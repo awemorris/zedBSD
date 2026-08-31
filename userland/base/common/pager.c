@@ -106,15 +106,15 @@ pager_main(
 	}
 
 	/* Validates the command-line arguments. */
-	if (index == argc)
+	if (index == argc) {
 		data_stdin = 1;
-	else {
+	} else {
 		/* Process each remaining command-line operand. */
-		for (i = index; i < argc; i++)
-
+		for (i = index; i < argc; i++) {
 			/* Handles the selected command-line operation. */
 			if (!strcmp(argv[i], "-"))
 				data_stdin = 1;
+		}
 	}
 
 	/* Validates the command-line arguments. */
@@ -382,7 +382,6 @@ load_document(
 
 	/* Checks the current descriptor. */
 	if (d->memory_size == PIPE_LIMIT) {
-
 		n = read(d->fd, &extra, 1);
 
 		/* Checks the current item count. */
@@ -456,11 +455,11 @@ index_bytes(
 	size_t i;
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < n; i++)
-
+	for (i = 0; i < n; i++) {
 		/* Handles a failed add line operation. */
 		if (b[i] == '\n' && add_line(d, base + (off_t)i + 1))
 			return -1;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -504,16 +503,17 @@ interactive(
 	status = 0;
 	for (;;) {
 		/* Handles the style condition. */
-		if (style == PAGER_MORE)
+		if (style == PAGER_MORE) {
 			snprintf(prompt, sizeof(prompt), "--More--(%llu/%llu)",
 				 (unsigned long long)(top + body < d->lines
 							  ? top + body
 							  : d->lines),
 				 (unsigned long long)d->lines);
-		else
+		} else {
 			snprintf(prompt, sizeof(prompt), "%s  %llu/%llu",
 				 d->name, (unsigned long long)(top + 1U),
 				 (unsigned long long)d->lines);
+		}
 
 		/* Handles the render condition. */
 		if (render(d, top, horizontal, t, numbers, prompt)) {
@@ -536,7 +536,7 @@ interactive(
 
 		/* Handles the selected key. */
 		if (key == ' ' || key == 'j') {
-						move_local = key == ' ' ? body : 1U;
+			move_local = key == ' ' ? body : 1U;
 
 			/* Handles the top condition. */
 			if (top + move_local < d->lines)
@@ -546,7 +546,7 @@ interactive(
 			if (top + 1U < d->lines)
 				top++;
 		} else if (key == 'b' || key == 'k') {
-						move_local1 = key == 'b' ? body : 1U;
+			move_local1 = key == 'b' ? body : 1U;
 			top = top > move_local1 ? top - move_local1 : 0;
 		} else if (key == 'g')
 			top = 0;
@@ -557,7 +557,7 @@ interactive(
 		} else if (key == 'l')
 			horizontal += 8U;
 		else if (key == '/') {
-						r = search_prompt(t, d, top, &found);
+			r = search_prompt(t, d, top, &found);
 
 			/* Handles the r condition. */
 			if (r < 0) {
@@ -649,9 +649,8 @@ put_line(
 
 	/* Handles the numbers condition. */
 	if (numbers) {
-
-				n_local = snprintf(prefix, sizeof(prefix), "%6llu  ",
-				 (unsigned long long)(line + 1U));
+		n_local = snprintf(prefix, sizeof(prefix), "%6llu  ",
+		 (unsigned long long)(line + 1U));
 
 		/* Handles the out condition. */
 		if (out(prefix, (size_t)n_local))
@@ -671,8 +670,8 @@ put_line(
 
 	/* Process each remaining element. */
 	while (at < (size_t)got && shown < cols) {
-				c = bytes[at];
-				width = 1;
+		c = bytes[at];
+		width = 1;
 		used = 1;
 
 		/* Classifies the current input character. */
@@ -680,8 +679,7 @@ put_line(
 			width = 8U - (column % 8U);
 
 			/* Handles the column condition. */
-			if (column + width > horizontal && column >= horizontal)
-
+			if (column + width > horizontal && column >= horizontal) {
 				/* Continue while the operation condition remains true. */
 				while (width-- && shown < cols) {
 					/* Handles the out condition. */
@@ -689,6 +687,7 @@ put_line(
 						return -1;
 					shown++;
 				}
+			}
 			column += 8U - (column % 8U);
 			at++;
 			continue;
@@ -696,14 +695,13 @@ put_line(
 
 		/* Classifies the current input character. */
 		if (c >= 0x80U) {
-
 			memset(&state, 0, sizeof(state));
 			n_local1 = mbrtowc(&wc, (const char *)bytes + at,
 				    (size_t)got - at, &state);
 
 			/* Handles the n local1 condition. */
 			if (n_local1 != (size_t)-1 && n_local1 != (size_t)-2 && n_local1 > 0) {
-								w = wcwidth(wc);
+				w = wcwidth(wc);
 				used = n_local1;
 				width = w > 0 ? (unsigned)w : 1U;
 			}
@@ -778,14 +776,15 @@ line_bytes(
 
 		/* Checks the current descriptor. */
 		if (d->seekable) {
-						n = pread(d->fd, b, amount, start);
+			n = pread(d->fd, b, amount, start);
 
 			/* Checks the current item count. */
 			if (n < 0)
 				return -1;
 			amount = (size_t)n;
-		} else
+		} else {
 			memcpy(b, d->memory + (size_t)start, amount);
+		}
 
 		/* Continue while the operation condition remains true. */
 		while (amount &&
@@ -941,7 +940,6 @@ find_forward(
 
 	/* Process each element required by the operation. */
 	for (i = start; i < d->lines; i++) {
-
 		n = line_bytes(d, i, bytes, sizeof(bytes) - 1U);
 
 		/* Checks the current item count. */
@@ -970,7 +968,6 @@ terminal_close(
 
 	/* Handles the t condition. */
 	if (t->active) {
-
 		out(restore, sizeof(restore) - 1U);
 		tcsetattr(t->fd, TCSANOW, &t->saved);
 		t->active = 0;

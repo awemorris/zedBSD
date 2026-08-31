@@ -59,7 +59,7 @@ main(
 			/* Classifies the current input character. */
 			if (c == '\t') {
 				/* Continue while the operation condition remains true. */
-								n = tab - col % tab;
+				n = tab - col % tab;
 				while (n--)
 					putchar(' ');
 				col += tab - col % tab;

@@ -128,7 +128,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (operand = first; operand < argc; operand++) {
-				path = input_path(&options, argv[operand]);
+		path = input_path(&options, argv[operand]);
 
 		/* Handles the path availability. */
 		if (path == NULL)
@@ -161,8 +161,7 @@ main(
 
 	/* Handles the output availability. */
 	if (options.output != NULL) {
-
-				total = 0;
+		total = 0;
 
 		memset(&combined, 0, sizeof(combined));
 
@@ -181,13 +180,14 @@ main(
 		/* Process each remaining element. */
 		for (catalog_index = 0; catalog_index < catalogs.count;
 		     catalog_index++) {
-						source = &catalogs.items[catalog_index];
+			source = &catalogs.items[catalog_index];
 
 			/* Process each remaining element. */
 			for (message_index = 0; message_index < source->count;
-			     message_index++)
+			     message_index++) {
 				combined.messages[combined.count++] =
 				    source->messages[message_index];
+			}
 			source->count = 0;
 		}
 
@@ -195,9 +195,10 @@ main(
 		if (write_catalog(&combined, options.output) != 0) {
 			/* Process each remaining element. */
 			for (catalog_index = 0; catalog_index < combined.count;
-			     catalog_index++)
+			     catalog_index++) {
 				message_discard(
 				    &combined.messages[catalog_index]);
+			}
 			free(combined.messages);
 			goto done;
 		}
@@ -211,7 +212,7 @@ main(
 		/* Process each remaining element. */
 		for (catalog_index = 0; catalog_index < catalogs.count;
 		     catalog_index++) {
-						catalog = &catalogs.items[catalog_index];
+			catalog = &catalogs.items[catalog_index];
 
 			/* Handles the catalog condition. */
 			if (catalog->count == 0)
@@ -231,7 +232,7 @@ main(
 
 	/* Checks the selected options. */
 	if (options.verbose) {
-				messages = 0;
+		messages = 0;
 
 		/* Process each remaining element. */
 		for (catalog_index = 0; catalog_index < catalogs.count;
@@ -266,7 +267,7 @@ parse_options(
 
 	/* Process each remaining command-line operand. */
 	for (index = 1; index < argc; index++) {
-				argument = argv[index];
+		argument = argv[index];
 
 		/* Handles the argument condition. */
 		if (argument[0] != '-' || argument[1] == '\0')
@@ -280,7 +281,7 @@ parse_options(
 
 		/* Process each element required by the operation. */
 		for (position = 1; argument[position] != '\0'; position++) {
-						option_name = argument[position];
+			option_name = argument[position];
 
 			/* Dispatch the selected operation case. */
 			switch (argument[position]) {
@@ -477,9 +478,9 @@ catalog_get(
 
 	/* Handles the catalogs condition. */
 	if (catalogs->count == catalogs->capacity) {
-				capacity = catalogs->capacity == 0 ? 4U : catalogs->capacity * 2U;
-				items = resize_array(catalogs->items, capacity,
-					   sizeof(*catalogs->items));
+		capacity = catalogs->capacity == 0 ? 4U : catalogs->capacity * 2U;
+		items = resize_array(catalogs->items, capacity,
+			   sizeof(*catalogs->items));
 
 		/* Handles the items availability. */
 		if (items == NULL)
@@ -512,11 +513,11 @@ catalog_find(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < catalogs->count; index++)
-
+	for (index = 0; index < catalogs->count; index++) {
 		/* Selects the matching value. */
 		if (!strcmp(catalogs->items[index].domain, domain))
 			return &catalogs->items[index];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -563,8 +564,8 @@ read_line(
 	while ((character = fgetc(stream)) != EOF) {
 		/* Checks the current data length. */
 		if (*length + 1U >= *capacity) {
-						new_capacity = *capacity == 0 ? 128U : *capacity * 2U;
-						new_line = resize_array(*line, new_capacity, 1U);
+			new_capacity = *capacity == 0 ? 128U : *capacity * 2U;
+			new_line = resize_array(*line, new_capacity, 1U);
 
 			/* Handles the new line availability. */
 			if (new_line == NULL)
@@ -661,7 +662,7 @@ parse_directive(
 
 	/* Selects the matching value. */
 	if (!strcmp(keyword, "domain")) {
-				domain = NULL;
+		domain = NULL;
 
 		/* Handles a failed message complete operation. */
 		if (message_complete(parser) != 0 ||
@@ -698,8 +699,7 @@ parse_directive(
 			goto syntax;
 		parser->active = &parser->message.plural_identifier;
 	} else if (!strncmp(keyword, "msgstr[", 7)) {
-
-				number = strtoul(keyword + 7, &end, 10);
+		number = strtoul(keyword + 7, &end, 10);
 
 		/* Handles a failed translation slot operation. */
 		if (*end != ']' || end[1] != '\0' || number > SIZE_MAX ||
@@ -859,7 +859,7 @@ append_quoted(
 		default:
 			/* Checks the current cursor position. */
 			if (*cursor >= '0' && *cursor <= '7') {
-								digits_local = 0;
+				digits_local = 0;
 
 				/* Continue while the operation condition remains true. */
 				value = 0;
@@ -870,8 +870,7 @@ append_quoted(
 					digits_local++;
 				}
 			} else if (*cursor == 'x') {
-
-								digits_local1 = 0;
+				digits_local1 = 0;
 
 				cursor++;
 
@@ -1002,10 +1001,10 @@ message_complete(
 		/* Process each remaining element. */
 		for (index = 0; index < parser->message.translation_count;
 		     index++) {
-						source = index == 0 ||
-				    parser->message.plural_identifier == NULL
-				? parser->message.identifier
-				: parser->message.plural_identifier;
+			source = index == 0 ||
+		    parser->message.plural_identifier == NULL
+		? parser->message.identifier
+		: parser->message.plural_identifier;
 
 			/* Handles a failed formats compatible operation. */
 			if (!formats_compatible(
@@ -1024,8 +1023,7 @@ message_complete(
 	if (parser->message.identifier[0] != '\0') {
 		/* Process each remaining element. */
 		for (index = 0; index < parser->message.translation_count;
-		     index++)
-
+		     index++) {
 			/* Checks the parser state. */
 			if (parser->message.translations[index][0] == '\0') {
 				message_discard(&parser->message);
@@ -1033,6 +1031,7 @@ message_complete(
 				/* Reports successful completion. */
 				return 0;
 			}
+		}
 	}
 
 	/* Checks the parser state. */
@@ -1044,8 +1043,7 @@ message_complete(
 	}
 
 	/* Process each remaining element. */
-	for (index = 0; index < parser->catalog->count; index++)
-
+	for (index = 0; index < parser->catalog->count; index++) {
 		/* Selects the matching value. */
 		if (!strcmp(parser->catalog->messages[index].identifier,
 			    parser->message.identifier)) {
@@ -1054,14 +1052,15 @@ message_complete(
 			/* Reports successful completion. */
 			return 0;
 		}
+	}
 
 	/* Checks the parser state. */
 	if (parser->catalog->count == parser->catalog->capacity) {
-				capacity = parser->catalog->capacity == 0
-				      ? 16U
-				      : parser->catalog->capacity * 2U;
-				messages = resize_array(parser->catalog->messages, capacity,
-				 sizeof(*parser->catalog->messages));
+		capacity = parser->catalog->capacity == 0
+		      ? 16U
+		      : parser->catalog->capacity * 2U;
+		messages = resize_array(parser->catalog->messages, capacity,
+		 sizeof(*parser->catalog->messages));
 
 		/* Handles the messages availability. */
 		if (messages == NULL)
@@ -1111,7 +1110,6 @@ format_signature(
 
 	/* Continue while the operation condition remains true. */
 	while (*format != '\0') {
-
 		length = 0;
 
 		/* Handles the format condition. */
@@ -1274,8 +1272,8 @@ sort_signature(
 
 	/* Process each remaining element. */
 	for (index = 1; index < length; index++) {
-				value = signature[index];
-				position = index;
+		value = signature[index];
+		position = index;
 
 		/* Continue while the operation condition remains true. */
 		while (position != 0 && signature[position - 1U] > value) {
@@ -1316,9 +1314,9 @@ translation_slot(
 
 	/* Checks the current index. */
 	if (index >= message->translation_count) {
-				count = index + 1U;
-				translations = resize_array(message->translations, count,
-						   sizeof(*translations));
+		count = index + 1U;
+		translations = resize_array(message->translations, count,
+				   sizeof(*translations));
 
 		/* Handles the translations availability. */
 		if (translations == NULL)
@@ -1384,7 +1382,7 @@ write_catalog(
 	/* Process each remaining element. */
 	cursor = string_offset;
 	for (index = 0; index < catalog->count; index++) {
-				length_local = original_length(&catalog->messages[index]);
+		length_local = original_length(&catalog->messages[index]);
 
 		/* Handles the length local condition. */
 		if (length_local > UINT32_MAX || cursor > UINT32_MAX)
@@ -1396,7 +1394,7 @@ write_catalog(
 
 	/* Process each remaining element. */
 	for (index = 0; index < catalog->count; index++) {
-				length_local1 = translation_length(&catalog->messages[index]);
+		length_local1 = translation_length(&catalog->messages[index]);
 
 		/* Handles the length local1 condition. */
 		if (length_local1 > UINT32_MAX || cursor > UINT32_MAX)
@@ -1408,8 +1406,8 @@ write_catalog(
 
 	/* Process each remaining element. */
 	for (index = 0; index < catalog->count; index++) {
-				message_local = &catalog->messages[index];
-				length_local2 = strlen(message_local->identifier);
+		message_local = &catalog->messages[index];
+		length_local2 = strlen(message_local->identifier);
 
 		/* Handles a failed fwrite operation. */
 		if (fwrite(message_local->identifier, 1, length_local2, stream) != length_local2)
@@ -1428,7 +1426,7 @@ write_catalog(
 
 	/* Process each remaining element. */
 	for (index = 0; index < catalog->count; index++) {
-				message_local3 = &catalog->messages[index];
+		message_local3 = &catalog->messages[index];
 
 		/* Process each remaining element. */
 		for (form = 0; form < message_local3->translation_count; form++) {
@@ -1577,7 +1575,7 @@ catalogs_discard(
 	/* Process each remaining element. */
 	for (catalog_index = 0; catalog_index < catalogs->count;
 	     catalog_index++) {
-				catalog = &catalogs->items[catalog_index];
+		catalog = &catalogs->items[catalog_index];
 
 		/* Process each remaining element. */
 		for (message_index = 0; message_index < catalog->count;

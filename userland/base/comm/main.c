@@ -47,16 +47,16 @@ main(
 	cy = 0;
 	for (; i < argc && argv[i][0] == '-'; ++i) {
 		/* Continue while the operation condition remains true. */
-				p = argv[i] + 1;
+		p = argv[i] + 1;
 		while (*p) {
 			/* Checks the current pointer. */
 			if (*p == '1')
 				s1 = 1;
 			else if (*p == '2')
 				s2 = 1;
-			else if (*p == '3')
+			else if (*p == '3') {
 				s3 = 1;
-			else {
+			} else {
 				fprintf(stderr, "comm: invalid option\n");
 
 				/* Reports operation failure. */
@@ -91,10 +91,10 @@ main(
 		/* Handles the nx condition. */
 		if (nx <= 0)
 			c = 1;
-		else if (ny <= 0)
+		else if (ny <= 0) {
 			c = -1;
-		else {
-						n = (size_t)(nx < ny ? nx : ny);
+		} else {
+			n = (size_t)(nx < ny ? nx : ny);
 			c = memcmp(x, y, n);
 
 			/* Classifies the current input character. */

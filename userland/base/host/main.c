@@ -51,7 +51,6 @@ main(
 
 	/* Process each element required by the operation. */
 	for (p = r; p; p = p->ai_next) {
-
 		sin = (struct sockaddr_in *)p->ai_addr;
 
 		/* Handles a failed inet ntop operation. */

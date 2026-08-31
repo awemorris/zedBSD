@@ -81,7 +81,6 @@ main(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		n = read(0, buf, sizeof(buf));
 		used = 0;
 
@@ -102,7 +101,7 @@ main(
 
 		/* Process each remaining element. */
 		for (i = 0; i < (size_t)n; ++i) {
-						c = buf[i];
+			c = buf[i];
 
 			/* Handles the del condition. */
 			if (del && mark[c])
@@ -144,7 +143,7 @@ set(
 	/* Process each element required by the operation. */
 	n = 0;
 	for (i = 0; s[i]; ++i) {
-				a = (unsigned char)s[i];
+		a = (unsigned char)s[i];
 		z = a;
 
 		/* Checks the current string state. */

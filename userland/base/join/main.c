@@ -77,17 +77,16 @@ main(
 	nx = command_read_line(a, &x, &cx);
 	ny = command_read_line(b, &y, &cy);
 	while (nx > 0 && ny > 0) {
-
 		c = keycmp(x, y, f1, f2);
 
 		/* Classifies the current input character. */
 		if (c < 0)
 			nx = command_read_line(a, &x, &cx);
-		else if (c > 0)
+		else if (c > 0) {
 			ny = command_read_line(b, &y, &cy);
-		else {
+		} else {
 			/* Continue while the operation condition remains true. */
-						k = field(x, f1);
+			k = field(x, f1);
 			e = k;
 			while (*e && *e != ' ' && *e != '\t' && *e != '\n')
 				e++;

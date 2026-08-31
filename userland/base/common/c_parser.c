@@ -145,7 +145,7 @@ read_fd(
 	for (;;) {
 		/* Handles the capacity condition. */
 		if (capacity - size < 4096) {
-						next = capacity ? capacity * 2 : 8192;
+			next = capacity ? capacity * 2 : 8192;
 
 			/* Handles the next condition. */
 			if (next < capacity || next == SIZE_MAX) {
@@ -211,6 +211,7 @@ tokenize(
 {
 	size_t start_local;
 	size_t start_local1;
+	size_t start;
 	int continued;
 	char quote;
 	size_t i, line;
@@ -237,7 +238,6 @@ tokenize(
 
 		/* Handles the beginning condition. */
 		if (beginning && source[i] == '#') {
-
 			do {
 				/* Process each remaining element. */
 				continued = 0;
@@ -295,7 +295,7 @@ tokenize(
 		/* Handles a failed isalpha operation. */
 		if (isalpha((unsigned char)source[i]) || source[i] == '_') {
 			/* Process each remaining element. */
-						start_local = i++;
+			start_local = i++;
 			while (i < size && (isalnum((unsigned char)source[i]) ||
 					    source[i] == '_'))
 				i++;
@@ -312,7 +312,7 @@ tokenize(
 		/* Handles the isdigit condition. */
 		if (isdigit((unsigned char)source[i])) {
 			/* Process each remaining element. */
-						start_local1 = i++;
+			start_local1 = i++;
 			while (i < size &&
 			       (isalnum((unsigned char)source[i]) ||
 				source[i] == '.' || source[i] == '_'))
@@ -330,13 +330,13 @@ tokenize(
 		/* Handles the source condition. */
 		if (source[i] == '"' || source[i] == '\'') {
 			/* Process each remaining element. */
-						quote = source[i];
-			size_t start = i++;
+			quote = source[i];
+			start = i++;
 			while (i < size && source[i] != quote) {
 				/* Handles the source condition. */
-				if (source[i] == '\\' && i + 1 < size)
+				if (source[i] == '\\' && i + 1 < size) {
 					i += 2;
-				else {
+				} else {
 					/* Handles the source condition. */
 					if (source[i] == '\n')
 						line++;
@@ -464,7 +464,7 @@ parse_tokens(
 	function = NULL;
 	declaration = 0;
 	for (i_index_for = 0; i_index_for < list->count; i_index_for++) {
-				token = &list->tokens[i_index_for];
+		token = &list->tokens[i_index_for];
 
 		/* Handles a failed type word operation. */
 		if (token->kind == TOKEN_NAME && is_type_word(token->text))
@@ -473,14 +473,14 @@ parse_tokens(
 		/* Selects the matching value. */
 		if (!strcmp(token->text, "{") && braces == 0) {
 			/* Continue while the operation condition remains true. */
-						right = (ssize_t)i_index_for - 1;
+			right = (ssize_t)i_index_for - 1;
 			while (right >= 0 &&
 			       strcmp(list->tokens[right].text, ")"))
 				right--;
 
 			/* Handles the right condition. */
 			if (right >= 0) {
-								left = matching_left(list, (size_t)right);
+				left = matching_left(list, (size_t)right);
 
 				/* Handles a failed keyword operation. */
 				if (left > 0 &&
@@ -575,11 +575,11 @@ is_type_word(
 	    "_Thread_local"};
 
 	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < sizeof(words) / sizeof(words[0]); i_index_for++)
-
+	for (i_index_for = 0; i_index_for < sizeof(words) / sizeof(words[0]); i_index_for++) {
 		/* Selects the matching value. */
 		if (!strcmp(name, words[i_index_for]))
 			return 1;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -631,11 +631,11 @@ is_keyword(
 	    "_Imaginary", "_Noreturn", "_Static_assert", "_Thread_local"};
 
 	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < sizeof(words) / sizeof(words[0]); i_index_for++)
-
+	for (i_index_for = 0; i_index_for < sizeof(words) / sizeof(words[0]); i_index_for++) {
 		/* Selects the matching value. */
 		if (!strcmp(name, words[i_index_for]))
 			return 1;
+	}
 
 	/* Reports successful completion. */
 	return 0;

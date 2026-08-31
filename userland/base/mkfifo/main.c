@@ -46,13 +46,13 @@ main(
 		goto usage;
 
 	/* Process each remaining command-line operand. */
-	for (; i < argc; i++)
-
+	for (; i < argc; i++) {
 		/* Validates the command-line arguments. */
 		if (mkfifo(argv[i], mode)) {
 			command_error("mkfifo", argv[i]);
 			failed = 1;
 		}
+	}
 
 	/* Returns the computed result. */
 	return failed;

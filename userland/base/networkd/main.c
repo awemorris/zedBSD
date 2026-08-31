@@ -69,8 +69,7 @@ main(
 
 	/* Handles the listener condition. */
 	if (listener < 0) {
-
-				saved = errno;
+		saved = errno;
 		(void)snprintf(record, sizeof(record), "FAIL %d %s\n", saved,
 			       strerror(saved));
 		notify_init(record);
@@ -84,7 +83,6 @@ main(
 
 	/* Continue while the operation condition remains true. */
 	while (!stopping) {
-
 		client = accept4(listener, NULL, NULL, SOCK_CLOEXEC);
 
 		/* Handles the client condition. */
@@ -129,7 +127,7 @@ open_listener(
 	if (bind(descriptor, (struct sockaddr *)&address, sizeof(address)) !=
 		0 ||
 	    chmod(NETWORKD_SOCKET, 0600) != 0 || listen(descriptor, 8) != 0) {
-				saved = errno;
+		saved = errno;
 		close(descriptor);
 		errno = saved;
 
@@ -170,7 +168,6 @@ write_all(
 	/* Process each remaining element. */
 	offset = 0;
 	while (offset < length) {
-
 		count = write(descriptor, buffer + offset, length - offset);
 
 		/* Handles the reported system error. */
@@ -284,7 +281,6 @@ handle_request(
 		error = errno;
 	} else if (strcmp(items[1], "DHCP") == 0 && count == 4 &&
 		   parse_seconds(items[3], &timeout) == 0) {
-
 		(void)snprintf(seconds, sizeof(seconds), "%u", timeout);
 		arguments[0] = "/sbin/dhcpc";
 		arguments[1] = "-t";
@@ -293,18 +289,19 @@ handle_request(
 		arguments[4] = NULL;
 
 		/* Handles a failed interface exists operation. */
-		if (interface_exists(items[2]) == 0)
+		if (interface_exists(items[2]) == 0) {
 			result =
 			    run_command(arguments, timeout + 5U, diagnostic);
+		}
 		error = errno;
 	} else if (strcmp(items[1], "DEFAULTROUTE") == 0 && count == 3) {
 		/* Handles a failed netutil parse ipv4 operation. */
 		if (netutil_parse_ipv4(items[2], &gateway) == 0 &&
 		    (present = default_route_exists()) >= 0) {
 			/* Handles the present condition. */
-			if (present)
+			if (present) {
 				result = 0;
-			else {
+			} else {
 				arguments[0] = "/sbin/route";
 				arguments[1] = "add";
 				arguments[2] = "default";
@@ -349,7 +346,6 @@ read_request(
 	/* Continue while the operation condition remains true. */
 	used = 0;
 	while (used + 1U < NETWORKD_REQUEST_MAX) {
-
 		count = read(descriptor, buffer + used,
 				     NETWORKD_REQUEST_MAX - used - 1U);
 
@@ -435,16 +431,15 @@ show_interfaces(
 		return -1;
 
 	/* Handles the name availability. */
-	if (name != NULL)
+	if (name != NULL) {
 		result = append_interface_status(descriptor, name, output,
 						 capacity, &used);
-	else if (netutil_interfaces(descriptor, &items, &count) != 0)
+	} else if (netutil_interfaces(descriptor, &items, &count) != 0)
 		result = -1;
 	else
 
 		/* Process each remaining element. */
-		for (index = 0; index < count; index++)
-
+		for (index = 0; index < count; index++) {
 			/* Handles a failed append interface status operation. */
 			if (append_interface_status(
 				descriptor, items[index].ifr_name, output,
@@ -452,6 +447,7 @@ show_interfaces(
 				result = -1;
 				break;
 			}
+		}
 	free(items);
 	close(descriptor);
 
@@ -576,7 +572,6 @@ run_command(
 		return -1;
 	}
 	while (!child_done) {
-
 		result = waitpid(child, &status, WNOHANG);
 
 		/* Checks the operation result. */
@@ -601,7 +596,7 @@ run_command(
 
 	/* Handles a failed lseek operation. */
 	if (lseek(output, 0, SEEK_SET) >= 0) {
-				count = read(output, diagnostic, CHILD_OUTPUT_MAX - 1U);
+		count = read(output, diagnostic, CHILD_OUTPUT_MAX - 1U);
 
 		/* Checks the remaining item count. */
 		if (count > 0)
@@ -642,11 +637,11 @@ clean_diagnostic(
 
 	/* Process each remaining element. */
 		text[--length] = '\0';
-	for (index = 0; index < length; index++)
-
+	for (index = 0; index < length; index++) {
 		/* Validates the current text. */
 		if ((unsigned char)text[index] < 32U || text[index] == 127)
 			text[index] = ' ';
+	}
 }
 
 /* Supports the parse seconds operation. */
@@ -690,7 +685,6 @@ default_route_exists(
 	/* Process each remaining element. */
 	for (route.rt_index = 0; ioctl(descriptor, SIOCGRTENTRY, &route) == 0;
 	     route.rt_index++) {
-
 		destination = (const struct sockaddr_in *)&route.rt_dst;
 		mask = (const struct sockaddr_in *)&route.rt_genmask;
 
@@ -745,17 +739,17 @@ write_resolver(
 			goto fail;
 
 		/* Process each remaining element. */
-		for (prior = 0; prior < index; prior++)
-
+		for (prior = 0; prior < index; prior++) {
 			/* Selects the matching value. */
 			if (strcmp(addresses[prior], addresses[index]) == 0)
 				break;
+		}
 
 		/* Handles the prior condition. */
 		if (prior != index)
 			continue;
-					length = snprintf(line, sizeof(line), "nameserver %s\n",
-			     addresses[index]);
+		length = snprintf(line, sizeof(line), "nameserver %s\n",
+	     addresses[index]);
 
 		/* Handles a failed write all operation. */
 		if (length < 0 || (size_t)length >= sizeof(line) ||

@@ -25,11 +25,11 @@ rtld_strlen(
 	n = 0;
 
 	/* Handles the s availability. */
-	if (s != NULL)
-
+	if (s != NULL) {
 		/* Continue while the operation condition remains true. */
 		while (s[n] != '\0')
 			n++;
+	}
 
 	/* Returns the computed result. */
 	return n;

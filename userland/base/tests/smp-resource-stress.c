@@ -202,7 +202,6 @@ worker_main(
 
 	/* Process each element required by the operation. */
 	for (iteration = 0; iteration < ITERATIONS; iteration++) {
-
 		value = (unsigned char)(worker ^ iteration);
 
 		mapping = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
@@ -235,8 +234,8 @@ worker_main(
 
 		/* Handles the iteration condition. */
 		if ((iteration & 511U) == 0) {
-						shared = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
-				 MAP_SHARED, file_descriptor, 0);
+			shared = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
+		 MAP_SHARED, file_descriptor, 0);
 
 			/* Handles an operation failure. */
 			if (shared == MAP_FAILED)
@@ -269,7 +268,7 @@ worker_main(
 
 		/* Handles the iteration condition. */
 		if ((iteration & 255U) == 0) {
-						received = 0;
+			received = 0;
 
 			/* Handles a failed socketpair operation. */
 			if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0)
@@ -342,9 +341,10 @@ print_resource_delta(
 	/* Process each remaining element. */
 	for (index = 0; index < sizeof(names) / sizeof(names[0]); index++) {
 		/* Handles the a condition. */
-		if (a[index] != b[index])
+		if (a[index] != b[index]) {
 			printf("SMP_STRESS_RESOURCE_DELTA:%s:%llu:%llu\n",
 			       names[index], (unsigned long long)a[index],
 			       (unsigned long long)b[index]);
+		}
 	}
 }

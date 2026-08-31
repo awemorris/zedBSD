@@ -132,9 +132,9 @@ m4_define(
 
 	/* Handles the context condition. */
 	if (context->definition_count == context->definition_capacity) {
-				capacity = context->definition_capacity == 0
-				      ? 32
-				      : context->definition_capacity * 2;
+		capacity = context->definition_capacity == 0
+		      ? 32
+		      : context->definition_capacity * 2;
 
 		/* Handles the capacity condition. */
 		if (capacity < context->definition_capacity ||
@@ -287,8 +287,7 @@ m4_finish(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 1; index < M4_DIVERSION_COUNT; index++)
-
+	for (index = 1; index < M4_DIVERSION_COUNT; index++) {
 		/* Handles a failed builder append operation. */
 		if (context->diversion[index].length != 0 &&
 		    builder_append(context, &context->output,
@@ -297,6 +296,7 @@ m4_finish(
 
 			/* Reports operation failure. */
 			return -1;
+	}
 
 	/* Obtains the command write all result. */
 	function_result = command_write_all(
@@ -357,6 +357,7 @@ expand_text(
 	size_t start_local1;
 	size_t after_name;
 	struct definition *definition;
+	struct arguments arguments;
 	int builtin;
 	size_t offset;
 
@@ -398,7 +399,7 @@ expand_text(
 
 		/* Validates the current text. */
 		if (text[offset] == '#') {
-						start_local = offset;
+			start_local = offset;
 
 			/* Process each remaining element. */
 			while (offset < length && text[offset] != '\n')
@@ -420,9 +421,10 @@ expand_text(
 
 		/* Handles the name start condition. */
 		if (is_name_start(text[offset])) {
-						start_local1 = offset++;
+			start_local1 = offset++;
 
-			struct arguments arguments = {0};
+			/* Initializes the parsed argument list. */
+			memset(&arguments, 0, sizeof(arguments));
 
 			/* Process each remaining element. */
 			while (offset < length &&
@@ -455,8 +457,9 @@ expand_text(
 
 					/* Reports operation failure. */
 					return -1;
-			} else
+			} else {
 				offset = after_name;
+			}
 
 			/* Handles the definition availability. */
 			if (definition != NULL) {
@@ -502,11 +505,12 @@ set_error(
 	const char *message)
 {
 	/* Handles an operation failure. */
-	if (context->error[0] == '\0')
+	if (context->error[0] == '\0') {
 		(void)snprintf(context->error, sizeof(context->error),
 			       "%s:%u: %s",
 			       context->source == NULL ? "-" : context->source,
 			       context->line, message);
+	}
 }
 
 /* Supports the starts with operation. */
@@ -657,7 +661,7 @@ builder_append(
 
 	/* Handles the needed condition. */
 	if (needed > builder->capacity) {
-				capacity = builder->capacity == 0 ? 256 : builder->capacity;
+		capacity = builder->capacity == 0 ? 256 : builder->capacity;
 
 		/* Continue while the operation condition remains true. */
 		while (capacity < needed) {
@@ -726,14 +730,14 @@ is_builtin(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 0; names[index] != NULL; index++)
-
+	for (index = 0; names[index] != NULL; index++) {
 		/* Handles a failed strlen operation. */
 		if (strlen(names[index]) == length &&
 		    memcmp(names[index], name, length) == 0)
 
 			/* Reports operation failure. */
 			return 1;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -786,14 +790,14 @@ parse_arguments(
 				if (--depth == 0) {
 					/* Checks the current cursor position. */
 					if (cursor != start ||
-					    arguments->count != 0)
-
+					    arguments->count != 0) {
 						/* Handles a failed arguments add operation. */
 						if (arguments_add(
 							context, arguments,
 							text + start,
 							cursor - start) != 0)
 							goto fail;
+					}
 					*offset = cursor + 1;
 					/* Reports successful completion. */
 					return 0;
@@ -907,7 +911,7 @@ emit_user_macro(
 	while (*cursor != '\0') {
 		/* Checks the current cursor position. */
 		if (*cursor == '$' && cursor[1] >= '0' && cursor[1] <= '9') {
-						index = (size_t)(cursor[1] - '0');
+			index = (size_t)(cursor[1] - '0');
 
 			/* Checks the current index. */
 			if (index == 0) {
@@ -916,8 +920,8 @@ emit_user_macro(
 						   name_length) != 0)
 					goto fail;
 			} else if (index <= arguments->count) {
-								argument = expanded_argument(
-				    context, arguments, index - 1, depth);
+				argument = expanded_argument(
+			    context, arguments, index - 1, depth);
 
 				/* Handles a failed builder append operation. */
 				if (argument == NULL ||
@@ -1099,9 +1103,8 @@ emit_builtin(
 				      strcmp(a, b) == 0 ? 2 : 3, depth);
 		result = c == NULL ? -1 : emit(context, capture, c, strlen(c));
 	} else if (BUILTIN("include") || BUILTIN("sinclude")) {
-
-				saved_source = context->source;
-				saved_line = context->line;
+		saved_source = context->source;
+		saved_line = context->line;
 
 		/* Handles a failed read file operation. */
 		if (read_file(a, &file_text, &file_length) != 0) {
@@ -1120,14 +1123,12 @@ emit_builtin(
 		context->line = saved_line;
 		free(file_text);
 	} else if (BUILTIN("len")) {
-
-				length_local = snprintf(output_local, sizeof(output_local), "%zu", strlen(a));
+		length_local = snprintf(output_local, sizeof(output_local), "%zu", strlen(a));
 
 		result = length_local < 0 || (size_t)length_local >= sizeof(output_local)
 			     ? -1
 			     : emit(context, capture, output_local, (size_t)length_local);
 	} else if (BUILTIN("incr") || BUILTIN("decr")) {
-
 		errno = 0;
 		value_local = strtoll(a, &end_local, 10);
 
@@ -1146,7 +1147,6 @@ emit_builtin(
 	} else if (BUILTIN("eval"))
 		result = builtin_eval(context, a, capture);
 	else if (BUILTIN("index")) {
-
 		b = expanded_argument(context, arguments, 1, depth);
 
 		/* Handles the b availability. */
@@ -1160,8 +1160,7 @@ emit_builtin(
 			     ? -1
 			     : emit(context, capture, output_local3, (size_t)length_local4);
 	} else if (BUILTIN("substr")) {
-
-				count = ULLONG_MAX;
+		count = ULLONG_MAX;
 
 		b = expanded_argument(context, arguments, 1, depth);
 		c = expanded_argument(context, arguments, 2, depth);
@@ -1188,9 +1187,9 @@ emit_builtin(
 		available = strlen(a);
 
 		/* Handles the start condition. */
-		if (start >= available)
+		if (start >= available) {
 			result = 0;
-		else {
+		} else {
 			available -= (size_t)start;
 
 			/* Checks the remaining item count. */
@@ -1209,7 +1208,7 @@ emit_builtin(
 
 		/* Process each remaining element. */
 		for (index_local = 0; a[index_local] != '\0'; index_local++) {
-						mapped = strchr(b, a[index_local]);
+			mapped = strchr(b, a[index_local]);
 
 			/* Handles the mapped availability. */
 			if (mapped == NULL) {
@@ -1239,14 +1238,12 @@ emit_builtin(
 		context->current_diversion = (int)diversion_value;
 		result = 0;
 	} else if (BUILTIN("divnum")) {
-
-				length_local8 = snprintf(output_local7, sizeof(output_local7), "%d",
-				      context->current_diversion);
+		length_local8 = snprintf(output_local7, sizeof(output_local7), "%d",
+		      context->current_diversion);
 
 		result = emit(context, capture, output_local7, (size_t)length_local8);
 	} else if (BUILTIN("undivert")) {
-
-				value_local10 = strtol(a, &end_local9, 10);
+		value_local10 = strtol(a, &end_local9, 10);
 
 		/* Handles the a condition. */
 		if (*a == '\0') {
@@ -1287,7 +1284,6 @@ emit_builtin(
 		/* Process each remaining element. */
 		result = 0;
 		for (index_local12 = 1; index_local12 < arguments->count; index_local12++) {
-
 			value_local11 = expanded_argument(context, arguments, index_local12, depth);
 
 			/* Handles a failed emit operation. */
@@ -1314,10 +1310,11 @@ done:
 	free(c);
 
 	/* Handles an operation failure. */
-	if (result != 0 && context->error[0] == '\0')
+	if (result != 0 && context->error[0] == '\0') {
 		set_error(context, errno == ENOMEM
 				       ? "out of memory"
 				       : "invalid builtin arguments");
+	}
 
 	/* Returns the computed result. */
 	return result;
@@ -1355,7 +1352,7 @@ read_file(
 
 		/* Handles the builder condition. */
 		if (builder.length + count + 1 > builder.capacity) {
-						capacity = builder.capacity == 0 ? 4096 : builder.capacity;
+			capacity = builder.capacity == 0 ? 4096 : builder.capacity;
 
 			/* Process each remaining element. */
 			while (capacity < builder.length + count + 1)
@@ -1448,7 +1445,6 @@ expression_add(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		expression_space(parser);
 		operation = *parser->text;
 
@@ -1477,7 +1473,6 @@ expression_product(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		expression_space(parser);
 		operation = *parser->text;
 

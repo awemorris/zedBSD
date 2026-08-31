@@ -57,7 +57,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (; i < argc; i++) {
-				fd = open(argv[i], O_RDONLY);
+		fd = open(argv[i], O_RDONLY);
 
 		/* Checks the file descriptor. */
 		if (fd < 0) {
@@ -94,7 +94,6 @@ scan(
 	/* Continue until the operation reaches a terminal state. */
 	used = 0;
 	for (;;) {
-
 		n = read(fd, in, sizeof(in));
 
 		/* Checks the current item count. */
@@ -107,7 +106,7 @@ scan(
 
 		/* Process each remaining element. */
 		for (i_index_for = 0; i_index_for < n; i_index_for++) {
-						c = in[i_index_for];
+			c = in[i_index_for];
 
 			/* Classifies the current input character. */
 			if (c >= 0x20 && c <= 0x7e) {

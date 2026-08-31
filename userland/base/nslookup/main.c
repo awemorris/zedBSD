@@ -100,8 +100,7 @@ main(
 					      (uint16_t)port, &result);
 	} else if (port == 53U)
 		error = resolver_query(query, type, &result);
-	else if ((error = resolver_load_config(&config)) == 0)
-
+	else if ((error = resolver_load_config(&config)) == 0) {
 		/* Process each remaining element. */
 		for (index = 0; index < config.count; index++) {
 			error = resolver_query_server(query, type,
@@ -112,6 +111,7 @@ main(
 			if (error == 0 || error == EAI_NONAME)
 				break;
 		}
+	}
 
 	/* Handles an operation failure. */
 	if (error != 0) {

@@ -204,7 +204,6 @@ parse_charmap(
 
 	/* Process input until it is exhausted. */
 	while (fgets(line, sizeof(line), stream) != NULL) {
-
 		text = trim(line);
 
 		/* Selects the matching prefix. */
@@ -225,9 +224,9 @@ parse_charmap(
 		if (strcmp(text, "UTF-8") == 0 || strcmp(text, "UTF8") == 0)
 			*utf8 = 1;
 		else if (strcmp(text, "US-ASCII") == 0 ||
-			 strcmp(text, "ASCII") == 0)
+			 strcmp(text, "ASCII") == 0) {
 			*utf8 = 0;
-		else {
+		} else {
 			fclose(stream);
 			errno = ENOTSUP;
 
@@ -286,7 +285,7 @@ source_defaults(
 	/* Process each remaining element. */
 	source->utf8 = utf8;
 	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++) {
-				value = utf8 ? metadata[key].utf8_value : metadata[key].c_value;
+		value = utf8 ? metadata[key].utf8_value : metadata[key].c_value;
 
 		source->values[key] = strdup(value);
 
@@ -326,7 +325,6 @@ parse_source(
 
 	/* Process input until it is exhausted. */
 	while (fgets(line, sizeof(line), stream) != NULL) {
-
 		line_number++;
 
 		/* Handles a failed strchr operation. */
@@ -390,7 +388,7 @@ parse_source(
 
 		/* Selects the matching value. */
 		if (strcmp(keyword, "copy") == 0) {
-						decoded_local = decode_string(value, 1);
+			decoded_local = decode_string(value, 1);
 
 			/* Handles a failed copy builtin operation. */
 			if (decoded_local == NULL ||
@@ -551,11 +549,11 @@ category_index(
 	int category;
 
 	/* Process each element required by the operation. */
-	for (category = 0; category < 6; category++)
-
+	for (category = 0; category < 6; category++) {
 		/* Selects the matching value. */
 		if (strcmp(name, category_names[category]) == 0)
 			return category;
+	}
 
 	/* Reports operation failure. */
 	return -1;
@@ -596,13 +594,12 @@ decode_string(
 	while (input < end) {
 		/* Validates the current input. */
 		if (*input == '<' && end - input >= 4 && input[1] == 'U') {
-						cursor = input + 2;
-						value = 0;
-						digits = 0;
+			cursor = input + 2;
+			value = 0;
+			digits = 0;
 
 			/* Continue while the operation condition remains true. */
 			while (cursor < end && *cursor != '>') {
-
 				digit = hex_value((unsigned char)*cursor++);
 
 				/* Handles the digit condition. */
@@ -624,7 +621,6 @@ decode_string(
 
 		/* Validates the current input. */
 		if ((*input == '\\' || *input == '/') && input + 1 < end) {
-
 			input++;
 			escape = (unsigned char)*input++;
 
@@ -740,9 +736,9 @@ copy_builtin(
 	/* Selects the matching value. */
 	if (strcmp(name, "C") == 0 || strcmp(name, "POSIX") == 0)
 		utf8 = 0;
-	else if (strcmp(name, "C.UTF-8") == 0 || strcmp(name, "C.utf8") == 0)
+	else if (strcmp(name, "C.UTF-8") == 0 || strcmp(name, "C.utf8") == 0) {
 		utf8 = 1;
-	else {
+	} else {
 		errno = ENOENT;
 
 		/* Reports operation failure. */
@@ -750,8 +746,7 @@ copy_builtin(
 	}
 
 	/* Process each remaining element. */
-	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++)
-
+	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++) {
 		/* Handles a failed source set operation. */
 		if (metadata[key].category == category &&
 		    source_set(source, (enum zedbsd_locale_key)key,
@@ -761,6 +756,7 @@ copy_builtin(
 
 			/* Reports operation failure. */
 			return -1;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -817,7 +813,7 @@ parse_group(
 
 	/* Process each remaining element. */
 	for (index = 0; index < count; index++) {
-				decoded = decode_string(parts[index], source->utf8);
+		decoded = decode_string(parts[index], source->utf8);
 
 		/* Handles a failed source set operation. */
 		if (decoded == NULL ||
@@ -908,7 +904,6 @@ parse_grouping(
 
 	/* Process each remaining element. */
 	for (index = 0; index < count; index++) {
-
 		errno = 0;
 		value = strtol(parts[index], &end, 10);
 
@@ -938,14 +933,14 @@ key_find(
 	unsigned key;
 
 	/* Process each remaining element. */
-	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++)
-
+	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++) {
 		/* Handles the metadata condition. */
 		if (metadata[key].category == category &&
 		    strcmp(metadata[key].keyword, keyword) == 0)
 
 			/* Returns the computed result. */
 			return (enum zedbsd_locale_key)key;
+	}
 
 	/* Returns the computed result. */
 	return ZEDBSD_LOCALE_KEY_INVALID;
@@ -970,7 +965,7 @@ encode_source(
 
 	/* Process each remaining element. */
 	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++) {
-				length = strlen(source->values[key]) + 1U;
+		length = strlen(source->values[key]) + 1U;
 
 		/* Checks the current data length. */
 		if (length > UINT32_MAX - strings) {
@@ -1008,9 +1003,9 @@ encode_source(
 
 	/* Process each remaining element. */
 	for (key = 1; key < ZEDBSD_LOCALE_KEY_COUNT; key++) {
-				entry = data + ZEDBSD_LOCALE_HEADER_SIZE +
-				       (key - 1U) * ZEDBSD_LOCALE_ENTRY_SIZE;
-		size_t length = strlen(source->values[key]);
+		entry = data + ZEDBSD_LOCALE_HEADER_SIZE +
+		       (key - 1U) * ZEDBSD_LOCALE_ENTRY_SIZE;
+		length = strlen(source->values[key]);
 
 		zedbsd_locale_put32(entry, key);
 		zedbsd_locale_put32(entry + 4U, metadata[key].category);

@@ -57,7 +57,7 @@ main(
 	if (argc == 1 || (argc == 2 && strcmp(argv[1], "show") == 0) ||
 	    (argc == 3 && strcmp(argv[1], "-n") == 0 &&
 	     strcmp(argv[2], "show") == 0)) {
-				status = show_routes(descriptor);
+		status = show_routes(descriptor);
 		close(descriptor);
 
 		/* Returns the computed result. */
@@ -232,10 +232,9 @@ show_routes(
 		(void)netutil_mask_prefix(mask, &prefix);
 
 		/* Handles the address condition. */
-		if (address.s_addr == 0 && mask.s_addr == 0)
+		if (address.s_addr == 0 && mask.s_addr == 0) {
 			strcpy(destination, "default");
-		else {
-
+		} else {
 			inet_ntop(AF_INET, &address, base, sizeof(base));
 			snprintf(destination, sizeof(destination), "%s/%u",
 				 base, prefix);

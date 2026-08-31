@@ -59,16 +59,16 @@ main(
 	/* Handles the selected command-line operation. */
 	if (argc == 1 || (argc == 2 && strcmp(argv[1], "-a") == 0)) {
 		/* Handles a failed netutil interfaces operation. */
-		if (netutil_interfaces(descriptor, &interfaces, &count) != 0)
+		if (netutil_interfaces(descriptor, &interfaces, &count) != 0) {
 			status = 1;
-		else {
+		} else {
 			/* Process each remaining element. */
-			for (index = 0; index < count; index++)
-
+			for (index = 0; index < count; index++) {
 				/* Handles a failed show operation. */
 				if (show(descriptor,
 					 interfaces[index].ifr_name) != 0)
 					status = 1;
+			}
 			free(interfaces);
 		}
 		close(descriptor);
@@ -90,9 +90,9 @@ main(
 	if (argc == 3 &&
 	    (strcmp(argv[2], "up") == 0 || strcmp(argv[2], "down") == 0)) {
 		/* Validates the command-line arguments. */
-		if (request(descriptor, argv[1], SIOCGIFFLAGS, &request_) != 0)
+		if (request(descriptor, argv[1], SIOCGIFFLAGS, &request_) != 0) {
 			status = 1;
-		else {
+		} else {
 			/* Handles the selected command-line operation. */
 			if (strcmp(argv[2], "up") == 0)
 				request_.ifr_flags |= IFF_UP;
@@ -216,11 +216,12 @@ show(
 	if (request(descriptor, name, SIOCGIFADDR, &address) == 0 &&
 	    ((struct sockaddr_in *)&address.ifr_addr)->sin_addr.s_addr != 0 &&
 	    request(descriptor, name, SIOCGIFNETMASK, &mask) == 0 &&
-	    request(descriptor, name, SIOCGIFBRDADDR, &broadcast) == 0)
+	    request(descriptor, name, SIOCGIFBRDADDR, &broadcast) == 0) {
 		printf("        inet %s netmask %s broadcast %s\n",
 		       address_text(&address.ifr_addr, a),
 		       address_text(&mask.ifr_addr, m),
 		       address_text(&broadcast.ifr_addr, b));
+	}
 	printf("        ether %02x:%02x:%02x:%02x:%02x:%02x\n",
 	       hardware.ifr_hwaddr[0], hardware.ifr_hwaddr[1],
 	       hardware.ifr_hwaddr[2], hardware.ifr_hwaddr[3],

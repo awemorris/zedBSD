@@ -105,7 +105,7 @@ main(
 
 	/* Handles a failed send message operation. */
 	if (send_message(terminal) != 0) {
-				saved_errno = errno;
+		saved_errno = errno;
 
 		(void)close(terminal);
 		errno = saved_errno;
@@ -157,7 +157,6 @@ find_terminal(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		offset = 0;
 
 		/* Process each remaining element. */
@@ -327,6 +326,7 @@ line_safe(
 {
 	const char *slash;
 	const char *component;
+	size_t length;
 
 	component = line;
 
@@ -336,9 +336,9 @@ line_safe(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-				slash = strchr(component, '/');
-		size_t length = slash == NULL ? strlen(component)
-					      : (size_t)(slash - component);
+		slash = strchr(component, '/');
+		length = slash == NULL ? strlen(component)
+				       : (size_t)(slash - component);
 
 		/* Checks the current data length. */
 		if (length == 0 || (length == 1 && component[0] == '.') ||
@@ -407,7 +407,6 @@ send_message(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		count = read(STDIN_FILENO, buffer, sizeof(buffer));
 
 		/* Handles the reported system error. */

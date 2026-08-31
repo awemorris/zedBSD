@@ -40,6 +40,7 @@ main(
 	/* Handles the separator condition. */
 	if (separator)
 		*separator = '\0';
+
 	/* Validates the command-line arguments. */
 	if (command_parse_ull(argv[1], &user) ||
 	    user > (unsigned long long)(uid_t)-1)
@@ -51,13 +52,13 @@ main(
 		goto usage;
 
 	/* Process each remaining command-line operand. */
-	for (i = 2; i < argc; i++)
-
+	for (i = 2; i < argc; i++) {
 		/* Validates the command-line arguments. */
 		if (chown(argv[i], (uid_t)user, (gid_t)group)) {
 			command_error("chown", argv[i]);
 			failed = 1;
 		}
+	}
 
 	/* Returns the computed result. */
 	return failed;

@@ -47,8 +47,9 @@ main(
 				/* Reports operation failure. */
 				return 2;
 			}
-		} else
+		} else {
 			break;
+		}
 	}
 	do {
 				f = i == argc || !strcmp(argv[i], "-")
@@ -63,7 +64,6 @@ main(
 			return 1;
 		}
 		while ((c = fgetc(f)) != EOF) {
-
 			next = col;
 
 			/* Classifies the current input character. */

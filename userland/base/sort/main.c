@@ -51,16 +51,16 @@ main(
 	lc = 0;
 	for (; i < argc && argv[i][0] == '-'; ++i) {
 		/* Continue while the operation condition remains true. */
-				p = argv[i] + 1;
+		p = argv[i] + 1;
 		while (*p) {
 			/* Checks the current pointer. */
 			if (*p == 'r')
 				reverse = 1;
 			else if (*p == 'n')
 				numeric = 1;
-			else if (*p == 'u')
+			else if (*p == 'u') {
 				unique = 1;
-			else {
+			} else {
 				fprintf(stderr, "sort: invalid option\n");
 
 				/* Reports operation failure. */
@@ -82,7 +82,6 @@ main(
 			continue;
 		}
 		while ((len = command_read_line(f, &line, &lc)) > 0) {
-
 			s = malloc((size_t)len + 1);
 
 			/* Checks the current string state. */
@@ -92,8 +91,8 @@ main(
 
 			/* Checks the current item count. */
 			if (n == cap) {
-								nc = cap ? cap * 2 : 64;
-								nv = realloc(v, nc * sizeof(*v));
+				nc = cap ? cap * 2 : 64;
+				nv = realloc(v, nc * sizeof(*v));
 
 				/* Handles the nv condition. */
 				if (!nv)
@@ -113,8 +112,8 @@ main(
 	/* Process each element required by the operation. */
 	for (i = 1; i < (int)n; ++i) {
 		/* Continue while the operation condition remains true. */
-				x = v[i];
-				j = i;
+		x = v[i];
+		j = i;
 		while (j && cmp(v[j - 1], x) > 0) {
 			v[j] = v[j - 1];
 			--j;
@@ -154,15 +153,16 @@ cmp(
 
 	/* Handles the numeric condition. */
 	if (numeric) {
-				p = strtoll(x, NULL, 10);
+		p = strtoll(x, NULL, 10);
 		q = strtoll(y, NULL, 10);
 		c = (p > q) - (p < q);
 
 		/* Classifies the current input character. */
 		if (!c)
 			c = strcmp(x, y);
-	} else
+	} else {
 		c = strcmp(x, y);
+	}
 
 	/* Returns the computed result. */
 	return reverse ? -c : c;

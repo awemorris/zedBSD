@@ -40,7 +40,7 @@ main(
 	i = 1;
 	failed = 0;
 	for (; i < argc && argv[i][0] == '-'; i++) {
-				p = argv[i] + 1;
+		p = argv[i] + 1;
 
 		/* Checks the current pointer. */
 		if (!*p)
@@ -76,8 +76,8 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (; i < argc; i++) {
-				fd = !strcmp(argv[i], "-") ? STDIN_FILENO
-					       : open(argv[i], O_RDONLY);
+		fd = !strcmp(argv[i], "-") ? STDIN_FILENO
+			       : open(argv[i], O_RDONLY);
 
 		/* Checks the file descriptor. */
 		if (fd < 0) {
@@ -125,7 +125,6 @@ count_fd(
 	b = 0;
 	inword = 0;
 	for (;;) {
-
 		n = read(fd, buffer, sizeof(buffer));
 
 		/* Checks the current item count. */

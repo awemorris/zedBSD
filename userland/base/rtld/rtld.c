@@ -264,9 +264,10 @@ rtld_debug(
 	const char *message)
 {
 	/* Handles the message availability. */
-	if (message != NULL)
+	if (message != NULL) {
 		(void)syscall6(ZEDBSD_SYS_write, 2, (uintptr_t)message,
 			       rtld_strlen(message), 0, 0, 0);
+	}
 }
 
 /*
@@ -364,26 +365,27 @@ __rtld_thread_free(
 	loader_lock();
 
 	/* Process each element required by the operation. */
-	for (link = &rtld_threads; *link != NULL; link = &(*link)->rtld_next)
-
+	for (link = &rtld_threads; *link != NULL; link = &(*link)->rtld_next) {
 		/* Handles the link condition. */
 		if (*link == tcb) {
 			*link = tcb->rtld_next;
 			break;
 		}
+	}
 	loader_unlock();
 
 	/* Handles the dtv availability. */
-	if (tcb->dtv != NULL)
-
+	if (tcb->dtv != NULL) {
 		/* Process each remaining element. */
 		for (id = 1; id < tcb->dtv_count && id <= tls_module_count;
-		     id++)
-
+		     id++) {
 			/* Handles the tcb condition. */
-			if (tcb->dtv[id] != NULL)
+			if (tcb->dtv[id] != NULL) {
 				tls_unmap(tcb->dtv[id],
 					  tls_modules[id].memory_size);
+			}
+		}
+	}
 	tls_unmap(tcb->dtv, (RTLD_OBJECT_MAX + 1U) * sizeof(*tcb->dtv));
 	tcb->dtv = NULL;
 	tls_unmap(tcb, sizeof(*tcb));
@@ -598,11 +600,11 @@ __rtld_startup_init(
 
 	/* Process each remaining element. */
 	startup_initialized = 1;
-	for (i = 0; i < main_object->preinit_count; i++)
-
+	for (i = 0; i < main_object->preinit_count; i++) {
 		/* Handles the main object condition. */
 		if (main_object->preinit_array[i] != 0)
 			((void (*)(void))main_object->preinit_array[i])();
+	}
 	initialize_object(main_object);
 }
 
@@ -624,8 +626,8 @@ __rtld_process_fini(
 	process_finalized = 1;
 	while (initialization_count != 0) {
 		/* Continue while the operation condition remains true. */
-				object = initialization_order[--initialization_count];
-				i = object->fini_count;
+		object = initialization_order[--initialization_count];
+		i = object->fini_count;
 		while (i != 0) {
 			i--;
 
@@ -694,8 +696,7 @@ __rtld_dlopen(
 	}
 
 	/* Process each remaining element. */
-	for (i = 0; i < object_count; i++)
-
+	for (i = 0; i < object_count; i++) {
 		/* Handles a failed rtld strcmp operation. */
 		if (objects[i].active && !objects[i].unloading &&
 		    (rtld_strcmp(objects[i].path, path) == 0 ||
@@ -704,6 +705,7 @@ __rtld_dlopen(
 			object = &objects[i];
 			goto loaded;
 		}
+	}
 	rtld_memcpy(full_path, "/lib/", 5);
 	rtld_memcpy(full_path + 5, name, length + 1U);
 	fd = syscall6(ZEDBSD_SYS_open, (uintptr_t)full_path, O_RDONLY, 0, 0, 0,
@@ -821,14 +823,14 @@ __rtld_dladdr(
 	loader_lock();
 
 	/* Process each remaining element. */
-	for (i = 0; i < object_count; i++)
-
+	for (i = 0; i < object_count; i++) {
 		/* Handles a failed object contains operation. */
 		if (objects[i].active && !objects[i].unloading &&
 		    object_contains(&objects[i], address, 1, 0)) {
 			object = &objects[i];
 			break;
 		}
+	}
 
 	/* Handles the object availability. */
 	if (object == NULL) {
@@ -840,9 +842,9 @@ __rtld_dladdr(
 
 	/* Process each remaining element. */
 	for (i = 1; i < object->symbol_count; i++) {
-				symbol = &object->symtab[i];
+		symbol = &object->symtab[i];
 
-				type = ELF_ST_TYPE(symbol->st_info);
+		type = ELF_ST_TYPE(symbol->st_info);
 
 		/* Handles the symbol condition. */
 		if (symbol->st_shndx == SHN_UNDEF || symbol->st_name == 0 ||
@@ -857,9 +859,9 @@ __rtld_dladdr(
 			continue;
 
 		/* Handles the symbol condition. */
-		if (symbol->st_shndx == SHN_ABS)
+		if (symbol->st_shndx == SHN_ABS) {
 			symbol_address = (uintptr_t)symbol->st_value;
-		else {
+		} else {
 			/* Handles the uintptr t condition. */
 			if ((uintptr_t)symbol->st_value >
 			    UINTPTR_MAX - object->base)
@@ -921,9 +923,10 @@ __rtld_dlclose(
 		/* Handles the main scope condition. */
 		if (!main_scope) {
 			/* Checks the current object. */
-			if (object->direct_refs == 0)
+			if (object->direct_refs == 0) {
 				rtld_fatal(
 				    "invalid shared-object direct reference");
+			}
 			object->direct_refs--;
 			unload_object_locked(object);
 		}
@@ -1052,23 +1055,24 @@ rtld_main(
 		rtld_fatal("interpreter bootstrap relocation failed");
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < at_phnum; i++)
-
+	for (i = 0; i < at_phnum; i++) {
 		/* Handles the Elf Phdr condition. */
 		if (((Elf_Phdr *)at_phdr)[i].p_type == PT_PHDR) {
-						phdr_vaddr = (uintptr_t)((Elf_Phdr *)at_phdr)[i].p_vaddr;
+			phdr_vaddr = (uintptr_t)((Elf_Phdr *)at_phdr)[i].p_vaddr;
 
 			/* Handles the phdr vaddr condition. */
-			if (phdr_vaddr > at_phdr)
+			if (phdr_vaddr > at_phdr) {
 				rtld_fatal(
 				    "invalid main program-header address");
+			}
 			main_base = at_phdr - phdr_vaddr;
 			break;
 		}
+	}
 
 	/* Handles the main base condition. */
 	if (main_base != 0) {
-				main_header = (Elf_Ehdr *)main_base;
+		main_header = (Elf_Ehdr *)main_base;
 
 		/* Handles a failed valid elf header operation. */
 		if (!valid_elf_header(main_header, ET_DYN))
@@ -1090,22 +1094,22 @@ rtld_main(
 		rtld_fatal("interpreter must not have dependencies");
 
 	/* Process each remaining element. */
-	for (i = 0; i < object_count; i++)
-
+	for (i = 0; i < object_count; i++) {
 		/* Handles the objects condition. */
 		if (objects[i].active)
 			relocate_object(&objects[i]);
+	}
 
 	/*
  * The initial executable, interpreter, and DT_NEEDED closure remain
 	 * mapped until process termination.  Only later dlopen() objects are
 	 * candidates for physical unload. */
 	/* Process each remaining element. */
-	for (i = 0; i < object_count; i++)
-
+	for (i = 0; i < object_count; i++) {
 		/* Handles the objects condition. */
 		if (objects[i].active)
 			objects[i].permanent = 1;
+	}
 
 	/* Handles a failed rtld thread alloc operation. */
 	if (__rtld_thread_alloc(NULL, &initial_tcb) != 0)
@@ -1211,9 +1215,10 @@ tls_unmap(
 	size_t size)
 {
 	/* Handles the address availability. */
-	if (address != NULL)
+	if (address != NULL) {
 		(void)syscall6(ZEDBSD_SYS_munmap, (uintptr_t)address,
 			       page_ceil(size), 0, 0, 0, 0);
+	}
 }
 
 /* Supports the loader lock operation. */
@@ -1304,9 +1309,10 @@ allocate_tls_block(
 		rtld_memcpy(block, module->init_image, module->file_size);
 
 	/* Handles the module condition. */
-	if (module->memory_size > module->file_size)
+	if (module->memory_size > module->file_size) {
 		rtld_memset((unsigned char *)block + module->file_size, 0,
 			    module->memory_size - module->file_size);
+	}
 
 	/* Returns the computed result. */
 	return block;
@@ -1341,11 +1347,11 @@ initialize_object(
 		((void (*)(void))object->init)();
 
 	/* Process each remaining element. */
-	for (i = 0; i < object->init_count; i++)
-
+	for (i = 0; i < object->init_count; i++) {
 		/* Checks the current object. */
 		if (object->init_array[i] != 0)
 			((void (*)(void))object->init_array[i])();
+	}
 
 	/* Handles the initialization count condition. */
 	if (initialization_count == RTLD_OBJECT_MAX)
@@ -1427,8 +1433,7 @@ allocate_handle(
 	unsigned i;
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < RTLD_HANDLE_MAX; i++)
-
+	for (i = 0; i < RTLD_HANDLE_MAX; i++) {
 		/* Handles the handles condition. */
 		if (!handles[i].active) {
 			handles[i].magic = RTLD_HANDLE_MAGIC;
@@ -1449,6 +1454,7 @@ allocate_handle(
 			/* Returns the computed result. */
 			return &handles[i];
 		}
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -1477,11 +1483,11 @@ dlopen_bare_name(
 	}
 
 	/* Process each element required by the operation. */
-	for (cursor = path; *cursor != '\0'; cursor++)
-
+	for (cursor = path; *cursor != '\0'; cursor++) {
 		/* Checks the current cursor position. */
 		if (*cursor == '/')
 			return NULL;
+	}
 
 	/* Returns the computed result. */
 	return path;
@@ -1695,11 +1701,11 @@ load_object(
 		rtld_fatal("dependency name too long");
 
 	/* Process each remaining element. */
-	for (i = 0; i < length; i++)
-
+	for (i = 0; i < length; i++) {
 		/* Validates the current name. */
 		if (name[i] == '/')
 			rtld_fatal("dependency path must be a bare name");
+	}
 	fd = open_dependency(name, length, requester, path);
 
 	/* Handles an operation failure. */
@@ -1751,8 +1757,7 @@ load_object(
 	rtld_memcpy(object->phdr, phdr, object->phnum * sizeof(Elf_Phdr));
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < object->phnum; i++)
-
+	for (i = 0; i < object->phnum; i++) {
 		/* Handles a failed page floor operation. */
 		if (object->phdr[i].p_type == PT_LOAD &&
 		    object->phdr[i].p_memsz != 0 &&
@@ -1761,15 +1766,16 @@ load_object(
 			    page_floor((uintptr_t)object->phdr[i].p_vaddr);
 			first = i;
 		}
+	}
 	map_one_segment(object, (int)fd, &object->phdr[first], 1);
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < object->phnum; i++)
-
+	for (i = 0; i < object->phnum; i++) {
 		/* Checks the current index. */
 		if (i != first && object->phdr[i].p_type == PT_LOAD &&
 		    object->phdr[i].p_memsz != 0)
 			map_one_segment(object, (int)fd, &object->phdr[i], 0);
+	}
 	(void)syscall6(ZEDBSD_SYS_close, (uintptr_t)fd, 0, 0, 0, 0, 0);
 	parse_dynamic(object);
 	load_dependencies(object);
@@ -1801,8 +1807,7 @@ open_dependency(
 	} else {
 		/* Process each element required by the operation. */
 		for (owner = requester; owner != NULL;
-		     owner = owner->loader_parent)
-
+		     owner = owner->loader_parent) {
 			/* Handles the rpath availability. */
 			if (owner->rpath != NULL) {
 				fd = open_search_list(owner->rpath, owner, name,
@@ -1812,6 +1817,7 @@ open_dependency(
 				if (!raw_error(fd))
 					return fd;
 			}
+		}
 	}
 
 	/* Obtains the open search candidate result. */
@@ -1846,7 +1852,6 @@ open_search_list(
 	/* Continue until the operation reaches a terminal state. */
 	component = list;
 	for (;;) {
-
 		end = component;
 		fd = -1;
 
@@ -1870,16 +1875,16 @@ open_search_list(
 			   component[5] == 'I' && component[6] == 'N' &&
 			   (length == 7U || component[7] == '/') &&
 			   owner != NULL && owner->path[0] == '/') {
-						slash = owner->path;
+			slash = owner->path;
 
-						suffix_length = length - 7U;
+			suffix_length = length - 7U;
 
 			/* Process each element required by the operation. */
-			for (cursor = owner->path; *cursor != '\0'; cursor++)
-
+			for (cursor = owner->path; *cursor != '\0'; cursor++) {
 				/* Checks the current cursor position. */
 				if (*cursor == '/')
 					slash = cursor;
+			}
 			origin_length = (size_t)(slash - owner->path);
 
 			/* Handles the origin length condition. */
@@ -1893,10 +1898,11 @@ open_search_list(
 					    origin_length);
 
 				/* Handles the suffix length condition. */
-				if (suffix_length != 0)
+				if (suffix_length != 0) {
 					rtld_memcpy(directory + origin_length,
 						    component + 7U,
 						    suffix_length);
+				}
 				length = origin_length + suffix_length;
 				directory[length] = '\0';
 				fd = open_search_candidate(
@@ -1959,8 +1965,7 @@ find_identity(
 	unsigned i;
 
 	/* Process each remaining element. */
-	for (i = 0; i < object_count; i++)
-
+	for (i = 0; i < object_count; i++) {
 		/* Handles the objects condition. */
 		if (objects[i].active && !objects[i].unloading &&
 		    objects[i].has_identity &&
@@ -1969,6 +1974,7 @@ find_identity(
 
 			/* Returns the computed result. */
 			return &objects[i];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -1983,11 +1989,11 @@ new_object(
 	unsigned i;
 
 	/* Process each remaining element. */
-	for (i = 0; i < object_count; i++)
-
+	for (i = 0; i < object_count; i++) {
 		/* Handles the objects condition. */
 		if (!objects[i].active)
 			break;
+	}
 
 	/* Checks the current index. */
 	if (i == object_count) {
@@ -2111,8 +2117,8 @@ map_one_segment(
 
 	/* Handles the file map size condition. */
 	if (file_map_size < memory_map_size) {
-				anonymous = object->base + virtual_page + file_map_size;
-				anonymous_size = memory_map_size - file_map_size;
+		anonymous = object->base + virtual_page + file_map_size;
+		anonymous_size = memory_map_size - file_map_size;
 		mapped = map_call(
 		    anonymous, anonymous_size, map_prot,
 		    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
@@ -2125,28 +2131,29 @@ map_one_segment(
 
 	/* Handles the zero condition. */
 	if (need_zero && program->p_filesz != 0) {
-				zero_start = object->base +
-				       (uintptr_t)program->p_vaddr +
-				       (uintptr_t)program->p_filesz;
-				zero_end = object->base +
-				     (uintptr_t)program->p_vaddr +
-				     (uintptr_t)program->p_memsz;
-				file_page_end = object->base + virtual_page + file_map_size;
+		zero_start = object->base +
+		       (uintptr_t)program->p_vaddr +
+		       (uintptr_t)program->p_filesz;
+		zero_end = object->base +
+		     (uintptr_t)program->p_vaddr +
+		     (uintptr_t)program->p_memsz;
+		file_page_end = object->base + virtual_page + file_map_size;
 
 		/* Handles the zero end condition. */
 		if (zero_end > file_page_end)
 			zero_end = file_page_end;
 
 		/* Handles the zero end condition. */
-		if (zero_end > zero_start)
+		if (zero_end > zero_start) {
 			rtld_memset((void *)zero_start, 0,
 				    zero_end - zero_start);
+		}
 	}
 
 	/* Handles the map prot condition. */
 	if (map_prot != final_prot) {
-				result = syscall6(ZEDBSD_SYS_mprotect, object->base + virtual_page,
-			     memory_map_size, (uintptr_t)final_prot, 0, 0, 0);
+		result = syscall6(ZEDBSD_SYS_mprotect, object->base + virtual_page,
+	     memory_map_size, (uintptr_t)final_prot, 0, 0, 0);
 
 		/* Handles an operation failure. */
 		if (raw_error(result))
@@ -2246,8 +2253,7 @@ parse_dynamic(
 	jmprel_value = 0;
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < object->phnum; i++)
-
+	for (i = 0; i < object->phnum; i++) {
 		/* Checks the current object. */
 		if (object->phdr[i].p_type == PT_DYNAMIC) {
 			/* Handles the dynamic availability. */
@@ -2260,6 +2266,7 @@ parse_dynamic(
 			object->dynamic_count =
 			    (size_t)object->phdr[i].p_memsz / sizeof(Elf_Dyn);
 		}
+	}
 
 	/* Handles the dynamic availability. */
 	if (object->dynamic == NULL)
@@ -2267,7 +2274,7 @@ parse_dynamic(
 
 	/* Process each remaining element. */
 	for (i = 0; i < object->dynamic_count; i++) {
-				dynamic = &object->dynamic[i];
+		dynamic = &object->dynamic[i];
 
 		/* Handles the dynamic condition. */
 		if (dynamic->d_tag == DT_NULL)
@@ -2308,9 +2315,10 @@ parse_dynamic(
 			break;
 		case DT_VERDEFNUM:
 			/* Handles the dynamic condition. */
-			if (dynamic->d_un.d_val > UINT32_MAX)
+			if (dynamic->d_un.d_val > UINT32_MAX) {
 				rtld_fatal(
 				    "too many symbol version definitions");
+			}
 			object->verdef_count = (uint32_t)dynamic->d_un.d_val;
 			break;
 		case DT_VERNEED:
@@ -2318,9 +2326,10 @@ parse_dynamic(
 			break;
 		case DT_VERNEEDNUM:
 			/* Handles the dynamic condition. */
-			if (dynamic->d_un.d_val > UINT32_MAX)
+			if (dynamic->d_un.d_val > UINT32_MAX) {
 				rtld_fatal(
 				    "too many symbol version requirements");
+			}
 			object->verneed_count = (uint32_t)dynamic->d_un.d_val;
 			break;
 		case DT_REL:
@@ -2413,7 +2422,6 @@ parse_dynamic(
 
 	/* Handles the hash value condition. */
 	if (hash_value != 0) {
-
 		object->hash = (uint32_t *)object_pointer(
 		    object, (Elf_Addr)hash_value, 2U * sizeof(uint32_t), PF_R);
 
@@ -2484,15 +2492,16 @@ parse_dynamic(
 		chain_capacity = chain_bytes / sizeof(uint32_t);
 
 		/* Handles the chain capacity condition. */
-		if (chain_capacity != 0)
+		if (chain_capacity != 0) {
 			object->gnu_chain = (uint32_t *)object_pointer(
 			    object, (Elf_Addr)offset, sizeof(uint32_t), PF_R);
+		}
 
 		/* Process each remaining element. */
 		gnu_symbol_count = object->gnu_symbol_offset;
 		for (bucket_index = 0; bucket_index < object->gnu_bucket_count;
 		     bucket_index++) {
-						symbol = object->gnu_bucket[bucket_index];
+			symbol = object->gnu_bucket[bucket_index];
 
 			/* Handles the symbol condition. */
 			if (symbol == 0)
@@ -2507,18 +2516,20 @@ parse_dynamic(
 			/* Continue until the operation reaches a terminal state. */
 			for (;;) {
 				/* Handles the chain index condition. */
-				if (chain_index >= chain_capacity)
+				if (chain_index >= chain_capacity) {
 					rtld_fatal(
 					    "unterminated GNU hash chain");
+				}
 
 				/* Checks the current object. */
 				if ((object->gnu_chain[chain_index] & 1U) != 0)
 					break;
 
 				/* Handles the symbol condition. */
-				if (symbol == UINT32_MAX)
+				if (symbol == UINT32_MAX) {
 					rtld_fatal(
 					    "unterminated GNU hash chain");
+				}
 				symbol++;
 				chain_index++;
 			}
@@ -2552,10 +2563,11 @@ parse_dynamic(
 			rtld_fatal("invalid GNU hash chain size");
 
 		/* Handles the chain capacity condition. */
-		if (chain_capacity != 0)
+		if (chain_capacity != 0) {
 			(void)object_pointer(object, (Elf_Addr)offset,
 					     chain_capacity * sizeof(uint32_t),
 					     PF_R);
+		}
 	}
 
 	/* Checks the current object. */
@@ -2626,25 +2638,28 @@ parse_dynamic(
 	object->preinit_count = preinit_array_size / sizeof(uintptr_t);
 
 	/* Handles the init array availability. */
-	if (object->init_array != NULL)
+	if (object->init_array != NULL) {
 		(void)object_pointer(
 		    object,
 		    (Elf_Addr)((uintptr_t)object->init_array - object->base),
 		    init_array_size, PF_R);
+	}
 
 	/* Handles the fini array availability. */
-	if (object->fini_array != NULL)
+	if (object->fini_array != NULL) {
 		(void)object_pointer(
 		    object,
 		    (Elf_Addr)((uintptr_t)object->fini_array - object->base),
 		    fini_array_size, PF_R);
+	}
 
 	/* Handles the preinit array availability. */
-	if (object->preinit_array != NULL)
+	if (object->preinit_array != NULL) {
 		(void)object_pointer(
 		    object,
 		    (Elf_Addr)((uintptr_t)object->preinit_array - object->base),
 		    preinit_array_size, PF_R);
+	}
 
 	/* Process each remaining element. */
 	for (i = 0; i < object->needed_count; i++) {
@@ -2787,7 +2802,6 @@ validate_verdef(
 
 	/* Process each remaining element. */
 	for (record = 0; record < object->verdef_count; record++) {
-
 		definition = (Elf_Verdef *)object_pointer(
 		    object, cursor, sizeof(*definition), PF_R);
 
@@ -2803,7 +2817,6 @@ validate_verdef(
 		/* Process each element required by the operation. */
 		auxiliary = version_offset(cursor, definition->vd_aux);
 		for (item = 0; item < definition->vd_cnt; item++) {
-
 			name = (Elf_Verdaux *)object_pointer(
 			    object, auxiliary, sizeof(*name), PF_R);
 			(void)dynamic_string(object, name->vda_name);
@@ -2811,9 +2824,10 @@ validate_verdef(
 			/* Handles the item condition. */
 			if (item + 1U < definition->vd_cnt) {
 				/* Validates the current name. */
-				if (name->vda_next == 0)
+				if (name->vda_next == 0) {
 					rtld_fatal("truncated symbol version "
 						   "definition");
+				}
 				auxiliary =
 				    version_offset(auxiliary, name->vda_next);
 			}
@@ -2822,9 +2836,10 @@ validate_verdef(
 		/* Handles the record condition. */
 		if (record + 1U < object->verdef_count) {
 			/* Handles the definition condition. */
-			if (definition->vd_next == 0)
+			if (definition->vd_next == 0) {
 				rtld_fatal(
 				    "truncated symbol version definitions");
+			}
 			cursor = version_offset(cursor, definition->vd_next);
 		} else if (definition->vd_next != 0) {
 			rtld_fatal("extra symbol version definitions");
@@ -2872,8 +2887,7 @@ bounded_string(
 	size_t length;
 
 	/* Process each remaining element. */
-	for (length = 0; length < capacity; length++)
-
+	for (length = 0; length < capacity; length++) {
 		/* Handles the string condition. */
 		if (string[length] == '\0') {
 			/* Handles the length out availability. */
@@ -2882,6 +2896,7 @@ bounded_string(
 			/* Reports operation failure. */
 			return 1;
 		}
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -2903,7 +2918,6 @@ validate_verneed(
 
 	/* Process each remaining element. */
 	for (record = 0; record < object->verneed_count; record++) {
-
 		need = (Elf_Verneed *)object_pointer(
 		    object, cursor, sizeof(*need), PF_R);
 
@@ -2916,22 +2930,23 @@ validate_verneed(
 		/* Process each element required by the operation. */
 		auxiliary = version_offset(cursor, need->vn_aux);
 		for (item = 0; item < need->vn_cnt; item++) {
-
 			name = (Elf_Vernaux *)object_pointer(
 			    object, auxiliary, sizeof(*name), PF_R);
 
 			/* Validates the current name. */
-			if ((name->vna_other & VER_NDX_MASK) <= VER_NDX_GLOBAL)
+			if ((name->vna_other & VER_NDX_MASK) <= VER_NDX_GLOBAL) {
 				rtld_fatal(
 				    "invalid required symbol version index");
+			}
 			(void)dynamic_string(object, name->vna_name);
 
 			/* Handles the item condition. */
 			if (item + 1U < need->vn_cnt) {
 				/* Validates the current name. */
-				if (name->vna_next == 0)
+				if (name->vna_next == 0) {
 					rtld_fatal("truncated symbol version "
 						   "requirement");
+				}
 				auxiliary =
 				    version_offset(auxiliary, name->vna_next);
 			}
@@ -2940,9 +2955,10 @@ validate_verneed(
 		/* Handles the record condition. */
 		if (record + 1U < object->verneed_count) {
 			/* Handles the need condition. */
-			if (need->vn_next == 0)
+			if (need->vn_next == 0) {
 				rtld_fatal(
 				    "truncated symbol version requirements");
+			}
 			cursor = version_offset(cursor, need->vn_next);
 		} else if (need->vn_next != 0) {
 			rtld_fatal("extra symbol version requirements");
@@ -2960,12 +2976,10 @@ register_tls_module(
 	unsigned i, id;
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < object->phnum; i++)
-
+	for (i = 0; i < object->phnum; i++) {
 		/* Checks the current object. */
 		if (object->phdr[i].p_type == PT_TLS) {
-
-						alignment = (size_t)object->phdr[i].p_align;
+			alignment = (size_t)object->phdr[i].p_align;
 
 			/* Checks the current object. */
 			if (object->tls_module_id != 0 ||
@@ -2985,11 +2999,11 @@ register_tls_module(
 				rtld_fatal("unsupported TLS alignment or size");
 
 			/* Process each remaining element. */
-			for (id = 1; id <= tls_module_count; id++)
-
+			for (id = 1; id <= tls_module_count; id++) {
 				/* Handles the tls modules condition. */
 				if (!tls_modules[id].active)
 					break;
+			}
 
 			/* Handles the id condition. */
 			if (id > tls_module_count) {
@@ -3008,14 +3022,16 @@ register_tls_module(
 			module->owner = object;
 
 			/* Handles the module condition. */
-			if (module->file_size != 0)
+			if (module->file_size != 0) {
 				module->init_image =
 				    (const void *)object_pointer(
 					object, object->phdr[i].p_vaddr,
 					module->file_size, PF_R);
+			}
 			module->active = 1;
 			tls_generation++;
 		}
+	}
 }
 
 /* Supports the load dependencies operation. */
@@ -3085,19 +3101,21 @@ relocate_object(
 	/* Handles the jmprel availability. */
 	if (object->jmprel != NULL && object->pltrel == DT_REL) {
 		/* Process each remaining element. */
-				rel = object->jmprel;
-		for (i = 0; i < object->jmprel_size / sizeof(*rel); i++)
+		rel = object->jmprel;
+		for (i = 0; i < object->jmprel_size / sizeof(*rel); i++) {
 			apply_value(object, (uintptr_t)rel[i].r_offset,
 				    ELF_R_TYPE(rel[i].r_info),
 				    ELF_R_SYM(rel[i].r_info), 0, 0);
+		}
 	} else if (object->jmprel != NULL && object->pltrel == DT_RELA) {
 		/* Process each remaining element. */
-				rela = object->jmprel;
-		for (i = 0; i < object->jmprel_size / sizeof(*rela); i++)
+		rela = object->jmprel;
+		for (i = 0; i < object->jmprel_size / sizeof(*rela); i++) {
 			apply_value(object, (uintptr_t)rela[i].r_offset,
 				    ELF_R_TYPE(rela[i].r_info),
 				    ELF_R_SYM(rela[i].r_info),
 				    (uintptr_t)rela[i].r_addend, 1);
+		}
 	}
 #if defined(HAL_ARCH_SPARCV9)
 
@@ -3533,7 +3551,7 @@ lookup_symbol_version(
 
 	/* Process each remaining element. */
 	for (i = 0; i < object_count; i++) {
-				object = &objects[i];
+		object = &objects[i];
 
 		/* Checks the current object. */
 		if (!object->active || object->unloading ||
@@ -3587,11 +3605,11 @@ reserved_loader_symbol(
 	size_t i;
 
 	/* Process each remaining element. */
-	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++)
-
+	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
 		/* Handles a failed rtld strcmp operation. */
 		if (rtld_strcmp(name, names[i]) == 0)
 			return 1;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -3818,15 +3836,14 @@ defined_version_name(
 
 	/* Process each remaining element. */
 	for (record = 0; record < object->verdef_count; record++) {
-
 		definition = (Elf_Verdef *)object_pointer(
 		    object, cursor, sizeof(*definition), PF_R);
 
 		/* Handles the definition condition. */
 		if ((definition->vd_ndx & VER_NDX_MASK) == version_index) {
-						auxiliary = version_offset(cursor, definition->vd_aux);
-						name = (Elf_Verdaux *)object_pointer(
-			    object, auxiliary, sizeof(*name), PF_R);
+			auxiliary = version_offset(cursor, definition->vd_aux);
+			name = (Elf_Verdaux *)object_pointer(
+		    object, auxiliary, sizeof(*name), PF_R);
 
 			/* Obtains the dynamic string result. */
 			function_result = dynamic_string(object, name->vda_name);
@@ -3917,14 +3934,12 @@ required_version_name(
 
 	/* Process each remaining element. */
 	for (record = 0; record < object->verneed_count; record++) {
-
 		need = (Elf_Verneed *)object_pointer(
 		    object, cursor, sizeof(*need), PF_R);
 		auxiliary = version_offset(cursor, need->vn_aux);
 
 		/* Process each element required by the operation. */
 		for (item = 0; item < need->vn_cnt; item++) {
-
 			name = (Elf_Vernaux *)object_pointer(
 			    object, auxiliary, sizeof(*name), PF_R);
 
@@ -3994,7 +4009,7 @@ resolve_tls_symbol(
 
 	/* Process each remaining element. */
 	for (i = 0; i < object_count; i++) {
-				candidate = &objects[i];
+		candidate = &objects[i];
 
 		/* Handles the candidate condition. */
 		if (!candidate->active || candidate->unloading ||
@@ -4142,8 +4157,7 @@ unload_object_locked(
 		/* Process each element required by the operation. */
 		module = &tls_modules[object->tls_module_id];
 		tls_size = module->memory_size;
-		for (tcb = rtld_threads; tcb != NULL; tcb = tcb->rtld_next)
-
+		for (tcb = rtld_threads; tcb != NULL; tcb = tcb->rtld_next) {
 			/* Handles the dtv availability. */
 			if (tcb->dtv != NULL &&
 			    object->tls_module_id < tcb->dtv_count &&
@@ -4153,6 +4167,7 @@ unload_object_locked(
 				tcb->dtv[object->tls_module_id] = NULL;
 				tcb->dtv_generation = tls_generation + 1U;
 			}
+		}
 		module->active = 0;
 		module->owner = NULL;
 		module->init_image = NULL;
@@ -4161,8 +4176,8 @@ unload_object_locked(
 
 	/* Process each remaining element. */
 	for (i = object->mapping_count; i != 0; i--) {
-				result = syscall6(ZEDBSD_SYS_munmap, object->mapping_start[i - 1U],
-			     object->mapping_size[i - 1U], 0, 0, 0, 0);
+		result = syscall6(ZEDBSD_SYS_munmap, object->mapping_start[i - 1U],
+	     object->mapping_size[i - 1U], 0, 0, 0, 0);
 
 		/* Handles an operation failure. */
 		if (raw_error(result))
@@ -4173,9 +4188,10 @@ unload_object_locked(
 	for (i = 0; i < dependency_count; i++) {
 		/* Handles the dependencies condition. */
 		if (dependencies[i] == NULL ||
-		    dependencies[i]->dependency_refs == 0)
+		    dependencies[i]->dependency_refs == 0) {
 			rtld_fatal(
 			    "invalid shared-object dependency reference");
+		}
 		dependencies[i]->dependency_refs--;
 	}
 	rtld_memset(object, 0, sizeof(*object));
@@ -4193,17 +4209,18 @@ remove_initialization_record(
 	unsigned i;
 
 	/* Process each remaining element. */
-	for (i = 0; i < initialization_count; i++)
-
+	for (i = 0; i < initialization_count; i++) {
 		/* Handles the initialization order condition. */
 		if (initialization_order[i] == object) {
 			/* Process each remaining element. */
-			for (; i + 1U < initialization_count; i++)
+			for (; i + 1U < initialization_count; i++) {
 				initialization_order[i] =
 				    initialization_order[i + 1U];
+			}
 			initialization_order[--initialization_count] = NULL;
 			break;
 		}
+	}
 }
 
 /* Supports the finalize object unlocked operation. */
@@ -4342,7 +4359,7 @@ lookup_global_optional(
 
 	/* Process each remaining element. */
 	for (i = 0; i < object_count; i++) {
-				object = &objects[i];
+		object = &objects[i];
 
 		/* Checks the current object. */
 		if (!object->active || object->unloading ||
@@ -4406,8 +4423,8 @@ lookup_handle_graph(
 
 	/* Process each remaining element. */
 	for (i = 0; i < object->needed_count; i++) {
-				value = lookup_handle_graph(object->needed[i], name,
-						      version, visited, found);
+		value = lookup_handle_graph(object->needed[i], name,
+				      version, visited, found);
 
 		/* Handles the found condition. */
 		if (*found)
@@ -4443,8 +4460,7 @@ bootstrap_relative(
 	relaent = sizeof(Elf_Rela);
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < phnum; i++)
-
+	for (i = 0; i < phnum; i++) {
 		/* Handles the phdr condition. */
 		if (phdr[i].p_type == PT_DYNAMIC) {
 			/* Handles the dynamic availability. */
@@ -4458,6 +4474,7 @@ bootstrap_relative(
 			dynamic_count =
 			    (size_t)phdr[i].p_memsz / sizeof(Elf_Dyn);
 		}
+	}
 
 	/* Handles the dynamic availability. */
 	if (dynamic == NULL)

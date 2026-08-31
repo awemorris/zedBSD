@@ -388,17 +388,18 @@ call_init(
 	if (context->zsv1_call(context->zsv1_opaque, context->init_socket,
 			       request, response) != 0) {
 		/* Handles the policy changed condition. */
-		if (policy_changed)
+		if (policy_changed) {
 			(void)fprintf(
 			    context->error,
 			    "service: persistent policy changed; init "
 			    "reload failed: %s; runtime policy may "
 			    "remain stale\n",
 			    strerror(errno));
-		else
+		} else {
 			(void)fprintf(context->error,
 				      "service: init request failed: %s\n",
 				      strerror(errno));
+		}
 
 		/* Reports operation failure. */
 		return -1;
@@ -407,15 +408,16 @@ call_init(
 	/* Handles a failed response bounds valid operation. */
 	if (!response->ended || !response_bounds_valid(response)) {
 		/* Handles the policy changed condition. */
-		if (policy_changed)
+		if (policy_changed) {
 			(void)fprintf(
 			    context->error,
 			    "service: persistent policy changed; init "
 			    "reload returned an invalid ZSV1 response; "
 			    "runtime policy may remain stale\n");
-		else
+		} else {
 			(void)fprintf(context->error,
 				      "service: invalid ZSV1 response\n");
+		}
 
 		/* Reports operation failure. */
 		return -1;
@@ -426,35 +428,37 @@ call_init(
 		/* Handles an operation failure. */
 		if (!response_has_error(response)) {
 			/* Handles the policy changed condition. */
-			if (policy_changed)
+			if (policy_changed) {
 				(void)fprintf(
 				    context->error,
 				    "service: persistent policy changed; init "
 				    "reload returned an invalid ZSV1 response; "
 				    "runtime policy may remain stale\n");
-			else
+			} else {
 				(void)fprintf(
 				    context->error,
 				    "service: invalid ZSV1 response\n");
+			}
 
 			/* Reports operation failure. */
 			return -1;
 		}
 
 		/* Handles the policy changed condition. */
-		if (policy_changed)
+		if (policy_changed) {
 			(void)fprintf(
 			    context->error,
 			    "service: persistent policy changed; init "
 			    "reload failed: %s (errno %d); runtime "
 			    "policy may remain stale\n",
 			    response->error_reason, response->error_number);
-		else
+		} else {
 			(void)fprintf(context->error,
 				      "service: init rejected request: %s "
 				      "(errno %d)\n",
 				      response->error_reason,
 				      response->error_number);
+		}
 
 		/* Reports operation failure. */
 		return -1;

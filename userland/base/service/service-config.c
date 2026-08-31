@@ -44,7 +44,7 @@ service_name_valid(
 
 	/* Process each remaining element. */
 	while (name[length] != '\0') {
-				character = (unsigned char)name[length];
+		character = (unsigned char)name[length];
 
 		/* Classifies the current input character. */
 		if (!((character >= 'A' && character <= 'Z') ||
@@ -190,7 +190,7 @@ parse_line(
 	*end = '\0';
 	/* Handles the equals condition. */
 	if (*equals == '\'' || *equals == '"') {
-				quote = (unsigned char)*equals++;
+		quote = (unsigned char)*equals++;
 		end = equals + strlen(equals);
 
 		/* Checks the current endpoint. */

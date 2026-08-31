@@ -114,7 +114,7 @@ main(
 
 	/* If the password is empty. */
 	if (shadow.sp_pwdp[0] == '\0') {
-				empty = password[0] == '\0';
+		empty = password[0] == '\0';
 
 		/* Shred. */
 		memset(password, 0, sizeof(password));
@@ -154,9 +154,9 @@ main(
 
 	/* Checks the child process state. */
 	if (child == 0) {
-				shell = account.pw_shell[0] ?
-			account.pw_shell :
-			"/bin/sh";
+		shell = account.pw_shell[0] ?
+	account.pw_shell :
+	"/bin/sh";
 
 		/* Handles the initgroups condition. */
 		if (initgroups(account.pw_name, account.pw_gid) ||
@@ -242,7 +242,6 @@ read_line(
 	}
 
 	while (used + 1U < size) {
-
 		count = read(STDIN_FILENO, &byte, 1);
 
 		/* Handles the reported system error. */

@@ -71,16 +71,16 @@ main(
 		} else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
 			type = argv[++i];
 		} else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
-						option = argv[++i];
+			option = argv[++i];
 
 			/* Selects the matching value. */
 			if (strcmp(option, "ro") == 0)
 				flags |= MNT_RDONLY;
 			else if (strcmp(option, "nosuid") == 0)
 				flags |= MNT_NOSUID;
-			else if (strncmp(option, "fspec=", 6) == 0)
+			else if (strncmp(option, "fspec=", 6) == 0) {
 				source = option + 6;
-			else {
+			} else {
 				fprintf(stderr,
 					"mount: unsupported option: %s\n",
 					option);
@@ -207,7 +207,6 @@ mount_all(
 		return 1;
 	}
 	while (fgets(line, sizeof(line), stream) != NULL) {
-
 		cursor = line;
 		line_number++;
 

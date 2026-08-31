@@ -134,26 +134,26 @@ main(
 
 	/* Handles an operation failure. */
 	if (!failed && node_count) {
-				active = calloc(node_count, 1);
+		active = calloc(node_count, 1);
 
 		/* Handles the active condition. */
-		if (!active)
+		if (!active) {
 			failed = 1;
-		else {
+		} else {
 			/* Process each remaining element. */
-			for (i_index_for1 = 0; i_index_for1 < node_count; i_index_for1++)
-
+			for (i_index_for1 = 0; i_index_for1 < node_count; i_index_for1++) {
 				/* Handles the nodes condition. */
 				if (nodes[i_index_for1].defined && !nodes[i_index_for1].called)
 					print_node(i_index_for1, 0, active);
+			}
 
 			/* Process each remaining element. */
-			for (i_index_for2 = 0; i_index_for2 < node_count; i_index_for2++)
-
+			for (i_index_for2 = 0; i_index_for2 < node_count; i_index_for2++) {
 				/* Handles the nodes condition. */
 				if (nodes[i_index_for2].defined && nodes[i_index_for2].called &&
 				    !nodes[i_index_for2].edge_count)
 					print_node(i_index_for2, 0, active);
+			}
 			free(active);
 		}
 	}
@@ -193,11 +193,11 @@ consume(
 
 	/* Process each remaining element. */
 	for (i_index_for = 0; i_index_for < result->count; i_index_for++) {
-				event = &result->events[i_index_for];
+		event = &result->events[i_index_for];
 
 		/* Handles the event condition. */
 		if (event->kind == C_SYMBOL_FUNCTION) {
-						node = node_get(event->name);
+			node = node_get(event->name);
 
 			/* Handles the node condition. */
 			if (node == SIZE_MAX)
@@ -214,8 +214,8 @@ consume(
 					return -1;
 			}
 		} else if (event->kind == C_SYMBOL_CALL && event->function) {
-						caller = node_get(event->function);
-						callee = node_get(event->name);
+			caller = node_get(event->function);
+			callee = node_get(event->name);
 
 			/* Handles the caller condition. */
 			if (caller == SIZE_MAX || callee == SIZE_MAX)
@@ -279,11 +279,11 @@ node_find(
 	size_t i_index_for;
 
 	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < node_count; i_index_for++)
-
+	for (i_index_for = 0; i_index_for < node_count; i_index_for++) {
 		/* Selects the matching value. */
 		if (!strcmp(nodes[i_index_for].name, name))
 			return i_index_for;
+	}
 
 	/* Returns the computed result. */
 	return SIZE_MAX;
@@ -299,11 +299,11 @@ edge_add(
 	size_t *replacement;
 
 	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < nodes[from].edge_count; i_index_for++)
-
+	for (i_index_for = 0; i_index_for < nodes[from].edge_count; i_index_for++) {
 		/* Handles the nodes condition. */
 		if (nodes[from].edges[i_index_for] == to)
 			return 0;
+	}
 
 	/* Handles the nodes condition. */
 	if (nodes[from].edge_count == SIZE_MAX / sizeof(*replacement))

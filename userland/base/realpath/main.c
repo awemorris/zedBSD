@@ -134,7 +134,6 @@ resolve(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		cursor = pending;
 
 		/* Continue while the operation condition remains true. */
@@ -192,8 +191,7 @@ resolve(
 
 		/* Checks the operation status. */
 		if (S_ISLNK(status.st_mode)) {
-
-						rest = strlen(cursor);
+			rest = strlen(cursor);
 
 			/* Handles the links condition. */
 			if (++links > SYMLINK_LIMIT) {
@@ -292,9 +290,10 @@ absolute_pending(
 	pending = malloc(current_length + operand_length + 2U);
 
 	/* Handles the pending availability. */
-	if (pending != NULL)
+	if (pending != NULL) {
 		(void)snprintf(pending, current_length + operand_length + 2U,
 			       "%s/%s", current, operand);
+	}
 
 	/* Returns the computed result. */
 	return pending;

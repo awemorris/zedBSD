@@ -40,7 +40,7 @@ main(
 	version = 0;
 	machine = 0;
 	for (index = 1; index < argc; index++) {
-				option = argv[index];
+		option = argv[index];
 
 		/* Handles the option condition. */
 		if (option[0] != '-' || option[1] == '\0')

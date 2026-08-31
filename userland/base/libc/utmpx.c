@@ -103,11 +103,11 @@ getutxid(
 		/* Reports that no result is available. */
 		return NULL;
 	}
-	while ((entry = getutxent()) != NULL)
-
+	while ((entry = getutxent()) != NULL) {
 		/* Handles the utmp same id condition. */
 		if (utmp_same_id(entry, key))
 			return entry;
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -129,8 +129,7 @@ getutxline(
 		/* Reports that no result is available. */
 		return NULL;
 	}
-	while ((entry = getutxent()) != NULL)
-
+	while ((entry = getutxent()) != NULL) {
 		/* Handles the entry condition. */
 		if ((entry->ut_type == LOGIN_PROCESS ||
 		     entry->ut_type == USER_PROCESS) &&
@@ -139,6 +138,7 @@ getutxline(
 
 			/* Returns the computed result. */
 			return entry;
+	}
 
 	/* Reports that no result is available. */
 	return NULL;

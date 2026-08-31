@@ -201,11 +201,11 @@ member_of(
 
 	/* Process each element required by the operation. */
 	for (member = group->gr_mem; member != NULL && *member != NULL;
-	     member++)
-
+	     member++) {
 		/* Selects the matching value. */
 		if (strcmp(*member, account->pw_name) == 0)
 			return 1;
+	}
 
 	/* Reports successful completion. */
 	return 0;

@@ -245,9 +245,10 @@ transform_file(
 	if (!options->decompress && !options->force &&
 	    output_stat.st_size >= input_stat.st_size) {
 		/* Checks the selected options. */
-		if (options->verbose)
+		if (options->verbose) {
 			fprintf(stderr, "%s: %s unchanged; no space saved\n",
 				program, input_name);
+		}
 		close(output);
 		output = -1;
 		unlink(temporary);

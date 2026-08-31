@@ -71,16 +71,18 @@ sh_lex(
 			if (*text == '&') {
 				text++;
 				type = SH_TOKEN_AND_IF;
-			} else
+			} else {
 				type = SH_TOKEN_AMP;
+			}
 			break;
 		case '|':
 			/* Validates the current text. */
 			if (*text == '|') {
 				text++;
 				type = SH_TOKEN_OR_IF;
-			} else
+			} else {
 				type = SH_TOKEN_PIPE;
+			}
 			break;
 		case '<':
 			type = SH_TOKEN_INPUT;
@@ -90,8 +92,9 @@ sh_lex(
 			if (*text == '>') {
 				text++;
 				type = SH_TOKEN_APPEND;
-			} else
+			} else {
 				type = SH_TOKEN_OUTPUT;
+			}
 			break;
 		}
 
@@ -173,8 +176,8 @@ lex_word(
 	       !is_operator(*text)) {
 		/* Validates the current text. */
 		if (text[0] == '$' && text[1] == '(') {
-						depth = 1;
-						inner_quote = '\0';
+			depth = 1;
+			inner_quote = '\0';
 
 			/* Handles a failed word append operation. */
 			if (!word_append(&word, *text++, SH_QUOTE_UNQUOTED) ||
@@ -183,7 +186,6 @@ lex_word(
 
 			/* Continue while the operation condition remains true. */
 			while (*text != '\0' && depth != 0) {
-
 				value = *text++;
 
 				/* Validates the current value. */
@@ -200,9 +202,10 @@ lex_word(
 				/* Validates the current value. */
 				if ((value == '\'' || value == '"') &&
 				    (inner_quote == '\0' ||
-				     inner_quote == value))
+				     inner_quote == value)) {
 					inner_quote =
 					    inner_quote == '\0' ? value : '\0';
+				}
 
 				/* Handles the inner quote condition. */
 				if (inner_quote == '\0') {
@@ -259,10 +262,9 @@ lex_word(
 		/* Validates the current text. */
 		if (*text == '\'' || *text == '"') {
 			/* Continue while the operation condition remains true. */
-						quote = *text++;
+			quote = *text++;
 			quoted = 1;
 			while (*text != '\0' && *text != quote) {
-
 				escaped = 0;
 
 				/* Handles the quote condition. */

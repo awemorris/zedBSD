@@ -174,13 +174,13 @@ main(
 
 		/* Process each remaining command-line operand. */
 		pinned = 1;
-		for (i = 2; i < argc; i++)
-
+		for (i = 2; i < argc; i++) {
 			/* Validates the command-line arguments. */
 			if (!noct_set_array_elem_make_string(
 				env, &arguments, (size_t)(i - 2),
 				&argument_value, argv[i]))
 				goto out;
+		}
 	}
 
 	/* Handles a failed noct enter vm operation. */
@@ -288,7 +288,7 @@ import_environment(
 
 	/* Process each element required by the operation. */
 	for (i = 0; envp != NULL && envp[i] != NULL; i++) {
-				equals = strchr(envp[i], '=');
+		equals = strchr(envp[i], '=');
 
 		/* Handles the equals availability. */
 		if (equals == NULL)
@@ -380,7 +380,6 @@ run_repl(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		input = read_repl_line(line, sizeof(line), continuation);
 
 		/* Validates the current input. */

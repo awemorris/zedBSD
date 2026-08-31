@@ -103,42 +103,48 @@ netconf_validate(
 
 	/* Process each remaining element. */
 	for (index = 0; index < configuration->interface_count; index++) {
-				item = &configuration->interfaces[index];
+		item = &configuration->interfaces[index];
 
 		/* Handles the item condition. */
-		if (item->type == NETCONF_INTERFACE_UNSET || !item->enabled_set)
+		if (item->type == NETCONF_INTERFACE_UNSET || !item->enabled_set) {
 			VALIDATE_ERROR("interface %s lacks type or enabled",
 				       item->name);
+		}
 
 		/* Handles the item condition. */
-		if (item->dhcp && item->address_count != 0)
+		if (item->dhcp && item->address_count != 0) {
 			VALIDATE_ERROR(
 			    "interface %s mixes DHCP and static addresses",
 			    item->name);
+		}
 
 		/* Handles the item condition. */
-		if (item->dhcp_timeout_set && !item->dhcp)
+		if (item->dhcp_timeout_set && !item->dhcp) {
 			VALIDATE_ERROR("interface %s has timeout without DHCP",
 				       item->name);
+		}
 
 		/* Process each remaining element. */
-		for (address = 0; address < item->address_count; address++)
-
+		for (address = 0; address < item->address_count; address++) {
 			/* Handles the item condition. */
-			if (item->addresses[address].prefix_length > 32)
+			if (item->addresses[address].prefix_length > 32) {
 				VALIDATE_ERROR(
 				    "interface %s address lacks prefix",
 				    item->name);
+			}
+		}
 
 		/* Handles the item condition. */
 		if (item->type == NETCONF_INTERFACE_VLAN) {
 			/* Handles the item condition. */
-			if (*item->parent == '\0' || !item->vlan_id_set)
+			if (*item->parent == '\0' || !item->vlan_id_set) {
 				VALIDATE_ERROR("VLAN %s lacks parent or ID",
 					       item->name);
-		} else if (*item->parent != '\0' || item->vlan_id_set)
+			}
+		} else if (*item->parent != '\0' || item->vlan_id_set) {
 			VALIDATE_ERROR("non-VLAN %s has VLAN fields",
 				       item->name);
+		}
 
 		/* Handles the item condition. */
 		if (item->type != NETCONF_INTERFACE_BRIDGE &&
@@ -147,12 +153,12 @@ netconf_validate(
 	}
 
 	/* Process each remaining element. */
-	for (index = 0; index < configuration->route_count; index++)
-
+	for (index = 0; index < configuration->route_count; index++) {
 		/* Handles the configuration condition. */
 		if (*configuration->routes[index].destination == '\0' ||
 		    *configuration->routes[index].gateway == '\0')
 			VALIDATE_ERROR("route lacks destination or gateway");
+	}
 
 	/* Handles the configuration condition. */
 	if (configuration->dns_mode == NETCONF_DNS_UNSET)
@@ -164,12 +170,12 @@ netconf_validate(
 		VALIDATE_ERROR("static DNS requires servers");
 
 	/* Process each remaining element. */
-	for (index = 0; index < configuration->interface_count; index++)
-
+	for (index = 0; index < configuration->interface_count; index++) {
 		/* Handles a failed validate graph operation. */
 		if (validate_graph(configuration, index, &visiting, &visited) !=
 		    0)
 			VALIDATE_ERROR("invalid or cyclic interface topology");
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -207,7 +213,6 @@ netconf_parse(
 	parser.error = error;
 	parser.error_capacity = capacity;
 	while (fgets(line, sizeof(line), stream) != NULL) {
-
 		indent = 0;
 		parser.line++;
 
@@ -362,7 +367,7 @@ netconf_write(
 
 	/* Process each remaining element. */
 	for (index = 0; index < configuration->interface_count; index++) {
-				item = &configuration->interfaces[index];
+		item = &configuration->interfaces[index];
 
 		/* Handles a failed fprintf operation. */
 		if (fprintf(stream, "  %s:\n    type: %s\n    enabled: %s\n",
@@ -393,14 +398,14 @@ netconf_write(
 				return -1;
 
 			/* Process each remaining element. */
-			for (child = 0; child < item->member_count; child++)
-
+			for (child = 0; child < item->member_count; child++) {
 				/* Handles a failed fprintf operation. */
 				if (fprintf(stream, "      - %s\n",
 					    item->members[child]) < 0)
 
 					/* Reports operation failure. */
 					return -1;
+			}
 		}
 
 		/* Handles the item condition. */
@@ -433,8 +438,7 @@ netconf_write(
 
 				/* Process each remaining element. */
 				for (child = 0; child < item->address_count;
-				     child++)
-
+				     child++) {
 					/* Handles a failed fprintf operation. */
 					if (fprintf(
 						stream,
@@ -446,6 +450,7 @@ netconf_write(
 
 						/* Reports operation failure. */
 						return -1;
+				}
 			}
 		}
 
@@ -461,8 +466,7 @@ netconf_write(
 			return -1;
 
 		/* Process each remaining element. */
-		for (index = 0; index < configuration->route_count; index++)
-
+		for (index = 0; index < configuration->route_count; index++) {
 			/* Handles a failed fprintf operation. */
 			if (fprintf(stream,
 				    "  - destination: %s\n    gateway: %s\n",
@@ -471,6 +475,7 @@ netconf_write(
 
 				/* Reports operation failure. */
 				return -1;
+		}
 
 		/* Handles the end-of-file condition. */
 		if (fputc('\n', stream) == EOF)
@@ -491,14 +496,14 @@ netconf_write(
 			return -1;
 
 		/* Process each remaining element. */
-		for (index = 0; index < configuration->dns_count; index++)
-
+		for (index = 0; index < configuration->dns_count; index++) {
 			/* Handles a failed fprintf operation. */
 			if (fprintf(stream, "    - %s\n",
 				    configuration->dns_servers[index]) < 0)
 
 				/* Reports operation failure. */
 				return -1;
+		}
 	}
 
 	/* Computes the function result. */
@@ -531,11 +536,12 @@ netconf_save_atomic(
 	    netconf_validate(configuration, validation, sizeof(validation)) !=
 		0) {
 		/* Handles an operation failure. */
-		if (error != NULL && capacity != 0)
+		if (error != NULL && capacity != 0) {
 			(void)snprintf(error, capacity, "%s",
 				       path == NULL || configuration == NULL
 					   ? "invalid save request"
 					   : validation);
+		}
 		errno = EINVAL;
 
 		/* Reports operation failure. */
@@ -637,7 +643,7 @@ validate_graph(
 	*visiting |= bit;
 	/* Handles the interface condition. */
 	if (*interface->parent != '\0') {
-				target_local = find_interface(configuration, interface->parent);
+		target_local = find_interface(configuration, interface->parent);
 
 		/* Handles the target local availability. */
 		if (target_local == NULL)
@@ -654,7 +660,7 @@ validate_graph(
 
 	/* Process each remaining element. */
 	for (member = 0; member < interface->member_count; member++) {
-				target_local1 = find_interface(configuration, interface->members[member]);
+		target_local1 = find_interface(configuration, interface->members[member]);
 
 		/* Handles the target local1 availability. */
 		if (target_local1 == NULL)
@@ -683,12 +689,13 @@ find_interface(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < configuration->interface_count; index++)
-
+	for (index = 0; index < configuration->interface_count; index++) {
 		/* Selects the matching value. */
-		if (strcmp(configuration->interfaces[index].name, name) == 0)
+		if (strcmp(configuration->interfaces[index].name, name) == 0) {
 			return (struct netconf_interface *)&configuration
 			    ->interfaces[index];
+		}
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -707,8 +714,8 @@ fail(
 
 	/* Handles an operation failure. */
 	if (parser->error != NULL && parser->error_capacity != 0) {
-				used = snprintf(parser->error, parser->error_capacity,
-				    "line %u: ", parser->line);
+		used = snprintf(parser->error, parser->error_capacity,
+		    "line %u: ", parser->line);
 
 		/* Handles an operation failure. */
 		if (used >= 0 && (size_t)used < parser->error_capacity) {
@@ -1045,8 +1052,7 @@ new_interface(
 	}
 
 	/* Process each remaining element. */
-	for (index = 0; index < parser->configuration->interface_count; index++)
-
+	for (index = 0; index < parser->configuration->interface_count; index++) {
 		/* Selects the matching value. */
 		if (strcmp(parser->configuration->interfaces[index].name,
 			   key) == 0) {
@@ -1056,6 +1062,7 @@ new_interface(
 			/* Returns the computed result. */
 			return function_result;
 		}
+	}
 
 	/* Checks the parser state. */
 	if (parser->configuration->interface_count == NETCONF_MAX_INTERFACES) {
@@ -1095,14 +1102,14 @@ name_valid(
 		return 0;
 
 	/* Process each remaining element. */
-	for (index = 1; index < length; index++)
-
+	for (index = 1; index < length; index++) {
 		/* Handles a failed isalnum operation. */
 		if (!isalnum((unsigned char)name[index]) &&
 		    name[index] != '_' && name[index] != '-')
 
 			/* Reports successful completion. */
 			return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -1144,9 +1151,9 @@ interface_property(
 			interface->type = NETCONF_INTERFACE_ETHERNET;
 		else if (strcmp(value, "vlan") == 0)
 			interface->type = NETCONF_INTERFACE_VLAN;
-		else if (strcmp(value, "bridge") == 0)
+		else if (strcmp(value, "bridge") == 0) {
 			interface->type = NETCONF_INTERFACE_BRIDGE;
-		else {
+		} else {
 			/* Obtains the fail result. */
 			function_result = fail(parser, "invalid interface type");
 
@@ -1319,8 +1326,7 @@ member_entry(
 	}
 
 	/* Process each remaining element. */
-	for (index = 0; index < interface->member_count; index++)
-
+	for (index = 0; index < interface->member_count; index++) {
 		/* Selects the matching value. */
 		if (strcmp(interface->members[index], name) == 0) {
 			/* Obtains the fail result. */
@@ -1329,6 +1335,7 @@ member_entry(
 			/* Returns the computed result. */
 			return function_result;
 		}
+	}
 
 	/* Handles the interface condition. */
 	if (interface->member_count == NETCONF_MAX_MEMBERS) {
@@ -1626,9 +1633,9 @@ dns_property(
 			parser->configuration->dns_mode = NETCONF_DNS_DHCP;
 		else if (strcmp(value, "static") == 0)
 			parser->configuration->dns_mode = NETCONF_DNS_STATIC;
-		else if (strcmp(value, "merge") == 0)
+		else if (strcmp(value, "merge") == 0) {
 			parser->configuration->dns_mode = NETCONF_DNS_MERGE;
-		else {
+		} else {
 			/* Obtains the fail result. */
 			function_result = fail(parser, "invalid DNS mode");
 
@@ -1675,8 +1682,7 @@ dns_entry(
 	}
 
 	/* Process each remaining element. */
-	for (index = 0; index < parser->configuration->dns_count; index++)
-
+	for (index = 0; index < parser->configuration->dns_count; index++) {
 		/* Selects the matching value. */
 		if (strcmp(parser->configuration->dns_servers[index],
 			   address) == 0) {
@@ -1686,6 +1692,7 @@ dns_entry(
 			/* Returns the computed result. */
 			return function_result;
 		}
+	}
 
 	/* Checks the parser state. */
 	if (parser->configuration->dns_count == NETCONF_MAX_DNS) {

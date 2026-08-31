@@ -123,9 +123,10 @@ env_set(
 	tail = (size_t)environment->used - offset - old_span;
 
 	/* Handles the old span condition. */
-	if (old_span != new_span)
+	if (old_span != new_span) {
 		memmove(environment->storage + offset + new_span,
 			environment->storage + offset + old_span, tail);
+	}
 	memcpy(environment->storage + offset, name, name_length + 1U);
 	memcpy(environment->storage + offset + name_length + 1U, value,
 	       value_length + 1U);
@@ -206,7 +207,6 @@ env_at(
 
 	/* Continue while the operation condition remains true. */
 	while (position < environment->used) {
-
 		entry_name = environment->storage + position;
 		entry_value = entry_name + strlen(entry_name) + 1U;
 
@@ -244,7 +244,7 @@ valid_name(
 
 	/* Process each remaining element. */
 	for (index = 1; name[index] != '\0'; index++) {
-				ch = name[index];
+		ch = name[index];
 
 		/* Checks the current index. */
 		if (index >= ZEDBSD_ENV_NAME_MAX ||
@@ -277,7 +277,6 @@ find_entry(
 
 	/* Continue while the operation condition remains true. */
 	while (position < environment->used) {
-
 		entry_name = environment->storage + position;
 		name_length = strlen(entry_name);
 		entry_value = entry_name + name_length + 1U;

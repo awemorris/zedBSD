@@ -91,8 +91,8 @@ main(
 
 		/* Checks the current data length. */
 		if (length + 1 >= word_capacity) {
-						next = word_capacity ? word_capacity * 2 : 32;
-						grown = realloc(word, next);
+			next = word_capacity ? word_capacity * 2 : 32;
+			grown = realloc(word, next);
 
 			/* Handles the grown condition. */
 			if (!grown)
@@ -157,7 +157,6 @@ add(
 
 	/* Checks the remaining item count. */
 	if (*count + 2 > *capacity) {
-
 		*capacity *= 2;
 		grown = realloc(*values, (size_t)*capacity * sizeof(**values));
 

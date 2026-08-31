@@ -53,8 +53,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (; i < argc; i++) {
-
-				n = strlen(argv[i]);
+		n = strlen(argv[i]);
 
 		/* Checks the current item count. */
 		if (n >= sizeof(path)) {

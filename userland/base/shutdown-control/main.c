@@ -40,9 +40,9 @@ main(
 		/* Handles the selected command-line operation. */
 		if (argc == 1 || (argc == 2 && strcmp(argv[1], "-h") == 0))
 			request.command = ZSV1_COMMAND_POWEROFF;
-		else if (argc == 2 && strcmp(argv[1], "-r") == 0)
+		else if (argc == 2 && strcmp(argv[1], "-r") == 0) {
 			request.command = ZSV1_COMMAND_REBOOT;
-		else {
+		} else {
 			fprintf(stderr, "usage: shutdown [-h|-r]\n");
 
 			/* Reports operation failure. */

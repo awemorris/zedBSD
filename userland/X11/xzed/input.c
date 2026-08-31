@@ -201,7 +201,6 @@ xzed_input_open_with_io(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		errno = 0;
 		entry = readdir(directory);
 
@@ -297,9 +296,10 @@ xzed_input_pollfds(
 	}
 
 	/* Process each remaining element. */
-	for (index = 0; index < input->count; index++)
+	for (index = 0; index < input->count; index++) {
 		descriptors[index] = (struct pollfd){input->devices[index].fd,
 		    POLLIN, 0};
+	}
 
 	/* Returns the computed result. */
 	return input->count;
@@ -329,17 +329,18 @@ xzed_input_dispatch(
 
 	/* Process each remaining element. */
 	for (index = 0; index < count; index++) {
-				events = descriptors[index].revents;
-				drained = 0;
+		events = descriptors[index].revents;
+		drained = 0;
 
 		/* Handles the events condition. */
 		if (events & (POLLIN | POLLHUP))
 			drained = drain_device(input, &input->devices[index]);
 
 		/* Handles the drained condition. */
-		if (drained < 0)
+		if (drained < 0) {
 			fprintf(stderr, "Xzed: input read %s: %s\n",
 			    input->devices[index].path, strerror(errno));
+		}
 
 		/* Handles the drained condition. */
 		if (drained != 0 || (events & (POLLERR | POLLHUP | POLLNVAL)))
@@ -349,7 +350,7 @@ xzed_input_dispatch(
 	/* Process each remaining element. */
 	write_index = 0;
 	for (index = 0; index < input->count; index++) {
-				device = &input->devices[index];
+		device = &input->devices[index];
 
 		/* Handles the device condition. */
 		if (device->removed) {
@@ -432,11 +433,11 @@ event_node_name(
 		return 0;
 
 	/* Process each element required by the operation. */
-	for (cursor = name + 5; *cursor != '\0'; cursor++)
-
+	for (cursor = name + 5; *cursor != '\0'; cursor++) {
 		/* Checks the current cursor position. */
 		if (*cursor < '0' || *cursor > '9')
 			return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -699,36 +700,39 @@ resynchronize(
 	recompute_modifiers(input);
 
 	/* Handles the publish condition. */
-	if (publish && input->modifiers != old_modifiers)
+	if (publish && input->modifiers != old_modifiers) {
 		input->handlers.key(input->handler_context, 0, 1, time,
 		    input->modifiers);
+	}
 
 	/* Handles the device condition. */
-	if (device->roles & XZED_ROLE_KEYBOARD)
-
+	if (device->roles & XZED_ROLE_KEYBOARD) {
 		/* Process each element required by the operation. */
 		for (code = 0; code <= KEY_MAX; code++) {
-						old_keycode = device->keycodes[code];
-						down = bit_is_set(state, code);
+			old_keycode = device->keycodes[code];
+			down = bit_is_set(state, code);
 
 			/* Handles the old keycode condition. */
 			if (old_keycode != 0 && !down) {
 				device->keycodes[code] = 0;
 
 				/* Handles the publish condition. */
-				if (publish)
+				if (publish) {
 					input->handlers.key(input->handler_context,
 					    old_keycode, 0, time, input->modifiers);
+				}
 			} else if (old_keycode == 0 && down &&
 			    (current_keycode = x_keycode(input, (uint16_t)code)) != 0) {
 				device->keycodes[code] = current_keycode;
 
 				/* Handles the publish condition. */
-				if (publish)
+				if (publish) {
 					input->handlers.key(input->handler_context,
 					    current_keycode, 1, time, input->modifiers);
+				}
 			}
 		}
+	}
 	memset(&pointer, 0, sizeof(pointer));
 	pointer.time = time;
 	pointer.buttons_before = old_buttons;
@@ -903,16 +907,16 @@ x_keycode(
 	default:
 		/* Process each remaining element. */
 		for (index = 0; index < sizeof(key_symbols) /
-		    sizeof(key_symbols[0]); index++)
-
+		    sizeof(key_symbols[0]); index++) {
 			/* Handles the key symbols condition. */
 			if (key_symbols[index].code == code) {
-								use_shift = key_symbols[index].letter ?
-				    shifted ^ input->caps_lock : shifted;
+				use_shift = key_symbols[index].letter ?
+			    shifted ^ input->caps_lock : shifted;
 				symbol = use_shift ? key_symbols[index].shifted :
 				    key_symbols[index].normal;
 				break;
 			}
+		}
 		break;
 	}
 
@@ -972,7 +976,6 @@ snapshot_button_edges(
 	/* Process each element required by the operation. */
 	state = old;
 	for (bit = 0; bit < 3U; bit++) {
-
 		mask = (uint16_t)(1U << bit);
 
 		/* Handles the old condition. */
@@ -1048,7 +1051,6 @@ drain_device(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		length = input->io.read(input->io_context, device->fd,
 		    bytes, sizeof(bytes));
 
@@ -1248,7 +1250,7 @@ process_frame(
 	/* Process each remaining element. */
 	pointer.buttons_before = input->buttons;
 	for (index = 0; index < device->frame_count; index++) {
-				event = &device->frame[index];
+		event = &device->frame[index];
 
 		/* Handles a failed button info operation. */
 		if (event->type == EV_KEY &&
@@ -1280,8 +1282,9 @@ process_frame(
 			} else if (event->code == ABS_Y) {
 				absolute_seen = 1;
 				device->abs_y.value = event->value;
-			} else
+			} else {
 				continue;
+			}
 			pointer.time = event_time(event);
 			pointer_event = 1;
 		}
@@ -1390,9 +1393,10 @@ publish_key(
 		recompute_modifiers(input);
 
 		/* Validates the current input. */
-		if (input->modifiers != old_modifiers)
+		if (input->modifiers != old_modifiers) {
 			input->handlers.key(input->handler_context, 0,
 			    event->value, event_time(event), input->modifiers);
+		}
 
 		/* Returns the computed result. */
 		return;
@@ -1429,9 +1433,10 @@ publish_key(
 	}
 
 	/* Handles the keycode condition. */
-	if (keycode != 0)
+	if (keycode != 0) {
 		input->handlers.key(input->handler_context, keycode,
 		    event->value, event_time(event), input->modifiers);
+	}
 }
 
 /* Supports the modifier bit operation. */
@@ -1494,19 +1499,20 @@ release_device_state(
 	recompute_modifiers(input);
 
 	/* Validates the current input. */
-	if (input->modifiers != old_modifiers)
+	if (input->modifiers != old_modifiers) {
 		input->handlers.key(input->handler_context, 0, 0, 0,
 		    input->modifiers);
+	}
 
 	/* Process each element required by the operation. */
-	for (code = 0; code <= KEY_MAX; code++)
-
+	for (code = 0; code <= KEY_MAX; code++) {
 		/* Handles the device condition. */
 		if (device->keycodes[code] != 0) {
 			input->handlers.key(input->handler_context,
 			    device->keycodes[code], 0, 0, input->modifiers);
 			device->keycodes[code] = 0;
 		}
+	}
 	memset(&pointer, 0, sizeof(pointer));
 	pointer.buttons_before = old_buttons;
 	device->buttons = 0;

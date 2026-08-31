@@ -172,7 +172,6 @@ process_file(
 		return 1;
 	}
 	while (done < (size_t)st.st_size) {
-
 		n = read(fd, data + done, (size_t)st.st_size - done);
 
 		/* Handles the reported system error. */
@@ -200,18 +199,20 @@ process_file(
 			result = 1;
 		} else {
 			/* Process each remaining element. */
-			for (i_index_for = 0; i_index_for < archive.count; i_index_for++)
-
+			for (i_index_for = 0; i_index_for < archive.count; i_index_for++) {
 				/* Handles the archive condition. */
-				if (!archive.members[i_index_for].special)
+				if (!archive.members[i_index_for].special) {
 					result |= display_object(
 					    archive.members[i_index_for].data,
 					    archive.members[i_index_for].size, path,
 					    archive.members[i_index_for].name, 1);
+				}
+			}
 			archive_free(&archive);
 		}
-	} else
+	} else {
 		result = display_object(data, done, path, NULL, multiple);
+	}
 	free(data);
 
 	/* Returns the computed result. */
@@ -245,18 +246,20 @@ display_object(
 	}
 
 	/* Checks the selected options. */
-	if (!options.no_sort && table.count > 1)
+	if (!options.no_sort && table.count > 1) {
 		qsort(table.symbols, table.count, sizeof(*table.symbols),
 		      compare_name);
+	}
 
 	/* Handles the multiple condition. */
-	if (multiple && !options.prefix && !options.portable)
+	if (multiple && !options.prefix && !options.portable) {
 		printf("\n%s%s%s%s:\n", file, member ? "(" : "",
 		       member ? member : "", member ? ")" : "");
+	}
 
 	/* Process each remaining element. */
 	for (i_index_for = 0; i_index_for < table.count; i_index_for++) {
-				symbol = &table.symbols[i_index_for];
+		symbol = &table.symbols[i_index_for];
 
 		/* Handles the symbol condition. */
 		if (!*symbol->name ||
@@ -265,9 +268,10 @@ display_object(
 			continue;
 
 		/* Checks the selected options. */
-		if (options.prefix)
+		if (options.prefix) {
 			printf("%s%s%s%s: ", file, member ? "(" : "",
 			       member ? member : "", member ? ")" : "");
+		}
 
 		/* Checks the selected options. */
 		if (options.portable) {
@@ -298,15 +302,16 @@ print_value(
 	unsigned bits)
 {
 	/* Checks the selected options. */
-	if (options.radix == 'd')
+	if (options.radix == 'd') {
 		printf("%0*llu", bits == 64 ? 20 : 10,
 		       (unsigned long long)value);
-	else if (options.radix == 'o')
+	} else if (options.radix == 'o') {
 		printf("%0*llo", bits == 64 ? 22 : 11,
 		       (unsigned long long)value);
-	else
+	} else {
 		printf("%0*llx", bits == 64 ? 16 : 8,
 		       (unsigned long long)value);
+	}
 }
 
 /* Supports the compare name operation. */
@@ -330,8 +335,9 @@ compare_name(
 			result = 1;
 		else
 			result = strcmp(a->name, b->name);
-	} else
+	} else {
 		result = strcmp(a->name, b->name);
+	}
 
 	/* Returns the computed result. */
 	return options.reverse ? -result : result;

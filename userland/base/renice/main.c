@@ -64,8 +64,9 @@ main(
 		} else if (strcmp(argv[index], "--") == 0) {
 			index++;
 			break;
-		} else
+		} else {
 			break;
+		}
 		index++;
 	}
 
@@ -161,7 +162,7 @@ parse_id(
 
 	/* Handles the which condition. */
 	if (which == PRIO_USER && text[0] != '\0') {
-				account = getpwnam(text);
+		account = getpwnam(text);
 
 		/* Handles the account availability. */
 		if (account != NULL) {

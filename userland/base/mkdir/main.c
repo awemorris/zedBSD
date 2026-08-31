@@ -51,8 +51,9 @@ main(
 			if (command_parse_mode(argv[i], &value))
 				goto usage;
 			mode = (mode_t)value;
-		} else
+		} else {
 			goto usage;
+		}
 	}
 
 	/* Validates the command-line arguments. */
@@ -60,14 +61,14 @@ main(
 		goto usage;
 
 	/* Process each remaining command-line operand. */
-	for (; i < argc; i++)
-
+	for (; i < argc; i++) {
 		/* Validates the command-line arguments. */
 		if ((p ? make_parents(argv[i], mode) : mkdir(argv[i], mode)) !=
 		    0) {
 			command_error("mkdir", argv[i]);
 			failed = 1;
 		}
+	}
 
 	/* Returns the computed result. */
 	return failed;
@@ -101,11 +102,9 @@ make_parents(
 	memcpy(path, name, length + 1);
 
 	/* Process each remaining element. */
-	for (i = 1; i < length; i++)
-
+	for (i = 1; i < length; i++) {
 		/* Handles the path condition. */
 		if (path[i] == '/') {
-
 			path[i] = '\0';
 
 			/* Handles the reported system error. */
@@ -117,6 +116,7 @@ make_parents(
 				return -1;
 			path[i] = '/';
 		}
+	}
 
 	/* Handles a failed mkdir operation. */
 	if (mkdir(path, mode) != 0) {

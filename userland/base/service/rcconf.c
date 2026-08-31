@@ -122,7 +122,7 @@ rcconf_model_validate(
 	/* Process each remaining element. */
 	for (service_index = 0; service_index < model->service_count;
 	     service_index++) {
-				service = &model->services[service_index];
+		service = &model->services[service_index];
 
 		/* Handles a failed service name valid operation. */
 		if (!service_name_valid(service->name) ||
@@ -142,7 +142,7 @@ rcconf_model_validate(
 		/* Process each remaining element. */
 		for (setting_index = 0; setting_index < service->setting_count;
 		     setting_index++) {
-						setting = &service->settings[setting_index];
+			setting = &service->settings[setting_index];
 
 			/* Handles a failed service name valid operation. */
 			if (!service_name_valid(setting->name) ||
@@ -583,7 +583,7 @@ string_representable(
 
 	/* Process each remaining element. */
 	for (index = 0; index < length; index++) {
-				character = (unsigned char)text[index];
+		character = (unsigned char)text[index];
 
 		/* Classifies the current input character. */
 		if (character < 0x20 || character > 0x7e)
@@ -743,8 +743,8 @@ parse_stream(
 	/* Process each remaining element. */
 	while ((line_result = read_yaml_line(stream, line, sizeof(line))) > 0) {
 		memset(&scalar, 0, sizeof(scalar));
-				value = NULL;
-				indent = 0;
+		value = NULL;
+		indent = 0;
 
 		/* Handles a failed strchr operation. */
 		if (strchr(line, '\t') != NULL) {
@@ -1042,7 +1042,7 @@ parse_scalar(
 
 	/* Validates the current text. */
 	if (text[0] == '\'' || text[0] == '"') {
-				quote = (unsigned char)text[0];
+		quote = (unsigned char)text[0];
 
 		/* Checks the current data length. */
 		if (length < 2 || text[length - 1] != quote)
@@ -1052,7 +1052,7 @@ parse_scalar(
 
 		/* Process each remaining element. */
 		for (index = 0; text[index] != '\0'; index++) {
-						character = (unsigned char)text[index];
+			character = (unsigned char)text[index];
 
 			/* Classifies the current input character. */
 			if (character < 0x20 || character > 0x7e ||
@@ -1086,7 +1086,7 @@ parse_scalar(
 	if (decimal_string(text)) {
 		/* Process each remaining element. */
 		for (index = 0; text[index] != '\0'; index++) {
-						digit = (unsigned int)(text[index] - '0');
+			digit = (unsigned int)(text[index] - '0');
 
 			/* Handles the number condition. */
 			if (number > (UINT64_MAX - digit) / 10)
@@ -1204,7 +1204,7 @@ emit_model(
 	/* Process each remaining element. */
 	for (service_position = 0; service_position < model->service_count;
 	     service_position++) {
-				service = &model->services[service_order[service_position]];
+		service = &model->services[service_order[service_position]];
 
 		/* Handles a failed emit text operation. */
 		if (emit_text(emit, argument, "  ") != 0 ||
@@ -1230,7 +1230,7 @@ emit_model(
 		for (setting_position = 0;
 		     setting_position < service->setting_count;
 		     setting_position++) {
-						setting = &service->settings[setting_order[setting_position]];
+			setting = &service->settings[setting_order[setting_position]];
 
 			/* Handles a failed emit text operation. */
 			if (emit_text(emit, argument, "      ") != 0 ||
@@ -1312,8 +1312,8 @@ sort_services(
 		/* Process each remaining element. */
 		order[index] = index;
 		for (position = index; position > 0; position--) {
-						left = order[position - 1];
-						right = order[position];
+			left = order[position - 1];
+			right = order[position];
 
 			/* Selects the matching value. */
 			if (strcmp(model->services[left].name,
@@ -1340,8 +1340,8 @@ sort_settings(
 		/* Process each remaining element. */
 		order[index] = index;
 		for (position = index; position > 0; position--) {
-						left = order[position - 1];
-						right = order[position];
+			left = order[position - 1];
+			right = order[position];
 
 			/* Selects the matching value. */
 			if (strcmp(service->settings[left].name,
@@ -1418,7 +1418,7 @@ lock_configuration(
 
 	/* Handles a failed fchmod operation. */
 	if (fchmod(descriptor, 0600) != 0) {
-				saved_errno_local = errno;
+		saved_errno_local = errno;
 
 		close(descriptor);
 		errno = saved_errno_local;
@@ -1432,7 +1432,7 @@ lock_configuration(
 
 	/* Handles a failed fcntl operation. */
 	if (fcntl(descriptor, F_SETLKW, &lock) != 0) {
-				saved_errno_local1 = errno;
+		saved_errno_local1 = errno;
 
 		close(descriptor);
 		errno = saved_errno_local1;
@@ -1522,7 +1522,6 @@ emit_descriptor(
 
 	/* Process each remaining element. */
 	while (offset < length) {
-
 		result = RCCONF_WRITE(descriptor, data + offset, length - offset);
 
 		/* Checks the operation result. */

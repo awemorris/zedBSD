@@ -111,8 +111,7 @@ main(
 			verbose = 1;
 			arg++;
 		} else if (strcmp(argv[arg], "-t") == 0 && arg + 1 < argc) {
-
-						v = strtoul(argv[arg + 1], &end, 10);
+			v = strtoul(argv[arg + 1], &end, 10);
 
 			/* Checks the current endpoint. */
 			if (*end != '\0' || v == 0 || v > 3600U) {
@@ -250,7 +249,6 @@ main(
 
 		/* Continue until the operation reaches a terminal state. */
 		for (;;) {
-
 			slen_local = sizeof(source);
 
 			/* Handles a failed set receive deadline operation. */
@@ -307,7 +305,6 @@ main(
 
 		/* Continue until the operation reaches a terminal state. */
 		for (;;) {
-
 			slen_local1 = sizeof(source);
 
 			/* Handles a failed set receive deadline operation. */
@@ -374,7 +371,6 @@ main(
 
 	/* Handles the lease condition. */
 	if (lease.router_count != 0) {
-
 		memset(&route, 0, sizeof(route));
 		route.rt_flags = RTF_UP | RTF_GATEWAY | RTF_DYNAMIC;
 		route.rt_ifindex = ifindex;
@@ -643,7 +639,6 @@ wait_for_carrier(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		now = netutil_monotonic_us();
 
 		/* Handles the timed out condition. */
@@ -933,12 +928,12 @@ write_resolver(
 	     index++) {
 		/* Process each remaining element. */
 		value.s_addr = lease->dns_servers[index];
-		for (prior = 0; prior < index; prior++)
-
+		for (prior = 0; prior < index; prior++) {
 			/* Handles the lease condition. */
 			if (lease->dns_servers[prior] ==
 			    lease->dns_servers[index])
 				break;
+		}
 
 		/* Handles the prior condition. */
 		if (prior != index)
@@ -969,7 +964,6 @@ write_resolver(
 	/* Continue while the operation condition remains true. */
 	offset = 0;
 	while (offset < used) {
-
 		count = write(descriptor, buffer + offset, used - offset);
 
 		/* Handles the reported system error. */

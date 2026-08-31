@@ -56,15 +56,15 @@ main(
 
 	/* Process each element required by the operation. */
 	n = a.n > b.n ? a.n : b.n;
-	for (i = 0; i < n; i++)
-
+	for (i = 0; i < n; i++) {
 		/* Checks the current index. */
 		if (i >= a.n || i >= b.n || strcmp(a.v[i], b.v[i])) {
 			/* Handles the different condition. */
-			if (!different)
+			if (!different) {
 				printf("--- %s\n+++ %s\n@@ -1,%lu +1,%lu @@\n",
 				       argv[1], argv[2], (unsigned long)a.n,
 				       (unsigned long)b.n);
+			}
 
 			/* Checks the current index. */
 			if (i < a.n) {
@@ -87,6 +87,7 @@ main(
 			}
 			different = 1;
 		}
+	}
 
 	/* Process each element required by the operation. */
 	for (i = 0; i < a.n; i++)
@@ -128,7 +129,6 @@ load(
 		return -1;
 	}
 	while ((n = command_read_line(f, &b, &cap)) > 0) {
-
 		s = malloc((size_t)n + 1);
 
 		/* Checks the current string state. */
@@ -138,8 +138,8 @@ load(
 
 		/* Handles the l condition. */
 		if (l->n == l->c) {
-						c = l->c ? l->c * 2 : 32;
-						v = realloc(l->v, c * sizeof(*v));
+			c = l->c ? l->c * 2 : 32;
+			v = realloc(l->v, c * sizeof(*v));
 
 			/* Handles the v condition. */
 			if (!v)

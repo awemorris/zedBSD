@@ -95,9 +95,9 @@ main(
 	/* Continue while the operation condition remains true. */
 	while ((nb = command_read_line(f, &b, &cb)) > 0) {
 		/* Handles the na condition. */
-		if (na == nb && !memcmp(a, b, (size_t)na))
+		if (na == nb && !memcmp(a, b, (size_t)na)) {
 			++count;
-		else {
+		} else {
 			emit(a, na, count, c, d, u);
 
 			t = a;

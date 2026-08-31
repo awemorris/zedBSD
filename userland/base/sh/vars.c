@@ -392,9 +392,9 @@ environment:
 			   snapshot->environment, 1) != 0)
 			result = -1;
 	} else {
-				name = snapshot->name == NULL && variable != NULL
-				       ? variable->name
-				       : snapshot->name;
+		name = snapshot->name == NULL && variable != NULL
+		       ? variable->name
+		       : snapshot->name;
 
 		/* Handles a failed unsetenv operation. */
 		if (name != NULL && unsetenv(name) != 0)

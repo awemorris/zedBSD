@@ -58,9 +58,9 @@ main(
 	/* Process each remaining command-line operand. */
 	for (; index < argc; index++) {
 		/* Handles the selected command-line operation. */
-		if (!strcmp(argv[index], "-"))
+		if (!strcmp(argv[index], "-")) {
 			descriptor = STDIN_FILENO;
-		else {
+		} else {
 			descriptor = open(argv[index], O_RDONLY);
 
 			/* Checks the file descriptor. */

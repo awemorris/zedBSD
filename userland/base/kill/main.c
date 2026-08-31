@@ -77,8 +77,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (; i < argc; i++) {
-
-				pid = strtol(argv[i], &end, 10);
+		pid = strtol(argv[i], &end, 10);
 
 		/* Validates the command-line arguments. */
 		if (!*argv[i] || *end || kill((pid_t)pid, signal_number)) {
@@ -105,11 +104,11 @@ parse_signal(
 		text += 3;
 
 	/* Process each remaining element. */
-	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++)
-
+	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
 		/* Selects the matching value. */
 		if (!strcmp(text, names[i].name))
 			return names[i].number;
+	}
 	n = strtol(text, &end, 10);
 
 	/* Returns the computed result. */

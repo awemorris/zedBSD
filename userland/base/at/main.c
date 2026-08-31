@@ -141,11 +141,11 @@ list_jobs(
 		return errno == ENOENT ? 0 : 1;
 
 	/* Process each directory entry. */
-	while ((entry = readdir(directory)) != NULL)
-
+	while ((entry = readdir(directory)) != NULL) {
 		/* Handles a failed job owned operation. */
 		if (entry->d_name[0] != '.' && job_owned(entry->d_name))
 			puts(entry->d_name);
+	}
 	closedir(directory);
 
 	/* Reports successful completion. */
@@ -214,7 +214,7 @@ parse_time(
 {
 	char *end_local;
 	char text_local[32], *colon_local, *end_local1;
-	long count;
+	long count, scale;
 	unsigned long hour, minute;
 	struct tm broken;
 	time_t now;
@@ -239,9 +239,8 @@ parse_time(
 
 		/* Handles the selected command-line operation. */
 		if (first + 4 == argc && strcmp(argv[first + 1], "+") == 0) {
-
-						count = strtol(argv[first + 2], &end_local, 10);
-			long scale =
+			count = strtol(argv[first + 2], &end_local, 10);
+			scale =
 			    strcmp(argv[first + 3], "hours") == 0 ||
 				    strcmp(argv[first + 3], "hour") == 0
 				? 3600
@@ -321,11 +320,11 @@ submit_job(
 	fprintf(output, "# zedBSD at job\n");
 
 	/* Process input until it is exhausted. */
-	while (fgets(buffer, sizeof(buffer), input) != NULL)
-
+	while (fgets(buffer, sizeof(buffer), input) != NULL) {
 		/* Handles the end-of-file condition. */
 		if (fputs(buffer, output) == EOF)
 			break;
+	}
 
 	/* Handles an operation failure. */
 	if (ferror(input) || ferror(output) || fflush(output) != 0 ||

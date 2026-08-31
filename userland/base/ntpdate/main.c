@@ -80,18 +80,18 @@ main(
 
 		/* Process each element required by the operation. */
 		for (server = strtok(copy, " \t,"); server != NULL;
-		     server = strtok(NULL, " \t,"))
-
+		     server = strtok(NULL, " \t,")) {
 			/* Handles a failed query server operation. */
 			if (query_server(server, &selected) == 0)
 				goto set_clock;
+		}
 	} else {
 		/* Process each remaining command-line operand. */
-		for (index = 1; index < argc; index++)
-
+		for (index = 1; index < argc; index++) {
 			/* Validates the command-line arguments. */
 			if (query_server(argv[index], &selected) == 0)
 				goto set_clock;
+		}
 	}
 	fprintf(stderr, "ntpdate: no valid response\n");
 

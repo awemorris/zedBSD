@@ -132,7 +132,6 @@ resolver_dns_parse(
 
 	/* Process each remaining element. */
 	for (index = 0; index < ancount; index++) {
-
 		error =
 		    decode_name(message, length, &offset, name, sizeof(name));
 
@@ -162,7 +161,6 @@ resolver_dns_parse(
 				result->ttl = ttl;
 		} else if (class_ == 1U &&
 			   (type == DNS_TYPE_CNAME || type == DNS_TYPE_PTR)) {
-
 			error = decode_name(message, length, &rdata, decoded,
 					    sizeof(decoded));
 
@@ -179,10 +177,11 @@ resolver_dns_parse(
 				       strlen(decoded) + 1U);
 
 				/* Checks the operation result. */
-				if (result->cname_count < 8U)
+				if (result->cname_count < 8U) {
 					memcpy(result->cname_chain
 						   [result->cname_count++],
 					       decoded, strlen(decoded) + 1U);
+				}
 			}
 
 			/* Checks the operation result. */
@@ -235,7 +234,6 @@ encode_name(
 
 	/* Continue while the operation condition remains true. */
 	while (*label != '\0') {
-
 		dot = strchr(label, '.');
 		length = dot != NULL ? (size_t)(dot - label) : strlen(label);
 

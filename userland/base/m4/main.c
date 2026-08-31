@@ -40,6 +40,7 @@ main(
 	struct m4_context *context;
 	int index;
 	int status;
+	int define;
 
 	context = m4_context_create();
 	index = 1;
@@ -53,7 +54,7 @@ main(
 		return 1;
 	}
 	while (index < argc && argv[index][0] == '-') {
-				argument = argv[index];
+		argument = argv[index];
 
 		/* Selects the matching value. */
 		if (strcmp(argument, "--") == 0) {
@@ -69,8 +70,8 @@ main(
 
 		/* Handles the argument condition. */
 		if (argument[1] == 'D' || argument[1] == 'U') {
-						value = argument + 2;
-			int define = argument[1] == 'D';
+			value = argument + 2;
+			define = argument[1] == 'D';
 
 			/* Validates the command-line arguments. */
 			if (*value == '\0' && ++index < argc)
@@ -98,13 +99,13 @@ main(
 	else
 
 		/* Process each remaining command-line operand. */
-		for (; index < argc; index++)
-
+		for (; index < argc; index++) {
 			/* Validates the command-line arguments. */
 			if (process_file(context, argv[index]) != 0) {
 				status = 1;
 				break;
 			}
+		}
 
 	/* Handles a failed m4 finish operation. */
 	if (status == 0 && m4_finish(context, 1) != 0) {

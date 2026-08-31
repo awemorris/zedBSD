@@ -134,7 +134,7 @@ main(
 		/* Process each remaining command-line operand. */
 		message[0] = '\0';
 		for (index = optind; index < argc; index++) {
-						length = strlen(argv[index]);
+			length = strlen(argv[index]);
 
 			/* Checks the current capacity usage. */
 			if (used + length + (used != 0) + 1 > sizeof(message)) {
@@ -188,8 +188,9 @@ parse_priority(
 
 			/* Reports operation failure. */
 			return -1;
-	} else
+	} else {
 		dot = copy;
+	}
 
 	/* Handles a failed lookup operation. */
 	if (lookup(levels, sizeof(levels) / sizeof(levels[0]), dot, &level) ==
@@ -220,14 +221,14 @@ lookup(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < count; index++)
-
+	for (index = 0; index < count; index++) {
 		/* Selects the matching value. */
 		if (strcmp(table[index].name, name) == 0) {
 			*value = table[index].value;
 			/* Reports successful completion. */
 			return 0;
 		}
+	}
 
 	/* Reports operation failure. */
 	return -1;
@@ -244,7 +245,6 @@ log_stream(
 
 	/* Process input until it is exhausted. */
 	while (fgets(line, sizeof(line), stream) != NULL) {
-
 		length = strlen(line);
 
 		/* Checks the current data length. */

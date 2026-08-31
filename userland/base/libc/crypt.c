@@ -98,7 +98,7 @@ crypt(
 
 	/* Selects the matching prefix. */
 	if (!strncmp(salt, "rounds=", 7)) {
-				r = strtoul(salt + 7, &end, 10);
+		r = strtoul(salt + 7, &end, 10);
 
 		/* Checks the current endpoint. */
 		if (*end != '$') {
@@ -159,9 +159,10 @@ crypt(
 	add_repeat(&c, alt, 64, plen);
 
 	/* Process each element required by the operation. */
-	for (i = plen; i; i >>= 1)
+	for (i = plen; i; i >>= 1) {
 		sha_add(&c, (i & 1) ? alt : (const uint8_t *)password,
 			(i & 1) ? 64 : plen);
+	}
 	sha_final(&c, alt);
 	sha_init(&c);
 
@@ -186,7 +187,6 @@ crypt(
 	/* Process each element required by the operation. */
 		sseq[i] = ds[i % 64];
 	for (i = 0; i < rounds; i++) {
-
 		sha_init(&c);
 
 		/* Checks the current index. */
@@ -216,9 +216,10 @@ crypt(
 	o += 3;
 
 	/* Handles the custom condition. */
-	if (custom)
+	if (custom) {
 		o += snprintf(o, (size_t)(output + sizeof(output) - o),
 			      "rounds=%lu$", rounds);
+	}
 	memcpy(o, salt, slen);
 	o += slen;
 	*o++ = '$';
@@ -295,7 +296,6 @@ sha_add(
 
 	/* Continue while the operation condition remains true. */
 	while (n) {
-
 		take = 128U - c->used;
 
 		/* Handles the take condition. */
@@ -330,7 +330,7 @@ sha_block(
 	/* Process each element required by the operation. */
 		w[i] = load64(p + 8U * i);
 	for (i = 16; i < 80; i++) {
-				x = w[i - 15];
+		x = w[i - 15];
 		y = w[i - 2];
 		w[i] = w[i - 16] + (ror(x, 1) ^ ror(x, 8) ^ (x >> 7)) +
 		       w[i - 7] + (ror(y, 19) ^ ror(y, 61) ^ (y >> 6));
@@ -452,7 +452,6 @@ add_repeat(
 
 	/* Continue while the operation condition remains true. */
 	while (n) {
-
 		z = n < plen ? n : plen;
 		sha_add(c, p, z);
 		n -= z;

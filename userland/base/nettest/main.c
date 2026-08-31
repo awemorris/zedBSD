@@ -123,8 +123,7 @@ main(
 		    (packet[0] & 0x0fU) >= 5U && packet[9] == IPPROTO_ICMP &&
 		    (size_t)count >= (size_t)(packet[0] & 0x0fU) * 4U + 8U &&
 		    packet[(packet[0] & 0x0fU) * 4U] == 0) {
-
-						header_length = (size_t)(packet[0] & 0x0fU) * 4U;
+			header_length = (size_t)(packet[0] & 0x0fU) * 4U;
 
 			/* Handles a failed inet ntop operation. */
 			if (inet_ntop(AF_INET, &source.sin_addr, address,

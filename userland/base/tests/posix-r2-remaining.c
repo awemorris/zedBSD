@@ -523,7 +523,7 @@ test_record_lock(
 
 	/* Checks the child process state. */
 	if (child == 0) {
-				result = fcntl(fd, F_SETLK, &lock);
+		result = fcntl(fd, F_SETLK, &lock);
 		_exit(result == -1 && (errno == EAGAIN || errno == EACCES) ? 0
 									   : 1);
 	}
@@ -562,8 +562,7 @@ test_record_lock(
 
 	/* Checks the child process state. */
 	if (child == 0) {
-
-				query = lock;
+		query = lock;
 
 		/* Handles a failed fcntl operation. */
 		if (fcntl(duplicate, F_OFD_SETLK, &lock) != 0)
@@ -1146,7 +1145,6 @@ write_test_file(
 
 	/* Process each remaining element. */
 	while (done < length) {
-
 		count = write(descriptor, contents + done, length - done);
 
 		/* Checks the remaining item count. */
@@ -1228,7 +1226,6 @@ copy_test_executable(
 		/* Process each remaining element. */
 		done = 0;
 		while (done < count) {
-
 			written = write(output, buffer + done,
 						(size_t)(count - done));
 
@@ -1294,8 +1291,7 @@ wait_setid_mutation(
 
 	/* Checks the child process state. */
 	if (child == 0) {
-
-				flags = O_WRONLY | (truncate ? O_TRUNC : 0);
+		flags = O_WRONLY | (truncate ? O_TRUNC : 0);
 
 		/* Handles a failed setgid operation. */
 		if (setgid(200) != 0 || setuid(123) != 0)
@@ -1394,9 +1390,10 @@ test_posix2024_apis(
 	}
 
 	/* Checks the child process state. */
-	if (child == 0)
+	if (child == 0) {
 		_exit(fcntl(descriptor, F_GETFD) == -1 && errno == EBADF ? 0
 									 : 1);
+	}
 
 	/* Handles a failed waitpid operation. */
 	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||

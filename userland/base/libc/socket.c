@@ -470,9 +470,9 @@ recvmsg(
 		message->msg_flags = (int)request.output_flags;
 		copied = (size_t)result < total ? (size_t)result : total;
 		for (i = 0; i < message->msg_iovlen && copied != 0; i++) {
-						part = message->msg_iov[i].iov_len < copied
-					  ? message->msg_iov[i].iov_len
-					  : copied;
+			part = message->msg_iov[i].iov_len < copied
+		  ? message->msg_iov[i].iov_len
+		  : copied;
 			memcpy(message->msg_iov[i].iov_base, buffer + offset,
 			       part);
 			offset += part;
@@ -481,8 +481,8 @@ recvmsg(
 
 		/* Handles the request condition. */
 		if (request.descriptor_count != 0) {
-						control = message->msg_control;
-						bytes = request.descriptor_count * sizeof(int);
+			control = message->msg_control;
+			bytes = request.descriptor_count * sizeof(int);
 			control->cmsg_level = SOL_SOCKET;
 			control->cmsg_type = SCM_RIGHTS;
 			control->cmsg_len = CMSG_LEN(bytes);

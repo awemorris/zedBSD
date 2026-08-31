@@ -230,7 +230,6 @@ readline(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		HIST_ENTRY *entry;
 		size_t old_length;
 		size_t old_point;
@@ -329,9 +328,10 @@ readline(
 			/* Checks the current data length. */
 			if (length == 0) {
 				/* Checks the terminal state. */
-				if (terminal)
+				if (terminal) {
 					(void)tcsetattr(STDIN_FILENO, TCSANOW,
 							&saved);
+				}
 				free(line);
 				rl_line_buffer = NULL;
 
@@ -424,7 +424,6 @@ write_all(
 
 	/* Process each remaining element. */
 	while (size != 0) {
-
 		done = write(STDOUT_FILENO, bytes, size);
 
 		/* Handles the done condition. */
@@ -579,7 +578,7 @@ update_display(
 	/* Handles the old length condition. */
 	if (old_length > length) {
 		/* Continue while the operation condition remains true. */
-				spaces = old_length - length;
+		spaces = old_length - length;
 		while (spaces-- != 0U)
 			(void)write_all(" ", 1);
 	}

@@ -266,9 +266,9 @@ main(
 	}
 
 	/* Handles the archive name value availability. */
-	if (archive_name_value == NULL || !strcmp(archive_name_value, "-"))
+	if (archive_name_value == NULL || !strcmp(archive_name_value, "-")) {
 		archive_file = stdin;
-	else {
+	} else {
 		archive_file = fopen(archive_name_value, "rb");
 
 		/* Handles the archive file availability. */
@@ -460,7 +460,7 @@ write_operands(
 
 	/* Process each remaining element. */
 	for (index = 0; index < count; index++) {
-				stored = portable_name(operands[index]);
+		stored = portable_name(operands[index]);
 
 		/* Handles a failed write tree operation. */
 		if (write_tree(operands[index], stored) != 0)
@@ -594,7 +594,7 @@ write_member(
 	} else if (S_ISDIR(status->st_mode))
 		type = '5';
 	else if (S_ISLNK(status->st_mode)) {
-				count = readlink(filesystem_name, linkname, PATH_MAX);
+		count = readlink(filesystem_name, linkname, PATH_MAX);
 
 		/* Checks the remaining item count. */
 		if (count < 0) {
@@ -605,9 +605,9 @@ write_member(
 		}
 		linkname[count] = '\0';
 		type = '2';
-	} else if (S_ISFIFO(status->st_mode))
+	} else if (S_ISFIFO(status->st_mode)) {
 		type = '6';
-	else {
+	} else {
 		fprintf(stderr, "pax: unsupported file type: %s\n",
 			filesystem_name);
 		exit_status = 1;
@@ -681,14 +681,14 @@ known_link(
 	struct hard_link *entry;
 
 	/* Process each linked entry. */
-	for (entry = links; entry != NULL; entry = entry->next)
-
+	for (entry = links; entry != NULL; entry = entry->next) {
 		/* Handles the entry condition. */
 		if (entry->device == status->st_dev &&
 		    entry->inode == status->st_ino)
 
 			/* Returns the computed result. */
 			return entry->name;
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -849,7 +849,6 @@ write_all(
 	/* Process each remaining element. */
 	cursor = buffer;
 	while (length != 0) {
-
 		count = fwrite(cursor, 1, length, file);
 
 		/* Checks the remaining item count. */
@@ -875,7 +874,6 @@ copy_stream(
 
 	/* Process each remaining element. */
 	while (length != 0) {
-
 		wanted = length < sizeof(buffer) ? (size_t)length : sizeof(buffer);
 
 		/* Handles a failed read all operation. */
@@ -905,7 +903,6 @@ read_all(
 	/* Process each remaining element. */
 	cursor = buffer;
 	while (length != 0) {
-
 		count = fread(cursor, 1, length, file);
 
 		/* Checks the remaining item count. */
@@ -1014,7 +1011,6 @@ read_archive(
 	/* Continue until the operation reaches a terminal state. */
 	saw_zero = 0;
 	for (;;) {
-
 		header = (struct tar_header *)block;
 		result = read_all(archive_file, block, sizeof(block));
 
@@ -1121,7 +1117,6 @@ read_archive(
 				return -1;
 			}
 		} else {
-
 			memcpy(linkname, header->linkname,
 			       sizeof(header->linkname));
 			linkname[sizeof(header->linkname)] = '\0';
@@ -1184,11 +1179,11 @@ zero_block(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < BLOCK_SIZE; index++)
-
+	for (index = 0; index < BLOCK_SIZE; index++) {
 		/* Handles the block condition. */
 		if (block[index] != 0)
 			return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -1276,7 +1271,6 @@ transform_name(
 
 	/* Process each linked entry. */
 	for (rule = substitutions; rule != NULL; rule = rule->next) {
-
 		next = replace_once(current, rule, &matched);
 		free(current);
 
@@ -1322,7 +1316,6 @@ replace_once(
 		return NULL;
 	*matched = 0;
 	do {
-
 		whole = &matches[0];
 
 		/* Handles a failed regexec operation. */
@@ -1354,7 +1347,6 @@ replace_once(
 		/* Process each element required by the operation. */
 		for (replacement = rule->replacement; *replacement != '\0';
 		     replacement++) {
-
 			group = -1;
 
 			/* Handles the replacement condition. */
@@ -1368,8 +1360,8 @@ replace_once(
 
 			/* Handles the group condition. */
 			if (group >= 0 && matches[group].rm_so >= 0) {
-								group_length = (size_t)(matches[group].rm_eo -
-					     matches[group].rm_so);
+				group_length = (size_t)(matches[group].rm_eo -
+			     matches[group].rm_so);
 				ENSURE(group_length);
 				memcpy(output + length,
 				       cursor + matches[group].rm_so,
@@ -1408,11 +1400,11 @@ matches_patterns(
 		return 1;
 
 	/* Process each remaining element. */
-	for (index = 0; index < pattern_count; index++)
-
+	for (index = 0; index < pattern_count; index++) {
 		/* Handles a failed fnmatch operation. */
 		if (fnmatch(patterns[index], name, 0) == 0)
 			return 1;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -1430,7 +1422,6 @@ skip_payload(
 	/* Continue while the operation condition remains true. */
 	total = length + (BLOCK_SIZE - length % BLOCK_SIZE) % BLOCK_SIZE;
 	while (total != 0) {
-
 		amount = total < sizeof(buffer) ? (size_t)total : sizeof(buffer);
 
 		/* Handles a failed read all operation. */
@@ -1450,6 +1441,7 @@ safe_path(
 {
 	const char *slash;
 	const char *part;
+	size_t length;
 
 	part = path;
 
@@ -1459,9 +1451,9 @@ safe_path(
 
 	/* Continue while the operation condition remains true. */
 	while (*part != '\0') {
-				slash = strchr(part, '/');
-		size_t length =
-		    slash == NULL ? strlen(part) : (size_t)(slash - part);
+		slash = strchr(part, '/');
+		length = slash == NULL ? strlen(part)
+				       : (size_t)(slash - part);
 
 		/* Checks the current data length. */
 		if (length == 2 && part[0] == '.' && part[1] == '.')
@@ -1680,7 +1672,6 @@ position_for_append(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		header = (struct tar_header *)block;
 		position = ftello(file);
 

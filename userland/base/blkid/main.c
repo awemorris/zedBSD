@@ -70,7 +70,7 @@ identify(
 
 	/* Handles a failed ioctl operation. */
 	if (ioctl(fd, BLKGETIDENTITY, &id) != 0) {
-				error = errno;
+		error = errno;
 		close(fd);
 
 		/* Handles an operation failure. */

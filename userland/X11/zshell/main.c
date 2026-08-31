@@ -130,7 +130,6 @@ main(
 
 	/* Continue while the operation condition remains true. */
 	while (running) {
-
 		exposed = 0;
 
 		/*
@@ -254,7 +253,6 @@ refresh_tasks(
 
 	/* Process each linked entry. */
 	for (index = 0; index < count && next_count < MAX_TASKS; index++) {
-
 		name = NULL;
 		path = NULL;
 
@@ -288,11 +286,9 @@ refresh_tasks(
 	changed = next_count != shell->task_count;
 
 	/* Handles the changed condition. */
-	if (!changed)
-
+	if (!changed) {
 		/* Process each linked entry. */
-		for (index = 0; index < next_count; index++)
-
+		for (index = 0; index < next_count; index++) {
 			/* Handles the next condition. */
 			if (next[index].window != shell->tasks[index].window ||
 			    next[index].client != shell->tasks[index].client ||
@@ -302,6 +298,8 @@ refresh_tasks(
 				changed = 1;
 				break;
 			}
+		}
+	}
 
 	/* Handles the changed condition. */
 	if (changed) {
@@ -368,8 +366,7 @@ window_icon_path(
 		return 0;
 
 	/* Process each remaining element. */
-	for (index = 0; index < count; index++)
-
+	for (index = 0; index < count; index++) {
 		/* Handles a failed XzedGetIconPath operation. */
 		if (XzedGetIconPath(shell->display, children[index], path)) {
 			XFree(children);
@@ -377,6 +374,7 @@ window_icon_path(
 			/* Reports operation failure. */
 			return 1;
 		}
+	}
 	XFree(children);
 
 	/* Reports successful completion. */
@@ -393,12 +391,13 @@ cached_icon(
 	unsigned index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < shell->icon_count; index++)
-
+	for (index = 0; index < shell->icon_count; index++) {
 		/* Selects the matching value. */
-		if (strcmp(shell->icons[index].path, path) == 0)
+		if (strcmp(shell->icons[index].path, path) == 0) {
 			return shell->icons[index].valid ? &shell->icons[index]
 							 : NULL;
+		}
+	}
 
 	/* Handles the shell condition. */
 	if (shell->icon_count == ICON_CACHE_SIZE)
@@ -461,7 +460,6 @@ load_icon(
 	 */
 	/* Process each remaining element. */
 	for (index = 0; index < icon->color_count; index++) {
-
 		line = next_quoted(&cursor, end);
 
 		/* Handles a failed strstr operation. */
@@ -478,20 +476,19 @@ load_icon(
 		if (strcmp(color, "None") == 0)
 			icon->colors[index] = UINT32_MAX;
 		else if (*color == '#') {
-
-						value = strtoul(color + 1, &number_end, 16);
+			value = strtoul(color + 1, &number_end, 16);
 
 			/* Handles the number end condition. */
 			if (number_end != color + 7 || *number_end != '\0')
 				goto invalid;
 			icon->colors[index] = (uint32_t)value;
-		} else
+		} else {
 			goto invalid;
+		}
 	}
 
 	/* Process each element required by the operation. */
 	for (row = 0; row < icon->height; row++) {
-
 		line = next_quoted(&cursor, end);
 
 		/* Handles a failed strlen operation. */
@@ -502,8 +499,7 @@ load_icon(
 		for (column = 0; column < icon->width; column++) {
 			/* Process each remaining element. */
 			palette = ICON_TRANSPARENT;
-			for (index = 0; index < icon->color_count; index++)
-
+			for (index = 0; index < icon->color_count; index++) {
 				/* Handles the line condition. */
 				if (line[column] == keys[index]) {
 					palette =
@@ -512,6 +508,7 @@ load_icon(
 						: (uint8_t)index;
 					break;
 				}
+			}
 			icon->pixels[row * ICON_MAX_SIZE + column] = palette;
 		}
 	}
@@ -566,7 +563,6 @@ read_entire_file(
 		return 0;
 	}
 	while (used < (size_t)st.st_size) {
-
 		count = read(descriptor, data + used, (size_t)st.st_size - used);
 
 		/* Handles the reported system error. */
@@ -684,7 +680,6 @@ redraw(
 	/* Process each remaining element. */
 	for (index = 0; index < shell->task_count && x + 44U < status_x;
 	     index++) {
-
 		width = TASK_WIDTH;
 
 		/* Checks the current horizontal value. */
@@ -786,12 +781,13 @@ draw_launcher(
 	unsigned column;
 
 	/* Process each element required by the operation. */
-	for (row = 0; row < 3; row++)
-
+	for (row = 0; row < 3; row++) {
 		/* Process each element required by the operation. */
-		for (column = 0; column < 3; column++)
+		for (column = 0; column < 3; column++) {
 			fill(shell, BAR_TEXT, 10 + (int)column * 5,
 			     6 + (int)row * 5, 3, 3);
+		}
+	}
 }
 
 /* Supports the draw icon operation. */

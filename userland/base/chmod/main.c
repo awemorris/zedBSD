@@ -69,12 +69,12 @@ main(
 	(void)umask(mask);
 
 	/* Process each remaining command-line operand. */
-	for (; index < argc; index++)
-
+	for (; index < argc; index++) {
 		/* Validates the command-line arguments. */
 		if (!apply_path(argv[index], spec, numeric, (mode_t)parsed,
 				mask, recursive, 0))
 			failed = 1;
+	}
 
 	/* Returns the computed result. */
 	return failed;
@@ -140,7 +140,7 @@ apply_path(
 
 	/* Handles the recursive condition. */
 	if (recursive && S_ISDIR(status.st_mode)) {
-				d = opendir(path);
+		d = opendir(path);
 
 		/* Checks the current descriptor. */
 		if (!d) {
@@ -316,9 +316,9 @@ symbolic_mode(
 		/* Validates the selected operation. */
 		if (operation == '+')
 			mode |= bits;
-		else if (operation == '-')
+		else if (operation == '-') {
 			mode &= ~bits;
-		else {
+		} else {
 			mode &= ~affected;
 			mode |= bits;
 		}

@@ -54,8 +54,9 @@ main(
 			/* Validates the command-line arguments. */
 			if (command_parse_ull(argv[i], &inc))
 				return 2;
-		} else
+		} else {
 			break;
+		}
 	}
 	do {
 				f = i == argc || !strcmp(argv[i], "-")
@@ -70,15 +71,15 @@ main(
 			return 1;
 		}
 		while ((n = command_read_line(f, &l, &cap)) > 0) {
-
 			nonempty = n > 1 || (n == 1 && l[0] != '\n');
 
 			/* Handles the all condition. */
 			if (all || nonempty) {
 				printf("%6llu\t", number);
 				number += inc;
-			} else
+			} else {
 				printf("       ");
+			}
 			fwrite(l, 1, (size_t)n, stdout);
 		}
 

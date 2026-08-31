@@ -388,11 +388,12 @@ directory_read(
 		 * stable, lower-case spelling so POSIX clients can perform
 		 * case-sensitive completion on the names they typed. */
 		/* Process each element required by the operation. */
-		for (name_for = entry->name_for; *name_for != '\0'; name_for++)
-
+		for (name_for = entry->name_for; *name_for != '\0'; name_for++) {
 			/* Handles the name for condition. */
 			if (*name_for >= 'A' && *name_for <= 'Z')
 				*name_for = (char)(*name_for - 'A' + 'a');
+		}
+
 		/* Selects the matching value. */
 		if (!strcmp(path, "/"))
 			snprintf(child, sizeof(child), "/%s", item->d_name);

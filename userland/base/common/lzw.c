@@ -332,11 +332,11 @@ lzw_decompress(
 		/* Process each remaining element. */
 		first_char = suffix[code];
 		stack[stack_size++] = (unsigned char)first_char;
-		while (stack_size)
-
+		while (stack_size) {
 			/* Handles the output byte condition. */
 			if (output_byte(&output, stack[--stack_size]))
 				goto out;
+		}
 
 		/* Handles the next code condition. */
 		if (next_code < maximum) {
@@ -385,7 +385,6 @@ output_flush(
 	/* Process each remaining element. */
 	done = 0;
 	while (done < output->size) {
-
 		n = write(output->fd, output->data + done, output->size - done);
 
 		/* Handles the reported system error. */
@@ -412,7 +411,6 @@ input_byte(
 
 	/* Process each remaining element. */
 	while (input->offset == input->size) {
-
 		n = read(input->fd, input->data, sizeof(input->data));
 
 		/* Handles the reported system error. */
@@ -452,11 +450,11 @@ code_write(
 
 	/* Process each element required by the operation. */
 	bit = writer->count * writer->width;
-	for (i_index_for = 0; i_index_for < writer->width; i_index_for++)
-
+	for (i_index_for = 0; i_index_for < writer->width; i_index_for++) {
 		/* Handles the code condition. */
 		if (code & (1U << i_index_for))
 			writer->packet[(bit + i_index_for) / 8] |= 1U << ((bit + i_index_for) % 8);
+	}
 
 	/* Handles the writer condition. */
 	if (++writer->count == 8) {
@@ -481,11 +479,11 @@ code_writer_flush(
 
 	/* Process each element required by the operation. */
 	bytes = (writer->count * writer->width + 7) / 8;
-	for (i_index_for = 0; i_index_for < bytes; i_index_for++)
-
+	for (i_index_for = 0; i_index_for < bytes; i_index_for++) {
 		/* Handles a failed output byte operation. */
 		if (output_byte(writer->output, writer->packet[i_index_for]))
 			return -1;
+	}
 	memset(writer->packet, 0, sizeof(writer->packet));
 	writer->count = 0;
 
@@ -524,9 +522,8 @@ code_read(
 	/* Handles the reader condition. */
 	if (reader->index == reader->count) {
 		/* Continue while the operation condition remains true. */
-				got = 0;
+		got = 0;
 		while (got < bytes) {
-
 			byte = input_byte(reader->input);
 
 			/* Classifies the current byte. */
@@ -557,11 +554,12 @@ code_read(
 	/* Process each element required by the operation. */
 	*code = 0;
 	bit = reader->index++ * reader->width;
-	for (i_index_for = 0; i_index_for < reader->width; i_index_for++)
-
+	for (i_index_for = 0; i_index_for < reader->width; i_index_for++) {
 		/* Handles the reader condition. */
 		if (reader->packet[(bit + i_index_for) / 8] & (1U << ((bit + i_index_for) % 8)))
 			*code |= 1U << i_index_for;
+	}
+
 	/* Reports operation failure. */
 	return 1;
 }

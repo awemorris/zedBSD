@@ -45,8 +45,8 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (i = 1; i < argc; ++i) {
-				fd = !strcmp(argv[i], "-") ? STDIN_FILENO
-					       : open(argv[i], O_RDONLY);
+		fd = !strcmp(argv[i], "-") ? STDIN_FILENO
+			       : open(argv[i], O_RDONLY);
 
 		/* Checks the file descriptor. */
 		if (fd < 0) {
@@ -83,7 +83,6 @@ dump(
 	off = 0;
 	failed = 0;
 	for (;;) {
-
 		n = read(fd, b, sizeof(b));
 
 		/* Checks the current item count. */

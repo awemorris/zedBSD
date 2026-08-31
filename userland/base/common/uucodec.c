@@ -188,7 +188,6 @@ write_all(
 
 	/* Process each remaining element. */
 	while (length != 0) {
-
 		written = write(descriptor, bytes, length);
 
 		/* Handles the reported system error. */
@@ -230,14 +229,13 @@ encode_base64(
 	while ((status = read_chunk(descriptor, input, sizeof(input),
 				    &length)) == 0 &&
 	       length != 0) {
-
 		target = 0;
 
 		/* Process each remaining element. */
 		for (source = 0; source < length; source += 3U) {
-						a = input[source];
-						b = source + 1U < length ? input[source + 1U] : 0;
-						c = source + 2U < length ? input[source + 2U] : 0;
+			a = input[source];
+			b = source + 1U < length ? input[source + 1U] : 0;
+			c = source + 2U < length ? input[source + 2U] : 0;
 
 			output[target++] = alphabet[a >> 2];
 			output[target++] = alphabet[((a & 3U) << 4) | (b >> 4)];
@@ -281,7 +279,6 @@ read_chunk(
 
 	/* Continue while the operation condition remains true. */
 	while (used < capacity) {
-
 		count = read(descriptor, buffer + used, capacity - used);
 
 		/* Handles the reported system error. */
@@ -324,15 +321,14 @@ encode_historical(
 	while ((status = read_chunk(descriptor, input, sizeof(input),
 				    &length)) == 0 &&
 	       length != 0) {
-
 		target = 0;
 
 		/* Process each remaining element. */
 		output[target++] = historical_character((unsigned)length);
 		for (source = 0; source < length; source += 3U) {
-						a = input[source];
-						b = source + 1U < length ? input[source + 1U] : 0;
-						c = source + 2U < length ? input[source + 2U] : 0;
+			a = input[source];
+			b = source + 1U < length ? input[source + 1U] : 0;
+			c = source + 2U < length ? input[source + 2U] : 0;
 
 			output[target++] = historical_character(a >> 2);
 			output[target++] =
@@ -387,7 +383,6 @@ read_line(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		count = read(descriptor, &byte, 1);
 
 		/* Handles the reported system error. */
@@ -452,10 +447,10 @@ header_parse(
 	} else if (strncmp(line, "begin-base64 ", 13) == 0) {
 		*base64 = 1;
 		mode_text = line + 13;
-	} else
-
+	} else {
 		/* Reports successful completion. */
 		return 0;
+	}
 	separator = strchr(mode_text, ' ');
 
 	/* Handles the separator availability. */
@@ -629,6 +624,8 @@ decode_base64(
 {
 	int a;
 	int b;
+	int c;
+	int d;
 	unsigned char decoded[3];
 	size_t count;
 	size_t length;
@@ -639,7 +636,6 @@ decode_base64(
 
 	/* Process each remaining element. */
 	while ((status = read_line(input, line, sizeof(line))) > 0) {
-
 		saw_padding = 0;
 
 		/* Selects the matching value. */
@@ -653,16 +649,16 @@ decode_base64(
 
 		/* Process each remaining element. */
 		for (index = 0; index < length; index += 4U) {
-						a = base64_value(line[index]);
-						b = base64_value(line[index + 1U]);
-			int c = line[index + 2U] == '='
-				    ? -2
-				    : base64_value(line[index + 2U]);
-			int d = line[index + 3U] == '='
-				    ? -2
-				    : base64_value(line[index + 3U]);
+			a = base64_value(line[index]);
+			b = base64_value(line[index + 1U]);
+			c = line[index + 2U] == '='
+			    ? -2
+			    : base64_value(line[index + 2U]);
+			d = line[index + 3U] == '='
+			    ? -2
+			    : base64_value(line[index + 3U]);
 
-						count = 1;
+			count = 1;
 
 			/* Handles the saw padding condition. */
 			if (saw_padding || a < 0 || b < 0 || c == -1 ||
@@ -680,9 +676,10 @@ decode_base64(
 				    (unsigned char)((b << 4) | (c >> 2));
 
 				/* Checks the current descriptor. */
-				if (d >= 0)
+				if (d >= 0) {
 					decoded[count++] =
 					    (unsigned char)((c << 6) | d);
+				}
 			}
 
 			/* Classifies the current input character. */
@@ -750,7 +747,6 @@ decode_historical(
 
 	/* Process each remaining element. */
 	while ((status = read_line(input, line, sizeof(line))) > 0) {
-
 		used = 0;
 
 		/* Handles a failed historical value operation. */
@@ -790,14 +786,16 @@ decode_historical(
 				return -1;
 
 			/* Checks the current capacity usage. */
-			if (used < length)
+			if (used < length) {
 				decoded[used++] =
 				    (unsigned char)((a << 2) | (b >> 4));
+			}
 
 			/* Checks the current capacity usage. */
-			if (used < length)
+			if (used < length) {
 				decoded[used++] =
 				    (unsigned char)((b << 4) | (c >> 2));
+			}
 
 			/* Checks the current capacity usage. */
 			if (used < length)

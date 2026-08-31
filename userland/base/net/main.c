@@ -120,7 +120,6 @@ interactive(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		line = readline(console_prompt(&console));
 
 		/* Handles the line availability. */
@@ -289,20 +288,20 @@ console_help(
 	enum console_mode mode)
 {
 	/* Validates the selected mode. */
-	if (mode == CONSOLE_OPERATIONAL)
+	if (mode == CONSOLE_OPERATIONAL) {
 		puts("Operational commands:\n"
 		     "  show interfaces|interface "
 		     "NAME|running-config|startup-config|candidate\n"
 		     "  up NAME | down NAME | dhcp NAME [timeout SECONDS]\n"
 		     "  configure\n"
 		     "  help | ? | exit");
-	else if (mode == CONSOLE_CONFIGURATION)
+	} else if (mode == CONSOLE_CONFIGURATION) {
 		puts("Configuration commands:\n"
 		     "  interface NAME       select or create an interface\n"
 		     "  show candidate|startup-config|running-config\n"
 		     "  apply | save | discard\n"
 		     "  help | ? | end | exit");
-	else
+	} else {
 		puts("Interface commands:\n"
 		     "  enable | disable\n"
 		     "  dhcp [timeout SECONDS]\n"
@@ -310,6 +309,7 @@ console_help(
 		     "  no ipv4\n"
 		     "  up | down\n"
 		     "  help | ? | end | exit");
+	}
 }
 
 /* Supports the console operational operation. */
@@ -503,7 +503,7 @@ backend(
 	/* Selects the matching prefix. */
 	if (strncmp(response, NETWORKD_PROTOCOL_VERSION " OK", 5) == 0 &&
 	    (response[5] == '\n' || response[5] == ' ')) {
-				payload = response + 6;
+		payload = response + 6;
 
 		/* Handles a failed write all operation. */
 		if (display && *payload != '\0' &&
@@ -549,7 +549,6 @@ write_all(
 	/* Process each remaining element. */
 	offset = 0;
 	while (offset < length) {
-
 		count = write(descriptor, buffer + offset, length - offset);
 
 		/* Handles the reported system error. */
@@ -578,14 +577,14 @@ interface_name_valid(
 		return 0;
 
 	/* Process each remaining element. */
-	for (index = 0; index < length; index++)
-
+	for (index = 0; index < length; index++) {
 		/* Handles a failed isalnum operation. */
 		if (!isalnum((unsigned char)name[index]) &&
 		    name[index] != '_' && name[index] != '-')
 
 			/* Reports successful completion. */
 			return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -712,7 +711,7 @@ dispatch(
 	if (argc >= 3 && argc <= NET_DNS_LIMIT + 2 &&
 	    strcmp(argv[1], "dns") == 0) {
 		/* Process each remaining command-line operand. */
-				used = 0;
+		used = 0;
 		for (index = 2; index < argc; index++) {
 			/* Validates the command-line arguments. */
 			if (inet_aton(argv[index], &parsed) == 0) {
@@ -826,7 +825,7 @@ apply_candidate(
 
 	/* Process each remaining element. */
 	for (index = 0; index < configuration->interface_count; index++) {
-				item = &configuration->interfaces[index];
+		item = &configuration->interfaces[index];
 
 		/* Handles the item condition. */
 		if (!item->enabled) {
@@ -862,14 +861,14 @@ apply_candidate(
 	}
 
 	/* Process each remaining element. */
-	for (index = 0; index < configuration->route_count; index++)
-
+	for (index = 0; index < configuration->route_count; index++) {
 		/* Handles a failed backend operation. */
 		if (backend("DEFAULTROUTE",
 			    configuration->routes[index].gateway, 0) != 0)
 
 			/* Reports operation failure. */
 			return 1;
+	}
 
 	/* Handles the configuration condition. */
 	if (configuration->dns_count != 0) {
@@ -914,7 +913,7 @@ candidate_supported(
 
 	/* Process each remaining element. */
 	for (index = 0; index < configuration->interface_count; index++) {
-				item = &configuration->interfaces[index];
+		item = &configuration->interfaces[index];
 
 		/* Handles the item condition. */
 		if (item->type != NETCONF_INTERFACE_LOOPBACK &&
@@ -940,8 +939,7 @@ candidate_supported(
 	}
 
 	/* Process each remaining element. */
-	for (index = 0; index < configuration->route_count; index++)
-
+	for (index = 0; index < configuration->route_count; index++) {
 		/* Selects the matching value. */
 		if (strcmp(configuration->routes[index].destination,
 			   "default") != 0) {
@@ -952,6 +950,7 @@ candidate_supported(
 			/* Reports operation failure. */
 			return -1;
 		}
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -1177,11 +1176,11 @@ configuration_interface(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < configuration->interface_count; index++)
-
+	for (index = 0; index < configuration->interface_count; index++) {
 		/* Selects the matching value. */
 		if (strcmp(configuration->interfaces[index].name, name) == 0)
 			return &configuration->interfaces[index];
+	}
 
 	/* Handles a failed interface name valid operation. */
 	if (!create || !interface_name_valid(name) ||
@@ -1239,8 +1238,9 @@ console_interface(
 		if (count == 3) {
 			item->dhcp_timeout = value;
 			item->dhcp_timeout_set = 1;
-		} else
+		} else {
 			item->dhcp_timeout_set = 0;
+		}
 		console->dirty = 1;
 
 		/* Reports successful completion. */

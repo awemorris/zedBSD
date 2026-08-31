@@ -98,8 +98,7 @@ main(
 	}
 
 	/* Process each remaining command-line operand. */
-	for (parameter = 0; index < argc && parameter < 9; parameter++, index++)
-
+	for (parameter = 0; index < argc && parameter < 9; parameter++, index++) {
 		/* Validates the command-line arguments. */
 		if (!parse_parameter(argv[index], &parameters[parameter])) {
 			fprintf(stderr, "tput: %s: invalid numeric parameter\n",
@@ -108,6 +107,7 @@ main(
 			/* Reports operation failure. */
 			return 2;
 		}
+	}
 
 	/* Validates the command-line arguments. */
 	if (index != argc)

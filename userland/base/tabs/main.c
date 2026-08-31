@@ -166,13 +166,13 @@ main(
 			goto usage;
 	} else if (predefined != NULL) {
 		/* Process each remaining element. */
-		for (item = 0; item < predefined_count; item++)
-
+		for (item = 0; item < predefined_count; item++) {
 			/* Handles a failed append stop operation. */
 			if (predefined[item] > 1U &&
 			    !append_stop(stops, &stop_count, predefined[item],
 					 width))
 				goto usage;
+		}
 	} else if (!uniform_stops(stops, &stop_count, uniform, width))
 		goto usage;
 
@@ -183,7 +183,7 @@ main(
 
 	/* Process each remaining element. */
 	for (index = 0; (size_t)index < stop_count; index++) {
-				distance = stops[index] - position;
+		distance = stops[index] - position;
 
 		/* Handles a failed emit capability operation. */
 		if (emit_capability(terminfo_find(&terminal, "cuf"),
@@ -313,14 +313,14 @@ uniform_stops(
 		return 0;
 
 	/* Process each element required by the operation. */
-	for (stop = every + 1U; stop <= width; stop += every)
-
+	for (stop = every + 1U; stop <= width; stop += every) {
 		/* Handles a failed append stop operation. */
 		if (!append_stop(stops, count, stop, width) ||
 		    stop > UINT_MAX - every)
 
 			/* Reports successful completion. */
 			return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;

@@ -117,7 +117,6 @@ sh_alias_unset(
 	/* Continue while the operation condition remains true. */
 	link = &aliases;
 	while (*link != NULL) {
-
 		item = *link;
 
 		/* Selects the matching value. */
@@ -150,7 +149,6 @@ sh_alias_clear(
 
 	/* Continue while the operation condition remains true. */
 	while (aliases != NULL) {
-
 		next = aliases->next;
 		free(aliases->name);
 		free(aliases->value);
@@ -194,7 +192,7 @@ sh_alias_expand(
 	skip_redirection_word = 0;
 	expansions = 0;
 	while (position + 1U < list->count) {
-				token = &list->tokens[position];
+		token = &list->tokens[position];
 
 		/* Handles the token condition. */
 		if (token->type == SH_TOKEN_INPUT ||
@@ -238,7 +236,7 @@ sh_alias_expand(
 
 		/* Handles the command position condition. */
 		if (command_position && token_unquoted(token)) {
-						value = sh_alias_get(token->text);
+			value = sh_alias_get(token->text);
 
 			/* Handles the value availability. */
 			if (value != NULL) {
@@ -276,11 +274,11 @@ find_alias(
 	struct shell_alias *item;
 
 	/* Process each linked entry. */
-	for (item = aliases; item != NULL; item = item->next)
-
+	for (item = aliases; item != NULL; item = item->next) {
 		/* Selects the matching value. */
 		if (strcmp(item->name, name) == 0)
 			return item;
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -363,11 +361,11 @@ token_unquoted(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < token->length; index++)
-
+	for (index = 0; index < token->length; index++) {
 		/* Handles the token condition. */
 		if (token->quote[index] != SH_QUOTE_UNQUOTED)
 			return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;

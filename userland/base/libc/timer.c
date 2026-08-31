@@ -100,10 +100,11 @@ __timer_sigev_thread_fork_child(
 	 * discard the copied service state and invalidate every public ID.
 	 * The fixed slot array intentionally needs no allocation or freeing
 	 * here. */
-	if (timer_service_ready)
+	if (timer_service_ready) {
 		(void)timer_syscall(ZEDBSD_SYS_sigaction,
 				    LIBC_TIMER_WAKE_SIGNAL,
 				    (uintptr_t)&timer_previous_action, 0, 0);
+	}
 
 	/* Process each element required by the operation. */
 	for (slot = 0; slot < LIBC_TIMER_MAX; slot++) {
@@ -187,14 +188,14 @@ timer_create(
 		goto fail_locked;
 
 	/* Process each element required by the operation. */
-	for (slot = 0; slot < LIBC_TIMER_MAX; slot++)
-
+	for (slot = 0; slot < LIBC_TIMER_MAX; slot++) {
 		/* Handles a failed atomic load n operation. */
 		if (__atomic_load_n(&timer_slots[slot].state,
 				    __ATOMIC_RELAXED) == TIMER_SLOT_FREE) {
 			record = &timer_slots[slot];
 			break;
 		}
+	}
 
 	/* Handles the record availability. */
 	if (record == NULL) {
@@ -712,7 +713,6 @@ timer_dispatch_pending(
 
 	/* Process each remaining element. */
 	while (count-- != 0) {
-
 		callback = malloc(sizeof(*callback));
 
 		/* Handles the callback availability. */
@@ -799,24 +799,24 @@ timer_worker(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		observed = __atomic_load_n(&timer_wake_generation, __ATOMIC_ACQUIRE);
 
 		/* Process each element required by the operation. */
-		for (slot = 0; slot < LIBC_TIMER_MAX; slot++)
-
+		for (slot = 0; slot < LIBC_TIMER_MAX; slot++) {
 			/* Handles a failed atomic load n operation. */
 			if (__atomic_load_n(&timer_slots[slot].pending,
 					    __ATOMIC_ACQUIRE) != 0)
 				timer_dispatch_slot(slot);
+		}
 
 		/* Handles a failed atomic load n operation. */
 		if (__atomic_load_n(&timer_wake_generation, __ATOMIC_ACQUIRE) ==
-		    observed)
+		    observed) {
 			(void)__syscall6(ZEDBSD_SYS_usync,
 					 (uintptr_t)&timer_wake_generation,
 					 ZEDBSD_USYNC_WAIT, observed, 0, 0,
 					 ZEDBSD_USYNC_PRIVATE);
+		}
 	}
 
 	/* Reports that no result is available. */

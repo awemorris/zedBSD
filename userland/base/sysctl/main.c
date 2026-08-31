@@ -83,8 +83,7 @@ show_all(
 	unsigned i;
 
 	/* Process each remaining element. */
-	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++)
-
+	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
 		/* Handles a failed show name operation. */
 		if (show_name(names[i]) != 0) {
 			fprintf(stderr, "sysctl: %s: %s\n", names[i],
@@ -93,6 +92,7 @@ show_all(
 			/* Reports operation failure. */
 			return 1;
 		}
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -110,8 +110,7 @@ show_name(
 
 	/* Selects the matching value. */
 	if (strcmp(name, "vfs.bufcache.stats") == 0) {
-
-				length_local = sizeof(stats);
+		length_local = sizeof(stats);
 
 		/* Handles a failed sysctlbyname operation. */
 		if (sysctlbyname(name, &stats, &length_local, NULL, 0) != 0)
@@ -131,8 +130,7 @@ show_name(
 		/* Reports successful completion. */
 		return 0;
 	} else {
-
-				length_local1 = sizeof(value);
+		length_local1 = sizeof(value);
 
 		/* Handles a failed sysctlbyname operation. */
 		if (sysctlbyname(name, &value, &length_local1, NULL, 0) != 0)

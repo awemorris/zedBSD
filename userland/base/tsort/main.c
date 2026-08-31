@@ -109,7 +109,6 @@ main(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		left = read_token(input);
 
 		/* Handles the left availability. */
@@ -149,7 +148,7 @@ main(
 		/* Process each remaining element. */
 		for (node_index_value = 0; node_index_value < graph.count;
 		     node_index_value++) {
-						node = &graph.nodes[node_index_value];
+			node = &graph.nodes[node_index_value];
 
 			/* Handles the node condition. */
 			if (node->emitted || node->indegree != 0)
@@ -225,7 +224,6 @@ read_token(
 	do {
 		/* Checks the current data length. */
 		if (length + 1 >= capacity) {
-
 			capacity *= 2;
 			larger = realloc(text, capacity);
 
@@ -270,8 +268,8 @@ node_index(
 
 	/* Handles the graph condition. */
 	if (graph->count == graph->capacity) {
-				capacity = graph->capacity == 0 ? 16 : graph->capacity * 2;
-				larger = realloc(graph->nodes, capacity * sizeof(*larger));
+		capacity = graph->capacity == 0 ? 16 : graph->capacity * 2;
+		larger = realloc(graph->nodes, capacity * sizeof(*larger));
 
 		/* Handles the larger availability. */
 		if (larger == NULL)
@@ -320,8 +318,8 @@ add_edge(
 
 	/* Handles the node condition. */
 	if (node->edge_count == node->edge_capacity) {
-				capacity = node->edge_capacity == 0 ? 4 : node->edge_capacity * 2;
-				larger = realloc(node->edges, capacity * sizeof(*larger));
+		capacity = node->edge_capacity == 0 ? 4 : node->edge_capacity * 2;
+		larger = realloc(node->edges, capacity * sizeof(*larger));
 
 		/* Handles the larger availability. */
 		if (larger == NULL)
@@ -381,14 +379,14 @@ break_cycle(
 
 	/* Handles the found condition. */
 	if (found) {
-
 		fprintf(stderr, "tsort: input contains a cycle:\n");
 
 		/* Process each remaining element. */
 		for (node_index_value = cycle_start; node_index_value < depth;
-		     node_index_value++)
+		     node_index_value++) {
 			fprintf(stderr, "tsort: %s\n",
 				graph->nodes[stack[node_index_value]].name);
+		}
 
 		/* Process each remaining element. */
 		for (edge = 0; edge < graph->nodes[cycle_end].edge_count;
@@ -428,7 +426,7 @@ find_cycle(
 	state[current] = 1;
 	stack[(*depth)++] = current;
 	for (edge = 0; edge < node->edge_count; edge++) {
-				next = node->edges[edge];
+		next = node->edges[edge];
 
 		/* Handles the graph condition. */
 		if (graph->nodes[next].emitted)

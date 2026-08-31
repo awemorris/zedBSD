@@ -92,7 +92,7 @@ main(
 	}
 	while (index < argc && argv[index][0] == '-' &&
 	       argv[index][1] != '\0') {
-				option = argv[index] + 1;
+		option = argv[index] + 1;
 
 		/* Handles the selected command-line operation. */
 		if (strcmp(argv[index], "--") == 0) {
@@ -137,7 +137,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (; index < argc; index++) {
-				category = category_index(argv[index]);
+		category = category_index(argv[index]);
 
 		/* Handles the category condition. */
 		if (category >= 0) {
@@ -218,8 +218,8 @@ locale_list(
 
 			/* Checks the remaining item count. */
 			if (count == capacity) {
-								wanted = capacity == 0 ? 16U : capacity * 2U;
-								replacement = realloc(names, wanted * sizeof(*names));
+				wanted = capacity == 0 ? 16U : capacity * 2U;
+				replacement = realloc(names, wanted * sizeof(*names));
 
 				/* Handles the replacement availability. */
 				if (replacement == NULL) {
@@ -292,7 +292,7 @@ print_environment(
 
 	/* Process each element required by the operation. */
 	for (category = 0; category < 6; category++) {
-				environment = getenv(category_names[category]);
+		environment = getenv(category_names[category]);
 
 		printf("%s=\"%s\"\n", category_names[category],
 		       environment != NULL ? environment
@@ -309,11 +309,11 @@ category_index(
 	int category;
 
 	/* Process each element required by the operation. */
-	for (category = 0; category < 6; category++)
-
+	for (category = 0; category < 6; category++) {
 		/* Selects the matching value. */
 		if (strcmp(category_names[category], name) == 0)
 			return category;
+	}
 
 	/* Reports operation failure. */
 	return -1;
@@ -334,11 +334,11 @@ print_category(
 		printf("%s\n", category_names[category]);
 
 	/* Process each remaining element. */
-	for (index = 0; index < sizeof(metadata) / sizeof(metadata[0]); index++)
-
+	for (index = 0; index < sizeof(metadata) / sizeof(metadata[0]); index++) {
 		/* Handles the metadata condition. */
 		if (metadata[index].category == category)
 			print_value(&metadata[index], include_keyword);
+	}
 
 	/* Computes the function result. */
 	function_result = ferror(stdout) ? -1 : 0;
@@ -365,8 +365,8 @@ print_value(
 
 	/* Handles a failed grouping keyword operation. */
 	if (grouping_keyword(key->key)) {
-				group = (const unsigned char *)value;
-				first = 1;
+		group = (const unsigned char *)value;
+		first = 1;
 
 		/* Continue while the operation condition remains true. */
 		while (*group != '\0') {
@@ -414,7 +414,6 @@ print_quoted(
 
 	/* Continue while the operation condition remains true. */
 	while (*value != '\0') {
-
 		byte = (unsigned char)*value++;
 
 		/* Classifies the current byte. */
@@ -440,11 +439,11 @@ keyword_find(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < sizeof(metadata) / sizeof(metadata[0]); index++)
-
+	for (index = 0; index < sizeof(metadata) / sizeof(metadata[0]); index++) {
 		/* Selects the matching value. */
 		if (strcmp(metadata[index].keyword, name) == 0)
 			return &metadata[index];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;

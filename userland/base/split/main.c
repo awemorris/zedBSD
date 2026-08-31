@@ -79,7 +79,6 @@ main(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		n = read(in, &c, 1);
 
 		/* Checks the current item count. */
@@ -99,7 +98,7 @@ main(
 
 		/* Handles the out condition. */
 		if (out < 0) {
-						p = strlen(prefix);
+			p = strlen(prefix);
 
 			/* Checks the current pointer. */
 			if (p + 3 > sizeof(name) || index >= 26ULL * 26ULL) {

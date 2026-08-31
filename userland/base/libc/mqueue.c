@@ -143,9 +143,10 @@ mq_open(
 		/* Checks the file descriptor. */
 		if (fd >= 0)
 			created = 1;
-		else if (errno == EEXIST && (flags & O_EXCL) == 0)
+		else if (errno == EEXIST && (flags & O_EXCL) == 0) {
 			fd = shm_open(storage_name,
 				      O_RDWR | (flags & O_CLOEXEC), mode);
+		}
 	} else {
 		fd = shm_open(storage_name, O_RDWR | (flags & O_CLOEXEC), 0);
 	}
@@ -188,7 +189,6 @@ mq_open(
 		/* Continue while the operation condition remains true. */
 		while (__atomic_load_n(&store->magic, __ATOMIC_ACQUIRE) !=
 		       MQ_MAGIC) {
-
 			error = mq_usync_wait(&store->magic, 0, NULL, 0);
 
 			/* Handles an operation failure. */
@@ -231,14 +231,14 @@ mq_close(
 	mq_private_lock(&descriptor_guard);
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < MQ_MAX_DESCRIPTORS; i++)
-
+	for (i = 0; i < MQ_MAX_DESCRIPTORS; i++) {
 		/* Handles the descriptors condition. */
 		if (descriptors[i].used && descriptors[i].fd == descriptor) {
 			store = descriptors[i].store;
 			memset(&descriptors[i], 0, sizeof(descriptors[i]));
 			break;
 		}
+	}
 	mq_private_unlock(&descriptor_guard);
 
 	/* Handles the store availability. */
@@ -304,6 +304,7 @@ mq_timedsend(
 	uint32_t sequence;
 	struct timespec relative, *timeout;
 	unsigned position;
+	int was_empty;
 	struct mq_descriptor *entry;
 	struct mq_store *store;
 
@@ -345,24 +346,24 @@ mq_timedsend(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		timeout = NULL;
 		mq_store_lock(store);
 
 		/* Handles the store condition. */
 		if (store->count < store->maximum) {
 			/* Process each remaining element. */
-						notify_pid = 0;
+			notify_pid = 0;
 			notify_kind = SIGEV_NONE;
-						notify_signo = 0;
-						notify_value = 0;
-			int was_empty = store->count == 0;
+			notify_signo = 0;
+			notify_value = 0;
+			was_empty = store->count == 0;
 			for (position = store->count;
 			     position != 0 &&
 			     store->slots[position - 1U].priority < priority;
-			     position--)
+			     position--) {
 				store->slots[position] =
 				    store->slots[position - 1U];
+			}
 			store->slots[position].length = (uint32_t)length;
 			store->slots[position].priority = priority;
 			memcpy(store->slots[position].data, message, length);
@@ -383,7 +384,6 @@ mq_timedsend(
 
 			/* Handles the notify pid condition. */
 			if (notify_pid != 0 && notify_kind == SIGEV_SIGNAL) {
-
 				memcpy(&value, &notify_value,
 				       sizeof(notify_value));
 				(void)sigqueue((pid_t)notify_pid, notify_signo,
@@ -497,7 +497,6 @@ mq_timedreceive(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		timeout = NULL;
 		mq_store_lock(store);
 
@@ -713,7 +712,7 @@ mq_notify(
 
 	/* Handles the store condition. */
 	if (store->notify_pid != 0) {
-				owner = store->notify_pid;
+		owner = store->notify_pid;
 		mq_store_unlock(store);
 
 		/* Handles the reported system error. */
@@ -748,7 +747,6 @@ mq_notify(
 
 	/* Handles the immediate condition. */
 	if (immediate && kind == SIGEV_SIGNAL) {
-
 		memcpy(&signal_value, &value, sizeof(value));
 
 		/* Obtains the sigqueue result. */
@@ -871,8 +869,7 @@ mq_descriptor_install(
 	mq_private_lock(&descriptor_guard);
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < MQ_MAX_DESCRIPTORS; i++)
-
+	for (i = 0; i < MQ_MAX_DESCRIPTORS; i++) {
 		/* Handles the descriptors condition. */
 		if (!descriptors[i].used) {
 			descriptors[i].used = 1;
@@ -884,6 +881,7 @@ mq_descriptor_install(
 			/* Reports successful completion. */
 			return 0;
 		}
+	}
 	mq_private_unlock(&descriptor_guard);
 	errno = EMFILE;
 
@@ -944,13 +942,13 @@ mq_descriptor_get(
 	mq_private_lock(&descriptor_guard);
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < MQ_MAX_DESCRIPTORS; i++)
-
+	for (i = 0; i < MQ_MAX_DESCRIPTORS; i++) {
 		/* Handles the descriptors condition. */
 		if (descriptors[i].used && descriptors[i].fd == descriptor) {
 			found = &descriptors[i];
 			break;
 		}
+	}
 	mq_private_unlock(&descriptor_guard);
 
 	/* Returns the computed result. */

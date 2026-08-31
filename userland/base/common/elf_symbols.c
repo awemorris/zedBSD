@@ -120,7 +120,6 @@ elf_symbols_read(
 
 	/* Process each remaining element. */
 	for (i_index_for = 0; i_index_for < section_count; i_index_for++) {
-
 		s = data + section_offset + i_index_for * section_size;
 		sections[i_index_for].type = get32(s + 4, little);
 		sections[i_index_for].flags =
@@ -143,9 +142,9 @@ elf_symbols_read(
 
 	/* Process each remaining element. */
 	for (i_index_for1 = 0; i_index_for1 < section_count; i_index_for1++) {
-				symbols = &sections[i_index_for1];
+		symbols = &sections[i_index_for1];
 
-				minimum = elf64 ? 24 : 16;
+		minimum = elf64 ? 24 : 16;
 
 		/* Handles the symbols condition. */
 		if (symbols->type != (dynamic ? SHT_DYNSYM : SHT_SYMTAB))
@@ -165,7 +164,6 @@ elf_symbols_read(
 		strings = &sections[symbols->link];
 		for (n_index_for = 0; n_index_for < symbols->size / symbols->entsize;
 		     n_index_for++) {
-
 			entry = data + symbols->offset + n_index_for * symbols->entsize;
 
 			/* Handles a failed add symbol operation. */
@@ -244,9 +242,10 @@ get32(
 	int little)
 {
 	/* Handles the little condition. */
-	if (little)
+	if (little) {
 		return (uint32_t)p[0] | (uint32_t)p[1] << 8 |
 		       (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+	}
 
 	/* Returns the computed result. */
 	return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 |

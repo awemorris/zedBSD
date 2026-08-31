@@ -233,15 +233,15 @@ getaddrinfo(
 			return error;
 
 		/* Checks the operation result. */
-		if (result.canonical[0] == '\0')
+		if (result.canonical[0] == '\0') {
 			strncpy(result.canonical, node,
 				sizeof(result.canonical) - 1U);
+		}
 	}
 
 	/* Process each remaining element. */
 	count = result.address_count;
 	for (index = 0; index < count; index++) {
-
 		item = calloc(1, sizeof(*item));
 		address = calloc(1, sizeof(*address));
 
@@ -286,7 +286,6 @@ freeaddrinfo(
 
 	/* Continue while the operation condition remains true. */
 	while (info != NULL) {
-
 		next = info->ai_next;
 		free(info->ai_addr);
 		free(info->ai_canonname);
@@ -377,8 +376,8 @@ getnameinfo(
 
 	/* Handles the service availability. */
 	if (service != NULL && service_length != 0U) {
-				needed = snprintf(service, service_length, "%u",
-				      ntohs(inet->sin_port));
+		needed = snprintf(service, service_length, "%u",
+		      ntohs(inet->sin_port));
 
 		/* Handles the needed condition. */
 		if (needed < 0 || (socklen_t)needed >= service_length)
@@ -495,17 +494,17 @@ resolver_query_server_depth(
 				close(descriptor);
 
 				/* Handles the truncated condition. */
-				if (truncated)
+				if (truncated) {
 					error = tcp_query(&server, query,
 							  query_length, id,
 							  name, type, result);
+				}
 
 				/* Handles an operation failure. */
 				if (error == EAI_NONAME && type == DNS_TYPE_A &&
 				    result->canonical[0] != '\0' &&
 				    depth < 8U) {
-
-										cname_ttl = result->ttl;
+					cname_ttl = result->ttl;
 					strncpy(alias, result->canonical,
 						sizeof(alias) - 1U);
 					alias[sizeof(alias) - 1U] = '\0';
@@ -645,7 +644,6 @@ write_all_socket(
 
 	/* Process each remaining element. */
 	while (length != 0U) {
-
 		count = send(descriptor, buffer, length, 0);
 
 		/* Checks the remaining item count. */
@@ -670,7 +668,6 @@ read_exact_socket(
 
 	/* Process each remaining element. */
 	while (length != 0U) {
-
 		count = recv(descriptor, buffer, length, 0);
 
 		/* Checks the remaining item count. */
