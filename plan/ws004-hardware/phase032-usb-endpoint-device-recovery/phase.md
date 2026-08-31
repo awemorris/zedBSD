@@ -12,7 +12,7 @@ Work item: `HW-28`
 
 Test case: `HW-T26`
 
-Status: in progress (`q047`); p031 and p006 automatic dependencies complete
+Status: complete (`q047`, 2026-08-31)
 
 Parent: [WS004](../ws.md)
 
@@ -454,6 +454,50 @@ boot is not reported as injected recovery evidence.
   controls pass with exact evidence boundaries.
 - The general recovery prerequisite of `ws006-p008` is satisfied without
   claiming that USB HID, hub reset, or multi-owner device reset is implemented.
+
+## Result
+
+Q047 completed the shared checked recovery boundary. The USB core now latches
+nonzero bulk/interrupt endpoint STALL before callback publication, rejects
+rearm until recovery succeeds, sends checked device-side clear-halt before the
+mandatory HCD-side ring/toggle reset, and provides the bounded direct-root
+single-owner reset transaction. xHCI retains checked ring ownership and has no
+implicit nonzero-endpoint recovery; UHCI and EHCI restore DATA0 only after the
+confirmed device-side event. USB Mass Storage uses the common recovery API and
+no longer repairs HCD-private endpoint state.
+
+The reclaim-safe error path is allocation-free after controller start. The USB
+core owns its preallocated recovery URB, while UHCI and EHCI own one bounded
+controller reserve for reclaim-safe request, schedule, and bounce storage.
+Ordinary traffic retains its dynamic allocation path. A reserve remains busy
+and its DMA remains retained whenever hardware retirement is uncertain.
+
+Automatic evidence passed as follows:
+
+- `HW-T26` passed 1,111 ordinary checks and the same 1,111 checks under
+  ASan/UBSan; its analyzer and configured production-object gates passed.
+- The USB function model passed 1,496 checks. The binding-transaction fixture
+  passed 971 ordinary and 971 ASan/UBSan checks plus its analyzer gate.
+- The legacy reclaim-safe reserve runner passed ordinary, sanitizer,
+  analyzer, and configured UHCI/EHCI builds.
+- The concurrent xHCI/model, USB Storage SCSI/BOT, CDC NCM
+  binding/lifecycle, and removable no-media regressions passed. Earlier
+  USB-root continuity and overlay-write evidence remains retained rather than
+  being reported as a fresh q047 rerun. The Apple removable-reader case
+  retains its class binding without publishing a zero-sized disk for current
+  sense `02/3a/xx`; media polling and later dynamic disk publication are not
+  claimed.
+- The repository `make -j16` gate passed without `make check` or `.internal/`.
+- A fresh 4-GiB OVMF/Q35/xHCI USB-root login control passed in
+  `build/q047-p032-final-xhci-control2`.
+- The paired EHCI/UHCI QEMU control passed concurrent legacy-HCD storage and
+  hotplug in `build/q047-p032-final-legacy-paired`.
+
+No physical-machine recovery or removable-reader check was performed for this
+Phase. That absence does not weaken its automatic completion boundary and must
+not be reported as physical acceptance. With p031 and p032 complete, the WS004
+prerequisites of `ws006-p008` are satisfied and that downstream Phase is
+Queue-ready; USB HID itself remains unimplemented by this Phase.
 
 ## Reconsideration boundary
 

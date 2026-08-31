@@ -245,8 +245,32 @@ test_port_reset_status(void)
 	    DRV_XHCI_PORT_RESET_DISCONNECTED);
 	assert(drv_xhci_port_reset_status(DRV_XHCI_PORTSC_PED) ==
 	    DRV_XHCI_PORT_RESET_DISCONNECTED);
+	assert(drv_xhci_port_reset_status(DRV_XHCI_PORTSC_CCS |
+	    DRV_XHCI_PORTSC_PED | DRV_XHCI_PORTSC_PRC |
+	    DRV_XHCI_PORTSC_CSC) == DRV_XHCI_PORT_RESET_DISCONNECTED);
+	assert(drv_xhci_port_reset_status(DRV_XHCI_PORTSC_CSC) ==
+	    DRV_XHCI_PORT_RESET_DISCONNECTED);
 	assert(drv_xhci_port_reset_status(UINT32_MAX) ==
 	    DRV_XHCI_PORT_RESET_INVALID);
+}
+
+static void
+test_endpoint_reset_admission(void)
+{
+	assert(drv_xhci_endpoint_reset_admit(0U, 0U, 0U) ==
+	    DRV_XHCI_ENDPOINT_RESET_ACQUIRE);
+	assert(drv_xhci_endpoint_reset_admit(1U, 0U, 0U) ==
+	    DRV_XHCI_ENDPOINT_RESET_BUSY);
+	assert(drv_xhci_endpoint_reset_admit(0U, 1U, 0U) ==
+	    DRV_XHCI_ENDPOINT_RESET_BUSY);
+	assert(drv_xhci_endpoint_reset_admit(0U, 1U, 1U) ==
+	    DRV_XHCI_ENDPOINT_RESET_WAIT_PUBLICATION);
+	assert(drv_xhci_endpoint_reset_admit(1U, 1U, 1U) ==
+	    DRV_XHCI_ENDPOINT_RESET_BUSY);
+	/* A publication marker without its recovery owner is inconsistent and
+	 * must never be treated as an idle endpoint. */
+	assert(drv_xhci_endpoint_reset_admit(0U, 0U, 1U) ==
+	    DRV_XHCI_ENDPOINT_RESET_BUSY);
 }
 
 int
@@ -261,6 +285,7 @@ main(void)
 	test_ep0_context();
 	test_superspeed_context_fields();
 	test_port_reset_status();
+	test_endpoint_reset_admission();
 	puts("xHCI control/EP0/reset test: PASS");
 	return 0;
 }

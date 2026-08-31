@@ -358,6 +358,12 @@ struct drv_usb_hcd_ops {
 		*endpoint_disable)(
 		struct drv_usb_hcd *,
 		struct drv_usb_endpoint *);
+	/* Reset host-side ring/toggle state only after the USB core has proved a
+	 * device-side endpoint reset.  Every HCD must provide this operation. */
+	int (
+		*endpoint_reset)(
+		struct drv_usb_hcd *,
+		struct drv_usb_endpoint *);
 	uint32_t (
 		*frame_number)(
 		struct drv_usb_hcd *);
@@ -689,6 +695,9 @@ drv_usb_endpoint_set_hcd_data(
 	struct drv_usb_endpoint *e,
 	unsigned n,
 	uintptr_t value);
+int
+drv_usb_endpoint_clear_halt(
+	struct drv_usb_endpoint *endpoint);
 
 /*
  * Asynchronous USB Request Block (URB) allocation and submission.

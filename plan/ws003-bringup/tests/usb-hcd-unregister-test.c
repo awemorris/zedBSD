@@ -53,6 +53,17 @@ hal_printf(const char *format, ...)
 	return 0;
 }
 
+bool
+hal_irq_disable(void)
+{
+	return true;
+}
+
+void
+hal_irq_enable(void)
+{
+}
+
 uint64_t
 sched_ticks(void)
 {
@@ -110,6 +121,15 @@ test_urb_dequeue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 	(void)hcd;
 	(void)urb;
 	return dequeue_result;
+}
+
+static int
+test_endpoint_reset(struct drv_usb_hcd *hcd,
+	struct drv_usb_endpoint *endpoint)
+{
+	assert(hcd != NULL);
+	assert(endpoint != NULL);
+	return 0;
 }
 
 static int
@@ -182,6 +202,7 @@ main(void)
 		.stop = test_stop,
 		.urb_enqueue = test_urb_enqueue,
 		.urb_dequeue = test_urb_dequeue,
+		.endpoint_reset = test_endpoint_reset,
 		.root_hub_control = test_root_control,
 		.root_port_reset = test_root_reset,
 	};

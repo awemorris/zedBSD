@@ -84,11 +84,34 @@ regression, shared-INTx, and repository-build gates, this completes HW-T25 and
 ## HW-T26 checked USB recovery
 
 [`ws004-p032`](../phase032-usb-endpoint-device-recovery/phase.md) owns the
-production USB-core/HCD recovery fixture. It proves callback-before-latch
-visibility, exact `CLEAR_FEATURE(ENDPOINT_HALT)` ordering, HCD ring/toggle
-reset, conservative direct-root reset, failure quarantine/retention, and the
-removal of class-side HCD-private Mass Storage recovery. QEMU normal controls
-remain distinct from focused injected STALL/reset evidence.
+production USB-core/HCD recovery fixture.  The fake HCD drives the production
+`usb.c` implementation directly and checks latch-before-callback visibility,
+callback re-entry, exact `CLEAR_FEATURE(ENDPOINT_HALT)` wire/HCD/unlatch
+ordering, preventive clears, endpoint-owner and active-URB admission, and every
+accepted-wire ambiguity or HCD failure quarantine.  Device-reset cases cover
+direct-root and disabled-port preflight with zero side effects, active and
+multiple binding owners, retained alternates and sibling claims, exact
+disable/quiesce/port/device/address/configuration/alternate/endpoint-reset
+ordering, rollback before the destructive boundary, quarantine afterward, and
+stable binding/generation/recovery-URB lifetime.
+
+The same runner keeps existing fake HCDs compatible with the mandatory
+`endpoint_reset` operation and rejects registration without it.  Production
+source gates require xHCI retained-ring and Set-TR-Dequeue restart behavior,
+CSC-preserving root reset, UHCI/EHCI DATA0 plus completion-inflight lifetime,
+and common-API-only Mass Storage recovery.  It runs the focused fixture in
+ordinary, ASan/UBSan, and GCC analyzer modes, the function/binding/unregister
+regressions, and configured amd64/i386 production-object builds without
+starting QEMU:
+
+```sh
+mkdir -p build/q047-tmp
+TMPDIR="$PWD/build/q047-tmp" \
+  plan/ws004-hardware/tests/run-usb-recovery-contract-test.sh
+```
+
+QEMU normal controls remain distinct from the focused injected STALL/reset
+evidence.
 
 ## HW-T27 amd64 framebuffer console serialization
 
@@ -443,6 +466,17 @@ cc -std=c11 -Iinclude -Wall -Wextra -Werror \
   plan/ws004-hardware/tests/usb-storage-scsi-test.c \
   -o /tmp/ws004-usb-storage-scsi-test
 /tmp/ws004-usb-storage-scsi-test
+```
+
+The production-path empty-reader fixture supplies current `02/3a/xx` sense to
+the real `usb-storage.c` attach routine. It requires one readiness attempt, an
+idle bound interface retaining its three preallocated URBs, no disk
+publication, and clean detach/free. Deferred sense and a non-removable LUN
+remain failures. The runner executes ordinary, ASan/UBSan, and analyzer modes:
+
+```sh
+TMPDIR="$PWD/build/q047-tmp" \
+  plan/ws004-hardware/tests/run-usb-storage-no-media-test.sh
 ```
 
 The i386 build selection is `tests/config-pcat-xhci.mk`. Runtime acceptance and

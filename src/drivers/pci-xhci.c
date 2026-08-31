@@ -33,6 +33,7 @@
 #define XHCI_PORT_PED 0x00000002U
 #define XHCI_PORT_PR 0x00000010U
 #define XHCI_PORT_PP 0x00000200U
+#define XHCI_PORT_CSC 0x00020000U
 #define XHCI_PORT_CHANGE 0x00fe0000U
 #define XHCI_TRB_CYCLE 0x00000001U
 #define XHCI_TRB_CHAIN 0x00000010U
@@ -69,7 +70,7 @@ struct xhci_endpoint {
 	struct xhci_ring ring;
 	struct xhci_request *active;
 	unsigned dci;
-	unsigned enabled, recovering;
+	unsigned enabled, recovering, stall_publishing;
 };
 struct xhci_device {
 	struct drv_usb_device *usb;
@@ -94,6 +95,7 @@ struct xhci_request {
 	int input;
 	unsigned cancelling, transfer_seen, completion_code;
 	unsigned short_seen;
+	unsigned stall_publication;
 	unsigned reserved;
 	size_t short_actual;
 	size_t completion_actual, completion_residual;
@@ -673,7 +675,10 @@ fill_endpoint(struct xhci_controller *c, void *context,
 	      const struct drv_xhci_endpoint_context_words *encoded)
 {
 	uint32_t *w = context;
-	uint64_t dequeue = ep->ring.dma.device_address | 1U;
+	uint64_t dequeue = ep->ring.dma.device_address +
+	    (uint64_t)ep->ring.enqueue * sizeof(struct xhci_trb);
+
+	dequeue |= ep->ring.cycle ? 1U : 0U;
 	memset(context, 0, c->context_size);
 	w[0] = encoded->word0;
 	w[1] = encoded->word1;
@@ -760,7 +765,8 @@ static void
 xhci_recovery_leave_locked(struct xhci_controller *c,
 	struct xhci_endpoint *endpoint)
 {
-	if (!endpoint->recovering || c->endpoint_recoveries_busy == 0)
+	if (!endpoint->recovering || endpoint->stall_publishing ||
+	    c->endpoint_recoveries_busy == 0)
 		__builtin_trap();
 	endpoint->recovering = 0;
 	c->endpoint_recoveries_busy--;
@@ -1031,6 +1037,7 @@ xhci_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 	uint8_t *input;
 	uint32_t *control;
 	unsigned number, dci, entries, type;
+	int ring_allocated = 0;
 	int e;
 	if (!d)
 		return ENODEV;
@@ -1061,8 +1068,13 @@ xhci_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 	    type, desc->maximum_packet_size, desc->interval, companion,
 	    &endpoint_context))
 		return EINVAL;
-	if ((e = ring_alloc(c, &ep->ring)) != 0)
-		return e;
+	if (ep->ring.dma.address == NULL) {
+		if ((e = ring_alloc(c, &ep->ring)) != 0)
+			return e;
+		ring_allocated = 1;
+	} else if (ep->dci != dci) {
+		return EIO;
+	}
 	ep->dci = dci;
 	input = d->input_context.address;
 	memset(input, 0, 4096U);
@@ -1075,7 +1087,10 @@ xhci_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 	e = command(c, d->input_context.device_address, 0,
 		    XHCI_TRB_TYPE(12) | XHCI_TRB_SLOT(d->slot), NULL);
 	if (e) {
-		ring_free(c, &ep->ring);
+		if (ring_allocated) {
+			ring_free(c, &ep->ring);
+			ep->dci = 0;
+		}
 		return e;
 	}
 	d->context_entries = entries;
@@ -1133,7 +1148,6 @@ xhci_endpoint_disable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 	if (error != 0)
 		return error;
 	d->context_entries = entries;
-	ring_free(c, &ep->ring);
 	return 0;
 }
 
@@ -1189,6 +1203,25 @@ transfer_claim(struct xhci_controller *c, const struct xhci_trb *event)
 	request->completion_residual = residual;
 	request->completion_trb_offset = trb_offset;
 	request->completion_next = NULL;
+	if (request->terminal_status == DRV_USB_URB_STALL &&
+	    control_request == NULL &&
+	    (drv_usb_endpoint_type(drv_usb_urb_endpoint(request->urb)) ==
+		DRV_USB_TRANSFER_BULK ||
+	    drv_usb_endpoint_type(drv_usb_urb_endpoint(request->urb)) ==
+		DRV_USB_TRANSFER_INTERRUPT)) {
+		/* Keep HCD admission closed until drv_usb_hcd_complete() has latched
+		 * the STALL in the USB core.  Once the active request is unlinked,
+		 * this marker is the only HCD-side barrier against a same-endpoint TD
+		 * slipping into the completion-publication window. */
+		if (request->endpoint->recovering ||
+		    request->endpoint->stall_publishing ||
+		    c->endpoint_recoveries_busy == UINT_MAX)
+			__builtin_trap();
+		request->endpoint->recovering = 1U;
+		request->endpoint->stall_publishing = 1U;
+		c->endpoint_recoveries_busy++;
+		request->stall_publication = 1U;
+	}
 	if (atomic_raw_fetch_add_relaxed(&c->completion_busy, 1U) ==
 	    UINT_MAX)
 		__builtin_trap();
@@ -1215,6 +1248,8 @@ xhci_completion_finish(struct xhci_controller *c,
 	const struct drv_usb_control_request *control_request =
 	    drv_usb_urb_control_request(urb);
 	enum drv_usb_urb_status terminal_status = request->terminal_status;
+	struct xhci_endpoint *stall_endpoint = request->stall_publication ?
+	    request->endpoint : NULL;
 	size_t completion_actual = request->completion_actual;
 	unsigned long irq;
 
@@ -1252,6 +1287,15 @@ xhci_completion_finish(struct xhci_controller *c,
 	drv_usb_hcd_complete(&c->hcd, urb, terminal_status, completion_actual);
 
 	irq = spin_lock_irqsave(&c->active_lock);
+	/* transfer_claim incremented this device's completions_busy before unlink;
+	 * xhci_device_quiesce cannot release the endpoint graph until the marker is
+	 * cleared and that checked owner is dropped below. */
+	if (stall_endpoint != NULL) {
+		if (!stall_endpoint->stall_publishing)
+			__builtin_trap();
+		stall_endpoint->stall_publishing = 0U;
+		xhci_recovery_leave_locked(c, stall_endpoint);
+	}
 	if (device->completions_busy == 0)
 		__builtin_trap();
 	device->completions_busy--;
@@ -1449,6 +1493,36 @@ enqueue_normal(struct xhci_ring *ring, uint64_t address, size_t length,
 }
 
 static int
+xhci_endpoint_restart_empty(struct xhci_controller *c, struct xhci_device *d,
+	struct xhci_endpoint *endpoint, unsigned dci)
+{
+	uint64_t deadline;
+	unsigned state;
+
+	if (endpoint->ring.dma.address == NULL)
+		return EIO;
+	/* Set TR Dequeue points at the software producer, whose cycle bit denotes
+	 * an empty ring.  Ring the endpoint and require hardware to publish Running
+	 * before either recovery succeeds or cancelled DMA ownership is released. */
+	wr32(c->doorbells, d->slot * 4U, dci);
+	deadline = sched_ticks() + 100U;
+	for (;;) {
+		state = xhci_endpoint_state(c, d, dci);
+		if (state == DRV_XHCI_ENDPOINT_RUNNING)
+			return 0;
+		if (state == DRV_XHCI_ENDPOINT_DISABLED ||
+		    state == DRV_XHCI_ENDPOINT_HALTED ||
+		    state == DRV_XHCI_ENDPOINT_ERROR)
+			return EIO;
+		if (c->controller_stopping || c->dma_quiesced || d->quiescing)
+			return ENODEV;
+		if (sched_ticks() >= deadline)
+			return ETIMEDOUT;
+		sched_yield();
+	}
+}
+
+static int
 xhci_endpoint_recover(struct xhci_controller *c, struct xhci_device *d,
 	struct xhci_endpoint *endpoint, unsigned dci)
 {
@@ -1490,8 +1564,12 @@ xhci_endpoint_recover(struct xhci_controller *c, struct xhci_device *d,
 			error = command_ex(c, dequeue, 0,
 			    XHCI_TRB_TYPE(16) | (dci << 16) |
 				XHCI_TRB_SLOT(d->slot), NULL, &completion);
-			if (error == 0)
-				return 0;
+			if (error == 0) {
+				error = xhci_endpoint_restart_empty(c, d, endpoint,
+				    dci);
+				if (error == 0)
+					return 0;
+			}
 			break;
 		case DRV_XHCI_CANCEL_STOP_ENDPOINT:
 		case DRV_XHCI_CANCEL_QUIESCE_CONTROLLER:
@@ -1509,6 +1587,71 @@ xhci_endpoint_recover(struct xhci_controller *c, struct xhci_device *d,
 	    "xhci: slot %u endpoint %u recovery failed (%d, completion=%u, state=%u); new TD rejected\n",
 	    d->slot, dci, error, completion, state);
 	return error != 0 ? error : EIO;
+}
+
+static int
+xhci_endpoint_reset(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
+{
+	struct xhci_controller *c = hcd_controller(h);
+	struct xhci_device *d;
+	struct xhci_endpoint *endpoint;
+	enum drv_xhci_endpoint_reset_admission admission;
+	uint64_t wait_started;
+	unsigned dci;
+	unsigned long irq;
+	int error;
+
+	if (usbep == NULL)
+		return EINVAL;
+	d = xhci_usb_device(drv_usb_endpoint_device(usbep));
+	if (d == NULL)
+		return ENODEV;
+	dci = (drv_usb_endpoint_address(usbep) & 15U) * 2U +
+	    (drv_usb_endpoint_is_input(usbep) ? 1U : 0U);
+	if (dci < 2U || dci >= 32U)
+		return EINVAL;
+	endpoint = &d->endpoints[dci];
+	wait_started = sched_ticks();
+	for (;;) {
+		irq = spin_lock_irqsave(&c->active_lock);
+		if (!endpoint->enabled || endpoint->dci != dci ||
+		    endpoint->ring.dma.address == NULL || d->quiescing ||
+		    c->controller_stopping || c->dma_quiesced) {
+			error = !endpoint->enabled || d->quiescing ||
+			    c->controller_stopping || c->dma_quiesced ? ENODEV : EIO;
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			return error;
+		}
+		admission = drv_xhci_endpoint_reset_admit(
+		    endpoint->active != NULL, endpoint->recovering,
+		    endpoint->stall_publishing);
+		if (admission == DRV_XHCI_ENDPOINT_RESET_ACQUIRE) {
+			if (c->endpoint_recoveries_busy == UINT_MAX)
+				__builtin_trap();
+			endpoint->recovering = 1U;
+			c->endpoint_recoveries_busy++;
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			break;
+		}
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		if (admission != DRV_XHCI_ENDPOINT_RESET_WAIT_PUBLICATION)
+			return EBUSY;
+		/* drv_usb_urb_drain() may observe the core HCD reference drop just
+		 * before this completion thread releases its STALL publication owner.
+		 * Join only that bounded handoff; every other recovery remains EBUSY. */
+		if (sched_ticks() - wait_started >= 100U)
+			return EBUSY;
+		sched_yield();
+	}
+
+	error = xhci_endpoint_recover(c, d, endpoint, dci);
+	irq = spin_lock_irqsave(&c->active_lock);
+	if (error == 0 && (d->quiescing || c->controller_stopping ||
+	    c->dma_quiesced))
+		error = ENODEV;
+	xhci_recovery_leave_locked(c, endpoint);
+	spin_unlock_irqrestore(&c->active_lock, irq);
+	return error;
 }
 
 /*
@@ -1773,7 +1916,12 @@ xhci_urb_enqueue(struct drv_usb_hcd *h, struct drv_usb_urb *u)
 	r->slot = d->slot;
 	r->dci = dci;
 	r->port = drv_usb_device_port(drv_usb_urb_device(u));
-	e = xhci_endpoint_recover(c, d, ep, dci);
+	/* EP0 retains implicit checked recovery because a control STALL is not
+	 * core-latched.  Every nonzero endpoint must already be Running; only the
+	 * explicit endpoint_reset callback may issue its recovery commands. */
+	e = q != NULL ? xhci_endpoint_recover(c, d, ep, dci) :
+	    xhci_endpoint_state(c, d, dci) == DRV_XHCI_ENDPOINT_RUNNING ?
+		0 : EIO;
 	irq = spin_lock_irqsave(&c->active_lock);
 	if (e != 0 || ep->active != NULL || d->quiescing ||
 	    c->controller_stopping) {
@@ -1877,7 +2025,7 @@ xhci_cancel_request(struct xhci_controller *c, struct xhci_device *d,
 			    XHCI_TRB_TYPE(14) | (r->dci << 16) |
 				XHCI_TRB_SLOT(d->slot), NULL, &completion);
 			break;
-	case DRV_XHCI_CANCEL_SET_TR_DEQUEUE:
+		case DRV_XHCI_CANCEL_SET_TR_DEQUEUE:
 			/* Queue depth is one per endpoint.  The producer is the first
 			 * safe dequeue position after this endpoint's cancelled TD.  Keep
 			 * the owner published until this command completes so the same ring
@@ -1889,9 +2037,13 @@ xhci_cancel_request(struct xhci_controller *c, struct xhci_device *d,
 			    XHCI_TRB_TYPE(16) | (r->dci << 16) |
 				XHCI_TRB_SLOT(d->slot), NULL, &completion);
 			if (error == 0) {
-				releasable =
-				    drv_xhci_request_resources_releasable(1, 0);
-				goto release;
+				error = xhci_endpoint_restart_empty(c, d, ep,
+				    r->dci);
+				if (error == 0) {
+					releasable =
+					    drv_xhci_request_resources_releasable(1, 0);
+					goto release;
+				}
 			}
 			break;
 		case DRV_XHCI_CANCEL_QUIESCE_CONTROLLER:
@@ -2284,12 +2436,20 @@ xhci_root_port_reset(struct drv_usb_hcd *h, unsigned port)
 	portsc = rd32(c->operational, XHCI_PORTSC(index));
 	if (portsc == UINT32_MAX)
 		return EIO;
+	if ((portsc & XHCI_PORT_CSC) != 0)
+		return ENODEV;
 	if ((portsc & XHCI_PORT_CCS) == 0)
 		return ENODEV;
 	if ((portsc & XHCI_PORT_CHANGE) != 0)
 		wr32(c->operational, XHCI_PORTSC(index),
-		    (portsc & XHCI_PORT_PP) | (portsc & XHCI_PORT_CHANGE));
+		    (portsc & XHCI_PORT_PP) |
+			(portsc & (XHCI_PORT_CHANGE & ~XHCI_PORT_CSC)));
 	portsc = rd32(c->operational, XHCI_PORTSC(index));
+	if (portsc == UINT32_MAX)
+		return EIO;
+	if ((portsc & XHCI_PORT_CSC) != 0 ||
+	    (portsc & XHCI_PORT_CCS) == 0)
+		return ENODEV;
 	wr32(c->operational, XHCI_PORTSC(index),
 	    (portsc & XHCI_PORT_PP) | XHCI_PORT_PP | XHCI_PORT_PR);
 	deadline = sched_ticks() + 100U;
@@ -2299,9 +2459,14 @@ xhci_root_port_reset(struct drv_usb_hcd *h, unsigned port)
 		if (decision == DRV_XHCI_PORT_RESET_SUCCESS) {
 			wr32(c->operational, XHCI_PORTSC(index),
 			    (portsc & XHCI_PORT_PP) |
-				(portsc & XHCI_PORT_CHANGE));
-			hal_printf("xhci: port %u reset complete portsc=%08x\n",
-			    port, portsc);
+				(portsc &
+				    (XHCI_PORT_CHANGE & ~XHCI_PORT_CSC)));
+			portsc = rd32(c->operational, XHCI_PORTSC(index));
+			if (portsc == UINT32_MAX)
+				return EIO;
+			if ((portsc & XHCI_PORT_CSC) != 0 ||
+			    (portsc & XHCI_PORT_CCS) == 0)
+				return ENODEV;
 			{
 				/* Two 10-ms ticks guarantee at least one full recovery
 				 * interval even when reset completes on a tick boundary. */
@@ -2310,6 +2475,16 @@ xhci_root_port_reset(struct drv_usb_hcd *h, unsigned port)
 				while (sched_ticks() < recovery)
 					sched_yield();
 			}
+			/* The mandatory recovery delay is part of reset.  Preserve a
+			 * detach/reinsert edge which arrives during that interval too. */
+			portsc = rd32(c->operational, XHCI_PORTSC(index));
+			if (portsc == UINT32_MAX)
+				return EIO;
+			if ((portsc & XHCI_PORT_CSC) != 0 ||
+			    (portsc & XHCI_PORT_CCS) == 0)
+				return ENODEV;
+			hal_printf("xhci: port %u reset complete portsc=%08x\n",
+			    port, portsc);
 			return 0;
 		}
 		if (decision == DRV_XHCI_PORT_RESET_DISCONNECTED)
@@ -2796,6 +2971,20 @@ xhci_guarded_endpoint_enable(struct drv_usb_hcd *h,
 }
 
 static int
+xhci_guarded_endpoint_reset(struct drv_usb_hcd *h,
+	struct drv_usb_endpoint *endpoint)
+{
+	struct xhci_controller *c = hcd_controller(h);
+	int error = xhci_operation_enter(c);
+
+	if (error != 0)
+		return error;
+	error = xhci_endpoint_reset(h, endpoint);
+	xhci_operation_leave(c);
+	return error;
+}
+
+static int
 xhci_guarded_endpoint_disable(struct drv_usb_hcd *h,
 	struct drv_usb_endpoint *endpoint)
 {
@@ -2877,6 +3066,7 @@ static const struct drv_usb_hcd_ops xhci_ops = {
     .urb_dequeue = xhci_guarded_urb_dequeue,
     .endpoint_enable = xhci_guarded_endpoint_enable,
     .endpoint_disable = xhci_guarded_endpoint_disable,
+    .endpoint_reset = xhci_guarded_endpoint_reset,
     .frame_number = xhci_guarded_frame,
     .root_hub_status = xhci_guarded_root_status,
     .root_hub_control = xhci_guarded_root_control,

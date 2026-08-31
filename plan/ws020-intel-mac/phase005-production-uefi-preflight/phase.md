@@ -24,6 +24,24 @@ The photographed boot device is the independent `30de:6544` USB Mass Storage
 device registered as `sda`; failure to attach the unused internal reader is not
 a prerequisite for booting zedBSD.
 
+The later q047 photograph confirms that this separate device is not a boot
+dependency. The local USB ID database identifies `05ac:8406` as Apple's
+Internal Memory Card Reader. Its `INQUIRY` completed, then exactly three
+`TEST UNIT READY` commands returned valid BOT command-failed CSWs; enumeration
+continued to `boot: parameters` afterwards. That is a SCSI logical-unit state,
+not a BOT transport, xHCI recovery, or boot-order failure.
+
+The bounded follow-up now decodes the associated REQUEST SENSE result. A
+removable direct-access LUN reporting `NOT READY / MEDIUM NOT PRESENT`
+(`02/3a/xx`) is retained as an idle `usb-storage` interface without publishing
+a zero-sized disk, and therefore produces neither `attach-failed error=5` nor
+the generic CHECK CONDITION lines. The expected class diagnostic is exactly
+one `usb-storage: LUN 0 has no medium; reader attached without a disk`, followed
+by the USB core's ordinary `driver=usb-storage` binding line. Other readiness
+failures remain errors and print their exact sense tuple. Media-insertion
+polling and dynamically publishing a disk for this reader remain outside this
+Phase.
+
 ## Trigger and diagnosis
 
 The Intel Mac observation used UUID `0B40-6EB0` and reported three GPT entries.

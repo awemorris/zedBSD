@@ -27,6 +27,7 @@
 #define DRV_XHCI_PORTSC_PED	0x00000002U
 #define DRV_XHCI_PORTSC_PR	0x00000010U
 #define DRV_XHCI_PORTSC_PLS_MASK	0x000001e0U
+#define DRV_XHCI_PORTSC_CSC	0x00020000U
 #define DRV_XHCI_PORTSC_PRC	0x00200000U
 
 enum drv_xhci_control_data {
@@ -40,6 +41,12 @@ enum drv_xhci_port_reset_decision {
 	DRV_XHCI_PORT_RESET_SUCCESS,
 	DRV_XHCI_PORT_RESET_DISCONNECTED,
 	DRV_XHCI_PORT_RESET_INVALID
+};
+
+enum drv_xhci_endpoint_reset_admission {
+	DRV_XHCI_ENDPOINT_RESET_ACQUIRE,
+	DRV_XHCI_ENDPOINT_RESET_WAIT_PUBLICATION,
+	DRV_XHCI_ENDPOINT_RESET_BUSY
 };
 
 struct drv_xhci_trb_words {
@@ -63,6 +70,23 @@ static inline unsigned
 drv_xhci_port_speed_id(uint32_t portsc)
 {
 	return (portsc >> 10) & 15U;
+}
+
+/* A STALL completion temporarily owns endpoint recovery while it hands the
+ * hardware result to the USB core.  The reset worker may wait for that one
+ * owner because the core halt latch is already published before the HCD URB
+ * reference is released.  It must reject an active TD or every other recovery
+ * owner instead of accidentally joining an unrelated command transaction. */
+static inline enum drv_xhci_endpoint_reset_admission
+drv_xhci_endpoint_reset_admit(unsigned active, unsigned recovering,
+	unsigned stall_publishing)
+{
+	if (active || (stall_publishing && !recovering))
+		return DRV_XHCI_ENDPOINT_RESET_BUSY;
+	if (!recovering)
+		return DRV_XHCI_ENDPOINT_RESET_ACQUIRE;
+	return stall_publishing ? DRV_XHCI_ENDPOINT_RESET_WAIT_PUBLICATION :
+	    DRV_XHCI_ENDPOINT_RESET_BUSY;
 }
 
 static inline uint32_t
@@ -289,6 +313,11 @@ drv_xhci_port_reset_status(uint32_t portsc)
 {
 	if (portsc == UINT32_MAX)
 		return DRV_XHCI_PORT_RESET_INVALID;
+	/* A latched connection-status edge may represent a fast detach/reinsert
+	 * even when CCS is set again.  Never accept reset completion for the old
+	 * device generation across that edge. */
+	if ((portsc & DRV_XHCI_PORTSC_CSC) != 0)
+		return DRV_XHCI_PORT_RESET_DISCONNECTED;
 	if ((portsc & DRV_XHCI_PORTSC_CCS) == 0)
 		return DRV_XHCI_PORT_RESET_DISCONNECTED;
 	if ((portsc & DRV_XHCI_PORTSC_PR) != 0 ||

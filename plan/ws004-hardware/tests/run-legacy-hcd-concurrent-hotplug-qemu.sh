@@ -25,6 +25,10 @@ hotplug_timeout=${HOTPLUG_TIMEOUT_SECONDS:-30}
 cell_timeout=${CELL_TIMEOUT_SECONDS:-600}
 stage_delay=${STAGE_DELAY_SECONDS:-30}
 key_delay=${KEY_DELAY_SECONDS:-0.03}
+# Keep the phase acceptance default at both cells while allowing a failure
+# investigation to execute one named cell without retrying or cloning the
+# runner.  Evidence records the selected topology explicitly.
+diagnostic_cells=${LEGACY_HCD_CELLS:-"uhci paired"}
 # The first read admitted by QEMU's token bucket can complete immediately.
 # A 4-KiB priming read immediately before the observed read therefore leaves
 # two seconds of nominal debt at 2 KiB/s.  This is deliberately much longer
@@ -46,6 +50,21 @@ case $key_delay in
 		echo "KEY_DELAY_SECONDS must be a non-negative decimal" >&2
 		exit 2
 	;;
+esac
+case $diagnostic_cells in
+	uhci)
+		cell_description=standalone-UHCI
+		;;
+	paired)
+		cell_description=paired-EHCI-with-three-UHCI-companions
+		;;
+	'uhci paired')
+		cell_description=standalone-UHCI,paired-EHCI-with-three-UHCI-companions
+		;;
+	*)
+		echo "LEGACY_HCD_CELLS must be 'uhci', 'paired', or 'uhci paired'" >&2
+		exit 2
+		;;
 esac
 
 test -f "$ovmf_code" || { echo "OVMF code not found: $ovmf_code" >&2; exit 2; }
@@ -109,7 +128,7 @@ printf 'cell\tresult\tevidence\n' >"$results"
 	echo "source_boot_sha256_before=$boot_digest"
 	echo "source_auxiliary=$source_auxiliary"
 	echo "source_auxiliary_sha256_before=$auxiliary_digest"
-	echo "cells=standalone-UHCI,paired-EHCI-with-three-UHCI-companions"
+	echo "cells=$cell_description"
 	echo "hotplug_cycles_per_cell=11"
 	echo "storage_bytes_per_read=4096"
 	echo "storage_throttle_read_bps=$storage_read_bps"
@@ -1150,6 +1169,7 @@ run_cell()
 	echo "HW-T25 QEMU $cell_kind: PASS"
 }
 
-run_cell uhci
-run_cell paired
+for diagnostic_cell in $diagnostic_cells; do
+	run_cell "$diagnostic_cell"
+done
 exit 0

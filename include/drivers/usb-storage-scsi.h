@@ -86,6 +86,23 @@ drv_usb_scsi_sense_is_invalid_opcode(
 }
 
 /*
+ * A current NOT READY / MEDIUM NOT PRESENT is the ordinary state of an empty
+ * removable reader. ASCQ refines the reason (tray open, unloaded, and so on),
+ * but every value under ASC 3Ah means that no block medium can be published
+ * yet. Deferred responses (71h/73h) describe an earlier command and therefore
+ * cannot establish why this TEST UNIT READY failed.
+ */
+static inline int
+drv_usb_scsi_sense_is_medium_absent(
+	const struct drv_usb_scsi_sense *sense)
+{
+	return sense != NULL && sense->valid != 0 &&
+	    (sense->response_code == 0x70U ||
+	     sense->response_code == 0x72U) &&
+	    sense->key == 0x02U && sense->asc == 0x3aU;
+}
+
+/*
  * Parse the current-values MODE SENSE(6) parameter list for Caching page 08h.
  * The returned boolean says whether cache_valid is set.  Declared bytes past
  * the actual transfer, invalid block/page lengths, a subpage-form caching

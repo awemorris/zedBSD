@@ -81,6 +81,14 @@ uhci_finish=$(sed -n '/uhci_finish_completion(/,/^}/p' "$uhci")
 uhci_dequeue=$(sed -n '/uhci_urb_dequeue(/,/^}/p' "$uhci")
 uhci_schedule_initialize=$(sed -n \
 	'/^uhci_schedule_initialize(/,/^}/p' "$uhci")
+uhci_schedule_release=$(sed -n '/^uhci_schedule_release(/,/^}/p' "$uhci")
+uhci_reclaim_acquire=$(sed -n \
+	'/^uhci_reclaim_request_acquire(/,/^}/p' "$uhci")
+uhci_request_free=$(sed -n \
+	'/^static void uhci_request_free(/,/^}/p' "$uhci")
+uhci_request_sets_empty=$(sed -n \
+	'/^uhci_request_sets_empty_locked(/,/^}/p' "$uhci")
+uhci_retirement_fail=$(sed -n '/^uhci_retirement_fail(/,/^}/p' "$uhci")
 uhci_retirement_start=$(sed -n \
 	'/^uhci_retirement_worker_start(/,/^}/p' "$uhci")
 uhci_root_start=$(sed -n '/^uhci_root_worker_start(/,/^}/p' "$uhci")
@@ -94,6 +102,51 @@ for contract in 'length > SIZE_MAX - 8U' 'uhci_endpoint_parameters' \
     'r->td_count != required_tds' 'EOVERFLOW'; do
 	printf '%s\n' "$uhci_build" | grep -q "$contract"
 done
+
+# Reclaim-safe recovery must use the single request/schedule/bounce graph
+# allocated at controller start.  The acquisition function is an explicit
+# allocation-forbidden region, and ambiguous retirement keeps that graph busy
+# instead of returning it to a later URB.
+for contract in DRV_USB_URB_RECLAIM_SAFE \
+    'uhci_reclaim_request_acquire(c, length, &r)' \
+    'if (!r->reclaim_reserved)' drv_dma_alloc_coherent hal_malloc; do
+	printf '%s\n' "$uhci_build" | grep -Fq -- "$contract"
+done
+for contract in DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE \
+    'sizeof(struct drv_usb_control_request)' reclaim_request_busy EBUSY \
+    'request->reclaim_reserved = true'; do
+	printf '%s\n' "$uhci_reclaim_acquire" | grep -Fq -- "$contract"
+done
+if printf '%s\n' "$uhci_reclaim_acquire" | \
+    grep -Eq 'hal_malloc|drv_dma_alloc_coherent'; then
+	echo 'UHCI source gate: reclaim enqueue can allocate memory' >&2
+	exit 1
+fi
+for contract in 'DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE +' \
+    'sizeof(struct drv_usb_control_request)' \
+    '&controller->reclaim_request.schedule' \
+    '&controller->reclaim_request.bounce'; do
+	printf '%s\n' "$uhci_schedule_initialize" | grep -Fq -- "$contract"
+done
+for contract in 'if (r->reclaim_reserved)' \
+    'c->reclaim_request_busy = 0' 'r->schedule = schedule' \
+    'r->bounce = bounce'; do
+	printf '%s\n' "$uhci_request_free" | grep -Fq -- "$contract"
+done
+for contract in reclaim_request_busy reclaim_request.schedule \
+    reclaim_request.bounce; do
+	printf '%s\n' "$uhci_schedule_release" | grep -Fq -- "$contract"
+done
+printf '%s\n' "$uhci_request_sets_empty" | grep -Fq -- \
+	'controller->reclaim_request_busy != 0'
+printf '%s\n' "$uhci_pci_release" | grep -Fq -- \
+	'controller->reclaim_request_busy != 0'
+printf '%s\n' "$uhci_retirement_fail" | grep -Fq -- \
+	'request->state = UHCI_REQUEST_FAILED'
+if printf '%s\n' "$uhci_retirement_fail" | grep -Fq 'uhci_request_free'; then
+	echo 'UHCI source gate: ambiguous retirement releases reclaim DMA' >&2
+	exit 1
+fi
 grep -q '(descriptor->maximum_packet_size & 0xf800U) != 0' "$uhci"
 grep -q 'data_count > UHCI_MAX_TDS - 2U' "$uhci"
 printf '%s\n' "$uhci_interval" | grep -q \
@@ -126,8 +179,10 @@ printf '%s\n' "$uhci_dequeue" | grep -q \
 
 # Early Intel UHCI can leave QH.element on an inactive successful TD.  The
 # production workaround must observe the exact same request-local candidate
-# across a later healthy raw FRNUM, then copy the immutable TD link.  It must
-# not synthesize a pointer, advance an error/final/SPD-short TD, or run from IRQ.
+# across later healthy raw FRNUM and the established 200-ms stuck threshold,
+# then copy the immutable TD link.  A successor made inactive by normal HC
+# progress is left to the IRQ terminal path.  The workaround must not synthesize
+# a pointer, advance an error/final/SPD-short TD, or run from IRQ.
 for contract in advance_candidate advance_element advance_status \
     advance_frame advance_started_tick; do
 	grep -q "$contract" "$uhci"
@@ -139,6 +194,8 @@ for contract in hal_io_rmb 'request->qh->element' UHCI_LINK_ADDRESS \
 	'(next_status & UHCI_TD_ACTIVE) == 0'; do
 	printf '%s\n' "$uhci_advance_snapshot" | grep -Fq -- "$contract"
 done
+printf '%s\n' "$uhci_advance_snapshot" | \
+	grep -A1 -F '(next_status & UHCI_TD_ACTIVE) == 0' | grep -Fq 'return 0'
 snapshot_barrier_line=$(printf '%s\n' "$uhci_advance_snapshot" | \
 	grep -n 'hal_io_rmb' | head -1 | cut -d: -f1)
 snapshot_element_line=$(printf '%s\n' "$uhci_advance_snapshot" | \
@@ -152,23 +209,29 @@ for contract in 'request->state != UHCI_REQUEST_ACTIVE' \
     '!request->scheduled' 'request->advance_candidate == index + 1U' \
     'request->advance_element == element' \
     'request->advance_status == status' \
-    'frame != request->advance_frame' 'request->qh->element = link' \
+    'frame != request->advance_frame' UHCI_QH_STALL_TICKS \
+    'request->qh->element = link' \
     hal_io_wmb UHCI_RETIRE_TICKS; do
 	printf '%s\n' "$uhci_qh_progress" | grep -Fq -- "$contract"
 done
 fresh_line=$(printf '%s\n' "$uhci_qh_progress" | \
 	grep -n 'frame != request->advance_frame' | head -1 | cut -d: -f1)
+stable_line=$(printf '%s\n' "$uhci_qh_progress" | \
+	grep -n 'UHCI_QH_STALL_TICKS' | head -1 | cut -d: -f1)
 element_write_line=$(printf '%s\n' "$uhci_qh_progress" | \
 	grep -n 'request->qh->element = link' | head -1 | cut -d: -f1)
 write_barrier_line=$(printf '%s\n' "$uhci_qh_progress" | \
 	grep -n 'hal_io_wmb' | head -1 | cut -d: -f1)
-if [ -z "$fresh_line" ] || [ -z "$element_write_line" ] || \
+if [ -z "$fresh_line" ] || [ -z "$stable_line" ] || \
+    [ -z "$element_write_line" ] || \
     [ -z "$write_barrier_line" ] || \
-    [ "$fresh_line" -ge "$element_write_line" ] || \
+    [ "$fresh_line" -ge "$stable_line" ] || \
+    [ "$stable_line" -ge "$element_write_line" ] || \
     [ "$element_write_line" -ge "$write_barrier_line" ]; then
-	echo 'UHCI source gate: QH repair lacks fresh-frame/write publication order' >&2
+	echo 'UHCI source gate: QH repair lacks fresh-frame/stability/write order' >&2
 	exit 1
 fi
+grep -q '^#define UHCI_QH_STALL_TICKS 20U$' "$uhci"
 for contract in UHCI_FRNUM UHCI_USBSTS UHCI_USBCMD UHCI_FRNUM_MASK \
     UHCI_CMD_RUN UHCI_STS_HOST_SYSTEM_ERROR UHCI_STS_PROCESS_ERROR \
     UHCI_STS_HALTED hal_io_mb; do
@@ -394,6 +457,21 @@ ehci_retire_periodic=$(sed -n \
 ehci_parameters=$(sed -n '/^ehci_periodic_parameters(/,/^}/p' "$ehci")
 ehci_schedule_initialize=$(sed -n \
 	'/^ehci_schedule_initialize(/,/^}/p' "$ehci")
+ehci_schedule_release=$(sed -n '/^ehci_schedule_release(/,/^}/p' "$ehci")
+ehci_reclaim_acquire=$(sed -n \
+	'/^ehci_reclaim_request_acquire(/,/^}/p' "$ehci")
+ehci_request_free=$(sed -n '/^ehci_request_free(/,/^}/p' "$ehci")
+ehci_unpublished_discard=$(sed -n \
+	'/^ehci_unpublished_request_discard(/,/^}/p' "$ehci")
+ehci_controller_fail=$(sed -n \
+	'/^ehci_controller_fail_locked(/,/^}/p' "$ehci")
+ehci_shutdown=$(sed -n \
+	'/^ehci_report_shutdown_evidence(/,/^}/p' "$ehci")
+ehci_quiesce_requests=$(sed -n \
+	'/^ehci_quiesce_requests(/,/^}/p' "$ehci")
+ehci_quiesce=$(sed -n '/^ehci_quiesce(/,/^}/p' "$ehci")
+ehci_stop=$(sed -n '/^ehci_stop(/,/^}/p' "$ehci")
+ehci_pci_release=$(sed -n '/^ehci_pci_release(/,/^}/p' "$ehci")
 ehci_begin_iaa=$(sed -n \
 	'/^ehci_retirement_begin_iaa_locked(/,/^}/p' "$ehci")
 ehci_observe_iaa=$(sed -n \
@@ -428,6 +506,60 @@ printf '%s\n' "$ehci_periodic" | grep -q \
 	'ehci_active_insert_locked(controller, request)'
 printf '%s\n' "$ehci_periodic" | grep -q \
 	'ehci_periodic_insert_locked(controller, request)'
+
+# EHCI has the same controller-start reclaim reserve.  Its unpublished discard
+# keeps the builder lifetime through the final reserve/DMA release, while every
+# teardown proof independently refuses to free a busy reserve.
+for contract in DRV_USB_URB_RECLAIM_SAFE \
+    'ehci_reclaim_request_acquire(controller, length,' \
+    'if (!request->reclaim_reserved)' drv_dma_alloc_coherent hal_malloc; do
+	printf '%s\n' "$ehci_build" | grep -Fq -- "$contract"
+done
+for contract in DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE \
+    'sizeof(struct drv_usb_control_request)' reclaim_request_busy EBUSY \
+    'request->reclaim_reserved = true'; do
+	printf '%s\n' "$ehci_reclaim_acquire" | grep -Fq -- "$contract"
+done
+if printf '%s\n' "$ehci_reclaim_acquire" | \
+    grep -Eq 'hal_malloc|drv_dma_alloc_coherent'; then
+	echo 'EHCI source gate: reclaim enqueue can allocate memory' >&2
+	exit 1
+fi
+for contract in 'DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE +' \
+    'sizeof(struct drv_usb_control_request)' \
+    '&controller->reclaim_request.schedule' \
+    '&controller->reclaim_request.bounce'; do
+	printf '%s\n' "$ehci_schedule_initialize" | grep -Fq -- "$contract"
+done
+for contract in 'if (request->reclaim_reserved)' \
+    'controller->reclaim_request_busy = 0' \
+    'request->schedule = schedule' 'request->bounce = bounce'; do
+	printf '%s\n' "$ehci_request_free" | grep -Fq -- "$contract"
+done
+discard_free_line=$(printf '%s\n' "$ehci_unpublished_discard" | \
+	grep -n 'ehci_request_free(controller, request)' | cut -d: -f1)
+discard_leave_line=$(printf '%s\n' "$ehci_unpublished_discard" | \
+	grep -n 'ehci_builder_leave(controller)' | cut -d: -f1)
+if [ -z "$discard_free_line" ] || [ -z "$discard_leave_line" ] || \
+    [ "$discard_free_line" -ge "$discard_leave_line" ]; then
+	echo 'EHCI source gate: unpublished request outlives builder pin' >&2
+	exit 1
+fi
+for contract in reclaim_request_busy reclaim_request.schedule \
+    reclaim_request.bounce; do
+	printf '%s\n' "$ehci_schedule_release" | grep -Fq -- "$contract"
+done
+for body in "$ehci_quiesce_requests" "$ehci_shutdown" "$ehci_quiesce" \
+    "$ehci_stop" \
+    "$ehci_pci_release"; do
+	printf '%s\n' "$body" | grep -Fq -- 'reclaim_request_busy'
+done
+printf '%s\n' "$ehci_controller_fail" | grep -Fq -- \
+	'request->state = EHCI_REQUEST_FAILED'
+if printf '%s\n' "$ehci_controller_fail" | grep -Fq 'ehci_request_free'; then
+	echo 'EHCI source gate: ambiguous retirement releases reclaim DMA' >&2
+	exit 1
+fi
 
 # High-speed bInterval is an exponent in microframes, not a frame interval.
 # Prove every legal service-mask form, the 1,024-frame representable limit,
@@ -619,9 +751,9 @@ grep -q 'ehci: root hotplug worker active' "$ehci"
 # HCD registration, and each independently published worker.  Creation precedes
 # pointer publication, which precedes thread_start, for all four HCD workers.
 if [ "$(printf '%s\n' "$uhci_schedule_initialize" | \
-    grep -c 'drv_dma_alloc_coherent')" -ne 2 ] ||
+	grep -c 'drv_dma_alloc_coherent')" -ne 4 ] ||
     [ "$(printf '%s\n' "$ehci_schedule_initialize" | \
-    grep -c 'drv_dma_alloc_coherent')" -ne 3 ]; then
+	grep -c 'drv_dma_alloc_coherent')" -ne 5 ]; then
 	echo 'legacy HCD source gate: schedule allocation stages changed' >&2
 	exit 1
 fi

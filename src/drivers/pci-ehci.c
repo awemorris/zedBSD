@@ -11,6 +11,7 @@
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
+#include <limits.h>
 #include <string.h>
 
 #define EHCI_USBCMD 0x00U
@@ -94,6 +95,7 @@
 #define EHCI_PERIODIC_BUDGET_BITS 48000U
 #define EHCI_PERIODIC_TRANSACTION_BITS 512U
 #define EHCI_MAX_ROOT_PORTS 15U
+#define EHCI_ENDPOINT_STALL_PUBLISHING_SLOT 1U
 
 enum ehci_request_state {
 	EHCI_REQUEST_ACTIVE,
@@ -172,6 +174,7 @@ struct ehci_request {
 	const char *failure_stage;
 	int failure_error;
 	unsigned failure_reported;
+	bool reclaim_reserved;
 };
 
 struct ehci_controller {
@@ -199,6 +202,7 @@ struct ehci_controller {
 	struct ehci_request *iaa_owner;
 	struct thread *retirement_worker;
 	struct thread *root_worker;
+	struct ehci_request reclaim_request;
 	struct ehci_controller *next;
 	uint64_t retirement_generation;
 	unsigned periodic_phase_next[EHCI_PERIODIC_LEVELS];
@@ -214,6 +218,8 @@ struct ehci_controller {
 	unsigned quiescing;
 	unsigned builders;
 	unsigned active_count;
+	unsigned completion_inflight;
+	unsigned reclaim_request_busy;
 	unsigned periodic_updating;
 	unsigned listed;
 	unsigned quarantined;
@@ -475,6 +481,16 @@ ehci_periodic_release_locked(struct ehci_controller *controller,
 static void
 ehci_schedule_release(struct ehci_controller *controller)
 {
+	if (controller->reclaim_request_busy)
+		__builtin_trap();
+	if (controller->reclaim_request.schedule.address != NULL)
+		drv_dma_free_coherent(controller->hcd.dma,
+		    &controller->reclaim_request.schedule);
+	if (controller->reclaim_request.bounce.address != NULL)
+		drv_dma_free_coherent(controller->hcd.dma,
+		    &controller->reclaim_request.bounce);
+	memset(&controller->reclaim_request, 0,
+	    sizeof(controller->reclaim_request));
 	if (controller->async_head_memory.address != NULL) {
 		drv_dma_free_coherent(controller->hcd.dma,
 		    &controller->async_head_memory);
@@ -516,13 +532,27 @@ ehci_schedule_initialize(struct ehci_controller *controller)
 	    &controller->async_head_memory);
 	if (error != 0)
 		goto fail;
+	error = drv_dma_alloc_coherent(controller->hcd.dma, 4096U, 64U,
+	    &controller->reclaim_request.schedule);
+	if (error != 0)
+		goto fail;
+	error = drv_dma_alloc_coherent(controller->hcd.dma,
+	    DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE +
+	    sizeof(struct drv_usb_control_request), 64U,
+	    &controller->reclaim_request.bounce);
+	if (error != 0)
+		goto fail;
 	if (!ehci_dma_buffer_is_32bit(&controller->periodic) ||
 	    !ehci_dma_buffer_is_32bit(
 	    &controller->periodic_skeleton_memory) ||
-	    !ehci_dma_buffer_is_32bit(&controller->async_head_memory)) {
+	    !ehci_dma_buffer_is_32bit(&controller->async_head_memory) ||
+	    !ehci_dma_buffer_is_32bit(
+	    &controller->reclaim_request.schedule) ||
+	    !ehci_dma_buffer_is_32bit(&controller->reclaim_request.bounce)) {
 		error = EOVERFLOW;
 		goto fail;
 	}
+	controller->reclaim_request.reclaim_reserved = true;
 
 	controller->periodic_skeleton =
 	    controller->periodic_skeleton_memory.address;
@@ -660,6 +690,7 @@ ehci_start(struct drv_usb_hcd *hcd)
 	controller->quiescing = 0;
 	controller->builders = 0;
 	controller->active_count = 0;
+	controller->completion_inflight = 0;
 	controller->active = NULL;
 	controller->async_first = NULL;
 	controller->async_last = NULL;
@@ -933,13 +964,71 @@ static void
 ehci_request_free(struct ehci_controller *controller,
 	struct ehci_request *request)
 {
+	struct drv_dma_buffer schedule, bounce;
+	unsigned long irq;
+
 	if (request == NULL)
 		return;
+	if (request->periodic_reserved)
+		__builtin_trap();
+	if (request->reclaim_reserved) {
+		if (request != &controller->reclaim_request)
+			__builtin_trap();
+		schedule = request->schedule;
+		bounce = request->bounce;
+		memset(request, 0, sizeof(*request));
+		request->schedule = schedule;
+		request->bounce = bounce;
+		request->reclaim_reserved = true;
+		irq = spin_lock_irqsave(&controller->active_lock);
+		if (!controller->reclaim_request_busy) {
+			spin_unlock_irqrestore(&controller->active_lock, irq);
+			__builtin_trap();
+		}
+		controller->reclaim_request_busy = 0;
+		spin_unlock_irqrestore(&controller->active_lock, irq);
+		return;
+	}
 	if (request->schedule.address != NULL)
 		drv_dma_free_coherent(controller->hcd.dma, &request->schedule);
 	if (request->bounce.address != NULL)
 		drv_dma_free_coherent(controller->hcd.dma, &request->bounce);
 	hal_free(request);
+}
+
+static int
+ehci_reclaim_request_acquire(struct ehci_controller *controller,
+	size_t length, struct ehci_request **result)
+{
+	struct drv_dma_buffer schedule, bounce;
+	struct ehci_request *request = &controller->reclaim_request;
+	unsigned long irq;
+	int error = 0;
+
+	*result = NULL;
+	if (length > DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE)
+		return EMSGSIZE;
+	irq = spin_lock_irqsave(&controller->active_lock);
+	if (request->schedule.address == NULL ||
+	    request->schedule.size < 4096U || request->bounce.address == NULL ||
+	    request->bounce.size < DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE +
+	    sizeof(struct drv_usb_control_request))
+		error = ENOMEM;
+	else if (controller->reclaim_request_busy)
+		error = EBUSY;
+	else
+		controller->reclaim_request_busy = 1U;
+	schedule = request->schedule;
+	bounce = request->bounce;
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+	if (error != 0)
+		return error;
+	memset(request, 0, sizeof(*request));
+	request->schedule = schedule;
+	request->bounce = bounce;
+	request->reclaim_reserved = true;
+	*result = request;
+	return 0;
 }
 
 static int
@@ -1058,10 +1147,17 @@ ehci_build_request(struct ehci_controller *controller,
 	}
 	if (required_qtds > EHCI_MAX_QTDS)
 		return E2BIG;
-	request = hal_malloc(sizeof(*request));
-	if (request == NULL)
-		return ENOMEM;
-	memset(request, 0, sizeof(*request));
+	if ((drv_usb_urb_flags(urb) & DRV_USB_URB_RECLAIM_SAFE) != 0) {
+		error = ehci_reclaim_request_acquire(controller, length,
+		    &request);
+		if (error != 0)
+			return error;
+	} else {
+		request = hal_malloc(sizeof(*request));
+		if (request == NULL)
+			return ENOMEM;
+		memset(request, 0, sizeof(*request));
+	}
 	request->urb = urb;
 	request->endpoint = endpoint;
 	request->state = EHCI_REQUEST_ACTIVE;
@@ -1078,16 +1174,19 @@ ehci_build_request(struct ehci_controller *controller,
 		    (payload * 56U + 5U) / 6U;
 	}
 
-	error = drv_dma_alloc_coherent(controller->hcd.dma, 4096U, 64U,
-	    &request->schedule);
-	if (error != 0) {
-		hal_free(request);
-		return error;
+	if (!request->reclaim_reserved) {
+		error = drv_dma_alloc_coherent(controller->hcd.dma, 4096U, 64U,
+		    &request->schedule);
+		if (error != 0) {
+			hal_free(request);
+			return error;
+		}
+		error = drv_dma_alloc_coherent(controller->hcd.dma,
+		    length + sizeof(struct drv_usb_control_request), 64U,
+		    &request->bounce);
+		if (error != 0)
+			goto fail;
 	}
-	error = drv_dma_alloc_coherent(controller->hcd.dma, length + 8U, 64U,
-	    &request->bounce);
-	if (error != 0)
-		goto fail;
 	if (!ehci_dma_buffer_is_32bit(&request->schedule) ||
 	    !ehci_dma_buffer_is_32bit(&request->bounce)) {
 		error = EOVERFLOW;
@@ -1372,6 +1471,18 @@ ehci_builder_leave(struct ehci_controller *controller)
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
+static void
+ehci_unpublished_request_discard(struct ehci_controller *controller,
+	struct ehci_request *request)
+{
+	/* builders is the lifetime pin for both the controller-owned reclaim
+	 * reserve and an ordinary request's DMA allocator.  Drop it only after the
+	 * private request has been returned; quiesce may release the whole schedule
+	 * as soon as the counter reaches zero. */
+	ehci_request_free(controller, request);
+	ehci_builder_leave(controller);
+}
+
 static int
 ehci_periodic_update_acquire(struct ehci_controller *controller,
 	int retirement)
@@ -1523,7 +1634,9 @@ ehci_publish_async_request(struct ehci_controller *controller,
 		    __ATOMIC_ACQUIRE) != 0) {
 			error = ENODEV;
 		} else if (ehci_endpoint_owner_locked(controller,
-		    request->endpoint) != NULL) {
+		    request->endpoint) != NULL ||
+		    drv_usb_endpoint_hcd_data(request->endpoint,
+		    EHCI_ENDPOINT_STALL_PUBLISHING_SLOT) != 0) {
 			error = EBUSY;
 		} else if (controller->iaa_owner != NULL) {
 			spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -1539,11 +1652,8 @@ ehci_publish_async_request(struct ehci_controller *controller,
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 			return 0;
 		}
-		if (controller->builders == 0)
-			__builtin_trap();
-		controller->builders--;
 		spin_unlock_irqrestore(&controller->active_lock, irq);
-		ehci_request_free(controller, request);
+		ehci_unpublished_request_discard(controller, request);
 		return error;
 	}
 }
@@ -1560,8 +1670,7 @@ ehci_publish_periodic_request(struct ehci_controller *controller,
 
 	error = ehci_periodic_update_acquire(controller, 0);
 	if (error != 0) {
-		ehci_builder_leave(controller);
-		ehci_request_free(controller, request);
+		ehci_unpublished_request_discard(controller, request);
 		return error;
 	}
 	error = ehci_periodic_pause(controller);
@@ -1571,9 +1680,8 @@ ehci_publish_periodic_request(struct ehci_controller *controller,
 		    "periodic publication pause");
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		ehci_periodic_update_release(controller);
-		ehci_builder_leave(controller);
-		ehci_request_free(controller, request);
 		ehci_retirement_worker_wakeup(controller);
+		ehci_unpublished_request_discard(controller, request);
 		return error;
 	}
 
@@ -1586,7 +1694,9 @@ ehci_publish_periodic_request(struct ehci_controller *controller,
 	    __ATOMIC_ACQUIRE) != 0)
 		error = ENODEV;
 	else if (ehci_endpoint_owner_locked(controller,
-	    request->endpoint) != NULL)
+	    request->endpoint) != NULL ||
+	    drv_usb_endpoint_hcd_data(request->endpoint,
+	    EHCI_ENDPOINT_STALL_PUBLISHING_SLOT) != 0)
 		error = EBUSY;
 	else {
 		unsigned frame_offset, frame_start;
@@ -1655,7 +1765,8 @@ ehci_publish_periodic_request(struct ehci_controller *controller,
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 	resume_error = ehci_periodic_resume(controller);
 	ehci_periodic_update_release(controller);
-	ehci_builder_leave(controller);
+	if (accepted)
+		ehci_builder_leave(controller);
 
 	if (resume_error != 0) {
 		irq = spin_lock_irqsave(&controller->active_lock);
@@ -1665,11 +1776,11 @@ ehci_publish_periodic_request(struct ehci_controller *controller,
 		ehci_retirement_worker_wakeup(controller);
 		if (accepted)
 			return 0;
-		ehci_request_free(controller, request);
+		ehci_unpublished_request_discard(controller, request);
 		return resume_error;
 	}
 	if (!accepted) {
-		ehci_request_free(controller, request);
+		ehci_unpublished_request_discard(controller, request);
 		return error;
 	}
 	return 0;
@@ -1697,6 +1808,11 @@ ehci_urb_enqueue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 		return ENODEV;
 	}
 	if (ehci_endpoint_owner_locked(controller, endpoint) != NULL) {
+		spin_unlock_irqrestore(&controller->active_lock, irq);
+		return EBUSY;
+	}
+	if (drv_usb_endpoint_hcd_data(endpoint,
+	    EHCI_ENDPOINT_STALL_PUBLISHING_SLOT) != 0) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		return EBUSY;
 	}
@@ -1988,9 +2104,11 @@ ehci_complete_retired_request(struct ehci_controller *controller,
 	struct ehci_request *request)
 {
 	struct drv_usb_urb *urb = request->urb;
+	struct drv_usb_endpoint *endpoint = request->endpoint;
 	enum drv_usb_urb_status result = request->completion_status;
 	size_t actual = 0;
 	unsigned long irq;
+	int stall_publication;
 
 	/* The QH is unreachable and the controller-specific barrier has completed. */
 	hal_io_rmb();
@@ -2003,17 +2121,40 @@ ehci_complete_retired_request(struct ehci_controller *controller,
 	} else {
 		result = DRV_USB_URB_DISCONNECTED;
 	}
+	stall_publication = result == DRV_USB_URB_STALL &&
+	    (drv_usb_endpoint_type(endpoint) == DRV_USB_TRANSFER_BULK ||
+	    drv_usb_endpoint_type(endpoint) == DRV_USB_TRANSFER_INTERRUPT);
 
 	irq = spin_lock_irqsave(&controller->active_lock);
 	if (!ehci_request_is_active_locked(controller, request) ||
 	    request->state != EHCI_REQUEST_COMPLETING ||
 	    drv_usb_urb_hcd_data(urb) != request || request->linked)
 		__builtin_trap();
+	if (controller->completion_inflight == UINT_MAX)
+		__builtin_trap();
+	if (stall_publication &&
+	    (drv_usb_endpoint_hcd_data(endpoint,
+	    EHCI_ENDPOINT_STALL_PUBLISHING_SLOT) != 0 ||
+	    drv_usb_endpoint_set_hcd_data(endpoint,
+	    EHCI_ENDPOINT_STALL_PUBLISHING_SLOT, 1U) != 0))
+		__builtin_trap();
+	/* Keep controller quiesce closed across callback publication.  The endpoint
+	 * marker is deliberately not touched after the core completion call: runtime
+	 * device teardown may release the endpoint as soon as core HCD ownership is
+	 * dropped.  A successful endpoint_reset clears the retained marker. */
+	controller->completion_inflight++;
 	ehci_active_remove_locked(controller, request);
 	(void)drv_usb_urb_set_hcd_data(urb, NULL);
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 	ehci_request_free(controller, request);
 	drv_usb_hcd_complete(&controller->hcd, urb, result, actual);
+	irq = spin_lock_irqsave(&controller->active_lock);
+	if (controller->completion_inflight == 0) {
+		spin_unlock_irqrestore(&controller->active_lock, irq);
+		__builtin_trap();
+	}
+	controller->completion_inflight--;
+	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
 static int
@@ -2706,7 +2847,9 @@ ehci_quiesce_requests(struct ehci_controller *controller)
 		int failure_error = EIO;
 
 		irq = spin_lock_irqsave(&controller->active_lock);
-		if (controller->active_count == 0) {
+		if (controller->active_count == 0 &&
+		    controller->completion_inflight == 0 &&
+		    controller->reclaim_request_busy == 0) {
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 			return 0;
 		}
@@ -2749,7 +2892,9 @@ ehci_report_shutdown_evidence(struct ehci_controller *controller)
 	    !controller->hardware_stop_in_progress &&
 	    controller->hardware_stop_waiters == 0 &&
 	    controller->active == NULL && controller->active_count == 0 &&
-	    controller->builders == 0 && controller->retirement_head == NULL &&
+	    controller->completion_inflight == 0 && controller->builders == 0 &&
+	    controller->reclaim_request_busy == 0 &&
+	    controller->retirement_head == NULL &&
 	    controller->iaa_owner == NULL && !controller->periodic_updating &&
 	    controller->retirement_worker == NULL &&
 	    !controller->retirement_joining && controller->root_worker == NULL &&
@@ -2844,7 +2989,9 @@ ehci_quiesce(struct drv_usb_hcd *hcd)
 		return request_error;
 	}
 	if (controller->active != NULL || controller->active_count != 0 ||
+	    controller->completion_inflight != 0 ||
 	    controller->builders != 0 ||
+	    controller->reclaim_request_busy != 0 ||
 	    controller->retirement_head != NULL ||
 	    controller->iaa_owner != NULL || controller->periodic_updating)
 		__builtin_trap();
@@ -2864,7 +3011,9 @@ ehci_stop(struct drv_usb_hcd *hcd)
 
 	irq = spin_lock_irqsave(&controller->active_lock);
 	releasable = controller->dma_quiesced && controller->active == NULL &&
-	    controller->active_count == 0 && controller->builders == 0 &&
+	    controller->active_count == 0 &&
+	    controller->completion_inflight == 0 && controller->builders == 0 &&
+	    controller->reclaim_request_busy == 0 &&
 	    controller->retirement_head == NULL &&
 	    controller->iaa_owner == NULL && !controller->periodic_updating &&
 	    controller->hardware_stopped &&
@@ -2901,6 +3050,39 @@ ehci_endpoint_disable(struct drv_usb_hcd *hcd,
 	int error = ehci_endpoint_owner_locked(controller, endpoint) == NULL ?
 	    0 : EBUSY;
 
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+	return error;
+}
+
+static int
+ehci_endpoint_reset(struct drv_usb_hcd *hcd,
+	struct drv_usb_endpoint *endpoint)
+{
+	struct ehci_controller *controller = hcd_controller(hcd);
+	unsigned long irq;
+	int error;
+
+	if (endpoint == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&controller->active_lock);
+	if (controller->quiescing || controller->dma_quiesced ||
+	    controller->quarantined || controller->hardware_stopped ||
+	    controller->retirement_worker == NULL ||
+	    controller->retirement_joining ||
+	    __atomic_load_n(&controller->retirement_stopping,
+	    __ATOMIC_ACQUIRE) != 0) {
+		error = ENODEV;
+	} else if (ehci_endpoint_owner_locked(controller, endpoint) != NULL) {
+		error = EBUSY;
+	} else if (drv_usb_endpoint_hcd_data(endpoint,
+	    EHCI_ENDPOINT_STALL_PUBLISHING_SLOT) > 1U) {
+		error = EIO;
+	} else {
+		error = drv_usb_endpoint_set_hcd_data(endpoint, 0, 0);
+		if (error == 0)
+			error = drv_usb_endpoint_set_hcd_data(endpoint,
+			    EHCI_ENDPOINT_STALL_PUBLISHING_SLOT, 0);
+	}
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 	return error;
 }
@@ -3180,6 +3362,7 @@ static const struct drv_usb_hcd_ops ehci_ops = {
 	.urb_dequeue = ehci_urb_dequeue,
 	.endpoint_enable = ehci_endpoint_enable,
 	.endpoint_disable = ehci_endpoint_disable,
+	.endpoint_reset = ehci_endpoint_reset,
 	.frame_number = ehci_frame_number,
 	.root_hub_status = ehci_root_status,
 	.root_hub_control = ehci_root_control
@@ -3226,11 +3409,14 @@ ehci_pci_release(struct ehci_controller *controller)
 	    !controller->retirement_joining && controller->root_worker == NULL &&
 	    !controller->root_joining && !controller->root_dispatching &&
 	    !controller->hardware_stop_in_progress &&
-	    controller->hardware_stop_waiters == 0;
+	    controller->hardware_stop_waiters == 0 &&
+	    controller->reclaim_request_busy == 0;
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 	if (!releasable || controller->periodic.address != NULL ||
 	    controller->periodic_skeleton_memory.address != NULL ||
 	    controller->async_head_memory.address != NULL ||
+	    controller->reclaim_request.schedule.address != NULL ||
+	    controller->reclaim_request.bounce.address != NULL ||
 	    !controller->dma_quiesced)
 		return EBUSY;
 	if (controller->pci_state_saved) {
@@ -3318,7 +3504,9 @@ ehci_cleanup(struct ehci_controller *controller)
 	 * cleanup attempt; never unmap PCI state or free that graph until it wins. */
 	if (controller->periodic.address != NULL ||
 	    controller->periodic_skeleton_memory.address != NULL ||
-	    controller->async_head_memory.address != NULL) {
+	    controller->async_head_memory.address != NULL ||
+	    controller->reclaim_request.schedule.address != NULL ||
+	    controller->reclaim_request.bounce.address != NULL) {
 		irq = spin_lock_irqsave(&controller->active_lock);
 		if (controller->dma_quiesced) {
 			spin_unlock_irqrestore(&controller->active_lock, irq);

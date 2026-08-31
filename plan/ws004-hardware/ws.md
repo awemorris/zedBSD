@@ -6,10 +6,10 @@ WSID: `ws004`
 
 Status: active; WS is not complete. q041 completed p016 checked legacy-HCD
 request retirement. q047 completed p031 legacy-HCD concurrent scheduling and
-root hotplug and retains p032 checked endpoint/device recovery. P033's
+root hotplug plus p032 checked endpoint/device recovery. P033's
 extracted amd64 framebuffer-console correction is complete after passing its
-host gates and the shared forced HW-T25 QEMU matrix. P031 is complete; p032 is
-the remaining WS004 prerequisite for WS006 USB HID. `ws004-p026` completed every
+host gates and the shared forced HW-T25 QEMU matrix. P031 and p032 are
+complete, so WS006 p008 is Queue-ready. `ws004-p026` completed every
 automatic/read-only intake field in q040 and is uncleared only at the printed
 unit label. `ws004-p020` deterministic CDC NCM hardening and
 `ws004-p022`--`p024` NVMe discovery/I/O/strict-GPT QEMU acceptance are
@@ -46,8 +46,8 @@ corrected the IAD-less, Union-associated NCM match exposed by
 the first physical RTL8156 insertion, and the accepted follow-up published
 `ue0`. The broader asynchronous-TX/accounting decisions remain in p017.
 
-Resume point: p031 and p033 are complete. Execute p032, whose p031 dependency is
-now satisfied. If p032 completes, WS006 p008 becomes Queue-ready.
+Resume point: p031, p032, and p033 are complete. WS006 p008 is Queue-ready; no
+physical-machine recovery result is claimed by p032.
 The 2026-08-30 completion audit also found p017, p021, p025,
 and p026--p030 still open. q030 completed p022 through p024, including strict
 primary/backup GPT and the final disposable QEMU acceptance matrix. The later
@@ -100,7 +100,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p029`](phase029-wpa2-ccmp-l2/phase.md) | Planned; depends on p028 automatic milestone; not queued | Common-kernel WPA2-Personal/CCMP authentication, association, four-way handshake, key CAM, controlled port, and bidirectional Ethernet L2; physical evidence is shared with p030/WS005 p008 |
 | [`ws004-p030`](phase030-wlan-lifecycle-hardware-hardening/phase.md) | Planned; depends on p029 automatic milestone; not queued | Rekey, bounded reconnect, reset, up/down, unplug/reinsert, shutdown, and concurrent-storage regressions; share one lifecycle checkpoint and the frozen-artifact five-run ledger with WS005 p008 rather than duplicate physical work |
 | [`ws004-p031`](phase031-legacy-hcd-concurrent-hotplug/phase.md) | Complete (`q047`) | UHCI/EHCI per-endpoint concurrency, periodic/asynchronous progress, request-local retirement, worker-context root hotplug, shared-INTx dispatch, all focused/configured/regression/build gates, and both forced QEMU cells pass |
-| [`ws004-p032`](phase032-usb-endpoint-device-recovery/phase.md) | In progress (`q047`); prerequisites complete | Add ordered endpoint clear-halt and conservative direct-root device reset across xHCI/UHCI/EHCI, then remove Mass Storage's HCD-private recovery hack |
+| [`ws004-p032`](phase032-usb-endpoint-device-recovery/phase.md) | Complete (`q047`) | Ordered endpoint clear-halt, conservative direct-root reset, allocation-free reclaim-safe recovery, and Mass Storage migration pass HW-T26 and xHCI/legacy QEMU controls; physical recovery was not exercised |
 | [`ws004-p033`](phase033-amd64-framebuffer-console-serialization/phase.md) | Complete (`q047`) | One early-safe lock and strict cell/framebuffer bounds pass HW-T27 host/sanitizer/input/build gates and the shared forced HW-T25 QEMU matrix without console fault or stall |
 
 ### MSI follow-up register
@@ -117,7 +117,7 @@ fetch. p021 is an independent standards correction rather than an active
 failure response; its implementation is retained and only its fresh-image
 runtime checkpoints remain after the Noct verifier correction. Later WS004
 candidates are p017, p019, the p021 runtime resume, p025, the planned-only
-p026--p030 WLAN chain, and q047 p032; p031 and p033 are complete. Additional work is
+p026--p030 WLAN chain; q047 p031--p033 are complete. Additional work is
 HW-11, HW-20/HW-21, and HW-30 when their inputs and acceptance environments
 are available. q040 selects the evidence/policy-only p026 boundary; it does
 not authorize p027--p030 implementation.
@@ -185,7 +185,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-25 | Planned as `ws004-p029`; not queued | WPA2-Personal/CCMP authentication, association, key installation, controlled port, and Ethernet L2 | HW-24, kernel entropy and reviewed crypto substrate | HW-T33 passes automatic handshake/replay/CCMP/negative fixtures; the eventual secure-L2 fields come from the same p008 ledger with no p029-specific request |
 | HW-26 | Planned as `ws004-p030`; not queued | Rekey, bounded reconnect, reset, hotplug, shutdown, and final exact-hardware hardening | HW-25, controlled AP, WS005 p008 | HW-T34 passes automatic fault/race/storage gates and references the one shared p008 lifecycle checkpoint/five-run frozen-artifact ledger |
 | HW-27 | Complete as `ws004-p031` (`q047`) | Concurrent UHCI/EHCI per-endpoint scheduling, request-local retirement, and runtime root-port lifecycle | p009--p011, p015, p016 | HW-T25 ordinary/sanitizer/analyzer and configured production gates, shared-INTx and USB regressions, repository build, plus standalone UHCI and paired EHCI/UHCI QEMU cells pass |
-| HW-28 | In progress as `ws004-p032` (`q047`) | Ordered USB endpoint-halt recovery and conservative direct-root device reset shared by xHCI/UHCI/EHCI | HW-27, p010/p011/p015/p016 | HW-T26 proves STALL latch, wire/HCD ordering, DATA0/ring recovery, reset transaction, Mass Storage migration, and checked failure retention |
+| HW-28 | Complete as `ws004-p032` (`q047`) | Ordered USB endpoint-halt recovery and conservative direct-root device reset shared by xHCI/UHCI/EHCI | HW-27, p010/p011/p015/p016 | HW-T26, reclaim-safe reserve gates, xHCI and paired UHCI/EHCI QEMU controls pass; no physical-machine recovery result is claimed |
 | HW-29 | Complete as `ws004-p033` (`q047`) | Early-safe amd64 PC/AT framebuffer-console serialization and strict cell/pixel bounds | q047 p031 stress observation, existing console contract | HW-T27 host/sanitizer/input/build gates and forced `q047-legacy-hcd-final4` standalone/paired QEMU cells pass without console fault, corruption, or stall |
 | HW-30 | Proposed | i915 hardware foundations for the discovered 11th-generation GPU | BR-00, HW-00, GFX UAPI | Modeset/scanout and recovery on hardware; model tests for device-independent layers |
 

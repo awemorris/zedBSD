@@ -60,6 +60,9 @@
 #define UHCI_RETIRE_TICKS 100U
 #define UHCI_QUIESCE_TICKS 100U
 #define UHCI_ADVANCE_POLL_TICKS 1U
+/* Match the established UHCI stuck-QH threshold: a normal TD-status/QH-element
+ * writeback window must not be mistaken for the early-Intel element bug. */
+#define UHCI_QH_STALL_TICKS 20U
 /* The kernel clock is 100 Hz, so ten ticks are a bounded 100-ms poll. */
 #define UHCI_ROOT_POLL_TICKS 10U
 #define UHCI_PERIODIC_LEVELS 8U
@@ -74,6 +77,7 @@
 #define UHCI_PORT_RW_BITS \
 	(UHCI_PORT_PE | UHCI_PORT_RD | UHCI_PORT_RESET | UHCI_PORT_SUSPEND)
 #define UHCI_PORT_CHANGE_BITS (UHCI_PORT_CSC | UHCI_PORT_PEC)
+#define UHCI_ENDPOINT_STALL_PUBLISHING_SLOT 1U
 
 struct uhci_qh { volatile uint32_t head, element, reserved[2]; };
 struct uhci_td { volatile uint32_t link, status, token, buffer; };
@@ -109,6 +113,7 @@ struct uhci_request {
 	int retirement_error;
 	bool input, low_speed, periodic, scheduled, retirement_queued;
 	bool periodic_reserved;
+	bool reclaim_reserved;
 };
 
 struct uhci_controller {
@@ -130,9 +135,11 @@ struct uhci_controller {
 	struct uhci_request *retirement_head, *retirement_tail;
 	struct thread *retirement_worker;
 	struct thread *root_worker;
+	struct uhci_request reclaim_request;
 	unsigned bar_claimed, pci_state_saved, hcd_registered, irq_allocated;
 	unsigned dma_quiesced, quiescing, submitting, active_count;
 	unsigned completion_inflight;
+	unsigned reclaim_request_busy;
 	unsigned periodic_bit_times;
 	unsigned listed, quarantined;
 	volatile unsigned retirement_pending, retirement_stopping;
@@ -206,6 +213,16 @@ uhci_frame_periodic_level(unsigned frame)
 static void
 uhci_schedule_release(struct uhci_controller *controller)
 {
+	if (controller->reclaim_request_busy)
+		__builtin_trap();
+	if (controller->reclaim_request.schedule.address != NULL)
+		drv_dma_free_coherent(controller->hcd.dma,
+		    &controller->reclaim_request.schedule);
+	if (controller->reclaim_request.bounce.address != NULL)
+		drv_dma_free_coherent(controller->hcd.dma,
+		    &controller->reclaim_request.bounce);
+	memset(&controller->reclaim_request, 0,
+	    sizeof(controller->reclaim_request));
 	if (controller->skeleton_memory.address != NULL) {
 		drv_dma_free_coherent(controller->hcd.dma,
 		    &controller->skeleton_memory);
@@ -239,6 +256,29 @@ uhci_schedule_initialize(struct uhci_controller *controller)
 		uhci_schedule_release(controller);
 		return error;
 	}
+	error = drv_dma_alloc_coherent(controller->hcd.dma, 4096U, 16U,
+	    &controller->reclaim_request.schedule);
+	if (error != 0) {
+		uhci_schedule_release(controller);
+		return error;
+	}
+	error = drv_dma_alloc_coherent(controller->hcd.dma,
+	    DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE +
+	    sizeof(struct drv_usb_control_request), 16U,
+	    &controller->reclaim_request.bounce);
+	if (error != 0 ||
+	    controller->reclaim_request.schedule.device_address > UINT32_MAX ||
+	    controller->reclaim_request.schedule.device_address +
+		controller->reclaim_request.schedule.size - 1U > UINT32_MAX ||
+	    controller->reclaim_request.bounce.device_address > UINT32_MAX ||
+	    controller->reclaim_request.bounce.device_address +
+		controller->reclaim_request.bounce.size - 1U > UINT32_MAX) {
+		if (error == 0)
+			error = EOVERFLOW;
+		uhci_schedule_release(controller);
+		return error;
+	}
+	controller->reclaim_request.reclaim_reserved = true;
 	controller->skeleton = controller->skeleton_memory.address;
 	memset(controller->skeleton, 0,
 	    UHCI_SKELETON_COUNT * sizeof(*controller->skeleton));
@@ -265,6 +305,7 @@ uhci_request_sets_empty_locked(struct uhci_controller *controller)
 
 	if (controller->active != NULL || controller->active_count != 0 ||
 	    controller->completion_inflight != 0 ||
+	    controller->reclaim_request_busy != 0 ||
 	    controller->asynchronous != NULL ||
 	    controller->retirement_head != NULL ||
 	    controller->retirement_tail != NULL ||
@@ -615,12 +656,68 @@ static uint32_t uhci_token(uint8_t pid,unsigned address,unsigned endpoint,
 
 static void uhci_request_free(struct uhci_controller*c,struct uhci_request*r)
 {
+	struct drv_dma_buffer schedule, bounce;
+	unsigned long irq;
+
 	if(!r)return;
 	if (r->periodic_reserved)
 		__builtin_trap();
+	if (r->reclaim_reserved) {
+		if (r != &c->reclaim_request)
+			__builtin_trap();
+		schedule = r->schedule;
+		bounce = r->bounce;
+		memset(r, 0, sizeof(*r));
+		r->schedule = schedule;
+		r->bounce = bounce;
+		r->reclaim_reserved = true;
+		irq = spin_lock_irqsave(&c->active_lock);
+		if (!c->reclaim_request_busy) {
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			__builtin_trap();
+		}
+		c->reclaim_request_busy = 0;
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return;
+	}
 	if(r->schedule.address)drv_dma_free_coherent(c->hcd.dma,&r->schedule);
 	if(r->bounce.address)drv_dma_free_coherent(c->hcd.dma,&r->bounce);
 	hal_free(r);
+}
+
+static int
+uhci_reclaim_request_acquire(struct uhci_controller *controller,
+	size_t length, struct uhci_request **result)
+{
+	struct drv_dma_buffer schedule, bounce;
+	struct uhci_request *request = &controller->reclaim_request;
+	unsigned long irq;
+	int error = 0;
+
+	*result = NULL;
+	if (length > DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE)
+		return EMSGSIZE;
+	irq = spin_lock_irqsave(&controller->active_lock);
+	if (request->schedule.address == NULL ||
+	    request->schedule.size < 4096U || request->bounce.address == NULL ||
+	    request->bounce.size < DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE +
+	    sizeof(struct drv_usb_control_request))
+		error = ENOMEM;
+	else if (controller->reclaim_request_busy)
+		error = EBUSY;
+	else
+		controller->reclaim_request_busy = 1U;
+	schedule = request->schedule;
+	bounce = request->bounce;
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+	if (error != 0)
+		return error;
+	memset(request, 0, sizeof(*request));
+	request->schedule = schedule;
+	request->bounce = bounce;
+	request->reclaim_reserved = true;
+	*result = request;
+	return 0;
 }
 
 static void
@@ -824,10 +921,16 @@ static int uhci_build_request(struct uhci_controller*c,struct drv_usb_urb*urb,
 	if (error != 0)
 		return error;
 
-	r = hal_malloc(sizeof(*r));
-	if (r == NULL)
-		return ENOMEM;
-	memset(r, 0, sizeof(*r));
+	if ((drv_usb_urb_flags(urb) & DRV_USB_URB_RECLAIM_SAFE) != 0) {
+		error = uhci_reclaim_request_acquire(c, length, &r);
+		if (error != 0)
+			return error;
+	} else {
+		r = hal_malloc(sizeof(*r));
+		if (r == NULL)
+			return ENOMEM;
+		memset(r, 0, sizeof(*r));
+	}
 	r->urb = urb;
 	r->endpoint = ep;
 	r->state = UHCI_REQUEST_ACTIVE;
@@ -838,21 +941,23 @@ static int uhci_build_request(struct uhci_controller*c,struct drv_usb_urb*urb,
 		error = uhci_periodic_cost(length, packet, r->low_speed,
 		    &r->periodic_cost);
 		if (error != 0) {
-			hal_free(r);
+			uhci_request_free(c, r);
 			return error;
 		}
 	}
-	error = drv_dma_alloc_coherent(c->hcd.dma, 4096U, 16U,
-	    &r->schedule);
-	if (error != 0) {
-		hal_free(r);
-		return error;
-	}
-	error = drv_dma_alloc_coherent(c->hcd.dma, length + 8U, 16U,
-	    &r->bounce);
-	if (error != 0) {
-		uhci_request_free(c, r);
-		return error;
+	if (!r->reclaim_reserved) {
+		error = drv_dma_alloc_coherent(c->hcd.dma, 4096U, 16U,
+		    &r->schedule);
+		if (error != 0) {
+			hal_free(r);
+			return error;
+		}
+		error = drv_dma_alloc_coherent(c->hcd.dma, length + 8U, 16U,
+		    &r->bounce);
+		if (error != 0) {
+			uhci_request_free(c, r);
+			return error;
+		}
 	}
 	if (r->schedule.device_address > UINT32_MAX ||
 	    r->schedule.device_address + r->schedule.size - 1U > UINT32_MAX ||
@@ -1010,12 +1115,13 @@ uhci_request_advance_snapshot(struct uhci_request *request,
 	    (index + 1U) * sizeof(*request->tds)))
 		return EIO;
 	/* The PIIX erratum leaves the QH exactly at the boundary between the
-	 * completed TD and the first unexecuted TD.  If the successor is no longer
-	 * active, this is not that erratum: advancing could replay an already
-	 * completed transfer, so fail closed instead. */
+	 * completed TD and the first unexecuted TD.  A later TD status can become
+	 * terminal before its QH writeback or IRQ is visible to this CPU.  That is
+	 * forward progress, not corrupt linkage; leave it to the IRQ terminal path
+	 * and never replay it from this workaround. */
 	next_status = request->tds[index + 1U].status;
 	if ((next_status & UHCI_TD_ACTIVE) == 0)
-		return EIO;
+		return 0;
 
 	/* SPD deliberately leaves the QH element unchanged after a short IN.
 	 * The current builder never sets SPD, but keeping that distinction here
@@ -1066,7 +1172,14 @@ uhci_request_qh_progress_locked(struct uhci_controller *controller,
 		    request->advance_candidate == index + 1U &&
 		    request->advance_element == element &&
 		    request->advance_status == status) {
-			if (frame != request->advance_frame) {
+			/* Early Intel controllers need a software element advance only
+			 * after the same stopped boundary has remained stable for the
+			 * established 200-ms QH timeout.  A single fresh frame merely
+			 * closes retirement; it does not close the normal TD-status before
+			 * QH-element writeback race. */
+			if (frame != request->advance_frame &&
+			    sched_ticks() - request->advance_started_tick >=
+			    UHCI_QH_STALL_TICKS) {
 				request->qh->element = link;
 				hal_io_wmb();
 				uhci_request_advance_clear(request);
@@ -1507,9 +1620,13 @@ uhci_finish_completion(struct uhci_controller *controller,
 	struct uhci_request *request)
 {
 	struct drv_usb_urb *urb = request->urb;
+	struct drv_usb_endpoint *endpoint = request->endpoint;
 	enum drv_usb_urb_status completion_status = request->completion_status;
 	size_t actual;
 	unsigned long irq;
+	int stall_publication = completion_status == DRV_USB_URB_STALL &&
+	    (drv_usb_endpoint_type(endpoint) == DRV_USB_TRANSFER_BULK ||
+	    drv_usb_endpoint_type(endpoint) == DRV_USB_TRANSFER_INTERRUPT);
 
 	/* FRNUM has advanced since the unlink snapshot, so neither descriptors
 	 * nor the bounce buffer can still be reached by this controller. */
@@ -1533,6 +1650,18 @@ uhci_finish_completion(struct uhci_controller *controller,
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		__builtin_trap();
 	}
+	if (stall_publication &&
+	    (drv_usb_endpoint_hcd_data(endpoint,
+	    UHCI_ENDPOINT_STALL_PUBLISHING_SLOT) != 0 ||
+	    drv_usb_endpoint_set_hcd_data(endpoint,
+	    UHCI_ENDPOINT_STALL_PUBLISHING_SLOT, 1U) != 0)) {
+		spin_unlock_irqrestore(&controller->active_lock, irq);
+		__builtin_trap();
+	}
+	/* Keep controller quiesce closed across callback publication.  The endpoint
+	 * marker is deliberately not touched after the core completion call: runtime
+	 * device teardown may release the endpoint as soon as core HCD ownership is
+	 * dropped.  A successful endpoint_reset clears the retained marker. */
 	controller->completion_inflight++;
 	uhci_active_remove_locked(controller, request);
 	(void)drv_usb_urb_set_hcd_data(urb, NULL);
@@ -1897,10 +2026,13 @@ uhci_retirement_watchdog_arm(struct uhci_controller *controller)
 static int uhci_urb_enqueue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 {
 	struct uhci_controller *c = hcd_controller(hcd);
+	struct drv_usb_endpoint *endpoint = drv_usb_urb_endpoint(urb);
 	struct uhci_request *r = NULL;
 	unsigned long irq;
 	int error;
 
+	if (endpoint == NULL)
+		return EINVAL;
 	irq = spin_lock_irqsave(&c->active_lock);
 	if (c->quiescing || c->dma_quiesced ||
 	    c->retirement_worker == NULL) {
@@ -1908,6 +2040,11 @@ static int uhci_urb_enqueue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 		    c->retirement_worker == NULL ? ENODEV : EBUSY;
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		return error;
+	}
+	if (drv_usb_endpoint_hcd_data(endpoint,
+	    UHCI_ENDPOINT_STALL_PUBLISHING_SLOT) != 0) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return EBUSY;
 	}
 	if (c->submitting == UINT_MAX)
 		__builtin_trap();
@@ -1924,7 +2061,9 @@ static int uhci_urb_enqueue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 	}
 	if (c->quiescing || c->dma_quiesced ||
 	    c->retirement_worker == NULL ||
-	    uhci_endpoint_owned_locked(c, r->endpoint)) {
+	    uhci_endpoint_owned_locked(c, r->endpoint) ||
+	    drv_usb_endpoint_hcd_data(r->endpoint,
+	    UHCI_ENDPOINT_STALL_PUBLISHING_SLOT) != 0) {
 		error = c->quiescing || c->dma_quiesced ||
 		    c->retirement_worker == NULL ? ENODEV : EBUSY;
 		spin_unlock_irqrestore(&c->active_lock, irq);
@@ -2071,6 +2210,35 @@ static int uhci_endpoint_enable(struct drv_usb_hcd *hcd,
 static int uhci_endpoint_disable(struct drv_usb_hcd *hcd,
 	struct drv_usb_endpoint *endpoint)
 { (void)hcd; (void)endpoint; return 0; }
+static int
+uhci_endpoint_reset(struct drv_usb_hcd *hcd,
+	struct drv_usb_endpoint *endpoint)
+{
+	struct uhci_controller *controller = hcd_controller(hcd);
+	unsigned long irq;
+	int error;
+
+	if (endpoint == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&controller->active_lock);
+	if (controller->quiescing || controller->dma_quiesced ||
+	    controller->quarantined || controller->retirement_worker == NULL ||
+	    controller->retirement_stopping) {
+		error = ENODEV;
+	} else if (uhci_endpoint_owned_locked(controller, endpoint)) {
+		error = EBUSY;
+	} else if (drv_usb_endpoint_hcd_data(endpoint,
+	    UHCI_ENDPOINT_STALL_PUBLISHING_SLOT) > 1U) {
+		error = EIO;
+	} else {
+		error = drv_usb_endpoint_set_hcd_data(endpoint, 0, 0);
+		if (error == 0)
+			error = drv_usb_endpoint_set_hcd_data(endpoint,
+			    UHCI_ENDPOINT_STALL_PUBLISHING_SLOT, 0);
+	}
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+	return error;
+}
 static uint32_t uhci_frame_number(struct drv_usb_hcd *hcd)
 { struct uhci_controller*c=hcd_controller(hcd);return in16(c->io_base+UHCI_FRNUM)&0x7ffU; }
 
@@ -2391,7 +2559,8 @@ static const struct drv_usb_hcd_ops uhci_ops = {
 	.start=uhci_start,.quiesce=uhci_quiesce,.stop=uhci_stop,
 	.urb_enqueue=uhci_urb_enqueue,
 	.urb_dequeue=uhci_urb_dequeue,.endpoint_enable=uhci_endpoint_enable,
-	.endpoint_disable=uhci_endpoint_disable,.frame_number=uhci_frame_number,
+	.endpoint_disable=uhci_endpoint_disable,.endpoint_reset=uhci_endpoint_reset,
+	.frame_number=uhci_frame_number,
 	.root_hub_status=uhci_root_hub_status,.root_hub_control=uhci_root_hub_control
 };
 
@@ -2433,6 +2602,9 @@ uhci_pci_release(struct uhci_controller *controller)
 	 * while that graph lacks the checked halt/master/IRQ barrier. */
 	if (controller->frame_list.address != NULL ||
 	    controller->skeleton_memory.address != NULL ||
+	    controller->reclaim_request.schedule.address != NULL ||
+	    controller->reclaim_request.bounce.address != NULL ||
+	    controller->reclaim_request_busy != 0 ||
 	    !controller->dma_quiesced)
 		return EBUSY;
 	if (controller->pci_state_saved) {
@@ -2500,7 +2672,9 @@ uhci_cleanup(struct uhci_controller *controller)
 	 * A RUN-visible frame graph therefore remains owned here until the same
 	 * checked halt/BME/IRQ barrier succeeds on this or a later detach retry. */
 	if (controller->frame_list.address != NULL ||
-	    controller->skeleton_memory.address != NULL) {
+	    controller->skeleton_memory.address != NULL ||
+	    controller->reclaim_request.schedule.address != NULL ||
+	    controller->reclaim_request.bounce.address != NULL) {
 		irq = spin_lock_irqsave(&controller->active_lock);
 		dma_quiesced = controller->dma_quiesced != 0;
 		spin_unlock_irqrestore(&controller->active_lock, irq);

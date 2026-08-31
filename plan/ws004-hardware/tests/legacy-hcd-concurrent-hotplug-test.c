@@ -10,6 +10,7 @@
 #define PERIODIC_BUCKETS 8U
 #define UHCI_FRNUM_MASK 0x07ffU
 #define UHCI_ADVANCE_TIMEOUT 100U
+#define UHCI_QH_STALL_TICKS 20U
 #define UHCI_MODEL_LINK_TERM 0x00000001U
 #define UHCI_MODEL_LINK_QH 0x00000002U
 #define UHCI_MODEL_LINK_DEPTH 0x00000004U
@@ -30,6 +31,8 @@
 #define EHCI_PERIODIC_BARRIER_COMPLETE (EHCI_PERIODIC_COMMAND_DISABLED | \
 	EHCI_PERIODIC_STATUS_CLEAR | EHCI_PERIODIC_UPDATE_COMPLETE | \
 	EHCI_PERIODIC_COMMAND_ENABLED)
+#define RECLAIM_SAFE_MAX_SIZE 8192U
+#define USB_CONTROL_REQUEST_SIZE 8U
 
 enum controller_kind {
 	MODEL_UHCI,
@@ -154,6 +157,8 @@ enum startup_failure_stage {
 	START_FAIL_SCHEDULE_FRAME,
 	START_FAIL_SCHEDULE_SKELETON,
 	START_FAIL_SCHEDULE_ASYNC,
+	START_FAIL_SCHEDULE_RECLAIM_REQUEST,
+	START_FAIL_SCHEDULE_RECLAIM_BOUNCE,
 	START_FAIL_HCD_REGISTRATION,
 	START_FAIL_RETIREMENT_ALLOCATION,
 	START_FAIL_RETIREMENT_PUBLICATION,
@@ -175,6 +180,67 @@ struct startup_lifecycle {
 	int hcd_registered;
 	int hid_driver_data;
 };
+
+struct reclaim_reserve_model {
+	enum controller_kind kind;
+	size_t schedule_size;
+	size_t bounce_size;
+	unsigned busy;
+	unsigned dma_owned;
+	unsigned dynamic_allocations;
+	unsigned forbidden_allocation_attempts;
+	unsigned allocation_forbidden;
+};
+
+static void
+reclaim_reserve_init(struct reclaim_reserve_model *reserve,
+	enum controller_kind kind)
+{
+	memset(reserve, 0, sizeof(*reserve));
+	reserve->kind = kind;
+	reserve->schedule_size = 4096U;
+	reserve->bounce_size = RECLAIM_SAFE_MAX_SIZE +
+	    USB_CONTROL_REQUEST_SIZE;
+}
+
+static int
+reclaim_request_acquire(struct reclaim_reserve_model *reserve,
+	int reclaim_safe, size_t length)
+{
+	if (!reclaim_safe) {
+		if (reserve->allocation_forbidden) {
+			reserve->forbidden_allocation_attempts++;
+			return ENOMEM;
+		}
+		reserve->dynamic_allocations++;
+		return 0;
+	}
+	if (length > RECLAIM_SAFE_MAX_SIZE)
+		return EMSGSIZE;
+	if (reserve->schedule_size < 4096U ||
+	    reserve->bounce_size < length + USB_CONTROL_REQUEST_SIZE)
+		return ENOMEM;
+	if (reserve->busy)
+		return EBUSY;
+	reserve->busy = 1U;
+	reserve->dma_owned = 1U;
+	return 0;
+}
+
+static int
+reclaim_request_retire(struct reclaim_reserve_model *reserve,
+	int retirement_proven)
+{
+	if (!reserve->busy || !reserve->dma_owned)
+		return EINVAL;
+	/* An ambiguous controller retirement retains both the request reservation
+	 * and its DMA graph.  Only positive retirement evidence makes it reusable. */
+	if (!retirement_proven)
+		return EIO;
+	reserve->dma_owned = 0U;
+	reserve->busy = 0U;
+	return 0;
+}
 
 static void
 controller_init(struct controller *controller, enum controller_kind kind)
@@ -256,7 +322,7 @@ uhci_advance_model_snapshot(struct uhci_advance_model *model,
 		return EIO;
 	next_status = model->tds[index + 1U].status;
 	if ((next_status & UHCI_MODEL_TD_ACTIVE) == 0U)
-		return EIO;
+		return 0;
 	if ((status & UHCI_MODEL_TD_SHORT_PACKET) != 0U) {
 		token = model->tds[index].token;
 		if ((token & 0xffU) != UHCI_MODEL_PID_IN)
@@ -303,7 +369,9 @@ uhci_advance_model_step(struct uhci_advance_model *model,
 		if (candidate == 1 && model->candidate == index + 1U &&
 		    model->candidate_element == element &&
 		    model->candidate_status == status) {
-			if (raw_frame != model->candidate_frame) {
+			if (raw_frame != model->candidate_frame &&
+			    tick - model->candidate_started >=
+			    UHCI_QH_STALL_TICKS) {
 				model->qh_element = link;
 				model->repair_count++;
 				uhci_advance_model_clear(model);
@@ -1040,14 +1108,16 @@ startup_attempt(struct startup_lifecycle *startup,
 	enum controller_kind kind,
 	enum startup_failure_stage fail_stage)
 {
-	unsigned schedule_last = kind == MODEL_UHCI ?
-	    START_FAIL_SCHEDULE_SKELETON : START_FAIL_SCHEDULE_ASYNC;
+	unsigned schedule_last = START_FAIL_SCHEDULE_RECLAIM_BOUNCE;
 	unsigned schedule_stage;
 	int error;
 
 	memset(startup, 0, sizeof(*startup));
 	for (schedule_stage = START_FAIL_SCHEDULE_FRAME;
 	    schedule_stage <= schedule_last; schedule_stage++) {
+		if (kind == MODEL_UHCI &&
+		    schedule_stage == START_FAIL_SCHEDULE_ASYNC)
+			continue;
 		if (fail_stage == (enum startup_failure_stage)schedule_stage) {
 			error = ENOMEM;
 			goto fail;
@@ -1238,9 +1308,10 @@ test_uhci_qh_element_advance_workaround(void)
 	struct uhci_advance_model model, unrelated;
 	uint32_t original;
 
-	/* The first observation only arms the proof.  The same FRNUM cannot
-	 * authorize a write; a later healthy frame copies the exact immutable TD
-	 * link and repeated polling cannot advance the QH twice. */
+	/* The first observation only arms the proof.  Neither the same FRNUM nor a
+	 * normal fresh-frame writeback window authorizes a write.  Only the same
+	 * stopped boundary lasting the established 200-ms threshold copies the
+	 * exact immutable TD link, and repeated polling cannot advance it twice. */
 	uhci_advance_model_init(&model);
 	uhci_advance_model_init(&unrelated);
 	model.tds[0].status = 7U;
@@ -1249,10 +1320,17 @@ test_uhci_qh_element_advance_workaround(void)
 	assert(model.candidate == 1U && model.qh_element == 0x1010U);
 	assert(uhci_advance_model_step(&model, 10U, 21U, 1, 1) == 0);
 	assert(model.repair_count == 0U && model.qh_element == 0x1010U);
-	assert(uhci_advance_model_step(&model, 11U, 22U, 1, 1) == 1);
+	assert(uhci_advance_model_step(&model, 11U, 22U, 1, 1) == 0);
+	assert(model.repair_count == 0U && model.qh_element == 0x1010U);
+	assert(uhci_advance_model_step(&model, 29U,
+	    20U + UHCI_QH_STALL_TICKS - 1U, 1, 1) == 0);
+	assert(model.repair_count == 0U && model.qh_element == 0x1010U);
+	assert(uhci_advance_model_step(&model, 30U,
+	    20U + UHCI_QH_STALL_TICKS, 1, 1) == 1);
 	assert(model.qh_element == model.tds[0].link);
 	assert(model.repair_count == 1U && model.candidate == 0U);
-	assert(uhci_advance_model_step(&model, 12U, 23U, 1, 1) == 0);
+	assert(uhci_advance_model_step(&model, 31U,
+	    20U + UHCI_QH_STALL_TICKS + 1U, 1, 1) == 0);
 	assert(model.repair_count == 1U && unrelated.qh_element == original);
 
 	/* A normal HC writeback which wins during the observation interval clears
@@ -1271,7 +1349,8 @@ test_uhci_qh_element_advance_workaround(void)
 	model.tds[0].status = 7U;
 	assert(uhci_advance_model_step(&model, UHCI_FRNUM_MASK, 40U,
 	    1, 1) == 0);
-	assert(uhci_advance_model_step(&model, 0U, 41U, 1, 1) == 1);
+	assert(uhci_advance_model_step(&model, 0U,
+	    40U + UHCI_QH_STALL_TICKS, 1, 1) == 1);
 	assert(model.qh_element == model.tds[0].link);
 
 	/* SPD-short is an intentional non-advance.  With SPD clear, the UHCI
@@ -1284,11 +1363,13 @@ test_uhci_qh_element_advance_workaround(void)
 	uhci_advance_model_init(&model);
 	model.tds[0].status = 3U;
 	assert(uhci_advance_model_step(&model, 50U, 50U, 1, 1) == 0);
-	assert(uhci_advance_model_step(&model, 51U, 51U, 1, 1) == 1);
+	assert(uhci_advance_model_step(&model, 51U,
+	    50U + UHCI_QH_STALL_TICKS, 1, 1) == 1);
 	uhci_advance_model_init(&model);
 	model.tds[0].status = UHCI_MODEL_TD_SHORT_PACKET | 7U;
 	assert(uhci_advance_model_step(&model, 52U, 52U, 1, 1) == 0);
-	assert(uhci_advance_model_step(&model, 53U, 53U, 1, 1) == 1);
+	assert(uhci_advance_model_step(&model, 53U,
+	    52U + UHCI_QH_STALL_TICKS, 1, 1) == 1);
 
 	/* Errors and final TDs remain owned by the IRQ terminal path. */
 	uhci_advance_model_init(&model);
@@ -1300,14 +1381,41 @@ test_uhci_qh_element_advance_workaround(void)
 	model.tds[0].status = 7U;
 	model.tds[1].status = 7U;
 	original = model.qh_element;
-	assert(uhci_advance_model_step(&model, 60U, 60U, 1, 1) == EIO);
-	assert(model.quarantined && model.qh_element == original);
+	assert(uhci_advance_model_step(&model, 60U, 60U, 1, 1) == 0);
+	assert(!model.quarantined && model.candidate == 0U &&
+	    model.qh_element == original);
 	uhci_advance_model_init(&model);
 	model.tds[0].status = 7U;
 	model.tds[1].status = 0x00020000U;
 	original = model.qh_element;
-	assert(uhci_advance_model_step(&model, 60U, 60U, 1, 1) == EIO);
-	assert(model.quarantined && model.qh_element == original);
+	assert(uhci_advance_model_step(&model, 60U, 60U, 1, 1) == 0);
+	assert(!model.quarantined && model.candidate == 0U &&
+	    model.qh_element == original);
+	uhci_advance_model_init(&model);
+	model.tds[0].status = 7U;
+	model.tds[1].status = 7U;
+	model.tds[2].status = 7U;
+	original = model.qh_element;
+	assert(uhci_advance_model_step(&model, 60U, 60U, 1, 1) == 0);
+	assert(!model.quarantined && model.candidate == 0U &&
+	    model.repair_count == 0U && model.qh_element == original);
+
+	/* QEMU publishes TD status and QH.element with separate DMA writes.  If a
+	 * successor finishes after the candidate was armed but before its QH
+	 * writeback, clear the stale candidate without quarantining or replaying
+	 * either completed transaction. */
+	uhci_advance_model_init(&model);
+	model.tds[0].status = 7U;
+	original = model.qh_element;
+	assert(uhci_advance_model_step(&model, 61U, 61U, 1, 1) == 0);
+	assert(model.candidate == 1U);
+	model.tds[1].status = 7U;
+	assert(uhci_advance_model_step(&model, 62U, 62U, 1, 1) == 0);
+	assert(!model.quarantined && model.candidate == 0U &&
+	    model.repair_count == 0U && model.qh_element == original);
+	model.qh_element = model.tds[1].link;
+	assert(uhci_advance_model_step(&model, 63U, 63U, 1, 1) == 0);
+	assert(!model.quarantined && model.repair_count == 0U);
 	uhci_advance_model_init(&model);
 	model.qh_element = model.tds[2].physical;
 	model.tds[2].status = 7U;
@@ -1723,7 +1831,7 @@ test_partial_startup_failure_matrix(enum controller_kind kind)
 {
 	struct startup_lifecycle startup;
 	enum startup_failure_stage stage;
-	unsigned schedule_count = kind == MODEL_UHCI ? 2U : 3U;
+	unsigned schedule_count = kind == MODEL_UHCI ? 4U : 5U;
 
 	for (stage = START_FAIL_SCHEDULE_FRAME;
 	    stage <= START_FAIL_HID_WORKER_PUBLICATION; stage++) {
@@ -1916,6 +2024,54 @@ test_ehci_companion_handoff(void)
 	assert(ehci_reset_handoff_model(1U, 0U, 0U, 1U, &owner) == ENODEV);
 }
 
+static void
+test_reclaim_safe_preallocated_reserve(enum controller_kind kind)
+{
+	struct reclaim_reserve_model reserve;
+
+	reclaim_reserve_init(&reserve, kind);
+	assert(reserve.schedule_size == 4096U);
+	assert(reserve.bounce_size == RECLAIM_SAFE_MAX_SIZE +
+	    USB_CONTROL_REQUEST_SIZE);
+	reserve.allocation_forbidden = 1U;
+
+	/* The reclaim-safe path succeeds at its public bound without attempting a
+	 * request, schedule, or bounce allocation.  Its one controller-start reserve
+	 * serializes a second recovery submission. */
+	assert(reclaim_request_acquire(&reserve, 1,
+	    RECLAIM_SAFE_MAX_SIZE) == 0);
+	assert(reserve.dynamic_allocations == 0U);
+	assert(reserve.forbidden_allocation_attempts == 0U);
+	assert(reserve.busy && reserve.dma_owned);
+	assert(reclaim_request_acquire(&reserve, 1, 1U) == EBUSY);
+	/* The serialized reserve is not a controller-wide admission gate.  An
+	 * unrelated ordinary endpoint keeps using its independent dynamic path. */
+	reserve.allocation_forbidden = 0U;
+	assert(reclaim_request_acquire(&reserve, 0, 1U) == 0);
+	assert(reserve.dynamic_allocations == 1U);
+	assert(reserve.busy && reserve.dma_owned);
+	reserve.allocation_forbidden = 1U;
+
+	/* A failed retirement proof retains the reserve and prevents unsafe DMA
+	 * reuse.  Positive evidence alone releases it for the next recovery. */
+	assert(reclaim_request_retire(&reserve, 0) == EIO);
+	assert(reserve.busy && reserve.dma_owned);
+	assert(reclaim_request_acquire(&reserve, 1, 1U) == EBUSY);
+	assert(reclaim_request_retire(&reserve, 1) == 0);
+	assert(!reserve.busy && !reserve.dma_owned);
+	assert(reclaim_request_acquire(&reserve, 1, 0U) == 0);
+	assert(reclaim_request_retire(&reserve, 1) == 0);
+
+	/* The flag selects the reserve: oversize reclaim work fails before taking it,
+	 * while an ordinary request still reaches the dynamic allocator. */
+	assert(reclaim_request_acquire(&reserve, 1,
+	    RECLAIM_SAFE_MAX_SIZE + 1U) == EMSGSIZE);
+	assert(!reserve.busy && !reserve.dma_owned);
+	assert(reclaim_request_acquire(&reserve, 0, 1U) == ENOMEM);
+	assert(reserve.forbidden_allocation_attempts == 1U);
+	assert(reserve.dynamic_allocations == 1U);
+}
+
 int
 main(void)
 {
@@ -1934,6 +2090,8 @@ main(void)
 	test_ehci_periodic_bandwidth();
 	test_ehci_periodic_checked_barrier();
 	test_ehci_companion_handoff();
+	test_reclaim_safe_preallocated_reserve(MODEL_UHCI);
+	test_reclaim_safe_preallocated_reserve(MODEL_EHCI);
 	test_builder_and_shutdown(MODEL_UHCI);
 	test_builder_and_shutdown(MODEL_EHCI);
 	test_worker_failure_and_self_stop();

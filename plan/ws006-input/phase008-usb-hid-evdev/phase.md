@@ -8,8 +8,8 @@ Phase ID: `p008`
 
 Combined ID: `ws006-p008`
 
-Status: planned; the Report-Protocol and stale-fd namespace policies are
-resolved, but WS004 legacy-HCD and general reset/STALL prerequisites remain
+Status: planned; Queue-ready. Report-Protocol and stale-fd namespace policies
+are resolved, and WS004 p031/p032 prerequisites are complete (`q047`)
 
 Parent: [WS006](../ws.md)
 
@@ -56,20 +56,21 @@ The project owner resolved the two observable policy choices as follows:
    event registry, and attach must fail cleanly rather than alias generations.
 The initial HCD runtime scope was resolved by the user on 2026-08-31: USB HID
 must also work correctly on USB 1.1 and therefore may not ship as xHCI-only.
-Before p008 enters a Queue, WS004 must add a focused UHCI/EHCI Phase which
-removes the controller-global single-active-request starvation and supplies
-the required legacy hotplug lifecycle. Merely compiling p008 for i386 is not
-runtime support.
+WS004 p031 removed the controller-global single-active-request starvation and
+supplied the required legacy hotplug lifecycle. Its automatic, configured,
+and QEMU evidence passed in q047; merely compiling p008 for i386 would not have
+been runtime support.
 
 The same audit found that device reset and endpoint-STALL recovery cannot meet
 the current completion wording through the existing general USB contract:
 `drv_usb_device_reset()` returns `ENOTSUP`, and no checked endpoint reset/toggle
-contract is published. A separate WS004 Phase must provide that contract
-before p008 enters a Queue.
+contract is published. A separate WS004 Phase had to provide that contract
+before p008 entered a Queue. WS004 p032 has now completed the checked
+clear-halt/direct-root-reset contract in q047.
 
-No source was changed by this audit. Once the WS004 prerequisites are complete,
-the remaining implementation path is concrete: early built-in HID registration,
-pending activation after input-core readiness, generation-safe input/devfs
+No source was changed by the original audit. With the WS004 prerequisites now
+complete, the remaining implementation path is concrete: early built-in HID
+registration, pending activation after input-core readiness, generation-safe input/devfs
 publication, an always-on worker-owned interrupt URB per interface, and q35
 xHCI keyboard/mouse/tablet plus concurrent USB-root fixtures.
 
