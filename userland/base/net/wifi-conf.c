@@ -346,8 +346,7 @@ parse_record(const unsigned char *line, size_t length,
 		profile->automatic = 1;
 	else if (consume_literal(&cursor, end, "manual") == 0)
 		profile->automatic = 0;
-	else
-
+	else {
 		/* Obtains the wifi conf fail result. */
 		function_result = wifi_conf_fail(error, error_capacity, EINVAL,
 		    "wifi.conf: record %lu has unsupported mode",
@@ -355,6 +354,7 @@ parse_record(const unsigned char *line, size_t length,
 
 		/* Returns the computed result. */
 		return function_result;
+	}
 
 	/* Checks the current cursor position. */
 	if (cursor != end) {
