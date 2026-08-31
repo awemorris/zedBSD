@@ -1,6 +1,6 @@
 # WS004 Phase 029: WPA2-Personal/CCMP association and L2 data path
 
-Last updated: 2026-08-30
+Last updated: 2026-09-01
 
 Phase ID: `ws004-p029`
 
@@ -104,10 +104,13 @@ scan snapshot and exact SSID
 ```
 
 Each transition has a finite deadline, a connection generation, a limited
-retransmission count, and a precise terminal reason. A scan completion or
-802.11 association never raises carrier. Only a valid message 3, successful
-atomic pairwise/group key install, and transmitted message 4 authorize the
-controlled port.
+retransmission count, and a precise terminal reason. The complete direct L2
+connection generation has the frozen 30-second total monotonic deadline; every
+authentication, association, EAPOL, key, driver, and retry wait uses the
+smaller of its local bound and the remaining total, and no retry restarts that
+budget. A scan completion or 802.11 association never raises carrier. Only a
+valid message 3, successful atomic pairwise/group key install, and transmitted
+message 4 authorize the controlled port.
 
 ## RSN, EAPOL, and key contract
 

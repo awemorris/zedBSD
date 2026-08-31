@@ -1,6 +1,6 @@
 # WS004 Phase 027: generic WLAN UAPI, common core, and fake device
 
-Last updated: 2026-08-30
+Last updated: 2026-09-01
 
 Phase ID: `ws004-p027`
 
@@ -81,6 +81,12 @@ interval, age, capability bits, and normalized security flags. Raw information
 elements and unbounded vendor data are not exposed in version 1. The cache is
 bounded at 64 BSS records, deduplicated by BSSID, with a deterministic weakest/
 oldest eviction rule and stable BSSID tie-break.
+
+One scan generation has a 15-second total monotonic deadline. The common core,
+not a chip driver, owns that deadline; every dwell, callback, cancellation, and
+terminal publication uses the smaller of its local bound and the remaining
+generation time. The fake connection state also enforces the frozen 30-second
+total direct-L2-connect deadline even though p029 supplies the real WPA2 work.
 
 The first connect form accepts an SSID plus an 8--63-octet WPA2 passphrase. It
 does not accept a shell-formatted string, raw pointer, implicit NUL terminator,
@@ -183,6 +189,9 @@ from an old generation and releases its ownership exactly once.
   rejection, association rejection, and key failure remain distinct status
   reasons. Diagnostics contain SSID only in escaped/redacted form and never
   passphrase, PMK, PTK, GTK, nonce, MIC key, or packet-number material.
+- Scan and direct-connect generations terminate within their respective
+  15-second and 30-second total monotonic deadlines; a retry or child
+  transition consumes the existing budget and never restarts it.
 - No operation reports success from a stub. A real device before `p029` returns
   `EOPNOTSUPP` for secure connect while scan can be complete independently.
 

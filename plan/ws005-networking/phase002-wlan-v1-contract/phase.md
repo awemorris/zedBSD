@@ -1,6 +1,6 @@
 # WS005 Phase 002: WLAN v1 control contract
 
-Last updated: 2026-08-30
+Last updated: 2026-09-01
 
 WSID: `ws005`
 
@@ -8,7 +8,7 @@ Phase ID: `p002`
 
 Combined ID: `ws005-p002`
 
-Status: planned; not queued; v1 contract frozen
+Status: Complete (`q053`); v1 contract frozen and synchronized
 
 Parent: [WS005 networking and WLAN](../ws.md)
 
@@ -285,6 +285,25 @@ privilege, or parse secrets from human-readable child output.
 
 ## Queue boundary and handoff
 
-This Phase is not in a Queue and does not authorize code.  It has no remaining
-human design gate; propose only a finite dependency-ready implementation slice
-with its own P-book, timebox, automatic gates, and explicit Queue approval.
+Q053 selected only this design-closure boundary and did not authorize code.
+Future implementation still requires a finite dependency-ready Queue with its
+own P-book, timebox, and automatic gates.
+
+## q053 design-closure result (2026-09-01)
+
+The topology, public/direct command grammar, kernel/driver/command/daemon/client
+ownership, authenticated privilege boundary, credential separation, finite
+failure state, and supersession record agree across the master, WS005, WS011,
+and the dependent WS004/WS005 P-books. The audit found no new product decision.
+
+Three downstream numeric omissions were corrected: `ws004-p027` now freezes
+the 15-second scan and 30-second direct-connect generation budgets, p028 binds
+all driver scan work to the same 15-second total, and p029 binds the complete
+WPA2 L2 connection to the same 30-second total without retry reset. The
+10-second DHCP stage, 90-second compound limit, four auto attempts, 64-entry
+snapshot, and 0/1/2/4/8-second five-failure/30-second same-BSS recovery were
+already consistent in their owning downstream P-books.
+
+The historical `/sbin/wpa`, `/etc/wpa/`, resident profile loop, and
+RTL8822CE-first proposal remain explicitly superseded; MB-006 remains released.
+No source, build, QEMU, radio, or hardware result is attributed to p002.

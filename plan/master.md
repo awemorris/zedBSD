@@ -94,13 +94,17 @@ canonical IDs `ws001-p022` and `ws001-p023`. Production-linked rollback and
 synchronization gates plus five bounded abrupt-stop/remount launches pass.
 The completed [q051](queue-q051.md) closes `ws005-p005`: the real root/non-root
 `/sbin/net wifi set-key`, read-side inode replacement rejection, and
-abrupt-stop/reboot persistence boundaries pass. The completed current
-[Queue Book](queue.md) and [q052](queue-q052.md) then consume q047's repaired
-Noct verifier boundary for `ws004-p021`. All current-source xHCI/NCM gates, a
+abrupt-stop/reboot persistence boundaries pass. Completed [q052](queue-q052.md)
+then consumed q047's repaired Noct verifier boundary for `ws004-p021`. All
+current-source xHCI/NCM gates, a
 fresh private configured build, and one OVMF q35/xHCI USB-root boot pass. One
 hash-pinned Latitude/RTL8156 observation remains, so the Phase is honestly
-`uncleared` while q052 itself is finished. The remaining Noct
-compile/application CLI defect is unrelated. The
+`uncleared` while q052 itself is finished. The current [Queue Book](queue.md)
+then completes q053's documentation-only `ws005-p002` closure: the frozen WLAN
+v1 topology, ownership, security and supersession records now agree with all
+dependent P-books, including exact 15-second scan and 30-second direct-connect
+budgets. No source, radio, or hardware result is attributed to that design
+Phase. The remaining Noct compile/application CLI defect is unrelated. The
 archived q043 PC-98 fixed-read and exact-mouse
 paths both pass locally, and their remaining external resume facts do not
 block subsequent Queues. The
@@ -370,8 +374,8 @@ actually warranted.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q050 completed both VFS prerequisites discovered by q041 | `ws001-p022` and `ws001-p023` complete with production-linked faults and abrupt-stop/remount evidence | Retain p022/p023 as regressions; their dependency consumer resumes in WS005 p005 | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; restore its Make-owned Noct gate through ws008-p010 | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; q049 completed the independent CDC ECM QEMU network baseline and q052 completed p021's fresh-build/xHCI USB-root automatic milestone. q040 p026 remains uncleared only at the purchased-unit label; NVMe software and physical CDC NCM Ethernet are complete | `ws004-p010`--`p016`, `p018`--`p020`, p022--p024, and p031--p033 complete; p021 automatic/runtime milestone passes | Retain p017; record p021's single hash-pinned Latitude checkpoint and p025 when their physical boundaries are available, then continue the WLAN chain | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WLAN | Active; q051 completed p005 after q041 host implementation and q050 VFS prerequisite completion | Physical USB Ethernet, authenticated control, and strict root/per-user credential storage pass through real-command abrupt-stop/remount acceptance | Continue the WLAN dependency chain through the WS004 common core and p004 primitive before p006 protocol composition | [WS005](ws005-networking/ws.md) |
+| `ws004` | Hardware expansion | Active; q049 completed the independent CDC ECM QEMU network baseline and q052 completed p021's fresh-build/xHCI USB-root automatic milestone. q040 p026 remains uncleared only at the purchased-unit label; NVMe software and physical CDC NCM Ethernet are complete | `ws004-p010`--`p016`, `p018`--`p020`, p022--p024, and p031--p033 complete; p021 automatic/runtime milestone passes | Defer p017 pending the shared asynchronous-TX statistics decision; record p021's single hash-pinned Latitude checkpoint and p025 when their physical boundaries are available, then continue the WLAN chain | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WLAN | Active; q053 completed p002's WLAN v1 contract synchronization after q051 completed p005 | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, and the frozen design contract are complete | Record the exact purchased Archer identity in `ws004-p026`, then continue through the WS004 common core and p004 primitive before p006 protocol composition | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; p009 still waits for accepted WS008 userland | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked; accepted host SHA restores runtime `--path` and passes the ordinary production build plus zedbuild byte primitives, while target packages remain separately disabled | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 is uncleared only at unrelated `NOCT-T082` compile/application parsing, and p009 remains separately target-blocked | Resume p010 only from a maintainer-reviewed commit which fixes `--compile --app --path=...`; resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
@@ -495,7 +499,11 @@ priority one.
    q052 then completed p021's current-source automatic/runtime boundary and
    froze one candidate for its remaining Latitude check. WS004 retains p017,
    that p021 physical checkpoint, p025, and the WLAN chain rather than treating
-   the working visible USB/NVMe cases as closure.
+   the working visible USB/NVMe cases as closure. Q053 subsequently completed
+   the documentation-only `ws005-p002` WLAN v1 contract audit. No further
+   decision-free USB-LAN implementation Phase remains: p017 waits for the
+   common asynchronous-TX statistics policy and p021 waits for its one physical
+   Latitude observation.
 2. WS018 is complete.  q035 finished p009's retained runtime evidence and
    p010--p012 in consumer-before-deletion order; no residual Phase remains.
 3. Complete WS020 Intel Mac bring-up. The generic board Variant, three amd64
@@ -556,6 +564,7 @@ until stopped or no judgment-free Phase remains.
 | UEFI-only Protective MBR and primary-only GPT shape | WS020 | Resolved: zero non-executable Protective-MBR code, one non-active `0xee` entry, three zero entries, and `55 aa`; the fixed 395,297-sector artifact contains a valid primary GPT and zero final 33-sector reservation but no backup GPT or compatibility-MBR entry |
 | Initial Secure Boot scope | WS003 | Resolved: use UEFI with Secure Boot disabled; signing/key enrollment deferred and not required for NVMe |
 | USB Ethernet interface descriptors and, for vendor-specific interfaces, VID:PID/controller family | WS003/WS004/WS005 | Choose CDC ECM/NCM class frontend or Realtek-family frontend for HW-12/NET-10; ACM is inapplicable |
+| USB Ethernet asynchronous TX statistics | WS004 p017 | Choose whether packets/bytes count driver acceptance or successful HCD completion, whether a later terminal failure adds only `tx_errors` or also `tx_dropped`, and whether administrative `CANCELLED` is an error before p017 resumes |
 | First USB WLAN identity | WS004/WS005 | Primary evidence identifies Archer T3U Nano V1.0 as RTL8822BU, USB `2357:012e`; `ws004-p026` must still record the exact physical unit revision, descriptors, and firmware provenance before driver implementation |
 | Built-in PCI WLAN identity | WS004/WS005 | Resolved as RTL8822CE `10ec:c822`, subsystem `10ec:c130`; retained as a later target after the Archer-first sequence |
 | WLAN privilege and process topology | WS005 | Resolved for v1: one `root:network` mode-0660 `/run/networkd.sock`, kernel-attested connection-time peer credentials, `net` as user/desktop frontend, root `networkd` as orchestrator, and fixed primitive `ifconfig`/`wifi`/`dhcpc` children; no resident/pluggable `wpa` child |

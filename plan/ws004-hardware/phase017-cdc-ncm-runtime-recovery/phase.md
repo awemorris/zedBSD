@@ -1,10 +1,10 @@
 # WS004 Phase 017: CDC NCM runtime recovery and completion accounting
 
-Last updated: 2026-08-29
+Last updated: 2026-09-01
 
 Phase ID: `ws004-p017`
 
-Status: pending; not queued
+Status: deferred; human TX-statistics decision required; not queued
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -46,9 +46,9 @@ fully valid NTB is accepted at any sequence, every fully valid mismatch is
 delivered and resynchronizes the next expectation to the wire sequence plus
 one, malformed input changes no sequence state, and completion work is
 budgeted. p020 also owns packet-filter programming on open after the active
-alternate. Those items no longer wait on this broader Phase, but p017 remains
-pending for asynchronous TX accounting and any later recovery work outside
-p020's explicit boundary.
+alternate. Those items no longer wait on this broader Phase, but p017 is
+deferred pending the shared asynchronous-TX statistics decision and any later
+recovery work outside p020's explicit boundary.
 
 ## Planned design work
 
@@ -81,3 +81,26 @@ recovery rule. If correct accounting requires changing the general
 `net_device` contract, plan that shared change before modifying the NCM driver
 or its public headers. Do not fold p020, notification reassembly, xHCI IRQ
 redesign, or ECM into p017 merely because they concern the same device.
+
+## q053 readiness audit (2026-09-01)
+
+No decision-free implementation slice remains. Today
+`net_device_transmit()` counts `tx_packets` and `tx_bytes` when a driver accepts
+the submission, while a later NCM bulk-OUT terminal error only releases the
+busy state. Before p017 enters a Queue, decide all of the following as one
+general `net_device` statistics contract:
+
+- whether accepted packet/byte counters remain counted after a later HCD
+  failure or move to successful completion;
+- whether that terminal failure increments only `tx_errors` or also
+  `tx_dropped`; and
+- whether administrative `CANCELLED` during close/detach is excluded from
+  failure statistics.
+
+The recommended compatible policy is to retain accepted/submitted
+`tx_packets`/`tx_bytes`, increment `tx_errors` exactly once for genuine later
+`STALL`, `TIMEOUT`, `DISCONNECTED`, or `IO_ERROR`, leave `tx_dropped` unchanged,
+and exclude administrative cancellation. This is a recommendation, not an
+adopted decision. Q029 supplies no residual physical recovery failure beyond
+the already completed p020 rules. ECM remains outside p017 and would require a
+separate consumer Phase after the common contract is fixed.

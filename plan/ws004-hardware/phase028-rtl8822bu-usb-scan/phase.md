@@ -1,6 +1,6 @@
 # WS004 Phase 028: RTL8822BU USB attach, firmware, and scan
 
-Last updated: 2026-08-30
+Last updated: 2026-09-01
 
 Phase ID: `ws004-p028`
 
@@ -116,7 +116,10 @@ or success after a partial start.
 
 Scanning is a common-core operation, not a driver-owned autonomous policy. The
 first implementation uses bounded software scan so correctness does not depend
-on optional firmware scan offload:
+on optional firmware scan offload. One scan generation has the p002/p027
+15-second total monotonic deadline; every channel dwell, firmware command, USB
+completion, cancellation, and terminal publication is bounded by the smaller
+of its local limit and the remaining generation time:
 
 1. The common core starts a generation and supplies the legal channel list.
 2. The driver sets one 20-MHz channel, acknowledges completion, and enables

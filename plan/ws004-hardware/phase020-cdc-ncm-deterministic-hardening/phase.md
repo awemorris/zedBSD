@@ -1,6 +1,6 @@
 # WS004 Phase 020: CDC NCM deterministic receive and open hardening
 
-Last updated: 2026-08-29
+Last updated: 2026-09-01
 
 Phase ID: `ws004-p020`
 
@@ -167,10 +167,11 @@ trace work retained by `ws005-p001`.
 
 ## Relationship to `ws004-p017`
 
-`ws004-p017` remains pending. This Phase extracts only the deterministic policy
-the user has now approved: valid-sequence acceptance/resynchronization and
-bounded completion work. p017 retains asynchronous TX completion accounting
-and any later recovery topics not explicitly frozen here.
+`ws004-p017` is deferred pending the shared asynchronous-TX statistics
+decision. This Phase extracts only the deterministic policy the user has now
+approved: valid-sequence acceptance/resynchronization and bounded completion
+work. p017 retains asynchronous TX completion accounting and any later
+recovery topics not explicitly frozen here.
 
 ## Reconsideration boundary
 

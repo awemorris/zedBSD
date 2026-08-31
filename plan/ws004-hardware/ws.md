@@ -48,7 +48,8 @@ shared-INTx dispatch, and worker-context root hotplug through all focused,
 configured-build, regression, repository-build, and two-cell QEMU gates. `p018`
 corrected the IAD-less, Union-associated NCM match exposed by
 the first physical RTL8156 insertion, and the accepted follow-up published
-`ue0`. The broader asynchronous-TX/accounting decisions remain in p017.
+`ue0`. Q053 confirms that the broader asynchronous-TX/accounting semantics
+remain a human decision in p017; no decision-free implementation slice exists.
 
 Resume point: p031, p032, and p033 are complete, q048 consumed their USB HID
 handoff, and q049 completed p019's automatic ECM and four-cell QEMU scope. No
@@ -65,7 +66,8 @@ automatic loader/installer prerequisites before requesting that physical
 checkpoint. Q052 consumed q047's Noct release and completed p021's disposable
 QEMU boot; one hash-pinned Latitude checkpoint remains. P019 completed in
 q049 as an independent ECM baseline. The remaining asynchronous-TX/accounting
-portion of p017 stays later
+portion of p017 is explicitly deferred pending the shared statistics decision;
+it stays later
 WS004 work. WLAN planning has resumed with the Archer T3U Nano as
 the first target. `p026` must confirm the physical adapter descriptor and
 separate firmware-package policy; `p027`--`p030` then progress through the
@@ -95,7 +97,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p014`](phase014-cdc-ncm-driver/phase.md) | Complete (`q027`) | Strict self-contained CDC NCM `ueN` integration passes automatic lifecycle, concurrency, build, and QEMU regression gates; physical NCM remains WS005 |
 | [`ws004-p015`](phase015-usb-binding-transactions/phase.md) | Complete (`q027`) | General binding lifecycle, interface I/O gate, active-endpoint submission, endpoint-zero serialization, and conservative legacy-HCD ownership passed focused, sanitizer, analyzer, build, and USB-root QEMU gates |
 | [`ws004-p016`](phase016-legacy-hcd-request-retirement/phase.md) | Complete (`q041`) | Controller-proven UHCI frame and EHCI Async Advance retirement, callback re-entry and toggle continuity pass focused/configured/QEMU gates; unavailable fault injection is explicitly model-only |
-| [`ws004-p017`](phase017-cdc-ncm-runtime-recovery/phase.md) | Pending; not queued; residual TX-accounting policy open | p020 extracts the approved valid-sequence/resync and bounded-work rules; p017 retains asynchronous terminal TX accounting and any later separately approved recovery work |
+| [`ws004-p017`](phase017-cdc-ncm-runtime-recovery/phase.md) | Deferred; human TX-statistics decision required; not queued | p020 owns the approved recovery rules; choose accepted-vs-completed counters, terminal error/drop accounting, and administrative-cancel treatment before p017 implementation |
 | [`ws004-p018`](phase018-rtl8156-ncm-association/phase.md) | Complete (`q028`) | CDC Union is authoritative and IAD is optional strict corroboration; automatic gates pass and physical RTL8156 configuration 2 binds and publishes `ue0`; carrier/data work moved to WS005 p001 |
 | [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Complete (`q049`) | Independent standards CDC ECM, the general xHCI/EHCI/UHCI zero-packet HCD contract, focused lifetime/fault evidence, and all four IDE/xHCI-storage static/DHCP QEMU cells pass without NCM wire sharing or VID:PID/configuration quirks |
 | [`ws004-p020`](phase020-cdc-ncm-deterministic-hardening/phase.md) | Complete (`q029` automatic software scope) | Valid sequences accept/resynchronize, malformed input preserves state, completions and rearms are bounded/fair, and the packet filter is programmed transactionally on open; focused and regression gates pass |
@@ -125,8 +127,8 @@ Shared tests: [WS004 test index](tests/README.md)
 q029, p020, and WS005 p001 are complete through final Latitude-native external
 fetch. p021 is an independent standards correction rather than an active
 failure response; q052 retains its passing fresh-image QEMU result and only one
-physical checkpoint remains. Later WS004 candidates after q052 are p017, the
-p021 physical checkpoint, p025, the planned-only
+physical checkpoint remains. Later WS004 boundaries after q052 are the
+decision-deferred p017, the p021 physical checkpoint, p025, and the planned-only
 p026--p030 WLAN chain; q047 p031--p033 are complete. Additional work is
 HW-11, HW-20/HW-21, and HW-30 when their inputs and acceptance environments
 are available. q040 selects the evidence/policy-only p026 boundary; it does
