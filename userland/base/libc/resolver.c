@@ -1,4 +1,16 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the zedBSD C library resolver support.
+ */
+
 #include "userland/base/libc/resolver-internal.h"
 
 #include <arpa/inet.h>
@@ -17,123 +29,416 @@
 static uint32_t resolver_counter;
 static pthread_mutex_t resolver_counter_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static uint16_t
-query_id(const char *name)
-{
-	struct timespec now;
-	uint32_t hash;
-	(void)pthread_mutex_lock(&resolver_counter_lock);
-	hash = ++resolver_counter;
-	(void)pthread_mutex_unlock(&resolver_counter_lock);
-	while (*name != '\0')
-		hash = hash * 33U ^ (uint8_t)*name++;
-	if (clock_gettime(CLOCK_MONOTONIC, &now) == 0)
-		hash ^= (uint32_t)now.tv_nsec ^ (uint32_t)now.tv_sec;
-	return (uint16_t)(hash ^ hash >> 16);
-}
+static int resolver_query_server_depth(const char *name, uint16_t type, const struct in_addr *server_address, uint16_t port, struct resolver_result *result, unsigned depth);
+static uint16_t query_id(const char *name);
+static int tcp_query(const struct sockaddr_in *server, const uint8_t *query, size_t query_length, uint16_t id, const char *name, uint16_t type, struct resolver_result *result);
+static int write_all_socket(int descriptor, const uint8_t *buffer, size_t length);
+static int read_exact_socket(int descriptor, uint8_t *buffer, size_t length);
+static int parse_service(const char *service, uint16_t *port);
+static int make_ptr_name(struct in_addr address, char *output, size_t capacity);
 
+/*
+ * Implements the resolver load config operation.
+ */
 int
-resolver_load_config(struct resolver_config *config)
+resolver_load_config(
+	struct resolver_config *config)
 {
+	char *text, *end;
 	FILE *file;
 	char line[128];
 
+	/* Handles the config availability. */
 	if (config == NULL)
 		return EAI_FAIL;
 	memset(config, 0, sizeof(*config));
 	file = fopen("/etc/resolv.conf", "r");
+
+	/* Handles the file availability. */
 	if (file == NULL)
 		return EAI_AGAIN;
+
+	/* Process input until it is exhausted. */
 	while (config->count < DNS_MAX_NAMESERVERS &&
 	       fgets(line, sizeof(line), file) != NULL) {
-		char *text = line, *end;
+		/* Continue while the operation condition remains true. */
+		text = line;
 		while (*text == ' ' || *text == '\t')
 			text++;
+
+		/* Validates the current text. */
 		if (*text == '#' || *text == '\n' || *text == '\0')
 			continue;
+
+		/* Selects the matching prefix. */
 		if (strncmp(text, "nameserver", 10U) != 0 ||
 		    (text[10] != ' ' && text[10] != '\t'))
 			continue;
 		text += 10;
+
+		/* Continue while the operation condition remains true. */
 		while (*text == ' ' || *text == '\t')
 			text++;
+
+		/* Continue while the operation condition remains true. */
 		end = text;
 		while (*end != '\0' && *end != '\n' && *end != '\r' &&
 		       *end != ' ' && *end != '\t' && *end != '#')
 			end++;
 		*end = '\0';
+		/* Handles a failed inet aton operation. */
 		if (inet_aton(text, &config->servers[config->count]))
 			config->count++;
 	}
 	fclose(file);
+
+	/* Returns the computed result. */
 	return config->count != 0U ? 0 : EAI_AGAIN;
 }
 
-static int
-write_all_socket(int descriptor, const uint8_t *buffer, size_t length)
+/*
+ * Implements the resolver query server operation.
+ */
+int
+resolver_query_server(
+	const char *name,
+	uint16_t type,
+	const struct in_addr *server_address,
+	uint16_t port,
+	struct resolver_result *result)
 {
-	while (length != 0U) {
-		ssize_t count = send(descriptor, buffer, length, 0);
-		if (count <= 0)
-			return -1;
-		buffer += count;
-		length -= (size_t)count;
-	}
-	return 0;
+	int function_result;
+
+	/* Obtains the resolver query server depth result. */
+	function_result = resolver_query_server_depth(name, type, server_address, port,
+					   result, 0);
+
+	/* Returns the computed result. */
+	return function_result;
 }
 
-static int
-read_exact_socket(int descriptor, uint8_t *buffer, size_t length)
+/*
+ * Implements the resolver query operation.
+ */
+int
+resolver_query(
+	const char *name,
+	uint16_t type,
+	struct resolver_result *result)
 {
-	while (length != 0U) {
-		ssize_t count = recv(descriptor, buffer, length, 0);
-		if (count <= 0)
-			return -1;
-		buffer += count;
-		length -= (size_t)count;
+	struct resolver_config config;
+	unsigned index;
+	int error;
+
+	error = resolver_load_config(&config);
+
+	/* Handles an operation failure. */
+	if (error != 0)
+		return error;
+
+	/* Process each remaining element. */
+	for (index = 0; index < config.count; index++) {
+		error = resolver_query_server(
+		    name, type, &config.servers[index], 53U, result);
+
+		/* Handles an operation failure. */
+		if (error == 0 || error == EAI_NONAME)
+			return error;
 	}
-	return 0;
+
+	/* Returns the computed result. */
+	return error;
 }
 
-static int
-tcp_query(const struct sockaddr_in *server, const uint8_t *query,
-	  size_t query_length, uint16_t id, const char *name, uint16_t type,
-	  struct resolver_result *result)
+/*
+ * Implements the getaddrinfo operation.
+ */
+int
+getaddrinfo(
+	const char *node,
+	const char *service,
+	const struct addrinfo *hints,
+	struct addrinfo **output)
 {
-	uint8_t request[514], response[2048], prefix[2];
-	uint16_t length;
-	int descriptor, error, truncated;
+	struct addrinfo *item;
+	struct sockaddr_in *address;
+	struct resolver_result result;
+	struct addrinfo *head, **tail;
+	struct in_addr numeric;
+	uint16_t port;
+	unsigned count, index;
+	int family, socktype, protocol, flags, error;
 
-	request[0] = (uint8_t)(query_length >> 8);
-	request[1] = (uint8_t)query_length;
-	memcpy(request + 2, query, query_length);
-	descriptor = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (descriptor < 0)
-		return EAI_AGAIN;
-	if (connect(descriptor, (const struct sockaddr *)server,
-		    sizeof(*server)) != 0 ||
-	    write_all_socket(descriptor, request, query_length + 2U) != 0 ||
-	    read_exact_socket(descriptor, prefix, 2U) != 0) {
-		close(descriptor);
-		return EAI_AGAIN;
-	}
-	length = (uint16_t)((uint16_t)prefix[0] << 8 | prefix[1]);
-	if (length > sizeof(response) ||
-	    read_exact_socket(descriptor, response, length) != 0) {
-		close(descriptor);
+	head = NULL;
+	tail = &head;
+	family = AF_UNSPEC;
+	socktype = 0;
+	protocol = 0;
+	flags = 0;
+
+	/* Handles the output availability. */
+	if (output == NULL)
 		return EAI_FAIL;
+	*output = NULL;
+	/* Handles the hints availability. */
+	if (hints != NULL) {
+		family = hints->ai_family;
+		socktype = hints->ai_socktype;
+		protocol = hints->ai_protocol;
+		flags = hints->ai_flags;
+
+		/* Checks the active flags. */
+		if ((flags & ~(AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST |
+			       AI_NUMERICSERV)) != 0)
+
+			/* Returns the computed result. */
+			return EAI_BADFLAGS;
 	}
-	close(descriptor);
-	error = resolver_dns_parse(response, length, id, name, type, result,
-				   &truncated);
-	return truncated ? EAI_FAIL : error;
+
+	/* Handles the family condition. */
+	if (family != AF_UNSPEC && family != AF_INET)
+		return EAI_FAMILY;
+
+	/* Handles the socktype condition. */
+	if (socktype != 0 && socktype != SOCK_DGRAM &&
+	    socktype != SOCK_STREAM && socktype != SOCK_RAW)
+
+		/* Returns the computed result. */
+		return EAI_SOCKTYPE;
+	error = parse_service(service, &port);
+
+	/* Handles an operation failure. */
+	if (error != 0)
+		return error;
+	memset(&result, 0, sizeof(result));
+
+	/* Handles the node availability. */
+	if (node == NULL) {
+		numeric.s_addr =
+		    htonl((flags & AI_PASSIVE) ? INADDR_ANY : 0x7f000001U);
+		result.addresses[0] = numeric;
+		result.address_count = 1;
+	} else if (inet_aton(node, &numeric)) {
+		result.addresses[0] = numeric;
+		result.address_count = 1;
+		strncpy(result.canonical, node, sizeof(result.canonical) - 1U);
+	} else {
+		/* Checks the active flags. */
+		if ((flags & AI_NUMERICHOST) != 0)
+			return EAI_NONAME;
+		error = resolver_query(node, DNS_TYPE_A, &result);
+
+		/* Handles an operation failure. */
+		if (error != 0)
+			return error;
+
+		/* Checks the operation result. */
+		if (result.canonical[0] == '\0')
+			strncpy(result.canonical, node,
+				sizeof(result.canonical) - 1U);
+	}
+
+	/* Process each remaining element. */
+	count = result.address_count;
+	for (index = 0; index < count; index++) {
+
+		item = calloc(1, sizeof(*item));
+		address = calloc(1, sizeof(*address));
+
+		/* Handles the item availability. */
+		if (item == NULL || address == NULL) {
+			free(item);
+			free(address);
+			freeaddrinfo(head);
+
+			/* Returns the computed result. */
+			return EAI_MEMORY;
+		}
+		address->sin_family = AF_INET;
+		address->sin_port = htons(port);
+		address->sin_addr = result.addresses[index];
+		item->ai_flags = flags;
+		item->ai_family = AF_INET;
+		item->ai_socktype = socktype;
+		item->ai_protocol = protocol;
+		item->ai_addrlen = sizeof(*address);
+		item->ai_addr = (struct sockaddr *)address;
+
+		/* Checks the active flags. */
+		if ((flags & AI_CANONNAME) != 0 && index == 0)
+			item->ai_canonname = strdup(result.canonical);
+		*tail = item;
+		tail = &item->ai_next;
+	}
+	*output = head;
+	/* Reports successful completion. */
+	return 0;
 }
 
-static int
-resolver_query_server_depth(const char *name, uint16_t type,
-			    const struct in_addr *server_address, uint16_t port,
-			    struct resolver_result *result, unsigned depth)
+/*
+ * Implements the freeaddrinfo operation.
+ */
+void
+freeaddrinfo(
+	struct addrinfo *info)
 {
+	struct addrinfo *next;
+
+	/* Continue while the operation condition remains true. */
+	while (info != NULL) {
+
+		next = info->ai_next;
+		free(info->ai_addr);
+		free(info->ai_canonname);
+		free(info);
+		info = next;
+	}
+}
+
+/*
+ * Implements the gai strerror operation.
+ */
+const char *
+gai_strerror(
+	int error)
+{
+	/* Dispatch the selected operation case. */
+	switch (error) {
+	case 0:
+		/* Returns the computed result. */
+		return "success";
+	case EAI_AGAIN:
+		/* Returns the computed result. */
+		return "temporary failure in name resolution";
+	case EAI_BADFLAGS:
+		/* Returns the computed result. */
+		return "invalid resolver flags";
+	case EAI_FAIL:
+		/* Returns the computed result. */
+		return "name server failure";
+	case EAI_FAMILY:
+		/* Returns the computed result. */
+		return "unsupported address family";
+	case EAI_MEMORY:
+		/* Returns the computed result. */
+		return "out of memory";
+	case EAI_NONAME:
+		/* Returns the computed result. */
+		return "name or service not known";
+	case EAI_SERVICE:
+		/* Returns the computed result. */
+		return "unsupported service";
+	case EAI_SOCKTYPE:
+		/* Returns the computed result. */
+		return "unsupported socket type";
+	case EAI_OVERFLOW:
+		/* Returns the computed result. */
+		return "result buffer too small";
+	case EAI_SYSTEM:
+		/* Returns the computed result. */
+		return "system error";
+	default:
+		/* Returns the computed result. */
+		return "resolver error";
+	}
+}
+
+/*
+ * Implements the getnameinfo operation.
+ */
+int
+getnameinfo(
+	const struct sockaddr *address,
+	socklen_t length,
+	char *host,
+	socklen_t host_length,
+	char *service,
+	socklen_t service_length,
+	int flags)
+{
+	int needed;
+	const struct sockaddr_in *inet;
+	char buffer[254];
+	struct resolver_result result;
+	int error;
+
+	inet = (const struct sockaddr_in *)address;
+
+	/* Checks the active flags. */
+	if ((flags & ~(NI_NUMERICHOST | NI_NUMERICSERV | NI_NAMEREQD)) != 0)
+		return EAI_BADFLAGS;
+
+	/* Handles the address availability. */
+	if (address == NULL || length < sizeof(*inet) ||
+	    inet->sin_family != AF_INET)
+
+		/* Returns the computed result. */
+		return EAI_FAMILY;
+
+	/* Handles the service availability. */
+	if (service != NULL && service_length != 0U) {
+				needed = snprintf(service, service_length, "%u",
+				      ntohs(inet->sin_port));
+
+		/* Handles the needed condition. */
+		if (needed < 0 || (socklen_t)needed >= service_length)
+			return EAI_OVERFLOW;
+	}
+
+	/* Handles the host availability. */
+	if (host == NULL || host_length == 0U)
+		return 0;
+
+	/* Checks the active flags. */
+	if ((flags & NI_NUMERICHOST) == 0) {
+		error = make_ptr_name(inet->sin_addr, buffer, sizeof(buffer));
+
+		/* Handles an operation failure. */
+		if (error == 0)
+			error = resolver_query(buffer, DNS_TYPE_PTR, &result);
+
+		/* Handles an operation failure. */
+		if (error == 0) {
+			/* Handles a failed strlen operation. */
+			if (strlen(result.ptr_name) + 1U > host_length)
+				return EAI_OVERFLOW;
+			strcpy(host, result.ptr_name);
+
+			/* Reports successful completion. */
+			return 0;
+		}
+
+		/* Checks the active flags. */
+		if ((flags & NI_NAMEREQD) != 0)
+			return error;
+	}
+
+	/* Handles a failed inet ntop operation. */
+	if (inet_ntop(AF_INET, &inet->sin_addr, buffer, sizeof(buffer)) == NULL)
+		return EAI_SYSTEM;
+
+	/* Handles a failed strlen operation. */
+	if (strlen(buffer) + 1U > host_length)
+		return EAI_OVERFLOW;
+	strcpy(host, buffer);
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the resolver query server depth operation. */
+static int
+resolver_query_server_depth(
+	const char *name,
+	uint16_t type,
+	const struct in_addr *server_address,
+	uint16_t port,
+	struct resolver_result *result,
+	unsigned depth)
+{
+	struct resolver_result target;
+	char alias[254];
+	uint32_t cname_ttl;
 	uint8_t query[512], response[512];
 	struct sockaddr_in server, source;
 	struct timeval timeout;
@@ -141,34 +446,46 @@ resolver_query_server_depth(const char *name, uint16_t type,
 	size_t query_length;
 	uint16_t id;
 	int attempt, descriptor, error, truncated;
+	ssize_t count;
 
+	/* Handles the name availability. */
 	if (name == NULL || server_address == NULL || result == NULL)
 		return EAI_FAIL;
 	memset(result, 0, sizeof(*result));
 	id = query_id(name);
 	error = resolver_dns_build_query(query, sizeof(query), id, name, type,
 					 &query_length);
+
+	/* Handles an operation failure. */
 	if (error != 0)
 		return error;
 	memset(&server, 0, sizeof(server));
+
+	/* Process each element required by the operation. */
 	server.sin_family = AF_INET;
 	server.sin_port = htons(port);
 	server.sin_addr = *server_address;
 	for (attempt = 0; attempt < 2; attempt++) {
 		descriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+
+		/* Checks the file descriptor. */
 		if (descriptor < 0)
 			return EAI_SYSTEM;
 		timeout.tv_sec = 2;
 		timeout.tv_usec = 0;
 		(void)setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout,
 				 sizeof(timeout));
+
+		/* Handles a failed sendto operation. */
 		if (sendto(descriptor, query, query_length, 0,
 			   (const struct sockaddr *)&server,
 			   sizeof(server)) >= 0) {
 			source_length = sizeof(source);
-			ssize_t count = recvfrom(
+			count = recvfrom(
 			    descriptor, response, sizeof(response), 0,
 			    (struct sockaddr *)&source, &source_length);
+
+			/* Checks the remaining item count. */
 			if (count >= 0 && source.sin_family == AF_INET &&
 			    source.sin_addr.s_addr == server.sin_addr.s_addr &&
 			    source.sin_port == server.sin_port) {
@@ -176,24 +493,30 @@ resolver_query_server_depth(const char *name, uint16_t type,
 				    response, (size_t)count, id, name, type,
 				    result, &truncated);
 				close(descriptor);
+
+				/* Handles the truncated condition. */
 				if (truncated)
 					error = tcp_query(&server, query,
 							  query_length, id,
 							  name, type, result);
+
+				/* Handles an operation failure. */
 				if (error == EAI_NONAME && type == DNS_TYPE_A &&
 				    result->canonical[0] != '\0' &&
 				    depth < 8U) {
-					struct resolver_result target;
-					char alias[254];
-					uint32_t cname_ttl = result->ttl;
+
+										cname_ttl = result->ttl;
 					strncpy(alias, result->canonical,
 						sizeof(alias) - 1U);
 					alias[sizeof(alias) - 1U] = '\0';
 					error = resolver_query_server_depth(
 					    alias, type, server_address, port,
 					    &target, depth + 1U);
+
+					/* Handles an operation failure. */
 					if (error == 0) {
 						*result = target;
+						/* Checks the operation result. */
 						if (result->cname_count < 8U) {
 							memmove(
 							    result->cname_chain +
@@ -209,241 +532,202 @@ resolver_query_server_depth(const char *name, uint16_t type,
 							    alias, 253U);
 							result->cname_count++;
 						}
+
+						/* Handles the cname ttl condition. */
 						if (cname_ttl != 0 &&
 						    (result->ttl == 0 ||
 						     cname_ttl < result->ttl))
 							result->ttl = cname_ttl;
 					}
 				}
+
+				/* Handles an operation failure. */
 				if (error == 0) {
 					result->server = *server_address;
 					result->port = port;
 				}
+
+				/* Returns the computed result. */
 				return error;
 			}
 		}
 		close(descriptor);
 	}
+
+	/* Returns the computed result. */
 	return EAI_AGAIN;
 }
 
-int
-resolver_query_server(const char *name, uint16_t type,
-		      const struct in_addr *server_address, uint16_t port,
-		      struct resolver_result *result)
+/* Supports the query id operation. */
+static uint16_t
+query_id(
+	const char *name)
 {
-	return resolver_query_server_depth(name, type, server_address, port,
-					   result, 0);
+	struct timespec now;
+	uint32_t hash;
+
+	(void)pthread_mutex_lock(&resolver_counter_lock);
+	hash = ++resolver_counter;
+	(void)pthread_mutex_unlock(&resolver_counter_lock);
+
+	/* Continue while the operation condition remains true. */
+	while (*name != '\0')
+		hash = hash * 33U ^ (uint8_t)*name++;
+
+	/* Handles a failed clock gettime operation. */
+	if (clock_gettime(CLOCK_MONOTONIC, &now) == 0)
+		hash ^= (uint32_t)now.tv_nsec ^ (uint32_t)now.tv_sec;
+
+	/* Returns the computed result. */
+	return (uint16_t)(hash ^ hash >> 16);
 }
 
-int
-resolver_query(const char *name, uint16_t type, struct resolver_result *result)
-{
-	struct resolver_config config;
-	unsigned index;
-	int error;
-
-	error = resolver_load_config(&config);
-	if (error != 0)
-		return error;
-	for (index = 0; index < config.count; index++) {
-		error = resolver_query_server(
-		    name, type, &config.servers[index], 53U, result);
-		if (error == 0 || error == EAI_NONAME)
-			return error;
-	}
-	return error;
-}
-
+/* Supports the tcp query operation. */
 static int
-parse_service(const char *service, uint16_t *port)
+tcp_query(
+	const struct sockaddr_in *server,
+	const uint8_t *query,
+	size_t query_length,
+	uint16_t id,
+	const char *name,
+	uint16_t type,
+	struct resolver_result *result)
+{
+	uint8_t request[514], response[2048], prefix[2];
+	uint16_t length;
+	int descriptor, error, truncated;
+
+	request[0] = (uint8_t)(query_length >> 8);
+	request[1] = (uint8_t)query_length;
+	memcpy(request + 2, query, query_length);
+	descriptor = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+	/* Checks the file descriptor. */
+	if (descriptor < 0)
+		return EAI_AGAIN;
+
+	/* Handles a failed connect operation. */
+	if (connect(descriptor, (const struct sockaddr *)server,
+		    sizeof(*server)) != 0 ||
+	    write_all_socket(descriptor, request, query_length + 2U) != 0 ||
+	    read_exact_socket(descriptor, prefix, 2U) != 0) {
+		close(descriptor);
+
+		/* Returns the computed result. */
+		return EAI_AGAIN;
+	}
+	length = (uint16_t)((uint16_t)prefix[0] << 8 | prefix[1]);
+
+	/* Handles a failed read exact socket operation. */
+	if (length > sizeof(response) ||
+	    read_exact_socket(descriptor, response, length) != 0) {
+		close(descriptor);
+
+		/* Returns the computed result. */
+		return EAI_FAIL;
+	}
+	close(descriptor);
+	error = resolver_dns_parse(response, length, id, name, type, result,
+				   &truncated);
+
+	/* Returns the computed result. */
+	return truncated ? EAI_FAIL : error;
+}
+
+/* Supports the write all socket operation. */
+static int
+write_all_socket(
+	int descriptor,
+	const uint8_t *buffer,
+	size_t length)
+{
+	ssize_t count;
+
+	/* Process each remaining element. */
+	while (length != 0U) {
+
+		count = send(descriptor, buffer, length, 0);
+
+		/* Checks the remaining item count. */
+		if (count <= 0)
+			return -1;
+		buffer += count;
+		length -= (size_t)count;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the read exact socket operation. */
+static int
+read_exact_socket(
+	int descriptor,
+	uint8_t *buffer,
+	size_t length)
+{
+	ssize_t count;
+
+	/* Process each remaining element. */
+	while (length != 0U) {
+
+		count = recv(descriptor, buffer, length, 0);
+
+		/* Checks the remaining item count. */
+		if (count <= 0)
+			return -1;
+		buffer += count;
+		length -= (size_t)count;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the parse service operation. */
+static int
+parse_service(
+	const char *service,
+	uint16_t *port)
 {
 	char *end;
 	unsigned long value;
+
+	/* Handles the service availability. */
 	if (service == NULL) {
 		*port = 0;
+		/* Reports successful completion. */
 		return 0;
 	}
 	value = strtoul(service, &end, 10);
+
+	/* Handles the service condition. */
 	if (*service == '\0' || *end != '\0' || value > 65535U)
 		return EAI_SERVICE;
 	*port = (uint16_t)value;
+	/* Reports successful completion. */
 	return 0;
 }
 
-int
-getaddrinfo(const char *node, const char *service, const struct addrinfo *hints,
-	    struct addrinfo **output)
-{
-	struct resolver_result result;
-	struct addrinfo *head = NULL, **tail = &head;
-	struct in_addr numeric;
-	uint16_t port;
-	unsigned count, index;
-	int family = AF_UNSPEC, socktype = 0, protocol = 0, flags = 0, error;
-
-	if (output == NULL)
-		return EAI_FAIL;
-	*output = NULL;
-	if (hints != NULL) {
-		family = hints->ai_family;
-		socktype = hints->ai_socktype;
-		protocol = hints->ai_protocol;
-		flags = hints->ai_flags;
-		if ((flags & ~(AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST |
-			       AI_NUMERICSERV)) != 0)
-			return EAI_BADFLAGS;
-	}
-	if (family != AF_UNSPEC && family != AF_INET)
-		return EAI_FAMILY;
-	if (socktype != 0 && socktype != SOCK_DGRAM &&
-	    socktype != SOCK_STREAM && socktype != SOCK_RAW)
-		return EAI_SOCKTYPE;
-	error = parse_service(service, &port);
-	if (error != 0)
-		return error;
-	memset(&result, 0, sizeof(result));
-	if (node == NULL) {
-		numeric.s_addr =
-		    htonl((flags & AI_PASSIVE) ? INADDR_ANY : 0x7f000001U);
-		result.addresses[0] = numeric;
-		result.address_count = 1;
-	} else if (inet_aton(node, &numeric)) {
-		result.addresses[0] = numeric;
-		result.address_count = 1;
-		strncpy(result.canonical, node, sizeof(result.canonical) - 1U);
-	} else {
-		if ((flags & AI_NUMERICHOST) != 0)
-			return EAI_NONAME;
-		error = resolver_query(node, DNS_TYPE_A, &result);
-		if (error != 0)
-			return error;
-		if (result.canonical[0] == '\0')
-			strncpy(result.canonical, node,
-				sizeof(result.canonical) - 1U);
-	}
-	count = result.address_count;
-	for (index = 0; index < count; index++) {
-		struct addrinfo *item = calloc(1, sizeof(*item));
-		struct sockaddr_in *address = calloc(1, sizeof(*address));
-		if (item == NULL || address == NULL) {
-			free(item);
-			free(address);
-			freeaddrinfo(head);
-			return EAI_MEMORY;
-		}
-		address->sin_family = AF_INET;
-		address->sin_port = htons(port);
-		address->sin_addr = result.addresses[index];
-		item->ai_flags = flags;
-		item->ai_family = AF_INET;
-		item->ai_socktype = socktype;
-		item->ai_protocol = protocol;
-		item->ai_addrlen = sizeof(*address);
-		item->ai_addr = (struct sockaddr *)address;
-		if ((flags & AI_CANONNAME) != 0 && index == 0)
-			item->ai_canonname = strdup(result.canonical);
-		*tail = item;
-		tail = &item->ai_next;
-	}
-	*output = head;
-	return 0;
-}
-
-void
-freeaddrinfo(struct addrinfo *info)
-{
-	while (info != NULL) {
-		struct addrinfo *next = info->ai_next;
-		free(info->ai_addr);
-		free(info->ai_canonname);
-		free(info);
-		info = next;
-	}
-}
-
-const char *
-gai_strerror(int error)
-{
-	switch (error) {
-	case 0:
-		return "success";
-	case EAI_AGAIN:
-		return "temporary failure in name resolution";
-	case EAI_BADFLAGS:
-		return "invalid resolver flags";
-	case EAI_FAIL:
-		return "name server failure";
-	case EAI_FAMILY:
-		return "unsupported address family";
-	case EAI_MEMORY:
-		return "out of memory";
-	case EAI_NONAME:
-		return "name or service not known";
-	case EAI_SERVICE:
-		return "unsupported service";
-	case EAI_SOCKTYPE:
-		return "unsupported socket type";
-	case EAI_OVERFLOW:
-		return "result buffer too small";
-	case EAI_SYSTEM:
-		return "system error";
-	default:
-		return "resolver error";
-	}
-}
-
+/* Supports the make ptr name operation. */
 static int
-make_ptr_name(struct in_addr address, char *output, size_t capacity)
+make_ptr_name(
+	struct in_addr address,
+	char *output,
+	size_t capacity)
 {
-	uint32_t value = ntohl(address.s_addr);
-	return snprintf(output, capacity, "%u.%u.%u.%u.in-addr.arpa",
+	int function_result;
+	uint32_t value;
+
+	value = ntohl(address.s_addr);
+
+	/* Computes the function result. */
+	function_result = snprintf(output, capacity, "%u.%u.%u.%u.in-addr.arpa",
 			value & 255U, value >> 8 & 255U, value >> 16 & 255U,
 			value >> 24 & 255U) >= (int)capacity
 		   ? EAI_OVERFLOW
 		   : 0;
-}
 
-int
-getnameinfo(const struct sockaddr *address, socklen_t length, char *host,
-	    socklen_t host_length, char *service, socklen_t service_length,
-	    int flags)
-{
-	const struct sockaddr_in *inet = (const struct sockaddr_in *)address;
-	char buffer[254];
-	struct resolver_result result;
-	int error;
-
-	if ((flags & ~(NI_NUMERICHOST | NI_NUMERICSERV | NI_NAMEREQD)) != 0)
-		return EAI_BADFLAGS;
-	if (address == NULL || length < sizeof(*inet) ||
-	    inet->sin_family != AF_INET)
-		return EAI_FAMILY;
-	if (service != NULL && service_length != 0U) {
-		int needed = snprintf(service, service_length, "%u",
-				      ntohs(inet->sin_port));
-		if (needed < 0 || (socklen_t)needed >= service_length)
-			return EAI_OVERFLOW;
-	}
-	if (host == NULL || host_length == 0U)
-		return 0;
-	if ((flags & NI_NUMERICHOST) == 0) {
-		error = make_ptr_name(inet->sin_addr, buffer, sizeof(buffer));
-		if (error == 0)
-			error = resolver_query(buffer, DNS_TYPE_PTR, &result);
-		if (error == 0) {
-			if (strlen(result.ptr_name) + 1U > host_length)
-				return EAI_OVERFLOW;
-			strcpy(host, result.ptr_name);
-			return 0;
-		}
-		if ((flags & NI_NAMEREQD) != 0)
-			return error;
-	}
-	if (inet_ntop(AF_INET, &inet->sin_addr, buffer, sizeof(buffer)) == NULL)
-		return EAI_SYSTEM;
-	if (strlen(buffer) + 1U > host_length)
-		return EAI_OVERFLOW;
-	strcpy(host, buffer);
-	return 0;
+	/* Returns the computed result. */
+	return function_result;
 }

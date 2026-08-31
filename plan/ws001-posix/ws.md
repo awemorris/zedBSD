@@ -8,13 +8,14 @@ Status: in progress; compliance ledger remains active
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws001-p014`
+Last verified Phase: `ws001-p019`
 
-Resume point: q042 retained passing source and focused host milestones for
-`ws001-p015` and p016. Both remain uncleared until `ws008-p010` permits fresh
-disposable-image/remount acceptance; p015 also retains two explicitly recorded
-backend failure-injection cells. The dependent `ws005-p005` remains held until
-both native prerequisites complete.
+Resume point: the Principal-authored Phase sequence through `ws001-p021` is
+canonical.  `agent2-q002` completed `ws001-p019`; p020 and p021 retain the
+uncleared handoffs recorded below.  Concurrent q042 source and focused-host
+milestones used the colliding pre-merge identifiers p015 and p016.  Those
+records are preserved after the registry, but must receive unique IDs across
+their Phase documents and dependencies before either resumes.
 
 Shared tests: [WS001 test index](tests/README.md)
 
@@ -38,8 +39,30 @@ Shared tests: [WS001 test index](tests/README.md)
 | `ws001-p012` | [bounded dirname correction](phase012-dirname/phase.md) | Complete milestone | Host lexical/failure suite and native amd64 build pass; runtime/locale handoff remains |
 | `ws001-p013` | [bounded link/unlink correction](phase013-link-unlink/phase.md) | Complete | Host identity/failure suite and native amd64 build pass; broad filesystem matrix remains |
 | `ws001-p014` | [shell foreground job-control synchronization](phase014-shell-job-control/phase.md) | Complete (`q023`, 2026-08-28) | Foreground pipelines gate every member until TTY handoff; `fg` hands off before `SIGCONT`; background/non-TTY and cleanup regressions pass |
+| `ws001-p015` | [base C coding-style adoption](phase015-base-c-style-adoption/phase.md) | Complete (`agent2-q001`, 2026-08-31) | New/refactored base source has an executable style gate; the final inventory is 7 compliant and 234 historical files |
+| `ws001-p016` | [direct PDF printing over LPD](phase016-direct-lpd-printing/phase.md) | Complete implementation milestone (`agent2-q001`, 2026-08-31) | Native PDF-only `lp`/`lpr` and fake-LPD protocol matrix pass; POSIX text/`-w` and guest network submission remain handoffs |
+| `ws001-p017` | [bounded cmp conformance](phase017-cmp-conformance/phase.md) | Complete implementation milestone (`agent2-q001`, 2026-08-31) | `-l`/`-s`, skip extension, independent short reads, output formats, and exit classes pass focused tests |
+| `ws001-p018` | [bounded tee conformance](phase018-tee-conformance/phase.md) | Complete implementation milestone (`agent2-q001`, 2026-08-31) | `-i`, dynamic outputs, robust writes, failure continuation, and statuses pass focused tests |
+| `ws001-p019` | [canonical userland source headers](phase019-userland-file-headers/phase.md) | Complete (`agent2-q002`, 2026-08-31) | All 269 userland C-family files have the exact section 13 block and a separate explanation; body hashes, fixtures, assembler preprocessing, full build, and whitespace checks pass |
+| `ws001-p020` | [complete userland C-style conformance](phase020-complete-userland-c-style/phase.md) | Uncleared (`agent2-q003`, 2026-08-31) | All 2,454 functions pass public/static order, prototype, header-layout, comment, loop/switch, case-label, and build gates; the body audit records 731 mechanical residuals plus semantic-review handoffs in the 258-row ledger |
+| `ws001-p021` | [ANSI C declarations and semantic layout](phase021-ansi-c-semantic-layout/phase.md) | Uncleared (`agent2-q005`, 2026-08-31) | Whole-tree paragraph spacing, loop preparation, decision/return comments, and explicit call-result gates pass; human file-specific prose review remains across all 214 implementations |
+
+### Concurrent q042 records with colliding pre-merge IDs
+
+The following work is retained as history and remains uncleared.  Its original
+IDs collide with the canonical registry above, so these rows are not active
+combined IDs and cannot be queued until the Phase documents and all dependent
+references are assigned unique IDs.
+
+| Pre-merge q042 identifier | Phase | Status | Result |
+| --- | --- | --- | --- |
 | `ws001-p015` | [credential-aware VFS object creation](phase015-credential-aware-vfs-creation/phase.md) | Uncleared (`q042`, 2026-08-31); source/host milestone passes | Explicit effective-credential creation, backend rollback hardening, 883,564 FAT ordinary/sanitized checks, UFS and AF_UNIX focused gates pass; two fault cells and fresh native/remount acceptance remain |
 | `ws001-p016` | [truthful and durable directory fsync](phase016-directory-fsync/phase.md) | Uncleared (`q042`, 2026-08-31); source/host milestone passes | Explicit VFS/UFS/overlay directory-sync behavior and 135 deterministic checks pass; fresh QEMU/remount evidence waits for `ws008-p010` |
+
+For these two pre-merge records, `ws008-p010` remains the prerequisite for
+fresh disposable-image/remount acceptance, the credential Phase retains its
+two recorded backend failure-injection cells, and dependent `ws005-p005`
+remains held until both native prerequisites complete.
 
 Original combined planning context is retained in the
 [legacy Phase 0–10 plan](history/phase000-010-legacy-plan.md).
@@ -148,7 +171,7 @@ passes.  `5/5` replacement gates still does not mean full POSIX conformance.
 | `option-disabled` | 20 | outside the selected option profile |
 | historical Phase 9 P0 findings | 3 | the imported `bc`, `ed`, and `m4` findings were resolved by Phase 10 on 2026-08-24 |
 | current policy conflicts | 0 | the declared `userland/base` provenance gate rejects the removed imported trees and fingerprints |
-| current P1 known incompatibilities | 77 | the prior 73 plus four intentionally partial local service utilities |
+| current P1 known incompatibilities | 75 | the prior 77 minus the bounded `cmp` and `tee` incompatibilities closed by `agent2-q001`; full reviews remain open |
 | Phase 9 P2 incomplete proof | 38 | no confirmed complete review; targeted evidence is missing |
 | rows promoted by Phase 9 | 0 | no pending row satisfied the review checklist |
 
@@ -279,7 +302,7 @@ dependency even when they are not POSIX public APIs.
 | SVC-SCHED-01 | `at`, `batch`, `crontab`, `cron` | partial | local durable spools; QEMU proves at execution and crontab persistence | complete POSIX at time grammar, queue policy, batch load gating, cron ranges/lists/steps/environment, periodic-job QEMU evidence, locking/races, and mail/output delivery |
 | SVC-LOG-01 | `logger` and system logging | implemented-unreviewed | `/run/log` datagrams reach local `syslogd` and `/var/log/messages` in QEMU | permissions/backpressure/rotation/storage failure, facility policy, live kernel stream, and durable boot-log review |
 | SVC-MAIL-01 | `mailx` | deferred-provider | explicit failure command | required mail provider and Send Mode; Receive Mode for enabled XSI/UP environment |
-| SVC-PRINT-01 | `lp` | reviewed | tested no-destination failure in the declared no-device profile | preserve provider replacement rules if CUPS is selected |
+| SVC-PRINT-01 | `lp`, `lpr` | partial | `ws001-p016` supplies direct PDF-over-LPD submission, no persistent spool, and host protocol/failure evidence | Issue 8 text input, `-w`, unspecified default destination, multi-file request semantics, timeout/early-close injection, and guest/physical-printer submission remain |
 | SVC-TALK-01 | `talk` | disabled-profile | installed failure command | local rendezvous provider and service only if UP/XSI profile is enabled |
 | SVC-INIT-01 | PID 1 and service manager | implemented-unreviewed | native `/sbin/init`, `/sbin/service`, `/etc/rc.conf`, and `/etc/service.d`; Phase 20 adds explicit `after`/`requires`, startup states, and FD 3 readiness, with networkd restart and orderly shutdown passing QEMU | prove crash loops, cycles, required/optional failures, malformed reload, stop timeout, persistence, scheduled-work restart, and the remaining shutdown actions |
 | SVC-NOTIFY-01 | daemon startup readiness | implemented-unreviewed | private FD 3 READY/FAIL protocol, bounded timeout/parser, descriptor hygiene, terminal startup states, dependency propagation, and service status are implemented; QEMU proves networkd READY before `net boot` | add runtime fault injection for fragmented/malformed/duplicate/oversized records, FAIL, premature exit, timeout, and every descriptor-leak/restart edge |
@@ -404,7 +427,7 @@ The current register therefore contains 0 P0, 73 P1, and 38 P2 findings.
 | 17 | [chmod](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/chmod.html) | P2 incomplete proof | Numeric and substantial symbolic modes plus `-R` exist; omitted-who/umask semantics, symlink/traversal policy, special bits, race/error cases, and exhaustive grammar tests remain. |
 | 18 | [chown](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/chown.html) | P1 known incompatibility | Numeric UID/GID only; owner/group names, omitted components, `-h`, recursive link modes, and traversal/error semantics are absent. |
 | 19 | [cksum](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/cksum.html) | P2 incomplete proof | CRC path is plausible, but standard vectors at length boundaries, multiple files/stdin naming, read interruption, output/close failure, and accumulated exit status are not fully tested. |
-| 20 | [cmp](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/cmp.html) | P1 known incompatibility | Missing `-l` and `-s`; independent short reads can be compared incorrectly, and `EINTR`, offsets, diagnostics, same-stdin, and close/error paths are incomplete. |
+| 20 | [cmp](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/cmp.html) | implemented-unreviewed (`ws001-p017`) | `-l`/`-s`, POSIX-locale formats, exit classes, independent short reads, same-stdin rejection, and a checked skip extension pass; deterministic I/O/close fault and locale review remain. |
 | 21 | [comm](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/comm.html) | P1 known incompatibility | Column suppression exists, but comparison uses byte ordering rather than `LC_COLLATE`; sorted-input assumptions, long lines, read/write errors, and locale behavior are unproved. |
 | 22 | [command](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/command.html) | P1 known incompatibility | Only ordinary dispatch and `-v` are recognized; `-p`, `-V`, lookup/reporting rules, special-builtin behavior, and 126/127 statuses are incomplete. |
 | 23 | [compress](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/compress.html) | P1 known incompatibility | Classic `.Z` LZW is implemented, but Issue 8 algorithm-selection interfaces and complete overwrite, metadata, signal, full-disk, corrupted-stream, and replacement semantics remain. |
@@ -478,7 +501,7 @@ The current register therefore contains 0 P0, 73 P1, and 38 P2 findings.
 | 116 | [stty](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/stty.html) | P1 known incompatibility | Only a few flags and `raw` are handled; `-g`, speeds, control characters, rows/columns, complete modes, parse/application atomicity, non-tty errors, and exact restorable output are absent. |
 | 117 | [tabs](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/tabs.html) | P2 incomplete proof | Major predefined forms, explicit lists, `-T`, and terminfo output exist; exact historical layouts, `+m`, terminal width/margins, tty errors, malformed data, output interruption, and runtime terminal tests remain. |
 | 118 | [tail](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/tail.html) | P1 known incompatibility | Buffers input and supports only `-n`; `-c`, `-f`, `-r`, origin/sign forms, legacy syntax, growing/truncated files, pipes, large inputs, overflow, and robust I/O are absent. |
-| 120 | [tee](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/tee.html) | P1 known incompatibility | `-a` exists, but `-i` is absent, outputs are capped at 32, and short writes, `EINTR`, broken outputs, signal behavior, descriptor/open failures, and continuation/status rules are incomplete. |
+| 120 | [tee](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/tee.html) | implemented-unreviewed (`ws001-p018`) | `-a`/`-i`, dynamic output count, robust writes, open/write continuation, and final status pass; deterministic partial-I/O, allocation, close, descriptor, and locale review remain. |
 | 121 | [test](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/test.html) | P1 known incompatibility | Implements only small unary/binary arities; compound negation/parentheses/AND/OR, all primaries, precedence by argument count, integer errors, symlinks, permissions, and `[` form are incomplete. |
 | 122 | [time](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/time.html) | P1 known incompatibility | No `-p`, reports only elapsed time, omits user/system CPU, mishandles normalized time subtraction, and lacks signal/exec status, locale format, and redirection tests. |
 | 124 | [touch](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/touch.html) | P1 known incompatibility | Sets both times to now and always permits create; `-a`/`-m`/`-c`, `-r`, `-t`, `-d`, parsing/ranges/timezones, permissions, symlink policy, and partial failures are absent. |

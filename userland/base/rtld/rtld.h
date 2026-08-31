@@ -1,4 +1,16 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Declares the zedBSD userland rtld interface.
+ */
+
 #ifndef ZEDBSD_RTLD_H
 #define ZEDBSD_RTLD_H
 

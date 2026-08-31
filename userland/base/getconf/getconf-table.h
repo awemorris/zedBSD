@@ -1,5 +1,15 @@
-/* One maintained mapping for getconf names and their defining interfaces. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * One maintained mapping for getconf names and their defining interfaces.
+ */
 
 GETCONF_SYSCONF("ARG_MAX", _SC_ARG_MAX)
 GETCONF_SYSCONF("CHILD_MAX", _SC_CHILD_MAX)

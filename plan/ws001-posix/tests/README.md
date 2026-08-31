@@ -21,8 +21,24 @@ those paths.
 | `ws001-p009` | utility matrix check, source/test audit, format/provenance review evidence recorded in the Phase report |
 | `ws001-p010` | `tests/test-phase10-local-source.sh`, local bc/ed/m4 host tests, standalone installs, top build, Phase 10 QEMU target |
 | `ws001-p014` | `shell-job-control-test.sh` plus instrumented shell hooks/PTY probe; `qemu-shell-job-control.sh` against the installed amd64 `/bin/sh` |
-| `ws001-p015` | `credential-creation-request-host-test.mk` verifies the exact production authorization/parent-attribute locking boundary; `credential-vfs-qemu.mk` builds native UFS1, UFS2, tmpfs, FAT, and normal overlay-root credential/object probes; `fat-native-vfs-host-test.c` retains the exact FAT production-path regression |
-| `ws001-p016` | `directory-fsync-host-test.mk` links the exact production VFS, UFS1/UFS2, and overlay directory-sync functions and deterministically checks explicit directory dispatch, UFS inode-before-device order, overlay upper-before-journal-before-mount order, and first-error propagation |
+| `ws001-p015` | `base-c-style-audit-test.sh`, `base-c-style-inventory.sh`, and `run-base-command-host-test.sh` |
+| `ws001-p016` | `run-lpd-host-test.sh` plus `fake-lpd-test.py`; `qemu-base-utility-smoke.sh` proves the native guest binary/error path while guest networking remains a handoff |
+| `ws001-p017` | `run-cmp-host-test.sh` and the shared `qemu-base-utility-smoke.sh` native guest cell |
+| `ws001-p018` | `run-tee-host-test.sh` and the shared `qemu-base-utility-smoke.sh` native guest cell |
+| `ws001-p019` | `userland-file-header-audit.py`, `userland-file-header-audit-test.sh`, `migrate-userland-file-headers.py`, the deterministic 269-file inventory and body hashes, assembler preprocessing, and the configured build gate |
+| `ws001-p020` | `userland-c-style-audit.py`, `userland-c-style-audit-test.sh`, `userland-c-body-audit.py`, three idempotent refactoring tools, the deterministic 258-file review ledger, Phase 19 header regression, declaration-after-statement compiler gate, and configured build; Phase is honestly uncleared by recorded body/semantic residuals |
+| `ws001-p021` | `refactor-userland-ansi-c.py`, `refactor-userland-semantic-layout.py`, the extended zero-residual body audit and `userland-c-body-audit-test.sh`, the 269-file header gate, structural/header fixtures, the 258-row review ledger, configured `make -j16`, and whitespace validation; q005 adds loop-preparation paragraphs, mandatory comment gaps, decision/return comments, and explicit call results across all implementations |
+
+The concurrent q042 branch used `ws001-p015` and `ws001-p016` before the
+Principal-authored registry above was merged.  The two labels below are
+pre-merge historical identifiers, not additional active uses of those combined
+IDs.  Their evidence remains indexed here so it is not lost; each Phase must be
+assigned a unique ID across its document and dependencies before it resumes.
+
+| Pre-merge q042 identifier | Test cases / executable evidence |
+| --- | --- |
+| `ws001-p015` (credential-aware VFS creation) | `credential-creation-request-host-test.mk` verifies the exact production authorization/parent-attribute locking boundary; `credential-vfs-qemu.mk` builds native UFS1, UFS2, tmpfs, FAT, and normal overlay-root credential/object probes; `fat-native-vfs-host-test.c` retains the exact FAT production-path regression |
+| `ws001-p016` (directory fsync) | `directory-fsync-host-test.mk` links the exact production VFS, UFS1/UFS2, and overlay directory-sync functions and deterministically checks explicit directory dispatch, UFS inode-before-device order, overlay upper-before-journal-before-mount order, and first-error propagation |
 
 When a new Phase fixes a ledger item, add its normative case, failure case,
 executable path, and environment here before marking the row reviewed.
@@ -106,7 +122,7 @@ Its optional output-directory argument must name a new path. The default is a
 new ignored directory below `plan/ws001-posix/temp/`; only a disposable image
 copy is writable.
 
-## ws001-p015 credential-aware object creation
+## q042 pre-merge ws001-p015: credential-aware object creation
 
 [`credential-creation-request-host-test.mk`](./credential-creation-request-host-test.mk)
 links the exact production creation-request helper and verifies that create
@@ -152,7 +168,7 @@ module-search CLI.  A failure in which the pinned interpreter rejects
 `--path=tools/build` is the separate `ws008-p010` blocker and is not evidence
 that the guest acceptance passed.
 
-## ws001-p016 directory fsync ordering
+## q042 pre-merge ws001-p016: directory fsync ordering
 
 [`directory-fsync-host-test.mk`](./directory-fsync-host-test.mk) builds three
 small host executables from the exact production functions.  It uses linker

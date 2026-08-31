@@ -9,13 +9,20 @@ function from top to bottom, understand each processing phase from its
 surrounding whitespace and comments, and stop a debugger on each
 meaningful decision.
 
-Declarations first, small guarded steps, explicit error exits, and
+ANSI C-compatible declarations first, small guarded steps, explicit error exits, and
 semantic paragraphs separated by blank lines.  It still contains
 historical exceptions.  Those exceptions are not precedents; the rules
 below are the canonical form for new and refactored code.
 
 Style-only changes must preserve evaluation order, ownership,
 lifetime, error reporting, and observable behavior.
+
+The language baseline is ANSI C (C89/C90).  Do not use ordinary C99-or-later
+syntax where ANSI C expresses the same program.  Implementation-reserved
+extensions that are reliably supported by every configured compiler may be
+used when the platform needs them.  Examples include `__inline`, `__attribute__`,
+and `__asm__`.  Spell such extensions explicitly with their reserved names;
+an extension is not permission to use unrelated newer-language syntax.
 
 ## 2. File organization
 
@@ -34,8 +41,9 @@ that use it when moving it to the top would make the implementation harder to
 read.  This is a narrow exception for macros that are inseparable from the
 local implementation.
 
-Use the Emacs modeline used by the existing source files.  Indentation uses
-tabs with a tab width of eight.
+Put the Emacs modeline on the first physical line of the file.  Follow it with
+one blank line and then the copyright header.  Indentation uses tabs with a tab
+width of eight.
 
 ## 3. Forward declarations and function definitions
 
@@ -80,8 +88,13 @@ A short one-line header comment is required for any static function.
 
 ## 4. Local declarations
 
-Declare automatic variables before executable statements in their block.  Do
-not initialize them in the declaration:
+Use ANSI C declaration placement.  Declare every automatic variable at the
+beginning of its function, before the first executable statement.  ANSI C
+initializers are permitted, including aggregate and `static const` table
+initializers.  Keep an initializer when splitting it into later assignments
+would change constness, aggregate representation, evaluation order, or
+readability.  Prefer a separate assignment for runtime initialization that
+forms a semantic paragraph:
 
 ```c
 int count;
@@ -89,18 +102,27 @@ int count;
 count = 0;
 ```
 
-An initialized declaration is allowed inside an `if` or `else` body when the
-variable is local to that branch.  Keep a blank line after the declaration:
+Move variables needed only by a nested control-flow path to the function
+declaration group as well.  Choose a name that remains unambiguous at function
+scope.  Do not declare a variable in a `for` initializer:
 
 ```c
-if (has_value) {
-	int value = get_value();
+int i;
 
-	use_value(value);
-}
+/* Processes every input item. */
+for (i = 0; i < item_count; i++)
+	process_item(&items[i]);
 ```
 
-Put one blank line after the local declaration group.  Then write
+Do not introduce a standalone compound statement merely to restrict a
+variable's scope.  Braced bodies owned by a function, `if`, `else`, `for`,
+`while`, `do`, or `switch` are normal control-flow bodies and are not standalone
+scope blocks.  If moving declarations to function scope makes a function hard
+to understand or creates excessive nesting, split the function along a
+semantic boundary instead of adding a scope-only block.
+
+Put exactly one blank line between the function declaration group and the first
+executable statement.  Then write
 `UNUSED_PARAMETER()` entries together, one per line and in argument order.  Put
 assertions below them after another blank line:
 
@@ -116,14 +138,37 @@ assert(result != NULL);
 
 ## 5. Semantic paragraphs and whitespace
 
-Use blank lines to expose processing phases.  Allocation and its check,
-initialization of one object, traversal of one collection, and publication of a
-result are separate semantic paragraphs.
+Treat consecutive assignments and function calls that perform one operation as
+a semantic paragraph.  Precede every semantic paragraph with a comment that
+explains what the paragraph does, normally as a one-line verb-and-object English
+sentence.  Use a natural multi-line explanation when one sentence cannot state
+the purpose clearly.  Allocation and its check, initialization of one object,
+traversal of one collection, and publication of a result are separate semantic
+paragraphs.  Put one blank line between semantic paragraphs and before each
+paragraph comment.
 
-Do not put a blank line between an operation and an `if` that immediately checks
-its result:
+A purpose comment introduces the entire operation that follows it, including
+the assignments that prepare a loop or decision.  Put the comment before those
+assignments, not between the preparation and the control statement.  Keep the
+preparation and the control statement adjacent when they are one operation:
 
 ```c
+/* Processes each requested archive option. */
+options = argv[1][0] == '-' ? argv[1] + 1 : argv[1];
+for (; *options; options++) {
+	/* ... */
+}
+```
+
+Do not leave an uncommented initialization paragraph immediately followed by a
+comment that describes only the loop which consumes it.
+
+An `if` that immediately checks an operation belongs to the same semantic
+paragraph.  Keep its purpose comment above the operation and do not put a blank
+line between the operation and its check:
+
+```c
+/* Allocates the result item. */
 item = hir_malloc(sizeof(*item));
 if (item == NULL) {
 	hir_out_of_memory();
@@ -134,13 +179,25 @@ memset(item, 0, sizeof(*item));
 item->type = HIR_ITEM_VALUE;
 ```
 
-Place a blank line before an unrelated `if`, and between an independent `if`
-and a following `if`-`else` chain.  Do not insert blank lines inside one
-`if`-`else if`-`else` chain.
+Precede every `if` with a purpose comment and a blank line.  One comment may
+introduce a complete `if`-`else if`-`else` chain; do not insert blank lines or
+repeated comments inside that chain.  An immediate result check uses the
+semantic paragraph comment above the checked operation instead of a redundant
+second comment.
+
+The blank line before a paragraph comment is mandatory.  A comment must not be
+attached to the preceding statement merely because it is adjacent to the
+`if`, loop, `switch`, return, or assignment that it describes.  The only normal
+exceptions are the first paragraph after an opening brace, a continued comment
+block, and a comment directly following a `case` or other label where inserting
+a blank line would not create a paragraph boundary.
 
 Place a blank line before the purpose comment that introduces a `switch`,
-`for`, or `while` block unless the block immediately continues or checks the
-preceding operation.  Keep the purpose comment adjacent to the block.
+`for`, or `while` block.  Keep the purpose comment adjacent to the paragraph;
+loop-preparation assignments may appear between that comment and the loop as
+described below.  The same blank-line rule applies before comments that
+introduce returns and other semantic paragraphs, except at the beginning of a
+control-flow body where the opening brace already provides the visual boundary.
 
 ## 6. Debugger-friendly control flow
 
@@ -196,9 +253,11 @@ condition.
 
 ## 7. Loops and switches
 
-Every `for` and `while` loop has a one-line comment immediately before it that
-states what the loop does.  The comment describes intent rather than restating
-the syntax:
+Every `for` and `while` loop belongs to a paragraph introduced by a one-line
+comment that states what the loop does.  The comment is immediately before the
+loop when no preparation is required.  When assignments prepare the traversal,
+put the comment before those assignments and keep the assignments adjacent to
+the loop.  The comment describes intent rather than restating the syntax:
 
 ```c
 /* Skip redundant parenthesized expressions. */
@@ -217,6 +276,9 @@ for (;
 	/* ... */
 }
 ```
+
+A `for` initializer is an expression, never a declaration.  Its control
+variable is declared in the function's leading declaration group.
 
 Put a one-line purpose comment immediately before every `switch`, just as for a
 loop.  Separate the comment and switch from the preceding semantic paragraph
@@ -279,8 +341,11 @@ several fallible operations and test all their results afterward.
 
 ## 10. Comments
 
-Use comments to expose why a processing phase or loop exists.  Do not narrate
-obvious individual assignments.
+Use comments to expose why a processing phase or loop exists.  Describe a
+meaningful group of assignments or calls, not each obvious individual
+statement.  Prefer a verb-and-object sentence such as `Initializes the output
+record.` or `Publishes the completed request.`.  Put a blank line before the
+comment and keep the comment adjacent to the paragraph it introduces.
 
 Use this form for a comment that spans multiple lines:
 
@@ -295,11 +360,33 @@ Do not start a multi-line comment with prose on the opening `/*` line.
 
 ## 11. Returns
 
-Normally put a blank line before the final return of a function.  The blank line
-may be omitted when the function immediately returns the result just calculated
-or assigned by the preceding statement.
+Precede a return with a comment that explains the returned result or the reason
+for the exit.  Put a blank line before that comment and keep the comment adjacent
+to the return.  An early guard return remains adjacent to its controlling
+condition and is explained by the condition's purpose comment instead of a
+redundant return comment.
 
-Early guard returns stay adjacent to the condition they serve.
+Do not directly return the result of a meaningful function call.  Store the
+result or test it explicitly so that success and failure each provide a debugger
+stop point and the function's own return convention is visible.  Preserve the
+callee's actual success convention; do not assume that zero, nonzero, true, or
+false means success without checking its contract:
+
+```c
+/* Submits the completed job. */
+status = submit_job(input, when, queue);
+
+/* Propagates a failed submission. */
+if (status != 0)
+	return status;
+
+/* Reports a successful submission. */
+return 0;
+```
+
+Literal, variable, field, and simple arithmetic returns may remain direct, with
+their required result comment.  Early guard returns remain governed by the
+preceding decision comment.
 
 ## 12. Test controls and environment variables
 
@@ -315,19 +402,51 @@ Tests must exercise the default production path.  They must not require a
 hidden environment variable to enable or disable the implementation under
 test.
 
-## 13. Review checklist
+## 13. Copyright header
+
+Source code files start with the Emacs modeline, followed by one blank line.
+The copyright header then begins with:
+
+```
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+```
+
+Then add the file explanation:
+
+```
+/*
+ * The cmp progmra.
+ */
+
+```
+
+## 14. Review checklist
 
 Before finishing a C-source change, verify that:
 
 - file sections and public/static function order are correct
 - every normal static function has a one-line forward declaration
 - every public function definition has a verb-and-object comment
-- local declarations, and assertions follow the required order and spacing
+- every local declaration is in the function-leading ANSI C declaration group,
+  no `for` initializer declares a variable, and no standalone scope-only block
+  exists
+- the declaration group, first statement, and assertions follow the required
+  order and spacing
 - compound decisions and fallible calls are individually debuggable
 - every loop and `switch` has an immediately preceding intent comment
 - split calls use one argument per line and split controlled statements use
   braces
 - allocations, checks, and per-object initialization form clear blocks
-- final returns and semantic paragraphs have the expected blank lines
+- every semantic paragraph, decision, loop, and return has an adjacent purpose
+  comment and the expected blank lines
+- every loop-preparation assignment is covered by the loop paragraph comment,
+  every comment starts a new paragraph where required, and meaningful function
+  results are not returned directly
 - no test-only environment switch controls production behavior
 - the build, focused tests, and `git diff --check` pass

@@ -1,4 +1,15 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the zedBSD getconf userland command.
+ */
 
 #include <errno.h>
 #include <limits.h>
@@ -55,49 +66,179 @@ static const struct variable variables[] = {
 #undef GETCONF_TEXT
 };
 
-static const struct variable *
-variable_find(const char *name)
-{
-	size_t index;
+static int specification_supported(const char *name);
+static int print_variable(const struct variable *variable, const char *path, int show_name);
+static const struct variable *variable_find(const char *name);
 
-	for (index = 0; index < sizeof(variables) / sizeof(variables[0]);
-	     index++)
-		if (strcmp(variables[index].name, name) == 0)
-			return &variables[index];
-	return NULL;
+/*
+ * Runs the getconf command.
+ */
+int
+main(
+	int argc,
+	char **argv)
+{
+	size_t variable_index;
+	int result;
+	const char *specification;
+	const char *path;
+	const struct variable *variable;
+	int index;
+
+	specification = NULL;
+	path = NULL;
+	index = 1;
+
+	/* Handles the selected command-line operation. */
+	if (index < argc && strcmp(argv[index], "-v") == 0) {
+		/* Validates the command-line arguments. */
+		if (++index >= argc)
+			goto usage;
+		specification = argv[index++];
+
+		/* Handles a failed specification supported operation. */
+		if (!specification_supported(specification)) {
+			fprintf(stderr,
+				"getconf: unsupported specification: %s\n",
+				specification);
+
+			/* Reports operation failure. */
+			return 1;
+		}
+	}
+
+	/* Handles the selected command-line operation. */
+	if (index < argc && strcmp(argv[index], "-a") == 0) {
+
+				result = 1;
+
+		index++;
+		path = index < argc ? argv[index++] : ".";
+
+		/* Validates the command-line arguments. */
+		if (index != argc)
+			goto usage;
+
+		/* Process each remaining element. */
+		for (variable_index = 0;
+		     variable_index < sizeof(variables) / sizeof(variables[0]);
+		     variable_index++)
+
+			/* Handles a failed print variable operation. */
+			if (!print_variable(&variables[variable_index], path,
+					    1))
+				result = 0;
+
+		/* Returns the computed result. */
+		return result ? 0 : 1;
+	}
+
+	/* Validates the command-line arguments. */
+	if (index >= argc)
+		goto usage;
+	variable = variable_find(argv[index++]);
+
+	/* Handles the variable availability. */
+	if (variable == NULL) {
+		fprintf(stderr, "getconf: unknown variable: %s\n",
+			argv[index - 1]);
+
+		/* Reports operation failure. */
+		return 1;
+	}
+
+	/* Handles the variable condition. */
+	if (variable->kind == VARIABLE_PATHCONF) {
+		/* Validates the command-line arguments. */
+		if (index >= argc)
+			goto usage;
+		path = argv[index++];
+	} else if (index < argc)
+		goto usage;
+
+	/* Validates the command-line arguments. */
+	if (index != argc)
+		goto usage;
+
+	/* Handles a failed print variable operation. */
+	if (!print_variable(variable, path, 0)) {
+		fprintf(stderr, "getconf: %s: %s\n", variable->name,
+			strerror(errno));
+
+		/* Reports operation failure. */
+		return 1;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+
+usage:
+	fprintf(stderr,
+		"usage: getconf [-v specification] variable [pathname]\n"
+		"       getconf [-v specification] -a [pathname]\n");
+
+	/* Reports operation failure. */
+	return 2;
 }
 
+/* Supports the specification supported operation. */
 static int
-specification_supported(const char *name)
+specification_supported(
+	const char *name)
 {
-	return strcmp(name, GETCONF_MODEL_V7) == 0 ||
+	int function_result;
+
+	/* Computes the function result. */
+	function_result = strcmp(name, GETCONF_MODEL_V7) == 0 ||
 	       strcmp(name, GETCONF_MODEL_V8) == 0 ||
 	       strcmp(name, "POSIX_V7_THREADS") == 0 ||
 	       strcmp(name, "POSIX_V8_THREADS") == 0;
+
+	/* Returns the computed result. */
+	return function_result;
 }
 
+/* Supports the print variable operation. */
 static int
-print_variable(const struct variable *variable, const char *path, int show_name)
+print_variable(
+	const struct variable *variable,
+	const char *path,
+	int show_name)
 {
+	size_t needed;
+	char *text;
 	long value;
 
+	/* Handles the show name condition. */
 	if (show_name)
 		printf("%-38s ", variable->name);
+
+	/* Handles the variable condition. */
 	if (variable->kind == VARIABLE_TEXT) {
 		puts(variable->text);
+
+		/* Reports operation failure. */
 		return 1;
 	}
+
+	/* Handles the variable condition. */
 	if (variable->kind == VARIABLE_CONSTANT) {
 		printf("%ld\n", variable->number);
+
+		/* Reports operation failure. */
 		return 1;
 	}
-	if (variable->kind == VARIABLE_CONFSTR) {
-		size_t needed = confstr((int)variable->number, NULL, 0);
-		char *text;
 
+	/* Handles the variable condition. */
+	if (variable->kind == VARIABLE_CONFSTR) {
+				needed = confstr((int)variable->number, NULL, 0);
+
+		/* Handles the needed condition. */
 		if (needed == 0)
 			goto failed;
 		text = malloc(needed);
+
+		/* Handles a failed confstr operation. */
 		if (text == NULL ||
 		    confstr((int)variable->number, text, needed) != needed) {
 			free(text);
@@ -105,89 +246,59 @@ print_variable(const struct variable *variable, const char *path, int show_name)
 		}
 		puts(text);
 		free(text);
+
+		/* Reports operation failure. */
 		return 1;
 	}
 	errno = 0;
+
+	/* Handles the variable condition. */
 	if (variable->kind == VARIABLE_PATHCONF)
 		value = pathconf(path, (int)variable->number);
 	else
 		value = sysconf((int)variable->number);
+
+	/* Handles the reported system error. */
 	if (value == -1 && errno == 0) {
 		puts("undefined");
+
+		/* Reports operation failure. */
 		return 1;
 	}
+
+	/* Validates the current value. */
 	if (value == -1)
 		goto failed;
 	printf("%ld\n", value);
+
+	/* Reports operation failure. */
 	return 1;
 
 failed:
+
+	/* Handles the show name condition. */
 	if (show_name)
 		putchar('\n');
+
+	/* Reports successful completion. */
 	return 0;
 }
 
-int
-main(int argc, char **argv)
+/* Supports the variable find operation. */
+static const struct variable *
+variable_find(
+	const char *name)
 {
-	const char *specification = NULL;
-	const char *path = NULL;
-	const struct variable *variable;
-	int index = 1;
+	size_t index;
 
-	if (index < argc && strcmp(argv[index], "-v") == 0) {
-		if (++index >= argc)
-			goto usage;
-		specification = argv[index++];
-		if (!specification_supported(specification)) {
-			fprintf(stderr,
-				"getconf: unsupported specification: %s\n",
-				specification);
-			return 1;
-		}
-	}
-	if (index < argc && strcmp(argv[index], "-a") == 0) {
-		size_t variable_index;
-		int result = 1;
+	/* Process each remaining element. */
+	for (index = 0; index < sizeof(variables) / sizeof(variables[0]);
+	     index++)
 
-		index++;
-		path = index < argc ? argv[index++] : ".";
-		if (index != argc)
-			goto usage;
-		for (variable_index = 0;
-		     variable_index < sizeof(variables) / sizeof(variables[0]);
-		     variable_index++)
-			if (!print_variable(&variables[variable_index], path,
-					    1))
-				result = 0;
-		return result ? 0 : 1;
-	}
-	if (index >= argc)
-		goto usage;
-	variable = variable_find(argv[index++]);
-	if (variable == NULL) {
-		fprintf(stderr, "getconf: unknown variable: %s\n",
-			argv[index - 1]);
-		return 1;
-	}
-	if (variable->kind == VARIABLE_PATHCONF) {
-		if (index >= argc)
-			goto usage;
-		path = argv[index++];
-	} else if (index < argc)
-		goto usage;
-	if (index != argc)
-		goto usage;
-	if (!print_variable(variable, path, 0)) {
-		fprintf(stderr, "getconf: %s: %s\n", variable->name,
-			strerror(errno));
-		return 1;
-	}
-	return 0;
+		/* Selects the matching value. */
+		if (strcmp(variables[index].name, name) == 0)
+			return &variables[index];
 
-usage:
-	fprintf(stderr,
-		"usage: getconf [-v specification] variable [pathname]\n"
-		"       getconf [-v specification] -a [pathname]\n");
-	return 2;
+	/* Reports that no result is available. */
+	return NULL;
 }

@@ -202,7 +202,7 @@ override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 # Essential administrative tools are present even when an older config.mk
 # predates their package registration.
 override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) at batch \
-	blkid crontab getty gettext halt hostname init logger login lp mailx msgfmt ngettext \
+	blkid crontab getty gettext halt hostname init logger login lp lpr mailx msgfmt ngettext \
 	cron net networkd ntpdate poweroff reboot service shutdown swapoff swapon syslogd talk)
 # Xzed cannot operate without the kernel graphics character device.  Keep
 # hand-edited and older saved configurations from producing an unusable

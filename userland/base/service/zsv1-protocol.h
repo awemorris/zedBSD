@@ -1,4 +1,16 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Declares the zedBSD userland zsv1 protocol interface.
+ */
+
 #ifndef ZEDBSD_ZSV1_PROTOCOL_H
 #define ZEDBSD_ZSV1_PROTOCOL_H
 
