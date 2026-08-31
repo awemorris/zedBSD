@@ -21,6 +21,10 @@ those paths.
 | `ws001-p009` | utility matrix check, source/test audit, format/provenance review evidence recorded in the Phase report |
 | `ws001-p010` | `tests/test-phase10-local-source.sh`, local bc/ed/m4 host tests, standalone installs, top build, Phase 10 QEMU target |
 | `ws001-p014` | `shell-job-control-test.sh` plus instrumented shell hooks/PTY probe; `qemu-shell-job-control.sh` against the installed amd64 `/bin/sh` |
+| `ws001-p015` | `base-c-style-audit-test.sh`, `base-c-style-inventory.sh`, and `run-base-command-host-test.sh` |
+| `ws001-p016` | `run-lpd-host-test.sh` plus `fake-lpd-test.py`; `qemu-base-utility-smoke.sh` proves the native guest binary/error path while guest networking remains a handoff |
+| `ws001-p017` | `run-cmp-host-test.sh` and the shared `qemu-base-utility-smoke.sh` native guest cell |
+| `ws001-p018` | `run-tee-host-test.sh` and the shared `qemu-base-utility-smoke.sh` native guest cell |
 
 When a new Phase fixes a ledger item, add its normative case, failure case,
 executable path, and environment here before marking the row reviewed.

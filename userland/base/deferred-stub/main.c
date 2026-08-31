@@ -15,7 +15,6 @@ static const struct deferred_command commands[] = {
     {"logger", "system logging facility is unavailable"},
     {"mailx", "mail provider is not installed"},
     {"talk", "talk rendezvous service is unavailable"},
-    {"lp", "no print destination is configured"},
 };
 
 static const char *
