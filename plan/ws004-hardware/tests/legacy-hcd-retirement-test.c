@@ -52,6 +52,8 @@ struct model_request {
 	unsigned callback_under_lock;
 	unsigned stale_ack_count;
 	unsigned matching_ack_count;
+	unsigned disconnect_count;
+	unsigned completion_sequence;
 	uint16_t unlink_frame;
 };
 
@@ -67,9 +69,28 @@ struct model_controller {
 	unsigned iaad;
 	unsigned iaa;
 	unsigned worker_context;
+	unsigned retirement_stopping;
 	unsigned retirement_pending;
+	unsigned completion_inflight;
 	unsigned retirement_wakeups;
 	unsigned inline_progress_count;
+	unsigned hardware_stop_count;
+	unsigned halt_attempt_count;
+	unsigned master_disable_count;
+	unsigned irq_drain_count;
+	unsigned root_stop_count;
+	unsigned root_join_count;
+	unsigned root_joined;
+	unsigned worker_stop_count;
+	unsigned worker_join_count;
+	unsigned worker_joined;
+	unsigned sequence;
+	unsigned root_stop_sequence;
+	unsigned root_join_sequence;
+	unsigned worker_stop_sequence;
+	unsigned worker_join_sequence;
+	unsigned hardware_stop_sequence;
+	unsigned dma_quiesced;
 	unsigned frame_list[UHCI_FRAME_COUNT];
 	unsigned generation;
 };
@@ -127,10 +148,23 @@ model_stop(struct model_request *request)
 	return request->active ? EBUSY : 0;
 }
 
+static int
+model_ehci_quiesce(struct model_controller *controller, int request_error,
+	int hardware_error)
+{
+	controller->hardware_stop_count++;
+	if (hardware_error != 0)
+		return hardware_error;
+	controller->running = 0U;
+	controller->dma_quiesced = 1U;
+	return request_error;
+}
+
 static void
 model_release(struct model_controller *controller,
 	struct model_request *request, int hcd_completion)
 {
+	controller->completion_inflight++;
 	CHECK(controller->lock_held == 0U);
 	CHECK(request->active != 0U);
 	CHECK(request->hcd_data != 0U);
@@ -144,8 +178,11 @@ model_release(struct model_controller *controller,
 	if (hcd_completion) {
 		request->completion_count++;
 		request->callback_under_lock += controller->lock_held != 0U;
+		request->completion_sequence = ++controller->sequence;
 	}
 	request->state = MODEL_RELEASED;
+	CHECK(controller->completion_inflight != 0U);
+	controller->completion_inflight--;
 }
 
 static int
@@ -183,7 +220,7 @@ uhci_progress(struct model_controller *controller,
 	if (controller->host_system_error)
 		status |= MODEL_UHCI_STS_HOST_SYSTEM_ERROR;
 	observation = model_uhci_frame_advance(request->unlink_frame, frame,
-	    status, command, controller->quiescing);
+	    status, command, controller->retirement_stopping);
 	if (observation != 0 && observation != EAGAIN)
 		timeout = 1;
 	if (timeout) {
@@ -211,6 +248,104 @@ uhci_cancel_finish(struct model_controller *controller,
 		return EBUSY;
 	model_release(controller, request, 0);
 	return 0;
+}
+
+static int
+model_uhci_hardware_stop(struct model_controller *controller, int error)
+{
+	controller->hardware_stop_count++;
+	controller->halt_attempt_count++;
+	controller->master_disable_count++;
+	controller->irq_drain_count++;
+	controller->hardware_stop_sequence = ++controller->sequence;
+	if (error != 0)
+		return error;
+	controller->running = 0U;
+	controller->halted = 1U;
+	controller->dma_quiesced = 1U;
+	return 0;
+}
+
+static int
+model_uhci_quiesce_drain(struct model_controller *controller,
+	struct model_request *requests, size_t request_count, uint16_t frame,
+	int retirement_timeout, int root_join_error, int worker_join_error,
+	int hardware_error)
+{
+	size_t index;
+	int request_error = 0;
+	int root_error = 0;
+	int worker_error = 0;
+	int stop_error = 0;
+	int requests_active = controller->completion_inflight != 0U;
+	int wake = 0;
+
+	controller->quiescing = 1U;
+	for (index = 0; index < request_count; index++) {
+		struct model_request *request = &requests[index];
+		int error;
+
+		if (request->state == MODEL_ACTIVE) {
+			request->disconnect_count++;
+			error = uhci_begin(controller, request, 0, frame);
+			if (error == 0)
+				wake = 1;
+			else if (request_error == 0)
+				request_error = error;
+		} else if (request->state == MODEL_FAILED && request_error == 0)
+			request_error = EBUSY;
+	}
+	if (wake)
+		controller->retirement_wakeups++;
+	for (index = 0; index < request_count; index++) {
+		struct model_request *request = &requests[index];
+		int error;
+
+		if (request->state != MODEL_WAIT_COMPLETE)
+			continue;
+		error = uhci_progress(controller, request,
+		    (uint16_t)((frame + 1U) & MODEL_UHCI_FRNUM_MASK),
+		    retirement_timeout || controller->quarantined);
+		if (error != 0 && retirement_timeout)
+			error = ETIMEDOUT;
+		if (error == EAGAIN)
+			error = EBUSY;
+		if (error != 0 && request_error == 0)
+			request_error = error;
+	}
+	for (index = 0; index < request_count; index++)
+		requests_active |= requests[index].active != 0U;
+	if (request_error == 0 && requests_active)
+		request_error = EBUSY;
+	if (!controller->root_joined) {
+		controller->root_stop_count++;
+		controller->root_stop_sequence = ++controller->sequence;
+		root_error = root_join_error;
+		if (root_error == 0) {
+			controller->root_joined = 1U;
+			controller->root_join_count++;
+			controller->root_join_sequence = ++controller->sequence;
+		}
+	}
+	if (request_error == 0 && !controller->worker_joined) {
+		controller->worker_stop_count++;
+		controller->worker_stop_sequence = ++controller->sequence;
+		worker_error = worker_join_error;
+		if (worker_error == 0) {
+			controller->worker_joined = 1U;
+			controller->worker_join_count++;
+			controller->worker_join_sequence = ++controller->sequence;
+		}
+	}
+	if (!controller->dma_quiesced)
+		stop_error = model_uhci_hardware_stop(controller, hardware_error);
+	if (request_error != 0)
+		return request_error;
+	if (root_error != 0)
+		return root_error;
+	if (worker_error != 0)
+		return worker_error;
+	return stop_error;
 }
 
 static int
@@ -287,6 +422,19 @@ ehci_advance(struct model_controller *controller,
 	request->state = MODEL_COMPLETING;
 	model_release(controller, request, 1);
 	return 0;
+}
+
+static void
+ehci_fatalize(struct model_controller *controller,
+	struct model_request *request)
+{
+	controller->quarantined = 1U;
+	controller->quiescing = 1U;
+	if (request->state == MODEL_FAILED ||
+	    request->state == MODEL_COMPLETING ||
+	    request->state == MODEL_RETIRED_CANCEL)
+		return;
+	request->state = MODEL_FAILED;
 }
 
 static int
@@ -515,6 +663,166 @@ test_uhci_failure_retains(void)
 }
 
 static void
+test_uhci_quiesce_drain_and_fail_safe_stop(void)
+{
+	struct model_controller controller;
+	struct model_request request;
+	struct model_request requests[3];
+	unsigned index;
+
+	/* Clean teardown claims every active request as a disconnect, publishes each
+	 * sole completion, joins the root and retirement workers, and only then
+	 * crosses the controller-global hardware boundary.  A retry cannot publish
+	 * twice. */
+	model_init(&controller, &requests[0]);
+	requests[1] = requests[0];
+	requests[2] = requests[0];
+	CHECK(model_uhci_quiesce_drain(&controller, requests, 3U, 300U, 0, 0, 0,
+	    0) == 0);
+	CHECK(controller.quiescing == 1U);
+	for (index = 0; index < 3U; index++) {
+		CHECK(requests[index].disconnect_count == 1U);
+		CHECK(requests[index].state == MODEL_RELEASED &&
+		    requests[index].active == 0U);
+		CHECK(requests[index].free_count == 1U &&
+		    requests[index].completion_count == 1U);
+	}
+	CHECK(controller.retirement_wakeups == 1U);
+	CHECK(controller.root_stop_count == 1U &&
+	    controller.root_join_count == 1U && controller.root_joined == 1U);
+	CHECK(controller.worker_stop_count == 1U &&
+	    controller.worker_join_count == 1U && controller.worker_joined == 1U);
+	for (index = 0; index < 3U; index++)
+		CHECK(requests[index].completion_sequence <
+		    controller.root_stop_sequence);
+	CHECK(controller.root_stop_sequence < controller.root_join_sequence);
+	CHECK(controller.root_join_sequence < controller.worker_stop_sequence);
+	CHECK(controller.worker_stop_sequence < controller.worker_join_sequence);
+	CHECK(controller.worker_join_sequence < controller.hardware_stop_sequence);
+	CHECK(controller.hardware_stop_count == 1U &&
+	    controller.halt_attempt_count == 1U &&
+	    controller.master_disable_count == 1U &&
+	    controller.irq_drain_count == 1U);
+	CHECK(controller.running == 0U && controller.halted == 1U &&
+	    controller.dma_quiesced == 1U);
+	CHECK(model_uhci_quiesce_drain(&controller, requests, 3U, 301U, 0, 0, 0,
+	    0) == 0);
+	for (index = 0; index < 3U; index++)
+		CHECK(requests[index].disconnect_count == 1U &&
+		    requests[index].free_count == 1U &&
+		    requests[index].completion_count == 1U);
+	CHECK(controller.root_stop_count == 1U &&
+	    controller.worker_stop_count == 1U &&
+	    controller.hardware_stop_count == 1U);
+
+	/* A request-local timeout retains every request owner.  The same quiesce
+	 * invocation must nevertheless attempt halt, BME-off, and IRQ drain, and a
+	 * successful global proof does not authorize releasing the failed graph. */
+	model_init(&controller, &requests[0]);
+	requests[1] = requests[0];
+	requests[2] = requests[0];
+	CHECK(model_uhci_quiesce_drain(&controller, requests, 3U, 400U, 1, 0, 0,
+	    0) == ETIMEDOUT);
+	for (index = 0; index < 3U; index++) {
+		CHECK(requests[index].state == MODEL_FAILED &&
+		    requests[index].active == 1U &&
+		    requests[index].hcd_data == 1U);
+		CHECK(requests[index].schedule_dma == 1U &&
+		    requests[index].bounce_dma == 1U);
+		CHECK(requests[index].free_count == 0U &&
+		    requests[index].completion_count == 0U);
+	}
+	CHECK(controller.worker_stop_count == 0U &&
+	    controller.worker_join_count == 0U);
+	CHECK(controller.root_stop_count == 1U &&
+	    controller.root_join_count == 1U);
+	CHECK(controller.hardware_stop_count == 1U &&
+	    controller.halt_attempt_count == 1U &&
+	    controller.master_disable_count == 1U &&
+	    controller.irq_drain_count == 1U);
+	CHECK(controller.dma_quiesced == 1U);
+
+	/* A failed worker join also cannot bypass the hardware fail-safe.  Once an
+	 * external retry performs the unique join, neither request completion nor
+	 * the already-proved hardware stop is repeated. */
+	model_init(&controller, &request);
+	CHECK(model_uhci_quiesce_drain(&controller, &request, 1U, 500U, 0, 0,
+	    EBUSY, 0) == EBUSY);
+	CHECK(request.free_count == 1U && request.completion_count == 1U);
+	CHECK(controller.worker_stop_count == 1U &&
+	    controller.worker_join_count == 0U && !controller.worker_joined);
+	CHECK(controller.worker_stop_sequence < controller.hardware_stop_sequence);
+	CHECK(controller.hardware_stop_count == 1U &&
+	    controller.dma_quiesced == 1U);
+	CHECK(model_uhci_quiesce_drain(&controller, &request, 1U, 501U, 0, 0, 0,
+	    0) == 0);
+	CHECK(request.disconnect_count == 1U && request.free_count == 1U &&
+	    request.completion_count == 1U);
+	CHECK(controller.worker_stop_count == 2U &&
+	    controller.worker_join_count == 1U && controller.worker_joined);
+	CHECK(controller.hardware_stop_count == 1U);
+
+	/* A worker preempted after active-set removal still owns completion.  The
+	 * explicit in-flight count prevents a false clean drain and retirement join;
+	 * the bounded failure nevertheless reaches the global stop. */
+	model_init(&controller, &request);
+	request.active = 0U;
+	request.hcd_data = 0U;
+	request.state = MODEL_COMPLETING;
+	controller.completion_inflight = 1U;
+	CHECK(model_uhci_quiesce_drain(&controller, &request, 0U, 525U, 0, 0, 0,
+	    0) == EBUSY);
+	CHECK(controller.root_joined && !controller.worker_joined);
+	CHECK(controller.worker_stop_count == 0U &&
+	    controller.hardware_stop_count == 1U && controller.dma_quiesced);
+	CHECK(request.schedule_dma && request.bounce_dma &&
+	    request.free_count == 0U && request.completion_count == 0U);
+	request.schedule_dma = 0U;
+	request.bounce_dma = 0U;
+	request.free_count = 1U;
+	request.completion_count = 1U;
+	request.state = MODEL_RELEASED;
+	controller.completion_inflight = 0U;
+	CHECK(model_uhci_quiesce_drain(&controller, &request, 0U, 526U, 0, 0, 0,
+	    0) == 0);
+	CHECK(controller.worker_joined && controller.worker_join_count == 1U);
+	CHECK(controller.hardware_stop_count == 1U);
+
+	/* A failed root-worker join is also retained, while the independent
+	 * retirement join and hardware stop still execute in their frozen order. */
+	model_init(&controller, &request);
+	CHECK(model_uhci_quiesce_drain(&controller, &request, 1U, 550U, 0,
+	    EBUSY, 0, 0) == EBUSY);
+	CHECK(request.free_count == 1U && request.completion_count == 1U);
+	CHECK(controller.root_stop_count == 1U &&
+	    controller.root_join_count == 0U && !controller.root_joined);
+	CHECK(controller.root_stop_sequence < controller.worker_stop_sequence);
+	CHECK(controller.worker_join_sequence < controller.hardware_stop_sequence);
+	CHECK(controller.worker_joined && controller.dma_quiesced);
+	CHECK(model_uhci_quiesce_drain(&controller, &request, 1U, 551U, 0, 0, 0,
+	    0) == 0);
+	CHECK(controller.root_stop_count == 2U &&
+	    controller.root_join_count == 1U && controller.root_joined);
+	CHECK(controller.worker_stop_count == 1U &&
+	    controller.worker_join_count == 1U);
+	CHECK(controller.hardware_stop_count == 1U);
+
+	/* If both boundaries fail, the first request-local error remains the return
+	 * value, every global stop leg is still attempted, and no DMA is freed. */
+	model_init(&controller, &request);
+	CHECK(model_uhci_quiesce_drain(&controller, &request, 1U, 600U, 1, 0, 0,
+	    EIO) == ETIMEDOUT);
+	CHECK(controller.hardware_stop_count == 1U &&
+	    controller.halt_attempt_count == 1U &&
+	    controller.master_disable_count == 1U &&
+	    controller.irq_drain_count == 1U);
+	CHECK(controller.dma_quiesced == 0U);
+	CHECK(request.active && request.hcd_data && request.schedule_dma &&
+	    request.bounce_dma);
+	CHECK(request.free_count == 0U && request.completion_count == 0U);
+}
+
+static void
 test_worker_callback_reentrant_enqueue_dequeue(void)
 {
 	struct model_controller controller;
@@ -710,6 +1018,56 @@ test_ehci_failures_retain(void)
 }
 
 static void
+test_ehci_fatal_preserves_terminal_owner(void)
+{
+	struct model_controller controller;
+	struct model_request request;
+
+	/* The retirement worker has crossed IAA/PSS, popped the request, and owns
+	 * completion even though active-list removal still lies ahead. */
+	model_init(&controller, &request);
+	request.unlinked = 1U;
+	request.state = MODEL_COMPLETING;
+	ehci_fatalize(&controller, &request);
+	CHECK(controller.quarantined && controller.quiescing);
+	CHECK(request.state == MODEL_COMPLETING);
+	CHECK(request.active && request.hcd_data && request.schedule_dma &&
+	    request.bounce_dma);
+	CHECK(request.free_count == 0U && request.completion_count == 0U);
+	model_release(&controller, &request, 1);
+	CHECK(request.free_count == 1U && request.completion_count == 1U);
+
+	/* Checked cancellation has the same unique terminal owner: the dequeue
+	 * caller, rather than the completion worker, performs the one release. */
+	model_init(&controller, &request);
+	request.unlinked = 1U;
+	request.state = MODEL_RETIRED_CANCEL;
+	ehci_fatalize(&controller, &request);
+	CHECK(request.state == MODEL_RETIRED_CANCEL);
+	CHECK(request.free_count == 0U && request.completion_count == 0U);
+	CHECK(ehci_cancel_finish(&controller, &request) == 0);
+	CHECK(request.free_count == 1U && request.completion_count == 0U);
+
+	/* Before the checked hardware boundary, fatalization must still retain the
+	 * whole request graph under FAILED ownership. */
+	model_init(&controller, &request);
+	request.state = MODEL_WAIT_COMPLETE;
+	ehci_fatalize(&controller, &request);
+	CHECK(request.state == MODEL_FAILED);
+	CHECK(request.active && request.hcd_data && request.schedule_dma &&
+	    request.bounce_dma);
+	CHECK(request.free_count == 0U && request.completion_count == 0U);
+	CHECK(model_stop(&request) == EBUSY);
+	/* A single production shutdown attempt returns the retirement error only
+	 * after synchronously proving the hardware DMA-stop boundary. */
+	CHECK(model_ehci_quiesce(&controller, EIO, 0) == EIO);
+	CHECK(controller.hardware_stop_count == 1U);
+	CHECK(controller.running == 0U && controller.dma_quiesced == 1U);
+	CHECK(request.active && request.hcd_data && request.schedule_dma &&
+	    request.bounce_dma);
+}
+
+static void
 test_terminal_scan(void)
 {
 	unsigned tokens[] = {0U, MODEL_TD_ERROR, MODEL_TD_ACTIVE};
@@ -733,12 +1091,14 @@ main(void)
 	test_uhci_normal_and_rollover();
 	test_uhci_terminal_races();
 	test_uhci_failure_retains();
+	test_uhci_quiesce_drain_and_fail_safe_stop();
 	test_worker_callback_reentrant_enqueue_dequeue();
 	test_uhci_frame_health_precedes_change();
 	test_non_control_toggle_progress();
 	test_ehci_stale_and_matching_iaa();
 	test_ehci_cancel_race_and_quiesce();
 	test_ehci_failures_retain();
+	test_ehci_fatal_preserves_terminal_owner();
 	test_terminal_scan();
 	test_smp_terminal_claim();
 	printf("legacy HCD retirement model: %u checks PASS\n", checks);

@@ -12,5 +12,7 @@ int bsp_physical_range_mappable(uint64_t physical, size_t size);
 uint64_t bsp_acpi_rsdp(void);
 void pcat_cons_init(void);
 void pcat_cons_irq_init(void);
+uint64_t pcat_cons_output_begin(void);
+void pcat_cons_output_end(uint64_t token);
 
 #endif

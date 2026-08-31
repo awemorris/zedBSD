@@ -59,10 +59,13 @@ and partition substrate only.
   protective entry. This compatibility entry may coexist with a valid GPT, but
   it is ignored completely: it is neither reconciled with nor published in
   preference to GPT. The protective entry itself must be inactive, start at
-  LBA 1, cover `min(last LBA, UINT32_MAX)`, and be unique. This preserves the
-  shared BIOS/UEFI image without weakening the no-fallback rule.
+  LBA 1, have nonzero length, and be unique. WS020-p006 subsequently made a
+  valid GPT authoritative when that 32-bit compatibility length disagrees with
+  the GPT extent; the mismatch is diagnosed rather than rejected. This
+  preserves the shared BIOS/UEFI image without weakening the no-fallback rule.
 - Each primary/backup copy is validated independently. Either one fully valid
-  copy may be used with a visible degraded diagnostic when its peer is damaged.
+  copy may be used read-only with a visible degraded diagnostic when its peer is
+  damaged, on exact or bounded physical media.
   If both are valid, disk GUID, usable range, entry count/size, and the exact
   entry-array bytes must agree; disagreement rejects the disk.
 - GPT revision is 1.0; header size is at least 92 bytes and no larger than the

@@ -47,8 +47,10 @@ bounded internal subscriber, and repairs overflow through an atomic
 begin/snapshot/end state transaction. Its independent bounded HID parser
 rejects impossible field widths even on unsupported usages and passes 791
 strict/sanitizer/analyzer checks. Live USB HID attachment remains WS006 p008;
-fresh image/QEMU evidence is presently held by the already recorded WS008
-Noct CLI incompatibility.
+p031 has completed the required USB 1.1 concurrency/hotplug boundary and p032
+remains its last WS004 prerequisite. The accepted Noct revision now passes
+runtime `--path`, the ordinary production build, and zedbuild byte primitives;
+only the unrelated compile/application CLI form remains uncleared.
 
 The archived [q039](queue-q039.md) first proves the
 already-correct PC-98 `IPL1` field and has prepared one immutable audio-trace
@@ -72,23 +74,37 @@ completed independent AF_UNIX/network authorization foundation. The archived
 parser milestones. The archived [q045](queue-q045.md) records the independent
 WS004 SuperSpeed interrupt-context automatic/source correction. The completed
 [q046](queue-q046.md) reconciles the producer-linked evdev/input and kernel
-boot-parameter references. The current [Queue Book](queue.md) records that
-completion while the next WS004 prerequisite Queue is extracted. The archived
-q043 PC-98 fixed-read and exact-mouse
+boot-parameter references. The current [Queue Book](queue.md) executes the
+WS004 legacy-HCD concurrency/hotplug and checked USB recovery prerequisites
+before USB HID. It has completed p031's focused, configured-production,
+regression, repository-build, and forced standalone/paired QEMU gates, and has
+completed p033, the bounded amd64 framebuffer-console race extracted when
+p031's third hot-add exposed a cursor-row overwrite. P032 remains. The
+archived q043 PC-98 fixed-read and exact-mouse
 paths both pass locally, and their remaining external resume facts do not
 block subsequent Queues. The
 archived [q038](queue-q038.md) replaced the
 stale or intermediate image used for the first Intel Mac observation with one
 fresh, production-checked UEFI-only artifact and passed the exact larger-USB
-path through init/login. One provisional p004 boot of that exact hash is next.
+path through init/login. Q047 refreshed `MAC-T021`, the partition-publication
+ordinary/sanitizer/analyzer gates, and the installed handoff bytes at SHA-256
+`f811a0f5...`. The first provisional Intel Mac boot of those exact bytes
+reached the kernel, USB storage, and current boot parameters, then rejected a
+host-relocated physical-end GPT because its Protective MBR still advertised the
+compact source extent. Q047 therefore extracted `ws020-p006`: it makes a
+CRC-valid, structurally valid GPT authoritative over the Protective MBR sector
+count while preserving strict bounds, copy-consistency, and corruption
+checks. Its automatic gates precede one refreshed
+provisional boot; p004 still ends with the final five cold boots.
 The archived [q037](queue-q037.md) passed every automatic native PC-98 IPL and
 INT 1Bh disk-read gate while retaining the native partition layout and `55 aa`;
 its frozen image still awaits the already-requested PC-9821V13 observation.
 The archived [q036](queue-q036.md) completed the generic Variant and three
 fixed amd64 image-layout Phases through their automatic layout gates. Its
-strict six-cell runtime Phase is uncleared because three fresh runs exposed an
+strict six-cell runtime Phase was uncleared because three fresh runs exposed an
 image/firmware-independent init/getty scheduling flake after root and swap had
-already succeeded; the oracle was not weakened.
+already succeeded. Q047 later completed p003 with one uninterrupted six-cell
+PASS using the original exact `login:` and negative-cell oracles.
 The archived [q035](queue-q035.md) completed the retained WS018 graphics
 runtime matrix, consolidated FAT, migrated FAT boot-media access to native VFS
 objects, and removed the retired bootfs/namespace/startup/M9 and broad
@@ -330,13 +346,13 @@ actually warranted.
 | WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q042 retained passing source/host milestones for both VFS prerequisites discovered by q041 | `ws001-p014` complete; p015/p016 source/host milestones uncleared | Restore the Noct host CLI through WS008 p010, complete p015's two retained fault cells, then run fresh native/remount acceptance for p015/p016 before returning to WS005 p005 | [WS001](ws001-posix/ws.md) |
-| `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
+| `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; restore its Make-owned Noct gate through ws008-p010 | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Audited active; q041 p016 completed checked UHCI/EHCI request retirement with configured and QEMU lifecycle evidence. q040 p026 completed every automatic/read-only intake step and is uncleared only for the purchased unit's printed model/region/revision. `q030` NVMe software and the physical USB-Ethernet path are complete | `ws004-p010`--`p016`, `p018`, p020, and p022--p024 complete | Proceed through q041; obtain one serial-redacted Archer label observation when convenient without blocking independent work | [WS004](ws004-hardware/ws.md) |
+| `ws004` | Hardware expansion | Active; q047 completed legacy-HCD concurrency/hotplug and retains general USB recovery for HID; the extracted amd64 framebuffer-console correction is complete. q040 p026 remains uncleared only at the purchased-unit label; NVMe software and physical USB Ethernet are complete | `ws004-p010`--`p016`, `p018`, p020, p022--p024, p031, and p033 complete | Complete p032; its p031 dependency is satisfied. If p032 passes, hand the dependency-ready boundary to WS006 p008 | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q029 p001 and q040 p003 complete; q041 p005 host implementation passes and q042 advanced but did not complete its VFS dependencies | Physical USB Ethernet and authenticated control pass; strict local credential parser/store/CLI now pass host safety and regression gates | Complete WS001 p015/p016 after WS008 p010, then requeue p005 root/non-root ownership and remount-durability acceptance; p004 remains hardware-core dependency-gated | [WS005](ws005-networking/ws.md) |
-| `ws006` | Input and evdev | Active; q044 completed truthful per-source ownership and the bounded HID parser; p008 now has frozen Report-Protocol and stale-fd namespace policies | `ws006-p006` automatic/source and `ws006-p007` parser milestones complete | Complete WS004 USB 1.1 concurrency/hotplug and reset/STALL prerequisites, then implement p008; p009 still waits for accepted WS008 userland | [WS006](ws006-input/ws.md) |
+| `ws006` | Input and evdev | Active; q044 completed truthful per-source ownership and the bounded HID parser; p008 now has frozen Report-Protocol and stale-fd namespace policies | `ws006-p006` automatic/source and `ws006-p007` parser milestones complete | P031 clears USB 1.1 concurrency/hotplug; complete WS004 p032 reset/STALL recovery, then implement p008. P009 still waits for accepted WS008 userland | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Blocked; target packages remain disabled, and the p008 host pin is not production-usable because upstream removed its documented module-path CLI | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 records the later `--path` production-build regression and p009 remains separately target-blocked | Resume p010 from the maintainer's accepted upstream repair or an explicit compatible revision, then resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Blocked; accepted host SHA restores runtime `--path` and passes the ordinary production build plus zedbuild byte primitives, while target packages remain separately disabled | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 is uncleared only at unrelated `NOCT-T082` compile/application parsing, and p009 remains separately target-blocked | Resume p010 only from a maintainer-reviewed commit which fixes `--compile --app --path=...`; resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | Active; q046 reconciled two already implemented producer contracts | `ws009-p004` and `p005` complete | Extract the next dependency-ready public reference alongside its producer WS | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; VLAN/bridge hold released, detailed design still open | `ws011-p003` complete; p004 resumed for design; p005 bounds open | After higher priorities, finish p004's virtual-interface/UAPI/packet-ownership design before implementation; freeze p005 bounds independently | [WS011](ws011-net-config/ws.md) |
@@ -348,7 +364,7 @@ actually warranted.
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
-| `ws020` | Intel Mac UEFI bring-up and generic image variants | Active but physical work deferred by user; q036 p001-p002 and q038 p005 complete, p003 uncleared | First physical log used an older three-entry Hybrid-family artifact; fresh fixed UEFI-only hash `3bca88c3...` passes production checking and an exact 60,549,120-sector OVMF/xHCI boot through login | Resume p004 only when the user reselects the Intel Mac checkpoint; separately resolve p003 before its final five-run campaign | [WS020](ws020-intel-mac/ws.md) |
+| `ws020` | Intel Mac UEFI bring-up and generic image variants | Active; p006 automatic GPT/Protective-MBR repair complete, one provisional and p004 final physical acceptance pending | `MAC-T022`, pristine `MAC-T021`, and uninterrupted six-cell `MAC-T020` pass; exact `692160cf...331d` / `A93F-BBBE` image published | Record one provisional Intel Mac boot without blocking p032, then retain p004's final five consecutive cold boots | [WS020](ws020-intel-mac/ws.md) |
 
 ## 4. Milestones
 
@@ -444,20 +460,24 @@ active execution order. Dependency closure may interleave adjacent WSs, but it
 must not silently promote a lower-priority product goal over a ready higher-
 priority one.
 
-1. Continue the WS006/WS004 completion audit. q044 completed WS006 p006/p007
-   source boundaries without calling the WS complete. P008's checked Report-
-   Protocol and stale-fd namespace policies are resolved; the user requires
-   USB 1.1, so focused UHCI/EHCI concurrency/hotplug and general reset/STALL
-   work must precede it, while
+1. Continue the WS006/WS004 completion audit through q047. q044 completed WS006
+   p006/p007 source boundaries without calling the WS complete. P008's checked
+   Report-Protocol and stale-fd namespace policies are resolved; the user
+   requires USB 1.1. P031 UHCI/EHCI concurrency/hotplug is complete; pending
+   p032 general reset/STALL work still precedes p008. P033 has completed the
+   framebuffer-console
+   race correction using host gates and p031's passing forced QEMU evidence
+   rather than adding a second run, while
    p009 remains WS008-dependent. WS004
    likewise retains its independently listed p017, p019, p021, p025, and WLAN
    chain rather than treating the working visible USB/NVMe cases as closure.
 2. WS018 is complete.  q035 finished p009's retained runtime evidence and
    p010--p012 in consumer-before-deletion order; no residual Phase remains.
-3. Complete WS020 Intel Mac bring-up. Add the generic board Variant, implement
-   combined/UEFI-only/BIOS-only amd64 image profiles, pass the six-cell QEMU
-   matrix, then perform the bounded physical UEFI-only checkpoint and final
-   five-run acceptance. Disk capacity is not a menu selection.
+3. Complete WS020 Intel Mac bring-up. The generic board Variant, three amd64
+   image profiles, strict six-cell QEMU matrix, and refreshed production
+   handoff preflight pass. The bounded physical UEFI-only checkpoint and final
+   five-run acceptance remain deferred by the user. Disk capacity is not a
+   menu selection.
 4. Implement the Archer T3U Nano USB WLAN path across WS004 and WS005. The
    dependency order is p026 exact-unit/firmware intake, p027 generic WLAN core,
    WS005 privilege/command/profile/protocol prerequisites, p028--p030 radio and
@@ -532,7 +552,7 @@ until stopped or no judgment-free Phase remains.
 | Installer source-image stability | WS019 p004 | Choose unused immutable installer templates for data/swap (recommended) or explicitly redesign p004 to generate them at the target; never copy the live overlay upper or active swap |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
 | Confirmed-commit implementation bounds | WS011 | Public semantics are fixed: interactive only, explicit timeout, delayed `/etc/net.conf` write, ordinary `commit` confirms, and DHCP is reacquired; freeze timeout maximum, lock path, and diagnostic bounds before implementation |
-| Authoritative Noct repository, build sequence, and revision | WS008 | Official main remains `awemorris/NoctLang`. q041 pinned host commit `3bf3d236...`, but p010 records that it rejects the still-documented `--path`/`require` CLI used by production scripts; the accepted replacement revision is manually blocked by `MB-008`. Target relocation remains p009. |
+| Authoritative Noct repository, build sequence, and revision | WS008 | Official main remains `awemorris/NoctLang`. q047 pins maintainer-published `e56274ff...`; runtime `--path`, NOCT-T084, and zedbuild byte primitives pass. Only unrelated NOCT-T082 `--compile --app --path=...` remains uncleared. Target relocation remains p009. |
 | PC/AT boot selector | WS004 | Resolved: reuse UUID/PARTUUID; standard FAT handoff uses UUID |
 | Runtime swap command standard and control boundary | WS016 | Resolved for v1: SUSv4/POSIX does not define `swapon`/`swapoff`; zedBSD supplies minimal privileged extensions over versioned `/dev/system` control and existing signed sources |
 | Optional LFB mapping and Xzed fallback boundary | WS017 | Resolved for v1: fixed post-ENTER geometry, 8/16/24/32-bpp layout query, shared non-executable mmap when supported, true-color Xzed fast path, and unchanged ioctl fallback; PC-98 Cirrus is excluded |
@@ -551,13 +571,13 @@ until the user explicitly releases the named hold.
 | `MB-004` | `ws013-p001` | Service-container package format, dependencies, updates, config, and data | User explicitly resumes service-container package discussion |
 | `MB-005` | `ws014-p001` | GPU UAPI, capability profiles, display takeover, i915 split, Vulkan/GLES | User explicitly resumes GPU architecture discussion |
 | `MB-007` | `ws015-p001` | μITRON profile/UAPI, legacy static configuration, RT/POSIX mailbox and filesystem proxy, scheduling, failure, and timing contracts | User explicitly resumes WS015 architecture/API discussion |
-| `MB-008` | `ws008-p010` | Noct host CLI repair ownership and replacement revision after pinned `3bf3d236...` removed the documented `--path`/`require` contract | Maintainer publishes and identifies an accepted upstream repair, or the user explicitly selects a compatible older immutable revision |
 
 Released holds remain permanent history rather than reusable identifiers:
 
 | Hold ID | Released | Result |
 | --- | --- | --- |
 | `MB-001` | 2026-08-30 | The user placed VLAN and bridge implementation back in the active priority order. The manual hold is removed; unresolved virtual-interface UAPI, packet ownership, filtering, and persistence details remain ordinary p004 design gates. |
+| `MB-008` | 2026-08-31 | The maintainer-published `e56274ff...` revision restores runtime `--path`; q047 verifies the host toolchain, ordinary production build, and zedbuild byte primitives. The independent NOCT-T082 compile/application parser remains an ordinary p010 resume condition. |
 | `MB-006` | 2026-08-30 | The user resumed WLAN design after completing USB Ethernet. The old RTL8822CE-first, `/sbin/wpa`, and `/etc/wpa/` proposal was superseded by the Archer T3U Nano first target and the fixed `net` -> `networkd` -> `ifconfig`/`wifi`/`dhcpc` topology. Firmware and exact-device facts are ordinary Phase dependencies, not a continuing manual hold. |
 
 ## 8. Interruption and resumption

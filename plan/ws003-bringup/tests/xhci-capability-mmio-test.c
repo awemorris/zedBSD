@@ -60,6 +60,9 @@ hal_printf(const char *format, ...)
 	return 0;
 }
 
+bool hal_irq_disable(void) { return true; }
+void hal_irq_enable(void) { }
+
 void
 hal_irq_mask(int irq)
 {
@@ -81,6 +84,11 @@ hal_irq_send_eoi(hal_irq_ack_t acknowledge)
 
 void
 hal_io_mb(void)
+{
+}
+
+void
+hal_io_rmb(void)
 {
 }
 

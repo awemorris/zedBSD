@@ -27,14 +27,15 @@ CC := gcc
 HOSTCC ?= cc
 PYTHON ?= python3
 ZEDBSD_HOST_NOCT_REPOSITORY ?= https://github.com/awemorris/NoctLang.git
-ZEDBSD_HOST_NOCT_REVISION ?= 3bf3d236aa8ce014c63853dee3b21fa023d877ed
+ZEDBSD_HOST_NOCT_REVISION ?= e56274ff00894182da5c44f1b8a2fb2fcf2c3dac
 ZEDBSD_HOST_NOCT_SOURCE_DIR := build/NoctLang
 ZEDBSD_HOST_NOCT_BUILD_DIR := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/build-static
 ZEDBSD_HOST_NOCT := $(ZEDBSD_HOST_NOCT_BUILD_DIR)/noct
 ZEDBSD_HOST_NOCT_CMAKE_OPTIONS := -DNOCT_ENABLE_API_PROCESS=ON
 NOCT ?= $(abspath $(ZEDBSD_HOST_NOCT))
-ZEDBSD_HOST_NOCT_CHECKOUT_STAMP := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/.zedbsd-checkout-$(ZEDBSD_HOST_NOCT_REVISION)
-ZEDBSD_HOST_NOCT_BUILD_STAMP := $(ZEDBSD_HOST_NOCT_BUILD_DIR)/.zedbsd-built-$(ZEDBSD_HOST_NOCT_REVISION)-process
+ZEDBSD_HOST_NOCT_STATE_DIR := build/host-noct-state
+ZEDBSD_HOST_NOCT_CHECKOUT_STAMP := $(ZEDBSD_HOST_NOCT_STATE_DIR)/checkout-$(ZEDBSD_HOST_NOCT_REVISION)
+ZEDBSD_HOST_NOCT_BUILD_STAMP := $(ZEDBSD_HOST_NOCT_STATE_DIR)/built-$(ZEDBSD_HOST_NOCT_REVISION)-process
 ZEDBSD_IMAGE_HOST := build/zedimage-host
 .DEFAULT_GOAL := disk-image
 
@@ -128,6 +129,7 @@ CONFIG_DRIVER_PCI_NVME ?= y
 CONFIG_DRIVER_USB_STORAGE ?= y
 CONFIG_DRIVER_USB_CDC_NCM ?= y
 CONFIG_KERNEL_TEST_CHECKPOINTS ?= n
+CONFIG_KERNEL_USB_HID_CHECKPOINT ?= n
 CONFIG_BUF_CACHE_KIB ?= 0
 
 # Optional packages install commands and directly executable payloads here.
@@ -317,23 +319,46 @@ list-targets:
 
 .PHONY: zedbsd-host-noct-checkout-verify
 zedbsd-host-noct-checkout-verify:
-	@mkdir -p build
+	@mkdir -p build "$(ZEDBSD_HOST_NOCT_STATE_DIR)"
 	@if test ! -d "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)/.git"; then \
 		git clone "$(ZEDBSD_HOST_NOCT_REPOSITORY)" "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)"; \
 	fi
-	@if ! git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" diff --quiet || \
-	    ! git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" diff --cached --quiet; then \
-		echo "NoctLang host checkout has tracked changes: $(ZEDBSD_HOST_NOCT_SOURCE_DIR)" >&2; \
+	@for legacy_stamp in \
+		"$(ZEDBSD_HOST_NOCT_SOURCE_DIR)"/.zedbsd-checkout-* \
+		"$(ZEDBSD_HOST_NOCT_BUILD_DIR)"/.zedbsd-built-*; do \
+		if test ! -e "$$legacy_stamp"; then \
+			continue; \
+		fi; \
+		if test -L "$$legacy_stamp" || test ! -f "$$legacy_stamp" || \
+		    test -s "$$legacy_stamp"; then \
+			echo "Refusing to remove unexpected legacy Noct stamp: $$legacy_stamp" >&2; \
+			exit 1; \
+		fi; \
+		rm -f -- "$$legacy_stamp"; \
+	done
+	@status=$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" \
+		status --porcelain=v1 --untracked-files=all); \
+	if test -n "$$status"; then \
+		echo "NoctLang host checkout is not clean: $(ZEDBSD_HOST_NOCT_SOURCE_DIR)" >&2; \
+		printf '%s\n' "$$status" >&2; \
 		exit 1; \
 	fi
 	@changed=0; \
 	actual=$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" rev-parse HEAD); \
-	if test "$$actual" != "$(ZEDBSD_HOST_NOCT_REVISION)"; then \
-		git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" fetch origin "$(ZEDBSD_HOST_NOCT_REVISION)"; \
+	branch=$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" symbolic-ref -q HEAD || :); \
+	if test "$$actual" != "$(ZEDBSD_HOST_NOCT_REVISION)" || test -n "$$branch"; then \
+		if ! git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" cat-file -e \
+		    "$(ZEDBSD_HOST_NOCT_REVISION)^{commit}"; then \
+			git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" fetch origin \
+				"$(ZEDBSD_HOST_NOCT_REVISION)"; \
+		fi; \
 		git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" checkout --detach "$(ZEDBSD_HOST_NOCT_REVISION)"; \
 		changed=1; \
 	fi; \
 	if test ! -e "$(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP)"; then \
+		changed=1; \
+	fi; \
+	if test ! -x "$(ZEDBSD_HOST_NOCT)"; then \
 		changed=1; \
 	fi; \
 	if test "$$changed" = 1; then \
@@ -344,6 +369,9 @@ zedbsd-host-noct-checkout-verify:
 $(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP): | zedbsd-host-noct-checkout-verify
 	@test "$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" rev-parse HEAD)" = \
 		"$(ZEDBSD_HOST_NOCT_REVISION)"
+	@test -z "$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" symbolic-ref -q HEAD || :)"
+	@test -z "$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" \
+		status --porcelain=v1 --untracked-files=all)"
 	@test -e "$@"
 
 $(ZEDBSD_HOST_NOCT_BUILD_STAMP): $(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP)
@@ -375,11 +403,11 @@ ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_PCI_NVME=$(if $(filter y,$(CONFIG_DRIVER_PCI_NVME)),1,0) \
 	-DCONFIG_DRIVER_USB_STORAGE=$(if $(filter y,$(CONFIG_DRIVER_USB_STORAGE)),1,0) \
 	-DCONFIG_DRIVER_USB_CDC_NCM=$(if $(filter y,$(CONFIG_DRIVER_USB_CDC_NCM)),1,0) \
+	-DCONFIG_KERNEL_USB_HID_CHECKPOINT=$(if $(filter y,$(CONFIG_KERNEL_USB_HID_CHECKPOINT)),1,0) \
 	-DCONFIG_BUF_CACHE_KIB=$(CONFIG_BUF_CACHE_KIB)
 ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
 ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_TEST_CHECKPOINTS
 endif
-
 BUILD_TOOLS_DIR := tools/build
 ZEDBSD_PRIMARY_TARGETS := menuconfig vmunix bootloader rootfs-bin rootfs-usr \
 	rootfs world disk-image run toolchain

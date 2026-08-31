@@ -31,6 +31,8 @@ ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 $cc $common -fanalyzer -c "$fixture" -o "$work/xhci-concurrent-analyzer.o"
 
 xhci="$root/src/drivers/pci-xhci.c"
+ehci="$root/src/drivers/pci-ehci.c"
+uhci="$root/src/drivers/pci-uhci.c"
 storage="$root/src/drivers/usb-storage.c"
 usb="$root/src/drivers/usb.c"
 
@@ -60,21 +62,19 @@ grep -q 'drv_usb_urb_setup_control_flags' "$usb"
 grep -q 'drv_usb_urb_drain' "$usb"
 grep -q 'drv_usb_device_hcd_capabilities' "$usb"
 grep -q 'hcd.capabilities = DRV_USB_HCD_CAP_CONCURRENT_URBS' "$xhci"
-if grep -q 'DRV_USB_HCD_CAP_CONCURRENT_URBS' \
-	"$root/src/drivers/pci-ehci.c" "$root/src/drivers/pci-uhci.c"; then
-	echo 'xHCI source audit: EHCI/UHCI advertises concurrent URBs' >&2
-	exit 1
-fi
+grep -q 'hcd.capabilities = DRV_USB_HCD_CAP_CONCURRENT_URBS' "$ehci"
+grep -q 'hcd.capabilities = DRV_USB_HCD_CAP_CONCURRENT_URBS' "$uhci"
 
-# The legacy single-active HCDs share their request slot between submit,
-# interrupt completion, cancellation, and quiesce.  p016 replaced the former
-# unconditional EBUSY dequeue with checked controller-specific retirement.
-# Keep this xHCI regression aware of that contract without duplicating the
-# detailed FRNUM/IAA fixture owned by run-legacy-hcd-retirement-test.sh.
+# All production HCDs now admit independent requests concurrently while an
+# exact endpoint retains one owner.  Keep this xHCI regression aware of the
+# legacy-HCD capability boundary without duplicating the detailed FRNUM/IAA
+# retirement fixture owned by run-legacy-hcd-retirement-test.sh.
 for legacy_hcd in ehci uhci; do
 	legacy_source="$root/src/drivers/pci-$legacy_hcd.c"
 	grep -q 'struct spinlock active_lock;' "$legacy_source"
-	grep -q 'submitting = 1;' "$legacy_source"
+	grep -q "struct ${legacy_hcd}_request \*active;" "$legacy_source"
+	grep -q 'active_next' "$legacy_source"
+	grep -q 'active_count' "$legacy_source"
 	grep -q 'quiescing = 1;' "$legacy_source"
 	dequeue_body=$(sed -n "/${legacy_hcd}_urb_dequeue(/,/^}/p" \
 		"$legacy_source")
@@ -86,10 +86,15 @@ for legacy_hcd in ehci uhci; do
 		exit 1
 	fi
 done
-grep -q 'uhci_retirement_begin_locked' "$root/src/drivers/pci-uhci.c"
-grep -q 'uhci_wait_frame_advance' "$root/src/drivers/pci-uhci.c"
-grep -q 'ehci_retirement_begin_iaa_locked' "$root/src/drivers/pci-ehci.c"
-grep -q 'ehci_retirement_observe_iaa_locked' "$root/src/drivers/pci-ehci.c"
+grep -q 'uhci_endpoint_owned_locked' "$uhci"
+grep -q 'uhci_schedule_insert_locked' "$uhci"
+grep -q 'uhci_retirement_begin_locked' "$uhci"
+grep -q 'uhci_wait_frame_advance' "$uhci"
+grep -q 'ehci_endpoint_owner_locked' "$ehci"
+grep -q 'ehci_publish_async_request' "$ehci"
+grep -q 'ehci_publish_periodic_request' "$ehci"
+grep -q 'ehci_retirement_begin_iaa_locked' "$ehci"
+grep -q 'ehci_retirement_observe_iaa_locked' "$ehci"
 if sed -n '/struct xhci_controller {/,/^};/p' "$xhci" |
 	grep -q 'struct xhci_request[[:space:]]*\*active'; then
 	echo 'xHCI source audit: controller-global active request remains' >&2

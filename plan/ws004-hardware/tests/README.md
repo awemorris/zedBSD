@@ -4,10 +4,10 @@ Parent: [WS004](../ws.md)
 
 | Case ID | Area | Required observation |
 | --- | --- | --- |
-| HW-T00 | PCIe/DMA/interrupts | BARs, capability walking, DMA widths/order, MSI/MSI-X setup/teardown, and timeout cleanup pass focused tests |
+| HW-T00 | PCIe/DMA/interrupts | BARs, capability walking, DMA widths/order, shared INTx fanout/checked teardown, MSI/MSI-X setup/teardown, and timeout cleanup pass focused tests |
 | HW-T01 | ECAM/MSI HAL contract | Canonical source parsing, MCFG validation, vector allocation/exhaustion/reuse, PCI register images, rollback, in-flight unregister, and real QEMU delivery pass |
 | HW-T02 | Legacy PCI HCD IRQ teardown | EHCI and UHCI retain the IRQ cookie/allocation, DMA, BAR-or-I/O ownership, HCD bus, handler argument, and controller after checked removal failure; retry releases each resource exactly once |
-| HW-T03 | Legacy HCD request retirement | UHCI requires all-frame unlink plus an observed FRNUM boundary, EHCI requires a fresh matching Async Advance acknowledgement, and both retain request/URB/DMA ownership on every checked failure |
+| HW-T03 | Legacy HCD request retirement | UHCI requires request-local unlink plus an observed FRNUM boundary, EHCI requires schedule-local unlink plus its checked periodic barrier or fresh matching Async Advance acknowledgement, and both retain request/URB/DMA ownership on every checked failure; p016's former single-request/all-frame shape is historical |
 | HW-T10 | xHCI model | QEMU enumeration, control/bulk/interrupt transfers, reconnect, timeout, and controller reset pass |
 | HW-T11 | USB storage | Root-continuity cases from WS003 pass through xHCI |
 | HW-T12 | USB overlay writes | Correlated URB/heap tests pass; 500 sequential q35/xHCI/SMP=4 boots from pristine raw-image copies have zero kernel/storage-error markers; explicit `DATA.IMG` persistence and IDE control pass; detailed manual acceptance follows |
@@ -23,6 +23,9 @@ Parent: [WS004](../ws.md)
 | HW-T22 | CDC ECM QEMU baseline | A QEMU RNDIS-first/ECM-second `usb-net` function selects ECM without a quirk, publishes `ue0`, carries raw Ethernet and DHCP/ping traffic, detaches cleanly, and coexists with xHCI USB Storage |
 | HW-T23 | CDC NCM deterministic hardening | Arbitrary first and mismatched fully valid sequences deliver and resynchronize, malformed NTBs preserve state, zero-delivery completions consume bounded poll work, and each open programs the packet filter after the active alternate and before input URBs |
 | HW-T24 | xHCI SuperSpeed interrupt context | Companion `wBytesPerInterval` validation and host-endian decode produce exact Max ESIT/Average TRB Length fields for RTL8156 EP3; zero, oversized, reserved-field, 16384-byte ceiling, and 16385 rejection cases behave as specified while non-SS/non-interrupt contexts remain unchanged |
+| HW-T25 | Legacy HCD concurrency and hotplug | Shared PCI INTx dispatch lets all paired controllers attach; UHCI/EHCI accept independent endpoint owners, retire only target schedule graphs, keep interrupt and Storage progress concurrent, and perform detach/reinsert only through independent root workers |
+| HW-T26 | Checked USB recovery | Core STALL latching, ordered endpoint clear-halt, xHCI ring recovery, UHCI/EHCI DATA0, direct-root reset, and Mass Storage migration preserve exact callback/URB/DMA ownership under failure |
+| HW-T27 | amd64 framebuffer console serialization | Concurrent CPU/IRQ-style output, terminal same-CPU re-entry, invalid cell coordinates, and framebuffer extent guards preserve cursor/cell/pixel state; the final HW-T25 QEMU run has no console fault or stall |
 | HW-T30 | Generic WLAN logic | The versioned pointer-free ioctl ABI, scan generations/cache, station state, cancellation, carrier, detach, race, and secret-erasure rules pass against a deterministic fake radio without claiming RF success |
 | HW-T31 | RTL8822BU attach/scan | Only the descriptor-confirmed `2357:012e` interface binds; automatic firmware/USB/scan gates pass, and the physical attach/scan fields come from the one shared WS005 p008 ledger with no p028-specific run |
 | HW-T32 | Archer identity/firmware policy | The exact adapter label and complete descriptor are retained; V1.0 RTL8822BU evidence is separated from later-revision inference, and one separately packaged firmware blob/license/provenance/digest/update rule is frozen before binding |
@@ -31,6 +34,83 @@ Parent: [WS004](../ws.md)
 | HW-T40 | i915 foundations | Device-independent UAPI/model tests pass; modeset/scanout/reset require target-hardware evidence |
 
 QEMU/model and physical-hardware results are always separate evidence fields.
+
+## HW-T25 legacy HCD concurrency and hotplug
+
+[`ws004-p031`](../phase031-legacy-hcd-concurrent-hotplug/phase.md) owns a
+production-source/model runner in ordinary, ASan/UBSan, and analyzer modes,
+then standalone UHCI and paired EHCI/UHCI QEMU cells.  The runtime cells log in
+through PS/2 using QMP `input-send-event` commands with explicit key-down and
+key-up pairs, then hot-add a full-speed `usb-mouse` as the bounded HID probe
+alongside independent USB Storage.  QMP-wrapped `mouse_move`, `device_del`, and
+`device_add` commands exercise 11 detach/reinsert transitions across 12 HID
+generations; generation 12 is re-armed and left pending across normal reboot.
+The cells require clean worker/DMA retirement and do not claim production HID
+or evdev behavior.
+
+The paired q35 topology routes its EHCI and three UHCI controllers over two
+shared legacy INTx lines.  The focused fixture verifies one HAL registration
+and one EOI per line, delivery to every PCI subscriber, non-final removal
+without masking a peer, in-flight `EBUSY` retention, and final checked-removal
+failure followed by retry:
+
+```sh
+mkdir -p build/q047-tmp
+TMPDIR="$PWD/build/q047-tmp" \
+  cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
+  src/drivers/pci.c \
+  plan/ws004-hardware/tests/pci-shared-intx-test.c \
+  -o build/q047-tmp/pci-shared-intx-test
+build/q047-tmp/pci-shared-intx-test
+```
+
+Scope note: this fixture covers dispatcher/list/drain lifetime, not a live
+function which remains asserted after unsubscribe.  EHCI and UHCI mask their
+controller-local source before checked PCI removal.  Generic PCI support for
+setting and restoring `PCI_COMMAND.INTx Disable` remains a known follow-up and
+is not claimed by HW-T25.
+
+The forced-canonical `build/q047-legacy-hcd-final4` QEMU result passes both
+cells under QEMU 10.0.11.  Each cell records 12 attaches/detaches, 11
+detach/reinsert transitions, four accepted and completed Storage requests,
+payload comparison, final pending re-arm across reboot, checked worker joins,
+and unchanged input hashes.  The paired cell records three UHCI plus one EHCI
+controller, 12 Mb/s companion-UHCI mouse ownership, and 480 Mb/s EHCI Storage;
+it does not claim EHCI high-speed periodic runtime coverage.  Together with
+the passing ordinary/sanitizer/analyzer, configured-production, focused
+regression, shared-INTx, and repository-build gates, this completes HW-T25 and
+`ws004-p031`.
+
+## HW-T26 checked USB recovery
+
+[`ws004-p032`](../phase032-usb-endpoint-device-recovery/phase.md) owns the
+production USB-core/HCD recovery fixture. It proves callback-before-latch
+visibility, exact `CLEAR_FEATURE(ENDPOINT_HALT)` ordering, HCD ring/toggle
+reset, conservative direct-root reset, failure quarantine/retention, and the
+removal of class-side HCD-private Mass Storage recovery. QEMU normal controls
+remain distinct from focused injected STALL/reset evidence.
+
+## HW-T27 amd64 framebuffer console serialization
+
+[`ws004-p033`](../phase033-amd64-framebuffer-console-serialization/phase.md)
+links the production amd64 PC/AT console into a four-writer host fixture.  It
+checks framebuffer canaries, invalid coordinates, and same-CPU terminal
+re-entry in ordinary and ASan/UBSan modes:
+
+```sh
+TMPDIR="$PWD/build/q047-tmp" \
+  plan/ws004-hardware/tests/run-amd64-console-output-host-test.sh
+```
+
+The existing WS006 input ownership/resynchronization fixture remains the input
+regression.  One fresh maintained HW-T25 QEMU matrix supplies the final runtime
+evidence for both p031 and p033; HW-T27 does not request duplicate QEMU boots.
+The forced-canonical `build/q047-legacy-hcd-final4` result passes standalone
+UHCI and paired EHCI plus three UHCI companions for 11 detach/reinsert
+transitions across 12 generations per cell, Storage comparison, and reboot
+with no console fault, corruption, or stall.
+Together with the ordinary and ASan/UBSan host runner and the WS006 input
+regression, this completes HW-T27.
 
 ## HW-T24 xHCI SuperSpeed interrupt context
 
@@ -293,9 +373,12 @@ cc -std=c11 -Wall -Wextra -Werror \
 
 ## HW-T03 checked legacy-HCD request retirement
 
-`ws004-p016` keeps the single-active-request UHCI/EHCI contract but replaces
-software-only unlink with a controller-observed retirement boundary.  The
-focused model and production-source gate cover completion versus dequeue,
+`ws004-p016` established the then-current single-active-request UHCI/EHCI
+baseline and replaced software-only unlink with a controller-observed
+retirement boundary.  `ws004-p031`/HW-T25 supersedes the scheduler shape with
+per-endpoint concurrency and request-local unlink while retaining these
+controller-observed retirement guarantees.  The focused model and
+production-source gate cover completion versus dequeue,
 timeout versus IRQ, late/duplicate acknowledgement, quiesce/stop during
 retirement, failure retention, exactly-one terminal publication, callback
 execution after the ownership lock is released, and worker-callback

@@ -285,6 +285,7 @@ struct fake_controller {
 	unsigned teardown_stop_sequence;
 	int teardown_detach_error;
 	int teardown_device_quiesce_error;
+	int teardown_hcd_quiesce_error;
 };
 
 static struct fake_controller *
@@ -318,7 +319,7 @@ fake_quiesce(struct drv_usb_hcd *hcd)
 	if (controller->teardown_tracking)
 		controller->teardown_hcd_quiesce_sequence =
 		    ++controller->teardown_sequence;
-	return 0;
+	return controller->teardown_hcd_quiesce_error;
 }
 
 static int
@@ -544,7 +545,7 @@ fake_root_control(struct drv_usb_hcd *hcd,
 
 	if (request->request == 0 && request->request_type == 0xa3U) {
 		CHECK(buffer != NULL && length >= sizeof(status));
-		status = controller->connected ? 1U | 0x400U | (1U << 16) :
+		status = controller->connected ? 1U | 2U | 0x400U | (1U << 16) :
 		    (1U << 16);
 		memcpy(buffer, &status, sizeof(status));
 		*actual = sizeof(status);
@@ -799,7 +800,7 @@ main(void)
 	struct fake_controller tie_controller, no_driver_controller, rtl8156;
 	struct fake_controller hotplug_success, hotplug_detach_failure;
 	struct fake_controller shutdown_success, shutdown_detach_failure;
-	struct fake_controller shutdown_device_failure;
+	struct fake_controller shutdown_device_failure, shutdown_hcd_failure;
 	struct fake_controller capability_controller;
 	struct drv_usb_hcd invalid_hcd;
 	struct drv_usb_hcd_ops invalid_ops;
@@ -1333,7 +1334,27 @@ main(void)
 	CHECK(control != NULL &&
 	    drv_usb_interface_driver(control) == &fake_driver);
 
+	/* Register this controller last so its checked HCD-stop failure is the
+	 * first bus visited.  The same shutdown invocation must still quiesce all
+	 * later buses, and a later invocation must retry only this retained bus. */
+	fake_register(&shutdown_hcd_failure, 0);
+	shutdown_hcd_failure.teardown_tracking = 1U;
+	shutdown_hcd_failure.teardown_hcd_quiesce_error = EIO;
+	shutdown_hcd_failure.vendor_first = 1U;
+	drv_usb_hcd_root_hub_changed(&shutdown_hcd_failure.hcd);
+	device = drv_usb_find_device(shutdown_hcd_failure.bus_number, 1);
+	CHECK(device != NULL);
+	configuration = drv_usb_device_active_configuration(device);
+	control = drv_usb_configuration_find_interface(configuration, 0);
+	CHECK(control != NULL &&
+	    drv_usb_interface_driver(control) == &fake_driver);
+
 	drv_usb_shutdown();
+	CHECK(shutdown_hcd_failure.teardown_detach_sequence == 1U);
+	CHECK(shutdown_hcd_failure.teardown_device_quiesce_sequence == 2U);
+	CHECK(shutdown_hcd_failure.teardown_hcd_quiesce_sequence == 3U);
+	CHECK(shutdown_hcd_failure.teardown_stop_sequence == 0U);
+	CHECK(shutdown_hcd_failure.teardown_sequence == 3U);
 	CHECK(shutdown_success.teardown_detach_sequence == 1U);
 	CHECK(shutdown_success.teardown_device_quiesce_sequence == 2U);
 	CHECK(shutdown_success.teardown_hcd_quiesce_sequence == 3U);
@@ -1350,6 +1371,15 @@ main(void)
 	CHECK(shutdown_device_failure.teardown_device_quiesce_sequence == 2U);
 	CHECK(shutdown_device_failure.teardown_hcd_quiesce_sequence == 3U);
 	CHECK(shutdown_device_failure.teardown_stop_sequence == 0U);
+	CHECK(shutdown_device_failure.teardown_sequence == 3U);
+
+	shutdown_hcd_failure.teardown_hcd_quiesce_error = 0;
+	drv_usb_shutdown();
+	CHECK(shutdown_hcd_failure.teardown_hcd_quiesce_sequence == 5U);
+	CHECK(shutdown_hcd_failure.teardown_stop_sequence == 6U);
+	CHECK(shutdown_hcd_failure.teardown_sequence == 6U);
+	CHECK(shutdown_success.teardown_sequence == 4U);
+	CHECK(shutdown_detach_failure.teardown_sequence == 3U);
 	CHECK(shutdown_device_failure.teardown_sequence == 3U);
 
 	printf("usb function model: %u checks passed\n", checks);

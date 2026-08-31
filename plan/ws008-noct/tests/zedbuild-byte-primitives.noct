@@ -1,0 +1,61 @@
+require zedbuild;
+
+func expect(condition, message) {
+    if (!condition) { zbFail(message); }
+}
+
+func main(args) {
+    var bytes = Packed.uint8(16);
+
+    if (Array.size(args) == 1) {
+        if (args[0] == "negative-offset") { zbU32LE(bytes, -1); }
+        else if (args[0] == "short-buffer") {
+            zbI64LE(Packed.uint8(7), 0);
+        }
+        else if (args[0] == "wrong-packed-type") {
+            zbU32LE(Packed.uint32(1), 0);
+        }
+        else if (args[0] == "non-integer-value") {
+            zbPut64LE(bytes, 0, 1.5);
+        }
+        else { zbFail("unknown test mode: " + args[0]); }
+        zbFail("invalid byte primitive input was accepted");
+    }
+    if (Array.size(args) != 0) { zbFail("too many test arguments"); }
+
+    Packed.fill(bytes, 0, 16, 0);
+    bytes[0] = 120;
+    bytes[1] = 86;
+    bytes[2] = 52;
+    bytes[3] = 18;
+    expect(zbU32LE(bytes, 0) == 305419896, "u32 little-endian decode");
+
+    bytes[0] = 255;
+    bytes[1] = 255;
+    bytes[2] = 255;
+    bytes[3] = 255;
+    expect(zbU32LE(bytes, 0) == 4294967295L, "u32 maximum decode");
+
+    zbPut64LE(bytes, 4, 81985529216486895L);
+    expect(bytes[4] == 239 && bytes[5] == 205 && bytes[6] == 171 &&
+           bytes[7] == 137 && bytes[8] == 103 && bytes[9] == 69 &&
+           bytes[10] == 35 && bytes[11] == 1,
+           "u64 little-endian encode");
+    expect(zbI64LE(bytes, 4) == 81985529216486895L,
+           "positive i64 little-endian decode");
+
+    zbPut64LE(bytes, 4, -2147483648);
+    expect(zbI64LE(bytes, 4) == -2147483648,
+           "negative i64 little-endian round trip");
+
+    zbPut64LE(bytes, 4, 9223372036854775807L);
+    expect(zbI64LE(bytes, 4) == 9223372036854775807L,
+           "i64 maximum round trip");
+    var minimum = -9223372036854775807L - 1L;
+    zbPut64LE(bytes, 4, minimum);
+    expect(zbI64LE(bytes, 4) == minimum, "i64 minimum round trip");
+    zbPut64LE(bytes, 4, -1);
+    expect(zbI64LE(bytes, 4) == -1L && bytes[4] == 255 && bytes[11] == 255,
+           "negative one bit-pattern round trip");
+    print("zedbuild byte primitives: PASS");
+}

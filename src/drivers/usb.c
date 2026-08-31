@@ -119,9 +119,16 @@ struct drv_usb_bus {
 	struct usb_port_state {
 		unsigned observed;
 		unsigned connected;
+		unsigned enabled;
 	} *ports;
 	unsigned number;
 	unsigned stopping;
+	/* Protected by usb_topology_gate.  HCD quiesce may join a root worker
+	 * which is itself waiting for that gate, so shutdown/unregister claim the
+	 * bus here and invoke the blocking HCD barrier with the gate released. */
+	unsigned lifecycle_claimed;
+	unsigned shutdown_processed;
+	uint64_t shutdown_attempt_generation;
 	struct drv_usb_hcd *hcd;
 	struct drv_usb_device *root_hub, *devices;
 	struct drv_usb_bus *next;
@@ -165,6 +172,7 @@ struct usb_driver_entry {
 static struct drv_usb_bus *usb_buses;
 static struct usb_driver_entry *usb_drivers;
 static unsigned next_bus_number;
+static uint64_t usb_shutdown_generation;
 static bool usb_initialized;
 static atomic_uint_t usb_topology_gate;
 
@@ -436,6 +444,7 @@ int drv_usb_init(void)
 {
 	if (usb_initialized) return EALREADY;
 	usb_buses = NULL; usb_drivers = NULL; next_bus_number = 0;
+	usb_shutdown_generation = 0;
 	atomic_store_release(&usb_topology_gate, 0U);
 	usb_initialized = true;
 	hal_printf("usb: URB completion contract q009-release-acquire-v1\n");
@@ -444,15 +453,34 @@ int drv_usb_init(void)
 
 void drv_usb_shutdown(void)
 {
-	struct drv_usb_bus *bus;
+	uint64_t generation;
 
 	usb_topology_lock();
-	for (bus = usb_buses; bus != NULL; bus = bus->next) {
+	generation = ++usb_shutdown_generation;
+	if (generation == 0)
+		generation = ++usb_shutdown_generation;
+	usb_topology_unlock();
+	for (;;) {
+		struct drv_usb_bus *bus;
 		struct drv_usb_device *device;
 		int error, retain = 0;
 
-		if (hal_atomic_fetch_or_release(&bus->stopping, 1U) != 0)
-			continue;
+		usb_topology_lock();
+		for (bus = usb_buses; bus != NULL; bus = bus->next)
+			if (!bus->shutdown_processed && !bus->lifecycle_claimed &&
+			    bus->shutdown_attempt_generation != generation)
+				break;
+		if (bus == NULL) {
+			usb_topology_unlock();
+			return;
+		}
+		bus->lifecycle_claimed = 1U;
+		bus->shutdown_attempt_generation = generation;
+		/* stopping closes admission, but is not evidence that the HCD has
+		 * crossed its checked DMA-stop boundary.  In particular, unregister
+		 * leaves it set when a worker join or quiesce attempt fails.  A terminal
+		 * shutdown must retry that same checked sequence. */
+		hal_atomic_store_release(&bus->stopping, 1U);
 		/* Stop admission first, then let every class driver disconnect and
 		 * cancel/drain its own work while the HCD is still operational. */
 		for (device = bus->devices; device != NULL; device = device->next)
@@ -474,20 +502,36 @@ void drv_usb_shutdown(void)
 			if (error != 0)
 				retain = 1;
 		}
-		if (bus->hcd->ops->quiesce != NULL &&
-		    bus->hcd->ops->quiesce(bus->hcd) != 0) {
+		/* A runtime root worker can be blocked trying to enter the topology
+		 * gate.  Release it before the HCD joins that worker.  The bus claim
+		 * prevents concurrent unregister/free while the pointer is borrowed. */
+		usb_topology_unlock();
+		error = bus->hcd->ops->quiesce == NULL ? 0 :
+		    bus->hcd->ops->quiesce(bus->hcd);
+		if (error != 0) {
 			hal_printf("usb%u: host controller stop failed\n",
 			    bus->number);
+			usb_topology_lock();
+			if (!bus->lifecycle_claimed)
+				__builtin_trap();
+			bus->lifecycle_claimed = 0U;
+			usb_topology_unlock();
+			/* Leave shutdown_processed clear so a later shutdown request can
+			 * retry.  This invocation marks it attempted and continues through
+			 * every other controller without spinning on this one. */
 			continue;
 		}
 		/* A failed class/device teardown keeps callback-visible HCD memory,
 		 * but the checked HCD quiesce above still stops DMA before reboot. */
-		if (retain)
-			continue;
-		if (bus->hcd->ops->stop != NULL)
+		if (!retain && bus->hcd->ops->stop != NULL)
 			bus->hcd->ops->stop(bus->hcd);
+		usb_topology_lock();
+		bus->shutdown_processed = 1U;
+		if (!bus->lifecycle_claimed)
+			__builtin_trap();
+		bus->lifecycle_claimed = 0U;
+		usb_topology_unlock();
 	}
-	usb_topology_unlock();
 }
 
 int drv_usb_hcd_register(struct drv_usb_hcd *hcd, struct drv_usb_bus **result)
@@ -549,26 +593,37 @@ int drv_usb_hcd_unregister(struct drv_usb_hcd *hcd)
 	usb_topology_lock();
 	for (link = &usb_buses; (bus = *link) != NULL; link = &bus->next) {
 		if (bus->hcd != hcd) continue;
-		if (bus->devices != NULL) {
+		if (bus->devices != NULL || bus->lifecycle_claimed) {
 			usb_topology_unlock();
 			return EBUSY;
 		}
+		bus->lifecycle_claimed = 1U;
 		hal_atomic_store_release(&bus->stopping, 1U);
 		device_begin_disconnect(bus->root_hub);
+		/* Root workers enter the topology path in process context.  Never join
+		 * one while retaining the gate it may be waiting to acquire. */
+		usb_topology_unlock();
 		if (hcd->ops->quiesce != NULL) {
 			error = hcd->ops->quiesce(hcd);
 			if (error != 0) {
+				usb_topology_lock();
+				if (!bus->lifecycle_claimed)
+					__builtin_trap();
+				bus->lifecycle_claimed = 0U;
 				usb_topology_unlock();
 				return error;
 			}
 		}
+		usb_topology_lock();
 		state = hal_atomic_load_acquire(&bus->root_hub->lifecycle);
 		for (;;) {
 			if ((state & USB_DEVICE_LIFECYCLE_URB_MASK) != 0) {
+				bus->lifecycle_claimed = 0U;
 				usb_topology_unlock();
 				return EBUSY;
 			}
 			if ((state & USB_DEVICE_LIFECYCLE_FINALIZING) != 0) {
+				bus->lifecycle_claimed = 0U;
 				usb_topology_unlock();
 				return EALREADY;
 			}
@@ -577,12 +632,20 @@ int drv_usb_hcd_unregister(struct drv_usb_hcd *hcd)
 			    state | USB_DEVICE_LIFECYCLE_FINALIZING))
 				break;
 		}
+		usb_topology_unlock();
 		hcd->ops->stop(hcd);
+		usb_topology_lock();
+		for (link = &usb_buses; *link != NULL && *link != bus;
+		    link = &(*link)->next)
+			;
+		if (*link != bus || !bus->lifecycle_claimed)
+			__builtin_trap();
 		*link = bus->next;
+		bus->lifecycle_claimed = 0U;
+		usb_topology_unlock();
 		hal_free(bus->root_hub);
 		hal_free(bus->ports);
 		hal_free(bus);
-		usb_topology_unlock();
 		return 0;
 	}
 	usb_topology_unlock();
@@ -1629,7 +1692,9 @@ void drv_usb_hcd_root_hub_changed(struct drv_usb_hcd *hcd)
 	for (port = 1; port <= hcd->root_port_count; port++) {
 		struct drv_usb_device *present;
 		uint32_t status = 0;
-		unsigned connected, connection_changed, initial, state_changed;
+		unsigned connected, enabled, connection_changed, enable_changed;
+		unsigned initial, state_changed, port_disabled;
+		unsigned replace_generation = 0;
 		int error;
 
 		error = root_port_status(hcd, port, &status);
@@ -1642,21 +1707,37 @@ void drv_usb_hcd_root_hub_changed(struct drv_usb_hcd *hcd)
 			continue;
 		}
 		connected = (status & 1U) != 0;
+		enabled = (status & 2U) != 0;
 		connection_changed = (status & (1U << 16)) != 0;
+		enable_changed = (status & (1U << 17)) != 0;
 		initial = !bus->ports[port].observed;
 		state_changed = !initial &&
 		    bus->ports[port].connected != connected;
+		port_disabled = connected && !enabled &&
+		    (!initial && (bus->ports[port].enabled || enable_changed));
 		bus->ports[port].observed = 1U;
 		bus->ports[port].connected = connected;
+		bus->ports[port].enabled = enabled;
 		present = find_port_device(bus, port);
-		if (present != NULL && (!connected ||
+		/* A connection edge identifies a new physical generation even when
+		 * the port is connected again by the time it is sampled.  Never let
+		 * the retained device, bindings, or URBs cross that edge.  A failed
+		 * destroy leaves DISCONNECTING set; periodic root scans then retry the
+		 * same teardown without relying on another hardware change bit. */
+		if (present != NULL && connected && (connection_changed ||
+		    state_changed || port_disabled ||
+		    device_is_disconnecting(present)))
+			replace_generation = 1;
+		if (present != NULL && (!connected || connection_changed ||
+		    state_changed || port_disabled ||
 		    device_is_disconnecting(present))) {
 			if (destroy_device(bus, present) == 0)
 				present = NULL;
 		}
 		if (!connected || present != NULL)
 			continue;
-		if (!initial && !connection_changed && !state_changed)
+		if (!initial && !connection_changed && !state_changed &&
+		    !replace_generation)
 			continue;
 		if (hcd->ops->root_port_reset != NULL)
 			error = hcd->ops->root_port_reset(hcd, port);
@@ -1664,10 +1745,14 @@ void drv_usb_hcd_root_hub_changed(struct drv_usb_hcd *hcd)
 			error = legacy_root_port_reset(hcd, port);
 		if (error == 0)
 			error = root_port_status(hcd, port, &status);
-		if (error == 0 && (status & 1U) != 0)
-			error = enumerate_port(bus, port, status);
-		else if (error == 0)
-			error = ENODEV;
+		if (error == 0) {
+			bus->ports[port].connected = (status & 1U) != 0;
+			bus->ports[port].enabled = (status & 2U) != 0;
+			if ((status & 3U) == 3U)
+				error = enumerate_port(bus, port, status);
+			else
+				error = ENODEV;
+		}
 		if (error != 0)
 			hal_printf("usb%u: port %u enumeration failed (%d)\n",
 			    bus->number, port, error);
@@ -2520,6 +2605,8 @@ drv_usb_urb_submit(struct drv_usb_urb *urb)
 	struct drv_usb_device *device;
 	struct drv_usb_interface *submitting_owner = NULL;
 	struct usb_submit_commit commit;
+	struct usb_submit_commit *claimed = NULL;
+	bool irq_enabled;
 	int error;
 
 	if (urb == NULL)
@@ -2562,18 +2649,24 @@ drv_usb_urb_submit(struct drv_usb_urb *urb)
 	hal_atomic_store_release(&urb->status, DRV_USB_URB_PENDING);
 	error = device->bus->hcd->ops->urb_enqueue(device->bus->hcd, urb);
 	/* If synchronous completion already claimed the stack record, it publishes
-	 * finished before entering the callback.  Avoid touching an URB which that
-	 * callback may have released. */
+	 * finished before entering the callback.  Claiming it here and releasing
+	 * the short submit gates must be indivisible with respect to a local HCD
+	 * interrupt: otherwise that interrupt can observe a NULL record, wait for
+	 * submit_commit_pending, and deadlock on the submitter it preempted.  A
+	 * remote completion which wins the claim can still finish while local IRQs
+	 * are masked. */
+	irq_enabled = hal_irq_disable();
 	if (atomic_load_acquire(&commit.finished) == 0) {
-		struct usb_submit_commit *claimed = __atomic_exchange_n(
-		    &urb->submit_commit, NULL, __ATOMIC_ACQ_REL);
-
+		claimed = __atomic_exchange_n(&urb->submit_commit, NULL,
+		    __ATOMIC_ACQ_REL);
 		if (claimed != NULL)
 			submit_commit_finish(urb, claimed);
-		else
-			while (atomic_load_acquire(&commit.finished) == 0)
-				sched_yield();
 	}
+	if (irq_enabled)
+		hal_irq_enable();
+	if (claimed == NULL)
+		while (atomic_load_acquire(&commit.finished) == 0)
+			sched_yield();
 	if (error != 0) {
 		hal_atomic_store_release(&urb->status, DRV_USB_URB_IDLE);
 		urb_hcd_put(urb);

@@ -1,6 +1,6 @@
 # WS008 shared test index
 
-Last updated: 2026-08-28
+Last updated: 2026-08-31
 
 Reusable scripts, sources, expected outputs, and QEMU drivers created while
 executing WS008 belong in this directory. Disposable build directories, disk
@@ -271,6 +271,43 @@ not reported as a pass.
 
 The completed p006 matrix and unavailable-toolchain record are captured in
 [the Phase execution evidence](../phase006-maintainer-api-layout-review/evidence.md).
+
+## Host script module-path compatibility tests
+
+| ID | Phase | Contract |
+| --- | --- | --- |
+| `NOCT-T080` | p010 | Host help advertises `--path=DIR1:DIR2`; empty and malformed forms fail with bounded diagnostics |
+| `NOCT-T081` | p010 | Interpreter mode resolves a required module only through the supplied path, with deterministic left-to-right duplicate lookup |
+| `NOCT-T082` | p010 | `--compile --app --path=...` resolves the same module graph and the resulting application produces the expected result |
+| `NOCT-T083` | p010 | The pinned Process-enabled static host build passes the existing File/Process/System toolchain smoke |
+| `NOCT-T084` | p010 | An ordinary selected production build completes every live Noct-backed generator and checker it reaches |
+| `NOCT-T085` | p010 | The host source is clean and detached at the full pin, state stamps remain outside it, and live production invocations retain `--path=` |
+| `NOCT-T086` | p010 | zedBSD-owned little-endian build primitives pass signed/unsigned boundaries and invalid-input checks in interpreter and JIT modes without the optional `Binary` API |
+
+[`noct-host-path-contract.sh`](./noct-host-path-contract.sh) owns the focused
+`NOCT-T080`--`NOCT-T082` and `NOCT-T085` checks. It verifies the full pin and
+external state-stamp layout, runs one required module from a two-entry search
+path in interpreter and compiled-application modes, rejects empty, malformed,
+and missing paths, and audits every live top-level/platform `$(NOCT)` recipe.
+Run it after `make -j16 toolchain`:
+
+```sh
+bash plan/ws008-noct/tests/noct-host-path-contract.sh
+```
+
+The runner retains a bounded result directory under
+`plan/ws008-noct/temp/`. `NOCT-T083` remains the existing
+`plan/ws010-scripting/tests/toolchain-smoke.noct`; `NOCT-T084` is the separate
+ordinary `make -j16` gate and is not replaced by the focused fixture.
+
+`run-zedbuild-byte-primitives.sh` owns `NOCT-T086` and runs
+`zedbuild-byte-primitives.noct` in interpreter and JIT modes before auditing
+the production module for a residual `Binary.` dependency.
+
+Q047 result at maintainer-published `e56274ff...`: `NOCT-T080`, `NOCT-T081`,
+and `NOCT-T083`--`NOCT-T086` pass. Only `NOCT-T082` remains uncleared because
+the literal `--compile --app --path=...` form treats `--app` as a file before
+module resolution.
 
 ## Common build gate
 

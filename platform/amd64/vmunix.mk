@@ -118,6 +118,9 @@ ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb-cdc-ncm.c \
 	src/drivers/usb-cdc-ncm-net.c
 endif
+ifeq ($(CONFIG_KERNEL_USB_HID_CHECKPOINT),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb-hid-checkpoint.c
+endif
 
 AMD64_KERNEL_SOURCES := \
 	src/kern/main.c \

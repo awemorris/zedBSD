@@ -1,19 +1,20 @@
 # WS002: system services
 
-Last updated: 2026-08-27
+Last updated: 2026-08-31
 
 WSID: `ws002`
 
 Status: baseline complete through `ws002-p020`; corrective `ws002-p021` is
-planned and non-blocking
+planned and non-blocking; recurring console-login correction `ws002-p022` is
+complete
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws002-p020`
+Last verified Phase: `ws002-p022`
 
-Resume point: retain the completed service baseline. Execute `ws002-p021` when
-session-lifecycle robustness is selected; continue DHCP lifecycle, physical
-networking, WLAN, and WPA in [WS005](../ws005-networking/ws.md).
+Resume point: return the now-passing exact-login gate to `ws020-p006`. Execute
+`ws002-p021` when missing-login session-lifecycle robustness is separately
+selected; continue networking in [WS005](../ws005-networking/ws.md).
 
 Shared tests: [WS002 test index](tests/README.md)
 
@@ -157,6 +158,7 @@ PID 1 does not parse fstab.  A required internal oneshot invokes
 | `ws002-p019` | [integrated QEMU acceptance](phase019-integration/phase.md) | Complete minimum system | Boot, login, services, jobs, network, and shutdown were exercised and repaired |
 | `ws002-p020` | [synchronous network service](phase020-network-service/phase.md) | Complete milestone | fd 3 readiness and synchronous `net` orchestration pass host/build/QEMU gates |
 | `ws002-p021` | [missing-login session teardown](phase021-missing-login-session-teardown/phase.md) | Planned corrective; non-blocking | A deliberately missing `/bin/login` cannot corrupt getty/TTY/process teardown or escape bounded crash-loop supervision |
+| `ws002-p022` | [intermittent console-login progress](phase022-intermittent-console-login/phase.md) | Complete | USB submit-commit IRQ self-wait repaired; deterministic old-order regression, unchanged `MAC-T022`, and ordinary initial plus final five exact-login boots pass |
 
 The original Phase 11–19 detail is retained in the
 [legacy aggregate plan](history/phase011-019-legacy-plan.md).

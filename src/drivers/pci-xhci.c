@@ -146,6 +146,7 @@ struct xhci_controller {
 	uint32_t legacy_control;
 	struct xhci_controller *next;
 };
+
 static struct xhci_controller *controllers;
 
 static void xhci_request_release(struct xhci_controller *,

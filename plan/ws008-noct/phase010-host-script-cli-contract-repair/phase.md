@@ -8,8 +8,8 @@ Phase ID: `p010`
 
 Combined ID: `ws008-p010`
 
-Status: Blocked (`MB-008`); upstream maintainer repair or an explicit
-compatible-revision decision is required
+Status: Uncleared (`q047`); runtime `--path` and the ordinary production build
+pass, but the independent `NOCT-T082` compile/application form still fails
 
 Parent: [WS008](../ws.md)
 
@@ -51,27 +51,32 @@ The failure is not a kernel or PC-98 compiler defect. At the pinned revision:
   published contract, so changing only the first failing PC-98 recipe would
   conceal the regression rather than repair it.
 
-The user has already stated that Noct will be repaired manually under
-Principal Engineer ownership after rejecting prior automated source changes.
-Consequently no agent may modify or publish Noct for this Phase until the user
-provides an accepted upstream revision or explicitly selects the compatible-pin
-alternative.
+The user retained Principal Engineer ownership after rejecting prior automated
+source changes. On 2026-08-31 the maintainer reported that the upstream Noct
+update now restores `--path`, released `MB-008`, and authorized this Phase to
+resume after the current USB implementation reaches a buildable boundary.
+The Phase therefore selects the accepted published revision; it still does
+not authorize an agent-authored downstream or upstream Noct source patch.
 
-## Human decision and resume paths
+## Released decision and selected path
 
-Choose exactly one path before this Phase enters a Queue:
-
-1. **Preferred maintainer path:** publish an accepted upstream Noct revision
-   which restores the existing `--path`/`require` runtime contract (and the
-   documented compile/application form), then pin that immutable revision.
-2. **Compatible revision path:** explicitly select an older immutable upstream
-   revision whose host CLI satisfies the same contract, accepting that it
-   supersedes the `ws008-p008` "latest main" selection until a repaired newer
-   revision is available.
+The preferred maintainer path selected published revision
+`e56274ff00894182da5c44f1b8a2fb2fcf2c3dac`. That full commit remains pinned
+because it restores the interpreter-mode `--path` needed by zedBSD recipes.
+Verification found that the same revision does not yet implement the
+documented compile/application form. The ordinary zedBSD build no longer
+depends on Noct's optional, unregistered `Binary` API: its own `zedbuild.noct`
+module now implements the three required little-endian operations with public
+language and `Packed.uint8` facilities. Another maintainer-owned upstream
+repair is therefore required only for the frozen compile/application CLI
+contract before this Phase can complete.
 
 A downstream source patch, a dirty ignored checkout, a shell/Python adapter,
 or a zedBSD-wide rewrite which avoids module search is not an implicit third
 choice. Any such proposal requires a newly documented ownership decision.
+Repository-owned byte encoding inside `zedbuild.noct` is permitted: it changes
+neither Noct source nor module lookup, and is checked in interpreter and JIT
+modes at signed/unsigned boundaries and invalid inputs.
 
 ## Fixed compatibility contract
 
@@ -108,6 +113,62 @@ choice. Any such proposal requires a newly documented ownership decision.
 7. Record the source SHA, checkout cleanliness, executable checksum, focused
    CLI results, and full-build result.
 
+## q047 execution result
+
+The zedBSD host pin now names
+`e56274ff00894182da5c44f1b8a2fb2fcf2c3dac`. The Process-enabled static build
+and existing File/Process/System smoke completed. The resulting executable is
+`build/NoctLang/build-static/noct`, with SHA-256
+`10f58889a4a62023d65a747f04f9b7312fb71898190ab38f56deff45b8171d4f`.
+
+The checkout is detached at that exact commit and
+`git status --porcelain=v1 --untracked-files=all` is empty. Host checkout and
+build stamps now live under `build/host-noct-state/`, outside the upstream
+worktree. The transition removed four zero-length legacy
+`.zedbsd-checkout-<revision>` stamps and one zero-length legacy
+`build-static/.zedbsd-built-<revision>-process` stamp which the old zedBSD
+Makefile had generated; no other untracked upstream file was removed.
+
+The project-owned
+[`noct-host-path-contract.sh`](../tests/noct-host-path-contract.sh) produced
+these bounded results:
+
+- `NOCT-T080` passed: help advertises `--path=DIR1:DIR2`, and empty and
+  missing-`=` forms fail deterministically;
+- `NOCT-T081` passed: interpreter mode resolved a helper available only via a
+  two-entry path and selected the leftmost duplicate;
+- `NOCT-T082` failed: the documented literal form
+  `--compile --app --path=...` reports `Cannot open file --app.` before module
+  resolution;
+- the missing-module negative check passed with
+  `Cannot resolve required module 'absent_module'`; and
+- the source/state/live-recipe portion of `NOCT-T085` passed, covering 77
+  actual top-level or platform recipe invocations after excluding the
+  path-free toolchain smoke and nested `--checker-runner` arguments.
+
+`NOCT-T083` passed through `make -j16 toolchain`. The focused `NOCT-T086`
+zedbuild byte-primitive gate passes in interpreter and JIT modes for U32
+maximum, I64 minimum/maximum, negative values, round trips, range/type
+failures, and confirms that the live build module has no `Binary.` reference.
+`NOCT-T084` then passed through the ordinary `make -j16`, including the
+selected PC-98 image post-processing and image builder. No Noct source, zedBSD
+wrapper, option-stripping adapter, or duplicated module was added. Of the
+q047 gates, only the unrelated `NOCT-T082` compile/application form remains
+uncleared.
+
+The host initially exhausted the already full `/tmp` tmpfs during parallel C
+compilation. Repeating the identical build with `TMPDIR` under `build/`
+completed; this environmental retry is not a product failure.
+
+## Resume condition
+
+Publish a new maintainer-reviewed Noct commit which parses
+`--compile --app --path=...`, resolves and bundles the required module graph,
+and passes `NOCT-T082`.
+
+Then update the full pin and rerun `NOCT-T080`--`NOCT-T086`. Do not weaken the
+compile/application contract or patch the pristine checkout locally.
+
 ## Verification
 
 - `NOCT-T080`: `noct --help` advertises the restored option and malformed
@@ -124,6 +185,9 @@ choice. Any such proposal requires a newly documented ownership decision.
 - `NOCT-T085`: source and checkout audit proves the host is clean and detached
   at the recorded revision and zedBSD contains no downstream Noct source patch
   or compatibility wrapper.
+- `NOCT-T086`: zedbuild little-endian byte primitives pass signed/unsigned
+  boundaries, round trips, and invalid inputs in interpreter and JIT modes
+  without the optional `Binary` API.
 - Run `git diff --check`. Do not run `make check` and do not consume
   `.internal/`.
 
@@ -131,8 +195,9 @@ choice. Any such proposal requires a newly documented ownership decision.
 
 - One user-approved immutable upstream revision satisfies the runtime and
   compile/application `--path` contracts.
-- Focused module-search regression, the existing toolchain smoke, and the
-  ordinary production build all pass with the same host executable.
+- Focused module-search and zedbuild byte-primitive regressions, the existing
+  toolchain smoke, and the ordinary production build all pass with the same
+  host executable.
 - No supported zedBSD script is converted to Python, shell, duplicated helper
   source, or an ad-hoc option-stripping workaround.
 - The Noct checkout remains pristine and upstream-owned.
@@ -152,7 +217,8 @@ target gates. Passing p010 alone does not re-enable the target package.
 
 ## Authorization boundary
 
-This P book is not Queue-ready while `MB-008` remains active. Planning and
-read-only inspection are allowed. Editing, committing, or publishing Noct,
-selecting an older pin, or implementing a downstream compatibility layer
-requires the user's explicit release decision.
+Q047 consumed the released revision and left this Phase uncleared at its frozen
+gates. A subsequently published maintainer revision may update the zedBSD pin
+and rerun them. Editing or publishing Noct source, selecting an unrelated
+older pin, weakening the failed gates, or implementing a downstream
+compatibility layer remains outside authorization.

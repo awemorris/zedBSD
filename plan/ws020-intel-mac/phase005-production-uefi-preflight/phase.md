@@ -8,7 +8,7 @@ Phase ID: `p005`
 
 Combined ID: `ws020-p005`
 
-Status: Completed (`q038`, 2026-08-31)
+Status: Completed (`q038`; refreshed `q047`, 2026-08-31)
 
 Parent: [WS020](../ws.md)
 
@@ -80,41 +80,53 @@ UEFI-only source passes `MAC-T021`, its source hash remains unchanged, and the
 same bytes are published at `build/amd64/hdd-image.img` with a frozen identity.
 No Intel Mac boot is required to complete this preflight Phase.
 
-The next human action belongs to p004: boot that one linked image once to
-confirm the corrected handoff and, if it still stops, return the new explicit
-partition-publication errno. The final five-run physical campaign remains
-deferred until all corrections and p003's independent strict matrix are
-settled.
+The requested provisional p004 observation was performed after this refresh.
+The payload UUID matched this Phase, but the physical medium reported both
+bounded GPT copies as `EINVAL`. Because the pristine source and the same
+60,549,120-sector QEMU shape pass, the failure is assigned to
+[`ws020-p006`](../phase006-relocated-physical-gpt/phase.md) as host-relocated GPT
+compatibility. It does not invalidate this Phase's source-image or QEMU
+preflight result. P005 must nevertheless be refreshed after p006 changes the
+kernel before handing off another exact physical-test artifact. P003's strict
+matrix remains settled; the next human action is the one p006 provisional boot,
+while p004's five-run physical campaign remains last.
 
 ## Result
 
-`MAC-T021` passed from a fresh private amd64/PC-AT/UEFI build. The production
-checker accepted the fixed pure-Protective-MBR, two-partition, primary-only
-source. A disposable copy extended from 395,297 to 60,549,120 sectors then
-booted once with OVMF/Q35/xHCI and reached `login:`:
+The initial q038 `MAC-T021` run completed this Phase. Q047 refreshed the same
+preflight from the current tree at
+`plan/ws020-intel-mac/temp/p005-q047-refresh/`; `MAC-T021` passed again from a
+fresh private amd64/PC-AT/UEFI build. The production checker accepted the fixed
+pure-Protective-MBR, two-partition, primary-only source. A disposable copy
+extended from 395,297 to 60,549,120 sectors then booted once with
+OVMF/Q35/xHCI and reached `login:`:
 
 ```text
 usb-storage: sda blocks=60549120 block-size=512 ...
 gpt: sda bounded extent accepted: logical-last=395296 physical-last=60549119 declared-sectors=395297 physical-sectors=60549120 ignored-tail-sectors=60153823
 vfs: scan sda H/S=255/63 blocks=60549120: 2 entries
-vfs: boot0 UUID=42E7-0E4C -> /dev/sda2 (private FAT)
+vfs: boot0 UUID=FDC1-A4EF -> /dev/sda2 (private FAT)
 vfs: root=overlay lower=boot0:rootfs.img upper=boot0:data.img
 swap: active sources=1 total=16383 free=16383
 init: system running
 login:
 ```
 
-The source and repository configuration hashes remained unchanged. The exact
-checked source was then published to the ordinary build path:
+The source and repository configuration hashes remained unchanged. The
+partition-publication fixture also passed in ordinary, sanitizer, and analyzer
+modes. The exact inspected source was then atomically published to the ordinary
+build path, superseding the earlier q038 handoff artifact:
 
 | Property | Value |
 | --- | --- |
 | Image | `/home/awe/zedBSD/build/amd64/hdd-image.img` |
 | Size | 202,392,064 bytes (395,297 sectors) |
-| SHA-256 | `3bca88c3f5673f0b447cac4a7af457b8aba3a745861a005459f374adbe50dc79` |
-| Payload UUID | `42E7-0E4C` |
+| SHA-256 | `f811a0f5eff70f8081b6725f417355afa9ef1bf14e0c6d24fd1900823ad09c96` |
+| Payload UUID | `FDC1-A4EF` |
 
-The published file is byte-identical to the checked source and passes the
-production checker again after publication. `make -j16`, the partition
-publication ordinary/sanitizer/analyzer fixture, and `git diff --check` pass.
-Evidence is retained under `../temp/p005-production-preflight-final-003/`.
+The 202,392,064-byte published file is byte-identical to the inspected
+`images/uefi.img`; both have the SHA-256 above. The production checker,
+`MAC-T021`, the partition-publication ordinary/sanitizer/analyzer matrix, the
+q047 repository build gate, and `git diff --check` pass. The repository
+`config.mk` remained at
+`45f19641d030fd40237a6aecaafa96c8cd2073f07249b522e81bcbd330834660`.

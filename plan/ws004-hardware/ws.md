@@ -4,14 +4,18 @@ Last updated: 2026-08-31
 
 WSID: `ws004`
 
-Status: audited active; WS is not complete. q041 completed p016 checked
-legacy-HCD request retirement and is proceeding to its independent WS005 and
-WS008 items. `ws004-p026` completed every
+Status: active; WS is not complete. q041 completed p016 checked legacy-HCD
+request retirement. q047 completed p031 legacy-HCD concurrent scheduling and
+root hotplug and retains p032 checked endpoint/device recovery. P033's
+extracted amd64 framebuffer-console correction is complete after passing its
+host gates and the shared forced HW-T25 QEMU matrix. P031 is complete; p032 is
+the remaining WS004 prerequisite for WS006 USB HID. `ws004-p026` completed every
 automatic/read-only intake field in q040 and is uncleared only at the printed
 unit label. `ws004-p020` deterministic CDC NCM hardening and
 `ws004-p022`--`p024` NVMe discovery/I/O/strict-GPT QEMU acceptance are
 complete; `ws004-p021` has passed its q045 automatic/source milestone and is
-uncleared only at the Noct-blocked fresh-image runtime boundary;
+uncleared only at its fresh-image QEMU/Latitude runtime boundary, now released
+by q047's accepted Noct runtime path;
 `ws004-p027`--`p030`
 define the later Archer T3U Nano WLAN implementation path
 
@@ -31,23 +35,28 @@ parser and real adapter pass carrier, DHCP, and ping through QEMU xHCI, and the
 final Latitude-native image successfully fetches `www.google.com`.
 `p021` corrects the independent native-xHCI Max ESIT defect exposed by the same
 audit; q045 passes its exact-word, strict-validation, regression, analyzer, and
-configured-object gates, while the existing Noct `--path` mismatch prevents a
-fresh QEMU/Latitude candidate. `p016` now completes the controller-proven
-legacy-HCD hardware-retirement follow-up exposed by that audit. `p018`
+configured-object gates. Q047's accepted Noct `--path` runtime releases its
+fresh QEMU/Latitude candidate build; those runtime checkpoints remain. `p016`
+now completes the controller-proven
+legacy-HCD hardware-retirement follow-up exposed by that audit. `p031` now
+completes concurrent UHCI/EHCI endpoint ownership, request-local retirement,
+shared-INTx dispatch, and worker-context root hotplug through all focused,
+configured-build, regression, repository-build, and two-cell QEMU gates. `p018`
 corrected the IAD-less, Union-associated NCM match exposed by
 the first physical RTL8156 insertion, and the accepted follow-up published
 `ue0`. The broader asynchronous-TX/accounting decisions remain in p017.
 
-Resume point: the 2026-08-30 completion audit found p016, p017, p021, p025,
+Resume point: p031 and p033 are complete. Execute p032, whose p031 dependency is
+now satisfied. If p032 completes, WS006 p008 becomes Queue-ready.
+The 2026-08-30 completion audit also found p017, p021, p025,
 and p026--p030 still open. q030 completed p022 through p024, including strict
 primary/backup GPT and the final disposable QEMU acceptance matrix. The later
 p025 is the single read-only Latitude SN740 checkpoint. Complete the remaining
 automatic loader/installer prerequisites before requesting that physical
-checkpoint. p021 resumes only after the separately owned Noct verifier accepts
-the repository invocation, then needs one disposable QEMU boot and one
-Latitude checkpoint. p019 remains an independent ECM
-baseline. p016 and the remaining asynchronous-TX/accounting portion of p017
-stay later WS004 work. WLAN planning has resumed with the Archer T3U Nano as
+checkpoint. Q047's Noct runtime and production gates release p021; it still
+needs one disposable QEMU boot and one Latitude checkpoint. p019 remains an independent ECM
+baseline. The remaining asynchronous-TX/accounting portion of p017 stays later
+WS004 work. WLAN planning has resumed with the Archer T3U Nano as
 the first target. `p026` must confirm the physical adapter descriptor and
 separate firmware-package policy; `p027`--`p030` then progress through the
 generic kernel WLAN core, RTL8822BU USB scan, WPA2-Personal/CCMP L2, and final
@@ -80,7 +89,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p018`](phase018-rtl8156-ncm-association/phase.md) | Complete (`q028`) | CDC Union is authoritative and IAD is optional strict corroboration; automatic gates pass and physical RTL8156 configuration 2 binds and publishes `ue0`; carrier/data work moved to WS005 p001 |
 | [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Deferred; trigger no longer present | Real RTL8156 NCM carrier/DHCP/ping passed through QEMU and on Latitude, so the diagnostic ECM fallback is not required by the current WLAN/NVMe path; retain it only as an independently selected future class-driver baseline |
 | [`ws004-p020`](phase020-cdc-ncm-deterministic-hardening/phase.md) | Complete (`q029` automatic software scope) | Valid sequences accept/resynchronize, malformed input preserves state, completions and rearms are bounded/fair, and the packet filter is programmed transactionally on open; focused and regression gates pass |
-| [`ws004-p021`](phase021-xhci-superspeed-interrupt-context/phase.md) | Uncleared (`q045`; automatic/source milestone passed) | Host-endian companion access, exact RTL8156 Max ESIT/Average TRB fields, pre-ring strict rejection, non-target compatibility, regressions, analyzer, and x86 objects pass; existing Noct `--path` mismatch blocks a fresh QEMU/Latitude candidate |
+| [`ws004-p021`](phase021-xhci-superspeed-interrupt-context/phase.md) | Uncleared (`q045`; automatic/source milestone passed) | Host-endian companion access, exact RTL8156 Max ESIT/Average TRB fields, pre-ring strict rejection, non-target compatibility, regressions, analyzer, and x86 objects pass; q047 releases the Noct runtime build blocker, while fresh QEMU/Latitude evidence remains |
 | [`ws004-p022`](phase022-nvme-admin-identify/phase.md) | Complete (`q030`) | Bounded reset/admin Identify, transactional PCI/MSI lifecycle, stable names, focused fixtures, amd64/i386 builds, exact non-mutating QEMU namespace, IDE, and USB-root gates pass |
 | [`ws004-p023`](phase023-nvme-io-lifecycle/phase.md) | Complete (`q030`) | One depth-64 I/O queue, private 4-KiB bounce slots, checked 64-bit read/write, truthful flush, concurrent wrap, timeout/reset, normal shutdown, and quarantine pass focused/build/QEMU/regression gates |
 | [`ws004-p024`](phase024-nvme-qemu-acceptance/phase.md) | Complete (`q030`) | Strict 512/4096 GPT host gates and disposable QEMU partition write/flush/restart/rejection plus IDE, xHCI USB-root, amd64, and i386 gates pass |
@@ -90,6 +99,9 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p028`](phase028-rtl8822bu-usb-scan/phase.md) | Planned; depends on p026/p027; not queued | Bind only the descriptor-confirmed RTL8822BU interface, load the pinned optional firmware, and implement conservative 2.4-GHz/20-MHz scan; physical attach/scan evidence is one field of the shared WS005 p008 ledger, not a p028 run |
 | [`ws004-p029`](phase029-wpa2-ccmp-l2/phase.md) | Planned; depends on p028 automatic milestone; not queued | Common-kernel WPA2-Personal/CCMP authentication, association, four-way handshake, key CAM, controlled port, and bidirectional Ethernet L2; physical evidence is shared with p030/WS005 p008 |
 | [`ws004-p030`](phase030-wlan-lifecycle-hardware-hardening/phase.md) | Planned; depends on p029 automatic milestone; not queued | Rekey, bounded reconnect, reset, up/down, unplug/reinsert, shutdown, and concurrent-storage regressions; share one lifecycle checkpoint and the frozen-artifact five-run ledger with WS005 p008 rather than duplicate physical work |
+| [`ws004-p031`](phase031-legacy-hcd-concurrent-hotplug/phase.md) | Complete (`q047`) | UHCI/EHCI per-endpoint concurrency, periodic/asynchronous progress, request-local retirement, worker-context root hotplug, shared-INTx dispatch, all focused/configured/regression/build gates, and both forced QEMU cells pass |
+| [`ws004-p032`](phase032-usb-endpoint-device-recovery/phase.md) | In progress (`q047`); prerequisites complete | Add ordered endpoint clear-halt and conservative direct-root device reset across xHCI/UHCI/EHCI, then remove Mass Storage's HCD-private recovery hack |
+| [`ws004-p033`](phase033-amd64-framebuffer-console-serialization/phase.md) | Complete (`q047`) | One early-safe lock and strict cell/framebuffer bounds pass HW-T27 host/sanitizer/input/build gates and the shared forced HW-T25 QEMU matrix without console fault or stall |
 
 ### MSI follow-up register
 
@@ -104,8 +116,8 @@ q029, p020, and WS005 p001 are complete through final Latitude-native external
 fetch. p021 is an independent standards correction rather than an active
 failure response; its implementation is retained and only its fresh-image
 runtime checkpoints remain after the Noct verifier correction. Later WS004
-candidates are p017, p019, the p021 runtime resume, p025, and the planned-only
-p026--p030 WLAN chain, plus
+candidates are p017, p019, the p021 runtime resume, p025, the planned-only
+p026--p030 WLAN chain, and q047 p032; p031 and p033 are complete. Additional work is
 HW-11, HW-20/HW-21, and HW-30 when their inputs and acceptance environments
 are available. q040 selects the evidence/policy-only p026 boundary; it does
 not authorize p027--p030 implementation.
@@ -172,6 +184,9 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-24 | Planned as `ws004-p028`; not queued | Exact RTL8822BU USB attach, separately packaged firmware start, and conservative 2.4-GHz/20-MHz scan | HW-22, HW-23, p010/p011/p015 | HW-T31 passes automatic attach/firmware/scan gates; the eventual physical fields come from the single shared WS005 p008 ledger with no p028-specific request |
 | HW-25 | Planned as `ws004-p029`; not queued | WPA2-Personal/CCMP authentication, association, key installation, controlled port, and Ethernet L2 | HW-24, kernel entropy and reviewed crypto substrate | HW-T33 passes automatic handshake/replay/CCMP/negative fixtures; the eventual secure-L2 fields come from the same p008 ledger with no p029-specific request |
 | HW-26 | Planned as `ws004-p030`; not queued | Rekey, bounded reconnect, reset, hotplug, shutdown, and final exact-hardware hardening | HW-25, controlled AP, WS005 p008 | HW-T34 passes automatic fault/race/storage gates and references the one shared p008 lifecycle checkpoint/five-run frozen-artifact ledger |
+| HW-27 | Complete as `ws004-p031` (`q047`) | Concurrent UHCI/EHCI per-endpoint scheduling, request-local retirement, and runtime root-port lifecycle | p009--p011, p015, p016 | HW-T25 ordinary/sanitizer/analyzer and configured production gates, shared-INTx and USB regressions, repository build, plus standalone UHCI and paired EHCI/UHCI QEMU cells pass |
+| HW-28 | In progress as `ws004-p032` (`q047`) | Ordered USB endpoint-halt recovery and conservative direct-root device reset shared by xHCI/UHCI/EHCI | HW-27, p010/p011/p015/p016 | HW-T26 proves STALL latch, wire/HCD ordering, DATA0/ring recovery, reset transaction, Mass Storage migration, and checked failure retention |
+| HW-29 | Complete as `ws004-p033` (`q047`) | Early-safe amd64 PC/AT framebuffer-console serialization and strict cell/pixel bounds | q047 p031 stress observation, existing console contract | HW-T27 host/sanitizer/input/build gates and forced `q047-legacy-hcd-final4` standalone/paired QEMU cells pass without console fault, corruption, or stall |
 | HW-30 | Proposed | i915 hardware foundations for the discovered 11th-generation GPU | BR-00, HW-00, GFX UAPI | Modeset/scanout and recovery on hardware; model tests for device-independent layers |
 
 ## 4. NVMe sequence

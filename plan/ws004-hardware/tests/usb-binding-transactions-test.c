@@ -74,6 +74,17 @@ sched_yield(void)
 	thrd_yield();
 }
 
+bool
+hal_irq_disable(void)
+{
+	return true;
+}
+
+void
+hal_irq_enable(void)
+{
+}
+
 static const uint8_t fixture_device_descriptor[] = {
 	18, 1, 0x00, 0x02, 0xef, 2, 1, 64,
 	0x34, 0x12, 0x15, 0x00, 0x00, 0x01, 0, 0, 0, 2
@@ -489,7 +500,7 @@ fake_root_control(struct drv_usb_hcd *hcd,
 	if (request->request == 0U && request->request_type == 0xa3U) {
 		CHECK(buffer != NULL && length >= sizeof(status));
 		status = atomic_load_explicit(&controller->connected,
-		    memory_order_acquire) != 0 ? 1U | 0x400U | (1U << 16) :
+		    memory_order_acquire) != 0 ? 1U | 2U | 0x400U | (1U << 16) :
 		    (1U << 16);
 		memcpy(buffer, &status, sizeof(status));
 		*actual = sizeof(status);

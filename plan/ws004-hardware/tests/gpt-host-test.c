@@ -449,6 +449,50 @@ build_gpt(uint32_t block_size)
 	build_gpt_extent(block_size, TEST_BLOCKS - 1U, TEST_BLOCKS);
 }
 
+/* Reproduce the bounded raw-image transformation observed after an Intel Mac
+ * boot.  The pure PMBR continues to advertise the original compact extent,
+ * while a host has rewritten the primary header and installed a complete
+ * matching backup at the physical medium's end.  The original backup
+ * reservation remains zero, as it was in the production primary-only image.
+ */
+static uint64_t
+build_host_relocated_gpt(uint32_t block_size, uint32_t entry_count,
+	int expand_last_usable)
+{
+	static const uint16_t name[] = {
+		'z', 'e', 'd', 'B', 'S', 'D'
+	};
+	const uint64_t advertised_last = TEST_BLOCKS / 2U - 1U;
+	const uint64_t physical_last = TEST_BLOCKS - 1U;
+	uint64_t advertised_last_usable;
+	uint64_t old_backup_table;
+	uint64_t reserve_blocks;
+	uint64_t lba;
+
+	begin_gpt_extent(block_size, entry_count, 128U, advertised_last,
+	    TEST_BLOCKS);
+	write_entry(3U, 0x10U, layout.first_usable + 8U,
+	    layout.first_usable + 71U, name,
+	    (unsigned)(sizeof(name) / sizeof(name[0])));
+	advertised_last_usable = layout.last_usable;
+	old_backup_table = layout.backup_table;
+	reserve_blocks = advertised_last - old_backup_table;
+
+	/* The source format deliberately omitted this mirror. */
+	for (lba = old_backup_table; lba <= advertised_last; lba++)
+		memset(block_at(lba), 0, block_size);
+
+	/* Preserve the bounded PMBR, but relocate the live GPT pair. */
+	layout.logical_last = physical_last;
+	layout.backup_table = physical_last - reserve_blocks;
+	layout.last_usable = expand_last_usable ?
+	    layout.backup_table - 1U : advertised_last_usable;
+	memcpy(table_at(0), table_at(1), (size_t)layout.table_bytes);
+	write_header(1);
+	write_header(0);
+	return advertised_last;
+}
+
 static void
 add_valid_stale_physical_backup(void)
 {
@@ -489,6 +533,56 @@ add_valid_stale_physical_backup(void)
 	layout.last_usable = saved_last_usable;
 }
 
+static void
+add_matching_physical_backup(void)
+{
+	uint64_t saved_logical_last = layout.logical_last;
+	uint64_t saved_backup_table = layout.backup_table;
+	uint64_t saved_last_usable = layout.last_usable;
+	uint64_t physical_last = disk.d_block_count - 1U;
+	uint64_t reserve_blocks = saved_logical_last - saved_backup_table;
+	uint64_t physical_table = physical_last - reserve_blocks;
+
+	CHECK(physical_last > saved_logical_last);
+	if (physical_table >= medium.size / disk.d_block_size) {
+		if (medium.sparse_bytes == NULL)
+			map_sparse_blocks(physical_table,
+			    (uint32_t)(physical_last - physical_table + 1U));
+		else
+			extend_sparse_blocks(physical_last);
+	}
+	memcpy(block_at(physical_table), table_at(1),
+	    (size_t)layout.table_bytes);
+	layout.logical_last = physical_last;
+	layout.backup_table = physical_table;
+	/* Keep the same usable range and partition table.  Only the legal backup
+	 * location differs, so the two candidates describe the same GPT. */
+	write_header(0);
+	layout.logical_last = saved_logical_last;
+	layout.backup_table = saved_backup_table;
+	layout.last_usable = saved_last_usable;
+}
+
+static void
+add_unreferenced_backup(uint64_t header_lba)
+{
+	uint64_t saved_logical_last = layout.logical_last;
+	uint64_t saved_backup_table = layout.backup_table;
+	uint64_t saved_last_usable = layout.last_usable;
+	uint64_t reserve_blocks = saved_logical_last - saved_backup_table;
+
+	CHECK(header_lba > reserve_blocks + layout.first_usable);
+	CHECK(header_lba < disk.d_block_count - 1U);
+	layout.logical_last = header_lba;
+	layout.backup_table = header_lba - reserve_blocks;
+	layout.last_usable = layout.backup_table - 1U;
+	memcpy(table_at(0), table_at(1), (size_t)layout.table_bytes);
+	write_header(0);
+	layout.logical_last = saved_logical_last;
+	layout.backup_table = saved_backup_table;
+	layout.last_usable = saved_last_usable;
+}
+
 static int
 scan(struct partition *entries, unsigned capacity)
 {
@@ -513,6 +607,20 @@ check_basic_entry(const struct partition *entry, const char *label)
 }
 
 static void
+check_tail_entry(const struct partition *entry, uint64_t first)
+{
+	CHECK(entry->p_parent == &disk);
+	CHECK(entry->p_index == 4U);
+	CHECK(entry->p_start_block == first);
+	CHECK(entry->p_data_block == first);
+	CHECK(entry->p_block_count == 8U);
+	CHECK(entry->p_flags == (PARTITION_HAS_LABEL | PARTITION_HAS_UUID));
+	CHECK(strcmp(entry->p_label, "tail") == 0);
+	CHECK(strcmp(entry->p_uuid,
+	    "73727170-7574-7776-7879-7a7b7c7d7e7f") == 0);
+}
+
+static void
 expect_rejected(const char *name)
 {
 	struct partition entries[TEST_CAPACITY], before[TEST_CAPACITY];
@@ -526,6 +634,21 @@ expect_rejected(const char *name)
 		    name, result,
 		    memcmp(entries, before, sizeof(entries)) == 0 ? "no" : "yes",
 		    diagnostics);
+		failures++;
+	}
+}
+
+static void
+expect_accepted(const char *name, unsigned expected)
+{
+	struct partition entries[TEST_CAPACITY];
+	int result;
+
+	memset(entries, 0xa5, sizeof(entries));
+	result = scan(entries, TEST_CAPACITY);
+	if (result != (int)expected) {
+		printf("FAIL %s: result=%d expected=%u diagnostics=%s\n",
+		    name, result, expected, diagnostics);
 		failures++;
 	}
 }
@@ -607,7 +730,7 @@ test_bounded_extent(uint32_t block_size)
 }
 
 static void
-test_bounded_extent_rejection(void)
+test_bounded_extent_recovery_and_rejection(void)
 {
 	const uint64_t logical_last = TEST_BLOCKS / 2U - 1U;
 	uint8_t *entry;
@@ -615,26 +738,55 @@ test_bounded_extent_rejection(void)
 
 	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
 	header_at(0)[16U] ^= 1U;
-	expect_rejected("bounded-damaged-backup");
+	expect_accepted("bounded-damaged-backup", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
 
 	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
 	header_at(1)[16U] ^= 1U;
-	expect_rejected("bounded-damaged-primary");
+	expect_accepted("bounded-damaged-primary", 1U);
+	CHECK(strstr(diagnostics, "primary damaged") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
+
+	build_gpt_extent(4096U, logical_last, TEST_BLOCKS);
+	header_at(0)[16U] ^= 1U;
+	expect_accepted("bounded-4096-damaged-backup", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
+
+	build_gpt_extent(4096U, logical_last, TEST_BLOCKS);
+	table_at(1)[0U] ^= 1U;
+	expect_accepted("bounded-4096-primary-table-damaged", 1U);
+	CHECK(strstr(diagnostics, "primary damaged") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
 
 	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
 	put64(header_at(1) + 32U, disk.d_block_count);
 	refresh_header_crc(1);
-	expect_rejected("bounded-primary-alternate-after-physical-end");
+	expect_accepted("bounded-primary-alternate-after-physical-end", 1U);
+	CHECK(strstr(diagnostics, "primary damaged") != NULL);
 
 	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
 	put64(header_at(0) + 32U, 2U);
 	refresh_header_crc(0);
-	expect_rejected("bounded-backup-alternate-not-primary");
+	expect_accepted("bounded-backup-alternate-not-primary", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
 
 	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
 	medium.fail_lba = logical_last;
 	medium.fail_reads = 1;
-	expect_rejected("bounded-unreadable-backup");
+	expect_accepted("bounded-unreadable-backup", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
+
+	/* A structurally sound primary header authenticates the named backup even
+	 * when the primary entry array is damaged. */
+	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
+	table_at(1)[0U] ^= 1U;
+	expect_accepted("bounded-primary-table-damaged", 1U);
+	CHECK(strstr(diagnostics, "primary damaged") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
 
 	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
 	table_at(0)[3U * layout.entry_size + 56U] = 'X';
@@ -648,7 +800,9 @@ test_bounded_extent_rejection(void)
 	memcpy(block_at(tail_table), table_at(0), (size_t)layout.table_bytes);
 	put64(header_at(0) + 72U, tail_table);
 	refresh_header_crc(0);
-	expect_rejected("bounded-backup-table-in-physical-tail");
+	expect_accepted("bounded-backup-table-in-physical-tail", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
 
 	/* A partition in physically present tail blocks remains out of range. */
 	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
@@ -661,16 +815,227 @@ test_bounded_extent_rejection(void)
 	refresh_table_and_header(0);
 	expect_rejected("bounded-partition-in-physical-tail");
 
-	/* The protective entry describes the copied GPT extent, not the larger
-	 * destination medium. */
+	/* A Protective-MBR extent mismatch is diagnostic only.  The valid GPT
+	 * primary remains authoritative and retains its bounded extent. */
 	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
 	put32(block_at(0U) + 0x1beU + 12U, TEST_BLOCKS - 1U);
-	expect_rejected("bounded-pmbr-uses-physical-size");
+	expect_accepted("bounded-pmbr-uses-physical-size", 1U);
+	CHECK(strstr(diagnostics, "protective MBR extent mismatch") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
 
-	/* Truncating even one block below the advertised logical end is fatal. */
+	/* Truncating even one block below the GPT-declared logical end is fatal. */
 	build_gpt_extent(512U, 3071U, TEST_BLOCKS);
 	disk.d_block_count = 3071U;
 	expect_rejected("bounded-physical-medium-too-small");
+}
+
+static void
+test_host_relocated_physical_gpt_acceptance(void)
+{
+	struct partition entries[TEST_CAPACITY];
+	unsigned block_size_index, expand;
+	static const uint32_t block_sizes[] = { 512U, 4096U };
+
+	for (block_size_index = 0U;
+	    block_size_index < sizeof(block_sizes) / sizeof(block_sizes[0]);
+	    block_size_index++) {
+		for (expand = 0U; expand < 2U; expand++) {
+			build_host_relocated_gpt(block_sizes[block_size_index],
+			    128U, (int)expand);
+			memset(entries, 0xa5, sizeof(entries));
+			CHECK(scan(entries, TEST_CAPACITY) == 1);
+			check_basic_entry(&entries[0], "zedBSD");
+			CHECK(strstr(diagnostics,
+			    "protective MBR extent mismatch") != NULL);
+			CHECK(strstr(diagnostics, "using GPT") != NULL);
+		}
+	}
+}
+
+static void
+test_host_relocated_gpt_precedence(void)
+{
+	static const uint16_t tail_name[] = {
+		't', 'a', 'i', 'l'
+	};
+	struct partition entries[TEST_CAPACITY];
+	char expected[512];
+	uint64_t advertised_last, reserve_blocks;
+	const uint64_t third_lba = 3000U;
+	uint8_t *backup_entry;
+	int result;
+
+	/* The valid primary determines the GPT extent.  Existing exact-extent
+	 * degraded-copy recovery remains available when its relocated backup is
+	 * missing, corrupt, or unreadable. */
+	(void)build_host_relocated_gpt(512U, 128U, 1);
+	memset(header_at(0), 0, disk.d_block_size);
+	expect_accepted("relocated-physical-backup-missing", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+
+	(void)build_host_relocated_gpt(512U, 128U, 1);
+	header_at(0)[16U] ^= 1U;
+	expect_accepted("relocated-physical-backup-header-crc", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+
+	(void)build_host_relocated_gpt(512U, 128U, 1);
+	medium.fail_lba = disk.d_block_count - 1U;
+	medium.fail_reads = 1;
+	expect_accepted("relocated-physical-backup-read-error", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+
+	/* A CRC-valid primary header still authenticates the physical backup when
+	 * only its entry array is damaged. */
+	(void)build_host_relocated_gpt(512U, 128U, 1);
+	table_at(1)[0U] ^= 1U;
+	memset(entries, 0xa5, sizeof(entries));
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "primary damaged") != NULL);
+	CHECK(strstr(diagnostics, "protective MBR extent mismatch") != NULL);
+
+	/* If the primary header itself is damaged, recovery checks only the PMBR
+	 * end and the physical end.  A uniquely valid physical backup wins for
+	 * small, oversized, and saturated PMBR advertisements. */
+	advertised_last = build_host_relocated_gpt(512U, 128U, 1);
+	header_at(1)[16U] ^= 1U;
+	memset(entries, 0xa5, sizeof(entries));
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	(void)snprintf(expected, sizeof(expected),
+	    "gpt: nvme0n1 primary damaged (%d), using backup at LBA %u "
+	    "read-only\n"
+	    "gpt: nvme0n1 protective MBR extent mismatch: "
+	    "advertised-last=%llu gpt-last=%u; using GPT\n",
+	    EINVAL, TEST_BLOCKS - 1U, (unsigned long long)advertised_last,
+	    TEST_BLOCKS - 1U);
+	CHECK(strcmp(diagnostics, expected) == 0);
+
+	advertised_last = build_host_relocated_gpt(4096U, 128U, 1);
+	header_at(1)[16U] ^= 1U;
+	memset(entries, 0xa5, sizeof(entries));
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "using backup at LBA 4095") != NULL);
+	CHECK(strstr(diagnostics, "protective MBR extent mismatch") != NULL);
+	CHECK(advertised_last == TEST_BLOCKS / 2U - 1U);
+
+	(void)build_host_relocated_gpt(512U, 128U, 1);
+	put32(block_at(0U) + 0x1beU + 12U, TEST_BLOCKS + 127U);
+	header_at(1)[16U] ^= 1U;
+	expect_accepted("relocated-primary-bad-large-pmbr", 1U);
+	CHECK(strstr(diagnostics, "advertised-last=4223 gpt-last=4095") !=
+	    NULL);
+
+	(void)build_host_relocated_gpt(512U, 128U, 1);
+	put32(block_at(0U) + 0x1beU + 12U, UINT32_MAX);
+	header_at(1)[16U] ^= 1U;
+	expect_accepted("relocated-primary-bad-saturated-pmbr", 1U);
+	CHECK(strstr(diagnostics,
+	    "advertised-last=4294967295 gpt-last=4095") != NULL);
+
+	/* A CRC-valid header with invalid geometry cannot authenticate its named
+	 * alternate.  Recovery therefore uses only the PMBR and physical ends. */
+	(void)build_host_relocated_gpt(512U, 128U, 1);
+	put64(header_at(1) + 32U, third_lba);
+	put64(header_at(1) + 40U, 1U);
+	refresh_header_crc(1);
+	memset(entries, 0xa5, sizeof(entries));
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "using backup at LBA 4095") != NULL);
+
+	/* If a structurally sound primary names a damaged/missing pair, failure of
+	 * both named copies also enables the same bounded two-candidate recovery. */
+	(void)build_host_relocated_gpt(512U, 128U, 1);
+	put64(header_at(1) + 32U, third_lba);
+	put64(header_at(1) + 48U, third_lba - 33U);
+	refresh_header_crc(1);
+	table_at(1)[0U] ^= 1U;
+	memset(entries, 0xa5, sizeof(entries));
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "using backup at LBA 4095") != NULL);
+
+	/* A valid backup at an unrelated third LBA is not a discovery candidate
+	 * after primary damage.  PMBR-end and physical-end failure is terminal. */
+	build_gpt_extent(512U, TEST_BLOCKS / 2U - 1U, TEST_BLOCKS);
+	add_unreferenced_backup(third_lba);
+	header_at(1)[16U] ^= 1U;
+	header_at(0)[16U] ^= 1U;
+	expect_rejected("unreferenced-third-backup-not-scanned");
+	CHECK(strstr(diagnostics, "using backup at LBA 3000") == NULL);
+
+	/* Two independently valid candidate backups are accepted only if they
+	 * describe the same GPT.  Prefer the PMBR-bounded candidate in that case. */
+	build_gpt_extent(512U, TEST_BLOCKS / 2U - 1U, TEST_BLOCKS);
+	add_matching_physical_backup();
+	header_at(1)[16U] ^= 1U;
+	memset(entries, 0xa5, sizeof(entries));
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "using backup at LBA 2047") != NULL);
+	CHECK(strstr(diagnostics, "protective MBR extent mismatch") == NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
+
+	build_gpt_extent(512U, TEST_BLOCKS / 2U - 1U, TEST_BLOCKS);
+	add_valid_stale_physical_backup();
+	header_at(1)[16U] ^= 1U;
+	expect_rejected("contradictory-pmbr-and-physical-backups");
+	CHECK(strstr(diagnostics, "contradictory backup candidates") != NULL);
+
+	(void)build_host_relocated_gpt(512U, 128U, 1);
+	backup_entry = table_at(0) + 3U * layout.entry_size;
+	backup_entry[56U] = 'X';
+	refresh_table_and_header(0);
+	expect_rejected("relocated-contradictory-physical-backup");
+
+	/* Once a complete GPT is valid, obsolete bytes in the old compact tail
+	 * and ordinary hybrid-MBR bytes do not override it. */
+	advertised_last = build_host_relocated_gpt(512U, 128U, 1);
+	reserve_blocks = (16384U + disk.d_block_size - 1U) /
+	    disk.d_block_size;
+	block_at(advertised_last - reserve_blocks)[0U] = 1U;
+	expect_accepted("relocated-old-reservation-nonzero", 1U);
+
+	(void)build_host_relocated_gpt(512U, 128U, 1);
+	block_at(0U)[0U] = 0x90U;
+	expect_accepted("relocated-pmbr-bootstrap", 1U);
+
+	(void)build_host_relocated_gpt(512U, 128U, 1);
+	mbr_entry(1U, 0U, 0x0cU, 64U, 32U);
+	expect_accepted("relocated-pmbr-compatibility-entry", 1U);
+
+	/* General valid GPT geometry and partitions in the GPT-declared physical
+	 * range are authoritative even when the PMBR still advertises less. */
+	(void)build_host_relocated_gpt(512U, 8U, 1);
+	expect_accepted("relocated-general-entry-geometry", 1U);
+
+	advertised_last = build_host_relocated_gpt(512U, 128U, 1);
+	write_entry(4U, 0x70U, advertised_last + 8U,
+	    advertised_last + 15U, tail_name,
+	    (unsigned)(sizeof(tail_name) / sizeof(tail_name[0])));
+	refresh_table_and_header(1);
+	refresh_table_and_header(0);
+	memset(entries, 0xa5, sizeof(entries));
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 2);
+	check_basic_entry(&entries[0], "zedBSD");
+	check_tail_entry(&entries[1], advertised_last + 8U);
+
+	/* The old reservation is not consulted once GPT names the physical end. */
+	advertised_last = build_host_relocated_gpt(512U, 128U, 1);
+	reserve_blocks = (16384U + disk.d_block_size - 1U) /
+	    disk.d_block_size;
+	medium.fail_lba = advertised_last - reserve_blocks;
+	medium.fail_reads = 1;
+	expect_accepted("relocated-old-reservation-read-error", 1U);
 }
 
 static void
@@ -699,22 +1064,29 @@ test_bounded_saturated_protective_mbr(void)
 
 	build_gpt_extent(512U, logical_last, physical_blocks);
 	put32(block_at(0U) + 0x1beU + 12U, UINT32_MAX - 1U);
-	expect_rejected("bounded-saturated-pmbr-must-be-ffffffff");
+	expect_accepted("bounded-saturated-pmbr-mismatch", 1U);
+	CHECK(strstr(diagnostics, "protective MBR extent mismatch") != NULL);
 }
 
 static void
 test_saturated_extent_ambiguity_rejection(void)
 {
-	const uint64_t logical_last = (uint64_t)UINT32_MAX + 64U;
+	/* At the saturation boundary the PMBR end is an exact candidate.  A
+	 * contradictory but valid physical-end backup must not override it. */
+	const uint64_t logical_last = UINT32_MAX;
 	const uint64_t physical_blocks = logical_last + 129U;
 
-	/* Each case has a fully valid but stale whole-device backup at the
-	 * physical end.  Saturation must not let primary damage select it. */
+	/* A valid named backup remains authoritative when only the primary table is
+	 * damaged; the unreferenced physical-tail copy is not inspected. */
 	build_gpt_extent(512U, logical_last, physical_blocks);
 	add_valid_stale_physical_backup();
 	table_at(1)[0U] ^= 1U;
-	expect_rejected("saturated-primary-table-damaged-with-stale-tail");
+	expect_accepted("saturated-primary-table-damaged-with-stale-tail", 1U);
+	CHECK(strstr(diagnostics, "primary damaged") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
 
+	/* Header damage removes the authenticated named-backup location.  The two
+	 * conventional candidates then contradict and must be rejected. */
 	build_gpt_extent(512U, logical_last, physical_blocks);
 	add_valid_stale_physical_backup();
 	header_at(1)[16U] ^= 1U;
@@ -947,15 +1319,40 @@ test_fixed_primary_only_extent(void)
 	    "intentional primary-only GPT accepted") != NULL);
 	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
 
+	/* The primary GPT, not the PMBR count, identifies this intentional source
+	 * form.  Smaller and larger PMBR extents remain diagnostic-only. */
+	put32(block_at(0U) + 0x1beU + 12U,
+	    (uint32_t)(logical_last - 1U));
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics,
+	    "intentional primary-only GPT accepted") != NULL);
+	CHECK(strstr(diagnostics, "protective MBR extent mismatch") != NULL);
+
+	put32(block_at(0U) + 0x1beU + 12U,
+	    (uint32_t)(logical_last + 4096U));
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics,
+	    "intentional primary-only GPT accepted") != NULL);
+	CHECK(strstr(diagnostics, "protective MBR extent mismatch") != NULL);
+
 	/* Truncation below the advertised logical last block remains fatal. */
 	disk.d_block_count = logical_last;
 	expect_rejected("primary-only-medium-one-sector-short");
 
-	/* A larger physical tail does not excuse bytes in the declared backup
-	 * reservation, a BIOS-capable PMBR, or noncanonical primary geometry. */
+	/* These forms are not the production intentional-primary-only profile, but
+	 * their fully valid primary remains ordinary read-only one-copy recovery.
+	 * The production byte checker enforces the stricter source-image shape. */
 	disk.d_block_count = logical_last + 4097U;
+	put32(block_at(0U) + 0x1beU + 12U,
+	    (uint32_t)(logical_last - 1U));
 	table_at(0)[0U] = 1U;
-	expect_rejected("bounded-primary-only-nonzero-reservation");
+	expect_accepted("bounded-primary-only-mismatch-nonzero-reservation", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+	CHECK(strstr(diagnostics, "intentional primary-only") == NULL);
 
 	begin_gpt_extent(512U, 128U, 128U, logical_last,
 	    logical_last + 4097U);
@@ -967,7 +1364,9 @@ test_fixed_primary_only_extent(void)
 	memset(table_at(0), 0, (size_t)layout.table_bytes);
 	memset(header_at(0), 0, disk.d_block_size);
 	block_at(0U)[0U] = 0x90U;
-	expect_rejected("bounded-primary-only-nonzero-mbr-bootstrap");
+	expect_accepted("bounded-primary-only-nonzero-mbr-bootstrap", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+	CHECK(strstr(diagnostics, "intentional primary-only") == NULL);
 
 	begin_gpt_extent(512U, 128U, 128U, logical_last,
 	    logical_last + 4097U);
@@ -979,7 +1378,9 @@ test_fixed_primary_only_extent(void)
 	memset(table_at(0), 0, (size_t)layout.table_bytes);
 	memset(header_at(0), 0, disk.d_block_size);
 	mbr_entry(1U, 0U, 0x0cU, 2048U, 128U);
-	expect_rejected("bounded-primary-only-compatibility-mbr-entry");
+	expect_accepted("bounded-primary-only-compatibility-mbr-entry", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+	CHECK(strstr(diagnostics, "intentional primary-only") == NULL);
 
 	begin_gpt_extent(512U, 8U, 128U, logical_last,
 	    logical_last + 4097U);
@@ -990,7 +1391,11 @@ test_fixed_primary_only_extent(void)
 	write_header(0);
 	memset(table_at(0), 0, (size_t)layout.table_bytes);
 	memset(header_at(0), 0, disk.d_block_size);
-	expect_rejected("bounded-primary-only-noncanonical-entry-geometry");
+	put32(block_at(0U) + 0x1beU + 12U,
+	    (uint32_t)(logical_last - 1U));
+	expect_accepted("bounded-primary-only-noncanonical-entry-geometry", 1U);
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+	CHECK(strstr(diagnostics, "intentional primary-only") == NULL);
 }
 
 static void
@@ -1052,7 +1457,7 @@ test_header_and_geometry_rejection(void)
 	invalidate_both_u32(84U, 64U, "short-entry-size");
 	invalidate_both_u32(84U, 384U, "non-power-of-two-entry-size");
 	invalidate_both_u64(24U, 2U, TEST_BLOCKS - 2U, "my-lba");
-	invalidate_both_u64(32U, TEST_BLOCKS - 2U, 2U, "alternate-lba");
+	invalidate_both_u64(32U, 1U, 2U, "alternate-lba");
 	invalidate_both_u64(40U, TEST_BLOCKS - 2U, TEST_BLOCKS - 2U,
 	    "usable-range");
 	invalidate_both_u64(48U, TEST_BLOCKS, TEST_BLOCKS, "last-usable");
@@ -1100,7 +1505,8 @@ test_protective_mbr_rejection(void)
 
 	build_gpt(512U);
 	put32(block_at(0U) + 0x1beU + 12U, UINT32_MAX);
-	expect_rejected("protective-saturated-size-on-small-medium");
+	expect_accepted("protective-saturated-size-on-small-medium", 1U);
+	CHECK(strstr(diagnostics, "protective MBR extent mismatch") != NULL);
 
 	build_gpt(512U);
 	block_at(0U)[0x1beU] = 0x80U;
@@ -1112,7 +1518,13 @@ test_protective_mbr_rejection(void)
 
 	build_gpt(512U);
 	put32(block_at(0U) + 0x1beU + 12U, TEST_BLOCKS - 2U);
-	expect_rejected("protective-size");
+	expect_accepted("protective-size-mismatch", 1U);
+	CHECK(strstr(diagnostics, "protective MBR extent mismatch") != NULL);
+
+	build_gpt(512U);
+	put32(block_at(0U) + 0x1beU + 12U, TEST_BLOCKS + 123U);
+	expect_accepted("protective-size-beyond-medium", 1U);
+	CHECK(strstr(diagnostics, "protective MBR extent mismatch") != NULL);
 
 	build_gpt(512U);
 	mbr_entry(1U, 0U, 0xeeU, 1U, TEST_BLOCKS - 1U);
@@ -1340,7 +1752,9 @@ main(void)
 	test_bounded_extent(512U);
 	test_bounded_extent(4096U);
 	test_bounded_large_physical_media();
-	test_bounded_extent_rejection();
+	test_bounded_extent_recovery_and_rejection();
+	test_host_relocated_physical_gpt_acceptance();
+	test_host_relocated_gpt_precedence();
 	test_bounded_saturated_protective_mbr();
 	test_saturated_extent_ambiguity_rejection();
 	test_saturated_canonical_recovery();

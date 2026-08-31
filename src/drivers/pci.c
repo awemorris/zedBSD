@@ -60,11 +60,15 @@ struct pci_driver_entry {
 	struct pci_driver_entry *next;
 };
 
+struct pci_intx_line;
+
 struct pci_irq_cookie {
 	int irq;
 	drv_pci_irq_handler_t handler;
 	void *argument;
 	struct drv_pci_device *device;
+	struct pci_intx_line *intx_line;
+	struct pci_irq_cookie *intx_next;
 	enum drv_pci_irq_type type;
 	unsigned capability, index;
 	struct drv_pci_mapping table;
@@ -80,9 +84,37 @@ struct pci_irq_cookie {
 	uint32_t msix_entry_saved[4];
 };
 
+struct pci_intx_line {
+	int irq;
+	unsigned dispatching;
+	unsigned removing;
+	struct pci_irq_cookie *handlers;
+	struct pci_intx_line *next;
+};
+
 static struct drv_pci_bus *root_buses;
 static struct pci_driver_entry *drivers;
+static struct pci_intx_line *intx_lines;
+static volatile unsigned intx_lock;
 static int initialized;
+
+static bool
+intx_lock_enter(void)
+{
+	bool enabled = hal_irq_disable();
+
+	while (!hal_atomic_uint_try_acquire(&intx_lock))
+		hal_atomic_relax();
+	return enabled;
+}
+
+static void
+intx_lock_leave(bool enabled)
+{
+	hal_atomic_store_release(&intx_lock, 0U);
+	if (enabled)
+		hal_irq_enable();
+}
 
 static int cfg_read(struct drv_pci_bus *bus, const struct drv_pci_address *a,
 	unsigned offset, unsigned width, uint32_t *value)
@@ -176,7 +208,8 @@ static int read_device(struct drv_pci_device *device)
 int drv_pci_init(void)
 {
 	if (initialized) return EALREADY;
-	root_buses = NULL; drivers = NULL; initialized = 1;
+	root_buses = NULL; drivers = NULL; intx_lines = NULL; intx_lock = 0;
+	initialized = 1;
 	return 0;
 }
 
@@ -603,6 +636,173 @@ pci_irq_dispatch(int irq, hal_irq_ack_t acknowledge, void *argument)
 }
 
 static void
+pci_intx_dispatch(int irq, hal_irq_ack_t acknowledge, void *argument)
+{
+	struct pci_intx_line *line = argument;
+	struct pci_irq_cookie *cookie;
+	bool enabled;
+
+	(void)irq;
+	enabled = intx_lock_enter();
+	line->dispatching++;
+	cookie = line->handlers;
+	intx_lock_leave(enabled);
+	while (cookie != NULL) {
+		drv_pci_irq_handler_t handler;
+		void *handler_argument;
+		struct pci_irq_cookie *next;
+
+		enabled = intx_lock_enter();
+		/* Checked removal cannot unlink a cookie while any dispatcher is
+		 * walking this line. Establishment may append a new cookie, which may
+		 * be observed on this interrupt or the next one. */
+		handler = cookie->handler;
+		handler_argument = cookie->argument;
+		next = cookie->intx_next;
+		intx_lock_leave(enabled);
+		(void)handler(handler_argument);
+		cookie = next;
+	}
+	enabled = intx_lock_enter();
+	line->dispatching--;
+	intx_lock_leave(enabled);
+	hal_irq_send_eoi(acknowledge);
+}
+
+static struct pci_intx_line *
+find_intx_line(int irq)
+{
+	struct pci_intx_line *line;
+
+	for (line = intx_lines; line != NULL; line = line->next)
+		if (line->irq == irq)
+			return line;
+	return NULL;
+}
+
+static int
+establish_intx(struct pci_irq_cookie *cookie, const struct drv_pci_irq *irq)
+{
+	struct pci_intx_line *candidate, *line;
+	struct pci_irq_cookie **link;
+	bool enabled;
+	int hal_error;
+
+	candidate = hal_malloc(sizeof(*candidate));
+	if (candidate == NULL)
+		return ENOMEM;
+	memset(candidate, 0, sizeof(*candidate));
+	candidate->irq = (int)irq->vector;
+
+	enabled = intx_lock_enter();
+	line = find_intx_line(candidate->irq);
+	if (line != NULL) {
+		if (line->removing) {
+			intx_lock_leave(enabled);
+			hal_free(candidate);
+			return EBUSY;
+		}
+		for (link = &line->handlers; *link != NULL;
+		    link = &(*link)->intx_next)
+			;
+		*link = cookie;
+		cookie->irq = line->irq;
+		cookie->intx_line = line;
+		intx_lock_leave(enabled);
+		hal_free(candidate);
+		return 0;
+	}
+
+	/* Publish a line only after the sole HAL handler has been installed.
+	 * The line remains masked until both the handler and cookie list exist. */
+	hal_error = hal_irq_set_handler(candidate->irq, pci_intx_dispatch,
+	    candidate);
+	if (hal_error == HAL_OK) {
+		candidate->handlers = cookie;
+		candidate->next = intx_lines;
+		intx_lines = candidate;
+		cookie->irq = candidate->irq;
+		cookie->intx_line = candidate;
+		hal_irq_unmask(candidate->irq);
+	}
+	intx_lock_leave(enabled);
+	if (hal_error != HAL_OK) {
+		hal_free(candidate);
+		return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
+	}
+	return 0;
+}
+
+static int
+disestablish_intx(struct pci_irq_cookie *cookie)
+{
+	struct pci_intx_line *line;
+	struct pci_intx_line **line_link;
+	struct pci_irq_cookie **cookie_link;
+	bool enabled;
+	int hal_error;
+
+	enabled = intx_lock_enter();
+	line = cookie->intx_line;
+	if (line == NULL || line->removing) {
+		intx_lock_leave(enabled);
+		return line == NULL ? EINVAL : EBUSY;
+	}
+	for (cookie_link = &line->handlers; *cookie_link != NULL;
+	    cookie_link = &(*cookie_link)->intx_next)
+		if (*cookie_link == cookie)
+			break;
+	if (*cookie_link == NULL) {
+		intx_lock_leave(enabled);
+		return EINVAL;
+	}
+	/* Preserve the exact registered state on EBUSY. In particular, a driver
+	 * which retains its argument after an in-flight callback must remain able
+	 * to retry without repairing a half-unlinked shared handler. */
+	if (line->dispatching != 0) {
+		intx_lock_leave(enabled);
+		return EBUSY;
+	}
+	if (line->handlers != cookie || cookie->intx_next != NULL) {
+		*cookie_link = cookie->intx_next;
+		cookie->intx_line = NULL;
+		cookie->intx_next = NULL;
+		intx_lock_leave(enabled);
+		hal_free(cookie);
+		return 0;
+	}
+
+	/* Only the final owner may mask and remove the physical IRQ handler. */
+	line->removing = 1;
+	hal_irq_mask(line->irq);
+	intx_lock_leave(enabled);
+	hal_error = hal_irq_set_handler(line->irq, NULL, NULL);
+	if (hal_error != HAL_OK) {
+		enabled = intx_lock_enter();
+		line->removing = 0;
+		hal_irq_unmask(line->irq);
+		intx_lock_leave(enabled);
+		return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
+	}
+
+	/* HAL removal is a checked drain barrier, so no dispatcher can still hold
+	 * the line or its final cookie once it succeeds. */
+	enabled = intx_lock_enter();
+	for (line_link = &intx_lines; *line_link != NULL;
+	    line_link = &(*line_link)->next)
+		if (*line_link == line) {
+			*line_link = line->next;
+			break;
+		}
+	line->handlers = NULL;
+	cookie->intx_line = NULL;
+	intx_lock_leave(enabled);
+	hal_free(line);
+	hal_free(cookie);
+	return 0;
+}
+
+static void
 pci_source(const struct drv_pci_address *address, char result[17])
 {
 	static const char hex[] = "0123456789abcdef";
@@ -840,11 +1040,7 @@ drv_pci_device_establish_irq(struct drv_pci_device *device,
 	cookie->handler = handler;
 	cookie->argument = argument;
 	if (irq->type == DRV_PCI_IRQ_INTX) {
-		cookie->irq = (int)irq->vector;
-		error = hal_irq_set_handler(cookie->irq, pci_irq_dispatch, cookie) ==
-		    HAL_OK ? 0 : EIO;
-		if (error == 0)
-			hal_irq_unmask(cookie->irq);
+		error = establish_intx(cookie, irq);
 	} else if (irq->type == DRV_PCI_IRQ_MSI) {
 		error = establish_msi(cookie, irq);
 	} else if (irq->type == DRV_PCI_IRQ_MSIX) {
@@ -871,10 +1067,7 @@ drv_pci_device_disestablish_irq_checked(struct drv_pci_device *device,
 	if (cookie == NULL)
 		return EINVAL;
 	if (cookie->type == DRV_PCI_IRQ_INTX) {
-		hal_irq_mask(cookie->irq);
-		hal_error = hal_irq_set_handler(cookie->irq, NULL, NULL);
-		if (hal_error != HAL_OK)
-			return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
+		return disestablish_intx(cookie);
 	} else if (cookie->type == DRV_PCI_IRQ_MSI) {
 		if (cookie->message_registered) {
 			if (drv_pci_device_config_read16(cookie->device,

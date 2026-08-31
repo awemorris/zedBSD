@@ -5,18 +5,23 @@ Last updated: 2026-08-31
 WSID: `ws008`
 
 Status: Blocked; target package remains disabled by `ws008-p007`, p009 awaits
-an accepted target fix, and p010 awaits the maintainer-owned host CLI repair
+an accepted target fix, and p010's published host repair still fails its
+compile/application compatibility gate
 
 Parent: [master plan](../master.md)
 
 Last accepted Phase: `ws008-p008`
 
-Resume point: p008 selected immutable upstream commit
-`3bf3d236aa8ce014c63853dee3b21fa023d877ed`, but a later full production build
-proved that revision rejects the established `--path`/`require` script
-contract. Resume p010 only from a maintainer-approved upstream repair or an
-explicit compatible-revision decision. Do not execute p009 until its separate
-clean upstream zedBSD-target fix or downstream patch-overlay decision exists.
+Resume point: q047 pinned maintainer-published commit
+`e56274ff00894182da5c44f1b8a2fb2fcf2c3dac`. Interpreter `--path`, the host
+toolchain smoke, clean detached ownership, live-recipe audit, NOCT-T084
+ordinary production build, and NOCT-T086 zedbuild byte primitives pass. Only
+NOCT-T082 remains uncleared: `--compile --app --path=...` still treats `--app`
+as a file. zedBSD-owned checked endian primitives removed the optional
+`Binary` API dependency. Resume p010 from a new
+maintainer-reviewed commit which fixes the remaining CLI gate. Do not execute p009 until
+its separate clean upstream zedBSD-target fix or downstream patch-overlay
+decision exists.
 
 Shared tests: [WS008 test index](tests/README.md)
 
@@ -33,7 +38,7 @@ Shared tests: [WS008 test index](tests/README.md)
 | [`ws008-p007`](phase007-target-package-hold/phase.md) | Complete (`q025`, 2026-08-28) | Target Noct and dependent Remacs are absent from menu, forced selection, and a fresh rootfs; the separate host Noct script runtime remains operational |
 | [`ws008-p008`](phase008-latest-host-toolchain-pin/phase.md) | Complete (`q041`, 2026-08-31) | Host pin `3bf3d236...`, clean detached checkout, Process-enabled static build, stale-stamp invalidation, and clean/incremental toolchain smoke pass |
 | [`ws008-p009`](phase009-base-noct-relocation-target-resume/phase.md) | Blocked | Move target integration to `userland/base/noct/` with clone at `userland/base/noct/noct/`, then re-enable amd64 Noct only after upstream/overlay resolution and QEMU acceptance |
-| [`ws008-p010`](phase010-host-script-cli-contract-repair/phase.md) | Blocked (`MB-008`) | Restore the upstream `--path`/`require` host CLI contract and prove the accepted pin through focused module tests plus an ordinary production build |
+| [`ws008-p010`](phase010-host-script-cli-contract-repair/phase.md) | Uncleared (`q047`) | Commit `e56274ff...` restores runtime `--path`; NOCT-T084 production and NOCT-T086 zedbuild byte-primitives gates pass, while only unrelated NOCT-T082 compile/application parsing remains upstream-blocked |
 
 The old NOCT-00--NOCT-05 labels are superseded as scheduling units by these
 immutable Phase IDs. Their concerns are retained inside p001--p003 rather than

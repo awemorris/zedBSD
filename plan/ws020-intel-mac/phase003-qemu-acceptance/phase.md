@@ -8,7 +8,7 @@ Phase ID: `p003`
 
 Combined ID: `ws020-p003`
 
-Status: Uncleared
+Status: Complete (`q047`, 2026-08-31)
 
 Parent: [WS020](../ws.md)
 
@@ -26,7 +26,8 @@ each single-firmware profile genuinely lacks the other boot path.
 Every cell uses a disposable writable image copy. OVMF cells use an independent
 variables copy. The maintained runner records exact source/artifact/firmware
 hashes, a shell-escaped QEMU command, guest debug output, serial and firmware
-logs, elapsed time, and a machine-readable result.
+logs, elapsed time, and a machine-readable result. A failed cell writes its
+`FAILED` row and single-line reason before the runner exits.
 
 Before UEFI-only boot, the runner proves the fixed 202,392,064-byte geometry,
 pure Protective MBR, valid primary header/table, exact partition bounds, and
@@ -46,8 +47,10 @@ unrelated nonzero tail fails. The immutable source artifact must not change.
   which proves an all-zero MBR bootstrap and no zedBSD BIOS loader. SeaBIOS
   must then select the disk and hand the pure Protective MBR to `0000:7c00`,
   remain alive through the bounded settle, stop cleanly under runner control,
-  and expose an exactly empty zedBSD guest log. Neither the handoff marker nor
-  a timeout is acceptance by itself.
+  and expose an exactly empty zedBSD guest log. Both firmware handoff markers
+  are checked only after QEMU has stopped and closed its firmware-log backend;
+  live polling of that buffered log is not an oracle. Neither the handoff
+  marker nor a timeout is acceptance by itself.
 
 ## Verification and completion
 
@@ -66,8 +69,8 @@ implements the six strict positive/negative oracles above. The byte-level
 layout tests, GPT host ordinary/sanitizer/analyzer tests, three-Variant artifact
 invariance test, `make -j16`, and `git diff --check` passed.
 
-The full runtime matrix is **uncleared**. Three fresh attempts stopped at the
-unchanged positive `login:` oracle:
+Q036 retained three fresh attempts which stopped at the unchanged positive
+`login:` oracle:
 
 - `temp/p003-fixed-20260831-agent-004`: both Hybrid cells passed; BIOS/SeaBIOS
   reached overlay root, swap, runtime filesystems, and `boot: starting init
@@ -79,12 +82,40 @@ unchanged positive `login:` oracle:
   started `getty_console`, emitted `init: system running`, but still emitted no
   `login:` before the bound.
 
-The symptom crossed BIOS/UEFI firmware, image layout, four-vCPU MTTCG,
+That symptom crossed BIOS/UEFI firmware, image layout, four-vCPU MTTCG,
 one-vCPU MTTCG, and one-vCPU single-thread TCG. The image, USB-storage, GPT,
 overlay-root, and swap paths had already succeeded in every stopped cell. This
-is therefore retained as a pre-existing runtime init/getty scheduling flake,
-not converted into an image-layout success by retries or a weaker oracle.
+history remains recorded under the now-resolved `BUG-002`; `ws002-p022` later
+captured and repaired the USB submit/terminal-publication IRQ self-wait. Those
+stopped runs are not converted into passes and no weaker oracle is used.
 
-Resume after that runtime issue has a diagnosis/fix in a separately authorized
-Phase. Completion still requires one fresh, uninterrupted six-cell PASS with
-the strict `login:` and post-login settle gates.
+Q047 then ran one fresh, uninterrupted matrix at
+`plan/ws020-intel-mac/temp/p003-q047-final/`. The runner printed
+`MAC-T020 QEMU Variant matrix: PASS (6 cells; ...)`, and its machine-readable
+results record six strict passes:
+
+| Cell | Result | Elapsed |
+| --- | --- | ---: |
+| Hybrid / SeaBIOS positive | PASS | 25 s |
+| Hybrid / OVMF positive | PASS | 16 s |
+| BIOS-only / SeaBIOS positive | PASS | 14 s |
+| BIOS-only / OVMF negative | PASS | 3 s |
+| UEFI-only / OVMF positive | PASS | 26 s |
+| UEFI-only / SeaBIOS negative | PASS | 30 s |
+
+All four positive cells reached exact `init: system running` and `login:`
+markers and passed their settle/failure-diagnostic gates. Both negative cells
+passed their production byte-level absence check, bounded firmware
+observation, live settle, and empty zedBSD-log oracle. Every disposable run
+left its immutable source unchanged. The accepted source identities are:
+
+| Variant | SHA-256 |
+| --- | --- |
+| Hybrid | `865c13a727b0b40fa0d59a324aa6d93c335e5329b5a73bb4b965fe6142af4888` |
+| BIOS-only | `4ffcbeadf0aefed68a346202a5dab9696e6a74ac0ed95fb137fb003fea8e7fef` |
+| UEFI-only | `0cd337ca769e58d143ed604658256bfa7b4468e6c3f892158c84f2b400b13f1d` |
+
+The three production image checkers also report `PASS`. This fresh result,
+together with q047's already passing repository build gate and the final
+`git diff --check`, satisfies the Phase completion contract. The physical
+Intel Mac campaign remains independently deferred in p004.

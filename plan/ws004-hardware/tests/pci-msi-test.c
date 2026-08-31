@@ -16,6 +16,8 @@ static char registered_source[17];
 void *hal_malloc(size_t size) { return malloc(size); }
 void hal_free(void *pointer) { free(pointer); }
 int hal_printf(const char *format, ...) { (void)format; return 0; }
+bool hal_irq_disable(void) { return true; }
+void hal_irq_enable(void) { }
 void hal_irq_mask(int irq) { (void)irq; }
 void hal_irq_unmask(int irq) { (void)irq; }
 void hal_irq_send_eoi(hal_irq_ack_t acknowledge) { (void)acknowledge; }

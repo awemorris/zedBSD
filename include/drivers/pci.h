@@ -457,9 +457,10 @@ drv_pci_device_establish_irq(
 	void *a,
 	const char *n,
 	void **result);
-/* Mask the source and remove its handler.  EBUSY leaves the cookie and all
- * mappings owned by the caller so an in-flight handler can drain before a
- * retry. */
+/* Remove this source from interrupt dispatch.  A final INTx owner also masks
+ * and removes the physical line handler.  EBUSY leaves the cookie, handler,
+ * and all mappings owned by the caller so in-flight dispatch can drain before
+ * a retry. */
 int
 drv_pci_device_disestablish_irq_checked(
 	struct drv_pci_device *d,

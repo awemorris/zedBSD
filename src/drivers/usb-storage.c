@@ -30,6 +30,7 @@
 #define SCSI_REQUEST_SENSE 0x03U
 #define SCSI_INQUIRY 0x12U
 #define SCSI_READ_CAPACITY_10 0x25U
+#define SCSI_READ_10 0x28U
 #define SCSI_SYNCHRONIZE_CACHE_10 0x35U
 
 struct bot_cbw {
@@ -48,6 +49,11 @@ struct bot_csw {
 	uint8_t residue[4];
 	uint8_t status;
 } __attribute__((packed));
+
+struct storage_read_checkpoint {
+	uint32_t lba;
+	uint16_t blocks;
+};
 
 struct usb_storage {
 	struct drv_usb_interface *interface;
@@ -69,6 +75,9 @@ struct usb_storage {
 	uint8_t dpofua;
 	int flush_error;
 	enum drv_usb_scsi_flush_policy flush_policy;
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+	unsigned checkpoint_read_sequence;
+#endif
 };
 
 static uint32_t get_le32(const uint8_t value[4])
@@ -88,6 +97,11 @@ static uint32_t get_be32(const uint8_t value[4])
 {
 	return ((uint32_t)value[0] << 24) | ((uint32_t)value[1] << 16) |
 	    ((uint32_t)value[2] << 8) | value[3];
+}
+
+static uint16_t get_be16(const uint8_t value[2])
+{
+	return (uint16_t)((uint16_t)value[0] << 8) | value[1];
 }
 
 static void put_be32(uint8_t value[4], uint32_t number)
@@ -111,12 +125,19 @@ static void put_be16(uint8_t value[2], uint16_t number)
  * objects.
  */
 static int
-storage_urb_transfer(struct drv_usb_urb *urb, void *buffer, size_t length,
-	unsigned timeout, size_t *actual)
+storage_urb_transfer(struct usb_storage *storage, struct drv_usb_urb *urb,
+	void *buffer, size_t length, unsigned timeout, size_t *actual,
+	const struct storage_read_checkpoint *checkpoint)
 {
 	unsigned flags = length <= DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE ?
 	    DRV_USB_URB_RECLAIM_SAFE : 0;
 	int error;
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+	unsigned checkpoint_sequence = 0;
+#else
+	(void)storage;
+	(void)checkpoint;
+#endif
 
 	if (actual != NULL)
 		*actual = 0;
@@ -124,8 +145,37 @@ storage_urb_transfer(struct drv_usb_urb *urb, void *buffer, size_t length,
 	    NULL);
 	if (error == 0)
 		error = drv_usb_urb_submit(urb);
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+	/* This marker is intentionally emitted only after the HCD accepted the
+	 * READ(10) data URB and while the USB core still publishes it as pending.
+	 * HW-T25 waits for it before injecting the concurrent HID completion. */
+	if (error == 0 && checkpoint != NULL &&
+	    drv_usb_urb_status(urb) == DRV_USB_URB_PENDING) {
+		checkpoint_sequence = ++storage->checkpoint_read_sequence;
+		hal_printf("usb-storage-checkpoint: accepted disk=%s generation=%u "
+		    "usb%u device=%u lba=%u blocks=%u bytes=%u status=pending\n",
+		    storage->disk != NULL ? storage->disk->d_name : "unpublished",
+		    checkpoint_sequence,
+		    drv_usb_bus_number(drv_usb_device_bus(storage->device)),
+		    drv_usb_device_address(storage->device), checkpoint->lba,
+		    (unsigned)checkpoint->blocks, (unsigned)length);
+	}
+#endif
 	if (error == 0)
 		error = drv_usb_urb_wait_reusable(urb);
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+	if (checkpoint_sequence != 0)
+		hal_printf("usb-storage-checkpoint: completed disk=%s generation=%u "
+		    "usb%u device=%u lba=%u blocks=%u bytes=%u status=%u "
+		    "actual=%u error=%d\n",
+		    storage->disk != NULL ? storage->disk->d_name : "unpublished",
+		    checkpoint_sequence,
+		    drv_usb_bus_number(drv_usb_device_bus(storage->device)),
+		    drv_usb_device_address(storage->device), checkpoint->lba,
+		    (unsigned)checkpoint->blocks, (unsigned)length,
+		    (unsigned)drv_usb_urb_status(urb),
+		    (unsigned)drv_usb_urb_actual_length(urb), error);
+#endif
 	if (actual != NULL)
 		*actual = drv_usb_urb_actual_length(urb);
 	return error;
@@ -133,7 +183,8 @@ storage_urb_transfer(struct drv_usb_urb *urb, void *buffer, size_t length,
 
 static int
 storage_bulk(struct usb_storage *storage, struct drv_usb_endpoint *endpoint,
-	void *buffer, size_t length, unsigned timeout, size_t *actual)
+	void *buffer, size_t length, unsigned timeout, size_t *actual,
+	const struct storage_read_checkpoint *checkpoint)
 {
 	struct drv_usb_urb *urb;
 
@@ -143,7 +194,8 @@ storage_bulk(struct usb_storage *storage, struct drv_usb_endpoint *endpoint,
 		urb = storage->bulk_out_urb;
 	else
 		return EINVAL;
-	return storage_urb_transfer(urb, buffer, length, timeout, actual);
+	return storage_urb_transfer(storage, urb, buffer, length, timeout, actual,
+	    checkpoint);
 }
 
 static int
@@ -254,6 +306,8 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 {
 	struct bot_cbw cbw;
 	struct bot_csw csw;
+	struct storage_read_checkpoint read_checkpoint;
+	const struct storage_read_checkpoint *checkpoint = NULL;
 	enum drv_usb_bot_csw_result csw_result;
 	uint32_t residue, tag;
 	size_t actual, data_actual = 0, processed;
@@ -278,10 +332,16 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 	cbw.lun = storage->lun;
 	cbw.command_length = (uint8_t)cdb_length;
 	memcpy(cbw.command, cdb, cdb_length);
+	if (input != 0 && ((const uint8_t *)cdb)[0] == SCSI_READ_10 &&
+	    cdb_length >= 10U) {
+		read_checkpoint.lba = get_be32((const uint8_t *)cdb + 2);
+		read_checkpoint.blocks = get_be16((const uint8_t *)cdb + 7);
+		checkpoint = &read_checkpoint;
+	}
 
 	actual = 0;
 	error = storage_bulk(storage, storage->bulk_out, &cbw,
-	    sizeof(cbw), BOT_TIMEOUT_MS, &actual);
+	    sizeof(cbw), BOT_TIMEOUT_MS, &actual, NULL);
 	if (error != 0 || actual != sizeof(cbw)) {
 		hal_printf("usb-storage: BOT CBW error=%d actual=%u expected=%u\n",
 		    error, (unsigned)actual, (unsigned)sizeof(cbw));
@@ -294,7 +354,7 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 
 		actual = 0;
 		error = storage_bulk(storage, endpoint, buffer, length,
-		    BOT_TIMEOUT_MS, &actual);
+		    BOT_TIMEOUT_MS, &actual, checkpoint);
 		data_actual = actual;
 		if (error == EPIPE) {
 			int halt_error = clear_halt(storage, endpoint);
@@ -317,7 +377,7 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 	}
 	actual = 0;
 	error = storage_bulk(storage, storage->bulk_in, &csw,
-	    sizeof(csw), BOT_TIMEOUT_MS, &actual);
+	    sizeof(csw), BOT_TIMEOUT_MS, &actual, NULL);
 	if (error != 0 || actual != sizeof(csw) ||
 	    get_le32(csw.signature) != BOT_CSW_SIGNATURE ||
 	    get_le32(csw.tag) != tag) {

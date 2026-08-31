@@ -35,12 +35,14 @@ path.
 5. Reserve LBAs 395,264--395,296 as 33 zero sectors and deliberately omit the
    backup table/header. Publish atomically only after a Variant-aware checker
    validates the exact layout and inclusion/exclusion rules.
-6. Keep the kernel's strict intentional-primary-only classification. Accept
-   this form on both exact-sized and larger physical media; reject a declared
-   end beyond the medium and malformed primary geometry/CRCs. On a larger
-   bounded medium, a nonzero invalid declared-tail is not an intentional
-   omission and is rejected. Preserve the established exact-medium
-   valid-primary/damaged-backup read-only recovery independently.
+6. Keep the kernel's strict intentional-primary-only classification as an
+   explicit diagnostic for this source shape. Accept this form on both
+   exact-sized and larger physical media; reject a declared end beyond the
+   medium and malformed primary geometry/CRCs. A nonzero or otherwise
+   noncanonical declared-tail is not an intentional omission, but a fully valid
+   primary is still accepted by the ordinary read-only one-copy rule on exact
+   and bounded media. The production byte checker, independently of the kernel
+   recovery policy, rejects those noncanonical source artifacts.
 
 ## Verification
 
@@ -48,8 +50,10 @@ path.
   geometry, partition types/extents, loader/file inclusion and exclusion,
   fixed file length, and all-zero final reservation.
 - Host GPT fixtures cover exact-sized and larger-physical-media intentional
-  primary-only input, and reject undersized media, malformed primary data,
-  noncanonical PMBRs, and nonzero malformed declared-tail metadata.
+  primary-only input, reject undersized media and malformed primary data, and
+  prove that noncanonical PMBR/bootstrap/tail forms use generic one-copy
+  recovery without receiving the intentional-source diagnostic. The production
+  image checker continues to reject those source forms byte-for-byte.
 - Cross-Variant images and failed candidates do not replace an accepted output.
 - Existing combined BIOS+UEFI behavior remains passing; all loader artifacts
   remain present regardless of selected image Variant.
@@ -83,10 +87,12 @@ requirements are replaced by the fixed contract above.
   (`bios`), and 202,392,064 bytes (`uefi`). The UEFI-only source has exactly
   395,297 sectors and the final 33 sectors are zero.
 - The production GPT host fixture passes ordinary, Address/UndefinedBehavior
-  sanitizer, and static-analyzer runs. Exact and larger physical media accept
-  only the strict pure-PMBR primary-only form; bounded nonzero reservations,
-  compatibility entries, MBR code, noncanonical table geometry, and truncated
-  media fail. Exact-medium degraded-copy recovery remains intact.
+  sanitizer, and static-analyzer runs. Exact and larger physical media classify
+  only the strict pure-PMBR zero-tail shape as intentional; other fully valid
+  one-copy GPTs remain generic read-only recovery, while truncated media and
+  malformed primary GPT data fail. The separate production image checker still
+  rejects nonzero reservations, compatibility entries, MBR code, and
+  noncanonical table geometry in a published UEFI-only source.
 - The image backend compiles with strict warnings, focused fixtures and
   `make -j16` pass, and `git diff --check` is clean.
 

@@ -3,6 +3,45 @@ require zedbuild;
 // MAC-T020 finite firmware/layout acceptance matrix.
 // Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
+var activeCellName = "";
+var activeCellPath = "";
+var activeResultsPath = "";
+var activeCellFailureRecorded = false;
+
+func singleLine(value) {
+    var result = "";
+    for (i in 0..String.charCount(value)) {
+        var code = String.charCodeAt(value, i);
+        if (code == 9 || code == 10 || code == 13) {
+            result = result + " ";
+        } else {
+            result = result + String.charAt(value, i);
+        }
+    }
+    return result;
+}
+
+func recordActiveCellFailure(reason) {
+    if (activeCellName == "" || activeCellFailureRecorded) { return; }
+    activeCellFailureRecorded = true;
+    var text = singleLine(reason);
+    if (FileUtil.checkFileExists(activeResultsPath) == 1) {
+        var results = FileUtil.readText(activeResultsPath);
+        FileUtil.writeText(activeResultsPath, results + activeCellName +
+            "\tFAILED\t-\t" + text + "\n");
+    }
+    if (FileUtil.checkFileExists(activeCellPath) == 1) {
+        FileUtil.writeText(activeCellPath + "/result.txt",
+            "MAC-T020\t" + activeCellName + "\tFAILED\treason=" + text +
+            "\n");
+    }
+}
+
+func matrixFail(reason) {
+    recordActiveCellFailure(reason);
+    zbFail(reason);
+}
+
 func normalizeProcessText(value) {
     var result = "";
     for (i in 0..String.charCount(value)) {
@@ -15,7 +54,7 @@ func normalizeProcessText(value) {
 
 func capture(command, what) {
     var child = Process.spawn(["/bin/sh", "-c", command + " 2>&1"]);
-    if (child < 0) { zbFail("cannot start " + what); }
+    if (child < 0) { matrixFail("cannot start " + what); }
     var output = "";
     while (Process.isAlive(child) == 1) {
         output = output + Process.read(child, 100);
@@ -29,50 +68,50 @@ func capture(command, what) {
         output = String.substring(output, 0, String.charCount(output) - 1);
     }
     if (status != 0) {
-        zbFail(what + " failed (status=" + status + "): " + output);
+        matrixFail(what + " failed (status=" + status + "): " + output);
     }
     return output;
 }
 
 func run(repo, command, what) {
     var status = System.shell("cd " + zbShellQuote(repo) + " && " + command);
-    if (status != 0) { zbFail(what + " failed (status=" + status + ")"); }
+    if (status != 0) { matrixFail(what + " failed (status=" + status + ")"); }
 }
 
 func runLogged(repo, log, command, what) {
     var status = System.shell("cd " + zbShellQuote(repo) + " && " + command +
                               " >" + zbShellQuote(log) + " 2>&1");
     if (status != 0) {
-        zbFail(what + " failed (status=" + status + "; log=" + log + ")");
+        matrixFail(what + " failed (status=" + status + "; log=" + log + ")");
     }
 }
 
 func requirePattern(path, pattern, what) {
     if (System.shell("rg -a -q -- " + zbShellQuote(pattern) + " " +
                      zbShellQuote(path)) != 0) {
-        zbFail(what + " is missing (log=" + path + ")");
+        matrixFail(what + " is missing (log=" + path + ")");
     }
 }
 
 func rejectPattern(path, pattern, what) {
     var status = System.shell("rg -a -q -- " + zbShellQuote(pattern) + " " +
                               zbShellQuote(path));
-    if (status == 0) { zbFail(what + " was observed (log=" + path + ")"); }
+    if (status == 0) { matrixFail(what + " was observed (log=" + path + ")"); }
     // System.shell exposes the wait status on this host, so rg's ordinary
     // no-match exit may appear either as 1 or as 1<<8.
-    if (status != 1 && status != 256) { zbFail("cannot inspect " + path); }
+    if (status != 1 && status != 256) { matrixFail("cannot inspect " + path); }
 }
 
 func resolveCommand(shellExpression, what) {
     var value = capture("command -v \"" + shellExpression + "\"", what);
-    if (value == "") { zbFail(what + " resolved to an empty path"); }
+    if (value == "") { matrixFail(what + " resolved to an empty path"); }
     return value;
 }
 
 func resolveFile(shellExpression, what) {
     var value = capture("realpath \"" + shellExpression + "\"", what);
     if (FileUtil.checkFileExists(value) != 1) {
-        zbFail(what + " not found: " + value);
+        matrixFail(what + " not found: " + value);
     }
     return value;
 }
@@ -273,7 +312,7 @@ func validBackupMirror(front, tail) {
 
 func requireUefiState(image, cell, stage) {
     if (FileUtil.getFileSize(image) != 202392064) {
-        zbFail("UEFI " + stage + " image has the wrong fixed extent");
+        matrixFail("UEFI " + stage + " image has the wrong fixed extent");
     }
     var frontPath = cell + "/gpt-front-" + stage + ".bin";
     var tailPath = cell + "/gpt-tail-" + stage + ".bin";
@@ -285,11 +324,11 @@ func requireUefiState(image, cell, stage) {
     var front = zbReadFile(frontPath);
     var tail = zbReadFile(tailPath);
     if (!validPrimaryFront(front)) {
-        zbFail("UEFI " + stage + " primary GPT geometry is invalid");
+        matrixFail("UEFI " + stage + " primary GPT geometry is invalid");
     }
     if (stage == "pre") {
         if (!allZero(tail)) {
-            zbFail("UEFI source does not reserve a zero final GPT region");
+            matrixFail("UEFI source does not reserve a zero final GPT region");
         }
         FileUtil.writeText(cell + "/gpt-state-pre.txt",
                            "intentional-primary-only-zero-tail\n");
@@ -300,7 +339,7 @@ func requireUefiState(image, cell, stage) {
         FileUtil.writeText(cell + "/gpt-state-post.txt",
                            "firmware-repaired-valid-mirror\n");
     } else {
-        zbFail("UEFI postboot tail is malformed or contradicts the primary");
+        matrixFail("UEFI postboot tail is malformed or contradicts the primary");
     }
     run("/", "sha256sum " + zbShellQuote(frontPath) + " " +
         zbShellQuote(tailPath) + " >" +
@@ -324,7 +363,11 @@ func prepareRunImage(source, destination, layout, cell) {
 
 func makeQemuCommand(qemu, seabios, ovmfCode, varsCopy, firmware, image,
                      guestLog, serialLog, firmwareLog) {
-    var command = ["timeout", "120", qemu];
+    // The runner owns every observation and shutdown bound. Keeping QEMU as
+    // the direct child also guarantees that SIGTERM/SIGKILL target QEMU, not
+    // an intermediate timeout process which could leave the firmware-log
+    // writer alive after the recorded child exits.
+    var command = [qemu];
     if (firmware == "seabios") {
         Array.push(command, "-bios");
         Array.push(command, seabios);
@@ -379,14 +422,37 @@ func stopQemu(child) {
     if (Process.isAlive(child) == 1) { Process.write(child, "quit\n"); }
     var output = "";
     var ticks = 0;
-    while (Process.isAlive(child) == 1 && ticks < 100) {
+    var forced = 0;
+    while (Process.isAlive(child) == 1 && ticks < 50) {
         output = output + Process.read(child, 100);
         ticks = ticks + 1;
     }
+    if (Process.isAlive(child) == 1) {
+        forced = 15;
+        Process.kill(child, 15);
+        ticks = 0;
+        while (Process.isAlive(child) == 1 && ticks < 20) {
+            output = output + Process.read(child, 100);
+            ticks = ticks + 1;
+        }
+    }
+    if (Process.isAlive(child) == 1) {
+        forced = 9;
+        Process.kill(child, 9);
+        ticks = 0;
+        while (Process.isAlive(child) == 1 && ticks < 20) {
+            output = output + Process.read(child, 100);
+            ticks = ticks + 1;
+        }
+    }
     output = output + Process.read(child, 0);
+    if (Process.isAlive(child) == 1) {
+        Process.close(child);
+        return [-2, normalizeProcessText(output), forced];
+    }
     var status = Process.wait(child);
     Process.close(child);
-    return [status, normalizeProcessText(output)];
+    return [status, normalizeProcessText(output), forced];
 }
 
 func hasText(path, marker) {
@@ -396,7 +462,7 @@ func hasText(path, marker) {
 
 func runPositiveQemu(command, cell, guestLog) {
     var child = Process.spawn(command);
-    if (child < 0) { zbFail("cannot start QEMU for " + cell); }
+    if (child < 0) { matrixFail("cannot start QEMU for " + cell); }
     var output = "";
     var reached = false;
     var ticks = 0;
@@ -408,7 +474,7 @@ func runPositiveQemu(command, cell, guestLog) {
     if (!reached) {
         var failed = stopQemu(child);
         FileUtil.writeText(cell + "/qemu.log", output + failed[1]);
-        zbFail("QEMU did not reach login (cell=" + cell + ")");
+        matrixFail("QEMU did not reach login (cell=" + cell + ")");
     }
     ticks = 0;
     while (ticks < 20 && Process.isAlive(child) == 1) {
@@ -418,18 +484,19 @@ func runPositiveQemu(command, cell, guestLog) {
     if (Process.isAlive(child) != 1) {
         var early = stopQemu(child);
         FileUtil.writeText(cell + "/qemu.log", output + early[1]);
-        zbFail("QEMU exited during the post-login settle (cell=" + cell + ")");
+        matrixFail("QEMU exited during the post-login settle (cell=" + cell + ")");
     }
     var stopped = stopQemu(child);
     output = output + stopped[1];
     FileUtil.writeText(cell + "/qemu.log", output);
-    if (stopped[0] != 0) {
-        zbFail("QEMU monitor quit failed (cell=" + cell +
-               ", status=" + stopped[0] + ")");
+    if (stopped[0] != 0 || stopped[2] != 0) {
+        matrixFail("QEMU monitor quit failed (cell=" + cell +
+                   ", status=" + stopped[0] + ", forced=" + stopped[2] +
+                   ")");
     }
 }
 
-func negativeFirmwareReached(firmware, serialLog, firmwareLog) {
+func negativeFirmwareReached(firmware, serialLog) {
     if (firmware == "ovmf") {
         return hasText(serialLog, "BdsDxe: failed to load Boot") &&
             hasText(serialLog, "QEMU USB HARDDRIVE") &&
@@ -437,52 +504,80 @@ func negativeFirmwareReached(firmware, serialLog, firmwareLog) {
             (hasText(serialLog, "UEFI Interactive Shell") ||
              hasText(serialLog, "Shell>"));
     }
-    // A pure protective MBR still carries 0x55aa, so SeaBIOS hands its
-    // all-zero bootstrap to 0000:7c00 instead of printing its own failure.
-    // This marker is accepted only as part of runNegativeQemu's compound
-    // byte-check + bounded-live-settle + empty-guest-log oracle.
-    return hasText(firmwareLog, "Booting from Hard Disk") &&
-        hasText(firmwareLog, "Booting from 0000:7c00");
+    return false;
 }
 
 func runNegativeQemu(command, firmware, cell, guestLog, serialLog,
                      firmwareLog) {
     var child = Process.spawn(command);
-    if (child < 0) { zbFail("cannot start negative QEMU cell: " + cell); }
+    if (child < 0) { matrixFail("cannot start negative QEMU cell: " + cell); }
     var output = "";
     var reached = false;
     var ticks = 0;
-    while (ticks < 300 && Process.isAlive(child) == 1) {
-        output = output + Process.read(child, 100);
-        if (negativeFirmwareReached(firmware, serialLog, firmwareLog)) {
-            reached = true;
-            break;
+    if (firmware == "seabios") {
+        // The isa-debugcon file backend need not make its final records
+        // visible while QEMU still owns it. Prove the negative cell remains
+        // alive for the complete observation interval, then inspect the
+        // closed log below. The byte-level absence gate still runs first.
+        while (ticks < 300 && Process.isAlive(child) == 1) {
+            output = output + Process.read(child, 0);
+            Thread.sleep(100);
+            ticks = ticks + 1;
         }
-        ticks = ticks + 1;
-    }
-    if (!reached) {
-        var failed = stopQemu(child);
-        FileUtil.writeText(cell + "/qemu.log", output + failed[1]);
-        zbFail("negative firmware observation missing (cell=" + cell + ")");
-    }
-    ticks = 0;
-    while (ticks < 20 && Process.isAlive(child) == 1) {
-        output = output + Process.read(child, 100);
-        ticks = ticks + 1;
-    }
-    if (Process.isAlive(child) != 1) {
-        var early = stopQemu(child);
-        FileUtil.writeText(cell + "/qemu.log", output + early[1]);
-        zbFail("firmware exited during negative settle (cell=" + cell + ")");
+        if (Process.isAlive(child) != 1) {
+            var early = stopQemu(child);
+            FileUtil.writeText(cell + "/qemu.log", output + early[1]);
+            matrixFail("SeaBIOS negative cell exited during the bounded " +
+                       "observation (cell=" + cell + ")");
+        }
+    } else {
+        while (ticks < 300 && Process.isAlive(child) == 1) {
+            output = output + Process.read(child, 100);
+            if (negativeFirmwareReached(firmware, serialLog)) {
+                reached = true;
+                break;
+            }
+            ticks = ticks + 1;
+        }
+        if (!reached) {
+            var failed = stopQemu(child);
+            FileUtil.writeText(cell + "/qemu.log", output + failed[1]);
+            matrixFail("negative firmware observation missing (cell=" + cell +
+                       ")");
+        }
+        ticks = 0;
+        while (ticks < 20 && Process.isAlive(child) == 1) {
+            output = output + Process.read(child, 100);
+            ticks = ticks + 1;
+        }
+        if (Process.isAlive(child) != 1) {
+            var early = stopQemu(child);
+            FileUtil.writeText(cell + "/qemu.log", output + early[1]);
+            matrixFail("firmware exited during negative settle (cell=" + cell +
+                       ")");
+        }
     }
     var stopped = stopQemu(child);
     output = output + stopped[1];
     FileUtil.writeText(cell + "/qemu.log", output);
-    if (stopped[0] != 0) {
-        zbFail("negative QEMU monitor quit failed (cell=" + cell + ")");
+    if (stopped[0] != 0 || stopped[2] != 0) {
+        matrixFail("negative QEMU monitor quit failed (cell=" + cell +
+                   ", status=" + stopped[0] + ", forced=" + stopped[2] +
+                   ")");
     }
-    if (FileUtil.getFileSize(guestLog) != 0) {
-        zbFail("negative cell reached a zedBSD debug path (cell=" + cell + ")");
+    if (firmware == "seabios") {
+        // A pure protective MBR still carries 0x55aa. SeaBIOS must select
+        // the disk and hand its all-zero bootstrap to 0000:7c00; inspect the
+        // closed backend so buffered firmware diagnostics cannot false-fail.
+        requirePattern(firmwareLog, "Booting from Hard Disk",
+                       "SeaBIOS negative disk selection");
+        requirePattern(firmwareLog, "Booting from 0000:7c00",
+                       "SeaBIOS negative protective-MBR handoff");
+    }
+    if (FileUtil.checkFileExists(guestLog) != 1 ||
+        FileUtil.getFileSize(guestLog) != 0) {
+        matrixFail("negative cell reached a zedBSD debug path (cell=" + cell +
+                   ")");
     }
 }
 
@@ -530,6 +625,10 @@ func runCell(qemu, seabios, ovmfCode, ovmfVars, source, layout, firmware,
     if (!positive) { polarity = "negative"; }
     var cellName = layout + "-" + firmware + "-" + polarity;
     var cell = evidence + "/cells/" + cellName;
+    activeCellName = cellName;
+    activeCellPath = cell;
+    activeResultsPath = evidence + "/results.tsv";
+    activeCellFailureRecorded = false;
     run("/", "mkdir -p " + zbShellQuote(cell), "create cell directory");
     var runImage = cell + "/run.img";
     var guestLog = cell + "/debugcon.log";
@@ -582,21 +681,24 @@ func runCell(qemu, seabios, ovmfCode, ovmfVars, source, layout, firmware,
     var elapsed = finished - started;
     FileUtil.writeText(cell + "/result.txt", "MAC-T020\t" + cellName +
         "\tPASS\telapsed_seconds=" + elapsed + "\n");
-    run("/", "printf '%s\\tPASS\\t%s\\n' " + zbShellQuote(cellName) +
+    run("/", "printf '%s\\tPASS\\t%s\\t-\\n' " + zbShellQuote(cellName) +
         " " + elapsed + " >>" + zbShellQuote(evidence + "/results.tsv"),
         "record cell result");
+    activeCellName = "";
+    activeCellPath = "";
+    activeResultsPath = "";
 }
 
 func main(args) {
     if (Array.size(args) != 2) {
-        zbFail("usage: qemu-variant-matrix.noct REPOSITORY EVIDENCE");
+        matrixFail("usage: qemu-variant-matrix.noct REPOSITORY EVIDENCE");
     }
     var repo = capture("realpath " + zbShellQuote(args[0]),
                        "resolve repository path");
     var evidence = capture("realpath -m " + zbShellQuote(args[1]),
                            "resolve evidence path");
     if (FileUtil.checkFileExists(evidence) == 1) {
-        zbFail("evidence path already exists: " + evidence);
+        matrixFail("evidence path already exists: " + evidence);
     }
     run(repo, "mkdir -p " + zbShellQuote(evidence + "/images") + " " +
         zbShellQuote(evidence + "/cells") + " " +
@@ -619,7 +721,7 @@ func main(args) {
         " BUILD=" + zbShellQuote(build) + " clean",
         "clean fixture-private BUILD");
     FileUtil.writeText(evidence + "/results.tsv",
-                       "cell\tresult\telapsed_seconds\n");
+                       "cell\tresult\telapsed_seconds\treason\n");
     run(repo, "{ " + zbShellQuote(qemu) + " --version | sed -n '1p'; " +
         "printf 'qemu=%s\\nseabios=%s\\novmf_code=%s\\novmf_vars=%s\\n' " +
         zbShellQuote(qemu) + " " + zbShellQuote(seabios) + " " +
