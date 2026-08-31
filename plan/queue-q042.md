@@ -24,6 +24,12 @@ Parent: [master plan](master.md)
 
 Previous Queue: [q041](queue-q041.md)
 
+Canonical ID note: this historical Queue retains the pre-merge
+`ws001-p015`/`ws001-p016` labels and test output names.  Their active Phase
+documents are now
+[`ws001-p022`](ws001-posix/phase022-credential-aware-vfs-creation/phase.md)
+and [`ws001-p023`](ws001-posix/phase023-directory-fsync/phase.md).
+
 ## Purpose
 
 Correct native filesystem object ownership and directory synchronization,
@@ -34,8 +40,8 @@ then use those exact semantics to finish the root/non-root transactional
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws001-p015` | [Phase](ws001-posix/phase015-credential-aware-vfs-creation/phase.md) | uncleared | Source/host milestone passes: atomic authorization/credential snapshot, all creation callers/backends, conservative rollback, 50 request checks, AF_UNIX publication, 883,564 FAT ordinary/sanitized checks, and UFS gates; two backend fault cells plus native/remount evidence remain |
-| 2 | `ws001-p016` | [Phase](ws001-posix/phase016-directory-fsync/phase.md) | uncleared | Source implementation and 135 deterministic ordering/error checks pass; disposable-image remount and device-flush acceptance cannot run until `ws008-p010` restores Noct `--path` |
+| 1 | `ws001-p015` | [Canonical Phase](ws001-posix/phase022-credential-aware-vfs-creation/phase.md) | uncleared | Source/host milestone passes: atomic authorization/credential snapshot, all creation callers/backends, conservative rollback, 50 request checks, AF_UNIX publication, 883,564 FAT ordinary/sanitized checks, and UFS gates; two backend fault cells plus native/remount evidence remain |
+| 2 | `ws001-p016` | [Canonical Phase](ws001-posix/phase023-directory-fsync/phase.md) | uncleared | Source implementation and 135 deterministic ordering/error checks pass; disposable-image remount and device-flush acceptance cannot run until `ws008-p010` restores Noct `--path` |
 | 3 | `ws005-p005` | [Phase](ws005-networking/phase005-wifi-credential-store/phase.md) | uncleared | Its retained host implementation was not rerun as invalid native acceptance: both explicit WS001 prerequisites remain incomplete |
 
 ## Dependency and deferral decisions

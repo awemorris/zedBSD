@@ -1,6 +1,6 @@
 # WS005 Phase 005: root and per-user Wi-Fi credential store
 
-Last updated: 2026-08-30
+Last updated: 2026-09-01
 
 WSID: `ws005`
 
@@ -8,8 +8,8 @@ Phase ID: `p005`
 
 Combined ID: `ws005-p005`
 
-Status: Uncleared (`q041`, 2026-08-31); host implementation complete, native
-VFS prerequisites assigned to `ws001-p015` and `ws001-p016`
+Status: Ready to requeue; q041 host implementation complete and q050 completed
+the native VFS prerequisites `ws001-p022` and `ws001-p023`
 
 Parent: [WS005 networking and WLAN](../ws.md)
 
@@ -53,15 +53,12 @@ rc.conf service option, or a confirmed-commit rollback program.
   command grammar, and no `/sbin/wpa` compatibility path.
 - Existing passwd/group lookup, `openat`, `renameat`, `O_DIRECTORY`,
   `O_NOFOLLOW`, `O_EXCL`, record locking, `fsync`, and effective-UID support.
-- [`ws001-p015`](../../ws001-posix/phase015-credential-aware-vfs-creation/phase.md)
-  must make newly created native objects inherit the caller's effective
-  UID/GID.  The current VFS authorizes with the credential but drops it before
-  backend creation, so a non-root caller cannot create an honestly owned
-  lock or temporary file.
-- [`ws001-p016`](../../ws001-posix/phase016-directory-fsync/phase.md) must make
-  directory `fsync()` durable or explicitly unsupported.  The current generic
-  fallback can return success without synchronizing an overlay directory or
-  its backing namespace.
+- [`ws001-p022`](../../ws001-posix/phase022-credential-aware-vfs-creation/phase.md)
+  is complete and makes newly created native objects inherit the caller's
+  effective UID/GID before publication.
+- [`ws001-p023`](../../ws001-posix/phase023-directory-fsync/phase.md) is
+  complete and makes UFS/overlay directory `fsync()` durable while returning
+  an explicit unsupported result for FAT/tmpfs directories.
 - `ws005-p003` is not required for local `set-key`, but later profile use over
   `networkd` depends on its peer-authenticated socket.
 
@@ -393,7 +390,7 @@ world-readable compatibility store.
 
 q041 processed this Phase to the reconsideration boundary.  Its parser and
 selected-profile API become dependencies of `ws005-p006`/`p007`, but the Phase
-must be requeued after `ws001-p015` and `ws001-p016`; it does not itself
+must be requeued after `ws001-p022` and `ws001-p023`; it does not itself
 authorize socket protocol, association, DHCP, or physical-adapter work.
 
 ## q041 execution result
@@ -433,11 +430,24 @@ cell and all retained host regressions from the same artifact.
 ## q042 dependency result
 
 q042 processed both prerequisite Phases but did not make either complete.
-`ws001-p015` now retains credential-aware creation and rollback hardening, and
-`ws001-p016` retains truthful directory-sync dispatch with 135 deterministic
-ordering/error checks. Their fresh native/remount gates remain blocked by the
-host Noct CLI regression, and p015 retains two backend fault-injection cells.
-Accordingly this Phase was marked `uncleared` without repeating a guest test
-whose stated prerequisites were not met. Resume only after both WS001 Phases
-are complete; then rerun the entire retained host matrix and the root/non-root
-credential ownership plus remount-durability guest cell from one artifact.
+`ws001-p022` now retains credential-aware creation and rollback hardening, and
+`ws001-p023` retains truthful directory-sync dispatch with 135 deterministic
+ordering/error checks. At q042 closure their fresh native/remount gates were
+blocked by the host Noct CLI regression, and p022 retained two backend
+fault-injection cells. Accordingly, at q042 closure this Phase remained
+`uncleared` without repeating a guest test whose stated prerequisites were not
+met. The q050 dependency result below supersedes that temporary hold; the full
+retained host matrix and root/non-root credential ownership plus
+remount-durability guest cell now remain as the Phase's own acceptance work.
+
+## q050 dependency result
+
+Both WS001 prerequisites are complete. Their production-linked fault,
+ownership, namespace-ordering, sanitizer/analyzer, full-build, and five-launch
+QEMU/remount gates pass. `ws005-p005` is therefore ready to requeue without a
+new product decision. Its remaining work is the Phase-owned consumer proof:
+run the real `/sbin/net wifi set-key` path as root, as a sudo-like real-user
+effective-root process, and as an ordinary user; verify ownership, mode,
+persistent locking, same-directory atomic replacement, no secret output, and
+no temporary residue; stop QEMU without a guest unmount; then verify both
+stores on the same writable image after reboot.

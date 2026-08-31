@@ -86,10 +86,14 @@ amd64 framebuffer-console race extracted when p031's third hot-add exposed a
 cursor-row overwrite. No physical recovery result is claimed for p032. The
 archived [q048](queue-q048.md) completes the WS006 p008 automatic HID milestone
 with xHCI and paired EHCI/UHCI acceptance; it does not claim the remaining
-physical IN-T42 observation. The current [Queue Book](queue.md) and completed
-[q049](queue-q049.md) contain only WS004 p019: the independent standards CDC
-ECM driver, general zero-packet HCD contract, and passing four-cell
-IDE/xHCI-storage static/DHCP QEMU baseline. The
+physical IN-T42 observation. Completed [q049](queue-q049.md) contains WS004
+p019: the independent standards CDC ECM driver, general zero-packet HCD
+contract, and passing four-cell IDE/xHCI-storage static/DHCP QEMU baseline.
+The current completed [Queue Book](queue.md) and [q050](queue-q050.md) close
+the two VFS prerequisites under their canonical IDs `ws001-p022` and
+`ws001-p023`. Production-linked rollback and synchronization gates plus five
+bounded abrupt-stop/remount launches pass, so `ws005-p005` is ready to requeue.
+The remaining Noct compile/application CLI defect is unrelated. The
 archived q043 PC-98 fixed-read and exact-mouse
 paths both pass locally, and their remaining external resume facts do not
 block subsequent Queues. The
@@ -356,11 +360,11 @@ actually warranted.
 
 | WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
 | --- | --- | --- | --- | --- | --- |
-| `ws001` | POSIX.1-2024 compliance | Active ledger; q042 retained passing source/host milestones for both VFS prerequisites discovered by q041 | `ws001-p014` complete; p015/p016 source/host milestones uncleared | Restore the Noct host CLI through WS008 p010, complete p015's two retained fault cells, then run fresh native/remount acceptance for p015/p016 before returning to WS005 p005 | [WS001](ws001-posix/ws.md) |
+| `ws001` | POSIX.1-2024 compliance | Active ledger; q050 completed both VFS prerequisites discovered by q041 | `ws001-p022` and `ws001-p023` complete with production-linked faults and abrupt-stop/remount evidence | Retain p022/p023 as regressions; their dependency consumer resumes in WS005 p005 | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; restore its Make-owned Noct gate through ws008-p010 | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; q049 completed the independent CDC ECM QEMU network baseline after q047 completed legacy-HCD concurrency/hotplug and checked USB recovery and q048 consumed that boundary for HID. q040 p026 remains uncleared only at the purchased-unit label; NVMe software and physical CDC NCM Ethernet are complete | `ws004-p010`--`p016`, `p018`--`p020`, p022--p024, and p031--p033 complete | Retain p017, resume p021 and p025 when their finite runtime/hardware boundaries are ready, then continue the WLAN chain | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WLAN | Active; q029 p001 and q040 p003 complete; q041 p005 host implementation passes and q042 advanced but did not complete its VFS dependencies | Physical USB Ethernet and authenticated control pass; strict local credential parser/store/CLI now pass host safety and regression gates | Complete WS001 p015/p016 after WS008 p010, then requeue p005 root/non-root ownership and remount-durability acceptance; p004 remains hardware-core dependency-gated | [WS005](ws005-networking/ws.md) |
+| `ws005` | Networking and WLAN | Active; q029 p001 and q040 p003 complete; q041 p005 host implementation passes and q050 completed its VFS dependencies | Physical USB Ethernet and authenticated control pass; strict local credential parser/store/CLI plus required VFS behavior pass | Requeue p005 for the real root/non-root `net wifi set-key` and abrupt-stop/remount consumer cell; p004 remains hardware-core dependency-gated | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; p009 still waits for accepted WS008 userland | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked; accepted host SHA restores runtime `--path` and passes the ordinary production build plus zedbuild byte primitives, while target packages remain separately disabled | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 is uncleared only at unrelated `NOCT-T082` compile/application parsing, and p009 remains separately target-blocked | Resume p010 only from a maintainer-reviewed commit which fixes `--compile --app --path=...`; resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
@@ -498,9 +502,10 @@ priority one.
    passthrough of the connected adapter after automatic gates pass.
 5. Complete the `/sbin/net` WLAN stack in WS005 through the fixed
    `net` -> `networkd` -> `ifconfig`/`wifi`/`dhcpc` topology.
-6. Resume WS008 from the maintainer's latest accepted NoctLang tree. First
-   restore and verify the host `--path`/`require` CLI contract in p010; then
-   update the userland package through p009. The latter is rooted at
+6. Resume WS008 from the maintainer's latest accepted NoctLang tree. The host
+   runtime `--path`/`require` CLI contract is restored; finish p010 only at its
+   remaining compile/application CLI boundary, then update the userland
+   package through p009. The latter is rooted at
    `userland/base/noct/` and clones upstream into
    `userland/base/noct/noct/`.
 7. Implement WS017's `/dev/graphics` LFB fast path after resolving its retained

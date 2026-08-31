@@ -2,9 +2,10 @@
 
 Parent: [WS001](../ws.md)
 
-This directory owns the POSIX workstream's test-case catalog. Executable tests
-remain under repository `/tests` because the top-level Makefile and tooling use
-those paths.
+This directory owns the POSIX workstream's test-case catalog and its reusable
+Phase-specific fixtures. Historical project-wide executables remain under
+repository `/tests` where the top-level Makefile and tooling already use them;
+new WS001-only evidence is kept here rather than copied into `.internal/`.
 
 | Phase(s) | Test cases / executable evidence |
 | --- | --- |
@@ -32,13 +33,21 @@ those paths.
 The concurrent q042 branch used `ws001-p015` and `ws001-p016` before the
 Principal-authored registry above was merged.  The two labels below are
 pre-merge historical identifiers, not additional active uses of those combined
-IDs.  Their evidence remains indexed here so it is not lost; each Phase must be
-assigned a unique ID across its document and dependencies before it resumes.
+IDs.  Their evidence and output labels remain indexed here unchanged; the
+active Phase documents and dependencies now use `ws001-p022` for credential-
+aware VFS creation and `ws001-p023` for directory `fsync`.
 
 | Pre-merge q042 identifier | Test cases / executable evidence |
 | --- | --- |
 | `ws001-p015` (credential-aware VFS creation) | `credential-creation-request-host-test.mk` verifies the exact production authorization/parent-attribute locking boundary; `credential-vfs-qemu.mk` builds native UFS1, UFS2, tmpfs, FAT, and normal overlay-root credential/object probes; `fat-native-vfs-host-test.c` retains the exact FAT production-path regression |
 | `ws001-p016` (directory fsync) | `directory-fsync-host-test.mk` links the exact production VFS, UFS1/UFS2, and overlay directory-sync functions and deterministically checks explicit directory dispatch, UFS inode-before-device order, overlay upper-before-journal-before-mount order, and first-error propagation |
+
+Canonical q050 completion extends those retained fixtures as follows:
+
+| Active Phase | Additional executable evidence |
+| --- | --- |
+| `ws001-p022` | `credential-vfs-ufs-socket-fault-host-test.mk` and `credential-vfs-overlay-fault-host-test.mk` link the exact production rollback paths; `credential-vfs-qemu.noct` drives the five-launch backend/reopen/remount matrix built by `credential-vfs-qemu.mk` |
+| `ws001-p023` | `directory-fsync-host-test.mk` also drives production UFS1/UFS2 namespace write/rollback cells; the shared q050 QEMU runner supplies abrupt-stop/remount durability evidence |
 
 When a new Phase fixes a ledger item, add its normative case, failure case,
 executable path, and environment here before marking the row reviewed.
@@ -163,14 +172,14 @@ The native guest remains the behavioral authority for successful tmpfs, UFS,
 and overlay pathname binds.  This focused source contract specifically keeps
 an early-published `i_special` from becoming usable before bind commits.
 
-Image generation currently depends on the repository's established Noct
-module-search CLI.  A failure in which the pinned interpreter rejects
-`--path=tools/build` is the separate `ws008-p010` blocker and is not evidence
-that the guest acceptance passed.
+At q042 closure image generation depended on a Noct module-search CLI which
+the pinned interpreter rejected. That was a separate `ws008-p010` blocker and
+was not evidence that guest acceptance passed. q050 used the subsequently
+restored runtime `--path=tools/build` contract and completed the guest matrix.
 
 ## q042 pre-merge ws001-p016: directory fsync ordering
 
-[`directory-fsync-host-test.mk`](./directory-fsync-host-test.mk) builds three
+[`directory-fsync-host-test.mk`](./directory-fsync-host-test.mk) builds five
 small host executables from the exact production functions.  It uses linker
 section collection to avoid substituting copied filesystem logic and makes
 only the private UFS/overlay sync entry points visible in the temporary object
@@ -187,6 +196,46 @@ the device flush and that either error is returned.  The overlay cell proves
 upper-directory sync, journal sync, and upper-mount sync order, including
 lower-only/read-only cases and independent failures at every boundary.
 
-This host fixture does not prove namespace survival across a real remount or a
-storage-device flush.  Those remain the disposable-image/QEMU acceptance
-portion of the Phase and must not be inferred from a clean host-test exit.
+This host fixture alone does not prove namespace survival across a real
+remount or a storage-device flush. q050 therefore adds the separate
+disposable-image/QEMU acceptance below; neither proof is inferred from the
+other.
+
+## q050 canonical p022/p023 completion
+
+Run the deterministic fault and ordering matrix without the aggregate test
+target:
+
+```sh
+make -f plan/ws001-posix/tests/credential-vfs-ufs-socket-fault-host-test.mk \
+    run sanitize analyze
+make -f plan/ws001-posix/tests/credential-vfs-overlay-fault-host-test.mk \
+    run sanitize analyze
+make -f plan/ws001-posix/tests/directory-fsync-host-test.mk \
+    run run-sanitize analyze
+```
+
+The QEMU runner makes all images in a private output directory and requires a
+path which does not yet exist:
+
+```sh
+build/NoctLang/build-static/noct --path=tools/build \
+    plan/ws001-posix/tests/credential-vfs-qemu.noct \
+    "$PWD" /tmp/ws001-q050-final-001
+```
+
+It performs five launches: overlay stage 1/stage 2, native UFS1 stage 1/stage
+2, and FAT. The stage pairs use the same writable disposable media. The runner
+sends QMP `quit` immediately after the stage-1 PASS marker, without guest
+unmount or shutdown, and stage 2 verifies the namespace and content. The
+overlay cell also exercises tmpfs and a journaled external UFS2 image. FAT
+uses a raw external image with a test-only `/etc/unixmode` policy, verifies
+representable root creation and explicit non-root rejection, and remounts the
+same image. Source images are hashed before and after and must remain
+unchanged. Historical guest markers use `WS001-P015` and map to canonical
+`ws001-p022`.
+
+The `analyze` targets analyze the programmable fixture translation unit, then
+link and execute it against ordinary-warning production objects. They are
+fixture-scoped analyzer evidence, not a claim that GCC's analyzer covered the
+entire production overlay/UFS translation units.

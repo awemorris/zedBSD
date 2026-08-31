@@ -22,6 +22,8 @@
 #define STATE_DIRECTORY "/p015-state"
 #define STAGE_MARKER STATE_DIRECTORY "/stage1"
 #define EXTERNAL_MOUNT "/p015-external"
+#define DURABILITY_DIRECTORY STATE_DIRECTORY "/p023"
+#define EXTERNAL_DURABILITY EXTERNAL_MOUNT "/p023"
 
 static int
 failure(const char *stage)
@@ -29,6 +31,13 @@ failure(const char *stage)
 	printf("WS001-P015 FAIL stage=%s errno=%d\n", stage, errno);
 	fflush(stdout);
 	return 1;
+}
+
+static void
+progress(const char *stage)
+{
+	printf("WS001-P015 PROGRESS stage=%s\n", stage);
+	fflush(stdout);
 }
 
 static int
@@ -67,6 +76,13 @@ write_file(const char *path, const char *contents, mode_t mode)
 		}
 		offset += (size_t)count;
 	}
+	if (fsync(descriptor) != 0) {
+		int saved = errno;
+
+		(void)close(descriptor);
+		errno = saved;
+		return -1;
+	}
 	return close(descriptor);
 }
 
@@ -97,6 +113,137 @@ read_word(const char *path, char *buffer, size_t capacity)
 	    buffer[count - 1] == '\r'))
 		buffer[--count] = '\0';
 	return count > 0 ? 0 : -1;
+}
+
+static int
+expect_absent(const char *path)
+{
+	struct stat status;
+
+	errno = 0;
+	return lstat(path, &status) == -1 && errno == ENOENT ? 0 : -1;
+}
+
+static int
+expect_contents(const char *path, const char *expected)
+{
+	char contents[64];
+
+	return read_word(path, contents, sizeof(contents)) == 0 &&
+	    strcmp(contents, expected) == 0 ? 0 : -1;
+}
+
+static int
+sync_directory(const char *path, int expected_error)
+{
+	int descriptor, error, saved;
+
+	descriptor = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (descriptor < 0)
+		return -1;
+	errno = 0;
+	error = fsync(descriptor);
+	saved = errno;
+	if (close(descriptor) != 0)
+		return -1;
+	if (expected_error == 0)
+		return error == 0 ? 0 : -1;
+	if (error == -1 && saved == expected_error)
+		return 0;
+	errno = saved;
+	return -1;
+}
+
+static int
+write_stage_marker(const char *contents)
+{
+	if (write_file(STAGE_MARKER, contents, 0600U) != 0)
+		return -1;
+	return sync_directory(STATE_DIRECTORY, 0);
+}
+
+static int
+durability_stage_one(const char *directory, int supports_hardlink)
+{
+	char temporary[256], payload[256], hardlink[256], scratch[256];
+	char selector[256], replacement[256];
+	int descriptor;
+
+	if (mkdir(directory, 0755U) != 0 ||
+	    join_path(temporary, sizeof(temporary), directory,
+	    "payload.tmp") != 0 ||
+	    join_path(payload, sizeof(payload), directory, "payload") != 0 ||
+	    join_path(hardlink, sizeof(hardlink), directory, "hardlink") != 0 ||
+	    join_path(scratch, sizeof(scratch), directory, "scratch") != 0 ||
+	    join_path(selector, sizeof(selector), directory, "selector") != 0 ||
+	    join_path(replacement, sizeof(replacement), directory,
+	    "selector.new") != 0)
+		return -1;
+	descriptor = open(temporary,
+	    O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644U);
+	if (descriptor < 0 || write(descriptor, "durable-v1\n", 11U) != 11 ||
+	    fsync(descriptor) != 0 || close(descriptor) != 0 ||
+	    rename(temporary, payload) != 0 || mkdir(scratch, 0755U) != 0 ||
+	    sync_directory(directory, 0) != 0 || rmdir(scratch) != 0)
+		return -1;
+	errno = 0;
+	if (supports_hardlink) {
+		if (link(payload, hardlink) != 0 ||
+		    sync_directory(directory, 0) != 0 || unlink(hardlink) != 0)
+			return -1;
+	} else if (link(payload, hardlink) != -1 || errno != EOPNOTSUPP) {
+		return -1;
+	}
+	if (symlink("obsolete", selector) != 0 ||
+	    symlink("payload", replacement) != 0 ||
+	    rename(replacement, selector) != 0 ||
+	    sync_directory(directory, 0) != 0)
+		return -1;
+	return 0;
+}
+
+static int
+durability_validate(const char *directory)
+{
+	char payload[256], hardlink[256], scratch[256], temporary[256];
+	char selector[256], replacement[256], target[32];
+	ssize_t length;
+
+	if (join_path(payload, sizeof(payload), directory, "payload") != 0 ||
+	    join_path(hardlink, sizeof(hardlink), directory, "hardlink") != 0 ||
+	    join_path(scratch, sizeof(scratch), directory, "scratch") != 0 ||
+	    join_path(temporary, sizeof(temporary), directory,
+	    "payload.tmp") != 0 ||
+	    join_path(selector, sizeof(selector), directory, "selector") != 0 ||
+	    join_path(replacement, sizeof(replacement), directory,
+	    "selector.new") != 0 ||
+	    expect_contents(payload, "durable-v1") != 0 ||
+	    expect_absent(hardlink) != 0 || expect_absent(scratch) != 0 ||
+	    expect_absent(temporary) != 0 || expect_absent(replacement) != 0)
+		return -1;
+	length = readlink(selector, target, sizeof(target) - 1U);
+	if (length < 0)
+		return -1;
+	target[length] = '\0';
+	return strcmp(target, "payload") == 0 ? 0 : -1;
+}
+
+static int
+tmpfs_fsync_contract(void)
+{
+	const char *directory = "/tmp/ws001-p023";
+	const char *regular = "/tmp/ws001-p023/regular";
+	int descriptor;
+
+	if (mkdir(directory, 0755U) != 0)
+		return -1;
+	descriptor = open(regular,
+	    O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644U);
+	if (descriptor < 0 || write(descriptor, "tmpfs\n", 6U) != 6 ||
+	    fsync(descriptor) != 0 || close(descriptor) != 0 ||
+	    sync_directory(directory, EOPNOTSUPP) != 0)
+		return -1;
+	return 0;
 }
 
 static int
@@ -199,11 +346,19 @@ expect_object(const char *directory, const char *name, mode_t type,
 	struct stat status;
 
 	if (join_path(path, sizeof(path), directory, name) != 0 ||
-	    lstat(path, &status) != 0)
+	    lstat(path, &status) != 0) {
+		printf("WS001-P015 DETAIL missing=%s/%s errno=%d\n", directory,
+		    name, errno);
 		return -1;
+	}
 	if ((status.st_mode & S_IFMT) != type ||
 	    (status.st_mode & 07777U) != permissions || status.st_uid != uid ||
 	    status.st_gid != gid) {
+		printf("WS001-P015 DETAIL object=%s/%s mode=%o expected=%o "
+		    "uid=%u expected-uid=%u gid=%u expected-gid=%u\n",
+		    directory, name, (unsigned)status.st_mode,
+		    (unsigned)(type | permissions), (unsigned)status.st_uid,
+		    (unsigned)uid, (unsigned)status.st_gid, (unsigned)gid);
 		errno = EINVAL;
 		return -1;
 	}
@@ -235,6 +390,15 @@ validate_objects(const char *directory, gid_t gid, int setgid_parent,
 		    regular.st_dev != hardlink.st_dev ||
 		    regular.st_ino != hardlink.st_ino || regular.st_nlink != 2U ||
 		    hardlink.st_nlink != 2U) {
+			printf("WS001-P015 DETAIL hardlink=%s regular-dev=%llu "
+			    "link-dev=%llu regular-ino=%llu link-ino=%llu "
+			    "regular-nlink=%u link-nlink=%u\n", directory,
+			    (unsigned long long)regular.st_dev,
+			    (unsigned long long)hardlink.st_dev,
+			    (unsigned long long)regular.st_ino,
+			    (unsigned long long)hardlink.st_ino,
+			    (unsigned)regular.st_nlink,
+			    (unsigned)hardlink.st_nlink);
 			errno = EINVAL;
 			return -1;
 		}
@@ -266,23 +430,35 @@ create_object_set(const char *directory, uid_t owner, gid_t group,
 	mode_t mode, gid_t expected_group, int setgid_parent,
 	int supports_hardlink, int supports_socket)
 {
+	int child_status;
 	pid_t child;
 
 	if (mkdir(directory, 0700U) != 0 || chown(directory, owner, group) != 0 ||
-	    chmod(directory, mode) != 0)
+	    chmod(directory, mode) != 0) {
+		printf("WS001-P015 DETAIL create-parent=%s errno=%d\n",
+		    directory, errno);
 		return -1;
+	}
 	child = fork();
 	if (child < 0)
 		return -1;
 	if (child == 0)
 		_exit(create_objects_child(directory, supports_hardlink,
 		    supports_socket));
-	if (wait_child(child) != 0) {
+	child_status = wait_child(child);
+	if (child_status != 0) {
+		printf("WS001-P015 DETAIL create-child=%s status=%d\n",
+		    directory, child_status);
 		errno = EIO;
 		return -1;
 	}
-	return validate_objects(directory, expected_group, setgid_parent,
-	    supports_hardlink, supports_socket);
+	if (validate_objects(directory, expected_group, setgid_parent,
+	    supports_hardlink, supports_socket) != 0) {
+		printf("WS001-P015 DETAIL validate=%s errno=%d\n", directory,
+		    errno);
+		return -1;
+	}
+	return 0;
 }
 
 static int
@@ -308,9 +484,15 @@ static int
 run_suite(const char *base, int supports_hardlink, int supports_socket)
 {
 	char ordinary[256], inherited[256], denied[256];
+	int child_status;
 	pid_t child;
 
-	if (mkdir(base, 0755U) != 0 ||
+	if (mkdir(base, 0755U) != 0) {
+		printf("WS001-P015 DETAIL suite-mkdir=%s errno=%d\n", base,
+		    errno);
+		return -1;
+	}
+	if (
 	    join_path(ordinary, sizeof(ordinary), base, "ordinary") != 0 ||
 	    join_path(inherited, sizeof(inherited), base, "setgid") != 0 ||
 	    join_path(denied, sizeof(denied), base, "denied") != 0 ||
@@ -320,14 +502,20 @@ run_suite(const char *base, int supports_hardlink, int supports_socket)
 	    S_ISGID | 0770U, PARENT_GID, 1,
 	    supports_hardlink, supports_socket) != 0 ||
 	    mkdir(denied, 0555U) != 0 || chown(denied, 0, 0) != 0 ||
-	    chmod(denied, 0555U) != 0)
+	    chmod(denied, 0555U) != 0) {
+		printf("WS001-P015 DETAIL suite-setup=%s errno=%d\n", base,
+		    errno);
 		return -1;
+	}
 	child = fork();
 	if (child < 0)
 		return -1;
 	if (child == 0)
 		_exit(permission_denial_child(denied));
-	if (wait_child(child) != 0) {
+	child_status = wait_child(child);
+	if (child_status != 0) {
+		printf("WS001-P015 DETAIL denial-child=%s status=%d\n", base,
+		    child_status);
 		errno = EIO;
 		return -1;
 	}
@@ -386,24 +574,41 @@ mount_external(const char *wanted_backend, char fspec[32])
 {
 	static const char *const candidates[] = {"sdb", "sdc", "sdd", "sda"};
 	struct mount_args arguments;
+	const char *marker_name;
 	char marker[32];
 	unsigned index;
+	int marker_error, saved;
 
 	if (mkdir(EXTERNAL_MOUNT, 0755U) != 0 && errno != EEXIST)
 		return -1;
+	/* FAT keeps the required .p015-backend fixture, but the acceptance probe
+	 * uses an 8.3 alias so backend selection does not depend on FAT LFN. */
+	marker_name = strcmp(wanted_backend, "fat") == 0 ?
+	    EXTERNAL_MOUNT "/P015TYPE" :
+	    EXTERNAL_MOUNT "/.p015-backend";
 	for (index = 0; index < sizeof(candidates) / sizeof(candidates[0]);
 	    index++) {
 		memset(&arguments, 0, sizeof(arguments));
 		arguments.size = sizeof(arguments);
 		arguments.version = ZEDBSD_MOUNT_ARGS_VERSION;
 		strcpy(arguments.fspec, candidates[index]);
-		if (mount("auto", EXTERNAL_MOUNT, 0, &arguments) != 0)
+		if (mount(wanted_backend, EXTERNAL_MOUNT, 0, &arguments) != 0) {
+			printf("WS001-P015 DETAIL mount=%s errno=%d\n",
+			    candidates[index], errno);
 			continue;
-		if (read_word(EXTERNAL_MOUNT "/.p015-backend", marker,
-		    sizeof(marker)) == 0 && strcmp(marker, wanted_backend) == 0) {
+		}
+		marker[0] = '\0';
+		errno = 0;
+		marker_error = read_word(marker_name, marker, sizeof(marker));
+		saved = errno;
+		if (marker_error == 0 && strcmp(marker, wanted_backend) == 0) {
 			strcpy(fspec, candidates[index]);
 			return 0;
 		}
+		printf("WS001-P015 DETAIL marker=%s wanted=%s got=%s "
+		    "read-error=%d errno=%d\n", candidates[index], wanted_backend,
+		    marker_error == 0 ? marker : "<unreadable>", marker_error,
+		    saved);
 		(void)unmount(EXTERNAL_MOUNT, 0);
 	}
 	errno = ENODEV;
@@ -411,7 +616,7 @@ mount_external(const char *wanted_backend, char fspec[32])
 }
 
 static int
-remount_external(const char *fspec)
+remount_external(const char *fspec, const char *type)
 {
 	struct mount_args arguments;
 
@@ -419,7 +624,7 @@ remount_external(const char *fspec)
 	arguments.size = sizeof(arguments);
 	arguments.version = ZEDBSD_MOUNT_ARGS_VERSION;
 	strcpy(arguments.fspec, fspec);
-	return mount("auto", EXTERNAL_MOUNT, 0, &arguments);
+	return mount(type, EXTERNAL_MOUNT, 0, &arguments);
 }
 
 static int
@@ -428,11 +633,11 @@ fat_nonroot_rejection_child(void)
 	struct sockaddr_un address;
 	struct stat status;
 	const char *const paths[] = {
-	    EXTERNAL_MOUNT "/writable/user-file",
-	    EXTERNAL_MOUNT "/writable/user-directory",
-	    EXTERNAL_MOUNT "/writable/user-fifo",
-	    EXTERNAL_MOUNT "/writable/user-symlink",
-	    EXTERNAL_MOUNT "/writable/user-socket"};
+	    EXTERNAL_MOUNT "/writable/UFILE",
+	    EXTERNAL_MOUNT "/writable/UDIR",
+	    EXTERNAL_MOUNT "/writable/UFIFO",
+	    EXTERNAL_MOUNT "/writable/USYMLINK",
+	    EXTERNAL_MOUNT "/writable/USOCKET"};
 	int descriptor, socket_descriptor;
 	unsigned index;
 
@@ -484,15 +689,29 @@ run_fat(void)
 	if (mount_external("fat", fspec) != 0)
 		return failure("fat-mount");
 	(void)umask(0);
-	descriptor = open(EXTERNAL_MOUNT "/root-file",
+	/* Keep the FAT16 acceptance names within 8.3.  LFN is independent of the
+	 * ownership/rollback and directory-fsync contracts exercised here. */
+	descriptor = open(EXTERNAL_MOUNT "/ROOTFILE",
 	    O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0755U);
-	if (descriptor < 0 || close(descriptor) != 0 ||
-	    mkdir(EXTERNAL_MOUNT "/root-directory", 0755U) != 0 ||
-	    expect_object(EXTERNAL_MOUNT, "root-file", S_IFREG, 0755U, 0, 0,
-	    NULL) != 0 ||
-	    expect_object(EXTERNAL_MOUNT, "root-directory", S_IFDIR, 0755U,
+	if (descriptor < 0)
+		return failure("fat-root-file-open");
+	if (write(descriptor, "fat\n", 4U) != 4)
+		return failure("fat-root-file-write");
+	if (fsync(descriptor) != 0)
+		return failure("fat-root-file-fsync");
+	if (close(descriptor) != 0)
+		return failure("fat-root-file-close");
+	if (mkdir(EXTERNAL_MOUNT "/ROOTDIR", 0755U) != 0)
+		return failure("fat-root-directory-mkdir");
+	if (sync_directory(EXTERNAL_MOUNT "/ROOTDIR",
+	    EOPNOTSUPP) != 0)
+		return failure("fat-root-directory-fsync");
+	if (expect_object(EXTERNAL_MOUNT, "ROOTFILE", S_IFREG, 0755U, 0, 0,
+	    NULL) != 0)
+		return failure("fat-root-file-stat");
+	if (expect_object(EXTERNAL_MOUNT, "ROOTDIR", S_IFDIR, 0755U,
 	    0, 0, NULL) != 0)
-		return failure("fat-representable-create");
+		return failure("fat-root-directory-stat");
 	child = fork();
 	if (child < 0)
 		return failure("fat-fork");
@@ -500,17 +719,20 @@ run_fat(void)
 		_exit(fat_nonroot_rejection_child());
 	if (wait_child(child) != 0)
 		return failure("fat-nonroot-rejection");
-	if (unmount(EXTERNAL_MOUNT, 0) != 0 || remount_external(fspec) != 0 ||
-	    expect_object(EXTERNAL_MOUNT, "root-file", S_IFREG, 0755U, 0, 0,
+	if (unmount(EXTERNAL_MOUNT, 0) != 0 ||
+	    remount_external(fspec, "fat") != 0 ||
+	    expect_object(EXTERNAL_MOUNT, "ROOTFILE", S_IFREG, 0755U, 0, 0,
 	    NULL) != 0 ||
-	    expect_object(EXTERNAL_MOUNT, "root-directory", S_IFDIR, 0755U,
+	    expect_object(EXTERNAL_MOUNT, "ROOTDIR", S_IFDIR, 0755U,
 	    0, 0, NULL) != 0)
 		return failure("fat-remount");
 	errno = 0;
-	if (lstat(EXTERNAL_MOUNT "/writable/user-file", &status) != -1 ||
+	if (lstat(EXTERNAL_MOUNT "/writable/UFILE", &status) != -1 ||
 	    errno != ENOENT)
 		return failure("fat-residue");
 	printf("WS001-P015 FAT PASS\n");
+	printf("WS001-P023 PASS scenario=fat regular-fsync=PASS "
+	    "directory-fsync=EOPNOTSUPP\n");
 	fflush(stdout);
 	return 0;
 }
@@ -525,25 +747,40 @@ run_overlay_stage_one(void)
 	 * AF_UNIX sockets now use the same atomic publication contract as tmpfs
 	 * and native UFS.
 	 */
-	if (mkdir(STATE_DIRECTORY, 0755U) != 0 ||
-	    run_suite(STATE_DIRECTORY "/overlay", 0, 1) != 0 ||
-	    create_direct_nonroot("/p015-lower-only/nonroot", 0600U) != 0 ||
+	progress("overlay-state-mkdir-begin");
+	if (mkdir(STATE_DIRECTORY, 0755U) != 0)
+		return failure("overlay-create");
+	progress("overlay-state-mkdir-end");
+	if (run_suite(STATE_DIRECTORY "/overlay", 0, 1) != 0)
+		return failure("overlay-create");
+	progress("overlay-suite-end");
+	if (create_direct_nonroot("/p015-lower-only/nonroot", 0600U) != 0 ||
 	    expect_object("/p015-lower-only", "nonroot", S_IFREG, 0600U,
-	    TEST_UID, TEST_GID, NULL) != 0 ||
-	    run_suite("/tmp/ws001-p015", 1, 1) != 0)
-		return failure("overlay-tmpfs-create");
+	    TEST_UID, TEST_GID, NULL) != 0)
+		return failure("overlay-copy-up");
+	progress("overlay-copy-up-end");
+	if (run_suite("/tmp/ws001-p015", 1, 1) != 0)
+		return failure("tmpfs-create");
+	progress("tmpfs-suite-end");
+	if (tmpfs_fsync_contract() != 0)
+		return failure("tmpfs-fsync");
+	if (durability_stage_one(DURABILITY_DIRECTORY, 0) != 0)
+		return failure("overlay-directory-fsync");
+	progress("overlay-durability-end");
 	if (mount_external("ufs2", fspec) != 0 ||
 	    read_word(EXTERNAL_MOUNT "/.p015-backend", backend,
 	    sizeof(backend)) != 0 || strcmp(backend, "ufs2") != 0 ||
 	    run_suite(EXTERNAL_MOUNT "/suite", 1, 1) != 0 ||
-	    unmount(EXTERNAL_MOUNT, 0) != 0 || remount_external(fspec) != 0 ||
+	    unmount(EXTERNAL_MOUNT, 0) != 0 ||
+	    remount_external(fspec, "ufs2") != 0 ||
 	    validate_suite(EXTERNAL_MOUNT "/suite", 1, 1) != 0 ||
-	    unmount(EXTERNAL_MOUNT, 0) != 0)
+	    durability_stage_one(EXTERNAL_DURABILITY, 1) != 0)
 		return failure("ufs2-remount");
-	if (write_file(STAGE_MARKER, "overlay\n", 0600U) != 0)
+	if (write_stage_marker("overlay\n") != 0)
 		return failure("overlay-stage-marker");
 	printf("WS001-P015 STAGE1 PASS scenario=overlay backend=ufs2 "
 	    "overlay-hardlink=EOPNOTSUPP overlay-socket=PASS\n");
+	printf("WS001-P023 STAGE1 PASS scenario=overlay backend=ufs2\n");
 	fflush(stdout);
 	return 0;
 }
@@ -551,6 +788,7 @@ run_overlay_stage_one(void)
 static int
 run_overlay(void)
 {
+	char fspec[32];
 	struct stat status;
 
 	if (lstat(STAGE_MARKER, &status) != 0) {
@@ -560,9 +798,14 @@ run_overlay(void)
 	}
 	if (validate_suite(STATE_DIRECTORY "/overlay", 0, 1) != 0 ||
 	    expect_object("/p015-lower-only", "nonroot", S_IFREG, 0600U,
-	    TEST_UID, TEST_GID, NULL) != 0)
+	    TEST_UID, TEST_GID, NULL) != 0 ||
+	    durability_validate(DURABILITY_DIRECTORY) != 0 ||
+	    mount_external("ufs2", fspec) != 0 ||
+	    validate_suite(EXTERNAL_MOUNT "/suite", 1, 1) != 0 ||
+	    durability_validate(EXTERNAL_DURABILITY) != 0)
 		return failure("overlay-reboot-validate");
 	printf("WS001-P015 PASS scenario=overlay\n");
+	printf("WS001-P023 PASS scenario=overlay backend=ufs2\n");
 	fflush(stdout);
 	return 0;
 }
@@ -576,10 +819,15 @@ run_native_stage_one(void)
 	    chown("/home/p015", TEST_UID, TEST_GID) != 0 ||
 	    create_direct_nonroot("/home/p015/.wifi.conf", 0600U) != 0 ||
 	    expect_object("/home/p015", ".wifi.conf", S_IFREG, 0600U,
-	    TEST_UID, TEST_GID, NULL) != 0 ||
-	    write_file(STAGE_MARKER, "native\n", 0600U) != 0)
-		return failure("native-stage1");
+	    TEST_UID, TEST_GID, NULL) != 0)
+		return failure("native-create");
+	if (tmpfs_fsync_contract() != 0)
+		return failure("native-tmpfs-fsync");
+	if (durability_stage_one(DURABILITY_DIRECTORY, 1) != 0 ||
+	    write_stage_marker("native\n") != 0)
+		return failure("native-directory-fsync");
 	printf("WS001-P015 STAGE1 PASS scenario=native backend=ufs1\n");
+	printf("WS001-P023 STAGE1 PASS scenario=native backend=ufs1\n");
 	fflush(stdout);
 	return 0;
 }
@@ -596,9 +844,11 @@ run_native(void)
 	}
 	if (validate_suite(STATE_DIRECTORY "/native", 1, 1) != 0 ||
 	    expect_object("/home/p015", ".wifi.conf", S_IFREG, 0600U,
-	    TEST_UID, TEST_GID, NULL) != 0)
+	    TEST_UID, TEST_GID, NULL) != 0 ||
+	    durability_validate(DURABILITY_DIRECTORY) != 0)
 		return failure("native-reboot-validate");
 	printf("WS001-P015 PASS scenario=native-ufs1\n");
+	printf("WS001-P023 PASS scenario=native-ufs1\n");
 	fflush(stdout);
 	return 0;
 }

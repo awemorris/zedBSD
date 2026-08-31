@@ -1212,18 +1212,104 @@ overlay_install_upper(struct inode *inode, const struct path *upper)
 	overlay_publish_upper(inode, upper, 0, NULL);
 }
 
-static OVERLAY_HIGH int
-overlay_ensure_upper_dir(struct inode *directory)
+#define OVERLAY_MATERIALIZATION_MAX ((ZEDBSD_PATH_MAX / 2U) + 1U)
+
+struct overlay_materialization_entry {
+	struct overlay_materialization_entry *next;
+	struct inode *directory;
+	struct path parent_upper;
+	struct path created_upper;
+	char name[NAME_MAX + 1U];
+};
+
+struct overlay_materialization_transaction {
+	struct overlay_materialization_entry *created;
+	unsigned count;
+};
+
+static OVERLAY_HIGH void
+overlay_clear_upper_if(struct inode *inode, const struct path *expected)
 {
+	struct overlay_inode_info *info = overlay_info(inode);
+	struct path removed;
+
+	path_init(&removed);
+	if (info == NULL || expected == NULL)
+		return;
+	mutex_lock(&inode->i_lock);
+	if (info->upper.p_mount == expected->p_mount &&
+	    info->upper.p_inode == expected->p_inode) {
+		removed = info->upper;
+		path_init(&info->upper);
+		overlay_refresh_locked(inode);
+	}
+	mutex_unlock(&inode->i_lock);
+	path_release(&removed);
+}
+
+/* A leaf operation may need to materialize several lower-only ancestors.
+ * Keep those allocations provisional until the leaf commits.  On failure,
+ * remove them from deepest to shallowest and preserve any entry whose rmdir
+ * failed as the authoritative upper while quarantining the mount read-only. */
+static OVERLAY_HIGH int
+overlay_materialization_complete(struct overlay_mount_state *state,
+	struct overlay_materialization_transaction *transaction, int error)
+{
+	struct overlay_materialization_entry *entry, *next;
+	/* A prior leaf rollback may already have quarantined the mount.  Preserve
+	 * that first cleanup errno while still attempting every ancestor cleanup. */
+	int cleanup_error = state->flags == OVERLAY_READ_ONLY ? error : 0;
+	int one_error;
+
+	for (entry = transaction->created; entry != NULL; entry = next) {
+		next = entry->next;
+		if (error != 0) {
+			struct componentname name;
+
+			name.cn_nameptr = entry->name;
+			name.cn_namelen = strlen(entry->name);
+			name.cn_flags = COMPONENT_LAST;
+			one_error = inode_rmdir(entry->parent_upper.p_inode, &name);
+			if (one_error == 0)
+				overlay_clear_upper_if(entry->directory,
+				    &entry->created_upper);
+			if (cleanup_error == 0)
+				cleanup_error = one_error;
+			one_error = mount_sync(entry->parent_upper.p_mount);
+			if (cleanup_error == 0)
+				cleanup_error = one_error;
+		}
+		path_release(&entry->parent_upper);
+		path_release(&entry->created_upper);
+		inode_release(entry->directory);
+		kern_free(entry);
+	}
+	transaction->created = NULL;
+	transaction->count = 0;
+	if (cleanup_error != 0) {
+		state->flags = OVERLAY_READ_ONLY;
+		return cleanup_error;
+	}
+	return error;
+}
+
+static OVERLAY_HIGH int
+overlay_ensure_upper_dir_tracked(struct inode *directory,
+	struct overlay_materialization_transaction *transaction)
+{
+	struct overlay_mount_state *state;
+	struct overlay_materialization_entry *pending = NULL;
 	struct inode *parent, *created;
 	struct inode_creation_request request;
 	struct path upper, lower, parent_upper;
 	struct componentname name;
 	char relative[ZEDBSD_PATH_MAX], parent_path[ZEDBSD_PATH_MAX];
-	int error;
+	int error, cleanup_error, sync_error;
+	int created_new = 0;
 
 	if (overlay_info(directory) == NULL || directory->i_type != INODE_DIR)
 		return ENOTDIR;
+	state = directory->i_mount->m_data;
 	error = overlay_info_snapshot(directory, &upper, &lower, relative);
 	if (error != 0)
 		return error;
@@ -1239,7 +1325,7 @@ overlay_ensure_upper_dir(struct inode *directory)
 	error = overlay_find_relative(directory->i_mount, parent_path, &parent);
 	if (error != 0)
 		goto out_paths;
-	error = overlay_ensure_upper_dir(parent);
+	error = overlay_ensure_upper_dir_tracked(parent, transaction);
 	if (error == 0)
 		error = inode_creation_request_preserve(
 			lower.p_inode != NULL ? lower.p_inode : directory,
@@ -1248,28 +1334,97 @@ overlay_ensure_upper_dir(struct inode *directory)
 	if (error == 0)
 		error = overlay_path_snapshot(parent, OVERLAY_PATH_UPPER,
 		    &parent_upper);
+	if (error == 0 && transaction != NULL) {
+		if (transaction->count >= OVERLAY_MATERIALIZATION_MAX)
+			error = ENAMETOOLONG;
+		else {
+			pending = kern_calloc(1, sizeof(*pending));
+			if (pending == NULL)
+				error = ENOMEM;
+		}
+	}
 	if (error == 0)
 		error = inode_mkdir(parent_upper.p_inode, &name,
 			&request, &created);
-	if (error == EEXIST)
+	if (error == 0)
+		created_new = 1;
+	if (error == EEXIST) {
+		if (pending != NULL) {
+			kern_free(pending);
+			pending = NULL;
+		}
 		error = inode_lookup(parent_upper.p_inode, &name,
 			&created);
+	}
 	if (error == 0) {
 		struct path created_path;
 
 		path_init(&created_path);
 		path_set(&created_path, parent_upper.p_mount, created);
-		overlay_install_upper(directory, &created_path);
+		/* A newly materialized directory is not published to the overlay
+		 * inode until its upper namespace entry is durable.  Otherwise a
+		 * failed sync leaves a visible upper directory after returning an
+		 * error.  An EEXIST lookup observes an already committed directory
+		 * and needs no new durability transaction. */
+		if (created_new)
+			error = mount_sync(parent_upper.p_mount);
+		if (error == 0) {
+			overlay_install_upper(directory, &created_path);
+			if (created_new && transaction != NULL) {
+				pending->directory = directory;
+				inode_ref(directory);
+				path_init(&pending->parent_upper);
+				path_set(&pending->parent_upper,
+				    parent_upper.p_mount, parent_upper.p_inode);
+				path_init(&pending->created_upper);
+				path_set(&pending->created_upper,
+				    created_path.p_mount, created_path.p_inode);
+				memcpy(pending->name, name.cn_nameptr,
+				    name.cn_namelen);
+				pending->name[name.cn_namelen] = '\0';
+				pending->next = transaction->created;
+				transaction->created = pending;
+				transaction->count++;
+				pending = NULL;
+			}
+		} else if (created_new) {
+			cleanup_error = inode_rmdir(parent_upper.p_inode, &name);
+			/* A failed rmdir leaves the complete created directory in the
+			 * upper namespace.  Keep it authoritative before quarantining the
+			 * mount; a successful rmdir leaves no live entry to publish even if
+			 * the following durability sync fails. */
+			if (cleanup_error != 0)
+				overlay_install_upper(directory, &created_path);
+			sync_error = mount_sync(parent_upper.p_mount);
+			if (cleanup_error == 0)
+				cleanup_error = sync_error;
+			if (cleanup_error != 0) {
+				state->flags = OVERLAY_READ_ONLY;
+				error = cleanup_error;
+			}
+		}
 		path_release(&created_path);
 		inode_release(created);
-		error = mount_sync(parent_upper.p_mount);
 	}
 	path_release(&parent_upper);
 	inode_release(parent);
 	out_paths:
+	if (pending != NULL)
+		kern_free(pending);
 	path_release(&upper);
 	path_release(&lower);
 	return error;
+}
+
+static OVERLAY_HIGH int
+overlay_ensure_upper_dir(struct inode *directory)
+{
+	struct overlay_materialization_transaction transaction = { NULL, 0U };
+	struct overlay_mount_state *state = directory->i_mount->m_data;
+	int error;
+
+	error = overlay_ensure_upper_dir_tracked(directory, &transaction);
+	return overlay_materialization_complete(state, &transaction, error);
 }
 
 static OVERLAY_HIGH void
@@ -1289,6 +1444,9 @@ static OVERLAY_HIGH int
 overlay_copy_up_regular(struct inode *inode)
 {
 	struct overlay_mount_state *state = inode->i_mount->m_data;
+	struct overlay_materialization_transaction materialization = {
+		NULL, 0U
+	};
 	struct inode *parent = NULL, *temp_inode = NULL;
 	struct file *source = NULL, *destination = NULL;
 	struct path upper, lower, parent_upper, temp_path, final_path;
@@ -1298,7 +1456,9 @@ overlay_copy_up_regular(struct inode *inode)
 	char temp_name[11];
 	uint8_t *buffer = NULL;
 	off_t offset = 0;
-	int error = 0, renamed = 0, entered_transaction = 0;
+	int error = 0, cleanup_error;
+	int renamed = 0, final_removed = 0, retain_materialization = 0;
+	int entered_transaction = 0;
 	unsigned attempts;
 
 	if (state->flags != OVERLAY_READ_WRITE)
@@ -1316,6 +1476,14 @@ overlay_copy_up_regular(struct inode *inode)
 		entered_transaction = 1;
 	}
 	mutex_lock(&state->copy_up_lock);
+	/* A cleanup failure may have quarantined the mount while this caller
+	 * waited for the namespace/copy-up gates.  The check above is only a fast
+	 * path; revalidate the authoritative state before creating any upper
+	 * object. */
+	if (state->flags != OVERLAY_READ_WRITE) {
+		error = EROFS;
+		goto out;
+	}
 	/* The first waiter may have completed the copy while this caller slept. */
 	error = overlay_info_snapshot(inode, &upper, &lower, relative);
 	if (error != 0)
@@ -1332,7 +1500,7 @@ overlay_copy_up_regular(struct inode *inode)
 	if (error == 0)
 		error = overlay_find_relative(inode->i_mount, parent_path, &parent);
 	if (error == 0)
-		error = overlay_ensure_upper_dir(parent);
+		error = overlay_ensure_upper_dir_tracked(parent, &materialization);
 	if (error == 0)
 		error = overlay_path_snapshot(parent, OVERLAY_PATH_UPPER,
 		    &parent_upper);
@@ -1390,23 +1558,65 @@ overlay_copy_up_regular(struct inode *inode)
 		error = inode_rename(parent_upper.p_inode,
 			&temp_name_component, parent_upper.p_inode,
 			&final_name, 0);
-		if (error == 0) {
+		if (error == 0)
 			renamed = 1;
-			/* Rename is the namespace commit.  Publish the resulting upper
-			 * inode immediately, even if the following durability sync fails. */
+	}
+	if (renamed) {
+		error = mount_sync(parent_upper.p_mount);
+		if (error == 0) {
 			path_set(&final_path, parent_upper.p_mount, temp_inode);
 			overlay_install_upper(inode, &final_path);
+		} else {
+			int original_error = error;
+			int sync_error;
+
+			cleanup_error = inode_unlink(parent_upper.p_inode,
+				&final_name);
+			if (cleanup_error == 0)
+				final_removed = 1;
+			sync_error = mount_sync(parent_upper.p_mount);
+			if (cleanup_error == 0)
+				cleanup_error = sync_error;
+			if (cleanup_error == 0) {
+				error = original_error;
+			} else {
+				/* If unlink itself failed, the complete renamed upper is still
+				 * authoritative.  Publish it before freezing so readers never
+				 * select stale lower contents.  A removed-but-not-durable name
+				 * remains unpublished in the live namespace. */
+				if (!final_removed) {
+					path_set(&final_path, parent_upper.p_mount,
+					    temp_inode);
+					overlay_install_upper(inode, &final_path);
+					retain_materialization = 1;
+				}
+				state->flags = OVERLAY_READ_ONLY;
+				error = cleanup_error;
+			}
 		}
 	}
-	if (error == 0)
-		error = mount_sync(parent_upper.p_mount);
 out:
 	if (buffer != NULL) kern_free(buffer);
 	if (destination != NULL) (void)file_close(destination);
 	if (source != NULL) (void)file_close(source);
-	if (!renamed && temp_inode != NULL && parent_upper.p_inode != NULL)
-		(void)inode_unlink(parent_upper.p_inode,
+	if (!renamed && temp_inode != NULL && parent_upper.p_inode != NULL) {
+		int sync_error;
+
+		cleanup_error = inode_unlink(parent_upper.p_inode,
 			&temp_name_component);
+		sync_error = mount_sync(parent_upper.p_mount);
+		if (cleanup_error == 0)
+			cleanup_error = sync_error;
+		if (cleanup_error != 0) {
+			state->flags = OVERLAY_READ_ONLY;
+			error = cleanup_error;
+		}
+	}
+	if (retain_materialization)
+		(void)overlay_materialization_complete(state, &materialization, 0);
+	else
+		error = overlay_materialization_complete(state, &materialization,
+		    error);
 	if (temp_inode != NULL) inode_release(temp_inode);
 	if (parent != NULL) inode_release(parent);
 	path_release(&upper);
@@ -1553,6 +1763,9 @@ overlay_create(struct inode *directory, const struct componentname *name,
 	       struct inode **result)
 {
 	struct overlay_mount_state *state = directory->i_mount->m_data;
+	struct overlay_materialization_transaction materialization = {
+		NULL, 0U
+	};
 	struct path upper;
 	struct inode *created = NULL;
 	char text[NAME_MAX + 1U], relative[ZEDBSD_PATH_MAX];
@@ -1565,7 +1778,8 @@ overlay_create(struct inode *directory, const struct componentname *name,
 		return EROFS;
 	error = overlay_new_preflight(directory, name, text, relative, NULL);
 	if (error == 0)
-		error = overlay_ensure_upper_dir(directory);
+		error = overlay_ensure_upper_dir_tracked(directory,
+		    &materialization);
 	if (error == 0)
 		error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER, &upper);
 	if (error == 0)
@@ -1573,9 +1787,10 @@ overlay_create(struct inode *directory, const struct componentname *name,
 	if (error == 0)
 		inode_release(created);
 	path_release(&upper);
-	if (error != 0)
-		return error;
-	return overlay_finish_new(directory, name, relative, 0, 0, result);
+	if (error == 0)
+		error = overlay_finish_new(directory, name, relative, 0, 0,
+		    result);
+	return overlay_materialization_complete(state, &materialization, error);
 }
 
 static OVERLAY_HIGH int
@@ -1584,6 +1799,9 @@ overlay_mkdir(struct inode *directory, const struct componentname *name,
 	      struct inode **result)
 {
 	struct overlay_mount_state *state = directory->i_mount->m_data;
+	struct overlay_materialization_transaction materialization = {
+		NULL, 0U
+	};
 	struct path upper;
 	struct inode *created = NULL, *lower = NULL;
 	char text[NAME_MAX + 1U], relative[ZEDBSD_PATH_MAX];
@@ -1598,7 +1816,7 @@ overlay_mkdir(struct inode *directory, const struct componentname *name,
 	error = overlay_new_preflight(directory, name, text, relative, &lower);
 	if (error != 0)
 		goto out;
-	error = overlay_ensure_upper_dir(directory);
+	error = overlay_ensure_upper_dir_tracked(directory, &materialization);
 	if (error != 0)
 		goto out;
 	error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER, &upper);
@@ -1635,7 +1853,7 @@ out:
 	if (lower != NULL)
 		inode_release(lower);
 	path_release(&upper);
-	return error;
+	return overlay_materialization_complete(state, &materialization, error);
 }
 
 static OVERLAY_HIGH void
@@ -1694,7 +1912,7 @@ overlay_mknod_socket(struct inode *directory,
 	struct path parent_upper, temporary_path;
 	char temporary_name[11];
 	unsigned attempts;
-	int error = 0, renamed = 0;
+	int error = 0, cleanup_error, sync_error, renamed = 0;
 
 	path_init(&parent_upper);
 	path_init(&temporary_path);
@@ -1738,8 +1956,21 @@ out:
 		overlay_special_clear(prepared, request->special);
 		overlay_retire_inode(prepared);
 	}
-	if (!renamed && created != NULL)
-		(void)inode_unlink(parent_upper.p_inode, &temporary);
+	if (!renamed && created != NULL) {
+		/* The reserved temporary name is not visible through overlay lookup,
+		 * but it is still persistent upper state.  Complete and sync its
+		 * removal before reporting the original failure.  If cleanup cannot be
+		 * made durable, its error is authoritative and the overlay is
+		 * quarantined read-only. */
+		cleanup_error = inode_unlink(parent_upper.p_inode, &temporary);
+		sync_error = mount_sync(parent_upper.p_mount);
+		if (cleanup_error == 0)
+			cleanup_error = sync_error;
+		if (cleanup_error != 0) {
+			state->flags = OVERLAY_READ_ONLY;
+			error = cleanup_error;
+		}
+	}
 	if (prepared != NULL)
 		inode_release(prepared);
 	if (created != NULL) {
@@ -1759,6 +1990,9 @@ overlay_mknod(struct inode *directory, const struct componentname *name,
 	      struct inode **result)
 {
 	struct overlay_mount_state *state = directory->i_mount->m_data;
+	struct overlay_materialization_transaction materialization = {
+		NULL, 0U
+	};
 	struct path upper;
 	struct inode *created = NULL;
 	char text[NAME_MAX + 1U], relative[ZEDBSD_PATH_MAX];
@@ -1776,19 +2010,22 @@ overlay_mknod(struct inode *directory, const struct componentname *name,
 		return EROFS;
 	error = overlay_new_preflight(directory, name, text, relative, NULL);
 	if (error == 0)
-		error = overlay_ensure_upper_dir(directory);
+		error = overlay_ensure_upper_dir_tracked(directory,
+		    &materialization);
 	if (error == 0 && request->type == INODE_SOCKET)
-		return overlay_mknod_socket(directory, name, request, relative,
+		error = overlay_mknod_socket(directory, name, request, relative,
 		    result);
-	if (error == 0)
+	else if (error == 0)
 		error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER, &upper);
-	if (error == 0)
+	if (error == 0 && request->type != INODE_SOCKET)
 		error = inode_mknod(upper.p_inode, name, request, &created);
 	path_release(&upper);
-	if (error != 0)
-		return error;
-	inode_release(created);
-	return overlay_finish_new(directory, name, relative, 0, 0, result);
+	if (error == 0 && request->type != INODE_SOCKET) {
+		inode_release(created);
+		error = overlay_finish_new(directory, name, relative, 0, 0,
+		    result);
+	}
+	return overlay_materialization_complete(state, &materialization, error);
 }
 
 static OVERLAY_HIGH int
@@ -1797,6 +2034,9 @@ overlay_symlink(struct inode *directory, const struct componentname *name,
 	struct inode **result)
 {
 	struct overlay_mount_state *state = directory->i_mount->m_data;
+	struct overlay_materialization_transaction materialization = {
+		NULL, 0U
+	};
 	struct path upper;
 	struct inode *created = NULL;
 	char text[NAME_MAX + 1U], relative[ZEDBSD_PATH_MAX];
@@ -1811,17 +2051,20 @@ overlay_symlink(struct inode *directory, const struct componentname *name,
 		return EROFS;
 	error = overlay_new_preflight(directory, name, text, relative, NULL);
 	if (error == 0)
-		error = overlay_ensure_upper_dir(directory);
+		error = overlay_ensure_upper_dir_tracked(directory,
+		    &materialization);
 	if (error == 0)
 		error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER, &upper);
 	if (error == 0)
 		error = inode_symlink(upper.p_inode, name, target, request,
 		    &created);
 	path_release(&upper);
-	if (error != 0)
-		return error;
-	inode_release(created);
-	return overlay_finish_new(directory, name, relative, 0, 0, result);
+	if (error == 0) {
+		inode_release(created);
+		error = overlay_finish_new(directory, name, relative, 0, 0,
+		    result);
+	}
+	return overlay_materialization_complete(state, &materialization, error);
 }
 
 static OVERLAY_HIGH ssize_t

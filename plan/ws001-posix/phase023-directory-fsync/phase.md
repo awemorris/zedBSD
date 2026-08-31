@@ -1,12 +1,10 @@
-# WS001 Phase 016: truthful and durable directory fsync
+# WS001 Phase 023: truthful and durable directory fsync
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
-Phase ID: `ws001-p016`
+Phase ID: `ws001-p023`
 
-Status: Uncleared (`q042`, 2026-08-31); implementation and deterministic host
-ordering tests pass, but disposable-image/remount acceptance is blocked by
-`ws008-p010`
+Status: Complete (`q050`, 2026-09-01)
 
 Parent: [WS001](../ws.md)
 
@@ -47,7 +45,7 @@ success.  That behavior is not truthful for directories:
 `fsync()` a sibling temporary file, `rename()` it over the target, then
 `fsync()` the containing directory.  The final step cannot be accepted while a
 successful return may be a no-op.  Object ownership is separately owned by
-`ws001-p015`; these Phases are independent.
+`ws001-p022`; these Phases are independent.
 
 ## Durability contract
 
@@ -88,7 +86,7 @@ Out of scope:
   storage-device firmware guarantees beyond a successful driver flush, or a
   new journaling filesystem;
 - adding FAT directory durability or treating volatile tmpfs as persistent;
-- ownership and effective-credential creation, owned by `ws001-p015`;
+- ownership and effective-credential creation, owned by `ws001-p022`;
 - a complete power-failure proof for every ordering combination or every
   supported platform.
 
@@ -154,7 +152,7 @@ Out of scope:
    the final namespace.  Use disposable images for destructive storage tests.
 9. Run the `ws005-p005` atomic-replacement durability sequence as a focused
    consumer regression.  Its non-root ownership gate may remain pending until
-   `ws001-p015` completes.
+   `ws001-p022` completes.
 10. Format changed source, run focused tests, run `make -j16`, and perform
     bounded `qemu-system-x86_64` acceptance.  Do not use `make check`.
 11. Record actual commands and evidence, update the WS001 VFS/cross-cutting
@@ -198,7 +196,7 @@ amd64 QEMU acceptance pass; and the WS001 ledger accurately records the
 remaining crash-consistency scope.
 
 Completion removes the directory-durability blocker from `ws005-p005`.  That
-Phase still depends on `ws001-p015` for non-root creator ownership.
+Phase still depends on `ws001-p022` for non-root creator ownership.
 
 ## Reconsideration boundary
 
@@ -212,7 +210,7 @@ as evidence of `fsync()` durability.
 
 ## Resume point
 
-This Phase is independent of `ws001-p015` and may be queued before or after it.
+This Phase is independent of `ws001-p022` and may be queued before or after it.
 After both Phases complete, requeue `ws005-p005` and run its complete
 root/non-root transactional credential-store acceptance.
 
@@ -235,11 +233,33 @@ ordering/error checks.  The affected UFS1, UFS2, overlay, and generic file
 objects compile with warnings as errors for both configured PC-98 and amd64
 targets, and `git diff --check` passes.
 
-Completion is not claimed.  The ordinary production build reaches the final
-PC-98 image step and then the pinned Noct interpreter rejects the established
-`--path=tools/build` option.  Consequently q042 could not generate disposable
+At q042 closure, completion was not claimed. The ordinary production build
+reached the final PC-98 image step and then the pinned Noct interpreter
+rejected the established `--path=tools/build` option. Consequently q042 could not generate disposable
 images or prove create/rename/directory-`fsync` survival across a native
-remount and real storage flush.  Resume after `ws008-p010` restores the host
-script CLI contract, rerun the host fixture, generate fresh disposable images,
-and execute the bounded amd64 QEMU/remount matrix before changing this Phase to
-complete.
+remount and real storage flush. The q050 result below records the restored
+runtime host-script CLI, rerun host fixtures, fresh disposable images, and the
+bounded amd64 QEMU/remount matrix which resolved that handoff. The unrelated
+compile/application CLI form did not gate this Phase.
+
+## q050 completion result
+
+The production-linked host matrix passes 13 VFS dispatch, 36 UFS ordering,
+79 UFS1 namespace-mutation, 83 UFS2 namespace-mutation, and 86 overlay
+ordering/error checks. The UFS mutation cells also pass ASan/UBSan and
+fixture-scoped compiler-analyzer builds. These cells verify the namespace
+write/rollback boundary, first-error propagation, explicit unsupported
+directory synchronization, and the required UFS and overlay flush order.
+
+Five bounded amd64 launches supply the storage evidence that q042 could not
+run. Overlay and native UFS1 stage 1 create and synchronize the namespace and
+are stopped immediately with QMP `quit`, without a clean guest unmount or
+shutdown. Stage 2 on the same writable media verifies the committed names and
+content. The overlay cell also mounts a journaled UFS2 auxiliary image in its
+writable second stage; the FAT cell proves regular-file synchronization still
+works while directory `fsync()` truthfully returns `EOPNOTSUPP`. Frozen source
+image hashes remain unchanged.
+
+`make -j16` and `git diff --check` pass. No new journal, public ABI, or lock
+ordering decision was required. This Phase is complete and releases the
+directory-durability prerequisite of `ws005-p005`.

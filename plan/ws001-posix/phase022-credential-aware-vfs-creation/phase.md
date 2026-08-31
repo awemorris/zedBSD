@@ -1,11 +1,10 @@
-# WS001 Phase 015: credential-aware VFS object creation
+# WS001 Phase 022: credential-aware VFS object creation
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
-Phase ID: `ws001-p015`
+Phase ID: `ws001-p022`
 
-Status: Uncleared (`q042`, 2026-08-31); source and focused host milestones
-pass, but native/remount acceptance and two backend fault cells remain
+Status: Complete (`q050`, 2026-09-01)
 
 Parent: [WS001](../ws.md)
 
@@ -19,9 +18,12 @@ Make the ownership of every newly created filesystem object derive from the
 originating process's effective credentials instead of backend defaults.  A
 successful user-originated creation must publish an object whose `st_uid` is
 the caller's effective UID and whose `st_gid` follows one documented zedBSD
-rule based on the effective GID and a set-GID parent directory.  A failed
-ownership or metadata commit must not leave a pathname, allocated inode,
-quota charge, link-count change, or partially initialized object behind.
+rule based on the effective GID and a set-GID parent directory. A failed
+ownership or metadata commit must restore every mutation while cleanup I/O
+succeeds. If cleanup itself fails, the operation returns that cleanup error,
+detaches borrowed resources, publishes no partial cache object, retains any
+uncertain allocation needed for safety, and quarantines the filesystem
+read-only rather than pretending that rollback completed.
 
 This Phase narrows `KERN-CRED-01`, `KERN-VFS-01`, `CROSS-FS-01`, and
 `CROSS-QEMU-01`.  It is a VFS/filesystem correctness Phase, not a general
@@ -50,7 +52,7 @@ Consequently:
 This blocks the non-root native acceptance in `ws005-p005`: creating
 `~/.wifi.conf.lock`, a temporary credential file, or `~/.wifi.conf` cannot
 currently prove the required owner before publication.  Repairing directory
-durability is separately owned by `ws001-p016`; neither Phase depends on the
+durability is separately owned by `ws001-p023`; neither Phase depends on the
 other.
 
 ## Ownership contract
@@ -103,7 +105,7 @@ Out of scope:
   representation;
 - ACL feature expansion, default ACL syntax, extended attributes, quotas as a
   standalone feature, or namespace/container credentials;
-- directory durability and truthful `fsync()`, which belong to `ws001-p016`.
+- directory durability and truthful `fsync()`, which belong to `ws001-p023`.
 
 ## Design constraints
 
@@ -118,11 +120,12 @@ Out of scope:
 3. The backend initializes and, where persistent, records ownership before the
    new directory entry becomes observable.  In-memory inode fields and on-disk
    metadata must agree when the operation returns.
-4. Every backend returns either one referenced, fully initialized inode or no
-   object.  A failure after allocation or publication must restore the parent
-   and reclaim the child; a rollback failure must be surfaced and leave the
-   filesystem in its existing conservative/read-only failure state rather
-   than returning success.  A pathname AF_UNIX endpoint carried by the
+4. The caller receives either one referenced, fully initialized inode or a
+   null result. A failure after allocation or publication must restore the
+   parent and reclaim the child while cleanup succeeds. A rollback failure
+   must be surfaced and leave uncertain storage retained in the filesystem's
+   conservative/read-only failure state rather than returning success or
+   freeing still-referenced media state. A pathname AF_UNIX endpoint carried by the
    creation request is borrowed by the child: every failed publication must
    detach it before releasing a possibly cached inode.  If a directory
    rollback fails and leaves the socket dirent allocated, that inert inode
@@ -177,7 +180,7 @@ Out of scope:
 11. Record actual evidence and update the WS001 credential/VFS/cross-cutting
     rows before marking the Phase complete.  Then rerun the non-root ownership
     portion of `ws005-p005`; its durability completion still waits for
-    `ws001-p016`.
+    `ws001-p023`.
 
 ## Focused test matrix
 
@@ -199,7 +202,9 @@ For root and at least one non-root effective UID/GID, cover:
   documented errno and no residual entry;
 - each injected post-allocation and post-directory-write failure, proving no
   leaked inode/block/quota charge, child name, `.`/`..`, parent link count, or
-  name-cache hit; and
+  name-cache hit while cleanup succeeds; plus double-fault cases which prove
+  cleanup-error precedence, endpoint detachment, no partial cache publication,
+  safe uncertain-state retention, and read-only quarantine; and
 - unchanged ownership of an existing inode when a new hard link is made.
 
 The native QEMU case must create a non-root home-directory file with mode
@@ -213,13 +218,16 @@ This Phase is complete when every user-originated inode creation path carries
 resolved effective ownership to its backend; UFS1, UFS2, tmpfs, and overlay
 publish the documented UID/GID/mode atomically; FAT either represents the
 request or rejects it before mutation; every injected failure restores all
-namespace and allocation state; existing permission/umask/ACL behavior remains
-green; focused tests, `make -j16`, formatting, `git diff --check`, and bounded
+namespace and allocation state while cleanup succeeds, and every injected
+cleanup failure returns the cleanup error, detaches borrowed resources,
+retains uncertain state safely, and freezes the filesystem read-only; existing
+permission/umask/ACL behavior remains green; focused tests, `make -j16`,
+formatting, `git diff --check`, and bounded
 amd64 QEMU acceptance pass; and the WS001 ledger records any remaining POSIX
 credential debt without overstating conformance.
 
 Completion of this Phase removes the creation-ownership blocker from
-`ws005-p005`.  That Phase still requires `ws001-p016` before it can claim its
+`ws005-p005`.  That Phase still requires `ws001-p023` before it can claim its
 atomic credential-file replacement durable.
 
 ## Reconsideration boundary
@@ -227,15 +235,16 @@ atomic credential-file replacement durable.
 Mark the Phase `uncleared` and return the unresolved choice for planning if
 correct ownership would require a persistent FAT metadata format change, a
 new namespace credential model, or an incompatible public ABI.  Mark a
-backend-specific residual instead of weakening the contract if failure
-injection shows that the backend cannot roll back an already published object
-without filesystem repair.  Do not accept post-publication `chown()`, ambient
+backend-specific residual instead of weakening the contract if an ordinary
+single failure cannot roll back an already published object, or if a cleanup
+failure cannot detach resources and quarantine uncertain state safely. Do not
+accept post-publication `chown()`, ambient
 credentials, root-default ownership, silent FAT coercion, or tests that run
 only as root.
 
 ## Resume point
 
-This Phase is independent of `ws001-p016` and may be queued before or after it.
+This Phase is independent of `ws001-p023` and may be queued before or after it.
 After both Phases complete, requeue `ws005-p005` and run its full root/non-root
 native credential-store acceptance.
 
@@ -284,10 +293,47 @@ Focused evidence passes:
   both x86 kernel link steps succeed and reach their established Noct
   post-link validators, and `git diff --check` passes.
 
-Completion is not claimed. The pinned host Noct rejects the established
-`--path=tools/build` option, so q042 cannot generate fresh disposable images
-or run the native UFS1/UFS2/tmpfs/FAT/overlay root/non-root, reopen, and remount
+At q042 closure, completion was not claimed. The pinned host Noct rejected the
+established `--path=tools/build` option, so q042 could not generate disposable
+images or run the native UFS1/UFS2/tmpfs/FAT/overlay root/non-root, reopen, and remount
 matrix. Deterministic injection for the exact UFS rollback-failed pathname
-socket branch and the full overlay create/copy-up rollback matrix is also not
-yet present. Resume after `ws008-p010`, add those two focused fault cells, then
-run the Phase-owned amd64 guest matrix before changing this Phase to complete.
+socket branch and the full overlay create/copy-up rollback matrix was also not
+yet present. The q050 result below records how the restored runtime `--path`,
+the two focused fault cells, and the Phase-owned amd64 guest matrix resolved
+those exact handoffs. The unrelated compile/application CLI form did not gate
+these tests.
+
+## q050 completion result
+
+q050 completed every retained boundary without changing the public ABI or an
+on-disk format:
+
+- `tmpfs_link()` no longer applies a second link-count increment after the
+  generic `inode_link()` publication step;
+- lower-only overlay ancestors remain provisional until the leaf operation
+  commits and are removed deepest-first after failure;
+- failed copy-up publication and temporary pathname-socket cleanup now remove
+  and synchronize persistent upper state, preserve the first cleanup errno,
+  detach borrowed socket endpoints, and make the overlay read-only when the
+  namespace cannot be restored with certainty;
+- exact production-linked UFS1/UFS2 pathname-socket rollback-failure fixtures
+  each pass 64 checks in ordinary, ASan/UBSan, and fixture-scoped analyzer
+  builds; and
+- the overlay create/materialization/copy-up fixture passes 2,667 checks in
+  each of those modes. A final adversarial review found no remaining
+  actionable publication, rollback, stale-lower, reference, or test-fixture
+  issue.
+
+The retained production gates also pass: 50 creation-request checks, AF_UNIX
+publication, 441,782 FAT production checks in both ordinary and ASan/UBSan
+modes, 23 UFS1 plus 23 UFS2 independence checks, and 45 UFS2 consistency
+checks. Five bounded amd64 launches then prove overlay, native UFS1, external
+UFS2, tmpfs, and FAT behavior. Overlay and native UFS1 each survive an
+immediate QMP stop after stage 1 and verify the same writable media in stage 2;
+the FAT cell verifies representable creation, explicit non-root rejection,
+and external remount. All frozen source image hashes remain unchanged.
+
+`make -j16` and `git diff --check` pass. This Phase is complete and no longer
+blocks `ws005-p005`. Historical guest output continues to say
+`WS001-P015`; it is retained evidence for this canonical Phase, not a second
+active use of Phase 015.

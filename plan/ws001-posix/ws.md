@@ -1,6 +1,6 @@
 # WS001: POSIX.1-2024 compliance
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 WSID: `ws001`
 
@@ -8,14 +8,14 @@ Status: in progress; compliance ledger remains active
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws001-p019`
+Last verified Phase: `ws001-p023`
 
-Resume point: the Principal-authored Phase sequence through `ws001-p021` is
-canonical.  `agent2-q002` completed `ws001-p019`; p020 and p021 retain the
-uncleared handoffs recorded below.  Concurrent q042 source and focused-host
-milestones used the colliding pre-merge identifiers p015 and p016.  Those
-records are preserved after the registry, but must receive unique IDs across
-their Phase documents and dependencies before either resumes.
+Resume point: q050 completed canonical p022/p023 and returned their released
+VFS dependencies to `ws005-p005`. The POSIX compliance ledger remains active;
+p020 retains its explicitly recorded audit residuals while completed p021 and
+p022/p023 remain regression inputs. Concurrent q042 source and focused-host
+milestones originally used the colliding pre-merge identifiers p015 and p016;
+their active Phase IDs are `ws001-p022` and `ws001-p023`.
 
 Shared tests: [WS001 test index](tests/README.md)
 
@@ -46,23 +46,17 @@ Shared tests: [WS001 test index](tests/README.md)
 | `ws001-p019` | [canonical userland source headers](phase019-userland-file-headers/phase.md) | Complete (`agent2-q002`, 2026-08-31) | All 269 userland C-family files have the exact section 13 block and a separate explanation; body hashes, fixtures, assembler preprocessing, full build, and whitespace checks pass |
 | `ws001-p020` | [complete userland C-style conformance](phase020-complete-userland-c-style/phase.md) | Uncleared (`agent2-q003`, 2026-08-31) | All 2,454 functions pass public/static order, prototype, header-layout, comment, loop/switch, case-label, and build gates; the body audit records 731 mechanical residuals plus semantic-review handoffs in the 258-row ledger |
 | `ws001-p021` | [ANSI C declarations and semantic layout](phase021-ansi-c-semantic-layout/phase.md) | Complete (`agent2-q006`, 2026-08-31) | All 214 implementations pass ANSI declaration, semantic paragraph, symmetric brace, loop block, entry spacing, indentation, build, automated audit, and user manual-review gates |
+| `ws001-p022` | [credential-aware VFS object creation](phase022-credential-aware-vfs-creation/phase.md) | Complete (`q050`, 2026-09-01) | Production-linked UFS/overlay rollback faults, root/non-root backend matrix, and abrupt-stop/reopen/remount acceptance pass; tmpfs double link increment fixed |
+| `ws001-p023` | [truthful and durable directory fsync](phase023-directory-fsync/phase.md) | Complete (`q050`, 2026-09-01) | VFS/UFS/overlay ordering and mutation gates plus five-launch abrupt-stop/remount durability pass; FAT/tmpfs directory sync stays explicitly unsupported |
 
-### Concurrent q042 records with colliding pre-merge IDs
+### q042 pre-merge identifier migration
 
-The following work is retained as history and remains uncleared.  Its original
-IDs collide with the canonical registry above, so these rows are not active
-combined IDs and cannot be queued until the Phase documents and all dependent
-references are assigned unique IDs.
-
-| Pre-merge q042 identifier | Phase | Status | Result |
-| --- | --- | --- | --- |
-| `ws001-p015` | [credential-aware VFS object creation](phase015-credential-aware-vfs-creation/phase.md) | Uncleared (`q042`, 2026-08-31); source/host milestone passes | Explicit effective-credential creation, backend rollback hardening, 883,564 FAT ordinary/sanitized checks, UFS and AF_UNIX focused gates pass; two fault cells and fresh native/remount acceptance remain |
-| `ws001-p016` | [truthful and durable directory fsync](phase016-directory-fsync/phase.md) | Uncleared (`q042`, 2026-08-31); source/host milestone passes | Explicit VFS/UFS/overlay directory-sync behavior and 135 deterministic checks pass; fresh QEMU/remount evidence waits for `ws008-p010` |
-
-For these two pre-merge records, `ws008-p010` remains the prerequisite for
-fresh disposable-image/remount acceptance, the credential Phase retains its
-two recorded backend failure-injection cells, and dependent `ws005-p005`
-remains held until both native prerequisites complete.
+Historical q041/q042 documents and test output labels retain the original
+`ws001-p015` credential-creation and `ws001-p016` directory-fsync names.  In
+the active registry and all current dependencies, those records map to
+`ws001-p022` and `ws001-p023`, respectively. Runtime `--path` is proven and
+q050 completed their fault-injection and disposable-image/remount acceptance,
+releasing both VFS dependencies of `ws005-p005`.
 
 Original combined planning context is retained in the
 [legacy Phase 0–10 plan](history/phase000-010-legacy-plan.md).
@@ -237,13 +231,13 @@ may be implemented while its consuming utility remains non-conforming.
 | KERN-IPC-01 | System V message queues | implemented-unreviewed | `ipcrm`, `ipcs` | create/stat/remove works; verify ownership, permissions, limits, stale IDs, races, enumeration, and error status |
 | KERN-IPC-02 | System V semaphores | implemented-unreviewed | `ipcrm`, `ipcs` | create/stat/remove works; verify arrays/operations, undo/lifecycle semantics, limits, ownership, and concurrent removal |
 | KERN-IPC-03 | System V shared memory | implemented-unreviewed | `ipcrm`, `ipcs` | create/attach/stat/remove path exists; verify attachment lifecycle, permissions, limits, stale IDs, and removal races |
-| KERN-CRED-01 | credentials and process identity | partial | `id`, `chown`, `chgrp`, `newgrp`, `ps` | numeric credentials work; audit real/effective IDs, supplementary groups, set-ID transitions, permission checks, and account-database integration |
+| KERN-CRED-01 | credentials and process identity | partial | `id`, `chown`, `chgrp`, `newgrp`, `ps` | q050 proves effective-credential ownership before UFS1/UFS2/tmpfs/overlay publication, FAT representability rejection, set-GID inheritance, and safe read-only quarantine when rollback cleanup itself fails; broader real/effective IDs, supplementary groups, set-ID transitions, permission checks, and account-database integration remain |
 | KERN-SIG-01 | signals and process groups | partial | `kill`, `sh`, `time`, `wait` | basic signaling works; prove process-group targets, job-control delivery, stopped/continued children, saved statuses, interruption, and permissions |
 | KERN-WAIT-01 | child wait and accounting | partial | `wait`, `time`, `sh` | basic `waitpid()` works; multiple saved statuses, non-child behavior, signal status, stopped jobs, and user/system CPU accounting remain; missing-login exit/reap invalid-free remains tracked by [`ws002-p021`](../ws002-services/phase021-missing-login-session-teardown/phase.md) |
 | KERN-TTY-01 | tty line discipline and termios | partial | `stty`, `sh`, `mesg`, `tty`, `newgrp` | canonical/raw and common flags exist; audit all required flags, speeds, control characters, VMIN/VTIME, drains/flushes, signals, and error atomicity |
 | KERN-PTY-01 | pseudo terminals and controlling tty | implemented-unreviewed | shell/job control, terminal tests | UNIX98-style PTY path exists; prove session/controlling-terminal acquisition, foreground groups, hangup, permissions, and lifecycle; missing-login exit/reap invalid-free remains tracked by [`ws002-p021`](../ws002-services/phase021-missing-login-session-teardown/phase.md) |
 | KERN-CLOCK-01 | clocks and clock setting | partial | `date`, `touch`, libc time | `clock_settime()` exists; prove privilege checks, valid ranges, clock selection, timezone-facing behavior, interruption, and filesystem timestamp integration |
-| KERN-VFS-01 | pathname, metadata, and traversal semantics | partial | file utilities | core operations exist, but recursive symlink policies, mount boundaries, hard-link identity, metadata preservation, races, and exact error propagation need family tests |
+| KERN-VFS-01 | pathname, metadata, and traversal semantics | partial | file utilities | q050 proves credential-aware object creation/rollback and truthful UFS1/UFS2/overlay directory `fsync`, with FAT/tmpfs directory sync explicitly `EOPNOTSUPP`; recursive symlink policies, mount boundaries, broader hard-link/metadata races, and family-wide error semantics remain |
 | KERN-FSSTAT-01 | filesystem capacity/accounting | partial | `df`, `du` | provide and verify stable filesystem/device identity, portable block accounting, mount lookup, overflow behavior, and permission/error cases |
 | KERN-RSRC-01 | priorities | reviewed | `nice`, `renice` | declared current scope has reviewed utility evidence; keep regression and permission/range tests |
 | KERN-RSRC-02 | resource limits | reviewed | `ulimit`, shell | declared current scope has reviewed utility evidence; expand when new limit classes are exposed |
@@ -317,11 +311,11 @@ dependency even when they are not POSIX public APIs.
 | CROSS-IO-01 | short reads/writes and `EINTR` | partial | stream, archive, filesystem, parser utilities | reusable host fault shim plus pipe/device/QEMU cases |
 | CROSS-OUT-01 | broken stdout and close/flush errors | partial | every output-producing utility | exact non-zero status and no false success after partial output |
 | CROSS-MEM-01 | allocation/size overflow | partial | dynamic arrays, parsers, recursion, binary formats | deterministic allocation injection, checked arithmetic, bounded nesting/input |
-| CROSS-FS-01 | filesystem failures and atomic replacement | partial | editors, archives, SCCS, copy/move, generated databases | permissions, full disk, rename/fsync failure, interruption, rollback, no corrupted destination |
+| CROSS-FS-01 | filesystem failures and atomic replacement | partial | editors, archives, SCCS, copy/move, generated databases | q050 adds production-linked allocation/publication/cleanup faults, cleanup-error precedence, rollback quarantine, directory-sync ordering, and abrupt-stop namespace survival for the bounded credential/VFS matrix; broader permissions, full-disk, interruption, utility-specific rollback, and destination-integrity evidence remain |
 | CROSS-LOCALE-01 | locale/collation/multibyte | partial | most text and display utilities | non-C locale fixtures, invalid artifacts/sequences, boundary-split input, output verification |
 | CROSS-SHELL-01 | current-shell state | partial | shell builtins | tests inside a running zshell for environment, cwd, umask, limits, traps, descriptors, and jobs; completed [`ws001-p014`](phase014-shell-job-control/phase.md) supplies direct/pipeline/Ctrl-Z/`fg`/background/non-TTY job-control regression |
 | CROSS-BINARY-01 | malformed binary formats | partial | locale/catalog/terminfo/archive/ELF/SCCS/compression | truncation, invalid offsets/counts, integer overflow, fuzz corpus, bounded failure |
-| CROSS-QEMU-01 | zedBSD runtime evidence | implemented-unreviewed | kernel-, tty-, credential-, IPC-, process-, service-dependent behavior | bounded headless amd64 tests with complete markers; add a target whenever host behavior is insufficient |
+| CROSS-QEMU-01 | zedBSD runtime evidence | implemented-unreviewed | kernel-, tty-, credential-, IPC-, process-, service-dependent behavior | q050 adds five bounded amd64 launches covering overlay and native UFS1 abrupt-stop/relaunch, external journaled UFS2, tmpfs, FAT rejection/remount, and frozen-source integrity; continue adding target-specific cells whenever host behavior is insufficient |
 | CROSS-PROV-01 | external source exclusion | reviewed | Phase 10 `bc`, `ed`, `m4` scope | imported production/generated trees and the m4 host compatibility layer were removed; `make phase10-local-source-check` passes |
 
 ## 10. Phase 10 local replacement progress

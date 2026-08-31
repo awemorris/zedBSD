@@ -22,6 +22,11 @@ Parent: [master plan](master.md)
 
 Previous Queue: [q040](queue-q040.md)
 
+Canonical ID note: this historical Queue retains the pre-merge
+`ws001-p015`/`ws001-p016` labels.  Their active Phase documents are now
+[`ws001-p022`](ws001-posix/phase022-credential-aware-vfs-creation/phase.md)
+and [`ws001-p023`](ws001-posix/phase023-directory-fsync/phase.md).
+
 ## Purpose
 
 Complete the oldest dependency-ready hardware lifetime repair, then implement

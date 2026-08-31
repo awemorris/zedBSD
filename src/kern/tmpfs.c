@@ -534,7 +534,7 @@ tmpfs_link(struct inode *directory, const struct componentname *component,
 	entry->cookie = parent->state->next_cookie++;
 	inode_ref(target);
 	*link = entry;
-	target->i_linkcount++;
+	/* inode_link() publishes the successful link-count increment. */
 	mutex_unlock(&parent->state->namespace_lock);
 	return 0;
 }

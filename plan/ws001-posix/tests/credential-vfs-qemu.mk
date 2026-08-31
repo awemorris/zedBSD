@@ -1,8 +1,8 @@
-# WS001-p015 test-only effective-credential VFS image rules.
+# WS001-p022/p023 test-only VFS creation and durability image rules.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 ifneq ($(ZEDBSD_PLATFORM_DIR),amd64)
-$(error WS001-p015 QEMU acceptance requires an amd64/PC-AT configuration)
+$(error WS001 p022/p023 QEMU acceptance requires amd64/PC-AT)
 endif
 
 WS001_P015_SOURCE := \
@@ -16,9 +16,15 @@ WS001_P015_NATIVE_ARCH_UFS := \
 	$(ARCH_IMAGE_DIR)/amd64-ws001-p015-native.ufs
 WS001_P015_FAT_UFS := $(ARCH_IMAGE_DIR)/amd64-ws001-p015-fat.ufs
 WS001_P015_NATIVE_ROOT := $(BUILD)/ws001-p015-native-root.img
-WS001_P015_OVERLAY_IMAGE := $(BUILD)/ws001-p015-overlay-hdd-image.img
-WS001_P015_NATIVE_IMAGE := $(BUILD)/ws001-p015-native-hdd-image.img
-WS001_P015_FAT_IMAGE := $(BUILD)/ws001-p015-fat-hdd-image.img
+WS001_P015_OVERLAY_IMAGE := $(BUILD)/tests/ws001-p022-overlay.img
+WS001_P015_NATIVE_IMAGE := $(BUILD)/tests/ws001-p022-native.img
+WS001_P015_FAT_IMAGE := $(BUILD)/tests/ws001-p022-fat.img
+WS001_P015_UFS2_ROOT := $(BUILD)/tests/ws001-p022-ufs2-root
+WS001_P015_UFS2_STAMP := $(WS001_P015_UFS2_ROOT)/.stamp
+WS001_P015_UFS2_IMAGE := $(BUILD)/tests/ws001-p022-ufs2.img
+WS001_P015_FAT_ROOT := $(BUILD)/tests/ws001-p022-fat-root
+WS001_P015_FAT_STAMP := $(WS001_P015_FAT_ROOT)/.stamp
+WS001_P015_FAT_EXTERNAL := $(BUILD)/tests/ws001-p022-fat-external.img
 WS001_P015_OVERLAY_CONFIG := \
 	plan/ws001-posix/tests/credential-vfs-overlay.cfg
 WS001_P015_NATIVE_CONFIG := \
@@ -72,12 +78,54 @@ $(WS001_P015_NATIVE_ROOT): $(WS001_P015_NATIVE_ARCH_UFS) \
 	$(PYTHON) $(BUILD_TOOLS_DIR)/make-ufs1-root-image.py --force \
 		--arch-profile amd64 --arch-image $(WS001_P015_NATIVE_ARCH_UFS) $@
 
+$(WS001_P015_UFS2_STAMP): \
+	plan/ws001-posix/tests/credential-vfs-ufs2.txt
+	@rm -rf $(WS001_P015_UFS2_ROOT)
+	@mkdir -p $(WS001_P015_UFS2_ROOT)/writable
+	@cp plan/ws001-posix/tests/credential-vfs-ufs2.txt \
+		$(WS001_P015_UFS2_ROOT)/.p015-backend
+	@touch $@
+
+$(WS001_P015_UFS2_IMAGE): $(WS001_P015_UFS2_STAMP) \
+	$(BUILD_TOOLS_DIR)/make-ufs-test-image.py \
+	$(BUILD_TOOLS_DIR)/ufs1_format.py $(BUILD_TOOLS_DIR)/ufs2_format.py
+	@mkdir -p $(dir $@)
+	PYTHONPATH=$(BUILD_TOOLS_DIR) $(PYTHON) \
+		$(BUILD_TOOLS_DIR)/make-ufs-test-image.py $@ \
+		--format ufs2 --size-mib 16 --journal-mib 4 \
+		--root $(WS001_P015_UFS2_ROOT)
+
+$(WS001_P015_FAT_STAMP): plan/ws001-posix/tests/credential-vfs-fat.txt \
+	plan/ws001-posix/tests/credential-vfs-fat-unixmode.txt
+	@rm -rf $(WS001_P015_FAT_ROOT)
+	@mkdir -p $(WS001_P015_FAT_ROOT)/writable
+	@cp plan/ws001-posix/tests/credential-vfs-fat.txt \
+		$(WS001_P015_FAT_ROOT)/.p015-backend
+	@touch $@
+
+$(WS001_P015_FAT_EXTERNAL): $(WS001_P015_FAT_STAMP)
+	@mkdir -p $(dir $@)
+	@rm -f $@ $@.tmp
+	@truncate -s 16777216 $@.tmp
+	@mformat -i $@.tmp -v WS001P022 ::
+	@mcopy -o -i $@.tmp $(WS001_P015_FAT_ROOT)/.p015-backend \
+		::/.p015-backend
+	@mcopy -o -i $@.tmp $(WS001_P015_FAT_ROOT)/.p015-backend \
+		::/P015TYPE
+	@mmd -i $@.tmp ::/writable
+	@mmd -i $@.tmp ::/etc
+	@mcopy -o -i $@.tmp \
+		plan/ws001-posix/tests/credential-vfs-fat-unixmode.txt \
+		::/etc/unixmode
+	@mv -f $@.tmp $@
+
 define WS001_P015_OVERLAY_IMAGE_RULE
 $(1): $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2-chain.bin \
 	$(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(2) \
-	$(DATA_IMAGE) $(BUILD)/uefi/BOOTX64.EFI $(WS001_P015_OVERLAY_CONFIG) \
+	$(DATA_IMAGE) $(SWAP_IMAGE) $(BUILD)/uefi/BOOTX64.EFI \
+	$(WS001_P015_OVERLAY_CONFIG) \
 	$(ZEDBSD_IMAGE_HOST) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) \
@@ -94,13 +142,17 @@ $(1): $(BUILD)/bootloader/stage1.bin \
 		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
 		--zedbsd-config $(WS001_P015_OVERLAY_CONFIG) \
 		--arch-profile amd64 --arch-image $(2) --arch-format ufs \
-		--data-image $(DATA_IMAGE) $$@
+		--data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) $$@
 endef
 
 $(eval $(call WS001_P015_OVERLAY_IMAGE_RULE,$(WS001_P015_OVERLAY_IMAGE),\
 	$(WS001_P015_OVERLAY_UFS)))
 $(eval $(call WS001_P015_OVERLAY_IMAGE_RULE,$(WS001_P015_FAT_IMAGE),\
 	$(WS001_P015_FAT_UFS)))
+
+# The image backend is not re-entrant for these concurrent GPT recipes.  Keep
+# them ordered even when the acceptance target is invoked with -j.
+$(WS001_P015_FAT_IMAGE): $(WS001_P015_OVERLAY_IMAGE)
 
 $(WS001_P015_NATIVE_IMAGE): $(BUILD)/bootloader/stage1-native.bin \
 	$(BUILD)/bootloader/stage2-chain.bin \
@@ -122,7 +174,14 @@ $(WS001_P015_NATIVE_IMAGE): $(BUILD)/bootloader/stage1-native.bin \
 		--zedbsd-config $(WS001_P015_NATIVE_CONFIG) \
 		--ufs-root $(WS001_P015_NATIVE_ROOT) --size-mib 193 $@
 
-.PHONY: ws001-p015-qemu-images ws001-p015-guest-probe
+# A failed prerequisite is therefore terminal rather than allowing a later
+# recipe to leave a plausible but stale acceptance image behind.
+$(WS001_P015_NATIVE_IMAGE): $(WS001_P015_FAT_IMAGE)
+
+.PHONY: ws001-p015-qemu-images ws001-p015-guest-probe \
+	ws001-p022-p023-qemu-images
 ws001-p015-guest-probe: $(WS001_P015_PROGRAM)
 ws001-p015-qemu-images: $(WS001_P015_OVERLAY_IMAGE) \
-	$(WS001_P015_NATIVE_IMAGE) $(WS001_P015_FAT_IMAGE)
+	$(WS001_P015_NATIVE_IMAGE) $(WS001_P015_FAT_IMAGE) \
+	$(WS001_P015_UFS2_IMAGE) $(WS001_P015_FAT_EXTERNAL)
+ws001-p022-p023-qemu-images: ws001-p015-qemu-images

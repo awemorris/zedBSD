@@ -32,9 +32,9 @@ plan/ws005-networking/tests/run-wifi-conf-store-test.sh
 It exercises the strict v1 model, canonical serialization, checked
 same-directory store operations, injected publication failures, lock timing,
 concurrency, and redaction in ordinary, ASan+UBSan, and compiler-analyzer
-builds.  Native root/non-root ownership and directory-durability acceptance
-remain separate guest gates because they depend on the kernel VFS semantics
-recorded by `ws001-p015` and `ws001-p016`.
+builds. Native root/non-root ownership and directory-durability acceptance is
+the remaining Phase-owned guest gate. Its kernel VFS prerequisites
+`ws001-p022` and `ws001-p023` completed in q050.
 
 NET-T22 has three reproducible executable entry points:
 
