@@ -201,6 +201,13 @@ ZEDBSD_USER_PROGRAMS_DEPS_3 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_2) \
 ZEDBSD_TARGET_PACKAGE_HOLD := noct remacs
 override ZEDBSD_USER_PROGRAMS := $(filter-out \
 	$(ZEDBSD_TARGET_PACKAGE_HOLD),$(ZEDBSD_USER_PROGRAMS_DEPS_3))
+# The RTL8822B initialization tables are BSD-3-Clause data embedded in the
+# kernel.  Binary images containing that driver must carry the corresponding
+# notice even when the separately licensed firmware package is not selected.
+ifeq ($(strip $(CONFIG_DRIVER_USB_RTL8822BU)),y)
+override ZEDBSD_USER_PROGRAMS := $(sort \
+	$(ZEDBSD_USER_PROGRAMS) rtl8822b-tables-license)
+endif
 # A saved configuration may be reused after changing targets.  Do not let
 # packages selected for another ABI become impossible prerequisites of the
 # current root filesystem (PC/AT i386 is named "pcat" by the build system).

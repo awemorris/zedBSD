@@ -104,6 +104,10 @@ ordered transitions:
   producers, reset/power-cycle, reload the same pinned blob, and perform a fresh
   handshake. If any retirement is unproven, quarantine the complete object and
   fail visibly rather than free DMA.
+- warm rebind or low-power recovery: detect surviving firmware state and apply
+  the reviewed RTL8822B RPWM `0xfe58` toggle/acknowledgement sequence before
+  reusing the WCPU. Q057 cold-open correctness does not prove this path; cover
+  both retained-firmware and fully powered-off cases here with finite waits.
 - USB transfer timeout/stall: attribute the endpoint/request and connection
   generation, recover only that transport when safe, and escalate to the same
   full reset path after a bounded retry. Do not reset an unrelated xHCI device.

@@ -8,6 +8,7 @@
 #include <drivers/usb.h>
 #include <errno.h>
 #include <hal/hal.h>
+#include <kern/clock.h>
 #include <kern/lock.h>
 #include <kern/net/net-device.h>
 #include <kern/net/packet-buf.h>
@@ -16,6 +17,18 @@
 #include <string.h>
 
 #include "rtl8822b-internal.h"
+
+/* The host fixture substitutes an immutable in-memory lease.  Production
+ * always uses the fixed-path VFS loader and the validated core walker. */
+#ifndef RTL8822BU_FIRMWARE_LOAD
+#define RTL8822BU_FIRMWARE_LOAD rtl8822b_firmware_load
+#endif
+#ifndef RTL8822BU_FIRMWARE_RELEASE
+#define RTL8822BU_FIRMWARE_RELEASE rtl8822b_firmware_release
+#endif
+#ifndef RTL8822BU_FIRMWARE_WALK
+#define RTL8822BU_FIRMWARE_WALK rtl8822b_firmware_walk
+#endif
 
 #define RTL8822BU_VENDOR_ID                         0x2357U
 #define RTL8822BU_PRODUCT_ID                        0x012eU
@@ -40,6 +53,16 @@
 #define RTL8822BU_FIRMWARE_TRANSFER_TIMEOUT_MS             50U
 #define RTL8822BU_FIRMWARE_POLL_MAX                       1000U
 #define RTL8822BU_RX_DRAIN_TIMEOUT_MS                       50U
+/*
+ * The bounded RFE/cut model needs at most 3245 control transfers plus
+ * 412326 us of explicit table/RF delay.  Fifteen seconds retains a finite
+ * failure bound without assuming an unrealistically low host USB latency.
+ */
+#define RTL8822BU_RADIO_OPEN_TIMEOUT_TICKS      (15U * KERN_CLOCK_HZ)
+#define RTL8822BU_RADIO_STOP_TIMEOUT_TICKS       (1U * KERN_CLOCK_HZ)
+#define RTL8822BU_STATION_CLOSE_TIMEOUT_TICKS     (1U * KERN_CLOCK_HZ)
+#define RTL8822BU_MICROSECONDS_PER_SECOND                 1000000ULL
+#define RTL8822BU_RELAXATIONS_PER_MICROSECOND                  128U
 
 #define RTL8822BU_REG_SYS_FUNC_EN                      0x0002U
 #define RTL8822BU_REG_SYS_CLKR                         0x0008U
@@ -128,13 +151,15 @@ struct rtl8822bu_adapter {
 	struct net_device *net_device;
 	struct wlan_station *station;
 	struct rtl8822bu_board_info board;
+	struct rtl8822b_radio radio;
 	struct mutex lifecycle_lock;
 	struct spinlock lock;
 	unsigned ready;
 	unsigned net_live;
 	unsigned station_attached;
 	unsigned detaching;
-	unsigned radio_tables_ready;
+	unsigned firmware_running;
+	unsigned radio_running;
 	unsigned opened;
 	unsigned closing;
 	unsigned stopping;
@@ -151,6 +176,146 @@ struct rtl8822bu_adapter {
 typedef int (*rtl8822bu_firmware_walk_fn)(
 	const struct rtl8822b_firmware_view *,
 	rtl8822b_firmware_chunk_fn, void *);
+
+static int rtl8822bu_read8(struct rtl8822bu_adapter *, uint16_t, uint8_t *);
+static int rtl8822bu_read16(struct rtl8822bu_adapter *, uint16_t, uint16_t *);
+static int rtl8822bu_read32(struct rtl8822bu_adapter *, uint16_t, uint32_t *);
+static int rtl8822bu_write8(struct rtl8822bu_adapter *, uint16_t, uint8_t);
+static int rtl8822bu_write16(struct rtl8822bu_adapter *, uint16_t, uint16_t);
+static int rtl8822bu_write32(struct rtl8822bu_adapter *, uint16_t, uint32_t);
+
+static int
+rtl8822bu_radio_read(void *context, uint16_t address, unsigned width,
+	uint32_t *value)
+{
+	struct rtl8822bu_adapter *adapter = context;
+	uint16_t value16;
+	uint8_t value8;
+	int error;
+
+	if (adapter == NULL || value == NULL)
+		return EINVAL;
+	if (width == 1U) {
+		error = rtl8822bu_read8(adapter, address, &value8);
+		if (error == 0)
+			*value = value8;
+		return error;
+	}
+	if (width == 2U) {
+		error = rtl8822bu_read16(adapter, address, &value16);
+		if (error == 0)
+			*value = value16;
+		return error;
+	}
+	if (width == 4U)
+		return rtl8822bu_read32(adapter, address, value);
+	return EINVAL;
+}
+
+static int
+rtl8822bu_radio_write(void *context, uint16_t address, unsigned width,
+	uint32_t value)
+{
+	struct rtl8822bu_adapter *adapter = context;
+
+	if (adapter == NULL)
+		return EINVAL;
+	if (width == 1U && value <= UINT8_MAX)
+		return rtl8822bu_write8(adapter, address, (uint8_t)value);
+	if (width == 2U && value <= UINT16_MAX)
+		return rtl8822bu_write16(adapter, address, (uint16_t)value);
+	if (width == 4U)
+		return rtl8822bu_write32(adapter, address, value);
+	return EINVAL;
+}
+
+static uint64_t
+rtl8822bu_radio_now(void *context)
+{
+	(void)context;
+	return clock_ticks();
+}
+
+static void
+rtl8822bu_radio_yield(void *context)
+{
+	(void)context;
+	sched_yield();
+}
+
+static int
+rtl8822bu_radio_delay_us(void *context, uint32_t microseconds,
+	uint64_t deadline_ticks)
+{
+	uint64_t now, target, ticks, scaled;
+	uint32_t remaining, batch, spin;
+
+	(void)context;
+	now = clock_ticks();
+	if (now >= deadline_ticks)
+		return ETIMEDOUT;
+	if (microseconds == 0U)
+		return 0;
+	/* Long requests are representable by the monotonic kernel clock.  Short
+	 * MAC/RF-table delays are deliberately not rounded to a 10-ms tick: doing
+	 * so for every 1/5/13-us table entry makes initialization take minutes.
+	 * hal_atomic_relax() keeps the bounded sub-tick path architecture-neutral. */
+	scaled = (uint64_t)microseconds * KERN_CLOCK_HZ;
+	/* One millisecond and longer is rare (power transition or an explicit
+	 * table pseudo-op) and needs a guaranteed minimum, so round it once to the
+	 * coarse clock.  Only the dense <=100-us RF-write delays use relax. */
+	if (microseconds >= 1000U) {
+		ticks = (scaled + RTL8822BU_MICROSECONDS_PER_SECOND - 1U) /
+		    RTL8822BU_MICROSECONDS_PER_SECOND;
+		if (ticks > UINT64_MAX - now)
+			return EOVERFLOW;
+		target = now + ticks;
+		if (target >= deadline_ticks)
+			return ETIMEDOUT;
+		while (clock_ticks() < target) {
+			if (clock_ticks() >= deadline_ticks)
+				return ETIMEDOUT;
+			sched_yield();
+		}
+		return 0;
+	}
+	remaining = microseconds;
+	while (remaining != 0U) {
+		batch = remaining > 50U ? 50U : remaining;
+		for (spin = 0U;
+		    spin < batch * RTL8822BU_RELAXATIONS_PER_MICROSECOND; spin++)
+			hal_atomic_relax();
+		remaining -= batch;
+		now = clock_ticks();
+		if (now >= deadline_ticks)
+			return ETIMEDOUT;
+	}
+	return 0;
+}
+
+static int
+rtl8822bu_deadline_after(uint64_t delta, uint64_t *deadline)
+{
+	uint64_t now = clock_ticks();
+
+	if (deadline == NULL || now > UINT64_MAX - delta)
+		return EOVERFLOW;
+	*deadline = now + delta;
+	return 0;
+}
+
+static void
+rtl8822bu_radio_transport_init(struct rtl8822bu_adapter *adapter,
+	struct rtl8822b_radio_transport *transport)
+{
+	memset(transport, 0, sizeof(*transport));
+	transport->context = adapter;
+	transport->read = rtl8822bu_radio_read;
+	transport->write = rtl8822bu_radio_write;
+	transport->now_ticks = rtl8822bu_radio_now;
+	transport->delay_us = rtl8822bu_radio_delay_us;
+	transport->yield = rtl8822bu_radio_yield;
+}
 
 static int
 rtl8822bu_endpoint_accept(struct rtl8822bu_binding *binding,
@@ -979,7 +1144,7 @@ rtl8822bu_firmware_download(struct rtl8822bu_adapter *adapter,
 	const struct rtl8822b_firmware_view *view)
 {
 	return rtl8822bu_firmware_download_model(adapter, view,
-	    rtl8822b_firmware_walk);
+	    RTL8822BU_FIRMWARE_WALK);
 }
 
 static int
@@ -1143,7 +1308,7 @@ rtl8822bu_rx_stop(struct rtl8822bu_adapter *adapter)
 	return error;
 }
 
-static int __attribute__((unused))
+static int
 rtl8822bu_rx_start(struct rtl8822bu_adapter *adapter, uint64_t generation,
 	uint32_t channel)
 {
@@ -1164,6 +1329,35 @@ rtl8822bu_rx_start(struct rtl8822bu_adapter *adapter, uint64_t generation,
 	return rtl8822bu_rx_submit(adapter, 1);
 }
 
+/* lifecycle_lock is held.  The common WLAN station is quiesced before this
+ * helper runs, so no channel/TX callback can race the checked hardware stop. */
+static int
+rtl8822bu_hardware_stop_locked(struct rtl8822bu_adapter *adapter)
+{
+	uint64_t deadline;
+	unsigned long enabled;
+	int error, stop_error;
+
+	error = rtl8822bu_rx_stop(adapter);
+	if (rtl8822bu_deadline_after(RTL8822BU_RADIO_STOP_TIMEOUT_TICKS,
+	    &deadline) != 0)
+		stop_error = EOVERFLOW;
+	else
+		stop_error = rtl8822b_radio_stop(&adapter->radio, deadline);
+	rtl8822bu_record_cleanup_error(&error, stop_error);
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (stop_error == 0) {
+		adapter->radio_running = 0U;
+		adapter->firmware_running = 0U;
+	} else {
+		adapter->quarantined = 1U;
+	}
+	adapter->scan_generation = 0U;
+	adapter->scan_channel = 0U;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	return error;
+}
+
 struct rtl8822bu_rx_report_context {
 	struct rtl8822bu_adapter *adapter;
 	unsigned reported;
@@ -1174,6 +1368,10 @@ rtl8822bu_rx_report(void *context, const struct rtl8822b_rx_packet *packet)
 {
 	struct rtl8822bu_rx_report_context *report = context;
 	struct rtl8822bu_adapter *adapter = report->adapter;
+	struct wlan_station *station;
+	unsigned long enabled;
+	uint64_t generation;
+	uint32_t channel;
 	uint16_t frame_control;
 	uint16_t subtype;
 	int error;
@@ -1190,9 +1388,20 @@ rtl8822bu_rx_report(void *context, const struct rtl8822b_rx_packet *packet)
 	subtype = frame_control & 0x00f0U;
 	if (subtype != 0x0080U && subtype != 0x0050U)
 		return 0;
-	error = wlan_station_report_scan_frame(adapter->station,
-	    adapter->scan_generation, packet->payload, packet->payload_length,
-	    packet->rssi_dbm, (uint8_t)adapter->scan_channel);
+	enabled = spin_lock_irqsave(&adapter->lock);
+	station = adapter->station;
+	generation = adapter->scan_generation;
+	channel = adapter->scan_channel;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	/* Management traffic outside a current software-scan dwell is normal.
+	 * It is not a malformed RX aggregate and must not inflate rx_errors. */
+	if (station == NULL || generation == 0U || channel == 0U)
+		return 0;
+	error = wlan_station_report_scan_frame(station, generation,
+	    packet->payload, packet->payload_length, packet->rssi_dbm,
+	    (uint8_t)channel);
+	if (error == ESTALE)
+		return 0;
 	if (error == 0)
 		report->reported++;
 	return error;
@@ -1221,18 +1430,78 @@ static int
 rtl8822bu_scan_channel_start(void *context, uint64_t generation,
 	uint32_t step_index, uint32_t channel, uint64_t deadline)
 {
-	(void)generation;
-	(void)step_index;
-	(void)channel;
-	(void)deadline;
-	return rtl8822bu_radio_unsupported(context);
+	struct rtl8822bu_adapter *adapter = context;
+	struct wlan_station *station;
+	unsigned long enabled;
+	int error;
+
+	if (adapter == NULL || generation == 0U || step_index >= 11U ||
+	    channel == 0U || channel > 11U)
+		return EINVAL;
+	if (clock_ticks() >= deadline)
+		return ETIMEDOUT;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (!adapter->ready || !adapter->opened || adapter->closing ||
+	    adapter->stopping || adapter->quarantined ||
+	    !adapter->radio_running || adapter->station == NULL) {
+		error = adapter->ready ? ENETDOWN : ENODEV;
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+		return error;
+	}
+	station = adapter->station;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	error = rtl8822b_radio_set_channel(&adapter->radio, (uint8_t)channel,
+	    deadline);
+	if (error != 0) {
+		/* Invalid caller input is rejected above without touching hardware.
+		 * Once the core has entered channel programming, however, a failed
+		 * transaction fail-closes the radio and clears its state.  Mirror that
+		 * terminal hardware state here so no later callback can observe stale
+		 * firmware/radio-running flags or keep admitting RX/TX work.  opened is
+		 * intentionally retained until close/detach drains the outstanding URB. */
+		enabled = spin_lock_irqsave(&adapter->lock);
+		if (adapter->radio.state == RTL8822B_RADIO_OFF) {
+			adapter->firmware_running = 0U;
+			adapter->radio_running = 0U;
+			adapter->scan_generation = 0U;
+			adapter->scan_channel = 0U;
+			adapter->quarantined = 1U;
+		}
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+		return error;
+	}
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (!adapter->ready || !adapter->opened || adapter->closing ||
+	    adapter->stopping || adapter->quarantined ||
+	    !adapter->radio_running || adapter->station != station) {
+		error = adapter->ready ? ENETDOWN : ENODEV;
+	} else {
+		adapter->scan_generation = generation;
+		adapter->scan_channel = channel;
+		error = 0;
+	}
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (error != 0)
+		return error;
+	error = wlan_station_report_scan_channel_ready(station, generation,
+	    step_index);
+	return error == ESTALE ? 0 : error;
 }
 
 static int
 rtl8822bu_scan_stop(void *context, uint64_t generation)
 {
-	(void)context;
-	(void)generation;
+	struct rtl8822bu_adapter *adapter = context;
+	unsigned long enabled;
+
+	if (adapter == NULL)
+		return ENODEV;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (generation == 0U || adapter->scan_generation == generation) {
+		adapter->scan_generation = 0U;
+		adapter->scan_channel = 0U;
+	}
+	spin_unlock_irqrestore(&adapter->lock, enabled);
 	return 0;
 }
 
@@ -1258,11 +1527,61 @@ static int
 rtl8822bu_management_transmit(void *context, uint64_t generation,
 	const uint8_t *frame, size_t length, uint64_t deadline)
 {
-	(void)generation;
-	(void)frame;
-	(void)length;
-	(void)deadline;
-	return rtl8822bu_radio_unsupported(context);
+	struct rtl8822bu_adapter *adapter = context;
+	uint8_t *wire;
+	unsigned long enabled;
+	uint64_t now, remaining, milliseconds;
+	uint32_t channel;
+	size_t wire_length = 0U, actual = 0U;
+	int error;
+
+	if (adapter == NULL || generation == 0U || frame == NULL ||
+	    length == 0U || length > RTL8822B_MANAGEMENT_MPDU_MAX)
+		return EINVAL;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (!adapter->ready || !adapter->opened || adapter->closing ||
+	    adapter->stopping || adapter->quarantined ||
+	    !adapter->radio_running || adapter->scan_generation != generation) {
+		error = adapter->ready ? ENETDOWN : ENODEV;
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+		return error;
+	}
+	channel = adapter->scan_channel;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	/* The core permits only the all-rate/all-path TXAGC index-0 floor on the
+	 * frozen 2.4-GHz profile; every broader transmit mode remains closed. */
+	if (!rtl8822b_radio_active_scan_allowed(&adapter->radio,
+	    (uint8_t)channel))
+		return EPERM;
+	wire = hal_malloc(RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U);
+	if (wire == NULL)
+		return ENOMEM;
+	error = rtl8822b_radio_management_frame_prepare(&adapter->radio, wire,
+	    RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U, frame, length,
+	    &wire_length);
+	now = clock_ticks();
+	if (error == 0 && now >= deadline)
+		error = ETIMEDOUT;
+	if (error == 0) {
+		remaining = deadline - now;
+		milliseconds = remaining > UINT64_MAX / 1000ULL ? UINT64_MAX :
+		    (remaining * 1000ULL) / KERN_CLOCK_HZ;
+		if (milliseconds == 0U)
+			milliseconds = 1U;
+		if (milliseconds > UINT32_MAX)
+			milliseconds = UINT32_MAX;
+		/* The frozen three-OUT RQPN map routes the management QSEL to the
+		 * high-priority DMA pipe, endpoint 0x05. */
+		error = drv_usb_bulk(adapter->usb_device,
+		    adapter->bulk_out_high, wire, wire_length,
+		    (unsigned)milliseconds, &actual);
+		if (error == 0 && actual != wire_length)
+			error = EIO;
+	}
+	memset(wire, 0,
+	    RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U);
+	hal_free(wire);
+	return error;
 }
 
 static int
@@ -1288,7 +1607,15 @@ rtl8822bu_key_delete(void *context, uint64_t generation,
 static int
 rtl8822bu_quiesce(void *context)
 {
-	(void)context;
+	struct rtl8822bu_adapter *adapter = context;
+	unsigned long enabled;
+
+	if (adapter == NULL)
+		return ENODEV;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	adapter->scan_generation = 0U;
+	adapter->scan_channel = 0U;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
 	return 0;
 }
 
@@ -1307,33 +1634,125 @@ static int
 rtl8822bu_open(struct net_device *device)
 {
 	struct rtl8822bu_adapter *adapter = device->driver_data;
-	int error;
+	struct rtl8822b_firmware_blob firmware;
+	struct rtl8822b_radio_transport transport;
+	unsigned long enabled;
+	uint64_t deadline;
+	int error, cleanup_error;
 
 	/* net_device_create() makes the name visible before station attachment.
 	 * Do not recurse into lifecycle_lock from that publication callback. */
 	if (!rtl8822bu_ready_station(adapter, NULL))
 		return ENODEV;
+	memset(&firmware, 0, sizeof(firmware));
 	mutex_lock(&adapter->lifecycle_lock);
 	if (!rtl8822bu_ready_station(adapter, NULL)) {
 		error = ENODEV;
-	} else {
-		(void)net_device_set_carrier(device, 0);
-		/* P036 has no approved MAC/BB/AGC/RF table.  Refuse before loading
-		 * the firmware or issuing any USB/register write. */
-		error = EOPNOTSUPP;
+		goto out;
 	}
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (adapter->opened || adapter->closing || adapter->stopping ||
+	    adapter->quarantined || adapter->radio_running ||
+	    adapter->firmware_running)
+		error = adapter->quarantined ? EIO : EBUSY;
+	else
+		error = 0;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (error != 0)
+		goto out;
+	error = net_device_set_carrier(device, 0);
+	if (error != 0)
+		goto out;
+	error = rtl8822bu_deadline_after(RTL8822BU_RADIO_OPEN_TIMEOUT_TICKS,
+	    &deadline);
+	if (error != 0)
+		goto out;
+	rtl8822bu_radio_transport_init(adapter, &transport);
+	error = rtl8822b_radio_power_on(&adapter->radio, &transport,
+	    &adapter->board, deadline);
+	if (error != 0)
+		goto fail_hardware;
+	error = RTL8822BU_FIRMWARE_LOAD(&firmware);
+	if (error != 0)
+		goto fail_hardware;
+	error = rtl8822bu_firmware_download(adapter, &firmware.view);
+	if (error != 0)
+		goto fail_hardware;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	adapter->firmware_running = 1U;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	error = rtl8822b_radio_start(&adapter->radio, deadline);
+	if (error != 0)
+		goto fail_hardware;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	adapter->radio_running = 1U;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	error = rtl8822bu_rx_start(adapter, 0U, 1U);
+	if (error != 0)
+		goto fail_hardware;
+	error = wlan_station_open(adapter->station);
+	if (error != 0)
+		goto fail_hardware;
+	RTL8822BU_FIRMWARE_RELEASE(&firmware);
+	goto out;
+
+fail_hardware:
+	/* The staging lease remains owned until RX cancellation and the checked
+	 * core reset have completed, so every failure follows one reverse-order
+	 * transaction boundary. */
+	cleanup_error = rtl8822bu_hardware_stop_locked(adapter);
+	rtl8822bu_record_cleanup_error(&error, cleanup_error);
+	RTL8822BU_FIRMWARE_RELEASE(&firmware);
+out:
 	mutex_unlock(&adapter->lifecycle_lock);
 	return error;
+}
+
+static int
+rtl8822bu_station_close_wait(struct wlan_station *station)
+{
+	uint64_t deadline;
+	int error;
+
+	if (station == NULL)
+		return ENODEV;
+	error = rtl8822bu_deadline_after(
+	    RTL8822BU_STATION_CLOSE_TIMEOUT_TICKS, &deadline);
+	if (error != 0)
+		return error;
+	for (;;) {
+		error = wlan_station_close(station);
+		if (error != EBUSY)
+			return error;
+		if (clock_ticks() >= deadline)
+			return ETIMEDOUT;
+		/* No adapter spin or common-WLAN lock is retained here.  An already
+		 * admitted channel/TX callback can therefore retire before retry. */
+		sched_yield();
+	}
 }
 
 static void
 rtl8822bu_close(struct net_device *device)
 {
 	struct rtl8822bu_adapter *adapter = device->driver_data;
+	struct wlan_station *station;
+	unsigned long enabled;
+	int error;
 
 	mutex_lock(&adapter->lifecycle_lock);
 	(void)net_device_set_carrier(device, 0);
-	(void)rtl8822bu_rx_stop(adapter);
+	enabled = spin_lock_irqsave(&adapter->lock);
+	station = adapter->station;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	error = rtl8822bu_station_close_wait(station);
+	if (error == 0 || error == ENODEV)
+		(void)rtl8822bu_hardware_stop_locked(adapter);
+	else {
+		enabled = spin_lock_irqsave(&adapter->lock);
+		adapter->quarantined = 1U;
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+	}
 	mutex_unlock(&adapter->lifecycle_lock);
 }
 
@@ -1472,11 +1891,16 @@ rtl8822bu_scan_profile(struct wlan_scan_profile *profile)
 	unsigned channel;
 
 	memset(profile, 0, sizeof(*profile));
-	profile->channel_count = WLAN_SCAN_CHANNEL_MAX;
-	for (channel = 1U; channel <= WLAN_SCAN_CHANNEL_MAX; channel++) {
+	/* The initial table set and channel programming cover 2.4-GHz channels
+	 * 1--11.  The core permits only its all-rate/all-path index-0 TXAGC floor,
+	 * which is sufficient for a bounded wildcard probe and no general data. */
+	profile->channel_count = 11U;
+	for (channel = 1U; channel <= profile->channel_count; channel++) {
 		profile->channels[channel - 1U].channel = channel;
 		profile->channels[channel - 1U].center_frequency_mhz =
-		    channel == 14U ? 2484U : 2407U + channel * 5U;
+		    2407U + channel * 5U;
+		profile->channels[channel - 1U].flags =
+		    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED;
 	}
 }
 
@@ -1576,14 +2000,21 @@ rtl8822bu_teardown(struct drv_usb_interface *interface,
 		mutex_unlock(&adapter->lifecycle_lock);
 	}
 	mutex_lock(&adapter->lifecycle_lock);
-	error = rtl8822bu_rx_stop(adapter);
+	enabled = spin_lock_irqsave(&adapter->lock);
+	station = adapter->station;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (station != NULL && adapter->station_attached) {
+		error = wlan_station_close(station);
+		if (error != 0 && error != ENODEV) {
+			mutex_unlock(&adapter->lifecycle_lock);
+			return error;
+		}
+	}
+	error = rtl8822bu_hardware_stop_locked(adapter);
 	if (error != 0) {
 		mutex_unlock(&adapter->lifecycle_lock);
 		return error;
 	}
-	enabled = spin_lock_irqsave(&adapter->lock);
-	station = adapter->station;
-	spin_unlock_irqrestore(&adapter->lock, enabled);
 	if (station != NULL && adapter->station_attached) {
 		error = wlan_station_detach(station);
 		/* Global network shutdown may already have joined this station. */
@@ -1714,17 +2145,27 @@ rtl8822bu_shutdown(struct drv_usb_interface *interface)
 {
 	struct rtl8822bu_adapter *adapter =
 	    drv_usb_interface_driver_data(interface);
+	struct wlan_station *station;
 	unsigned long enabled;
+	int error;
 
 	if (adapter == NULL)
 		return;
 	mutex_lock(&adapter->lifecycle_lock);
 	enabled = spin_lock_irqsave(&adapter->lock);
 	adapter->ready = 0U;
+	station = adapter->station;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	if (adapter->net_device != NULL)
 		(void)net_device_set_carrier(adapter->net_device, 0);
-	(void)rtl8822bu_rx_stop(adapter);
+	error = rtl8822bu_station_close_wait(station);
+	if (error == 0 || error == ENODEV)
+		(void)rtl8822bu_hardware_stop_locked(adapter);
+	else {
+		enabled = spin_lock_irqsave(&adapter->lock);
+		adapter->quarantined = 1U;
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+	}
 	mutex_unlock(&adapter->lifecycle_lock);
 }
 

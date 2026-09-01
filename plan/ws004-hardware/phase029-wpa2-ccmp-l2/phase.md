@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p029`
 
-Status: planned; depends on the `ws004-p028` automatic milestone; not queued
+Status: in progress (`q058`); the `ws004-p028` automatic dependency is complete
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -37,7 +37,7 @@ and ARP/ping only as a visible consumer of the completed L2 path.
   a 2.4-GHz non-DFS 20-MHz channel. The real controlled AP and peer are inputs
   only to the later shared WS005 p008 checkpoint, not a p029 gate.
 
-This Phase remains a P-book plan and is not added to an implementation Queue.
+Q058 executes this automatic milestone without a physical-radio dependency.
 
 ## Frozen security profile
 

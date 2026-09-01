@@ -1,0 +1,180 @@
+require zedbuild;
+
+func requireSha256(path, expected) {
+    var command = "printf '%s  %s\\n' " + zbShellQuote(expected) + " " +
+        zbShellQuote(path) + " | sha256sum -c - >/dev/null";
+    if (System.shell(command) != 0) {
+        zbFail(path + ": SHA-256 differs from the immutable source");
+    }
+}
+
+func requireText(text, needle, what) {
+    if (String.indexOf(text, needle) < 0) {
+        zbFail(what + ": missing " + needle);
+    }
+}
+
+func rejectText(text, needle, what) {
+    if (String.indexOf(text, needle) >= 0) {
+        zbFail(what + ": forbidden imported content " + needle);
+    }
+}
+
+func arrayBody(text, name, what) {
+    var anchor = name + "[] = {";
+    var start = String.indexOf(text, anchor);
+    if (start < 0) { zbFail(what + ": missing array " + name); }
+    var rest = String.substring(text, start + String.charCount(anchor), -1);
+    var finish = String.indexOf(rest, "\n};");
+    if (finish < 0) { zbFail(what + ": unterminated array " + name); }
+    return String.substring(rest, 0, finish);
+}
+
+func isHexDigit(code) {
+    return (code >= 48 && code <= 57) || (code >= 65 && code <= 70) ||
+        (code >= 97 && code <= 102);
+}
+
+func countHexWords(text) {
+    var count = 0;
+    var i = 0;
+    var length = String.charCount(text);
+    while (i + 2 < length) {
+        if (String.charAt(text, i) == "0" &&
+            (String.charAt(text, i + 1) == "x" ||
+             String.charAt(text, i + 1) == "X") &&
+            isHexDigit(String.charCodeAt(text, i + 2))) {
+            count = count + 1;
+            i = i + 3;
+            while (i < length && isHexDigit(String.charCodeAt(text, i))) {
+                i = i + 1;
+            }
+        } else {
+            i = i + 1;
+        }
+    }
+    return count;
+}
+
+func main(args) {
+    var sourceTable = "";
+    var sourceChip = "";
+    var sourceLicense = "";
+    var imported = "src/drivers/rtl8822b-tables.inc";
+    var binaryLicense =
+        "userland/base/licenses/rtl8822b-tables/LICENSE";
+    var i = 0;
+    while (i < Array.size(args)) {
+        if (args[i] == "--source-table" && i + 1 < Array.size(args)) {
+            sourceTable = args[i + 1]; i = i + 2;
+        } else if (args[i] == "--source-chip" && i + 1 < Array.size(args)) {
+            sourceChip = args[i + 1]; i = i + 2;
+        } else if (args[i] == "--source-license" && i + 1 < Array.size(args)) {
+            sourceLicense = args[i + 1]; i = i + 2;
+        } else if (args[i] == "--import" && i + 1 < Array.size(args)) {
+            imported = args[i + 1]; i = i + 2;
+        } else if (args[i] == "--binary-license" &&
+                   i + 1 < Array.size(args)) {
+            binaryLicense = args[i + 1]; i = i + 2;
+        } else {
+            zbFail("usage: check-rtl8822b-tables.noct --source-table FILE " +
+                "--source-chip FILE --source-license FILE [--import FILE] " +
+                "[--binary-license FILE]");
+        }
+    }
+    if (sourceTable == "" || sourceChip == "" || sourceLicense == "") {
+        zbFail("all three immutable upstream source files are required");
+    }
+
+    requireSha256(sourceTable,
+        "8e58874cfb30a2bcbfe24af93348a56a35f2968fcbf2fbea2e7b48f733d212a7");
+    requireSha256(sourceChip,
+        "76f624db6f3cea02506be5a72924e9b5da27966fed9fc8fbdf6bb2f126712076");
+    requireSha256(sourceLicense,
+        "7a83b1aeb460458db9a4bd521d7f237c45b1650f6e60ea5ffc71e49472454de3");
+    requireSha256(imported,
+        "9e4ee1fc1d085b66f2c15b8736dbfed204996ea25f7ee992012590fe8e676f4b");
+
+    var tableText = FileUtil.readText(sourceTable);
+    var chipText = FileUtil.readText(sourceChip);
+    var licenseText = FileUtil.readText(sourceLicense);
+    var importedText = FileUtil.readText(imported);
+    var binaryLicenseText = FileUtil.readText(binaryLicense);
+
+    requireText(tableText,
+        "// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause",
+        "upstream table source");
+    requireText(importedText, "// SPDX-License-Identifier: BSD-3-Clause",
+        "imported table data");
+    requireText(licenseText,
+        "Redistribution and use in source and binary forms",
+        "upstream BSD-3-Clause text");
+    requireText(importedText,
+        "Redistribution and use in source and binary forms",
+        "imported BSD-3-Clause notice");
+    requireText(importedText,
+        "Neither the name of the copyright holder nor the names of its",
+        "imported BSD-3-Clause notice");
+    requireText(importedText,
+        "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS",
+        "imported BSD-3-Clause notice");
+    requireText(binaryLicenseText,
+        "Copyright (c) 2018-2019 Realtek Corporation",
+        "binary-distribution BSD-3-Clause notice");
+    requireText(binaryLicenseText,
+        "Redistribution and use in source and binary forms",
+        "binary-distribution BSD-3-Clause notice");
+    requireText(binaryLicenseText,
+        "Neither the name of the copyright holder nor the names of its",
+        "binary-distribution BSD-3-Clause notice");
+    requireText(binaryLicenseText,
+        "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS",
+        "binary-distribution BSD-3-Clause notice");
+
+    var included = ["rtw8822b_mac", "rtw8822b_agc", "rtw8822b_bb",
+        "rtw8822b_rf_a", "rtw8822b_rf_b"];
+    var expectedWords = [250, 20302, 2984, 10178, 8904];
+    for (j in 0..Array.size(included)) {
+        var name = included[j];
+        var sourceBody = arrayBody(tableText, name, "upstream table source");
+        var importedBody = arrayBody(importedText, name,
+            "imported table data");
+        if (sourceBody != importedBody) {
+            zbFail(name + ": data stream is not an exact mechanical copy");
+        }
+        if (countHexWords(sourceBody) != expectedWords[j] ||
+            countHexWords(importedBody) != expectedWords[j] ||
+            (expectedWords[j] & 1) != 0) {
+            zbFail(name + ": word count differs from section metadata");
+        }
+    }
+
+    var excluded = ["rtw8822b_bb_pg_type2", "rtw8822b_bb_pg_type3",
+        "rtw8822b_bb_pg_type5", "rtw8822b_txpwr_lmt_type0",
+        "rtw8822b_txpwr_lmt_type2", "rtw8822b_txpwr_lmt_type5"];
+    for (j in 0..Array.size(excluded)) {
+        arrayBody(tableText, excluded[j], "upstream table source");
+        rejectText(importedText, excluded[j] + "[]", "imported table data");
+    }
+
+    requireText(chipText, "[2] = RTW_DEF_RFE(8822b, 2, 2),",
+        "upstream RFE map");
+    requireText(chipText, "[3] = RTW_DEF_RFE(8822b, 3, 0),",
+        "upstream RFE map");
+    requireText(chipText, "[5] = RTW_DEF_RFE(8822b, 5, 5),",
+        "upstream RFE map");
+
+    var counts = ["rtw8822b_mac, 250", "rtw8822b_agc, 20302",
+        "rtw8822b_bb, 2984", "rtw8822b_rf_a, 10178",
+        "rtw8822b_rf_b, 8904"];
+    for (j in 0..Array.size(counts)) {
+        requireText(importedText, counts[j], "section metadata");
+    }
+
+    rejectText(importedText, "#include", "imported table data");
+    rejectText(importedText, "RTW_DECL_TABLE", "imported table data");
+    rejectText(importedText, "rtw_phy_cfg_", "imported table data");
+    rejectText(importedText, "static void ", "imported table data");
+    rejectText(importedText, "static int ", "imported table data");
+    print("RTL8822B table provenance check: PASS");
+}

@@ -4,8 +4,8 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p028`
 
-Status: in progress (`q057`); `ws004-p026`, `ws004-p027`, and `ws004-p036`
-complete; BSD-3-Clause table policy resolved
+Status: automatic milestone complete (`q057`); physical radio evidence is
+intentionally deferred to the shared `ws005-p008` checkpoint
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -299,6 +299,59 @@ automatic gates pass, the single p030/WS005 p008 ledger must confirm the real
 attach, firmware start, and controlled scan before WS004 records physical
 completion. p028 makes no independent user request and is not a physical
 dependency of p029/p030, avoiding a cycle through p008.
+
+## Execution evidence (`q057`)
+
+Q057 completed the automatic milestone on 2026-09-01. The imported
+`rtl8822b-tables.inc` is a data-only, mechanically verified copy of the pinned
+MAC/BB/AGC/RF arrays. It retains the Realtek copyright, complete selected
+BSD-3-Clause text, immutable upstream commit/path/hash, exact word counts, and
+no Linux control flow. Driver-enabled binary images automatically install the
+same notice as `/usr/share/licenses/rtl8822b-tables/LICENSE`; this is separate
+from the optional Realtek firmware package and its license.
+
+The production radio core now performs checked USB card power sequencing and
+already-powered normalization, configures the three bulk-OUT FIFO/RQPN/LLT/H2C
+layout and HS RX aggregation, applies the conditional tables for supported
+cut/RFE/path identities, programs the minimum MAC timing/RFE/TRX/receive
+profile, fixes every TXAGC entry at index zero, and selects only channels
+1--11 at 20 MHz. Active scan accepts only a standards-bounded 1-Mbit/s
+wildcard probe on the management queue and endpoint `0x05`; all other TX
+profiles remain outside this milestone. Measured worst-case fixture work was
+3,108 writes, 137 reads, and 412,326 microseconds of explicit delay, so first
+open has one finite 15-second deadline.
+
+The USB driver completes first-open in the order power, pinned firmware,
+radio, RX arm, then common-station open. Reverse stop drains RX before radio
+and firmware release. A channel-programming transport failure leaves the core
+OFF, clears the USB firmware/radio/scan flags, quarantines new work, and keeps
+the admitted RX ownership until checked detach drains it. Invalid arguments
+do not quarantine the device. The production scan path passed passive and
+permitted wildcard-active channel 1--11 generations, stale/malformed RX,
+timeout, close, retry, shutdown, detach, and concurrent fake-storage cases.
+
+The following focused gates passed in ordinary, ASan/UBSan, and compiler-
+analyzer modes where supplied:
+
+```sh
+plan/ws004-hardware/tests/run-rtl8822b-table-import-test.sh
+RTL8822B_FIRMWARE_TEST_BLOB=build/sources/firmware/rtl8822b/2f56219d20e4becccd718963fc3bcc671c543ce5/rtw8822b_fw.bin \
+  plan/ws004-hardware/tests/run-rtl8822b-core-test.sh
+plan/ws004-hardware/tests/run-usb-rtl8822bu-driver-test.sh
+```
+
+Forced RTL8822BU-enabled amd64 and i386 kernels built successfully and retained
+both `drv_usb_rtl8822bu_driver_register` and `rtl8822b_radio_start`. The amd64
+root filesystem carried the byte-identical table license. Ordinary
+`make -j16` passed. Disposable amd64 IDE-root and q35/xHCI USB-root boots each
+reached exactly one `login:` without a panic or VFS failure, and
+`git diff --check` passed. A final independent read-only audit found no
+remaining cold-open, passive-scan, or wildcard-active-scan P0/P1 blocker.
+
+Warm rebind with firmware surviving in low-power state may additionally
+benefit from the RTL8822B RPWM `0xfe58` toggle. It is not used by this cold-open
+milestone and is recorded in p030's recovery hardening rather than being
+silently claimed here. No physical Archer radio operation is claimed by q057.
 
 ## Explicit exclusions
 

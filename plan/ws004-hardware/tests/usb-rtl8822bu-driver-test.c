@@ -60,6 +60,17 @@ struct wlan_station {
 #define RTL8822B_HOST_TEST 1
 #define RTL8822B_TESTING 1
 #include "../../../src/drivers/rtl8822b.c"
+
+static int __attribute__((unused)) fixture_firmware_load(
+	struct rtl8822b_firmware_blob *firmware);
+static void __attribute__((unused)) fixture_firmware_release(
+	struct rtl8822b_firmware_blob *firmware);
+static int test_firmware_walk(const struct rtl8822b_firmware_view *view,
+	rtl8822b_firmware_chunk_fn callback, void *context);
+
+#define RTL8822BU_FIRMWARE_LOAD fixture_firmware_load
+#define RTL8822BU_FIRMWARE_RELEASE fixture_firmware_release
+#define RTL8822BU_FIRMWARE_WALK test_firmware_walk
 #include "../../../src/drivers/usb-rtl8822bu.c"
 
 static uint8_t fake_registers[UINT16_MAX + 1U];
@@ -68,6 +79,7 @@ static struct net_device fake_net_device;
 static struct wlan_station fake_station;
 static unsigned control_calls;
 static unsigned control_fail_at;
+static uint16_t control_fail_address;
 static unsigned control_short_at;
 static unsigned access_off_count;
 static unsigned allocations;
@@ -81,11 +93,20 @@ static int net_gone_error;
 static unsigned station_attached;
 static unsigned station_detached;
 static unsigned station_detach_calls;
+static unsigned station_open_calls;
+static unsigned station_close_calls;
+static unsigned scan_ready_calls;
+static uint64_t scan_ready_generation;
+static uint32_t scan_ready_step;
 static unsigned lifecycle_sequence;
 static unsigned net_gone_sequence;
 static unsigned station_detach_sequence;
 static int station_attach_error;
 static int station_detach_error;
+static int station_open_error;
+static int station_close_error;
+static unsigned station_close_busy_count;
+static int scan_ready_error;
 static unsigned open_during_create;
 static int open_during_create_error;
 static unsigned callback_during_gone;
@@ -125,7 +146,12 @@ static unsigned firmware_ready_suppressed;
 static unsigned firmware_ready_forbidden_bit;
 static unsigned beacon_completion_suppressed;
 static unsigned firmware_descriptors_checked;
+static unsigned management_descriptors_checked;
+static unsigned firmware_load_calls;
+static unsigned firmware_release_calls;
+static int firmware_load_error;
 static unsigned urb_submit_calls;
+static int urb_submit_error;
 static unsigned urb_cancel_calls;
 static unsigned urb_drain_calls;
 static unsigned poll_schedule_calls;
@@ -134,6 +160,7 @@ static uint64_t scan_report_generation;
 static uint8_t scan_report_channel;
 static int32_t scan_report_rssi;
 static unsigned storage_progress;
+static uint64_t fake_clock_ticks;
 static struct drv_usb_urb *persistent_rx_urb;
 static void (*yield_hook)(void);
 static unsigned yield_calls;
@@ -223,6 +250,7 @@ fake_transport_reset(void)
 	fake_efuse_make_board();
 	control_calls = 0U;
 	control_fail_at = 0U;
+	control_fail_address = 0U;
 	control_short_at = 0U;
 	access_off_count = 0U;
 	bulk_calls = 0U;
@@ -234,6 +262,16 @@ fake_transport_reset(void)
 	firmware_ready_forbidden_bit = 0U;
 	beacon_completion_suppressed = 0U;
 	firmware_descriptors_checked = 0U;
+	management_descriptors_checked = 0U;
+	firmware_load_calls = 0U;
+	firmware_release_calls = 0U;
+	firmware_load_error = 0;
+	urb_submit_error = 0;
+	urb_submit_calls = 0U;
+	urb_cancel_calls = 0U;
+	urb_drain_calls = 0U;
+	poll_schedule_calls = 0U;
+	fake_clock_ticks = 1U;
 	net_created = 0U;
 	net_gone = 0U;
 	net_gone_calls = 0U;
@@ -242,8 +280,17 @@ fake_transport_reset(void)
 	station_attached = 0U;
 	station_detached = 0U;
 	station_detach_calls = 0U;
+	station_open_calls = 0U;
+	station_close_calls = 0U;
+	scan_ready_calls = 0U;
+	scan_ready_generation = 0U;
+	scan_ready_step = 0U;
 	station_attach_error = 0;
 	station_detach_error = 0;
+	station_open_error = 0;
+	station_close_error = 0;
+	station_close_busy_count = 0U;
+	scan_ready_error = 0;
 	open_count_during_gone = 0U;
 	close_calls_during_gone = 0U;
 	defer_net_release = 0U;
@@ -276,7 +323,8 @@ fake_transport_reset(void)
 	fake_store32(RTL8822BU_REG_SYS_CFG1, 0x00800000U);
 	fake_registers[RTL8822BU_REG_RSV_CTRL + 1U] =
 	    RTL8822BU_WCPU_IO_ENABLE | 0xa0U;
-	fake_registers[RTL8822BU_REG_CR] = 0x33U;
+	/* The exact-radio core starts from a genuinely powered-off device. */
+	fake_registers[RTL8822BU_REG_CR] = 0xeaU;
 	fake_registers[RTL8822BU_REG_CR + 1U] = 0x22U;
 	fake_registers[RTL8822BU_REG_TXDMA_PQ_MAP + 1U] = 0x55U;
 	fake_store16(RTL8822BU_REG_FIFOPAGE_CTRL_2, 0x0123U);
@@ -286,6 +334,10 @@ fake_transport_reset(void)
 	fake_store32(RTL8822BU_REG_H2CQ_CSR, 0x10203040U);
 	fake_registers[RTL8822BU_REG_CPU_DMEM_CON + 2U] = 0x81U;
 	fake_store16(RTL8822BU_REG_MCUFW_CTRL, 0x3000U);
+	fake_store32(RTL8822B_RF_DIRECT_A + 0x18U * 4U, 0x00000c01U);
+	fake_store32(RTL8822B_RF_DIRECT_B + 0x18U * 4U, 0x00000c01U);
+	fake_store32(0x0c50U, 0x20U);
+	fake_store32(0x0e50U, 0x20U);
 }
 
 void *
@@ -339,10 +391,17 @@ sched_yield(void)
 	static const struct timespec pause = { 0, 1000 };
 
 	(void)__atomic_add_fetch(&yield_calls, 1U, __ATOMIC_RELAXED);
+	(void)__atomic_add_fetch(&fake_clock_ticks, 1U, __ATOMIC_RELAXED);
 	if (yield_hook != NULL)
 		yield_hook();
 	if (__atomic_load_n(&threaded_test_active, __ATOMIC_RELAXED))
 		(void)nanosleep(&pause, NULL);
+}
+
+uint64_t
+clock_ticks(void)
+{
+	return __atomic_load_n(&fake_clock_ticks, __ATOMIC_RELAXED);
 }
 
 void
@@ -501,8 +560,10 @@ drv_usb_control(struct drv_usb_device *device, uint8_t request_type,
 	assert(length == 1U || length == 2U || length == 4U);
 	assert((request_type & (DRV_USB_REQUEST_VENDOR | DRV_USB_RECIP_DEVICE)) ==
 	    (DRV_USB_REQUEST_VENDOR | DRV_USB_RECIP_DEVICE));
-	if (call == control_fail_at) {
+	if (call == control_fail_at ||
+	    (control_fail_address != 0U && value == control_fail_address)) {
 		control_fail_at = 0U;
+		control_fail_address = 0U;
 		if (actual != NULL)
 			*actual = 0U;
 		return ETIMEDOUT;
@@ -521,6 +582,18 @@ drv_usb_control(struct drv_usb_device *device, uint8_t request_type,
 			fake_store16(value, stored);
 		} else {
 			memcpy(fake_registers + value, buffer, length);
+		}
+		/* A SIPI RF write is observed through the direct-read window.  Model
+		 * that hardware alias so the core's bounded RF LUT/readback checks test
+		 * the USB transport rather than a permanently-zero byte array. */
+		if ((value == RTL8822B_RF_SIPI_A ||
+		    value == RTL8822B_RF_SIPI_B) && length == 4U) {
+			control = fake_le32(buffer);
+			address = ((control >> 20) & 0xffU) * 4U +
+			    (value == RTL8822B_RF_SIPI_A ? RTL8822B_RF_DIRECT_A :
+			    RTL8822B_RF_DIRECT_B);
+			fake_store32((uint16_t)address,
+			    control & RTL8822B_RF_VALUE_MASK);
 		}
 		if (value == RTL8822BU_REG_EFUSE_ACCESS && length == 1U &&
 		    *(const uint8_t *)buffer == RTL8822BU_EFUSE_ACCESS_OFF)
@@ -569,6 +642,14 @@ drv_usb_control(struct drv_usb_device *device, uint8_t request_type,
 			fake_store16(RTL8822BU_REG_MCUFW_CTRL, firmware);
 		}
 	} else {
+		/* Model the self-clearing card-enable/disable handshake bits rather
+		 * than spending the entire deterministic deadline in a fake poll. */
+		if (value == 0x0006U && length == 1U)
+			fake_registers[value] |= 0x02U;
+		if (value == 0x0005U && length == 1U)
+			fake_registers[value] &= (uint8_t)~0x03U;
+		if (value == RTL8822B_REG_AUTO_LLT && length == 1U)
+			fake_registers[value] &= (uint8_t)~0x01U;
 		if (value == RTL8822BU_REG_EFUSE_CTRL && length == 4U) {
 			control = fake_le32(fake_registers + value);
 			address = (control & RTL8822BU_EFUSE_ADDRESS_MASK) >>
@@ -659,8 +740,14 @@ drv_usb_urb_submit(struct drv_usb_urb *urb)
 	    __atomic_load_n(&urb->status,
 	    __ATOMIC_ACQUIRE) == DRV_USB_URB_PENDING)
 		return EINVAL;
-	__atomic_store_n(&urb->status, DRV_USB_URB_PENDING, __ATOMIC_RELEASE);
 	urb_submit_calls++;
+	if (urb_submit_error != 0) {
+		int error = urb_submit_error;
+
+		urb_submit_error = 0;
+		return error;
+	}
+	__atomic_store_n(&urb->status, DRV_USB_URB_PENDING, __ATOMIC_RELEASE);
 	if (urb->endpoint->descriptor.address == RTL8822BU_BULK_IN_ADDRESS) {
 		if (persistent_rx_urb == NULL)
 			persistent_rx_urb = urb;
@@ -768,6 +855,24 @@ drv_usb_bulk(struct drv_usb_device *device, struct drv_usb_endpoint *endpoint,
 	unsigned call = ++bulk_calls;
 
 	assert(device != NULL && endpoint != NULL && buffer != NULL);
+	if (((fake_le32(bytes + 4U) >> 8) & 0x1fU) == 18U) {
+		assert(endpoint->descriptor.address ==
+		    RTL8822BU_BULK_OUT_HIGH_ADDRESS);
+		assert(timeout != 0U);
+		assert(length > RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE);
+		assert((fake_le32(bytes) & 0xffffU) ==
+		    length - RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE);
+		assert(((fake_le32(bytes) >> 16) & 0xffU) ==
+		    RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE);
+		assert(((fake_le32(bytes + 4U) >> 8) & 0x1fU) == 18U);
+		for (word = 0U; word < 16U; word++)
+			checksum ^= fake_le16(bytes + word * 2U);
+		assert(checksum == 0U);
+		management_descriptors_checked++;
+		if (actual != NULL)
+			*actual = call == bulk_short_at ? length - 1U : length;
+		return call == bulk_fail_at ? ETIMEDOUT : 0;
+	}
 	assert(endpoint->descriptor.address ==
 	    RTL8822BU_BULK_OUT_HIGH_ADDRESS);
 	assert(timeout == RTL8822BU_FIRMWARE_TRANSFER_TIMEOUT_MS);
@@ -929,13 +1034,40 @@ wlan_station_attach(struct net_device *device,
 	assert(radio_context != NULL);
 	assert(__atomic_load_n(&((struct rtl8822bu_adapter *)radio_context)->
 	    lifecycle_lock.locked, __ATOMIC_RELAXED));
-	assert(profile != NULL && profile->channel_count == 14U);
+	assert(profile != NULL && profile->channel_count == 11U);
+	for (unsigned index = 0U; index < profile->channel_count; index++) {
+		assert(profile->channels[index].channel == index + 1U);
+		assert(profile->channels[index].center_frequency_mhz ==
+		    2412U + index * 5U);
+		assert(profile->channels[index].flags ==
+		    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED);
+	}
 	if (station_attach_error != 0)
 		return station_attach_error;
 	fake_station.marker = 0x8822U;
 	*result = &fake_station;
 	station_attached = 1U;
 	return 0;
+}
+
+int
+wlan_station_open(struct wlan_station *station)
+{
+	assert(station == &fake_station);
+	station_open_calls++;
+	return station_open_error;
+}
+
+int
+wlan_station_close(struct wlan_station *station)
+{
+	assert(station == &fake_station);
+	station_close_calls++;
+	if (station_close_busy_count != 0U) {
+		station_close_busy_count--;
+		return EBUSY;
+	}
+	return station_close_error;
 }
 
 int
@@ -985,6 +1117,17 @@ wlan_station_report_scan_frame(struct wlan_station *station,
 	scan_report_channel = channel_hint;
 	scan_report_rssi = rssi_dbm;
 	return 0;
+}
+
+int
+wlan_station_report_scan_channel_ready(struct wlan_station *station,
+	uint64_t generation, uint32_t step_index)
+{
+	assert(station == &fake_station);
+	scan_ready_calls++;
+	scan_ready_generation = generation;
+	scan_ready_step = step_index;
+	return scan_ready_error;
 }
 
 static void
@@ -1067,6 +1210,52 @@ test_firmware_walk(const struct rtl8822b_firmware_view *view,
 {
 	return rtl8822b_test_firmware_walk(view, test_firmware_digest,
 	    callback, context);
+}
+
+static int
+fixture_firmware_load(struct rtl8822b_firmware_blob *firmware)
+{
+	uint8_t *bytes;
+	int error;
+
+	firmware_load_calls++;
+	if (firmware == NULL)
+		return EINVAL;
+	if (firmware_load_error != 0)
+		return firmware_load_error;
+	if (firmware->bytes != NULL || firmware->size != 0U)
+		return EBUSY;
+	bytes = hal_malloc(RTL8822B_FIRMWARE_SIZE);
+	if (bytes == NULL)
+		return ENOMEM;
+	make_test_firmware(bytes);
+	error = rtl8822b_sha256(bytes, RTL8822B_FIRMWARE_SIZE,
+	    test_firmware_digest);
+	if (error == 0)
+		error = rtl8822b_test_firmware_validate(bytes,
+		    RTL8822B_FIRMWARE_SIZE, test_firmware_digest, &firmware->view);
+	if (error != 0) {
+		memset(bytes, 0, RTL8822B_FIRMWARE_SIZE);
+		hal_free(bytes);
+		memset(firmware, 0, sizeof(*firmware));
+		return error;
+	}
+	firmware->bytes = bytes;
+	firmware->size = RTL8822B_FIRMWARE_SIZE;
+	return 0;
+}
+
+static void
+fixture_firmware_release(struct rtl8822b_firmware_blob *firmware)
+{
+	if (firmware == NULL)
+		return;
+	if (firmware->bytes != NULL) {
+		memset(firmware->bytes, 0, firmware->size);
+		hal_free(firmware->bytes);
+		firmware_release_calls++;
+	}
+	memset(firmware, 0, sizeof(*firmware));
 }
 
 struct firmware_register_snapshot {
@@ -1370,6 +1559,28 @@ test_register_transport(void)
 }
 
 static void
+test_radio_delay_resolution(void)
+{
+	uint64_t before;
+
+	fake_transport_reset();
+	before = clock_ticks();
+	assert(rtl8822bu_radio_delay_us(NULL, 1U, before + 10U) == 0);
+	assert(rtl8822bu_radio_delay_us(NULL, 50U, before + 10U) == 0);
+	/* Sub-tick table delays are never expanded into scheduler ticks. */
+	assert(clock_ticks() == before);
+	assert(rtl8822bu_radio_delay_us(NULL, 5000U, before + 10U) == 0);
+	assert(clock_ticks() == before + 1U);
+	before = clock_ticks();
+	assert(rtl8822bu_radio_delay_us(NULL, 50000U, before + 10U) == 0);
+	assert(clock_ticks() == before + 5U);
+	before = clock_ticks();
+	assert(rtl8822bu_radio_delay_us(NULL, 50000U, before + 5U) ==
+	    ETIMEDOUT);
+	assert(clock_ticks() == before);
+}
+
+static void
 test_efuse_cleanup(void)
 {
 	struct drv_usb_device device;
@@ -1437,8 +1648,12 @@ test_attach_open_detach(void)
 	assert(fake_net_device.carrier == 0U);
 	control_calls = 0U;
 	bulk_calls = 0U;
-	assert(fake_net_device.ops->open(&fake_net_device) == EOPNOTSUPP);
-	assert(control_calls == 0U && bulk_calls == 0U);
+	assert(fake_net_device.ops->open(&fake_net_device) == 0);
+	assert(control_calls != 0U && bulk_calls != 0U);
+	assert(firmware_load_calls == 1U && firmware_release_calls == 1U);
+	assert(station_open_calls == 1U);
+	assert(adapter->firmware_running && adapter->radio_running &&
+	    adapter->opened && adapter->rx_urb->status == DRV_USB_URB_PENDING);
 	assert(fake_net_device.ops->ioctl(&fake_net_device, 0U, NULL) == 77);
 	assert(rtl8822bu_detach(&interface, 0U) == 0);
 	assert(net_gone && station_detached);
@@ -1450,6 +1665,250 @@ test_attach_open_detach(void)
 	assert(drv_usb_rtl8822bu_driver_register() == 0);
 	open_during_create = 0U;
 	callback_during_gone = 0U;
+}
+
+static void
+assert_open_failure_stopped(struct rtl8822bu_adapter *adapter,
+	unsigned baseline_allocations)
+{
+	assert(adapter != NULL);
+	assert(!adapter->opened && !adapter->firmware_running &&
+	    !adapter->radio_running && !adapter->quarantined);
+	assert(adapter->radio.state == RTL8822B_RADIO_OFF);
+	assert(adapter->rx_urb->status != DRV_USB_URB_PENDING);
+	assert(allocations == baseline_allocations);
+}
+
+static void
+test_first_open_failure_unwind(void)
+{
+	struct drv_usb_device device;
+	struct drv_usb_interface interface;
+	struct drv_usb_endpoint endpoints[5];
+	struct rtl8822bu_adapter *adapter;
+	unsigned baseline;
+	int expected;
+	unsigned failure;
+
+	for (failure = 0U; failure < 6U; failure++) {
+		fake_transport_reset();
+		make_exact_interface(&device, &interface, endpoints);
+		assert(rtl8822bu_attach(&interface, &rtl8822bu_ids[0]) == 0);
+		adapter = interface.driver_data;
+		baseline = allocations;
+		expected = EIO;
+		if (failure == 0U) {
+			control_fail_address = 0x004aU;
+			expected = ETIMEDOUT;
+		} else if (failure == 1U) {
+			firmware_load_error = ENOENT;
+			expected = ENOENT;
+		} else if (failure == 2U) {
+			bulk_fail_at = 1U;
+			expected = ETIMEDOUT;
+		} else if (failure == 3U) {
+			/* TXAGC is programmed after firmware and the imported tables. */
+			control_fail_address = RTL8822B_TXAGC_A;
+			expected = ETIMEDOUT;
+		} else if (failure == 4U) {
+			urb_submit_error = EIO;
+		} else {
+			station_open_error = EIO;
+		}
+		assert(fake_net_device.ops->open(&fake_net_device) == expected);
+		assert(firmware_load_calls == (failure == 0U ? 0U : 1U));
+		assert(firmware_release_calls == (failure <= 1U ? 0U : 1U));
+		assert_open_failure_stopped(adapter, baseline);
+		if (failure == 5U)
+			assert(urb_cancel_calls == 1U);
+		assert(rtl8822bu_detach(&interface, 0U) == 0);
+		assert(interface.driver_data == NULL && allocations == 0U);
+	}
+}
+
+static size_t
+make_wildcard_probe(uint8_t frame[26])
+{
+	memset(frame, 0, 26U);
+	frame[0] = 0x40U;
+	memset(frame + 4U, 0xff, 6U);
+	frame[10] = 0x02U;
+	frame[11] = 0x11U;
+	frame[12] = 0x22U;
+	frame[13] = 0x33U;
+	frame[14] = 0x44U;
+	frame[15] = 0x55U;
+	memset(frame + 16U, 0xff, 6U);
+	/* Empty SSID information element. */
+	frame[24] = 0U;
+	frame[25] = 0U;
+	return 26U;
+}
+
+static void
+test_first_open_software_scan(void)
+{
+	struct drv_usb_device device;
+	struct drv_usb_interface interface;
+	struct drv_usb_endpoint endpoints[5];
+	struct rtl8822bu_adapter *adapter;
+	uint8_t probe[26];
+	uint64_t deadline;
+	size_t aggregate_length;
+	unsigned reports, errors;
+
+	fake_transport_reset();
+	make_exact_interface(&device, &interface, endpoints);
+	assert(rtl8822bu_attach(&interface, &rtl8822bu_ids[0]) == 0);
+	adapter = interface.driver_data;
+	assert(fake_net_device.ops->open(&fake_net_device) == 0);
+	deadline = clock_ticks() + 50U;
+	assert(rtl8822bu_scan_channel_start(adapter, 42U, 5U, 6U,
+	    deadline) == 0);
+	assert(scan_ready_calls == 1U && scan_ready_generation == 42U &&
+	    scan_ready_step == 5U);
+	assert(adapter->scan_generation == 42U && adapter->scan_channel == 6U);
+	assert(rtl8822bu_management_transmit(adapter, 42U, probe,
+	    make_wildcard_probe(probe), deadline) == 0);
+	assert(management_descriptors_checked == 1U);
+	bulk_short_at = bulk_calls + 1U;
+	assert(rtl8822bu_management_transmit(adapter, 42U, probe,
+	    sizeof(probe), deadline) == EIO);
+	bulk_short_at = 0U;
+	bulk_fail_at = bulk_calls + 1U;
+	assert(rtl8822bu_management_transmit(adapter, 42U, probe,
+	    sizeof(probe), deadline) == ETIMEDOUT);
+	bulk_fail_at = 0U;
+	assert(rtl8822bu_management_transmit(adapter, 42U, probe,
+	    sizeof(probe), clock_ticks()) == ETIMEDOUT);
+
+	aggregate_length = make_beacon_aggregate(adapter->rx_buffer, 0x80U);
+	fake_urb_complete(adapter->rx_urb, DRV_USB_URB_COMPLETE,
+	    aggregate_length);
+	assert(rtl8822bu_poll_receive(&fake_net_device, 1U) == 1U);
+	assert(scan_report_calls == 1U && scan_report_generation == 42U &&
+	    scan_report_channel == 6U);
+	assert(rtl8822bu_scan_stop(adapter, 42U) == 0);
+	assert(adapter->scan_generation == 0U && adapter->scan_channel == 0U);
+
+	/* Late management RX after the synchronous stop barrier is ignored and is
+	 * not misclassified as a malformed aggregate. */
+	reports = scan_report_calls;
+	errors = fake_net_device.rx_errors;
+	aggregate_length = make_beacon_aggregate(adapter->rx_buffer, 0x80U);
+	fake_urb_complete(adapter->rx_urb, DRV_USB_URB_COMPLETE,
+	    aggregate_length);
+	assert(rtl8822bu_poll_receive(&fake_net_device, 1U) == 1U);
+	assert(scan_report_calls == reports && fake_net_device.rx_errors == errors);
+	assert(rtl8822bu_management_transmit(adapter, 42U, probe,
+	    sizeof(probe), deadline) == ENETDOWN);
+	fake_net_device.ops->close(&fake_net_device);
+	assert(station_close_calls == 1U && !adapter->opened &&
+	    adapter->radio.state == RTL8822B_RADIO_OFF);
+	assert(rtl8822bu_detach(&interface, 0U) == 0);
+	assert(interface.driver_data == NULL && allocations == 0U);
+}
+
+static void
+test_scan_channel_transport_failure_quarantine(void)
+{
+	struct drv_usb_device device;
+	struct drv_usb_interface interface;
+	struct drv_usb_endpoint endpoints[5];
+	struct rtl8822bu_adapter *adapter;
+	uint8_t probe[26];
+	uint64_t deadline;
+	size_t aggregate_length;
+	unsigned reports, schedules, submits;
+
+	fake_transport_reset();
+	make_exact_interface(&device, &interface, endpoints);
+	assert(rtl8822bu_attach(&interface, &rtl8822bu_ids[0]) == 0);
+	adapter = interface.driver_data;
+	assert(fake_net_device.ops->open(&fake_net_device) == 0);
+	deadline = clock_ticks() + 50U;
+
+	/* Wrapper validation never reaches the core and must leave a healthy
+	 * radio usable rather than turning a caller error into quarantine. */
+	assert(rtl8822bu_scan_channel_start(adapter, 0U, 0U, 1U,
+	    deadline) == EINVAL);
+	assert(rtl8822bu_scan_channel_start(adapter, 1U, 0U, 12U,
+	    deadline) == EINVAL);
+	assert(adapter->radio.state == RTL8822B_RADIO_STARTED);
+	assert(adapter->firmware_running && adapter->radio_running &&
+	    adapter->opened && !adapter->quarantined);
+
+	/* A transport failure after channel programming starts makes the core
+	 * emergency-off and clear itself.  The USB wrapper must mirror that state
+	 * while retaining ownership of the pending RX URB for checked detach. */
+	control_fail_address = RTL8822B_REG_TX_PAUSE;
+	assert(rtl8822bu_scan_channel_start(adapter, 43U, 6U, 7U,
+	    deadline) == ETIMEDOUT);
+	assert(adapter->radio.state == RTL8822B_RADIO_OFF);
+	assert(!adapter->firmware_running && !adapter->radio_running &&
+	    adapter->opened && adapter->quarantined);
+	assert(adapter->scan_generation == 0U && adapter->scan_channel == 0U);
+	assert(adapter->rx_urb->status == DRV_USB_URB_PENDING);
+	assert(rtl8822bu_management_transmit(adapter, 43U, probe,
+	    make_wildcard_probe(probe), deadline) == ENETDOWN);
+
+	/* A completion already owned by the controller is allowed to retire, but
+	 * quarantine suppresses both publication and RX rearm. */
+	schedules = poll_schedule_calls;
+	submits = urb_submit_calls;
+	reports = scan_report_calls;
+	aggregate_length = make_beacon_aggregate(adapter->rx_buffer, 0x80U);
+	fake_urb_complete(adapter->rx_urb, DRV_USB_URB_COMPLETE,
+	    aggregate_length);
+	assert(poll_schedule_calls == schedules);
+	assert(rtl8822bu_poll_receive(&fake_net_device, 1U) == 0U);
+	assert(urb_submit_calls == submits && scan_report_calls == reports);
+	assert(rtl8822bu_detach(&interface, 0U) == 0);
+	assert(interface.driver_data == NULL && allocations == 0U);
+}
+
+static void
+test_close_finite_station_join(void)
+{
+	struct drv_usb_device device;
+	struct drv_usb_interface interface;
+	struct drv_usb_endpoint endpoints[5];
+	struct rtl8822bu_adapter *adapter;
+	uint64_t before;
+
+	/* A short-lived common callback retires while close holds only the driver
+	 * lifecycle mutex; no adapter/common spin lock blocks its progress. */
+	fake_transport_reset();
+	make_exact_interface(&device, &interface, endpoints);
+	assert(rtl8822bu_attach(&interface, &rtl8822bu_ids[0]) == 0);
+	adapter = interface.driver_data;
+	assert(fake_net_device.ops->open(&fake_net_device) == 0);
+	station_close_busy_count = 3U;
+	fake_net_device.ops->close(&fake_net_device);
+	assert(station_close_calls == 4U && station_close_busy_count == 0U);
+	assert(!adapter->opened && !adapter->quarantined &&
+	    adapter->radio.state == RTL8822B_RADIO_OFF);
+	assert(rtl8822bu_detach(&interface, 0U) == 0);
+	assert(interface.driver_data == NULL && allocations == 0U);
+
+	/* A producer that misses the finite void-close bound leaves RX/DMA and the
+	 * radio owned, closes further admission, and is recovered by checked
+	 * detach after the common callback becomes joinable. */
+	fake_transport_reset();
+	make_exact_interface(&device, &interface, endpoints);
+	assert(rtl8822bu_attach(&interface, &rtl8822bu_ids[0]) == 0);
+	adapter = interface.driver_data;
+	assert(fake_net_device.ops->open(&fake_net_device) == 0);
+	station_close_error = EBUSY;
+	before = clock_ticks();
+	fake_net_device.ops->close(&fake_net_device);
+	assert(clock_ticks() >= before + RTL8822BU_STATION_CLOSE_TIMEOUT_TICKS);
+	assert(adapter->quarantined && adapter->opened &&
+	    adapter->radio.state == RTL8822B_RADIO_STARTED &&
+	    adapter->rx_urb->status == DRV_USB_URB_PENDING);
+	station_close_error = 0;
+	assert(rtl8822bu_detach(&interface, 0U) == 0);
+	assert(interface.driver_data == NULL && allocations == 0U);
 }
 
 static void
@@ -1907,7 +2366,7 @@ test_open_detach_lifecycle_serialization(void)
 	assert(pthread_join(open_thread, NULL) == 0);
 	assert(pthread_join(detach_thread, NULL) == 0);
 	__atomic_store_n(&threaded_test_active, 0U, __ATOMIC_RELEASE);
-	assert(open_context.result == EOPNOTSUPP && detach_context.result == 0);
+	assert(open_context.result == 0 && detach_context.result == 0);
 	assert(interface.driver_data == NULL && allocations == 0U);
 }
 
@@ -2115,9 +2574,14 @@ main(void)
 {
 	test_exact_match();
 	test_register_transport();
+	test_radio_delay_resolution();
 	test_efuse_cleanup();
 	test_firmware_transport();
 	test_attach_open_detach();
+	test_first_open_failure_unwind();
+	test_first_open_software_scan();
+	test_scan_channel_transport_failure_quarantine();
+	test_close_finite_station_join();
 	test_rx_poll_rearm_and_lifecycle();
 	test_attach_failure_unwind();
 	test_network_shutdown_precedes_usb();

@@ -196,6 +196,34 @@ channel-plan validation, firmware size/digest/header/page/ready/error cases,
 descriptor bounds, concurrent URBs, scan stop, stale completions, retry, close,
 and detach while unrelated USB storage remains active.
 
+Q057 completed that automatic boundary with these Phase-owned runners:
+
+```sh
+plan/ws004-hardware/tests/run-rtl8822b-table-import-test.sh
+RTL8822B_FIRMWARE_TEST_BLOB=build/sources/firmware/rtl8822b/2f56219d20e4becccd718963fc3bcc671c543ce5/rtw8822b_fw.bin \
+  plan/ws004-hardware/tests/run-rtl8822b-core-test.sh
+plan/ws004-hardware/tests/run-usb-rtl8822bu-driver-test.sh
+```
+
+The table runner proves immutable source revision/path/hashes, exact word
+streams, the absence of imported Linux control flow, the complete selected
+BSD-3-Clause notice, and mandatory installation of
+`/usr/share/licenses/rtl8822b-tables/LICENSE` whenever the kernel driver is
+enabled. The radio fixture covers supported and rejected cut/RFE/path/table
+conditions, power and already-powered normalization, MAC/USB/FIFO/RX/RFE/TRX
+profiles, channels 1/6/11, the TXAGC floor, wildcard-probe descriptor and
+endpoint, finite deadlines, rollback, and retry. Its maximum observed profile
+was 3,108 writes, 137 reads, and 412,326 microseconds of explicit delay.
+
+The USB fixture covers the complete first-open and reverse-close ledger,
+passive and permitted wildcard-active channel generations through the
+production common core, stale/malformed RX, same-controller storage progress,
+and channel-fault fail-close/quarantine followed by checked detach. Ordinary,
+ASan/UBSan, and analyzer modes passed. Driver-enabled amd64/i386 builds,
+ordinary `make -j16`, one disposable IDE-root exact-login boot, and one
+q35/xHCI USB-root exact-login boot also passed. These are automatic model and
+boot-regression results, not physical RF evidence.
+
 HW-T31 makes no independent physical request. After every p028--p030 and WS005
 automatic gate passes, the one combined WS005 p008 provisional ledger supplies
 its physical fields: exact `wlan0`, firmware/cut/RFE/endpoints, and bounded
