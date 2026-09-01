@@ -4,8 +4,8 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p030`
 
-Status: planned; deliberately deferred until WS005 p009 proves minimum
-physical communication; not queued
+Status: planned and dependency-ready after `q059`/WS005 p009 proved minimum
+physical communication; not queued and not started
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -20,9 +20,9 @@ reinsert, shutdown, and repeated physical use. Completion means the declared
 does not imply 5-GHz, DFS, VHT, roaming, or DHCP support.
 
 This Phase begins only after one simple attach/scan/connect/DHCP/ping/fetch
-path works in WS005 p009. Its detailed abnormal and semi-normal behavior is a
-second layer of work, not a prerequisite for establishing first
-communication.
+path works in WS005 p009. Q059 satisfied that prerequisite. Its detailed
+abnormal and semi-normal behavior is a second layer of work and remains wholly
+unimplemented by that normal-path result.
 
 The common kernel WLAN layer owns long-lived rekey/reconnect and controlled
 port state while an interface instance remains up. WS005 owns persistent SSID/
@@ -46,7 +46,7 @@ running `dhcpc` after L2 authorization.
   one physical normal path reaches secure carrier and useful IP communication
   before this lifecycle matrix is started.
 
-This Phase is not part of q059. After p009, a later Queue may execute its finite
+This Phase was not part of q059. A later Queue may now execute its finite
 automatic milestone. It does not authorize an additional physical adapter/AP
 checkpoint or repeated human action; final lifecycle evidence remains the
 single later shared WS005 p008 request after all automatic gates.
@@ -226,7 +226,8 @@ physical request in this Phase.
 
 The three conditions above are p030's automatic milestone. They are sufficient
 for WS005 p008 to seal one candidate and request its single combined
-provisional checkpoint; no p028/p029/p030 hardware run precedes it.
+provisional checkpoint. Q059's earlier one-run normal-path observation is
+developmental feedback only and does not satisfy or consume this checkpoint.
 
 - The one shared p030/p008 lifecycle checkpoint passes and p030 references its
   retained redacted evidence; it does not duplicate the human action. DHCP is

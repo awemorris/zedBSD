@@ -4,8 +4,9 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p028`
 
-Status: automatic milestone complete (`q057`); physical radio evidence is
-intentionally deferred to the shared `ws005-p008` checkpoint
+Status: automatic milestone complete (`q057`); one-run developmental physical
+feedback obtained by `q059`/`ws005-p009`; final shared `ws005-p008`
+acceptance remains incomplete
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -17,10 +18,12 @@ Complete the descriptor-confirmed Archer T3U Nano RTL8822BU path after p036's
 USB, firmware, parser, and lifetime substrate: import the selected
 BSD-3-Clause initialization tables, initialize the minimum safe station-mode
 radio profile, and produce truthful scan results through the generic WLAN
-UAPI. It stops before authentication, association, key
-installation, encrypted data, DHCP, or 5-GHz operation. Its automatic
-implementation may feed p029/p030 without an independent hardware run; the
-first zedBSD radio observation is the later combined WS005 p008 checkpoint.
+UAPI. Its own implementation scope stops before authentication, association,
+key installation, encrypted data, DHCP, or 5-GHz operation. Its automatic
+implementation fed p029, and the deliberately narrow q059/p009 developmental
+run later supplied one real attach, firmware-start, and controlled-scan
+observation. Final lifecycle and repeatability acceptance remains the separate
+WS005 p008 checkpoint after p030.
 
 ## Dependencies
 
@@ -264,20 +267,20 @@ a separately reviewed source/hash update, not an unpinned copy from `master`.
 
 ## Physical-evidence handoff
 
-p028 makes no zedBSD physical request. Its only hardware prerequisite is the
-single read-only development-host descriptor inventory already owned by p026;
-that inventory authorizes the exact match but does not prove this driver.
-Missing/wrong firmware, endpoint faults, scan generations, repeated scans, and
-unplug races are maximized in automatic fake-USB/model tests here.
+p028 made no independent zedBSD physical request. Its original hardware
+prerequisite was the single read-only development-host descriptor inventory
+owned by p026; missing/wrong firmware, endpoint faults, scan generations,
+repeated scans, and unplug races remained automatic fake-USB/model work here.
 
-After p028--p030 and every WS005 command/orchestration automatic gate pass on
-one candidate, the first zedBSD run occurs in the one combined provisional
-checkpoint owned by
+The user later prioritized normal-path communication before lifecycle
+hardening. Accordingly, `q059`/`ws005-p009` performed one shared developmental
+run and supplied p028 with real attach, pinned-firmware start, and controlled
+scan feedback before proceeding through secure authorization and useful IP
+communication. This is a one-run development checkpoint, not the final
+acceptance ledger. After p030 and the remaining control-plane gates, the
+combined lifecycle checkpoint and frozen-artifact five-consecutive-run
+acceptance remain owned by
 [`ws005-p008`](../../ws005-networking/phase008-archer-physical-acceptance/phase.md).
-That shared script retains the actual firmware/cut/RFE/endpoint diagnostics and
-one controlled scan before continuing to association, lifecycle, DHCP, and
-cleanup. p028 references that evidence for its physical claim; it does not ask
-the user to repeat an attach or scan.
 
 ## Automatic milestone and later physical feedback
 
@@ -293,12 +296,11 @@ the user to repeat an attach or scan.
 - Host ordinary/sanitizer/analyzer gates, amd64 and i386 configured builds,
   `make -j16`, and IDE/xHCI USB-root regressions pass.
 
-Those conditions are the p028 automatic milestone and are sufficient for p029
-to begin; they do not claim radio success. After all p028--p030 and WS005
-automatic gates pass, the single p030/WS005 p008 ledger must confirm the real
-attach, firmware start, and controlled scan before WS004 records physical
-completion. p028 makes no independent user request and is not a physical
-dependency of p029/p030, avoiding a cycle through p008.
+Those conditions are the p028 automatic milestone and were sufficient for p029
+to begin. Q059/p009 subsequently supplied one successful real-radio
+development observation without turning it into a p028-specific user request.
+After p030 and all WS005 automatic gates pass, the single p030/WS005 p008
+ledger still owns final physical completion and repeatability acceptance.
 
 ## Execution evidence (`q057`)
 
@@ -310,16 +312,16 @@ no Linux control flow. Driver-enabled binary images automatically install the
 same notice as `/usr/share/licenses/rtl8822b-tables/LICENSE`; this is separate
 from the optional Realtek firmware package and its license.
 
-The production radio core now performs checked USB card power sequencing and
-already-powered normalization, configures the three bulk-OUT FIFO/RQPN/LLT/H2C
-layout and HS RX aggregation, applies the conditional tables for supported
-cut/RFE/path identities, programs the minimum MAC timing/RFE/TRX/receive
-profile, fixes every TXAGC entry at index zero, and selects only channels
-1--11 at 20 MHz. Active scan accepts only a standards-bounded 1-Mbit/s
-wildcard probe on the management queue and endpoint `0x05`; all other TX
-profiles remain outside this milestone. Measured worst-case fixture work was
-3,108 writes, 137 reads, and 412,326 microseconds of explicit delay, so first
-open has one finite 15-second deadline.
+The production radio core in the q057 candidate performs checked USB card
+power sequencing and already-powered normalization, configures the three
+bulk-OUT FIFO/RQPN/LLT/H2C layout and HS RX aggregation, applies the conditional
+tables for supported cut/RFE/path identities, programs the minimum MAC timing/
+RFE/TRX/receive profile, fixes every TXAGC entry at index zero, and selects only
+channels 1--11 at 20 MHz. Active scan accepts only a standards-bounded
+1-Mbit/s wildcard probe on the management queue and endpoint `0x05`; all other
+TX profiles remain outside this milestone. Measured worst-case fixture work
+was 3,108 writes, 137 reads, and 412,326 microseconds of explicit delay, so
+first open has one finite 15-second deadline.
 
 The USB driver completes first-open in the order power, pinned firmware,
 radio, RX arm, then common-station open. Reverse stop drains RX before radio
@@ -352,6 +354,32 @@ Warm rebind with firmware surviving in low-power state may additionally
 benefit from the RTL8822B RPWM `0xfe58` toggle. It is not used by this cold-open
 milestone and is recorded in p030's recovery hardening rather than being
 silently claimed here. No physical Archer radio operation is claimed by q057.
+
+## Later developmental feedback (`q059` / `ws005-p009`)
+
+Q059 superseded q057's intentionally inert TXAGC floor for the normal-path
+development candidate. The driver derives calibrated legacy transmit power
+from the EFUSE CCK/BW40 base and signed OFDM difference, applies the
+BSD-3-Clause compact per-rate offsets plus the channel/world ceiling, programs
+rates 0--11 before transmitter unpause, and leaves rates 12--63 at zero. HT and
+VHT remain disabled and deferred. Association advertises all implemented
+legacy rates, keeping the fixed 6-Mbit/s EAPOL/data path consistent with the
+station capabilities.
+
+The q059 candidate reran and passed the focused RTL8822B core and USB
+RTL8822BU production fixtures after these changes:
+
+```sh
+plan/ws004-hardware/tests/run-rtl8822b-core-test.sh
+plan/ws004-hardware/tests/run-usb-rtl8822bu-driver-test.sh
+```
+
+The exact q059 candidate completed one passthrough-backed real-device attach,
+pinned-firmware start, controlled scan, secure authorization, DHCP, gateway
+and public reachability, a nonempty HTTP fetch, disconnect, and administrative
+down. No network identity or credential is retained here. This closes the
+planned p028 developmental feedback only; p030 hardening and the WS005 p008
+five-run final acceptance are still outstanding.
 
 ## Explicit exclusions
 

@@ -4,9 +4,9 @@ Last updated: 2026-09-01
 
 QID: `q059`
 
-Queue status: in progress
+Queue status: completed
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: the user changed the implementation order on 2026-09-01.
 Establish one simple successful communication path before perfecting detailed
@@ -44,8 +44,8 @@ injection, and long repeatability campaigns.
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws005-p004` | [Primitive wifi command](ws005-networking/phase004-wifi-ioctl-command/phase.md) | in-progress | The direct root `/sbin/wifi` human command drives the existing scan/status/connect/disconnect WLAN ioctls on the normal path |
-| 2 | `ws005-p009` | [Minimum connectivity](ws005-networking/phase009-wlan-minimum-connectivity/phase.md) | planned; follows p004 | One physical adapter run reaches scan, secure carrier, DHCP, ping, and bounded fetch using runtime-only credentials |
+| 1 | `ws005-p004` | [Primitive wifi command](ws005-networking/phase004-wifi-ioctl-command/phase.md) | completed (`q059`) | The direct root `/sbin/wifi` human command drives the existing scan/status/connect/disconnect WLAN ioctls on the normal path |
+| 2 | `ws005-p009` | [Minimum connectivity](ws005-networking/phase009-wlan-minimum-connectivity/phase.md) | completed (`q059`) | One physical adapter run reaches scan, secure carrier, DHCP, ping, and bounded fetch using runtime-only credentials |
 
 ## Accepted decisions
 
@@ -109,6 +109,24 @@ behavior, or final five-run acceptance.
 
 ## Execution result
 
-Not started. The previously begun q059 lifecycle-hardening source edits were
-discarded before completion. Q058 remains intact and pushed. No credential was
-written to the repository or retained evidence.
+Completed on 2026-09-01. The final candidate was
+`build/amd64/hdd-image.img`, 203423744 bytes, SHA-256
+`6d0ec924f0d063b663c6da8ab1a7b8b39bcef8b2b2849e4fb0d8308340f9ed75`.
+
+p004 added and focused-tested all six direct human `/sbin/wifi` forms. The
+normal-path repair also accepts the authenticated RSNXE element (`id=244`) in
+WPA2 message 3 and advertises all twelve implemented legacy rates so that the
+fixed 6-Mbit/s EAPOL/data path is consistent with association capabilities.
+
+One QEMU/KVM `-cpu host` run with xHCI USB passthrough then published `wlan0`,
+completed a scan, reached WPA2-Personal/CCMP authorized carrier, obtained DHCP
+configuration, passed both gateway and public ping at 3/3 replies with 0%
+loss, fetched an 84255-byte HTTP object, and completed disconnect plus
+administrative down without an observed hang. Runtime credentials and network
+identity were not retained in the repository or evidence.
+
+This is the single p009 development checkpoint only. It does not complete
+p008's final five-run acceptance, p006/p007 `networkd`/`net wifi`
+composition, p010 primitive abnormal/semi-normal hardening, or WS004 p030
+reconnect, hotplug, recovery, and lifecycle hardening. Those remain eligible
+next work rather than hidden q059 scope.

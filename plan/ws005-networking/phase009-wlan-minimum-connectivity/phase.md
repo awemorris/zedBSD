@@ -8,7 +8,7 @@ Phase ID: `p009`
 
 Combined ID: `ws005-p009`
 
-Status: planned; selected second in `q059` after p004
+Status: completed (`q059`)
 
 Parent: [WS005 networking and WLAN](../ws.md)
 
@@ -85,3 +85,31 @@ retry, recovery, or comprehensive fault machinery.
 
 Completion unlocks p006/p007 functional composition and provides the working
 baseline required before WS004 p030 and WS005 p010 hardening.
+
+## Execution result
+
+Completed in q059 on 2026-09-01 with
+`build/amd64/hdd-image.img` (203423744 bytes, SHA-256
+`6d0ec924f0d063b663c6da8ab1a7b8b39bcef8b2b2849e4fb0d8308340f9ed75`).
+One QEMU/KVM `-cpu host` run with xHCI USB passthrough produced the following
+bounded normal-path evidence:
+
+- the RTL8822BU path attached and published `wlan0`;
+- scanning completed and the controlled WPA2-Personal/CCMP network was found;
+- association completed with authorized carrier;
+- DHCP completed;
+- gateway and public ping each returned 3/3 replies with 0% loss;
+- one HTTP fetch produced 84255 bytes; and
+- disconnect and administrative interface down completed without an observed
+  hang.
+
+The successful candidate includes authenticated message-3 RSNXE (`id=244`)
+handling and advertises all twelve implemented legacy rates, including the
+rate used by the fixed EAPOL/data transmit path. No credential, BSSID, MAC
+address, assigned address, or other network identity is retained here.
+
+This is exactly one development checkpoint. It is not p008's five consecutive
+final runs and does not claim `networkd`/`net wifi` composition, rekey,
+automatic reconnect, hotplug/recovery, repeated detach, or comprehensive
+abnormal/semi-normal behavior. p006 and p010 are now dependency-ready; p007
+follows p006, and all three remain incomplete.

@@ -100,14 +100,14 @@ automatically carries the complete Realtek table notice under
 `/usr/share/licenses/rtl8822b-tables/LICENSE`, independently of the optional
 firmware package.
 
-The production core now covers checked power-on/off and already-powered
-normalization, three-bulk-OUT FIFO/RQPN/LLT/H2C setup, HS USB RX aggregation,
-conditional table selection, RF SIPI, supported RFE/path programming, minimum
-MAC protocol timing, 2.4-GHz 20-MHz channel 1--11 selection, and an absolute
-TXAGC index-zero floor. Only a bounded 1-Mbit/s wildcard management probe is
-admitted for active scan. Worst-case fixture initialization used 3,108 writes,
-137 reads, and 412,326 microseconds of explicit delay under one finite
-15-second open deadline.
+The production core in the q057 candidate covers checked power-on/off and
+already-powered normalization, three-bulk-OUT FIFO/RQPN/LLT/H2C setup, HS USB
+RX aggregation, conditional table selection, RF SIPI, supported RFE/path
+programming, minimum MAC protocol timing, 2.4-GHz 20-MHz channel 1--11
+selection, and an absolute TXAGC index-zero floor. Only a bounded 1-Mbit/s
+wildcard management probe is admitted for active scan. Worst-case fixture
+initialization used 3,108 writes, 137 reads, and 412,326 microseconds of
+explicit delay under one finite 15-second open deadline.
 
 The USB first-open path loads the immutable pinned firmware before radio/RX/
 station publication, and its reverse close/detach path drains admitted work.
@@ -127,7 +127,25 @@ found no cold-open/passive/active scan P0/P1 blocker.
 
 The possible warm-rebind RPWM `0xfe58` refinement is recorded in p030. Q057
 makes no physical RF claim and does not request human work; p029 is now
-dependency-ready. The single later WS005 p008 checkpoint remains the source of
-physical attach/scan feedback.
+dependency-ready. At q057 completion, the later WS005 p008 checkpoint was the
+planned source of physical attach/scan feedback; q059's subsequent sequencing
+change is recorded below.
 
-Next Queue: [q058](queue.md)
+## Later follow-up
+
+The zero-TXAGC floor above is the historical q057 scan-only candidate, not the
+current transmit configuration. Q059 later replaced it with EFUSE CCK/BW40
+base plus signed OFDM-difference calibration, BSD-3-Clause compact per-rate
+offsets, and channel/world ceilings. Rates 0--11 are programmed before
+transmitter unpause; rates 12--63 remain zero, with HT/VHT still deferred. Its
+WPA2 Message 3 parser also accepts a bounded, well-formed RSNXE (element ID
+244), enabling the transition-mode normal path.
+
+Q059/WS005 p009 subsequently supplied one passthrough-backed real-device
+attach, pinned-firmware start, scan, authorized connection, DHCP, gateway and
+public reachability, nonempty HTTP fetch, disconnect, and administrative-down
+development result. This later feedback does not alter q057's automatic-only
+scope and does not complete WS005 p008's final five-run acceptance. No network
+identity or credential is retained here.
+
+Next Queue: [q058](queue-q058.md)

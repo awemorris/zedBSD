@@ -4,8 +4,9 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p029`
 
-Status: automatic milestone complete (`q058`); physical secure-L2 evidence is
-intentionally deferred to the shared `ws005-p008` checkpoint
+Status: automatic milestone complete (`q058`); one-run developmental physical
+secure-L2 feedback obtained by `q059`/`ws005-p009`; final shared
+`ws005-p008` acceptance remains incomplete
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -133,9 +134,11 @@ message 4 authorize the controlled port.
    regenerate SNonce, reinstall an already installed key, or reset a transmit/
    receive packet number. This is the explicit key-reinstallation defense.
 5. Decrypt message-3 key data with the derived KEK and strict AES key-unwrapping
-   bounds. Accept exactly the GTK KDE/key index required by the declared
-   profile; reject duplicate, conflicting, unknown mandatory, malformed, or
-   oversized key data before CAM modification.
+   bounds. Require the compatible RSN element and exactly the GTK KDE/key index
+   needed by the declared profile. A well-formed RSNXE (element ID 244) may be
+   present for a transition-mode AP but does not expand this Phase beyond
+   WPA2-Personal/CCMP. Reject duplicate, conflicting, unknown mandatory,
+   malformed, or oversized key data before CAM modification.
 6. Install PTK and GTK under one common-core transaction. If either driver
    operation fails, delete any staged slot, leave the port unauthorized and
    carrier down, send deauthentication when possible, and scrub transient
@@ -223,19 +226,19 @@ IDE boot, and xHCI USB-root regressions. Do not use `make check`.
 
 ## Physical-evidence handoff
 
-p029 makes no independent zedBSD physical request. Successful and negative
+p029 made no independent zedBSD physical request. Successful and negative
 RSN/authentication/association/EAPOL/key/CCMP cases, wrong passphrases,
 unsupported security, malformed handshakes, and USB/key failures are exhausted
 through the production common core and fake radio/USB fixtures first.
 
-The first zedBSD association and data observation is the same single combined
-checkpoint shared by p030 and
-[`ws005-p008`](../../ws005-networking/phase008-archer-physical-acceptance/phase.md).
-Its early L2 stages scan/select the controlled WPA2-Personal/CCMP SSID,
-complete authentication/association/four-way/key installation, raise carrier
-only after authorization, and exchange bounded bidirectional data before the
-WS005 DHCP/lifecycle stages. p029 references the redacted management/EAPOL/key/
-CCMP counters from that run and does not request a separate boot.
+The user later prioritized one simple normal-path observation before lifecycle
+hardening. Q059/WS005 p009 therefore supplied a shared developmental run that
+completed authentication, association, four-way/key installation, raised
+carrier only after authorization, and exchanged useful L2/IP traffic. P029
+references that redacted result and does not request a separate boot. It is not
+the lifecycle or repeatability checkpoint: p030 and
+[`ws005-p008`](../../ws005-networking/phase008-archer-physical-acceptance/phase.md)
+still own the final shared acceptance ledger.
 
 ## Automatic milestone and later physical feedback
 
@@ -250,11 +253,12 @@ CCMP counters from that run and does not request a separate boot.
 - `HW-T33` plus sanitizer/analyzer/build/storage regressions leave one candidate
   ready for p030 lifecycle work without claiming radio success.
 
-Those conditions are the p029 automatic milestone and are sufficient for p030
-to begin. The eventual actual RTL8822BU association/key/CCMP/L2 claim references
-the single p030/WS005 p008 ledger after all automatic work, with no separate
-p029 boot, secret disclosure, plaintext fallback, or DHCP substitution. This
-feedback is not a prerequisite of p030 and therefore does not create a cycle.
+Those conditions are the p029 automatic milestone and were sufficient for the
+q059 normal-path run. That run now supplies one actual RTL8822BU association,
+key, CCMP, and useful-data development result with no p029-specific boot,
+secret disclosure, or plaintext fallback. It makes p030 eligible, but the
+single p030/WS005 p008 lifecycle and five-run ledger remains required for final
+physical completion.
 
 ## Execution evidence (`q058`)
 
@@ -297,8 +301,31 @@ SHA-256 remained
 `1f395a3decde5317fe3c44f408517eb9483f9d082c91f8a42807b63da527f0d9`.
 `git diff --check` passed and `.internal/` was not used.
 
-Q058 makes no physical RF claim. P030 is dependency-ready and retains the
-single shared WS005 p008 physical association/lifecycle checkpoint.
+Q058 itself makes no physical RF claim.
+
+## Later developmental feedback (`q059` / `ws005-p009`)
+
+Q059 extended the authenticated Message 3 codec to accept one strictly framed
+RSNXE (element ID 244), as observed on a transition-mode AP, without changing
+the selected WPA2-Personal/CCMP profile or weakening RSN/GTK validation. The
+WPA2 codec/engine and CCMP L2 focused runners passed together with the
+RTL8822B core/security and USB RTL8822BU production fixtures.
+
+```sh
+plan/ws004-hardware/tests/run-wlan-wpa2-codec-test.sh
+plan/ws004-hardware/tests/run-wlan-wpa2-engine-test.sh
+plan/ws004-hardware/tests/run-wlan-wpa2-ccmp-l2-test.sh
+plan/ws004-hardware/tests/run-rtl8822b-security-test.sh
+plan/ws004-hardware/tests/run-usb-rtl8822bu-driver-test.sh
+```
+
+The exact q059 candidate then completed one passthrough-backed real-device
+scan, authentication, association, four-way handshake, authorized CCMP data
+path, DHCP, gateway/public reachability, nonempty HTTP fetch, disconnect, and
+administrative down. No network identity or credential is retained in this
+evidence. This completes only the planned normal-path developmental feedback.
+Rekey, reconnect, fault recovery, hotplug, long-run behavior, and the final
+five-consecutive-run acceptance remain in p030 and WS005 p008.
 
 ## Reconsideration boundary
 

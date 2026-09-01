@@ -23,9 +23,11 @@ exactly-once CDC NCM terminal accounting;
 `ws004-p027`--`p030` define the Archer T3U Nano WLAN implementation path;
 q055 completed `p027`, q056 completed p036's independently testable RTL8822BU
 pre-radio substrate, q057 completed p028's automatic radio/scan milestone, and
-q058 completed p029's automatic secure-L2 milestone. q059 now moves to WS005
-p004/p009 to establish one simple direct-command physical communication path;
-p030 lifecycle hardening is deliberately deferred until that path works. `p034`
+q058 completed p029's automatic secure-L2 milestone. q059 completed WS005
+p004/p009 and supplied one simple direct-command physical attach, scan,
+secure-L2, and IP-communication result; this developmental run does not
+complete the later WS005 p008 five-run acceptance. P030 lifecycle hardening is
+now dependency-ready but remains unstarted. `p034`
 separately records deferred, nonblocking CDC ECM accounting adoption, and
 `p035` records the nonblocking future same-endpoint multi-URB extension which
 the first WLAN scan path deliberately does not require.
@@ -91,8 +93,11 @@ firmware package, USB/register/efuse/firmware/RX substrate, and p027
 integration before radio-table programming. Q057 completed p028's
 notice-preserving BSD-3-Clause table import, binary notice installation,
 bounded radio initialization, and conservative RTL8822BU scan. Q058 completed
-the WPA2-Personal/CCMP L2 milestone. WS005 p009 is the next developmental
-checkpoint; p030 remains the later lifecycle-hardening successor.
+the WPA2-Personal/CCMP L2 milestone. Q059 completed the first one-run WS005
+p009 developmental attach/scan/connect/DHCP/ping/fetch checkpoint with
+calibrated legacy TX power and transition-mode RSNXE handling. P030 remains the
+later lifecycle-hardening successor, and WS005 p008 final acceptance is still
+incomplete.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -127,9 +132,9 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p025`](phase025-latitude-nvme-readonly/phase.md) | Planned physical checkpoint; depends on p024 | Latitude SN740 `15b7:5015` identifies and reads safely without modifying internal storage |
 | [`ws004-p026`](phase026-archer-t3u-nano-identity-firmware/phase.md) | Complete (`q055`; q040 intake retained) | The Japan-market label has no printed revision; the retained exact `2357:012e` descriptor is authoritative, and the pinned upstream bytes plus explicit GitHub-mirror `rtl8822b-firmware` boundary are frozen |
 | [`ws004-p027`](phase027-wlan-uapi-common-core/phase.md) | Complete (`q055`) | Versioned pointer-free WLAN ioctls, strict INET dispatch, persistent station/cache/generations, checked lifetime barriers, deterministic fake radio, x86 builds, and IDE/xHCI exact-login gates pass without a hardware claim |
-| [`ws004-p028`](phase028-rtl8822bu-usb-scan/phase.md) | Automatic milestone complete (`q057`); shared physical feedback deferred | Pinned BSD-3-Clause tables and binary notice, checked power/MAC/PHY/USB profiles, ch1--11 20-MHz passive/wildcard-active production scans, fail-close lifetime, focused/build/IDE/xHCI gates pass; physical evidence remains in WS005 p008 |
-| [`ws004-p029`](phase029-wpa2-ccmp-l2/phase.md) | Automatic milestone complete (`q058`); physical secure-L2 evidence deferred to the shared checkpoint | Common-kernel WPA2-Personal/CCMP authentication, association, four-way handshake, key CAM, controlled port, and bidirectional Ethernet L2; physical evidence is shared with p030/WS005 p008 |
-| [`ws004-p030`](phase030-wlan-lifecycle-hardware-hardening/phase.md) | Planned/deferred; not queued; begins after WS005 p009 | Rekey, bounded reconnect, reset, up/down, unplug/reinsert, shutdown, and concurrent-storage regressions; share one lifecycle checkpoint and the frozen-artifact five-run ledger with WS005 p008 rather than duplicate physical work |
+| [`ws004-p028`](phase028-rtl8822bu-usb-scan/phase.md) | Automatic milestone complete (`q057`); developmental physical feedback obtained (`q059`/WS005 p009); final acceptance pending | Pinned BSD-3-Clause tables and binary notice, checked power/MAC/PHY/USB profiles, ch1--11 20-MHz scans, and automatic gates pass; q059 added EFUSE-calibrated legacy TX power and supplied one real attach/firmware/scan result, while WS005 p008 remains incomplete |
+| [`ws004-p029`](phase029-wpa2-ccmp-l2/phase.md) | Automatic milestone complete (`q058`); developmental physical secure-L2 feedback obtained (`q059`/WS005 p009); final acceptance pending | Common-kernel WPA2-Personal/CCMP authentication, association, four-way handshake, key CAM, controlled port, and bidirectional Ethernet L2 pass focused gates; q059 added strict RSNXE handling and one real authorized data result, while p030/WS005 p008 remain incomplete |
+| [`ws004-p030`](phase030-wlan-lifecycle-hardware-hardening/phase.md) | Planned and dependency-ready after q059; not queued or started | Rekey, bounded reconnect, reset, up/down, unplug/reinsert, shutdown, and concurrent-storage regressions remain; share one lifecycle checkpoint and the frozen-artifact five-run ledger with WS005 p008 rather than duplicate physical work |
 | [`ws004-p031`](phase031-legacy-hcd-concurrent-hotplug/phase.md) | Complete (`q047`) | UHCI/EHCI per-endpoint concurrency, periodic/asynchronous progress, request-local retirement, worker-context root hotplug, shared-INTx dispatch, all focused/configured/regression/build gates, and both forced QEMU cells pass |
 | [`ws004-p032`](phase032-usb-endpoint-device-recovery/phase.md) | Complete (`q047`) | Ordered endpoint clear-halt, conservative direct-root reset, allocation-free reclaim-safe recovery, and Mass Storage migration pass HW-T26 and xHCI/legacy QEMU controls; physical recovery was not exercised |
 | [`ws004-p033`](phase033-amd64-framebuffer-console-serialization/phase.md) | Complete (`q047`) | One early-safe lock and strict cell/framebuffer bounds pass HW-T27 host/sanitizer/input/build gates and the shared forced HW-T25 QEMU matrix without console fault or stall |
@@ -160,9 +165,11 @@ Additional work is HW-11,
 HW-20/HW-21, and HW-30 when their inputs and acceptance environments are
 available. Q040 selected the evidence/policy-only p026 intake. Q055 closed its
 later identity/package decision and completed p027; q056 completed p036 and
-q057 completed p028's automatic milestone and q058 completed p029. q059 first
-establishes the WS005 p004/p009 direct physical communication path; p030 and
-P034 remain unqueued.
+q057 completed p028's automatic milestone and q058 completed p029. q059
+established the WS005 p004/p009 direct physical communication path, including
+RSNXE-compatible WPA2 Message 3 handling and calibrated legacy TX power. This
+was one developmental run, not WS005 p008 final acceptance; p030 and P034
+remain unqueued.
 
 ## Goals
 
@@ -223,9 +230,9 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-21 | Deferred built-in follow-up; existing ID retained | Testable RTL8822CE-specific PCI/firmware hardware abstraction or protocol fixture | HW-20 design and the completed generic common-core fixture | Driver-specific state/error paths pass without claiming QEMU emulates the laptop radio |
 | HW-22 | Complete as `ws004-p026` (`q055`; q040 intake retained) | Exact Japan-market T3U Nano identity and optional Realtek firmware package/license policy | Physical adapter, primary-source record | HW-T32 retains the full authoritative descriptor, explicit absence of printed revision, pinned upstream bytes/license, immutable GitHub acquisition mirror, separate install path, and update rule |
 | HW-23 | Complete as `ws004-p027` (`q055`) | Generic WLAN ioctl UAPI, persistent kernel station core, scan cache/state/lifetime, and deterministic fake device | HW-22 documentary capability boundary, p012 | HW-T30 passes ABI, state, race, detach, and secret-erasure fixtures without a physical-radio claim |
-| HW-24 | P036 complete (`q056`); p028 automatic milestone complete (`q057`) | Exact RTL8822BU USB/pre-radio substrate, separately selected firmware, BSD-licensed tables, and conservative 2.4-GHz/20-MHz scan | HW-22, HW-23, p010/p011/p015 | P036 package/transport/parser/lifetime and HW-T31 table/radio/scan automatic gates pass; physical fields come from the single shared WS005 p008 ledger |
-| HW-25 | Automatic milestone complete as `ws004-p029` (`q058`) | WPA2-Personal/CCMP authentication, association, key installation, controlled port, and Ethernet L2 | HW-24, kernel entropy and reviewed crypto substrate | HW-T33 passes automatic handshake/replay/CCMP/negative fixtures; the eventual secure-L2 fields come from the same p008 ledger with no p029-specific request |
-| HW-26 | Planned/deferred as `ws004-p030`; starts after WS005 p009 | Rekey, bounded reconnect, reset, hotplug, shutdown, and final exact-hardware hardening | HW-25, WS005 p009, controlled AP, WS005 p008 | HW-T34 passes automatic fault/race/storage gates and references the one shared p008 lifecycle checkpoint/five-run frozen-artifact ledger |
+| HW-24 | P036 complete (`q056`); p028 automatic milestone complete (`q057`); developmental physical feedback obtained (`q059`) | Exact RTL8822BU USB/pre-radio substrate, separately selected firmware, BSD-licensed tables, calibrated legacy TX power, and conservative 2.4-GHz/20-MHz scan | HW-22, HW-23, p010/p011/p015 | P036 and HW-T31 automatic gates pass; q059/p009 proves one real attach/firmware/scan normal path, while the WS005 p008 final ledger remains incomplete |
+| HW-25 | Automatic milestone complete as `ws004-p029` (`q058`); developmental physical feedback obtained (`q059`) | WPA2-Personal/CCMP authentication, association, key installation, controlled port, and Ethernet L2, including bounded RSNXE handling | HW-24, kernel entropy and reviewed crypto substrate | HW-T33 and q059 focused codec/engine/CCMP/RTL fixtures pass; one real authorized data path succeeds, while p030/WS005 p008 final acceptance remains incomplete |
+| HW-26 | Planned and dependency-ready as `ws004-p030`; not started | Rekey, bounded reconnect, reset, hotplug, shutdown, and final exact-hardware hardening | HW-25, completed WS005 p009 normal path, controlled AP, WS005 p008 | HW-T34 automatic fault/race/storage gates and the shared p008 lifecycle/five-run frozen-artifact ledger remain outstanding |
 | HW-27 | Complete as `ws004-p031` (`q047`) | Concurrent UHCI/EHCI per-endpoint scheduling, request-local retirement, and runtime root-port lifecycle | p009--p011, p015, p016 | HW-T25 ordinary/sanitizer/analyzer and configured production gates, shared-INTx and USB regressions, repository build, plus standalone UHCI and paired EHCI/UHCI QEMU cells pass |
 | HW-28 | Complete as `ws004-p032` (`q047`) | Ordered USB endpoint-halt recovery and conservative direct-root device reset shared by xHCI/UHCI/EHCI | HW-27, p010/p011/p015/p016 | HW-T26, reclaim-safe reserve gates, xHCI and paired UHCI/EHCI QEMU controls pass; no physical-machine recovery result is claimed |
 | HW-29 | Complete as `ws004-p033` (`q047`) | Early-safe amd64 PC/AT framebuffer-console serialization and strict cell/pixel bounds | q047 p031 stress observation, existing console contract | HW-T27 host/sanitizer/input/build gates and forced `q047-legacy-hcd-final4` standalone/paired QEMU cells pass without console fault, corruption, or stall |
@@ -282,7 +289,7 @@ The ordered implementation path is:
    WPA2-Personal/CCMP authentication, association, four-way handshake,
    controlled-port authorization, and Ethernet L2 without DHCP.
 5. [`ws005-p009`](../ws005-networking/phase009-wlan-minimum-connectivity/phase.md)
-   first proves one direct physical carrier/DHCP/ping/fetch path without
+   proved one direct physical carrier/DHCP/ping/fetch path in q059 without
    rekey, recovery, or repeatability expansion.
 6. [`ws004-p030`](phase030-wlan-lifecycle-hardware-hardening/phase.md) then completes
    rekey, bounded reconnect, reset, up/down, unplug/reinsert, shutdown,
@@ -291,7 +298,9 @@ The ordered implementation path is:
 
 P026 and p027 are complete through q055, q056 completed the extracted p036
 pre-radio substrate, and q057 completed p028 with the resolved BSD-3-Clause
-table policy. Q058 completed p029; p030 remains an M/W/P planning entry. P028 uses one
+table policy. Q058 completed p029, and q059/p009 supplied one real
+attach/firmware/scan plus authorized normal-connectivity result. P030 remains
+an M/W/P planning entry and WS005 p008 final acceptance remains incomplete. P028 uses one
 persistent bulk-IN URB; the deferred p035 same-endpoint ring is a throughput
 extension and is not in this dependency chain.
 
@@ -318,9 +327,12 @@ QEMU provides no faithful 802.11 RF model. Host fixtures and a constrained fake
 device prove the generic state/lifetime logic only; USB transport fixtures
 prove ownership only. Scan, association, encrypted L2, rekey, and final
 reliability require the descriptor-confirmed physical adapter and a controlled
-AP. WS005 p009 first records one deliberately narrow developmental
-scan/connect/DHCP/ping/fetch observation after p029. That observation is not a
-p028--p030 closure gate and does not consume final acceptance. After all
+AP. WS005 p009 recorded one deliberately narrow developmental
+scan/connect/DHCP/ping/fetch observation after p029. The q059 candidate used
+EFUSE-derived legacy power calibration, advertised the implemented legacy
+rates, and accepted the bounded RSNXE element in WPA2 Message 3 for a
+transition-mode AP. That observation is not a p028--p030 closure gate and does
+not consume final acceptance. After all
 p028--p030 and control-plane automatic gates, WS005 p008 owns the combined
 lifecycle checkpoint and the later frozen-artifact
 five-consecutive-run ledger, which p028--p030 reference for physical completion.

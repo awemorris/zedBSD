@@ -4,11 +4,10 @@ Last updated: 2026-09-01
 
 WSID: `ws005`
 
-Status: active; q058 completed the RTL8822BU WPA2-Personal/CCMP automatic L2
-milestone after q056/q057 completed the pre-radio and scan layers. q059 is now
-the normal-path-first Queue: implement the minimum direct `/sbin/wifi` command
-in p004, then prove one physical DHCP/ping/fetch path in p009. Detailed
-primitive and hardware lifecycle hardening follows in p010 and WS004 p030.
+Status: active; q059 completed the minimum direct `/sbin/wifi` command in p004
+and one physical-equivalent RTL8822BU scan/WPA2/CCMP/DHCP/ping/fetch path in
+p009. Detailed command composition and primitive/hardware lifecycle hardening
+remain in p006/p007, p010, and WS004 p030 before p008 final acceptance.
 
 Parent: [master plan](../master.md)
 
@@ -29,12 +28,13 @@ the purchased Japan-market Archer has no printed revision, its retained exact
 descriptor is authoritative, and the separately installed `rtl8822b-firmware`
 package boundary is frozen. Q055 completed the generic WLAN core/fake radio in
 `ws004-p027`, and q056 completed the independent RTL8822BU pre-radio substrate
-in `ws004-p036`. `ws005-p004` is dependency-ready, and q057 has completed
-`ws004-p028`'s BSD-3-Clause radio-table import and conservative automatic scan
-milestone. Q058 completed WS004 p029 secure L2 independently of the command
-stack. Start q059 at p004's human direct-root normal path; after p009 proves
-one useful physical IP path, continue with p006/p007 composition and the
-separately retained p010/p030 hardening work.
+in `ws004-p036`. Q057 completed `ws004-p028`'s BSD-3-Clause radio-table import
+and conservative automatic scan milestone. Q058 completed WS004 p029 secure
+L2 independently of the command stack. Q059 then completed p004's human
+direct-root normal path and p009's one useful physical IP path. Continue with
+p006 then p007 composition; p010 and WS004 p030 are also eligible hardening
+work. None of these later Phases, nor p008's final five-run acceptance, is
+complete.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -45,13 +45,13 @@ Shared tests: [WS005 test index](tests/README.md)
 | [`ws005-p001`](phase001-usb-ncm-physical-datapath/phase.md) | Complete (`q029`) | RTL8156 NCM carrier/static/DHCP/ping and final Latitude external fetch pass |
 | [`ws005-p002`](phase002-wlan-v1-contract/phase.md) | Complete (`q053`) | Frozen v1 topology, ownership, security, supersession, limits, and recovery semantics are synchronized across the dependent P-books; no source or hardware result is claimed |
 | [`ws005-p003`](phase003-unix-peer-credentials/phase.md) | Complete (`q040`) | Fixed 12-byte connection-time AF_UNIX identity, checked `root:network 0660` publication, root/non-root operation policy, and kernel ioctl privilege boundary pass focused and native PC-98 gates |
-| [`ws005-p004`](phase004-wifi-ioctl-command/phase.md) | Ready; selected first in `q059` | Add the minimum human, direct-root `/sbin/wifi` normal path without DHCP or persistence |
+| [`ws005-p004`](phase004-wifi-ioctl-command/phase.md) | Complete (`q059`) | Six direct-root `/sbin/wifi` forms pass focused bounds/secret-clearing gates and the physical normal path without taking DHCP or persistence ownership |
 | [`ws005-p005`](phase005-wifi-credential-store/phase.md) | Complete (`q051`) | Real root/sudo-like/non-root `/sbin/net wifi set-key`, read-side replacement rejection, metadata, redaction, atomic update, abrupt stop, and second-boot persistence pass |
-| [`ws005-p006`](phase006-networkd-wifi-protocol/phase.md) | Planned; depends on p003-p005 and the p004 primitive | Replace whitespace `ZNV1` limitations with bounded length-framed WLAN requests, peer authorization, and a secret-FD child path |
-| [`ws005-p007`](phase007-net-wifi-orchestration/phase.md) | Planned; depends on p005-p006 and WS004 WLAN fixture | Implement the requested `net wifi` search/list/up/down/connect flow through `networkd` to `ifconfig`, `wifi`, and `dhcpc` |
+| [`ws005-p006`](phase006-networkd-wifi-protocol/phase.md) | Ready; not started | Replace whitespace `ZNV1` limitations with bounded length-framed WLAN requests, peer authorization, and a secret-FD child path |
+| [`ws005-p007`](phase007-net-wifi-orchestration/phase.md) | Next after p006; not started | Implement the requested `net wifi` search/list/up/down/connect flow through `networkd` to `ifconfig`, `wifi`, and `dhcpc` |
 | [`ws005-p008`](phase008-archer-physical-acceptance/phase.md) | Planned; depends on p007 and `ws004-p030` | Prove one complete physical scan/WPA2/DHCP/transfer/down path, then run the final frozen-artifact repeatability campaign |
-| [`ws005-p009`](phase009-wlan-minimum-connectivity/phase.md) | Planned; selected second in `q059` after p004 | One developmental physical run reaches scan, secure carrier, DHCP, ping, and bounded fetch before hardening |
-| [`ws005-p010`](phase010-wifi-primitive-hardening/phase.md) | Planned; deferred until p009 | Complete the primitive command's abnormal/semi-normal, cancellation, race, boundary, and redaction matrix |
+| [`ws005-p009`](phase009-wlan-minimum-connectivity/phase.md) | Complete (`q059`) | One USB-passthrough development run reached scan, authorized carrier, DHCP, two 3/3 ping checks, an 84255-byte fetch, disconnect, and down |
+| [`ws005-p010`](phase010-wifi-primitive-hardening/phase.md) | Ready; not started | Complete the primitive command's abnormal/semi-normal, cancellation, race, boundary, and redaction matrix |
 
 `ws002-p020` remains historical ownership of the current wired
 `networkd`/`net` baseline; it is not renumbered into this WS. Native device and
@@ -292,13 +292,13 @@ rather than being parsed as a WLAN request.
 | NET-24 | Superseded | Pluggable WPA backend family | Fixed primitive topology | No implementation |
 | NET-25 | Complete as p002 (`q053`) | WLAN v1 contract freeze | User decisions recorded above | P-book and dependent design records are synchronized; no implementation result claimed |
 | NET-26 | Planned as p003 | AF_UNIX peer credentials and one-socket authorization | NET-25 | Credential spoof/race/group/privilege fixtures pass |
-| NET-27 | Ready as p004; selected in `q059` | Minimum human direct-root `/sbin/wifi` over the stable WLAN ioctl contract | NET-25, WS004 p027-p029 | one normal search/list/status/connect/disconnect sequence passes without DHCP/persistence |
+| NET-27 | Complete as p004 (`q059`) | Minimum human direct-root `/sbin/wifi` over the stable WLAN ioctl contract | NET-25, WS004 p027-p029 | one normal search/list/status/connect/disconnect sequence passes without DHCP/persistence |
 | NET-28 | Complete as p005 (`q051`) | System/per-user `wifi.conf` and `set-key` | NET-25 | ownership/mode/symlink/locking/atomicity/redaction and abrupt-stop/remount tests pass |
-| NET-29 | Planned as p006 | `ZNV2`, peer authorization, `wifi` child secret-FD bridge | NET-26--NET-28 | malformed/auth/timeout/cancel/crash fixtures pass |
-| NET-30 | Planned as p007 | Requested high-level `net wifi` operations | NET-29, WS004 WLAN fixture | full fake-device association/DHCP/down transaction passes |
+| NET-29 | Ready as p006; not started | `ZNV2`, peer authorization, `wifi` child secret-FD bridge | NET-26--NET-28 | malformed/auth/timeout/cancel/crash fixtures pass |
+| NET-30 | Next as p007 after p006; not started | Requested high-level `net wifi` operations | NET-29, WS004 WLAN fixture | full fake-device association/DHCP/down transaction passes |
 | NET-31 | Planned as p008 | Archer end-to-end and repeatability acceptance | NET-30, NET-33, WS004 p030 | physical L2, DHCP, transfer, down, reconnect, final repetition pass |
-| NET-32 | Planned as p009; selected after p004 in `q059` | Minimum physical WLAN communication checkpoint | NET-27, WS004 p026-p029 | one runtime-only-credential run reaches carrier, DHCP, ping, and bounded fetch |
-| NET-33 | Planned as p010; deferred until NET-32 | Primitive CLI abnormal/semi-normal hardening | NET-27, NET-32 | bounded invalid/race/cancel/detach/redaction fixtures pass |
+| NET-32 | Complete as p009 (`q059`) | Minimum physical WLAN communication checkpoint | NET-27, WS004 p026-p029 | one runtime-only-credential run reaches carrier, DHCP, ping, and bounded fetch |
+| NET-33 | Ready as p010; not started | Primitive CLI abnormal/semi-normal hardening | NET-27, NET-32 | bounded invalid/race/cancel/detach/redaction fixtures pass |
 
 ## 8. Cross-WS dependencies
 

@@ -118,10 +118,12 @@ the notice-preserving BSD-3-Clause tables and binary license, bounded RTL8822B
 radio programming, conservative ch1--11 scan, failure rollback, and focused/
 build/IDE/xHCI gates pass without claiming physical RF. Q058 completed
 p029's strict WPA2-Personal/CCMP handshake, controlled port, RTL keys, and
-synthetic Ethernet L2 automatic milestone. q059 now implements WS005 p004's
-minimum direct `/sbin/wifi` command and p009's single physical
-scan/connect/DHCP/ping/fetch path. WS004 p030 lifecycle hardening follows only
-after that simple communication path works. The remaining Noct
+synthetic Ethernet L2 automatic milestone. Q059 completed WS005 p004's
+minimum direct `/sbin/wifi` command and p009's single USB-passthrough
+development checkpoint: scan, WPA2/CCMP authorization, DHCP, gateway/public
+ping, bounded HTTP fetch, disconnect, and interface down passed. WS005 p006
+and p010 plus WS004 p030 are now ready; p007 follows p006, while p008 final
+five-run acceptance remains incomplete. The remaining Noct
 compile/application CLI defect is unrelated. The
 archived q043 PC-98 fixed-read and exact-mouse
 paths both pass locally, and their remaining external resume facts do not
@@ -399,8 +401,8 @@ allowed to block first communication unless the normal path depends on them.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q050 completed both VFS prerequisites discovered by q041 | `ws001-p022` and `ws001-p023` complete with production-linked faults and abrupt-stop/remount evidence | Retain p022/p023 as regressions; their dependency consumer resumes in WS005 p005 | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; restore its Make-owned Noct gate through ws008-p010 | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; q058 completed RTL8822BU p029 secure L2; p030 is deferred until one useful WS005 p009 physical path works | `ws004-p010`--`p020`, p022--p024, p026-p029 automatic, p031--p033, and p036 complete; p030 is planned/not queued | Let q059 establish the p004/p009 vertical path, then schedule p030 hardening; RTL8822CE and Intel AX201 remain later independent targets | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WLAN | Active; q059 is ready for p004 minimum direct command followed by p009 one-run physical connectivity | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, frozen design contract, exact first-radio identity, common WLAN control ABI, p036, and p028-p029 automatic milestones are complete | Execute p004 then p009; afterwards continue p006/p007 composition and p010/p030 hardening before p008 final acceptance | [WS005](ws005-networking/ws.md) |
+| `ws004` | Hardware expansion | Active; q058 completed RTL8822BU p029 secure L2 and q059 supplied the useful WS005 p009 physical-development path | `ws004-p010`--`p020`, p022--p024, p026-p029 automatic, p031--p033, and p036 complete; p030 is now ready/not started | Schedule p030 lifecycle hardening; RTL8822CE and Intel AX201 remain later independent targets | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WLAN | Active; q059 completed p004 minimum direct command and p009 one-run physical connectivity | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, frozen design contract, exact first-radio identity, common WLAN control ABI, p036, p028-p029 automatic milestones, p004, and p009 are complete | p006 and p010 are ready; p007 follows p006; complete p006/p007 composition and p010/p030 hardening before p008 final acceptance | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; p009 still waits for accepted WS008 userland | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked; accepted host SHA restores runtime `--path` and passes the ordinary production build plus zedbuild byte primitives, while target packages remain separately disabled | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 is uncleared only at unrelated `NOCT-T082` compile/application parsing, and p009 remains separately target-blocked | Resume p010 only from a maintainer-reviewed commit which fixes `--compile --app --path=...`; resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
@@ -541,9 +543,10 @@ priority one.
    dependency order is p026 exact-unit/firmware intake, p027 generic WLAN core,
    the completed p036 pre-radio substrate with its individually selected
    firmware package, WS005 privilege/command/profile/protocol prerequisites,
-   completed q057 p028 scan and q058 p029 secure L2, q059 p004 minimum command
-   plus p009 single physical communication path, then WS005 orchestration,
-   p010/p030 hardening, and the single final p008 hardware acceptance.
+   completed q057 p028 scan, q058 p029 secure L2, and q059 p004 minimum command
+   plus p009 single physical communication path. Next are p006 then p007
+   orchestration and the ready p010/p030 hardening, followed by the single
+   final p008 hardware acceptance.
    RTL8822CE and Intel AX201 remain later,
    independent targets. The SSH host `awe@10.0.10.25` may be used for QEMU USB
    passthrough of the connected adapter after automatic gates pass.

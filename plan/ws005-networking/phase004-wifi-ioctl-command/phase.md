@@ -8,7 +8,7 @@ Phase ID: `p004`
 
 Combined ID: `ws005-p004`
 
-Status: in progress (`q059`)
+Status: completed (`q059`)
 
 Parent: [WS005 networking and WLAN](../ws.md)
 
@@ -140,3 +140,20 @@ six operations, if successful WPA2 association requires a resident userspace
 engine, or if the command would have to expose kernel-private structures.
 Ordinary implementation bugs on the direct happy path are fixed inside p004;
 they are not reasons to import p006/p007/p010/p030 scope.
+
+## Execution result
+
+Completed in q059 on 2026-09-01. `/sbin/wifi` implements the six declared
+human direct-root forms and is installed in the amd64 image. The focused
+production-ioctl fixture passes search start/stop, completed list, status,
+connect through authorized carrier, and disconnect; it also covers the basic
+pre-ioctl length rejections and mutable userspace secret clearing required by
+this Phase.
+
+The final q059 candidate is `build/amd64/hdd-image.img`, 203423744 bytes,
+SHA-256
+`6d0ec924f0d063b663c6da8ab1a7b8b39bcef8b2b2849e4fb0d8308340f9ed75`.
+Its one physical-equivalent USB-passthrough run completed p009's normal path.
+No profile persistence, DHCP ownership, `networkd` protocol, or `net wifi`
+orchestration was added to this primitive. Those remain p006/p007 work, and
+the intentionally deferred abnormal/semi-normal matrix remains p010.
