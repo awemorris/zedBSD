@@ -84,8 +84,10 @@ int wlan_wpa2_eapol_key_build(uint8_t *output, size_t capacity,
 	const struct wlan_wpa2_eapol_key *key, size_t *result_length);
 
 /* Message-3 key data is passed here only after authenticated RFC 3394
- * unwrapping.  The first profile accepts exactly one compatible RSN element,
- * one CCMP GTK KDE, and canonical AES-wrap padding. */
+ * unwrapping.  The first profile requires exactly one compatible RSN element
+ * and one CCMP GTK KDE, accepts one authenticated RSN Extension Element,
+ * skips framed KDEs with the standard RSN OUI but an unimplemented data type,
+ * and accepts canonical AES-wrap padding. */
 int wlan_wpa2_m3_plaintext_parse(const uint8_t *plaintext, size_t length,
 	struct wlan_wpa2_gtk *result);
 int wlan_wpa2_m3_plaintext_build(uint8_t *output, size_t capacity,

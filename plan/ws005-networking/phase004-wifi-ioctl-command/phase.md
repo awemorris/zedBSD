@@ -8,7 +8,7 @@ Phase ID: `p004`
 
 Combined ID: `ws005-p004`
 
-Status: ready; selected first in `q059`
+Status: in progress (`q059`)
 
 Parent: [WS005 networking and WLAN](../ws.md)
 

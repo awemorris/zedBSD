@@ -22,6 +22,7 @@
 #define IEEE80211_IE_RSN 48U
 #define IEEE80211_IE_EXTENDED_RATES 50U
 #define IEEE80211_IE_VENDOR 221U
+#define IEEE80211_IE_RSN_EXTENSION 244U
 
 #define RSN_CAPABILITY_MFPR 0x0040U
 #define RSN_CAPABILITY_MFPC 0x0080U
@@ -616,6 +617,7 @@ wlan_wpa2_m3_plaintext_parse(const uint8_t *plaintext, size_t length,
 	struct wlan_wpa2_gtk parsed;
 	size_t offset = 0U;
 	int have_rsn = 0;
+	int have_rsn_extension = 0;
 	int have_gtk = 0;
 
 	if (plaintext == NULL || result == NULL || length < 16U ||
@@ -644,6 +646,13 @@ wlan_wpa2_m3_plaintext_parse(const uint8_t *plaintext, size_t length,
 			    plaintext + offset, (size_t)ie_length + 2U) != 0)
 				return EINVAL;
 			have_rsn = 1;
+		} else if (identifier == IEEE80211_IE_RSN_EXTENSION) {
+			/* WPA2/WPA3 transition-mode authenticators may carry an RSNXE in
+			 * M3.  It is authenticated metadata and cannot replace the selected
+			 * RSN element or GTK required by this WPA2-PSK profile. */
+			if (have_rsn_extension || ie_length == 0U)
+				return EINVAL;
+			have_rsn_extension = 1;
 		} else if (identifier == IEEE80211_IE_VENDOR &&
 		    ie_length >= 4U && suite_is(body, rsn_gtk_kde)) {
 			uint8_t key_info;
@@ -659,6 +668,11 @@ wlan_wpa2_m3_plaintext_parse(const uint8_t *plaintext, size_t length,
 			parsed.key_index = key_info & 3U;
 			memcpy(parsed.key, body + 6U, sizeof(parsed.key));
 			have_gtk = 1;
+		} else if (identifier == IEEE80211_IE_VENDOR &&
+		    ie_length >= 4U && memcmp(body, rsn_gtk_kde, 3U) == 0) {
+			/* Authenticated RSN key data is extensible.  A KDE with the
+			 * standard RSN OUI but an unimplemented data type belongs to its
+			 * defining extension and does not weaken the selected profile. */
 		} else {
 			return EINVAL;
 		}

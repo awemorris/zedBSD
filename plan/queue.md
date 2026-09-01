@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 QID: `q059`
 
-Queue status: ready; not started
+Queue status: in progress
 
 Queue finished: **No**
 
@@ -28,6 +28,7 @@ Provide the shortest useful vertical slice:
 ```text
 RTL8822BU attach and firmware
   -> wlan0
+  -> /sbin/ifconfig wlan0 up
   -> /sbin/wifi scan and list
   -> WPA2-Personal/CCMP connect
   -> carrier
@@ -43,7 +44,7 @@ injection, and long repeatability campaigns.
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws005-p004` | [Primitive wifi command](ws005-networking/phase004-wifi-ioctl-command/phase.md) | ready | The direct root `/sbin/wifi` human command drives the existing scan/status/connect/disconnect WLAN ioctls on the normal path |
+| 1 | `ws005-p004` | [Primitive wifi command](ws005-networking/phase004-wifi-ioctl-command/phase.md) | in-progress | The direct root `/sbin/wifi` human command drives the existing scan/status/connect/disconnect WLAN ioctls on the normal path |
 | 2 | `ws005-p009` | [Minimum connectivity](ws005-networking/phase009-wlan-minimum-connectivity/phase.md) | planned; follows p004 | One physical adapter run reaches scan, secure carrier, DHCP, ping, and bounded fetch using runtime-only credentials |
 
 ## Accepted decisions
@@ -83,15 +84,15 @@ Use one candidate image and the already available passthrough environment.
 Supply the controlled AP identity and passphrase only at runtime without
 retaining them. Perform one bounded sequence:
 
-1. Attach the exact p026 adapter and require one `wlan0` with the pinned
-   firmware.
+1. Attach the exact p026 adapter, require one `wlan0` with the pinned
+   firmware, and run `/sbin/ifconfig wlan0 up`.
 2. Start a scan, wait for completion, and confirm the controlled WPA2/CCMP BSS
    appears.
 3. Connect with `/sbin/wifi`; require authorized carrier.
 4. Run `/sbin/dhcpc wlan0`; require an IPv4 address and route.
 5. Ping the local gateway and one external address, then fetch one bounded
    object and validate nonzero/matching expected length or digest.
-6. Disconnect once and confirm carrier clears.
+6. Disconnect once, confirm carrier clears, and bring the interface down.
 
 If the sequence fails, retain only redacted first-boundary evidence and return
 to that normal-path implementation. Do not add unrelated retry/recovery logic

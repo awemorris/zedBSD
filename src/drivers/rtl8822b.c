@@ -170,6 +170,10 @@
 #define RTL8822B_TXAGC_A                       0x1d00U
 #define RTL8822B_TXAGC_B                       0x1d80U
 #define RTL8822B_TXAGC_LAST_RATE                   0x3fU
+#define RTL8822B_EFUSE_TX_POWER_OFFSET             0x10U
+#define RTL8822B_EFUSE_TX_POWER_STRIDE             0x2aU
+#define RTL8822B_EFUSE_2G_HT1_DIFF_OFFSET          0x0bU
+#define RTL8822B_LEGACY_RATE_COUNT                    12U
 
 #define RTL8822B_CR_ALL_ENABLE                     0xffU
 #define RTL8822B_BB_RESET_BITS                     0x03U
@@ -823,11 +827,36 @@ mac_address_valid(const uint8_t address[6])
 	return !all_zero && !all_ff;
 }
 
+static int
+board_tx_power_2g_valid(const struct rtl8822bu_board_info *board)
+{
+	unsigned path;
+
+	if (board == NULL || (board->chip.rf_path_count != 1U &&
+	    board->chip.rf_path_count != RTL8822B_RF_PATH_COUNT))
+		return 0;
+	for (path = 0U; path < board->chip.rf_path_count; path++) {
+		const struct rtl8822b_2g_tx_power *power =
+		    &board->tx_power_2g[path];
+		unsigned group;
+
+		for (group = 0U; group < 4U; group++) {
+			if (power->cck_base[group] > 0x3fU ||
+			    power->bw40_base[group] > 0x3fU)
+				return 0;
+		}
+		if (power->ofdm_diff < -8 || power->ofdm_diff > 7)
+			return 0;
+	}
+	return 1;
+}
+
 int
 rtl8822bu_board_parse(const uint8_t *logical, size_t logical_length,
 	uint32_t sys_cfg1, struct rtl8822bu_board_info *board)
 {
 	struct rtl8822bu_board_info result;
+	unsigned path;
 	int error;
 
 	if (logical == NULL || board == NULL ||
@@ -852,6 +881,22 @@ rtl8822bu_board_parse(const uint8_t *logical, size_t logical_length,
 	if (result.rfe_option != 2U && result.rfe_option != 3U &&
 	    result.rfe_option != 5U)
 		return EOPNOTSUPP;
+	for (path = 0U; path < result.chip.rf_path_count; path++) {
+		const uint8_t *power = logical + RTL8822B_EFUSE_TX_POWER_OFFSET +
+		    path * RTL8822B_EFUSE_TX_POWER_STRIDE;
+		uint8_t nibble;
+
+		memcpy(result.tx_power_2g[path].cck_base, power,
+		    sizeof(result.tx_power_2g[path].cck_base));
+		memcpy(result.tx_power_2g[path].bw40_base,
+		    power + RTL8822B_2G_CCK_GROUP_COUNT,
+		    sizeof(result.tx_power_2g[path].bw40_base));
+		nibble = power[RTL8822B_EFUSE_2G_HT1_DIFF_OFFSET] & 0x0fU;
+		result.tx_power_2g[path].ofdm_diff = (int8_t)(nibble < 8U ?
+		    nibble : (int)nibble - 16);
+	}
+	if (!board_tx_power_2g_valid(&result))
+		return EINVAL;
 	*board = result;
 	return 0;
 }
@@ -1943,6 +1988,9 @@ radio_rfe_2g(struct rtl8822b_radio *radio,
 	return error;
 }
 
+static int radio_txagc_legacy_profile(struct rtl8822b_radio *radio,
+	uint8_t channel, uint64_t deadline_ticks);
+
 static int
 radio_channel_apply(struct rtl8822b_radio *radio, uint8_t channel,
 	int unpause, uint64_t deadline_ticks)
@@ -1952,6 +2000,7 @@ radio_channel_apply(struct rtl8822b_radio *radio, uint8_t channel,
 
 	if (channel < 1U || channel > 11U)
 		return EOPNOTSUPP;
+	radio->power_limits_valid = 0U;
 	memset(&journal, 0, sizeof(journal));
 	error = journal_update(radio, &journal, RTL8822B_REG_TX_PAUSE, 1U,
 	    0xffU, 0xffU, deadline_ticks);
@@ -1970,6 +2019,9 @@ radio_channel_apply(struct rtl8822b_radio *radio, uint8_t channel,
 		error = radio_cca_20(radio, &journal, deadline_ticks);
 	if (error == 0)
 		error = radio_rfe_2g(radio, &journal, deadline_ticks);
+	if (error == 0)
+		error = radio_txagc_legacy_profile(radio, channel,
+		    deadline_ticks);
 	if (error == 0 && unpause)
 		error = journal_update(radio, &journal, RTL8822B_REG_TX_PAUSE,
 		    1U, 0xffU, 0U, deadline_ticks);
@@ -2035,8 +2087,49 @@ radio_tables_apply(struct rtl8822b_radio *radio, uint64_t deadline_ticks)
 	return error;
 }
 
+static unsigned
+radio_2g_power_group(uint8_t channel)
+{
+	if (channel <= 2U)
+		return 0U;
+	if (channel <= 5U)
+		return 1U;
+	if (channel <= 8U)
+		return 2U;
+	return 3U;
+}
+
+static uint8_t
+radio_txagc_legacy_index(const struct rtl8822bu_board_info *board,
+	unsigned path, uint8_t channel, unsigned rate)
+{
+	const struct rtl8822b_2g_tx_power *power = &board->tx_power_2g[path];
+	unsigned group = radio_2g_power_group(channel);
+	unsigned section = rate < 4U ? 0U : 1U;
+	int section_base = section == 0U ? 32 : 28;
+	int limit_offset =
+	    (int)rtw8822b_2g_legacy_world_limit[channel - 1U][section] -
+	    section_base;
+	int rate_offset = rtw8822b_2g_legacy_rate_offset[rate];
+	int index;
+
+	if (rate_offset > limit_offset)
+		rate_offset = limit_offset;
+	if (section == 0U)
+		index = power->cck_base[group] + rate_offset;
+	else
+		index = power->bw40_base[group] + power->ofdm_diff +
+		    rate_offset;
+	if (index < 0)
+		return 0U;
+	if (index > 0x3f)
+		return 0x3fU;
+	return (uint8_t)index;
+}
+
 static int
-radio_txagc_floor(struct rtl8822b_radio *radio, uint64_t deadline_ticks)
+radio_txagc_legacy_profile(struct rtl8822b_radio *radio, uint8_t channel,
+	uint64_t deadline_ticks)
 {
 	unsigned path;
 	unsigned rate;
@@ -2046,9 +2139,20 @@ radio_txagc_floor(struct rtl8822b_radio *radio, uint64_t deadline_ticks)
 		    RTL8822B_TXAGC_B;
 
 		for (rate = 0U; rate <= RTL8822B_TXAGC_LAST_RATE; rate += 4U) {
-			int error = radio_write(radio,
-			    (uint16_t)(base + rate), 4U, 0U, deadline_ticks);
+			uint32_t packed = 0U;
+			unsigned lane;
+			int error;
 
+			for (lane = 0U; lane < 4U; lane++) {
+				unsigned current = rate + lane;
+
+				if (current < RTL8822B_LEGACY_RATE_COUNT)
+					packed |= (uint32_t)
+					    radio_txagc_legacy_index(&radio->board,
+					    path, channel, current) << (lane * 8U);
+			}
+			error = radio_write(radio, (uint16_t)(base + rate), 4U,
+			    packed, deadline_ticks);
 			if (error != 0)
 				return error;
 		}
@@ -2413,7 +2517,7 @@ radio_minimum_mac_profile(struct rtl8822b_radio *radio,
 	if (error == 0)
 		error = radio_update(radio, RTL8822B_REG_TIMER0_SOURCE, 1U,
 		    0x70U, 0U, deadline_ticks);
-	/* Keep the low TX gate closed until the absolute TXAGC floor exists. */
+	/* Keep TX closed until the calibrated legacy TXAGC profile exists. */
 	if (error == 0)
 		error = radio_write(radio, RTL8822B_REG_TX_PAUSE + 1U, 1U,
 		    0U, deadline_ticks);
@@ -2508,6 +2612,7 @@ rtl8822b_radio_power_on(struct rtl8822b_radio *radio,
 	    !mac_address_valid(board->mac_address) ||
 	    (board->chip.rf_path_count != 1U &&
 	    board->chip.rf_path_count != 2U) ||
+	    !board_tx_power_2g_valid(board) ||
 	    (board->rfe_option != 2U && board->rfe_option != 3U &&
 	    board->rfe_option != 5U))
 		return EINVAL;
@@ -2592,8 +2697,6 @@ rtl8822b_radio_start(struct rtl8822b_radio *radio,
 		error = radio_phy_rfe_post_table(radio, deadline_ticks);
 	if (error == 0)
 		error = radio_channel_apply(radio, 1U, 0, deadline_ticks);
-	if (error == 0)
-		error = radio_txagc_floor(radio, deadline_ticks);
 	if (error == 0)
 		error = radio_write(radio, RTL8822B_REG_CR, 1U,
 		    RTL8822B_CR_ALL_ENABLE, deadline_ticks);

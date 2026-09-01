@@ -1740,9 +1740,10 @@ rtl8822bu_tx_report_complete(struct rtl8822bu_adapter *adapter,
 
 static int
 rtl8822bu_tx_descriptor_set_priority(uint8_t *wire, size_t wire_length,
-	enum rtl8822bu_frame_class class)
+	enum rtl8822bu_frame_class class, uint8_t channel)
 {
 	uint32_t word1;
+	uint32_t word4;
 	uint16_t checksum = 0U;
 	unsigned index;
 
@@ -1759,6 +1760,14 @@ rtl8822bu_tx_descriptor_set_priority(uint8_t *wire, size_t wire_length,
 	word1 &= ~((uint32_t)0x1fU << 16);
 	word1 |= 8U << 16;
 	rtl8822bu_store_le32(wire + 4U, word1);
+	/* The common descriptor starts at 6 Mbps.  On 2.4 GHz, authentication
+	 * and association management frames must use the 1 Mbps basic rate just
+	 * like the already working active-scan path and upstream rtw88. */
+	if (class == RTL8822BU_FRAME_MANAGEMENT && channel <= 14U) {
+		word4 = rtl8822bu_load_le32(wire + 16U);
+		word4 &= ~0x7fU;
+		rtl8822bu_store_le32(wire + 16U, word4);
+	}
 	rtl8822bu_store_le16(wire + 28U, 0U);
 	for (index = 0U; index < 16U; index++)
 		checksum ^= rtl8822bu_load_le16(wire + index * 2U);
@@ -1783,6 +1792,7 @@ rtl8822bu_frame_transmit_private(struct rtl8822bu_adapter *adapter,
 	size_t wire_length = 0U;
 	size_t actual = 0U;
 	uint8_t sequence = 0U;
+	uint8_t channel = 0U;
 	int error;
 
 	if (adapter == NULL || generation == 0U || cookie == 0U || frame == NULL ||
@@ -1843,8 +1853,10 @@ rtl8822bu_frame_transmit_private(struct rtl8822bu_adapter *adapter,
 	} else {
 		error = rtl8822bu_tx_report_reserve_locked(adapter, generation,
 		    key_generation, cookie, now, deadline, &sequence);
-		if (error == 0)
+		if (error == 0) {
+			channel = adapter->connection_channel;
 			adapter->radio_operations_active++;
+		}
 	}
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	if (error != 0)
@@ -1859,7 +1871,7 @@ rtl8822bu_frame_transmit_private(struct rtl8822bu_adapter *adapter,
 	    frame, length, encrypted, 0U, sequence, &wire_length);
 	if (error == 0)
 		error = rtl8822bu_tx_descriptor_set_priority(wire, wire_length,
-		    class);
+		    class, channel);
 	now = clock_ticks();
 	if (error == 0 && now >= deadline)
 		error = ETIMEDOUT;
@@ -2927,8 +2939,8 @@ rtl8822bu_management_transmit(void *context, uint64_t generation,
 	channel = adapter->scan_channel;
 	adapter->radio_operations_active++;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
-	/* The core permits only the all-rate/all-path TXAGC index-0 floor on the
-	 * frozen 2.4-GHz profile; every broader transmit mode remains closed. */
+	/* The core permits only its calibrated, worldwide-bounded legacy-rate
+	 * 2.4-GHz profile; every broader transmit mode remains closed. */
 	if (!rtl8822b_radio_active_scan_allowed(&adapter->radio,
 	    (uint8_t)channel)) {
 		error = EPERM;
@@ -3323,8 +3335,8 @@ rtl8822bu_scan_profile(struct wlan_scan_profile *profile)
 
 	memset(profile, 0, sizeof(*profile));
 	/* The initial table set and channel programming cover 2.4-GHz channels
-	 * 1--11.  The core permits only its all-rate/all-path index-0 TXAGC floor,
-	 * which is sufficient for a bounded wildcard probe and no general data. */
+	 * 1--11.  The core permits its calibrated, worldwide-bounded legacy-rate
+	 * TXAGC profile; HT, VHT, and 5-GHz transmission remain disabled. */
 	profile->channel_count = 11U;
 	for (channel = 1U; channel <= profile->channel_count; channel++) {
 		profile->channels[channel - 1U].channel = channel;

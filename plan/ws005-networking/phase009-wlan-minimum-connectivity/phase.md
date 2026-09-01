@@ -20,7 +20,7 @@ Prove one simple physical end-to-end communication path before expanding WLAN
 error handling. Use the direct root primitives to reach:
 
 ```text
-RTL8822BU attach -> wlan0 -> scan -> WPA2/CCMP carrier
+RTL8822BU attach -> wlan0 -> ifconfig up -> scan -> WPA2/CCMP carrier
                  -> dhcpc -> ping -> bounded fetch
 ```
 
@@ -51,14 +51,16 @@ identity and the first public failing boundary.
 Use one freshly built amd64 image containing `/sbin/wifi` and the separately
 selected pinned firmware package:
 
-1. Attach the exact p026 adapter and require exactly one usable `wlan0`.
+1. Attach the exact p026 adapter, require exactly one usable `wlan0`, and run
+   `/sbin/ifconfig wlan0 up` so the radio and firmware are started.
 2. Start a scan, wait within the existing finite scan budget, list the
    completed snapshot, and find the controlled WPA2/CCMP network.
 3. Connect once with `/sbin/wifi` and require authorized carrier.
 4. Run `/sbin/dhcpc wlan0` and require a usable IPv4 address and route.
 5. Ping the local gateway and one external address.
 6. Fetch one bounded object and verify a nonzero expected size or digest.
-7. Disconnect once and confirm carrier is down.
+7. Disconnect once, confirm carrier is down, and run
+   `/sbin/ifconfig wlan0 down`.
 
 The run is bounded and performed once. It does not deliberately cause link
 loss, rekey, firmware failure, device removal, concurrent stress, or a second

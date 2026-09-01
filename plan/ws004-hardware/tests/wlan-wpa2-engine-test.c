@@ -614,6 +614,92 @@ reach_message_3(struct wlan_wpa2_engine *engine, struct fake_radio *fake,
 }
 
 static void
+test_peer_response_precedes_tx_report(void)
+{
+	struct wlan_wpa2_engine engine;
+	struct fake_radio fake;
+	struct wlan_wpa2_profile profile = test_profile(1000U);
+	struct wlan_wpa2_eapol_key parsed;
+	uint8_t anonce[WLAN_WPA2_NONCE_LENGTH];
+	uint8_t ptk[WLAN_WPA2_PTK_LENGTH];
+	uint8_t gtk[WLAN_WPA2_GTK_LENGTH];
+	uint8_t eapol[WLAN_WPA2_EAPOL_FRAME_MAX];
+	uint8_t response[64];
+	size_t length;
+	uint64_t auth_cookie;
+	uint64_t assoc_cookie;
+	uint64_t m2_cookie;
+	uint64_t m4_cookie;
+
+	memset(&fake, 0, sizeof(fake));
+	assert(wlan_wpa2_engine_init(&engine, &fake_ops, &fake) == 0);
+	assert(wlan_wpa2_engine_start(&engine, 114U, &profile, 1U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_AUTH_TX);
+	auth_cookie = captured_cookie(&fake);
+
+	/* An unrelated response cannot retire the in-flight authentication. */
+	length = association_response(response, 0U);
+	assert(wlan_wpa2_engine_receive_management(&engine, 114U, response,
+	    length, 2U) == ESTALE);
+	assert(engine.tx_cookie_active == auth_cookie);
+
+	/* The exact authentication response proves that the AP received the TX,
+	 * even when its firmware completion has not reached the host yet. */
+	length = authentication_response(response, 0U);
+	assert(wlan_wpa2_engine_receive_management(&engine, 114U, response,
+	    length, 2U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_ASSOC_TX);
+	assoc_cookie = captured_cookie(&fake);
+	assert(assoc_cookie != auth_cookie &&
+	    engine.tx_cookie_active == assoc_cookie);
+	assert(wlan_wpa2_engine_report_tx(&engine, 114U, auth_cookie, 1, 0,
+	    2U) == ESTALE);
+
+	/* Association has the same ordering rule.  Its response leaves no active
+	 * association-request cookie while the engine waits for M1. */
+	length = association_response(response, 0U);
+	assert(wlan_wpa2_engine_receive_management(&engine, 114U, response,
+	    length, 3U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_MESSAGE_1 &&
+	    engine.tx_cookie_active == 0U && fake.association_set_calls == 1U);
+	assert(wlan_wpa2_engine_report_tx(&engine, 114U, assoc_cookie, 1, 0,
+	    3U) == ESTALE);
+
+	fill_bytes(anonce, sizeof(anonce), 0x21U);
+	length = message_1(eapol, 17U, anonce);
+	assert(wlan_wpa2_engine_receive_eapol(&engine, 114U, bssid, station,
+	    eapol, length, 4U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_MESSAGE_2_TX);
+	m2_cookie = captured_cookie(&fake);
+	assert(wlan_wpa2_eapol_key_parse(fake.frame, fake.frame_length,
+	    &parsed) == 0 && parsed.message == WLAN_WPA2_EAPOL_MESSAGE_2);
+	derive_test_ptk(parsed.nonce, anonce, ptk);
+
+	/* A valid M3 authenticates receipt of M2.  It may therefore replace that
+	 * pending report with M4, but M4 itself still requires TX completion. */
+	fill_bytes(gtk, sizeof(gtk), 0x91U);
+	length = message_3(eapol, 18U, anonce, ptk, gtk, 2U, 0U);
+	assert(wlan_wpa2_engine_receive_eapol(&engine, 114U, bssid, station,
+	    eapol, length, 5U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_MESSAGE_4_TX);
+	m4_cookie = captured_cookie(&fake);
+	assert(m4_cookie != m2_cookie && engine.tx_cookie_active == m4_cookie &&
+	    fake.pair_install_calls == 1U && fake.group_install_calls == 1U &&
+	    fake.authorize_on_calls == 0U);
+	assert(wlan_wpa2_engine_report_tx(&engine, 114U, m2_cookie, 1, 0,
+	    5U) == ESTALE);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_MESSAGE_4_TX &&
+	    fake.authorize_on_calls == 0U);
+	assert(wlan_wpa2_engine_report_tx(&engine, 114U, m4_cookie, 1, 0,
+	    6U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_AUTHORIZED &&
+	    fake.authorize_on_calls == 1U);
+	assert(wlan_wpa2_engine_stop(&engine) == 0);
+	assert(wlan_wpa2_engine_test_secrets_clear(&engine));
+	wlan_crypto_erase(ptk, sizeof(ptk));
+}
+
+static void
 test_complete_handshake_and_retransmission(void)
 {
 	struct wlan_wpa2_engine engine;
@@ -1134,6 +1220,7 @@ int
 main(void)
 {
 	test_argument_contract();
+	test_peer_response_precedes_tx_report();
 	test_complete_handshake_and_retransmission();
 	test_address_entropy_and_nonce_failures();
 	test_unrelated_management_is_benign();

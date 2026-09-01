@@ -80,3 +80,15 @@ mutation is rejected before argument access for a non-root caller, that root
 reaches the ordinary validation path, that the explicit query set remains
 available, and that future unknown/private commands default to the privileged
 side of the boundary.
+
+NET-T24 has one focused command-level entry point:
+
+```sh
+plan/ws005-networking/tests/run-wifi-command-test.sh
+```
+
+It includes the production `wifi` command with deterministic socket, ioctl,
+clock, sleep, and output doubles.  The fixture proves the exact six-command
+normal sequence and public WLAN request records, basic empty/oversize rejection
+before ioctl, and mutable argv/request secret clearing without relinking the
+lower WLAN, WPA, or driver stack.

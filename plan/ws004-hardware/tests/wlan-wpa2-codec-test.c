@@ -469,6 +469,8 @@ test_m3_plaintext_codec(void)
 {
 	uint8_t plaintext[64];
 	uint8_t modified[64];
+	uint8_t extended[64];
+	uint8_t rsn_extended[64];
 	uint8_t gtk[WLAN_WPA2_GTK_LENGTH];
 	struct wlan_wpa2_gtk parsed;
 	size_t length;
@@ -483,6 +485,46 @@ test_m3_plaintext_codec(void)
 	assert(wlan_wpa2_m3_plaintext_parse(plaintext, length, &parsed) == 0);
 	assert(parsed.key_index == 1U && memcmp(parsed.key, gtk,
 	    sizeof(gtk)) == 0);
+	/* Transition-mode APs may authenticate an RSN Extension Element in M3.
+	 * Preserve it as ignorable metadata without relaxing the selected RSN
+	 * profile or the unique GTK requirement. */
+	memcpy(rsn_extended, plaintext, 22U);
+	rsn_extended[22] = 244U;
+	rsn_extended[23] = 2U;
+	rsn_extended[24] = 0x20U;
+	rsn_extended[25] = 0x00U;
+	memcpy(rsn_extended + 26U, plaintext + 22U, 24U);
+	rsn_extended[50] = 221U;
+	rsn_extended[51] = 0U;
+	memset(rsn_extended + 52U, 0, 4U);
+	assert(wlan_wpa2_m3_plaintext_parse(rsn_extended, 56U, &parsed) == 0);
+	assert(parsed.key_index == 1U && memcmp(parsed.key, gtk,
+	    sizeof(gtk)) == 0);
+	rsn_extended[23] = 0U;
+	assert(wlan_wpa2_m3_plaintext_parse(rsn_extended, 56U, &parsed) ==
+	    EINVAL);
+	/* Authenticated M3 key data may carry extension KDEs that this profile
+	 * does not consume.  Preserve strict IE framing while skipping them. */
+	memcpy(extended, plaintext, 22U);
+	extended[22] = 221U;
+	extended[23] = 6U;
+	extended[24] = 0x00U;
+	extended[25] = 0x0fU;
+	extended[26] = 0xacU;
+	extended[27] = 9U;
+	extended[28] = 0U;
+	extended[29] = 0U;
+	memcpy(extended + 30U, plaintext + 22U, 24U);
+	extended[54] = 221U;
+	extended[55] = 0U;
+	assert(wlan_wpa2_m3_plaintext_parse(extended, 56U, &parsed) == 0);
+	assert(parsed.key_index == 1U && memcmp(parsed.key, gtk,
+	    sizeof(gtk)) == 0);
+	extended[24] = 1U;
+	assert(wlan_wpa2_m3_plaintext_parse(extended, 56U, &parsed) == EINVAL);
+	extended[24] = 0U;
+	extended[22] = 1U;
+	assert(wlan_wpa2_m3_plaintext_parse(extended, 56U, &parsed) == EINVAL);
 	assert(wlan_wpa2_m3_plaintext_build(plaintext, 47U, 1U, gtk,
 	    &length) == ENOSPC);
 	assert(wlan_wpa2_m3_plaintext_build(plaintext, sizeof(plaintext), 0U,

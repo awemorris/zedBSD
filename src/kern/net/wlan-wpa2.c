@@ -66,6 +66,15 @@ expected_management_response(const struct wlan_wpa2_engine *engine,
 	    address_equal(frame + 16U, engine->profile.bssid);
 }
 
+static void
+retire_implicitly_completed_tx(struct wlan_wpa2_engine *engine)
+{
+	/* A peer response for the exact transaction is stronger evidence than a
+	 * delayed firmware TX report.  Its cookie must no longer be able to advance
+	 * a later state; a report which arrives afterwards is deliberately stale. */
+	engine->tx_cookie_active = 0U;
+}
+
 static uint64_t
 bounded_deadline(const struct wlan_wpa2_engine *engine, uint64_t now_ticks)
 {
@@ -650,6 +659,7 @@ message_3_first(struct wlan_wpa2_engine *engine,
 	wlan_crypto_erase(&gtk, sizeof(gtk));
 	if (error != 0)
 		return fail(engine, error);
+	retire_implicitly_completed_tx(engine);
 	return build_message_4(engine, WLAN_WPA2_STATE_MESSAGE_4_TX,
 	    now_ticks);
 }
@@ -727,7 +737,8 @@ wlan_wpa2_engine_receive_management(struct wlan_wpa2_engine *engine,
 		return ESTALE;
 	if (!active_time_valid(engine, now_ticks))
 		return fail(engine, ETIMEDOUT);
-	if (engine->state == WLAN_WPA2_STATE_AUTH_RESPONSE) {
+	if (engine->state == WLAN_WPA2_STATE_AUTH_TX ||
+	    engine->state == WLAN_WPA2_STATE_AUTH_RESPONSE) {
 		/* Beacons, action frames, frames for another station, and a delayed
 		 * response from an older exchange are normal traffic.  Only a response
 		 * for this exact transaction may fail the connection on malformed body. */
@@ -740,9 +751,11 @@ wlan_wpa2_engine_receive_management(struct wlan_wpa2_engine *engine,
 			return fail(engine, error);
 		if (status != 0U)
 			return fail(engine, ECONNREFUSED);
+		retire_implicitly_completed_tx(engine);
 		return build_association(engine, now_ticks);
 	}
-	if (engine->state == WLAN_WPA2_STATE_ASSOC_RESPONSE) {
+	if (engine->state == WLAN_WPA2_STATE_ASSOC_TX ||
+	    engine->state == WLAN_WPA2_STATE_ASSOC_RESPONSE) {
 		if (!expected_management_response(engine, frame, length,
 		    WPA2_FC_ASSOC_RESPONSE))
 			return ESTALE;
@@ -752,6 +765,7 @@ wlan_wpa2_engine_receive_management(struct wlan_wpa2_engine *engine,
 			return fail(engine, error);
 		if (response.status != 0U)
 			return fail(engine, ECONNREFUSED);
+		retire_implicitly_completed_tx(engine);
 		/* As with key programming, failure does not prove that the
 		 * hardware rejected the request before changing state. */
 		engine->associated = 1U;
@@ -800,7 +814,8 @@ wlan_wpa2_engine_receive_eapol(struct wlan_wpa2_engine *engine,
 		return EBUSY;
 	}
 	if (key.message == WLAN_WPA2_EAPOL_MESSAGE_3) {
-		if (engine->state == WLAN_WPA2_STATE_MESSAGE_3)
+		if (engine->state == WLAN_WPA2_STATE_MESSAGE_2_TX ||
+		    engine->state == WLAN_WPA2_STATE_MESSAGE_3)
 			return message_3_first(engine, &key, frame, length,
 			    now_ticks);
 		if (engine->state == WLAN_WPA2_STATE_MESSAGE_4_TX ||

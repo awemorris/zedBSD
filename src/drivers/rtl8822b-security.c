@@ -329,6 +329,7 @@ rtl8822b_data_frame_prepare(const struct rtl8822b_radio *radio,
 		return EINVAL;
 	*wire_length = 0U;
 	if (radio == NULL || radio->state != RTL8822B_RADIO_STARTED ||
+	    radio->power_limits_valid == 0U ||
 	    wire == NULL || frame == NULL || frame_length < 24U ||
 	    frame_length > RTL8822B_DATA_MPDU_MAX || mac_id > 127U ||
 	    (encrypted != 0 && encrypted != 1) || cookie > 0x0fffU)

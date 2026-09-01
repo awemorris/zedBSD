@@ -94,6 +94,16 @@ struct rtl8822b_chip_identity {
 	uint8_t reserved;
 };
 
+#define RTL8822B_RF_PATH_COUNT 2U
+#define RTL8822B_2G_CCK_GROUP_COUNT 6U
+#define RTL8822B_2G_OFDM_GROUP_COUNT 5U
+
+struct rtl8822b_2g_tx_power {
+	uint8_t cck_base[RTL8822B_2G_CCK_GROUP_COUNT];
+	uint8_t bw40_base[RTL8822B_2G_OFDM_GROUP_COUNT];
+	int8_t ofdm_diff;
+};
+
 struct rtl8822bu_board_info {
 	struct rtl8822b_chip_identity chip;
 	uint8_t mac_address[6];
@@ -103,6 +113,7 @@ struct rtl8822bu_board_info {
 	uint8_t thermal_meter;
 	uint8_t rf_board_option;
 	uint8_t country_code[2];
+	struct rtl8822b_2g_tx_power tx_power_2g[RTL8822B_RF_PATH_COUNT];
 };
 
 /*
@@ -193,7 +204,8 @@ int rtl8822b_rx_aggregate_walk(const uint8_t *bytes, size_t length,
  * The staged order is power_on, caller-owned firmware download, start, RX
  * arm, and finally WLAN publication.  start never claims success for tables
  * alone: it completes the three-bulk-OUT/HS USB queues, minimum MAC timing,
- * MAC/BB/AGC/RF profile, channel 1, and an all-rate/path TXAGC index-0 floor.
+ * MAC/BB/AGC/RF profile, channel 1, and a factory-calibrated, worldwide-
+ * bounded legacy 2.4-GHz TXAGC profile.  HT/VHT TXAGC remains disabled.
  * The q058 extension admits the bounded legacy-rate management, EAPOL, and
  * data frames required by the WPA2-Personal/CCMP profile while HT, VHT,
  * aggregation, and rate adaptation remain outside this profile.  A channel

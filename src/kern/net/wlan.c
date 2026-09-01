@@ -1668,8 +1668,10 @@ ioctl_bss(struct wlan_station *station, struct wlan_bss_request *request)
 static int
 ioctl_connect(struct wlan_station *station, struct wlan_connect_request *request)
 {
-	static const uint8_t basic_rates[4] = {
-		0x82U, 0x84U, 0x8bU, 0x96U
+	static const uint8_t supported_rates[12] = {
+		0x82U, 0x84U, 0x8bU, 0x96U,
+		0x0cU, 0x12U, 0x18U, 0x24U,
+		0x30U, 0x48U, 0x60U, 0x6cU
 	};
 	uint8_t credential[WLAN_PASSPHRASE_STORAGE];
 	struct wlan_bss_record selected;
@@ -1749,8 +1751,8 @@ ioctl_connect(struct wlan_station *station, struct wlan_connect_request *request
 	memcpy(profile.bssid, selected.bssid, sizeof(profile.bssid));
 	memcpy(profile.ssid, selected.ssid, selected.ssid_length);
 	profile.ssid_length = selected.ssid_length;
-	memcpy(profile.rates, basic_rates, sizeof(basic_rates));
-	profile.rate_count = sizeof(basic_rates);
+	memcpy(profile.rates, supported_rates, sizeof(supported_rates));
+	profile.rate_count = sizeof(supported_rates);
 	profile.channel = selected.channel;
 	profile.capability = (uint16_t)selected.capability;
 	profile.listen_interval = 1U;

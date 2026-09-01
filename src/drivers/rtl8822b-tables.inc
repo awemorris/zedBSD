@@ -59,18 +59,31 @@
  * condition words, or a BB/RF delay pseudo-address.  The consumer must parse
  * these records rather than treating every pair as a write.
  *
- * Deliberately excluded source arrays:
+ * The normal-path WPA2 extension uses the following mechanically reduced
+ * 2.4-GHz legacy-rate data from those arrays.  Full HT/VHT and 5-GHz tables
+ * remain deliberately excluded:
  *   rtw8822b_bb_pg_type2/type3/type5       46 records each
  *   rtw8822b_txpwr_lmt_type0/type2/type5 585 records each
  *
  * The RFE map selects BB-PG/TX-limit types 2/2, 3/0, and 5/5 for RFE options
  * 2, 3, and 5.  Those records are transmit-power-by-rate and regulatory power
- * ceilings, not additional receive/channel initialization tables.  P028 keeps
- * active-probe TXAGC at the absolute index-0 floor and disables general data,
- * HT, and VHT transmission, so importing those unused tables would widen the
- * licensed data surface without making the bounded scan safer.  Their source
- * counts and immutable hashes remain recorded here for a later TX-power Phase.
+ * ceilings, not additional receive/channel initialization tables.  For
+ * channels 1--11 the three supported RFE profiles have identical legacy 2G
+ * power-by-rate values.  The arrays below retain their BCD-decoded per-rate
+ * offsets and the minimum FCC/ETSI/MKK ceiling (worldwide-safe until a full
+ * regulatory-domain engine exists).  Their source counts and immutable hashes
+ * remain recorded here for a later full TX-power Phase.
  */
+
+static const int8_t rtw8822b_2g_legacy_rate_offset[12] = {
+	6, 4, 2, 0, 14, 12, 10, 8, 6, 4, 2, 0
+};
+
+/* Absolute table ceilings for CCK and OFDM, indexed by channel minus one. */
+static const uint8_t rtw8822b_2g_legacy_world_limit[11][2] = {
+	{28, 26}, {28, 30}, {28, 30}, {28, 30}, {28, 30}, {28, 30},
+	{28, 30}, {28, 30}, {28, 30}, {28, 30}, {28, 28}
+};
 
 static const uint32_t rtw8822b_mac[] = {
 	0x029, 0x000000F9,

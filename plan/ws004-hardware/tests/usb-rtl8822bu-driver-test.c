@@ -271,6 +271,18 @@ fake_efuse_block(size_t *offset, unsigned block, const uint8_t bytes[8])
 static void
 fake_efuse_make_board(void)
 {
+	static const uint8_t block2[8] = {
+		32U, 33U, 34U, 35U, 36U, 37U, 30U, 31U
+	};
+	static const uint8_t block3[8] = {
+		32U, 33U, 34U, 0xaeU, 0xffU, 0xffU, 0xffU, 0xffU
+	};
+	static const uint8_t block7[8] = {
+		0xffU, 0xffU, 28U, 29U, 30U, 31U, 32U, 33U
+	};
+	static const uint8_t block8[8] = {
+		26U, 27U, 28U, 29U, 30U, 0xb3U, 0xffU, 0xffU
+	};
 	static const uint8_t block23[8] = {
 		0x7f, 0x22, 0x19, 0xff, 0xff, 0xff, 0xff, 0xff
 	};
@@ -289,6 +301,10 @@ fake_efuse_make_board(void)
 	size_t offset = 0U;
 
 	memset(fake_efuse, 0xff, sizeof(fake_efuse));
+	fake_efuse_block(&offset, 2U, block2);
+	fake_efuse_block(&offset, 3U, block3);
+	fake_efuse_block(&offset, 7U, block7);
+	fake_efuse_block(&offset, 8U, block8);
 	fake_efuse_block(&offset, 23U, block23);
 	fake_efuse_block(&offset, 24U, block24);
 	fake_efuse_block(&offset, 25U, block25);
@@ -395,7 +411,8 @@ fake_transport_reset(void)
 	fake_store16(RTL8822BU_REG_SYS_FUNC_EN, 0x0440U);
 	fake_store16(RTL8822BU_REG_SYS_CLKR, 0x4080U);
 	fake_store32(RTL8822BU_REG_LDO_EFUSE_CTRL, 0x80000355U);
-	fake_store32(RTL8822BU_REG_SYS_CFG1, 0x00800000U);
+	/* RTL8822BU is a two-path part; exercise both EFUSE power records. */
+	fake_store32(RTL8822BU_REG_SYS_CFG1, 0x08800000U);
 	fake_registers[RTL8822BU_REG_RSV_CTRL + 1U] =
 	    RTL8822BU_WCPU_IO_ENABLE | 0xa0U;
 	/* The exact-radio core starts from a genuinely powered-off device. */
@@ -990,10 +1007,17 @@ drv_usb_bulk(struct drv_usb_device *device, struct drv_usb_endpoint *endpoint,
 		if ((fake_le32(bytes + 8U) & (1U << 19)) != 0U) {
 			last_tx_sequence = (uint8_t)(fake_le32(bytes + 24U) &
 			    0xfcU);
-			if (qsel == 18U)
+			if (qsel == 18U) {
+				/* The fixture BSS is channel 6.  Management traffic
+				 * must use the 2.4 GHz 1 Mbps basic rate; EAPOL is a
+				 * data frame and retains the separate data policy. */
+				if ((fake_le16(bytes +
+				    RTL8822B_DATA_TX_DESCRIPTOR_SIZE) & 0x000cU) == 0U)
+					assert((fake_le32(bytes + 16U) & 0x7fU) == 0U);
 				station_descriptors_checked++;
-			else
+			} else {
 				data_descriptors_checked++;
+			}
 		} else {
 			assert(qsel == 18U);
 			management_descriptors_checked++;
@@ -1809,6 +1833,12 @@ test_attach_open_detach(void)
 	assert(rtl8822bu_attach(&interface, &rtl8822bu_ids[0]) == 0);
 	adapter = interface.driver_data;
 	assert(adapter != NULL && adapter->ready);
+	assert(adapter->board.tx_power_2g[0].cck_base[0] == 32U);
+	assert(adapter->board.tx_power_2g[0].bw40_base[0] == 30U);
+	assert(adapter->board.tx_power_2g[0].ofdm_diff == -2);
+	assert(adapter->board.tx_power_2g[1].cck_base[0] == 28U);
+	assert(adapter->board.tx_power_2g[1].bw40_base[0] == 26U);
+	assert(adapter->board.tx_power_2g[1].ofdm_diff == 3);
 	assert(net_created && station_attached);
 	assert(open_during_create_error == ENODEV);
 	assert(strcmp(fake_net_device.name, "wlan0") == 0);

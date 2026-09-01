@@ -125,6 +125,7 @@ radio_init(struct rtl8822b_radio *radio, struct fake_transport *fake)
 	memset(radio, 0, sizeof(*radio));
 	radio->state = RTL8822B_RADIO_STARTED;
 	radio->channel = 1U;
+	radio->power_limits_valid = 1U;
 	radio->transport.context = fake;
 	radio->transport.read = fake_read;
 	radio->transport.write = fake_write;
@@ -212,6 +213,10 @@ test_descriptor(void)
 	frame[0] = 0x08U;
 	frame[1] = 0x41U;
 	frame[4] = 2U;
+	radio.power_limits_valid = 0U;
+	assert(rtl8822b_data_frame_prepare(&radio, wire, sizeof(wire), frame,
+	    sizeof(frame), 1, 7U, 0x321U, &length) == EINVAL);
+	radio.power_limits_valid = 1U;
 	assert(rtl8822b_data_frame_prepare(&radio, wire, sizeof(wire), frame,
 	    sizeof(frame), 1, 7U, 0x321U, &length) == 0);
 	assert(length == 48U + sizeof(frame));
