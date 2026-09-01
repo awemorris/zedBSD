@@ -111,9 +111,10 @@ error without a drop, and administrative `CANCELLED` adds none. Focused,
 sanitizer, analyzer, retained-regression, configured x86 build, and fresh OVMF
 q35/xHCI USB-root exact-login gates pass. Q055 then closed p026 with the exact
 Japan-unit descriptor and explicit optional-package decision and completed
-p027's generic WLAN UAPI/common core before any Realtek register access. The
-next Queue continues the WLAN priority with the independently testable
-RTL8822BU pre-radio substrate. The remaining Noct
+p027's generic WLAN UAPI/common core before any Realtek register access. Q056
+completed p036's independently testable RTL8822BU pre-radio substrate and
+per-device firmware hierarchy. Q057 now continues the WLAN priority with
+p028's BSD-3-Clause radio-table import and conservative scan. The remaining Noct
 compile/application CLI defect is unrelated. The
 archived q043 PC-98 fixed-read and exact-mouse
 paths both pass locally, and their remaining external resume facts do not
@@ -384,8 +385,8 @@ actually warranted.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q050 completed both VFS prerequisites discovered by q041 | `ws001-p022` and `ws001-p023` complete with production-linked faults and abrupt-stop/remount evidence | Retain p022/p023 as regressions; their dependency consumer resumes in WS005 p005 | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; restore its Make-owned Noct gate through ws008-p010 | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; q055 completed the exact Japan Archer intake and generic WLAN UAPI/common core after q054 completed NCM asynchronous-TX accounting. NVMe software and physical CDC NCM Ethernet are complete | `ws004-p010`--`p020`, p022--p024, p026-p027, and p031--p033 complete; p021 automatic/runtime milestone passes | Continue the RTL8822BU implementation chain; the recorded ECM/Latitude/HID and same-endpoint multi-URB follow-ups do not block it | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WLAN | Active; q055 completed the WS004 WLAN common-core dependency after q053's p002 contract synchronization | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, frozen design contract, exact first-radio identity, and common WLAN control ABI are complete | Continue the prioritized RTL8822BU substrate, then implement the p004 primitive before p006 protocol composition | [WS005](ws005-networking/ws.md) |
+| `ws004` | Hardware expansion | Active; q056 completed the RTL8822BU pre-radio substrate after q055 completed the exact Japan Archer intake and generic WLAN core. q057 now implements p028 scan; NVMe software and physical CDC NCM Ethernet are complete | `ws004-p010`--`p020`, p022--p024, p026-p027, p031--p033, and p036 complete; p028 is in progress | Complete q057/p028, then continue p029--p030; RTL8822CE and Intel AX201 remain later independent targets | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WLAN | Active; q056 supplied the WS004 pre-radio substrate and q057 now supplies its radio-table/scan layer after q055 completed the common WLAN dependency | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, frozen design contract, exact first-radio identity, common WLAN control ABI, and p036 are complete | Complete q057/p028, then implement the p004 primitive before p006 protocol composition | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; p009 still waits for accepted WS008 userland | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked; accepted host SHA restores runtime `--path` and passes the ordinary production build plus zedbuild byte primitives, while target packages remain separately disabled | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 is uncleared only at unrelated `NOCT-T082` compile/application parsing, and p009 remains separately target-blocked | Resume p010 only from a maintainer-reviewed commit which fixes `--compile --app --path=...`; resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
@@ -442,6 +443,7 @@ WS003 hardware inventory
        +-- NVMe
        +-- RTL8822BU USB WLAN -- WS005 wifi/networkd (first WLAN target)
        +-- RTL8822CE PCI WLAN (later target)
+       +-- Intel AX201 WLAN (later target)
        +-- i915 prerequisites -- WS014 GPU/Vulkan/GLES -- WS007 Wayland
 
 WS004 xHCI -- WS006 USB HID -- evdev
@@ -523,9 +525,11 @@ priority one.
    menu selection.
 4. Implement the Archer T3U Nano USB WLAN path across WS004 and WS005. The
    dependency order is p026 exact-unit/firmware intake, p027 generic WLAN core,
-   WS005 privilege/command/profile/protocol prerequisites, p028--p030 radio and
-   WPA2 lifecycle, then WS005 orchestration and the single shared hardware
-   acceptance. The SSH host `awe@10.0.10.25` may be used for QEMU USB
+   the completed p036 pre-radio substrate with its individually selected
+   firmware package, WS005 privilege/command/profile/protocol prerequisites,
+   q057 p028 scan, p029--p030 WPA2 lifecycle, then WS005 orchestration and the
+   single shared hardware acceptance. RTL8822CE and Intel AX201 remain later,
+   independent targets. The SSH host `awe@10.0.10.25` may be used for QEMU USB
    passthrough of the connected adapter after automatic gates pass.
 5. Complete the `/sbin/net` WLAN stack in WS005 through the fixed
    `net` -> `networkd` -> `ifconfig`/`wifi`/`dhcpc` topology.
@@ -575,8 +579,9 @@ until stopped or no judgment-free Phase remains.
 | Initial Secure Boot scope | WS003 | Resolved: use UEFI with Secure Boot disabled; signing/key enrollment deferred and not required for NVMe |
 | USB Ethernet interface descriptors and, for vendor-specific interfaces, VID:PID/controller family | WS003/WS004/WS005 | Choose CDC ECM/NCM class frontend or Realtek-family frontend for HW-12/NET-10; ACM is inapplicable |
 | USB Ethernet asynchronous TX statistics | WS004 p017 | Resolved and implemented by q054 for NCM: packets/bytes count driver acceptance; later `STALL`, `TIMEOUT`, `DISCONNECTED`, or `IO_ERROR` adds exactly one `tx_errors` and no `tx_dropped`; administrative `CANCELLED` adds neither. ECM is a separate future consumer of the common helper |
-| First USB WLAN identity | WS004/WS005 | Resolved in q055: the Japan-labelled unit has no printed hardware revision, so its retained exact `2357:012e`, `bcdDevice=2.10`, `ff/ff/ff`, five-endpoint descriptor is authoritative. Firmware remains a separately selected `userland/packages/wifi-firmware/` package fetched from one immutable GitHub revision and hash-verified; V1.0 remains documentary family evidence only |
+| First USB WLAN identity | WS004/WS005 | Resolved in q055 and refined for q056: the Japan-labelled unit has no printed hardware revision, so its retained exact `2357:012e`, `bcdDevice=2.10`, `ff/ff/ff`, five-endpoint descriptor is authoritative. Firmware is the separately selected `userland/firmware/rtl8822b/` entry, fetched from one immutable GitHub revision and hash-verified; V1.0 remains documentary family evidence only |
 | Built-in PCI WLAN identity | WS004/WS005 | Resolved as RTL8822CE `10ec:c822`, subsystem `10ec:c130`; retained as a later target after the Archer-first sequence |
+| WLAN firmware source layout | WS004/WS005 | Resolved: menuconfig divides userland into Base, X11, Firmware, and Packages. Per-device firmware entries live under `userland/firmware/rtl8822b`, future `rtl8822c`, and future `intelax201`, fetch only when selected, install bytes under `/lib/firmware`, and retain the applicable license. No common RTL88 chip layer is introduced before demonstrated commonality |
 | WLAN privilege and process topology | WS005 | Resolved for v1: one `root:network` mode-0660 `/run/networkd.sock`, kernel-attested connection-time peer credentials, `net` as user/desktop frontend, root `networkd` as orchestrator, and fixed primitive `ifconfig`/`wifi`/`dhcpc` children; no resident/pluggable `wpa` child |
 | WLAN protocol-state ownership | WS004/WS005 | Resolved for v1: a device-independent kernel WLAN layer retains scan/authentication/association/WPA2 key and rekey/controlled-port state after one-shot `/sbin/wifi` exits; the RTL8822BU driver owns only hardware/firmware-specific radio, USB, frame, channel, and key-slot operations |
 | `/etc/net.conf` v1 grammar and empty-collection syntax | WS011 | Parser and boot migration |

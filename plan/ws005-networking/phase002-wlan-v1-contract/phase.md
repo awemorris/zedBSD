@@ -317,6 +317,6 @@ physical fact and decision: the product label is `Archer T3U Nano`, the region
 is Japan, and no separate hardware revision is printed. Absence is recorded
 rather than inferred from `bcdDevice`; the exact q040 descriptor is
 authoritative for this unit. The optional firmware will be separately acquired
-and installed through the p028 `userland/packages/wifi-firmware/` recipe;
+and installed through the p036 `userland/firmware/rtl8822b/` recipe;
 neither that package decision nor the exact-unit identity changes the frozen
 WLAN control topology, limits, or ownership recorded by q053.

@@ -141,8 +141,8 @@ forbids endorsement and reverse engineering/decompilation/disassembly, and
 contains the stated limited patent license. It is not represented as zlib-
 licensed base-system source.
 
-The approved optional package identity and source root are `wifi-firmware` and
-`userland/packages/wifi-firmware/`. P028 will add the recipe and manifest with
+The approved optional entry identity and source root are
+`rtl8822b-firmware` and `userland/firmware/rtl8822b/`. P036 adds the recipe and manifest with
 the frozen mirror revision, hashes, provenance, and update rule, but never the
 Realtek blob. Once implemented, only explicit selection/build of that package
 downloads the unmodified blob and license into ignored build storage, verifies

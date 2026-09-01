@@ -4,8 +4,8 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p028`
 
-Status: planned; `ws004-p026` complete; depends on completion of
-`ws004-p027`; not queued
+Status: in progress (`q057`); `ws004-p026`, `ws004-p027`, and `ws004-p036`
+complete; BSD-3-Clause table policy resolved
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -13,10 +13,11 @@ Tests: [WS004 test index](../tests/README.md)
 
 ## Objective
 
-Bind the descriptor-confirmed Archer T3U Nano as an RTL8822BU USB WLAN device,
-load the separately packaged and pinned 8822B firmware, initialize the minimum
-safe station-mode radio profile, and prepare truthful scan results through the
-generic WLAN UAPI. It stops before authentication, association, key
+Complete the descriptor-confirmed Archer T3U Nano RTL8822BU path after p036's
+USB, firmware, parser, and lifetime substrate: import the selected
+BSD-3-Clause initialization tables, initialize the minimum safe station-mode
+radio profile, and produce truthful scan results through the generic WLAN
+UAPI. It stops before authentication, association, key
 installation, encrypted data, DHCP, or 5-GHz operation. Its automatic
 implementation may feed p029/p030 without an independent hardware run; the
 first zedBSD radio observation is the later combined WS005 p008 checkpoint.
@@ -33,11 +34,15 @@ first zedBSD radio observation is the later combined WS005 p008 checkpoint.
   acquisition source, and install path are frozen.
 - `ws004-p027`: generic WLAN UAPI, scan cache, operation generations, common
   state, and fake-driver contract.
+- `ws004-p036`: exact USB binding, optional firmware package, immutable loader,
+  register/efuse/firmware/RX codecs, DDMA model, endpoint lifetime, serialized
+  net-device/station publication, and synthetic p027 scan integration.
 
-The exact-device and firmware-package decisions in `p026` are complete. The
-remaining Queue prerequisite is successful completion of `p027`'s common scan
-state machine, lifetime contract, and automatic gates. It is not added to the
-current implementation Queue by this plan.
+The exact-device and firmware-package decisions in `p026`, p027 common layer,
+and BSD-3-Clause table policy are complete. The remaining Queue prerequisite
+was successful completion of p036's pre-radio substrate. That dependency is
+complete. P028 now owns q057's licensed table import, production radio
+programming, channel operation, and real scan path.
 
 ## Frozen initial radio profile
 
@@ -133,7 +138,7 @@ must remain `EBUSY`; same-endpoint multi-URB rings are the separate deferred
 block this Phase.
 
 The driver and kernel never acquire firmware from a network. Only explicit
-selection/build of `userland/packages/wifi-firmware/` fetches the unmodified
+selection/build of `userland/firmware/rtl8822b/` fetches the unmodified
 blob and root `LICENCE.rtlwifi_firmware.txt` from
 `https://github.com/endlessm/linux-firmware.git` at
 immutable revision `2f56219d20e4becccd718963fc3bcc671c543ce5`; the package
@@ -245,16 +250,17 @@ source:
 - <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/realtek/rtw88/rtw8822b.c>
 - <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/realtek/rtw88/usb.c>
 
-Production RF initialization has a separate provenance checkpoint. The large
-RTL8822B MAC/BB/AGC/RF/RFE tables are needed even for passive reception; the
-driver must not pretend that firmware alone initializes the receive path. The
-public Linux table is dual-licensed `GPL-2.0 OR BSD-3-Clause`, while an
-independent permissive implementation or public register guide was not found.
-Before adding those tables, human review selects either a notice-preserving
-BSD-3-Clause import or a clean-room transaction trace. This decision does not
-block the firmware package, exact USB binding, register transport, efuse and
-firmware parsers, DDMA model, RX aggregate parser, endpoint lifecycle, or
-synthetic common-core scan integration.
+Production RF initialization uses the user-selected BSD-3-Clause branch of the
+upstream dual license. The large RTL8822B MAC/BB/AGC/RF/RFE tables are needed
+even for passive reception; the driver must not pretend that firmware alone
+initializes the receive path. Import only the data representation required by
+zedBSD into a dedicated `.inc` file whose SPDX identifier, Realtek copyright,
+full BSD-3-Clause notice, pinned upstream commit/path, and source SHA-256 are
+kept separate from the surrounding Zlib driver. Mechanical conversion must be
+reproducible and must not mix Linux control-flow implementation into the
+licensed data file. Binary redistributions retain the notice in project
+documentation/materials as required by BSD-3-Clause. Any later table refresh is
+a separately reviewed source/hash update, not an unpinned copy from `master`.
 
 ## Physical-evidence handoff
 
@@ -277,7 +283,7 @@ the user to repeat an attach or scan.
 
 - Production binding logic accepts only the descriptor-confirmed `2357:012e`
   tuple and the fake-USB fixture publishes one stable `wlanN` identity.
-- The `wifi-firmware` package-only acquisition checks and firmware
+- The `rtl8822b-firmware` package-only acquisition checks and firmware
   transport/model start only the separately installed, pinned 8822B image with
   truthful provenance/version/digest diagnostics; every negative case fails
   atomically.
@@ -306,8 +312,7 @@ RTL8822CE are outside this Phase.
 Stop the production-radio portion if the adapter descriptor differs from
 `p026`, efuse requires an unknown RFE/calibration table, the pinned blob is
 incompatible, legal 2.4-GHz transmit limits cannot be derived conservatively,
-firmware scan offload is mandatory, the PHY-table provenance decision above
-is still pending, or correct USB teardown requires changing p011/p015
+firmware scan offload is mandatory, or correct USB teardown requires changing p011/p015
 ownership. Continue every independently testable pre-radio item before
 recording that boundary; do not broaden the USB match, claim a tableless radio,
 or enable unrestricted channels as a workaround.

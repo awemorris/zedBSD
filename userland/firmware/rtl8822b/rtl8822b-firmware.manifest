@@ -1,0 +1,29 @@
+# zedBSD optional firmware package manifest
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+package=rtl8822b-firmware
+package-version=30.20.0
+installed-firmware=/lib/firmware/rtw88/rtw8822b_fw.bin
+installed-license=/usr/share/licenses/rtl8822b-firmware/LICENCE.rtlwifi_firmware.txt
+
+acquisition-repository=https://github.com/endlessm/linux-firmware.git
+acquisition-revision=2f56219d20e4becccd718963fc3bcc671c543ce5
+acquisition-firmware-path=rtw88/rtw8822b_fw.bin
+acquisition-firmware-size=161240
+acquisition-firmware-sha256=a72da690597bfa99d8eb6fc2ab090d18d8ad92ac2befd35db1c9e3662d8d8418
+acquisition-license-path=LICENCE.rtlwifi_firmware.txt
+acquisition-license-size=2115
+acquisition-license-sha256=a61351665b4f264f6c631364f85b907d8f8f41f8b369533ef4021765f9f3b62e
+acquisition-whence-path=WHENCE
+acquisition-whence-size=364259
+acquisition-whence-sha256=54474263d8418a29e7b11485e79936d15a81dd75381308b29cadf2d53b78aa51
+
+official-repository=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+official-revision=458e40fdbb4dad5134ec230a42df21aea1b5baf8
+official-whence-sha256=34f954c7d068ec4fd5fcc216471912dd3cf40ff60a7ffa8d06ff6f9b5999551f
+
+redistribution=unmodified-binary-only
+redistribution-notice=Copyright and disclaimer must accompany the unmodified binary; consult the exact installed Realtek license
+license=Realtek binary firmware terms in the installed license file
+source-tree-blob=absent
+runtime-network-fetch=forbidden

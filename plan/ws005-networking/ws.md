@@ -4,7 +4,9 @@ Last updated: 2026-09-01
 
 WSID: `ws005`
 
-Status: active; q029 p001 completed the first physical USB-Ethernet path,
+Status: active; q056 completed the RTL8822BU pre-radio substrate and q057 now
+implements the p028 radio-table/scan layer after
+q029 p001 completed the first physical USB-Ethernet path,
 q040 completed p003's AF_UNIX/network authorization foundation, q051 completed
 p005's real-command guest and abrupt-stop/remount acceptance, and q053 completed
 p002's documentation-only WLAN v1 contract synchronization
@@ -25,12 +27,13 @@ DHCP, ping, and external-fetch path remains passing.
 
 Resume point: p002, p003, and p005 are complete. WS004 p026 is also complete:
 the purchased Japan-market Archer has no printed revision, its retained exact
-descriptor is authoritative, and the separately installed `wifi-firmware`
+descriptor is authoritative, and the separately installed `rtl8822b-firmware`
 package boundary is frozen. Q055 completed the generic WLAN core/fake radio in
-`ws004-p027`; `ws005-p004` is now dependency-ready, while the current priority
-continues with the independent RTL8822BU pre-radio substrate before returning
-to the command stack. P006 then consumes the completed p003/p005 contracts plus
-that primitive.
+`ws004-p027`, and q056 completed the independent RTL8822BU pre-radio substrate
+in `ws004-p036`. `ws005-p004` is dependency-ready, while q057 first completes
+`ws004-p028`'s BSD-3-Clause radio-table import and conservative scan before
+returning to the command stack. P006 then consumes the completed p003/p005
+contracts plus that primitive.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -278,7 +281,7 @@ rather than being parsed as a WLAN request.
 | NET-24 | Superseded | Pluggable WPA backend family | Fixed primitive topology | No implementation |
 | NET-25 | Complete as p002 (`q053`) | WLAN v1 contract freeze | User decisions recorded above | P-book and dependent design records are synchronized; no implementation result claimed |
 | NET-26 | Planned as p003 | AF_UNIX peer credentials and one-socket authorization | NET-25 | Credential spoof/race/group/privilege fixtures pass |
-| NET-27 | WS004 p027 complete (`q055`); p004 dependency-ready | Primitive `/sbin/wifi` and stable WLAN ioctl contract | NET-25, common WLAN fixture | search/list/status/connect/disconnect pass without DHCP/persistence |
+| NET-27 | WS004 p027/p036 complete (`q055`/`q056`); p028 active in q057; p004 dependency-ready | Primitive `/sbin/wifi` and stable WLAN ioctl contract | NET-25, common WLAN fixture | search/list/status/connect/disconnect pass without DHCP/persistence |
 | NET-28 | Complete as p005 (`q051`) | System/per-user `wifi.conf` and `set-key` | NET-25 | ownership/mode/symlink/locking/atomicity/redaction and abrupt-stop/remount tests pass |
 | NET-29 | Planned as p006 | `ZNV2`, peer authorization, `wifi` child secret-FD bridge | NET-26--NET-28 | malformed/auth/timeout/cancel/crash fixtures pass |
 | NET-30 | Planned as p007 | Requested high-level `net wifi` operations | NET-29, WS004 WLAN fixture | full fake-device association/DHCP/down transaction passes |

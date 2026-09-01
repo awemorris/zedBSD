@@ -135,7 +135,7 @@ all acceptance-relevant inputs:
 - kernel and, if independently replaceable, `/sbin/net`, `/sbin/networkd`,
   `/sbin/ifconfig`, `/sbin/wifi`, and `/sbin/dhcpc` digests;
 - build configuration and driver match data;
-- the separately installed `wifi-firmware` package manifest, installed
+- the separately installed `rtl8822b-firmware` manifest, installed
   firmware path `/lib/firmware/rtw88/rtw8822b_fw.bin`, 161,240-byte size,
   version 30.20.0, SHA-256
   `a72da690597bfa99d8eb6fc2ab090d18d8ad92ac2befd35db1c9e3662d8d8418`,
@@ -284,7 +284,7 @@ they do not reopen product policy or add human checkpoints:
   `bcdDevice`, interface, endpoint signature, and firmware identity. A mismatch
   stops the one provisional run and returns to a new identity Phase; it never
   widens this target to RTL8828BU or another descriptor profile or unit.
-- Import the separately installed `wifi-firmware` package from p026/p028. Its
+- Import the separately installed `rtl8822b-firmware` entry from p026/p036. Its
   acquisition manifest names only
   `https://github.com/endlessm/linux-firmware.git` revision
   `2f56219d20e4becccd718963fc3bcc671c543ce5`; the evidence retains official

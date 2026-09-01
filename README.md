@@ -47,6 +47,7 @@ make help              # show a short command summary
 | `userland/base/`     | Base programs                                          |
 | `userland/comp/`     | Compilers                                              |
 | `userland/X11/`      | Xzed programs                                          |
+| `userland/firmware/` | Optional per-device firmware packages                  |
 | `userland/packages/` | `/usr/bin` third-party packages                        |
 | `libc/`              | zedBSD `libc`                                          |
 | `platform/`          | Target Makefiles and tools                             |

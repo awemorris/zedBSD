@@ -10,6 +10,7 @@
 #   userland/base/       base-system programs and libc glue
 #   userland/comp/       compilers
 #   userland/X11/        X11 servers and applications
+#   userland/firmware/   optional device firmware, selected per device
 #   userland/packages/   optional language runtimes, editors, and packages
 #   libc/             freestanding libc subset
 #   src/softfloat/    zedBSD integer-only soft-float/compiler runtime
@@ -45,7 +46,7 @@ ZEDBSD_CONFIG ?= config.mk
 # menuconfig and help remain available before the first configuration is
 # saved.  Every build target requires the target information from config.mk.
 ZEDBSD_CONFIG_OPTIONAL_GOALS := menuconfig help list-user-programs \
-	menuconfig-host-test
+	menuconfig-host-test rtl8822b-firmware-fixture-cache
 ifeq ($(strip $(ZEDBSD_PLATFORM)),)
 ifneq ($(filter-out $(ZEDBSD_CONFIG_OPTIONAL_GOALS),$(MAKECMDGOALS)),)
 $(error config.mk is missing or invalid; run 'make menuconfig')
@@ -130,6 +131,7 @@ CONFIG_DRIVER_USB_STORAGE ?= y
 CONFIG_DRIVER_USB_CDC_NCM ?= y
 CONFIG_DRIVER_USB_CDC_ECM ?= y
 CONFIG_DRIVER_USB_HID ?= y
+CONFIG_DRIVER_USB_RTL8822BU ?= n
 CONFIG_KERNEL_TEST_CHECKPOINTS ?= n
 CONFIG_KERNEL_USB_HID_CHECKPOINT ?= n
 CONFIG_BUF_CACHE_KIB ?= 0
@@ -168,11 +170,16 @@ ZEDBSD_TOPLEVEL_BUILD := 1
 include $(USERLAND_PACKAGE_MAKEFILES)
 ZEDBSD_ALL_USER_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
 	$(if $(filter y,$(USERLAND_$(program)_SELECTABLE)),$(program)))
+ZEDBSD_DEFAULT_USER_PROGRAMS := $(foreach program,$(ZEDBSD_ALL_USER_PROGRAMS),\
+	$(if $(filter y,$(USERLAND_$(program)_DEFAULT)),$(program)))
 USERLAND_BASIC_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
 	$(if $(filter basic,$(USERLAND_$(program)_CLASS)),$(program)))
 USERLAND_NETWORK_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
 	$(if $(filter network,$(USERLAND_$(program)_CLASS)),$(program)))
-ZEDBSD_USER_PROGRAMS ?= $(ZEDBSD_ALL_USER_PROGRAMS)
+# A valid legacy/minimal config may omit ZEDBSD_USER_PROGRAMS.  Honor package
+# defaults in that case; selecting every optional entry would turn a normal
+# offline build into an implicit source download.
+ZEDBSD_USER_PROGRAMS ?= $(ZEDBSD_DEFAULT_USER_PROGRAMS)
 
 # Package dependencies are named by their stable path below
 # userland/packages (for example, editors/remacs -> lang/noct).  Resolve the
@@ -232,7 +239,7 @@ FORCE_ZEDBSD_GRAPHICS_CONFIG:
 $(ZEDBSD_GRAPHICS_CONFIG_STAMP): FORCE_ZEDBSD_GRAPHICS_CONFIG
 	@mkdir -p $(dir $@)
 	@value='CONFIG_DRIVER_GRAPHICS_DEVICE=$(CONFIG_DRIVER_GRAPHICS_DEVICE)'; \
-		if ! test -f $@ || ! grep -Fqx "$$value" $@; then \
+		if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
 			printf '%s\n' "$$value" > $@.tmp; \
 			mv $@.tmp $@; \
 		fi
@@ -407,8 +414,20 @@ ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_USB_CDC_NCM=$(if $(filter y,$(CONFIG_DRIVER_USB_CDC_NCM)),1,0) \
 	-DCONFIG_DRIVER_USB_CDC_ECM=$(if $(filter y,$(CONFIG_DRIVER_USB_CDC_ECM)),1,0) \
 	-DCONFIG_DRIVER_USB_HID=$(if $(filter y,$(CONFIG_DRIVER_USB_HID)),1,0) \
+	-DCONFIG_DRIVER_USB_RTL8822BU=$(if $(filter y,$(CONFIG_DRIVER_USB_RTL8822BU)),1,0) \
 	-DCONFIG_KERNEL_USB_HID_CHECKPOINT=$(if $(filter y,$(CONFIG_KERNEL_USB_HID_CHECKPOINT)),1,0) \
 	-DCONFIG_BUF_CACHE_KIB=$(CONFIG_BUF_CACHE_KIB)
+ZEDBSD_PLATFORM_CONFIG_STAMP := $(BUILD)/.platform-config
+.PHONY: FORCE_ZEDBSD_PLATFORM_CONFIG
+FORCE_ZEDBSD_PLATFORM_CONFIG:
+
+$(ZEDBSD_PLATFORM_CONFIG_STAMP): FORCE_ZEDBSD_PLATFORM_CONFIG
+	@mkdir -p $(dir $@)
+	@value='$(strip $(ZEDBSD_CONFIG_CPPFLAGS))'; \
+		if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
+			printf '%s\n' "$$value" > $@.tmp; \
+			mv $@.tmp $@; \
+		fi
 ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
 ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_TEST_CHECKPOINTS
 endif
@@ -574,6 +593,32 @@ ZEDBSD_XZED_SESSION_FILES := $(if $(filter zwm,$(ZEDBSD_USER_PROGRAMS)),\
 ZEDBSD_PACKAGE_INPUTS += $(ZEDBSD_XZED_SESSION_INPUTS)
 ZEDBSD_PACKAGE_FILES += $(ZEDBSD_XZED_SESSION_FILES)
 
+# The rootfs output path is shared by successive menuconfig selections.  A
+# source file timestamp cannot represent removal of a program or the addition
+# of an older cached data-only package, so retain the complete resolved
+# selection as a content-stable prerequisite.
+ZEDBSD_ROOTFS_CONFIG_STAMP := $(BUILD)/.rootfs-config
+ZEDBSD_ARCH_IMAGE_CONFIG_STAMP := \
+	$(ARCH_IMAGE_DIR)/.$(ZEDBSD_ARCHITECTURE)-rootfs-config
+.PHONY: FORCE_ZEDBSD_ROOTFS_CONFIG
+FORCE_ZEDBSD_ROOTFS_CONFIG:
+
+$(ZEDBSD_ROOTFS_CONFIG_STAMP) \
+$(ZEDBSD_ARCH_IMAGE_CONFIG_STAMP): FORCE_ZEDBSD_ROOTFS_CONFIG
+	@mkdir -p $(dir $@)
+	@platform='$(ZEDBSD_PLATFORM)'; \
+		architecture='$(ZEDBSD_ARCHITECTURE)'; \
+		board='$(ZEDBSD_BOARD)'; \
+		programs='$(strip $(ZEDBSD_USER_PROGRAMS))'; \
+		data='$(strip $(ZEDBSD_USERLAND_DATA_FILES))'; \
+		files='$(strip $(ZEDBSD_PACKAGE_FILES))'; \
+		modes='$(strip $(ZEDBSD_USERLAND_FILE_MODES))'; \
+		value="platform=$$platform;architecture=$$architecture;board=$$board;programs=$$programs;data=$$data;files=$$files;modes=$$modes"; \
+		if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
+			printf '%s\n' "$$value" > $@.tmp; \
+			mv $@.tmp $@; \
+		fi
+
 $(DATA_IMAGE): $(DATA_IMAGE_TOOLS)
 	@mkdir -p $(dir $@)
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) \
@@ -586,7 +631,8 @@ $(SWAP_IMAGE): $(BUILD_TOOLS_DIR)/make-swapfile.noct
 
 # $(1): output, $(2): profile, $(3): prerequisites, $(4): --file arguments.
 define ZEDBSD_ARCH_IMAGE_RULE
-$(1): $(3) $(ZEDBSD_PACKAGE_INPUTS) $(ARCH_IMAGE_TOOLS)
+$(1): $(ZEDBSD_ARCH_IMAGE_CONFIG_STAMP) $(3) $(ZEDBSD_PACKAGE_INPUTS) \
+	$(ARCH_IMAGE_TOOLS)
 	@mkdir -p $$(dir $$@)
 	$$(PYTHON) $$(BUILD_TOOLS_DIR)/make-arch-overlay-image.py --force \
 		--profile $(2) --output $$@ $(4) $(ZEDBSD_PACKAGE_FILES)
@@ -598,7 +644,8 @@ endef
 
 # $(1): output, $(2): profile, $(3): prerequisites, $(4): --file arguments.
 define ZEDBSD_ARCH_UFS_IMAGE_RULE
-$(1): $(3) $(ZEDBSD_PACKAGE_INPUTS) $(ARCH_UFS_IMAGE_TOOLS)
+$(1): $(ZEDBSD_ARCH_IMAGE_CONFIG_STAMP) $(3) $(ZEDBSD_PACKAGE_INPUTS) \
+	$(ARCH_UFS_IMAGE_TOOLS)
 	@mkdir -p $$(dir $$@)
 	$$(NOCT) --path=$$(BUILD_TOOLS_DIR) \
 		$$(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.noct \
@@ -615,7 +662,8 @@ endef
 # The staging tree is the canonical rootfs artifact.  The tarball is retained
 # as a packaging artifact and is produced from that tree.
 define ZEDBSD_ROOTFS_TAR_RULE
-$(BUILD)/rootfs/.stamp: $(2) $(ZEDBSD_PACKAGE_INPUTS)
+$(BUILD)/rootfs/.stamp: $(ZEDBSD_ROOTFS_CONFIG_STAMP) $(2) \
+	$(ZEDBSD_PACKAGE_INPUTS)
 	@rm -rf $(BUILD)/rootfs
 	@mkdir -p $(BUILD)/rootfs
 	@mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/sbin \
@@ -653,9 +701,11 @@ clean:
 distclean:
 	rm -rf build
 
+ifneq ($(strip $(ZEDBSD_PLATFORM)),)
 -include $(filter-out $(BUILD)/rootfs/%,$(wildcard $(BUILD)/*.d \
 	$(BUILD)/*/*.d $(BUILD)/*/*/*.d $(BUILD)/*/*/*/*.d \
 	$(BUILD)/*/*/*/*/*.d $(BUILD)/*/*/*/*/*/*.d \
 	$(BUILD)/*/*/*/*/*/*/*.d))
+endif
 
 .PHONY: clean distclean

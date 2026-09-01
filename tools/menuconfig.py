@@ -65,11 +65,10 @@ DRIVER_CATEGORIES = [
 ]
 
 PROGRAM_CATEGORIES = [
-    ("Base", "base"),
-    ("Compilers", "comp"),
-    ("X11 servers", "x11-servers"),
-    ("X11 applications", "x11-applications"),
-    ("Packages", "packages"),
+    ("Base", ("base", "comp")),
+    ("X11", ("x11-servers", "x11-applications")),
+    ("Firmware", ("firmware",)),
+    ("Packages", ("packages",)),
 ]
 
 PACKAGE_CATEGORIES = [
@@ -119,11 +118,10 @@ def read_rows(path: Path, fields: int) -> list[list[str]]:
     return result
 
 
-def option_rows(path: Path, platform: str,
-                platform_specific: bool = True) -> list[dict[str, object]]:
+def option_rows(path: Path, platform: str) -> list[dict[str, object]]:
     result = []
     for key, kind, label, targets, default, choices in read_rows(path, 6):
-        if platform_specific and not applies(targets, platform):
+        if not applies(targets, platform):
             continue
         parsed_choices = []
         if choices:
@@ -218,8 +216,9 @@ def normalize(values: dict[str, object]) -> None:
             if key != "-" and kind != "fixed" and applies(targets, platform):
                 supported.add(key)
     for path in common_option_files:
-        for key, kind, _label, _targets, _default, _choices in read_rows(path, 6):
-            if key != "-" and kind != "fixed":
+        for key, kind, _label, targets, _default, _choices in read_rows(path, 6):
+            if (key != "-" and kind != "fixed" and
+                    applies(targets, platform)):
                 supported.add(key)
     for key in list(values):
         if key.startswith("CONFIG_DRIVER_") and key not in supported:
@@ -432,16 +431,15 @@ def select_drivers(screen, values: dict[str, object]) -> None:
         title, path = DRIVER_CATEGORIES[selected]
         if path is None:
             path = architecture_driver_path(str(values["ZEDBSD_PLATFORM"]))
-        options = option_rows(path, str(values["ZEDBSD_PLATFORM"]),
-                              platform_specific=path == architecture_driver_path(
-                                  str(values["ZEDBSD_PLATFORM"])))
+        options = option_rows(path, str(values["ZEDBSD_PLATFORM"]))
         edit_options(screen, title, options, values)
 
 
-def edit_program_group(screen, values: dict[str, object], group: str,
+def edit_program_group(screen, values: dict[str, object], groups: tuple[str, ...],
                        title: str) -> None:
     platform = str(values["ZEDBSD_PLATFORM"])
-    rows = [row for row in user_program_rows() if row[4] == group]
+    rows = [row for row in user_program_rows()
+            if row[4] in groups and applies(row[2], platform)]
     selected_programs = values.setdefault("ZEDBSD_USER_PROGRAMS", set())
     selected = 0
     while True:
@@ -491,7 +489,7 @@ def select_package_programs(screen, values: dict[str, object]) -> None:
         if choice is None or choice == len(PACKAGE_CATEGORIES):
             return
         label, group = PACKAGE_CATEGORIES[choice]
-        edit_program_group(screen, values, group, label)
+        edit_program_group(screen, values, (group,), label)
 
 
 def select_programs(screen, values: dict[str, object]) -> None:
@@ -501,11 +499,11 @@ def select_programs(screen, values: dict[str, object]) -> None:
                         target_label(values))
         if choice is None or choice == len(PROGRAM_CATEGORIES):
             return
-        label, group = PROGRAM_CATEGORIES[choice]
-        if group == "packages":
+        label, groups = PROGRAM_CATEGORIES[choice]
+        if groups == ("packages",):
             select_package_programs(screen, values)
         else:
-            edit_program_group(screen, values, group, label)
+            edit_program_group(screen, values, groups, label)
 
 
 def user_program_rows() -> list[list[str]]:

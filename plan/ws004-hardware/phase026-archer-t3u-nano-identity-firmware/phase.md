@@ -93,7 +93,7 @@ The accepted distribution boundary is:
 
 - zedBSD base contains the native driver and a fixed firmware request for
   `/lib/firmware/rtw88/rtw8822b_fw.bin`, but no Realtek binary;
-- the optional `userland/packages/wifi-firmware/` package downloads the
+- the optional `userland/firmware/rtl8822b/` entry downloads the
   unmodified blob and `LICENCE.rtlwifi_firmware.txt` from the immutable GitHub
   transport mirror `endlessm/linux-firmware` revision
   `2f56219d20e4becccd718963fc3bcc671c543ce5` only when that package is selected,
@@ -224,11 +224,11 @@ restricted to `2357:012e`, `bcdDevice=2.10`, interface `ff/ff/ff`, and the
 recorded five-endpoint tuple.
 
 The firmware remains outside the kernel and base system. The approved package
-root is `userland/packages/wifi-firmware/`; selecting/building that package
+root is `userland/firmware/rtl8822b/`; selecting/building that firmware entry
 downloads from the immutable `endlessm/linux-firmware` GitHub revision
 `2f56219d20e4becccd718963fc3bcc671c543ce5`, verifies the frozen blob and
 license digests, and installs `/lib/firmware/rtw88/rtw8822b_fw.bin` only as an
 additional userland package. An ordinary base build performs no firmware
-download, and the kernel performs no runtime network fetch. The actual package
-rules and driver-side loader remain part of p028; this decision closes p026 and
-releases p027.
+download, and the kernel performs no runtime network fetch. The actual
+firmware-entry rules and driver-side loader are part of p036; this decision
+closes p026 and releases p027.

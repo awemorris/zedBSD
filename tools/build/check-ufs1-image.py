@@ -10,7 +10,7 @@ import struct
 import sys
 
 MAGIC=0x011954; ROOT=2; NDADDR=12; NIADDR=3; INODE_SIZE=128
-IFMT=0o170000; IFDIR=0o040000
+IFMT=0o170000; IFDIR=0o040000; IFLNK=0o120000
 
 
 class UFS1:
@@ -27,7 +27,9 @@ class UFS1:
         self.cgmask=self.u32(self.sb,28)
         self.fragments=self.u32(self.sb,36); self.ncg=self.u32(self.sb,44)
         self.cgsize=self.u32(self.sb,160)
-        if (self.bsize,self.fsize,self.frag,self.nindir,self.inopb)!=(8192,1024,8,2048,64):
+        self.maxsymlinklen=self.u32(self.sb,1320)
+        if (self.bsize,self.fsize,self.frag,self.nindir,self.inopb,
+            self.maxsymlinklen)!=(8192,1024,8,2048,64,60):
             raise ValueError('unsupported UFS1 profile')
         if self.ncg<1 or self.fpg<self.dblk:
             raise ValueError('bad cylinder group geometry')
@@ -90,6 +92,9 @@ class UFS1:
 
     def blocks(self,number,owned=None):
         raw=self.inode(number); result=[]
+        if (self.u16(raw,0)&IFMT)==IFLNK and \
+                self.u64(raw,8)<=self.maxsymlinklen:
+            return result
         for index in range(NDADDR):
             pointer=self.u32(raw,40+index*4)
             if pointer: result.append(pointer)
@@ -99,6 +104,8 @@ class UFS1:
 
     def read_file(self,number):
         raw=self.inode(number); size=self.u64(raw,8); result=bytearray()
+        if (self.u16(raw,0)&IFMT)==IFLNK and size<=self.maxsymlinklen:
+            return bytes(raw[40:40+size])
         blocks=self.blocks(number)
         for fragment in blocks:
             start=fragment*self.fsize

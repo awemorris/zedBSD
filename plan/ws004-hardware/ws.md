@@ -21,7 +21,9 @@ uncleared only at one hash-pinned Latitude/RTL8156 checkpoint;
 q054 completed `ws004-p017`'s shared asynchronous-TX statistics helper and
 exactly-once CDC NCM terminal accounting;
 `ws004-p027`--`p030` define the Archer T3U Nano WLAN implementation path;
-q055 completed `p027`, while p028--p030 remain unqueued. `p034`
+q055 completed `p027`, q056 completed p036's independently testable RTL8822BU
+pre-radio substrate, and q057 now implements p028 while p029--p030 remain
+unqueued. `p034`
 separately records deferred, nonblocking CDC ECM accounting adoption, and
 `p035` records the nonblocking future same-endpoint multi-URB extension which
 the first WLAN scan path deliberately does not require.
@@ -81,10 +83,13 @@ NCM. WLAN planning resumed
 with the Archer T3U Nano as the first target. q055 closes `p026`: the purchased
 Japan-market unit has no printed revision, so its retained exact USB descriptor
 is the binding authority, and firmware is acquired only through the separately
-installed optional `wifi-firmware` package. Q055 completed `p027`'s generic
-kernel WLAN core and its x86/QEMU gates. P028 through p030 remain planning entries for the
-RTL8822BU USB scan, WPA2-Personal/CCMP L2, and final lifecycle hardening and
-have not crossed the Queue boundary.
+installed optional `rtl8822b-firmware` entry under `userland/firmware/`. Q055 completed `p027`'s generic
+kernel WLAN core and its x86/QEMU gates. Q056 completed p036's default-off
+firmware package, USB/register/efuse/firmware/RX substrate, and p027
+integration before radio-table programming. Q057 now owns p028's
+notice-preserving BSD-3-Clause table import and conservative RTL8822BU scan;
+p029 and p030 remain planning entries for WPA2-Personal/CCMP L2 and final
+lifecycle hardening.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -117,9 +122,9 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p023`](phase023-nvme-io-lifecycle/phase.md) | Complete (`q030`) | One depth-64 I/O queue, private 4-KiB bounce slots, checked 64-bit read/write, truthful flush, concurrent wrap, timeout/reset, normal shutdown, and quarantine pass focused/build/QEMU/regression gates |
 | [`ws004-p024`](phase024-nvme-qemu-acceptance/phase.md) | Complete (`q030`) | Strict 512/4096 GPT host gates and disposable QEMU partition write/flush/restart/rejection plus IDE, xHCI USB-root, amd64, and i386 gates pass |
 | [`ws004-p025`](phase025-latitude-nvme-readonly/phase.md) | Planned physical checkpoint; depends on p024 | Latitude SN740 `15b7:5015` identifies and reads safely without modifying internal storage |
-| [`ws004-p026`](phase026-archer-t3u-nano-identity-firmware/phase.md) | Complete (`q055`; q040 intake retained) | The Japan-market label has no printed revision; the retained exact `2357:012e` descriptor is authoritative, and the pinned upstream bytes plus explicit GitHub-mirror `wifi-firmware` package boundary are frozen |
+| [`ws004-p026`](phase026-archer-t3u-nano-identity-firmware/phase.md) | Complete (`q055`; q040 intake retained) | The Japan-market label has no printed revision; the retained exact `2357:012e` descriptor is authoritative, and the pinned upstream bytes plus explicit GitHub-mirror `rtl8822b-firmware` boundary are frozen |
 | [`ws004-p027`](phase027-wlan-uapi-common-core/phase.md) | Complete (`q055`) | Versioned pointer-free WLAN ioctls, strict INET dispatch, persistent station/cache/generations, checked lifetime barriers, deterministic fake radio, x86 builds, and IDE/xHCI exact-login gates pass without a hardware claim |
-| [`ws004-p028`](phase028-rtl8822bu-usb-scan/phase.md) | Planned; depends on p026/p027; not queued | Bind only the descriptor-confirmed RTL8822BU interface, load the pinned optional firmware, and implement conservative 2.4-GHz/20-MHz scan; physical attach/scan evidence is one field of the shared WS005 p008 ledger, not a p028 run |
+| [`ws004-p028`](phase028-rtl8822bu-usb-scan/phase.md) | In progress (`q057`); p036 complete; BSD-3-Clause table policy resolved | Import the notice-preserving table `.inc`, program only the conservative radio profile, and implement 2.4-GHz/20-MHz scan over p036; physical evidence remains in the shared WS005 p008 ledger |
 | [`ws004-p029`](phase029-wpa2-ccmp-l2/phase.md) | Planned; depends on p028 automatic milestone; not queued | Common-kernel WPA2-Personal/CCMP authentication, association, four-way handshake, key CAM, controlled port, and bidirectional Ethernet L2; physical evidence is shared with p030/WS005 p008 |
 | [`ws004-p030`](phase030-wlan-lifecycle-hardware-hardening/phase.md) | Planned; depends on p029 automatic milestone; not queued | Rekey, bounded reconnect, reset, up/down, unplug/reinsert, shutdown, and concurrent-storage regressions; share one lifecycle checkpoint and the frozen-artifact five-run ledger with WS005 p008 rather than duplicate physical work |
 | [`ws004-p031`](phase031-legacy-hcd-concurrent-hotplug/phase.md) | Complete (`q047`) | UHCI/EHCI per-endpoint concurrency, periodic/asynchronous progress, request-local retirement, worker-context root hotplug, shared-INTx dispatch, all focused/configured/regression/build gates, and both forced QEMU cells pass |
@@ -127,6 +132,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p033`](phase033-amd64-framebuffer-console-serialization/phase.md) | Complete (`q047`) | One early-safe lock and strict cell/framebuffer bounds pass HW-T27 host/sanitizer/input/build gates and the shared forced HW-T25 QEMU matrix without console fault or stall |
 | [`ws004-p034`](phase034-cdc-ecm-async-tx-accounting/phase.md) | Planned/deferred; nonblocking; not queued | Apply q054's exactly-once asynchronous TX-error accounting to CDC ECM, preserve accepted packet/byte and drop meanings, and rerun automatic ECM gates without a physical check |
 | [`ws004-p035`](phase035-usb-same-endpoint-multi-urb/phase.md) | Planned/deferred; nonblocking; not queued | Add a bounded same-endpoint xHCI URB ring only when a measured workload needs it; p028 retains one persistent bulk-IN URB and does not depend on this Phase |
+| [`ws004-p036`](phase036-rtl8822bu-pre-radio-substrate/phase.md) | Complete (`q056`) | The default-off firmware package, exact USB/register/efuse/firmware/RX substrate, serialized p027 publication, fake DDMA/RX integration, and tableless production refusal pass before p028 programs RF |
 
 ### MSI follow-up register
 
@@ -142,14 +148,15 @@ Latitude-native external
 fetch. p021 is an independent standards correction rather than an active
 failure response; q052 retains its passing fresh-image QEMU result and only one
 physical checkpoint remains. Later WS004 boundaries after q055 are the p021
-physical checkpoint, p025, and the planned-only p028--p030 WLAN implementation
-chain; p026, p027, and q047 p031--p033 are complete. P034 and
+physical checkpoint, p025, and the p028--p030 WLAN implementation chain; p026,
+p027, p036, and q047 p031--p033 are complete, with p028 now active in q057.
+P034 and
 p035 are separate deferred, nonblocking consistency/performance follow-ups.
 Additional work is HW-11,
 HW-20/HW-21, and HW-30 when their inputs and acceptance environments are
 available. Q040 selected the evidence/policy-only p026 intake. Q055 closed its
-later identity/package decision and completed p027; p028--p030 and p034 remain
-unqueued.
+later identity/package decision and completed p027; q056 completed p036, q057
+now executes p028, and p029--p030 plus p034 remain unqueued.
 
 ## Goals
 
@@ -210,7 +217,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-21 | Deferred built-in follow-up; existing ID retained | Testable RTL8822CE-specific PCI/firmware hardware abstraction or protocol fixture | HW-20 design and the completed generic common-core fixture | Driver-specific state/error paths pass without claiming QEMU emulates the laptop radio |
 | HW-22 | Complete as `ws004-p026` (`q055`; q040 intake retained) | Exact Japan-market T3U Nano identity and optional Realtek firmware package/license policy | Physical adapter, primary-source record | HW-T32 retains the full authoritative descriptor, explicit absence of printed revision, pinned upstream bytes/license, immutable GitHub acquisition mirror, separate install path, and update rule |
 | HW-23 | Complete as `ws004-p027` (`q055`) | Generic WLAN ioctl UAPI, persistent kernel station core, scan cache/state/lifetime, and deterministic fake device | HW-22 documentary capability boundary, p012 | HW-T30 passes ABI, state, race, detach, and secret-erasure fixtures without a physical-radio claim |
-| HW-24 | Planned as `ws004-p028`; not queued | Exact RTL8822BU USB attach, separately packaged firmware start, and conservative 2.4-GHz/20-MHz scan | HW-22, HW-23, p010/p011/p015 | HW-T31 passes automatic attach/firmware/scan gates; the eventual physical fields come from the single shared WS005 p008 ledger with no p028-specific request |
+| HW-24 | P036 complete (`q056`); p028 in progress (`q057`) | Exact RTL8822BU USB/pre-radio substrate, separately selected firmware, BSD-licensed tables, and conservative 2.4-GHz/20-MHz scan | HW-22, HW-23, p010/p011/p015 | P036 passes package/transport/parser/lifetime gates; HW-T31 then passes table/radio/scan gates, with physical fields from the single shared WS005 p008 ledger |
 | HW-25 | Planned as `ws004-p029`; not queued | WPA2-Personal/CCMP authentication, association, key installation, controlled port, and Ethernet L2 | HW-24, kernel entropy and reviewed crypto substrate | HW-T33 passes automatic handshake/replay/CCMP/negative fixtures; the eventual secure-L2 fields come from the same p008 ledger with no p029-specific request |
 | HW-26 | Planned as `ws004-p030`; not queued | Rekey, bounded reconnect, reset, hotplug, shutdown, and final exact-hardware hardening | HW-25, controlled AP, WS005 p008 | HW-T34 passes automatic fault/race/storage gates and references the one shared p008 lifecycle checkpoint/five-run frozen-artifact ledger |
 | HW-27 | Complete as `ws004-p031` (`q047`) | Concurrent UHCI/EHCI per-endpoint scheduling, request-local retirement, and runtime root-port lifecycle | p009--p011, p015, p016 | HW-T25 ordinary/sanitizer/analyzer and configured production gates, shared-INTx and USB regressions, repository build, plus standalone UHCI and paired EHCI/UHCI QEMU cells pass |
@@ -219,6 +226,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-30 | Proposed | i915 hardware foundations for the discovered 11th-generation GPU | BR-00, HW-00, GFX UAPI | Modeset/scanout and recovery on hardware; model tests for device-independent layers |
 | HW-31 | Planned/deferred as `ws004-p034`; nonblocking; not queued | CDC ECM adoption of q054 asynchronous TX-error accounting | p019, p017/q054 | HW-T28 proves exactly-once genuine terminal errors, excluded administrative cancellation, retained packet/byte/drop meanings, lifecycle safety, and unchanged QEMU ECM behavior without a physical check |
 | HW-32 | Planned/deferred as `ws004-p035`; nonblocking; not queued | Bounded same-endpoint multi-URB support for xHCI | A measured consumer need; existing p011 per-endpoint contract | HW-T35 proves exact per-request completion/cancel/drain, ring wrap, teardown, and fairness while UHCI/EHCI retain one request per endpoint |
+| HW-33 | Planned/deferred; not queued | Native Intel Wi-Fi 6 AX201 driver with its own `userland/firmware/intelax201/` entry | Exact PCI/subsystem inventory, HW-00, completed generic WLAN core, Intel firmware/license review | A future Phase freezes the device/firmware identity before scan, association, and data-path work; no RTL88 implementation is reused |
 
 ## 4. NVMe sequence
 
@@ -272,12 +280,11 @@ The ordered implementation path is:
    concurrent-storage regression, and exact-hardware reliability using the
    same physical checkpoint and final five-run ledger as WS005 p008.
 
-P026 and p027 are complete through q055. The three later implementation
-Phases p028--p030 remain M/W/P planning entries; each still requires a finite
-Queue proposal and explicit execution approval. This sequence is not itself an
-implementation Queue. P028 uses one persistent bulk-IN URB; the deferred p035
-same-endpoint ring is a throughput extension and is not in this dependency
-chain.
+P026 and p027 are complete through q055, and q056 completed the extracted p036
+pre-radio substrate. Q057 implements p028 with the resolved BSD-3-Clause table
+policy; p029 and p030 remain M/W/P planning entries. P028 uses one
+persistent bulk-IN URB; the deferred p035 same-endpoint ring is a throughput
+extension and is not in this dependency chain.
 
 ### Responsibility boundary
 
@@ -309,8 +316,8 @@ five-consecutive-run ledger, which p028--p030 reference for physical completion.
 
 ### Firmware and retained built-in target
 
-RTL8822BU uses `rtw88/rtw8822b_fw.bin`. The approved p028 optional-package
-contract requires its future `userland/packages/wifi-firmware/` recipe to
+RTL8822BU uses `rtw88/rtw8822b_fw.bin`. The approved p036 firmware-entry
+contract requires `userland/firmware/rtl8822b/` to
 acquire the blob and `LICENCE.rtlwifi_firmware.txt` only from the immutable
 `https://github.com/endlessm/linux-firmware.git` mirror revision
 `2f56219d20e4becccd718963fc3bcc671c543ce5`, verify the frozen size and SHA-256
@@ -327,6 +334,12 @@ subsystem `10ec:c130`. It is a later HW-20/HW-21 path, not an alias for the USB
 device: it uses the 8822C family, PCIe transport, and
 `rtw88/rtw8822c_fw.bin`. The generic common core is intended to be reused, but
 no p026--p030 completion claims the built-in device.
+
+Do not introduce a common RTL88 chip module before both implementations prove
+a truly identical boundary. A future RTL8822CE Phase owns
+`userland/firmware/rtl8822c/`; a later Intel AX201 Phase owns
+`userland/firmware/intelax201/`. The Intel target is recorded from the Linux
+debug host and remains deferred behind the Archer-first sequence.
 
 On FreeBSD the built-in PCI WLAN inventory is collected with:
 

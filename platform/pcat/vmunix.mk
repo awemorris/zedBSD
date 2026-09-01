@@ -72,6 +72,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 
 $(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/platform/pcat.o: \
 	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
+$(BUILD)/src/kern/platform/pcat.o: $(ZEDBSD_PLATFORM_CONFIG_STAMP)
 
 PCAT_USB_HCD_OBJS :=
 ifeq ($(CONFIG_DRIVER_PCI_UHCI),y)
@@ -100,6 +101,10 @@ PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-cdc-ecm.o
 endif
 ifeq ($(CONFIG_DRIVER_USB_HID),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-hid.o
+endif
+ifeq ($(CONFIG_DRIVER_USB_RTL8822BU),y)
+PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/rtl8822b.o \
+	$(BUILD)/drivers/usb-rtl8822bu.o
 endif
 ifeq ($(CONFIG_KERNEL_USB_HID_CHECKPOINT),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-hid-checkpoint.o

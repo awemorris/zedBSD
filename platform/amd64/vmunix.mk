@@ -38,7 +38,7 @@ FORCE_AMD64_IMAGE_CONTRACT:
 $(AMD64_IMAGE_CONTRACT_STAMP): FORCE_AMD64_IMAGE_CONTRACT
 	@mkdir -p $(dir $@)
 	@value='layout=$(ZEDBSD_VARIANT)'; \
-		if ! test -f $@ || ! grep -Fqx "$$value" $@; then \
+		if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
 			printf '%s\n' "$$value" > $@.tmp; \
 			mv $@.tmp $@; \
 		fi
@@ -124,6 +124,10 @@ endif
 ifeq ($(CONFIG_DRIVER_USB_HID),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb-hid.c
 endif
+ifeq ($(CONFIG_DRIVER_USB_RTL8822BU),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/rtl8822b.c \
+	src/drivers/usb-rtl8822bu.c
+endif
 ifeq ($(CONFIG_KERNEL_USB_HID_CHECKPOINT),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb-hid-checkpoint.c
 endif
@@ -194,6 +198,8 @@ endif
 $(BUILD)/kern64/src/kern/vfs.o \
 	$(BUILD)/kern64/src/kern/platform/pcat.o: \
 	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
+$(BUILD)/kern64/src/kern/platform/pcat.o: \
+	$(ZEDBSD_PLATFORM_CONFIG_STAMP)
 
 vmunix: $(BUILD)/vmunix
 

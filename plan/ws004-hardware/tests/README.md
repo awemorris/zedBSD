@@ -29,10 +29,11 @@ Parent: [WS004](../ws.md)
 | HW-T28 | CDC ECM asynchronous TX accounting | An accepted frame keeps packet/byte counts; each genuine terminal `STALL`, `TIMEOUT`, `DISCONNECTED`, or `IO_ERROR` adds exactly one TX error and no drop; administrative `CANCELLED` adds neither, including close/detach/reconnect races |
 | HW-T30 | Generic WLAN logic | The versioned pointer-free ioctl ABI, scan generations/cache, station state, cancellation, carrier, detach, race, and secret-erasure rules pass against a deterministic fake radio without claiming RF success |
 | HW-T31 | RTL8822BU attach/scan | Only the descriptor-confirmed `2357:012e` interface binds; automatic firmware/USB/scan gates pass, and the physical attach/scan fields come from the one shared WS005 p008 ledger with no p028-specific run |
-| HW-T32 | Archer identity/firmware policy | The Japan-market adapter is labelled `Archer T3U Nano` with no printed revision; its complete descriptor is the exact-unit binding authority, V1.0 remains documentary family evidence only, and the optional separately installed `wifi-firmware` package contract has frozen mirror/upstream/license/digest/update rules |
+| HW-T32 | Archer identity/firmware policy | The Japan-market adapter is labelled `Archer T3U Nano` with no printed revision; its complete descriptor is the exact-unit binding authority, V1.0 remains documentary family evidence only, and the optional separately installed `rtl8822b-firmware` entry has frozen mirror/upstream/license/digest/update rules |
 | HW-T33 | WPA2-Personal/CCMP L2 | Crypto vectors and strict positive/negative RSN/authentication/association/four-way/replay/key-CAM/controlled-port fixtures pass; physical secure-L2 fields come from the one shared WS005 p008 ledger with no p029-specific run |
 | HW-T34 | WLAN lifecycle hardening | Rekey, bounded reconnect, firmware/USB recovery, up/down, unplug/reinsert, shutdown, concurrent storage, and race/fault fixtures pass; one shared WS005 p008 lifecycle checkpoint and its frozen-artifact five-run batch supply nonduplicated physical evidence |
 | HW-T35 | USB same-endpoint multi-URB | A supporting xHCI endpoint owns a bounded multi-URB queue with exact completion/cancel/drain, ring-wrap, late-event, detach, and fairness behavior; legacy HCDs retain one active URB per endpoint |
+| HW-T36 | RTL8822BU pre-radio substrate | Default-off firmware acquisition, pinned image validation, exact USB/register/efuse contracts, bounded firmware/RX codecs, serialized WLAN publication, and tableless production refusal pass without an RF-success claim |
 | HW-T40 | i915 foundations | Device-independent UAPI/model tests pass; modeset/scanout/reset require target-hardware evidence |
 
 QEMU/model and physical-hardware results are always separate evidence fields.
@@ -228,8 +229,8 @@ The documentary evidence separately records:
 
 One official `linux-firmware` commit of `rtw88/rtw8822b_fw.bin` is pinned by
 path, reported version, size, SHA-256, WHENCE entry, and exact
-`LICENCE.rtlwifi_firmware.txt`. The planned p028
-`userland/packages/wifi-firmware/` recipe must use only
+`LICENCE.rtlwifi_firmware.txt`. The p036
+`userland/firmware/rtl8822b/` recipe must use only
 `https://github.com/endlessm/linux-firmware.git` revision
 `2f56219d20e4becccd718963fc3bcc671c543ce5` as its immutable acquisition
 mirror, verify the frozen blob and license digests, and stage them only when
@@ -783,6 +784,53 @@ owns this future xHCI queueing fixture. It is run only after a measured
 consumer requires more than the current one-active-URB-per-endpoint contract.
 The initial RTL8822BU scan implementation instead uses one persistent `0x84`
 bulk-IN request and poll-context drain/rearm, so HW-T35 is not a WLAN blocker.
+
+## HW-T36 RTL8822BU pre-radio substrate
+
+[`ws004-p036`](../phase036-rtl8822bu-pre-radio-substrate/phase.md) owns this
+automatic boundary. The firmware-package fixture proves selected-only GitHub
+acquisition, immutable size/hash/license/WHENCE identities, atomic cache
+publication, offline reuse, corruption rejection, and absence from the default
+image. The production RTL8822B codec fixture proves SHA-256, the exact pinned
+firmware header and segment walk, efuse sparse-map and board bounds, firmware
+TX descriptors, RX aggregate/C2H parsing, and negative cases in ordinary,
+sanitizer, and analyzer modes:
+
+```sh
+plan/ws004-hardware/tests/run-rtl8822b-firmware-package-test.sh
+RTL8822B_FIRMWARE_TEST_BLOB=build/sources/firmware/rtl8822b/2f56219d20e4becccd718963fc3bcc671c543ce5/rtw8822b_fw.bin \
+  plan/ws004-hardware/tests/run-rtl8822b-core-test.sh
+```
+
+The companion production-driver fixture passed ordinary, ASan/UBSan, and GCC
+analyzer modes:
+
+```sh
+plan/ws004-hardware/tests/run-usb-rtl8822bu-driver-test.sh
+```
+
+It proves exact and neighboring USB identity/topology, bounded register
+transport, reserved-page/DDMA/FW-ready behavior, persistent RX drain/rearm,
+attach-failure unwind, checked teardown retry, and deterministic
+open/close/shutdown/ioctl/poll/start/stop/detach races using a real fixture spin
+lock. The start counter remains owned through the final URB status/cancel
+access, and the final independent read-only audit reported no correctness or
+lifetime blocker.
+
+Q056 also passed forced driver-enabled amd64 and i386 production object builds,
+the ordinary `make -j16` build, all required focused regressions, and
+`git diff --check`. Disposable runtime controls reached exact `login:` 1/1 from
+amd64 IDE root and 1/1 from q35/xHCI USB root. UFS inspection separately proved
+that explicit real-firmware selection installs the pinned blob, license, and
+manifest, while a non-selected image contains none of them and performs no
+firmware acquisition.
+
+HW-T36 deliberately does not claim that firmware or RF has started. The
+production fixture publishes the exact device but proves that `open` returns
+`EOPNOTSUPP`, carrier remains down, and no firmware bulk transfer or register
+write occurs until p028 adds the reviewed BSD-3-Clause table. These automatic,
+build, image, QEMU, and independent-audit results complete HW-T36 in q056;
+physical Archer operation and scan evidence remain later work.
 
 ## HW-T20 NVMe QEMU
 

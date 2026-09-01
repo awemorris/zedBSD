@@ -1,110 +1,98 @@
-# Queue: first WLAN common foundation
+# Queue: RTL8822BU minimum radio and scan
 
 Last updated: 2026-09-01
 
-QID: `q055`
+QID: `q057`
 
-Queue status: completed
+Queue status: in progress
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: the user supplied the remaining exact-device identity facts,
-approved `userland/packages/wifi-firmware/` as an optional GitHub-fetched
-firmware package, and explicitly directed WLAN to take priority and this Queue
-to start.
+Authorization: the user directed WLAN to remain the priority, selected
+BSD-3-Clause for the RTL8822B initialization-table import, and decided that a
+common RTL88 layer, RTL8822CE, and Intel AX201 are not part of the current
+implementation. Q056 completed the exact USB/firmware/pre-radio substrate.
 
-Timebox: none. Close the finite p026 decision record, then implement the one
-hardware-independent p027 WLAN UAPI/common-core Phase and its automatic
-regressions. No physical radio action is required.
+Timebox: none. Execute only the finite, automatically verifiable p028 radio and
+scan milestone. No physical zedBSD radio run or human acceptance is requested
+in this Queue.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q054](queue-q054.md)
+Previous Queue: [q056](queue-q056.md)
 
 ## Purpose
 
-Freeze the exact first Archer identity and separate firmware-package boundary,
-then add one versioned, pointer-free, device-independent WLAN ioctl and station
-state layer. Prove its cache, state, generation, credential-erasure, and
-hot-unplug behavior with a deterministic fake radio before a Realtek driver is
-allowed to consume it.
+Turn the tested RTL8822BU substrate into the smallest truthful station-mode
+radio: import the licensed RTL8822B initialization data, start the pinned
+firmware on first open, program a conservative 2.4-GHz/20-MHz profile, and feed
+bounded passive/allowed-wildcard-active scan results through the p027 generic
+WLAN contract. Authentication, association, keys, IP networking, broader RF
+capability, and physical acceptance remain later milestones.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws004-p026` | [Phase](ws004-hardware/phase026-archer-t3u-nano-identity-firmware/phase.md) | completed | Japan label, absent revision marking, exact retained descriptor authority, and optional hash-verified GitHub firmware-package boundary are synchronized |
-| 2 | `ws004-p027` | [Phase](ws004-hardware/phase027-wlan-uapi-common-core/phase.md) | completed | Versioned WLAN ioctl ABI, active-ioctl lifetime gate, persistent common station state, bounded cache/generations, and deterministic fake radio pass every automatic gate |
+| 1 | `ws004-p028` | [Phase](ws004-hardware/phase028-rtl8822bu-usb-scan/phase.md) | in progress | Licensed table import, minimum safe radio start, bounded software scan, and complete production-path synthetic results pass all automatic gates |
 
 ## Accepted decisions
 
-- The physical target is the exact retained `2357:012e`, `bcdDevice=2.10`,
-  `ff/ff/ff`, five-endpoint descriptor. The label says only `Archer T3U Nano`,
-  the region is Japan, and no hardware revision is printed; no V1.0 claim or
-  cross-unit alias is inferred.
-- Kernel and base system contain no Realtek blob. A separately selected
-  `userland/packages/wifi-firmware/` recipe may fetch only the immutable
-  `endlessm/linux-firmware` GitHub revision frozen by p026, must verify the
-  frozen firmware and license hashes, and installs the file separately.
-- P027 is bus/chip independent. It contains no RTL8822BU registers, firmware
-  loader, WPA implementation, user command, DHCP, or physical-radio claim.
+- The production match remains only the retained Japan unit:
+  `2357:012e`, `bcdDevice=2.10`, `ff/ff/ff`, endpoints
+  `84/05/06/08/87`.
+- Import only required RTL8822B table data under BSD-3-Clause into a dedicated
+  `.inc`, retaining SPDX, Realtek copyright, full notice, immutable upstream
+  commit/path, and source SHA-256. Do not copy Linux control flow.
+- The initial radio is station-only, 2.4 GHz channels 1--11, 20 MHz, passive
+  scan plus wildcard active probes only where the conservative world profile
+  permits transmission.
+- Keep the RTL8822BU implementation self-contained. Do not introduce a common
+  RTL88 layer; RTL8822CE and Intel AX201 remain deferred independent targets.
+- Firmware remains the separately selected, immutable
+  `userland/firmware/rtl8822b/` package and is loaded from the fixed
+  `/lib/firmware/rtw88/rtw8822b_fw.bin` path only on first open.
 
 ## Boundaries
 
-- Preserve every wired-network interface and ioctl behavior.
-- Use the AF_INET socket ioctl route, exact encoded sizes, fixed-width pointer-
-  free records, central privilege classification, and kernel-local buffers.
-- Extend the generic `net_device` teardown barrier so close/gone/shutdown join
-  admitted ioctls before driver data can be released.
-- Keep all time/cache/state bounds and fake-radio ownership defined by p027.
-- Do not implement p028 hardware/firmware loading or any WS005 command in q055.
+- Preserve Mass Storage, CDC NCM/ECM, USB HID, wired networking, legacy HCDs,
+  and the q056 lifecycle/teardown contracts.
+- Keep scan timing, cache, generation, and frame-normalization policy in the
+  p027 common WLAN layer; keep USB/register/table/channel work in this driver.
+- Do not implement authentication, association, WPA/WEP/EAPOL, key install,
+  encrypted data, DHCP, `/sbin/wifi`, `net wifi`, 5 GHz, DFS, HT/VHT, AP,
+  monitor mode, throughput tuning, or same-endpoint multi-URB rings.
+- Do not perform an independent physical Archer request. The later combined
+  WS005 p008 checkpoint owns the first physical attach/scan/connect evidence.
 - Do not use `.internal/` or aggregate `make check`.
 
 ## Automatic gates
 
-1. Pass `HW-T30` against production common-core sources in ordinary,
-   ASan/UBSan, and analyzer modes, including malformed/cache/state/deadline/
-   cancellation/stale-generation/secret-erasure cases.
-2. Prove every public ABI size/offset on configured amd64 and i386; wrong
-   version/size/direction/reserved fields must fail before device dispatch.
-3. Extend the production net-device/INET fixtures for WLAN capability,
-   privilege, active-ioctl admission/join, removal races, and wired regressions.
-4. Run `make -j16`, forced configured amd64/i386 consumers, and disposable
-   amd64 IDE plus q35 xHCI USB-root boots to exact `login:`.
-5. Require `git diff --check`; record exact results in P/W/M/Q documents.
+1. Reproducibly verify the imported `.inc` source revision/path/hash and full
+   BSD-3-Clause notice, and prove it contains data only.
+2. Extend production-source and fake-register tests over supported/unsupported
+   cut/RFE identities, checked MAC/BB/AGC/RF programming order, finite waits,
+   rollback, channel 1/6/11 selection, regulatory clamping, and no 5-GHz path.
+3. Prove first-open immutable firmware load, DDMA/start, table programming, RX
+   arm, close/retry, error unwind, cancellation, detach, and staging scrub.
+4. Drive passive and allowed wildcard-active software scans through the full
+   production scan path using fake USB/register/RX inputs; verify bounded
+   generations, terminal publication, malformed/stale rejection, and storage
+   progress on the same fake controller.
+5. Pass ordinary, ASan/UBSan, analyzer, driver-enabled amd64/i386,
+   `make -j16`, disposable amd64 IDE and q35 xHCI USB-root exact-login, and
+   `git diff --check` gates.
 
 ## Completion definition
 
-Q055 completes when p026 is synchronized as complete and p027's generic ABI,
-core, fake device, lifecycle gate, and automatic regressions pass without a
-new product decision. A physical Archer observation is deliberately deferred
-to the later shared hardware acceptance; ECM helper adoption, Latitude xHCI/
-NVMe checks, and physical USB HID remain phase-recorded and non-blocking.
+Q057 completes when p028 can automatically start the pinned firmware and
+minimum licensed radio model, scan channels 1--11 within the common 15-second
+generation budget, and publish truthful synthetic BSS records through the
+production driver/common-core path with complete failure rollback. Completion
+unblocks p029 but makes no claim that physical RF has succeeded.
 
 ## Execution result
 
-Q055 completed both finite entries without physical-radio work. P026 records
-the Japan-market label, absence of a printed revision, exact retained
-`2357:012e` descriptor authority, and the separately selected hash-pinned
-GitHub firmware-package boundary.
-
-P027 adds six versioned, pointer-free, exact-size WLAN ioctls; strict INET
-copy/privilege dispatch; an admitted-ioctl teardown gate; a persistent common
-station with bounded scan snapshots, generations, total deadlines, normalized
-beacon/RSN parsing, connect states, credential scrubbing, and checked
-detach/shutdown; plus a level-triggered worker predicate which closes a lost-
-wakeup interval. The station retains a live net-device reference and freezes a
-driver contract for serialized attach/removal, bounded radio callbacks, and a
-single production clock domain. Duplicate, stopping, and capacity attach
-failures preserve carrier and reference ownership.
-
-`HW-T30` passes ordinary, ASan/UBSan, GCC analyzer, and amd64/i386 ABI modes.
-The strict INET WLAN authorization runner passes twice, the net-device/ARP/INET
-hotplug runner passes, and `git diff --check` passes. Ordinary PC-98
-`make -j16` and forced amd64/i386 builds pass; the i386 gate caught and removed
-one accidental compiler-atomic runtime dependency. The final amd64 image is
-`b0409dad5d4dd3574cb4b4e9381ade59a7308e72cc6641b21cf7924fbad8f43f`.
-Disposable four-CPU, 4-GiB OVMF q35 boots reached exact `login:` through both
-explicit IDE and xHCI USB-only storage with no fatal/storage marker. P028 now
-uses the required LIVE-publication then removal-serialized station-attach
-ordering.
+In progress. Q056 completed every p036 dependency and left production RF
+disabled until this Queue imports and verifies the licensed table. Q057 has
+selected p028 as its sole implementation entry.

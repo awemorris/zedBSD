@@ -32,6 +32,9 @@
 #if CONFIG_DRIVER_USB_HID
 #include <drivers/usb-hid.h>
 #endif
+#if CONFIG_DRIVER_USB_RTL8822BU
+#include <drivers/usb-rtl8822bu.h>
+#endif
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 int usb_hid_checkpoint_driver_register(void);
 #endif
@@ -78,6 +81,10 @@ kern_platform_init(const struct boot_handoff *handoff,
 #if CONFIG_DRIVER_USB_CDC_ECM
 	if (drv_usb_cdc_ecm_driver_register() != 0)
 		hal_printf("usb: CDC ECM driver registration failed\n");
+#endif
+#if CONFIG_DRIVER_USB_RTL8822BU
+	if (drv_usb_rtl8822bu_driver_register() != 0)
+		hal_printf("usb: RTL8822BU WLAN driver registration failed\n");
 #endif
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 	if (usb_hid_checkpoint_driver_register() != 0)
