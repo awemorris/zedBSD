@@ -508,19 +508,33 @@ ncm_urb_status_error(enum drv_usb_urb_status status)
 	return EIO;
 }
 
+static int
+ncm_tx_status_is_error(enum drv_usb_urb_status status)
+{
+	return status == DRV_USB_URB_STALL ||
+	    status == DRV_USB_URB_TIMEOUT ||
+	    status == DRV_USB_URB_DISCONNECTED ||
+	    status == DRV_USB_URB_IO_ERROR;
+}
+
 static void
 ncm_completion(struct drv_usb_urb *urb, void *argument)
 {
 	struct ncm_adapter *adapter = argument;
 	unsigned long irq = spin_lock_irqsave(&adapter->lock);
+	int tx_error = 0;
 
 	if (urb == adapter->notification_urb)
 		adapter->notification_ready = 1;
 	else if (urb == adapter->rx_urb)
 		adapter->rx_ready = 1;
-	else if (urb == adapter->tx_urb)
+	else if (urb == adapter->tx_urb) {
 		adapter->tx_ready = 1;
+		tx_error = ncm_tx_status_is_error(drv_usb_urb_status(urb));
+	}
 	spin_unlock_irqrestore(&adapter->lock, irq);
+	if (tx_error)
+		net_device_tx_error(adapter->net_device);
 	net_device_schedule_poll(adapter->net_device);
 }
 

@@ -14,8 +14,8 @@ Parent: [WS004](../ws.md)
 | HW-T13 | PC/AT warm reset | Three consecutive guest reboots reach fresh login with clean kernel BSS state |
 | HW-T14 | USB function model | Multiple configurations, IAD/Union, class-specific descriptors, alternate endpoints, strings, sibling claims, and failed-selection rollback pass production-source fixtures |
 | HW-T15 | Concurrent xHCI URBs | Control, interrupt, bulk RX/TX, and independent storage requests complete out of order; isolated cancel, quiesce, and reclaim reserve invariants pass |
-| HW-T16 | Removable net device | Carrier changes, queued-RX detach, ARP/route purge, deferred release, shutdown, and more than eight reconnects pass without stale ownership |
-| HW-T17 | CDC NCM wire and driver | NTH16/NDP16 valid/malformed fixtures, strict negotiation, bind/unwind, RX/TX, notification, detach, reconnect, and concurrent storage pass |
+| HW-T16 | Removable net device | Carrier changes, queued-RX detach, ARP/route purge, locked asynchronous TX-error accounting during removal, deferred release, shutdown, and more than eight reconnects pass without stale ownership |
+| HW-T17 | CDC NCM wire and driver | NTH16/NDP16 valid/malformed fixtures, strict negotiation, bind/unwind, RX/TX, terminal-result accounting, administrative cancellation, notification, detach, reconnect, and concurrent storage pass |
 | HW-T18 | USB binding transactions | Idle inactive-alt URBs, interface-scoped switch admission, sibling concurrency, submit races, provisional attach abort, detach retention, EP0 serialization, and Mass Storage regression pass |
 | HW-T19 | RTL8156 NCM association | An unsupported-vendor/NCM/ECM three-configuration fixture selects Union-associated NCM without requiring an IAD; matching IAD corroborates, contradictions reject, binding diagnostics identify selection/outcome, and one final Latitude insertion publishes `ue0` |
 | HW-T20 | NVMe QEMU | Admin/I/O queue ownership, Identify, namespace bounds, read/write/flush, concurrency, reset, strict primary/backup GPT discovery, and failure tests pass on disposable images |
@@ -654,15 +654,40 @@ cannot precede worker retirement. The failed-attach fixture makes cleanup fail
 once, verifies that the provisional graph remains intact, then completes one
 forced cleanup without a double release.
 
+Q054 extends the production net-device and NCM fixtures through asynchronous TX
+accounting. An accepted frame increments `tx_packets` and `tx_bytes` once;
+later `STALL`, `TIMEOUT`, `DISCONNECTED`, or `IO_ERROR` completion increments
+`tx_errors` exactly once without changing `tx_dropped`. Administrative
+`CANCELLED` completion during close, detach, or shutdown is not an error or a
+drop. The cases cover callback-before-poll publication, close after a published
+error, forced detach with pending accepted TX, quarantine and checked cleanup
+retry, and twelve fresh reconnect generations without counter or busy-state
+leakage. The common net-device fixture separately proves locked error updates
+while the device is live and while checked removal retains the object.
+
 ```sh
+plan/ws004-hardware/tests/run-net-device-hotplug-test.sh
 plan/ws004-hardware/tests/run-usb-cdc-ncm-wire-test.sh
 plan/ws004-hardware/tests/run-usb-cdc-ncm-driver-test.sh
 ```
 
 The integrated runner executes ordinary and ASan/UBSan builds plus GCC
-`-fanalyzer`; its q028 result is 1,283 checks in each runtime mode. This is an
-automatic software gate. A real NCM role or `g_ncm` gadget still owns the
-physical link/transfer/reconnect acceptance in WS005 NET-T40.
+`-fanalyzer`; its q054 result is 2,013 checks in each runtime mode. The retained
+USB binding, concurrent-xHCI, USB function, checked-recovery, and shutdown-order
+regressions also pass; their current focused counts include 971 binding checks,
+1,496 USB-function checks, and 1,111 checked-recovery checks in each applicable
+ordinary and sanitizer mode. Configured amd64 and i386 production objects and
+the repository `make -j16` build remain required gates.
+
+The final q054 runtime gate passes with fresh private configured amd64 image
+SHA-256
+`0c794540d535c9a83006428683a16db4d4ffc949b457819401ce00938a7d187c`.
+A disposable 4-GiB, 4-CPU OVMF `q35` guest boots solely through `qemu-xhci`
+USB Mass Storage, mounts the overlay root, activates swap, starts init, and
+reaches the exact `login:` marker in 13 seconds. This is a boot/storage
+integration smoke test, not a claim of physical NCM traffic. A real NCM role
+or `g_ncm` gadget still owns the physical link/transfer/reconnect acceptance in
+WS005 NET-T40.
 
 ## HW-T19 RTL8156 NCM association
 

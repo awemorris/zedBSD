@@ -235,6 +235,13 @@ carrier_and_route_test(void)
 	packet.length = 64;
 	assert(net_device_transmit(device, &packet) == 0);
 	assert(transmit_count == 1);
+	assert(device->tx_packets == 1 && device->tx_bytes == 64 &&
+	    device->tx_errors == 0 && device->tx_dropped == 0);
+	net_device_tx_error(device);
+	assert(device->tx_packets == 1 && device->tx_bytes == 64 &&
+	    device->tx_errors == 1 && device->tx_dropped == 0);
+	net_device_tx_error(NULL);
+	assert(device->tx_errors == 1 && device->tx_dropped == 0);
 	assert(net_device_set_carrier(device, 0) == 0);
 	assert(!net_device_running(device));
 	memset(&packet, 0, sizeof(packet));
@@ -476,10 +483,17 @@ static void
 close_detach_race_test(void)
 {
 	struct net_device *device = create_device("ue0");
+	struct packet_buf packet;
 	pthread_t close_worker, gone_worker;
+	uint64_t tx_errors, tx_dropped;
 	unsigned released;
 
 	assert(net_device_open(device) == 0);
+	memset(&packet, 0, sizeof(packet));
+	packet.length = 96;
+	assert(net_device_transmit(device, &packet) == 0);
+	tx_errors = device->tx_errors;
+	tx_dropped = device->tx_dropped;
 	atomic_store(&close_entered, 0);
 	atomic_store(&close_returned, 0);
 	atomic_store(&close_thread_started, 0);
@@ -497,6 +511,11 @@ close_detach_race_test(void)
 		sched_yield();
 	while (net_device_is_live(device))
 		sched_yield();
+	/* A terminal completion may publish after removal has withdrawn the
+	 * registry identity but before the joined driver close returns. */
+	net_device_tx_error(device);
+	assert(device->tx_errors == tx_errors + 1U &&
+	    device->tx_dropped == tx_dropped);
 	/* Detach must not return and permit USB/HCD ownership release while a
 	 * concurrent driver close remains inside its drain boundary. */
 	assert(!atomic_load_explicit(&close_returned, memory_order_acquire));

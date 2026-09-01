@@ -719,6 +719,18 @@ net_device_transmit(struct net_device *device, struct packet_buf *packet)
 }
 
 void
+net_device_tx_error(struct net_device *device)
+{
+	bool enabled;
+
+	if (device == NULL)
+		return;
+	enabled = device_lock();
+	device->tx_errors++;
+	device_unlock(enabled);
+}
+
+void
 net_device_receive(struct net_device *device, struct packet_buf *packet)
 {
 	bool enabled;

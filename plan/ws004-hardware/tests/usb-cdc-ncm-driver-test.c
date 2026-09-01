@@ -107,6 +107,7 @@ static unsigned drain_fail_once;
 static unsigned packet_live;
 static unsigned packet_frees;
 static unsigned received_packets;
+static unsigned tx_error_reports;
 static uint8_t received_frame[DRV_USB_CDC_NCM_MAX_DATAGRAM_SIZE];
 static size_t received_length;
 static struct net_device *published_device;
@@ -995,7 +996,25 @@ net_device_poll(struct net_device *device, unsigned budget)
 int
 net_device_transmit(struct net_device *device, struct packet_buf *packet)
 {
-	return device->ops->transmit(device, packet);
+	size_t length = packet->length;
+	int error = device->ops->transmit(device, packet);
+
+	if (error == 0) {
+		device->tx_packets++;
+		device->tx_bytes += length;
+	} else {
+		device->tx_errors++;
+		device->tx_dropped++;
+	}
+	return error;
+}
+
+void
+net_device_tx_error(struct net_device *device)
+{
+	CHECK(device != NULL);
+	device->tx_errors++;
+	tx_error_reports++;
 }
 
 void
@@ -1452,6 +1471,164 @@ test_io_and_lifetime(void)
 }
 
 static void
+test_tx_completion_accounting(void)
+{
+	static const enum drv_usb_urb_status failures[] = {
+		DRV_USB_URB_STALL,
+		DRV_USB_URB_TIMEOUT,
+		DRV_USB_URB_DISCONNECTED,
+		DRV_USB_URB_IO_ERROR
+	};
+	struct drv_usb_device device;
+	struct ncm_adapter *adapter;
+	struct packet_buf *packet;
+	uint8_t frame[64];
+	uint64_t packets_before, bytes_before, errors_before, drops_before;
+	unsigned reports_before, index;
+
+	memset(frame, 0x4e, sizeof(frame));
+	for (index = 0; index < sizeof(failures) / sizeof(failures[0]); index++) {
+		function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
+		adapter = attach_function(&device);
+		CHECK(net_device_open(published_device) == 0);
+		packet = packet_buf_alloc(0);
+		CHECK(packet != NULL && packet_buf_append(packet,
+		    sizeof(frame)) != NULL);
+		memcpy(packet->data, frame, sizeof(frame));
+		reports_before = tx_error_reports;
+		packets_before = published_device->tx_packets;
+		bytes_before = published_device->tx_bytes;
+		errors_before = published_device->tx_errors;
+		drops_before = published_device->tx_dropped;
+		CHECK(net_device_transmit(published_device, packet) == 0);
+		CHECK(adapter->tx_busy != 0 && adapter->tx_ready == 0 &&
+		    published_device->tx_packets == packets_before + 1U &&
+		    published_device->tx_bytes == bytes_before + sizeof(frame));
+		fake_complete(adapter->tx_urb, failures[index], 0);
+		/* The terminal callback accounts before worker polling, so a close
+		 * cannot discard the failure by clearing scheduled work. */
+		CHECK(tx_error_reports == reports_before + 1U &&
+		    published_device->tx_packets == packets_before + 1U &&
+		    published_device->tx_bytes == bytes_before + sizeof(frame) &&
+		    published_device->tx_errors == errors_before + 1U &&
+		    published_device->tx_dropped == drops_before &&
+		    adapter->tx_ready != 0 && adapter->tx_busy != 0);
+		CHECK(net_device_poll(published_device, 8) == 1);
+		CHECK(adapter->tx_ready == 0 && adapter->tx_busy == 0 &&
+		    tx_error_reports == reports_before + 1U &&
+		    published_device->tx_errors == errors_before + 1U &&
+		    published_device->tx_dropped == drops_before);
+		CHECK(net_device_poll(published_device, 8) == 0);
+		CHECK(tx_error_reports == reports_before + 1U);
+		net_device_close(published_device);
+		CHECK(core_detach(&device.configuration.interfaces[0],
+		    DRV_USB_DETACH_FORCE) == 0);
+		CHECK(hal_live == 0 && live_urbs == 0 && pending_urbs == 0 &&
+		    packet_live == 0);
+	}
+
+	/* A genuine completion immediately before close is already accounted and
+	 * cannot be counted again when stop drains and clears its ready flag. */
+	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	adapter = attach_function(&device);
+	CHECK(net_device_open(published_device) == 0);
+	packet = packet_buf_alloc(0);
+	CHECK(packet != NULL && packet_buf_append(packet, sizeof(frame)) != NULL);
+	memcpy(packet->data, frame, sizeof(frame));
+	reports_before = tx_error_reports;
+	packets_before = published_device->tx_packets;
+	bytes_before = published_device->tx_bytes;
+	errors_before = published_device->tx_errors;
+	drops_before = published_device->tx_dropped;
+	CHECK(net_device_transmit(published_device, packet) == 0);
+	fake_complete(adapter->tx_urb, DRV_USB_URB_IO_ERROR, 0);
+	CHECK(tx_error_reports == reports_before + 1U &&
+	    published_device->tx_packets == packets_before + 1U &&
+	    published_device->tx_bytes == bytes_before + sizeof(frame) &&
+	    published_device->tx_errors == errors_before + 1U);
+	net_device_close(published_device);
+	CHECK(adapter->tx_busy == 0 && adapter->tx_ready == 0 &&
+	    tx_error_reports == reports_before + 1U &&
+	    published_device->tx_errors == errors_before + 1U &&
+	    published_device->tx_dropped == drops_before);
+	CHECK(core_detach(&device.configuration.interfaces[0],
+	    DRV_USB_DETACH_FORCE) == 0);
+	CHECK(hal_live == 0 && live_urbs == 0 && pending_urbs == 0 &&
+	    packet_live == 0);
+
+	/* Cancelling an accepted request for administrative close is not an error.
+	 * The same persistent URB remains reusable after a subsequent open. */
+	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	adapter = attach_function(&device);
+	CHECK(net_device_open(published_device) == 0);
+	packet = packet_buf_alloc(0);
+	CHECK(packet != NULL && packet_buf_append(packet, sizeof(frame)) != NULL);
+	memcpy(packet->data, frame, sizeof(frame));
+	reports_before = tx_error_reports;
+	packets_before = published_device->tx_packets;
+	bytes_before = published_device->tx_bytes;
+	errors_before = published_device->tx_errors;
+	drops_before = published_device->tx_dropped;
+	CHECK(net_device_transmit(published_device, packet) == 0);
+	net_device_close(published_device);
+	CHECK(adapter->tx_urb->status == DRV_USB_URB_CANCELLED &&
+	    adapter->tx_busy == 0 && adapter->tx_ready == 0 &&
+	    tx_error_reports == reports_before &&
+	    published_device->tx_packets == packets_before + 1U &&
+	    published_device->tx_bytes == bytes_before + sizeof(frame) &&
+	    published_device->tx_errors == errors_before &&
+	    published_device->tx_dropped == drops_before);
+	CHECK(net_device_open(published_device) == 0);
+	packet = packet_buf_alloc(0);
+	CHECK(packet != NULL && packet_buf_append(packet, sizeof(frame)) != NULL);
+	memcpy(packet->data, frame, sizeof(frame));
+	CHECK(net_device_transmit(published_device, packet) == 0);
+	CHECK(published_device->tx_packets == packets_before + 2U &&
+	    published_device->tx_bytes == bytes_before + 2U * sizeof(frame));
+	fake_complete(adapter->tx_urb, DRV_USB_URB_COMPLETE,
+	    adapter->tx_urb->length);
+	CHECK(net_device_poll(published_device, 8) == 1 &&
+	    adapter->tx_busy == 0 && tx_error_reports == reports_before &&
+	    published_device->tx_errors == errors_before &&
+	    published_device->tx_dropped == drops_before);
+	net_device_close(published_device);
+	CHECK(core_detach(&device.configuration.interfaces[0],
+	    DRV_USB_DETACH_FORCE) == 0);
+	CHECK(hal_live == 0 && live_urbs == 0 && pending_urbs == 0 &&
+	    packet_live == 0);
+
+	/* Direct detach also cancels an accepted pending TX administratively.  A
+	 * failed registry withdrawal retains the graph for inspection and retry. */
+	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	adapter = attach_function(&device);
+	CHECK(net_device_open(published_device) == 0);
+	packet = packet_buf_alloc(0);
+	CHECK(packet != NULL && packet_buf_append(packet, sizeof(frame)) != NULL);
+	memcpy(packet->data, frame, sizeof(frame));
+	reports_before = tx_error_reports;
+	packets_before = published_device->tx_packets;
+	bytes_before = published_device->tx_bytes;
+	errors_before = published_device->tx_errors;
+	drops_before = published_device->tx_dropped;
+	CHECK(net_device_transmit(published_device, packet) == 0);
+	net_device_gone_fail_once = 1;
+	CHECK(core_detach(&device.configuration.interfaces[0],
+	    DRV_USB_DETACH_FORCE) == EWOULDBLOCK);
+	CHECK(adapter->ready == 0 && adapter->tx_busy == 0 &&
+	    adapter->tx_ready == 0 &&
+	    adapter->tx_urb->status == DRV_USB_URB_CANCELLED &&
+	    tx_error_reports == reports_before &&
+	    published_device->tx_packets == packets_before + 1U &&
+	    published_device->tx_bytes == bytes_before + sizeof(frame) &&
+	    published_device->tx_errors == errors_before &&
+	    published_device->tx_dropped == drops_before);
+	CHECK(core_detach(&device.configuration.interfaces[0],
+	    DRV_USB_DETACH_FORCE) == 0);
+	CHECK(hal_live == 0 && live_urbs == 0 && pending_urbs == 0 &&
+	    packet_live == 0);
+}
+
+static void
 test_immediate_completion(void)
 {
 	struct drv_usb_device device;
@@ -1824,21 +2001,43 @@ test_drain_quarantine(void)
 {
 	struct drv_usb_device device;
 	struct ncm_adapter *adapter;
+	struct packet_buf *packet;
+	uint8_t frame[64];
+	uint64_t errors_before, drops_before;
+	unsigned reports_before;
 
+	memset(frame, 0x71, sizeof(frame));
 	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
 	adapter = attach_function(&device);
 	CHECK(net_device_open(published_device) == 0);
+	packet = packet_buf_alloc(0);
+	CHECK(packet != NULL && packet_buf_append(packet, sizeof(frame)) != NULL);
+	memcpy(packet->data, frame, sizeof(frame));
+	reports_before = tx_error_reports;
+	errors_before = published_device->tx_errors;
+	drops_before = published_device->tx_dropped;
+	CHECK(net_device_transmit(published_device, packet) == 0);
+	fake_complete(adapter->tx_urb, DRV_USB_URB_IO_ERROR, 0);
+	CHECK(tx_error_reports == reports_before + 1U &&
+	    published_device->tx_errors == errors_before + 1U &&
+	    published_device->tx_dropped == drops_before &&
+	    adapter->tx_busy != 0 && adapter->tx_ready != 0);
 	drain_fail_once = 1;
 	CHECK(core_detach(&device.configuration.interfaces[0],
 	    DRV_USB_DETACH_FORCE) == ETIMEDOUT);
-	CHECK(adapter->quarantined != 0);
+	CHECK(adapter->quarantined != 0 && adapter->tx_busy != 0 &&
+	    tx_error_reports == reports_before + 1U &&
+	    published_device->tx_errors == errors_before + 1U &&
+	    published_device->tx_dropped == drops_before);
 	CHECK(device.configuration.interfaces[1].claimed_by != NULL);
 	/* The first cancel already retired every fake request.  A bus-level
 	 * teardown retry may now finish the retained ownership graph. */
 	adapter->quarantined = 0;
 	CHECK(core_detach(&device.configuration.interfaces[0],
 	    DRV_USB_DETACH_FORCE) == 0);
-	CHECK(published_device == NULL && live_urbs == 0 && hal_live == 0);
+	CHECK(tx_error_reports == reports_before + 1U &&
+	    published_device == NULL && live_urbs == 0 && hal_live == 0 &&
+	    packet_live == 0);
 }
 
 static void
@@ -1876,16 +2075,51 @@ test_registry_ninth_bind(void)
 static void
 test_twelve_reconnects(void)
 {
+	uint8_t frame[64];
 	unsigned iteration;
 
+	memset(frame, 0x5c, sizeof(frame));
 	for (iteration = 0; iteration < 12U; iteration++) {
 		struct drv_usb_device device;
 		struct ncm_adapter *adapter;
+		struct packet_buf *packet;
+		unsigned reports_before = tx_error_reports;
 
 		function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
 		adapter = attach_function(&device);
 		CHECK(!strcmp(adapter->net_device->name, "ue0"));
+		CHECK(adapter->net_device->tx_packets == 0 &&
+		    adapter->net_device->tx_bytes == 0 &&
+		    adapter->net_device->tx_errors == 0 &&
+		    adapter->net_device->tx_dropped == 0);
 		CHECK(net_device_open(adapter->net_device) == 0);
+		packet = packet_buf_alloc(0);
+		CHECK(packet != NULL && packet_buf_append(packet,
+		    sizeof(frame)) != NULL);
+		memcpy(packet->data, frame, sizeof(frame));
+		CHECK(net_device_transmit(adapter->net_device, packet) == 0);
+		net_device_close(adapter->net_device);
+		CHECK(adapter->tx_urb->status == DRV_USB_URB_CANCELLED &&
+		    adapter->net_device->tx_packets == 1 &&
+		    adapter->net_device->tx_bytes == sizeof(frame) &&
+		    adapter->net_device->tx_errors == 0 &&
+		    adapter->net_device->tx_dropped == 0 &&
+		    tx_error_reports == reports_before);
+		CHECK(net_device_open(adapter->net_device) == 0);
+		packet = packet_buf_alloc(0);
+		CHECK(packet != NULL && packet_buf_append(packet,
+		    sizeof(frame)) != NULL);
+		memcpy(packet->data, frame, sizeof(frame));
+		CHECK(net_device_transmit(adapter->net_device, packet) == 0);
+		fake_complete(adapter->tx_urb, DRV_USB_URB_COMPLETE,
+		    adapter->tx_urb->length);
+		CHECK(net_device_poll(adapter->net_device, 8) == 1 &&
+		    adapter->tx_busy == 0 &&
+		    adapter->net_device->tx_packets == 2 &&
+		    adapter->net_device->tx_bytes == 2U * sizeof(frame) &&
+		    adapter->net_device->tx_errors == 0 &&
+		    adapter->net_device->tx_dropped == 0 &&
+		    tx_error_reports == reports_before);
 		net_device_close(adapter->net_device);
 		CHECK(core_detach(&device.configuration.interfaces[0],
 		    DRV_USB_DETACH_FORCE) == 0);
@@ -2168,6 +2402,7 @@ main(void)
 	test_optional_capabilities();
 	test_filter_open_order_failure_and_reopen();
 	test_io_and_lifetime();
+	test_tx_completion_accounting();
 	test_immediate_completion();
 	test_poll_budget_and_completion_storm();
 	test_rearm_retry_and_quarantine();

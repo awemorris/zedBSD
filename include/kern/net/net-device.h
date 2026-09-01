@@ -105,6 +105,10 @@ int net_device_open(struct net_device *device);
  * close requested with IRQs already disabled is conservatively deferred. */
 void net_device_close(struct net_device *device);
 int net_device_transmit(struct net_device *device, struct packet_buf *packet);
+/* Record one genuine terminal failure reported after transmit accepted a
+ * packet. Accepted packet/byte counters remain unchanged and this does not
+ * classify the packet as dropped. The driver owns exactly-once publication. */
+void net_device_tx_error(struct net_device *device);
 void net_device_receive(struct net_device *device, struct packet_buf *packet);
 void net_device_schedule_poll(struct net_device *device);
 unsigned net_device_poll(struct net_device *device, unsigned budget);

@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p017`
 
-Status: deferred; human TX-statistics decision required; not queued
+Status: Complete (`q054`)
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -47,8 +47,9 @@ delivered and resynchronizes the next expectation to the wire sequence plus
 one, malformed input changes no sequence state, and completion work is
 budgeted. p020 also owns packet-filter programming on open after the active
 alternate. Those items no longer wait on this broader Phase, but p017 is
-deferred pending the shared asynchronous-TX statistics decision and any later
-recovery work outside p020's explicit boundary.
+now complete after q053 closed the shared asynchronous-TX statistics decision
+and q054 implemented it. Later recovery work outside p020's explicit boundary
+remains separate.
 
 ## Planned design work
 
@@ -57,12 +58,11 @@ recovery work outside p020's explicit boundary.
 2. Define the `net_device` meaning of accepted-versus-completed TX statistics,
    then publish terminal bulk-OUT errors without double-consuming a packet or
    racing device removal.
-3. Decide whether any transport-loss or quarantine recovery behavior beyond
-   p020 is required after physical evidence, without adding notification
-   reassembly or an xHCI IRQ redesign implicitly.
-4. Add production-source fixtures for terminal TX error, close/detach during
-   accounting, reconnect reset, and any separately approved residual recovery
-   rule.
+3. Add production-source fixtures for every accepted terminal TX error,
+   exactly-once callback publication, close/detach cancellation, a genuine
+   completion immediately before close, and close/open reuse.
+4. Retain transport-loss or quarantine recovery beyond p020 as future work
+   unless new physical evidence identifies one exact missing rule.
 
 ## Completion conditions
 
@@ -75,12 +75,11 @@ recovery work outside p020's explicit boundary.
 
 ## Reconsideration boundary
 
-Do not queue this remaining Phase until the meaning of asynchronous TX
-statistics is explicit and new physical evidence identifies any additional
-recovery rule. If correct accounting requires changing the general
-`net_device` contract, plan that shared change before modifying the NCM driver
-or its public headers. Do not fold p020, notification reassembly, xHCI IRQ
-redesign, or ECM into p017 merely because they concern the same device.
+The asynchronous TX-statistics meaning is now explicit. Return to human design
+only if implementation would require changing the accepted counter meanings,
+publishing a public UAPI, or adding a recovery rule without failure evidence.
+Do not fold p020, notification reassembly, xHCI IRQ redesign, or ECM into p017
+merely because they concern the same device.
 
 ## q053 readiness audit (2026-09-01)
 
@@ -97,10 +96,62 @@ general `net_device` statistics contract:
 - whether administrative `CANCELLED` during close/detach is excluded from
   failure statistics.
 
-The recommended compatible policy is to retain accepted/submitted
-`tx_packets`/`tx_bytes`, increment `tx_errors` exactly once for genuine later
-`STALL`, `TIMEOUT`, `DISCONNECTED`, or `IO_ERROR`, leave `tx_dropped` unchanged,
-and exclude administrative cancellation. This is a recommendation, not an
-adopted decision. Q029 supplies no residual physical recovery failure beyond
-the already completed p020 rules. ECM remains outside p017 and would require a
+The recommended compatible policy was accepted by the user on 2026-09-01:
+retain accepted/submitted `tx_packets`/`tx_bytes`, increment `tx_errors`
+exactly once for genuine later `STALL`, `TIMEOUT`, `DISCONNECTED`, or
+`IO_ERROR`, leave `tx_dropped` unchanged, and exclude administrative
+`CANCELLED`. Q029 supplies no residual physical recovery failure beyond the
+already completed p020 rules. ECM remains outside p017 and would require a
 separate consumer Phase after the common contract is fixed.
+
+## q054 implementation boundary
+
+The general network layer supplies one locked asynchronous-TX-error helper.
+It changes only `tx_errors`; accepted packet and byte counters remain owned by
+`net_device_transmit()`, and drops retain their existing synchronous rejection
+meaning. CDC NCM classifies the terminal status in the one USB completion
+callback and calls the helper only for the four accepted genuine failures.
+The USB core's single terminal-claim callback contract supplies exactly-once
+publication even when HCD completion races administrative cancellation.
+
+This callback-side accounting deliberately precedes worker polling. A close,
+detach, or shutdown may discard scheduled poll work after joining/cancelling
+URBs, but it cannot discard a genuine error already published by the terminal
+callback. An orderly cancellation follows the same callback path and is
+explicitly ignored. A failed drain retains the existing graph and does not
+invent a terminal result.
+
+## q054 implementation result (2026-09-01)
+
+The common network-device layer now exposes a locked internal
+`net_device_tx_error()` helper. CDC NCM calls it from the one terminal TX URB
+callback only for `STALL`, `TIMEOUT`, `DISCONNECTED`, and `IO_ERROR`.
+Successful driver acceptance remains the `tx_packets`/`tx_bytes` boundary,
+later terminal failure changes only `tx_errors`, and administrative
+`CANCELLED` changes no failure counter. The callback does not clear `tx_busy`:
+poll or the checked stop/drain path first observes HCD ownership release and
+then makes the persistent URB reusable.
+
+The common hotplug fixture passes accepted-counter, asynchronous-error,
+unchanged-drop, null-helper, and removal-join cases. The production-source NCM
+fixture passes ordinary and ASan/UBSan runs at 2,013 checks each plus its
+analyzer gate. It covers every genuine status, completion-before-poll,
+completion-before-close, no double account after a second poll or drain retry,
+orderly close/detach cancellation, close/open URB reuse, and twelve fresh
+detach/reconnect generations with zero inherited statistics.
+
+The retained NCM wire, USB binding, concurrent-URB, USB recovery, and shutdown
+regressions pass. Configured amd64 and i386 production objects compile, the
+ordinary repository `make -j16` passes, and a fresh private amd64/xHCI
+configured image builds successfully. Its SHA-256 is
+`0c794540d535c9a83006428683a16db4d4ffc949b457819401ce00938a7d187c`.
+A disposable 4-GiB, four-CPU OVMF q35 guest booted that image solely through
+xHCI USB Storage, mounted the overlay root, activated `swap0`, started init,
+and reached the exact `login:` prompt in 13 seconds.
+
+CDC ECM consumption of the helper, coherent locked `SIOCGIFSTATS` snapshots
+on i386, and conversion of dp8390's private accounting are separate future
+boundaries. They neither change nor block this NCM Phase. An autonomous NCM TX
+timeout policy is also separate: the present asynchronous submit path does not
+itself manufacture `TIMEOUT`, but correctly classifies one if the USB layer
+publishes it.

@@ -18,6 +18,8 @@ unit label. `ws004-p020` deterministic CDC NCM hardening and
 complete; q052 has completed `ws004-p021`'s current-source automatic/runtime
 milestone, including one fresh xHCI USB-root QEMU boot, and the Phase is
 uncleared only at one hash-pinned Latitude/RTL8156 checkpoint;
+q054 completed `ws004-p017`'s shared asynchronous-TX statistics helper and
+exactly-once CDC NCM terminal accounting;
 `ws004-p027`--`p030`
 define the later Archer T3U Nano WLAN implementation path
 
@@ -48,8 +50,11 @@ shared-INTx dispatch, and worker-context root hotplug through all focused,
 configured-build, regression, repository-build, and two-cell QEMU gates. `p018`
 corrected the IAD-less, Union-associated NCM match exposed by
 the first physical RTL8156 insertion, and the accepted follow-up published
-`ue0`. Q053 confirms that the broader asynchronous-TX/accounting semantics
-remain a human decision in p017; no decision-free implementation slice exists.
+`ue0`. Q054 resolves the asynchronous-TX/accounting boundary: successful
+driver acceptance owns packet/byte counters, later genuine NCM terminal
+failure adds one error only, and administrative cancellation adds none. Its
+focused, sanitizer, analyzer, configured-build, retained-regression, and fresh
+OVMF q35/xHCI USB-root gates pass.
 
 Resume point: p031, p032, and p033 are complete, q048 consumed their USB HID
 handoff, and q049 completed p019's automatic ECM and four-cell QEMU scope. No
@@ -66,9 +71,9 @@ automatic loader/installer prerequisites before requesting that physical
 checkpoint. Q052 consumed q047's Noct release and completed p021's disposable
 QEMU boot; one hash-pinned Latitude checkpoint remains. P019 completed in
 q049 as an independent ECM baseline. The remaining asynchronous-TX/accounting
-portion of p017 is explicitly deferred pending the shared statistics decision;
-it stays later
-WS004 work. WLAN planning has resumed with the Archer T3U Nano as
+portion of p017 completed in q054. CDC ECM adoption of the same helper remains
+a separate future consumer rather than reopening NCM. WLAN planning has
+resumed with the Archer T3U Nano as
 the first target. `p026` must confirm the physical adapter descriptor and
 separate firmware-package policy; `p027`--`p030` then progress through the
 generic kernel WLAN core, RTL8822BU USB scan, WPA2-Personal/CCMP L2, and final
@@ -97,7 +102,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p014`](phase014-cdc-ncm-driver/phase.md) | Complete (`q027`) | Strict self-contained CDC NCM `ueN` integration passes automatic lifecycle, concurrency, build, and QEMU regression gates; physical NCM remains WS005 |
 | [`ws004-p015`](phase015-usb-binding-transactions/phase.md) | Complete (`q027`) | General binding lifecycle, interface I/O gate, active-endpoint submission, endpoint-zero serialization, and conservative legacy-HCD ownership passed focused, sanitizer, analyzer, build, and USB-root QEMU gates |
 | [`ws004-p016`](phase016-legacy-hcd-request-retirement/phase.md) | Complete (`q041`) | Controller-proven UHCI frame and EHCI Async Advance retirement, callback re-entry and toggle continuity pass focused/configured/QEMU gates; unavailable fault injection is explicitly model-only |
-| [`ws004-p017`](phase017-cdc-ncm-runtime-recovery/phase.md) | Deferred; human TX-statistics decision required; not queued | p020 owns the approved recovery rules; choose accepted-vs-completed counters, terminal error/drop accounting, and administrative-cancel treatment before p017 implementation |
+| [`ws004-p017`](phase017-cdc-ncm-runtime-recovery/phase.md) | Complete (`q054`) | Accepted packet/byte counters remain, genuine asynchronous NCM terminal failure adds exactly one locked `tx_errors`, administrative cancellation adds none, and focused/sanitizer/analyzer/build/OVMF xHCI USB-root gates pass |
 | [`ws004-p018`](phase018-rtl8156-ncm-association/phase.md) | Complete (`q028`) | CDC Union is authoritative and IAD is optional strict corroboration; automatic gates pass and physical RTL8156 configuration 2 binds and publishes `ue0`; carrier/data work moved to WS005 p001 |
 | [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Complete (`q049`) | Independent standards CDC ECM, the general xHCI/EHCI/UHCI zero-packet HCD contract, focused lifetime/fault evidence, and all four IDE/xHCI-storage static/DHCP QEMU cells pass without NCM wire sharing or VID:PID/configuration quirks |
 | [`ws004-p020`](phase020-cdc-ncm-deterministic-hardening/phase.md) | Complete (`q029` automatic software scope) | Valid sequences accept/resynchronize, malformed input preserves state, completions and rearms are bounded/fair, and the packet filter is programmed transactionally on open; focused and regression gates pass |
@@ -124,11 +129,12 @@ Shared tests: [WS004 test index](tests/README.md)
 | arm64 IORT/GIC ITS backend | Deferred; public signature preserved and port returns unsupported | An arm64 PCIe platform Phase supplies firmware and interrupt-controller fixtures |
 | Non-PCI message source prefixes | Deferred; only canonical PCI BDF is accepted | A concrete platform device needs message interrupts and defines stable source identity |
 
-q029, p020, and WS005 p001 are complete through final Latitude-native external
+q029, p020, p017/q054, and WS005 p001 are complete through final
+Latitude-native external
 fetch. p021 is an independent standards correction rather than an active
 failure response; q052 retains its passing fresh-image QEMU result and only one
-physical checkpoint remains. Later WS004 boundaries after q052 are the
-decision-deferred p017, the p021 physical checkpoint, p025, and the planned-only
+physical checkpoint remains. Later WS004 boundaries after q054 are the p021
+physical checkpoint, p025, and the planned-only
 p026--p030 WLAN chain; q047 p031--p033 are complete. Additional work is
 HW-11, HW-20/HW-21, and HW-30 when their inputs and acceptance environments
 are available. q040 selects the evidence/policy-only p026 boundary; it does
@@ -187,7 +193,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-03 | Complete (`q016`) | Checked PCI IRQ/controller lifetime for EHCI and UHCI detach; xHCI is already converted and is outside this Phase | HW-00, checked PCI IRQ API from q015 | Busy/error removal retains all ownership; retry and final detach host fixtures plus i386 builds pass |
 | HW-10 | Complete (`q030`) | NVMe controller, admin/I/O queues, namespace naming, block integration, and disposable QEMU acceptance | HW-00 | QEMU NVMe identify/read/write/flush/concurrency/reset and GPT partition tests pass |
 | HW-11 | Planned as `ws004-p025` plus WS003 p018 | Read-only SN740 verification before the separately confirmed existing-FAT overlay install/boot acceptance | HW-10, BR-00, WS019 | Identify/read-only first; file writes occur only through the explicitly confirmed installer Phase |
-| HW-12 | Active (`q029` p020 hardening; q028 bind complete) | Independent CDC NCM class driver on the common USB/xHCI/net-device lifetime foundations; Union-associated NCM does not require an IAD; deterministic valid-sequence recovery, bounded completion work, and post-alternate open filtering precede one physical data check | HW-01 | p020 automatic gates pass, then WS005 proves or precisely bounds carrier/static/DHCP traffic on the Latitude RTL8156 |
+| HW-12 | Complete (`q054`; physical data previously accepted in WS005) | Independent CDC NCM class driver on the common USB/xHCI/net-device lifetime foundations; Union-associated NCM does not require an IAD; deterministic recovery, bounded work, transactional open filtering, and exactly-once asynchronous TX error accounting are complete | HW-01 | p020 and p017 automatic gates pass; the Latitude RTL8156 carrier/DHCP/ping/fetch result remains the accepted physical data evidence |
 | HW-13 | Complete as `ws004-p019` in `q049` | Independent standards-based CDC ECM driver and QEMU `usb-net` common-path baseline; no speculative shared ECM/NCM backend | HW-01, HW-12 foundations, NET-00 | QEMU selects ECM, publishes `ue0`, passes static/DHCP/ping in IDE and concurrent USB-storage topologies, honors zero-packet transfers, and preserves detach/reconnect ownership |
 | HW-20 | Deferred built-in follow-up; existing ID retained | RTL8822CE (`10ec:c822`, subsystem `10ec:c130`) architecture and native PCIe driver | BR-00, HW-00, stable generic WLAN core, separate 8822C firmware decision | Scan, authenticate, associate, and exchange data on the exact built-in hardware in a later Phase |
 | HW-21 | Deferred built-in follow-up; existing ID retained | Testable RTL8822CE-specific PCI/firmware hardware abstraction or protocol fixture | HW-20 design and the completed generic common-core fixture | Driver-specific state/error paths pass without claiming QEMU emulates the laptop radio |
