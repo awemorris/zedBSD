@@ -1,6 +1,6 @@
 # WS005 Phase 008: Archer T3U Nano physical acceptance
 
-Last updated: 2026-08-30
+Last updated: 2026-09-01
 
 Phase ID: `ws005-p008`
 
@@ -18,9 +18,10 @@ WLAN common/driver dependencies: [p027](../../ws004-hardware/phase027-wlan-uapi-
 
 ## Objective
 
-Accept one precisely identified TP-Link Archer T3U Nano revision as the first
-physical WLAN target without turning hardware access into an iterative
-development loop.
+Accept one precisely identified Japan-market TP-Link Archer T3U Nano as the
+first physical WLAN target without turning hardware access into an iterative
+development loop. Its label has no printed hardware revision; the exact
+retained USB descriptor is the unit's binding authority.
 
 After every automatic lower-layer, protocol, orchestration, build, static, and
 regression gate passes, p008 permits exactly one provisional physical check.
@@ -29,11 +30,13 @@ one final batch must produce five consecutive successful runs. The final batch
 is initiated by one human gate and proceeds without another approval, retry
 request, code/config change, or manual success decision between runs.
 
-The marketing name alone is not hardware identity. Primary evidence makes
-`2357:012e`/RTL8822BU the provisional V1.0 target and rejects the original
-RTL8828BU guess, but the purchased unit's descriptors remain authoritative.
-p008 does not bind or accept it until those values and the pinned firmware
-match the p026 identity profile.
+The marketing name alone is not hardware identity. The FCC V1.0 record is
+documentary RTL8822BU family evidence and the independent software mappings
+make `2357:012e`/RTL8822BU the target while rejecting the original RTL8828BU
+guess. The purchased unit is labelled `Archer T3U Nano`, region Japan, with no
+printed revision; its descriptors remain authoritative. p008 does not bind or
+accept it until those values and the pinned firmware match the p026 identity
+profile.
 
 ## Dependencies
 
@@ -53,7 +56,8 @@ match the p026 identity profile.
 
 ## Scope
 
-- identity capture for one Archer T3U Nano physical unit and hardware revision;
+- identity capture for the exact Archer T3U Nano physical unit, including its
+  Japan label, explicit absence of a printed revision, and descriptor profile;
 - one provisional attach/scan/associate/DHCP/reconnect/data/down check after
   automatic evidence is complete;
 - one combined provisional record feeding the p028 scan, p029 secure L2, p030
@@ -68,7 +72,8 @@ match the p026 identity profile.
 ## Non-goals
 
 - assuming all products sold as Archer T3U Nano use one USB id or chipset;
-- accepting a different Archer model, revision, clone, or unrecorded firmware;
+- accepting a different Archer model, descriptor profile, clone, or unrecorded
+  firmware;
 - debugging or changing code during a physical run;
 - requesting repeated provisional checks after each automatic change;
 - restarting the five-run counter inside p008 after a failed run;
@@ -78,9 +83,10 @@ match the p026 identity profile.
 
 ## Exact hardware identity contract
 
-Before Queue eligibility, record the expected product/SKU label and the
-authoritative candidate USB-id set. During the one provisional check, capture
-and compare at least:
+Before Queue eligibility, retain the expected product/SKU label
+`Archer T3U Nano`, Japan region, explicit absence of a printed revision, and the
+authoritative candidate descriptor profile. During the one provisional check,
+capture and compare at least:
 
 - USB vendor id, product id, and `bcdDevice`;
 - device, configuration, interface, and endpoint descriptors, including
@@ -88,16 +94,16 @@ and compare at least:
   interval;
 - manufacturer/product strings and a redacted or hashed serial if present;
 - negotiated USB speed, physical port/controller path, and selected driver;
-- firmware filename/version or embedded-firmware identity and cryptographic
-  digest, with its source and license record;
+- separately installed firmware filename/version and cryptographic digest,
+  with its package, acquisition source, and license record;
 - published WLAN interface name and permanent MAC in a privacy-preserving run
   record.
 
 Any mismatch is `hardware identity mismatch`, not a driver failure and not a
 reason to broaden the match table during the check. The first check determines
 whether the exact unit matches the predeclared target. No acceptance result may
-be generalized to another VID:PID, `bcdDevice`, firmware digest, or marketing
-revision.
+be generalized to another VID:PID, `bcdDevice`, interface/endpoint profile,
+firmware digest, label, or physical unit.
 
 ## Automatic preflight gate
 
@@ -128,7 +134,18 @@ all acceptance-relevant inputs:
 - boot image pathname, byte size, and digest;
 - kernel and, if independently replaceable, `/sbin/net`, `/sbin/networkd`,
   `/sbin/ifconfig`, `/sbin/wifi`, and `/sbin/dhcpc` digests;
-- build configuration, driver match data, and firmware filename/digest/license;
+- build configuration and driver match data;
+- the separately installed `wifi-firmware` package manifest, installed
+  firmware path `/lib/firmware/rtw88/rtw8822b_fw.bin`, 161,240-byte size,
+  version 30.20.0, SHA-256
+  `a72da690597bfa99d8eb6fc2ab090d18d8ad92ac2befd35db1c9e3662d8d8418`,
+  license SHA-256
+  `a61351665b4f264f6c631364f85b907d8f8f41f8b369533ef4021765f9f3b62e`,
+  the immutable acquisition endpoint
+  `https://github.com/endlessm/linux-firmware.git` at
+  revision `2f56219d20e4becccd718963fc3bcc671c543ce5`, and official-upstream
+  provenance commit `458e40fdbb4dad5134ec230a42df21aea1b5baf8` with WHENCE
+  SHA-256 `34f954c7d068ec4fd5fcc216471912dd3cf40ff60a7ffa8d06ff6f9b5999551f`;
 - wifi.conf format version and initial nonsecret policy state; secrets and
   reusable hashes of weak passphrases are not copied into the public ledger;
 - expected adapter identity, host USB controller/port, access-point identity,
@@ -255,19 +272,26 @@ evidence and digests.
 5. Accept only five consecutive complete ledger entries. On the first failure,
    stop and preserve evidence for a later Phase without a retry request.
 6. Record completion in the WS and test index without broadening the claim
-   beyond the exact frozen unit/revision/environment.
+   beyond the exact frozen unit/descriptor/environment.
 
 ## Queue-entry evidence checks
 
 These checks instantiate the fixed acceptance contract for the available lab;
 they do not reopen product policy or add human checkpoints:
 
-- Record the purchased label and compare the expected `2357:012e`/RTL8822BU
-  p026 profile, `bcdDevice`, descriptor signature, and firmware identity. A
-  mismatch stops the one provisional run and returns to a new identity Phase;
-  it never widens this target to RTL8828BU or another revision.
-- Import p026's approved firmware source, license/redistribution decision,
-  install path, digest, and missing/mismatch behavior into the candidate image.
+- Record the purchased Japan-market label, explicit absence of a printed
+  revision, and compare the authoritative `2357:012e`/RTL8822BU p026 profile,
+  `bcdDevice`, interface, endpoint signature, and firmware identity. A mismatch
+  stops the one provisional run and returns to a new identity Phase; it never
+  widens this target to RTL8828BU or another descriptor profile or unit.
+- Import the separately installed `wifi-firmware` package from p026/p028. Its
+  acquisition manifest names only
+  `https://github.com/endlessm/linux-firmware.git` revision
+  `2f56219d20e4becccd718963fc3bcc671c543ce5`; the evidence retains official
+  `linux-firmware` provenance commit
+  `458e40fdbb4dad5134ec230a42df21aea1b5baf8`, the frozen blob/license hashes,
+  install path, and missing/mismatch behavior. The candidate proves that the
+  package was separately installed, not fetched by the base build or kernel.
 - Record `wlan0` as the first common WLAN interface, per p028, and prove the
   lowest-available `wlanN` rule cannot race with another device in the frozen
   test topology.
@@ -306,8 +330,8 @@ they do not reopen product policy or add human checkpoints:
 - Evidence is bounded and redacted, recovery remains responsive, and no secret,
   callback, child, descriptor, key, driver, or USB reference remains live.
 - The claim names only the exact adapter identity, firmware, artifact, host/AP
-  environment, and tested security mode; it does not imply all Archer T3U Nano
-  revisions or general WLAN interoperability.
+  environment, and tested security mode; it does not imply another Archer T3U
+  Nano unit or descriptor profile, or general WLAN interoperability.
 
 ## Interruption and resumption
 

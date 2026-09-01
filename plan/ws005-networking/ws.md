@@ -23,11 +23,14 @@ non-root mutating network ioctls.  Its focused, analyzer, sanitizer, full
 build, and PC-98 native runtime gates pass.  The earlier RTL8156 carrier,
 DHCP, ping, and external-fetch path remains passing.
 
-Resume point: p002, p003, and p005 are complete. The next WLAN implementation
-dependency is `ws004-p026`, which must record the exact purchased Archer label,
-region, hardware revision, descriptors, and firmware provenance. The generic
-WLAN core/fake radio in `ws004-p027` follows before `ws005-p004`; p006 then
-consumes the completed p003/p005 contracts plus that primitive.
+Resume point: p002, p003, and p005 are complete. WS004 p026 is also complete:
+the purchased Japan-market Archer has no printed revision, its retained exact
+descriptor is authoritative, and the separately installed `wifi-firmware`
+package boundary is frozen. Q055 completed the generic WLAN core/fake radio in
+`ws004-p027`; `ws005-p004` is now dependency-ready, while the current priority
+continues with the independent RTL8822BU pre-radio substrate before returning
+to the command stack. P006 then consumes the completed p003/p005 contracts plus
+that primitive.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -59,10 +62,10 @@ common kernel WLAN work is owned by `ws004-p026` through `ws004-p030`.
   DNS, interactive database, or resident daemon role.
 - Use one authenticated Unix-domain control socket for root and authorized
   ordinary users; never trust an identity carried in the request payload.
-- Bring up TP-Link Archer T3U Nano V1.0 as the first WLAN target. Public
-  primary evidence identifies it as RTL8822BU, USB `2357:012e`; the exact
-  physical unit remains authoritative and must be recorded before driver
-  implementation.
+- Bring up the exact Japan-market TP-Link Archer T3U Nano as the first WLAN
+  target. It has no printed revision; its retained `2357:012e`,
+  `bcdDevice=2.10`, `ff/ff/ff`, five-endpoint descriptor is authoritative.
+  Public V1.0 evidence remains documentary RTL8822BU family evidence only.
 
 ## WS completion conditions
 
@@ -114,7 +117,8 @@ Initial scope includes:
 - explicit association and disconnection;
 - WPA2-Personal PSK with CCMP, including 4-way/group-key handling, rekey, and
   controlled-port state;
-- one TP-Link Archer T3U Nano V1.0 / RTL8822BU USB implementation;
+- one descriptor-confirmed Japan-market TP-Link Archer T3U Nano / RTL8822BU USB
+  implementation, without claiming a printed hardware revision;
 - root and per-user plaintext profiles with an `auto` flag;
 - high-level `net wifi` orchestration through DHCP; and
 - truthful hot-unplug, timeout, and failure reporting.
@@ -274,7 +278,7 @@ rather than being parsed as a WLAN request.
 | NET-24 | Superseded | Pluggable WPA backend family | Fixed primitive topology | No implementation |
 | NET-25 | Complete as p002 (`q053`) | WLAN v1 contract freeze | User decisions recorded above | P-book and dependent design records are synchronized; no implementation result claimed |
 | NET-26 | Planned as p003 | AF_UNIX peer credentials and one-socket authorization | NET-25 | Credential spoof/race/group/privilege fixtures pass |
-| NET-27 | Planned as p004 plus WS004 p027 | Primitive `/sbin/wifi` and stable WLAN ioctl contract | NET-25, common WLAN fixture | search/list/status/connect/disconnect pass without DHCP/persistence |
+| NET-27 | WS004 p027 complete (`q055`); p004 dependency-ready | Primitive `/sbin/wifi` and stable WLAN ioctl contract | NET-25, common WLAN fixture | search/list/status/connect/disconnect pass without DHCP/persistence |
 | NET-28 | Complete as p005 (`q051`) | System/per-user `wifi.conf` and `set-key` | NET-25 | ownership/mode/symlink/locking/atomicity/redaction and abrupt-stop/remount tests pass |
 | NET-29 | Planned as p006 | `ZNV2`, peer authorization, `wifi` child secret-FD bridge | NET-26--NET-28 | malformed/auth/timeout/cancel/crash fixtures pass |
 | NET-30 | Planned as p007 | Requested high-level `net wifi` operations | NET-29, WS004 WLAN fixture | full fake-device association/DHCP/down transaction passes |

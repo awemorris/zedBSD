@@ -1,11 +1,11 @@
 # HW-T32 Archer T3U Nano intake evidence
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 Phase: `ws004-p026`
 
-Status: automatic/read-only intake complete; printed product label fields are
-the only missing evidence
+Status: complete (`q055`); q040 read-only intake plus the exact-unit label and
+firmware-package decisions are closed
 
 ## Exact development unit descriptor
 
@@ -65,11 +65,11 @@ BOS:
 Device status: bus powered
 ```
 
-The future positive match is the exact combination of `2357:012e`, device
-revision `2.10`, interface `ff/ff/ff`, and the five-endpoint tuple above. It is
-not a vendor-wide, product-string, or generic vendor-class match. A different
-printed hardware revision remains a stop condition even if it reuses these
-descriptor fields.
+The positive match is the exact combination of `2357:012e`, device revision
+`2.10`, interface `ff/ff/ff`, and the five-endpoint tuple above. This retained
+descriptor is the binding authority for the exact purchased Japan-market unit;
+it is not a vendor-wide, product-string, marketing-revision, or generic
+vendor-class match.
 
 ## Independent 8822B mappings
 
@@ -103,12 +103,13 @@ Its exact `USB_DEVICE_AND_INTERFACE_INFO(0x2357, 0x012e, 0xff, 0xff,
 0xff)` entry selects `rtw8822b_hw_spec`.
 
 These two independent mappings agree with the FCC V1.0 internal-photo record.
-They reject the earlier RTL8828BU guess, but do not identify an unobserved
-printed revision of the purchased unit.
+They reject the earlier RTL8828BU guess. The FCC revision is documentary family
+evidence only: the purchased unit has no printed revision and is not asserted
+to be V1.0.
 
 ## Pinned firmware and license boundary
 
-The pinned upstream is official `linux-firmware` revision
+The pinned upstream is official `linux-firmware` commit
 `458e40fdbb4dad5134ec230a42df21aea1b5baf8`:
 
 | Property | Value |
@@ -124,6 +125,15 @@ The pinned upstream is official `linux-firmware` revision
 | License size | 2,115 bytes |
 | License SHA-256 | `a61351665b4f264f6c631364f85b907d8f8f41f8b369533ef4021765f9f3b62e` |
 
+The approved acquisition mirror is
+`https://github.com/endlessm/linux-firmware.git` at immutable revision
+`2f56219d20e4becccd718963fc3bcc671c543ce5`. At that revision,
+`rtw88/rtw8822b_fw.bin` is byte-identical to the pinned official-upstream blob,
+and the mirror's root `LICENCE.rtlwifi_firmware.txt` is byte-identical to the
+pinned license. The mirror is transport only: official provenance remains the
+`linux-firmware` commit and WHENCE record above, and the frozen size and
+SHA-256 values are authoritative.
+
 The pinned WHENCE entry says that the rtw88 firmware was supplied by a Realtek
 engineer and directs redistribution to the exact license above. That license
 permits unmodified binary redistribution with its copyright/disclaimer,
@@ -131,11 +141,15 @@ forbids endorsement and reverse engineering/decompilation/disassembly, and
 contains the stated limited patent license. It is not represented as zlib-
 licensed base-system source.
 
-The optional package identity is `firmware-rtw8822b`. It must contain the
-unmodified blob, the exact pinned license text, this upstream revision/path,
-size and digest, and an explicit update record. The zedBSD base contains only
-the native source and fixed request path. It contains neither the blob nor a
-build-time/runtime download, and a normal image cannot silently obtain it.
+The approved optional package identity and source root are `wifi-firmware` and
+`userland/packages/wifi-firmware/`. P028 will add the recipe and manifest with
+the frozen mirror revision, hashes, provenance, and update rule, but never the
+Realtek blob. Once implemented, only explicit selection/build of that package
+downloads the unmodified blob and license into ignored build storage, verifies
+both frozen SHA-256 values, and stages the blob for separate installation at
+the fixed path. An ordinary base build performs no firmware download, an
+ordinary image contains no blob, and the kernel never performs a runtime
+network fetch.
 
 ## Later HW-T31 negative inputs
 
@@ -154,14 +168,17 @@ Every case leaves carrier down, publishes no working-radio claim, and performs
 no partial upload. A newer upstream blob is the wrong-digest case until a
 separate package review advances every pinned field.
 
-## Remaining physical evidence
+## q055 final label observation and authority decision
 
-The descriptor cannot establish what is printed on the enclosure or package.
-To clear p026, one observation must still supply, with the serial omitted:
+The purchased product is labelled only `Archer T3U Nano`, its region is Japan,
+and no separate `Ver:` or hardware-revision marking is present. The serial
+remains omitted. Absence of a printed revision is the observed value; it is not
+filled from `bcdDevice=2.10` and does not turn the FCC V1.0 record into a claim
+about this unit.
 
-- printed model;
-- printed region; and
-- printed `Ver:`/hardware revision.
-
-Until then, p026 is `uncleared`, p027/p028 do not bind this purchased adapter,
-and no inference from `bcdDevice=2.10` fills the missing label field.
+The user accepts the complete q040 descriptor as the binding authority for this
+exact unit. The initial driver therefore matches only the retained
+`2357:012e`, `bcdDevice=2.10`, `ff/ff/ff`, five-endpoint profile. A future unit
+with a different descriptor returns to identity planning rather than widening
+the match. This decision closes p026 and releases p027; it supplies no zedBSD
+radio result.

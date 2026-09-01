@@ -11,6 +11,7 @@
 #include <zedbsd/netif.h>
 #include <zedbsd/netinet.h>
 #include <zedbsd/route.h>
+#include <zedbsd/wlan.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <string.h>
@@ -20,6 +21,16 @@ struct inet_interface {
 	uint32_t address;
 	uint32_t netmask;
 	uint32_t broadcast;
+};
+
+union inet_wlan_ioctl_request {
+	struct wlan_ioctl_header header;
+	struct wlan_scan_request scan;
+	struct wlan_scan_status_request scan_status;
+	struct wlan_bss_request bss;
+	struct wlan_connect_request connect;
+	struct wlan_disconnect_request disconnect;
+	struct wlan_status_request status;
 };
 
 static struct inet_interface interfaces[NET_DEVICE_MAX];
@@ -440,6 +451,155 @@ inet_ioctl_caller_is_superuser(void)
 	return permitted;
 }
 
+#define INET_IOCTL_DIRECTION_MASK ZEDBSD_IOC_INOUT
+#define INET_IOCTL_SIZE_MASK (0x1fffUL << 16)
+#define INET_IOCTL_GROUP_MASK (0xffUL << 8)
+#define INET_IOCTL_NUMBER_MASK 0xffUL
+#define INET_IOCTL_ENCODING_MASK                                               \
+	(INET_IOCTL_DIRECTION_MASK | INET_IOCTL_SIZE_MASK |                     \
+	 INET_IOCTL_GROUP_MASK | INET_IOCTL_NUMBER_MASK)
+
+static bool
+inet_ioctl_is_wlan_group(unsigned long command)
+{
+	return (command & INET_IOCTL_GROUP_MASK) ==
+	       ((unsigned long)ZEDBSD_WLAN_IOCTL_GROUP << 8);
+}
+
+static void
+inet_ioctl_scrub(void *buffer, size_t size)
+{
+	volatile unsigned char *byte = buffer;
+
+	while (size-- != 0)
+		*byte++ = 0;
+}
+
+static int
+inet_ioctl_wlan_classify(unsigned long command, size_t *size, bool *query)
+{
+	unsigned long expected;
+	unsigned long encoded_size;
+	unsigned number;
+
+	if (size == NULL || query == NULL ||
+	    (command & ~INET_IOCTL_ENCODING_MASK) != 0 ||
+	    !inet_ioctl_is_wlan_group(command) ||
+	    (command & INET_IOCTL_DIRECTION_MASK) != ZEDBSD_IOC_INOUT)
+		return EINVAL;
+	number = (unsigned)(command & INET_IOCTL_NUMBER_MASK);
+	switch (number) {
+	case 1:
+		expected = SIOCSWLANSCAN;
+		*size = sizeof(struct wlan_scan_request);
+		*query = false;
+		break;
+	case 2:
+		expected = SIOCGWLANSCAN;
+		*size = sizeof(struct wlan_scan_status_request);
+		*query = true;
+		break;
+	case 3:
+		expected = SIOCGWLANBSS;
+		*size = sizeof(struct wlan_bss_request);
+		*query = true;
+		break;
+	case 4:
+		expected = SIOCSWLANCONNECT;
+		*size = sizeof(struct wlan_connect_request);
+		*query = false;
+		break;
+	case 5:
+		expected = SIOCSWLANDISCONNECT;
+		*size = sizeof(struct wlan_disconnect_request);
+		*query = false;
+		break;
+	case 6:
+		expected = SIOCGWLANSTATUS;
+		*size = sizeof(struct wlan_status_request);
+		*query = true;
+		break;
+	default:
+		return EINVAL;
+	}
+	encoded_size = (command & INET_IOCTL_SIZE_MASK) >> 16;
+	if (command != expected || encoded_size != *size)
+		return EINVAL;
+	return 0;
+}
+
+static int
+inet_ioctl_wlan_validate(const struct wlan_ioctl_header *header, size_t size)
+{
+	if (header == NULL || header->version != WLAN_ABI_VERSION ||
+	    header->size != size || header->ifr_name[0] == '\0' ||
+	    memchr(header->ifr_name, '\0', sizeof(header->ifr_name)) == NULL)
+		return EINVAL;
+	return 0;
+}
+
+static int
+inet_ioctl_wlan(unsigned long command, uintptr_t argument)
+{
+	union inet_wlan_ioctl_request request;
+	struct net_device *device = NULL;
+	size_t size = 0;
+	bool query = false;
+	unsigned capabilities;
+	int error;
+
+	memset(&request, 0, sizeof(request));
+	error = inet_ioctl_wlan_classify(command, &size, &query);
+	if (error != 0)
+		goto out;
+	if (!query && !inet_ioctl_caller_is_superuser()) {
+		error = EPERM;
+		goto out;
+	}
+	if (argument == 0) {
+		error = EFAULT;
+		goto out;
+	}
+	error = copyin(argument, &request, size);
+	if (error != 0)
+		goto out;
+	error = inet_ioctl_wlan_validate(&request.header, size);
+	if (error != 0)
+		goto out;
+	device = net_device_find_ref(request.header.ifr_name);
+	if (device == NULL) {
+		error = ENODEV;
+		goto out;
+	}
+	capabilities = net_device_capabilities_get(device);
+	if (!net_device_is_live(device)) {
+		error = ENODEV;
+		goto out_device;
+	}
+	if ((capabilities & NET_DEVICE_CAP_WLAN) == 0) {
+		error = EOPNOTSUPP;
+		goto out_device;
+	}
+	error = net_device_ioctl(device, command, &request);
+	net_device_release(device);
+	device = NULL;
+	if (error != 0)
+		goto out;
+	if (command == SIOCSWLANCONNECT) {
+		inet_ioctl_scrub(request.connect.passphrase,
+				  sizeof(request.connect.passphrase));
+		request.connect.passphrase_length = 0;
+	}
+	error = copyout(&request, argument, size);
+	goto out;
+
+out_device:
+	net_device_release(device);
+out:
+	inet_ioctl_scrub(&request, sizeof(request));
+	return error;
+}
+
 int
 inet_socket_ioctl(struct socket *socket, unsigned long command,
 		  uintptr_t argument)
@@ -452,6 +612,8 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 	int error;
 
 	(void)socket;
+	if (inet_ioctl_is_wlan_group(command))
+		return inet_ioctl_wlan(command, argument);
 	if (!inet_ioctl_is_query(command) &&
 	    !inet_ioctl_caller_is_superuser())
 		return EPERM;

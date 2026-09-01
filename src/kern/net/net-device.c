@@ -46,7 +46,8 @@ device_reclaim_locked(struct net_device *device,
 	if (device == NULL || !device->destroy_pending ||
 	    refcount_load(&device->refs) != 0 || device->state == NET_DEVICE_LIVE ||
 	    device->open_count != 0 || device->opening || device->closing ||
-	    device->poll_active != 0 || device->reclaiming)
+	    device->poll_active != 0 || device->ioctl_active != 0 ||
+	    device->reclaiming)
 		return 0;
 	device->reclaiming = 1;
 	finalizer->device = device;
@@ -109,7 +110,7 @@ device_wait_callbacks(struct net_device *device, int opening, int closing)
 
 	for (;;) {
 		enabled = device_lock();
-		pending = device->poll_active != 0 ||
+		pending = device->poll_active != 0 || device->ioctl_active != 0 ||
 		    (opening && device->opening) ||
 		    (closing && device->closing);
 		device_unlock(enabled);
@@ -307,9 +308,9 @@ net_device_gone(struct net_device *device)
 		call_close = device->ops != NULL && device->ops->close != NULL;
 	}
 	device_unlock(enabled);
-	/* A driver close cannot race poll_receive(): once closing/GONE is
-	 * published no new poll starts, and this joins the callback already in
-	 * progress before the driver's I/O retirement boundary. */
+	/* A driver close cannot race poll_receive() or ioctl(): once
+	 * closing/GONE is published no new callback starts, and this joins every
+	 * admitted callback before the driver's I/O retirement boundary. */
 	if (call_close)
 		device_wait_callbacks(device, 0, 0);
 	/* close() is the driver retirement boundary: asynchronous producers must
@@ -355,6 +356,12 @@ net_device_shutdown_all(void)
 {
 	bool enabled = device_lock();
 
+	/* Terminal shutdown joins callbacks and may yield.  Reject an interrupt-
+	 * context caller before publishing the irreversible registry stop. */
+	if (hal_irq_disable != NULL && !enabled) {
+		device_unlock(enabled);
+		return EWOULDBLOCK;
+	}
 	registry_stopping = 1U;
 	device_unlock(enabled);
 	for (;;) {
@@ -574,6 +581,21 @@ net_device_running(const struct net_device *device)
 	return (net_device_flags_get(device) & NET_DEVICE_RUNNING) != 0;
 }
 
+unsigned
+net_device_capabilities_get(const struct net_device *device)
+{
+	bool enabled;
+	unsigned capabilities = 0;
+
+	if (device == NULL)
+		return 0;
+	enabled = device_lock();
+	if (device->state == NET_DEVICE_LIVE && !device->destroy_pending)
+		capabilities = device->capabilities;
+	device_unlock(enabled);
+	return capabilities;
+}
+
 int
 net_device_open(struct net_device *device)
 {
@@ -716,6 +738,54 @@ net_device_transmit(struct net_device *device, struct packet_buf *packet)
 	device_unlock(enabled);
 	net_device_release(device);
 	return error;
+}
+
+int
+net_device_ioctl(struct net_device *device, unsigned long request,
+		 void *argument)
+{
+	bool enabled;
+	int error;
+	int live;
+
+	if (device == NULL)
+		return ENODEV;
+	enabled = device_lock();
+	/* Driver ioctls are thread-context operations.  In particular, do not run
+	 * an arbitrary callback with the caller's interrupt state disabled. */
+	if (hal_irq_disable != NULL && !enabled) {
+		device_unlock(enabled);
+		return EWOULDBLOCK;
+	}
+	if (device->state != NET_DEVICE_LIVE || device->destroy_pending) {
+		device_unlock(enabled);
+		return ENODEV;
+	}
+	if (device->opening || device->closing || registry_stopping) {
+		device_unlock(enabled);
+		return EBUSY;
+	}
+	if (device->ops == NULL || device->ops->ioctl == NULL) {
+		device_unlock(enabled);
+		return EOPNOTSUPP;
+	}
+	device->ioctl_active++;
+	refcount_get(&device->refs);
+	device_unlock(enabled);
+
+	/* The callback is non-reentrant and must not synchronously enter a same-
+	 * device close/removal or terminal shutdown barrier: those paths may join
+	 * this count. */
+	error = device->ops->ioctl(device, request, argument);
+
+	enabled = device_lock();
+	if (device->ioctl_active == 0)
+		__builtin_trap();
+	device->ioctl_active--;
+	live = device->state == NET_DEVICE_LIVE && !device->destroy_pending;
+	device_unlock(enabled);
+	net_device_release(device);
+	return live ? error : ENODEV;
 }
 
 void

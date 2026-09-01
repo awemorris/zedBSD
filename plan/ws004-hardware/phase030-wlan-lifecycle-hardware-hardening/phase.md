@@ -1,6 +1,6 @@
 # WS004 Phase 030: WLAN lifecycle, reconnect, and hardware hardening
 
-Last updated: 2026-08-30
+Last updated: 2026-09-01
 
 Phase ID: `ws004-p030`
 
@@ -156,7 +156,8 @@ preflight gate passes on one candidate, p030 and
 [`ws005-p008`](../../ws005-networking/phase008-archer-physical-acceptance/phase.md)
 use the same single provisional physical checkpoint and evidence record.
 
-The shared record includes adapter hardware revision,
+The shared record includes the Japan-market `Archer T3U Nano` label, explicit
+absence of a printed hardware revision, authoritative
 VID:PID/bcdDevice/interface/endpoints, firmware upstream revision/digest/
 reported version, AP model and firmware, channel/security/width, host
 controller, complete artifact manifest, build fingerprint, and exact first
@@ -226,8 +227,8 @@ p008 dependency graph is acyclic.
 
 Stop and return to the owning Phase if recovery requires a global xHCI reset,
 firmware loses state without a detectable event, hardware cannot prevent key/
-PN reinstall, callbacks cannot be drained, the exact adapter revision changes,
-or repeated physical failure shows a missing radio/calibration/coexistence
-requirement. Do not make reconnect unbounded, retain credentials across device
-removal, suppress carrier transitions, skip rekey/replay checks, or expand into
-5 GHz/DFS/VHT/DHCP to work around the failure.
+PN reinstall, callbacks cannot be drained, the exact adapter descriptor or
+identity changes, or repeated physical failure shows a missing radio/
+calibration/coexistence requirement. Do not make reconnect unbounded, retain
+credentials across device removal, suppress carrier transitions, skip rekey/
+replay checks, or expand into 5 GHz/DFS/VHT/DHCP to work around the failure.

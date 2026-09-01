@@ -75,6 +75,7 @@ int *__libc_errno_location(void);
 #define ENOTSUP EOPNOTSUPP
 #define ENOMSG 64
 #define EIDRM 65
+#define ESTALE 66
 
 #define EWOULDBLOCK EAGAIN
 

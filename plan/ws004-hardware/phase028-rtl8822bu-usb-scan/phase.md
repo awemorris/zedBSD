@@ -4,7 +4,8 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p028`
 
-Status: planned; depends on `ws004-p026` and `ws004-p027`; not queued
+Status: planned; `ws004-p026` complete; depends on completion of
+`ws004-p027`; not queued
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -26,13 +27,16 @@ first zedBSD radio observation is the later combined WS005 p008 checkpoint.
   URBs, interface-scoped claims, callback drain, checked alternate/configuration
   rollback, and detach ownership.
 - `ws004-p012`: removable `net_device` and carrier lifetime.
-- `ws004-p026`: the exact unit is confirmed as `2357:012e`, and one firmware
-  blob, digest, license, package, and install path are frozen.
+- `ws004-p026`: the Japan-market unit has no printed revision; its exact
+  `2357:012e`, `bcdDevice=2.10`, `ff/ff/ff`, five-endpoint descriptor is
+  authoritative, and one firmware blob, digest, license, optional-package
+  acquisition source, and install path are frozen.
 - `ws004-p027`: generic WLAN UAPI, scan cache, operation generations, common
   state, and fake-driver contract.
 
-The Phase is ineligible for a Queue proposal until the physical descriptor and
-firmware-package decision in `p026` are complete. It is not added to the
+The exact-device and firmware-package decisions in `p026` are complete. The
+remaining Queue prerequisite is successful completion of `p027`'s common scan
+state machine, lifetime contract, and automatic gates. It is not added to the
 current implementation Queue by this plan.
 
 ## Frozen initial radio profile
@@ -62,20 +66,34 @@ their own evidence.
    and endpoint topology recorded by `p026`. The initial table contains only
    TP-Link `2357:012e`; the product name and a generic Realtek vendor interface
    never match by themselves.
-2. Claim exactly the matching USB interface through the p015 transaction. Do
-   not disturb another interface or choose an alternate/configuration not
-   present in the retained physical descriptor.
+2. Bind the matching primary interface through the USB core's provisional
+   binding transaction. The device has one interface, so do not self-claim it
+   through the sibling-interface claim API. Do not disturb another interface
+   or choose an alternate/configuration not present in the retained physical
+   descriptor.
 3. Validate all bulk endpoint directions, packet sizes, burst metadata, and
    address uniqueness before allocating requests. The actual descriptor decides
    the endpoint map; Linux constants are a comparison, not a substitute.
-4. Acquire in one rollback ledger: USB claim, driver object, control lock,
-   RX/TX request pools and DMA, firmware staging buffer, common WLAN station,
-   and net-device publication. A failed step unwinds in exact reverse order.
-5. Read and validate the 8822BU efuse/board data needed for MAC address, cut,
+4. Acquire in one rollback ledger: provisional primary binding, driver object,
+   lifecycle/control lock, RX/TX request pools and DMA, board data, an
+   allocated `net_device`, live net-device publication, and the common WLAN
+   station. Firmware staging is not an attach resource; it belongs to the
+   first-open transaction below. A failed step unwinds in exact reverse order.
+5. `wlan_station_attach()` accepts only a live device and its retained
+   reference does not pin the device in the LIVE state. The driver therefore
+   keeps its lifecycle lock across `net_device_create()` and the complete WLAN
+   attach, exposes a not-ready gate from every net-device callback during that
+   short interval, and serializes USB detach plus the net-device close callback
+   through the same lock. If WLAN attach fails, call the checked
+   `net_device_gone()` barrier before destroying the net device. If removal
+   wins after publication, close waits for the attach interval and then
+   detaches the completed station; it must not leave an orphan station on a
+   GONE device.
+6. Read and validate the 8822BU efuse/board data needed for MAC address, cut,
    RFE option, RF paths, crystal calibration, channel plan, and power limits.
    An invalid MAC, unsupported cut/RFE, truncated map, or contradictory country
    data is a hard attach/open error; do not invent calibration or a random MAC.
-6. Publish the first common WLAN interface as `wlan0` and later instances as
+7. Publish the first common WLAN interface as `wlan0` and later instances as
    the lowest available `wlanN`. Publication means the descriptor and board
    identity are valid, not that firmware or carrier is active.
 
@@ -92,25 +110,76 @@ The chip driver owns only RTL8822BU and USB-specific work:
 - the 8822B power-on/off sequence, efuse access, MAC/BB/RF table programming,
   USB endpoint/queue mapping, TX/RX descriptors, firmware commands/events, and
   key-CAM hooks used by `p029`;
-- multiple persistent bulk-IN requests and bounded bulk-OUT ownership using the
-  concurrent-URB contract from p011; and
+- one persistent bulk-IN request on endpoint `0x84` for this scan-only
+  milestone, plus bounded bulk-OUT ownership on the independently schedulable
+  OUT endpoints using the concurrent-URB contract from p011; and
 - translation of validated RX descriptors, firmware events, TX status, RSSI,
   channel, and security metadata into generic WLAN callbacks.
 
+The retained target is the observed High-Speed device. The initial driver does
+not perform an unproven USB-3 mode switch. Endpoint `0x87` is required by the
+exact topology and is validated at attach, but this scan milestone does not arm
+the interrupt endpoint; firmware events needed here are consumed through the
+documented receive path.
+
+P011 permits one active request per endpoint, not multiple requests on one
+endpoint. The bulk-IN completion therefore only latches bounded work and
+schedules net-device polling. Poll context drains the completed request,
+validates and copies one bounded RX unit, reports it to the WLAN common core,
+and then rearms the same request. Stop, close, and detach cancel and drain that
+request before releasing its buffer. A second simultaneous request on `0x84`
+must remain `EBUSY`; same-endpoint multi-URB rings are the separate deferred
+[`ws004-p035`](../phase035-usb-same-endpoint-multi-urb/phase.md) and do not
+block this Phase.
+
+The driver and kernel never acquire firmware from a network. Only explicit
+selection/build of `userland/packages/wifi-firmware/` fetches the unmodified
+blob and root `LICENCE.rtlwifi_firmware.txt` from
+`https://github.com/endlessm/linux-firmware.git` at
+immutable revision `2f56219d20e4becccd718963fc3bcc671c543ce5`; the package
+verifies the frozen blob and license SHA-256 values and stages them as an
+opt-in data package for image or `DESTDIR` installation. The current package
+model does not imply an on-device package database or runtime uninstall. The
+package also installs a package-owned immutable manifest under
+`/usr/share/zedbsd/packages/` recording the mirror revision, official
+provenance, paths, sizes, and hashes. Official provenance remains
+`linux-firmware` commit
+`458e40fdbb4dad5134ec230a42df21aea1b5baf8`: firmware version 30.20.0, size
+161,240 bytes, blob SHA-256
+`a72da690597bfa99d8eb6fc2ab090d18d8ad92ac2befd35db1c9e3662d8d8418`, and
+license SHA-256
+`a61351665b4f264f6c631364f85b907d8f8f41f8b369533ef4021765f9f3b62e`;
+the official WHENCE SHA-256 is
+`34f954c7d068ec4fd5fcc216471912dd3cf40ff60a7ffa8d06ff6f9b5999551f`.
+
 On first open, request only
-`/lib/firmware/rtw88/rtw8822b_fw.bin`. Validate the `p026` size and SHA-256 and
-the supported 8822B firmware header before any device upload. Stage immutable
-bytes, split every download write within the documented page/window limit,
-check all address and length arithmetic, and wait with finite deadlines for
-checksum/download completion and WLAN CPU ready. Only then program the minimum
-radio/MAC receive path and arm RX requests.
+`/lib/firmware/rtw88/rtw8822b_fw.bin`. Validate the pinned size and SHA-256 and
+the supported 8822B firmware header before any device upload. The frozen image
+is 161,240 bytes with a 64-byte header, 11,208-byte DMEM plus its 8-byte
+checksum, and 149,952-byte IMEM plus its 8-byte checksum. Stage immutable bytes
+and use the RTL8822B/WCPU-3081 reserved-page protocol: prepend the checked
+48-byte TX descriptor, submit bounded firmware pages through bulk OUT endpoint
+`0x05`, and use the internal DDMA engine in chunks no larger than `0x1000`.
+Do not substitute the legacy vendor-control firmware-page writer used by other
+chip generations. Check every address and length operation and wait with finite
+deadlines for DDMA/checksum completion and WLAN CPU ready. Only then program
+the minimum radio/MAC receive path and arm RX requests.
+
+Attach reads SYS_CFG1 plus the physical/logical efuse needed to establish the
+MAC and board identity; it does not require the firmware C2H hardware-feature
+query and does not guess NSS or bandwidth capability. The initial capability
+surface remains the frozen 2.4-GHz/20-MHz profile until later evidence expands
+it.
 
 Missing firmware, wrong digest, unsupported header/version, short USB write,
 firmware-ready timeout, firmware error event, and RX-arm failure are distinct
 errors. Each leaves carrier down, cancels/drains every admitted request,
 powers the device off when possible, scrubs/frees staging memory, and permits a
-later checked `IFF_UP` retry. There is no runtime download, embedded fallback,
-or success after a partial start.
+later checked `IFF_UP` retry. Firmware open, size/digest/header validation,
+upload, radio start, and RX arming all complete before calling
+`wlan_station_open()`; otherwise generic driver-open failure could leave only
+the common station administratively up. There is no kernel runtime network
+fetch, embedded fallback, or success after a partial start.
 
 ## Scan implementation
 
@@ -153,21 +222,39 @@ Extend `HW-T31` with production-source fixtures for:
   and conservative power/channel intersection;
 - firmware header, size, digest, download-page boundaries, short transfers,
   ready/error/timeout events, retry, close, detach, and staging-buffer release;
+- optional-package-only acquisition, exact immutable mirror revision, frozen
+  blob/license hashes, no ordinary-base-build or kernel fetch, and separate
+  installation at the fixed path;
 - RX/TX descriptor bounds, foreign/truncated/oversized frames, malformed
   firmware events, and stale scan generations; and
+- single-URB `0x84` completion-to-poll drain/rearm, rejection of a simultaneous
+  second `0x84` request under the existing per-endpoint admission contract,
+  and complete cancel/drain on every stop/unwind path; and
 - scan start/stop/timeout over a fake USB transport while storage requests are
   concurrently active on the same xHCI controller.
 
 The fixture may derive expected register/descriptor values from independently
 reviewed public specifications, descriptors, traces, and Realtek/Linux
-behavioral references. No external driver implementation is copied into the
-zedBSD base: source is written independently against the frozen interfaces and
-test vectors. Linux mainline's 8822B and USB files are behavioral references,
-not an implementation source:
+behavioral references. Register transport, descriptor parsing, firmware
+loading, efuse decoding, DDMA, endpoint lifecycle, and synthetic scan glue are
+implemented independently against frozen interfaces and test vectors. Linux
+mainline's 8822B and USB files are behavioral references, not an implementation
+source:
 
 - <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/realtek/rtw88/rtw8822bu.c>
 - <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/realtek/rtw88/rtw8822b.c>
 - <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/realtek/rtw88/usb.c>
+
+Production RF initialization has a separate provenance checkpoint. The large
+RTL8822B MAC/BB/AGC/RF/RFE tables are needed even for passive reception; the
+driver must not pretend that firmware alone initializes the receive path. The
+public Linux table is dual-licensed `GPL-2.0 OR BSD-3-Clause`, while an
+independent permissive implementation or public register guide was not found.
+Before adding those tables, human review selects either a notice-preserving
+BSD-3-Clause import or a clean-room transaction trace. This decision does not
+block the firmware package, exact USB binding, register transport, efuse and
+firmware parsers, DDMA model, RX aggregate parser, endpoint lifecycle, or
+synthetic common-core scan integration.
 
 ## Physical-evidence handoff
 
@@ -190,9 +277,10 @@ the user to repeat an attach or scan.
 
 - Production binding logic accepts only the descriptor-confirmed `2357:012e`
   tuple and the fake-USB fixture publishes one stable `wlanN` identity.
-- The firmware transport/model starts only the separately packaged, pinned
-  8822B image with truthful version/digest diagnostics; every negative case
-  fails atomically.
+- The `wifi-firmware` package-only acquisition checks and firmware
+  transport/model start only the separately installed, pinned 8822B image with
+  truthful provenance/version/digest diagnostics; every negative case fails
+  atomically.
 - Synthetic 2.4-GHz/20-MHz beacons/probe responses produce generation-
   consistent BSS records and bounded stop through the complete production
   scan path.
@@ -215,9 +303,11 @@ RTL8822CE are outside this Phase.
 
 ## Reconsideration boundary
 
-Stop if the adapter descriptor differs from `p026`, efuse requires an unknown
-RFE/calibration table, the pinned blob is incompatible, legal 2.4-GHz transmit
-limits cannot be derived conservatively, firmware scan offload is mandatory,
-or correct USB teardown requires changing p011/p015 ownership. Record the exact
-boundary and return it to the owning Phase; do not broaden the USB match or
-enable unrestricted channels as a workaround.
+Stop the production-radio portion if the adapter descriptor differs from
+`p026`, efuse requires an unknown RFE/calibration table, the pinned blob is
+incompatible, legal 2.4-GHz transmit limits cannot be derived conservatively,
+firmware scan offload is mandatory, the PHY-table provenance decision above
+is still pending, or correct USB teardown requires changing p011/p015
+ownership. Continue every independently testable pre-radio item before
+recording that boundary; do not broaden the USB match, claim a tableless radio,
+or enable unrestricted channels as a workaround.

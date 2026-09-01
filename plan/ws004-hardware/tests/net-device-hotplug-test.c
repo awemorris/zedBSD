@@ -47,6 +47,12 @@ static struct net_device *blocked_close_device;
 static unsigned poll_count;
 static atomic_uint poll_sequence;
 static atomic_int schedule_during_open;
+static unsigned ioctl_count;
+static atomic_int block_ioctl;
+static atomic_int ioctl_entered;
+static atomic_int ioctl_returned;
+static atomic_int ioctl_result;
+static atomic_uint ioctl_sequence;
 static _Thread_local int irq_enabled = 1;
 
 bool
@@ -173,6 +179,21 @@ fixture_poll_receive(struct net_device *device, unsigned budget)
 	return budget;
 }
 
+static int
+fixture_ioctl(struct net_device *device, unsigned long request, void *argument)
+{
+	(void)device;
+	assert(request == 0x1234UL);
+	assert(argument == &ioctl_count);
+	atomic_store_explicit(&ioctl_entered, 1, memory_order_release);
+	while (atomic_load_explicit(&block_ioctl, memory_order_acquire))
+		sched_yield();
+	ioctl_count++;
+	ioctl_sequence = ++sequence;
+	atomic_store_explicit(&ioctl_returned, 1, memory_order_release);
+	return 0;
+}
+
 static void
 fixture_release(void *driver_data)
 {
@@ -185,6 +206,7 @@ static const struct net_device_ops fixture_ops = {
 	.close = fixture_close,
 	.transmit = fixture_transmit,
 	.poll_receive = fixture_poll_receive,
+	.ioctl = fixture_ioctl,
 	.release = fixture_release,
 };
 
@@ -390,6 +412,118 @@ poll_thread(void *argument)
 	return NULL;
 }
 
+static void *
+ioctl_thread(void *argument)
+{
+	atomic_store(&ioctl_result,
+	    net_device_ioctl(argument, 0x1234UL, &ioctl_count));
+	return NULL;
+}
+
+static void
+ioctl_close_barrier_test(void)
+{
+	struct net_device *device = create_device("wlan0");
+	pthread_t ioctl_worker, close_worker;
+	unsigned closed = atomic_load(&close_count);
+	unsigned completed = ioctl_count;
+	unsigned released = release_count;
+
+	device->capabilities = NET_DEVICE_CAP_WLAN;
+	assert(net_device_capabilities_get(device) == NET_DEVICE_CAP_WLAN);
+	assert(net_device_open(device) == 0);
+	sequence = close_sequence = ioctl_sequence = 0;
+	atomic_store(&block_close, 0);
+	atomic_store(&close_entered, 0);
+	atomic_store(&close_returned, 0);
+	atomic_store(&close_thread_started, 0);
+	atomic_store(&close_thread_returned, 0);
+	atomic_store(&block_ioctl, 1);
+	atomic_store(&ioctl_entered, 0);
+	atomic_store(&ioctl_returned, 0);
+	atomic_store(&ioctl_result, -1);
+	assert(pthread_create(&ioctl_worker, NULL, ioctl_thread, device) == 0);
+	while (!atomic_load_explicit(&ioctl_entered, memory_order_acquire))
+		sched_yield();
+	assert(pthread_create(&close_worker, NULL, close_thread, device) == 0);
+	while (!atomic_load_explicit(&close_thread_started,
+				    memory_order_acquire) ||
+	       (net_device_flags_get(device) & NET_DEVICE_UP) != 0)
+		sched_yield();
+	assert(atomic_load(&close_count) == closed);
+	assert(!atomic_load_explicit(&close_thread_returned,
+				    memory_order_acquire));
+	assert(net_device_ioctl(device, 0x1234UL, &ioctl_count) == EBUSY);
+	atomic_store_explicit(&block_ioctl, 0, memory_order_release);
+	assert(pthread_join(ioctl_worker, NULL) == 0);
+	assert(pthread_join(close_worker, NULL) == 0);
+	assert(atomic_load_explicit(&ioctl_returned, memory_order_acquire));
+	assert(atomic_load(&ioctl_result) == 0);
+	assert(atomic_load_explicit(&close_returned, memory_order_acquire));
+	assert(atomic_load_explicit(&close_thread_returned,
+				    memory_order_acquire));
+	assert(ioctl_count == completed + 1U);
+	assert(atomic_load(&close_count) == closed + 1U);
+	assert(atomic_load(&ioctl_sequence) != 0U);
+	assert(atomic_load(&close_sequence) > atomic_load(&ioctl_sequence));
+	assert(release_count == released);
+	assert(net_device_gone(device) == 0);
+	assert(release_count == released);
+	net_device_destroy(device);
+	assert(release_count == released + 1U);
+}
+
+static void
+ioctl_detach_barrier_test(void)
+{
+	struct net_device *device = create_device("wlan0");
+	pthread_t ioctl_worker, gone_worker;
+	unsigned closed = atomic_load(&close_count);
+	unsigned completed = ioctl_count;
+	unsigned released = release_count;
+
+	device->capabilities = NET_DEVICE_CAP_WLAN;
+	assert(net_device_capabilities_get(device) == NET_DEVICE_CAP_WLAN);
+	assert(net_device_open(device) == 0);
+	sequence = close_sequence = ioctl_sequence = 0;
+	atomic_store(&block_close, 0);
+	atomic_store(&close_returned, 0);
+	atomic_store(&block_ioctl, 1);
+	atomic_store(&ioctl_entered, 0);
+	atomic_store(&ioctl_returned, 0);
+	atomic_store(&ioctl_result, -1);
+	atomic_store(&gone_thread_started, 0);
+	atomic_store(&gone_thread_returned, 0);
+	atomic_store(&gone_result, -1);
+	assert(pthread_create(&ioctl_worker, NULL, ioctl_thread, device) == 0);
+	while (!atomic_load_explicit(&ioctl_entered, memory_order_acquire))
+		sched_yield();
+	assert(pthread_create(&gone_worker, NULL, gone_thread, device) == 0);
+	while (!atomic_load_explicit(&gone_thread_started, memory_order_acquire))
+		sched_yield();
+	while (net_device_is_live(device))
+		sched_yield();
+	assert(atomic_load(&close_count) == closed);
+	assert(!atomic_load_explicit(&gone_thread_returned, memory_order_acquire));
+	assert(release_count == released);
+	assert(net_device_ioctl(device, 0x1234UL, &ioctl_count) == ENODEV);
+	atomic_store_explicit(&block_ioctl, 0, memory_order_release);
+	assert(pthread_join(ioctl_worker, NULL) == 0);
+	assert(pthread_join(gone_worker, NULL) == 0);
+	assert(atomic_load_explicit(&ioctl_returned, memory_order_acquire));
+	assert(atomic_load(&ioctl_result) == ENODEV);
+	assert(atomic_load(&gone_result) == 0);
+	assert(atomic_load_explicit(&close_returned, memory_order_acquire));
+	assert(ioctl_count == completed + 1U);
+	assert(atomic_load(&close_count) == closed + 1U);
+	assert(atomic_load(&ioctl_sequence) != 0U);
+	assert(atomic_load(&close_sequence) > atomic_load(&ioctl_sequence));
+	assert(net_device_capabilities_get(device) == 0);
+	assert(release_count == released);
+	net_device_destroy(device);
+	assert(release_count == released + 1U);
+}
+
 static void
 poll_close_barrier_test(void)
 {
@@ -461,22 +595,41 @@ immediate_completion_open_test(void)
 }
 
 static void
-irq_disabled_gone_test(void)
+irq_disabled_lifecycle_test(void)
 {
 	struct net_device *device = create_device("ue0");
+	struct net_device *peer;
 	struct net_device *found;
+	unsigned completed = ioctl_count;
 
 	assert(net_device_open(device) == 0);
+	atomic_store(&block_ioctl, 0);
+	atomic_store(&ioctl_entered, 0);
 	irq_enabled = 0;
+	assert(net_device_ioctl(device, 0x1234UL, &ioctl_count) ==
+	    EWOULDBLOCK);
+	assert(!atomic_load_explicit(&ioctl_entered, memory_order_acquire));
+	assert(ioctl_count == completed);
+	assert(irq_enabled == 0);
+	assert(net_device_shutdown_all() == EWOULDBLOCK);
+	assert(irq_enabled == 0);
 	assert(net_device_gone(device) == EWOULDBLOCK);
+	assert(irq_enabled == 0);
 	irq_enabled = 1;
 	assert(net_device_is_live(device));
 	assert(net_device_count() == 1);
 	found = net_device_find_ref("ue0");
 	assert(found == device);
 	net_device_release(found);
+	/* A rejected shutdown must not leave the terminal registry gate set. */
+	peer = create_device("ue1");
+	assert(net_device_count() == 2);
+	assert(net_device_ioctl(device, 0x1234UL, &ioctl_count) == 0);
+	assert(ioctl_count == completed + 1U);
 	assert(net_device_gone(device) == 0);
+	assert(net_device_gone(peer) == 0);
 	net_device_destroy(device);
+	net_device_destroy(peer);
 }
 
 static void
@@ -616,15 +769,21 @@ shutdown_all_open_references_test(void)
 {
 	struct net_device *device = create_device("ue0");
 	struct net_device *removing = create_device("ue1");
-	pthread_t removal_worker, shutdown_worker;
-	unsigned closed = close_count, released = release_count;
+	pthread_t ioctl_worker, removal_worker, shutdown_worker;
+	unsigned closed = atomic_load(&close_count), completed = ioctl_count;
+	unsigned released = release_count;
 
 	assert(net_device_open(device) == 0);
 	assert(net_device_open(device) == 0);
 	assert(net_device_open(removing) == 0);
 	assert(net_device_running(device));
+	sequence = close_sequence = ioctl_sequence = 0;
 	atomic_store(&close_entered, 0);
 	atomic_store(&close_returned, 0);
+	atomic_store(&block_ioctl, 1);
+	atomic_store(&ioctl_entered, 0);
+	atomic_store(&ioctl_returned, 0);
+	atomic_store(&ioctl_result, -1);
 	atomic_store(&gone_thread_started, 0);
 	atomic_store(&gone_thread_returned, 0);
 	atomic_store(&gone_result, -1);
@@ -633,6 +792,9 @@ shutdown_all_open_references_test(void)
 	atomic_store(&shutdown_result, -1);
 	blocked_close_device = removing;
 	atomic_store_explicit(&block_close, 1, memory_order_release);
+	assert(pthread_create(&ioctl_worker, NULL, ioctl_thread, device) == 0);
+	while (!atomic_load_explicit(&ioctl_entered, memory_order_acquire))
+		sched_yield();
 	assert(pthread_create(&removal_worker, NULL, gone_thread, removing) == 0);
 	while (!atomic_load_explicit(&close_entered, memory_order_acquire))
 		sched_yield();
@@ -641,18 +803,34 @@ shutdown_all_open_references_test(void)
 				    memory_order_acquire))
 		sched_yield();
 	/* shutdown removes the remaining double-open device, but cannot pass the
-	 * already-unlinked REMOVING device until its close barrier completes. */
+	 * admitted ioctl or the already-unlinked REMOVING device until both
+	 * callback barriers complete. */
 	while (net_device_is_live(device))
 		sched_yield();
+	assert(atomic_load(&close_count) == closed);
 	assert(!atomic_load_explicit(&shutdown_thread_returned,
 				    memory_order_acquire));
+	assert(release_count == released);
+	atomic_store_explicit(&block_ioctl, 0, memory_order_release);
+	assert(pthread_join(ioctl_worker, NULL) == 0);
+	assert(atomic_load_explicit(&ioctl_returned, memory_order_acquire));
+	assert(atomic_load(&ioctl_result) == ENODEV);
+	assert(ioctl_count == completed + 1U);
+	while (!atomic_load_explicit(&close_returned, memory_order_acquire))
+		sched_yield();
+	assert(atomic_load(&close_count) == closed + 1U);
+	assert(atomic_load(&ioctl_sequence) != 0U);
+	assert(atomic_load(&close_sequence) > atomic_load(&ioctl_sequence));
+	assert(!atomic_load_explicit(&shutdown_thread_returned,
+				    memory_order_acquire));
+	assert(release_count == released);
 	atomic_store_explicit(&block_close, 0, memory_order_release);
 	assert(pthread_join(removal_worker, NULL) == 0);
 	assert(pthread_join(shutdown_worker, NULL) == 0);
 	blocked_close_device = NULL;
 	assert(atomic_load(&gone_result) == 0);
 	assert(atomic_load(&shutdown_result) == 0);
-	assert(close_count == closed + 2U);
+	assert(atomic_load(&close_count) == closed + 2U);
 	assert(net_device_count() == 0);
 	assert(!net_device_is_live(device));
 	assert(!net_device_is_live(removing));
@@ -671,11 +849,13 @@ main(void)
 	queued_receive_test();
 	immediate_completion_open_test();
 	poll_close_barrier_test();
-	irq_disabled_gone_test();
+	ioctl_close_barrier_test();
+	irq_disabled_lifecycle_test();
 	close_detach_race_test();
 	open_detach_race_test();
 	concurrent_gone_barrier_test();
 	reconnect_test();
+	ioctl_detach_barrier_test();
 	shutdown_all_open_references_test();
 	puts("net-device hotplug tests: PASS");
 	return 0;

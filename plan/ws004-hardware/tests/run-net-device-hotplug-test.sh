@@ -24,6 +24,7 @@ cc -std=c11 -D_GNU_SOURCE -Wall -Wextra -Werror -ffunction-sections \
 "$temporary/arp-hotplug-test"
 
 cc -std=c11 -D_GNU_SOURCE -Wall -Wextra -Werror -ffunction-sections \
+	-I"$repo/plan/ws004-hardware/tests/host-include" \
 	-I"$repo/include" -I"$repo/include/uapi" -I"$repo/src/kern/net" \
 	"$repo/src/kern/net/net-device.c" \
 	"$repo/src/kern/net/inet-socket.c" \

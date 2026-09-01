@@ -26,11 +26,13 @@ Parent: [WS004](../ws.md)
 | HW-T25 | Legacy HCD concurrency and hotplug | Shared PCI INTx dispatch lets all paired controllers attach; UHCI/EHCI accept independent endpoint owners, retire only target schedule graphs, keep interrupt and Storage progress concurrent, and perform detach/reinsert only through independent root workers |
 | HW-T26 | Checked USB recovery | Core STALL latching, ordered endpoint clear-halt, xHCI ring recovery, UHCI/EHCI DATA0, direct-root reset, and Mass Storage migration preserve exact callback/URB/DMA ownership under failure |
 | HW-T27 | amd64 framebuffer console serialization | Concurrent CPU/IRQ-style output, terminal same-CPU re-entry, invalid cell coordinates, and framebuffer extent guards preserve cursor/cell/pixel state; the final HW-T25 QEMU run has no console fault or stall |
+| HW-T28 | CDC ECM asynchronous TX accounting | An accepted frame keeps packet/byte counts; each genuine terminal `STALL`, `TIMEOUT`, `DISCONNECTED`, or `IO_ERROR` adds exactly one TX error and no drop; administrative `CANCELLED` adds neither, including close/detach/reconnect races |
 | HW-T30 | Generic WLAN logic | The versioned pointer-free ioctl ABI, scan generations/cache, station state, cancellation, carrier, detach, race, and secret-erasure rules pass against a deterministic fake radio without claiming RF success |
 | HW-T31 | RTL8822BU attach/scan | Only the descriptor-confirmed `2357:012e` interface binds; automatic firmware/USB/scan gates pass, and the physical attach/scan fields come from the one shared WS005 p008 ledger with no p028-specific run |
-| HW-T32 | Archer identity/firmware policy | The exact adapter label and complete descriptor are retained; V1.0 RTL8822BU evidence is separated from later-revision inference, and one separately packaged firmware blob/license/provenance/digest/update rule is frozen before binding |
+| HW-T32 | Archer identity/firmware policy | The Japan-market adapter is labelled `Archer T3U Nano` with no printed revision; its complete descriptor is the exact-unit binding authority, V1.0 remains documentary family evidence only, and the optional separately installed `wifi-firmware` package contract has frozen mirror/upstream/license/digest/update rules |
 | HW-T33 | WPA2-Personal/CCMP L2 | Crypto vectors and strict positive/negative RSN/authentication/association/four-way/replay/key-CAM/controlled-port fixtures pass; physical secure-L2 fields come from the one shared WS005 p008 ledger with no p029-specific run |
 | HW-T34 | WLAN lifecycle hardening | Rekey, bounded reconnect, firmware/USB recovery, up/down, unplug/reinsert, shutdown, concurrent storage, and race/fault fixtures pass; one shared WS005 p008 lifecycle checkpoint and its frozen-artifact five-run batch supply nonduplicated physical evidence |
+| HW-T35 | USB same-endpoint multi-URB | A supporting xHCI endpoint owns a bounded multi-URB queue with exact completion/cancel/drain, ring-wrap, late-event, detach, and fairness behavior; legacy HCDs retain one active URB per endpoint |
 | HW-T40 | i915 foundations | Device-independent UAPI/model tests pass; modeset/scanout/reset require target-hardware evidence |
 
 QEMU/model and physical-hardware results are always separate evidence fields.
@@ -202,18 +204,18 @@ p028 does not ask the user to repeat an attach or scan.
 ## HW-T32 Archer identity and firmware policy
 
 The q040 read-only descriptor, independent 8822B mappings, pinned firmware and
-license record, negative-input definitions, and exact remaining printed-label
-checkpoint are retained in
+license record, negative-input definitions, and q055 exact-unit/package closure
+are retained in
 [`archer-t3u-nano-intake.md`](archer-t3u-nano-intake.md).
 
-`ws004-p026` retains the purchased adapter's model/region/hardware-revision
-label and complete raw USB device/configuration/interface/alternate/endpoint
-descriptor from one read-only `lsusb -v`/`usbconfig` inventory on an existing
-development host. It is not a zedBSD boot or radio test. Serial number and
-unrelated device identity are redacted. The positive binding input is
-`2357:012e` plus the exact interface and endpoint tuple; product text,
-vendor-only, broad Realtek, and neighboring IDs reject. If this inventory is
-unavailable, p026 is `uncleared` and p028 binding remains ineligible.
+`ws004-p026` retains the purchased adapter's `Archer T3U Nano` label, Japan
+region, explicit absence of a printed hardware revision, and complete raw USB
+device/configuration/interface/alternate/endpoint descriptor from one read-only
+`lsusb -v` inventory on an existing development host. It is not a zedBSD boot
+or radio test. Serial number and unrelated device identity are redacted. The
+positive binding authority is `2357:012e`, `bcdDevice=2.10`, `ff/ff/ff`, and the
+exact five-endpoint tuple; product text, vendor-only, broad Realtek, and
+neighboring or differing descriptor profiles reject.
 
 The documentary evidence separately records:
 
@@ -221,13 +223,21 @@ The documentary evidence separately records:
 - the TP-Link INF 8822B mapping for `USB\VID_2357&PID_012E`;
 - Linux mainline's `2357:012e` to `rtw8822b_hw_spec` mapping; and
 - later TP-Link hardware labels as inference only until their own descriptor/
-  physical evidence exists. RTL8828BU is not an accepted alias.
+  physical evidence exists. The purchased revision-less unit is not asserted
+  to be V1.0, and RTL8828BU is not an accepted alias.
 
-One official `linux-firmware` revision of `rtw88/rtw8822b_fw.bin` is pinned by
+One official `linux-firmware` commit of `rtw88/rtw8822b_fw.bin` is pinned by
 path, reported version, size, SHA-256, WHENCE entry, and exact
-`LICENCE.rtlwifi_firmware.txt`. The optional package includes the unmodified
-blob and license; the ordinary base image includes neither the blob nor a
-download step. Absent, short, oversized, wrong-digest, and unsupported-header
+`LICENCE.rtlwifi_firmware.txt`. The planned p028
+`userland/packages/wifi-firmware/` recipe must use only
+`https://github.com/endlessm/linux-firmware.git` revision
+`2f56219d20e4becccd718963fc3bcc671c543ce5` as its immutable acquisition
+mirror, verify the frozen blob and license digests, and stage them only when
+the optional package is explicitly selected for separate installation.
+Official upstream provenance remains commit
+`458e40fdbb4dad5134ec230a42df21aea1b5baf8`. The ordinary base build/image
+includes neither the blob nor a network fetch, and the kernel never downloads
+firmware. Absent, short, oversized, wrong-digest, and unsupported-header
 negative inputs are retained for HW-T31.
 
 ## HW-T33 WPA2-Personal/CCMP L2
@@ -748,6 +758,31 @@ build/NoctLang/build-static/noct --path=tools/build \
   plan/ws004-hardware/tests/qemu-usb-cdc-ecm.noct \
   "$PWD" /tmp/ws004-p019-evidence
 ```
+
+## HW-T28 CDC ECM asynchronous TX accounting
+
+The planned [`ws004-p034`](../phase034-cdc-ecm-async-tx-accounting/phase.md)
+extends the production-source ECM fixture with q054's common accounting
+contract. Accepted frames retain `tx_packets` and `tx_bytes`; later `STALL`,
+`TIMEOUT`, `DISCONNECTED`, and `IO_ERROR` completions each add exactly one
+`tx_errors` without changing `tx_dropped`; administrative `CANCELLED` adds
+neither. Completion-before-poll/close/detach, repeated poll/drain,
+failed-drain retention, close/open reuse, and reconnect cases must preserve
+counter and persistent-URB ownership.
+
+The ECM runner must pass ordinary, ASan/UBSan, and analyzer variants together
+with the q054 net-device/NCM accounting regressions, configured amd64/i386 and
+repository builds, and p019's four fresh IDE/shared-xHCI static/DHCP QEMU ECM
+cells. This is automatic consistency evidence only; HW-T28 has no physical
+checkpoint.
+
+## HW-T35 USB same-endpoint multi-URB
+
+The deferred [`ws004-p035`](../phase035-usb-same-endpoint-multi-urb/phase.md)
+owns this future xHCI queueing fixture. It is run only after a measured
+consumer requires more than the current one-active-URB-per-endpoint contract.
+The initial RTL8822BU scan implementation instead uses one persistent `0x84`
+bulk-IN request and poll-context drain/rearm, so HW-T35 is not a WLAN blocker.
 
 ## HW-T20 NVMe QEMU
 

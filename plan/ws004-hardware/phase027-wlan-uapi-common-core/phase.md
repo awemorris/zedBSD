@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p027`
 
-Status: planned; not queued
+Status: complete (`q055`)
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -34,8 +34,8 @@ contract instead of introducing a second device-private control path.
   that hardware identity never enters the generic ABI.
 - Existing AF_INET socket ioctl routing and fixed-width zedBSD UAPI rules.
 
-`p027` is independently host-testable, but it is not placed in an execution
-Queue by this plan update.
+`p027` is independently host-testable and is the implementation Phase selected
+by `q055` after p026's identity decision closed.
 
 ## Frozen public control ABI
 
@@ -255,6 +255,38 @@ These are planning paths, not implementation authorization.
   snapshot, double completion, credential disclosure, or false hardware claim.
 - Non-WLAN interfaces reject WLAN ioctls with `EOPNOTSUPP`, and existing wired
   interface, DHCP, route, hotplug, and shutdown regressions remain unchanged.
+
+## Execution result
+
+Q055 completed the frozen common boundary without a physical-radio claim. The
+kernel now has one pointer-free WLAN UAPI with six exact size-encoded ioctls,
+strict INET copy/privilege dispatch, an active-ioctl teardown barrier, bounded
+scan snapshots and generations, normalized beacon/RSN parsing, persistent
+station/connect state, total scan/connect deadlines, credential erasure, and
+checked detach/shutdown ownership. The network worker retains a generation
+counter plus a level-triggered WLAN work predicate so an edge wakeup cannot be
+lost immediately before sleep.
+
+The station owns a live net-device reference through successful detach or
+shutdown finalization. Its attach contract explicitly requires the hardware
+caller to serialize the full live-publication/attach interval against removal;
+failed duplicate, stopping, and capacity admissions do not mutate carrier.
+Driver radio callbacks run outside station locks, must return within a bounded
+driver contract, and may not wait for network-worker progress. Production uses
+the single kernel `clock_ticks()` domain; the explicit clock exists only in the
+test attachment API.
+
+The production-source `HW-T30` runner passes ordinary, ASan/UBSan, GCC analyzer,
+and configured amd64/i386 ABI variants. The INET WLAN authorization dispatcher
+passes twice, and the extended net-device, ARP, and INET hotplug fixtures pass.
+Ordinary PC-98 `make -j16` plus forced amd64 and i386 builds pass; the i386
+integration gate caught and removed one accidental direct compiler-atomic
+runtime dependency. The final amd64 image has SHA-256
+`b0409dad5d4dd3574cb4b4e9381ade59a7308e72cc6641b21cf7924fbad8f43f`.
+Disposable four-CPU, 4-GiB OVMF q35 launches reached exact `login:` through
+both explicit IDE and xHCI USB-only storage, with no fatal or storage-error
+marker. `git diff --check` passes. P028 has been synchronized to the required
+LIVE-publication then serialized-station-attach order.
 
 ## Reconsideration boundary
 

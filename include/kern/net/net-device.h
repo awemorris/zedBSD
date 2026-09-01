@@ -26,6 +26,8 @@
 #define NET_DEVICE_MULTICAST 0x00000008U
 #define NET_DEVICE_LOOPBACK 0x00000010U
 
+#define NET_DEVICE_CAP_WLAN 0x00000001U
+
 struct packet_buf;
 struct net_device;
 
@@ -36,6 +38,10 @@ struct net_device_ops {
 	void (*close)(struct net_device *device);
 	int (*transmit)(struct net_device *device, struct packet_buf *packet);
 	unsigned (*poll_receive)(struct net_device *device, unsigned budget);
+	/* Thread-context and non-reentrant.  The callback must not retain argument,
+	 * recursively call net_device_ioctl(), or synchronously call
+	 * net_device_close(), net_device_gone(), or net_device_shutdown_all(): those
+	 * lifecycle paths may join this admission. */
 	int (*ioctl)(struct net_device *device, unsigned long request,
 		     void *argument);
 	/* Optional final owner for dynamically allocated driver state.  This is
@@ -51,6 +57,7 @@ struct net_device {
 	unsigned mtu;
 	uint8_t hwaddr[NET_DEVICE_HWADDR_MAX];
 	uint8_t hwaddr_len;
+	unsigned capabilities;
 	const struct net_device_ops *ops;
 	void *driver_data;
 	unsigned open_count;
@@ -63,6 +70,7 @@ struct net_device {
 	unsigned closing;
 	unsigned poll_scheduled;
 	unsigned poll_active;
+	unsigned ioctl_active;
 	uint64_t rx_packets;
 	uint64_t rx_bytes;
 	uint64_t rx_errors;
@@ -78,11 +86,14 @@ void net_device_registry_init(void);
 struct net_device *net_device_alloc(void);
 int net_device_create(struct net_device *device);
 /* Thread-context teardown barrier.  The device becomes unobservable before
- * this joins open, close, and poll callbacks.  If IRQs were already disabled,
- * EWOULDBLOCK is returned without changing registry or lifecycle state. */
+ * this joins open, close, poll, and admitted ioctl callbacks.  If IRQs were
+ * already disabled, EWOULDBLOCK is returned without changing registry or
+ * lifecycle state. */
 int net_device_gone(struct net_device *device);
-/* Terminal network shutdown removes every live device and synchronously
- * retires all of its open references before returning. */
+/* Thread-context terminal shutdown removes every live device and synchronously
+ * retires all of its open references before returning.  If IRQs were already
+ * disabled, EWOULDBLOCK is returned without stopping or changing the
+ * registry. */
 int net_device_shutdown_all(void);
 void net_device_destroy(struct net_device *device);
 /*
@@ -105,6 +116,17 @@ int net_device_open(struct net_device *device);
  * close requested with IRQs already disabled is conservatively deferred. */
 void net_device_close(struct net_device *device);
 int net_device_transmit(struct net_device *device, struct packet_buf *packet);
+/* Run one thread-context driver ioctl against a kernel-owned request buffer.
+ * This is the only supported driver-ioctl entry point: it admits the callback
+ * under the common lifecycle gate and final close/removal joins it before
+ * retiring driver_data.  IRQ-disabled callers receive EWOULDBLOCK without
+ * admission.  The callback must not retain argument, recursively call
+ * net_device_ioctl(), or synchronously call net_device_close(),
+ * net_device_gone(), or net_device_shutdown_all(), because those lifecycle
+ * paths may wait on this admission. */
+int net_device_ioctl(struct net_device *device, unsigned long request,
+		     void *argument);
+unsigned net_device_capabilities_get(const struct net_device *device);
 /* Record one genuine terminal failure reported after transmit accepted a
  * packet. Accepted packet/byte counters remain unchanged and this does not
  * classify the packet as dropped. The driver owns exactly-once publication. */

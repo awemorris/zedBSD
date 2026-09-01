@@ -17,10 +17,12 @@ Tests: [WS005 test index](../tests/README.md)
 ## Objective
 
 Freeze the first WLAN control architecture before any driver, ioctl, command,
-credential, or `networkd` implementation begins.  The first target is a
-TP-Link Archer T3U Nano V1.0.  Public primary evidence identifies that product
-as RTL8822BU, USB `2357:012e`; the exact physical unit, revision, descriptors,
-and firmware remain authoritative and are captured before driver work.
+credential, or `networkd` implementation begins. The first target is the exact
+Japan-market TP-Link Archer T3U Nano retained by WS004 p026. Public V1.0
+evidence identifies the RTL8822BU family and software USB `2357:012e` mapping,
+but the purchased unit has no printed revision. Its complete retained
+`2357:012e`, `bcdDevice=2.10`, `ff/ff/ff`, five-endpoint descriptor is the
+binding authority before driver work.
 
 This is a design Phase.  It records the user-selected control topology,
 supersedes the earlier pluggable `/sbin/wpa` proposal, assigns ownership to the
@@ -307,3 +309,14 @@ already consistent in their owning downstream P-books.
 The historical `/sbin/wpa`, `/etc/wpa/`, resident profile loop, and
 RTL8822CE-first proposal remain explicitly superseded; MB-006 remains released.
 No source, build, QEMU, radio, or hardware result is attributed to p002.
+
+## q055 identity-policy synchronization (2026-09-01)
+
+After q053 closed this control design, the user supplied the remaining p026
+physical fact and decision: the product label is `Archer T3U Nano`, the region
+is Japan, and no separate hardware revision is printed. Absence is recorded
+rather than inferred from `bcdDevice`; the exact q040 descriptor is
+authoritative for this unit. The optional firmware will be separately acquired
+and installed through the p028 `userland/packages/wifi-firmware/` recipe;
+neither that package decision nor the exact-unit identity changes the frozen
+WLAN control topology, limits, or ownership recorded by q053.

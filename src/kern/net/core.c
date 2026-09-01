@@ -6,7 +6,9 @@
 #include "kern/net/ethernet.h"
 #include "kern/net/inet-socket.h"
 #include "kern/net/route.h"
+#include "kern/net/wlan.h"
 #include "internal.h"
+#include "kern/clock.h"
 #include "kern/lock.h"
 #include "kern/sched.h"
 #include "kern/thread.h"
@@ -26,10 +28,19 @@ static struct packet_buf *input_head;
 static struct packet_buf *input_tail;
 static unsigned input_count;
 static struct thread *worker_thread;
+static uint64_t worker_generation;
 static struct net_stats network_stats;
 static int network_stopping;
 static struct spinlock input_lock;
 static struct net_device *loopback_device;
+
+static void
+worker_generation_advance_locked(void)
+{
+	worker_generation++;
+	if (worker_generation == 0U)
+		worker_generation++;
+}
 
 static int
 loopback_open(struct net_device *device)
@@ -119,6 +130,7 @@ net_input_enqueue(struct net_device *device, struct packet_buf *packet)
 		input_head = packet;
 	input_tail = packet;
 	input_count++;
+	worker_generation_advance_locked();
 	worker = worker_thread;
 	spin_unlock_irqrestore(&input_lock, irq);
 	if (worker != NULL)
@@ -132,6 +144,7 @@ net_worker_wakeup(void)
 	struct thread *worker;
 	unsigned long irq = spin_lock_irqsave(&input_lock);
 
+	worker_generation_advance_locked();
 	worker = worker_thread;
 	spin_unlock_irqrestore(&input_lock, irq);
 	if (worker != NULL)
@@ -180,7 +193,7 @@ work_pending(void)
 		}
 		net_device_release(device);
 	}
-	return 0;
+	return wlan_work_pending();
 }
 
 static void
@@ -192,6 +205,7 @@ network_worker(void *argument)
 		struct packet_buf *packet;
 
 		tcp_timer_run();
+		wlan_timer_run(clock_ticks());
 		work = poll_devices();
 
 		while (work < NET_WORK_BUDGET &&
@@ -210,13 +224,35 @@ network_worker(void *argument)
 			continue;
 		}
 		if (!work_pending()) {
-			bool enabled = hal_irq_disable();
-			uint64_t deadline = tcp_timer_next_deadline();
+			uint64_t deadline;
+			uint64_t wlan_deadline;
+			uint64_t observed;
+			unsigned long irq;
 
-			if (!work_pending())
-				sched_sleep(deadline);
-			if (enabled)
-				hal_irq_enable();
+			/* Observe the producer generation before sampling deadlines.  If
+			 * a producer publishes a new timer without immediate work after
+			 * this point, the final generation comparison prevents sleeping on
+			 * the older deadline. */
+			irq = spin_lock_irqsave(&input_lock);
+			observed = worker_generation;
+			spin_unlock_irqrestore(&input_lock, irq);
+			deadline = tcp_timer_next_deadline();
+			wlan_deadline = wlan_timer_next_deadline();
+			if (wlan_deadline != 0 &&
+			    (deadline == 0 || wlan_deadline < deadline))
+				deadline = wlan_deadline;
+
+			/* Every producer advances this generation while holding
+			 * input_lock before waking us.  The final comparison and
+			 * sched_sleep_locked() form one atomic handoff: an SMP producer
+			 * can no longer wake a still-RUNNING worker and then have that
+			 * worker publish THREAD_SLEEPING after the wake was lost. */
+			if (!work_pending()) {
+				irq = spin_lock_irqsave(&input_lock);
+				if (observed == worker_generation && input_head == NULL)
+					sched_sleep_locked(deadline, &input_lock);
+				spin_unlock_irqrestore(&input_lock, irq);
+			}
 		}
 	}
 }
@@ -229,6 +265,7 @@ net_init(void)
 	spin_init(&input_lock, LOCK_RANK_NETWORK, "network input");
 	packet_buf_pool_init();
 	net_device_registry_init();
+	wlan_core_init();
 	error = loopback_init();
 	if (error != 0)
 		return error;
@@ -241,6 +278,7 @@ net_init(void)
 		unsigned long irq = spin_lock_irqsave(&input_lock);
 
 		worker_thread = NULL;
+		worker_generation = 1U;
 		network_stopping = 0;
 		memset(&network_stats, 0, sizeof(network_stats));
 		spin_unlock_irqrestore(&input_lock, irq);
@@ -288,14 +326,29 @@ net_shutdown_for_boot(void)
 {
 	struct packet_buf *packet;
 	unsigned long irq;
-	int error;
+	int error, last_error;
 
 	irq = spin_lock_irqsave(&input_lock);
 	network_stopping = 1;
 	spin_unlock_irqrestore(&input_lock, irq);
-	error = net_device_shutdown_all();
-	if (error != 0)
-		hal_printf("net: shutdown barrier failed (%d)\n", error);
+	/* USB and PCI teardown must not run past a failed network producer join.
+	 * Keep the checked barrier live until every admitted callback and radio
+	 * producer has retired.  Log only error transitions to avoid an unbounded
+	 * shutdown-time diagnostic storm while a retry is still making progress. */
+	last_error = 0;
+	while ((error = net_device_shutdown_all()) != 0) {
+		if (error != last_error)
+			hal_printf("net: shutdown barrier retry (%d)\n", error);
+		last_error = error;
+		sched_yield();
+	}
+	last_error = 0;
+	while ((error = wlan_station_shutdown_all()) != 0) {
+		if (error != last_error)
+			hal_printf("net: WLAN shutdown barrier retry (%d)\n", error);
+		last_error = error;
+		sched_yield();
+	}
 	while ((packet = input_dequeue()) != NULL)
 		packet_buf_free(packet);
 }
