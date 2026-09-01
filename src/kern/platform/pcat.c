@@ -20,6 +20,9 @@
 #if CONFIG_DRIVER_PCI_NVME
 #include <drivers/pci-nvme.h>
 #endif
+#if CONFIG_DRIVER_PCI_INTEL_AX211
+#include <drivers/pci-intel-ax211.h>
+#endif
 #if CONFIG_DRIVER_USB_STORAGE
 #include "drivers/usb-storage.h"
 #endif
@@ -108,6 +111,10 @@ kern_platform_init(const struct boot_handoff *handoff,
 #if CONFIG_DRIVER_PCI_NVME
 	if (drv_pci_nvme_driver_register() != 0)
 		hal_printf("nvme: PCI driver registration failed\n");
+#endif
+#if CONFIG_DRIVER_PCI_INTEL_AX211
+	if (drv_pci_intel_ax211_driver_register() != 0)
+		hal_printf("wlan: Intel AX211 PCI driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
 	if (pcat_graphics_pci_register() != 0)

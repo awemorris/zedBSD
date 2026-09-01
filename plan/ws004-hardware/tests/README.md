@@ -927,6 +927,46 @@ official `linux-firmware` `20260410` provenance, the WHENCE `86` versus runtime
 `89` version discrepancy, the clear Intel notice boundary, and direct zedBSD
 boot for p038. No host mutation or network identity is retained.
 
+## HW-T38 Intel AX211 standalone normal path
+
+Q062 first freezes the optional firmware boundary independently of the
+unfinished PCI/radio path. The default-off amd64 `intelax211-firmware` package
+installs only the exact `-89.ucode`, family PNVM, complete Intel notice,
+WHENCE, and provenance manifest. Its focused fixture verifies immutable
+official provenance, all four sizes and SHA-256 values, atomic cache
+publication, offline reuse, corruption and unsafe-path rejection, locked
+production metadata, absence from the default image, and the visible WHENCE
+`86` versus runtime `89` discrepancy:
+
+```sh
+plan/ws004-hardware/tests/run-intelax211-firmware-package-test.sh
+```
+
+This package gate does not claim that the AX211 PCI function attaches or that
+firmware starts. The AX211-private pure core then validates the complete
+cached API89 firmware and PNVM, strict TLV bounds and section inventories,
+Gen3 descriptors/context, command/event codecs, ring wrap, and staging scrub
+in ordinary, ASan/UBSan, analyzer, amd64, and ILP32 syntax modes:
+
+```sh
+plan/ws004-hardware/tests/run-intel-ax211-core-test.sh
+```
+
+The first PCI milestone is intentionally detection-only. It matches the exact
+PCI/subsystem/revision/class tuple, inspects a 16-KiB BAR0 with bus mastering
+disabled, accepts only SO/SOF plus GF non-CDB hardware, restores a temporarily
+changed BAR and the inherited PCI command state, and publishes no WLAN device
+before a firmware transport exists:
+
+```sh
+plan/ws004-hardware/tests/run-intel-ax211-pci-test.sh
+```
+
+These automatic gates prove package, parser, identity, and inspection
+boundaries only. Firmware DMA/start/ALIVE, NVM, scan, and the useful network
+path remain in progress, followed by one direct zedBSD boot on the exact q061
+machine.
+
 ## HW-T20 NVMe QEMU
 
 The p022 admin fixture exercises production register/CAP/queue/Identify

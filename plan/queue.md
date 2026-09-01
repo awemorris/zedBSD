@@ -99,4 +99,14 @@ Queue.
 
 ## Execution result
 
-In progress.
+In progress. The first automatic checkpoint is complete: the default-off
+`intelax211-firmware` package reproduces and verifies the exact official
+`-89.ucode`, PNVM, Intel notice, and WHENCE snapshot, remains absent from the
+default image, rejects unsafe or corrupt caches, and passes its focused
+fixture. The private core parses the complete selected API89 and PNVM bytes
+and passes descriptor, command/event, ring, bounds, sanitizer, analyzer, and
+ABI gates. The default-off PCI driver passes exact identity, 16-KiB BAR0,
+SO/SOF plus GF non-CDB, and reverse-unwind fixtures, but deliberately restores
+the device and returns unsupported without publishing WLAN. Firmware DMA,
+start/ALIVE, NVM, scan, and radio operation remain in progress; this
+checkpoint makes no firmware-start or usable-network claim.

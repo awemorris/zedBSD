@@ -46,7 +46,8 @@ ZEDBSD_CONFIG ?= config.mk
 # menuconfig and help remain available before the first configuration is
 # saved.  Every build target requires the target information from config.mk.
 ZEDBSD_CONFIG_OPTIONAL_GOALS := menuconfig help list-user-programs \
-	menuconfig-host-test rtl8822b-firmware-fixture-cache
+	menuconfig-host-test rtl8822b-firmware-fixture-cache \
+	intelax211-firmware-fixture-cache
 ifeq ($(strip $(ZEDBSD_PLATFORM)),)
 ifneq ($(filter-out $(ZEDBSD_CONFIG_OPTIONAL_GOALS),$(MAKECMDGOALS)),)
 $(error config.mk is missing or invalid; run 'make menuconfig')
@@ -127,6 +128,7 @@ CONFIG_DRIVER_PCI_UHCI ?= y
 CONFIG_DRIVER_PCI_EHCI ?= y
 CONFIG_DRIVER_PCI_XHCI ?= y
 CONFIG_DRIVER_PCI_NVME ?= y
+CONFIG_DRIVER_PCI_INTEL_AX211 ?= n
 CONFIG_DRIVER_USB_STORAGE ?= y
 CONFIG_DRIVER_USB_CDC_NCM ?= y
 CONFIG_DRIVER_USB_CDC_ECM ?= y
@@ -417,6 +419,7 @@ ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_PCI_EHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_EHCI)),1,0) \
 	-DCONFIG_DRIVER_PCI_XHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_XHCI)),1,0) \
 	-DCONFIG_DRIVER_PCI_NVME=$(if $(filter y,$(CONFIG_DRIVER_PCI_NVME)),1,0) \
+	-DCONFIG_DRIVER_PCI_INTEL_AX211=$(if $(filter y,$(CONFIG_DRIVER_PCI_INTEL_AX211)),1,0) \
 	-DCONFIG_DRIVER_USB_STORAGE=$(if $(filter y,$(CONFIG_DRIVER_USB_STORAGE)),1,0) \
 	-DCONFIG_DRIVER_USB_CDC_NCM=$(if $(filter y,$(CONFIG_DRIVER_USB_CDC_NCM)),1,0) \
 	-DCONFIG_DRIVER_USB_CDC_ECM=$(if $(filter y,$(CONFIG_DRIVER_USB_CDC_ECM)),1,0) \

@@ -4,8 +4,8 @@ Last updated: 2026-09-02
 
 Phase ID: `ws004-p038`
 
-Status: planned; follows completed `ws004-p030` automatic milestone and
-completed `ws004-p037`; not started or queued
+Status: in progress (`q062`); follows completed `ws004-p030` automatic
+milestone and completed `ws004-p037`
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -210,6 +210,20 @@ topology.
   duplicated implementation is intentionally retained for p039 review.
 - Exhaustive reconnect/rekey/recovery/long-run behavior is explicitly
   unclaimed and recorded for a later hardening Phase.
+
+## Q062 progress
+
+- Complete: default-off exact firmware/PNVM/license/WHENCE package and its
+  immutable-cache fixture.
+- Complete: private API89/PNVM parser, exact real-blob inventory, Gen3
+  context/descriptor and command/event codecs, ring/staging bounds, and
+  ordinary/sanitizer/analyzer/ABI gates.
+- Complete as a detection-only milestone: default-off exact PCI match, BAR0
+  and SO/SOF+GF non-CDB inspection with bus mastering disabled, checked BAR
+  and command-state restoration, and no premature WLAN publication.
+- In progress: persistent PCI ownership, DMA/rings, firmware boot and ALIVE,
+  PNVM selection, NVM, passive scan, common WLAN adaptation, and the direct
+  useful-network checkpoint.
 
 ## Reconsideration boundary
 

@@ -3,3 +3,4 @@ CONFIG_DRIVER_PCI_UHCI|bool|UHCI USB host controller|i386,amd64|y|
 CONFIG_DRIVER_PCI_EHCI|bool|EHCI USB host controller|i386,amd64|y|
 CONFIG_DRIVER_PCI_XHCI|bool|xHCI USB host controller|i386,amd64|y|
 CONFIG_DRIVER_PCI_NVME|bool|PCI NVMe storage controller|i386,amd64|y|
+CONFIG_DRIVER_PCI_INTEL_AX211|bool|Intel AX211 CNVio2 WLAN (experimental)|amd64|n|
