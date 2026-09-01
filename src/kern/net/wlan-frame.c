@@ -65,6 +65,7 @@ parse_security_body(const uint8_t *body, size_t length, int rsn,
 	uint16_t count;
 	uint16_t capabilities = 0;
 	enum cipher_kind cipher;
+	int pairwise_supported = 0;
 	unsigned index;
 
 	if (length < 2U || read_le16(body) != 1U)
@@ -75,7 +76,9 @@ parse_security_body(const uint8_t *body, size_t length, int rsn,
 	cipher = parse_cipher(body + offset, rsn);
 	if (cipher == CIPHER_TKIP)
 		*security |= WLAN_SECURITY_TKIP;
-	else if (cipher == CIPHER_UNSUPPORTED)
+	/* The frozen station profile requires CCMP as the group cipher.  An
+	 * otherwise valid CCMP pairwise choice cannot repair this field. */
+	if (cipher != CIPHER_CCMP)
 		*security |= WLAN_SECURITY_UNSUPPORTED_SUITE;
 	offset += 4U;
 	if (length - offset < 2U)
@@ -88,12 +91,17 @@ parse_security_body(const uint8_t *body, size_t length, int rsn,
 		cipher = parse_cipher(body + offset, rsn);
 		if (cipher == CIPHER_TKIP)
 			*security |= WLAN_SECURITY_TKIP;
-		else if (cipher == CIPHER_CCMP)
+		else if (cipher == CIPHER_CCMP) {
 			*security |= WLAN_SECURITY_CCMP;
-		else
-			*security |= WLAN_SECURITY_UNSUPPORTED_SUITE;
+			pairwise_supported = 1;
+		}
 		offset += 4U;
 	}
+	/* Additional pairwise suites are advertisements, not mandatory choices.
+	 * Preserve known properties above, but reject only when no CCMP choice
+	 * exists.  This lets the association codec select a CCMP-only RSN IE. */
+	if (!pairwise_supported)
+		*security |= WLAN_SECURITY_UNSUPPORTED_SUITE;
 	if (length - offset < 2U)
 		return EINVAL;
 	count = read_le16(body + offset);

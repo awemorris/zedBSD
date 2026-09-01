@@ -4,7 +4,8 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p029`
 
-Status: in progress (`q058`); the `ws004-p028` automatic dependency is complete
+Status: automatic milestone complete (`q058`); physical secure-L2 evidence is
+intentionally deferred to the shared `ws005-p008` checkpoint
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -254,6 +255,50 @@ to begin. The eventual actual RTL8822BU association/key/CCMP/L2 claim references
 the single p030/WS005 p008 ledger after all automatic work, with no separate
 p029 boot, secret disclosure, plaintext fallback, or DHCP substitution. This
 feedback is not a prerequisite of p030 and therefore does not create a cycle.
+
+## Execution evidence (`q058`)
+
+Q058 completed the automatic milestone on 2026-09-01. The production common
+WLAN path now performs strict WPA2-Personal RSN/PSK/CCMP selection, open-system
+authentication, association, the asynchronous EAPOL four-way handshake,
+transactional PTK/GTK installation, controlled-port authorization only after
+the matching message-4 TX acknowledgement, and bidirectional Ethernet/802.11
+LLC/SNAP conversion. Same-ANonce message-1 and validated message-3
+retransmissions resend their responses without regenerating SNonce,
+reinstalling a key, or resetting a packet number. Stale frames, replay,
+downgrade, malformed key data, MIC failure, entropy failure, and partial CAM
+failure all fail closed.
+
+The RTL8822BU path now owns BSSID/AID, SEC/CAM, exact management/EAPOL/data TX
+descriptors and endpoints, encrypted RX metadata, and C2H TX reports. Every
+CAM/BSSID mutation closes TX admission, drains admitted USB operations and TX
+reports, proves all four hardware page pools empty, then mutates hardware.
+Ambiguous transport/CAM failure quarantines the adapter instead of reopening
+traffic, and successful radio reset is the terminal absence barrier. No
+`TXPAUSE` shortcut is used because it could strand queued packets.
+
+The fail-fast HW-T33 aggregate executed eight production-linked component
+runners. Crypto completed 1,494 checks in each of ordinary, ASan/UBSan, and
+analyzer modes; the WPA codec/engine, L2, RFC 3610 CCMP reference, common core,
+RTL security, and USB fixtures also passed their declared ordinary,
+sanitizer/analyzer, and amd64/i386 ABI gates. The RTL security fixture passed
+12 mode/case executions and the USB fixture passed 72. A final independent
+read-only review found no remaining p029 P0/P1 blocker.
+
+Driver-enabled amd64 and i386 kernels built successfully with the WPA2 and
+RTL8822BU symbols present. The full amd64 UEFI disk image built with
+`CONFIG_DRIVER_USB_RTL8822BU=1` and passed `BOOTX64.EFI` validation; ordinary
+`make -j16` also built the current PC-98 image. A disposable OVMF/q35 IDE-root
+copy reached `login:` with IDE disk, boot0, overlay root/data, swap, and init.
+The same source image booted OVMF/q35 with four CPUs and 4 GiB solely through
+xHCI USB storage and reached `login:` with every BR-T24 marker. Both controls
+were free of panic, VFS, storage, and I/O error markers, and the source-image
+SHA-256 remained
+`1f395a3decde5317fe3c44f408517eb9483f9d082c91f8a42807b63da527f0d9`.
+`git diff --check` passed and `.internal/` was not used.
+
+Q058 makes no physical RF claim. P030 is dependency-ready and retains the
+single shared WS005 p008 physical association/lifecycle checkpoint.
 
 ## Reconsideration boundary
 

@@ -494,7 +494,11 @@ KERN_NET_SOURCES := \
 	src/kern/net/ethernet.c \
 	src/kern/net/route.c \
 	src/kern/net/inet-socket.c \
+	src/kern/net/wlan-crypto.c \
 	src/kern/net/wlan-frame.c \
+	src/kern/net/wlan-wpa2-codec.c \
+	src/kern/net/wlan-wpa2.c \
+	src/kern/net/wlan-l2.c \
 	src/kern/net/wlan.c \
 	src/kern/net/arp.c \
 	src/kern/net/ipv4.c \

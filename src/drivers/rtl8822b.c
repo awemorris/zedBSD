@@ -40,6 +40,10 @@
 #define RTL8822B_RX_SHIFT_SHIFT               24U
 #define RTL8822B_RX_SHIFT_MASK                0x03U
 #define RTL8822B_RX_PHY_STATUS           0x04000000U
+#define RTL8822B_RX_ENCRYPTION_SHIFT             20U
+#define RTL8822B_RX_ENCRYPTION_MASK              0x07U
+#define RTL8822B_RX_SOFTWARE_DECRYPT      0x08000000U
+#define RTL8822B_RX_MAC_ID_MASK                  0x7fU
 #define RTL8822B_RX_C2H_FLAG             0x10000000U
 #define RTL8822B_RX_RATE_MASK                 0x7fU
 #define RTL8822B_RX_RATE_MAX                  0x54U
@@ -867,7 +871,7 @@ rtl8822b_rx_packet_parse(const uint8_t *bytes, size_t length,
 	struct rtl8822b_rx_packet *packet)
 {
 	struct rtl8822b_rx_packet result;
-	uint32_t word0, word2, word3, word4;
+	uint32_t word0, word1, word2, word3, word4;
 	size_t packet_length, driver_info_length, shift, payload_offset;
 	size_t occupied, aligned;
 	int is_c2h;
@@ -878,6 +882,7 @@ rtl8822b_rx_packet_parse(const uint8_t *bytes, size_t length,
 	if (length < RTL8822B_RX_DESCRIPTOR_SIZE)
 		return EINVAL;
 	word0 = load_le32(bytes);
+	word1 = load_le32(bytes + 4U);
 	word2 = load_le32(bytes + 8U);
 	word3 = load_le32(bytes + 12U);
 	word4 = load_le32(bytes + 16U);
@@ -888,7 +893,7 @@ rtl8822b_rx_packet_parse(const uint8_t *bytes, size_t length,
 	shift = (word0 >> RTL8822B_RX_SHIFT_SHIFT) & RTL8822B_RX_SHIFT_MASK;
 	if (packet_length == 0U ||
 	    (!is_c2h && packet_length > RTL8822B_RX_MPDU_MAX) ||
-	    (word0 & (RTL8822B_RX_CRC_ERROR | RTL8822B_RX_ICV_ERROR)) != 0U ||
+	    (word0 & RTL8822B_RX_CRC_ERROR) != 0U ||
 	    (driver_info_length != 0U &&
 	    driver_info_length != RTL8822B_RX_PHY_INFO_SIZE) ||
 	    ((word0 & RTL8822B_RX_PHY_STATUS) != 0U &&
@@ -918,6 +923,12 @@ rtl8822b_rx_packet_parse(const uint8_t *bytes, size_t length,
 	result.bandwidth = (uint8_t)((word4 >>
 	    RTL8822B_RX_BANDWIDTH_SHIFT) & RTL8822B_RX_BANDWIDTH_MASK);
 	result.tsf_low = load_le32(bytes + 20U);
+	result.encryption_type = (uint8_t)((word0 >>
+	    RTL8822B_RX_ENCRYPTION_SHIFT) & RTL8822B_RX_ENCRYPTION_MASK);
+	result.software_decrypted =
+	    (word0 & RTL8822B_RX_SOFTWARE_DECRYPT) != 0U;
+	result.mac_id = (uint8_t)(word1 & RTL8822B_RX_MAC_ID_MASK);
+	result.icv_error = (word0 & RTL8822B_RX_ICV_ERROR) != 0U;
 	result.rssi_dbm = -128;
 	if ((word0 & RTL8822B_RX_PHY_STATUS) != 0U) {
 		uint8_t page;

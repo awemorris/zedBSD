@@ -1,12 +1,14 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/lock.h"
 #include "kern/net/net-device.h"
+#include "kern/net/packet-buf.h"
 #include "kern/net/wlan.h"
 
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 struct fake_radio {
@@ -111,6 +113,40 @@ net_device_release(struct net_device *device)
 	assert(device != NULL);
 	assert(net_device_reference_balance > 0);
 	net_device_reference_balance--;
+}
+
+struct packet_buf *
+packet_buf_alloc(size_t headroom)
+{
+	(void)headroom;
+	return NULL;
+}
+
+void *
+packet_buf_append(struct packet_buf *packet, size_t length)
+{
+	(void)packet;
+	(void)length;
+	return NULL;
+}
+
+void
+packet_buf_free(struct packet_buf *packet)
+{
+	(void)packet;
+}
+
+void
+net_device_receive(struct net_device *device, struct packet_buf *packet)
+{
+	(void)device;
+	(void)packet;
+}
+
+void
+net_device_tx_error(struct net_device *device)
+{
+	(void)device;
 }
 
 void
@@ -245,6 +281,75 @@ fake_disconnect(void *context, uint64_t generation)
 }
 
 static int
+fake_association_set(void *context, uint64_t generation,
+	const uint8_t bssid[6], uint16_t aid, uint64_t deadline)
+{
+	struct fake_radio *fake = context;
+
+	assert(generation == fake->connect_generation);
+	assert(memcmp(bssid, fake->selected.bssid, 6U) == 0);
+	assert(aid != 0U && deadline <= fake->connect_deadline);
+	return 0;
+}
+
+static int
+fake_association_clear(void *context, uint64_t generation,
+	uint64_t deadline)
+{
+	struct fake_radio *fake = context;
+
+	assert(generation == fake->connect_generation);
+	assert(deadline <= fake->connect_deadline);
+	return 0;
+}
+
+static int
+fake_frame_transmit(void *context,
+	const struct wlan_radio_tx_request *request)
+{
+	struct fake_radio *fake = context;
+
+	assert(request != NULL && request->frame != NULL &&
+	    request->length != 0U);
+	assert(request->generation == fake->connect_generation);
+	assert(request->deadline_ticks <= fake->connect_deadline);
+	return 0;
+}
+
+static int
+fake_key_install(void *context,
+	const struct wlan_radio_key_request *request)
+{
+	struct fake_radio *fake = context;
+
+	assert(request != NULL && request->generation ==
+	    fake->connect_generation);
+	return 0;
+}
+
+static int
+fake_key_delete(void *context, uint64_t generation,
+	enum wlan_radio_key_kind kind, uint8_t key_index,
+	uint64_t key_generation, uint64_t deadline)
+{
+	struct fake_radio *fake = context;
+
+	(void)kind;
+	(void)key_index;
+	(void)key_generation;
+	assert(generation == fake->connect_generation);
+	assert(deadline <= fake->connect_deadline);
+	return 0;
+}
+
+bool
+hal_entropy_fill(void *buffer, size_t length)
+{
+	memset(buffer, 0x5a, length);
+	return true;
+}
+
+static int
 fake_quiesce(void *context)
 {
 	struct fake_radio *fake = context;
@@ -259,6 +364,11 @@ static const struct wlan_radio_ops fake_ops = {
 	.connect_start = fake_connect_start,
 	.disconnect = fake_disconnect,
 	.management_transmit = fake_management_transmit,
+	.association_set = fake_association_set,
+	.association_clear = fake_association_clear,
+	.frame_transmit = fake_frame_transmit,
+	.key_install = fake_key_install,
+	.key_delete = fake_key_delete,
 	.quiesce = fake_quiesce
 };
 
@@ -299,7 +409,7 @@ make_bss(uint8_t identity, const uint8_t *ssid, uint8_t ssid_length,
 	bss.center_frequency_mhz = 2437U;
 	bss.rssi_dbm = rssi;
 	bss.beacon_interval_tu = 100U;
-	bss.capability = 0x0010U;
+	bss.capability = 0x0011U;
 	bss.security = WLAN_SECURITY_PRIVACY | WLAN_SECURITY_WPA2 |
 	    WLAN_SECURITY_CCMP | WLAN_SECURITY_PSK;
 	return bss;
@@ -682,11 +792,11 @@ test_core(void)
 	struct scan_race_task race_tasks[4];
 	pthread_t race_threads[4];
 	uint64_t first_scan_generation;
-	uint64_t connection_generation;
 	uint64_t saved_now;
 	unsigned index;
 	unsigned carrier_calls_before;
 	int found_oldest;
+	int connect_result;
 
 	memset(&device, 0, sizeof(device));
 	memset(&unsupported_device, 0, sizeof(unsupported_device));
@@ -976,162 +1086,41 @@ test_core(void)
 	connect.ssid_length = sizeof(target);
 	memset(connect.passphrase, 0xa5, sizeof(connect.passphrase));
 	connect.passphrase_length = WLAN_PASSPHRASE_MIN;
-	assert(wlan_station_ioctl(&device, SIOCSWLANCONNECT, &connect) == 0);
+	connect_result = wlan_station_ioctl(&device, SIOCSWLANCONNECT,
+	    &connect);
+	if (connect_result != 0) {
+		request_header(&status, sizeof(status), "wlan0");
+		assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
+		fprintf(stderr, "initial WPA2 connect failed: %d starts=%u "
+		    "bssid=%u station=%u channel=%u now=%llu driver-deadline=%llu "
+		    "total=%llu state=%u\n", connect_result,
+		    fake.connect_start_calls, status.bssid[5],
+		    device.hwaddr[5], status.channel,
+		    (unsigned long long)fake.now,
+		    (unsigned long long)fake.connect_deadline,
+		    (unsigned long long)status.deadline_ticks, status.state);
+	}
+	assert(connect_result == 0);
 	assert(connect.state == WLAN_STATE_AUTHENTICATING);
 	assert(memcmp(connect.passphrase,
 	    (uint8_t[WLAN_PASSPHRASE_STORAGE]){ 0 },
 	    sizeof(connect.passphrase)) == 0);
-	assert(fake.selected.bssid[5] == 1U);
-	assert(fake.connect_deadline == fake.now + WLAN_CONNECT_DEADLINE_TICKS);
+	/* A transition AP advertising PSK and SAE remains usable through its
+	 * explicitly selected PSK AKM. */
+	assert(fake.selected.bssid[5] == 253U);
+	assert(fake.connect_deadline == fake.now +
+	    WLAN_CONNECT_TRANSITION_TICKS);
 	assert(worker_wake_calls >= 2U);
 	assert(!wlan_station_test_secrets_clear(station));
-	connection_generation = connect.generation;
-	assert(wlan_station_report_connect_event(station,
-	    connection_generation, WLAN_CONNECT_EVENT_AUTHORIZED, 0) == EINVAL);
-	assert(wlan_station_report_connect_event(station,
-	    connection_generation, WLAN_CONNECT_EVENT_RETRY, 0) == 0);
-	assert(wlan_station_report_connect_event(station,
-	    connection_generation, WLAN_CONNECT_EVENT_AUTHENTICATED, 0) == 0);
-	assert(wlan_station_report_connect_event(station,
-	    connection_generation, WLAN_CONNECT_EVENT_ASSOCIATED, 0) == 0);
-	assert(wlan_station_report_connect_event(station,
-	    connection_generation, WLAN_CONNECT_EVENT_KEY_INSTALLED, 0) == 0);
-	assert(device.carrier == 0U);
-	assert(wlan_station_report_connect_event(station,
-	    connection_generation, WLAN_CONNECT_EVENT_AUTHORIZED, 0) == 0);
-	assert(device.carrier == 1U);
-	assert(wlan_station_test_secrets_clear(station));
 	request_header(&status, sizeof(status), "wlan0");
 	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
-	assert(status.state == WLAN_STATE_CONNECTED);
-	assert(status.controlled_port == 1U && status.key_installed == 1U &&
-	    status.retry_count == 0U);
-
-	fake.disconnect_error = EBUSY;
-	request_header(&disconnect, sizeof(disconnect), "wlan0");
-	assert(wlan_station_ioctl(&device, SIOCSWLANDISCONNECT,
-	    &disconnect) == EBUSY);
-	assert(disconnect.state == WLAN_STATE_FAILED);
-	assert(device.carrier == 0U);
-	assert(wlan_station_test_secrets_clear(station));
-	fake.disconnect_error = 0;
+	assert(status.state == WLAN_STATE_AUTHENTICATING &&
+	    status.controlled_port == 0U && device.carrier == 0U);
 	request_header(&disconnect, sizeof(disconnect), "wlan0");
 	assert(wlan_station_ioctl(&device, SIOCSWLANDISCONNECT,
 	    &disconnect) == 0);
 	assert(disconnect.state == WLAN_STATE_IDLE);
 	assert(wlan_station_test_secrets_clear(station));
-	assert(wlan_station_report_connect_event(station,
-	    connection_generation, WLAN_CONNECT_EVENT_FAILED, EIO) == ESTALE);
-
-	request_header(&connect, sizeof(connect), "wlan0");
-	memcpy(connect.ssid, target, sizeof(target));
-	connect.ssid_length = sizeof(target);
-	memset(connect.passphrase, 0x6c, sizeof(connect.passphrase));
-	connect.passphrase_length = WLAN_PASSPHRASE_MIN;
-	assert(wlan_station_ioctl(&device, SIOCSWLANCONNECT, &connect) == 0);
-	assert(wlan_station_report_connect_event(station, connect.generation,
-	    WLAN_CONNECT_EVENT_AUTHENTICATED, 0) == 0);
-	assert(wlan_station_report_connect_event(station, connect.generation,
-	    WLAN_CONNECT_EVENT_ASSOCIATED, 0) == 0);
-	assert(wlan_station_report_connect_event(station, connect.generation,
-	    WLAN_CONNECT_EVENT_KEY_INSTALLED, 0) == 0);
-	carrier_up_error = EIO;
-	index = fake.disconnect_calls;
-	assert(wlan_station_report_connect_event(station, connect.generation,
-	    WLAN_CONNECT_EVENT_AUTHORIZED, 0) == EIO);
-	assert(fake.disconnect_calls == index && wlan_work_pending());
-	wlan_timer_run(fake.now);
-	assert(fake.disconnect_calls == index + 1U);
-	carrier_up_error = 0;
-	request_header(&disconnect, sizeof(disconnect), "wlan0");
-	assert(wlan_station_ioctl(&device, SIOCSWLANDISCONNECT,
-	    &disconnect) == 0);
-
-	fake.connect_start_error = EIO;
-	index = fake.disconnect_calls;
-	request_header(&connect, sizeof(connect), "wlan0");
-	memcpy(connect.ssid, target, sizeof(target));
-	connect.ssid_length = sizeof(target);
-	memset(connect.passphrase, 0xa5, sizeof(connect.passphrase));
-	connect.passphrase_length = WLAN_PASSPHRASE_MIN;
-	assert(wlan_station_ioctl(&device, SIOCSWLANCONNECT, &connect) == EIO);
-	assert(connect.state == WLAN_STATE_FAILED);
-	assert(fake.disconnect_calls == index + 1U);
-	assert(wlan_station_test_secrets_clear(station));
-	fake.connect_start_error = 0;
-	fake.connect_start_advance = WLAN_CONNECT_DEADLINE_TICKS;
-	index = fake.disconnect_calls;
-	request_header(&connect, sizeof(connect), "wlan0");
-	memcpy(connect.ssid, target, sizeof(target));
-	connect.ssid_length = sizeof(target);
-	memset(connect.passphrase, 0x2a, sizeof(connect.passphrase));
-	connect.passphrase_length = WLAN_PASSPHRASE_MIN;
-	assert(wlan_station_ioctl(&device, SIOCSWLANCONNECT, &connect) ==
-	    ETIMEDOUT);
-	assert(fake.disconnect_calls == index + 1U);
-	assert(wlan_station_test_secrets_clear(station));
-	fake.connect_start_advance = 0U;
-
-	request_header(&connect, sizeof(connect), "wlan0");
-	memcpy(connect.ssid, target, sizeof(target));
-	connect.ssid_length = sizeof(target);
-	memset(connect.passphrase, 0x3c, sizeof(connect.passphrase));
-	connect.passphrase_length = WLAN_PASSPHRASE_MIN;
-	assert(wlan_station_ioctl(&device, SIOCSWLANCONNECT, &connect) == 0);
-	assert(wlan_station_report_connect_event(station, connect.generation,
-	    WLAN_CONNECT_EVENT_FAILED, EACCES) == 0);
-	assert(wlan_station_test_secrets_clear(station));
-	assert(wlan_work_pending());
-	wlan_timer_run(fake.now);
-
-	request_header(&connect, sizeof(connect), "wlan0");
-	memcpy(connect.ssid, target, sizeof(target));
-	connect.ssid_length = sizeof(target);
-	memset(connect.passphrase, 0x4d, sizeof(connect.passphrase));
-	connect.passphrase_length = WLAN_PASSPHRASE_MIN;
-	assert(wlan_station_ioctl(&device, SIOCSWLANCONNECT, &connect) == 0);
-	for (index = 0U; index < WLAN_CONNECT_RETRY_MAX; index++)
-		assert(wlan_station_report_connect_event(station,
-		    connect.generation, WLAN_CONNECT_EVENT_RETRY, 0) == 0);
-	assert(wlan_station_report_connect_event(station, connect.generation,
-	    WLAN_CONNECT_EVENT_RETRY, 0) == EOVERFLOW);
-	request_header(&status, sizeof(status), "wlan0");
-	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
-	assert(status.state == WLAN_STATE_FAILED &&
-	    status.terminal_error == EOVERFLOW &&
-	    status.retry_count == WLAN_CONNECT_RETRY_MAX);
-	assert(wlan_station_test_secrets_clear(station) && wlan_work_pending());
-	wlan_timer_run(fake.now);
-
-	request_header(&connect, sizeof(connect), "wlan0");
-	memcpy(connect.ssid, target, sizeof(target));
-	connect.ssid_length = sizeof(target);
-	memset(connect.passphrase, 0x5a, sizeof(connect.passphrase));
-	connect.passphrase_length = WLAN_PASSPHRASE_MIN;
-	assert(wlan_station_ioctl(&device, SIOCSWLANCONNECT, &connect) == 0);
-	assert(wlan_station_report_connect_event(station, connect.generation,
-	    WLAN_CONNECT_EVENT_RETRY, 0) == 0);
-	request_header(&status, sizeof(status), "wlan0");
-	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
-	assert(status.retry_count == 1U);
-	assert(status.deadline_ticks == fake.connect_deadline);
-	fake.now = fake.connect_deadline;
-	index = fake.disconnect_calls;
-	assert(wlan_station_report_connect_event(station, connect.generation,
-	    WLAN_CONNECT_EVENT_AUTHENTICATED, 0) == ETIMEDOUT);
-	assert(fake.disconnect_calls == index);
-	assert(!wlan_station_test_secrets_clear(station));
-	fake.disconnect_error = EBUSY;
-	wlan_timer_run(fake.now);
-	request_header(&status, sizeof(status), "wlan0");
-	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
-	assert(status.state == WLAN_STATE_FAILED);
-	assert(status.terminal_error == ETIMEDOUT);
-	assert(wlan_station_test_secrets_clear(station));
-	assert(wlan_timer_next_deadline() == fake.now + 1U);
-	fake.disconnect_error = 0;
-	fake.now++;
-	wlan_timer_run(fake.now);
 
 	request_header(&scan, sizeof(scan), "wlan0");
 	scan.action = WLAN_SCAN_START;

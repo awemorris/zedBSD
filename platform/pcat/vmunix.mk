@@ -104,6 +104,7 @@ PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-hid.o
 endif
 ifeq ($(CONFIG_DRIVER_USB_RTL8822BU),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/rtl8822b.o \
+	$(BUILD)/drivers/rtl8822b-security.o \
 	$(BUILD)/drivers/usb-rtl8822bu.o
 endif
 ifeq ($(CONFIG_KERNEL_USB_HID_CHECKPOINT),y)

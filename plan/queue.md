@@ -4,9 +4,9 @@ Last updated: 2026-09-01
 
 QID: `q058`
 
-Queue status: in progress
+Queue status: completed
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: the user directed WLAN to remain the priority and authorized
 automatic Queue continuation. Q057 completed the p028 automatic radio/scan
@@ -34,7 +34,7 @@ secret-lifetime, and synthetic data cases before any physical RF request.
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws004-p029` | [Phase](ws004-hardware/phase029-wpa2-ccmp-l2/phase.md) | in progress | Strict WPA2-Personal/CCMP handshake, transactional RTL keys, controlled port, and bidirectional synthetic Ethernet L2 pass every automatic gate |
+| 1 | `ws004-p029` | [Phase](ws004-hardware/phase029-wpa2-ccmp-l2/phase.md) | automatic milestone completed | Strict WPA2-Personal/CCMP handshake, transactional RTL keys, controlled port, and bidirectional synthetic Ethernet L2 pass every automatic gate |
 
 ## Accepted decisions
 
@@ -114,8 +114,21 @@ orchestration claim.
 
 ## Execution result
 
-In progress. Q057 completed every radio/scan dependency. The readiness audit
-identified no human decision or hardware input required for this automatic
-milestone. Implementation begins with the internal contract and the two
-existing shortcut/RSN-selection corrections before crypto and RTL work proceed
-in parallel.
+Q058 completed the finite p029 automatic milestone. Eight fail-fast HW-T33
+component runners passed the crypto, strict RSN/authentication/association/
+EAPOL codec, asynchronous four-way engine, replay/reinstallation defense,
+CCMP reference, Ethernet L2, common-core, RTL CAM/security, and RTL8822BU USB
+contracts. The crypto gate passed 1,494 checks in each mode; ordinary,
+ASan/UBSan, analyzer, and declared amd64/i386 ABI variants all passed.
+
+The hardware path now closes TX admission and proves synchronous USB work, TX
+reports, and all four FIFO page pools drained before CAM/BSSID mutation.
+Unknown hardware state stays quarantined. Driver-enabled amd64/i386 builds and
+ordinary `make -j16` passed. The full amd64 UEFI image passed BOOTX64 validation,
+one disposable OVMF/q35 IDE-root boot, and one four-CPU/4-GiB OVMF/q35/xHCI
+USB-root boot through exact `login:`. The source image remained byte-identical,
+`git diff --check` passed, and `.internal/` was excluded.
+
+No physical RF, DHCP, command, or orchestration result is claimed. P030 is now
+dependency-ready; its eventual hardware feedback remains the one shared WS005
+p008 checkpoint.

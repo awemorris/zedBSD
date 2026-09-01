@@ -126,6 +126,7 @@ AMD64_USB_CLASS_SOURCES += src/drivers/usb-hid.c
 endif
 ifeq ($(CONFIG_DRIVER_USB_RTL8822BU),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/rtl8822b.c \
+	src/drivers/rtl8822b-security.c \
 	src/drivers/usb-rtl8822bu.c
 endif
 ifeq ($(CONFIG_KERNEL_USB_HID_CHECKPOINT),y)

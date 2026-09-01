@@ -73,13 +73,25 @@ static int test_firmware_walk(const struct rtl8822b_firmware_view *view,
 #define RTL8822BU_FIRMWARE_WALK test_firmware_walk
 #include "../../../src/drivers/usb-rtl8822bu.c"
 
+#define FIXTURE_SEC_COMMAND       0x0670U
+#define FIXTURE_SEC_WRITE         0x0674U
+#define FIXTURE_RCR               0x0608U
+#define FIXTURE_FIFO_PAGE_HIGH    0x0230U
+#define FIXTURE_FIFO_PAGE_LOW     0x0234U
+#define FIXTURE_FIFO_PAGE_NORMAL  0x0238U
+#define FIXTURE_FIFO_PAGE_EXTRA   0x023cU
+#define FIXTURE_CAM_WRITE_ENABLE  0x00010000U
+#define FIXTURE_CAM_POLLING       0x80000000U
+
 static uint8_t fake_registers[UINT16_MAX + 1U];
 static uint8_t fake_efuse[RTL8822B_EFUSE_PHYSICAL_SIZE];
+static uint32_t fake_cam[RTL8822B_CAM_ENTRY_COUNT][8];
 static struct net_device fake_net_device;
 static struct wlan_station fake_station;
 static unsigned control_calls;
 static unsigned control_fail_at;
 static uint16_t control_fail_address;
+static unsigned control_fail_address_remaining;
 static unsigned control_short_at;
 static unsigned access_off_count;
 static unsigned allocations;
@@ -147,6 +159,10 @@ static unsigned firmware_ready_forbidden_bit;
 static unsigned beacon_completion_suppressed;
 static unsigned firmware_descriptors_checked;
 static unsigned management_descriptors_checked;
+static unsigned station_descriptors_checked;
+static unsigned data_descriptors_checked;
+static uint8_t last_tx_sequence;
+static unsigned cam_writes;
 static unsigned firmware_load_calls;
 static unsigned firmware_release_calls;
 static int firmware_load_error;
@@ -159,11 +175,49 @@ static unsigned scan_report_calls;
 static uint64_t scan_report_generation;
 static uint8_t scan_report_channel;
 static int32_t scan_report_rssi;
+static unsigned frame_report_calls;
+static struct wlan_radio_rx_frame last_frame_report;
+static unsigned tx_report_calls;
+static uint64_t tx_report_generation;
+static uint64_t tx_report_cookie;
+static int tx_report_acknowledged;
+static int tx_report_error;
+static unsigned station_transmit_calls;
+static int station_transmit_error;
+static unsigned station_transmit_block_once;
+static unsigned station_transmit_block_entered;
+static unsigned station_transmit_block_release;
+static unsigned queue_read_block_once;
+static unsigned queue_read_block_entered;
+static unsigned queue_read_block_release;
 static unsigned storage_progress;
 static uint64_t fake_clock_ticks;
 static struct drv_usb_urb *persistent_rx_urb;
 static void (*yield_hook)(void);
 static unsigned yield_calls;
+
+static void wait_for_atomic_nonzero(unsigned *);
+
+struct key_delete_thread_context {
+	struct rtl8822bu_adapter *adapter;
+	uint64_t generation;
+	uint64_t key_generation;
+	uint64_t deadline;
+	int result;
+	unsigned done;
+};
+
+static void *
+run_key_delete_thread(void *argument)
+{
+	struct key_delete_thread_context *context = argument;
+
+	context->result = rtl8822bu_key_delete(context->adapter,
+	    context->generation, WLAN_RADIO_KEY_PAIRWISE, 0U,
+	    context->key_generation, context->deadline);
+	__atomic_store_n(&context->done, 1U, __ATOMIC_RELEASE);
+	return NULL;
+}
 
 enum fixture_thread_role {
 	FIXTURE_ROLE_NONE,
@@ -247,10 +301,12 @@ fake_transport_reset(void)
 {
 	assert(deferred_release == NULL && deferred_driver_data == NULL);
 	memset(fake_registers, 0, sizeof(fake_registers));
+	memset(fake_cam, 0, sizeof(fake_cam));
 	fake_efuse_make_board();
 	control_calls = 0U;
 	control_fail_at = 0U;
 	control_fail_address = 0U;
+	control_fail_address_remaining = 0U;
 	control_short_at = 0U;
 	access_off_count = 0U;
 	bulk_calls = 0U;
@@ -263,6 +319,10 @@ fake_transport_reset(void)
 	beacon_completion_suppressed = 0U;
 	firmware_descriptors_checked = 0U;
 	management_descriptors_checked = 0U;
+	station_descriptors_checked = 0U;
+	data_descriptors_checked = 0U;
+	last_tx_sequence = 0U;
+	cam_writes = 0U;
 	firmware_load_calls = 0U;
 	firmware_release_calls = 0U;
 	firmware_load_error = 0;
@@ -291,6 +351,21 @@ fake_transport_reset(void)
 	station_close_error = 0;
 	station_close_busy_count = 0U;
 	scan_ready_error = 0;
+	frame_report_calls = 0U;
+	memset(&last_frame_report, 0, sizeof(last_frame_report));
+	tx_report_calls = 0U;
+	tx_report_generation = 0U;
+	tx_report_cookie = 0U;
+	tx_report_acknowledged = 0;
+	tx_report_error = 0;
+	station_transmit_calls = 0U;
+	station_transmit_error = 0;
+	station_transmit_block_once = 0U;
+	station_transmit_block_entered = 0U;
+	station_transmit_block_release = 0U;
+	queue_read_block_once = 0U;
+	queue_read_block_entered = 0U;
+	queue_read_block_release = 0U;
 	open_count_during_gone = 0U;
 	close_calls_during_gone = 0U;
 	defer_net_release = 0U;
@@ -560,10 +635,26 @@ drv_usb_control(struct drv_usb_device *device, uint8_t request_type,
 	assert(length == 1U || length == 2U || length == 4U);
 	assert((request_type & (DRV_USB_REQUEST_VENDOR | DRV_USB_RECIP_DEVICE)) ==
 	    (DRV_USB_REQUEST_VENDOR | DRV_USB_RECIP_DEVICE));
+	if (!write && value == FIXTURE_FIFO_PAGE_HIGH &&
+	    __atomic_exchange_n(&queue_read_block_once, 0U,
+	    __ATOMIC_ACQ_REL) != 0U) {
+		__atomic_store_n(&queue_read_block_entered, 1U,
+		    __ATOMIC_RELEASE);
+		while (__atomic_load_n(&queue_read_block_release,
+		    __ATOMIC_ACQUIRE) == 0U)
+			sched_yield();
+	}
 	if (call == control_fail_at ||
 	    (control_fail_address != 0U && value == control_fail_address)) {
 		control_fail_at = 0U;
-		control_fail_address = 0U;
+		if (control_fail_address != 0U &&
+		    value == control_fail_address &&
+		    control_fail_address_remaining > 1U) {
+			control_fail_address_remaining--;
+		} else {
+			control_fail_address = 0U;
+			control_fail_address_remaining = 0U;
+		}
 		if (actual != NULL)
 			*actual = 0U;
 		return ETIMEDOUT;
@@ -582,6 +673,32 @@ drv_usb_control(struct drv_usb_device *device, uint8_t request_type,
 			fake_store16(value, stored);
 		} else {
 			memcpy(fake_registers + value, buffer, length);
+		}
+		/* The radio start transaction reserves pages in each priority queue.
+		 * The default fixture models an already drained MAC by mirroring the
+		 * hardware's available counter; individual tests may then force a
+		 * mismatch to exercise the bounded retry path. */
+		if (length == 2U && (value == FIXTURE_FIFO_PAGE_HIGH ||
+		    value == FIXTURE_FIFO_PAGE_LOW ||
+		    value == FIXTURE_FIFO_PAGE_NORMAL ||
+		    value == FIXTURE_FIFO_PAGE_EXTRA))
+			fake_store16((uint16_t)(value + 2U),
+			    fake_le16(buffer));
+		if (value == FIXTURE_SEC_COMMAND && length == 4U) {
+			uint32_t command = fake_le32(buffer);
+			unsigned cam_address = command & 0xffU;
+
+			if ((command & (FIXTURE_CAM_WRITE_ENABLE |
+			    FIXTURE_CAM_POLLING)) == (FIXTURE_CAM_WRITE_ENABLE |
+			    FIXTURE_CAM_POLLING)) {
+				assert((cam_address >> 3) <
+				    RTL8822B_CAM_ENTRY_COUNT);
+				fake_cam[cam_address >> 3][cam_address & 7U] =
+				    fake_le32(fake_registers + FIXTURE_SEC_WRITE);
+				cam_writes++;
+			}
+			command &= ~FIXTURE_CAM_POLLING;
+			fake_store32(FIXTURE_SEC_COMMAND, command);
 		}
 		/* A SIPI RF write is observed through the direct-read window.  Model
 		 * that hardware alias so the core's bounded RF LUT/readback checks test
@@ -851,24 +968,36 @@ drv_usb_bulk(struct drv_usb_device *device, struct drv_usb_endpoint *endpoint,
 {
 	const uint8_t *bytes = buffer;
 	uint16_t checksum = 0U;
+	uint32_t qsel;
 	unsigned word;
 	unsigned call = ++bulk_calls;
 
 	assert(device != NULL && endpoint != NULL && buffer != NULL);
-	if (((fake_le32(bytes + 4U) >> 8) & 0x1fU) == 18U) {
+	qsel = (fake_le32(bytes + 4U) >> 8) & 0x1fU;
+	if (qsel == 18U || qsel == 0U) {
 		assert(endpoint->descriptor.address ==
-		    RTL8822BU_BULK_OUT_HIGH_ADDRESS);
+		    (qsel == 18U ? RTL8822BU_BULK_OUT_HIGH_ADDRESS :
+		    RTL8822BU_BULK_OUT_LOW_ADDRESS));
 		assert(timeout != 0U);
-		assert(length > RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE);
+		assert(length > RTL8822B_DATA_TX_DESCRIPTOR_SIZE);
 		assert((fake_le32(bytes) & 0xffffU) ==
-		    length - RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE);
+		    length - RTL8822B_DATA_TX_DESCRIPTOR_SIZE);
 		assert(((fake_le32(bytes) >> 16) & 0xffU) ==
-		    RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE);
-		assert(((fake_le32(bytes + 4U) >> 8) & 0x1fU) == 18U);
+		    RTL8822B_DATA_TX_DESCRIPTOR_SIZE);
 		for (word = 0U; word < 16U; word++)
 			checksum ^= fake_le16(bytes + word * 2U);
 		assert(checksum == 0U);
-		management_descriptors_checked++;
+		if ((fake_le32(bytes + 8U) & (1U << 19)) != 0U) {
+			last_tx_sequence = (uint8_t)(fake_le32(bytes + 24U) &
+			    0xfcU);
+			if (qsel == 18U)
+				station_descriptors_checked++;
+			else
+				data_descriptors_checked++;
+		} else {
+			assert(qsel == 18U);
+			management_descriptors_checked++;
+		}
 		if (actual != NULL)
 			*actual = call == bulk_short_at ? length - 1U : length;
 		return call == bulk_fail_at ? ETIMEDOUT : 0;
@@ -1117,6 +1246,47 @@ wlan_station_report_scan_frame(struct wlan_station *station,
 	scan_report_channel = channel_hint;
 	scan_report_rssi = rssi_dbm;
 	return 0;
+}
+
+int
+wlan_station_report_frame(struct wlan_station *station,
+	const struct wlan_radio_rx_frame *report)
+{
+	assert(station == &fake_station && report != NULL);
+	assert(report->frame != NULL && report->length >= 2U);
+	frame_report_calls++;
+	last_frame_report = *report;
+	return 0;
+}
+
+int
+wlan_station_report_tx_complete(struct wlan_station *station,
+	uint64_t generation, uint64_t cookie, int acknowledged, int error)
+{
+	assert(station == &fake_station);
+	tx_report_calls++;
+	tx_report_generation = generation;
+	tx_report_cookie = cookie;
+	tx_report_acknowledged = acknowledged;
+	tx_report_error = error;
+	return 0;
+}
+
+int
+wlan_station_transmit(struct wlan_station *station, struct packet_buf *packet)
+{
+	assert(station == &fake_station && packet != NULL);
+	station_transmit_calls++;
+	if (__atomic_exchange_n(&station_transmit_block_once, 0U,
+	    __ATOMIC_ACQ_REL) != 0U) {
+		__atomic_store_n(&station_transmit_block_entered, 1U,
+		    __ATOMIC_RELEASE);
+		while (__atomic_load_n(&station_transmit_block_release,
+		    __ATOMIC_ACQUIRE) == 0U)
+			sched_yield();
+	}
+	packet_buf_free(packet);
+	return station_transmit_error;
 }
 
 int
@@ -1746,6 +1916,540 @@ make_wildcard_probe(uint8_t frame[26])
 }
 
 static void
+make_connection_bss(struct wlan_bss_record *bss)
+{
+	memset(bss, 0, sizeof(*bss));
+	memcpy(bss->ssid, "fixture", 7U);
+	bss->ssid_length = 7U;
+	memcpy(bss->bssid,
+	    (const uint8_t[]){ 0x02U, 0xaaU, 0xbbU, 0xccU, 0xddU, 0xeeU },
+	    6U);
+	bss->channel = 6U;
+	bss->center_frequency_mhz = 2437U;
+	bss->security = WLAN_SECURITY_PRIVACY | WLAN_SECURITY_WPA2 |
+	    WLAN_SECURITY_CCMP | WLAN_SECURITY_PSK;
+}
+
+static size_t
+make_station_frame(uint8_t *frame, enum wlan_radio_frame_class class,
+	const struct wlan_bss_record *bss, int encrypted, uint8_t key_index,
+	uint64_t packet_number)
+{
+	size_t offset;
+	uint16_t frame_control;
+
+	memset(frame, 0, 96U);
+	if (class == WLAN_RADIO_FRAME_MANAGEMENT) {
+		frame[0] = 0xb0U;
+		memcpy(frame + 4U, bss->bssid, 6U);
+		memcpy(frame + 10U, fake_net_device.hwaddr, 6U);
+		memcpy(frame + 16U, bss->bssid, 6U);
+		return 30U;
+	}
+	frame_control = 0x0108U | (encrypted ? 0x4000U : 0U);
+	frame[0] = (uint8_t)frame_control;
+	frame[1] = (uint8_t)(frame_control >> 8);
+	memcpy(frame + 4U, bss->bssid, 6U);
+	memcpy(frame + 10U, fake_net_device.hwaddr, 6U);
+	memcpy(frame + 16U,
+	    (const uint8_t[]){ 0x02U, 1U, 2U, 3U, 4U, 5U }, 6U);
+	offset = 24U;
+	if (encrypted) {
+		frame[offset++] = (uint8_t)packet_number;
+		frame[offset++] = (uint8_t)(packet_number >> 8);
+		frame[offset++] = 0U;
+		frame[offset++] = (uint8_t)(0x20U | (key_index << 6));
+		frame[offset++] = (uint8_t)(packet_number >> 16);
+		frame[offset++] = (uint8_t)(packet_number >> 24);
+		frame[offset++] = (uint8_t)(packet_number >> 32);
+		frame[offset++] = (uint8_t)(packet_number >> 40);
+	}
+	memcpy(frame + offset,
+	    (const uint8_t[]){ 0xaaU, 0xaaU, 0x03U, 0U, 0U, 0U,
+	    class == WLAN_RADIO_FRAME_EAPOL ? 0x88U : 0x08U,
+	    class == WLAN_RADIO_FRAME_EAPOL ? 0x8eU : 0x00U }, 8U);
+	return offset + 8U;
+}
+
+static size_t
+make_ap_frame(uint8_t *frame, const struct wlan_bss_record *bss, int group,
+	uint8_t key_index, uint64_t packet_number, int eapol)
+{
+	size_t offset = 24U;
+	uint16_t frame_control = 0x0208U | (packet_number != 0U ? 0x4000U : 0U);
+
+	memset(frame, 0, 96U);
+	frame[0] = (uint8_t)frame_control;
+	frame[1] = (uint8_t)(frame_control >> 8);
+	memcpy(frame + 4U, group ?
+	    (const uint8_t[]){ 0x01U, 0U, 0x5eU, 0U, 0U, 1U } :
+	    fake_net_device.hwaddr, 6U);
+	memcpy(frame + 10U, bss->bssid, 6U);
+	memcpy(frame + 16U,
+	    (const uint8_t[]){ 0x02U, 6U, 7U, 8U, 9U, 10U }, 6U);
+	if (packet_number != 0U) {
+		frame[offset++] = (uint8_t)packet_number;
+		frame[offset++] = (uint8_t)(packet_number >> 8);
+		frame[offset++] = 0U;
+		frame[offset++] = (uint8_t)(0x20U | (key_index << 6));
+		frame[offset++] = (uint8_t)(packet_number >> 16);
+		frame[offset++] = (uint8_t)(packet_number >> 24);
+		frame[offset++] = (uint8_t)(packet_number >> 32);
+		frame[offset++] = (uint8_t)(packet_number >> 40);
+	}
+	memcpy(frame + offset,
+	    (const uint8_t[]){ 0xaaU, 0xaaU, 0x03U, 0U, 0U, 0U,
+	    eapol ? 0x88U : 0x08U, eapol ? 0x8eU : 0x00U }, 8U);
+	return offset + 8U;
+}
+
+static void
+make_ccx_report(struct rtl8822b_rx_packet *packet, uint8_t payload[9],
+	uint8_t sequence, uint8_t status)
+{
+	memset(payload, 0, 9U);
+	payload[0] = RTL8822BU_C2H_CCX_TX_REPORT_ID;
+	payload[8] = sequence;
+	payload[2] = status;
+	memset(packet, 0, sizeof(*packet));
+	packet->kind = RTL8822B_RX_C2H;
+	packet->payload = payload;
+	packet->payload_length = 9U;
+	packet->c2h_id = RTL8822BU_C2H_CCX_TX_REPORT_ID;
+}
+
+static void
+make_ccx_extended_report(struct rtl8822b_rx_packet *packet,
+	uint8_t payload[12], uint8_t sequence, uint8_t status)
+{
+	memset(payload, 0, 12U);
+	payload[0] = RTL8822BU_C2H_EXTENDED_ID;
+	payload[2] = RTL8822BU_C2H_EXTENDED_CCX_REPORT_ID;
+	payload[10] = sequence;
+	payload[11] = status;
+	memset(packet, 0, sizeof(*packet));
+	packet->kind = RTL8822B_RX_C2H;
+	packet->payload = payload;
+	packet->payload_length = 12U;
+	packet->c2h_id = RTL8822BU_C2H_EXTENDED_ID;
+}
+
+static void
+test_secure_station_hardware_contract(void)
+{
+	static const uint8_t broadcast[6] = {
+		0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU
+	};
+	struct drv_usb_device device;
+	struct drv_usb_interface interface;
+	struct drv_usb_endpoint endpoints[5];
+	struct rtl8822bu_adapter *adapter;
+	struct wlan_bss_record bss;
+	struct wlan_radio_key_request key_request;
+	struct wlan_radio_tx_request tx_request;
+	struct rtl8822b_rx_packet rx_packet;
+	struct rtl8822bu_rx_report_context rx_context;
+	uint8_t frame[96];
+	uint8_t c2h[12];
+	uint64_t deadline;
+	size_t frame_length;
+	unsigned writes;
+
+	fake_transport_reset();
+	make_exact_interface(&device, &interface, endpoints);
+	assert(rtl8822bu_attach(&interface, &rtl8822bu_ids[0]) == 0);
+	adapter = interface.driver_data;
+	assert(fake_net_device.ops->open(&fake_net_device) == 0);
+	assert(fake_net_device.ops->transmit(&fake_net_device,
+	    malloc(sizeof(struct packet_buf))) == 0);
+	assert(station_transmit_calls == 1U &&
+	    adapter->radio_operations_active == 0U);
+	station_transmit_error = EHOSTUNREACH;
+	assert(fake_net_device.ops->transmit(&fake_net_device,
+	    malloc(sizeof(struct packet_buf))) == EHOSTUNREACH);
+	assert(station_transmit_calls == 2U &&
+	    adapter->radio_operations_active == 0U);
+	station_transmit_error = 0;
+	make_connection_bss(&bss);
+	deadline = clock_ticks() + 100U;
+	assert(rtl8822bu_connect_start(adapter, 900U, &bss, deadline) == 0);
+	assert(adapter->connection_generation == 900U &&
+	    adapter->connection_prepared && adapter->security_enabled &&
+	    adapter->connection_channel == 6U &&
+	    rtl8822bu_mac_equal(adapter->connection_bssid, bss.bssid));
+	assert(rtl8822bu_connect_start(adapter, 900U, &bss, deadline) == 0);
+	assert(rtl8822bu_connect_start(adapter, 901U, &bss, deadline) == EBUSY);
+	assert(rtl8822bu_scan_channel_start(adapter, 901U, 0U, 1U,
+	    deadline) == EBUSY);
+	assert(rtl8822bu_association_set(adapter, 899U, bss.bssid, 0x123U,
+	    deadline) == ESTALE);
+	assert(rtl8822bu_association_set(adapter, 900U, bss.bssid, 0x123U,
+	    deadline) == 0);
+	assert(adapter->association_active && adapter->association_aid == 0x123U);
+	assert(fake_le32(fake_registers + 0x0618U) == 0xccbbaa02U);
+	assert(fake_le16(fake_registers + 0x061cU) == 0xeeddU);
+	assert((fake_le16(fake_registers + 0x06a8U) & 0x07ffU) == 0x123U);
+
+	memset(&key_request, 0, sizeof(key_request));
+	key_request.generation = 900U;
+	key_request.key_generation = 77U;
+	key_request.deadline_ticks = deadline;
+	key_request.kind = WLAN_RADIO_KEY_PAIRWISE;
+	memcpy(key_request.address, bss.bssid, 6U);
+	memset(key_request.key, 0x11, sizeof(key_request.key));
+	assert(rtl8822bu_key_install(adapter, &key_request) == 0);
+	assert(adapter->pairwise_key_installed &&
+	    adapter->pairwise_key_generation == 77U);
+	assert((fake_cam[RTL8822B_CAM_PAIRWISE_SLOT][0] & 0x00008000U) != 0U);
+	writes = cam_writes;
+	assert(rtl8822bu_key_install(adapter, &key_request) == EALREADY);
+	assert(cam_writes == writes);
+	key_request.kind = WLAN_RADIO_KEY_GROUP;
+	key_request.key_index = 2U;
+	key_request.receive_packet_number = 4U;
+	memcpy(key_request.address, broadcast, 6U);
+	memset(key_request.key, 0x22, sizeof(key_request.key));
+	assert(rtl8822bu_key_install(adapter, &key_request) == 0);
+	assert((adapter->group_key_mask & (1U << 2)) != 0U &&
+	    adapter->group_key_generation[2] == 77U);
+	assert((fake_cam[2][0] & (0x00008000U | 0x40U)) ==
+	    (0x00008000U | 0x40U));
+
+	memset(&tx_request, 0, sizeof(tx_request));
+	tx_request.generation = 900U;
+	tx_request.cookie = 0x123456789abcdef0ULL;
+	tx_request.deadline_ticks = deadline;
+	tx_request.frame_class = WLAN_RADIO_FRAME_MANAGEMENT;
+	tx_request.frame = frame;
+	tx_request.length = make_station_frame(frame,
+	    WLAN_RADIO_FRAME_MANAGEMENT, &bss, 0, 0U, 0U);
+	assert(rtl8822bu_frame_transmit(adapter, &tx_request) == 0);
+	assert(station_descriptors_checked == 1U);
+	make_ccx_report(&rx_packet, c2h, last_tx_sequence, 0U);
+	memset(&rx_context, 0, sizeof(rx_context));
+	rx_context.adapter = adapter;
+	rx_packet.payload_length = 8U;
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == EILSEQ);
+	assert(tx_report_calls == 0U);
+	make_ccx_extended_report(&rx_packet, c2h, last_tx_sequence, 0U);
+	c2h[2] = 0x7fU;
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == 0);
+	assert(tx_report_calls == 0U);
+	make_ccx_report(&rx_packet, c2h, last_tx_sequence, 0U);
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == 0);
+	assert(tx_report_calls == 1U && tx_report_generation == 900U &&
+	    tx_report_cookie == 0x123456789abcdef0ULL &&
+	    tx_report_acknowledged && tx_report_error == 0);
+	/* A duplicate completion is stale and cannot complete another cookie. */
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == 0);
+	assert(tx_report_calls == 1U);
+
+	tx_request.cookie = 2U;
+	tx_request.frame_class = WLAN_RADIO_FRAME_EAPOL;
+	tx_request.frame = frame;
+	tx_request.length = make_station_frame(frame, WLAN_RADIO_FRAME_EAPOL,
+	    &bss, 0, 0U, 0U);
+	assert(rtl8822bu_frame_transmit(adapter, &tx_request) == 0);
+	assert(station_descriptors_checked == 2U);
+	make_ccx_extended_report(&rx_packet, c2h, last_tx_sequence, 0U);
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == 0);
+	assert(tx_report_calls == 2U && tx_report_cookie == 2U);
+
+	tx_request.cookie = 3U;
+	tx_request.key_generation = 77U;
+	tx_request.packet_number = 9U;
+	tx_request.encrypted = 1U;
+	tx_request.frame_class = WLAN_RADIO_FRAME_DATA;
+	tx_request.frame = frame;
+	tx_request.length = make_station_frame(frame, WLAN_RADIO_FRAME_DATA,
+	    &bss, 1, 0U, 9U);
+	assert(rtl8822bu_frame_transmit(adapter, &tx_request) == 0);
+	assert(data_descriptors_checked == 1U);
+	make_ccx_report(&rx_packet, c2h, last_tx_sequence, 0x40U);
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == 0);
+	assert(tx_report_calls == 3U && tx_report_cookie == 3U &&
+	    !tx_report_acknowledged && tx_report_error == EIO);
+
+	/* Lost firmware reports are bounded by the original TX deadline: all 64
+	 * CCX sequence slots may fill temporarily, but expiry makes the next
+	 * reservation progress instead of leaving the interface at ENOSPC forever. */
+	memset(&tx_request, 0, sizeof(tx_request));
+	tx_request.generation = 900U;
+	tx_request.deadline_ticks = clock_ticks() + 2U;
+	tx_request.frame_class = WLAN_RADIO_FRAME_MANAGEMENT;
+	tx_request.frame = frame;
+	tx_request.length = make_station_frame(frame,
+	    WLAN_RADIO_FRAME_MANAGEMENT, &bss, 0, 0U, 0U);
+	for (writes = 0U; writes < RTL8822BU_TX_REPORT_COUNT; writes++) {
+		tx_request.cookie = 1000U + writes;
+		assert(rtl8822bu_frame_transmit(adapter, &tx_request) == 0);
+	}
+	tx_request.cookie = 2000U;
+	assert(rtl8822bu_frame_transmit(adapter, &tx_request) == ENOSPC);
+	fake_clock_ticks = tx_request.deadline_ticks +
+	    RTL8822BU_TX_REPORT_RETIRE_TICKS;
+	tx_request.deadline_ticks = clock_ticks() + 100U;
+	assert(rtl8822bu_frame_transmit(adapter, &tx_request) == 0);
+	make_ccx_report(&rx_packet, c2h, last_tx_sequence, 0U);
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == 0);
+	assert(tx_report_calls == 4U && tx_report_cookie == 2000U &&
+	    tx_report_acknowledged && tx_report_error == 0);
+
+	frame_length = make_ap_frame(frame, &bss, 0, 0U, 0U, 1);
+	memset(&rx_packet, 0, sizeof(rx_packet));
+	rx_packet.kind = RTL8822B_RX_FRAME;
+	rx_packet.payload = frame;
+	rx_packet.payload_length = frame_length;
+	rx_packet.rssi_dbm = -42;
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == 0);
+	assert(frame_report_calls == 1U &&
+	    last_frame_report.generation == 900U &&
+	    last_frame_report.cipher == WLAN_RADIO_CIPHER_NONE &&
+	    !last_frame_report.decrypted);
+
+	frame_length = make_ap_frame(frame, &bss, 0, 0U, 10U, 0);
+	rx_packet.payload_length = frame_length;
+	rx_packet.encryption_type = RTL8822BU_RX_ENCRYPTION_AES;
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == 0);
+	assert(frame_report_calls == 2U && last_frame_report.decrypted &&
+	    last_frame_report.key_generation == 77U &&
+	    last_frame_report.packet_number == 10U);
+	frame_length = make_ap_frame(frame, &bss, 0, 1U, 10U, 0);
+	rx_packet.payload_length = frame_length;
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == EACCES);
+	assert(frame_report_calls == 2U);
+	frame_length = make_ap_frame(frame, &bss, 0, 0U, 10U, 0);
+	rx_packet.payload_length = frame_length;
+	rx_packet.icv_error = 1U;
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == EACCES);
+	assert(frame_report_calls == 2U);
+	rx_packet.icv_error = 0U;
+	frame_length = make_ap_frame(frame, &bss, 1, 2U, 11U, 0);
+	rx_packet.payload_length = frame_length;
+	assert(rtl8822bu_rx_report(&rx_context, &rx_packet) == 0);
+	assert(frame_report_calls == 3U && last_frame_report.key_index == 2U &&
+	    last_frame_report.packet_number == 11U);
+
+	/* CAM deletion is a nonblocking checked barrier.  A data frame whose USB
+	 * write completed still owns its key until CCX completion or the bounded
+	 * retention window expires; the worker may poll/retry without deadlock. */
+	memset(&tx_request, 0, sizeof(tx_request));
+	tx_request.generation = 900U;
+	tx_request.cookie = 3000U;
+	tx_request.deadline_ticks = clock_ticks() + 2U;
+	tx_request.key_generation = 77U;
+	tx_request.packet_number = 12U;
+	tx_request.encrypted = 1U;
+	tx_request.frame_class = WLAN_RADIO_FRAME_DATA;
+	tx_request.frame = frame;
+	tx_request.length = make_station_frame(frame, WLAN_RADIO_FRAME_DATA,
+	    &bss, 1, 0U, 12U);
+	assert(rtl8822bu_frame_transmit(adapter, &tx_request) == 0);
+	assert(rtl8822bu_key_delete(adapter, 900U, WLAN_RADIO_KEY_PAIRWISE, 0U,
+	    77U, deadline) == EBUSY);
+	fake_clock_ticks = tx_request.deadline_ticks +
+	    RTL8822BU_TX_REPORT_RETIRE_TICKS;
+	deadline = clock_ticks() + 100U;
+
+	assert(rtl8822bu_key_delete(adapter, 900U, WLAN_RADIO_KEY_GROUP, 2U,
+	    78U, deadline) == ESTALE);
+	assert(rtl8822bu_key_delete(adapter, 900U, WLAN_RADIO_KEY_GROUP, 2U,
+	    77U, deadline) == 0);
+	assert(rtl8822bu_key_delete(adapter, 900U, WLAN_RADIO_KEY_PAIRWISE, 0U,
+	    77U, deadline) == 0);
+	assert(rtl8822bu_association_clear(adapter, 900U, deadline) == 0);
+	assert(rtl8822bu_disconnect(adapter, 900U) == 0);
+	assert(adapter->connection_generation == 0U &&
+	    !adapter->connection_prepared && !adapter->association_active &&
+	    !adapter->pairwise_key_installed && adapter->group_key_mask == 0U);
+
+	/* A command failure leaves the partially written slot invalid and keeps
+	 * the radio usable when both the core and wrapper rollback clear succeed. */
+	assert(rtl8822bu_connect_start(adapter, 901U, &bss, deadline) == 0);
+	assert(rtl8822bu_association_set(adapter, 901U, bss.bssid, 1U,
+	    deadline) == 0);
+	memset(&key_request, 0, sizeof(key_request));
+	key_request.generation = 901U;
+	key_request.key_generation = 78U;
+	key_request.deadline_ticks = deadline;
+	key_request.kind = WLAN_RADIO_KEY_PAIRWISE;
+	memcpy(key_request.address, bss.bssid, 6U);
+	memset(key_request.key, 0x33, sizeof(key_request.key));
+	control_fail_address = FIXTURE_SEC_COMMAND;
+	assert(rtl8822bu_key_install(adapter, &key_request) == ETIMEDOUT);
+	assert(!adapter->pairwise_key_installed &&
+	    fake_cam[RTL8822B_CAM_PAIRWISE_SLOT][0] == 0U &&
+	    !adapter->quarantined);
+	assert(rtl8822bu_association_clear(adapter, 901U, deadline) == 0);
+	assert(rtl8822bu_disconnect(adapter, 901U) == 0);
+
+	/* A failed association rollback is not allowed to make its inverse
+	 * unreachable.  Quarantine blocks forward work, while the matching clear
+	 * and final disconnect remain checked recovery barriers. */
+	assert(rtl8822bu_connect_start(adapter, 902U, &bss, deadline) == 0);
+	control_fail_address = FIXTURE_RCR;
+	control_fail_address_remaining = 3U;
+	assert(rtl8822bu_association_set(adapter, 902U, bss.bssid, 2U,
+	    deadline) == ETIMEDOUT);
+	assert(adapter->quarantined && adapter->association_uncertain &&
+	    !adapter->association_active);
+	assert(rtl8822bu_association_clear(adapter, 902U, deadline) == 0);
+	assert(!adapter->association_uncertain);
+	assert(rtl8822bu_disconnect(adapter, 902U) == 0);
+	assert(!adapter->quarantined);
+
+	/* Likewise, a CAM program whose internal and wrapper rollback both fail
+	 * retains the slot generation.  The exact inverse can clear that slot even
+	 * though ordinary radio operations are quarantined. */
+	assert(rtl8822bu_connect_start(adapter, 903U, &bss, deadline) == 0);
+	assert(rtl8822bu_association_set(adapter, 903U, bss.bssid, 3U,
+	    deadline) == 0);
+	memset(&key_request, 0, sizeof(key_request));
+	key_request.generation = 903U;
+	key_request.key_generation = 79U;
+	key_request.deadline_ticks = deadline;
+	key_request.kind = WLAN_RADIO_KEY_PAIRWISE;
+	memcpy(key_request.address, bss.bssid, 6U);
+	memset(key_request.key, 0x44, sizeof(key_request.key));
+	control_fail_address = FIXTURE_SEC_COMMAND;
+	control_fail_address_remaining = 3U;
+	assert(rtl8822bu_key_install(adapter, &key_request) == ETIMEDOUT);
+	assert(adapter->quarantined && !adapter->pairwise_key_installed &&
+	    adapter->pairwise_key_generation == 79U &&
+	    (adapter->cam_uncertain_mask &
+	    (1U << RTL8822B_CAM_PAIRWISE_SLOT)) != 0U);
+	assert(rtl8822bu_association_clear(adapter, 903U, deadline) == EBUSY);
+	assert(rtl8822bu_key_delete(adapter, 903U, WLAN_RADIO_KEY_PAIRWISE,
+	    0U, 79U, deadline) == 0);
+	assert(adapter->pairwise_key_generation == 0U &&
+	    (adapter->cam_uncertain_mask &
+	    (1U << RTL8822B_CAM_PAIRWISE_SLOT)) == 0U);
+	assert(rtl8822bu_association_clear(adapter, 903U, deadline) == 0);
+	assert(rtl8822bu_disconnect(adapter, 903U) == 0);
+	assert(!adapter->quarantined);
+	fake_net_device.ops->close(&fake_net_device);
+	assert(rtl8822bu_detach(&interface, 0U) == 0);
+	assert(interface.driver_data == NULL && allocations == 0U);
+}
+
+static void
+test_tx_quiesce_queue_barrier(void)
+{
+	struct drv_usb_device device;
+	struct drv_usb_interface interface;
+	struct drv_usb_endpoint endpoints[5];
+	struct rtl8822bu_adapter *adapter;
+	struct wlan_bss_record bss;
+	struct wlan_radio_key_request key_request;
+	struct wlan_radio_tx_request tx_request;
+	struct key_delete_thread_context delete_context = {0};
+	pthread_t delete_thread;
+	struct packet_buf *packet;
+	uint8_t frame[96];
+	uint64_t deadline;
+	uint16_t reserved;
+	unsigned writes, transmit_calls;
+
+	fake_transport_reset();
+	make_exact_interface(&device, &interface, endpoints);
+	assert(rtl8822bu_attach(&interface, &rtl8822bu_ids[0]) == 0);
+	adapter = interface.driver_data;
+	assert(fake_net_device.ops->open(&fake_net_device) == 0);
+	make_connection_bss(&bss);
+	deadline = clock_ticks() + 100U;
+	assert(rtl8822bu_connect_start(adapter, 910U, &bss, deadline) == 0);
+	assert(rtl8822bu_association_set(adapter, 910U, bss.bssid, 7U,
+	    deadline) == 0);
+	memset(&key_request, 0, sizeof(key_request));
+	key_request.generation = 910U;
+	key_request.key_generation = 77U;
+	key_request.deadline_ticks = deadline;
+	key_request.kind = WLAN_RADIO_KEY_PAIRWISE;
+	memcpy(key_request.address, bss.bssid, sizeof(key_request.address));
+	memset(key_request.key, 0x5a, sizeof(key_request.key));
+	assert(rtl8822bu_key_install(adapter, &key_request) == 0);
+
+	/* A complete but non-empty counter snapshot is a retry state.  CAM is not
+	 * touched and admission stays closed until the same inverse observes a
+	 * drained queue. */
+	reserved = fake_le16(fake_registers + FIXTURE_FIFO_PAGE_LOW);
+	assert(reserved != 0U);
+	fake_store16(FIXTURE_FIFO_PAGE_LOW + 2U,
+	    (uint16_t)(reserved - 1U));
+	writes = cam_writes;
+	assert(rtl8822bu_key_delete(adapter, 910U,
+	    WLAN_RADIO_KEY_PAIRWISE, 0U, 77U, deadline) == EBUSY);
+	assert(adapter->tx_quiescing && !adapter->quarantined &&
+	    adapter->pairwise_key_installed && cam_writes == writes);
+	memset(&tx_request, 0, sizeof(tx_request));
+	tx_request.generation = 910U;
+	tx_request.cookie = 0x1111U;
+	tx_request.deadline_ticks = deadline;
+	tx_request.frame_class = WLAN_RADIO_FRAME_MANAGEMENT;
+	tx_request.frame = frame;
+	tx_request.length = make_station_frame(frame,
+	    WLAN_RADIO_FRAME_MANAGEMENT, &bss, 0, 0U, 0U);
+	assert(rtl8822bu_frame_transmit(adapter, &tx_request) == EBUSY);
+	fake_store16(FIXTURE_FIFO_PAGE_LOW + 2U, reserved);
+	assert(rtl8822bu_key_delete(adapter, 910U,
+	    WLAN_RADIO_KEY_PAIRWISE, 0U, 77U, deadline) == 0);
+	assert(!adapter->tx_quiescing && !adapter->pairwise_key_installed);
+
+	/* Hold the first hardware counter read after the transition atomically
+	 * closes admission.  Both the private radio callback and outer net-device
+	 * entry must reject a racing frame before CAM mutation begins. */
+	key_request.key_generation = 78U;
+	assert(rtl8822bu_key_install(adapter, &key_request) == 0);
+	delete_context.adapter = adapter;
+	delete_context.generation = 910U;
+	delete_context.key_generation = 78U;
+	delete_context.deadline = UINT64_MAX;
+	__atomic_store_n(&threaded_test_active, 1U, __ATOMIC_RELEASE);
+	__atomic_store_n(&queue_read_block_once, 1U, __ATOMIC_RELEASE);
+	assert(pthread_create(&delete_thread, NULL, run_key_delete_thread,
+	    &delete_context) == 0);
+	wait_for_atomic_nonzero(&queue_read_block_entered);
+	assert(adapter->tx_quiescing && adapter->radio_operations_active == 1U);
+	writes = cam_writes;
+	tx_request.cookie++;
+	assert(rtl8822bu_frame_transmit(adapter, &tx_request) == EBUSY);
+	transmit_calls = station_transmit_calls;
+	packet = malloc(sizeof(*packet));
+	assert(packet != NULL);
+	assert(fake_net_device.ops->transmit(&fake_net_device, packet) == EBUSY);
+	assert(station_transmit_calls == transmit_calls && cam_writes == writes);
+	__atomic_store_n(&queue_read_block_release, 1U, __ATOMIC_RELEASE);
+	assert(pthread_join(delete_thread, NULL) == 0);
+	__atomic_store_n(&threaded_test_active, 0U, __ATOMIC_RELEASE);
+	assert(delete_context.result == 0 &&
+	    __atomic_load_n(&delete_context.done, __ATOMIC_ACQUIRE) != 0U);
+	assert(!adapter->tx_quiescing && !adapter->pairwise_key_installed);
+
+	/* An incomplete queue snapshot is not EBUSY: retain quarantine and the
+	 * gate, then let the exact inverse retry prove drain and clear the slot. */
+	deadline = clock_ticks() + 100U;
+	key_request.deadline_ticks = deadline;
+	key_request.key_generation = 79U;
+	assert(rtl8822bu_key_install(adapter, &key_request) == 0);
+	writes = cam_writes;
+	control_fail_address = FIXTURE_FIFO_PAGE_NORMAL + 2U;
+	assert(rtl8822bu_key_delete(adapter, 910U,
+	    WLAN_RADIO_KEY_PAIRWISE, 0U, 79U, deadline) == ETIMEDOUT);
+	assert(adapter->tx_quiescing && adapter->quarantined &&
+	    (adapter->cam_uncertain_mask &
+	    (1U << RTL8822B_CAM_PAIRWISE_SLOT)) != 0U &&
+	    cam_writes == writes);
+	assert(rtl8822bu_key_delete(adapter, 910U,
+	    WLAN_RADIO_KEY_PAIRWISE, 0U, 79U, deadline) == 0);
+	assert(rtl8822bu_association_clear(adapter, 910U, deadline) == 0);
+	assert(rtl8822bu_disconnect(adapter, 910U) == 0);
+	assert(!adapter->tx_quiescing && !adapter->quarantined);
+	fake_net_device.ops->close(&fake_net_device);
+	assert(rtl8822bu_detach(&interface, 0U) == 0);
+	assert(interface.driver_data == NULL && allocations == 0U);
+}
+
+static void
 test_first_open_software_scan(void)
 {
 	struct drv_usb_device device;
@@ -2277,6 +2981,18 @@ run_poll_thread(void *argument)
 }
 
 static void *
+run_transmit_thread(void *argument)
+{
+	struct lifecycle_thread_context *context = argument;
+	struct packet_buf *packet = malloc(sizeof(*packet));
+
+	assert(packet != NULL);
+	context->result = fake_net_device.ops->transmit(&fake_net_device, packet);
+	__atomic_store_n(&context->done, 1U, __ATOMIC_RELEASE);
+	return NULL;
+}
+
+static void *
 run_start_thread(void *argument)
 {
 	struct lifecycle_thread_context *context = argument;
@@ -2367,6 +3083,37 @@ test_open_detach_lifecycle_serialization(void)
 	assert(pthread_join(detach_thread, NULL) == 0);
 	__atomic_store_n(&threaded_test_active, 0U, __ATOMIC_RELEASE);
 	assert(open_context.result == 0 && detach_context.result == 0);
+	assert(interface.driver_data == NULL && allocations == 0U);
+}
+
+static void
+test_transmit_detach_operation_lease(void)
+{
+	struct drv_usb_device device;
+	struct drv_usb_interface interface;
+	struct drv_usb_endpoint endpoints[5];
+	struct rtl8822bu_adapter *adapter;
+	struct lifecycle_thread_context transmit = {0}, detach = {0};
+	pthread_t transmit_thread, detach_thread;
+
+	fake_transport_reset();
+	make_exact_interface(&device, &interface, endpoints);
+	assert(rtl8822bu_attach(&interface, &rtl8822bu_ids[0]) == 0);
+	adapter = interface.driver_data;
+	assert(fake_net_device.ops->open(&fake_net_device) == 0);
+	detach.interface = &interface;
+	__atomic_store_n(&station_transmit_block_once, 1U, __ATOMIC_RELEASE);
+	assert(pthread_create(&transmit_thread, NULL, run_transmit_thread,
+	    &transmit) == 0);
+	wait_for_atomic_nonzero(&station_transmit_block_entered);
+	assert(pthread_create(&detach_thread, NULL, run_detach_thread,
+	    &detach) == 0);
+	wait_for_adapter_stopping(adapter);
+	assert(__atomic_load_n(&detach.done, __ATOMIC_ACQUIRE) == 0U);
+	__atomic_store_n(&station_transmit_block_release, 1U, __ATOMIC_RELEASE);
+	assert(pthread_join(transmit_thread, NULL) == 0);
+	assert(pthread_join(detach_thread, NULL) == 0);
+	assert(transmit.result == 0 && detach.result == 0);
 	assert(interface.driver_data == NULL && allocations == 0U);
 }
 
@@ -2580,6 +3327,8 @@ main(void)
 	test_attach_open_detach();
 	test_first_open_failure_unwind();
 	test_first_open_software_scan();
+	test_secure_station_hardware_contract();
+	test_tx_quiesce_queue_barrier();
 	test_scan_channel_transport_failure_quarantine();
 	test_close_finite_station_join();
 	test_rx_poll_rearm_and_lifecycle();
@@ -2590,6 +3339,7 @@ main(void)
 	test_checked_detach_retry();
 	test_usb_resources_retire_before_net_release();
 	test_open_detach_lifecycle_serialization();
+	test_transmit_detach_operation_lease();
 	test_close_and_shutdown_detach_serialization();
 	test_ioctl_and_poll_detach_join();
 	test_rx_start_stop_and_detach_ownership();

@@ -16,6 +16,7 @@
 #define WLAN_SCAN_TUNE_DEADLINE_TICKS 50ULL
 #define WLAN_SCAN_DWELL_TICKS 100ULL
 #define WLAN_CONNECT_DEADLINE_TICKS 3000ULL
+#define WLAN_CONNECT_TRANSITION_TICKS 100ULL
 #define WLAN_MANAGEMENT_FRAME_MAX 2304U
 
 #define WLAN_SCAN_CHANNEL_MAX 14U
@@ -36,18 +37,74 @@ struct wlan_scan_profile {
 	struct wlan_scan_channel channels[WLAN_SCAN_CHANNEL_MAX];
 };
 
-#define WLAN_CONNECT_EVENT_AUTHENTICATED 1U
-#define WLAN_CONNECT_EVENT_ASSOCIATED    2U
-#define WLAN_CONNECT_EVENT_KEY_INSTALLED 3U
-#define WLAN_CONNECT_EVENT_AUTHORIZED    4U
-#define WLAN_CONNECT_EVENT_RETRY         5U
-#define WLAN_CONNECT_EVENT_FAILED        6U
-#define WLAN_CONNECT_RETRY_MAX           5U
-
 struct net_device;
+struct packet_buf;
 struct wlan_station;
 
 typedef uint64_t (*wlan_clock_fn)(void *context);
+
+enum wlan_radio_frame_class {
+	WLAN_RADIO_FRAME_MANAGEMENT = 1,
+	WLAN_RADIO_FRAME_EAPOL = 2,
+	WLAN_RADIO_FRAME_DATA = 3
+};
+
+enum wlan_radio_key_kind {
+	WLAN_RADIO_KEY_PAIRWISE = 1,
+	WLAN_RADIO_KEY_GROUP = 2
+};
+
+#define WLAN_RADIO_CIPHER_NONE 0U
+#define WLAN_RADIO_CIPHER_CCMP 1U
+
+/* The common core owns every protocol value in this request.  The driver
+ * copies the frame before returning and may retain only the scalar generation
+ * and cookie needed for its later completion report. */
+struct wlan_radio_tx_request {
+	uint64_t generation;
+	uint64_t cookie;
+	uint64_t deadline_ticks;
+	uint64_t key_generation;
+	uint64_t packet_number;
+	enum wlan_radio_frame_class frame_class;
+	uint8_t encrypted;
+	uint8_t key_index;
+	uint8_t reserved[6];
+	const uint8_t *frame;
+	size_t length;
+};
+
+/* A key request is one transaction input and is never retained by a driver.
+ * receive_packet_number is the AP-provided initial group receive PN. */
+struct wlan_radio_key_request {
+	uint64_t generation;
+	uint64_t key_generation;
+	uint64_t deadline_ticks;
+	uint64_t receive_packet_number;
+	enum wlan_radio_key_kind kind;
+	uint8_t key_index;
+	uint8_t address[6];
+	uint8_t key[16];
+};
+
+/* RX reports are bounded thread/poll-context objects.  For a clear frame all
+ * security fields are zero.  A CCMP report carries the key generation chosen
+ * by the driver, the 48-bit PN decoded from the MPDU, and hardware integrity
+ * status; the common core independently validates the in-frame CCMP header. */
+struct wlan_radio_rx_frame {
+	uint64_t generation;
+	uint64_t key_generation;
+	uint64_t packet_number;
+	const uint8_t *frame;
+	size_t length;
+	int32_t rssi_dbm;
+	uint8_t channel;
+	uint8_t cipher;
+	uint8_t decrypted;
+	uint8_t key_index;
+	uint8_t integrity_error;
+	uint8_t reserved[3];
+};
 
 /* Radio methods run in thread context without the station lock.  Every method
  * must return promptly within a documented driver-owned finite bound and must
@@ -67,10 +124,17 @@ struct wlan_radio_ops {
 	int (*disconnect)(void *context, uint64_t generation);
 	int (*management_transmit)(void *context, uint64_t generation,
 		const uint8_t *frame, size_t length, uint64_t deadline_ticks);
-	int (*key_install)(void *context, uint64_t generation,
-		uint32_t key_index, const uint8_t *key, size_t length);
+	int (*association_set)(void *context, uint64_t generation,
+		const uint8_t bssid[6], uint16_t aid, uint64_t deadline_ticks);
+	int (*association_clear)(void *context, uint64_t generation,
+		uint64_t deadline_ticks);
+	int (*frame_transmit)(void *context,
+		const struct wlan_radio_tx_request *request);
+	int (*key_install)(void *context,
+		const struct wlan_radio_key_request *request);
 	int (*key_delete)(void *context, uint64_t generation,
-		uint32_t key_index);
+		enum wlan_radio_key_kind kind, uint8_t key_index,
+		uint64_t key_generation, uint64_t deadline_ticks);
 	int (*quiesce)(void *context);
 };
 
@@ -119,8 +183,15 @@ int wlan_station_report_scan_channel_ready(struct wlan_station *station,
 	uint64_t generation, uint32_t step_index);
 int wlan_station_report_scan_error(struct wlan_station *station,
 	uint64_t generation, int error);
-int wlan_station_report_connect_event(struct wlan_station *station,
-	uint64_t generation, uint32_t event, int error);
+/* Only these common-core entry points can advance a connection.  Drivers
+ * cannot publish AUTHORIZED directly: that transition is made after the WPA2
+ * engine receives the matching M4 TX acknowledgement. */
+int wlan_station_report_frame(struct wlan_station *station,
+	const struct wlan_radio_rx_frame *report);
+int wlan_station_report_tx_complete(struct wlan_station *station,
+	uint64_t generation, uint64_t cookie, int acknowledged, int error);
+int wlan_station_transmit(struct wlan_station *station,
+	struct packet_buf *packet);
 
 void wlan_timer_run(uint64_t now_ticks);
 uint64_t wlan_timer_next_deadline(void);

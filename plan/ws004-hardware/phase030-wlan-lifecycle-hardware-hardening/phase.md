@@ -94,6 +94,13 @@ connected:
 Every acquisition remains in the p028/p029 ownership ledgers. Harden these
 ordered transitions:
 
+- build Association Request capability bits from the station's reviewed local
+  feature set instead of copying optional capability claims from the selected
+  AP, and cover AP-advertised unsupported optional bits in the fake peer;
+- send a bounded best-effort Deauthentication frame before teardown whenever
+  the transport is usable, while never delaying controlled-port closure, key
+  retirement, or radio stop when that transmission fails;
+
 - `IFF_UP`: load/validate/start firmware if needed, arm RX, enter IDLE, and
   accept scan/connect. A failed open leaves the device published but down and
   retryable.

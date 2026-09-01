@@ -279,6 +279,28 @@ validation, atomic PTK/GTK CAM install, entropy and CAM failures, and carrier
 only after controlled-port authorization. Retransmitted messages 1 and 3 must
 not regenerate SNonce, reinstall a key, or reset a packet number.
 
+Run the complete fail-fast automatic gate from the repository root with:
+
+```sh
+TMPDIR="$PWD/build/q058-tmp" \
+  plan/ws004-hardware/tests/run-wlan-wpa2-ccmp-l2-test.sh
+```
+
+The aggregate runner creates the temporary directory, exports its canonical
+path to every child, and invokes these production-linked component gates in
+order. It stops at the first failure and does not invoke `make check`.
+
+| Exact component command | Scope |
+| --- | --- |
+| `plan/ws004-hardware/tests/run-wlan-crypto-test.sh` | SHA-1, HMAC-SHA1, PBKDF2, AES-128, RFC 3394, bounds, erasure, sanitizer/analyzer, and amd64/i386 syntax |
+| `plan/ws004-hardware/tests/run-wlan-wpa2-codec-test.sh` | Strict RSN, Authentication, Association, and EAPOL-Key wire encoding/decoding plus amd64/i386 syntax |
+| `plan/ws004-hardware/tests/run-wlan-wpa2-engine-test.sh` | Asynchronous four-way handshake, response filtering, deadlines, retransmission/replay, key rollback, authorization, and secret lifetime |
+| `plan/ws004-hardware/tests/run-wlan-l2-test.sh` | Ethernet/802.11/LLC-SNAP conversion, CCMP metadata, key ID/generation, PN replay, MIC trailer, and malformed-frame rejection |
+| `plan/ws004-hardware/tests/run-rtl8822b-security-test.sh` | RTL8822B CAM word encoding, bounded register operations, programming, invalidation, and failure handling |
+| `plan/ws004-hardware/tests/run-wlan-ccmp-reference-test.sh` | Independent RFC 3610 AES-CCM vector and production 802.11 CCMP nonce/AAD/PN/Key-ID/MIC cross-check |
+| `plan/ws004-hardware/tests/run-wlan-common-core-test.sh` | Public ABI, scan/connect state, common WPA2/L2 integration, controlled-port/carrier ordering, cancellation, detach, and secret erasure |
+| `plan/ws004-hardware/tests/run-usb-rtl8822bu-driver-test.sh` | RTL8822BU USB management/EAPOL/data descriptors, RX security classification, CAM generations, TX reports, errors, and teardown |
+
 Ethernet/LLC/SNAP and test-reference CCMP cases cover valid traffic plus wrong
 BSSID/direction/key generation/key ID/PN/MIC/length, preauthorization filtering,
 disconnect, and secret erasure. Wrong-passphrase, unsupported-security, and

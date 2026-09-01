@@ -34,6 +34,10 @@
 #define RTL8822B_RX_MPDU_MAX                    11454U
 #define RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE     48U
 #define RTL8822B_MANAGEMENT_MPDU_MAX              2304U
+#define RTL8822B_DATA_TX_DESCRIPTOR_SIZE             48U
+#define RTL8822B_DATA_MPDU_MAX                      1554U
+#define RTL8822B_CAM_ENTRY_COUNT                      32U
+#define RTL8822B_CAM_PAIRWISE_SLOT                     4U
 
 #define RTL8822B_TABLE_DOMAIN_MAC                    1U
 #define RTL8822B_TABLE_DOMAIN_AGC                    2U
@@ -153,6 +157,10 @@ struct rtl8822b_rx_packet {
 	uint8_t bandwidth;
 	uint8_t c2h_id;
 	uint8_t c2h_sequence;
+	uint8_t encryption_type;
+	uint8_t software_decrypted;
+	uint8_t mac_id;
+	uint8_t icv_error;
 };
 
 typedef int (*rtl8822b_rx_packet_fn)(void *context,
@@ -186,13 +194,13 @@ int rtl8822b_rx_aggregate_walk(const uint8_t *bytes, size_t length,
  * arm, and finally WLAN publication.  start never claims success for tables
  * alone: it completes the three-bulk-OUT/HS USB queues, minimum MAC timing,
  * MAC/BB/AGC/RF profile, channel 1, and an all-rate/path TXAGC index-0 floor.
- * Consequently the only transmitted frame accepted here is a 1 Mbps
- * wildcard probe request on channels 1-11; general, HT, VHT, and data TX are
- * outside this bounded first profile.  A channel transport fault fails the
- * radio closed.  power_on normalizes a still-powered rebind through the
- * checked disable sequence before enabling it again.  stop always clears the
- * software object, including after a disconnected transport error, so the
- * caller may zero/rebind it safely.
+ * The q058 extension admits the bounded legacy-rate management, EAPOL, and
+ * data frames required by the WPA2-Personal/CCMP profile while HT, VHT,
+ * aggregation, and rate adaptation remain outside this profile.  A channel
+ * transport fault fails the radio closed.  power_on normalizes a
+ * still-powered rebind through the checked disable sequence before enabling
+ * it again.  stop always clears the software object, including after a
+ * disconnected transport error, so the caller may zero/rebind it safely.
  */
 int rtl8822b_radio_power_on(struct rtl8822b_radio *radio,
 	const struct rtl8822b_radio_transport *transport,
@@ -208,6 +216,29 @@ int rtl8822b_radio_active_scan_allowed(const struct rtl8822b_radio *radio,
 int rtl8822b_radio_management_frame_prepare(
 	const struct rtl8822b_radio *radio, uint8_t *wire, size_t capacity,
 	const uint8_t *frame, size_t frame_length, size_t *wire_length);
+int rtl8822b_security_enable(struct rtl8822b_radio *radio,
+	uint64_t deadline_ticks);
+/*
+ * Snapshot the four MAC priority-queue page counters.  A queue is empty only
+ * when its reserved and available page counts are equal.  This helper never
+ * pauses or polls the MAC: callers close TX admission, join admitted USB
+ * operations, then retry EBUSY from their bounded worker context.
+ */
+int rtl8822b_tx_queues_empty(struct rtl8822b_radio *radio,
+	uint64_t deadline_ticks);
+int rtl8822b_security_set_association(struct rtl8822b_radio *radio,
+	const uint8_t bssid[6], uint16_t aid, uint64_t deadline_ticks);
+int rtl8822b_security_clear_association(struct rtl8822b_radio *radio,
+	uint64_t deadline_ticks);
+int rtl8822b_cam_program_ccmp(struct rtl8822b_radio *radio, uint8_t slot,
+	uint8_t key_index, int group, const uint8_t address[6],
+	const uint8_t key[16], uint64_t deadline_ticks);
+int rtl8822b_cam_clear(struct rtl8822b_radio *radio, uint8_t slot,
+	uint64_t deadline_ticks);
+int rtl8822b_data_frame_prepare(const struct rtl8822b_radio *radio,
+	uint8_t *wire, size_t capacity, const uint8_t *frame,
+	size_t frame_length, int encrypted, uint8_t mac_id, uint16_t cookie,
+	size_t *wire_length);
 
 #ifdef RTL8822B_TESTING
 int rtl8822b_test_firmware_validate(const uint8_t *data, size_t length,

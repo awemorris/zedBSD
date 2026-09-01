@@ -476,6 +476,15 @@ test_rx(void)
 	packet_bytes[24U + 2U] = 2U;
 	assert(rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == 0);
 	assert(packet.phy_info == NULL && packet.phy_info_length == 0U);
+	assert(packet.encryption_type == 0U && !packet.software_decrypted &&
+	    packet.mac_id == 0U && !packet.icv_error);
+	put_le32(packet_bytes, (original & ~0x04000000U) |
+	    (3U << 20) | 0x08000000U | 0x8000U);
+	put_le32(packet_bytes + 4U, 4U);
+	assert(rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == 0);
+	assert(packet.encryption_type == 3U && packet.software_decrypted &&
+	    packet.mac_id == 4U && packet.icv_error);
+	put_le32(packet_bytes + 4U, 0U);
 	put_le32(packet_bytes, original);
 	assert(rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == EINVAL);
 	packet_bytes[24U + 2U] = 0U;
