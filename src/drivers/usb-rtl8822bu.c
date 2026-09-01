@@ -3157,9 +3157,9 @@ rtl8822bu_key_install_checked(struct rtl8822bu_adapter *adapter,
 	unsigned long enabled;
 	uint64_t cleanup_deadline;
 	uint64_t active_generation;
-	uint8_t slot;
+	uint8_t slot = 0U;
 	int installed;
-	int replacement;
+	int replacement = 0;
 	int error;
 	int rollback_error;
 
