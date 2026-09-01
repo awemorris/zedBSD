@@ -149,6 +149,8 @@ struct intel_ax211_firmware_manifest {
 	uint32_t cpu_count;
 	size_t iml_offset;
 	size_t iml_length;
+	size_t command_versions_offset;
+	size_t command_versions_length;
 	struct intel_ax211_section runtime[INTEL_AX211_MAX_FW_SECTIONS];
 	size_t runtime_count;
 	size_t lmac_count;

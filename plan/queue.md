@@ -56,9 +56,10 @@ machine.
 - Keep the first capability profile to station-mode 2.4 GHz, 20 MHz,
   WPA2-Personal/CCMP and one useful IP path. Do not claim 5/6 GHz, wide
   channels, HE performance, WPA3, roaming, AP/monitor, suspend, or throughput.
-- Use runtime-only credentials. Retain no credential, SSID, BSSID, MAC address,
-  lease, hostname, account name, or host address in plans, fixtures, logs, or
-  screenshots.
+- Use runtime-only credentials. Retain no real-machine or real-network
+  credential, SSID, BSSID, MAC address, lease, hostname, account name, or host
+  address in plans, fixtures, logs, or screenshots. Clearly synthetic protocol
+  vectors remain permitted in automatic fixtures.
 - The singleton IOMMU group does not reproduce CNVio2 platform topology in a
   generic guest. The exact-device acceptance method is direct zedBSD boot, not
   PCI passthrough.
@@ -99,14 +100,21 @@ Queue.
 
 ## Execution result
 
-In progress. The first automatic checkpoint is complete: the default-off
-`intelax211-firmware` package reproduces and verifies the exact official
-`-89.ucode`, PNVM, Intel notice, and WHENCE snapshot, remains absent from the
-default image, rejects unsafe or corrupt caches, and passes its focused
-fixture. The private core parses the complete selected API89 and PNVM bytes
-and passes descriptor, command/event, ring, bounds, sanitizer, analyzer, and
-ABI gates. The default-off PCI driver passes exact identity, 16-KiB BAR0,
-SO/SOF plus GF non-CDB, and reverse-unwind fixtures, but deliberately restores
-the device and returns unsupported without publishing WLAN. Firmware DMA,
-start/ALIVE, NVM, scan, and radio operation remain in progress; this
-checkpoint makes no firmware-start or usable-network claim.
+In progress. The automatic implementation and focused gates are complete:
+the default-off firmware package, the automatically selected source-notice
+package, strict exact-device
+attach, checked PCI/MSI-X/DMA lifetime, API89 firmware/PNVM/NVM boot, runtime
+radio command sequence, passive scan, association/key/TX/RX paths, common
+WLAN/WPA2/CCMP/L2 adaptation, fatal recovery, and detach/down behavior pass
+their declared ordinary, sanitizer, analyzer, amd64, and i386 fixtures. The
+configured amd64 kernel links with AX211 selected, and the production common
+integration fixture reaches an authorized protected Ethernet exchange using
+only synthetic protocol data. The public WLAN UAPI remains unchanged and no
+Intel/Realtek hardware layer was introduced.
+
+The exact-device checkpoint has not run. Q062 and p038 therefore remain
+`in-progress`: one direct zedBSD boot on the exact AX211/CNVio2 machine must
+still establish physical firmware/PNVM execution, RF scan and WPA2/CCMP
+association, DHCP, gateway/public ping, a bounded nonempty fetch, disconnect,
+and administrative down. Automatic fixtures do not claim those physical
+firmware, RF, or useful-network results.

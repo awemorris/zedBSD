@@ -15,4 +15,8 @@
 int
 drv_pci_intel_ax211_driver_register(void);
 
+/* Publishes retained controllers after platform interrupt initialization. */
+void
+drv_pci_intel_ax211_devices_ready(void);
+
 #endif

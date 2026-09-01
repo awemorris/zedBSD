@@ -344,7 +344,11 @@ intel_ax211_firmware_parse(const uint8_t *bytes, size_t length,
 		case AX211_TLV_CMD_VERSIONS:
 			if ((seen & 16U) != 0U)
 				return INTEL_AX211_DUPLICATE;
+			if (tlv_length == 0U || (tlv_length & 3U) != 0U)
+				return INTEL_AX211_INVALID;
 			seen |= 16U;
+			parsed.command_versions_offset = offset;
+			parsed.command_versions_length = tlv_length;
 			break;
 		default:
 			if (!ax211_ignored_firmware_tlv(type))
@@ -354,7 +358,7 @@ intel_ax211_firmware_parse(const uint8_t *bytes, size_t length,
 		offset += span;
 	}
 
-	if ((seen & 15U) != 15U || parsed.runtime_count == 0U ||
+	if ((seen & 31U) != 31U || parsed.runtime_count == 0U ||
 	    cpu_separator == SIZE_MAX || paging_separator == SIZE_MAX)
 		return INTEL_AX211_MISSING;
 	if (cpu_separator == 0U || paging_separator <= cpu_separator + 1U ||

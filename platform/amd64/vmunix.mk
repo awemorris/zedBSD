@@ -117,6 +117,26 @@ endif
 AMD64_INTEL_WLAN_SOURCES :=
 ifeq ($(CONFIG_DRIVER_PCI_INTEL_AX211),y)
 AMD64_INTEL_WLAN_SOURCES += src/drivers/intel-ax211.c \
+	src/drivers/intel-ax211-assoc.c \
+	src/drivers/intel-ax211-boot.c \
+	src/drivers/intel-ax211-bss.c \
+	src/drivers/intel-ax211-command.c \
+	src/drivers/intel-ax211-dma.c \
+	src/drivers/intel-ax211-firmware.c \
+	src/drivers/intel-ax211-init.c \
+	src/drivers/intel-ax211-mmio.c \
+	src/drivers/intel-ax211-pci-mmio.c \
+	src/drivers/intel-ax211-protocol.c \
+	src/drivers/intel-ax211-runtime.c \
+	src/drivers/intel-ax211-runtime-start.c \
+	src/drivers/intel-ax211-scan.c \
+	src/drivers/intel-ax211-scan-session.c \
+	src/drivers/intel-ax211-rx.c \
+	src/drivers/intel-ax211-key.c \
+	src/drivers/intel-ax211-tx.c \
+	src/drivers/intel-ax211-tx-ring.c \
+	src/drivers/intel-ax211-transport-backend.c \
+	src/drivers/intel-ax211-transport.c \
 	src/drivers/pci-intel-ax211.c
 endif
 ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)

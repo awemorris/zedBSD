@@ -35,7 +35,7 @@ Parent: [WS004](../ws.md)
 | HW-T35 | USB same-endpoint multi-URB | A supporting xHCI endpoint owns a bounded multi-URB queue with exact completion/cancel/drain, ring-wrap, late-event, detach, and fairness behavior; legacy HCDs retain one active URB per endpoint |
 | HW-T36 | RTL8822BU pre-radio substrate | Default-off firmware acquisition, pinned image validation, exact USB/register/efuse contracts, bounded firmware/RX codecs, serialized WLAN publication, and tableless production refusal pass without an RF-success claim |
 | HW-T37 | [Intel AX211 identity/firmware intake](q061-intel-wlan-intake-evidence.md) | Q061's read-only evidence corrects the target to exact AX211/CNVio2 `8086:51f0`, subsystem `8086:4090`, revision `01`, and freezes immutable bytes, provenance, clear license, optional-package, and direct-boot boundaries without host mutation |
-| HW-T38 | Standalone Intel AX211 normal path | Exact AX211/CNVio2 attach and pinned `-89.ucode`/PNVM, bounded 2.4-GHz scan, WPA2/CCMP authorization, DHCP, gateway/public ping, nonempty fetch, disconnect, and down pass by direct zedBSD boot without a prior Intel/RTL hardware framework |
+| HW-T38 | Standalone Intel AX211 normal path | Implementation and focused automatic exact-attach/firmware/runtime/scan/security/L2/lifetime gates pass without a prior Intel/RTL hardware framework; one exact-device direct boot must still prove physical firmware/PNVM, RF scan, WPA2/CCMP, DHCP, gateway/public ping, nonempty fetch, disconnect, and down |
 | HW-T39 | Evidence-driven WLAN refactor | The two working drivers retain ABI and normal-path behavior while only substantial identical contracts are extracted; a documented no-extraction result is valid |
 | HW-T40 | i915 foundations | Device-independent UAPI/model tests pass; modeset/scanout/reset require target-hardware evidence |
 
@@ -929,21 +929,26 @@ boot for p038. No host mutation or network identity is retained.
 
 ## HW-T38 Intel AX211 standalone normal path
 
-Q062 first freezes the optional firmware boundary independently of the
-unfinished PCI/radio path. The default-off amd64 `intelax211-firmware` package
-installs only the exact `-89.ucode`, family PNVM, complete Intel notice,
-WHENCE, and provenance manifest. Its focused fixture verifies immutable
-official provenance, all four sizes and SHA-256 values, atomic cache
+Q062 implements the exact standalone driver while keeping its optional
+firmware boundary independent. The default-off amd64 `intelax211-firmware`
+package installs only the exact `-89.ucode`, family PNVM, complete Intel
+notice, WHENCE, and provenance manifest. Its focused fixture verifies
+immutable official provenance, all four sizes and SHA-256 values, atomic cache
 publication, offline reuse, corruption and unsafe-path rejection, locked
 production metadata, absence from the default image, and the visible WHENCE
 `86` versus runtime `89` discrepancy:
 
 ```sh
 plan/ws004-hardware/tests/run-intelax211-firmware-package-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-driver-license-test.sh
 ```
 
 This package gate does not claim that the AX211 PCI function attaches or that
-firmware starts. The AX211-private pure core then validates the complete
+firmware starts.  The automatically selected hidden driver-notice package is
+separate from the optional firmware package: every image with the kernel
+driver carries the complete OpenBSD `iwx(4)` ISC and Intel BSD-3-Clause terms
+at `/usr/share/licenses/intel-ax211-driver/LICENSE`.  The AX211-private pure
+core then validates the complete
 cached API89 firmware and PNVM, strict TLV bounds and section inventories,
 Gen3 descriptors/context, command/event codecs, ring wrap, and staging scrub
 in ordinary, ASan/UBSan, analyzer, amd64, and ILP32 syntax modes:
@@ -952,20 +957,76 @@ in ordinary, ASan/UBSan, analyzer, amd64, and ILP32 syntax modes:
 plan/ws004-hardware/tests/run-intel-ax211-core-test.sh
 ```
 
-The first PCI milestone is intentionally detection-only. It matches the exact
-PCI/subsystem/revision/class tuple, inspects a 16-KiB BAR0 with bus mastering
-disabled, accepts only SO/SOF plus GF non-CDB hardware, restores a temporarily
-changed BAR and the inherited PCI command state, and publishes no WLAN device
-before a firmware transport exists:
+The next automatic layer keeps file I/O, DMA ownership, hardware sequencing,
+firmware protocol, command transactions, and interrupt/ring transport as
+separate AX211-private contracts.  The fixtures use the frozen real blobs
+where applicable, inject every allocation and checked I/O failure, verify
+bounded waits and reverse unwind, and run ordinary, sanitizer, analyzer, and
+amd64/i386 syntax gates:
+
+```sh
+plan/ws004-hardware/tests/run-intel-ax211-firmware-loader-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-dma-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-mmio-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-pci-mmio-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-protocol-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-init-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-command-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-transport-backend-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-transport-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-boot-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-runtime-start-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-runtime-scan-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-scan-session-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-bss-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-assoc-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-key-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-tx-ring-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-tx-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-rx-test.sh
+```
+
+The two coordinators bind every admitted hardware pass to a fresh nonzero
+epoch after draining the receive queue. The first pass copies the exact
+868-byte command-version table and NVM result before releasing firmware files,
+then proves a checked device reset before freeing DMA. The operational pass
+reloads the exact image, completes ALIVE/PNVM/init, holds checked NIC ownership
+across the complete non-DQA API89 runtime command sequence, retains the exact
+MCC response, and returns a live DMA/IRQ/transport session. Its focused runner
+also covers stale and duplicate events, bounded timeouts, generation wrap,
+MCC framing, lock/unlock failures, and both retained-DMA and dirty-controller
+stop retries.
+
+The production PCI fixture now covers more than the earlier detection-only
+milestone. It matches the exact PCI/subsystem/revision/class tuple, validates a
+16-KiB BAR0 and SO/SOF plus GF non-CDB hardware, retains the controller with
+bus mastering disabled, publishes one administratively-down station after
+post-interrupt refresh, and exercises checked open, poll, fatal recovery,
+close, failed-open unwind, publication retry, and detach. It also verifies
+operation leases, single-poll ownership, late-event generation/sequence
+rejection, retained-DMA recovery retry, and exact reverse release:
 
 ```sh
 plan/ws004-hardware/tests/run-intel-ax211-pci-test.sh
+plan/ws004-hardware/tests/run-intel-ax211-wlan-common-integration-test.sh
 ```
 
-These automatic gates prove package, parser, identity, and inspection
-boundaries only. Firmware DMA/start/ALIVE, NVM, scan, and the useful network
-path remain in progress, followed by one direct zedBSD boot on the exact q061
-machine.
+The focused common-integration fixture does not replace physical evidence. It
+opens the production common station, publishes a synthetic BSS through the
+production AX211 scan/RX/BSS codecs, selects it, completes the real common
+WPA2/CCMP four-way engine through production AX211 association/key/TX state,
+passes protected Ethernet TX and RX through the production L2 engine, and
+closes through checked cleanup.  A finite synthetic AX211 command exchange
+backs the private operations; MMIO, DMA command-ring ownership, and interrupt
+delivery remain the separately tested command/transport/PCI boundaries above.
+The runner applies ordinary, ASan/UBSan, analyzer, and amd64/i386 syntax gates.
+Together these focused gates complete Q062's automatic implementation evidence
+for exact attach, firmware/runtime transactions, passive scan, WPA2/CCMP/L2,
+concurrency, recovery, and terminal down. They still do not claim that the
+physical AX211 executes the pinned firmware/PNVM, returns real RF scan results,
+associates, obtains DHCP, or carries useful IP traffic. Those results require
+one direct zedBSD boot on the exact q061 machine, so HW-T38, p038, and q062
+remain in progress until that run is recorded.
 
 ## HW-T20 NVMe QEMU
 

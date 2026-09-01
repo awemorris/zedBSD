@@ -86,6 +86,50 @@ UMAC PRPH offset     0x300000
 MAC-address CSR base 0x380
 ```
 
+## zedBSD publication and firmware-load ordering
+
+zedBSD scans and attaches PCI devices before enabling interrupts and before
+mounting the root VFS.  The production firmware loader intentionally opens
+the two fixed files through VFS with `O_NOFOLLOW`; it therefore cannot run
+from the PCI attach callback.  The AX211 lifetime is split into three checked
+transactions:
+
+1. PCI attach retains one controller, BAR0, the saved PCI enable state, and
+   the exact HW/RF identity.  It does not wait on the kernel clock, enable bus
+   mastering, claim an interrupt, allocate DMA, load firmware, or publish a
+   network interface.
+2. The post-interrupt platform refresh performs the finite prepare/reset/APM
+   sequence, reads the station address from strap CSR words with OTP fallback,
+   stops the device again, and publishes one administratively-down `wlanN`.
+   The address is retained only in the controller/device object and is never
+   printed or copied into Queue evidence.
+3. `net_device` open runs after root VFS availability.  It loads and validates
+   the fixed firmware/PNVM, creates the open-generation DMA and MSI-X
+   ownership, performs the NVM pass, resets, performs a fresh runtime pass,
+   and only then opens the common WLAN station.  Close and failed open unwind
+   those open-generation resources after interrupts and DMA are quiesced.
+
+The first P038 scan profile is deliberately fixed to passive 2.4-GHz channels
+1 through 11.  The driver intersects each requested channel with validated
+NVM/MCC data before issuing firmware commands.  This keeps the existing public
+WLAN contract unchanged and makes a scan-profile replacement API unnecessary
+for the initial useful path.
+
+During `net_device` open, ordinary network polling is not yet admitted.  The
+PCI ISR therefore only acknowledges and latches generation-tagged controller
+events; the opening thread drains that private queue under finite ALIVE, PNVM,
+init, and NVM deadlines.  Only an already-open generation may schedule the
+normal network poll path.  The first implementation requires MSI-X and does
+not silently route an MSI allocation through MSI-X register programming.
+
+Every firmware pass advances a nonzero 32-bit hardware epoch, including a pass
+which fails before DMA publication.  Before binding rings, the controller must
+atomically discard its queued events and stamp all subsequent events with the
+new epoch; failure leaves receive admission closed.  Epoch zero is never used,
+and wrap advances from `UINT32_MAX` to one only after the queue flush, so a
+late notification or command response from an earlier reset cannot satisfy a
+new ALIVE, PNVM, INIT, or command wait.
+
 ## Ownership, reset, and the shortest path to ALIVE
 
 Use the OpenBSD order and names:
@@ -313,7 +357,11 @@ the channel valid and active. Require the 2.4-GHz SKU bit, nonzero TX/RX chain
 masks, and at least one valid 2.4-GHz channel.
 
 After the read-NVM pass, stop/reset and perform a fresh operational firmware
-load. Do not reuse partially initialized firmware state.
+load. The private `intel_ax211_mmio_stop()` success contract includes the
+bounded STOP_MASTER acknowledgement, APM stop, software-reset request, and
+five-millisecond reset settling delay; only then may the command hardware
+epoch advance or DMA be released. Do not reuse partially initialized firmware
+state.
 
 ## Operational init and first scan
 
@@ -327,7 +375,10 @@ can be omitted:
    diversity disabled;
 4. `iwx_send_bt_init_conf()` / `IWX_BT_CONFIG` (`0x9b`);
 5. `iwx_send_soc_conf()` with the exact 51f0 discrete/zero-latency settings;
-6. `iwx_send_dqa_cmd()` because the pinned firmware advertises DQA;
+6. do not send `iwx_send_dqa_cmd()`: the pinned image's first enabled-
+   capabilities word is `0x9def037e`, whose DQA bit 12 is clear. OpenBSD sends
+   this command only when that capability is set; the command-version table's
+   absence of DQA is therefore consistent with this exact image;
 7. `iwx_config_ltr()` only when PCIe LTREN is enabled;
 8. `iwx_send_temp_report_ths_cmd()` because the pinned firmware advertises
    firmware CT-kill;
@@ -353,6 +404,14 @@ entry in the OpenBSD path. `iwx_initiate_scan()` must dispatch exact
 - active dwell 10 TU, passive dwell 110 TU, full-scan adaptive budget 300 TU;
 - probe-request construction bounded by TLV `PROBE_MAX_LEN` before any later
   active/directed scan is enabled.
+
+The exact v17 request is 1,940 bytes, while an ordinary command slot admits
+only a 316-byte inline payload.  It must therefore use one AX211-private
+coherent external-command DMA object.  Reserve the ordinary ring token first,
+publish the wide header and complete request with a PREWRITE synchronization,
+and keep that object owned by the exact token until its completion or a proven
+interrupt drain plus device stop/reset.  A timeout or ambiguous doorbell
+failure does not authorize early reuse or release.
 
 The request acknowledgement deadline is 1 second. Receive and validate scan
 MPDU notifications until `IWX_SCAN_COMPLETE_UMAC` (`0x0f`) or
@@ -393,6 +452,24 @@ indices, payload lengths, DMA spans, and notification versions are checked
 before use.
 
 ## Automatic proof and hardware proof boundary
+
+### Q062 implementation state
+
+The production implementation now composes the private pieces described above
+through exact PCI attach, post-interrupt publication, checked open-generation
+MSI-X/DMA ownership, API89 firmware/PNVM/NVM boot, runtime initialization,
+passive scan, BSS selection, association, hardware-key programming, TX-ring/
+TX, RX, common WLAN authorization, protected Ethernet exchange, fatal
+recovery, close, and detach. Focused ordinary, sanitizer, analyzer, amd64, and
+i386 fixtures cover those boundaries, and the configured amd64 kernel links
+with the driver selected. The public WLAN UAPI is unchanged and no Intel/
+Realtek hardware layer has been introduced.
+
+That automatic evidence is not physical completion. A finite synthetic
+firmware exchange cannot prove that the exact CNVio2 device executes the
+pinned firmware/PNVM, delivers real RF scan results, associates with an AP, or
+reaches DHCP and useful IP traffic. Q062 therefore remains in progress until
+one exact-machine direct-boot run supplies the hardware proof listed below.
 
 Before direct boot, automatic tests can establish:
 

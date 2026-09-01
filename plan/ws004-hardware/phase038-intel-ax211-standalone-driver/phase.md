@@ -133,6 +133,10 @@ normal-path completion claim.
 - Keep every blob outside the base-license claim and default image. An ordinary
   build and the kernel perform no firmware network fetch. Missing, wrong-
   digest, or incompatible bytes fail visibly with carrier down.
+- Automatically install the complete OpenBSD ISC and Intel BSD-3-Clause
+  source-derivation notices whenever the kernel AX211 driver is selected. This
+  binary-distribution obligation is independent of the optional firmware
+  package and its separate firmware license.
 - Parse and upload only the pinned firmware/PNVM formats with checked
   arithmetic, bounded commands, explicit ready/error states, and complete
   staging scrub. Do not reverse engineer, decompile, or disassemble the blob.
@@ -170,8 +174,10 @@ normal-path completion claim.
   Scan, connect using runtime-only credentials, obtain DHCP, ping the gateway
   and one public address, fetch a bounded nonempty HTTP object, disconnect, and
   bring the interface down.
-- Never retain a credential, SSID, BSSID, MAC address, lease, hostname, account
-  name, or host address in plans, build logs, screenshots, or fixtures.
+- Never retain a real-machine or real-network credential, SSID, BSSID, MAC
+  address, lease, hostname, account name, or host address in plans, build logs,
+  screenshots, or fixtures. Clearly synthetic protocol vectors are permitted
+  in automatic tests.
 
 ## Verification contract (`HW-T38`)
 
@@ -214,16 +220,30 @@ topology.
 ## Q062 progress
 
 - Complete: default-off exact firmware/PNVM/license/WHENCE package and its
-  immutable-cache fixture.
+  immutable-cache fixture, plus automatic installation of the complete driver
+  source notices whenever the kernel driver is selected.
 - Complete: private API89/PNVM parser, exact real-blob inventory, Gen3
   context/descriptor and command/event codecs, ring/staging bounds, and
   ordinary/sanitizer/analyzer/ABI gates.
-- Complete as a detection-only milestone: default-off exact PCI match, BAR0
-  and SO/SOF+GF non-CDB inspection with bus mastering disabled, checked BAR
-  and command-state restoration, and no premature WLAN publication.
-- In progress: persistent PCI ownership, DMA/rings, firmware boot and ALIVE,
-  PNVM selection, NVM, passive scan, common WLAN adaptation, and the direct
-  useful-network checkpoint.
+- Complete as production integration plus automatic evidence: exact PCI
+  ownership and down-state publication, checked MSI-X/DMA open-generation
+  lifetime, firmware boot/ALIVE/PNVM/NVM, the non-DQA API89 runtime command
+  sequence, MCC-constrained passive scan, external-DMA scan command, BSS,
+  association, key, TX-ring/TX, and RX paths all pass their focused gates.
+- Complete: the production common station opens only after hardware success;
+  the synthetic integration fixture traverses scan selection, WPA2/CCMP
+  authorization, protected Ethernet TX/RX, disconnect, close, and detach
+  without changing the public WLAN UAPI.
+- Complete: operation leases, single-poll ownership, generation/sequence
+  checks, secret erasure, and fatal recovery cover concurrent close/detach,
+  stale completions, ambiguous command failure, and retained-DMA retry without
+  use-after-free or premature resource release. The configured amd64 kernel
+  links with the driver selected.
+- Pending human evidence: one direct boot on the exact q061 AX211/CNVio2
+  machine must still establish physical firmware/PNVM execution, RF scan,
+  WPA2/CCMP association, DHCP, gateway/public ping, bounded nonempty fetch,
+  disconnect, and administrative down. Until that single run succeeds, p038
+  and q062 remain `in-progress` and make no physical firmware/RF claim.
 
 ## Reconsideration boundary
 

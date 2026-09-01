@@ -181,6 +181,9 @@ void kern_platform_refresh_devices(const struct boot_device *d, size_t n)
 #if CONFIG_DRIVER_PCI_XHCI
 	drv_pci_xhci_probe_roots();
 #endif
+#if CONFIG_DRIVER_PCI_INTEL_AX211
+	drv_pci_intel_ax211_devices_ready();
+#endif
 	if (disk_count() != 0)
 		goto nvme;
 	deadline = clock_ticks() + 5U * KERN_CLOCK_HZ;

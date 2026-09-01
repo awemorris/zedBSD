@@ -90,6 +90,7 @@ make_firmware(uint8_t *firmware)
 	uint8_t version[12];
 	uint8_t section[8];
 	uint8_t iml[5] = { 1, 2, 3, 4, 5 };
+	uint8_t command_version[4] = { 1, 0, 99, 6 };
 	size_t offset = INTEL_AX211_TLV_HEADER_SIZE;
 
 	memset(firmware, 0, TEST_FW_CAPACITY);
@@ -106,6 +107,8 @@ make_firmware(uint8_t *firmware)
 	    sizeof(version));
 	offset = append_tlv(firmware, TEST_FW_CAPACITY, offset, 52U, iml,
 	    sizeof(iml));
+	offset = append_tlv(firmware, TEST_FW_CAPACITY, offset, 48U,
+	    command_version, sizeof(command_version));
 	put_le32(section, 0x1000U);
 	put_le32(section + 4U, 0xaaaaaaaaU);
 	offset = append_tlv(firmware, TEST_FW_CAPACITY, offset, 19U, section,
@@ -198,6 +201,9 @@ test_firmware_parser(void)
 	assert(manifest.cpu_count == 2U);
 	assert(manifest.phy_sku == 0x12345678U);
 	assert(manifest.iml_length == 5U);
+	assert(manifest.command_versions_length == 4U);
+	assert(memcmp(firmware + manifest.command_versions_offset,
+	    "\x01\x00\x63\x06", 4U) == 0);
 	assert(manifest.runtime_count == 5U);
 	assert(manifest.lmac_count == 1U);
 	assert(manifest.umac_count == 1U);
@@ -228,6 +234,12 @@ test_firmware_parser(void)
 	put_le32(malformed + INTEL_AX211_TLV_HEADER_SIZE + 32U, 0U);
 	assert(intel_ax211_firmware_parse(malformed, length, &manifest) ==
 	    INTEL_AX211_IDENTITY_MISMATCH);
+
+	memcpy(malformed, firmware, length);
+	/* The command-version TLV follows IML and must contain whole rows. */
+	put_le32(malformed + INTEL_AX211_TLV_HEADER_SIZE + 64U, 3U);
+	assert(intel_ax211_firmware_parse(malformed, length, &manifest) ==
+	    INTEL_AX211_INVALID);
 
 	memcpy(malformed, firmware, length);
 	offset = append_u32(malformed, TEST_FW_CAPACITY, length, 23U,
@@ -494,6 +506,7 @@ test_real_firmware(const char *path)
 	assert(manifest.api_major == INTEL_AX211_FIRMWARE_API);
 	assert(manifest.cpu_count == 2U);
 	assert(manifest.iml_length == 13944U);
+	assert(manifest.command_versions_length == 868U);
 	assert(manifest.runtime_count == 60U);
 	assert(manifest.lmac_count == 15U);
 	assert(manifest.umac_count == 17U);
