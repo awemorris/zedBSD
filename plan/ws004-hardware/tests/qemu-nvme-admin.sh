@@ -1,5 +1,5 @@
 #!/bin/sh
-# ws004-p022 disposable QEMU NVMe Identify acceptance.
+# Disposable QEMU NVMe Identify and non-destructive boot regression.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
 
@@ -110,7 +110,7 @@ qemu_pid=
 
 if [ "$result" = pass ]; then
 	for marker in 'nvme: PCI controller' \
-	    'nvme: /dev/nvme0n1 namespace=1 blocks=00000000:00010000 block-size=512 read-only' \
+	    'nvme: /dev/nvme0n1 namespace=1 blocks=00000000:00010000 block-size=512 writable max-transfer=8' \
 	    'login:'; do
 		if ! rg -a -F -q -- "$marker" "$guest_log"; then
 			result=missing-marker

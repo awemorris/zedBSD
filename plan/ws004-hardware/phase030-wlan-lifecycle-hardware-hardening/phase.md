@@ -1,11 +1,11 @@
 # WS004 Phase 030: WLAN lifecycle, reconnect, and hardware hardening
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 Phase ID: `ws004-p030`
 
-Status: automatic milestone in progress (`q060`); later shared physical
-closure remains outside this Queue
+Status: automatic milestone complete (`q060`); later shared physical closure
+remains pending in `ws005-p008`
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -19,10 +19,11 @@ reinsert, shutdown, and repeated physical use. Completion means the declared
 2.4-GHz/20-MHz WPA2-Personal/CCMP L2 profile is reliable and diagnosable; it
 does not imply 5-GHz, DFS, VHT, roaming, or DHCP support.
 
-This Phase begins only after one simple attach/scan/connect/DHCP/ping/fetch
-path works in WS005 p009. Q059 satisfied that prerequisite. Its detailed
-abnormal and semi-normal behavior is a second layer of work and remains wholly
-unimplemented by that normal-path result.
+This Phase began only after one simple attach/scan/connect/DHCP/ping/fetch path
+worked in WS005 p009. Q059 satisfied that prerequisite without implementing
+the detailed abnormal and semi-normal behavior. Q060 has now completed that
+second layer's finite automatic milestone; the later shared physical closure
+remains pending.
 
 The common kernel WLAN layer owns long-lived rekey/reconnect and controlled
 port state while an interface instance remains up. WS005 owns persistent SSID/
@@ -46,8 +47,8 @@ running `dhcpc` after L2 authorization.
   one physical normal path reaches secure carrier and useful IP communication
   before this lifecycle matrix is started.
 
-This Phase was not part of q059. A later Queue may now execute its finite
-automatic milestone. It does not authorize an additional physical adapter/AP
+This Phase was not part of q059. Q060 executed its finite automatic milestone.
+That completion did not authorize or consume an additional physical adapter/AP
 checkpoint or repeated human action; final lifecycle evidence remains the
 single later shared WS005 p008 request after all automatic gates.
 
@@ -245,6 +246,36 @@ p029 secure L2, p030 lifecycle, and p008 DHCP/E2E. The later five-run p008
 ledger supplies final physical repeatability. These feedback conditions close
 the physical claims but are not inputs to p030's automatic milestone, so the
 p008 dependency graph is acyclic.
+
+## Automatic execution evidence (`q060`)
+
+Q060 completed the finite automatic milestone on 2026-09-02. The aggregate
+production-linked WPA2/CCMP lifecycle gate passed its ordinary, ASan/UBSan,
+compiler-analyzer, and amd64/i386 ABI variants. It covers group and pairwise
+rekey, replay/reinstallation defenses, bounded reconnect and cancellation,
+close/reopen, firmware and endpoint recovery, detach/reinsert, terminal
+shutdown, at least 100 synthetic lifecycle generations, and independently
+verified concurrent storage progress through the common and RTL8822BU ledgers.
+
+Eight declared USB-wide regressions passed: checked recovery, concurrent xHCI
+URBs, xHCI SuperSpeed interrupt context, net-device hotplug, CDC NCM wire and
+driver, zero-packet HCD handling, and CDC ECM. The NCM driver passed 2,013
+checks and ECM passed 1,464 checks in each ordinary and sanitizer run. All five
+NVMe focused runners passed their ordinary, sanitizer, and analyzer variants.
+
+The amd64 disk image and configured i386 kernel built after explicit
+initialization of the slot/replacement declarations. The final candidate is
+`build/q060-final-001/amd64/hdd-image.img`, 202392064 bytes, SHA-256
+`e1b05f714af810bb1cb89b6badb4c2c694b33c20b7abb8406c86c9ca76c5c707`.
+One four-CPU/4-GiB OVMF q35/xHCI USB-root boot passed through exact `login:`.
+The corrected NVMe admin control required the current truthful
+`writable max-transfer=8` namespace publication and returned
+`HW-T20 QEMU NVMe admin: PASS`; its disposable namespace and the source image
+remained byte-identical.
+
+This evidence completes only the automatic milestone. The one shared WS005
+p008 lifecycle checkpoint and p008-owned five-consecutive-cold-boot campaign
+remain pending and are required before p030's physical claim closes.
 
 ## Reconsideration boundary
 

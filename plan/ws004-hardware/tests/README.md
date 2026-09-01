@@ -34,8 +34,8 @@ Parent: [WS004](../ws.md)
 | HW-T34 | WLAN lifecycle hardening | Rekey, bounded reconnect, firmware/USB recovery, up/down, unplug/reinsert, shutdown, concurrent storage, and race/fault fixtures pass; one shared WS005 p008 lifecycle checkpoint and its frozen-artifact five-run batch supply nonduplicated physical evidence |
 | HW-T35 | USB same-endpoint multi-URB | A supporting xHCI endpoint owns a bounded multi-URB queue with exact completion/cancel/drain, ring-wrap, late-event, detach, and fairness behavior; legacy HCDs retain one active URB per endpoint |
 | HW-T36 | RTL8822BU pre-radio substrate | Default-off firmware acquisition, pinned image validation, exact USB/register/efuse contracts, bounded firmware/RX codecs, serialized WLAN publication, and tableless production refusal pass without an RF-success claim |
-| HW-T37 | Intel AX201 identity/firmware intake | Read-only test-machine PCI/topology/driver/firmware evidence freezes exact identity, immutable bytes, provenance, license, optional-package boundary, and safe later execution method without host mutation |
-| HW-T38 | Standalone Intel AX201 normal path | Exact attach and pinned firmware, bounded 2.4-GHz scan, WPA2/CCMP authorization, DHCP, gateway/public ping, nonempty fetch, disconnect, and down pass without a prior Intel/RTL hardware framework |
+| HW-T37 | [Intel AX211 identity/firmware intake](q061-intel-wlan-intake-evidence.md) | Q061's read-only evidence corrects the target to exact AX211/CNVio2 `8086:51f0`, subsystem `8086:4090`, revision `01`, and freezes immutable bytes, provenance, clear license, optional-package, and direct-boot boundaries without host mutation |
+| HW-T38 | Standalone Intel AX211 normal path | Exact AX211/CNVio2 attach and pinned `-89.ucode`/PNVM, bounded 2.4-GHz scan, WPA2/CCMP authorization, DHCP, gateway/public ping, nonempty fetch, disconnect, and down pass by direct zedBSD boot without a prior Intel/RTL hardware framework |
 | HW-T39 | Evidence-driven WLAN refactor | The two working drivers retain ABI and normal-path behavior while only substantial identical contracts are extracted; a documented no-extraction result is valid |
 | HW-T40 | i915 foundations | Device-independent UAPI/model tests pass; modeset/scanout/reset require target-hardware evidence |
 
@@ -339,6 +339,28 @@ the final five-consecutive-cold-boot batch. The fifth run adds at most ten
 minutes of bounded bidirectional traffic with concurrent storage. HW-T34
 references that one redacted ledger, while forced rekey, repeated hotplug,
 firmware/endpoint negatives, and 100-iteration stress remain automatic.
+
+Q060 completed the HW-T34 automatic milestone on 2026-09-02. The aggregate
+production-linked WPA2/CCMP lifecycle runner passed ordinary, ASan/UBSan,
+compiler-analyzer, and amd64/i386 ABI variants, including the declared
+100-generation lifecycle and concurrent-storage cases. Eight USB-wide
+regression runners passed: checked recovery, concurrent xHCI URBs, xHCI
+SuperSpeed interrupt context, net-device hotplug, CDC NCM wire and driver,
+zero-packet HCD handling, and CDC ECM. The NCM driver recorded 2,013 checks and
+ECM recorded 1,464 checks in each ordinary and sanitizer run. All five NVMe
+focused runners passed ordinary, sanitizer, and analyzer variants.
+
+The amd64 image and configured i386 kernel built after explicit initialization
+of the slot/replacement declarations. Candidate
+`build/q060-final-001/amd64/hdd-image.img` is 202392064 bytes with SHA-256
+`e1b05f714af810bb1cb89b6badb4c2c694b33c20b7abb8406c86c9ca76c5c707`.
+One four-CPU/4-GiB OVMF q35/xHCI USB-root boot reached exact `login:`. The
+NVMe admin control, corrected to require the truthful current
+`writable max-transfer=8` publication, returned
+`HW-T20 QEMU NVMe admin: PASS` with unchanged source and disposable namespace
+digests. These are automatic model/build/QEMU controls only. The shared WS005
+p008 lifecycle checkpoint and its frozen-artifact five-run batch remain
+pending and are not claimed by HW-T34's q060 result.
 
 ## HW-T20 NVMe I/O and lifecycle evidence
 
@@ -892,6 +914,18 @@ production fixture publishes the exact device but proves that `open` returns
 write occurs until p028 adds the reviewed BSD-3-Clause table. These automatic,
 build, image, QEMU, and independent-audit results complete HW-T36 in q056;
 physical Archer operation and scan evidence remain later work.
+
+## HW-T37 Intel AX211 identity and firmware intake
+
+Q061 completed the read-only intake and retained its normalized, redacted
+evidence in
+[`q061-intel-wlan-intake-evidence.md`](q061-intel-wlan-intake-evidence.md).
+It freezes PCI `8086:51f0`, subsystem `8086:4090`, revision `01`, AX211/CNVio2
+topology, BAR/interrupt/MSI-X/IOMMU/FLR facts, `iwlwifi`/`iwlmvm`, the selected
+`iwlwifi-so-a0-gf-a0-89.ucode`, family PNVM, exact sizes and SHA-256 values,
+official `linux-firmware` `20260410` provenance, the WHENCE `86` versus runtime
+`89` version discrepancy, the clear Intel notice boundary, and direct zedBSD
+boot for p038. No host mutation or network identity is retained.
 
 ## HW-T20 NVMe QEMU
 

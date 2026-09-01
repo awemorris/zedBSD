@@ -75,8 +75,8 @@ The private SHA-256 implementation is tested with standard public vectors but
 is not exported as a general crypto interface.
 
 This Phase does not create placeholder downloads for
-`userland/firmware/rtl8822c/` or `userland/firmware/intelax201/`. Those paths
-belong to the deferred, separate RTL8822CE and Intel AX201 driver efforts.
+`userland/firmware/rtl8822c/` or `userland/firmware/intelax211/`. Those paths
+belong to the deferred, separate RTL8822CE and exact AX211 driver efforts.
 There is no common RTL88 chip layer in this milestone; the 8822B/USB module is
 allowed to stand alone below the stable p027 WLAN interface.
 

@@ -1,89 +1,101 @@
-# Queue: RTL8822BU lifecycle automatic hardening
+# Queue: Intel AX211 standalone normal path
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
-QID: `q060`
+QID: `q062`
 
 Queue status: in progress
 
 Queue finished: **No**
 
-Authorization: the user authorized continuous Queue execution, prioritized
-WS004 before WS005, and directed the implementation to establish a simple
-working communication path before perfecting abnormal and semi-normal cases.
-Q059 completed that normal path. The user then explicitly selected complete
-RTL8822BU abnormal/semi-normal hardening as the next priority.
+Authorization: the user authorized continuous Queue execution and accepted the
+q061 exact Intel AX211/CNVio2 target. Q060 completed p030's automatic
+RTL8822BU dependency, and q061 completed p037's identity, firmware, provenance,
+license, package, and direct-boot boundaries.
 
-Timebox: none. Execute only the finite automatic milestone of p030. Do not
-request another physical adapter run or start WS005 p008 final acceptance in
-this Queue.
+Timebox: none. Execute only finite `ws004-p038`. Do not broaden the exact
+device identity, change the public WLAN UAPI without an explicit decision,
+create an Intel/Realtek hardware framework, claim generic QEMU passthrough, or
+begin p039 in this Queue.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q059](queue-q059.md)
+Previous Queue: [q061](queue-q061.md)
 
 ## Purpose
 
-Harden the now-working RTL8822BU WPA2-Personal/CCMP station across rekey,
-bounded same-network reconnect, interface close/reopen, USB and firmware
-failure, unplug/reinsert, shutdown, and concurrent USB-storage activity using
-production-linked deterministic fixtures. Preserve the q059 normal path and
-leave all physical lifecycle and five-run repeatability evidence to the later
-shared WS005 p008 checkpoint.
+Implement the exact q061 Intel Wi-Fi 6E AX211/CNVio2 function independently
+behind the existing WLAN/net-device contracts. Prove exact attach, pinned
+firmware/PNVM start, bounded 2.4-GHz scan, WPA2-Personal/CCMP authorization,
+DHCP, gateway/public ping, bounded nonempty HTTP fetch, disconnect, and
+administrative down, ending with one bounded direct zedBSD boot on the exact
+machine.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws004-p030` | [WLAN lifecycle hardening](ws004-hardware/phase030-wlan-lifecycle-hardware-hardening/phase.md) | in-progress | P030's rekey/reconnect/lifecycle/fault/race/storage automatic milestone passes without claiming its later shared physical closure |
+| 1 | `ws004-p038` | [standalone Intel AX211 normal path](ws004-hardware/phase038-intel-ax211-standalone-driver/phase.md) | in-progress (`q062`) | Exact AX211/CNVio2 attach and pinned firmware/PNVM pass automatic gates and one direct exact-device scan/WPA2/CCMP/DHCP/ping/fetch/disconnect/down checkpoint without prior Intel/RTL commonization |
 
 ## Accepted decisions
 
-- Retain only the already supported station-mode 2.4-GHz/20-MHz
-  WPA2-Personal/CCMP profile. Do not add 5 GHz, DFS, HT/VHT, roaming, WPA3,
-  DHCP policy, or another WLAN device in q060.
-- The common kernel WLAN layer owns long-lived controlled-port, rekey, and
-  same-network reconnect state. The RTL8822BU driver owns hardware/firmware,
-  USB transport, radio, descriptors, and key slots.
-- Reconnect attempts use delays 0/1/2/4/8 seconds, at most five failures and
-  at most 30 seconds per generation. Explicit disconnect/down/removal cancels
-  the generation.
-- Removal never retains a passphrase or PMK. Reinsert creates a fresh device
-  instance; later WS005 policy may submit a new credential.
-- Implement the ordinary lifecycle transition first inside this Queue, then
-  complete the bounded error/race matrix. Do not broaden into unrelated
-  hardening.
-- Do not use aggregate `make check`. Repository `.internal/` material is not
-  an input to automatic tests; if runtime credentials are ever needed later,
-  they may exist only under ignored `.internal/` and must not enter evidence or
-  a commit.
+- Bind only PCI `8086:51f0`, subsystem `8086:4090`, revision `01`, with the
+  q061-recorded AX211/CNVio2 transport relationship. Reject AX201, AX210,
+  neighboring AX211 identities, and broad Intel matches.
+- Use only `intel/iwlwifi/iwlwifi-so-a0-gf-a0-89.ucode` and
+  `intel/iwlwifi/iwlwifi-so-a0-gf-a0.pnvm` at the exact q061 sizes and SHA-256
+  values from official `linux-firmware` tag `20260410`. Preserve the WHENCE
+  `86.735b75a4.0` versus runtime `89.735b75a4.0` discrepancy visibly.
+- Implement a default-off `userland/firmware/intelax211/` package. Firmware
+  bytes and the complete Intel notice remain outside the base source/default
+  image; ordinary builds and the kernel perform no firmware network fetch.
+- Keep firmware transport, CNVi/CRF interaction, DMA rings, interrupts,
+  descriptors, NVM/calibration, reset, and hardware keys AX211-private. Reuse
+  only existing device-independent PCI/DMA/interrupt, WLAN, WPA2/CCMP, and
+  net-device contracts.
+- Keep the first capability profile to station-mode 2.4 GHz, 20 MHz,
+  WPA2-Personal/CCMP and one useful IP path. Do not claim 5/6 GHz, wide
+  channels, HE performance, WPA3, roaming, AP/monitor, suspend, or throughput.
+- Use runtime-only credentials. Retain no credential, SSID, BSSID, MAC address,
+  lease, hostname, account name, or host address in plans, fixtures, logs, or
+  screenshots.
+- The singleton IOMMU group does not reproduce CNVio2 platform topology in a
+  generic guest. The exact-device acceptance method is direct zedBSD boot, not
+  PCI passthrough.
 
 ## Implementation checkpoints
 
-1. Inventory the q059 production state machine and ownership ledgers; extend
-   focused fixtures before changing public or long-lived state.
-2. Implement GTK and pairwise rekey with atomic key-generation replacement,
-   replay/reinstall protection, and controlled-port ordering.
-3. Implement finite same-network reconnect after link loss, with fresh
-   authentication/nonces/keys and cancellation by explicit lifecycle events.
-4. Harden open/down, firmware restart, endpoint recovery, unplug/reinsert, and
-   terminal shutdown so all work is retired exactly once or quarantined.
-5. Exercise success and injected failure across rekey/reconnect/lifecycle,
-   including at least 100 synthetic iterations and concurrent USB-storage
-   progress.
-6. Rerun directly affected WLAN/RTL8822BU/USB/net-device regressions,
-   sanitizer/analyzer variants, configured x86 builds, `make -j16`, bounded
-   IDE and xHCI USB-root boots, and `git diff --check`.
+1. Add the selected-only `intelax211` firmware package with frozen file sizes,
+   digests, official snapshot, license/manifest installation, offline reuse,
+   corruption rejection, and absence from the default image.
+2. Implement exact PCI/subsystem/revision and CNVio2 transport validation,
+   transactional BAR0/MSI-X/DMA/net-device ownership, checked reverse unwind,
+   bounded firmware/PNVM/NVM parsing and upload, finite command/event handling,
+   and staging/secret erasure.
+3. Keep the AX211 transport private while adapting its finite scan and
+   authentication/association/key/TX/RX callbacks to the unchanged p027/p029
+   WLAN, WPA2/CCMP, controlled-port, and Ethernet contracts.
+4. Pass exact/neighboring identity, allocation/unwind, DMA/ring wrap,
+   interrupt, malformed firmware/PNVM/NVM, timeout, stale/duplicate frame,
+   authorization-order, hardware-key failure, TX/RX bound, and terminal-down
+   automatic fixtures, including sanitizer and compiler-analyzer variants.
+5. Pass the retained p027/p029 WLAN/security/L2 suites through an AX211-private
+   fake transport, configured amd64, ordinary repository build,
+   `git diff --check`, and IDE/xHCI USB-root plus RTL8822BU regressions.
+6. Only after automatic gates pass, produce one direct-boot candidate and run
+   the exact-device checkpoint: attach, pinned firmware/PNVM, bounded scan,
+   WPA2/CCMP authorization, DHCP, gateway/public ping, bounded nonempty fetch,
+   disconnect, and administrative down with all network identity redacted.
 
 ## Completion definition
 
-Q060 completes when p030's automatic milestone passes: rekey and reconnect
-preserve strict key/PN/controlled-port semantics; close/recovery/removal/
-reinsert/shutdown retire every owned object exactly once or retain a complete
-checked quarantine; and the declared fault/race/storage regression matrix
-passes. The Phase remains physically open until its one shared WS005 p008
-lifecycle checkpoint and p008-owned five consecutive cold boots are later
-accepted. No human action is requested by q060.
+Q062 completes when p038 passes the automatic package/identity/ownership/
+firmware/transport/scan/security/L2/build/regression gates and one exact AX211/
+CNVio2 direct-boot normal path reaches useful IP communication, then
+disconnects and goes down cleanly. The public WLAN UAPI remains unchanged, the
+AX211 implementation remains independent of RTL internals, and exhaustive
+recovery/rekey/suspend/race/throughput/repeatability claims remain outside this
+Queue.
 
 ## Execution result
 

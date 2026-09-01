@@ -1,11 +1,10 @@
 # WS004 Phase 039: evidence-driven WLAN commonization review
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 Phase ID: `ws004-p039`
 
-Status: planned; follows the `ws004-p030` automatic milestone and completed
-`ws004-p038`; not queued
+Status: planned; not started; follows completed `ws004-p038`; not queued
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -13,7 +12,11 @@ Tests: [WS004 test index](../tests/README.md)
 
 ## Objective
 
-Review the independently working RTL8822BU and Intel AX201 implementations
+P039 remains unstarted until the retargeted AX211 p038 normal path is complete.
+The q061 AX211/CNVio2 observation is intake evidence, not a second working
+driver and not permission to begin commonization.
+
+Review the independently working RTL8822BU and Intel AX211 implementations
 side by side, identify only common behavior proven by both implementations,
 and move a worthwhile stable subset into the existing generic WLAN framework.
 This is late abstraction, not a mandate to eliminate duplication. A reviewed
@@ -43,7 +46,7 @@ Do not create a proposed common layer as a prerequisite for the Intel driver.
 - `ws004-p030`: RTL8822BU normal behavior and the automatic lifecycle matrix
   are complete under its declared profile; p008 retains final physical
   repeatability ownership.
-- `ws004-p038`: the independent Intel AX201 scan/WPA2/CCMP/useful-IP path is
+- `ws004-p038`: the independent Intel AX211 scan/WPA2/CCMP/useful-IP path is
   complete and its duplicated/private boundaries are visible.
 - Passing focused and physical normal-path evidence for both exact devices.
 - The project-wide interface-based modularity and late-abstraction preference
@@ -89,7 +92,7 @@ mechanical cleanup.
 
 - Preserve a before/after map of every moved symbol and its ownership.
 - Run all p027/p029 generic WLAN, WPA2 codec/engine, CCMP L2, RTL8822B core/
-  security/USB, and Intel AX201 transport/security fixtures.
+  security/USB, and Intel AX211 transport/security fixtures.
 - Prove unchanged ABI layout and ioctl values with compile-time and binary
   conformance checks.
 - Run configured amd64 builds, ordinary repository build, and retained

@@ -131,4 +131,4 @@ composition, p010 primitive abnormal/semi-normal hardening, or WS004 p030
 reconnect, hotplug, recovery, and lifecycle hardening. Those remain eligible
 next work rather than hidden q059 scope.
 
-Next Queue: [q060](queue.md)
+Next Queue: [q060](queue-q060.md)
