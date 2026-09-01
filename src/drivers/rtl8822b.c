@@ -81,6 +81,7 @@
 #define RTL8822B_REG_H2C_READ                  0x024cU
 #define RTL8822B_REG_H2C_INFO                  0x0254U
 #define RTL8822B_REG_RXDMA_AGGREGATION         0x0280U
+#define RTL8822B_REG_RX_PACKET_NUMBER          0x0284U
 #define RTL8822B_REG_RXDMA_MODE                0x0290U
 #define RTL8822B_REG_CR_EXT                    0x1100U
 #define RTL8822B_REG_CPU_DMEM_CON              0x1080U
@@ -160,6 +161,14 @@
 #define RTL8822B_REG_RFE_PATH_SOURCE           0x1990U
 #define RTL8822B_REG_RFE_IO_DIRECTION          0x0974U
 #define RTL8822B_REG_MRC                       0x0850U
+#define RTL8822B_REG_USB_CPWM                  0xfe57U
+#define RTL8822B_REG_USB_RPWM                  0xfe58U
+
+#define RTL8822B_MCUFW_INIT_READY              0x8000U
+#define RTL8822B_RPWM_ACK                        0x40U
+#define RTL8822B_RPWM_TOGGLE                     0x80U
+#define RTL8822B_RPWM_ACK_POLL_US                 100U
+#define RTL8822B_RPWM_ACK_POLL_MAX                150U
 
 #define RTL8822B_RF_SIPI_A                     0x0c90U
 #define RTL8822B_RF_SIPI_B                     0x0e90U
@@ -176,6 +185,11 @@
 #define RTL8822B_LEGACY_RATE_COUNT                    12U
 
 #define RTL8822B_CR_ALL_ENABLE                     0xffU
+#define RTL8822B_CR_RX_ENABLE_MASK                 0x8aU
+#define RTL8822B_RX_RELEASE_ENABLE             0x00040000U
+#define RTL8822B_RXDMA_IDLE                    0x00020000U
+#define RTL8822B_RX_GENERATION_POLL_MAX               150U
+#define RTL8822B_RX_GENERATION_POLL_US                100U
 #define RTL8822B_BB_RESET_BITS                     0x03U
 #define RTL8822B_RF_ENABLE_BITS                    0x07U
 #define RTL8822B_WLRF_ENABLE_BITS             0x07000000U
@@ -1308,6 +1322,66 @@ radio_power_state_is_on(struct rtl8822b_radio *radio, int *powered,
 	if (error == 0)
 		*powered = control != 0xeaU && (status & 0x01U) == 0U;
 	return error;
+}
+
+/*
+ * A USB RTL8822B may survive a host-side rebind with its WCPU and firmware
+ * still running.  Before the checked card-disable sequence touches that warm
+ * instance, send the reviewed RPWM acknowledgement request and wait for
+ * firmware to toggle CPWM.  A missing acknowledgement does not authorize
+ * reuse: power_on() still performs the full disable/enable transaction and
+ * the caller downloads a fresh, pinned firmware image afterwards.
+ *
+ * Fully powered-off and powered-but-without-firmware states deliberately skip
+ * RPWM.  Those states have no firmware peer which could acknowledge it.
+ */
+static int
+radio_warm_firmware_ack(struct rtl8822b_radio *radio,
+	uint64_t deadline_ticks)
+{
+	uint32_t firmware;
+	uint32_t request;
+	uint32_t confirm;
+	uint32_t polling;
+	unsigned attempt;
+	int error;
+
+	error = radio_read(radio, RTL8822B_REG_MCUFW_CTRL, 2U, &firmware,
+	    deadline_ticks);
+	if (error != 0 || (firmware & RTL8822B_MCUFW_INIT_READY) == 0U)
+		return error;
+	error = radio_read(radio, RTL8822B_REG_USB_RPWM, 1U, &request,
+	    deadline_ticks);
+	if (error == 0)
+		error = radio_read(radio, RTL8822B_REG_USB_CPWM, 1U, &confirm,
+		    deadline_ticks);
+	if (error != 0)
+		return error;
+	/* Clear every mode bit, invert only the toggle, and request an ACK. */
+	request = ((request & RTL8822B_RPWM_TOGGLE) ^
+	    RTL8822B_RPWM_TOGGLE) | RTL8822B_RPWM_ACK;
+	error = radio_write(radio, RTL8822B_REG_USB_RPWM, 1U, request,
+	    deadline_ticks);
+	if (error != 0)
+		return error;
+	/* now_ticks is expressed in kernel ticks while delay_us is explicitly
+	 * microseconds.  Bound this secondary wait by count, never by adding
+	 * microseconds to an opaque tick value. */
+	for (attempt = 0U; attempt < RTL8822B_RPWM_ACK_POLL_MAX; attempt++) {
+		error = radio_read(radio, RTL8822B_REG_USB_CPWM, 1U, &polling,
+		    deadline_ticks);
+		if (error != 0)
+			return error;
+		if (((polling ^ confirm) & RTL8822B_RPWM_TOGGLE) != 0U)
+			return 0;
+		error = radio_delay(radio, RTL8822B_RPWM_ACK_POLL_US,
+		    deadline_ticks);
+		if (error != 0)
+			return error;
+		if (radio->transport.yield != NULL)
+			radio->transport.yield(radio->transport.context);
+	}
+	return ETIMEDOUT;
 }
 
 static int
@@ -2626,6 +2700,10 @@ rtl8822b_radio_power_on(struct rtl8822b_radio *radio,
 		error = radio_power_state_is_on(radio, &already_powered,
 		    deadline_ticks);
 	if (error == 0 && already_powered)
+		/* A failed/missing firmware acknowledgement forces the same full
+		 * power-cycle below; no warm state is ever reused. */
+		(void)radio_warm_firmware_ack(radio, deadline_ticks);
+	if (error == 0 && already_powered)
 		error = radio_power_commands(radio, rtl8822b_power_disable,
 		    sizeof(rtl8822b_power_disable) /
 		    sizeof(rtl8822b_power_disable[0]), deadline_ticks);
@@ -2721,6 +2799,77 @@ rtl8822b_radio_set_channel(struct rtl8822b_radio *radio,
 }
 
 int
+rtl8822b_radio_rx_generation_pause(struct rtl8822b_radio *radio,
+	uint64_t deadline_ticks)
+{
+	uint32_t control;
+	uint32_t receive;
+	unsigned attempt;
+	int error;
+
+	if (radio == NULL || radio->state != RTL8822B_RADIO_STARTED)
+		return EINVAL;
+	if (radio->rx_generation_paused)
+		return 0;
+	error = radio_read(radio, RTL8822B_REG_CR, 1U, &control,
+	    deadline_ticks);
+	if (error == 0)
+		error = radio_write(radio, RTL8822B_REG_CR, 1U,
+		    control & ~RTL8822B_CR_RX_ENABLE_MASK, deadline_ticks);
+	if (error != 0)
+		return error;
+	/* From this point forward a failure is fail-closed: resume or the checked
+	 * radio-stop transaction is required before RX can run again. */
+	radio->rx_generation_paused = 1U;
+	error = radio_read(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U, &receive,
+	    deadline_ticks);
+	if (error == 0)
+		error = radio_write(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U,
+		    receive | RTL8822B_RX_RELEASE_ENABLE, deadline_ticks);
+	if (error != 0)
+		return error;
+	for (attempt = 0U; attempt < RTL8822B_RX_GENERATION_POLL_MAX; attempt++) {
+		error = radio_read(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U,
+		    &receive, deadline_ticks);
+		if (error != 0 || (receive & RTL8822B_RXDMA_IDLE) != 0U)
+			return error;
+		error = radio_delay(radio, RTL8822B_RX_GENERATION_POLL_US,
+		    deadline_ticks);
+		if (error != 0)
+			return error;
+	}
+	return ETIMEDOUT;
+}
+
+int
+rtl8822b_radio_rx_generation_resume(struct rtl8822b_radio *radio,
+	uint64_t deadline_ticks)
+{
+	uint32_t control;
+	uint32_t receive;
+	int error;
+
+	if (radio == NULL || radio->state != RTL8822B_RADIO_STARTED)
+		return EINVAL;
+	if (!radio->rx_generation_paused)
+		return 0;
+	error = radio_read(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U, &receive,
+	    deadline_ticks);
+	if (error == 0)
+		error = radio_write(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U,
+		    receive & ~RTL8822B_RX_RELEASE_ENABLE, deadline_ticks);
+	if (error == 0)
+		error = radio_read(radio, RTL8822B_REG_CR, 1U, &control,
+		    deadline_ticks);
+	if (error == 0)
+		error = radio_write(radio, RTL8822B_REG_CR, 1U,
+		    control | RTL8822B_CR_RX_ENABLE_MASK, deadline_ticks);
+	if (error == 0)
+		radio->rx_generation_paused = 0U;
+	return error;
+}
+
+int
 rtl8822b_radio_stop(struct rtl8822b_radio *radio,
 	uint64_t deadline_ticks)
 {
@@ -2774,11 +2923,11 @@ rtl8822b_radio_active_scan_allowed(const struct rtl8822b_radio *radio,
 }
 
 static int
-wildcard_probe_request_valid(const struct rtl8822b_radio *radio,
+probe_request_valid(const struct rtl8822b_radio *radio,
 	const uint8_t *frame, size_t length)
 {
 	size_t offset;
-	int wildcard = 0;
+	unsigned ssid_count = 0U;
 	unsigned index;
 
 	if (radio == NULL || frame == NULL || length < 26U ||
@@ -2802,17 +2951,23 @@ wildcard_probe_request_valid(const struct rtl8822b_radio *radio,
 		offset += 2U;
 		if ((size_t)ie_length > length - offset)
 			return 0;
-		if (id == 0U && ie_length == 0U)
-			wildcard = 1;
+		if (id == 0U) {
+			/* IEEE 802.11 Probe Request contains one SSID IE.  Length zero
+			 * is a wildcard scan; 1..32 is the directed reconnect form
+			 * emitted by the common WLAN engine. */
+			if (ssid_count != 0U || ie_length > 32U)
+				return 0;
+			ssid_count++;
+		}
 		offset += ie_length;
 	}
-	return wildcard;
+	return ssid_count == 1U;
 }
 
-int
-rtl8822b_radio_management_frame_prepare(
-	const struct rtl8822b_radio *radio, uint8_t *wire, size_t capacity,
-	const uint8_t *frame, size_t frame_length, size_t *wire_length)
+static int
+radio_management_frame_prepare(const struct rtl8822b_radio *radio,
+	uint8_t *wire, size_t capacity, const uint8_t *frame,
+	size_t frame_length, size_t *wire_length)
 {
 	size_t total;
 	uint16_t checksum = 0U;
@@ -2824,8 +2979,6 @@ rtl8822b_radio_management_frame_prepare(
 	if (radio == NULL || wire == NULL || frame == NULL ||
 	    !rtl8822b_radio_active_scan_allowed(radio, radio->channel))
 		return EPERM;
-	if (!wildcard_probe_request_valid(radio, frame, frame_length))
-		return EINVAL;
 	if (frame_length > SIZE_MAX - RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE)
 		return EOVERFLOW;
 	total = RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + frame_length;
@@ -2850,4 +3003,45 @@ rtl8822b_radio_management_frame_prepare(
 	    frame_length);
 	*wire_length = total;
 	return 0;
+}
+
+int
+rtl8822b_radio_management_frame_prepare(
+	const struct rtl8822b_radio *radio, uint8_t *wire, size_t capacity,
+	const uint8_t *frame, size_t frame_length, size_t *wire_length)
+{
+	if (!probe_request_valid(radio, frame, frame_length)) {
+		if (wire_length != NULL)
+			*wire_length = 0U;
+		return EINVAL;
+	}
+	return radio_management_frame_prepare(radio, wire, capacity, frame,
+	    frame_length, wire_length);
+}
+
+int
+rtl8822b_radio_deauthentication_prepare(
+	const struct rtl8822b_radio *radio, uint8_t *wire, size_t capacity,
+	const uint8_t bssid[6], const uint8_t station[6], uint16_t reason,
+	size_t *wire_length)
+{
+	uint8_t frame[26];
+	int error;
+
+	if (wire_length == NULL)
+		return EINVAL;
+	*wire_length = 0U;
+	if (bssid == NULL || station == NULL || reason == 0U ||
+	    (bssid[0] & 1U) != 0U || (station[0] & 1U) != 0U)
+		return EINVAL;
+	memset(frame, 0, sizeof(frame));
+	frame[0] = 0xc0U;
+	memcpy(frame + 4U, bssid, 6U);
+	memcpy(frame + 10U, station, 6U);
+	memcpy(frame + 16U, bssid, 6U);
+	store_le16(frame + 24U, reason);
+	error = radio_management_frame_prepare(radio, wire, capacity, frame,
+	    sizeof(frame), wire_length);
+	memset(frame, 0, sizeof(frame));
+	return error;
 }

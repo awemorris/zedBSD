@@ -14,6 +14,19 @@
 
 #include "../../../src/drivers/rtl8822b-internal.h"
 
+#define FIXTURE_REG_MCUFW_CTRL       0x0080U
+#define FIXTURE_REG_SYS_STATUS1      0x00f4U
+#define FIXTURE_REG_CR               0x0100U
+#define FIXTURE_REG_USB_CPWM         0xfe57U
+#define FIXTURE_REG_USB_RPWM         0xfe58U
+#define FIXTURE_REG_RX_PACKET_NUMBER 0x0284U
+#define FIXTURE_MCUFW_INIT_READY     0x8000U
+#define FIXTURE_RPWM_ACK               0x40U
+#define FIXTURE_RPWM_TOGGLE            0x80U
+#define FIXTURE_RPWM_ACK_TIMEOUT_US   15000U
+#define FIXTURE_RX_RELEASE_ENABLE 0x00040000U
+#define FIXTURE_RXDMA_IDLE        0x00020000U
+
 static void
 put_le16(uint8_t *bytes, uint16_t value)
 {
@@ -639,6 +652,7 @@ struct fake_radio {
 	uint64_t now;
 	uint64_t delay_microseconds;
 	int automatic_power_ack;
+	int automatic_rpwm_ack;
 	int automatic_llt_ack;
 	int automatic_rf_lut_ack;
 };
@@ -656,6 +670,7 @@ fake_radio_create(void)
 	fake->fail_write_at = SIZE_MAX;
 	fake->fail_read_at = SIZE_MAX;
 	fake->automatic_power_ack = 1;
+	fake->automatic_rpwm_ack = 1;
 	fake->automatic_llt_ack = 1;
 	fake->automatic_rf_lut_ack = 1;
 	fake->registers[0x0100U] = 0xeaU;
@@ -714,6 +729,9 @@ fake_radio_write(void *context, uint16_t address, unsigned width,
 	mask = width == 1U ? 0xffU : width == 2U ? 0xffffU : UINT32_MAX;
 	fake->registers[address] = (fake->registers[address] & ~mask) |
 	    (value & mask);
+	if (address == FIXTURE_REG_RX_PACKET_NUMBER && width == 4U &&
+	    (value & FIXTURE_RX_RELEASE_ENABLE) != 0U)
+		fake->registers[address] |= FIXTURE_RXDMA_IDLE;
 	if (address == 0x0c90U || address == 0x0e90U) {
 		uint32_t rf_address = (value >> 20) & 0xffU;
 		uint32_t direct = (address == 0x0c90U ? 0x2800U :
@@ -725,6 +743,12 @@ fake_radio_write(void *context, uint16_t address, unsigned width,
 	}
 	if (fake->automatic_power_ack && address == 0x0005U)
 		fake->registers[address] &= ~0x03U;
+	if (fake->automatic_rpwm_ack && address == FIXTURE_REG_USB_RPWM &&
+	    width == 1U)
+		fake->registers[FIXTURE_REG_USB_CPWM] =
+		    (fake->registers[FIXTURE_REG_USB_CPWM] &
+		    ~FIXTURE_RPWM_TOGGLE) |
+		    (value & FIXTURE_RPWM_TOGGLE);
 	if (fake->automatic_llt_ack && address == 0x0208U && width == 1U &&
 	    (value & 0x01U) != 0U)
 		fake->registers[address] &= ~0x01U;
@@ -973,6 +997,7 @@ test_radio_lifecycle(void)
 	size_t stages[16];
 	size_t stage_count = 0U;
 	uint8_t frame[26];
+	uint8_t directed_frame[64];
 	uint8_t padded_frame[464];
 	uint8_t padded_wire[513];
 	uint8_t wire[128];
@@ -987,6 +1012,18 @@ test_radio_lifecycle(void)
 	assert(radio.state == RTL8822B_RADIO_POWERED);
 	assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
 	assert(radio.state == RTL8822B_RADIO_STARTED && radio.channel == 1U);
+	assert(rtl8822b_radio_rx_generation_pause(&radio, UINT64_MAX) == 0);
+	assert(radio.rx_generation_paused &&
+	    (baseline->registers[0x0100U] & 0x8aU) == 0U &&
+	    (baseline->registers[FIXTURE_REG_RX_PACKET_NUMBER] &
+	    (FIXTURE_RX_RELEASE_ENABLE | FIXTURE_RXDMA_IDLE)) ==
+	    (FIXTURE_RX_RELEASE_ENABLE | FIXTURE_RXDMA_IDLE));
+	assert(rtl8822b_radio_rx_generation_pause(&radio, UINT64_MAX) == 0);
+	assert(rtl8822b_radio_rx_generation_resume(&radio, UINT64_MAX) == 0);
+	assert(!radio.rx_generation_paused &&
+	    (baseline->registers[0x0100U] & 0x8aU) == 0x8aU &&
+	    (baseline->registers[FIXTURE_REG_RX_PACKET_NUMBER] &
+	    FIXTURE_RX_RELEASE_ENABLE) == 0U);
 	assert((baseline->registers[0x010cU] & 0xffffU) == 0xf5a5U);
 	assert((baseline->registers[0x0290U] & 0xffU) == 0x1eU);
 	assert((baseline->registers[0x020cU] & 0x0200U) != 0U);
@@ -1066,6 +1103,34 @@ test_radio_lifecycle(void)
 		checksum ^= get_le16(wire + index * 2U);
 	assert(checksum == 0U);
 	assert(memcmp(wire + 48U, frame, sizeof(frame)) == 0);
+	/* The common reconnect scan emits the same broadcast DA/BSSID Probe
+	 * Request with one non-empty SSID IE and the legacy basic rates IE. */
+	memset(directed_frame, 0, sizeof(directed_frame));
+	directed_frame[0] = 0x40U;
+	memset(directed_frame + 4U, 0xff, 6U);
+	memcpy(directed_frame + 10U, board.mac_address, 6U);
+	memset(directed_frame + 16U, 0xff, 6U);
+	directed_frame[24U] = 0U;
+	directed_frame[25U] = 6U;
+	memcpy(directed_frame + 26U, "zedBSD", 6U);
+	directed_frame[32U] = 1U;
+	directed_frame[33U] = 4U;
+	memcpy(directed_frame + 34U,
+	    (const uint8_t[]){ 0x82U, 0x84U, 0x8bU, 0x96U }, 4U);
+	assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+	    sizeof(wire), directed_frame, 38U, &wire_length) == 0);
+	assert(wire_length == 48U + 38U &&
+	    memcmp(wire + 48U, directed_frame, 38U) == 0);
+	/* More than 32 bytes and duplicate SSID IEs are not valid directed
+	 * requests, even if one of the duplicates is a wildcard. */
+	directed_frame[25U] = 33U;
+	assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+	    sizeof(wire), directed_frame, 38U, &wire_length) == EINVAL);
+	directed_frame[25U] = 6U;
+	directed_frame[38U] = 0U;
+	directed_frame[39U] = 0U;
+	assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+	    sizeof(wire), directed_frame, 40U, &wire_length) == EINVAL);
 	assert(rtl8822b_radio_management_frame_prepare(&radio, wire, 60U,
 	    frame, sizeof(frame), &wire_length) == ENOSPC);
 	frame[4U] = 0U;
@@ -1084,6 +1149,14 @@ test_radio_lifecycle(void)
 	memset(padded_frame + 4U, 0xff, 6U);
 	memcpy(padded_frame + 10U, board.mac_address, 6U);
 	memset(padded_frame + 16U, 0xff, 6U);
+	/* One wildcard SSID followed by two bounded vendor IEs fills the padded
+	 * frame without accidentally creating duplicate zero-length SSID IEs. */
+	padded_frame[24U] = 0U;
+	padded_frame[25U] = 0U;
+	padded_frame[26U] = 221U;
+	padded_frame[27U] = 255U;
+	padded_frame[283U] = 221U;
+	padded_frame[284U] = 179U;
 	assert(rtl8822b_radio_management_frame_prepare(&radio, padded_wire,
 	    sizeof(padded_wire), padded_frame, sizeof(padded_frame),
 	    &wire_length) == 0);
@@ -1298,6 +1371,43 @@ test_radio_already_powered_rebind(void)
 	    disable_usb < disable_gpio && disable_gpio < enable_tail);
 	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 	assert_radio_off(fake, &radio);
+	fake_radio_destroy(fake);
+
+	/* Retained firmware must acknowledge the USB RPWM toggle before the
+	 * checked disable/enable transaction.  Other request bits are cleared. */
+	fake = fake_radio_create();
+	transport = fake_radio_transport(fake);
+	memset(&radio, 0, sizeof(radio));
+	fake->registers[FIXTURE_REG_CR] = 0xffU;
+	fake->registers[FIXTURE_REG_SYS_STATUS1 + 1U] = 0U;
+	fake->registers[FIXTURE_REG_MCUFW_CTRL] = FIXTURE_MCUFW_INIT_READY;
+	fake->registers[FIXTURE_REG_USB_RPWM] = 0x35U;
+	fake->registers[FIXTURE_REG_USB_CPWM] = FIXTURE_RPWM_TOGGLE;
+	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	    UINT64_MAX) == 0);
+	disable_start = trace_find(fake, 0U, FIXTURE_REG_USB_RPWM, 1U,
+	    FIXTURE_RPWM_ACK | FIXTURE_RPWM_TOGGLE);
+	enable_tail = trace_find(fake, disable_start + 1U, 0x0029U, 1U,
+	    0xf9U);
+	assert(disable_start < enable_tail);
+	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	fake_radio_destroy(fake);
+
+	/* A stalled warm firmware is never reused.  The finite handshake expires,
+	 * then the full card-disable transaction recovers the object for a fresh
+	 * firmware download by the USB owner. */
+	fake = fake_radio_create();
+	transport = fake_radio_transport(fake);
+	memset(&radio, 0, sizeof(radio));
+	fake->registers[FIXTURE_REG_CR] = 0xffU;
+	fake->registers[FIXTURE_REG_SYS_STATUS1 + 1U] = 0U;
+	fake->registers[FIXTURE_REG_MCUFW_CTRL] = FIXTURE_MCUFW_INIT_READY;
+	fake->automatic_rpwm_ack = 0;
+	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	    UINT64_MAX) == 0);
+	assert(fake->delay_microseconds >= FIXTURE_RPWM_ACK_TIMEOUT_US);
+	assert(radio.state == RTL8822B_RADIO_POWERED);
+	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 	fake_radio_destroy(fake);
 }
 

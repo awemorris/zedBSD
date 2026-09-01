@@ -53,6 +53,8 @@
 #define RTL8822BU_FIRMWARE_TRANSFER_TIMEOUT_MS             50U
 #define RTL8822BU_FIRMWARE_POLL_MAX                       1000U
 #define RTL8822BU_RX_DRAIN_TIMEOUT_MS                       50U
+#define RTL8822BU_RX_RECOVERY_LIMIT                           3U
+#define RTL8822BU_RECOVERY_CLEANUP_RETRY_LIMIT               32U
 /*
  * The bounded RFE/cut model needs at most 3245 control transfers plus
  * 412326 us of explicit table/RF delay.  Fifteen seconds retains a finite
@@ -130,6 +132,9 @@
 #define RTL8822BU_RX_BUFFER_SIZE RTL8822B_RX_AGGREGATE_MAX
 #define RTL8822BU_SECURITY_TIMEOUT_TICKS       (1U * KERN_CLOCK_HZ)
 #define RTL8822BU_GROUP_KEY_COUNT                         4U
+#define RTL8822BU_PAIRWISE_STAGING_SLOT                   5U
+#define RTL8822BU_GROUP_STAGING_SLOT_BASE                 8U
+#define RTL8822BU_CAM_OWNED_SLOT_COUNT                   12U
 #define RTL8822BU_TX_REPORT_COUNT                        64U
 #define RTL8822BU_TX_REPORT_SEQUENCE_STEP                 4U
 #define RTL8822BU_TX_REPORT_RETIRE_TICKS \
@@ -166,6 +171,7 @@ struct rtl8822bu_tx_report_slot {
 	uint64_t deadline_ticks;
 	uint64_t retire_deadline_ticks;
 	uint8_t active;
+	uint8_t tombstone;
 };
 
 struct rtl8822bu_rx_private {
@@ -188,7 +194,19 @@ struct rtl8822bu_binding {
 	struct drv_usb_endpoint *bulk_out_high;
 	struct drv_usb_endpoint *bulk_out_normal;
 	struct drv_usb_endpoint *bulk_out_low;
-	struct drv_usb_endpoint *interrupt_in;
+	unsigned interrupt_in_present;
+};
+
+struct rtl8822bu_adapter;
+
+/* The USB core publishes exactly one terminal callback per submission and a
+ * successful drain joins that callback before setup may reuse the URB.  The
+ * alternating contexts tag the currently published submission for local
+ * bookkeeping; they do not claim tolerance for callbacks which violate that
+ * core exact-once/drain contract. */
+struct rtl8822bu_rx_completion_context {
+	struct rtl8822bu_adapter *adapter;
+	uint64_t generation;
 };
 
 struct rtl8822bu_adapter {
@@ -198,7 +216,6 @@ struct rtl8822bu_adapter {
 	struct drv_usb_endpoint *bulk_out_high;
 	struct drv_usb_endpoint *bulk_out_normal;
 	struct drv_usb_endpoint *bulk_out_low;
-	struct drv_usb_endpoint *interrupt_in;
 	struct drv_usb_urb *rx_urb;
 	uint8_t *rx_buffer;
 	struct net_device *net_device;
@@ -211,6 +228,10 @@ struct rtl8822bu_adapter {
 	unsigned net_live;
 	unsigned station_attached;
 	unsigned detaching;
+	/* Set only for a physical USB-absence boundary.  The USB core closes its
+	 * submit/binding gate before FORCE detach, so checked software inverses
+	 * must retire local ownership without attempting impossible register I/O. */
+	unsigned transport_absent;
 	unsigned firmware_running;
 	unsigned radio_running;
 	unsigned opened;
@@ -222,6 +243,22 @@ struct rtl8822bu_adapter {
 	unsigned rx_ready;
 	unsigned rx_rearm;
 	unsigned rx_rearm_active;
+	unsigned rx_generation_barrier;
+	unsigned rx_error_streak;
+	unsigned recovery_pending;
+	unsigned recovery_active;
+	unsigned recovery_cleanup_attempts;
+	int recovery_error;
+	unsigned control_error_streak;
+	unsigned tx_high_error_streak;
+	unsigned tx_normal_error_streak;
+	unsigned tx_low_error_streak;
+	unsigned tx_report_error_streak;
+	unsigned tx_report_tombstone_count;
+	uint64_t rx_submit_generation;
+	uint64_t rx_inflight_generation;
+	uint64_t rx_completed_generation;
+	struct rtl8822bu_rx_completion_context rx_completion[2];
 	unsigned radio_operations_active;
 	/* Set under lock before any CAM/BSSID transition.  TX admission and the
 	 * operation lease are checked/changed by the same lock, closing the race
@@ -234,13 +271,28 @@ struct rtl8822bu_adapter {
 	unsigned security_enabled;
 	unsigned pairwise_key_installed;
 	uint8_t group_key_mask;
-	uint8_t cam_uncertain_mask;
+	uint8_t group_staged_mask;
+	uint8_t group_retired_mask;
+	uint8_t pairwise_key_slot;
+	uint8_t pairwise_staged_slot;
+	uint8_t pairwise_retired_slot;
+	uint8_t pairwise_staged_installed;
+	uint8_t pairwise_retired_valid;
+	uint32_t cam_uncertain_mask;
 	uint8_t connection_channel;
 	uint16_t association_aid;
 	uint8_t connection_bssid[6];
 	uint64_t connection_generation;
+	uint64_t deauthentication_attempted_generation;
 	uint64_t pairwise_key_generation;
+	uint64_t pairwise_staged_generation;
+	uint64_t pairwise_retired_generation;
 	uint64_t group_key_generation[RTL8822BU_GROUP_KEY_COUNT];
+	uint64_t group_staged_generation[RTL8822BU_GROUP_KEY_COUNT];
+	uint64_t group_retired_generation[RTL8822BU_GROUP_KEY_COUNT];
+	uint8_t group_key_slot[RTL8822BU_GROUP_KEY_COUNT];
+	uint8_t group_staged_slot[RTL8822BU_GROUP_KEY_COUNT];
+	uint8_t group_retired_slot[RTL8822BU_GROUP_KEY_COUNT];
 	struct rtl8822bu_tx_report_slot
 	    tx_reports[RTL8822BU_TX_REPORT_COUNT];
 	uint8_t tx_report_next;
@@ -260,6 +312,18 @@ static int rtl8822bu_write16(struct rtl8822bu_adapter *, uint16_t, uint16_t);
 static int rtl8822bu_write32(struct rtl8822bu_adapter *, uint16_t, uint32_t);
 static int rtl8822bu_security_hardware_clear(
 	struct rtl8822bu_adapter *, uint64_t);
+static int rtl8822bu_hardware_start_locked(struct rtl8822bu_adapter *);
+static void rtl8822bu_runtime_recover(struct rtl8822bu_adapter *);
+static int rtl8822bu_rx_generation_pause(struct rtl8822bu_adapter *,
+	uint64_t);
+static int rtl8822bu_rx_generation_resume(struct rtl8822bu_adapter *,
+	uint64_t);
+static void rtl8822bu_deauthenticate_best_effort(
+	struct rtl8822bu_adapter *, const uint8_t [6], uint64_t);
+static void rtl8822bu_sync_endpoint_result(struct rtl8822bu_adapter *,
+	struct drv_usb_endpoint *, int);
+static int rtl8822bu_bulk_transfer(struct rtl8822bu_adapter *,
+	struct drv_usb_endpoint *, void *, size_t, unsigned, size_t *);
 static int rtl8822bu_tx_report_generation_active_locked(
 	const struct rtl8822bu_adapter *, uint64_t, uint64_t, int);
 static void rtl8822bu_tx_report_reap_locked(
@@ -448,6 +512,8 @@ rtl8822bu_unicast_address(const uint8_t address[6])
 static void
 rtl8822bu_connection_state_clear_locked(struct rtl8822bu_adapter *adapter)
 {
+	unsigned index;
+
 	adapter->connection_preparing = 0U;
 	adapter->connection_prepared = 0U;
 	adapter->association_active = 0U;
@@ -455,17 +521,35 @@ rtl8822bu_connection_state_clear_locked(struct rtl8822bu_adapter *adapter)
 	adapter->security_enabled = 0U;
 	adapter->pairwise_key_installed = 0U;
 	adapter->group_key_mask = 0U;
+	adapter->group_staged_mask = 0U;
+	adapter->group_retired_mask = 0U;
+	adapter->pairwise_key_slot = RTL8822B_CAM_PAIRWISE_SLOT;
+	adapter->pairwise_staged_slot = RTL8822BU_PAIRWISE_STAGING_SLOT;
+	adapter->pairwise_retired_slot = 0U;
+	adapter->pairwise_staged_installed = 0U;
+	adapter->pairwise_retired_valid = 0U;
 	adapter->cam_uncertain_mask = 0U;
 	adapter->connection_channel = 0U;
 	adapter->association_aid = 0U;
 	adapter->connection_generation = 0U;
+	adapter->deauthentication_attempted_generation = 0U;
 	adapter->pairwise_key_generation = 0U;
+	adapter->pairwise_staged_generation = 0U;
+	adapter->pairwise_retired_generation = 0U;
 	memset(adapter->connection_bssid, 0,
 	    sizeof(adapter->connection_bssid));
 	memset(adapter->group_key_generation, 0,
 	    sizeof(adapter->group_key_generation));
-	memset(adapter->tx_reports, 0, sizeof(adapter->tx_reports));
-	adapter->tx_report_next = 0U;
+	memset(adapter->group_staged_generation, 0,
+	    sizeof(adapter->group_staged_generation));
+	memset(adapter->group_retired_generation, 0,
+	    sizeof(adapter->group_retired_generation));
+	for (index = 0U; index < RTL8822BU_GROUP_KEY_COUNT; index++) {
+		adapter->group_key_slot[index] = (uint8_t)index;
+		adapter->group_staged_slot[index] = (uint8_t)
+		    (RTL8822BU_GROUP_STAGING_SLOT_BASE + index);
+		adapter->group_retired_slot[index] = 0U;
+	}
 	adapter->tx_quiescing = 0U;
 }
 
@@ -492,11 +576,19 @@ static void
 rtl8822bu_operation_leave(struct rtl8822bu_adapter *adapter)
 {
 	unsigned long enabled = spin_lock_irqsave(&adapter->lock);
+	int schedule;
 
 	if (adapter->radio_operations_active == 0U)
 		__builtin_trap();
 	adapter->radio_operations_active--;
+	schedule = adapter->radio_operations_active == 0U &&
+	    adapter->recovery_pending && !adapter->recovery_active &&
+	    adapter->ready && !adapter->detaching && adapter->opened &&
+	    !adapter->closing &&
+	    !adapter->stopping && adapter->net_device != NULL;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (schedule)
+		net_device_schedule_poll(adapter->net_device);
 }
 
 static void
@@ -527,6 +619,22 @@ rtl8822bu_endpoint_accept(struct rtl8822bu_binding *binding,
 	descriptor = drv_usb_endpoint_descriptor(endpoint);
 	if (descriptor == NULL)
 		return 0;
+	/* RTL8822BU advertises interrupt-IN 0x87, but this minimum driver receives
+	 * all C2H/TX reports through bulk-IN 0x84 and never submits an interrupt
+	 * URB.  Validate it when present without making an unused producer part of
+	 * the binding/lifecycle contract. */
+	if (descriptor->address == RTL8822BU_INTERRUPT_IN_ADDRESS) {
+		if (binding->interrupt_in_present ||
+		    drv_usb_endpoint_type(endpoint) != DRV_USB_TRANSFER_INTERRUPT ||
+		    descriptor->attributes != 3U ||
+		    descriptor->maximum_packet_size !=
+		    RTL8822BU_INTERRUPT_MAX_PACKET_SIZE ||
+		    descriptor->interval != RTL8822BU_INTERRUPT_INTERVAL ||
+		    !drv_usb_endpoint_is_input(endpoint))
+			return 0;
+		binding->interrupt_in_present = 1U;
+		return 1;
+	}
 	slot = NULL;
 	type = DRV_USB_TRANSFER_BULK;
 	packet_size = RTL8822BU_BULK_MAX_PACKET_SIZE;
@@ -544,12 +652,6 @@ rtl8822bu_endpoint_accept(struct rtl8822bu_binding *binding,
 	case RTL8822BU_BULK_OUT_LOW_ADDRESS:
 		slot = &binding->bulk_out_low;
 		break;
-	case RTL8822BU_INTERRUPT_IN_ADDRESS:
-		slot = &binding->interrupt_in;
-		type = DRV_USB_TRANSFER_INTERRUPT;
-		packet_size = RTL8822BU_INTERRUPT_MAX_PACKET_SIZE;
-		interval = RTL8822BU_INTERRUPT_INTERVAL;
-		break;
 	default:
 		return 0;
 	}
@@ -558,8 +660,7 @@ rtl8822bu_endpoint_accept(struct rtl8822bu_binding *binding,
 	    descriptor->maximum_packet_size != packet_size ||
 	    descriptor->interval != interval)
 		return 0;
-	if ((descriptor->address == RTL8822BU_BULK_IN_ADDRESS ||
-	    descriptor->address == RTL8822BU_INTERRUPT_IN_ADDRESS) !=
+	if ((descriptor->address == RTL8822BU_BULK_IN_ADDRESS) !=
 	    drv_usb_endpoint_is_input(endpoint))
 		return 0;
 	*slot = endpoint;
@@ -574,6 +675,7 @@ rtl8822bu_binding_parse(struct drv_usb_interface *interface,
 	const struct drv_usb_interface_descriptor *interface_descriptor;
 	const struct drv_usb_host_interface *alternate;
 	struct drv_usb_device *device;
+	unsigned endpoint_count;
 	unsigned index;
 
 	if (interface == NULL || binding == NULL)
@@ -596,7 +698,8 @@ rtl8822bu_binding_parse(struct drv_usb_interface *interface,
 	    drv_usb_device_speed(device) != DRV_USB_SPEED_HIGH ||
 	    interface_descriptor->interface_number != 0U ||
 	    interface_descriptor->alternate_setting != 0U ||
-	    interface_descriptor->endpoint_count != 5U ||
+	    (interface_descriptor->endpoint_count < 4U ||
+	    interface_descriptor->endpoint_count > 5U) ||
 	    interface_descriptor->interface_class !=
 	    RTL8822BU_INTERFACE_CLASS ||
 	    interface_descriptor->interface_subclass !=
@@ -608,16 +711,16 @@ rtl8822bu_binding_parse(struct drv_usb_interface *interface,
 	    DRV_USB_HCD_CAP_CONCURRENT_URBS) == 0U)
 		return 0;
 	alternate = drv_usb_interface_active_alternate(interface);
+	endpoint_count = interface_descriptor->endpoint_count;
 	if (alternate == NULL ||
-	    drv_usb_host_interface_endpoint_count(alternate) != 5U)
+	    drv_usb_host_interface_endpoint_count(alternate) != endpoint_count)
 		return 0;
-	for (index = 0U; index < 5U; index++)
+	for (index = 0U; index < endpoint_count; index++)
 		if (!rtl8822bu_endpoint_accept(binding,
 		    drv_usb_host_interface_endpoint(alternate, index)))
 			return 0;
 	if (binding->bulk_in == NULL || binding->bulk_out_high == NULL ||
-	    binding->bulk_out_normal == NULL || binding->bulk_out_low == NULL ||
-	    binding->interrupt_in == NULL)
+	    binding->bulk_out_normal == NULL || binding->bulk_out_low == NULL)
 		return 0;
 	binding->device = device;
 	return 1;
@@ -639,9 +742,21 @@ rtl8822bu_register_transfer(struct rtl8822bu_adapter *adapter,
 	error = drv_usb_control(adapter->usb_device, request_type,
 	    RTL8822BU_VENDOR_REQUEST, reg, 0U, bytes, width,
 	    RTL8822BU_REGISTER_TIMEOUT_MS, &actual);
+	/* EP0 has implicit host-side STALL recovery in the USB core.  Reissuing
+	 * this idempotent vendor register transaction once is the endpoint-local
+	 * retry; no device/controller reset is permitted. */
+	if (error == EPIPE) {
+		actual = 0U;
+		error = drv_usb_control(adapter->usb_device, request_type,
+		    RTL8822BU_VENDOR_REQUEST, reg, 0U, bytes, width,
+		    RTL8822BU_REGISTER_TIMEOUT_MS, &actual);
+	}
+	if (error == 0 && actual != width)
+		error = EIO;
+	rtl8822bu_sync_endpoint_result(adapter, NULL, error);
 	if (error != 0)
 		return error;
-	return actual == width ? 0 : EIO;
+	return 0;
 }
 
 static int
@@ -1113,7 +1228,7 @@ rtl8822bu_firmware_reserved_page(struct rtl8822bu_firmware_transfer *transfer,
 		return error;
 	total = RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE +
 	    chunk->wire_payload_length;
-	error = drv_usb_bulk(adapter->usb_device, adapter->bulk_out_high,
+	error = rtl8822bu_bulk_transfer(adapter, adapter->bulk_out_high,
 	    transfer->wire_buffer, total,
 	    RTL8822BU_FIRMWARE_TRANSFER_TIMEOUT_MS, &actual);
 	if (error != 0)
@@ -1350,7 +1465,8 @@ rtl8822bu_ready_station(struct rtl8822bu_adapter *adapter,
 	int ready;
 
 	enabled = spin_lock_irqsave(&adapter->lock);
-	ready = adapter->ready && adapter->station != NULL;
+	ready = adapter->ready && !adapter->detaching &&
+	    adapter->station != NULL;
 	if (station != NULL)
 		*station = ready ? adapter->station : NULL;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -1371,18 +1487,111 @@ rtl8822bu_urb_status_error(enum drv_usb_urb_status status)
 	return EIO;
 }
 
+static unsigned *
+rtl8822bu_sync_error_streak_locked(struct rtl8822bu_adapter *adapter,
+	const struct drv_usb_endpoint *endpoint)
+{
+	if (endpoint == NULL)
+		return &adapter->control_error_streak;
+	if (endpoint == adapter->bulk_out_high)
+		return &adapter->tx_high_error_streak;
+	if (endpoint == adapter->bulk_out_normal)
+		return &adapter->tx_normal_error_streak;
+	return &adapter->tx_low_error_streak;
+}
+
+static void
+rtl8822bu_sync_endpoint_result(struct rtl8822bu_adapter *adapter,
+	struct drv_usb_endpoint *endpoint, int error)
+{
+	unsigned long enabled;
+	unsigned *streak;
+	int schedule = 0;
+
+	if (adapter == NULL)
+		return;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	streak = rtl8822bu_sync_error_streak_locked(adapter, endpoint);
+	if (error == 0) {
+		*streak = 0U;
+	} else if (error == ENODEV) {
+		adapter->quarantined = 1U;
+	} else {
+		if (*streak != UINT_MAX)
+			(*streak)++;
+		if (*streak >= RTL8822BU_RX_RECOVERY_LIMIT || error == EPIPE) {
+			adapter->recovery_pending = 1U;
+			adapter->recovery_error = error;
+			adapter->tx_quiescing = 1U;
+			schedule = adapter->ready && !adapter->detaching &&
+			    adapter->opened &&
+			    !adapter->closing && !adapter->stopping &&
+			    adapter->radio_operations_active == 0U &&
+			    adapter->net_device != NULL;
+		}
+	}
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (schedule)
+		net_device_schedule_poll(adapter->net_device);
+}
+
+/* Synchronous bulk STALL means that request was rejected by the endpoint and
+ * is therefore safe to retry once after a local CLEAR_FEATURE(ENDPOINT_HALT).
+ * Timeouts and short transfers are not retried: completion may be ambiguous,
+ * so the caller reports failure and the bounded endpoint streak eventually
+ * promotes the device to local firmware recovery. */
+static int
+rtl8822bu_bulk_transfer(struct rtl8822bu_adapter *adapter,
+	struct drv_usb_endpoint *endpoint, void *buffer, size_t length,
+	unsigned timeout_ms, size_t *actual)
+{
+	int error;
+	int clear_error;
+
+	if (actual != NULL)
+		*actual = 0U;
+	error = drv_usb_bulk(adapter->usb_device, endpoint, buffer, length,
+	    timeout_ms, actual);
+	if (error == EPIPE) {
+		clear_error = drv_usb_endpoint_clear_halt(endpoint);
+		if (clear_error == 0) {
+			if (actual != NULL)
+				*actual = 0U;
+			error = drv_usb_bulk(adapter->usb_device, endpoint, buffer,
+			    length, timeout_ms, actual);
+		} else {
+			error = clear_error;
+		}
+	}
+	if (error == 0 && actual != NULL && *actual != length)
+		error = EIO;
+	rtl8822bu_sync_endpoint_result(adapter, endpoint, error);
+	return error;
+}
+
 static void
 rtl8822bu_rx_completion(struct drv_usb_urb *urb, void *argument)
 {
-	struct rtl8822bu_adapter *adapter = argument;
+	struct rtl8822bu_rx_completion_context *completion = argument;
+	struct rtl8822bu_adapter *adapter;
 	unsigned long enabled;
 	int schedule = 0;
 
-	if (adapter == NULL || urb != adapter->rx_urb)
+	if (completion == NULL || completion->adapter == NULL)
+		return;
+	adapter = completion->adapter;
+	if (urb != adapter->rx_urb)
 		return;
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (adapter->ready && adapter->opened && !adapter->closing &&
-	    !adapter->stopping && !adapter->quarantined) {
+	if (completion->generation != 0U &&
+	    completion->generation == adapter->rx_inflight_generation &&
+	    adapter->ready && !adapter->detaching && adapter->opened &&
+	    !adapter->closing &&
+	    !adapter->rx_generation_barrier &&
+	    !adapter->stopping && (!adapter->recovery_pending ||
+	    adapter->recovery_active) &&
+	    !adapter->quarantined) {
+		adapter->rx_completed_generation = completion->generation;
 		adapter->rx_ready = 1U;
 		schedule = 1;
 	}
@@ -1394,24 +1603,42 @@ rtl8822bu_rx_completion(struct drv_usb_urb *urb, void *argument)
 static int
 rtl8822bu_rx_submit(struct rtl8822bu_adapter *adapter, int close_on_error)
 {
+	struct rtl8822bu_rx_completion_context *completion;
 	unsigned long enabled;
+	uint64_t generation;
 	int cancel = 0, error;
 
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (!adapter->ready || !adapter->opened || adapter->closing ||
-	    adapter->stopping || adapter->quarantined) {
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    adapter->closing ||
+	    adapter->rx_generation_barrier ||
+	    adapter->stopping || (adapter->recovery_pending &&
+	    !adapter->recovery_active) ||
+	    adapter->quarantined) {
 		spin_unlock_irqrestore(&adapter->lock, enabled);
 		return ENETDOWN;
 	}
+	generation = adapter->rx_submit_generation + 1U;
+	if (generation == 0U)
+		generation = 1U;
+	adapter->rx_submit_generation = generation;
+	adapter->rx_inflight_generation = generation;
+	adapter->rx_completed_generation = 0U;
+	completion = &adapter->rx_completion[generation & 1U];
+	completion->adapter = adapter;
+	completion->generation = generation;
 	adapter->starts_active++;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	error = drv_usb_urb_setup(adapter->rx_urb, adapter->rx_buffer,
-	    RTL8822BU_RX_BUFFER_SIZE, 0U, 0U, rtl8822bu_rx_completion, adapter);
+	    RTL8822BU_RX_BUFFER_SIZE, 0U, 0U, rtl8822bu_rx_completion,
+	    completion);
 	if (error == 0)
 		error = drv_usb_urb_submit(adapter->rx_urb);
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (error == 0 && (!adapter->ready || !adapter->opened ||
-	    adapter->closing || adapter->stopping)) {
+	if (error == 0 && (!adapter->ready || adapter->detaching ||
+	    !adapter->opened ||
+	    adapter->closing || adapter->stopping ||
+	    (adapter->recovery_pending && !adapter->recovery_active))) {
 		error = ENETDOWN;
 		cancel = 1;
 	}
@@ -1427,6 +1654,10 @@ rtl8822bu_rx_submit(struct rtl8822bu_adapter *adapter, int close_on_error)
 		__builtin_trap();
 	if (error != 0 && close_on_error)
 		adapter->opened = 0U;
+	if (error != 0 && adapter->rx_inflight_generation == generation) {
+		adapter->rx_inflight_generation = 0U;
+		adapter->rx_completed_generation = 0U;
+	}
 	adapter->starts_active--;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	return error;
@@ -1436,8 +1667,11 @@ static int
 rtl8822bu_poll_enter(struct rtl8822bu_adapter *adapter)
 {
 	unsigned long enabled = spin_lock_irqsave(&adapter->lock);
-	int admitted = adapter->ready && adapter->opened && !adapter->closing &&
-	    !adapter->stopping && !adapter->quarantined;
+	int admitted = adapter->ready && !adapter->detaching &&
+	    adapter->opened && !adapter->closing &&
+	    !adapter->rx_generation_barrier &&
+	    !adapter->stopping && !adapter->recovery_pending &&
+	    !adapter->quarantined;
 
 	if (admitted)
 		adapter->polls_active++;
@@ -1486,6 +1720,9 @@ rtl8822bu_rx_stop(struct rtl8822bu_adapter *adapter)
 	adapter->opened = 0U;
 	adapter->rx_ready = 0U;
 	adapter->rx_rearm = 0U;
+	adapter->rx_inflight_generation = 0U;
+	adapter->rx_completed_generation = 0U;
+	adapter->rx_generation_barrier = 0U;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	rtl8822bu_wait_activity(adapter);
 	status = drv_usb_urb_status(adapter->rx_urb);
@@ -1498,9 +1735,112 @@ rtl8822bu_rx_stop(struct rtl8822bu_adapter *adapter)
 	adapter->rx_rearm_active = 0U;
 	if (error != 0)
 		adapter->quarantined = 1U;
-	else
+	else {
 		adapter->closing = 0U;
+		adapter->rx_error_streak = 0U;
+	}
 	spin_unlock_irqrestore(&adapter->lock, enabled);
+	return error;
+}
+
+/* Retire the complete old RX producer generation before a CAM generation is
+ * published.  A poll/start already admitted by the old generation is never
+ * waited from inside a radio callback: the common worker receives EBUSY and
+ * retries after that bounded producer retires. */
+static int
+rtl8822bu_rx_generation_pause(struct rtl8822bu_adapter *adapter,
+	uint64_t deadline)
+{
+	enum drv_usb_urb_status status;
+	unsigned long enabled;
+	int error;
+
+	if (adapter == NULL || adapter->rx_urb == NULL)
+		return ENODEV;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    adapter->closing ||
+	    adapter->stopping || adapter->recovery_pending ||
+	    adapter->quarantined) {
+		error = adapter->ready ? ENETDOWN : ENODEV;
+	} else if (adapter->rx_generation_barrier ||
+	    adapter->starts_active != 0U || adapter->polls_active != 0U) {
+		error = EBUSY;
+	} else {
+		adapter->rx_generation_barrier = 1U;
+		adapter->rx_ready = 0U;
+		adapter->rx_rearm = 0U;
+		adapter->rx_inflight_generation = 0U;
+		adapter->rx_completed_generation = 0U;
+		error = 0;
+	}
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (error != 0)
+		return error;
+	/* Stop MAC/HCI RX and release the device-side RXDMA/USB FIFO generation
+	 * before cancelling the host URB.  Host drain alone cannot prove that an
+	 * old-key frame was not already queued inside the device. */
+	error = rtl8822b_radio_rx_generation_pause(&adapter->radio, deadline);
+	if (error != 0) {
+		enabled = spin_lock_irqsave(&adapter->lock);
+		adapter->quarantined = 1U;
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+		return error;
+	}
+	status = drv_usb_urb_status(adapter->rx_urb);
+	if (status == DRV_USB_URB_PENDING)
+		(void)drv_usb_urb_cancel(adapter->rx_urb);
+	error = drv_usb_urb_drain(adapter->rx_urb,
+	    RTL8822BU_RX_DRAIN_TIMEOUT_MS);
+	if (error != 0) {
+		enabled = spin_lock_irqsave(&adapter->lock);
+		adapter->quarantined = 1U;
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+	}
+	return error;
+}
+
+static int
+rtl8822bu_rx_generation_resume(struct rtl8822bu_adapter *adapter,
+	uint64_t deadline)
+{
+	enum drv_usb_urb_status status;
+	unsigned long enabled;
+	int error;
+
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (!adapter->rx_generation_barrier) {
+		error = EINVAL;
+	} else if (!adapter->ready || adapter->detaching ||
+	    !adapter->opened || adapter->closing ||
+	    adapter->stopping || adapter->recovery_pending ||
+	    adapter->quarantined) {
+		error = adapter->ready ? ENETDOWN : ENODEV;
+	} else {
+		adapter->rx_generation_barrier = 0U;
+		error = 0;
+	}
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (error == 0)
+		error = rtl8822bu_rx_submit(adapter, 0);
+	if (error == 0)
+		error = rtl8822b_radio_rx_generation_resume(&adapter->radio,
+		    deadline);
+	if (error != 0) {
+		enabled = spin_lock_irqsave(&adapter->lock);
+		adapter->rx_generation_barrier = 1U;
+		adapter->rx_ready = 0U;
+		adapter->rx_rearm = 0U;
+		adapter->rx_inflight_generation = 0U;
+		adapter->rx_completed_generation = 0U;
+		adapter->quarantined = 1U;
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+		status = drv_usb_urb_status(adapter->rx_urb);
+		if (status == DRV_USB_URB_PENDING)
+			(void)drv_usb_urb_cancel(adapter->rx_urb);
+		(void)drv_usb_urb_drain(adapter->rx_urb,
+		    RTL8822BU_RX_DRAIN_TIMEOUT_MS);
+	}
 	return error;
 }
 
@@ -1513,7 +1853,8 @@ rtl8822bu_rx_start(struct rtl8822bu_adapter *adapter, uint64_t generation,
 	if (adapter == NULL || channel == 0U || channel > UINT8_MAX)
 		return EINVAL;
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (!adapter->ready || adapter->opened || adapter->closing ||
+	if (!adapter->ready || adapter->detaching || adapter->opened ||
+	    adapter->closing ||
 	    adapter->stopping || adapter->quarantined) {
 		spin_unlock_irqrestore(&adapter->lock, enabled);
 		return adapter->ready ? EBUSY : ENODEV;
@@ -1537,6 +1878,46 @@ rtl8822bu_hardware_stop_locked(struct rtl8822bu_adapter *adapter)
 
 	error = rtl8822bu_rx_stop(adapter);
 	enabled = spin_lock_irqsave(&adapter->lock);
+	if (adapter->transport_absent) {
+		/* FORCE detach arrives after the USB core has permanently closed
+		 * transfers for this device generation.  A drained host producer plus
+		 * physical absence is a stronger hardware-absence proof than any
+		 * register inverse; scrub the complete local radio/CAM ledger without
+		 * touching EP0 or an OUT endpoint. */
+		if (error == 0) {
+			memset(&adapter->radio, 0, sizeof(adapter->radio));
+			adapter->radio_running = 0U;
+			adapter->firmware_running = 0U;
+			rtl8822bu_connection_state_clear_locked(adapter);
+			memset(adapter->tx_reports, 0,
+			    sizeof(adapter->tx_reports));
+			adapter->tx_report_next = 0U;
+			adapter->quarantined = 0U;
+			adapter->recovery_pending = 0U;
+			adapter->recovery_active = 0U;
+			adapter->recovery_error = 0;
+			adapter->recovery_cleanup_attempts = 0U;
+			adapter->rx_error_streak = 0U;
+			adapter->control_error_streak = 0U;
+			adapter->tx_high_error_streak = 0U;
+			adapter->tx_normal_error_streak = 0U;
+			adapter->tx_low_error_streak = 0U;
+			adapter->tx_report_error_streak = 0U;
+			adapter->tx_report_tombstone_count = 0U;
+			adapter->rx_submit_generation = 0U;
+			adapter->rx_inflight_generation = 0U;
+			adapter->rx_completed_generation = 0U;
+			memset(adapter->rx_completion, 0,
+			    sizeof(adapter->rx_completion));
+			adapter->rx_generation_barrier = 0U;
+			adapter->scan_generation = 0U;
+			adapter->scan_channel = 0U;
+		} else {
+			adapter->quarantined = 1U;
+		}
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+		return error;
+	}
 	/* opened=0 already closes every normal TX path.  Keep an explicit gate
 	 * across the queue snapshot and any best-effort CAM/BSSID cleanup so this
 	 * ordering remains local even if stop admission changes later. */
@@ -1568,8 +1949,20 @@ rtl8822bu_hardware_stop_locked(struct rtl8822bu_adapter *adapter)
 		adapter->radio_running = 0U;
 		adapter->firmware_running = 0U;
 		rtl8822bu_connection_state_clear_locked(adapter);
+		memset(adapter->tx_reports, 0, sizeof(adapter->tx_reports));
+		adapter->tx_report_next = 0U;
 		adapter->tx_quiescing = 0U;
 		adapter->quarantined = 0U;
+		adapter->recovery_pending = 0U;
+		adapter->recovery_error = 0;
+		adapter->recovery_cleanup_attempts = 0U;
+		adapter->rx_error_streak = 0U;
+		adapter->control_error_streak = 0U;
+		adapter->tx_high_error_streak = 0U;
+		adapter->tx_normal_error_streak = 0U;
+		adapter->tx_low_error_streak = 0U;
+		adapter->tx_report_error_streak = 0U;
+		adapter->tx_report_tombstone_count = 0U;
 	} else {
 		adapter->tx_quiescing = 1U;
 		adapter->quarantined = 1U;
@@ -1605,13 +1998,32 @@ static void
 rtl8822bu_tx_report_reap_locked(struct rtl8822bu_adapter *adapter,
 	uint64_t now)
 {
+	unsigned expired = 0U;
 	unsigned index;
 
 	for (index = 0U; index < RTL8822BU_TX_REPORT_COUNT; index++)
 		if (adapter->tx_reports[index].active &&
-		    now >= adapter->tx_reports[index].retire_deadline_ticks)
+		    now >= adapter->tx_reports[index].retire_deadline_ticks) {
 			memset(&adapter->tx_reports[index], 0,
 			    sizeof(adapter->tx_reports[index]));
+			adapter->tx_reports[index].tombstone = 1U;
+			expired++;
+		}
+	while (expired-- != 0U) {
+		if (adapter->tx_report_error_streak != UINT_MAX)
+			adapter->tx_report_error_streak++;
+		if (adapter->tx_report_tombstone_count != UINT_MAX)
+			adapter->tx_report_tombstone_count++;
+	}
+	if (adapter->tx_report_tombstone_count >= RTL8822BU_RX_RECOVERY_LIMIT &&
+	    adapter->ready && !adapter->detaching && adapter->opened &&
+	    !adapter->closing && !adapter->stopping && adapter->radio_running) {
+		/* USB bulk completion only proves host-to-device delivery.  Missing
+		 * bounded CCX reports are the observable firmware-stall boundary. */
+		adapter->recovery_pending = 1U;
+		adapter->recovery_error = ETIMEDOUT;
+		adapter->tx_quiescing = 1U;
+	}
 }
 
 static int
@@ -1628,6 +2040,8 @@ rtl8822bu_tx_report_reserve_locked(struct rtl8822bu_adapter *adapter,
 	 * 500-ms report window as a bounded MAC-queue/key-use drain, even when
 	 * the common transaction has a shorter deadline. */
 	rtl8822bu_tx_report_reap_locked(adapter, now);
+	if (adapter->recovery_pending)
+		return ENETDOWN;
 	retire_deadline = now > UINT64_MAX -
 	    RTL8822BU_TX_REPORT_RETIRE_TICKS ? UINT64_MAX :
 	    now + RTL8822BU_TX_REPORT_RETIRE_TICKS;
@@ -1636,7 +2050,8 @@ rtl8822bu_tx_report_reserve_locked(struct rtl8822bu_adapter *adapter,
 	for (count = 0U; count < RTL8822BU_TX_REPORT_COUNT; count++) {
 		index = (adapter->tx_report_next + count) %
 		    RTL8822BU_TX_REPORT_COUNT;
-		if (adapter->tx_reports[index].active)
+		if (adapter->tx_reports[index].active ||
+		    adapter->tx_reports[index].tombstone)
 			continue;
 		adapter->tx_reports[index].active = 1U;
 		adapter->tx_reports[index].cookie = cookie;
@@ -1649,6 +2064,9 @@ rtl8822bu_tx_report_reserve_locked(struct rtl8822bu_adapter *adapter,
 		*sequence = (uint8_t)(index * RTL8822BU_TX_REPORT_SEQUENCE_STEP);
 		return 0;
 	}
+	adapter->recovery_pending = 1U;
+	adapter->recovery_error = ENOSPC;
+	adapter->tx_quiescing = 1U;
 	return ENOSPC;
 }
 
@@ -1665,6 +2083,40 @@ rtl8822bu_tx_report_release(struct rtl8822bu_adapter *adapter,
 	enabled = spin_lock_irqsave(&adapter->lock);
 	memset(&adapter->tx_reports[index], 0,
 	    sizeof(adapter->tx_reports[index]));
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+}
+
+static void
+rtl8822bu_tx_report_abandon_attempted(struct rtl8822bu_adapter *adapter,
+	uint8_t sequence, int error)
+{
+	unsigned long enabled;
+	unsigned index = sequence / RTL8822BU_TX_REPORT_SEQUENCE_STEP;
+
+	if ((sequence & (RTL8822BU_TX_REPORT_SEQUENCE_STEP - 1U)) != 0U ||
+	    index >= RTL8822BU_TX_REPORT_COUNT)
+		return;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (adapter->tx_reports[index].active) {
+		/* Once bulk OUT was attempted, timeout/short/STALL cannot prove that
+		 * firmware did not retain the CCX sequence.  Never recycle it until a
+		 * checked hardware reset makes every late report impossible. */
+		memset(&adapter->tx_reports[index], 0,
+		    sizeof(adapter->tx_reports[index]));
+		adapter->tx_reports[index].tombstone = 1U;
+		if (adapter->tx_report_error_streak != UINT_MAX)
+			adapter->tx_report_error_streak++;
+		if (adapter->tx_report_tombstone_count != UINT_MAX)
+			adapter->tx_report_tombstone_count++;
+		if (adapter->tx_report_tombstone_count >=
+		    RTL8822BU_RX_RECOVERY_LIMIT && adapter->ready &&
+		    !adapter->detaching && adapter->opened && !adapter->closing &&
+		    !adapter->stopping && adapter->radio_running) {
+			adapter->recovery_pending = 1U;
+			adapter->recovery_error = error != 0 ? error : EIO;
+			adapter->tx_quiescing = 1U;
+		}
+	}
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 }
 
@@ -1726,6 +2178,8 @@ rtl8822bu_tx_report_complete(struct rtl8822bu_adapter *adapter,
 	}
 	memset(&adapter->tx_reports[index], 0,
 	    sizeof(adapter->tx_reports[index]));
+	if (now < pending.deadline_ticks && tx_error == 0)
+		adapter->tx_report_error_streak = 0U;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	memset(result, 0, sizeof(*result));
 	result->class = RTL8822BU_RX_TX_REPORT;
@@ -1776,6 +2230,30 @@ rtl8822bu_tx_descriptor_set_priority(uint8_t *wire, size_t wire_length,
 }
 
 static int
+rtl8822bu_tx_descriptor_request_report(uint8_t *wire, size_t wire_length,
+	uint8_t sequence)
+{
+	uint32_t word2;
+	uint32_t word6;
+	uint16_t checksum = 0U;
+	unsigned index;
+
+	if (wire == NULL || wire_length < RTL8822B_DATA_TX_DESCRIPTOR_SIZE ||
+	    (sequence & (RTL8822BU_TX_REPORT_SEQUENCE_STEP - 1U)) != 0U)
+		return EINVAL;
+	word2 = rtl8822bu_load_le32(wire + 8U) | (1U << 19);
+	word6 = rtl8822bu_load_le32(wire + 24U);
+	word6 = (word6 & ~0x0fffU) | sequence;
+	rtl8822bu_store_le32(wire + 8U, word2);
+	rtl8822bu_store_le32(wire + 24U, word6);
+	rtl8822bu_store_le16(wire + 28U, 0U);
+	for (index = 0U; index < 16U; index++)
+		checksum ^= rtl8822bu_load_le16(wire + index * 2U);
+	rtl8822bu_store_le16(wire + 28U, checksum);
+	return 0;
+}
+
+static int
 rtl8822bu_frame_transmit_private(struct rtl8822bu_adapter *adapter,
 	uint64_t generation, enum rtl8822bu_frame_class class,
 	const uint8_t *frame, size_t length, int encrypted, uint8_t key_index,
@@ -1793,6 +2271,7 @@ rtl8822bu_frame_transmit_private(struct rtl8822bu_adapter *adapter,
 	size_t actual = 0U;
 	uint8_t sequence = 0U;
 	uint8_t channel = 0U;
+	int transfer_attempted = 0;
 	int error;
 
 	if (adapter == NULL || generation == 0U || cookie == 0U || frame == NULL ||
@@ -1802,8 +2281,6 @@ rtl8822bu_frame_transmit_private(struct rtl8822bu_adapter *adapter,
 	    (encrypted != 0 && encrypted != 1) || key_index >= 4U)
 		return EINVAL;
 	now = clock_ticks();
-	if (now >= deadline)
-		return ETIMEDOUT;
 	if ((class == RTL8822BU_FRAME_MANAGEMENT && encrypted) ||
 	    (class == RTL8822BU_FRAME_DATA && !encrypted) ||
 	    (!encrypted && (key_generation != 0U || packet_number != 0U)) ||
@@ -1835,8 +2312,10 @@ rtl8822bu_frame_transmit_private(struct rtl8822bu_adapter *adapter,
 		return EINVAL;
 	}
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (!adapter->ready || !adapter->opened || adapter->closing ||
-	    adapter->stopping || adapter->quarantined ||
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    adapter->closing ||
+	    adapter->stopping || adapter->recovery_pending ||
+	    adapter->quarantined ||
 	    !adapter->radio_running) {
 		error = adapter->ready ? ENETDOWN : ENODEV;
 	} else if (adapter->tx_quiescing) {
@@ -1887,7 +2366,8 @@ rtl8822bu_frame_transmit_private(struct rtl8822bu_adapter *adapter,
 		 * the low DMA pipe; management QSEL 18 uses the high pipe. */
 		endpoint = class == RTL8822BU_FRAME_DATA ?
 		    adapter->bulk_out_low : adapter->bulk_out_high;
-		error = drv_usb_bulk(adapter->usb_device, endpoint, wire,
+		transfer_attempted = 1;
+		error = rtl8822bu_bulk_transfer(adapter, endpoint, wire,
 		    wire_length, (unsigned)milliseconds, &actual);
 		if (error == 0 && actual != wire_length)
 			error = EIO;
@@ -1895,8 +2375,13 @@ rtl8822bu_frame_transmit_private(struct rtl8822bu_adapter *adapter,
 	memset(wire, 0, capacity);
 	hal_free(wire);
 out_release:
-	if (error != 0)
-		rtl8822bu_tx_report_release(adapter, sequence);
+	if (error != 0) {
+		if (transfer_attempted)
+			rtl8822bu_tx_report_abandon_attempted(adapter, sequence,
+			    error);
+		else
+			rtl8822bu_tx_report_release(adapter, sequence);
+	}
 	rtl8822bu_operation_leave(adapter);
 	return error;
 }
@@ -2131,8 +2616,10 @@ static int
 rtl8822bu_rx_has_work(struct rtl8822bu_adapter *adapter)
 {
 	unsigned long enabled = spin_lock_irqsave(&adapter->lock);
-	int pending = adapter->ready && adapter->opened && !adapter->closing &&
-	    !adapter->stopping && !adapter->quarantined &&
+	int pending = adapter->ready && !adapter->detaching &&
+	    adapter->opened && !adapter->closing &&
+	    !adapter->stopping && !adapter->recovery_pending &&
+	    !adapter->quarantined &&
 	    (adapter->rx_ready || (adapter->rx_rearm &&
 	    !adapter->rx_rearm_active));
 
@@ -2155,8 +2642,10 @@ rtl8822bu_scan_channel_start(void *context, uint64_t generation,
 	if (clock_ticks() >= deadline)
 		return ETIMEDOUT;
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (!adapter->ready || !adapter->opened || adapter->closing ||
-	    adapter->stopping || adapter->quarantined ||
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    adapter->closing ||
+	    adapter->stopping || adapter->recovery_pending ||
+	    adapter->quarantined ||
 	    !adapter->radio_running || adapter->station == NULL) {
 		error = adapter->ready ? ENETDOWN : ENODEV;
 		spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -2192,8 +2681,10 @@ rtl8822bu_scan_channel_start(void *context, uint64_t generation,
 		return error;
 	}
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (!adapter->ready || !adapter->opened || adapter->closing ||
-	    adapter->stopping || adapter->quarantined ||
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    adapter->closing ||
+	    adapter->stopping || adapter->recovery_pending ||
+	    adapter->quarantined ||
 	    !adapter->radio_running || adapter->station != station) {
 		error = adapter->ready ? ENETDOWN : ENODEV;
 	} else {
@@ -2245,7 +2736,7 @@ rtl8822bu_security_hardware_clear(struct rtl8822bu_adapter *adapter,
 	if (cleanup_error != 0)
 		return cleanup_error;
 
-	/* Clear the complete q058 allocation, not merely the software bitmap.
+	/* Clear the complete q058/q060 allocation, not merely the software bitmap.
 	 * This makes a warm firmware/device handoff fail closed even if the prior
 	 * host disappeared between a CAM write and its software commit. */
 	cleanup_error = rtl8822b_security_clear_association(&adapter->radio,
@@ -2258,34 +2749,44 @@ rtl8822bu_security_hardware_clear(struct rtl8822bu_adapter *adapter,
 	}
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
-	for (slot = 0U; slot < RTL8822BU_GROUP_KEY_COUNT; slot++) {
+	for (slot = 0U; slot < RTL8822BU_CAM_OWNED_SLOT_COUNT; slot++) {
 		cleanup_error = rtl8822b_cam_clear(&adapter->radio, (uint8_t)slot,
 		    deadline);
 		enabled = spin_lock_irqsave(&adapter->lock);
-		if (cleanup_error == 0) {
-			adapter->cam_uncertain_mask &= (uint8_t)~(1U << slot);
-			adapter->group_key_mask &= (uint8_t)~(1U << slot);
-			adapter->group_key_generation[slot] = 0U;
-		} else {
-			adapter->cam_uncertain_mask |= (uint8_t)(1U << slot);
-		}
+		if (cleanup_error == 0)
+			adapter->cam_uncertain_mask &= ~(1U << slot);
+		else
+			adapter->cam_uncertain_mask |= 1U << slot;
 		spin_unlock_irqrestore(&adapter->lock, enabled);
 		rtl8822bu_record_cleanup_error(&error, cleanup_error);
 	}
-	cleanup_error = rtl8822b_cam_clear(&adapter->radio,
-	    RTL8822B_CAM_PAIRWISE_SLOT, deadline);
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (cleanup_error == 0) {
-		adapter->cam_uncertain_mask &= (uint8_t)~(1U <<
-		    RTL8822B_CAM_PAIRWISE_SLOT);
+	if (error == 0) {
 		adapter->pairwise_key_installed = 0U;
 		adapter->pairwise_key_generation = 0U;
-	} else {
-		adapter->cam_uncertain_mask |= (uint8_t)(1U <<
-		    RTL8822B_CAM_PAIRWISE_SLOT);
+		adapter->pairwise_staged_installed = 0U;
+		adapter->pairwise_staged_generation = 0U;
+		adapter->pairwise_retired_valid = 0U;
+		adapter->pairwise_retired_generation = 0U;
+		adapter->pairwise_key_slot = RTL8822B_CAM_PAIRWISE_SLOT;
+		adapter->pairwise_staged_slot = RTL8822BU_PAIRWISE_STAGING_SLOT;
+		adapter->group_key_mask = 0U;
+		adapter->group_staged_mask = 0U;
+		adapter->group_retired_mask = 0U;
+		memset(adapter->group_key_generation, 0,
+		    sizeof(adapter->group_key_generation));
+		memset(adapter->group_staged_generation, 0,
+		    sizeof(adapter->group_staged_generation));
+		memset(adapter->group_retired_generation, 0,
+		    sizeof(adapter->group_retired_generation));
+		for (slot = 0U; slot < RTL8822BU_GROUP_KEY_COUNT; slot++) {
+			adapter->group_key_slot[slot] = (uint8_t)slot;
+			adapter->group_staged_slot[slot] = (uint8_t)
+			    (RTL8822BU_GROUP_STAGING_SLOT_BASE + slot);
+			adapter->group_retired_slot[slot] = 0U;
+		}
 	}
 	spin_unlock_irqrestore(&adapter->lock, enabled);
-	rtl8822bu_record_cleanup_error(&error, cleanup_error);
 	return error;
 }
 
@@ -2308,8 +2809,10 @@ rtl8822bu_connect_start(void *context, uint64_t generation,
 	if (clock_ticks() >= deadline)
 		return ETIMEDOUT;
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (!adapter->ready || !adapter->opened || adapter->closing ||
-	    adapter->stopping || adapter->quarantined ||
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    adapter->closing ||
+	    adapter->stopping || adapter->recovery_pending ||
+	    adapter->quarantined ||
 	    !adapter->radio_running) {
 		error = adapter->ready ? ENETDOWN : ENODEV;
 	} else if (adapter->connection_generation != 0U) {
@@ -2363,9 +2866,11 @@ rtl8822bu_connect_start(void *context, uint64_t generation,
 	if (error == 0)
 		error = rtl8822bu_security_hardware_clear(adapter, deadline);
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (error == 0 && adapter->ready && adapter->opened &&
+	if (error == 0 && adapter->ready && !adapter->detaching &&
+	    adapter->opened &&
 	    !adapter->closing && !adapter->stopping &&
-	    !adapter->quarantined && adapter->radio_running &&
+	    !adapter->recovery_pending && !adapter->quarantined &&
+	    adapter->radio_running &&
 	    adapter->connection_generation == generation) {
 		adapter->connection_preparing = 0U;
 		adapter->connection_prepared = 1U;
@@ -2434,8 +2939,10 @@ rtl8822bu_association_set(void *context, uint64_t generation,
 	if (clock_ticks() >= deadline)
 		return ETIMEDOUT;
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (!adapter->ready || !adapter->opened || adapter->closing ||
-	    adapter->stopping || adapter->quarantined ||
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    adapter->closing ||
+	    adapter->stopping || adapter->recovery_pending ||
+	    adapter->quarantined ||
 	    !adapter->radio_running) {
 		error = adapter->ready ? ENETDOWN : ENODEV;
 	} else if (!adapter->connection_prepared ||
@@ -2491,7 +2998,8 @@ rtl8822bu_association_set(void *context, uint64_t generation,
 	    deadline);
 	enabled = spin_lock_irqsave(&adapter->lock);
 	if (error == 0 && adapter->connection_generation == generation &&
-	    adapter->connection_prepared && !adapter->quarantined) {
+	    adapter->connection_prepared && !adapter->recovery_pending &&
+	    !adapter->quarantined) {
 		adapter->association_active = 1U;
 		adapter->association_uncertain = 0U;
 		adapter->association_aid = aid;
@@ -2530,25 +3038,48 @@ rtl8822bu_association_clear(void *context, uint64_t generation,
 	uint64_t deadline)
 {
 	struct rtl8822bu_adapter *adapter = context;
+	uint8_t bssid[6];
 	unsigned long enabled;
 	uint64_t now;
+	int send_deauthentication = 0;
 	int error;
 
 	if (adapter == NULL || generation == 0U)
 		return EINVAL;
 	now = clock_ticks();
-	if (now >= deadline)
-		return ETIMEDOUT;
 	enabled = spin_lock_irqsave(&adapter->lock);
 	rtl8822bu_tx_report_reap_locked(adapter, now);
-	if (!adapter->ready || !adapter->opened || adapter->closing ||
+	if (adapter->connection_generation != generation) {
+		error = ESTALE;
+	} else if (adapter->transport_absent) {
+		/* Physical absence proves the device-side association no longer
+		 * exists.  Preserve common inverse ordering: keys must first retire
+		 * their exact local ledgers, then association identity can disappear. */
+		if (adapter->pairwise_key_installed ||
+		    adapter->pairwise_staged_installed ||
+		    adapter->pairwise_staged_generation != 0U ||
+		    adapter->group_key_mask != 0U ||
+		    adapter->group_staged_mask != 0U ||
+		    adapter->cam_uncertain_mask != 0U) {
+			error = EBUSY;
+		} else {
+			adapter->association_active = 0U;
+			adapter->association_uncertain = 0U;
+			adapter->association_aid = 0U;
+			error = 0;
+		}
+	} else if (now >= deadline) {
+		error = ETIMEDOUT;
+	} else if (!adapter->ready || !adapter->opened ||
+	    adapter->closing ||
 	    adapter->stopping ||
 	    !adapter->radio_running) {
 		error = adapter->ready ? ENETDOWN : ENODEV;
-	} else if (adapter->connection_generation != generation) {
-		error = ESTALE;
 	} else if (adapter->pairwise_key_installed ||
+	    adapter->pairwise_staged_installed ||
+	    adapter->pairwise_staged_generation != 0U ||
 	    adapter->group_key_mask != 0U ||
+	    adapter->group_staged_mask != 0U ||
 	    adapter->cam_uncertain_mask != 0U) {
 		adapter->tx_quiescing = 1U;
 		error = EBUSY;
@@ -2565,6 +3096,12 @@ rtl8822bu_association_clear(void *context, uint64_t generation,
 	} else {
 		adapter->radio_operations_active++;
 		adapter->tx_quiescing = 1U;
+		if (adapter->association_active &&
+		    adapter->deauthentication_attempted_generation != generation) {
+			adapter->deauthentication_attempted_generation = generation;
+			memcpy(bssid, adapter->connection_bssid, sizeof(bssid));
+			send_deauthentication = 1;
+		}
 		error = EINPROGRESS;
 	}
 	spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -2582,6 +3119,12 @@ rtl8822bu_association_clear(void *context, uint64_t generation,
 		rtl8822bu_operation_leave(adapter);
 		return error;
 	}
+	/* The common teardown order retires keys before association state and calls
+	 * disconnect last.  Send the optional class-2 deauthentication while the
+	 * association identity is still retained.  Transport failure is deliberately
+	 * ignored and can never delay the checked local state inverse below. */
+	if (send_deauthentication)
+		rtl8822bu_deauthenticate_best_effort(adapter, bssid, deadline);
 	error = rtl8822b_security_clear_association(&adapter->radio, deadline);
 	enabled = spin_lock_irqsave(&adapter->lock);
 	if (error == 0) {
@@ -2613,7 +3156,10 @@ rtl8822bu_key_install_checked(struct rtl8822bu_adapter *adapter,
 	const uint8_t *cam_address;
 	unsigned long enabled;
 	uint64_t cleanup_deadline;
+	uint64_t active_generation;
 	uint8_t slot;
+	int installed;
+	int replacement;
 	int error;
 	int rollback_error;
 
@@ -2627,17 +3173,17 @@ rtl8822bu_key_install_checked(struct rtl8822bu_adapter *adapter,
 	if (role == RTL8822BU_KEY_PAIRWISE) {
 		if (key_index != 0U)
 			return EINVAL;
-		slot = RTL8822B_CAM_PAIRWISE_SLOT;
 		cam_address = address;
 	} else {
 		if ((address[0] & 1U) == 0U)
 			return EINVAL;
-		slot = key_index;
 		cam_address = broadcast;
 	}
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (!adapter->ready || !adapter->opened || adapter->closing ||
-	    adapter->stopping || adapter->quarantined ||
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    adapter->closing ||
+	    adapter->stopping || adapter->recovery_pending ||
+	    adapter->quarantined ||
 	    !adapter->radio_running) {
 		error = adapter->ready ? ENETDOWN : ENODEV;
 	} else if (role == RTL8822BU_KEY_PAIRWISE &&
@@ -2647,46 +3193,104 @@ rtl8822bu_key_install_checked(struct rtl8822bu_adapter *adapter,
 	    !adapter->association_active ||
 	    adapter->connection_generation != generation) {
 		error = ESTALE;
-	} else if ((role == RTL8822BU_KEY_PAIRWISE &&
-	    (adapter->pairwise_key_installed ||
-	    (adapter->cam_uncertain_mask & (1U << slot)) != 0U)) ||
-	    (role == RTL8822BU_KEY_GROUP &&
-	    ((adapter->group_key_mask & (1U << key_index)) != 0U ||
-	    (adapter->cam_uncertain_mask & (1U << slot)) != 0U))) {
-		/* Never rewrite a live CAM entry.  The common state machine treats
-		 * EALREADY as a replay/reinstallation defect, even for equal bytes. */
-		error = EALREADY;
-	} else if ((role == RTL8822BU_KEY_PAIRWISE ?
-	    adapter->pairwise_key_generation :
-	    adapter->group_key_generation[key_index]) != 0U) {
-		/* A key generation is tentatively retained while a queue-drain retry
-		 * owns the closed admission gate. */
-		if (adapter->tx_quiescing &&
-		    (role == RTL8822BU_KEY_PAIRWISE ?
-		    adapter->pairwise_key_generation :
-		    adapter->group_key_generation[key_index]) == key_generation) {
-			if (adapter->radio_operations_active != 0U) {
-				error = EBUSY;
-			} else {
-				adapter->radio_operations_active++;
-				error = EINPROGRESS;
-			}
-		} else {
-			error = EALREADY;
-		}
-	} else if (adapter->tx_quiescing) {
-		error = EBUSY;
 	} else {
-		adapter->tx_quiescing = 1U;
-		if (role == RTL8822BU_KEY_PAIRWISE)
-			adapter->pairwise_key_generation = key_generation;
-		else
-			adapter->group_key_generation[key_index] = key_generation;
-		if (adapter->radio_operations_active != 0U) {
-			error = EBUSY;
+		installed = role == RTL8822BU_KEY_PAIRWISE ?
+		    adapter->pairwise_key_installed : adapter->group_key_mask != 0U;
+		active_generation = role == RTL8822BU_KEY_PAIRWISE ?
+		    adapter->pairwise_key_generation :
+		    adapter->group_key_generation[key_index];
+		replacement = installed;
+		if (role == RTL8822BU_KEY_PAIRWISE) {
+			if (adapter->pairwise_staged_generation != 0U) {
+				if (adapter->pairwise_staged_generation != key_generation)
+					error = EBUSY;
+				else if (adapter->pairwise_staged_installed)
+					error = EALREADY;
+				else
+					error = EINPROGRESS;
+			} else if (installed) {
+				if (active_generation == key_generation) {
+					error = EALREADY;
+				} else if (adapter->pairwise_retired_valid) {
+					error = EBUSY;
+				} else {
+					adapter->pairwise_staged_slot =
+					    adapter->pairwise_key_slot ==
+					    RTL8822B_CAM_PAIRWISE_SLOT ?
+					    RTL8822BU_PAIRWISE_STAGING_SLOT :
+					    RTL8822B_CAM_PAIRWISE_SLOT;
+					adapter->pairwise_staged_generation =
+					    key_generation;
+					error = EINPROGRESS;
+				}
+			} else if (active_generation == 0U) {
+				adapter->pairwise_key_slot =
+				    RTL8822B_CAM_PAIRWISE_SLOT;
+				adapter->pairwise_key_generation = key_generation;
+				error = EINPROGRESS;
+			} else {
+				error = active_generation == key_generation &&
+				    adapter->tx_quiescing ? EINPROGRESS : EALREADY;
+			}
+			slot = replacement ? adapter->pairwise_staged_slot :
+			    adapter->pairwise_key_slot;
 		} else {
+			if (adapter->group_staged_generation[key_index] != 0U) {
+				if (adapter->group_staged_generation[key_index] !=
+				    key_generation)
+					error = EBUSY;
+				else if ((adapter->group_staged_mask &
+				    (1U << key_index)) != 0U)
+					error = EALREADY;
+				else
+					error = EINPROGRESS;
+			} else if (replacement) {
+				if ((adapter->group_key_mask & (1U << key_index)) != 0U &&
+				    active_generation == key_generation) {
+					error = EALREADY;
+				} else if ((adapter->group_retired_mask &
+				    (1U << key_index)) != 0U) {
+					error = EBUSY;
+				} else {
+					adapter->group_staged_slot[key_index] =
+					    (adapter->group_key_mask &
+					    (1U << key_index)) != 0U ?
+					    (adapter->group_key_slot[key_index] == key_index ?
+					    (uint8_t)(RTL8822BU_GROUP_STAGING_SLOT_BASE +
+					    key_index) : key_index) : key_index;
+					adapter->group_staged_generation[key_index] =
+					    key_generation;
+					error = EINPROGRESS;
+				}
+			} else if (active_generation == 0U) {
+				adapter->group_key_slot[key_index] = key_index;
+				adapter->group_key_generation[key_index] = key_generation;
+				error = EINPROGRESS;
+			} else {
+				error = active_generation == key_generation &&
+				    adapter->tx_quiescing ? EINPROGRESS : EALREADY;
+			}
+			slot = replacement ? adapter->group_staged_slot[key_index] :
+			    adapter->group_key_slot[key_index];
+		}
+		if (error == EINPROGRESS &&
+		    (adapter->cam_uncertain_mask & (1U << slot)) != 0U) {
+			error = EIO;
+			adapter->quarantined = 1U;
+		}
+		if (error == EINPROGRESS && replacement &&
+		    role == RTL8822BU_KEY_PAIRWISE &&
+		    rtl8822bu_tx_report_generation_active_locked(adapter,
+		    generation, active_generation, 1)) {
+			adapter->tx_quiescing = 1U;
+			error = EBUSY;
+		} else if (error == EINPROGRESS &&
+		    adapter->radio_operations_active != 0U) {
+			adapter->tx_quiescing = 1U;
+			error = EBUSY;
+		} else if (error == EINPROGRESS) {
+			adapter->tx_quiescing = 1U;
 			adapter->radio_operations_active++;
-			error = EINPROGRESS;
 		}
 	}
 	spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -2696,7 +3300,7 @@ rtl8822bu_key_install_checked(struct rtl8822bu_adapter *adapter,
 	if (error != 0) {
 		enabled = spin_lock_irqsave(&adapter->lock);
 		if (error != EBUSY) {
-			adapter->cam_uncertain_mask |= (uint8_t)(1U << slot);
+			adapter->cam_uncertain_mask |= 1U << slot;
 			adapter->quarantined = 1U;
 		}
 		rtl8822bu_tx_quiesce_result_locked(adapter, error, 0);
@@ -2705,22 +3309,35 @@ rtl8822bu_key_install_checked(struct rtl8822bu_adapter *adapter,
 		return error;
 	}
 	enabled = spin_lock_irqsave(&adapter->lock);
-	adapter->cam_uncertain_mask |= (uint8_t)(1U << slot);
+	adapter->cam_uncertain_mask |= 1U << slot;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
-	error = rtl8822b_cam_program_ccmp(&adapter->radio, slot, key_index,
-	    role == RTL8822BU_KEY_GROUP, cam_address, key, deadline);
+	if (replacement)
+		error = rtl8822b_cam_stage_ccmp(&adapter->radio, slot, key_index,
+		    role == RTL8822BU_KEY_GROUP, cam_address, key, deadline);
+	else
+		error = rtl8822b_cam_program_ccmp(&adapter->radio, slot, key_index,
+		    role == RTL8822BU_KEY_GROUP, cam_address, key, deadline);
 	if (error == 0) {
 		enabled = spin_lock_irqsave(&adapter->lock);
 		if (adapter->connection_generation != generation ||
-		    !adapter->association_active || adapter->quarantined) {
+		    !adapter->association_active || adapter->recovery_pending ||
+		    adapter->quarantined) {
 			error = ESTALE;
 		} else if (role == RTL8822BU_KEY_PAIRWISE) {
-			adapter->pairwise_key_installed = 1U;
-			adapter->cam_uncertain_mask &= (uint8_t)~(1U << slot);
+			if (replacement)
+				adapter->pairwise_staged_installed = 1U;
+			else
+				adapter->pairwise_key_installed = 1U;
+			adapter->cam_uncertain_mask &= ~(1U << slot);
 			adapter->tx_quiescing = 0U;
 		} else {
-			adapter->group_key_mask |= (uint8_t)(1U << key_index);
-			adapter->cam_uncertain_mask &= (uint8_t)~(1U << slot);
+			if (replacement)
+				adapter->group_staged_mask |=
+				    (uint8_t)(1U << key_index);
+			else
+				adapter->group_key_mask |=
+				    (uint8_t)(1U << key_index);
+			adapter->cam_uncertain_mask &= ~(1U << slot);
 			adapter->tx_quiescing = 0U;
 		}
 		spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -2733,18 +3350,29 @@ rtl8822bu_key_install_checked(struct rtl8822bu_adapter *adapter,
 			    cleanup_deadline);
 		enabled = spin_lock_irqsave(&adapter->lock);
 		if (rollback_error == 0) {
-			adapter->cam_uncertain_mask &= (uint8_t)~(1U << slot);
+			adapter->cam_uncertain_mask &= ~(1U << slot);
 			if (role == RTL8822BU_KEY_PAIRWISE) {
-				adapter->pairwise_key_installed = 0U;
-				adapter->pairwise_key_generation = 0U;
+				if (replacement) {
+					adapter->pairwise_staged_installed = 0U;
+					adapter->pairwise_staged_generation = 0U;
+				} else {
+					adapter->pairwise_key_installed = 0U;
+					adapter->pairwise_key_generation = 0U;
+				}
 			} else {
-				adapter->group_key_mask &=
-				    (uint8_t)~(1U << key_index);
-				adapter->group_key_generation[key_index] = 0U;
+				if (replacement) {
+					adapter->group_staged_mask &=
+					    (uint8_t)~(1U << key_index);
+					adapter->group_staged_generation[key_index] = 0U;
+				} else {
+					adapter->group_key_mask &=
+					    (uint8_t)~(1U << key_index);
+					adapter->group_key_generation[key_index] = 0U;
+				}
 			}
 			adapter->tx_quiescing = 0U;
 		} else {
-			adapter->cam_uncertain_mask |= (uint8_t)(1U << slot);
+			adapter->cam_uncertain_mask |= 1U << slot;
 			adapter->tx_quiescing = 1U;
 			adapter->quarantined = 1U;
 		}
@@ -2756,15 +3384,288 @@ rtl8822bu_key_install_checked(struct rtl8822bu_adapter *adapter,
 }
 
 static int
+rtl8822bu_keys_activate_checked(struct rtl8822bu_adapter *adapter,
+	uint64_t generation, uint64_t pairwise_generation,
+	uint64_t group_generation, uint64_t deadline)
+{
+	static const uint8_t broadcast[6] = {
+		0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU
+	};
+	unsigned long enabled;
+	uint64_t now;
+	uint64_t old_pairwise_generation = 0U;
+	uint64_t old_group_generation = 0U;
+	uint8_t old_pairwise_slot = 0U;
+	uint8_t new_pairwise_slot = 0U;
+	uint8_t old_group_slot = 0U;
+	uint8_t new_group_slot = 0U;
+	int pairwise_staged = 0;
+	int group_staged_index = -1;
+	int group_active_index = -1;
+	int group_collision = 0;
+	int rx_paused = 0;
+	int new_pairwise_cleared = 0;
+	int new_group_cleared = 0;
+	int index;
+	int error;
+	int cleanup_error;
+
+	if (adapter == NULL || generation == 0U ||
+	    pairwise_generation == 0U || group_generation == 0U)
+		return EINVAL;
+	now = clock_ticks();
+	if (now >= deadline)
+		return ETIMEDOUT;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	rtl8822bu_tx_report_reap_locked(adapter, now);
+	for (index = 0; index < (int)RTL8822BU_GROUP_KEY_COUNT; index++) {
+		if ((adapter->group_staged_mask & (1U << index)) != 0U &&
+		    adapter->group_staged_generation[index] == group_generation) {
+			if (group_staged_index >= 0)
+				group_staged_index = -2;
+			else
+				group_staged_index = index;
+		}
+		if ((adapter->group_key_mask & (1U << index)) != 0U &&
+		    adapter->group_key_generation[index] == group_generation) {
+			if (group_active_index >= 0)
+				group_active_index = -2;
+			else
+				group_active_index = index;
+		}
+	}
+	pairwise_staged = adapter->pairwise_staged_installed &&
+	    adapter->pairwise_staged_generation == pairwise_generation;
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    adapter->closing ||
+	    adapter->stopping || adapter->recovery_pending ||
+	    adapter->quarantined || !adapter->radio_running) {
+		error = adapter->ready ? ENETDOWN : ENODEV;
+	} else if (!adapter->connection_prepared ||
+	    !adapter->association_active ||
+	    adapter->connection_generation != generation) {
+		error = ESTALE;
+	} else if (group_staged_index == -2 || group_active_index == -2) {
+		error = EIO;
+	} else if (!pairwise_staged &&
+	    (!adapter->pairwise_key_installed ||
+	    adapter->pairwise_key_generation != pairwise_generation)) {
+		error = ESTALE;
+	} else if (group_staged_index < 0 && group_active_index < 0) {
+		error = ESTALE;
+	} else if (!pairwise_staged && group_staged_index < 0) {
+		/* The common layer may repeat activation after the hardware switch but
+		 * before both old-generation tombstones have been retired. */
+		error = 0;
+	} else if (pairwise_staged && adapter->pairwise_retired_valid) {
+		error = EBUSY;
+	} else if (group_staged_index >= 0 &&
+	    (adapter->group_retired_mask &
+	    (1U << group_staged_index)) != 0U) {
+		error = EBUSY;
+	} else {
+		if (pairwise_staged) {
+			old_pairwise_slot = adapter->pairwise_key_slot;
+			old_pairwise_generation =
+			    adapter->pairwise_key_generation;
+			new_pairwise_slot = adapter->pairwise_staged_slot;
+		}
+		if (group_staged_index >= 0) {
+			new_group_slot =
+			    adapter->group_staged_slot[group_staged_index];
+			if ((adapter->group_key_mask &
+			    (1U << group_staged_index)) != 0U) {
+				group_collision = 1;
+				old_group_slot =
+				    adapter->group_key_slot[group_staged_index];
+				old_group_generation = adapter->
+				    group_key_generation[group_staged_index];
+			}
+		}
+		adapter->tx_quiescing = 1U;
+		if (pairwise_staged &&
+		    rtl8822bu_tx_report_generation_active_locked(adapter,
+		    generation, old_pairwise_generation, 1)) {
+			error = EBUSY;
+		} else if (adapter->radio_operations_active != 0U) {
+			error = EBUSY;
+		} else {
+			adapter->radio_operations_active++;
+			error = EINPROGRESS;
+		}
+	}
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (error != EINPROGRESS)
+		return error;
+
+	error = rtl8822b_tx_queues_empty(&adapter->radio, deadline);
+	if (error != 0)
+		goto out_error;
+	error = rtl8822bu_rx_generation_pause(adapter, deadline);
+	if (error != 0)
+		goto out_error;
+	rx_paused = 1;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (pairwise_staged) {
+		adapter->cam_uncertain_mask |= 1U << old_pairwise_slot;
+		adapter->cam_uncertain_mask |= 1U << new_pairwise_slot;
+	}
+	if (group_staged_index >= 0) {
+		adapter->cam_uncertain_mask |= 1U << new_group_slot;
+		if (group_collision)
+			adapter->cam_uncertain_mask |= 1U << old_group_slot;
+	}
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+
+	/* A matching old entry is invalidated before its staged replacement can
+	 * become live.  The interval between those writes is intentionally
+	 * fail-closed; no CAM lookup-order assumption is made. */
+	if (pairwise_staged)
+		error = rtl8822b_cam_clear(&adapter->radio, old_pairwise_slot,
+		    deadline);
+	if (error == 0 && group_collision)
+		error = rtl8822b_cam_clear(&adapter->radio, old_group_slot,
+		    deadline);
+	if (error == 0 && pairwise_staged)
+		error = rtl8822b_cam_activate_ccmp(&adapter->radio,
+		    new_pairwise_slot, 0U, 0, adapter->connection_bssid, deadline);
+	if (error == 0 && group_staged_index >= 0)
+		error = rtl8822b_cam_activate_ccmp(&adapter->radio, new_group_slot,
+		    (uint8_t)group_staged_index, 1, broadcast, deadline);
+	if (error != 0)
+		goto rollback_new;
+
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    adapter->closing ||
+	    adapter->stopping || adapter->recovery_pending ||
+	    adapter->quarantined || !adapter->association_active ||
+	    adapter->connection_generation != generation ||
+	    (pairwise_staged && (!adapter->pairwise_staged_installed ||
+	    adapter->pairwise_staged_generation != pairwise_generation)) ||
+	    (group_staged_index >= 0 &&
+	    ((adapter->group_staged_mask &
+	    (1U << group_staged_index)) == 0U ||
+	    adapter->group_staged_generation[group_staged_index] !=
+	    group_generation))) {
+		error = ESTALE;
+		adapter->quarantined = 1U;
+		adapter->tx_quiescing = 1U;
+	} else {
+		if (pairwise_staged) {
+			adapter->pairwise_retired_valid = 1U;
+			adapter->pairwise_retired_slot = old_pairwise_slot;
+			adapter->pairwise_retired_generation =
+			    old_pairwise_generation;
+			adapter->pairwise_key_slot = new_pairwise_slot;
+			adapter->pairwise_key_generation = pairwise_generation;
+			adapter->pairwise_key_installed = 1U;
+			adapter->pairwise_staged_installed = 0U;
+			adapter->pairwise_staged_generation = 0U;
+			adapter->pairwise_staged_slot = old_pairwise_slot;
+			adapter->cam_uncertain_mask &= ~(1U << old_pairwise_slot);
+			adapter->cam_uncertain_mask &= ~(1U << new_pairwise_slot);
+		}
+		if (group_staged_index >= 0) {
+			if (group_collision) {
+				adapter->group_retired_mask |=
+				    (uint8_t)(1U << group_staged_index);
+				adapter->group_retired_slot[group_staged_index] =
+				    old_group_slot;
+				adapter->group_retired_generation[group_staged_index] =
+				    old_group_generation;
+				adapter->cam_uncertain_mask &= ~(1U << old_group_slot);
+			}
+			adapter->group_key_mask |=
+			    (uint8_t)(1U << group_staged_index);
+			adapter->group_key_slot[group_staged_index] = new_group_slot;
+			adapter->group_key_generation[group_staged_index] =
+			    group_generation;
+			adapter->group_staged_mask &=
+			    (uint8_t)~(1U << group_staged_index);
+			adapter->group_staged_generation[group_staged_index] = 0U;
+			adapter->group_staged_slot[group_staged_index] =
+			    group_collision ? old_group_slot :
+			    (uint8_t)(RTL8822BU_GROUP_STAGING_SLOT_BASE +
+			    group_staged_index);
+			adapter->cam_uncertain_mask &= ~(1U << new_group_slot);
+		}
+		/* RX is still cancelled here.  Publish the driver generations first,
+		 * then arm a fresh URB before reopening TX admission. */
+		adapter->tx_quiescing = 1U;
+	}
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (error == 0) {
+		error = rtl8822bu_rx_generation_resume(adapter, deadline);
+		if (error == 0) {
+			enabled = spin_lock_irqsave(&adapter->lock);
+			adapter->tx_quiescing = 0U;
+			spin_unlock_irqrestore(&adapter->lock, enabled);
+		}
+		rtl8822bu_operation_leave(adapter);
+		return error;
+	}
+
+rollback_new:
+	/* Never try to resurrect an old generation without retaining its key.
+	 * Instead invalidate every possibly published replacement and quarantine
+	 * the connection until the checked disconnect path clears all CAM slots. */
+	if (pairwise_staged) {
+		cleanup_error = rtl8822b_cam_clear(&adapter->radio,
+		    new_pairwise_slot, deadline);
+		new_pairwise_cleared = cleanup_error == 0;
+		rtl8822bu_record_cleanup_error(&error, cleanup_error);
+	}
+	if (group_staged_index >= 0) {
+		cleanup_error = rtl8822b_cam_clear(&adapter->radio,
+		    new_group_slot, deadline);
+		new_group_cleared = cleanup_error == 0;
+		rtl8822bu_record_cleanup_error(&error, cleanup_error);
+	}
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (new_pairwise_cleared)
+		adapter->cam_uncertain_mask &= ~(1U << new_pairwise_slot);
+	if (new_group_cleared)
+		adapter->cam_uncertain_mask &= ~(1U << new_group_slot);
+	/* Once device RX has been paused, an activation failure remains fail-closed.
+	 * Checked key/association inverses are still callable while quarantined;
+	 * only the terminal hardware-stop transaction clears this barrier. */
+	if (rx_paused)
+		adapter->rx_generation_barrier = 1U;
+	adapter->tx_quiescing = 1U;
+	adapter->quarantined = 1U;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	rtl8822bu_operation_leave(adapter);
+	return error;
+
+out_error:
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (error != EBUSY) {
+		adapter->quarantined = 1U;
+		adapter->tx_quiescing = 1U;
+	}
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	rtl8822bu_operation_leave(adapter);
+	return error;
+}
+
+static int
 rtl8822bu_key_delete_checked(struct rtl8822bu_adapter *adapter,
 	uint64_t generation, enum rtl8822bu_key_role role, uint8_t key_index,
 	uint64_t key_generation, uint64_t deadline)
 {
+	enum rtl8822bu_key_location {
+		RTL8822BU_KEY_ABSENT,
+		RTL8822BU_KEY_ACTIVE,
+		RTL8822BU_KEY_STAGED,
+		RTL8822BU_KEY_RETIRED
+	};
 	unsigned long enabled;
-	uint64_t installed_generation;
 	uint64_t now;
-	uint8_t slot;
-	int installed;
+	uint8_t slot = 0U;
+	enum rtl8822bu_key_location location = RTL8822BU_KEY_ABSENT;
+	int present = 0;
+	int known_generation = 0;
 	int uncertain;
 	int error;
 
@@ -2773,32 +3674,132 @@ rtl8822bu_key_delete_checked(struct rtl8822bu_adapter *adapter,
 	    (role != RTL8822BU_KEY_PAIRWISE && role != RTL8822BU_KEY_GROUP))
 		return EINVAL;
 	now = clock_ticks();
-	if (now >= deadline)
-		return ETIMEDOUT;
 	if (role == RTL8822BU_KEY_PAIRWISE && key_index != 0U)
 		return EINVAL;
-	slot = role == RTL8822BU_KEY_PAIRWISE ?
-	    RTL8822B_CAM_PAIRWISE_SLOT : key_index;
 	enabled = spin_lock_irqsave(&adapter->lock);
 	rtl8822bu_tx_report_reap_locked(adapter, now);
-	installed = role == RTL8822BU_KEY_PAIRWISE ?
-	    adapter->pairwise_key_installed :
-	    (adapter->group_key_mask & (1U << key_index)) != 0U;
-	installed_generation = role == RTL8822BU_KEY_PAIRWISE ?
-	    adapter->pairwise_key_generation :
-	    adapter->group_key_generation[key_index];
-	uncertain = (adapter->cam_uncertain_mask & (1U << slot)) != 0U;
-	if (!adapter->ready || !adapter->opened || adapter->closing ||
+	if (role == RTL8822BU_KEY_PAIRWISE) {
+		known_generation = adapter->pairwise_key_generation != 0U ||
+		    adapter->pairwise_staged_generation != 0U ||
+		    adapter->pairwise_retired_valid;
+		if (adapter->pairwise_key_generation == key_generation) {
+			location = RTL8822BU_KEY_ACTIVE;
+			slot = adapter->pairwise_key_slot;
+			present = adapter->pairwise_key_installed;
+		} else if (adapter->pairwise_staged_generation ==
+		    key_generation) {
+			location = RTL8822BU_KEY_STAGED;
+			slot = adapter->pairwise_staged_slot;
+			present = adapter->pairwise_staged_installed;
+		} else if (adapter->pairwise_retired_valid &&
+		    adapter->pairwise_retired_generation == key_generation) {
+			location = RTL8822BU_KEY_RETIRED;
+			slot = adapter->pairwise_retired_slot;
+		}
+	} else {
+		known_generation = adapter->group_key_generation[key_index] != 0U ||
+		    adapter->group_staged_generation[key_index] != 0U ||
+		    (adapter->group_retired_mask & (1U << key_index)) != 0U;
+		if (adapter->group_key_generation[key_index] == key_generation) {
+			location = RTL8822BU_KEY_ACTIVE;
+			slot = adapter->group_key_slot[key_index];
+			present = (adapter->group_key_mask &
+			    (1U << key_index)) != 0U;
+		} else if (adapter->group_staged_generation[key_index] ==
+		    key_generation) {
+			location = RTL8822BU_KEY_STAGED;
+			slot = adapter->group_staged_slot[key_index];
+			present = (adapter->group_staged_mask &
+			    (1U << key_index)) != 0U;
+		} else if ((adapter->group_retired_mask &
+		    (1U << key_index)) != 0U &&
+		    adapter->group_retired_generation[key_index] ==
+		    key_generation) {
+			location = RTL8822BU_KEY_RETIRED;
+			slot = adapter->group_retired_slot[key_index];
+		}
+	}
+	uncertain = location != RTL8822BU_KEY_ABSENT &&
+	    (adapter->cam_uncertain_mask & (1U << slot)) != 0U;
+	if (adapter->connection_generation != generation) {
+		error = ESTALE;
+	} else if (adapter->transport_absent) {
+		/* A FORCE detach is itself proof that every hardware CAM entry is
+		 * absent.  Retire only the exact software ledger requested by the
+		 * common engine; do not issue register I/O after the USB submit gate
+		 * has closed. */
+		if (location == RTL8822BU_KEY_ABSENT) {
+			error = known_generation ? ESTALE : 0;
+		} else {
+			adapter->cam_uncertain_mask &= ~(1U << slot);
+			if (role == RTL8822BU_KEY_PAIRWISE) {
+				if (location == RTL8822BU_KEY_ACTIVE) {
+					adapter->pairwise_key_installed = 0U;
+					adapter->pairwise_key_generation = 0U;
+				} else if (location == RTL8822BU_KEY_STAGED) {
+					adapter->pairwise_staged_installed = 0U;
+					adapter->pairwise_staged_generation = 0U;
+				} else {
+					adapter->pairwise_retired_valid = 0U;
+					adapter->pairwise_retired_generation = 0U;
+					adapter->pairwise_retired_slot = 0U;
+				}
+			} else if (location == RTL8822BU_KEY_ACTIVE) {
+				adapter->group_key_mask &=
+				    (uint8_t)~(1U << key_index);
+				adapter->group_key_generation[key_index] = 0U;
+			} else if (location == RTL8822BU_KEY_STAGED) {
+				adapter->group_staged_mask &=
+				    (uint8_t)~(1U << key_index);
+				adapter->group_staged_generation[key_index] = 0U;
+			} else {
+				adapter->group_retired_mask &=
+				    (uint8_t)~(1U << key_index);
+				adapter->group_retired_generation[key_index] = 0U;
+				adapter->group_retired_slot[key_index] = 0U;
+			}
+			error = 0;
+		}
+	} else if (now >= deadline) {
+		error = ETIMEDOUT;
+	} else if (!adapter->ready || !adapter->opened ||
+	    adapter->closing ||
 	    adapter->stopping ||
 	    !adapter->radio_running) {
 		error = adapter->ready ? ENETDOWN : ENODEV;
-	} else if (adapter->connection_generation != generation) {
-		error = ESTALE;
-	} else if (!installed && !uncertain) {
+	} else if (location == RTL8822BU_KEY_ABSENT) {
+		error = known_generation ? ESTALE : 0;
+	} else if (location == RTL8822BU_KEY_RETIRED) {
+		/* Activation already cleared the colliding hardware entry.  Retain a
+		 * software tombstone until the common layer retires the old generation,
+		 * then make that exact inverse idempotent without touching the new key. */
+		if (role == RTL8822BU_KEY_PAIRWISE) {
+			adapter->pairwise_retired_valid = 0U;
+			adapter->pairwise_retired_generation = 0U;
+			adapter->pairwise_retired_slot = 0U;
+		} else {
+			adapter->group_retired_mask &=
+			    (uint8_t)~(1U << key_index);
+			adapter->group_retired_generation[key_index] = 0U;
+			adapter->group_retired_slot[key_index] = 0U;
+		}
 		error = 0;
-	} else if (installed_generation != key_generation) {
-		error = ESTALE;
-	} else if (rtl8822bu_tx_report_generation_active_locked(adapter,
+	} else if (!present && !uncertain) {
+		/* A queue/operation retry may reserve a generation before any CAM
+		 * write.  Cancellation must retire that reservation as well. */
+		if (role == RTL8822BU_KEY_PAIRWISE) {
+			if (location == RTL8822BU_KEY_ACTIVE)
+				adapter->pairwise_key_generation = 0U;
+			else
+				adapter->pairwise_staged_generation = 0U;
+		} else if (location == RTL8822BU_KEY_ACTIVE) {
+			adapter->group_key_generation[key_index] = 0U;
+		} else {
+			adapter->group_staged_generation[key_index] = 0U;
+		}
+		error = 0;
+	} else if (location == RTL8822BU_KEY_ACTIVE &&
+	    rtl8822bu_tx_report_generation_active_locked(adapter,
 	    generation, key_generation, 1)) {
 		adapter->tx_quiescing = 1U;
 		error = EBUSY;
@@ -2817,7 +3818,7 @@ rtl8822bu_key_delete_checked(struct rtl8822bu_adapter *adapter,
 	if (error != 0) {
 		enabled = spin_lock_irqsave(&adapter->lock);
 		if (error != EBUSY) {
-			adapter->cam_uncertain_mask |= (uint8_t)(1U << slot);
+			adapter->cam_uncertain_mask |= 1U << slot;
 			adapter->quarantined = 1U;
 		}
 		rtl8822bu_tx_quiesce_result_locked(adapter, error, 0);
@@ -2828,19 +3829,31 @@ rtl8822bu_key_delete_checked(struct rtl8822bu_adapter *adapter,
 	error = rtl8822b_cam_clear(&adapter->radio, slot, deadline);
 	enabled = spin_lock_irqsave(&adapter->lock);
 	if (error == 0) {
-		adapter->cam_uncertain_mask &= (uint8_t)~(1U << slot);
+		adapter->cam_uncertain_mask &= ~(1U << slot);
 		if (role == RTL8822BU_KEY_PAIRWISE) {
-			adapter->pairwise_key_installed = 0U;
-			adapter->pairwise_key_generation = 0U;
+			if (location == RTL8822BU_KEY_ACTIVE) {
+				adapter->pairwise_key_installed = 0U;
+				adapter->pairwise_key_generation = 0U;
+			} else {
+				adapter->pairwise_staged_installed = 0U;
+				adapter->pairwise_staged_generation = 0U;
+			}
 		} else {
-			adapter->group_key_mask &= (uint8_t)~(1U << key_index);
-			adapter->group_key_generation[key_index] = 0U;
+			if (location == RTL8822BU_KEY_ACTIVE) {
+				adapter->group_key_mask &=
+				    (uint8_t)~(1U << key_index);
+				adapter->group_key_generation[key_index] = 0U;
+			} else {
+				adapter->group_staged_mask &=
+				    (uint8_t)~(1U << key_index);
+				adapter->group_staged_generation[key_index] = 0U;
+			}
 		}
 		adapter->tx_quiescing = 0U;
 		if (adapter->connection_generation != generation)
 			error = ESTALE;
 	} else {
-		adapter->cam_uncertain_mask |= (uint8_t)(1U << slot);
+		adapter->cam_uncertain_mask |= 1U << slot;
 		adapter->tx_quiescing = 1U;
 		adapter->quarantined = 1U;
 	}
@@ -2849,13 +3862,52 @@ rtl8822bu_key_delete_checked(struct rtl8822bu_adapter *adapter,
 	return error;
 }
 
+static void
+rtl8822bu_deauthenticate_best_effort(struct rtl8822bu_adapter *adapter,
+	const uint8_t bssid[6], uint64_t deadline)
+{
+	uint8_t wire[RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + 26U + 1U];
+	uint64_t now, remaining, milliseconds;
+	size_t actual = 0U, wire_length = 0U;
+	int error;
+
+	if (adapter == NULL || bssid == NULL ||
+	    adapter->transport_absent ||
+	    adapter->radio.state != RTL8822B_RADIO_STARTED)
+		return;
+	error = rtl8822b_radio_deauthentication_prepare(&adapter->radio, wire,
+	    sizeof(wire), bssid, adapter->board.mac_address, 3U, &wire_length);
+	now = clock_ticks();
+	if (error != 0 || now >= deadline)
+		goto out;
+	remaining = deadline - now;
+	milliseconds = remaining > UINT64_MAX / 1000ULL ? UINT64_MAX :
+	    (remaining * 1000ULL) / KERN_CLOCK_HZ;
+	if (milliseconds == 0U)
+		milliseconds = 1U;
+	if (milliseconds > RTL8822BU_REGISTER_TIMEOUT_MS)
+		milliseconds = RTL8822BU_REGISTER_TIMEOUT_MS;
+	error = drv_usb_bulk(adapter->usb_device, adapter->bulk_out_high, wire,
+	    wire_length, (unsigned)milliseconds, &actual);
+	if (error == EPIPE &&
+	    drv_usb_endpoint_clear_halt(adapter->bulk_out_high) == 0) {
+		actual = 0U;
+		(void)drv_usb_bulk(adapter->usb_device, adapter->bulk_out_high,
+		    wire, wire_length, (unsigned)milliseconds, &actual);
+	}
+out:
+	memset(wire, 0, sizeof(wire));
+}
+
 static int
 rtl8822bu_disconnect(void *context, uint64_t generation)
 {
 	struct rtl8822bu_adapter *adapter = context;
+	uint8_t bssid[6];
 	unsigned long enabled;
 	uint64_t deadline;
 	uint64_t now;
+	int send_deauthentication = 0;
 	int error;
 
 	if (adapter == NULL)
@@ -2867,11 +3919,27 @@ rtl8822bu_disconnect(void *context, uint64_t generation)
 	    !adapter->association_active && !adapter->association_uncertain &&
 	    adapter->cam_uncertain_mask == 0U &&
 	    !adapter->pairwise_key_installed &&
-	    adapter->group_key_mask == 0U) {
+	    !adapter->pairwise_staged_installed &&
+	    adapter->pairwise_staged_generation == 0U &&
+	    adapter->group_key_mask == 0U &&
+	    adapter->group_staged_mask == 0U) {
 		error = 0;
 	} else if (generation != 0U &&
 	    adapter->connection_generation != generation) {
 		error = ESTALE;
+	} else if (adapter->transport_absent) {
+		if (adapter->pairwise_key_installed ||
+		    adapter->pairwise_staged_installed ||
+		    adapter->pairwise_staged_generation != 0U ||
+		    adapter->pairwise_retired_valid ||
+		    adapter->group_key_mask != 0U ||
+		    adapter->group_staged_mask != 0U ||
+		    adapter->group_retired_mask != 0U) {
+			error = EBUSY;
+		} else {
+			rtl8822bu_connection_state_clear_locked(adapter);
+			error = 0;
+		}
 	} else if (rtl8822bu_tx_report_generation_active_locked(adapter,
 	    adapter->connection_generation, 0U, 0)) {
 		adapter->tx_quiescing = 1U;
@@ -2882,6 +3950,14 @@ rtl8822bu_disconnect(void *context, uint64_t generation)
 	} else {
 		adapter->tx_quiescing = 1U;
 		adapter->radio_operations_active++;
+		if (adapter->association_active &&
+		    adapter->deauthentication_attempted_generation !=
+		    adapter->connection_generation) {
+			adapter->deauthentication_attempted_generation =
+			    adapter->connection_generation;
+			memcpy(bssid, adapter->connection_bssid, sizeof(bssid));
+			send_deauthentication = 1;
+		}
 		error = EINPROGRESS;
 	}
 	adapter->scan_generation = 0U;
@@ -2891,6 +3967,8 @@ rtl8822bu_disconnect(void *context, uint64_t generation)
 		return error;
 	error = rtl8822bu_deadline_after(RTL8822BU_SECURITY_TIMEOUT_TICKS,
 	    &deadline);
+	if (error == 0 && send_deauthentication)
+		rtl8822bu_deauthenticate_best_effort(adapter, bssid, deadline);
 	if (error == 0 && adapter->radio.state == RTL8822B_RADIO_STARTED)
 		error = rtl8822bu_security_hardware_clear(adapter, deadline);
 	enabled = spin_lock_irqsave(&adapter->lock);
@@ -2919,14 +3997,22 @@ rtl8822bu_management_transmit(void *context, uint64_t generation,
 	uint64_t now, remaining, milliseconds;
 	uint32_t channel;
 	size_t wire_length = 0U, actual = 0U;
+	uint8_t sequence = 0U;
+	int report_reserved = 0;
+	int transfer_attempted = 0;
 	int error;
 
 	if (adapter == NULL || generation == 0U || frame == NULL ||
 	    length == 0U || length > RTL8822B_MANAGEMENT_MPDU_MAX)
 		return EINVAL;
+	now = clock_ticks();
+	if (now >= deadline)
+		return ETIMEDOUT;
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (!adapter->ready || !adapter->opened || adapter->closing ||
-	    adapter->stopping || adapter->quarantined ||
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    adapter->closing ||
+	    adapter->stopping || adapter->recovery_pending ||
+	    adapter->quarantined ||
 	    !adapter->radio_running || adapter->scan_generation != generation) {
 		error = adapter->ready ? ENETDOWN : ENODEV;
 		spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -2938,7 +4024,13 @@ rtl8822bu_management_transmit(void *context, uint64_t generation,
 	}
 	channel = adapter->scan_channel;
 	adapter->radio_operations_active++;
+	error = rtl8822bu_tx_report_reserve_locked(adapter, generation, 0U,
+	    generation, now, deadline, &sequence);
+	if (error == 0)
+		report_reserved = 1;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (error != 0)
+		goto out_operation;
 	/* The core permits only its calibrated, worldwide-bounded legacy-rate
 	 * 2.4-GHz profile; every broader transmit mode remains closed. */
 	if (!rtl8822b_radio_active_scan_allowed(&adapter->radio,
@@ -2954,6 +4046,9 @@ rtl8822bu_management_transmit(void *context, uint64_t generation,
 	error = rtl8822b_radio_management_frame_prepare(&adapter->radio, wire,
 	    RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U, frame, length,
 	    &wire_length);
+	if (error == 0)
+		error = rtl8822bu_tx_descriptor_request_report(wire, wire_length,
+		    sequence);
 	now = clock_ticks();
 	if (error == 0 && now >= deadline)
 		error = ETIMEDOUT;
@@ -2967,7 +4062,8 @@ rtl8822bu_management_transmit(void *context, uint64_t generation,
 			milliseconds = UINT32_MAX;
 		/* The frozen three-OUT RQPN map routes the management QSEL to the
 		 * high-priority DMA pipe, endpoint 0x05. */
-		error = drv_usb_bulk(adapter->usb_device,
+		transfer_attempted = 1;
+		error = rtl8822bu_bulk_transfer(adapter,
 		    adapter->bulk_out_high, wire, wire_length,
 		    (unsigned)milliseconds, &actual);
 		if (error == 0 && actual != wire_length)
@@ -2977,6 +4073,13 @@ rtl8822bu_management_transmit(void *context, uint64_t generation,
 	    RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + length + 1U);
 	hal_free(wire);
 out_operation:
+	if (error != 0 && report_reserved) {
+		if (transfer_attempted)
+			rtl8822bu_tx_report_abandon_attempted(adapter, sequence,
+			    error);
+		else
+			rtl8822bu_tx_report_release(adapter, sequence);
+	}
 	rtl8822bu_operation_leave(adapter);
 	return error;
 }
@@ -3018,6 +4121,15 @@ rtl8822bu_key_delete(void *context, uint64_t generation,
 }
 
 static int
+rtl8822bu_keys_activate(void *context, uint64_t generation,
+	uint64_t pairwise_key_generation, uint64_t group_key_generation,
+	uint64_t deadline)
+{
+	return rtl8822bu_keys_activate_checked(context, generation,
+	    pairwise_key_generation, group_key_generation, deadline);
+}
+
+static int
 rtl8822bu_quiesce(void *context)
 {
 	struct rtl8822bu_adapter *adapter = context;
@@ -3045,28 +4157,23 @@ static const struct wlan_radio_ops rtl8822bu_radio_ops = {
 	.frame_transmit = rtl8822bu_frame_transmit,
 	.key_install = rtl8822bu_key_install,
 	.key_delete = rtl8822bu_key_delete,
+	.keys_activate = rtl8822bu_keys_activate,
 	.quiesce = rtl8822bu_quiesce
 };
 
 static int
-rtl8822bu_open(struct net_device *device)
+rtl8822bu_hardware_start_locked(struct rtl8822bu_adapter *adapter)
 {
-	struct rtl8822bu_adapter *adapter = device->driver_data;
 	struct rtl8822b_firmware_blob firmware;
 	struct rtl8822b_radio_transport transport;
 	unsigned long enabled;
 	uint64_t deadline;
 	int error, cleanup_error;
 
-	/* net_device_create() makes the name visible before station attachment.
-	 * Do not recurse into lifecycle_lock from that publication callback. */
-	if (!rtl8822bu_ready_station(adapter, NULL))
-		return ENODEV;
 	memset(&firmware, 0, sizeof(firmware));
-	mutex_lock(&adapter->lifecycle_lock);
 	if (!rtl8822bu_ready_station(adapter, NULL)) {
 		error = ENODEV;
-		goto out;
+		goto done;
 	}
 	enabled = spin_lock_irqsave(&adapter->lock);
 	if (adapter->opened || adapter->closing || adapter->stopping ||
@@ -3077,14 +4184,11 @@ rtl8822bu_open(struct net_device *device)
 		error = 0;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	if (error != 0)
-		goto out;
-	error = net_device_set_carrier(device, 0);
-	if (error != 0)
-		goto out;
+		goto done;
 	error = rtl8822bu_deadline_after(RTL8822BU_RADIO_OPEN_TIMEOUT_TICKS,
 	    &deadline);
 	if (error != 0)
-		goto out;
+		goto done;
 	rtl8822bu_radio_transport_init(adapter, &transport);
 	error = rtl8822b_radio_power_on(&adapter->radio, &transport,
 	    &adapter->board, deadline);
@@ -3108,11 +4212,8 @@ rtl8822bu_open(struct net_device *device)
 	error = rtl8822bu_rx_start(adapter, 0U, 1U);
 	if (error != 0)
 		goto fail_hardware;
-	error = wlan_station_open(adapter->station);
-	if (error != 0)
-		goto fail_hardware;
 	RTL8822BU_FIRMWARE_RELEASE(&firmware);
-	goto out;
+	return 0;
 
 fail_hardware:
 	/* The staging lease remains owned until RX cancellation and the checked
@@ -3121,7 +4222,30 @@ fail_hardware:
 	cleanup_error = rtl8822bu_hardware_stop_locked(adapter);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
 	RTL8822BU_FIRMWARE_RELEASE(&firmware);
-out:
+done:
+	return error;
+}
+
+static int
+rtl8822bu_open(struct net_device *device)
+{
+	struct rtl8822bu_adapter *adapter = device->driver_data;
+	int error, cleanup_error;
+
+	/* net_device_create() makes the name visible before station attachment.
+	 * Do not recurse into lifecycle_lock from that publication callback. */
+	if (!rtl8822bu_ready_station(adapter, NULL))
+		return ENODEV;
+	mutex_lock(&adapter->lifecycle_lock);
+	error = net_device_set_carrier(device, 0);
+	if (error == 0)
+		error = rtl8822bu_hardware_start_locked(adapter);
+	if (error == 0)
+		error = wlan_station_open(adapter->station);
+	if (error != 0) {
+		cleanup_error = rtl8822bu_hardware_stop_locked(adapter);
+		rtl8822bu_record_cleanup_error(&error, cleanup_error);
+	}
 	mutex_unlock(&adapter->lifecycle_lock);
 	return error;
 }
@@ -3148,6 +4272,98 @@ rtl8822bu_station_close_wait(struct wlan_station *station)
 		 * admitted channel/TX callback can therefore retire before retry. */
 		sched_yield();
 	}
+}
+
+/*
+ * Runtime USB recovery is a device-local lifecycle transaction.  The caller
+ * has already retired the terminal RX completion and left poll context, so
+ * hardware_stop can join every remaining producer without waiting on itself.
+ * Common WLAN link-loss cleanup retires the controlled port, CAM generations,
+ * and packet-number state while retaining the selected BSS and PMK.  The
+ * device is then restarted locally; the common finite reconnect worker owns
+ * the fresh handshake.  Explicit IFF_DOWN/remove still use station_close and
+ * deliberately erase that reconnect intent.
+ */
+static void
+rtl8822bu_runtime_recover(struct rtl8822bu_adapter *adapter)
+{
+	struct wlan_station *station;
+	unsigned long enabled;
+	uint64_t generation;
+	int reason;
+	int error = 0;
+	int cleanup_error;
+	int hardware_stopped = 0;
+	int schedule = 0;
+
+	if (adapter == NULL)
+		return;
+	mutex_lock(&adapter->lifecycle_lock);
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (!adapter->ready || adapter->detaching || !adapter->opened ||
+	    !adapter->recovery_pending || adapter->recovery_active) {
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+		mutex_unlock(&adapter->lifecycle_lock);
+		return;
+	}
+	adapter->recovery_active = 1U;
+	station = adapter->station;
+	generation = adapter->connection_generation;
+	reason = adapter->recovery_error != 0 ? adapter->recovery_error : EIO;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (adapter->net_device != NULL)
+		(void)net_device_set_carrier(adapter->net_device, 0);
+	if (generation != 0U) {
+		error = wlan_station_report_link_loss(station, generation, reason);
+	}
+	if (error != 0) {
+		/* The common station still owns at least one controlled-port/key/PN
+		 * inverse.  Never reset the device underneath that ownership: doing so
+		 * would leave subsequent checked deletes unable to prove absence.  A
+		 * bounded series of poll-worker retries leaves inverse callbacks usable;
+		 * after the bound, explicit down/remove may still finish cleanup. */
+		enabled = spin_lock_irqsave(&adapter->lock);
+		if (adapter->recovery_cleanup_attempts != UINT_MAX)
+			adapter->recovery_cleanup_attempts++;
+		adapter->recovery_active = 0U;
+		adapter->recovery_pending = 1U;
+		adapter->recovery_error = reason;
+		adapter->tx_quiescing = 1U;
+		if (adapter->recovery_cleanup_attempts <
+		    RTL8822BU_RECOVERY_CLEANUP_RETRY_LIMIT) {
+			schedule = adapter->ready && !adapter->detaching &&
+			    adapter->opened && adapter->net_device != NULL;
+		} else {
+			adapter->quarantined = 1U;
+		}
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+		mutex_unlock(&adapter->lifecycle_lock);
+		if (schedule)
+			net_device_schedule_poll(adapter->net_device);
+		return;
+	}
+	if (error == 0) {
+		error = rtl8822bu_hardware_stop_locked(adapter);
+		hardware_stopped = error == 0;
+	}
+	if (error == 0)
+		error = rtl8822bu_hardware_start_locked(adapter);
+	if (error != 0 && hardware_stopped) {
+		/* If start crossed any acquisition boundary, use the same checked
+		 * reverse transaction.  Failure preserves quarantine and ownership. */
+		cleanup_error = rtl8822bu_hardware_stop_locked(adapter);
+		rtl8822bu_record_cleanup_error(&error, cleanup_error);
+	}
+	enabled = spin_lock_irqsave(&adapter->lock);
+	adapter->recovery_pending = 0U;
+	adapter->recovery_active = 0U;
+	adapter->recovery_cleanup_attempts = 0U;
+	adapter->recovery_error = 0;
+	adapter->rx_error_streak = 0U;
+	if (error != 0)
+		adapter->quarantined = 1U;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	mutex_unlock(&adapter->lifecycle_lock);
 }
 
 static void
@@ -3185,8 +4401,10 @@ rtl8822bu_transmit(struct net_device *device, struct packet_buf *packet)
 	if (packet == NULL)
 		return EINVAL;
 	enabled = spin_lock_irqsave(&adapter->lock);
-	if (!adapter->ready || adapter->station == NULL || !adapter->opened ||
-	    adapter->closing || adapter->stopping || adapter->quarantined) {
+	if (!adapter->ready || adapter->detaching || adapter->station == NULL ||
+	    !adapter->opened ||
+	    adapter->closing || adapter->stopping ||
+	    adapter->recovery_pending || adapter->quarantined) {
 		error = adapter->ready ? ENETDOWN : ENODEV;
 		station = NULL;
 	} else if (adapter->tx_quiescing) {
@@ -3217,16 +4435,31 @@ rtl8822bu_poll_receive(struct net_device *device, unsigned budget)
 {
 	struct rtl8822bu_adapter *adapter = device->driver_data;
 	struct rtl8822bu_rx_report_context report;
-	enum drv_usb_urb_status status;
+	enum drv_usb_urb_status status = DRV_USB_URB_IO_ERROR;
 	unsigned long enabled;
+	uint64_t completed_generation = 0U;
 	size_t length, packet_count = 0U;
-	int error = 0, take_ready = 0, take_rearm = 0;
+	int clear_error = 0, error = 0, recover = 0;
+	int take_ready = 0, take_rearm = 0;
 
-	if (budget == 0U || !rtl8822bu_poll_enter(adapter))
+	if (budget == 0U)
+		return 0U;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	recover = adapter->ready && !adapter->detaching && adapter->opened &&
+	    !adapter->closing &&
+	    !adapter->stopping && adapter->recovery_pending &&
+	    !adapter->recovery_active;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (recover) {
+		rtl8822bu_runtime_recover(adapter);
+		return 1U;
+	}
+	if (!rtl8822bu_poll_enter(adapter))
 		return 0U;
 	enabled = spin_lock_irqsave(&adapter->lock);
 	if (adapter->rx_ready) {
 		adapter->rx_ready = 0U;
+		completed_generation = adapter->rx_completed_generation;
 		take_ready = 1;
 	}
 	spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -3237,23 +4470,50 @@ rtl8822bu_poll_receive(struct net_device *device, unsigned budget)
 			status = drv_usb_urb_status(adapter->rx_urb);
 			error = rtl8822bu_urb_status_error(status);
 		}
+		enabled = spin_lock_irqsave(&adapter->lock);
+		if (completed_generation == 0U ||
+		    completed_generation != adapter->rx_inflight_generation) {
+			/* The callback belongs to a retired submission.  It must not
+			 * consume or rearm the current request. */
+			error = ESTALE;
+		} else {
+			adapter->rx_inflight_generation = 0U;
+			adapter->rx_completed_generation = 0U;
+		}
+		spin_unlock_irqrestore(&adapter->lock, enabled);
 		length = drv_usb_urb_actual_length(adapter->rx_urb);
 		memset(&report, 0, sizeof(report));
 		report.adapter = adapter;
 		if (error == 0)
 			error = rtl8822b_rx_aggregate_walk(adapter->rx_buffer,
 			    length, rtl8822bu_rx_report, &report, &packet_count);
-		if (error != 0) {
+		if (error != 0 && error != ESTALE) {
 			device->rx_errors++;
-			if (error == ENODEV) {
-				enabled = spin_lock_irqsave(&adapter->lock);
-				adapter->quarantined = 1U;
-				spin_unlock_irqrestore(&adapter->lock, enabled);
+		}
+		/* A halted pipe is recovered locally.  Never reset the USB device or
+		 * controller: unrelated storage owns independent endpoints and URBs. */
+		if (status == DRV_USB_URB_STALL)
+			clear_error = drv_usb_endpoint_clear_halt(adapter->bulk_in);
+		enabled = spin_lock_irqsave(&adapter->lock);
+		if (status == DRV_USB_URB_COMPLETE && error == 0) {
+			adapter->rx_error_streak = 0U;
+		} else if (error == ENODEV || status == DRV_USB_URB_DISCONNECTED) {
+			adapter->quarantined = 1U;
+		} else if (error != ESTALE) {
+			adapter->rx_error_streak++;
+			if (clear_error != 0 || adapter->rx_error_streak >=
+			    RTL8822BU_RX_RECOVERY_LIMIT) {
+				adapter->recovery_pending = 1U;
+				adapter->recovery_error = clear_error != 0 ?
+				    clear_error : (error != 0 ? error : EIO);
+				adapter->tx_quiescing = 1U;
+				recover = 1;
 			}
 		}
-		enabled = spin_lock_irqsave(&adapter->lock);
 		if (adapter->ready && adapter->opened && !adapter->closing &&
-		    !adapter->stopping && !adapter->quarantined)
+		    !adapter->stopping && !adapter->recovery_pending &&
+		    !adapter->quarantined &&
+		    error != ESTALE)
 			adapter->rx_rearm = 1U;
 		spin_unlock_irqrestore(&adapter->lock, enabled);
 	}
@@ -3276,9 +4536,13 @@ rtl8822bu_poll_receive(struct net_device *device, unsigned budget)
 		}
 		spin_unlock_irqrestore(&adapter->lock, enabled);
 	}
-	if (rtl8822bu_rx_has_work(adapter))
+	if (!recover && rtl8822bu_rx_has_work(adapter))
 		net_device_schedule_poll(device);
 	rtl8822bu_poll_exit(adapter);
+	if (recover) {
+		(void)net_device_set_carrier(device, 0);
+		rtl8822bu_runtime_recover(adapter);
+	}
 	return take_ready || take_rearm ? 1U : 0U;
 }
 
@@ -3288,9 +4552,17 @@ rtl8822bu_ioctl(struct net_device *device, unsigned long request,
 {
 	struct rtl8822bu_adapter *adapter = device->driver_data;
 	struct wlan_station *station;
+	unsigned long enabled;
+	int blocked;
 
 	if (!rtl8822bu_ready_station(adapter, &station))
 		return ENODEV;
+	enabled = spin_lock_irqsave(&adapter->lock);
+	blocked = adapter->recovery_pending || adapter->recovery_active ||
+	    adapter->quarantined;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (blocked)
+		return ENETDOWN;
 	return wlan_station_ioctl(device, request, argument);
 }
 
@@ -3411,7 +4683,7 @@ rtl8822bu_net_device_create(struct rtl8822bu_adapter *adapter)
  */
 static int
 rtl8822bu_teardown(struct drv_usb_interface *interface,
-	struct rtl8822bu_adapter *adapter)
+	struct rtl8822bu_adapter *adapter, unsigned flags)
 {
 	struct net_device *device;
 	struct wlan_station *station;
@@ -3422,7 +4694,8 @@ rtl8822bu_teardown(struct drv_usb_interface *interface,
 	mutex_lock(&adapter->lifecycle_lock);
 	enabled = spin_lock_irqsave(&adapter->lock);
 	adapter->detaching = 1U;
-	adapter->ready = 0U;
+	if ((flags & DRV_USB_DETACH_FORCE) != 0U)
+		adapter->transport_absent = 1U;
 	device = adapter->net_device;
 	net_live = adapter->net_live;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -3458,6 +4731,9 @@ rtl8822bu_teardown(struct drv_usb_interface *interface,
 		mutex_unlock(&adapter->lifecycle_lock);
 		return error;
 	}
+	enabled = spin_lock_irqsave(&adapter->lock);
+	adapter->ready = 0U;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
 	if (station != NULL && adapter->station_attached) {
 		error = wlan_station_detach(station);
 		/* Global network shutdown may already have joined this station. */
@@ -3516,13 +4792,13 @@ rtl8822bu_attach(struct drv_usb_interface *interface,
 	if (adapter == NULL)
 		return ENOMEM;
 	memset(adapter, 0, sizeof(*adapter));
+	rtl8822bu_connection_state_clear_locked(adapter);
 	adapter->usb_device = binding.device;
 	adapter->interface = interface;
 	adapter->bulk_in = binding.bulk_in;
 	adapter->bulk_out_high = binding.bulk_out_high;
 	adapter->bulk_out_normal = binding.bulk_out_normal;
 	adapter->bulk_out_low = binding.bulk_out_low;
-	adapter->interrupt_in = binding.interrupt_in;
 	spin_init(&adapter->lock, LOCK_RANK_DEVICE, "usb-rtl8822bu");
 	error = mutex_init(&adapter->lifecycle_lock, LOCK_RANK_DEVICE,
 	    "usb-rtl8822bu lifecycle");
@@ -3565,7 +4841,8 @@ rtl8822bu_attach(struct drv_usb_interface *interface,
 fail_locked:
 	mutex_unlock(&adapter->lifecycle_lock);
 	{
-		int cleanup_error = rtl8822bu_teardown(interface, adapter);
+		int cleanup_error = rtl8822bu_teardown(interface, adapter,
+		    DRV_USB_DETACH_ATTACH_FAILED);
 
 		return cleanup_error != 0 ? cleanup_error : error;
 	}
@@ -3576,11 +4853,10 @@ rtl8822bu_detach(struct drv_usb_interface *interface, unsigned flags)
 {
 	struct rtl8822bu_adapter *adapter;
 
-	(void)flags;
 	adapter = drv_usb_interface_driver_data(interface);
 	if (adapter == NULL)
 		return 0;
-	return rtl8822bu_teardown(interface, adapter);
+	return rtl8822bu_teardown(interface, adapter, flags);
 }
 
 static void
@@ -3596,14 +4872,20 @@ rtl8822bu_shutdown(struct drv_usb_interface *interface)
 		return;
 	mutex_lock(&adapter->lifecycle_lock);
 	enabled = spin_lock_irqsave(&adapter->lock);
-	adapter->ready = 0U;
+	adapter->detaching = 1U;
 	station = adapter->station;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	if (adapter->net_device != NULL)
 		(void)net_device_set_carrier(adapter->net_device, 0);
 	error = rtl8822bu_station_close_wait(station);
-	if (error == 0 || error == ENODEV)
-		(void)rtl8822bu_hardware_stop_locked(adapter);
+	if (error == 0 || error == ENODEV) {
+		error = rtl8822bu_hardware_stop_locked(adapter);
+		if (error == 0) {
+			enabled = spin_lock_irqsave(&adapter->lock);
+			adapter->ready = 0U;
+			spin_unlock_irqrestore(&adapter->lock, enabled);
+		}
+	}
 	else {
 		enabled = spin_lock_irqsave(&adapter->lock);
 		adapter->quarantined = 1U;

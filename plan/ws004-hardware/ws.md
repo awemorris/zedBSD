@@ -27,7 +27,10 @@ q058 completed p029's automatic secure-L2 milestone. q059 completed WS005
 p004/p009 and supplied one simple direct-command physical attach, scan,
 secure-L2, and IP-communication result; this developmental run does not
 complete the later WS005 p008 five-run acceptance. P030 lifecycle hardening is
-now dependency-ready but remains unstarted. `p034`
+now dependency-ready but remains unstarted. After p030's automatic milestone,
+p037 performs the read-only Intel AX201 identity/firmware-license intake, p038 implements AX201
+independently through one useful normal path, and p039 reviews only proven
+cross-driver commonality. `p034`
 separately records deferred, nonblocking CDC ECM accounting adoption, and
 `p035` records the nonblocking future same-endpoint multi-URB extension which
 the first WLAN scan path deliberately does not require.
@@ -97,7 +100,10 @@ the WPA2-Personal/CCMP L2 milestone. Q059 completed the first one-run WS005
 p009 developmental attach/scan/connect/DHCP/ping/fetch checkpoint with
 calibrated legacy TX power and transition-mode RSNXE handling. P030 remains the
 later lifecycle-hardening successor, and WS005 p008 final acceptance is still
-incomplete.
+incomplete. The next hardware sequence is now p030's automatic milestone, then
+p037, p038, and p039;
+the latter three do not permit an Intel/Realtek common hardware layer before
+both drivers work independently.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -141,6 +147,9 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p034`](phase034-cdc-ecm-async-tx-accounting/phase.md) | Planned/deferred; nonblocking; not queued | Apply q054's exactly-once asynchronous TX-error accounting to CDC ECM, preserve accepted packet/byte and drop meanings, and rerun automatic ECM gates without a physical check |
 | [`ws004-p035`](phase035-usb-same-endpoint-multi-urb/phase.md) | Planned/deferred; nonblocking; not queued | Add a bounded same-endpoint xHCI URB ring only when a measured workload needs it; p028 retains one persistent bulk-IN URB and does not depend on this Phase |
 | [`ws004-p036`](phase036-rtl8822bu-pre-radio-substrate/phase.md) | Complete (`q056`) | The default-off firmware package, exact USB/register/efuse/firmware/RX substrate, serialized p027 publication, fake DDMA/RX integration, and tableless production refusal pass before p028 programs RF |
+| [`ws004-p037`](phase037-intel-ax201-intake-firmware/phase.md) | Planned; follows p030 automatic milestone; read-only and not queued | Identify the exact test-machine AX201 PCI/topology/firmware facts and freeze the optional-package/license boundary; mark only a genuinely ambiguous redistribution decision uncleared |
+| [`ws004-p038`](phase038-intel-ax201-standalone-driver/phase.md) | Planned; follows p030 automatic milestone and p037; not queued | Implement an independent Intel driver without prior RTL commonization, then pass scan, WPA2/CCMP, DHCP, ping, fetch, disconnect, and down on the exact device |
+| [`ws004-p039`](phase039-wlan-evidence-driven-refactor/phase.md) | Planned; follows p030 automatic milestone and p038; not queued | Compare both working drivers and move only substantial, stable, demonstrated common behavior beneath the unchanged public WLAN UAPI; a justified no-extraction result is valid |
 
 ### MSI follow-up register
 
@@ -169,23 +178,28 @@ q057 completed p028's automatic milestone and q058 completed p029. q059
 established the WS005 p004/p009 direct physical communication path, including
 RSNXE-compatible WPA2 Message 3 handling and calibrated legacy TX power. This
 was one developmental run, not WS005 p008 final acceptance; p030 and P034
-remain unqueued.
+remain unqueued. The new explicit successor chain is p030 automatic milestone
+-> p037 read-only
+AX201 intake -> p038 standalone AX201 normal path -> p039 evidence-driven
+commonization review. RTL8822CE remains a separate later target.
 
 ## Goals
 
 - Provide the reusable PCIe, DMA, interrupt, reset, and firmware foundations
   required by the target laptop.
-- Implement xHCI/USB-root, USB Ethernet, NVMe, the selected WLAN device, and
-  i915 foundations as native zedBSD drivers.
+- Implement xHCI/USB-root, USB Ethernet, NVMe, the selected RTL8822BU and Intel
+  AX201 WLAN scopes, and i915 foundations as native zedBSD drivers.
 - Keep modeled/QEMU results separate from physical-hardware results.
 
 ## WS completion conditions
 
 WS004 is complete when the common hardware facilities pass focused regression
-tests and the selected xHCI, NVMe, and WLAN driver scopes pass their declared
-lifecycle and recovery tests on the Latitude 5320. Unsupported devices and
-firmware constraints must be explicitly documented. Native GPU/i915 ownership
-and its completion gate belong to pending WS014 rather than blocking WS004.
+tests; the selected xHCI and NVMe scopes pass on the Latitude 5320; the
+RTL8822BU scope passes its declared lifecycle/recovery gates; and the exact
+test-machine Intel AX201 passes its separately declared normal path followed by
+the evidence-driven commonization review. Unsupported devices and firmware
+constraints must be explicitly documented. Native GPU/i915 ownership and its
+completion gate belong to pending WS014 rather than blocking WS004.
 
 Primary physical target: Dell Latitude 5320
 
@@ -193,9 +207,10 @@ Primary physical target: Dell Latitude 5320
 
 Build the reusable kernel foundations and native drivers needed for the target
 laptop, beginning with xHCI/USB-root support and NVMe. Bring up the
-descriptor-confirmed USB WLAN adapter through a reusable WLAN core before the
-separate built-in PCI WLAN follow-up, then continue to the i915 graphics
-generation discovered by hardware inventory.
+descriptor-confirmed USB WLAN adapter, complete its lifecycle, then implement
+the test-machine Intel AX201 independently. Only after both WLAN devices work
+may proven common behavior move into the generic WLAN framework. The separate
+RTL8822CE and i915 targets remain later work.
 
 ## 2. Shared foundations
 
@@ -239,7 +254,9 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-30 | Proposed | i915 hardware foundations for the discovered 11th-generation GPU | BR-00, HW-00, GFX UAPI | Modeset/scanout and recovery on hardware; model tests for device-independent layers |
 | HW-31 | Planned/deferred as `ws004-p034`; nonblocking; not queued | CDC ECM adoption of q054 asynchronous TX-error accounting | p019, p017/q054 | HW-T28 proves exactly-once genuine terminal errors, excluded administrative cancellation, retained packet/byte/drop meanings, lifecycle safety, and unchanged QEMU ECM behavior without a physical check |
 | HW-32 | Planned/deferred as `ws004-p035`; nonblocking; not queued | Bounded same-endpoint multi-URB support for xHCI | A measured consumer need; existing p011 per-endpoint contract | HW-T35 proves exact per-request completion/cancel/drain, ring wrap, teardown, and fairness while UHCI/EHCI retain one request per endpoint |
-| HW-33 | Planned/deferred; not queued | Native Intel Wi-Fi 6 AX201 driver with its own `userland/firmware/intelax201/` entry | Exact PCI/subsystem inventory, HW-00, completed generic WLAN core, Intel firmware/license review | A future Phase freezes the device/firmware identity before scan, association, and data-path work; no RTL88 implementation is reused |
+| HW-33 | Planned as `ws004-p037`; follows p030 automatic milestone | Read-only Intel Wi-Fi 6 AX201 identity, topology, firmware, provenance, and optional-package/license intake | P030 automatic gates and authorized SSH test machine | HW-T37 freezes exact hardware and firmware facts without host mutation; ambiguous redistribution terms alone make the Phase uncleared |
+| HW-34 | Planned as `ws004-p038`; follows p037 | Independent native AX201 driver and `userland/firmware/intelax201/` entry, without an Intel/RTL hardware framework | HW-33, HW-00/HW-23/HW-25 contracts | HW-T38 and one exact-device run pass scan, WPA2/CCMP, DHCP, ping, fetch, disconnect, and down; exhaustive hardening remains later |
+| HW-35 | Planned as `ws004-p039`; follows p038 | Evidence-driven comparison and optional extraction of proven common WLAN behavior | HW-26 automatic milestone and completed HW-34, with passing exact-device paths | HW-T39 preserves public UAPI and both drivers; a documented no-extraction review is valid when commonality is not substantial/stable |
 
 ## 4. NVMe sequence
 
@@ -360,9 +377,34 @@ no p026--p030 completion claims the built-in device.
 
 Do not introduce a common RTL88 chip module before both implementations prove
 a truly identical boundary. A future RTL8822CE Phase owns
-`userland/firmware/rtl8822c/`; a later Intel AX201 Phase owns
-`userland/firmware/intelax201/`. The Intel target is recorded from the Linux
-debug host and remains deferred behind the Archer-first sequence.
+`userland/firmware/rtl8822c/`. Intel AX201 is now the next WLAN hardware target
+after p030, but it remains independent of both Realtek implementations. P037
+freezes the exact test-machine identity and firmware/license boundary, p038
+owns `userland/firmware/intelax201/` plus the standalone Intel driver, and p039
+reviews commonality only after both production paths work.
+
+### Intel AX201 successor sequence
+
+1. Complete p030's automatic RTL8822BU lifecycle implementation first. Its
+   later p008 shared physical/five-run closure remains independently pending.
+2. [`ws004-p037`](phase037-intel-ax201-intake-firmware/phase.md) performs one
+   read-only test-machine inventory and freezes exact hardware, firmware,
+   provenance, and license facts. It needs no human judgment unless the
+   redistribution terms are genuinely ambiguous.
+3. [`ws004-p038`](phase038-intel-ax201-standalone-driver/phase.md) implements
+   AX201 independently and first proves scan, WPA2/CCMP, DHCP, ping, fetch,
+   disconnect, and down. It reuses stable public WLAN contracts, not RTL
+   internals or a newly invented hardware framework.
+4. [`ws004-p039`](phase039-wlan-evidence-driven-refactor/phase.md) compares the
+   two working drivers and extracts only substantial, stable, demonstrated
+   common behavior. It may complete with no extraction when duplication better
+   preserves replaceability.
+
+The public WLAN UAPI remains stable across this sequence. If either Intel
+bring-up or the later comparison demonstrates a significant missing public
+semantic that cannot be handled by a private adapter, the owning Phase becomes
+`uncleared` and requests an explicit interface decision before changing the
+header.
 
 On FreeBSD the built-in PCI WLAN inventory is collected with:
 

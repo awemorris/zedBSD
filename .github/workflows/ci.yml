@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up dependencies
+        run: |
+          # apt-get install -y
+
+      - name: Build i386 PC-98
+        run: |
+          cp config/ci/config-pc98.mk config.mk
+          make
+          mkdir artifacts
+          cp build/pc98/hdd-image.img artifacts/zedbsd-pc98.img
+
+      - name: Build i386 PC/AT
+        run: |
+          cp config/ci/config-pcat.mk config.mk
+          make
+          mkdir artifacts
+          cp build/pcat/hdd-image.img artifacts/zedbsd-pcat.img
+
+      - name: Build amd64
+        run: |
+          cp config/ci/config-amd64.mk config.mk
+          make
+          mkdir artifacts
+          cp build/amd64/hdd-image.img artifacts/zedbsd-amd64.img
+
+      - name: Build Intel Mac
+        run: |
+          cp config/ci/config-intelmac.mk config.mk
+          rm -rf build/amd64
+          make
+          mkdir artifacts
+          cp build/amd64/hdd-image.img artifacts/zedbsd-intelmac.img
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts
+          path: artifacts/*.img
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: artifacts
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: nightly-${{ github.run_number }}
+          name: Nightly Build ${{ github.run_number }}
+          prerelease: true
+
+          body: |
+            This is an automated nightly build. Not an official release.
+            
+            zedBSD OS
+            =========            
+            
+            `zedBSD` is a modern, re-designed BSD-based kernel and base system
+             aiming to implement all `POSIX.1-2024` and `Single UNIX Specification
+             version 4 (SUSv4)` features, along with `μITRON` hard real-time APIs.
+             
+             CI artifacts are for:
+             - IBM PC/AT amd64
+             - IBM PC/AT i386
+             - NEC PC-9800 i386
+
+            | CPU     | Machine      | File                  | Description            |
+            |---------|--------------|-----------------------|------------------------|
+            | amd64   | PC/AT        | `zedbsd-amd64.img`    | For both UEFI and BIOS |
+            | amd64   | Intel Mac    | `zedbsd-intelmac.img` |                        |
+            | i386    | PC/AT        | `zedbsd-pcat.img`     |                        |
+            | i386    | NEC PC-9800  | `zedbsd-pc98.img`     |                        |
+
+          files: |
+            artifacts/zedbsd-amd64.img
+            artifacts/zedbsd-intelmac.img
+            artifacts/zedbsd-pcat.img
+            artifacts/zedbsd-pc98.img

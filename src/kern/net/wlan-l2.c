@@ -137,6 +137,7 @@ wlan_l2_parse_data(const uint8_t station[6], const uint8_t bssid[6],
 	size_t offset = WLAN_L2_DATA_HEADER_SIZE;
 	size_t payload_length;
 	uint64_t packet_number = 0U;
+	uint64_t expected_key_generation;
 	uint64_t *last_packet_number = NULL;
 	uint8_t key_index = 0U;
 	int protected_frame;
@@ -165,8 +166,7 @@ wlan_l2_parse_data(const uint8_t station[6], const uint8_t bssid[6],
 		    WLAN_L2_CCMP_HEADER_SIZE + WLAN_L2_LLC_SNAP_SIZE +
 		    WLAN_L2_CCMP_MIC_SIZE ||
 		    !security->decrypted || !security->cipher_ccmp ||
-		    security->key_generation == 0U ||
-		    security->key_generation != state->key_generation)
+		    security->key_generation == 0U)
 			return EACCES;
 		error = ccmp_header_parse(mpdu + offset, &key_index,
 		    &packet_number);
@@ -175,6 +175,11 @@ wlan_l2_parse_data(const uint8_t station[6], const uint8_t bssid[6],
 			return EACCES;
 		group = mac_group(mpdu + 4U);
 		if (!group && key_index != 0U)
+			return EACCES;
+		expected_key_generation = group ?
+		    state->group_key_generation[key_index] :
+		    state->pairwise_key_generation;
+		if (security->key_generation != expected_key_generation)
 			return EACCES;
 		last_packet_number = group ?
 		    &state->group_packet_number[key_index] :

@@ -40,6 +40,8 @@
 #define EAPOL_KEY_INFO_MESSAGE_2 0x010aU
 #define EAPOL_KEY_INFO_MESSAGE_3 0x13caU
 #define EAPOL_KEY_INFO_MESSAGE_4 0x030aU
+#define EAPOL_KEY_INFO_GROUP_MESSAGE_1 0x1382U
+#define EAPOL_KEY_INFO_GROUP_MESSAGE_2 0x0302U
 
 static const uint8_t rsn_ccmp_suite[4] = { 0x00U, 0x0fU, 0xacU, 0x04U };
 static const uint8_t rsn_psk_suite[4] = { 0x00U, 0x0fU, 0xacU, 0x02U };
@@ -455,6 +457,10 @@ message_key_info(enum wlan_wpa2_eapol_message message)
 		return EAPOL_KEY_INFO_MESSAGE_3;
 	case WLAN_WPA2_EAPOL_MESSAGE_4:
 		return EAPOL_KEY_INFO_MESSAGE_4;
+	case WLAN_WPA2_EAPOL_GROUP_MESSAGE_1:
+		return EAPOL_KEY_INFO_GROUP_MESSAGE_1;
+	case WLAN_WPA2_EAPOL_GROUP_MESSAGE_2:
+		return EAPOL_KEY_INFO_GROUP_MESSAGE_2;
 	default:
 		return 0U;
 	}
@@ -472,6 +478,10 @@ key_info_message(uint16_t key_info)
 		return WLAN_WPA2_EAPOL_MESSAGE_3;
 	case EAPOL_KEY_INFO_MESSAGE_4:
 		return WLAN_WPA2_EAPOL_MESSAGE_4;
+	case EAPOL_KEY_INFO_GROUP_MESSAGE_1:
+		return WLAN_WPA2_EAPOL_GROUP_MESSAGE_1;
+	case EAPOL_KEY_INFO_GROUP_MESSAGE_2:
+		return WLAN_WPA2_EAPOL_GROUP_MESSAGE_2;
 	default:
 		return 0;
 	}
@@ -488,6 +498,7 @@ eapol_key_fields_valid(const struct wlan_wpa2_eapol_key *key,
 	    !all_zero(key->iv, sizeof(key->iv)))
 		return 0;
 	if (key->message != WLAN_WPA2_EAPOL_MESSAGE_3 &&
+	    key->message != WLAN_WPA2_EAPOL_GROUP_MESSAGE_1 &&
 	    !all_zero(key->rsc, sizeof(key->rsc)))
 		return 0;
 	switch (key->message) {
@@ -512,6 +523,16 @@ eapol_key_fields_valid(const struct wlan_wpa2_eapol_key *key,
 		    !all_zero(key->nonce, sizeof(key->nonce)) &&
 		    (!parsing || !all_zero(key->mic, sizeof(key->mic)));
 	case WLAN_WPA2_EAPOL_MESSAGE_4:
+		return key->key_length == 0U && key->key_data_length == 0U &&
+		    all_zero(key->nonce, sizeof(key->nonce)) &&
+		    (!parsing || !all_zero(key->mic, sizeof(key->mic)));
+	case WLAN_WPA2_EAPOL_GROUP_MESSAGE_1:
+		return key->key_length == EAPOL_CCMP_KEY_LENGTH &&
+		    key->key_data_length >= 24U &&
+		    (key->key_data_length & 7U) == 0U &&
+		    all_zero(key->nonce, sizeof(key->nonce)) &&
+		    (!parsing || !all_zero(key->mic, sizeof(key->mic)));
+	case WLAN_WPA2_EAPOL_GROUP_MESSAGE_2:
 		return key->key_length == 0U && key->key_data_length == 0U &&
 		    all_zero(key->nonce, sizeof(key->nonce)) &&
 		    (!parsing || !all_zero(key->mic, sizeof(key->mic)));
@@ -610,9 +631,9 @@ padding_valid(const uint8_t *bytes, size_t length)
 	return 1;
 }
 
-int
-wlan_wpa2_m3_plaintext_parse(const uint8_t *plaintext, size_t length,
-	struct wlan_wpa2_gtk *result)
+static int
+key_plaintext_parse(const uint8_t *plaintext, size_t length,
+	struct wlan_wpa2_gtk *result, int require_rsn)
 {
 	struct wlan_wpa2_gtk parsed;
 	size_t offset = 0U;
@@ -678,10 +699,24 @@ wlan_wpa2_m3_plaintext_parse(const uint8_t *plaintext, size_t length,
 		}
 		offset += (size_t)ie_length + 2U;
 	}
-	if (!have_rsn || !have_gtk)
+	if (have_rsn != require_rsn || !have_gtk)
 		return EINVAL;
 	*result = parsed;
 	return 0;
+}
+
+int
+wlan_wpa2_m3_plaintext_parse(const uint8_t *plaintext, size_t length,
+	struct wlan_wpa2_gtk *result)
+{
+	return key_plaintext_parse(plaintext, length, result, 1);
+}
+
+int
+wlan_wpa2_group_plaintext_parse(const uint8_t *plaintext, size_t length,
+	struct wlan_wpa2_gtk *result)
+{
+	return key_plaintext_parse(plaintext, length, result, 0);
 }
 
 int
@@ -706,6 +741,31 @@ wlan_wpa2_m3_plaintext_build(uint8_t *output, size_t capacity,
 	/* Canonical KDE padding: vendor-specific ID, zero length. */
 	output[46] = IEEE80211_IE_VENDOR;
 	output[47] = 0U;
+	*result_length = length;
+	return 0;
+}
+
+int
+wlan_wpa2_group_plaintext_build(uint8_t *output, size_t capacity,
+	uint8_t key_index, const uint8_t gtk[WLAN_WPA2_GTK_LENGTH],
+	size_t *result_length)
+{
+	const size_t length = 32U;
+
+	if (output == NULL || gtk == NULL || result_length == NULL ||
+	    key_index == 0U || key_index > 3U)
+		return EINVAL;
+	if (capacity < length)
+		return ENOSPC;
+	output[0] = IEEE80211_IE_VENDOR;
+	output[1] = 22U;
+	memcpy(output + 2U, rsn_gtk_kde, sizeof(rsn_gtk_kde));
+	output[6] = key_index;
+	output[7] = 0U;
+	memcpy(output + 8U, gtk, WLAN_WPA2_GTK_LENGTH);
+	output[24] = IEEE80211_IE_VENDOR;
+	output[25] = 0U;
+	memset(output + 26U, 0, length - 26U);
 	*result_length = length;
 	return 0;
 }

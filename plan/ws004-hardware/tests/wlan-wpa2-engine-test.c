@@ -45,6 +45,7 @@ struct fake_radio {
 	unsigned pn_advance_calls;
 	unsigned pair_delete_calls;
 	unsigned group_delete_calls;
+	unsigned activate_calls;
 	unsigned authorize_on_calls;
 	unsigned authorize_off_calls;
 	unsigned radio_stop_calls;
@@ -56,12 +57,22 @@ struct fake_radio {
 	int fail_pn_advance;
 	int fail_pair_delete;
 	int fail_group_delete;
+	int fail_activate;
+	unsigned pair_delete_busy_remaining;
+	unsigned group_delete_busy_remaining;
+	unsigned activate_busy_remaining;
+	unsigned pair_install_busy_remaining;
+	unsigned group_install_busy_remaining;
 	int fail_authorize;
 	int fail_radio_stop;
 	uint8_t pairwise_key[WLAN_WPA2_TK_LENGTH];
 	uint8_t group_key[WLAN_WPA2_TK_LENGTH];
 	uint8_t group_index;
 	uint64_t group_receive_pn;
+	uint64_t pairwise_key_generation;
+	uint64_t group_key_generation;
+	uint64_t activated_pairwise_generation;
+	uint64_t activated_group_generation;
 };
 
 static void
@@ -182,13 +193,18 @@ fake_key_install(void *context, uint64_t generation,
 {
 	struct fake_radio *fake = context;
 
-	assert(generation == fake->generation && key_generation == generation);
+	assert(generation == fake->generation && key_generation != 0U);
 	if (kind == WLAN_WPA2_KEY_PAIRWISE) {
 		assert(key_index == 0U && receive_packet_number == 0U);
 		fake->pair_install_calls++;
 		if (fake->fail_pair_install)
 			return EIO;
+		if (fake->pair_install_busy_remaining != 0U) {
+			fake->pair_install_busy_remaining--;
+			return EBUSY;
+		}
 		memcpy(fake->pairwise_key, key, sizeof(fake->pairwise_key));
+		fake->pairwise_key_generation = key_generation;
 		return 0;
 	}
 	assert(kind == WLAN_WPA2_KEY_GROUP && key_index > 0U &&
@@ -196,9 +212,14 @@ fake_key_install(void *context, uint64_t generation,
 	fake->group_install_calls++;
 	if (fake->fail_group_install)
 		return EIO;
+	if (fake->group_install_busy_remaining != 0U) {
+		fake->group_install_busy_remaining--;
+		return EBUSY;
+	}
 	memcpy(fake->group_key, key, sizeof(fake->group_key));
 	fake->group_index = key_index;
 	fake->group_receive_pn = receive_packet_number;
+	fake->group_key_generation = key_generation;
 	return 0;
 }
 
@@ -209,18 +230,26 @@ fake_key_delete(void *context, uint64_t generation,
 {
 	struct fake_radio *fake = context;
 
-	assert(generation == fake->generation && key_generation == generation);
+	assert(generation == fake->generation && key_generation != 0U);
 	if (kind == WLAN_WPA2_KEY_PAIRWISE) {
 		assert(key_index == 0U);
 		fake->pair_delete_calls++;
 		if (fake->fail_pair_delete)
 			return EBUSY;
+		if (fake->pair_delete_busy_remaining != 0U) {
+			fake->pair_delete_busy_remaining--;
+			return EBUSY;
+		}
 	} else {
 		assert(kind == WLAN_WPA2_KEY_GROUP && key_index > 0U &&
 		    key_index <= 3U);
 		fake->group_delete_calls++;
 		if (fake->fail_group_delete)
 			return EBUSY;
+		if (fake->group_delete_busy_remaining != 0U) {
+			fake->group_delete_busy_remaining--;
+			return EBUSY;
+		}
 	}
 	return 0;
 }
@@ -232,13 +261,33 @@ fake_key_receive_pn_advance(void *context, uint64_t generation,
 {
 	struct fake_radio *fake = context;
 
-	assert(generation == fake->generation && key_generation == generation &&
-	    kind == WLAN_WPA2_KEY_GROUP && key_index == fake->group_index &&
+	assert(generation == fake->generation && key_generation != 0U &&
+	    kind == WLAN_WPA2_KEY_GROUP && key_index > 0U && key_index <= 3U &&
 	    receive_packet_number > fake->group_receive_pn);
 	fake->pn_advance_calls++;
 	if (fake->fail_pn_advance)
 		return EIO;
 	fake->group_receive_pn = receive_packet_number;
+	return 0;
+}
+
+static int
+fake_keys_activate(void *context, uint64_t generation,
+	uint64_t pairwise_key_generation, uint64_t group_key_generation)
+{
+	struct fake_radio *fake = context;
+
+	assert(generation == fake->generation &&
+	    pairwise_key_generation != 0U && group_key_generation != 0U);
+	fake->activate_calls++;
+	if (fake->fail_activate)
+		return EIO;
+	if (fake->activate_busy_remaining != 0U) {
+		fake->activate_busy_remaining--;
+		return EBUSY;
+	}
+	fake->activated_pairwise_generation = pairwise_key_generation;
+	fake->activated_group_generation = group_key_generation;
 	return 0;
 }
 
@@ -277,6 +326,7 @@ static const struct wlan_wpa2_ops fake_ops = {
 	.key_install = fake_key_install,
 	.key_receive_pn_advance = fake_key_receive_pn_advance,
 	.key_delete = fake_key_delete,
+	.keys_activate = fake_keys_activate,
 	.authorized_set = fake_authorized_set,
 	.radio_stop = fake_radio_stop
 };
@@ -301,6 +351,7 @@ test_profile(uint64_t deadline)
 	profile.passphrase_length = sizeof(passphrase) - 1U;
 	profile.total_deadline_ticks = deadline;
 	profile.transition_timeout_ticks = 10U;
+	profile.recovery_timeout_ticks = 300U;
 	return profile;
 }
 
@@ -547,6 +598,44 @@ message_3(uint8_t frame[WLAN_WPA2_EAPOL_FRAME_MAX], uint64_t replay,
 	return length;
 }
 
+static size_t
+group_message_1(uint8_t frame[WLAN_WPA2_EAPOL_FRAME_MAX], uint64_t replay,
+	const uint8_t ptk[WLAN_WPA2_PTK_LENGTH],
+	const uint8_t gtk[WLAN_WPA2_GTK_LENGTH], uint8_t gtk_index,
+	uint64_t receive_pn)
+{
+	struct wlan_wpa2_eapol_key key;
+	uint8_t plaintext[32];
+	uint8_t wrapped[40];
+	size_t plaintext_length;
+	size_t wrapped_length;
+	size_t length;
+	unsigned index;
+
+	assert(wlan_wpa2_group_plaintext_build(plaintext, sizeof(plaintext),
+	    gtk_index, gtk, &plaintext_length) == 0);
+	wrapped_length = rfc3394_wrap(ptk + WLAN_WPA2_KCK_LENGTH, plaintext,
+	    plaintext_length, wrapped, sizeof(wrapped));
+	memset(&key, 0, sizeof(key));
+	key.message = WLAN_WPA2_EAPOL_GROUP_MESSAGE_1;
+	key.protocol_version = 2U;
+	key.key_length = WLAN_WPA2_TK_LENGTH;
+	key.replay_counter = replay;
+	for (index = 0U; index < 6U; index++) {
+		key.rsc[index] = (uint8_t)receive_pn;
+		receive_pn >>= 8;
+	}
+	key.key_data = wrapped;
+	key.key_data_length = wrapped_length;
+	assert(wlan_wpa2_eapol_key_build(frame, WLAN_WPA2_EAPOL_FRAME_MAX,
+	    &key, &length) == 0);
+	eapol_sign(frame, length, ptk);
+	wlan_crypto_erase(&key, sizeof(key));
+	wlan_crypto_erase(plaintext, sizeof(plaintext));
+	wlan_crypto_erase(wrapped, sizeof(wrapped));
+	return length;
+}
+
 static void
 init_and_reach_message_1(struct wlan_wpa2_engine *engine,
 	struct fake_radio *fake, uint64_t generation)
@@ -611,6 +700,26 @@ reach_message_3(struct wlan_wpa2_engine *engine, struct fake_radio *fake,
 	assert(report_captured(engine, fake, 1, 0, 7U) == 0);
 	assert(wlan_wpa2_engine_state(engine) == WLAN_WPA2_STATE_MESSAGE_3);
 	return m1_length;
+}
+
+static void
+reach_authorized(struct wlan_wpa2_engine *engine, struct fake_radio *fake,
+	uint64_t generation, uint8_t anonce[WLAN_WPA2_NONCE_LENGTH],
+	uint8_t ptk[WLAN_WPA2_PTK_LENGTH],
+	uint8_t gtk[WLAN_WPA2_GTK_LENGTH], uint8_t gtk_index)
+{
+	uint8_t m1[WLAN_WPA2_EAPOL_FRAME_MAX];
+	uint8_t m3[WLAN_WPA2_EAPOL_FRAME_MAX];
+	size_t length;
+
+	(void)reach_message_3(engine, fake, generation, anonce, ptk, m1);
+	fill_bytes(gtk, WLAN_WPA2_GTK_LENGTH, 0x91U);
+	length = message_3(m3, 18U, anonce, ptk, gtk, gtk_index, 7U);
+	assert(wlan_wpa2_engine_receive_eapol(engine, generation, bssid,
+	    station, m3, length, 8U) == 0);
+	assert(report_captured(engine, fake, 1, 0, 9U) == 0);
+	assert(wlan_wpa2_engine_state(engine) == WLAN_WPA2_STATE_AUTHORIZED &&
+	    engine->reconnectable && engine->authorized);
 }
 
 static void
@@ -1195,6 +1304,234 @@ test_uncertain_callback_rollback(void)
 }
 
 static void
+test_group_rekey_stage_retry_and_replay(void)
+{
+	struct wlan_wpa2_engine engine;
+	struct fake_radio fake;
+	struct wlan_wpa2_eapol_key parsed;
+	uint8_t anonce[WLAN_WPA2_NONCE_LENGTH];
+	uint8_t ptk[WLAN_WPA2_PTK_LENGTH];
+	uint8_t gtk[WLAN_WPA2_GTK_LENGTH];
+	uint8_t replacement[WLAN_WPA2_GTK_LENGTH];
+	uint8_t g1[WLAN_WPA2_EAPOL_FRAME_MAX];
+	uint8_t pair_m1[WLAN_WPA2_EAPOL_FRAME_MAX];
+	size_t length;
+	uint64_t pairwise_generation;
+	uint64_t group_generation;
+	unsigned install_calls;
+	unsigned activate_calls;
+	unsigned delete_calls;
+
+	reach_authorized(&engine, &fake, 200U, anonce, ptk, gtk, 1U);
+	pairwise_generation = engine.key_generation;
+	group_generation = engine.group_key_generation;
+	fill_bytes(replacement, sizeof(replacement), 0x41U);
+	fake.group_install_busy_remaining = 1U;
+	length = group_message_1(g1, 30U, ptk, replacement, 2U, 10U);
+	install_calls = fake.group_install_calls;
+	assert(wlan_wpa2_engine_receive_eapol(&engine, 200U, bssid, station,
+	    g1, length, 20U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_GROUP_STAGE &&
+	    engine.group_key_generation == group_generation &&
+	    engine.pending_group_installed &&
+	    !engine.pending_group_programmed && engine.authorized);
+	assert(fake.group_install_calls == install_calls + 1U);
+	assert(wlan_wpa2_engine_receive_eapol(&engine, 200U, bssid, station,
+	    g1, length, 20U) == EALREADY);
+	assert(wlan_wpa2_engine_timer(&engine, 21U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) ==
+	    WLAN_WPA2_STATE_GROUP_MESSAGE_2_TX &&
+	    fake.group_install_calls == install_calls + 2U);
+	assert(wlan_wpa2_eapol_key_parse(fake.frame, fake.frame_length,
+	    &parsed) == 0 &&
+	    parsed.message == WLAN_WPA2_EAPOL_GROUP_MESSAGE_2);
+
+	/* An authenticator may advance Replay Counter and RSC for the same
+	 * staged GTK.  The engine raises the PN floor and rebuilds G2, but does
+	 * not allocate or install another generation. */
+	length = group_message_1(g1, 31U, ptk, replacement, 2U, 11U);
+	assert(wlan_wpa2_engine_receive_eapol(&engine, 200U, bssid, station,
+	    g1, length, 22U) == 0);
+	assert(fake.group_install_calls == install_calls + 2U &&
+	    fake.pn_advance_calls == 1U);
+	assert(report_captured(&engine, &fake, 1, 0, 23U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_AUTHORIZED &&
+	    engine.key_generation == pairwise_generation &&
+	    engine.group_key_generation != group_generation &&
+	    engine.group_receive_packet_number == 11U &&
+	    fake.activate_calls == 1U && fake.group_delete_calls == 1U);
+
+	/* Same-index GTK replacement is valid and crosses the same stage/activate
+	 * contract; it is not rejected merely because the index is reused. */
+	memcpy(gtk, replacement, sizeof(gtk));
+	fill_bytes(replacement, sizeof(replacement), 0x61U);
+	length = group_message_1(g1, 32U, ptk, replacement, 2U, 12U);
+	assert(wlan_wpa2_engine_receive_eapol(&engine, 200U, bssid, station,
+	    g1, length, 24U) == 0);
+	activate_calls = fake.activate_calls;
+	delete_calls = fake.group_delete_calls;
+	assert(report_captured(&engine, &fake, 1, 0, 25U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_AUTHORIZED &&
+	    fake.activate_calls == activate_calls + 1U &&
+	    fake.group_delete_calls == delete_calls + 1U);
+
+	/* Pairwise rekey replay must exceed every preceding EAPOL-Key replay,
+	 * including the latest group-key exchange. */
+	fill_bytes(anonce, sizeof(anonce), 0x31U);
+	length = message_1(pair_m1, 32U, anonce);
+	assert(wlan_wpa2_engine_receive_eapol(&engine, 200U, bssid, station,
+	    pair_m1, length, 26U) == EACCES);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_FAILED);
+	assert(wlan_wpa2_engine_stop(&engine) == 0);
+	assert(wlan_wpa2_engine_test_secrets_clear(&engine));
+	wlan_crypto_erase(ptk, sizeof(ptk));
+}
+
+static void
+test_pairwise_rekey_stage_and_retire_retry(void)
+{
+	struct wlan_wpa2_engine engine;
+	struct fake_radio fake;
+	struct wlan_wpa2_eapol_key parsed;
+	uint8_t old_anonce[WLAN_WPA2_NONCE_LENGTH];
+	uint8_t new_anonce[WLAN_WPA2_NONCE_LENGTH];
+	uint8_t old_ptk[WLAN_WPA2_PTK_LENGTH];
+	uint8_t new_ptk[WLAN_WPA2_PTK_LENGTH];
+	uint8_t gtk[WLAN_WPA2_GTK_LENGTH];
+	uint8_t replacement[WLAN_WPA2_GTK_LENGTH];
+	uint8_t m1[WLAN_WPA2_EAPOL_FRAME_MAX];
+	uint8_t m3[WLAN_WPA2_EAPOL_FRAME_MAX];
+	size_t length;
+	uint64_t old_pairwise_generation;
+	uint64_t old_group_generation;
+	unsigned activate_calls;
+	unsigned group_delete_calls;
+
+	reach_authorized(&engine, &fake, 201U, old_anonce, old_ptk, gtk, 1U);
+	old_pairwise_generation = engine.key_generation;
+	old_group_generation = engine.group_key_generation;
+	fill_bytes(new_anonce, sizeof(new_anonce), 0x51U);
+	length = message_1(m1, 40U, new_anonce);
+	assert(wlan_wpa2_engine_receive_eapol(&engine, 201U, bssid, station,
+	    m1, length, 20U) == 0);
+	assert(!engine.authorized && engine.pairwise_rekey &&
+	    fake.authorize_off_calls == 1U);
+	assert(wlan_wpa2_eapol_key_parse(fake.frame, fake.frame_length,
+	    &parsed) == 0 && parsed.message == WLAN_WPA2_EAPOL_MESSAGE_2);
+	derive_test_ptk(parsed.nonce, new_anonce, new_ptk);
+	assert(report_captured(&engine, &fake, 1, 0, 21U) == 0);
+
+	fill_bytes(replacement, sizeof(replacement), 0x71U);
+	fake.pair_install_busy_remaining = 1U;
+	length = message_3(m3, 41U, new_anonce, new_ptk, replacement, 1U, 20U);
+	assert(wlan_wpa2_engine_receive_eapol(&engine, 201U, bssid, station,
+	    m3, length, 22U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_PAIRWISE_STAGE &&
+	    engine.key_generation == old_pairwise_generation &&
+	    engine.group_key_generation == old_group_generation &&
+	    engine.pending_pairwise_installed &&
+	    !engine.pending_pairwise_programmed);
+	assert(wlan_wpa2_engine_receive_eapol(&engine, 201U, bssid, station,
+	    m3, length, 22U) == EALREADY);
+	assert(wlan_wpa2_engine_timer(&engine, 23U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_MESSAGE_4_TX &&
+	    engine.key_generation == old_pairwise_generation &&
+	    engine.pending_pairwise_programmed && engine.pending_group_programmed);
+
+	/* Activation succeeds, old GTK retirement succeeds, then old PTK
+	 * retirement reports EBUSY.  The next timer resumes at the one incomplete
+	 * step: it must not activate again or delete the old GTK again. */
+	fake.pair_delete_busy_remaining = 1U;
+	assert(report_captured(&engine, &fake, 1, 0, 24U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) ==
+	    WLAN_WPA2_STATE_PAIRWISE_ACTIVATE);
+	activate_calls = fake.activate_calls;
+	group_delete_calls = fake.group_delete_calls;
+	assert(activate_calls == 1U && group_delete_calls == 1U &&
+	    fake.pair_delete_calls == 1U);
+	assert(wlan_wpa2_engine_timer(&engine, 25U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_AUTHORIZED &&
+	    fake.activate_calls == activate_calls &&
+	    fake.group_delete_calls == group_delete_calls &&
+	    fake.pair_delete_calls == 2U && fake.authorize_on_calls == 2U &&
+	    engine.key_generation != old_pairwise_generation &&
+	    engine.group_key_generation != old_group_generation &&
+	    !engine.pending_pairwise_installed &&
+	    !engine.pending_group_installed);
+	assert(wlan_wpa2_engine_stop(&engine) == 0);
+	assert(wlan_wpa2_engine_test_secrets_clear(&engine));
+	wlan_crypto_erase(old_ptk, sizeof(old_ptk));
+	wlan_crypto_erase(new_ptk, sizeof(new_ptk));
+}
+
+static void
+test_reconnect_cleanup_retry_and_fresh_generation(void)
+{
+	struct wlan_wpa2_engine engine;
+	struct fake_radio fake;
+	uint8_t anonce[WLAN_WPA2_NONCE_LENGTH];
+	uint8_t ptk[WLAN_WPA2_PTK_LENGTH];
+	uint8_t gtk[WLAN_WPA2_GTK_LENGTH];
+	uint64_t old_key_generation;
+
+	reach_authorized(&engine, &fake, 202U, anonce, ptk, gtk, 1U);
+	old_key_generation = engine.key_generation;
+	fake.group_delete_busy_remaining = 1U;
+	assert(wlan_wpa2_engine_link_lost(&engine, ECONNRESET) == EBUSY);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_FAILED &&
+	    engine.group_installed && wlan_wpa2_engine_can_reconnect(&engine));
+	assert(wlan_wpa2_engine_link_lost(&engine, ECONNRESET) == 0);
+	assert(wlan_wpa2_engine_state(&engine) ==
+	    WLAN_WPA2_STATE_RECONNECT_WAIT && !engine.configured &&
+	    !engine.associated && !engine.pairwise_installed &&
+	    !engine.group_installed && wlan_wpa2_engine_can_reconnect(&engine));
+	assert(wlan_wpa2_engine_reconnect(&engine, 203U, 1000U, 30U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_AUTH_TX &&
+	    engine.generation == 203U &&
+	    engine.key_generation > old_key_generation &&
+	    fake.radio_start_calls == 2U);
+	assert(wlan_wpa2_engine_stop(&engine) == 0);
+	assert(wlan_wpa2_engine_test_secrets_clear(&engine));
+	wlan_crypto_erase(ptk, sizeof(ptk));
+}
+
+static void
+test_group_rekey_100_iterations(void)
+{
+	struct wlan_wpa2_engine engine;
+	struct fake_radio fake;
+	uint8_t anonce[WLAN_WPA2_NONCE_LENGTH];
+	uint8_t ptk[WLAN_WPA2_PTK_LENGTH];
+	uint8_t gtk[WLAN_WPA2_GTK_LENGTH];
+	uint8_t replacement[WLAN_WPA2_GTK_LENGTH];
+	uint8_t g1[WLAN_WPA2_EAPOL_FRAME_MAX];
+	size_t length;
+	unsigned iteration;
+
+	reach_authorized(&engine, &fake, 204U, anonce, ptk, gtk, 1U);
+	for (iteration = 0U; iteration < 100U; iteration++) {
+		fill_bytes(replacement, sizeof(replacement),
+		    (uint8_t)(0x20U + iteration));
+		length = group_message_1(g1, 30U + iteration, ptk, replacement,
+		    (uint8_t)(1U + (iteration % 3U)), 20U + iteration);
+		assert(wlan_wpa2_engine_receive_eapol(&engine, 204U, bssid,
+		    station, g1, length, 20U + iteration * 2U) == 0);
+		assert(report_captured(&engine, &fake, 1, 0,
+		    21U + iteration * 2U) == 0);
+		assert(wlan_wpa2_engine_state(&engine) ==
+		    WLAN_WPA2_STATE_AUTHORIZED && engine.authorized &&
+		    !engine.pending_group_installed &&
+		    !engine.pending_group_programmed &&
+		    !engine.activation_complete);
+	}
+	assert(fake.activate_calls == 100U &&
+	    fake.group_delete_calls == 100U);
+	assert(wlan_wpa2_engine_stop(&engine) == 0);
+	assert(wlan_wpa2_engine_test_secrets_clear(&engine));
+	wlan_crypto_erase(ptk, sizeof(ptk));
+}
+
+static void
 test_argument_contract(void)
 {
 	struct wlan_wpa2_engine engine;
@@ -1229,5 +1566,9 @@ main(void)
 	test_authorize_callback_failure();
 	test_checked_cleanup_retry();
 	test_uncertain_callback_rollback();
+	test_group_rekey_stage_retry_and_replay();
+	test_pairwise_rekey_stage_and_retire_retry();
+	test_reconnect_cleanup_retry_and_fresh_generation();
+	test_group_rekey_100_iterations();
 	return 0;
 }

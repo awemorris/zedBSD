@@ -147,7 +147,7 @@ struct rtl8822b_radio {
 	uint8_t state;
 	uint8_t channel;
 	uint8_t power_limits_valid;
-	uint8_t reserved;
+	uint8_t rx_generation_paused;
 };
 
 enum rtl8822b_rx_kind {
@@ -221,6 +221,13 @@ int rtl8822b_radio_start(struct rtl8822b_radio *radio,
 	uint64_t deadline_ticks);
 int rtl8822b_radio_set_channel(struct rtl8822b_radio *radio,
 	uint8_t channel, uint64_t deadline_ticks);
+/* Stop MAC/HCI RX and release the complete device-side RXDMA/FIFO generation
+ * before a CAM generation switch.  resume re-enables RX only after the USB
+ * owner has cancelled/drained the old URB and armed a fresh one. */
+int rtl8822b_radio_rx_generation_pause(struct rtl8822b_radio *radio,
+	uint64_t deadline_ticks);
+int rtl8822b_radio_rx_generation_resume(struct rtl8822b_radio *radio,
+	uint64_t deadline_ticks);
 int rtl8822b_radio_stop(struct rtl8822b_radio *radio,
 	uint64_t deadline_ticks);
 int rtl8822b_radio_active_scan_allowed(const struct rtl8822b_radio *radio,
@@ -228,6 +235,10 @@ int rtl8822b_radio_active_scan_allowed(const struct rtl8822b_radio *radio,
 int rtl8822b_radio_management_frame_prepare(
 	const struct rtl8822b_radio *radio, uint8_t *wire, size_t capacity,
 	const uint8_t *frame, size_t frame_length, size_t *wire_length);
+int rtl8822b_radio_deauthentication_prepare(
+	const struct rtl8822b_radio *radio, uint8_t *wire, size_t capacity,
+	const uint8_t bssid[6], const uint8_t station[6], uint16_t reason,
+	size_t *wire_length);
 int rtl8822b_security_enable(struct rtl8822b_radio *radio,
 	uint64_t deadline_ticks);
 /*
@@ -245,6 +256,12 @@ int rtl8822b_security_clear_association(struct rtl8822b_radio *radio,
 int rtl8822b_cam_program_ccmp(struct rtl8822b_radio *radio, uint8_t slot,
 	uint8_t key_index, int group, const uint8_t address[6],
 	const uint8_t key[16], uint64_t deadline_ticks);
+int rtl8822b_cam_stage_ccmp(struct rtl8822b_radio *radio, uint8_t slot,
+	uint8_t key_index, int group, const uint8_t address[6],
+	const uint8_t key[16], uint64_t deadline_ticks);
+int rtl8822b_cam_activate_ccmp(struct rtl8822b_radio *radio, uint8_t slot,
+	uint8_t key_index, int group, const uint8_t address[6],
+	uint64_t deadline_ticks);
 int rtl8822b_cam_clear(struct rtl8822b_radio *radio, uint8_t slot,
 	uint64_t deadline_ticks);
 int rtl8822b_data_frame_prepare(const struct rtl8822b_radio *radio,

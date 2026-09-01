@@ -63,7 +63,7 @@ test_round_trip(void)
 	security.packet_number = 0x010203040506ULL;
 	security.decrypted = 1U;
 	security.cipher_ccmp = 1U;
-	state.key_generation = 19U;
+	state.pairwise_key_generation = 19U;
 	assert(wlan_l2_parse_data(station, bssid, mpdu, mpdu_length,
 	    &security, &state, output, sizeof(output), &output_length) == 0);
 	assert(output_length == ethernet_length);
@@ -94,7 +94,7 @@ test_group_and_plain(void)
 	security.decrypted = 1U;
 	security.cipher_ccmp = 1U;
 	security.key_index = 2U;
-	state.key_generation = 3U;
+	state.group_key_generation[2U] = 3U;
 	assert(wlan_l2_parse_data(station, bssid, mpdu, mpdu_length,
 	    &security, &state, output, sizeof(output), &output_length) == 0);
 	assert(state.group_packet_number[2] == 7U);
@@ -136,10 +136,10 @@ test_rejections(void)
 	security.packet_number = 1U;
 	security.decrypted = 1U;
 	security.cipher_ccmp = 1U;
-	state.key_generation = 2U;
+	state.pairwise_key_generation = 2U;
 	assert(wlan_l2_parse_data(station, bssid, mpdu, mpdu_length,
 	    &security, &state, output, sizeof(output), &output_length) == EACCES);
-	state.key_generation = 1U;
+	state.pairwise_key_generation = 1U;
 	security.key_index = 1U;
 	assert(wlan_l2_parse_data(station, bssid, mpdu, mpdu_length,
 	    &security, &state, output, sizeof(output), &output_length) == EACCES);

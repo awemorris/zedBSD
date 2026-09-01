@@ -27,7 +27,8 @@ struct wlan_l2_rx_security {
 };
 
 struct wlan_l2_rx_state {
-	uint64_t key_generation;
+	uint64_t pairwise_key_generation;
+	uint64_t group_key_generation[4];
 	uint64_t pairwise_packet_number;
 	uint64_t group_packet_number[4];
 };

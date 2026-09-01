@@ -19,7 +19,9 @@ enum wlan_wpa2_eapol_message {
 	WLAN_WPA2_EAPOL_MESSAGE_1 = 1,
 	WLAN_WPA2_EAPOL_MESSAGE_2 = 2,
 	WLAN_WPA2_EAPOL_MESSAGE_3 = 3,
-	WLAN_WPA2_EAPOL_MESSAGE_4 = 4
+	WLAN_WPA2_EAPOL_MESSAGE_4 = 4,
+	WLAN_WPA2_EAPOL_GROUP_MESSAGE_1 = 5,
+	WLAN_WPA2_EAPOL_GROUP_MESSAGE_2 = 6
 };
 
 /* key_data points into the caller-owned parsed frame, or into caller-owned
@@ -77,7 +79,8 @@ int wlan_wpa2_assoc_response_parse(const uint8_t *frame, size_t length,
 
 /* EAPOL helpers consume and produce an EAPOL payload beginning with the
  * 802.1X protocol-version octet (the Ethernet header/EtherType is external).
- * Parse accepts only the four exact WPA2-PSK/CCMP key-info profiles. */
+ * Parse accepts only the six exact WPA2-PSK/CCMP pairwise/group key-info
+ * profiles implemented by this engine. */
 int wlan_wpa2_eapol_key_parse(const uint8_t *frame, size_t length,
 	struct wlan_wpa2_eapol_key *result);
 int wlan_wpa2_eapol_key_build(uint8_t *output, size_t capacity,
@@ -91,6 +94,14 @@ int wlan_wpa2_eapol_key_build(uint8_t *output, size_t capacity,
 int wlan_wpa2_m3_plaintext_parse(const uint8_t *plaintext, size_t length,
 	struct wlan_wpa2_gtk *result);
 int wlan_wpa2_m3_plaintext_build(uint8_t *output, size_t capacity,
+	uint8_t key_index, const uint8_t gtk[WLAN_WPA2_GTK_LENGTH],
+	size_t *result_length);
+
+/* Group-Key Message 1 carries only the GTK KDE and canonical AES-wrap
+ * padding.  It must not smuggle another association RSN element. */
+int wlan_wpa2_group_plaintext_parse(const uint8_t *plaintext, size_t length,
+	struct wlan_wpa2_gtk *result);
+int wlan_wpa2_group_plaintext_build(uint8_t *output, size_t capacity,
 	uint8_t key_index, const uint8_t gtk[WLAN_WPA2_GTK_LENGTH],
 	size_t *result_length);
 

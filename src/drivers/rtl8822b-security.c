@@ -30,6 +30,7 @@
 #define RTL8822B_CAM_POLLING            0x80000000U
 #define RTL8822B_CAM_ENTRY_SHIFT        3U
 #define RTL8822B_CAM_AES                4U
+#define RTL8822B_CAM_VALID              0x00008000U
 
 static uint32_t
 load_le32(const uint8_t *bytes)
@@ -151,6 +152,23 @@ cam_write_word(struct rtl8822b_radio *radio, uint8_t slot,
 	    RTL8822B_CAM_WRITE_ENABLE | RTL8822B_CAM_POLLING | address,
 	    deadline);
 	return error == 0 ? cam_wait(radio, deadline) : error;
+}
+
+static uint32_t
+cam_ccmp_word0(uint8_t key_index, int group, const uint8_t address[6])
+{
+	return key_index | (RTL8822B_CAM_AES << 2) |
+	    ((uint32_t)group << 6) | RTL8822B_CAM_VALID |
+	    ((uint32_t)address[0] << 16) | ((uint32_t)address[1] << 24);
+}
+
+static int
+cam_ccmp_arguments_valid(const struct rtl8822b_radio *radio, uint8_t slot,
+	uint8_t key_index, int group, const uint8_t address[6])
+{
+	return radio != NULL && address != NULL &&
+	    slot < RTL8822B_CAM_ENTRY_COUNT && key_index <= 3U &&
+	    (group == 0 || group == 1);
 }
 
 int
@@ -276,14 +294,11 @@ rtl8822b_cam_program_ccmp(struct rtl8822b_radio *radio, uint8_t slot,
 	int index;
 	int error;
 
-	if (radio == NULL || address == NULL || key == NULL ||
-	    slot >= RTL8822B_CAM_ENTRY_COUNT || key_index > 3U ||
-	    (group != 0 && group != 1))
+	if (!cam_ccmp_arguments_valid(radio, slot, key_index, group, address) ||
+	    key == NULL)
 		return EINVAL;
 	memset(words, 0, sizeof(words));
-	words[0] = key_index | (RTL8822B_CAM_AES << 2) |
-	    ((uint32_t)group << 6) | 0x00008000U |
-	    ((uint32_t)address[0] << 16) | ((uint32_t)address[1] << 24);
+	words[0] = cam_ccmp_word0(key_index, group, address);
 	words[1] = (uint32_t)address[2] | ((uint32_t)address[3] << 8) |
 	    ((uint32_t)address[4] << 16) | ((uint32_t)address[5] << 24);
 	for (index = 0; index < 4; index++)
@@ -303,6 +318,54 @@ rollback:
 out:
 	secret_erase(words, sizeof(words));
 	return error;
+}
+
+/*
+ * Stage a replacement without making it visible to the CAM lookup engine.
+ * Word zero contains both the address prefix and VALID bit, so it is cleared
+ * before any secret material is written and deliberately remains clear on
+ * success.  The owning driver closes TX admission before calling this helper
+ * and later performs the fail-closed old-clear/new-activate transition.
+ */
+int
+rtl8822b_cam_stage_ccmp(struct rtl8822b_radio *radio, uint8_t slot,
+	uint8_t key_index, int group, const uint8_t address[6],
+	const uint8_t key[16], uint64_t deadline_ticks)
+{
+	uint32_t words[8];
+	int index;
+	int error;
+
+	if (!cam_ccmp_arguments_valid(radio, slot, key_index, group, address) ||
+	    key == NULL)
+		return EINVAL;
+	memset(words, 0, sizeof(words));
+	words[1] = (uint32_t)address[2] | ((uint32_t)address[3] << 8) |
+	    ((uint32_t)address[4] << 16) | ((uint32_t)address[5] << 24);
+	for (index = 0; index < 4; index++)
+		words[2 + index] = load_le32(key + (size_t)index * 4U);
+	error = cam_write_word(radio, slot, 0U, 0U, deadline_ticks);
+	for (index = 7; error == 0 && index >= 1; index--)
+		error = cam_write_word(radio, slot, (uint8_t)index, words[index],
+		    deadline_ticks);
+	if (error != 0)
+		(void)cam_write_word(radio, slot, 0U, 0U, deadline_ticks);
+	secret_erase(words, sizeof(words));
+	return error;
+}
+
+/* Publish an already staged entry.  Callers must first clear every live CAM
+ * entry that can match the same traffic; this final word-zero write is the
+ * sole transition from inert secret storage to a hardware-visible key. */
+int
+rtl8822b_cam_activate_ccmp(struct rtl8822b_radio *radio, uint8_t slot,
+	uint8_t key_index, int group, const uint8_t address[6],
+	uint64_t deadline_ticks)
+{
+	if (!cam_ccmp_arguments_valid(radio, slot, key_index, group, address))
+		return EINVAL;
+	return cam_write_word(radio, slot, 0U,
+	    cam_ccmp_word0(key_index, group, address), deadline_ticks);
 }
 
 int

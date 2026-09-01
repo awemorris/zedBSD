@@ -171,6 +171,20 @@ test_association_and_cam(void)
 	assert((fake.cam_value[15] & 0x40U) != 0U);
 	assert(rtl8822b_cam_clear(&radio, 2U, 100U) == 0);
 	assert(fake.cam_value[16] == 0U);
+	assert(rtl8822b_cam_stage_ccmp(&radio, 5U, 0U, 0, bssid, key,
+	    100U) == 0);
+	/* Stage first invalidates word zero, writes only words 7..1, and leaves
+	 * the replacement invisible until the explicit activation barrier. */
+	assert(fake.cam_count == 25U);
+	assert(fake.cam_address[17] == 5U * 8U);
+	assert(fake.cam_value[17] == 0U);
+	assert(fake.cam_address[24] == 5U * 8U + 1U);
+	assert(rtl8822b_cam_activate_ccmp(&radio, 5U, 0U, 0, bssid,
+	    100U) == 0);
+	assert(fake.cam_address[25] == 5U * 8U);
+	assert((fake.cam_value[25] & 0x8000U) != 0U);
+	assert(rtl8822b_cam_clear(&radio, 5U, 100U) == 0);
+	assert(fake.cam_value[26] == 0U);
 	assert(rtl8822b_security_clear_association(&radio, 100U) == 0);
 	assert((fake.registers[0x608U / 4U] & 0x40U) == 0U);
 	assert((fake.registers[0x100U / 4U] & 0x30000U) == 0U);

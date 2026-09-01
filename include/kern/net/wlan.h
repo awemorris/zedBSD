@@ -135,6 +135,9 @@ struct wlan_radio_ops {
 	int (*key_delete)(void *context, uint64_t generation,
 		enum wlan_radio_key_kind kind, uint8_t key_index,
 		uint64_t key_generation, uint64_t deadline_ticks);
+	int (*keys_activate)(void *context, uint64_t generation,
+		uint64_t pairwise_key_generation,
+		uint64_t group_key_generation, uint64_t deadline_ticks);
 	int (*quiesce)(void *context);
 };
 
@@ -190,6 +193,11 @@ int wlan_station_report_frame(struct wlan_station *station,
 	const struct wlan_radio_rx_frame *report);
 int wlan_station_report_tx_complete(struct wlan_station *station,
 	uint64_t generation, uint64_t cookie, int acknowledged, int error);
+/* Poll/thread-context recoverable transport/firmware loss.  It closes carrier
+ * and retires the reported generation before arming bounded same-network
+ * recovery; explicit interface teardown cancels that recovery. */
+int wlan_station_report_link_loss(struct wlan_station *station,
+	uint64_t generation, int error);
 int wlan_station_transmit(struct wlan_station *station,
 	struct packet_buf *packet);
 
@@ -201,6 +209,38 @@ int wlan_work_pending(void);
 
 #ifdef WLAN_TESTING
 typedef void (*wlan_station_test_hook_fn)(void *context);
+struct wlan_station_test_snapshot {
+	uint64_t connection_generation;
+	uint64_t connection_deadline;
+	uint64_t connection_step_deadline;
+	uint64_t reconnect_deadline;
+	uint64_t reconnect_next_attempt;
+	uint64_t reconnect_cleanup_retry;
+	uint64_t connect_retry_deadline;
+	uint64_t scan_retry_deadline;
+	uint64_t beacon_watch_deadline;
+	uint64_t pairwise_key_generation;
+	uint64_t group_key_generation;
+	uint64_t pending_pairwise_key_generation;
+	uint64_t pending_group_key_generation;
+	uint64_t pairwise_receive_packet_number;
+	uint64_t group_receive_packet_number[4];
+	uint64_t pending_group_receive_packet_number;
+	uint64_t transmit_packet_number;
+	uint32_t reconnect_attempts;
+	uint32_t state;
+	uint32_t wpa_state;
+	uint16_t association_capability;
+	uint8_t reconnect_pending;
+	uint8_t reconnect_scan_active;
+	uint8_t controlled_port;
+	uint8_t connect_driver_active;
+	uint8_t connect_stop_pending;
+	uint8_t connect_retire_explicit;
+	uint8_t reserved[2];
+};
+#define WLAN_STATION_TEST_PHASE_ASSOCIATING 1U
+#define WLAN_STATION_TEST_PHASE_FOUR_WAY 2U
 int wlan_station_test_set_report_hook(struct wlan_station *station,
 	wlan_station_test_hook_fn hook, void *context);
 int wlan_station_test_attach(struct net_device *device,
@@ -209,6 +249,19 @@ int wlan_station_test_attach(struct net_device *device,
 	void *clock_context, struct wlan_station **result);
 unsigned wlan_station_test_control_waiters(struct wlan_station *station);
 int wlan_station_test_secrets_clear(struct wlan_station *station);
+int wlan_station_test_seed_authorized(struct wlan_station *station,
+	const struct wlan_bss_record *bss, uint64_t generation,
+	uint64_t key_generation);
+int wlan_station_test_begin_pairwise_rekey(struct wlan_station *station);
+int wlan_station_test_begin_group_rekey(struct wlan_station *station);
+int wlan_station_test_set_initial_phase(struct wlan_station *station,
+	uint32_t phase);
+int wlan_station_test_complete_authorized(struct wlan_station *station,
+	uint64_t key_generation);
+int wlan_station_test_snapshot(struct wlan_station *station,
+	struct wlan_station_test_snapshot *snapshot);
+int wlan_station_test_transmit_eapol(struct wlan_station *station,
+	uint64_t cookie, const uint8_t *frame, size_t length);
 #endif
 
 #endif

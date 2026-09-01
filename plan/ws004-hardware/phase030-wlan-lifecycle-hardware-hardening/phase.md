@@ -4,8 +4,8 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p030`
 
-Status: planned and dependency-ready after `q059`/WS005 p009 proved minimum
-physical communication; not queued and not started
+Status: automatic milestone in progress (`q060`); later shared physical
+closure remains outside this Queue
 
 Parent: [WS004 hardware expansion](../ws.md)
 

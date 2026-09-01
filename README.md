@@ -1,18 +1,25 @@
 zedBSD
 ======
 
-`zedBSD` is a small BSD re-implementation for retro and contemporary
-computers. Its hardware abstraction layer keeps the platform-neutral kernel
-portable across substantially different machines.
+`zedBSD` is a modern, re-designed BSD-based kernel and base system
+aiming to implement all `POSIX.1-2024` and `Single UNIX Specification
+version 4 (SUSv4)` features, along with `μITRON` hard real-time APIs.
+
+It runs on the latest and retro computers. Its HAL (Hardware
+Abstraction Layer, or Historic Architecture Library) keeps the
+platform-neutral kernel portable across substantially different
+machines.
 
 Supported targets are the following:
 
-- NEC PC-9800 i386
-- IBM PC/AT i386
-- IBM PC/AT amd64
-- Raspberry Pi 4 aarch64
-- sun4u/sparcv9
-- Sharp X68000/m68k
+- Well-supported:
+    - IBM PC/AT amd64
+    - IBM PC/AT i386
+    - NEC PC-9800 i386
+- Working:
+    - Raspberry Pi 4 aarch64
+    - sun4u/sparcv9
+    - Sharp X68000/m68k
 
 ## Building
 

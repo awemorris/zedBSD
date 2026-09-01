@@ -1,132 +1,90 @@
-# Queue: RTL8822BU minimum end-to-end connectivity
+# Queue: RTL8822BU lifecycle automatic hardening
 
 Last updated: 2026-09-01
 
-QID: `q059`
+QID: `q060`
 
-Queue status: completed
+Queue status: in progress
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: the user changed the implementation order on 2026-09-01.
-Establish one simple successful communication path before perfecting detailed
-error, recovery, race, and long-run behavior. Q058 already supplies the
-automatic WPA2-Personal/CCMP kernel and RTL8822BU L2 foundation.
+Authorization: the user authorized continuous Queue execution, prioritized
+WS004 before WS005, and directed the implementation to establish a simple
+working communication path before perfecting abnormal and semi-normal cases.
+Q059 completed that normal path. The user then explicitly selected complete
+RTL8822BU abnormal/semi-normal hardening as the next priority.
 
-Timebox: none. Execute the normal path only. When a failure occurs, diagnose
-and repair the first boundary blocking that path; do not broaden the Queue
-into speculative abnormal-case hardening.
+Timebox: none. Execute only the finite automatic milestone of p030. Do not
+request another physical adapter run or start WS005 p008 final acceptance in
+this Queue.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q058](queue-q058.md)
+Previous Queue: [q059](queue-q059.md)
 
 ## Purpose
 
-Provide the shortest useful vertical slice:
-
-```text
-RTL8822BU attach and firmware
-  -> wlan0
-  -> /sbin/ifconfig wlan0 up
-  -> /sbin/wifi scan and list
-  -> WPA2-Personal/CCMP connect
-  -> carrier
-  -> /sbin/dhcpc
-  -> ping and bounded fetch
-```
-
-This Queue deliberately precedes rekey, automatic reconnect, firmware crash
-recovery, repeated hotplug, exhaustive malformed input, exhaustive race/fault
-injection, and long repeatability campaigns.
+Harden the now-working RTL8822BU WPA2-Personal/CCMP station across rekey,
+bounded same-network reconnect, interface close/reopen, USB and firmware
+failure, unplug/reinsert, shutdown, and concurrent USB-storage activity using
+production-linked deterministic fixtures. Preserve the q059 normal path and
+leave all physical lifecycle and five-run repeatability evidence to the later
+shared WS005 p008 checkpoint.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws005-p004` | [Primitive wifi command](ws005-networking/phase004-wifi-ioctl-command/phase.md) | completed (`q059`) | The direct root `/sbin/wifi` human command drives the existing scan/status/connect/disconnect WLAN ioctls on the normal path |
-| 2 | `ws005-p009` | [Minimum connectivity](ws005-networking/phase009-wlan-minimum-connectivity/phase.md) | completed (`q059`) | One physical adapter run reaches scan, secure carrier, DHCP, ping, and bounded fetch using runtime-only credentials |
+| 1 | `ws004-p030` | [WLAN lifecycle hardening](ws004-hardware/phase030-wlan-lifecycle-hardware-hardening/phase.md) | in-progress | P030's rekey/reconnect/lifecycle/fault/race/storage automatic milestone passes without claiming its later shared physical closure |
 
 ## Accepted decisions
 
-- Implement only the direct root human `/sbin/wifi` forms needed for initial
-  bring-up. `--machine`, secret fd 4, ZNV2, `networkd`, profile lookup, and
-  `net wifi` orchestration remain p006/p007 work after basic connectivity.
-- Use the existing p027-p029 kernel UAPI and WPA2/CCMP implementation. Do not
-  add rekey/reconnect/recovery APIs merely to complete this Queue.
-- Apply essential bounds, checked return values, finite waits, and secret
-  buffer clearing to the normal path. Defer exhaustive syntax/error matrices,
-  every cancellation race, and every injected failure to later hardening.
-- The physical check is one developmental success check, not final
-  acceptance or repeatability evidence. It does not require five runs and
-  does not induce link loss, unplug/reinsert, or firmware failure.
-- The supplied SSID and passphrase are runtime-only inputs. Never write them
-  to a plan, source, fixture, image, retained command line, diagnostic, test
-  log, or commit.
-- Do not use `.internal/` or aggregate `make check`.
+- Retain only the already supported station-mode 2.4-GHz/20-MHz
+  WPA2-Personal/CCMP profile. Do not add 5 GHz, DFS, HT/VHT, roaming, WPA3,
+  DHCP policy, or another WLAN device in q060.
+- The common kernel WLAN layer owns long-lived controlled-port, rekey, and
+  same-network reconnect state. The RTL8822BU driver owns hardware/firmware,
+  USB transport, radio, descriptors, and key slots.
+- Reconnect attempts use delays 0/1/2/4/8 seconds, at most five failures and
+  at most 30 seconds per generation. Explicit disconnect/down/removal cancels
+  the generation.
+- Removal never retains a passphrase or PMK. Reinsert creates a fresh device
+  instance; later WS005 policy may submit a new credential.
+- Implement the ordinary lifecycle transition first inside this Queue, then
+  complete the bounded error/race matrix. Do not broaden into unrelated
+  hardening.
+- Do not use aggregate `make check`. Repository `.internal/` material is not
+  an input to automatic tests; if runtime credentials are ever needed later,
+  they may exist only under ignored `.internal/` and must not enter evidence or
+  a commit.
 
-## Automatic gate before physical use
+## Implementation checkpoints
 
-1. `/sbin/wifi` builds and is installed in the amd64 image.
-2. A production-ioctl fake WLAN smoke test passes exactly one normal sequence:
-   search start, completed list, status, connect through authorized carrier,
-   disconnect, and search stop.
-3. Basic empty/oversized interface, SSID, and passphrase inputs fail before an
-   ioctl, output stays bounded, and every userspace secret buffer is erased.
-4. Retain q058 as the accepted lower-layer baseline. Rerun only directly
-   affected focused gates if a normal-path repair touches that layer, plus the
-   driver-enabled amd64 image build, one bounded xHCI USB-root boot, and
-   `git diff --check`.
-
-## Physical development check
-
-Use one candidate image and the already available passthrough environment.
-Supply the controlled AP identity and passphrase only at runtime without
-retaining them. Perform one bounded sequence:
-
-1. Attach the exact p026 adapter, require one `wlan0` with the pinned
-   firmware, and run `/sbin/ifconfig wlan0 up`.
-2. Start a scan, wait for completion, and confirm the controlled WPA2/CCMP BSS
-   appears.
-3. Connect with `/sbin/wifi`; require authorized carrier.
-4. Run `/sbin/dhcpc wlan0`; require an IPv4 address and route.
-5. Ping the local gateway and one external address, then fetch one bounded
-   object and validate nonzero/matching expected length or digest.
-6. Disconnect once, confirm carrier clears, and bring the interface down.
-
-If the sequence fails, retain only redacted first-boundary evidence and return
-to that normal-path implementation. Do not add unrelated retry/recovery logic
-in response.
+1. Inventory the q059 production state machine and ownership ledgers; extend
+   focused fixtures before changing public or long-lived state.
+2. Implement GTK and pairwise rekey with atomic key-generation replacement,
+   replay/reinstall protection, and controlled-port ordering.
+3. Implement finite same-network reconnect after link loss, with fresh
+   authentication/nonces/keys and cancellation by explicit lifecycle events.
+4. Harden open/down, firmware restart, endpoint recovery, unplug/reinsert, and
+   terminal shutdown so all work is retired exactly once or quarantined.
+5. Exercise success and injected failure across rekey/reconnect/lifecycle,
+   including at least 100 synthetic iterations and concurrent USB-storage
+   progress.
+6. Rerun directly affected WLAN/RTL8822BU/USB/net-device regressions,
+   sanitizer/analyzer variants, configured x86 builds, `make -j16`, bounded
+   IDE and xHCI USB-root boots, and `git diff --check`.
 
 ## Completion definition
 
-Q059 completes when p004's minimum direct command and p009's single physical
-development check prove the complete vertical path through useful IP
-communication. Completion then permits the normal `networkd`/`net wifi`
-composition work and the separately planned p030/error-hardening work. It
-does not claim rekey, automatic reconnect, hotplug recovery, exhaustive fault
-behavior, or final five-run acceptance.
+Q060 completes when p030's automatic milestone passes: rekey and reconnect
+preserve strict key/PN/controlled-port semantics; close/recovery/removal/
+reinsert/shutdown retire every owned object exactly once or retain a complete
+checked quarantine; and the declared fault/race/storage regression matrix
+passes. The Phase remains physically open until its one shared WS005 p008
+lifecycle checkpoint and p008-owned five consecutive cold boots are later
+accepted. No human action is requested by q060.
 
 ## Execution result
 
-Completed on 2026-09-01. The final candidate was
-`build/amd64/hdd-image.img`, 203423744 bytes, SHA-256
-`6d0ec924f0d063b663c6da8ab1a7b8b39bcef8b2b2849e4fb0d8308340f9ed75`.
-
-p004 added and focused-tested all six direct human `/sbin/wifi` forms. The
-normal-path repair also accepts the authenticated RSNXE element (`id=244`) in
-WPA2 message 3 and advertises all twelve implemented legacy rates so that the
-fixed 6-Mbit/s EAPOL/data path is consistent with association capabilities.
-
-One QEMU/KVM `-cpu host` run with xHCI USB passthrough then published `wlan0`,
-completed a scan, reached WPA2-Personal/CCMP authorized carrier, obtained DHCP
-configuration, passed both gateway and public ping at 3/3 replies with 0%
-loss, fetched an 84255-byte HTTP object, and completed disconnect plus
-administrative down without an observed hang. Runtime credentials and network
-identity were not retained in the repository or evidence.
-
-This is the single p009 development checkpoint only. It does not complete
-p008's final five-run acceptance, p006/p007 `networkd`/`net wifi`
-composition, p010 primitive abnormal/semi-normal hardening, or WS004 p030
-reconnect, hotplug, recovery, and lifecycle hardening. Those remain eligible
-next work rather than hidden q059 scope.
+In progress.

@@ -34,6 +34,9 @@ Parent: [WS004](../ws.md)
 | HW-T34 | WLAN lifecycle hardening | Rekey, bounded reconnect, firmware/USB recovery, up/down, unplug/reinsert, shutdown, concurrent storage, and race/fault fixtures pass; one shared WS005 p008 lifecycle checkpoint and its frozen-artifact five-run batch supply nonduplicated physical evidence |
 | HW-T35 | USB same-endpoint multi-URB | A supporting xHCI endpoint owns a bounded multi-URB queue with exact completion/cancel/drain, ring-wrap, late-event, detach, and fairness behavior; legacy HCDs retain one active URB per endpoint |
 | HW-T36 | RTL8822BU pre-radio substrate | Default-off firmware acquisition, pinned image validation, exact USB/register/efuse contracts, bounded firmware/RX codecs, serialized WLAN publication, and tableless production refusal pass without an RF-success claim |
+| HW-T37 | Intel AX201 identity/firmware intake | Read-only test-machine PCI/topology/driver/firmware evidence freezes exact identity, immutable bytes, provenance, license, optional-package boundary, and safe later execution method without host mutation |
+| HW-T38 | Standalone Intel AX201 normal path | Exact attach and pinned firmware, bounded 2.4-GHz scan, WPA2/CCMP authorization, DHCP, gateway/public ping, nonempty fetch, disconnect, and down pass without a prior Intel/RTL hardware framework |
+| HW-T39 | Evidence-driven WLAN refactor | The two working drivers retain ABI and normal-path behavior while only substantial identical contracts are extracted; a documented no-extraction result is valid |
 | HW-T40 | i915 foundations | Device-independent UAPI/model tests pass; modeset/scanout/reset require target-hardware evidence |
 
 QEMU/model and physical-hardware results are always separate evidence fields.
@@ -318,7 +321,15 @@ stall/reload, endpoint timeout/stall/short/foreign completion, reconnect
 backoff/cancellation/exhaustion, up/down, unplug/reinsert, and terminal shutdown.
 At least 100 synthetic iterations run with concurrent xHCI USB-storage work and
 prove exact timer/callback/URB/DMA/key/common/net-device retirement or checked
-retention.
+retention. RX buffer-generation reuse is justified by the USB core's
+single-terminal-owner and successful-drain join contract, and the production
+driver fixture relies on that contract rather than synthesizing a second
+completion forbidden by it. The focused `usb-urb-publication-test.c` model
+below is therefore an explicit HW-T34 prerequisite. The 100-cycle common-core
+fixture runs the production WLAN engine and its checked cleanup; the matching
+100-cycle RTL8822BU fixture runs the production driver, USB/DMA/key/net-device
+ledgers, and the same checked inverse at the common callback boundary while an
+unrelated USB-storage request makes independently verified progress.
 
 Physical evidence is not a second HW-T34 campaign. One shared WS005 p008
 provisional script validates the exact adapter/artifacts, complete WLAN path,

@@ -38,6 +38,13 @@ enum wlan_wpa2_state {
 	WLAN_WPA2_STATE_MESSAGE_3,
 	WLAN_WPA2_STATE_MESSAGE_4_TX,
 	WLAN_WPA2_STATE_MESSAGE_4_RETRANSMIT_TX,
+	WLAN_WPA2_STATE_PAIRWISE_STAGE,
+	WLAN_WPA2_STATE_GROUP_STAGE,
+	WLAN_WPA2_STATE_GROUP_MESSAGE_2_TX,
+	WLAN_WPA2_STATE_GROUP_MESSAGE_2_RETRANSMIT_TX,
+	WLAN_WPA2_STATE_PAIRWISE_ACTIVATE,
+	WLAN_WPA2_STATE_GROUP_ACTIVATE,
+	WLAN_WPA2_STATE_RECONNECT_WAIT,
 	WLAN_WPA2_STATE_AUTHORIZED,
 	WLAN_WPA2_STATE_FAILED
 };
@@ -70,6 +77,7 @@ struct wlan_wpa2_profile {
 	/* Both values use the caller's one monotonic tick domain. */
 	uint64_t total_deadline_ticks;
 	uint64_t transition_timeout_ticks;
+	uint64_t recovery_timeout_ticks;
 };
 
 /*
@@ -110,6 +118,12 @@ struct wlan_wpa2_ops {
 	int (*key_delete)(void *context, uint64_t generation,
 		enum wlan_wpa2_key_kind kind, uint8_t key_index,
 		uint64_t key_generation);
+	/* Atomically promotes staged replacement slots after the EAPOL response
+	 * is acknowledged.  Success publishes the new pairwise/group generation
+	 * and leaves the old generations as idempotent delete tombstones. */
+	int (*keys_activate)(void *context, uint64_t generation,
+		uint64_t pairwise_key_generation,
+		uint64_t group_key_generation);
 	int (*authorized_set)(void *context, uint64_t generation,
 		int authorized);
 	int (*radio_stop)(void *context, uint64_t generation);
@@ -124,23 +138,40 @@ struct wlan_wpa2_engine {
 	enum wlan_wpa2_tx_kind tx_kind;
 	uint64_t generation;
 	uint64_t key_generation;
+	uint64_t group_key_generation;
+	uint64_t next_key_generation;
+	uint64_t pending_pairwise_key_generation;
+	uint64_t pending_group_key_generation;
 	uint64_t step_deadline_ticks;
 	uint64_t tx_cookie_next;
 	uint64_t tx_cookie_active;
 	uint64_t message_1_replay_counter;
 	uint64_t message_3_replay_counter;
+	uint64_t group_replay_counter;
 	uint64_t group_receive_packet_number;
+	uint64_t pending_group_receive_packet_number;
 	uint16_t next_sequence;
 	uint16_t aid;
 	uint8_t retry_count;
 	uint8_t protocol_version;
 	uint8_t gtk_index;
+	uint8_t pending_gtk_index;
 	uint8_t configured;
 	uint8_t associated;
 	uint8_t pairwise_installed;
+	uint8_t pending_pairwise_installed;
+	uint8_t pending_pairwise_programmed;
 	uint8_t group_installed;
+	uint8_t pending_group_installed;
+	uint8_t pending_group_programmed;
 	uint8_t authorized;
 	uint8_t message_3_accepted;
+	uint8_t group_message_accepted;
+	uint8_t reconnectable;
+	uint8_t pairwise_rekey;
+	uint8_t activation_complete;
+	uint8_t old_group_retired;
+	uint8_t old_pairwise_retired;
 	int last_error;
 	size_t tx_length;
 	uint8_t tx_destination[WLAN_WPA2_MAC_LENGTH];
@@ -150,7 +181,9 @@ struct wlan_wpa2_engine {
 	uint8_t anonce[WLAN_WPA2_NONCE_LENGTH];
 	uint8_t snonce[WLAN_WPA2_NONCE_LENGTH];
 	uint8_t gtk[WLAN_WPA2_GTK_LENGTH];
+	uint8_t pending_gtk[WLAN_WPA2_GTK_LENGTH];
 	uint8_t message_3_digest[WLAN_SHA1_DIGEST_SIZE];
+	uint8_t group_message_digest[WLAN_SHA1_DIGEST_SIZE];
 };
 
 int wlan_wpa2_engine_init(struct wlan_wpa2_engine *engine,
@@ -171,6 +204,14 @@ int wlan_wpa2_engine_report_tx(struct wlan_wpa2_engine *engine,
 	uint64_t now_ticks);
 int wlan_wpa2_engine_timer(struct wlan_wpa2_engine *engine,
 	uint64_t now_ticks);
+/* Link loss retains only the PMK and nonsecret profile for bounded
+ * same-network recovery.  reconnect() always starts a fresh radio,
+ * authentication, association, nonce, key generation, and PN domain. */
+int wlan_wpa2_engine_link_lost(struct wlan_wpa2_engine *engine, int error);
+int wlan_wpa2_engine_reconnect(struct wlan_wpa2_engine *engine,
+	uint64_t generation, uint64_t total_deadline_ticks,
+	uint64_t now_ticks);
+int wlan_wpa2_engine_can_reconnect(const struct wlan_wpa2_engine *engine);
 int wlan_wpa2_engine_stop(struct wlan_wpa2_engine *engine);
 
 enum wlan_wpa2_state wlan_wpa2_engine_state(

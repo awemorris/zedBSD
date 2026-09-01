@@ -3,6 +3,7 @@
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
 #include "kern/net/wlan.h"
+#include "kern/net/wlan-wpa2.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -25,18 +26,28 @@ struct fake_radio {
 	unsigned connect_start_calls;
 	unsigned disconnect_calls;
 	unsigned quiesce_calls;
+	unsigned frame_tx_calls;
+	unsigned key_delete_calls;
+	unsigned pair_delete_calls;
+	unsigned group_delete_calls;
+	unsigned key_delete_busy_remaining;
 	int scan_start_error;
 	int scan_stop_error;
 	int management_error;
 	int connect_start_error;
 	int disconnect_error;
 	int quiesce_error;
+	struct wlan_radio_tx_request last_tx;
+	uint8_t last_tx_frame[WLAN_MANAGEMENT_FRAME_MAX];
+	uint64_t tx_packet_numbers[64];
+	uint64_t tx_key_generations[64];
+	uint8_t tx_encrypted[64];
 	struct block_gate *scan_start_gate;
 	int scan_start_returned;
 	int scan_stop_saw_start_returned;
-	uint32_t scan_steps[WLAN_SCAN_CHANNEL_MAX * 4U];
-	uint32_t scan_channels[WLAN_SCAN_CHANNEL_MAX * 4U];
-	uint64_t scan_deadlines[WLAN_SCAN_CHANNEL_MAX * 4U];
+	uint32_t scan_steps[256];
+	uint32_t scan_channels[256];
+	uint64_t scan_deadlines[256];
 	uint8_t management_frame[64];
 	size_t management_length;
 	uint64_t management_deadline;
@@ -313,6 +324,15 @@ fake_frame_transmit(void *context,
 	    request->length != 0U);
 	assert(request->generation == fake->connect_generation);
 	assert(request->deadline_ticks <= fake->connect_deadline);
+	assert(fake->frame_tx_calls < 64U);
+	fake->tx_packet_numbers[fake->frame_tx_calls] = request->packet_number;
+	fake->tx_key_generations[fake->frame_tx_calls] = request->key_generation;
+	fake->tx_encrypted[fake->frame_tx_calls] = request->encrypted;
+	fake->last_tx = *request;
+	assert(request->length <= sizeof(fake->last_tx_frame));
+	memcpy(fake->last_tx_frame, request->frame, request->length);
+	fake->last_tx.frame = fake->last_tx_frame;
+	fake->frame_tx_calls++;
 	return 0;
 }
 
@@ -338,6 +358,28 @@ fake_key_delete(void *context, uint64_t generation,
 	(void)key_index;
 	(void)key_generation;
 	assert(generation == fake->connect_generation);
+	assert(deadline <= fake->connect_deadline);
+	fake->key_delete_calls++;
+	if (kind == WLAN_RADIO_KEY_PAIRWISE)
+		fake->pair_delete_calls++;
+	else
+		fake->group_delete_calls++;
+	if (fake->key_delete_busy_remaining != 0U) {
+		fake->key_delete_busy_remaining--;
+		return EBUSY;
+	}
+	return 0;
+}
+
+static int
+fake_keys_activate(void *context, uint64_t generation,
+	uint64_t pairwise_key_generation, uint64_t group_key_generation,
+	uint64_t deadline)
+{
+	struct fake_radio *fake = context;
+
+	assert(generation == fake->connect_generation);
+	assert(pairwise_key_generation != 0U && group_key_generation != 0U);
 	assert(deadline <= fake->connect_deadline);
 	return 0;
 }
@@ -369,6 +411,7 @@ static const struct wlan_radio_ops fake_ops = {
 	.frame_transmit = fake_frame_transmit,
 	.key_install = fake_key_install,
 	.key_delete = fake_key_delete,
+	.keys_activate = fake_keys_activate,
 	.quiesce = fake_quiesce
 };
 
@@ -761,6 +804,583 @@ scan_complete(struct wlan_station *station, struct fake_radio *fake,
 	    0U) == ESTALE);
 }
 
+static uint64_t
+reconnect_scan_drive_to_dwell(struct wlan_station *station,
+	struct fake_radio *fake)
+{
+	unsigned starts = fake->scan_start_calls;
+	unsigned probes = fake->management_calls;
+	uint64_t generation;
+
+	wlan_timer_run(fake->now);
+	assert(fake->scan_start_calls == starts + 1U);
+	generation = fake->scan_generation;
+	assert(wlan_station_report_scan_channel_ready(station, generation,
+	    0U) == 0);
+	wlan_timer_run(fake->now);
+	assert(fake->management_calls == probes + 1U);
+	return generation;
+}
+
+static size_t
+clear_eapol_from_ap(uint8_t *frame, const uint8_t station_address[6],
+	const uint8_t bssid_address[6])
+{
+	static const uint8_t llc[] = {
+		0xaaU, 0xaaU, 0x03U, 0U, 0U, 0U, 0x88U, 0x8eU
+	};
+
+	memset(frame, 0, 36U);
+	frame[0] = 0x08U;
+	frame[1] = 0x02U;
+	memcpy(frame + 4U, station_address, 6U);
+	memcpy(frame + 10U, bssid_address, 6U);
+	memcpy(frame + 16U, bssid_address, 6U);
+	memcpy(frame + 24U, llc, sizeof(llc));
+	frame[32U] = 2U;
+	frame[33U] = 3U;
+	return 36U;
+}
+
+static void
+disconnect_station(struct net_device *device)
+{
+	struct wlan_disconnect_request disconnect;
+
+	request_header(&disconnect, sizeof(disconnect), "wlan0");
+	assert(wlan_station_ioctl(device, SIOCSWLANDISCONNECT, &disconnect) == 0);
+	assert(disconnect.state == WLAN_STATE_IDLE);
+}
+
+static uint64_t
+connect_cached_station(struct net_device *device, const uint8_t *ssid,
+	uint8_t ssid_length)
+{
+	struct wlan_connect_request connect;
+
+	request_header(&connect, sizeof(connect), "wlan0");
+	memcpy(connect.ssid, ssid, ssid_length);
+	connect.ssid_length = ssid_length;
+	memset(connect.passphrase, 0x5a, WLAN_PASSPHRASE_MIN);
+	connect.passphrase_length = WLAN_PASSPHRASE_MIN;
+	assert(wlan_station_ioctl(device, SIOCSWLANCONNECT, &connect) == 0);
+	assert(connect.generation != 0U &&
+	    connect.state == WLAN_STATE_AUTHENTICATING);
+	return connect.generation;
+}
+
+static void
+assert_station_retired(struct wlan_station *station)
+{
+	struct wlan_station_test_snapshot snapshot;
+
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0);
+	assert(!snapshot.reconnect_pending &&
+	    !snapshot.reconnect_scan_active &&
+	    snapshot.reconnect_deadline == 0U &&
+	    snapshot.reconnect_next_attempt == 0U &&
+	    snapshot.reconnect_cleanup_retry == 0U &&
+	    snapshot.connection_deadline == 0U &&
+	    snapshot.connection_step_deadline == 0U &&
+	    snapshot.connect_retry_deadline == 0U &&
+	    snapshot.scan_retry_deadline == 0U &&
+	    snapshot.beacon_watch_deadline == 0U &&
+	    snapshot.pairwise_key_generation == 0U &&
+	    snapshot.group_key_generation == 0U &&
+	    snapshot.pending_pairwise_key_generation == 0U &&
+	    snapshot.pending_group_key_generation == 0U &&
+	    snapshot.pairwise_receive_packet_number == 0U &&
+	    memcmp(snapshot.group_receive_packet_number,
+	    (uint64_t[4]){ 0U, 0U, 0U, 0U },
+	    sizeof(snapshot.group_receive_packet_number)) == 0 &&
+	    snapshot.pending_group_receive_packet_number == 0U &&
+	    snapshot.transmit_packet_number == 0U &&
+	    !snapshot.controlled_port && !snapshot.connect_driver_active &&
+	    !snapshot.connect_stop_pending &&
+	    !snapshot.connect_retire_explicit &&
+	    wlan_station_test_secrets_clear(station));
+}
+
+static void
+reconnect_fail_scans(struct wlan_station *station, struct fake_radio *fake,
+	unsigned count)
+{
+	struct wlan_station_test_snapshot snapshot;
+	uint64_t generation;
+	unsigned index;
+
+	for (index = 0U; index < count; index++) {
+		generation = reconnect_scan_drive_to_dwell(station, fake);
+		scan_complete(station, fake, generation);
+		assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+		    snapshot.reconnect_attempts == index + 1U);
+		if (index + 1U < count)
+			fake->now = snapshot.reconnect_next_attempt;
+	}
+}
+
+static void
+test_common_wpa_lifecycle(struct net_device *device,
+	struct wlan_station *station, struct fake_radio *fake)
+{
+	static const uint8_t target[] = { 'n', 'e', 't' };
+	static const uint8_t old_target[] = { 'o', 'l', 'd' };
+	static const uint64_t backoff_delays[] = {
+		0U, 100U, 200U, 400U, 800U
+	};
+	struct wlan_connect_request connect;
+	struct wlan_disconnect_request disconnect;
+	struct wlan_station_test_snapshot snapshot;
+	struct wlan_radio_rx_frame report;
+	struct wlan_bss_record bss;
+	struct wlan_bss_record old_bss;
+	struct wlan_bss_record foreign_bss;
+	uint8_t frame[256];
+	uint8_t eapol[4] = { 2U, 3U, 0U, 0U };
+	size_t length;
+	uint64_t generation;
+	uint64_t cancelled_deadline;
+	uint64_t prior_deadline;
+	unsigned frame_tx_base;
+	unsigned scan_start_base;
+	unsigned scan_count;
+	unsigned iteration;
+	unsigned phase;
+
+	bss = make_bss(0x71U, target, sizeof(target), -30);
+	fake->now = 2000U;
+	fake->connect_generation = 500U;
+	fake->connect_deadline = fake->now + WLAN_CONNECT_DEADLINE_TICKS;
+	fake->selected = bss;
+	assert(wlan_station_test_seed_authorized(station, &bss, 500U, 600U) == 0);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0);
+	assert(snapshot.state == WLAN_STATE_CONNECTED &&
+	    snapshot.controlled_port && snapshot.association_capability == 0x0011U &&
+	    snapshot.beacon_watch_deadline > fake->now);
+
+	/* Only a fresh beacon from the selected BSSID refreshes the finite
+	 * activity latch.  Foreign and stale-generation beacons remain irrelevant. */
+	prior_deadline = snapshot.beacon_watch_deadline;
+	fake->now += 100U;
+	length = build_frame(frame, target, sizeof(target), bss.bssid[5], 4U,
+	    2U, 0U, 1);
+	memset(&report, 0, sizeof(report));
+	report.generation = 500U;
+	report.frame = frame;
+	report.length = length;
+	report.rssi_dbm = -30;
+	report.channel = 6U;
+	assert(wlan_station_report_frame(station, &report) == 0);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0);
+	assert(snapshot.beacon_watch_deadline > prior_deadline);
+	prior_deadline = snapshot.beacon_watch_deadline;
+	length = build_frame(frame, target, sizeof(target),
+	    (uint8_t)(bss.bssid[5] + 1U), 4U, 2U, 0U, 1);
+	report.length = length;
+	assert(wlan_station_report_frame(station, &report) == ESTALE);
+	report.generation--;
+	length = build_frame(frame, target, sizeof(target), bss.bssid[5], 4U,
+	    2U, 0U, 1);
+	report.length = length;
+	assert(wlan_station_report_frame(station, &report) == ESTALE);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.beacon_watch_deadline == prior_deadline);
+	report.generation = 500U;
+
+	/* Active-key lifetime rejects clear EAPOL before it can reach the engine
+	 * and close the controlled port. */
+	length = clear_eapol_from_ap(frame, device->hwaddr, bss.bssid);
+	report.frame = frame;
+	report.length = length;
+	report.rssi_dbm = -30;
+	report.channel = 6U;
+	assert(wlan_station_report_frame(station, &report) == EACCES);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.controlled_port && snapshot.wpa_state ==
+	    WLAN_WPA2_STATE_AUTHORIZED);
+
+	/* EAPOL retransmission through an active PTK uses a fresh protected PN
+	 * every time; a failed/delayed report can never cause PN reuse. */
+	frame_tx_base = fake->frame_tx_calls;
+	assert(wlan_station_test_transmit_eapol(station, 1U, eapol,
+	    sizeof(eapol)) == 0);
+	assert(wlan_station_test_transmit_eapol(station, 2U, eapol,
+	    sizeof(eapol)) == 0);
+	assert(fake->frame_tx_calls == frame_tx_base + 2U &&
+	    fake->tx_encrypted[frame_tx_base] &&
+	    fake->tx_encrypted[frame_tx_base + 1U] &&
+	    fake->tx_packet_numbers[frame_tx_base] != 0U &&
+	    fake->tx_packet_numbers[frame_tx_base + 1U] ==
+	    fake->tx_packet_numbers[frame_tx_base] + 1U &&
+	    fake->tx_key_generations[frame_tx_base] == 600U &&
+	    fake->tx_key_generations[frame_tx_base + 1U] == 600U);
+
+	/* Watchdog expiry enters the same checked link-loss boundary. */
+	fake->now = prior_deadline - 1U;
+	wlan_timer_run(fake->now);
+	assert(device->carrier != 0U);
+	fake->now = prior_deadline;
+	wlan_timer_run(fake->now);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.reconnect_pending && snapshot.beacon_watch_deadline == 0U &&
+	    !snapshot.controlled_port && device->carrier == 0U);
+	disconnect_station(device);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    !snapshot.reconnect_pending && snapshot.beacon_watch_deadline == 0U &&
+	    wlan_station_test_secrets_clear(station));
+
+	/* Pairwise rekey closes the controlled port but keeps the selected radio
+	 * association alive, so matching beacons must still refresh its watchdog. */
+	fake->now = 2500U;
+	fake->connect_generation = 600U;
+	fake->connect_deadline = fake->now + WLAN_CONNECT_DEADLINE_TICKS;
+	fake->selected = bss;
+	assert(wlan_station_test_seed_authorized(station, &bss, 600U, 610U) == 0);
+	assert(wlan_station_test_begin_pairwise_rekey(station) == 0);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.state == WLAN_STATE_FOUR_WAY && !snapshot.controlled_port);
+	prior_deadline = snapshot.beacon_watch_deadline;
+	fake->now += 100U;
+	length = build_frame(frame, target, sizeof(target), bss.bssid[5], 4U,
+	    2U, 0U, 1);
+	memset(&report, 0, sizeof(report));
+	report.generation = 600U;
+	report.frame = frame;
+	report.length = length;
+	report.rssi_dbm = -30;
+	report.channel = 6U;
+	assert(wlan_station_report_frame(station, &report) == 0);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.beacon_watch_deadline > prior_deadline);
+	disconnect_station(device);
+
+	/* Explicit disconnect owns an uncertain key-delete until a checked retry
+	 * succeeds.  Neither a new request nor state scrubbing may cross it. */
+	fake->now = 2750U;
+	fake->connect_generation = 650U;
+	fake->connect_deadline = fake->now + WLAN_CONNECT_DEADLINE_TICKS;
+	fake->selected = bss;
+	assert(wlan_station_test_seed_authorized(station, &bss, 650U, 660U) == 0);
+	fake->key_delete_busy_remaining = 1U;
+	request_header(&disconnect, sizeof(disconnect), "wlan0");
+	assert(wlan_station_ioctl(device, SIOCSWLANDISCONNECT, &disconnect) ==
+	    EBUSY);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.wpa_state == WLAN_WPA2_STATE_FAILED &&
+	    snapshot.pairwise_key_generation == 660U &&
+	    !wlan_station_test_secrets_clear(station));
+	assert(wlan_station_report_link_loss(station, 650U, EIO) == ESTALE);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    !snapshot.reconnect_pending && snapshot.connect_retire_explicit);
+	request_header(&connect, sizeof(connect), "wlan0");
+	memcpy(connect.ssid, target, sizeof(target));
+	connect.ssid_length = sizeof(target);
+	memset(connect.passphrase, 0x5a, WLAN_PASSPHRASE_MIN);
+	connect.passphrase_length = WLAN_PASSPHRASE_MIN;
+	assert(wlan_station_ioctl(device, SIOCSWLANCONNECT, &connect) == EBUSY);
+	wlan_timer_run(fake->now);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.wpa_state == WLAN_WPA2_STATE_FAILED);
+	fake->now++;
+	wlan_timer_run(fake->now);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.wpa_state == WLAN_WPA2_STATE_IDLE &&
+	    snapshot.state == WLAN_STATE_IDLE &&
+	    snapshot.pairwise_key_generation == 0U &&
+	    wlan_station_test_secrets_clear(station));
+
+	/* Common link-loss ownership is identical across the initial auth,
+	 * association, and four-way states.  These phase seeds retain the real
+	 * engine cleanup/callback path while avoiding a second fake authenticator. */
+	for (phase = 0U; phase < 3U; phase++) {
+		fake->now = 2800U + phase * 10U;
+		generation = connect_cached_station(device, target, sizeof(target));
+		if (phase == 1U)
+			assert(wlan_station_test_set_initial_phase(station,
+			    WLAN_STATION_TEST_PHASE_ASSOCIATING) == 0);
+		else if (phase == 2U)
+			assert(wlan_station_test_set_initial_phase(station,
+			    WLAN_STATION_TEST_PHASE_FOUR_WAY) == 0);
+		assert(wlan_station_report_link_loss(station, generation, EIO) == 0);
+		assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+		    snapshot.state == WLAN_STATE_FAILED &&
+		    snapshot.wpa_state == WLAN_WPA2_STATE_IDLE &&
+		    !snapshot.reconnect_pending);
+		assert_station_retired(station);
+		disconnect_station(device);
+	}
+
+	/* Connected data, group rekey, and pairwise rekey all converge on the
+	 * bounded full-reconnect boundary with carrier already down. */
+	for (phase = 0U; phase < 3U; phase++) {
+		generation = 670U + phase * 10U;
+		fake->now = 2900U + phase * 10U;
+		fake->connect_generation = generation;
+		fake->connect_deadline = fake->now + WLAN_CONNECT_DEADLINE_TICKS;
+		fake->selected = bss;
+		assert(wlan_station_test_seed_authorized(station, &bss, generation,
+		    generation + 1U) == 0);
+		if (phase == 1U)
+			assert(wlan_station_test_begin_group_rekey(station) == 0);
+		else if (phase == 2U)
+			assert(wlan_station_test_begin_pairwise_rekey(station) == 0);
+		assert(wlan_station_report_link_loss(station, generation, EIO) == 0);
+		assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+		    snapshot.reconnect_pending &&
+		    snapshot.wpa_state == WLAN_WPA2_STATE_RECONNECT_WAIT &&
+		    !snapshot.controlled_port && device->carrier == 0U);
+		disconnect_station(device);
+		assert_station_retired(station);
+	}
+
+	/* An uncertain key delete must complete before targeted scan or hardware
+	 * restart. */
+	fake->now = 3000U;
+	fake->connect_generation = 700U;
+	fake->connect_deadline = fake->now + WLAN_CONNECT_DEADLINE_TICKS;
+	old_bss = make_bss(0x72U, old_target, sizeof(old_target), -31);
+	fake->selected = old_bss;
+	assert(wlan_station_test_seed_authorized(station, &old_bss, 700U,
+	    800U) == 0);
+	fake->key_delete_busy_remaining = 1U;
+	scan_start_base = fake->scan_start_calls;
+	assert(wlan_station_report_link_loss(station, 700U, EIO) == EBUSY);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.wpa_state == WLAN_WPA2_STATE_FAILED &&
+	    snapshot.reconnect_pending &&
+	    fake->scan_start_calls == scan_start_base);
+	wlan_timer_run(fake->now);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.wpa_state == WLAN_WPA2_STATE_FAILED &&
+	    fake->scan_start_calls == scan_start_base);
+	fake->now++;
+	wlan_timer_run(fake->now);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.wpa_state == WLAN_WPA2_STATE_RECONNECT_WAIT &&
+	    fake->scan_start_calls == scan_start_base);
+	generation = reconnect_scan_drive_to_dwell(station, fake);
+	assert(fake->scan_channels[scan_start_base] == old_bss.channel &&
+	    fake->management_length == 32U + sizeof(old_target) &&
+	    fake->management_frame[24] == 0U &&
+	    fake->management_frame[25] == sizeof(old_target) &&
+	    memcmp(fake->management_frame + 26U, old_target,
+	    sizeof(old_target)) == 0);
+	foreign_bss = old_bss;
+	foreign_bss.bssid[5]++;
+	assert(wlan_station_report_scan_bss(station, generation,
+	    &foreign_bss) == 0);
+	scan_complete(station, fake, generation);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.reconnect_attempts == 1U &&
+	    snapshot.reconnect_next_attempt == fake->now + 100U);
+	/* A new SSID request cancels the old backoff, checks retirement, and starts
+	 * only after the old engine reaches IDLE. */
+	request_header(&connect, sizeof(connect), "wlan0");
+	memcpy(connect.ssid, target, sizeof(target));
+	connect.ssid_length = sizeof(target);
+	memset(connect.passphrase, 0x5a, WLAN_PASSPHRASE_MIN);
+	connect.passphrase_length = WLAN_PASSPHRASE_MIN;
+	assert(wlan_station_ioctl(device, SIOCSWLANCONNECT, &connect) == 0);
+	assert(connect.generation != 700U &&
+	    connect.state == WLAN_STATE_AUTHENTICATING);
+	disconnect_station(device);
+	fake->now += 100U;
+	wlan_timer_run(fake->now);
+	assert(fake->scan_start_calls == scan_start_base + 1U &&
+	    wlan_station_test_secrets_clear(station));
+
+	/* Reappearance in the next targeted generation starts a fresh connection
+	 * generation only after the scan-stop barrier. */
+	fake->now = 4000U;
+	fake->connect_generation = 900U;
+	fake->connect_deadline = fake->now + WLAN_CONNECT_DEADLINE_TICKS;
+	fake->selected = bss;
+	assert(wlan_station_test_seed_authorized(station, &bss, 900U, 1000U) == 0);
+	assert(wlan_station_report_link_loss(station, 900U, EIO) == 0);
+	generation = reconnect_scan_drive_to_dwell(station, fake);
+	assert(wlan_station_report_scan_bss(station, generation, &bss) == 0);
+	scan_complete(station, fake, generation);
+	wlan_timer_run(fake->now);
+	assert(fake->connect_start_calls != 0U &&
+	    fake->connect_generation != 900U);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.connection_generation == fake->connect_generation &&
+	    snapshot.wpa_state == WLAN_WPA2_STATE_AUTH_TX);
+	/* Loss during the fresh reconnect handshake retires that new generation
+	 * and returns to checked RECONNECT_WAIT rather than overlapping attempts. */
+	assert(wlan_station_report_link_loss(station,
+	    snapshot.connection_generation, EIO) == 0);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.reconnect_pending &&
+	    snapshot.wpa_state == WLAN_WPA2_STATE_RECONNECT_WAIT);
+	disconnect_station(device);
+
+	/* A successful fresh generation clears every backoff counter/deadline. */
+	fake->now = 4500U;
+	fake->connect_generation = 1000U;
+	fake->connect_deadline = fake->now + WLAN_CONNECT_DEADLINE_TICKS;
+	fake->selected = bss;
+	assert(wlan_station_test_seed_authorized(station, &bss, 1000U,
+	    1010U) == 0);
+	assert(wlan_station_report_link_loss(station, 1000U, EIO) == 0);
+	generation = reconnect_scan_drive_to_dwell(station, fake);
+	assert(wlan_station_report_scan_bss(station, generation, &bss) == 0);
+	scan_complete(station, fake, generation);
+	wlan_timer_run(fake->now);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.reconnect_pending &&
+	    snapshot.wpa_state == WLAN_WPA2_STATE_AUTH_TX);
+	assert(wlan_station_test_complete_authorized(station, 1020U) == 0);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.state == WLAN_STATE_CONNECTED &&
+	    snapshot.wpa_state == WLAN_WPA2_STATE_AUTHORIZED &&
+	    !snapshot.reconnect_pending && snapshot.reconnect_attempts == 0U &&
+	    snapshot.reconnect_deadline == 0U &&
+	    snapshot.reconnect_next_attempt == 0U && snapshot.controlled_port &&
+	    device->carrier != 0U);
+	disconnect_station(device);
+
+	/* The finite 0/1/2/4/8 policy is relative to each completed failed scan,
+	 * including dwell time; the fifth failure exhausts without a sixth scan. */
+	fake->now = 5000U;
+	fake->connect_generation = 1100U;
+	fake->connect_deadline = fake->now + WLAN_CONNECT_DEADLINE_TICKS;
+	fake->selected = bss;
+	assert(wlan_station_test_seed_authorized(station, &bss, 1100U, 1200U) == 0);
+	assert(wlan_station_report_link_loss(station, 1100U, EIO) == 0);
+	scan_count = fake->scan_start_calls;
+	for (iteration = 0U; iteration < 5U; iteration++) {
+		generation = reconnect_scan_drive_to_dwell(station, fake);
+		scan_complete(station, fake, generation);
+		assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+		    snapshot.reconnect_attempts == iteration + 1U);
+		if (iteration < 4U) {
+			assert(snapshot.reconnect_next_attempt == fake->now +
+			    backoff_delays[iteration + 1U]);
+			fake->now = snapshot.reconnect_next_attempt;
+		}
+	}
+	wlan_timer_run(fake->now);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    !snapshot.reconnect_pending && snapshot.state == WLAN_STATE_FAILED &&
+	    fake->scan_start_calls == scan_count + 5U &&
+	    wlan_station_test_secrets_clear(station));
+	assert_station_retired(station);
+	disconnect_station(device);
+
+	/* Every frozen backoff slot is cancellable.  One iteration uses close/open
+	 * to cover administrative down; the others use explicit disconnect. */
+	for (phase = 0U; phase < 5U; phase++) {
+		generation = 1300U + phase * 10U;
+		fake->now = 7000U + phase * 2000U;
+		fake->connect_generation = generation;
+		fake->connect_deadline = fake->now + WLAN_CONNECT_DEADLINE_TICKS;
+		fake->selected = bss;
+		assert(wlan_station_test_seed_authorized(station, &bss,
+		    generation, generation + 1U) == 0);
+		assert(wlan_station_report_link_loss(station, generation, EIO) == 0);
+		reconnect_fail_scans(station, fake, phase);
+		assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+		    snapshot.reconnect_pending &&
+		    snapshot.reconnect_next_attempt == fake->now +
+		    backoff_delays[phase]);
+		cancelled_deadline = snapshot.reconnect_next_attempt;
+		scan_count = fake->scan_start_calls;
+		if (phase == 3U) {
+			assert(wlan_station_close(station) == 0);
+			assert_station_retired(station);
+			assert(wlan_station_open(station) == 0);
+		} else {
+			disconnect_station(device);
+			assert_station_retired(station);
+		}
+		fake->now = cancelled_deadline;
+		wlan_timer_run(fake->now);
+		assert(fake->scan_start_calls == scan_count);
+	}
+
+	/* Detach is the removal-equivalent cancellation boundary.  Exercise it at
+	 * the longest pending delay on an independent station instance. */
+	{
+		struct net_device remove_device;
+		struct fake_radio remove_fake;
+		struct wlan_station *remove_station;
+		struct wlan_station_test_snapshot remove_snapshot;
+		int references = net_device_reference_balance;
+
+		memset(&remove_device, 0, sizeof(remove_device));
+		memset(&remove_fake, 0, sizeof(remove_fake));
+		memcpy(remove_device.name, "wlan9", 6U);
+		memcpy(remove_device.hwaddr,
+		    (uint8_t[6]){ 0x02U, 0U, 0U, 0U, 0U, 0x79U }, 6U);
+		remove_device.hwaddr_len = 6U;
+		remove_device.flags = NET_DEVICE_UP;
+		memcpy(remove_fake.hwaddr, remove_device.hwaddr, 6U);
+		remove_fake.now = 17000U;
+		remove_fake.connect_generation = 1500U;
+		remove_fake.connect_deadline = remove_fake.now +
+		    WLAN_CONNECT_DEADLINE_TICKS;
+		remove_fake.selected = bss;
+		assert(wlan_station_test_attach(&remove_device, &fake_ops,
+		    &remove_fake, &test_scan_profile, fake_clock, &remove_fake,
+		    &remove_station) == 0);
+		remove_fake.station = remove_station;
+		assert(net_device_reference_balance == references + 1);
+		assert(wlan_station_open(remove_station) == 0);
+		assert(wlan_station_test_seed_authorized(remove_station, &bss,
+		    1500U, 1510U) == 0);
+		assert(wlan_station_report_link_loss(remove_station, 1500U,
+		    EIO) == 0);
+		reconnect_fail_scans(remove_station, &remove_fake, 4U);
+		assert(wlan_station_test_snapshot(remove_station,
+		    &remove_snapshot) == 0 && remove_snapshot.reconnect_pending &&
+		    remove_snapshot.reconnect_next_attempt == remove_fake.now + 800U);
+		cancelled_deadline = remove_snapshot.reconnect_next_attempt;
+		scan_count = remove_fake.scan_start_calls;
+		assert(wlan_station_detach(remove_station) == 0);
+		assert(net_device_reference_balance == references);
+		assert_station_retired(remove_station);
+		remove_fake.now = cancelled_deadline;
+		wlan_timer_run(remove_fake.now);
+		assert(remove_fake.scan_start_calls == scan_count);
+	}
+
+	/* The independent 30-second cap also exhausts and scrubs even before the
+	 * five-attempt count is reached. */
+	fake->now = 18000U;
+	fake->connect_generation = 1400U;
+	fake->connect_deadline = fake->now + WLAN_CONNECT_DEADLINE_TICKS;
+	fake->selected = bss;
+	assert(wlan_station_test_seed_authorized(station, &bss, 1400U,
+	    1410U) == 0);
+	assert(wlan_station_report_link_loss(station, 1400U, EIO) == 0);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.reconnect_deadline > fake->now);
+	fake->now = snapshot.reconnect_deadline;
+	wlan_timer_run(fake->now);
+	assert(wlan_station_test_snapshot(station, &snapshot) == 0 &&
+	    snapshot.state == WLAN_STATE_FAILED &&
+	    snapshot.wpa_state == WLAN_WPA2_STATE_IDLE);
+	assert_station_retired(station);
+	disconnect_station(device);
+
+	/* Repeated link-loss/cancel leaves no PMK, key generation, beacon timer,
+	 * scan generation, or reconnect timer owned by the common station. */
+	for (iteration = 0U; iteration < 100U; iteration++) {
+		uint64_t current = 2000U + iteration * 2U;
+
+		fake->now++;
+		fake->connect_generation = current;
+		fake->connect_deadline = fake->now + WLAN_CONNECT_DEADLINE_TICKS;
+		fake->selected = bss;
+		assert(wlan_station_test_seed_authorized(station, &bss, current,
+		    current + 500U) == 0);
+		assert(wlan_station_report_link_loss(station, current, EIO) == 0);
+		disconnect_station(device);
+		assert_station_retired(station);
+	}
+}
+
 static void
 test_core(void)
 {
@@ -768,19 +1388,23 @@ test_core(void)
 	static const uint8_t filler[] = { 'x' };
 	struct net_device device;
 	struct net_device unsupported_device;
+	struct net_device shutdown_device;
 	struct net_device capacity_devices[NET_DEVICE_MAX - 1U];
 	struct net_device overflow_device;
 	struct wlan_station *station;
 	struct wlan_station *unsupported_station;
+	struct wlan_station *shutdown_station;
 	struct wlan_station *capacity_stations[NET_DEVICE_MAX - 1U];
 	struct fake_radio fake;
 	struct fake_radio unsupported;
+	struct fake_radio shutdown_fake;
 	struct wlan_scan_request scan;
 	struct wlan_scan_status_request scan_status;
 	struct wlan_bss_request query;
 	struct wlan_connect_request connect;
 	struct wlan_disconnect_request disconnect;
 	struct wlan_status_request status;
+	struct wlan_station_test_snapshot station_snapshot;
 	struct wlan_bss_record bss;
 	uint8_t scan_frame[256];
 	size_t scan_frame_length;
@@ -793,29 +1417,39 @@ test_core(void)
 	pthread_t race_threads[4];
 	uint64_t first_scan_generation;
 	uint64_t saved_now;
+	uint64_t shutdown_cancelled_deadline;
 	unsigned index;
 	unsigned carrier_calls_before;
+	unsigned shutdown_scan_calls;
 	int found_oldest;
 	int connect_result;
 
 	memset(&device, 0, sizeof(device));
 	memset(&unsupported_device, 0, sizeof(unsupported_device));
+	memset(&shutdown_device, 0, sizeof(shutdown_device));
 	memset(capacity_devices, 0, sizeof(capacity_devices));
 	memset(&overflow_device, 0, sizeof(overflow_device));
 	memset(&fake, 0, sizeof(fake));
 	memset(&unsupported, 0, sizeof(unsupported));
+	memset(&shutdown_fake, 0, sizeof(shutdown_fake));
 	memcpy(device.name, "wlan0", 6U);
 	memcpy(unsupported_device.name, "wlan1", 6U);
+	memcpy(shutdown_device.name, "wlan2", 6U);
 	memcpy(device.hwaddr,
 	    (uint8_t[6]){ 0x02U, 0U, 0U, 0U, 0U, 0x10U }, 6U);
 	memcpy(unsupported_device.hwaddr,
 	    (uint8_t[6]){ 0x02U, 0U, 0U, 0U, 0U, 0x11U }, 6U);
+	memcpy(shutdown_device.hwaddr,
+	    (uint8_t[6]){ 0x02U, 0U, 0U, 0U, 0U, 0x12U }, 6U);
 	device.hwaddr_len = 6U;
 	unsupported_device.hwaddr_len = 6U;
+	shutdown_device.hwaddr_len = 6U;
 	memcpy(fake.hwaddr, device.hwaddr, 6U);
 	memcpy(unsupported.hwaddr, unsupported_device.hwaddr, 6U);
+	memcpy(shutdown_fake.hwaddr, shutdown_device.hwaddr, 6U);
 	device.flags = NET_DEVICE_UP;
 	unsupported_device.flags = NET_DEVICE_UP;
+	shutdown_device.flags = NET_DEVICE_UP;
 	wlan_core_init();
 	profile = test_scan_profile;
 	invalid_profile = profile;
@@ -981,6 +1615,7 @@ test_core(void)
 	    &bss) == 0);
 	fake.now++;
 	bss = make_bss(253U, target, sizeof(target), -1);
+	bss.capability = 0x0431U;
 	bss.security |= WLAN_SECURITY_SAE;
 	assert(wlan_station_report_scan_bss(station, first_scan_generation,
 	    &bss) == 0);
@@ -1108,6 +1743,9 @@ test_core(void)
 	/* A transition AP advertising PSK and SAE remains usable through its
 	 * explicitly selected PSK AKM. */
 	assert(fake.selected.bssid[5] == 253U);
+	assert(fake.selected.capability == 0x0431U);
+	assert(wlan_station_test_snapshot(station, &station_snapshot) == 0 &&
+	    station_snapshot.association_capability == 0x0011U);
 	assert(fake.connect_deadline == fake.now +
 	    WLAN_CONNECT_TRANSITION_TICKS);
 	assert(worker_wake_calls >= 2U);
@@ -1116,11 +1754,21 @@ test_core(void)
 	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
 	assert(status.state == WLAN_STATE_AUTHENTICATING &&
 	    status.controlled_port == 0U && device.carrier == 0U);
+	/* Link loss during the initial (not yet reconnectable) handshake still
+	 * performs a checked stop and leaves no stale timer or transmit producer. */
+	assert(wlan_station_report_link_loss(station, connect.generation,
+	    ECONNRESET) == 0);
+	request_header(&status, sizeof(status), "wlan0");
+	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
+	assert(status.state == WLAN_STATE_FAILED &&
+	    status.controlled_port == 0U && device.carrier == 0U &&
+	    wlan_station_test_secrets_clear(station));
 	request_header(&disconnect, sizeof(disconnect), "wlan0");
 	assert(wlan_station_ioctl(&device, SIOCSWLANDISCONNECT,
 	    &disconnect) == 0);
 	assert(disconnect.state == WLAN_STATE_IDLE);
 	assert(wlan_station_test_secrets_clear(station));
+	test_common_wpa_lifecycle(&device, station, &fake);
 
 	request_header(&scan, sizeof(scan), "wlan0");
 	scan.action = WLAN_SCAN_START;
@@ -1392,6 +2040,31 @@ test_core(void)
 	assert(wlan_station_detach(unsupported_station) == 0);
 	assert(net_device_reference_balance == 1);
 
+	/* Global shutdown is also a cancellation boundary while a finite
+	 * reconnect delay is pending.  Keep this independent station asleep at
+	 * the two-second backoff while the primary station exercises shutdown's
+	 * active-callback and quiesce retry barriers below. */
+	bss = make_bss(0x73U, target, sizeof(target), -32);
+	shutdown_fake.now = 30000U;
+	shutdown_fake.connect_generation = 1600U;
+	shutdown_fake.connect_deadline = shutdown_fake.now +
+	    WLAN_CONNECT_DEADLINE_TICKS;
+	shutdown_fake.selected = bss;
+	assert(wlan_station_test_attach(&shutdown_device, &fake_ops,
+	    &shutdown_fake, &test_scan_profile, fake_clock, &shutdown_fake,
+	    &shutdown_station) == 0);
+	shutdown_fake.station = shutdown_station;
+	assert(net_device_reference_balance == 2);
+	assert(wlan_station_open(shutdown_station) == 0);
+	assert(wlan_station_test_seed_authorized(shutdown_station, &bss,
+	    1600U, 1610U) == 0);
+	assert(wlan_station_report_link_loss(shutdown_station, 1600U, EIO) == 0);
+	reconnect_fail_scans(shutdown_station, &shutdown_fake, 2U);
+	assert(wlan_station_test_snapshot(shutdown_station,
+	    &station_snapshot) == 0 && station_snapshot.reconnect_pending &&
+	    station_snapshot.reconnect_next_attempt == shutdown_fake.now + 200U);
+	shutdown_cancelled_deadline = station_snapshot.reconnect_next_attempt;
+
 	assert(wlan_station_open(station) == 0);
 	request_header(&scan, sizeof(scan), "wlan0");
 	scan.action = WLAN_SCAN_START;
@@ -1457,6 +2130,11 @@ test_core(void)
 	}
 	assert(wlan_station_shutdown_all() == EBUSY);
 	assert(net_device_reference_balance == 1);
+	assert_station_retired(shutdown_station);
+	shutdown_scan_calls = shutdown_fake.scan_start_calls;
+	shutdown_fake.now = shutdown_cancelled_deadline;
+	wlan_timer_run(shutdown_fake.now);
+	assert(shutdown_fake.scan_start_calls == shutdown_scan_calls);
 	request_header(&status, sizeof(status), "wlan0");
 	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == ENODEV);
 	assert(wlan_station_test_secrets_clear(station));
