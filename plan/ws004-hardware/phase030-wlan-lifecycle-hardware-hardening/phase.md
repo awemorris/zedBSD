@@ -4,7 +4,8 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p030`
 
-Status: planned; depends on the `ws004-p029` automatic milestone; not queued
+Status: planned; deliberately deferred until WS005 p009 proves minimum
+physical communication; not queued
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -17,6 +18,11 @@ link loss, bounded reconnect, USB errors, interface up/down, reset, unplug,
 reinsert, shutdown, and repeated physical use. Completion means the declared
 2.4-GHz/20-MHz WPA2-Personal/CCMP L2 profile is reliable and diagnosable; it
 does not imply 5-GHz, DFS, VHT, roaming, or DHCP support.
+
+This Phase begins only after one simple attach/scan/connect/DHCP/ping/fetch
+path works in WS005 p009. Its detailed abnormal and semi-normal behavior is a
+second layer of work, not a prerequisite for establishing first
+communication.
 
 The common kernel WLAN layer owns long-lived rekey/reconnect and controlled
 port state while an interface instance remains up. WS005 owns persistent SSID/
@@ -33,12 +39,17 @@ running `dhcpc` after L2 authorization.
   ownership through disconnect and controller teardown.
 - A deterministic fake authenticator/USB transport that can force GTK rekey,
   deauthenticate a station, restart its radio, and retain deterministic
-  2.4-GHz settings. The real controlled AP is supplied only to the shared
-  WS005 p008 checkpoint and need not force rekey there.
+  2.4-GHz settings. A real controlled AP is used once by WS005 p009 for the
+  simple communication path and later by the shared WS005 p008 lifecycle
+  checkpoint; p009 does not force rekey or recovery.
+- [`ws005-p009`](../../ws005-networking/phase009-wlan-minimum-connectivity/phase.md):
+  one physical normal path reaches secure carrier and useful IP communication
+  before this lifecycle matrix is started.
 
-This final hardware Phase is planned only. It is not placed in the current
-Queue and does not authorize repeated physical actions until separately
-proposed and approved.
+This Phase is not part of q059. After p009, a later Queue may execute its finite
+automatic milestone. It does not authorize an additional physical adapter/AP
+checkpoint or repeated human action; final lifecycle evidence remains the
+single later shared WS005 p008 request after all automatic gates.
 
 ## Frozen reconnect policy
 

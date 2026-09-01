@@ -1,134 +1,113 @@
-# Queue: RTL8822BU WPA2-Personal/CCMP L2
+# Queue: RTL8822BU minimum end-to-end connectivity
 
 Last updated: 2026-09-01
 
-QID: `q058`
+QID: `q059`
 
-Queue status: completed
+Queue status: ready; not started
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: the user directed WLAN to remain the priority and authorized
-automatic Queue continuation. Q057 completed the p028 automatic radio/scan
-milestone. A read-only readiness audit found p029 sufficiently specified to
-begin without a new human decision.
+Authorization: the user changed the implementation order on 2026-09-01.
+Establish one simple successful communication path before perfecting detailed
+error, recovery, race, and long-run behavior. Q058 already supplies the
+automatic WPA2-Personal/CCMP kernel and RTL8822BU L2 foundation.
 
-Timebox: none. Execute the one finite p029 automatic milestone. Do not request
-a physical adapter, AP, credential, `/sbin/wifi`, DHCP, or WS005 acceptance in
-this Queue.
+Timebox: none. Execute the normal path only. When a failure occurs, diagnose
+and repair the first boundary blocking that path; do not broaden the Queue
+into speculative abnormal-case hardening.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q057](queue-q057.md)
+Previous Queue: [q058](queue-q058.md)
 
 ## Purpose
 
-Turn the q057 scan-only station into the smallest secure useful L2 station:
-strict WPA2-Personal/RSN/PSK/CCMP authentication and association, the four-way
-handshake, transactional hardware keys, controlled-port authorization, and
-bidirectional Ethernet framing through the production common WLAN and
-RTL8822BU paths. Complete all success, malformed, timeout, replay, rollback,
-secret-lifetime, and synthetic data cases before any physical RF request.
+Provide the shortest useful vertical slice:
+
+```text
+RTL8822BU attach and firmware
+  -> wlan0
+  -> /sbin/wifi scan and list
+  -> WPA2-Personal/CCMP connect
+  -> carrier
+  -> /sbin/dhcpc
+  -> ping and bounded fetch
+```
+
+This Queue deliberately precedes rekey, automatic reconnect, firmware crash
+recovery, repeated hotplug, exhaustive malformed input, exhaustive race/fault
+injection, and long repeatability campaigns.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws004-p029` | [Phase](ws004-hardware/phase029-wpa2-ccmp-l2/phase.md) | automatic milestone completed | Strict WPA2-Personal/CCMP handshake, transactional RTL keys, controlled port, and bidirectional synthetic Ethernet L2 pass every automatic gate |
+| 1 | `ws005-p004` | [Primitive wifi command](ws005-networking/phase004-wifi-ioctl-command/phase.md) | ready | The direct root `/sbin/wifi` human command drives the existing scan/status/connect/disconnect WLAN ioctls on the normal path |
+| 2 | `ws005-p009` | [Minimum connectivity](ws005-networking/phase009-wlan-minimum-connectivity/phase.md) | planned; follows p004 | One physical adapter run reaches scan, secure carrier, DHCP, ping, and bounded fetch using runtime-only credentials |
 
 ## Accepted decisions
 
-- Support only infrastructure open-system authentication followed by RSN v1,
-  PSK, and CCMP-128. Reject or defer open/WEP/WPA1/TKIP/SAE/WPA3/802.1X,
-  PMF-required, raw-hex PSKs, 5 GHz, HT/VHT optimization, and roaming.
-- The common kernel WLAN layer owns BSS/security selection, authentication,
-  association, passphrase derivation, nonces, EAPOL, keys, replay state,
-  controlled-port state, and Ethernet/802.11 conversion. RTL code owns only
-  BSSID/AID, SEC/CAM, TX/RX descriptor metadata, firmware reports, and device
-  reset/quiesce.
-- One direct-connect generation has a total 30-second monotonic deadline.
-  Local waits and retries consume that budget and never restart it.
-- A valid message 3 plus successful atomic pairwise/group key installation and
-  successful message 4 transmission are required before carrier is raised.
-  A driver shortcut cannot publish `AUTHORIZED`.
-- If an AP advertises extra suites but has a complete CCMP+PSK choice, select
-  that choice and construct a bounded association RSN element; do not reject
-  it merely for advertising alternatives and do not copy its IE verbatim.
-
-## Boundaries
-
-- Preserve q057 power/radio/scan, generic USB, Mass Storage, CDC NCM/ECM, USB
-  HID, wired network, net-device, and storage behavior.
-- Keep new APIs internal to the existing kernel WLAN boundary unless a proven
-  consumer requires a public change. Do not casually expand the frozen UAPI.
-- Do not implement persistent profiles, `/sbin/wifi`, `net wifi`, `networkd`
-  composition, DHCP, reconnect/rekey campaigns, or physical acceptance here.
-  WS005 owns orchestration; p030 owns long-lived lifecycle hardening.
+- Implement only the direct root human `/sbin/wifi` forms needed for initial
+  bring-up. `--machine`, secret fd 4, ZNV2, `networkd`, profile lookup, and
+  `net wifi` orchestration remain p006/p007 work after basic connectivity.
+- Use the existing p027-p029 kernel UAPI and WPA2/CCMP implementation. Do not
+  add rekey/reconnect/recovery APIs merely to complete this Queue.
+- Apply essential bounds, checked return values, finite waits, and secret
+  buffer clearing to the normal path. Defer exhaustive syntax/error matrices,
+  every cancellation race, and every injected failure to later hardening.
+- The physical check is one developmental success check, not final
+  acceptance or repeatability evidence. It does not require five runs and
+  does not induce link loss, unplug/reinsert, or firmware failure.
+- The supplied SSID and passphrase are runtime-only inputs. Never write them
+  to a plan, source, fixture, image, retained command line, diagnostic, test
+  log, or commit.
 - Do not use `.internal/` or aggregate `make check`.
 
-## Implementation checkpoints
+## Automatic gate before physical use
 
-1. Freeze the internal common-WLAN/radio callbacks needed for raw management,
-   EAPOL, data, TX completion cookies, RX security metadata, BSSID/AID, and key
-   generations. Remove/restrict the generic driver-authorized shortcut and
-   correct strict-but-selective RSN choice.
-2. Add bus-independent SHA-1, HMAC-SHA1, PBKDF2-HMAC-SHA1, AES-128, RFC 3394
-   unwrap, constant-time comparison, and explicit secret erasure with official
-   known-answer vectors and checked bounds.
-3. Implement authentication, association, EAPOL messages 1--4, PMK/PTK/GTK,
-   nonce/replay/retransmission rules, one atomic key transaction, finite state
-   transitions, and a deterministic fake authenticator.
-4. Add controlled-port gating, Ethernet/LLC-SNAP/802.11 conversion, CCMP
-   metadata and packet-number rules, and valid/invalid bidirectional synthetic
-   L2 traffic.
-5. Implement RTL8822BU BSSID/AID, SEC/CAM install/delete, CCMP TX descriptor,
-   encrypted RX status, and C2H TX report handling without moving protocol
-   policy into the driver.
-6. Exhaust handshake, crypto, downgrade, malformed, stale, timeout, entropy,
-   CAM, USB, close/detach, and secret-lifetime faults; retain q057 and generic
-   WLAN/storage regressions.
+1. `/sbin/wifi` builds and is installed in the amd64 image.
+2. A production-ioctl fake WLAN smoke test passes exactly one normal sequence:
+   search start, completed list, status, connect through authorized carrier,
+   disconnect, and search stop.
+3. Basic empty/oversized interface, SSID, and passphrase inputs fail before an
+   ioctl, output stays bounded, and every userspace secret buffer is erased.
+4. Retain q058 as the accepted lower-layer baseline. Rerun only directly
+   affected focused gates if a normal-path repair touches that layer, plus the
+   driver-enabled amd64 image build, one bounded xHCI USB-root boot, and
+   `git diff --check`.
 
-## Automatic gates
+## Physical development check
 
-1. One focused production-linked runner passes crypto KATs, strict RSN/auth/
-   association/EAPOL behavior, retransmission/replay defenses, atomic key
-   rollback, controlled-port ordering, secret scrubbing, and L2 conversion in
-   ordinary, ASan/UBSan, and compiler-analyzer modes.
-2. RTL core/USB fixtures pass SEC/CAM/BSSID/AID, descriptor/RX-security/TX-
-   report success and failure cases, endpoint ownership, stale generations,
-   close/detach, and concurrent fake storage.
-3. Existing p027/p028 common WLAN, table, radio, firmware, USB, net-device,
-   Mass Storage, CDC, and storage-focused regressions remain passing.
-4. Driver-enabled amd64 and i386 builds, ordinary `make -j16`, disposable IDE
-   root and q35/xHCI USB-root exact-login controls, and `git diff --check` pass.
+Use one candidate image and the already available passthrough environment.
+Supply the controlled AP identity and passphrase only at runtime without
+retaining them. Perform one bounded sequence:
+
+1. Attach the exact p026 adapter and require one `wlan0` with the pinned
+   firmware.
+2. Start a scan, wait for completion, and confirm the controlled WPA2/CCMP BSS
+   appears.
+3. Connect with `/sbin/wifi`; require authorized carrier.
+4. Run `/sbin/dhcpc wlan0`; require an IPv4 address and route.
+5. Ping the local gateway and one external address, then fetch one bounded
+   object and validate nonzero/matching expected length or digest.
+6. Disconnect once and confirm carrier clears.
+
+If the sequence fails, retain only redacted first-boundary evidence and return
+to that normal-path implementation. Do not add unrelated retry/recovery logic
+in response.
 
 ## Completion definition
 
-Q058 completes when the production common WLAN and RTL8822BU paths can
-automatically complete the declared WPA2-Personal/CCMP four-way handshake,
-install and retire keys without replay/reinstall defects, authorize carrier at
-the exact terminal boundary, and exchange bounded bidirectional synthetic
-Ethernet L2 while every declared negative case fails closed and scrubs secret
-state. Completion unblocks p030 and makes no physical-radio, DHCP, command, or
-orchestration claim.
+Q059 completes when p004's minimum direct command and p009's single physical
+development check prove the complete vertical path through useful IP
+communication. Completion then permits the normal `networkd`/`net wifi`
+composition work and the separately planned p030/error-hardening work. It
+does not claim rekey, automatic reconnect, hotplug recovery, exhaustive fault
+behavior, or final five-run acceptance.
 
 ## Execution result
 
-Q058 completed the finite p029 automatic milestone. Eight fail-fast HW-T33
-component runners passed the crypto, strict RSN/authentication/association/
-EAPOL codec, asynchronous four-way engine, replay/reinstallation defense,
-CCMP reference, Ethernet L2, common-core, RTL CAM/security, and RTL8822BU USB
-contracts. The crypto gate passed 1,494 checks in each mode; ordinary,
-ASan/UBSan, analyzer, and declared amd64/i386 ABI variants all passed.
-
-The hardware path now closes TX admission and proves synchronous USB work, TX
-reports, and all four FIFO page pools drained before CAM/BSSID mutation.
-Unknown hardware state stays quarantined. Driver-enabled amd64/i386 builds and
-ordinary `make -j16` passed. The full amd64 UEFI image passed BOOTX64 validation,
-one disposable OVMF/q35 IDE-root boot, and one four-CPU/4-GiB OVMF/q35/xHCI
-USB-root boot through exact `login:`. The source image remained byte-identical,
-`git diff --check` passed, and `.internal/` was excluded.
-
-No physical RF, DHCP, command, or orchestration result is claimed. P030 is now
-dependency-ready; its eventual hardware feedback remains the one shared WS005
-p008 checkpoint.
+Not started. The previously begun q059 lifecycle-hardening source edits were
+discarded before completion. Q058 remains intact and pushed. No credential was
+written to the repository or retained evidence.

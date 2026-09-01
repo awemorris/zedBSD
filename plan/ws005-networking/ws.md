@@ -4,12 +4,11 @@ Last updated: 2026-09-01
 
 WSID: `ws005`
 
-Status: active; q056 completed the RTL8822BU pre-radio substrate and q057
-completed the p028 automatic radio-table/scan layer after
-q029 p001 completed the first physical USB-Ethernet path,
-q040 completed p003's AF_UNIX/network authorization foundation, q051 completed
-p005's real-command guest and abrupt-stop/remount acceptance, and q053 completed
-p002's documentation-only WLAN v1 contract synchronization
+Status: active; q058 completed the RTL8822BU WPA2-Personal/CCMP automatic L2
+milestone after q056/q057 completed the pre-radio and scan layers. q059 is now
+the normal-path-first Queue: implement the minimum direct `/sbin/wifi` command
+in p004, then prove one physical DHCP/ping/fetch path in p009. Detailed
+primitive and hardware lifecycle hardening follows in p010 and WS004 p030.
 
 Parent: [master plan](../master.md)
 
@@ -32,9 +31,10 @@ package boundary is frozen. Q055 completed the generic WLAN core/fake radio in
 `ws004-p027`, and q056 completed the independent RTL8822BU pre-radio substrate
 in `ws004-p036`. `ws005-p004` is dependency-ready, and q057 has completed
 `ws004-p028`'s BSD-3-Clause radio-table import and conservative automatic scan
-milestone. Q058 now implements WS004 p029 secure L2 independently of the
-command stack. P006 then consumes the completed p003/p005
-contracts plus that primitive.
+milestone. Q058 completed WS004 p029 secure L2 independently of the command
+stack. Start q059 at p004's human direct-root normal path; after p009 proves
+one useful physical IP path, continue with p006/p007 composition and the
+separately retained p010/p030 hardening work.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -45,11 +45,13 @@ Shared tests: [WS005 test index](tests/README.md)
 | [`ws005-p001`](phase001-usb-ncm-physical-datapath/phase.md) | Complete (`q029`) | RTL8156 NCM carrier/static/DHCP/ping and final Latitude external fetch pass |
 | [`ws005-p002`](phase002-wlan-v1-contract/phase.md) | Complete (`q053`) | Frozen v1 topology, ownership, security, supersession, limits, and recovery semantics are synchronized across the dependent P-books; no source or hardware result is claimed |
 | [`ws005-p003`](phase003-unix-peer-credentials/phase.md) | Complete (`q040`) | Fixed 12-byte connection-time AF_UNIX identity, checked `root:network 0660` publication, root/non-root operation policy, and kernel ioctl privilege boundary pass focused and native PC-98 gates |
-| [`ws005-p004`](phase004-wifi-ioctl-command/phase.md) | Planned; depends on p002, p003, and `ws004-p027` | Add the primitive, L2-only `/sbin/wifi` ioctl command with bounded machine and human output |
+| [`ws005-p004`](phase004-wifi-ioctl-command/phase.md) | Ready; selected first in `q059` | Add the minimum human, direct-root `/sbin/wifi` normal path without DHCP or persistence |
 | [`ws005-p005`](phase005-wifi-credential-store/phase.md) | Complete (`q051`) | Real root/sudo-like/non-root `/sbin/net wifi set-key`, read-side replacement rejection, metadata, redaction, atomic update, abrupt stop, and second-boot persistence pass |
 | [`ws005-p006`](phase006-networkd-wifi-protocol/phase.md) | Planned; depends on p003-p005 and the p004 primitive | Replace whitespace `ZNV1` limitations with bounded length-framed WLAN requests, peer authorization, and a secret-FD child path |
 | [`ws005-p007`](phase007-net-wifi-orchestration/phase.md) | Planned; depends on p005-p006 and WS004 WLAN fixture | Implement the requested `net wifi` search/list/up/down/connect flow through `networkd` to `ifconfig`, `wifi`, and `dhcpc` |
 | [`ws005-p008`](phase008-archer-physical-acceptance/phase.md) | Planned; depends on p007 and `ws004-p030` | Prove one complete physical scan/WPA2/DHCP/transfer/down path, then run the final frozen-artifact repeatability campaign |
+| [`ws005-p009`](phase009-wlan-minimum-connectivity/phase.md) | Planned; selected second in `q059` after p004 | One developmental physical run reaches scan, secure carrier, DHCP, ping, and bounded fetch before hardening |
+| [`ws005-p010`](phase010-wifi-primitive-hardening/phase.md) | Planned; deferred until p009 | Complete the primitive command's abnormal/semi-normal, cancellation, race, boundary, and redaction matrix |
 
 `ws002-p020` remains historical ownership of the current wired
 `networkd`/`net` baseline; it is not renumbered into this WS. Native device and
@@ -57,6 +59,10 @@ common kernel WLAN work is owned by `ws004-p026` through `ws004-p030`.
 
 ## Goals
 
+- Establish one simple vertical communication path before perfecting detailed
+  abnormal, recovery, race, and repeatability behavior. Essential bounds,
+  finite waits, checked returns, and secret redaction still apply from the
+  first implementation.
 - Preserve the completed wired and USB-Ethernet behavior while adding one
   coherent WLAN control path.
 - Make `/sbin/net` the interface used by people and desktop software.
@@ -81,6 +87,9 @@ association, DHCP, disconnect, cancellation, recovery, and useful diagnostics
 pass the automatic fixture matrix; and the selected physical adapter passes
 the declared final acceptance campaign. Direct primitive recovery remains
 available to root without making `networkd` optional for ordinary users.
+
+p009 is only the early development checkpoint for that sequence. It does not
+replace p006/p007 composition, p010/p030 hardening, or p008 final acceptance.
 
 ## 1. Objective and ownership boundary
 
@@ -188,9 +197,10 @@ wifi <interface> connect <SSID> <passphrase>
 wifi <interface> disconnect
 ```
 
-It performs no DHCP or persistence. Human output is separate from a bounded
-machine-readable mode used by `networkd`. The internal child form accepts key
-material from a dedicated inherited descriptor; `networkd` never places a
+It performs no DHCP or persistence. P004 first supplies only human output.
+P006 later adds the bounded machine-readable mode used by `networkd` and the
+internal child form accepting key material from a dedicated inherited
+descriptor; `networkd` never places a
 passphrase in child argv, temporary diagnostic files, or logs. The requested
 public connect form is retained, with its shell-history/process-list exposure
 documented as a direct-administration limitation.
@@ -282,17 +292,21 @@ rather than being parsed as a WLAN request.
 | NET-24 | Superseded | Pluggable WPA backend family | Fixed primitive topology | No implementation |
 | NET-25 | Complete as p002 (`q053`) | WLAN v1 contract freeze | User decisions recorded above | P-book and dependent design records are synchronized; no implementation result claimed |
 | NET-26 | Planned as p003 | AF_UNIX peer credentials and one-socket authorization | NET-25 | Credential spoof/race/group/privilege fixtures pass |
-| NET-27 | WS004 p027/p036 and p028 automatic milestone complete (`q055`--`q057`); p004 dependency-ready | Primitive `/sbin/wifi` and stable WLAN ioctl contract | NET-25, common WLAN fixture | search/list/status/connect/disconnect pass without DHCP/persistence |
+| NET-27 | Ready as p004; selected in `q059` | Minimum human direct-root `/sbin/wifi` over the stable WLAN ioctl contract | NET-25, WS004 p027-p029 | one normal search/list/status/connect/disconnect sequence passes without DHCP/persistence |
 | NET-28 | Complete as p005 (`q051`) | System/per-user `wifi.conf` and `set-key` | NET-25 | ownership/mode/symlink/locking/atomicity/redaction and abrupt-stop/remount tests pass |
 | NET-29 | Planned as p006 | `ZNV2`, peer authorization, `wifi` child secret-FD bridge | NET-26--NET-28 | malformed/auth/timeout/cancel/crash fixtures pass |
 | NET-30 | Planned as p007 | Requested high-level `net wifi` operations | NET-29, WS004 WLAN fixture | full fake-device association/DHCP/down transaction passes |
-| NET-31 | Planned as p008 | Archer end-to-end and repeatability acceptance | NET-30, WS004 p030 | physical L2, DHCP, transfer, down, reconnect, final repetition pass |
+| NET-31 | Planned as p008 | Archer end-to-end and repeatability acceptance | NET-30, NET-33, WS004 p030 | physical L2, DHCP, transfer, down, reconnect, final repetition pass |
+| NET-32 | Planned as p009; selected after p004 in `q059` | Minimum physical WLAN communication checkpoint | NET-27, WS004 p026-p029 | one runtime-only-credential run reaches carrier, DHCP, ping, and bounded fetch |
+| NET-33 | Planned as p010; deferred until NET-32 | Primitive CLI abnormal/semi-normal hardening | NET-27, NET-32 | bounded invalid/race/cancel/detach/redaction fixtures pass |
 
 ## 8. Cross-WS dependencies
 
 - WS002 supplies init, fd 3 readiness, `networkd`, `net`, and `dhcpc` baseline.
 - WS004 owns generic kernel WLAN facilities, USB RTL8822BU hardware,
-  firmware, lifecycle, and test-double boundaries in p026-p030.
+  firmware, lifecycle, and test-double boundaries in p026-p030. Its p030
+  lifecycle hardening begins after p009 has established the normal physical
+  communication baseline.
 - WS011 owns `/etc/net.conf`, interactive candidate/commit behavior, and later
   VLAN/bridge design. WLAN secrets never enter `/etc/net.conf`.
 - WS009 will document administrator/user commands, plaintext-secret risk,

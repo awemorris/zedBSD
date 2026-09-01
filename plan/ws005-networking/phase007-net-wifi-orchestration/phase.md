@@ -1,10 +1,10 @@
 # WS005 Phase 007: `net wifi` orchestration
 
-Last updated: 2026-08-30
+Last updated: 2026-09-01
 
 Phase ID: `ws005-p007`
 
-Status: planned; not queued
+Status: planned; not queued; follows p009 and p006
 
 Parent: [WS005](../ws.md)
 
@@ -101,7 +101,7 @@ net wifi connect <interface> <SSID>
 ```
 
 `list` is part of this Phase so callers do not bypass networkd and parse
-human-oriented `/sbin/wifi` output. Networkd consumes the bounded p004/p006
+human-oriented `/sbin/wifi` output. Networkd consumes the bounded p006
 machine records and emits one stable, escaped public view containing SSID,
 BSSID, RSSI, channel/band, WPA2-Personal/CCMP capability, snapshot state, and
 generation. The existing interactive `net` console exposes the same operations
@@ -229,7 +229,7 @@ bounded results. Otherwise return a stable `not-scanned`/`in-progress` status;
 do not silently start a scan. Each record carries explicit SSID length and the
 minimum selection metadata needed by p007, with SSID bytes escaped for the
 public view. Keys and credential presence are not exposed. Record ordering,
-duplicate records, and stale generations follow the p004 `WIFI1` snapshot
+duplicate records, and stale generations follow the p006 `WIFI1` snapshot
 exactly; scanning, complete-with-zero-results, and failed are distinct, and
 the minimum public fields are fixed above.
 

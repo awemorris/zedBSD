@@ -1,10 +1,10 @@
 # WS005 Phase 006: networkd Wi-Fi control protocol
 
-Last updated: 2026-08-30
+Last updated: 2026-09-01
 
 Phase ID: `ws005-p006`
 
-Status: planned; not queued
+Status: planned; not queued; follows the p009 minimum-connectivity checkpoint
 
 Parent: [WS005](../ws.md)
 
@@ -75,12 +75,16 @@ cross-stage rollback belong to `ws005-p007`.
   implementation, and lifecycle/authorization tests.
 - A bounded WLAN ioctl contract whose blocking operations are interruptible or
   have a kernel-owned finite deadline.
-- [`ws005-p004`](../phase004-wifi-ioctl-command/phase.md) `/sbin/wifi`, with
-  `WIFI1` machine scan/status/list/connect/disconnect records and the private
-  passphrase-descriptor form.
+- [`ws005-p004`](../phase004-wifi-ioctl-command/phase.md) supplies the minimum
+  human direct-root `/sbin/wifi`. This Phase extends that same binary with
+  `WIFI1` machine records and the private passphrase-descriptor form.
 - [`ws005-p005`](../phase005-wifi-credential-store/phase.md) versioned
   `/etc/wifi.conf` and per-user `~/.wifi.conf` parser/store used by `net`,
   including explicit-length SSID/passphrase fields and secret wiping.
+- [`ws005-p009`](../phase009-wlan-minimum-connectivity/phase.md) first proves
+  that the direct primitive and physical L2/DHCP data path work. p006 then adds
+  machine framing and daemon composition without making those mechanisms a
+  prerequisite for first communication.
 - AF_UNIX descriptor passing remains available for tests and future protocol
   evolution, but this Phase does not create a second daemon socket.
 
@@ -237,13 +241,13 @@ nonroot peer, root peer, and descriptor/lifecycle cases from p003.
 
 ## `/sbin/wifi` child contract
 
-`networkd` uses the p004 private machine invocation, `wifi --machine ...`, and
-its `WIFI1` record contract. The child contract is:
+This Phase adds the private machine invocation, `wifi --machine ...`, and its
+`WIFI1` record contract for `networkd`. The child contract is:
 
 - interface and operation may be argv because they are validated bounded
   identifiers; a passphrase never appears in child argv or the environment;
 - inherited descriptor 4 carries the exact passphrase bytes followed by EOF,
-  matching p004 `--passphrase-fd=4`. fd 3 remains reserved for init readiness.
+  using p006 `--passphrase-fd=4`. fd 3 remains reserved for init readiness.
   The child rejects short input, more than the WPA2-Personal maximum plus the
   overflow probe, trailing data, and an unexpected secret for a read-only
   operation;
@@ -306,7 +310,7 @@ and rollback rather than treating process termination as L2 disconnection.
    parser/executor, and retain only bounded initial-magic version failure.
 5. Add the bounded child runner with separate secret, machine stdout, and
    diagnostic pipes; implement full timeout, termination, and reaping paths.
-6. Consume p004's private `/sbin/wifi` machine/secret-fd mode and add
+6. Extend p004's `/sbin/wifi` with the private machine/secret-fd mode and add
    production-contract child fixtures. Keep human output outside the machine
    parser.
 7. Implement the Wi-Fi ZNV2 operations needed by p007 without yet composing
@@ -360,7 +364,7 @@ product or human decisions:
   parser and executor path.
 - Map p003's fixed root/all and admitted-nonroot read-only-plus-WLAN matrix to
   the generated opcodes. The socket remains `root:network 0660`, GID 69.
-- Map every p004 `WIFI1` terminal/error into one ZNV2 result. Secret fd 4,
+- Map every p006 `WIFI1` terminal/error into one ZNV2 result. Secret fd 4,
   32768-byte/64-record stdout, 512-byte stderr, and EOF-terminated secret bytes
   are fixed inputs, not selectable alternatives.
 - Add boundary vectors for five-second request/response I/O, 15-second scan,

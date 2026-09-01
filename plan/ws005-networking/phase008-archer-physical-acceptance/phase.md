@@ -10,6 +10,10 @@ Parent: [WS005](../ws.md)
 
 Orchestration dependency: [`net wifi` orchestration](../phase007-net-wifi-orchestration/phase.md)
 
+Earlier development checkpoint: [minimum connectivity](../phase009-wlan-minimum-connectivity/phase.md)
+
+Primitive hardening dependency: [p010](../phase010-wifi-primitive-hardening/phase.md)
+
 Tests: [WS005 test index](../tests/README.md)
 
 Target identity: [WS004 p026](../../ws004-hardware/phase026-archer-t3u-nano-identity-firmware/phase.md)
@@ -22,6 +26,11 @@ Accept one precisely identified Japan-market TP-Link Archer T3U Nano as the
 first physical WLAN target without turning hardware access into an iterative
 development loop. Its label has no printed hardware revision; the exact
 retained USB descriptor is the unit's binding authority.
+
+WS005 p009 intentionally performs one earlier, narrow development check to
+prove basic scan/connect/DHCP/ping/fetch communication before hardening. That
+result is not this Phase's provisional acceptance, consumes none of the
+five-run ledger, and carries no reconnect/recovery claim.
 
 After every automatic lower-layer, protocol, orchestration, build, static, and
 regression gate passes, p008 permits exactly one provisional physical check.
@@ -40,10 +49,11 @@ profile.
 
 ## Dependencies
 
-- All automatic/model gates from WS004 p026-p030 and the WS005 primitive,
-  profile, p006 protocol, and p007 orchestration Phases are complete. Their
-  physical evidence is supplied only through the bounded p008 procedure, not
-  by ad hoc earlier human retries.
+- The p009 one-run minimum-connectivity development checkpoint is complete.
+- All automatic/model gates from WS004 p026-p030 and WS005 p004-p007 plus p010
+  are complete. Their final physical acceptance evidence is supplied only
+  through the bounded p008 procedure; p009 remains separately labelled
+  development evidence.
 - The p003 AF_UNIX peer-credential contract and `root:network` socket policy
   pass their native and lifecycle regressions.
 - The supported full build, focused host/native tests, sanitizers/analyzers
@@ -79,7 +89,9 @@ profile.
 - restarting the five-run counter inside p008 after a failed run;
 - broad interoperability across access points, bands, roaming, suspend/resume,
   enterprise authentication, WPA3, throughput, or power-management matrices;
-- claiming boot-time Wi-Fi policy not selected by p007.
+- claiming boot-time Wi-Fi policy not selected by p007; and
+- treating p009's earlier one-run development result as provisional or final
+  acceptance, or counting it toward the five consecutive runs.
 
 ## Exact hardware identity contract
 
