@@ -251,6 +251,12 @@ significant calls still applies.
 Preserve the original short-circuit evaluation order when decomposing a
 condition.
 
+Do not use `goto`, including for error cleanup.  Keep ownership local, return
+immediately after a failed operation, and release already acquired resources
+in reverse order on that path.  When this would duplicate a large cleanup
+sequence or obscure the main operation, extract a small cleanup helper or
+split the function at an ownership boundary.
+
 ## 7. Loops and switches
 
 Every `for` and `while` loop belongs to a paragraph introduced by a one-line
@@ -464,6 +470,7 @@ Before finishing a C-source change, verify that:
 - the declaration group, first statement, and assertions follow the required
   order and spacing
 - compound decisions and fallible calls are individually debuggable
+- no `goto` statement is used for cleanup or control flow
 - every loop and `switch` has an immediately preceding intent comment
 - split calls use one argument per line and split controlled statements use
   braces
