@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+include $(dir $(lastword $(MAKEFILE_LIST)))../../package.mk
 
 INTEL_AX211_DRIVER_LICENSE_DATA := \
 	/usr/share/licenses/intel-ax211-driver/LICENSE=userland/base/licenses/intel-ax211-driver/LICENSE

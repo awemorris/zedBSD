@@ -9,7 +9,7 @@ production_config=$repo/config.mk
 production_image=$repo/build/amd64/hdd-image.img
 package_artifact=$repo/build/amd64/bin/noct
 staged_artifact=$repo/build/amd64/rootfs/usr/bin/noct
-cmake_artifact=${NOCT_CMAKE_ARTIFACT:-$repo/userland/noct/NoctLang/build-zedbsd/noct}
+cmake_artifact=${NOCT_CMAKE_ARTIFACT:-$repo/userland/base/noct/noct/build-zedbsd-amd64/noct}
 qemu=${QEMU_SYSTEM_X86_64:-qemu-system-x86_64}
 build_timeout=${BUILD_TIMEOUT_SECONDS:-3600}
 boot_timeout=${BOOT_TIMEOUT_SECONDS:-120}
@@ -90,6 +90,12 @@ base64 --decode "$script_dir/beui-zedbsd.bmp.b64" >"$bmp"
 cat >>"$config" <<EOF
 
 # NOCT-T011/T012 private package payload.
+ZEDBSD_PLATFORM := amd64
+ZEDBSD_ARCHITECTURE := amd64
+ZEDBSD_BOARD := pcat
+ZEDBSD_VARIANT := hybrid
+CONFIG_DRIVER_PCI_XHCI := y
+CONFIG_DRIVER_USB_STORAGE := y
 ZEDBSD_USER_PROGRAMS += noct
 ZEDBSD_PACKAGE_INPUTS += $script_dir/beui-zedbsd-qemu.noct $bmp
 ZEDBSD_PACKAGE_FILES += --file /usr/share/noct/beui-zedbsd.noct=$script_dir/beui-zedbsd-qemu.noct --file /usr/share/noct/beui-zedbsd.bmp=$bmp
@@ -110,8 +116,10 @@ printf 'case\tresult\tevidence\n' >"$results"
 
 build_command=(make -C "$repo" -j16 "ZEDBSD_CONFIG=$config")
 qemu_command=(
-	"$qemu" -machine pc -m 512 -smp 4
-	-drive "file=$run_image,format=raw,if=ide"
+	"$qemu" -machine q35 -m 512 -smp 4
+	-device qemu-xhci,id=xhci
+	-drive "if=none,id=usbboot,file=$run_image,format=raw"
+	-device usb-storage,bus=xhci.0,drive=usbboot,id=bootstick,bootindex=1
 	-display none -serial none -debugcon "file:$guest_log"
 	-monitor stdio -no-reboot
 )
@@ -148,15 +156,15 @@ cmake_hash=$(hash_file "$cmake_artifact")
 printf 'artifact-identity\tpass\trun-metadata.txt\n' >>"$results"
 printf 'cmake_artifact_sha256=%s\n' "$cmake_hash" >>"$metadata"
 
-backend=$repo/userland/noct/NoctLang/src/api/api-beui-zedbsd.c
-link_file=$repo/userland/noct/NoctLang/build-zedbsd/CMakeFiles/noctapi.dir/link.txt
+backend=$repo/userland/base/noct/noct/src/api/api-beui-zedbsd.c
+link_file=$repo/userland/base/noct/noct/build-zedbsd-amd64/CMakeFiles/noctapi.dir/link.txt
 [[ -f $backend ]] || { echo "backend source missing: $backend" >&2; exit 1; }
 if rg -n 'ZEDBSD_CONSOLE_(POLL_EVENT|READ_EVENT|KEY_STATE|DRAIN_INPUT)|#include[[:space:]]*[<"]zedbsd/console.h' "$backend"; then
 	echo "legacy console input dependency remains in canonical BeUI" >&2
 	exit 1
 fi
-[[ ! -e $repo/userland/noct/NoctLang/src/api/beui-zedbsd-input.c ]]
-[[ ! -e $repo/userland/noct/NoctLang/src/api/beui-zedbsd-input.h ]]
+[[ ! -e $repo/userland/base/noct/noct/src/api/beui-zedbsd-input.c ]]
+[[ ! -e $repo/userland/base/noct/noct/src/api/beui-zedbsd-input.h ]]
 rg -q 'api-beui-zedbsd.c' "$link_file"
 ! rg -q 'beui-zedbsd-input.c' "$link_file"
 nm -g --defined-only "$cmake_artifact" >"$symbol_report"

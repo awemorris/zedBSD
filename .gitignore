@@ -1,6 +1,7 @@
 /build/
 /config.mk
-/userland/noct/NoctLang/
+/userland/base/noct/distfiles/
+/userland/base/noct/noct/
 __pycache__/
 *~
 .internal/

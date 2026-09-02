@@ -14,7 +14,19 @@ CC ?= cc
 AR ?= ar
 ZEDBSD_STANDALONE_CONFIG ?= $(ZEDBSD_REPO_ROOT)/config.mk
 
+# Acquisition and patch preparation must also work in a freshly cloned source
+# tree, before menuconfig has produced config.mk.  Compilation and installation
+# retain the existing configured-target requirement.
+ifeq ($(strip $(MAKECMDGOALS)),)
 include $(ZEDBSD_STANDALONE_CONFIG)
+else ifeq ($(strip $(filter-out download patch,$(MAKECMDGOALS))),)
+-include $(ZEDBSD_STANDALONE_CONFIG)
+else
+include $(ZEDBSD_STANDALONE_CONFIG)
+endif
+
+ZEDBSD_USERLAND_PACKAGE_LIFECYCLE := 1
+include $(dir $(ZEDBSD_BASE_PACKAGE_MK))../download.mk
 
 ZEDBSD_STANDALONE_PLATFORM_DIR = $(strip \
 	$(if $(filter i386,$(ZEDBSD_PLATFORM)),pcat,\
@@ -38,11 +50,14 @@ ZEDBSD_STANDALONE_HEADERS := $(14)
 ZEDBSD_STANDALONE_INSTALL_DIR := $(if $(15),$(15),bin)
 endef
 
-.PHONY: all install clean
+.PHONY: all build install clean
 
-all:
+all: build
+
+build: patch
 	@if test "$(ZEDBSD_STANDALONE_TYPE)" = program; then \
 		$(MAKE) -C "$(ZEDBSD_REPO_ROOT)" \
+			ZEDBSD_CONFIG="$(ZEDBSD_STANDALONE_CONFIG)" \
 			ZEDBSD_USER_PROGRAMS="$(ZEDBSD_STANDALONE_NAME)" \
 			"build/$(ZEDBSD_STANDALONE_PLATFORM_DIR)/bin/$(ZEDBSD_STANDALONE_NAME)"; \
 	elif test "$(ZEDBSD_STANDALONE_TYPE)" = library && \
@@ -58,7 +73,7 @@ all:
 		$(AR) rcs "build/lib$(ZEDBSD_STANDALONE_NAME).a" $$objects; \
 	fi
 
-install: all
+install: build
 	@if test "$(ZEDBSD_STANDALONE_TYPE)" = program; then \
 		$(INSTALL) -d "$(DESTDIR)$(ZEDBSD_STANDALONE_BINDIR)"; \
 		$(INSTALL) -m "$(ZEDBSD_STANDALONE_MODE)" \
@@ -82,8 +97,12 @@ install: all
 		case "$$destination" in \
 		/lib/terminfo/*) destination="$(ZEDBSD_STANDALONE_TERMINFO_DIR)/$${destination##*/}" ;; \
 		esac; \
+		case "$$source" in \
+		/*) ;; \
+		*) source="$(ZEDBSD_REPO_ROOT)/$$source" ;; \
+		esac; \
 		$(INSTALL) -d "$(DESTDIR)$${destination%/*}"; \
-		$(INSTALL) -m 0644 "$(ZEDBSD_REPO_ROOT)/$$source" \
+		$(INSTALL) -m 0644 "$$source" \
 			"$(DESTDIR)$$destination"; \
 	done
 

@@ -27,16 +27,16 @@ OBJCOPY := objcopy
 CC := gcc
 HOSTCC ?= cc
 PYTHON ?= python3
-ZEDBSD_HOST_NOCT_REPOSITORY ?= https://github.com/awemorris/NoctLang.git
-ZEDBSD_HOST_NOCT_REVISION ?= e56274ff00894182da5c44f1b8a2fb2fcf2c3dac
+include userland/base/noct/version.mk
 ZEDBSD_HOST_NOCT_SOURCE_DIR := build/NoctLang
 ZEDBSD_HOST_NOCT_BUILD_DIR := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/build-static
 ZEDBSD_HOST_NOCT := $(ZEDBSD_HOST_NOCT_BUILD_DIR)/noct
-ZEDBSD_HOST_NOCT_CMAKE_OPTIONS := -DNOCT_ENABLE_API_PROCESS=ON
+ZEDBSD_HOST_NOCT_CMAKE_OPTIONS := -DNOCT_ENABLE_API_PROCESS=ON \
+	-DNOCT_VERSION=$(ZEDBSD_NOCT_VERSION)
 NOCT ?= $(abspath $(ZEDBSD_HOST_NOCT))
 ZEDBSD_HOST_NOCT_STATE_DIR := build/host-noct-state
-ZEDBSD_HOST_NOCT_CHECKOUT_STAMP := $(ZEDBSD_HOST_NOCT_STATE_DIR)/checkout-$(ZEDBSD_HOST_NOCT_REVISION)
-ZEDBSD_HOST_NOCT_BUILD_STAMP := $(ZEDBSD_HOST_NOCT_STATE_DIR)/built-$(ZEDBSD_HOST_NOCT_REVISION)-process
+ZEDBSD_HOST_NOCT_SOURCE_STAMP := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/.zedbsd-source-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)
+ZEDBSD_HOST_NOCT_BUILD_STAMP := $(ZEDBSD_HOST_NOCT_STATE_DIR)/built-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)-process
 ZEDBSD_IMAGE_HOST := build/zedimage-host
 .DEFAULT_GOAL := disk-image
 
@@ -47,7 +47,9 @@ ZEDBSD_CONFIG ?= config.mk
 # saved.  Every build target requires the target information from config.mk.
 ZEDBSD_CONFIG_OPTIONAL_GOALS := menuconfig help list-user-programs \
 	menuconfig-host-test rtl8822b-firmware-fixture-cache \
-	intelax211-firmware-fixture-cache
+	intelax211-firmware-fixture-cache download toolchain \
+	noct-toolchain-smoke noct-download noct-source \
+	noct-target-source-verify noct-host-source noct-host-source-verify
 ifeq ($(strip $(ZEDBSD_PLATFORM)),)
 ifneq ($(filter-out $(ZEDBSD_CONFIG_OPTIONAL_GOALS),$(MAKECMDGOALS)),)
 $(error config.mk is missing or invalid; run 'make menuconfig')
@@ -145,6 +147,7 @@ ZEDBSD_PACKAGE_BINDIR := /usr/bin
 # makefiles provide ABI-specific link rules, while package ownership, source
 # paths and menu metadata live with each program.
 USERLAND_PACKAGES :=
+ZEDBSD_USERLAND_DOWNLOAD_TARGETS :=
 define ZEDBSD_USERLAND_PACKAGE
 USERLAND_PACKAGES += $(1)
 USERLAND_$(1)_LABEL := $(2)
@@ -163,11 +166,10 @@ USERLAND_$(1)_DATA := $(13)
 USERLAND_$(1)_HEADERS := $(14)
 USERLAND_$(1)_INSTALL_DIR := $(if $(15),$(15),bin)
 endef
-# userland/noct is a source-acquisition helper, not a zedBSD image package.
-USERLAND_PACKAGE_MAKEFILES := $(filter-out userland/noct/%, $(sort \
+USERLAND_PACKAGE_MAKEFILES := $(sort \
 	$(wildcard userland/*/Makefile) \
 	$(wildcard userland/*/*/Makefile) \
-	$(wildcard userland/*/*/*/Makefile)))
+	$(wildcard userland/*/*/*/Makefile))
 ZEDBSD_TOPLEVEL_BUILD := 1
 include $(USERLAND_PACKAGE_MAKEFILES)
 ZEDBSD_ALL_USER_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
@@ -183,9 +185,16 @@ USERLAND_NETWORK_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
 # offline build into an implicit source download.
 ZEDBSD_USER_PROGRAMS ?= $(ZEDBSD_DEFAULT_USER_PROGRAMS)
 
-# Package dependencies are named by their stable path below
-# userland/packages (for example, editors/remacs -> lang/noct).  Resolve the
-# paths back to registered program names even when config.mk was hand-edited.
+# Remove held package roots before dependency expansion.  Otherwise a stale
+# configuration that still names a held application could retain its
+# dependencies even though the application itself is suppressed.
+ZEDBSD_TARGET_PACKAGE_HOLD := remacs
+override ZEDBSD_USER_PROGRAMS := $(filter-out \
+	$(ZEDBSD_TARGET_PACKAGE_HOLD),$(ZEDBSD_USER_PROGRAMS))
+
+# Package dependencies are named by their registered stable path (for example,
+# editors/remacs -> base/noct). Resolve those paths back to program names even
+# when config.mk was hand-edited.
 user_program_dependency_names = $(strip $(foreach program,$(1),\
 	$(foreach requirement,$(USERLAND_$(program)_REQUIRE),\
 		$(foreach candidate,$(USERLAND_PACKAGES),\
@@ -197,12 +206,7 @@ ZEDBSD_USER_PROGRAMS_DEPS_2 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_1) \
 	$(call user_program_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_1)))
 ZEDBSD_USER_PROGRAMS_DEPS_3 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_2) \
 	$(call user_program_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_2)))
-# The target Noct port is under Principal Engineer repair.  Keep the separate
-# host Noct toolchain used by build scripts, but do not let a stale/manual
-# configuration or dependency expansion install Noct or its Remacs dependent.
-ZEDBSD_TARGET_PACKAGE_HOLD := noct remacs
-override ZEDBSD_USER_PROGRAMS := $(filter-out \
-	$(ZEDBSD_TARGET_PACKAGE_HOLD),$(ZEDBSD_USER_PROGRAMS_DEPS_3))
+override ZEDBSD_USER_PROGRAMS := $(ZEDBSD_USER_PROGRAMS_DEPS_3)
 # The RTL8822B initialization tables are BSD-3-Clause data embedded in the
 # kernel.  Binary images containing that driver must carry the corresponding
 # notice even when the separately licensed firmware package is not selected.
@@ -331,6 +335,7 @@ help:
 		'  make rootfs      Build rootfs' \
 		'  make vmunix      Build the kernel' \
 		'  make run         Build a disk image and start QEMU' \
+		'  make download    Acquire all declared external userland inputs' \
 		'  make toolchain   Build the toolchain' \
 		'  make help        Show this summary'
 
@@ -342,67 +347,15 @@ list-targets:
 	@printf 'Focused checks:\n'; \
 		for target in $(ZEDBSD_CHECK_TARGETS); do printf '  %s\n' "$$target"; done
 
-.PHONY: zedbsd-host-noct-checkout-verify
-zedbsd-host-noct-checkout-verify:
-	@mkdir -p build "$(ZEDBSD_HOST_NOCT_STATE_DIR)"
-	@if test ! -d "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)/.git"; then \
-		git clone "$(ZEDBSD_HOST_NOCT_REPOSITORY)" "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)"; \
-	fi
-	@for legacy_stamp in \
-		"$(ZEDBSD_HOST_NOCT_SOURCE_DIR)"/.zedbsd-checkout-* \
-		"$(ZEDBSD_HOST_NOCT_BUILD_DIR)"/.zedbsd-built-*; do \
-		if test ! -e "$$legacy_stamp"; then \
-			continue; \
-		fi; \
-		if test -L "$$legacy_stamp" || test ! -f "$$legacy_stamp" || \
-		    test -s "$$legacy_stamp"; then \
-			echo "Refusing to remove unexpected legacy Noct stamp: $$legacy_stamp" >&2; \
-			exit 1; \
-		fi; \
-		rm -f -- "$$legacy_stamp"; \
-	done
-	@status=$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" \
-		status --porcelain=v1 --untracked-files=all); \
-	if test -n "$$status"; then \
-		echo "NoctLang host checkout is not clean: $(ZEDBSD_HOST_NOCT_SOURCE_DIR)" >&2; \
-		printf '%s\n' "$$status" >&2; \
-		exit 1; \
-	fi
-	@changed=0; \
-	actual=$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" rev-parse HEAD); \
-	branch=$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" symbolic-ref -q HEAD || :); \
-	if test "$$actual" != "$(ZEDBSD_HOST_NOCT_REVISION)" || test -n "$$branch"; then \
-		if ! git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" cat-file -e \
-		    "$(ZEDBSD_HOST_NOCT_REVISION)^{commit}"; then \
-			git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" fetch origin \
-				"$(ZEDBSD_HOST_NOCT_REVISION)"; \
-		fi; \
-		git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" checkout --detach "$(ZEDBSD_HOST_NOCT_REVISION)"; \
-		changed=1; \
-	fi; \
-	if test ! -e "$(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP)"; then \
-		changed=1; \
-	fi; \
-	if test ! -x "$(ZEDBSD_HOST_NOCT)"; then \
-		changed=1; \
-	fi; \
-	if test "$$changed" = 1; then \
-		rm -f "$(ZEDBSD_HOST_NOCT_BUILD_STAMP)"; \
-		touch "$(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP)"; \
-	fi
-
-$(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP): | zedbsd-host-noct-checkout-verify
-	@test "$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" rev-parse HEAD)" = \
-		"$(ZEDBSD_HOST_NOCT_REVISION)"
-	@test -z "$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" symbolic-ref -q HEAD || :)"
-	@test -z "$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" \
-		status --porcelain=v1 --untracked-files=all)"
-	@test -e "$@"
-
-$(ZEDBSD_HOST_NOCT_BUILD_STAMP): $(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP)
+$(ZEDBSD_HOST_NOCT): $(ZEDBSD_HOST_NOCT_SOURCE_STAMP) | noct-host-source-verify
+	@mkdir -p "$(ZEDBSD_HOST_NOCT_STATE_DIR)"
 	cd "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" && cmake --preset static \
 		$(ZEDBSD_HOST_NOCT_CMAKE_OPTIONS)
-	cd "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" && cmake --build --preset static --parallel
+	cd "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" && cmake --build --preset static --parallel 16
+	@test -x "$(ZEDBSD_HOST_NOCT)"
+	@touch "$(ZEDBSD_HOST_NOCT_BUILD_STAMP)"
+
+$(ZEDBSD_HOST_NOCT_BUILD_STAMP): $(ZEDBSD_HOST_NOCT)
 	@test -x "$(ZEDBSD_HOST_NOCT)"
 	@touch $@
 
@@ -412,6 +365,10 @@ noct-toolchain-smoke: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) plan/ws010-scripting/tests
 		$(abspath build/noct-toolchain-smoke.txt)
 
 toolchain: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) noct-toolchain-smoke
+
+.PHONY: download
+download: $(sort $(ZEDBSD_USERLAND_DOWNLOAD_TARGETS))
+
 
 $(ZEDBSD_IMAGE_HOST): tools/build/zedimage-host.c
 	@mkdir -p $(dir $@)

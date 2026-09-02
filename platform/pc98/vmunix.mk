@@ -367,36 +367,6 @@ $(BUILD)/INIT.ELF: $(USER_LIBC_OBJS) $(BUILD)/userland/base/tests/syscall-smoke.
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
-USER_NOCT_GLUE_OBJS := $(BUILD)/userland/packages/lang/noct/runtime/main.o \
-	$(BUILD)/userland/packages/lang/noct/runtime/memory.o \
-	$(BUILD)/userland/packages/lang/noct/runtime/platform.o \
-	$(BUILD)/userland/packages/lang/noct/runtime/env.o \
-	$(BUILD)/userland/packages/lang/noct/runtime/napi.o \
-	$(BUILD)/userland/packages/lang/noct/runtime/target.o
-$(USER_NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
-$(USER_NOCT_GLUE_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
-$(BUILD)/userland/packages/lang/noct/runtime/napi.o: userland/packages/lang/noct/runtime/napi.c
-	@mkdir -p $(dir $@)
-	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
-$(BUILD)/userland/packages/lang/noct/runtime/target.o: userland/packages/lang/noct/runtime/target.c
-	@mkdir -p $(dir $@)
-	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
-
-$(BUILD)/NOCT.ELF: $(USER_LIBC_OBJS) $(USER_NOCT_GLUE_OBJS) \
-	$(USER_NOCT_OBJECTS) $(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld \
-	$(USER_ELF_CHECK)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) \
-		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_NOCT_GLUE_OBJS) \
-		$(USER_NOCT_OBJECTS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
-	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
-
-$(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
-	@mkdir -p $(dir $@)
-	cp $< $@
-	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
-
 USER_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),sh)
 USER_READLINE_OBJ := $(BUILD)/userland/base/libedit/readline.o
 USER_READLINE_LIB := $(BUILD)/lib/libreadline.a

@@ -41,8 +41,7 @@ test -e "$repo/include/drivers/hid/pc98-busmouse.h"
 
 if rg -n '/dev/mouse|mouse_device_(register|set_backend)|mouse_input_report|zedbsd/mouse' \
 	"$repo/src" "$repo/include" "$repo/userland" "$repo/platform" \
-	"$repo/Makefile" --glob '!userland/noct/**' \
-	--glob '!userland/packages/lang/noct/**'; then
+	"$repo/Makefile" --glob '!userland/base/noct/noct/**'; then
 	echo "retired generic mouse implementation remains" >&2
 	exit 1
 fi

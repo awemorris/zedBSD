@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+include $(dir $(lastword $(MAKEFILE_LIST)))../../package.mk
 
 RTL8822B_TABLES_LICENSE_DATA := \
 	/usr/share/licenses/rtl8822b-tables/LICENSE=userland/base/licenses/rtl8822b-tables/LICENSE

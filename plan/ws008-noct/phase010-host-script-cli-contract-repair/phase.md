@@ -1,6 +1,6 @@
 # WS008 Phase 010: restore the Noct host-script CLI contract
 
-Last updated: 2026-08-31
+Last updated: 2026-09-02
 
 WSID: `ws008`
 
@@ -8,8 +8,7 @@ Phase ID: `p010`
 
 Combined ID: `ws008-p010`
 
-Status: Uncleared (`q047`); runtime `--path` and the ordinary production build
-pass, but the independent `NOCT-T082` compile/application form still fails
+Status: complete (`q063`, 2026-09-02)
 
 Parent: [WS008](../ws.md)
 
@@ -23,7 +22,7 @@ can run those scripts throughout an ordinary production build.
 
 This is an upstream Noct compatibility Phase. It does not authorize a zedBSD
 wrapper which strips `--path`, copies required modules into each script, or
-edits the pristine checkout below `build/NoctLang`.
+edits the verified release source extraction below `build/NoctLang`.
 
 ## Discovery and blocking evidence
 
@@ -55,25 +54,26 @@ The user retained Principal Engineer ownership after rejecting prior automated
 source changes. On 2026-08-31 the maintainer reported that the upstream Noct
 update now restores `--path`, released `MB-008`, and authorized this Phase to
 resume after the current USB implementation reaches a buildable boundary.
-The Phase therefore selects the accepted published revision; it still does
+At q047 the Phase therefore selected the accepted published revision; it did
 not authorize an agent-authored downstream or upstream Noct source patch.
 
-## Released decision and selected path
+## Q047 released decision and selected path
 
-The preferred maintainer path selected published revision
-`e56274ff00894182da5c44f1b8a2fb2fcf2c3dac`. That full commit remains pinned
-because it restores the interpreter-mode `--path` needed by zedBSD recipes.
-Verification found that the same revision does not yet implement the
+Q047 selected published revision
+`e56274ff00894182da5c44f1b8a2fb2fcf2c3dac`. That full commit was pinned
+because it restored the interpreter-mode `--path` needed by zedBSD recipes.
+Verification found that the same revision did not yet implement the
 documented compile/application form. The ordinary zedBSD build no longer
 depends on Noct's optional, unregistered `Binary` API: its own `zedbuild.noct`
 module now implements the three required little-endian operations with public
-language and `Packed.uint8` facilities. Another maintainer-owned upstream
-repair is therefore required only for the frozen compile/application CLI
-contract before this Phase can complete.
+language and `Packed.uint8` facilities. At q047 another maintainer-owned
+upstream repair was therefore required for the frozen compile/application CLI
+contract before this Phase could complete.
 
-A downstream source patch, a dirty ignored checkout, a shell/Python adapter,
-or a zedBSD-wide rewrite which avoids module search is not an implicit third
-choice. Any such proposal requires a newly documented ownership decision.
+A tracked downstream patch is authorized only for the separate zedBSD target
+CMake/link integration owned by p009. Host language/CLI behavior remains the
+unmodified `v2.0.1` release implementation; no option-stripping wrapper or
+dirty source extraction is accepted.
 Repository-owned byte encoding inside `zedbuild.noct` is permitted: it changes
 neither Noct source nor module lookup, and is checked in interpreter and JIT
 modes at signed/unsigned boundaries and invalid inputs.
@@ -92,15 +92,15 @@ modes at signed/unsigned boundaries and invalid inputs.
   module resolution is deterministic.
 - A missing required module or invalid path fails nonzero with a bounded,
   actionable diagnostic.
-- Host source remains a clean detached checkout at one full commit ID. Noct
-  source changes are authored, reviewed, and published in
-  `awemorris/NoctLang`, not embedded in zedBSD.
+- Host source is extracted from one verified official release archive. Its
+  URL, tag commit, exact size, and SHA-256 are the source identity; the
+  extracted source and built executable are not tracked by Git.
 
 ## Work packages after release
 
-1. Record the user's selected resume path and full accepted upstream commit.
-2. Update `ZEDBSD_HOST_NOCT_REVISION` only to that immutable commit and rebuild
-   the Process-enabled static host interpreter from a clean detached checkout.
+1. Record the user's selected release, tag commit, archive size, and digest.
+2. Replace the host Git pin/fetch path with the verified release archive and
+   rebuild the Process-enabled static host interpreter from a clean extraction.
 3. Add a focused project-owned regression which loads one helper through
    `--path` in interpreter mode and compiles/runs a small required-module
    application through `--compile --app --path`.
@@ -110,8 +110,8 @@ modes at signed/unsigned boundaries and invalid inputs.
 6. Audit all live `$(NOCT)` recipes so every `--path` consumer is covered by
    either the ordinary build or a focused representative test; do not rewrite
    historical Queue evidence.
-7. Record the source SHA, checkout cleanliness, executable checksum, focused
-   CLI results, and full-build result.
+7. Record the archive identity, extraction manifest, executable checksum,
+   focused CLI results, and full-build result.
 
 ## q047 execution result
 
@@ -160,14 +160,37 @@ The host initially exhausted the already full `/tmp` tmpfs during parallel C
 compilation. Repeating the identical build with `TMPDIR` under `build/`
 completed; this environmental retry is not a product failure.
 
-## Resume condition
+## Q063 release decision
 
-Publish a new maintainer-reviewed Noct commit which parses
-`--compile --app --path=...`, resolves and bundles the required module graph,
-and passes `NOCT-T082`.
+The user selected official release `v2.0.1`, tag commit
+`ed621e79139f55d06dd1a474243afbf0ce5efe0a`, source archive size `2524680`,
+and SHA-256
+`68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f`.
+Pre-Queue probing showed that this release supports both interpreter
+`--path=...` and the literal `--compile --app --path=...` form, so the q047
+resume condition is satisfied. P010 replaced host Git checkout/fetch with the
+verified release archive shared by the new source lifecycle, built the static
+Process-enabled host interpreter below `build/NoctLang`, and reran
+`NOCT-T080`--`NOCT-T086` plus clean/incremental `make -j16 toolchain` and the
+ordinary build.
 
-Then update the full pin and rerun `NOCT-T080`--`NOCT-T086`. Do not weaken the
-compile/application contract or patch the pristine checkout locally.
+## Q063 execution result
+
+Complete. Host acquisition uses the official `v2.0.1` archive at tag commit
+`ed621e79139f55d06dd1a474243afbf0ce5efe0a`, exact size `2524680`, SHA-256
+`68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f`.
+The ignored extraction carries the recorded source identity and manifest; its
+source verifier passed after the build. The Process-enabled host executable
+SHA-256 is
+`db128557cacc7385976e491a26528bf14e3cfd47a2b9dbff78a63a64617653f6`.
+
+`NOCT-T080`--`NOCT-T082` and `NOCT-T085` pass, including interpreter and
+compiled-application module lookup plus malformed/missing-path negatives and
+73 live `--path` recipe consumers. `NOCT-T083` and `NOCT-T086`, clean and
+incremental `make -j16 toolchain`, removal/recovery of the generated host
+artifact, and the ordinary configured `make -j16` pass. No host compatibility
+wrapper or host language/CLI patch was added. P009's separately authorized
+two-hunk target final-link CMake patch is not part of the host behavior.
 
 ## Verification
 
@@ -182,9 +205,9 @@ compile/application contract or patch the pristine checkout locally.
 - `NOCT-T084`: an ordinary `make -j16` production build completes its selected
   Noct-backed ELF/image checks and generators without `Unknown option`, missing
   helper symbols, or a non-Noct fallback.
-- `NOCT-T085`: source and checkout audit proves the host is clean and detached
-  at the recorded revision and zedBSD contains no downstream Noct source patch
-  or compatibility wrapper.
+- `NOCT-T085`: source/archive audit proves the host tree comes from the
+  recorded release identity and zedBSD contains no host CLI compatibility
+  wrapper. P009's independently authorized target-only CMake patch is allowed.
 - `NOCT-T086`: zedbuild little-endian byte primitives pass signed/unsigned
   boundaries, round trips, and invalid inputs in interpreter and JIT modes
   without the optional `Binary` API.
@@ -193,32 +216,32 @@ compile/application contract or patch the pristine checkout locally.
 
 ## Completion conditions
 
-- One user-approved immutable upstream revision satisfies the runtime and
+- One user-approved immutable upstream release satisfies the runtime and
   compile/application `--path` contracts.
 - Focused module-search and zedbuild byte-primitive regressions, the existing
   toolchain smoke, and the ordinary production build all pass with the same
   host executable.
 - No supported zedBSD script is converted to Python, shell, duplicated helper
   source, or an ad-hoc option-stripping workaround.
-- The Noct checkout remains pristine and upstream-owned.
+- The Noct archive remains pristine and upstream-owned; any extracted patch is
+  limited to p009's separately recorded target CMake integration.
 
 ## Relationship to p008 and p009
 
 `ws008-p008` remains an honest completed record of the revision-selection,
 clean-checkout, Process-enabled build, and bounded smoke that it actually ran.
-This Phase records the production-path regression which that smoke did not
-cover; it must complete before p008's pin can again be considered usable by the
-whole zedBSD build.
+This Phase records and closes the production-path regression which that smoke
+did not cover. P008 remains truthful history; q063's verified release archive
+supersedes its former active Git pin for the whole zedBSD build.
 
-`ws008-p009` remains separately blocked on a buildable upstream zedBSD target.
-If one accepted revision resolves both p009's target defects and this Phase's
-host CLI defect, p010 runs first and p009 may reuse that revision after its own
-target gates. Passing p010 alone does not re-enable the target package.
+`ws008-p009` followed p010 in q063 and uses the same release archive plus its
+authorized target-only CMake patch. P009 separately re-enabled and accepted
+the target package.
 
 ## Authorization boundary
 
-Q047 consumed the released revision and left this Phase uncleared at its frozen
-gates. A subsequently published maintainer revision may update the zedBSD pin
-and rerun them. Editing or publishing Noct source, selecting an unrelated
-older pin, weakening the failed gates, or implementing a downstream
-compatibility layer remains outside authorization.
+Q047 consumed its then-published revision and honestly left this Phase
+uncleared. Q063 consumed `v2.0.1`, replaced Git acquisition with the verified
+tarball, and passed the frozen host gates without weakening them or adding a
+host CLI compatibility layer. The separately authorized p009 patch connects
+only the zedBSD target final-link adapter.

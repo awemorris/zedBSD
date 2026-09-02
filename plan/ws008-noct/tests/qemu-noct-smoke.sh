@@ -9,8 +9,8 @@ production_config=$repo/config.mk
 production_image=$repo/build/amd64/hdd-image.img
 package_artifact=$repo/build/amd64/bin/noct
 staged_artifact=$repo/build/amd64/rootfs/usr/bin/noct
-cmake_artifact=${NOCT_CMAKE_ARTIFACT:-$repo/userland/noct/NoctLang/build-zedbsd/noct}
-noct_source=${NOCT_SOURCE_DIR:-$repo/userland/noct/NoctLang}
+cmake_artifact=${NOCT_CMAKE_ARTIFACT:-$repo/userland/base/noct/noct/build-zedbsd-amd64/noct}
+noct_source=${NOCT_SOURCE_DIR:-$repo/userland/base/noct/noct}
 qemu=${QEMU_SYSTEM_X86_64:-qemu-system-x86_64}
 build_timeout=${BUILD_TIMEOUT_SECONDS:-3600}
 boot_timeout=${BOOT_TIMEOUT_SECONDS:-120}
@@ -135,13 +135,22 @@ require_amd64_config()
 
 config_hash_before=$(hash_file "$production_config")
 cp -- "$production_config" "$temporary_config"
-printf '\n# NOCT-T003 private package selection.\nZEDBSD_USER_PROGRAMS += noct cksum\n' \
-	>>"$temporary_config"
+cat >>"$temporary_config" <<EOF
+
+# NOCT-T003 private amd64 package selection.
+ZEDBSD_PLATFORM := amd64
+ZEDBSD_ARCHITECTURE := amd64
+ZEDBSD_BOARD := pcat
+ZEDBSD_VARIANT := hybrid
+CONFIG_DRIVER_PCI_XHCI := y
+CONFIG_DRIVER_USB_STORAGE := y
+ZEDBSD_USER_PROGRAMS += noct cksum
+EOF
 require_amd64_config "$temporary_config"
 temporary_config_hash_before=$(hash_file "$temporary_config")
-git -C "$noct_source" status --porcelain=v1 --untracked-files=all \
-	>"$source_status"
-noct_revision=$(git -C "$noct_source" rev-parse HEAD)
+make -s -C "$repo" noct-target-source-verify
+cp -- "$noct_source/.zedbsd-source-identity" "$source_status"
+noct_revision=$(awk -F= '$1 == "commit" { print $2 }' "$source_status")
 qemu_version=$("$qemu" --version | sed -n '1p')
 
 printf 'case\tresult\tevidence\n' >"$results"
@@ -152,8 +161,10 @@ printf 'case\tresult\tevidence\n' >"$results"
 
 build_command=(make -C "$repo" -j16 "ZEDBSD_CONFIG=$temporary_config")
 qemu_command=(
-	"$qemu" -machine pc -m 512 -smp 4
-	-drive "file=$run_image,format=raw,if=ide"
+	"$qemu" -machine q35 -m 512 -smp 4
+	-device qemu-xhci,id=xhci
+	-drive "if=none,id=usbboot,file=$run_image,format=raw"
+	-device usb-storage,bus=xhci.0,drive=usbboot,id=bootstick,bootindex=1
 	-display none -serial none -debugcon "file:$guest_log"
 	-monitor stdio -no-reboot
 )

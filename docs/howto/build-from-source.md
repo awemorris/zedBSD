@@ -1,6 +1,6 @@
 # Build zedBSD from source
 
-Status: current for the 2026-08-25 build interface
+Status: current for the 2026-09-02 build interface
 
 This guide builds a zedBSD disk image from a source checkout and starts the
 supported x86 QEMU targets. Commands are run from the repository root.
@@ -9,38 +9,54 @@ supported x86 QEMU targets. Commands are run from the repository root.
 
 The normal build expects a POSIX-like host with:
 
-- GNU Make, Git, CMake, a C compiler, GNU binutils, and a POSIX shell;
+- GNU Make, CMake, a C compiler, GNU binutils, `patch`, `curl`, `tar`,
+  `sha256sum`, and a POSIX shell; Git is required for development;
 - Python 3 for the interactive `make menuconfig` frontend;
 - an x86 compiler capable of both `-m64` and `-m32` when building amd64 and
   i386 targets;
 - `qemu-system-x86_64` for amd64 and `qemu-system-i386` for PC/AT i386;
-- enough free space for `build/`, the Noct checkout, and disk images.
+- enough free space for `build/`, extracted Noct source, downloaded external
+  inputs, and disk images.
 
 PC-98 requires a QEMU build that supplies the non-upstream `pc9821` machine.
 Ordinary upstream `qemu-system-i386` is sufficient for PC/AT, but not PC-98.
 
-No host installation prefix is modified. Host tools, including the pinned
-Noct checkout, remain below `build/`.
+No host installation prefix is modified. Host tools, including the verified
+Noct release extraction, remain below `build/`.
 
 ## 2. Obtain and build the host toolchain
 
-From a zedBSD checkout:
+First materialize every declared external userland input:
+
+```sh
+make download
+```
+
+This verifies the official Noct `v2.0.1` source archive and the optional
+firmware inputs even when those firmware packages are not selected. Downloaded
+bytes are ignored by Git but remain inside the working tree, allowing the
+post-download tree to be packed as a multi-license source distribution.
+
+Then build the host toolchain:
 
 ```sh
 make toolchain
 ```
 
-This checks out `awemorris/NoctLang` at the revision pinned in the top-level
-Makefile under `build/NoctLang`, builds
-`build/NoctLang/build-static/noct`, and runs a smoke script. A second invocation
-is incremental and must also succeed:
+This verifies and extracts the release archive below `build/NoctLang`, applies
+the tracked target-only CMake integration patch (which is inert for the host
+preset), builds `build/NoctLang/build-static/noct`, and runs a smoke script. A
+second invocation is incremental and must also succeed:
 
 ```sh
 make toolchain
 test -x build/NoctLang/build-static/noct
 ```
 
-Network access is needed only when the pinned checkout is not already present.
+Network access is needed only when the verified release archive is absent.
+Each userland item also accepts `make download`, `make patch`, `make build`,
+and `make install` from its own directory. In-tree items use no-op acquisition
+and patch stages.
 
 ## 3. Select a target
 
@@ -137,8 +153,9 @@ not write to a real disk device when following this guide.
 ## 6. Diagnostics
 
 - `config.mk is missing or invalid`: run `make menuconfig` and save a target.
-- Noct checkout/build failure: verify Git/network access, CMake, and the host C
-  compiler, then rerun `make toolchain`; do not substitute an unpinned binary.
+- Noct download/build failure: verify network access, `curl`, `tar`, `patch`,
+  CMake, and the host C compiler, then rerun `make download` and
+  `make toolchain`; do not replace the recorded archive with unverified bytes.
 - `-m32` compile/link failure: install the host's 32-bit compiler/binutils
   support before selecting i386.
 - QEMU command not found: install the appropriate system emulator or pass

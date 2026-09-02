@@ -14,14 +14,14 @@ if [[ $# -gt 1 ]]; then
 	echo "usage: $0 [OUTPUT-DIRECTORY]" >&2
 	exit 2
 fi
-for command in awk cmp git rg; do
+for command in awk cmp git make rg sha256sum tr wc; do
 	command -v "$command" >/dev/null || {
 		echo "required command not found: $command" >&2
 		exit 2
 	}
 done
-[[ -x $noct && -d $source_dir/.git ]] || {
-	echo "pinned host Noct is not built: $noct" >&2
+[[ -x $noct && -d $source_dir && ! -e $source_dir/.git ]] || {
+	echo "release-archive host Noct is not built: $noct" >&2
 	exit 2
 }
 
@@ -38,38 +38,44 @@ else
 fi
 output=$(cd -- "$output" && pwd)
 
-expected_revision=$(awk '
-	$1 == "ZEDBSD_HOST_NOCT_REVISION" && $2 == "?=" { print $3 }
-' "$repo/Makefile")
-actual_revision=$(git -C "$source_dir" rev-parse HEAD)
-[[ $expected_revision =~ ^[0-9a-f]{40}$ &&
-   $actual_revision == "$expected_revision" ]] || {
-	echo "host checkout does not match the full zedBSD pin" >&2
-	echo "expected: ${expected_revision:-<missing>}" >&2
-	echo "actual:   $actual_revision" >&2
+version_file=$repo/userland/base/noct/version.mk
+read_release_value() {
+	awk -v name="$1" '$1 == "override" && $2 == name && $3 == ":=" { print $4 }' \
+		"$version_file"
+}
+expected_version=$(read_release_value ZEDBSD_NOCT_VERSION)
+expected_tag=$(read_release_value ZEDBSD_NOCT_TAG)
+expected_revision=$(read_release_value ZEDBSD_NOCT_TAG_COMMIT)
+expected_size=$(read_release_value ZEDBSD_NOCT_ARCHIVE_SIZE)
+expected_hash=$(read_release_value ZEDBSD_NOCT_ARCHIVE_SHA256)
+expected_patch=$(read_release_value ZEDBSD_NOCT_PATCH_LEVEL)
+archive=$repo/userland/base/noct/distfiles/NoctLang-$expected_version.tar.gz
+identity=$source_dir/.zedbsd-source-identity
+
+[[ $expected_version == 2.0.1 && $expected_tag == v2.0.1 &&
+   $expected_revision =~ ^[0-9a-f]{40}$ &&
+   $expected_hash =~ ^[0-9a-f]{64}$ && -f $archive && ! -L $archive ]] || {
+	echo "host release identity is incomplete" >&2
 	exit 1
 }
-[[ -z $(git -C "$source_dir" symbolic-ref -q HEAD || true) ]] || {
-	echo "host checkout is not detached at its pinned revision" >&2
+[[ $(wc -c <"$archive" | tr -d '[:space:]') == "$expected_size" &&
+   $(sha256sum "$archive" | awk '{print $1}') == "$expected_hash" ]] || {
+	echo "host release archive identity mismatch" >&2
 	exit 1
 }
-checkout_status=$(git -C "$source_dir" status \
-	--porcelain=v1 --untracked-files=all)
-[[ -z $checkout_status ]] || {
-	echo "host checkout is not clean" >&2
-	printf '%s\n' "$checkout_status" >&2
+expected_identity=$(printf '%s\n' \
+	"version=$expected_version" \
+	"tag=$expected_tag" \
+	"commit=$expected_revision" \
+	"archive-sha256=$expected_hash" \
+	"patch-level=$expected_patch")
+[[ -f $identity && ! -L $identity && $(cat "$identity") == "$expected_identity" ]] || {
+	echo "host extracted-source identity mismatch" >&2
 	exit 1
 }
-if find "$source_dir" -maxdepth 1 -name '.zedbsd-checkout-*' -print -quit |
-	rg -q . ||
-   find "$source_dir/build-static" -maxdepth 1 -name '.zedbsd-built-*' \
-	-print -quit | rg -q .; then
-	echo "legacy zedBSD state stamp remains inside the upstream checkout" >&2
-	exit 1
-fi
-[[ -f $repo/build/host-noct-state/checkout-$expected_revision &&
-   -f $repo/build/host-noct-state/built-$expected_revision-process ]] || {
-	echo "external host Noct state stamps are incomplete" >&2
+make -s -C "$repo" noct-host-source-verify
+[[ -f $repo/build/host-noct-state/built-$expected_version-$expected_patch-process ]] || {
+	echo "external host Noct build stamp is incomplete" >&2
 	exit 1
 }
 
@@ -145,7 +151,9 @@ done <"$output/live-noct-recipes.txt"
 
 {
 	printf 'tests=NOCT-T080,NOCT-T081,NOCT-T082,NOCT-T085\n'
-	printf 'revision=%s\n' "$actual_revision"
+	printf 'version=%s\n' "$expected_version"
+	printf 'tag_commit=%s\n' "$expected_revision"
+	printf 'archive_sha256=%s\n' "$expected_hash"
 	printf 'noct=%s\n' "$noct"
 	printf 'runtime_path=pass\n'
 	printf 'compile_application_path=%s\n' "$compile_result"

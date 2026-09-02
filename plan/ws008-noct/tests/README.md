@@ -7,6 +7,37 @@ executing WS008 belong in this directory. Disposable build directories, disk
 copies, sockets, and serial logs belong under `plan/ws008-noct/temp/` and stay
 untracked. Repository `.internal/` material is not used.
 
+## Current release integration
+
+Q063 replaces the historical Git-checkout layouts described by the older
+Phase sections below. The current host and target both use the verified Noct
+`v2.0.1` archive; the target source is extracted at
+`userland/base/noct/noct/`, and its canonical artifact is
+`build-zedbsd-amd64/noct`. The only downstream patch connects the
+zedBSD-owned final-link adapter. It is not a BeUI adapter; the BeUI QEMU gate
+uses upstream `src/api/api-beui-zedbsd.c` directly.
+
+Run the current focused and runtime gates with:
+
+```sh
+make download
+make -j16 toolchain
+plan/ws008-noct/tests/noct-host-path-contract.sh
+plan/ws008-noct/tests/run-zedbuild-byte-primitives.sh
+plan/ws008-noct/tests/qemu-noct-smoke.sh
+plan/ws008-noct/tests/qemu-noct-jit.sh
+plan/ws008-noct/tests/qemu-beui-zedbsd.sh
+```
+
+The QEMU runners use disposable q35/xHCI USB-root images so the separately
+deferred intermittent legacy-IDE `BUG-001` is not part of Noct acceptance.
+The completed result is recorded in
+[`q063-noct-2.0.1-evidence.md`](./q063-noct-2.0.1-evidence.md).
+
+The p001--p006 paths and commands retained below are historical contracts for
+their archived revisions; do not use their former `userland/noct/NoctLang`
+paths as the current integration entry point.
+
 ## Preset and target tests
 
 | ID | Phase | Contract |

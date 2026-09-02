@@ -4,8 +4,8 @@ Last updated: 2026-09-02
 
 Phase ID: `ws004-p038`
 
-Status: in progress (`q062`); follows completed `ws004-p030` automatic
-milestone and completed `ws004-p037`
+Status: Uncleared (`q062`); automatic implementation/gates complete, exact
+direct-boot checkpoint deferred by the user
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -243,7 +243,9 @@ topology.
   machine must still establish physical firmware/PNVM execution, RF scan,
   WPA2/CCMP association, DHCP, gateway/public ping, bounded nonempty fetch,
   disconnect, and administrative down. Until that single run succeeds, p038
-  and q062 remain `in-progress` and make no physical firmware/RF claim.
+  remains required and p038 makes no physical firmware/RF claim. Q062 closed
+  this item as `uncleared` when the user deferred the physical test so that
+  independent work could continue.
 
 ## Reconsideration boundary
 

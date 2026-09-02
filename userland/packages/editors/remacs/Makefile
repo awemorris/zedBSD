@@ -1,7 +1,8 @@
 # zedBSD userland package
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+include $(dir $(lastword $(MAKEFILE_LIST)))../../../base/package.mk
 
-REQUIRE = lang/noct
+REQUIRE = base/noct
 # Remacs currently requires the held target Noct package, so it is hidden
 # until that dependency is explicitly returned to service.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,remacs,Remacs,i386 pc98 amd64,n,package,,n,packages/editors,editors/remacs,$(REQUIRE)))
@@ -30,7 +31,7 @@ $(REMACS_SOURCE_STAMP):
 		$(REMACS_REPOSITORY) $(REMACS_SOURCE_DIR)
 	@git -C $(REMACS_SOURCE_DIR) rev-parse HEAD > $@
 
-$(REMACS_HOST_NOCT): $(NOCT_SOURCE_SENTINEL)
+$(REMACS_HOST_NOCT): $(NOCT_SOURCE_STAMP) | noct-target-source-verify
 	cmake -S $(NOCT_SOURCE_DIR) \
 		-B $(REMACS_HOST_NOCT_DIR) -DCMAKE_BUILD_TYPE=Release \
 		-DNOCT_ENABLE_STATIC=ON -DNOCT_ENABLE_CLI=ON \

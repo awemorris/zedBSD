@@ -50,10 +50,12 @@ strict/sanitizer/analyzer checks. Q047 completed p008's USB 1.1 concurrency,
 hotplug, and checked recovery prerequisites. Q048 then completed the production
 Report-Protocol keyboard/mouse/tablet automatic milestone, including dynamic
 generation-safe evdev publication and xHCI plus paired EHCI/UHCI QEMU runtime;
-one bounded physical HID observation remains. The accepted Noct revision now
-passes
-runtime `--path`, the ordinary production build, and zedbuild byte primitives;
-only the unrelated compile/application CLI form remains uncleared.
+one bounded physical HID observation remains. Q063 now accepts official Noct
+`v2.0.1` for both host and target: runtime and compile/application `--path`,
+clean/incremental toolchain, ordinary production build, amd64 static/package
+identity, non-JIT, RW-to-RX/JIT, and canonical BeUI q35/xHCI gates pass. Its
+tracked two-hunk target patch connects only the zedBSD final-link adapter and
+is explicitly not a BeUI adapter.
 
 The archived [q039](queue-q039.md) first proves the
 already-correct PC-98 `IPL1` field and has prepared one immutable audio-trace
@@ -126,13 +128,14 @@ WS004 p030's automatic RTL8822BU lifecycle milestone, while its shared WS005
 p008 physical lifecycle and five-run closure remain pending. Q061 completed
 p037's read-only Intel intake, corrected the exact target to AX211/CNVio2
 `8086:51f0`, subsystem `8086:4090`, revision `01`, and cleared its firmware/
-license and direct-boot boundaries. Q062 has completed p038's implementation
+license and direct-boot boundaries. Q062 completed p038's implementation
 and focused automatic package/PCI/MSI-X/DMA/firmware/runtime/scan/security/L2/
-lifetime gates; p038 and q062 remain in progress only for one exact AX211
+lifetime gates; p038 is uncleared only for one exact AX211
 direct-boot firmware/RF/WPA2/DHCP/ping/fetch/down result. P039's evidence-
 driven cross-driver review follows that physical checkpoint before the return
-to p006/p007. P008 final five-run acceptance remains incomplete. The remaining Noct
-compile/application CLI defect is unrelated. The
+to p006/p007. P008 final five-run acceptance remains incomplete. Q063
+independently closes the former Noct compile/application CLI defect and target
+package hold. The
 archived q043 PC-98 fixed-read and exact-mouse
 paths both pass locally, and their remaining external resume facts do not
 block subsequent Queues. The
@@ -220,7 +223,8 @@ target Noct/Remacs package options without touching the maintainer's Noct
 source, then completed the first WS018 kernel-ownership foundation wave. The
 archived [q024](queue-q024.md) passed automated Noct gates but is recorded
 `uncleared` because the Principal Engineer's first source review rejected the
-implementation quality. Noct is now under maintainer-only manual repair. The
+implementation quality. At that historical point Noct entered maintainer-only
+manual repair; q063 later consumes the accepted official release. The
 requested kernel reorganization remains WS018 p001--p012. The
 archived [q023](queue-q023.md) completed `ws003-p016`, `ws008-p005`, and
 `ws001-p014` in that order without reaching a human-decision boundary. The archived
@@ -387,13 +391,22 @@ generation, and maintenance tooling. A supported build first runs
 Python dependencies must not be added to supported production build paths,
 and an already migrated path must not regress to invoking Python.
 
-The bootstrap needed to obtain Noct may use Make, the host compiler, CMake,
-Git, and a minimal shell recipe because Noct does not exist yet at that point.
+The bootstrap needed to obtain Noct may use Make, the host compiler, CMake, a
+downloader, checksum/archive tools, and a minimal shell recipe because Noct
+does not exist yet at that point. Q063 obtains the verified official release
+archive rather than cloning a Git checkout.
 Ordinary Make recipes that directly invoke tools are not required to be
 rewritten as scripts. When a value can be expressed clearly as maintained
 source or an ordinary Make dependency, prefer that over generating source at
 build time; Noct is the implementation language when a project-owned script is
 actually warranted.
+
+WS021 extends this bootstrap without changing its ownership boundary. The host
+C/C++ toolchain builds host Noct and the project-owned LLVM 23.1.0 installation;
+then only `build/llvm/` builds supported i386/amd64 zedBSD kernels, userland,
+target Noct and bootloaders. Host Noct is not rebuilt as a zedBSD target merely
+because it orchestrates those target builds. The x86 sysroots are
+`build/amd64/sysroot` and the PC/AT/PC-98 shared `build/i386/sysroot`.
 
 For new hardware and protocol bring-up, establish one bounded, useful normal
 path before perfecting every abnormal and semi-normal branch. The first slice
@@ -408,14 +421,14 @@ allowed to block first communication unless the normal path depends on them.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q050 completed both VFS prerequisites discovered by q041 | `ws001-p022` and `ws001-p023` complete with production-linked faults and abrupt-stop/remount evidence | Retain p022/p023 as regressions; their dependency consumer resumes in WS005 p005 | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
-| `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; restore its Make-owned Noct gate through ws008-p010 | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; q062 completed p038 implementation and focused automatic gates after q061 corrected the target to exact AX211/CNVio2 | `ws004-p010`--`p020`, p022--p024, p026-p030 automatic, p031--p033, p036, and p037 are complete; p038 awaits one exact-device run and p039 remains | Record one exact AX211/CNVio2 direct-boot firmware/RF/WPA2/DHCP/ping/fetch/down result, then perform p039's evidence-driven comparison; p030's shared WS005 p008 physical closure and RTL8822CE remain later | [WS004](ws004-hardware/ws.md) |
+| `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; q063 has restored the Make-owned Noct gate | [WS003](ws003-bringup/ws.md) |
+| `ws004` | Hardware expansion | Active; q062 completed p038 implementation and focused automatic gates after q061 corrected the target to exact AX211/CNVio2 | `ws004-p010`--`p020`, p022--p024, p026-p030 automatic, p031--p033, p036, and p037 are complete; p038 is uncleared after its user-deferred exact-device run and p039 remains | Record one exact AX211/CNVio2 direct-boot firmware/RF/WPA2/DHCP/ping/fetch/down result, then perform p039's evidence-driven comparison; p030's shared WS005 p008 physical closure and RTL8822CE remain later | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q059 completed p004 minimum direct command and p009 one-run physical connectivity; q060 completed the p030 automatic dependency | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, frozen design contract, exact first-radio identity, common WLAN control ABI, p036, p028-p030 automatic milestones, p004, and p009 are complete; q062 completed WS004 p038 automatic gates but its exact-device run remains | After WS004 p038/p039, complete p006/p007/p010 before the still-pending shared p008 final acceptance | [WS005](ws005-networking/ws.md) |
-| `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; p009 still waits for accepted WS008 userland | [WS006](ws006-input/ws.md) |
+| `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; q063 released p009's WS008 userland dependency | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Blocked; accepted host SHA restores runtime `--path` and passes the ordinary production build plus zedbuild byte primitives, while target packages remain separately disabled | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 is uncleared only at unrelated `NOCT-T082` compile/application parsing, and p009 remains separately target-blocked | Resume p010 only from a maintainer-reviewed commit which fixes `--compile --app --path=...`; resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Complete (`q063`) | p010 host CLI/toolchain/ordinary-build and p009 amd64 static/package/q35-xHCI runtime gates pass on official `v2.0.1`; p006 remains historical review evidence | No current Phase; Remacs and i386/PC-98 target Noct remain explicitly outside q063 | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | Active; q046 reconciled two already implemented producer contracts | `ws009-p004` and `p005` complete | Extract the next dependency-ready public reference alongside its producer WS | [WS009](ws009-documentation/ws.md) |
-| `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
+| `ws010` | Noct scripting and x86 image tools | Complete (`q063`) | `ws010-p001`–`p005` complete; all 177 maintained userland Makefiles expose the common lifecycle and top-level download materializes declared external inputs | No current Phase; extract a new requirement before resuming | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; VLAN/bridge hold released, detailed design still open | `ws011-p003` complete; p004 resumed for design; p005 bounds open | After higher priorities, finish p004's virtual-interface/UAPI/packet-ownership design before implementation; freeze p005 bounds independently | [WS011](ws011-net-config/ws.md) |
 | `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
 | `ws013` | CPAR container partitioning | Active; q031/q032 configured x86 boot paths complete, Runtime topics manually blocked | `ws013-p002`--`p006` complete | No Boot configuration Phase remains; resume Runtime namespace/CLI/package design only after its explicit manual holds are released | [WS013](ws013-containers/ws.md) |
@@ -426,6 +439,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
 | `ws020` | Intel Mac UEFI bring-up and generic image variants | Active; p006 automatic GPT/Protective-MBR repair complete, one provisional and p004 final physical acceptance pending | `MAC-T022`, pristine `MAC-T021`, and uninterrupted six-cell `MAC-T020` pass; exact `692160cf...331d` / `A93F-BBBE` image published | Record one provisional Intel Mac boot, then retain p004's final five consecutive cold boots | [WS020](ws020-intel-mac/ws.md) |
+| `ws021` | Reproducible x86 LLVM toolchain and sysroots | Planned; p001--p006 detailed and Queue-ready | No Phase started | Queue p001--p006 together; use host/format gates through p005 and run the consolidated QEMU matrix only in p006 | [WS021](ws021-llvm-toolchain/ws.md) |
 
 ## 4. Milestones
 
@@ -445,6 +459,7 @@ allowed to block first communication unless the normal path depends on them.
 | M11 — Latitude native installation | A later installer step creates or selects the required native filesystem and boots it with `rootpart=` without regressing M10 | WS003, WS004, WS009, WS013, WS019 |
 | M12 — Panasonic CF-SV7 USB shell | The CF-SV7 clears its captured post-RSDP early interrupt stop, then reaches USB-backed init/login/shell with bounded diagnostics and final repeatability evidence | WS003, WS004, WS006, WS009 |
 | M13 — Intel Mac UEFI boot | A fixed amd64 UEFI-only image with a pure Protective MBR and no BIOS path boots an Intel Mac to login, while generic Variant support preserves combined and BIOS-only images | WS003, WS009, WS013, WS020 |
+| M14 — Reproducible x86 toolchain | Host tools bootstrap LLVM 23.1.0 below `build/llvm`; every amd64/i386 kernel, userland, target Noct and BIOS/UEFI loader uses the project toolchain/sysroots and passes one final six-cell QEMU campaign | WS008, WS010, WS021 |
 | Continuous | POSIX debt and public documentation remain traceable | WS001, WS009, all producers |
 
 ## 5. Dependency map
@@ -515,14 +530,19 @@ WS004 SMP/IRQ/timer/reset + WS001 POSIX boundary
 
 WS001 compliance and WS009 documentation cross all workstreams.
 WS010 supplies host-side build and test scripting used by all workstreams.
+WS010 host Noct + host C/C++ bootstrap -- WS021 LLVM 23.1.0
+  +-- build/amd64/sysroot + build/i386/sysroot
+  +-- amd64/i386 kernels and userland -- WS008 target Noct
+  +-- BIOS/UEFI loaders and all x86 images -- final big-bang QEMU matrix
 ```
 
 ## 6. Priority waves
 
-The user replaced the earlier wave ordering on 2026-08-30 with the following
-active execution order. Dependency closure may interleave adjacent WSs, but it
-must not silently promote a lower-priority product goal over a ready higher-
-priority one.
+The user replaced the earlier wave ordering on 2026-08-30 and inserted the
+approved WS021 LLVM toolchain plan on 2026-09-02. The following is the active
+execution order. Dependency closure may interleave adjacent WSs, but it must
+not silently promote a lower-priority product goal over a ready higher-priority
+one.
 
 1. q048 completed the WS006 p008 production HID automatic/software milestone
    after q044's p006/p007 source boundaries and q047's p031/p032 USB 1.1,
@@ -573,33 +593,44 @@ priority one.
    hardening and the single final p008 hardware acceptance. P030's automatic
    dependency is complete; the shared physical subrecord closes inside that
    later p008 acceptance.
-7. Resume WS008 from the maintainer's latest accepted NoctLang tree. The host
-   runtime `--path`/`require` CLI contract is restored; finish p010 only at its
-   remaining compile/application CLI boundary, then update the userland
-   package through p009. The latter is rooted at
-   `userland/base/noct/` and clones upstream into
-   `userland/base/noct/noct/`.
-8. Implement WS017's `/dev/graphics` LFB fast path after resolving its retained
+7. WS008 and WS010 are complete through q063. Official Noct `v2.0.1` is
+   verified once and extracted for both host and target; host runtime and
+   compile/application `--path`, ordinary build, amd64 target package, and
+   q35/xHCI non-JIT/JIT/BeUI gates pass. The target package is rooted at
+   `userland/base/noct/`, the tracked two-hunk patch connects only the zedBSD
+   final-link adapter, and Remacs plus i386/PC-98 target Noct remain outside
+   this completed item. All maintained userland items expose
+   download/patch/build/install, with top-level `make download` providing the
+   source-distribution acquisition boundary.
+8. Implement WS021 as one ordered Queue through p001--p006. Build host Noct and
+   verified patched LLVM 23.1.0 with the host toolchain; install LLVM below
+   `build/llvm`; construct `build/amd64/sysroot` and the PC/AT/PC-98 shared
+   `build/i386/sysroot`; migrate x86 kernels, userland, target Noct and all
+   BIOS/UEFI loaders away from host target GCC/binutils/MinGW. Do not use
+   repeated QEMU boots as intermediate gates: finish the source/compile/link/
+   format migration first, then run p006's consolidated six-cell big-bang
+   matrix and feed its target-Noct result back to WS008.
+9. Implement WS017's `/dev/graphics` LFB fast path after resolving its retained
    `mprotect` permission-ceiling decision. Do not infer that decision from the
    priority change.
-9. Retain q043's `ws007-p004` result as `uncleared`: the frozen headless PC-98
+10. Retain q043's `ws007-p004` result as `uncleared`: the frozen headless PC-98
    cell and focused input gates pass, while the maintained qemu-pc98 build has
    no interactive display backend. Resume only from the user's exact failing
    GUI environment. After WS017, continue the remaining WS007 integration,
    including real Xzed/LFB behavior.
-10. Continue WS001 POSIX work. Add a bounded `lp`/`lpr` Phase whose deliberate
+11. Continue WS001 POSIX work. Add a bounded `lp`/`lpr` Phase whose deliberate
    model posts PDF directly to an LPD printer and has no local spool queue.
-11. Re-plan WS019 so the installer is written in Noct, then implement it after
+12. Re-plan WS019 so the installer is written in Noct, then implement it after
    its complete installer specification is supplied. The user's latest message
    ended after "仕様は"; that missing contract is a human blocker and must not be
    guessed from the older C-oriented plan.
-12. After the installer passes automatic acceptance, complete WS003 by
+13. After the installer passes automatic acceptance, complete WS003 by
     installing to and booting from the Latitude 5320 NVMe device.
-13. Resume WS011 VLAN and bridge work. The previous manual hold is released by
+14. Resume WS011 VLAN and bridge work. The previous manual hold is released by
     this priority instruction, but any still-open virtual-interface, packet-
     ownership, filtering, or persistence decision remains a design gate rather
     than permission to improvise an incompatible UAPI.
-14. Keep WS013 Runtime CPAR, WS014 GPU, and WS015 μITRON pending until their
+15. Keep WS013 Runtime CPAR, WS014 GPU, and WS015 μITRON pending until their
     explicit architecture holds are separately released.
 
 When a higher-priority item reaches a recorded human decision, mark only that
@@ -644,7 +675,8 @@ until stopped or no judgment-free Phase remains.
 | Installer source-image stability | WS019 p004 | Choose unused immutable installer templates for data/swap (recommended) or explicitly redesign p004 to generate them at the target; never copy the live overlay upper or active swap |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
 | Confirmed-commit implementation bounds | WS011 | Public semantics are fixed: interactive only, explicit timeout, delayed `/etc/net.conf` write, ordinary `commit` confirms, and DHCP is reacquired; freeze timeout maximum, lock path, and diagnostic bounds before implementation |
-| Authoritative Noct repository, build sequence, and revision | WS008 | Official main remains `awemorris/NoctLang`. q047 pins maintainer-published `e56274ff...`; runtime `--path`, NOCT-T084, and zedbuild byte primitives pass. Only unrelated NOCT-T082 `--compile --app --path=...` remains uncleared. Target relocation remains p009. |
+| Authoritative Noct repository, build sequence, and release | WS008 | Resolved by q063: official `awemorris/NoctLang` release `v2.0.1`, tag commit `ed621e79139f55d06dd1a474243afbf0ce5efe0a`, archive size `2524680`, and SHA-256 `68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f` are the common host/target identity. Both `--path` forms, toolchain/ordinary build, amd64 target package, and q35/xHCI non-JIT/JIT/BeUI gates pass. The target-only two-hunk final-link patch is explicitly not BeUI; Remacs and i386/PC-98 target support remain outside the accepted scope. |
+| x86 compiler triples, bootstrap and sysroot ownership | WS021 | Resolved for v1: host C/C++ builds host Noct and official LLVM 23.1.0; project LLVM installs at `build/llvm`; target triples are `x86_64-unknown-zedbsd` and `i386-unknown-zedbsd`; sysroots are `build/amd64/sysroot` and shared `build/i386/sysroot`; target Noct uses the former; BIOS/UEFI loaders are included so no host target GNU/MinGW tool remains. sparcv9/m68030 use a later project-built GCC. Runtime is deferred to one final p006 big-bang matrix rather than repeated intermediate QEMU gates. |
 | PC/AT boot selector | WS004 | Resolved: reuse UUID/PARTUUID; standard FAT handoff uses UUID |
 | Runtime swap command standard and control boundary | WS016 | Resolved for v1: SUSv4/POSIX does not define `swapon`/`swapoff`; zedBSD supplies minimal privileged extensions over versioned `/dev/system` control and existing signed sources |
 | Optional LFB mapping and Xzed fallback boundary | WS017 | Resolved for v1: fixed post-ENTER geometry, 8/16/24/32-bpp layout query, shared non-executable mmap when supported, true-color Xzed fast path, and unchanged ioctl fallback; PC-98 Cirrus is excluded |
@@ -669,7 +701,7 @@ Released holds remain permanent history rather than reusable identifiers:
 | Hold ID | Released | Result |
 | --- | --- | --- |
 | `MB-001` | 2026-08-30 | The user placed VLAN and bridge implementation back in the active priority order. The manual hold is removed; unresolved virtual-interface UAPI, packet ownership, filtering, and persistence details remain ordinary p004 design gates. |
-| `MB-008` | 2026-08-31 | The maintainer-published `e56274ff...` revision restores runtime `--path`; q047 verifies the host toolchain, ordinary production build, and zedbuild byte primitives. The independent NOCT-T082 compile/application parser remains an ordinary p010 resume condition. |
+| `MB-008` | 2026-08-31 | The maintainer-published `e56274ff...` revision first restored runtime `--path`; q047 retained the compile/application parser as p010's ordinary resume condition. Q063 later resolves that condition with official `v2.0.1`, completes p010/p009, and leaves no Noct human-decision hold. |
 | `MB-009` | 2026-09-02 | Q061 found AX211/CNVio2 rather than the AX201 hypothesis; the user immediately accepted exact `8086:51f0`, subsystem `8086:4090`, revision `01` as the corrected target. P037 is complete and p038 is retargeted, so no Intel-target manual block remains. |
 | `MB-006` | 2026-08-30 | The user resumed WLAN design after completing USB Ethernet. The old RTL8822CE-first, `/sbin/wpa`, and `/etc/wpa/` proposal was superseded by the Archer T3U Nano first target and the fixed `net` -> `networkd` -> `ifconfig`/`wifi`/`dhcpc` topology. Firmware and exact-device facts are ordinary Phase dependencies, not a continuing manual hold. |
 

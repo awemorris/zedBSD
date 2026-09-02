@@ -1,0 +1,29 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1174,6 +1174,12 @@ if(NOCT_ENABLE_CLI)
+   # Link libnoct and libnoctapi.
+   target_link_libraries(noctcli PRIVATE noct noctapi)
+ 
++  if(NOCT_TARGET_ZEDBSD)
++    enable_language(ASM)
++    include("${ZEDBSD_SOURCE_DIR}/userland/base/noct/zedbsd.cmake")
++    noct_configure_zedbsd_target(noctcli)
++  endif()
++
+   # Win32
+   if(WIN32)
+     target_link_libraries(noctcli PRIVATE shell32)
+diff --git a/cmake/toolchains/zedbsd-amd64.cmake b/cmake/toolchains/zedbsd-amd64.cmake
+--- a/cmake/toolchains/zedbsd-amd64.cmake
++++ b/cmake/toolchains/zedbsd-amd64.cmake
+@@ -40,7 +40,7 @@ set(_NOCT_ZEDBSD_REQUIRED_FILES
+   include/uapi/zedbsd/system.h
+   libc/include/stdint.h
+   platform/amd64/user.ld
+-  userland/packages/lang/noct/zedbsd.cmake
++  userland/base/noct/zedbsd.cmake
+ )
+ foreach(_NOCT_ZEDBSD_FILE IN LISTS _NOCT_ZEDBSD_REQUIRED_FILES)
+   if(NOT EXISTS "${ZEDBSD_SOURCE_DIR}/${_NOCT_ZEDBSD_FILE}")
+

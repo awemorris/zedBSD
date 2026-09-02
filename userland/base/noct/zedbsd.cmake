@@ -144,3 +144,4 @@ function(noct_configure_zedbsd_target target)
   set_property(TARGET "${target}" APPEND PROPERTY LINK_DEPENDS
     "${linker_script}")
 endfunction()
+

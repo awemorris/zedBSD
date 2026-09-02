@@ -1,120 +1,107 @@
-# Queue: Intel AX211 standalone normal path
+# Queue: Noct 2.0.1 and userland source lifecycle
 
 Last updated: 2026-09-02
 
-QID: `q062`
+QID: `q063`
 
-Queue status: in progress
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes**
 
-Authorization: the user authorized continuous Queue execution and accepted the
-q061 exact Intel AX211/CNVio2 target. Q060 completed p030's automatic
-RTL8822BU dependency, and q061 completed p037's identity, firmware, provenance,
-license, package, and direct-boot boundaries.
+Authorization: the user deferred q062's exact AX211 physical test, requested
+WS008's current Noct release for both toolchain and userland, selected
+`userland/base/noct/`, requested top-level source acquisition and a common
+per-item lifecycle, and explicitly authorized a tracked target patch.
 
-Timebox: none. Execute only finite `ws004-p038`. Do not broaden the exact
-device identity, change the public WLAN UAPI without an explicit decision,
-create an Intel/Realtek hardware framework, claim generic QEMU passthrough, or
-begin p039 in this Queue.
+Timebox: none. Execute only the three finite items below in dependency order.
+Do not broaden the target patch beyond CMake/final-link integration, claim
+i386/PC-98 target Noct, re-enable Remacs, or consume `.internal/`.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q061](queue-q061.md)
+Previous Queue: [q062](queue-q062.md)
 
 ## Purpose
 
-Implement the exact q061 Intel Wi-Fi 6E AX211/CNVio2 function independently
-behind the existing WLAN/net-device contracts. Prove exact attach, pinned
-firmware/PNVM start, bounded 2.4-GHz scan, WPA2-Personal/CCMP authorization,
-DHCP, gateway/public ping, bounded nonempty HTTP fetch, disconnect, and
-administrative down, ending with one bounded direct zedBSD boot on the exact
-machine.
+Replace Noct Git acquisition with one verified official `v2.0.1` source
+archive, make it the common host and amd64 target source identity, relocate the
+target package under `userland/base/noct/`, and give every userland item a
+uniform `download -> patch -> build -> install` interface. Top-level
+`make download` must materialize declared external inputs without adding blobs
+to Git or making ordinary builds silently network-dependent.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws004-p038` | [standalone Intel AX211 normal path](ws004-hardware/phase038-intel-ax211-standalone-driver/phase.md) | in-progress (`q062`) | Exact AX211/CNVio2 attach and pinned firmware/PNVM pass automatic gates and one direct exact-device scan/WPA2/CCMP/DHCP/ping/fetch/disconnect/down checkpoint without prior Intel/RTL commonization |
+| 1 | `ws010-p005` | [userland source lifecycle](ws010-scripting/phase005-userland-source-lifecycle/phase.md) | complete (`q063`) | Every tracked userland item exposes download/patch/build/install; top-level download verifies all declared initial external inputs |
+| 2 | `ws008-p010` | [host CLI contract repair](ws008-noct/phase010-host-script-cli-contract-repair/phase.md) | complete (`q063`) | Host toolchain is built from verified Noct 2.0.1 and passes `NOCT-T080`--`T086`, clean/incremental toolchain, and ordinary build gates |
+| 3 | `ws008-p009` | [base Noct relocation and target resume](ws008-noct/phase009-base-noct-relocation-target-resume/phase.md) | complete (`q063`) | Target integration moves under base, the strict two-hunk patch attaches the existing link adapter, and the optional amd64 artifact passes static/package and bounded QEMU gates |
 
 ## Accepted decisions
 
-- Bind only PCI `8086:51f0`, subsystem `8086:4090`, revision `01`, with the
-  q061-recorded AX211/CNVio2 transport relationship. Reject AX201, AX210,
-  neighboring AX211 identities, and broad Intel matches.
-- Use only `intel/iwlwifi/iwlwifi-so-a0-gf-a0-89.ucode` and
-  `intel/iwlwifi/iwlwifi-so-a0-gf-a0.pnvm` at the exact q061 sizes and SHA-256
-  values from official `linux-firmware` tag `20260410`. Preserve the WHENCE
-  `86.735b75a4.0` versus runtime `89.735b75a4.0` discrepancy visibly.
-- Implement a default-off `userland/firmware/intelax211/` package. Firmware
-  bytes and the complete Intel notice remain outside the base source/default
-  image; ordinary builds and the kernel perform no firmware network fetch.
-- Keep firmware transport, CNVi/CRF interaction, DMA rings, interrupts,
-  descriptors, NVM/calibration, reset, and hardware keys AX211-private. Reuse
-  only existing device-independent PCI/DMA/interrupt, WLAN, WPA2/CCMP, and
-  net-device contracts.
-- Keep the first capability profile to station-mode 2.4 GHz, 20 MHz,
-  WPA2-Personal/CCMP and one useful IP path. Do not claim 5/6 GHz, wide
-  channels, HE performance, WPA3, roaming, AP/monitor, suspend, or throughput.
-- Use runtime-only credentials. Retain no real-machine or real-network
-  credential, SSID, BSSID, MAC address, lease, hostname, account name, or host
-  address in plans, fixtures, logs, or screenshots. Clearly synthetic protocol
-  vectors remain permitted in automatic fixtures.
-- The singleton IOMMU group does not reproduce CNVio2 platform topology in a
-  generic guest. The exact-device acceptance method is direct zedBSD boot, not
-  PCI passthrough.
-
-## Implementation checkpoints
-
-1. Add the selected-only `intelax211` firmware package with frozen file sizes,
-   digests, official snapshot, license/manifest installation, offline reuse,
-   corruption rejection, and absence from the default image.
-2. Implement exact PCI/subsystem/revision and CNVio2 transport validation,
-   transactional BAR0/MSI-X/DMA/net-device ownership, checked reverse unwind,
-   bounded firmware/PNVM/NVM parsing and upload, finite command/event handling,
-   and staging/secret erasure.
-3. Keep the AX211 transport private while adapting its finite scan and
-   authentication/association/key/TX/RX callbacks to the unchanged p027/p029
-   WLAN, WPA2/CCMP, controlled-port, and Ethernet contracts.
-4. Pass exact/neighboring identity, allocation/unwind, DMA/ring wrap,
-   interrupt, malformed firmware/PNVM/NVM, timeout, stale/duplicate frame,
-   authorization-order, hardware-key failure, TX/RX bound, and terminal-down
-   automatic fixtures, including sanitizer and compiler-analyzer variants.
-5. Pass the retained p027/p029 WLAN/security/L2 suites through an AX211-private
-   fake transport, configured amd64, ordinary repository build,
-   `git diff --check`, and IDE/xHCI USB-root plus RTL8822BU regressions.
-6. Only after automatic gates pass, produce one direct-boot candidate and run
-   the exact-device checkpoint: attach, pinned firmware/PNVM, bounded scan,
-   WPA2/CCMP authorization, DHCP, gateway/public ping, bounded nonempty fetch,
-   disconnect, and administrative down with all network identity redacted.
+- Official release: `v2.0.1`; tag commit
+  `ed621e79139f55d06dd1a474243afbf0ce5efe0a`.
+- Source archive URL:
+  `https://github.com/awemorris/NoctLang/archive/refs/tags/v2.0.1.tar.gz`;
+  exact size `2524680`; SHA-256
+  `68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f`.
+- The tarball is stored below `userland/base/noct/distfiles/` after download
+  and is ignored by Git. Host and target extractions use that same byte stream.
+- The target extraction is `userland/base/noct/noct/`. The legacy
+  `userland/noct` integration is removed. Its dirty ignored checkout was
+  preserved outside the repository before removal.
+- The target-only tracked patch may change exactly the hard-coded adapter path
+  and enable/include/invoke the existing zedBSD final-link adapter. It does not
+  alter BeUI, Noct APIs, CLI, runtime, JIT, or public headers.
+- Target Noct remains amd64-only and optional at `/usr/bin/noct`. Remacs stays
+  held in this Queue.
+- Every userland item accepts the four lifecycle targets; an item without an
+  external input or patch may use a successful no-op for those stages.
+- Top-level `make download` is configuration-optional and includes unselected
+  declared firmware/source inputs. Ordinary `make -j16` does not implicitly
+  acquire them except where an explicitly selected package needs its input.
 
 ## Completion definition
 
-Q062 completes when p038 passes the automatic package/identity/ownership/
-firmware/transport/scan/security/L2/build/regression gates and one exact AX211/
-CNVio2 direct-boot normal path reaches useful IP communication, then
-disconnects and goes down cleanly. The public WLAN UAPI remains unchanged, the
-AX211 implementation remains independent of RTL internals, and exhaustive
-recovery/rekey/suspend/race/throughput/repeatability claims remain outside this
-Queue.
+Q063 finishes when all three items are completed or honestly uncleared with a
+concrete resume condition, P/W/M/Q records agree, and no registry item remains
+pending or in progress. Automatic source/lifecycle/host/target/build evidence
+must be recorded. Physical input interaction may be left as a bounded QEMU
+gate; this Queue does not request a human hardware checkpoint.
 
 ## Execution result
 
-In progress. The automatic implementation and focused gates are complete:
-the default-off firmware package, the automatically selected source-notice
-package, strict exact-device
-attach, checked PCI/MSI-X/DMA lifetime, API89 firmware/PNVM/NVM boot, runtime
-radio command sequence, passive scan, association/key/TX/RX paths, common
-WLAN/WPA2/CCMP/L2 adaptation, fatal recovery, and detach/down behavior pass
-their declared ordinary, sanitizer, analyzer, amd64, and i386 fixtures. The
-configured amd64 kernel links with AX211 selected, and the production common
-integration fixture reaches an authorized protected Ethernet exchange using
-only synthetic protocol data. The public WLAN UAPI remains unchanged and no
-Intel/Realtek hardware layer was introduced.
+Finished on 2026-09-02 with all three items complete.
 
-The exact-device checkpoint has not run. Q062 and p038 therefore remain
-`in-progress`: one direct zedBSD boot on the exact AX211/CNVio2 machine must
-still establish physical firmware/PNVM execution, RF scan and WPA2/CCMP
-association, DHCP, gateway/public ping, a bounded nonempty fetch, disconnect,
-and administrative down. Automatic fixtures do not claim those physical
-firmware, RF, or useful-network results.
+- `ws010-p005`: all 177 maintained userland Makefiles expose the uniform
+  `download -> patch -> build -> install` lifecycle. Config-free preparation,
+  repeated top-level `make download`, both firmware caches, standalone Noct
+  build/install, corruption rejection, and ordinary `make -j16` passed. Git
+  tracks acquisition identities, licenses, and patches, but not downloaded
+  source or firmware bytes.
+- `ws008-p010`: host Noct now comes from the official `v2.0.1` archive at tag
+  commit `ed621e79139f55d06dd1a474243afbf0ce5efe0a`, exact size `2524680`,
+  and SHA-256
+  `68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f`.
+  `NOCT-T080`--`NOCT-T086`, all 73 live `--path` recipe consumers,
+  clean/incremental `make -j16 toolchain`, host-artifact recovery, and the
+  ordinary configured build passed. The host executable SHA-256 is
+  `db128557cacc7385976e491a26528bf14e3cfd47a2b9dbff78a63a64617653f6`.
+- `ws008-p009`: target integration is owned by `userland/base/noct/`; target
+  and host extractions use the same verified archive. The strict two-hunk
+  target-only patch updates and invokes the zedBSD final-link CMake adapter.
+  It is explicitly not a BeUI adapter and does not modify upstream BeUI,
+  language, runtime, CLI, JIT, or public headers. The optional amd64-only
+  static target, package artifact, and staged `/usr/bin/noct` are
+  byte-identical at SHA-256
+  `e8ee34e05a79f89baefe30f57932cb7c543b4285edfddd61e9083e4e1ad92641`.
+  Disposable q35/xHCI USB-root non-JIT, RW-to-RX/JIT, and upstream BeUI cells
+  passed. Remacs remains held and i386/PC-98 target Noct is not claimed.
+
+The first non-JIT attempt used the legacy IDE path and encountered the already
+recorded intermittent `BUG-001` `BIO_FLUSH` failure before Noct ran. The same
+image passed on retry, and all canonical q063 runtime gates passed on the
+primary q35/xHCI USB-root path. `BUG-001` therefore remains a known,
+non-blocking IDE defect and is not attributed to Noct. No physical hardware
+result is claimed by q063.

@@ -1,5 +1,6 @@
 # zedBSD optional RTL8822B firmware package
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
 
 override RTL8822B_FIRMWARE_FIXTURE_GOAL := rtl8822b-firmware-fixture-cache
 ifneq ($(filter $(RTL8822B_FIRMWARE_FIXTURE_GOAL),$(MAKECMDGOALS)),)
@@ -45,7 +46,7 @@ override RTL8822B_FIRMWARE_OFFICIAL_WHENCE_SHA256 := 34f954c7d068ec4fd5fcc216471
 
 RTL8822B_FIRMWARE_FETCH ?= curl --fail --location --silent --show-error
 override RTL8822B_FIRMWARE_SHA256_COMMAND := sha256sum
-RTL8822B_FIRMWARE_CACHE_ROOT ?= build/sources/firmware/rtl8822b
+RTL8822B_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/rtl8822b
 override RTL8822B_FIRMWARE_CACHE_DIR := $(RTL8822B_FIRMWARE_CACHE_ROOT)/$(RTL8822B_FIRMWARE_MIRROR_REVISION)
 override RTL8822B_FIRMWARE_CACHE_BLOB := $(RTL8822B_FIRMWARE_CACHE_DIR)/rtw8822b_fw.bin
 override RTL8822B_FIRMWARE_CACHE_LICENSE := $(RTL8822B_FIRMWARE_CACHE_DIR)/LICENCE.rtlwifi_firmware.txt
@@ -59,9 +60,14 @@ override RTL8822B_FIRMWARE_DATA := \
 
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,rtl8822b-firmware,Realtek RTL8822B firmware,i386 pc98 amd64,n,package,,y,firmware,firmware/rtl8822b,,,data,$(RTL8822B_FIRMWARE_DATA),,))
 override USERLAND_rtl8822b-firmware_DATA := $(RTL8822B_FIRMWARE_DATA)
+ZEDBSD_USERLAND_DOWNLOAD_TARGETS += rtl8822b-firmware
 
-.PHONY: rtl8822b-firmware rtl8822b-firmware-cache \
+.PHONY: download rtl8822b-firmware rtl8822b-firmware-cache \
 	rtl8822b-firmware-fixture-cache
+
+ifndef ZEDBSD_TOPLEVEL_BUILD
+download: rtl8822b-firmware
+endif
 
 rtl8822b-firmware: $(RTL8822B_FIRMWARE_CACHE_BLOB) \
 	$(RTL8822B_FIRMWARE_CACHE_LICENSE) $(RTL8822B_FIRMWARE_CACHE_WHENCE)

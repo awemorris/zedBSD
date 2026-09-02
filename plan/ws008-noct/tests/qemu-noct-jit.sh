@@ -8,7 +8,7 @@ repo=$(cd -- "$script_dir/../../.." && pwd)
 runner=$script_dir/qemu-noct-jit.sh
 production_config=$repo/config.mk
 production_image=$repo/build/amd64/hdd-image.img
-cmake_artifact=${NOCT_CMAKE_ARTIFACT:-$repo/userland/noct/NoctLang/build-zedbsd/noct}
+cmake_artifact=${NOCT_CMAKE_ARTIFACT:-$repo/userland/base/noct/noct/build-zedbsd-amd64/noct}
 package_artifact=$repo/build/amd64/bin/noct
 staged_artifact=$repo/build/amd64/rootfs/usr/bin/noct
 probe_source=$script_dir/noct-jit-vm-probe.c
@@ -16,7 +16,7 @@ probe_target=build/amd64/NOCT-JIT-VM-PROBE.ELF
 probe_artifact=$repo/$probe_target
 probe_staged=$repo/build/amd64/rootfs/usr/bin/noct-jit-vm-probe
 jit_script=$script_dir/noct-jit-qemu.noct
-noct_source=${NOCT_SOURCE_DIR:-$repo/userland/noct/NoctLang}
+noct_source=${NOCT_SOURCE_DIR:-$repo/userland/base/noct/noct}
 qemu=${QEMU_SYSTEM_X86_64:-qemu-system-x86_64}
 build_timeout=${BUILD_TIMEOUT_SECONDS:-3600}
 boot_timeout=${BOOT_TIMEOUT_SECONDS:-120}
@@ -158,6 +158,12 @@ cat >>"$temporary_config" <<EOF
 
 # NOCT-T020/T021/T022 private payload.  The direct probe is a test-only
 # amd64 target, not a registered base-system package.
+ZEDBSD_PLATFORM := amd64
+ZEDBSD_ARCHITECTURE := amd64
+ZEDBSD_BOARD := pcat
+ZEDBSD_VARIANT := hybrid
+CONFIG_DRIVER_PCI_XHCI := y
+CONFIG_DRIVER_USB_STORAGE := y
 ZEDBSD_USER_PROGRAMS += noct cksum
 ZEDBSD_PACKAGE_INPUTS += $probe_target $jit_script
 ZEDBSD_PACKAGE_FILES += --file /usr/bin/noct-jit-vm-probe=$probe_target --mode /usr/bin/noct-jit-vm-probe=0755
@@ -167,10 +173,10 @@ require_amd64_config "$temporary_config"
 temporary_config_hash=$(hash_file "$temporary_config")
 
 git -C "$repo" status --porcelain=v1 --untracked-files=all >"$zedbsd_status"
-git -C "$noct_source" status --porcelain=v1 --untracked-files=all \
-	>"$noct_status"
+make -s -C "$repo" noct-target-source-verify
+cp -- "$noct_source/.zedbsd-source-identity" "$noct_status"
 zedbsd_revision=$(git -C "$repo" rev-parse HEAD)
-noct_revision=$(git -C "$noct_source" rev-parse HEAD)
+noct_revision=$(awk -F= '$1 == "commit" { print $2 }' "$noct_status")
 qemu_version=$("$qemu" --version | sed -n '1p')
 probe_source_hash=$(hash_file "$probe_source")
 jit_script_hash=$(hash_file "$jit_script")
@@ -185,8 +191,10 @@ printf 'case\tresult\tevidence\n' >"$results"
 build_command=(make -C "$repo" -j16 "ZEDBSD_CONFIG=$temporary_config"
 	"$probe_target" disk-image)
 qemu_command=(
-	"$qemu" -machine pc -m 512 -smp 4
-	-drive "file=$run_image,format=raw,if=ide"
+	"$qemu" -machine q35 -m 512 -smp 4
+	-device qemu-xhci,id=xhci
+	-drive "if=none,id=usbboot,file=$run_image,format=raw"
+	-device usb-storage,bus=xhci.0,drive=usbboot,id=bootstick,bootindex=1
 	-display none -serial none -debugcon "file:$guest_log"
 	-monitor stdio -no-reboot
 )
