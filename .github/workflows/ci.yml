@@ -94,23 +94,16 @@ jobs:
             This is an automated nightly build. Not an official release.
             
             zedBSD OS
-            =========            
+            =========
             
-            `zedBSD` is a modern, re-designed BSD-based kernel and base system
-             aiming to implement all `POSIX.1-2024` and `Single UNIX Specification
-             version 4 (SUSv4)` features, along with `μITRON` hard real-time APIs.
+            `zedBSD` is a modern, re-designed BSD-based kernel and base system aiming to implement all `POSIX.1-2024` and `Single UNIX Specification version 4 (SUSv4)` features, along with `μITRON` hard real-time APIs.
              
-             CI artifacts are for:
-             - IBM PC/AT amd64
-             - IBM PC/AT i386
-             - NEC PC-9800 i386
-
-            | CPU     | Machine      | File                  | Description            |
-            |---------|--------------|-----------------------|------------------------|
-            | amd64   | PC/AT        | `zedbsd-amd64.img`    | For both UEFI and BIOS |
-            | amd64   | Intel Mac    | `zedbsd-intelmac.img` |                        |
-            | i386    | PC/AT        | `zedbsd-pcat.img`     |                        |
-            | i386    | NEC PC-9800  | `zedbsd-pc98.img`     |                        |
+            | CPU     | Machine      | File                  | Description                                             |
+            |---------|--------------|-----------------------|---------------------------------------------------------|
+            | amd64   | PC           | `zedbsd-amd64.img`    | USB image.                                              |
+            | amd64   | Intel Mac    | `zedbsd-intelmac.img` | USB image. No MacBook keyboard driver yet, use USB one. |
+            | i386    | PC           | `zedbsd-pcat.img`     | IDE HDD image.                                          |
+            | i386    | NEC PC-9800  | `zedbsd-pc98.img`     | IDE HDD image.                                          |
 
           files: |
             artifacts/zedbsd-amd64.img
