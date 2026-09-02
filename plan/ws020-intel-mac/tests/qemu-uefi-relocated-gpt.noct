@@ -129,7 +129,7 @@ func buildCheckedSource(repo, evidence, config, build) {
     runLogged(repo, evidence + "/images/build-uefi.log", command,
               "private production UEFI-only image");
     var built = build + "/hdd-image.img";
-    if (FileUtil.getFileSize(built) != 202392064) {
+    if (FileUtil.getFileSize(built) != 252723712) {
         zbFail("private production UEFI-only image has the wrong extent");
     }
     if (FileUtil.readText(build + "/.disk-image-contract") !=

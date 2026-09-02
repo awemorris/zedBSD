@@ -3,6 +3,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#if defined(ZEDBSD_DYNAMIC_LIBC)
+#define RANDOM_THREAD_LOCAL _Thread_local
+#else
+#define RANDOM_THREAD_LOCAL
+#endif
+
 enum { TYPE_0 = 0, TYPE_1, TYPE_2, TYPE_3, TYPE_4 };
 static const int degrees[] = { 0, 7, 15, 31, 63 };
 static const int separations[] = { 0, 3, 1, 3, 1 };
@@ -164,7 +170,7 @@ a64l(const char *text)
 char *
 l64a(long value)
 {
-	static _Thread_local char output[7];
+	static RANDOM_THREAD_LOCAL char output[7];
 	static const char alphabet[] = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 	unsigned long bits = (unsigned long)value;
 	unsigned index = 0;

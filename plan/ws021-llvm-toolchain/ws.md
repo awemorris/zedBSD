@@ -4,7 +4,7 @@ Last updated: 2026-09-02
 
 WSID: `ws021`
 
-Status: planned; detailed and ready for Queue construction
+Status: complete (`q064`)
 
 Parent: [master plan](../master.md)
 
@@ -77,16 +77,17 @@ The bootstrap boundary is deliberate:
 
 | Phase | Status | Required result |
 | --- | --- | --- |
-| [`ws021-p001`](phase001-llvm-source-and-zedbsd-target/phase.md) | Planned | Verified LLVM 23.1.0 acquisition and strict zedBSD OS/triple/driver/compiler-rt patch boundary |
-| [`ws021-p002`](phase002-host-llvm-build/phase.md) | Planned | `make toolchain` installs the required X86 Clang/LLD/LLVM tools below `build/llvm/` while host Noct remains host-built |
-| [`ws021-p003`](phase003-x86-sysroots/phase.md) | Planned | Complete amd64 and shared i386 public sysroots with startup, libc, compiler builtins, and linker inputs |
-| [`ws021-p004`](phase004-x86-target-migration/phase.md) | Planned | All x86 kernels and userland, including target Noct, compile/link only through the project LLVM toolchain and sysroots |
-| [`ws021-p005`](phase005-bootloader-toolchain-closure/phase.md) | Planned | BIOS and UEFI loaders plus all x86 disk images build without host target GNU/MinGW tools |
-| [`ws021-p006`](phase006-big-bang-qemu-acceptance/phase.md) | Planned | One final consolidated amd64/i386/PC-98 QEMU campaign accepts the migrated toolchain and target Noct |
+| [`ws021-p001`](phase001-llvm-source-and-zedbsd-target/phase.md) | Complete (`q064`) | Verified LLVM 23.1.0 acquisition and strict zedBSD OS/triple/driver/compiler-rt patch boundary |
+| [`ws021-p002`](phase002-host-llvm-build/phase.md) | Complete (`q064`) | `make toolchain` installs the required X86 Clang/LLD/LLVM tools below `build/llvm/` while host Noct remains host-built |
+| [`ws021-p007`](phase007-host-llvm-release/phase.md) | Complete (`q064`) | Publish the validated x86_64 Linux host install as a pinned permanent `rev-0` CI asset |
+| [`ws021-p003`](phase003-x86-sysroots/phase.md) | Complete (`q064`) | Complete amd64 and shared i386 public sysroots with startup, libc, compiler builtins, and linker inputs |
+| [`ws021-p004`](phase004-x86-target-migration/phase.md) | Complete (`q064`) | All x86 kernels and userland, including target Noct, compile/link only through the project LLVM toolchain and sysroots |
+| [`ws021-p005`](phase005-bootloader-toolchain-closure/phase.md) | Complete (`q064`) | BIOS and UEFI loaders plus all x86 disk images build without host target GNU/MinGW tools |
+| [`ws021-p006`](phase006-big-bang-qemu-acceptance/phase.md) | Complete (`q064`) | One final consolidated amd64/i386/PC-98 QEMU campaign accepts the migrated toolchain and target Noct |
 
 ## Queue strategy
 
-The intended execution Queue contains p001 through p006 together, in order.
+The intended execution Queue contains p001, p002, p007, then p003 through p006.
 P001--p005 may use bounded host/unit/compile/link/format checks, but QEMU runtime
 is not a dependency between them. P006 runs only after every supported x86
 image builds and the no-host-target-tool audit passes. If p006 finds a runtime
@@ -107,6 +108,14 @@ complete matrix once for final acceptance.
   GNU binutils, or MinGW installation.
 - The p006 final matrix reaches its declared runtime checkpoints, including
   target Noct non-JIT, JIT/RW-to-RX, and BeUI behavior on amd64 UEFI.
+
+## Execution result
+
+Q064 completed all seven Phases on 2026-09-02. The pinned LLVM 23.1.0 cache,
+both x86 sysroots, every maintained x86 image, and the local CI sequence pass.
+The final runtime evidence includes the uninterrupted six-cell amd64
+firmware/Variant matrix, i386 PC/AT login, maintained PC-98 login/Xzed mouse,
+and amd64 UEFI target-noct non-JIT, JIT/RW-to-RX, and BeUI acceptance.
 
 ## Exclusions and reconsideration boundaries
 

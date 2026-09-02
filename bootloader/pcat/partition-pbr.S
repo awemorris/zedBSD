@@ -17,7 +17,10 @@ _start:
 	/* FAT16 ends its extended BPB at 0x3e; FAT32 extends it to 0x5a. */
 	.fill 0x005a - (. - _start), 1, 0
 pbr_start:
-	ljmp 0x07c0, pbr_rebased
+	/* 16:16 immediate far jump (EA offset16 segment16). */
+	.byte 0xea
+	.word pbr_rebased
+	.word 0x07c0
 pbr_rebased:
 	cli
 	cld
@@ -66,7 +69,8 @@ pbr_rebased:
 	loop 4b
 	push cs
 	push offset pbr_continue
-	retf
+	/* LLVM IAS otherwise selects the ELF32 operand size (66 CB). */
+	.byte 0xcb
 
 fatal:
 	mov al, 'P'
@@ -425,7 +429,8 @@ load_file:
 	mov dl, byte ptr [boot_drive]
 	push word ptr [entry_seg]
 	push word ptr [entry_off]
-	retf
+	/* LLVM IAS otherwise selects the ELF32 operand size (66 CB). */
+	.byte 0xcb
 
 loader_name: .ascii "BOOTZBSDEXE"
 root_lba: .long 0

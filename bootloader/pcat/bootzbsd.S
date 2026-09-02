@@ -22,6 +22,17 @@
 .set KERNEL_HIGH_WINDOW_MIN, 0x80000000
 .set KERNEL_HIGH_WINDOW_LIMIT, 0xc0000000
 
+/* LLVM's integrated assembler otherwise selects ELF32 near call/return
+ * operands even inside .code16.  Keep hand-written real-mode routines on a
+ * true 16-bit near-call ABI; the two .code16gcc C calls below remain 32-bit. */
+.macro call16 target
+	.byte 0xe8
+	.word \target - . - 2
+.endm
+.macro ret16
+	.byte 0xc3
+.endm
+
 stage2_header:
 	.long ZBL2_MAGIC
 	.word ZBL2_VERSION
@@ -63,7 +74,10 @@ stage2_entry:
 	mov cx, word ptr [ZBL2_SECTOR_COUNT]
 	shl cx, 8
 	rep movsw
-	ljmp 0x1000, stage2_entry
+	/* 16:16 immediate far jump (EA offset16 segment16). */
+	.byte 0xea
+	.word stage2_entry
+	.word 0x1000
 stage2_resident:
 	mov ds, ax
 	mov ss, ax
@@ -79,7 +93,7 @@ stage2_resident:
 9:	pop ds
 	mov byte ptr [boot_drive], dl
 	mov si, offset msg_start
-	call puts
+	call16 puts
 
 	/* Conventional-memory query used by the Multiboot v1 handoff. */
 	mov ax, 0x8800
@@ -91,14 +105,14 @@ stage2_resident:
 	mov ax, 0x3c00
 2:	movzx eax, ax
 	mov dword ptr [mbi_mem_upper], eax
-	call sample_vga_font
+	call16 sample_vga_font
 
 	xor eax, eax
-	call disk_read_one
+	call16 disk_read_one
 	cmp word ptr es:[MBR_SIGNATURE], 0xaa55
 	jne fatal_mbr
 	mov si, offset msg_mbr
-	call puts
+	call16 puts
 
 	/* Validate statuses, then select the first active primary entry. */
 	mov si, MBR_TABLE_OFFSET
@@ -145,18 +159,18 @@ mbr_status_ok:
 	test bx, bx
 	jz fatal_partition
 	mov si, offset msg_partition
-	call puts
+	call16 puts
 
-	call fat16_mount
-	call load_zedbsd_configuration
+	call16 fat16_mount
+	call16 load_zedbsd_configuration
 	mov byte ptr [path_role], 1
 	mov si, offset bios_configuration
-	call fat_find_path
+	call16 fat_find_path
 	mov si, offset msg_kernel
-	call puts
+	call16 puts
 
 	xor eax, eax
-	call fat16_read_file_sector
+	call16 fat16_read_file_sector
 	cmp dword ptr es:[0], 0x464c457f
 	jne fatal_elf
 	mov al, byte ptr es:[EI_CLASS]
@@ -261,7 +275,7 @@ elf32_ph_next:
 	cmp byte ptr [elf_entry_executable], 1
 	jne fatal_elf
 	mov si, offset msg_elf32
-	call puts
+	call16 puts
 	jmp load_all_segments
 
 /* ------------------------------------------------------------------ */
@@ -381,11 +395,11 @@ elf64_ph_next:
 	cmp byte ptr [elf_entry_executable], 1
 	jne fatal_elf64
 	mov si, offset msg_elf64
-	call puts
+	call16 puts
 
 /* ------------------------------------------------------------------ */
 load_all_segments:
-	call unreal_gs
+	call16 unreal_gs
 	mov word ptr [ph_cursor], offset ph_table
 	mov ax, word ptr [ph_load_count]
 	mov word ptr [ph_remaining], ax
@@ -405,7 +419,7 @@ load_file_loop:
 	test eax, eax
 	jz zero_bss
 	mov eax, dword ptr [load_file_sector]
-	call fat16_read_file_sector
+	call16 fat16_read_file_sector
 	mov ecx, 512
 	cmp dword ptr [load_remaining], ecx
 	jae 1f
@@ -490,7 +504,7 @@ next_ph:
 	jmp load_ph_loop
 load_complete:
 	mov si, offset msg_loaded
-	call puts
+	call16 puts
 	cmp byte ptr [elf_class], ELFCLASS64
 	je enter_long_mode
 	jmp enter_protected_mode
@@ -499,7 +513,7 @@ load_complete:
 /* FAT12/16/32. */
 fat16_mount:
 	mov eax, dword ptr [partition_lba]
-	call disk_read_one
+	call16 disk_read_one
 	cmp word ptr es:[BPB_BYTES_PER_SECTOR], 512
 	jne fatal_fat
 	mov al, byte ptr es:[BPB_SECTORS_CLUSTER]
@@ -591,7 +605,7 @@ fat16_mount:
 2:	cmp dword ptr [fat_cluster_limit], 0xfff0
 	jae fatal_fat
 3:
-	ret
+	ret16
 
 fat32_mount:
 	cmp byte ptr es:[BPB_EXT_SIGNATURE32], 0x29
@@ -655,7 +669,7 @@ fat32_mount:
 	mov eax, dword ptr [root_cluster32]
 	cmp eax, dword ptr [fat_cluster_limit]
 	jae fatal_fat
-	ret
+	ret16
 
 /*
  * Resolve a bounded, NUL-terminated selected-volume path.  The p003 parser
@@ -692,7 +706,7 @@ fat_path_component:
 	mov byte ptr [path_component_final], 0
 	inc si
 3:	mov word ptr [path_cursor], si
-	call fat_find_directory_component
+	call16 fat_find_directory_component
 	mov al, byte ptr [found_attribute]
 	cmp byte ptr [path_component_final], 0
 	je fat_path_directory
@@ -711,7 +725,7 @@ fat_path_component:
 	mov dword ptr [file_size], eax
 	mov byte ptr [file_cache_valid], 0
 	mov byte ptr [fat_cache_valid], 0
-	ret
+	ret16
 fat_path_directory:
 	test al, FAT_ATTRIBUTE_DIRECTORY
 	jz fatal_path
@@ -745,7 +759,7 @@ fat_scan_fixed_sector:
 	cmp dword ptr [scan_sectors], 0
 	je fatal_path
 	mov eax, dword ptr [scan_lba]
-	call fat_scan_one_sector
+	call16 fat_scan_one_sector
 	cmp eax, -2
 	je fatal_path
 	cmp eax, -1
@@ -786,7 +800,7 @@ fat_scan_cluster_sector:
 	cmp dword ptr [scan_sectors], 0
 	je fat_scan_next_cluster
 	mov eax, dword ptr [scan_lba]
-	call fat_scan_one_sector
+	call16 fat_scan_one_sector
 	cmp eax, -2
 	je fatal_path
 	cmp eax, -1
@@ -798,12 +812,12 @@ fat_scan_next_cluster:
 	mov eax, dword ptr [directory_cluster]
 	cmp byte ptr [fat_type], FAT_TYPE_32
 	je 1f
-	call fat16_next_cluster
+	call16 fat16_next_cluster
 	movzx eax, ax
 	cmp eax, 0xfff8
 	jae fatal_path
 	jmp 2f
-1:	call fat32_next_cluster
+1:	call16 fat32_next_cluster
 	cmp eax, 0x0ffffff8
 	jae fatal_path
 2:	cmp eax, 2
@@ -815,7 +829,7 @@ fat_scan_next_cluster:
 
 /* Return entry offset, -1 for no match, or -2 for directory end. */
 fat_scan_one_sector:
-	call fat_read_one
+	call16 fat_read_one
 	xor bx, bx
 	mov di, offset directory_sector
 	mov cx, 512 / 4
@@ -829,7 +843,9 @@ fat_scan_one_sector:
 	push eax
 	movzx eax, word ptr [path_component]
 	push eax
-	push 512
+	/* LLVM IAS does not apply .code16gcc to immediate pushes. */
+	.byte 0x66, 0x68
+	.long 512
 	mov eax, offset directory_sector
 	push eax
 	mov eax, offset directory_state
@@ -837,7 +853,7 @@ fat_scan_one_sector:
 	call zbl_bios_fat_directory_search
 	add esp, 20
 	.code16
-	ret
+	ret16
 
 fat_scan_found:
 	mov bx, ax
@@ -854,15 +870,15 @@ fat_scan_found:
 1:	mov dword ptr [found_cluster], eax
 	mov eax, dword ptr [bx + 28]
 	mov dword ptr [found_size], eax
-	ret
+	ret16
 
 load_zedbsd_configuration:
 	cmp byte ptr [boot_uuid_valid], 0
 	je fatal_config
-	call format_boot_uuid
+	call16 format_boot_uuid
 	mov byte ptr [path_role], 0
 	mov si, offset zedbsd_config_path
-	call fat_find_path
+	call16 fat_find_path
 	mov eax, dword ptr [file_size]
 	cmp eax, ZBL_ZEDBSD_CONFIG_FILE_MAX
 	ja fatal_config
@@ -873,7 +889,7 @@ load_zedbsd_configuration:
 	cmp edx, dword ptr [config_size]
 	jae 3f
 	mov eax, dword ptr [config_read_sector]
-	call fat16_read_file_sector
+	call16 fat16_read_file_sector
 	xor bx, bx
 	mov di, word ptr [config_copy_offset]
 	add di, offset config_source
@@ -888,7 +904,9 @@ load_zedbsd_configuration:
 	jmp 1b
 3:
 	.code16gcc
-	push 10
+	/* LLVM IAS does not apply .code16gcc to immediate pushes. */
+	.byte 0x66, 0x68
+	.long 10
 	mov eax, offset boot_uuid_text
 	push eax
 	push dword ptr [config_size]
@@ -911,22 +929,22 @@ load_zedbsd_configuration:
 	rep movsd
 	pop es
 	mov si, offset msg_config
-	call puts
+	call16 puts
 	mov si, offset boot_uuid_text
-	call puts
+	call16 puts
 	mov si, offset msg_config_kernel
-	call puts
+	call16 puts
 	mov si, offset bios_configuration
-	call puts
+	call16 puts
 	mov si, offset msg_config_parameters
-	call puts
+	call16 puts
 	mov si, offset bios_configuration + \
 		ZBL_ZEDBSD_CONFIG_PARAMETER_RECORD_OFFSET + \
 	    ZEDBSD_BOOT_PARAMETER_RECORD_TEXT_OFFSET
-	call puts
+	call16 puts
 	mov al, '\n'
-	call putc
-	ret
+	call16 putc
+	ret16
 
 format_boot_uuid:
 	mov ebx, dword ptr [boot_volume_serial]
@@ -948,7 +966,7 @@ format_boot_uuid:
 	inc di
 4:	loop 1b
 	mov byte ptr [di], 0
-	ret
+	ret16
 
 /* EAX=file-relative sector; returns it in ES:0000. */
 fat16_read_file_sector:
@@ -985,7 +1003,7 @@ fat_file_request_selected:
 	cmp dl, byte ptr [fat_spc]
 	jb fat_file_cache_ready
 	xor dl, dl
-	call fat16_next_cluster
+	call16 fat16_next_cluster
 	movzx eax, ax
 	cmp eax, dword ptr [fat_cluster_limit]
 	jae fatal_fat_chain
@@ -1009,7 +1027,7 @@ fat_file_walk_from_start:
 fat_cluster_walk:
 	cmp dword ptr [cluster_steps], 0
 	je fat_cluster_found
-	call fat16_next_cluster
+	call16 fat16_next_cluster
 	movzx edx, ax
 	cmp edx, dword ptr [fat_cluster_limit]
 	jae fatal_fat_chain
@@ -1039,14 +1057,14 @@ fat_cluster_cached:
 	jc fatal_fat_chain
 	cmp eax, dword ptr [fat_volume_end_lba]
 	jae fatal_fat_chain
-	call fat_read_one
+	call16 fat_read_one
 	mov eax, dword ptr [requested_sector]
 	cmp eax, dword ptr [desired_sector]
 	jae fat_file_read_done
 	inc eax
 	jmp fat_file_next_request
 fat_file_read_done:
-	ret
+	ret16
 
 fat32_read_file_sector:
 	mov dword ptr [desired_sector], eax
@@ -1062,7 +1080,7 @@ fat32_read_file_sector:
 	cmp bl, byte ptr [fat_spc]
 	jb fat32_file_cache_ready
 	xor bl, bl
-	call fat32_next_cluster
+	call16 fat32_next_cluster
 	cmp eax, 0x0ffffff8
 	jae fatal_fat_chain
 	cmp eax, 2
@@ -1090,7 +1108,7 @@ fat32_file_from_start:
 fat32_file_walk:
 	cmp dword ptr [cluster_steps], 0
 	je fat32_file_cluster_ready
-	call fat32_next_cluster
+	call16 fat32_next_cluster
 	cmp eax, 0x0ffffff8
 	jae fatal_fat_chain
 	cmp eax, 2
@@ -1122,9 +1140,9 @@ fat32_file_cluster_cached:
 	jc fatal_fat_chain
 	cmp eax, dword ptr [fat_volume_end_lba]
 	jae fatal_fat_chain
-	call fat_read_one
+	call16 fat_read_one
 	mov eax, dword ptr [desired_sector]
-	ret
+	ret16
 
 fat32_next_cluster:
 	push ebx
@@ -1143,13 +1161,13 @@ fat32_next_cluster:
 	jc fatal_fat_chain
 	cmp eax, dword ptr [fat_end_lba]
 	jae fatal_fat_chain
-	call fat_read_one
+	call16 fat_read_one
 	movzx ebx, word ptr [fat_offset32]
 	mov eax, dword ptr es:[bx]
 	and eax, 0x0fffffff
 	pop edx
 	pop ebx
-	ret
+	ret16
 
 /* AX=current cluster, AX=next cluster. */
 fat16_next_cluster:
@@ -1183,7 +1201,7 @@ fat_entry_offset_ready:
 	je fat_cache_ready
 fat_cache_fill:
 	mov dword ptr [fat_cache_lba], eax
-	call fat_read_one
+	call16 fat_read_one
 	xor bx, bx
 	mov di, offset fat_cache
 	mov ecx, 512 / 4
@@ -1200,7 +1218,7 @@ fat_cache_copy:
 	inc eax
 	cmp eax, dword ptr [fat_end_lba]
 	jae fatal_fat_chain
-	call fat_read_one
+	call16 fat_read_one
 	xor bx, bx
 	mov di, offset fat_cache + 512
 	mov ecx, 512 / 4
@@ -1229,7 +1247,7 @@ fat_cache_ready:
 fat_next_value_ready:
 	cmp ax, 2
 	jb fatal_fat_chain
-	ret
+	ret16
 
 /* ------------------------------------------------------------------ */
 fat_read_one:
@@ -1257,7 +1275,7 @@ disk_read_one:
 	jmp fatal_disk
 2:	mov ax, ZBL_BOUNCE_SEG
 	mov es, ax
-	ret
+	ret16
 
 /* Preserve the BIOS 8x16 ASCII font before entering protected mode.  The
  * kernel copies this low-memory handoff during its earliest BSP setup. */
@@ -1302,7 +1320,7 @@ sample_vga_font:
 	pop cx
 	pop bx
 	pop ax
-	ret
+	ret16
 
 #include "bootloader/pcat/vbe.inc"
 
@@ -1319,7 +1337,7 @@ unreal_gs:
 	and eax, 0xfffffffe
 	mov cr0, eax
 	sti
-	ret
+	ret16
 
 /* ------------------------------------------------------------------ */
 enter_protected_mode:
@@ -1334,7 +1352,7 @@ enter_protected_mode:
 	or eax, 0x0000ffff
 	mov dword ptr [mbi_boot_device], eax
 	mov si, offset msg_go
-	call puts
+	call16 puts
 	cli
 	lgdt [gdt_pointer]
 	mov eax, cr0
@@ -1355,9 +1373,9 @@ enter_long_mode:
 	and edx, 0x20100000
 	cmp edx, 0x20100000
 	jne fatal_elf64
-	call vbe_setup_framebuffer
+	call16 vbe_setup_framebuffer
 	mov si, offset msg_go
-	call puts
+	call16 puts
 	cmp byte ptr [boot_uuid_valid], 0
 	je 1f
 	or word ptr [long_handoff + ZBL6_HANDOFF_FLAGS_OFFSET], 0x0010
@@ -1372,7 +1390,7 @@ enter_long_mode:
 	mov dword ptr [long_handoff + ZBL6_HANDOFF_MEM_LOWER_OFFSET], eax
 	mov eax, dword ptr [mbi_mem_upper]
 	mov dword ptr [long_handoff + ZBL6_HANDOFF_MEM_UPPER_OFFSET], eax
-	call unreal_gs
+	call16 unreal_gs
 	mov edi, 0x00050000
 	mov ecx, 0x6000 / 4
 	xor eax, eax
@@ -1405,7 +1423,7 @@ enter_long_mode:
 	add ebx, 0x00200000
 	add edi, 8
 	loop 3b
-	call vbe_map_framebuffer
+	call16 vbe_map_framebuffer
 	cli
 	mov eax, cr4
 	or eax, 0x20
@@ -1483,9 +1501,9 @@ puts:
 	lodsb
 	test al, al
 	jz 1f
-	call putc
+	call16 putc
 	jmp puts
-1:	ret
+1:	ret16
 putc:
 	push ax
 	push dx
@@ -1493,7 +1511,7 @@ putc:
 	out dx, al
 	pop dx
 	pop ax
-	ret
+	ret16
 
 fatal_mbr:       mov al, 'M'; jmp fatal
 fatal_partition: mov al, 'P'; jmp fatal
@@ -1511,11 +1529,11 @@ fatal_disk:      mov al, 'D'
 fatal:
 	push ax
 	mov si, offset msg_error
-	call puts
+	call16 puts
 	pop ax
-	call putc
+	call16 putc
 	mov al, '\n'
-	call putc
+	call16 putc
 	cli
 1:	hlt
 	jmp 1b

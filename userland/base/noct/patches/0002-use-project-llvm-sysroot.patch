@@ -1,0 +1,83 @@
+--- a/cmake/toolchains/zedbsd-amd64.cmake
++++ b/cmake/toolchains/zedbsd-amd64.cmake
+@@ -54,39 +54,49 @@
+ list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES ZEDBSD_SOURCE_DIR)
+ list(REMOVE_DUPLICATES CMAKE_TRY_COMPILE_PLATFORM_VARIABLES)
+
++foreach(_NOCT_ZEDBSD_ENV IN ITEMS ZEDBSD_LLVM_BIN ZEDBSD_SYSROOT)
++  if((NOT DEFINED ${_NOCT_ZEDBSD_ENV} OR
++      "${${_NOCT_ZEDBSD_ENV}}" STREQUAL "") AND
++     DEFINED ENV{${_NOCT_ZEDBSD_ENV}} AND
++     NOT "$ENV{${_NOCT_ZEDBSD_ENV}}" STREQUAL "")
++    set(${_NOCT_ZEDBSD_ENV} "$ENV{${_NOCT_ZEDBSD_ENV}}" CACHE PATH
++        "zedBSD target toolchain input")
++  endif()
++  if(NOT DEFINED ${_NOCT_ZEDBSD_ENV} OR
++     "${${_NOCT_ZEDBSD_ENV}}" STREQUAL "")
++    message(FATAL_ERROR "${_NOCT_ZEDBSD_ENV} is required")
++  endif()
++  get_filename_component(${_NOCT_ZEDBSD_ENV}
++      "${${_NOCT_ZEDBSD_ENV}}" REALPATH)
++  set(${_NOCT_ZEDBSD_ENV} "${${_NOCT_ZEDBSD_ENV}}" CACHE PATH
++      "zedBSD target toolchain input" FORCE)
++endforeach()
++list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
++  ZEDBSD_LLVM_BIN ZEDBSD_SYSROOT)
++list(REMOVE_DUPLICATES CMAKE_TRY_COMPILE_PLATFORM_VARIABLES)
++
+ set(CMAKE_SYSTEM_NAME zedBSD)
+ set(CMAKE_SYSTEM_PROCESSOR x86_64)
+ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
+-find_program(_NOCT_ZEDBSD_CC NAMES gcc)
+-find_program(_NOCT_ZEDBSD_AR NAMES ar)
+-find_program(_NOCT_ZEDBSD_RANLIB NAMES ranlib)
+-if(NOT _NOCT_ZEDBSD_CC OR NOT _NOCT_ZEDBSD_AR OR
+-   NOT _NOCT_ZEDBSD_RANLIB)
+-  message(FATAL_ERROR
+-    "The zedBSD amd64 build requires gcc, ar, and ranlib in PATH")
+-endif()
+-set(CMAKE_C_COMPILER "${_NOCT_ZEDBSD_CC}" CACHE FILEPATH
++set(CMAKE_C_COMPILER "${ZEDBSD_LLVM_BIN}/clang" CACHE FILEPATH
+     "C compiler for zedBSD amd64" FORCE)
+-set(CMAKE_ASM_COMPILER "${_NOCT_ZEDBSD_CC}" CACHE FILEPATH
++set(CMAKE_ASM_COMPILER "${ZEDBSD_LLVM_BIN}/clang" CACHE FILEPATH
+     "Assembler driver for zedBSD amd64" FORCE)
+-set(CMAKE_AR "${_NOCT_ZEDBSD_AR}" CACHE FILEPATH
++set(CMAKE_AR "${ZEDBSD_LLVM_BIN}/llvm-ar" CACHE FILEPATH
+     "Archiver for zedBSD amd64" FORCE)
+-set(CMAKE_RANLIB "${_NOCT_ZEDBSD_RANLIB}" CACHE FILEPATH
++set(CMAKE_RANLIB "${ZEDBSD_LLVM_BIN}/llvm-ranlib" CACHE FILEPATH
+     "Archive indexer for zedBSD amd64" FORCE)
+-unset(_NOCT_ZEDBSD_CC CACHE)
+-unset(_NOCT_ZEDBSD_AR CACHE)
+-unset(_NOCT_ZEDBSD_RANLIB CACHE)
++set(CMAKE_LINKER "${ZEDBSD_LLVM_BIN}/ld.lld" CACHE FILEPATH
++    "Linker for zedBSD amd64" FORCE)
++set(CMAKE_C_COMPILER_TARGET x86_64-unknown-zedbsd)
++set(CMAKE_ASM_COMPILER_TARGET x86_64-unknown-zedbsd)
++set(CMAKE_SYSROOT "${ZEDBSD_SYSROOT}")
+
+ set(CMAKE_C_FLAGS_INIT
+-  "-m64 -march=x86-64 -mno-red-zone -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -fno-strict-aliasing -nostdinc -U__linux__ -U__linux -Ulinux -D__ZEDBSD__ -DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64")
+-set(CMAKE_ASM_FLAGS_INIT "-nostdinc")
++  "-m64 -march=x86-64 -mno-red-zone -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -fno-common -ffunction-sections -fdata-sections -fno-strict-aliasing -DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64")
+ set(CMAKE_C_STANDARD_INCLUDE_DIRECTORIES
+-  "${ZEDBSD_SOURCE_DIR}/include"
+-  "${ZEDBSD_SOURCE_DIR}/include/uapi"
+-  "${ZEDBSD_SOURCE_DIR}/src"
+-  "${ZEDBSD_SOURCE_DIR}"
+-  "${ZEDBSD_SOURCE_DIR}/libc/include"
++  "${ZEDBSD_SYSROOT}/usr/include"
+ )
+
+ set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
+@@ -94,7 +101,7 @@
+ set(CMAKE_BUILD_RPATH "")
+ set(CMAKE_INSTALL_RPATH "")
+
+-set(CMAKE_FIND_ROOT_PATH "${ZEDBSD_SOURCE_DIR}")
++set(CMAKE_FIND_ROOT_PATH "${ZEDBSD_SYSROOT}")
+ set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)

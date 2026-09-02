@@ -57,6 +57,14 @@ identity, non-JIT, RW-to-RX/JIT, and canonical BeUI q35/xHCI gates pass. Its
 tracked two-hunk target patch connects only the zedBSD final-link adapter and
 is explicitly not a BeUI adapter.
 
+Q064 completes the reproducible x86 compiler boundary. Verified patched LLVM
+23.1.0, its permanent digest-pinned `rev-0` x86_64 Linux cache, amd64/i386
+sysroots, all maintained x86 kernel/userland/loaders, and all four CI image
+configurations pass. The consolidated runtime campaign covers every amd64
+firmware/Variant cell, i386 PC/AT, maintained PC-98, and target noct non-JIT,
+JIT/RW-to-RX, and BeUI on amd64 UEFI. WS022 records the separately deferred
+compiler-emitted static ELF `PT_TLS` work.
+
 The archived [q039](queue-q039.md) first proves the
 already-correct PC-98 `IPL1` field and has prepared one immutable audio-trace
 image for the still-silent PC-9821V13 boundary; its automatic gates pass and
@@ -439,7 +447,8 @@ allowed to block first communication unless the normal path depends on them.
 | `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
 | `ws020` | Intel Mac UEFI bring-up and generic image variants | Active; p006 automatic GPT/Protective-MBR repair complete, one provisional and p004 final physical acceptance pending | `MAC-T022`, pristine `MAC-T021`, and uninterrupted six-cell `MAC-T020` pass; exact `692160cf...331d` / `A93F-BBBE` image published | Record one provisional Intel Mac boot, then retain p004's final five consecutive cold boots | [WS020](ws020-intel-mac/ws.md) |
-| `ws021` | Reproducible x86 LLVM toolchain and sysroots | Planned; p001--p006 detailed and Queue-ready | No Phase started | Queue p001--p006 together; use host/format gates through p005 and run the consolidated QEMU matrix only in p006 | [WS021](ws021-llvm-toolchain/ws.md) |
+| `ws021` | Reproducible x86 LLVM toolchain and sysroots | Complete (`q064`) | LLVM 23.1.0 cache/source paths, amd64/i386 sysroots, all x86 target/loader builds, four CI configurations, six-cell amd64 firmware matrix, i386 PC/AT and PC-98, and target noct non-JIT/JIT/BeUI gates pass | No current Phase; the source-build path and pinned `rev-0` cache remain supported in parallel | [WS021](ws021-llvm-toolchain/ws.md) |
+| `ws022` | ELF `PT_TLS` and static thread-local storage | Planned; WS021 dependency satisfied, not queued | No Phase started | Freeze the x86 TLS/TCB ABI and fixture matrix in p001 before changing exec or pthread runtime | [WS022](ws022-elf-tls/ws.md) |
 
 ## 4. Milestones
 
@@ -602,35 +611,36 @@ one.
    this completed item. All maintained userland items expose
    download/patch/build/install, with top-level `make download` providing the
    source-distribution acquisition boundary.
-8. Implement WS021 as one ordered Queue through p001--p006. Build host Noct and
-   verified patched LLVM 23.1.0 with the host toolchain; install LLVM below
-   `build/llvm`; construct `build/amd64/sysroot` and the PC/AT/PC-98 shared
-   `build/i386/sysroot`; migrate x86 kernels, userland, target Noct and all
-   BIOS/UEFI loaders away from host target GCC/binutils/MinGW. Do not use
-   repeated QEMU boots as intermediate gates: finish the source/compile/link/
-   format migration first, then run p006's consolidated six-cell big-bang
-   matrix and feed its target-Noct result back to WS008.
-9. Implement WS017's `/dev/graphics` LFB fast path after resolving its retained
+8. Retain q064's completed WS021 boundary: host Noct and verified patched LLVM
+   23.1.0 bootstrap with the host toolchain; `build/llvm`, both x86 sysroots,
+   every x86 target/loader, the permanent `rev-0` cache, CI builds, and the
+   consolidated QEMU/target-noct acceptance all pass. Future x86 target work
+   must keep using this project-owned toolchain boundary.
+9. After WS021, implement WS022's compiler-emitted static ELF `PT_TLS`
+   contract. Freeze the amd64/i386 TLS/TCB ABI and malformed-ELF fixtures
+   before changing exec; then provide independent initial-thread and pthread
+   TLS images. Dynamic `dlopen()` TLS remains outside the first boundary.
+10. Implement WS017's `/dev/graphics` LFB fast path after resolving its retained
    `mprotect` permission-ceiling decision. Do not infer that decision from the
    priority change.
-10. Retain q043's `ws007-p004` result as `uncleared`: the frozen headless PC-98
+11. Retain q043's `ws007-p004` result as `uncleared`: the frozen headless PC-98
    cell and focused input gates pass, while the maintained qemu-pc98 build has
    no interactive display backend. Resume only from the user's exact failing
    GUI environment. After WS017, continue the remaining WS007 integration,
    including real Xzed/LFB behavior.
-11. Continue WS001 POSIX work. Add a bounded `lp`/`lpr` Phase whose deliberate
+12. Continue WS001 POSIX work. Add a bounded `lp`/`lpr` Phase whose deliberate
    model posts PDF directly to an LPD printer and has no local spool queue.
-12. Re-plan WS019 so the installer is written in Noct, then implement it after
+13. Re-plan WS019 so the installer is written in Noct, then implement it after
    its complete installer specification is supplied. The user's latest message
    ended after "仕様は"; that missing contract is a human blocker and must not be
    guessed from the older C-oriented plan.
-13. After the installer passes automatic acceptance, complete WS003 by
+14. After the installer passes automatic acceptance, complete WS003 by
     installing to and booting from the Latitude 5320 NVMe device.
-14. Resume WS011 VLAN and bridge work. The previous manual hold is released by
+15. Resume WS011 VLAN and bridge work. The previous manual hold is released by
     this priority instruction, but any still-open virtual-interface, packet-
     ownership, filtering, or persistence decision remains a design gate rather
     than permission to improvise an incompatible UAPI.
-15. Keep WS013 Runtime CPAR, WS014 GPU, and WS015 μITRON pending until their
+16. Keep WS013 Runtime CPAR, WS014 GPU, and WS015 μITRON pending until their
     explicit architecture holds are separately released.
 
 When a higher-priority item reaches a recorded human decision, mark only that
@@ -676,7 +686,7 @@ until stopped or no judgment-free Phase remains.
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
 | Confirmed-commit implementation bounds | WS011 | Public semantics are fixed: interactive only, explicit timeout, delayed `/etc/net.conf` write, ordinary `commit` confirms, and DHCP is reacquired; freeze timeout maximum, lock path, and diagnostic bounds before implementation |
 | Authoritative Noct repository, build sequence, and release | WS008 | Resolved by q063: official `awemorris/NoctLang` release `v2.0.1`, tag commit `ed621e79139f55d06dd1a474243afbf0ce5efe0a`, archive size `2524680`, and SHA-256 `68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f` are the common host/target identity. Both `--path` forms, toolchain/ordinary build, amd64 target package, and q35/xHCI non-JIT/JIT/BeUI gates pass. The target-only two-hunk final-link patch is explicitly not BeUI; Remacs and i386/PC-98 target support remain outside the accepted scope. |
-| x86 compiler triples, bootstrap and sysroot ownership | WS021 | Resolved for v1: host C/C++ builds host Noct and official LLVM 23.1.0; project LLVM installs at `build/llvm`; target triples are `x86_64-unknown-zedbsd` and `i386-unknown-zedbsd`; sysroots are `build/amd64/sysroot` and shared `build/i386/sysroot`; target Noct uses the former; BIOS/UEFI loaders are included so no host target GNU/MinGW tool remains. sparcv9/m68030 use a later project-built GCC. Runtime is deferred to one final p006 big-bang matrix rather than repeated intermediate QEMU gates. |
+| x86 compiler triples, bootstrap and sysroot ownership | WS021 | Resolved by q064: host C/C++ builds host Noct and verified patched LLVM 23.1.0; project LLVM installs at `build/llvm` from source or the pinned `rev-0` cache; target triples are `x86_64-unknown-zedbsd` and `i386-unknown-zedbsd`; sysroots are `build/amd64/sysroot` and shared `build/i386/sysroot`; target Noct uses the former; BIOS/UEFI loaders use LLVM with no host target GNU/MinGW fallback. The final amd64/i386/PC-98 and target-noct runtime campaign passes. sparcv9/m68030 use a later project-built GCC. |
 | PC/AT boot selector | WS004 | Resolved: reuse UUID/PARTUUID; standard FAT handoff uses UUID |
 | Runtime swap command standard and control boundary | WS016 | Resolved for v1: SUSv4/POSIX does not define `swapon`/`swapoff`; zedBSD supplies minimal privileged extensions over versioned `/dev/system` control and existing signed sources |
 | Optional LFB mapping and Xzed fallback boundary | WS017 | Resolved for v1: fixed post-ENTER geometry, 8/16/24/32-bpp layout query, shared non-executable mmap when supported, true-color Xzed fast path, and unchanged ioctl fallback; PC-98 Cirrus is excluded |

@@ -163,15 +163,15 @@ func checkerArgs(build, evidence, layout, image) {
 }
 
 func imageBytes(layout) {
-    if (layout == "hybrid") { return 203423744; }
-    if (layout == "bios") { return 135266304; }
-    return 202392064;
+    if (layout == "hybrid") { return 253755392; }
+    if (layout == "bios") { return 185597952; }
+    return 252723712;
 }
 
 func expectedUsbBlocks(layout) {
-    if (layout == "hybrid") { return 397312; }
-    if (layout == "bios") { return 264192; }
-    return 395297;
+    if (layout == "hybrid") { return 495616; }
+    if (layout == "bios") { return 362496; }
+    return 493601;
 }
 
 func expectedBootPartition(layout) {
@@ -256,20 +256,20 @@ func crc32Range(data, start, count) {
     return (crc ^ 4294967295) & 4294967295;
 }
 
-func validPrimaryFront(front) {
+func validPrimaryFront(front, lastLba) {
     if (Packed.size(front) != 17408 ||
         !allZeroRange(front, 0, 446) || front[446] != 0 ||
         front[447] != 0 || front[448] != 2 || front[449] != 0 ||
         front[450] != 238 || front[451] != 255 || front[452] != 255 ||
         front[453] != 255 || zbU32LE(front, 454) != 1 ||
-        zbU32LE(front, 458) != 395296 ||
+        zbU32LE(front, 458) != lastLba ||
         !allZeroRange(front, 462, 510) || front[510] != 85 ||
         front[511] != 170 || !zbBytesEqual(front, 512, "EFI PART") ||
         zbU32LE(front, 520) != 65536 || zbU32LE(front, 524) != 92 ||
         zbU32LE(front, 532) != 0 || zbU64SmallLE(front, 536) != 1 ||
-        zbU64SmallLE(front, 544) != 395296 ||
+        zbU64SmallLE(front, 544) != lastLba ||
         zbU64SmallLE(front, 552) != 34 ||
-        zbU64SmallLE(front, 560) != 395263 ||
+        zbU64SmallLE(front, 560) != lastLba - 33 ||
         zbU64SmallLE(front, 584) != 2 ||
         zbU32LE(front, 592) != 128 || zbU32LE(front, 596) != 128 ||
         !allZeroRange(front, 604, 1024)) {
@@ -283,18 +283,18 @@ func validPrimaryFront(front) {
         zbU32LE(front, 600) == crc32Range(front, 1024, 16384);
 }
 
-func validBackupMirror(front, tail) {
+func validBackupMirror(front, tail, lastLba) {
     var headerAt = 16384;
     if (Packed.size(front) != 17408 || Packed.size(tail) != 16896 ||
         !zbBytesEqual(tail, headerAt, "EFI PART") ||
         zbU32LE(tail, headerAt + 8) != 65536 ||
         zbU32LE(tail, headerAt + 12) != 92 ||
         zbU32LE(tail, headerAt + 20) != 0 ||
-        zbU64SmallLE(tail, headerAt + 24) != 395296 ||
+        zbU64SmallLE(tail, headerAt + 24) != lastLba ||
         zbU64SmallLE(tail, headerAt + 32) != 1 ||
         zbU64SmallLE(tail, headerAt + 40) != 34 ||
-        zbU64SmallLE(tail, headerAt + 48) != 395263 ||
-        zbU64SmallLE(tail, headerAt + 72) != 395264 ||
+        zbU64SmallLE(tail, headerAt + 48) != lastLba - 33 ||
+        zbU64SmallLE(tail, headerAt + 72) != lastLba - 32 ||
         zbU32LE(tail, headerAt + 80) != 128 ||
         zbU32LE(tail, headerAt + 84) != 128 ||
         zbU32LE(tail, headerAt + 88) != crc32Range(tail, 0, 16384) ||
@@ -311,19 +311,20 @@ func validBackupMirror(front, tail) {
 }
 
 func requireUefiState(image, cell, stage) {
-    if (FileUtil.getFileSize(image) != 202392064) {
+    if (FileUtil.getFileSize(image) != 252723712) {
         matrixFail("UEFI " + stage + " image has the wrong fixed extent");
     }
     var frontPath = cell + "/gpt-front-" + stage + ".bin";
     var tailPath = cell + "/gpt-tail-" + stage + ".bin";
+    var lastLba = FileUtil.getFileSize(image) / 512 - 1;
     run("/", "dd if=" + zbShellQuote(image) + " of=" +
         zbShellQuote(frontPath) + " bs=512 count=34 status=none && dd if=" +
         zbShellQuote(image) + " of=" + zbShellQuote(tailPath) +
-        " bs=512 skip=395264 count=33 status=none",
+        " bs=512 skip=" + (lastLba - 32) + " count=33 status=none",
         "extract bounded UEFI GPT evidence");
     var front = zbReadFile(frontPath);
     var tail = zbReadFile(tailPath);
-    if (!validPrimaryFront(front)) {
+    if (!validPrimaryFront(front, lastLba)) {
         matrixFail("UEFI " + stage + " primary GPT geometry is invalid");
     }
     if (stage == "pre") {
@@ -335,7 +336,7 @@ func requireUefiState(image, cell, stage) {
     } else if (allZero(tail)) {
         FileUtil.writeText(cell + "/gpt-state-post.txt",
                            "intentional-primary-only-zero-tail\n");
-    } else if (validBackupMirror(front, tail)) {
+    } else if (validBackupMirror(front, tail, lastLba)) {
         FileUtil.writeText(cell + "/gpt-state-post.txt",
                            "firmware-repaired-valid-mirror\n");
     } else {

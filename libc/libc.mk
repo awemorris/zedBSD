@@ -4,8 +4,8 @@
 # being linked into vmunix at a later integration milestone.
 
 ZEDBSD_LIBC_CC ?= $(CC)
-ZEDBSD_LIBC_NM ?= nm
-ZEDBSD_LIBC_OBJDUMP ?= objdump
+ZEDBSD_LIBC_NM ?= $(if $(NM),$(NM),nm)
+ZEDBSD_LIBC_OBJDUMP ?= $(if $(OBJDUMP),$(OBJDUMP),objdump)
 
 ZEDBSD_REGEX_SOURCES := libc/regex/regcomp.c libc/regex/regexec.c \
 	libc/regex/regerror.c libc/regex/tre-mem.c
@@ -59,7 +59,7 @@ ZEDBSD_LIBC_CFLAGS := \
 	-m32 -march=i386 -Os -ffreestanding -fno-builtin \
 	-fno-pic -fno-pie -fno-stack-protector \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \
-	-fno-isolate-erroneous-paths-dereference -fno-strict-aliasing \
+	-fno-strict-aliasing \
 	-msoft-float -mno-80387 -mno-fp-ret-in-387 \
 	-mno-mmx -mno-sse -mno-sse2 \
 	-ffunction-sections -fdata-sections -Wall -Wextra -Werror

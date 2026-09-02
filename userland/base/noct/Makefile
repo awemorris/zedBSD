@@ -10,7 +10,9 @@ ZEDBSD_NOCT_ROOT := $(if $(ZEDBSD_TOPLEVEL_BUILD),$(CURDIR),$(ZEDBSD_REPO_ROOT))
 ZEDBSD_NOCT_PACKAGE_ROOT := $(abspath $(ZEDBSD_NOCT_ROOT)/userland/base/noct)
 ZEDBSD_NOCT_DISTDIR := $(ZEDBSD_NOCT_PACKAGE_ROOT)/distfiles
 ZEDBSD_NOCT_DISTFILE := $(ZEDBSD_NOCT_DISTDIR)/$(ZEDBSD_NOCT_ARCHIVE_NAME)
-ZEDBSD_NOCT_PATCH := $(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0001-connect-zedbsd-target-adapter.patch
+ZEDBSD_NOCT_PATCHES := \
+	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0001-connect-zedbsd-target-adapter.patch \
+	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0002-use-project-llvm-sysroot.patch
 ZEDBSD_NOCT_FETCH ?= curl --fail --location --silent --show-error
 ZEDBSD_NOCT_SHA256 ?= sha256sum
 
@@ -29,7 +31,7 @@ NOCT_PACKAGE_HOLORIS := $(NOCT_SOURCE_DIR)/resources/apps/holoris/holoris.noct
 
 # The first resumed target remains amd64-only and optional. Remacs stays held
 # independently until its own application acceptance is scheduled.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,Noct,amd64,n,package,,y,base,base/noct,))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,noct,amd64,n,package,,y,base,base/noct,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter noct,$(ZEDBSD_USER_PROGRAMS)),\
 	$(BUILD)/bin/noct $(NOCT_PACKAGE_HOLORIS))
@@ -132,7 +134,9 @@ define ZEDBSD_NOCT_EXTRACT_SOURCE
 		echo "Noct: expected archive root is missing" >&2; \
 		exit 1; \
 	fi; \
-	(cd "$$tree" && patch --batch --forward --fuzz=0 -p1 < '$(ZEDBSD_NOCT_PATCH)'); \
+	for patch_file in $(ZEDBSD_NOCT_PATCHES); do \
+		(cd "$$tree" && patch --batch --forward --fuzz=0 -p1 < "$$patch_file"); \
+	done; \
 	printf '%s\n' \
 		'version=$(ZEDBSD_NOCT_VERSION)' \
 		'tag=$(ZEDBSD_NOCT_TAG)' \
@@ -189,10 +193,10 @@ define ZEDBSD_NOCT_VERIFY_SOURCE
 	trap - EXIT HUP INT TERM
 endef
 
-$(NOCT_SOURCE_STAMP): $(ZEDBSD_NOCT_PATCH) | noct-download
+$(NOCT_SOURCE_STAMP): $(ZEDBSD_NOCT_PATCHES) | noct-download
 	$(call ZEDBSD_NOCT_EXTRACT_SOURCE,$(NOCT_SOURCE_DIR))
 
-$(NOCT_HOST_SOURCE_STAMP): $(ZEDBSD_NOCT_PATCH) | noct-download
+$(NOCT_HOST_SOURCE_STAMP): $(ZEDBSD_NOCT_PATCHES) | noct-download
 	$(call ZEDBSD_NOCT_EXTRACT_SOURCE,$(NOCT_HOST_SOURCE_DIR))
 
 .PHONY: noct-source noct-target-source-verify noct-host-source \
@@ -215,12 +219,17 @@ patch: noct-target-source-verify
 $(NOCT_PACKAGE_HOLORIS): | noct-target-source-verify
 	@test -f '$@'
 
-noct-zedbsd: noct-target-source-verify
+noct-zedbsd: noct-target-source-verify sysroot-amd64
 	cd '$(NOCT_SOURCE_DIR)' && \
-		ZEDBSD_SOURCE_DIR='$(ZEDBSD_NOCT_ROOT)' cmake --preset zedbsd-amd64 \
+		ZEDBSD_SOURCE_DIR='$(ZEDBSD_NOCT_ROOT)' \
+		ZEDBSD_SYSROOT='$(ZEDBSD_SYSROOT_AMD64)' \
+		ZEDBSD_LLVM_BIN='$(ZEDBSD_LLVM_INSTALL)/bin' \
+		cmake --preset zedbsd-amd64 \
 		-DNOCT_VERSION='$(ZEDBSD_NOCT_VERSION)'
 	cd '$(NOCT_SOURCE_DIR)' && \
 		ZEDBSD_SOURCE_DIR='$(ZEDBSD_NOCT_ROOT)' \
+		ZEDBSD_SYSROOT='$(ZEDBSD_SYSROOT_AMD64)' \
+		ZEDBSD_LLVM_BIN='$(ZEDBSD_LLVM_INSTALL)/bin' \
 		cmake --build --preset zedbsd-amd64 --parallel 16
 	@test -x '$(NOCT_ZEDBSD_ARTIFACT)'
 

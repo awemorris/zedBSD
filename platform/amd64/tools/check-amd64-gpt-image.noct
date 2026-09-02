@@ -254,7 +254,7 @@ func checkBios(image, raw, stage1Input, stage2Input, kernel, bootzbsd, pbr,
     var total = Packed.size(raw) / 512;
     var payloadStart = 2048;
     var payloadBlocks = total - payloadStart;
-    if (total != 264192 || raw[510] != 85 || raw[511] != 170) {
+    if (total != 362496 || raw[510] != 85 || raw[511] != 170) {
         zbFail("BIOS-only image has the wrong extent or signature");
     }
     requireStage1(raw, stage1Input);
@@ -296,7 +296,7 @@ func checkUefi(image, raw, kernel, bootzbsd, pbr, bootx64,
     var espStart = 2048;
     var espBlocks = 131072;
     var payloadStart = espStart + espBlocks;
-    var payloadBlocks = 262144;
+    var payloadBlocks = 360448;
     var total = payloadStart + payloadBlocks + 33;
     if (Packed.size(raw) != total * 512) {
         zbFail("UEFI-only artifact is not the exact fixed extent");
@@ -403,9 +403,9 @@ func main(args) {
     var fileSize = FileUtil.getFileSize(image);
     if (fileSize < 0) { zbFail("cannot stat image"); }
     // Enforce every public artifact extent before reading it into memory.
-    var expectedFileSize = 203423744;
-    if (layout == "bios") { expectedFileSize = 135266304; }
-    else if (layout == "uefi") { expectedFileSize = 202392064; }
+    var expectedFileSize = 253755392;
+    if (layout == "bios") { expectedFileSize = 185597952; }
+    else if (layout == "uefi") { expectedFileSize = 252723712; }
     if (fileSize != expectedFileSize) {
         zbFail(layout + " artifact has the wrong exact extent");
     }
@@ -421,11 +421,11 @@ func main(args) {
                   zedbsdConfig, arch, dataImage, swap);
         return;
     }
-    if (total != 397312) { zbFail("Hybrid image has the wrong exact extent"); }
+    if (total != 495616) { zbFail("Hybrid image has the wrong exact extent"); }
     requireStage1(raw,stage1Input);
     requireStage1LoadLba(raw,34);
     if(zbU32LE(raw,440)==0||raw[444]!=0||raw[445]!=0){zbFail("invalid Hybrid disk signature or reserved MBR bytes");}
-    var espStart=2048;var espBlocks=131072;var payloadStart=espStart+espBlocks;var payloadBlocks=262144;
+    var espStart=2048;var espBlocks=131072;var payloadStart=espStart+espBlocks;var payloadBlocks=360448;
     var protectiveBlocks=total-1;if(protectiveBlocks>4294967295){protectiveBlocks=4294967295;}
     if(raw[446]!=128||raw[447]!=254||raw[448]!=255||raw[449]!=255||
        raw[450]!=12||raw[451]!=254||raw[452]!=255||raw[453]!=255||

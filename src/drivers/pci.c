@@ -1157,7 +1157,32 @@ int drv_pci_driver_match(struct drv_pci_driver*r,struct drv_pci_device*d,const s
 int drv_pci_device_probe(struct drv_pci_device*d){struct pci_driver_entry*e,*best=NULL;const struct drv_pci_id*i,*best_id=NULL;int score,best_score=0,error;if(!d||d->driver)return d?EBUSY:EINVAL;for(e=drivers;e;e=e->next)if((score=drv_pci_driver_match(e->driver,d,&i))>best_score){best=e;best_id=i;best_score=score;}if(!best)return ENODEV;error=best->driver->attach?best->driver->attach(d,best_id):0;if(error)return error;d->driver=best->driver;return 0;}
 int drv_pci_device_detach(struct drv_pci_device*d,unsigned f){int e=0;if(!d||!d->driver)return EINVAL;if(d->driver->detach)e=d->driver->detach(d,f);if(!e){d->driver=NULL;d->driver_data=NULL;}return e;}
 int drv_pci_device_reprobe(struct drv_pci_device*d){if(!d)return EINVAL;if(d->driver){int e=drv_pci_device_detach(d,0);if(e)return e;}return drv_pci_device_probe(d);}
-int drv_pci_driver_register(struct drv_pci_driver*r){struct pci_driver_entry*e,**p;if(!initialized||!r||!r->name)return EINVAL;for(e=drivers;e;e=e->next)if(e->driver==r)return EEXIST;e=hal_malloc(sizeof(*e));if(!e)return ENOMEM;e->driver=r;e->next=NULL;for(p=&drivers;*p;p=&(*p)->next);*p=e;{struct drv_pci_bus*b;struct drv_pci_device*d;for(b=root_buses;b;b=b->next)for(d=b->devices;d;d=d->next)if(!d->driver)(void)drv_pci_device_probe(d);}return 0;}
+int
+drv_pci_driver_register(struct drv_pci_driver *driver)
+{
+	struct pci_driver_entry *entry, **tail;
+	struct drv_pci_bus *bus;
+	struct drv_pci_device *device;
+
+	if (!initialized || driver == NULL || driver->name == NULL)
+		return EINVAL;
+	for (entry = drivers; entry != NULL; entry = entry->next)
+		if (entry->driver == driver)
+			return EEXIST;
+	entry = hal_malloc(sizeof(*entry));
+	if (entry == NULL)
+		return ENOMEM;
+	entry->driver = driver;
+	entry->next = NULL;
+	for (tail = &drivers; *tail != NULL; tail = &(*tail)->next)
+		continue;
+	*tail = entry;
+	for (bus = root_buses; bus != NULL; bus = bus->next)
+		for (device = bus->devices; device != NULL; device = device->next)
+			if (device->driver == NULL)
+				(void)drv_pci_device_probe(device);
+	return 0;
+}
 int drv_pci_driver_unregister(struct drv_pci_driver*r){struct pci_driver_entry**p,*e;struct drv_pci_bus*b;struct drv_pci_device*d;if(!r)return EINVAL;for(b=root_buses;b;b=b->next)for(d=b->devices;d;d=d->next)if(d->driver==r&&drv_pci_device_detach(d,0))return EBUSY;for(p=&drivers;(e=*p)!=NULL;p=&e->next)if(e->driver==r){*p=e->next;hal_free(e);return 0;}return ENOENT;}
 const char*drv_pci_driver_name(const struct drv_pci_driver*r){return r?r->name:NULL;}
 size_t drv_pci_driver_device_count(const struct drv_pci_driver*r){size_t n=0;struct drv_pci_bus*b;struct drv_pci_device*d;for(b=root_buses;b;b=b->next)for(d=b->devices;d;d=d->next)if(d->driver==r)n++;return n;}

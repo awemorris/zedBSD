@@ -58,7 +58,10 @@ active_found:
 	mov al, '3'
 	call putc
 	mov dl, byte ptr [boot_drive]
-	ljmp 0x0000, 0x7c00
+	/* 16:16 immediate far jump (EA offset16 segment16). */
+	.byte 0xea
+	.word 0x7c00
+	.word 0x0000
 
 read_one:
 	mov si, offset dap

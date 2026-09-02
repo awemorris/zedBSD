@@ -2,6 +2,7 @@
 /config.mk
 /userland/base/noct/distfiles/
 /userland/base/noct/noct/
+/toolchain/llvm/distfiles/
 __pycache__/
 *~
 .internal/

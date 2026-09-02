@@ -19,6 +19,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(ZEDBSD_DYNAMIC_LIBC)
+#define CRYPT_THREAD_LOCAL _Thread_local
+#else
+#define CRYPT_THREAD_LOCAL
+#endif
+
 struct sha512_ctx {
 	uint64_t h[8];
 	uint64_t bytes_hi, bytes_lo;
@@ -78,7 +84,7 @@ crypt(
 	unsigned long r;
 	uint8_t next[64];
 
-	static _Thread_local char output[192];
+	static CRYPT_THREAD_LOCAL char output[192];
 	struct sha512_ctx c;
 	uint8_t alt[64], dp[64], ds[64], *pseq, *sseq;
 	const char *salt;

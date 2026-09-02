@@ -7,7 +7,7 @@
 
 ZEDBSD_SOFTFLOAT_BUILD_DIR := $(BUILD)/softfloat
 ZEDBSD_SOFTFLOAT_CC ?= $(CC)
-ZEDBSD_SOFTFLOAT_OBJDUMP ?= objdump
+ZEDBSD_SOFTFLOAT_OBJDUMP ?= $(if $(OBJDUMP),$(OBJDUMP),objdump)
 
 ZEDBSD_COMPILER_RT_SOURCES := src/softfloat/zed-softfloat.c \
 	src/softfloat/compiler-runtime.c

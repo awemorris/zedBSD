@@ -27,14 +27,20 @@
 #define ACCOUNT_RESULT_MAX 2048
 #define ACCOUNT_GROUP_MAX 16
 
+#if defined(ZEDBSD_DYNAMIC_LIBC)
+#define ACCOUNT_THREAD_LOCAL _Thread_local
+#else
+#define ACCOUNT_THREAD_LOCAL
+#endif
+
 static pthread_mutex_t account_lock = PTHREAD_MUTEX_INITIALIZER;
 static FILE *passwd_stream, *group_stream, *shadow_stream;
-static _Thread_local struct passwd passwd_result;
-static _Thread_local struct group group_result;
-static _Thread_local struct spwd shadow_result;
-static _Thread_local char passwd_buffer[ACCOUNT_RESULT_MAX];
-static _Thread_local char group_buffer[ACCOUNT_RESULT_MAX];
-static _Thread_local char shadow_buffer[ACCOUNT_RESULT_MAX];
+static ACCOUNT_THREAD_LOCAL struct passwd passwd_result;
+static ACCOUNT_THREAD_LOCAL struct group group_result;
+static ACCOUNT_THREAD_LOCAL struct spwd shadow_result;
+static ACCOUNT_THREAD_LOCAL char passwd_buffer[ACCOUNT_RESULT_MAX];
+static ACCOUNT_THREAD_LOCAL char group_buffer[ACCOUNT_RESULT_MAX];
+static ACCOUNT_THREAD_LOCAL char shadow_buffer[ACCOUNT_RESULT_MAX];
 
 static int passwd_lookup(const char *name, uid_t uid, int by_name, struct passwd *entry, char *buffer, size_t size, struct passwd **result);
 static int passwd_parse(const char *line, struct passwd *entry, char *buffer, size_t size);

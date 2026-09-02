@@ -102,7 +102,8 @@ checksum_loop:
 	call putc
 	push ZBL_STAGE2_SEG
 	push bx
-	retf
+	/* LLVM IAS otherwise selects the ELF32 operand size (66 CB). */
+	.byte 0xcb
 
 error_header_ds:
 	pop ds

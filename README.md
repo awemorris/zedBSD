@@ -36,6 +36,7 @@ make world             # build vmunix and rootfs
 make rootfs            # build rootfs
 make vmunix            # build vmunix kernel
 make run               # build a disk image and start QEMU
+make toolchain-cache   # install pinned rev-0 LLVM cache (x86_64 Linux)
 make toolchain         # build a toolchain
 make help              # show a short command summary
 ```

@@ -486,7 +486,7 @@ build_extended_image()
 	"${command[@]}"
 	if [[ -n $partition_index ]]; then
 		local partition_start=264192
-		[[ $group == amd64 ]] && partition_start=397312
+		[[ $group == amd64 ]] && partition_start=495616
 		"$image_tool" add-partition --machine "$machine" --kind "$kind" \
 		    --index "$partition_index" --start-lba "$partition_start" \
 		    --payload "$payload" "$destination"

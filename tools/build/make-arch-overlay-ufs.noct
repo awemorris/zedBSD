@@ -6,7 +6,7 @@ func splitSpec(spec, option) {
     return [String.substring(spec,0,at),String.substring(spec,at+1,-1)];
 }
 func main(args){
-    var profile="";var output="";var backend="";var sizeMiB=16;var files=[];var modes=[];var force=false;var i=0;
+    var profile="";var output="";var backend="";var sizeMiB=32;var files=[];var modes=[];var force=false;var i=0;
     while(i<Array.size(args)){
         if(args[i]=="--profile"&&i+1<Array.size(args)){profile=args[i+1];i=i+2;}
         else if(args[i]=="--output"&&i+1<Array.size(args)){output=args[i+1];i=i+2;}

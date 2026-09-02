@@ -11,7 +11,7 @@ SECTIONS {
 		*(.bss*)
 		stage2_end = .;
 	}
-	/DISCARD/ : { *(*) }
+	/DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) *(.llvm_addrsig) }
 }
 ASSERT(stage2_end <= stage2_c_stack_top - stage2_c_stack_reserve,
        "PC-98 BOOTZBSD stage 2 overlaps the 16-bit C stack reserve")

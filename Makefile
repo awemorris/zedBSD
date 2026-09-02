@@ -26,8 +26,11 @@ LD := ld
 OBJCOPY := objcopy
 CC := gcc
 HOSTCC ?= cc
+HOSTCXX ?= c++
 PYTHON ?= python3
 include userland/base/noct/version.mk
+ZEDBSD_TOPLEVEL_BUILD := 1
+include toolchain/llvm/llvm.mk
 ZEDBSD_HOST_NOCT_SOURCE_DIR := build/NoctLang
 ZEDBSD_HOST_NOCT_BUILD_DIR := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/build-static
 ZEDBSD_HOST_NOCT := $(ZEDBSD_HOST_NOCT_BUILD_DIR)/noct
@@ -49,7 +52,10 @@ ZEDBSD_CONFIG_OPTIONAL_GOALS := menuconfig help list-user-programs \
 	menuconfig-host-test rtl8822b-firmware-fixture-cache \
 	intelax211-firmware-fixture-cache download toolchain \
 	noct-toolchain-smoke noct-download noct-source \
-	noct-target-source-verify noct-host-source noct-host-source-verify
+	noct-target-source-verify noct-host-source noct-host-source-verify \
+	llvm-download llvm-source llvm-source-verify llvm-configure llvm-build llvm-toolchain \
+	llvm-host-archive toolchain-cache \
+	sysroot-amd64 sysroot-i386 sysroots
 ifeq ($(strip $(ZEDBSD_PLATFORM)),)
 ifneq ($(filter-out $(ZEDBSD_CONFIG_OPTIONAL_GOALS),$(MAKECMDGOALS)),)
 $(error config.mk is missing or invalid; run 'make menuconfig')
@@ -71,6 +77,32 @@ $(error Unsupported ZEDBSD_PLATFORM '$(ZEDBSD_PLATFORM)' in config.mk)
 endif
 endif
 BUILD := build/$(ZEDBSD_PLATFORM_DIR)
+
+# Maintained x86 target artifacts are built only by the project-owned LLVM
+# installation.  HOSTCC/HOSTCXX remain independent bootstrap compilers for
+# host Noct and LLVM themselves.
+ZEDBSD_TARGET_LLVM_BIN := $(abspath build/llvm/bin)
+ifeq ($(ZEDBSD_ARCHITECTURE),amd64)
+ZEDBSD_TARGET_TRIPLE := x86_64-unknown-zedbsd
+ZEDBSD_TARGET_SYSROOT := $(abspath build/amd64/sysroot)
+else ifeq ($(ZEDBSD_ARCHITECTURE),i386)
+ZEDBSD_TARGET_TRIPLE := i386-unknown-zedbsd
+ZEDBSD_TARGET_SYSROOT := $(abspath build/i386/sysroot)
+endif
+ifneq ($(strip $(ZEDBSD_TARGET_TRIPLE)),)
+ZEDBSD_TARGET_CLANG := $(ZEDBSD_TARGET_LLVM_BIN)/clang
+CC := $(ZEDBSD_TARGET_CLANG) --target=$(ZEDBSD_TARGET_TRIPLE) \
+	--sysroot=$(ZEDBSD_TARGET_SYSROOT)
+AS := $(CC)
+LD := $(ZEDBSD_TARGET_LLVM_BIN)/ld.lld
+AR := $(ZEDBSD_TARGET_LLVM_BIN)/llvm-ar
+RANLIB := $(ZEDBSD_TARGET_LLVM_BIN)/llvm-ranlib
+NM := $(ZEDBSD_TARGET_LLVM_BIN)/llvm-nm
+OBJCOPY := $(ZEDBSD_TARGET_LLVM_BIN)/llvm-objcopy
+OBJDUMP := $(ZEDBSD_TARGET_LLVM_BIN)/llvm-objdump
+READELF := $(ZEDBSD_TARGET_LLVM_BIN)/llvm-readelf
+STRIP := $(ZEDBSD_TARGET_LLVM_BIN)/llvm-strip
+endif
 
 # Architecture + Board owns the image-layout Variant set.  These values are
 # image metadata only: do not add them to ZEDBSD_CPPFLAGS, source lists, object
@@ -170,7 +202,6 @@ USERLAND_PACKAGE_MAKEFILES := $(sort \
 	$(wildcard userland/*/Makefile) \
 	$(wildcard userland/*/*/Makefile) \
 	$(wildcard userland/*/*/*/Makefile))
-ZEDBSD_TOPLEVEL_BUILD := 1
 include $(USERLAND_PACKAGE_MAKEFILES)
 ZEDBSD_ALL_USER_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
 	$(if $(filter y,$(USERLAND_$(program)_SELECTABLE)),$(program)))
@@ -220,6 +251,10 @@ endif
 ifeq ($(strip $(CONFIG_DRIVER_PCI_INTEL_AX211)),y)
 override ZEDBSD_USER_PROGRAMS := $(sort \
 	$(ZEDBSD_USER_PROGRAMS) intel-ax211-driver-license)
+endif
+ifneq ($(strip $(ZEDBSD_TARGET_TRIPLE)),)
+override ZEDBSD_USER_PROGRAMS := $(sort \
+	$(ZEDBSD_USER_PROGRAMS) llvm-runtime-license)
 endif
 # A saved configuration may be reused after changing targets.  Do not let
 # packages selected for another ABI become impossible prerequisites of the
@@ -336,6 +371,7 @@ help:
 		'  make vmunix      Build the kernel' \
 		'  make run         Build a disk image and start QEMU' \
 		'  make download    Acquire all declared external userland inputs' \
+		'  make toolchain-cache  Install the pinned rev-0 LLVM cache (x86_64 Linux)' \
 		'  make toolchain   Build the toolchain' \
 		'  make help        Show this summary'
 
@@ -364,10 +400,11 @@ noct-toolchain-smoke: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) plan/ws010-scripting/tests
 	$(NOCT) plan/ws010-scripting/tests/toolchain-smoke.noct \
 		$(abspath build/noct-toolchain-smoke.txt)
 
-toolchain: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) noct-toolchain-smoke
+toolchain: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) noct-toolchain-smoke llvm-toolchain \
+	sysroots
 
 .PHONY: download
-download: $(sort $(ZEDBSD_USERLAND_DOWNLOAD_TARGETS))
+download: $(sort $(ZEDBSD_USERLAND_DOWNLOAD_TARGETS)) llvm-download
 
 
 $(ZEDBSD_IMAGE_HOST): tools/build/zedimage-host.c
@@ -427,9 +464,19 @@ ZEDBSD_CHECK_TARGETS := check softfloat-host-test \
 export ZEDBSD_ARCH := $(ZEDBSD_ARCHITECTURE)
 export ZEDBSD_BUILD_DIR := $(CURDIR)/$(BUILD)
 
-ASFLAGS := --32
-ZEDBSD_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. -I$(BUILD) -Ilibc/include \
-	$(ZEDBSD_CONFIG_CPPFLAGS)
+ifeq ($(ZEDBSD_ARCHITECTURE),amd64)
+ASFLAGS := -m64 -c
+else
+ASFLAGS := -m32 -c
+endif
+ifneq ($(strip $(ZEDBSD_TARGET_SYSROOT)),)
+ZEDBSD_CPPFLAGS := -nostdinc \
+	-isystem $(ZEDBSD_TARGET_SYSROOT)/usr/include \
+	-Iinclude -Isrc -I. -I$(BUILD) $(ZEDBSD_CONFIG_CPPFLAGS)
+else
+ZEDBSD_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
+	-I$(BUILD) -Ilibc/include $(ZEDBSD_CONFIG_CPPFLAGS)
+endif
 ifeq ($(ZEDBSD_ARCHITECTURE),i386)
 ZEDBSD_CPPFLAGS += -DHAL_ARCH_I386
 else ifeq ($(ZEDBSD_ARCHITECTURE),amd64)
@@ -448,6 +495,13 @@ ZEDBSD_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fno-pic -fno-pie \
 
 include libc/libc.mk
 include src/softfloat/softfloat.mk
+include toolchain/llvm/sysroot.mk
+ifneq ($(strip $(ZEDBSD_TARGET_SYSROOT)),)
+ZEDBSD_COMPILER_RT_OBJECTS := \
+	$(ZEDBSD_TARGET_SYSROOT)/usr/lib/libzedbsd-compiler-rt.o \
+	$(ZEDBSD_TARGET_SYSROOT)/usr/lib/libclang_rt.builtins.a
+ZEDBSD_SOFTFLOAT_OBJECTS := $(ZEDBSD_COMPILER_RT_OBJECTS)
+endif
 
 KERN_NET_SOURCES := \
 	src/kern/net/packet-buf.c \
@@ -668,6 +722,27 @@ endef
 
 ifneq ($(strip $(ZEDBSD_PLATFORM)),)
 include $(PLATFORM_MAKEFILE)
+endif
+
+ifneq ($(strip $(ZEDBSD_TARGET_TRIPLE)),)
+.PHONY: zedbsd-target-toolchain-ready
+zedbsd-target-toolchain-ready:
+	@for tool in clang ld.lld lld-link llvm-ar llvm-ranlib llvm-nm llvm-objcopy \
+		llvm-objdump llvm-readelf llvm-strip; do \
+		test -x "$(ZEDBSD_TARGET_LLVM_BIN)/$$tool" || { \
+			echo "Missing project target tool: $(ZEDBSD_TARGET_LLVM_BIN)/$$tool" >&2; \
+			echo "Run 'make toolchain-cache' first on x86_64 Linux, then run 'make toolchain'." >&2; \
+			echo "Alternatively run 'make toolchain' alone to build LLVM from source." >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -f "$(ZEDBSD_TARGET_SYSROOT)/.zedbsd-sysroot-complete" || { \
+		echo "Missing target sysroot: $(ZEDBSD_TARGET_SYSROOT)" >&2; \
+		echo "Run 'make toolchain' before building a target image." >&2; \
+		exit 1; \
+	}
+
+vmunix rootfs world disk-image run: | zedbsd-target-toolchain-ready
 endif
 
 .PHONY: vmunix rootfs world

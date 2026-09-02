@@ -11,6 +11,9 @@ package_artifact=$repo/build/amd64/bin/noct
 staged_artifact=$repo/build/amd64/rootfs/usr/bin/noct
 cmake_artifact=${NOCT_CMAKE_ARTIFACT:-$repo/userland/base/noct/noct/build-zedbsd-amd64/noct}
 qemu=${QEMU_SYSTEM_X86_64:-qemu-system-x86_64}
+test_variant=${ZEDBSD_TEST_VARIANT:-hybrid}
+qemu_firmware=${QEMU_FIRMWARE:-}
+qemu_firmware_vars=${QEMU_FIRMWARE_VARS:-}
 build_timeout=${BUILD_TIMEOUT_SECONDS:-3600}
 boot_timeout=${BOOT_TIMEOUT_SECONDS:-120}
 command_timeout=${COMMAND_TIMEOUT_SECONDS:-90}
@@ -93,7 +96,7 @@ cat >>"$config" <<EOF
 ZEDBSD_PLATFORM := amd64
 ZEDBSD_ARCHITECTURE := amd64
 ZEDBSD_BOARD := pcat
-ZEDBSD_VARIANT := hybrid
+ZEDBSD_VARIANT := $test_variant
 CONFIG_DRIVER_PCI_XHCI := y
 CONFIG_DRIVER_USB_STORAGE := y
 ZEDBSD_USER_PROGRAMS += noct
@@ -123,6 +126,18 @@ qemu_command=(
 	-display none -serial none -debugcon "file:$guest_log"
 	-monitor stdio -no-reboot
 )
+if [[ -n $qemu_firmware ]]; then
+	if [[ -n $qemu_firmware_vars ]]; then
+		vars_copy=$output/OVMF_VARS.fd
+		cp -- "$qemu_firmware_vars" "$vars_copy"
+		qemu_command+=(
+			-drive "if=pflash,format=raw,readonly=on,file=$qemu_firmware"
+			-drive "if=pflash,format=raw,file=$vars_copy"
+		)
+	else
+		qemu_command+=( -bios "$qemu_firmware" )
+	fi
+fi
 {
 	printf 'tests=NOCT-T011,NOCT-T012,NOCT-T013\n'
 	printf 'start_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -185,7 +200,7 @@ cp --reflink=auto --sparse=always "$production_image" "$run_image"
 marker_count()
 {
 	local pattern=$1 count
-	count=$(rg -a -c -- "$pattern" "$guest_log" 2>/dev/null || true)
+	count=$(tr -d '\r' <"$guest_log" | rg -a -c -- "$pattern" 2>/dev/null || true)
 	printf '%s\n' "${count:-0}"
 }
 

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build
@@ -16,35 +19,45 @@ jobs:
 
       - name: Set up dependencies
         run: |
-          # apt-get install -y
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake curl git grub-common gzip ninja-build \
+            patch xz-utils
+
+      - name: Acquire verified source inputs
+        run: make download
+
+      - name: Install pinned LLVM toolchain cache
+        run: |
+          make toolchain-cache
+          make -j16 toolchain
 
       - name: Build i386 PC-98
         run: |
           cp config/ci/config-pc98.mk config.mk
-          make
-          mkdir artifacts
+          make -j16
+          mkdir -p artifacts
           cp build/pc98/hdd-image.img artifacts/zedbsd-pc98.img
 
       - name: Build i386 PC/AT
         run: |
           cp config/ci/config-pcat.mk config.mk
-          make
-          mkdir artifacts
+          make -j16
+          mkdir -p artifacts
           cp build/pcat/hdd-image.img artifacts/zedbsd-pcat.img
 
       - name: Build amd64
         run: |
           cp config/ci/config-amd64.mk config.mk
-          make
-          mkdir artifacts
+          make -j16
+          mkdir -p artifacts
           cp build/amd64/hdd-image.img artifacts/zedbsd-amd64.img
 
       - name: Build Intel Mac
         run: |
           cp config/ci/config-intelmac.mk config.mk
-          rm -rf build/amd64
-          make
-          mkdir artifacts
+          make -j16
+          mkdir -p artifacts
           cp build/amd64/hdd-image.img artifacts/zedbsd-intelmac.img
 
       - name: Upload binary
@@ -56,6 +69,9 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
     needs:
       - build
     steps:

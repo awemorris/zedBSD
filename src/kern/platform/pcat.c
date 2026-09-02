@@ -193,6 +193,7 @@ void kern_platform_refresh_devices(const struct boot_device *d, size_t n)
 	if (disk_count() == 0)
 		hal_printf("boot: boot-storage wait expired\n");
 nvme:
+	(void)0;
 	/* Probe NVMe namespaces after removable boot media has had its existing
 	 * bounded discovery window.  A present PCI namespace must not make
 	 * USB-root discovery look complete before the removable device arrives. */

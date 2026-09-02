@@ -18,6 +18,9 @@ probe_staged=$repo/build/amd64/rootfs/usr/bin/noct-jit-vm-probe
 jit_script=$script_dir/noct-jit-qemu.noct
 noct_source=${NOCT_SOURCE_DIR:-$repo/userland/base/noct/noct}
 qemu=${QEMU_SYSTEM_X86_64:-qemu-system-x86_64}
+test_variant=${ZEDBSD_TEST_VARIANT:-hybrid}
+qemu_firmware=${QEMU_FIRMWARE:-}
+qemu_firmware_vars=${QEMU_FIRMWARE_VARS:-}
 build_timeout=${BUILD_TIMEOUT_SECONDS:-3600}
 boot_timeout=${BOOT_TIMEOUT_SECONDS:-120}
 command_timeout=${COMMAND_TIMEOUT_SECONDS:-90}
@@ -161,7 +164,7 @@ cat >>"$temporary_config" <<EOF
 ZEDBSD_PLATFORM := amd64
 ZEDBSD_ARCHITECTURE := amd64
 ZEDBSD_BOARD := pcat
-ZEDBSD_VARIANT := hybrid
+ZEDBSD_VARIANT := $test_variant
 CONFIG_DRIVER_PCI_XHCI := y
 CONFIG_DRIVER_USB_STORAGE := y
 ZEDBSD_USER_PROGRAMS += noct cksum
@@ -198,6 +201,18 @@ qemu_command=(
 	-display none -serial none -debugcon "file:$guest_log"
 	-monitor stdio -no-reboot
 )
+if [[ -n $qemu_firmware ]]; then
+	if [[ -n $qemu_firmware_vars ]]; then
+		vars_copy=$output/OVMF_VARS.fd
+		cp -- "$qemu_firmware_vars" "$vars_copy"
+		qemu_command+=(
+			-drive "if=pflash,format=raw,readonly=on,file=$qemu_firmware"
+			-drive "if=pflash,format=raw,file=$vars_copy"
+		)
+	else
+		qemu_command+=( -bios "$qemu_firmware" )
+	fi
+fi
 guest_t020_command='/usr/bin/noct-jit-vm-probe'
 guest_t021_command='NOCT_JIT_DEBUG=1 /usr/bin/noct -j /usr/share/noct/noct-jit-qemu.noct'
 guest_t022_interpreter_command='NOCT_JIT_DEBUG=1 /usr/bin/noct -j0 /usr/share/noct/noct-jit-qemu.noct'
@@ -389,7 +404,7 @@ marker_count()
 {
 	local pattern=$1 file=$2 count
 
-	count=$(rg -a -c -- "$pattern" "$file" 2>/dev/null || true)
+	count=$(tr -d '\r' <"$file" | rg -a -c -- "$pattern" 2>/dev/null || true)
 	printf '%s\n' "${count:-0}"
 }
 

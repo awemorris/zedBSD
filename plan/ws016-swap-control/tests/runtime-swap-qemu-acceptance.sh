@@ -300,12 +300,12 @@ build_image()
 		;;
 	mixed)
 		"$image_tool" add-partition --machine pcat --kind swap \
-		    --index 4 --start-lba 397312 --payload "$raw_swap" \
+		    --index 4 --start-lba 495616 --payload "$raw_swap" \
 		    "$destination"
 		;;
 	native)
 		"$image_tool" add-partition --machine pcat --kind ufs \
-		    --index 4 --start-lba 397312 --payload "$native_rootfs" \
+		    --index 4 --start-lba 495616 --payload "$native_rootfs" \
 		    "$destination"
 		;;
 	esac

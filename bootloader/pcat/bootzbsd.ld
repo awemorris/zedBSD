@@ -13,5 +13,5 @@ SECTIONS
 	}
 	ASSERT(stage2_end < 0xd000,
 	       "BOOTZBSD image overlaps its protected 8 KiB C stack")
-	/DISCARD/ : { *(*) }
+	/DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) *(.llvm_addrsig) }
 }

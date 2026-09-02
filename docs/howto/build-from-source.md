@@ -9,11 +9,9 @@ supported x86 QEMU targets. Commands are run from the repository root.
 
 The normal build expects a POSIX-like host with:
 
-- GNU Make, CMake, a C compiler, GNU binutils, `patch`, `curl`, `tar`,
-  `sha256sum`, and a POSIX shell; Git is required for development;
+- GNU Make, CMake, Ninja, a host C/C++ compiler, `patch`, `curl`, `tar`,
+  `gzip`, `sha256sum`, and a POSIX shell; Git is required for development;
 - Python 3 for the interactive `make menuconfig` frontend;
-- an x86 compiler capable of both `-m64` and `-m32` when building amd64 and
-  i386 targets;
 - `qemu-system-x86_64` for amd64 and `qemu-system-i386` for PC/AT i386;
 - enough free space for `build/`, extracted Noct source, downloaded external
   inputs, and disk images.
@@ -26,7 +24,27 @@ Noct release extraction, remain below `build/`.
 
 ## 2. Obtain and build the host toolchain
 
-First materialize every declared external userland input:
+On an x86_64 Linux host, install the permanent, digest-pinned LLVM 23.1.0
+binary cache from release `rev-0` before the normal toolchain target:
+
+```sh
+make toolchain-cache
+make -j16 toolchain
+```
+
+`make toolchain-cache` is an explicit acceleration path. It verifies the
+tracked SHA-256, validates archive paths, installed identity, required tools,
+versions and license, then installs below `build/llvm/`. It does not silently
+fall back to unverified bytes. The following command remains the source-build
+path on every supported host, and is used automatically when no accepted cache
+was installed:
+
+```sh
+make -j16 toolchain
+```
+
+To materialize every declared source and firmware input for a redistributable
+multi-license source tree, run:
 
 ```sh
 make download
@@ -37,23 +55,19 @@ firmware inputs even when those firmware packages are not selected. Downloaded
 bytes are ignored by Git but remain inside the working tree, allowing the
 post-download tree to be packed as a multi-license source distribution.
 
-Then build the host toolchain:
-
-```sh
-make toolchain
-```
-
-This verifies and extracts the release archive below `build/NoctLang`, applies
-the tracked target-only CMake integration patch (which is inert for the host
-preset), builds `build/NoctLang/build-static/noct`, and runs a smoke script. A
-second invocation is incremental and must also succeed:
+The toolchain target verifies and extracts Noct below `build/NoctLang`, builds
+the host interpreter with the host compiler, installs or accepts the patched
+project LLVM under `build/llvm/`, constructs amd64/i386 target sysroots, and
+runs focused smoke checks. A second invocation is incremental and must also
+succeed:
 
 ```sh
 make toolchain
 test -x build/NoctLang/build-static/noct
 ```
 
-Network access is needed only when the verified release archive is absent.
+Network access is needed only when a required verified release archive is
+absent.
 Each userland item also accepts `make download`, `make patch`, `make build`,
 and `make install` from its own directory. In-tree items use no-op acquisition
 and patch stages.
@@ -156,8 +170,9 @@ not write to a real disk device when following this guide.
 - Noct download/build failure: verify network access, `curl`, `tar`, `patch`,
   CMake, and the host C compiler, then rerun `make download` and
   `make toolchain`; do not replace the recorded archive with unverified bytes.
-- `-m32` compile/link failure: install the host's 32-bit compiler/binutils
-  support before selecting i386.
+- `Missing project target tool` or `Missing target sysroot`: on x86_64 Linux,
+  run `make toolchain-cache` and then `make toolchain`; otherwise run
+  `make toolchain` to bootstrap LLVM from verified source.
 - QEMU command not found: install the appropriate system emulator or pass
   `QEMU=/absolute/path/to/qemu-system-*` to `make run`.
 - PC-98 reports that the machine is unavailable: use the documented custom

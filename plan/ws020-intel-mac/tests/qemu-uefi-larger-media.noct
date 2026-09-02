@@ -129,7 +129,7 @@ func buildImage(repo, evidence, config, build) {
     runLogged(repo, evidence + "/images/build-uefi.log", command,
               "private production UEFI-only image");
     var built = build + "/hdd-image.img";
-    if (FileUtil.getFileSize(built) != 202392064) {
+    if (FileUtil.getFileSize(built) != 252723712) {
         zbFail("private production UEFI-only image has the wrong extent");
     }
     if (FileUtil.readText(build + "/.disk-image-contract") !=
@@ -293,7 +293,7 @@ func main(args) {
         " | awk '{print $1}'", "capture source digest");
     FileUtil.writeText(evidence + "/metadata.txt",
         "case=MAC-T021\nsource=" + source + "\nsource_sha256=" +
-        sourceDigest + "\nsource_bytes=202392064\nsource_sectors=395297\n" +
+        sourceDigest + "\nsource_bytes=252723712\nsource_sectors=493601\n" +
         "payload_uuid=" + uuid + "\nlarger_media_sectors=60549120\n" +
         "memory_mib=4096\nsmp_cpus=1\n" +
         "topology=OVMF q35 xHCI USB-storage NE2000\n");

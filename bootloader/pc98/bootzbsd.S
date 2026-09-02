@@ -60,7 +60,10 @@ stage2_entry:
 	mov cx, word ptr [ZBL2_SECTOR_COUNT]
 	shl cx, 8
 	rep movsw
-	ljmp 0x1000, stage2_entry
+	/* 16:16 immediate far jump (EA offset16 segment16). */
+	.byte 0xea
+	.word stage2_entry
+	.word 0x1000
 stage2_resident:
 	mov ds, ax
 	movzx ecx, word ptr [ZBL2_SECTOR_COUNT]

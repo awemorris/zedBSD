@@ -108,9 +108,9 @@ func makeImage(repo, evidence, config, build, layout) {
     runLogged(repo, evidence + "/build-" + name + ".log", command,
               name + " production image");
     var expected = "";
-    if (layout == "hybrid") { expected = "203423744"; }
-    else if (layout == "bios") { expected = "135266304"; }
-    else { expected = "202392064"; }
+    if (layout == "hybrid") { expected = "253755392"; }
+    else if (layout == "bios") { expected = "185597952"; }
+    else { expected = "252723712"; }
     var image = build + "/hdd-image.img";
     run(repo, "test \"$(stat -c%s " + zbShellQuote(image) + ")\" = " + expected,
         name + " exact artifact extent");

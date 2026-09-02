@@ -6,6 +6,12 @@
 #include <string.h>
 #include <unistd.h>
 
+#if defined(ZEDBSD_DYNAMIC_LIBC)
+#define FTW_THREAD_LOCAL _Thread_local
+#else
+#define FTW_THREAD_LOCAL
+#endif
+
 struct walk_context {
 	int (*callback)(const char *, const struct stat *, int, struct FTW *);
 	int flags;
@@ -93,7 +99,7 @@ nftw(const char *path, int (*callback)(const char *, const struct stat *, int,
 	return walk_path(&context, buffer, 0);
 }
 
-static _Thread_local int (*ftw_callback)(const char *, const struct stat *, int);
+static FTW_THREAD_LOCAL int (*ftw_callback)(const char *, const struct stat *, int);
 static int ftw_adapter(const char *p, const struct stat *s, int k, struct FTW *f)
 { (void)f; return ftw_callback(p, s, k); }
 

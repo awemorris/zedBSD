@@ -80,8 +80,14 @@ extern void __libc_environment_lock(void) __attribute__((weak));
 extern void __libc_environment_unlock(void) __attribute__((weak));
 extern char *__pthread_environment_exchange(char *) __attribute__((weak));
 #if !defined(ZEDBSD_DYNAMIC_LIBC)
-extern void __rtld_process_fini(void) __attribute__((weak));
-extern void __rtld_startup_init(void) __attribute__((weak));
+void __rtld_process_fini(void) __attribute__((weak));
+void __rtld_startup_init(void) __attribute__((weak));
+
+/* Static executables retain no unresolved weak rtld symbols.  A linked
+ * runtime loader provides strong definitions and replaces these no-op
+ * defaults. */
+void __rtld_process_fini(void) {}
+void __rtld_startup_init(void) {}
 #endif
 
 static char *bootstrap_environment_value;

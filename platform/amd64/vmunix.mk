@@ -56,16 +56,19 @@ define AMD64_VALIDATE_GPT_IMAGE
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $(1)
 endef
-EFI_CC ?= x86_64-w64-mingw32-gcc
-EFI_LD ?= x86_64-w64-mingw32-ld
-EFI_NM ?= x86_64-w64-mingw32-nm
+EFI_CC := $(ZEDBSD_TARGET_LLVM_BIN)/clang \
+	--target=x86_64-unknown-windows
+EFI_LD := $(ZEDBSD_TARGET_LLVM_BIN)/lld-link
+EFI_NM := $(ZEDBSD_TARGET_LLVM_BIN)/llvm-nm
 EFI_CFLAGS := -std=c11 -ffreestanding -fshort-wchar -mno-red-zone \
 	-fno-stack-protector -fno-builtin -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections \
 	-Os -Wall -Wextra -Werror -I.
 
-AMD64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
-	-Ilibc/include -DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON \
+AMD64_CPPFLAGS := -nostdinc \
+	-isystem $(ZEDBSD_SYSROOT_AMD64)/usr/include \
+	-Iinclude -Isrc -I. \
+	-DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON \
 	-DZEDBSD_USER_ABI_LP64 \
 	-DPCAT_VGA_APERTURE_ADDRESS=0xffffffff800a0000ULL \
 	-DPCAT_CIRRUS_APERTURE_ADDRESS=0xffffffffc0000000ULL
@@ -323,7 +326,7 @@ $(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S \
 	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/partition-pbr.elf: $(BUILD)/bootloader/partition-pbr.o
-	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
+	$(LD) -m elf_i386 --image-base=0 -Ttext=0 -e _start $< -o $@
 
 $(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
 	$(OBJCOPY) -O binary -j .text $< $@
@@ -431,16 +434,17 @@ $(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
 	$(BUILD)/uefi/volume-discovery.o $(BUILD)/uefi/zedbsd-config.o \
 	$(BUILD)/uefi/transition.o \
 	platform/amd64/tools/check-bootx64.noct
-	$(EFI_LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \
-		--gc-sections --enable-reloc-section --no-insert-timestamp \
-		$(filter %.o,$^) -o $@
+	$(EFI_LD) /subsystem:efi_application /entry:efi_main /base:0 \
+		/fixed:no /timestamp:0 /nodefaultlib \
+		/out:$@ $(filter %.o,$^)
 	@test -z "$$($(EFI_NM) -u $@ | grep -Ev \
 		' (__bss_start__|__bss_end__|__end__|___tls_start__|___tls_end__)$$')" \
 		|| { $(EFI_NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build platform/amd64/tools/check-bootx64.noct $@
 
-AMD64_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
-	-Ilibc/include -DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64
+AMD64_USER_CPPFLAGS := -nostdinc \
+	-isystem $(ZEDBSD_SYSROOT_AMD64)/usr/include \
+	-Iinclude -Isrc -I. -DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64
 AMD64_USER_CFLAGS := -m64 -march=x86-64 -mno-red-zone -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-builtin -fno-common -ffunction-sections \
@@ -461,6 +465,12 @@ AMD64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfc
 	$(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
 AMD64_USER_LIBC_OBJS := $(BUILD)/user64/src/crt/crt0-amd64.o \
 	$(patsubst %.c,$(BUILD)/user64/%.o,$(AMD64_USER_RUNTIME_SOURCES))
+# User programs consume the canonical target sysroot.  The relocatable libc
+# bundle preserves the established whole-runtime static link semantics while
+# eliminating per-command recompilation of the same sources.
+AMD64_USER_LIBC_OBJS := \
+	$(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt0.o \
+	$(ZEDBSD_SYSROOT_AMD64)/usr/lib/libc.o
 AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS)
 AMD64_USER_NETTEST_OBJS := $(BUILD)/user64/userland/base/nettest/main.o
 AMD64_USER_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,sh)
@@ -530,7 +540,7 @@ $(BUILD)/NOCT-JIT-VM-PROBE.ELF: $(AMD64_USER_LIBC_OBJS) \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_NOCT_JIT_VM_PROBE_OBJ) -o $@
-	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/SUSV4-XSI.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
@@ -540,7 +550,7 @@ $(BUILD)/SUSV4-XSI.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
 		$(BUILD)/user64/userland/base/tests/susv4-xsi.o -o $@
-	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 susv4-xsi-user-test: $(BUILD)/SUSV4-XSI.ELF
@@ -554,7 +564,7 @@ $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_USER_SH_OBJS) $(AMD64_USER_READLINE_LIB) -o $@
-	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
@@ -564,7 +574,7 @@ $(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
 		$(BUILD)/user64/userland/base/tests/smp-resource-stress.o -o $@
-	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 AMD64_USER_SYSCTL_OBJ := $(BUILD)/user64/userland/base/sysctl/main.o
@@ -575,7 +585,7 @@ $(BUILD)/bin/sysctl: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SYSCTL_OBJ) \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_USER_SYSCTL_OBJ) -o $@
-	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 AMD64_USER_MOUNT_OBJ := $(BUILD)/user64/userland/base/mount/main.o
@@ -586,7 +596,7 @@ $(BUILD)/bin/mount: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_MOUNT_OBJ) \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_USER_MOUNT_OBJ) -o $@
-	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
@@ -600,7 +610,7 @@ $(BUILD)/bin/nettest: $(AMD64_USER_NET_LIBC_OBJS) \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
 		$(AMD64_USER_NETTEST_OBJS) -o $@
-	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 USER_NET_COMMANDS := $(USERLAND_SELECTED_NETWORK_PROGRAMS)
@@ -620,7 +630,7 @@ $(BUILD)/bin/$(1): $(AMD64_USER_NET_LIBC_OBJS) \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
 		$(AMD64_USER_NET_COMMON_OBJS) \
 		$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) -o $$@
-	@test -z "$$$$(nm -u $$@)" || { nm -u $$@; exit 1; }
+	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
 endef
 $(foreach command,$(USER_NET_COMMANDS),\
@@ -639,14 +649,15 @@ $(BUILD)/bin/$(1): $(AMD64_USER_LIBC_OBJS) \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_USER_BASIC_COMMON_OBJ) \
 		$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) -o $$@
-	@test -z "$$$$(nm -u $$@)" || { nm -u $$@; exit 1; }
+	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
 endef
 $(foreach command,$(USER_BASIC_COMMANDS),\
 	$(eval $(call AMD64_USER_BASIC_COMMAND,$(command))))
 # ELF64 runtime linker and shared libc.
 DYNAMIC_DIR := $(BUILD)/dynamic
-DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Iinclude/uapi -Ilibc/include \
+DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude \
+	-isystem $(ZEDBSD_SYSROOT_AMD64)/usr/include \
 	-DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64 -DZEDBSD_DYNAMIC_LIBC
 DYNAMIC_CFLAGS := -m64 -march=x86-64 -mno-red-zone -Os -ffreestanding \
 	-fPIC -fno-builtin -fno-stack-protector \
@@ -759,7 +770,7 @@ $(DYNAMIC_DIR)/versuse.so: \
 		-z now -z relro -z separate-code $< -L$(DYNAMIC_DIR) \
 		-l:verstest.so -o $@
 
-$(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/src/crt/crt1.o \
+$(DYNAMIC_DIR)/dyntest: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
 	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so \
 	$(DYNAMIC_DIR)/versuse.so
@@ -767,7 +778,7 @@ $(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/src/crt/crt1.o \
 		-Wl,--hash-style=sysv,-z,now,-z,relro,-z,separate-code \
 		-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
 		-Wl,--dynamic-linker=/lib/ld.so \
-		$(DYNAMIC_DIR)/obj/src/crt/crt1.o \
+		$(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 		$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o \
 		-L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
 		-l:libc.so -o $@
@@ -1045,7 +1056,7 @@ $(BUILD)/bin/posix-phase5-helper: $(AMD64_USER_NET_LIBC_OBJS) \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
 		$(BUILD)/user64/userland/base/tests/posix-phase5-helper.o -o $@
-	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 AMD64_POSIX_PHASE5_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase5-test.ufs
@@ -1268,7 +1279,7 @@ $(BUILD)/bin/phase85-curses-test: $(AMD64_USER_LIBC_OBJS) \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_POSIX_PHASE85_CURSES_OBJS) -o $@
-	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 AMD64_POSIX_PHASE85_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase85-test.ufs

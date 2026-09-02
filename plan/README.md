@@ -48,6 +48,9 @@ For example, `ws001-p009` is WS001 Phase 009.
 | `ws017` | `/dev/graphics` linear-framebuffer fast path | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | [WS019](ws019-installation/ws.md) |
+| `ws020` | Intel Mac UEFI bring-up and generic image variants | [WS020](ws020-intel-mac/ws.md) |
+| `ws021` | Reproducible x86 LLVM toolchain and sysroots | [WS021](ws021-llvm-toolchain/ws.md) |
+| `ws022` | ELF `PT_TLS` and static thread-local storage | [WS022](ws022-elf-tls/ws.md) |
 
 Status, interruption, resumption, and evidence rules are defined in
 [governance.md](governance.md).
