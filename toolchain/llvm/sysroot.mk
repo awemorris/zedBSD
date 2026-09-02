@@ -65,6 +65,12 @@ ZEDBSD_SYSROOT_LLVM_BUILTIN_SOURCES := $(addprefix \
 	$(ZEDBSD_LLVM_SOURCE)/compiler-rt/lib/builtins/,\
 	$(ZEDBSD_SYSROOT_LLVM_BUILTIN_NAMES))
 
+# A clean cache-based bootstrap has build/llvm but no extracted LLVM source.
+# Give each compiler-rt input a real generating prerequisite so parallel Make
+# completes the verified source extraction before it diagnoses a missing file.
+$(ZEDBSD_SYSROOT_LLVM_BUILTIN_SOURCES): | $(ZEDBSD_LLVM_SOURCE_STAMP)
+	@test -f '$@'
+
 ZEDBSD_SYSROOT_PUBLIC_HEADERS := $(shell \
 	find libc/include include/uapi -type f -print | LC_ALL=C sort)
 ZEDBSD_SYSROOT_LINKER_SCRIPTS := \
