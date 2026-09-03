@@ -1,5 +1,7 @@
 /*
- * Copyright (C) 2026 Awe Morris
+ * zedBSD
+ * Copyright (C) 2005, 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
 
@@ -8,13 +10,17 @@
 #if defined(HAL_BOARD_PCAT)
 	.section .multiboot,"a"
 	.balign 4
-	multiboot_header:
+    multiboot_header:
+
 	.long 0x1badb002
 	.long 0x00010003
 	.long -(0x1badb002 + 0x00010003)
-	/* Multiboot v1 address fields.  The ELF's first allocated section is
+
+	/*
+         * Multiboot v1 address fields.  The ELF's first allocated section is
 	 * at file offset 0x1000, so GRUB copies the ELF header page just below
-	 * the 2 MiB kernel and enters the physical bootstrap alias. */
+	 * the 2 MiB kernel and enters the physical bootstrap alias.
+         */
 	.long multiboot_header - SYS_START
 	.long multiboot_header - SYS_START - 0x1000
 	.long __low_image_end - SYS_START

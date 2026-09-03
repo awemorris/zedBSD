@@ -1,3 +1,10 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #include "defs.h"
 
 .code32
@@ -14,7 +21,7 @@ EXT_C(asm_task_entrypoint):
 	iret
 
 /*
- * スタックを切り替える
+ * Switch the stack.
  *
  * void asm_task_dispatch(
  *	struct task_resume_frame *save,

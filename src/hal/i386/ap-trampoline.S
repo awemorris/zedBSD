@@ -1,5 +1,14 @@
-/* Position-independent INIT/SIPI trampoline copied to physical 0x6000. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Position-independent INIT/SIPI trampoline copied to physical 0x6000.
+ */
+
 #include "defs.h"
 
 .section .rodata.ap_trampoline,"a"

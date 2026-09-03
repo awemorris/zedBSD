@@ -1,5 +1,14 @@
-/* zedBSD amd64 bootstrap entry. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * zedBSD amd64 bootstrap entry.
+ */
+
 #include "defs.h"
 #include "bootloader/include/amd64-handoff.h"
 

@@ -1,4 +1,12 @@
-/* Real-mode AP trampoline copied to physical 0x8000. */
+/*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+  * Real-mode AP trampoline copied to physical 0x8000.
+ */
+
 #include "defs.h"
 
 #define TRAMPOLINE_BASE AMD64_AP_TRAMPOLINE
