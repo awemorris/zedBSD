@@ -1,6 +1,6 @@
 # zedBSD master plan
 
-Last updated: 2026-09-02
+Last updated: 2026-09-03
 
 Status: active
 
@@ -64,6 +64,13 @@ configurations pass. The consolidated runtime campaign covers every amd64
 firmware/Variant cell, i386 PC/AT, maintained PC-98, and target noct non-JIT,
 JIT/RW-to-RX, and BeUI on amd64 UEFI. WS022 records the separately deferred
 compiler-emitted static ELF `PT_TLS` work.
+
+WS023 records the completed x86 HAL readability correction. Its q067 audit
+refactored all 88 maintained i386/amd64 HAL C/header files, including the five
+inherited i386 edits from `b4be6eb`, through small behavior-preserving reviews.
+Strict/focused tests, all four configured image builds, and PC/AT, PC-98,
+amd64 BIOS SMP, and amd64 UEFI SMP runtime cells pass without a public HAL API,
+ABI, or intended hardware-policy change.
 
 The archived [q039](queue-q039.md) first proves the
 already-correct PC-98 `IPL1` field and has prepared one immutable audio-trace
@@ -451,6 +458,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws020` | Intel Mac UEFI bring-up and generic image variants | Active; p006 automatic GPT/Protective-MBR repair complete, one provisional and p004 final physical acceptance pending | `MAC-T022`, pristine `MAC-T021`, and uninterrupted six-cell `MAC-T020` pass; exact `692160cf...331d` / `A93F-BBBE` image published | Record one provisional Intel Mac boot, then retain p004's final five consecutive cold boots | [WS020](ws020-intel-mac/ws.md) |
 | `ws021` | Reproducible x86 LLVM toolchain and sysroots | Complete (`q064`) | LLVM 23.1.0 cache/source paths, amd64/i386 sysroots, all x86 target/loader builds, four CI configurations, six-cell amd64 firmware matrix, i386 PC/AT and PC-98, and target noct non-JIT/JIT/BeUI gates pass | No current Phase; the source-build path and pinned `rev-0` cache remain supported in parallel | [WS021](ws021-llvm-toolchain/ws.md) |
 | `ws022` | ELF `PT_TLS` and static thread-local storage | Planned; WS021 dependency satisfied, not queued | No Phase started | Freeze the x86 TLS/TCB ABI and fixture matrix in p001 before changing exec or pthread runtime | [WS022](ws022-elf-tls/ws.md) |
+| `ws023` | i386/amd64 HAL coding-style conformance | Complete (`q067`) | All 88 C/header files, focused/strict gates, four configured builds, and four x86 runtime cells pass; API/ABI review found no delta | No current Phase; retain the q067 evidence and extract pre-existing risks separately if prioritized | [WS023](ws023-x86-hal-style/ws.md) |
 
 ## 4. Milestones
 
@@ -471,7 +479,7 @@ allowed to block first communication unless the normal path depends on them.
 | M12 — Panasonic CF-SV7 USB shell | The CF-SV7 clears its captured post-RSDP early interrupt stop, then reaches USB-backed init/login/shell with bounded diagnostics and final repeatability evidence | WS003, WS004, WS006, WS009 |
 | M13 — Intel Mac UEFI boot | A fixed amd64 UEFI-only image with a pure Protective MBR and no BIOS path boots an Intel Mac to login, while generic Variant support preserves combined and BIOS-only images | WS003, WS009, WS013, WS020 |
 | M14 — Reproducible x86 toolchain | Host tools bootstrap LLVM 23.1.0 below `build/llvm`; every amd64/i386 kernel, userland, target Noct and BIOS/UEFI loader uses the project toolchain/sysroots and passes one final six-cell QEMU campaign | WS008, WS010, WS021 |
-| Continuous | POSIX debt and public documentation remain traceable | WS001, WS009, all producers |
+| Continuous | POSIX debt, public documentation, and maintainable source form remain traceable | WS001, WS009, WS023, all producers |
 
 ## 5. Dependency map
 
@@ -545,6 +553,11 @@ WS010 host Noct + host C/C++ bootstrap -- WS021 LLVM 23.1.0
   +-- build/amd64/sysroot + build/i386/sysroot
   +-- amd64/i386 kernels and userland -- WS008 target Noct
   +-- BIOS/UEFI loaders and all x86 images -- final big-bang QEMU matrix
+
+WS003/WS004 x86 HAL behavior + WS021 project LLVM
+  +-- WS023 i386-first, then amd64 source-style conformance
+       +-- unchanged HAL API/ABI and hardware behavior
+       +-- four configured x86 image builds and final QEMU regression
 ```
 
 ## 6. Priority waves
@@ -554,6 +567,9 @@ approved WS021 LLVM toolchain plan on 2026-09-02. The following is the active
 execution order. Dependency closure may interleave adjacent WSs, but it must
 not silently promote a lower-priority product goal over a ready higher-priority
 one.
+
+The temporary WS023 maintenance override completed in q067. Product work may
+therefore resume from item 9 below without carrying an active style Queue.
 
 1. q048 completed the WS006 p008 production HID automatic/software milestone
    after q044's p006/p007 source boundaries and q047's p031/p032 USB 1.1,
@@ -691,6 +707,7 @@ until stopped or no judgment-free Phase remains.
 | Confirmed-commit implementation bounds | WS011 | Public semantics are fixed: interactive only, explicit timeout, delayed `/etc/net.conf` write, ordinary `commit` confirms, and DHCP is reacquired; freeze timeout maximum, lock path, and diagnostic bounds before implementation |
 | Authoritative Noct repository, build sequence, and release | WS008 | Resolved by q063: official `awemorris/NoctLang` release `v2.0.1`, tag commit `ed621e79139f55d06dd1a474243afbf0ce5efe0a`, archive size `2524680`, and SHA-256 `68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f` are the common host/target identity. Both `--path` forms, toolchain/ordinary build, amd64 target package, and q35/xHCI non-JIT/JIT/BeUI gates pass. The target-only two-hunk final-link patch is explicitly not BeUI; Remacs and i386/PC-98 target support remain outside the accepted scope. |
 | x86 compiler triples, bootstrap and sysroot ownership | WS021 | Resolved by q064: host C/C++ builds host Noct and verified patched LLVM 23.1.0; project LLVM installs at `build/llvm` from source or the pinned `rev-0` cache; target triples are `x86_64-unknown-zedbsd` and `i386-unknown-zedbsd`; sysroots are `build/amd64/sysroot` and shared `build/i386/sysroot`; target Noct uses the former; BIOS/UEFI loaders use LLVM with no host target GNU/MinGW fallback. The final amd64/i386/PC-98 and target-noct runtime campaign passes. sparcv9/m68030 use a later project-built GCC. |
+| x86 HAL style-only boundary | WS023 | Resolved and completed in q067: `plan/coding-style.md` now applies to all 88 C/header files under `src/hal/i386` and `src/hal/amd64`; the five inherited edits were preserved, narrow compiler-extension/table exceptions are recorded, and strict, focused, configured-build, runtime, and API/ABI review passed. |
 | PC/AT boot selector | WS004 | Resolved: reuse UUID/PARTUUID; standard FAT handoff uses UUID |
 | Runtime swap command standard and control boundary | WS016 | Resolved for v1: SUSv4/POSIX does not define `swapon`/`swapoff`; zedBSD supplies minimal privileged extensions over versioned `/dev/system` control and existing signed sources |
 | Optional LFB mapping and Xzed fallback boundary | WS017 | Resolved for v1: fixed post-ENTER geometry, 8/16/24/32-bpp layout query, shared non-executable mmap when supported, true-color Xzed fast path, and unchanged ioctl fallback; PC-98 Cirrus is excluded |

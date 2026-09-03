@@ -1,0 +1,135 @@
+require zedbuild;
+
+// WS023 mechanically decidable x86 HAL source-style audit.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+func capture(command) {
+    var child = Process.spawn(["/bin/sh", "-c", command + " 2>&1"]);
+    if (child < 0) { zbFail("cannot spawn audit command: " + command); }
+    var output = "";
+    while (Process.isAlive(child) == 1) {
+        output = output + Process.read(child, 100);
+    }
+    output = output + Process.read(child, 0);
+    var status = Process.wait(child);
+    Process.close(child);
+
+    var normalized = "";
+    for (i in 0..String.charCount(output)) {
+        if (String.charCodeAt(output, i) != 13) {
+            normalized = normalized + String.charAt(output, i);
+        }
+    }
+    return [status, normalized];
+}
+
+func expectExact(repo, command, expected, what) {
+    var result = capture("cd " + zbShellQuote(repo) + " && " + command);
+    if (result[0] != 0 || result[1] != expected) {
+        zbFail(what + " failed (status=" + result[0] + "):\n" + result[1]);
+    }
+}
+
+func expectNoMatches(repo, command, what) {
+    var result = capture("cd " + zbShellQuote(repo) + " && " + command);
+    if (result[0] == 0) {
+        zbFail(what + ":\n" + result[1]);
+    }
+    if (result[0] != 1 || result[1] != "") {
+        zbFail(what + " audit failed (status=" + result[0] + "):\n" +
+               result[1]);
+    }
+}
+
+func auditFiles(repo) {
+    var find = "find src/hal/i386 src/hal/amd64 -type f " +
+        "\\( -name '*.c' -o -name '*.h' \\) ! -name '*~'";
+    var files = "$(" + find + " -print | LC_ALL=C sort)";
+
+    expectExact(repo, find + " -print | wc -l | tr -d ' '", "88\n",
+                "x86 HAL C/header inventory");
+
+    expectNoMatches(repo,
+        "awk 'FNR == 1 && $0 != " +
+        "\"/* -*- mode: c; c-file-style: \\\"linux\\\"; tab-width: 8; -*- */\"" +
+        " { print FILENAME \": invalid modeline\" }' " + files + " | grep .",
+        "invalid x86 HAL modeline");
+
+    expectNoMatches(repo,
+        "awk '" +
+        "FNR == 2 && $0 != \"\" { print FILENAME \":2\" }; " +
+        "FNR == 3 && $0 != \"/*\" { print FILENAME \":3\" }; " +
+        "FNR == 4 && $0 != \" * zedBSD\" { print FILENAME \":4\" }; " +
+        "FNR == 5 && $0 != \" * Copyright (C) 2026 Awe Morris\" " +
+        "{ print FILENAME \":5\" }; " +
+        "FNR == 6 && $0 != \" *\" { print FILENAME \":6\" }; " +
+        "FNR == 7 && $0 != \" * SPDX-License-Identifier: Zlib\" " +
+        "{ print FILENAME \":7\" }; " +
+        "FNR == 8 && $0 != \" */\" { print FILENAME \":8\" }; " +
+        "FNR == 9 && $0 != \"\" { print FILENAME \":9\" }; " +
+        "FNR == 10 && $0 != \"/*\" { print FILENAME \":10\" }' " + files +
+        " | grep .",
+        "invalid x86 HAL canonical header");
+
+    expectNoMatches(repo,
+        "rg -n '(^|[^[:alnum:]_])goto[[:space:]]+[[:alpha:]_]' " +
+        "src/hal/i386 src/hal/amd64 --glob '*.[ch]'",
+        "prohibited goto remains");
+
+    expectNoMatches(repo,
+        "rg -n 'for[[:space:]]*\\([[:space:]]*" +
+        "(const[[:space:]]+)?(unsigned|signed|int|long|short|char|" +
+        "size_t|ssize_t|u?int(8|16|32|64)_t)[[:space:]*]+' " +
+        "src/hal/i386 src/hal/amd64 --glob '*.[ch]'",
+        "declaration in for initializer remains");
+
+    expectNoMatches(repo,
+        "rg -n '_Static_assert|static_assert' " +
+        "src/hal/i386 src/hal/amd64 --glob '*.[ch]'",
+        "replaceable post-C89 static assertion remains");
+
+    expectNoMatches(repo,
+        "rg -n '//' src/hal/i386 src/hal/amd64 --glob '*.[ch]'",
+        "ordinary line comment remains");
+
+    expectNoMatches(repo,
+        "rg -n '\\)[[:space:]]*\\{[^{}]*(;|return)[^{}]*\\}" +
+        "[[:space:]]*$' src/hal/i386 src/hal/amd64 --glob '*.[ch]'",
+        "collapsed function or control body remains");
+
+    expectNoMatches(repo,
+        "rg -n '\\breturn[[:space:]]+[^;]*\\b" +
+        "[[:alpha:]_][[:alnum:]_]*[[:space:]]*\\(' " +
+        "src/hal/i386 src/hal/amd64 --glob '*.c'",
+        "meaningful call result is returned directly");
+
+    expectNoMatches(repo,
+        "rg -n '\\breturn[[:space:]]+[^;]*(==|!=|<=|>=)[^;]*;' " +
+        "src/hal/i386 src/hal/amd64 --glob '*.c'",
+        "comparison result is returned without a debugger-visible decision");
+
+    expectNoMatches(repo,
+        "rg -n '\\breturn[[:space:]]+[^;]*\\?[^;]*:' " +
+        "src/hal/i386 src/hal/amd64 --glob '*.c'",
+        "conditional result is returned without a debugger-visible decision");
+
+    expectNoMatches(repo,
+        "awk 'FNR == 1 { previous = \"\" }; " +
+        "$0 == \"{\" && previous ~ /^[[:alnum:]_ *]+\\([^;]*\\)$/ " +
+        "{ print FILENAME \":\" FNR - 1 \": \" previous }; " +
+        "{ previous = $0 }' " + files + " | grep .",
+        "function name and argument remain on one definition line");
+}
+
+func main(args) {
+    var repo = ".";
+    if (Array.size(args) > 1) {
+        zbFail("usage: x86-hal-style-audit.noct [REPOSITORY]");
+    }
+    if (Array.size(args) == 1) {
+        repo = args[0];
+    }
+
+    auditFiles(repo);
+    print("WS023 x86 HAL mechanical style audit: PASS (88 files)");
+}
