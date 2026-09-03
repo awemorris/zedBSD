@@ -1,3 +1,16 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The private i386 machine constants and source helpers.
+ */
+
 #ifndef SYS_HAL_I386_I386_H
 #define SYS_HAL_I386_I386_H
 
@@ -7,8 +20,9 @@
 #define CLOCK_HZ	(100)
 
 /*
- * Maximum Supported Memory Size in MB.  128MB matches the initial direct map and is generous for every
- * PC-98 (and retro PC/AT) this kernel targets,; the page bitmap stays 4KB.
+ * Maximum supported memory size in MiB.  The 128 MiB limit matches the
+ * initial direct map and covers the PC-98 and retro PC/AT targets while
+ * keeping the page bitmap at 4 KiB.
  */
 #define PHYSICAL_MEGS	(128)
 
@@ -114,5 +128,8 @@
  *  - Some compiler adds "_" to symbols.
  */
 #define EXT_C(def) def
+
+/* Marks an intentionally unused parameter without extending the public HAL. */
+#define UNUSED_PARAMETER(parameter) ((void)(parameter))
 
 #endif

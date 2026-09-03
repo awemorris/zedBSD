@@ -1,3 +1,5 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -6,8 +8,9 @@
  */
 
 /*
- * PIC (programmable interrupt controller) management, BSP-provided:
- * the 8259 pair sits at different ports on the PC-98 and the PC/AT.
+ * The board-provided i386 programmable interrupt-controller contract.
+ *
+ * The 8259 pair uses different ports on PC-98 and PC/AT systems.
  */
 
 #ifndef _SYS_ARCH_X86_PIC_H_

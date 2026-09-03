@@ -1,5 +1,16 @@
-/* i386 APIC topology shared by the ACPI and MPS discovery frontends. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The shared i386 ACPI and MPS interrupt-topology contract.
+ */
+
 #ifndef ZEDBSD_HAL_I386_APIC_TOPOLOGY_H
 #define ZEDBSD_HAL_I386_APIC_TOPOLOGY_H
 

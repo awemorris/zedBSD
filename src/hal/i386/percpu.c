@@ -1,3 +1,5 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -6,10 +8,11 @@
  */
 
 /*
- * Per-CPU GDT and TSS instances for i386 SMP.
+ * The i386 per-CPU GDT and task-state implementation.
  */
 
 #include <hal/hal.h>
+
 #include "apic-topology.h"
 #include "defs.h"
 #include "percpu.h"
@@ -22,59 +25,88 @@ struct gdtr {
 static uint64_t gdts[I386_APIC_MAX_CPUS][6] __attribute__((aligned(16)));
 static uint8_t tsses[I386_APIC_MAX_CPUS][104] __attribute__((aligned(16)));
 
-static uint64_t tss_descriptor(uintptr_t base)
-{
-	uint64_t d = 103U;
+static uint64_t tss_descriptor(uintptr_t base_address);
 
-	d |= (uint64_t)(base&0xffffU)<<16;
-	d |= (uint64_t)((base>>16)&0xffU)<<32;
-	d |= (uint64_t)0x89U<<40;
-	d |= (uint64_t)((base>>24)&0xffU)<<56;
-
-	return d;
-}
-
-void i386_percpu_init(hal_cpu_id_t cpu,uintptr_t stack)
+/*
+ * Initializes the GDT and task-state segment for one CPU.
+ */
+void
+i386_percpu_init(
+	hal_cpu_id_t cpu,
+	uintptr_t stack)
 {
 	struct gdtr descriptor;
-	uint16_t selector = SEG_TSS;
 	uint32_t *tss;
+	uint16_t selector;
 
+	/* Rejects a logical CPU outside the fixed per-CPU tables. */
 	if (cpu >= I386_APIC_MAX_CPUS)
 		HAL_FATAL("invalid i386 per-CPU ID");
 
+	/* Builds the null, kernel, and user segment descriptors. */
 	gdts[cpu][0] = 0;
 	gdts[cpu][1] = 0x00cf9a000000ffffULL;
 	gdts[cpu][2] = 0x00cf92000000ffffULL;
 	gdts[cpu][3] = 0x00cff8000000ffffULL;
 	gdts[cpu][4] = 0x00cff2000000ffffULL;
 
+	/* Initializes the CPU's task-state segment and kernel stack. */
 	hal_memset(tsses[cpu], 0, sizeof(tsses[cpu]));
-
-	tss = (uint32_t*)tsses[cpu];
+	tss = (uint32_t *)tsses[cpu];
 	tss[1] = (uint32_t)stack;
 	tss[2] = SEG_SYS_DATA;
+	*(uint16_t *)(tsses[cpu] + 102) = sizeof(tsses[cpu]);
 
-	*(uint16_t*)(tsses[cpu]+102) = sizeof(tsses[cpu]);
-
+	/* Installs the task-state descriptor into the final GDT slot. */
 	gdts[cpu][5] = tss_descriptor((uintptr_t)tsses[cpu]);
-
 	descriptor.limit = sizeof(gdts[cpu]) - 1U;
 	descriptor.base = (uint32_t)(uintptr_t)gdts[cpu];
 
-	__asm__ volatile("lgdt %0"::"m"(descriptor):"memory");
-	__asm__ volatile("ljmp $0x08,$1f;1:" ::: "memory");
-	__asm__ volatile("movw %0,%%ds;movw %0,%%es;movw %0,%%fs;movw %0,%%gs;movw %0,%%ss"::"r"((uint16_t)SEG_SYS_DATA):"memory");
-	__asm__ volatile("ltr %0"::"r"(selector):"memory");
+	/* Loads the CPU-local GDT and refreshes every segment selector. */
+	__asm__ volatile("lgdt %0" : : "m"(descriptor) : "memory");
+	__asm__ volatile("ljmp $0x08,$1f;1:" : : : "memory");
+	__asm__ volatile(
+		"movw %0,%%ds;movw %0,%%es;movw %0,%%fs;"
+		"movw %0,%%gs;movw %0,%%ss"
+		:
+		: "r"((uint16_t)SEG_SYS_DATA)
+		: "memory");
+
+	/* Activates the CPU-local task-state segment. */
+	selector = SEG_TSS;
+	__asm__ volatile("ltr %0" : : "r"(selector) : "memory");
 }
 
+/*
+ * Updates one CPU's ring-zero interrupt stack.
+ */
 void
 i386_percpu_set_kernel_stack(
 	hal_cpu_id_t cpu,
 	uintptr_t stack)
 {
+	/* Rejects a logical CPU outside the fixed task-state table. */
 	if (cpu >= I386_APIC_MAX_CPUS)
 		HAL_FATAL("invalid i386 TSS CPU");
 
-	((uint32_t*)tsses[cpu])[1] = (uint32_t)stack;
+	/* Publishes the new privilege-transition stack pointer. */
+	((uint32_t *)tsses[cpu])[1] = (uint32_t)stack;
+}
+
+/* Encodes one available 32-bit task-state segment descriptor. */
+static uint64_t
+tss_descriptor(
+	uintptr_t base_address)
+{
+	uint64_t descriptor;
+
+	/* Encodes the fixed limit and split base-address fields. */
+	descriptor = 103U;
+	descriptor |= (uint64_t)(base_address & 0xffffU) << 16;
+	descriptor |= (uint64_t)((base_address >> 16) & 0xffU) << 32;
+	descriptor |= (uint64_t)0x89U << 40;
+	descriptor |= (uint64_t)((base_address >> 24) & 0xffU) << 56;
+
+	/* Returns the complete descriptor image. */
+	return descriptor;
 }

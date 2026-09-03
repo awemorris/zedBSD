@@ -1,5 +1,14 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
- * Interval timer (BSP-provided PIT programming).
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The board-provided i386 interval-timer contract.
  */
 
 #ifndef _SYS_ARCH_X86_CLOCK_H_

@@ -1,3 +1,5 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -6,7 +8,7 @@
  */
 
 /*
- * GRUB multiboot specification support
+ * The GRUB Multiboot information contract used by the i386 BSP.
  */
 
 #ifndef ZEDBSD_HAL_I386_MULTIBOOT_H
