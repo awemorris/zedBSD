@@ -1109,3 +1109,13 @@ phase-owned monitor/sendkey harness.  Its guest write path must call `fsync()`
 on the still-open raw NVMe descriptor before rereading and restarting; a plain
 `dd` followed by a process-wide `sync()` is not evidence that this unmounted
 devfs descriptor issued the driver's `BIO_FLUSH` operation.
+
+## HW-T40 RTL8822BU direct-connect reproduction
+
+Q068's exact-device passthrough record is
+[q068 RTL8822BU evidence](q068-rtl8822bu-passthrough-evidence.md). It freezes the
+source/image/QEMU/OVMF/USB identities, one fresh redacted scan, the immediate
+`ENOENT`, the unchanged idle status, and post-run host restoration. It
+localizes the failure to common BSS selection: the controlled 5-GHz target is
+absent because the production RTL scan profile is limited to channels 1--11.
+No driver source was changed in the reproduction Queue.
