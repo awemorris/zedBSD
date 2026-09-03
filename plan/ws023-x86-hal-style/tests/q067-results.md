@@ -18,6 +18,28 @@ Assembly files were explicitly outside this C/header Phase.  Concurrent
 assembly edits and editor working files already present in the shared working
 tree were neither modified nor staged by q067.
 
+## Publication
+
+The user-owned inherited checkpoint is `b4be6eb`.  Q067 published one `WIP`
+checkpoint per completed Phase to `origin/main`:
+
+| Phase | Commit |
+| --- | --- |
+| `ws023-p001` | `800808e` |
+| `ws023-p002` | `98af9cf` |
+| `ws023-p003` | `a4448fa` |
+| `ws023-p004` | `daeba48` |
+| `ws023-p005` | `8533329` |
+| `ws023-p006` | `227d0d1` |
+| `ws023-p007` | `47bc603` |
+| `ws023-p008` | `7a43b12` |
+| `ws023-p009` | `6fb7372` |
+| `ws023-p010` | `2ab7a94` |
+| `ws023-p011` | `7f4b9bc` |
+
+Immediately before publication, `origin/main` remained at `106023a`; merging
+it was a no-op.  The push of `106023a..7f4b9bc` to `origin/main` succeeded.
+
 ## Source audit
 
 - `tests/x86-hal-style-audit.noct`: PASS, exact inventory 88/88.

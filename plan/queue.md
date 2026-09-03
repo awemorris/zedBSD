@@ -117,3 +117,5 @@ results.
   and were neither modified nor staged by q067.
 - Exact evidence and retained baseline risks are recorded in the
   [q067 result ledger](ws023-x86-hal-style/tests/q067-results.md).
+- The eleven Phase checkpoints `800808e` through `7f4b9bc` were published to
+  `origin/main` after the required origin merge check completed as a no-op.
