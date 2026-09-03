@@ -41,9 +41,11 @@ separately records deferred, nonblocking CDC ECM accounting adoption, and
 the first WLAN scan path deliberately does not require. Q068 completed p040's
 exact `2357:012e` passthrough reproduction: the requested 5-GHz target is absent
 from the driver's channel-1--11 snapshot, so common BSS selection returns
-`ENOENT` before a connection generation is admitted. P041 is the Queue-ready
-RTL8822BU 5-GHz useful-normal-path correction; AX211 quality work remains
-deferred.
+`ENOENT` before a connection generation is admitted. The user's corrected
+2.4-GHz report was checked once in q069/p042: the exact channel-1 BSS connected
+and authorized, so its reported `ENOENT` remains unlocalized and receives no
+speculative fix. P041 is again Queue-ready as the independently proven 5-GHz
+capability addition. AX211 quality work remains deferred.
 
 Parent: [master plan](../master.md)
 
@@ -164,7 +166,8 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p038`](phase038-intel-ax211-standalone-driver/phase.md) | Uncleared (`q066`); automatic and exact-device VFIO normal-path milestones complete | API89 firmware/PNVM, scan, WPA2/CCMP, DHCP, LAN/public ping, nonempty HTTP fetch, disconnect, down, and host restoration pass; obtain the one shared final direct-boot result |
 | [`ws004-p039`](phase039-wlan-evidence-driven-refactor/phase.md) | Planned; follows p030 automatic milestone and p038; not queued | Compare both working drivers and move only substantial, stable, demonstrated common behavior beneath the unchanged public WLAN UAPI; a justified no-extraction result is valid |
 | [`ws004-p040`](phase040-rtl8822bu-passthrough-reproduction/phase.md) | Complete (`q068`) | Exact passthrough reproduced immediate `ENOENT`; the controlled 5-GHz target was absent from the completed channel-1 snapshot, so common BSS selection rejected it before RTL admission |
-| [`ws004-p041`](phase041-rtl8822bu-5ghz-quality/phase.md) | Planned; Queue-ready after `q068`; not queued | Add a checked non-DFS 5-GHz RTL8822BU scan and WPA2/CCMP useful normal path while preserving 2.4 GHz; AX211 repair and cross-driver commonization remain separate |
+| [`ws004-p041`](phase041-rtl8822bu-5ghz-quality/phase.md) | Planned; Queue-ready after q069; not queued | Add a checked non-DFS 5-GHz RTL8822BU scan and WPA2/CCMP useful normal path while preserving the passing 2.4-GHz path; AX211 remains separate |
+| [`ws004-p042`](phase042-rtl8822bu-24ghz-connect-reproduction/phase.md) | Complete (`q069`) | The one exact scan-visible channel-1 attempt connected and authorized with zero retries/error; the user's 2.4-GHz `ENOENT` did not reproduce |
 
 ### MSI follow-up register
 

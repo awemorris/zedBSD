@@ -1119,3 +1119,9 @@ source/image/QEMU/OVMF/USB identities, one fresh redacted scan, the immediate
 localizes the failure to common BSS selection: the controlled 5-GHz target is
 absent because the production RTL scan profile is limited to channels 1--11.
 No driver source was changed in the reproduction Queue.
+
+Q069's follow-up is retained in
+[q069 RTL8822BU 2.4-GHz evidence](q069-rtl8822bu-24ghz-evidence.md). Its one
+exact channel-1 attempt completed authentication, association, key install,
+and authorization with zero retries/error. It did not reproduce the user's
+2.4-GHz `ENOENT`, and no retry or speculative source correction was made.

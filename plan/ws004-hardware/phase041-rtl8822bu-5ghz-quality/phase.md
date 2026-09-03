@@ -8,7 +8,7 @@ Phase ID: `p041`
 
 Combined ID: `ws004-p041`
 
-Status: planned; Queue-ready after `q068`; not queued
+Status: planned; Queue-ready after q069; not queued
 
 Parent: [WS004 hardware](../ws.md)
 
@@ -16,10 +16,16 @@ Tests: [WS004 test index](../tests/README.md)
 
 ## Objective
 
-Close the deterministic RTL8822BU capability gap isolated by q068: the exact
+Address the deterministic RTL8822BU capability gap isolated by q068: the exact
 `2357:012e` adapter currently scans only 2.4-GHz channels 1--11, so a valid
 5-GHz target never enters the common BSS snapshot and direct connect returns
 `ENOENT` before the RTL connection state machine runs.
+
+The user subsequently reported the same `ENOENT` for a snapshot-visible
+2.4-GHz target. Q069's one exact attempt connected successfully, so that report
+remains unlocalized and receives no speculative fix here. This Phase remains
+the independently proven 5-GHz capability addition, not an assertion that the
+separate 2.4-GHz observation was caused by the same gap.
 
 Establish one simple 5-GHz WPA2-Personal/CCMP useful normal path through scan,
 selection, authentication, association, key installation, authorized L2,

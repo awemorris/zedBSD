@@ -439,7 +439,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q050 completed both VFS prerequisites discovered by q041 | `ws001-p022` and `ws001-p023` complete with production-linked faults and abrupt-stop/remount evidence | Retain p022/p023 as regressions; their dependency consumer resumes in WS005 p005 | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; q066 completed p025's automatic HAL counter milestone while the completed Latitude USB/network and CF-SV7 USB-root milestones remain intact | p025's API split, private calibration, complete-CPU-set validation, positive/negative SMP KVM evidence, and configured build matrix pass; p024 still awaits one V13 boot and p018/p019 remain | Share p025's sole remaining physical multicore observation with p038's final direct boot rather than creating an intermediate human block | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; q068 reproduced and localized the exact-RTL8822BU direct-connect failure before any correction | `ws004-p040` complete: the controlled 5-GHz target is absent from the channel-1--11 snapshot and common selection returns `ENOENT` before RTL admission | Queue `ws004-p041` for the checked RTL8822BU non-DFS 5-GHz useful normal path; keep AX211 instability deferred | [WS004](ws004-hardware/ws.md) |
+| `ws004` | Hardware expansion | Active; q069 completed one exact RTL8822BU 2.4-GHz connect check successfully | `ws004-p042` complete: scan generation 1 selected channel 1 and connection generation 2 reached authorized state with zero error | Queue p041 for the independently proven 5-GHz gap; retain the non-reproduced 2.4-GHz report without speculative repair and keep AX211 deferred | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q059 completed p004 minimum direct command and p009 one-run physical connectivity; q060 completed the p030 automatic dependency | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, frozen design contract, exact first-radio identity, common WLAN control ABI, p036, p028-p030 automatic milestones, p004, and p009 are complete; q066 completed WS004 p038's exact-device VFIO normal path, while its native direct boot remains | After WS004 p038/p039, complete p006/p007/p010 before the still-pending shared p008 final acceptance | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; q063 released p009's WS008 userland dependency | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
@@ -571,12 +571,12 @@ one.
 The temporary WS023 maintenance override completed in q067. Product work may
 therefore resume from item 9 below without carrying an active style Queue.
 
-Q068 completed the exact RTL8822BU passthrough reproduction. The first boundary
-is deterministic common BSS selection: the controlled 5-GHz target cannot
-enter the production driver's channel-1--11 snapshot, so direct connect returns
-`ENOENT` without admitting an RTL connection generation. The Queue-ready p041
-now owns a checked non-DFS 5-GHz useful normal path. AX211 quality work remains
-deferred behind the prioritized RTL correction.
+Q068 completed only the exact RTL8822BU absent-5-GHz reproduction. The user
+then clarified that the snapshot-visible 2.4-GHz SSID also returned `ENOENT` on
+hardware. Q069's one exact p042 attempt instead completed generation 2 and
+authorized with zero retries/error. The report therefore remains unlocalized
+without a speculative fix, while p041 is Queue-ready for the independently
+proven 5-GHz capability gap. AX211 quality work remains deferred.
 
 1. q048 completed the WS006 p008 production HID automatic/software milestone
    after q044's p006/p007 source boundaries and q047's p031/p032 USB 1.1,
