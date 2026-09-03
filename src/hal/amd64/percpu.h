@@ -1,3 +1,16 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The private amd64 per-CPU state and interrupt acknowledgement contract.
+ */
+
 #ifndef ZEDBSD_HAL_AMD64_PERCPU_H
 #define ZEDBSD_HAL_AMD64_PERCPU_H
 
@@ -5,14 +18,14 @@
 #include "defs.h"
 #include "bsp-pcat/timecounter-policy.h"
 
+#define AMD64_IRQ_ACK_DEPTH 8U
+#define AMD64_STARTUP_ERROR_TIMER 0x100U
+
 struct amd64_irq_ack {
 	uint32_t vector;
 	uint32_t irq;
 	unsigned active;
 };
-
-#define AMD64_IRQ_ACK_DEPTH 8U
-#define AMD64_STARTUP_ERROR_TIMER 0x100U
 
 struct amd64_task;
 

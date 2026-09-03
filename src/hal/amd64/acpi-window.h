@@ -1,5 +1,16 @@
-/* Sparse persistent mapping slots for amd64 ACPI table discovery. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The sparse persistent-mapping window used for amd64 ACPI discovery.
+ */
+
 #ifndef ZEDBSD_HAL_AMD64_ACPI_WINDOW_H
 #define ZEDBSD_HAL_AMD64_ACPI_WINDOW_H
 
@@ -14,10 +25,18 @@ struct amd64_acpi_window {
 	unsigned used;
 };
 
-void amd64_acpi_window_init(struct amd64_acpi_window *window);
-int amd64_acpi_window_reserve(struct amd64_acpi_window *window,
-	paddr_t physical, size_t size, unsigned *first_slot,
-	size_t *page_offset, unsigned *new_first_slot,
+void
+amd64_acpi_window_init(
+	struct amd64_acpi_window *window);
+
+int
+amd64_acpi_window_reserve(
+	struct amd64_acpi_window *window,
+	paddr_t physical,
+	size_t size,
+	unsigned *first_slot,
+	size_t *page_offset,
+	unsigned *new_first_slot,
 	unsigned *new_slot_count);
 
 #endif

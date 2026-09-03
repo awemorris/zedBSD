@@ -1,5 +1,15 @@
-/* Pure policy for the amd64 PC/AT boot-local timecounter. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Pure policy for the amd64 PC/AT boot-local timecounter.
+ */
 
 #ifndef ZEDBSD_HAL_AMD64_TIMECOUNTER_POLICY_H
 #define ZEDBSD_HAL_AMD64_TIMECOUNTER_POLICY_H
@@ -83,4 +93,5 @@ bool amd64_timecounter_read_guarded(
 	struct amd64_timecounter_read_state *state,
 	amd64_timecounter_sample_fn sample, void *context,
 	uint64_t *counter, uint64_t *frequency_hz);
+
 #endif

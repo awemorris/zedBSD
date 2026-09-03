@@ -1,5 +1,15 @@
-/* Pure policy helpers for amd64 PC/AT early interrupt bring-up. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Pure amd64 PC/AT early-interrupt policy shared with host fixtures.
+ */
 
 #ifndef ZEDBSD_HAL_AMD64_EARLY_INIT_POLICY_H
 #define ZEDBSD_HAL_AMD64_EARLY_INIT_POLICY_H
@@ -65,11 +75,16 @@ struct amd64_ioapic_range {
 	uint32_t redirections;
 };
 
-enum amd64_ioapic_policy_result amd64_ioapic_policy_evaluate(
-	uint32_t version, uint32_t gsi_base,
-	const struct amd64_ioapic_range *previous, unsigned previous_count,
+enum amd64_ioapic_policy_result
+amd64_ioapic_policy_evaluate(
+	uint32_t version,
+	uint32_t gsi_base,
+	const struct amd64_ioapic_range *previous,
+	unsigned previous_count,
 	uint32_t *redirections);
-const char *amd64_ioapic_policy_result_name(
+
+const char *
+amd64_ioapic_policy_result_name(
 	enum amd64_ioapic_policy_result result);
 
 #endif

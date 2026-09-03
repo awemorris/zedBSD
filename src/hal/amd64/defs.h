@@ -1,4 +1,16 @@
-/* amd64 HAL private constants. */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The private amd64 machine constants and source helpers.
+ */
+
 #ifndef ZEDBSD_HAL_AMD64_DEFS_H
 #define ZEDBSD_HAL_AMD64_DEFS_H
 
@@ -43,5 +55,8 @@
 #define AMD64_VECTOR_TLB       0xf1U
 #define AMD64_VECTOR_ERROR     0xfeU
 #define AMD64_VECTOR_SPURIOUS  0xffU
+
+/* Marks an intentionally unused private implementation parameter. */
+#define UNUSED_PARAMETER(parameter) ((void)(parameter))
 
 #endif
