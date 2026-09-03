@@ -1,6 +1,20 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
- * DMA
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * The legacy PC-98 system-DMA contract.
+ */
+
+#ifndef ZEDBSD_HAL_I386_PC98_DMA_H
+#define ZEDBSD_HAL_I386_PC98_DMA_H
+
+#include <hal/hal.h>
 
 /* DMA transfer direction. */
 #define HAL_DMA_CPU_TO_DEVICE	(1)	/* CPU -> Device */
@@ -30,3 +44,4 @@ bool hal_dma_wait(int channel);
 /* Stop the DMA channel execution. (optional) */
 void hal_dma_cancel(int channel);
 
+#endif

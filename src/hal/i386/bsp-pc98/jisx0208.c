@@ -1,12 +1,14 @@
-/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
 
 /*
- * PC-98 HAL Unicode mapping
- * Copyright (c) 2025, 2026, Awe Morris
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
  */
 
 /*
- * JIS X 0208 (EUC-JP code set 1) to Unicode BMP mapping.
+ * The PC-98 JIS X 0208 to Unicode BMP mapping table.
  *
  * Generated from the standard euc-jp codec: rows 0xA1-0xF4, cells
  * 0xA1-0xFE, row-major; zero means an unassigned cell.

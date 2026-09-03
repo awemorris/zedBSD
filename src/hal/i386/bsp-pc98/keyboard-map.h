@@ -1,19 +1,22 @@
-/* PC-98 keyboard scan-code translation shared with focused host tests. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The PC-98 keyboard scan-code translation contract.
+ *
+ * Focused host tests share this private state and event representation.
+ */
+
 #ifndef ZEDBSD_HAL_I386_PC98_KEYBOARD_MAP_H
 #define ZEDBSD_HAL_I386_PC98_KEYBOARD_MAP_H
 
 #include <stdint.h>
-
-struct pc98_keyboard {
-	uint8_t shift;
-	uint8_t ctrl;
-	uint8_t graph;
-	uint8_t caps;
-	uint8_t kana;
-	uint8_t down[16];
-	uint16_t last_key[128];
-};
 
 #define HAL_KEY_ESCAPE 0x1b
 #define HAL_KEY_BACKSPACE 0x08
@@ -74,6 +77,16 @@ struct pc98_keyboard {
 #define HAL_KEY_EVENT_GRAPH_PRIVATE 0x00040000U
 #define HAL_KEY_EVENT_RELEASE_PRIVATE 0x00080000U
 #define HAL_KEY_EVENT_REPEAT_PRIVATE 0x00100000U
+
+struct pc98_keyboard {
+	uint8_t shift;
+	uint8_t ctrl;
+	uint8_t graph;
+	uint8_t caps;
+	uint8_t kana;
+	uint8_t down[16];
+	uint16_t last_key[128];
+};
 
 void pc98_keyboard_reset(struct pc98_keyboard *);
 int pc98_keyboard_feed(struct pc98_keyboard *, uint8_t, unsigned *);
