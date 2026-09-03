@@ -1,3 +1,16 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The amd64 task context and assembly-transition contract.
+ */
+
 #ifndef ZEDBSD_HAL_AMD64_TASK_H
 #define ZEDBSD_HAL_AMD64_TASK_H
 
@@ -29,10 +42,10 @@ void amd64_kernel_task_entry(void);
 void amd64_user_task_entry(void);
 void amd64_user_frame_entry(void);
 void amd64_task_returned(void) __attribute__((noreturn));
-void amd64_task_enter_user_frame(void *);
+void amd64_task_enter_user_frame(void *frame);
 void amd64_task_leave_user_frame(void);
 void amd64_task_init_cpu(int run_selftest);
-void amd64_xmm_load(const void *);
-void amd64_xmm_store(void *);
+void amd64_xmm_load(const void *value);
+void amd64_xmm_store(void *value);
 
 #endif

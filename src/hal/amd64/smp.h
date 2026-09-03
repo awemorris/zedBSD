@@ -1,3 +1,16 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The amd64 symmetric-multiprocessing contract.
+ */
+
 #ifndef ZEDBSD_HAL_AMD64_SMP_H
 #define ZEDBSD_HAL_AMD64_SMP_H
 
