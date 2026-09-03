@@ -287,6 +287,15 @@ static int
 profile_valid(const struct wlan_wpa2_profile *profile, uint64_t now_ticks)
 {
 	size_t index;
+	uint8_t channel;
+	int channel_valid;
+
+	channel = profile == NULL ? 0U : profile->channel;
+	channel_valid = (channel >= 1U && channel <= 14U) ||
+	    (channel >= 36U && channel <= 144U &&
+	    (channel - 36U) % 4U == 0U) ||
+	    (channel >= 149U && channel <= 181U &&
+	    (channel - 149U) % 4U == 0U);
 
 	if (profile == NULL || !address_valid(profile->station) ||
 	    !address_valid(profile->bssid) ||
@@ -295,7 +304,7 @@ profile_valid(const struct wlan_wpa2_profile *profile, uint64_t now_ticks)
 	    profile->ssid_length > WLAN_WPA2_SSID_MAX ||
 	    profile->rate_count == 0U ||
 	    profile->rate_count > WLAN_WPA2_RATE_MAX ||
-	    profile->channel == 0U || profile->channel > 11U ||
+	    !channel_valid ||
 	    (profile->capability & (WPA2_CAPABILITY_ESS |
 	    WPA2_CAPABILITY_PRIVACY)) != (WPA2_CAPABILITY_ESS |
 	    WPA2_CAPABILITY_PRIVACY) ||

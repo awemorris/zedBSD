@@ -65,6 +65,15 @@
 #define INTEL_AX211_TRANSPORT_RX_DESCRIPTOR_COUNT            512U
 #define INTEL_AX211_TRANSPORT_RX_DESCRIPTOR_SIZE              16U
 #define INTEL_AX211_TRANSPORT_RX_COMPLETION_SIZE              32U
+#define INTEL_AX211_TRANSPORT_HW_CAUSE_ALIVE           0x00000001U
+#define INTEL_AX211_TRANSPORT_FH_CAUSE_ERROR            0x00200000U
+#define INTEL_AX211_TRANSPORT_HW_CAUSE_SW_ERROR_V2      0x00000020U
+#define INTEL_AX211_TRANSPORT_HW_CAUSE_SW_ERROR         0x02000000U
+#define INTEL_AX211_TRANSPORT_HW_CAUSE_HW_ERROR         0x20000000U
+#define INTEL_AX211_TRANSPORT_HW_FATAL_CAUSES \
+	(INTEL_AX211_TRANSPORT_HW_CAUSE_SW_ERROR_V2 | \
+	INTEL_AX211_TRANSPORT_HW_CAUSE_SW_ERROR | \
+	INTEL_AX211_TRANSPORT_HW_CAUSE_HW_ERROR)
 
 enum intel_ax211_transport_result {
 	INTEL_AX211_TRANSPORT_OK = 0,
@@ -139,6 +148,8 @@ struct intel_ax211_transport_ring_memory {
 struct intel_ax211_transport_causes {
 	uint32_t flow_handler;
 	uint32_t hardware;
+	uint32_t raw_flow_handler;
+	uint32_t raw_hardware;
 };
 
 struct intel_ax211_transport_rx_completion {
@@ -192,6 +203,7 @@ int intel_ax211_transport_interrupt_claim(struct intel_ax211_transport *transpor
 int intel_ax211_transport_interrupt_rearm(struct intel_ax211_transport *transport);
 int intel_ax211_transport_publish_rx_descriptor(struct intel_ax211_transport *transport,
 	uint16_t index, uint64_t device_address);
+/* Call only after the Gen3 hardware-ALIVE cause says firmware configured RFH. */
 int intel_ax211_transport_activate_rx(struct intel_ax211_transport *transport);
 int intel_ax211_transport_rx_refresh(struct intel_ax211_transport *transport);
 int intel_ax211_transport_rx_next(struct intel_ax211_transport *transport,

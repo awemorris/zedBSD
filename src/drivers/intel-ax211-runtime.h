@@ -100,10 +100,15 @@
 #define INTEL_AX211_RUNTIME_CAP_DS_PARAM_SET_IE               9U
 #define INTEL_AX211_RUNTIME_CAP_DQA                           12U
 #define INTEL_AX211_RUNTIME_CAP_LAR_MULTI_MCC                29U
+#define INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2                 50U
 #define INTEL_AX211_RUNTIME_CAP_CT_KILL_BY_FW                74U
 #define INTEL_AX211_RUNTIME_CAP_MCC_UPDATE_11AX              89U
 
+#define INTEL_AX211_RUNTIME_SOC_CONFIG_FLAGS               0x0aU
+#define INTEL_AX211_RUNTIME_SOC_CONFIG_XTAL_LATENCY        12000U
+
 #define INTEL_AX211_RUNTIME_MCC_CHANNEL_LIMIT               110U
+#define INTEL_AX211_RUNTIME_MCC_STATUS_MAX                    8U
 
 enum intel_ax211_runtime_result {
 	INTEL_AX211_RUNTIME_OK = 0,

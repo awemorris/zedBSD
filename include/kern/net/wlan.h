@@ -19,7 +19,7 @@
 #define WLAN_CONNECT_TRANSITION_TICKS 100ULL
 #define WLAN_MANAGEMENT_FRAME_MAX 2304U
 
-#define WLAN_SCAN_CHANNEL_MAX 14U
+#define WLAN_SCAN_CHANNEL_MAX 51U
 #define WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED 0x00000001U
 
 struct wlan_scan_channel {
@@ -154,6 +154,11 @@ int wlan_station_attach(struct net_device *device,
 	const struct wlan_radio_ops *ops, void *radio_context,
 	const struct wlan_scan_profile *scan_profile,
 	struct wlan_station **result);
+/* A driver which learns its regulatory channel set only after firmware start
+ * may replace the copied profile while the station is still administratively
+ * down.  The input is copied before this call returns. */
+int wlan_station_scan_profile_update(struct wlan_station *station,
+	const struct wlan_scan_profile *scan_profile);
 int wlan_station_open(struct wlan_station *station);
 /* Close and detach first block new station operations.  EBUSY is a checked
  * join result: an already admitted callback must retire before retry.  A

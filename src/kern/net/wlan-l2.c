@@ -7,10 +7,16 @@
 #define WLAN_FC_TYPE_MASK       0x000cU
 #define WLAN_FC_DATA            0x0008U
 #define WLAN_FC_SUBTYPE_MASK    0x00f0U
+#define WLAN_FC_QOS_DATA        0x0080U
 #define WLAN_FC_TO_DS           0x0100U
 #define WLAN_FC_FROM_DS         0x0200U
 #define WLAN_FC_MORE_FRAGMENTS  0x0400U
 #define WLAN_FC_PROTECTED       0x4000U
+#define WLAN_FC_ORDER           0x8000U
+#define WLAN_QOS_TID_MASK       0x000fU
+#define WLAN_QOS_AMSDU_PRESENT  0x0080U
+#define WLAN_QOS_CONTROL_SIZE        2U
+#define WLAN_HT_CONTROL_SIZE         4U
 
 static uint16_t
 load_le16(const uint8_t *bytes)
@@ -134,6 +140,8 @@ wlan_l2_parse_data(const uint8_t station[6], const uint8_t bssid[6],
 {
 	static const uint8_t llc_prefix[6] = { 0xaaU, 0xaaU, 0x03U, 0U, 0U, 0U };
 	uint16_t frame_control;
+	uint16_t qos_control;
+	uint16_t subtype;
 	size_t offset = WLAN_L2_DATA_HEADER_SIZE;
 	size_t payload_length;
 	uint64_t packet_number = 0U;
@@ -152,17 +160,32 @@ wlan_l2_parse_data(const uint8_t station[6], const uint8_t bssid[6],
 	    mpdu_length < WLAN_L2_DATA_HEADER_SIZE + WLAN_L2_LLC_SNAP_SIZE)
 		return EINVAL;
 	frame_control = load_le16(mpdu);
+	subtype = frame_control & WLAN_FC_SUBTYPE_MASK;
 	if ((frame_control & WLAN_FC_TYPE_MASK) != WLAN_FC_DATA ||
-	    (frame_control & WLAN_FC_SUBTYPE_MASK) != 0U ||
+	    (subtype != 0U && subtype != WLAN_FC_QOS_DATA) ||
 	    (frame_control & (WLAN_FC_TO_DS | WLAN_FC_FROM_DS)) !=
 	    WLAN_FC_FROM_DS || (frame_control & WLAN_FC_MORE_FRAGMENTS) != 0U ||
 	    (load_le16(mpdu + 22U) & 0x000fU) != 0U ||
 	    !mac_equal(mpdu + 10U, bssid) ||
 	    (!mac_equal(mpdu + 4U, station) && !mac_group(mpdu + 4U)))
 		return EINVAL;
+	if (subtype == WLAN_FC_QOS_DATA) {
+		if (mpdu_length < offset + WLAN_QOS_CONTROL_SIZE)
+			return EINVAL;
+		qos_control = load_le16(mpdu + offset);
+		if ((qos_control & (WLAN_QOS_TID_MASK |
+		    WLAN_QOS_AMSDU_PRESENT)) != 0U)
+			return EPROTONOSUPPORT;
+		offset += WLAN_QOS_CONTROL_SIZE;
+		if ((frame_control & WLAN_FC_ORDER) != 0U) {
+			if (mpdu_length < offset + WLAN_HT_CONTROL_SIZE)
+				return EINVAL;
+			offset += WLAN_HT_CONTROL_SIZE;
+		}
+	}
 	protected_frame = (frame_control & WLAN_FC_PROTECTED) != 0U;
 	if (protected_frame) {
-		if (mpdu_length < WLAN_L2_DATA_HEADER_SIZE +
+		if (mpdu_length < offset +
 		    WLAN_L2_CCMP_HEADER_SIZE + WLAN_L2_LLC_SNAP_SIZE +
 		    WLAN_L2_CCMP_MIC_SIZE ||
 		    !security->decrypted || !security->cipher_ccmp ||
@@ -196,6 +219,8 @@ wlan_l2_parse_data(const uint8_t station[6], const uint8_t bssid[6],
 	    security->packet_number != 0U) {
 		return EINVAL;
 	}
+	if (mpdu_length < offset + WLAN_L2_LLC_SNAP_SIZE)
+		return EINVAL;
 	if (memcmp(mpdu + offset, llc_prefix, sizeof(llc_prefix)) != 0)
 		return EPROTONOSUPPORT;
 	payload_length = mpdu_length - offset - WLAN_L2_LLC_SNAP_SIZE;

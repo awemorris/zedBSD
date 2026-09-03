@@ -648,6 +648,12 @@ test_frame_parser(void)
 	assert((bss.security & (WLAN_SECURITY_WPA2 |
 	    WLAN_SECURITY_CCMP | WLAN_SECURITY_PSK)) ==
 	    (WLAN_SECURITY_WPA2 | WLAN_SECURITY_CCMP | WLAN_SECURITY_PSK));
+	/* 5-GHz beacons commonly omit the 2.4-GHz DS parameter.  In that case
+	 * the radio channel which carried the frame is authoritative. */
+	frame[36U + 2U + sizeof(binary)] = 42U;
+	assert(wlan_frame_parse_bss(frame, length, -42, 36U, &bss) == 0);
+	assert(bss.channel == 36U && bss.center_frequency_mhz == 5180U);
+	assert(wlan_frame_parse_bss(frame, length, -42, 35U, &bss) == EINVAL);
 	length = build_frame_ciphers(frame, binary, sizeof(binary), 11U,
 	    4U, 6U, 2U, 0U, 1);
 	assert(wlan_frame_parse_bss(frame, length, -2, 0U, &bss) == 0);
@@ -1412,6 +1418,7 @@ test_core(void)
 	struct wlan_scan_profile passive_profile;
 	struct wlan_scan_profile invalid_profile;
 	struct wlan_scan_profile multi_profile;
+	struct wlan_scan_profile runtime_profile;
 	struct wlan_radio_ops invalid_ops;
 	struct scan_race_task race_tasks[4];
 	pthread_t race_threads[4];
@@ -1522,6 +1529,39 @@ test_core(void)
 	for (index = 0U; index < NET_DEVICE_MAX - 1U; index++)
 		assert(wlan_station_detach(capacity_stations[index]) == 0);
 	assert(net_device_reference_balance == 1);
+	memset(&runtime_profile, 0, sizeof(runtime_profile));
+	runtime_profile.channel_count = 1U;
+	runtime_profile.channels[0].channel = 36U;
+	runtime_profile.channels[0].center_frequency_mhz = 5181U;
+	assert(wlan_station_scan_profile_update(station, &runtime_profile) ==
+	    EINVAL);
+	runtime_profile.channels[0].center_frequency_mhz = 5180U;
+	runtime_profile.channels[0].flags =
+	    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED;
+	assert(wlan_station_scan_profile_update(station, &runtime_profile) == 0);
+	/* The station owns a value copy, not this driver-local object. */
+	runtime_profile.channels[0].channel = 40U;
+	runtime_profile.channels[0].center_frequency_mhz = 5200U;
+	assert(wlan_station_open(station) == 0);
+	assert(wlan_station_scan_profile_update(station, &runtime_profile) ==
+	    EBUSY);
+	request_header(&scan, sizeof(scan), "wlan0");
+	scan.action = WLAN_SCAN_START;
+	assert(wlan_station_ioctl(&device, SIOCSWLANSCAN, &scan) == 0);
+	wlan_timer_run(fake.now);
+	assert(fake.scan_start_calls == 1U);
+	assert(fake.scan_channels[0] == 36U);
+	assert(wlan_station_scan_profile_update(station, &runtime_profile) ==
+	    EBUSY);
+	request_header(&scan, sizeof(scan), "wlan0");
+	scan.action = WLAN_SCAN_STOP;
+	assert(wlan_station_ioctl(&device, SIOCSWLANSCAN, &scan) == 0);
+	assert(wlan_station_close(station) == 0);
+	assert(wlan_station_scan_profile_update(station, &test_scan_profile) ==
+	    0);
+	fake.scan_start_calls = 0U;
+	fake.scan_stop_calls = 0U;
+	fake.management_calls = 0U;
 	profile.channels[0].channel = 1U;
 	profile.channels[0].center_frequency_mhz = 2412U;
 	assert(wlan_station_open(station) == 0);
@@ -1530,7 +1570,7 @@ test_core(void)
 	request_header(&scan, sizeof(scan), "wlan0");
 	scan.action = WLAN_SCAN_START;
 	assert(wlan_station_ioctl(&device, SIOCSWLANSCAN, &scan) == EOVERFLOW);
-	assert(scan.state == WLAN_SCAN_IDLE);
+	assert(scan.state == WLAN_SCAN_CANCELLED);
 	fake.now = 0U;
 	{
 		struct block_gate gate;
@@ -1575,6 +1615,34 @@ test_core(void)
 		worker_wake_calls = 0U;
 		block_gate_destroy(&gate);
 	}
+
+	/* A radio poll may report ready and drain a beacon before the common
+	 * worker advances TUNING to DWELL.  That same-channel beacon belongs to
+	 * this generation and must survive final snapshot publication. */
+	fake.now = 50U;
+	request_header(&scan, sizeof(scan), "wlan0");
+	scan.action = WLAN_SCAN_START;
+	assert(wlan_station_ioctl(&device, SIOCSWLANSCAN, &scan) == 0);
+	wlan_timer_run(fake.now);
+	assert(wlan_station_report_scan_channel_ready(station, scan.generation,
+	    0U) == 0);
+	bss = make_bss(0xf0U, target, sizeof(target), -20);
+	assert(wlan_station_report_scan_bss(station, scan.generation, &bss) == 0);
+	wlan_timer_run(fake.now);
+	fake.now += WLAN_SCAN_DWELL_TICKS;
+	wlan_timer_run(fake.now);
+	request_header(&scan_status, sizeof(scan_status), "wlan0");
+	assert(wlan_station_ioctl(&device, SIOCGWLANSCAN, &scan_status) == 0);
+	assert(scan_status.state == WLAN_SCAN_COMPLETE &&
+	    scan_status.result_count == 1U);
+	request_header(&query, sizeof(query), "wlan0");
+	query.generation = scan.generation;
+	assert(wlan_station_ioctl(&device, SIOCGWLANBSS, &query) == 0);
+	assert(query.bss.bssid[5] == 0xf0U);
+	fake.scan_start_calls = 0U;
+	fake.scan_stop_calls = 0U;
+	fake.management_calls = 0U;
+	worker_wake_calls = 0U;
 
 	request_header(&scan, sizeof(scan), "wlan0");
 	scan.action = WLAN_SCAN_START;

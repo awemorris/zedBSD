@@ -37,8 +37,7 @@ enum test_event_type {
 	TEST_EVENT_MALFORMED = 15,
 	TEST_EVENT_TIMEOUT = 16,
 	TEST_EVENT_MALFORMED_MCC = 17,
-	TEST_EVENT_POWER_STATUS_FAILED = 18,
-	TEST_EVENT_MALFORMED_POWER = 19
+	TEST_EVENT_MALFORMED_POWER = 18
 };
 
 enum test_fail_stage {
@@ -66,6 +65,8 @@ struct test_command {
 	uint8_t group;
 	uint8_t opcode;
 	uint8_t version;
+	uint8_t payload[INTEL_AX211_COMMAND_INLINE_PAYLOAD_SIZE];
+	size_t payload_length;
 };
 
 struct test_fixture {
@@ -410,9 +411,9 @@ intel_ax211_transport_command_prepare_inline(
 	struct test_fixture *fixture;
 	int result;
 
-	(void)payload;
 	fixture = active_fixture;
 	assert(command != NULL);
+	assert(payload != NULL || payload_length == 0U);
 	assert(command->version == 0U);
 	assert(payload_length <= INTEL_AX211_COMMAND_INLINE_PAYLOAD_SIZE);
 	assert(fixture->command_count < TEST_COMMAND_CAPACITY);
@@ -423,6 +424,10 @@ intel_ax211_transport_command_prepare_inline(
 	fixture->command[fixture->command_count].group = command->group;
 	fixture->command[fixture->command_count].opcode = command->opcode;
 	fixture->command[fixture->command_count].version = command->version;
+	fixture->command[fixture->command_count].payload_length = payload_length;
+	if (payload_length != 0U)
+		memcpy(fixture->command[fixture->command_count].payload, payload,
+		    payload_length);
 	fixture->command_count++;
 	test_trace(fixture, 'c');
 	return INTEL_AX211_TRANSPORT_OK;
@@ -763,7 +768,9 @@ test_event_make(
 	uint32_t *generation)
 {
 	uint8_t alive[INTEL_AX211_PROTOCOL_ALIVE_SIZE];
+	uint8_t init[INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE];
 	uint8_t mcc[INTEL_AX211_RUNTIME_START_MCC_RESPONSE_MAX];
+	uint8_t pnvm[INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_SIZE];
 	uint8_t generic_status[INTEL_AX211_RUNTIME_START_GENERIC_RESPONSE_SIZE];
 	uint8_t flags;
 	uint8_t opcode;
@@ -797,9 +804,15 @@ test_event_make(
 		opcode = INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_OPCODE;
 		flags = INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM;
 		*version = INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_VERSION;
+		memset(pnvm, 0, sizeof(pnvm));
+		payload = pnvm;
+		payload_length = sizeof(pnvm);
 	} else if (script->type == TEST_EVENT_INIT) {
 		opcode = INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE;
 		*version = INTEL_AX211_PROTOCOL_UNKNOWN_VERSION;
+		memset(init, 0, sizeof(init));
+		payload = init;
+		payload_length = sizeof(init);
 	} else if (script->type == TEST_EVENT_MALFORMED) {
 		assert(capacity >= 7U);
 		memset(bytes, 0, 7U);
@@ -810,20 +823,19 @@ test_event_make(
 		opcode = command->opcode;
 		flags = command->group;
 		queue = TEST_COMMAND_QUEUE;
-		if (script->type == TEST_EVENT_ACK_MCC ||
+		if (script->type == TEST_EVENT_ACK_EXTENDED) {
+			memset(generic_status, 0, sizeof(generic_status));
+			payload = generic_status;
+			payload_length = sizeof(generic_status);
+		} else if (script->type == TEST_EVENT_ACK_MCC ||
 		    script->type == TEST_EVENT_MALFORMED_MCC) {
 			payload_length = test_mcc_payload(mcc, sizeof(mcc),
 			    script->type == TEST_EVENT_MALFORMED_MCC);
 			payload = mcc;
-		} else if (script->type == TEST_EVENT_ACK_POWER ||
-		    script->type == TEST_EVENT_POWER_STATUS_FAILED ||
-		    script->type == TEST_EVENT_MALFORMED_POWER) {
-			memset(generic_status, 0, sizeof(generic_status));
-			if (script->type == TEST_EVENT_POWER_STATUS_FAILED)
-				test_put_le32(generic_status, 1U);
+		} else if (script->type == TEST_EVENT_MALFORMED_POWER) {
+			generic_status[0] = 0U;
 			payload = generic_status;
-			payload_length = script->type == TEST_EVENT_MALFORMED_POWER ?
-			    sizeof(generic_status) - 1U : sizeof(generic_status);
+			payload_length = 1U;
 		}
 	}
 	if (script->failed)
@@ -1088,6 +1100,9 @@ test_success_retains_then_stops(void)
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
 	result = intel_ax211_runtime_start_run(&fixture.session);
+	if (result != INTEL_AX211_RUNTIME_START_OK)
+		fprintf(stderr, "runtime result=%d events=%lu trace=%s\n",
+		    result, (unsigned long)fixture.event_index, fixture.trace);
 	assert(result == INTEL_AX211_RUNTIME_START_OK);
 	assert(fixture.session.state == INTEL_AX211_RUNTIME_START_STATE_RUNNING);
 	assert(fixture.session.generation == 8U);
@@ -1100,6 +1115,7 @@ test_success_retains_then_stops(void)
 	assert(fixture.bound_generation == 8U);
 	assert(fixture.session.commands.hardware_epoch == 8U);
 	assert(fixture.command_count == sizeof(group) / sizeof(group[0]));
+	assert(strchr(fixture.trace, 'A') == NULL);
 	for (command_index = 0U; command_index < fixture.command_count;
 	     command_index++) {
 		assert(fixture.command[command_index].group ==
@@ -1108,6 +1124,23 @@ test_success_retains_then_stops(void)
 		    opcode[command_index]);
 		assert(fixture.command[command_index].version == 0U);
 	}
+	/* The operational unified image still requires IWL_INIT_NVM. */
+	assert(fixture.command[0].payload_length ==
+	    INTEL_AX211_INIT_EXTENDED_CFG_SIZE);
+	assert(fixture.command[0].payload[0] ==
+	    INTEL_AX211_INIT_EXTENDED_CFG_NVM_FLAG);
+	assert(fixture.command[0].payload[1] == 0U &&
+	    fixture.command[0].payload[2] == 0U &&
+	    fixture.command[0].payload[3] == 0U);
+	assert(fixture.command[1].group ==
+	    INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM);
+	assert(fixture.command[1].opcode ==
+	    INTEL_AX211_PROTOCOL_NVM_ACCESS_COMPLETE_OPCODE);
+	assert(fixture.command[1].payload_length == 4U);
+	assert(fixture.command[1].payload[0] == 0U &&
+	    fixture.command[1].payload[1] == 0U &&
+	    fixture.command[1].payload[2] == 0U &&
+	    fixture.command[1].payload[3] == 0U);
 	assert(intel_ax211_runtime_start_mcc(&fixture.session, &mcc) ==
 	    INTEL_AX211_RUNTIME_START_OK);
 	assert(mcc.channel_count == 1U);
@@ -1186,21 +1219,7 @@ test_runtime_failure_unwind(void)
 	size_t index;
 	int result;
 
-	/* POWER_TABLE consumes the firmware's exact generic status reply. */
-	test_fixture_init(&fixture);
-	test_success_events(&fixture);
-	for (index = 0U; index < fixture.event_count; index++) {
-		if (fixture.event[index].type == TEST_EVENT_ACK_POWER) {
-			fixture.event[index].type = TEST_EVENT_POWER_STATUS_FAILED;
-			break;
-		}
-	}
-	assert(index < fixture.event_count);
-	result = intel_ax211_runtime_start_run(&fixture.session);
-	assert(result == INTEL_AX211_RUNTIME_START_COMMAND);
-	assert(fixture.dma_released);
-	assert(!fixture.nic_owned);
-
+	/* POWER_TABLE has an exact zero-payload acknowledgement. */
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
 	for (index = 0U; index < fixture.event_count; index++) {

@@ -2,8 +2,10 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
 #include "src/hal/amd64/bsp-pcat/early-init-policy.h"
+#include "src/hal/amd64/bsp-pcat/timecounter-policy.h"
 
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -137,6 +139,316 @@ test_pit_poll(void)
 	    AMD64_PIT_POLL_TIMEOUT);
 }
 
+static struct amd64_tsc_cpuid_frequency_input
+valid_tsc_input(void)
+{
+	struct amd64_tsc_cpuid_frequency_input input = {
+		.max_basic_leaf = 0x15U,
+		.denominator = 1U,
+		.numerator = 96U,
+		.crystal_hz = 25000000U,
+		.tsc_supported = 1,
+		.invariant_tsc_supported = 1
+	};
+
+	return input;
+}
+
+static void
+test_tsc_frequency_policy(void)
+{
+	struct amd64_tsc_cpuid_frequency_input input;
+	uint64_t frequency;
+
+	input = valid_tsc_input();
+	assert(amd64_tsc_cpuid_frequency_evaluate(&input, &frequency) ==
+	    AMD64_TSC_FREQUENCY_READY);
+	assert(frequency == 2400000000ULL);
+
+	input.tsc_supported = 0;
+	frequency = UINT64_MAX;
+	assert(amd64_tsc_cpuid_frequency_evaluate(&input, &frequency) ==
+	    AMD64_TSC_FREQUENCY_UNAVAILABLE);
+	assert(frequency == 0U);
+	input = valid_tsc_input();
+	input.invariant_tsc_supported = 0;
+	assert(amd64_tsc_cpuid_frequency_evaluate(&input, &frequency) ==
+	    AMD64_TSC_FREQUENCY_UNAVAILABLE);
+
+	input = valid_tsc_input();
+	input.max_basic_leaf = 0x14U;
+	assert(amd64_tsc_cpuid_frequency_evaluate(&input, &frequency) ==
+	    AMD64_TSC_FREQUENCY_NEEDS_PIT);
+	input = valid_tsc_input();
+	input.denominator = 0U;
+	assert(amd64_tsc_cpuid_frequency_evaluate(&input, &frequency) ==
+	    AMD64_TSC_FREQUENCY_NEEDS_PIT);
+	input = valid_tsc_input();
+	input.numerator = 0U;
+	assert(amd64_tsc_cpuid_frequency_evaluate(&input, &frequency) ==
+	    AMD64_TSC_FREQUENCY_NEEDS_PIT);
+	input = valid_tsc_input();
+	input.crystal_hz = 0U;
+	assert(amd64_tsc_cpuid_frequency_evaluate(&input, &frequency) ==
+	    AMD64_TSC_FREQUENCY_NEEDS_PIT);
+
+	input = valid_tsc_input();
+	input.denominator = 3U;
+	input.numerator = 1U;
+	input.crystal_hz = 10000000U;
+	assert(amd64_tsc_cpuid_frequency_evaluate(&input, &frequency) ==
+	    AMD64_TSC_FREQUENCY_READY);
+	assert(frequency == 3333334ULL);
+	input = valid_tsc_input();
+	input.denominator = 2U;
+	input.numerator = 1U;
+	input.crystal_hz = 1000000U;
+	assert(amd64_tsc_cpuid_frequency_evaluate(&input, &frequency) ==
+	    AMD64_TSC_FREQUENCY_NEEDS_PIT);
+	input = valid_tsc_input();
+	input.numerator = 500U;
+	assert(amd64_tsc_cpuid_frequency_evaluate(&input, &frequency) ==
+	    AMD64_TSC_FREQUENCY_NEEDS_PIT);
+
+	assert(amd64_tsc_cpuid_frequency_evaluate(NULL, &frequency) ==
+	    AMD64_TSC_FREQUENCY_UNAVAILABLE);
+	assert(amd64_tsc_cpuid_frequency_evaluate(&input, NULL) ==
+	    AMD64_TSC_FREQUENCY_UNAVAILABLE);
+}
+
+static void
+test_tsc_pit_window_frequency(void)
+{
+	uint64_t frequency;
+
+	assert(amd64_tsc_pit_window_frequency(1000U, 24001362U,
+	    1193182U, 11932U, &frequency));
+	assert(frequency == 2399999994ULL);
+	frequency = UINT64_MAX;
+	assert(!amd64_tsc_pit_window_frequency(1000U, 1000U,
+	    1193182U, 11932U, &frequency));
+	assert(frequency == 0U);
+	assert(!amd64_tsc_pit_window_frequency(1001U, 1000U,
+	    1193182U, 11932U, &frequency));
+	assert(!amd64_tsc_pit_window_frequency(0U, 9999U,
+	    1193182U, 11932U, &frequency));
+	assert(!amd64_tsc_pit_window_frequency(0U, 100100000U,
+	    1193182U, 11932U, &frequency));
+	assert(!amd64_tsc_pit_window_frequency(0U, UINT64_MAX,
+	    1193182U, 11932U, &frequency));
+	assert(!amd64_tsc_pit_window_frequency(0U, 24000000U,
+	    0U, 11932U, &frequency));
+	assert(!amd64_tsc_pit_window_frequency(0U, 24000000U,
+	    1193182U, 0U, &frequency));
+	assert(!amd64_tsc_pit_window_frequency(0U, 24000000U,
+	    1193182U, 11932U, NULL));
+}
+
+static struct amd64_timecounter_cpu_metadata
+valid_timecounter_metadata(void)
+{
+	struct amd64_timecounter_cpu_metadata metadata = {
+		.frequency = {
+			.max_basic_leaf = 0x15U,
+			.denominator = 1U,
+			.numerator = 96U,
+			.crystal_hz = 25000000U,
+			.tsc_supported = 1,
+			.invariant_tsc_supported = 1
+		},
+		.tsc_adjust = 0U,
+		.tsc_adjust_supported = 1
+	};
+
+	return metadata;
+}
+
+static void
+test_timecounter_metadata_policy(void)
+{
+	struct amd64_timecounter_cpu_metadata bsp =
+	    valid_timecounter_metadata();
+	struct amd64_timecounter_cpu_metadata ap = bsp;
+
+	assert(amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_CPUID15, 2400000000ULL, &bsp, &ap));
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_NONE, 2400000000ULL, &bsp, &ap));
+	assert(amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_PIT, 2400000000ULL, &bsp, &ap));
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_CPUID15, 0U, &bsp, &ap));
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_CPUID15, 2400000001ULL, &bsp, &ap));
+	ap.frequency.numerator = 95U;
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_CPUID15, 2400000000ULL, &bsp, &ap));
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_PIT, 2400000000ULL, &bsp, &ap));
+	ap = bsp;
+	ap.frequency.max_basic_leaf++;
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_PIT, 2400000000ULL, &bsp, &ap));
+	ap = bsp;
+	ap.frequency.invariant_tsc_supported = 0;
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_CPUID15, 2400000000ULL, &bsp, &ap));
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_PIT, 2400000000ULL, &bsp, &ap));
+	ap = bsp;
+	ap.tsc_adjust_supported = 0;
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_CPUID15, 2400000000ULL, &bsp, &ap));
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_PIT, 2400000000ULL, &bsp, &ap));
+	ap = bsp;
+	ap.tsc_adjust = 1U;
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_CPUID15, 2400000000ULL, &bsp, &ap));
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_PIT, 2400000000ULL, &bsp, &ap));
+	assert(!amd64_timecounter_metadata_compatible(
+	    AMD64_TIMECOUNTER_SOURCE_CPUID15, 2400000000ULL, NULL, &ap));
+}
+
+static void
+test_timecounter_probe_policy(void)
+{
+	struct amd64_timecounter_probe_result probe;
+	unsigned round;
+
+	amd64_timecounter_probe_init(&probe);
+	for (round = 0U; round < AMD64_TIMECOUNTER_PROBE_ROUNDS; round++) {
+		uint64_t width = 200000U - round * 10000U;
+		assert(amd64_timecounter_probe_consider(&probe, 1000000U,
+		    1000000U + width / 2U, 1000000U + width));
+	}
+	assert(probe.valid_rounds == AMD64_TIMECOUNTER_PROBE_ROUNDS);
+	assert(probe.width == 130000U);
+	assert(amd64_timecounter_probe_accept(&probe, 2400000000ULL));
+
+	amd64_timecounter_probe_init(&probe);
+	assert(!amd64_timecounter_probe_consider(&probe, 1000U, 999U,
+	    1100U));
+	assert(!amd64_timecounter_probe_consider(&probe, 1000U, 1101U,
+	    1100U));
+	assert(!amd64_timecounter_probe_consider(&probe, 1000U, 1000U,
+	    1000U));
+	assert(!amd64_timecounter_probe_accept(&probe, 2400000000ULL));
+
+	amd64_timecounter_probe_init(&probe);
+	for (round = 0U; round < AMD64_TIMECOUNTER_PROBE_ROUNDS; round++)
+		assert(amd64_timecounter_probe_consider(&probe, 0U, 250000U,
+		    250001U));
+	assert(!amd64_timecounter_probe_accept(&probe, 2400000000ULL));
+
+	amd64_timecounter_probe_init(&probe);
+	for (round = 1U; round < AMD64_TIMECOUNTER_PROBE_ROUNDS; round++)
+		assert(amd64_timecounter_probe_consider(&probe, 10U, 11U,
+		    12U));
+	assert(!amd64_timecounter_probe_accept(&probe, 2400000000ULL));
+}
+
+struct sample_sequence {
+	const uint64_t *values;
+	unsigned count;
+	unsigned index;
+};
+
+static uint64_t
+sample_sequence_read(void *context)
+{
+	struct sample_sequence *sequence = context;
+	unsigned index = sequence->index++;
+
+	assert(index < sequence->count);
+	return sequence->values[index];
+}
+
+struct concurrent_counter {
+	struct amd64_timecounter_read_state *state;
+	volatile uint64_t next;
+	volatile unsigned failed;
+};
+
+static uint64_t
+sample_increment(void *context)
+{
+	struct concurrent_counter *counter = context;
+
+	return __atomic_add_fetch(&counter->next, 1U, __ATOMIC_RELAXED);
+}
+
+static void *
+concurrent_reader(void *argument)
+{
+	struct concurrent_counter *counter = argument;
+	unsigned iteration;
+
+	for (iteration = 0U; iteration < 10000U; iteration++) {
+		uint64_t sample;
+		uint64_t frequency;
+
+		if (!amd64_timecounter_read_guarded(counter->state,
+		    sample_increment, counter, &sample, &frequency) ||
+		    sample == 0U || frequency != 2400000000ULL)
+			__atomic_store_n(&counter->failed, 1U,
+			    __ATOMIC_RELEASE);
+	}
+	return NULL;
+}
+
+static void
+test_timecounter_read_guard(void)
+{
+	static const uint64_t backward_values[] = { 100U, 90U, 110U };
+	struct amd64_timecounter_read_state state;
+	struct sample_sequence sequence = {
+		.values = backward_values,
+		.count = sizeof(backward_values) / sizeof(backward_values[0])
+	};
+	struct concurrent_counter concurrent = {
+		.state = &state,
+		.next = 0U,
+		.failed = 0U
+	};
+	pthread_t readers[4];
+	uint64_t sample = UINT64_MAX;
+	uint64_t frequency = UINT64_MAX;
+	unsigned index;
+
+	amd64_timecounter_read_state_init(&state);
+	assert(!amd64_timecounter_read_guarded(&state,
+	    sample_sequence_read, &sequence, &sample, &frequency));
+	assert(sample == UINT64_MAX && frequency == UINT64_MAX);
+	assert(!amd64_timecounter_read_state_publish(&state, 0U));
+	assert(amd64_timecounter_read_state_publish(&state, 2400000000ULL));
+	assert(!amd64_timecounter_read_state_publish(&state, 2400000000ULL));
+	assert(amd64_timecounter_read_guarded(&state, sample_sequence_read,
+	    &sequence, &sample, &frequency));
+	assert(sample == 100U && frequency == 2400000000ULL);
+	sample = 0xaaaaaaaaaaaaaaaaULL;
+	frequency = 0xbbbbbbbbbbbbbbbbULL;
+	assert(!amd64_timecounter_read_guarded(&state, sample_sequence_read,
+	    &sequence, &sample, &frequency));
+	assert(sample == 0xaaaaaaaaaaaaaaaaULL);
+	assert(frequency == 0xbbbbbbbbbbbbbbbbULL);
+	assert(!amd64_timecounter_read_guarded(&state, sample_sequence_read,
+	    &sequence, &sample, &frequency));
+	assert(sequence.index == 2U);
+
+	amd64_timecounter_read_state_init(&state);
+	assert(amd64_timecounter_read_state_publish(&state, 2400000000ULL));
+	for (index = 0U; index < 4U; index++)
+		assert(pthread_create(&readers[index], NULL, concurrent_reader,
+		    &concurrent) == 0);
+	for (index = 0U; index < 4U; index++)
+		assert(pthread_join(readers[index], NULL) == 0);
+	assert(__atomic_load_n(&concurrent.failed, __ATOMIC_ACQUIRE) == 0U);
+	assert(__atomic_load_n(&concurrent.next, __ATOMIC_ACQUIRE) == 40000U);
+	assert(__atomic_load_n(&state.last_sample, __ATOMIC_ACQUIRE) == 40000U);
+}
+
 static void
 expect_ioapic(uint32_t version, uint32_t gsi_base,
 	const struct amd64_ioapic_range *previous, unsigned previous_count,
@@ -185,6 +497,11 @@ main(void)
 {
 	test_apic_policy();
 	test_pit_poll();
+	test_tsc_frequency_policy();
+	test_tsc_pit_window_frequency();
+	test_timecounter_metadata_policy();
+	test_timecounter_probe_policy();
+	test_timecounter_read_guard();
 	test_ioapic_policy();
 	puts("BR-T52 amd64 early-init policy test: PASS");
 	return 0;

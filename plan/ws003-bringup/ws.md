@@ -1,6 +1,6 @@
 # WS003: real-hardware bring-up
 
-Last updated: 2026-08-31
+Last updated: 2026-09-03
 
 WSID: `ws003`
 
@@ -16,6 +16,12 @@ invariant CHS 0/0/2 read while retaining the geometry-dependent PBR/BOOTZBSD
 SENSE paths. Its source/binary/QEMU milestone passes and one exact
 PC-9821V13 artifact boot remains; p022/p023 are retained as historical
 automatic evidence rather than competing physical requests
+
+Q066 completed `ws003-p025`'s automatic milestone: the approved HAL
+wall-clock/counter split and complete-CPU-set amd64 TSC publication contract
+now pass their focused, positive/negative SMP QEMU, and configured-build gates.
+It does not move timing policy into the AX211 driver. One physical multicore
+observation remains and is shared with p038's final direct boot.
 
 Parent: [master plan](../master.md)
 
@@ -68,6 +74,7 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p022` | [PC-9821V13 IPL stack and disk-read contract](phase022-pc9821-v13-ipl-read-contract/phase.md) | Uncleared historical evidence (`q037`); physical handoff superseded by p024 | Native layout, private stack, and then-current SENSE/read invariants passed QEMU; do not run its older artifact |
 | `ws003-p023` | [PC-9821V13 IPL entry localization](phase023-pc9821-v13-ipl-entry-localization/phase.md) | Uncleared historical evidence (`q039`); physical handoff superseded by p024 | Exact/corrupted `IPL1` and normal/diagnostic QEMU login pass; p024 consumes its localization result and owns the current artifact |
 | `ws003-p024` | [PC-9821V13 Stage-1 fixed-read compatibility](phase024-pc9821-v13-stage1-fixed-read-compatibility/phase.md) | Uncleared (`q043`); automatic milestone passes | Stage 1 contains only its fixed AH=`06h` CHS 0/0/2 read, PBR/BOOTZBSD retain SENSE, normal and diagnostic QEMU reach login, and exact artifact `7d4e7d67...` awaits one V13 boot; Make-owned Noct gates resume through p010 |
+| `ws003-p025` | [HAL clock-source split and amd64 SMP monotonic counter](phase025-amd64-smp-counter-validation/phase.md) | Automatic milestone complete (`q066`); shared physical observation pending | The approved epoch/counter API pair, private calibration, complete admitted-CPU validation, same-build fault-injection rebuild gate, and positive/negative SMP KVM evidence pass; close it with p038's one final direct boot |
 
 `ws003-p003` was the sole authorized item in q012. Its physical result closes
 the PCI/BAR/capability boundary and extracts the first device-enumeration stop

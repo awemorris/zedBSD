@@ -1,6 +1,6 @@
 # WS004: hardware expansion
 
-Last updated: 2026-09-02
+Last updated: 2026-09-03
 
 WSID: `ws004`
 
@@ -29,11 +29,13 @@ secure-L2, and IP-communication result; this developmental run does not
 complete the later WS005 p008 five-run acceptance. Q060 completed p030's finite
 automatic lifecycle milestone without consuming that shared physical closure.
 Q061 completed p037's read-only intake, corrected the exact target to Intel
-AX211/CNVio2, and cleared its firmware/license boundary. P038 is now the
-retargeted independent AX211 useful normal path: its implementation and
-focused automatic gates are complete, while one exact-device direct-boot
-firmware/RF/IP checkpoint remains. P039 remains the subsequent review of
-proven cross-driver commonality. `p034`
+AX211/CNVio2, and cleared its firmware/license boundary. Q065 localized its
+first association stop to legacy commands against the pinned `-89` MLD API.
+Q066 then completed the API89 transition and an exact-device VFIO normal path
+through WPA2/CCMP, DHCP, ping, nonempty HTTP fetch, disconnect, down, and host
+restoration. P038 remains uncleared only for the one direct physical run shared
+with `ws003-p025`. P039 remains the subsequent review of proven cross-driver
+commonality. `p034`
 separately records deferred, nonblocking CDC ECM accounting adoption, and
 `p035` records the nonblocking future same-endpoint multi-URB extension which
 the first WLAN scan path deliberately does not require.
@@ -104,10 +106,11 @@ p009 developmental attach/scan/connect/DHCP/ping/fetch checkpoint with
 calibrated legacy TX power and transition-mode RSNXE handling. Q060 then
 completed p030's automatic lifecycle-hardening milestone; WS005 p008's shared
 physical lifecycle and five-run acceptance remains incomplete. Q061 completed
-p037 with the accepted exact AX211/CNVio2 target. Q062 has completed p038's
-implementation and focused automatic gates; q062 closed p038 as uncleared
-when the user deferred its one exact-device direct-boot run. P039 follows a
-successful result. This sequence does not permit an
+p037 with the accepted exact AX211/CNVio2 target. Q062 completed p038's initial
+implementation and focused automatic gates. Q066 subsequently completed its
+API89 MLD correction and exact-device VFIO useful normal path with verified
+host restoration. P038 now awaits only one direct physical run shared with
+WS003 p025. P039 follows that successful result. This sequence does not permit an
 Intel/Realtek common hardware layer before both drivers work independently.
 
 Shared tests: [WS004 test index](tests/README.md)
@@ -153,7 +156,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p035`](phase035-usb-same-endpoint-multi-urb/phase.md) | Planned/deferred; nonblocking; not queued | Add a bounded same-endpoint xHCI URB ring only when a measured workload needs it; p028 retains one persistent bulk-IN URB and does not depend on this Phase |
 | [`ws004-p036`](phase036-rtl8822bu-pre-radio-substrate/phase.md) | Complete (`q056`) | The default-off firmware package, exact USB/register/efuse/firmware/RX substrate, serialized p027 publication, fake DDMA/RX integration, and tableless production refusal pass before p028 programs RF |
 | [`ws004-p037`](phase037-intel-ax201-intake-firmware/phase.md) | Complete (`q061`) | The AX201 hypothesis was corrected to exact AX211/CNVio2 `8086:51f0`, subsystem `8086:4090`, revision `01`; firmware, provenance, clear license, optional-package, and direct-boot boundaries are frozen in HW-T37 |
-| [`ws004-p038`](phase038-intel-ax211-standalone-driver/phase.md) | Uncleared (`q062`); implementation and focused automatic package/PCI/MSI-X/DMA/firmware/runtime/scan/security/L2/lifetime gates complete, physical test deferred by user | Record one exact AX211/CNVio2 direct-boot result covering physical firmware/PNVM, RF scan, WPA2/CCMP, DHCP, ping, fetch, disconnect, and down |
+| [`ws004-p038`](phase038-intel-ax211-standalone-driver/phase.md) | Uncleared (`q066`); automatic and exact-device VFIO normal-path milestones complete | API89 firmware/PNVM, scan, WPA2/CCMP, DHCP, LAN/public ping, nonempty HTTP fetch, disconnect, down, and host restoration pass; obtain the one shared final direct-boot result |
 | [`ws004-p039`](phase039-wlan-evidence-driven-refactor/phase.md) | Planned; follows p030 automatic milestone and p038; not queued | Compare both working drivers and move only substantial, stable, demonstrated common behavior beneath the unchanged public WLAN UAPI; a justified no-extraction result is valid |
 
 ### MSI follow-up register
@@ -261,7 +264,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-31 | Planned/deferred as `ws004-p034`; nonblocking; not queued | CDC ECM adoption of q054 asynchronous TX-error accounting | p019, p017/q054 | HW-T28 proves exactly-once genuine terminal errors, excluded administrative cancellation, retained packet/byte/drop meanings, lifecycle safety, and unchanged QEMU ECM behavior without a physical check |
 | HW-32 | Planned/deferred as `ws004-p035`; nonblocking; not queued | Bounded same-endpoint multi-URB support for xHCI | A measured consumer need; existing p011 per-endpoint contract | HW-T35 proves exact per-request completion/cancel/drain, ring wrap, teardown, and fairness while UHCI/EHCI retain one request per endpoint |
 | HW-33 | Complete as `ws004-p037` (`q061`) | Read-only exact Intel AX211/CNVio2 identity, topology, firmware, provenance, and optional-package/license intake | Completed p030 automatic gates and authorized SSH test machine | HW-T37 freezes `8086:51f0`/`8086:4090`/rev `01`, exact firmware bytes, clear license, and direct-boot boundary without host mutation |
-| HW-34 | Uncleared as `ws004-p038` (`q062`); implementation and focused automatic gates complete, exact-device run deferred by user | Independent native AX211/CNVio2 driver and `userland/firmware/intelax211/` entry, without an Intel/RTL hardware framework | HW-33, HW-00/HW-23/HW-25 contracts | HW-T38 automatic evidence passes; one exact-device direct-boot run must still pass physical firmware/PNVM, scan, WPA2/CCMP, DHCP, ping, fetch, disconnect, and down; exhaustive hardening remains later |
+| HW-34 | Uncleared as `ws004-p038` (`q066`); automatic and exact-device VFIO milestones complete | Independent native AX211/CNVio2 driver and `userland/firmware/intelax211/` entry, without an Intel/RTL hardware framework | HW-33, HW-00/HW-23/HW-25 contracts and `ws003-p025` | HW-T38 API89/focused and exact-device VFIO scan, secure L2, useful-IP, checked-down, and host-restoration evidence pass; one direct boot must still supply the shared physical counter/network result |
 | HW-35 | Planned as `ws004-p039`; follows p038 | Evidence-driven comparison and optional extraction of proven common WLAN behavior | HW-26 automatic milestone and completed HW-34, with passing exact-device paths | HW-T39 preserves public UAPI and both drivers; a documented no-extraction review is valid when commonality is not substantial/stable |
 
 ## 4. NVMe sequence
@@ -400,9 +403,10 @@ reviews commonality only after both production paths work.
    `8086:51f0`/`8086:4090`/rev `01`, and froze hardware, firmware, provenance,
    clear license, package, and direct-boot facts.
 3. [`ws004-p038`](phase038-intel-ax211-standalone-driver/phase.md) implements
-   that AX211 independently. Its implementation and focused automatic gates
-   now pass; one exact-device direct boot still must prove physical firmware/
-   PNVM, scan, WPA2/CCMP, DHCP, ping, fetch, disconnect, and down. It reuses
+   that AX211 independently. Its implementation, focused gates, and exact-
+   device VFIO normal path through firmware/PNVM, scan, WPA2/CCMP, DHCP, ping,
+   fetch, disconnect, and down now pass with host restoration. One direct boot
+   still supplies the final native result shared with WS003 p025. It reuses
    stable public WLAN contracts, not RTL internals or a newly invented
    hardware framework.
 4. [`ws004-p039`](phase039-wlan-evidence-driven-refactor/phase.md) compares the

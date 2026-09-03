@@ -77,10 +77,11 @@
 #define INTEL_AX211_SCAN_PASSIVE_DWELL                     110U
 #define INTEL_AX211_SCAN_ADAPTIVE_BUDGET                   300U
 #define INTEL_AX211_SCAN_CHANNEL_WIDTH_MHZ                  20U
-#define INTEL_AX211_SCAN_CHANNEL_LIMIT                      11U
+#define INTEL_AX211_SCAN_CHANNEL_LIMIT                      51U
 #define INTEL_AX211_SCAN_FIRMWARE_CHANNEL_LIMIT             67U
 #define INTEL_AX211_SCAN_PROBE_LIMIT                       512U
 #define INTEL_AX211_SCAN_REQUEST_SIZE                     1940U
+#define INTEL_AX211_SCAN_ITERATION_NOTIFICATION_SIZE       912U
 #define INTEL_AX211_SCAN_ABORT_SIZE                          8U
 #define INTEL_AX211_SCAN_ACK_TIMEOUT_US                1000000U
 #define INTEL_AX211_SCAN_WATCHDOG_US                   5000000U
@@ -144,7 +145,7 @@ struct intel_ax211_scan_state {
 	uint32_t generation;
 	uint64_t acknowledgement_deadline;
 	uint64_t scan_deadline;
-	uint16_t requested_channels;
+	uint8_t requested_channels[32U];
 	enum intel_ax211_scan_phase phase;
 	uint8_t abort_required;
 };

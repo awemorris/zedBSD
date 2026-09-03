@@ -116,8 +116,7 @@ ax211_scan_station_valid(const uint8_t address[6])
 static int
 ax211_scan_profile_valid(const struct intel_ax211_scan_profile *profile)
 {
-	uint16_t channels;
-	size_t index;
+	size_t index, earlier;
 
 	if (profile == NULL ||
 	    !ax211_scan_station_valid(profile->station_address) ||
@@ -126,20 +125,44 @@ ax211_scan_profile_valid(const struct intel_ax211_scan_profile *profile)
 	    profile->channel_count == 0U ||
 	    profile->channel_count > INTEL_AX211_SCAN_CHANNEL_LIMIT)
 		return 0;
-	channels = 0U;
 	for (index = 0U; index < profile->channel_count; index++) {
 		uint8_t channel;
-		uint16_t bit;
 
 		channel = profile->channel[index];
-		if (channel == 0U || channel > INTEL_AX211_SCAN_CHANNEL_LIMIT)
+		if (!((channel >= 1U && channel <= 14U) ||
+		    (channel >= 36U && channel <= 144U &&
+		    ((channel - 36U) % 4U) == 0U) ||
+		    (channel >= 149U && channel <= 181U &&
+		    ((channel - 149U) % 4U) == 0U)))
 			return 0;
-		bit = (uint16_t)(UINT16_C(1) << channel);
-		if ((channels & bit) != 0U)
-			return 0;
-		channels |= bit;
+		for (earlier = 0U; earlier < index; earlier++) {
+			if (profile->channel[earlier] == channel)
+				return 0;
+		}
 	}
 	return 1;
+}
+
+static void
+ax211_scan_profile_add(
+	struct intel_ax211_scan_profile *profile,
+	const struct intel_ax211_protocol_channel *candidate,
+	const struct intel_ax211_runtime_mcc *mcc,
+	size_t regulatory_index,
+	int lar_enabled)
+{
+	if (candidate->number == 0U || profile->channel_count >=
+	    INTEL_AX211_SCAN_CHANNEL_LIMIT)
+		return;
+	if (lar_enabled) {
+		if (mcc == NULL || regulatory_index >= mcc->channel_count ||
+		    (mcc->channel[regulatory_index] &
+		    INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID) == 0U)
+			return;
+	} else if (!candidate->valid) {
+		return;
+	}
+	profile->channel[profile->channel_count++] = candidate->number;
 }
 
 int
@@ -150,41 +173,34 @@ intel_ax211_scan_profile_from_nvm(
 	struct intel_ax211_scan_profile *profile)
 {
 	struct intel_ax211_scan_profile parsed;
-	uint16_t admitted;
 	size_t index;
 
 	if (nvm == NULL || station_address == NULL || profile == NULL ||
 	    !nvm->band_24_enabled ||
 	    nvm->channel_24ghz_count >
 	    INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT ||
-	    (nvm->lar_enabled && mcc == NULL) ||
-	    (mcc != NULL && (mcc->status > 1U || mcc->channel_count == 0U ||
+	    nvm->channel_5ghz_count >
+	    INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT ||
+	    (nvm->lar_enabled && (mcc == NULL || mcc->status >
+	    INTEL_AX211_RUNTIME_MCC_STATUS_MAX ||
+	    mcc->channel_count == 0U ||
 	    mcc->channel_count > INTEL_AX211_RUNTIME_MCC_CHANNEL_LIMIT)) ||
 	    !ax211_scan_station_valid(station_address))
 		return INTEL_AX211_SCAN_INVALID;
 	memset(&parsed, 0, sizeof(parsed));
 	memcpy(parsed.station_address, station_address, 6U);
 	parsed.channel_width_mhz = INTEL_AX211_SCAN_CHANNEL_WIDTH_MHZ;
-	admitted = 0U;
 	for (index = 0U; index < nvm->channel_24ghz_count; index++) {
-		const struct intel_ax211_protocol_channel *candidate;
-		uint16_t bit;
-
-		candidate = &nvm->channel_24ghz[index];
-		if (!candidate->valid || candidate->number == 0U ||
-		    candidate->number > INTEL_AX211_SCAN_CHANNEL_LIMIT)
-			continue;
-		if (mcc != NULL &&
-		    ((size_t)candidate->number > mcc->channel_count ||
-		    (mcc->channel[candidate->number - 1U] &
-		    INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID) == 0U))
-			continue;
-		bit = (uint16_t)(UINT16_C(1) << candidate->number);
-		if ((admitted & bit) != 0U)
-			continue;
-		parsed.channel[parsed.channel_count] = candidate->number;
-		parsed.channel_count++;
-		admitted |= bit;
+		ax211_scan_profile_add(&parsed, &nvm->channel_24ghz[index],
+		    mcc, index, nvm->lar_enabled);
+	}
+	if (nvm->band_52_enabled) {
+		for (index = 0U; index < nvm->channel_5ghz_count; index++) {
+			ax211_scan_profile_add(&parsed,
+			    &nvm->channel_5ghz[index], mcc,
+			    INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT + index,
+			    nvm->lar_enabled);
+		}
 	}
 	if (!ax211_scan_profile_valid(&parsed))
 		return INTEL_AX211_SCAN_UNSUPPORTED;
@@ -325,7 +341,8 @@ intel_ax211_scan_request_encode(
 
 		channel = output + AX211_SCAN_CHANNEL_CONFIG_OFFSET +
 		    index * AX211_SCAN_CHANNEL_CONFIG_SIZE;
-		ax211_scan_put_le32(channel, AX211_SCAN_24GHZ_BAND_FLAG);
+		ax211_scan_put_le32(channel, profile->channel[index] <= 14U ?
+		    AX211_SCAN_24GHZ_BAND_FLAG : 0U);
 		channel[4U] = profile->channel[index];
 		channel[5U] = 0x80U;
 		channel[6U] = 1U;
@@ -371,8 +388,8 @@ intel_ax211_scan_begin(
 	started.scan_deadline = now_us + INTEL_AX211_SCAN_WATCHDOG_US;
 	started.phase = INTEL_AX211_SCAN_PHASE_WAIT_ACK;
 	for (index = 0U; index < profile->channel_count; index++)
-		started.requested_channels |= (uint16_t)(UINT16_C(1) <<
-		    profile->channel[index]);
+		started.requested_channels[profile->channel[index] / 8U] |=
+		    (uint8_t)(UINT8_C(1) << (profile->channel[index] % 8U));
 	*state = started;
 	return INTEL_AX211_SCAN_OK;
 }
@@ -456,37 +473,40 @@ ax211_scan_complete_decode(
 	event->last_iteration = bytes[5U];
 	event->status = bytes[6U];
 	event->ebs_status = bytes[7U];
-	if (event->last_schedule != 0U || event->last_iteration > 1U ||
-	    ax211_scan_get_le32(bytes + 12U) != 0U)
-		return INTEL_AX211_SCAN_UNSUPPORTED;
+	/* Scheduling, iteration, EBS, elapsed-time, and reserved fields are
+	 * firmware reports.  They do not narrow the v1 completion contract. */
 	return ax211_scan_status_result(event->status);
 }
 
 static int
 ax211_scan_iteration_decode(
-	const struct intel_ax211_scan_state *state,
 	const struct intel_ax211_protocol_message *message,
 	struct intel_ax211_scan_event *event)
 {
-	uint16_t seen;
 	const uint8_t *bytes;
+	size_t available;
 	size_t count;
 	size_t expected;
 	size_t index;
 
 	if (message->payload_length < 16U)
 		return INTEL_AX211_SCAN_TRUNCATED;
+	if (message->payload_length >
+	    INTEL_AX211_SCAN_ITERATION_NOTIFICATION_SIZE ||
+	    (message->payload_length - 16U) % 8U != 0U)
+		return INTEL_AX211_SCAN_OVERSIZED;
 	bytes = message->payload;
 	if (ax211_scan_get_le32(bytes) != INTEL_AX211_SCAN_UID)
 		return INTEL_AX211_SCAN_OUT_OF_ORDER;
 	count = bytes[4U];
 	if (count > INTEL_AX211_SCAN_CHANNEL_LIMIT)
 		return INTEL_AX211_SCAN_OVERSIZED;
+	available = (message->payload_length - 16U) / 8U;
+	if (count > available)
+		return INTEL_AX211_SCAN_TRUNCATED;
 	expected = 16U + count * 8U;
 	if (message->payload_length < expected)
 		return INTEL_AX211_SCAN_TRUNCATED;
-	if (message->payload_length > expected)
-		return INTEL_AX211_SCAN_OVERSIZED;
 	memset(event, 0, sizeof(*event));
 	event->kind = INTEL_AX211_SCAN_EVENT_ITERATION_COMPLETE;
 	event->channel_count = count;
@@ -495,34 +515,24 @@ ax211_scan_iteration_decode(
 	event->last_channel = bytes[7U];
 	event->tsf = (uint64_t)ax211_scan_get_le32(bytes + 8U) |
 	    ((uint64_t)ax211_scan_get_le32(bytes + 12U) << 32);
-	if (event->last_channel != 0U &&
-	    (event->last_channel > INTEL_AX211_SCAN_CHANNEL_LIMIT ||
-	    (state->requested_channels & (UINT16_C(1) <<
-	    event->last_channel)) == 0U))
-		return INTEL_AX211_SCAN_UNSUPPORTED;
-	seen = 0U;
 	for (index = 0U; index < count; index++) {
 		const uint8_t *result;
-		uint8_t channel;
-		uint16_t bit;
 
 		result = bytes + 16U + index * 8U;
-		channel = result[0U];
-		if (result[1U] != 1U || channel == 0U ||
-		    channel > INTEL_AX211_SCAN_CHANNEL_LIMIT)
-			return INTEL_AX211_SCAN_UNSUPPORTED;
-		bit = (uint16_t)(UINT16_C(1) << channel);
-		if ((state->requested_channels & bit) == 0U ||
-		    (seen & bit) != 0U)
-			return INTEL_AX211_SCAN_UNSUPPORTED;
-		seen |= bit;
-		event->channel[index].channel = channel;
+		/* Channel, band, and per-probe fields are informational reports.
+		 * The UID and bounded result count fence this notification. */
+		event->channel[index].channel = result[0U];
 		event->channel[index].probe_status = result[2U];
 		event->channel[index].probe_not_sent = result[3U];
 		event->channel[index].duration =
 		    ax211_scan_get_le32(result + 4U);
 	}
-	return ax211_scan_status_result(event->status);
+	/* API89 firmware may publish the complete 112-entry result storage even
+	 * when scanned_channels says only one entry is live.  Decode exactly that
+	 * bounded prefix and ignore the remaining fixed-array storage.  This is an
+	 * iteration report, not the terminal UMAC completion; SCAN_COMPLETE_UMAC
+	 * owns lifetime. */
+	return INTEL_AX211_SCAN_OK;
 }
 
 int
@@ -548,7 +558,7 @@ intel_ax211_scan_event_accept(
 		result = ax211_scan_complete_decode(message, event);
 	else if (message->opcode ==
 	    INTEL_AX211_SCAN_ITERATION_COMPLETE_OPCODE)
-		result = ax211_scan_iteration_decode(state, message, event);
+		result = ax211_scan_iteration_decode(message, event);
 	else
 		return INTEL_AX211_SCAN_UNSUPPORTED;
 	if (result == INTEL_AX211_SCAN_COMPLETE ||

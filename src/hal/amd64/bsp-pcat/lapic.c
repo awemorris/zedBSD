@@ -5,6 +5,7 @@
 #include "lapic.h"
 #include "acpi.h"
 #include "early-init-policy.h"
+#include "timecounter.h"
 #include "../asm.h"
 #include "../defs.h"
 
@@ -25,6 +26,8 @@
 #define LAPIC_PERIODIC 0x20000U
 #define ICR_PENDING    0x1000U
 #define PIT_POLL_LIMIT 1000000U
+#define PIT_INPUT_HZ   1193182ULL
+#define PIT_CAL_TICKS  11932U
 
 #define CPUID_ARCH_CAPABILITIES (1U << 29)
 #define ARCH_CAP_XAPIC_DISABLE_STATUS (1ULL << 21)
@@ -222,7 +225,8 @@ pit_wait_level(struct amd64_pit_poll *poll, int expected_high,
 }
 
 static int
-pit_wait_10ms(uint8_t *last_port61, unsigned *polls, const char **stage)
+pit_wait_10ms(uint8_t *last_port61, unsigned *polls, const char **stage,
+	int measure_tsc, uint64_t *tsc_start, uint64_t *tsc_end)
 {
 	uint8_t value = asm_inb(0x61U);
 	struct amd64_pit_poll poll;
@@ -232,8 +236,8 @@ pit_wait_10ms(uint8_t *last_port61, unsigned *polls, const char **stage)
 	 * before raising GATE, otherwise a stuck-high port can look successful. */
 	asm_outb(0x61U, (uint8_t)(value & ~3U));
 	asm_outb(0x43U, 0xb0U);
-	asm_outb(0x42U, (uint8_t)11932U);
-	asm_outb(0x42U, (uint8_t)(11932U >> 8));
+	asm_outb(0x42U, (uint8_t)PIT_CAL_TICKS);
+	asm_outb(0x42U, (uint8_t)(PIT_CAL_TICKS >> 8));
 	amd64_pit_poll_init(&poll, PIT_POLL_LIMIT);
 	error = pit_wait_level(&poll, 0, last_port61);
 	if (error != HAL_OK) {
@@ -241,9 +245,13 @@ pit_wait_10ms(uint8_t *last_port61, unsigned *polls, const char **stage)
 			*stage = "out-low";
 		goto out;
 	}
+	if (measure_tsc)
+		*tsc_start = amd64_timecounter_sample_serialized();
 	asm_outb(0x61U, (uint8_t)((value & ~2U) | 1U));
 	amd64_pit_poll_init(&poll, PIT_POLL_LIMIT);
 	error = pit_wait_level(&poll, 1, last_port61);
+	if (error == HAL_OK && measure_tsc)
+		*tsc_end = amd64_timecounter_sample_serialized();
 	if (error != HAL_OK && stage != NULL)
 		*stage = "out-high";
 out:
@@ -258,19 +266,27 @@ amd64_lapic_timer_start(void)
 {
 	if (timer_initial == 0) {
 		uint32_t elapsed;
+		uint64_t tsc_start = 0U;
+		uint64_t tsc_end = 0U;
 		uint8_t port61;
 		unsigned polls;
 		const char *stage = "complete";
+		enum amd64_tsc_frequency_policy_result tsc_policy;
+		int measure_tsc;
 
 		hal_puts("A64 TIMER CAL BEGIN\n");
+		tsc_policy = amd64_timecounter_bsp_prepare();
+		measure_tsc = tsc_policy == AMD64_TSC_FREQUENCY_NEEDS_PIT;
 		write_reg(LAPIC_TIMER_DIVIDE, 0x3U); /* divide by 16 */
 		write_reg(LAPIC_LVT_TIMER, LAPIC_MASKED | INT_IRQ_BASE);
 		write_reg(LAPIC_TIMER_INITIAL, 0xffffffffU);
-		if (pit_wait_10ms(&port61, &polls, &stage) != HAL_OK) {
+		if (pit_wait_10ms(&port61, &polls, &stage, measure_tsc,
+		    &tsc_start, &tsc_end) != HAL_OK) {
 			uint32_t current = read_reg(LAPIC_TIMER_CURRENT);
 			write_reg(LAPIC_LVT_TIMER,
 			    LAPIC_MASKED | INT_IRQ_BASE);
 			write_reg(LAPIC_TIMER_INITIAL, 0);
+			amd64_timecounter_bsp_abort();
 			hal_printf("A64 TIMER CAL TIMEOUT stage=%s port61=%02X "
 			    "lapic-current=%08X polls=%u\n", stage, port61,
 			    current, polls);
@@ -281,10 +297,14 @@ amd64_lapic_timer_start(void)
 		if (elapsed < 100U) {
 			write_reg(LAPIC_LVT_TIMER,
 			    LAPIC_MASKED | INT_IRQ_BASE);
+			amd64_timecounter_bsp_abort();
 			hal_printf("A64 TIMER CAL INVALID elapsed=%u\n", elapsed);
 			return HAL_ERR_STATE;
 		}
 		timer_initial = elapsed;
+		if (measure_tsc)
+			amd64_timecounter_pit_complete(tsc_start, tsc_end,
+			    PIT_INPUT_HZ, PIT_CAL_TICKS);
 		hal_printf("A64 TIMER CAL READY ticks=%u\n", timer_initial);
 	}
 	write_reg(LAPIC_TIMER_DIVIDE, 0x3U);

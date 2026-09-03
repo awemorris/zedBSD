@@ -65,6 +65,7 @@
 #define AX211_TX_OFFLOAD_PADDING                       0x2000U
 
 #define AX211_TX_RATE_1M_CCK                              0U
+#define AX211_TX_RATE_6M_OFDM                         0x0100U
 #define AX211_TX_RATE_ANTENNA_A                       0x4000U
 
 #define AX211_TX_FRAME_TYPE_MASK                       0x000cU
@@ -150,14 +151,16 @@ intel_ax211_tx_prepare(
 
 	memset(&encoded, 0, sizeof(encoded));
 	flags = 0U;
-	rate = AX211_TX_RATE_1M_CCK | AX211_TX_RATE_ANTENNA_A;
+	rate = AX211_TX_RATE_ANTENNA_A | (request->band_5ghz ?
+	    AX211_TX_RATE_6M_OFDM : AX211_TX_RATE_1M_CCK);
 	if (!request->encrypted)
 		flags |= AX211_TX_FLAG_ENCRYPT_DISABLE;
 	/*
 	 * API89 does not have usable data-rate state until TLC is configured.
 	 * Keep the first standalone-driver path self-contained by supplying a
-	 * conservative 2.4 GHz basic rate for every frame class.  A later TLC
-	 * phase may replace this fixed-rate policy without changing the TX ABI.
+	 * conservative basic rate for every frame class: 1M CCK on 2.4 GHz and
+	 * 6M OFDM where CCK is illegal on 5 GHz.  A later TLC phase may replace
+	 * this fixed-rate policy without changing the TX ABI.
 	 */
 	flags |= AX211_TX_FLAG_COMMAND_RATE | AX211_TX_FLAG_HIGH_PRIORITY;
 	padding = header_length & 3U;
@@ -209,7 +212,9 @@ intel_ax211_tx_completion_decode(
 	uint16_t response_queue;
 
 	if (message == NULL || completion == NULL || hardware_generation == 0U ||
-	    message->generation == 0U || expected_queue > UINT8_MAX)
+	    message->generation == 0U ||
+	    expected_queue < INTEL_AX211_TX_QUEUE_MIN ||
+	    expected_queue > INTEL_AX211_TX_QUEUE_MAX)
 		return INTEL_AX211_TX_INVALID;
 	if (message->generation != hardware_generation)
 		return INTEL_AX211_TX_STALE;
@@ -219,7 +224,8 @@ intel_ax211_tx_completion_decode(
 		return INTEL_AX211_TX_UNSUPPORTED;
 	if ((message->flags & INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK) != 0U)
 		return INTEL_AX211_TX_FAILED;
-	if (message->queue != expected_queue || message->index != expected_index)
+	if (message->queue != (uint8_t)(expected_queue & 0x1fU) ||
+	    message->index != expected_index)
 		return INTEL_AX211_TX_STALE;
 	if (message->payload == NULL)
 		return INTEL_AX211_TX_INVALID;
@@ -268,6 +274,7 @@ ax211_tx_request_validate(
 	    request->length < header_length ||
 	    request->length > INTEL_AX211_TX_FRAME_MAX ||
 	    (request->encrypted != 0U && request->encrypted != 1U) ||
+	    (request->band_5ghz != 0U && request->band_5ghz != 1U) ||
 	    request->key_index > 3U ||
 	    (request->frame_class != INTEL_AX211_TX_FRAME_MANAGEMENT &&
 	    request->frame_class != INTEL_AX211_TX_FRAME_EAPOL &&

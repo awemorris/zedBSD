@@ -63,7 +63,6 @@
 #include "intel-ax211-protocol.h"
 #include "intel-ax211-tx.h"
 
-#define INTEL_AX211_TX_RING_QUEUE                         1U
 #define INTEL_AX211_TX_RING_MANAGEMENT_TID               15U
 #define INTEL_AX211_TX_RING_SLOT_COUNT                  256U
 /* Intel documents that at most 255 of the 256 TFDs may be outstanding. */
@@ -120,7 +119,6 @@ struct intel_ax211_tx_queue_config {
 	uint8_t command[INTEL_AX211_TX_QUEUE_CONFIG_COMMAND_SIZE];
 	uint64_t tfd_address;
 	uint64_t byte_count_address;
-	uint16_t expected_write_pointer;
 	uint8_t station_id;
 	uint8_t tid;
 };
@@ -170,6 +168,7 @@ struct intel_ax211_tx_ring {
 	uint16_t write_sequence;
 	uint16_t last_completion_sequence;
 	uint16_t pending_count;
+	uint16_t queue;
 	uint8_t station_id;
 	uint8_t tid;
 	uint8_t allocated;
@@ -189,7 +188,6 @@ int intel_ax211_tx_ring_allocate(struct drv_dma_device *dma_device,
 
 int intel_ax211_tx_ring_queue_add_build(
 	const struct intel_ax211_tx_ring *ring, uint8_t station_id, uint8_t tid,
-	uint16_t expected_write_pointer,
 	struct intel_ax211_tx_queue_config *config);
 
 int intel_ax211_tx_ring_queue_add_complete(struct intel_ax211_tx_ring *ring,

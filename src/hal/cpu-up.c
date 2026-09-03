@@ -1,5 +1,13 @@
-/* Generic uniprocessor implementation of the public CPU lifecycle API. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Generic uniprocessor implementation of the public CPU lifecycle API.
+ */
 
 #include <hal/hal.h>
 
@@ -43,9 +51,12 @@ hal_cpu_notify_mask(const struct hal_cpu_mask *targets)
 
 	if (targets == NULL || !hal_cpu_mask_test(targets, 0))
 		return HAL_ERR_INVALID;
-	for (cpu = 1; cpu < HAL_CPU_MAX; cpu++)
+
+	for (cpu = 1; cpu < HAL_CPU_MAX; cpu++) {
 		if (hal_cpu_mask_test(targets, cpu))
 			return HAL_ERR_INVALID;
+	}
+
 	return HAL_ERR_UNSUPPORTED;
 }
 

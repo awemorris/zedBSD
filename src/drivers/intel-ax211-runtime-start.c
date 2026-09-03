@@ -410,9 +410,7 @@ ax211_runtime_start_device(
 		if (result != INTEL_AX211_TRANSPORT_OK)
 			return INTEL_AX211_RUNTIME_START_TRANSPORT;
 	}
-	result = intel_ax211_transport_activate_rx(session->transport);
-	if (result != INTEL_AX211_TRANSPORT_OK)
-		return INTEL_AX211_RUNTIME_START_TRANSPORT;
+	/* The first RX credit is deferred until the hardware-ALIVE cause. */
 	result = intel_ax211_transport_enable_firmware_interrupts(
 	    session->transport);
 	if (result != INTEL_AX211_TRANSPORT_OK)
@@ -472,7 +470,7 @@ ax211_runtime_start_select_and_publish_pnvm(
 	return INTEL_AX211_RUNTIME_START_OK;
 }
 
-/* Performs the runtime-profile init firmware handshake. */
+/* Performs the operational unified-firmware init/NVM handshake. */
 static int
 ax211_runtime_start_init_firmware(
 	struct intel_ax211_runtime_start *session)
@@ -516,12 +514,13 @@ ax211_runtime_start_send_extended_cfg(
 	struct intel_ax211_command_request request;
 	struct intel_ax211_command_handle handle;
 	uint8_t payload[INTEL_AX211_INIT_EXTENDED_CFG_SIZE];
+	uint8_t response[INTEL_AX211_RUNTIME_START_GENERIC_RESPONSE_SIZE];
 	uint64_t deadline;
 	size_t response_length;
 	int result;
 
 	result = intel_ax211_init_extended_cfg_encode(
-	    INTEL_AX211_INIT_PROFILE_RUNTIME, payload);
+	    INTEL_AX211_INIT_PROFILE_READ_NVM, payload);
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return ax211_runtime_start_protocol_result(result);
 	memset(&request, 0, sizeof(request));
@@ -531,20 +530,25 @@ ax211_runtime_start_send_extended_cfg(
 	request.payload = payload;
 	request.payload_length = sizeof(payload);
 	request.response_version = 0U;
-	request.minimum_response_length = 0U;
-	request.maximum_response_length = 0U;
+	request.minimum_response_length = sizeof(response);
+	request.maximum_response_length = sizeof(response);
 	result = ax211_runtime_start_submit(session, &request, &handle,
 	    &deadline);
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
 	response_length = 0U;
-	result = ax211_runtime_start_wait_command(session, deadline, NULL, 0U,
+	memset(response, 0, sizeof(response));
+	result = ax211_runtime_start_wait_command(session, deadline, response,
+	    sizeof(response),
 	    &response_length);
-	if (result != INTEL_AX211_RUNTIME_START_OK)
-		return result;
-	if (response_length != 0U)
-		return INTEL_AX211_RUNTIME_START_PROTOCOL;
-	return INTEL_AX211_RUNTIME_START_OK;
+	if (result == INTEL_AX211_RUNTIME_START_OK &&
+	    response_length != sizeof(response))
+		result = INTEL_AX211_RUNTIME_START_PROTOCOL;
+	if (result == INTEL_AX211_RUNTIME_START_OK &&
+	    ax211_runtime_start_get_le32(response) != 0U)
+		result = INTEL_AX211_RUNTIME_START_COMMAND;
+	memset(response, 0, sizeof(response));
+	return result;
 }
 
 static int
@@ -682,14 +686,6 @@ ax211_runtime_start_send_step(
 		request.maximum_response_length =
 		    INTEL_AX211_RUNTIME_START_MCC_RESPONSE_MAX;
 		response_capacity = sizeof(session->response_bytes);
-	} else if (step == INTEL_AX211_RUNTIME_STEP_POWER_TABLE) {
-		/* POWER_TABLE has an exact four-byte generic status response. */
-		request.minimum_response_length =
-		    INTEL_AX211_RUNTIME_START_GENERIC_RESPONSE_SIZE;
-		request.maximum_response_length =
-		    INTEL_AX211_RUNTIME_START_GENERIC_RESPONSE_SIZE;
-		response_capacity =
-		    INTEL_AX211_RUNTIME_START_GENERIC_RESPONSE_SIZE;
 	} else {
 		request.minimum_response_length = 0U;
 		request.maximum_response_length = 0U;
@@ -705,17 +701,6 @@ ax211_runtime_start_send_step(
 	    response_capacity, &response_length);
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
-	if (step == INTEL_AX211_RUNTIME_STEP_POWER_TABLE) {
-		if (response_length !=
-		    INTEL_AX211_RUNTIME_START_GENERIC_RESPONSE_SIZE)
-			return INTEL_AX211_RUNTIME_START_PROTOCOL;
-		result = ax211_runtime_start_get_le32(session->response_bytes) == 0U ?
-		    INTEL_AX211_RUNTIME_START_OK :
-		    INTEL_AX211_RUNTIME_START_COMMAND;
-		memset(session->response_bytes, 0,
-		    INTEL_AX211_RUNTIME_START_GENERIC_RESPONSE_SIZE);
-		return result;
-	}
 	if (step != INTEL_AX211_RUNTIME_STEP_MCC_UPDATE) {
 		if (response_length != 0U)
 			return INTEL_AX211_RUNTIME_START_PROTOCOL;

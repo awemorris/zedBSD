@@ -11,6 +11,7 @@
 #include "task.h"
 #include "bsp-pcat/early-init-policy.h"
 #include "bsp-pcat/lapic.h"
+#include "bsp-pcat/timecounter.h"
 
 extern uint8_t amd64_ap_trampoline_start[];
 extern uint8_t amd64_ap_trampoline_end[];
@@ -92,7 +93,7 @@ amd64_smp_apic_id(hal_cpu_id_t cpu)
 }
 
 static int
-start_one(struct amd64_percpu *cpu)
+start_one(struct amd64_percpu *cpu, int *timecounter_valid)
 {
 	const struct hal_pmem_request stack_request = {
 		HAL_PMEM_PADDR_ANY, AMD64_AP_STACK_SIZE, 4096,
@@ -103,10 +104,25 @@ start_one(struct amd64_percpu *cpu)
 	    amd64_ap_trampoline_start);
 	unsigned timeout;
 
-	if (image_size == 0 || image_size > 4096U ||
+	if (timecounter_valid == NULL || image_size == 0 || image_size > 4096U ||
 	    hal_pmem_alloc(&stack_request, &cpu->bootstrap_stack) != HAL_OK)
 		return HAL_ERR_NOMEM;
+	*timecounter_valid = 0;
 	__atomic_store_n(&cpu->startup_error, 0U, __ATOMIC_RELEASE);
+	__atomic_store_n(&cpu->timecounter_probe_ready, 0U, __ATOMIC_RELAXED);
+	__atomic_store_n(&cpu->timecounter_probe_request, 0U,
+	    __ATOMIC_RELAXED);
+	__atomic_store_n(&cpu->timecounter_probe_ack, 0U, __ATOMIC_RELAXED);
+	__atomic_store_n(&cpu->timecounter_probe_release, 0U,
+	    __ATOMIC_RELAXED);
+	__atomic_store_n(&cpu->timecounter_runtime_ready, 0U,
+	    __ATOMIC_RELAXED);
+	__atomic_store_n(&cpu->timecounter_runtime_done, 0U,
+	    __ATOMIC_RELAXED);
+	cpu->timecounter_probe_sample = 0U;
+	cpu->timecounter_probe_valid = 0;
+	cpu->timecounter_runtime_status = 0U;
+	cpu->timecounter_runtime_reads = 0U;
 	hal_memcpy(destination, amd64_ap_trampoline_start, image_size);
 	*(uint32_t *)(destination + (amd64_ap_trampoline_cr3 -
 	    amd64_ap_trampoline_start)) = (uint32_t)amd64_system_cr3();
@@ -118,15 +134,22 @@ start_one(struct amd64_percpu *cpu)
 	*(uint64_t *)(destination + (amd64_ap_trampoline_entry -
 	    amd64_ap_trampoline_start)) = (uint64_t)(uintptr_t)amd64_ap_entry;
 	hal_wmb();
-	if (amd64_lapic_send_init(cpu->apic_id) != HAL_OK)
+	if (amd64_lapic_send_init(cpu->apic_id) != HAL_OK) {
+		__atomic_store_n(&cpu->timecounter_probe_release, 1U,
+		    __ATOMIC_RELEASE);
 		return HAL_ERR_IO;
+	}
 	short_delay();
 	if (amd64_lapic_send_startup(cpu->apic_id,
-	    AMD64_AP_TRAMPOLINE >> 12) != HAL_OK)
+	    AMD64_AP_TRAMPOLINE >> 12) != HAL_OK) {
+		__atomic_store_n(&cpu->timecounter_probe_release, 1U,
+		    __ATOMIC_RELEASE);
 		return HAL_ERR_IO;
+	}
 	short_delay();
 	(void)amd64_lapic_send_startup(cpu->apic_id,
 	    AMD64_AP_TRAMPOLINE >> 12);
+	*timecounter_valid = amd64_timecounter_bsp_validate_ap(cpu);
 	for (timeout = 0; timeout < 10000000U; timeout++) {
 		unsigned startup_error;
 
@@ -154,11 +177,21 @@ int
 hal_cpu_start_others(void)
 {
 	hal_cpu_id_t cpu;
+	int complete_counter_set = amd64_timecounter_bsp_candidate_valid();
+
 	for (cpu = 1; cpu < present_count; cpu++) {
-		int error = start_one(amd64_percpu_get(cpu));
-		if (error != HAL_OK)
+		int timecounter_valid;
+		int error = start_one(amd64_percpu_get(cpu),
+		    &timecounter_valid);
+		if (error != HAL_OK) {
+			amd64_timecounter_release_boot_validation();
 			return error;
+		}
+		if (!timecounter_valid)
+			complete_counter_set = 0;
 	}
+	amd64_timecounter_complete_boot_validation(
+	    complete_counter_set != 0, present_count);
 	__atomic_store_n(&panic_available, 1U, __ATOMIC_RELEASE);
 	return HAL_OK;
 }
@@ -186,6 +219,7 @@ amd64_ap_entry(uint64_t logical_cpu)
 		for (;;)
 			asm_hlt();
 	}
+	amd64_timecounter_ap_probe(cpu);
 	amd64_task_init_cpu(0);
 	if (amd64_lapic_timer_start() != HAL_OK) {
 		hal_printf("A64 TIMER AP HALT cpu=%u\n", cpu->logical_id);
@@ -199,6 +233,7 @@ amd64_ap_entry(uint64_t logical_cpu)
 	(void)__atomic_fetch_or(
 	    &ready_mask.bits[cpu->logical_id / 64U],
 	    (uint64_t)1U << (cpu->logical_id % 64U), __ATOMIC_RELEASE);
+	amd64_timecounter_ap_runtime_validate(cpu);
 	kernel_secondary_entry(cpu->logical_id);
 	HAL_FATAL("kernel_secondary_entry returned");
 	for (;;)

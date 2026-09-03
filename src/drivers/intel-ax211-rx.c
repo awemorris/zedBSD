@@ -163,9 +163,8 @@ intel_ax211_rx_mpdu_decode(
 	if (message->payload_length - INTEL_AX211_RX_MPDU_DESCRIPTOR_SIZE <
 	    frame_length)
 		return INTEL_AX211_RX_TRUNCATED;
-	if (message->payload_length - INTEL_AX211_RX_MPDU_DESCRIPTOR_SIZE >
-	    frame_length)
-		return INTEL_AX211_RX_OVERSIZED;
+	/* The transport may round an RX packet up and leave bytes after the
+	 * descriptor-declared MPDU.  They are not part of the 802.11 frame. */
 	if (frame_length < 2U)
 		return INTEL_AX211_RX_TRUNCATED;
 

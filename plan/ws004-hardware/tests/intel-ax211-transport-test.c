@@ -28,6 +28,7 @@
 #define TEST_RX_STATUS_SIZE                                    2U
 
 #define TEST_CSR_INT_COALESCING                             0x004U
+#define TEST_CSR_INT                                        0x008U
 #define TEST_CSR_UCODE_DRV_GP1_CLR                         0x05cU
 #define TEST_CSR_MAC_SHADOW_REG_CTRL                       0x0a8U
 #define TEST_HBUS_TARG_WRPTR                               0x460U
@@ -767,6 +768,11 @@ test_interrupt_modes(void)
 	second_clear = test_find_event(&fixture.backend, first_clear + 1U,
 	    TEST_EVENT_CSR_WRITE, TEST_CSR_UCODE_DRV_GP1_CLR, 4U);
 	assert(first_clear < second_clear);
+	assert(test_find_event(&fixture.backend, 0U, TEST_EVENT_CSR_WRITE,
+	    TEST_CSR_INT, UINT32_MAX) < first_clear);
+	assert(test_find_event(&fixture.backend, second_clear + 1U,
+	    TEST_EVENT_CSR_WRITE, TEST_CSR_INT, UINT32_MAX) <
+	    fixture.backend.event_count);
 
 	assert(intel_ax211_transport_enable_runtime_interrupts(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
@@ -778,6 +784,9 @@ test_interrupt_modes(void)
 	    &causes) == INTEL_AX211_TRANSPORT_OK);
 	assert(causes.flow_handler == TEST_FH_Q0);
 	assert(causes.hardware == TEST_HW_RF_KILL);
+	assert(causes.raw_flow_handler == (TEST_FH_Q0 | 0x80000000U));
+	assert(causes.raw_hardware ==
+	    (TEST_HW_RF_KILL | TEST_HW_TOP_FATAL));
 	assert(fixture.backend.csr[TEST_MSIX_FH_CAUSES / 4U] == 0U);
 	assert(fixture.backend.csr[TEST_MSIX_HW_CAUSES / 4U] == 0U);
 	assert(intel_ax211_transport_interrupt_rearm(&fixture.transport) ==
@@ -822,6 +831,16 @@ test_rx_transport(void)
 	    index, address) == INTEL_AX211_TRANSPORT_OK);
 	assert(intel_ax211_transport_activate_rx(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
+	assert(fixture.backend.event[fixture.backend.event_count - 2U].type ==
+	    TEST_EVENT_DMA);
+	assert(fixture.backend.event[fixture.backend.event_count - 2U].address ==
+	    INTEL_AX211_TRANSPORT_DMA_RX_TRANSFER);
+	assert(fixture.backend.event[fixture.backend.event_count - 2U].value ==
+	    INTEL_AX211_TRANSPORT_DMA_PREWRITE);
+	assert(fixture.backend.event[fixture.backend.event_count - 2U].offset ==
+	    0U);
+	assert(fixture.backend.event[fixture.backend.event_count - 2U].length ==
+	    TEST_RX_TRANSFER_SIZE);
 	assert(fixture.backend.csr[TEST_RFH_Q0_FRBDCB_WIDX_TRG / 4U] == 8U);
 
 	test_put_le16(fixture.storage.rx_status, 1U);

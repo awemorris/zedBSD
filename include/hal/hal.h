@@ -301,9 +301,22 @@ hal_irq_unregister_msi(
 
 #define HAL_TIMER_FREQUENCY	(100U)
 
+/* Read wall-clock time as whole seconds since the Unix epoch. */
 bool
-hal_rtc_read(
+hal_rtc_read_epoch_time(
 	uint64_t *unix_seconds);
+
+/*
+ * Read a fixed-frequency monotonic counter.  Its epoch is unspecified and
+ * only differences between samples are meaningful.  On false, neither output
+ * is changed.  On true, the frequency is nonzero and stable for the boot, and
+ * successful operations are linearizable: a later operation never returns a
+ * counter below an earlier successful operation, including across CPUs.
+ */
+bool
+hal_rtc_read_counter(
+	uint64_t *counter,
+	uint64_t *freq_hz);
 
 /*
  * System Call

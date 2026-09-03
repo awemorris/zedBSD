@@ -3,6 +3,7 @@
 
 #include <hal/hal.h>
 #include "defs.h"
+#include "bsp-pcat/timecounter-policy.h"
 
 struct amd64_irq_ack {
 	uint32_t vector;
@@ -21,6 +22,17 @@ struct amd64_percpu {
 	uint32_t apic_id;
 	volatile unsigned ready;
 	volatile unsigned startup_error;
+	volatile unsigned timecounter_probe_ready;
+	volatile unsigned timecounter_probe_request;
+	volatile unsigned timecounter_probe_ack;
+	volatile unsigned timecounter_probe_release;
+	uint64_t timecounter_probe_sample;
+	struct amd64_timecounter_cpu_metadata timecounter_metadata;
+	int timecounter_probe_valid;
+	volatile unsigned timecounter_runtime_ready;
+	volatile unsigned timecounter_runtime_done;
+	unsigned timecounter_runtime_status;
+	unsigned timecounter_runtime_reads;
 	struct hal_pmem bootstrap_stack;
 	struct amd64_irq_ack acknowledgements[AMD64_IRQ_ACK_DEPTH];
 	unsigned acknowledgement_depth;

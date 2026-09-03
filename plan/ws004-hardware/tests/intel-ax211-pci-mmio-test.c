@@ -3,83 +3,29 @@
 #include <assert.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "../../../src/drivers/intel-ax211-pci-mmio.h"
 
-enum test_cpuid_mode {
-	TEST_CPUID_VALID,
-	TEST_CPUID_NON_INTEL,
-	TEST_CPUID_NO_TSC,
-	TEST_CPUID_NO_EXTENDED_POWER,
-	TEST_CPUID_NO_INVARIANT,
-	TEST_CPUID_NO_RATIO,
-	TEST_CPUID_NO_CRYSTAL,
-	TEST_CPUID_FRACTIONAL,
-	TEST_CPUID_TOO_HIGH
-};
-
-static enum test_cpuid_mode cpuid_mode;
 static uint64_t test_tsc;
+static uint64_t test_counter_frequency;
 static uint64_t test_relax_step;
 static uint64_t test_yield_step;
 static unsigned int test_relax_count;
 static unsigned int test_yield_count;
-static unsigned int test_leaf16_calls;
+static bool test_counter_available;
 
-void
-intel_ax211_pci_mmio_host_cpuid(
-	uint32_t leaf,
-	uint32_t subleaf,
-	uint32_t *eax,
-	uint32_t *ebx,
-	uint32_t *ecx,
-	uint32_t *edx)
+bool
+hal_rtc_read_counter(uint64_t *counter, uint64_t *freq_hz)
 {
-	(void)subleaf;
-	*eax = 0U;
-	*ebx = 0U;
-	*ecx = 0U;
-	*edx = 0U;
-	if (leaf == 0U) {
-		*eax = 0x16U;
-		*ebx = cpuid_mode == TEST_CPUID_NON_INTEL ? 0U : 0x756e6547U;
-		*edx = 0x49656e69U;
-		*ecx = 0x6c65746eU;
-	} else if (leaf == 1U) {
-		if (cpuid_mode != TEST_CPUID_NO_TSC)
-			*edx = 1U << 4;
-	} else if (leaf == 0x80000000U) {
-		*eax = cpuid_mode == TEST_CPUID_NO_EXTENDED_POWER ?
-		    0x80000006U : 0x80000007U;
-	} else if (leaf == 0x80000007U) {
-		if (cpuid_mode != TEST_CPUID_NO_INVARIANT)
-			*edx = 1U << 8;
-	} else if (leaf == 0x15U) {
-		*eax = cpuid_mode == TEST_CPUID_NO_RATIO ? 0U : 1U;
-		*ebx = 96U;
-		*ecx = cpuid_mode == TEST_CPUID_NO_CRYSTAL ? 0U : 25000000U;
-		if (cpuid_mode == TEST_CPUID_FRACTIONAL) {
-			*eax = 3U;
-			*ebx = 1U;
-			*ecx = 10000000U;
-		} else if (cpuid_mode == TEST_CPUID_TOO_HIGH) {
-			*eax = 1U;
-			*ebx = 500U;
-			*ecx = 25000000U;
-		}
-	} else if (leaf == 0x16U) {
-		test_leaf16_calls++;
-		*eax = 2400U;
-	}
-}
-
-uint64_t
-intel_ax211_pci_mmio_host_rdtsc(void)
-{
-	return test_tsc;
+	if (!test_counter_available || counter == NULL || freq_hz == NULL)
+		return false;
+	*counter = test_tsc;
+	*freq_hz = test_counter_frequency;
+	return true;
 }
 
 void
@@ -152,36 +98,26 @@ test_calibration_rejection(void)
 {
 	uint32_t registers[0x4000U / sizeof(uint32_t)];
 	struct intel_ax211_pci_mmio_backend backend;
-	static const enum test_cpuid_mode rejected[] = {
-		TEST_CPUID_NON_INTEL,
-		TEST_CPUID_NO_TSC,
-		TEST_CPUID_NO_EXTENDED_POWER,
-		TEST_CPUID_NO_INVARIANT,
-		TEST_CPUID_NO_RATIO,
-		TEST_CPUID_NO_CRYSTAL,
-		TEST_CPUID_TOO_HIGH
-	};
-	size_t index;
 
 	memset(registers, 0, sizeof(registers));
-	for (index = 0U; index < sizeof(rejected) / sizeof(rejected[0]);
-	    index++) {
-		memset(&backend, 0xa5, sizeof(backend));
-		cpuid_mode = rejected[index];
-		test_tsc = 1000U;
-		test_leaf16_calls = 0U;
-		assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
-		    sizeof(registers)) == ENOTSUP);
-		assert(backend.registers == NULL);
-		assert(backend.tsc_calibrated == 0U);
-		assert(test_leaf16_calls == 0U);
-	}
-
-	cpuid_mode = TEST_CPUID_FRACTIONAL;
+	memset(&backend, 0xa5, sizeof(backend));
+	test_counter_available = false;
+	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
+	    sizeof(registers)) == ENOTSUP);
+	assert(backend.registers == NULL);
+	assert(backend.counter_ready == 0U);
+	test_counter_available = true;
+	test_counter_frequency = 999999U;
+	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
+	    sizeof(registers)) == ENOTSUP);
+	test_counter_frequency = 10000000001ULL;
+	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
+	    sizeof(registers)) == ENOTSUP);
+	test_counter_frequency = 3333334ULL;
 	test_tsc = 9000U;
 	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
 	    sizeof(registers)) == 0);
-	assert(backend.tsc_frequency_hz == 3333334ULL);
+	assert(backend.counter_frequency_hz == 3333334ULL);
 }
 
 static void
@@ -195,7 +131,8 @@ test_backend_io_and_clock(void)
 
 	memset(registers, 0, sizeof(registers));
 	memset(&backend, 0xa5, sizeof(backend));
-	cpuid_mode = TEST_CPUID_VALID;
+	test_counter_available = true;
+	test_counter_frequency = 2400000000ULL;
 	test_tsc = 100000U;
 	assert(intel_ax211_pci_mmio_backend_init(NULL, registers,
 	    sizeof(registers)) != 0);
@@ -205,9 +142,9 @@ test_backend_io_and_clock(void)
 	    sizeof(registers) - 1U) != 0);
 	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
 	    sizeof(registers)) == 0);
-	assert(backend.tsc_calibrated == 1U);
-	assert(backend.tsc_frequency_hz == 2400000000ULL);
-	assert(backend.tsc_origin == 100000U);
+	assert(backend.counter_ready == 1U);
+	assert(backend.counter_frequency_hz == 2400000000ULL);
+	assert(backend.counter_origin == 100000U);
 	ops = intel_ax211_pci_mmio_ops();
 	assert(ops != NULL);
 
@@ -264,7 +201,8 @@ test_delay_overflow(void)
 	const struct intel_ax211_mmio_ops *ops;
 
 	memset(registers, 0, sizeof(registers));
-	cpuid_mode = TEST_CPUID_VALID;
+	test_counter_available = true;
+	test_counter_frequency = 2400000000ULL;
 	test_tsc = UINT64_MAX - 1000U;
 	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
 	    sizeof(registers)) == 0);

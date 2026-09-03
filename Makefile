@@ -428,6 +428,14 @@ ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_USB_RTL8822BU=$(if $(filter y,$(CONFIG_DRIVER_USB_RTL8822BU)),1,0) \
 	-DCONFIG_KERNEL_USB_HID_CHECKPOINT=$(if $(filter y,$(CONFIG_KERNEL_USB_HID_CHECKPOINT)),1,0) \
 	-DCONFIG_BUF_CACHE_KIB=$(CONFIG_BUF_CACHE_KIB)
+ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
+ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_TEST_CHECKPOINTS
+endif
+# Private test builds may add compile-time fault injection without replacing
+# the configured feature macros above.  Keep these flags last so a disposable
+# BUILD directory records the complete effective configuration in its stamp.
+ZEDBSD_TEST_CPPFLAGS ?=
+ZEDBSD_CONFIG_CPPFLAGS += $(strip $(ZEDBSD_TEST_CPPFLAGS))
 ZEDBSD_PLATFORM_CONFIG_STAMP := $(BUILD)/.platform-config
 .PHONY: FORCE_ZEDBSD_PLATFORM_CONFIG
 FORCE_ZEDBSD_PLATFORM_CONFIG:
@@ -439,9 +447,6 @@ $(ZEDBSD_PLATFORM_CONFIG_STAMP): FORCE_ZEDBSD_PLATFORM_CONFIG
 			printf '%s\n' "$$value" > $@.tmp; \
 			mv $@.tmp $@; \
 		fi
-ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
-ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_TEST_CHECKPOINTS
-endif
 BUILD_TOOLS_DIR := tools/build
 ZEDBSD_PRIMARY_TARGETS := menuconfig vmunix bootloader rootfs-bin rootfs-usr \
 	rootfs world disk-image run toolchain

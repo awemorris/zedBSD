@@ -179,7 +179,6 @@ intel_ax211_tx_ring_queue_add_build(
 	const struct intel_ax211_tx_ring *ring,
 	uint8_t station_id,
 	uint8_t tid,
-	uint16_t expected_write_pointer,
 	struct intel_ax211_tx_queue_config *config)
 {
 	struct intel_ax211_tx_queue_config candidate;
@@ -191,7 +190,6 @@ intel_ax211_tx_ring_queue_add_build(
 	memset(&candidate, 0, sizeof(candidate));
 	candidate.tfd_address = ring->tfd.device_address;
 	candidate.byte_count_address = ring->byte_count.device_address;
-	candidate.expected_write_pointer = expected_write_pointer;
 	candidate.station_id = station_id;
 	candidate.tid = tid;
 	ax211_tx_queue_command_encode(candidate.command, station_id, tid,
@@ -210,6 +208,8 @@ intel_ax211_tx_ring_queue_add_complete(
 	const struct intel_ax211_protocol_pending_command *pending)
 {
 	const uint8_t *payload;
+	uint16_t queue;
+	uint16_t write_pointer;
 	int result;
 
 	if (!ax211_tx_ring_valid(ring) ||
@@ -233,17 +233,27 @@ intel_ax211_tx_ring_queue_add_complete(
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return ax211_tx_protocol_result(result);
 	payload = message->payload;
-	if (payload == NULL ||
-	    ax211_tx_ring_get_le16(payload) != INTEL_AX211_TX_RING_QUEUE ||
-	    ax211_tx_ring_get_le16(payload + 2U) != 0U ||
-	    ax211_tx_ring_get_le16(payload + 4U) !=
-	    config->expected_write_pointer ||
+	if (payload == NULL)
+		return INTEL_AX211_TX_RING_MALFORMED;
+	queue = ax211_tx_ring_get_le16(payload);
+	write_pointer = ax211_tx_ring_get_le16(payload + 4U);
+	/*
+	 * API 89 hardware has been observed returning bit 0 in this field
+	 * together with a valid queue number and write pointer.  Linux iwlwifi
+	 * and OpenBSD iwx deliberately do not use the response flags as a
+	 * completion status.  Match those production drivers so a valid
+	 * dynamically assigned queue is not rejected locally.
+	 */
+	if (queue < INTEL_AX211_TX_QUEUE_MIN ||
+	    queue > INTEL_AX211_TX_QUEUE_MAX ||
 	    ax211_tx_ring_get_le16(payload + 6U) != 0U)
 		return INTEL_AX211_TX_RING_MALFORMED;
 	ring->hardware_generation = hardware_generation;
 	ring->connection_generation = connection_generation;
-	ring->read_sequence = config->expected_write_pointer;
-	ring->write_sequence = config->expected_write_pointer;
+	ring->queue = queue;
+	ring->read_sequence = write_pointer &
+	    (INTEL_AX211_TX_RING_SLOT_COUNT - 1U);
+	ring->write_sequence = ring->read_sequence;
 	ring->station_id = config->station_id;
 	ring->tid = config->tid;
 	ring->enabled = 1U;
@@ -305,7 +315,7 @@ intel_ax211_tx_ring_submit(
 	slot->active = 1U;
 	ring->pending_count++;
 	ring->write_sequence = (uint16_t)(sequence + 1U);
-	write_pointer = ((uint32_t)INTEL_AX211_TX_RING_QUEUE << 16) |
+	write_pointer = ((uint32_t)ring->queue << 16) |
 	    ring->write_sequence;
 	if (ring->ops->write32(ring->ops_argument,
 	    INTEL_AX211_TX_RING_WRITE_POINTER_REGISTER, write_pointer) != 0) {
@@ -338,7 +348,7 @@ intel_ax211_tx_ring_complete(
 	if (ring->poisoned)
 		return INTEL_AX211_TX_RING_POISONED;
 	result = intel_ax211_tx_completion_decode(message,
-	    ring->hardware_generation, INTEL_AX211_TX_RING_QUEUE,
+	    ring->hardware_generation, ring->queue,
 	    message->index, &completion);
 	if (result != INTEL_AX211_TX_OK)
 		return ax211_tx_codec_result(result);
@@ -449,6 +459,7 @@ intel_ax211_tx_ring_reset(
 	ring->write_sequence = 0U;
 	ring->last_completion_sequence = 0U;
 	ring->pending_count = 0U;
+	ring->queue = 0U;
 	ring->station_id = 0U;
 	ring->tid = 0U;
 	ring->enabled = 0U;
@@ -697,7 +708,7 @@ ax211_tx_ring_slot_stage(
 	command[0U] = INTEL_AX211_TX_OPCODE;
 	command[1U] = 0U;
 	command[2U] = index;
-	command[3U] = INTEL_AX211_TX_RING_QUEUE;
+	command[3U] = (uint8_t)(ring->queue & 0x1fU);
 	memcpy(command + AX211_TX_NARROW_HEADER_SIZE, prepared->command,
 	    prepared->command_length);
 	if (prepared->payload_length != 0U)

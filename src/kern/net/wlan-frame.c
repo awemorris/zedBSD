@@ -145,6 +145,11 @@ channel_frequency(uint8_t channel)
 		return 2407U + 5U * (uint32_t)channel;
 	if (channel == 14U)
 		return 2484U;
+	if ((channel >= 36U && channel <= 144U &&
+	    (channel - 36U) % 4U == 0U) ||
+	    (channel >= 149U && channel <= 181U &&
+	    (channel - 149U) % 4U == 0U))
+		return 5000U + 5U * (uint32_t)channel;
 	return 0U;
 }
 

@@ -250,7 +250,7 @@ test_fixture_init(
 	memset(fixture, 0, sizeof(*fixture));
 	fixture->lower.pci.registers = (volatile uint8_t *)fixture->registers;
 	fixture->lower.pci.mapping_size = sizeof(fixture->registers);
-	fixture->lower.pci.tsc_calibrated = 1U;
+	fixture->lower.pci.counter_ready = 1U;
 	fixture->device.coherent = 1;
 	memset(&profile, 0, sizeof(profile));
 	profile.mac_type = INTEL_AX211_MMIO_MAC_SO;

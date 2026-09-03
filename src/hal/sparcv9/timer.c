@@ -58,7 +58,17 @@ sun4u_timer_interrupt(hal_irq_ack_t acknowledge)
 }
 
 bool
-hal_rtc_read(uint64_t *unix_seconds)
+hal_rtc_read_counter(uint64_t *counter, uint64_t *freq_hz)
+{
+	if (counter == NULL || freq_hz == NULL || tick_frequency == 0U)
+		return false;
+	*counter = sparcv9_tick();
+	*freq_hz = tick_frequency;
+	return true;
+}
+
+bool
+hal_rtc_read_epoch_time(uint64_t *unix_seconds)
 {
 	(void)unix_seconds;
 	return false;

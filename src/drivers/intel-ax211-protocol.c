@@ -340,8 +340,9 @@ intel_ax211_protocol_pnvm_init_complete(
 	return ax211_protocol_message_validate(message,
 	    INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 	    INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_OPCODE,
-	    INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_VERSION, generation, 0U,
-	    0U);
+	    INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_VERSION, generation,
+	    INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_SIZE,
+	    INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_SIZE);
 }
 
 int
@@ -352,7 +353,9 @@ intel_ax211_protocol_init_complete(
 	return ax211_protocol_message_validate(message,
 	    INTEL_AX211_PROTOCOL_GROUP_LEGACY,
 	    INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE,
-	    INTEL_AX211_PROTOCOL_UNKNOWN_VERSION, generation, 0U, 0U);
+	    INTEL_AX211_PROTOCOL_UNKNOWN_VERSION, generation,
+	    INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE,
+	    INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE);
 }
 
 int
@@ -361,10 +364,18 @@ intel_ax211_protocol_nvm_get_info_decode(
 	const struct intel_ax211_protocol_pending_command *pending,
 	struct intel_ax211_protocol_nvm *nvm)
 {
+	static const uint8_t channel_5ghz[
+	    INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT] = {
+		36U, 40U, 44U, 48U, 52U, 56U, 60U, 64U,
+		68U, 72U, 76U, 80U, 84U, 88U, 92U, 96U,
+		100U, 104U, 108U, 112U, 116U, 120U, 124U, 128U,
+		132U, 136U, 140U, 144U, 149U, 153U, 157U, 161U,
+		165U, 169U, 173U, 177U, 181U
+	};
 	struct intel_ax211_protocol_nvm decoded;
 	const uint8_t *bytes;
 	uint32_t tx_chains, rx_chains;
-	size_t index, channel_count;
+	size_t index, channel_count, channel_offset;
 	int result;
 
 	if (pending == NULL || nvm == NULL)
@@ -434,7 +445,32 @@ intel_ax211_protocol_nvm_get_info_decode(
 		if (channel->valid)
 			decoded.valid_24ghz_count++;
 	}
-	if (decoded.valid_24ghz_count == 0U)
+	channel_offset = INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT;
+	channel_count = decoded.n_channels > channel_offset ?
+	    decoded.n_channels - channel_offset : 0U;
+	if (channel_count > INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT)
+		channel_count = INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT;
+	decoded.channel_5ghz_count = channel_count;
+	for (index = 0U; index < channel_count; index++) {
+		struct intel_ax211_protocol_channel *channel =
+		    &decoded.channel_5ghz[index];
+
+		channel->number = channel_5ghz[index];
+		channel->flags = ax211_protocol_get_le32(bytes + 28U +
+		    (channel_offset + index) * sizeof(uint32_t));
+		channel->valid = decoded.band_52_enabled && (channel->flags &
+		    INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID) != 0U;
+		channel->active = channel->valid && (channel->flags &
+		    INTEL_AX211_PROTOCOL_NVM_CHANNEL_ACTIVE) != 0U;
+		if (channel->valid)
+			decoded.valid_5ghz_count++;
+	}
+	/*
+	 * With LAR enabled, MCC is authoritative for regulatory validity.  NVM
+	 * still supplies the hardware channel table, but its VALID bit is not a
+	 * prerequisite for using a channel accepted by MCC.
+	 */
+	if (decoded.valid_24ghz_count == 0U && !decoded.lar_enabled)
 		return INTEL_AX211_PROTOCOL_MISSING;
 	*nvm = decoded;
 	return INTEL_AX211_PROTOCOL_OK;

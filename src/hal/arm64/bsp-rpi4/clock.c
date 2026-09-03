@@ -13,7 +13,9 @@ static uint64_t
 counter(void)
 {
 	uint64_t value;
-	__asm__ volatile("mrs %0, cntpct_el0" : "=r"(value));
+	/* Order the architectural counter sample at this program point. */
+	__asm__ volatile("isb\n\tmrs %0, cntpct_el0" : "=r"(value) : :
+	    "memory");
 	return value;
 }
 
@@ -55,7 +57,17 @@ rpi4_timer_interrupt(hal_irq_ack_t acknowledge)
 }
 
 bool
-hal_rtc_read(uint64_t *unix_seconds)
+hal_rtc_read_counter(uint64_t *value, uint64_t *freq_hz)
+{
+	if (value == NULL || freq_hz == NULL || timer_frequency == 0U)
+		return false;
+	*value = counter();
+	*freq_hz = timer_frequency;
+	return true;
+}
+
+bool
+hal_rtc_read_epoch_time(uint64_t *unix_seconds)
 {
 	(void)unix_seconds;
 	return false;

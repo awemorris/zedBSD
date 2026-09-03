@@ -210,6 +210,13 @@ intel_ax211_runtime_api89_validate(
 		return INTEL_AX211_RUNTIME_UNSUPPORTED;
 	for (index = 0U; index < sizeof(ax211_runtime_versions) /
 	    sizeof(ax211_runtime_versions[0]); index++) {
+		if (ax211_runtime_versions[index].group ==
+		    INTEL_AX211_RUNTIME_GROUP_LONG &&
+		    ax211_runtime_versions[index].opcode ==
+		    INTEL_AX211_RUNTIME_LTR_CONFIG_OPCODE &&
+		    ax211_runtime_bit(profile->capabilities, 5U,
+		    INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2))
+			continue;
 		result = ax211_runtime_version_validate(table,
 		    &ax211_runtime_versions[index]);
 		if (result != INTEL_AX211_RUNTIME_OK)
@@ -228,7 +235,9 @@ ax211_runtime_step_enabled(enum intel_ax211_runtime_step step,
 	const struct intel_ax211_runtime_profile *profile)
 {
 	if (step == INTEL_AX211_RUNTIME_STEP_LTR_CONFIG)
-		return profile->ltr_enabled;
+		return profile->ltr_enabled &&
+		    !ax211_runtime_bit(profile->capabilities, 5U,
+		    INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2);
 	if (step == INTEL_AX211_RUNTIME_STEP_MCC_UPDATE)
 		return profile->lar_enabled;
 	return step < INTEL_AX211_RUNTIME_STEP_DONE;
@@ -285,7 +294,10 @@ intel_ax211_runtime_command_encode(
 		encoded.opcode = INTEL_AX211_RUNTIME_SOC_CONFIG_OPCODE;
 		encoded.layout_version = INTEL_AX211_RUNTIME_SOC_CONFIG_VERSION;
 		encoded.payload_length = INTEL_AX211_RUNTIME_SOC_CONFIG_SIZE;
-		ax211_runtime_put_le32(encoded.payload, 1U);
+		ax211_runtime_put_le32(encoded.payload,
+		    INTEL_AX211_RUNTIME_SOC_CONFIG_FLAGS);
+		ax211_runtime_put_le32(encoded.payload + 4U,
+		    INTEL_AX211_RUNTIME_SOC_CONFIG_XTAL_LATENCY);
 		break;
 	case INTEL_AX211_RUNTIME_STEP_LTR_CONFIG:
 		encoded.group = INTEL_AX211_RUNTIME_GROUP_LONG;
@@ -374,10 +386,10 @@ intel_ax211_runtime_mcc_decode(
 	parsed.time = ax211_runtime_get_le16(bytes + 8U);
 	parsed.geographic_info = ax211_runtime_get_le16(bytes + 10U);
 	parsed.source = bytes[12U];
-	if (bytes[13U] != 0U || bytes[14U] != 0U || bytes[15U] != 0U)
-		return INTEL_AX211_RUNTIME_UNSUPPORTED;
+	/* v4/v5/v6 share this layout; reserved padding is not semantic input. */
 	parsed.channel_count = ax211_runtime_get_le32(bytes + 16U);
-	if (parsed.status > 1U)
+	/* Every documented MCC status still carries a usable channel profile. */
+	if (parsed.status > INTEL_AX211_RUNTIME_MCC_STATUS_MAX)
 		return INTEL_AX211_RUNTIME_FAILED;
 	if (parsed.channel_count == 0U)
 		return INTEL_AX211_RUNTIME_UNSUPPORTED;

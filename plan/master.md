@@ -136,10 +136,12 @@ WS004 p030's automatic RTL8822BU lifecycle milestone, while its shared WS005
 p008 physical lifecycle and five-run closure remain pending. Q061 completed
 p037's read-only Intel intake, corrected the exact target to AX211/CNVio2
 `8086:51f0`, subsystem `8086:4090`, revision `01`, and cleared its firmware/
-license and direct-boot boundaries. Q062 completed p038's implementation
+license and direct-boot boundaries. Q062 completed p038's initial implementation
 and focused automatic package/PCI/MSI-X/DMA/firmware/runtime/scan/security/L2/
-lifetime gates; p038 is uncleared only for one exact AX211
-direct-boot firmware/RF/WPA2/DHCP/ping/fetch/down result. P039's evidence-
+lifetime gates. Q066 completed the API89 MLD correction and exact-device VFIO
+normal path through WPA2/CCMP, DHCP, ping, nonempty HTTP fetch, disconnect,
+down, and host restoration; p038 is uncleared only for one exact AX211 direct-
+boot result shared with the HAL counter observation. P039's evidence-
 driven cross-driver review follows that physical checkpoint before the return
 to p006/p007. P008 final five-run acceptance remains incomplete. Q063
 independently closes the former Noct compile/application CLI defect and target
@@ -429,9 +431,9 @@ allowed to block first communication unless the normal path depends on them.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q050 completed both VFS prerequisites discovered by q041 | `ws001-p022` and `ws001-p023` complete with production-linked faults and abrupt-stop/remount evidence | Retain p022/p023 as regressions; their dependency consumer resumes in WS005 p005 | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
-| `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; q063 has restored the Make-owned Noct gate | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; q062 completed p038 implementation and focused automatic gates after q061 corrected the target to exact AX211/CNVio2 | `ws004-p010`--`p020`, p022--p024, p026-p030 automatic, p031--p033, p036, and p037 are complete; p038 is uncleared after its user-deferred exact-device run and p039 remains | Record one exact AX211/CNVio2 direct-boot firmware/RF/WPA2/DHCP/ping/fetch/down result, then perform p039's evidence-driven comparison; p030's shared WS005 p008 physical closure and RTL8822CE remain later | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WLAN | Active; q059 completed p004 minimum direct command and p009 one-run physical connectivity; q060 completed the p030 automatic dependency | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, frozen design contract, exact first-radio identity, common WLAN control ABI, p036, p028-p030 automatic milestones, p004, and p009 are complete; q062 completed WS004 p038 automatic gates but its exact-device run remains | After WS004 p038/p039, complete p006/p007/p010 before the still-pending shared p008 final acceptance | [WS005](ws005-networking/ws.md) |
+| `ws003` | x86 laptop and PC-98 hardware bring-up | Active; q066 completed p025's automatic HAL counter milestone while the completed Latitude USB/network and CF-SV7 USB-root milestones remain intact | p025's API split, private calibration, complete-CPU-set validation, positive/negative SMP KVM evidence, and configured build matrix pass; p024 still awaits one V13 boot and p018/p019 remain | Share p025's sole remaining physical multicore observation with p038's final direct boot rather than creating an intermediate human block | [WS003](ws003-bringup/ws.md) |
+| `ws004` | Hardware expansion | Active; q066 completed the AX211 API89 correction and exact-device VFIO useful normal path with checked host restoration | `ws004-p010`--`p020`, p022--p024, p026-p030 automatic, p031--p033, p036, and p037 are complete; p038's automatic and VFIO milestones pass | Use one direct boot to close both p025 physical-counter and p038 native-network evidence, then perform p039's evidence-driven cross-driver review | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WLAN | Active; q059 completed p004 minimum direct command and p009 one-run physical connectivity; q060 completed the p030 automatic dependency | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, frozen design contract, exact first-radio identity, common WLAN control ABI, p036, p028-p030 automatic milestones, p004, and p009 are complete; q066 completed WS004 p038's exact-device VFIO normal path, while its native direct boot remains | After WS004 p038/p039, complete p006/p007/p010 before the still-pending shared p008 final acceptance | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; q063 released p009's WS008 userland dependency | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Complete (`q063`) | p010 host CLI/toolchain/ordinary-build and p009 amd64 static/package/q35-xHCI runtime gates pass on official `v2.0.1`; p006 remains historical review evidence | No current Phase; Remacs and i386/PC-98 target Noct remain explicitly outside q063 | [WS008](ws008-noct/ws.md) |
@@ -589,9 +591,11 @@ one.
 5. Execute the corrected Intel AX211/CNVio2 chain in strict order: q061
    completed p037's read-only exact-device and firmware/license intake. Q062
    completed p038's standalone exact `8086:51f0`/`8086:4090`/rev `01`
-   implementation and focused automatic gates; one exact-machine direct boot
-   still must prove firmware/PNVM, RF scan, WPA2/CCMP, DHCP, ping, fetch, and
-   down before p038 closes. Then p039 reviews/refactors only common behavior
+   implementation and focused automatic gates. Q066 completed its API89 MLD
+   correction and exact-device VFIO normal path through firmware/PNVM, scan,
+   WPA2/CCMP, DHCP, ping, nonempty fetch, disconnect, and down with host
+   restoration; one exact-machine direct boot remains before p038 closes.
+   Then p039 reviews/refactors only common behavior
    demonstrated by both working drivers. Do not create a common Intel/Realtek
    hardware layer first, and do not change the public WLAN UAPI without a
    significant explicit interface decision. RTL8822CE remains a later

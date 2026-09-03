@@ -43,7 +43,7 @@ void kern_clock_init(void)
 	realtime_offset.tv_nsec=0;
 	atomic_raw_store_release((volatile unsigned *)&realtime_synchronized,0);
 	process_timer_init();
-	if(hal_rtc_read(&seconds)){
+	if(hal_rtc_read_epoch_time(&seconds)){
 		realtime_offset.tv_sec=(int64_t)seconds;
 		atomic_raw_store_release((volatile unsigned *)&realtime_synchronized,1);
 	}

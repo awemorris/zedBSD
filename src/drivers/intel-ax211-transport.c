@@ -68,6 +68,7 @@
 #define AX211_COMMAND_GROUP_LONG                            1U
 
 #define AX211_CSR_INT_COALESCING                         0x004U
+#define AX211_CSR_INT                                    0x008U
 #define AX211_CSR_UCODE_DRV_GP1_CLR                     0x05cU
 #define AX211_CSR_MAC_SHADOW_REG_CTRL                   0x0a8U
 #define AX211_HBUS_TARG_WRPTR                           0x460U
@@ -93,22 +94,26 @@
 #define AX211_FH_CAUSE_D2S_CH0                         0x00010000U
 #define AX211_FH_CAUSE_D2S_CH1                         0x00020000U
 #define AX211_FH_CAUSE_S2D                             0x00080000U
-#define AX211_FH_CAUSE_ERROR                           0x00200000U
+#define AX211_FH_CAUSE_ERROR \
+	INTEL_AX211_TRANSPORT_FH_CAUSE_ERROR
 #define AX211_FH_SUPPORTED (AX211_FH_CAUSE_Q0 | AX211_FH_CAUSE_Q1 | \
 	AX211_FH_CAUSE_D2S_CH0 | AX211_FH_CAUSE_D2S_CH1 | \
 	AX211_FH_CAUSE_S2D | AX211_FH_CAUSE_ERROR)
 
-#define AX211_HW_CAUSE_ALIVE                           0x00000001U
+#define AX211_HW_CAUSE_ALIVE             INTEL_AX211_TRANSPORT_HW_CAUSE_ALIVE
 #define AX211_HW_CAUSE_WAKEUP                          0x00000002U
 #define AX211_HW_CAUSE_RESET_DONE                      0x00000004U
-#define AX211_HW_CAUSE_SW_ERROR_V2                     0x00000020U
+#define AX211_HW_CAUSE_SW_ERROR_V2 \
+	INTEL_AX211_TRANSPORT_HW_CAUSE_SW_ERROR_V2
 #define AX211_HW_CAUSE_CT_KILL                         0x00000040U
 #define AX211_HW_CAUSE_RF_KILL                         0x00000080U
 #define AX211_HW_CAUSE_PERIODIC                        0x00000100U
-#define AX211_HW_CAUSE_SW_ERROR                        0x02000000U
+#define AX211_HW_CAUSE_SW_ERROR \
+	INTEL_AX211_TRANSPORT_HW_CAUSE_SW_ERROR
 #define AX211_HW_CAUSE_SCD                             0x04000000U
 #define AX211_HW_CAUSE_FH_TX                           0x08000000U
-#define AX211_HW_CAUSE_HW_ERROR                        0x20000000U
+#define AX211_HW_CAUSE_HW_ERROR \
+	INTEL_AX211_TRANSPORT_HW_CAUSE_HW_ERROR
 #define AX211_HW_CAUSE_HAP                             0x40000000U
 #define AX211_HW_SUPPORTED (AX211_HW_CAUSE_ALIVE | AX211_HW_CAUSE_WAKEUP | \
 	AX211_HW_CAUSE_RESET_DONE | AX211_HW_CAUSE_SW_ERROR_V2 | \
@@ -380,8 +385,10 @@ intel_ax211_transport_enable_firmware_interrupts(
 	    transport->quiesced || transport->failed)
 		return INTEL_AX211_TRANSPORT_ORDER;
 
-	/* Masks and acknowledges every stale cause before clearing handshakes. */
-	result = ax211_mask_all(transport);
+	/* Clears legacy and MSI-X stale state before clearing handshakes. */
+	result = ax211_csr_write(transport, AX211_CSR_INT, UINT32_MAX);
+	if (result == INTEL_AX211_TRANSPORT_OK)
+		result = ax211_mask_all(transport);
 	if (result == INTEL_AX211_TRANSPORT_OK)
 		result = ax211_ack_raw(transport, &flow_handler, &hardware);
 	if (result != INTEL_AX211_TRANSPORT_OK) {
@@ -398,6 +405,8 @@ intel_ax211_transport_enable_firmware_interrupts(
 		result = ax211_csr_write(transport,
 		    AX211_CSR_UCODE_DRV_GP1_CLR,
 		    AX211_UCODE_COMMAND_BLOCKED_CLEAR);
+	if (result == INTEL_AX211_TRANSPORT_OK)
+		result = ax211_csr_write(transport, AX211_CSR_INT, UINT32_MAX);
 	if (result != INTEL_AX211_TRANSPORT_OK) {
 		ax211_mask_all_best_effort(transport);
 		transport->failed = 1U;
@@ -520,6 +529,8 @@ intel_ax211_transport_interrupt_claim(
 	}
 	causes->flow_handler = flow_handler & transport->enabled_fh_causes;
 	causes->hardware = hardware & transport->enabled_hw_causes;
+	causes->raw_flow_handler = flow_handler;
+	causes->raw_hardware = hardware;
 	return INTEL_AX211_TRANSPORT_OK;
 }
 
@@ -566,7 +577,7 @@ intel_ax211_transport_publish_rx_descriptor(
 }
 
 /*
- * Activates RX only after all 512 transfer descriptors are DMA-visible.
+ * Gives firmware its first RX credit after hardware ALIVE configured RFH.
  */
 int
 intel_ax211_transport_activate_rx(
@@ -582,8 +593,14 @@ intel_ax211_transport_activate_rx(
 	if (!ax211_all_rx_published(transport))
 		return INTEL_AX211_TRANSPORT_ORDER;
 
-	/* Gives firmware the first aligned descriptor-credit boundary. */
-	result = ax211_csr_write(transport, AX211_RFH_Q0_FRBDCB_WIDX_TRG, 8U);
+	/* Republishes the complete ring after firmware has configured RFH. */
+	result = ax211_dma_sync(transport,
+	    INTEL_AX211_TRANSPORT_DMA_RX_TRANSFER, 0U,
+	    transport->memory.rx_transfer_size,
+	    INTEL_AX211_TRANSPORT_DMA_PREWRITE);
+	if (result == INTEL_AX211_TRANSPORT_OK)
+		result = ax211_csr_write(transport,
+		    AX211_RFH_Q0_FRBDCB_WIDX_TRG, 8U);
 	if (result != INTEL_AX211_TRANSPORT_OK) {
 		transport->failed = 1U;
 		transport->quiesced = 1U;

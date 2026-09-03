@@ -21,7 +21,7 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 HAL_PC98_SOURCES := \
 	src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c src/hal/i386/page.c \
 	src/hal/i386/mps.c src/hal/i386/acpi.c src/hal/i386/lapic.c \
-	src/hal/i386/ioapic.c src/hal/i386/interrupt-controller.c \
+	src/hal/i386/ioapic.c \
 	src/hal/i386/space.c src/hal/i386/int.c src/hal/i386/cmain.c \
 	src/hal/i386/task.c \
 	src/hal/x86/boot-parameters.c \
@@ -129,6 +129,7 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/panic.o \
 	$(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PC98_OBJS) $(KERN_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
+$(STAGE2_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
 
 vmunix: $(BUILD)/vmunix
 

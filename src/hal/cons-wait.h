@@ -1,5 +1,13 @@
-/* Internal HAL console wait-list helpers. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Internal HAL console wait-list helpers.
+ */
 
 #ifndef ZEDBSD_HAL_CONS_WAIT_H
 #define ZEDBSD_HAL_CONS_WAIT_H

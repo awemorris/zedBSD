@@ -10,7 +10,7 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON
 HAL_PCAT_SOURCES := src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/x86/rtc.c src/hal/x86/boot-parameters.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c \
 	src/hal/i386/mps.c src/hal/i386/acpi.c src/hal/i386/lapic.c \
-	src/hal/i386/ioapic.c src/hal/i386/interrupt-controller.c \
+	src/hal/i386/ioapic.c \
 	src/hal/i386/page.c src/hal/i386/space.c src/hal/i386/int.c \
 	src/hal/i386/cmain.c src/hal/i386/task.c \
 	src/hal/i386/bsp-pcat/boot.c src/hal/i386/bsp-pcat/cons.c \
@@ -141,6 +141,7 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PCAT_OBJS) $(KERN_OBJS) $(KERN_BLOCK_IDENTITY_OBJS) \
 	$(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
+$(VMUNIX_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
 
 vmunix: $(BUILD)/vmunix
 

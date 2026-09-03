@@ -7,7 +7,6 @@
 #include "asm.h"
 #include "space.h"
 #include "bsp.h"
-#include "interrupt-controller.h"
 
 void i386_page_init(void);
 void i386_int_init(void);

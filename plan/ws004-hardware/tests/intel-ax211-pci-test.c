@@ -72,6 +72,11 @@ struct drv_pci_device {
 
 #include "../../../src/drivers/pci-intel-ax211.c"
 
+#define FIXTURE_TX_QUEUE 0x0107U
+#define FIXTURE_TX_EVENT_QUEUE \
+	((uint8_t)(FIXTURE_TX_QUEUE & 0x1fU))
+#define FIXTURE_TX_EVENT_GROUP INTEL_AX211_PROTOCOL_GROUP_LEGACY
+
 static struct drv_pci_driver *registered_driver;
 static struct drv_pci_device *active_device;
 static struct ax211_pci_controller *allocated_controller;
@@ -90,6 +95,7 @@ static unsigned station_attaches;
 static unsigned station_detaches;
 static unsigned station_opens;
 static unsigned station_closes;
+static unsigned scan_profile_updates;
 static unsigned carrier_updates;
 static unsigned lifecycle_locks;
 static unsigned lifecycle_unlocks;
@@ -109,6 +115,7 @@ static unsigned transport_bind_count;
 static unsigned transport_replenish_count;
 static unsigned transport_rearm_count;
 static unsigned transport_disable_count;
+static unsigned transport_activate_count;
 static unsigned boot_run_count;
 static unsigned runtime_run_count;
 static unsigned runtime_stop_count;
@@ -151,6 +158,7 @@ static unsigned char fixture_dma_token;
 static uint8_t fixture_rx_bytes[INTEL_AX211_BOOT_EVENT_CAPACITY];
 static size_t fixture_rx_length;
 static unsigned fixture_rx_ready;
+static uint32_t fixture_hw_causes;
 static uint64_t fixture_clock;
 static unsigned fixture_command_timeout;
 static unsigned fixture_key_add_timeout_once;
@@ -175,6 +183,12 @@ static unsigned fixture_yield_count;
 static unsigned fixture_poll_overlap;
 static unsigned fixture_nested_poll_count;
 static unsigned fixture_tx_kick_failure;
+static unsigned fixture_command_fatal_mac;
+static uint32_t fixture_sram[96];
+static uint32_t fixture_sram_cursor;
+
+#define FIXTURE_SRAM_BASE 0x00400000U
+#define FIXTURE_UMAC_ERROR_ADDRESS (FIXTURE_SRAM_BASE + 0x100U)
 
 struct wlan_station {
 	const struct wlan_radio_ops *ops;
@@ -197,7 +211,7 @@ static void test_open_failure_unwind(void);
 static void test_checked_runtime_drain_retry(void);
 static void test_common_up_down_up_lifecycle(void);
 static void test_transmit_lease_detach_join(void);
-static void test_fatal_poll_checked_cleanup(void);
+static void test_malformed_rx_is_dropped(void);
 static void test_failed_key_add_scrubs_plaintext(void);
 static void test_tx_kick_schedules_recovery(void);
 static void test_recovery_join_retries_without_free(void);
@@ -270,6 +284,7 @@ fixture_reset(
 	station_detaches = 0U;
 	station_opens = 0U;
 	station_closes = 0U;
+	scan_profile_updates = 0U;
 	carrier_updates = 0U;
 	lifecycle_locks = 0U;
 	lifecycle_unlocks = 0U;
@@ -289,6 +304,7 @@ fixture_reset(
 	transport_replenish_count = 0U;
 	transport_rearm_count = 0U;
 	transport_disable_count = 0U;
+	transport_activate_count = 0U;
 	boot_run_count = 0U;
 	runtime_run_count = 0U;
 	runtime_stop_count = 0U;
@@ -330,6 +346,7 @@ fixture_reset(
 	memset(fixture_rx_bytes, 0, sizeof(fixture_rx_bytes));
 	fixture_rx_length = 0U;
 	fixture_rx_ready = 0U;
+	fixture_hw_causes = 0U;
 	fixture_clock = 1U;
 	fixture_command_timeout = 0U;
 	fixture_key_add_timeout_once = 0U;
@@ -355,6 +372,9 @@ fixture_reset(
 	fixture_poll_overlap = 0U;
 	fixture_nested_poll_count = 0U;
 	fixture_tx_kick_failure = 0U;
+	fixture_command_fatal_mac = 0U;
+	memset(fixture_sram, 0, sizeof(fixture_sram));
+	fixture_sram_cursor = 0U;
 	ax211_registry_initialized = 0U;
 	ax211_controllers = NULL;
 	ax211_refresh_epoch = 0U;
@@ -597,6 +617,13 @@ hal_io_rmb(void)
 	read_barrier_count++;
 }
 
+void
+hal_io_mb(void)
+{
+	read_barrier_count++;
+	write_barrier_count++;
+}
+
 int
 hal_printf(
 	const char *format,
@@ -773,12 +800,38 @@ fixture_csr_write32(
 	struct intel_ax211_pci_mmio_backend *backend = argument;
 
 	assert(backend == &allocated_controller->backend);
+	if (offset == AX211_HBUS_TARG_MEM_RADDR) {
+		fixture_sram_cursor = value;
+		return 0;
+	}
 	assert(offset == INTEL_AX211_TX_RING_WRITE_POINTER_REGISTER);
-	assert((value >> 16) == INTEL_AX211_TX_RING_QUEUE);
+	assert((value >> 16) == FIXTURE_TX_QUEUE);
 	return fixture_tx_kick_failure ? -1 : 0;
 }
 
+static int
+fixture_csr_read32(
+	void *argument,
+	uint32_t offset,
+	uint32_t *value)
+{
+	struct intel_ax211_pci_mmio_backend *backend = argument;
+	size_t index;
+
+	assert(backend == &allocated_controller->backend);
+	assert(offset == AX211_HBUS_TARG_MEM_RDAT);
+	assert(value != NULL);
+	assert(fixture_sram_cursor >= FIXTURE_SRAM_BASE);
+	assert((fixture_sram_cursor & 3U) == 0U);
+	index = (fixture_sram_cursor - FIXTURE_SRAM_BASE) / sizeof(uint32_t);
+	assert(index < sizeof(fixture_sram) / sizeof(fixture_sram[0U]));
+	*value = fixture_sram[index];
+	fixture_sram_cursor += sizeof(uint32_t);
+	return 0;
+}
+
 static const struct intel_ax211_mmio_ops fixture_mmio_ops = {
+	.csr_read32 = fixture_csr_read32,
 	.csr_write32 = fixture_csr_write32,
 	.delay_us = fixture_delay_us,
 	.clock_us = fixture_clock_us
@@ -973,6 +1026,24 @@ wlan_station_attach(
 	published_station->radio_context = radio_context;
 	published_station->live = 0U;
 	*result = published_station;
+	return 0;
+}
+
+int
+wlan_station_scan_profile_update(
+	struct wlan_station *station,
+	const struct wlan_scan_profile *profile)
+{
+	assert(station == published_station);
+	assert(allocated_controller->lifecycle_lock.locked == 1U);
+	assert(station->live == 0U);
+	assert(profile != NULL && profile->channel_count == 11U);
+	assert(profile->channels[0U].channel == 1U);
+	assert(profile->channels[0U].center_frequency_mhz == 2412U);
+	assert(profile->channels[10U].channel == 36U);
+	assert(profile->channels[10U].center_frequency_mhz == 5180U);
+	published_profile = *profile;
+	scan_profile_updates++;
 	return 0;
 }
 
@@ -1296,6 +1367,20 @@ intel_ax211_transport_interrupt_claim(
 	assert(transport == &allocated_controller->transport);
 	assert(causes != NULL);
 	memset(causes, 0, sizeof(*causes));
+	causes->hardware = fixture_hw_causes;
+	causes->raw_hardware = fixture_hw_causes;
+	fixture_hw_causes = 0U;
+	return INTEL_AX211_TRANSPORT_OK;
+}
+
+int
+intel_ax211_transport_activate_rx(
+	struct intel_ax211_transport *transport)
+{
+	assert(transport == &allocated_controller->transport);
+	assert(!transport->rx_active);
+	transport->rx_active = 1U;
+	transport_activate_count++;
 	return INTEL_AX211_TRANSPORT_OK;
 }
 
@@ -1306,6 +1391,8 @@ intel_ax211_transport_rx_next(
 {
 	assert(transport == &allocated_controller->transport);
 	assert(completion != NULL);
+	if (!transport->rx_active)
+		return INTEL_AX211_TRANSPORT_ORDER;
 	if (!fixture_rx_ready)
 		return INTEL_AX211_TRANSPORT_STALE;
 	memset(completion, 0, sizeof(*completion));
@@ -1436,6 +1523,12 @@ intel_ax211_protocol_command_version_lookup(
 	if (group == INTEL_AX211_ASSOC_GROUP_LONG &&
 	    opcode == INTEL_AX211_ASSOC_PHY_CONTEXT_OPCODE)
 		command_version = INTEL_AX211_ASSOC_PHY_CONTEXT_VERSION;
+	else if (group == INTEL_AX211_ASSOC_GROUP_MAC_CONFIG &&
+	    opcode == INTEL_AX211_ASSOC_MAC_CONFIG_OPCODE)
+		command_version = INTEL_AX211_ASSOC_MAC_CONFIG_VERSION;
+	else if (group == INTEL_AX211_ASSOC_GROUP_MAC_CONFIG &&
+	    opcode == INTEL_AX211_ASSOC_LINK_CONFIG_OPCODE)
+		command_version = INTEL_AX211_ASSOC_LINK_CONFIG_VERSION;
 	else if (group == INTEL_AX211_ASSOC_GROUP_DATA_PATH &&
 	    opcode == INTEL_AX211_ASSOC_RLC_CONFIG_OPCODE)
 		command_version = INTEL_AX211_ASSOC_RLC_CONFIG_VERSION;
@@ -1541,6 +1634,82 @@ intel_ax211_command_submit(
 	transaction->pending_count = 1U;
 	command_submit_count++;
 	suppress_response = fixture_command_timeout != 0U;
+	if (request->command.group == INTEL_AX211_ASSOC_GROUP_MAC_CONFIG &&
+	    request->command.opcode == INTEL_AX211_ASSOC_MAC_CONFIG_OPCODE) {
+		const uint8_t *payload = request->payload;
+		uint32_t action;
+
+		assert(request->command.version == 0U);
+		assert(payload != NULL && request->payload_length ==
+		    INTEL_AX211_ASSOC_MAC_CONFIG_SIZE);
+		assert(ax211_pci_get_le32(payload) == INTEL_AX211_ASSOC_MAC_ID);
+		action = ax211_pci_get_le32(payload + 4U);
+		assert(action >= 1U && action <= 3U);
+		if (action != 3U) {
+			assert(ax211_pci_get_le32(payload + 8U) == 5U);
+			assert(ax211_pci_get_le32(payload + 20U) == 0x0cU);
+			assert(ax211_pci_get_le32(payload + 32U) == 1U);
+		}
+		if (fixture_command_fatal_mac && action == 1U) {
+			fixture_command_fatal_mac = 0U;
+			fixture_hw_causes =
+			    INTEL_AX211_TRANSPORT_HW_CAUSE_SW_ERROR;
+			suppress_response = 1;
+		}
+	}
+	if (request->command.group == INTEL_AX211_ASSOC_GROUP_MAC_CONFIG &&
+	    request->command.opcode == INTEL_AX211_ASSOC_LINK_CONFIG_OPCODE) {
+		const uint8_t *payload = request->payload;
+		uint32_t action;
+		uint32_t mask;
+
+		assert(request->command.version == 0U);
+		assert(payload != NULL && request->payload_length ==
+		    INTEL_AX211_ASSOC_LINK_CONFIG_SIZE);
+		action = ax211_pci_get_le32(payload);
+		assert(action >= 1U && action <= 3U);
+		assert(ax211_pci_get_le32(payload + 4U) ==
+		    INTEL_AX211_ASSOC_LINK_ID);
+		if (action == 1U || action == 3U)
+			assert(ax211_pci_get_le32(payload + 12U) == UINT32_MAX);
+		else {
+			assert(ax211_pci_get_le32(payload + 12U) == 0U);
+			mask = ax211_pci_get_le32(payload + 24U);
+			assert(mask == 0U || mask == 0x01U || mask == 0x03U ||
+			    mask == 0x1aU);
+			assert(ax211_pci_get_le32(payload + 28U) <= 1U);
+		}
+	}
+	if (request->command.group == INTEL_AX211_ASSOC_GROUP_MAC_CONFIG &&
+	    request->command.opcode == INTEL_AX211_ASSOC_STATION_CONFIG_OPCODE) {
+		const uint8_t *payload = request->payload;
+
+		assert(request->command.version == 0U);
+		assert(payload != NULL && request->payload_length ==
+		    INTEL_AX211_ASSOC_STATION_CONFIG_SIZE);
+		assert(ax211_pci_get_le32(payload) ==
+		    INTEL_AX211_ASSOC_STATION_ID);
+		assert(ax211_pci_get_le32(payload + 4U) ==
+		    INTEL_AX211_ASSOC_LINK_ID);
+		assert(ax211_pci_get_le32(payload + 24U) == 0U);
+	}
+	if (request->command.group == INTEL_AX211_ASSOC_GROUP_MAC_CONFIG &&
+	    request->command.opcode == INTEL_AX211_ASSOC_STATION_REMOVE_OPCODE) {
+		assert(request->command.version == 0U);
+		assert(request->payload != NULL && request->payload_length ==
+		    INTEL_AX211_ASSOC_REMOVE_STATION_SIZE);
+		assert(ax211_pci_get_le32(request->payload) ==
+		    INTEL_AX211_ASSOC_STATION_ID);
+	}
+	if (request->command.group == INTEL_AX211_ASSOC_GROUP_DATA_PATH &&
+	    request->command.opcode == INTEL_AX211_ASSOC_RLC_CONFIG_OPCODE) {
+		assert(request->command.version ==
+		    INTEL_AX211_ASSOC_RLC_CONFIG_VERSION);
+		assert(request->payload != NULL && request->payload_length ==
+		    INTEL_AX211_ASSOC_RLC_CONFIG_SIZE);
+		/* This fixture advertises RX chain A only. */
+		assert(ax211_pci_get_le32(request->payload + 4U) == 0x1402U);
+	}
 	if (request->command.group == INTEL_AX211_ASSOC_GROUP_LEGACY &&
 	    request->command.opcode == INTEL_AX211_ASSOC_MCAST_FILTER_OPCODE) {
 		const uint8_t *payload = request->payload;
@@ -1570,6 +1739,8 @@ intel_ax211_command_submit(
 	if (request->command.group == INTEL_AX211_KEY_GROUP &&
 	    request->command.opcode == INTEL_AX211_KEY_OPCODE &&
 	    request->payload != NULL && request->payload_length >= 4U) {
+		assert(request->command.version == INTEL_AX211_KEY_WIRE_VERSION);
+		assert(request->payload_length == INTEL_AX211_KEY_COMMAND_SIZE);
 		if (((const uint8_t *)request->payload)[0U] == 1U) {
 			fixture_key_add_count++;
 			if (fixture_key_add_timeout_once) {
@@ -1590,19 +1761,13 @@ intel_ax211_command_submit(
 			response[0U] = (uint8_t)fixture_power_status;
 		}
 		if (response_length == INTEL_AX211_ASSOC_QUEUE_RESPONSE_SIZE) {
-			response[0U] = fixture_command_malformed_queue ? 2U :
-			    INTEL_AX211_TX_RING_QUEUE;
-			if (!allocated_controller->tx_ring.enabled) {
-				response[4U] = (uint8_t)allocated_controller->
-				    tx_queue_config.expected_write_pointer;
-				response[5U] = (uint8_t)(allocated_controller->
-				    tx_queue_config.expected_write_pointer >> 8);
-			}
-		} else if (response_length == 4U &&
-		    request->command.group == INTEL_AX211_ASSOC_GROUP_LEGACY &&
-		    request->command.opcode ==
-		    INTEL_AX211_ASSOC_ADD_STATION_OPCODE)
-			response[0U] = 1U;
+			uint16_t queue;
+
+			queue = fixture_command_malformed_queue ? 0U :
+			    FIXTURE_TX_QUEUE;
+			response[0U] = (uint8_t)queue;
+			response[1U] = (uint8_t)(queue >> 8);
+		}
 		fixture_rx_event(request->command.opcode, request->command.group,
 		    handle->token.queue, response, response_length);
 		if (fixture_command_async_tx_before_response) {
@@ -1610,8 +1775,8 @@ intel_ax211_command_submit(
 			    fixture_rx_length);
 			fixture_pending_response_length = fixture_rx_length;
 			fixture_pending_command_response = 1U;
-			fixture_rx_event(INTEL_AX211_TX_OPCODE, INTEL_AX211_TX_GROUP,
-			    0x81U, fixture_async_tx_response,
+			fixture_rx_event(INTEL_AX211_TX_OPCODE, FIXTURE_TX_EVENT_GROUP,
+			    FIXTURE_TX_EVENT_QUEUE, fixture_async_tx_response,
 			    sizeof(fixture_async_tx_response));
 			fixture_rx_bytes[6U] = fixture_async_tx_index;
 			fixture_command_async_tx_before_response = 0U;
@@ -1819,6 +1984,7 @@ intel_ax211_runtime_start_run(
 	if (result == 0) {
 		session->transport->msix_configured = 1U;
 		session->transport->interrupts_enabled = 1U;
+		session->transport->rx_active = 1U;
 	}
 	if (result != 0 || active_device->failure == FIXTURE_FAIL_RUNTIME_RUN) {
 		if (result == 0)
@@ -1920,6 +2086,12 @@ intel_ax211_scan_session_init(
 	session->hardware_epoch = hardware_epoch;
 	session->initialized = 1U;
 	session->phase = INTEL_AX211_SCAN_SESSION_IDLE;
+	session->full_profile.channel_width_mhz =
+	    INTEL_AX211_SCAN_CHANNEL_WIDTH_MHZ;
+	session->full_profile.channel_count = 11U;
+	for (size_t index = 0U; index < 10U; index++)
+		session->full_profile.channel[index] = (uint8_t)(index + 1U);
+	session->full_profile.channel[10U] = 36U;
 	return INTEL_AX211_SCAN_SESSION_OK;
 }
 
@@ -2797,7 +2969,7 @@ test_transmit_lease_detach_join(void)
 }
 
 static void
-test_fatal_poll_checked_cleanup(void)
+test_malformed_rx_is_dropped(void)
 {
 	static const uint8_t bssid[6] = {
 		0x02U, 0x66U, 0x77U, 0x88U, 0x99U, 0xaaU
@@ -2827,22 +2999,20 @@ test_fatal_poll_checked_cleanup(void)
 	fixture_rx_decode_result = INTEL_AX211_RX_TRUNCATED;
 	fixture_rx_event(INTEL_AX211_RX_MPDU_OPCODE, INTEL_AX211_RX_MPDU_GROUP,
 	    0x80U, payload, sizeof(payload));
-	assert(published_device->ops->poll_receive(published_device, 1U) == 0U);
+	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
 	assert(controller->poll_active == 0U);
-	assert(controller->runtime_active == 0U);
-	assert(controller->operation_admission_open == 0U);
-	assert(controller->quarantined == 1U);
-	assert(link_loss_reports == 1U);
-	assert(reported_link_loss_generation == 71U);
-	assert(reported_link_loss_error == EIO);
-	assert(published_device->carrier == 0U);
-	assert(controller->active_dma == NULL);
-	assert(controller->irq_established == 0U);
-	assert(device.irq_established == 0U);
-	assert((device.command & AX211_PCI_COMMAND_MASTER) == 0U);
-	assert(dma_allocations == dma_frees);
+	assert(controller->runtime_active == 1U);
+	assert(controller->operation_admission_open == 1U);
+	assert(controller->quarantined == 0U);
+	assert(link_loss_reports == 0U);
+	assert(published_device->carrier == 1U);
+	assert(controller->active_dma != NULL);
+	assert(controller->irq_established == 1U);
+	assert(device.irq_established == 1U);
+	assert((device.command & AX211_PCI_COMMAND_MASTER) != 0U);
 	fixture_rx_decode_result = INTEL_AX211_RX_OK;
 	assert(ax211_pci_detach(&device, 0U) == 0);
+	assert(dma_allocations == dma_frees);
 }
 
 static void
@@ -3078,6 +3248,11 @@ test_notification_layout_versions(void)
 	    INTEL_AX211_PROTOCOL_UNKNOWN_VERSION);
 	event[7U] = 0U;
 	assert(ax211_pci_notification_version(event, sizeof(event)) == 0U);
+	event[4U] = INTEL_AX211_TX_OPCODE;
+	event[5U] = FIXTURE_TX_EVENT_GROUP;
+	event[7U] = FIXTURE_TX_EVENT_QUEUE;
+	assert(ax211_pci_notification_version(event, sizeof(event)) ==
+	    INTEL_AX211_TX_NOTIFICATION_VERSION);
 }
 
 static void
@@ -3111,9 +3286,18 @@ test_receive_copy_replenish_and_poll_boundary(void)
 	assert(device.irq_handler != NULL);
 	assert(device.irq_handler(device.irq_argument) == 1);
 	assert(device.poll_scheduled == 1U);
+	controller->transport.rx_active = 0U;
+	assert(controller->transport.rx_active == 0U);
+	memset(copy, 0, sizeof(copy));
+	memset(&event, 0, sizeof(event));
+	assert(ax211_pci_receive_event(controller, fixture_clock, copy,
+	    sizeof(copy), &event) == INTEL_AX211_BOOT_RECEIVE_TIMEOUT);
+	assert(controller->transport.rx_active == 0U);
+	assert(transport_activate_count == 0U);
 	fixture_rx_event(INTEL_AX211_PROTOCOL_ALIVE_OPCODE,
 	    INTEL_AX211_PROTOCOL_GROUP_LEGACY, 0x80U, payload,
 	    sizeof(payload));
+	fixture_hw_causes = INTEL_AX211_TRANSPORT_HW_CAUSE_ALIVE;
 	memset(copy, 0, sizeof(copy));
 	memset(&event, 0, sizeof(event));
 	assert(ax211_pci_receive_event(controller, fixture_clock, copy,
@@ -3122,19 +3306,35 @@ test_receive_copy_replenish_and_poll_boundary(void)
 	assert(event.generation == controller->hardware_epoch);
 	assert(event.notification_version ==
 	    INTEL_AX211_PROTOCOL_ALIVE_VERSION);
+	assert(controller->transport.rx_active == 1U);
+	assert(transport_activate_count == 1U);
 	assert(memcmp(copy + 8U, payload, sizeof(payload)) == 0);
 	assert(fixture_rx_bytes[8U] == 0xa5U);
 	assert(transport_replenish_count == 1U);
-	assert(transport_rearm_count == 1U);
+	assert(transport_rearm_count == 2U);
 
 	memset(fixture_rx_bytes, 0, sizeof(fixture_rx_bytes));
 	fixture_rx_bytes[0U] = 0xffU;
 	fixture_rx_bytes[1U] = 0x3fU;
 	fixture_rx_ready = 1U;
+	fixture_hw_causes = INTEL_AX211_TRANSPORT_HW_CAUSE_ALIVE;
 	memset(&event, 0, sizeof(event));
 	assert(ax211_pci_receive_event(controller, fixture_clock, copy,
 	    sizeof(copy), &event) == INTEL_AX211_BOOT_RECEIVE_IO);
 	assert(transport_replenish_count == 2U);
+	assert(transport_activate_count == 1U);
+
+	controller->command_hw_causes = 0U;
+	controller->command_raw_hw_causes = 0U;
+	fixture_hw_causes = INTEL_AX211_TRANSPORT_HW_CAUSE_SW_ERROR_V2;
+	memset(&event, 0, sizeof(event));
+	assert(ax211_pci_receive_event(controller, fixture_clock, copy,
+	    sizeof(copy), &event) == INTEL_AX211_BOOT_RECEIVE_IO);
+	assert(controller->command_hw_causes ==
+	    INTEL_AX211_TRANSPORT_HW_CAUSE_SW_ERROR_V2);
+	assert(controller->command_raw_hw_causes ==
+	    INTEL_AX211_TRANSPORT_HW_CAUSE_SW_ERROR_V2);
+	assert(strstr(log_buffer, "fatal firmware interrupt") != NULL);
 
 	fixture_rx_event(0x7fU, 0U, 0x80U, payload, sizeof(payload));
 	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
@@ -3263,6 +3463,7 @@ test_association_key_tx_rx_disconnect_sequence(void)
 	uint8_t frame[32];
 	uint8_t session_event[INTEL_AX211_ASSOC_SESSION_NOTIFICATION_SIZE];
 	uint8_t tx_response[48];
+	uint8_t tx_index;
 	uint64_t connection_generation;
 	uint64_t scan_generation;
 	uint64_t deadline;
@@ -3277,10 +3478,12 @@ test_association_key_tx_rx_disconnect_sequence(void)
 	drv_pci_intel_ax211_devices_ready();
 	controller = device.driver_data;
 	assert(published_device->ops->open(published_device) == 0);
+	assert(scan_profile_updates == 1U);
+	assert(published_profile.channels[10U].channel == 36U);
 	scan_generation = UINT64_C(0x100000029);
 	deadline = clock_ticks() + 100U;
 	assert(published_station->ops->scan_channel_start(controller,
-	    scan_generation, AX211_PASSIVE_CHANNEL_COUNT - 1U, 1U,
+	    scan_generation, AX211_PASSIVE_CHANNEL_COUNT - 1U, 36U,
 	    deadline) == 0);
 	fixture_rx_event(INTEL_AX211_SCAN_REQUEST_OPCODE,
 	    INTEL_AX211_SCAN_GROUP_LONG, 1U, NULL, 0U);
@@ -3297,12 +3500,19 @@ test_association_key_tx_rx_disconnect_sequence(void)
 
 	memset(&bss, 0, sizeof(bss));
 	memcpy(bss.bssid, bssid, sizeof(bssid));
-	bss.channel = 1U;
+	bss.channel = 36U;
 	connection_generation = UINT64_C(0x20000002a);
 	assert(published_station->ops->connect_start(controller,
 	    connection_generation, &bss, deadline) == 0);
 	assert(controller->association.phase ==
 	    INTEL_AX211_ASSOC_PHASE_AUTH_READY);
+	assert(controller->association.profile.channel == 36U);
+	assert(controller->association.profile.cck_ack_rates == 1U);
+	/* The synthetic AP capability omits SHORT_SLOT_TIME; 5 GHz still forces
+	 * short-slot in the Intel MAC context while keeping short preamble off. */
+	assert((controller->selected_metadata.capability & 0x0400U) == 0U);
+	assert(controller->association.profile.short_preamble == 0U);
+	assert(controller->association.profile.short_slot == 1U);
 	assert(controller->tx_ring.enabled == 1U);
 
 	memset(frame, 0, sizeof(frame));
@@ -3315,15 +3525,19 @@ test_association_key_tx_rx_disconnect_sequence(void)
 	transmit.frame = frame;
 	transmit.length = 24U;
 	assert(published_station->ops->frame_transmit(controller, &transmit) == 0);
+	tx_index = (uint8_t)(controller->tx_ring.write_sequence - 1U);
+	assert(ax211_pci_get_le32(controller->tx_ring.slot[tx_index].
+	    command.address + 20U) == 0x00004100U);
 	assert(controller->tx_ring.pending_count == 1U);
 	memset(tx_response, 0, sizeof(tx_response));
 	tx_response[0U] = 1U;
 	tx_response[30U] = 24U;
-	tx_response[36U] = INTEL_AX211_TX_RING_QUEUE;
+	tx_response[36U] = (uint8_t)FIXTURE_TX_QUEUE;
+	tx_response[37U] = (uint8_t)(FIXTURE_TX_QUEUE >> 8);
 	tx_response[40U] = 1U;
 	tx_response[44U] = 1U;
-	fixture_rx_event(INTEL_AX211_TX_OPCODE, INTEL_AX211_TX_GROUP, 0x81U,
-	    tx_response, sizeof(tx_response));
+	fixture_rx_event(INTEL_AX211_TX_OPCODE, FIXTURE_TX_EVENT_GROUP,
+	    FIXTURE_TX_EVENT_QUEUE, tx_response, sizeof(tx_response));
 	fixture_rx_bytes[6U] = 0U;
 	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
 	assert(tx_completion_reports == 1U && reported_tx_cookie == UINT64_MAX);
@@ -3379,7 +3593,8 @@ test_association_key_tx_rx_disconnect_sequence(void)
 	    sizeof(fixture_async_tx_response));
 	fixture_async_tx_response[0U] = 1U;
 	fixture_async_tx_response[30U] = 24U;
-	fixture_async_tx_response[36U] = INTEL_AX211_TX_RING_QUEUE;
+	fixture_async_tx_response[36U] = (uint8_t)FIXTURE_TX_QUEUE;
+	fixture_async_tx_response[37U] = (uint8_t)(FIXTURE_TX_QUEUE >> 8);
 	fixture_async_tx_response[40U] = 1U;
 	fixture_async_tx_response[44U] = 2U;
 	fixture_async_tx_index = 1U;
@@ -3439,11 +3654,12 @@ test_association_key_tx_rx_disconnect_sequence(void)
 	memset(tx_response, 0, sizeof(tx_response));
 	tx_response[0U] = 1U;
 	tx_response[30U] = 24U;
-	tx_response[36U] = INTEL_AX211_TX_RING_QUEUE;
+	tx_response[36U] = (uint8_t)FIXTURE_TX_QUEUE;
+	tx_response[37U] = (uint8_t)(FIXTURE_TX_QUEUE >> 8);
 	tx_response[40U] = 1U;
 	tx_response[44U] = 3U;
-	fixture_rx_event(INTEL_AX211_TX_OPCODE, INTEL_AX211_TX_GROUP, 0x81U,
-	    tx_response, sizeof(tx_response));
+	fixture_rx_event(INTEL_AX211_TX_OPCODE, FIXTURE_TX_EVENT_GROUP,
+	    FIXTURE_TX_EVENT_QUEUE, tx_response, sizeof(tx_response));
 	fixture_rx_bytes[6U] = 2U;
 	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
 	assert(tx_completion_reports == 3U && reported_tx_cookie ==
@@ -3476,11 +3692,12 @@ test_association_key_tx_rx_disconnect_sequence(void)
 	memset(tx_response, 0, sizeof(tx_response));
 	tx_response[0U] = 1U;
 	tx_response[30U] = 24U;
-	tx_response[36U] = INTEL_AX211_TX_RING_QUEUE;
+	tx_response[36U] = (uint8_t)FIXTURE_TX_QUEUE;
+	tx_response[37U] = (uint8_t)(FIXTURE_TX_QUEUE >> 8);
 	tx_response[40U] = 1U;
 	tx_response[44U] = 4U;
-	fixture_rx_event(INTEL_AX211_TX_OPCODE, INTEL_AX211_TX_GROUP, 0x81U,
-	    tx_response, sizeof(tx_response));
+	fixture_rx_event(INTEL_AX211_TX_OPCODE, FIXTURE_TX_EVENT_GROUP,
+	    FIXTURE_TX_EVENT_QUEUE, tx_response, sizeof(tx_response));
 	fixture_rx_bytes[6U] = 3U;
 	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
 	assert(published_station->ops->keys_activate(controller,
@@ -3502,11 +3719,12 @@ test_association_key_tx_rx_disconnect_sequence(void)
 	memset(tx_response, 0, sizeof(tx_response));
 	tx_response[0U] = 1U;
 	tx_response[30U] = 24U;
-	tx_response[36U] = INTEL_AX211_TX_RING_QUEUE;
+	tx_response[36U] = (uint8_t)FIXTURE_TX_QUEUE;
+	tx_response[37U] = (uint8_t)(FIXTURE_TX_QUEUE >> 8);
 	tx_response[40U] = 1U;
 	tx_response[44U] = 5U;
-	fixture_rx_event(INTEL_AX211_TX_OPCODE, INTEL_AX211_TX_GROUP, 0x81U,
-	    tx_response, sizeof(tx_response));
+	fixture_rx_event(INTEL_AX211_TX_OPCODE, FIXTURE_TX_EVENT_GROUP,
+	    FIXTURE_TX_EVENT_QUEUE, tx_response, sizeof(tx_response));
 	fixture_rx_bytes[6U] = 4U;
 	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
 
@@ -3630,22 +3848,20 @@ test_association_key_tx_rx_disconnect_sequence(void)
 	assert(controller->tx_ring.enabled == 0U);
 	/* A completion already in the device event ring may arrive after the
 	 * queue-remove ACK.  It is a stale tombstone, not live-DMA corruption. */
-	fixture_rx_event(INTEL_AX211_TX_OPCODE, INTEL_AX211_TX_GROUP, 0x81U,
-	    tx_response, sizeof(tx_response));
+	fixture_rx_event(INTEL_AX211_TX_OPCODE, FIXTURE_TX_EVENT_GROUP,
+	    FIXTURE_TX_EVENT_QUEUE, tx_response, sizeof(tx_response));
 	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
 	assert(controller->runtime_active == 1U);
 	assert(controller->quarantined == 0U);
 
-	/* Queue removal preserves the scheduler sequence across a reconnect.
-	 * Otherwise an old seq=1/index=0 completion can retire the first new
-	 * frame after both software and firmware queues restart at zero. */
+	/* A reconnect starts from the write pointer returned by the new
+	 * firmware-owned queue rather than from a host-selected sequence. */
 	connection_generation = UINT64_C(0x20000002b);
 	deadline = clock_ticks() + 100U;
 	assert(published_station->ops->connect_start(controller,
 	    connection_generation, &bss, deadline) == 0);
 	reconnect_sequence = controller->tx_ring.write_sequence;
-	assert(reconnect_sequence == controller->tx_next_sequence);
-	assert(reconnect_sequence != 0U);
+	assert(reconnect_sequence == controller->tx_ring.read_sequence);
 	memset(frame, 0, sizeof(frame));
 	frame[0U] = 0xb0U;
 	memset(&transmit, 0, sizeof(transmit));
@@ -3661,19 +3877,13 @@ test_association_key_tx_rx_disconnect_sequence(void)
 	memset(tx_response, 0, sizeof(tx_response));
 	tx_response[0U] = 1U;
 	tx_response[30U] = 24U;
-	tx_response[36U] = INTEL_AX211_TX_RING_QUEUE;
+	tx_response[36U] = (uint8_t)FIXTURE_TX_QUEUE;
+	tx_response[37U] = (uint8_t)(FIXTURE_TX_QUEUE >> 8);
 	tx_response[40U] = 1U;
-	tx_response[44U] = 1U;
-	fixture_rx_event(INTEL_AX211_TX_OPCODE, INTEL_AX211_TX_GROUP, 0x81U,
-	    tx_response, sizeof(tx_response));
-	fixture_rx_bytes[6U] = 0U;
-	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
-	assert(controller->tx_ring.pending_count == 1U);
-	assert(tx_completion_reports == completion_count);
 	tx_response[44U] = (uint8_t)(reconnect_sequence + 1U);
 	tx_response[45U] = (uint8_t)((reconnect_sequence + 1U) >> 8);
-	fixture_rx_event(INTEL_AX211_TX_OPCODE, INTEL_AX211_TX_GROUP, 0x81U,
-	    tx_response, sizeof(tx_response));
+	fixture_rx_event(INTEL_AX211_TX_OPCODE, FIXTURE_TX_EVENT_GROUP,
+	    FIXTURE_TX_EVENT_QUEUE, tx_response, sizeof(tx_response));
 	fixture_rx_bytes[6U] = (uint8_t)reconnect_sequence;
 	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
 	assert(controller->tx_ring.pending_count == 0U);
@@ -3752,7 +3962,7 @@ test_scan_generation_resets_full_bss_cache(void)
 
 	second_generation = UINT64_C(0x300000002);
 	assert(published_station->ops->scan_channel_start(controller,
-	    second_generation, AX211_PASSIVE_CHANNEL_COUNT - 1U, 1U,
+	    second_generation, 0U, 1U,
 	    deadline) == 0);
 	assert(controller->bss_staging_cache.count == 0U);
 	assert(controller->bss_published_cache.count ==
@@ -3780,6 +3990,22 @@ test_scan_generation_resets_full_bss_cache(void)
 	    &entry) ==
 	    INTEL_AX211_BSS_OK);
 	assert(controller->bss_staging_cache.count == 1U);
+	fixture_rx_event(INTEL_AX211_SCAN_COMPLETE_OPCODE,
+	    INTEL_AX211_SCAN_GROUP_LEGACY, 0x80U, NULL, 0U);
+	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
+	assert(published_station->ops->scan_stop(controller,
+	    second_generation) == 0);
+	assert(controller->bss_staging_cache.count == 1U);
+	assert(controller->bss_staging_initialized == 1U);
+	assert(controller->bss_published_generation == first_generation);
+	/* Complete the same generation on its final 5-GHz channel.  The BSS
+	 * found on channel 1 must survive and remain association metadata. */
+	assert(published_station->ops->scan_channel_start(controller,
+	    second_generation, AX211_PASSIVE_CHANNEL_COUNT - 1U, 36U,
+	    deadline) == 0);
+	fixture_rx_event(INTEL_AX211_SCAN_REQUEST_OPCODE,
+	    INTEL_AX211_SCAN_GROUP_LONG, 1U, NULL, 0U);
+	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
 	fixture_rx_event(INTEL_AX211_SCAN_COMPLETE_OPCODE,
 	    INTEL_AX211_SCAN_GROUP_LEGACY, 0x80U, NULL, 0U);
 	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
@@ -3862,6 +4088,51 @@ test_association_failure_unwind_and_tx_timeout(void)
 	deadline = clock_ticks() + 100U;
 	assert(published_station->ops->connect_start(controller, 41U, &bss,
 	    deadline) == EIO);
+	assert(controller->runtime_active == 1U);
+	assert(controller->quarantined == 0U);
+	assert(controller->tx_ring.enabled == 0U);
+	assert(ax211_pci_detach(&device, 0U) == 0);
+	assert(dma_allocations == dma_frees);
+
+	/* A firmware fatal edge is diagnosed from the ALIVE SRAM tables before
+	 * command cancellation releases NIC ownership. */
+	fixture_reset(&device);
+	assert(drv_pci_intel_ax211_driver_register() == 0);
+	assert(ax211_pci_attach(&device, &ax211_pci_ids[0]) == 0);
+	drv_pci_intel_ax211_devices_ready();
+	controller = device.driver_data;
+	assert(published_device->ops->open(published_device) == 0);
+	fixture_seed_bss(controller, bssid);
+	controller->runtime_start.alive_accepted = 1U;
+	controller->runtime_start.alive.status =
+	    INTEL_AX211_PROTOCOL_ALIVE_STATUS_OK;
+	controller->runtime_start.alive.lmac[0].error_event_table =
+	    FIXTURE_SRAM_BASE;
+	controller->runtime_start.alive.umac.error_info =
+	    FIXTURE_UMAC_ERROR_ADDRESS | AX211_FW_ADDR_CACHE_CONTROL;
+	fixture_sram[0U] = 1U;
+	fixture_sram[1U] = 0x38U;
+	fixture_sram[7U] = 0x11111111U;
+	fixture_sram[8U] = 0x22222222U;
+	fixture_sram[9U] = 0x33333333U;
+	fixture_sram[23U] = 0x00030128U;
+	fixture_sram[29U] = 0x00000028U;
+	fixture_sram[64U + 0U] = 1U;
+	fixture_sram[64U + 1U] = 0x35U;
+	fixture_sram[64U + 6U] = 0x44444444U;
+	fixture_sram[64U + 7U] = 0x55555555U;
+	fixture_sram[64U + 8U] = 0x66666666U;
+	fixture_sram[64U + 13U] = 0x00030128U;
+	fixture_sram[64U + 14U] = 0x77777777U;
+	fixture_command_fatal_mac = 1U;
+	deadline = clock_ticks() + 100U;
+	assert(published_station->ops->connect_start(controller, 42U, &bss,
+	    deadline) == EIO);
+	assert(strstr(log_buffer, "LMAC firmware error") != NULL);
+	assert(strstr(log_buffer, "id=00000038") != NULL);
+	assert(strstr(log_buffer, "hcmd=00030128 last=00000028") != NULL);
+	assert(strstr(log_buffer, "UMAC firmware error") != NULL);
+	assert(controller->mmio.nic_lock_depth == 0U);
 	assert(controller->runtime_active == 0U);
 	assert(controller->quarantined == 1U);
 	assert(dma_allocations == dma_frees);
@@ -3973,7 +4244,7 @@ main(void)
 	test_checked_runtime_drain_retry();
 	test_common_up_down_up_lifecycle();
 	test_transmit_lease_detach_join();
-	test_fatal_poll_checked_cleanup();
+	test_malformed_rx_is_dropped();
 	test_failed_key_add_scrubs_plaintext();
 	test_tx_kick_schedules_recovery();
 	test_recovery_join_retries_without_free();

@@ -692,7 +692,8 @@ test_stop_timeout_and_failure(void)
 	test_reach_apm(&mmio, &backend);
 	start = backend.now;
 	backend.event_count = 0U;
-	assert(intel_ax211_mmio_stop(&mmio) == INTEL_AX211_MMIO_TIMEOUT);
+	assert(intel_ax211_mmio_stop(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(mmio.master_disable_timed_out);
 	assert(backend.now == start + 11100U);
 	assert(test_find_event(&backend, 0U, TEST_EVENT_CSR_WRITE,
 	    TEST_CSR_GP_CNTRL, TEST_GP_MAC_CLOCK_READY) <
@@ -709,6 +710,7 @@ test_stop_timeout_and_failure(void)
 	backend.master_disabled_at = backend.now + 6000U;
 	backend.event_count = 0U;
 	assert(intel_ax211_mmio_stop(&mmio) == INTEL_AX211_MMIO_IO);
+	assert(!mmio.master_disable_timed_out);
 	assert(test_find_event(&backend, 0U, TEST_EVENT_CSR_WRITE,
 	    TEST_CSR_RESET, TEST_RESET_SW | TEST_RESET_STOP_MASTER) <
 	    backend.event_count);

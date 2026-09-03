@@ -262,10 +262,11 @@ static void
 test_completions_and_response(void)
 {
 	uint8_t byte = 0U;
+	uint8_t payload[INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_SIZE] = { 0U };
 	struct intel_ax211_protocol_message message;
 	struct intel_ax211_protocol_pending_command pending;
 
-	message = make_message(NULL, 0U,
+	message = make_message(payload, sizeof(payload),
 	    INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 	    INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_OPCODE,
 	    INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_VERSION, 42U);
@@ -275,12 +276,15 @@ test_completions_and_response(void)
 	assert(intel_ax211_protocol_pnvm_init_complete(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 	message.version = INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_VERSION;
-	message.payload = &byte;
+	message.payload = payload;
 	message.payload_length = 1U;
+	assert(intel_ax211_protocol_pnvm_init_complete(&message, 42U) ==
+	    INTEL_AX211_PROTOCOL_TRUNCATED);
+	message.payload_length = sizeof(payload) + 1U;
 	assert(intel_ax211_protocol_pnvm_init_complete(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_OVERSIZED);
 
-	message = make_message(NULL, 0U,
+	message = make_message(payload, INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE,
 	    INTEL_AX211_PROTOCOL_GROUP_LEGACY,
 	    INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE,
 	    INTEL_AX211_PROTOCOL_UNKNOWN_VERSION, 43U);
@@ -288,6 +292,14 @@ test_completions_and_response(void)
 	    INTEL_AX211_PROTOCOL_OK);
 	assert(intel_ax211_protocol_init_complete(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_STALE);
+	message.generation = 43U;
+	message.payload_length--;
+	assert(intel_ax211_protocol_init_complete(&message, 43U) ==
+	    INTEL_AX211_PROTOCOL_TRUNCATED);
+	message.payload_length = INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE + 1U;
+	assert(intel_ax211_protocol_init_complete(&message, 43U) ==
+	    INTEL_AX211_PROTOCOL_OVERSIZED);
+	message.payload_length = INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE;
 	message.opcode++;
 	assert(intel_ax211_protocol_init_complete(&message, 43U) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
@@ -354,9 +366,10 @@ make_nvm(uint8_t payload[INTEL_AX211_PROTOCOL_NVM_GET_INFO_SIZE])
 	    index++) {
 		uint32_t flags = 0U;
 
-		if (index < INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT)
+		if (index < INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT ||
+		    index == 14U || index == 17U)
 			flags = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
-		if (index == 0U)
+		if (index == 0U || index == 14U)
 			flags |= INTEL_AX211_PROTOCOL_NVM_CHANNEL_ACTIVE;
 		put_le32(payload + 28U + index * sizeof(uint32_t), flags);
 	}
@@ -410,6 +423,17 @@ test_nvm(void)
 	assert(nvm.channel_24ghz[0].active);
 	assert(nvm.channel_24ghz[1].number == 2U);
 	assert(!nvm.channel_24ghz[1].active);
+	assert(nvm.channel_5ghz_count ==
+	    INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT);
+	assert(nvm.valid_5ghz_count == 2U);
+	assert(nvm.channel_5ghz[0].number == 36U);
+	assert(nvm.channel_5ghz[0].valid);
+	assert(nvm.channel_5ghz[0].active);
+	assert(nvm.channel_5ghz[3].number == 48U);
+	assert(nvm.channel_5ghz[3].valid);
+	assert(!nvm.channel_5ghz[3].active);
+	assert(nvm.channel_5ghz[28].number == 149U);
+	assert(nvm.channel_5ghz[36].number == 181U);
 
 	message.payload_length--;
 	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
@@ -436,6 +460,15 @@ test_nvm(void)
 	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_MISSING);
 	memcpy(payload, original, sizeof(original));
+	put_le32(payload + 8U,
+	    INTEL_AX211_PROTOCOL_NVM_BAND_24_ENABLED |
+	    INTEL_AX211_PROTOCOL_NVM_11N_ENABLED);
+	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	    &nvm) == INTEL_AX211_PROTOCOL_OK);
+	assert(nvm.channel_5ghz_count ==
+	    INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT);
+	assert(nvm.valid_5ghz_count == 0U);
+	memcpy(payload, original, sizeof(original));
 	put_le32(payload + 12U, 0U);
 	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_MISSING);
@@ -450,6 +483,10 @@ test_nvm(void)
 	    &nvm) == INTEL_AX211_PROTOCOL_OVERSIZED);
 	memcpy(payload, original, sizeof(original));
 	memset(payload + 28U, 0, 14U * sizeof(uint32_t));
+	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	    &nvm) == INTEL_AX211_PROTOCOL_OK);
+	assert(nvm.lar_enabled && nvm.valid_24ghz_count == 0U);
+	put_le32(payload + 20U, 0U);
 	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_MISSING);
 

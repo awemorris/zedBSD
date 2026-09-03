@@ -49,6 +49,7 @@ static int ax211_boot_finish(struct intel_ax211_boot *boot, int result,
 	struct intel_ax211_protocol_nvm *nvm);
 static int ax211_boot_protocol_result(int result);
 static int ax211_boot_command_result(int result);
+static uint32_t ax211_boot_get_le32(const uint8_t bytes[4]);
 
 /*
  * Initializes one controller-owned first-boot coordinator.
@@ -356,7 +357,7 @@ ax211_boot_start_device(
 	if (boot->dma.rx_buffer_count != INTEL_AX211_RX_RING_SIZE)
 		return INTEL_AX211_BOOT_DMA;
 
-	/* Publishes every exact RX buffer before enabling the RX engine. */
+	/* Publishes every exact RX buffer before firmware can configure RFH. */
 	for (index = 0U; index < boot->dma.rx_buffer_count; index++) {
 		if (boot->dma.rx_buffer[index].address == NULL ||
 		    boot->dma.rx_buffer[index].device_address == 0U)
@@ -367,9 +368,7 @@ ax211_boot_start_device(
 		if (result != INTEL_AX211_TRANSPORT_OK)
 			return INTEL_AX211_BOOT_TRANSPORT;
 	}
-	result = intel_ax211_transport_activate_rx(boot->transport);
-	if (result != INTEL_AX211_TRANSPORT_OK)
-		return INTEL_AX211_BOOT_TRANSPORT;
+	/* The first RX credit is deferred until the hardware-ALIVE cause. */
 	result = intel_ax211_transport_enable_firmware_interrupts(
 	    boot->transport);
 	if (result != INTEL_AX211_TRANSPORT_OK)
@@ -480,6 +479,7 @@ ax211_boot_send_extended_cfg(
 	struct intel_ax211_command_request request;
 	struct intel_ax211_command_handle handle;
 	uint8_t payload[INTEL_AX211_INIT_EXTENDED_CFG_SIZE];
+	uint8_t response[4];
 	uint64_t deadline;
 	uint64_t now;
 	size_t response_length;
@@ -498,8 +498,8 @@ ax211_boot_send_extended_cfg(
 	request.payload = payload;
 	request.payload_length = sizeof(payload);
 	request.response_version = 0U;
-	request.minimum_response_length = 0U;
-	request.maximum_response_length = 0U;
+	request.minimum_response_length = sizeof(response);
+	request.maximum_response_length = sizeof(response);
 
 	/* Submits the command with one finite acknowledgement deadline. */
 	result = ax211_boot_deadline(boot,
@@ -511,13 +511,16 @@ ax211_boot_send_extended_cfg(
 	if (result != INTEL_AX211_COMMAND_OK)
 		return ax211_boot_command_result(result);
 	response_length = 0U;
-	result = ax211_boot_wait_command(boot, deadline, NULL, 0U,
+	memset(response, 0, sizeof(response));
+	result = ax211_boot_wait_command(boot, deadline, response,
+	    sizeof(response),
 	    &response_length);
-	if (result != INTEL_AX211_BOOT_OK)
-		return result;
-	if (response_length != 0U)
-		return INTEL_AX211_BOOT_PROTOCOL;
-	return INTEL_AX211_BOOT_OK;
+	if (result == INTEL_AX211_BOOT_OK && response_length != sizeof(response))
+		result = INTEL_AX211_BOOT_PROTOCOL;
+	if (result == INTEL_AX211_BOOT_OK && ax211_boot_get_le32(response) != 0U)
+		result = INTEL_AX211_BOOT_COMMAND;
+	memset(response, 0, sizeof(response));
+	return result;
 }
 
 /* Sends fixed-v1 NVM_ACCESS_COMPLETE and waits for its acknowledgement. */
@@ -531,7 +534,7 @@ ax211_boot_send_nvm_access_complete(
 	size_t response_length;
 	int result;
 
-	/* Submits the exact zero-payload command with a finite deadline. */
+	/* Submits the 4-byte reserved request for a zero-payload acknowledgement. */
 	result = ax211_boot_deadline(boot,
 	    INTEL_AX211_BOOT_COMMAND_TIMEOUT_US, &now, &deadline);
 	if (result != INTEL_AX211_BOOT_OK)
@@ -983,4 +986,15 @@ ax211_boot_command_result(
 	    result == INTEL_AX211_COMMAND_BUFFER_TOO_SMALL)
 		return INTEL_AX211_BOOT_PROTOCOL;
 	return INTEL_AX211_BOOT_COMMAND;
+}
+
+/* Decodes one exact little-endian generic firmware status. */
+static uint32_t
+ax211_boot_get_le32(
+	const uint8_t bytes[4])
+{
+	return (uint32_t)bytes[0] |
+	    (uint32_t)bytes[1] << 8 |
+	    (uint32_t)bytes[2] << 16 |
+	    (uint32_t)bytes[3] << 24;
 }

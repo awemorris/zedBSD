@@ -92,6 +92,8 @@ AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/x86/boot-parameters.c \
 	src/hal/amd64/bsp-pcat/pic.c src/hal/amd64/bsp-pcat/clock.c \
 	src/hal/amd64/bsp-pcat/acpi.c src/hal/amd64/bsp-pcat/lapic.c \
 	src/hal/amd64/bsp-pcat/early-init-policy.c \
+	src/hal/amd64/bsp-pcat/timecounter-policy.c \
+	src/hal/amd64/bsp-pcat/timecounter.c \
 	src/hal/amd64/bsp-pcat/mcfg.c \
 	src/hal/amd64/bsp-pcat/ioapic.c
 AMD64_HAL_ASM := src/hal/amd64/locore.S src/hal/amd64/trap.S \
@@ -225,11 +227,10 @@ AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS) \
 ifneq ($(strip $(ZEDBSD_CONFIG)),)
 $(AMD64_VMUNIX_OBJS): $(ZEDBSD_CONFIG)
 endif
+$(AMD64_VMUNIX_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
 $(BUILD)/kern64/src/kern/vfs.o \
 	$(BUILD)/kern64/src/kern/platform/pcat.o: \
 	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
-$(BUILD)/kern64/src/kern/platform/pcat.o: \
-	$(ZEDBSD_PLATFORM_CONFIG_STAMP)
 
 vmunix: $(BUILD)/vmunix
 

@@ -116,6 +116,27 @@ test_clear_management(void)
 }
 
 static void
+test_transport_alignment_padding(void)
+{
+	uint8_t payload[INTEL_AX211_RX_MPDU_DESCRIPTOR_SIZE + 64U];
+	uint8_t frame[32U];
+	uint8_t output[64U];
+	struct intel_ax211_protocol_message message;
+	struct intel_ax211_rx_mpdu decoded;
+
+	memset(frame, 0, sizeof(frame));
+	frame[0U] = 0x80U;
+	frame[24U] = 0x5aU;
+	message = make_message(payload, frame, sizeof(frame), 0U, STATUS_CLEAR);
+	memset(payload + message.payload_length, 0xa5U, 4U);
+	message.payload_length += 4U;
+	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
+	assert(decoded.length == sizeof(frame));
+	assert(memcmp(output, frame, sizeof(frame)) == 0);
+}
+
+static void
 test_tsf_overload(void)
 {
 	uint8_t payload[INTEL_AX211_RX_MPDU_DESCRIPTOR_SIZE + 64U];
@@ -322,7 +343,7 @@ test_envelope_rejections(void)
 	    sizeof(output), &decoded) == INTEL_AX211_RX_TRUNCATED);
 	message.payload_length += 2U;
 	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
-	    sizeof(output), &decoded) == INTEL_AX211_RX_OVERSIZED);
+	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	message.payload_length--;
 	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output, 31U,
 	    &decoded) == INTEL_AX211_RX_BUFFER_TOO_SMALL);
@@ -388,6 +409,7 @@ main(void)
 {
 	test_api89_version();
 	test_clear_management();
+	test_transport_alignment_padding();
 	test_tsf_overload();
 	test_padding();
 	test_ccmp();

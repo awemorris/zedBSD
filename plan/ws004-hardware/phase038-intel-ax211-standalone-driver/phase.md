@@ -1,11 +1,11 @@
 # WS004 Phase 038: standalone Intel Wi-Fi 6E AX211 normal path
 
-Last updated: 2026-09-02
+Last updated: 2026-09-03
 
 Phase ID: `ws004-p038`
 
-Status: Uncleared (`q062`); automatic implementation/gates complete, exact
-direct-boot checkpoint deferred by the user
+Status: Uncleared (`q066` automatic and exact-device VFIO normal-path
+milestones complete); one final direct physical run remains pending
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -22,7 +22,7 @@ order:
 
 ```text
 exact attach + pinned firmware/PNVM
-  -> 2.4-GHz/20-MHz scan
+  -> NVM/MCC-permitted 2.4/5-GHz 20-MHz scan
   -> WPA2-Personal/CCMP authorization
   -> DHCP
   -> gateway ping + public ping + bounded HTTP fetch
@@ -52,7 +52,7 @@ P038 binds only this q061 tuple:
 | PNVM size/SHA-256 | `55176`; `efa9726d4a9d44b83fc9a14cedcf306a4e439e9de919802eb9e92df4ec032b2a` |
 | Upstream snapshot | official `linux-firmware` tag `20260410`, commit `dc85ccedc9c973682fbcf4d628ca61174bcc3120` |
 | Runtime firmware report | `89.735b75a4.0` |
-| Execution method | bounded direct zedBSD boot on the exact machine |
+| Execution method | bounded QEMU VFIO development run on the exact device, followed by one final direct zedBSD boot on the exact machine |
 
 Do not match AX201, AX210, another AX211 subsystem/revision, a broad Intel
 vendor range, or a neighboring `so-a0` firmware family. Tagged WHENCE reports
@@ -71,10 +71,16 @@ using it to substitute a different blob.
   and checked lifetime contracts.
 - `ws004-p027` and `p029`: the existing generic WLAN UAPI/common station,
   WPA2-Personal/CCMP engine, controlled port, and Ethernet conversion contract.
-- One bounded direct zedBSD boot on the q061 machine. Generic QEMU PCI
-  passthrough is excluded because the Root Complex Integrated Endpoint depends
-  on platform CNVi and its companion RF module even though its observed IOMMU
-  group is a singleton.
+- `ws003-p025`: the q065 production PCI backend correctly refused to invent a
+  local timing source. Q066 first completes the approved HAL fixed-frequency
+  counter and its whole-CPU-set publication contract. This supplies deadlines;
+  it is not the root cause of the firmware association assert.
+- The q061 machine exposes `0000:00:14.3` alone in IOMMU group 11, advertises
+  FLR, supplies VFIO support, and reaches SSH through another interface.
+  Q065 used QEMU PCI passthrough as a bounded development and
+  physical-device evidence path. The guest does not reproduce the host PCI,
+  ACPI, power, CNVi or RF-kill topology, so one direct zedBSD boot remains the
+  final completion gate.
 
 P006/p007 WS005 orchestration is not a dependency. The development checkpoint
 may use the already working primitive commands and `dhcpc`, keeping this Phase
@@ -103,13 +109,13 @@ differ completely from Realtek.
 
 - Exact q061 AX211 identity only: `8086:51f0`, subsystem `8086:4090`, revision
   `01`, with the recorded CNVio2 platform relationship.
-- Infrastructure station mode, 2.4-GHz channels permitted by the frozen world/
-  board policy, 20-MHz width, and the legacy/HT subset actually required for
-  the controlled normal path.
+- Infrastructure station mode, 2.4/5-GHz channels permitted by the frozen
+  NVM/MCC world/board policy, 20-MHz width, and the legacy/HT subset actually
+  required for the controlled normal path.
 - WPA2-Personal PSK with CCMP-128 through the existing common security engine.
 - One ordinary Ethernet MTU and one bounded TX/RX queue profile sufficient for
   DHCP, ICMP, ARP, DNS, and the HTTP oracle.
-- No 5 GHz or 6 GHz, 40/80/160 MHz, 802.11ax/HE performance claim, WPA3/SAE,
+- No 6 GHz, 40/80/160 MHz, 802.11ax/HE performance claim, WPA3/SAE,
   802.1X, roaming, AP/monitor mode, aggregation tuning, power-save
   optimization, Bluetooth coexistence optimization, suspend/resume, or
   throughput target.
@@ -156,11 +162,17 @@ normal-path completion claim.
 
 - Map Intel receive/event formats into the existing bounded WLAN scan callbacks
   without changing their public representation.
-- Complete one finite 2.4-GHz scan, publish truthful BSS/security/channel/RSSI
-  fields, and stop cleanly. A scan result never implies authorization.
+- Complete one finite NVM/MCC-constrained 2.4/5-GHz scan, publish truthful
+  BSS/security/channel/RSSI fields, and stop cleanly. A scan result never
+  implies authorization.
 
 ### 4. WPA2/CCMP and Ethernet normal path
 
+- The pinned `-89` firmware advertises `MLD_API_SUPPORT`; keep one command API
+  generation throughout association. Encode and sequence API89
+  `MAC_CONFIG`, `LINK_CONFIG`, `STA_CONFIG`, and its matching security-key
+  operation. Do not send legacy `MAC_CONTEXT`, binding, `ADD_STA`, or legacy
+  key commands on this path, and do not substitute `-77` firmware.
 - Supply the existing common authentication, association, EAPOL, hardware-key,
   encrypted TX/RX, and completion callbacks from AX211-private operations.
 - Preserve p029 replay, MIC, key-install, controlled-port, and secret-lifetime
@@ -189,7 +201,8 @@ Automatic gates first cover:
   and secret/staging erasure;
 - reproduction of the frozen two firmware-file sizes/digests and rejection of
   WHENCE/runtime-version confusion, unapproved fallbacks, and floating updates;
-- deterministic scan events and malformed/stale/duplicate frame rejection;
+- deterministic 2.4/5-GHz scan events, NVM/MCC regulatory precedence, and
+  malformed/stale/duplicate frame rejection;
 - the existing p027/p029 fake-authenticator WPA2/CCMP and L2 suites against an
   AX211-private fake transport;
 - authorization ordering, hardware-key failure, TX/RX bounds, terminal down,
@@ -198,10 +211,14 @@ Automatic gates first cover:
   IDE/xHCI USB-root regressions proving the new driver does not disturb the
   boot medium or RTL8822BU baseline.
 
-After automatic gates, use only one bounded direct zedBSD boot on the exact
-q061 machine. QEMU assignment of the isolated BDF is not an acceptance path:
-the recorded IOMMU grouping does not reproduce the required platform CNVi/CRF
-topology.
+Q065 assigned only the isolated exact BDF to a bounded QEMU guest and recorded
+PCI ownership, MSI-X/DMA, firmware/PNVM, ALIVE, and scan before the first
+association command failed. Q066 resumes from that exact boundary after p025,
+then records association and useful traffic as separate gates. Always restore
+the host binding to `iwlwifi`. This development path may expose and repair
+driver defects, but one bounded direct zedBSD boot on the exact q061 machine
+remains the final acceptance path because QEMU does not reproduce the host
+platform topology.
 
 ## Completion conditions
 
@@ -212,6 +229,10 @@ topology.
   pass without changing the public WLAN UAPI.
 - One exact direct-boot run reaches DHCP, gateway/public ping, and a bounded
   nonempty HTTP fetch, then disconnects and goes administratively down.
+- Before that final run, the q065/q066 VFIO attempts record their deepest
+  exact-device checkpoints and restore the host AX211 to `iwlwifi`; a
+  virtualization-only topology failure is recorded rather than treated as a
+  native driver claim.
 - The AX211 implementation remains independent of RTL internal code. Any
   duplicated implementation is intentionally retained for p039 review.
 - Exhaustive reconnect/rekey/recovery/long-run behavior is explicitly
@@ -246,6 +267,90 @@ topology.
   remains required and p038 makes no physical firmware/RF claim. Q062 closed
   this item as `uncleared` when the user deferred the physical test so that
   independent work could continue.
+
+## Q065 evidence and exact resume boundary
+
+- The isolated exact device passed safe VFIO assignment, MSI-X/DMA startup,
+  pinned firmware and PNVM ALIVE, NVM/MCC policy, and a complete 33-BSS scan.
+  The intended 5-GHz BSS was found on channel 44.
+- The first legacy 148-byte `MAC_CONTEXT_CMD` ADD caused firmware UMAC
+  `ADVANCED_SYSASSERT`; the recorded last host command decodes as group 1,
+  opcode `0x28`. Adding the reference-consistent initial DTIM value did not
+  change the failure.
+- Static comparison established that the exact `-89` firmware exposes
+  capability bit 110 (`MLD_API_SUPPORT`) and the MAC/LINK configuration command
+  family. Linux and current OpenBSD use the MLD family with this generation;
+  the available legacy comparison uses `-77`. Therefore q066 replaces the
+  complete MAC/link/station/key family rather than guessing another legacy
+  payload field or changing the frozen firmware.
+- Every bounded run restored `0000:00:14.3` to `iwlwifi`; the independent USB
+  Ethernet SSH route remained intact. Remote credential-bearing staging and
+  logs were deleted.
+
+Q066 completed the byte-exact MLD transition, focused gates, and bounded VFIO
+normal path after `ws003-p025` passed its automatic counter gates. The sole
+remaining p038 gate is the one-run direct boot shared with p025's physical
+multicore counter observation.
+
+## Q066 automatic and exact-device VFIO evidence
+
+- Replaced the mixed-generation legacy association path with one API89 MLD
+  family. Initial setup is now exactly `MAC_CONFIG ADD`, `LINK_CONFIG ADD`
+  with invalid PHY, legacy `PHY_CONTEXT ADD`, `RLC_CONFIG`, `LINK_CONFIG
+  MODIFY` assigning PHY 0 while inactive, `LINK_CONFIG MODIFY` activating the
+  link with rates, `STA_CONFIG`, queue add, then session protection.
+- Post-scan association is `MAC_CONFIG MODIFY`, `LINK_CONFIG MODIFY` with the
+  rates/QoS/beacon-timing mask `0x1a`, then `STA_CONFIG`. Cleanup is bounded
+  reverse ownership order: session, queue, station, link deactivate, link
+  remove, MAC remove, and PHY remove. An ambiguous submitted command is never
+  retried and contributes its possibly acquired resource to that rollback.
+- Command-table layout versions remain independently validated (`MAC_CONFIG`
+  v2, `LINK_CONFIG` v2, implicit `STA_CONFIG`/`STA_REMOVE` v1, `RLC_CONFIG`
+  v2, and `SEC_KEY` v1). MLD MAC/LINK/STA commands and `SEC_KEY` use wide-header
+  version 0, while the API89 `RLC_CONFIG` exception explicitly uses wide-header
+  version 2. These commands accept only an empty ACK. Queue ADD alone retains
+  its exact v2 eight-byte allocation response; Queue REMOVE is a synchronous
+  ACK whose optional payload has no remove-result semantics and is ignored.
+- An intermediate exact-device VFIO retry passed counter publication, open,
+  and the complete 5-GHz scan, then localized Queue ADD ownership. Static
+  comparison with the API89 Linux contract found that the v3 ADD request does
+  not select a queue or write pointer: firmware returns a 1..511 queue ID and
+  initial pointer in the v2 response. Production now stores both, masks the
+  returned pointer by the 256-entry ring, uses the full queue ID for WRPTR and
+  completion-payload checks, and uses its five-bit sequence-field
+  representation for TX command/completion headers. REMOVE no longer applies
+  ADD-response queue/write-pointer equality to its ACK.
+- The closing bounded VFIO run on the exact device passed firmware/PNVM,
+  5-GHz scan and target discovery, WPA2/CCMP association, controlled-port
+  authorization, DHCP and default-route installation, the selected LAN-peer
+  ping, public ping, a bounded nonempty HTTP fetch, disconnect, and
+  administrative down. Both test components returned success; the host BDF
+  was restored to `iwlwifi`, its independent Ethernet route remained
+  available, and the disposable remote staging tree was removed.
+- The v2 link payload uses the firmware's `ac[]` wire order BK, BE, VI, VO,
+  independently from Gen2 TX FIFO identities 1, 2, 3, 4. The production codec
+  and an independently arranged full-payload fixture prevent the AC-index and
+  FIFO-mask values from being conflated.
+- `run-intel-ax211-assoc-test.sh` passes ordinary execution, the cached real
+  API89 command table, ASan/UBSan, analyzer, and amd64/i386 syntax gates. It
+  checks the complete 52/208/96-byte MLD payloads, nine-command setup,
+  three-command association update, exact response identity, uncertain
+  completion, session expiry, and seven-command rollback.
+- `run-intel-ax211-key-test.sh`, `run-intel-ax211-pci-test.sh`, and
+  `run-intel-ax211-wlan-common-integration-test.sh` pass their ordinary,
+  sanitizer/analyzer, and amd64/i386 gates. The ordinary configured repository
+  build also passes with `make -j16`; no HAL or public WLAN UAPI was changed by
+  this MLD transition.
+- The common L2 receive path accepts ordinary TID-0 non-A-MSDU QoS Data with checked
+  QoS, optional HT Control, CCMP, LLC, and MIC offsets. The focused ordinary,
+  sanitizer, and analyzer gate and the exact-device useful-IP run pass. Full
+  WMM/nonzero-TID transmit policy, A-MSDU, per-TID replay state, and exhaustive malformed
+  QoS cases remain outside this normal-path Phase.
+- Automatic and VFIO evidence does not replace the final direct physical
+  acceptance run.
+- Q066's exit scope remains one end-to-end normal-path pass. Exhaustive
+  recovery, rekey, race, fault-injection, and repeatability matrices are
+  deliberately deferred to a later hardening Phase rather than expanded here.
 
 ## Reconsideration boundary
 

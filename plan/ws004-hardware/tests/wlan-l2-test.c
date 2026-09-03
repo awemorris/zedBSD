@@ -110,6 +110,47 @@ test_group_and_plain(void)
 }
 
 static void
+test_qos_from_ds(void)
+{
+	uint8_t ethernet[1514], output[1514], mpdu[WLAN_L2_MPDU_MAX];
+	struct wlan_l2_rx_security security;
+	struct wlan_l2_rx_state state;
+	size_t ethernet_length, output_length, mpdu_length;
+
+	memset(&security, 0, sizeof(security));
+	memset(&state, 0, sizeof(state));
+	ethernet_length = ethernet_frame(ethernet, 0);
+	assert(wlan_l2_build_data(station, bssid, ethernet, ethernet_length, 1,
+	    0U, 11U, mpdu, sizeof(mpdu), &mpdu_length) == 0);
+	memset(mpdu + mpdu_length, 0x5a, WLAN_L2_CCMP_MIC_SIZE);
+	mpdu_length += WLAN_L2_CCMP_MIC_SIZE;
+	memcpy(ethernet, station, 6U);
+	turn_into_from_ds(mpdu, ethernet);
+	memmove(mpdu + WLAN_L2_DATA_HEADER_SIZE + 2U,
+	    mpdu + WLAN_L2_DATA_HEADER_SIZE,
+	    mpdu_length - WLAN_L2_DATA_HEADER_SIZE);
+	mpdu_length += 2U;
+	mpdu[0U] = 0x88U;
+	mpdu[24U] = 0U;
+	mpdu[25U] = 0U;
+	security.key_generation = 23U;
+	security.packet_number = 11U;
+	security.decrypted = 1U;
+	security.cipher_ccmp = 1U;
+	state.pairwise_key_generation = 23U;
+	mpdu[24U] = 1U;
+	assert(wlan_l2_parse_data(station, bssid, mpdu, mpdu_length,
+	    &security, &state, output, sizeof(output), &output_length) ==
+	    EPROTONOSUPPORT);
+	assert(state.pairwise_packet_number == 0U);
+	mpdu[24U] = 0U;
+	assert(wlan_l2_parse_data(station, bssid, mpdu, mpdu_length,
+	    &security, &state, output, sizeof(output), &output_length) == 0);
+	assert(output_length == ethernet_length);
+	assert(memcmp(output, ethernet, ethernet_length) == 0);
+}
+
+static void
 test_rejections(void)
 {
 	uint8_t ethernet[1514], output[1514], mpdu[WLAN_L2_MPDU_MAX];
@@ -168,6 +209,7 @@ main(void)
 {
 	test_round_trip();
 	test_group_and_plain();
+	test_qos_from_ds();
 	test_rejections();
 	puts("wlan l2 fixture: PASS");
 	return 0;

@@ -58,28 +58,31 @@
 
 #define AX211_ASSOC_RESOURCE_PHY                         0x01U
 #define AX211_ASSOC_RESOURCE_MAC                         0x02U
-#define AX211_ASSOC_RESOURCE_BINDING                     0x04U
-#define AX211_ASSOC_RESOURCE_STATION                     0x08U
-#define AX211_ASSOC_RESOURCE_QUEUE                       0x10U
-#define AX211_ASSOC_RESOURCE_SESSION                     0x20U
+#define AX211_ASSOC_RESOURCE_LINK                        0x04U
+#define AX211_ASSOC_RESOURCE_LINK_ACTIVE                 0x08U
+#define AX211_ASSOC_RESOURCE_STATION                     0x10U
+#define AX211_ASSOC_RESOURCE_QUEUE                       0x20U
+#define AX211_ASSOC_RESOURCE_SESSION                     0x40U
 
 #define AX211_ASSOC_ACTION_ADD                              1U
 #define AX211_ASSOC_ACTION_MODIFY                           2U
 #define AX211_ASSOC_ACTION_REMOVE                           3U
 #define AX211_ASSOC_INVALID_CONTEXT                0xffffffffU
+#define AX211_ASSOC_PHY_BAND_5                              0U
 #define AX211_ASSOC_PHY_BAND_24                             1U
 #define AX211_ASSOC_MAC_TYPE_BSS_STATION                    5U
 #define AX211_ASSOC_MAC_FILTER_ACCEPT_GROUP              0x04U
-#define AX211_ASSOC_MAC_FILTER_BEACON                    0x40U
-#define AX211_ASSOC_MAC_SHORT_SLOT                       0x10U
-#define AX211_ASSOC_MAC_SHORT_PREAMBLE                   0x20U
-#define AX211_ASSOC_MAC_QOS_UPDATE_EDCA                  0x01U
-#define AX211_ASSOC_STATION_FLAGS_MASK             0x3c000000U
-#define AX211_ASSOC_STATION_TYPE_LINK                       0U
-#define AX211_ASSOC_STATION_STATUS_SUCCESS                  1U
+#define AX211_ASSOC_MAC_FILTER_BEACON                    0x08U
+#define AX211_ASSOC_MAC_NIC_NOT_ACK                         1U
+#define AX211_ASSOC_LINK_MODIFY_ACTIVE                    0x01U
+#define AX211_ASSOC_LINK_MODIFY_RATES                     0x02U
+#define AX211_ASSOC_LINK_MODIFY_QOS                       0x08U
+#define AX211_ASSOC_LINK_MODIFY_BEACON_TIMING             0x10U
+#define AX211_ASSOC_STATION_TYPE_PEER                        0U
 #define AX211_ASSOC_QUEUE_OPERATION_ADD                     0U
 #define AX211_ASSOC_QUEUE_OPERATION_REMOVE                  1U
-#define AX211_ASSOC_QUEUE_ID                                1U
+#define AX211_ASSOC_QUEUE_MIN                               1U
+#define AX211_ASSOC_QUEUE_MAX                             511U
 #define AX211_ASSOC_MANAGEMENT_TID                         15U
 #define AX211_ASSOC_QUEUE_CB_SIZE                           5U
 #define AX211_ASSOC_SESSION_CONFIGURATION_ASSOC             0U
@@ -96,6 +99,10 @@ static int ax211_assoc_update_valid(
 	const struct intel_ax211_assoc_profile *profile,
 	const struct intel_ax211_assoc_update *update);
 static int ax211_assoc_required_version(
+	const struct intel_ax211_protocol_command_table *table,
+	uint8_t group, uint8_t opcode, uint8_t command_version,
+	uint8_t notification_version);
+static int ax211_assoc_optional_version(
 	const struct intel_ax211_protocol_command_table *table,
 	uint8_t group, uint8_t opcode, uint8_t command_version,
 	uint8_t notification_version);
@@ -117,13 +124,15 @@ static void ax211_assoc_phy_encode(
 static void ax211_assoc_rlc_encode(
 	const struct intel_ax211_assoc_state *state,
 	struct intel_ax211_assoc_command *command);
-static void ax211_assoc_mac_encode(
+static void ax211_assoc_mac_config_encode(
 	const struct intel_ax211_assoc_state *state, uint32_t action,
 	int associated, struct intel_ax211_assoc_command *command);
-static void ax211_assoc_binding_encode(uint32_t action,
+static void ax211_assoc_link_config_encode(
+	const struct intel_ax211_assoc_state *state, uint32_t action,
+	uint32_t modify_mask, uint32_t active, uint32_t phy_id,
 	struct intel_ax211_assoc_command *command);
-static void ax211_assoc_station_encode(
-	const struct intel_ax211_assoc_state *state, int update,
+static void ax211_assoc_station_config_encode(
+	const struct intel_ax211_assoc_state *state, int associated,
 	struct intel_ax211_assoc_command *command);
 static void ax211_assoc_station_remove_encode(
 	struct intel_ax211_assoc_command *command);
@@ -207,12 +216,21 @@ static int
 ax211_assoc_profile_valid(const struct intel_ax211_assoc_profile *profile)
 {
 	size_t index;
+	uint8_t channel;
+	int channel_valid;
+
+	channel = profile == NULL ? 0U : profile->channel;
+	channel_valid = (channel >= 1U && channel <= 14U) ||
+	    (channel >= 36U && channel <= 144U &&
+	    ((channel - 36U) % 4U) == 0U) ||
+	    (channel >= 149U && channel <= 181U &&
+	    ((channel - 149U) % 4U) == 0U);
 
 	if (profile == NULL ||
 	    !ax211_assoc_address_valid(profile->station_address) ||
 	    !ax211_assoc_address_valid(profile->bssid) ||
 	    memcmp(profile->station_address, profile->bssid, 6U) == 0 ||
-	    profile->channel == 0U || profile->channel > 14U ||
+	    !channel_valid ||
 	    profile->channel_width_mhz !=
 	    INTEL_AX211_ASSOC_CHANNEL_WIDTH_MHZ ||
 	    profile->rx_chain_mask == 0U || profile->rx_chain_mask > 7U ||
@@ -271,6 +289,32 @@ ax211_assoc_required_version(
 
 	result = intel_ax211_protocol_command_version_lookup(table, group,
 	    opcode, &version);
+	if (result != INTEL_AX211_PROTOCOL_OK ||
+	    version.command_version != command_version ||
+	    version.notification_version != notification_version)
+		return INTEL_AX211_ASSOC_UNSUPPORTED;
+	return INTEL_AX211_ASSOC_OK;
+}
+
+/*
+ * API89 omits STA_CONFIG/STA_REMOVE from its command-version table.  The
+ * firmware ABI defines their baseline v1 layouts implicitly.  Accept a
+ * matching explicit entry for deterministic fixtures, but never accept an
+ * explicit conflicting version.
+ */
+static int
+ax211_assoc_optional_version(
+	const struct intel_ax211_protocol_command_table *table,
+	uint8_t group, uint8_t opcode, uint8_t command_version,
+	uint8_t notification_version)
+{
+	struct intel_ax211_protocol_command_version version;
+	int result;
+
+	result = intel_ax211_protocol_command_version_lookup(table, group,
+	    opcode, &version);
+	if (result == INTEL_AX211_PROTOCOL_MISSING)
+		return INTEL_AX211_ASSOC_OK;
 	if (result != INTEL_AX211_PROTOCOL_OK ||
 	    version.command_version != command_version ||
 	    version.notification_version != notification_version)
@@ -353,7 +397,7 @@ intel_ax211_assoc_mac_power_encode(
 	if (keep_alive_seconds > UINT16_MAX)
 		return INTEL_AX211_ASSOC_OVERSIZED;
 	memset(output, 0, INTEL_AX211_ASSOC_MAC_POWER_SIZE);
-	ax211_assoc_put_le32(output, INTEL_AX211_ASSOC_MAC_CONTEXT_ID);
+	ax211_assoc_put_le32(output, INTEL_AX211_ASSOC_MAC_ID);
 	ax211_assoc_put_le16(output + 4U, 0U);
 	ax211_assoc_put_le16(output + 6U, (uint16_t)keep_alive_seconds);
 	return INTEL_AX211_ASSOC_OK;
@@ -366,6 +410,10 @@ intel_ax211_assoc_mac_power_response_validate(
 {
 	if (response == NULL)
 		return INTEL_AX211_ASSOC_INVALID;
+	/* API 89 may acknowledge MAC_PM_POWER_TABLE with no payload.  The
+	 * command-response header remains the authoritative success result. */
+	if (response_length == 0U)
+		return INTEL_AX211_ASSOC_OK;
 	if (response_length < INTEL_AX211_ASSOC_MAC_POWER_RESPONSE_SIZE)
 		return INTEL_AX211_ASSOC_TRUNCATED;
 	if (response_length > INTEL_AX211_ASSOC_MAC_POWER_RESPONSE_SIZE)
@@ -389,6 +437,30 @@ intel_ax211_assoc_api89_validate(
 	    INTEL_AX211_ASSOC_GROUP_LONG,
 	    INTEL_AX211_ASSOC_PHY_CONTEXT_OPCODE,
 	    INTEL_AX211_ASSOC_PHY_CONTEXT_VERSION, 0U);
+	if (result != INTEL_AX211_ASSOC_OK)
+		return result;
+	result = ax211_assoc_required_version(table,
+	    INTEL_AX211_ASSOC_GROUP_MAC_CONFIG,
+	    INTEL_AX211_ASSOC_MAC_CONFIG_OPCODE,
+	    INTEL_AX211_ASSOC_MAC_CONFIG_VERSION, 0U);
+	if (result != INTEL_AX211_ASSOC_OK)
+		return result;
+	result = ax211_assoc_required_version(table,
+	    INTEL_AX211_ASSOC_GROUP_MAC_CONFIG,
+	    INTEL_AX211_ASSOC_LINK_CONFIG_OPCODE,
+	    INTEL_AX211_ASSOC_LINK_CONFIG_VERSION, 0U);
+	if (result != INTEL_AX211_ASSOC_OK)
+		return result;
+	result = ax211_assoc_optional_version(table,
+	    INTEL_AX211_ASSOC_GROUP_MAC_CONFIG,
+	    INTEL_AX211_ASSOC_STATION_CONFIG_OPCODE,
+	    INTEL_AX211_ASSOC_STATION_CONFIG_VERSION, 0U);
+	if (result != INTEL_AX211_ASSOC_OK)
+		return result;
+	result = ax211_assoc_optional_version(table,
+	    INTEL_AX211_ASSOC_GROUP_MAC_CONFIG,
+	    INTEL_AX211_ASSOC_STATION_REMOVE_OPCODE,
+	    INTEL_AX211_ASSOC_STATION_REMOVE_VERSION, 0U);
 	if (result != INTEL_AX211_ASSOC_OK)
 		return result;
 	result = ax211_assoc_required_version(table,
@@ -482,7 +554,7 @@ intel_ax211_assoc_begin(struct intel_ax211_assoc_state *state,
 	state->failure = INTEL_AX211_ASSOC_OK;
 	state->initialized = 1U;
 	result = ax211_assoc_set_step(state,
-	    INTEL_AX211_ASSOC_STEP_PHY_ADD, now_us);
+	    INTEL_AX211_ASSOC_STEP_MAC_ADD, now_us);
 	if (result != INTEL_AX211_ASSOC_OK)
 		memset(state, 0, sizeof(*state));
 	return result;
@@ -506,7 +578,7 @@ intel_ax211_assoc_begin_update(struct intel_ax211_assoc_state *state,
 	if (!ax211_assoc_update_valid(&state->profile, update))
 		return INTEL_AX211_ASSOC_INVALID;
 	result = ax211_assoc_set_step(state,
-	    INTEL_AX211_ASSOC_STEP_STATION_UPDATE, now_us);
+	    INTEL_AX211_ASSOC_STEP_MAC_ASSOCIATE, now_us);
 	if (result != INTEL_AX211_ASSOC_OK)
 		return result;
 	state->update = *update;
@@ -538,8 +610,12 @@ ax211_assoc_phy_encode(const struct intel_ax211_assoc_state *state,
 	command->response_kind = INTEL_AX211_ASSOC_RESPONSE_EMPTY;
 	command->payload_length = INTEL_AX211_ASSOC_PHY_CONTEXT_SIZE;
 	ax211_assoc_put_le32(command->payload + 4U, action);
+	/* ULTRA_HB_CHANNELS selects the 32-byte PHY_CONTEXT v4 variant.  Its
+	 * CHANNEL_CONFIG v2 stores channel as LE32, followed by band/width/control;
+	 * lmac_id at offset 16 remains zero because this AX211 is not CDB. */
 	ax211_assoc_put_le32(command->payload + 8U, state->profile.channel);
-	command->payload[12U] = AX211_ASSOC_PHY_BAND_24;
+	command->payload[12U] = state->profile.channel <= 14U ?
+	    AX211_ASSOC_PHY_BAND_24 : AX211_ASSOC_PHY_BAND_5;
 }
 
 static void
@@ -551,6 +627,7 @@ ax211_assoc_rlc_encode(const struct intel_ax211_assoc_state *state,
 	command->header = INTEL_AX211_ASSOC_HEADER_WIDE;
 	command->group = INTEL_AX211_ASSOC_GROUP_DATA_PATH;
 	command->opcode = INTEL_AX211_ASSOC_RLC_CONFIG_OPCODE;
+	/* RLC_CONFIG is the API89 exception which selects v2 in the wide header. */
 	command->wire_version = INTEL_AX211_ASSOC_RLC_CONFIG_VERSION;
 	command->layout_version = INTEL_AX211_ASSOC_RLC_CONFIG_VERSION;
 	command->response_kind = INTEL_AX211_ASSOC_RESPONSE_EMPTY;
@@ -564,6 +641,10 @@ static void
 ax211_assoc_edca_encode(const struct intel_ax211_assoc_profile *profile,
 	uint8_t *output)
 {
+	/* profile[] is BE, BK, VI, VO; firmware ac[] is BK, BE, VI, VO. */
+	static const uint8_t ac_index[INTEL_AX211_ASSOC_EDCA_COUNT] = {
+		1U, 0U, 2U, 3U
+	};
 	static const uint8_t fifo[INTEL_AX211_ASSOC_EDCA_COUNT] = {
 		2U, 1U, 3U, 4U
 	};
@@ -576,7 +657,7 @@ ax211_assoc_edca_encode(const struct intel_ax211_assoc_profile *profile,
 		uint16_t cw_max;
 
 		edca = &profile->edca[index];
-		entry = output + (size_t)fifo[index] * 8U;
+		entry = output + (size_t)ac_index[index] * 8U;
 		cw_min = (uint16_t)((UINT32_C(1) << edca->ecw_min) - 1U);
 		cw_max = (uint16_t)((UINT32_C(1) << edca->ecw_max) - 1U);
 		ax211_assoc_put_le16(entry, cw_min);
@@ -589,35 +670,26 @@ ax211_assoc_edca_encode(const struct intel_ax211_assoc_profile *profile,
 }
 
 static void
-ax211_assoc_mac_encode(const struct intel_ax211_assoc_state *state,
+ax211_assoc_mac_config_encode(const struct intel_ax211_assoc_state *state,
 	uint32_t action, int associated,
 	struct intel_ax211_assoc_command *command)
 {
 	uint32_t filter;
 
-	command->header = INTEL_AX211_ASSOC_HEADER_LEGACY;
-	command->group = INTEL_AX211_ASSOC_GROUP_LEGACY;
-	command->opcode = INTEL_AX211_ASSOC_MAC_CONTEXT_OPCODE;
-	command->layout_version = INTEL_AX211_ASSOC_MAC_CONTEXT_VERSION;
+	command->header = INTEL_AX211_ASSOC_HEADER_WIDE;
+	command->group = INTEL_AX211_ASSOC_GROUP_MAC_CONFIG;
+	command->opcode = INTEL_AX211_ASSOC_MAC_CONFIG_OPCODE;
+	command->wire_version = 0U;
+	command->layout_version = INTEL_AX211_ASSOC_MAC_CONFIG_VERSION;
 	command->response_kind = INTEL_AX211_ASSOC_RESPONSE_EMPTY;
-	command->payload_length = INTEL_AX211_ASSOC_MAC_CONTEXT_SIZE;
+	command->payload_length = INTEL_AX211_ASSOC_MAC_CONFIG_SIZE;
+	ax211_assoc_put_le32(command->payload, INTEL_AX211_ASSOC_MAC_ID);
 	ax211_assoc_put_le32(command->payload + 4U, action);
 	if (action == AX211_ASSOC_ACTION_REMOVE)
 		return;
 	ax211_assoc_put_le32(command->payload + 8U,
 	    AX211_ASSOC_MAC_TYPE_BSS_STATION);
-	memcpy(command->payload + 16U, state->profile.station_address, 6U);
-	memcpy(command->payload + 24U, state->profile.bssid, 6U);
-	ax211_assoc_put_le32(command->payload + 32U,
-	    state->profile.cck_ack_rates);
-	ax211_assoc_put_le32(command->payload + 36U,
-	    state->profile.ofdm_ack_rates);
-	if (state->profile.short_preamble)
-		ax211_assoc_put_le32(command->payload + 44U,
-		    AX211_ASSOC_MAC_SHORT_PREAMBLE);
-	if (state->profile.short_slot)
-		ax211_assoc_put_le32(command->payload + 48U,
-		    AX211_ASSOC_MAC_SHORT_SLOT);
+	memcpy(command->payload + 12U, state->profile.station_address, 6U);
 	/*
 	 * The common WLAN liveness contract is refreshed by delivered beacons.
 	 * Keep them visible after association until a firmware missed-beacon
@@ -625,82 +697,99 @@ ax211_assoc_mac_encode(const struct intel_ax211_assoc_state *state,
 	 */
 	filter = AX211_ASSOC_MAC_FILTER_ACCEPT_GROUP |
 	    AX211_ASSOC_MAC_FILTER_BEACON;
-	ax211_assoc_put_le32(command->payload + 52U, filter);
-	if (state->profile.qos)
-		ax211_assoc_put_le32(command->payload + 56U,
-		    AX211_ASSOC_MAC_QOS_UPDATE_EDCA);
-	ax211_assoc_edca_encode(&state->profile, command->payload + 60U);
-
-	ax211_assoc_put_le32(command->payload + 100U,
-	    associated ? 1U : 0U);
-	ax211_assoc_put_le32(command->payload + 116U,
-	    state->profile.beacon_interval_tu);
-	ax211_assoc_put_le32(command->payload + 132U, 10U);
-	if (associated) {
-		uint32_t dtim_offset;
-		uint32_t dtim_interval;
-
-		dtim_offset = (uint32_t)state->update.dtim_count *
-		    (uint32_t)state->profile.beacon_interval_tu * 1024U;
-		dtim_interval = (uint32_t)state->profile.beacon_interval_tu *
-		    (uint32_t)state->update.dtim_period;
-		ax211_assoc_put_le32(command->payload + 104U,
-		    state->update.beacon_arrive_time + dtim_offset);
-		ax211_assoc_put_le64(command->payload + 108U,
-		    state->update.beacon_tsf + dtim_offset);
-		ax211_assoc_put_le32(command->payload + 124U, dtim_interval);
-		ax211_assoc_put_le32(command->payload + 136U,
+	ax211_assoc_put_le32(command->payload + 20U, filter);
+	ax211_assoc_put_le32(command->payload + 32U,
+	    AX211_ASSOC_MAC_NIC_NOT_ACK);
+	command->payload[36U] = associated ? 1U : 0U;
+	if (associated)
+		ax211_assoc_put_le16(command->payload + 40U,
 		    state->update.association_id);
-		ax211_assoc_put_le32(command->payload + 140U,
-		    state->update.beacon_arrive_time);
-	}
 }
 
 static void
-ax211_assoc_binding_encode(uint32_t action,
+ax211_assoc_link_config_encode(const struct intel_ax211_assoc_state *state,
+	uint32_t action, uint32_t modify_mask, uint32_t active, uint32_t phy_id,
 	struct intel_ax211_assoc_command *command)
 {
-	command->header = INTEL_AX211_ASSOC_HEADER_LEGACY;
-	command->group = INTEL_AX211_ASSOC_GROUP_LEGACY;
-	command->opcode = INTEL_AX211_ASSOC_BINDING_OPCODE;
-	command->layout_version = INTEL_AX211_ASSOC_BINDING_VERSION;
-	command->response_kind = INTEL_AX211_ASSOC_RESPONSE_STATUS_ZERO;
-	command->payload_length = INTEL_AX211_ASSOC_BINDING_SIZE;
-	ax211_assoc_put_le32(command->payload + 4U, action);
-	ax211_assoc_put_le32(command->payload + 12U,
-	    AX211_ASSOC_INVALID_CONTEXT);
-	ax211_assoc_put_le32(command->payload + 16U,
-	    AX211_ASSOC_INVALID_CONTEXT);
+	uint8_t dtim_period;
+
+	command->header = INTEL_AX211_ASSOC_HEADER_WIDE;
+	command->group = INTEL_AX211_ASSOC_GROUP_MAC_CONFIG;
+	command->opcode = INTEL_AX211_ASSOC_LINK_CONFIG_OPCODE;
+	command->wire_version = 0U;
+	command->layout_version = INTEL_AX211_ASSOC_LINK_CONFIG_VERSION;
+	command->response_kind = INTEL_AX211_ASSOC_RESPONSE_EMPTY;
+	command->payload_length = INTEL_AX211_ASSOC_LINK_CONFIG_SIZE;
+	ax211_assoc_put_le32(command->payload, action);
+	ax211_assoc_put_le32(command->payload + 4U,
+	    INTEL_AX211_ASSOC_LINK_ID);
+	ax211_assoc_put_le32(command->payload + 12U, phy_id);
+	if (action == AX211_ASSOC_ACTION_REMOVE)
+		return;
+	ax211_assoc_put_le32(command->payload + 8U,
+	    INTEL_AX211_ASSOC_MAC_ID);
+	memcpy(command->payload + 16U, state->profile.station_address, 6U);
+	if (action == AX211_ASSOC_ACTION_ADD)
+		return;
+	ax211_assoc_put_le32(command->payload + 24U, modify_mask);
+	ax211_assoc_put_le32(command->payload + 28U, active);
+	ax211_assoc_put_le32(command->payload + 36U,
+	    state->profile.cck_ack_rates);
+	ax211_assoc_put_le32(command->payload + 40U,
+	    state->profile.ofdm_ack_rates);
+	ax211_assoc_put_le32(command->payload + 44U,
+	    state->profile.short_preamble);
+	ax211_assoc_put_le32(command->payload + 48U,
+	    state->profile.short_slot);
+	ax211_assoc_put_le32(command->payload + 56U,
+	    state->profile.qos ? 1U : 0U);
+	ax211_assoc_edca_encode(&state->profile, command->payload + 60U);
+	ax211_assoc_put_le32(command->payload + 136U,
+	    state->profile.beacon_interval_tu);
+	dtim_period = state->update_valid ? state->update.dtim_period :
+	    state->profile.dtim_period;
+	ax211_assoc_put_le32(command->payload + 140U,
+	    (uint32_t)state->profile.beacon_interval_tu *
+	    (uint32_t)dtim_period);
 }
 
 static void
-ax211_assoc_station_encode(const struct intel_ax211_assoc_state *state,
-	int update, struct intel_ax211_assoc_command *command)
+ax211_assoc_station_config_encode(const struct intel_ax211_assoc_state *state,
+	int associated, struct intel_ax211_assoc_command *command)
 {
-	command->header = INTEL_AX211_ASSOC_HEADER_LEGACY;
-	command->group = INTEL_AX211_ASSOC_GROUP_LEGACY;
-	command->opcode = INTEL_AX211_ASSOC_ADD_STATION_OPCODE;
-	command->layout_version = INTEL_AX211_ASSOC_STATION_VERSION;
-	command->response_kind = INTEL_AX211_ASSOC_RESPONSE_STATION_SUCCESS;
-	command->payload_length = INTEL_AX211_ASSOC_STATION_SIZE;
-	command->payload[0U] = update ? 1U : 0U;
-	if (!update)
-		memcpy(command->payload + 8U, state->profile.bssid, 6U);
+	command->header = INTEL_AX211_ASSOC_HEADER_WIDE;
+	command->group = INTEL_AX211_ASSOC_GROUP_MAC_CONFIG;
+	command->opcode = INTEL_AX211_ASSOC_STATION_CONFIG_OPCODE;
+	command->wire_version = 0U;
+	command->layout_version = INTEL_AX211_ASSOC_STATION_CONFIG_VERSION;
+	command->response_kind = INTEL_AX211_ASSOC_RESPONSE_EMPTY;
+	command->payload_length = INTEL_AX211_ASSOC_STATION_CONFIG_SIZE;
+	ax211_assoc_put_le32(command->payload,
+	    INTEL_AX211_ASSOC_STATION_ID);
+	ax211_assoc_put_le32(command->payload + 4U,
+	    INTEL_AX211_ASSOC_LINK_ID);
+	memcpy(command->payload + 8U, state->profile.bssid, 6U);
+	memcpy(command->payload + 16U, state->profile.bssid, 6U);
 	ax211_assoc_put_le32(command->payload + 24U,
-	    AX211_ASSOC_STATION_FLAGS_MASK);
-	command->payload[35U] = AX211_ASSOC_STATION_TYPE_LINK;
+	    AX211_ASSOC_STATION_TYPE_PEER);
+	if (associated)
+		ax211_assoc_put_le32(command->payload + 28U,
+		    state->update.association_id);
 }
 
 static void
 ax211_assoc_station_remove_encode(
 	struct intel_ax211_assoc_command *command)
 {
-	command->header = INTEL_AX211_ASSOC_HEADER_LEGACY;
-	command->group = INTEL_AX211_ASSOC_GROUP_LEGACY;
-	command->opcode = INTEL_AX211_ASSOC_REMOVE_STATION_OPCODE;
-	command->layout_version = INTEL_AX211_ASSOC_REMOVE_STATION_VERSION;
+	command->header = INTEL_AX211_ASSOC_HEADER_WIDE;
+	command->group = INTEL_AX211_ASSOC_GROUP_MAC_CONFIG;
+	command->opcode = INTEL_AX211_ASSOC_STATION_REMOVE_OPCODE;
+	command->wire_version = 0U;
+	command->layout_version = INTEL_AX211_ASSOC_STATION_REMOVE_VERSION;
 	command->response_kind = INTEL_AX211_ASSOC_RESPONSE_EMPTY;
 	command->payload_length = INTEL_AX211_ASSOC_REMOVE_STATION_SIZE;
+	ax211_assoc_put_le32(command->payload,
+	    INTEL_AX211_ASSOC_STATION_ID);
 }
 
 static void
@@ -712,13 +801,13 @@ ax211_assoc_queue_encode(const struct intel_ax211_assoc_state *state,
 	command->opcode = INTEL_AX211_ASSOC_QUEUE_CONFIG_OPCODE;
 	command->layout_version = INTEL_AX211_ASSOC_QUEUE_CONFIG_VERSION;
 	command->response_version = INTEL_AX211_ASSOC_QUEUE_RESPONSE_VERSION;
-	command->response_kind = INTEL_AX211_ASSOC_RESPONSE_QUEUE;
+	command->response_kind = operation == AX211_ASSOC_QUEUE_OPERATION_ADD ?
+	    INTEL_AX211_ASSOC_RESPONSE_QUEUE :
+	    INTEL_AX211_ASSOC_RESPONSE_IGNORED;
 	command->payload_length = INTEL_AX211_ASSOC_QUEUE_CONFIG_SIZE;
 	ax211_assoc_put_le32(command->payload, operation);
 	ax211_assoc_put_le32(command->payload + 4U, 1U);
 	if (operation == AX211_ASSOC_QUEUE_OPERATION_ADD) {
-		command->expected_queue_write_pointer =
-		    state->profile.queue_initial_write_pointer;
 		command->payload[8U] = AX211_ASSOC_MANAGEMENT_TID;
 		ax211_assoc_put_le32(command->payload + 16U,
 		    AX211_ASSOC_QUEUE_CB_SIZE);
@@ -745,7 +834,7 @@ ax211_assoc_session_encode(const struct intel_ax211_assoc_state *state,
 	command->payload_length =
 	    INTEL_AX211_ASSOC_SESSION_PROTECTION_SIZE;
 	ax211_assoc_put_le32(command->payload,
-	    INTEL_AX211_ASSOC_MAC_CONTEXT_ID);
+	    INTEL_AX211_ASSOC_MAC_ID);
 	ax211_assoc_put_le32(command->payload + 4U, action);
 	ax211_assoc_put_le32(command->payload + 8U,
 	    AX211_ASSOC_SESSION_CONFIGURATION_ASSOC);
@@ -760,21 +849,31 @@ ax211_assoc_command_encode(const struct intel_ax211_assoc_state *state,
 {
 	ax211_assoc_command_base(state, command);
 	switch (state->step) {
+	case INTEL_AX211_ASSOC_STEP_MAC_ADD:
+		ax211_assoc_mac_config_encode(state, AX211_ASSOC_ACTION_ADD, 0,
+		    command);
+		break;
+	case INTEL_AX211_ASSOC_STEP_LINK_ADD:
+		ax211_assoc_link_config_encode(state, AX211_ASSOC_ACTION_ADD, 0U,
+		    0U, AX211_ASSOC_INVALID_CONTEXT, command);
+		break;
 	case INTEL_AX211_ASSOC_STEP_PHY_ADD:
 		ax211_assoc_phy_encode(state, AX211_ASSOC_ACTION_ADD, command);
 		break;
 	case INTEL_AX211_ASSOC_STEP_RLC_CONFIG:
 		ax211_assoc_rlc_encode(state, command);
 		break;
-	case INTEL_AX211_ASSOC_STEP_MAC_ADD:
-		ax211_assoc_mac_encode(state, AX211_ASSOC_ACTION_ADD, 0,
-		    command);
+	case INTEL_AX211_ASSOC_STEP_LINK_ASSIGN:
+		ax211_assoc_link_config_encode(state, AX211_ASSOC_ACTION_MODIFY,
+		    0U, 0U, 0U, command);
 		break;
-	case INTEL_AX211_ASSOC_STEP_BINDING_ADD:
-		ax211_assoc_binding_encode(AX211_ASSOC_ACTION_ADD, command);
+	case INTEL_AX211_ASSOC_STEP_LINK_ACTIVATE:
+		ax211_assoc_link_config_encode(state, AX211_ASSOC_ACTION_MODIFY,
+		    AX211_ASSOC_LINK_MODIFY_ACTIVE |
+		    AX211_ASSOC_LINK_MODIFY_RATES, 1U, 0U, command);
 		break;
 	case INTEL_AX211_ASSOC_STEP_STATION_ADD:
-		ax211_assoc_station_encode(state, 0, command);
+		ax211_assoc_station_config_encode(state, 0, command);
 		break;
 	case INTEL_AX211_ASSOC_STEP_QUEUE_ENABLE:
 		ax211_assoc_queue_encode(state, AX211_ASSOC_QUEUE_OPERATION_ADD,
@@ -784,12 +883,18 @@ ax211_assoc_command_encode(const struct intel_ax211_assoc_state *state,
 		ax211_assoc_session_encode(state, AX211_ASSOC_ACTION_ADD,
 		    command);
 		break;
-	case INTEL_AX211_ASSOC_STEP_STATION_UPDATE:
-		ax211_assoc_station_encode(state, 1, command);
-		break;
 	case INTEL_AX211_ASSOC_STEP_MAC_ASSOCIATE:
-		ax211_assoc_mac_encode(state, AX211_ASSOC_ACTION_MODIFY, 1,
+		ax211_assoc_mac_config_encode(state, AX211_ASSOC_ACTION_MODIFY, 1,
 		    command);
+		break;
+	case INTEL_AX211_ASSOC_STEP_LINK_ASSOCIATE:
+		ax211_assoc_link_config_encode(state, AX211_ASSOC_ACTION_MODIFY,
+		    AX211_ASSOC_LINK_MODIFY_RATES |
+		    AX211_ASSOC_LINK_MODIFY_QOS |
+		    AX211_ASSOC_LINK_MODIFY_BEACON_TIMING, 1U, 0U, command);
+		break;
+	case INTEL_AX211_ASSOC_STEP_STATION_UPDATE:
+		ax211_assoc_station_config_encode(state, 1, command);
 		break;
 	case INTEL_AX211_ASSOC_STEP_SESSION_REMOVE:
 		ax211_assoc_session_encode(state, AX211_ASSOC_ACTION_REMOVE,
@@ -802,11 +907,16 @@ ax211_assoc_command_encode(const struct intel_ax211_assoc_state *state,
 	case INTEL_AX211_ASSOC_STEP_STATION_REMOVE:
 		ax211_assoc_station_remove_encode(command);
 		break;
-	case INTEL_AX211_ASSOC_STEP_BINDING_REMOVE:
-		ax211_assoc_binding_encode(AX211_ASSOC_ACTION_REMOVE, command);
+	case INTEL_AX211_ASSOC_STEP_LINK_DEACTIVATE:
+		ax211_assoc_link_config_encode(state, AX211_ASSOC_ACTION_MODIFY,
+		    AX211_ASSOC_LINK_MODIFY_ACTIVE, 0U, 0U, command);
+		break;
+	case INTEL_AX211_ASSOC_STEP_LINK_REMOVE:
+		ax211_assoc_link_config_encode(state, AX211_ASSOC_ACTION_REMOVE,
+		    0U, 0U, AX211_ASSOC_INVALID_CONTEXT, command);
 		break;
 	case INTEL_AX211_ASSOC_STEP_MAC_REMOVE:
-		ax211_assoc_mac_encode(state, AX211_ASSOC_ACTION_REMOVE, 0,
+		ax211_assoc_mac_config_encode(state, AX211_ASSOC_ACTION_REMOVE, 0,
 		    command);
 		break;
 	case INTEL_AX211_ASSOC_STEP_PHY_REMOVE:
@@ -838,8 +948,6 @@ ax211_assoc_command_matches(const struct intel_ax211_assoc_state *state,
 	    command->wire_version == expected.wire_version &&
 	    command->layout_version == expected.layout_version &&
 	    command->response_version == expected.response_version &&
-	    command->expected_queue_write_pointer ==
-	        expected.expected_queue_write_pointer &&
 	    command->sequence == expected.sequence &&
 	    command->common_generation == expected.common_generation &&
 	    command->hardware_epoch == expected.hardware_epoch &&
@@ -889,22 +997,18 @@ ax211_assoc_response_validate(const struct intel_ax211_assoc_command *command,
 		    ax211_assoc_get_le32(reply->payload) != 0U)
 			return INTEL_AX211_ASSOC_FIRMWARE;
 		return INTEL_AX211_ASSOC_OK;
-	case INTEL_AX211_ASSOC_RESPONSE_STATION_SUCCESS:
-		if (reply->payload_length != 4U ||
-		    ax211_assoc_get_le32(reply->payload) !=
-		    AX211_ASSOC_STATION_STATUS_SUCCESS)
-			return INTEL_AX211_ASSOC_FIRMWARE;
-		return INTEL_AX211_ASSOC_OK;
 	case INTEL_AX211_ASSOC_RESPONSE_QUEUE:
 		if (reply->payload_length !=
 		    INTEL_AX211_ASSOC_QUEUE_RESPONSE_SIZE ||
-		    ax211_assoc_get_le16(reply->payload) !=
-		    AX211_ASSOC_QUEUE_ID ||
-		    ax211_assoc_get_le16(reply->payload + 2U) != 0U ||
-		    ax211_assoc_get_le16(reply->payload + 4U) !=
-		    command->expected_queue_write_pointer ||
+		    ax211_assoc_get_le16(reply->payload) <
+		    AX211_ASSOC_QUEUE_MIN ||
+		    ax211_assoc_get_le16(reply->payload) >
+		    AX211_ASSOC_QUEUE_MAX ||
 		    ax211_assoc_get_le16(reply->payload + 6U) != 0U)
 			return INTEL_AX211_ASSOC_FIRMWARE;
+		/* Linux iwlwifi and OpenBSD iwx both ignore response flags here. */
+		return INTEL_AX211_ASSOC_OK;
+	case INTEL_AX211_ASSOC_RESPONSE_IGNORED:
 		return INTEL_AX211_ASSOC_OK;
 	default:
 		return INTEL_AX211_ASSOC_FIRMWARE;
@@ -916,14 +1020,17 @@ ax211_assoc_mark_success(struct intel_ax211_assoc_state *state,
 	enum intel_ax211_assoc_step step)
 {
 	switch (step) {
-	case INTEL_AX211_ASSOC_STEP_PHY_ADD:
-		state->resources |= AX211_ASSOC_RESOURCE_PHY;
-		break;
 	case INTEL_AX211_ASSOC_STEP_MAC_ADD:
 		state->resources |= AX211_ASSOC_RESOURCE_MAC;
 		break;
-	case INTEL_AX211_ASSOC_STEP_BINDING_ADD:
-		state->resources |= AX211_ASSOC_RESOURCE_BINDING;
+	case INTEL_AX211_ASSOC_STEP_LINK_ADD:
+		state->resources |= AX211_ASSOC_RESOURCE_LINK;
+		break;
+	case INTEL_AX211_ASSOC_STEP_PHY_ADD:
+		state->resources |= AX211_ASSOC_RESOURCE_PHY;
+		break;
+	case INTEL_AX211_ASSOC_STEP_LINK_ACTIVATE:
+		state->resources |= AX211_ASSOC_RESOURCE_LINK_ACTIVE;
 		break;
 	case INTEL_AX211_ASSOC_STEP_STATION_ADD:
 		state->resources |= AX211_ASSOC_RESOURCE_STATION;
@@ -945,8 +1052,12 @@ ax211_assoc_mark_success(struct intel_ax211_assoc_state *state,
 	case INTEL_AX211_ASSOC_STEP_STATION_REMOVE:
 		state->resources &= ~AX211_ASSOC_RESOURCE_STATION;
 		break;
-	case INTEL_AX211_ASSOC_STEP_BINDING_REMOVE:
-		state->resources &= ~AX211_ASSOC_RESOURCE_BINDING;
+	case INTEL_AX211_ASSOC_STEP_LINK_DEACTIVATE:
+		state->resources &= ~AX211_ASSOC_RESOURCE_LINK_ACTIVE;
+		break;
+	case INTEL_AX211_ASSOC_STEP_LINK_REMOVE:
+		state->resources &= ~(AX211_ASSOC_RESOURCE_LINK |
+		    AX211_ASSOC_RESOURCE_LINK_ACTIVE);
 		break;
 	case INTEL_AX211_ASSOC_STEP_MAC_REMOVE:
 		state->resources &= ~AX211_ASSOC_RESOURCE_MAC;
@@ -956,8 +1067,10 @@ ax211_assoc_mark_success(struct intel_ax211_assoc_state *state,
 		break;
 	case INTEL_AX211_ASSOC_STEP_NONE:
 	case INTEL_AX211_ASSOC_STEP_RLC_CONFIG:
+	case INTEL_AX211_ASSOC_STEP_LINK_ASSIGN:
 	case INTEL_AX211_ASSOC_STEP_STATION_UPDATE:
 	case INTEL_AX211_ASSOC_STEP_MAC_ASSOCIATE:
+	case INTEL_AX211_ASSOC_STEP_LINK_ASSOCIATE:
 	default:
 		break;
 	}
@@ -968,14 +1081,17 @@ ax211_assoc_mark_uncertain(struct intel_ax211_assoc_state *state,
 	enum intel_ax211_assoc_step step)
 {
 	switch (step) {
-	case INTEL_AX211_ASSOC_STEP_PHY_ADD:
-		state->resources |= AX211_ASSOC_RESOURCE_PHY;
-		break;
 	case INTEL_AX211_ASSOC_STEP_MAC_ADD:
 		state->resources |= AX211_ASSOC_RESOURCE_MAC;
 		break;
-	case INTEL_AX211_ASSOC_STEP_BINDING_ADD:
-		state->resources |= AX211_ASSOC_RESOURCE_BINDING;
+	case INTEL_AX211_ASSOC_STEP_LINK_ADD:
+		state->resources |= AX211_ASSOC_RESOURCE_LINK;
+		break;
+	case INTEL_AX211_ASSOC_STEP_PHY_ADD:
+		state->resources |= AX211_ASSOC_RESOURCE_PHY;
+		break;
+	case INTEL_AX211_ASSOC_STEP_LINK_ACTIVATE:
+		state->resources |= AX211_ASSOC_RESOURCE_LINK_ACTIVE;
 		break;
 	case INTEL_AX211_ASSOC_STEP_STATION_ADD:
 		state->resources |= AX211_ASSOC_RESOURCE_STATION;
@@ -984,7 +1100,6 @@ ax211_assoc_mark_uncertain(struct intel_ax211_assoc_state *state,
 		state->resources |= AX211_ASSOC_RESOURCE_QUEUE;
 		break;
 	case INTEL_AX211_ASSOC_STEP_SESSION_PROTECT:
-	case INTEL_AX211_ASSOC_STEP_MAC_ASSOCIATE:
 		if (state->session_ended == 0U)
 			state->resources |= AX211_ASSOC_RESOURCE_SESSION;
 		break;
@@ -1002,8 +1117,10 @@ ax211_assoc_rollback_step(uint32_t resources)
 		return INTEL_AX211_ASSOC_STEP_QUEUE_REMOVE;
 	if ((resources & AX211_ASSOC_RESOURCE_STATION) != 0U)
 		return INTEL_AX211_ASSOC_STEP_STATION_REMOVE;
-	if ((resources & AX211_ASSOC_RESOURCE_BINDING) != 0U)
-		return INTEL_AX211_ASSOC_STEP_BINDING_REMOVE;
+	if ((resources & AX211_ASSOC_RESOURCE_LINK_ACTIVE) != 0U)
+		return INTEL_AX211_ASSOC_STEP_LINK_DEACTIVATE;
+	if ((resources & AX211_ASSOC_RESOURCE_LINK) != 0U)
+		return INTEL_AX211_ASSOC_STEP_LINK_REMOVE;
 	if ((resources & AX211_ASSOC_RESOURCE_MAC) != 0U)
 		return INTEL_AX211_ASSOC_STEP_MAC_REMOVE;
 	if ((resources & AX211_ASSOC_RESOURCE_PHY) != 0U)
@@ -1046,16 +1163,22 @@ ax211_assoc_advance(struct intel_ax211_assoc_state *state, uint64_t now_us)
 	int result;
 
 	switch (state->step) {
+	case INTEL_AX211_ASSOC_STEP_MAC_ADD:
+		next = INTEL_AX211_ASSOC_STEP_LINK_ADD;
+		break;
+	case INTEL_AX211_ASSOC_STEP_LINK_ADD:
+		next = INTEL_AX211_ASSOC_STEP_PHY_ADD;
+		break;
 	case INTEL_AX211_ASSOC_STEP_PHY_ADD:
 		next = INTEL_AX211_ASSOC_STEP_RLC_CONFIG;
 		break;
 	case INTEL_AX211_ASSOC_STEP_RLC_CONFIG:
-		next = INTEL_AX211_ASSOC_STEP_MAC_ADD;
+		next = INTEL_AX211_ASSOC_STEP_LINK_ASSIGN;
 		break;
-	case INTEL_AX211_ASSOC_STEP_MAC_ADD:
-		next = INTEL_AX211_ASSOC_STEP_BINDING_ADD;
+	case INTEL_AX211_ASSOC_STEP_LINK_ASSIGN:
+		next = INTEL_AX211_ASSOC_STEP_LINK_ACTIVATE;
 		break;
-	case INTEL_AX211_ASSOC_STEP_BINDING_ADD:
+	case INTEL_AX211_ASSOC_STEP_LINK_ACTIVATE:
 		next = INTEL_AX211_ASSOC_STEP_STATION_ADD;
 		break;
 	case INTEL_AX211_ASSOC_STEP_STATION_ADD:
@@ -1070,10 +1193,13 @@ ax211_assoc_advance(struct intel_ax211_assoc_state *state, uint64_t now_us)
 		state->active_sequence = 0U;
 		state->deadline = 0U;
 		return INTEL_AX211_ASSOC_AUTH_READY;
-	case INTEL_AX211_ASSOC_STEP_STATION_UPDATE:
-		next = INTEL_AX211_ASSOC_STEP_MAC_ASSOCIATE;
-		break;
 	case INTEL_AX211_ASSOC_STEP_MAC_ASSOCIATE:
+		next = INTEL_AX211_ASSOC_STEP_LINK_ASSOCIATE;
+		break;
+	case INTEL_AX211_ASSOC_STEP_LINK_ASSOCIATE:
+		next = INTEL_AX211_ASSOC_STEP_STATION_UPDATE;
+		break;
+	case INTEL_AX211_ASSOC_STEP_STATION_UPDATE:
 		state->phase = INTEL_AX211_ASSOC_PHASE_ASSOCIATED;
 		state->step = INTEL_AX211_ASSOC_STEP_NONE;
 		state->active_sequence = 0U;
@@ -1082,7 +1208,8 @@ ax211_assoc_advance(struct intel_ax211_assoc_state *state, uint64_t now_us)
 	case INTEL_AX211_ASSOC_STEP_SESSION_REMOVE:
 	case INTEL_AX211_ASSOC_STEP_QUEUE_REMOVE:
 	case INTEL_AX211_ASSOC_STEP_STATION_REMOVE:
-	case INTEL_AX211_ASSOC_STEP_BINDING_REMOVE:
+	case INTEL_AX211_ASSOC_STEP_LINK_DEACTIVATE:
+	case INTEL_AX211_ASSOC_STEP_LINK_REMOVE:
 	case INTEL_AX211_ASSOC_STEP_MAC_REMOVE:
 	case INTEL_AX211_ASSOC_STEP_PHY_REMOVE:
 		next = ax211_assoc_rollback_step(state->resources);
@@ -1206,7 +1333,7 @@ intel_ax211_assoc_session_event_accept(
 	configuration_id = ax211_assoc_get_le32(message->payload + 12U);
 	if (status > 1U || start > 1U)
 		return INTEL_AX211_ASSOC_FIRMWARE;
-	if (mac_id != INTEL_AX211_ASSOC_MAC_CONTEXT_ID ||
+	if (mac_id != INTEL_AX211_ASSOC_MAC_ID ||
 	    configuration_id != AX211_ASSOC_SESSION_CONFIGURATION_ASSOC ||
 	    status != 1U || start != 0U)
 		return INTEL_AX211_ASSOC_EVENT_IGNORED;

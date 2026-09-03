@@ -28,8 +28,44 @@ struct irq_service_info {
 	struct hal_cpu_mask requested;
 };
 
-/* irq.c */
-void irq_init(void);
-void irq_handler(int irq_num);	/* called from int.c */
+void
+irq_init(void);
+
+/* called from int.c */
+void
+irq_handler(int irq_num);
+
+int
+i386_interrupt_select(void);
+
+int
+i386_interrupt_uses_apic(void);
+
+int
+i386_interrupt_validate(
+	int irq);
+
+void
+i386_interrupt_mask(
+	int irq);
+
+void
+i386_interrupt_unmask(
+	int irq);
+
+void
+i386_interrupt_eoi(
+	int irq);
+
+int
+i386_interrupt_route(
+	int irq,
+	hal_cpu_id_t cpu);
+
+int
+i386_interrupt_calibration_tick(void);
+
+uint32_t
+i386_interrupt_timer_ticks(void);
 
 #endif

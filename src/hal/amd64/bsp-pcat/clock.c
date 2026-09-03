@@ -4,6 +4,7 @@
 #include "../clock.h"
 #include "../../x86/rtc.h"
 #include "lapic.h"
+#include "timecounter.h"
 
 static int first_tick = 1;
 
@@ -43,7 +44,13 @@ clock_handler(void)
 }
 
 bool
-hal_rtc_read(uint64_t *unix_seconds)
+hal_rtc_read_counter(uint64_t *counter, uint64_t *freq_hz)
+{
+	return amd64_timecounter_read(counter, freq_hz);
+}
+
+bool
+hal_rtc_read_epoch_time(uint64_t *unix_seconds)
 {
 	return x86_cmos_rtc_read(cmos_read, NULL, unix_seconds);
 }

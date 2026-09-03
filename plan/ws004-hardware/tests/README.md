@@ -1011,6 +1011,28 @@ plan/ws004-hardware/tests/run-intel-ax211-pci-test.sh
 plan/ws004-hardware/tests/run-intel-ax211-wlan-common-integration-test.sh
 ```
 
+The exact-device q065/q066 development runs use
+`run-intel-ax211-vfio-qemu.sh`. It requires root, a disposable image and work
+directory, an explicitly named non-WLAN safety route, a singleton IOMMU group,
+FLR, and the original `iwlwifi` binding. It assigns only the exact BDF through
+`driver_override`, starts an interactive QEMU monitor, and restores the host
+binding on every ordinary exit. Captures and credentials remain untracked.
+Q066's closing run passed scan, WPA2/CCMP authorization, DHCP, default-route
+installation, a selected LAN-peer ping, public ping, bounded nonempty HTTP
+fetch, disconnect, and administrative down; it then restored `iwlwifi` and the
+independent Ethernet route and deleted its disposable remote staging tree.
+
+The common L2 fixture also covers the normal TID-0 non-A-MSDU QoS Data receive form,
+including its dynamic QoS/optional-HT/CCMP offsets:
+
+```sh
+plan/ws004-hardware/tests/run-wlan-l2-test.sh
+```
+
+Full WMM/nonzero-TID transmit policy, A-MSDU, per-TID replay state, and exhaustive QoS
+malformed-frame coverage are deliberately outside this first useful normal
+path.
+
 The focused common-integration fixture does not replace physical evidence. It
 opens the production common station, publishes a synthetic BSS through the
 production AX211 scan/RX/BSS codecs, selects it, completes the real common
@@ -1020,13 +1042,11 @@ closes through checked cleanup.  A finite synthetic AX211 command exchange
 backs the private operations; MMIO, DMA command-ring ownership, and interrupt
 delivery remain the separately tested command/transport/PCI boundaries above.
 The runner applies ordinary, ASan/UBSan, analyzer, and amd64/i386 syntax gates.
-Together these focused gates complete Q062's automatic implementation evidence
-for exact attach, firmware/runtime transactions, passive scan, WPA2/CCMP/L2,
-concurrency, recovery, and terminal down. They still do not claim that the
-physical AX211 executes the pinned firmware/PNVM, returns real RF scan results,
-associates, obtains DHCP, or carries useful IP traffic. Those results require
-one direct zedBSD boot on the exact q061 machine, so HW-T38, p038, and q062
-remain in progress until that run is recorded.
+Together these focused gates and Q066's exact-device VFIO run prove exact
+attach, physical firmware/PNVM execution, real RF scan, WPA2/CCMP/L2, DHCP and
+useful IP traffic through the virtualized host path. They still do not replace
+one direct zedBSD boot on the exact q061 machine, so HW-T38 and p038 remain
+uncleared until that final run is recorded.
 
 ## HW-T20 NVMe QEMU
 

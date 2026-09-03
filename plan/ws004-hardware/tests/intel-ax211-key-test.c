@@ -56,6 +56,8 @@ test_version(void)
 	};
 	struct intel_ax211_protocol_command_table table;
 
+	/* SEC_KEY_CMD uses table layout v1 but API89's wide header version 0. */
+	assert(INTEL_AX211_KEY_WIRE_VERSION == 0U);
 	assert(intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
 	    &table) == INTEL_AX211_PROTOCOL_OK);
 	assert(intel_ax211_key_api89_validate(&table) == INTEL_AX211_KEY_OK);

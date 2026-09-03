@@ -110,6 +110,7 @@ struct intel_ax211_mmio {
 	int prepared;
 	int reset_done;
 	int apm_ready;
+	int master_disable_timed_out;
 };
 
 int intel_ax211_mmio_init(struct intel_ax211_mmio *mmio,
@@ -118,7 +119,7 @@ int intel_ax211_mmio_init(struct intel_ax211_mmio *mmio,
 int intel_ax211_mmio_prepare_card_hw(struct intel_ax211_mmio *mmio);
 int intel_ax211_mmio_sw_reset(struct intel_ax211_mmio *mmio);
 int intel_ax211_mmio_apm_init(struct intel_ax211_mmio *mmio);
-/* Success guarantees STOP_MASTER, APM stop, and a settled software reset. */
+/* Success guarantees a STOP_MASTER request, APM stop, and settled reset. */
 int intel_ax211_mmio_stop(struct intel_ax211_mmio *mmio);
 int intel_ax211_mmio_nic_lock(struct intel_ax211_mmio *mmio);
 int intel_ax211_mmio_nic_unlock(struct intel_ax211_mmio *mmio);

@@ -174,12 +174,15 @@ static struct intel_ax211_protocol_message
 make_init_complete(uint32_t generation)
 {
 	struct intel_ax211_protocol_message message;
+	static const uint8_t payload[INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE];
 
 	memset(&message, 0, sizeof(message));
 	message.opcode = INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE;
 	message.group = INTEL_AX211_PROTOCOL_GROUP_LEGACY;
 	message.version = INTEL_AX211_PROTOCOL_UNKNOWN_VERSION;
 	message.generation = generation;
+	message.payload = payload;
+	message.payload_length = sizeof(payload);
 	return message;
 }
 
@@ -187,7 +190,7 @@ static void
 test_init_complete(void)
 {
 	struct intel_ax211_protocol_message message;
-	uint8_t payload = 0U;
+	uint8_t payload[INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE + 1U] = { 0U };
 
 	message = make_init_complete(42U);
 	assert(intel_ax211_init_complete_validate(&message, 42U) ==
@@ -212,10 +215,15 @@ test_init_complete(void)
 	assert(intel_ax211_init_complete_validate(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_STALE);
 	message = make_init_complete(42U);
-	message.payload = &payload;
-	message.payload_length = 1U;
+	message.payload = payload;
+	message.payload_length = sizeof(payload);
 	assert(intel_ax211_init_complete_validate(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_OVERSIZED);
+	message = make_init_complete(42U);
+	message.payload_length--;
+	assert(intel_ax211_init_complete_validate(&message, 42U) ==
+	    INTEL_AX211_PROTOCOL_TRUNCATED);
+	message = make_init_complete(42U);
 	message.payload = NULL;
 	assert(intel_ax211_init_complete_validate(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_INVALID);

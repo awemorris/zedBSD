@@ -66,7 +66,15 @@ x68k_timer_init(uint32_t frequency)
 }
 
 bool
-hal_rtc_read(uint64_t *unix_seconds)
+hal_rtc_read_counter(uint64_t *counter, uint64_t *freq_hz)
+{
+	(void)counter;
+	(void)freq_hz;
+	return false;
+}
+
+bool
+hal_rtc_read_epoch_time(uint64_t *unix_seconds)
 {
 	(void)unix_seconds;
 	return false;

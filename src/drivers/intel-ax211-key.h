@@ -60,6 +60,7 @@
 #define INTEL_AX211_KEY_GROUP                              5U
 #define INTEL_AX211_KEY_OPCODE                          0x18U
 #define INTEL_AX211_KEY_COMMAND_VERSION                    1U
+#define INTEL_AX211_KEY_WIRE_VERSION                       0U
 #define INTEL_AX211_KEY_RESPONSE_VERSION                   0U
 #define INTEL_AX211_KEY_COMMAND_SIZE                      80U
 #define INTEL_AX211_KEY_BYTES                             16U

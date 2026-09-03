@@ -22,6 +22,7 @@
 #define FIXTURE_ALLOCATION_COUNT  514U
 #define FIXTURE_RECORD_COUNT      520U
 #define FIXTURE_HBUS_TARG_WRPTR  0x460U
+#define FIXTURE_TX_QUEUE          0x107U
 
 struct drv_dma_device {
 	unsigned marker;
@@ -249,15 +250,15 @@ test_api_and_queue_config(void)
 	TEST_CHECK(ring.tfd.size == INTEL_AX211_TX_RING_TFD_RING_SIZE);
 	TEST_CHECK(ring.byte_count.size ==
 	    INTEL_AX211_TX_RING_BYTE_COUNT_SIZE);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U, 0U,
+	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U,
 	    &config) == INTEL_AX211_TX_RING_OK);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 8U, 0U,
+	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 8U,
 	    &config) == INTEL_AX211_TX_RING_INVALID);
 	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U,
-	    INTEL_AX211_TX_RING_MANAGEMENT_TID, 0U, &config) ==
+	    INTEL_AX211_TX_RING_MANAGEMENT_TID, &config) ==
 	    INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(config.command[8U] == INTEL_AX211_TX_RING_MANAGEMENT_TID);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U, 0U,
+	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U,
 	    &config) == INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(get_le32(config.command) == 0U);
 	TEST_CHECK(get_le32(config.command + 4U) == 8U);
@@ -268,7 +269,10 @@ test_api_and_queue_config(void)
 	    ring.byte_count.device_address);
 	TEST_CHECK(get_le64(config.command + 28U) == ring.tfd.device_address);
 	memset(response, 0, sizeof(response));
-	put_le16(response, INTEL_AX211_TX_RING_QUEUE);
+	put_le16(response, FIXTURE_TX_QUEUE);
+	/* The tested API 89 device reports bit 0 with a valid queue and pointer. */
+	put_le16(response + 2U, 1U);
+	put_le16(response + 4U, 0x345U);
 	memset(&pending, 0, sizeof(pending));
 	pending.group = INTEL_AX211_TX_QUEUE_CONFIG_GROUP;
 	pending.opcode = INTEL_AX211_TX_QUEUE_CONFIG_OPCODE;
@@ -291,6 +295,8 @@ test_api_and_queue_config(void)
 	TEST_CHECK(intel_ax211_tx_ring_queue_add_complete(&ring, &config, 17U,
 	    23U, &message, &pending) == INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(ring.enabled && ring.station_id == 3U && ring.tid == 0U);
+	TEST_CHECK(ring.queue == FIXTURE_TX_QUEUE);
+	TEST_CHECK(ring.read_sequence == 0x45U && ring.write_sequence == 0x45U);
 	TEST_CHECK(ring.hardware_generation == 17U &&
 	    ring.connection_generation == 23U);
 	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 0) ==
@@ -306,18 +312,13 @@ test_api_and_queue_config(void)
 	memset(&io, 0, sizeof(io));
 	TEST_CHECK(intel_ax211_tx_ring_allocate(&fixture_device, &fixture_ops,
 	    &io, &ring) == INTEL_AX211_TX_RING_OK);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U, 0U,
+	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U,
 	    &config) == INTEL_AX211_TX_RING_OK);
-	put_le16(response + 4U, 1U);
+	put_le16(response, 0U);
 	result = intel_ax211_tx_ring_queue_add_complete(&ring, &config, 17U,
 	    23U, &message, &pending);
 	TEST_CHECK(result == INTEL_AX211_TX_RING_MALFORMED);
-	put_le16(response + 4U, 0U);
-	put_le16(response + 2U, 1U);
-	result = intel_ax211_tx_ring_queue_add_complete(&ring, &config, 17U,
-	    23U, &message, &pending);
-	TEST_CHECK(result == INTEL_AX211_TX_RING_MALFORMED);
-	put_le16(response + 2U, 0U);
+	put_le16(response, FIXTURE_TX_QUEUE);
 	config.command[8U] = 1U;
 	TEST_CHECK(intel_ax211_tx_ring_queue_add_complete(&ring, &config, 17U,
 	    23U, &message, &pending) == INTEL_AX211_TX_RING_INVALID);
@@ -343,6 +344,7 @@ test_submit_and_completion(void)
 	TEST_CHECK(allocator_reset() == 0);
 	TEST_CHECK(fixture_ring_open(&ring, &io, 0U, 31U, 41U) == 0);
 	fixture_request(&request, frame, 41U, 51U);
+	request.band_5ghz = 1U;
 	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 100U, 50U,
 	    &handle) == INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(handle.hardware_generation == 31U &&
@@ -354,11 +356,13 @@ test_submit_and_completion(void)
 	TEST_CHECK(INTEL_AX211_TX_RING_WRITE_POINTER_REGISTER ==
 	    FIXTURE_HBUS_TARG_WRPTR);
 	TEST_CHECK(io.last_offset == FIXTURE_HBUS_TARG_WRPTR);
-	TEST_CHECK(io.last_value == UINT32_C(0x00010001));
+	TEST_CHECK(io.last_value == UINT32_C(0x01070001));
 	command = ring.slot[0U].command.address;
 	TEST_CHECK(command[0U] == INTEL_AX211_TX_OPCODE && command[1U] == 0U &&
-	    command[2U] == 0U && command[3U] == INTEL_AX211_TX_RING_QUEUE);
+	    command[2U] == 0U &&
+	    command[3U] == (uint8_t)(FIXTURE_TX_QUEUE & 0x1fU));
 	TEST_CHECK(get_le16(command + 4U) == request.length);
+	TEST_CHECK(get_le32(command + 20U) == 0x00004100U);
 	tfd = ring.tfd.address;
 	TEST_CHECK(get_le16(tfd) == 3U);
 	TEST_CHECK(get_le16(tfd + 2U) == INTEL_AX211_TX_RING_FIRST_TB_SIZE);
@@ -442,13 +446,13 @@ test_wrap_and_ring_full(void)
 	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
 	    &handle) == INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(handle.index == UINT8_MAX &&
-	    handle.scheduler_sequence == UINT16_MAX);
-	TEST_CHECK(io.last_value == UINT32_C(0x00010000));
+	    handle.scheduler_sequence == UINT8_MAX);
+	TEST_CHECK(io.last_value == UINT32_C(0x01070100));
 	message = fixture_completion(payload, UINT8_MAX,
-	    (uint16_t)request.length, 0U, 3U, 1U);
+	    (uint16_t)request.length, 256U, 3U, 1U);
 	TEST_CHECK(intel_ax211_tx_ring_complete(&ring, &message, &retired) ==
 	    INTEL_AX211_TX_RING_OK);
-	TEST_CHECK(ring.read_sequence == 0U);
+	TEST_CHECK(ring.read_sequence == 256U);
 	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 1) ==
 	    INTEL_AX211_TX_RING_OK);
 
@@ -620,10 +624,10 @@ fixture_ring_open(
 	TEST_CHECK(intel_ax211_tx_ring_allocate(&fixture_device, &fixture_ops,
 	    io, ring) == INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(ring, 2U,
-	    INTEL_AX211_TX_RING_MANAGEMENT_TID, write_pointer, &config) ==
+	    INTEL_AX211_TX_RING_MANAGEMENT_TID, &config) ==
 	    INTEL_AX211_TX_RING_OK);
 	memset(response, 0, sizeof(response));
-	put_le16(response, INTEL_AX211_TX_RING_QUEUE);
+	put_le16(response, FIXTURE_TX_QUEUE);
 	put_le16(response + 4U, write_pointer);
 	memset(&pending, 0, sizeof(pending));
 	pending.group = INTEL_AX211_TX_QUEUE_CONFIG_GROUP;
@@ -684,14 +688,14 @@ fixture_completion(
 	payload[3U] = 3U;
 	put_le16(payload + 28U, 0x1230U);
 	put_le16(payload + 30U, byte_count);
-	put_le16(payload + 36U, INTEL_AX211_TX_RING_QUEUE);
+	put_le16(payload + 36U, FIXTURE_TX_QUEUE);
 	put_le32(payload + 40U, status);
 	put_le32(payload + 44U, next_sequence);
 	memset(&message, 0, sizeof(message));
 	message.group = INTEL_AX211_TX_GROUP;
 	message.opcode = INTEL_AX211_TX_OPCODE;
 	message.version = INTEL_AX211_TX_NOTIFICATION_VERSION;
-	message.queue = INTEL_AX211_TX_RING_QUEUE;
+	message.queue = (uint8_t)(FIXTURE_TX_QUEUE & 0x1fU);
 	message.index = index;
 	message.generation = hardware_generation;
 	message.payload = payload;

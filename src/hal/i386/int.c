@@ -11,7 +11,6 @@
 #include "irq.h"
 #include "asm.h"
 #include "pic.h"
-#include "interrupt-controller.h"
 #include "space.h"
 #include <errno.h>
 

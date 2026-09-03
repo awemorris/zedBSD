@@ -16,6 +16,7 @@
 #include <string.h>
 
 #define WLAN_LOCAL_ASSOC_CAPABILITY 0x0011U
+#define WLAN_ASSOC_CAPABILITY_SHORT_SLOT_TIME 0x0400U
 #define WLAN_RECONNECT_ATTEMPT_MAX 5U
 #define WLAN_RECONNECT_SCAN_DEADLINE_TICKS 200U
 #define WLAN_BEACON_MISS_MULTIPLIER 20U
@@ -245,14 +246,22 @@ bytes_zero(const void *memory, size_t length)
 static uint32_t
 channel_frequency(uint32_t channel)
 {
-	return channel == 14U ? 2484U : 2407U + 5U * channel;
+	if (channel >= 1U && channel <= 13U)
+		return 2407U + 5U * channel;
+	if (channel == 14U)
+		return 2484U;
+	if ((channel >= 36U && channel <= 144U &&
+	    (channel - 36U) % 4U == 0U) ||
+	    (channel >= 149U && channel <= 181U &&
+	    (channel - 149U) % 4U == 0U))
+		return 5000U + 5U * channel;
+	return 0U;
 }
 
 static int
 scan_profile_validate(const struct wlan_scan_profile *profile)
 {
-	uint32_t index;
-	uint32_t seen = 0U;
+	uint32_t index, earlier;
 
 	if (profile == NULL || profile->channel_count == 0U ||
 	    profile->channel_count > WLAN_SCAN_CHANNEL_MAX ||
@@ -267,16 +276,28 @@ scan_profile_validate(const struct wlan_scan_profile *profile)
 				return EINVAL;
 			continue;
 		}
-		if (channel->channel == 0U || channel->channel > 14U ||
+		if (channel_frequency(channel->channel) == 0U ||
 		    channel->center_frequency_mhz !=
 		    channel_frequency(channel->channel) ||
 		    (channel->flags & ~WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED) != 0U ||
-		    channel->reserved != 0U ||
-		    (seen & (1U << (channel->channel - 1U))) != 0U)
+		    channel->reserved != 0U)
 			return EINVAL;
-		seen |= 1U << (channel->channel - 1U);
+		for (earlier = 0U; earlier < index; earlier++) {
+			if (profile->channels[earlier].channel == channel->channel)
+				return EINVAL;
+		}
 	}
 	return 0;
+}
+
+static uint64_t
+scan_deadline_ticks(uint32_t channel_count)
+{
+	if (channel_count <= 14U)
+		return WLAN_SCAN_DEADLINE_TICKS;
+	return WLAN_SCAN_DEADLINE_TICKS +
+	    (uint64_t)(channel_count - 14U) *
+	    (WLAN_SCAN_TUNE_DEADLINE_TICKS + WLAN_SCAN_DWELL_TICKS);
 }
 
 static int
@@ -1486,6 +1507,51 @@ wlan_station_attach(struct net_device *device,
 }
 
 int
+wlan_station_scan_profile_update(struct wlan_station *station,
+	const struct wlan_scan_profile *scan_profile)
+{
+	unsigned long enabled;
+	unsigned index;
+	int error;
+
+	error = scan_profile_validate(scan_profile);
+	if (error != 0)
+		return error;
+	error = station_enter(station);
+	if (error != 0)
+		return error;
+	station_control_enter(station);
+	enabled = spin_lock_irqsave(&station->lock);
+	if (!station->used || station->closing || station->lifecycle_inflight) {
+		error = ENODEV;
+	} else if (station->administrative_up ||
+	    station->state != WLAN_STATE_DOWN ||
+	    station->scan_driver_active || station->connect_driver_active ||
+	    station->scan_state == WLAN_SCAN_RUNNING ||
+	    station->reconnect_pending) {
+		error = EBUSY;
+	} else {
+		error = 0;
+		if (station->ops->management_transmit == NULL) {
+			for (index = 0U; index < scan_profile->channel_count;
+			    index++) {
+				if ((scan_profile->channels[index].flags &
+				    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED) != 0U) {
+					error = EINVAL;
+					break;
+				}
+			}
+		}
+		if (error == 0)
+			station->scan_profile = *scan_profile;
+	}
+	spin_unlock_irqrestore(&station->lock, enabled);
+	station_control_leave(station);
+	station_leave(station);
+	return error;
+}
+
+int
 wlan_station_open(struct wlan_station *station)
 {
 	unsigned long enabled;
@@ -1512,6 +1578,7 @@ wlan_station_report_scan_bss(struct wlan_station *station,
 	struct wlan_bss_record normalized;
 	unsigned long enabled;
 	uint64_t now;
+	int scan_channel_accepting;
 	int wake_worker = 0;
 	int error;
 
@@ -1524,7 +1591,7 @@ wlan_station_report_scan_bss(struct wlan_station *station,
 	    WLAN_SECURITY_UNSUPPORTED_SUITE;
 
 	if (bss == NULL || bss->ssid_length > WLAN_SSID_MAX ||
-	    bss->channel == 0U || bss->channel > 14U ||
+	    channel_frequency(bss->channel) == 0U ||
 	    bss->capability > UINT16_MAX ||
 	    bss->beacon_interval_tu > UINT16_MAX ||
 	    (bss->security & ~known_security) != 0U ||
@@ -1558,9 +1625,13 @@ wlan_station_report_scan_bss(struct wlan_station *station,
 #endif
 	enabled = spin_lock_irqsave(&station->lock);
 	now = station_now_locked(station);
+	scan_channel_accepting =
+	    station->scan_step_state == WLAN_SCAN_STEP_DWELL ||
+	    (station->scan_step_state == WLAN_SCAN_STEP_TUNING &&
+	    station->scan_ready_pending);
 	if (station->scan_state != WLAN_SCAN_RUNNING ||
 	    station->scan_generation != generation ||
-	    station->scan_step_state != WLAN_SCAN_STEP_DWELL ||
+	    !scan_channel_accepting ||
 	    station->scan_step_index >= station->scan_profile.channel_count ||
 	    station->scan_profile.channels[station->scan_step_index].channel !=
 	    normalized.channel) {
@@ -1700,7 +1771,8 @@ wlan_station_report_frame(struct wlan_station *station,
 
 	if (report == NULL || report->frame == NULL || report->length < 2U ||
 	    report->length > WLAN_MANAGEMENT_FRAME_MAX ||
-	    report->generation == 0U || report->channel > 14U ||
+	    report->generation == 0U ||
+	    channel_frequency(report->channel) == 0U ||
 	    report->cipher > WLAN_RADIO_CIPHER_CCMP ||
 	    (report->decrypted != 0U && report->decrypted != 1U) ||
 	    (report->integrity_error != 0U &&
@@ -2026,7 +2098,8 @@ ioctl_scan(struct wlan_station *station, struct wlan_scan_request *request)
 			goto output;
 		}
 		now = station_now_locked(station);
-		error = deadline_checked(now, WLAN_SCAN_DEADLINE_TICKS,
+		error = deadline_checked(now, scan_deadline_ticks(
+		    station->scan_profile.channel_count),
 		    &deadline);
 		if (error != 0)
 			goto output;
@@ -2164,10 +2237,14 @@ ioctl_bss(struct wlan_station *station, struct wlan_bss_request *request)
 static int
 ioctl_connect(struct wlan_station *station, struct wlan_connect_request *request)
 {
-	static const uint8_t supported_rates[12] = {
+	static const uint8_t supported_rates_24[12] = {
 		0x82U, 0x84U, 0x8bU, 0x96U,
 		0x0cU, 0x12U, 0x18U, 0x24U,
 		0x30U, 0x48U, 0x60U, 0x6cU
+	};
+	static const uint8_t supported_rates_5[8] = {
+		0x8cU, 0x12U, 0x98U, 0x24U,
+		0xb0U, 0x48U, 0x60U, 0x6cU
 	};
 	uint8_t credential[WLAN_PASSPHRASE_STORAGE];
 	struct wlan_bss_record selected;
@@ -2255,13 +2332,22 @@ ioctl_connect(struct wlan_station *station, struct wlan_connect_request *request
 	memcpy(profile.bssid, selected.bssid, sizeof(profile.bssid));
 	memcpy(profile.ssid, selected.ssid, selected.ssid_length);
 	profile.ssid_length = selected.ssid_length;
-	memcpy(profile.rates, supported_rates, sizeof(supported_rates));
-	profile.rate_count = sizeof(supported_rates);
+	if (selected.channel <= 14U) {
+		memcpy(profile.rates, supported_rates_24,
+		    sizeof(supported_rates_24));
+		profile.rate_count = sizeof(supported_rates_24);
+	} else {
+		memcpy(profile.rates, supported_rates_5,
+		    sizeof(supported_rates_5));
+		profile.rate_count = sizeof(supported_rates_5);
+	}
 	profile.channel = selected.channel;
 	/* Association capability is our implemented local feature set.  AP
 	 * optional claims from its beacon are input to compatibility selection,
 	 * never capabilities that this station may echo as its own. */
-	profile.capability = WLAN_LOCAL_ASSOC_CAPABILITY;
+	profile.capability = WLAN_LOCAL_ASSOC_CAPABILITY |
+	    (selected.channel > 14U ?
+	    WLAN_ASSOC_CAPABILITY_SHORT_SLOT_TIME : 0U);
 	profile.listen_interval = 1U;
 	profile.initial_sequence = 0U;
 	profile.passphrase = credential;
@@ -3570,8 +3656,8 @@ wlan_station_test_seed_authorized(struct wlan_station *station,
 	if (station == NULL || bss == NULL || generation == 0U ||
 	    key_generation == 0U || key_generation == UINT64_MAX ||
 	    !bssid_valid(bss->bssid) || bss->ssid_length == 0U ||
-	    bss->ssid_length > WLAN_SSID_MAX || bss->channel == 0U ||
-	    bss->channel > 11U)
+	    bss->ssid_length > WLAN_SSID_MAX ||
+	    channel_frequency(bss->channel) == 0U)
 		return EINVAL;
 	group_generation = key_generation + 1U;
 	enabled = spin_lock_irqsave(&station->lock);

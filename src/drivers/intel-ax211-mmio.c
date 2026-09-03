@@ -191,6 +191,7 @@ intel_ax211_mmio_prepare_card_hw(
 	mmio->prepared = 0;
 	mmio->reset_done = 0;
 	mmio->apm_ready = 0;
+	mmio->master_disable_timed_out = 0;
 
 	/* Tries the ordinary ownership handshake first. */
 	result = ax211_set_hw_ready(mmio);
@@ -349,7 +350,14 @@ intel_ax211_mmio_stop(
 	    AX211_RESET_MASTER_DISABLED, AX211_RESET_MASTER_DISABLED,
 	    AX211_STOP_MASTER_TIMEOUT_US, AX211_GENERAL_POLL_US,
 	    INTEL_AX211_MMIO_WAIT_MASTER_DISABLED);
-	ax211_remember_error(&first_error, result);
+	/* Linux and OpenBSD both treat this 100-us indication deadline as a
+	 * warning and continue the mandatory software reset.  The PCI owner has
+	 * already disabled bus mastering before a DMA-owning stop reaches here;
+	 * keep all actual MMIO, clock, and reset failures fatal. */
+	if (result == INTEL_AX211_MMIO_TIMEOUT)
+		mmio->master_disable_timed_out = 1;
+	else
+		ax211_remember_error(&first_error, result);
 
 	/* Returns the adapter to D0U even when an earlier stop stage failed. */
 	result = ax211_csr_clear_bits(mmio, AX211_CSR_GP_CNTRL,

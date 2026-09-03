@@ -815,7 +815,10 @@ test_event_make(
 	uint32_t *generation)
 {
 	uint8_t alive[INTEL_AX211_PROTOCOL_ALIVE_SIZE];
+	uint8_t generic_status[4];
+	uint8_t init[INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE];
 	uint8_t nvm[INTEL_AX211_PROTOCOL_NVM_GET_INFO_SIZE];
+	uint8_t pnvm[INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_SIZE];
 	uint8_t command_index;
 	uint8_t group;
 	uint8_t opcode;
@@ -852,13 +855,22 @@ test_event_make(
 		opcode = INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_OPCODE;
 		group = INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM;
 		*version = INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_VERSION;
+		memset(pnvm, 0, sizeof(pnvm));
+		payload = pnvm;
+		payload_length = sizeof(pnvm);
 	} else if (event->type == TEST_EVENT_INIT) {
 		opcode = INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE;
 		*version = INTEL_AX211_PROTOCOL_UNKNOWN_VERSION;
+		memset(init, 0, sizeof(init));
+		payload = init;
+		payload_length = sizeof(init);
 	} else if (event->type == TEST_EVENT_ACK_EXTENDED) {
 		opcode = INTEL_AX211_INIT_EXTENDED_CFG_OPCODE;
 		group = INTEL_AX211_INIT_SYSTEM_GROUP;
 		queue = TEST_COMMAND_QUEUE;
+		memset(generic_status, 0, sizeof(generic_status));
+		payload = generic_status;
+		payload_length = sizeof(generic_status);
 	} else if (event->type == TEST_EVENT_ACK_ACCESS) {
 		opcode = INTEL_AX211_PROTOCOL_NVM_ACCESS_COMPLETE_OPCODE;
 		group = INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM;
@@ -1105,6 +1117,10 @@ test_success(void)
 	test_success_events(&fixture);
 	memset(&nvm, 0, sizeof(nvm));
 	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	if (result != INTEL_AX211_BOOT_OK)
+		fprintf(stderr, "boot result=%d last=%u events=%lu trace=%s\n",
+		    result, fixture.boot.last_error,
+		    (unsigned long)fixture.event_index, fixture.trace);
 	assert(result == INTEL_AX211_BOOT_OK);
 	assert(fixture.boot.state == INTEL_AX211_BOOT_STATE_COMPLETE);
 	assert(fixture.boot.generation == 8U);
@@ -1112,6 +1128,7 @@ test_success(void)
 	assert(fixture.bound_generation == fixture.boot.generation);
 	assert(fixture.boot.commands.hardware_epoch == fixture.boot.generation);
 	assert(fixture.rx_publish_count == INTEL_AX211_RX_RING_SIZE);
+	assert(strchr(fixture.trace, 'A') == NULL);
 	assert(fixture.source_released);
 	assert(fixture.dma_released);
 	assert(nvm.nvm_version == 0x1234U);

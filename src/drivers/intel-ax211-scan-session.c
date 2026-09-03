@@ -54,6 +54,11 @@
 
 #include <string.h>
 
+#define AX211_SCAN_ABORT_RESPONSE_SIZE                    4U
+#define AX211_SCAN_ABORT_STATUS_SUCCESS                    0U
+#define AX211_SCAN_ABORT_STATUS_IN_PROGRESS                1U
+#define AX211_SCAN_ABORT_STATUS_NOT_FOUND                  2U
+
 static int ax211_scan_session_live(
 	const struct intel_ax211_scan_session *session);
 static int ax211_scan_session_command_result(int result);
@@ -67,7 +72,8 @@ static int ax211_scan_session_submit(
 static int ax211_scan_session_ack(
 	struct intel_ax211_scan_session *session, uint8_t required_phase,
 	const uint8_t *event_bytes, size_t event_length,
-	uint32_t hardware_epoch, uint64_t now_us);
+	uint32_t hardware_epoch, uint64_t now_us,
+	uint32_t *abort_status);
 static int ax211_scan_session_terminal(
 	struct intel_ax211_scan_session *session, int result);
 
@@ -180,7 +186,7 @@ intel_ax211_scan_session_start_ack(
 
 	result = ax211_scan_session_ack(session,
 	    INTEL_AX211_SCAN_SESSION_WAIT_START_ACK, event_bytes,
-	    event_length, hardware_epoch, now_us);
+	    event_length, hardware_epoch, now_us, NULL);
 	if (result != INTEL_AX211_SCAN_SESSION_OK)
 		return result;
 	result = intel_ax211_scan_request_ack(&session->scan,
@@ -221,8 +227,11 @@ intel_ax211_scan_session_notification(
 	if (result == INTEL_AX211_SCAN_SESSION_COMPLETE ||
 	    result == INTEL_AX211_SCAN_SESSION_ABORTED ||
 	    result == INTEL_AX211_SCAN_SESSION_FAILED ||
-	    result == INTEL_AX211_SCAN_SESSION_TIMEOUT)
+	    result == INTEL_AX211_SCAN_SESSION_TIMEOUT) {
+		if (result != INTEL_AX211_SCAN_SESSION_TIMEOUT)
+			session->scan.abort_required = 0U;
 		ax211_scan_session_terminal(session, result);
+	}
 	if (result == INTEL_AX211_SCAN_SESSION_COMPLETE ||
 	    result == INTEL_AX211_SCAN_SESSION_ABORTED ||
 	    result == INTEL_AX211_SCAN_SESSION_FAILED ||
@@ -274,18 +283,28 @@ intel_ax211_scan_session_abort_ack(
 	uint32_t hardware_epoch,
 	uint64_t now_us)
 {
+	uint32_t abort_status;
 	int result;
 
 	result = ax211_scan_session_ack(session,
 	    INTEL_AX211_SCAN_SESSION_WAIT_ABORT_ACK, event_bytes,
-	    event_length, hardware_epoch, now_us);
+	    event_length, hardware_epoch, now_us, &abort_status);
 	if (result != INTEL_AX211_SCAN_SESSION_OK)
 		return result;
-	if (session->scan.abort_required) {
+	if (abort_status != AX211_SCAN_ABORT_STATUS_SUCCESS &&
+	    abort_status != AX211_SCAN_ABORT_STATUS_IN_PROGRESS &&
+	    abort_status != AX211_SCAN_ABORT_STATUS_NOT_FOUND)
+		return ax211_scan_session_terminal(session,
+		    INTEL_AX211_SCAN_SESSION_COMMAND);
+	if (abort_status == AX211_SCAN_ABORT_STATUS_NOT_FOUND) {
 		session->scan.abort_required = 0U;
+		session->scan.phase = INTEL_AX211_SCAN_PHASE_TERMINAL;
 		return ax211_scan_session_terminal(session,
 		    INTEL_AX211_SCAN_SESSION_ABORTED);
 	}
+	/* SUCCESS and IN_PROGRESS both complete through SCAN_COMPLETE_UMAC. */
+	session->scan.phase = INTEL_AX211_SCAN_PHASE_RUNNING;
+	session->scan.scan_deadline = session->command_deadline;
 	session->phase = INTEL_AX211_SCAN_SESSION_WAIT_ABORT_COMPLETE;
 	return INTEL_AX211_SCAN_SESSION_OK;
 }
@@ -396,8 +415,15 @@ ax211_scan_session_submit(
 	request.payload = payload;
 	request.payload_length = payload_length;
 	request.response_version = 0U;
-	request.minimum_response_length = 0U;
-	request.maximum_response_length = 0U;
+	if (opcode == INTEL_AX211_SCAN_ABORT_OPCODE) {
+		request.minimum_response_length =
+		    AX211_SCAN_ABORT_RESPONSE_SIZE;
+		request.maximum_response_length =
+		    AX211_SCAN_ABORT_RESPONSE_SIZE;
+	} else {
+		request.minimum_response_length = 0U;
+		request.maximum_response_length = 0U;
+	}
 	result = intel_ax211_command_submit(session->commands, &request,
 	    now_us, timeout_us, &session->command_handle);
 	result = ax211_scan_session_command_result(result);
@@ -415,9 +441,13 @@ ax211_scan_session_ack(
 	const uint8_t *event_bytes,
 	size_t event_length,
 	uint32_t hardware_epoch,
-	uint64_t now_us)
+	uint64_t now_us,
+	uint32_t *abort_status)
 {
 	struct intel_ax211_event event;
+	uint8_t response[AX211_SCAN_ABORT_RESPONSE_SIZE];
+	void *response_bytes;
+	size_t response_capacity;
 	size_t response_length;
 	int result;
 
@@ -439,6 +469,9 @@ ax211_scan_session_ack(
 			return INTEL_AX211_SCAN_SESSION_DUPLICATE;
 		return INTEL_AX211_SCAN_SESSION_OUT_OF_ORDER;
 	}
+	if ((required_phase == INTEL_AX211_SCAN_SESSION_WAIT_ABORT_ACK) !=
+	    (abort_status != NULL))
+		return INTEL_AX211_SCAN_SESSION_INVALID;
 	if (now_us >= session->command_deadline)
 		return intel_ax211_scan_session_expire(session, now_us);
 	if (intel_ax211_event_decode(event_bytes, event_length, &event) !=
@@ -447,15 +480,32 @@ ax211_scan_session_ack(
 	if (event.queue != session->command_handle.token.queue ||
 	    event.index != session->command_handle.token.index)
 		return INTEL_AX211_SCAN_SESSION_OUT_OF_ORDER;
+	response_bytes = NULL;
+	response_capacity = 0U;
+	if (abort_status != NULL) {
+		memset(response, 0, sizeof(response));
+		response_bytes = response;
+		response_capacity = sizeof(response);
+	}
 	response_length = 0U;
 	result = intel_ax211_command_complete(session->commands, event_bytes,
-	    event_length, hardware_epoch, NULL, 0U, &response_length);
+	    event_length, hardware_epoch, response_bytes, response_capacity,
+	    &response_length);
 	result = ax211_scan_session_command_result(result);
 	if (result != INTEL_AX211_SCAN_SESSION_OK)
 		return ax211_scan_session_terminal(session, result);
-	if (response_length != 0U)
+	if (abort_status == NULL && response_length != 0U)
 		return ax211_scan_session_terminal(session,
 		    INTEL_AX211_SCAN_SESSION_COMMAND);
+	if (abort_status != NULL) {
+		if (response_length != sizeof(response))
+			return ax211_scan_session_terminal(session,
+			    INTEL_AX211_SCAN_SESSION_COMMAND);
+		*abort_status = (uint32_t)response[0U] |
+		    ((uint32_t)response[1U] << 8) |
+		    ((uint32_t)response[2U] << 16) |
+		    ((uint32_t)response[3U] << 24);
+	}
 	return INTEL_AX211_SCAN_SESSION_OK;
 }
 

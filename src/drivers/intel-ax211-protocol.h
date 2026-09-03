@@ -80,9 +80,12 @@
 #define INTEL_AX211_PROTOCOL_NVM_GET_INFO_VERSION          4U
 
 #define INTEL_AX211_PROTOCOL_ALIVE_SIZE                  144U
+#define INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE            4U
+#define INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_SIZE       4U
 #define INTEL_AX211_PROTOCOL_NVM_GET_INFO_SIZE           468U
 #define INTEL_AX211_PROTOCOL_NVM_CHANNEL_LIMIT           110U
 #define INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT          14U
+#define INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT           37U
 
 #define INTEL_AX211_PROTOCOL_ALIVE_STATUS_ERROR        0xdeadU
 #define INTEL_AX211_PROTOCOL_ALIVE_STATUS_OK           0xcafeU
@@ -209,6 +212,10 @@ struct intel_ax211_protocol_nvm {
 	    INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT];
 	size_t channel_24ghz_count;
 	size_t valid_24ghz_count;
+	struct intel_ax211_protocol_channel channel_5ghz[
+	    INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT];
+	size_t channel_5ghz_count;
+	size_t valid_5ghz_count;
 };
 
 int intel_ax211_protocol_command_table_parse(const uint8_t *bytes,

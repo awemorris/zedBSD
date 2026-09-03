@@ -70,6 +70,8 @@
 	INTEL_AX211_TX_MAC_HEADER_MAX + 2U)
 #define INTEL_AX211_TX_FRAME_MAX                        2304U
 #define INTEL_AX211_TX_QUEUE_SIZE                        256U
+#define INTEL_AX211_TX_QUEUE_MIN                           1U
+#define INTEL_AX211_TX_QUEUE_MAX                         511U
 #define INTEL_AX211_TX_SCHEDULER_SEQUENCE_LIMIT        65536U
 
 enum intel_ax211_tx_result {
@@ -99,7 +101,8 @@ struct intel_ax211_tx_request {
 	enum intel_ax211_tx_frame_class frame_class;
 	uint8_t encrypted;
 	uint8_t key_index;
-	uint8_t reserved[6];
+	uint8_t band_5ghz;
+	uint8_t reserved[5];
 };
 
 /*

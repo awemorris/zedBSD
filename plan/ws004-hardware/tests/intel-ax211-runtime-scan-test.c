@@ -111,6 +111,7 @@ make_nvm(struct intel_ax211_protocol_nvm *nvm)
 
 	memset(nvm, 0, sizeof(*nvm));
 	nvm->band_24_enabled = 1U;
+	nvm->band_52_enabled = 1U;
 	nvm->tx_chain_mask = 3U;
 	nvm->rx_chain_mask = 3U;
 	nvm->lar_enabled = 1U;
@@ -120,6 +121,12 @@ make_nvm(struct intel_ax211_protocol_nvm *nvm)
 		nvm->channel_24ghz[index].valid = 1U;
 		nvm->channel_24ghz[index].active = index < 9U ? 1U : 0U;
 	}
+	nvm->channel_5ghz_count = 2U;
+	nvm->channel_5ghz[0].number = 36U;
+	nvm->channel_5ghz[0].valid = 1U;
+	nvm->channel_5ghz[0].active = 1U;
+	nvm->channel_5ghz[1].number = 40U;
+	nvm->channel_5ghz[1].valid = 1U;
 }
 
 static struct intel_ax211_protocol_command_table
@@ -165,6 +172,16 @@ test_runtime_profile_and_versions(void)
 	table = parse_table(malformed);
 	assert(intel_ax211_runtime_api89_validate(&table, &profile) ==
 	    INTEL_AX211_RUNTIME_UNSUPPORTED);
+
+	memcpy(malformed, bytes, sizeof(malformed));
+	put_version(malformed, 9U, 0x01U, 0xeeU, 2U, 0U);
+	table = parse_table(malformed);
+	assert(intel_ax211_runtime_api89_validate(&table, &profile) ==
+	    INTEL_AX211_RUNTIME_UNSUPPORTED);
+	set_bit(profile.capabilities,
+	    INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2);
+	assert(intel_ax211_runtime_api89_validate(&table, &profile) ==
+	    INTEL_AX211_RUNTIME_OK);
 
 	make_manifest(&manifest);
 	set_bit(manifest.capabilities, INTEL_AX211_RUNTIME_CAP_DQA);
@@ -221,8 +238,8 @@ test_runtime_codecs(void)
 	assert(intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_SOC_CONFIG, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
-	assert(command.group == 2U && get_le32(command.payload) == 1U);
-	assert(get_le32(command.payload + 4U) == 0U);
+	assert(command.group == 2U && get_le32(command.payload) == 0x0aU);
+	assert(get_le32(command.payload + 4U) == 12000U);
 	assert(intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_LTR_CONFIG, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
@@ -257,6 +274,11 @@ test_runtime_codecs(void)
 	    INTEL_AX211_RUNTIME_OK);
 	assert(command.payload_length == 60U);
 	assert_zero(command.payload, 60U);
+	set_bit(profile.capabilities,
+	    INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2);
+	assert(intel_ax211_runtime_command_encode(
+	    INTEL_AX211_RUNTIME_STEP_LTR_CONFIG, &profile, &command) ==
+	    INTEL_AX211_RUNTIME_INVALID);
 }
 
 static void
@@ -271,7 +293,9 @@ test_runtime_state(void)
 
 	make_api89_table(bytes);
 	table = parse_table(bytes);
-	profile = make_runtime_profile(0, 0);
+	profile = make_runtime_profile(1, 0);
+	set_bit(profile.capabilities,
+	    INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2);
 	assert(intel_ax211_runtime_begin(&state, &table, &profile, 7U, 100U) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(intel_ax211_runtime_current(&state, 100U, &command) ==
@@ -361,9 +385,14 @@ test_mcc_decode(void)
 	message.payload_length = sizeof(payload);
 	payload[13U] = 1U;
 	assert(intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
-	    INTEL_AX211_RUNTIME_UNSUPPORTED);
+	    INTEL_AX211_RUNTIME_OK);
+	assert(mcc.channel_count == 2U);
 	payload[13U] = 0U;
 	put_le32(payload, 2U);
+	assert(intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
+	    INTEL_AX211_RUNTIME_OK);
+	assert(mcc.status == 2U);
+	put_le32(payload, INTEL_AX211_RUNTIME_MCC_STATUS_MAX + 1U);
 	assert(intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
 	    INTEL_AX211_RUNTIME_FAILED);
 	put_le32(payload, 1U);
@@ -384,15 +413,16 @@ make_scan_profile(void)
 
 	make_nvm(&nvm);
 	memset(&mcc, 0, sizeof(mcc));
-	mcc.channel_count = 14U;
+	mcc.channel_count = 16U;
 	for (index = 0U; index < mcc.channel_count; index++)
 		mcc.channel[index] = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
 	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) ==
 	    INTEL_AX211_SCAN_OK);
-	assert(profile.channel_count == 11U);
+	assert(profile.channel_count == 16U);
 	assert(profile.channel_width_mhz == 20U);
-	assert(profile.channel[0] == 1U && profile.channel[10] == 11U);
+	assert(profile.channel[0] == 1U && profile.channel[13] == 14U);
+	assert(profile.channel[14] == 36U && profile.channel[15] == 40U);
 	return profile;
 }
 
@@ -401,21 +431,41 @@ test_scan_profile_bounds(void)
 {
 	static const uint8_t station[6] = { 0x02U, 0x11U, 0x22U,
 	    0x33U, 0x44U, 0x55U };
+	static const uint8_t channels_5ghz[] = {
+		36U, 40U, 44U, 48U, 52U, 56U, 60U, 64U,
+		68U, 72U, 76U, 80U, 84U, 88U, 92U, 96U,
+		100U, 104U, 108U, 112U, 116U, 120U, 124U, 128U,
+		132U, 136U, 140U, 144U, 149U, 153U, 157U, 161U,
+		165U, 169U, 173U, 177U, 181U
+	};
 	struct intel_ax211_protocol_nvm nvm;
 	struct intel_ax211_runtime_mcc mcc;
 	struct intel_ax211_scan_profile profile;
+	uint8_t request[INTEL_AX211_SCAN_REQUEST_SIZE];
 	size_t index;
 
 	make_nvm(&nvm);
 	memset(&mcc, 0, sizeof(mcc));
-	mcc.channel_count = 14U;
+	mcc.channel_count = 16U;
 	for (index = 0U; index < mcc.channel_count; index++)
 		mcc.channel[index] = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
+	mcc.status = INTEL_AX211_RUNTIME_MCC_STATUS_MAX;
+	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	    &profile) == INTEL_AX211_SCAN_OK);
+	mcc.status = INTEL_AX211_RUNTIME_MCC_STATUS_MAX + 1U;
+	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	    &profile) == INTEL_AX211_SCAN_INVALID);
+	mcc.status = 0U;
 	nvm.channel_24ghz_count =
 	    INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT + 1U;
 	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) ==
 	    INTEL_AX211_SCAN_INVALID);
+	make_nvm(&nvm);
+	nvm.channel_5ghz_count =
+	    INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT + 1U;
+	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	    &profile) == INTEL_AX211_SCAN_INVALID);
 	make_nvm(&nvm);
 	nvm.band_24_enabled = 0U;
 	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
@@ -424,9 +474,10 @@ test_scan_profile_bounds(void)
 	make_nvm(&nvm);
 	nvm.channel_24ghz[0].valid = 0U;
 	nvm.channel_24ghz_count = 1U;
+	nvm.channel_5ghz_count = 0U;
 	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
-	    &profile) ==
-	    INTEL_AX211_SCAN_UNSUPPORTED);
+	    &profile) == INTEL_AX211_SCAN_OK);
+	assert(profile.channel_count == 1U && profile.channel[0] == 1U);
 	make_nvm(&nvm);
 	assert(intel_ax211_scan_profile_from_nvm(&nvm, NULL, station,
 	    &profile) == INTEL_AX211_SCAN_INVALID);
@@ -437,7 +488,69 @@ test_scan_profile_bounds(void)
 	mcc.channel[4U] = 0U;
 	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) == INTEL_AX211_SCAN_OK);
-	assert(profile.channel_count == 10U && profile.channel[4U] == 6U);
+	assert(profile.channel_count == 15U && profile.channel[4U] == 6U);
+
+	/* LAR takes validity from MCC, not the NVM regulatory VALID bit. */
+	make_nvm(&nvm);
+	mcc.channel[4U] = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
+	nvm.channel_5ghz[0].valid = 0U;
+	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	    &profile) == INTEL_AX211_SCAN_OK);
+	assert(profile.channel_count == 16U && profile.channel[14U] == 36U);
+
+	/* An MCC-invalid 5 GHz channel is excluded even if NVM marks it valid. */
+	make_nvm(&nvm);
+	mcc.channel[14U] = 0U;
+	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	    &profile) == INTEL_AX211_SCAN_OK);
+	assert(profile.channel_count == 15U && profile.channel[14U] == 40U);
+
+	/* Without LAR, NVM VALID remains authoritative and MCC is unnecessary. */
+	make_nvm(&nvm);
+	mcc.channel[14U] = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
+	nvm.lar_enabled = 0U;
+	nvm.channel_5ghz[0].valid = 0U;
+	mcc.status = INTEL_AX211_RUNTIME_MCC_STATUS_MAX + 1U;
+	mcc.channel_count = 0U;
+	assert(intel_ax211_scan_profile_from_nvm(&nvm, NULL, station,
+	    &profile) == INTEL_AX211_SCAN_OK);
+	assert(profile.channel_count == 15U && profile.channel[14U] == 40U);
+	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	    &profile) == INTEL_AX211_SCAN_OK);
+
+	make_nvm(&nvm);
+	mcc.status = 0U;
+	mcc.channel_count = 16U;
+	for (index = 0U; index < mcc.channel_count; index++)
+		mcc.channel[index] = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
+	nvm.band_52_enabled = 0U;
+	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	    &profile) == INTEL_AX211_SCAN_OK);
+	assert(profile.channel_count == 14U);
+
+	/* The complete hardware 2.4/5 GHz profile fits the kernel and v17 wire
+	 * contracts, including the highest represented 5 GHz channel. */
+	make_nvm(&nvm);
+	nvm.channel_5ghz_count = sizeof(channels_5ghz);
+	for (index = 0U; index < nvm.channel_5ghz_count; index++) {
+		nvm.channel_5ghz[index].number = channels_5ghz[index];
+		nvm.channel_5ghz[index].valid = 1U;
+	}
+	mcc.channel_count = INTEL_AX211_SCAN_CHANNEL_LIMIT;
+	for (index = 0U; index < mcc.channel_count; index++)
+		mcc.channel[index] = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
+	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	    &profile) == INTEL_AX211_SCAN_OK);
+	assert(profile.channel_count == INTEL_AX211_SCAN_CHANNEL_LIMIT);
+	assert(profile.channel[0U] == 1U && profile.channel[14U] == 36U &&
+	    profile.channel[INTEL_AX211_SCAN_CHANNEL_LIMIT - 1U] == 181U);
+	assert(intel_ax211_scan_request_encode(&profile, request) ==
+	    INTEL_AX211_SCAN_OK);
+	assert(request[45U] == INTEL_AX211_SCAN_CHANNEL_LIMIT);
+	assert(get_le32(request + 48U +
+	    (INTEL_AX211_SCAN_CHANNEL_LIMIT - 1U) * 8U) == 0U);
+	assert(request[48U + (INTEL_AX211_SCAN_CHANNEL_LIMIT - 1U) * 8U +
+	    4U] == 181U);
 }
 
 static void
@@ -459,13 +572,21 @@ test_scan_codec(void)
 	assert(request[12U] == 10U && request[13U] == 10U);
 	assert(get_le16(request + 18U) == 300U);
 	assert(request[40U] == 110U && request[41U] == 110U);
-	assert(request[44U] == 0x20U && request[45U] == 11U);
+	assert(request[44U] == 0x20U && request[45U] == 16U);
 	assert(request[46U] == 10U && request[47U] == 2U);
-	for (index = 0U; index < 11U; index++) {
+	for (index = 0U; index < 14U; index++) {
 		const uint8_t *channel = request + 48U + index * 8U;
 
 		assert(get_le32(channel) == 0x40000000U);
 		assert(channel[4U] == index + 1U);
+		assert(channel[5U] == 0x80U && channel[6U] == 1U &&
+		    channel[7U] == 0U);
+	}
+	for (; index < profile.channel_count; index++) {
+		const uint8_t *channel = request + 48U + index * 8U;
+
+		assert(get_le32(channel) == 0U);
+		assert(channel[4U] == profile.channel[index]);
 		assert(channel[5U] == 0x80U && channel[6U] == 1U &&
 		    channel[7U] == 0U);
 	}
@@ -555,25 +676,39 @@ test_scan_state_and_events(void)
 	    INTEL_AX211_SCAN_STALE);
 	message.generation = 91U;
 	result = intel_ax211_scan_event_accept(&state, &message, 200U, &event);
-	assert(result == INTEL_AX211_SCAN_COMPLETE);
+	assert(result == INTEL_AX211_SCAN_OK);
 	assert(event.kind == INTEL_AX211_SCAN_EVENT_ITERATION_COMPLETE);
 	assert(event.channel_count == 3U && event.channel[2].channel == 3U);
 	assert(event.tsf == UINT64_C(0x1122334455667788));
-	assert(state.phase == INTEL_AX211_SCAN_PHASE_TERMINAL);
+	assert(state.phase == INTEL_AX211_SCAN_PHASE_RUNNING);
 	assert(intel_ax211_scan_event_accept(&state, &message, 201U, &event) ==
-	    INTEL_AX211_SCAN_DUPLICATE);
+	    INTEL_AX211_SCAN_OK);
+	memset(complete, 0, sizeof(complete));
+	complete[6U] = 1U;
+	message = make_scan_message(INTEL_AX211_SCAN_COMPLETE_OPCODE, 91U,
+	    complete, sizeof(complete));
+	assert(intel_ax211_scan_event_accept(&state, &message, 202U, &event) ==
+	    INTEL_AX211_SCAN_COMPLETE);
+	assert(state.phase == INTEL_AX211_SCAN_PHASE_TERMINAL);
 
 	assert(intel_ax211_scan_begin(&state, &table, &profile, 92U, 0U) ==
 	    INTEL_AX211_SCAN_OK);
 	assert(intel_ax211_scan_request_ack(&state, 92U, 1U) ==
 	    INTEL_AX211_SCAN_OK);
 	memset(complete, 0, sizeof(complete));
+	complete[4U] = 7U;
+	complete[5U] = 0xffU;
 	complete[6U] = 2U;
+	complete[7U] = 3U;
+	put_le32(complete + 8U, 1234U);
+	put_le32(complete + 12U, 0xa5a5a5a5U);
 	message = make_scan_message(INTEL_AX211_SCAN_COMPLETE_OPCODE, 92U,
 	    complete, sizeof(complete));
 	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_ABORTED);
 	assert(event.kind == INTEL_AX211_SCAN_EVENT_COMPLETE);
+	assert(event.last_schedule == 7U && event.last_iteration == 0xffU);
+	assert(event.ebs_status == 3U);
 
 	assert(intel_ax211_scan_begin(&state, &table, &profile, 93U, 0U) ==
 	    INTEL_AX211_SCAN_OK);
@@ -597,6 +732,7 @@ static void
 test_scan_malformed_events(void)
 {
 	uint8_t table_bytes[INTEL_AX211_PROTOCOL_API89_COMMAND_BYTES];
+	uint8_t complete[17U];
 	uint8_t iteration[24U];
 	struct intel_ax211_protocol_command_table table;
 	struct intel_ax211_protocol_message message;
@@ -629,17 +765,50 @@ test_scan_malformed_events(void)
 	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_OVERSIZED);
 	message.payload_length = sizeof(iteration);
+	put_le32(iteration, 1U);
+	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	    INTEL_AX211_SCAN_OUT_OF_ORDER);
+	put_le32(iteration, INTEL_AX211_SCAN_UID);
+	iteration[7U] = 0xffU;
+	iteration[16U] = 12U;
 	iteration[17U] = 0U;
 	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
-	    INTEL_AX211_SCAN_UNSUPPORTED);
-	iteration[17U] = 1U;
-	iteration[16U] = 12U;
-	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
-	    INTEL_AX211_SCAN_UNSUPPORTED);
-	iteration[16U] = 1U;
+	    INTEL_AX211_SCAN_OK);
+	assert(event.last_channel == 0xffU && event.channel[0].channel == 12U);
+
+	assert(intel_ax211_scan_begin(&state, &table, &profile, 2U, 0U) ==
+	    INTEL_AX211_SCAN_OK);
+	assert(intel_ax211_scan_request_ack(&state, 2U, 1U) ==
+	    INTEL_AX211_SCAN_OK);
+	message.generation = 2U;
 	message.version = 2U;
 	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_UNSUPPORTED);
+
+	assert(intel_ax211_scan_begin(&state, &table, &profile, 3U, 0U) ==
+	    INTEL_AX211_SCAN_OK);
+	assert(intel_ax211_scan_request_ack(&state, 3U, 1U) ==
+	    INTEL_AX211_SCAN_OK);
+	memset(complete, 0, sizeof(complete));
+	complete[4U] = 9U;
+	complete[5U] = 0xfeU;
+	complete[6U] = 3U;
+	complete[7U] = 0xffU;
+	put_le32(complete + 12U, 1U);
+	message = make_scan_message(INTEL_AX211_SCAN_COMPLETE_OPCODE, 3U,
+	    complete, 15U);
+	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	    INTEL_AX211_SCAN_TRUNCATED);
+	message.payload_length = sizeof(complete);
+	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	    INTEL_AX211_SCAN_OVERSIZED);
+	message.payload_length = 16U;
+	put_le32(complete, 1U);
+	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	    INTEL_AX211_SCAN_OUT_OF_ORDER);
+	put_le32(complete, INTEL_AX211_SCAN_UID);
+	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	    INTEL_AX211_SCAN_FAILED);
 }
 
 static uint8_t *

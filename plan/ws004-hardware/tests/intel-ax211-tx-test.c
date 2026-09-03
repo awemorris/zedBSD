@@ -87,6 +87,10 @@ test_clear_management(void)
 	assert(memcmp(prepared.command + INTEL_AX211_TX_COMMAND_FIXED_SIZE,
 	    frame, 24U) == 0);
 	assert(prepared.connection_generation == 7U && prepared.cookie == 9U);
+	request.band_5ghz = 1U;
+	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	    INTEL_AX211_TX_OK);
+	assert(get_le32(prepared.command + 16U) == 0x00004100U);
 }
 
 static void
@@ -243,6 +247,10 @@ test_rejections(void)
 	request.frame_class = INTEL_AX211_TX_FRAME_MANAGEMENT;
 	assert(intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_OK);
+	request.band_5ghz = 2U;
+	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	    INTEL_AX211_TX_INVALID);
+	request.band_5ghz = 0U;
 	request.connection_generation = 0U;
 	assert(intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_INVALID);

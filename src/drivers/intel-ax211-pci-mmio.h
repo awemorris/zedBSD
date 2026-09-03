@@ -15,11 +15,11 @@
 struct intel_ax211_pci_mmio_backend {
 	volatile uint8_t *registers;
 	size_t mapping_size;
-	uint64_t tsc_frequency_hz;
-	uint64_t tsc_origin;
-	uint64_t last_tsc;
+	uint64_t counter_frequency_hz;
+	uint64_t counter_origin;
+	uint64_t last_counter;
 	uint64_t last_microseconds;
-	uint8_t tsc_calibrated;
+	uint8_t counter_ready;
 };
 
 int intel_ax211_pci_mmio_backend_init(

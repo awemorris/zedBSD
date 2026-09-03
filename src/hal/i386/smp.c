@@ -4,7 +4,7 @@
 #include "apic-topology.h"
 #include "asm.h"
 #include "int.h"
-#include "interrupt-controller.h"
+#include "irq.h"
 #include "lapic.h"
 #include "percpu.h"
 #include "smp.h"

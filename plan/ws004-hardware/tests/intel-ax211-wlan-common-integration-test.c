@@ -34,6 +34,8 @@
 #define RX_STATUS_MIC_OK 0x00000040U
 #define RX_STATUS_CCMP 0x00000200U
 #define RX_STATUS_DECRYPTED 0x00000800U
+#define FIXTURE_CHANNEL 36U
+#define FIXTURE_FREQUENCY_MHZ 5180U
 
 static const uint8_t fixture_station[6] = {
 	0x02U, 0x16U, 0x3eU, 0x21U, 0x10U, 0x01U
@@ -104,6 +106,7 @@ static struct fixture_packet packet_pool[4];
 
 static void put_le16(uint8_t *bytes, uint16_t value);
 static void put_le32(uint8_t *bytes, uint32_t value);
+static uint32_t get_le32(const uint8_t *bytes);
 static void put_be16(uint8_t *bytes, uint16_t value);
 static void put_be64(uint8_t *bytes, uint64_t value);
 static void request_header(void *request, size_t size);
@@ -145,6 +148,7 @@ static int radio_quiesce(void *context);
 static size_t build_beacon(uint8_t *frame);
 static size_t build_authentication_response(uint8_t *frame);
 static size_t build_association_response(uint8_t *frame);
+static void assert_association_rates(const uint8_t *frame, size_t length);
 static size_t build_from_ds_data(uint8_t *frame, const uint8_t source[6],
 	uint16_t ether_type, const uint8_t *payload, size_t payload_length,
 	int protected_frame, uint8_t key_index, uint64_t packet_number);
@@ -353,6 +357,13 @@ put_le32(uint8_t *bytes, uint32_t value)
 	bytes[3] = (uint8_t)(value >> 24);
 }
 
+static uint32_t
+get_le32(const uint8_t *bytes)
+{
+	return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8) |
+	    ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
+}
+
 static void
 put_be16(uint8_t *bytes, uint16_t value)
 {
@@ -427,6 +438,14 @@ make_api89_table(struct ax211_radio_fixture *fixture)
 	table_version(fixture->table_bytes, 16U, INTEL_AX211_RX_MPDU_GROUP,
 	    INTEL_AX211_RX_MPDU_OPCODE, 99U,
 	    INTEL_AX211_RX_MPDU_NOTIFICATION_VERSION);
+	table_version(fixture->table_bytes, 17U,
+	    INTEL_AX211_ASSOC_GROUP_MAC_CONFIG,
+	    INTEL_AX211_ASSOC_MAC_CONFIG_OPCODE,
+	    INTEL_AX211_ASSOC_MAC_CONFIG_VERSION, 0U);
+	table_version(fixture->table_bytes, 18U,
+	    INTEL_AX211_ASSOC_GROUP_MAC_CONFIG,
+	    INTEL_AX211_ASSOC_LINK_CONFIG_OPCODE,
+	    INTEL_AX211_ASSOC_LINK_CONFIG_VERSION, 0U);
 	table_version(fixture->table_bytes,
 	    INTEL_AX211_PROTOCOL_API89_COMMAND_COUNT - 1U, 0U, 0U, 0U, 0U);
 	assert(intel_ax211_protocol_command_table_parse(fixture->table_bytes,
@@ -463,14 +482,13 @@ assoc_reply(const struct intel_ax211_assoc_command *command)
 	reply.hardware_epoch = command->hardware_epoch;
 	if (command->response_kind == INTEL_AX211_ASSOC_RESPONSE_STATUS_ZERO)
 		reply.payload_length = 4U;
-	else if (command->response_kind ==
-	    INTEL_AX211_ASSOC_RESPONSE_STATION_SUCCESS) {
-		reply.payload[0] = 1U;
-		reply.payload_length = 4U;
-	} else if (command->response_kind == INTEL_AX211_ASSOC_RESPONSE_QUEUE) {
-		put_le16(reply.payload, 1U);
+	else if (command->response_kind == INTEL_AX211_ASSOC_RESPONSE_QUEUE) {
+		put_le16(reply.payload, 0x101U);
+		put_le16(reply.payload + 4U, 0x345U);
 		reply.payload_length = 8U;
-	}
+	} else if (command->response_kind ==
+	    INTEL_AX211_ASSOC_RESPONSE_IGNORED)
+		reply.payload_length = 0U;
 	return reply;
 }
 
@@ -506,13 +524,14 @@ radio_scan_channel_start(void *context, uint64_t generation,
 	uint8_t request[INTEL_AX211_SCAN_REQUEST_SIZE];
 	int result;
 
-	assert(step_index == 0U && channel == 6U && deadline > fixture->now);
+	assert(step_index == 0U && channel == FIXTURE_CHANNEL &&
+	    deadline > fixture->now);
 	if (transport_take(fixture, &fixture->transport.scan_commands) != 0)
 		return EIO;
 	memset(&profile, 0, sizeof(profile));
 	memcpy(profile.station_address, fixture_station, sizeof(fixture_station));
 	profile.channel_width_mhz = INTEL_AX211_SCAN_CHANNEL_WIDTH_MHZ;
-	profile.channel[0] = 6U;
+	profile.channel[0] = FIXTURE_CHANNEL;
 	profile.channel_count = 1U;
 	assert(intel_ax211_scan_request_encode(&profile, request) ==
 	    INTEL_AX211_SCAN_OK);
@@ -565,7 +584,9 @@ radio_management_transmit(void *context, uint64_t generation,
 	request.frame = frame;
 	request.length = length;
 	request.frame_class = INTEL_AX211_TX_FRAME_MANAGEMENT;
+	request.band_5ghz = 1U;
 	assert(intel_ax211_tx_prepare(&request, &prepared) == INTEL_AX211_TX_OK);
+	assert(get_le32(prepared.command + 16U) == 0x4100U);
 	return 0;
 }
 
@@ -577,16 +598,17 @@ radio_connect_start(void *context, uint64_t generation,
 	struct intel_ax211_assoc_profile profile;
 	int result;
 
-	assert(bss != NULL && deadline > fixture->now && bss->channel == 6U);
+	assert(bss != NULL && deadline > fixture->now &&
+	    bss->channel == FIXTURE_CHANNEL);
 	memset(&profile, 0, sizeof(profile));
 	memcpy(profile.station_address, fixture_station, sizeof(fixture_station));
 	memcpy(profile.bssid, bss->bssid, sizeof(profile.bssid));
 	profile.channel = bss->channel;
 	profile.channel_width_mhz = INTEL_AX211_ASSOC_CHANNEL_WIDTH_MHZ;
 	profile.rx_chain_mask = 1U;
-	profile.cck_ack_rates = 0x0fU;
+	profile.cck_ack_rates = 0U;
 	profile.ofdm_ack_rates = 0x15U;
-	profile.short_preamble = 1U;
+	profile.short_preamble = 0U;
 	profile.short_slot = 1U;
 	profile.qos = 1U;
 	profile.beacon_interval_tu = 100U;
@@ -678,6 +700,7 @@ radio_frame_transmit(void *context,
 	private_request.length = request->length;
 	private_request.encrypted = request->encrypted;
 	private_request.key_index = request->key_index;
+	private_request.band_5ghz = 1U;
 	if (request->frame_class == WLAN_RADIO_FRAME_MANAGEMENT)
 		private_request.frame_class = INTEL_AX211_TX_FRAME_MANAGEMENT;
 	else if (request->frame_class == WLAN_RADIO_FRAME_EAPOL)
@@ -691,6 +714,7 @@ radio_frame_transmit(void *context,
 		    FIXTURE_HARDWARE_EPOCH) == INTEL_AX211_KEY_OK);
 	assert(intel_ax211_tx_prepare(&private_request, &prepared) ==
 	    INTEL_AX211_TX_OK);
+	assert(get_le32(prepared.command + 16U) == 0x4100U);
 	assert(request->length <= sizeof(fixture->pending_frame));
 	fixture->pending_generation = request->generation;
 	fixture->pending_cookie = request->cookie;
@@ -795,7 +819,9 @@ radio_quiesce(void *context)
 static size_t
 build_beacon(uint8_t *frame)
 {
-	static const uint8_t rates[] = { 0x82U, 0x84U, 0x8bU, 0x96U };
+	static const uint8_t rates[] = {
+		0x8cU, 0x12U, 0x98U, 0x24U, 0xb0U, 0x48U, 0x60U, 0x6cU
+	};
 	size_t offset = 36U;
 
 	memset(frame, 0, 256U);
@@ -813,9 +839,7 @@ build_beacon(uint8_t *frame)
 	frame[offset++] = sizeof(rates);
 	memcpy(frame + offset, rates, sizeof(rates));
 	offset += sizeof(rates);
-	frame[offset++] = 3U;
-	frame[offset++] = 1U;
-	frame[offset++] = 6U;
+	/* No DS parameter IE: the RX channel hint must retain 5 GHz. */
 	memcpy(frame + offset, fixture_rsn, sizeof(fixture_rsn));
 	offset += sizeof(fixture_rsn);
 	return offset;
@@ -836,7 +860,9 @@ build_authentication_response(uint8_t *frame)
 static size_t
 build_association_response(uint8_t *frame)
 {
-	static const uint8_t rates[] = { 0x82U, 0x84U, 0x8bU, 0x96U };
+	static const uint8_t rates[] = {
+		0x8cU, 0x12U, 0x98U, 0x24U, 0xb0U, 0x48U, 0x60U, 0x6cU
+	};
 	size_t offset = 30U;
 
 	memset(frame, 0, 64U);
@@ -850,6 +876,34 @@ build_association_response(uint8_t *frame)
 	frame[offset++] = sizeof(rates);
 	memcpy(frame + offset, rates, sizeof(rates));
 	return offset + sizeof(rates);
+}
+
+static void
+assert_association_rates(const uint8_t *frame, size_t length)
+{
+	static const uint8_t expected[] = {
+		0x8cU, 0x12U, 0x98U, 0x24U, 0xb0U, 0x48U, 0x60U, 0x6cU
+	};
+	size_t offset;
+	int found = 0;
+
+	assert(frame != NULL && length >= 28U);
+	assert((frame[0] & 0xfcU) == 0U);
+	assert(frame[24U] == 0x11U && frame[25U] == 0x04U);
+	for (offset = 28U; offset + 2U <= length;) {
+		uint8_t identifier = frame[offset++];
+		uint8_t ie_length = frame[offset++];
+
+		assert(offset + ie_length <= length);
+		if (identifier == 1U) {
+			assert(ie_length == sizeof(expected));
+			assert(memcmp(frame + offset, expected,
+			    sizeof(expected)) == 0);
+			found = 1;
+		}
+		offset += ie_length;
+	}
+	assert(found);
 }
 
 static size_t
@@ -913,7 +967,7 @@ deliver_rx(struct ax211_radio_fixture *fixture, uint64_t common_generation,
 	}
 	put_le32(payload + 12U, status);
 	payload[40U] = 35U;
-	payload[42U] = 6U;
+	payload[42U] = FIXTURE_CHANNEL;
 	memcpy(payload + INTEL_AX211_RX_MPDU_DESCRIPTOR_SIZE, frame,
 	    frame_length);
 	memset(&message, 0, sizeof(message));
@@ -1171,8 +1225,8 @@ run_integration(void)
 	device.hwaddr_len = 6U;
 	device.flags = NET_DEVICE_UP;
 	scan_profile.channel_count = 1U;
-	scan_profile.channels[0].channel = 6U;
-	scan_profile.channels[0].center_frequency_mhz = 2437U;
+	scan_profile.channels[0].channel = FIXTURE_CHANNEL;
+	scan_profile.channels[0].center_frequency_mhz = FIXTURE_FREQUENCY_MHZ;
 	scan_profile.channels[0].flags = WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED;
 	wlan_core_init();
 	assert(wlan_station_test_attach(&device, &radio_ops, &fixture,
@@ -1210,6 +1264,7 @@ run_integration(void)
 	length = build_authentication_response(frame);
 	assert(deliver_rx(&fixture, connection_generation, frame, length, 0) == 0);
 	assert(fixture.pending);
+	assert_association_rates(fixture.pending_frame, fixture.pending_length);
 	complete_pending(&fixture);
 	length = build_association_response(frame);
 	assert(deliver_rx(&fixture, connection_generation, frame, length, 0) == 0);
