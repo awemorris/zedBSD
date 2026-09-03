@@ -1,4 +1,11 @@
 /*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
  * PIC (programmable interrupt controller) management, BSP-provided:
  * the 8259 pair sits at different ports on the PC-98 and the PC/AT.
  */

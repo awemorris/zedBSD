@@ -1,7 +1,11 @@
 /*
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
  * i386 physical memory management (pmem): range descriptors over a
  * page-usage bitmap.  Range bookkeeping only -- page tables are managed
  * by the space API.

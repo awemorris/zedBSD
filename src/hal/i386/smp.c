@@ -1,5 +1,14 @@
-/* i386 xAPIC CPU discovery and INIT-SIPI-SIPI startup. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * i386 xAPIC CPU discovery and INIT-SIPI-SIPI startup.
+ */
+
 #include <hal/hal.h>
 #include "apic-topology.h"
 #include "asm.h"
@@ -16,15 +25,37 @@
 #define VECTOR_NOTIFY 0xd0U
 #define VECTOR_PANIC 0xd1U
 #define VECTOR_TLB 0xd2U
+
+struct cpu_state {
+	uint8_t apic_id;
+	volatile unsigned ready;
+	void*stack;
+};
+
 extern uint8_t i386_ap_trampoline_start[],i386_ap_trampoline_end[];
 extern uint8_t i386_ap_trampoline_cr3[],i386_ap_trampoline_stack[];
 extern uint8_t i386_ap_trampoline_cpu[],i386_ap_trampoline_target[];
 extern void i386_ap_high_entry(void);
 
-struct cpu_state{uint8_t apic_id;volatile unsigned ready;void*stack;};
-static struct cpu_state cpus[I386_APIC_MAX_CPUS];static unsigned cpu_count=1;static volatile unsigned configured;static struct hal_cpu_mask ready_mask;
-static size_t off(uint8_t*s){return(size_t)(s-i386_ap_trampoline_start);}
-static void delay(void){volatile unsigned n;for(n=0;n<200000U;n++)__asm__ volatile("pause");}
+static struct cpu_state cpus[I386_APIC_MAX_CPUS];
+static unsigned cpu_count = 1;
+static volatile unsigned configured;
+static struct hal_cpu_mask ready_mask;
+
+static size_t
+off(
+	uint8_t*s)
+{
+	return (size_t)(s-i386_ap_trampoline_start);
+}
+
+static void
+delay(void)
+{
+	volatile unsigned n;
+	for (n = 0; n < 200000U; n++)
+		__asm__ volatile("pause");
+}
 
 void i386_smp_configure(const struct i386_apic_topology*t)
 {
@@ -32,6 +63,7 @@ void i386_smp_configure(const struct i386_apic_topology*t)
 	for(i=0;i<t->cpu_count&&target<I386_APIC_MAX_CPUS;i++)if(t->cpus[i].apic_id!=bsp)cpus[target++].apic_id=t->cpus[i].apic_id;
 	cpu_count=target;hal_cpu_mask_zero(&ready_mask);hal_cpu_mask_set(&ready_mask,0);configured=1;
 }
+
 hal_cpu_id_t hal_cpu_current(void){unsigned i;if(!configured)return 0;{uint8_t id=i386_lapic_id();for(i=0;i<cpu_count;i++)if(cpus[i].apic_id==id)return i;}HAL_FATAL("unknown i386 APIC ID");return 0;}
 unsigned hal_cpu_count(void){return cpu_count;}
 void hal_cpu_ready_mask(struct hal_cpu_mask*r){unsigned w;if(r==NULL)return;hal_rmb();for(w=0;w<HAL_CPU_MASK_WORDS;w++)r->bits[w]=ready_mask.bits[w];}
