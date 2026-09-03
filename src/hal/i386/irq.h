@@ -1,8 +1,14 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * IRQ numbers and the ISR-task registry.
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The i386 IRQ-controller and service contract.
  */
 
 #ifndef HAL_I386_IRQ_H
@@ -28,44 +34,27 @@ struct irq_service_info {
 	struct hal_cpu_mask requested;
 };
 
-void
-irq_init(void);
+void irq_init(void);
 
 /* called from int.c */
-void
-irq_handler(int irq_num);
+void irq_handler(int irq_num);
 
-int
-i386_interrupt_select(void);
+int i386_interrupt_select(void);
 
-int
-i386_interrupt_uses_apic(void);
+int i386_interrupt_uses_apic(void);
 
-int
-i386_interrupt_validate(
-	int irq);
+int i386_interrupt_validate(int irq);
 
-void
-i386_interrupt_mask(
-	int irq);
+void i386_interrupt_mask(int irq);
 
-void
-i386_interrupt_unmask(
-	int irq);
+void i386_interrupt_unmask(int irq);
 
-void
-i386_interrupt_eoi(
-	int irq);
+void i386_interrupt_eoi(int irq);
 
-int
-i386_interrupt_route(
-	int irq,
-	hal_cpu_id_t cpu);
+int i386_interrupt_route(int irq, hal_cpu_id_t cpu);
 
-int
-i386_interrupt_calibration_tick(void);
+int i386_interrupt_calibration_tick(void);
 
-uint32_t
-i386_interrupt_timer_ticks(void);
+uint32_t i386_interrupt_timer_ticks(void);
 
 #endif

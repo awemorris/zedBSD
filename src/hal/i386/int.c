@@ -1,116 +1,127 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * Interrupt management.
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The i386 interrupt-dispatch implementation.
  */
 
 #include <hal/hal.h>
-#include "int.h"
-#include "task.h"
-#include "irq.h"
+
+#include <errno.h>
+
 #include "asm.h"
+#include "int.h"
+#include "irq.h"
 #include "pic.h"
 #include "space.h"
-#include <errno.h>
+#include "task.h"
 
 static hal_syscall_handler_t syscall_handler;
 
-/* Forward declaration. */
-static void create_idt();
-static void load_idt();
+static int is_asynchronous_interrupt(int int_num);
+static void create_idt(void);
+static void load_idt(void);
 static void set_idt_entry(int index, int dpl, void *handler);
 static void handle_fault(struct interrupt_frame *fp);
 
-static int
-is_asynchronous_interrupt(int int_num)
+/*
+ * Initializes the i386 interrupt descriptor table.
+ */
+void
+i386_int_init(
+	void)
 {
-	return (int_num >= INT_IRQ_BASE && int_num <= INT_IRQ_BASE + IRQ_MAX) ||
-	    int_num == INT_CPU_NOTIFY || int_num == INT_CPU_TLB;
+	/* Creates and installs the descriptor table while IRQs remain disabled. */
+	create_idt();
+	load_idt();
 }
-
 
 /*
- * Initialize the interrupt managemtn module.
+ * Reloads the i386 interrupt descriptor table on the current CPU.
  */
-void i386_int_init(void)
-{
-
-	/*
-	 * NOTE:
-	 * - At this moment, IRQ are prohibited.
-	 * - Allowing IRQ is done in the initialization of IRQ after initializing PIC.
-	 */
-
-	/* Create an IDT. */
-	create_idt();
-
-	/* Load the IDT. */
-	load_idt();
-
-	/* cmain enables interrupts after the PIC and PIT are initialized. */
-}
-
 void
-i386_int_load(void)
+i386_int_load(
+	void)
 {
+	/* Installs the shared descriptor-table image on this CPU. */
 	load_idt();
 }
 
+/*
+ * Installs the kernel system-call handler.
+ */
 void
-hal_syscall_set_handler(hal_syscall_handler_t handler)
+hal_syscall_set_handler(
+	hal_syscall_handler_t handler)
 {
+	/* Publishes the callback used by the system-call vector. */
 	syscall_handler = handler;
 }
 
 /*
- * General Interrupt Handler
- * (called from trap.s)
+ * Dispatches one i386 interrupt frame.
  *
- * NOTE:
- *  - Registered as an "interrupt gate" in IDT.
- *  - So the handler is started with interrupts disabled.
+ * The assembly entry stubs install these handlers as interrupt gates, so the
+ * processor enters this function with interrupts disabled.
  */
-void int_handler(struct interrupt_frame *fp)
+void
+int_handler(
+	struct interrupt_frame *fp)
 {
-	int is_handled, int_num, user_interrupt;
+	uintptr_t args[HAL_SYSCALL_ARGS];
+	uint32_t syscall_result;
+	int in_service;
+	int int_num;
+	int irq_num;
+	int is_handled;
+	int user_interrupt;
 
+	/* Classifies the interrupt without disturbing short-circuit call order. */
 	is_handled = 0;
-	int_num    = fp->int_num;
-	user_interrupt = (fp->cs & 3U) == 3U &&
-	    is_asynchronous_interrupt(int_num);
+	int_num = fp->int_num;
+	user_interrupt = 0;
 
-	/* Only a frame returning to ring 3 is valid for signal delivery. */
+	/* Recognizes asynchronous interrupts which can return to user mode. */
+	if ((fp->cs & 3U) == 3U) {
+		user_interrupt = is_asynchronous_interrupt(int_num);
+	}
+
+	/* Makes an asynchronous user frame available for signal delivery. */
 	if (user_interrupt)
 		i386_task_enter_user_frame(fp);
 
-	/*
-	 * IRQに割り当てられた割り込みの番号である場合
-	 */
-	if(int_num >= INT_IRQ_BASE && int_num <= INT_IRQ_BASE + IRQ_MAX) {
-		/* ソフトウェアによるINT命令である場合、例外0Dとして処理する */
+	/* Dispatches the vector according to its reserved interrupt class. */
+	if (int_num >= INT_IRQ_BASE && int_num <= INT_IRQ_BASE + IRQ_MAX) {
+		/* Validates that hardware, rather than a user INT, raised the IRQ. */
+		irq_num = int_num - INT_IRQ_BASE;
+		in_service = i386_interrupt_validate(irq_num);
 
-		int irq_num = int_num - INT_IRQ_BASE;
-		int in_service = i386_interrupt_validate(irq_num);
-
-		if(in_service == -1) {
+		/* Rejects a vector which the active controller did not report. */
+		if (in_service == -1) {
 			is_handled = 1;
-			hal_printf("\nIRQ not in service (pic_isr=%02X, int=%02X)\n", in_service, int_num);
+			hal_printf(
+				"\nIRQ not in service (pic_isr=%02X, int=%02X)\n",
+				in_service,
+				int_num);
 			HAL_FATAL("IRQ error");
 		} else {
-			/* IRQハンドラをコールする */
+			/* Delivers the validated IRQ to the registered service. */
 			irq_handler(irq_num);
 			is_handled = 1;
 		}
-	}
-
-	/*
-	 * CPUの例外をハンドルする
-	 */
-	else if (int_num == INT_SYSCALL && (fp->cs & 3) == 3) {
-		uintptr_t args[HAL_SYSCALL_ARGS];
-		kernel_user_int_handler((uint32_t)int_num, fp->cs,
-		    fp->eip, fp->regs.eax);
+	} else if (int_num == INT_SYSCALL && (fp->cs & 3U) == 3U) {
+		/* Reports the user entry and captures the ABI argument registers. */
+		kernel_user_int_handler(
+			(uint32_t)int_num,
+			fp->cs,
+			fp->eip,
+			fp->regs.eax);
 		args[0] = fp->regs.ebx;
 		args[1] = fp->regs.ecx;
 		args[2] = fp->regs.edx;
@@ -118,146 +129,207 @@ void int_handler(struct interrupt_frame *fp)
 		args[4] = fp->regs.edi;
 		args[5] = fp->regs.ebp;
 		i386_task_enter_user_frame(fp);
-		/* The generic callback owns accounting and its interruptible window. */
-		fp->regs.eax = syscall_handler != NULL ?
-			(uint32_t)syscall_handler(fp->regs.eax, args) :
-			(uint32_t)-(int32_t)ENOSYS;
+
+		/* Invokes the installed callback or reports an unavailable syscall. */
+		if (syscall_handler != NULL) {
+			syscall_result = (uint32_t)syscall_handler(
+				fp->regs.eax,
+				args);
+		} else {
+			syscall_result = (uint32_t)-(int32_t)ENOSYS;
+		}
+		fp->regs.eax = syscall_result;
+
+		/* Completes accounting before releasing the active user frame. */
 		kernel_user_return_handler();
 		i386_task_leave_user_frame();
 		is_handled = 1;
-	}
-	else if (int_num == INT_CPU_NOTIFY) {
+	} else if (int_num == INT_CPU_NOTIFY) {
+		/* Delivers the scheduler notification for the current CPU. */
 		kernel_cpu_notify_handler(hal_cpu_current(), IRQ_MAX + 2U);
 		is_handled = 1;
-	}
-	else if (int_num == INT_CPU_TLB) {
+	} else if (int_num == INT_CPU_TLB) {
+		/* Services pending remote TLB invalidations. */
 		i386_tlb_interrupt();
 		is_handled = 1;
-	}
-	else if (int_num == INT_CPU_PANIC) {
+	} else if (int_num == INT_CPU_PANIC) {
+		/* Parks this CPU after a remote panic request. */
 		hal_cpu_park();
-	}
-	else if(int_num >= 0 && int_num <= 0x1f) {
+	} else if (int_num >= 0 && int_num <= 0x1f) {
+		/* Handles processor-defined fault vectors. */
 		handle_fault(fp);
 		is_handled = 1;
 	}
 
-	/*
-	 * ハンドルされなかった場合
-	 */
-	if(!is_handled) {
-		hal_printf("\nIRQ handler not installed (int %02X)\n" ,int_num);
+	/* Rejects every vector outside the installed dispatch classes. */
+	if (!is_handled) {
+		hal_printf("\nIRQ handler not installed (int %02X)\n", int_num);
 		HAL_FATAL("IRQ error");
 	}
+
+	/* Completes signal delivery for an asynchronous user interruption. */
 	if (user_interrupt) {
 		kernel_user_return_handler();
 		i386_task_leave_user_frame();
 	}
-
-	/* 割り込み処理ハンドラ内で再スケジュールが要求された場合*/
 }
 
-/* IDTを作成する */
-static void create_idt()
+/* Tests whether a vector is delivered asynchronously. */
+static int
+is_asynchronous_interrupt(
+	int int_num)
+{
+	/* Accepts any hardware IRQ vector. */
+	if (int_num >= INT_IRQ_BASE && int_num <= INT_IRQ_BASE + IRQ_MAX)
+		return 1;
+
+	/* Accepts the interprocessor notification vector. */
+	if (int_num == INT_CPU_NOTIFY)
+		return 1;
+
+	/* Accepts the interprocessor TLB vector. */
+	if (int_num == INT_CPU_TLB)
+		return 1;
+
+	/* Rejects synchronous vectors. */
+	return 0;
+}
+
+/* Builds the shared interrupt descriptor table. */
+static void
+create_idt(
+	void)
 {
 	int i;
 
-	/* すべてのエントリに未定義割り込みハンドラをセットする */
-	for(i=0; i<256; i++)
+	/* Installs the undefined-vector handler in every table entry. */
+	for (i = 0; i < 256; i++)
 		set_idt_entry(i, 0, _asm_undefined_int_handler);
 
-	/* 32個のフォールトハンドラをセットする */
-	for(i=0; i<32; i++)
+	/* Installs the processor-fault entry stubs. */
+	for (i = 0; i < 32; i++)
 		set_idt_entry(i, 0, _asm_fault_int_handler_tbl[i]);
 
-	/* 16個のIRQハンドラをセットする */
-	for(i=0; i<16; i++)
-		set_idt_entry(i+INT_IRQ_BASE, 0, _asm_irq_int_handler_tbl[i]);
+	/* Installs the legacy IRQ entry stubs. */
+	for (i = 0; i < 16; i++) {
+		set_idt_entry(
+			i + INT_IRQ_BASE,
+			0,
+			_asm_irq_int_handler_tbl[i]);
+	}
 
-	/* システムコールハンドラをセットする */
+	/* Installs the system-call and interprocessor entry stubs. */
 	set_idt_entry(INT_SYSCALL, 3, _asm_syscall_int_handler);
 	set_idt_entry(INT_CPU_NOTIFY, 0, _asm_cpu_notify_handler);
 	set_idt_entry(INT_CPU_PANIC, 0, _asm_cpu_panic_handler);
 	set_idt_entry(INT_CPU_TLB, 0, _asm_cpu_tlb_handler);
 }
 
-/* IDTのエントリをセットする */
-static void set_idt_entry(int index, int dpl, void *handler)
+/* Populates one interrupt descriptor table entry. */
+static void
+set_idt_entry(
+	int index,
+	int dpl,
+	void *handler)
 {
-	uint8_t	*entry;
+	uint8_t *entry;
 
-	/* エントリへのポインタを求める */
-	entry = (uint8_t *)(ADDR_IDT | SYS_START) + 8*index;
+	/* Locates the selected descriptor in the shared table. */
+	entry = (uint8_t *)(ADDR_IDT | SYS_START) + 8 * index;
 
-	/* 属性部をセットする */
-	entry[5] = 0x8e | (dpl << 5);	/* 割り込みゲート */
-//	entry[5] = 0x8f | (dpl << 5);	/* トラップゲート */
+	/* Configures an interrupt gate at the requested privilege level. */
+	entry[5] = 0x8e | (dpl << 5);
 
-	/* コピーカウントをゼロにする */
+	/* Clears the unused gate copy count. */
 	entry[4] = 0;
 
-	/* ハンドラアドレスをセットる */
-	*(uint16_t *)(&entry[0]) = (uint16_t)((uint32_t)handler & 0xffff);
-	*(uint16_t *)(&entry[6]) = (uint16_t)((uint32_t)handler >> 16);
-	*(uint16_t *)(&entry[2]) = SEG_SYS_CODE;
+	/* Encodes the handler offset and kernel code selector. */
+	*(uint16_t *)&entry[0] = (uint16_t)((uint32_t)handler & 0xffffU);
+	*(uint16_t *)&entry[6] = (uint16_t)((uint32_t)handler >> 16);
+	*(uint16_t *)&entry[2] = SEG_SYS_CODE;
 }
 
-/* IDTをロードする */
-static void load_idt()
+/* Installs the shared interrupt descriptor table. */
+static void
+load_idt(
+	void)
 {
-	uint8_t	idtr[6];
+	uint8_t idtr[6];
 
-	/* IDTRの構造を用意する */
-	*(uint16_t *)&idtr[0] = 8*256-1;				/* IDTのリミット値 */
-	*(uint32_t *)&idtr[2] = ADDR_IDT + SYS_START;	/* IDTのリニアアドレス */
+	/* Encodes the descriptor-table extent and linear address. */
+	*(uint16_t *)&idtr[0] = 8 * 256 - 1;
+	*(uint32_t *)&idtr[2] = ADDR_IDT + SYS_START;
 
-	/* LIDT命令でIDTをロードする */
+	/* Loads the prepared descriptor-table register. */
 	asm_lidt(idtr);
 }
 
-/* プロセッサフォールトハンドラ*/
-static void handle_fault(struct interrupt_frame *fp)
+/* Handles one processor fault frame. */
+static void
+handle_fault(
+	struct interrupt_frame *fp)
 {
-	int int_num = fp->int_num;
+	uint32_t fault_address;
+	int handled;
+	int int_num;
 
-	if (fp->cs & 3) {
-		int handled;
+	/* Captures the processor fault number. */
+	int_num = fp->int_num;
+
+	/* Delegates user faults while retaining kernel faults for diagnostics. */
+	if ((fp->cs & 3U) != 0U) {
+		/* Offers the active user frame before observing fault state. */
 		i386_task_enter_user_frame(fp);
-		handled = kernel_user_fault_handler((uint32_t)int_num, fp->cs,
-		    fp->eip, fp->error_code,
-		    int_num == INT_PAGEFAULT ? asm_get_cr2() : 0) ==
-		    HAL_TRAP_RET_SUCCESS;
-		if (handled) {
+
+		/* Captures CR2 only for the page-fault callback argument. */
+		fault_address = 0;
+		if (int_num == INT_PAGEFAULT)
+			fault_address = asm_get_cr2();
+
+		/* Delegates the captured fault to the generic handler. */
+		handled = kernel_user_fault_handler(
+			(uint32_t)int_num,
+			fp->cs,
+			fp->eip,
+			fp->error_code,
+			fault_address);
+
+		/* Completes a successfully handled user fault. */
+		if (handled == HAL_TRAP_RET_SUCCESS) {
 			kernel_user_return_handler();
 			i386_task_leave_user_frame();
 			return;
 		}
+
+		/* Rejects an unhandled user fault after releasing its frame. */
 		i386_task_leave_user_frame();
 		HAL_FATAL("user fault handler returned");
 	} else {
-		hal_printf("[INT] int 0x%02X handled!\n"
-		       "CS:  %04X  EIP: %08X\n"
-		       "DS:  %04X  ES:  %04X\n"
-		       "EAX: %08X  EBX: %08X  ECX: %08X  EDX: %08X\n"
-		       "ESI: %08X  EDI: %08X  EBP: %08X\n"
-		       "EFLAGS: %08X  ERRORCODE: %08X\n",
-		       int_num,
-		       fp->cs,
-		       fp->eip,
-		       fp->regs.ds,
-		       fp->regs.es,
-		       fp->regs.eax,
-		       fp->regs.ebx,
-		       fp->regs.ecx,
-		       fp->regs.edx,
-		       fp->regs.esi,
-		       fp->regs.edi,
-		       fp->regs.ebp,
-		       fp->eflags,
-		       fp->error_code);
+		/* Reports the complete kernel fault register frame. */
+		hal_printf(
+			"[INT] int 0x%02X handled!\n"
+			"CS:  %04X  EIP: %08X\n"
+			"DS:  %04X  ES:  %04X\n"
+			"EAX: %08X  EBX: %08X  ECX: %08X  EDX: %08X\n"
+			"ESI: %08X  EDI: %08X  EBP: %08X\n"
+			"EFLAGS: %08X  ERRORCODE: %08X\n",
+			int_num,
+			fp->cs,
+			fp->eip,
+			fp->regs.ds,
+			fp->regs.es,
+			fp->regs.eax,
+			fp->regs.ebx,
+			fp->regs.ecx,
+			fp->regs.edx,
+			fp->regs.esi,
+			fp->regs.edi,
+			fp->regs.ebp,
+			fp->eflags,
+			fp->error_code);
 	}
 
-	/* Halt. */
-	for(;;)
+	/* Halts permanently after an unrecoverable processor fault. */
+	for (;;)
 		asm_hlt();
 }

@@ -1,11 +1,17 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
- * Kernel HAL for i386: assembly routine declarations (locore.S).
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
  *
- * The board-support surface the HAL core relies on today is small and
- * declared where it lives: the console in <hal/hal.h>, the PIC in
- * pic.h, the interval timer in clock.h, and the memory windows through
- * i386_page_init() (page.c).  The wider hal.h contract grows onto
- * these pieces stage by stage.
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The i386 assembly and board-console contract.
+ *
+ * The assembly implementations live in locore.S.  The remaining board
+ * interfaces are declared by their owning private headers.
  */
 
 #ifndef SYS_HAL_I386_ASM_H

@@ -1,3 +1,16 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The i386 interrupt-frame and assembly-handler contract.
+ */
+
 #ifndef _SYS_ARCH_X86_INT_H_
 #define _SYS_ARCH_X86_INT_H_
 
@@ -55,10 +68,10 @@ void i386_int_load(void);
  */
 extern void *_asm_fault_int_handler_tbl[32];
 extern void *_asm_irq_int_handler_tbl[16];
-extern void *_asm_syscall_int_handler();
-extern void *_asm_cpu_notify_handler();
-extern void *_asm_cpu_panic_handler();
-extern void *_asm_cpu_tlb_handler();
-extern void *_asm_undefined_int_handler();
+extern void *_asm_syscall_int_handler(void);
+extern void *_asm_cpu_notify_handler(void);
+extern void *_asm_cpu_panic_handler(void);
+extern void *_asm_cpu_tlb_handler(void);
+extern void *_asm_undefined_int_handler(void);
 
 #endif

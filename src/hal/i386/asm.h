@@ -1,9 +1,17 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * i386 assembly helpers (implemented in locore.S) and the shared
- * constants.  defs.h carries the assembler-visible half.
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The i386 assembly-helper contract.
+ *
+ * The implementations live in locore.S and defs.h carries the
+ * assembler-visible constants.
  */
 
 #ifndef _SYS_ARCH_X86_ASM_H_
