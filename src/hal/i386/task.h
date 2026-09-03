@@ -1,9 +1,16 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * i386 CPU-context implementation. Private to the HAL.
+ * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * The private i386 task-context and signal-frame contract.
+ */
+
 #ifndef ZEDBSD_HAL_I386_TASK_H
 #define ZEDBSD_HAL_I386_TASK_H
 
@@ -50,8 +57,7 @@ struct task_info {
 void i386_task_init(void);
 void i386_task_init_secondary(hal_cpu_id_t, uintptr_t);
 void asm_task_entrypoint(void);
-void asm_task_dispatch(struct task_resume_frame **save,
-			struct task_resume_frame **load);
+void asm_task_dispatch(struct task_resume_frame **save, struct task_resume_frame **load);
 void i386_task_enter_user_frame(void *);
 void i386_task_leave_user_frame(void);
 

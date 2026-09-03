@@ -1,8 +1,14 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * i386 page-table implementation; private to the HAL.
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The private i386 page-table and address-space contract.
  */
 
 #ifndef ZEDBSD_HAL_I386_SPACE_H
