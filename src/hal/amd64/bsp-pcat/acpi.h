@@ -1,3 +1,16 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The amd64 ACPI topology and PCI ECAM discovery contract.
+ */
+
 #ifndef ZEDBSD_HAL_AMD64_ACPI_H
 #define ZEDBSD_HAL_AMD64_ACPI_H
 
@@ -5,7 +18,7 @@
 #include "../defs.h"
 
 #define AMD64_IOAPIC_MAX 4U
-#define AMD64_ECAM_MAX 8U
+#define AMD64_ECAM_MAX   8U
 
 struct amd64_acpi_cpu {
 	uint32_t apic_id;
@@ -42,13 +55,32 @@ struct amd64_acpi_info {
 	struct amd64_acpi_ecam ecam[AMD64_ECAM_MAX];
 };
 
-int amd64_acpi_discover(struct amd64_acpi_info *result,
+int
+amd64_acpi_discover(
+	struct amd64_acpi_info *result,
 	hal_physaddr_t rsdp_address);
-int amd64_acpi_parse_mcfg(const void *table, size_t available,
-	struct amd64_acpi_ecam *regions, unsigned *region_count);
-int amd64_acpi_ecam_address(uint16_t segment, uint8_t bus, uint8_t device,
-	uint8_t function, paddr_t *result);
-int amd64_acpi_ecam_pointer(uint16_t segment, uint8_t bus, uint8_t device,
-	uint8_t function, volatile uint8_t **result);
+
+int
+amd64_acpi_parse_mcfg(
+	const void *table,
+	size_t available,
+	struct amd64_acpi_ecam *regions,
+	unsigned *region_count);
+
+int
+amd64_acpi_ecam_address(
+	uint16_t segment,
+	uint8_t bus,
+	uint8_t device,
+	uint8_t function,
+	paddr_t *result);
+
+int
+amd64_acpi_ecam_pointer(
+	uint16_t segment,
+	uint8_t bus,
+	uint8_t device,
+	uint8_t function,
+	volatile uint8_t **result);
 
 #endif
