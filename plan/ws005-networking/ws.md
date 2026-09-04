@@ -1,6 +1,6 @@
 # WS005: networking and WLAN
 
-Last updated: 2026-09-01
+Last updated: 2026-09-04
 
 WSID: `ws005`
 
@@ -193,9 +193,21 @@ wifi <interface> search start
 wifi <interface> search stop
 wifi <interface> list
 wifi <interface> status
+wifi <interface> up
+wifi <interface> down
 wifi <interface> connect <SSID> <passphrase>
 wifi <interface> disconnect
 ```
+
+WS004 p043 extends every primitive form with the optional global placement
+`wifi --quiet <interface> ...`, makes quiet operation produce no stdout or
+stderr, and makes direct connect automatically scan for up to one shared
+30-second connection deadline. A missing supported BSS (`ENOENT`) starts the
+scan, whereas transient driver ownership (`EBUSY`) waits without discarding a
+completed snapshot or starting a replacement scan. These are physical
+RTL8822BU corrections in that existing hardware WS, not a separate WS005
+Phase. The primitive remains L2-only and does not gain profile persistence or
+DHCP.
 
 It performs no DHCP or persistence. P004 first supplies only human output.
 P006 later adds the bounded machine-readable mode used by `networkd` and the

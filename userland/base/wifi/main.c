@@ -37,6 +37,8 @@
 
 enum wifi_operation {
 	WIFI_OPERATION_NONE,
+	WIFI_OPERATION_UP,
+	WIFI_OPERATION_DOWN,
 	WIFI_OPERATION_SEARCH_START,
 	WIFI_OPERATION_SEARCH_STOP,
 	WIFI_OPERATION_LIST,
@@ -44,6 +46,8 @@ enum wifi_operation {
 	WIFI_OPERATION_CONNECT,
 	WIFI_OPERATION_DISCONNECT
 };
+
+static int wifi_quiet;
 
 static void clear_bytes(void *buffer, size_t size);
 static void clear_argument(char *argument);
@@ -55,14 +59,21 @@ static const char *wlan_state_name(uint32_t state);
 static int escape_bytes(const uint8_t *input, size_t length, char *output, size_t capacity);
 static void security_text(uint32_t security, char *output, size_t capacity);
 static int search_command(int descriptor, const char *interface, size_t interface_length, uint32_t action);
+static int interface_command(int descriptor, const char *interface, size_t interface_length, int bring_up);
 static int list_command(int descriptor, const char *interface, size_t interface_length);
+static int scan_status_request(int descriptor, const char *interface, size_t interface_length, struct wlan_scan_status_request *scan);
 static int status_request(int descriptor, const char *interface, size_t interface_length, struct wlan_status_request *status);
 static int status_command(int descriptor, const char *interface, size_t interface_length);
 static int connect_command(int descriptor, const char *interface, size_t interface_length, const char *ssid, size_t ssid_length, char *passphrase, size_t passphrase_length);
 static int disconnect_command(int descriptor, const char *interface, size_t interface_length);
 static int monotonic_ticks(uint64_t *ticks, uint64_t *frequency);
 static int wait_slice(uint64_t now, uint64_t deadline, uint64_t frequency);
-static int wait_for_connection(int descriptor, const char *interface, size_t interface_length, uint64_t generation, struct wlan_status_request *result);
+static int wait_for_connection(int descriptor, const char *interface, size_t interface_length, uint64_t generation, uint64_t deadline, uint64_t frequency, struct wlan_status_request *result);
+static int wait_for_scan(int descriptor, const char *interface, size_t interface_length, uint64_t deadline, uint64_t frequency);
+static int cancel_scan(int descriptor, const char *interface, size_t interface_length);
+static int cancel_connection(int descriptor, const char *interface, size_t interface_length);
+static void print_failure_status(int descriptor, const char *interface, size_t interface_length);
+static int print_connection_progress(uint32_t state);
 static int print_status(const struct wlan_status_request *status);
 static int parse_operation(int argc, char **argv, enum wifi_operation *operation);
 static const char *operation_name(enum wifi_operation operation);
@@ -84,6 +95,13 @@ main(int argc, char **argv)
 	int error = 0;
 	int status = 1;
 	int syntax_error;
+
+	wifi_quiet = 0;
+	if (argc >= 2 && strcmp(argv[1], "--quiet") == 0) {
+		wifi_quiet = 1;
+		argc--;
+		argv++;
+	}
 
 	/*
 	 * Remember a direct-command secret early so every ordinary
@@ -107,7 +125,8 @@ main(int argc, char **argv)
 		if (passphrase != NULL)
 			clear_argument(passphrase);
 
-		fprintf(stderr,
+		if (!wifi_quiet)
+			fprintf(stderr,
 			"wifi: interface must contain 1 to %u bytes\n",
 			IFNAMSIZ - 1U);
 		return 1;
@@ -118,7 +137,8 @@ main(int argc, char **argv)
 		if (passphrase != NULL)
 			clear_argument(passphrase);
 
-		fprintf(stderr, "wifi: invalid interface\n");
+		if (!wifi_quiet)
+			fprintf(stderr, "wifi: invalid interface\n");
 
 		return 1;
 	}
@@ -129,7 +149,8 @@ main(int argc, char **argv)
 		ssid_length = strnlen(argv[3], WLAN_SSID_MAX + 1U);
 		if (ssid_length == 0U || ssid_length > WLAN_SSID_MAX) {
 			clear_argument(passphrase);
-			fprintf(stderr,
+			if (!wifi_quiet)
+				fprintf(stderr,
 				"wifi: SSID must contain 1 to %u bytes\n",
 				WLAN_SSID_MAX);
 			return 1;
@@ -138,7 +159,8 @@ main(int argc, char **argv)
 		if (passphrase_length < WLAN_PASSPHRASE_MIN ||
 		    passphrase_length > WLAN_PASSPHRASE_MAX) {
 			clear_argument(passphrase);
-			fprintf(stderr,
+			if (!wifi_quiet)
+				fprintf(stderr,
 				"wifi: passphrase must contain %u to %u bytes\n",
 				WLAN_PASSPHRASE_MIN,
 				WLAN_PASSPHRASE_MAX);
@@ -149,7 +171,8 @@ main(int argc, char **argv)
 
 			if (byte < 0x20U || byte > 0x7eU) {
 				clear_argument(passphrase);
-				fprintf(stderr, "wifi: passphrase must be printable ASCII\n");
+				if (!wifi_quiet)
+					fprintf(stderr, "wifi: passphrase must be printable ASCII\n");
 				return 1;
 			}
 		}
@@ -162,13 +185,20 @@ main(int argc, char **argv)
 		if (passphrase != NULL)
 			clear_argument(passphrase);
 
-		fprintf(stderr,
+		if (!wifi_quiet)
+			fprintf(stderr,
 			"wifi: %s: socket: %s (%d)\n",
 			escaped_interface, strerror(error), error);
 		return 1;
 	}
 
 	switch (operation) {
+	case WIFI_OPERATION_UP:
+		error = interface_command(descriptor, argv[1], interface_length, 1);
+		break;
+	case WIFI_OPERATION_DOWN:
+		error = interface_command(descriptor, argv[1], interface_length, 0);
+		break;
 	case WIFI_OPERATION_SEARCH_START:
 		error = search_command(descriptor,
 				       argv[1],
@@ -218,13 +248,15 @@ main(int argc, char **argv)
 	if (close(descriptor) != 0 && error == 0)
 		error = errno != 0 ? errno : EIO;
 
-	if (error == 0 && (ferror(stdout) || fflush(stdout) != 0))
+	if (!wifi_quiet && error == 0 &&
+	    (ferror(stdout) || fflush(stdout) != 0))
 		error = errno != 0 ? errno : EIO;
 
 	if (error == 0) {
 		status = 0;
 	} else {
-		fprintf(stderr,
+		if (!wifi_quiet)
+			fprintf(stderr,
 			"wifi: %s: %s: %s (%d)\n",
 			escaped_interface,
 			operation_name(operation),
@@ -258,13 +290,17 @@ clear_argument(char *argument)
 static int
 usage(void)
 {
+	if (wifi_quiet)
+		return 1;
 	if (fputs("usage:\n"
-	    "  wifi INTERFACE search start\n"
-	    "  wifi INTERFACE search stop\n"
-	    "  wifi INTERFACE list\n"
-	    "  wifi INTERFACE status\n"
-	    "  wifi INTERFACE connect SSID PASSPHRASE\n"
-	    "  wifi INTERFACE disconnect\n", stderr) == EOF)
+	    "  wifi [--quiet] INTERFACE up\n"
+	    "  wifi [--quiet] INTERFACE down\n"
+	    "  wifi [--quiet] INTERFACE search start\n"
+	    "  wifi [--quiet] INTERFACE search stop\n"
+	    "  wifi [--quiet] INTERFACE list\n"
+	    "  wifi [--quiet] INTERFACE status\n"
+	    "  wifi [--quiet] INTERFACE connect SSID PASSPHRASE\n"
+	    "  wifi [--quiet] INTERFACE disconnect\n", stderr) == EOF)
 		return 1;
 	return 1;
 }
@@ -458,13 +494,57 @@ search_command(int descriptor, const char *interface,
 	if (error == 0 && action == WLAN_SCAN_STOP &&
 	    request.state == WLAN_SCAN_RUNNING)
 		error = EIO;
-	if (error == 0 && printf("search state=%s generation=%llu error=%d\n",
+	if (!wifi_quiet && error == 0 &&
+	    printf("search state=%s generation=%llu error=%d\n",
 	    scan_state_name(request.state),
 	    (unsigned long long)request.generation,
 	    request.terminal_error) < 0)
 		error = EIO;
 	clear_bytes(&request, sizeof(request));
 	return error;
+}
+
+/* Changes only the existing generic administrative interface state. */
+static int
+interface_command(int descriptor, const char *interface,
+	size_t interface_length, int bring_up)
+{
+	struct ifreq request;
+	int error;
+
+	if (interface == NULL || interface_length == 0U ||
+	    interface_length >= sizeof(request.ifr_name))
+		return EINVAL;
+	memset(&request, 0, sizeof(request));
+	memcpy(request.ifr_name, interface, interface_length);
+	error = ioctl_error(descriptor, SIOCGIFFLAGS, &request);
+	if (error != 0)
+		return error;
+	if (bring_up)
+		request.ifr_flags |= IFF_UP;
+	else
+		request.ifr_flags &= (int)~IFF_UP;
+	error = ioctl_error(descriptor, SIOCSIFFLAGS, &request);
+	if (!wifi_quiet && error == 0 &&
+	    printf("interface %s administrative=%s\n", interface,
+		bring_up ? "up" : "down") < 0)
+		error = EIO;
+	memset(&request, 0, sizeof(request));
+	return error;
+}
+
+/* Obtains one public scan-operation and immutable-snapshot record. */
+static int
+scan_status_request(int descriptor, const char *interface,
+	size_t interface_length, struct wlan_scan_status_request *scan)
+{
+	int error;
+
+	error = request_header(scan, sizeof(*scan), interface,
+	    interface_length);
+	if (error != 0)
+		return error;
+	return ioctl_error(descriptor, SIOCGWLANSCAN, scan);
 }
 
 /* Prints one immutable, bounded scan-cache snapshot. */
@@ -480,17 +560,15 @@ list_command(int descriptor, const char *interface,
 	int error;
 	int terminal_error = 0;
 
-	error = request_header(&scan, sizeof(scan), interface,
-	    interface_length);
-	if (error != 0)
-		return error;
-	error = ioctl_error(descriptor, SIOCGWLANSCAN, &scan);
+	error = scan_status_request(descriptor, interface, interface_length,
+	    &scan);
 	if (error != 0)
 		return error;
 	if (scan.result_count > WLAN_BSS_MAX ||
 	    (scan.result_count != 0U && scan.generation == 0U))
 		return EIO;
-	if (printf("scan state=%s generation=%llu results=%u truncated=%s "
+	if (!wifi_quiet &&
+	    printf("scan state=%s generation=%llu results=%u truncated=%s "
 	    "error=%d\n", scan_state_name(scan.state),
 	    (unsigned long long)scan.generation, scan.result_count,
 	    scan.truncated != 0U ? "yes" : "no", scan.terminal_error) < 0)
@@ -515,7 +593,8 @@ list_command(int descriptor, const char *interface,
 		}
 		security_text(request.bss.security, security,
 		    sizeof(security));
-		if (printf("%u ssid=%s bssid=%02x:%02x:%02x:%02x:%02x:%02x "
+		if (!wifi_quiet &&
+		    printf("%u ssid=%s bssid=%02x:%02x:%02x:%02x:%02x:%02x "
 		    "channel=%u frequency=%u rssi=%d age=%u "
 		    "security=%s flags=0x%08x\n", index, escaped,
 		    request.bss.bssid[0], request.bss.bssid[1],
@@ -564,46 +643,221 @@ status_command(int descriptor, const char *interface,
 	return error;
 }
 
-/* Submits one credential and waits only for the kernel operation deadline. */
+/* Scans as needed, then connects under one command-wide deadline. */
 static int
 connect_command(int descriptor, const char *interface,
 	size_t interface_length, const char *ssid, size_t ssid_length,
 	char *passphrase, size_t passphrase_length)
 {
 	struct wlan_connect_request request;
+	struct wlan_scan_status_request scan;
 	struct wlan_status_request status;
-	uint64_t generation;
+	uint64_t deadline;
+	uint64_t frequency;
+	uint64_t generation = 0U;
+	uint64_t now;
+	int admitted = 0;
+	int busy_announced = 0;
+	int start_announced = 0;
+	int error;
+
+	memset(&request, 0, sizeof(request));
+	memset(&scan, 0, sizeof(scan));
+	memset(&status, 0, sizeof(status));
+
+	error = monotonic_ticks(&now, &frequency);
+	if (error != 0 || frequency == 0U ||
+	    now > UINT64_MAX - WIFI_CONNECT_SECONDS * frequency) {
+		error = error != 0 ? error : EOVERFLOW;
+		goto out_secret;
+	}
+	deadline = now + WIFI_CONNECT_SECONDS * frequency;
+	for (;;) {
+		if (!wifi_quiet && !start_announced) {
+			if (fputs("Selecting a supported BSS and preparing the radio...\n",
+			    stdout) == EOF || fflush(stdout) != 0) {
+				error = EIO;
+				goto out_secret;
+			}
+			start_announced = 1;
+		}
+		error = request_header(&request, sizeof(request), interface,
+		    interface_length);
+		if (error != 0)
+			goto out_secret;
+		memcpy(request.ssid, ssid, ssid_length);
+		memcpy(request.passphrase, passphrase, passphrase_length);
+		request.ssid_length = (uint32_t)ssid_length;
+		request.passphrase_length = (uint32_t)passphrase_length;
+		error = ioctl_error(descriptor, SIOCSWLANCONNECT, &request);
+		generation = request.generation;
+		clear_bytes(&request, sizeof(request));
+		if (error == 0) {
+			admitted = 1;
+			break;
+		}
+		if (error != ENOENT && error != EBUSY) {
+			/* A new generation can have partially prepared hardware even
+			 * when the initiating ioctl reports an immediate failure. */
+			admitted = generation != 0U;
+			if (admitted)
+				goto out_cancel_connection;
+			goto out_secret;
+		}
+		if (error == EBUSY) {
+			/* EBUSY is a transient ownership barrier, not evidence that the
+			 * BSS cache is missing.  Starting a new scan here used to consume
+			 * the shared 30-second deadline and discard a usable snapshot. */
+			if (generation != 0U)
+				goto out_secret;
+			error = scan_status_request(descriptor, interface,
+			    interface_length, &scan);
+			if (error != 0)
+				goto out_secret;
+			if (scan.state == WLAN_SCAN_RUNNING) {
+				clear_bytes(&scan, sizeof(scan));
+				error = wait_for_scan(descriptor, interface,
+				    interface_length, deadline, frequency);
+				if (error != 0)
+					goto out_cancel_scan;
+			} else {
+				clear_bytes(&scan, sizeof(scan));
+				if (!wifi_quiet && !busy_announced) {
+					if (fputs("Waiting for the radio to become ready...\n",
+					    stdout) == EOF || fflush(stdout) != 0) {
+						error = EIO;
+						goto out_secret;
+					}
+					busy_announced = 1;
+				}
+				error = monotonic_ticks(&now, &frequency);
+				if (error != 0 || now >= deadline) {
+					error = error != 0 ? error : ETIMEDOUT;
+					goto out_secret;
+				}
+				error = wait_slice(now, deadline, frequency);
+				if (error != 0)
+					goto out_secret;
+			}
+			continue;
+		}
+		error = scan_status_request(descriptor, interface,
+		    interface_length, &scan);
+		if (error != 0)
+			goto out_secret;
+		if (scan.state != WLAN_SCAN_RUNNING) {
+			struct wlan_scan_request start;
+
+			clear_bytes(&scan, sizeof(scan));
+			if (request_header(&start, sizeof(start), interface,
+			    interface_length) != 0) {
+				error = EINVAL;
+				goto out_secret;
+			}
+			start.action = WLAN_SCAN_START;
+			error = ioctl_error(descriptor, SIOCSWLANSCAN, &start);
+			clear_bytes(&start, sizeof(start));
+			if (error != 0)
+				goto out_secret;
+		} else {
+			clear_bytes(&scan, sizeof(scan));
+		}
+		error = wait_for_scan(descriptor, interface, interface_length,
+		    deadline, frequency);
+		if (error != 0)
+			goto out_cancel_scan;
+		if (!wifi_quiet &&
+		    printf("Selecting a supported BSS...\n") < 0) {
+			error = EIO;
+			goto out_secret;
+		}
+		error = monotonic_ticks(&now, &frequency);
+		if (error != 0 || now >= deadline) {
+			error = error != 0 ? error : ETIMEDOUT;
+			goto out_secret;
+		}
+	}
+	/* argv need not retain the credential after the kernel admitted the
+	 * bounded connection attempt. */
+	clear_argument(passphrase);
+	if (generation == 0U) {
+		error = EIO;
+		goto out_cancel_connection;
+	}
+	error = wait_for_connection(descriptor, interface, interface_length,
+	    generation, deadline, frequency, &status);
+	if (!wifi_quiet && error == 0 &&
+	    printf("Connected: controlled port authorized "
+	    "(generation=%llu).\n", (unsigned long long)generation) < 0)
+		error = EIO;
+	clear_bytes(&status, sizeof(status));
+	if (error != 0)
+		goto out_cancel_connection;
+	return 0;
+
+out_cancel_scan:
+	print_failure_status(descriptor, interface, interface_length);
+	(void)cancel_scan(descriptor, interface, interface_length);
+out_secret:
+	clear_argument(passphrase);
+	clear_bytes(&request, sizeof(request));
+	return error;
+
+out_cancel_connection:
+	print_failure_status(descriptor, interface, interface_length);
+	if (admitted)
+		(void)cancel_connection(descriptor, interface, interface_length);
+	clear_argument(passphrase);
+	clear_bytes(&request, sizeof(request));
+	return error;
+}
+
+/* Names the public failing stage before a connect error is reported.  The
+ * summary is best effort and never masks or replaces the original error. */
+static void
+print_failure_status(int descriptor, const char *interface,
+	size_t interface_length)
+{
+	struct wlan_status_request status;
+
+	if (wifi_quiet)
+		return;
+	if (status_request(descriptor, interface, interface_length,
+	    &status) == 0)
+		(void)print_status(&status);
+	clear_bytes(&status, sizeof(status));
+}
+
+/* Best-effort cancellation used only while retiring this command's scan. */
+static int
+cancel_scan(int descriptor, const char *interface, size_t interface_length)
+{
+	struct wlan_scan_request request;
 	int error;
 
 	error = request_header(&request, sizeof(request), interface,
 	    interface_length);
 	if (error != 0)
-		goto out_secret;
-	memcpy(request.ssid, ssid, ssid_length);
-	memcpy(request.passphrase, passphrase, passphrase_length);
-	request.ssid_length = (uint32_t)ssid_length;
-	request.passphrase_length = (uint32_t)passphrase_length;
-	/* argv need not retain the credential while the kernel owns the bounded
-	 * connection attempt. */
-	clear_argument(passphrase);
-	error = ioctl_error(descriptor, SIOCSWLANCONNECT, &request);
-	generation = request.generation;
+		return error;
+	request.action = WLAN_SCAN_STOP;
+	error = ioctl_error(descriptor, SIOCSWLANSCAN, &request);
 	clear_bytes(&request, sizeof(request));
+	return error;
+}
+
+/* Best-effort cancellation used only after this command admitted connect. */
+static int
+cancel_connection(int descriptor, const char *interface,
+	size_t interface_length)
+{
+	struct wlan_disconnect_request request;
+	int error;
+
+	error = request_header(&request, sizeof(request), interface,
+	    interface_length);
 	if (error != 0)
 		return error;
-	if (generation == 0U)
-		return EIO;
-	error = wait_for_connection(descriptor, interface, interface_length,
-	    generation, &status);
-	if (error == 0 && printf("connected state=%s generation=%llu "
-	    "authorized=yes\n", wlan_state_name(status.state),
-	    (unsigned long long)generation) < 0)
-		error = EIO;
-	clear_bytes(&status, sizeof(status));
-	return error;
-
-out_secret:
-	clear_argument(passphrase);
+	error = ioctl_error(descriptor, SIOCSWLANDISCONNECT, &request);
 	clear_bytes(&request, sizeof(request));
 	return error;
 }
@@ -625,7 +879,8 @@ disconnect_command(int descriptor, const char *interface,
 	    request.state != WLAN_STATE_DOWN)
 		error = request.terminal_error != 0 ?
 		    request.terminal_error : EIO;
-	if (error == 0 && printf("disconnected state=%s generation=%llu\n",
+	if (!wifi_quiet && error == 0 &&
+	    printf("disconnected state=%s generation=%llu\n",
 	    wlan_state_name(request.state),
 	    (unsigned long long)request.generation) < 0)
 		error = EIO;
@@ -685,22 +940,15 @@ wait_slice(uint64_t now, uint64_t deadline, uint64_t frequency)
 /* Polls the public state until authorized carrier or a bounded failure. */
 static int
 wait_for_connection(int descriptor, const char *interface,
-	size_t interface_length, uint64_t generation,
-	struct wlan_status_request *result)
+	size_t interface_length, uint64_t generation, uint64_t deadline,
+	uint64_t frequency, struct wlan_status_request *result)
 {
-	uint64_t start = 0U;
-	uint64_t frequency = 0U;
-	uint64_t local_deadline = 0U;
+	uint32_t displayed_state = UINT32_MAX;
+	uint64_t effective_deadline;
 	uint64_t now;
-	uint64_t deadline;
 	unsigned polls;
-	int have_clock;
 	int error;
 
-	have_clock = monotonic_ticks(&start, &frequency) == 0 &&
-	    start <= UINT64_MAX - WIFI_CONNECT_SECONDS * frequency;
-	if (have_clock)
-		local_deadline = start + WIFI_CONNECT_SECONDS * frequency;
 	for (polls = 0U; polls <= WIFI_FALLBACK_POLLS; polls++) {
 		error = status_request(descriptor, interface, interface_length,
 		    result);
@@ -715,6 +963,12 @@ wait_for_connection(int descriptor, const char *interface,
 		}
 		if (result->terminal_error != 0)
 			return result->terminal_error;
+		if (result->state != displayed_state) {
+			error = print_connection_progress(result->state);
+			if (error != 0)
+				return error;
+			displayed_state = result->state;
+		}
 		switch (result->state) {
 		case WLAN_STATE_AUTHENTICATING:
 		case WLAN_STATE_ASSOCIATING:
@@ -734,27 +988,120 @@ wait_for_connection(int descriptor, const char *interface,
 		}
 		if (polls == WIFI_FALLBACK_POLLS)
 			return ETIMEDOUT;
-		if (!have_clock) {
-			struct timespec delay = { 0, WIFI_POLL_NANOSECONDS };
-
-			if (nanosleep(&delay, NULL) != 0 && errno != EINTR)
-				return errno != 0 ? errno : EIO;
-			continue;
-		}
 		error = monotonic_ticks(&now, &frequency);
 		if (error != 0)
 			return error;
-		deadline = local_deadline;
+		effective_deadline = deadline;
 		if (result->deadline_ticks != 0U &&
-		    result->deadline_ticks < deadline)
-			deadline = result->deadline_ticks;
-		if (now >= deadline)
+		    result->deadline_ticks < effective_deadline)
+			effective_deadline = result->deadline_ticks;
+		if (now >= effective_deadline)
 			return ETIMEDOUT;
-		error = wait_slice(now, deadline, frequency);
+		error = wait_slice(now, effective_deadline, frequency);
 		if (error != 0)
 			return error;
 	}
 	return ETIMEDOUT;
+}
+
+/* Waits for one scan snapshot without extending the command-wide deadline. */
+static int
+wait_for_scan(int descriptor, const char *interface,
+	size_t interface_length, uint64_t deadline, uint64_t frequency)
+{
+	struct wlan_scan_status_request scan;
+	uint64_t displayed_seconds = UINT64_MAX;
+	uint64_t remaining;
+	uint64_t now;
+	unsigned polls;
+	/* An interactive terminal refreshes one countdown line in place; a
+	 * pipe or log receives one complete line per refresh instead. */
+	int overwrite = !wifi_quiet && isatty(STDOUT_FILENO) == 1;
+	int line_open = 0;
+	int error;
+
+	memset(&scan, 0, sizeof(scan));
+	for (polls = 0U; polls <= WIFI_FALLBACK_POLLS; polls++) {
+		error = scan_status_request(descriptor, interface,
+		    interface_length, &scan);
+		if (error != 0)
+			goto out;
+		if (scan.state == WLAN_SCAN_COMPLETE) {
+			error = 0;
+			goto out;
+		}
+		if (scan.state == WLAN_SCAN_FAILED) {
+			error = scan.terminal_error != 0 ?
+			    scan.terminal_error : EIO;
+			goto out;
+		}
+		if (scan.state == WLAN_SCAN_CANCELLED ||
+		    scan.state == WLAN_SCAN_IDLE) {
+			error = ECANCELED;
+			goto out;
+		}
+		if (scan.state != WLAN_SCAN_RUNNING) {
+			error = EIO;
+			goto out;
+		}
+		error = monotonic_ticks(&now, &frequency);
+		if (error != 0)
+			goto out;
+		if (now >= deadline || polls == WIFI_FALLBACK_POLLS) {
+			error = ETIMEDOUT;
+			goto out;
+		}
+		remaining = (deadline - now + frequency - 1U) / frequency;
+		if (!wifi_quiet && remaining != displayed_seconds) {
+			/* The two-digit field keeps a refreshed line the same
+			 * width, so no stale tail survives the overwrite. */
+			if (printf(overwrite ?
+			    "\rScanning... (%2llu seconds remaining)" :
+			    "Scanning... (%2llu seconds remaining)\n",
+			    (unsigned long long)remaining) < 0 ||
+			    (overwrite && fflush(stdout) != 0)) {
+				error = EIO;
+				goto out;
+			}
+			line_open = overwrite;
+			displayed_seconds = remaining;
+		}
+		error = wait_slice(now, deadline, frequency);
+		if (error != 0)
+			goto out;
+		clear_bytes(&scan, sizeof(scan));
+	}
+	error = ETIMEDOUT;
+out:
+	/* Whatever follows starts on its own line, even after a failure. */
+	if (line_open && putchar('\n') == EOF && error == 0)
+		error = EIO;
+	clear_bytes(&scan, sizeof(scan));
+	return error;
+}
+
+/* Announces meaningful state transitions without exposing credentials. */
+static int
+print_connection_progress(uint32_t state)
+{
+	const char *message;
+
+	if (wifi_quiet)
+		return 0;
+	switch (state) {
+	case WLAN_STATE_AUTHENTICATING:
+		message = "Preparing the radio and starting 802.11 authentication...\n";
+		break;
+	case WLAN_STATE_ASSOCIATING:
+		message = "Associating with the access point...\n";
+		break;
+	case WLAN_STATE_FOUR_WAY:
+		message = "Completing the WPA2 four-way handshake...\n";
+		break;
+	default:
+		return 0;
+	}
+	return fputs(message, stdout) == EOF ? EIO : 0;
 }
 
 /* Prints a bounded public status record. */
@@ -763,6 +1110,8 @@ print_status(const struct wlan_status_request *status)
 {
 	char security[WIFI_SECURITY_TEXT_SIZE];
 
+	if (wifi_quiet)
+		return 0;
 	security_text(status->security, security, sizeof(security));
 	if (printf("state=%s scan=%s administrative=%s authenticated=%s "
 	    "associated=%s key=%s authorized=%s retries=%u error=%d",
@@ -791,10 +1140,18 @@ print_status(const struct wlan_status_request *status)
 	return 0;
 }
 
-/* Accepts exactly the six p004 human forms. */
+/* Accepts the direct human forms after the optional global --quiet. */
 static int
 parse_operation(int argc, char **argv, enum wifi_operation *operation)
 {
+	if (argc == 3 && strcmp(argv[2], "up") == 0) {
+		*operation = WIFI_OPERATION_UP;
+		return 0;
+	}
+	if (argc == 3 && strcmp(argv[2], "down") == 0) {
+		*operation = WIFI_OPERATION_DOWN;
+		return 0;
+	}
 	if (argc == 4 && strcmp(argv[2], "search") == 0) {
 		if (strcmp(argv[3], "start") == 0)
 			*operation = WIFI_OPERATION_SEARCH_START;
@@ -828,6 +1185,10 @@ static const char *
 operation_name(enum wifi_operation operation)
 {
 	switch (operation) {
+	case WIFI_OPERATION_UP:
+		return "up";
+	case WIFI_OPERATION_DOWN:
+		return "down";
 	case WIFI_OPERATION_SEARCH_START:
 		return "search start";
 	case WIFI_OPERATION_SEARCH_STOP:

@@ -10,7 +10,7 @@ Parent: [WS005](../ws.md)
 | NET-T21 | wifi.conf profile | `net` selects `/etc/wifi.conf` or its euid account's `~/.wifi.conf` without trusting `HOME`; permission, parsing, escaping, atomic rewrite, corruption recovery, maxima, wiping, and secret-redaction cases pass, and networkd never opens a profile |
 | NET-T22 | AF_UNIX admission/authentication | The p003 peer snapshot and lifecycle regressions pass; `root:network` GID 69 mode `0660`, readiness ordering, unauthorized/admitted peers, root/all versus nonroot/read-only-plus-WLAN authorization, fd passing, and peer close are covered |
 | NET-T23 | Primitive wifi child contract | `WIFI1` scan/status/list/connect/disconnect records, secret fd 4, 32768-byte/64-record stdout, 512-byte stderr, blocked output, 15/30-second stage deadline, cancel, crash, one-second termination grace, kill/reap, USB removal, malformed records, and no-secret-echo cases pass |
-| NET-T24 | Minimum direct wifi command | One production-ioctl fake sequence passes human direct-root search start, completed list, status, connect to authorized carrier, disconnect, and search stop; basic input bounds and userspace secret erasure pass without machine mode, DHCP, or persistence |
+| NET-T24 | Direct wifi command and bounded connect UX | Production-ioctl fixtures pass the original direct-root sequence plus scan-before-connect, one command-wide 30-second scan timeout, ordered nonsecret connection progress, idempotent administrative up/down, global quiet output suppression, bounds, and userspace secret erasure without DHCP or persistence |
 | NET-T30 | WLAN orchestration fixture | `net` to networkd to production-contract `ifconfig`/`wifi`/`dhcpc` child doubles passes search start/stop, list, local set-key, up/down/connect, file-order auto selection with four attempts, 10-second DHCP/90-second total, cancellation, unchanged pre-mutation failure, fixed admin-up/disconnected/search-stopped/no-owned-L3 fail-clean, degraded retirement, and same-network-only bounded reconnect without claiming hardware |
 | NET-T31 | Archer identity subrecord | Within NET-T32, not as another physical gate, the Japan-market unit labelled `Archer T3U Nano` with no printed revision matches the authoritative p026 `2357:012e`/RTL8822BU `bcdDevice`/interface/endpoint profile and pinned firmware; RTL8828BU, another unit, or another descriptor profile is not inferred |
 | NET-T32 | Single combined provisional checkpoint | Only after every automatic gate passes, one candidate-artifact action produces p028 identity/firmware/scan, p029 WPA2/CCMP L2, p030 reconnect/lifecycle, and p008 DHCP/orchestration subrecords through attach, search/list/stop, secure up, DHCP, bounded reconnect/transfer, down, removal, and recovery without retry or code/config change |
@@ -91,4 +91,10 @@ It includes the production `wifi` command with deterministic socket, ioctl,
 clock, sleep, and output doubles.  The fixture proves the exact six-command
 normal sequence and public WLAN request records, basic empty/oversize rejection
 before ioctl, and mutable argv/request secret clearing without relinking the
-lower WLAN, WPA, or driver stack.
+lower WLAN, WPA, or driver stack.  A dedicated terminal-timeout scenario
+proves that a failed connect prints the redacted public stage, retry, and
+error summary before its terminal message and still cancels the admitted
+attempt without leaking the credential.  A terminal/pipe pair of
+scenarios proves that the scan countdown refreshes one line in place with
+`\r` only on an interactive terminal and emits one line per refresh
+otherwise.

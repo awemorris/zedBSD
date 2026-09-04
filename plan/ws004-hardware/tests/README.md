@@ -303,6 +303,7 @@ order. It stops at the first failure and does not invoke `make check`.
 | `plan/ws004-hardware/tests/run-wlan-ccmp-reference-test.sh` | Independent RFC 3610 AES-CCM vector and production 802.11 CCMP nonce/AAD/PN/Key-ID/MIC cross-check |
 | `plan/ws004-hardware/tests/run-wlan-common-core-test.sh` | Public ABI, scan/connect state, common WPA2/L2 integration, controlled-port/carrier ordering, cancellation, detach, and secret erasure |
 | `plan/ws004-hardware/tests/run-usb-rtl8822bu-driver-test.sh` | RTL8822BU USB management/EAPOL/data descriptors, RX security classification, CAM generations, TX reports, errors, and teardown |
+| `plan/ws004-hardware/tests/run-hal-printf-format-host-test.sh` | Production amd64 `hal_printf` conversions through a captured console, including the `l`/`ll` length modifiers behind the q070 RTL8822BU connect diagnostics |
 
 Ethernet/LLC/SNAP and test-reference CCMP cases cover valid traffic plus wrong
 BSSID/direction/key generation/key ID/PN/MIC/length, preauthorization filtering,

@@ -583,13 +583,14 @@ station_wpa_entropy_fill(void *context, void *buffer, size_t length)
 
 static int
 station_wpa_radio_start(void *context, uint64_t generation,
-	const uint8_t bssid[6], uint32_t channel, uint64_t deadline)
+	const uint8_t bssid[6], uint32_t channel, uint64_t deadline,
+	uint64_t *completion_ticks)
 {
 	struct wlan_station *station = context;
 	unsigned long enabled;
 	int error;
 
-	if (station == NULL || bssid == NULL ||
+	if (station == NULL || bssid == NULL || completion_ticks == NULL ||
 	    station->ops->connect_start == NULL)
 		return EOPNOTSUPP;
 	enabled = spin_lock_irqsave(&station->lock);
@@ -617,6 +618,7 @@ station_wpa_radio_start(void *context, uint64_t generation,
 	spin_unlock_irqrestore(&station->lock, enabled);
 	error = station->ops->connect_start(station->radio_context, generation,
 	    &station->selected, deadline);
+	*completion_ticks = station->clock(station->clock_context);
 	if (error == 0) {
 		enabled = spin_lock_irqsave(&station->lock);
 		if (station->connection_generation == generation)

@@ -1899,6 +1899,19 @@ make_beacon_aggregate(uint8_t *buffer, uint8_t subtype)
 }
 
 static struct rtl8822bu_adapter *retiring_poll_adapter;
+static struct rtl8822bu_adapter *serialized_connect_adapter;
+
+static void
+release_serialized_radio_operation(void)
+{
+	struct rtl8822bu_adapter *adapter = serialized_connect_adapter;
+
+	assert(adapter != NULL);
+	assert(adapter->radio_operations_active == 1U);
+	adapter->radio_operations_active = 0U;
+	serialized_connect_adapter = NULL;
+	yield_hook = NULL;
+}
 
 static void
 retire_fake_poll(void)
@@ -2381,11 +2394,21 @@ test_secure_station_hardware_contract(void)
 	station_transmit_error = 0;
 	make_connection_bss(&bss);
 	deadline = clock_ticks() + 100U;
+	writes = cam_writes;
+	/* A receive/poll operation can briefly overlap the completed scan.  The
+	 * fresh connect owns its generation and waits inside the same deadline;
+	 * it must not leak EBUSY to the WPA engine or clear the BSS snapshot. */
+	adapter->radio_operations_active = 1U;
+	serialized_connect_adapter = adapter;
+	yield_calls = 0U;
+	yield_hook = release_serialized_radio_operation;
 	assert(rtl8822bu_connect_start(adapter, 900U, &bss, deadline) == 0);
+	assert(yield_calls == 1U && serialized_connect_adapter == NULL);
 	assert(adapter->connection_generation == 900U &&
 	    adapter->connection_prepared && adapter->security_enabled &&
 	    adapter->connection_channel == 6U &&
-	    rtl8822bu_mac_equal(adapter->connection_bssid, bss.bssid));
+	    rtl8822bu_mac_equal(adapter->connection_bssid, bss.bssid) &&
+	    cam_writes == writes);
 	assert(rtl8822bu_connect_start(adapter, 900U, &bss, deadline) == 0);
 	assert(rtl8822bu_connect_start(adapter, 901U, &bss, deadline) == EBUSY);
 	assert(rtl8822bu_scan_channel_start(adapter, 901U, 0U, 1U,

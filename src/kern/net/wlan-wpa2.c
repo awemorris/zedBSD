@@ -242,7 +242,9 @@ cleanup(struct wlan_wpa2_engine *engine, int preserve_pmk)
 		engine->configured = 0U;
 	}
 	engine->aid = 0U;
-	engine->retry_count = 0U;
+	/* retry_count deliberately survives this cleanup: it is the public
+	 * failure evidence behind the status retries field, and the next
+	 * cache_and_submit() resets it before any new transmission. */
 	engine->pairwise_rekey = 0U;
 	engine->activation_complete = 0U;
 	engine->old_group_retired = 0U;
@@ -1144,9 +1146,11 @@ wlan_wpa2_engine_start(struct wlan_wpa2_engine *engine,
 	engine->configured = 1U;
 	error = engine->ops->radio_start(engine->callback_context, generation,
 	    engine->profile.bssid, engine->profile.channel,
-	    bounded_deadline(engine, now_ticks));
+	    engine->profile.total_deadline_ticks, &now_ticks);
 	if (error != 0)
 		return fail(engine, error);
+	if (!active_time_valid(engine, now_ticks))
+		return fail(engine, ETIMEDOUT);
 	return build_authentication(engine, now_ticks);
 }
 
@@ -1467,8 +1471,21 @@ wlan_wpa2_engine_report_tx(struct wlan_wpa2_engine *engine,
 		return ESTALE;
 	if (!active_time_valid(engine, now_ticks))
 		return fail(engine, ETIMEDOUT);
-	if (!acknowledged || error != 0)
+	if (!acknowledged || error != 0) {
+		/* The q070 physical target reported six unacknowledged
+		 * authentication frames within tens of milliseconds, so an
+		 * immediate resubmission converts the bounded retry budget
+		 * into one sub-second burst.  Management attempts retire this
+		 * report's cookie and let the existing step deadline drive the
+		 * next spaced retransmission; EAPOL keeps its immediate
+		 * policy because the authenticator paces that exchange. */
+		if (pending == WLAN_WPA2_STATE_AUTH_TX ||
+		    pending == WLAN_WPA2_STATE_ASSOC_TX) {
+			engine->tx_cookie_active = 0U;
+			return 0;
+		}
 		return retry_current(engine, pending, now_ticks);
+	}
 	engine->tx_cookie_active = 0U;
 	engine->step_deadline_ticks = bounded_deadline(engine, now_ticks);
 	switch (engine->state) {
@@ -1630,9 +1647,11 @@ wlan_wpa2_engine_reconnect(struct wlan_wpa2_engine *engine,
 	engine->configured = 1U;
 	error = engine->ops->radio_start(engine->callback_context, generation,
 	    engine->profile.bssid, engine->profile.channel,
-	    bounded_deadline(engine, now_ticks));
+	    engine->profile.total_deadline_ticks, &now_ticks);
 	if (error != 0)
 		return fail(engine, error);
+	if (!active_time_valid(engine, now_ticks))
+		return fail(engine, ETIMEDOUT);
 	return build_authentication(engine, now_ticks);
 }
 

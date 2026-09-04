@@ -22,7 +22,7 @@
 static void *(*allocator_alloc)(size_t size);
 static void (*allocator_free)(void *p);
 
-static void put_unsigned(uint32_t value, unsigned base, int upper, int width, int zero);
+static void put_unsigned(uint64_t value, unsigned base, int upper, int width, int zero);
 
 /*
  * Counts bytes in a terminated string.
@@ -241,7 +241,9 @@ hal_printf(
 	__builtin_va_list ap;
 	const char *p;
 	const char *string;
-	int value;
+	uint64_t magnitude;
+	int64_t value;
+	int longs;
 	int width;
 	int zero;
 
@@ -255,6 +257,7 @@ hal_printf(
 		}
 
 		/* Parses the supported zero-fill flag and decimal field width. */
+		longs = 0;
 		zero = 0;
 		width = 0;
 		p++;
@@ -268,6 +271,12 @@ hal_printf(
 		/* Accumulates every decimal width digit. */
 		while (*p >= '0' && *p <= '9') {
 			width = width * 10 + (*p - '0');
+			p++;
+		}
+
+		/* Counts the optional l and ll length modifiers. */
+		while (*p == 'l' && longs < 2) {
+			longs++;
 			p++;
 		}
 
@@ -287,36 +296,39 @@ hal_printf(
 			}
 			break;
 		case 'd':
-			value = __builtin_va_arg(ap, int);
+			/* Consumes the argument at its promoted width. */
+			if (longs == 0) {
+				value = __builtin_va_arg(ap, int);
+			} else if (longs == 1) {
+				value = __builtin_va_arg(ap, long);
+			} else {
+				value = __builtin_va_arg(ap, long long);
+			}
 
 			/* Emits a sign before converting a negative magnitude. */
+			magnitude = (uint64_t)value;
 			if (value < 0) {
 				hal_cons_putc('-');
-				value = -value;
+				magnitude = 0U - magnitude;
 			}
-			put_unsigned((uint32_t)value, 10, 0, width, zero);
+			put_unsigned(magnitude, 10, 0, width, zero);
 			break;
 		case 'u':
-			put_unsigned(
-				__builtin_va_arg(ap, uint32_t),
-				10,
-				0,
-				width,
-				zero);
-			break;
 		case 'x':
-			put_unsigned(
-				__builtin_va_arg(ap, uint32_t),
-				16,
-				0,
-				width,
-				zero);
-			break;
 		case 'X':
+			/* Consumes the argument at its promoted width. */
+			if (longs == 0) {
+				magnitude = __builtin_va_arg(ap, uint32_t);
+			} else if (longs == 1) {
+				magnitude = __builtin_va_arg(ap, unsigned long);
+			} else {
+				magnitude = __builtin_va_arg(ap,
+				    unsigned long long);
+			}
 			put_unsigned(
-				__builtin_va_arg(ap, uint32_t),
-				16,
-				1,
+				magnitude,
+				*p == 'u' ? 10 : 16,
+				*p == 'X',
 				width,
 				zero);
 			break;
@@ -325,6 +337,10 @@ hal_printf(
 			break;
 		default:
 			hal_cons_putc('%');
+
+			/* Restores any consumed length modifiers verbatim. */
+			while (longs-- > 0)
+				hal_cons_putc('l');
 
 			/* Emits the unknown conversion or reprocesses the terminator. */
 			if (*p != '\0') {
@@ -505,20 +521,20 @@ hal_io_wmb(
 /* Writes one unsigned value in the requested base and field width. */
 static void
 put_unsigned(
-	uint32_t value,
+	uint64_t value,
 	unsigned base,
 	int upper,
 	int width,
 	int zero)
 {
-	char digits[12];
+	char digits[24];
 	unsigned digit;
 	int n;
 
 	/* Converts digits in reverse order into the local buffer. */
 	n = 0;
 	do {
-		digit = value % base;
+		digit = (unsigned)(value % base);
 		digits[n] = (char)(digit < 10 ?
 		    '0' + digit : (upper ? 'A' : 'a') + digit - 10);
 		n++;

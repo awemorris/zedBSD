@@ -87,6 +87,10 @@ struct wlan_wpa2_profile {
  * the frame nor destination pointer after returning, and it must not report a
  * completion reentrantly from inside transmit().  All callbacks run in the
  * caller's serialized WLAN control context, never from a hard-IRQ handler.
+ * radio_start() receives the whole remaining connection deadline and writes
+ * the monotonic completion time after synchronous radio preparation.  The
+ * engine starts its short protocol-transition deadline from that returned
+ * time rather than from the stale pre-preparation admission time.
  *
  * Every mutating callback is a checked barrier.  A nonzero return may leave
  * the requested hardware state uncertain, so the corresponding inverse
@@ -98,7 +102,7 @@ struct wlan_wpa2_ops {
 	int (*entropy_fill)(void *context, void *buffer, size_t length);
 	int (*radio_start)(void *context, uint64_t generation,
 		const uint8_t bssid[WLAN_WPA2_MAC_LENGTH], uint32_t channel,
-		uint64_t deadline_ticks);
+		uint64_t deadline_ticks, uint64_t *completion_ticks);
 	int (*transmit)(void *context, uint64_t generation, uint64_t cookie,
 		enum wlan_wpa2_tx_kind kind,
 		const uint8_t destination[WLAN_WPA2_MAC_LENGTH],

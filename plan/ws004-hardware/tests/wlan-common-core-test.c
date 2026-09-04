@@ -1814,8 +1814,10 @@ test_core(void)
 	assert(fake.selected.capability == 0x0431U);
 	assert(wlan_station_test_snapshot(station, &station_snapshot) == 0 &&
 	    station_snapshot.association_capability == 0x0011U);
+	/* Radio preparation owns the remaining connection budget; the short
+	 * transition deadline begins only after preparation reaches protocol TX. */
 	assert(fake.connect_deadline == fake.now +
-	    WLAN_CONNECT_TRANSITION_TICKS);
+	    WLAN_CONNECT_DEADLINE_TICKS);
 	assert(worker_wake_calls >= 2U);
 	assert(!wlan_station_test_secrets_clear(station));
 	request_header(&status, sizeof(status), "wlan0");

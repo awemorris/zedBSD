@@ -24,7 +24,7 @@ static void *(*allocator_alloc)(size_t size);
 static void (*allocator_free)(void *pointer);
 static volatile unsigned panic_in_progress;
 
-static void put_unsigned(uint32_t value, unsigned base, int upper, int width, int zero);
+static void put_unsigned(uint64_t value, unsigned base, int upper, int width, int zero);
 
 /*
  * Measures a terminated byte string.
@@ -221,9 +221,10 @@ hal_printf(
 	const char *position;
 	const char *string;
 	uint64_t output_token;
-	uint32_t unsigned_value;
+	uint64_t unsigned_value;
+	int64_t signed_value;
 	int character;
-	int signed_value;
+	int longs;
 	int zero;
 	int width;
 
@@ -233,6 +234,7 @@ hal_printf(
 
 	/* Emits every literal byte or conversion in format order. */
 	for (position = format; *position != '\0'; position++) {
+		longs = 0;
 		zero = 0;
 		width = 0;
 
@@ -255,6 +257,12 @@ hal_printf(
 			position++;
 		}
 
+		/* Counts the optional l and ll length modifiers. */
+		while (*position == 'l' && longs < 2) {
+			longs++;
+			position++;
+		}
+
 		/* Emits the selected supported conversion. */
 		switch (*position) {
 		case 'c':
@@ -270,37 +278,52 @@ hal_printf(
 			hal_cons_write(string);
 			break;
 		case 'd':
-			signed_value = __builtin_va_arg(arguments, int);
+			/* Consumes the argument at its promoted width. */
+			if (longs == 0)
+				signed_value = __builtin_va_arg(arguments, int);
+			else if (longs == 1)
+				signed_value = __builtin_va_arg(arguments, long);
+			else
+				signed_value = __builtin_va_arg(arguments,
+				    long long);
 
 			/* Emits the sign before formatting the magnitude. */
+			unsigned_value = (uint64_t)signed_value;
 			if (signed_value < 0) {
 				hal_cons_putc('-');
-				signed_value = -signed_value;
+				unsigned_value = 0U - unsigned_value;
 			}
-			put_unsigned(
-				(uint32_t)signed_value,
-				10,
-				0,
-				width,
-				zero);
-			break;
-		case 'u':
-			unsigned_value = __builtin_va_arg(arguments, uint32_t);
 			put_unsigned(unsigned_value, 10, 0, width, zero);
 			break;
+		case 'u':
 		case 'x':
-			unsigned_value = __builtin_va_arg(arguments, uint32_t);
-			put_unsigned(unsigned_value, 16, 0, width, zero);
-			break;
 		case 'X':
-			unsigned_value = __builtin_va_arg(arguments, uint32_t);
-			put_unsigned(unsigned_value, 16, 1, width, zero);
+			/* Consumes the argument at its promoted width. */
+			if (longs == 0)
+				unsigned_value = __builtin_va_arg(arguments,
+				    uint32_t);
+			else if (longs == 1)
+				unsigned_value = __builtin_va_arg(arguments,
+				    unsigned long);
+			else
+				unsigned_value = __builtin_va_arg(arguments,
+				    unsigned long long);
+			put_unsigned(
+				unsigned_value,
+				*position == 'u' ? 10 : 16,
+				*position == 'X',
+				width,
+				zero);
 			break;
 		case '%':
 			hal_cons_putc('%');
 			break;
 		default:
 			hal_cons_putc('%');
+
+			/* Restores any consumed length modifiers verbatim. */
+			while (longs-- > 0)
+				hal_cons_putc('l');
 
 			/* Preserves an unknown conversion or trailing marker. */
 			if (*position != '\0')
@@ -449,20 +472,20 @@ hal_entropy_fill(
 /* Emits an unsigned value with the requested base and padding. */
 static void
 put_unsigned(
-	uint32_t value,
+	uint64_t value,
 	unsigned base,
 	int upper,
 	int width,
 	int zero)
 {
-	char digits[12];
+	char digits[24];
 	unsigned digit;
 	int length;
 
 	/* Builds the value in reverse order. */
 	length = 0;
 	do {
-		digit = value % base;
+		digit = (unsigned)(value % base);
 
 		/* Selects the requested alphabet for this digit. */
 		if (digit < 10)

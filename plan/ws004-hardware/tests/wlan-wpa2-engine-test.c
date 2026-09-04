@@ -27,6 +27,8 @@ static const uint8_t selected_rsn[WLAN_WPA2_RSN_IE_LENGTH] = {
 
 struct fake_radio {
 	uint64_t generation;
+	uint64_t radio_deadline;
+	uint64_t radio_completion_ticks;
 	uint64_t cookie;
 	uint64_t deadline;
 	enum wlan_wpa2_tx_kind tx_kind;
@@ -124,13 +126,16 @@ fake_entropy(void *context, void *buffer, size_t length)
 static int
 fake_radio_start(void *context, uint64_t generation,
 	const uint8_t expected_bssid[WLAN_WPA2_MAC_LENGTH], uint32_t channel,
-	uint64_t deadline)
+	uint64_t deadline, uint64_t *completion_ticks)
 {
 	struct fake_radio *fake = context;
 
 	assert(memcmp(expected_bssid, bssid, sizeof(bssid)) == 0);
-	assert(channel == 6U && deadline != 0U);
+	assert(channel == 6U && deadline != 0U && completion_ticks != NULL);
 	fake->generation = generation;
+	fake->radio_deadline = deadline;
+	if (fake->radio_completion_ticks != 0U)
+		*completion_ticks = fake->radio_completion_ticks;
 	fake->radio_start_calls++;
 	return fake->fail_radio_start ? EIO : 0;
 }
@@ -649,7 +654,8 @@ init_and_reach_message_1(struct wlan_wpa2_engine *engine,
 	assert(wlan_wpa2_engine_init(engine, &fake_ops, fake) == 0);
 	assert(wlan_wpa2_engine_start(engine, generation, &profile, 1U) == 0);
 	assert(wlan_wpa2_engine_state(engine) == WLAN_WPA2_STATE_AUTH_TX);
-	assert(fake->radio_start_calls == 1U && fake->management_tx_calls == 1U);
+	assert(fake->radio_start_calls == 1U && fake->radio_deadline == 1000U &&
+	    fake->management_tx_calls == 1U);
 	assert(fake->authorize_on_calls == 0U);
 	original_cookie = captured_cookie(fake);
 	assert(wlan_wpa2_engine_report_tx(engine, generation,
@@ -1152,6 +1158,66 @@ test_m4_ack_gate_nack_and_timeout(void)
 }
 
 static void
+test_auth_nack_spaced_retransmission(void)
+{
+	struct wlan_wpa2_engine engine;
+	struct fake_radio fake;
+	struct wlan_wpa2_profile profile = test_profile(1000U);
+	uint8_t response[64];
+	size_t length;
+	uint64_t now = 1U;
+	uint64_t cookie;
+	unsigned attempt;
+
+	/* q070 physical evidence: the target reported six unacknowledged
+	 * authentication frames within tens of milliseconds.  A management
+	 * NACK must wait for the step deadline instead of burning the whole
+	 * retry budget in one immediate sub-second burst. */
+	memset(&fake, 0, sizeof(fake));
+	assert(wlan_wpa2_engine_init(&engine, &fake_ops, &fake) == 0);
+	assert(wlan_wpa2_engine_start(&engine, 115U, &profile, now) == 0);
+	assert(fake.management_tx_calls == 1U);
+	cookie = captured_cookie(&fake);
+	assert(report_captured(&engine, &fake, 0, EIO, now + 1U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_AUTH_TX);
+	assert(fake.management_tx_calls == 1U);
+	/* The consumed cookie no longer matches a duplicate report. */
+	assert(wlan_wpa2_engine_report_tx(&engine, 115U, cookie, 0, EIO,
+	    now + 2U) == ESTALE);
+	/* An early timer tick before the step deadline changes nothing. */
+	assert(wlan_wpa2_engine_timer(&engine, now + 5U) == 0);
+	assert(fake.management_tx_calls == 1U);
+	/* Each step-deadline expiry drives exactly one spaced retransmission. */
+	for (attempt = 1U; attempt <= WLAN_WPA2_RETRY_MAX; attempt++) {
+		now += 10U;
+		assert(wlan_wpa2_engine_timer(&engine, now) == 0);
+		assert(fake.management_tx_calls == 1U + attempt);
+		assert(wlan_wpa2_engine_state(&engine) ==
+		    WLAN_WPA2_STATE_AUTH_TX);
+		assert(report_captured(&engine, &fake, 0, EIO, now + 1U) == 0);
+		assert(fake.management_tx_calls == 1U + attempt);
+	}
+	/* Exhaustion keeps the retry evidence for the public status record. */
+	now += 10U;
+	assert(wlan_wpa2_engine_timer(&engine, now) == ETIMEDOUT);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_FAILED &&
+	    wlan_wpa2_engine_last_error(&engine) == ETIMEDOUT &&
+	    engine.retry_count == WLAN_WPA2_RETRY_MAX &&
+	    wlan_wpa2_engine_test_secrets_clear(&engine));
+
+	/* A waiting unacknowledged attempt still accepts the peer response. */
+	memset(&fake, 0, sizeof(fake));
+	assert(wlan_wpa2_engine_init(&engine, &fake_ops, &fake) == 0);
+	assert(wlan_wpa2_engine_start(&engine, 116U, &profile, 1U) == 0);
+	assert(report_captured(&engine, &fake, 0, EIO, 2U) == 0);
+	length = authentication_response(response, 0U);
+	assert(wlan_wpa2_engine_receive_management(&engine, 116U, response,
+	    length, 3U) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_ASSOC_TX);
+	assert(fake.management_tx_calls == 2U);
+}
+
+static void
 test_authorize_callback_failure(void)
 {
 	struct wlan_wpa2_engine engine;
@@ -1489,7 +1555,7 @@ test_reconnect_cleanup_retry_and_fresh_generation(void)
 	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_AUTH_TX &&
 	    engine.generation == 203U &&
 	    engine.key_generation > old_key_generation &&
-	    fake.radio_start_calls == 2U);
+	    fake.radio_start_calls == 2U && fake.radio_deadline == 1000U);
 	assert(wlan_wpa2_engine_stop(&engine) == 0);
 	assert(wlan_wpa2_engine_test_secrets_clear(&engine));
 	wlan_crypto_erase(ptk, sizeof(ptk));
@@ -1553,16 +1619,43 @@ test_argument_contract(void)
 	assert(wlan_wpa2_engine_timer(NULL, 0U) == EINVAL);
 }
 
+static void
+test_radio_completion_starts_protocol_deadline(void)
+{
+	struct wlan_wpa2_engine engine;
+	struct fake_radio fake;
+	struct wlan_wpa2_profile profile = test_profile(1000U);
+
+	memset(&fake, 0, sizeof(fake));
+	fake.radio_completion_ticks = 75U;
+	assert(wlan_wpa2_engine_init(&engine, &fake_ops, &fake) == 0);
+	assert(wlan_wpa2_engine_start(&engine, 301U, &profile, 1U) == 0);
+	assert(fake.radio_deadline == 1000U);
+	assert(fake.deadline == 75U + profile.transition_timeout_ticks);
+	assert(wlan_wpa2_engine_stop(&engine) == 0);
+
+	memset(&fake, 0, sizeof(fake));
+	fake.radio_completion_ticks = profile.total_deadline_ticks;
+	assert(wlan_wpa2_engine_init(&engine, &fake_ops, &fake) == 0);
+	assert(wlan_wpa2_engine_start(&engine, 302U, &profile, 1U) ==
+	    ETIMEDOUT);
+	assert(fake.radio_start_calls == 1U && fake.tx_calls == 0U &&
+	    fake.radio_stop_calls == 1U);
+	assert(wlan_wpa2_engine_test_secrets_clear(&engine));
+}
+
 int
 main(void)
 {
 	test_argument_contract();
+	test_radio_completion_starts_protocol_deadline();
 	test_peer_response_precedes_tx_report();
 	test_complete_handshake_and_retransmission();
 	test_address_entropy_and_nonce_failures();
 	test_unrelated_management_is_benign();
 	test_message_3_validation_and_rollback();
 	test_m4_ack_gate_nack_and_timeout();
+	test_auth_nack_spaced_retransmission();
 	test_authorize_callback_failure();
 	test_checked_cleanup_retry();
 	test_uncertain_callback_rollback();

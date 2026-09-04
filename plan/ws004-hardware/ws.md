@@ -1,6 +1,6 @@
 # WS004: hardware expansion
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 WSID: `ws004`
 
@@ -28,6 +28,11 @@ p004/p009 and supplied one simple direct-command physical attach, scan,
 secure-L2, and IP-communication result; this developmental run does not
 complete the later WS005 p008 five-run acceptance. Q060 completed p030's finite
 automatic lifecycle milestone without consuming that shared physical closure.
+Q070's first physical candidate selected the BSS but expired before its first
+authentication transaction. The revised p043 candidate removes redundant
+pre-authentication CAM clearing under a checked clean-generation invariant;
+its focused gates and builds pass and one physical RTL8822BU confirmation
+remains.
 Q061 completed p037's read-only intake, corrected the exact target to Intel
 AX211/CNVio2, and cleared its firmware/license boundary. Q065 localized its
 first association stop to legacy commands against the pinned `-89` MLD API.
@@ -276,6 +281,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-33 | Complete as `ws004-p037` (`q061`) | Read-only exact Intel AX211/CNVio2 identity, topology, firmware, provenance, and optional-package/license intake | Completed p030 automatic gates and authorized SSH test machine | HW-T37 freezes `8086:51f0`/`8086:4090`/rev `01`, exact firmware bytes, clear license, and direct-boot boundary without host mutation |
 | HW-34 | Uncleared as `ws004-p038` (`q066`); automatic and exact-device VFIO milestones complete | Independent native AX211/CNVio2 driver and `userland/firmware/intelax211/` entry, without an Intel/RTL hardware framework | HW-33, HW-00/HW-23/HW-25 contracts and `ws003-p025` | HW-T38 API89/focused and exact-device VFIO scan, secure L2, useful-IP, checked-down, and host-restoration evidence pass; one direct boot must still supply the shared physical counter/network result |
 | HW-35 | Planned as `ws004-p039`; follows p038 | Evidence-driven comparison and optional extraction of proven common WLAN behavior | HW-26 automatic milestone and completed HW-34, with passing exact-device paths | HW-T39 preserves public UAPI and both drivers; a documented no-extraction review is valid when commonality is not substantial/stable |
+| HW-36 | In progress as `ws004-p043` (`q070`) | Physical RTL8822BU scan-before-connect, one 30-second connection state machine, explicit primitive up/down and quiet mode, and measured real-xHCI timeout correction | HW-24--HW-26, q069, newly repeatable physical observations | Automatic state/deadline/output and transient-radio-ownership regressions plus configured builds pass; one exact-device run starts without a scan, reaches controlled-port authorization, and remains reusable after disconnect/down/up |
 
 ## 4. NVMe sequence
 
@@ -332,6 +338,12 @@ The ordered implementation path is:
    shutdown, and concurrent-storage milestone in q060. Its exact-hardware
    lifecycle and final five-run closure still use the same later WS005 p008
    ledger.
+7. [`ws004-p043`](phase043-rtl8822bu-physical-connect-ux/phase.md) consumes the
+   post-q069 physical evidence: direct connect automatically scans under one
+   30-second deadline, the primitive command gains explicit administrative
+   up/down and quiet operation, and the real zero-retry sub-second timeout is
+   localized and corrected before the single physical checkpoint. The final
+   five-run ledger remains WS005 p008.
 
 P026 and p027 are complete through q055, q056 completed the extracted p036
 pre-radio substrate, and q057 completed p028 with the resolved BSD-3-Clause
