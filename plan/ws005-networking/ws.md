@@ -6,8 +6,9 @@ WSID: `ws005`
 
 Status: active; q059 completed the minimum direct `/sbin/wifi` command in p004
 and one physical-equivalent RTL8822BU scan/WPA2/CCMP/DHCP/ping/fetch path in
-p009. Detailed command composition and primitive/hardware lifecycle hardening
-remain in p006/p007, p010, and WS004 p030 before p008 final acceptance.
+p009. Q070 subsequently closed the physically accepted WS004 RTL8822BU
+hardware path. Detailed command composition and primitive hardening remain in
+p006/p007 and p010 before this WS's separately owned p008 final acceptance.
 
 Parent: [master plan](../master.md)
 
@@ -32,9 +33,9 @@ in `ws004-p036`. Q057 completed `ws004-p028`'s BSD-3-Clause radio-table import
 and conservative automatic scan milestone. Q058 completed WS004 p029 secure
 L2 independently of the command stack. Q059 then completed p004's human
 direct-root normal path and p009's one useful physical IP path. Continue with
-p006 then p007 composition; p010 and WS004 p030 are also eligible hardening
-work. None of these later Phases, nor p008's final five-run acceptance, is
-complete.
+p006 then p007 composition and p010; WS004 p030's automatic dependency and
+q070's physical RTL8822BU hardware boundary are complete. None of these WS005
+Phases, nor p008's final five-run acceptance, is complete.
 
 Shared tests: [WS005 test index](tests/README.md)
 

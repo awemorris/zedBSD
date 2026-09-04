@@ -4,7 +4,9 @@ Last updated: 2026-09-04
 
 WSID: `ws004`
 
-Status: active; WS is not complete. q041 completed p016 checked legacy-HCD
+Status: complete baseline (`q070`); closed by user acceptance after the
+physically verified RTL8822BU correction was merged from `origin/main`.
+q041 completed p016 checked legacy-HCD
 request retirement. q047 completed p031 legacy-HCD concurrent scheduling and
 root hotplug plus p032 checked endpoint/device recovery. P033's
 extracted amd64 framebuffer-console correction is complete after passing its
@@ -28,11 +30,11 @@ p004/p009 and supplied one simple direct-command physical attach, scan,
 secure-L2, and IP-communication result; this developmental run does not
 complete the later WS005 p008 five-run acceptance. Q060 completed p030's finite
 automatic lifecycle milestone without consuming that shared physical closure.
-Q070's first physical candidate selected the BSS but expired before its first
-authentication transaction. The revised p043 candidate removes redundant
-pre-authentication CAM clearing under a checked clean-generation invariant;
-its focused gates and builds pass and one physical RTL8822BU confirmation
-remains.
+Q070 iterated the physical RTL8822BU connection boundary through measured
+authentication diagnostics and completed p043 after the corrected source
+reached controlled-port authorization on hardware.  The final origin/main
+candidate was accepted by the user and its focused regressions pass after the
+merge.
 Q061 completed p037's read-only intake, corrected the exact target to Intel
 AX211/CNVio2, and cleared its firmware/license boundary. Q065 localized its
 first association stop to legacy commands against the pinned `-89` MLD API.
@@ -50,7 +52,9 @@ from the driver's channel-1--11 snapshot, so common BSS selection returns
 2.4-GHz report was checked once in q069/p042: the exact channel-1 BSS connected
 and authorized, so its reported `ENOENT` remains unlocalized and receives no
 speculative fix. P041 is again Queue-ready as the independently proven 5-GHz
-capability addition. AX211 quality work remains deferred.
+capability addition. AX211 quality work remains deferred. These explicitly
+deferred or separately owned follow-ups remain in this ledger for later
+reopening; they do not keep the accepted WS004 baseline active.
 
 Parent: [master plan](../master.md)
 
@@ -173,6 +177,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p040`](phase040-rtl8822bu-passthrough-reproduction/phase.md) | Complete (`q068`) | Exact passthrough reproduced immediate `ENOENT`; the controlled 5-GHz target was absent from the completed channel-1 snapshot, so common BSS selection rejected it before RTL admission |
 | [`ws004-p041`](phase041-rtl8822bu-5ghz-quality/phase.md) | Planned; Queue-ready after q069; not queued | Add a checked non-DFS 5-GHz RTL8822BU scan and WPA2/CCMP useful normal path while preserving the passing 2.4-GHz path; AX211 remains separate |
 | [`ws004-p042`](phase042-rtl8822bu-24ghz-connect-reproduction/phase.md) | Complete (`q069`) | The one exact scan-visible channel-1 attempt connected and authorized with zero retries/error; the user's 2.4-GHz `ENOENT` did not reproduce |
+| [`ws004-p043`](phase043-rtl8822bu-physical-connect-ux/phase.md) | Complete (`q070`) | The origin/main correction passes focused regressions and the user-confirmed physical RTL8822BU path; scan-before-connect, bounded progress, controlled-port authorization, disconnect/down/up reuse, quiet output, and 64-bit diagnostics are accepted |
 
 ### MSI follow-up register
 
@@ -281,7 +286,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-33 | Complete as `ws004-p037` (`q061`) | Read-only exact Intel AX211/CNVio2 identity, topology, firmware, provenance, and optional-package/license intake | Completed p030 automatic gates and authorized SSH test machine | HW-T37 freezes `8086:51f0`/`8086:4090`/rev `01`, exact firmware bytes, clear license, and direct-boot boundary without host mutation |
 | HW-34 | Uncleared as `ws004-p038` (`q066`); automatic and exact-device VFIO milestones complete | Independent native AX211/CNVio2 driver and `userland/firmware/intelax211/` entry, without an Intel/RTL hardware framework | HW-33, HW-00/HW-23/HW-25 contracts and `ws003-p025` | HW-T38 API89/focused and exact-device VFIO scan, secure L2, useful-IP, checked-down, and host-restoration evidence pass; one direct boot must still supply the shared physical counter/network result |
 | HW-35 | Planned as `ws004-p039`; follows p038 | Evidence-driven comparison and optional extraction of proven common WLAN behavior | HW-26 automatic milestone and completed HW-34, with passing exact-device paths | HW-T39 preserves public UAPI and both drivers; a documented no-extraction review is valid when commonality is not substantial/stable |
-| HW-36 | In progress as `ws004-p043` (`q070`) | Physical RTL8822BU scan-before-connect, one 30-second connection state machine, explicit primitive up/down and quiet mode, and measured real-xHCI timeout correction | HW-24--HW-26, q069, newly repeatable physical observations | Automatic state/deadline/output and transient-radio-ownership regressions plus configured builds pass; one exact-device run starts without a scan, reaches controlled-port authorization, and remains reusable after disconnect/down/up |
+| HW-36 | Complete as `ws004-p043` (`q070`) | Physical RTL8822BU scan-before-connect, one 30-second connection state machine, explicit primitive up/down and quiet mode, and measured real-xHCI timeout correction | HW-24--HW-26, q069, newly repeatable physical observations | Automatic gates pass and the user-confirmed origin/main correction works on the physical RTL8822BU target; p043 is closed |
 
 ## 4. NVMe sequence
 

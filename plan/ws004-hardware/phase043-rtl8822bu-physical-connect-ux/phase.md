@@ -8,7 +8,7 @@ Phase ID: `p043`
 
 Combined ID: `ws004-p043`
 
-Status: in-progress (`q070`)
+Status: complete (`q070`)
 
 Parent: [WS004 hardware](../ws.md)
 
@@ -467,3 +467,18 @@ The single physical acceptance check closes with one run of this candidate:
 up, one direct connect next to the access point, a short period of ordinary
 traffic with a silent console, disconnect, down, up, and a new scan.  Its
 confirmation clears this Phase.
+
+## Physical acceptance and closure
+
+On 2026-09-04 the user published the physically verified RTL8822BU correction
+as `origin/main` commit `d6591cb` (`Fix RTL8822BU`) and explicitly accepted the
+hardware result.  The merged source is therefore the authoritative closing
+candidate.  The user confirmed that the RTL8822BU path works on the physical
+machine; no credential or key material is retained in this record.
+
+After the fast-forward merge, the RTL8822BU driver/security suite, WLAN common
+core and WPA2 engine/L2 suites, primitive `wifi` command suite, and amd64/i386
+HAL formatting suite passed again.  This clears the one remaining physical
+boundary and completes p043.  `BUG-009`, 5-GHz expansion, AX211 direct-boot
+acceptance, and the WS005 five-run campaign remain separately recorded future
+work and do not reopen this completed Phase.

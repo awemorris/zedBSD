@@ -140,7 +140,13 @@ minimum direct `/sbin/wifi` command and p009's single USB-passthrough
 development checkpoint: scan, WPA2/CCMP authorization, DHCP, gateway/public
 ping, bounded HTTP fetch, disconnect, and interface down passed. Q060 completed
 WS004 p030's automatic RTL8822BU lifecycle milestone, while its shared WS005
-p008 physical lifecycle and five-run closure remain pending. Q061 completed
+p008 physical lifecycle and five-run closure remain pending. Q070 then closed
+WS004 p043: the user published the physically verified RTL8822BU correction as
+`origin/main` commit `d6591cb`, accepted the hardware result, and the merged
+driver, WLAN/WPA2, wifi-command, and HAL-format regressions pass. WS004 is now
+closed as an accepted hardware baseline; its explicitly deferred 5-GHz,
+AX211-direct-boot, RF-link-budget, and cross-driver follow-ups remain available
+for a deliberate later reopening. Q061 completed
 p037's read-only Intel intake, corrected the exact target to AX211/CNVio2
 `8086:51f0`, subsystem `8086:4090`, revision `01`, and cleared its firmware/
 license and direct-boot boundaries. Q062 completed p038's initial implementation
@@ -439,8 +445,8 @@ allowed to block first communication unless the normal path depends on them.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q050 completed both VFS prerequisites discovered by q041 | `ws001-p022` and `ws001-p023` complete with production-linked faults and abrupt-stop/remount evidence | Retain p022/p023 as regressions; their dependency consumer resumes in WS005 p005 | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; q066 completed p025's automatic HAL counter milestone while the completed Latitude USB/network and CF-SV7 USB-root milestones remain intact | p025's API split, private calibration, complete-CPU-set validation, positive/negative SMP KVM evidence, and configured build matrix pass; p024 still awaits one V13 boot and p018/p019 remain | Share p025's sole remaining physical multicore observation with p038's final direct boot rather than creating an intermediate human block | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; q070's next RTL8822BU candidate is ready after physical transient-ownership localization | p043 automatic scan-before-connect, one 30-second deadline, up/down/quiet, pre-auth CAM optimization, driver-side radio serialization, no-rescan transient busy handling, focused suites, and configured builds pass | Run the one revised physical p043 checkpoint with its immutable image; p041 remains the separate 5-GHz gap | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WLAN | Active; q059 completed p004 minimum direct command and p009 one-run physical connectivity; q060 completed the p030 automatic dependency | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, frozen design contract, exact first-radio identity, common WLAN control ABI, p036, p028-p030 automatic milestones, p004, and p009 are complete; q066 completed WS004 p038's exact-device VFIO normal path, while its native direct boot remains | After WS004 p038/p039, complete p006/p007/p010 before the still-pending shared p008 final acceptance | [WS005](ws005-networking/ws.md) |
+| `ws004` | Hardware expansion | Complete baseline (`q070`); closed by user acceptance of the physically verified origin/main RTL8822BU correction | p043 scan-before-connect, one 30-second deadline, up/down/quiet, corrected radio/authentication path, controlled-port authorization, focused suites, and HAL formatting pass | No active Phase; deferred 5-GHz, AX211 direct-boot/refactor, RF-link-budget, and other recorded follow-ups require an explicit reopening | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WLAN | Active; q059 completed p004 minimum direct command and p009 one-run physical connectivity; q060 completed the p030 automatic dependency | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, frozen design contract, exact first-radio identity, common WLAN control ABI, p036, p028-p030 automatic milestones, p004, and p009 are complete; q070 physically accepted the RTL8822BU hardware path | Complete p006/p007/p010 before the still-pending p008 final acceptance; deferred WS004 AX211/refactor work does not block this stack | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; q063 released p009's WS008 userland dependency | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Complete (`q063`) | p010 host CLI/toolchain/ordinary-build and p009 amd64 static/package/q35-xHCI runtime gates pass on official `v2.0.1`; p006 remains historical review evidence | No current Phase; Remacs and i386/PC-98 target Noct remain explicitly outside q063 | [WS008](ws008-noct/ws.md) |
@@ -576,7 +582,11 @@ then clarified that the snapshot-visible 2.4-GHz SSID also returned `ENOENT` on
 hardware. Q069's one exact p042 attempt instead completed generation 2 and
 authorized with zero retries/error. The report therefore remains unlocalized
 without a speculative fix, while p041 is Queue-ready for the independently
-proven 5-GHz capability gap. AX211 quality work remains deferred.
+proven 5-GHz capability gap. Q070 subsequently completed p043 after the user
+published and physically accepted the working RTL8822BU correction on
+`origin/main`; WS004 is closed as a baseline, and its remaining hardware
+follow-ups are deferred until an explicit reopening. AX211 quality work
+remains deferred.
 
 1. q048 completed the WS006 p008 production HID automatic/software milestone
    after q044's p006/p007 source boundaries and q047's p031/p032 USB 1.1,
@@ -592,10 +602,10 @@ proven 5-GHz capability gap. AX211 quality work remains deferred.
    froze one candidate for its remaining Latitude check. Q053 subsequently
    completed the documentation-only `ws005-p002` WLAN v1 contract audit, and
    q054 implemented the accepted common asynchronous-TX statistics policy in
-   NCM and completed p017. WS004 retains the p021 physical checkpoint, p025,
-   and the WLAN chain rather than treating the working visible USB/NVMe cases
-   as closure. ECM adoption of the helper is a separate future consumer, not a
-   residual failure of p017.
+   NCM and completed p017. Q070 now closes the accepted WS004 baseline; p021,
+   p025, and other unfinished hardware entries remain deferred reopening
+   points rather than active closure blockers. ECM adoption of the helper is a
+   separate future consumer, not a residual failure of p017.
 2. WS018 is complete.  q035 finished p009's retained runtime evidence and
    p010--p012 in consumer-before-deletion order; no residual Phase remains.
 3. Complete WS020 Intel Mac bring-up. The generic board Variant, three amd64
@@ -603,7 +613,9 @@ proven 5-GHz capability gap. AX211 quality work remains deferred.
    handoff preflight pass. The bounded physical UEFI-only checkpoint and final
    five-run acceptance remain deferred by the user. Disk capacity is not a
    menu selection.
-4. Implement the Archer T3U Nano USB WLAN path across WS004 and WS005. The
+4. The Archer T3U Nano USB WLAN hardware path in WS004 is complete through
+   q070/p043 and physically accepted. The remaining WS005 orchestration and
+   final repeatability work is independently owned there. The historical
    dependency order is p026 exact-unit/firmware intake, p027 generic WLAN core,
    the completed p036 pre-radio substrate with its individually selected
    firmware package, WS005 privilege/command/profile/protocol prerequisites,
@@ -611,14 +623,15 @@ proven 5-GHz capability gap. AX211 quality work remains deferred.
    plus p009 single physical communication path, and q060 p030 automatic
    lifecycle hardening. P030's shared p008 physical/five-run acceptance remains
    pending and was not consumed by q060.
-5. Execute the corrected Intel AX211/CNVio2 chain in strict order: q061
+5. The corrected Intel AX211/CNVio2 continuation is deferred until WS004 is
+   explicitly reopened. Its completed history is: q061
    completed p037's read-only exact-device and firmware/license intake. Q062
    completed p038's standalone exact `8086:51f0`/`8086:4090`/rev `01`
    implementation and focused automatic gates. Q066 completed its API89 MLD
    correction and exact-device VFIO normal path through firmware/PNVM, scan,
    WPA2/CCMP, DHCP, ping, nonempty fetch, disconnect, and down with host
    restoration; one exact-machine direct boot remains before p038 closes.
-   Then p039 reviews/refactors only common behavior
+   After reopening, p039 reviews/refactors only common behavior
    demonstrated by both working drivers. Do not create a common Intel/Realtek
    hardware layer first, and do not change the public WLAN UAPI without a
    significant explicit interface decision. RTL8822CE remains a later
