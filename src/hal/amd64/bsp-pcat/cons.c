@@ -26,9 +26,24 @@
 #define VGA_INDEX	0x3d4U
 #define VGA_DATA	0x3d5U
 
-#define KBD_DATA	0x60U
-#define KBD_STATUS	0x64U
-#define KBD_STATUS_AUX	0x20U
+#define KBD_DATA			0x60U
+#define KBD_STATUS			0x64U
+#define KBD_COMMAND			0x64U
+#define KBD_STATUS_OUTPUT		0x01U
+#define KBD_STATUS_INPUT		0x02U
+#define KBD_STATUS_AUX			0x20U
+#define KBD_READ_CONFIGURATION		0x20U
+#define KBD_WRITE_CONFIGURATION		0x60U
+#define KBD_DISABLE_AUX			0xa7U
+#define KBD_DISABLE_KEYBOARD		0xadU
+#define KBD_ENABLE_KEYBOARD		0xaeU
+#define KBD_CONFIGURATION_KEYBOARD_IRQ	0x01U
+#define KBD_CONFIGURATION_AUX_IRQ	0x02U
+#define KBD_CONFIGURATION_KEYBOARD_OFF	0x10U
+#define KBD_CONFIGURATION_AUX_OFF	0x20U
+#define KBD_CONFIGURATION_TRANSLATION	0x40U
+#define KBD_WAIT_LOOPS			100000U
+#define KBD_FLUSH_LIMIT			64U
 
 /* 256 physical scan positions, two resync markers, and one ring sentinel. */
 #define EVENT_COUNT 259U
@@ -196,6 +211,12 @@ static int symbol_equal(const char *left, const char *right);
 static void rebuild_keyboard_events_locked(void);
 static void enqueue_keyboard_event_locked(const char *symbol, uint32_t flags);
 static int snapshot_modifier(const char *symbol);
+static int keyboard_wait_input_empty(void);
+static int keyboard_write_command(uint8_t command);
+static void keyboard_flush_output(void);
+static int keyboard_read_configuration(uint8_t *configuration);
+static int keyboard_write_configuration(uint8_t configuration);
+static int keyboard_controller_init(void);
 static void pump_keyboard_locked(void);
 static void keyboard_interrupt(int irq, hal_irq_ack_t acknowledge, void *argument);
 
@@ -1189,6 +1210,9 @@ pcat_cons_irq_init(
 {
 	int status;
 
+	/* Keeps the legacy line quiet while establishing controller ownership. */
+	hal_irq_mask(IRQ_KEYBOARD);
+
 	/* Registers the keyboard interrupt handler. */
 	status = hal_irq_set_handler(
 		IRQ_KEYBOARD,
@@ -1196,6 +1220,13 @@ pcat_cons_irq_init(
 		NULL);
 	if (status != HAL_OK)
 		HAL_FATAL("PC/AT keyboard IRQ registration failed");
+
+	/* Establishes a known keyboard port and scan-code translation state. */
+	status = keyboard_controller_init();
+	if (status != HAL_OK) {
+		hal_printf("input: i8042 keyboard unavailable (%d)\n", status);
+		return;
+	}
 
 	/* Enables delivery of keyboard interrupts. */
 	hal_irq_unmask(IRQ_KEYBOARD);
@@ -2095,6 +2126,146 @@ snapshot_modifier(
 
 	/* Reports an ordinary held-key symbol. */
 	return 0;
+}
+
+/* Waits until the 8042 can accept a command or data byte. */
+static int
+keyboard_wait_input_empty(
+	void)
+{
+	unsigned spin;
+
+	/* Bounds an absent or wedged legacy controller. */
+	for (spin = 0; spin < KBD_WAIT_LOOPS; spin++) {
+		if ((asm_inb(KBD_STATUS) & KBD_STATUS_INPUT) == 0)
+			return HAL_OK;
+		__asm__ volatile("pause");
+	}
+
+	/* Reports that the controller never accepted another byte. */
+	return HAL_ERR_TIMEOUT;
+}
+
+/* Writes one 8042 controller command after its input buffer drains. */
+static int
+keyboard_write_command(
+	uint8_t command)
+{
+	int status;
+
+	status = keyboard_wait_input_empty();
+	if (status != HAL_OK)
+		return status;
+	asm_outb(KBD_COMMAND, command);
+
+	/* Reports successful command submission. */
+	return HAL_OK;
+}
+
+/* Discards stale bytes left by firmware in the shared output buffer. */
+static void
+keyboard_flush_output(
+	void)
+{
+	unsigned count;
+
+	/* Both ports are disabled before this bounded drain begins. */
+	for (count = 0; count < KBD_FLUSH_LIMIT; count++) {
+		if ((asm_inb(KBD_STATUS) & KBD_STATUS_OUTPUT) == 0)
+			break;
+		(void)asm_inb(KBD_DATA);
+	}
+}
+
+/* Reads the 8042 configuration byte without accepting an auxiliary byte. */
+static int
+keyboard_read_configuration(
+	uint8_t *configuration)
+{
+	uint8_t status;
+	unsigned spin;
+	int result;
+
+	result = keyboard_write_command(KBD_READ_CONFIGURATION);
+	if (result != HAL_OK)
+		return result;
+
+	/* Waits for the controller response and drains any stale AUX byte. */
+	for (spin = 0; spin < KBD_WAIT_LOOPS; spin++) {
+		status = asm_inb(KBD_STATUS);
+		if ((status & KBD_STATUS_OUTPUT) == 0) {
+			__asm__ volatile("pause");
+			continue;
+		}
+		if ((status & KBD_STATUS_AUX) != 0) {
+			(void)asm_inb(KBD_DATA);
+			continue;
+		}
+		*configuration = asm_inb(KBD_DATA);
+		return HAL_OK;
+	}
+
+	/* Reports a controller which did not return its configuration. */
+	return HAL_ERR_TIMEOUT;
+}
+
+/* Writes the 8042 configuration byte as one controller transaction. */
+static int
+keyboard_write_configuration(
+	uint8_t configuration)
+{
+	int status;
+
+	status = keyboard_write_command(KBD_WRITE_CONFIGURATION);
+	if (status != HAL_OK)
+		return status;
+	status = keyboard_wait_input_empty();
+	if (status != HAL_OK)
+		return status;
+	asm_outb(KBD_DATA, configuration);
+
+	/* Reports successful configuration submission. */
+	return HAL_OK;
+}
+
+/* Establishes the PC/AT keyboard port independently of firmware state. */
+static int
+keyboard_controller_init(
+	void)
+{
+	uint8_t configuration;
+	int status;
+
+	/* Stops both sources before discarding firmware-owned output bytes. */
+	status = keyboard_write_command(KBD_DISABLE_KEYBOARD);
+	if (status != HAL_OK)
+		return status;
+	status = keyboard_write_command(KBD_DISABLE_AUX);
+	if (status != HAL_OK)
+		return status;
+	status = keyboard_wait_input_empty();
+	if (status != HAL_OK)
+		return status;
+	keyboard_flush_output();
+
+	/* Selects translated set-1 input and leaves AUX disabled until opened. */
+	status = keyboard_read_configuration(&configuration);
+	if (status != HAL_OK)
+		return status;
+	configuration |= KBD_CONFIGURATION_KEYBOARD_IRQ |
+	    KBD_CONFIGURATION_AUX_OFF |
+	    KBD_CONFIGURATION_TRANSLATION;
+	configuration &= (uint8_t)~(KBD_CONFIGURATION_AUX_IRQ |
+	    KBD_CONFIGURATION_KEYBOARD_OFF);
+	status = keyboard_write_configuration(configuration);
+	if (status != HAL_OK)
+		return status;
+
+	/* Restarts the keyboard clock after its interrupt route is installed. */
+	status = keyboard_write_command(KBD_ENABLE_KEYBOARD);
+	if (status != HAL_OK)
+		return status;
+	return keyboard_wait_input_empty();
 }
 
 /* Rebuilds the event queue as a truthful held-key snapshot. */
