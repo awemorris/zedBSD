@@ -8,7 +8,8 @@ Phase ID: `p007`
 
 Combined ID: `ws011-p007`
 
-Status: Ready; proposed as the sole pending item in q074
+Status: uncleared (`q074`, 2026-09-05); T020 passed, T021 stopped during
+target atomic publication
 
 Parent: [WS011](../ws.md)
 
@@ -16,9 +17,11 @@ Implementation: [confirmed commit](../phase006-confirmed-commit-implementation/p
 
 Tests: [WS011 test index](../tests/README.md)
 
-Queue proposal: [q074](../../queue.md)
+Queue result: [q074](../../queue-q074.md)
 
 Physical follow-up: [p008](../phase008-confirmed-commit-physical-acceptance/phase.md)
+
+Corrective follow-up: [p009](../phase009-confirmed-commit-overlay-publication/phase.md)
 
 ## Objective
 
@@ -109,22 +112,22 @@ through reboot.
 
 ## Ordered work packages
 
-- [ ] NCOM-A01: Freeze the test-only amd64/NE2000 configuration, synthetic
+- [x] NCOM-A01: Freeze the test-only amd64/NE2000 configuration, synthetic
       startup/candidate values, monitor command vocabulary, markers, and all
       controller deadlines without modifying production inputs.
-- [ ] NCOM-A02: Add a reusable two-cell runner which records metadata/results,
+- [x] NCOM-A02: Add a reusable two-cell runner which records metadata/results,
       drives the real installed `net` and networkd, checks source/config
       integrity, and retains no secret or successful writable image.
-- [ ] NCOM-A03: Run NCOM-T020 once from a fresh image and retain bounded evidence
+- [x] NCOM-A03: Run NCOM-T020 once from a fresh image and retain bounded evidence
       for pre-arm state, temporary apply, lost client, timer expiry, complete
       rollback, unchanged startup bytes, and connectivity recovery.
-- [ ] NCOM-A04: Run NCOM-T021 once from another fresh image and retain bounded
-      evidence for delayed publication, matching-session confirmation, no late
-      rollback, and reboot persistence.
-- [ ] NCOM-A05: Rerun NCOM-T001--T012, existing WS011 and ZNV2 gates, the four
+- [x] NCOM-A04: Run NCOM-T021 once from another fresh image. It preserved the
+      old startup view and completed full reconcile, but stopped inside atomic
+      publication before DISARM; late-timer and reboot evidence are absent.
+- [x] NCOM-A05: Rerun NCOM-T001--T012, existing WS011 and ZNV2 gates, the four
       q073 managed-WLAN/Wi-Fi runners, and maintained amd64/i386
       `net`/networkd target builds. Do not run aggregate `make check`.
-- [ ] NCOM-A06: Run both documentation validators and `git diff --check`, then
+- [x] NCOM-A06: Run both documentation validators and `git diff --check`, then
       synchronize actual commands, hashes, results, and the p008 resume boundary
       into the P/W/M/Q/test books.
 
@@ -152,6 +155,25 @@ place, beginning p008 physical work, or performing a third QEMU acceptance run.
 
 ## Current result and resumption
 
-The p006 dependency and existing focused gates are complete. P007 is fully
-extracted as the sole proposed q074 item; no runner has been added and no QEMU
-cell has started. Obtain explicit q074 execution approval before NCOM-A01.
+Q074 processed both authorized cells exactly once. NCOM-T020 passed: after the
+originating client exited, the real one-minute timeout restored the old address,
+route, resolver, connectivity, and byte-identical `/etc/net.conf`.
+
+NCOM-T021 is uncleared. The same-session ordinary `commit` completed its
+confirmed check and full candidate reconcile, then failed to return within the
+30-second command bound. The ten admitted post-commit networkd requests and
+absence of a DISARM request bound the stop to `netconf_save_atomic_locked()`;
+the existing log cannot distinguish file sync, close, overlay rename, or
+backing synchronization. Consequently q074 does not claim new persisted bytes,
+absence of late rollback, or reboot restoration.
+
+All selected NCOM-T001--T012, parser/console/persistence/boot/ZNV2, managed-
+WLAN/Wi-Fi, and amd64/i386 target-build gates pass. Both documentation
+validators and `git diff --check` pass. Production config and image hashes are
+unchanged. Exact environment, hashes, and observations are retained in the
+[q074 evidence summary](../tests/q074-confirmed-commit-qemu-evidence.md).
+
+No third QEMU cell was run. Resume through separately proposed p009, which must
+first obtain stage evidence and correct the publication path before one
+T021-only rerun. P008 remains blocked on both p007 completion and its physical
+transport/topology/recovery choices.

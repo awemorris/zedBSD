@@ -1,81 +1,77 @@
-# Queue proposal: confirmed-commit automatic acceptance
+# Queue: confirmed-commit overlay publication correction
 
 Last updated: 2026-09-05
 
-QID: `q074`
+QID: `q075`
 
-Queue status: proposed; awaiting explicit execution approval
+Queue status: proposed
 
 Queue finished: **No**
 
-Authorization: the user requested that the next work be extracted. This
-authorizes the planning proposal only; QEMU execution remains `pending` until
-the user explicitly approves q074.
+Authorization: pending explicit user approval; no implementation or additional
+QEMU execution is authorized by this proposal.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q073](queue-q073.md)
+Previous Queue: [q074](queue-q074.md)
 
 ## Purpose
 
-Accept the q073 confirmed-commit implementation in a deterministic amd64
-PC/AT QEMU environment. Prove timeout restoration after loss of the originating
-management client and prove same-session confirmation, delayed persistence,
-absence of late rollback, and reboot persistence without requiring a physical
-network or an unavailable in-base remote-shell daemon.
+Correct the target hybrid-overlay atomic-publication stop exposed by q074's
+NCOM-T021 cell. Establish the exact blocking stage, make only the responsible
+bounded correction, then rerun T021 once so p007 can either complete or retain
+a narrower honest residual.
 
-## Proposed execution registry
+## Execution registry
 
 | Priority | WS / Phase | Status | Purpose / dependency |
 | --- | --- | --- | --- |
-| 1 | [`ws011-p007`](ws011-net-config/phase007-confirmed-commit-acceptance/phase.md) | pending | Add and run the two-cell NCOM-T020/T021 QEMU acceptance plus the q073 focused regression/build boundary; depends on completed ws011-p006 |
+| 1 | [`ws011-p009`](ws011-net-config/phase009-confirmed-commit-overlay-publication/phase.md) | pending | Diagnose and correct the post-reconcile/pre-DISARM atomic publication stop, then perform one T021-only corrective acceptance; depends on q074 evidence and completed p006 |
 
 ## Why this is the next bounded unit
 
-- It is first in the active order in the master plan and directly accepts the
-  just-completed q073 implementation.
-- P005 fixed the semantics and bounds; p006 implements them and passes all
-  host/model/integration gates. The remaining automatic uncertainty is target
-  runtime behavior across a real monotonic minute and reboot.
-- A dedicated NE2000 QEMU topology and monitor-driven guest console are already
-  established repository test patterns, so this work needs a runner and
-  disposable image fixture rather than a new product interface.
-- Physical remote administration is separated into p008 because the current
-  base system has no SSH, Telnet, or rlogin daemon and no safe target management
-  transport/topology has been selected. Q074 contains no unresolved physical
-  decision.
+- Q074 accepted T020 but exhausted p007's two-cell boundary when T021 failed to
+  return from atomic publication. Repeating that attempt without new evidence
+  is prohibited.
+- The ten admitted post-commit requests and absence of DISARM constrain the
+  problem to one production interval: temporary write/flush/close/overlay
+  replace and backing synchronization.
+- P009 defines finite stage instrumentation, lower-only overlay replacement
+  tests, strict durability/order invariants, and a maximum QEMU budget. It can
+  stop uncleared if the cause requires a material filesystem redesign.
+- P008 cannot proceed until automatic T021 passes, and the active WS019 wave
+  follows WS011. This correction therefore remains the first dependency-ready
+  work.
 
 ## Execution and timebox boundary
 
-- One Queue item and one automatic acceptance Phase only.
-- Build or derive one test-only amd64 PC/AT image with NE2000 enabled and a
-  synthetic static `10.0.2.0/24` configuration. Run exactly two fresh QEMU
-  cells: timeout/client-loss restoration and same-session confirmation/reboot.
-- Use restricted QEMU user networking, a fixed synthetic MAC, monitor-driven
-  keyboard input, bounded boot/command/cell deadlines, and disposable image
-  copies. Preserve `config.mk`, the production image, and every source input by
-  before/after digest.
-- Retain reusable runner/config fixtures under `plan/ws011-net-config/tests/`.
-  Keep run images and verbose logs under the ignored WS011 `temp/` tree; retain
-  only bounded, secret-free summaries in planning evidence.
-- Rerun NCOM-T001--T012, the parser/console/persistence/boot/private-protocol
-  gates, managed-WLAN/Wi-Fi focused regressions, maintained amd64/i386
-  `net`/networkd builds, documentation link checks, and `git diff --check`.
-- Do not run aggregate `make check`, change public grammar or protocol, begin
-  VLAN/bridge p004, add a remote-shell service, or perform a physical test.
-- If either QEMU cell exposes a production defect, mark p007 `uncleared` and
-  extract a corrective Phase instead of silently widening this acceptance
-  Queue into implementation.
+- One Queue item and one corrective Phase only.
+- Begin with static and host stage/order/failure evidence. Use at most one
+  instrumented diagnostic amd64 QEMU cell only if target-only localization is
+  still required.
+- Make only a bounded fix in the responsible netconf, generic sync, overlay, or
+  directly backing-filesystem path. Do not weaken file synchronization, atomic
+  replacement, error propagation, or publication-before-DISARM ordering.
+- After deterministic correction gates pass, run exactly one fresh T021-only
+  acceptance cell with q074's restricted NE2000 topology and real one-minute
+  timeout. Do not rerun accepted T020.
+- Rerun NCOM-T001--T012, directly affected VFS/storage fixtures, existing
+  WS011/ZNV2/Wi-Fi regressions, maintained amd64/i386 target builds,
+  documentation validators, and `git diff --check`. Do not run aggregate
+  `make check`.
+- Do not begin p008 physical work, add a remote service, change public
+  grammar/protocol, begin VLAN/bridge, or broaden into a VFS/storage redesign.
 
 ## Important uncertainty
 
-The automatic runner and its exact guest keystroke/image-staging mechanics do
-not exist yet. They are bounded fixture work inside p007. The physical
-remote-administration mechanism is a separate unresolved dependency owned by
-p008 and cannot block or be claimed by q074.
+Current evidence proves the stop interval but not whether file `fsync`, close,
+overlay rename, or backing synchronization is responsible. P009 permits one
+instrumented target cell for that distinction. If the result requires broader
+filesystem architecture, q075 finishes with p009 uncleared and a new Phase;
+it does not force a speculative fix or consume repeated QEMU retries.
 
-## Approval boundary
+## Approval request
 
-Present this q074 proposal before starting QEMU or adding its runner. On
-explicit approval, set q074 and `ws011-p007` to `in-progress` and execute the
-P-book packages in order. Without that approval, this Queue remains a proposal.
+Approve q075 to execute only `ws011-p009` within the boundary above. Planning
+changes and this proposal may be committed, but production correction and any
+additional QEMU execution wait for explicit approval.

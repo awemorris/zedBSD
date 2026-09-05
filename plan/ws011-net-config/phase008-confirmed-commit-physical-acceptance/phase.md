@@ -13,6 +13,8 @@ Parent: [WS011](../ws.md)
 
 Automatic prerequisite: [p007](../phase007-confirmed-commit-acceptance/phase.md)
 
+Corrective prerequisite: [p009](../phase009-confirmed-commit-overlay-publication/phase.md)
+
 Tests: [WS011 test index](../tests/README.md)
 
 ## Objective
@@ -93,6 +95,8 @@ without a verified local/out-of-band recovery route.
 
 ## Current result and resumption
 
-The physical check is extracted but not Queue-ready. Resume only after p007
-passes and the user selects the remote-administration transport, target link,
-safe trial values, and recovery route. No physical action is authorized here.
+The physical check is extracted but not Queue-ready. Q074 passed T020 but left
+p007 uncleared at target atomic publication in T021; p009 must correct and
+accept that path first. Resume only after p007 passes and the user selects the
+remote-administration transport, target link, safe trial values, and recovery
+route. No physical action is authorized here.

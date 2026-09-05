@@ -15,6 +15,7 @@ repository-wide `make check` target is not an acceptance interface.
 | `NCOM-T001`–`NCOM-T012` | `ws011-p006` | Grammar removal/addition, arm/apply/confirm, timeout, explicit rollback, session loss, stale token, concurrency, restart, bounds, partial failure, and acknowledgement loss |
 | `NCOM-T020`–`NCOM-T021` | `ws011-p007` | Automatic QEMU timeout/client-loss recovery and confirmed persistence through reboot |
 | `NCOM-T022` | `ws011-p008` | One consolidated physical remote-administration timeout and confirmation acceptance after transport/topology selection |
+| `NCOM-T023` | `ws011-p009` | Target hybrid-overlay atomic-publication stage, bounded completion/error, lower-only replacement, and T021-only corrective rerun |
 
 Future WLAN fixtures use synthetic, redacted credentials only.
 
@@ -38,7 +39,9 @@ Future WLAN fixtures use synthetic, redacted credentials only.
 P006 owns host/model/protocol fixtures and supported target builds for these
 cases. P007 owns the two automatic QEMU cells NCOM-T020--T021. P008 owns only
 NCOM-T022 and is not Queue-ready until its physical remote transport, target
-link, trial values, and safe recovery route are selected.
+link, trial values, and safe recovery route are selected. P009 owns the
+correction extracted after q074 passed T020 but stopped inside target atomic
+publication during T021; it does not rerun T020 or begin physical work.
 
 ## Executable tests
 
