@@ -461,7 +461,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws008` | Noct and BeUI | Complete (`q063`) | p010 host CLI/toolchain/ordinary-build and p009 amd64 static/package/q35-xHCI runtime gates pass on official `v2.0.1`; p006 remains historical review evidence | No current Phase; Remacs and i386/PC-98 target Noct remain explicitly outside q063 | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | Active; completed-producer follow-up complete (`q072`) | `ws009-p006` completes current WLAN, physical USB HID, Intel Mac Variant, Noct 2.0.1, and project LLVM references | Return producer-specific documentation to its owning implementation Phase; remaining DOC ledger items stay scoped | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete (`q063`) | `ws010-p001`–`p005` complete; all 177 maintained userland Makefiles expose the common lifecycle and top-level download materializes declared external inputs | No current Phase; extract a new requirement before resuming | [WS010](ws010-scripting/ws.md) |
-| `ws011` | Network configuration console | In progress; confirmed-commit design complete; VLAN/bridge separately blocked | `ws011-p005` complete by design; p006 Queue-ready; p007 follows; p004 blocked by MB-010 | After WS009 p006, implement p006 then complete p007 acceptance | [WS011](ws011-net-config/ws.md) |
+| `ws011` | Network configuration console | In progress; confirmed-commit design complete; VLAN/bridge separately blocked | `ws011-p005` complete by design; p006 Ready and proposed as sole q073 item; p007 follows; p004 blocked by MB-010 | Obtain explicit q073 approval, implement p006, then separately extract p007 acceptance | [WS011](ws011-net-config/ws.md) |
 | `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
 | `ws013` | CPAR container partitioning | Active; q031/q032 configured x86 boot paths complete, Runtime topics manually blocked | `ws013-p002`--`p006` complete | No Boot configuration Phase remains; resume Runtime namespace/CLI/package design only after its explicit manual holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
@@ -581,10 +581,12 @@ The user replaced the previous WLAN/toolchain wave on 2026-09-05. Completed
 WS004, WS005, WS008, WS009 p006, WS018, WS020, WS021, and WS023 results remain
 accepted and are no longer execution-order entries. The active order is:
 
-1. `ws011-p006`, then `ws011-p007`: implement and accept interactive confirmed
-   commit. The originating `net` process alone owns the candidate and may
-   publish `/etc/net.conf`; networkd owns only the volatile timer, token, and
-   `/tmp` rollback program. VLAN/bridge p004 remains excluded by `MB-010`.
+1. `ws011-p006`, then separately `ws011-p007`: implement and accept interactive
+   confirmed commit. P006 is proposed as the sole q073 item; execution still
+   needs explicit approval. The originating `net` process alone owns the
+   candidate and may publish `/etc/net.conf`; networkd owns only the volatile
+   timer, token, and `/tmp` rollback program. VLAN/bridge p004 remains excluded
+   by `MB-010`.
 2. WS019 in dependency order: p002 read-only storage administration, p003
    read-only `/sbin/diskpart`, p008 target UFS1-in-file `/sbin/mkfs`, p009
    target ZEDSWAP2-in-file `/sbin/mkswap`, p004 Noct `/bin/zedinst`, then p005

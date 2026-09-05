@@ -1,66 +1,62 @@
-# Queue: completed-producer documentation follow-up
+# Queue proposal: confirmed-commit implementation
 
 Last updated: 2026-09-05
 
-QID: `q072`
+QID: `q073`
 
-Queue status: complete
+Queue status: proposed; awaiting explicit execution approval
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: the user explicitly requested that `ws009-p006` be placed in
-the Queue and executed. This Queue is limited to the current execution cycle
-and contains no later implementation Phase.
+Authorization: the user asked for the next work to be extracted. That
+authorizes this planning proposal, not implementation. The item remains
+`pending` until the user explicitly approves q073 execution.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q071](queue-q071.md)
+Previous Queue: [q072](queue-q072.md)
 
 ## Purpose
 
-Bring public documentation forward to the already accepted WLAN, physical USB
-HID, Intel Mac image-Variant, Noct 2.0.1, and project LLVM state before the next
-implementation wave. Planned removals, new UAPIs, and manually blocked work
-remain visibly distinct from installed behavior.
+Implement the already frozen interactive confirmed-commit contract as one
+bounded software Phase. Keep the candidate and `/etc/net.conf` writer in the
+originating `net` process; networkd owns only the volatile deadline, opaque
+token, already-open rollback program, and bounded rollback result.
 
-## Execution registry
+## Proposed execution registry
 
 | Priority | WS / Phase | Status | Purpose / dependency |
 | --- | --- | --- | --- |
-| 1 | [`ws009-p006`](ws009-documentation/phase006-completed-producer-follow-up/phase.md) | completed (`q072`) | Published current completed-producer behavior; completed WS004/WS005/WS006/WS008/WS020/WS021 results |
+| 1 | [`ws011-p006`](ws011-net-config/phase006-confirmed-commit-implementation/phase.md) | pending | Replace interactive `apply`/`save`/`discard` with `commit`, `commit confirmed MINUTES`, and `rollback`; p005 design and q072 documentation dependency are complete |
 
-## Execution policy
+## Why this is the next bounded unit
 
-- Change product documentation and its WS009 planning/evidence records only;
-  do not implement WS006 p009, WS011, WS017, WS019, or WS022 behavior.
-- Derive command examples and claims from current production source and the
-  completed producer evidence rather than from planned contracts alone.
-- Do not expose real credentials, retained `.internal/` paths, or private test
-  data. Examples use obvious placeholders.
-- Keep current, experimental, deprecated, planned, and manually blocked
-  behavior distinct in status banners and prose.
-- Run the native Noct relative-link validator, focused documentation command
-  and example checks, and `git diff --check`. Do not run aggregate
-  `make check`.
+- It is first in the active order in the master plan.
+- `ws011-p005` froze ownership, grammar, time, size, locking, persistence, and
+  acknowledgement bounds; no unresolved design decision remains.
+- q072 completed the only higher-priority dependency.
+- VLAN/bridge p004 remains outside scope under `MB-010`.
+- p007 includes QEMU and user-operated physical acceptance, so it remains a
+  separate follow-up after this implementation reaches its focused gates.
 
-## Completion boundary
+## Execution and timebox boundary
 
-Q072 completes when `ws009-p006` satisfies its P-book completion conditions
-and its actual evidence is synchronized into the P, W, M, test index, and this
-Queue. Any newly discovered producer mismatch outside documentation scope is
-recorded and returned to its owning WS rather than silently implemented here.
+- One Queue item and one implementation Phase only.
+- Change the private `net`/networkd protocol, interactive transaction owner,
+  rollback-program machinery, focused fixtures, build integration, and the
+  directly affected public network-console documentation.
+- Preserve the existing argv interface, direct `/sbin/ifconfig` recovery,
+  wired boot, and completed managed-WLAN behavior.
+- Do not implement VLAN/bridge, a persistent daemon candidate, a cross-reboot
+  timer, an argv confirmed-commit command, a separate `confirm`, pending-status,
+  or timer-extension/reset commands.
+- Stop after NCOM-T001--T012, focused existing regressions, supported target
+  builds, and `git diff --check`. Do not begin p007 QEMU or physical acceptance
+  and do not run aggregate `make check`.
 
-## Completion result
+## Approval boundary
 
-- Added the managed-WLAN command, profile, authority, state, recovery, and
-  failure reference from the accepted implementation boundary.
-- Reconciled evdev/USB HID, Intel Mac image variants, Noct 2.0.1, and project
-  LLVM 23.1.0 documentation while keeping deprecated and planned behavior
-  explicit.
-- Added a focused completed-producer documentation checker and made the native
-  relative-link validator ignore only disposable `temp/` and prohibited
-  `.internal/` trees.
-- `DOC-T70--T72 completed-producer documentation: PASS (11 status banners)`.
-- `Markdown relative-link check: PASS (1803 links)`.
-- `git diff --check` passed. No producer source, runtime configuration, or
-  image behavior changed in this Queue.
+Before source changes, present this q073 proposal to the user. On explicit
+approval, change the Queue to active, set `ws011-p006` to `in-progress`, and
+execute its P-book work packages in order. Without that approval, q073 remains
+a proposal and no implementation work is authorized.

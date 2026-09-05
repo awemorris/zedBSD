@@ -8,8 +8,8 @@ Phase ID: `p005`
 
 Combined ID: `ws011-p005`
 
-Status: complete design; implementation is authorized and extracted as p006,
-with automatic/physical acceptance in p007
+Status: complete design; implementation is extracted as p006, with
+automatic/physical acceptance in p007; execution still requires Queue approval
 
 Parent: [WS011](../ws.md)
 

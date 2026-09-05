@@ -14,7 +14,7 @@ Parent: [WS009](../ws.md)
 
 Tests: [WS009 test index](../tests/README.md)
 
-Queue: [q072](../../queue.md)
+Queue: [q072](../../queue-q072.md)
 
 ## Objective
 

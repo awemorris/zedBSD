@@ -17,6 +17,26 @@ repository-wide `make check` target is not an acceptance interface.
 
 Future WLAN fixtures use synthetic, redacted credentials only.
 
+### NCOM-T001--T012 extraction
+
+| Case | Focused implementation observation |
+| --- | --- |
+| `NCOM-T001` | Interactive help and parsing expose only `commit`, `commit confirmed MINUTES`, and `rollback`; removed and non-interactive forms fail without mutation |
+| `NCOM-T002` | Normal commit validates and completely reconciles runtime before atomic persistence; partial forward failure restores old intent |
+| `NCOM-T003` | Pre-arm accepts only a bounded root-mode-0600 regular rollback file and executes the accepted descriptor rather than a replacement pathname |
+| `NCOM-T004` | The originating session temporarily applies, then ordinarily commits, atomically publishes, and disarms only its matching token with bounded retries |
+| `NCOM-T005` | Monotonic timeout restores old running intent and leaves `/etc/net.conf` byte-identical |
+| `NCOM-T006` | Explicit rollback executes immediately, cancels the timer, and reloads the caller's candidate from startup configuration |
+| `NCOM-T007` | Client/TTY loss cannot confirm or adopt the candidate; rollback remains armed until explicit rollback or timeout |
+| `NCOM-T008` | One pending transaction, `/run/net.conf.lock`, concurrent sessions, and stale-token rejection prevent replacement or cross-confirmation |
+| `NCOM-T009` | Networkd restart forgets volatile state without changing `/etc/net.conf`; next boot retains the old committed intent |
+| `NCOM-T010` | Malformed, truncated, symlinked, replaced-before-open, over-count, over-line, and over-total rollback programs fail before arming |
+| `NCOM-T011` | Rollback continues after individual failures with bounded aggregate diagnostics; DHCP intent performs a fresh acquisition |
+| `NCOM-T012` | Lost disarm acknowledgement reports nonzero `outcome uncertain`; parser, console, persistence, boot, direct ifconfig, wired, and WLAN focused regressions pass |
+
+P006 owns host/model/protocol fixtures and supported target builds for these
+cases. P007 alone owns NCOM-T020--T022 QEMU and physical acceptance.
+
 ## Executable tests
 
 `netconf-parser-test.c` is the `ws011-p001` host contract test. Run it with:
