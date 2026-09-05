@@ -35,7 +35,8 @@ then prove that a separately confirmed safe change persists through reboot.
 
 ## Queue-readiness prerequisites
 
-- P007 passes both automatic QEMU cells on the exact candidate commit/image.
+- P007 automatic acceptance is complete, including p009's corrective closure;
+  the physical run identifies its exact final candidate commit/image.
 - The user identifies or approves the remote-administration transport and the
   physical target/interface used by the session.
 - A local console or other out-of-band recovery route is available and tested
@@ -95,8 +96,8 @@ without a verified local/out-of-band recovery route.
 
 ## Current result and resumption
 
-The physical check is extracted but not Queue-ready. Q074 passed T020 but left
-p007 uncleared at target atomic publication in T021; p009 must correct and
-accept that path first. Resume only after p007 passes and the user selects the
+The physical check is extracted but not Queue-ready. Q075 completed p009's
+FAT traversal correction and p007 automatic acceptance, retaining the accepted
+q074 T020 and four post-fix T021 cells. Resume only after the user selects the
 remote-administration transport, target link, safe trial values, and recovery
 route. No physical action is authorized here.

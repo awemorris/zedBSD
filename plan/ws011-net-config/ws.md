@@ -5,17 +5,16 @@ Last updated: 2026-09-05
 WSID: `ws011`
 
 Status: in progress; p001--p003, p005 design, and p006 implementation are
-complete. Q074 passed p007/T020 but left T021 uncleared at target atomic
-publication; p009 is proposed as q075. VLAN/bridge is blocked by `MB-010`;
-p008 physical acceptance awaits p007 and its remote topology.
+complete. Q075 completes p009's FAT traversal correction and p007 automatic
+acceptance, retaining the pre-fix failure. VLAN/bridge is blocked by `MB-010`;
+p008 physical acceptance awaits its remote transport/topology/recovery choices.
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws011-p007` processed as uncleared (`q074`); T020 passed
+Last verified Phase: `ws011-p009` completed (`q075`); p007 automatic acceptance completed
 
-Resume point: obtain explicit q075 approval, then execute p009's staged target
-publication diagnosis/correction and one T021-only rerun. Keep p004 blocked.
-Queue p008 only after p007 passes and the user selects the physical remote
+Resume point: retain the completed p007/p009 regressions; keep p004 blocked.
+Queue p008 only after the user selects the physical remote
 transport, target link, and safe recovery route.
 The current `/sbin/net` implements `commit`, `commit confirmed MINUTES`, and
 `rollback`; historical `apply`/`save`/`discard` are removed.
@@ -79,9 +78,9 @@ strict YAML-like zedBSD format, not general YAML.
 | `ws011-p004` | [VLAN and bridge interfaces](phase004-vlan-bridge/phase.md) | Blocked by explicit manual hold | Resume design and implementation only after explicit user release |
 | `ws011-p005` | [Confirmed-commit design](phase005-confirmed-commit-design/phase.md) | Complete design (2026-09-05) | Session-only candidate/token, networkd rollback timer, delayed config publication, and implementation bounds are frozen |
 | `ws011-p006` | [Confirmed-commit implementation](phase006-confirmed-commit-implementation/phase.md) | Complete (`q073`, 2026-09-05) | Complete reconcile, interactive confirmed commit, volatile networkd rollback, serialized delayed publication, focused regressions, and amd64/i386 builds pass |
-| `ws011-p007` | [Confirmed-commit automatic acceptance](phase007-confirmed-commit-acceptance/phase.md) | Uncleared (`q074`, 2026-09-05) | T020 timeout/client-loss restoration passed; T021 stopped inside target atomic publication before DISARM, late-deadline, and reboot evidence |
+| `ws011-p007` | [Confirmed-commit automatic acceptance](phase007-confirmed-commit-acceptance/phase.md) | Complete (`q075`, 2026-09-05) | Q074 T020 plus all four post-fix q075 T021 cells prove timeout recovery, confirmed persistence, no late rollback, reboot and connectivity |
 | `ws011-p008` | [Confirmed-commit physical acceptance](phase008-confirmed-commit-physical-acceptance/phase.md) | Planned; not Queue-ready | One consolidated real-hardware remote check after p007/p009 and explicit transport/topology/recovery selection |
-| `ws011-p009` | [Confirmed-commit overlay publication correction](phase009-confirmed-commit-overlay-publication/phase.md) | Queue-ready; proposed as `q075` | Identify and correct the bounded target publication stop, then rerun only T021 and return p007 to acceptance |
+| `ws011-p009` | [Confirmed-commit overlay publication correction](phase009-confirmed-commit-overlay-publication/phase.md) | Complete (`q075`) | FAT validation/seek/write fusion removes reproduced traversal amplification; old/new cost, corruption/growth faults, supported builds and four post-fix T021 cells pass |
 
 ## Fixed decisions
 
@@ -99,7 +98,9 @@ strict YAML-like zedBSD format, not general YAML.
   multiline scalars. Supported scalars are bounded strings, unsigned integers,
   `true`, and `false`.
 - Persistent writes use a same-directory temporary file, validation, sync, and
-  atomic rename. Failure preserves the prior valid file.
+  atomic rename. Pre-rename failure preserves the prior valid file. A backing
+  sync error after rename may leave the new namespace visible; it is reported
+  as failure and does not authorize confirmed DISARM.
 - Wi-Fi secrets stay in the euid-selected `/etc/wifi.conf` or `~/.wifi.conf`
   owned by WS005 and are never duplicated in `net.conf`.
 - A VLAN is a virtual interface with a parent and 802.1Q ID. A bridge is a

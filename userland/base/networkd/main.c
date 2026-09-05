@@ -13,6 +13,7 @@
 
 #include "userland/base/net/netutil.h"
 #include "userland/base/net/protocol.h"
+#include "userland/base/net/publication-trace.h"
 #include "userland/base/net/wifi-store.h"
 #include "userland/base/networkd/confirmed.h"
 #include "userland/base/networkd/managed-wlan.h"
@@ -1400,6 +1401,7 @@ handle_request(
 	}
 
 	/* Applies peer authorization before operation dispatch. */
+	NCOM_TRACE("daemon-read-done", request.header.opcode);
 	operation = operation_name(request.header.opcode);
 	if (operation == NULL || !operation_allowed(role, operation)) {
 		send_response(client, request.header.request_id,
@@ -1502,9 +1504,11 @@ handle_request(
 	}
 
 	/* Dispatches the validated operation through absolute child paths. */
+	NCOM_TRACE("daemon-execute-enter", request.header.opcode);
 	result = execute_wired_request(&request, response, sizeof(response),
 	    diagnostic, sizeof(diagnostic), &response_length, &error,
 	    mutation_deadline);
+	NCOM_TRACE("daemon-execute-done", request.header.opcode);
 	if (mutation_deadline != 0U &&
 	    netutil_monotonic_us() >= mutation_deadline) {
 		run_confirmed_due();
@@ -1515,6 +1519,7 @@ handle_request(
 	}
 
 	/* Sends one correlated terminal response and clears request storage. */
+	NCOM_TRACE("daemon-response-enter", request.header.opcode);
 	if (result == 0) {
 		send_response(client, request.header.request_id,
 		    request.header.opcode, NETWORKD_RESULT_OK, 0, NULL,
@@ -1526,6 +1531,7 @@ handle_request(
 		    diagnostic[0] != '\0' ? diagnostic : operation,
 		    NULL, 0U);
 	}
+	NCOM_TRACE("daemon-response-done", request.header.opcode);
 	networkd_protocol_clear(&request, sizeof(request));
 	networkd_protocol_clear(response, sizeof(response));
 	networkd_protocol_clear(diagnostic, sizeof(diagnostic));
@@ -4391,7 +4397,9 @@ write_resolver(
 		/* Reports operation failure. */
 		return -1;
 	}
+	NCOM_TRACE("resolver-open-enter", 0);
 	descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0644);
+	NCOM_TRACE("resolver-open-done", 0);
 
 	/* Checks the file descriptor. */
 	if (descriptor < 0)
@@ -4427,15 +4435,24 @@ write_resolver(
 	}
 
 	/* Handles a failed fsync operation. */
-	if (fsync(descriptor) != 0 || close(descriptor) != 0) {
+	NCOM_TRACE("resolver-fsync-enter", 0);
+	if (fsync(descriptor) != 0) {
+		descriptor = -1;
+		goto fail;
+	}
+	NCOM_TRACE("resolver-close-enter", 0);
+	if (close(descriptor) != 0) {
 		descriptor = -1;
 		goto fail;
 	}
 	descriptor = -1;
+	NCOM_TRACE("resolver-close-done", 0);
 
 	/* Handles a failed rename operation. */
+	NCOM_TRACE("resolver-rename-enter", 0);
 	if (rename(temporary, "/etc/resolv.conf") != 0)
 		goto fail;
+	NCOM_TRACE("resolver-rename-done", 0);
 
 	/* Reports successful completion. */
 	return 0;

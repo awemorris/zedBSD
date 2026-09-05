@@ -160,10 +160,12 @@ deferred. Q073 completed WS011 p006: interactive confirmed commit, complete
 wired reconcile, secure volatile networkd rollback, serialized delayed
 publication, focused failure evidence, and maintained amd64/i386 builds pass.
 Q074 passed p007's timeout/client-loss cell but left its confirmation cell
-uncleared inside target overlay-backed atomic publication before DISARM. P009
-is proposed as q075 to instrument and correct that bounded path, then rerun
-only T021. P008 retains the physical remote-administration check until p007 is
-complete and its transport and safe topology are selected.
+uncleared at the final DNS/publication boundary before observed DISARM.
+Completed [q075](queue-q075.md) localized excessive FAT backing-chain traversal
+in normal case 06, fused full validation and write-position traversal, and
+passed all four post-fix T021 cells. P007 automatic acceptance and p009 are
+complete, with the pre-fix failure preserved. P008 retains the separate physical
+remote-administration check until its transport and safe topology are selected.
 Q061 completed
 p037's read-only Intel intake, corrected the exact target to AX211/CNVio2
 `8086:51f0`, subsystem `8086:4090`, revision `01`, and cleared its firmware/
@@ -469,7 +471,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws008` | Noct and BeUI | Complete (`q063`) | p010 host CLI/toolchain/ordinary-build and p009 amd64 static/package/q35-xHCI runtime gates pass on official `v2.0.1`; p006 remains historical review evidence | No current Phase; Remacs and i386/PC-98 target Noct remain explicitly outside q063 | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | Active; completed-producer follow-up complete (`q072`) | `ws009-p006` completes current WLAN, physical USB HID, Intel Mac Variant, Noct 2.0.1, and project LLVM references | Return producer-specific documentation to its owning implementation Phase; remaining DOC ledger items stay scoped | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete (`q063`) | `ws010-p001`–`p005` complete; all 177 maintained userland Makefiles expose the common lifecycle and top-level download materializes declared external inputs | No current Phase; extract a new requirement before resuming | [WS010](ws010-scripting/ws.md) |
-| `ws011` | Network configuration console | In progress; confirmed-commit implementation complete, q074 passed T020 but p007/T021 is uncleared at atomic publication; VLAN/bridge separately blocked | `ws011-p006` complete; `ws011-p009` proposed as q075 to correct target publication and rerun T021; p008 awaits p007 plus its remote topology; p004 blocked by MB-010 | Approve and execute q075/p009; consider p008 only after p007 and explicit transport/topology/recovery selection | [WS011](ws011-net-config/ws.md) |
+| `ws011` | Network configuration console | Automatic milestone complete (`q075`); physical acceptance and held VLAN/bridge remain | p007/p009 complete: FAT traversal correction, deterministic cost/fault gates and four post-fix T021 cells pass; p004 blocked by MB-010 | Retain regressions; queue p008 only after explicit physical transport/topology/recovery selection | [WS011](ws011-net-config/ws.md) |
 | `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
 | `ws013` | CPAR container partitioning | Active; q031/q032 configured x86 boot paths complete, Runtime topics manually blocked | `ws013-p002`--`p006` complete | No Boot configuration Phase remains; resume Runtime namespace/CLI/package design only after its explicit manual holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
@@ -477,7 +479,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Queue-ready; permission ceiling selected | No Phase started; p001 Queue-ready | After WS022, Queue p001--p004; RW mappings may return from RO to RW within their original maximum | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
-| `ws019` | Installation and disk administration | Active; Noct 2.0.1 block released and target-generation policy selected | p001 complete; p002 Queue-ready; p003/p008/p009/p004/p005 follow | After WS011, implement read-only diskpart, target mkfs/mkswap, Noct zedinst, and QEMU acceptance in dependency order | [WS019](ws019-installation/ws.md) |
+| `ws019` | Installation and disk administration | Active; Noct 2.0.1 block released and target-generation policy selected | p001 complete; p002 Queue-ready; p003/p008/p009/p004/p005 follow | Next dependency-ready wave after q075: queue p002, then diskpart, target mkfs/mkswap, Noct zedinst, and QEMU acceptance in dependency order | [WS019](ws019-installation/ws.md) |
 | `ws020` | Intel Mac UEFI bring-up and generic image variants | Complete (user physical confirmation, 2026-09-05) | Automatic Variant/GPT/QEMU gates and successful Intel Mac real-hardware operation pass | No Phase remains; explicit acceptance supersedes the older five-run campaign | [WS020](ws020-intel-mac/ws.md) |
 | `ws021` | Reproducible x86 LLVM toolchain and sysroots | Complete (`q064`) | LLVM 23.1.0 cache/source paths, amd64/i386 sysroots, all x86 target/loader builds, four CI configurations, six-cell amd64 firmware matrix, i386 PC/AT and PC-98, and target noct non-JIT/JIT/BeUI gates pass | No current Phase; the source-build path and pinned `rev-0` cache remain supported in parallel | [WS021](ws021-llvm-toolchain/ws.md) |
 | `ws022` | ELF `PT_TLS` and static thread-local storage | Queue-ready; WS021 dependency satisfied | No Phase started | Queue p001 to freeze the x86 TLS/TCB ABI and fixtures, then implement p002/p003 | [WS022](ws022-elf-tls/ws.md) |
@@ -587,32 +589,26 @@ WS003/WS004 x86 HAL behavior + WS021 project LLVM
 
 The user replaced the previous WLAN/toolchain wave on 2026-09-05. Completed
 WS004, WS005, WS008, WS009 p006, WS018, WS020, WS021, and WS023 results remain
-accepted and are no longer execution-order entries. The active order is:
+accepted and are no longer execution-order entries. Q075 also completes WS011's
+p007/p009 automatic milestone. Physical p008 still requires its transport,
+target link, trial values, and recovery route; VLAN/bridge p004 remains excluded
+by `MB-010`. The next dependency-ready order, requiring a new Queue approval, is:
 
-1. `ws011-p009`: q074 accepted p007's T020 timeout/client-loss restoration, but
-   T021 completed full reconcile and then stopped in target
-   `netconf_save_atomic_locked()` before DISARM. Execute the proposed q075 to
-   obtain exact stage evidence, make only the responsible bounded correction,
-   and rerun T021 once. The originating `net` process remains the sole
-   `/etc/net.conf` writer and networkd retains only volatile rollback state.
-   VLAN/bridge p004 remains excluded by `MB-010`; p008 follows only after p007
-   passes and its physical transport, target link, trial values, and recovery
-   route are selected.
-2. WS019 in dependency order: p002 read-only storage administration, p003
+1. WS019 in dependency order: p002 read-only storage administration, p003
    read-only `/sbin/diskpart`, p008 target UFS1-in-file `/sbin/mkfs`, p009
    target ZEDSWAP2-in-file `/sbin/mkswap`, p004 Noct `/bin/zedinst`, then p005
    consolidated QEMU NVMe installation acceptance. No template image or live
    `DATA.IMG`/`SWAPFILE` copy is permitted.
-3. WS022 p001--p003: freeze and implement compiler-emitted static ELF
+2. WS022 p001--p003: freeze and implement compiler-emitted static ELF
    `PT_TLS` for amd64/i386 initial threads and pthreads. Dynamic `dlopen()` TLS
    remains outside the first boundary.
-4. WS017 p001--p004: implement the optional `/dev/graphics` mapped-LFB path,
+3. WS017 p001--p004: implement the optional `/dev/graphics` mapped-LFB path,
    amd64 backend, Xzed fast path, and final amd64 UEFI acceptance. An initially
    RW mapping may transition `RW -> RO -> RW` within its original maximum; an
    initially RO mapping cannot gain write, and execute is always forbidden.
 
 `ws006-p009` is independently Queue-ready after physical USB HID acceptance,
-but is outside this explicitly ordered four-WS wave. It remains visible and is
+but is outside this explicitly ordered wave. It remains visible and is
 not silently inserted ahead of the listed priorities. WS003 Latitude NVMe
 installation follows successful WS019 acceptance. WS007, WS001, remaining
 WS004 hardware follow-ups, WS013 Runtime CPAR, WS014 GPU, and WS015 μITRON stay

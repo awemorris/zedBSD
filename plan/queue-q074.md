@@ -27,7 +27,7 @@ network or an unavailable in-base remote-shell daemon.
 
 | Priority | WS / Phase | Status | Purpose / dependency |
 | --- | --- | --- | --- |
-| 1 | [`ws011-p007`](ws011-net-config/phase007-confirmed-commit-acceptance/phase.md) | uncleared (`q074`) | NCOM-T020 passed; NCOM-T021 completed full reconcile but stopped in target atomic publication before DISARM, late-deadline, and reboot evidence |
+| 1 | [`ws011-p007`](ws011-net-config/phase007-confirmed-commit-acceptance/phase.md) | uncleared (`q074`) | NCOM-T020 passed; NCOM-T021 stopped at the final-request/publication boundary before DISARM, late-deadline, and reboot evidence |
 
 ## Why this was the next bounded unit
 
@@ -79,10 +79,11 @@ were processed within the boundary above.
   before ordinary commit and all ten expected check/reconcile requests were
   admitted, but atomic publication did not return inside 30 seconds. No DISARM,
   late-deadline, or reboot observation followed.
-- Existing logs bound the stop to `netconf_save_atomic_locked()` but cannot
-  distinguish file sync, close, overlay rename, or backing sync. No third QEMU
-  cell was run. The correction and one T021-only rerun are extracted as
-  `ws011-p009`, proposed in q075.
+- Existing logs leave final DNS handling/response/client close, subsequent
+  publication, and DISARM connection setup unresolved. Admission is logged
+  before dispatch; the initial inference of completed reconcile and entry into
+  `netconf_save_atomic_locked()` was too strong. No third QEMU cell was run in
+  q074. The correction was extracted as `ws011-p009` in q075.
 - NCOM-T001--T012, parser/console/persistence/boot/ZNV2, all four selected
   Wi-Fi regressions, maintained amd64/i386 `net`/networkd builds, both
   documentation validators, and `git diff --check` pass. Production config and
@@ -90,3 +91,8 @@ were processed within the boundary above.
 - The bounded environment, hashes, and results are retained in the
   [q074 evidence summary](ws011-net-config/tests/q074-confirmed-commit-qemu-evidence.md).
   Physical p008 work remains unstarted and unauthorized.
+
+Q075 retrospective closure: a separate normal cell reproduced excessive FAT
+backing-file traversal during write/flush. The bounded correction and four
+post-fix T021 cells complete p007; the original q074 uncleared result remains
+historical. See [q075](queue-q075.md) and its corrective evidence.

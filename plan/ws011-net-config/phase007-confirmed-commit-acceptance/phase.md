@@ -8,8 +8,7 @@ Phase ID: `p007`
 
 Combined ID: `ws011-p007`
 
-Status: uncleared (`q074`, 2026-09-05); T020 passed, T021 stopped during
-target atomic publication
+Status: completed (`q075`, 2026-09-05); q074 T020 and corrective q075 T021 accepted
 
 Parent: [WS011](../ws.md)
 
@@ -18,6 +17,8 @@ Implementation: [confirmed commit](../phase006-confirmed-commit-implementation/p
 Tests: [WS011 test index](../tests/README.md)
 
 Queue result: [q074](../../queue-q074.md)
+
+Corrective closure: [q075](../../queue-q075.md)
 
 Physical follow-up: [p008](../phase008-confirmed-commit-physical-acceptance/phase.md)
 
@@ -122,8 +123,8 @@ through reboot.
       for pre-arm state, temporary apply, lost client, timer expiry, complete
       rollback, unchanged startup bytes, and connectivity recovery.
 - [x] NCOM-A04: Run NCOM-T021 once from another fresh image. It preserved the
-      old startup view and completed full reconcile, but stopped inside atomic
-      publication before DISARM; late-timer and reboot evidence are absent.
+      old startup view but stopped at the final-request/publication boundary
+      before DISARM; late-timer and reboot evidence are absent in q074.
 - [x] NCOM-A05: Rerun NCOM-T001--T012, existing WS011 and ZNV2 gates, the four
       q073 managed-WLAN/Wi-Fi runners, and maintained amd64/i386
       `net`/networkd target builds. Do not run aggregate `make check`.
@@ -159,13 +160,14 @@ Q074 processed both authorized cells exactly once. NCOM-T020 passed: after the
 originating client exited, the real one-minute timeout restored the old address,
 route, resolver, connectivity, and byte-identical `/etc/net.conf`.
 
-NCOM-T021 is uncleared. The same-session ordinary `commit` completed its
-confirmed check and full candidate reconcile, then failed to return within the
-30-second command bound. The ten admitted post-commit networkd requests and
-absence of a DISARM request bound the stop to `netconf_save_atomic_locked()`;
-the existing log cannot distinguish file sync, close, overlay rename, or
-backing synchronization. Consequently q074 does not claim new persisted bytes,
-absence of late rollback, or reboot restoration.
+NCOM-T021 was uncleared in q074. The same-session ordinary `commit` failed to return
+within the 30-second command bound. Authentication is logged before dispatch,
+so the ten admitted post-commit connections alone do not prove full candidate
+reconcile or entry into `netconf_save_atomic_locked()`. Q074 does not claim new
+persisted bytes, absence of late rollback, or reboot restoration. Q075's later
+normal case 06 independently localized the stop to excessive FAT backing-file
+traversal during the writer's flush; see the
+[corrective evidence](../tests/q075-confirmed-commit-evidence.md).
 
 All selected NCOM-T001--T012, parser/console/persistence/boot/ZNV2, managed-
 WLAN/Wi-Fi, and amd64/i386 target-build gates pass. Both documentation
@@ -173,7 +175,13 @@ validators and `git diff --check` pass. Production config and image hashes are
 unchanged. Exact environment, hashes, and observations are retained in the
 [q074 evidence summary](../tests/q074-confirmed-commit-qemu-evidence.md).
 
-No third QEMU cell was run. Resume through separately proposed p009, which must
-first obtain stage evidence and correct the publication path before one
-T021-only rerun. P008 remains blocked on both p007 completion and its physical
-transport/topology/recovery choices.
+No third QEMU cell was run in q074. Separately approved p009 localized and
+corrected the FAT backing-file traversal defect. Its user-amended ten-cell
+campaign retains the real pre-fix case 06 failure and passes all four post-fix
+normal cells, including the failed procedure. Each proves new persisted bytes,
+no late rollback after 70 seconds, rebooted intent, usable networking, and
+unchanged within-cell production inputs. T020 was not repeated.
+
+Together with the accepted q074 T020 and renewed focused/build/documentation
+gates, this completes p007's automatic acceptance. P008 now awaits only its
+physical transport/topology/recovery choices; no physical result is claimed.

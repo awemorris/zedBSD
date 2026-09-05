@@ -12,6 +12,7 @@
  */
 
 #include "userland/base/net/netconf.h"
+#include "userland/base/net/publication-trace.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -627,6 +628,7 @@ netconf_save_atomic_locked(
 	stream = NULL;
 	descriptor = -1;
 	temporary_created = 0;
+	NCOM_TRACE("save-enter", 0);
 
 	/* Handles a failed netconf validate operation. */
 	if (path == NULL || configuration == NULL ||
@@ -657,13 +659,17 @@ netconf_save_atomic_locked(
 		/* Reports operation failure. */
 		return -1;
 	}
+	NCOM_TRACE("save-open-enter", 0);
 	descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0644);
+	NCOM_TRACE("save-open-done", 0);
 
 	/* Checks the file descriptor. */
 	if (descriptor < 0)
 		goto failed;
 	temporary_created = 1;
+	NCOM_TRACE("save-fdopen-enter", 0);
 	stream = fdopen(descriptor, "w");
+	NCOM_TRACE("save-fdopen-done", 0);
 
 	/* Handles the stream availability. */
 	if (stream == NULL)
@@ -671,20 +677,31 @@ netconf_save_atomic_locked(
 	descriptor = -1;
 
 	/* Handles a failed netconf write operation. */
-	if (netconf_write(stream, configuration) != 0 || fflush(stream) != 0 ||
-	    fsync(fileno(stream)) != 0)
+	NCOM_TRACE("save-write-enter", 0);
+	if (netconf_write(stream, configuration) != 0)
 		goto failed;
+	NCOM_TRACE("save-flush-enter", 0);
+	if (fflush(stream) != 0)
+		goto failed;
+	NCOM_TRACE("save-fsync-enter", 0);
+	if (fsync(fileno(stream)) != 0)
+		goto failed;
+	NCOM_TRACE("save-fsync-done", 0);
 
 	/* Handles a failed fclose operation. */
+	NCOM_TRACE("save-close-enter", 0);
 	if (fclose(stream) != 0) {
 		stream = NULL;
 		goto failed;
 	}
 	stream = NULL;
+	NCOM_TRACE("save-close-done", 0);
 
 	/* Handles a failed rename operation. */
+	NCOM_TRACE("save-rename-enter", 0);
 	if (rename(temporary, path) != 0)
 		goto failed;
+	NCOM_TRACE("save-rename-done", 0);
 
 	/* Handles an operation failure. */
 	if (error != NULL && capacity != 0)
@@ -695,6 +712,7 @@ netconf_save_atomic_locked(
 
 failed:
 	saved_errno = errno;
+	NCOM_TRACE("save-error-cleanup-enter", 0);
 
 	/* Handles the stream availability. */
 	if (stream != NULL)
@@ -705,6 +723,7 @@ failed:
 	/* Handles the temporary created condition. */
 	if (temporary_created)
 		(void)unlink(temporary);
+	NCOM_TRACE("save-error-cleanup-done", 0);
 
 	/* Handles an operation failure. */
 	if (error != NULL && capacity != 0)

@@ -1431,48 +1431,74 @@ static uint32_t fat_raw_root_cluster(const struct fat_mount_state *fat)
 	return fat->type == ZEDBSD_FAT32 ? fat->root_cluster : 0;
 }
 
-static int fat_raw_validate_chain(
-	struct fat_mount_state *filesystem, uint32_t first_cluster)
+/* Per-operation position only: never retained after releasing the mount lock. */
+struct fat_chain_cursor {
+	uint32_t index;
+	uint32_t cluster;
+};
+
+static int
+fat_raw_validate_chain_at(struct fat_mount_state *filesystem,
+	uint32_t first_cluster, uint32_t wanted_index,
+	struct fat_chain_cursor *cursor, uint32_t *last_cluster)
 {
 	struct fat_mount_state *fat = filesystem;
-	uint32_t slow = first_cluster, fast = first_cluster;
-	uint32_t steps;
+	uint32_t cluster = first_cluster, checkpoint = first_cluster;
+	uint32_t steps, span = 0U, power = 1U;
 
 	if (!fat_raw_valid_cluster(fat, first_cluster))
 		return EIO;
+	if (cursor != NULL)
+		cursor->cluster = 0U;
 	for (steps = 0; steps <= fat->cluster_count; steps++) {
 		uint32_t next;
 		int result;
 
-		result = fat_raw_next_cluster(filesystem, slow, &next);
-		if (result != 0)
-			return result;
-		if (fat_raw_is_end(fat, next))
-			return 0;
-		if (!fat_raw_valid_cluster(fat, next))
-			return EIO;
-		slow = next;
+		if (cursor != NULL && steps == wanted_index) {
+			cursor->index = steps;
+			cursor->cluster = cluster;
+		}
 
-		result = fat_raw_next_cluster(filesystem, fast, &next);
+		/* Brent's single forward cursor retains bounded cycle detection
+		 * without alternating distant FAT sectors on every link.  That
+		 * alternation defeats this mount's one-sector cache for large loop
+		 * backing files, even when the block cache already holds the FAT. */
+		result = fat_raw_next_cluster(filesystem, cluster, &next);
 		if (result != 0)
 			return result;
-		if (fat_raw_is_end(fat, next))
+		if (fat_raw_is_end(fat, next)) {
+			if (last_cluster != NULL)
+				*last_cluster = cluster;
+			/* A growing write may begin beyond the old EOF.  Its seek can
+			 * continue from this validated tail instead of the first link. */
+			if (cursor != NULL && cursor->cluster == 0U) {
+				cursor->index = steps;
+				cursor->cluster = cluster;
+			}
 			return 0;
+		}
 		if (!fat_raw_valid_cluster(fat, next))
 			return EIO;
-		fast = next;
-		result = fat_raw_next_cluster(filesystem, fast, &next);
-		if (result != 0)
-			return result;
-		if (fat_raw_is_end(fat, next))
-			return 0;
-		if (!fat_raw_valid_cluster(fat, next))
+		cluster = next;
+		span++;
+		if (cluster == checkpoint)
 			return EIO;
-		fast = next;
-		if (slow == fast)
-			return EIO;
+		if (span == power) {
+			checkpoint = cluster;
+			span = 0U;
+			if (power <= UINT32_MAX / 2U)
+				power *= 2U;
+		}
 	}
 	return EIO;
+}
+
+static int
+fat_raw_validate_chain(struct fat_mount_state *filesystem,
+	uint32_t first_cluster)
+{
+	return fat_raw_validate_chain_at(filesystem, first_cluster, 0U,
+		NULL, NULL);
 }
 
 static int fat_raw_free_chain(
@@ -1967,16 +1993,54 @@ static int fat_raw_flush_file(struct fat_file_state *file)
 	return result;
 }
 
+static int
+fat_raw_advance_cluster(struct fat_file_state *file, uint32_t cluster,
+	int allocate, uint32_t *next)
+{
+	int result = fat_raw_next_cluster(file->mount, cluster, next);
+
+	if (result != 0)
+		return result;
+	if (fat_raw_is_end(file->mount, *next)) {
+		if (!allocate)
+			return EIO;
+		result = fat_raw_allocate_cluster(file->mount, next);
+		if (result != 0)
+			return result;
+		result = fat_raw_set_cluster(file->mount, cluster, *next);
+		if (result != 0) {
+			int rollback;
+
+			/* The new cluster is not reachable until the tail link
+			 * succeeds.  Return it to the free pool on failure. */
+			rollback = fat_raw_set_cluster(file->mount, *next, 0);
+			if (rollback != 0) {
+				file->mount->read_only = 1;
+				return rollback;
+			}
+			return result;
+		}
+	} else if (!fat_raw_valid_cluster(file->mount, *next)) {
+		return EIO;
+	}
+	return 0;
+}
+
 static int fat_raw_cluster_at(
 	struct fat_file_state *file, uint32_t cluster_index, int allocate,
-	uint32_t *found_cluster)
+	uint32_t *found_cluster, struct fat_chain_cursor *cursor)
 {
 	struct fat_mount_state *fat = file->mount;
 	struct fat_file_state *state = file;
 	uint32_t cluster = state->first_cluster;
-	uint32_t index;
+	uint32_t index = 0U;
 	int result;
 
+	if (cursor != NULL && cursor->cluster != 0U &&
+	    cursor->index <= cluster_index) {
+		cluster = cursor->cluster;
+		index = cursor->index;
+	}
 	if (!cluster) {
 		if (!allocate)
 			return EIO;
@@ -1988,65 +2052,51 @@ static int fat_raw_cluster_at(
 	}
 	if (!fat_raw_valid_cluster(fat, cluster))
 		return EIO;
-	for (index = 0; index < cluster_index; index++) {
+	for (; index < cluster_index; index++) {
 		uint32_t next;
 
 		if (index >= fat->cluster_count)
 			return EIO;
-		result = fat_raw_next_cluster(file->mount, cluster, &next);
+		result = fat_raw_advance_cluster(file, cluster, allocate, &next);
 		if (result != 0)
 			return result;
-		if (fat_raw_is_end(fat, next)) {
-			if (!allocate)
-				return EIO;
-			result = fat_raw_allocate_cluster(file->mount, &next);
-			if (result != 0)
-				return result;
-			result = fat_raw_set_cluster(file->mount, cluster, next);
-			if (result != 0) {
-				int rollback;
-
-				/* The new cluster is not reachable until the tail link
-				 * succeeds.  Return it to the free pool on failure. */
-				rollback = fat_raw_set_cluster(file->mount, next, 0);
-				if (rollback != 0) {
-					file->mount->read_only = 1;
-					return rollback;
-				}
-				return result;
-			}
-		} else if (!fat_raw_valid_cluster(fat, next)) {
-			return EIO;
-		}
 		cluster = next;
 	}
 	*found_cluster = cluster;
+	if (cursor != NULL) {
+		cursor->index = cluster_index;
+		cursor->cluster = cluster;
+	}
 	return 0;
 }
 
 static int fat_raw_write_bytes(
 	struct fat_file_state *file, uint32_t offset, const uint8_t *input,
-	uint32_t length, int zero)
+	uint32_t length, int zero, struct fat_chain_cursor *cursor)
 {
 	struct fat_mount_state *fat = file->mount;
 	uint32_t cluster_bytes = (uint32_t)fat->sectors_per_cluster * 512U;
 	uint32_t position = offset;
+	uint32_t cluster;
+	int result;
+
+	if (length == 0U)
+		return 0;
+	result = fat_raw_cluster_at(file, position / cluster_bytes, 1, &cluster,
+		cursor);
+	if (result != 0)
+		return result;
 
 	while (length) {
-		uint32_t cluster_index = position / cluster_bytes;
 		uint32_t in_cluster = position % cluster_bytes;
 		uint32_t sector_index = in_cluster / 512U;
 		uint32_t within = in_cluster & 511U;
 		uint32_t chunk = 512U - within;
-		uint32_t cluster, lba;
+		uint32_t lba;
 		uint8_t *sector;
-		int result;
 
 		if (chunk > length)
 			chunk = length;
-		result = fat_raw_cluster_at(file, cluster_index, 1, &cluster);
-		if (result != 0)
-			return result;
 		result = fat_engine_cluster_lba(file->mount, cluster,
 						sector_index, &lba);
 		if (result != 0)
@@ -2068,34 +2118,23 @@ static int fat_raw_write_bytes(
 			input += chunk;
 		position += chunk;
 		length -= chunk;
+		/* The mount lock keeps this operation's chain stable.  Reuse the
+		 * current cluster within it and advance once at each boundary,
+		 * instead of seeking again from the first cluster for every sector. */
+		if (length != 0U && position % cluster_bytes == 0U) {
+			uint32_t next;
+
+			if (cursor->index >= fat->cluster_count)
+				return EIO;
+			result = fat_raw_advance_cluster(file, cluster, 1, &next);
+			if (result != 0)
+				return result;
+			cluster = next;
+			cursor->index++;
+			cursor->cluster = cluster;
+		}
 	}
 	return 0;
-}
-
-static int
-fat_raw_last_cluster(struct fat_mount_state *filesystem,
-	uint32_t first_cluster, uint32_t *last_cluster)
-{
-	struct fat_mount_state *fat = filesystem;
-	uint32_t cluster = first_cluster, steps;
-
-	if (last_cluster == NULL || !fat_raw_valid_cluster(fat, cluster))
-		return EIO;
-	for (steps = 0; steps < fat->cluster_count; steps++) {
-		uint32_t next;
-		int result = fat_raw_next_cluster(filesystem, cluster, &next);
-
-		if (result != 0)
-			return result;
-		if (fat_raw_is_end(fat, next)) {
-			*last_cluster = cluster;
-			return 0;
-		}
-		if (!fat_raw_valid_cluster(fat, next))
-			return EIO;
-		cluster = next;
-	}
-	return EIO;
 }
 
 static int
@@ -2153,6 +2192,7 @@ static int fat_raw_write(
 	uint64_t end;
 	uint64_t old_size;
 	uint32_t old_first, old_last = 0;
+	struct fat_chain_cursor cursor = {0U, 0U};
 	uint8_t old_directory_dirty;
 	int result;
 
@@ -2163,24 +2203,27 @@ static int fat_raw_write(
 		return EINVAL;
 	if (!length)
 		return 0;
+	end = offset + length;
 	old_first = state->first_cluster;
 	old_size = file->size;
 	old_directory_dirty = state->directory_dirty;
 	if (file->first_cluster) {
-		result = fat_raw_validate_chain(file->mount,
-			file->first_cluster);
-		if (result != 0)
-			return result;
-	}
-	end = offset + length;
-	if (end > old_size && old_first != 0) {
-		result = fat_raw_last_cluster(file->mount, old_first, &old_last);
+		uint32_t cluster_bytes =
+			(uint32_t)file->mount->sectors_per_cluster * 512U;
+		uint64_t first_offset = offset < old_size ? offset : old_size;
+
+		/* Full validation precedes all writes, including corruption beyond
+		 * the requested range.  Retain only this call's start and old tail
+		 * so data/zero-fill/growth do not repeat the same validated walk. */
+		result = fat_raw_validate_chain_at(file->mount,
+			file->first_cluster, (uint32_t)first_offset / cluster_bytes,
+			&cursor, end > old_size ? &old_last : NULL);
 		if (result != 0)
 			return result;
 	}
 	if (offset > file->size) {
 		result = fat_raw_write_bytes(file, (uint32_t)file->size, 0,
-					   (uint32_t)(offset - file->size), 1);
+					   (uint32_t)(offset - file->size), 1, &cursor);
 		if (result != 0) {
 			int rollback = fat_raw_rollback_growth(file, old_first,
 				old_last, old_size, old_directory_dirty);
@@ -2189,7 +2232,8 @@ static int fat_raw_write(
 			return result;
 		}
 	}
-	result = fat_raw_write_bytes(file, (uint32_t)offset, buffer, length, 0);
+	result = fat_raw_write_bytes(file, (uint32_t)offset, buffer, length, 0,
+		&cursor);
 	if (result != 0) {
 		int rollback = fat_raw_rollback_growth(file, old_first, old_last,
 			old_size, old_directory_dirty);
@@ -2210,6 +2254,8 @@ static int fat_raw_truncate(
 	struct fat_mount_state *fat = file->mount;
 	struct fat_file_state *state = file;
 	uint32_t old_first = state->first_cluster;
+	uint32_t old_last = 0U;
+	struct fat_chain_cursor cursor = {0U, 0U};
 	uint64_t old_size = file->size;
 	uint8_t old_directory_dirty = state->directory_dirty;
 	int result;
@@ -2222,22 +2268,18 @@ static int fat_raw_truncate(
 	if (size == file->size && (size || !state->first_cluster))
 		return 0;
 	if (state->first_cluster) {
-		result = fat_raw_validate_chain(file->mount,
-					      state->first_cluster);
+		uint32_t cluster_bytes = (uint32_t)fat->sectors_per_cluster * 512U;
+		uint64_t first_offset = size > old_size ? old_size :
+			size != 0U ? size - 1U : 0U;
+
+		result = fat_raw_validate_chain_at(file->mount, state->first_cluster,
+			(uint32_t)first_offset / cluster_bytes, &cursor, &old_last);
 		if (result != 0)
 			return result;
 	}
 	if (size > file->size) {
-		uint32_t old_last = 0;
-
-		if (old_first != 0) {
-			result = fat_raw_last_cluster(file->mount, old_first,
-				&old_last);
-			if (result != 0)
-				return result;
-		}
 		result = fat_raw_write_bytes(file, (uint32_t)file->size, 0,
-					   (uint32_t)(size - file->size), 1);
+					   (uint32_t)(size - file->size), 1, &cursor);
 		if (result != 0) {
 			int rollback = fat_raw_rollback_growth(file, old_first,
 				old_last, old_size, old_directory_dirty);
@@ -2282,7 +2324,7 @@ static int fat_raw_truncate(
 		uint32_t keep_index = ((uint32_t)size - 1U) / cluster_bytes;
 		uint32_t keep, tail;
 
-		result = fat_raw_cluster_at(file, keep_index, 0, &keep);
+		result = fat_raw_cluster_at(file, keep_index, 0, &keep, &cursor);
 		if (result != 0)
 			return result;
 		result = fat_raw_next_cluster(file->mount, keep, &tail);

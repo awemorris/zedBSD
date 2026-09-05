@@ -14,6 +14,7 @@
 #include "userland/base/net/protocol.h"
 #include "userland/base/net/reconcile.h"
 #include "userland/base/net/netconf.h"
+#include "userland/base/net/publication-trace.h"
 #include "userland/base/net/wifi-store.h"
 #include "userland/base/libedit/readline/history.h"
 #include "userland/base/libedit/readline/readline.h"
@@ -823,6 +824,7 @@ backend_exchange_result(
 	request.request_id = request_id;
 	request.opcode = opcode;
 	request.payload_length = payload_length;
+	NCOM_TRACE("client-socket-enter", opcode);
 	descriptor = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 	if (descriptor < 0)
 		goto unavailable;
@@ -848,8 +850,10 @@ backend_exchange_result(
 	memset(&address, 0, sizeof(address));
 	address.sun_family = AF_UNIX;
 	strcpy(address.sun_path, NETWORKD_SOCKET);
+	NCOM_TRACE("client-connect-enter", opcode);
 	if (connect(descriptor, (struct sockaddr *)&address, sizeof(address)) != 0)
 		goto unavailable;
+	NCOM_TRACE("client-send-enter", opcode);
 
 	/* Writes exactly one frame and closes the request direction. */
 	if (networkd_protocol_write_frame(descriptor, &request, payload) != 0 ||
@@ -857,11 +861,14 @@ backend_exchange_result(
 		goto unavailable;
 
 	/* Reads one bounded, correlated terminal response. */
+	NCOM_TRACE("client-receive-enter", opcode);
 	if (networkd_protocol_read_frame(descriptor, &response,
 	    response_payload, sizeof(response_payload),
 	    NETWORKD_RESPONSE_MAX) != 0)
 		goto unavailable;
+	NCOM_TRACE("client-close-enter", opcode);
 	close(descriptor);
+	NCOM_TRACE("client-close-done", opcode);
 	descriptor = -1;
 	if (response.request_id != request_id || response.opcode != opcode) {
 		if (server_error != NULL)
@@ -880,8 +887,10 @@ backend_exchange_result(
 
 unavailable:
 	saved = errno != 0 ? errno : EIO;
+	NCOM_TRACE("client-error-cleanup-enter", opcode);
 	if (descriptor >= 0)
 		close(descriptor);
+	NCOM_TRACE("client-error-cleanup-done", opcode);
 	if (server_error != NULL)
 		*server_error = saved;
 	if (report_errors)
@@ -1995,6 +2004,7 @@ console_commit(
 			release_writer_lock(console);
 		return 1;
 	}
+	NCOM_TRACE("commit-reconcile-done", 0);
 	if (netconf_save_atomic_locked(NETCONF_PATH, &console->candidate, error,
 	    sizeof(error)) != 0) {
 		fprintf(stderr, "net: cannot save %s: %s\n", NETCONF_PATH, error);
@@ -2006,6 +2016,7 @@ console_commit(
 			release_writer_lock(console);
 		return 1;
 	}
+	NCOM_TRACE("commit-save-done", 0);
 	if (console->confirmed_pending) {
 		result = 1;
 		for (attempt = 0; attempt < 3; attempt++) {

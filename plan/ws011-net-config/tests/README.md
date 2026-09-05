@@ -121,3 +121,78 @@ session loss, unchanged startup bytes, and lost disarm acknowledgements:
 ```sh
 sh plan/ws011-net-config/tests/confirmed-commit-test.sh
 ```
+
+## NCOM-T023 publication and stopped-guest diagnosis
+
+The atomic-writer fixture links the real `netconf_save_atomic_locked()` and
+injects open/fdopen/flush/sync/close/rename/cleanup failures. It checks exact
+primary errors, old-file preservation before rename, cleanup ownership, and
+canonical replacement. It uses host libc, not target overlay storage:
+
+```sh
+sh plan/ws011-net-config/tests/run-netconf-atomic-writer-host-test.sh
+NCOM_SANITIZE=1 sh plan/ws011-net-config/tests/run-netconf-atomic-writer-host-test.sh
+```
+
+The overlay fixture links the real overlay sync/close/rename/publication
+branches with a programmable lower/upper namespace. Its 199 checks cover
+lower-only replacement and six failure stages; locks, reference management,
+and storage are synthetic, so it is not UFS/FAT integration or deadlock proof:
+
+```sh
+timeout 45s make -f plan/ws011-net-config/tests/overlay-publication-host-test.mk run
+timeout 45s make -f plan/ws011-net-config/tests/overlay-publication-host-test.mk sanitize
+```
+
+The FAT cost fixture links the production driver to the maintained WS018
+memory-disk/VFS mocks. It compares deterministic sector-read counts for the
+32 MiB, 2 KiB-cluster backing-file geometry, and rejects cycles, malformed
+links and exact injected I/O errors before modifying data:
+
+```sh
+sh plan/ws011-net-config/tests/run-fat-write-cost-host-test.sh
+NCOM_SANITIZE=1 sh plan/ws011-net-config/tests/run-fat-write-cost-host-test.sh
+timeout 180s sh plan/ws018-kernel-architecture/tests/run-fat-native-vfs-host-test.sh
+```
+
+The companion cursor fixture checks fragmented, unaligned, and sparse writes
+across FAT12/16/32 and 512/1024-byte logical sectors. It injects every backend
+write failure in two multi-cluster growth sequences and verifies exact errors,
+FAT/size/free-space rollback, retry, and remounted contents. Existing payload
+bytes already overwritten before an error are not transactionally restored:
+
+```sh
+sh plan/ws011-net-config/tests/run-fat-write-cursor-host-test.sh
+NCOM_SANITIZE=1 sh plan/ws011-net-config/tests/run-fat-write-cursor-host-test.sh
+```
+
+The QEMU runner defaults to the two original T020/T021 cells. Q075 selects
+only T021. `NCOM_DIAGNOSTIC=1` enables compile-time stage markers plus debug
+symbols/frame pointers and can never count as normal-build acceptance.
+`NCOM_CAPTURE_FAILURE=1` instead preserves a failed guest's image, CPU/register/
+stack observations, memory dump and a bounded GDB inspection window without
+changing normal compilation. `NCOM_VARIANT` selects the small procedural
+differences in the [p009 ten-cell matrix](../phase009-confirmed-commit-overlay-publication/phase.md).
+
+```sh
+NCOM_CELL_SELECTION=t021 NCOM_CAPTURE_FAILURE=1 NCOM_VARIANT=baseline \
+  bash plan/ws011-net-config/tests/run-confirmed-commit-qemu.sh \
+  plan/ws011-net-config/temp/q075-normal-01
+```
+
+Each invocation requires a new output path and executes one fresh cell. A
+passing diagnostic observation is not a causal repair. Q075 reproduced the
+real stop in normal case 06 and completed the causal FAT-correction path;
+cases 07--10 all passed post-fix acceptance, starting with a replay of its
+failed procedure. No repeat of accepted T020 was part of this matrix. See the
+[q075 evidence](q075-confirmed-commit-evidence.md) for the pre/post-fix split.
+
+`run-confirmed-commit-matrix.sh` runs the fixed ten-cell matrix sequentially,
+stops at the first failure with retained evidence, and records `matrix.tsv`.
+It explicitly disables diagnostic compilation and enables passive failure
+capture; run it only with a Queue authorization for all ten cells.
+It can resume past a host-only failure after retained-evidence revalidation,
+but deliberately refuses to skip a real guest failure. The four post-fix
+q075 cells are separate invocations of the single-cell runner, preserving the
+original case 06 failure and its source identity; they are not a fresh ten-run
+non-reproduction campaign.

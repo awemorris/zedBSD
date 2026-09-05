@@ -5,6 +5,21 @@ ifneq ($(ZEDBSD_PLATFORM_DIR),amd64)
 $(error WS011 p007 QEMU acceptance requires amd64/PC-AT)
 endif
 
+# Keep diagnostic flags private to this fixture. The normal kernel already
+# depends on the effective configuration stamp; add the same dependency to
+# every traced user object so switching trace mode off rebuilds clean binaries.
+WS011_P007_TRACE_USER_OBJS := $(sort $(AMD64_USER_NET_COMMON_OBJS) \
+	$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,net) \
+	$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,networkd))
+$(WS011_P007_TRACE_USER_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
+$(WS011_P007_TRACE_USER_OBJS): AMD64_USER_CPPFLAGS += $(ZEDBSD_TEST_CPPFLAGS)
+
+ifneq ($(filter -DZEDBSD_NCOM_TRACE,$(ZEDBSD_TEST_CPPFLAGS)),)
+AMD64_CFLAGS += -g -fno-omit-frame-pointer
+AMD64_KERNEL_LIBC_CFLAGS += -g -fno-omit-frame-pointer
+$(WS011_P007_TRACE_USER_OBJS): AMD64_USER_CFLAGS += -g -fno-omit-frame-pointer
+endif
+
 WS011_P007_NETCONF := \
 	plan/ws011-net-config/tests/confirmed-commit-qemu-net.conf
 WS011_P007_UFS := $(ARCH_IMAGE_DIR)/amd64-ws011-p007.ufs

@@ -66,17 +66,19 @@ A second fresh disposable cell booted with the same old checksum and usable
 networking. In one interactive `net` session it applied `10.0.2.17/24` through
 `commit confirmed 1`; `show startup-config` still showed the old
 `10.0.2.15/24` intent. The subsequent ordinary `commit` caused ten admitted
-networkd operations, completing the expected confirmed-check and full
-candidate reconcile, but did not print `Commit complete.` or return the
+networkd connections, matching the expected confirmed-check and nine
+reconcile requests, but did not print `Commit complete.` or return the
 configuration prompt within the fixed 30-second command deadline.
 
 No confirmed-disarm request appeared, no second boot began, and no guest or
 QEMU fatal diagnostic appeared before the controller terminated the cell
-cleanly through the monitor. From the production order in `console_commit()`,
-the stop is after full reconcile and before DISARM, inside the
-`netconf_save_atomic_locked()` publication interval. Existing evidence cannot
-further distinguish file `fsync`, close, overlay rename, or their backing sync
-without a new instrumented observation. NCOM-T021 therefore does not establish
+cleanly through the monitor. Authentication is logged before request dispatch,
+so the tenth connection does not prove final DNS completion. The unobserved
+interval includes final DNS handling/response/client close, subsequent
+`netconf_save_atomic_locked()` publication, and DISARM connection setup.
+Existing evidence cannot distinguish these stages without an instrumented
+observation. The entire cell lasted less than one minute; the missing rollback
+expiry is therefore not a timer failure. NCOM-T021 does not establish
 publication, late-timer absence, or reboot persistence.
 
 The p007 two-cell boundary is exhausted. No third QEMU cell was run. The

@@ -18,6 +18,10 @@ rollback_wait=${ROLLBACK_WAIT_SECONDS:-70}
 cell_timeout=${CELL_TIMEOUT_SECONDS:-420}
 key_delay=${KEY_DELAY_SECONDS:-0.015}
 cell_selection=${NCOM_CELL_SELECTION:-both}
+diagnostic=${NCOM_DIAGNOSTIC:-0}
+capture_failure=${NCOM_CAPTURE_FAILURE:-0}
+diagnostic_hold=${NCOM_DIAGNOSTIC_HOLD_SECONDS:-90}
+variant=${NCOM_VARIANT:-baseline}
 synthetic_mac=52:54:00:11:07:01
 old_address=10.0.2.15
 timeout_address=10.0.2.16
@@ -31,6 +35,16 @@ usage: $0 [OUTPUT-DIRECTORY]
 Builds one test-only amd64/PC-AT NE2000 image and runs exactly two fresh QEMU
 cells: NCOM-T020 timeout/client-loss restoration and NCOM-T021 same-session
 confirmation, late-timer absence, and reboot persistence.
+
+NCOM_DIAGNOSTIC=1 requires NCOM_CELL_SELECTION=t021. It enables private trace
+builds, retains the image and symbols, and pauses a failed guest for bounded
+GDB inspection before quitting. Diagnostic runs never count as acceptance.
+NCOM_CAPTURE_FAILURE=1 also requires t021 and captures a failed normal build
+without enabling trace/debug compilation. Successful runs remain acceptance.
+NCOM_DIAGNOSTIC_HOLD_SECONDS defaults to 90 and must be between 1 and 120.
+NCOM_VARIANT defaults to baseline; t021 also accepts confirm-delay-1,
+confirm-delay-5, show-candidate, show-startup-twice, edit-roundtrip,
+upper-startup, and repeat-commit.
 EOF
 }
 
@@ -65,6 +79,34 @@ both|t020|t021) ;;
 	exit 2
 	;;
 esac
+case $diagnostic in
+0|1) ;;
+*) echo "NCOM_DIAGNOSTIC must be 0 or 1" >&2; exit 2 ;;
+esac
+case $capture_failure in
+0|1) ;;
+*) echo "NCOM_CAPTURE_FAILURE must be 0 or 1" >&2; exit 2 ;;
+esac
+[[ $diagnostic == 0 ]] || capture_failure=1
+case $variant in
+baseline|confirm-delay-1|confirm-delay-5|show-candidate|show-startup-twice|edit-roundtrip|upper-startup|repeat-commit) ;;
+*) echo "unsupported NCOM_VARIANT: $variant" >&2; exit 2 ;;
+esac
+if [[ $variant != baseline && $cell_selection != t021 ]]; then
+	echo "non-baseline NCOM_VARIANT requires NCOM_CELL_SELECTION=t021" >&2
+	exit 2
+fi
+if [[ $capture_failure == 1 ]]; then
+	[[ $cell_selection == t021 ]] || {
+		echo "failure capture requires NCOM_CELL_SELECTION=t021" >&2
+		exit 2
+	}
+	[[ $diagnostic_hold =~ ^[1-9][0-9]{0,2}$ ]] &&
+		((10#$diagnostic_hold <= 120)) || {
+		echo "NCOM_DIAGNOSTIC_HOLD_SECONDS must be between 1 and 120" >&2
+		exit 2
+	}
+fi
 for command in "$qemu" awk cp date git make mktemp rg sed sha256sum sleep sort \
 	timeout tr; do
 	command -v "$command" >/dev/null || {
@@ -88,6 +130,13 @@ else
 	output=$(mktemp -d "$repo/plan/ws011-net-config/temp/q074.XXXXXX")
 fi
 output=$(cd -- "$output" && pwd)
+diagnostic_socket=$output/diagnostic-gdb.sock
+if [[ $capture_failure == 1 &&
+    (${#diagnostic_socket} -gt 107 || $diagnostic_socket == *,* ||
+    $diagnostic_socket == *$'\n'* || $diagnostic_socket == *$'\r'*) ]]; then
+	echo "diagnostic output path is too long for a Unix socket or contains a comma/newline" >&2
+	exit 2
+fi
 temporary=$(mktemp -d "$repo/plan/ws011-net-config/temp/q074-run.XXXXXX")
 trap 'rm -rf -- "$temporary"' EXIT HUP INT TERM
 
@@ -100,6 +149,9 @@ timeout_qemu=$output/ncom-t020-qemu.log
 confirm_guest=$output/ncom-t021-guest.log
 confirm_logical=$output/ncom-t021-guest-logical.log
 confirm_qemu=$output/ncom-t021-qemu.log
+inputs_finalized=0
+runner_pid=$BASHPID
+capture_image=
 
 path_hash()
 {
@@ -124,6 +176,74 @@ tracked_digest()
 			done |
 			sha256sum | awk '{print $1}'
 	)
+}
+
+finalize_inputs()
+{
+	local tracked_after config_after production_image_after build_config_after
+	local source_after integrity=pass source_integrity=not-established
+
+	[[ $inputs_finalized == 0 ]] || return 0
+	inputs_finalized=1
+	tracked_after=$(tracked_digest) || integrity=fail
+	config_after=$(path_hash "$production_config") || integrity=fail
+	production_image_after=$(path_hash "$production_image") || integrity=fail
+	build_config_after=$(path_hash "$build_config") || integrity=fail
+	source_after=$(path_hash "$source_image") || integrity=fail
+	if [[ $tracked_after != "$tracked_before" || $config_after != "$config_before" ||
+	    $production_image_after != "$production_image_before" ||
+	    $build_config_after != "$build_config_before" ]]; then
+		integrity=fail
+	fi
+	if [[ -n ${source_hash:-} ]]; then
+		source_integrity=pass
+		if [[ $source_after != "$source_hash" ]]; then
+			source_integrity=fail
+			integrity=fail
+		fi
+	fi
+	{
+		printf 'end_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+		printf 'tracked_tree_sha256_after=%s\n' "$tracked_after"
+		printf 'config_sha256_after=%s\n' "$config_after"
+		printf 'production_image_sha256_after=%s\n' "$production_image_after"
+		printf 'test_config_sha256_after=%s\n' "$build_config_after"
+		printf 'source_image_sha256_after=%s\n' "$source_after"
+		printf 'source_image_integrity_result=%s\n' "$source_integrity"
+		printf 'input_integrity_result=%s\n' "$integrity"
+	} >>"$metadata" || return 1
+	printf 'input-integrity\t%s\trun-metadata.txt\n' "$integrity" >>"$results" ||
+		return 1
+	if [[ $integrity != pass ]]; then
+		echo "source, configuration, or image input changed during acceptance/diagnosis" >&2
+		return 1
+	fi
+}
+
+finish_run()
+{
+	local status=$1
+
+	# Pipeline controllers and hash subprocesses must not finalize the parent.
+	[[ $BASHPID == "$runner_pid" ]] || return "$status"
+	trap - EXIT HUP INT TERM
+	set +e
+	if ! finalize_inputs && [[ $status == 0 ]]; then
+		status=1
+	fi
+	if [[ $status != 0 && $capture_failure == 1 && $diagnostic == 0 &&
+	    -n $capture_image && -f $capture_image ]]; then
+		if cp --reflink=auto --sparse=always "$capture_image" \
+		    "$output/ncom-t021-failed.img"; then
+			printf 'capture_preserved_image=%s/ncom-t021-failed.img\n' \
+				"$output" >>"$metadata"
+		else
+			echo "could not preserve the failed guest image" >&2
+		fi
+	fi
+	printf 'runner_exit_status=%s\n' "$status" >>"$metadata"
+	rm -rf -- "$temporary"
+	exit "$status"
 }
 
 tracked_before=$(tracked_digest)
@@ -157,16 +277,36 @@ printf 'case\tresult\tevidence\n' >"$results"
 	printf 'rollback_wait_seconds=%s\n' "$rollback_wait"
 	printf 'cell_timeout_seconds=%s\n' "$cell_timeout"
 	printf 'cell_selection=%s\n' "$cell_selection"
+	printf 'diagnostic=%s\n' "$diagnostic"
+	printf 'capture_failure=%s\nvariant=%s\nkey_delay_seconds=%s\n' \
+		"$capture_failure" "$variant" "$key_delay"
+	if [[ $capture_failure == 1 ]]; then
+		printf 'diagnostic_hold_seconds=%s\n' "$diagnostic_hold"
+		printf 'diagnostic_gdb_socket=%s\n' "$diagnostic_socket"
+	fi
+	if [[ $diagnostic == 1 ]]; then
+		printf 'test_cppflags=-DZEDBSD_NCOM_TRACE\n'
+	else
+		printf 'test_cppflags=\n'
+	fi
 	printf 'tracked_tree_sha256_before=%s\n' "$tracked_before"
 	printf 'config_sha256_before=%s\n' "$config_before"
 	printf 'production_image_sha256_before=%s\n' "$production_image_before"
 	printf 'test_config_sha256_before=%s\n' "$build_config_before"
 } >"$metadata"
+trap 'finish_run "$?"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
+build_flags=(ZEDBSD_TEST_CPPFLAGS=)
+if [[ $diagnostic == 1 ]]; then
+	build_flags=(ZEDBSD_TEST_CPPFLAGS=-DZEDBSD_NCOM_TRACE)
+fi
 set +e
 timeout --foreground --kill-after=10 "${build_timeout}s" \
 	make -C "$repo" -j16 -f Makefile -f "$makefile" \
-	ZEDBSD_CONFIG="$build_config" ws011-p007-qemu-image \
+	ZEDBSD_CONFIG="$build_config" "${build_flags[@]}" ws011-p007-qemu-image \
 	>"$build_log" 2>&1
 build_status=$?
 set -e
@@ -177,6 +317,13 @@ fi
 source_hash=$(path_hash "$source_image")
 printf 'source_image=%s\nsource_image_sha256=%s\n' \
 	"$source_image" "$source_hash" >>"$metadata"
+if [[ $capture_failure == 1 ]]; then
+	for binary in vmunix bin/net bin/networkd; do
+		cp -- "$repo/build/amd64/$binary" "$output/${binary##*/}.elf"
+	done
+	sha256sum "$output/vmunix.elf" "$output/net.elf" \
+		"$output/networkd.elf" >"$output/diagnostic-symbols.sha256"
+fi
 
 marker_count()
 {
@@ -301,7 +448,14 @@ change_and_arm()
 
 	enter_net "$log" || return 1
 	send_net "$log" configure "$configuration_prompt" || return 1
+	if [[ $variant == upper-startup ]]; then
+		commit_and_wait "$log" || return 1
+	fi
 	send_net "$log" 'interface ne0' "$interface_prompt" || return 1
+	if [[ $variant == edit-roundtrip ]]; then
+		send_net "$log" 'static ipv4 10.0.2.18 prefix-length 24' \
+			"$interface_prompt" || return 1
+	fi
 	send_net "$log" "static ipv4 $address prefix-length 24" \
 		"$interface_prompt" || return 1
 	send_net "$log" exit "$configuration_prompt" || return 1
@@ -327,14 +481,36 @@ leave_pending_net()
 		$((before + 1))
 }
 
+commit_and_wait()
+{
+	local log=$1 before started ended status
+
+	before=$(marker_count 'Commit complete\.' "$log")
+	started=$(date +%s%N)
+	if send_net "$log" commit "$configuration_prompt" &&
+	    wait_for_pattern 'Commit complete\.' "$log" "$command_timeout" \
+		$((before + 1)); then
+		status=0
+	else
+		status=1
+	fi
+	ended=$(date +%s%N)
+	# Host wall-clock observation includes key delivery and prompt polling;
+	# it is not an isolated guest syscall benchmark or a changed timeout.
+	printf 'ordinary_commit_%s_status=%s\nordinary_commit_%s_host_elapsed_ms=%s\n' \
+		"$((before + 1))" "$status" "$((before + 1))" \
+		"$(((ended - started) / 1000000))" >>"$metadata"
+	return "$status"
+}
+
 confirm_and_leave_net()
 {
 	local log=$1 before
 
-	before=$(marker_count 'Commit complete\.' "$log")
-	send_net "$log" commit "$configuration_prompt" || return 1
-	wait_for_pattern 'Commit complete\.' "$log" "$command_timeout" \
-		$((before + 1)) || return 1
+	commit_and_wait "$log" || return 1
+	if [[ $variant == repeat-commit ]]; then
+		commit_and_wait "$log" || return 1
+	fi
 	send_net "$log" end "$operational_prompt" || return 1
 	before=$(marker_count "$shell_prompt" "$log")
 	send_text exit || return 1
@@ -364,7 +540,17 @@ confirm_controller()
 	login_guest "$log" 1 || return 1
 	observe_state "$log" ncom-t021-old || return 1
 	change_and_arm "$log" "$confirm_address" || return 1
+	case $variant in
+	show-candidate)
+		send_net "$log" 'show candidate' "$configuration_prompt" || return 1 ;;
+	show-startup-twice)
+		send_net "$log" 'show startup-config' "$configuration_prompt" || return 1 ;;
+	esac
 	send_net "$log" 'show startup-config' "$configuration_prompt" || return 1
+	case $variant in
+	confirm-delay-1) sleep 1 ;;
+	confirm-delay-5) sleep 5 ;;
+	esac
 	confirm_and_leave_net "$log" || return 1
 	observe_state "$log" ncom-t021-confirmed || return 1
 	sleep "$rollback_wait"
@@ -384,22 +570,44 @@ confirm_controller()
 run_cell()
 {
 	local name=$1 controller=$2 guest=$3 qemu_log=$4
-	local image statuses
+	local image statuses effective_timeout
+	local -a diagnostic_arguments=()
 
 	image=$temporary/$name.img
+	effective_timeout=$cell_timeout
+	if [[ $diagnostic == 1 ]]; then
+		image=$output/$name-diagnostic.img
+		printf 'diagnostic_image=%s\n' "$image" >>"$metadata"
+	fi
+	if [[ $capture_failure == 1 ]]; then
+		diagnostic_arguments=(-gdb "unix:$diagnostic_socket,server=on,wait=off")
+		effective_timeout=$((10#$cell_timeout + 10#$diagnostic_hold + 10))
+		capture_image=$image
+		printf 'capture_running_image=%s\neffective_cell_timeout_seconds=%s\n' \
+			"$image" "$effective_timeout" >>"$metadata"
+	fi
 
 	cp --reflink=auto --sparse=always "$source_image" "$image"
 	set +e
 	controller_wrapper "$controller" "$guest" |
-		timeout --foreground --kill-after=5 "${cell_timeout}s" \
+		timeout --foreground --kill-after=5 "${effective_timeout}s" \
 		"$qemu" -machine pc -m 512 -smp 4 \
 		-drive "file=$image,format=raw,if=ide" \
 		-netdev user,id=net0,restrict=on \
 		-device "ne2k_isa,netdev=net0,iobase=0x300,irq=10,mac=$synthetic_mac" \
-		-display none -serial none -debugcon "file:$guest" \
-		-monitor stdio >"$qemu_log" 2>&1
+			-display none -serial none -debugcon "file:$guest" \
+			"${diagnostic_arguments[@]}" \
+			-monitor stdio >"$qemu_log" 2>&1
 	statuses=("${PIPESTATUS[@]}")
 	set -e
+	printf '%s_controller_status=%s\n%s_qemu_status=%s\n' \
+		"$name" "${statuses[0]}" "$name" "${statuses[1]}" >>"$metadata"
+	if [[ $diagnostic == 1 ]]; then
+		printf 'diagnostic_controller_status=%s\ndiagnostic_qemu_status=%s\n' \
+			"${statuses[0]}" "${statuses[1]}" >>"$metadata"
+		printf 'NCOM-T021-diagnostic\tnot-acceptance\t%s\n' \
+			"${guest##*/},${qemu_log##*/},${image##*/}" >>"$results"
+	fi
 	if [[ ${statuses[0]} -ne 0 || ${statuses[1]} -ne 0 ]]; then
 		echo "$name failed: controller=${statuses[0]} qemu=${statuses[1]}" >&2
 		return 1
@@ -408,11 +616,31 @@ run_cell()
 
 controller_wrapper()
 {
-	local controller=$1 guest=$2 status
+	local controller=$1 guest=$2 status cpu remaining monitor_output
 
 	set +e
 	"$controller" "$guest"
 	status=$?
+	if [[ $capture_failure == 1 && $status -ne 0 ]]; then
+		printf 'stop\ninfo status\ninfo cpus\n'
+		for cpu in 0 1 2 3; do
+			printf 'cpu %s\ninfo registers\nx /64gx $rsp\n' "$cpu"
+		done
+		monitor_output=${output//\\/\\\\}
+		monitor_output=${monitor_output//\"/\\\"}
+		printf 'dump-guest-memory -p "%s/guest-memory.elf"\n' "$monitor_output"
+		printf 'diagnostic_pause_utc=%s\ndiagnostic_controller_failure=%s\n' \
+			"$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$status" >>"$metadata"
+		printf 'Diagnostic guest paused for %s seconds; GDB socket: %s\n' \
+			"$diagnostic_hold" "$diagnostic_socket" >&2
+		printf 'Symbols: %s/vmunix.elf; image and monitor snapshots are retained.\n' \
+			"$output" >&2
+		# Keep the pipe open while the caller inspects the stopped vCPUs.
+		# One-second increments keep every individual wait bounded.
+		for ((remaining = 10#$diagnostic_hold; remaining > 0; remaining--)); do
+			sleep 1
+		done
+	fi
 	printf 'quit\n'
 	return "$status"
 }
@@ -438,10 +666,10 @@ require_state()
 	rg -q "inet $address netmask 255\\.255\\.255\\.0" "$section" || {
 		echo "$marker missing address $address" >&2; return 1;
 	}
-	rg -q '^default[[:blank:]]+10\\.0\\.2\\.2[[:blank:]]+UG' "$section" || {
+	rg -q '^default[[:blank:]]+10\.0\.2\.2[[:blank:]]+UG' "$section" || {
 		echo "$marker missing default route" >&2; return 1;
 	}
-	rg -q '^nameserver 10\\.0\\.2\\.3$' "$section" || {
+	rg -q '^nameserver 10\.0\.2\.3$' "$section" || {
 		echo "$marker missing resolver" >&2; return 1;
 	}
 	rg -q '^1 packets transmitted, 1 packets received, 0% packet loss$' \
@@ -488,10 +716,20 @@ if [[ $cell_selection != t021 ]]; then
 		>>"$results"
 fi
 
-if [[ $cell_selection != t020 ]]; then
-	startup_before_confirm=$output/ncom-t021-startup-before-confirm.log
-	run_cell ncom-t021 confirm_controller "$confirm_guest" "$confirm_qemu"
+validate_confirmed_observations()
+{
+	local startup_before_confirm=$output/ncom-t021-startup-before-confirm.log
+	local -a confirm_sums
+
 	tr -d '\r' <"$confirm_guest" >"$confirm_logical"
+	if [[ $diagnostic == 0 ]] && rg -q '\[ncom\]' "$confirm_logical"; then
+		echo 'normal-build acceptance unexpectedly contains diagnostic tracing' >&2
+		exit 1
+	fi
+	if rg -q 'confirmed transaction expired|networkd: confirmed rollback' "$confirm_logical"; then
+		echo 'NCOM-T021 unexpectedly expired or ran a rollback' >&2
+		exit 1
+	fi
 	awk '
 		$0 == "net(config)> show startup-config" { active = 1; next }
 		active && $0 == "net(config)> commit" { found_end = 1; exit }
@@ -523,35 +761,23 @@ if [[ $cell_selection != t020 ]]; then
 		exit 1
 	}
 	validate_no_fatal "$confirm_logical" "$confirm_qemu" ncom-t021
-	printf 'NCOM-T021\tpass\tncom-t021-guest-logical.log,ncom-t021-qemu.log\n' \
-		>>"$results"
+	if [[ $diagnostic == 1 ]]; then
+		printf 'diagnostic-observations\tpass\tncom-t021-guest-logical.log,ncom-t021-qemu.log\n' \
+			>>"$results"
+	else
+		printf 'NCOM-T021\tpass\tncom-t021-guest-logical.log,ncom-t021-qemu.log\n' \
+			>>"$results"
+	fi
+}
+
+if [[ $cell_selection != t020 ]]; then
+	run_cell ncom-t021 confirm_controller "$confirm_guest" "$confirm_qemu"
+	validate_confirmed_observations
 fi
 
-tracked_after=$(tracked_digest)
-config_after=$(path_hash "$production_config")
-production_image_after=$(path_hash "$production_image")
-build_config_after=$(path_hash "$build_config")
-source_after=$(path_hash "$source_image")
-integrity=pass
-if [[ $tracked_after != "$tracked_before" || $config_after != "$config_before" ||
-    $production_image_after != "$production_image_before" ||
-    $build_config_after != "$build_config_before" ||
-    $source_after != "$source_hash" ]]; then
-	integrity=fail
+finalize_inputs || exit 1
+if [[ $diagnostic == 1 ]]; then
+	echo "WS011 T021 diagnostic observations: PASS (not acceptance; $output)"
+else
+	echo "WS011 NCOM-T020/T021 QEMU acceptance: PASS ($output)"
 fi
-{
-	printf 'end_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-	printf 'tracked_tree_sha256_after=%s\n' "$tracked_after"
-	printf 'config_sha256_after=%s\n' "$config_after"
-	printf 'production_image_sha256_after=%s\n' "$production_image_after"
-	printf 'test_config_sha256_after=%s\n' "$build_config_after"
-	printf 'source_image_sha256_after=%s\n' "$source_after"
-	printf 'input_integrity_result=%s\n' "$integrity"
-} >>"$metadata"
-printf 'input-integrity\t%s\trun-metadata.txt\n' "$integrity" >>"$results"
-if [[ $integrity != pass ]]; then
-	echo "source, configuration, or image input changed during acceptance" >&2
-	exit 1
-fi
-
-echo "WS011 NCOM-T020/T021 QEMU acceptance: PASS ($output)"
