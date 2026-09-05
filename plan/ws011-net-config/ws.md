@@ -5,16 +5,18 @@ Last updated: 2026-09-05
 WSID: `ws011`
 
 Status: in progress; p001--p003, p005 design, and p006 implementation are
-complete. VLAN/bridge is blocked by `MB-010`; p007 owns the separately
-queueable QEMU and physical confirmed-commit acceptance.
+complete. P007 automatic QEMU acceptance is proposed in q074. VLAN/bridge is
+blocked by `MB-010`; p008 physical acceptance awaits its remote topology.
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws011-p006` implementation complete (`q073`)
 
-Resume point: leave p004 blocked and separately queue p007's QEMU and physical
-acceptance. The current `/sbin/net` implements `commit`, `commit confirmed
-MINUTES`, and `rollback`; historical `apply`/`save`/`discard` are removed.
+Resume point: obtain explicit q074 approval before starting p007's two automatic
+QEMU cells. Keep p004 blocked. Queue p008 only after p007 passes and the user
+selects the physical remote transport, target link, and safe recovery route.
+The current `/sbin/net` implements `commit`, `commit confirmed MINUTES`, and
+`rollback`; historical `apply`/`save`/`discard` are removed.
 
 Shared tests: [WS011 test index](tests/README.md)
 
@@ -75,7 +77,8 @@ strict YAML-like zedBSD format, not general YAML.
 | `ws011-p004` | [VLAN and bridge interfaces](phase004-vlan-bridge/phase.md) | Blocked by explicit manual hold | Resume design and implementation only after explicit user release |
 | `ws011-p005` | [Confirmed-commit design](phase005-confirmed-commit-design/phase.md) | Complete design (2026-09-05) | Session-only candidate/token, networkd rollback timer, delayed config publication, and implementation bounds are frozen |
 | `ws011-p006` | [Confirmed-commit implementation](phase006-confirmed-commit-implementation/phase.md) | Complete (`q073`, 2026-09-05) | Complete reconcile, interactive confirmed commit, volatile networkd rollback, serialized delayed publication, focused regressions, and amd64/i386 builds pass |
-| `ws011-p007` | [Confirmed-commit acceptance](phase007-confirmed-commit-acceptance/phase.md) | Planned; follows p006 | Focused/QEMU failure and recovery matrix plus one consolidated physical remote-administration check |
+| `ws011-p007` | [Confirmed-commit automatic acceptance](phase007-confirmed-commit-acceptance/phase.md) | Ready; proposed as q074 | Two fresh amd64/NE2000 QEMU cells prove timeout/client-loss restoration and same-session confirmation through reboot |
+| `ws011-p008` | [Confirmed-commit physical acceptance](phase008-confirmed-commit-physical-acceptance/phase.md) | Planned; not Queue-ready | One consolidated real-hardware remote check after p007 and explicit transport/topology/recovery selection |
 
 ## Fixed decisions
 
@@ -214,7 +217,7 @@ claimed, full-state rollback, client loss, daemon restart, timeout, and
 confirmation behavior also pass separately extracted acceptance cases.
 
 VLAN/bridge p004 is deliberately excluded from the active Queue while
-`MB-010` is held; p006/p007 may complete independently without claiming p004.
+`MB-010` is held; p006--p008 may complete independently without claiming p004.
 
 ## Reconsideration boundaries
 

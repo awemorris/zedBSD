@@ -158,8 +158,10 @@ Noct 2.0.1, and project LLVM documentation with current source and producer
 evidence. AX211 direct boot, RF-link-budget, and cross-driver follow-ups remain
 deferred. Q073 completed WS011 p006: interactive confirmed commit, complete
 wired reconcile, secure volatile networkd rollback, serialized delayed
-publication, focused failure evidence, and maintained amd64/i386 builds pass;
-p007 retains the separately queueable QEMU and physical acceptance. Q061 completed
+publication, focused failure evidence, and maintained amd64/i386 builds pass.
+P007 automatic QEMU acceptance is proposed as q074; p008 retains the physical
+remote-administration check until its transport and safe topology are selected.
+Q061 completed
 p037's read-only Intel intake, corrected the exact target to AX211/CNVio2
 `8086:51f0`, subsystem `8086:4090`, revision `01`, and cleared its firmware/
 license and direct-boot boundaries. Q062 completed p038's initial implementation
@@ -464,7 +466,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws008` | Noct and BeUI | Complete (`q063`) | p010 host CLI/toolchain/ordinary-build and p009 amd64 static/package/q35-xHCI runtime gates pass on official `v2.0.1`; p006 remains historical review evidence | No current Phase; Remacs and i386/PC-98 target Noct remain explicitly outside q063 | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | Active; completed-producer follow-up complete (`q072`) | `ws009-p006` completes current WLAN, physical USB HID, Intel Mac Variant, Noct 2.0.1, and project LLVM references | Return producer-specific documentation to its owning implementation Phase; remaining DOC ledger items stay scoped | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete (`q063`) | `ws010-p001`–`p005` complete; all 177 maintained userland Makefiles expose the common lifecycle and top-level download materializes declared external inputs | No current Phase; extract a new requirement before resuming | [WS010](ws010-scripting/ws.md) |
-| `ws011` | Network configuration console | In progress; confirmed-commit implementation complete in q073; VLAN/bridge separately blocked | `ws011-p006` focused implementation complete; p007 follows; p004 blocked by MB-010 | Separately queue p007 QEMU/physical confirmed-commit acceptance | [WS011](ws011-net-config/ws.md) |
+| `ws011` | Network configuration console | In progress; confirmed-commit implementation complete in q073; p007 automatic acceptance proposed as q074; VLAN/bridge separately blocked | `ws011-p006` complete; p007 automatic QEMU acceptance ready; p008 physical acceptance awaits its remote topology; p004 blocked by MB-010 | Obtain q074 approval for p007; consider p008 only after p007 and explicit transport/topology/recovery selection | [WS011](ws011-net-config/ws.md) |
 | `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
 | `ws013` | CPAR container partitioning | Active; q031/q032 configured x86 boot paths complete, Runtime topics manually blocked | `ws013-p002`--`p006` complete | No Boot configuration Phase remains; resume Runtime namespace/CLI/package design only after its explicit manual holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
@@ -584,12 +586,13 @@ The user replaced the previous WLAN/toolchain wave on 2026-09-05. Completed
 WS004, WS005, WS008, WS009 p006, WS018, WS020, WS021, and WS023 results remain
 accepted and are no longer execution-order entries. The active order is:
 
-1. `ws011-p007`: accept the interactive confirmed-commit implementation after
-   q073 completed p006's focused software boundary. The originating `net`
+1. `ws011-p007`: run q074's two-cell automatic QEMU acceptance after q073
+   completed p006's focused software boundary. The originating `net`
    process alone owns the
    candidate and may publish `/etc/net.conf`; networkd owns only the volatile
    timer, token, and `/tmp` rollback program. VLAN/bridge p004 remains excluded
-   by `MB-010`.
+   by `MB-010`. The p008 physical remote check follows only after its transport,
+   target link, trial values, and safe recovery route are selected.
 2. WS019 in dependency order: p002 read-only storage administration, p003
    read-only `/sbin/diskpart`, p008 target UFS1-in-file `/sbin/mkfs`, p009
    target ZEDSWAP2-in-file `/sbin/mkswap`, p004 Noct `/bin/zedinst`, then p005
@@ -655,7 +658,7 @@ until stopped or no judgment-free Phase remains.
 | Installed UEFI `LoadOptions` precedence | WS013 p002/p003 | Resolved for q031: ignore LoadOptions on the required `zedbsd.cfg` path; do not merge or override the configuration |
 | Installer source-image stability | WS019 p004/p008/p009 | Resolved on 2026-09-05: no templates. `zedinst` creates unpublished regular files and invokes target `/sbin/mkfs` for existing UFS1 and `/sbin/mkswap` for existing ZEDSWAP2; it never copies the live overlay upper or active swap |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
-| Confirmed-commit ownership and bounds | WS011 p005--p007 | Resolved on 2026-09-05: interactive originating `net` owns candidate/token in memory and alone writes `/etc/net.conf` on ordinary commit; networkd owns only the volatile timer/open `/tmp` rollback program and never touches that file; client loss makes confirmation/adoption impossible, while explicit rollback or timeout remains; p005 freezes all size/time/lock/acknowledgement bounds |
+| Confirmed-commit ownership and bounds | WS011 p005--p008 | Resolved on 2026-09-05: interactive originating `net` owns candidate/token in memory and alone writes `/etc/net.conf` on ordinary commit; networkd owns only the volatile timer/open `/tmp` rollback program and never touches that file; client loss makes confirmation/adoption impossible, while explicit rollback or timeout remains; p005 freezes all size/time/lock/acknowledgement bounds; p007 owns automatic QEMU acceptance and p008 the later physical remote observation |
 | Authoritative Noct repository, build sequence, and release | WS008 | Resolved by q063: official `awemorris/NoctLang` release `v2.0.1`, tag commit `ed621e79139f55d06dd1a474243afbf0ce5efe0a`, archive size `2524680`, and SHA-256 `68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f` are the common host/target identity. Both `--path` forms, toolchain/ordinary build, amd64 target package, and q35/xHCI non-JIT/JIT/BeUI gates pass. The target-only two-hunk final-link patch is explicitly not BeUI; Remacs and i386/PC-98 target support remain outside the accepted scope. |
 | x86 compiler triples, bootstrap and sysroot ownership | WS021 | Resolved by q064: host C/C++ builds host Noct and verified patched LLVM 23.1.0; project LLVM installs at `build/llvm` from source or the pinned `rev-0` cache; target triples are `x86_64-unknown-zedbsd` and `i386-unknown-zedbsd`; sysroots are `build/amd64/sysroot` and shared `build/i386/sysroot`; target Noct uses the former; BIOS/UEFI loaders use LLVM with no host target GNU/MinGW fallback. The final amd64/i386/PC-98 and target-noct runtime campaign passes. sparcv9/m68030 use a later project-built GCC. |
 | x86 HAL style-only boundary | WS023 | Resolved and completed in q067: `plan/coding-style.md` now applies to all 88 C/header files under `src/hal/i386` and `src/hal/amd64`; the five inherited edits were preserved, narrow compiler-extension/table exceptions are recorded, and strict, focused, configured-build, runtime, and API/ABI review passed. |

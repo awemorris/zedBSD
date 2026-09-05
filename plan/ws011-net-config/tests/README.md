@@ -13,7 +13,8 @@ repository-wide `make check` target is not an acceptance interface.
 | `NVIR-T001`–`NVIR-T008` | `ws011-p004` | VLAN tags/isolation, bridge learning/forwarding, lifecycle, cycles, rollback |
 | `NCOM-D001`–`NCOM-D006` | `ws011-p005` | Interactive-only confirmed commit, delayed persistence, rollback-program validation, partial failure, volatile timeout/restart, single-owner locking, and fresh DHCP reacquisition |
 | `NCOM-T001`–`NCOM-T012` | `ws011-p006` | Grammar removal/addition, arm/apply/confirm, timeout, explicit rollback, session loss, stale token, concurrency, restart, bounds, partial failure, and acknowledgement loss |
-| `NCOM-T020`–`NCOM-T022` | `ws011-p007` | QEMU timeout recovery, confirmed persistence, and one consolidated physical remote-administration acceptance |
+| `NCOM-T020`–`NCOM-T021` | `ws011-p007` | Automatic QEMU timeout/client-loss recovery and confirmed persistence through reboot |
+| `NCOM-T022` | `ws011-p008` | One consolidated physical remote-administration timeout and confirmation acceptance after transport/topology selection |
 
 Future WLAN fixtures use synthetic, redacted credentials only.
 
@@ -35,7 +36,9 @@ Future WLAN fixtures use synthetic, redacted credentials only.
 | `NCOM-T012` | Lost disarm acknowledgement reports nonzero `outcome uncertain`; parser, console, persistence, boot, direct ifconfig, wired, and WLAN focused regressions pass |
 
 P006 owns host/model/protocol fixtures and supported target builds for these
-cases. P007 alone owns NCOM-T020--T022 QEMU and physical acceptance.
+cases. P007 owns the two automatic QEMU cells NCOM-T020--T021. P008 owns only
+NCOM-T022 and is not Queue-ready until its physical remote transport, target
+link, trial values, and safe recovery route are selected.
 
 ## Executable tests
 

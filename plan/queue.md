@@ -1,78 +1,81 @@
-# Queue: confirmed-commit implementation
+# Queue proposal: confirmed-commit automatic acceptance
 
 Last updated: 2026-09-05
 
-QID: `q073`
+QID: `q074`
 
-Queue status: complete
+Queue status: proposed; awaiting explicit execution approval
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: after reviewing the extracted proposal, the user explicitly
-requested implementation of q073 on 2026-09-05.
+Authorization: the user requested that the next work be extracted. This
+authorizes the planning proposal only; QEMU execution remains `pending` until
+the user explicitly approves q074.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q072](queue-q072.md)
+Previous Queue: [q073](queue-q073.md)
 
 ## Purpose
 
-Implement the already frozen interactive confirmed-commit contract as one
-bounded software Phase. Keep the candidate and `/etc/net.conf` writer in the
-originating `net` process; networkd owns only the volatile deadline, opaque
-token, already-open rollback program, and bounded rollback result.
+Accept the q073 confirmed-commit implementation in a deterministic amd64
+PC/AT QEMU environment. Prove timeout restoration after loss of the originating
+management client and prove same-session confirmation, delayed persistence,
+absence of late rollback, and reboot persistence without requiring a physical
+network or an unavailable in-base remote-shell daemon.
 
-## Execution registry
+## Proposed execution registry
 
 | Priority | WS / Phase | Status | Purpose / dependency |
 | --- | --- | --- | --- |
-| 1 | [`ws011-p006`](ws011-net-config/phase006-confirmed-commit-implementation/phase.md) | completed (`q073`) | Replaced interactive `apply`/`save`/`discard` with `commit`, `commit confirmed MINUTES`, and `rollback`; complete reconcile, volatile rollback ownership, and serialized publication gates pass |
+| 1 | [`ws011-p007`](ws011-net-config/phase007-confirmed-commit-acceptance/phase.md) | pending | Add and run the two-cell NCOM-T020/T021 QEMU acceptance plus the q073 focused regression/build boundary; depends on completed ws011-p006 |
 
 ## Why this is the next bounded unit
 
-- It is first in the active order in the master plan.
-- `ws011-p005` froze ownership, grammar, time, size, locking, persistence, and
-  acknowledgement bounds; no unresolved design decision remains.
-- q072 completed the only higher-priority dependency.
-- VLAN/bridge p004 remains outside scope under `MB-010`.
-- p007 includes QEMU and user-operated physical acceptance, so it remains a
-  separate follow-up after this implementation reaches its focused gates.
+- It is first in the active order in the master plan and directly accepts the
+  just-completed q073 implementation.
+- P005 fixed the semantics and bounds; p006 implements them and passes all
+  host/model/integration gates. The remaining automatic uncertainty is target
+  runtime behavior across a real monotonic minute and reboot.
+- A dedicated NE2000 QEMU topology and monitor-driven guest console are already
+  established repository test patterns, so this work needs a runner and
+  disposable image fixture rather than a new product interface.
+- Physical remote administration is separated into p008 because the current
+  base system has no SSH, Telnet, or rlogin daemon and no safe target management
+  transport/topology has been selected. Q074 contains no unresolved physical
+  decision.
 
 ## Execution and timebox boundary
 
-- One Queue item and one implementation Phase only.
-- Change the private `net`/networkd protocol, interactive transaction owner,
-  rollback-program machinery, focused fixtures, build integration, and the
-  directly affected public network-console documentation.
-- Preserve the existing argv interface, direct `/sbin/ifconfig` recovery,
-  wired boot, and completed managed-WLAN behavior.
-- Do not implement VLAN/bridge, a persistent daemon candidate, a cross-reboot
-  timer, an argv confirmed-commit command, a separate `confirm`, pending-status,
-  or timer-extension/reset commands.
-- Stop after NCOM-T001--T012, focused existing regressions, supported target
-  builds, and `git diff --check`. Do not begin p007 QEMU or physical acceptance
-  and do not run aggregate `make check`.
+- One Queue item and one automatic acceptance Phase only.
+- Build or derive one test-only amd64 PC/AT image with NE2000 enabled and a
+  synthetic static `10.0.2.0/24` configuration. Run exactly two fresh QEMU
+  cells: timeout/client-loss restoration and same-session confirmation/reboot.
+- Use restricted QEMU user networking, a fixed synthetic MAC, monitor-driven
+  keyboard input, bounded boot/command/cell deadlines, and disposable image
+  copies. Preserve `config.mk`, the production image, and every source input by
+  before/after digest.
+- Retain reusable runner/config fixtures under `plan/ws011-net-config/tests/`.
+  Keep run images and verbose logs under the ignored WS011 `temp/` tree; retain
+  only bounded, secret-free summaries in planning evidence.
+- Rerun NCOM-T001--T012, the parser/console/persistence/boot/private-protocol
+  gates, managed-WLAN/Wi-Fi focused regressions, maintained amd64/i386
+  `net`/networkd builds, documentation link checks, and `git diff --check`.
+- Do not run aggregate `make check`, change public grammar or protocol, begin
+  VLAN/bridge p004, add a remote-shell service, or perform a physical test.
+- If either QEMU cell exposes a production defect, mark p007 `uncleared` and
+  extract a corrective Phase instead of silently widening this acceptance
+  Queue into implementation.
 
-## Approval result
+## Important uncertainty
 
-The user explicitly approved implementation. Source changes may proceed within
-the execution and timebox boundary above; p007 remains outside this Queue.
+The automatic runner and its exact guest keystroke/image-staging mechanics do
+not exist yet. They are bounded fixture work inside p007. The physical
+remote-administration mechanism is a separate unresolved dependency owned by
+p008 and cannot block or be claimed by q074.
 
-## Completion result
+## Approval boundary
 
-- Added complete-intent forward and rollback reconcile, exact private ZNV2
-  transaction fields, matching-token mutation ownership, and networkd's one
-  secure volatile rollback program with monotonic deadline integration.
-- Added interactive ordinary and confirmed commit, explicit rollback,
-  runtime-before-persistence ordering, `/run/net.conf.lock`, and three bounded
-  post-publication disarm attempts with nonzero uncertain outcome.
-- NCOM-T001--T012 host/model/integration evidence passed, including malformed
-  and replaced rollback programs, timeout/restart state, partial failure,
-  session loss, concurrent writers, stale tokens, and acknowledgement loss.
-- Existing parser, console, persistence, boot, private protocol, Wi-Fi command,
-  managed-WLAN, credential-store, and Wi-Fi-child focused regressions passed.
-- Maintained amd64 and i386 PC/AT `net`/networkd target builds passed. The
-  documentation checks passed with 1,820 relative links and 12 current status
-  banners; `git diff --check` passed.
-- P007 QEMU and physical remote-administration acceptance remains deliberately
-  outside q073.
+Present this q074 proposal before starting QEMU or adding its runner. On
+explicit approval, set q074 and `ws011-p007` to `in-progress` and execute the
+P-book packages in order. Without that approval, this Queue remains a proposal.

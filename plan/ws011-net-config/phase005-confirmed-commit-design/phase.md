@@ -8,8 +8,8 @@ Phase ID: `p005`
 
 Combined ID: `ws011-p005`
 
-Status: complete design; implementation is extracted as p006, with
-automatic/physical acceptance in p007; execution still requires Queue approval
+Status: complete design; p006 implementation is complete, p007 automatic
+acceptance is proposed in q074, and p008 physical acceptance remains planned
 
 Parent: [WS011](../ws.md)
 
@@ -155,7 +155,8 @@ from argv/non-interactive mode.
 - [x] Freeze the timeout maximum, companion lock path, and bounded diagnostic
       record before extracting implementation.
 - [x] Define design review and later executable acceptance cases.
-- [x] Split implementation as p006 and automatic/physical acceptance as p007.
+- [x] Split implementation as p006 and acceptance as p007; the later acceptance
+      planning further separated automatic p007 from physical p008.
 
 ## Acceptance
 
@@ -166,7 +167,7 @@ explicit answers. No source, build, QEMU, or physical-network result is claimed.
 
 The public product flow, volatile timeout ownership, session-only candidate,
 configuration-write timing, forward rollback-program model, and all initial
-bounds are fixed. P006/p007 may proceed without reopening this design Phase.
+bounds are fixed. P006--p008 may proceed without reopening this design Phase.
 
 References:
 
@@ -181,9 +182,10 @@ References:
 
 ## Interruption / resumption
 
-The design is complete. Resume with p006 implementation and p007 acceptance;
-do not reopen the ownership or fixed bounds unless implementation proves one
-cannot be satisfied.
+The design is complete and p006 is implemented. Resume with q074/p007 automatic
+acceptance, then p008 only after its physical transport and safe recovery
+topology are selected; do not reopen ownership or fixed bounds unless evidence
+proves one cannot be satisfied.
 
 ## Remaining debt and handoff
 

@@ -110,6 +110,7 @@ provide confirmed-commit semantics.
 | Private ZNV2 fields and bounds | [`protocol.h`](../../userland/base/net/protocol.h) | [`networkd-protocol-test.c`](../../plan/ws005-networking/tests/networkd-protocol-test.c) |
 
 The private rollback language and `ZNV2` messages are implementation contracts,
-not public administration interfaces. QEMU timeout recovery, confirmed
-persistence, and the physical remote-administration scenario remain the
-separate WS011 p007 acceptance phase.
+not public administration interfaces. QEMU timeout recovery and confirmed
+persistence remain WS011 p007 automatic acceptance; the physical
+remote-administration scenario is the separate p008 follow-up after its
+transport and safe recovery topology are selected.

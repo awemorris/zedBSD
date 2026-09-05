@@ -56,7 +56,7 @@ candidate exclusively in the originating `net` process and keeping
 
 ## Non-goals
 
-- p007 QEMU or physical remote-administration acceptance;
+- p007 QEMU and p008 physical remote-administration acceptance;
 - VLAN/bridge work held by `MB-010`;
 - a public protocol, persistent daemon candidate, cross-reboot timer, or
   networkd access to `/etc/net.conf`;
@@ -144,8 +144,9 @@ timer-extension, or timer-reset command.
       parser, console, persistence, boot, private protocol, wired, and WLAN
       focused gates plus supported `net`/networkd target builds.
 - [x] NCOM-I07: Update the public network-console documentation and synchronize
-      actual commands, evidence, remaining p007 work, and resume state into the
-      P/W/M/Q books. Run the Markdown link check and `git diff --check`.
+      actual commands, evidence, remaining acceptance work, and resume state
+      into the P/W/M/Q books. Run the Markdown link check and
+      `git diff --check`.
 
 ## Acceptance-case allocation
 
@@ -202,6 +203,7 @@ four managed-WLAN/Wi-Fi regression runners, and maintained amd64/i386 PC/AT
 `net`/networkd target builds pass. The public network-console reference is
 linked and both documentation validators plus `git diff --check` pass.
 
-Resume with p007 only after it is separately queued: its QEMU timeout,
-confirmation, and physical remote-administration observations are not q073
-results. P004 remains held by `MB-010`.
+Resume with p007 only after q074 is explicitly approved: its QEMU timeout and
+confirmation observations are not q073 results. Physical remote-administration
+acceptance is separately owned by p008 after transport/topology selection. P004
+remains held by `MB-010`.
