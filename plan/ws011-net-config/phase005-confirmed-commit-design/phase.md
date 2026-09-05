@@ -1,6 +1,6 @@
 # WS011 Phase 005: confirmed-commit design
 
-Last updated: 2026-08-27
+Last updated: 2026-09-05
 
 WSID: `ws011`
 
@@ -8,7 +8,8 @@ Phase ID: `p005`
 
 Combined ID: `ws011-p005`
 
-Status: Proposed; public transaction semantics fixed
+Status: complete design; implementation is authorized and extracted as p006,
+with automatic/physical acceptance in p007
 
 Parent: [WS011](../ws.md)
 
@@ -74,9 +75,17 @@ from argv/non-interactive mode.
 - `commit confirmed MINUTES` requires an explicit positive timeout; there is
   no default. It is accepted only inside the interactive configuration mode.
 - During a confirmed transaction `/etc/net.conf` remains the old authoritative
-  configuration. The later ordinary `commit` atomically writes that session's
-  candidate and only after a successful write asks networkd to disarm the
-  matching timer. A failed write leaves rollback armed.
+  configuration. The later ordinary `commit` first validates and reconciles
+  the complete running state to that session's candidate, atomically writes
+  it, and only after a successful write asks networkd to disarm the matching
+  timer. Failed reconciliation or write leaves rollback armed.
+- The complete prospective configuration exists only in the originating
+  interactive `net` process memory until confirmation. Networkd never stores,
+  generates, reads, or writes `/etc/net.conf` or its candidate representation.
+- The originating session retains the opaque transaction token required by a
+  later ordinary `commit`. If that `net` process exits, no reconstructed
+  session can confirm because it has neither the exact in-memory candidate nor
+  the token. The transaction can only be explicitly rolled back or expire.
 - `rollback` with a pending transaction immediately executes its rollback
   program, cancels the timer, leaves `/etc/net.conf` unchanged, and reloads the
   session candidate from that file. With no pending transaction it simply
@@ -118,21 +127,23 @@ from argv/non-interactive mode.
   the initial grammar. The successful `commit confirmed` response reports that
   rollback is armed and states the requested timeout.
 
-## Open implementation bounds
+## Fixed implementation bounds
 
-- The maximum accepted explicit timeout in minutes. The minimum is one minute
-  and no default exists; the maximum remains to be chosen before code starts.
-- The exact stable companion lock-file name shared by all direct
-  `/etc/net.conf` writers across atomic rename.
-- Existing networkd request length/count bounds must be audited and reused for
-  rollback files; no second rollback-only command language is to be invented.
-- If one rollback command fails, networkd continues with the remaining lines,
-  records each failure, and returns an aggregate failure. The exact diagnostic
-  record format belongs to the implementation Phase.
-- The bounded retry and “outcome uncertain” diagnostic for a lost networkd
-  confirmation reply after `/etc/net.conf` has already been atomically renamed.
-  This rare cross-process boundary must not be reported as success without an
-  acknowledgement.
+- The explicit timeout is an integer from 1 through 1440 minutes; there is no
+  default.
+- Every direct `/etc/net.conf` writer holds an advisory exclusive lock on
+  `/run/net.conf.lock`, created as root mode 0600. Atomic replacement of
+  `/etc/net.conf` never replaces the lock inode.
+- A rollback program contains at most 64 canonical networkd requests, each at
+  most 4096 bytes and at most 32768 bytes in total. It reuses the ordinary
+  request grammar and does not create a second command language.
+- Each rollback failure diagnostic is bounded to 512 bytes and the complete
+  response remains within 32768 bytes. Networkd continues after a failed step
+  and reports an aggregate failure.
+- After `/etc/net.conf` has been renamed, `net` may retry disarming with the
+  same token at most three times within one second. Without acknowledgement it
+  exits nonzero with `outcome uncertain`; it never reports unacknowledged
+  success.
 
 ## Work packages
 
@@ -141,10 +152,10 @@ from argv/non-interactive mode.
 - [x] Resolve timer ownership, daemon/client/reboot failure, and persistence.
 - [x] Resolve concurrency and pending ownership.
 - [x] Resolve DHCP and other dynamic-state expectations.
-- [ ] Freeze the timeout maximum, companion lock path, and bounded diagnostic
+- [x] Freeze the timeout maximum, companion lock path, and bounded diagnostic
       record before extracting implementation.
-- [ ] Define design review and later executable acceptance cases.
-- [ ] Split later implementation Phases and synchronize WS011/master/WS009.
+- [x] Define design review and later executable acceptance cases.
+- [x] Split implementation as p006 and automatic/physical acceptance as p007.
 
 ## Acceptance
 
@@ -153,10 +164,9 @@ explicit answers. No source, build, QEMU, or physical-network result is claimed.
 
 ## Actual results and evidence
 
-The public product flow, volatile timeout ownership, configuration-write
-timing, and forward rollback-program model are fixed. The remaining
-prerequisite is a small implementation-bounds review, followed by extraction
-of implementation and verification Phases.
+The public product flow, volatile timeout ownership, session-only candidate,
+configuration-write timing, forward rollback-program model, and all initial
+bounds are fixed. P006/p007 may proceed without reopening this design Phase.
 
 References:
 
@@ -171,8 +181,9 @@ References:
 
 ## Interruption / resumption
 
-Resume with the three open implementation bounds. Do not Queue implementation
-until the timeout maximum, common lock path, and diagnostic bounds are frozen.
+The design is complete. Resume with p006 implementation and p007 acceptance;
+do not reopen the ownership or fixed bounds unless implementation proves one
+cannot be satisfied.
 
 ## Remaining debt and handoff
 

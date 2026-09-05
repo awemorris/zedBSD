@@ -1,6 +1,6 @@
 # WS020 Phase 006: GPT precedence over Protective-MBR extent
 
-Last updated: 2026-08-31
+Last updated: 2026-09-05
 
 WSID: `ws020`
 
@@ -8,7 +8,8 @@ Phase ID: `p006`
 
 Combined ID: `ws020-p006`
 
-Status: Automatic acceptance complete; one provisional Intel Mac boot pending
+Status: complete; automatic acceptance and the user's 2026-09-05 Intel Mac
+physical confirmation pass
 
 Parent: [WS020](../ws.md)
 

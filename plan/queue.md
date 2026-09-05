@@ -4,9 +4,9 @@ Last updated: 2026-09-05
 
 QID: `q071`
 
-Queue status: in-progress
+Queue status: complete
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: after resolving the kernel/userspace/networkd responsibility
 split, the user explicitly requested implementation.  The request also accepts
@@ -35,12 +35,13 @@ fallback.
 
 | Priority | WS / Phase | Status | Purpose / dependency |
 | --- | --- | --- | --- |
-| 1 | `ws004-p041` | in-progress | RTL8822BU W52 5-GHz normal path; existing 2.4-GHz baseline |
-| 2 | `ws004-p044` | in-progress; focused gates pass | Prompt asynchronous scan/connect, no kernel high-level reconnect, minimal interface event stream; p041 |
-| 3 | `ws005-p010` | in-progress; focused gates pass | Sole userspace 30-second retry and primitive abnormal paths; p044 |
-| 4 | `ws005-p006` | in-progress; focused gates pass | Versioned global no-secret ZNV2 requests, authenticated policy UID, fixed-store reader, and fd-4 child transport; p010 |
-| 5 | `ws005-p007` | in-progress; focused gates pass | Implement the six interface-free `net wifi` forms, stable all-WLAN selection, and one managed connection; p006 |
-| 6 | `ws005-p011` | in-progress; focused gates pass | Own four persistent states plus bounded transients and one same-SSID 30-second recovery child, with no retained passphrase; p007 |
+| 1 | `ws004-p041` | Complete (`q071`) | RTL8822BU W52 5-GHz normal path; existing 2.4-GHz baseline |
+| 2 | `ws004-p044` | Complete (`q071`) | Prompt asynchronous scan/connect, no kernel high-level reconnect, minimal interface event stream; p041 |
+| 3 | `ws005-p010` | Complete (`q071`) | Sole userspace 30-second retry and primitive abnormal paths; p044 |
+| 4 | `ws005-p006` | Complete (`q071`) | Versioned global no-secret ZNV2 requests, authenticated policy UID, fixed-store reader, and fd-4 child transport; p010 |
+| 5 | `ws005-p007` | Complete (`q071`) | Implement the six interface-free `net wifi` forms, stable all-WLAN selection, and one managed connection; p006 |
+| 6 | `ws005-p011` | Complete (`q071`) | Own four persistent states plus bounded transients and one same-SSID 30-second recovery child, with no retained passphrase; p007 |
+| 7 | `ws005-p008` | Complete (`q071`; user accepted 2026-09-05) | Consolidated exact-hardware WLAN acceptance; the user's explicit WS closure supersedes the older five-run campaign |
 
 ## Execution policy
 
@@ -83,13 +84,21 @@ fallback.
   detected WLAN and complete `disconnect`, `search stop`, and `down`, leaving
   policy `disabled`. A normalization failure suppresses `READY` or forces a
   nonzero exit; it is never reported as a successful lifecycle transition.
-- Do not request multiple physical boots during implementation.  The separate
-  `ws005-p008` final acceptance Phase retains the later consolidated five-run
-  campaign.
+- Do not request multiple physical boots during implementation. The user's
+  final consolidated physical result closes p008 without another campaign.
 
 ## Completion boundary
 
-Q071 is finished when each selected Phase is completed or has a precise
-`uncleared` result and no selected dependency-ready work remains.  It does not
-claim final five-run physical acceptance, AX211 completion, DFS support, or a
+Q071 is finished because every selected Phase and the shared physical
+acceptance are complete. It does not claim AX211 completion, DFS support, or a
 general routing socket.
+
+## Completion result
+
+All selected focused, configured-build, UEFI/xHCI boot, image-integrity, and
+credential-redaction gates passed. On 2026-09-05 the user reported that the
+resulting image worked on the target physical WLAN system and explicitly
+accepted WS005 as achieved. That explicit acceptance closes p008 with this
+single consolidated hardware observation and supersedes p008's older planned
+five-consecutive-run campaign; no additional repeatability request remains for
+WS005.

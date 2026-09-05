@@ -1,6 +1,6 @@
 # WS019 Phase 001: overlay installer-v1 contract
 
-Last updated: 2026-08-29
+Last updated: 2026-09-05
 
 Phase ID: `ws019-p001`
 
@@ -12,9 +12,9 @@ Tests: [WS019 test index](../tests/README.md)
 
 ## Objective
 
-Freeze the first installer as one non-formatting FAT-overlay path and split
-its implementation into bounded Phases. This Phase changes plans only; it
-does not implement commands or write a disk.
+Freeze the first installer as one partition-preserving FAT-overlay path and
+split its implementation into bounded Phases. This Phase changes plans only;
+it does not implement commands or write a disk.
 
 ## Fixed result
 
@@ -26,8 +26,11 @@ does not implement commands or write a disk.
   `/data.img`, and `/swapfile` as managed paths.
 - `ZEDBSD` names the payload role; v1 does not require or change a GPT name or
   FAT volume label.
-- The installer performs no GPT/MBR write, `mkfs`, resize, label change,
-  native-root installation, or UEFI-variable mutation.
+- The installer performs no GPT/MBR write, partition-filesystem formatting,
+  resize, label change, native-root installation, or UEFI-variable mutation.
+  It creates `data.img` and `swapfile` as new regular files and invokes the
+  target `/sbin/mkfs` and `/sbin/mkswap` implementations for their existing
+  zedBSD on-disk formats.
 - A conflicting managed file is refused. Unmanaged data is preserved.
 - The loader searches same-disk FAT16/FAT32 filesystems for `/zedbsd.cfg`.
   Absence is fatal; multiple candidates warn and use the deterministic first.
@@ -46,11 +49,15 @@ does not implement commands or write a disk.
 2. `ws019-p003` implements read-only `/sbin/diskpart` list/show.
 3. WS013 p002 selects the config FAT; WS013 p003 consumes required
    `kernel=`, inserts/validates `boot0`, and normalizes direct parameters.
-4. `ws019-p004` implements the bounded existing-FAT overlay copy transaction.
-5. `ws019-p005` accepts that install and boot on disposable QEMU NVMe.
-6. WS003 p018 performs one initial Latitude install/boot checkpoint and the
+4. `ws019-p008` implements target UFS1-in-file creation without formatting a
+   containing partition.
+5. `ws019-p009` implements target ZEDSWAP2-in-file creation.
+6. `ws019-p004` implements the bounded existing-FAT overlay transaction using
+   those target commands.
+7. `ws019-p005` accepts that install and boot on disposable QEMU NVMe.
+8. WS003 p018 performs one initial Latitude install/boot checkpoint and the
    later frozen repeatability gate.
-7. Whole-disk creation and native root remain future p006/p007 work.
+9. Whole-disk creation and native root remain future p006/p007 work.
 
 ## Completion evidence
 

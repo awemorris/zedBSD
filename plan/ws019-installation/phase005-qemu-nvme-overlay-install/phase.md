@@ -1,6 +1,6 @@
 # WS019 Phase 005: QEMU NVMe overlay-install acceptance
 
-Last updated: 2026-08-29
+Last updated: 2026-09-05
 
 Phase ID: `ws019-p005`
 
@@ -12,8 +12,9 @@ Tests: [WS019 test index](../tests/README.md)
 
 ## Objective
 
-Prove the complete non-formatting installer-v1 transaction and installed boot
-on a disposable QEMU NVMe before any physical Latitude write.
+Prove the complete partition-preserving installer-v1 transaction, target-side
+data/swap file creation, and installed boot on a disposable QEMU NVMe before
+any physical Latitude write.
 
 ## Fixture
 
@@ -34,9 +35,13 @@ on a disposable QEMU NVMe before any physical Latitude write.
    deterministic same-disk candidate, while the installer preflight refuses to
    create such an ambiguous installed layout;
 4. conflicting file, insufficient space, wrong filesystem, source/target
-   alias, and injected copy/flush/verify failures never report success;
+   alias, and injected copy/generation/format/flush/verify failures never
+   report success;
 5. an auxiliary FAT disk with matching-looking files cannot steal selection
-   from the ESP's physical GPT disk.
+   from the ESP's physical GPT disk;
+6. the generated 32-MiB `data.img` is recognized and mounted as UFS1, the
+   generated 64-MiB `swapfile` is recognized as ZEDSWAP2, and neither source
+   live object is opened as an installation input.
 
 QEMU may supply a firmware-created boot choice for the disk; the installer
 itself must not change the variable store. A successful manual/fallback file

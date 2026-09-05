@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 Phase ID: `ws019-p002`
 
-Status: planned; dependency-gated
+Status: Queue-ready; WS004 p024 and the existing storage foundations are complete
 
 Parent: [WS019](../ws.md)
 

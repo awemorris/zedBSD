@@ -12,6 +12,9 @@ Parent: [WS009](../ws.md)
 | DOC-T40 | init/service/network examples match fixed YAML v1, root-only typed ZSV1, argument and interactive command grammar, atomic locking, and documented failure boundaries, then pass against the installed commands |
 | DOC-T50 | Console, graphics, system, input, and GPU references distinguish current, deprecated, and planned interfaces |
 | DOC-T60 | POSIX/SUS and `_XOPEN_SOURCE` claims agree with WS001, public headers, and compile/runtime tests |
+| DOC-T70 | WLAN examples match the six interface-free `net wifi` forms, credential boundary, one managed connection, 30-second retry, and link-loss recovery without publishing secrets |
+| DOC-T71 | Input documentation distinguishes physically confirmed USB HID/evdev from the still-present deprecated console event/key-state UAPI pending WS006 p009 |
+| DOC-T72 | Build/boot documentation reproduces all three amd64 Variants and separates host Noct/bootstrap ownership from LLVM/sysroot-built target artifacts |
 
 Link validation is shared across all WSs; producer WSs own behavioral evidence
 while WS009 owns document accuracy and navigation.

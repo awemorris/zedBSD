@@ -1,6 +1,6 @@
 # WS019 shared test index
 
-Last updated: 2026-08-29
+Last updated: 2026-09-05
 
 This directory holds reusable installer and disk-administration fixtures when
 the corresponding Phase is implemented. Do not use `.internal/` as a test
@@ -17,8 +17,11 @@ source.
 | `IN-T007` | The loader chooses the deterministic first same-disk FAT16/FAT32 with `/zedbsd.cfg`, uses its required `kernel=`, synthesizes omitted `boot0`/bare paths, ignores auxiliary disks, fails on zero, and warns on multiple candidates |
 | `IN-T008` | Installed OVMF boot reaches login with `rootfs.img`, writable `data.img`, and active `swapfile`, without installer-created `Boot####` state |
 | `IN-T009` | The ordinary single-partition USB source remains bootable and its artifacts are verified before installer use |
+| `IN-T010` | Target `mkfs -t ufs1 FILE` formats only a pre-sized regular file, matches the production UFS1 format, mounts read/write, and refuses busy/aliased/non-regular targets |
+| `IN-T011` | Target `mkswap FILE` formats only a pre-sized page-aligned regular file as ZEDSWAP2, passes the production parser and `swapon`/`swapoff`, and refuses busy/aliased/non-regular targets |
+| `IN-T012` | `zedinst` creates unpublished 32-MiB data and 64-MiB swap staging files, invokes the target formatters, and never reads the live source `DATA.IMG` or `SWAPFILE` |
 
 GPT writer, raw offsets above 4 GiB, exactly-once raw sector writes, rescan,
-formatters, whole-disk confirmation, native-root installation, and destructive
-recovery cases belong to future p006/p007 planning and are not installer-v1
-acceptance requirements.
+partition/block-device formatters, whole-disk confirmation, native-root
+installation, and destructive recovery cases belong to future p006/p007
+planning and are not installer-v1 acceptance requirements.

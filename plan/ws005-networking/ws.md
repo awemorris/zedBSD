@@ -4,14 +4,11 @@ Last updated: 2026-09-05
 
 WSID: `ws005`
 
-Status: active; q059 completed the minimum direct `/sbin/wifi` command in p004
-and one physical-equivalent RTL8822BU scan/WPA2/CCMP/DHCP/ping/fetch path in
-p009. Q070 subsequently closed the physically accepted 2.4-GHz WS004
-RTL8822BU baseline. The user has now reopened WS004 p041 for W52 5-GHz and
-added p044's asynchronous-kernel ownership correction and resident networkd
-link recovery as WS005 p011. Detailed primitive, protocol, command composition,
-and managed-link work remains in p010, p006/p007, and p011 before this WS's
-separately owned p008 final acceptance.
+Status: complete (`q071`). The global `net wifi` policy, authenticated ZNV2
+control path, daemon-side credential loading, fixed primitive-child boundary,
+30-second userspace retry, link-event recovery, W52 RTL8822BU path, automatic
+gates, and consolidated physical check all pass. On 2026-09-05 the user
+explicitly accepted the real-hardware result and declared this WS achieved.
 
 Parent: [master plan](../master.md)
 
@@ -27,9 +24,9 @@ non-root mutating network ioctls.  Its focused, analyzer, sanitizer, full
 build, and PC-98 native runtime gates pass.  The earlier RTL8156 carrier,
 DHCP, ping, and external-fetch path remains passing.
 
-Resume point: p002, p003, and p005 are complete. P002's historical
-per-interface/profile-forwarding clauses are explicitly superseded by the
-2026-09-05 global-policy amendment implemented through p006/p007/p011.
+Resume point: no Phase remains. P002's historical per-interface/profile-
+forwarding clauses are explicitly superseded by the 2026-09-05 global-policy
+amendment completed through p006/p007/p011.
 WS004 p026 is also complete:
 the purchased Japan-market Archer has no printed revision, its retained exact
 descriptor is authoritative, and the separately installed `rtl8822b-firmware`
@@ -38,11 +35,11 @@ package boundary is frozen. Q055 completed the generic WLAN core/fake radio in
 in `ws004-p036`. Q057 completed `ws004-p028`'s BSD-3-Clause radio-table import
 and conservative automatic scan milestone. Q058 completed WS004 p029 secure
 L2 independently of the command stack. Q059 then completed p004's human
-direct-root normal path and p009's one useful physical IP path. Continue with
+direct-root normal path and p009's one useful physical IP path. Q071 completed
 p041, p044, p010, p006, p007, and p011 in dependency order; p044 deliberately
-supersedes only p030's kernel-owned automatic reconnect. Q070's physical
-RTL8822BU baseline remains complete. None of these WS005 Phases, nor p008's
-final five-run acceptance, is complete.
+supersedes only p030's kernel-owned automatic reconnect. The user's
+consolidated real-hardware pass closes p008 and replaces its older five-run
+campaign for this WS.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -55,12 +52,12 @@ Shared tests: [WS005 test index](tests/README.md)
 | [`ws005-p003`](phase003-unix-peer-credentials/phase.md) | Complete (`q040`) | Fixed 12-byte connection-time AF_UNIX identity, checked `root:network 0660` publication, root/non-root operation policy, and kernel ioctl privilege boundary pass focused and native PC-98 gates |
 | [`ws005-p004`](phase004-wifi-ioctl-command/phase.md) | Complete (`q059`) | Six direct-root `/sbin/wifi` forms pass focused bounds/secret-clearing gates and the physical normal path without taking DHCP or persistence ownership |
 | [`ws005-p005`](phase005-wifi-credential-store/phase.md) | Complete (`q051`) | Real root/sudo-like/non-root `/sbin/net wifi set-key`, read-side replacement rejection, metadata, redaction, atomic update, abrupt stop, and second-boot persistence pass |
-| [`ws005-p006`](phase006-networkd-wifi-protocol/phase.md) | In progress in `q071`; focused gates pass | Replace whitespace `ZNV1` with bounded ZNV2 global WLAN requests, authenticated policy-owner selection, daemon-side fixed-store reads, and a secret-FD child path |
-| [`ws005-p007`](phase007-net-wifi-orchestration/phase.md) | In progress in `q071`; focused gates pass | Implement the six global `net wifi` forms through `networkd` to interface-specific `ifconfig`, `wifi`, and `dhcpc` children, with deterministic all-WLAN selection and one managed connection |
-| [`ws005-p008`](phase008-archer-physical-acceptance/phase.md) | Planned; depends on p007, p010, p011, `ws004-p030`, `p041`, and `p044` | Prove one complete W52 global-policy/DHCP/transfer path, event-triggered userspace recovery, manual suppression, then the final frozen-artifact repeatability campaign |
+| [`ws005-p006`](phase006-networkd-wifi-protocol/phase.md) | Complete (`q071`) | Bounded ZNV2 global WLAN requests, authenticated policy-owner selection, daemon-side fixed-store reads, and the secret-FD child path pass |
+| [`ws005-p007`](phase007-net-wifi-orchestration/phase.md) | Complete (`q071`) | The six global `net wifi` forms, deterministic all-WLAN selection, and one managed connection pass |
+| [`ws005-p008`](phase008-archer-physical-acceptance/phase.md) | Complete (`q071`; user accepted 2026-09-05) | The consolidated real-hardware WLAN result passes; explicit WS acceptance supersedes the older five-run campaign |
 | [`ws005-p009`](phase009-wlan-minimum-connectivity/phase.md) | Complete (`q059`) | One USB-passthrough development run reached scan, authorized carrier, DHCP, two 3/3 ping checks, an 84255-byte fetch, disconnect, and down |
-| [`ws005-p010`](phase010-wifi-primitive-hardening/phase.md) | Ready after WS004 p044; not started | Make `/sbin/wifi` the sole owner of one 30-second asynchronous scan/select/connect retry sequence and complete its abnormal/semi-normal, cancellation, race, boundary, and redaction matrix |
-| [`ws005-p011`](phase011-networkd-managed-wlan-reconnect/phase.md) | In progress in `q071`; focused gates pass | Own the authenticated policy UID and four persistent global states, consume link events, and run one same-SSID 30-second recovery child before clean fallback to `auto-searching` |
+| [`ws005-p010`](phase010-wifi-primitive-hardening/phase.md) | Complete (`q071`) | `/sbin/wifi` owns the finite 30-second scan/select/connect sequence and its focused boundary/redaction gates pass |
+| [`ws005-p011`](phase011-networkd-managed-wlan-reconnect/phase.md) | Complete (`q071`) | Authenticated policy ownership, four persistent states, link events, and one same-SSID recovery child pass |
 
 `ws002-p020` remains historical ownership of the current wired
 `networkd`/`net` baseline; it is not renumbered into this WS. Native device and
@@ -104,18 +101,17 @@ p044 ownership correction.
 
 ## WS completion conditions
 
-WS005 is complete when the retained wired path and the selected W52 WLAN path
+WS005 is complete: the retained wired path and the selected W52 WLAN path
 operate through `net` -> `networkd` -> fixed primitive children; peer
 authorization is kernel-attested; system and per-user credentials satisfy the
 documented ownership, atomicity, and redaction rules; scan, explicit and auto
 association, DHCP, disconnect, cancellation, recovery, and useful diagnostics
-pass the automatic fixture matrix; and the selected physical adapter passes
-the declared final acceptance campaign. Direct primitive recovery remains
+pass the automatic fixture matrix; and the selected physical adapter passed
+the user-accepted consolidated real-hardware check. Direct primitive recovery remains
 available to root without making `networkd` optional for ordinary users.
 
-p009 is only the early development checkpoint for that sequence. It does not
-replace p006/p007 composition, p010/p044 hardening, p011 recovery, or p008
-final acceptance.
+p009 remains the early development checkpoint; q071 supplies the completed
+composition, hardening, recovery, and final accepted hardware result.
 
 ## 1. Objective and ownership boundary
 
@@ -347,22 +343,22 @@ rather than being parsed as a WLAN request.
 | NET-00 | Complete with follow-ups | Existing `networkd`, `net`, `dhcpc`, boot orchestration, and fd 3 readiness | WS002 p020 | Retained regression baseline |
 | NET-01 | Complete (`q029`) | RTL8156 USB-Ethernet physical data path | WS004 NCM sequence | Latitude external fetch passes |
 | NET-05 | Planned in WS011 | Interactive `net`, `/etc/net.conf`, confirmed commit, VLAN/bridge model | WS011 | WS011 evidence |
-| NET-10 | Active follow-up pool | Independent ECM/reconnect/sustained USB-Ethernet reliability | WS004/WS005 | Separately queued gates |
+| NET-10 | Retained external follow-up pool | Independent ECM/reconnect/sustained USB-Ethernet reliability | WS004 | Separately queued WS004 gates; not a WS005 closure condition |
 | NET-20 | Superseded by NET-25--NET-31 | Resident versioned `networkd`-to-`wpa` backend contract | 2026-08-30 topology decision | No implementation; retained as history |
 | NET-21 | Superseded by NET-28 | Root-only `/etc/wpa/` database | 2026-08-30 profile decision | No implementation; retained as history |
 | NET-22 | Superseded by WS004 p026-p030 | `/sbin/wpa` RTL8822CE backend | Archer-first decision | No implementation; RTL8822CE remains later hardware target |
 | NET-23 | Superseded by NET-29--NET-31 | Old `net` WLAN backend integration | Fixed primitive topology | No implementation |
 | NET-24 | Superseded | Pluggable WPA backend family | Fixed primitive topology | No implementation |
 | NET-25 | Complete as p002 (`q053`) | WLAN v1 contract freeze | User decisions recorded above | P-book and dependent design records are synchronized; no implementation result claimed |
-| NET-26 | Planned as p003 | AF_UNIX peer credentials and one-socket authorization | NET-25 | Credential spoof/race/group/privilege fixtures pass |
+| NET-26 | Complete as p003 (`q040`) | AF_UNIX peer credentials and one-socket authorization | NET-25 | Credential spoof/race/group/privilege fixtures pass |
 | NET-27 | Complete as p004 (`q059`) | Minimum human direct-root `/sbin/wifi` over the stable WLAN ioctl contract | NET-25, WS004 p027-p029 | one normal search/list/status/connect/disconnect sequence passes without DHCP/persistence |
 | NET-28 | Complete as p005 (`q051`) | System/per-user `wifi.conf` and `set-key` | NET-25 | ownership/mode/symlink/locking/atomicity/redaction and abrupt-stop/remount tests pass |
-| NET-29 | Queued as p006 in q071 | `ZNV2`, peer authorization, global no-secret WLAN requests, policy-store reader, and `wifi` child secret-FD bridge | NET-26--NET-28 | malformed/auth/store/timeout/cancel/crash fixtures pass |
-| NET-30 | Queued as p007 after p006/p010 | Six global `net wifi` operations, stable all-WLAN selection, and one-connection transaction | NET-29, NET-33, WS004 p044 | full fake-device automatic/manual association, DHCP, disconnect/disable, and policy-state matrix passes |
-| NET-31 | Planned as p008 | Archer end-to-end and repeatability acceptance | NET-30, NET-33, NET-34, WS004 p030/p041/p044 | physical W52 global policy, DHCP, transfer, event/userspace recovery, manual suppression, and final repetition pass |
+| NET-29 | Complete as p006 (`q071`) | `ZNV2`, peer authorization, global no-secret WLAN requests, policy-store reader, and `wifi` child secret-FD bridge | NET-26--NET-28 | focused malformed/auth/store/child gates pass |
+| NET-30 | Complete as p007 (`q071`) | Six global `net wifi` operations, stable all-WLAN selection, and one-connection transaction | NET-29, NET-33, WS004 p044 | focused automatic/manual selection, DHCP, disconnect/disable, and policy-state matrix passes |
+| NET-31 | Complete as p008 (`q071`) | Archer end-to-end acceptance | NET-30, NET-33, NET-34, WS004 p030/p041/p044 | user accepted the consolidated physical result; the older repeatability campaign is superseded |
 | NET-32 | Complete as p009 (`q059`) | Minimum physical WLAN communication checkpoint | NET-27, WS004 p026-p029 | one runtime-only-credential run reaches carrier, DHCP, ping, and bounded fetch |
-| NET-33 | Ready as p010 after WS004 p044; not started | Primitive CLI sole 30-second high-level retry plus abnormal/semi-normal hardening | NET-27, NET-32, WS004 p044 | asynchronous generations, bounded retry/invalid/race/cancel/detach/redaction fixtures pass |
-| NET-34 | Queued as p011 in q071 | Resident global policy UID/state, store reread, link-event recovery, and one-connection arbitration | NET-29, NET-30, NET-33, WS004 p044 | no retained passphrase, deterministic selection, one same-SSID 30-second recovery child, explicit suppression with scans retained, clean `auto-searching` fallback, and identity-safe cleanup pass |
+| NET-33 | Complete as p010 (`q071`) | Primitive CLI sole 30-second high-level retry plus focused abnormal/semi-normal hardening | NET-27, NET-32, WS004 p044 | asynchronous generations, bounded retry/invalid/race/cancel/detach/redaction fixtures pass |
+| NET-34 | Complete as p011 (`q071`) | Resident global policy UID/state, store reread, link-event recovery, and one-connection arbitration | NET-29, NET-30, NET-33, WS004 p044 | no retained passphrase, deterministic selection, bounded recovery, explicit suppression, fallback, and identity-safe cleanup pass |
 
 ## 8. Cross-WS dependencies
 

@@ -8,9 +8,8 @@ Phase ID: `p010`
 
 Combined ID: `ws005-p010`
 
-Status: planned; p009 proved basic communication and the user explicitly
-prioritized this hardening after the 5-GHz normal path; Queue-ready after
-WS004 p044
+Status: complete (`q071`); finite userspace retry, asynchronous-kernel
+boundary, focused abnormal/semi-normal paths, and redaction gates pass
 
 Parent: [WS005 networking and WLAN](../ws.md)
 

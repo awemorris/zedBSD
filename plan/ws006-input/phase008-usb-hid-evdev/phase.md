@@ -1,6 +1,6 @@
 # WS006 Phase 008: USB HID evdev producers and hotplug
 
-Last updated: 2026-09-01
+Last updated: 2026-09-05
 
 WSID: `ws006`
 
@@ -8,8 +8,7 @@ Phase ID: `p008`
 
 Combined ID: `ws006-p008`
 
-Status: complete automatic/software milestone (`q048`); the single bounded
-IN-T42 physical keyboard/mouse observation remains pending
+Status: complete (`q048` plus user physical confirmation, 2026-09-05)
 
 Parent: [WS006](../ws.md)
 

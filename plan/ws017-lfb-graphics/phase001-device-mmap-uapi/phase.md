@@ -8,26 +8,18 @@ Phase ID: `p001`
 
 Combined ID: `ws017-p001`
 
-Status: Blocked; human decision required
+Status: Queue-ready; initial-protection ceiling selected on 2026-09-05
 
 Parent: [WS017](../ws.md)
 
 Tests: [WS017 test index](../tests/README.md)
 
-## Human-decision gate
+## Selected permission contract
 
-Execution is blocked until the maximum-protection behavior of a device mapping
-is selected:
-
-1. **Initial-protection ceiling (recommended):** an initially RW mapping may
-   transition `RW -> RO -> RW`; an initially RO mapping cannot add write, and
-   execute is always forbidden.
-2. **Monotonic reduction:** once write is removed from a region or derivative,
-   it cannot be restored; execute is always forbidden.
-
-The selected rule becomes the public VM contract and must be covered across
-fork and region splitting. No implementation choice is authorized by the
-current Phase definition.
+An initially RW mapping may transition `RW -> RO -> RW`; an initially RO
+mapping cannot add write, and execute is always forbidden. The original
+maximum is retained across fork and region splitting and covered by the VM
+fixtures.
 
 ## Objective
 

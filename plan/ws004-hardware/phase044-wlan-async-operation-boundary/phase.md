@@ -4,9 +4,9 @@ Last updated: 2026-09-04
 
 Phase ID: `ws004-p044`
 
-Status: queued in q071; reconnect ownership and the minimal read-only
-`AF_ROUTE`/`RTM_IFINFO` event UAPI explicitly approved by the user; follows
-p041 and precedes WS005 p010/p011
+Status: complete (`q071`); asynchronous kernel ownership, minimal read-only
+`AF_ROUTE`/`RTM_IFINFO` events, focused gates, and shared physical acceptance
+pass
 
 Parent: [WS004 hardware expansion](../ws.md)
 

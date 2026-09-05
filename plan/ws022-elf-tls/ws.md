@@ -1,10 +1,10 @@
 # WS022: ELF `PT_TLS` and static thread-local storage
 
-Last updated: 2026-09-02
+Last updated: 2026-09-05
 
 WSID: `ws022`
 
-Status: planned; not queued
+Status: Queue-ready; WS021 dependency satisfied
 
 Parent: [master plan](../master.md)
 

@@ -8,8 +8,8 @@ Phase ID: `p041`
 
 Combined ID: `ws004-p041`
 
-Status: planned; explicitly reopened by the user after q070; Queue-ready; not
-queued
+Status: complete (`q071`); focused W52 gates and the shared user-accepted
+physical WLAN result pass
 
 Parent: [WS004 hardware](../ws.md)
 

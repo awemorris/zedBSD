@@ -10,10 +10,10 @@ Parent: [master plan](../master.md)
 
 Last verified Phase: `ws001-p023`
 
-Resume point: q050 completed canonical p022/p023 and returned their released
-VFS dependencies to `ws005-p005`. The POSIX compliance ledger remains active;
-p020 retains its explicitly recorded audit residuals while completed p021 and
-p022/p023 remain regression inputs. Concurrent q042 source and focused-host
+Resume point: q050 completed canonical p022/p023; completed WS005 consumed
+their released VFS dependencies. The POSIX compliance ledger remains active;
+select the next unresolved p020 audit item while completed p021 and p022/p023
+remain regression inputs. Concurrent q042 source and focused-host
 milestones originally used the colliding pre-merge identifiers p015 and p016;
 their active Phase IDs are `ws001-p022` and `ws001-p023`.
 

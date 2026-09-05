@@ -4,9 +4,14 @@ Last updated: 2026-09-05
 
 Phase ID: `ws005-p008`
 
-Status: planned; not queued
+Status: complete (`q071`; user accepted 2026-09-05)
 
 Parent: [WS005](../ws.md)
+
+Closure note: the user reported that the q071 image worked on the target real
+hardware and explicitly declared WS005 achieved. This acceptance replaces the
+older five-consecutive-run campaign below; that procedure is retained only as
+historical planning context and creates no remaining WS005 gate.
 
 Orchestration dependency: [`net wifi` orchestration](../phase007-net-wifi-orchestration/phase.md)
 

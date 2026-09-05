@@ -1,21 +1,20 @@
 # WS011: network configuration console
 
-Last updated: 2026-08-27
+Last updated: 2026-09-05
 
 WSID: `ws011`
 
-Status: in progress; `ws011-p003` software milestone complete; VLAN/bridge
-manual hold released
+Status: in progress; p001--p003 and p005 design are complete. VLAN/bridge is
+blocked by `MB-010`; confirmed-commit implementation p006 is Queue-ready and
+p007 owns its consolidated acceptance.
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws011-p003`
 
-Resume point: after the higher-priority Queues, resume `ws011-p004` by closing
-its remaining virtual-interface UAPI, packet-ownership, filtering, and
-persistence design gates before implementation. Complete the independent
-`ws011-p005` timeout maximum, companion lock path, and diagnostic bounds when
-selected.
+Resume point: leave p004 blocked. After the higher-priority WS009 documentation
+follow-up, Queue p006 and then p007. The current `/sbin/net` still implements
+historical `apply`/`save`/`discard`; p006 replaces them.
 
 Shared tests: [WS011 test index](tests/README.md)
 
@@ -73,8 +72,10 @@ strict YAML-like zedBSD format, not general YAML.
 | `ws011-p001` | [`net.conf` v1 format and parser](phase001-netconf/phase.md) | Complete | Strict native parser/model/writer and host/native build gates pass |
 | `ws011-p002` | [Interactive `net` console](phase002-console/phase.md) | Complete | Three modes, candidate safety, argv sharing, help/history, and native image gates pass |
 | `ws011-p003` | [Persistence and boot migration](phase003-persistence/phase.md) | Complete software milestone | Atomic authoritative configuration and boot/request evidence pass; migrated DHCP QEMU rerun remains |
-| `ws011-p004` | [VLAN and bridge interfaces](phase004-vlan-bridge/phase.md) | Resumed; detailed design required before Queue | Close the recorded topology/UAPI/data-path decisions, then implement VLAN and bridge through kernel, networkd, `net`, persistence, and tests |
-| `ws011-p005` | [Confirmed-commit design](phase005-confirmed-commit-design/phase.md) | Proposed; public semantics fixed | Freeze three implementation bounds, then extract implementation and verification Phases |
+| `ws011-p004` | [VLAN and bridge interfaces](phase004-vlan-bridge/phase.md) | Blocked by explicit manual hold | Resume design and implementation only after explicit user release |
+| `ws011-p005` | [Confirmed-commit design](phase005-confirmed-commit-design/phase.md) | Complete design (2026-09-05) | Session-only candidate/token, networkd rollback timer, delayed config publication, and implementation bounds are frozen |
+| `ws011-p006` | [Confirmed-commit implementation](phase006-confirmed-commit-implementation/phase.md) | Queue-ready after WS009 follow-up | Replace `apply/save/discard` with interactive `commit`, `commit confirmed MINUTES`, and `rollback`; networkd never touches `/etc/net.conf` |
+| `ws011-p007` | [Confirmed-commit acceptance](phase007-confirmed-commit-acceptance/phase.md) | Planned; follows p006 | Focused/QEMU failure and recovery matrix plus one consolidated physical remote-administration check |
 
 ## Fixed decisions
 
@@ -117,7 +118,9 @@ strict YAML-like zedBSD format, not general YAML.
   explicit `rollback` therefore restores only running state; the persistent
   file is already the old configuration.
 - Only one confirmed transaction may be pending. networkd owns its runtime
-  token, timeout, already-open rollback file, and execution result.
+  token, timeout, already-open rollback file, and execution result. The exact
+  candidate exists only in the originating `net` process memory; another
+  session may roll back but cannot confirm or adopt it.
 - `apply`, `save`, `discard`, a separate `confirm`, timer extension, and a
   pending-status command are not in the initial final grammar.
 
@@ -210,8 +213,8 @@ ifconfig recovery remains usable. Before a confirmed-commit implementation is
 claimed, full-state rollback, client loss, daemon restart, timeout, and
 confirmation behavior also pass separately extracted acceptance cases.
 
-The WS may pause after `ws011-p003` with `p004` proposed, provided the master
-and this registry record that boundary.
+VLAN/bridge p004 is deliberately excluded from the active Queue while
+`MB-010` is held; p006/p007 may complete independently without claiming p004.
 
 ## Reconsideration boundaries
 

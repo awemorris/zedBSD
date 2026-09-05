@@ -8,7 +8,8 @@ Phase ID: `p009`
 
 Combined ID: `ws006-p009`
 
-Status: planned; blocked on the latest WS008 Noct/userland integration; not queued
+Status: Queue-ready; q063 satisfied the latest WS008 dependency and the user
+confirmed p008 physical USB HID operation on 2026-09-05
 
 Parent: [WS006](../ws.md)
 
@@ -22,10 +23,10 @@ input-mode, drain-event, and key-state UAPI without leaving compatibility
 stubs.  Ordinary tty character input and console graphics/cursor operations
 remain supported.
 
-This is the WS006 closure Phase.  It cannot execute merely because historical
-Noct p002 evidence passed: the user-requested latest official Noct tree must
-first be integrated at its new userland location and its selected zedBSD BeUI
-backend must be reverified against evdev.
+This is the WS006 closure Phase. Q063 integrated the requested latest official
+Noct tree at its new userland location and reverified its selected zedBSD BeUI
+backend against evdev; the user has now supplied p008's bounded physical
+observation.
 
 ## Dependencies
 

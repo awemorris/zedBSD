@@ -144,15 +144,16 @@ synthetic Ethernet L2 automatic milestone. Q059 completed WS005 p004's
 minimum direct `/sbin/wifi` command and p009's single USB-passthrough
 development checkpoint: scan, WPA2/CCMP authorization, DHCP, gateway/public
 ping, bounded HTTP fetch, disconnect, and interface down passed. Q060 completed
-WS004 p030's automatic RTL8822BU lifecycle milestone, while its shared WS005
-p008 physical lifecycle and five-run closure remain pending. Q070 then closed
+WS004 p030's automatic RTL8822BU lifecycle milestone. Q070 then closed
 WS004 p043: the user published the physically verified RTL8822BU correction as
 `origin/main` commit `d6591cb`, accepted the hardware result, and the merged
 driver, WLAN/WPA2, wifi-command, and HAL-format regressions pass. On 2026-09-04
 the user explicitly reopened p041 for a Japan W52 5-GHz useful normal path and
 added p044 to replace p030's kernel-owned high-level reconnect with
 asynchronous kernel generations, link notification, and a userspace-owned
-retry. AX211 direct boot, RF-link-budget, and cross-driver follow-ups remain
+retry. Q071 completed p041/p044 and the corresponding WS005 policy/recovery
+Phases; the user accepted the consolidated physical WLAN result and closed
+WS005. AX211 direct boot, RF-link-budget, and cross-driver follow-ups remain
 deferred. Q061 completed
 p037's read-only Intel intake, corrected the exact target to AX211/CNVio2
 `8086:51f0`, subsystem `8086:4090`, revision `01`, and cleared its firmware/
@@ -162,8 +163,7 @@ lifetime gates. Q066 completed the API89 MLD correction and exact-device VFIO
 normal path through WPA2/CCMP, DHCP, ping, nonempty HTTP fetch, disconnect,
 down, and host restoration; p038 is uncleared only for one exact AX211 direct-
 boot result shared with the HAL counter observation. P039's evidence-
-driven cross-driver review follows that physical checkpoint before the return
-to p006/p007. P008 final five-run acceptance remains incomplete. Q063
+driven cross-driver review follows that physical checkpoint. Q063
 independently closes the former Noct compile/application CLI defect and target
 package hold. The
 archived q043 PC-98 fixed-read and exact-mouse
@@ -449,28 +449,28 @@ allowed to block first communication unless the normal path depends on them.
 
 | WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
 | --- | --- | --- | --- | --- | --- |
-| `ws001` | POSIX.1-2024 compliance | Active ledger; q050 completed both VFS prerequisites discovered by q041 | `ws001-p022` and `ws001-p023` complete with production-linked faults and abrupt-stop/remount evidence | Retain p022/p023 as regressions; their dependency consumer resumes in WS005 p005 | [WS001](ws001-posix/ws.md) |
+| `ws001` | POSIX.1-2024 compliance | Active ledger; q050 completed both VFS prerequisites discovered by q041 | `ws001-p022` and `ws001-p023` complete with production-linked faults and abrupt-stop/remount evidence | Retain p022/p023 as regressions and select the next unresolved p020 audit item; WS005 consumed the released VFS dependencies | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; q066 completed p025's automatic HAL counter milestone while the completed Latitude USB/network and CF-SV7 USB-root milestones remain intact | p025's API split, private calibration, complete-CPU-set validation, positive/negative SMP KVM evidence, and configured build matrix pass; p024 still awaits one V13 boot and p018/p019 remain | Share p025's sole remaining physical multicore observation with p038's final direct boot rather than creating an intermediate human block | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active follow-up; q070's 2.4-GHz RTL8822BU baseline remains accepted and p041/p044 are explicitly opened | p043 scan-before-connect, one 30-second command deadline, up/down/quiet, corrected radio/authentication path, controlled-port authorization, focused suites, and HAL formatting pass | Implement p041 W52, then p044's asynchronous kernel/no-hidden-retry/link-event correction; other deferred WS004 work remains closed | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WLAN | Active; q059 completed p004 minimum direct command and p009 one-run physical connectivity; q060 p030 is retained except for p044's reconnect supersession | Physical USB Ethernet, authenticated control, strict root/per-user credential storage, frozen design contract, exact first-radio identity, common WLAN control ABI, p036, p028-p030 automatic milestones, p004, and p009 are complete; q070 physically accepted the 2.4-GHz RTL8822BU hardware path; the 2026-09-05 global-policy amendment freezes six interface-free `net wifi` forms and daemon-side policy ownership | After p041/p044, complete p010, p006/p007, and p011's global one-connection policy/store-reread recovery before p008 final acceptance | [WS005](ws005-networking/ws.md) |
-| `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; q063 released p009's WS008 userland dependency | [WS006](ws006-input/ws.md) |
+| `ws004` | Hardware expansion | Active follow-up; q071 completed the RTL8822BU W52 path and asynchronous WLAN ownership boundary | p041/p044 and the shared WS005 real-hardware WLAN acceptance pass; prior USB, NVMe QEMU, and WLAN milestones remain intact | Resume the independent Latitude NVMe, AX211 direct-boot, deferred ECM accounting, or evidence-driven WLAN-refactor follow-ups | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WLAN | Complete (`q071`) | Six interface-free `net wifi` forms, authenticated ZNV2 policy, daemon-side credential reads, one managed connection, 30-second userspace retry, link-event recovery, automatic gates, and the accepted real-hardware W52 result pass | No Phase remains; extract a new requirement before resuming | [WS005](ws005-networking/ws.md) |
+| `ws006` | Input and evdev | Active; p008 complete after q048 automatic evidence and the user's physical USB HID confirmation | Report-Protocol HID works on hardware; `/dev/mouse` is absent and Xzed already uses evdev-only input | Queue p009 to remove event/key-state `/dev/console` UAPI while preserving ordinary character/TTY input | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Complete (`q063`) | p010 host CLI/toolchain/ordinary-build and p009 amd64 static/package/q35-xHCI runtime gates pass on official `v2.0.1`; p006 remains historical review evidence | No current Phase; Remacs and i386/PC-98 target Noct remain explicitly outside q063 | [WS008](ws008-noct/ws.md) |
-| `ws009` | Documentation | Active; q046 reconciled two already implemented producer contracts | `ws009-p004` and `p005` complete | Extract the next dependency-ready public reference alongside its producer WS | [WS009](ws009-documentation/ws.md) |
+| `ws009` | Documentation | Active; completed-producer follow-up is highest priority | `ws009-p004` and `p005` complete; p006 Queue-ready | Queue p006 for current WLAN, USB HID, Intel Mac Variant, Noct, and toolchain references | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete (`q063`) | `ws010-p001`–`p005` complete; all 177 maintained userland Makefiles expose the common lifecycle and top-level download materializes declared external inputs | No current Phase; extract a new requirement before resuming | [WS010](ws010-scripting/ws.md) |
-| `ws011` | Network configuration console | In progress; VLAN/bridge hold released, detailed design still open | `ws011-p003` complete; p004 resumed for design; p005 bounds open | After higher priorities, finish p004's virtual-interface/UAPI/packet-ownership design before implementation; freeze p005 bounds independently | [WS011](ws011-net-config/ws.md) |
+| `ws011` | Network configuration console | In progress; confirmed-commit design complete; VLAN/bridge separately blocked | `ws011-p005` complete by design; p006 Queue-ready; p007 follows; p004 blocked by MB-010 | After WS009 p006, implement p006 then complete p007 acceptance | [WS011](ws011-net-config/ws.md) |
 | `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
 | `ws013` | CPAR container partitioning | Active; q031/q032 configured x86 boot paths complete, Runtime topics manually blocked | `ws013-p002`--`p006` complete | No Boot configuration Phase remains; resume Runtime namespace/CLI/package design only after its explicit manual holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
-| `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
+| `ws017` | `/dev/graphics` LFB fast path | Queue-ready; permission ceiling selected | No Phase started; p001 Queue-ready | After WS022, Queue p001--p004; RW mappings may return from RO to RW within their original maximum | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
-| `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
-| `ws020` | Intel Mac UEFI bring-up and generic image variants | Active; p006 automatic GPT/Protective-MBR repair complete, one provisional and p004 final physical acceptance pending | `MAC-T022`, pristine `MAC-T021`, and uninterrupted six-cell `MAC-T020` pass; exact `692160cf...331d` / `A93F-BBBE` image published | Record one provisional Intel Mac boot, then retain p004's final five consecutive cold boots | [WS020](ws020-intel-mac/ws.md) |
+| `ws019` | Installation and disk administration | Active; Noct 2.0.1 block released and target-generation policy selected | p001 complete; p002 Queue-ready; p003/p008/p009/p004/p005 follow | After WS011, implement read-only diskpart, target mkfs/mkswap, Noct zedinst, and QEMU acceptance in dependency order | [WS019](ws019-installation/ws.md) |
+| `ws020` | Intel Mac UEFI bring-up and generic image variants | Complete (user physical confirmation, 2026-09-05) | Automatic Variant/GPT/QEMU gates and successful Intel Mac real-hardware operation pass | No Phase remains; explicit acceptance supersedes the older five-run campaign | [WS020](ws020-intel-mac/ws.md) |
 | `ws021` | Reproducible x86 LLVM toolchain and sysroots | Complete (`q064`) | LLVM 23.1.0 cache/source paths, amd64/i386 sysroots, all x86 target/loader builds, four CI configurations, six-cell amd64 firmware matrix, i386 PC/AT and PC-98, and target noct non-JIT/JIT/BeUI gates pass | No current Phase; the source-build path and pinned `rev-0` cache remain supported in parallel | [WS021](ws021-llvm-toolchain/ws.md) |
-| `ws022` | ELF `PT_TLS` and static thread-local storage | Planned; WS021 dependency satisfied, not queued | No Phase started | Freeze the x86 TLS/TCB ABI and fixture matrix in p001 before changing exec or pthread runtime | [WS022](ws022-elf-tls/ws.md) |
+| `ws022` | ELF `PT_TLS` and static thread-local storage | Queue-ready; WS021 dependency satisfied | No Phase started | Queue p001 to freeze the x86 TLS/TCB ABI and fixtures, then implement p002/p003 | [WS022](ws022-elf-tls/ws.md) |
 | `ws023` | i386/amd64 HAL coding-style conformance | Complete (`q067`) | All 88 C/header files, focused/strict gates, four configured builds, and four x86 runtime cells pass; API/ABI review found no delta | No current Phase; retain the q067 evidence and extract pre-existing risks separately if prioritized | [WS023](ws023-x86-hal-style/ws.md) |
 
 ## 4. Milestones
@@ -575,135 +575,36 @@ WS003/WS004 x86 HAL behavior + WS021 project LLVM
 
 ## 6. Priority waves
 
-The user replaced the earlier wave ordering on 2026-08-30 and inserted the
-approved WS021 LLVM toolchain plan on 2026-09-02. The following is the active
-execution order. Dependency closure may interleave adjacent WSs, but it must
-not silently promote a lower-priority product goal over a ready higher-priority
-one.
+The user replaced the previous WLAN/toolchain wave on 2026-09-05. Completed
+WS004, WS005, WS008, WS018, WS020, WS021, and WS023 results remain accepted and
+are no longer execution-order entries. The active order is:
 
-The temporary WS023 maintenance override completed in q067. The user's
-2026-09-04 instruction now places the reopened RTL8822BU 5-GHz path and the
-remaining WS005 stack ahead of the previously next product item.
+1. `ws009-p006`: update public documentation to the already completed WLAN,
+   physical USB HID, Intel Mac Variant, Noct 2.0.1, and project LLVM state.
+   Do not document planned removal or implementation as current behavior.
+2. `ws011-p006`, then `ws011-p007`: implement and accept interactive confirmed
+   commit. The originating `net` process alone owns the candidate and may
+   publish `/etc/net.conf`; networkd owns only the volatile timer, token, and
+   `/tmp` rollback program. VLAN/bridge p004 remains excluded by `MB-010`.
+3. WS019 in dependency order: p002 read-only storage administration, p003
+   read-only `/sbin/diskpart`, p008 target UFS1-in-file `/sbin/mkfs`, p009
+   target ZEDSWAP2-in-file `/sbin/mkswap`, p004 Noct `/bin/zedinst`, then p005
+   consolidated QEMU NVMe installation acceptance. No template image or live
+   `DATA.IMG`/`SWAPFILE` copy is permitted.
+4. WS022 p001--p003: freeze and implement compiler-emitted static ELF
+   `PT_TLS` for amd64/i386 initial threads and pthreads. Dynamic `dlopen()` TLS
+   remains outside the first boundary.
+5. WS017 p001--p004: implement the optional `/dev/graphics` mapped-LFB path,
+   amd64 backend, Xzed fast path, and final amd64 UEFI acceptance. An initially
+   RW mapping may transition `RW -> RO -> RW` within its original maximum; an
+   initially RO mapping cannot gain write, and execute is always forbidden.
 
-Q068 completed only the exact RTL8822BU absent-5-GHz reproduction. The user
-then clarified that the snapshot-visible 2.4-GHz SSID also returned `ENOENT` on
-hardware. Q069's one exact p042 attempt instead completed generation 2 and
-authorized with zero retries/error. The report therefore remains unlocalized
-without a speculative fix, while p041 is Queue-ready for the independently
-proven 5-GHz capability gap. Q070 subsequently completed p043 after the user
-published and physically accepted the working RTL8822BU correction on
-`origin/main`; that 2.4-GHz baseline remains accepted. The user has now
-explicitly reopened p041 for W52 only. AX211 quality work remains deferred.
-
-1. q048 completed the WS006 p008 production HID automatic/software milestone
-   after q044's p006/p007 source boundaries and q047's p031/p032 USB 1.1,
-   hotplug, and recovery prerequisites. Checked Report Protocol,
-   generation-safe stale-fd handling, xHCI, and paired EHCI/UHCI QEMU runtime
-   pass. One bounded physical HID observation remains without calling the WS
-   complete. q049 independently implemented CDC ECM and proved its four QEMU
-   network cells without making NCM wire behavior a shared implementation
-   dependency. q047 also completed p033's framebuffer-console race correction
-   using host gates and p031's passing forced QEMU evidence rather than adding
-   a second run. P009 remains WS008-dependent. WS004 completed p019 in q049;
-   q052 then completed p021's current-source automatic/runtime boundary and
-   froze one candidate for its remaining Latitude check. Q053 subsequently
-   completed the documentation-only `ws005-p002` WLAN v1 contract audit, and
-   q054 implemented the accepted common asynchronous-TX statistics policy in
-   NCM and completed p017. Q070 now closes the accepted WS004 baseline; p021,
-   p025, and other unfinished hardware entries remain deferred reopening
-   points rather than active closure blockers. ECM adoption of the helper is a
-   separate future consumer, not a residual failure of p017.
-2. WS018 is complete.  q035 finished p009's retained runtime evidence and
-   p010--p012 in consumer-before-deletion order; no residual Phase remains.
-3. Complete WS020 Intel Mac bring-up. The generic board Variant, three amd64
-   image profiles, strict six-cell QEMU matrix, and refreshed production
-   handoff preflight pass. The bounded physical UEFI-only checkpoint and final
-   five-run acceptance remain deferred by the user. Disk capacity is not a
-   menu selection.
-4. The Archer T3U Nano 2.4-GHz USB WLAN path is complete through q070/p043 and
-   physically accepted. Reopen p041 now and add a checked Japan W52
-   channels 36/40/44/48 path. Use direct `/sbin/wifi` to prove channel
-   44/5220 MHz, authorization, DHCP, LAN-peer ping, bounded nonempty fetch,
-   disconnect, and down on `10.0.10.25`, without waiting for `net wifi`. The
-   historical
-   dependency order is p026 exact-unit/firmware intake, p027 generic WLAN core,
-   the completed p036 pre-radio substrate with its individually selected
-   firmware package, WS005 privilege/command/profile/protocol prerequisites,
-   completed q057 p028 scan, q058 p029 secure L2, q059 p004 minimum command
-   plus p009 single physical communication path, and q060 p030 automatic
-   lifecycle hardening. P044 then supersedes only p030's high-level reconnect
-   ownership before the shared p008 physical/five-run acceptance; that
-   acceptance remains pending and was not consumed by q060.
-5. The corrected Intel AX211/CNVio2 continuation is deferred until WS004 is
-   explicitly reopened. Its completed history is: q061
-   completed p037's read-only exact-device and firmware/license intake. Q062
-   completed p038's standalone exact `8086:51f0`/`8086:4090`/rev `01`
-   implementation and focused automatic gates. Q066 completed its API89 MLD
-   correction and exact-device VFIO normal path through firmware/PNVM, scan,
-   WPA2/CCMP, DHCP, ping, nonempty fetch, disconnect, and down with host
-   restoration; one exact-machine direct boot remains before p038 closes.
-   After reopening, p039 reviews/refactors only common behavior
-   demonstrated by both working drivers. Do not create a common Intel/Realtek
-   hardware layer first, and do not change the public WLAN UAPI without a
-   significant explicit interface decision. RTL8822CE remains a later
-   independent target.
-6. Complete the WLAN quality/control stack after p041. Execute p044 to retain
-   asynchronous kernel scan/one-attempt connect, remove the kernel high-level
-   reconnect scheduler, and publish generic link events. Then execute p010,
-   which owns the sole 30-second `/sbin/wifi` retry, followed by p006 ZNV2/machine-child
-   infrastructure and p007's six global, interface-free `/sbin/net wifi`
-   commands through the fixed `net` -> `networkd` ->
-   `ifconfig`/`wifi`/`dhcpc` topology. `net` is stateless. Networkd derives one
-   prospective policy UID from the authenticated `enable` peer, validates its
-   fixed store and a stable radio enumeration before mutation, and publishes
-   that UID only after preparation succeeds. Zero radios is a valid
-   `auto-searching` hotplug wait; otherwise one failed radio does not exclude
-   successfully prepared radios from stable-order selection. Networkd admits
-   at most one managed connection. Follow with p011: RF loss moves `connected` to
-   `auto-searching`; each ordinary 30-second `wifi connect` child receives only
-   an operation-local fd-4 secret reread from the store, and no passphrase is
-   retained between children. P008 remains the single final
-   W52/event/userspace-recovery physical acceptance.
-7. WS008 and WS010 are complete through q063. Official Noct `v2.0.1` is
-   verified once and extracted for both host and target; host runtime and
-   compile/application `--path`, ordinary build, amd64 target package, and
-   q35/xHCI non-JIT/JIT/BeUI gates pass. The target package is rooted at
-   `userland/base/noct/`, the tracked two-hunk patch connects only the zedBSD
-   final-link adapter, and Remacs plus i386/PC-98 target Noct remain outside
-   this completed item. All maintained userland items expose
-   download/patch/build/install, with top-level `make download` providing the
-   source-distribution acquisition boundary.
-8. Retain q064's completed WS021 boundary: host Noct and verified patched LLVM
-   23.1.0 bootstrap with the host toolchain; `build/llvm`, both x86 sysroots,
-   every x86 target/loader, the permanent `rev-0` cache, CI builds, and the
-   consolidated QEMU/target-noct acceptance all pass. Future x86 target work
-   must keep using this project-owned toolchain boundary.
-9. After WS021, implement WS022's compiler-emitted static ELF `PT_TLS`
-   contract. Freeze the amd64/i386 TLS/TCB ABI and malformed-ELF fixtures
-   before changing exec; then provide independent initial-thread and pthread
-   TLS images. Dynamic `dlopen()` TLS remains outside the first boundary.
-10. Implement WS017's `/dev/graphics` LFB fast path after resolving its retained
-   `mprotect` permission-ceiling decision. Do not infer that decision from the
-   priority change.
-11. Retain q043's `ws007-p004` result as `uncleared`: the frozen headless PC-98
-   cell and focused input gates pass, while the maintained qemu-pc98 build has
-   no interactive display backend. Resume only from the user's exact failing
-   GUI environment. After WS017, continue the remaining WS007 integration,
-   including real Xzed/LFB behavior.
-12. Continue WS001 POSIX work. Add a bounded `lp`/`lpr` Phase whose deliberate
-   model posts PDF directly to an LPD printer and has no local spool queue.
-13. Re-plan WS019 so the installer is written in Noct, then implement it after
-   its complete installer specification is supplied. The user's latest message
-   ended after "仕様は"; that missing contract is a human blocker and must not be
-   guessed from the older C-oriented plan.
-14. After the installer passes automatic acceptance, complete WS003 by
-    installing to and booting from the Latitude 5320 NVMe device.
-15. Resume WS011 VLAN and bridge work. The previous manual hold is released by
-    this priority instruction, but any still-open virtual-interface, packet-
-    ownership, filtering, or persistence decision remains a design gate rather
-    than permission to improvise an incompatible UAPI.
-16. Keep WS013 Runtime CPAR, WS014 GPU, and WS015 μITRON pending until their
-    explicit architecture holds are separately released.
+`ws006-p009` is independently Queue-ready after physical USB HID acceptance,
+but is outside this explicitly ordered five-WS wave. It remains visible and is
+not silently inserted ahead of the listed priorities. WS003 Latitude NVMe
+installation follows successful WS019 acceptance. WS007, WS001, remaining
+WS004 hardware follow-ups, WS013 Runtime CPAR, WS014 GPU, and WS015 μITRON stay
+outside this wave until separately prioritized or unblocked.
 
 When a higher-priority item reaches a recorded human decision, mark only that
 Phase `uncleared`/deferred and continue to the next dependency-ready item. A
@@ -734,23 +635,23 @@ until stopped or no judgment-free Phase remains.
 | Managed WLAN reconnect and lifecycle state | WS005 p011 | Resolved: networkd owns `disabled`, `auto-searching`, `connected`, and `manual-disconnected`, with bounded internal `connecting`/`reconnecting` transients. Zero radios is a successful `auto-searching` hotplug wait; partial multi-radio preparation continues with usable radios in stable order. RF loss enters `reconnecting`, rereads the current store, and runs exactly one ordinary 30-second `/sbin/wifi` child for the same selected SSID; success returns to `connected`, while failure cleans up and settles in `auto-searching`. Explicit disconnect leaves radios up/scanning while suppressing automatic selection, and disable removes the policy. Startup and normal exit must disconnect, stop scans, and lower every detected WLAN; failed normalization cannot publish `READY` or a successful exit |
 | Kernel interface link notification transport | WS004 p044 / WS005 p011 | Resolved for q071: use read-only `socket(PF_ROUTE, SOCK_RAW, 0)` with bounded versioned `RTM_IFINFO` carrier/removal records, poll wakeup, explicit overflow/resnapshot, ifindex plus device-generation identity, and no route-mutation API in this Phase |
 | `/etc/net.conf` v1 grammar and empty-collection syntax | WS011 | Parser and boot migration |
-| VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | Manual hold released 2026-08-30; `ws011-p004` must now close the remaining design gates before implementation |
+| VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | Manually blocked again as `MB-010` on 2026-09-05; resume p004 only after explicit release |
 | Linux/FreeBSD evdev compatibility profile | WS006 | Resolved by `ws006-p001`; implement `/dev/input/eventN` against it |
 | USB HID v1 policy boundary | WS006 p008 / WS004 | Resolved: use checked Report Protocol with no malformed-descriptor fallback, and reserve a detached `eventN` until the final old-generation fd closes. USB 1.1 is required, so UHCI/EHCI concurrent-request scheduling and hotplug precede p008; a general endpoint-STALL/device-reset recovery contract is also required |
-| Device-mapping `mprotect` ceiling | WS017 | Choose whether an initial RW mapping may return from RO to RW within its original maximum, or whether every permission reduction is permanent, before `ws017-p001` enters a Queue |
+| Device-mapping `mprotect` ceiling | WS017 | Resolved on 2026-09-05: permissions may return only within the original mapping maximum (`RW -> RO -> RW` is valid for an initially RW map); an initially RO mapping cannot gain write and no device mapping can gain execute |
 | zedBSD GPU/Vulkan capability, object, and display-takeover profile | WS014 | Manually blocked; publishing `/dev/gpuN` UAPI or transferring i915 ownership |
 | YAML `/etc/rc.conf` schema and versioned init status/control protocol | WS012 | Resolved and complete: q017 completed YAML/persistence; q018 completed typed `/run/init.sock` service and `ZSV1 HALT`/`POWEROFF`/`REBOOT` clients, argv/interactive administration, and production integration with no unversioned compatibility path |
 | x86 kernel boot-parameter contract | WS003/WS013 | Resolved and implemented by q015: `boot0`--`boot3`, exclusive `rootpart` or explicit overlay root/data, `swap0`--`swap3`, and `init`; BR-T46 passes all 31 four-platform QEMU cells |
 | UEFI `zedbsd.cfg` boot contract | WS013 | Resolved for q031: required same-disk FAT16/FAT32 `/zedbsd.cfg`, required loader-only `kernel=`, direct kernel parameters with bounded shorthand, overlay or native `rootpart`, no menu, and ignored UEFI LoadOptions |
 | BIOS boot configuration names and convergence | WS013 p005/p006 | Resolved and implemented by q032: i386 PC/AT PBR/`BOOTZBSD.EXE` and amd64 BIOS PBR/`BOOTZBSD.EXE` use `/zedbsd.cfg`; PC-98 `BOOTZBSD.EXE` uses `/BOOTZBSD.CFG`; all implement the p003 format and parameter result with no `boot.cfg`, fixed-kernel, embedded-record, or reserved-area direct-kernel fallback |
 | NVMe partition naming | WS004/WS019 | Resolved by the existing one-based disk contract: namespace is `/dev/nvme0n1`, first partition is `p1`; the earlier `p0` example is not a new ABI |
-| Installer v1 layout and mutation boundary | WS019 p001 | Resolved: existing GPT, exactly one existing ESP, one explicitly selected distinct same-disk FAT32, no mkfs/GPT writes/label writes, overlay files only, and no firmware-variable mutation |
+| Installer v1 layout and mutation boundary | WS019 p001 | Resolved: existing GPT, exactly one existing ESP, one explicitly selected distinct same-disk FAT32, no partition-format/GPT/label writes, overlay files only, and no firmware-variable mutation; target commands format only newly created contained files |
 | Installer read-only administration UAPI | WS019 p002 | Expose stable whole/partition identity, GPT type/PARTUUID, parent relation, capacity, filesystem type, mount/swap state, and loader-origin identity before read-only `diskpart` and `zedinst` preflight |
 | Installer payload discovery | WS013 p002 | Resolved for q031: search same-physical-disk FAT16/FAT32; zero `/zedbsd.cfg` candidates is fatal, multiple candidates warn and use the deterministic first, and omitted `boot0` defaults to the selected config FAT while an explicit value is preserved |
 | Installed UEFI `LoadOptions` precedence | WS013 p002/p003 | Resolved for q031: ignore LoadOptions on the required `zedbsd.cfg` path; do not merge or override the configuration |
-| Installer source-image stability | WS019 p004 | Choose unused immutable installer templates for data/swap (recommended) or explicitly redesign p004 to generate them at the target; never copy the live overlay upper or active swap |
+| Installer source-image stability | WS019 p004/p008/p009 | Resolved on 2026-09-05: no templates. `zedinst` creates unpublished regular files and invokes target `/sbin/mkfs` for existing UFS1 and `/sbin/mkswap` for existing ZEDSWAP2; it never copies the live overlay upper or active swap |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
-| Confirmed-commit implementation bounds | WS011 | Public semantics are fixed: interactive only, explicit timeout, delayed `/etc/net.conf` write, ordinary `commit` confirms, and DHCP is reacquired; freeze timeout maximum, lock path, and diagnostic bounds before implementation |
+| Confirmed-commit ownership and bounds | WS011 p005--p007 | Resolved on 2026-09-05: interactive originating `net` owns candidate/token in memory and alone writes `/etc/net.conf` on ordinary commit; networkd owns only the volatile timer/open `/tmp` rollback program and never touches that file; client loss makes confirmation/adoption impossible, while explicit rollback or timeout remains; p005 freezes all size/time/lock/acknowledgement bounds |
 | Authoritative Noct repository, build sequence, and release | WS008 | Resolved by q063: official `awemorris/NoctLang` release `v2.0.1`, tag commit `ed621e79139f55d06dd1a474243afbf0ce5efe0a`, archive size `2524680`, and SHA-256 `68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f` are the common host/target identity. Both `--path` forms, toolchain/ordinary build, amd64 target package, and q35/xHCI non-JIT/JIT/BeUI gates pass. The target-only two-hunk final-link patch is explicitly not BeUI; Remacs and i386/PC-98 target support remain outside the accepted scope. |
 | x86 compiler triples, bootstrap and sysroot ownership | WS021 | Resolved by q064: host C/C++ builds host Noct and verified patched LLVM 23.1.0; project LLVM installs at `build/llvm` from source or the pinned `rev-0` cache; target triples are `x86_64-unknown-zedbsd` and `i386-unknown-zedbsd`; sysroots are `build/amd64/sysroot` and shared `build/i386/sysroot`; target Noct uses the former; BIOS/UEFI loaders use LLVM with no host target GNU/MinGW fallback. The final amd64/i386/PC-98 and target-noct runtime campaign passes. sparcv9/m68030 use a later project-built GCC. |
 | x86 HAL style-only boundary | WS023 | Resolved and completed in q067: `plan/coding-style.md` now applies to all 88 C/header files under `src/hal/i386` and `src/hal/amd64`; the five inherited edits were preserved, narrow compiler-extension/table exceptions are recorded, and strict, focused, configured-build, runtime, and API/ABI review passed. |
@@ -772,6 +673,7 @@ until the user explicitly releases the named hold.
 | `MB-004` | `ws013-p001` | Service-container package format, dependencies, updates, config, and data | User explicitly resumes service-container package discussion |
 | `MB-005` | `ws014-p001` | GPU UAPI, capability profiles, display takeover, i915 split, Vulkan/GLES | User explicitly resumes GPU architecture discussion |
 | `MB-007` | `ws015-p001` | μITRON profile/UAPI, legacy static configuration, RT/POSIX mailbox and filesystem proxy, scheduling, failure, and timing contracts | User explicitly resumes WS015 architecture/API discussion |
+| `MB-010` | `ws011-p004` | VLAN/bridge virtual-interface UAPI, packet ownership, filtering, persistence, and implementation | User explicitly resumes VLAN/bridge design |
 
 Released holds remain permanent history rather than reusable identifiers:
 

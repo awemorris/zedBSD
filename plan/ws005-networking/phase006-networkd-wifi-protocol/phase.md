@@ -4,8 +4,8 @@ Last updated: 2026-09-05
 
 Phase ID: `ws005-p006`
 
-Status: in progress in q071; focused protocol/auth/store/child gates pass;
-combined physical acceptance remains in p008
+Status: complete (`q071`); focused protocol/auth/store/child gates and the
+combined user-accepted physical result pass
 
 Parent: [WS005](../ws.md)
 

@@ -1,10 +1,10 @@
 # WS019 Phase 004: existing-FAT overlay `/bin/zedinst`
 
-Last updated: 2026-08-29
+Last updated: 2026-09-05
 
 Phase ID: `ws019-p004`
 
-Status: planned; blocked by stable installer-source decision
+Status: planned Noct implementation; follows p002, p003, p008, and p009
 
 Parent: [WS019](../ws.md)
 
@@ -13,12 +13,12 @@ Tests: [WS019 test index](../tests/README.md)
 ## Objective
 
 Install exactly one overlay environment from the ordinary USB system into an
-existing ESP plus an explicitly selected existing FAT32, without formatting,
-partition-table writes, label changes, or firmware-variable writes.
+existing ESP plus an explicitly selected existing FAT32, without formatting
+either partition, changing its table or labels, or writing firmware variables.
 
 ## Dependencies
 
-- `ws019-p002` and `ws019-p003`;
+- `ws019-p002`, `ws019-p003`, `ws019-p008`, and `ws019-p009`;
 - WS013 p002 `zedbsd.cfg` discovery and p003 parameter translation;
 - the stable NVMe block/GPT path from `ws004-p024`.
 
@@ -31,13 +31,17 @@ partition-table writes, label changes, or firmware-variable writes.
    alias, and no other same-disk `/zedbsd.cfg` marker. Although the loader can
    warn and choose its first candidate, the installer must guarantee that its
    selected payload is the only installed candidate.
-3. Resolve and verify only stable source artifacts from the current USB boot
-   filesystem, then generate the fixed direct `/zedbsd.cfg`. The live
-   writable overlay upper and active swap are forbidden as copy sources.
+3. Resolve and verify only `BOOTX64.EFI`, `vmunix`, and the immutable
+   `rootfs.img` from the current USB boot filesystem. Create fixed-size empty
+   regular-file staging objects for `data.img` and `swapfile`, format them
+   through `/sbin/mkfs` and `/sbin/mkswap`, and generate the fixed direct
+   `/zedbsd.cfg`. The live writable overlay upper and active swap are forbidden
+   as copy sources.
 4. Display source identity, destination identities, capacities, and all six
    managed destination paths and obtain one explicit confirmation.
-5. Stage, flush, digest, and rename each new file. Accept an exact existing
-   file; refuse any non-identical conflict.
+5. Stage, flush, digest, and rename each copied or generated file. Accept an
+   exact existing file; refuse any non-identical conflict. A child-command or
+   generation failure removes only its unpublished staging object.
 6. Reopen and verify all six final files, their payload uniqueness, the
    unchanged GPT, unchanged labels, unchanged UEFI variables, and unmanaged
    sentinel files before success.
@@ -56,25 +60,17 @@ There is no whole-disk, native, format, overwrite, or noninteractive mode.
 - Repeating the installer over byte-identical managed files succeeds
   idempotently; a single differing managed byte causes refusal.
 
+## Selected source and generation contract
+
+The live `DATA.IMG` and `SWAPFILE` are never copied. Installer templates are
+not introduced. P008 creates the same UFS1 format already consumed by the
+overlay upper; p009 creates the same ZEDSWAP2 format already consumed by the
+swap subsystem. For installer v1, `zedinst` creates a 32-MiB `data.img` and a
+64-MiB `swapfile`, matching the current image defaults. Size selection is a
+later installer feature.
+
 ## Reconsideration boundary
 
 Stop if FAT cannot provide a bounded same-filesystem publication primitive,
 if installer source identity cannot be proven, or if success would require
 rewriting an existing non-identical file.
-
-## Blocking source-safety decision
-
-The ordinary USB system actively writes its `DATA.IMG` overlay upper and uses
-its `SWAPFILE` as swap. Neither is a coherent installation template, even if a
-single read sometimes completes. Copying active swap is specifically invalid.
-
-Before this Phase enters a Queue, select one of these contracts:
-
-- add unused immutable installer templates such as `/INSTALL/DATA.IMG` and
-  `/INSTALL/SWAPFILE` to the source image and copy only those (recommended); or
-- redesign p004 to create the data image and swap object on the target, with
-  new bounded allocation/initialization and failure semantics.
-
-`BOOTX64.EFI`, the kernel, and read-only `rootfs.img` may continue to be
-verified from their existing source locations. This decision does not block
-WS013 p002/p003 or WS019 p002/p003.

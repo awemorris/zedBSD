@@ -12,6 +12,8 @@ repository-wide `make check` target is not an acceptance interface.
 | `NPER-T001`–`NPER-T007` | `ws011-p003` | Atomic persistence, rc.conf removal, boot ordering, static/DHCP QEMU, recovery |
 | `NVIR-T001`–`NVIR-T008` | `ws011-p004` | VLAN tags/isolation, bridge learning/forwarding, lifecycle, cycles, rollback |
 | `NCOM-D001`–`NCOM-D006` | `ws011-p005` | Interactive-only confirmed commit, delayed persistence, rollback-program validation, partial failure, volatile timeout/restart, single-owner locking, and fresh DHCP reacquisition |
+| `NCOM-T001`–`NCOM-T012` | `ws011-p006` | Grammar removal/addition, arm/apply/confirm, timeout, explicit rollback, session loss, stale token, concurrency, restart, bounds, partial failure, and acknowledgement loss |
+| `NCOM-T020`–`NCOM-T022` | `ws011-p007` | QEMU timeout recovery, confirmed persistence, and one consolidated physical remote-administration acceptance |
 
 Future WLAN fixtures use synthetic, redacted credentials only.
 

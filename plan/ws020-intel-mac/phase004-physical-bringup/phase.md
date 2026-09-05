@@ -1,6 +1,6 @@
 # WS020 Phase 004: Intel Mac physical UEFI bring-up
 
-Last updated: 2026-08-31
+Last updated: 2026-09-05
 
 WSID: `ws020`
 
@@ -8,9 +8,8 @@ Phase ID: `p004`
 
 Combined ID: `ws020-p004`
 
-Status: Provisional physical boot failed on 2026-08-31; blocked by
-[`ws020-p006`](../phase006-relocated-physical-gpt/phase.md), with the final
-five-cold-boot campaign still pending
+Status: complete; the user confirmed successful Intel Mac real-hardware
+operation on 2026-09-05 and accepted it without the older five-run campaign
 
 Parent: [WS020](../ws.md)
 

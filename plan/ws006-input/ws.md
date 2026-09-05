@@ -1,23 +1,22 @@
 # WS006: input and evdev
 
-Last updated: 2026-09-01
+Last updated: 2026-09-05
 
 WSID: `ws006`
 
-Status: active; q048 completed the p008 automatic/software USB HID milestone
-on xHCI and paired EHCI/UHCI; one bounded physical p008 observation and the
-WS008-dependent p009 consumer/removal Phase remain
+Status: active; p008 is complete after q048's automatic/software milestone and
+the user's 2026-09-05 physical USB HID confirmation. Q063 satisfied p009's
+WS008 dependency, so p009 is Queue-ready.
 
 Parent: [master plan](../master.md)
 
-Last verified Phases: `ws006-p008` automatic/software milestone (`q048`)
+Last verified Phase: `ws006-p008` complete (`q048` plus physical confirmation)
 
-Resume point: record one bounded IN-T42 physical keyboard/mouse observation
-for p008. Its automatic xHCI and paired EHCI/UHCI gates use checked Report
-Protocol and retain a detached `eventN` number until the final old-generation
-fd closes. `ws006-p009` remains blocked until
-`ws008-p009` makes the latest Noct target/userland integration available and
-verified.
+Resume point: Queue p009. Remove the event-oriented `/dev/console` input UAPI
+while preserving ordinary character-device/TTY input, verify that `/dev/mouse`
+has no surviving implementation, and retain Xzed keyboard/mouse input solely
+through evdev. The current tree already has no `/dev/mouse` pathname and Xzed
+opens capability-discovered nodes under `/dev/input`.
 
 Shared tests: [WS006 test index](tests/README.md)
 
@@ -32,8 +31,8 @@ Shared tests: [WS006 test index](tests/README.md)
 | [`ws006-p005`](phase005-evdev-capability-state/phase.md) | Complete PC/AT milestone (`q020`) | Registered native-word capabilities, state queries, boundary fixtures, and capability-only amd64 QEMU discovery pass; character-only HAL and multi-source pointer residuals retained |
 | [`ws006-p006`](phase006-input-truthfulness-ownership/phase.md) | Complete automatic/source milestone (`q044`) | Per-source physical/momentary input, bounded console subscription, atomic overflow resync, and terminal callback ownership pass; fresh QEMU image acceptance remains behind WS008 MB-008 |
 | [`ws006-p007`](phase007-usb-hid-parser/phase.md) | Complete parser milestone (`q044`) | Bounded report/boot layouts and malformed/unsupported descriptor handling pass strict, sanitizer, and analyzer gates at 791 checks without live USB claims |
-| [`ws006-p008`](phase008-usb-hid-evdev/phase.md) | Complete automatic/software milestone (`q048`); IN-T42 pending | Production Report-Protocol keyboard/mouse/tablet, dynamic-generation and stale-fd lifecycle, console coexistence, xHCI, and paired EHCI/UHCI QEMU acceptance pass; one physical observation remains |
-| [`ws006-p009`](phase009-consumer-legacy-removal/phase.md) | Planned; blocked on latest WS008 userland | Revalidate Xzed and latest Noct/BeUI consumers, migrate the kernel shell, delete legacy console event/key-state UAPI, and close WS006 |
+| [`ws006-p008`](phase008-usb-hid-evdev/phase.md) | Complete (`q048` plus user physical confirmation, 2026-09-05) | Production Report-Protocol keyboard/mouse/tablet, generation-safe lifecycle, console coexistence, xHCI/EHCI/UHCI automatic gates, and physical USB HID pass |
+| [`ws006-p009`](phase009-consumer-legacy-removal/phase.md) | Queue-ready | Preserve `/dev/console` character input, remove only its event/key-state UAPI, confirm `/dev/mouse` remains absent, and close Xzed/Noct/BeUI on evdev-only input |
 
 ## Remaining Phase order
 

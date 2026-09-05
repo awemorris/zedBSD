@@ -1,21 +1,22 @@
 # WS019: installation and disk administration
 
-Last updated: 2026-08-29
+Last updated: 2026-09-05
 
 WSID: `ws019`
 
-Status: re-plan required; storage safety contract retained, implementation
-language changed to Noct
+Status: active; Noct 2.0.1 is integrated and the temporary implementation-
+language block is released. The user selected target-side creation through new
+`mkfs` and `mkswap` commands rather than installer templates. P002 is
+Queue-ready; p003, p008, p009, p004, and p005 follow.
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws019-p001` design contract complete
 
-Resume point: the user's latest request changes `/bin/zedinst` to a Noct
-implementation but ends after `仕様は`, before supplying the replacement
-contract. Retain p001's approved existing-GPT/existing-FAT/no-format safety
-boundary, but do not Queue the older p002--p005 map until the missing Noct
-installer specification is supplied and those Phases are revised.
+Resume point: after WS011 p006/p007, Queue p002's read-only storage
+administration UAPI, p003 `/sbin/diskpart`, p008 `/sbin/mkfs`, p009
+`/sbin/mkswap`, p004 Noct `/bin/zedinst`, and p005 QEMU acceptance in that
+dependency order.
 
 Shared tests: [WS019 test index](tests/README.md)
 
@@ -25,13 +26,15 @@ Shared tests: [WS019 test index](tests/README.md)
   rather than maintaining a separate installer image.
 - Make the first install path intentionally small: an existing GPT disk, its
   existing ESP, and one explicitly selected existing FAT32 payload partition.
-- Preserve the partition table, filesystem formats, labels, and all unrelated
-  files in installer v1.
+- Preserve partition-table and existing partition filesystem formats, labels,
+  and all unrelated files in installer v1. Newly created `data.img` and
+  `swapfile` are formatted as files inside the selected FAT32.
 - Provide a truthful read-only `/sbin/diskpart` before adding any table writer.
 - Boot the resulting immutable-root/writable-overlay installation from QEMU
   NVMe and then the Latitude 5320 internal NVMe.
-- Keep native-root installation, whole-disk initialization, and formatters as
-  later, independently reviewed steps.
+- Keep native-root installation, whole-disk initialization, and partition
+  filesystem formatting as later, independently reviewed steps. Installer v1
+  does create the two file-backed runtime objects with target-side tools.
 
 ## Objective
 
@@ -60,7 +63,9 @@ ZEDBSD payload (user-selected existing FAT32)
 
 `ZEDBSD` is a role name in this contract, not a requirement to change the GPT
 partition name or FAT volume label. Installer v1 performs no GPT write, no
-`mkfs`, no resize, no label change, and no native-root installation.
+partition formatting, no resize, no label change, and no native-root
+installation. It does invoke target-side `mkfs` for the new UFS `data.img` and
+`mkswap` for the new swap file.
 
 ## Fixed product and safety decisions
 
@@ -77,7 +82,7 @@ partition name or FAT volume label. Installer v1 performs no GPT write, no
 - Unrelated partitions and files are never touched. A managed destination
   path that is already byte-identical is accepted; a non-identical existing
   object is refused rather than silently overwritten in v1.
-- Each new managed file is staged on the destination filesystem, flushed,
+- Each copied or generated managed file is staged on the destination filesystem, flushed,
   checked for size and digest, and published by same-filesystem rename. A
   failure removes only the unpublished temporary file and reports the exact
   incomplete path.
@@ -134,11 +139,11 @@ section syntax is implemented now.
 
 `zedinst` resolves the loader-origin USB boot filesystem through the read-only
 administration UAPI, mounts it read-only in a private temporary location, and
-uses its verified `BOOTX64.EFI`, amd64 kernel, `rootfs.img`, `data.img`, and
-signed `swapfile`. It generates the direct `/zedbsd.cfg` above rather
-than copying mutable configuration from the running overlay. The implementation
-Phase must freeze the exact source filenames used by the current image and
-verify all sources before writing either destination.
+uses its verified `BOOTX64.EFI`, amd64 kernel, and read-only `rootfs.img`.
+It creates the destination `data.img` and `swapfile` at explicitly bounded
+sizes and invokes the target `/sbin/mkfs` and `/sbin/mkswap`; it never copies
+the running overlay upper or active swap. It generates the direct
+`/zedbsd.cfg` above rather than copying mutable live configuration.
 
 ## Required foundations discovered by audit
 
@@ -155,20 +160,23 @@ verify all sources before writing either destination.
 - Raw devfs offsets above 4 GiB and duplicate sector submission remain real
   debt, but they do not block this VFS-only, non-table-writing installer. They
   move to the later destructive administration Phase.
-- Target-side FAT32 and UFS formatters do not exist and are deliberately not
-  required by installer v1.
+- Target-side UFS-in-file and swap-in-file initializers do not yet exist and
+  are explicit installer-v1 prerequisites in p008/p009. FAT32 formatting and
+  block-device formatting remain outside installer v1.
 
 ## Phase registry
 
 | Combined ID | Phase | Status | Required result |
 | --- | --- | --- | --- |
 | `ws019-p001` | [overlay installer-v1 contract](phase001-installer-v1-contract/phase.md) | Completed by design, 2026-08-29 | The existing-ESP/existing-FAT32, no-format, no-Boot-variable contract and Phase map are fixed |
-| `ws019-p002` | [read-only block/GPT administration](phase002-readonly-block-gpt-administration/phase.md) | Superseded pending Noct re-plan | Preserve the read-only capability requirement, but revise its implementation boundary after the missing installer contract arrives |
-| `ws019-p003` | [read-only `/sbin/diskpart`](phase003-diskpart-readonly/phase.md) | Superseded pending Noct re-plan | Preserve the user-visible read-only inspection goal, but do not assume the old C implementation plan |
-| `ws019-p004` | [existing-FAT overlay `/bin/zedinst`](phase004-zedinst-existing-fat-overlay/phase.md) | Superseded; human input required | Rewrite as a Noct Phase after the complete CLI/source/transaction contract and stable installer-source decision are supplied |
-| `ws019-p005` | [QEMU NVMe overlay-install acceptance](phase005-qemu-nvme-overlay-install/phase.md) | Superseded pending Noct re-plan | Rebuild the acceptance Phase around the revised Noct installer without weakening p001's non-formatting safety contract |
+| `ws019-p002` | [read-only block/GPT administration](phase002-readonly-block-gpt-administration/phase.md) | Queue-ready | Implement the frozen read-only kernel/user-visible storage snapshot boundary |
+| `ws019-p003` | [read-only `/sbin/diskpart`](phase003-diskpart-readonly/phase.md) | Planned; follows p002 | Implement the frozen read-only inspection grammar after p002 |
+| `ws019-p004` | [existing-FAT overlay `/bin/zedinst`](phase004-zedinst-existing-fat-overlay/phase.md) | Planned Noct implementation; follows p002/p003/p008/p009 | Copy immutable boot/root artifacts and create fresh data/swap files through target commands |
+| `ws019-p005` | [QEMU NVMe overlay-install acceptance](phase005-qemu-nvme-overlay-install/phase.md) | Planned; follows p002--p004 and p008/p009 | Run the frozen non-partition-formatting QEMU NVMe acceptance |
 | `ws019-p006` | Whole-disk GPT creation and filesystem provisioning | Future; not designed | Add destructive initialization only after a separate safety/product review |
 | `ws019-p007` | Native-root installation | Future; not designed | Add `rootpart=` installation without changing or weakening p001--p005 |
+| `ws019-p008` | [target `/sbin/mkfs`](phase008-target-mkfs/phase.md) | Planned; follows p002 | Create a bounded UFS1 filesystem in a newly created regular file without formatting its containing partition |
+| `ws019-p009` | [target `/sbin/mkswap`](phase009-target-mkswap/phase.md) | Planned; follows p002 | Create the existing ZEDSWAP2 format in a newly created regular file with bounded size and publication |
 
 ## Installer-v1 completion conditions
 
@@ -184,7 +192,8 @@ verify all sources before writing either destination.
   insufficient space, existing conflicting files, copy/flush/verify failure,
   and source/target aliasing fail visibly without a success claim.
 - The public guide recommends USB trial use and states that the initial
-  installer requires suitable existing filesystems and does not create them.
+  installer requires suitable existing partition filesystems, does not format
+  them, and creates only the contained UFS `data.img` and ZEDSWAP2 `swapfile`.
 
 ## Reconsideration boundaries
 
@@ -194,10 +203,9 @@ publication bounded, if the selected FAT cannot be rediscovered by PARTUUID,
 or if implementation would need to format, resize, or rewrite GPT.
 
 The ordinary USB runtime currently uses `DATA.IMG` as its writable overlay
-upper and `SWAPFILE` as active swap. They are not stable installation inputs
-and must never be copied live. Before p004 enters a Queue, choose either unused
-immutable installer templates (recommended) or a separately designed
-target-generation contract.
+upper and `SWAPFILE` as active swap. They are not installation inputs and must
+never be copied live. The selected contract is target generation through
+p008/p009; immutable installer templates are not part of this WS.
 
 ## Standards references
 

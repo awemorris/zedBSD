@@ -3,7 +3,7 @@
 WSID: `ws011`  
 Phase ID: `p004`  
 Combined ID: `ws011-p004`  
-Status: Blocked (manual hold)
+Status: Blocked by manual hold `MB-010`
 Parent WS: [WS011](../ws.md)
 
 ## Objective

@@ -8,9 +8,8 @@ Phase ID: `p011`
 
 Combined ID: `ws005-p011`
 
-Status: in progress in q071; 2026-09-05 global policy and
-no-retained-passphrase contract implemented and focused gates pass; combined
-physical acceptance remains in p008
+Status: complete (`q071`); the global policy, no-retained-passphrase contract,
+focused recovery gates, and combined user-accepted physical result pass
 
 Parent: [WS005 networking and WLAN](../ws.md)
 

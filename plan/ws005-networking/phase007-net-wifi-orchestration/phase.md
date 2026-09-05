@@ -4,9 +4,8 @@ Last updated: 2026-09-05
 
 Phase ID: `ws005-p007`
 
-Status: in progress in q071; 2026-09-05 global command and ownership amendment
-implemented and focused gates pass; combined physical acceptance remains in
-p008
+Status: complete (`q071`); the 2026-09-05 global command and ownership
+amendment, focused gates, and combined user-accepted physical result pass
 
 Parent: [WS005](../ws.md)
 

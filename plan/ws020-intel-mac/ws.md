@@ -1,12 +1,12 @@
 # WS020: Intel Mac UEFI bring-up
 
-Last updated: 2026-08-31
+Last updated: 2026-09-05
 
 WSID: `ws020`
 
-Status: active; p001-p003 and p005 automatic work complete, p006 automatic
-GPT compatibility repair complete with one provisional physical boot pending,
-and p004 final physical acceptance pending
+Status: complete. P001-p003 and p005-p006 automatic work pass, and the user
+confirmed successful Intel Mac real-hardware operation on 2026-09-05. That
+explicit acceptance closes p004/p006 without another repeatability campaign.
 
 Parent: [master plan](../master.md)
 
@@ -96,19 +96,18 @@ PC/AT default remains the combined UEFI+BIOS profile.
 | [`ws020-p001`](phase001-target-variant-config/phase.md) | Completed (revised 2026-08-31) | Capacity selector removed; generic Variant round-trip and three-way compiled-artifact invariance pass with the requested labels/order |
 | [`ws020-p002`](phase002-image-layouts/phase.md) | Completed (revised 2026-08-31) | Fixed pure-PMBR primary-only UEFI layout and larger-medium kernel handling pass strict image and GPT host gates |
 | [`ws020-p003`](phase003-qemu-acceptance/phase.md) | Complete (`q047`, 2026-08-31) | One fresh uninterrupted `MAC-T020` run passed all six strict positive/negative cells; every positive reached exact `login:` and every immutable source remained unchanged |
-| [`ws020-p004`](phase004-physical-bringup/phase.md) | Provisional boot pending | The former `FDC1-A4EF` payload exposed the host-relocated-GPT boundary; p006 automatic repair now passes, so boot the newly frozen `A93F-BBBE` artifact once, then retain the final five-cold-boot gate |
+| [`ws020-p004`](phase004-physical-bringup/phase.md) | Complete (user physical confirmation, 2026-09-05) | Intel Mac real-hardware operation passes; explicit acceptance supersedes the older five-cold-boot campaign |
 | [`ws020-p005`](phase005-production-uefi-preflight/phase.md) | Completed (`q038`); refreshed `q047` | Current two-partition UEFI-only source passed `MAC-T021` and partition publication ordinary/sanitizer/analyzer gates; exact checked hash `f811a0f5...` is installed |
-| [`ws020-p006`](phase006-relocated-physical-gpt/phase.md) | Automatic complete; physical pending | GPT precedence, host/sanitizer/analyzer, relocated/pristine QEMU, exact login, and six-cell gates pass; published image SHA-256 `692160cf...331d`, UUID `A93F-BBBE`, awaits one provisional Intel Mac boot |
+| [`ws020-p006`](phase006-relocated-physical-gpt/phase.md) | Complete (automatic plus user physical confirmation) | GPT precedence, host/sanitizer/analyzer, relocated/pristine QEMU, exact login, six-cell gates, and Intel Mac hardware operation pass |
 
 ## Completion conditions
 
-WS020 is complete when the generic Variant selection is stable, amd64 always
+WS020 is complete: the generic Variant selection is stable, amd64 always
 builds both loader families, each selected layout contains only its intended
 boot path, the six-cell automatic matrix and the p006 GPT-precedence
-compatibility gates pass, and the declared Intel Mac boots the frozen UEFI-only
-artifact to a usable login five times in the final campaign. A first successful
-physical boot after p006 is enough to continue debugging and implementation;
-repetition is deferred to final acceptance.
+compatibility gates pass, and the declared Intel Mac boots the UEFI-only
+artifact successfully. The user's 2026-09-05 real-hardware confirmation is the
+accepted final observation; the older five-run plan is superseded.
 
 ## Reconsideration boundaries
 

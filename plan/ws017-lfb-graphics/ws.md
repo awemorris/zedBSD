@@ -1,17 +1,17 @@
 # WS017: `/dev/graphics` linear-framebuffer fast path
 
-Last updated: 2026-08-28
+Last updated: 2026-09-05
 
 WSID: `ws017`
 
-Status: planned; `ws017-p001` is blocked on one human decision
+Status: Queue-ready; the initial-protection `mprotect` ceiling is selected
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: none
 
-Resume point: choose the device-mapping `mprotect` ceiling below, then select
-`ws017-p001` for a finite Queue after execution approval.
+Resume point: after the higher-priority WS009, WS011, WS019, and WS022 work,
+Queue `ws017-p001` followed by p002--p004.
 
 Shared tests: [WS017 test index](tests/README.md)
 
@@ -95,29 +95,17 @@ added: the mapping describes only the mode selected by the existing
   inherited/split mapping is unmapped or released at process exit. Final
   mapping release performs the existing driver leave/console-resume path once.
 - Forked mappings remain shared and retain the same ownership lease.
-- Executable access is always forbidden. The maximum write-permission rule is
-  deliberately not frozen yet: the human-decision gate below must select
-  whether an initially writable mapping may regain write access after a
-  temporary read-only interval.
+- Executable access is always forbidden. Permissions may change only within
+  the maximum originally granted by `mmap`: an initially RW LFB may transition
+  `RW -> RO -> RW`, while an initially RO mapping can never gain write access.
 
-## Human-decision gate: `mprotect` ceiling
+## Selected `mprotect` ceiling
 
-`ws017-p001` must not enter an execution Queue until one of these contracts is
-selected:
-
-1. **Initial-protection ceiling (recommended):** permissions may change within
-   the protection originally granted by `mmap`. An initial `PROT_READ |
-   PROT_WRITE` mapping may perform `RW -> RO -> RW`; an initial read-only
-   mapping can never gain write access, and no device mapping can gain execute
-   access.
-2. **Monotonic reduction:** removing write access is permanent for that region
-   and its derivatives; `RW -> RO -> RW` fails. Execute access remains
-   forbidden.
-
-The first model matches the usual maximum-protection interpretation and lets a
-renderer temporarily harden a writable buffer without remapping it. The second
-is stricter but makes an otherwise ordinary `mprotect` transition irreversible.
-This is a public VM behavior choice, so implementation must not infer it.
+The user selected the initial-protection ceiling on 2026-09-05. Permissions
+may change within the protection originally granted by `mmap`. An initial
+`PROT_READ | PROT_WRITE` LFB mapping may perform `RW -> RO -> RW`; an initial
+read-only mapping can never gain write access, and no device mapping can gain
+execute access. Forked and split regions retain that same original maximum.
 
 ## Scope
 
@@ -155,7 +143,7 @@ This is a public VM behavior choice, so implementation must not infer it.
 
 | Combined ID | Phase | Status | Required result |
 | --- | --- | --- | --- |
-| `ws017-p001` | [Device-mmap and graphics LFB UAPI](phase001-device-mmap-uapi/phase.md) | Blocked; human decision required | Optional cdev mapping, lease lifetime, query validation, 8/16/24/32 layouts, and fallback pass host tests |
+| `ws017-p001` | [Device-mmap and graphics LFB UAPI](phase001-device-mmap-uapi/phase.md) | Queue-ready | Optional cdev mapping, selected initial-protection ceiling, lease lifetime, query validation, 8/16/24/32 layouts, and fallback pass host tests |
 | `ws017-p002` | [amd64 boot-framebuffer backend](phase002-amd64-lfb-backend/phase.md) | Planned; Queue-ready after p001 | Existing GOP/VBE LFB is safely described and maps through `/dev/graphics`; non-linear drivers remain unchanged |
 | `ws017-p003` | [Xzed mapped-LFB fast path](phase003-xzed-lfb-fast-path/phase.md) | Planned; Queue-ready after p001--p002 | Xzed renders true-color dirty rectangles/cursor through masks and falls back without behavior loss |
 | `ws017-p004` | [amd64 UEFI Xzed acceptance](phase004-uefi-xzed-acceptance/phase.md) | Planned; Queue-ready after p001--p003 | QEMU/OVMF visibly launches the desktop through the mapped LFB and proves fallback remains operational |
