@@ -303,6 +303,12 @@ make_efuse(uint8_t physical[RTL8822B_EFUSE_PHYSICAL_SIZE],
 		{30U, 31U, 32U, 33U, 34U},
 		{26U, 27U, 28U, 29U, 30U}
 	};
+	static const uint8_t bw40_base_5g[2][RTL8822B_5G_OFDM_GROUP_COUNT] = {
+		{24U, 25U, 26U, 27U, 28U, 29U, 30U,
+		    31U, 32U, 33U, 34U, 35U, 36U, 37U},
+		{20U, 21U, 22U, 23U, 24U, 25U, 26U,
+		    27U, 28U, 29U, 30U, 31U, 32U, 33U}
+	};
 	static const size_t power_offset[2] = {0x10U, 0x3aU};
 	unsigned path;
 	size_t used = 0;
@@ -323,14 +329,25 @@ make_efuse(uint8_t physical[RTL8822B_EFUSE_PHYSICAL_SIZE],
 		memcpy(wanted + power_offset[path] +
 		    RTL8822B_2G_CCK_GROUP_COUNT, bw40_base[path],
 		    sizeof(bw40_base[path]));
+		memcpy(wanted + power_offset[path] + 0x12U,
+		    bw40_base_5g[path], sizeof(bw40_base_5g[path]));
 	}
 	/* Low nibbles are signed OFDM deltas: path A -2, path B +3. */
 	wanted[0x1bU] = 0xaeU;
 	wanted[0x45U] = 0xb3U;
+	/* The 5-GHz legacy OFDM deltas are path A -1 and path B +2. */
+	wanted[0x30U] = 0xafU;
+	wanted[0x5aU] = 0xb2U;
 	append_efuse_block(physical, &used, 2U, wanted);
 	append_efuse_block(physical, &used, 3U, wanted);
+	append_efuse_block(physical, &used, 4U, wanted);
+	append_efuse_block(physical, &used, 5U, wanted);
+	append_efuse_block(physical, &used, 6U, wanted);
 	append_efuse_block(physical, &used, 7U, wanted);
 	append_efuse_block(physical, &used, 8U, wanted);
+	append_efuse_block(physical, &used, 9U, wanted);
+	append_efuse_block(physical, &used, 10U, wanted);
+	append_efuse_block(physical, &used, 11U, wanted);
 	append_efuse_block(physical, &used, 23U, wanted);
 	append_efuse_block(physical, &used, 24U, wanted);
 	append_efuse_block(physical, &used, 25U, wanted);
@@ -372,6 +389,33 @@ test_efuse(void)
 	assert(memcmp(board.tx_power_2g[1].bw40_base, wanted + 0x40U,
 	    RTL8822B_2G_OFDM_GROUP_COUNT) == 0);
 	assert(board.tx_power_2g[1].ofdm_diff == 3);
+	assert(memcmp(board.tx_power_5g[0].bw40_base, wanted + 0x22U,
+	    RTL8822B_5G_OFDM_GROUP_COUNT) == 0);
+	assert(board.tx_power_5g[0].ofdm_diff == -1);
+	assert(memcmp(board.tx_power_5g[1].bw40_base, wanted + 0x4cU,
+	    RTL8822B_5G_OFDM_GROUP_COUNT) == 0);
+	assert(board.tx_power_5g[1].ofdm_diff == 2);
+	assert(rtl8822b_board_active_channel_allowed(&board, 36U));
+	assert(rtl8822b_board_active_channel_allowed(&board, 48U));
+	assert(!rtl8822b_board_active_channel_allowed(&board, 52U));
+	logical[0x22U] = 0x40U;
+	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	    &board) == 0);
+	assert(rtl8822b_board_active_channel_allowed(&board, 1U));
+	assert(!rtl8822b_board_active_channel_allowed(&board, 36U));
+	logical[0x22U] = wanted[0x22U];
+	logical[0xcbU] = 'U';
+	logical[0xccU] = 'S';
+	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	    &board) == 0);
+	assert(!rtl8822b_board_active_channel_allowed(&board, 36U));
+	logical[0xcbU] = wanted[0xcbU];
+	logical[0xccU] = wanted[0xccU];
+	logical[0xb8U] = 0x30U;
+	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	    &board) == 0);
+	assert(!rtl8822b_board_active_channel_allowed(&board, 36U));
+	logical[0xb8U] = wanted[0xb8U];
 	logical[0x1bU] = 0x08U;
 	logical[0x45U] = 0x07U;
 	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
@@ -813,6 +857,12 @@ fake_board(uint8_t rfe)
 		{30U, 31U, 32U, 33U, 34U},
 		{26U, 27U, 28U, 29U, 30U}
 	};
+	static const uint8_t bw40_base_5g[2][RTL8822B_5G_OFDM_GROUP_COUNT] = {
+		{24U, 25U, 26U, 27U, 28U, 29U, 30U,
+		    31U, 32U, 33U, 34U, 35U, 36U, 37U},
+		{20U, 21U, 22U, 23U, 24U, 25U, 26U,
+		    27U, 28U, 29U, 30U, 31U, 32U, 33U}
+	};
 	struct rtl8822bu_board_info board;
 
 	memset(&board, 0, sizeof(board));
@@ -841,6 +891,12 @@ fake_board(uint8_t rfe)
 	memcpy(board.tx_power_2g[1].bw40_base, bw40_base[1],
 	    sizeof(bw40_base[1]));
 	board.tx_power_2g[1].ofdm_diff = 3;
+	memcpy(board.tx_power_5g[0].bw40_base, bw40_base_5g[0],
+	    sizeof(bw40_base_5g[0]));
+	board.tx_power_5g[0].ofdm_diff = -1;
+	memcpy(board.tx_power_5g[1].bw40_base, bw40_base_5g[1],
+	    sizeof(bw40_base_5g[1]));
+	board.tx_power_5g[1].ofdm_diff = 2;
 	return board;
 }
 
@@ -1087,7 +1143,11 @@ test_radio_lifecycle(void)
 	    0x1b1b1b1bU, 0x1b1b1b1bU);
 	assert(rtl8822b_radio_active_scan_allowed(&radio, 1U));
 	assert(rtl8822b_radio_active_scan_allowed(&radio, 11U));
+	assert(rtl8822b_radio_active_scan_allowed(&radio, 36U));
+	assert(rtl8822b_radio_active_scan_allowed(&radio, 44U));
+	assert(rtl8822b_radio_active_scan_allowed(&radio, 48U));
 	assert(!rtl8822b_radio_active_scan_allowed(&radio, 12U));
+	assert(!rtl8822b_radio_active_scan_allowed(&radio, 52U));
 
 	make_probe_request(frame, &board);
 	assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
@@ -1194,11 +1254,42 @@ test_radio_lifecycle(void)
 	    0x1f1f1f1fU, 0x1f1f1f1fU);
 	assert_legacy_txagc(baseline, 0x1d80U, 0x1b1b1b1bU,
 	    0x20202020U, 0x20202020U);
+	assert(rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
+	assert(radio.channel == 44U);
+	assert((baseline->registers[0x0454U] & 0x80U) != 0U);
+	assert((baseline->registers[0x0808U] & 0x10000000U) == 0U);
+	assert((baseline->registers[0x0a80U] & 0x00040000U) != 0U);
+	assert((baseline->registers[0x0814U] & 0x0000fc00U) == 0x00008800U);
+	assert((baseline->registers[0x0958U] & 0x1fU) == 1U);
+	assert((baseline->registers[0x0860U] & 0x1ffe0000U) == 0x09280000U);
+	assert((baseline->registers[0x2860U] & 0x00070fffU) == 0x00010d2cU);
+	assert((baseline->registers[0x2c60U] & 0x00070fffU) == 0x00010d2cU);
+	assert((baseline->registers[0x2af8U] & 0x00038000U) == 0U);
+	assert(baseline->registers[0x082cU] == 0x75b76010U);
+	assert(baseline->registers[0x0830U] == 0x79a0eaaaU);
+	assert(baseline->registers[0x0838U] == 0x87766431U);
+	assert((baseline->registers[0x0cb0U] & 0x00ffffffU) == 0x00177517U);
+	assert((baseline->registers[0x0eb0U] & 0x00ffffffU) == 0x00177517U);
+	assert((baseline->registers[0x0cb4U] & 0x0000ff00U) == 0x00007500U);
+	assert((baseline->registers[0x0ca0U] & 0xffffU) == 0xa501U);
+	assert_legacy_txagc(baseline, 0x1d00U, 0U, 0x16161616U,
+	    0x16161616U);
+	assert_legacy_txagc(baseline, 0x1d80U, 0U, 0x15151515U,
+	    0x15151515U);
+	assert(rtl8822b_radio_set_channel(&radio, 1U, UINT64_MAX) == 0);
+	assert(radio.channel == 1U);
+	assert((baseline->registers[0x0454U] & 0x80U) == 0U);
+	assert((baseline->registers[0x0808U] & 0x10000000U) != 0U);
+	assert((baseline->registers[0x0a80U] & 0x00040000U) == 0U);
+	assert_legacy_txagc(baseline, 0x1d00U, 0x1c1c1c1cU,
+	    0x1a1a1a1aU, 0x1a1a1a1aU);
 	assert(rtl8822b_radio_set_channel(&radio, 0U, UINT64_MAX) ==
 	    EOPNOTSUPP);
 	assert(rtl8822b_radio_set_channel(&radio, 12U, UINT64_MAX) ==
 	    EOPNOTSUPP);
-	assert(radio.channel == 11U);
+	assert(rtl8822b_radio_set_channel(&radio, 52U, UINT64_MAX) ==
+	    EOPNOTSUPP);
+	assert(radio.channel == 1U);
 
 	/* One representative failing write at every externally visible stage. */
 	stages[stage_count++] = 0U; /* pre-power */

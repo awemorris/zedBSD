@@ -286,6 +286,9 @@ net_init(void)
 	error = packet_socket_init();
 	if (error != 0)
 		return error;
+	error = route_socket_init();
+	if (error != 0)
+		return error;
 	error = unix_socket_init();
 	if (error != 0)
 		return error;

@@ -480,7 +480,7 @@ test_authentication_contract(void)
 	supplied_peer.euid = 1000;
 	supplied_peer.egid = 69;
 	expect(authenticate_client(51, &peer, &role) == 0 &&
-		       role == NETWORKD_CLIENT_READ_ONLY && auth_log_count == 1,
+		       role == NETWORKD_CLIENT_MEMBER && auth_log_count == 1,
 	       "nonroot peer authentication");
 	expect(operation_allowed(role, "SHOW") &&
 		       !operation_allowed(role, "UP") &&
@@ -490,8 +490,15 @@ test_authentication_contract(void)
 		       !operation_allowed(role, "DEFAULTROUTE") &&
 		       !operation_allowed(role, "DNS") &&
 		       !operation_allowed(role, "RELOAD") &&
+		       operation_allowed(role, "WIFI_ENABLE") &&
+		       operation_allowed(role, "WIFI_DISABLE") &&
+		       operation_allowed(role, "WIFI_LIST") &&
+		       operation_allowed(role, "WIFI_CONNECT") &&
+		       operation_allowed(role, "WIFI_DISCONNECT") &&
+		       operation_allowed(role, "WIFI_PROFILES_CHANGED") &&
+		       !operation_allowed(role, "WIFI_UP") &&
 		       !operation_allowed(role, "FUTURE"),
-	       "nonroot SHOW-only surface");
+	       "nonroot SHOW and global Wi-Fi surface");
 
 	reset_fixture();
 	getsockopt_error = ENOPROTOOPT;

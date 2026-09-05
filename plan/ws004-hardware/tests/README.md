@@ -38,6 +38,8 @@ Parent: [WS004](../ws.md)
 | HW-T38 | Standalone Intel AX211 normal path | Implementation and focused automatic exact-attach/firmware/runtime/scan/security/L2/lifetime gates pass without a prior Intel/RTL hardware framework; one exact-device direct boot must still prove physical firmware/PNVM, RF scan, WPA2/CCMP, DHCP, gateway/public ping, nonempty fetch, disconnect, and down |
 | HW-T39 | Evidence-driven WLAN refactor | The two working drivers retain ABI and normal-path behavior while only substantial identical contracts are extracted; a documented no-extraction result is valid |
 | HW-T40 | i915 foundations | Device-independent UAPI/model tests pass; modeset/scanout/reset require target-hardware evidence |
+| HW-T41 | RTL8822BU Japan W52 | Exact channel-44 RF/BB/CCA/RFE/TXAGC, W52 profile membership, invalid-regulatory/DFS rejection, rollback, and 2.4-GHz regressions pass; one `10.0.10.25` passthrough run reaches ch44/5220-MHz scan, secure L2, DHCP, LAN-peer ping, bounded fetch, disconnect, and down |
+| HW-T42 | Asynchronous WLAN operation/event boundary | Scan/connect admission returns promptly, one generation advances asynchronously, terminal failure or post-success link loss never starts a kernel reconnect, and bounded `RTM_IFINFO` carrier/removal delivery survives overflow, subscription races, detach, and ifindex reuse |
 
 QEMU/model and physical-hardware results are always separate evidence fields.
 
@@ -1111,7 +1113,7 @@ on the still-open raw NVMe descriptor before rereading and restarting; a plain
 `dd` followed by a process-wide `sync()` is not evidence that this unmounted
 devfs descriptor issued the driver's `BIO_FLUSH` operation.
 
-## HW-T40 RTL8822BU direct-connect reproduction
+## Q068 RTL8822BU direct-connect reproduction
 
 Q068's exact-device passthrough record is
 [q068 RTL8822BU evidence](q068-rtl8822bu-passthrough-evidence.md). It freezes the
@@ -1126,3 +1128,24 @@ Q069's follow-up is retained in
 exact channel-1 attempt completed authentication, association, key install,
 and authorization with zero retries/error. It did not reproduce the user's
 2.4-GHz `ENOENT`, and no retry or speculative source correction was made.
+
+## HW-T41 RTL8822BU Japan W52
+
+[`ws004-p041`](../phase041-rtl8822bu-5ghz-quality/phase.md) owns the checked
+channels 36/40/44/48 addition.  The first hardware gate uses the exact unbound
+`2357:012e` adapter on `10.0.10.25`, keeps the independent RTL8156 SSH route on
+the host, and requires the controlled channel-44/5220-MHz BSS before attempting
+direct WPA2/CCMP authorization and useful IP traffic.  Credentials remain
+runtime-only and are excluded from retained evidence.
+
+## HW-T42 asynchronous WLAN operation/event boundary
+
+[`ws004-p044`](../phase044-wlan-async-operation-boundary/phase.md) owns the
+post-p030 correction. Production-linked fixtures prove that scan and one
+connection attempt are asynchronous generations, link loss immediately lowers
+carrier and becomes terminal, and advancing synthetic time never creates a
+second kernel connection generation. A minimal BSD-style `RTM_IFINFO` stream
+then proves poll wakeup, bounded overflow/resnapshot, startup ordering,
+removal, shutdown, and ifindex/device-generation reuse without a WLAN-private
+blocking ioctl. WS005 p010/p011 separately prove the userspace 30-second retry
+and daemon orchestration.

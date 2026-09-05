@@ -1,6 +1,6 @@
 # WS005 Phase 008: Archer T3U Nano physical acceptance
 
-Last updated: 2026-09-01
+Last updated: 2026-09-05
 
 Phase ID: `ws005-p008`
 
@@ -14,11 +14,13 @@ Earlier development checkpoint: [minimum connectivity](../phase009-wlan-minimum-
 
 Primitive hardening dependency: [p010](../phase010-wifi-primitive-hardening/phase.md)
 
+Managed reconnect dependency: [p011](../phase011-networkd-managed-wlan-reconnect/phase.md)
+
 Tests: [WS005 test index](../tests/README.md)
 
 Target identity: [WS004 p026](../../ws004-hardware/phase026-archer-t3u-nano-identity-firmware/phase.md)
 
-WLAN common/driver dependencies: [p027](../../ws004-hardware/phase027-wlan-uapi-common-core/phase.md), [p028](../../ws004-hardware/phase028-rtl8822bu-usb-scan/phase.md), [p029](../../ws004-hardware/phase029-wpa2-ccmp-l2/phase.md), and [p030](../../ws004-hardware/phase030-wlan-lifecycle-hardware-hardening/phase.md)
+WLAN common/driver dependencies: [p027](../../ws004-hardware/phase027-wlan-uapi-common-core/phase.md), [p028](../../ws004-hardware/phase028-rtl8822bu-usb-scan/phase.md), [p029](../../ws004-hardware/phase029-wpa2-ccmp-l2/phase.md), [p030](../../ws004-hardware/phase030-wlan-lifecycle-hardware-hardening/phase.md), [p041](../../ws004-hardware/phase041-rtl8822bu-5ghz-quality/phase.md), and [p044](../../ws004-hardware/phase044-wlan-async-operation-boundary/phase.md)
 
 ## Objective
 
@@ -50,8 +52,8 @@ profile.
 ## Dependencies
 
 - The p009 one-run minimum-connectivity development checkpoint is complete.
-- All automatic/model gates from WS004 p026-p030 and WS005 p004-p007 plus p010
-  are complete. Their final physical acceptance evidence is supplied only
+- All automatic/model gates from WS004 p026-p030/p041/p044 and WS005 p004-p007
+  plus p010/p011 are complete. Their final physical acceptance evidence is supplied only
   through the bounded p008 procedure; p009 remains separately labelled
   development evidence.
 - The p003 AF_UNIX peer-credential contract and `root:network` socket policy
@@ -71,8 +73,8 @@ profile.
 - one provisional attach/scan/associate/DHCP/reconnect/data/down check after
   automatic evidence is complete;
 - one combined provisional record feeding the p028 scan, p029 secure L2, p030
-  reconnect/lifecycle, and p008 orchestration owners without four physical
-  gates;
+  retained lifecycle, p041/p044 asynchronous W52, and p008/p011 orchestration
+  owners without separate physical gates;
 - promotion of the passing candidate to an immutable artifact manifest;
 - one uninterrupted five-run final acceptance batch on those frozen artifacts;
 - exact first-failure capture, redaction, artifact hashes, and run ledger;
@@ -87,9 +89,11 @@ profile.
 - debugging or changing code during a physical run;
 - requesting repeated provisional checks after each automatic change;
 - restarting the five-run counter inside p008 after a failed run;
-- broad interoperability across access points, bands, roaming, suspend/resume,
+- broad interoperability outside Japan W52 across access points, bands,
+  roaming, suspend/resume,
   enterprise authentication, WPA3, throughput, or power-management matrices;
-- claiming boot-time Wi-Fi policy not selected by p007; and
+- claiming boot-time Wi-Fi policy not selected by p007, or restoring the
+  superseded public per-interface grammar; and
 - treating p009's earlier one-run development result as provisional or final
   acceptance, or counting it toward the five consecutive runs.
 
@@ -158,7 +162,8 @@ all acceptance-relevant inputs:
   revision `2f56219d20e4becccd718963fc3bcc671c543ce5`, and official-upstream
   provenance commit `458e40fdbb4dad5134ec230a42df21aea1b5baf8` with WHENCE
   SHA-256 `34f954c7d068ec4fd5fcc216471912dd3cf40ff60a7ffa8d06ff6f9b5999551f`;
-- wifi.conf format version and initial nonsecret policy state; secrets and
+- wifi.conf format version, active policy UID class, and initial nonsecret
+  global policy state; secrets and
   reusable hashes of weak passphrases are not copied into the public ledger;
 - expected adapter identity, host USB controller/port, access-point identity,
   band/channel/security mode, DHCP server identity, and data-oracle identity;
@@ -170,7 +175,9 @@ choices: ZNV2 header/request/response and wifi machine output are
 32/4096/32768/32768 bytes, a scan list is at most 64 records, diagnostics are
 512 bytes, the secret descriptor is fd 4, child termination grace is one
 second, scan/direct-connect/DHCP/compound limits are 15/30/10/90 seconds, and
-one automatic-selection invocation makes at most four connection attempts.
+one automatic-selection generation makes at most four profile attempts. The
+kernel never runs a high-level reconnect; one p010 `/sbin/wifi connect` child
+owns the complete 30-second scan/select/connect retry window.
 
 If the provisional check passes, that exact manifest is promoted to `frozen`.
 No source, binary, image, firmware, driver match, command script, deadline,
@@ -183,10 +190,11 @@ belong to a later approved Phase.
 
 After automatic preflight, request one explicit physical action for the exact
 adapter and run one bounded script. This is the single combined provisional
-checkpoint for WS004 p028/p029/p030 and WS005 p008, not four separately
-repeatable hardware gates. Its one ledger records and routes the p028
-identity/firmware/scan evidence, p029 WPA2/CCMP L2 evidence, p030
-reconnect/lifecycle evidence, and p008 DHCP/orchestration evidence. The script
+checkpoint for WS004 p028/p029/p030/p041/p044 and WS005 p008/p011, not
+separately repeatable hardware gates. Its one ledger records and routes the
+p028 identity/firmware/scan evidence, p029 WPA2/CCMP L2 evidence, retained
+p030 lifecycle evidence, p041 W52 evidence, p044 asynchronous event evidence,
+and p008/p011 DHCP/orchestration evidence. The script
 performs, in order:
 
 1. Boot the candidate image cleanly with the target initially absent, capture
@@ -194,22 +202,33 @@ performs, in order:
 2. Capture and validate the exact identity contract before allowing the driver
    match; confirm firmware load, endpoint setup, interface publication, and
    bounded readiness without an error/retry storm.
-3. Run `net wifi search start <interface>`, wait for bounded terminal state,
-   run `net wifi list <interface>`, prove the controlled SSID is present with
-   the selected security, and run `net wifi search stop <interface>`.
-4. With a preprovisioned redacted test profile, run
-   `net wifi up <interface>` and prove secure association, `IFF_RUNNING`, DHCP
-   address, expected connected route/resolver ownership, and absence of stale
+3. With a preprovisioned redacted `auto` profile, run `net wifi enable` once.
+   Prove networkd records the authenticated policy UID, discovers all `wlanN`
+   in stable order, and permits only one managed association. Run `net wifi
+   list` and prove its aggregate view identifies the target interface and the
+   controlled W52 SSID/channel/frequency/security without exposing a key.
+4. Prove the same global enable generation selects the profile in file order,
+   chooses the first eligible stable-order WLAN, reaches secure `IFF_RUNNING`,
+   obtains DHCP, and owns the expected address/route/resolver without stale
    prior-network L3 state.
-5. Induce the frozen p030 same-network transient link-loss case: carrier must
-   fall immediately; only the accepted network may retry after 0/1/2/4/8
-   seconds, retaining only the PMK, with no more than five failed attempts or
-   30 seconds. No networkd profile switch or resident auto-selection loop is
-   permitted.
+5. Induce one transient radio link loss after success. Require immediate
+   kernel carrier-down plus one matching link event, exactly one networkd
+   `/sbin/wifi` child for the same selected SSID after rereading the policy
+   owner's store, AP restoration within that child's unchanged 30-second
+   window, fresh secure L2 authorization, preserved coherent DHCP/L3 state,
+   and no retained networkd passphrase.
 6. Pass the frozen L2/L3 data oracle: ARP/neighbor resolution, bounded ping,
    and a bounded payload transfer whose length and digest match the source.
-7. Run `net wifi down <interface>` and prove scan/association/DHCP work is
-   retired, carrier clears, owned L3 state follows the p007 decision, direct
+7. Induce one longer controlled loss so one 30-second recovery child fails.
+   Prove stale L3 is removed, policy remains `auto-searching`, the same scan
+   generation does not cause a tight retry loop, and every operation-local key
+   copy is wiped. Restore the AP and use the scripted next scan generation to
+   prove a later fresh selection can reconnect and reacquire DHCP.
+8. Run `net wifi disconnect`, prove `manual-disconnected` suppresses automatic
+   reconnection while all managed radios remain up and scanning, then run `net
+   wifi connect <SSID>` and prove the manual path uses the saved profile and
+   same global interface rule. Finish with `net wifi disable` and prove
+   scans/association/DHCP/policy ownership are retired, carrier clears, direct
    recovery commands remain responsive, and removal retains no callback,
    child, key, descriptor, or USB reference.
 
@@ -219,7 +238,8 @@ A hang, manual workaround, second attach attempt, AP setting change, command
 rerun, or success judged without all predicates is a provisional failure.
 
 On provisional failure, stop. Preserve the candidate manifest and first-failure
-evidence, label it with the owning p028, p029, p030, or p008 boundary, do not
+evidence, label it with the owning p028, p029, p030, p041, p044, p008, or p011
+boundary, do not
 repair code or widen a hardware match in p008, do not ask the user to try
 again, and do not enter the final batch. Return the blocker to a newly planned
 automatic Phase.
@@ -235,18 +255,22 @@ rule, AP, credential policy, deadlines, and oracle, and must independently:
 
 1. start from the frozen clean-boot/reset state and revalidate adapter,
    firmware, driver, and interface identity;
-2. execute search start, bounded list detection of the controlled SSID, and
-   search stop;
-3. execute `net wifi up`, prove secure carrier, acquire a fresh valid DHCP
+2. execute `net wifi enable` and bounded aggregate `net wifi list` detection of
+   the controlled SSID and chosen stable-order interface;
+3. prove automatic secure carrier and acquire a fresh valid DHCP
    result, and validate address, route, resolver, and no-stale-state predicates;
-4. induce one transient loss and prove only p030's same-network bounded
-   reconnect succeeds within its 0/1/2/4/8-second, five-failure/30-second
-   limit with PMK-only retention and no profile switch;
+4. induce one transient loss and prove a kernel link event starts exactly one
+   networkd `/sbin/wifi` child whose own 30-second retry reconnects the same
+   selected SSID, with no kernel or daemon-level second retry;
 5. pass the bounded neighbor, ping, and digest-checked transfer oracle;
-6. execute `net wifi down`, prove complete bounded retirement and recovery
-   responsiveness, and close the run with no leaked secret or live work.
+6. execute `net wifi disconnect`, prove `manual-disconnected` suppresses
+   recovery while the radios remain up and scanning, then `net wifi disable`;
+   prove complete bounded retirement and close the run with no leaked secret
+   or live work.
 
-A run counts only when every predicate succeeds without retry. Runs must be
+A run counts only when every predicate succeeds without rerunning a command or
+the run; the bounded retries internal to one `/sbin/wifi connect` invocation
+are part of the predicate. Runs must be
 consecutive: any timeout, mismatch, malformed result, association/DHCP/data
 failure, cleanup failure, retry, manual intervention, or artifact/environment
 change fails the batch immediately. Preserve all completed run records and the
@@ -263,9 +287,10 @@ errors, USB/interface identity, association security outcome, nonsecret DHCP
 and route assertions, transfer size/digest, cleanup outcome, and log digests.
 
 Passphrases, PMKs, raw secret descriptors, full profile contents, and reusable
-credential hashes are never retained in acceptance evidence. This does not
-alter p030's bounded in-kernel PMK retention for the same-network reconnect
-generation. SSID/BSSID/MAC/serial exposure follows the frozen lab-manifest
+credential hashes are never retained in acceptance evidence. P011 is verified
+to retain only the policy UID/nonsecret connection facts and to wipe each
+store-read/fd-4 operation secret before the next state transition.
+SSID/BSSID/MAC/serial exposure follows the frozen lab-manifest
 redaction rule. Raw bounded logs may be retained in a restricted artifact only
 when their secret scan passes; the public plan record contains redacted
 evidence and digests.
@@ -277,7 +302,8 @@ evidence and digests.
    evidence schema.
 2. Complete and review the automatic preflight manifest. Return any failure to
    its owning automatic Phase; do not touch the physical gate.
-3. Seal the candidate manifest and perform the one combined p028/p029/p030/p008
+3. Seal the candidate manifest and perform the one combined
+   p028/p029/p030/p041/p044/p008/p011
    provisional physical check.
 4. On provisional success, promote the unchanged candidate to frozen and make
    one final request for the uninterrupted five-run batch.
@@ -304,11 +330,13 @@ they do not reopen product policy or add human checkpoints:
   `458e40fdbb4dad5134ec230a42df21aea1b5baf8`, the frozen blob/license hashes,
   install path, and missing/mismatch behavior. The candidate proves that the
   package was separately installed, not fetched by the base build or kernel.
-- Record `wlan0` as the first common WLAN interface, per p028, and prove the
-  lowest-available `wlanN` rule cannot race with another device in the frozen
-  test topology.
-- Record one controlled AP identity/channel at p029's fixed 2.4-GHz non-DFS
-  20-MHz WPA2-Personal/CCMP profile and the scripted transient-loss method.
+- Record the complete stable WLAN discovery order and prove the target is the
+  first eligible interface reporting the chosen visible profile. Even in the
+  one-radio frozen topology, assert exactly one managed connection and no
+  hidden public interface selection.
+- Record one controlled AP identity/channel at p041's fixed Japan W52 non-DFS
+  20-MHz WPA2-Personal/CCMP profile and the scripted transient-success plus
+  one-command-exhaustion methods.
   Unsupported security never downgrades.
 - Record the DHCP server, subnet/route/resolver predicates, neighbor/ping
   targets, transfer endpoint, payload size/digest, and whether each assertion
@@ -317,14 +345,17 @@ they do not reopen product policy or add human checkpoints:
 - Record clean boot, attach, USB power/reset, host controller/port, AP reset,
   and per-run isolation so the provisional and all final runs have the same
   reproducible start without a mid-batch human action.
-- Carry the fixed 15-second scan, 30-second direct connect, 10-second DHCP,
+- Carry the fixed 15-second scan, 30-second `/sbin/wifi` connect, 10-second DHCP,
   90-second compound, one-second child grace, and four-attempt auto bounds into
-  the script. Carry p030's same-network 0/1/2/4/8-second,
-  five-failure/30-second reconnect; no human retry is permitted.
+  the script. Carry p044's no-kernel-retry rule, p011's no-retained-passphrase
+  rule, one internal same-SSID reconnecting attempt followed by clean
+  auto-searching fallback, and no-nested-retry rule; no human retry is
+  permitted.
 - Produce the candidate/frozen manifest, secret provisioning, raw-log access,
   SSID/BSSID/MAC/serial redaction, evidence-retention, and automatic-preflight
   records before requesting hardware.
-- Encode one combined provisional result with p028/p029/p030/p008 subrecords.
+- Encode one combined provisional result with
+  p028/p029/p030/p041/p044/p008/p011 subrecords.
   On success, promote the unchanged candidate and run one final five-run
   batch without a human gate between attempts; any change or failure ends
   p008 and requires a later Phase.
@@ -333,8 +364,9 @@ they do not reopen product policy or add human checkpoints:
 
 - Every declared automatic gate passes on the candidate artifact with no
   unresolved failure, stale result, or retry-masked flake.
-- The one combined provisional check passes every p028/p029/p030/p008 identity,
-  scan, association, DHCP, same-network reconnect, data, down, removal, and
+- The one combined provisional check passes every p028/p029/p030/p041/p044 and
+  p008/p011 identity, global enable/list/selection, W52 scan, association,
+  DHCP, event/userspace reconnect, manual disconnect, disable, removal, and
   cleanup predicate on the exact target.
 - The unchanged frozen manifest then produces five consecutive complete final
   run records after one batch request, with no retry, intervention, or

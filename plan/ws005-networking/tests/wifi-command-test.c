@@ -18,7 +18,7 @@
 #define FIXTURE_CLOCK_HZ 100U
 #define FIXTURE_SCAN_GENERATION UINT64_C(17)
 #define FIXTURE_CONNECT_GENERATION UINT64_C(29)
-#define FIXTURE_OUTPUT_MAX 8192U
+#define FIXTURE_OUTPUT_MAX 32769U
 #define FIXTURE_TRACE_MAX 512U
 #define FIXTURE_SSID "fixture-ap"
 #define FIXTURE_PASSPHRASE "fixture-passphrase"
@@ -31,6 +31,8 @@ struct fixture_trace {
 static struct {
 	unsigned socket_calls;
 	unsigned close_calls;
+	unsigned secret_close_calls;
+	unsigned secret_read_calls;
 	unsigned ioctl_calls;
 	unsigned sleep_calls;
 	unsigned clock_calls;
@@ -38,8 +40,11 @@ static struct {
 	unsigned argv_clear_calls;
 	unsigned request_clear_calls;
 	unsigned connect_status_polls;
+	unsigned connect_attempt_status_polls;
 	unsigned connect_attempts;
+	unsigned connect_admissions;
 	unsigned scan_status_polls;
+	uint32_t scan_result_count;
 	unsigned scan_starts;
 	unsigned scan_stops;
 	unsigned connect_seen;
@@ -47,14 +52,29 @@ static struct {
 	unsigned disconnect_seen;
 	unsigned auto_scan;
 	unsigned connect_busy_once;
+	unsigned connect_fatal;
+	unsigned connect_immediate_fatal;
+	unsigned connect_generation_replaced;
+	unsigned interrupt_on_sleep;
+	unsigned connect_slow_timeout;
 	unsigned scan_never_completes;
-	unsigned connect_times_out;
+	unsigned scan_generation_replaced;
+	unsigned connect_retry_once;
 	unsigned stdout_tty;
 	unsigned interface_up;
 	unsigned output_overflow;
+	unsigned secret_eintr_once;
+	unsigned secret_eintr_seen;
 	uint64_t ticks;
 	uint64_t connect_deadline;
+	uint64_t active_connect_generation;
 	void *connect_request;
+	const uint8_t *secret_input;
+	const uint8_t *expected_passphrase;
+	size_t secret_input_length;
+	size_t secret_input_offset;
+	size_t secret_read_chunk;
+	size_t expected_passphrase_length;
 	void *argv_secret;
 	size_t argv_secret_length;
 	struct fixture_trace trace[FIXTURE_TRACE_MAX];
@@ -73,6 +93,7 @@ static void fixture_explicit_clear(void *, size_t);
 static int fixture_socket(int, int, int);
 static int fixture_ioctl(int, unsigned long, ...);
 static int fixture_close(int);
+static ssize_t fixture_read(int, void *, size_t);
 static int fixture_clock_gettime(clockid_t, struct timespec *);
 static long fixture_sysconf(int);
 static int fixture_nanosleep(const struct timespec *, struct timespec *);
@@ -83,10 +104,15 @@ static int fixture_putchar(int);
 static int fixture_fflush(FILE *);
 static int fixture_ferror(FILE *);
 static int fixture_isatty(int);
+static void fixture_expect_machine_terminal(const char *, int);
+static void fixture_machine_connect(void);
+static void fixture_machine_secret_failures(void);
+static void fixture_machine_simple_operations(void);
 
 #define socket fixture_socket
 #define ioctl fixture_ioctl
 #define close fixture_close
+#define read fixture_read
 #define clock_gettime fixture_clock_gettime
 #define sysconf fixture_sysconf
 #define nanosleep fixture_nanosleep
@@ -114,6 +140,7 @@ static int fixture_isatty(int);
 #undef sysconf
 #undef clock_gettime
 #undef close
+#undef read
 #undef ioctl
 #undef socket
 
@@ -177,6 +204,10 @@ fixture_reset(void)
 {
 	memset(&fixture, 0, sizeof(fixture));
 	fixture.ticks = 100U;
+	fixture.expected_passphrase =
+	    (const uint8_t *)FIXTURE_PASSPHRASE;
+	fixture.expected_passphrase_length = sizeof(FIXTURE_PASSPHRASE) - 1U;
+	fixture.scan_result_count = 1U;
 	fixture_errno = 0;
 }
 
@@ -292,10 +323,41 @@ fixture_socket(int domain, int type, int protocol)
 static int
 fixture_close(int descriptor)
 {
+	if (descriptor == WIFI_SECRET_DESCRIPTOR) {
+		fixture.secret_close_calls++;
+		return 0;
+	}
 	fixture_require(descriptor == FIXTURE_DESCRIPTOR, "close",
 	    "descriptor");
 	fixture.close_calls++;
 	return 0;
+}
+
+static ssize_t
+fixture_read(int descriptor, void *buffer, size_t capacity)
+{
+	size_t available;
+	size_t count;
+
+	fixture_require(descriptor == WIFI_SECRET_DESCRIPTOR, "secret read",
+	    "descriptor");
+	fixture_require(buffer != NULL && capacity != 0U, "secret read",
+	    "buffer");
+	fixture.secret_read_calls++;
+	if (fixture.secret_eintr_once && !fixture.secret_eintr_seen) {
+		fixture.secret_eintr_seen = 1U;
+		fixture_errno = EINTR;
+		return -1;
+	}
+	available = fixture.secret_input_length - fixture.secret_input_offset;
+	if (available == 0U)
+		return 0;
+	count = available < capacity ? available : capacity;
+	if (fixture.secret_read_chunk != 0U && count > fixture.secret_read_chunk)
+		count = fixture.secret_read_chunk;
+	memcpy(buffer, fixture.secret_input + fixture.secret_input_offset, count);
+	fixture.secret_input_offset += count;
+	return (ssize_t)count;
 }
 
 static int
@@ -334,6 +396,12 @@ fixture_nanosleep(const struct timespec *delay, struct timespec *remaining)
 	    "sleep arguments");
 	fixture_require(delay->tv_sec == 0 && delay->tv_nsec > 0 &&
 	    delay->tv_nsec <= 100000000L, "wait", "sleep bound");
+	if (fixture.interrupt_on_sleep && fixture.sleep_calls == 0U) {
+		fixture.sleep_calls++;
+		fixture_errno = EINTR;
+		fixture_require(raise(SIGINT) == 0, "wait", "raise SIGINT");
+		return -1;
+	}
 	nanoseconds = (uint64_t)delay->tv_nsec;
 	fixture.ticks += (nanoseconds * FIXTURE_CLOCK_HZ + 999999999ULL) /
 	    1000000000ULL;
@@ -390,7 +458,7 @@ fixture_record(unsigned long command, uint32_t scan_action)
 static void
 fixture_fill_status(struct wlan_status_request *status, uint32_t state)
 {
-	status->operation_generation = FIXTURE_CONNECT_GENERATION;
+	status->operation_generation = fixture.active_connect_generation;
 	status->scan_generation = FIXTURE_SCAN_GENERATION;
 	status->snapshot_generation = FIXTURE_SCAN_GENERATION;
 	status->deadline_ticks = fixture.connect_deadline;
@@ -466,9 +534,6 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 			fixture.scan_starts++;
 			request->state = WLAN_SCAN_RUNNING;
 		} else {
-			fixture_require(fixture.scan_starts == 1U &&
-			    (fixture.auto_scan || fixture.disconnect_seen == 1U),
-			    "scan", "stop ordering");
 			fixture.scan_stops++;
 			request->state = WLAN_SCAN_CANCELLED;
 		}
@@ -480,9 +545,6 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 		fixture_require(fixture_bytes_zero((uint8_t *)request +
 		    sizeof(*header), sizeof(*request) - sizeof(*header)), "list",
 		    "scan-status input");
-		if (!fixture.auto_scan && !fixture.connect_busy_once)
-			fixture_require(fixture.scan_starts == 1U, "list",
-			    "list before search");
 		fixture_record(command, 0U);
 		if (fixture.auto_scan && fixture.scan_starts == 0U) {
 			request->state = WLAN_SCAN_IDLE;
@@ -491,6 +553,13 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 		request->generation = FIXTURE_SCAN_GENERATION;
 		request->scan_generation = FIXTURE_SCAN_GENERATION;
 		request->cache_sequence = 1U;
+		if (fixture.scan_generation_replaced &&
+		    fixture.scan_status_polls == 1U) {
+			request->scan_generation = FIXTURE_SCAN_GENERATION + 1U;
+			request->state = WLAN_SCAN_RUNNING;
+			fixture.scan_status_polls++;
+			return 0;
+		}
 		if (fixture.auto_scan &&
 		    (fixture.scan_never_completes ||
 		    fixture.scan_status_polls++ == 0U)) {
@@ -499,7 +568,7 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 			request->state = WLAN_SCAN_RUNNING;
 		} else {
 			request->state = WLAN_SCAN_COMPLETE;
-			request->result_count = 1U;
+			request->result_count = fixture.scan_result_count;
 		}
 		return 0;
 	}
@@ -507,7 +576,8 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 		struct wlan_bss_request *request = argument;
 
 		fixture_require(request->generation == FIXTURE_SCAN_GENERATION &&
-		    request->index == 0U && request->reserved0 == 0U &&
+		    request->index < fixture.scan_result_count &&
+		    request->reserved0 == 0U &&
 		    fixture_bytes_zero(&request->bss, sizeof(request->bss)) &&
 		    fixture_bytes_zero(request->reserved,
 			sizeof(request->reserved)), "list", "BSS request input");
@@ -530,19 +600,21 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 	if (command == SIOCSWLANCONNECT) {
 		struct wlan_connect_request *request = argument;
 
-		fixture_require(fixture.flush_calls != 0U &&
-		    strstr(fixture.output,
-		    "Selecting a supported BSS and preparing the radio...") != NULL,
-		    "connect", "progress not flushed before synchronous ioctl");
-		fixture_require(fixture.connect_seen == 0U, "connect",
-		    "connect after admission");
+		if (!wifi_quiet) {
+			fixture_require(fixture.flush_calls != 0U &&
+			    ((wifi_machine && strstr(fixture.output,
+			    "WIFI1 connect state=starting generation=0 error=0") != NULL) ||
+			    (!wifi_machine && strstr(fixture.output,
+			    "Selecting a supported BSS and preparing the radio...") != NULL)),
+			    "connect", "progress not flushed before admission ioctl");
+		}
 		fixture_require(request->ssid_length == sizeof(FIXTURE_SSID) - 1U &&
 		    memcmp(request->ssid, FIXTURE_SSID,
 			sizeof(FIXTURE_SSID) - 1U) == 0, "connect", "SSID input");
 		fixture_require(request->passphrase_length ==
-		    sizeof(FIXTURE_PASSPHRASE) - 1U &&
-		    memcmp(request->passphrase, FIXTURE_PASSPHRASE,
-			sizeof(FIXTURE_PASSPHRASE) - 1U) == 0, "connect",
+		    fixture.expected_passphrase_length &&
+		    memcmp(request->passphrase, fixture.expected_passphrase,
+			fixture.expected_passphrase_length) == 0, "connect",
 		    "passphrase input");
 		fixture_require(request->generation == 0U && request->state == 0U &&
 		    request->terminal_error == 0 &&
@@ -551,6 +623,11 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 		fixture_record(command, 0U);
 		fixture.connect_attempts++;
 		fixture.connect_request = request;
+		if (fixture.connect_immediate_fatal) {
+			request->generation = FIXTURE_CONNECT_GENERATION;
+			fixture_errno = EACCES;
+			return -1;
+		}
 		if (fixture.connect_busy_once && fixture.connect_attempts == 1U) {
 			fixture_errno = EBUSY;
 			return -1;
@@ -560,9 +637,13 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 			return -1;
 		}
 		fixture.connect_seen = 1U;
-		request->generation = FIXTURE_CONNECT_GENERATION;
+		fixture.connect_admissions++;
+		fixture.connect_attempt_status_polls = 0U;
+		fixture.active_connect_generation = FIXTURE_CONNECT_GENERATION +
+		    fixture.connect_admissions - 1U;
+		request->generation = fixture.active_connect_generation;
 		request->state = WLAN_STATE_AUTHENTICATING;
-		fixture.connect_deadline = fixture.ticks + 30U * FIXTURE_CLOCK_HZ;
+		fixture.connect_deadline = fixture.ticks + 5U * FIXTURE_CLOCK_HZ;
 		memset(request->passphrase, 0, sizeof(request->passphrase));
 		request->passphrase_length = 0U;
 		fixture.connect_redacted = fixture_bytes_zero(request->passphrase,
@@ -586,36 +667,75 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 			request->administrative_up = 1U;
 			return 0;
 		}
+		if (fixture.connect_generation_replaced) {
+			fixture_fill_status(request, WLAN_STATE_AUTHENTICATING);
+			request->operation_generation =
+			    fixture.active_connect_generation + 1U;
+			fixture.connect_status_polls++;
+			return 0;
+		}
 		fixture_require(fixture.request_clear_calls ==
 		    fixture.connect_attempts, "connect",
 		    "connect request was not cleared before status polling");
-		fixture_require(fixture.connect_status_polls < 4U, "connect",
-		    "excess status polls");
-		if (fixture.connect_times_out) {
-			/* Every post-admission status observation reports the
-			 * engine's terminal timeout with its retry evidence. */
+		if (fixture.connect_seen && !fixture.connect_slow_timeout &&
+		    !fixture.interrupt_on_sleep) {
+			fixture_require(fixture.connect_attempt_status_polls < 4U,
+			    "connect", "excess status polls");
+		}
+		if (fixture.connect_slow_timeout) {
+			if (fixture.connect_admissions == 1U &&
+			    fixture.connect_attempt_status_polls >= 250U) {
+				fixture_fill_status(request, WLAN_STATE_FAILED);
+				request->terminal_error = ETIMEDOUT;
+			} else {
+				fixture_fill_status(request, WLAN_STATE_AUTHENTICATING);
+			}
+			request->deadline_ticks = 0U;
 			fixture.connect_status_polls++;
-			fixture_fill_status(request, WLAN_STATE_FAILED);
-			request->terminal_error = ETIMEDOUT;
-			request->retry_count = 5U;
+			fixture.connect_attempt_status_polls++;
 			return 0;
 		}
-		state = fixture.connect_status_polls == 0U ?
+		if (fixture.connect_fatal) {
+			fixture_fill_status(request, WLAN_STATE_FAILED);
+			request->terminal_error = EACCES;
+			fixture.connect_status_polls++;
+			fixture.connect_attempt_status_polls++;
+			return 0;
+		}
+		if (fixture.connect_retry_once &&
+		    fixture.connect_admissions == 1U) {
+			/* The first asynchronous generation becomes terminal after one
+			 * observed protocol state.  Userspace must initiate generation 2. */
+			if (fixture.connect_attempt_status_polls == 0U) {
+				fixture_fill_status(request, WLAN_STATE_AUTHENTICATING);
+			} else {
+				fixture_fill_status(request, WLAN_STATE_FAILED);
+				request->terminal_error = ETIMEDOUT;
+				request->retry_count = 1U;
+			}
+			fixture.connect_status_polls++;
+			fixture.connect_attempt_status_polls++;
+			return 0;
+		}
+		state = fixture.connect_attempt_status_polls == 0U ?
 		    WLAN_STATE_AUTHENTICATING :
-		    (fixture.connect_status_polls == 1U ? WLAN_STATE_ASSOCIATING :
-		    (fixture.connect_status_polls == 2U ? WLAN_STATE_FOUR_WAY :
+		    (fixture.connect_attempt_status_polls == 1U ?
+		    WLAN_STATE_ASSOCIATING :
+		    (fixture.connect_attempt_status_polls == 2U ? WLAN_STATE_FOUR_WAY :
 		    WLAN_STATE_CONNECTED));
 		fixture.connect_status_polls++;
+		fixture.connect_attempt_status_polls++;
 		fixture_fill_status(request, state);
 		return 0;
 	}
 	if (command == SIOCSWLANDISCONNECT) {
 		struct wlan_disconnect_request *request = argument;
 
-		fixture_require(fixture.connect_times_out ?
-		    fixture.connect_status_polls == 2U :
-		    fixture.connect_status_polls == 4U,
-		    "disconnect", "disconnect before authorized status");
+		if (fixture.connect_seen && !fixture.connect_slow_timeout &&
+		    !fixture.interrupt_on_sleep) {
+			fixture_require(fixture.connect_status_polls == 4U,
+			    "disconnect", "disconnect before authorized status");
+		}
 		fixture_require(request->generation == 0U && request->flags == 0U &&
 		    request->state == 0U && request->terminal_error == 0 &&
 		    fixture_bytes_zero(request->reserved,
@@ -636,6 +756,242 @@ fixture_invoke(int argc, char **argv, char *secret, size_t secret_length)
 	fixture.argv_secret = secret;
 	fixture.argv_secret_length = secret_length;
 	return wifi_program_main(argc, argv);
+}
+
+static void
+fixture_expect_machine_terminal(const char *test, int error)
+{
+	char expected[64];
+	const char *cursor;
+	const char *newline;
+	const char *terminal;
+
+	if (error == 0)
+		(void)snprintf(expected, sizeof(expected),
+		    "WIFI1 terminal ok 0\n");
+	else
+		(void)snprintf(expected, sizeof(expected),
+		    "WIFI1 terminal error %d\n", error);
+	terminal = strstr(fixture.output, "WIFI1 terminal ");
+	fixture_require(terminal != NULL && strcmp(terminal, expected) == 0,
+	    test, "missing or non-final terminal record");
+	cursor = fixture.output;
+	while (*cursor != '\0') {
+		fixture_require(strncmp(cursor, "WIFI1 ", 6U) == 0, test,
+		    "machine line prefix");
+		newline = strchr(cursor, '\n');
+		fixture_require(newline != NULL, test, "partial machine record");
+		cursor = newline + 1;
+	}
+	fixture_require(fixture.error_length == 0U && !fixture.output_overflow,
+	    test, "machine diagnostic or output overflow");
+}
+
+static void
+fixture_machine_connect(void)
+{
+	static const uint8_t secret[] = FIXTURE_PASSPHRASE;
+	char interface[] = "wlan0";
+	char ssid[] = FIXTURE_SSID;
+	char *arguments[] = { "wifi", "--machine", "--passphrase-fd=4",
+	    interface, "connect", ssid, NULL };
+
+	fixture_reset();
+	fixture.secret_input = secret;
+	fixture.secret_input_length = sizeof(secret) - 1U;
+	fixture.secret_read_chunk = 3U;
+	fixture.secret_eintr_once = 1U;
+	fixture_require(fixture_invoke(6, arguments, NULL, 0U) == 0,
+	    "machine connect", "exit status");
+	fixture_expect_machine_terminal("machine connect", 0);
+	fixture_require(fixture.secret_read_calls > 2U &&
+	    fixture.secret_close_calls == 1U && fixture.connect_admissions == 1U &&
+	    fixture.connect_redacted == 1U && fixture.argv_secret == NULL,
+	    "machine connect", "secret descriptor or admission contract");
+	fixture_require(strstr(fixture.output,
+	    "WIFI1 connect state=starting generation=0 error=0\n") != NULL &&
+	    strstr(fixture.output, "WIFI1 connect state=6 generation=29 "
+	    "authorized=1 error=0\n") != NULL &&
+	    strstr(fixture.output, FIXTURE_PASSPHRASE) == NULL,
+	    "machine connect", "connect records or secret output");
+}
+
+static void
+fixture_machine_secret_failures(void)
+{
+	static const uint8_t short_secret[] = "1234567";
+	static const uint8_t invalid_secret[] = {
+		'a', 'b', 'c', 'd', 'e', 'f', 'g', '\n'
+	};
+	uint8_t maximum_secret[WLAN_PASSPHRASE_MAX];
+	uint8_t overflow_secret[WLAN_PASSPHRASE_STORAGE];
+	char interface[] = "wlan0";
+	char ssid[] = FIXTURE_SSID;
+	char *arguments[] = { "wifi", "--machine", "--passphrase-fd=4",
+	    interface, "connect", ssid, NULL };
+	char *missing_fd[] = { "wifi", "--machine", interface, "connect",
+	    ssid, NULL };
+	char *unexpected_fd[] = { "wifi", "--machine", "--passphrase-fd=4",
+	    interface, "status", NULL };
+
+	memset(maximum_secret, 'm', sizeof(maximum_secret));
+	memset(overflow_secret, 'o', sizeof(overflow_secret));
+
+	fixture_reset();
+	fixture.secret_input = short_secret;
+	fixture.secret_input_length = sizeof(short_secret) - 1U;
+	fixture_require(fixture_invoke(6, arguments, NULL, 0U) == 1,
+	    "machine short secret", "exit status");
+	fixture_expect_machine_terminal("machine short secret", EINVAL);
+	fixture_require(fixture.socket_calls == 0U &&
+	    fixture.secret_close_calls == 1U,
+	    "machine short secret", "operation escaped validation");
+
+	fixture_reset();
+	fixture.secret_input = invalid_secret;
+	fixture.secret_input_length = sizeof(invalid_secret);
+	fixture_require(fixture_invoke(6, arguments, NULL, 0U) == 1,
+	    "machine invalid secret", "exit status");
+	fixture_expect_machine_terminal("machine invalid secret", EINVAL);
+	fixture_require(fixture.socket_calls == 0U,
+	    "machine invalid secret", "operation escaped validation");
+
+	fixture_reset();
+	fixture.secret_input = overflow_secret;
+	fixture.secret_input_length = sizeof(overflow_secret);
+	fixture.secret_read_chunk = WLAN_PASSPHRASE_MAX;
+	fixture_require(fixture_invoke(6, arguments, NULL, 0U) == 1,
+	    "machine overflow secret", "exit status");
+	fixture_expect_machine_terminal("machine overflow secret", E2BIG);
+	fixture_require(fixture.secret_read_calls == 2U &&
+	    fixture.socket_calls == 0U,
+	    "machine overflow secret", "64th-byte overflow probe");
+
+	fixture_reset();
+	fixture.secret_input = maximum_secret;
+	fixture.secret_input_length = sizeof(maximum_secret);
+	fixture.expected_passphrase = maximum_secret;
+	fixture.expected_passphrase_length = sizeof(maximum_secret);
+	fixture_require(fixture_invoke(6, arguments, NULL, 0U) == 0,
+	    "machine maximum secret", "exit status");
+	fixture_expect_machine_terminal("machine maximum secret", 0);
+	fixture_require(fixture.secret_read_calls == 2U &&
+	    strstr(fixture.output, "mmmmmmmm") == NULL,
+	    "machine maximum secret", "EOF or secret output");
+
+	fixture_reset();
+	fixture_require(fixture_invoke(5, missing_fd, NULL, 0U) == 1,
+	    "machine missing fd", "exit status");
+	fixture_expect_machine_terminal("machine missing fd", EINVAL);
+	fixture_require(fixture.socket_calls == 0U &&
+	    fixture.secret_read_calls == 0U,
+	    "machine missing fd", "operation escaped grammar");
+
+	fixture_reset();
+	fixture_require(fixture_invoke(5, unexpected_fd, NULL, 0U) == 1,
+	    "machine unexpected fd", "exit status");
+	fixture_expect_machine_terminal("machine unexpected fd", EINVAL);
+	fixture_require(fixture.socket_calls == 0U &&
+	    fixture.secret_read_calls == 0U,
+	    "machine unexpected fd", "operation escaped grammar");
+}
+
+static void
+fixture_machine_simple_operations(void)
+{
+	char interface[] = "wlan0";
+	char *up[] = { "wifi", "--machine", interface, "up", NULL };
+	char *down[] = { "wifi", "--machine", interface, "down", NULL };
+	char *search_start[] = { "wifi", "--machine", interface, "search",
+	    "start", NULL };
+	char *search_stop[] = { "wifi", "--machine", interface, "search",
+	    "stop", NULL };
+	char *list[] = { "wifi", "--machine", interface, "list", NULL };
+	char *status[] = { "wifi", "--machine", interface, "status", NULL };
+	char *disconnect[] = { "wifi", "--machine", interface, "disconnect",
+	    NULL };
+	const char *cursor;
+	unsigned records;
+
+	fixture_reset();
+	fixture_require(fixture_invoke(4, up, NULL, 0U) == 0,
+	    "machine up", "exit status");
+	fixture_expect_machine_terminal("machine up", 0);
+	fixture_require(strstr(fixture.output,
+	    "WIFI1 interface administrative=1\n") != NULL,
+	    "machine up", "interface record");
+
+	fixture_reset();
+	fixture.interface_up = 1U;
+	fixture_require(fixture_invoke(4, down, NULL, 0U) == 0,
+	    "machine down", "exit status");
+	fixture_expect_machine_terminal("machine down", 0);
+	fixture_require(strstr(fixture.output,
+	    "WIFI1 interface administrative=0\n") != NULL,
+	    "machine down", "interface record");
+
+	fixture_reset();
+	fixture_require(fixture_invoke(5, search_start, NULL, 0U) == 0,
+	    "machine search start", "exit status");
+	fixture_expect_machine_terminal("machine search start", 0);
+	fixture_require(strstr(fixture.output,
+	    "WIFI1 scan action=1 state=1 generation=17 error=0\n") != NULL,
+	    "machine search start", "scan record");
+
+	fixture_reset();
+	fixture_require(fixture_invoke(5, search_stop, NULL, 0U) == 0,
+	    "machine search stop", "exit status");
+	fixture_expect_machine_terminal("machine search stop", 0);
+	fixture_require(strstr(fixture.output,
+	    "WIFI1 scan action=2 state=3 generation=17 error=0\n") != NULL,
+	    "machine search stop", "scan record");
+
+	fixture_reset();
+	fixture_require(fixture_invoke(4, list, NULL, 0U) == 0,
+	    "machine list", "exit status");
+	fixture_expect_machine_terminal("machine list", 0);
+	fixture_require(strstr(fixture.output,
+	    "WIFI1 scan state=2 generation=17 results=1 available=1 "
+	    "truncated=0 error=0\n") != NULL &&
+	    strstr(fixture.output,
+	    "WIFI1 bss index=0 ssid=666978747572652d6170 "
+	    "bssid=020000000042 channel=6 frequency=2437 rssi=-35 age=25 "
+	    "security=00000035 flags=00000011\n") != NULL,
+	    "machine list", "scan or canonical BSS record");
+
+	fixture_reset();
+	fixture.scan_result_count = WLAN_BSS_MAX;
+	fixture_require(fixture_invoke(4, list, NULL, 0U) == 0,
+	    "machine list bound", "exit status");
+	fixture_expect_machine_terminal("machine list bound", 0);
+	records = 0U;
+	for (cursor = fixture.output; *cursor != '\0'; cursor++) {
+		if (*cursor == '\n')
+			records++;
+	}
+	fixture_require(records == 64U && fixture.ioctl_calls == 63U &&
+	    strstr(fixture.output,
+	    "results=62 available=64 truncated=1 error=0") != NULL &&
+	    strstr(fixture.output, "WIFI1 bss index=61 ") != NULL &&
+	    strstr(fixture.output, "WIFI1 bss index=62 ") == NULL,
+	    "machine list bound", "record ceiling or truncation");
+
+	fixture_reset();
+	fixture_require(fixture_invoke(4, status, NULL, 0U) == 0,
+	    "machine status", "exit status");
+	fixture_expect_machine_terminal("machine status", 0);
+	fixture_require(strstr(fixture.output,
+	    "WIFI1 status state=1 scan=2 operation-generation=0 "
+	    "scan-generation=17 snapshot-generation=17") != NULL,
+	    "machine status", "status record");
+
+	fixture_reset();
+	fixture_require(fixture_invoke(4, disconnect, NULL, 0U) == 0,
+	    "machine disconnect", "exit status");
+	fixture_expect_machine_terminal("machine disconnect", 0);
+	fixture_require(strstr(fixture.output,
+	    "WIFI1 connect state=1 generation=29 error=0\n") != NULL,
+	    "machine disconnect", "disconnect record");
 }
 
 static void
@@ -886,13 +1242,20 @@ fixture_auto_scan_deadline(void)
 }
 
 static void
-fixture_connect_terminal_timeout(void)
+fixture_connect_terminal_retry(void)
 {
 	static const unsigned long expected[] = {
 		SIOCSWLANCONNECT,
 		SIOCGWLANSTATUS,
 		SIOCGWLANSTATUS,
-		SIOCSWLANDISCONNECT
+		SIOCGWLANSCAN,
+		SIOCSWLANSCAN,
+		SIOCGWLANSCAN,
+		SIOCSWLANCONNECT,
+		SIOCGWLANSTATUS,
+		SIOCGWLANSTATUS,
+		SIOCGWLANSTATUS,
+		SIOCGWLANSTATUS
 	};
 	char interface[] = "wlan0";
 	char ssid[] = FIXTURE_SSID;
@@ -902,30 +1265,265 @@ fixture_connect_terminal_timeout(void)
 	unsigned index;
 
 	fixture_reset();
-	fixture.connect_times_out = 1U;
+	fixture.connect_retry_once = 1U;
 	fixture_require(fixture_invoke(5, arguments, passphrase,
-	    sizeof(passphrase) - 1U) == 1, "connect timeout", "exit status");
+	    sizeof(passphrase) - 1U) == 0, "connect retry", "exit status");
 	fixture_require(fixture.ioctl_calls == sizeof(expected) /
-	    sizeof(expected[0]), "connect timeout", "ioctl count");
+	    sizeof(expected[0]), "connect retry", "ioctl count");
 	for (index = 0U; index < sizeof(expected) / sizeof(expected[0]); index++)
 		fixture_require(fixture.trace[index].command == expected[index],
-		    "connect timeout", "ioctl sequence");
-	fixture_require(fixture.connect_attempts == 1U &&
-	    fixture.connect_status_polls == 2U && fixture.scan_starts == 0U,
-	    "connect timeout", "operation sequence");
-	/* The terminal message must name the public stage and retry evidence
-	 * without leaking the credential. */
-	fixture_require(strstr(fixture.output, "state=failed") != NULL &&
-	    strstr(fixture.output, "retries=5") != NULL &&
-	    strstr(fixture.output, "error=42") != NULL, "connect timeout",
-	    "public failing stage");
-	fixture_require(strstr(fixture.error, "(42)") != NULL,
-	    "connect timeout", "terminal diagnostic");
+		    "connect retry", "ioctl sequence");
+	fixture_require(fixture.connect_attempts == 2U &&
+	    fixture.connect_admissions == 2U &&
+	    fixture.connect_status_polls == 6U && fixture.scan_starts == 1U,
+	    "connect retry", "operation sequence");
+	fixture_require(fixture.active_connect_generation ==
+	    FIXTURE_CONNECT_GENERATION + 1U, "connect retry",
+	    "generation did not advance");
+	fixture_require(fixture.sleep_calls == 5U &&
+	    fixture.clock_calls == 7U, "connect retry",
+	    "single userspace deadline timeline");
+	fixture_require(strstr(fixture.output,
+	    "Connection attempt failed; rescanning and retrying...") != NULL &&
+	    strstr(fixture.output, "Connected: controlled port authorized") !=
+	    NULL && fixture.error_length == 0U, "connect retry",
+	    "retry progress");
 	fixture_require(fixture_bytes_zero(passphrase,
 	    sizeof(passphrase) - 1U) &&
 	    strstr(fixture.output, FIXTURE_PASSPHRASE) == NULL &&
 	    strstr(fixture.error, FIXTURE_PASSPHRASE) == NULL,
-	    "connect timeout", "secret clearing");
+	    "connect retry", "secret clearing");
+}
+
+static void
+fixture_connect_fatal_error(void)
+{
+	static const unsigned long expected[] = {
+		SIOCSWLANCONNECT,
+		SIOCGWLANSTATUS,
+		SIOCGWLANSTATUS
+	};
+	char interface[] = "wlan0";
+	char ssid[] = FIXTURE_SSID;
+	char passphrase[] = FIXTURE_PASSPHRASE;
+	char marker[32];
+	char *arguments[] = { "wifi", interface, "connect", ssid,
+	    passphrase, NULL };
+	unsigned index;
+
+	fixture_reset();
+	fixture.connect_fatal = 1U;
+	fixture_require(fixture_invoke(5, arguments, passphrase,
+	    sizeof(passphrase) - 1U) == 1, "connect fatal", "exit status");
+	fixture_require(fixture.ioctl_calls == sizeof(expected) /
+	    sizeof(expected[0]), "connect fatal", "ioctl count");
+	for (index = 0U; index < sizeof(expected) / sizeof(expected[0]); index++)
+		fixture_require(fixture.trace[index].command == expected[index],
+		    "connect fatal", "ioctl sequence");
+	fixture_require(fixture.connect_attempts == 1U &&
+	    fixture.connect_admissions == 1U &&
+	    fixture.connect_status_polls == 2U &&
+	    fixture.scan_starts == 0U && fixture.disconnect_seen == 0U,
+	    "connect fatal", "fatal error was retried or cancelled");
+	(void)snprintf(marker, sizeof(marker), "(%d)", EACCES);
+	fixture_require(strstr(fixture.output, "state=failed") != NULL &&
+	    strstr(fixture.output, "error=") != NULL &&
+	    strstr(fixture.error, marker) != NULL &&
+	    strstr(fixture.output, "rescanning and retrying") == NULL,
+	    "connect fatal", "fatal diagnostic");
+	fixture_require(fixture_bytes_zero(passphrase,
+	    sizeof(passphrase) - 1U) &&
+	    strstr(fixture.output, FIXTURE_PASSPHRASE) == NULL &&
+	    strstr(fixture.error, FIXTURE_PASSPHRASE) == NULL,
+	    "connect fatal", "secret clearing");
+}
+
+static void
+fixture_connect_failed_admission(void)
+{
+	char interface[] = "wlan0";
+	char ssid[] = FIXTURE_SSID;
+	char passphrase[] = FIXTURE_PASSPHRASE;
+	char marker[32];
+	char *arguments[] = { "wifi", interface, "connect", ssid,
+	    passphrase, NULL };
+
+	fixture_reset();
+	fixture.connect_immediate_fatal = 1U;
+	fixture_require(fixture_invoke(5, arguments, passphrase,
+	    sizeof(passphrase) - 1U) == 1, "failed admission", "exit status");
+	fixture_require(fixture.connect_attempts == 1U &&
+	    fixture.connect_admissions == 0U && fixture.disconnect_seen == 0U &&
+	    fixture.ioctl_calls == 1U, "failed admission",
+	    "failed ioctl acquired cancellation ownership");
+	(void)snprintf(marker, sizeof(marker), "(%d)", EACCES);
+	fixture_require(strstr(fixture.error, marker) != NULL &&
+	    strstr(fixture.output, FIXTURE_PASSPHRASE) == NULL &&
+	    strstr(fixture.error, FIXTURE_PASSPHRASE) == NULL,
+	    "failed admission", "fatal diagnostic or redaction");
+	fixture_require(fixture_bytes_zero(passphrase,
+	    sizeof(passphrase) - 1U), "failed admission", "secret clearing");
+}
+
+static void
+fixture_quiet_connect_retry(void)
+{
+	char interface[] = "wlan0";
+	char ssid[] = FIXTURE_SSID;
+	char passphrase[] = FIXTURE_PASSPHRASE;
+	char *arguments[] = { "wifi", "--quiet", interface, "connect", ssid,
+	    passphrase, NULL };
+
+	fixture_reset();
+	fixture.connect_retry_once = 1U;
+	fixture_require(fixture_invoke(6, arguments, passphrase,
+	    sizeof(passphrase) - 1U) == 0, "quiet retry", "exit status");
+	fixture_require(fixture.connect_admissions == 2U &&
+	    fixture.scan_starts == 1U && fixture.output_length == 0U &&
+	    fixture.error_length == 0U, "quiet retry",
+	    "retry or output suppression");
+	fixture_require(fixture_bytes_zero(passphrase,
+	    sizeof(passphrase) - 1U), "quiet retry", "secret clearing");
+}
+
+static void
+fixture_retry_deadline_is_not_reset(void)
+{
+	char interface[] = "wlan0";
+	char ssid[] = FIXTURE_SSID;
+	char passphrase[] = FIXTURE_PASSPHRASE;
+	char marker[32];
+	char *arguments[] = { "wifi", interface, "connect", ssid,
+	    passphrase, NULL };
+	const char *first_retry;
+
+	fixture_reset();
+	fixture.connect_slow_timeout = 1U;
+	fixture_require(fixture_invoke(5, arguments, passphrase,
+	    sizeof(passphrase) - 1U) == 1, "retry deadline", "exit status");
+	fixture_require(fixture.ticks == 100U +
+	    WIFI_CONNECT_SECONDS * FIXTURE_CLOCK_HZ, "retry deadline",
+	    "deadline reset across generations");
+	fixture_require(fixture.connect_admissions == 2U &&
+	    fixture.scan_starts == 1U && fixture.disconnect_seen == 1U,
+	    "retry deadline", "attempt or cancellation ownership");
+	first_retry = strstr(fixture.output,
+	    "Connection attempt failed; rescanning and retrying...");
+	fixture_require(first_retry != NULL &&
+	    strstr(first_retry + 1, "Connection attempt failed; rescanning") ==
+	    NULL, "retry deadline", "unbounded retry output");
+	(void)snprintf(marker, sizeof(marker), "(%d)", ETIMEDOUT);
+	fixture_require(strstr(fixture.error, marker) != NULL &&
+	    fixture.output_overflow == 0U &&
+	    fixture.output_length < FIXTURE_OUTPUT_MAX &&
+	    fixture_bytes_zero(passphrase, sizeof(passphrase) - 1U) &&
+	    strstr(fixture.output, FIXTURE_PASSPHRASE) == NULL &&
+	    strstr(fixture.error, FIXTURE_PASSPHRASE) == NULL,
+	    "retry deadline", "bounded diagnostic or secret clearing");
+}
+
+static void
+fixture_scan_generation_replacement(void)
+{
+	static const unsigned long expected[] = {
+		SIOCSWLANCONNECT,
+		SIOCGWLANSCAN,
+		SIOCSWLANSCAN,
+		SIOCGWLANSCAN,
+		SIOCGWLANSCAN,
+		SIOCGWLANSTATUS
+	};
+	char interface[] = "wlan0";
+	char ssid[] = FIXTURE_SSID;
+	char passphrase[] = FIXTURE_PASSPHRASE;
+	char marker[32];
+	char *arguments[] = { "wifi", interface, "connect", ssid,
+	    passphrase, NULL };
+	unsigned index;
+
+	fixture_reset();
+	fixture.auto_scan = 1U;
+	fixture.scan_generation_replaced = 1U;
+	fixture_require(fixture_invoke(5, arguments, passphrase,
+	    sizeof(passphrase) - 1U) == 1, "scan replacement", "exit status");
+	fixture_require(fixture.ioctl_calls == sizeof(expected) /
+	    sizeof(expected[0]), "scan replacement", "ioctl count");
+	for (index = 0U; index < sizeof(expected) / sizeof(expected[0]); index++)
+		fixture_require(fixture.trace[index].command == expected[index],
+		    "scan replacement", "ioctl sequence");
+	fixture_require(fixture.connect_attempts == 1U &&
+	    fixture.connect_admissions == 0U && fixture.scan_starts == 1U &&
+	    fixture.scan_stops == 0U, "scan replacement",
+	    "stale generation was consumed or cancelled");
+	(void)snprintf(marker, sizeof(marker), "(%d)", ESTALE);
+	fixture_require(strstr(fixture.error, marker) != NULL &&
+	    strstr(fixture.output, FIXTURE_PASSPHRASE) == NULL &&
+	    strstr(fixture.error, FIXTURE_PASSPHRASE) == NULL,
+	    "scan replacement", "stale diagnostic or secret output");
+}
+
+static void
+fixture_connect_generation_replacement(void)
+{
+	static const unsigned long expected[] = {
+		SIOCSWLANCONNECT,
+		SIOCGWLANSTATUS,
+		SIOCGWLANSTATUS
+	};
+	char interface[] = "wlan0";
+	char ssid[] = FIXTURE_SSID;
+	char passphrase[] = FIXTURE_PASSPHRASE;
+	char marker[32];
+	char *arguments[] = { "wifi", interface, "connect", ssid,
+	    passphrase, NULL };
+	unsigned index;
+
+	fixture_reset();
+	fixture.connect_generation_replaced = 1U;
+	fixture_require(fixture_invoke(5, arguments, passphrase,
+	    sizeof(passphrase) - 1U) == 1, "connect replacement",
+	    "exit status");
+	fixture_require(fixture.ioctl_calls == sizeof(expected) /
+	    sizeof(expected[0]), "connect replacement", "ioctl count");
+	for (index = 0U; index < sizeof(expected) / sizeof(expected[0]); index++)
+		fixture_require(fixture.trace[index].command == expected[index],
+		    "connect replacement", "ioctl sequence");
+	fixture_require(fixture.connect_admissions == 1U &&
+	    fixture.disconnect_seen == 0U && fixture.scan_starts == 0U,
+	    "connect replacement", "replacement generation was cancelled");
+	(void)snprintf(marker, sizeof(marker), "(%d)", ESTALE);
+	fixture_require(strstr(fixture.error, marker) != NULL &&
+	    fixture_bytes_zero(passphrase, sizeof(passphrase) - 1U) &&
+	    strstr(fixture.output, FIXTURE_PASSPHRASE) == NULL &&
+	    strstr(fixture.error, FIXTURE_PASSPHRASE) == NULL,
+	    "connect replacement", "stale diagnostic or secret output");
+}
+
+static void
+fixture_connect_signal_cancellation(void)
+{
+	char interface[] = "wlan0";
+	char ssid[] = FIXTURE_SSID;
+	char passphrase[] = FIXTURE_PASSPHRASE;
+	char marker[32];
+	char *arguments[] = { "wifi", interface, "connect", ssid,
+	    passphrase, NULL };
+
+	fixture_reset();
+	fixture.interrupt_on_sleep = 1U;
+	fixture_require(fixture_invoke(5, arguments, passphrase,
+	    sizeof(passphrase) - 1U) == 1, "connect signal", "exit status");
+	fixture_require(fixture.connect_admissions == 1U &&
+	    fixture.connect_status_polls == 2U && fixture.sleep_calls == 1U &&
+	    fixture.disconnect_seen == 1U, "connect signal",
+	    "owned generation was not cancelled");
+	(void)snprintf(marker, sizeof(marker), "(%d)", EINTR);
+	fixture_require(strstr(fixture.error, marker) != NULL &&
+	    strstr(fixture.output, FIXTURE_PASSPHRASE) == NULL &&
+	    strstr(fixture.error, FIXTURE_PASSPHRASE) == NULL,
+	    "connect signal", "signal result or diagnostic redaction");
+	fixture_require(fixture_bytes_zero(passphrase,
+	    sizeof(passphrase) - 1U), "connect signal", "secret clearing");
 }
 
 static void
@@ -1050,12 +1648,22 @@ fixture_basic_bounds(void)
 int
 main(void)
 {
+	fixture_machine_connect();
+	fixture_machine_secret_failures();
+	fixture_machine_simple_operations();
 	fixture_normal_sequence();
 	fixture_auto_scan_connect();
 	fixture_transient_connect_busy();
 	fixture_quiet_interface_control();
 	fixture_auto_scan_deadline();
-	fixture_connect_terminal_timeout();
+	fixture_connect_terminal_retry();
+	fixture_connect_fatal_error();
+	fixture_connect_failed_admission();
+	fixture_quiet_connect_retry();
+	fixture_retry_deadline_is_not_reset();
+	fixture_scan_generation_replacement();
+	fixture_connect_generation_replacement();
+	fixture_connect_signal_cancellation();
 	fixture_terminal_scan_overwrite();
 	fixture_quiet_validation_failure();
 	fixture_basic_bounds();

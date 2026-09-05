@@ -128,6 +128,30 @@
 #define RTL8822BU_DDMA_LENGTH_MASK                  0x0003ffffU
 #define RTL8822BU_TX_BUFFER_OCP                     0x18780000U
 
+#define RTL8822BU_2G_SCAN_CHANNEL_COUNT                     11U
+#define RTL8822BU_W52_SCAN_CHANNEL_COUNT                     4U
+#define RTL8822BU_SCAN_CHANNEL_COUNT \
+	(RTL8822BU_2G_SCAN_CHANNEL_COUNT + RTL8822BU_W52_SCAN_CHANNEL_COUNT)
+
+static const struct wlan_scan_channel rtl8822bu_scan_channels[
+    RTL8822BU_SCAN_CHANNEL_COUNT] = {
+	{ 1U, 2412U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 2U, 2417U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 3U, 2422U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 4U, 2427U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 5U, 2432U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 6U, 2437U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 7U, 2442U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 8U, 2447U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 9U, 2452U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 10U, 2457U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 11U, 2462U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 36U, 5180U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 40U, 5200U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 44U, 5220U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U },
+	{ 48U, 5240U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U }
+};
+
 #define RTL8822BU_MCUFW_INIT_READY                       0x8000U
 #define RTL8822BU_MCUFW_DOWNLOAD_READY                   0x4000U
 #define RTL8822BU_MCUFW_DMEM_CHECKSUM_OK                 0x0040U
@@ -312,6 +336,32 @@ struct rtl8822bu_adapter {
 	uint64_t phy_sample_generation;
 	uint32_t scan_channel;
 };
+
+static uint32_t
+rtl8822bu_scan_channel_count(const struct rtl8822bu_board_info *board)
+{
+	return rtl8822b_board_active_channel_allowed(board, 36U) ?
+	    RTL8822BU_SCAN_CHANNEL_COUNT : RTL8822BU_2G_SCAN_CHANNEL_COUNT;
+}
+
+static int
+rtl8822bu_scan_step_valid(const struct rtl8822bu_adapter *adapter,
+	uint32_t step_index, uint32_t channel)
+{
+	uint32_t count;
+	uint32_t index;
+
+	if (adapter == NULL)
+		return 0;
+	count = rtl8822bu_scan_channel_count(&adapter->board);
+	if (step_index >= count)
+		return 0;
+	for (index = 0U; index < count; index++) {
+		if (rtl8822bu_scan_channels[index].channel == channel)
+			return 1;
+	}
+	return 0;
+}
 
 typedef int (*rtl8822bu_firmware_walk_fn)(
 	const struct rtl8822b_firmware_view *,
@@ -993,7 +1043,8 @@ rtl8822bu_board_read(struct rtl8822bu_adapter *adapter,
 			hal_printf("usb-rtl8822bu: efuse path=%u "
 			    "cck=%02x/%02x/%02x/%02x "
 			    "bw40=%02x/%02x/%02x/%02x ofdm-diff=%d "
-			    "rfe=%u plan=%02x\n", path,
+			    "w52=%02x/%02x ofdm-diff-5g=%d "
+			    "rfe=%u plan=%02x country=%c%c\n", path,
 			    board->tx_power_2g[path].cck_base[0],
 			    board->tx_power_2g[path].cck_base[1],
 			    board->tx_power_2g[path].cck_base[2],
@@ -1003,7 +1054,11 @@ rtl8822bu_board_read(struct rtl8822bu_adapter *adapter,
 			    board->tx_power_2g[path].bw40_base[2],
 			    board->tx_power_2g[path].bw40_base[3],
 			    (int)board->tx_power_2g[path].ofdm_diff,
-			    board->rfe_option, board->channel_plan);
+			    board->tx_power_5g[path].bw40_base[0],
+			    board->tx_power_5g[path].bw40_base[1],
+			    (int)board->tx_power_5g[path].ofdm_diff,
+			    board->rfe_option, board->channel_plan,
+			    board->country_code[0], board->country_code[1]);
 	}
 #endif
 	memset(logical, 0, RTL8822B_EFUSE_LOGICAL_SIZE);
@@ -2808,8 +2863,8 @@ rtl8822bu_scan_channel_start(void *context, uint64_t generation,
 	unsigned long enabled;
 	int error;
 
-	if (adapter == NULL || generation == 0U || step_index >= 11U ||
-	    channel == 0U || channel > 11U)
+	if (adapter == NULL || generation == 0U ||
+	    !rtl8822bu_scan_step_valid(adapter, step_index, channel))
 		return EINVAL;
 	if (clock_ticks() >= deadline)
 		return ETIMEDOUT;
@@ -2978,7 +3033,8 @@ rtl8822bu_connect_start(void *context, uint64_t generation,
 	int error;
 
 	if (adapter == NULL || generation == 0U || bss == NULL ||
-	    bss->channel == 0U || bss->channel > 11U ||
+	    !rtl8822b_board_active_channel_allowed(&adapter->board,
+	    bss->channel) ||
 	    !rtl8822bu_unicast_address(bss->bssid))
 		return EINVAL;
 	started = clock_ticks();
@@ -4824,22 +4880,13 @@ static const struct net_device_ops rtl8822bu_net_ops = {
 };
 
 static void
-rtl8822bu_scan_profile(struct wlan_scan_profile *profile)
+rtl8822bu_scan_profile(const struct rtl8822bu_board_info *board,
+	struct wlan_scan_profile *profile)
 {
-	unsigned channel;
-
 	memset(profile, 0, sizeof(*profile));
-	/* The initial table set and channel programming cover 2.4-GHz channels
-	 * 1--11.  The core permits its calibrated, worldwide-bounded legacy-rate
-	 * TXAGC profile; HT, VHT, and 5-GHz transmission remain disabled. */
-	profile->channel_count = 11U;
-	for (channel = 1U; channel <= profile->channel_count; channel++) {
-		profile->channels[channel - 1U].channel = channel;
-		profile->channels[channel - 1U].center_frequency_mhz =
-		    2407U + channel * 5U;
-		profile->channels[channel - 1U].flags =
-		    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED;
-	}
+	profile->channel_count = rtl8822bu_scan_channel_count(board);
+	memcpy(profile->channels, rtl8822bu_scan_channels,
+	    profile->channel_count * sizeof(profile->channels[0]));
 }
 
 static int
@@ -4880,7 +4927,7 @@ rtl8822bu_net_device_create(struct rtl8822bu_adapter *adapter)
 	enabled = spin_lock_irqsave(&adapter->lock);
 	adapter->net_live = 1U;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
-	rtl8822bu_scan_profile(&profile);
+	rtl8822bu_scan_profile(&adapter->board, &profile);
 	error = wlan_station_attach(device, &rtl8822bu_radio_ops, adapter,
 	    &profile, &station);
 	memset(&profile, 0, sizeof(profile));

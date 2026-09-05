@@ -198,9 +198,8 @@ int wlan_station_report_frame(struct wlan_station *station,
 	const struct wlan_radio_rx_frame *report);
 int wlan_station_report_tx_complete(struct wlan_station *station,
 	uint64_t generation, uint64_t cookie, int acknowledged, int error);
-/* Poll/thread-context recoverable transport/firmware loss.  It closes carrier
- * and retires the reported generation before arming bounded same-network
- * recovery; explicit interface teardown cancels that recovery. */
+/* Poll/thread-context transport/firmware loss.  It closes carrier and retires
+ * the reported generation.  A new connection requires a userspace request. */
 int wlan_station_report_link_loss(struct wlan_station *station,
 	uint64_t generation, int error);
 int wlan_station_transmit(struct wlan_station *station,

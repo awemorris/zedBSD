@@ -155,6 +155,7 @@ int socket_poll_common(struct socket *socket, short events, short *revents);
 unsigned socket_count_current(void);
 
 int packet_socket_init(void);
+int route_socket_init(void);
 int unix_socket_init(void);
 int unix_socket_pair_create(int type, int protocol,
 			    const struct zedbsd_peercred *creator,
@@ -200,5 +201,7 @@ int unix_socket_bound_path_matches(struct socket *socket,
 				   const struct path *path);
 void packet_socket_deliver(const struct packet_buf *packet,
 			   const uint8_t source[6], uint8_t packet_type);
+void route_socket_notify(unsigned ifindex, uint64_t device_generation,
+			 unsigned device_flags, unsigned transition);
 
 #endif

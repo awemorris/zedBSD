@@ -14,7 +14,8 @@ socket_file_read(struct file *file, void *buffer, size_t length)
 
 	if (socket == NULL)
 		return -EBADF;
-	if ((socket->type != SOCK_STREAM && socket->type != SOCK_DGRAM) ||
+	if ((socket->type != SOCK_STREAM && socket->type != SOCK_DGRAM &&
+	    socket->type != SOCK_RAW) ||
 	    socket->ops == NULL ||
 	    socket->ops->recvfrom == NULL)
 		return -EOPNOTSUPP;

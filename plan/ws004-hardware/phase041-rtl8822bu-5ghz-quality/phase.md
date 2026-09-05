@@ -1,6 +1,6 @@
 # WS004 Phase 041: RTL8822BU 5-GHz useful normal path
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 WSID: `ws004`
 
@@ -8,11 +8,14 @@ Phase ID: `p041`
 
 Combined ID: `ws004-p041`
 
-Status: planned; Queue-ready after q069; not queued
+Status: planned; explicitly reopened by the user after q070; Queue-ready; not
+queued
 
 Parent: [WS004 hardware](../ws.md)
 
 Tests: [WS004 test index](../tests/README.md)
+
+Primary test case: `HW-T41`
 
 ## Objective
 
@@ -40,22 +43,29 @@ commonization remain separate work.
 - `ws004-p028`: current 2.4-GHz radio and scan implementation;
 - `ws004-p029`: existing WPA2/CCMP and L2 normal path;
 - `ws004-p030`: existing automatic lifecycle and failure containment;
-- `ws005-p004` and `ws005-p007`: primitive `/sbin/wifi` and higher-level
-  network orchestration, used only after driver-level authorization works.
+- `ws005-p004`: the completed primitive `/sbin/wifi` path used for the first
+  driver-level authorization checkpoint.  The later `ws005-p007` orchestration
+  consumes this Phase; it is not a dependency and must not create a cycle.
 
 ## Frozen scope
 
 - Keep USB binding exact to the already accepted `2357:012e` descriptor.
 - Replace the hard-coded channel-1--11 assumption with a checked table-driven
-  2.4/5-GHz station scan contract.  Channel number, center frequency, band,
-  RF/BB programming, calibration, TX-power selection, and rollback must remain
-  internally consistent.
-- Derive the permitted active/passive behavior from retained device/regulatory
-  information.  Do not transmit on a channel whose permission cannot be
-  established.  DFS operation and a general regulatory-policy UAPI are not
-  prerequisites for the first useful non-DFS 5-GHz path.
+  station profile containing the existing 2.4-GHz channels and only Japan
+  non-DFS W52 channels 36, 40, 44, and 48 in the first implementation.
+  Channel number, center frequency, band, RF/BB programming, calibration,
+  TX-power selection, and rollback must remain internally consistent.
+- Permit active operation on W52 only when the retained board/channel-plan
+  facts establish the Japan policy.  Missing, malformed, or contradictory
+  policy fails closed rather than guessing a regulatory domain.  DFS, W53,
+  W56, channels 149 and above, passive-scan policy, and a general regulatory
+  UAPI are outside this Phase.
 - Preserve the working 2.4-GHz path.  A 5-GHz addition must not silently map a
   channel through the 2.4-GHz RF or TX-power tables.
+- Extend the checked RTL8822B board record with the 5-GHz EFUSE power fields
+  actually consumed by the W52 path.  Import the required legacy-OFDM
+  by-rate/absolute-limit data into the existing BSD-3-Clause table boundary;
+  do not reuse 2.4-GHz power values or mix their license/provenance records.
 - Keep credentials out of logs and planning.  Preserve the current common
   station, generation, cancellation, controlled-port, and secret-erasure
   contracts.
@@ -64,38 +74,47 @@ commonization remain separate work.
 
 ## Implementation sequence
 
-1. Audit the imported RTL8822B RF/BB/channel and TX-power tables against the
-   current `channel <= 11` guards and identify every band-dependent register,
-   calibration, and rollback field before relaxing a guard.
-2. Add a bounded channel descriptor table and focused production-source tests
-   for valid non-DFS 5-GHz selection, invalid/forbidden channels, frequency
-   mapping, power selection, rollback, cancellation, and preserved 2.4-GHz
-   behavior.
-3. Enable the minimum safe 5-GHz scan path, retaining finite per-channel and
+1. Extend the strict EFUSE/board parser with the RTL8822B 5-GHz BW40 base and
+   signed legacy-OFDM difference fields, validating every consumed power value
+   before the radio can expose W52.
+2. Import the mechanically reduced 5-GHz legacy-OFDM by-rate and absolute
+   power-limit data with its existing BSD-3-Clause provenance, then add focused
+   tests for exact W52 power selection and rejection of unrepresented bands.
+3. Make the 20-MHz RF/BB/CCA/RFE channel transaction band-aware, including
+   CCK disablement, sub-band selection, RF18/RF-BE values, the W52 CCA tuple,
+   RFE-specific front-end values, TXAGC calculation, and journal rollback.
+4. Replace the USB driver's scan/connect channel-1--11 guards with membership
+   in the 1--11 plus 36/40/44/48 profile.  Preserve finite per-channel and
    whole-scan deadlines and existing snapshot-generation semantics.
-4. Use exact-device QEMU USB passthrough for one developmental normal-path
+5. Use exact-device QEMU USB passthrough for one developmental normal-path
    checkpoint.  First require a redacted 5-GHz BSS row, then exercise direct
    WPA2/CCMP authorization and useful IP traffic.
-5. Only after the normal path works, add the directly adjacent malformed,
+6. Only after the normal path works, add the directly adjacent malformed,
    timeout, cancellation, detach, and radio-rollback cases exposed by the new
    band.  Do not expand this into unrelated exhaustive cleanup.
 
 ## Verification
 
-- Focused ordinary and sanitizer tests for channel/frequency/power/calibration
-  selection and rollback.
+- Focused ordinary and sanitizer tests for an exact channel-44 RF/BB/CCA/RFE/
+  TXAGC transaction, invalid/DFS rejection, rollback/fail-close, and a 2.4-GHz
+  round trip.
+- USB-driver tests for the exact fifteen-channel profile, the final channel-48
+  scan step, channel-44 connect, and preserved channel-1 behavior.
 - Existing RTL scan, WPA2/CCMP, L2, lifecycle, USB/xHCI, and 2.4-GHz regressions.
 - Configured amd64 and i386 builds with `make -j16`; never aggregate
   `make check`.
 - One disposable amd64 OVMF/xHCI USB-root control.
-- One exact `2357:012e` passthrough run on the authorized host.  Retain only
-  redacted scan/security/state/traffic evidence and remove credential-bearing
-  raw material.
+- One exact `2357:012e` passthrough run on `10.0.10.25`, using a separate guest
+  xHCI controller while leaving the host RTL8156 SSH route untouched.  Require
+  the controlled channel-44/5220-MHz row, direct authorization, DHCP, selected
+  LAN-peer ping, bounded nonempty HTTP fetch, disconnect, and down.  Retain
+  only redacted evidence and remove credential-bearing raw material.
 
 ## Completion conditions
 
-- A fresh scan on the exact adapter publishes the controlled non-DFS 5-GHz BSS
-  with correct channel/frequency/security metadata.
+- A fresh scan on the exact adapter publishes the controlled W52 BSS with
+  correct channel/frequency/security metadata, while an invalid regulatory
+  record exposes no 5-GHz transmit channel.
 - Direct `/sbin/wifi` connection reaches authenticated, associated, keyed, and
   authorized state, followed by DHCP, selected LAN-peer ping, and a bounded
   nonempty HTTP fetch.

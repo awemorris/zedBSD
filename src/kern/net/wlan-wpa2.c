@@ -124,10 +124,9 @@ next_key_generation(struct wlan_wpa2_engine *engine, uint64_t *result)
 }
 
 static void
-erase_secrets(struct wlan_wpa2_engine *engine, int preserve_pmk)
+erase_secrets(struct wlan_wpa2_engine *engine)
 {
-	if (!preserve_pmk)
-		wlan_crypto_erase(engine->pmk, sizeof(engine->pmk));
+	wlan_crypto_erase(engine->pmk, sizeof(engine->pmk));
 	wlan_crypto_erase(engine->ptk, sizeof(engine->ptk));
 	wlan_crypto_erase(engine->anonce, sizeof(engine->anonce));
 	wlan_crypto_erase(engine->snonce, sizeof(engine->snonce));
@@ -169,10 +168,30 @@ erase_handshake_secrets(struct wlan_wpa2_engine *engine)
 }
 
 static int
-cleanup(struct wlan_wpa2_engine *engine, int preserve_pmk)
+cleanup(struct wlan_wpa2_engine *engine)
 {
 	int error;
 
+	/* Inverse callbacks identify hardware state by generation/slot metadata;
+	 * none consumes the key bytes.  Scrub all software secret material before
+	 * crossing a checked barrier so link loss cannot preserve a PMK or nonce
+	 * merely because hardware cleanup must be retried. */
+	wlan_crypto_erase(engine->pmk, sizeof(engine->pmk));
+	wlan_crypto_erase(engine->ptk, sizeof(engine->ptk));
+	wlan_crypto_erase(engine->anonce, sizeof(engine->anonce));
+	wlan_crypto_erase(engine->snonce, sizeof(engine->snonce));
+	wlan_crypto_erase(engine->gtk, sizeof(engine->gtk));
+	wlan_crypto_erase(engine->pending_gtk, sizeof(engine->pending_gtk));
+	wlan_crypto_erase(engine->message_3_digest,
+	    sizeof(engine->message_3_digest));
+	wlan_crypto_erase(engine->group_message_digest,
+	    sizeof(engine->group_message_digest));
+	wlan_crypto_erase(engine->tx_frame, sizeof(engine->tx_frame));
+	engine->message_1_replay_counter = 0U;
+	engine->message_3_replay_counter = 0U;
+	engine->group_replay_counter = 0U;
+	engine->group_receive_packet_number = 0U;
+	engine->pending_group_receive_packet_number = 0U;
 	engine->tx_cookie_active = 0U;
 	engine->step_deadline_ticks = 0U;
 	if (engine->authorized) {
@@ -221,7 +240,7 @@ cleanup(struct wlan_wpa2_engine *engine, int preserve_pmk)
 	}
 	/* No installed hardware key can now reference this material.  Erase it
 	 * even when a later association/radio barrier needs a checked retry. */
-	erase_secrets(engine, preserve_pmk);
+	erase_secrets(engine);
 	engine->key_generation = 0U;
 	engine->group_key_generation = 0U;
 	engine->pending_pairwise_key_generation = 0U;
@@ -251,14 +270,12 @@ cleanup(struct wlan_wpa2_engine *engine, int preserve_pmk)
 	engine->old_pairwise_retired = 0U;
 	engine->pending_pairwise_programmed = 0U;
 	engine->pending_group_programmed = 0U;
-	if (!preserve_pmk) {
-		engine->reconnectable = 0U;
-		engine->next_key_generation = 0U;
-		engine->key_generation = 0U;
-		engine->group_key_generation = 0U;
-		engine->pending_group_key_generation = 0U;
-		engine->pending_pairwise_key_generation = 0U;
-	}
+	engine->connected_lifetime = 0U;
+	engine->next_key_generation = 0U;
+	engine->key_generation = 0U;
+	engine->group_key_generation = 0U;
+	engine->pending_group_key_generation = 0U;
+	engine->pending_pairwise_key_generation = 0U;
 	return 0;
 }
 
@@ -267,7 +284,7 @@ fail(struct wlan_wpa2_engine *engine, int error)
 {
 	if (error == 0)
 		error = EIO;
-	(void)cleanup(engine, engine->reconnectable != 0U);
+	(void)cleanup(engine);
 	engine->last_error = error;
 	engine->state = WLAN_WPA2_STATE_FAILED;
 	return error;
@@ -750,7 +767,7 @@ pairwise_rekey_begin(struct wlan_wpa2_engine *engine,
 
 	if (engine->group_replay_counter > previous_replay)
 		previous_replay = engine->group_replay_counter;
-	if (!engine->reconnectable || !engine->authorized ||
+	if (!engine->connected_lifetime || !engine->authorized ||
 	    !engine->pairwise_installed || !engine->group_installed ||
 	    key->replay_counter <= previous_replay)
 		return fail(engine, EACCES);
@@ -1114,7 +1131,7 @@ wlan_wpa2_engine_start(struct wlan_wpa2_engine *engine,
 	    engine->state != WLAN_WPA2_STATE_FAILED)
 		return EBUSY;
 	if (engine->state == WLAN_WPA2_STATE_FAILED) {
-		error = cleanup(engine, 0);
+		error = cleanup(engine);
 		if (error != 0) {
 			engine->last_error = error;
 			return error;
@@ -1130,7 +1147,7 @@ wlan_wpa2_engine_start(struct wlan_wpa2_engine *engine,
 	engine->pending_group_key_generation = 0U;
 	engine->next_sequence = profile->initial_sequence;
 	engine->last_error = 0;
-	engine->reconnectable = 0U;
+	engine->connected_lifetime = 0U;
 	engine->pairwise_rekey = 0U;
 	engine->pending_pairwise_programmed = 0U;
 	engine->pending_group_programmed = 0U;
@@ -1446,7 +1463,7 @@ pairwise_rekey_authorize(struct wlan_wpa2_engine *engine)
 	if (error != 0)
 		return fail(engine, error);
 	engine->state = WLAN_WPA2_STATE_AUTHORIZED;
-	engine->reconnectable = 1U;
+	engine->connected_lifetime = 1U;
 	engine->pairwise_rekey = 0U;
 	engine->step_deadline_ticks = 0U;
 	return 0;
@@ -1546,7 +1563,6 @@ wlan_wpa2_engine_timer(struct wlan_wpa2_engine *engine,
 		return EINVAL;
 	if (engine->state == WLAN_WPA2_STATE_IDLE ||
 	    engine->state == WLAN_WPA2_STATE_FAILED ||
-	    engine->state == WLAN_WPA2_STATE_RECONNECT_WAIT ||
 	    engine->state == WLAN_WPA2_STATE_AUTHORIZED)
 		return 0;
 	if (!active_time_valid(engine, now_ticks))
@@ -1596,80 +1612,13 @@ wlan_wpa2_engine_timer(struct wlan_wpa2_engine *engine,
 }
 
 int
-wlan_wpa2_engine_link_lost(struct wlan_wpa2_engine *engine, int error)
-{
-	int cleanup_error;
-
-	if (engine == NULL || !ops_valid(engine->ops) || error < 0)
-		return EINVAL;
-	if (!engine->reconnectable)
-		return ENOTCONN;
-	cleanup_error = cleanup(engine, 1);
-	engine->last_error = cleanup_error != 0 ? cleanup_error :
-	    (error != 0 ? error : ENETDOWN);
-	engine->state = cleanup_error == 0 ?
-	    WLAN_WPA2_STATE_RECONNECT_WAIT : WLAN_WPA2_STATE_FAILED;
-	return cleanup_error;
-}
-
-int
-wlan_wpa2_engine_reconnect(struct wlan_wpa2_engine *engine,
-	uint64_t generation, uint64_t total_deadline_ticks,
-	uint64_t now_ticks)
-{
-	uint64_t key_generation;
-	int error;
-
-	if (engine == NULL || !ops_valid(engine->ops) || generation == 0U ||
-	    !engine->reconnectable || total_deadline_ticks <= now_ticks ||
-	    (engine->state != WLAN_WPA2_STATE_RECONNECT_WAIT &&
-	    engine->state != WLAN_WPA2_STATE_FAILED))
-		return EINVAL;
-	error = cleanup(engine, 1);
-	if (error != 0) {
-		engine->last_error = error;
-		engine->state = WLAN_WPA2_STATE_FAILED;
-		return error;
-	}
-	error = next_key_generation(engine, &key_generation);
-	if (error != 0)
-		return fail(engine, error);
-	engine->generation = generation;
-	engine->key_generation = key_generation;
-	engine->group_key_generation = 0U;
-	engine->pending_group_key_generation = 0U;
-	engine->profile.total_deadline_ticks = total_deadline_ticks;
-	engine->last_error = 0;
-	engine->state = WLAN_WPA2_STATE_IDLE;
-	engine->pairwise_rekey = 0U;
-	engine->pending_pairwise_programmed = 0U;
-	engine->pending_group_programmed = 0U;
-	engine->configured = 1U;
-	error = engine->ops->radio_start(engine->callback_context, generation,
-	    engine->profile.bssid, engine->profile.channel,
-	    engine->profile.total_deadline_ticks, &now_ticks);
-	if (error != 0)
-		return fail(engine, error);
-	if (!active_time_valid(engine, now_ticks))
-		return fail(engine, ETIMEDOUT);
-	return build_authentication(engine, now_ticks);
-}
-
-int
-wlan_wpa2_engine_can_reconnect(const struct wlan_wpa2_engine *engine)
-{
-	return engine != NULL && engine->reconnectable != 0U &&
-	    !bytes_zero(engine->pmk, sizeof(engine->pmk));
-}
-
-int
 wlan_wpa2_engine_stop(struct wlan_wpa2_engine *engine)
 {
 	int error;
 
 	if (engine == NULL || !ops_valid(engine->ops))
 		return EINVAL;
-	error = cleanup(engine, 0);
+	error = cleanup(engine);
 	if (error != 0) {
 		engine->state = WLAN_WPA2_STATE_FAILED;
 		engine->last_error = error;
@@ -1700,7 +1649,6 @@ wlan_wpa2_engine_next_deadline(const struct wlan_wpa2_engine *engine)
 {
 	if (engine == NULL || engine->state == WLAN_WPA2_STATE_IDLE ||
 	    engine->state == WLAN_WPA2_STATE_FAILED ||
-	    engine->state == WLAN_WPA2_STATE_RECONNECT_WAIT ||
 	    engine->state == WLAN_WPA2_STATE_AUTHORIZED)
 		return 0U;
 	return engine->step_deadline_ticks;

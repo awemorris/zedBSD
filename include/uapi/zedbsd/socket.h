@@ -25,11 +25,13 @@ typedef uint32_t socklen_t;
 #define AF_UNIX	1
 #define AF_INET	2
 #define AF_PACKET	17
+#define AF_ROUTE	18
 
 #define PF_UNSPEC	AF_UNSPEC
 #define PF_UNIX	AF_UNIX
 #define PF_INET	AF_INET
 #define PF_PACKET	AF_PACKET
+#define PF_ROUTE	AF_ROUTE
 
 #define SOCK_STREAM	1
 #define SOCK_DGRAM	2

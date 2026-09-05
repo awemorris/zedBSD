@@ -20,6 +20,7 @@
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <net/if.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,16 +52,28 @@ static void configuration_default(struct netconf *configuration);
 static const char *console_prompt(const struct console *console);
 static int confirm_discard(void);
 static int split_words(char *line, char **words, int capacity);
+static void release_console_line(char *, size_t);
 static void console_help(enum console_mode mode);
 static int console_operational(struct console *console, int count, char **words);
 static int console_show(struct console *console, int count, char **words);
 static int backend(const char *operation, const char *operands, int display);
+static int backend_opcode(const char *operation, uint32_t *opcode);
+static int backend_payload(uint32_t opcode, const char *operands,
+	unsigned char *payload, size_t capacity, size_t *length);
+static int backend_exchange(uint32_t opcode, const void *payload,
+	size_t payload_length, int display, unsigned response_seconds,
+	int report_errors);
+static int backend_response(uint32_t opcode, uint32_t request_id,
+	const void *payload, size_t payload_length, int display,
+	int report_errors);
 static int write_all(int descriptor, const char *buffer, size_t length);
 static int interface_name_valid(const char *name);
 static int show_configuration(const struct netconf *configuration);
 static int dispatch(int argc, char **argv);
 static int command_help(void);
 static int wifi_set_key_command(int argc, char **argv);
+static int wifi_command(int argc, char **argv);
+static int wifi_backend(uint32_t, const unsigned char *, size_t, int);
 static int boot(void);
 static int apply_candidate(const struct netconf *configuration);
 static int candidate_supported(const struct netconf *configuration, char *error, size_t capacity);
@@ -98,10 +111,13 @@ interactive(
 	void)
 {
 	char *line;
+	char *history_line;
 	char *words[NET_CONSOLE_WORDS];
 	int count;
+	int secret_line;
 	struct console console;
 	char error[160];
+	size_t line_length;
 
 	memset(&console, 0, sizeof(console));
 
@@ -132,28 +148,42 @@ interactive(
 				continue;
 			break;
 		}
+		line_length = strlen(line);
+		history_line = strdup(line);
+		if (history_line == NULL) {
+			release_console_line(line, line_length);
+			fprintf(stderr, "net: cannot retain command line\n");
+			continue;
+		}
 		count = split_words(line, words, NET_CONSOLE_WORDS);
 
 		/* Checks the remaining item count. */
 		if (count < 0) {
-			fprintf(stderr, "net: too many words\n");
-			free(line);
+			fprintf(stderr, count == -1 ? "net: too many words\n" :
+			    "net: unmatched quote or escape\n");
+			release_console_line(history_line, line_length);
+			release_console_line(line, line_length);
 			continue;
 		}
 
 		/* Checks the remaining item count. */
 		if (count == 0) {
-			free(line);
+			release_console_line(history_line, line_length);
+			release_console_line(line, line_length);
 			continue;
 		}
-		add_history(line);
+		secret_line = count >= 2 && strcmp(words[0], "wifi") == 0 &&
+		    strcmp(words[1], "set-key") == 0;
+		if (!secret_line)
+			add_history(history_line);
+		release_console_line(history_line, line_length);
 
 		/* Selects the matching value. */
 		if ((strcmp(words[0], "help") == 0 ||
 		     strcmp(words[0], "?") == 0) &&
-		    count == 1) {
+			    count == 1) {
 			console_help(console.mode);
-			free(line);
+			release_console_line(line, line_length);
 			continue;
 		}
 
@@ -162,7 +192,7 @@ interactive(
 		    console.mode != CONSOLE_OPERATIONAL) {
 			console.mode = CONSOLE_OPERATIONAL;
 			console.interface = NULL;
-			free(line);
+			release_console_line(line, line_length);
 			continue;
 		}
 
@@ -175,10 +205,10 @@ interactive(
 			} else if (console.mode == CONSOLE_CONFIGURATION)
 				console.mode = CONSOLE_OPERATIONAL;
 			else if (!console.dirty || confirm_discard()) {
-				free(line);
+				release_console_line(line, line_length);
 				break;
 			}
-			free(line);
+			release_console_line(line, line_length);
 			continue;
 		}
 
@@ -189,7 +219,7 @@ interactive(
 			(void)console_configuration(&console, count, words);
 		else
 			(void)console_interface(&console, count, words);
-		free(line);
+		release_console_line(line, line_length);
 	}
 	clear_history();
 
@@ -253,36 +283,81 @@ split_words(
 	int capacity)
 {
 	int count;
-	char *cursor;
+	int quote;
+	char *input;
+	char *output;
 
-	/* Continue while the operation condition remains true. */
+	/* Parses shell-like quoting into the same bounded mutable buffer. */
 	count = 0;
-	cursor = line;
-	while (*cursor != '\0') {
-		/* Continue while the operation condition remains true. */
-		while (isspace((unsigned char)*cursor))
-			cursor++;
+	input = line;
+	output = line;
+	while (*input != '\0') {
+		while (isspace((unsigned char)*input))
+			input++;
 
 		/* Checks the current cursor position. */
-		if (*cursor == '\0')
+		if (*input == '\0')
 			break;
 
 		/* Checks the remaining item count. */
 		if (count == capacity)
 			return -1;
 
-		/* Continue while the operation condition remains true. */
-		words[count++] = cursor;
-		while (*cursor != '\0' && !isspace((unsigned char)*cursor))
-			cursor++;
-
-		/* Checks the current cursor position. */
-		if (*cursor != '\0')
-			*cursor++ = '\0';
+		/* Copies one possibly quoted or escaped operand. */
+		words[count++] = output;
+		quote = 0;
+		while (*input != '\0') {
+			if (quote != 0) {
+				if (*input == quote) {
+					quote = 0;
+					input++;
+					continue;
+				}
+				if (quote == '"' && *input == '\\') {
+					input++;
+					if (*input == '\0')
+						return -2;
+				}
+				*output++ = *input++;
+				continue;
+			}
+			if (*input == '\'' || *input == '"') {
+				quote = *input++;
+				continue;
+			}
+			if (*input == '\\') {
+				input++;
+				if (*input == '\0')
+					return -2;
+				*output++ = *input++;
+				continue;
+			}
+			if (isspace((unsigned char)*input))
+				break;
+			*output++ = *input++;
+		}
+		if (quote != 0)
+			return -2;
+		if (*input != '\0')
+			input++;
+		*output++ = '\0';
 	}
 
 	/* Returns the computed result. */
 	return count;
+}
+
+/* Clears and releases one readline-owned command buffer. */
+static void
+release_console_line(
+	char *line,
+	size_t length)
+{
+	/* Prevents a credential-bearing command from surviving in freed storage. */
+	if (line == NULL)
+		return;
+	explicit_bzero(line, length + 1U);
+	free(line);
 }
 
 /* Supports the console help operation. */
@@ -296,6 +371,9 @@ console_help(
 		     "  show interfaces|interface "
 		     "NAME|running-config|startup-config|candidate\n"
 		     "  up NAME | down NAME | dhcp NAME [timeout SECONDS]\n"
+		     "  wifi set-key SSID PASSPHRASE [auto]\n"
+		     "  wifi enable | wifi disable | wifi list\n"
+		     "  wifi connect SSID | wifi disconnect\n"
 		     "  configure\n"
 		     "  help | ? | exit");
 	} else if (mode == CONSOLE_CONFIGURATION) {
@@ -324,6 +402,8 @@ console_operational(
 {
 	int function_result;
 	char timeout[32], *arguments[5] = {"net", NULL, NULL, NULL, NULL};
+	char *wifi_arguments[NET_CONSOLE_WORDS + 1];
+	int index;
 
 	/* Selects the matching value. */
 	if (strcmp(words[0], "show") == 0) {
@@ -340,6 +420,17 @@ console_operational(
 
 		/* Reports successful completion. */
 		return 0;
+	}
+
+	/* Reuses the public Wi-Fi grammar from the interactive console. */
+	if (strcmp(words[0], "wifi") == 0) {
+		wifi_arguments[0] = "net";
+		for (index = 0; index < count; index++)
+			wifi_arguments[index + 1] = words[index];
+		function_result = dispatch(count + 1, wifi_arguments);
+
+		/* Returns the public command result. */
+		return function_result;
 	}
 
 	/* Checks the remaining item count. */
@@ -452,90 +543,323 @@ backend(
 	const char *operands,
 	int display)
 {
-	const char *payload;
-	struct sockaddr_un address;
-	char request[NETWORKD_REQUEST_MAX], response[NETWORKD_RESPONSE_MAX];
-	size_t used;
-	int descriptor;
-	ssize_t count;
+	unsigned char payload[NETWORKD_REQUEST_MAX];
+	size_t payload_length;
+	uint32_t opcode;
+	unsigned response_seconds;
+	unsigned dhcp_seconds;
+	const char *timeout_text;
 
-	used = 0;
-	descriptor = -1;
-
-	descriptor = socket(AF_UNIX, SOCK_STREAM, 0);
-
-	/* Checks the file descriptor. */
-	if (descriptor < 0)
-		goto unavailable;
-	memset(&address, 0, sizeof(address));
-	address.sun_family = AF_UNIX;
-	strcpy(address.sun_path, NETWORKD_SOCKET);
-
-	/* Handles a failed connect operation. */
-	if (connect(descriptor, (struct sockaddr *)&address, sizeof(address)) !=
-	    0)
-		goto unavailable;
-
-	/* Handles a failed snprintf operation. */
-	if (snprintf(request, sizeof(request), "%s %s%s%s\n",
-		     NETWORKD_PROTOCOL_VERSION, operation,
-		     operands != NULL && *operands != '\0' ? " " : "",
-		     operands != NULL ? operands : "") >=
-		(int)sizeof(request) ||
-	    write_all(descriptor, request, strlen(request)) != 0)
-		goto unavailable;
-	(void)shutdown(descriptor, SHUT_WR);
-
-	/* Process input until it is exhausted. */
-	while (used + 1U < sizeof(response) &&
-	       (count = read(descriptor, response + used,
-			     sizeof(response) - used - 1U)) != 0) {
-		/* Handles the reported system error. */
-		if (count < 0 && errno == EINTR)
-			continue;
-
-		/* Checks the remaining item count. */
-		if (count < 0)
-			goto unavailable;
-		used += (size_t)count;
+	/* Converts the internal operation into one typed request. */
+	if (backend_opcode(operation, &opcode) != 0 ||
+	    backend_payload(opcode, operands, payload, sizeof(payload),
+	    &payload_length) != 0) {
+		fprintf(stderr, "net: invalid backend request\n");
+		return 1;
 	}
-	close(descriptor);
-	descriptor = -1;
-	response[used] = '\0';
 
-	/* Selects the matching prefix. */
-	if (strncmp(response, NETWORKD_PROTOCOL_VERSION " OK", 5) == 0 &&
-	    (response[5] == '\n' || response[5] == ' ')) {
-		payload = response + 6;
+	/* Selects a response deadline which contains the requested operation. */
+	response_seconds = 15U;
+	if (opcode == NETWORKD_OP_DHCP && operands != NULL) {
+		timeout_text = strrchr(operands, ' ');
+		if (timeout_text != NULL &&
+		    decimal_timeout(timeout_text + 1, &dhcp_seconds) == 0 &&
+		    dhcp_seconds <= UINT_MAX - 5U)
+			response_seconds = dhcp_seconds + 5U;
+	}
 
-		/* Handles a failed write all operation. */
-		if (display && *payload != '\0' &&
-		    write_all(STDOUT_FILENO, payload, strlen(payload)) != 0)
+	/* Exchanges the typed request with networkd. */
+	return backend_exchange(opcode, payload, payload_length, display,
+	    response_seconds, 1);
+}
 
-			/* Reports operation failure. */
-			return 1;
+/* Maps one internal operation name to its stable wire opcode. */
+static int
+backend_opcode(
+	const char *operation,
+	uint32_t *opcode)
+{
+	struct operation_map {
+		const char *name;
+		uint32_t opcode;
+	};
+	static const struct operation_map operations[] = {
+		{ "SHOW", NETWORKD_OP_SHOW },
+		{ "UP", NETWORKD_OP_UP },
+		{ "DOWN", NETWORKD_OP_DOWN },
+		{ "DHCP", NETWORKD_OP_DHCP },
+		{ "STATIC", NETWORKD_OP_STATIC },
+		{ "DEFAULTROUTE", NETWORKD_OP_DEFAULT_ROUTE },
+		{ "DNS", NETWORKD_OP_DNS },
+		{ "RELOAD", NETWORKD_OP_RELOAD }
+	};
+	size_t index;
 
-		/* Reports successful completion. */
+	/* Finds the one exact operation spelling. */
+	if (operation == NULL || opcode == NULL)
+		return -1;
+	for (index = 0U; index < sizeof(operations) / sizeof(operations[0]);
+	    index++) {
+		if (strcmp(operation, operations[index].name) != 0)
+			continue;
+		*opcode = operations[index].opcode;
 		return 0;
 	}
 
-	/* Selects the matching prefix. */
-	if (strncmp(response, NETWORKD_PROTOCOL_VERSION " ERR ", 7) == 0)
-		fprintf(stderr, "net: %s", response + 7);
-	else
-		fprintf(stderr, "net: malformed networkd response\n");
+	/* Reports an unknown operation. */
+	return -1;
+}
 
-	/* Reports operation failure. */
-	return 1;
+/* Converts one existing command operand set into typed fields. */
+static int
+backend_payload(
+	uint32_t opcode,
+	const char *operands,
+	unsigned char *payload,
+	size_t capacity,
+	size_t *length)
+{
+	struct networkd_field_writer writer;
+	char copy[NETWORKD_REQUEST_MAX];
+	char *item[16];
+	char *token;
+	unsigned count;
+	unsigned index;
+	uint32_t timeout;
+	uint16_t field;
+
+	/* Splits only the legacy internal wired operands. */
+	if (payload == NULL || length == NULL ||
+	    (operands != NULL && strlen(operands) >= sizeof(copy)))
+		return -1;
+	copy[0] = '\0';
+	if (operands != NULL)
+		strcpy(copy, operands);
+	count = 0U;
+	for (token = strtok(copy, " "); token != NULL;
+	    token = strtok(NULL, " ")) {
+		if (count == sizeof(item) / sizeof(item[0]))
+			return -1;
+		item[count++] = token;
+	}
+
+	/* Validates the exact field count for the selected opcode. */
+	if ((opcode == NETWORKD_OP_SHOW && count > 1U) ||
+	    ((opcode == NETWORKD_OP_UP || opcode == NETWORKD_OP_DOWN) &&
+	    count != 1U) ||
+	    (opcode == NETWORKD_OP_DHCP && count != 2U) ||
+	    (opcode == NETWORKD_OP_STATIC && count != 5U) ||
+	    (opcode == NETWORKD_OP_DEFAULT_ROUTE && count != 1U) ||
+	    (opcode == NETWORKD_OP_DNS && (count == 0U || count > NET_DNS_LIMIT)) ||
+	    (opcode == NETWORKD_OP_RELOAD && count != 0U))
+		return -1;
+
+	/* Encodes each operation through explicit field boundaries. */
+	networkd_field_writer_init(&writer, payload, capacity);
+	if (opcode == NETWORKD_OP_SHOW) {
+		if (count == 1U && networkd_field_write(&writer,
+		    NETWORKD_FIELD_INTERFACE, item[0], strlen(item[0])) != 0)
+			return -1;
+	} else if (opcode == NETWORKD_OP_UP || opcode == NETWORKD_OP_DOWN) {
+		if (networkd_field_write(&writer, NETWORKD_FIELD_INTERFACE,
+		    item[0], strlen(item[0])) != 0)
+			return -1;
+	} else if (opcode == NETWORKD_OP_DHCP) {
+		if (decimal_timeout(item[1], &timeout) != 0 ||
+		    networkd_field_write(&writer, NETWORKD_FIELD_INTERFACE,
+		    item[0], strlen(item[0])) != 0 ||
+		    networkd_field_write_u32(&writer, NETWORKD_FIELD_TIMEOUT,
+		    timeout) != 0)
+			return -1;
+	} else if (opcode == NETWORKD_OP_STATIC) {
+		if (strcmp(item[1], "ipv4") != 0 ||
+		    strcmp(item[3], "netmask") != 0 ||
+		    networkd_field_write(&writer, NETWORKD_FIELD_INTERFACE,
+		    item[0], strlen(item[0])) != 0 ||
+		    networkd_field_write(&writer, NETWORKD_FIELD_ADDRESS,
+		    item[2], strlen(item[2])) != 0 ||
+		    networkd_field_write(&writer, NETWORKD_FIELD_NETMASK,
+		    item[4], strlen(item[4])) != 0)
+			return -1;
+	} else if (opcode == NETWORKD_OP_DEFAULT_ROUTE) {
+		if (networkd_field_write(&writer, NETWORKD_FIELD_GATEWAY,
+		    item[0], strlen(item[0])) != 0)
+			return -1;
+	} else if (opcode == NETWORKD_OP_DNS) {
+		field = NETWORKD_FIELD_DNS;
+		for (index = 0U; index < count; index++) {
+			if (networkd_field_write(&writer, field, item[index],
+			    strlen(item[index])) != 0)
+				return -1;
+		}
+	}
+	*length = writer.used;
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Exchanges one already encoded request and response. */
+static int
+backend_exchange(
+	uint32_t opcode,
+	const void *payload,
+	size_t payload_length,
+	int display,
+	unsigned response_seconds,
+	int report_errors)
+{
+	static uint32_t next_request_id = 1U;
+	struct networkd_protocol_header request;
+	struct networkd_protocol_header response;
+	struct sockaddr_un address;
+	struct timeval receive_timeout;
+	struct timeval send_timeout;
+	unsigned char response_payload[NETWORKD_RESPONSE_MAX];
+	uint32_t request_id;
+	int descriptor;
+	int saved;
+
+	/* Allocates one nonzero request identity. */
+	request_id = next_request_id++;
+	if (next_request_id == 0U)
+		next_request_id = 1U;
+	request.request_id = request_id;
+	request.opcode = opcode;
+	request.payload_length = payload_length;
+	descriptor = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (descriptor < 0)
+		goto unavailable;
+
+	/* Bounds transport stalls independently of operation policy. */
+	send_timeout.tv_sec = 5;
+	send_timeout.tv_usec = 0;
+	receive_timeout.tv_sec = response_seconds;
+	receive_timeout.tv_usec = 0;
+	if (setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout,
+	    sizeof(receive_timeout)) != 0 ||
+	    setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &send_timeout,
+	    sizeof(send_timeout)) != 0)
+		goto unavailable;
+
+	/* Connects to the one privileged network control endpoint. */
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	strcpy(address.sun_path, NETWORKD_SOCKET);
+	if (connect(descriptor, (struct sockaddr *)&address, sizeof(address)) != 0)
+		goto unavailable;
+
+	/* Writes exactly one frame and closes the request direction. */
+	if (networkd_protocol_write_frame(descriptor, &request, payload) != 0 ||
+	    shutdown(descriptor, SHUT_WR) != 0)
+		goto unavailable;
+
+	/* Reads one bounded, correlated terminal response. */
+	if (networkd_protocol_read_frame(descriptor, &response,
+	    response_payload, sizeof(response_payload),
+	    NETWORKD_RESPONSE_MAX) != 0)
+		goto unavailable;
+	close(descriptor);
+	descriptor = -1;
+	if (response.request_id != request_id || response.opcode != opcode) {
+		/* Reports a correlation failure when diagnostics are requested. */
+		if (!report_errors)
+			return 1;
+		fprintf(stderr, "net: mismatched networkd response\n");
+		return 1;
+	}
+
+	/* Returns the validated typed response result. */
+	return backend_response(opcode, request_id, response_payload,
+	    response.payload_length, display, report_errors);
 
 unavailable:
-	fprintf(stderr, "net: networkd is unavailable: %s\n", strerror(errno));
-
-	/* Checks the file descriptor. */
+	saved = errno != 0 ? errno : EIO;
 	if (descriptor >= 0)
 		close(descriptor);
+	if (report_errors)
+		fprintf(stderr, "net: networkd is unavailable: %s\n",
+		    strerror(saved));
+	return 1;
+}
 
-	/* Reports operation failure. */
+/* Validates and presents one typed terminal response. */
+static int
+backend_response(
+	uint32_t opcode,
+	uint32_t request_id,
+	const void *payload,
+	size_t payload_length,
+	int display,
+	int report_errors)
+{
+	struct networkd_field_reader reader;
+	struct networkd_field field;
+	const unsigned char *output;
+	const unsigned char *stage;
+	size_t output_length;
+	size_t stage_length;
+	uint32_t status;
+	uint32_t error;
+	unsigned seen;
+	int result;
+
+	/* Keeps correlation values visible to fixture builds. */
+	(void)opcode;
+	(void)request_id;
+	status = NETWORKD_RESULT_ERROR;
+	error = EINVAL;
+	output = NULL;
+	output_length = 0U;
+	stage = NULL;
+	stage_length = 0U;
+	seen = 0U;
+	networkd_field_reader_init(&reader, payload, payload_length);
+
+	/* Decodes each permitted response field exactly once. */
+	while ((result = networkd_field_read(&reader, &field)) == 0) {
+		if (field.type == NETWORKD_FIELD_STATUS && (seen & 1U) == 0U &&
+		    networkd_field_read_u32(&field, &status) == 0)
+			seen |= 1U;
+		else if (field.type == NETWORKD_FIELD_ERROR && (seen & 2U) == 0U &&
+		    networkd_field_read_u32(&field, &error) == 0)
+			seen |= 2U;
+		else if (field.type == NETWORKD_FIELD_STAGE && (seen & 4U) == 0U) {
+			stage = field.value;
+			stage_length = field.length;
+			seen |= 4U;
+		} else if (field.type == NETWORKD_FIELD_OUTPUT &&
+		    (seen & 8U) == 0U) {
+			output = field.value;
+			output_length = field.length;
+			seen |= 8U;
+		} else {
+			result = -1;
+			break;
+		}
+	}
+	if (result < 0 || (seen & 3U) != 3U) {
+		if (report_errors)
+			fprintf(stderr, "net: malformed networkd response\n");
+		return 1;
+	}
+
+	/* Presents a successful optional payload without string assumptions. */
+	if (status == NETWORKD_RESULT_OK && error == 0U) {
+		if (display && output_length != 0U &&
+		    write_all(STDOUT_FILENO, (const char *)output,
+		    output_length) != 0)
+			return 1;
+		return 0;
+	}
+
+	/* Presents only bounded sanitized stage and error information. */
+	if (report_errors) {
+		fprintf(stderr, "net: %.*s%s%s (%lu)\n", (int)stage_length,
+		    stage != NULL ? (const char *)stage : "",
+		    stage_length != 0U ? ": " : "",
+		    strerror((int)error), (unsigned long)error);
+	}
 	return 1;
 }
 
@@ -647,6 +971,14 @@ dispatch(
 	if (argc >= 3 && strcmp(argv[1], "wifi") == 0 &&
 	    strcmp(argv[2], "set-key") == 0) {
 		function_result = wifi_set_key_command(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Dispatches the remaining public Wi-Fi command family. */
+	if (argc >= 3 && strcmp(argv[1], "wifi") == 0) {
+		function_result = wifi_command(argc, argv);
 
 		/* Returns the computed result. */
 		return function_result;
@@ -781,6 +1113,11 @@ command_help(
 	     "  net dns address...          replace resolver name servers\n"
 	     "  net wifi set-key SSID PASSPHRASE [auto]\n"
 	     "                              save a local WPA2 profile\n"
+	     "  net wifi enable             enable managed Wi-Fi\n"
+	     "  net wifi disable            disable managed Wi-Fi\n"
+	     "  net wifi list               show managed Wi-Fi state\n"
+	     "  net wifi connect SSID       connect a saved profile\n"
+	     "  net wifi disconnect         disconnect managed Wi-Fi\n"
 	     "  net boot                    apply boot network configuration");
 
 	/* Computes the function result. */
@@ -800,6 +1137,7 @@ wifi_set_key_command(
 	char error[WIFI_CONF_DIAGNOSTIC_MAX] = "";
 	size_t passphrase_length;
 	int automatic;
+	int notification_result;
 	int result;
 
 	/* A passphrase does not exist yet when the command is incomplete. */
@@ -834,9 +1172,107 @@ wifi_set_key_command(
 		    error[0] != '\0' ? error : strerror(errno));
 	}
 	wifi_conf_explicit_clear(error, sizeof(error));
+	if (result != 0)
+		return 1;
 
-	/* Returns the computed result. */
-	return result == 0 ? 0 : 1;
+	/* Notifies a running daemon without sending identity or credentials. */
+	notification_result = wifi_backend(NETWORKD_OP_WIFI_PROFILES_CHANGED,
+	    NULL, 0U, 0);
+	if (notification_result != 0)
+		fprintf(stderr,
+		    "net: warning: Wi-Fi profile saved; networkd notification failed\n");
+
+	/* The durable local update remains authoritative for command success. */
+	return 0;
+}
+
+/* Dispatches one public Wi-Fi orchestration request. */
+static int
+wifi_command(
+	int argc,
+	char **argv)
+{
+	const unsigned char *selected_ssid;
+	size_t selected_ssid_length;
+	uint32_t opcode;
+	int display;
+	int result;
+
+	/* Recognizes the exact global command grammar. */
+	selected_ssid = NULL;
+	selected_ssid_length = 0U;
+	display = 0;
+	opcode = 0U;
+	if (argc == 3 && strcmp(argv[2], "enable") == 0) {
+		opcode = NETWORKD_OP_WIFI_ENABLE;
+		display = 1;
+	} else if (argc == 3 && strcmp(argv[2], "disable") == 0) {
+		opcode = NETWORKD_OP_WIFI_DISABLE;
+	} else if (argc == 3 && strcmp(argv[2], "list") == 0) {
+		opcode = NETWORKD_OP_WIFI_LIST;
+		display = 1;
+	} else if (argc == 4 && strcmp(argv[2], "connect") == 0) {
+		opcode = NETWORKD_OP_WIFI_CONNECT;
+		selected_ssid = (const unsigned char *)argv[3];
+		selected_ssid_length = strlen(argv[3]);
+		display = 1;
+	} else if (argc == 3 && strcmp(argv[2], "disconnect") == 0) {
+		opcode = NETWORKD_OP_WIFI_DISCONNECT;
+	} else {
+		return usage();
+	}
+	if (selected_ssid != NULL && (selected_ssid_length == 0U ||
+	    selected_ssid_length > WIFI_CONF_SSID_MAX)) {
+		fprintf(stderr, "net: invalid Wi-Fi command operand\n");
+		return 1;
+	}
+
+	/* Sends only the optional bounded SSID to networkd. */
+	result = wifi_backend(opcode, selected_ssid, selected_ssid_length,
+	    display);
+
+	/* Returns the orchestration result. */
+	return result;
+}
+
+/* Builds one typed global Wi-Fi request. */
+static int
+wifi_backend(
+	uint32_t opcode,
+	const unsigned char *selected_ssid,
+	size_t selected_ssid_length,
+	int display)
+{
+	struct networkd_field_writer writer;
+	unsigned char payload[NETWORKD_REQUEST_MAX];
+	unsigned response_seconds;
+	int report_errors;
+	int result;
+
+	/* Encodes only the explicit-connect SSID, when one was supplied. */
+	networkd_field_writer_init(&writer, payload, sizeof(payload));
+	if (selected_ssid != NULL && networkd_field_write(&writer,
+	    NETWORKD_FIELD_SSID, selected_ssid, selected_ssid_length) != 0)
+		return 1;
+
+	/* Selects the bounded wait and diagnostic policy for this operation. */
+	response_seconds = 15U;
+	report_errors = 1;
+	if (opcode == NETWORKD_OP_WIFI_ENABLE ||
+	    opcode == NETWORKD_OP_WIFI_CONNECT)
+		response_seconds = 100U;
+	else if (opcode == NETWORKD_OP_WIFI_PROFILES_CHANGED) {
+		response_seconds = 5U;
+		report_errors = 0;
+	}
+
+	/* Exchanges the request; the payload never contains a credential. */
+	result = backend_exchange(opcode, payload, writer.used, display,
+	    response_seconds, report_errors);
+	networkd_protocol_clear(payload, sizeof(payload));
+
+	/* Returns the request result. */
+	return result;
 }
 
 /* Supports the boot operation. */
@@ -1138,6 +1574,8 @@ usage(
 		"       net defaultroute gateway\n"
 		"       net dns address...\n"
 		"       net wifi set-key SSID PASSPHRASE [auto]\n"
+		"       net wifi enable|disable|list|disconnect\n"
+		"       net wifi connect SSID\n"
 		"       net boot\n");
 
 	/* Reports operation failure. */

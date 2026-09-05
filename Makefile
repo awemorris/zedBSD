@@ -516,6 +516,7 @@ KERN_NET_SOURCES := \
 	src/kern/net/socket-file.c \
 	src/kern/net/unix-socket.c \
 	src/kern/net/packet-socket.c \
+	src/kern/net/route-socket.c \
 	src/kern/net/checksum.c \
 	src/kern/net/ethernet.c \
 	src/kern/net/route.c \

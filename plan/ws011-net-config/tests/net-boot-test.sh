@@ -22,10 +22,12 @@ cc -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -I. \
   -Iuserland/base/libedit -Wall -Wextra -Werror \
   -DNETWORKD_SOCKET="\"$socket_path\"" \
   userland/base/net/main.c userland/base/net/netconf.c \
+  userland/base/net/protocol.c \
   userland/base/net/wifi-conf.c userland/base/net/wifi-store.c \
   userland/base/libedit/readline.c -o "$binary"
 cc -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror \
-  plan/ws011-net-config/tests/networkd-fake.c -o "$server"
+  -I. plan/ws011-net-config/tests/networkd-fake.c \
+  userland/base/net/protocol.c -o "$server"
 
 run_case()
 {
@@ -49,6 +51,7 @@ run_case()
     -DNETWORKD_SOCKET="\"$socket_path\"" \
     -DNETCONF_PATH="\"$NETCONF_TEST_PATH\"" \
     userland/base/net/main.c userland/base/net/netconf.c \
+    userland/base/net/protocol.c \
     userland/base/net/wifi-conf.c userland/base/net/wifi-store.c \
     userland/base/libedit/readline.c -o "$binary"
   "$binary" boot

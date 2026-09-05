@@ -1,6 +1,6 @@
 # WS004 Phase 030: WLAN lifecycle, reconnect, and hardware hardening
 
-Last updated: 2026-09-02
+Last updated: 2026-09-04
 
 Phase ID: `ws004-p030`
 
@@ -10,6 +10,24 @@ remains pending in `ws005-p008`
 Parent: [WS004 hardware expansion](../ws.md)
 
 Tests: [WS004 test index](../tests/README.md)
+
+## Post-completion ownership correction
+
+The q060 implementation and evidence below remain the historical p030 result,
+but the user corrected one architectural decision on 2026-09-04.  The kernel
+must expose asynchronous scan and one-attempt connect state; it must not own a
+30-second high-level reconnect loop.  The p030 0/1/2/4/8-second same-BSS retry
+policy and reconnect-only PMK retention are therefore superseded by
+[`ws004-p044`](../phase044-wlan-async-operation-boundary/phase.md).
+
+P044 removes that scheduler, makes link loss terminal until a new userspace
+request, and publishes a generic link event.  WS005 p010 gives one
+`/sbin/wifi connect` invocation the sole 30-second scan/connect retry deadline,
+and WS005 p011 invokes that finite command exactly once when a previously
+managed connection loses carrier.  P030's rekey, controlled-port, checked
+cleanup, USB lifecycle, and deterministic fault evidence are not superseded.
+The original text below is retained as q060 history and must not be read as the
+current target reconnect architecture.
 
 ## Objective
 

@@ -725,7 +725,7 @@ reach_authorized(struct wlan_wpa2_engine *engine, struct fake_radio *fake,
 	    station, m3, length, 8U) == 0);
 	assert(report_captured(engine, fake, 1, 0, 9U) == 0);
 	assert(wlan_wpa2_engine_state(engine) == WLAN_WPA2_STATE_AUTHORIZED &&
-	    engine->reconnectable && engine->authorized);
+	    engine->connected_lifetime && engine->authorized);
 }
 
 static void
@@ -1346,7 +1346,7 @@ test_uncertain_callback_rollback(void)
 	assert(engine.pairwise_installed && engine.associated &&
 	    engine.configured && fake.pair_delete_calls == 1U &&
 	    fake.association_clear_calls == 0U && fake.radio_stop_calls == 0U &&
-	    !wlan_wpa2_engine_test_secrets_clear(&engine));
+	    wlan_wpa2_engine_test_secrets_clear(&engine));
 	fake.fail_pair_delete = 0;
 	assert(wlan_wpa2_engine_stop(&engine) == 0);
 	assert(fake.pair_delete_calls == 2U &&
@@ -1361,7 +1361,7 @@ test_uncertain_callback_rollback(void)
 	    m3, length, 8U) == EIO);
 	assert(engine.group_installed && engine.pairwise_installed &&
 	    fake.group_delete_calls == 1U && fake.pair_delete_calls == 0U &&
-	    !wlan_wpa2_engine_test_secrets_clear(&engine));
+	    wlan_wpa2_engine_test_secrets_clear(&engine));
 	fake.fail_group_delete = 0;
 	assert(wlan_wpa2_engine_stop(&engine) == 0);
 	assert(fake.group_delete_calls == 2U && fake.pair_delete_calls == 1U &&
@@ -1531,33 +1531,26 @@ test_pairwise_rekey_stage_and_retire_retry(void)
 }
 
 static void
-test_reconnect_cleanup_retry_and_fresh_generation(void)
+test_terminal_cleanup_retry_scrubs_secrets(void)
 {
 	struct wlan_wpa2_engine engine;
 	struct fake_radio fake;
 	uint8_t anonce[WLAN_WPA2_NONCE_LENGTH];
 	uint8_t ptk[WLAN_WPA2_PTK_LENGTH];
 	uint8_t gtk[WLAN_WPA2_GTK_LENGTH];
-	uint64_t old_key_generation;
 
 	reach_authorized(&engine, &fake, 202U, anonce, ptk, gtk, 1U);
-	old_key_generation = engine.key_generation;
 	fake.group_delete_busy_remaining = 1U;
-	assert(wlan_wpa2_engine_link_lost(&engine, ECONNRESET) == EBUSY);
-	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_FAILED &&
-	    engine.group_installed && wlan_wpa2_engine_can_reconnect(&engine));
-	assert(wlan_wpa2_engine_link_lost(&engine, ECONNRESET) == 0);
-	assert(wlan_wpa2_engine_state(&engine) ==
-	    WLAN_WPA2_STATE_RECONNECT_WAIT && !engine.configured &&
-	    !engine.associated && !engine.pairwise_installed &&
-	    !engine.group_installed && wlan_wpa2_engine_can_reconnect(&engine));
-	assert(wlan_wpa2_engine_reconnect(&engine, 203U, 1000U, 30U) == 0);
-	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_AUTH_TX &&
-	    engine.generation == 203U &&
-	    engine.key_generation > old_key_generation &&
-	    fake.radio_start_calls == 2U && fake.radio_deadline == 1000U);
-	assert(wlan_wpa2_engine_stop(&engine) == 0);
+	assert(wlan_wpa2_engine_stop(&engine) == EBUSY);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_FAILED);
+	assert(engine.group_installed);
 	assert(wlan_wpa2_engine_test_secrets_clear(&engine));
+	assert(wlan_wpa2_engine_stop(&engine) == 0);
+	assert(wlan_wpa2_engine_state(&engine) == WLAN_WPA2_STATE_IDLE &&
+	    !engine.configured && !engine.associated &&
+	    !engine.pairwise_installed && !engine.group_installed &&
+	    !engine.connected_lifetime &&
+	    wlan_wpa2_engine_test_secrets_clear(&engine));
 	wlan_crypto_erase(ptk, sizeof(ptk));
 }
 
@@ -1661,7 +1654,7 @@ main(void)
 	test_uncertain_callback_rollback();
 	test_group_rekey_stage_retry_and_replay();
 	test_pairwise_rekey_stage_and_retire_retry();
-	test_reconnect_cleanup_retry_and_fresh_generation();
+	test_terminal_cleanup_retry_scrubs_secrets();
 	test_group_rekey_100_iterations();
 	return 0;
 }

@@ -53,6 +53,7 @@ struct net_device_ops {
 struct net_device {
 	char name[NET_DEVICE_NAME_MAX];
 	unsigned ifindex;
+	uint64_t generation;
 	unsigned flags;
 	unsigned mtu;
 	uint8_t hwaddr[NET_DEVICE_HWADDR_MAX];

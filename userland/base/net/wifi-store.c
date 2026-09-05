@@ -1557,10 +1557,11 @@ wifi_store_test_open_directory(const char *path, uid_t uid)
 #endif
 
 static int
-select_store(struct selected_store *selected)
+select_store(
+	struct selected_store *selected,
+	uid_t uid)
 {
 	char directory[PATH_MAX] = "";
-	uid_t uid = geteuid();
 
 	memset(selected, 0, sizeof(*selected));
 	selected->directory = -1;
@@ -1636,7 +1637,7 @@ wifi_store_set_key_for_effective_user(const char *ssid,
 		return -1;
 
 	/* Handles a failed select store operation. */
-	if (select_store(&selected) != 0) {
+	if (select_store(&selected, geteuid()) != 0) {
 		/* Obtains the store error result. */
 		function_result = store_error(error, error_capacity, errno,
 		    "select credential store", 0);
@@ -1666,6 +1667,27 @@ wifi_store_load_for_effective_user(struct wifi_conf_model *model, char *error,
 				   size_t error_capacity)
 {
 	int function_result;
+
+	/* Loads the store selected by the invoking process identity. */
+	function_result = wifi_store_load_for_user(
+		geteuid(),
+		model,
+		error,
+		error_capacity);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/* Loads the credential store selected by one authenticated effective UID. */
+int
+wifi_store_load_for_user(
+	uid_t uid,
+	struct wifi_conf_model *model,
+	char *error,
+	size_t error_capacity)
+{
+	int function_result;
 	struct selected_store selected;
 	int result, saved;
 
@@ -1682,7 +1704,7 @@ wifi_store_load_for_effective_user(struct wifi_conf_model *model, char *error,
 	}
 
 	/* Handles a failed select store operation. */
-	if (select_store(&selected) != 0) {
+	if (select_store(&selected, uid) != 0) {
 		/* Obtains the store error result. */
 		function_result = store_error(error, error_capacity, errno,
 		    "select credential store", 0);

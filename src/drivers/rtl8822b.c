@@ -131,6 +131,7 @@
 #define RTL8822B_REG_CCA_SELECT                0x082cU
 #define RTL8822B_REG_PD_MATCH_THRESHOLD        0x0830U
 #define RTL8822B_REG_CCA_SECONDARY             0x0838U
+#define RTL8822B_REG_L1_WEIGHT                 0x083cU
 #define RTL8822B_REG_CLOCK_TRACK               0x0860U
 #define RTL8822B_REG_ADC_CLOCK                 0x08acU
 #define RTL8822B_REG_ADC_160                   0x08c4U
@@ -182,7 +183,11 @@
 #define RTL8822B_EFUSE_TX_POWER_OFFSET             0x10U
 #define RTL8822B_EFUSE_TX_POWER_STRIDE             0x2aU
 #define RTL8822B_EFUSE_2G_HT1_DIFF_OFFSET          0x0bU
+#define RTL8822B_EFUSE_5G_BW40_OFFSET              0x12U
+#define RTL8822B_EFUSE_5G_HT1_DIFF_OFFSET          0x20U
 #define RTL8822B_LEGACY_RATE_COUNT                    12U
+#define RTL8822B_CHANNEL_PLAN_MKK1_MKK1             0x27U
+#define RTL8822B_CHANNEL_PLAN_REALTEK_DEFINE        0x7fU
 
 #define RTL8822B_CR_ALL_ENABLE                     0xffU
 #define RTL8822B_CR_RX_ENABLE_MASK                 0x8aU
@@ -865,6 +870,54 @@ board_tx_power_2g_valid(const struct rtl8822bu_board_info *board)
 	return 1;
 }
 
+static int
+board_tx_power_5g_w52_valid(const struct rtl8822bu_board_info *board)
+{
+	unsigned path;
+
+	if (board == NULL || (board->chip.rf_path_count != 1U &&
+	    board->chip.rf_path_count != RTL8822B_RF_PATH_COUNT))
+		return 0;
+	for (path = 0U; path < board->chip.rf_path_count; path++) {
+		const struct rtl8822b_5g_tx_power *power =
+		    &board->tx_power_5g[path];
+		unsigned group;
+
+		/* W52 consumes only groups 0 and 1 from the fourteen-group map. */
+		for (group = 0U; group < 2U; group++) {
+			if (power->bw40_base[group] > 0x3fU)
+				return 0;
+		}
+		if (power->ofdm_diff < -8 || power->ofdm_diff > 7)
+			return 0;
+	}
+	return 1;
+}
+
+static int
+channel_is_w52(uint8_t channel)
+{
+	return channel == 36U || channel == 40U || channel == 44U ||
+	    channel == 48U;
+}
+
+int
+rtl8822b_board_active_channel_allowed(
+	const struct rtl8822bu_board_info *board, uint8_t channel)
+{
+	if (board == NULL)
+		return 0;
+	if (channel >= 1U && channel <= 11U)
+		return board_tx_power_2g_valid(board);
+	if (!channel_is_w52(channel) ||
+	    !board_tx_power_5g_w52_valid(board) ||
+	    board->country_code[0] != 'J' || board->country_code[1] != 'P')
+		return 0;
+	/* 0x7f delegates the channel plan to the retained JP country code. */
+	return board->channel_plan == RTL8822B_CHANNEL_PLAN_MKK1_MKK1 ||
+	    board->channel_plan == RTL8822B_CHANNEL_PLAN_REALTEK_DEFINE;
+}
+
 int
 rtl8822bu_board_parse(const uint8_t *logical, size_t logical_length,
 	uint32_t sys_cfg1, struct rtl8822bu_board_info *board)
@@ -907,6 +960,12 @@ rtl8822bu_board_parse(const uint8_t *logical, size_t logical_length,
 		    sizeof(result.tx_power_2g[path].bw40_base));
 		nibble = power[RTL8822B_EFUSE_2G_HT1_DIFF_OFFSET] & 0x0fU;
 		result.tx_power_2g[path].ofdm_diff = (int8_t)(nibble < 8U ?
+		    nibble : (int)nibble - 16);
+		memcpy(result.tx_power_5g[path].bw40_base,
+		    power + RTL8822B_EFUSE_5G_BW40_OFFSET,
+		    sizeof(result.tx_power_5g[path].bw40_base));
+		nibble = power[RTL8822B_EFUSE_5G_HT1_DIFF_OFFSET] & 0x0fU;
+		result.tx_power_5g[path].ofdm_diff = (int8_t)(nibble < 8U ?
 		    nibble : (int)nibble - 16);
 	}
 	if (!board_tx_power_2g_valid(&result))
@@ -1823,7 +1882,8 @@ radio_post_power(struct rtl8822b_radio *radio, uint64_t deadline_ticks)
 
 static int
 radio_mac_channel_20(struct rtl8822b_radio *radio,
-	struct rtl8822b_journal *journal, uint64_t deadline_ticks)
+	struct rtl8822b_journal *journal, uint8_t channel,
+	uint64_t deadline_ticks)
 {
 	int error;
 
@@ -1846,46 +1906,52 @@ radio_mac_channel_20(struct rtl8822b_radio *radio,
 		    deadline_ticks);
 	if (error == 0)
 		error = journal_update(radio, journal, RTL8822B_REG_CCK_CHECK,
-		    1U, 0x80U, 0U, deadline_ticks);
+		    1U, 0x80U, channel_is_w52(channel) ? 1U : 0U,
+		    deadline_ticks);
 	return error;
 }
 
 static int
 radio_bb_channel_20(struct rtl8822b_radio *radio,
-	struct rtl8822b_journal *journal, uint64_t deadline_ticks)
+	struct rtl8822b_journal *journal, uint8_t channel,
+	uint64_t deadline_ticks)
 {
 	uint32_t value;
+	int w52 = channel_is_w52(channel);
 	int error;
 
 	error = journal_update(radio, journal,
-	    RTL8822B_REG_RX_PATH_SELECT, 4U, 0x10000000U, 1U,
+	    RTL8822B_REG_RX_PATH_SELECT, 4U, 0x10000000U, w52 ? 0U : 1U,
 	    deadline_ticks);
 	if (error == 0)
 		error = journal_update(radio, journal,
-		    RTL8822B_REG_ENABLE_TX_CCK, 4U, 0x00040000U, 0U,
+		    RTL8822B_REG_ENABLE_TX_CCK, 4U, 0x00040000U,
+		    w52 ? 1U : 0U,
 		    deadline_ticks);
 	if (error == 0)
 		error = journal_update(radio, journal, RTL8822B_REG_RX_CCA_MASK,
-		    4U, 0x0000fc00U, 15U, deadline_ticks);
+		    4U, 0x0000fc00U, w52 ? 34U : 15U, deadline_ticks);
 	if (error == 0)
 		error = journal_update(radio, journal,
-		    RTL8822B_REG_ACG_G2_TABLE, 4U, 0x0000001fU, 0U,
+		    RTL8822B_REG_ACG_G2_TABLE, 4U, 0x0000001fU,
+		    w52 ? 1U : 0U,
 		    deadline_ticks);
 	if (error == 0)
 		error = journal_update(radio, journal,
-		    RTL8822B_REG_CLOCK_TRACK, 4U, 0x1ffe0000U, 0x96aU,
+		    RTL8822B_REG_CLOCK_TRACK, 4U, 0x1ffe0000U,
+		    w52 ? 0x494U : 0x96aU,
 		    deadline_ticks);
-	if (error == 0)
+	if (error == 0 && !w52)
 		error = journal_update(radio, journal,
 		    RTL8822B_REG_TX_SHAPING2, 4U, 0xffffffffU,
 		    0x384f6577U, deadline_ticks);
-	if (error == 0)
+	if (error == 0 && !w52)
 		error = journal_update(radio, journal,
 		    RTL8822B_REG_TX_SHAPING6, 4U, 0x0000ffffU, 0x1525U,
 		    deadline_ticks);
 	if (error == 0)
 		error = journal_update_phy_paths(radio, journal,
-		    RTL8822B_REG_RFE_INVERT, 0x00000300U, 2U,
+		    RTL8822B_REG_RFE_INVERT, 0x00000300U, w52 ? 1U : 2U,
 		    deadline_ticks);
 	if (error != 0)
 		return error;
@@ -1916,8 +1982,12 @@ radio_rf_channel_20(struct rtl8822b_radio *radio,
 	rf18 &= ~(0x00010000U | 0x00000300U | 0x00060000U |
 	    0x00000c00U | 0x000000ffU);
 	rf18 |= (uint32_t)channel | 0x00000c00U;
+	if (channel_is_w52(channel))
+		rf18 |= 0x00010100U;
 	error = journal_rf_update(radio, journal, 0U, 0xbeU,
-	    0x00038000U, 0U, deadline_ticks);
+	    0x00038000U, channel_is_w52(channel) ?
+	    rtw8822b_w52_rf_be[(channel - 36U) / 4U] : 0U,
+	    deadline_ticks);
 	if (error == 0)
 		error = journal_rf_update(radio, journal, 0U, 0xdfU,
 		    0x00040000U, 0U, deadline_ticks);
@@ -1991,14 +2061,25 @@ radio_toggle_igi(struct rtl8822b_radio *radio,
 
 static int
 radio_cca_20(struct rtl8822b_radio *radio,
-	struct rtl8822b_journal *journal, uint64_t deadline_ticks)
+	struct rtl8822b_journal *journal, uint8_t channel,
+	uint64_t deadline_ticks)
 {
 	uint32_t cca_select;
 	uint32_t pd_threshold;
 	uint32_t cca_secondary;
 	int error;
 
-	if (radio->board.rfe_option == 2U) {
+	if (channel_is_w52(channel)) {
+		const uint32_t (*table)[3] = radio->board.rfe_option == 2U ?
+		    rtw8822b_w52_cca_type2 : rtw8822b_w52_cca_type35;
+		unsigned path = radio->board.chip.rf_path_count > 1U ? 1U : 0U;
+
+		cca_select = table[path][0];
+		pd_threshold = table[path][1];
+		cca_secondary = table[path][2];
+		if (radio->board.rfe_option == 5U && path == 1U)
+			pd_threshold = 0x79a0ea28U;
+	} else if (radio->board.rfe_option == 2U) {
 		cca_select = radio->board.chip.rf_path_count > 1U ?
 		    0x75c97010U : 0x75c97010U;
 		pd_threshold = radio->board.chip.rf_path_count > 1U ?
@@ -2022,23 +2103,29 @@ radio_cca_20(struct rtl8822b_radio *radio,
 		error = journal_update(radio, journal,
 		    RTL8822B_REG_CCA_SECONDARY, 4U, 0xffffffffU,
 		    cca_secondary, deadline_ticks);
+	if (error == 0 && channel_is_w52(channel) &&
+	    radio->board.rfe_option == 2U && radio->board.chip.cut != 1U)
+		error = journal_update(radio, journal, RTL8822B_REG_L1_WEIGHT,
+		    4U, 0xffffffffU, 0x9194b2b9U, deadline_ticks);
 	return error;
 }
 
 static int
-radio_rfe_2g(struct rtl8822b_radio *radio,
-	struct rtl8822b_journal *journal, uint64_t deadline_ticks)
+radio_rfe_channel(struct rtl8822b_radio *radio,
+	struct rtl8822b_journal *journal, uint8_t channel,
+	uint64_t deadline_ticks)
 {
-	uint32_t antenna = radio->board.chip.rf_path_count > 1U ?
-	    0xa501U : 0xa500U;
+	int w52 = channel_is_w52(channel);
+	uint32_t antenna = w52 && radio->board.rfe_option != 2U ? 0xa5a5U :
+	    (radio->board.chip.rf_path_count > 1U ? 0xa501U : 0xa500U);
 	uint32_t select0;
 	int error;
 
 	if (radio->board.rfe_option == 2U)
-		select0 = 0x705770U;
+		select0 = w52 ? 0x177517U : 0x705770U;
 	else if (radio->board.rfe_option == 3U ||
 	    radio->board.rfe_option == 5U)
-		select0 = 0x745774U;
+		select0 = w52 ? 0x477547U : 0x745774U;
 	else
 		return EOPNOTSUPP;
 	error = journal_update_phy_paths(radio, journal,
@@ -2046,11 +2133,13 @@ radio_rfe_2g(struct rtl8822b_radio *radio,
 	    deadline_ticks);
 	if (error == 0)
 		error = journal_update_phy_paths(radio, journal,
-		    RTL8822B_REG_RFE_SELECT8, 0x0000ff00U, 0x57U,
+		    RTL8822B_REG_RFE_SELECT8, 0x0000ff00U,
+		    w52 ? 0x75U : 0x57U,
 		    deadline_ticks);
 	if (error == 0 && radio->board.rfe_option == 2U)
 		error = journal_update_phy_paths(radio, journal,
-		    RTL8822B_REG_RFE_CONTROL, 0x10U, 0U, deadline_ticks);
+		    RTL8822B_REG_RFE_CONTROL, w52 ? 0x20U : 0x10U, 0U,
+		    deadline_ticks);
 	if (error == 0)
 		error = journal_update_phy_paths(radio, journal,
 		    RTL8822B_REG_RFE_INVERT, 0x00000c3fU, 0U,
@@ -2072,16 +2161,18 @@ radio_channel_apply(struct rtl8822b_radio *radio, uint8_t channel,
 	struct rtl8822b_journal journal;
 	int error;
 
-	if (channel < 1U || channel > 11U)
+	if (!rtl8822b_board_active_channel_allowed(&radio->board, channel))
 		return EOPNOTSUPP;
 	radio->power_limits_valid = 0U;
 	memset(&journal, 0, sizeof(journal));
 	error = journal_update(radio, &journal, RTL8822B_REG_TX_PAUSE, 1U,
 	    0xffU, 0xffU, deadline_ticks);
 	if (error == 0)
-		error = radio_bb_channel_20(radio, &journal, deadline_ticks);
+		error = radio_bb_channel_20(radio, &journal, channel,
+		    deadline_ticks);
 	if (error == 0)
-		error = radio_mac_channel_20(radio, &journal, deadline_ticks);
+		error = radio_mac_channel_20(radio, &journal, channel,
+		    deadline_ticks);
 	if (error == 0)
 		error = radio_rf_channel_20(radio, &journal, channel,
 		    deadline_ticks);
@@ -2090,9 +2181,10 @@ radio_channel_apply(struct rtl8822b_radio *radio, uint8_t channel,
 	if (error == 0)
 		error = radio_toggle_igi(radio, &journal, deadline_ticks);
 	if (error == 0)
-		error = radio_cca_20(radio, &journal, deadline_ticks);
+		error = radio_cca_20(radio, &journal, channel, deadline_ticks);
 	if (error == 0)
-		error = radio_rfe_2g(radio, &journal, deadline_ticks);
+		error = radio_rfe_channel(radio, &journal, channel,
+		    deadline_ticks);
 	if (error == 0)
 		error = radio_txagc_legacy_profile(radio, channel,
 		    deadline_ticks);
@@ -2201,6 +2293,35 @@ radio_txagc_legacy_index(const struct rtl8822bu_board_info *board,
 	return (uint8_t)index;
 }
 
+static unsigned
+radio_w52_power_group(uint8_t channel)
+{
+	return channel <= 40U ? 0U : 1U;
+}
+
+static uint8_t
+radio_txagc_5g_legacy_index(const struct rtl8822bu_board_info *board,
+	unsigned path, uint8_t channel, unsigned rate)
+{
+	const struct rtl8822b_5g_tx_power *power = &board->tx_power_5g[path];
+	unsigned group = radio_w52_power_group(channel);
+	unsigned channel_index = (channel - 36U) / 4U;
+	int section_base = board->rfe_option == 2U ? 32 : 26;
+	int limit_offset =
+	    (int)rtw8822b_w52_legacy_world_limit[channel_index] - section_base;
+	int rate_offset = rtw8822b_5g_legacy_rate_offset[rate - 4U];
+	int index;
+
+	if (rate_offset > limit_offset)
+		rate_offset = limit_offset;
+	index = power->bw40_base[group] + power->ofdm_diff + rate_offset;
+	if (index < 0)
+		return 0U;
+	if (index > 0x3f)
+		return 0x3fU;
+	return (uint8_t)index;
+}
+
 static int
 radio_txagc_legacy_profile(struct rtl8822b_radio *radio, uint8_t channel,
 	uint64_t deadline_ticks)
@@ -2220,10 +2341,16 @@ radio_txagc_legacy_profile(struct rtl8822b_radio *radio, uint8_t channel,
 			for (lane = 0U; lane < 4U; lane++) {
 				unsigned current = rate + lane;
 
-				if (current < RTL8822B_LEGACY_RATE_COUNT)
-					packed |= (uint32_t)
+				if (current < RTL8822B_LEGACY_RATE_COUNT) {
+					uint8_t index = channel_is_w52(channel) ?
+					    (current < 4U ? 0U :
+					    radio_txagc_5g_legacy_index(&radio->board,
+					    path, channel, current)) :
 					    radio_txagc_legacy_index(&radio->board,
-					    path, channel, current) << (lane * 8U);
+					    path, channel, current);
+
+					packed |= (uint32_t)index << (lane * 8U);
+				}
 			}
 			error = radio_write(radio, (uint16_t)(base + rate), 4U,
 			    packed, deadline_ticks);
@@ -2917,7 +3044,8 @@ rtl8822b_radio_active_scan_allowed(const struct rtl8822b_radio *radio,
 	uint8_t channel)
 {
 	return radio != NULL && radio->state == RTL8822B_RADIO_STARTED &&
-	    radio->power_limits_valid != 0U && channel >= 1U && channel <= 11U &&
+	    radio->power_limits_valid != 0U &&
+	    rtl8822b_board_active_channel_allowed(&radio->board, channel) &&
 	    (radio->board.rfe_option == 2U || radio->board.rfe_option == 3U ||
 	    radio->board.rfe_option == 5U);
 }

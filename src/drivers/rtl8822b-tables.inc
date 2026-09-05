@@ -60,8 +60,8 @@
  * these records rather than treating every pair as a write.
  *
  * The normal-path WPA2 extension uses the following mechanically reduced
- * 2.4-GHz legacy-rate data from those arrays.  Full HT/VHT and 5-GHz tables
- * remain deliberately excluded:
+ * legacy-rate data from those arrays.  Full HT/VHT and 5-GHz bands outside
+ * the Japan non-DFS W52 subset remain deliberately excluded:
  *   rtw8822b_bb_pg_type2/type3/type5       46 records each
  *   rtw8822b_txpwr_lmt_type0/type2/type5 585 records each
  *
@@ -83,6 +83,35 @@ static const int8_t rtw8822b_2g_legacy_rate_offset[12] = {
 static const uint8_t rtw8822b_2g_legacy_world_limit[11][2] = {
 	{28, 26}, {28, 30}, {28, 30}, {28, 30}, {28, 30}, {28, 30},
 	{28, 30}, {28, 30}, {28, 30}, {28, 30}, {28, 28}
+};
+
+/*
+ * W52 legacy OFDM is indexed by channel 36, 40, 44, and 48.  The relative
+ * rate values are the normalized band-1 bytes common to BB-PG types 2, 3,
+ * and 5.  The absolute values are the minimum FCC/ETSI/MKK OFDM ceilings in
+ * TX-power-limit types 0, 2, and 5.  Type 2 has a by-rate section base of 32;
+ * types 3 and 5 use 26.
+ */
+static const int8_t rtw8822b_5g_legacy_rate_offset[8] = {
+	14, 12, 10, 8, 6, 4, 2, 0
+};
+
+static const uint8_t rtw8822b_w52_legacy_world_limit[4] = {
+	30, 30, 30, 30
+};
+
+/* RF_MALSEL values mechanically reduced from low_band[] at W52 centers. */
+static const uint8_t rtw8822b_w52_rf_be[4] = { 7, 6, 0, 7 };
+
+/* REG_CCASEL, REG_PDMFTH, and REG_CCA2ND for one- and two-path W52. */
+static const uint32_t rtw8822b_w52_cca_type2[2][3] = {
+	{ 0x75b86010U, 0x79a0eaa8U, 0x87766451U },
+	{ 0x75b76010U, 0x79a0eaaaU, 0x87766431U }
+};
+
+static const uint32_t rtw8822b_w52_cca_type35[2][3] = {
+	{ 0x75da8010U, 0x79a0eaaaU, 0x87765561U },
+	{ 0x75da8010U, 0x79a0eaaaU, 0x86666361U }
 };
 
 static const uint32_t rtw8822b_mac[] = {

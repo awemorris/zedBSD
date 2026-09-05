@@ -307,11 +307,29 @@ fake_efuse_make_board(void)
 	static const uint8_t block3[8] = {
 		32U, 33U, 34U, 0xaeU, 0xffU, 0xffU, 0xffU, 0xffU
 	};
+	static const uint8_t block4[8] = {
+		0xffU, 0xffU, 24U, 25U, 26U, 27U, 28U, 29U
+	};
+	static const uint8_t block5[8] = {
+		30U, 31U, 32U, 33U, 34U, 35U, 36U, 37U
+	};
+	static const uint8_t block6[8] = {
+		0xafU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU
+	};
 	static const uint8_t block7[8] = {
 		0xffU, 0xffU, 28U, 29U, 30U, 31U, 32U, 33U
 	};
 	static const uint8_t block8[8] = {
 		26U, 27U, 28U, 29U, 30U, 0xb3U, 0xffU, 0xffU
+	};
+	static const uint8_t block9[8] = {
+		0xffU, 0xffU, 0xffU, 0xffU, 20U, 21U, 22U, 23U
+	};
+	static const uint8_t block10[8] = {
+		24U, 25U, 26U, 27U, 28U, 29U, 30U, 31U
+	};
+	static const uint8_t block11[8] = {
+		32U, 33U, 0xb2U, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU
 	};
 	static const uint8_t block23[8] = {
 		0x7f, 0x22, 0x19, 0xff, 0xff, 0xff, 0xff, 0xff
@@ -333,8 +351,14 @@ fake_efuse_make_board(void)
 	memset(fake_efuse, 0xff, sizeof(fake_efuse));
 	fake_efuse_block(&offset, 2U, block2);
 	fake_efuse_block(&offset, 3U, block3);
+	fake_efuse_block(&offset, 4U, block4);
+	fake_efuse_block(&offset, 5U, block5);
+	fake_efuse_block(&offset, 6U, block6);
 	fake_efuse_block(&offset, 7U, block7);
 	fake_efuse_block(&offset, 8U, block8);
+	fake_efuse_block(&offset, 9U, block9);
+	fake_efuse_block(&offset, 10U, block10);
+	fake_efuse_block(&offset, 11U, block11);
 	fake_efuse_block(&offset, 23U, block23);
 	fake_efuse_block(&offset, 24U, block24);
 	fake_efuse_block(&offset, 25U, block25);
@@ -1349,11 +1373,15 @@ wlan_station_attach(struct net_device *device,
 	assert(radio_context != NULL);
 	assert(__atomic_load_n(&((struct rtl8822bu_adapter *)radio_context)->
 	    lifecycle_lock.locked, __ATOMIC_RELAXED));
-	assert(profile != NULL && profile->channel_count == 11U);
+	assert(profile != NULL && profile->channel_count == 15U);
 	for (unsigned index = 0U; index < profile->channel_count; index++) {
-		assert(profile->channels[index].channel == index + 1U);
-		assert(profile->channels[index].center_frequency_mhz ==
-		    2412U + index * 5U);
+		uint32_t channel = index < 11U ? index + 1U :
+		    36U + (index - 11U) * 4U;
+		uint32_t frequency = channel <= 11U ? 2407U + channel * 5U :
+		    5000U + channel * 5U;
+
+		assert(profile->channels[index].channel == channel);
+		assert(profile->channels[index].center_frequency_mhz == frequency);
 		assert(profile->channels[index].flags ==
 		    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED);
 	}
@@ -2088,6 +2116,12 @@ test_attach_open_detach(void)
 	assert(adapter->board.tx_power_2g[1].cck_base[0] == 28U);
 	assert(adapter->board.tx_power_2g[1].bw40_base[0] == 26U);
 	assert(adapter->board.tx_power_2g[1].ofdm_diff == 3);
+	assert(adapter->board.tx_power_5g[0].bw40_base[0] == 24U);
+	assert(adapter->board.tx_power_5g[0].bw40_base[1] == 25U);
+	assert(adapter->board.tx_power_5g[0].ofdm_diff == -1);
+	assert(adapter->board.tx_power_5g[1].bw40_base[0] == 20U);
+	assert(adapter->board.tx_power_5g[1].bw40_base[1] == 21U);
+	assert(adapter->board.tx_power_5g[1].ofdm_diff == 2);
 	assert(net_created && station_attached);
 	assert(open_during_create_error == ENODEV);
 	assert(strcmp(fake_net_device.name, "wlan0") == 0);
@@ -3224,6 +3258,49 @@ test_first_open_software_scan(void)
 	fake_net_device.ops->close(&fake_net_device);
 	assert(station_close_calls == 1U && !adapter->opened &&
 	    adapter->radio.state == RTL8822B_RADIO_OFF);
+	assert(rtl8822bu_detach(&interface, 0U) == 0);
+	assert(interface.driver_data == NULL && allocations == 0U);
+}
+
+static void
+test_w52_scan_and_connect(void)
+{
+	struct drv_usb_device device;
+	struct drv_usb_interface interface;
+	struct drv_usb_endpoint endpoints[5];
+	struct rtl8822bu_adapter *adapter;
+	struct wlan_bss_record bss;
+	uint64_t deadline;
+
+	fake_transport_reset();
+	make_exact_interface(&device, &interface, endpoints);
+	assert(rtl8822bu_attach(&interface, &rtl8822bu_ids[0]) == 0);
+	adapter = interface.driver_data;
+	assert(fake_net_device.ops->open(&fake_net_device) == 0);
+	deadline = clock_ticks() + 100U;
+	assert(rtl8822bu_scan_channel_start(adapter, 48U, 14U, 48U,
+	    deadline) == 0);
+	assert(adapter->scan_generation == 48U && adapter->scan_channel == 48U &&
+	    adapter->radio.channel == 48U);
+	assert(rtl8822bu_scan_stop(adapter, 48U) == 0);
+	assert(rtl8822bu_scan_channel_start(adapter, 49U, 0U, 1U,
+	    deadline) == 0);
+	assert(adapter->scan_generation == 49U && adapter->scan_channel == 1U &&
+	    adapter->radio.channel == 1U);
+	assert(rtl8822bu_scan_stop(adapter, 49U) == 0);
+
+	make_connection_bss(&bss);
+	bss.channel = 44U;
+	bss.center_frequency_mhz = 5220U;
+	assert(rtl8822bu_connect_start(adapter, 50U, &bss, deadline) == 0);
+	assert(adapter->connection_prepared &&
+	    adapter->connection_generation == 50U &&
+	    adapter->connection_channel == 44U && adapter->radio.channel == 44U);
+	assert(rtl8822bu_disconnect(adapter, 50U) == 0);
+	bss.channel = 52U;
+	bss.center_frequency_mhz = 5260U;
+	assert(rtl8822bu_connect_start(adapter, 51U, &bss, deadline) == EINVAL);
+	fake_net_device.ops->close(&fake_net_device);
 	assert(rtl8822bu_detach(&interface, 0U) == 0);
 	assert(interface.driver_data == NULL && allocations == 0U);
 }
@@ -4732,6 +4809,7 @@ main(void)
 	test_attach_open_detach();
 	test_first_open_failure_unwind();
 	test_first_open_software_scan();
+	test_w52_scan_and_connect();
 	test_scan_report_stall_recovery();
 	test_attempted_tx_report_tombstones();
 	test_secure_station_hardware_contract();

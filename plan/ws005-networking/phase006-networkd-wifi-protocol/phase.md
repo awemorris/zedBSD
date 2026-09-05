@@ -1,10 +1,11 @@
 # WS005 Phase 006: networkd Wi-Fi control protocol
 
-Last updated: 2026-09-01
+Last updated: 2026-09-05
 
 Phase ID: `ws005-p006`
 
-Status: planned; not queued; follows the p009 minimum-connectivity checkpoint
+Status: in progress in q071; focused protocol/auth/store/child gates pass;
+combined physical acceptance remains in p008
 
 Parent: [WS005](../ws.md)
 
@@ -37,14 +38,25 @@ provide a bounded child runner which passes a Wi-Fi secret to `/sbin/wifi`
 through a dedicated descriptor without placing it in child argv, diagnostics,
 or machine-readable output.
 
+The WLAN request surface is global: `enable`, `disable`, `list`, `connect
+SSID`, `disconnect`, and the nonsecret `profiles-changed` notification. It has
+no public interface operand. `net` sends neither a credential nor a profile
+path. Networkd obtains the active policy UID from the authenticated `enable`
+peer, discovers `wlanN` interfaces, reads the fixed p005 store for that UID
+when needed, and wipes a passphrase immediately after the one child operation.
+`set-key` itself is local to `net`; its optional literal is only `auto`, and an
+omitted option means manual rather than sending a `manual` protocol value.
+
 This Phase establishes transport, authorization, subprocess, timeout, and
 cancellation contracts. The public `net wifi` operation sequence and its
-cross-stage rollback belong to `ws005-p007`.
+cross-stage rollback belong to `ws005-p007`; the later resident managed-link
+policy belongs to `ws005-p011` and must consume, not bypass, these contracts.
 
 ## Baseline and motivating findings
 
 - The current listener is one AF_UNIX stream socket at `/run/networkd.sock`,
-  mode `0600`. `net` opens one connection, writes one legacy literal `V1`
+  already published by p003 as `root:network` mode `0660`. `net` opens one
+  connection, writes one legacy literal `V1`
   (planning name `ZNV1`) line, shuts down its write side, reads one response,
   and closes it.
 - Legacy V1/ZNV1 is newline framed and `networkd` splits it with
@@ -73,18 +85,23 @@ cross-stage rollback belong to `ws005-p007`.
 - [`ws005-p003`](../phase003-unix-peer-credentials/phase.md) AF_UNIX
   peer-credential UAPI, connect-time snapshot, `getsockopt`
   implementation, and lifecycle/authorization tests.
-- A bounded WLAN ioctl contract whose blocking operations are interruptible or
-  have a kernel-owned finite deadline.
+- [`ws004-p044`](../../ws004-hardware/phase044-wlan-async-operation-boundary/phase.md)
+  supplies prompt asynchronous scan and single-attempt connect generations;
+  no WLAN ioctl owns the userspace command's 30-second deadline.
 - [`ws005-p004`](../phase004-wifi-ioctl-command/phase.md) supplies the minimum
   human direct-root `/sbin/wifi`. This Phase extends that same binary with
   `WIFI1` machine records and the private passphrase-descriptor form.
 - [`ws005-p005`](../phase005-wifi-credential-store/phase.md) versioned
-  `/etc/wifi.conf` and per-user `~/.wifi.conf` parser/store used by `net`,
-  including explicit-length SSID/passphrase fields and secret wiping.
+  `/etc/wifi.conf` and per-user `~/.wifi.conf` parser/store used by local
+  `set-key` and the networkd policy reader, including explicit-length
+  SSID/passphrase fields and secret wiping.
 - [`ws005-p009`](../phase009-wlan-minimum-connectivity/phase.md) first proves
   that the direct primitive and physical L2/DHCP data path work. p006 then adds
   machine framing and daemon composition without making those mechanisms a
   prerequisite for first communication.
+- [`ws005-p010`](../phase010-wifi-primitive-hardening/phase.md) completes the
+  human command's sole userspace 30-second retry before p006 exposes that same
+  behavior through `WIFI1` and fd 4.
 - AF_UNIX descriptor passing remains available for tests and future protocol
   evolution, but this Phase does not create a second daemon socket.
 
@@ -97,8 +114,10 @@ cross-stage rollback belong to `ws005-p007`.
   UAPI and accepted-socket snapshot semantics;
 - root versus ordinary-user authorization at the networkd request boundary;
 - one fixed `root:network` mode-`0660` listener policy;
-- transport of bounded profile values selected and read by `net`; networkd
-  does not resolve a home directory or open a wifi.conf file;
+- global WLAN opcodes with no public interface field, and an empty/nonsecret
+  `profiles-changed` notification;
+- active policy UID capture from the authenticated `enable` peer and checked
+  daemon-side reads of that UID's fixed p005 store;
 - a bounded `/sbin/wifi` child protocol with a dedicated secret descriptor;
 - separate machine output and sanitized diagnostics;
 - total child deadlines, termination, reaping, and operation cancellation;
@@ -112,8 +131,8 @@ cross-stage rollback belong to `ws005-p007`.
 - putting DHCP into `/sbin/wifi`;
 - reviving a persistent `/sbin/wpa` process or adding a second control socket;
 - defining WPA/RSN cryptography inside `networkd`;
-- opening `/etc/wifi.conf`, a user home, or an arbitrary credential path from
-  networkd;
+- accepting a UID, home, profile pathname, passphrase, or profile record from
+  a ZNV2 WLAN request;
 - changing `/etc/net.conf` or confirmed-commit semantics;
 - claiming Archer hardware success.
 
@@ -172,14 +191,18 @@ most 32768 bytes. The following parsing rules are fixed:
 - SSID bytes are bounded by the WLAN UAPI maximum and may contain whitespace.
   NUL/non-text handling follows the lower-layer SSID contract rather than C
   string rules;
-- profile passphrase fields selected by `net` are accepted only by
-  operations which need them, are copied into bounded secret buffers, and are
-  explicitly wiped on every exit;
+- WLAN opcodes are `enable`, `disable`, `list`, `connect`, `disconnect`, and
+  `profiles-changed`. Only `connect` carries an SSID. The others have empty
+  request payloads; no WLAN request carries an interface, UID, home, pathname,
+  passphrase, or profile record;
+- `profiles-changed` is a five-second-total, best-effort notification after a
+  successful local store update. Its failure is nonsecret and cannot roll back
+  or falsify that update;
 - errors identify the stage and stable error number but never echo a complete
   request, SSID unless safely escaped, passphrase, PMK, or child argv.
 
 The exact numeric opcode/field/error assignments are bounded engineering data,
-not user-facing choices. They are generated once in a shared codec table and
+not user-facing choices. They are defined once in a shared codec table and
 locked by golden vectors used by `net`, `networkd`, and host tests rather than
 maintained as two independent parsers.
 
@@ -205,24 +228,25 @@ dependency semantics consumed here are:
 `networkd` obtains this record immediately after `accept4` and before reading a
 request. It associates authorization, cancellation, and audit state with that
 snapshot for the lifetime of the request. Root may use every checked operation.
-An admitted nonroot peer may use read-only show/status and bounded WLAN
-search/list/up/down/connect, but not raw STATIC, DEFAULTROUTE, DNS, generic
-DHCP, or unrelated mutation opcodes. A ZNV2 request contains no claimed uid,
-username, home, group membership, or credential path.
+An admitted nonroot peer may use the bounded global WLAN opcodes but not raw
+STATIC, DEFAULTROUTE, DNS, generic DHCP, or unrelated mutation opcodes. A ZNV2
+request contains no claimed uid, username, home, group membership, credential
+path, interface, or passphrase.
 
-`net`, not networkd, selects and reads the profile for its own effective uid:
-uid 0 uses `/etc/wifi.conf`; a nonroot process uses `.wifi.conf` under the
-account home resolved for that euid without trusting `HOME`. `net` sends only
-the bounded values required by the requested operation in ZNV2. Networkd never
-calls `getpwuid`, resolves `HOME`, or opens either profile. A received secret is
-kept only in bounded wiped request/child buffers and passed to `/sbin/wifi` on
-the dedicated secret descriptor.
+An accepted `enable` copies the authenticated peer's effective UID into the
+single active policy record; `net` retains no policy state. A later authorized
+`enable` atomically switches that record to its authenticated peer, and UID 0
+is always allowed to override. Networkd selects `/etc/wifi.conf` for policy UID
+0 or `.wifi.conf` below the passwd-record home for another policy UID, without
+trusting `HOME`. It uses p005's no-follow, owner/mode, lock, and bounded parser
+rules. No client can select a UID or path.
 
-This does not make the client-selected file a server-enforced security
-boundary. Admission to the `network` group authorizes a peer to submit any
-otherwise valid bounded WLAN values, including from a custom ZNV2 client. The
-daemon authenticates the peer and operation, not the provenance of the
-passphrase. Per-user/seat-isolated secret enforcement is outside v1.
+Networkd reads a passphrase only while preparing one `/sbin/wifi connect`
+child, passes it on dedicated descriptor 4, and explicitly wipes every daemon
+and child copy when that operation terminates. The persistent store remains
+the only long-lived passphrase owner. Policy state may retain the UID,
+nonsecret selected SSID, interface/device identity, and L3 ownership, but not a
+passphrase or PMK.
 
 ## Socket access policy
 
@@ -264,6 +288,8 @@ This Phase adds the private machine invocation, `wifi --machine ...`, and its
   matching BSS, timeout/cancel, unsupported security, interface-down, device
   removal, and malformed machine output; p004 exit 0/1/2 and signal status are
   checked independently;
+- one child invocation contains p010's complete 30-second userspace retry
+  sequence; `networkd` never recreates that retry loop around an active child;
 - EOF with a partial record, excess records/bytes, output after terminal
   status, or exit zero without a complete success record is failure.
 
@@ -278,7 +304,8 @@ and rollback rather than treating process termination as L2 disconnection.
 - Request header, request payload, each child stage, and response write have
   finite monotonic deadlines. Header read, payload read, and response write are
   each capped at five seconds and by the remaining operation deadline. Scan
-  completion is capped at 15 seconds and a direct connect at 30 seconds; p007
+  completion is capped at 15 seconds and one `/sbin/wifi connect` child at 30
+  seconds; p007
   additionally caps DHCP at 10 seconds and a compound operation at 90 seconds.
 - A child operation receives the remaining total stage deadline; repeated
   irrelevant scan records or EINTR cannot extend it.
@@ -303,8 +330,8 @@ and rollback rather than treating process termination as L2 disconnection.
    codec/credential/child golden vectors before production changes.
 2. Consume the completed p003 peer-credential UAPI and regress its snapshot,
    `getsockopt`, and lifecycle behavior; do not duplicate that implementation.
-3. Change listener creation to `root:network` mode `0660`; authenticate the
-   p003 peer snapshot and reject an unauthorized peer before parsing a secret.
+3. Retain the `root:network` mode `0660` listener; authenticate the p003 peer
+   snapshot and reject an unauthorized peer before dispatch.
 4. Add a shared strict `ZNV2` codec and bounded I/O helpers. Migrate every
    wired caller and add the Wi-Fi callers in the same change, delete the V1
    parser/executor, and retain only bounded initial-magic version failure.
@@ -313,8 +340,11 @@ and rollback rather than treating process termination as L2 disconnection.
 6. Extend p004's `/sbin/wifi` with the private machine/secret-fd mode and add
    production-contract child fixtures. Keep human output outside the machine
    parser.
-7. Implement the Wi-Fi ZNV2 operations needed by p007 without yet composing
-   multi-stage `up`, `down`, or DHCP transactions.
+7. Implement the global Wi-Fi ZNV2 operations needed by p007: empty
+   enable/disable/list/disconnect/profiles-changed requests and one bounded
+   SSID for connect. Reject every public interface/UID/path/profile/secret
+   field. Add the fixed policy-UID store reader boundary without yet composing
+   the full selection/DHCP state machine.
 8. Run focused host/native tests, sanitizer/analyzer variants where supported,
    existing AF_UNIX rights/socket regressions, networkd ZNV2/fd-3 regressions,
    and the supported `make -j16` build. Do not run aggregate `make check`.
@@ -327,24 +357,26 @@ At minimum, automated evidence covers:
   extra bytes, overflow, 32-byte header and 4096/32768-byte payload boundaries,
   maximum-minus/maximum/maximum-plus-one, malformed field ordering,
   unknown/reserved data, and client read timeout;
-- SSIDs with spaces and boundary lengths; a selected passphrase appears only
-  in the authenticated bounded ZNV2 request and fd-4 buffers, is never echoed,
-  and is absent from logs, redacted traces, child argv, environment captures,
-  diagnostics, and machine records;
+- SSIDs with spaces and boundary lengths; no ZNV2 request contains a
+  passphrase. A daemon-read test passphrase appears only in the checked p005
+  reader and fd-4 buffers, is never echoed, and is absent from logs, redacted
+  traces, child argv, environment captures, diagnostics, and machine records;
 - accepted peer credentials, id change after connect, socketpair, failed
   connect, listener/peer close, and authorization allow/deny matrices;
-- root and nonroot `net` profile selection by its own euid, bounded selected
-  values in ZNV2, networkd never opening a profile, and malicious payload paths
-  having no effect;
+- root and nonroot `enable` policy-UID selection from peer credentials,
+  daemon-side fixed-path reads, owner/mode/symlink checks, owner switching,
+  empty profiles-changed delivery, and malicious UID/path/interface/secret
+  payload fields having no effect;
 - child success, nonzero exit, exec failure, malformed/over-32768-byte stdout,
   sixty-four/sixty-five scan records, over-512-byte stderr, blocked writer,
   crash, 15/30-second timeout, cancellation, one-second SIGTERM grace, SIGKILL
   fallback, and wait/reap failure;
 - scan-stop/association cancellation and USB removal without retained child,
   descriptor, key, or driver reference;
-- migrated ZNV2 UP/DOWN/DHCP/STATIC/SHOW, explicit V1 version failure and
-  eventual parser absence, fd-3 readiness, direct ifconfig, and wired network
-  regressions.
+- migrated ZNV2 UP/DOWN/DHCP/STATIC/SHOW plus global WIFI_ENABLE,
+  WIFI_DISABLE, WIFI_LIST, WIFI_CONNECT, WIFI_DISCONNECT, and
+  WIFI_PROFILES_CHANGED; explicit V1 version failure and eventual parser
+  absence; fd-3 readiness, direct ifconfig, and wired network regressions.
 
 No real radio, SSID, or credential is required by this Phase.
 
@@ -363,7 +395,8 @@ product or human decisions:
   inventory proving the simultaneous caller migration deletes every V1/ZNV1
   parser and executor path.
 - Map p003's fixed root/all and admitted-nonroot read-only-plus-WLAN matrix to
-  the generated opcodes. The socket remains `root:network 0660`, GID 69.
+  the global opcodes. The socket remains `root:network 0660`, GID 69; the
+  authenticated `enable` euid, never a payload UID, becomes policy owner.
 - Map every p006 `WIFI1` terminal/error into one ZNV2 result. Secret fd 4,
   32768-byte/64-record stdout, 512-byte stderr, and EOF-terminated secret bytes
   are fixed inputs, not selectable alternatives.
@@ -380,12 +413,14 @@ product or human decisions:
 - One `root:network` mode-`0660` `/run/networkd.sock` safely serves strict ZNV2
   wired and Wi-Fi requests with p003 peer-credential authorization; no V1
   request can execute.
-- `net` selects `/etc/wifi.conf` or its euid owner's `~/.wifi.conf` and sends
-  only bounded selected values. Networkd opens neither profile, and an
-  unauthorized peer or operation is rejected before any child or mutation.
+- Public WLAN requests contain no interface, UID, path, profile, or passphrase.
+  Networkd stores the authenticated active policy UID, selects only its fixed
+  p005 path, and rejects an unauthorized peer or operation before any read,
+  child, or mutation.
 - SSIDs survive length framing, and secrets never appear in child argv,
   environment, machine output, returned diagnostics, or retained temporary
-  files; bounded ZNV2/fd-4 copies are wiped after use.
+  files; bounded store/fd-4 copies are wiped after use and no passphrase remains
+  in policy state.
 - Every child/output path is bounded, cancellable, reaped, and removal-safe.
 - Focused automatic gates and wired/fd-3 regressions pass; no hardware success
   or public multi-stage orchestration is claimed.

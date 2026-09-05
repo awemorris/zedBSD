@@ -11,6 +11,7 @@ mkdir -p "$test_root"
 cc -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -I. \
   -Iuserland/base/libedit -Wall -Wextra -Werror \
   userland/base/net/main.c userland/base/net/netconf.c \
+  userland/base/net/protocol.c \
   userland/base/net/wifi-conf.c userland/base/net/wifi-store.c \
   userland/base/service/service-config.c userland/base/libedit/readline.c \
   -o "$binary"

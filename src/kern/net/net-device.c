@@ -1,6 +1,9 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
+#include "kern/net/socket.h"
+
+#include <zedbsd/route.h>
 
 #include <errno.h>
 #include <stdbool.h>
@@ -20,12 +23,15 @@ extern void route_purge_device(struct net_device *) __attribute__((weak));
 extern void inet_interface_purge_device(struct net_device *)
     __attribute__((weak));
 extern void arp_purge_device(struct net_device *) __attribute__((weak));
+extern void route_socket_notify(unsigned, uint64_t, unsigned, unsigned)
+    __attribute__((weak));
 
 static struct net_device devices[NET_DEVICE_MAX];
 static uint8_t device_used[NET_DEVICE_MAX];
 static struct net_device *device_head;
 static unsigned live_count;
 static unsigned next_ifindex = 1;
+static uint64_t next_device_generation = 1U;
 static unsigned removals_active;
 static unsigned registry_stopping;
 static atomic_uint_t device_guard;
@@ -231,11 +237,12 @@ net_device_create(struct net_device *device)
 			device_unlock(enabled);
 			return EEXIST;
 		}
-	if (next_ifindex == 0) {
+	if (next_ifindex == 0 || next_device_generation == 0U) {
 		device_unlock(enabled);
 		return ENOSPC;
 	}
 	device->ifindex = next_ifindex++;
+	device->generation = next_device_generation++;
 	device->carrier = (device->flags & NET_DEVICE_RUNNING) != 0;
 	device->flags &= ~NET_DEVICE_RUNNING;
 	device->state = NET_DEVICE_LIVE;
@@ -254,6 +261,9 @@ net_device_gone(struct net_device *device)
 	struct net_device **link;
 	bool enabled;
 	unsigned open_references = 0;
+	unsigned event_ifindex = 0;
+	unsigned event_flags = 0;
+	uint64_t event_generation = 0U;
 	int call_close = 0;
 
 	if (device == NULL)
@@ -298,6 +308,9 @@ net_device_gone(struct net_device *device)
 	removals_active++;
 	device->carrier = 0;
 	device->flags &= ~(NET_DEVICE_UP | NET_DEVICE_RUNNING);
+	event_ifindex = device->ifindex;
+	event_generation = device->generation;
+	event_flags = device->flags;
 	device->poll_scheduled = 0;
 	/* Keep the slot alive until close and every identity purge has finished. */
 	refcount_get(&device->refs);
@@ -308,6 +321,9 @@ net_device_gone(struct net_device *device)
 		call_close = device->ops != NULL && device->ops->close != NULL;
 	}
 	device_unlock(enabled);
+	if (route_socket_notify != NULL)
+		route_socket_notify(event_ifindex, event_generation, event_flags,
+		    RTM_IFINFO_REMOVAL);
 	/* A driver close cannot race poll_receive() or ioctl(): once
 	 * closing/GONE is published no new callback starts, and this joins every
 	 * admitted callback before the driver's I/O retirement boundary. */
@@ -546,6 +562,10 @@ int
 net_device_set_carrier(struct net_device *device, int carrier)
 {
 	bool enabled;
+	unsigned event_ifindex = 0;
+	unsigned event_flags = 0;
+	unsigned transition = 0;
+	uint64_t event_generation = 0U;
 	int error = 0;
 
 	if (device == NULL)
@@ -554,10 +574,21 @@ net_device_set_carrier(struct net_device *device, int carrier)
 	if (device->state != NET_DEVICE_LIVE) {
 		error = ENODEV;
 	} else {
-		device->carrier = carrier != 0;
-		device_update_running_locked(device);
+		carrier = carrier != 0;
+		if (device->carrier != (unsigned)carrier) {
+			device->carrier = (unsigned)carrier;
+			device_update_running_locked(device);
+			event_ifindex = device->ifindex;
+			event_generation = device->generation;
+			event_flags = device->flags;
+			transition = carrier ? RTM_IFINFO_CARRIER_UP :
+			    RTM_IFINFO_CARRIER_DOWN;
+		}
 	}
 	device_unlock(enabled);
+	if (transition != 0U && route_socket_notify != NULL)
+		route_socket_notify(event_ifindex, event_generation, event_flags,
+		    transition);
 	return error;
 }
 

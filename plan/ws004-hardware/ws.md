@@ -4,8 +4,10 @@ Last updated: 2026-09-04
 
 WSID: `ws004`
 
-Status: complete baseline (`q070`); closed by user acceptance after the
-physically verified RTL8822BU correction was merged from `origin/main`.
+Status: active follow-up; the q070 2.4-GHz RTL8822BU baseline remains accepted.
+The user explicitly reopened p041 for a W52 5-GHz useful normal path and added
+p044 to move high-level reconnect ownership out of the kernel and into the
+finite `/sbin/wifi` command.
 q041 completed p016 checked legacy-HCD
 request retirement. q047 completed p031 legacy-HCD concurrent scheduling and
 root hotplug plus p032 checked endpoint/device recovery. P033's
@@ -51,10 +53,11 @@ from the driver's channel-1--11 snapshot, so common BSS selection returns
 `ENOENT` before a connection generation is admitted. The user's corrected
 2.4-GHz report was checked once in q069/p042: the exact channel-1 BSS connected
 and authorized, so its reported `ENOENT` remains unlocalized and receives no
-speculative fix. P041 is again Queue-ready as the independently proven 5-GHz
-capability addition. AX211 quality work remains deferred. These explicitly
-deferred or separately owned follow-ups remain in this ledger for later
-reopening; they do not keep the accepted WS004 baseline active.
+speculative fix. On 2026-09-04 the user explicitly reopened p041 as the
+independently proven 5-GHz capability addition, then added p044 to supersede
+p030's kernel-owned automatic reconnect while retaining p030's other lifecycle
+evidence. AX211 quality work remains deferred; no other accepted or deferred
+WS004 boundary is reopened.
 
 Parent: [master plan](../master.md)
 
@@ -164,7 +167,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p027`](phase027-wlan-uapi-common-core/phase.md) | Complete (`q055`) | Versioned pointer-free WLAN ioctls, strict INET dispatch, persistent station/cache/generations, checked lifetime barriers, deterministic fake radio, x86 builds, and IDE/xHCI exact-login gates pass without a hardware claim |
 | [`ws004-p028`](phase028-rtl8822bu-usb-scan/phase.md) | Automatic milestone complete (`q057`); developmental physical feedback obtained (`q059`/WS005 p009); final acceptance pending | Pinned BSD-3-Clause tables and binary notice, checked power/MAC/PHY/USB profiles, ch1--11 20-MHz scans, and automatic gates pass; q059 added EFUSE-calibrated legacy TX power and supplied one real attach/firmware/scan result, while WS005 p008 remains incomplete |
 | [`ws004-p029`](phase029-wpa2-ccmp-l2/phase.md) | Automatic milestone complete (`q058`); developmental physical secure-L2 feedback obtained (`q059`/WS005 p009); final acceptance pending | Common-kernel WPA2-Personal/CCMP authentication, association, four-way handshake, key CAM, controlled port, and bidirectional Ethernet L2 pass focused gates; q059 added strict RSNXE handling and one real authorized data result, q060 completed p030 automatic hardening, and shared WS005 p008 physical acceptance remains incomplete |
-| [`ws004-p030`](phase030-wlan-lifecycle-hardware-hardening/phase.md) | Automatic milestone complete (`q060`); shared WS005 p008 physical closure pending | Rekey, bounded reconnect, reset, up/down, unplug/reinsert, shutdown, 100-generation lifecycle, concurrent-storage, sanitizer/analyzer, x86 build, and QEMU controls pass; the one lifecycle checkpoint and frozen-artifact five-run ledger remain owned by WS005 p008 |
+| [`ws004-p030`](phase030-wlan-lifecycle-hardware-hardening/phase.md) | Automatic milestone complete (`q060`); reconnect ownership superseded by p044 | Rekey, the historical kernel reconnect model, reset, up/down, unplug/reinsert, shutdown, 100-generation lifecycle, concurrent-storage, sanitizer/analyzer, x86 build, and QEMU controls passed; p044 replaces only the automatic high-level reconnect policy |
 | [`ws004-p031`](phase031-legacy-hcd-concurrent-hotplug/phase.md) | Complete (`q047`) | UHCI/EHCI per-endpoint concurrency, periodic/asynchronous progress, request-local retirement, worker-context root hotplug, shared-INTx dispatch, all focused/configured/regression/build gates, and both forced QEMU cells pass |
 | [`ws004-p032`](phase032-usb-endpoint-device-recovery/phase.md) | Complete (`q047`) | Ordered endpoint clear-halt, conservative direct-root reset, allocation-free reclaim-safe recovery, and Mass Storage migration pass HW-T26 and xHCI/legacy QEMU controls; physical recovery was not exercised |
 | [`ws004-p033`](phase033-amd64-framebuffer-console-serialization/phase.md) | Complete (`q047`) | One early-safe lock and strict cell/framebuffer bounds pass HW-T27 host/sanitizer/input/build gates and the shared forced HW-T25 QEMU matrix without console fault or stall |
@@ -175,9 +178,10 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p038`](phase038-intel-ax211-standalone-driver/phase.md) | Uncleared (`q066`); automatic and exact-device VFIO normal-path milestones complete | API89 firmware/PNVM, scan, WPA2/CCMP, DHCP, LAN/public ping, nonempty HTTP fetch, disconnect, down, and host restoration pass; obtain the one shared final direct-boot result |
 | [`ws004-p039`](phase039-wlan-evidence-driven-refactor/phase.md) | Planned; follows p030 automatic milestone and p038; not queued | Compare both working drivers and move only substantial, stable, demonstrated common behavior beneath the unchanged public WLAN UAPI; a justified no-extraction result is valid |
 | [`ws004-p040`](phase040-rtl8822bu-passthrough-reproduction/phase.md) | Complete (`q068`) | Exact passthrough reproduced immediate `ENOENT`; the controlled 5-GHz target was absent from the completed channel-1 snapshot, so common BSS selection rejected it before RTL admission |
-| [`ws004-p041`](phase041-rtl8822bu-5ghz-quality/phase.md) | Planned; Queue-ready after q069; not queued | Add a checked non-DFS 5-GHz RTL8822BU scan and WPA2/CCMP useful normal path while preserving the passing 2.4-GHz path; AX211 remains separate |
+| [`ws004-p041`](phase041-rtl8822bu-5ghz-quality/phase.md) | Planned; explicitly reopened; Queue-ready | Add the checked Japan W52 channels 36/40/44/48 RTL8822BU scan and WPA2/CCMP useful normal path while preserving the passing 2.4-GHz path; AX211 remains separate |
 | [`ws004-p042`](phase042-rtl8822bu-24ghz-connect-reproduction/phase.md) | Complete (`q069`) | The one exact scan-visible channel-1 attempt connected and authorized with zero retries/error; the user's 2.4-GHz `ENOENT` did not reproduce |
 | [`ws004-p043`](phase043-rtl8822bu-physical-connect-ux/phase.md) | Complete (`q070`) | The origin/main correction passes focused regressions and the user-confirmed physical RTL8822BU path; scan-before-connect, bounded progress, controlled-port authorization, disconnect/down/up reuse, quiet output, and 64-bit diagnostics are accepted |
+| [`ws004-p044`](phase044-wlan-async-operation-boundary/phase.md) | Planned; route-event UAPI confirmation required; follows p041 | Keep scan/connect as prompt asynchronous kernel generations, remove p030's kernel-owned high-level retry, emit generic carrier/removal events, and hand the sole 30-second retry policy to WS005 p010 `/sbin/wifi` |
 
 ### MSI follow-up register
 
@@ -276,7 +280,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-23 | Complete as `ws004-p027` (`q055`) | Generic WLAN ioctl UAPI, persistent kernel station core, scan cache/state/lifetime, and deterministic fake device | HW-22 documentary capability boundary, p012 | HW-T30 passes ABI, state, race, detach, and secret-erasure fixtures without a physical-radio claim |
 | HW-24 | P036 complete (`q056`); p028 automatic milestone complete (`q057`); developmental physical feedback obtained (`q059`) | Exact RTL8822BU USB/pre-radio substrate, separately selected firmware, BSD-licensed tables, calibrated legacy TX power, and conservative 2.4-GHz/20-MHz scan | HW-22, HW-23, p010/p011/p015 | P036 and HW-T31 automatic gates pass; q059/p009 proves one real attach/firmware/scan normal path, while the WS005 p008 final ledger remains incomplete |
 | HW-25 | Automatic milestone complete as `ws004-p029` (`q058`); developmental physical feedback obtained (`q059`) | WPA2-Personal/CCMP authentication, association, key installation, controlled port, and Ethernet L2, including bounded RSNXE handling | HW-24, kernel entropy and reviewed crypto substrate | HW-T33 and q059 focused codec/engine/CCMP/RTL fixtures pass; one real authorized data path succeeds, q060 completes p030 automatic hardening, and WS005 p008 final physical acceptance remains incomplete |
-| HW-26 | Automatic milestone complete as `ws004-p030` (`q060`); shared physical closure pending | Rekey, bounded reconnect, reset, hotplug, shutdown, and final exact-hardware hardening | HW-25, completed WS005 p009 normal path, controlled AP, WS005 p008 | HW-T34 automatic fault/race/storage, focused regression, configured-build, and QEMU controls pass; the shared p008 lifecycle/five-run frozen-artifact ledger remains outstanding |
+| HW-26 | Automatic milestone complete as `ws004-p030` (`q060`); reconnect policy superseded by p044 | Rekey, historical bounded kernel reconnect, reset, hotplug, shutdown, and exact-hardware hardening | HW-25, completed WS005 p009 normal path, controlled AP | HW-T34 automatic fault/race/storage, focused regression, configured-build, and QEMU controls passed; p044 now removes only the high-level kernel retry owner |
 | HW-27 | Complete as `ws004-p031` (`q047`) | Concurrent UHCI/EHCI per-endpoint scheduling, request-local retirement, and runtime root-port lifecycle | p009--p011, p015, p016 | HW-T25 ordinary/sanitizer/analyzer and configured production gates, shared-INTx and USB regressions, repository build, plus standalone UHCI and paired EHCI/UHCI QEMU cells pass |
 | HW-28 | Complete as `ws004-p032` (`q047`) | Ordered USB endpoint-halt recovery and conservative direct-root device reset shared by xHCI/UHCI/EHCI | HW-27, p010/p011/p015/p016 | HW-T26, reclaim-safe reserve gates, xHCI and paired UHCI/EHCI QEMU controls pass; no physical-machine recovery result is claimed |
 | HW-29 | Complete as `ws004-p033` (`q047`) | Early-safe amd64 PC/AT framebuffer-console serialization and strict cell/pixel bounds | q047 p031 stress observation, existing console contract | HW-T27 host/sanitizer/input/build gates and forced `q047-legacy-hcd-final4` standalone/paired QEMU cells pass without console fault, corruption, or stall |
@@ -287,6 +291,8 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-34 | Uncleared as `ws004-p038` (`q066`); automatic and exact-device VFIO milestones complete | Independent native AX211/CNVio2 driver and `userland/firmware/intelax211/` entry, without an Intel/RTL hardware framework | HW-33, HW-00/HW-23/HW-25 contracts and `ws003-p025` | HW-T38 API89/focused and exact-device VFIO scan, secure L2, useful-IP, checked-down, and host-restoration evidence pass; one direct boot must still supply the shared physical counter/network result |
 | HW-35 | Planned as `ws004-p039`; follows p038 | Evidence-driven comparison and optional extraction of proven common WLAN behavior | HW-26 automatic milestone and completed HW-34, with passing exact-device paths | HW-T39 preserves public UAPI and both drivers; a documented no-extraction review is valid when commonality is not substantial/stable |
 | HW-36 | Complete as `ws004-p043` (`q070`) | Physical RTL8822BU scan-before-connect, one 30-second connection state machine, explicit primitive up/down and quiet mode, and measured real-xHCI timeout correction | HW-24--HW-26, q069, newly repeatable physical observations | Automatic gates pass and the user-confirmed origin/main correction works on the physical RTL8822BU target; p043 is closed |
+| HW-37 | Planned as `ws004-p041`; explicitly reopened | Japan W52 channels 36/40/44/48 with checked 5-GHz EFUSE power, RF/BB/CCA/RFE programming, scan, secure L2, and one useful-IP passthrough path | HW-24--HW-26 and the accepted q070 baseline | Focused band/power/rollback and 2.4-GHz regression gates pass; exact `2357:012e` ch44/5220-MHz scan, authorization, DHCP, ping, fetch, disconnect, and down pass on `10.0.10.25` |
+| HW-38 | Planned as `ws004-p044`; route-event UAPI confirmation required; follows p041 | Asynchronous WLAN scan/single-attempt connect boundary and generic link-event delivery, with no kernel-owned high-level reconnect | HW-23--HW-26, HW-37, accepted q070 baseline | HW-T42 proves prompt ioctls, asynchronous terminal generations, immediate link-down cleanup/event, no hidden retry, event overflow/reuse safety, and retained lifecycle regressions |
 
 ## 4. NVMe sequence
 
@@ -363,13 +369,14 @@ extension and is not in this dependency chain.
 
 | Owner | Responsibilities |
 | --- | --- |
-| Common kernel WLAN layer | Versioned ioctl/status, scan generation/cache and BSS choice, 802.11 authentication/association, WPA2 state and crypto, rekey/reconnect, controlled port, Ethernet/802.11 conversion, carrier, cancellation, and secret lifetime |
+| Common kernel WLAN layer | Versioned asynchronous ioctl/status, scan generation/cache and BSS choice, one-attempt 802.11 authentication/association, WPA2 state and crypto, rekey, controlled port, Ethernet/802.11 conversion, carrier/link events, cancellation, and secret lifetime; p044 removes high-level reconnect |
 | RTL8822BU chip/USB driver | Exact descriptor binding, USB control/bulk transport, efuse/RFE/radio/channel, firmware upload/events, hardware TX/RX descriptors and status, key CAM and CCMP offload, reset/quiesce |
 | WS005 control plane | User-facing `wifi` and `net wifi` commands, per-user/root credential-file policy, automatic profile selection, and starting `dhcpc` only after L2 authorization |
 
 The kernel common layer is deliberately long-lived: a one-shot `wifi connect`
-process cannot own EAPOL retransmission, GTK rekey, link-loss handling, or
-controlled-port state after it exits. Conversely, the chip driver does not
+process cannot own EAPOL retransmission, GTK rekey, link-loss cleanup/event, or
+controlled-port state after it exits. It does not choose when to start another
+scan/connect generation; p010 `/sbin/wifi` owns that finite retry. Conversely, the chip driver does not
 parse a passphrase, choose an SSID, run WPA, or raise carrier. DHCP begins only
 after p029's authorized L2 result and remains outside WS004.
 

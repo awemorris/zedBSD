@@ -97,10 +97,16 @@ struct rtl8822b_chip_identity {
 #define RTL8822B_RF_PATH_COUNT 2U
 #define RTL8822B_2G_CCK_GROUP_COUNT 6U
 #define RTL8822B_2G_OFDM_GROUP_COUNT 5U
+#define RTL8822B_5G_OFDM_GROUP_COUNT 14U
 
 struct rtl8822b_2g_tx_power {
 	uint8_t cck_base[RTL8822B_2G_CCK_GROUP_COUNT];
 	uint8_t bw40_base[RTL8822B_2G_OFDM_GROUP_COUNT];
+	int8_t ofdm_diff;
+};
+
+struct rtl8822b_5g_tx_power {
+	uint8_t bw40_base[RTL8822B_5G_OFDM_GROUP_COUNT];
 	int8_t ofdm_diff;
 };
 
@@ -114,6 +120,7 @@ struct rtl8822bu_board_info {
 	uint8_t rf_board_option;
 	uint8_t country_code[2];
 	struct rtl8822b_2g_tx_power tx_power_2g[RTL8822B_RF_PATH_COUNT];
+	struct rtl8822b_5g_tx_power tx_power_5g[RTL8822B_RF_PATH_COUNT];
 };
 
 /*
@@ -194,6 +201,8 @@ int rtl8822b_chip_identity_parse(uint32_t sys_cfg1,
 	struct rtl8822b_chip_identity *identity);
 int rtl8822bu_board_parse(const uint8_t *logical, size_t logical_length,
 	uint32_t sys_cfg1, struct rtl8822bu_board_info *board);
+int rtl8822b_board_active_channel_allowed(
+	const struct rtl8822bu_board_info *board, uint8_t channel);
 
 int rtl8822b_rx_packet_parse(const uint8_t *bytes, size_t length,
 	struct rtl8822b_rx_packet *packet);

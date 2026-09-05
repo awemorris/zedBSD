@@ -44,7 +44,6 @@ enum wlan_wpa2_state {
 	WLAN_WPA2_STATE_GROUP_MESSAGE_2_RETRANSMIT_TX,
 	WLAN_WPA2_STATE_PAIRWISE_ACTIVATE,
 	WLAN_WPA2_STATE_GROUP_ACTIVATE,
-	WLAN_WPA2_STATE_RECONNECT_WAIT,
 	WLAN_WPA2_STATE_AUTHORIZED,
 	WLAN_WPA2_STATE_FAILED
 };
@@ -171,7 +170,7 @@ struct wlan_wpa2_engine {
 	uint8_t authorized;
 	uint8_t message_3_accepted;
 	uint8_t group_message_accepted;
-	uint8_t reconnectable;
+	uint8_t connected_lifetime;
 	uint8_t pairwise_rekey;
 	uint8_t activation_complete;
 	uint8_t old_group_retired;
@@ -208,14 +207,6 @@ int wlan_wpa2_engine_report_tx(struct wlan_wpa2_engine *engine,
 	uint64_t now_ticks);
 int wlan_wpa2_engine_timer(struct wlan_wpa2_engine *engine,
 	uint64_t now_ticks);
-/* Link loss retains only the PMK and nonsecret profile for bounded
- * same-network recovery.  reconnect() always starts a fresh radio,
- * authentication, association, nonce, key generation, and PN domain. */
-int wlan_wpa2_engine_link_lost(struct wlan_wpa2_engine *engine, int error);
-int wlan_wpa2_engine_reconnect(struct wlan_wpa2_engine *engine,
-	uint64_t generation, uint64_t total_deadline_ticks,
-	uint64_t now_ticks);
-int wlan_wpa2_engine_can_reconnect(const struct wlan_wpa2_engine *engine);
 int wlan_wpa2_engine_stop(struct wlan_wpa2_engine *engine);
 
 enum wlan_wpa2_state wlan_wpa2_engine_state(

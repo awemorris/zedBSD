@@ -1,6 +1,6 @@
 # WS005 Phase 005: root and per-user Wi-Fi credential store
 
-Last updated: 2026-09-01
+Last updated: 2026-09-05
 
 WSID: `ws005`
 
@@ -14,6 +14,20 @@ prerequisites, and q051 real-command abrupt-stop/reboot acceptance pass
 Parent: [WS005 networking and WLAN](../ws.md)
 
 Tests: [WS005 test index](../tests/README.md)
+
+## Post-completion integration amendment
+
+Q051 completed the store format, local writer, safe reader, durability, and
+redaction evidence. On 2026-09-05 the user changed only the later consumer:
+`networkd`, not the transient `net` frontend, reads the active policy owner's
+store when a connection operation needs it. The path and ownership algorithm
+below is unchanged and shared by the writer and daemon reader.
+
+After a successful local `set-key`, `net` sends a nonsecret
+`profiles-changed` notification over the authenticated networkd socket. A
+notification failure may produce a bounded nonsecret warning but does not
+roll back the already authoritative atomic file update. Q051 did not implement
+or test this notification; p006/p007 own it.
 
 ## Objective
 
@@ -29,12 +43,12 @@ reads and writes `.wifi.conf` in that account's passwd-record home directory.
 The update is owner-checked, mode `0600`, locked, validated, same-directory
 atomic, and redacted on every failure.
 
-This Phase manages profiles only.  `set-key` does not contact
-`networkd`, invoke `/sbin/wifi`, scan, associate, or run DHCP.  Later `net wifi
-up` and `net wifi connect` use the same parser in the `net` process, select a
-profile under the caller's effective UID, and send bounded selected values over
-the authenticated `networkd` socket.  `networkd` never resolves a client home
-directory or opens a client credential file.
+This Phase manages profiles only. `set-key` does not invoke `/sbin/wifi`, scan,
+associate, or run DHCP. Its only daemon interaction is the post-commit
+nonsecret notification above. Later `net wifi enable` establishes the active
+policy UID from authenticated peer credentials. `networkd` uses the same safe
+reader to open `/etc/wifi.conf` for UID 0 or `.wifi.conf` in the passwd-record
+home for another UID; no client supplies a pathname or secret over ZNV2.
 
 ## Baseline and supersession
 
@@ -49,8 +63,9 @@ rc.conf service option, or a confirmed-commit rollback program.
 
 ## Dependencies
 
-- `ws005-p002`: caller-owned profile selection, WPA2-Personal/CCMP v1, fixed
-  command grammar, and no `/sbin/wpa` compatibility path.
+- `ws005-p002`: euid-selected local writer, active-policy-UID daemon reader,
+  WPA2-Personal/CCMP v1, fixed command grammar, and no `/sbin/wpa`
+  compatibility path.
 - Existing passwd/group lookup, `openat`, `renameat`, `O_DIRECTORY`,
   `O_NOFOLLOW`, `O_EXCL`, record locking, `fsync`, and effective-UID support.
 - [`ws001-p022`](../../ws001-posix/phase022-credential-aware-vfs-creation/phase.md)
@@ -79,12 +94,13 @@ decision and not authority to create either credential file on a live system.
 
 ## Path and caller selection
 
-The `net` process selects exactly one store before opening any profile data:
+The writer selects by `net`'s effective UID. The daemon reader selects by its
+stored, kernel-attested active policy UID:
 
-| Calling effective UID | Store |
+| Selected UID | Store |
 | --- | --- |
 | `0` | `/etc/wifi.conf` |
-| nonzero | `<pw_dir>/.wifi.conf`, where `pw_dir` comes from `getpwuid_r(geteuid())` |
+| nonzero | `<pw_dir>/.wifi.conf`, where `pw_dir` comes from `getpwuid_r(selected_uid)` |
 
 The rules are fixed:
 
@@ -101,9 +117,9 @@ The rules are fixed:
   target, lock, temporary, validation, and rename operations are relative to
   that stable descriptor.
 
-`networkd` receives selected profile values in a later Phase.  It rejects a
-credential path or claimed home in protocol data and does not repeat this
-selection algorithm.
+`networkd` rejects a credential path, claimed UID, or claimed home in protocol
+data. It repeats this fixed selection algorithm locally using the active policy
+UID and never trusts the daemon environment.
 
 ## Version 1 file grammar
 
@@ -142,11 +158,12 @@ bytes outside safe printable ASCII use canonical escapes.  Empty/hidden SSID
 profiles, raw 64-hex PSKs, open networks, WPA3, WPA1, and enterprise
 credentials are rejected by v1.
 
-Each SSID appears at most once.  Duplicate decoded SSIDs are an error even if
-their quoted spellings differ.  File order is policy order: later automatic
-selection tries visible `auto` entries from first to last, with at most the
-first four matches attempted by one `net wifi up`.  There is no hidden RSSI
-priority.
+Each SSID appears at most once. Duplicate decoded SSIDs are an error even if
+their quoted spellings differ. File order is policy order: automatic selection
+tries visible `auto` entries from first to last, with at most the first four
+matches attempted by one selection generation. Explicit `connect SSID` reads
+the matching entry regardless of its `auto`/`manual` flag. There is no hidden
+RSSI priority between profiles.
 
 ## Frozen resource limits
 
@@ -177,6 +194,9 @@ net wifi set-key SSID PASSPHRASE [auto]
 - With `auto`, the resulting record is `auto`; without it, the resulting record
   is `manual`.  Updating without `auto` therefore clears a previous auto flag
   deliberately rather than retaining invisible state.
+- The literal `manual` is an internal file value, not a public option. An
+  explicit `manual` operand or any other extra token is rejected before the
+  store is opened.
 - An existing decoded SSID is replaced in place so profile order is stable.
   A new SSID appends after all existing records.
 - The complete existing file is validated before modification.  An invalid
@@ -210,8 +230,9 @@ separate commands if later required.
 - Wrong ownership or broad mode is reported and left unchanged.  `set-key`
   does not silently `chown` or weaken a pre-existing object to make it usable.
 
-These checks apply on every read as well as write.  A later `net wifi up` must
-not consume a profile file which `set-key` would reject.
+These checks apply on every read as well as write. A later networkd automatic
+or explicit connection must not consume a profile file which `set-key` would
+reject.
 
 ## Locking and atomic publication
 
@@ -277,8 +298,9 @@ lock-file spelling.
   secret service;
 - profile migration, merge, system/user inheritance, priority/RSSI policy, or
   multi-user session arbitration;
-- contacting `networkd` during `set-key`, authenticating a socket peer, or
-  implementing the later ZNV2 transport;
+- implementing the later ZNV2 `profiles-changed` notification or daemon
+  policy state; the completed local writer remains the only secret-bearing
+  part of `set-key`;
 - scan, association, key installation in the driver, DHCP, route/DNS mutation,
   or reconnect; and
 - adding credentials to `/etc/net.conf` or confirmed-commit rollback data.
@@ -288,9 +310,9 @@ lock-file spelling.
 1. Encode the frozen 32-KiB file, 512-byte line, 64-profile, 4096-byte decoded
    secret, five-second lock, shared-reader, and 512-byte diagnostic limits in
    named constants and boundary test vectors.
-2. Implement one bounded parser/model/canonical serializer shared by
-   `set-key` and later `net wifi` readers; do not duplicate credential parsing
-   in `networkd`.
+2. Implement one bounded parser/model/canonical serializer shared by local
+   `set-key` and the later networkd reader; do not create a second credential
+   grammar.
 3. Implement effective-UID/passwd path selection and directory-relative,
    no-follow ownership/type/mode validation.
 4. Implement the persistent companion lock and checked same-directory atomic
@@ -298,6 +320,7 @@ lock-file spelling.
    rename/directory-sync boundary.
 5. Add `net wifi set-key` dispatch, replace-in-place/append/auto semantics,
    zeroization, and redacted diagnostics without changing other `net` commands.
+   The later nonsecret notification remains p006/p007 integration work.
 6. Add focused ordinary/sanitizer/analyzer fixtures and preserve wired
    network, netconf, build, and QEMU regressions.
 
@@ -338,9 +361,12 @@ monotonic-clock fixture, including interruption and waiter cancellation.
 Capture stdout, stderr, syslog hooks, temporary directory listing, and test
 evidence for success and every failure.  The dummy passphrase may appear only
 inside the expected mode-0600 target or staged fixture while owned by the test.
-Prove `set-key` opens no networkd socket and invokes no `wifi`, `ifconfig`, or
-`dhcpc` child.  Existing `net` commands and `/etc/net.conf` remain byte-for-byte
-unchanged by the credential operation.
+Q051's original acceptance proves the local writer opens no networkd socket
+and invokes no `wifi`, `ifconfig`, or `dhcpc` child. Under the later amendment,
+p006/p007 must prove the only post-commit interaction is one empty bounded
+`profiles-changed` request and still invokes no primitive child. Existing
+`net` commands and `/etc/net.conf` remain byte-for-byte unchanged by the
+credential operation.
 
 Run ordinary and ASan/UBSan variants where supported, the compiler analyzer,
 existing WS011 netconf/persistence and WS002 network-service regressions,
@@ -367,8 +393,10 @@ existing WS011 netconf/persistence and WS002 network-service regressions,
 - No diagnostic, log, status, analyzer result, or retained evidence exposes a
   passphrase; every diagnostic stays within 512 bytes and the public argv
   exposure remains honestly documented.
-- `set-key` does no network operation, `/etc/net.conf` contains no WLAN secret,
-  and current wired `net`/`networkd`/`dhcpc`, build, and QEMU regressions pass.
+- `set-key` performs no secret-bearing network operation; its later
+  `profiles-changed` notification is empty/nonsecret. `/etc/net.conf` contains
+  no WLAN secret, and current wired `net`/`networkd`/`dhcpc`, build, and QEMU
+  regressions pass.
 
 ## Frozen implementation parameters
 
@@ -388,8 +416,9 @@ world-readable compatibility store.
 
 ## Queue boundary and handoff
 
-q051 completes this Phase. Its parser, selected-profile API, safe reader, and
-atomic store are available to `ws005-p006`/`p007`; this completion does not
+q051 completes the persistence portion of this Phase. Its parser,
+selected-profile API, safe reader, and atomic store are available to the
+networkd work in `ws005-p006`/`p007`; this completion does not
 itself authorize socket protocol, association, DHCP, or physical-adapter work.
 
 ## q041 execution result
@@ -408,9 +437,11 @@ The host-side implementation is retained as safe partial progress:
   old generation before rename, report post-rename durability uncertainty,
   never unlink the published lock inode, and sanitize a secret-bearing
   temporary before reporting an unremovable residual; and
-- `/sbin/net wifi set-key SSID PASSPHRASE [auto]` is local-only and clears its
-  mutable argv passphrase after use.  It does not contact `networkd` or alter
-  `/etc/net.conf`.
+- At q041, `/sbin/net wifi set-key SSID PASSPHRASE [auto]` was local-only and
+  cleared its mutable argv passphrase after use. Q071 adds only the empty,
+  nonsecret post-commit `profiles-changed` notice described above; no profile,
+  path, UID, or passphrase is sent to `networkd`, and `/etc/net.conf` remains
+  unchanged.
 
 The Phase-owned ordinary, ASan+UBSan, compiler-analyzer, and parser/model gates
 pass.  Existing WS011 console, boot-application, parser, and persistence gates;

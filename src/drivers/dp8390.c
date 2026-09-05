@@ -1,8 +1,12 @@
 /*
- * Common dp8390 Ethernet driver
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Common dp8390 Ethernet driver
  */
 
 #include "drivers/dp8390.h"

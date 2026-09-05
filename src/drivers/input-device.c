@@ -1,4 +1,10 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #include "kern/input-device.h"
 #include "kern/cdev.h"
 #include "kern/clock.h"

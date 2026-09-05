@@ -204,24 +204,24 @@ Non-root admission does not grant the existing raw `STATIC`, `DEFAULTROUTE`,
 WLAN opcode yet, so its executable non-root surface is only the existing
 read-only `SHOW` operation. The bounded WLAN policy categories are retained in
 the authorization classifier and fixtures, but p006 is the first Phase allowed
-to attach real opcodes to them. A future permitted compound `net wifi up` may
-cause root `networkd` to invoke `ifconfig`, `wifi`, and `dhcpc`, but the client
-cannot decompose that authority into arbitrary route, resolver, or address
-requests.
+to attach the global `enable`, `disable`, `list`, `connect SSID`, `disconnect`,
+and `profiles-changed` opcodes. Those opcodes may cause root `networkd` to
+invoke interface-specific `ifconfig`, `wifi`, and `dhcpc` children, but the
+client cannot decompose that authority into arbitrary route, resolver, or
+address requests.
 
-Profile selection is deliberately outside the daemon.  The `net` client uses
-its own effective UID to read `/etc/wifi.conf` or its passwd-record home
-`.wifi.conf`, then sends the selected bounded SSID and secret over the
-authenticated socket contract.  `networkd` never resolves `HOME`, calls
-`getpwuid` for a peer, opens a peer's credential file, or accepts a pathname in
-place of selected profile data.
+The 2026-09-05 policy amendment makes profile selection a daemon
+responsibility. `net wifi set-key` writes the caller's effective-UID store and
+sends only an empty `profiles-changed` notice. An accepted `enable` supplies
+the active policy UID solely through this Phase's kernel-attested
+`SO_PEERCRED`; networkd resolves that UID's passwd-record home when needed and
+opens the fixed store itself. No global WLAN request accepts a UID, `HOME`, a
+profile path, an interface, a profile record, or a passphrase.
 
-Consequently the profile path is a client policy, not an authorization proof.
-An admitted non-root peer can implement the protocol directly and supply any
-bounded WLAN profile values. The `network` group deliberately grants that
-bounded WLAN-administration authority; p003 does not claim per-user secret
-isolation merely because the standard `net` client chooses the caller's file.
-A future seat-scoped credential broker requires a separate design.
+The euid-selected file is policy input, not a separate secret-isolation
+boundary. Membership in `network` grants the bounded WLAN-administration
+authority to replace the active policy owner through `enable`; a future
+seat-scoped credential broker requires a separate design.
 
 The peer PID/EUID/EGID is attached to exactly one authorization-decision audit
 record per accepted connection.  The record is capped at 512 bytes including

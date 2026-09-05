@@ -15,6 +15,7 @@ int wifi_store_set_key_for_effective_user(const char *, const char *, int,
 					  char *, size_t);
 int wifi_store_load_for_effective_user(struct wifi_conf_model *, char *,
 				       size_t);
+int wifi_store_load_for_user(uid_t, struct wifi_conf_model *, char *, size_t);
 
 enum wifi_store_test_stage {
 	WIFI_STORE_TEST_NONE,

@@ -1259,6 +1259,8 @@ run_integration(void)
 	connect.passphrase_length = sizeof(fixture_passphrase) - 1U;
 	assert(wlan_station_ioctl(&device, SIOCSWLANCONNECT, &connect) == 0);
 	connection_generation = connect.generation;
+	assert(!fixture.pending && wlan_work_pending());
+	wlan_timer_run(fixture.now);
 	assert(fixture.pending);
 	complete_pending(&fixture);
 	length = build_authentication_response(frame);
