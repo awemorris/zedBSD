@@ -7,16 +7,16 @@ WSID: `ws019`
 Status: active; Noct 2.0.1 is integrated and the temporary implementation-
 language block is released. The user selected target-side creation through new
 `mkfs` and `mkswap` commands rather than installer templates. P002 is
-Queue-ready; p003, p008, p009, p004, and p005 follow.
+selected as pending in proposed q076; p003, p008, p009, p004, and p005 follow.
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws019-p001` design contract complete
 
-Resume point: after WS011 p006/p007, Queue p002's read-only storage
-administration UAPI, p003 `/sbin/diskpart`, p008 `/sbin/mkfs`, p009
+Resume point: WS011 p007/p009 completed in q075. Approve proposed q076 for
+p002's read-only storage UAPI only. P003 `/sbin/diskpart`, p008 `/sbin/mkfs`, p009
 `/sbin/mkswap`, p004 Noct `/bin/zedinst`, and p005 QEMU acceptance in that
-dependency order.
+dependency order require later Queue selection.
 
 Shared tests: [WS019 test index](tests/README.md)
 
@@ -104,7 +104,7 @@ unattended fixed-disk boot may add a separately reviewed Boot entry later.
 
 The loader is physically on the ESP while all remaining files are on the
 payload FAT32. Therefore loader origin cannot continue to mean `boot0`.
-WS013 p002/p003 must:
+WS013 p002/p003 completed this discovery/parsing contract in q031:
 
 1. enumerate SimpleFS handles on the same physical GPT disk as the loaded ESP;
 2. accept same-disk FAT16/FAT32, including the loaded filesystem when it owns
@@ -145,15 +145,17 @@ sizes and invokes the target `/sbin/mkfs` and `/sbin/mkswap`; it never copies
 the running overlay upper or active swap. It generates the direct
 `/zedbsd.cfg` above rather than copying mutable live configuration.
 
-## Required foundations discovered by audit
+## Foundations and current gaps
 
-- The UEFI loader currently opens only its own filesystem, loads
-  `/VMUNIX.X64`, and treats the ESP FAT serial as implicit `boot0`; it cannot
-  boot this two-partition layout without WS013 p002/p003.
-- The current UEFI handoff also hard-codes MBR and partition indices. The
-  loader/HAL boundary must stop presenting those values as authoritative for
-  a GPT boot. The selected config FAT's synthesized `boot0` remains the
-  filesystem identity contract.
+- WS013 p002/p003 completed same-disk config-volume discovery and configured
+  kernel loading in q031; the former own-filesystem-only `/VMUNIX.X64` path is
+  historical, not an outstanding prerequisite. Q032 completed the configured
+  BIOS paths. P002 must expose the retained selected boot/config filesystem
+  truthfully without confusing it with the firmware-loaded ESP.
+- The selected config FAT's synthesized `boot0` remains the filesystem
+  identity contract. Current versioned boot metadata distinguishes GPT from
+  legacy one-based MBR indices; p002 must not infer missing physical-loader
+  provenance from an MBR index, enumeration order, or the running root.
 - A strict GPT enumerator is required to publish partition type, PARTUUID,
   parent identity, and bounds. WS004 p024 owns its block-path acceptance;
   WS019 p002 owns the read-only user-visible query boundary.
@@ -169,7 +171,7 @@ the running overlay upper or active swap. It generates the direct
 | Combined ID | Phase | Status | Required result |
 | --- | --- | --- | --- |
 | `ws019-p001` | [overlay installer-v1 contract](phase001-installer-v1-contract/phase.md) | Completed by design, 2026-08-29 | The existing-ESP/existing-FAT32, no-format, no-Boot-variable contract and Phase map are fixed |
-| `ws019-p002` | [read-only block/GPT administration](phase002-readonly-block-gpt-administration/phase.md) | Queue-ready | Implement the frozen read-only kernel/user-visible storage snapshot boundary |
+| `ws019-p002` | [read-only block/GPT administration](phase002-readonly-block-gpt-administration/phase.md) | Pending in proposed q076 | Versioned read-only snapshot, full GPT metadata, use/boot provenance and opened-object change detection; no implementation before approval |
 | `ws019-p003` | [read-only `/sbin/diskpart`](phase003-diskpart-readonly/phase.md) | Planned; follows p002 | Implement the frozen read-only inspection grammar after p002 |
 | `ws019-p004` | [existing-FAT overlay `/bin/zedinst`](phase004-zedinst-existing-fat-overlay/phase.md) | Planned Noct implementation; follows p002/p003/p008/p009 | Copy immutable boot/root artifacts and create fresh data/swap files through target commands |
 | `ws019-p005` | [QEMU NVMe overlay-install acceptance](phase005-qemu-nvme-overlay-install/phase.md) | Planned; follows p002--p004 and p008/p009 | Run the frozen non-partition-formatting QEMU NVMe acceptance |

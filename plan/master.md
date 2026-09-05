@@ -479,7 +479,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Queue-ready; permission ceiling selected | No Phase started; p001 Queue-ready | After WS022, Queue p001--p004; RW mappings may return from RO to RW within their original maximum | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
-| `ws019` | Installation and disk administration | Active; Noct 2.0.1 block released and target-generation policy selected | p001 complete; p002 Queue-ready; p003/p008/p009/p004/p005 follow | Next dependency-ready wave after q075: queue p002, then diskpart, target mkfs/mkswap, Noct zedinst, and QEMU acceptance in dependency order | [WS019](ws019-installation/ws.md) |
+| `ws019` | Installation and disk administration | Active; q076 proposed for the first read-only storage boundary | p001 complete; p002 pending in proposed q076; p003/p008/p009/p004/p005 follow | Approve q076 for p002 only; later Queues cover diskpart, target formatters, Noct zedinst and installation acceptance | [WS019](ws019-installation/ws.md) |
 | `ws020` | Intel Mac UEFI bring-up and generic image variants | Complete (user physical confirmation, 2026-09-05) | Automatic Variant/GPT/QEMU gates and successful Intel Mac real-hardware operation pass | No Phase remains; explicit acceptance supersedes the older five-run campaign | [WS020](ws020-intel-mac/ws.md) |
 | `ws021` | Reproducible x86 LLVM toolchain and sysroots | Complete (`q064`) | LLVM 23.1.0 cache/source paths, amd64/i386 sysroots, all x86 target/loader builds, four CI configurations, six-cell amd64 firmware matrix, i386 PC/AT and PC-98, and target noct non-JIT/JIT/BeUI gates pass | No current Phase; the source-build path and pinned `rev-0` cache remain supported in parallel | [WS021](ws021-llvm-toolchain/ws.md) |
 | `ws022` | ELF `PT_TLS` and static thread-local storage | Queue-ready; WS021 dependency satisfied | No Phase started | Queue p001 to freeze the x86 TLS/TCB ABI and fixtures, then implement p002/p003 | [WS022](ws022-elf-tls/ws.md) |
@@ -593,6 +593,11 @@ accepted and are no longer execution-order entries. Q075 also completes WS011's
 p007/p009 automatic milestone. Physical p008 still requires its transport,
 target link, trial values, and recovery route; VLAN/bridge p004 remains excluded
 by `MB-010`. The next dependency-ready order, requiring a new Queue approval, is:
+
+[Proposed q076](queue.md) selects only `ws019-p002`: a read-only storage query
+boundary, with a proposed 2--3-hour active-work timebox and at most one
+disposable QEMU NVMe query cell. It does not authorize later CLI, formatter,
+or installer work and remains pending execution approval.
 
 1. WS019 in dependency order: p002 read-only storage administration, p003
    read-only `/sbin/diskpart`, p008 target UFS1-in-file `/sbin/mkfs`, p009

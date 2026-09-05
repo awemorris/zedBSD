@@ -1,115 +1,72 @@
-# Queue: confirmed-commit overlay publication correction
+# Queue proposal: read-only storage administration
 
 Last updated: 2026-09-05
 
-QID: `q075`
+QID: `q076`
 
-Queue status: finished
+Queue status: proposed; awaiting execution approval
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: the user approved correction on 2026-09-05 ("では修正してください").
-The user then expanded verification to ten slightly varied T021 trials and
-explicitly allowed clearance if the stop does not recur in any of them.
-One diagnostic cell passed, then normal case 06 reproduced the stop. The user
-subsequently explicitly approved thorough optimization of the identified FAT
-path. That failure is preserved; the four remaining cells all passed post-fix
-acceptance, beginning with the failing procedure. T020 was not rerun.
+Authorization: the user requested extraction of the next work item. This
+authorizes planning only; implementation, builds, and QEMU await approval.
+Standing permission permits a planning-only `WIP` commit and push.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q074](queue-q074.md)
+Previous Queue: [q075](queue-q075.md)
 
 ## Purpose
 
-Correct the target hybrid-overlay atomic-publication stop exposed by q074's
-NCOM-T021 cell. Establish the exact blocking stage, make only the responsible
-bounded correction, then complete T021 verification so p007 can either complete or retain
-a narrower honest residual.
+Provide the read-only storage snapshot needed before implementing diskpart
+and the existing-FAT installer. Q075 completed WS011's automatic prerequisite;
+its physical follow-up remains separate and does not block this next wave.
 
 ## Execution registry
 
 | Priority | WS / Phase | Status | Purpose / dependency |
 | --- | --- | --- | --- |
-| 1 | [`ws011-p009`](ws011-net-config/phase009-confirmed-commit-overlay-publication/phase.md) | completed | Reproduced and corrected FAT backing-file traversal cost; cost/fault/build gates and all four post-fix T021 cases pass; p007 automatic acceptance completed |
+| 1 | [`ws019-p002`](ws019-installation/phase002-readonly-block-gpt-administration/phase.md) | pending | Versioned disk/GPT/filesystem/use-state queries with bounded enumeration and change detection; depends on completed WS004 p024 and existing disk/mount/swap/boot-source foundations |
 
-## Why this is the next bounded unit
+## Why this is next
 
-- Q074 accepted T020 but exhausted p007's two-cell boundary when T021 failed to
-  return from atomic publication. Repeating that attempt without new evidence
-  is prohibited.
-- The ten admitted post-commit connections do not prove final DNS completion:
-  authentication is logged before request dispatch. Localization must cover
-  the final DNS request/response/close, subsequent atomic publication, and
-  DISARM connection setup rather than assuming a specific syscall failed.
-- P009 defines finite stage instrumentation, lower-only overlay replacement
-  tests, strict durability/order invariants, and a maximum QEMU budget. It can
-  stop uncleared if the cause requires a material filesystem redesign.
-- P008 cannot proceed until automatic T021 passes, and the active WS019 wave
-  follows WS011. This correction therefore remains the first dependency-ready
-  work.
+- WS019 is next in the master's dependency-ready order. P003 diskpart and the
+  target formatters/installer need reliable identity and current-use evidence.
+- Existing disk registry and blkid queries do not compose parent, full GPT
+  metadata, boot-source/use state, and change detection into one snapshot.
+- The GPT parser validates type GUIDs but does not retain them in published
+  partition records. The full GPT label exceeds the old blkid text field.
+- WS011 p008 still needs physical transport/topology choices; no remote
+  service or physical test is part of this Queue.
 
-## Execution and timebox boundary
+## Proposed timebox and execution boundary
 
-- One Queue item and one corrective Phase only.
-- Begin with static and host stage/order/failure evidence. Use at most one
-  instrumented diagnostic amd64 QEMU cell only if target-only localization is
-  still required.
-- Make only a bounded fix in the responsible netconf, generic sync, overlay, or
-  directly backing-filesystem path. Do not weaken file synchronization, atomic
-  replacement, error propagation, or publication-before-DISARM ordering.
-- User-amended boundary: run ten fresh T021-only cells using normal optimized
-  binaries, q074's restricted NE2000 topology, and the real one-minute timeout.
-  Vary one procedure/timing feature per case as recorded in P009. Preserve
-  failed guest state and investigate any recurrence; do not treat tracing or
-  frame-pointer builds as these ten acceptance trials. Do not rerun T020.
-- Rerun NCOM-T001--T012, directly affected VFS/storage fixtures, existing
-  WS011/ZNV2/Wi-Fi regressions, maintained amd64/i386 target builds,
-  documentation validators, and `git diff --check`. Do not run aggregate
-  `make check`.
-- Do not begin p008 physical work, add a remote service, change public
-  grammar/protocol, begin VLAN/bridge, or broaden into a VFS/storage redesign.
+- One Phase; estimated 2--3 hours of active work, reviewed at three hours.
+  Approve this proposed timebox together with the Queue.
+- Implement only read-only kernel/UAPI queries, narrow metadata retention and
+  lifetime/change tracking, and phase-owned fixtures.
+- Host ordinary/sanitizer/fault/ABI gates first, then maintained amd64/i386
+  builds with `make -j16`; no aggregate `make check`.
+- At most one amd64 OVMF/QEMU NVMe query cell: 120-second boot, 300-second
+  whole-cell bound. Use a disposable boot image and a separate host-prepared
+  GPT namespace containing one ESP and one FAT32 payload. Guest queries must
+  not write the target; verify its complete digest before/after.
+- Exclude p003 diskpart, mkfs/mkswap, zedinst, GPT writing, rescan, mount/unmount
+  commands, destructive claims, and all physical disk operations.
+- Stop uncleared if safe snapshots or truthful boot-source reporting requires
+  a broader lifecycle/loader redesign. Preserve evidence rather than silently
+  widening this Queue or repeating a failed runtime cell.
 
 ## Important uncertainty
 
-Q074 alone did not locate the exact stage. Q075 case 06 now identifies a
-running net write/flush through UFS-in-FAT, not a lock deadlock: the healthy
-32 MiB backing file has 16,384 clusters, and repeated Floyd validation and
-per-sector seeks amplify block-cache work. The correction uses a single
-forward validation and operation-local write position, without persistent
-validation trust or skipped synchronization. Deterministic old/new cost and
-fault gates and cases 07--10 passed. This is a causal-correction result, not ten
-successful non-reproductions. A broader architecture change or further runtime
-campaign remains outside this completed Queue.
+A snapshot describes a checked instant; it cannot freeze a disk until a later
+open or write. P002 must expose incarnation/change information and a read-only
+way to revalidate the opened object. Later installation-time exclusion is not
+provided by this query. The selected boot/config FAT (`boot0`) must not be
+confused with the firmware-loaded ESP; absent provenance is not inferred from
+enumeration order or the current root.
 
-## Approval record
+## Approval boundary
 
-The user's correction request authorizes `ws011-p009` within the boundary
-above. Standing user permission permits a `WIP` commit and push.
-
-## Completion result
-
-- Normal case 06 reproduced excessive FAT traversal during the startup writer's
-  flush, with a healthy 16,384-cluster DATA.IMG and no held cache lock. Preserve
-  its failure; case 01's unrelated host predicate defect was revalidated offline.
-- A single forward Brent validation also locates the starting cluster and old
-  tail. Operation-local cursors serve data, zero-fill, and growth without
-  repeating initial seeks. Every write still validates the entire chain; no
-  persistent trust cache, public ABI, synchronization, or rollback weakening.
-- The exact 32 MiB cost fixture drops 4 KiB backing writes from 16,399/17,423
-  backend reads to 138/138. Old code fails the enforced cost gate. Final cost,
-  cursor, and maintained FAT suites pass in ordinary and sanitizer modes,
-  including 55 in-loop growth write-failure positions with retry/remount.
-- All ten normal cells were consumed: cases 01--05 passed guest observations,
-  case 06 failed before correction, and cases 07--10 all passed after correction.
-  The latter prove publication, no late rollback after 70 seconds, rebooted
-  persistence, address/route/DNS/gateway connectivity, and input integrity.
-- NCOM-T001--T012, WS011/ZNV2/Wi-Fi, atomic writer and overlay fault regressions,
-  maintained amd64/i386 builds, document validators, and whitespace gates pass.
-  Production config and production image remain unchanged.
-- P007 and p009 are complete. P008 awaits only its physical transport/topology/
-  recovery decisions; p004 remains held. The next dependency-ready wave is
-  WS019, subject to a separately approved Queue.
-
-Exact commands, source identities, counts, and observations are retained in the
-[q075 evidence](ws011-net-config/tests/q075-confirmed-commit-evidence.md).
+Approve q076 to begin this one Phase under the proposed timebox and one-cell
+limit. P003 and the rest of WS019 require later Queue selection.

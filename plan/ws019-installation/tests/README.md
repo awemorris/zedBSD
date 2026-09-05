@@ -8,7 +8,7 @@ source.
 
 | Case | Required result |
 | --- | --- |
-| `IN-T001` | Read-only administration reports 64-bit disk/partition bounds, GPT type, PARTUUID/PARTLABEL, filesystem, parent, mount/root/swap state, and loader origin from one stable snapshot |
+| `IN-T001` | P002/q076: versioned read-only disk/partition snapshots, full GPT type/PARTUUID/PARTLABEL, checked 64-bit bounds, filesystem errors, indirect mount/root/swap use, boot provenance, bounded retries, same-name replacement/opened-object mismatch, amd64/i386 ABI and no target writes |
 | `IN-T002` | `diskpart list/show` reports the same stable identities and offers no mutation verb |
 | `IN-T003` | Preflight accepts exactly one usable ESP plus one explicitly selected distinct same-disk FAT32 and rejects every wrong/ambiguous/aliased case |
 | `IN-T004` | Installer publication changes only the six managed paths; GPT, formats, labels, unmanaged sentinels, and UEFI variables remain byte-identical |
