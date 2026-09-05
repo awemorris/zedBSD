@@ -46,6 +46,12 @@ static unsigned test_disk_count;
 static struct partition test_partitions[TEST_PARTITION_MAX];
 static unsigned test_partition_count;
 
+/* Identity tests must never exercise create/mkdir; the production FAT object
+ * also contains those callbacks in its hightext section. */
+int inode_creation_prepare(struct inode *parent, struct inode *child,
+	const struct inode_creation_request *request)
+{ (void)parent; (void)child; (void)request; abort(); }
+
 #define CHECK(expression)                                                   \
 	do {                                                                 \
 		checks++;                                                    \
@@ -739,6 +745,7 @@ test_partition_selectors(void)
 	test_disk_count = 1U;
 	memset(test_partitions, 0, sizeof(test_partitions));
 	test_partitions[0].p_disk = &first;
+	first.d_data = &test_partitions[0];
 	test_partitions[0].p_flags = PARTITION_HAS_UUID | PARTITION_HAS_LABEL;
 	strcpy(test_partitions[0].p_uuid, "0011-AABB");
 	strcpy(test_partitions[0].p_label, "System Partition");
@@ -758,6 +765,7 @@ test_partition_selectors(void)
 	test_disks[1] = &second;
 	test_disk_count = 2U;
 	test_partitions[1].p_disk = &second;
+	second.d_data = &test_partitions[1];
 	test_partitions[1].p_flags = PARTITION_HAS_UUID;
 	strcpy(test_partitions[1].p_uuid, "0011-AABB");
 	test_partition_count = 2U;

@@ -10,7 +10,7 @@ trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 compiler=${HOSTCC:-cc}
 fixture=$repo/plan/ws004-hardware/tests/partition-publication-test.c
 source=$repo/src/kern/partition.c
-includes="-I$repo/include -I$repo/include/uapi -I$repo/src -I$repo/libc/include"
+includes="-ffunction-sections -fdata-sections -Wl,--gc-sections -I$repo/include -I$repo/include/uapi -I$repo/src -I$repo/libc/include"
 
 # shellcheck disable=SC2086
 $compiler -std=c11 -O2 -Wall -Wextra -Werror $includes \

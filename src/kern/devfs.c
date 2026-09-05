@@ -14,6 +14,10 @@
 #include "kern/mount.h"
 #include "kern/namei.h"
 #include "kern/tty.h"
+#include "kern/uaccess.h"
+#include "kern/partition.h"
+#include "kern/cred.h"
+#include <zedbsd/block.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -30,6 +34,10 @@
 #define DEVFS_PTS_INO_BASE 0x200000000ULL
 #define DEVFS_CHAR_INO_BASE 0x300000000ULL
 #define DEVFS_HIGH __attribute__((section(".hightext")))
+#ifdef ZEDBSD_STORAGE_HOST_TEST
+#undef DEVFS_HIGH
+#define DEVFS_HIGH
+#endif
 
 typedef char devfs_ino_must_be_64_bit[(sizeof(ino_t) >= 8) ? 1 : -1];
 #if !defined(ZEDBSD_DEVFS_HOST_TEST)
@@ -492,7 +500,7 @@ block_open(struct file *file)
 	int error = disk_open_by_dev(file->f_inode->i_rdev, &disk);
 	if (error != 0)
 		return error;
-	if (disk->d_block_size != 512U) {
+	if (disk->d_block_size != 512U && disk->d_block_size != 4096U) {
 		disk_close(disk);
 		return EOPNOTSUPP;
 	}
@@ -513,7 +521,7 @@ static DEVFS_HIGH ssize_t
 block_pread(struct file *file, void *buffer, size_t length, off_t offset)
 {
 	struct disk *disk = file->f_data;
-	uint8_t bounce[512];
+	uint8_t bounce[4096];
 	uint8_t *output = buffer;
 	struct devfs_block_io_range range;
 	uint64_t position;
@@ -523,7 +531,7 @@ block_pread(struct file *file, void *buffer, size_t length, off_t offset)
 	if (disk == NULL)
 		return -EINVAL;
 	block_size = disk->d_block_size;
-	if (block_size != sizeof(bounce))
+	if (block_size != 512U && block_size != 4096U)
 		return -EOPNOTSUPP;
 	error = devfs_block_io_range_prepare(disk->d_block_count, block_size,
 	    (int64_t)offset, length, DEVFS_BLOCK_IO_READ, &range);
@@ -563,7 +571,7 @@ block_pwrite(struct file *file, const void *buffer, size_t length, off_t offset)
 {
 	struct disk *disk = file->f_data;
 	struct backing_mutation_guard guard;
-	uint8_t bounce[512];
+	uint8_t bounce[4096];
 	const uint8_t *input = buffer;
 	struct devfs_block_io_range range;
 	uint64_t position;
@@ -575,7 +583,7 @@ block_pwrite(struct file *file, const void *buffer, size_t length, off_t offset)
 	if ((disk->d_flags & DISK_READ_ONLY) != 0)
 		return -EROFS;
 	block_size = disk->d_block_size;
-	if (block_size != sizeof(bounce))
+	if (block_size != 512U && block_size != 4096U)
 		return -EOPNOTSUPP;
 	error = devfs_block_io_range_prepare(disk->d_block_count, block_size,
 	    (int64_t)offset, length, DEVFS_BLOCK_IO_WRITE, &range);
@@ -643,6 +651,23 @@ block_fsync(struct file *file)
 static DEVFS_HIGH int
 block_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 {
+	if (request == BLKREREADPART) {
+		struct ucred *cred = cred_current_ref();
+		int allowed = cred_is_superuser(cred);
+		cred_release(cred);
+		if (!allowed)
+			return EPERM;
+		if (argument != 0)
+			return EINVAL;
+		return partition_reload(file->f_data);
+	}
+	if (request == BLKGETINFO) {
+		struct zedbsd_block_info info;
+		int error = copyin(argument, &info, sizeof(info));
+		if (error == 0)
+			error = disk_block_info(file->f_data, &info);
+		return error != 0 ? error : copyout(&info, argument, sizeof(info));
+	}
 	if (file->f_data != NULL && request == BLKGETIDENTITY)
 		return argument != 0 ? block_identity_get(file->f_data,
 		    (struct block_identity *)argument) : EFAULT;

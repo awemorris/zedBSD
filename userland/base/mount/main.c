@@ -16,11 +16,53 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mount.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <zedbsd/mountinfo.h>
 
 static const char *program_name(const char *path);
 static int run_unmount(int argc, char **argv);
 static int mount_all(void);
 static int mount_fstab_entry(const char *source, const char *target, const char *type, char *options);
+
+static int
+list_mounts(void)
+{
+	struct zedbsd_mount_query *query;
+	unsigned i;
+	int fd, error;
+	query = calloc(1, sizeof(*query) + ZEDBSD_MOUNT_INFO_MAX *
+	    sizeof(query->entries[0]));
+	if (query == NULL) {
+		fprintf(stderr, "mount: out of memory\n");
+		return 1;
+	}
+	query->version = ZEDBSD_MOUNT_INFO_VERSION;
+	query->struct_size = sizeof(*query);
+	query->capacity = ZEDBSD_MOUNT_INFO_MAX;
+	fd = open("/dev/system", O_RDONLY);
+	error = fd < 0 ? errno : ioctl(fd, ZEDBSD_SYSTEM_GET_MOUNTS, query) < 0 ?
+	    errno : 0;
+	if (fd >= 0)
+		close(fd);
+	if (error != 0) {
+		fprintf(stderr, "mount: list: %s\n", strerror(error));
+		free(query);
+		return 1;
+	}
+	for (i = 0; i < query->count; i++) {
+		const struct zedbsd_mount_info *entry = &query->entries[i];
+		printf("%s%s on %s type %s (%s%s%s)\n",
+		    entry->device != 0 && !(entry->kind & ZEDBSD_MOUNT_INFO_BIND) ?
+		    "/dev/" : "", entry->source[0] ? entry->source : entry->type,
+		    entry->target, entry->type,
+		    entry->flags & MNT_RDONLY ? "ro" : "rw",
+		    entry->flags & MNT_NOSUID ? ",nosuid" : "",
+		    entry->kind & ZEDBSD_MOUNT_INFO_BIND ? ",bind" : "");
+	}
+	free(query);
+	return 0;
+}
 
 /*
  * Runs the mount command.
@@ -50,6 +92,8 @@ main(
 		return function_result;
 	}
 
+	if (argc == 1)
+		return list_mounts();
 	/* Handles the selected command-line operation. */
 	if (argc == 2 && strcmp(argv[1], "-a") == 0) {
 		/* Obtains the mount all result. */

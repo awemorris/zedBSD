@@ -42,6 +42,8 @@ struct dirent;
 struct statvfs;
 struct quota_control;
 struct snapshot_control;
+struct zedbsd_mount_info;
+int mount_info_snapshot(struct zedbsd_mount_info *, unsigned, unsigned *);
 struct block_identity;
 
 struct path {

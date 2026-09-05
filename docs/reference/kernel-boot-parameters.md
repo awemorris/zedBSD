@@ -126,6 +126,14 @@ case matching follows the mounted FAT implementation.
 Boot filesystems are mounted only in the kernel's private boot namespace for
 these lookups. This contract does not itself require exposing them at `/boot`.
 
+Partition discovery publishes block-device nodes, not filesystem mounts.
+Detected auxiliary FAT filesystems are no longer automatically mounted at
+`/diskN`; configured boot/root/overlay/swap sources are unchanged. Use an
+explicit mount request for an auxiliary filesystem. The current public mount
+API accepts root-level targets (for example `/data`), not nested targets.
+The [q076 evidence](../../plan/ws019-installation/tests/q076-results.md) records
+the amd64 boot check and the remaining explicit-mount/reboot regression gate.
+
 ## 5. Root modes
 
 Exactly one of `rootpart=` and `overlay-root=` must be effective after the

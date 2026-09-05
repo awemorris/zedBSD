@@ -12,6 +12,10 @@
 #include "kern/mount.h"
 #include "kern/namei.h"
 #include "kern/poll.h"
+#include "kern/uaccess.h"
+#include <zedbsd/block.h>
+#include <kern/cred.h>
+#include <kern/partition.h>
 #include "kern/tty.h"
 
 #include <assert.h>
@@ -25,6 +29,17 @@
 #include <string.h>
 
 #define TEST_INODE_MAX 64U
+
+int copyin(uintptr_t u, void *k, size_t n)
+{ if (!u) return EFAULT; memcpy(k, (const void *)u, n); return 0; }
+int copyout(const void *k, uintptr_t u, size_t n)
+{ if (!u) return EFAULT; memcpy((void *)u, k, n); return 0; }
+int disk_block_info(struct disk *d, struct zedbsd_block_info *i)
+{ (void)d; (void)i; return EOPNOTSUPP; }
+int partition_reload(struct disk *d) { (void)d; return EOPNOTSUPP; }
+struct ucred *cred_current_ref(void) { return NULL; }
+int cred_is_superuser(const struct ucred *c) { (void)c; return 0; }
+void cred_release(struct ucred *c) { (void)c; }
 
 struct test_payload {
 	unsigned value;

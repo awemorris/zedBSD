@@ -20,8 +20,10 @@
 #include "kern/namei.h"
 #include "kern/net/socket.h"
 #include "kern/vmspace.h"
+#include "kern/mount.h"
 
 #include <zedbsd/system.h>
+#include <zedbsd/mountinfo.h>
 #include <errno.h>
 #include <hal/hal.h>
 #include <string.h>
@@ -130,6 +132,40 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 {
 	(void)file;
 	switch (request) {
+	case ZEDBSD_SYSTEM_GET_MOUNTS: {
+		struct zedbsd_mount_query header, *output;
+		size_t bytes;
+		unsigned count = 0, i;
+		int error = copyin(argument, &header, sizeof(header));
+		if (error != 0)
+			return error;
+		if (header.version != ZEDBSD_MOUNT_INFO_VERSION ||
+		    header.struct_size != sizeof(header) ||
+		    header.capacity > ZEDBSD_MOUNT_INFO_MAX)
+			return EINVAL;
+		for (i = 0; i < 4; i++)
+			if (header.reserved[i] != 0)
+				return EINVAL;
+		bytes = sizeof(header) + header.capacity * sizeof(output->entries[0]);
+		output = kern_malloc(bytes);
+		if (output == NULL)
+			return ENOMEM;
+		memset(output, 0, bytes);
+		output->version = header.version;
+		output->struct_size = sizeof(header);
+		output->capacity = header.capacity;
+		error = mount_info_snapshot(output->entries, header.capacity, &count);
+		output->count = count;
+		if (error == 0 || error == ENOSPC) {
+			int copy_error = copyout(output, argument, error == 0 ?
+			    sizeof(header) + count * sizeof(output->entries[0]) :
+			    sizeof(header));
+			if (copy_error != 0)
+				error = copy_error;
+		}
+		kern_free(output);
+		return error;
+	}
 	case ZEDBSD_SYSTEM_GET_INFO: {
 		struct system_info info;
 		memset(&info, 0, sizeof(info));

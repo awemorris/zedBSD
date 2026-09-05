@@ -8,8 +8,8 @@ source.
 
 | Case | Required result |
 | --- | --- |
-| `IN-T001` | P002/q076: versioned read-only disk/partition snapshots, full GPT type/PARTUUID/PARTLABEL, checked 64-bit bounds, filesystem errors, indirect mount/root/swap use, boot provenance, bounded retries, same-name replacement/opened-object mismatch, amd64/i386 ABI and no target writes |
-| `IN-T002` | `diskpart list/show` reports the same stable identities and offers no mutation verb |
+| `IN-T001` | P002/q076: fixed-width basic block geometry/identity and coherent mount snapshots, malformed ABI, 512/4096 and 64-bit raw I/O, no query writes |
+| `IN-T002` | P003: diskpart list/show parses GPT/MBR entirely in userspace, rejects malformed/unsupported tables, reports on-disk vs kernel distinction |
 | `IN-T003` | Preflight accepts exactly one usable ESP plus one explicitly selected distinct same-disk FAT32 and rejects every wrong/ambiguous/aliased case |
 | `IN-T004` | Installer publication changes only the six managed paths; GPT, formats, labels, unmanaged sentinels, and UEFI variables remain byte-identical |
 | `IN-T005` | Exact existing managed files are idempotent, while any non-identical conflict is refused without overwrite |
@@ -21,7 +21,22 @@ source.
 | `IN-T011` | Target `mkswap FILE` formats only a pre-sized page-aligned regular file as ZEDSWAP2, passes the production parser and `swapon`/`swapoff`, and refuses busy/aliased/non-regular targets |
 | `IN-T012` | `zedinst` creates unpublished 32-MiB data and 64-MiB swap staging files, invokes the target formatters, and never reads the live source `DATA.IMG` or `SWAPFILE` |
 
-GPT writer, raw offsets above 4 GiB, exactly-once raw sector writes, rescan,
-partition/block-device formatters, whole-disk confirmation, native-root
-installation, and destructive recovery cases belong to future p006/p007
-planning and are not installer-v1 acceptance requirements.
+| `IN-T013` | P010: whole-disk EBUSY for any mounted child including ro/root/unchanged, claims/open users, serialized admission, atomic replacement and failure preservation |
+| `IN-T014` | P011: userspace GPT/MBR add/delete, confirmed exact target, metadata-only diffs, flush/fault/read-back tests, separate write/reload outcomes |
+| `IN-T015` | Q076: disposable QEMU idle reload plus mounted addition rejected with EBUSY, unchanged live mapping, reboot discovers new partitions |
+| `IN-T016` | P012: no auxiliary `/diskN` auto-mounts, configured overlay/swap boot intact, explicit ro/rw mounts and reboot regression |
+
+P010/p011 implement reload/existing-table writes independently of the unchanged
+non-table-writing installer-v1. Whole-disk initialization, filesystem formatting,
+native-root installation and data movement remain future p006/p007 work.
+
+## Q076 execution result
+
+[Evidence, commands and exact residuals](q076-results.md): p002/p003 completed;
+p010/p011/p012 implemented but uncleared for final mounted/reboot acceptance.
+The fixture now uses `/q076`, because the existing public mount API rejects
+nested targets. Do not run another QEMU cell until a new Queue is approved.
+
+Maintained fixtures: `run-storage-foundation-test.sh`,
+`run-diskpart-table-test.sh` (parser/writer and production CLI), and
+`storage-qemu.mk` / `run-storage-qemu.py` (disposable guest acceptance).

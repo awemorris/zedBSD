@@ -1,72 +1,77 @@
-# Queue proposal: read-only storage administration
+# Queue: userspace partition administration and conservative reload
 
 Last updated: 2026-09-05
 
 QID: `q076`
 
-Queue status: proposed; awaiting execution approval
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes** — two completed items; three uncleared runtime gates
 
-Authorization: the user requested extraction of the next work item. This
-authorizes planning only; implementation, builds, and QEMU await approval.
-Standing permission permits a planning-only `WIP` commit and push.
+Authorization: on 2026-09-05 the user approved userspace GPT/MBR editing and
+conservative kernel reload, then explicitly requested Phase detail, Queue
+selection and execution. This supersedes the unexecuted read-only proposal.
+Standing permission permits `WIP` commits and pushes.
 
 Parent: [master plan](master.md)
 
 Previous Queue: [q075](queue-q075.md)
 
-## Purpose
-
-Provide the read-only storage snapshot needed before implementing diskpart
-and the existing-FAT installer. Q075 completed WS011's automatic prerequisite;
-its physical follow-up remains separate and does not block this next wave.
-
 ## Execution registry
 
 | Priority | WS / Phase | Status | Purpose / dependency |
 | --- | --- | --- | --- |
-| 1 | [`ws019-p002`](ws019-installation/phase002-readonly-block-gpt-administration/phase.md) | pending | Versioned disk/GPT/filesystem/use-state queries with bounded enumeration and change detection; depends on completed WS004 p024 and existing disk/mount/swap/boot-source foundations |
+| 1 | [ws019-p002](ws019-installation/phase002-readonly-block-gpt-administration/phase.md) | completed | Basic disk/mount UAPI and 512/4096 raw I/O; host, ABI, build and guest queries passed |
+| 2 | [ws019-p010](ws019-installation/phase010-conservative-partition-reload/phase.md) | uncleared | Reload implemented; host exclusion/fault tests and guest idle replacement passed; final explicit rw/ro/root/reboot acceptance pending |
+| 3 | [ws019-p003](ws019-installation/phase003-diskpart-readonly/phase.md) | completed | Userspace GPT/MBR inspection; parser/CLI, build and guest list/show passed |
+| 4 | [ws019-p011](ws019-installation/phase011-userspace-partition-editing/phase.md) | uncleared | Writer/notification implemented; host fault/CLI and guest GPT/MBR round-trips passed; mounted-add/reboot acceptance pending |
+| 5 | [ws019-p012](ws019-installation/phase012-explicit-auxiliary-mounts/phase.md) | uncleared | Auto-mount loop removed and absence verified at login with overlay/swap; explicit mount/reboot regression remains |
 
-## Why this is next
+## Execution boundary
 
-- WS019 is next in the master's dependency-ready order. P003 diskpart and the
-  target formatters/installer need reliable identity and current-use evidence.
-- Existing disk registry and blkid queries do not compose parent, full GPT
-  metadata, boot-source/use state, and change detection into one snapshot.
-- The GPT parser validates type GUIDs but does not retain them in published
-  partition records. The full GPT label exceeds the old blkid text field.
-- WS011 p008 still needs physical transport/topology choices; no remote
-  service or physical test is part of this Queue.
+Review p002/p003 after two active hours each, p010/p011 after four each.
+This twelve-hour review ceiling is not a promise to consume the budget.
+The timebox and scope were presented before code work. If unrelated lifecycle,
+loader or filesystem redesign is necessary, record uncleared and return to
+planning; do not execute dependent work without its prerequisites.
 
-## Proposed timebox and execution boundary
+Host production-linked ordinary/sanitizer/fault/ABI gates precede maintained
+amd64/i386 builds with `make -j16`; never run aggregate `make check`.
+At most two final amd64 QEMU cells, each with 120-second boot / 600-second
+whole-cell bounds: idle auxiliary disk, then mounted/root busy and reboot.
+Use only explicit disposable image copies. Preserve failed cells; repeat only
+after a diagnosed correction within this budget.
 
-- One Phase; estimated 2--3 hours of active work, reviewed at three hours.
-  Approve this proposed timebox together with the Queue.
-- Implement only read-only kernel/UAPI queries, narrow metadata retention and
-  lifetime/change tracking, and phase-owned fixtures.
-- Host ordinary/sanitizer/fault/ABI gates first, then maintained amd64/i386
-  builds with `make -j16`; no aggregate `make check`.
-- At most one amd64 OVMF/QEMU NVMe query cell: 120-second boot, 300-second
-  whole-cell bound. Use a disposable boot image and a separate host-prepared
-  GPT namespace containing one ESP and one FAT32 payload. Guest queries must
-  not write the target; verify its complete digest before/after.
-- Exclude p003 diskpart, mkfs/mkswap, zedinst, GPT writing, rescan, mount/unmount
-  commands, destructive claims, and all physical disk operations.
-- Stop uncleared if safe snapshots or truthful boot-source reporting requires
-  a broader lifecycle/loader redesign. Preserve evidence rather than silently
-  widening this Queue or repeating a failed runtime cell.
+Additional authorization: during execution the user requested the auxiliary
+auto-mount correction in p012. Its 30-minute review timebox and at most two
+additional integrated QEMU launches were presented before implementation.
+The original two launches are retained as failed evidence: `q076-idle-01`
+encountered a legitimately busy auto-mounted disk (and a second unsupported
+NVMe controller); `q076-combined-02` confirmed EBUSY but the harness incorrectly
+read `$?` on a new shell input line. Neither established writer acceptance.
+The fresh p012 window uses one NVMe plus IDE auxiliary media and a guest-only
+waitpid observer, without changing production shell behavior.
 
-## Important uncertainty
+## Result and resume boundary
 
-A snapshot describes a checked instant; it cannot freeze a disk until a later
-open or write. P002 must expose incarnation/change information and a read-only
-way to revalidate the opened object. Later installation-time exclusion is not
-provided by this query. The selected boot/config FAT (`boot0`) must not be
-confused with the firmware-loaded ESP; absent provenance is not inferred from
-enumeration order or the current root.
+[Recorded evidence and exact remaining gates](ws019-installation/tests/q076-results.md).
+Both added launches are retained: `q076-explicit-03` injected its helper rootfs
+into the ESP instead of the configured payload (harness error);
+`q076-explicit-04` passed query/idle GPT+MBR editing but attempted `/mnt/q076`,
+which the existing root-level-only mount API rejects with EINVAL. No kernel
+panic or writer corruption was observed. The failed cell's GPT and MBR images
+each equal their original complete images after add/delete.
 
-## Approval boundary
+The runner now resolves the unique existing payload and uses `/q076` for the
+explicit mount. Do not expand mount pathname support or weaken EBUSY here.
+No fifth launch was attempted. A newly approved finite Queue must rerun the
+corrected combined cell (and at most one diagnosed correction) to clear
+p010/p011/p012. Current implementation is WIP, not fully storage-acceptance
+cleared. Installer/formatters have not been executed.
 
-Approve q076 to begin this one Phase under the proposed timebox and one-cell
-limit. P003 and the rest of WS019 require later Queue selection.
+No physical disks, production filesystem formatting, whole-disk initialization, partition
+data moves/resizes, extended-MBR editing, installer or boot-variable writes,
+or forced reload. Installer-v1 remains non-table-writing. Its source
+provenance is not part of the mount/basic-disk query ABI.
+Creating FAT solely inside fresh disposable test fixtures is not a production
+formatting command or permission to format existing media.

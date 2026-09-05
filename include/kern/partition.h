@@ -57,6 +57,8 @@ int
 partition_create_disk(
 	struct partition *partition);
 
+int partition_reload(struct disk *);
+
 void
 partition_reset(void);
 

@@ -13,10 +13,15 @@
 #include <zedbsd/blkid.h>
 #include <zedbsd/quota.h>
 #include <zedbsd/snapshot.h>
+#include <zedbsd/mountinfo.h>
 
 #define FILESYSTEM_MAX 8U
 #define MOUNT_BIND_INTERNAL 0x00000001U
 #define MOUNT_HIGH __attribute__((section(".hightext")))
+#ifdef ZEDBSD_STORAGE_HOST_TEST
+#undef MOUNT_HIGH
+#define MOUNT_HIGH
+#endif
 
 static struct mount mounts[MOUNT_MAX] __attribute__((section(".vfs_bss")));
 static uint8_t mount_used[MOUNT_MAX] __attribute__((section(".vfs_bss")));
@@ -26,6 +31,88 @@ static const struct filesystem_type *filesystems[FILESYSTEM_MAX]
 	__attribute__((section(".vfs_bss")));
 static unsigned filesystem_count;
 static struct spinlock namespace_lock;
+
+MOUNT_HIGH int
+mount_info_snapshot(struct zedbsd_mount_info *entries, unsigned capacity,
+		    unsigned *count_out)
+{
+	struct mount *mountp, *source, *snapshot[MOUNT_MAX];
+	struct path targets[MOUNT_MAX], sources[MOUNT_MAX];
+	struct cwdinfo context;
+	unsigned count = 0, i;
+	int error = 0;
+	unsigned long irq;
+	if (count_out == NULL || (capacity != 0 && entries == NULL) ||
+	    capacity > ZEDBSD_MOUNT_INFO_MAX)
+		return EINVAL;
+	irq = spin_lock_irqsave(&namespace_lock);
+	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next)
+		if (mountp->m_state == MOUNT_STATE_LIVE)
+			count++;
+	*count_out = count;
+	if (count > capacity) {
+		spin_unlock_irqrestore(&namespace_lock, irq);
+		return ENOSPC;
+	}
+	count = 0;
+	memset(&context, 0, sizeof(context));
+	spin_init(&context.lock, LOCK_RANK_PROCESS_RESOURCE, "mount paths");
+	if (root_mount != NULL)
+		path_set(&context.root, root_mount, root_mount->m_root);
+	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
+		struct zedbsd_mount_info *info;
+		if (mountp->m_state != MOUNT_STATE_LIVE)
+			continue;
+		path_set(&targets[count], mountp, mountp->m_root);
+		path_init(&sources[count]);
+		snapshot[count] = mountp;
+		mount_ref(mountp);
+		info = &entries[count++];
+		memset(info, 0, sizeof(*info));
+		info->flags = mountp->m_flags;
+		source = mountp->m_bind_source;
+		if (source != NULL) {
+			info->kind = ZEDBSD_MOUNT_INFO_BIND;
+			if (mount_is_private(source))
+				strcpy(info->source, "(private)");
+			else
+				path_set(&sources[count - 1], source, mountp->m_root);
+		} else {
+			source = mountp;
+			if (source->m_disk != NULL)
+				strcpy(info->source, source->m_disk->d_name);
+		}
+		if (source->m_disk != NULL)
+			info->device = (uint32_t)source->m_disk->d_dev;
+		if (source->m_type != NULL) {
+			strncpy(info->type, source->m_type->fs_name,
+			    sizeof(info->type) - 1U);
+		}
+	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	/* Mount references prevent teardown while pathname reconstruction performs
+	 * directory I/O. Membership is captured together; pathname resolution has
+	 * getcwd's bounded concurrent-rename semantics, not a rename transaction. */
+	for (i = 0; i < count && error == 0; i++) {
+		path_set(&context.cwd, targets[i].p_mount, targets[i].p_inode);
+		error = fs_getcwd(&context, entries[i].target,
+		    sizeof(entries[i].target));
+		path_release(&context.cwd);
+		if (error == 0 && sources[i].p_inode != NULL) {
+			path_set(&context.cwd, sources[i].p_mount, sources[i].p_inode);
+			error = fs_getcwd(&context, entries[i].source,
+			    sizeof(entries[i].source));
+			path_release(&context.cwd);
+		}
+	}
+	for (i = 0; i < count; i++) {
+		path_release(&sources[i]);
+		path_release(&targets[i]);
+		mount_release(snapshot[i]);
+	}
+	path_release(&context.root);
+	return error;
+}
 
 static struct mount *
 mount_alloc(void)

@@ -1,44 +1,42 @@
-# WS019 Phase 003: read-only `/sbin/diskpart`
+# WS019 Phase 003: userspace partition inspection
 
-Last updated: 2026-08-29
+Last updated: 2026-09-05
 
 Phase ID: `ws019-p003`
 
-Status: planned; depends on `ws019-p002`
+Status: completed in q076, 2026-09-05
 
 Parent: [WS019](../ws.md)
 
 Tests: [WS019 test index](../tests/README.md)
 
-## Objective
+## Contract
 
-Implement the first `/sbin/diskpart` as a small read-only GPT inspection tool
-that gives the installer and user the same stable view of candidate storage.
+Install `/sbin/diskpart` through the ordinary base build. No argument or
+`list` enumerates whole devices; `show DISK` reads the explicitly named whole
+device. `help` distinguishes on-disk tables from current kernel devices.
 
-## Command contract
+All GPT/MBR interpretation is userspace, via read/pread and p002 geometry:
+checked offsets, MBR signature/primary entries, GPT protective MBR, both
+headers and full entry arrays, CRCs, bounds, overlaps/duplicate GUIDs, canonical
+GUIDs and bounded UTF-16 names. Preserve sparse one-based slots. Corrupt GPT
+never silently falls back to MBR. Unsupported structures fail explicitly;
+extended-MBR editing is excluded. Host image adapters specify sector size.
 
-```text
-diskpart list
-diskpart show DISK
-diskpart show PARTITION
-diskpart help
-```
+## Verification / boundary
 
-No argument is equivalent to `diskpart list`. Output identifies whole disks
-and one-based partitions, capacity, filesystem, GPT role/type, PARTUUID,
-PARTLABEL, parent disk, and mounted/root/swap/read-only state. Invalid or
-ambiguous names fail; there is no edit/create/delete/format verb in this Phase.
+Production-linked parser/CLI tests cover 512/4096 sectors, sparse GPT, primary
+MBR, backup beyond 4 GiB, corrupt/truncated metadata, CRC/copy mismatch,
+overflow, overlap, unsupported structures and zero writes. Ordinary/sanitizer,
+amd64/i386 and shared q076 QEMU gates are required. Review at two active hours.
+P011 owns mutations. Installer filesystem/source/use decisions are not inferred
+from table bytes or the absence of a visible mount.
 
-## Completion conditions
+## Result
 
-- Parser/output fixtures cover empty, one-disk, multi-disk, malformed-record,
-  media-change, GPT, non-GPT, ESP, FAT32, mounted, and swap cases.
-- QEMU output identifies the NVMe disk, its ESP, and payload FAT32 without
-  relying on enumeration order.
-- Help and diagnostics make the read-only limitation explicit.
-- The command is installed to `/sbin/diskpart` by the ordinary base build.
-
-## Reconsideration boundary
-
-Do not add a convenience mutation verb. A request to write GPT returns to the
-separately planned destructive administration Phase.
+Production userspace parser/writer fixture: 1,722 checks in ordinary and
+ASan/UBSan modes; independent CLI fixture: 182 checks in each mode. Corrupt
+CRC-valid structures/copy disagreement, sparse slots, 512/4096 and >4-GiB
+offsets are covered. amd64/i386 builds and real guest list/show passed.
+See [q076 evidence](../tests/q076-results.md). P011 mutation acceptance remains
+separate; no installer provenance or permission-to-write inference was added.

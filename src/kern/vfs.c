@@ -163,20 +163,6 @@ vfs_fail(const char *stage, int error)
 }
 
 static int
-disk_name(unsigned number, char name[NAME_MAX + 1U])
-{
-	unsigned at = 4;
-	if (number == 0 || number > 99)
-		return EINVAL;
-	memcpy(name, "disk", 4);
-	if (number >= 10)
-		name[at++] = (char)('0' + number / 10);
-	name[at++] = (char)('0' + number % 10);
-	name[at] = '\0';
-	return 0;
-}
-
-static int
 vfs_ensure_root_directory(const struct path *root, const char *name,
 			  mode_t mode)
 {
@@ -725,14 +711,6 @@ vfs_mount_native_root(struct disk *disk, struct mount **root_out)
 	return 0;
 }
 
-static int
-vfs_boot_source_contains_disk(const struct disk *disk)
-{
-	unsigned slot;
-
-	return kern_boot_source_find_disk(&boot_sources, disk, &slot) == 0;
-}
-
 int
 kern_vfs_init(const struct boot_handoff *handoff,
 	      const struct boot_device *devices, unsigned device_count)
@@ -746,7 +724,7 @@ kern_vfs_init(const struct boot_handoff *handoff,
 	const struct kern_boot_parameters *parameters;
 	enum kern_boot_root_mode root_mode = KERN_BOOT_ROOT_NATIVE;
 	const char *failure_stage = "initialize root cwd";
-	unsigned physical_count = 0, next_number = 1, failed_swap, i;
+	unsigned physical_count = 0, failed_swap, i;
 	int error, legacy_autoroot = 0;
 
 	if (handoff == NULL)
@@ -1163,22 +1141,9 @@ root_ready:
 			goto out_root;
 	}
 	VFS_LOG("vfs: runtime filesystems mounted\n");
-	for (i = 0; i < partition_count(); i++) {
-		const struct partition *partition = partition_at(i);
-		struct fat_mount_args args;
-		char name[NAME_MAX + 1U];
-		if (partition == NULL || partition->p_disk == NULL ||
-		    (legacy_autoroot ?
-			 partition->p_disk == loader_boot_partition :
-			 vfs_boot_source_contains_disk(partition->p_disk)) ||
-		    partition->p_disk == root_partition ||
-		    disk_name(next_number, name) != 0)
-			continue;
-		args.fspec = partition->p_disk->d_name;
-		error = mount_at("auto", &root_path, name, 0, &args, NULL);
-		if (error == 0)
-			next_number++;
-	}
+	/* Discovery publishes devices, not mounts. Auxiliary filesystems require
+	 * an explicit mount; only configured boot/root/overlay/swap sources above
+	 * may be opened by boot policy. */
 	{
 		struct kern_swap_control_registration registration;
 

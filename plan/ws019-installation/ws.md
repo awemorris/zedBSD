@@ -7,16 +7,20 @@ WSID: `ws019`
 Status: active; Noct 2.0.1 is integrated and the temporary implementation-
 language block is released. The user selected target-side creation through new
 `mkfs` and `mkswap` commands rather than installer templates. P002 is
-selected as pending in proposed q076; p003, p008, p009, p004, and p005 follow.
+completed with p003 userspace inspection in finished q076. P010 reload, p011
+editing and user-added p012 explicit mounts are implemented but uncleared
+pending their final mounted/reboot runtime gate. Installer-v1 remains
+separately non-table-writing.
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws019-p001` design contract complete
+Last verified Phases: `ws019-p002` and `ws019-p003`, q076
 
-Resume point: WS011 p007/p009 completed in q075. Approve proposed q076 for
-p002's read-only storage UAPI only. P003 `/sbin/diskpart`, p008 `/sbin/mkfs`, p009
-`/sbin/mkswap`, p004 Noct `/bin/zedinst`, and p005 QEMU acceptance in that
-dependency order require later Queue selection.
+Resume point: obtain a new bounded validation Queue for p010/p011/p012 using
+the corrected root-level mount fixture; see [q076 evidence](tests/q076-results.md).
+P008 mkfs, p009 mkswap, p004 zedinst and p005 installation acceptance remain
+later work. The 2026-09-05 user decision supersedes the old kernel GPT query
+and read-only-only diskpart milestone; all diskpart parsing/writing is userspace.
 
 Shared tests: [WS019 test index](tests/README.md)
 
@@ -89,9 +93,13 @@ installation. It does invoke target-side `mkfs` for the new UFS `data.img` and
 - Secure Boot remains disabled for the initial Latitude installation.
 - Existing one-based partition naming remains authoritative: the first GPT
   partition is `/dev/nvme0n1p1`, never `p0`.
-- `/sbin/diskpart` is read-only in this milestone. GPT creation, protective
-  MBR/GPT writing, target formatting, raw-offset repair for destructive table
-  writes, rescan, and whole-disk confirmation belong to later Phases.
+- Diskpart's existing-table edits belong to p011; kernel p010 only reloads.
+  Any mounted partition (including read-only/unchanged/root) makes its whole
+  disk EBUSY. Writes and reload results are separate; reboot is acceptable.
+  No force, whole-disk initialization, formatting or partition data movement.
+- Discovery publishes auxiliary partition devices but never auto-mounts their
+  filesystems at `/diskN`. Only configured boot/root/overlay/swap sources and
+  explicit runtime mount requests select filesystem mounts (p012).
 
 ## Boot and payload discovery contract
 
@@ -137,8 +145,10 @@ section syntax is implemented now.
 
 ## Source artifact contract
 
-`zedinst` resolves the loader-origin USB boot filesystem through the read-only
-administration UAPI, mounts it read-only in a private temporary location, and
+`zedinst` must resolve its boot/config source using a separately designed
+provenance interface before p004 implementation; p002's minimal disk/mount
+queries do not expose that provenance. It mounts the verified source read-only
+in a private temporary location and
 uses its verified `BOOTX64.EFI`, amd64 kernel, and read-only `rootfs.img`.
 It creates the destination `data.img` and `swapfile` at explicitly bounded
 sizes and invokes the target `/sbin/mkfs` and `/sbin/mkswap`; it never copies
@@ -150,18 +160,19 @@ the running overlay upper or active swap. It generates the direct
 - WS013 p002/p003 completed same-disk config-volume discovery and configured
   kernel loading in q031; the former own-filesystem-only `/VMUNIX.X64` path is
   historical, not an outstanding prerequisite. Q032 completed the configured
-  BIOS paths. P002 must expose the retained selected boot/config filesystem
-  truthfully without confusing it with the firmware-loaded ESP.
+  BIOS paths. P004 still needs retained selected boot/config filesystem
+  provenance without confusing it with the firmware-loaded ESP.
 - The selected config FAT's synthesized `boot0` remains the filesystem
   identity contract. Current versioned boot metadata distinguishes GPT from
-  legacy one-based MBR indices; p002 must not infer missing physical-loader
+  legacy one-based MBR indices; p004 must not infer missing physical-loader
   provenance from an MBR index, enumeration order, or the running root.
-- A strict GPT enumerator is required to publish partition type, PARTUUID,
-  parent identity, and bounds. WS004 p024 owns its block-path acceptance;
-  WS019 p002 owns the read-only user-visible query boundary.
-- Raw devfs offsets above 4 GiB and duplicate sector submission remain real
-  debt, but they do not block this VFS-only, non-table-writing installer. They
-  move to the later destructive administration Phase.
+- WS004 p024 provides kernel GPT discovery; diskpart p003/p011 parses raw
+  tables in userspace. P002 exposes only basic block information and mounts.
+- Current devfs uses checked 64-bit offsets and exactly-once full-sector
+  writes. The old >4-GiB/duplicate-write debt note is stale; p002 extended its
+  block path to 4096-byte sectors and revalidated both in q076.
+- Installer source/boot provenance formerly assigned to p002 remains an
+  explicit p004 pre-implementation gap; it is not part of the minimal UAPI.
 - Target-side UFS-in-file and swap-in-file initializers do not yet exist and
   are explicit installer-v1 prerequisites in p008/p009. FAT32 formatting and
   block-device formatting remain outside installer v1.
@@ -171,14 +182,18 @@ the running overlay upper or active swap. It generates the direct
 | Combined ID | Phase | Status | Required result |
 | --- | --- | --- | --- |
 | `ws019-p001` | [overlay installer-v1 contract](phase001-installer-v1-contract/phase.md) | Completed by design, 2026-08-29 | The existing-ESP/existing-FAT32, no-format, no-Boot-variable contract and Phase map are fixed |
-| `ws019-p002` | [read-only block/GPT administration](phase002-readonly-block-gpt-administration/phase.md) | Pending in proposed q076 | Versioned read-only snapshot, full GPT metadata, use/boot provenance and opened-object change detection; no implementation before approval |
-| `ws019-p003` | [read-only `/sbin/diskpart`](phase003-diskpart-readonly/phase.md) | Planned; follows p002 | Implement the frozen read-only inspection grammar after p002 |
+| `ws019-p002` | [basic disk information and mounts](phase002-readonly-block-gpt-administration/phase.md) | Completed in q076 | Minimal fixed-width geometry and mount snapshot; no GPT query |
+| `ws019-p003` | [userspace diskpart inspection](phase003-diskpart-readonly/phase.md) | Completed in q076 | GPT/MBR analysis using raw reads |
 | `ws019-p004` | [existing-FAT overlay `/bin/zedinst`](phase004-zedinst-existing-fat-overlay/phase.md) | Planned Noct implementation; follows p002/p003/p008/p009 | Copy immutable boot/root artifacts and create fresh data/swap files through target commands |
 | `ws019-p005` | [QEMU NVMe overlay-install acceptance](phase005-qemu-nvme-overlay-install/phase.md) | Planned; follows p002--p004 and p008/p009 | Run the frozen non-partition-formatting QEMU NVMe acceptance |
 | `ws019-p006` | Whole-disk GPT creation and filesystem provisioning | Future; not designed | Add destructive initialization only after a separate safety/product review |
 | `ws019-p007` | Native-root installation | Future; not designed | Add `rootpart=` installation without changing or weakening p001--p005 |
 | `ws019-p008` | [target `/sbin/mkfs`](phase008-target-mkfs/phase.md) | Planned; follows p002 | Create a bounded UFS1 filesystem in a newly created regular file without formatting its containing partition |
 | `ws019-p009` | [target `/sbin/mkswap`](phase009-target-mkswap/phase.md) | Planned; follows p002 | Create the existing ZEDSWAP2 format in a newly created regular file with bounded size and publication |
+
+| `ws019-p010` | [conservative partition reload](phase010-conservative-partition-reload/phase.md) | Uncleared in finished q076 | Implemented; explicit mounted/root/reboot acceptance pending |
+| `ws019-p011` | [userspace existing-table editing](phase011-userspace-partition-editing/phase.md) | Uncleared in finished q076 | Idle edits/round-trips passed; mounted-add/reboot acceptance pending |
+| `ws019-p012` | [explicit auxiliary mounts](phase012-explicit-auxiliary-mounts/phase.md) | Uncleared in finished q076 | Auto-mount removal verified; explicit mount/reboot regression pending |
 
 ## Installer-v1 completion conditions
 

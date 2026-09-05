@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <hal/hal.h>
 #include <string.h>
+#include <zedbsd/block.h>
 
 _Static_assert(DISK_NAME_MAX >= sizeof("nvme0n4294967295"),
     "DISK_NAME_MAX must represent every 32-bit NVMe namespace ID");
@@ -21,6 +22,10 @@ extern void hal_irq_enable(void) __attribute__((weak));
 #define DISK_LIVE 2U
 #define DISK_GONE 3U
 #define DISK_HIGH __attribute__((section(".hightext")))
+#ifdef ZEDBSD_STORAGE_HOST_TEST
+#undef DISK_HIGH
+#define DISK_HIGH
+#endif
 
 static struct disk disks[DISK_MAX];
 static uint8_t disk_used[DISK_MAX];
@@ -82,6 +87,136 @@ name_valid(const char name[DISK_NAME_MAX])
 		if (name[i] == '\0')
 			return 1;
 	return 0;
+}
+
+/* Called with registry lock held. Only physical ancestry is followed here;
+ * loop/file consumers are independently covered by backing claims/opens. */
+static struct disk *
+disk_leaf(struct disk *disk)
+{
+	while (disk->d_parent != NULL)
+		disk = disk->d_parent;
+	return disk;
+}
+
+static int
+disk_reload_idle(struct disk *parent)
+{
+	struct disk *d;
+	if (parent->d_open_count != 1 || parent->d_opening != 0 ||
+	    parent->d_closing != 0 || parent->d_inflight != 0 ||
+	    parent->d_cache_users != 0)
+		return EBUSY;
+	for (d = disk_head; d != NULL; d = d->d_next) {
+		if (d == parent || disk_leaf(d) != parent)
+			continue;
+		/* Refuse nested published devices as well as open/mounted children. */
+		if (d->d_parent != parent || !(d->d_flags & DISK_PARTITION) ||
+		    d->d_open_count || d->d_opening || d->d_closing ||
+		    refcount_load(&d->d_refs) != 1)
+			return EBUSY;
+	}
+	return 0;
+}
+
+int
+disk_reload_begin(struct disk *parent)
+{
+	struct thread *owner = thread_current != NULL ? thread_current() : NULL;
+	bool enabled = disk_lock();
+	int error;
+	if (parent == NULL || disk_index(parent) < 0 ||
+	    parent->d_state != DISK_LIVE || parent->d_parent != NULL ||
+	    (parent->d_flags & DISK_PARTITION) != 0 || owner == NULL)
+		error = EINVAL;
+	else if (parent->d_reload_owner != NULL)
+		error = EBUSY;
+	else {
+		error = disk_reload_idle(parent);
+		if (error == 0)
+			parent->d_reload_owner = owner;
+	}
+	disk_unlock(enabled);
+	return error;
+}
+
+void
+disk_reload_end(struct disk *parent)
+{
+	bool enabled = disk_lock();
+	if (parent != NULL && thread_current != NULL &&
+	    parent->d_reload_owner == thread_current())
+		parent->d_reload_owner = NULL;
+	disk_unlock(enabled);
+}
+
+int
+disk_reload_replace(struct disk *parent, struct disk **new_disks, unsigned count)
+{
+	struct disk *d, **link, **tail;
+	unsigned i, j;
+	bool enabled = disk_lock();
+	int error = EINVAL;
+	if (parent == NULL || count > DISK_MAX ||
+	    (count != 0 && new_disks == NULL) || thread_current == NULL ||
+	    parent->d_reload_owner != thread_current())
+		goto out;
+	error = disk_reload_idle(parent);
+	if (error != 0)
+		goto out;
+	if (next_dev == 0 || count > UINT32_MAX - (uint32_t)next_dev) {
+		error = ENOSPC;
+		goto out;
+	}
+	for (i = 0; i < count; i++) {
+		d = new_disks[i];
+		if (d == NULL || disk_index(d) < 0 || d->d_state != DISK_ALLOCATED ||
+		    d->d_parent != parent || !(d->d_flags & DISK_PARTITION) ||
+		    d->d_block_size != parent->d_block_size || !name_valid(d->d_name) ||
+		    d->d_block_count == 0 || d->d_parent_offset >= parent->d_block_count ||
+		    d->d_block_count > parent->d_block_count - d->d_parent_offset) {
+			error = EINVAL;
+			goto out;
+		}
+		for (j = 0; j < i; j++)
+			if (name_equal(d->d_name, new_disks[j]->d_name)) {
+				error = EEXIST;
+				goto out;
+			}
+		for (struct disk *other = disk_head; other != NULL; other = other->d_next)
+			if (other->d_parent != parent && name_equal(d->d_name, other->d_name)) {
+				error = EEXIST;
+				goto out;
+			}
+	}
+	/* Everything that can fail precedes this one namespace commit. Old slots
+	 * stay allocated/GONE until the owner releases their partition records. */
+	for (link = &disk_head; (d = *link) != NULL;) {
+		if (d->d_parent != parent) {
+			link = &d->d_next;
+			continue;
+		}
+		*link = d->d_next;
+		d->d_next = NULL;
+		d->d_state = DISK_GONE;
+		live_count--;
+	}
+	tail = link;
+	for (i = 0; i < count; i++) {
+		d = new_disks[i];
+		d->d_dev = next_dev++;
+		d->d_state = DISK_LIVE;
+		d->d_next = NULL;
+		refcount_get(&parent->d_refs);
+		*tail = d;
+		tail = &d->d_next;
+		live_count++;
+	}
+	parent->d_identity_valid = 0;
+	error = 0;
+out:
+	disk_unlock(enabled);
+	return error;
 }
 
 struct disk *
@@ -242,6 +377,10 @@ disk_create(struct disk *disk)
 		disk_unlock(enabled);
 		return EINVAL;
 	}
+	if (disk->d_parent != NULL && disk_leaf(disk)->d_reload_owner != NULL) {
+		disk_unlock(enabled);
+		return EBUSY;
+	}
 	for (found = disk_head; found != NULL; found = found->d_next)
 		if (name_equal(found->d_name, disk->d_name)) {
 			disk_unlock(enabled);
@@ -276,6 +415,8 @@ disk_gone(struct disk *disk)
 					&guard) != 0)
 		return;
 	enabled = disk_lock();
+	if (disk_leaf(disk)->d_reload_owner != NULL)
+		goto out;
 	if (disk->d_state == DISK_GONE)
 		goto out;
 	if (disk->d_state != DISK_LIVE)
@@ -315,7 +456,9 @@ disk_gone_if_idle(struct disk *disk)
 		error = ENXIO;
 		goto out;
 	}
-	if (disk->d_open_count != 0 || disk->d_inflight != 0) {
+	if (disk->d_open_count != 0 || disk->d_inflight != 0 ||
+	    disk->d_opening || disk->d_closing ||
+	    disk_leaf(disk)->d_reload_owner != NULL) {
 		disk_unlock(enabled);
 		error = EBUSY;
 		goto out;
@@ -333,6 +476,8 @@ disk_gone_if_idle(struct disk *disk)
 		goto out;
 	}
 	if (disk->d_open_count != 0 || disk->d_inflight != 0 ||
+	    disk->d_opening || disk->d_closing ||
+	    disk_leaf(disk)->d_reload_owner != NULL ||
 	    refcount_load(&disk->d_refs) != 1) {
 		disk_unlock(enabled);
 		error = EBUSY;
@@ -373,6 +518,7 @@ disk_destroy(struct disk *disk)
 		return EINVAL;
 	}
 	if (disk->d_open_count != 0 || disk->d_inflight != 0 ||
+	    disk->d_opening || disk->d_closing ||
 	    refcount_load(&disk->d_refs) != 1) {
 		disk_unlock(enabled);
 		return EBUSY;
@@ -504,6 +650,39 @@ disk_copy_info(const struct disk *disk, struct disk_info *info)
 }
 
 DISK_HIGH int
+disk_block_info(struct disk *disk, struct zedbsd_block_info *info)
+{
+	bool enabled;
+	unsigned i;
+	if (info == NULL || info->version != ZEDBSD_BLOCK_VERSION ||
+	    info->struct_size != sizeof(*info))
+		return EINVAL;
+	for (i = 0; i < 4; i++)
+		if (info->reserved[i] != 0)
+			return EINVAL;
+	enabled = disk_lock();
+	if (disk == NULL || disk_index(disk) < 0 ||
+	    disk->d_state != DISK_LIVE) {
+		disk_unlock(enabled);
+		return ENXIO;
+	}
+	memset(info, 0, sizeof(*info));
+	info->version = ZEDBSD_BLOCK_VERSION;
+	info->struct_size = sizeof(*info);
+	info->device = (uint32_t)disk->d_dev;
+	info->parent_device = disk->d_parent != NULL ?
+	    (uint32_t)disk->d_parent->d_dev : 0;
+	info->flags = disk->d_flags & (DISK_READ_ONLY | DISK_REMOVABLE |
+	    DISK_PARTITION);
+	info->sector_size = disk->d_block_size;
+	info->sector_count = disk->d_block_count;
+	info->parent_offset = disk->d_parent_offset;
+	memcpy(info->name, disk->d_name, sizeof(info->name));
+	disk_unlock(enabled);
+	return 0;
+}
+
+DISK_HIGH int
 disk_get_info(const char *name, struct disk_info *result)
 {
 	struct disk *disk;
@@ -555,11 +734,17 @@ disk_open(struct disk *disk)
 		disk_unlock(enabled);
 		return ENXIO;
 	}
+	if (disk_leaf(disk)->d_reload_owner != NULL) {
+		disk_unlock(enabled);
+		return EBUSY;
+	}
+	disk->d_opening++;
 	refcount_get(&disk->d_refs); /* Temporary lifetime reference. */
 	disk_unlock(enabled);
 	if (disk->d_ops != NULL && disk->d_ops->open != NULL)
 		error = disk->d_ops->open(disk);
 	enabled = disk_lock();
+	disk->d_opening--;
 	if (error == 0) {
 		if (disk->d_state != DISK_LIVE)
 			error = ENXIO;
@@ -610,9 +795,13 @@ disk_close(struct disk *disk)
 		return;
 	}
 	disk->d_open_count--;
+	disk->d_closing++;
 	disk_unlock(enabled);
 	if (disk->d_ops != NULL && disk->d_ops->close != NULL)
 		disk->d_ops->close(disk);
+	enabled = disk_lock();
+	disk->d_closing--;
+	disk_unlock(enabled);
 	disk_release(disk);
 }
 
@@ -685,6 +874,12 @@ bio_submit(struct disk *disk, struct bio *bio)
 	if (disk->d_state != DISK_LIVE || leaf->d_state != DISK_LIVE) {
 		disk_unlock(enabled);
 		return ENXIO;
+	}
+	if (leaf->d_reload_owner != NULL &&
+	    (disk != leaf || thread_current == NULL ||
+	     leaf->d_reload_owner != thread_current())) {
+		disk_unlock(enabled);
+		return EBUSY;
 	}
 	bio->b_disk = disk;
 	bio->b_leaf_disk = leaf;
@@ -910,7 +1105,53 @@ disk_sync(struct disk *disk)
 int
 disk_read(struct disk *disk, uint64_t block, uint32_t count, void *data)
 {
-	return buf_read(disk, block, count, data);
+	struct disk *leaf;
+	bool enabled = disk_lock();
+	int error;
+	if (disk == NULL || disk->d_state != DISK_LIVE) {
+		disk_unlock(enabled);
+		return ENXIO;
+	}
+	leaf = disk_leaf(disk);
+	if (leaf->d_reload_owner != NULL && (disk != leaf ||
+	    thread_current == NULL || leaf->d_reload_owner != thread_current())) {
+		disk_unlock(enabled);
+		return EBUSY;
+	}
+	leaf->d_cache_users++;
+	disk_unlock(enabled);
+	error = buf_read(disk, block, count, data);
+	enabled = disk_lock();
+	leaf->d_cache_users--;
+	disk_unlock(enabled);
+	return error;
+}
+
+/* Keep cache-hit writes inside the same admission boundary as device I/O. */
+static int
+disk_cached_write(struct disk *disk, uint64_t block, uint32_t count,
+		  const void *data)
+{
+	struct disk *leaf;
+	bool enabled = disk_lock();
+	int error;
+	if (disk == NULL || disk->d_state != DISK_LIVE) {
+		disk_unlock(enabled);
+		return ENXIO;
+	}
+	leaf = disk_leaf(disk);
+	if (leaf->d_reload_owner != NULL && (disk != leaf ||
+	    thread_current == NULL || leaf->d_reload_owner != thread_current())) {
+		disk_unlock(enabled);
+		return EBUSY;
+	}
+	leaf->d_cache_users++;
+	disk_unlock(enabled);
+	error = buf_write(disk, block, count, data);
+	enabled = disk_lock();
+	leaf->d_cache_users--;
+	disk_unlock(enabled);
+	return error;
 }
 
 int
@@ -921,7 +1162,7 @@ disk_write(struct disk *disk, uint64_t block, uint32_t count, const void *data)
 	    backing_mutation_begin_disk(disk, block, count, NULL, &guard);
 	if (error != 0)
 		return error;
-	error = buf_write(disk, block, count, data);
+	error = disk_cached_write(disk, block, count, data);
 	backing_mutation_end(&guard);
 	return error;
 }
@@ -935,7 +1176,7 @@ disk_write_filesystem(struct disk *disk, uint64_t block, uint32_t count,
 							  &guard);
 	if (error != 0)
 		return error;
-	error = buf_write(disk, block, count, data);
+	error = disk_cached_write(disk, block, count, data);
 	backing_mutation_end(&guard);
 	return error;
 }

@@ -45,6 +45,9 @@ struct disk;
 struct bio;
 struct thread;
 struct backing_claim;
+struct zedbsd_block_info;
+
+int disk_block_info(struct disk *, struct zedbsd_block_info *);
 
 struct disk_geometry {
 	uint32_t cylinders;
@@ -89,6 +92,9 @@ struct disk {
 	unsigned d_inflight;
 	unsigned d_opening;
 	unsigned d_closing;
+	unsigned d_cache_users;
+	/* Non-NULL only while the whole-disk replacement owner is admitted. */
+	struct thread *d_reload_owner;
 	unsigned d_identity_valid;
 	uint32_t d_identity_flags;
 	char d_identity_type[16];
@@ -149,6 +155,11 @@ disk_gone_if_idle(
 int
 disk_destroy(
 	struct disk *disk);
+
+/* Whole-disk replacement gate. Caller holds the sole whole-disk open. */
+int disk_reload_begin(struct disk *);
+void disk_reload_end(struct disk *);
+int disk_reload_replace(struct disk *, struct disk **, unsigned);
 
 struct disk *
 disk_find(

@@ -55,28 +55,21 @@ read_bytes(struct disk *disk, uint64_t offset, size_t length, uint8_t *output)
 static void
 partition_identity_fill(struct disk *disk, struct block_identity *identity)
 {
-	unsigned i;
+	const struct partition *part = disk->d_data;
 
-	if ((disk->d_flags & DISK_PARTITION) == 0U)
+	if ((disk->d_flags & DISK_PARTITION) == 0U || part == NULL)
 		return;
-	for (i = 0; i < partition_count(); i++) {
-		const struct partition *part = partition_at(i);
-
-		if (part == NULL || part->p_disk != disk)
-			continue;
-		if ((part->p_flags & PARTITION_HAS_UUID) != 0U) {
-			memcpy(identity->partuuid, part->p_uuid,
-			    sizeof(identity->partuuid));
-			identity->partuuid[sizeof(identity->partuuid) - 1U] = '\0';
-			identity->flags |= ZEDBSD_BLKID_PARTUUID;
-		}
-		if ((part->p_flags & PARTITION_HAS_LABEL) != 0U) {
-			memcpy(identity->partlabel, part->p_label,
-			    sizeof(identity->partlabel));
-			identity->partlabel[sizeof(identity->partlabel) - 1U] = '\0';
-			identity->flags |= ZEDBSD_BLKID_PARTLABEL;
-		}
-		break;
+	/* The opened/referenced disk pins its immutable partition record. Avoid
+	 * traversing another disk's table while that disk is being reloaded. */
+	if ((part->p_flags & PARTITION_HAS_UUID) != 0U) {
+		memcpy(identity->partuuid, part->p_uuid, sizeof(identity->partuuid));
+		identity->partuuid[sizeof(identity->partuuid) - 1U] = '\0';
+		identity->flags |= ZEDBSD_BLKID_PARTUUID;
+	}
+	if ((part->p_flags & PARTITION_HAS_LABEL) != 0U) {
+		memcpy(identity->partlabel, part->p_label, sizeof(identity->partlabel));
+		identity->partlabel[sizeof(identity->partlabel) - 1U] = '\0';
+		identity->flags |= ZEDBSD_BLKID_PARTLABEL;
 	}
 }
 
