@@ -1,16 +1,15 @@
-# Queue proposal: confirmed-commit implementation
+# Queue: confirmed-commit implementation
 
 Last updated: 2026-09-05
 
 QID: `q073`
 
-Queue status: proposed; awaiting explicit execution approval
+Queue status: complete
 
-Queue finished: **No**
+Queue finished: **Yes**
 
-Authorization: the user asked for the next work to be extracted. That
-authorizes this planning proposal, not implementation. The item remains
-`pending` until the user explicitly approves q073 execution.
+Authorization: after reviewing the extracted proposal, the user explicitly
+requested implementation of q073 on 2026-09-05.
 
 Parent: [master plan](master.md)
 
@@ -23,11 +22,11 @@ bounded software Phase. Keep the candidate and `/etc/net.conf` writer in the
 originating `net` process; networkd owns only the volatile deadline, opaque
 token, already-open rollback program, and bounded rollback result.
 
-## Proposed execution registry
+## Execution registry
 
 | Priority | WS / Phase | Status | Purpose / dependency |
 | --- | --- | --- | --- |
-| 1 | [`ws011-p006`](ws011-net-config/phase006-confirmed-commit-implementation/phase.md) | pending | Replace interactive `apply`/`save`/`discard` with `commit`, `commit confirmed MINUTES`, and `rollback`; p005 design and q072 documentation dependency are complete |
+| 1 | [`ws011-p006`](ws011-net-config/phase006-confirmed-commit-implementation/phase.md) | completed (`q073`) | Replaced interactive `apply`/`save`/`discard` with `commit`, `commit confirmed MINUTES`, and `rollback`; complete reconcile, volatile rollback ownership, and serialized publication gates pass |
 
 ## Why this is the next bounded unit
 
@@ -54,9 +53,26 @@ token, already-open rollback program, and bounded rollback result.
   builds, and `git diff --check`. Do not begin p007 QEMU or physical acceptance
   and do not run aggregate `make check`.
 
-## Approval boundary
+## Approval result
 
-Before source changes, present this q073 proposal to the user. On explicit
-approval, change the Queue to active, set `ws011-p006` to `in-progress`, and
-execute its P-book work packages in order. Without that approval, q073 remains
-a proposal and no implementation work is authorized.
+The user explicitly approved implementation. Source changes may proceed within
+the execution and timebox boundary above; p007 remains outside this Queue.
+
+## Completion result
+
+- Added complete-intent forward and rollback reconcile, exact private ZNV2
+  transaction fields, matching-token mutation ownership, and networkd's one
+  secure volatile rollback program with monotonic deadline integration.
+- Added interactive ordinary and confirmed commit, explicit rollback,
+  runtime-before-persistence ordering, `/run/net.conf.lock`, and three bounded
+  post-publication disarm attempts with nonzero uncertain outcome.
+- NCOM-T001--T012 host/model/integration evidence passed, including malformed
+  and replaced rollback programs, timeout/restart state, partial failure,
+  session loss, concurrent writers, stale tokens, and acknowledgement loss.
+- Existing parser, console, persistence, boot, private protocol, Wi-Fi command,
+  managed-WLAN, credential-store, and Wi-Fi-child focused regressions passed.
+- Maintained amd64 and i386 PC/AT `net`/networkd target builds passed. The
+  documentation checks passed with 1,820 relative links and 12 current status
+  banners; `git diff --check` passed.
+- P007 QEMU and physical remote-administration acceptance remains deliberately
+  outside q073.

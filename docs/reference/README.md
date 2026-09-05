@@ -9,6 +9,8 @@ evidence; POSIX claims must agree with [WS001](../../plan/ws001-posix/ws.md).
 
 - [Managed WLAN administration](managed-wlan.md) — current `net wifi`,
   credential-store, selection, state, recovery, and permission contract.
+- [Network configuration console](network-console.md) — current candidate,
+  atomic `commit`, temporary `commit confirmed`, and `rollback` contract.
 - [Kernel boot parameters](kernel-boot-parameters.md) — current
   `boot0`–`boot3`, root-mode, `swap0`–`swap3`, and `init` contract for
   the four x86 production loaders, with the non-x86 NULL-source compatibility

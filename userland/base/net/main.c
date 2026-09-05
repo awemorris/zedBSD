@@ -12,6 +12,7 @@
  */
 
 #include "userland/base/net/protocol.h"
+#include "userland/base/net/reconcile.h"
 #include "userland/base/net/netconf.h"
 #include "userland/base/net/wifi-store.h"
 #include "userland/base/libedit/readline/history.h"
@@ -27,6 +28,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -45,6 +47,15 @@ struct console {
 	struct netconf candidate;
 	struct netconf_interface *interface;
 	int dirty;
+	int confirmed_pending;
+	uint32_t confirmed_token;
+	int writer_lock;
+};
+
+struct rollback_writer {
+	FILE *stream;
+	unsigned operations;
+	size_t bytes;
 };
 
 static int interactive(void);
@@ -57,15 +68,18 @@ static void console_help(enum console_mode mode);
 static int console_operational(struct console *console, int count, char **words);
 static int console_show(struct console *console, int count, char **words);
 static int backend(const char *operation, const char *operands, int display);
+static int backend_scoped(const char *, const char *, uint32_t);
 static int backend_opcode(const char *operation, uint32_t *opcode);
 static int backend_payload(uint32_t opcode, const char *operands,
 	unsigned char *payload, size_t capacity, size_t *length);
 static int backend_exchange(uint32_t opcode, const void *payload,
 	size_t payload_length, int display, unsigned response_seconds,
 	int report_errors);
+static int backend_exchange_result(uint32_t, const void *, size_t, int,
+	unsigned, int, uint32_t *, int *);
 static int backend_response(uint32_t opcode, uint32_t request_id,
 	const void *payload, size_t payload_length, int display,
-	int report_errors);
+	int report_errors, uint32_t *, int *);
 static int write_all(int descriptor, const char *buffer, size_t length);
 static int interface_name_valid(const char *name);
 static int show_configuration(const struct netconf *configuration);
@@ -87,6 +101,16 @@ static int console_configuration(struct console *console, int count, char **word
 static struct netconf_interface *configuration_interface(struct netconf *configuration, const char *name, int create);
 static int console_interface(struct console *console, int count, char **words);
 static int parse_prefix(const char *text, unsigned *result);
+static int transaction_exchange(uint32_t, const char *, unsigned, uint32_t,
+	uint32_t *, int *, int);
+static int reconcile_live(const char *, const char *, void *);
+static int reconcile_file(const char *, const char *, void *);
+static int write_rollback_program(const struct netconf *, const struct netconf *,
+	char *, size_t, char *, size_t);
+static int console_commit(struct console *, int, char **);
+static int console_rollback(struct console *);
+static int startup_matches(const struct console *, char *, size_t);
+static void release_writer_lock(struct console *);
 
 /*
  * Runs the net command.
@@ -114,12 +138,16 @@ interactive(
 	char *history_line;
 	char *words[NET_CONSOLE_WORDS];
 	int count;
+	int command_result;
 	int secret_line;
+	int status;
 	struct console console;
 	char error[160];
 	size_t line_length;
 
 	memset(&console, 0, sizeof(console));
+	console.writer_lock = -1;
+	status = 0;
 
 	/* Handles an operation failure. */
 	if (netconf_load(NETCONF_PATH, &console.startup, error,
@@ -214,17 +242,22 @@ interactive(
 
 		/* Handles the console condition. */
 		if (console.mode == CONSOLE_OPERATIONAL)
-			(void)console_operational(&console, count, words);
+			command_result = console_operational(&console, count, words);
 		else if (console.mode == CONSOLE_CONFIGURATION)
-			(void)console_configuration(&console, count, words);
+			command_result = console_configuration(&console, count, words);
 		else
-			(void)console_interface(&console, count, words);
+			command_result = console_interface(&console, count, words);
 		release_console_line(line, line_length);
+		if (command_result == 2) {
+			status = 1;
+			break;
+		}
 	}
 	clear_history();
+	release_writer_lock(&console);
 
-	/* Reports successful completion. */
-	return 0;
+	/* Reports the terminal console result. */
+	return status;
 }
 
 /* Supports the configuration default operation. */
@@ -380,7 +413,7 @@ console_help(
 		puts("Configuration commands:\n"
 		     "  interface NAME       select or create an interface\n"
 		     "  show candidate|startup-config|running-config\n"
-		     "  apply | save | discard\n"
+		     "  commit | commit confirmed MINUTES | rollback\n"
 		     "  help | ? | end | exit");
 	} else {
 		puts("Interface commands:\n"
@@ -573,6 +606,44 @@ backend(
 	    response_seconds, 1);
 }
 
+/* Sends one reconcile mutation under an optional confirmed token. */
+static int
+backend_scoped(
+	const char *operation,
+	const char *operands,
+	uint32_t token)
+{
+	struct networkd_field_writer writer;
+	unsigned char payload[NETWORKD_REQUEST_MAX];
+	size_t payload_length;
+	uint32_t opcode;
+	unsigned response_seconds;
+	unsigned dhcp_seconds;
+	const char *timeout_text;
+
+	if (backend_opcode(operation, &opcode) != 0 ||
+	    backend_payload(opcode, operands, payload, sizeof(payload),
+	    &payload_length) != 0)
+		return 1;
+	if (token != 0U) {
+		networkd_field_writer_init(&writer, payload, sizeof(payload));
+		writer.used = payload_length;
+		if (networkd_field_write_u32(&writer, NETWORKD_FIELD_TOKEN,
+		    token) != 0)
+			return 1;
+		payload_length = writer.used;
+	}
+	response_seconds = 15U;
+	if (opcode == NETWORKD_OP_DHCP && operands != NULL) {
+		timeout_text = strrchr(operands, ' ');
+		if (timeout_text != NULL && decimal_timeout(timeout_text + 1,
+		    &dhcp_seconds) == 0 && dhcp_seconds <= UINT_MAX - 5U)
+			response_seconds = dhcp_seconds + 5U;
+	}
+	return backend_exchange(opcode, payload, payload_length, 0,
+	    response_seconds, 1);
+}
+
 /* Maps one internal operation name to its stable wire opcode. */
 static int
 backend_opcode(
@@ -591,7 +662,9 @@ backend_opcode(
 		{ "STATIC", NETWORKD_OP_STATIC },
 		{ "DEFAULTROUTE", NETWORKD_OP_DEFAULT_ROUTE },
 		{ "DNS", NETWORKD_OP_DNS },
-		{ "RELOAD", NETWORKD_OP_RELOAD }
+		{ "RELOAD", NETWORKD_OP_RELOAD },
+		{ "DEFAULTROUTE_CLEAR", NETWORKD_OP_DEFAULT_ROUTE_CLEAR },
+		{ "DNS_CLEAR", NETWORKD_OP_DNS_CLEAR }
 	};
 	size_t index;
 
@@ -651,7 +724,9 @@ backend_payload(
 	    (opcode == NETWORKD_OP_STATIC && count != 5U) ||
 	    (opcode == NETWORKD_OP_DEFAULT_ROUTE && count != 1U) ||
 	    (opcode == NETWORKD_OP_DNS && (count == 0U || count > NET_DNS_LIMIT)) ||
-	    (opcode == NETWORKD_OP_RELOAD && count != 0U))
+	    ((opcode == NETWORKD_OP_RELOAD ||
+	    opcode == NETWORKD_OP_DEFAULT_ROUTE_CLEAR ||
+	    opcode == NETWORKD_OP_DNS_CLEAR) && count != 0U))
 		return -1;
 
 	/* Encodes each operation through explicit field boundaries. */
@@ -709,6 +784,22 @@ backend_exchange(
 	unsigned response_seconds,
 	int report_errors)
 {
+	return backend_exchange_result(opcode, payload, payload_length, display,
+	    response_seconds, report_errors, NULL, NULL);
+}
+
+/* Exchanges a request which may return a token and exact server error. */
+static int
+backend_exchange_result(
+	uint32_t opcode,
+	const void *payload,
+	size_t payload_length,
+	int display,
+	unsigned response_seconds,
+	int report_errors,
+	uint32_t *returned_token,
+	int *server_error)
+{
 	static uint32_t next_request_id = 1U;
 	struct networkd_protocol_header request;
 	struct networkd_protocol_header response;
@@ -719,6 +810,11 @@ backend_exchange(
 	uint32_t request_id;
 	int descriptor;
 	int saved;
+
+	if (returned_token != NULL)
+		*returned_token = 0U;
+	if (server_error != NULL)
+		*server_error = 0;
 
 	/* Allocates one nonzero request identity. */
 	request_id = next_request_id++;
@@ -732,10 +828,16 @@ backend_exchange(
 		goto unavailable;
 
 	/* Bounds transport stalls independently of operation policy. */
-	send_timeout.tv_sec = 5;
-	send_timeout.tv_usec = 0;
-	receive_timeout.tv_sec = response_seconds;
-	receive_timeout.tv_usec = 0;
+	if (opcode == NETWORKD_OP_CONFIRMED_DISARM) {
+		send_timeout.tv_sec = 0;
+		send_timeout.tv_usec = 250000;
+		receive_timeout = send_timeout;
+	} else {
+		send_timeout.tv_sec = 5;
+		send_timeout.tv_usec = 0;
+		receive_timeout.tv_sec = response_seconds;
+		receive_timeout.tv_usec = 0;
+	}
 	if (setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout,
 	    sizeof(receive_timeout)) != 0 ||
 	    setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &send_timeout,
@@ -762,6 +864,8 @@ backend_exchange(
 	close(descriptor);
 	descriptor = -1;
 	if (response.request_id != request_id || response.opcode != opcode) {
+		if (server_error != NULL)
+			*server_error = EINVAL;
 		/* Reports a correlation failure when diagnostics are requested. */
 		if (!report_errors)
 			return 1;
@@ -771,12 +875,15 @@ backend_exchange(
 
 	/* Returns the validated typed response result. */
 	return backend_response(opcode, request_id, response_payload,
-	    response.payload_length, display, report_errors);
+	    response.payload_length, display, report_errors, returned_token,
+	    server_error);
 
 unavailable:
 	saved = errno != 0 ? errno : EIO;
 	if (descriptor >= 0)
 		close(descriptor);
+	if (server_error != NULL)
+		*server_error = saved;
 	if (report_errors)
 		fprintf(stderr, "net: networkd is unavailable: %s\n",
 		    strerror(saved));
@@ -791,7 +898,9 @@ backend_response(
 	const void *payload,
 	size_t payload_length,
 	int display,
-	int report_errors)
+	int report_errors,
+	uint32_t *returned_token,
+	int *server_error)
 {
 	struct networkd_field_reader reader;
 	struct networkd_field field;
@@ -801,6 +910,7 @@ backend_response(
 	size_t stage_length;
 	uint32_t status;
 	uint32_t error;
+	uint32_t token;
 	unsigned seen;
 	int result;
 
@@ -809,6 +919,7 @@ backend_response(
 	(void)request_id;
 	status = NETWORKD_RESULT_ERROR;
 	error = EINVAL;
+	token = 0U;
 	output = NULL;
 	output_length = 0U;
 	stage = NULL;
@@ -833,12 +944,18 @@ backend_response(
 			output = field.value;
 			output_length = field.length;
 			seen |= 8U;
+		} else if (field.type == NETWORKD_FIELD_TOKEN &&
+		    (seen & 16U) == 0U && returned_token != NULL &&
+		    networkd_field_read_u32(&field, &token) == 0 && token != 0U) {
+			seen |= 16U;
 		} else {
 			result = -1;
 			break;
 		}
 	}
 	if (result < 0 || (seen & 3U) != 3U) {
+		if (server_error != NULL)
+			*server_error = EINVAL;
 		if (report_errors)
 			fprintf(stderr, "net: malformed networkd response\n");
 		return 1;
@@ -846,12 +963,25 @@ backend_response(
 
 	/* Presents a successful optional payload without string assumptions. */
 	if (status == NETWORKD_RESULT_OK && error == 0U) {
+		if (returned_token != NULL) {
+			if ((seen & 16U) == 0U) {
+				if (server_error != NULL)
+					*server_error = EINVAL;
+				return 1;
+			}
+			*returned_token = token;
+		}
 		if (display && output_length != 0U &&
 		    write_all(STDOUT_FILENO, (const char *)output,
 		    output_length) != 0)
 			return 1;
 		return 0;
 	}
+	if (server_error != NULL)
+		*server_error = error <= INT_MAX ? (int)error : EIO;
+	if (display && output_length != 0U &&
+	    write_all(STDOUT_FILENO, (const char *)output, output_length) != 0)
+		return 1;
 
 	/* Presents only bounded sanitized stage and error information. */
 	if (report_errors) {
@@ -861,6 +991,45 @@ backend_response(
 		    strerror((int)error), (unsigned long)error);
 	}
 	return 1;
+}
+
+/* Encodes one private confirmed-commit control request. */
+static int
+transaction_exchange(
+	uint32_t opcode,
+	const char *path,
+	unsigned minutes,
+	uint32_t token,
+	uint32_t *returned_token,
+	int *server_error,
+	int report_errors)
+{
+	struct networkd_field_writer writer;
+	unsigned char payload[NETWORKD_REQUEST_MAX];
+	int display;
+
+	networkd_field_writer_init(&writer, payload, sizeof(payload));
+	if (opcode == NETWORKD_OP_CONFIRMED_ARM) {
+		if (path == NULL || minutes == 0U ||
+		    networkd_field_write(&writer, NETWORKD_FIELD_PATH, path,
+		    strlen(path)) != 0 || networkd_field_write_u32(&writer,
+		    NETWORKD_FIELD_TIMEOUT, minutes) != 0)
+			return 1;
+	} else if (opcode == NETWORKD_OP_CONFIRMED_DISARM) {
+		if (token == 0U || networkd_field_write_u32(&writer,
+		    NETWORKD_FIELD_TOKEN, token) != 0)
+			return 1;
+	} else if (opcode == NETWORKD_OP_CONFIRMED_CHECK && token != 0U) {
+		if (networkd_field_write_u32(&writer, NETWORKD_FIELD_TOKEN,
+		    token) != 0)
+			return 1;
+	} else if (opcode != NETWORKD_OP_CONFIRMED_ROLLBACK &&
+	    opcode != NETWORKD_OP_CONFIRMED_CHECK) {
+		return 1;
+	}
+	display = opcode == NETWORKD_OP_CONFIRMED_ROLLBACK;
+	return backend_exchange_result(opcode, payload, writer.used, display, 15U,
+	    report_errors, returned_token, server_error);
 }
 
 /* Supports the write all operation. */
@@ -1582,6 +1751,328 @@ usage(
 	return 2;
 }
 
+/* Sends one operation from the complete-intent reconcile engine. */
+static int
+reconcile_live(
+	const char *operation,
+	const char *operands,
+	void *context)
+{
+	uint32_t token = context != NULL ? *(const uint32_t *)context : 0U;
+
+	return backend_scoped(operation, operands, token) == 0 ? 0 : -1;
+}
+
+/* Writes one canonical rollback operation. */
+static int
+reconcile_file(
+	const char *operation,
+	const char *operands,
+	void *context)
+{
+	struct rollback_writer *writer = context;
+	int count;
+
+	if (writer == NULL || writer->stream == NULL ||
+	    writer->operations == NETWORKD_ROLLBACK_OPERATION_MAX) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	count = fprintf(writer->stream, "V1 %s%s%s\n", operation,
+	    operands != NULL ? " " : "", operands != NULL ? operands : "");
+	if (count < 0 || (size_t)count > NETWORKD_ROLLBACK_LINE_MAX ||
+	    writer->bytes + (size_t)count > NETWORKD_ROLLBACK_PROGRAM_MAX) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	writer->operations++;
+	writer->bytes += (size_t)count;
+	return 0;
+}
+
+/* Creates and syncs one private rollback program for networkd to open. */
+static int
+write_rollback_program(
+	const struct netconf *previous,
+	const struct netconf *target,
+	char *path,
+	size_t path_capacity,
+	char *error,
+	size_t error_capacity)
+{
+	char temporary[] = "/tmp/net.rollback.XXXXXX";
+	struct rollback_writer writer;
+	FILE *stream;
+	int descriptor;
+	int saved;
+	int result;
+
+	if (path == NULL || path_capacity < sizeof(temporary)) {
+		errno = EINVAL;
+		return -1;
+	}
+	descriptor = mkstemp(temporary);
+	if (descriptor < 0)
+		goto failed;
+	if (fchmod(descriptor, 0600) != 0) {
+		saved = errno;
+		(void)close(descriptor);
+		(void)unlink(temporary);
+		errno = saved;
+		goto failed;
+	}
+	stream = fdopen(descriptor, "w");
+	if (stream == NULL) {
+		saved = errno;
+		(void)close(descriptor);
+		(void)unlink(temporary);
+		errno = saved;
+		goto failed;
+	}
+	memset(&writer, 0, sizeof(writer));
+	writer.stream = stream;
+	result = netconf_reconcile(previous, target, reconcile_file, &writer,
+	    error, error_capacity);
+	if (result == 0 && (fflush(stream) != 0 || fsync(fileno(stream)) != 0))
+		result = -1;
+	saved = errno;
+	if (fclose(stream) != 0 && result == 0) {
+		result = -1;
+		saved = errno;
+	}
+	if (result != 0) {
+		(void)unlink(temporary);
+		errno = saved != 0 ? saved : EIO;
+		goto failed;
+	}
+	strcpy(path, temporary);
+	if (error != NULL && error_capacity != 0U)
+		error[0] = '\0';
+	return 0;
+
+failed:
+	if (error != NULL && error_capacity != 0U && error[0] == '\0')
+		(void)snprintf(error, error_capacity, "%s", strerror(errno));
+	return -1;
+}
+
+/* Confirms that the session's startup generation still owns the writer lock. */
+static int
+startup_matches(
+	const struct console *console,
+	char *error,
+	size_t capacity)
+{
+	struct netconf current;
+
+	if (netconf_load(NETCONF_PATH, &current, error, capacity) != 0) {
+		if (errno != ENOENT)
+			return -1;
+		configuration_default(&current);
+	}
+	if (memcmp(&current, &console->startup, sizeof(current)) != 0) {
+		if (error != NULL && capacity != 0U)
+			(void)snprintf(error, capacity,
+			    "startup configuration changed in another session");
+		errno = EBUSY;
+		return -1;
+	}
+	return 0;
+}
+
+/* Releases this process's advisory writer ownership. */
+static void
+release_writer_lock(
+	struct console *console)
+{
+	if (console != NULL && console->writer_lock >= 0) {
+		(void)netconf_writer_unlock(console->writer_lock);
+		console->writer_lock = -1;
+	}
+}
+
+/* Implements ordinary and confirmed interactive commit. */
+static int
+console_commit(
+	struct console *console,
+	int count,
+	char **words)
+{
+	char rollback_path[NETWORKD_ROLLBACK_PATH_MAX + 1U];
+	char error[160];
+	unsigned minutes;
+	uint32_t token;
+	int server_error;
+	int confirmed_command;
+	int result;
+	int attempt;
+
+	error[0] = '\0';
+	rollback_path[0] = '\0';
+	confirmed_command = count == 3 && strcmp(words[1], "confirmed") == 0 &&
+	    decimal_timeout(words[2], &minutes) == 0 &&
+	    minutes <= NETWORKD_CONFIRMED_MINUTES_MAX;
+	if (!((count == 1) || confirmed_command)) {
+		fprintf(stderr, "net: usage: commit [confirmed MINUTES]\n");
+		return 1;
+	}
+	if (confirmed_command && console->confirmed_pending) {
+		fprintf(stderr, "net: a confirmed commit is already pending\n");
+		return 1;
+	}
+	if (netconf_reconcile_supported(&console->candidate, error,
+	    sizeof(error)) != 0) {
+		fprintf(stderr, "net: candidate cannot be committed: %s\n", error);
+		return 1;
+	}
+	if (console->writer_lock < 0) {
+		console->writer_lock = netconf_writer_lock(error, sizeof(error));
+		if (console->writer_lock < 0) {
+			fprintf(stderr, "net: cannot lock %s: %s\n",
+			    NETCONF_LOCK_PATH, error);
+			return 1;
+		}
+	}
+	if (startup_matches(console, error, sizeof(error)) != 0) {
+		fprintf(stderr, "net: cannot commit: %s\n", error);
+		release_writer_lock(console);
+		return 1;
+	}
+	server_error = 0;
+	if (console->confirmed_pending) {
+		result = transaction_exchange(NETWORKD_OP_CONFIRMED_CHECK, NULL, 0U,
+		    console->confirmed_token, NULL, &server_error, 1);
+		if (result != 0) {
+			fprintf(stderr,
+			    "net: confirmed transaction is no longer active\n");
+			console->confirmed_pending = 0;
+			console->confirmed_token = 0U;
+			release_writer_lock(console);
+			return 1;
+		}
+	} else if (transaction_exchange(NETWORKD_OP_CONFIRMED_CHECK, NULL, 0U,
+	    0U, NULL, &server_error, 1) != 0) {
+		release_writer_lock(console);
+		return 1;
+	}
+	if (confirmed_command) {
+		if (write_rollback_program(&console->candidate, &console->startup,
+		    rollback_path, sizeof(rollback_path), error, sizeof(error)) != 0) {
+			fprintf(stderr, "net: cannot create rollback program: %s\n",
+			    error);
+			release_writer_lock(console);
+			return 1;
+		}
+		token = 0U;
+		if (transaction_exchange(NETWORKD_OP_CONFIRMED_ARM, rollback_path,
+		    minutes, 0U, &token, &server_error, 1) != 0) {
+			(void)unlink(rollback_path);
+			release_writer_lock(console);
+			return 1;
+		}
+		console->confirmed_pending = 1;
+		console->confirmed_token = token;
+		if (netconf_reconcile(&console->startup, &console->candidate,
+		    reconcile_live, &console->confirmed_token, error,
+		    sizeof(error)) != 0) {
+			fprintf(stderr,
+			    "net: candidate apply failed; rollback remains armed\n");
+			return 1;
+		}
+		printf("Confirmed commit applied; rollback is armed for %u minute%s.\n",
+		    minutes, minutes == 1U ? "" : "s");
+		return 0;
+	}
+	if (netconf_reconcile(&console->startup, &console->candidate,
+	    reconcile_live, console->confirmed_pending ?
+	    &console->confirmed_token : NULL, error, sizeof(error)) != 0) {
+		fprintf(stderr, "net: commit apply failed\n");
+		if (!console->confirmed_pending && netconf_reconcile(
+		    &console->candidate, &console->startup, reconcile_live, NULL,
+		    error, sizeof(error)) != 0)
+			fprintf(stderr, "net: immediate rollback degraded\n");
+		if (!console->confirmed_pending)
+			release_writer_lock(console);
+		return 1;
+	}
+	if (netconf_save_atomic_locked(NETCONF_PATH, &console->candidate, error,
+	    sizeof(error)) != 0) {
+		fprintf(stderr, "net: cannot save %s: %s\n", NETCONF_PATH, error);
+		if (!console->confirmed_pending && netconf_reconcile(
+		    &console->candidate, &console->startup, reconcile_live, NULL,
+		    error, sizeof(error)) != 0)
+			fprintf(stderr, "net: immediate rollback degraded\n");
+		if (!console->confirmed_pending)
+			release_writer_lock(console);
+		return 1;
+	}
+	if (console->confirmed_pending) {
+		result = 1;
+		for (attempt = 0; attempt < 3; attempt++) {
+			result = transaction_exchange(NETWORKD_OP_CONFIRMED_DISARM,
+			    NULL, 0U, console->confirmed_token, NULL, &server_error,
+			    attempt == 2);
+			if (result == 0)
+				break;
+		}
+		if (result != 0) {
+			fprintf(stderr,
+			    "net: outcome uncertain after publishing %s\n",
+			    NETCONF_PATH);
+			console->confirmed_pending = 0;
+			console->confirmed_token = 0U;
+			release_writer_lock(console);
+			return 2;
+		}
+		console->confirmed_pending = 0;
+		console->confirmed_token = 0U;
+	}
+	console->startup = console->candidate;
+	console->dirty = 0;
+	release_writer_lock(console);
+	puts("Commit complete.");
+	return 0;
+}
+
+/* Abandons local edits or executes the one daemon-owned rollback. */
+static int
+console_rollback(
+	struct console *console)
+{
+	char error[160];
+	struct netconf startup;
+	int server_error;
+	int result;
+
+	error[0] = '\0';
+	server_error = 0;
+	result = transaction_exchange(NETWORKD_OP_CONFIRMED_ROLLBACK, NULL, 0U,
+	    0U, NULL, &server_error, 0);
+	if (result != 0 && server_error != ENOENT &&
+	    console->confirmed_pending) {
+		fprintf(stderr, "net: rollback request failed: %s\n",
+		    strerror(server_error != 0 ? server_error : EIO));
+		return 1;
+	}
+	if (netconf_load(NETCONF_PATH, &startup, error, sizeof(error)) != 0) {
+		if (errno != ENOENT) {
+			fprintf(stderr, "net: cannot reload %s: %s\n",
+			    NETCONF_PATH, error);
+			return 1;
+		}
+		configuration_default(&startup);
+	}
+	console->startup = startup;
+	console->candidate = startup;
+	console->interface = NULL;
+	console->dirty = 0;
+	console->confirmed_pending = 0;
+	console->confirmed_token = 0U;
+	release_writer_lock(console);
+	puts(result == 0 ? "Rollback complete." : "Candidate reloaded.");
+	return 0;
+}
+
 /* Supports the console configuration operation. */
 static int
 console_configuration(
@@ -1621,42 +2112,11 @@ console_configuration(
 		return 0;
 	}
 
-	/* Checks the remaining item count. */
-	if (count == 1 && strcmp(words[0], "apply") == 0) {
-		/* Obtains the apply candidate result. */
-		function_result = apply_candidate(&console->candidate);
-
-		/* Returns the computed result. */
-		return function_result;
-	}
-
-	/* Checks the remaining item count. */
-	if (count == 1 && strcmp(words[0], "save") == 0) {
-		/* Handles an operation failure. */
-		if (netconf_save_atomic(NETCONF_PATH, &console->candidate,
-					error, sizeof(error)) != 0) {
-			fprintf(stderr, "net: cannot save %s: %s\n",
-				NETCONF_PATH, error);
-
-			/* Reports operation failure. */
-			return 1;
-		}
-		console->startup = console->candidate;
-		console->dirty = 0;
-
-		/* Reports successful completion. */
-		return 0;
-	}
-
-	/* Checks the remaining item count. */
-	if (count == 1 && strcmp(words[0], "discard") == 0) {
-		console->candidate = console->startup;
-		console->interface = NULL;
-		console->dirty = 0;
-
-		/* Reports successful completion. */
-		return 0;
-	}
+	/* Dispatches only the final interactive transaction grammar. */
+	if (strcmp(words[0], "commit") == 0)
+		return console_commit(console, count, words);
+	if (count == 1 && strcmp(words[0], "rollback") == 0)
+		return console_rollback(console);
 
 	/* Handles an operation failure. */
 	if (netconf_validate(&console->candidate, error, sizeof(error)) != 0)

@@ -19,6 +19,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define NETCONF_LINE_MAX 512
@@ -513,11 +514,107 @@ netconf_write(
 	return function_result;
 }
 
-/*
- * Implements the netconf save atomic operation.
- */
+/* Acquires the permanent writer lock without replacing its inode. */
+int
+netconf_writer_lock(
+	char *error,
+	size_t capacity)
+{
+	struct flock lock;
+	struct stat status;
+	int descriptor;
+	int saved;
+
+	descriptor = open(NETCONF_LOCK_PATH,
+	    O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (descriptor < 0)
+		goto failed;
+	if (fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) ||
+	    status.st_nlink != 1 || status.st_uid != geteuid()) {
+		saved = errno != 0 ? errno : EINVAL;
+		(void)close(descriptor);
+		errno = saved;
+		goto failed;
+	}
+	if ((status.st_mode & 07777U) != 0600U &&
+	    fchmod(descriptor, 0600) != 0) {
+		saved = errno;
+		(void)close(descriptor);
+		errno = saved;
+		goto failed;
+	}
+	memset(&lock, 0, sizeof(lock));
+	lock.l_type = F_WRLCK;
+	lock.l_whence = SEEK_SET;
+	if (fcntl(descriptor, F_SETLK, &lock) != 0) {
+		saved = errno;
+		(void)close(descriptor);
+		errno = saved;
+		goto failed;
+	}
+	if (error != NULL && capacity != 0U)
+		error[0] = '\0';
+	return descriptor;
+
+failed:
+	if (error != NULL && capacity != 0U)
+		(void)snprintf(error, capacity, "%s", strerror(errno));
+	return -1;
+}
+
+/* Releases one writer lock descriptor. */
+int
+netconf_writer_unlock(
+	int descriptor)
+{
+	struct flock lock;
+	int result;
+	int saved;
+
+	if (descriptor < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	memset(&lock, 0, sizeof(lock));
+	lock.l_type = F_UNLCK;
+	lock.l_whence = SEEK_SET;
+	result = fcntl(descriptor, F_SETLK, &lock);
+	saved = errno;
+	if (close(descriptor) != 0 && result == 0)
+		return -1;
+	errno = saved;
+	return result;
+}
+
+/* Locks and atomically publishes one validated configuration. */
 int
 netconf_save_atomic(
+	const char *path,
+	const struct netconf *configuration,
+	char *error,
+	size_t capacity)
+{
+	int descriptor;
+	int result;
+	int saved;
+
+	descriptor = netconf_writer_lock(error, capacity);
+	if (descriptor < 0)
+		return -1;
+	result = netconf_save_atomic_locked(path, configuration, error, capacity);
+	saved = errno;
+	if (netconf_writer_unlock(descriptor) != 0 && result == 0) {
+		if (error != NULL && capacity != 0U)
+			(void)snprintf(error, capacity, "%s", strerror(errno));
+		return -1;
+	}
+	errno = saved;
+	return result;
+}
+
+/* Implements atomic publication while the caller owns the writer lock. */
+int
+netconf_save_atomic_locked(
 	const char *path,
 	const struct netconf *configuration,
 	char *error,

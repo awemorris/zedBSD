@@ -43,6 +43,7 @@ cases. P007 alone owns NCOM-T020--T022 QEMU and physical acceptance.
 
 ```sh
 cc -std=c11 -D_POSIX_C_SOURCE=200809L -I. -Wall -Wextra -Werror \
+  -DNETCONF_LOCK_PATH='"/tmp/ws011-net.conf.lock"' \
   userland/base/net/netconf.c \
   plan/ws011-net-config/tests/netconf-parser-test.c \
   -o /tmp/ws011-netconf-test
@@ -64,6 +65,7 @@ invalid-candidate preservation, and a same-operation temporary-file collision:
 
 ```sh
 cc -std=c11 -D_POSIX_C_SOURCE=200809L -I. -Wall -Wextra -Werror \
+  -DNETCONF_LOCK_PATH='"/tmp/ws011-net.conf.lock"' \
   userland/base/net/netconf.c \
   plan/ws011-net-config/tests/netconf-persistence-test.c \
   -o /tmp/ws011-netconf-persistence
@@ -77,4 +79,39 @@ sequence without reading `rc.conf`:
 
 ```sh
 sh plan/ws011-net-config/tests/net-boot-test.sh
+```
+
+`netconf-reconcile-test.c` covers the deterministic complete-intent forward
+and rollback sequences, absent-interface retirement, fresh DHCP acquisition,
+and forward failure boundaries:
+
+```sh
+cc -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -I. \
+  -Wall -Wextra -Werror userland/base/net/netconf.c \
+  userland/base/net/reconcile.c \
+  plan/ws011-net-config/tests/netconf-reconcile-test.c \
+  -o /tmp/ws011-netconf-reconcile
+/tmp/ws011-netconf-reconcile
+```
+
+`confirmed-commit-model-test.c` covers pre-arm validation and bounds,
+single-owner/token rules, monotonic expiry, accepted-descriptor execution,
+partial rollback continuation, and volatile restart cleanup:
+
+```sh
+cc -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -I. \
+  -Wall -Wextra -Werror userland/base/networkd/confirmed.c \
+  userland/base/net/protocol.c \
+  plan/ws011-net-config/tests/confirmed-commit-model-test.c \
+  -o /tmp/ws011-confirmed-model
+/tmp/ws011-confirmed-model
+```
+
+`confirmed-commit-test.sh` drives the real interactive client against a
+bounded fake ZNV2 peer. It covers normal publication ordering and partial
+apply rollback, temporary apply/confirm/disarm, explicit rollback, originating
+session loss, unchanged startup bytes, and lost disarm acknowledgements:
+
+```sh
+sh plan/ws011-net-config/tests/confirmed-commit-test.sh
 ```

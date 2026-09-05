@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static void
@@ -20,7 +22,10 @@ int
 main(int argc, char **argv)
 {
 	struct netconf original, loaded, invalid;
+	struct stat lock_status;
 	char error[160] = "", temporary[512];
+	pid_t child;
+	int lock_descriptor, status;
 
 	require(argc == 3, "usage: test DEFAULT OUTPUT");
 	require(netconf_load(argv[1], &original, error, sizeof(error)) == 0,
@@ -30,6 +35,28 @@ main(int argc, char **argv)
 		"atomic save failed");
 	require(netconf_load(argv[2], &loaded, error, sizeof(error)) == 0,
 		"saved configuration does not load");
+
+	lock_descriptor = netconf_writer_lock(error, sizeof(error));
+	require(lock_descriptor >= 0, "cannot acquire writer lock");
+	require(fstat(lock_descriptor, &lock_status) == 0 &&
+		    S_ISREG(lock_status.st_mode) &&
+		    (lock_status.st_mode & 07777U) == 0600U,
+		"writer lock is not a mode-0600 regular file");
+	child = fork();
+	require(child >= 0, "cannot fork lock contender");
+	if (child == 0) {
+		int contender = netconf_writer_lock(error, sizeof(error));
+		if (contender >= 0) {
+			(void)netconf_writer_unlock(contender);
+			_exit(1);
+		}
+		_exit(errno == EACCES || errno == EAGAIN ? 0 : 1);
+	}
+	require(waitpid(child, &status, 0) == child && WIFEXITED(status) &&
+		    WEXITSTATUS(status) == 0,
+		"concurrent writer was not rejected");
+	require(netconf_writer_unlock(lock_descriptor) == 0,
+		"cannot release writer lock");
 	require(loaded.interface_count == 1 &&
 		    strcmp(loaded.interfaces[0].name, "lo0") == 0 &&
 		    loaded.interfaces[0].addresses[0].prefix_length == 8,

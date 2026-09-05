@@ -8,7 +8,7 @@ Phase ID: `p006`
 
 Combined ID: `ws011-p006`
 
-Status: Ready; proposed as the sole pending item in q073
+Status: Complete (`q073`, 2026-09-05)
 
 Parent: [WS011](../ws.md)
 
@@ -121,29 +121,29 @@ timer-extension, or timer-reset command.
 
 ## Ordered work packages
 
-- [ ] NCOM-I01: Extract a deterministic complete-intent reconcile and canonical
+- [x] NCOM-I01: Extract a deterministic complete-intent reconcile and canonical
       rollback-program builder from the current forward-only `apply_candidate()`
       path; cover static, DHCP, routes, DNS, enable/disable, and absent-state
       retirement without adding VLAN/bridge semantics.
-- [ ] NCOM-I02: Extend ZNV2 with exact bounded arm, disarm, and explicit rollback
+- [x] NCOM-I02: Extend ZNV2 with exact bounded arm, disarm, and explicit rollback
       request/response fields. Keep wired mutations root-only, reject duplicate
       or unknown fields, and preserve all existing opcodes and framing.
-- [ ] NCOM-I03: Add networkd's single volatile transaction owner: secure
+- [x] NCOM-I03: Add networkd's single volatile transaction owner: secure
       pre-arm file open and validation, opaque generation token, monotonic poll
       deadline, already-open descriptor execution, all-step diagnostics, busy
       and stale-token handling, restart cleanup, and no `net.conf` path.
-- [ ] NCOM-I04: Replace interactive `apply`/`save`/`discard` parsing and help with
+- [x] NCOM-I04: Replace interactive `apply`/`save`/`discard` parsing and help with
       `commit`, `commit confirmed MINUTES`, and `rollback`. Retain the confirmed
       candidate/token only in the originating process and preserve safe exit or
       lost-session behavior.
-- [ ] NCOM-I05: Add the permanent root-mode-0600 `/run/net.conf.lock` writer
+- [x] NCOM-I05: Add the permanent root-mode-0600 `/run/net.conf.lock` writer
       boundary, runtime-before-persistence ordering, post-rename disarm retries,
       and explicit nonzero `outcome uncertain` result when acknowledgement is
       not obtained.
-- [ ] NCOM-I06: Implement and pass NCOM-T001--T012, then rerun the existing
+- [x] NCOM-I06: Implement and pass NCOM-T001--T012, then rerun the existing
       parser, console, persistence, boot, private protocol, wired, and WLAN
       focused gates plus supported `net`/networkd target builds.
-- [ ] NCOM-I07: Update the public network-console documentation and synchronize
+- [x] NCOM-I07: Update the public network-console documentation and synchronize
       actual commands, evidence, remaining p007 work, and resume state into the
       P/W/M/Q books. Run the Markdown link check and `git diff --check`.
 
@@ -189,7 +189,19 @@ candidate, cross-reboot timer, or any networkd write access to `/etc/net.conf`.
 
 ## Current result and resumption
 
-Planning extraction is complete; no source or test implementation has started.
-After explicit q073 approval, first mark the Queue and this Phase in progress,
-rerun the existing WS011 focused baseline, then begin NCOM-I01. P007 remains the
-sole acceptance handoff after every p006 completion condition has evidence.
+Implementation is complete. The production client now owns a process-local
+candidate, matching token, writer lock, complete reconcile, rollback-program
+generation, delayed atomic publication, and bounded disarm retry. Networkd owns
+only the securely opened volatile program, generation token, monotonic deadline,
+token-scoped mutations, all-line rollback, and bounded aggregate diagnostics;
+it has no `net.conf` path.
+
+Focused ordinary and sanitizer model tests, the real interactive client against
+a bounded fake ZNV2 peer, parser/console/persistence/boot/protocol regressions,
+four managed-WLAN/Wi-Fi regression runners, and maintained amd64/i386 PC/AT
+`net`/networkd target builds pass. The public network-console reference is
+linked and both documentation validators plus `git diff --check` pass.
+
+Resume with p007 only after it is separately queued: its QEMU timeout,
+confirmation, and physical remote-administration observations are not q073
+results. P004 remains held by `MB-010`.

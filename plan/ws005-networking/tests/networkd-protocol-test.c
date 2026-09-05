@@ -154,6 +154,16 @@ test_fields(
 	    NETWORKD_OP_WIFI_DISCONNECT == 36 &&
 	    NETWORKD_OP_WIFI_PROFILES_CHANGED == 37,
 	    "global Wi-Fi opcodes");
+
+	/* Reserves the confirmed-commit family without renumbering older requests. */
+	expect(NETWORKD_OP_DEFAULT_ROUTE_CLEAR == 9 &&
+	    NETWORKD_OP_DNS_CLEAR == 10 &&
+	    NETWORKD_OP_CONFIRMED_ARM == 16 &&
+	    NETWORKD_OP_CONFIRMED_DISARM == 17 &&
+	    NETWORKD_OP_CONFIRMED_ROLLBACK == 18 &&
+	    NETWORKD_OP_CONFIRMED_CHECK == 19 &&
+	    NETWORKD_FIELD_PATH == 22 && NETWORKD_FIELD_TOKEN == 23,
+	    "confirmed-commit protocol numbers");
 }
 
 /* Exercises a peer which closes before accepting one request frame. */

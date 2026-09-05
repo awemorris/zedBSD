@@ -4,18 +4,17 @@ Last updated: 2026-09-05
 
 WSID: `ws011`
 
-Status: in progress; p001--p003 and p005 design are complete. VLAN/bridge is
-blocked by `MB-010`; confirmed-commit implementation p006 is Ready and proposed
-as the sole q073 item, while p007 owns its later consolidated acceptance.
+Status: in progress; p001--p003, p005 design, and p006 implementation are
+complete. VLAN/bridge is blocked by `MB-010`; p007 owns the separately
+queueable QEMU and physical confirmed-commit acceptance.
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws011-p005` design complete
+Last verified Phase: `ws011-p006` implementation complete (`q073`)
 
-Resume point: leave p004 blocked and obtain explicit approval for proposed q073
-before implementing p006. The current `/sbin/net` still implements historical
-`apply`/`save`/`discard`; p006 replaces them. Extract p007 only after p006's
-focused implementation gates pass.
+Resume point: leave p004 blocked and separately queue p007's QEMU and physical
+acceptance. The current `/sbin/net` implements `commit`, `commit confirmed
+MINUTES`, and `rollback`; historical `apply`/`save`/`discard` are removed.
 
 Shared tests: [WS011 test index](tests/README.md)
 
@@ -75,7 +74,7 @@ strict YAML-like zedBSD format, not general YAML.
 | `ws011-p003` | [Persistence and boot migration](phase003-persistence/phase.md) | Complete software milestone | Atomic authoritative configuration and boot/request evidence pass; migrated DHCP QEMU rerun remains |
 | `ws011-p004` | [VLAN and bridge interfaces](phase004-vlan-bridge/phase.md) | Blocked by explicit manual hold | Resume design and implementation only after explicit user release |
 | `ws011-p005` | [Confirmed-commit design](phase005-confirmed-commit-design/phase.md) | Complete design (2026-09-05) | Session-only candidate/token, networkd rollback timer, delayed config publication, and implementation bounds are frozen |
-| `ws011-p006` | [Confirmed-commit implementation](phase006-confirmed-commit-implementation/phase.md) | Ready; proposed q073 | Replace `apply/save/discard` with interactive `commit`, `commit confirmed MINUTES`, and `rollback`; networkd never touches `/etc/net.conf` |
+| `ws011-p006` | [Confirmed-commit implementation](phase006-confirmed-commit-implementation/phase.md) | Complete (`q073`, 2026-09-05) | Complete reconcile, interactive confirmed commit, volatile networkd rollback, serialized delayed publication, focused regressions, and amd64/i386 builds pass |
 | `ws011-p007` | [Confirmed-commit acceptance](phase007-confirmed-commit-acceptance/phase.md) | Planned; follows p006 | Focused/QEMU failure and recovery matrix plus one consolidated physical remote-administration check |
 
 ## Fixed decisions
@@ -180,9 +179,9 @@ interfaces:
 - **candidate**: interactive edits not yet committed.
 
 The console provides `show startup-config`, `show running-config`, and
-`show candidate`. The historical p002/p003 implementation uses
-`apply`/`save`/`discard`; p005 replaces them with `commit`,
-`commit confirmed MINUTES`, and `rollback`. A normal `commit` applies and then
+`show candidate`. The current implementation uses `commit`, `commit confirmed
+MINUTES`, and `rollback`; historical `apply`/`save`/`discard` are removed. A
+normal `commit` applies and then
 persists. A confirmed commit applies temporarily, and its later ordinary
 `commit` persists. `rollback` abandons an uncommitted candidate or immediately
 executes an armed rollback program.

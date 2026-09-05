@@ -22,6 +22,7 @@ cc -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -I. \
   -Iuserland/base/libedit -Wall -Wextra -Werror \
   -DNETWORKD_SOCKET="\"$socket_path\"" \
   userland/base/net/main.c userland/base/net/netconf.c \
+  userland/base/net/reconcile.c \
   userland/base/net/protocol.c \
   userland/base/net/wifi-conf.c userland/base/net/wifi-store.c \
   userland/base/libedit/readline.c -o "$binary"
@@ -51,6 +52,7 @@ run_case()
     -DNETWORKD_SOCKET="\"$socket_path\"" \
     -DNETCONF_PATH="\"$NETCONF_TEST_PATH\"" \
     userland/base/net/main.c userland/base/net/netconf.c \
+    userland/base/net/reconcile.c \
     userland/base/net/protocol.c \
     userland/base/net/wifi-conf.c userland/base/net/wifi-store.c \
     userland/base/libedit/readline.c -o "$binary"

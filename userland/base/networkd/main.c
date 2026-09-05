@@ -14,6 +14,7 @@
 #include "userland/base/net/netutil.h"
 #include "userland/base/net/protocol.h"
 #include "userland/base/net/wifi-store.h"
+#include "userland/base/networkd/confirmed.h"
 #include "userland/base/networkd/managed-wlan.h"
 #include "userland/base/networkd/wifi-child.h"
 
@@ -80,11 +81,13 @@ struct networkd_request {
 	char address[INET_ADDRSTRLEN];
 	char netmask[INET_ADDRSTRLEN];
 	char gateway[INET_ADDRSTRLEN];
+	char rollback_path[NETWORKD_ROLLBACK_PATH_MAX + 1U];
 	char dns[8][INET_ADDRSTRLEN];
 	unsigned char ssid[WLAN_SSID_MAX];
 	size_t ssid_length;
 	unsigned dns_count;
 	unsigned timeout;
+	uint32_t token;
 };
 
 struct networkd_wlan_radio {
@@ -95,6 +98,7 @@ struct networkd_wlan_radio {
 
 static volatile sig_atomic_t stopping;
 static struct networkd_managed_wlan managed_wlan;
+static struct networkd_confirmed confirmed;
 static int route_events = -1;
 static uint64_t route_event_sequence;
 static uint64_t automatic_retry_at;
@@ -113,6 +117,9 @@ static void recover_managed_wlan(void);
 static void schedule_automatic_work(unsigned);
 static int automatic_poll_timeout(void);
 static void run_automatic_work(void);
+static int event_poll_timeout(void);
+static void run_confirmed_due(void);
+static void run_due_work(void);
 static int retire_managed_connection(enum networkd_managed_wlan_state, int);
 static int retire_managed_policy(void);
 static void notify_init(const char *record);
@@ -136,6 +143,13 @@ static const char *operation_name(uint32_t opcode);
 static void send_response(int, uint32_t, uint32_t, uint32_t, int,
 	const char *, const void *, size_t);
 static void send_error(int client, int error, const char *reason);
+static void send_token_response(int, uint32_t, uint32_t, uint32_t);
+static int execute_wired_request(struct networkd_request *, char *, size_t,
+	char *, size_t, size_t *, int *, uint64_t);
+static int rollback_validate(const char *, char *, size_t, void *);
+static int rollback_execute(const char *, char *, size_t, void *);
+static int rollback_parse(const char *, struct networkd_request *, char *,
+	size_t);
 static int show_interfaces(const char *name, char *output, size_t capacity);
 static int append_interface_status(int descriptor, const char *name, char *output, const size_t capacity, size_t *used);
 static int interface_exists(const char *name);
@@ -172,6 +186,8 @@ static int get_interface_ipv4(int, const char *, unsigned long, uint32_t *);
 static int set_interface_ipv4(int, const char *, unsigned long, uint32_t);
 static int unlink_owned_resolver(const struct networkd_managed_wlan *);
 static int run_command(char *const arguments[], unsigned timeout_seconds, char diagnostic[CHILD_OUTPUT_MAX]);
+static int run_command_until(char *const [], unsigned, uint64_t,
+	char [CHILD_OUTPUT_MAX]);
 static void clean_diagnostic(char *text);
 static int default_route_exists(void);
 static int write_resolver(char *const addresses[], int count);
@@ -202,6 +218,7 @@ main(
 	(void)signal(SIGINT, handle_signal);
 	status = 0;
 	networkd_managed_wlan_init(&managed_wlan);
+	networkd_confirmed_init(&confirmed);
 
 	/* Creates and verifies the privileged network control endpoint. */
 	if (open_listener(&listener) != 0) {
@@ -241,13 +258,15 @@ main(
 
 	/* Polls control and interface events without a one-second accept delay. */
 	while (!stopping) {
+		run_due_work();
 		descriptors[0].fd = listener.descriptor;
 		descriptors[0].events = POLLIN;
 		descriptors[0].revents = 0;
-		descriptors[1].fd = route_events;
+		descriptors[1].fd = networkd_confirmed_active(&confirmed) ? -1 :
+		    route_events;
 		descriptors[1].events = POLLIN;
 		descriptors[1].revents = 0;
-		poll_timeout = automatic_poll_timeout();
+		poll_timeout = event_poll_timeout();
 		poll_result = poll(descriptors, 2U, poll_timeout);
 		if (poll_result < 0) {
 			if (errno == EINTR)
@@ -255,7 +274,7 @@ main(
 			break;
 		}
 		if (poll_result == 0) {
-			run_automatic_work();
+			run_due_work();
 			continue;
 		}
 		if ((descriptors[1].revents & (POLLIN | POLLERR | POLLHUP)) != 0 &&
@@ -276,7 +295,8 @@ main(
 				send_error(client, EACCES,
 				    "authentication failed");
 			close(client);
-			if (managed_wlan.state == NETWORKD_WLAN_RECONNECTING)
+			if (managed_wlan.state == NETWORKD_WLAN_RECONNECTING &&
+			    !networkd_confirmed_active(&confirmed))
 				recover_managed_wlan();
 			if (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING &&
 			    automatic_retry_at == 0U)
@@ -290,6 +310,7 @@ main(
 			break;
 	}
 	status = stopping ? 0 : 1;
+	networkd_confirmed_reset(&confirmed);
 	if (retire_managed_policy() != 0)
 		status = 1;
 	if (route_events >= 0) {
@@ -1051,6 +1072,56 @@ run_automatic_work(
 		schedule_automatic_work(NETWORKD_WLAN_RESCAN_SECONDS);
 }
 
+/* Selects the earliest volatile networkd deadline. */
+static int
+event_poll_timeout(
+	void)
+{
+	int automatic;
+	int rollback;
+
+	automatic = networkd_confirmed_active(&confirmed) ? -1 :
+	    automatic_poll_timeout();
+	rollback = networkd_confirmed_poll_timeout(&confirmed,
+	    netutil_monotonic_us());
+	if (automatic < 0)
+		return rollback;
+	if (rollback < 0)
+		return automatic;
+	return automatic < rollback ? automatic : rollback;
+}
+
+/* Executes every volatile deadline which is due at this event-loop turn. */
+static void
+run_confirmed_due(
+	void)
+{
+	char diagnostic[NETWORKD_RESPONSE_MAX];
+	int result;
+
+	diagnostic[0] = '\0';
+	result = networkd_confirmed_run_due(&confirmed, netutil_monotonic_us(),
+	    rollback_execute, NULL, diagnostic, sizeof(diagnostic));
+	if (result < 0) {
+		fprintf(stderr, "networkd: confirmed rollback degraded: %s",
+		    diagnostic[0] != '\0' ? diagnostic : "operation failed\n");
+	} else if (result > 0) {
+		fprintf(stderr, "networkd: confirmed rollback expired and ran\n");
+	}
+	networkd_protocol_clear(diagnostic, sizeof(diagnostic));
+}
+
+/* Executes confirmed expiry first, then any independent WLAN retry. */
+static void
+run_due_work(
+	void)
+{
+	run_confirmed_due();
+	if (!networkd_confirmed_active(&confirmed) &&
+	    automatic_poll_timeout() == 0)
+		run_automatic_work();
+}
+
 /* Retires the sole connection while preserving its active policy owner. */
 static int
 retire_managed_connection(
@@ -1305,19 +1376,11 @@ handle_request(
 	const struct zedbsd_peercred *peer)
 {
 	struct networkd_request request;
-	struct in_addr address;
-	struct in_addr mask;
-	struct in_addr gateway;
-	unsigned prefix;
-	char seconds[16];
 	char response[NETWORKD_RESPONSE_MAX];
 	char diagnostic[CHILD_OUTPUT_MAX];
-	char *arguments[16];
-	char *dns[8];
 	const char *operation;
+	uint64_t mutation_deadline;
 	size_t response_length;
-	unsigned index;
-	int present;
 	int result;
 	int error;
 
@@ -1325,7 +1388,9 @@ handle_request(
 	result = -1;
 	error = EINVAL;
 	response_length = 0U;
+	response[0] = '\0';
 	diagnostic[0] = '\0';
+	mutation_deadline = 0U;
 
 	/* Reads and validates one exact length-framed request. */
 	if (read_request(client, &request) != 0) {
@@ -1344,6 +1409,88 @@ handle_request(
 		return;
 	}
 
+	/* A request arriving with the timer event cannot disarm an expired owner. */
+	run_confirmed_due();
+
+	/* Owns confirmed-commit control without ever opening net.conf. */
+	if (request.header.opcode >= NETWORKD_OP_CONFIRMED_ARM &&
+	    request.header.opcode <= NETWORKD_OP_CONFIRMED_CHECK) {
+		if (request.header.opcode == NETWORKD_OP_CONFIRMED_CHECK) {
+			result = networkd_confirmed_check(&confirmed, request.token);
+			error = result == 0 ? 0 : errno;
+		} else if (request.header.opcode == NETWORKD_OP_CONFIRMED_ARM) {
+			result = networkd_confirmed_arm(&confirmed,
+			    request.rollback_path, peer->euid, request.timeout,
+			    netutil_monotonic_us(), rollback_validate, NULL,
+			    &request.token, diagnostic, sizeof(diagnostic));
+			error = result == 0 ? 0 : errno;
+			if (result == 0) {
+				send_token_response(client, request.header.request_id,
+				    request.header.opcode, request.token);
+				networkd_protocol_clear(&request, sizeof(request));
+				networkd_protocol_clear(diagnostic,
+				    sizeof(diagnostic));
+				return;
+			}
+		} else if (request.header.opcode ==
+		    NETWORKD_OP_CONFIRMED_DISARM) {
+			result = networkd_confirmed_disarm(&confirmed,
+			    request.token);
+			error = result == 0 ? 0 : errno;
+		} else {
+			result = networkd_confirmed_rollback(&confirmed,
+			    rollback_execute, NULL, response, sizeof(response));
+			error = result == 0 ? 0 : errno;
+			response_length = strlen(response);
+		}
+		if (result == 0) {
+			send_response(client, request.header.request_id,
+			    request.header.opcode, NETWORKD_RESULT_OK, 0, NULL,
+			    response_length != 0U ? response : NULL,
+			    response_length);
+		} else {
+			send_response(client, request.header.request_id,
+			    request.header.opcode,
+			    request.header.opcode == NETWORKD_OP_CONFIRMED_ROLLBACK &&
+			    response_length != 0U ? NETWORKD_RESULT_DEGRADED :
+			    NETWORKD_RESULT_ERROR, error != 0 ? error : EIO,
+			    diagnostic[0] != '\0' ? diagnostic : operation,
+			    response_length != 0U ? response : NULL,
+			    response_length);
+		}
+		networkd_protocol_clear(&request, sizeof(request));
+		networkd_protocol_clear(response, sizeof(response));
+		networkd_protocol_clear(diagnostic, sizeof(diagnostic));
+		return;
+	}
+
+	/* Serializes every wired mutation with the volatile transaction owner. */
+	if (request.header.opcode >= NETWORKD_OP_UP &&
+	    request.header.opcode <= NETWORKD_OP_DNS_CLEAR &&
+	    request.header.opcode != NETWORKD_OP_RELOAD &&
+	    networkd_confirmed_check(&confirmed, request.token) != 0) {
+		error = errno != 0 ? errno : EBUSY;
+		send_response(client, request.header.request_id,
+		    request.header.opcode, NETWORKD_RESULT_ERROR, error,
+		    "confirmed transaction", NULL, 0U);
+		networkd_protocol_clear(&request, sizeof(request));
+		return;
+	}
+	if (request.token != 0U)
+		mutation_deadline = confirmed.deadline;
+
+	/* WLAN mutations cannot occupy the loop past a wired rollback deadline. */
+	if (networkd_confirmed_active(&confirmed) &&
+	    request.header.opcode >= NETWORKD_OP_WIFI_ENABLE &&
+	    request.header.opcode <= NETWORKD_OP_WIFI_PROFILES_CHANGED &&
+	    request.header.opcode != NETWORKD_OP_WIFI_LIST) {
+		send_response(client, request.header.request_id,
+		    request.header.opcode, NETWORKD_RESULT_ERROR, EBUSY,
+		    "confirmed transaction", NULL, 0U);
+		networkd_protocol_clear(&request, sizeof(request));
+		return;
+	}
+
 	/* Delegates the complete typed WLAN family to its bounded orchestrator. */
 	if (request.header.opcode >= NETWORKD_OP_WIFI_ENABLE &&
 	    request.header.opcode <= NETWORKD_OP_WIFI_PROFILES_CHANGED) {
@@ -1355,73 +1502,16 @@ handle_request(
 	}
 
 	/* Dispatches the validated operation through absolute child paths. */
-	if (request.header.opcode == NETWORKD_OP_SHOW) {
-		if (show_interfaces(request.interface[0] != '\0' ?
-		    request.interface : NULL, response, sizeof(response)) == 0) {
-			response_length = strlen(response);
-			result = 0;
-		}
-		error = errno;
-	} else if (request.header.opcode == NETWORKD_OP_UP ||
-	    request.header.opcode == NETWORKD_OP_DOWN) {
-		arguments[0] = "/sbin/ifconfig";
-		arguments[1] = request.interface;
-		arguments[2] = request.header.opcode == NETWORKD_OP_UP ?
-		    "up" : "down";
-		arguments[3] = NULL;
-		if (interface_exists(request.interface) == 0)
-			result = run_command(arguments, 10, diagnostic);
-		error = errno;
-	} else if (request.header.opcode == NETWORKD_OP_STATIC) {
-		if (interface_exists(request.interface) == 0 &&
-		    netutil_parse_ipv4(request.address, &address) == 0 &&
-		    netutil_parse_ipv4(request.netmask, &mask) == 0 &&
-		    netutil_mask_prefix(mask, &prefix) == 0) {
-			arguments[0] = "/sbin/ifconfig";
-			arguments[1] = request.interface;
-			arguments[2] = "inet";
-			arguments[3] = request.address;
-			arguments[4] = "netmask";
-			arguments[5] = request.netmask;
-			arguments[6] = NULL;
-			result = run_command(arguments, 10, diagnostic);
-		}
-		error = errno;
-	} else if (request.header.opcode == NETWORKD_OP_DHCP) {
-		(void)snprintf(seconds, sizeof(seconds), "%u", request.timeout);
-		arguments[0] = "/sbin/dhcpc";
-		arguments[1] = "-t";
-		arguments[2] = seconds;
-		arguments[3] = request.interface;
-		arguments[4] = NULL;
-		if (interface_exists(request.interface) == 0)
-			result = run_command(arguments, request.timeout + 5U,
-			    diagnostic);
-		error = errno;
-	} else if (request.header.opcode == NETWORKD_OP_DEFAULT_ROUTE) {
-		if (netutil_parse_ipv4(request.gateway, &gateway) == 0 &&
-		    (present = default_route_exists()) >= 0) {
-			if (present) {
-				result = 0;
-			} else {
-				arguments[0] = "/sbin/route";
-				arguments[1] = "add";
-				arguments[2] = "default";
-				arguments[3] = request.gateway;
-				arguments[4] = NULL;
-				result = run_command(arguments, 10, diagnostic);
-			}
-		}
-		error = errno;
-	} else if (request.header.opcode == NETWORKD_OP_DNS) {
-		for (index = 0U; index < request.dns_count; index++)
-			dns[index] = request.dns[index];
-		result = write_resolver(dns, (int)request.dns_count);
-		error = errno;
-	} else if (request.header.opcode == NETWORKD_OP_RELOAD) {
-		result = 0;
-	} else {
-		error = EOPNOTSUPP;
+	result = execute_wired_request(&request, response, sizeof(response),
+	    diagnostic, sizeof(diagnostic), &response_length, &error,
+	    mutation_deadline);
+	if (mutation_deadline != 0U &&
+	    netutil_monotonic_us() >= mutation_deadline) {
+		run_confirmed_due();
+		result = -1;
+		error = ETIMEDOUT;
+		(void)snprintf(diagnostic, sizeof(diagnostic),
+		    "confirmed transaction expired");
 	}
 
 	/* Sends one correlated terminal response and clears request storage. */
@@ -1439,6 +1529,280 @@ handle_request(
 	networkd_protocol_clear(&request, sizeof(request));
 	networkd_protocol_clear(response, sizeof(response));
 	networkd_protocol_clear(diagnostic, sizeof(diagnostic));
+}
+
+/* Executes one decoded non-WLAN request for a client or rollback program. */
+static int
+execute_wired_request(
+	struct networkd_request *request,
+	char *response,
+	size_t response_capacity,
+	char *diagnostic,
+	size_t diagnostic_capacity,
+	size_t *response_length,
+	int *error,
+	uint64_t deadline)
+{
+	struct in_addr address;
+	struct in_addr mask;
+	struct in_addr gateway;
+	unsigned prefix;
+	char seconds[16];
+	char *arguments[16];
+	char *dns[8];
+	unsigned index;
+	int present;
+	int result;
+
+	if (request == NULL || diagnostic == NULL ||
+	    diagnostic_capacity < CHILD_OUTPUT_MAX || response_length == NULL ||
+	    error == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	result = -1;
+	*error = EINVAL;
+	*response_length = 0U;
+	diagnostic[0] = '\0';
+	if (request->header.opcode == NETWORKD_OP_SHOW) {
+		if (response != NULL && response_capacity != 0U &&
+		    show_interfaces(request->interface[0] != '\0' ?
+		    request->interface : NULL, response, response_capacity) == 0) {
+			*response_length = strlen(response);
+			result = 0;
+		}
+		*error = errno;
+	} else if (request->header.opcode == NETWORKD_OP_UP ||
+	    request->header.opcode == NETWORKD_OP_DOWN) {
+		arguments[0] = "/sbin/ifconfig";
+		arguments[1] = request->interface;
+		arguments[2] = request->header.opcode == NETWORKD_OP_UP ?
+		    "up" : "down";
+		arguments[3] = NULL;
+		if (interface_exists(request->interface) == 0)
+			result = run_command_until(arguments, 10, deadline, diagnostic);
+		*error = errno;
+	} else if (request->header.opcode == NETWORKD_OP_STATIC) {
+		if (interface_exists(request->interface) == 0 &&
+		    netutil_parse_ipv4(request->address, &address) == 0 &&
+		    netutil_parse_ipv4(request->netmask, &mask) == 0 &&
+		    netutil_mask_prefix(mask, &prefix) == 0) {
+			arguments[0] = "/sbin/ifconfig";
+			arguments[1] = request->interface;
+			arguments[2] = "inet";
+			arguments[3] = request->address;
+			arguments[4] = "netmask";
+			arguments[5] = request->netmask;
+			arguments[6] = NULL;
+			result = run_command_until(arguments, 10, deadline, diagnostic);
+		}
+		*error = errno;
+	} else if (request->header.opcode == NETWORKD_OP_DHCP) {
+		(void)snprintf(seconds, sizeof(seconds), "%u", request->timeout);
+		arguments[0] = "/sbin/dhcpc";
+		arguments[1] = "-t";
+		arguments[2] = seconds;
+		arguments[3] = request->interface;
+		arguments[4] = NULL;
+		if (interface_exists(request->interface) == 0)
+			result = run_command_until(arguments, request->timeout + 5U,
+			    deadline, diagnostic);
+		*error = errno;
+	} else if (request->header.opcode == NETWORKD_OP_DEFAULT_ROUTE) {
+		if (netutil_parse_ipv4(request->gateway, &gateway) == 0 &&
+		    (present = default_route_exists()) >= 0) {
+			if (present) {
+				result = 0;
+			} else {
+				arguments[0] = "/sbin/route";
+				arguments[1] = "add";
+				arguments[2] = "default";
+				arguments[3] = request->gateway;
+				arguments[4] = NULL;
+				result = run_command_until(arguments, 10, deadline,
+				    diagnostic);
+			}
+		}
+		*error = errno;
+	} else if (request->header.opcode ==
+	    NETWORKD_OP_DEFAULT_ROUTE_CLEAR) {
+		present = default_route_exists();
+		if (present == 0) {
+			result = 0;
+		} else if (present > 0) {
+			arguments[0] = "/sbin/route";
+			arguments[1] = "delete";
+			arguments[2] = "default";
+			arguments[3] = NULL;
+			result = run_command_until(arguments, 10, deadline, diagnostic);
+		}
+		*error = errno;
+	} else if (request->header.opcode == NETWORKD_OP_DNS) {
+		for (index = 0U; index < request->dns_count; index++)
+			dns[index] = request->dns[index];
+		result = write_resolver(dns, (int)request->dns_count);
+		*error = errno;
+	} else if (request->header.opcode == NETWORKD_OP_DNS_CLEAR) {
+		result = write_resolver(NULL, 0);
+		*error = errno;
+	} else if (request->header.opcode == NETWORKD_OP_RELOAD) {
+		result = 0;
+		*error = 0;
+	} else {
+		*error = EOPNOTSUPP;
+	}
+	if (result != 0 && *error == 0)
+		*error = EIO;
+	return result;
+}
+
+/* Validates one rollback line without changing running state. */
+static int
+rollback_validate(
+	const char *line,
+	char *diagnostic,
+	size_t capacity,
+	void *context)
+{
+	struct networkd_request request;
+
+	(void)context;
+	return rollback_parse(line, &request, diagnostic, capacity);
+}
+
+/* Executes one already prevalidated rollback line. */
+static int
+rollback_execute(
+	const char *line,
+	char *diagnostic,
+	size_t capacity,
+	void *context)
+{
+	struct networkd_request request;
+	char output[1];
+	size_t output_length;
+	int error;
+
+	(void)context;
+	if (rollback_parse(line, &request, diagnostic, capacity) != 0)
+		return -1;
+	if (execute_wired_request(&request, output, sizeof(output), diagnostic,
+	    capacity, &output_length, &error, 0U) != 0) {
+		if (diagnostic[0] == '\0')
+			(void)snprintf(diagnostic, capacity, "%s", strerror(error));
+		errno = error;
+		return -1;
+	}
+	return 0;
+}
+
+/* Parses the canonical one-command-per-line rollback language. */
+static int
+rollback_parse(
+	const char *line,
+	struct networkd_request *request,
+	char *diagnostic,
+	size_t capacity)
+{
+	char copy[NETWORKD_ROLLBACK_LINE_MAX + 1U];
+	char *word[16];
+	char *token;
+	char *end;
+	struct in_addr parsed;
+	struct in_addr mask;
+	unsigned prefix;
+	unsigned long timeout;
+	size_t length;
+	unsigned count;
+	unsigned index;
+
+#define ROLLBACK_REJECT(text) do { \
+	if (diagnostic != NULL && capacity != 0U) \
+		(void)snprintf(diagnostic, capacity, "%s", text); \
+	errno = EINVAL; \
+	return -1; \
+} while (0)
+	if (line == NULL || request == NULL ||
+	    (length = strlen(line)) == 0U || length > NETWORKD_ROLLBACK_LINE_MAX)
+		ROLLBACK_REJECT("invalid rollback line length");
+	for (index = 0U; index < length; index++) {
+		if ((unsigned char)line[index] < 32U ||
+		    (unsigned char)line[index] > 126U)
+			ROLLBACK_REJECT("non-printable rollback byte");
+	}
+	strcpy(copy, line);
+	count = 0U;
+	for (token = strtok(copy, " "); token != NULL;
+	    token = strtok(NULL, " ")) {
+		if (count == sizeof(word) / sizeof(word[0]))
+			ROLLBACK_REJECT("too many rollback operands");
+		word[count++] = token;
+	}
+	if (count < 2U || strcmp(word[0], "V1") != 0)
+		ROLLBACK_REJECT("invalid rollback version");
+	memset(request, 0, sizeof(*request));
+	if ((strcmp(word[1], "UP") == 0 || strcmp(word[1], "DOWN") == 0) &&
+	    count == 3U) {
+		request->header.opcode = strcmp(word[1], "UP") == 0 ?
+		    NETWORKD_OP_UP : NETWORKD_OP_DOWN;
+		if (strlen(word[2]) >= sizeof(request->interface))
+			ROLLBACK_REJECT("invalid rollback interface");
+		strcpy(request->interface, word[2]);
+	} else if (strcmp(word[1], "DHCP") == 0 && count == 4U) {
+		errno = 0;
+		timeout = strtoul(word[3], &end, 10);
+		if (errno != 0 || end == word[3] || *end != '\0' || timeout == 0U ||
+		    timeout > 3600U || strlen(word[2]) >= sizeof(request->interface))
+			ROLLBACK_REJECT("invalid rollback DHCP");
+		request->header.opcode = NETWORKD_OP_DHCP;
+		request->timeout = (unsigned)timeout;
+		strcpy(request->interface, word[2]);
+	} else if (strcmp(word[1], "STATIC") == 0 && count == 7U &&
+	    strcmp(word[3], "ipv4") == 0 && strcmp(word[5], "netmask") == 0) {
+		if (strlen(word[2]) >= sizeof(request->interface) ||
+		    strlen(word[4]) >= sizeof(request->address) ||
+		    strlen(word[6]) >= sizeof(request->netmask) ||
+		    netutil_parse_ipv4(word[4], &parsed) != 0 ||
+		    netutil_parse_ipv4(word[6], &mask) != 0 ||
+		    netutil_mask_prefix(mask, &prefix) != 0)
+			ROLLBACK_REJECT("invalid rollback static address");
+		request->header.opcode = NETWORKD_OP_STATIC;
+		strcpy(request->interface, word[2]);
+		strcpy(request->address, word[4]);
+		strcpy(request->netmask, word[6]);
+	} else if (strcmp(word[1], "DEFAULTROUTE") == 0 && count == 3U) {
+		if (strlen(word[2]) >= sizeof(request->gateway) ||
+		    netutil_parse_ipv4(word[2], &parsed) != 0)
+			ROLLBACK_REJECT("invalid rollback default route");
+		request->header.opcode = NETWORKD_OP_DEFAULT_ROUTE;
+		strcpy(request->gateway, word[2]);
+	} else if (strcmp(word[1], "DEFAULTROUTE_CLEAR") == 0 && count == 2U) {
+		request->header.opcode = NETWORKD_OP_DEFAULT_ROUTE_CLEAR;
+	} else if (strcmp(word[1], "DNS_CLEAR") == 0 && count == 2U) {
+		request->header.opcode = NETWORKD_OP_DNS_CLEAR;
+	} else if (strcmp(word[1], "DNS") == 0 && count >= 3U && count <= 10U) {
+		request->header.opcode = NETWORKD_OP_DNS;
+		request->dns_count = count - 2U;
+		for (index = 0U; index < request->dns_count; index++) {
+			if (strlen(word[index + 2U]) >= sizeof(request->dns[index]) ||
+			    netutil_parse_ipv4(word[index + 2U], &parsed) != 0)
+				ROLLBACK_REJECT("invalid rollback DNS");
+			strcpy(request->dns[index], word[index + 2U]);
+		}
+	} else {
+		ROLLBACK_REJECT("unsupported rollback operation");
+	}
+	if ((request->header.opcode == NETWORKD_OP_UP ||
+	    request->header.opcode == NETWORKD_OP_DOWN ||
+	    request->header.opcode == NETWORKD_OP_DHCP ||
+	    request->header.opcode == NETWORKD_OP_STATIC) &&
+	    (request->interface[0] == '\0' ||
+	    strspn(request->interface,
+	    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") !=
+	    strlen(request->interface)))
+		ROLLBACK_REJECT("invalid rollback interface");
+	return 0;
+#undef ROLLBACK_REJECT
 }
 
 /* Clears every handler buffer which can contain policy or child data. */
@@ -1975,6 +2339,16 @@ decode_request(
 		    copy_request_text(request->dns[request->dns_count],
 		    sizeof(request->dns[request->dns_count]), &field) == 0) {
 			request->dns_count++;
+		} else if (field.type == NETWORKD_FIELD_PATH &&
+		    (seen & 64U) == 0U && copy_request_text(
+		    request->rollback_path, sizeof(request->rollback_path),
+		    &field) == 0) {
+			seen |= 64U;
+		} else if (field.type == NETWORKD_FIELD_TOKEN &&
+		    (seen & 128U) == 0U &&
+		    networkd_field_read_u32(&field, &request->token) == 0 &&
+		    request->token != 0U) {
+			seen |= 128U;
 		} else if (field.type == NETWORKD_FIELD_SSID &&
 		    (seen & 32U) == 0U && field.length != 0U &&
 		    field.length <= sizeof(request->ssid) &&
@@ -1994,18 +2368,35 @@ decode_request(
 	if ((request->header.opcode == NETWORKD_OP_SHOW &&
 	    (seen == 0U || seen == 1U) && request->dns_count == 0U) ||
 	    ((request->header.opcode == NETWORKD_OP_UP ||
-	    request->header.opcode == NETWORKD_OP_DOWN) && seen == 1U &&
+	    request->header.opcode == NETWORKD_OP_DOWN) &&
+	    (seen == 1U || seen == (1U | 128U)) &&
 	    request->dns_count == 0U) ||
-	    (request->header.opcode == NETWORKD_OP_DHCP && seen == 3U &&
+	    (request->header.opcode == NETWORKD_OP_DHCP &&
+	    (seen == 3U || seen == (3U | 128U)) &&
 	    request->dns_count == 0U) ||
-	    (request->header.opcode == NETWORKD_OP_STATIC && seen == 13U &&
+	    (request->header.opcode == NETWORKD_OP_STATIC &&
+	    (seen == 13U || seen == (13U | 128U)) &&
 	    request->dns_count == 0U) ||
 	    (request->header.opcode == NETWORKD_OP_DEFAULT_ROUTE &&
-	    seen == 16U && request->dns_count == 0U) ||
-	    (request->header.opcode == NETWORKD_OP_DNS && seen == 0U &&
+	    (seen == 16U || seen == (16U | 128U)) &&
+	    request->dns_count == 0U) ||
+	    (request->header.opcode == NETWORKD_OP_DNS &&
+	    (seen == 0U || seen == 128U) &&
 	    request->dns_count != 0U) ||
 	    (request->header.opcode == NETWORKD_OP_RELOAD && seen == 0U &&
 	    request->dns_count == 0U) ||
+	    ((request->header.opcode == NETWORKD_OP_DEFAULT_ROUTE_CLEAR ||
+	    request->header.opcode == NETWORKD_OP_DNS_CLEAR) &&
+	    (seen == 0U || seen == 128U) && request->dns_count == 0U) ||
+	    (request->header.opcode == NETWORKD_OP_CONFIRMED_ROLLBACK &&
+	    seen == 0U && request->dns_count == 0U) ||
+	    (request->header.opcode == NETWORKD_OP_CONFIRMED_CHECK &&
+	    (seen == 0U || seen == 128U) && request->dns_count == 0U) ||
+	    (request->header.opcode == NETWORKD_OP_CONFIRMED_ARM &&
+	    seen == (2U | 64U) && request->dns_count == 0U &&
+	    request->timeout <= NETWORKD_CONFIRMED_MINUTES_MAX) ||
+	    (request->header.opcode == NETWORKD_OP_CONFIRMED_DISARM &&
+	    seen == 128U && request->dns_count == 0U) ||
 	    ((request->header.opcode == NETWORKD_OP_WIFI_ENABLE ||
 	    request->header.opcode == NETWORKD_OP_WIFI_DISABLE ||
 	    request->header.opcode == NETWORKD_OP_WIFI_LIST ||
@@ -2051,6 +2442,18 @@ operation_name(
 	/* Maps the contiguous wired range. */
 	if (opcode < sizeof(names) / sizeof(names[0]))
 		return names[opcode];
+	if (opcode == NETWORKD_OP_DEFAULT_ROUTE_CLEAR)
+		return "DEFAULTROUTE_CLEAR";
+	if (opcode == NETWORKD_OP_DNS_CLEAR)
+		return "DNS_CLEAR";
+	if (opcode == NETWORKD_OP_CONFIRMED_ARM)
+		return "CONFIRMED_ARM";
+	if (opcode == NETWORKD_OP_CONFIRMED_DISARM)
+		return "CONFIRMED_DISARM";
+	if (opcode == NETWORKD_OP_CONFIRMED_ROLLBACK)
+		return "CONFIRMED_ROLLBACK";
+	if (opcode == NETWORKD_OP_CONFIRMED_CHECK)
+		return "CONFIRMED_CHECK";
 
 	/* Maps the separately allocated WLAN range. */
 	if (opcode == NETWORKD_OP_WIFI_ENABLE)
@@ -2117,6 +2520,31 @@ send_response(
 	}
 	header.request_id = request_id != 0U ? request_id : 1U;
 	header.opcode = opcode != 0U ? opcode : NETWORKD_OP_SHOW;
+	header.payload_length = writer.used;
+	(void)networkd_protocol_write_frame(client, &header, payload);
+	networkd_protocol_clear(payload, sizeof(payload));
+}
+
+/* Sends the sole successful arm response with its opaque token. */
+static void
+send_token_response(
+	int client,
+	uint32_t request_id,
+	uint32_t opcode,
+	uint32_t token)
+{
+	struct networkd_protocol_header header;
+	struct networkd_field_writer writer;
+	unsigned char payload[32];
+
+	networkd_field_writer_init(&writer, payload, sizeof(payload));
+	if (networkd_field_write_u32(&writer, NETWORKD_FIELD_STATUS,
+	    NETWORKD_RESULT_OK) != 0 || networkd_field_write_u32(&writer,
+	    NETWORKD_FIELD_ERROR, 0U) != 0 || networkd_field_write_u32(&writer,
+	    NETWORKD_FIELD_TOKEN, token) != 0)
+		return;
+	header.request_id = request_id;
+	header.opcode = opcode;
 	header.payload_length = writer.used;
 	(void)networkd_protocol_write_frame(client, &header, payload);
 	networkd_protocol_clear(payload, sizeof(payload));
@@ -3756,6 +4184,17 @@ run_command(
 	unsigned timeout_seconds,
 	char diagnostic[CHILD_OUTPUT_MAX])
 {
+	return run_command_until(arguments, timeout_seconds, 0U, diagnostic);
+}
+
+/* Runs one child with both an operation bound and an optional transaction deadline. */
+static int
+run_command_until(
+	char *const arguments[],
+	unsigned timeout_seconds,
+	uint64_t deadline,
+	char diagnostic[CHILD_OUTPUT_MAX])
+{
 	pid_t result;
 	ssize_t count;
 	char temporary[96];
@@ -3836,7 +4275,8 @@ run_command(
 			break;
 
 		/* Handles the ticks condition. */
-		if (ticks++ >= tick_limit) {
+		if (ticks++ >= tick_limit ||
+		    (deadline != 0U && netutil_monotonic_us() >= deadline)) {
 			(void)kill(child, SIGKILL);
 			(void)waitpid(child, &status, 0);
 			errno = ETIMEDOUT;
