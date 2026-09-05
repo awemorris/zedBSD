@@ -1,10 +1,11 @@
 # evdev compatibility profile
 
 Status: experimental UAPI. The event core, capability/current-state queries,
-console-keyboard adapter, PC/AT PS/2 mouse, and PC-98 bus mouse are implemented.
-The q044 source fixtures cover the PC/AT, PC-98, and X68000 physical paths and
-the character-only momentary contract used by arm64 and sparcv9. Live USB HID
-binding is not implemented.
+console-keyboard adapter, PC/AT PS/2 mouse, PC-98 bus mouse, and USB HID Report
+Protocol keyboard/mouse/tablet producers are implemented. The q048 automatic
+matrix covers USB HID on xHCI and paired EHCI/UHCI with concurrent USB-root
+storage, and the user confirmed physical USB keyboard/mouse operation on
+2026-09-05.
 
 zedBSD reserves `/dev/input/eventN` for an independently implemented event
 interface whose initial keyboard and pointer subset is source-oriented toward
@@ -53,14 +54,15 @@ records remain. These are production behaviors in
 
 An `eventN` number is an allocation result, not a stable device identity.
 Programs enumerate the nodes, query identity and capabilities, and select a
-device by those properties. The current core deliberately does not reuse a
-successfully published slot after detach. `ws006-p008` has frozen the future
-rule: unpublish immediately, but reserve the number until the final fd on that
-old generation closes; only then may a later generation reuse it. The current
-non-reusing implementation remains truthful until that Phase lands. The
-registration behavior is owned by
-[`input-device.c`](../../src/drivers/input-device.c), while capability-only
-enumeration is exercised by the
+device by those properties. Detach unpublishes the pathname immediately, but
+the number stays reserved while any fd still refers to that terminal device
+generation. Those stale fds drain only old queued records before EOF/HUP and
+cannot observe a later generation. After the final old fd closes, a new device
+may reuse the released number. Bounded registry exhaustion fails attachment
+instead of aliasing generations. The registration behavior is owned by
+[`input-device.c`](../../src/drivers/input-device.c), the dynamic namespace
+lifecycle by [`devfs.c`](../../src/kern/devfs.c), and capability-only
+enumeration by the
 [IN-T12 probe](../../plan/ws006-input/tests/evdev-capability-probe.c).
 
 ## Initial ioctl and policy subset
@@ -118,6 +120,15 @@ state is backend-local in the
 [ownership runner](../../plan/ws006-input/tests/run-input-ownership-host-test.sh)
 exercises two independent keyboard and pointer states, overlapping modifiers
 and buttons, registration races, and detach while held.
+
+The production [`usb-hid.c`](../../src/drivers/usb-hid.c) matches validated HID
+interfaces rather than device IDs, fetches and parses each Report descriptor,
+requires checked `SET_PROTOCOL(REPORT)` for boot-subclass devices, and publishes
+truthful `BUS_USB` identity and capabilities. A malformed or unsupported Report
+Protocol interface fails attachment; there is no silent Boot-Protocol runtime
+fallback. Each interface owns one interrupt-IN URB and one independent event
+device. Keyboard events also reach the console subscriber, while evdev readers
+remain independent and `EVIOCGRAB` still does not disable console text input.
 
 The HAL advertises whether a console source has physical release/repeat
 information or only characters through `struct hal_cons_input_info` returned
@@ -192,7 +203,7 @@ cover the source snapshot and atomic state transition.
 | Grab effect | Linux evdev exclusive delivery | FreeBSD evdev-compatible behavior | Other evdev readers excluded; console broker remains active |
 | Code catalog | Broad Linux catalog | Tracks Linux codes closely | Frozen keyboard/pointer subset only |
 | Event injection | Separate uinput facility | Separate uinput facility | Not provided |
-| Hotplug node generation | Dynamic event nodes | Dynamic event nodes | Current detach is terminal and non-reusing; p008 will reserve a detached number through the final stale-fd close, then permit reuse |
+| Hotplug node generation | Dynamic event nodes | Dynamic event nodes | Immediate unpublish; stale generation reserved through final fd close, then number reuse permitted |
 
 The Linux UAPI and event semantics are maintained in the [Linux input
 header](https://github.com/torvalds/linux/blob/master/include/uapi/linux/input.h)
@@ -210,21 +221,24 @@ incorporated into the zedBSD base system.
 | Independent queues, read/poll/grab, overflow, and detach | [`input-device.c`](../../src/drivers/input-device.c), [`input-queue.c`](../../src/drivers/input-queue.c) | [IN-T10 queue fixture](../../plan/ws006-input/tests/input-queue-test.c), [ownership/lifecycle fixture](../../plan/ws006-input/tests/input-device-ownership-test.c) |
 | Capability registration and current key/ABS state | [`input-capability.c`](../../src/drivers/input-capability.c) | [IN-T11](../../plan/ws006-input/tests/input-capability-test.c) and [IN-T12 probe](../../plan/ws006-input/tests/evdev-capability-probe.c) |
 | Per-source physical/momentary input, console subscription, resync, and detach | [`input-device.c`](../../src/drivers/input-device.c), [`input-subscriber.c`](../../src/drivers/input-subscriber.c), [`console.c`](../../src/drivers/fs/console.c) | [q044 ownership runner](../../plan/ws006-input/tests/run-input-ownership-host-test.sh) and [`ws006-p006`](../../plan/ws006-input/phase006-input-truthfulness-ownership/phase.md) |
-| Device-independent HID descriptor/report parsing only | [`hid-report.c`](../../src/drivers/hid/hid-report.c) | [IN-T40 fixture](../../plan/ws006-input/tests/hid-report-test.c) and [`ws006-p007`](../../plan/ws006-input/phase007-usb-hid-parser/phase.md) |
+| HID descriptor/report parsing | [`hid-report.c`](../../src/drivers/hid/hid-report.c) | [IN-T40 fixture](../../plan/ws006-input/tests/hid-report-test.c) and [`ws006-p007`](../../plan/ws006-input/phase007-usb-hid-parser/phase.md) |
+| USB HID Report-Protocol producers, hotplug, and generation-safe nodes | [`usb-hid.c`](../../src/drivers/usb-hid.c), [`input-device.c`](../../src/drivers/input-device.c), [`devfs.c`](../../src/kern/devfs.c) | [IN-T41/IN-T42 definitions](../../plan/ws006-input/tests/README.md), [`ws006-p008` result](../../plan/ws006-input/phase008-usb-hid-evdev/phase.md) |
 | Xzed evdev-only consumer | [Xzed input owner](../../userland/X11/xzed/input-posix.c) | [`ws018-p007`](../../plan/ws018-kernel-architecture/phase007-xzed-evdev-consumer/phase.md) and its [host runner](../../plan/ws018-kernel-architecture/tests/run-xzed-input-host-test.sh) |
+| Noct 2.0.1 BeUI evdev consumer | [zedBSD BeUI backend](../../userland/base/noct/noct/src/api/api-beui-zedbsd.c) | [q063 Noct evidence](../../plan/ws008-noct/tests/q063-noct-2.0.1-evidence.md) |
 
 Registration requires `EV_SYN/SYN_REPORT`; malformed declarations and
 undeclared producer events are rejected, keeping advertised capabilities and
-the delivered public stream consistent. The q044 automatic/source boundary
-passed the focused ownership runner in ordinary and ASan/UBSan modes, plus
-IN-T00, IN-T10, IN-T11, and IN-T20. A fresh image/QEMU rerun was unavailable
-behind the recorded Noct post-link build gate, so that runtime observation is
-not inferred here.
+the delivered public stream consistent. The q044 ownership gates pass, and
+q048 adds Report-Protocol keyboard, relative mouse, and absolute tablet
+production fixtures plus generation-safe cdev/devfs lifecycle checks. Its QEMU
+matrix passes with xHCI and paired EHCI/UHCI, including hotplug, stale-fd
+isolation, event-number reuse, console coexistence, and concurrent USB-root
+I/O. The user's 2026-09-05 physical USB HID confirmation completes IN-T42.
 
-Live USB HID interface binding, URBs, generation-safe event-node reuse, and
-QEMU/physical HID delivery remain `ws006-p008`; the completed
-`ws006-p007` result is parser-only. The legacy `/dev/console` continuous-event
-and key-state UAPI is still present because the latest Noct/BeUI consumer has
-not been revalidated; removal remains `ws006-p009`. Those planned boundaries
-are tracked by the [WS006 plan](../../plan/ws006-input/ws.md), not presented as
-current functionality.
+Xzed and the selected Noct 2.0.1 BeUI backend both discover
+`/dev/input/eventN` by capabilities and consume evdev without the console event
+interface. `/dev/mouse` is absent. The legacy `/dev/console` continuous-event,
+input-mode, and key-state ioctls remain implemented and are deprecated; their
+planned removal is `ws006-p009`, not current behavior. Ordinary character/TTY
+console input remains supported before and after that planned cleanup. Those
+boundaries are tracked by the [WS006 plan](../../plan/ws006-input/ws.md).

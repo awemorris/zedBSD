@@ -4,16 +4,16 @@ Last updated: 2026-09-05
 
 WSID: `ws009`
 
-Status: active; p006 is Queue-ready as the highest-priority follow-up to
-completed USB HID, WLAN, Intel Mac, Noct, and toolchain work
+Status: active; p006 completed the highest-priority USB HID, WLAN, Intel Mac,
+Noct, and toolchain documentation follow-up in q072
 
 Parent: [master plan](../master.md)
 
-Last verified Phases: `ws009-p004` and `ws009-p005` complete (`q046`)
+Last verified Phase: `ws009-p006` complete (`q072`)
 
-Resume point: Queue p006, then return producer-specific documentation to its
-own implementation Phase; DOC-10--12, DOC-30/32--34, and DOC-50--55 remain
-scoped work.
+Resume point: Return producer-specific documentation to its own implementation
+Phase; DOC-10--12, DOC-30/32--34, and the remaining DOC-50--55 work stay
+scoped.
 
 Shared tests: [WS009 test index](tests/README.md)
 
@@ -26,7 +26,7 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p003`](phase003-init-services/phase.md) | Complete | Current init/service configuration, readiness, supervision, and shutdown contract published |
 | [`ws009-p004`](phase004-evdev-input-reference/phase.md) | Complete (`q046`) | Current multi-source, momentary, resync, console-subscriber, and detach behavior is documented without claiming live USB HID |
 | [`ws009-p005`](phase005-kernel-parameter-reference/phase.md) | Complete (`q046`) | Common parameters and all four required configured x86 loader paths are reconciled with production source and retained q015/q031/q032 evidence |
-| [`ws009-p006`](phase006-completed-producer-follow-up/phase.md) | Queue-ready | Publish current WLAN, physical USB HID, Intel Mac Variant, Noct 2.0.1, and project-toolchain behavior without claiming planned removals or new UAPIs |
+| [`ws009-p006`](phase006-completed-producer-follow-up/phase.md) | Complete (`q072`) | Current WLAN, physical USB HID, Intel Mac Variant, Noct 2.0.1, and project-toolchain behavior is published without claiming planned removals or new UAPIs |
 
 Documentation work may be extracted alongside a producer WS when it describes
 a newly frozen public interface, but it retains a WS009 Phase ID and acceptance

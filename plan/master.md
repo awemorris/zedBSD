@@ -153,7 +153,9 @@ added p044 to replace p030's kernel-owned high-level reconnect with
 asynchronous kernel generations, link notification, and a userspace-owned
 retry. Q071 completed p041/p044 and the corresponding WS005 policy/recovery
 Phases; the user accepted the consolidated physical WLAN result and closed
-WS005. AX211 direct boot, RF-link-budget, and cross-driver follow-ups remain
+WS005. Q072 then reconciled public WLAN, physical USB HID, Intel Mac Variant,
+Noct 2.0.1, and project LLVM documentation with current source and producer
+evidence. AX211 direct boot, RF-link-budget, and cross-driver follow-ups remain
 deferred. Q061 completed
 p037's read-only Intel intake, corrected the exact target to AX211/CNVio2
 `8086:51f0`, subsystem `8086:4090`, revision `01`, and cleared its firmware/
@@ -457,7 +459,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws006` | Input and evdev | Active; p008 complete after q048 automatic evidence and the user's physical USB HID confirmation | Report-Protocol HID works on hardware; `/dev/mouse` is absent and Xzed already uses evdev-only input | Queue p009 to remove event/key-state `/dev/console` UAPI while preserving ordinary character/TTY input | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Complete (`q063`) | p010 host CLI/toolchain/ordinary-build and p009 amd64 static/package/q35-xHCI runtime gates pass on official `v2.0.1`; p006 remains historical review evidence | No current Phase; Remacs and i386/PC-98 target Noct remain explicitly outside q063 | [WS008](ws008-noct/ws.md) |
-| `ws009` | Documentation | Active; completed-producer follow-up is highest priority | `ws009-p004` and `p005` complete; p006 Queue-ready | Queue p006 for current WLAN, USB HID, Intel Mac Variant, Noct, and toolchain references | [WS009](ws009-documentation/ws.md) |
+| `ws009` | Documentation | Active; completed-producer follow-up complete (`q072`) | `ws009-p006` completes current WLAN, physical USB HID, Intel Mac Variant, Noct 2.0.1, and project LLVM references | Return producer-specific documentation to its owning implementation Phase; remaining DOC ledger items stay scoped | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete (`q063`) | `ws010-p001`–`p005` complete; all 177 maintained userland Makefiles expose the common lifecycle and top-level download materializes declared external inputs | No current Phase; extract a new requirement before resuming | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit design complete; VLAN/bridge separately blocked | `ws011-p005` complete by design; p006 Queue-ready; p007 follows; p004 blocked by MB-010 | After WS009 p006, implement p006 then complete p007 acceptance | [WS011](ws011-net-config/ws.md) |
 | `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
@@ -576,31 +578,28 @@ WS003/WS004 x86 HAL behavior + WS021 project LLVM
 ## 6. Priority waves
 
 The user replaced the previous WLAN/toolchain wave on 2026-09-05. Completed
-WS004, WS005, WS008, WS018, WS020, WS021, and WS023 results remain accepted and
-are no longer execution-order entries. The active order is:
+WS004, WS005, WS008, WS009 p006, WS018, WS020, WS021, and WS023 results remain
+accepted and are no longer execution-order entries. The active order is:
 
-1. `ws009-p006`: update public documentation to the already completed WLAN,
-   physical USB HID, Intel Mac Variant, Noct 2.0.1, and project LLVM state.
-   Do not document planned removal or implementation as current behavior.
-2. `ws011-p006`, then `ws011-p007`: implement and accept interactive confirmed
+1. `ws011-p006`, then `ws011-p007`: implement and accept interactive confirmed
    commit. The originating `net` process alone owns the candidate and may
    publish `/etc/net.conf`; networkd owns only the volatile timer, token, and
    `/tmp` rollback program. VLAN/bridge p004 remains excluded by `MB-010`.
-3. WS019 in dependency order: p002 read-only storage administration, p003
+2. WS019 in dependency order: p002 read-only storage administration, p003
    read-only `/sbin/diskpart`, p008 target UFS1-in-file `/sbin/mkfs`, p009
    target ZEDSWAP2-in-file `/sbin/mkswap`, p004 Noct `/bin/zedinst`, then p005
    consolidated QEMU NVMe installation acceptance. No template image or live
    `DATA.IMG`/`SWAPFILE` copy is permitted.
-4. WS022 p001--p003: freeze and implement compiler-emitted static ELF
+3. WS022 p001--p003: freeze and implement compiler-emitted static ELF
    `PT_TLS` for amd64/i386 initial threads and pthreads. Dynamic `dlopen()` TLS
    remains outside the first boundary.
-5. WS017 p001--p004: implement the optional `/dev/graphics` mapped-LFB path,
+4. WS017 p001--p004: implement the optional `/dev/graphics` mapped-LFB path,
    amd64 backend, Xzed fast path, and final amd64 UEFI acceptance. An initially
    RW mapping may transition `RW -> RO -> RW` within its original maximum; an
    initially RO mapping cannot gain write, and execute is always forbidden.
 
 `ws006-p009` is independently Queue-ready after physical USB HID acceptance,
-but is outside this explicitly ordered five-WS wave. It remains visible and is
+but is outside this explicitly ordered four-WS wave. It remains visible and is
 not silently inserted ahead of the listed priorities. WS003 Latitude NVMe
 installation follows successful WS019 acceptance. WS007, WS001, remaining
 WS004 hardware follow-ups, WS013 Runtime CPAR, WS014 GPU, and WS015 μITRON stay

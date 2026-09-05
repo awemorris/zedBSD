@@ -1,6 +1,6 @@
 # Build zedBSD from source
 
-Status: current for the 2026-09-02 build interface
+Status: current for the 2026-09-05 build and image interface
 
 This guide builds a zedBSD disk image from a source checkout and starts the
 supported x86 QEMU targets. Commands are run from the repository root.
@@ -55,6 +55,14 @@ firmware inputs even when those firmware packages are not selected. Downloaded
 bytes are ignored by Git but remain inside the working tree, allowing the
 post-download tree to be packed as a multi-license source distribution.
 
+Both host and target Noct come from release `v2.0.1`, tag commit
+`ed621e79139f55d06dd1a474243afbf0ce5efe0a`. The tracked archive identity is
+2,524,680 bytes with SHA-256
+`68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f`.
+Acquisition checks the size, digest, archive paths, member types, strict
+zero-fuzz patches, and a complete extracted-source manifest before publication.
+It never substitutes a Git checkout for that release archive.
+
 The toolchain target verifies and extracts Noct below `build/NoctLang`, builds
 the host interpreter with the host compiler, installs or accepts the patched
 project LLVM under `build/llvm/`, constructs amd64/i386 target sysroots, and
@@ -65,6 +73,24 @@ succeed:
 make toolchain
 test -x build/NoctLang/build-static/noct
 ```
+
+The build ownership boundary is:
+
+| Artifact | Builder and location | Role |
+| --- | --- | --- |
+| Host Noct | Host C/C++ compiler; `build/NoctLang/build-static/noct` | Runs repository-owned build, image, and validation scripts |
+| Project LLVM | Host C/C++ compiler or verified `rev-0` cache; `build/llvm/` | Builds every maintained x86 zedBSD target artifact |
+| amd64 sysroot | Project LLVM inputs under `build/amd64/sysroot/` | Public headers, startup objects, libc, builtins, and linker inputs for `x86_64-unknown-zedbsd` |
+| i386 sysroot | Project LLVM inputs under `build/i386/sysroot/` | Shared PC/AT and PC-98 boundary for `i386-unknown-zedbsd` |
+| Target Noct | Project LLVM, LLD, and amd64 sysroot; installed as `/usr/bin/noct` when selected | Runs inside zedBSD; does not replace host Noct |
+
+The permanent x86_64 Linux cache is release `rev-0`, asset
+`zedbsd-llvm-23.1.0-x86_64-linux.tar.gz`, with tracked SHA-256
+`6f8e1154c73b9f2d32f16360ace107b7862f08e748c6f10c1bd75914aa6502c2`.
+`make toolchain-cache` validates the archive, installed identity, tool set,
+versions, and license. `make -j16 toolchain` remains the authoritative
+source-build path and uses the official LLVM `23.1.0` source plus the tracked
+zedBSD target patch when no accepted cache is installed.
 
 Network access is needed only when a required verified release archive is
 absent.
@@ -85,12 +111,39 @@ the sole selected-target input; normal build targets reject a missing or
 invalid file. It is generated and should not be hand-edited.
 
 The target menu is organized as Architecture -> Board -> Variant. PC/AT amd64
-provides `UEFI + BIOS (for PC/AT)`, `UEFI (for Apple)`, and
-`BIOS (for PC/AT)`; the current single-profile boards save the fixed `Default`
-Variant. A saved configuration from before the Variant field was introduced
-uses its board default. Variant describes disk-image composition only; it does
-not change kernel or bootloader compilation. Disk capacity is not a build-menu
-selection.
+provides the following image profiles in this order:
+
+| Menu label | Saved value | Image boot paths | Expected firmware behavior |
+| --- | --- | --- | --- |
+| `UEFI + BIOS (for PC/AT)` | `hybrid` | Complete GPT/ESP plus compatibility BIOS path | Boots with OVMF and SeaBIOS |
+| `UEFI (for Apple)` | `uefi` | Pure Protective MBR, primary GPT, ESP, and payload FAT32; no BIOS payload | Boots with OVMF; does not boot with SeaBIOS |
+| `BIOS (for PC/AT)` | `bios` | Legacy MBR and BIOS payload; no GPT or ESP | Boots with SeaBIOS; does not boot with OVMF |
+
+The current single-profile boards save the fixed `Default` Variant. A saved
+configuration from before the Variant field was introduced uses its board
+default. Variant describes disk-image composition only; it does not change the
+kernel, target triple, or compiled BIOS/UEFI loader artifacts. Disk capacity is
+not a build-menu selection.
+
+To build each amd64 profile, run `make menuconfig`, choose PC/AT amd64 and the
+desired label, save, and run `make -j16 disk-image`. Repeat the menu/save/build
+sequence for another profile; each selected profile publishes its image at
+`build/amd64/hdd-image.img`, so preserve a copy elsewhere if multiple outputs
+are needed simultaneously. Do not hand-edit generated `config.mk`.
+
+The maintained six-cell positive/negative verification uses private build and
+image paths and therefore does not replace `config.mk` or the ordinary output:
+
+```sh
+build/NoctLang/build-static/noct --path=tools/build \
+  plan/ws020-intel-mac/tests/qemu-variant-matrix.noct \
+  . plan/ws020-intel-mac/temp/p003-qemu
+```
+
+It requires the locally documented SeaBIOS and OVMF firmware files and verifies
+all three profiles against both firmware families. See the
+[WS020 test index](../../plan/ws020-intel-mac/tests/README.md) before running
+this longer acceptance matrix.
 
 The maintained x86 output directories are:
 
@@ -132,11 +185,18 @@ names its focused tests under `plan/wsXXX-*/tests/`.
 
 ## 5. Start QEMU
 
-For the selected target, the simplest launch is:
+For a selected BIOS-capable profile, the simplest launch is:
 
 ```sh
 make run
 ```
+
+On amd64, `make run` uses the default QEMU PC machine and SeaBIOS. It is
+therefore suitable for `hybrid` and `bios`, but a correctly built `uefi` image
+is expected not to boot through that command. Use an OVMF launch or the
+maintained six-cell runner above for the UEFI path; give every run a disposable
+writable OVMF variables file and never let firmware modify the source image
+used as retained evidence.
 
 For amd64, the equivalent explicit command is:
 
@@ -164,9 +224,19 @@ The initial success marker for the maintained x86 images is an init sequence
 followed by `login:`. Exit QEMU normally with its UI or monitor controls; do
 not write to a real disk device when following this guide.
 
+The `UEFI (for Apple)` label describes a portable, UEFI-only disk-image layout;
+it does not make QEMU emulate Apple hardware. That layout and its relocated-GPT
+handling have passed the Intel Mac physical boot boundary. The separate Apple
+`05ac:8406` Internal Memory Card Reader can attach with no medium and does not
+publish a disk; media-insertion polling and later disk publication for that
+reader are not implemented. The accepted boot used a separate USB Mass Storage
+device, so the reader limitation is not a boot dependency.
+
 ## 6. Diagnostics
 
 - `config.mk is missing or invalid`: run `make menuconfig` and save a target.
+- A UEFI-only amd64 image appears not to boot under `make run`: this is the
+  expected SeaBIOS-negative profile; use OVMF or the maintained Variant runner.
 - Noct download/build failure: verify network access, `curl`, `tar`, `patch`,
   CMake, and the host C compiler, then rerun `make download` and
   `make toolchain`; do not replace the recorded archive with unverified bytes.

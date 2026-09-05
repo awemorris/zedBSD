@@ -1,6 +1,6 @@
 # Kernel boot parameters
 
-Status: implemented for the four x86 production-loader paths; reconciled with
+Status: current for the four x86 production-loader paths; reconciled with
 the configured-loader paths on 2026-08-31
 
 This document defines the implemented textual kernel-parameter contract for

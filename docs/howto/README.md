@@ -1,6 +1,6 @@
 # How-to guides
 
-Status: active
+Status: current navigation index
 
 How-to guides are reproducible, task-oriented procedures. They state supported
 architectures and prerequisites, use non-destructive examples by default, and

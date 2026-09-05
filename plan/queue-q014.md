@@ -104,7 +104,7 @@ log contains no SYNCHRONIZE CACHE command. `make check` was not run and
 `.internal/` was not used.
 
 The single BR-T41 artifact is
-[build/amd64/hdd-image-q014.img](../build/amd64/hdd-image-q014.img), 135266304
+historical generated artifact `build/amd64/hdd-image-q014.img`, 135266304
 bytes, SHA-256
 `003b54ef77e1fe2e0d96278421441ff7cf4988f736f766f433bf33d6b11cd891`.
 BR-T41 was performed once on 2026-08-27 with the requested frozen q014 image.

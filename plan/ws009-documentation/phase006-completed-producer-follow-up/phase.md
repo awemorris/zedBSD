@@ -8,11 +8,13 @@ Phase ID: `p006`
 
 Combined ID: `ws009-p006`
 
-Status: Queue-ready; highest current priority
+Status: Complete (`q072`, 2026-09-05)
 
 Parent: [WS009](../ws.md)
 
 Tests: [WS009 test index](../tests/README.md)
+
+Queue: [q072](../../queue.md)
 
 ## Objective
 
@@ -60,3 +62,54 @@ WS011 p006/p007, WS019 p002--p005/p008/p009, WS022, WS017, and WS006 p009 each
 update the corresponding public reference when their behavior exists. This
 Phase must label those contracts as planned rather than documenting them as
 installed commands or UAPIs.
+
+## Result
+
+- Added [`docs/reference/managed-wlan.md`](../../../docs/reference/managed-wlan.md)
+  from current `net`, `networkd`, `wifi`, profile-store, route-event, and q071
+  evidence. It records the six interface-free commands, effective-UID store
+  selection, `root:network` mode-0660 socket, four persistent policy states,
+  bounded transients, deterministic selection, 30-second child retry, link-loss
+  recovery, permissions, limits, and observable failures without a real
+  credential or retained internal path.
+- Reconciled [`docs/reference/evdev.md`](../../../docs/reference/evdev.md) with
+  production Report-Protocol USB keyboard/mouse/tablet binding, immediate
+  hot-unplug unpublication, stale-generation fd isolation, final-close event
+  number reuse, the accepted physical HID result, and the current Xzed/Noct
+  BeUI evdev consumers. The still-present console event/input-mode/key-state
+  ioctls remain explicitly deprecated rather than reported removed.
+- Extended the [source-build guide](../../../docs/howto/build-from-source.md)
+  with all three amd64 Variant labels and saved values, their positive and
+  negative firmware behavior, the maintained six-cell command, the Intel Mac
+  physical boundary and separate no-media `05ac:8406` reader limitation, the
+  exact Noct 2.0.1 identity, LLVM 23.1.0 `rev-0` cache, both x86 sysroots, and
+  host-Noct versus target-Noct ownership.
+- Normalized every product-document banner to the documented `current`,
+  `experimental`, `deprecated`, or `planned` vocabulary and added navigation
+  for the WLAN reference. The manually blocked μITRON design remains `planned`
+  and states its hold instead of appearing current.
+- Added the repeatable DOC-T70--T72 Noct reconciliation check. The relative-link
+  validator now excludes only ignored disposable `temp/` and prohibited
+  `.internal/` trees; while validating the permanent tree it found three q014
+  links to a no-longer-present generated image, which were converted to truthful
+  historical artifact names rather than live links.
+
+## Evidence
+
+The following commands passed from the repository root:
+
+```sh
+build/NoctLang/build-static/noct \
+  plan/ws009-documentation/tests/check-completed-producer-docs.noct .
+# DOC-T70--T72 completed-producer documentation: PASS (11 status banners)
+
+build/NoctLang/build-static/noct \
+  plan/ws009-documentation/tests/check-relative-links.noct docs plan
+# Markdown relative-link check: PASS (1803 links)
+
+git diff --check
+```
+
+No producer source, credential, image, runtime behavior, or existing
+`config.mk` was changed. The already accepted q048, q063, q064, q071, and WS020
+runtime/hardware evidence was documented rather than rerun.

@@ -374,7 +374,7 @@ pristine-copy overlay boot passes. `make -j16` and `git diff --check` pass.
 
 Frozen BR-T41 artifact:
 
-- file: [build/amd64/hdd-image-q014.img](../../../build/amd64/hdd-image-q014.img)
+- historical generated file: `build/amd64/hdd-image-q014.img`
 - size: 135266304 bytes
 - SHA-256:
   `003b54ef77e1fe2e0d96278421441ff7cf4988f736f766f433bf33d6b11cd891`

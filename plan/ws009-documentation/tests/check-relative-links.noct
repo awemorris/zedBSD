@@ -55,7 +55,11 @@ func walk(path) {
     for (entry in FileUtil.listDirectory(path)) {
         var child = path + "/" + entry;
         if (String.charAt(entry, String.charCount(entry) - 1) == "/") {
-            total = total + walk(child);
+            var name = String.substring(entry, 0,
+                                        String.charCount(entry) - 1);
+            if (name != "temp" && name != ".internal") {
+                total = total + walk(child);
+            }
         } else if (String.charCount(entry) >= 3 &&
                    String.substring(entry, String.charCount(entry) - 3, 3) == ".md") {
             total = total + checkDocument(child);

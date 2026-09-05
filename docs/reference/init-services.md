@@ -1,6 +1,6 @@
 # Init and service management
 
-Status: current implementation as of 2026-08-28
+Status: current; implementation reconciled on 2026-08-28
 
 zedBSD boots through the native `/sbin/init`. It does not use runlevels,
 SysV/BSD shell startup scripts, or a shell inside PID 1. Persistent service

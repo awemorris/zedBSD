@@ -1,0 +1,110 @@
+func requireText(path, marker) {
+    if (FileUtil.checkFileExists(path) != 1) {
+        System.error("DOC-T70--T72 missing file: " + path);
+    }
+    var content = FileUtil.readText(path);
+    if (String.indexOf(content, marker) < 0) {
+        System.error(path + ": missing required text: " + marker);
+    }
+}
+
+func rejectText(path, marker) {
+    if (FileUtil.checkFileExists(path) != 1) {
+        System.error("DOC-T70--T72 missing file: " + path);
+    }
+    if (String.indexOf(FileUtil.readText(path), marker) >= 0) {
+        System.error(path + ": contains forbidden text: " + marker);
+    }
+}
+
+func checkStatus(path) {
+    var content = FileUtil.readText(path);
+    if (String.indexOf(content, "\nStatus: current") < 0 &&
+        String.indexOf(content, "\nStatus: experimental") < 0 &&
+        String.indexOf(content, "\nStatus: deprecated") < 0 &&
+        String.indexOf(content, "\nStatus: planned") < 0) {
+        System.error(path + ": missing current/experimental/deprecated/planned status");
+    }
+    if (String.indexOf(content, ".internal/") >= 0) {
+        System.error(path + ": product documentation exposes an internal path");
+    }
+    return 1;
+}
+
+func walkDocuments(path) {
+    var total = 0;
+    for (entry in FileUtil.listDirectory(path)) {
+        var child = path + "/" + entry;
+        if (String.charAt(entry, String.charCount(entry) - 1) == "/") {
+            total = total + walkDocuments(child);
+        } else if (String.charCount(entry) >= 3 &&
+                   String.substring(entry, String.charCount(entry) - 3, 3) == ".md") {
+            total = total + checkStatus(child);
+        }
+    }
+    return total;
+}
+
+func main(args) {
+    if (Array.size(args) != 1) {
+        System.error("usage: check-completed-producer-docs.noct REPOSITORY");
+    }
+    var root = args[0];
+    var network = root + "/docs/reference/managed-wlan.md";
+    var evdev = root + "/docs/reference/evdev.md";
+    var build = root + "/docs/howto/build-from-source.md";
+    var netSource = root + "/userland/base/net/main.c";
+    var networkd = root + "/userland/base/networkd/main.c";
+    var wifiHeader = root + "/userland/base/net/wifi-conf.h";
+    var makefile = root + "/Makefile";
+    var noctVersion = root + "/userland/base/noct/version.mk";
+    var llvmVersion = root + "/toolchain/llvm/version.mk";
+
+    requireText(netSource, "net wifi set-key SSID PASSPHRASE [auto]");
+    requireText(netSource, "net wifi enable");
+    requireText(netSource, "net wifi disable");
+    requireText(netSource, "net wifi list");
+    requireText(netSource, "net wifi connect SSID");
+    requireText(netSource, "net wifi disconnect");
+    requireText(network, "net wifi set-key SSID PASSPHRASE [auto]");
+    requireText(network, "No high-level command accepts an interface operand");
+    requireText(network, "one monotonic 30-second");
+    requireText(network, "`disabled`");
+    requireText(network, "`auto-searching`");
+    requireText(network, "`connected`");
+    requireText(network, "`manual-disconnected`");
+    requireText(network, "root:network");
+    requireText(network, "mode\n`0660`");
+    requireText(network, "does not trust `HOME`");
+    requireText(network, "only long-lived\npassphrase owner");
+    requireText(networkd, "wifi state=%s interface=%s");
+    requireText(networkd, "SO_PEERCRED");
+    requireText(wifiHeader, "#define WIFI_CONF_FILE_MAX 32768U");
+
+    requireText(evdev, "USB HID Report\nProtocol keyboard/mouse/tablet producers are implemented");
+    requireText(evdev, "requires checked `SET_PROTOCOL(REPORT)`");
+    requireText(evdev, "the number stays reserved while any fd");
+    requireText(evdev, "Noct 2.0.1 BeUI evdev consumer");
+    requireText(evdev, "remain implemented and are deprecated");
+    rejectText(evdev, "Live USB HID binding is not implemented");
+    rejectText(evdev, "p008 will reserve");
+
+    requireText(makefile, "ZEDBSD_VARIANTS_amd64_pcat := hybrid uefi bios");
+    requireText(build, "`UEFI + BIOS (for PC/AT)`");
+    requireText(build, "`UEFI (for Apple)`");
+    requireText(build, "`BIOS (for PC/AT)`");
+    requireText(build, "correctly built `uefi` image\nis expected not to boot");
+    requireText(build, "Apple\n`05ac:8406` Internal Memory Card Reader");
+    requireText(noctVersion, "override ZEDBSD_NOCT_VERSION := 2.0.1");
+    requireText(noctVersion, "override ZEDBSD_NOCT_TAG := v2.0.1");
+    requireText(build, "Both host and target Noct come from release `v2.0.1`");
+    requireText(llvmVersion, "override ZEDBSD_LLVM_VERSION := 23.1.0");
+    requireText(llvmVersion, "override ZEDBSD_LLVM_CACHE_TAG := rev-0");
+    requireText(build, "`build/amd64/sysroot/`");
+    requireText(build, "`build/i386/sysroot/`");
+    requireText(build, "Target Noct");
+
+    var statuses = walkDocuments(root + "/docs");
+    print("DOC-T70--T72 completed-producer documentation: PASS (" +
+          statuses + " status banners)");
+}

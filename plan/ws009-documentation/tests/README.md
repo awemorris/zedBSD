@@ -68,4 +68,25 @@ build/NoctLang/build-static/noct \
 
 It recursively checks every Markdown link with a relative file target. Web,
 mail, absolute-path, and same-document fragment links are intentionally outside
-this file-existence check.
+this file-existence check. Ignored disposable `temp/` trees and prohibited
+`.internal/` material are not product/planning documents and are not traversed.
+
+## DOC-T70--T72 command
+
+Run the completed-producer reconciliation check from the repository root:
+
+```sh
+build/NoctLang/build-static/noct \
+  plan/ws009-documentation/tests/check-completed-producer-docs.noct .
+```
+
+It compares the managed-WLAN command/state/credential claims, USB HID and
+consumer state, amd64 Variant labels, Noct release, LLVM cache, and sysroot
+ownership against current production source. It also requires every product
+document to use a `current`, `experimental`, `deprecated`, or `planned` status
+banner and rejects retained internal paths in `docs/`.
+
+Q072 uses this check together with DOC-T00 and `git diff --check` to complete
+`ws009-p006`; it does not rerun the already accepted producer runtime matrices.
+The final run passed 11 product-document status banners, while DOC-T00 passed
+all 1,803 permanent `docs/` and `plan/` relative links.

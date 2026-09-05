@@ -1,6 +1,6 @@
 # Architecture
 
-Status: structure established; subsystem documents pending
+Status: current navigation index
 
 Architecture documents explain component boundaries, ownership, lifecycle,
 and design rationale. They must label current implementation, compatibility
