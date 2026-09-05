@@ -62,6 +62,9 @@ struct fixture_overlay_inode_info {
 };
 
 static unsigned checks;
+static struct mutex transaction_lock;
+static unsigned transaction_entries;
+static int hidden_lower;
 static struct fixture_overlay_mount_state state;
 static struct fixture_overlay_inode_info root_info;
 static struct fixture_overlay_inode_info sub_info;
@@ -137,6 +140,9 @@ static struct inode *last_overlay_inode;
 		}                                                            \
 	} while (0)
 
+extern int ws001_overlay_prepare_mutation(struct inode *);
+extern int ws001_overlay_rename(struct inode *, const struct componentname *, struct inode *, const struct componentname *, unsigned);
+extern int ws001_overlay_remove(struct inode *, const struct componentname *, int);
 extern int ws001_overlay_create(struct inode *, const struct componentname *,
     const struct inode_creation_request *, struct inode **);
 extern int ws001_overlay_mknod(struct inode *, const struct componentname *,
@@ -155,13 +161,15 @@ component_is(const struct componentname *component, const char *text)
 void
 mutex_lock(struct mutex *mutex)
 {
-	(void)mutex;
+	CHECK(mutex != NULL && !mutex->locked);
+	mutex->locked = 1;
 }
 
 void
 mutex_unlock(struct mutex *mutex)
 {
-	(void)mutex;
+	CHECK(mutex != NULL && mutex->locked);
+	mutex->locked = 0;
 }
 
 int
@@ -176,8 +184,7 @@ mutex_init(struct mutex *mutex, enum lock_rank rank, const char *name)
 int
 mutex_owned(struct mutex *mutex)
 {
-	(void)mutex;
-	return 1;
+	return mutex != NULL && mutex->locked;
 }
 
 void
@@ -238,6 +245,10 @@ inode_lookup(struct inode *directory, const struct componentname *component,
 {
 	if (lookup_error != 0)
 		return lookup_error;
+	if (hidden_lower && directory == &lower_root && component_is(component, "new")) {
+		*result = &lower_file;
+		return 0;
+	}
 	if (directory == &overlay_root && component_is(component, "sub")) {
 		*result = &overlay_sub;
 		return 0;
@@ -360,6 +371,12 @@ inode_rename(struct inode *old_directory,
 	CHECK(old_directory == &upper_root ||
 	    old_directory == &materialized_sub);
 	CHECK(new_directory == old_directory);
+	if (component_is(old_name, "new") && component_is(new_name, "moved")) {
+		CHECK(new_entry && flags == 0);
+		new_entry = 0;
+		rename_calls++;
+		return 0;
+	}
 	CHECK(old_name->cn_namelen == 10U);
 	CHECK(component_is(new_name, "file") ||
 	    component_is(new_name, "sock"));
@@ -476,6 +493,9 @@ inode_truncate_transaction(struct inode *inode,
 	return EOPNOTSUPP;
 }
 
+void inode_dir_changed(struct inode *directory)
+{ directory->i_dirseq++; }
+
 void
 namecache_remove(struct inode *directory,
     const struct componentname *component)
@@ -497,13 +517,22 @@ mount_sync(struct mount *mount)
 void
 mount_vfs_transaction_enter(struct mount *mount)
 {
-	(void)mount;
+	CHECK(!overlay_file.i_io_lock.locked);
+	transaction_entries++;
+	mutex_lock(mount->m_vfs_transaction_lock);
+}
+
+int mount_vfs_transaction_join(struct mount *mount)
+{
+	if (mutex_owned(mount->m_vfs_transaction_lock)) return 0;
+	mount_vfs_transaction_enter(mount);
+	return 1;
 }
 
 void
 mount_vfs_transaction_leave(struct mount *mount)
 {
-	(void)mount;
+	mutex_unlock(mount->m_vfs_transaction_lock);
 }
 
 int
@@ -657,6 +686,10 @@ reset_fixture(void)
 	state.upper_root.p_inode = &upper_root;
 	state.lower_root.p_mount = &lower_mount;
 	state.lower_root.p_inode = &lower_root;
+	memset(&transaction_lock, 0, sizeof(transaction_lock));
+	transaction_entries = 0;
+	hidden_lower = 0;
+	overlay_mount.m_vfs_transaction_lock = &transaction_lock;
 	overlay_mount.m_data = &state;
 	overlay_mount.m_root = &overlay_root;
 	overlay_root.i_mount = &overlay_mount;
@@ -1206,9 +1239,60 @@ test_socket_temporary_cleanup_failures(void)
 	check_no_metadata();
 }
 
+static void
+functional_regressions(void)
+{
+	struct componentname name = { .cn_nameptr = "new", .cn_namelen = 3 };
+	unsigned before;
+	reset_fixture();
+	CHECK_ERROR(ws001_overlay_prepare_mutation(&overlay_file), 0);
+	CHECK(file_info.upper.p_inode == &temp_inode);
+	before = transaction_entries;
+	mutex_lock(&overlay_file.i_io_lock);
+	CHECK_ERROR(ws001_overlay_prepare_mutation(&overlay_file), 0);
+	CHECK_ERROR(ws001_overlay_copy_up_regular(&overlay_file), 0);
+	CHECK(transaction_entries == before);
+	mutex_unlock(&overlay_file.i_io_lock);
+
+	for (int hidden = 0; hidden != 2; hidden++) {
+		struct componentname moved = { .cn_nameptr = "moved", .cn_namelen = 5 };
+		reset_fixture();
+		new_entry = new_allocation = 1;
+		new_inode.i_linkcount = 1;
+		hidden_lower = hidden;
+		mount_result_count = 1;
+		mount_results[0] = EIO;
+		CHECK_ERROR(ws001_overlay_rename(&overlay_root, &name,
+		    &overlay_root, &moved, 0), EIO);
+		CHECK(!new_entry && rename_calls == 1);
+		CHECK(overlay_root.i_dirseq != 0 && cache_removes == 2);
+		if (hidden) CHECK(journal_writes != 0);
+		CHECK_ERROR(ws001_overlay_remove(&overlay_root, &name, 0), ENOENT);
+	}
+	for (int hidden = 0; hidden != 2; hidden++) {
+		reset_fixture();
+		new_entry = new_allocation = 1;
+		new_inode.i_linkcount = 1;
+		hidden_lower = hidden;
+		/* Whiteout persistence, when needed, precedes the upper unlink. */
+		mount_result_count = 1;
+		mount_results[mount_result_count - 1] = EIO;
+		CHECK_ERROR(ws001_overlay_remove(&overlay_root, &name, 0), EIO);
+		CHECK(!new_entry);
+		CHECK(cache_removes == 1);
+		CHECK(overlay_root.i_dirseq != 0);
+		CHECK(last_overlay_inode != NULL);
+		CHECK((last_overlay_inode->i_flags & INODE_DEAD) != 0);
+		if (hidden) CHECK(journal_writes != 0);
+		CHECK_ERROR(ws001_overlay_remove(&overlay_root, &name, 0), ENOENT);
+		/* Production overlay inodes use a static pool in this fixture. */
+	}
+}
+
 int
 main(void)
 {
+	functional_regressions();
 	test_existing_upper_create_failures();
 	test_lower_only_materialization_failures();
 	test_copy_up_failures();

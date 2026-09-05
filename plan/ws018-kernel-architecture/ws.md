@@ -1,17 +1,20 @@
 # WS018: kernel source ownership and interface consolidation
 
-Last updated: 2026-08-30
+Last updated: 2026-09-05
 
 WSID: `ws018`
 
-Status: Complete (`q035`)
+Status: p001--p012 complete (`q035`); p013/p014/p015 complete (`q077`)
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws018-p012`
+Last verified Phase: `ws018-p015` (q077 functional audit/corrections)
 
-Resume point: No Phase remains.  Extract a new requirement before resuming
-this workstream.
+Resume point: no selected WS018 Phase remains. Q077 completed legacy residue
+removal, mounted namespace protection and the bounded filesystem functional
+audit/corrections. [Evidence and limits](tests/q077-results.md) include final
+host/build gates and shared QEMU acceptance. Further filesystem requirements
+need their own bounded Phase/Queue; no universal absence-of-bugs claim is made.
 
 Shared tests: [WS018 test index](tests/README.md)
 
@@ -30,6 +33,9 @@ Shared tests: [WS018 test index](tests/README.md)
   the already accepted four-platform boot-parameter behavior.
 - Remove legacy `bootfs`, `/dev/mouse`, and shared graphics/mouse frontends only
   after their consumers have crossed to the replacement interfaces.
+- Remove the proven-unused synthetic rootfs and inode-only mount scaffolding
+  left by `/diskN` automatic partition mounts, without removing current rootfs
+  images, configured boot sources or path-based mounts (new p013).
 
 ## Objective
 
@@ -217,6 +223,9 @@ path in the same bounded change.
 | `ws018-p010` | [FAT source consolidation](phase010-fat-source-consolidation/phase.md) | Complete (`q035`) | One driver-owned `fat.c` preserves current FAT/bootfs behavior |
 | `ws018-p011` | [FAT native VFS migration](phase011-fat-native-vfs/phase.md) | Complete (`q035`) | Boot-media files use the normal filesystem contract with overlay and swap intact |
 | `ws018-p012` | [Legacy bootfs and platform residue removal](phase012-legacy-bootfs-removal/phase.md) | Complete (`q035`) | `struct bootfs`, obsolete internal state, and historical platform residue are absent without regressions |
+| `ws018-p013` | [Legacy /diskN mount scaffolding removal](phase013-legacy-disk-mount-residue/phase.md) | Complete q077 | Retired graph/six manifests removed; focused/build/shared runtime acceptance passes |
+| `ws018-p014` | [Mounted namespace mutation protection](phase014-mounted-namespace-protection/phase.md) | Complete q077 | Mount protection, admission/cache/overlay corrections and final guest probes pass |
+| `ws018-p015` | [Filesystem-wide risk audit](phase015-filesystem-wide-audit/phase.md) | Complete q077 | Bounded functional audit and UFS/overlay/tmpfs corrections pass; coverage limits recorded |
 
 ## WS completion conditions
 
@@ -238,7 +247,7 @@ path in the same bounded change.
 - All applicable KA-T001--KA-T110 gates, `make -j16`, and
   `git diff --check` pass without `make check` or `.internal/`.
 
-## Completion result
+## Original p001--p012 completion result
 
 WS018 completed in `q035` on 2026-08-30.  The final Phase removed the retired
 bootfs/namespace/environment/startup-shell/M9 graph and broad `internal.h`
@@ -249,6 +258,15 @@ KA-T110, retained FAT/VFS and swap gates, six fresh supported-manifest builds,
 the ordinary image build, and the four x86 production-loader runtime paths all
 passed.  The four runtime cells directly exercised valid and out-of-range
 `/dev/system` metadata ioctls before overlay/data/file-swap stress.
+
+## Follow-up audit, 2026-09-05
+
+WS019 p012 removed the active `/diskN` boot loop in `d97e21c`. The user's
+follow-up audit found remaining synthetic-root storage/reset code, uncalled
+root creation and inode-only traversal APIs, an unset mountpoint field and a
+marker bit with no live producer. History confirms their former `/diskN`
+call path. P013 records deletion and regression gates; it does not revoke
+q035's historical acceptance or clear ws019-p010/p011/p012 runtime residuals.
 
 ## Reconsideration boundaries
 

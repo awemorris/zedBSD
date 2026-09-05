@@ -8,16 +8,17 @@ Status: active; Noct 2.0.1 is integrated and the temporary implementation-
 language block is released. The user selected target-side creation through new
 `mkfs` and `mkswap` commands rather than installer templates. P002 is
 completed with p003 userspace inspection in finished q076. P010 reload, p011
-editing and user-added p012 explicit mounts are implemented but uncleared
-pending their final mounted/reboot runtime gate. Installer-v1 remains
+editing and user-added p012 explicit mounts completed their final mounted/reboot
+runtime gates in q077. Installer-v1 remains
 separately non-table-writing.
 
 Parent: [master plan](../master.md)
 
-Last verified Phases: `ws019-p002` and `ws019-p003`, q076
+Last verified Phases: `ws019-p010`, `ws019-p011`, `ws019-p012`, q077
 
-Resume point: obtain a new bounded validation Queue for p010/p011/p012 using
-the corrected root-level mount fixture; see [q076 evidence](tests/q076-results.md).
+Resume point: select a new finite Queue for the later formatter/installer work.
+P010/p011/p012 runtime acceptance is complete; see
+[q077 evidence](../ws018-kernel-architecture/tests/q077-results.md).
 P008 mkfs, p009 mkswap, p004 zedinst and p005 installation acceptance remain
 later work. The 2026-09-05 user decision supersedes the old kernel GPT query
 and read-only-only diskpart milestone; all diskpart parsing/writing is userspace.
@@ -191,9 +192,9 @@ the running overlay upper or active swap. It generates the direct
 | `ws019-p008` | [target `/sbin/mkfs`](phase008-target-mkfs/phase.md) | Planned; follows p002 | Create a bounded UFS1 filesystem in a newly created regular file without formatting its containing partition |
 | `ws019-p009` | [target `/sbin/mkswap`](phase009-target-mkswap/phase.md) | Planned; follows p002 | Create the existing ZEDSWAP2 format in a newly created regular file with bounded size and publication |
 
-| `ws019-p010` | [conservative partition reload](phase010-conservative-partition-reload/phase.md) | Uncleared in finished q076 | Implemented; explicit mounted/root/reboot acceptance pending |
-| `ws019-p011` | [userspace existing-table editing](phase011-userspace-partition-editing/phase.md) | Uncleared in finished q076 | Idle edits/round-trips passed; mounted-add/reboot acceptance pending |
-| `ws019-p012` | [explicit auxiliary mounts](phase012-explicit-auxiliary-mounts/phase.md) | Uncleared in finished q076 | Auto-mount removal verified; explicit mount/reboot regression pending |
+| `ws019-p010` | [conservative partition reload](phase010-conservative-partition-reload/phase.md) | Complete q077 | Explicit ro/rw/root EBUSY and reboot acceptance pass |
+| `ws019-p011` | [userspace existing-table editing](phase011-userspace-partition-editing/phase.md) | Complete q077 | Mounted-add exit 3, no live replacement and reboot discovery pass |
+| `ws019-p012` | [explicit auxiliary mounts](phase012-explicit-auxiliary-mounts/phase.md) | Complete q077 | Explicit mounts and reboot/no-auto-mount acceptance pass |
 
 ## Installer-v1 completion conditions
 

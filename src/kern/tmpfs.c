@@ -769,9 +769,11 @@ tmpfs_write_at(struct inode *inode, const void *buffer, size_t length,
 		}
 		memcpy(page->data + within, in + done, count);
 		done += count;
+		/* Publish every completed prefix before a later allocation can fail.
+		 * A zero-length write must leave EOF unchanged. */
+		if ((off_t)((uint64_t)offset + done) > inode->i_size)
+			inode->i_size = (off_t)((uint64_t)offset + done);
 	}
-	if ((off_t)((uint64_t)offset + done) > inode->i_size)
-		inode->i_size = (off_t)((uint64_t)offset + done);
 	mutex_unlock(&inode->i_lock);
 	return (ssize_t)done;
 }

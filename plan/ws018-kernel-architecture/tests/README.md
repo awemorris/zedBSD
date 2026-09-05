@@ -29,6 +29,28 @@ disposable build/QEMU evidence belongs under `../temp/` and remains untracked.
 | KA-T101 | p011 | The same runner covers native inode/file lifetime, open-writer rename and path-truncate authority, mutable replacement/unlink orphans, remount persistence, mirrored FAT copies, read-only and no-space behavior, 1024-byte logical sectors, close/reclaim durability retry, directory-entry slot reuse, FAT32 LFN sector-boundary namespace rollback, and partial grow/shrink rollback under bounded faults; native partition-root and private/runtime mount publication remain runtime gates |
 | KA-T110 | p012 | [`run-legacy-bootfs-removal-host-test.sh`](run-legacy-bootfs-removal-host-test.sh) links production [`main.c`](../../../src/kern/main.c) with [`kernel-boot-metadata-host-test.c`](kernel-boot-metadata-host-test.c), verifies copied handoff and borrowed kernel-lifetime device metadata through the focused accessors, and audits every active source/build/test owner; BR-T46 then exercises production `/dev/system` `GET_INFO` plus valid/out-of-range `GET_DEVICE` on all four x86 boot paths |
 
+P013/p014 gates in approved q077 (baseline failure retained until corrected):
+
+- KA-T120: audit removal of the synthetic rootfs, old mountpoint field/marker
+  and inode-only APIs across active code and all six build manifests. Preserve
+  historical records and negative `/diskN` assertions.
+- KA-T121: production-linked mount/namei/inode regression retains path-based
+  traversal, mounted-directory protections and explicit mount lifetime; shared
+  bounded QEMU verifies boot/overlay/swap and no implicit auxiliary mounts.
+  See [p013](../phase013-legacy-disk-mount-residue/phase.md) for the Queue boundary
+  and required distinctions between runtime, build and source-audit evidence.
+  [P014](../phase014-mounted-namespace-protection/phase.md) adds the explicitly
+  authorized covered-directory/alias/concurrency audit and fix. The initial
+  mandatory rmdir probe failed on both d97e21c and the cleanup tree; ordinary
+  traversal PASS alone does not clear KA-T121.
+
+P015 functional correction adds [UFS concurrency/fault regressions](run-ufs-metadata-audit.sh)
+and [tmpfs partial-write regressions](run-tmpfs-partial-write-test.sh). The
+production overlay matrix in WS001 now also covers preparation lock ordering,
+postcommit remove/rename failure, and hidden-lower whiteouts. Exact findings,
+limits and evidence are in [q077 audit](q077-filesystem-audit.md) and
+[q077 results](q077-results.md).
+
 The supported build gate is `make -j16`; the aggregate `make check` target and
 repository `.internal/` material are excluded.  amd64 runtime tests use
 `qemu-system-x86_64`; destructive image tests use disposable copies.

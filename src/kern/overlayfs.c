@@ -1463,6 +1463,16 @@ overlay_copy_up_regular(struct inode *inode)
 
 	if (state->flags != OVERLAY_READ_WRITE)
 		return EROFS;
+	/* Generic preparation has already committed the upper before taking
+	 * i_io_lock. Inner metadata/truncate calls must not reacquire namespace.
+	 * Callers without i_io still join the gate below: another namespace
+	 * operation may have published provisional ancestors pending rollback. */
+	if (mutex_owned(&inode->i_io_lock)) {
+		error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER, &upper);
+		if (error == 0)
+			path_release(&upper);
+		return error == ENOENT ? EDEADLK : error;
+	}
 	path_init(&upper);
 	path_init(&lower);
 	path_init(&parent_upper);
@@ -2163,7 +2173,7 @@ overlay_rename(struct inode *old_directory,
 	struct overlay_mount_state *state = old_directory->i_mount->m_data;
 	struct overlay_inode_info *source_info;
 	struct inode *source = NULL, *target = NULL;
-	struct path old_parent_upper, new_parent_upper;
+	struct path old_parent_upper, new_parent_upper, old_parent_lower;
 	struct path source_upper, source_lower, new_upper_path;
 	char old_text[NAME_MAX + 1U], new_text[NAME_MAX + 1U];
 	char old_parent_path[ZEDBSD_PATH_MAX], new_parent_path[ZEDBSD_PATH_MAX];
@@ -2171,6 +2181,7 @@ overlay_rename(struct inode *old_directory,
 	int error;
 	unsigned identity;
 	path_init(&old_parent_upper);
+	path_init(&old_parent_lower);
 	path_init(&new_parent_upper);
 	path_init(&source_upper);
 	path_init(&source_lower);
@@ -2185,7 +2196,7 @@ overlay_rename(struct inode *old_directory,
 	if (error != 0 || overlay_reserved_name(old_text) ||
 	    overlay_reserved_name(new_text))
 		return error != 0 ? error : EINVAL;
-	error = overlay_info_snapshot(old_directory, NULL, NULL, old_parent_path);
+	error = overlay_info_snapshot(old_directory, NULL, &old_parent_lower, old_parent_path);
 	if (error == 0)
 		error = overlay_info_snapshot(new_directory, NULL, NULL,
 		    new_parent_path);
@@ -2201,6 +2212,13 @@ overlay_rename(struct inode *old_directory,
 	error = overlay_info_snapshot(source, &source_upper, &source_lower, NULL);
 	if (error != 0)
 		goto out;
+	/* The visible upper may omit its hidden lower. Renaming that upper must
+	 * still whiteout the old backing name, just like unlink. */
+	if (source_lower.p_inode == NULL && old_parent_lower.p_inode != NULL) {
+		error = overlay_lookup_real(&old_parent_lower, old_name, &source_lower);
+		if (error != 0 && error != ENOENT)
+			goto out;
+	}
 	error = overlay_lookup(new_directory, new_name, &target);
 	if (error == ENOENT)
 		error = 0;
@@ -2269,6 +2287,12 @@ overlay_rename(struct inode *old_directory,
 	overlay_publish_upper(source, &new_upper_path, 1, new_relative);
 	if (target != NULL && target != source)
 		overlay_retire_inode(target);
+	/* Reject delayed pre-rename lookups even when the following sync fails. */
+	inode_dir_changed(old_directory);
+	if (new_directory != old_directory)
+		inode_dir_changed(new_directory);
+	if (source->i_type == INODE_DIR && old_directory != new_directory)
+		inode_dir_changed(source);
 	namecache_remove(old_directory, old_name);
 	namecache_remove(new_directory, new_name);
 	error = mount_sync(new_parent_upper.p_mount);
@@ -2286,6 +2310,7 @@ out:
 	if (target != NULL) inode_release(target);
 	if (source != NULL) inode_release(source);
 	path_release(&old_parent_upper);
+	path_release(&old_parent_lower);
 	path_release(&new_parent_upper);
 	path_release(&source_upper);
 	path_release(&source_lower);
@@ -2326,12 +2351,13 @@ overlay_remove(struct inode *directory, const struct componentname *name,
 	       int removing_directory)
 {
 	struct overlay_mount_state *state = directory->i_mount->m_data;
-	struct path parent_upper, target_upper, target_lower;
+	struct path parent_upper, parent_lower, target_upper, target_lower;
 	struct inode *target;
 	char text[NAME_MAX + 1U], parent_path[ZEDBSD_PATH_MAX];
 	char relative[ZEDBSD_PATH_MAX];
 	int error;
 	path_init(&parent_upper);
+	path_init(&parent_lower);
 	path_init(&target_upper);
 	path_init(&target_lower);
 	if (state->flags != OVERLAY_READ_WRITE)
@@ -2339,7 +2365,7 @@ overlay_remove(struct inode *directory, const struct componentname *name,
 	error = overlay_component_text(name, text);
 	if (error != 0 || overlay_reserved_name(text))
 		return error != 0 ? error : EINVAL;
-	error = overlay_info_snapshot(directory, &parent_upper, NULL,
+	error = overlay_info_snapshot(directory, &parent_upper, &parent_lower,
 	    parent_path);
 	if (error == 0)
 		error = overlay_join(parent_path, text, relative);
@@ -2347,6 +2373,7 @@ overlay_remove(struct inode *directory, const struct componentname *name,
 		error = overlay_lookup(directory, name, &target);
 	if (error != 0) {
 		path_release(&parent_upper);
+		path_release(&parent_lower);
 		return error;
 	}
 	error = overlay_info_snapshot(target, &target_upper, &target_lower, NULL);
@@ -2358,6 +2385,13 @@ overlay_remove(struct inode *directory, const struct componentname *name,
 	}
 	if (removing_directory && (error = overlay_directory_empty(target)) != 0)
 		goto out;
+	/* A regular upper hides its lower path in the visible inode. Check the
+	 * backing directory too, or unlink would resurrect the hidden entry. */
+	if (target_lower.p_inode == NULL && parent_lower.p_inode != NULL) {
+		error = overlay_lookup_real(&parent_lower, name, &target_lower);
+		if (error != 0 && error != ENOENT)
+			goto out;
+	}
 	if (target_lower.p_inode != NULL) {
 		error = overlay_journal_append(state,
 			OVERLAY_OP_ADD_WHITEOUT, relative);
@@ -2370,14 +2404,15 @@ overlay_remove(struct inode *directory, const struct componentname *name,
 			inode_unlink(parent_upper.p_inode, name);
 		if (error != 0)
 			goto out;
-		error = mount_sync(parent_upper.p_mount);
-		if (error != 0)
-			goto out;
 	}
+	/* Removal is committed in the live namespace even if durability fails.
+	 * Publish invalidation before sync; generic callers only do it on success. */
+	inode_dir_changed(directory);
 	namecache_remove(directory, name);
 	overlay_retire_inode(target);
-	error = 0;
+	error = target_upper.p_inode != NULL ? mount_sync(parent_upper.p_mount) : 0;
 out:
+	path_release(&parent_lower);
 	inode_release(target);
 	path_release(&parent_upper);
 	path_release(&target_upper);
@@ -2432,6 +2467,48 @@ overlay_truncate_upper(struct inode *inode,
 	if (error == 0)
 		error = mount_sync(upper.p_mount);
 	path_release(&upper);
+	return error;
+}
+
+/* Prepare lower-only metadata/content before generic code takes i_io_lock.
+ * Namespace mutations may hold that lock while reading parent attributes,
+ * so materialization cannot acquire their gate from inside an I/O callback. */
+static OVERLAY_HIGH int
+overlay_prepare_mutation(struct inode *inode)
+{
+	struct overlay_mount_state *state = inode->i_mount->m_data;
+	struct path upper;
+	int error, entered;
+	if (state->flags != OVERLAY_READ_WRITE)
+		return EROFS;
+	/* An already-owned I/O domain implies an outer preparation. Otherwise
+	 * join even for an existing upper: it may belong to an in-flight ancestor
+	 * materialization which can still roll back while holding namespace. */
+	if (mutex_owned(&inode->i_io_lock)) {
+		error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER, &upper);
+		if (error == 0)
+			path_release(&upper);
+		return error == ENOENT ? EDEADLK : error;
+	}
+	entered = mount_vfs_transaction_join(inode->i_mount);
+	if (state->flags != OVERLAY_READ_WRITE) {
+		error = EROFS;
+		goto out;
+	}
+	error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER, &upper);
+	if (error == 0) {
+		path_release(&upper);
+	} else if (error == ENOENT) {
+		if (inode->i_type == INODE_REG)
+			error = overlay_copy_up_regular(inode);
+		else if (inode->i_type == INODE_DIR)
+			error = overlay_ensure_upper_dir(inode);
+		else
+			error = EOPNOTSUPP;
+	}
+out:
+	if (entered)
+		mount_vfs_transaction_leave(inode->i_mount);
 	return error;
 }
 
@@ -2526,6 +2603,7 @@ static const struct inode_ops overlay_inode_ops = {
 	.symlink = overlay_symlink,
 	.readlink = overlay_readlink,
 	.getattr = overlay_getattr,
+	.prepare_mutation = overlay_prepare_mutation,
 	.setattr = overlay_setattr,
 	.truncate = overlay_truncate,
 	.truncate_limited = overlay_truncate_limited,

@@ -83,7 +83,7 @@ namecache_lookup(struct inode *parent, const struct componentname *name,
 
 int
 namecache_enter(struct inode *parent, const struct componentname *name,
-		struct inode *child)
+		struct inode *child, uint64_t observed_sequence)
 {
 	struct inode *old_parent = NULL, *old_child = NULL;
 	unsigned i, slot = NAMECACHE_MAX;
@@ -95,11 +95,15 @@ namecache_enter(struct inode *parent, const struct componentname *name,
 	inode_ref(parent);
 	inode_ref(child);
 	irq = spin_lock_irqsave(&namecache_lock);
+	if (atomic_u64_load_acquire(&parent->i_dirseq) != observed_sequence) {
+		spin_unlock_irqrestore(&namecache_lock, irq);
+		release_pair(parent, child);
+		return EAGAIN;
+	}
 	for (i = 0; i < NAMECACHE_MAX; i++) {
 		if (entries[i].parent != NULL && matches(&entries[i], parent, name)) {
 			if (entries[i].child == child &&
-			    entries[i].parent_dirseq ==
-			    atomic_u64_load_acquire(&parent->i_dirseq)) {
+			    entries[i].parent_dirseq == observed_sequence) {
 				spin_unlock_irqrestore(&namecache_lock, irq);
 				release_pair(parent, child);
 				return 0;
@@ -117,8 +121,9 @@ namecache_enter(struct inode *parent, const struct componentname *name,
 	}
 	entries[slot].parent = parent;
 	entries[slot].child = child;
-	entries[slot].parent_dirseq =
-	    atomic_u64_load_acquire(&parent->i_dirseq);
+	/* A concurrent mutation after admission leaves an old sequence, which
+	 * lookup rejects.  Never promote an older lookup to the current sequence. */
+	entries[slot].parent_dirseq = observed_sequence;
 	entries[slot].length = name->cn_namelen;
 	memcpy(entries[slot].name, name->cn_nameptr, name->cn_namelen);
 	entries[slot].name[name->cn_namelen] = '\0';

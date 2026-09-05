@@ -43,7 +43,7 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/main.c \
 	$(KERN_FAT_SOURCES) \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
-	src/kern/mount.c src/kern/rootfs.c src/kern/tmpfs.c src/kern/overlayfs.c \
+	src/kern/mount.c src/kern/tmpfs.c src/kern/overlayfs.c \
 	src/kern/vfs.c src/kern/swap.c src/kern/backing-claim.c src/kern/swap-source.c \
 	src/kern/swap-control.c \
 	src/kern/swap-boot.c \

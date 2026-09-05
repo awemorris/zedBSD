@@ -4,7 +4,7 @@ Last updated: 2026-09-05
 
 Phase ID: `ws019-p010`
 
-Status: uncleared in finished q076; implemented, final busy/reboot gate pending
+Status: completed in finished q077; original q076 residual retained below
 
 Parent: [WS019](../ws.md)
 
@@ -55,3 +55,14 @@ was not reached because the fixture used an unsupported nested mount target.
 See [q076 evidence](../tests/q076-results.md). Resume only in a newly approved
 bounded Queue with the corrected root-level `/q076` fixture; no force option
 or mount API expansion is authorized by this residual.
+
+## Q077 residual acceptance — 2026-09-05
+
+Completed by final-source `q077-resume-02` after the p013/p014/p015 corrections.
+Explicit root-level ro/rw/virtual mounts and mutation protection pass; whole-disk
+reload returns EBUSY for ro, rw and the actual root disk. Mounted addition
+persists and exits 3 without live replacement; reboot discovers p2 with no
+automatic auxiliary mounts. MBR round-trip, GPT non-table preservation and
+production-input immutability pass. [Q077 evidence](../../ws018-kernel-architecture/tests/q077-results.md)
+records commands, hashes and both launches. Q076's earlier failure record is
+unchanged; this is new acceptance, not a retroactive PASS for its failed cells.

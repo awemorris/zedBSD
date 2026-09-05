@@ -104,7 +104,6 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/namecache.o \
 	$(BUILD)/src/kern/namei.o \
 	$(BUILD)/src/kern/mount.o \
-	$(BUILD)/src/kern/rootfs.o \
 	$(BUILD)/src/kern/tmpfs.o \
 	$(BUILD)/src/kern/overlayfs.o \
 	$(BUILD)/src/kern/vfs.o \

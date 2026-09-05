@@ -4,7 +4,7 @@ Last updated: 2026-09-05
 
 Phase ID: `ws019-p011`
 
-Status: uncleared in finished q076; implemented, mounted-add/reboot gate pending
+Status: completed in finished q077; original q076 residual retained below
 
 Parent: [WS019](../ws.md)
 
@@ -60,3 +60,14 @@ Mounted-add exit 3 is host-CLI verified but its real guest/reboot acceptance
 remains unexecuted after the nested-mount harness failure. See
 [q076 evidence](../tests/q076-results.md). Resume in a newly approved bounded
 Queue using `/q076`, without treating this partial result as full clearance.
+
+## Q077 residual acceptance — 2026-09-05
+
+Completed by final-source `q077-resume-02` after the p013/p014/p015 corrections.
+Explicit root-level ro/rw/virtual mounts and mutation protection pass; whole-disk
+reload returns EBUSY for ro, rw and the actual root disk. Mounted addition
+persists and exits 3 without live replacement; reboot discovers p2 with no
+automatic auxiliary mounts. MBR round-trip, GPT non-table preservation and
+production-input immutability pass. [Q077 evidence](../../ws018-kernel-architecture/tests/q077-results.md)
+records commands, hashes and both launches. Q076's earlier failure record is
+unchanged; this is new acceptance, not a retroactive PASS for its failed cells.

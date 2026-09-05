@@ -5,7 +5,6 @@
 #include "kern/inode.h"
 #include "kern/namecache.h"
 #include "kern/namei.h"
-#include "kern/rootfs.h"
 
 #include <errno.h>
 #include <string.h>
@@ -31,6 +30,14 @@ static const struct filesystem_type *filesystems[FILESYSTEM_MAX]
 	__attribute__((section(".vfs_bss")));
 static unsigned filesystem_count;
 static struct spinlock namespace_lock;
+static struct mutex namespace_transaction;
+
+static int
+same_inode(const struct inode *left, const struct inode *right)
+{
+	return left != NULL && right != NULL && (left == right ||
+	    (left->i_mount == right->i_mount && left->i_ino == right->i_ino));
+}
 
 MOUNT_HIGH int
 mount_info_snapshot(struct zedbsd_mount_info *entries, unsigned capacity,
@@ -57,7 +64,7 @@ mount_info_snapshot(struct zedbsd_mount_info *entries, unsigned capacity,
 	count = 0;
 	memset(&context, 0, sizeof(context));
 	spin_init(&context.lock, LOCK_RANK_PROCESS_RESOURCE, "mount paths");
-	if (root_mount != NULL)
+	if (root_mount != NULL && root_mount->m_state == MOUNT_STATE_LIVE)
 		path_set(&context.root, root_mount, root_mount->m_root);
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
 		struct zedbsd_mount_info *info;
@@ -127,10 +134,8 @@ mount_alloc(void)
 			refcount_init(&mounts[i].m_refs, 1);
 			(void)mutex_init(&mounts[i].m_lock, LOCK_RANK_NAMESPACE,
 			    "mount");
-			(void)mutex_init(&mounts[i].m_vfs_transaction_storage,
-			    LOCK_RANK_VFS_TRANSACTION, "VFS namespace transaction");
 			mounts[i].m_vfs_transaction_lock =
-			    &mounts[i].m_vfs_transaction_storage;
+			    &namespace_transaction;
 			waitq_init(&mounts[i].m_waitq, "mount state");
 			mounts[i].m_state = MOUNT_STATE_PREPARING;
 			result = &mounts[i];
@@ -152,6 +157,16 @@ mount_vfs_transaction_leave(struct mount *mountp)
 {
 	if (mountp != NULL)
 		mutex_unlock(mountp->m_vfs_transaction_lock);
+}
+
+int
+mount_vfs_transaction_join(struct mount *mountp)
+{
+	if (mountp == NULL || mountp->m_vfs_transaction_lock == NULL ||
+	    mutex_owned(mountp->m_vfs_transaction_lock))
+		return 0;
+	mount_vfs_transaction_enter(mountp);
+	return 1;
 }
 
 static void
@@ -220,7 +235,9 @@ void path_release(struct path *path)
 int path_equal(const struct path *left, const struct path *right)
 {
 	return left != NULL && right != NULL &&
-		left->p_mount == right->p_mount && left->p_inode == right->p_inode;
+		left->p_mount == right->p_mount &&
+		(left->p_inode == right->p_inode ||
+		 same_inode(left->p_inode, right->p_inode));
 }
 
 int
@@ -348,8 +365,9 @@ mount_reset(void)
 {
 	namecache_reset();
 	inode_cache_reset();
-	rootfs_reset();
 	spin_init(&namespace_lock, LOCK_RANK_NAMESPACE, "mount namespace");
+	(void)mutex_init(&namespace_transaction, LOCK_RANK_VFS_TRANSACTION,
+	    "VFS namespace transaction");
 	memset(mounts, 0, sizeof(mounts));
 	memset(mount_used, 0, sizeof(mount_used));
 	memset(filesystems, 0, sizeof(filesystems));
@@ -521,59 +539,44 @@ mount_root_create(const char *type_name, int flags, void *data,
 {
 	struct mount *mountp;
 	unsigned long irq;
-	int error;
+	int error, entered;
 	if (type_name == NULL)
 		return EINVAL;
-	irq = spin_lock_irqsave(&namespace_lock);
-	error = root_mount != NULL ? EBUSY : 0;
-	spin_unlock_irqrestore(&namespace_lock, irq);
-	if (error != 0)
-		return error;
 	mountp = mount_alloc();
 	if (mountp == NULL)
 		return ENOSPC;
-	strcpy(mountp->m_path, "/");
-	error = mount_filesystem(mountp, type_name, flags, data);
+	entered = mount_vfs_transaction_join(mountp);
+	irq = spin_lock_irqsave(&namespace_lock);
+	error = root_mount != NULL ? EBUSY : 0;
+	if (error == 0)
+		root_mount = mountp; /* Reserve the root slot before filesystem I/O. */
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
 	if (error != 0) {
 		mount_free(mountp);
 		return error;
 	}
+	strcpy(mountp->m_path, "/");
+	error = mount_filesystem(mountp, type_name, flags, data);
+	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
-	mount_head = root_mount = mountp;
+	if (error != 0) {
+		root_mount = NULL;
+		spin_unlock_irqrestore(&namespace_lock, irq);
+		if (entered)
+			mount_vfs_transaction_leave(mountp);
+		mount_free(mountp);
+		return error;
+	}
+	mount_head = mountp;
 	mountp->m_state = MOUNT_STATE_LIVE;
 	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
 	backing_mutation_end(&mountp->m_backing_guard);
 	if (result != NULL)
 		*result = mountp;
-	return 0;
-}
-
-int
-mount_rootfs(void)
-{
-	struct mount *mountp;
-	unsigned long irq;
-	int error;
-	irq = spin_lock_irqsave(&namespace_lock);
-	error = root_mount != NULL ? EBUSY : 0;
-	spin_unlock_irqrestore(&namespace_lock, irq);
-	if (error != 0)
-		return EBUSY;
-	mountp = mount_alloc();
-	if (mountp == NULL)
-		return ENOSPC;
-	strcpy(mountp->m_path, "/");
-	mountp->m_flags = MOUNT_READ_ONLY;
-	mountp->m_type = &rootfs_type;
-	error = rootfs_type.mount(mountp);
-	if (error != 0) {
-		mount_free(mountp);
-		return error;
-	}
-	irq = spin_lock_irqsave(&namespace_lock);
-	mount_head = root_mount = mountp;
-	mountp->m_state = MOUNT_STATE_LIVE;
-	spin_unlock_irqrestore(&namespace_lock, irq);
 	return 0;
 }
 
@@ -588,14 +591,6 @@ struct mount *mount_root_get_ref(void)
 	spin_unlock_irqrestore(&namespace_lock, irq);
 	return mountp;
 }
-struct inode *mount_root_inode(void)
-{
-	unsigned long irq = spin_lock_irqsave(&namespace_lock);
-	struct inode *inode = root_mount != NULL ? root_mount->m_root : NULL;
-	spin_unlock_irqrestore(&namespace_lock, irq);
-	return inode;
-}
-
 static int
 valid_component(const char *name)
 {
@@ -629,8 +624,20 @@ static int
 set_mount_path(struct mount *mountp, const struct path *directory,
 	       const char *name)
 {
-	const char *base = directory->p_mount->m_path;
-	size_t base_length = strlen(base), name_length = strlen(name);
+	struct cwdinfo context;
+	char base[ZEDBSD_PATH_MAX];
+	size_t base_length, name_length = strlen(name);
+	int error;
+	memset(&context, 0, sizeof(context));
+	spin_init(&context.lock, LOCK_RANK_PROCESS_RESOURCE, "mount path");
+	path_set(&context.root, root_mount, root_mount->m_root);
+	path_set(&context.cwd, directory->p_mount, directory->p_inode);
+	error = fs_getcwd(&context, base, sizeof(base));
+	path_release(&context.cwd);
+	path_release(&context.root);
+	if (error != 0)
+		return error;
+	base_length = strlen(base);
 	if (base_length + (base_length > 1U ? 1U : 0U) + name_length >=
 	    sizeof(mountp->m_path))
 		return ENAMETOOLONG;
@@ -642,47 +649,116 @@ set_mount_path(struct mount *mountp, const struct path *directory,
 	return 0;
 }
 
+static void unlink_child(struct mount *);
+
+static void
+unlink_global(struct mount *mountp)
+{
+	struct mount **link;
+	for (link = &mount_head; *link != NULL; link = &(*link)->m_next)
+		if (*link == mountp) {
+			*link = mountp->m_next;
+			return;
+		}
+}
+
+/* The transaction gate covers both admission and every filesystem mutation.
+ * A PREPARING child reserves its name and anchors while mount I/O runs with
+ * the gate released. Readers see EBUSY, never an uninitialized root inode. */
+static int
+reserve_mount(struct mount *mountp, const struct path *directory,
+	const char *name)
+{
+	struct componentname component = { name, strlen(name), 0 };
+	struct path existing;
+	unsigned long irq;
+	int error;
+	irq = spin_lock_irqsave(&namespace_lock);
+	error = directory->p_mount->m_state == MOUNT_STATE_LIVE &&
+	    root_mount != NULL && root_mount->m_state == MOUNT_STATE_LIVE ?
+	    0 : EBUSY;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (error != 0)
+		return error;
+	if ((directory->p_inode->i_flags & INODE_DEAD) != 0)
+		return ENOENT;
+	error = mount_lookup_child(directory, &component, &existing);
+	if (error == 0) {
+		path_release(&existing);
+		return EBUSY;
+	}
+	if (error != ENOENT)
+		return error;
+	error = set_mount_path(mountp, directory, name);
+	if (error != 0)
+		return error;
+	error = inode_lookup(directory->p_inode, &component,
+	    &mountp->m_covered_inode);
+	if (error != 0 && error != ENOENT)
+		return error;
+	path_set(&mountp->m_cover, directory->p_mount, directory->p_inode);
+	mountp->m_parent = directory->p_mount;
+	irq = spin_lock_irqsave(&namespace_lock);
+	link_child(directory->p_mount, mountp);
+	link_global(mountp);
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	return 0;
+}
+
+/* The caller owns the transaction; release references after dropping spin. */
+static void
+detach_mount(struct mount *mountp)
+{
+	unsigned long irq = spin_lock_irqsave(&namespace_lock);
+	unlink_child(mountp);
+	unlink_global(mountp);
+	mountp->m_state = MOUNT_STATE_DEAD;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	path_release(&mountp->m_cover);
+	if (mountp->m_covered_inode != NULL) {
+		inode_release(mountp->m_covered_inode);
+		mountp->m_covered_inode = NULL;
+	}
+}
+
 int
 mount_at(const char *type_name, const struct path *directory,
 	 const char *name, int flags, void *data, struct mount **result)
 {
 	struct mount *mountp;
 	unsigned long irq;
-	int error;
+	int error, entered;
 	if (type_name == NULL || directory == NULL || directory->p_mount == NULL ||
 	    directory->p_inode == NULL || directory->p_inode->i_type != INODE_DIR ||
 	    !valid_component(name))
 		return EINVAL;
-	{
-		struct componentname component = { name, strlen(name), 0 };
-		struct path existing;
-		if (mount_lookup_child(directory, &component, &existing) == 0) {
-			path_release(&existing);
-			return EBUSY;
-		}
-	}
 	mountp = mount_alloc();
 	if (mountp == NULL)
 		return ENOSPC;
-	error = set_mount_path(mountp, directory, name);
+	entered = mount_vfs_transaction_join(mountp);
+	error = reserve_mount(mountp, directory, name);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
 	if (error != 0)
 		goto fail;
-	path_set(&mountp->m_cover, directory->p_mount, directory->p_inode);
-	mountp->m_parent = directory->p_mount;
 	error = mount_filesystem(mountp, type_name, flags, data);
-	if (error != 0)
-		goto fail_cover;
+	entered = mount_vfs_transaction_join(mountp);
+	if (error != 0) {
+		detach_mount(mountp);
+		if (entered)
+			mount_vfs_transaction_leave(mountp);
+		goto fail;
+	}
 	irq = spin_lock_irqsave(&namespace_lock);
-	link_child(directory->p_mount, mountp);
-	link_global(mountp);
 	mountp->m_state = MOUNT_STATE_LIVE;
 	spin_unlock_irqrestore(&namespace_lock, irq);
+	inode_dir_changed(directory->p_inode);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
 	backing_mutation_end(&mountp->m_backing_guard);
 	if (result != NULL)
 		*result = mountp;
 	return 0;
-fail_cover:
-	path_release(&mountp->m_cover);
 fail:
 	mount_free(mountp);
 	return error;
@@ -694,7 +770,7 @@ mount_bind_at(const struct path *source, const struct path *directory,
 {
 	struct mount *mountp;
 	unsigned long irq;
-	int error;
+	int error, entered;
 	if (source == NULL || source->p_mount == NULL || source->p_inode == NULL ||
 	    directory == NULL || directory->p_mount == NULL ||
 	    directory->p_inode == NULL || directory->p_inode->i_type != INODE_DIR ||
@@ -703,29 +779,35 @@ mount_bind_at(const struct path *source, const struct path *directory,
 	mountp = mount_alloc();
 	if (mountp == NULL)
 		return ENOSPC;
-	error = set_mount_path(mountp, directory, name);
+	entered = mount_vfs_transaction_join(mountp);
+	irq = spin_lock_irqsave(&namespace_lock);
+	error = source->p_mount->m_state == MOUNT_STATE_LIVE ? 0 : EBUSY;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (error == 0 && (source->p_inode->i_flags & INODE_DEAD) != 0)
+		error = ENOENT;
+	if (error == 0)
+		error = reserve_mount(mountp, directory, name);
 	if (error != 0)
 		goto fail;
-	path_set(&mountp->m_cover, directory->p_mount, directory->p_inode);
-	mountp->m_parent = directory->p_mount;
 	mountp->m_bind_source = source->p_mount;
 	mount_ref(mountp->m_bind_source);
-	mountp->m_vfs_transaction_lock =
-	    source->p_mount->m_vfs_transaction_lock;
 	mountp->m_internal_flags = MOUNT_BIND_INTERNAL;
 	mountp->m_flags = source->p_mount->m_flags;
 	mountp->m_type = source->p_inode->i_mount->m_type;
 	mountp->m_root = source->p_inode;
 	inode_ref(mountp->m_root);
 	irq = spin_lock_irqsave(&namespace_lock);
-	link_child(directory->p_mount, mountp);
-	link_global(mountp);
 	mountp->m_state = MOUNT_STATE_LIVE;
 	spin_unlock_irqrestore(&namespace_lock, irq);
+	inode_dir_changed(directory->p_inode);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
 	if (result != NULL)
 		*result = mountp;
 	return 0;
 fail:
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
 	mount_free(mountp);
 	return error;
 }
@@ -761,10 +843,11 @@ MOUNT_HIGH int
 mount_private_promote_root(struct mount *mountp, struct mount **result)
 {
 	unsigned long irq;
-	int error = 0;
+	int error = 0, entered;
 
 	if (!mount_is_private(mountp))
 		return EINVAL;
+	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
 	if (root_mount != NULL)
 		error = EBUSY;
@@ -781,6 +864,8 @@ mount_private_promote_root(struct mount *mountp, struct mount **result)
 		mount_head = root_mount = mountp;
 	}
 	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
 	if (error == 0 && result != NULL)
 		*result = mountp;
 	return error;
@@ -813,12 +898,19 @@ mount_private_lookup(struct mount *mountp, const char *relative,
 {
 	struct cwdinfo context;
 	struct path root;
+	unsigned long irq;
 	int error;
 	if (!mount_is_private(mountp) || result == NULL ||
 	    !valid_private_path(relative))
 		return EINVAL;
 	path_init(&root);
+	irq = spin_lock_irqsave(&namespace_lock);
+	if (mountp->m_state != MOUNT_STATE_LIVE) {
+		spin_unlock_irqrestore(&namespace_lock, irq);
+		return EBUSY;
+	}
 	path_set(&root, mountp, mountp->m_root);
+	spin_unlock_irqrestore(&namespace_lock, irq);
 	error = cwdinfo_init(&context, &root);
 	path_release(&root);
 	if (error != 0)
@@ -979,21 +1071,96 @@ struct mount *mount_for_inode(const struct inode *inode)
 }
 
 int
+mount_namespace_check_name(struct inode *directory,
+	const struct componentname *name)
+{
+	struct mount *mountp;
+	unsigned long irq;
+	int error = 0;
+	if (directory == NULL || name == NULL || name->cn_nameptr == NULL ||
+	    name->cn_namelen == 0 || name->cn_namelen > NAME_MAX)
+		return EINVAL;
+	irq = spin_lock_irqsave(&namespace_lock);
+	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
+		if (same_inode(mountp->m_cover.p_inode, directory) &&
+		    strlen(mountp->m_name) == name->cn_namelen &&
+		    !memcmp(mountp->m_name, name->cn_nameptr, name->cn_namelen)) {
+			error = EBUSY;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	return error;
+}
+
+int
+mount_namespace_check_inode(struct inode *inode)
+{
+	struct inode *anchors[MOUNT_MAX * 2U];
+	struct mount *mountp;
+	unsigned count = 0, index;
+	unsigned long irq;
+	int error = 0, ancestor;
+	if (inode == NULL)
+		return EINVAL;
+	/* Covers and bind roots are stable until the owning transaction ends.
+	 * Take references under spin, then perform ancestor lookups without it.
+	 * Covered-entry identity also handles alternate backend spellings. */
+	irq = spin_lock_irqsave(&namespace_lock);
+	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
+		struct inode *cover = mountp->m_cover.p_inode;
+		struct inode *source = (mountp->m_internal_flags &
+		    MOUNT_BIND_INTERNAL) != 0 ? mountp->m_root : NULL;
+		if (same_inode(mountp->m_covered_inode, inode)) {
+			error = EBUSY;
+			break;
+		}
+		if (cover != NULL && cover->i_mount == inode->i_mount) {
+			inode_ref(cover);
+			anchors[count++] = cover;
+		}
+		if (source != NULL && source->i_mount == inode->i_mount) {
+			inode_ref(source);
+			anchors[count++] = source;
+		}
+	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	for (index = 0; index < count && error == 0; index++) {
+		if (same_inode(inode, anchors[index]))
+			error = EBUSY;
+		else if (inode->i_type == INODE_DIR &&
+		    anchors[index]->i_type == INODE_DIR) {
+			error = inode_is_ancestor(inode, anchors[index], &ancestor);
+			if (error == 0 && ancestor)
+				error = EBUSY;
+		}
+	}
+	for (index = 0; index < count; index++)
+		inode_release(anchors[index]);
+	return error;
+}
+
+int
 mount_lookup_child(const struct path *directory,
 		   const struct componentname *component, struct path *result)
 {
 	struct mount *child;
 	unsigned long irq;
-	if (directory == NULL || component == NULL || result == NULL)
+	if (directory == NULL || directory->p_mount == NULL ||
+	    component == NULL || result == NULL)
 		return EINVAL;
 	irq = spin_lock_irqsave(&namespace_lock);
 	for (child = directory->p_mount->m_children; child != NULL;
 	     child = child->m_sibling) {
 		size_t length = strlen(child->m_name);
 		if (child->m_cover.p_mount == directory->p_mount &&
-		    child->m_cover.p_inode == directory->p_inode &&
+		    same_inode(child->m_cover.p_inode, directory->p_inode) &&
 		    length == component->cn_namelen &&
 		    !memcmp(child->m_name, component->cn_nameptr, length)) {
+			if (child->m_state != MOUNT_STATE_LIVE) {
+				spin_unlock_irqrestore(&namespace_lock, irq);
+				return EBUSY;
+			}
 			path_set(result, child, child->m_root);
 			spin_unlock_irqrestore(&namespace_lock, irq);
 			return 0;
@@ -1010,7 +1177,7 @@ mount_cross_path_parent(const struct path *current, struct path *result)
 	if (current == NULL || current->p_mount == NULL || result == NULL)
 		return EINVAL;
 	irq = spin_lock_irqsave(&namespace_lock);
-	if (current->p_inode != current->p_mount->m_root ||
+	if (!same_inode(current->p_inode, current->p_mount->m_root) ||
 	    current->p_mount == root_mount ||
 	    current->p_mount->m_cover.p_inode == NULL) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
@@ -1020,53 +1187,6 @@ mount_cross_path_parent(const struct path *current, struct path *result)
 		 current->p_mount->m_cover.p_inode);
 	spin_unlock_irqrestore(&namespace_lock, irq);
 	return 0;
-}
-
-int
-mount_follow(struct inode *inode, struct inode **result)
-{
-	struct mount *mountp;
-	unsigned long irq;
-	if (inode == NULL || result == NULL)
-		return EINVAL;
-	irq = spin_lock_irqsave(&namespace_lock);
-	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
-		if (mountp->m_state == MOUNT_STATE_LIVE &&
-		    mountp->m_mountpoint == inode) {
-			inode_ref(mountp->m_root);
-			*result = mountp->m_root;
-			spin_unlock_irqrestore(&namespace_lock, irq);
-			return 0;
-		}
-	}
-	spin_unlock_irqrestore(&namespace_lock, irq);
-	return ENOENT;
-}
-
-int
-mount_cross_parent(struct inode *inode, struct inode **result)
-{
-	struct mount *mountp;
-	struct inode *point = NULL;
-	struct componentname dotdot = { "..", 2, COMPONENT_DOTDOT };
-	unsigned long irq;
-	if (inode == NULL || result == NULL)
-		return EINVAL;
-	irq = spin_lock_irqsave(&namespace_lock);
-	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next)
-		if (mountp->m_state == MOUNT_STATE_LIVE &&
-		    mountp->m_root == inode && mountp->m_mountpoint != NULL) {
-			point = mountp->m_mountpoint;
-			inode_ref(point);
-			break;
-		}
-	spin_unlock_irqrestore(&namespace_lock, irq);
-	if (point != NULL) {
-		int error = inode_lookup(point, &dotdot, result);
-		inode_release(point);
-		return error;
-	}
-	return ENOENT;
 }
 
 int
@@ -1082,13 +1202,17 @@ mount_readdir_child(const struct path *directory, unsigned *cursor,
 	for (child = directory->p_mount->m_children; child != NULL;
 	     child = child->m_sibling) {
 		if (child->m_cover.p_mount != directory->p_mount ||
-		    child->m_cover.p_inode != directory->p_inode)
+		    !same_inode(child->m_cover.p_inode, directory->p_inode))
 			continue;
+		if (child->m_state != MOUNT_STATE_LIVE) {
+			spin_unlock_irqrestore(&namespace_lock, irq);
+			return EBUSY;
+		}
 		if (index++ != *cursor)
 			continue;
 		memset(entry, 0, sizeof(*entry));
 		entry->d_ino = child->m_root->i_ino;
-		entry->d_type = INODE_DIR;
+		entry->d_type = child->m_root->i_type;
 		strcpy(entry->d_name, child->m_name);
 		(*cursor)++;
 		spin_unlock_irqrestore(&namespace_lock, irq);
@@ -1110,7 +1234,7 @@ mount_child_shadows(const struct path *directory, const char *name)
 	error = mount_lookup_child(directory, &component, &found);
 	if (error == 0)
 		path_release(&found);
-	return error == 0;
+	return error == 0 || error == EBUSY;
 }
 
 static void
@@ -1165,13 +1289,30 @@ finalize_filesystem_destroy(struct mount *mountp)
 MOUNT_HIGH int
 unmount_private(struct mount *mountp)
 {
-	int error;
+	unsigned long irq;
+	int error, entered;
 	if (!mount_is_private(mountp))
 		return EINVAL;
-	error = prepare_filesystem_destroy(mountp, 1);
-	if (error != 0)
-		return error;
+	entered = mount_vfs_transaction_join(mountp);
+	irq = spin_lock_irqsave(&namespace_lock);
+	if (!mount_is_private(mountp) || mountp->m_state != MOUNT_STATE_LIVE ||
+	    mountp->m_children != NULL || refcount_load(&mountp->m_refs) != 1) {
+		spin_unlock_irqrestore(&namespace_lock, irq);
+		if (entered)
+			mount_vfs_transaction_leave(mountp);
+		return EBUSY;
+	}
 	mountp->m_state = MOUNT_STATE_DYING;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
+	error = prepare_filesystem_destroy(mountp, 1);
+	if (error != 0) {
+		irq = spin_lock_irqsave(&namespace_lock);
+		mountp->m_state = MOUNT_STATE_LIVE;
+		spin_unlock_irqrestore(&namespace_lock, irq);
+		return error;
+	}
 	finalize_filesystem_destroy(mountp);
 	mount_free(mountp);
 	return 0;
@@ -1192,53 +1333,59 @@ int
 unmount(const char *dir, int flags)
 {
 	struct mount *mountp = mount_find_ref(dir);
-	struct mount **link;
 	unsigned long irq;
-	int error;
+	int error = 0, entered;
 	(void)flags;
 	if (mountp == NULL)
 		return ENOENT;
+	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
 	if (mountp == root_mount || mountp->m_state != MOUNT_STATE_LIVE) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
+		if (entered)
+			mount_vfs_transaction_leave(mountp);
 		mount_release(mountp);
 		return EBUSY;
 	}
 	if (mountp->m_children != NULL ||
 	    refcount_load(&mountp->m_refs) != 2) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
+		if (entered)
+			mount_vfs_transaction_leave(mountp);
 		mount_release(mountp);
 		return EBUSY;
 	}
 	mountp->m_state = MOUNT_STATE_DYING;
-	unlink_child(mountp);
-	for (link = &mount_head; *link != NULL; link = &(*link)->m_next)
-		if (*link == mountp) {
-			*link = mountp->m_next;
-			break;
-		}
 	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
+	/* Keep the DYING attachment reserved through every failure-capable step.
+	 * Readers cannot acquire new references or fall through to covered data.
+	 * Sync and teardown may call back through an overlay into the VFS. */
 	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) == 0) {
 		error = prepare_filesystem_destroy(mountp, 2);
 		if (error != 0) {
+			entered = mount_vfs_transaction_join(mountp);
 			irq = spin_lock_irqsave(&namespace_lock);
 			mountp->m_state = MOUNT_STATE_LIVE;
-			mountp->m_sibling = NULL;
-			mountp->m_next = NULL;
-			link_child(mountp->m_parent, mountp);
-			link_global(mountp);
 			spin_unlock_irqrestore(&namespace_lock, irq);
+			if (entered)
+				mount_vfs_transaction_leave(mountp);
 			mount_release(mountp);
 			return error;
 		}
-	} else if (mountp->m_bind_source != NULL) {
-		mount_release(mountp->m_bind_source);
-	}
-	path_release(&mountp->m_cover);
-	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) == 0)
 		finalize_filesystem_destroy(mountp);
-	else if (mountp->m_root != NULL)
+	}
+	entered = mount_vfs_transaction_join(mountp);
+	inode_dir_changed(mountp->m_cover.p_inode);
+	detach_mount(mountp);
+	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) != 0 &&
+	    mountp->m_root != NULL)
 		inode_release(mountp->m_root);
+	if (mountp->m_bind_source != NULL)
+		mount_release(mountp->m_bind_source);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
 	mount_release(mountp);
 	mount_free(mountp);
 	return 0;

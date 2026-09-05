@@ -478,8 +478,8 @@ allowed to block first communication unless the normal path depends on them.
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Queue-ready; permission ceiling selected | No Phase started; p001 Queue-ready | After WS022, Queue p001--p004; RW mappings may return from RO to RW within their original maximum | [WS017](ws017-lfb-graphics/ws.md) |
-| `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
-| `ws019` | Installation and disk administration | Active; q076 finished with partial runtime clearance | p002/p003 completed; p010/p011/p012 implemented but uncleared | Approve bounded corrected mounted/reboot acceptance; formatters and installer remain later | [WS019](ws019-installation/ws.md) |
+| `ws018` | Kernel source ownership and interface consolidation | p001--p012 complete (`q035`); p013/p014/p015 complete (`q077`) | Legacy removal and bounded functional corrections pass host/build/runtime | No selected WS018 Phase remains; retain audit coverage limits | [WS018](ws018-kernel-architecture/ws.md) |
+| `ws019` | Installation and disk administration | Active; q077 storage acceptance complete | p002/p003 and p010/p011/p012 complete | New Queue for p008/p009 formatters, then p004/p005 installer work | [WS019](ws019-installation/ws.md) |
 | `ws020` | Intel Mac UEFI bring-up and generic image variants | Complete (user physical confirmation, 2026-09-05) | Automatic Variant/GPT/QEMU gates and successful Intel Mac real-hardware operation pass | No Phase remains; explicit acceptance supersedes the older five-run campaign | [WS020](ws020-intel-mac/ws.md) |
 | `ws021` | Reproducible x86 LLVM toolchain and sysroots | Complete (`q064`) | LLVM 23.1.0 cache/source paths, amd64/i386 sysroots, all x86 target/loader builds, four CI configurations, six-cell amd64 firmware matrix, i386 PC/AT and PC-98, and target noct non-JIT/JIT/BeUI gates pass | No current Phase; the source-build path and pinned `rev-0` cache remain supported in parallel | [WS021](ws021-llvm-toolchain/ws.md) |
 | `ws022` | ELF `PT_TLS` and static thread-local storage | Queue-ready; WS021 dependency satisfied | No Phase started | Queue p001 to freeze the x86 TLS/TCB ABI and fixtures, then implement p002/p003 | [WS022](ws022-elf-tls/ws.md) |
@@ -594,7 +594,7 @@ p007/p009 automatic milestone. Physical p008 still requires its transport,
 target link, trial values, and recovery route; VLAN/bridge p004 remains excluded
 by `MB-010`. The next dependency-ready order, requiring a new Queue approval, is:
 
-[Finished q076](queue.md) completed `ws019-p002` basic queries and p003
+[Finished q076](queue-q076.md) completed `ws019-p002` basic queries and p003
 userspace inspection. P010 conservative reload, p011 existing-table editing,
 and user-added p012 removal of auxiliary `/diskN` auto-mounts are implemented
 but uncleared for the final explicit mounted/reboot gate. Host/build and guest
@@ -605,7 +605,28 @@ require a new Queue, not an automatic retry. Any mounted child, including
 read-only and unchanged partitions, still prevents whole-disk reload with
 EBUSY; reboot is acceptable. Boot/config/root/overlay/swap mounts remain.
 
-1. WS019 in dependency order: clear p010/p011/p012 runtime residuals, then
+The user's subsequent `/diskN` audit request found supporting residue even
+though the generating boot loop is gone: unused synthetic rootfs, inode-only
+mount traversal, unset mountpoint field/marker and six manifest dependencies.
+[WS018 p013](ws018-kernel-architecture/phase013-legacy-disk-mount-residue/phase.md)
+was approved and executed in [q077](queue.md). Its mandatory mounted-directory
+test reproduced a baseline bug, before and after cleanup. The user's explicit
+follow-up selects [p014](ws018-kernel-architecture/phase014-mounted-namespace-protection/phase.md)
+for thorough namespace/alias/lifetime audit and correction, with a four-active-
+hour review and the unchanged two-launch shared QEMU budget. Preserve q076's
+recorded stops; negative tests/history are not legacy execution.
+The user's next follow-up broadens the audit to the entire filesystem through
+[p015](ws018-kernel-architecture/phase015-filesystem-wide-audit/phase.md), retaining
+the same review window and explicit findings/coverage limits.
+
+Q077 subsequently completed the bounded functional continuation: UFS shared
+metadata/admission/allocation/xattr fixes, overlay lock/whiteout/cache corrections
+and tmpfs partial-write publication pass. Three maintained x86 builds and the
+final shared QEMU cell pass, closing WS018 p013--p015 and WS019 p010--p012.
+[Q077 evidence and limits](ws018-kernel-architecture/tests/q077-results.md)
+retain both launches and final image identity. No installer or formatter was run.
+
+1. Next Queue: WS019 in dependency order:
    p008 target UFS1-in-file `/sbin/mkfs`, p009
    target ZEDSWAP2-in-file `/sbin/mkswap`, p004 Noct `/bin/zedinst`, then p005
    consolidated QEMU NVMe installation acceptance. No template image or live

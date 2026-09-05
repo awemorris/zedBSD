@@ -136,16 +136,20 @@ extern int ws001_ufs2_mknod(struct inode *, const struct componentname *,
 #error select one WS001 p022 UFS fixture
 #endif
 
+int mutex_owned(struct mutex *mutex) { return mutex->locked != 0; }
+
 void
 mutex_lock(struct mutex *mutex)
 {
-	(void)mutex;
+	CHECK(!mutex->locked);
+	mutex->locked = 1;
 }
 
 void
 mutex_unlock(struct mutex *mutex)
 {
-	(void)mutex;
+	CHECK(mutex->locked);
+	mutex->locked = 0;
 }
 
 int

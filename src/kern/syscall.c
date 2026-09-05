@@ -2668,7 +2668,9 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 		struct inode *victim;
 
 		mount_vfs_transaction_enter(parent.p_mount);
-		error = inode_lookup(parent.p_inode, &name, &victim);
+		error = mount_namespace_check_name(parent.p_inode, &name);
+		if (error == 0)
+			error = inode_lookup(parent.p_inode, &name, &victim);
 		if (error == 0) {
 			error = vfs_may_remove(parent.p_inode, victim, credential);
 			inode_release(victim);
@@ -2698,6 +2700,11 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 			error = EXDEV;
 		if (error == 0)
 			mount_vfs_transaction_enter(parent.p_mount);
+		if (error == 0)
+			error = mount_namespace_check_name(parent.p_inode, &name);
+		if (error == 0)
+			error = mount_namespace_check_name(other_parent.p_inode,
+			    &other_name);
 		if (error == 0)
 			error = inode_lookup(parent.p_inode, &name, &source);
 		if (error == 0) {

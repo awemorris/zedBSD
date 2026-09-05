@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Q076 bounded production QEMU acceptance; only newly created image copies."""
+"""Q076/q077 bounded production QEMU acceptance; only fresh disposable copies."""
 import argparse
 import hashlib
 import os
@@ -164,6 +164,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("cell", choices=["idle", "busy", "combined"])
     parser.add_argument("output", type=Path)
+    parser.add_argument("--mount-protection", action="store_true",
+                        help="also run q077 exact-errno mounted namespace probes")
     args = parser.parse_args()
     output = args.output.resolve()
     # Fresh scope, under this Phase's disposable area; refuse existing paths.
@@ -203,9 +205,12 @@ def main():
     copied = subprocess.run(["mtype", "-i", f"{output / 'boot.img'}@@{start * 512}",
                              "::/rootfs.img"], capture_output=True, check=True).stdout
     assert hashlib.sha256(copied).hexdigest() == digest(fixture_root)
-    subprocess.run(["python3", "tools/build/check-arch-overlay-ufs.py", "--profile", "amd64",
-                    "--image", str(fixture_root), "--file",
-                    "/usr/bin/storage-exit=build/amd64/tests/storage-exit"], cwd=REPO, check=True)
+    check = ["python3", "tools/build/check-arch-overlay-ufs.py", "--profile", "amd64",
+             "--image", str(fixture_root), "--file",
+             "/usr/bin/storage-exit=build/amd64/tests/storage-exit"]
+    if args.mount_protection:
+        check += ["--file", "/usr/bin/mount-protection=build/amd64/tests/mount-protection"]
+    subprocess.run(check, cwd=REPO, check=True)
     shutil.copyfile("/usr/share/OVMF/OVMF_VARS_4M.fd", output / "vars.fd")
     fixture(output / "gpt.img", True)
     fixture(output / "mbr.img", False)
@@ -233,13 +238,25 @@ def main():
             guest.run("mkdir -p /q076")
             guest.run("mount -t fat -r nvme0n1p1 /q076")
             guest.run("mount", r"/dev/nvme0n1p1 on /q076 type fat \(ro")
+            if args.mount_protection:
+                guest.run("mount-protection mounted /q076", "mount-protection PASS mounted")
             guest.run("diskpart reload nvme0n1", "Disk busy", 1)
             guest.edit(f"diskpart add nvme0n1 2 150000 4096 {TYPE} {PART2} q076b", busy=True)
             guest.run("diskpart show nvme0n1", "2 active partitions")
             guest.run("ls /dev/nvme0n1p2", status=1)
             guest.run("ls /q076")
             guest.run("umount /q076")
+            if args.mount_protection:
+                guest.run("mount-protection released /q076", "mount-protection PASS released")
+                # Existing mount API also permits a virtual name with no
+                # underlying directory. It must receive the same protection.
+                guest.run("mount -t fat -r nvme0n1p1 /q077-virtual")
+                guest.run("mount-protection mounted /q077-virtual", "mount-protection PASS mounted")
+                guest.run("umount /q077-virtual")
+                guest.run("ls /q077-virtual", status=1)
             guest.run("mount -t fat nvme0n1p1 /q076")
+            if args.mount_protection:
+                guest.run("mount-protection mounted /q076", "mount-protection PASS mounted")
             guest.run("diskpart reload nvme0n1", "Disk busy", 1)
             # Actual ordinary boot disk (not the auxiliary NVMe namespaces).
             match = re.search(r"^(sd[a-z]+) \d+ \d+ \d+ (?:rw|ro)$", devices, re.M)
@@ -268,7 +285,8 @@ def main():
                 left, right = a.read(512), b.read(512)
                 if not (1 <= sector < 34 or SECTORS - 33 <= sector < SECTORS):
                     assert left == right, f"non-table sector changed: {sector}"
-    (output / "result.txt").write_text(f"PASS {args.cell}\nproduction_sha256={source_hash}\n")
+    (output / "result.txt").write_text(
+        f"PASS {args.cell}\nmount_protection={args.mount_protection}\nproduction_sha256={source_hash}\n")
     print(f"PASS {args.cell}: {output}", flush=True)
 
 

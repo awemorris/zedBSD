@@ -431,15 +431,15 @@ bmap_ensure(struct inode *inode,uint64_t logical,uint32_t *result)
 			/* Make the allocation reachable before user data I/O. */
 			error=persist_inode(inode);
 			if(error!=0) {
-				int free_error;
+				int rollback;
 				ui->direct[logical]=0;
 				ui->blocks-=s->bsize/UFS1_SECTOR_SIZE;
-				free_error=free_block(inode->i_mount,allocated);
-				if(free_error!=0) {
-					ui->direct[logical]=allocated;
-					ui->blocks+=s->bsize/UFS1_SECTOR_SIZE;
-					(void)persist_inode(inode);
-				}
+				/* Failure can follow a committed write (including replay).
+				 * Confirm pointer removal before recycling the allocation. */
+				rollback=persist_inode(inode);
+				if(rollback==0)rollback=disk_sync(inode->i_mount->m_disk);
+				if(rollback==0)rollback=free_block(inode->i_mount,allocated);
+				if(rollback!=0)state(inode->i_mount)->writable=0;
 				return error;
 			}
 		}
@@ -467,15 +467,15 @@ bmap_ensure(struct inode *inode,uint64_t logical,uint32_t *result)
 		ui->blocks+=s->bsize/UFS1_SECTOR_SIZE;
 		error=persist_inode(inode);
 		if(error!=0) {
-			int free_error;
+			int rollback;
 			*root=0;
 			ui->blocks-=s->bsize/UFS1_SECTOR_SIZE;
-			free_error=free_block(inode->i_mount,allocated);
-			if(free_error!=0) {
-				*root=allocated;
-				ui->blocks+=s->bsize/UFS1_SECTOR_SIZE;
-				(void)persist_inode(inode);
-			}
+			/* Failure can follow a committed write (including replay).
+			 * Confirm pointer removal before recycling the allocation. */
+			rollback=persist_inode(inode);
+			if(rollback==0)rollback=disk_sync(inode->i_mount->m_disk);
+			if(rollback==0)rollback=free_block(inode->i_mount,allocated);
+			if(rollback!=0)state(inode->i_mount)->writable=0;
 			return error;
 		}
 	}
@@ -516,6 +516,8 @@ bmap_ensure(struct inode *inode,uint64_t logical,uint32_t *result)
 					ufs1_put32(block,(size_t)index*4U,0,s->swapped);
 					rollback_error=write_block(inode->i_mount,
 					    fragment,block);
+					if(rollback_error==0)
+						rollback_error=disk_sync(inode->i_mount->m_disk);
 					if(rollback_error==0)
 						rollback_error=free_block(inode->i_mount,
 						    allocated);
@@ -582,8 +584,11 @@ persist_inode(struct inode *inode)
 	uint8_t *block=kern_malloc(ms->super.bsize),*raw;unsigned n;int error;
 	if(block==NULL)
 		return ENOMEM;
+	/* Different dinodes share this block. Serialize the entire read/modify/
+	 * write with allocation metadata, not merely each inode separately. */
+	mutex_lock(&ms->lock);
 	error=read_block(inode->i_mount,fragment,block);
-	if(error!=0){kern_free(block);return error;}raw=block+(index%ms->super.inopb)*UFS1_DINODE_SIZE;
+	if(error!=0){mutex_unlock(&ms->lock);kern_free(block);return error;}raw=block+(index%ms->super.inopb)*UFS1_DINODE_SIZE;
 	ufs1_put16(raw,UFS1_DI_MODE,(uint16_t)inode->i_mode,ms->super.swapped);
 	ufs1_put16(raw,UFS1_DI_NLINK,(uint16_t)inode->i_linkcount,ms->super.swapped);
 	ufs1_put64(raw,UFS1_DI_SIZE,(uint64_t)inode->i_size,ms->super.swapped);
@@ -616,7 +621,8 @@ persist_inode(struct inode *inode)
 	}
 	ufs1_put32(raw,UFS1_DI_BLOCKS,ui->blocks,ms->super.swapped);
 	ufs1_put32(raw,UFS1_DI_UID,inode->i_uid,ms->super.swapped);ufs1_put32(raw,UFS1_DI_GID,inode->i_gid,ms->super.swapped);
-	error=write_block(inode->i_mount,fragment,block);kern_free(block);return error;
+	error=write_block(inode->i_mount,fragment,block);
+	mutex_unlock(&ms->lock);kern_free(block);return error;
 }
 
 static ssize_t
@@ -651,97 +657,154 @@ indirect_span(const struct ufs1_super *super,unsigned depth)
 	return span;
 }
 
+/* Detach one inode-owned pointer durably before making its block reusable.
+ * On uncertain metadata I/O keep the allocation and stop further mutations. */
 static int
-truncate_indirect(struct inode *inode,uint32_t *root,unsigned depth,
-	uint64_t base,uint64_t keep)
+detach_inode_block(struct inode *inode, uint32_t *pointer)
 {
-	struct ufs1_mount_state *ms=state(inode->i_mount);
-	struct ufs1_inode_info *ui=info(inode);
-	uint8_t *block;
-	uint64_t child_span=indirect_span(&ms->super,depth-1U);
-	unsigned index;
-	int changed=0,empty=1,error;
+	struct ufs1_mount_state *ms = state(inode->i_mount);
+	struct ufs1_inode_info *ui = info(inode);
+	uint32_t fragment = *pointer;
+	unsigned sectors = ms->super.bsize / UFS1_SECTOR_SIZE;
+	int error;
 
-	if(*root==0)
+	if (fragment == 0)
 		return 0;
-	block=kern_malloc(ms->super.bsize);
-	if(block==NULL)
+	if (ui->blocks < sectors)
+		return EIO;
+	*pointer = 0;
+	ui->blocks -= sectors;
+	error = persist_inode(inode);
+	if (error == 0)
+		error = disk_sync(inode->i_mount->m_disk);
+	if (error == 0)
+		error = free_block(inode->i_mount, fragment);
+	if (error != 0)
+		ms->writable = 0;
+	return error;
+}
+
+/* Leave an empty root allocated until its caller has detached the owning
+ * pointer. A child is never freed while its parent still names it on disk. */
+static int
+truncate_indirect(struct inode *inode, uint32_t root, unsigned depth,
+	uint64_t base, uint64_t keep, int *empty)
+{
+	struct ufs1_mount_state *ms = state(inode->i_mount);
+	struct ufs1_inode_info *ui = info(inode);
+	uint8_t *block;
+	uint64_t child_span = indirect_span(&ms->super, depth - 1U);
+	unsigned index, sectors = ms->super.bsize / UFS1_SECTOR_SIZE;
+	int error = 0;
+
+	*empty = 1;
+	if (root == 0)
+		return 0;
+	block = kern_malloc(ms->super.bsize);
+	if (block == NULL)
 		return ENOMEM;
-	error=read_block(inode->i_mount,*root,block);
-	if(error!=0) {
-		kern_free(block);
-		return error;
-	}
-	for(index=0;index<ms->super.nindir;index++) {
-		uint32_t child=ufs1_get32(block,(size_t)index*4U,
-			ms->super.swapped);
-		uint64_t child_base=base+(uint64_t)index*child_span;
-		if(child==0)
+	error = read_block(inode->i_mount, root, block);
+	if (error != 0)
+		goto out;
+	for (index = 0; index < ms->super.nindir; index++) {
+		uint32_t child = ufs1_get32(block, (size_t)index * 4U,
+		    ms->super.swapped);
+		uint64_t child_base = base + (uint64_t)index * child_span;
+		int remove = 0;
+
+		if (child == 0)
 			continue;
-		if(depth==1U) {
-			if(child_base>=keep) {
-				error=free_block(inode->i_mount,child);
-				if(error!=0) {
-					kern_free(block);
-					return error;
-				}
-				ufs1_put32(block,(size_t)index*4U,0,
-					ms->super.swapped);
-				ui->blocks-=ms->super.bsize/UFS1_SECTOR_SIZE;
-				changed=1;
-				continue;
-			}
-		} else if(child_base+child_span>keep) {
-			error=truncate_indirect(inode,&child,depth-1U,child_base,keep);
-			if(error!=0) {
-				kern_free(block);
-				return error;
-			}
-			if(child!=ufs1_get32(block,(size_t)index*4U,
-			    ms->super.swapped)) {
-				ufs1_put32(block,(size_t)index*4U,child,
-					ms->super.swapped);
-				changed=1;
-			}
+		if (depth == 1U) {
+			remove = child_base >= keep;
+		} else if (child_base + child_span > keep) {
+			error = truncate_indirect(inode, child, depth - 1U,
+			    child_base, keep, &remove);
+			if (error != 0)
+				goto out;
 		}
-		if(ufs1_get32(block,(size_t)index*4U,ms->super.swapped)!=0)
-			empty=0;
-	}
-	if(empty) {
-		error=free_block(inode->i_mount,*root);
-		if(error==0) {
-			*root=0;
-			ui->blocks-=ms->super.bsize/UFS1_SECTOR_SIZE;
+		if (!remove) {
+			*empty = 0;
+			continue;
 		}
-	} else if(changed) {
-		error=write_block(inode->i_mount,*root,block);
-	} else {
-		error=0;
+		if (ui->blocks < sectors) { error = EIO; goto out; }
+		ufs1_put32(block, (size_t)index * 4U, 0, ms->super.swapped);
+		error = write_block(inode->i_mount, root, block);
+		if (error == 0)
+			error = disk_sync(inode->i_mount->m_disk);
+		if (error == 0) {
+			ui->blocks -= sectors;
+			error = free_block(inode->i_mount, child);
+		}
+		if (error != 0) {
+			ms->writable = 0;
+			goto out;
+		}
 	}
+out:
 	kern_free(block);
 	return error;
 }
 
 static int
-ufs1_truncate(struct inode *inode,off_t size)
+ufs1_truncate(struct inode *inode, off_t size)
 {
-	struct ufs1_mount_state *ms=state(inode->i_mount);struct ufs1_inode_info *ui=info(inode);uint8_t *block=NULL;uint64_t keep,base;unsigned n;int error=0;
-	if(!ms->writable)
+	struct ufs1_mount_state *ms = state(inode->i_mount);
+	struct ufs1_inode_info *ui = info(inode);
+	uint8_t *block = NULL;
+	uint64_t keep, base;
+	unsigned n;
+	int error = 0;
+
+	if (!ms->writable)
 		return EROFS;
-	if(size<0||(uint64_t)size>ms->super.maxfilesize)
+	if (size < 0 || (uint64_t)size > ms->super.maxfilesize)
 		return EFBIG;
-	mutex_lock(&inode->i_lock);keep=((uint64_t)size+ms->super.bsize-1U)/ms->super.bsize;
-	if(size<inode->i_size&&size!=0&&(size%ms->super.bsize)!=0){uint32_t fragment=0;error=bmap(inode,(uint64_t)size/ms->super.bsize,&fragment);if(error)goto out;if(fragment!=0){block=kern_malloc(ms->super.bsize);if(block==NULL){error=ENOMEM;goto out;}error=read_block(inode->i_mount,fragment,block);if(error)goto out;memset(block+(size%ms->super.bsize),0,ms->super.bsize-(size%ms->super.bsize));error=write_block(inode->i_mount,fragment,block);if(error)goto out;}}
-	for(n=(unsigned)keep;n<UFS1_NDADDR;n++)if(ui->direct[n]!=0){error=free_block(inode->i_mount,ui->direct[n]);if(error)goto out;ui->direct[n]=0;ui->blocks-=ms->super.bsize/UFS1_SECTOR_SIZE;}
-	base=UFS1_NDADDR;
-	for(n=0;n<UFS1_NIADDR;n++) {
-		error=truncate_indirect(inode,&ui->indirect[n],n+1U,base,keep);
-		if(error!=0)
+	mutex_lock(&inode->i_lock);
+	keep = ((uint64_t)size + ms->super.bsize - 1U) / ms->super.bsize;
+	if (size < inode->i_size && size != 0 && size % ms->super.bsize != 0) {
+		uint32_t fragment = 0;
+		error = bmap(inode, (uint64_t)size / ms->super.bsize, &fragment);
+		if (error != 0)
 			goto out;
-		base+=indirect_span(&ms->super,n+1U);
+		if (fragment != 0) {
+			block = kern_malloc(ms->super.bsize);
+			if (block == NULL) { error = ENOMEM; goto out; }
+			error = read_block(inode->i_mount, fragment, block);
+			if (error != 0)
+				goto out;
+			memset(block + size % ms->super.bsize, 0,
+			    ms->super.bsize - size % ms->super.bsize);
+			error = write_block(inode->i_mount, fragment, block);
+			if (error != 0)
+				goto out;
+		}
 	}
-	inode->i_size=size;error=persist_inode(inode);
-out:	kern_free(block);mutex_unlock(&inode->i_lock);return error;
+	/* Bound before narrowing: a large sparse size must not wrap to a
+	 * direct-block index and release unrelated data. */
+	for (n = 0; n < UFS1_NDADDR; n++) {
+		if ((uint64_t)n < keep)
+			continue;
+		error = detach_inode_block(inode, &ui->direct[n]);
+		if (error != 0)
+			goto out;
+	}
+	base = UFS1_NDADDR;
+	for (n = 0; n < UFS1_NIADDR; n++) {
+		int empty;
+		error = truncate_indirect(inode, ui->indirect[n], n + 1U,
+		    base, keep, &empty);
+		if (error == 0 && empty)
+			error = detach_inode_block(inode, &ui->indirect[n]);
+		if (error != 0)
+			goto out;
+		base += indirect_span(&ms->super, n + 1U);
+	}
+	inode->i_size = size;
+	error = persist_inode(inode);
+out:
+	kern_free(block);
+	mutex_unlock(&inode->i_lock);
+	return error;
 }
 
 static enum inode_type
@@ -756,7 +819,7 @@ mode_type(uint16_t mode)
 }
 
 static int
-load_inode(struct mount *mountp, uint32_t number, struct inode **result)
+load_inode_locked(struct mount *mountp, uint32_t number, struct inode **result)
 {
 	const struct ufs1_super *s = &state(mountp)->super;
 	struct ufs1_inode_info *ui;
@@ -847,6 +910,21 @@ load_inode(struct mount *mountp, uint32_t number, struct inode **result)
 	kern_free(block); *result=inode; return 0;
 }
 
+/* Creation already holds this gate. Miss, allocation and initialization must
+ * form one admission so aliases cannot publish duplicate in-core objects. */
+static int
+load_inode(struct mount *mountp, uint32_t number, struct inode **result)
+{
+	struct mutex *gate = &state(mountp)->namespace_lock;
+	int entered = !mutex_owned(gate), error;
+	if (entered)
+		mutex_lock(gate);
+	error = load_inode_locked(mountp, number, result);
+	if (entered)
+		mutex_unlock(gate);
+	return error;
+}
+
 static int
 next_dirent(struct inode *directory, off_t *cursor, uint32_t *number,
 	uint8_t *type, char name[NAME_MAX+1U])
@@ -895,10 +973,11 @@ dir_find_record(struct inode *directory,const struct componentname *name,
 {
 	struct ufs1_mount_state *ms=state(directory->i_mount);uint32_t pos=0,prev=UINT32_MAX;int error;
 	if(directory->i_size<0 || (uint64_t)directory->i_size>ms->super.bsize ||
+	    (uint64_t)directory->i_size%UFS1_DIRBLKSIZ!=0 ||
 	    info(directory)->direct[0]==0)
 		return EIO;
 	error=read_block(directory->i_mount,info(directory)->direct[0],block);if(error)return error;
-	while(pos<(uint32_t)directory->i_size){uint32_t ino=ufs1_get32(block,pos,ms->super.swapped);uint16_t reclen=ufs1_get16(block,pos+4U,ms->super.swapped);uint8_t nlen=block[pos+7U];
+	while(pos<(uint32_t)directory->i_size){if((uint32_t)directory->i_size-pos<8U||pos%UFS1_DIRBLKSIZ>UFS1_DIRBLKSIZ-8U){return EIO;}uint32_t ino=ufs1_get32(block,pos,ms->super.swapped);uint16_t reclen=ufs1_get16(block,pos+4U,ms->super.swapped);uint8_t nlen=block[pos+7U];
 		if(reclen<8U||(reclen&3U)!=0||pos%UFS1_DIRBLKSIZ+reclen>UFS1_DIRBLKSIZ||pos+reclen>(uint32_t)directory->i_size||8U+nlen>reclen)return EIO;
 		if(ino!=0&&nlen==name->cn_namelen&&memcmp(block+pos+8U,name->cn_nameptr,nlen)==0){*offset=pos;*previous=prev;*number=ino;return 0;}
 		prev=pos;pos+=reclen;
@@ -919,11 +998,15 @@ dir_add(struct inode *directory,const struct componentname *name,uint32_t number
 	need=dir_minimum((uint8_t)name->cn_namelen);block=kern_calloc(1,ms->super.bsize);original=kern_malloc(ms->super.bsize);if(block==NULL||original==NULL){kern_free(block);kern_free(original);return ENOMEM;}
 	mutex_lock(&directory->i_lock);
 	old_size=directory->i_size;old_direct=ui->direct[0];old_blocks=ui->blocks;
+	if(old_size<0 || (uint64_t)old_size>ms->super.bsize ||
+	    (uint64_t)old_size%UFS1_DIRBLKSIZ!=0) {
+		error=EIO;goto out;
+	}
 	if(ui->direct[0]==0){error=allocate_block(directory->i_mount,&ui->direct[0]);if(error)goto out;allocated=ui->direct[0];ui->blocks+=ms->super.bsize/UFS1_SECTOR_SIZE;}
 	error=read_block(directory->i_mount,ui->direct[0],block);if(error)goto out;
 	memcpy(original,block,ms->super.bsize);
-	while(pos<(uint32_t)directory->i_size){uint16_t reclen=ufs1_get16(block,pos+4U,ms->super.swapped);uint8_t nlen=block[pos+7U];uint16_t minimum=dir_minimum(nlen);
-		if(reclen<minimum||pos%UFS1_DIRBLKSIZ+reclen>UFS1_DIRBLKSIZ){error=EIO;goto out;}
+	while(pos<(uint32_t)directory->i_size){if((uint32_t)directory->i_size-pos<8U||pos%UFS1_DIRBLKSIZ>UFS1_DIRBLKSIZ-8U){error=EIO;goto out;}uint16_t reclen=ufs1_get16(block,pos+4U,ms->super.swapped);uint8_t nlen=block[pos+7U];uint16_t minimum=dir_minimum(nlen);
+		if(reclen<minimum||(reclen&3U)!=0||pos%UFS1_DIRBLKSIZ+reclen>UFS1_DIRBLKSIZ||reclen>(uint32_t)directory->i_size-pos){error=EIO;goto out;}
 		if(reclen-minimum>=need){uint32_t at=pos+minimum;ufs1_put16(block,pos+4U,minimum,ms->super.swapped);ufs1_put32(block,at,number,ms->super.swapped);ufs1_put16(block,at+4U,reclen-minimum,ms->super.swapped);block[at+6U]=type;block[at+7U]=(uint8_t)name->cn_namelen;memcpy(block+at+8U,name->cn_nameptr,name->cn_namelen);error=write_block(directory->i_mount,ui->direct[0],block);goto commit;}
 		pos+=reclen;
 	}
@@ -934,6 +1017,7 @@ commit:	if(error==0)error=persist_inode(directory);
 		rollback=restore_directory_block(directory,ui->direct[0],original,error);
 		directory->i_size=old_size;ui->direct[0]=old_direct;ui->blocks=old_blocks;
 		error=persist_inode(directory);
+		if(error==0)error=disk_sync(directory->i_mount->m_disk);
 		if(error!=0) {
 			ms->writable=0;
 		} else if(ms->writable&&allocated!=0) {
@@ -945,6 +1029,7 @@ commit:	if(error==0)error=persist_inode(directory);
 out:	if(error!=0&&allocated!=0&&ui->direct[0]==allocated){
 		directory->i_size=old_size;ui->direct[0]=old_direct;ui->blocks=old_blocks;
 		rollback=persist_inode(directory);
+		if(rollback==0)rollback=disk_sync(directory->i_mount->m_disk);
 		if(rollback!=0) {
 			ms->writable=0;
 			error=rollback;
@@ -1085,6 +1170,7 @@ discard_new_inode(struct inode *inode,int directory_counted)
 	ui->direct[0]=0;
 	ui->blocks=0;
 	cleanup=persist_inode(inode);
+	if(cleanup==0)cleanup=disk_sync(inode->i_mount->m_disk);
 	if(cleanup!=0) {
 		inode->i_mode=old_mode;
 		inode->i_type=old_type;
@@ -1185,7 +1271,7 @@ new_inode(struct inode *directory,
 }
 
 static int
-ufs1_lookup(struct inode *directory,const struct componentname *component,
+ufs1_lookup_locked(struct inode *directory,const struct componentname *component,
 	struct inode **result)
 {
 	off_t cursor=0; uint32_t number; uint8_t type; char name[NAME_MAX+1U]; int error;
@@ -1193,6 +1279,20 @@ ufs1_lookup(struct inode *directory,const struct componentname *component,
 		if (strlen(name)==component->cn_namelen &&
 		    memcmp(name,component->cn_nameptr,component->cn_namelen)==0)
 			return load_inode(directory->i_mount,number,result);
+	return error;
+}
+
+static int
+ufs1_lookup(struct inode *directory, const struct componentname *component,
+	struct inode **result)
+{
+	struct mutex *gate = &state(directory->i_mount)->namespace_lock;
+	int entered = !mutex_owned(gate), error;
+	if (entered)
+		mutex_lock(gate);
+	error = ufs1_lookup_locked(directory, component, result);
+	if (entered)
+		mutex_unlock(gate);
 	return error;
 }
 
@@ -1322,6 +1422,7 @@ ufs1_unlink(struct inode *directory,const struct componentname *name)
 	nlink_t old_links=0;
 	unsigned old_flags=0;
 	mutex_lock(&ms->namespace_lock);
+	if(!ms->writable){error=EROFS;goto out;}
 	error=ufs1_lookup(directory,name,&target);
 	if(error)goto out;
 	if(target->i_type==INODE_DIR){error=EISDIR;goto out;}
@@ -1377,6 +1478,7 @@ ufs1_rmdir(struct inode *directory,const struct componentname *name)
 	nlink_t old_target_links=0,old_directory_links=0;
 	unsigned old_target_flags=0;
 	mutex_lock(&ms->namespace_lock);
+	if(!ms->writable){error=EROFS;goto out;}
 	error=ufs1_lookup(directory,name,&target);
 	if(error)goto out;
 	if(target->i_type!=INODE_DIR){error=ENOTDIR;goto out;}
@@ -1450,6 +1552,7 @@ ufs1_rename(struct inode *old_directory,const struct componentname *old_name,
 		return 0;
 
 	mutex_lock(&ms->namespace_lock);
+	if(!ms->writable){error=EROFS;goto out;}
 	error=ufs1_lookup(old_directory,old_name,&source);
 	if(error!=0)
 		goto out;
@@ -1623,6 +1726,7 @@ ufs1_link(struct inode *directory,const struct componentname *name,struct inode 
 	if(target==NULL||target->i_mount!=directory->i_mount)return EXDEV;
 	if(target->i_type==INODE_DIR)return EPERM;
 	mutex_lock(&ms->namespace_lock);
+	if(!ms->writable){error=EROFS;goto out;}
 	mutex_lock(&target->i_lock);
 	if(target->i_linkcount==UINT16_MAX){mutex_unlock(&target->i_lock);error=EMLINK;goto out;}
 	mutex_unlock(&target->i_lock);
@@ -1761,6 +1865,7 @@ ufs1_setattr(struct inode *inode,const struct stat *status,unsigned mask)
 	}
 
 	mutex_lock(&inode->i_lock);
+	if(!state(inode->i_mount)->writable){mutex_unlock(&inode->i_lock);return EROFS;}
 	old_mode=inode->i_mode;
 	old_uid=inode->i_uid;
 	old_gid=inode->i_gid;
@@ -1802,7 +1907,8 @@ ufs1_inode_sync(struct inode *inode)
 	int error;
 
 	mutex_lock(&inode->i_lock);
-	error=persist_inode(inode);
+	error=state(inode->i_mount)->writable ? persist_inode(inode) :
+	    (inode->i_mount->m_flags&MOUNT_READ_ONLY)!=0 ? 0 : EROFS;
 	mutex_unlock(&inode->i_lock);
 	return error;
 }
@@ -1817,7 +1923,7 @@ static void ufs1_reclaim(struct inode *inode)
 	    (uint32_t)inode->i_ino,-1)!=0)
 		return;
 	inode->i_mode=0;inode->i_type=INODE_NONE;ui->blocks=0;
-	if(persist_inode(inode)==0)
+	if(persist_inode(inode)==0 && disk_sync(inode->i_mount->m_disk)==0)
 		(void)free_inode_number(inode->i_mount,(uint32_t)inode->i_ino);
 }
 static const struct inode_ops ufs1_inode_ops={.lookup=ufs1_lookup,.create=ufs1_create,

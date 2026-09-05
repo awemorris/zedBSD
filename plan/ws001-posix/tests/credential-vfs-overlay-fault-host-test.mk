@@ -40,12 +40,18 @@ $(OUT)/overlay.o: $(REPO)/src/kern/overlayfs.c $(SELF) | $(OUT)
 		-Wno-unused-const-variable \
 		-c $< -o $@
 	$(OBJCOPY) \
+		--redefine-sym overlay_prepare_mutation=ws001_overlay_prepare_mutation \
+		--redefine-sym overlay_rename=ws001_overlay_rename \
+		--redefine-sym overlay_remove=ws001_overlay_remove \
 		--redefine-sym overlay_create=ws001_overlay_create \
 		--redefine-sym overlay_mknod=ws001_overlay_mknod \
 		--redefine-sym overlay_ensure_upper_dir=ws001_overlay_ensure_upper_dir \
 		--redefine-sym overlay_copy_up_regular=ws001_overlay_copy_up_regular \
 		--redefine-sym overlay_alloc_inode=ws001_overlay_alloc_inode $@
 	$(OBJCOPY) \
+		--globalize-symbol=ws001_overlay_prepare_mutation \
+		--globalize-symbol=ws001_overlay_rename \
+		--globalize-symbol=ws001_overlay_remove \
 		--globalize-symbol=ws001_overlay_create \
 		--globalize-symbol=ws001_overlay_mknod \
 		--globalize-symbol=ws001_overlay_ensure_upper_dir \

@@ -343,6 +343,7 @@ inode_lookup(struct inode *directory, const struct componentname *name,
 	     struct inode **result)
 {
 	struct inode *child;
+	uint64_t sequence;
 	int error;
 	if (directory == NULL || name == NULL || result == NULL ||
 	    name->cn_namelen == 0 || name->cn_namelen > NAME_MAX)
@@ -354,6 +355,7 @@ inode_lookup(struct inode *directory, const struct componentname *name,
 		return 0;
 	if (directory->i_op == NULL || directory->i_op->lookup == NULL)
 		return EOPNOTSUPP;
+	sequence = atomic_u64_load_acquire(&directory->i_dirseq);
 	error = directory->i_op->lookup(directory, name, &child);
 	if (error != 0)
 		return error;
@@ -363,7 +365,7 @@ inode_lookup(struct inode *directory, const struct componentname *name,
 		return EIO;
 	}
 	if ((directory->i_flags & INODE_NOCACHE_CHILDREN) == 0)
-		(void)namecache_enter(directory, name, child);
+		(void)namecache_enter(directory, name, child, sequence);
 	*result = child;
 	return 0;
 }
@@ -513,6 +515,14 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 		mask &= ~INODE_ATTR_SIZE;
 		if (mask == 0)
 			return 0;
+	}
+	/* Copy-up can create/rename upper entries. Complete it before i_io_lock,
+	 * because namespace creation takes the transaction gate before this lock
+	 * when observing a parent's ownership and set-GID attributes. */
+	if (i->i_op != NULL && i->i_op->prepare_mutation != NULL) {
+		error = i->i_op->prepare_mutation(i);
+		if (error != 0)
+			return error;
 	}
 	/* Mode and ownership participate in the same regular-inode I/O domain as
 	 * writes and truncate.  This prevents chmod/chown from restoring set-id
@@ -743,7 +753,7 @@ inode_creation_prepare(struct inode *parent, struct inode *child,
 	return 0;
 }
 
-int inode_create(struct inode *i, const struct componentname *n,
+static int inode_create_locked(struct inode *i, const struct componentname *n,
 		 const struct inode_creation_request *request, struct inode **r)
 {
 	int error;
@@ -759,7 +769,7 @@ int inode_create(struct inode *i, const struct componentname *n,
 	}
 	return error;
 }
-int inode_mkdir(struct inode *i, const struct componentname *n,
+static int inode_mkdir_locked(struct inode *i, const struct componentname *n,
 		const struct inode_creation_request *request, struct inode **r)
 {
 	int error;
@@ -775,7 +785,7 @@ int inode_mkdir(struct inode *i, const struct componentname *n,
 	}
 	return error;
 }
-int inode_mknod(struct inode *i, const struct componentname *n,
+static int inode_mknod_locked(struct inode *i, const struct componentname *n,
 		const struct inode_creation_request *request, struct inode **r)
 {
 	int error;
@@ -796,7 +806,7 @@ int inode_mknod(struct inode *i, const struct componentname *n,
 	}
 	return error;
 }
-int inode_unlink(struct inode *i, const struct componentname *n)
+static int inode_unlink_locked(struct inode *i, const struct componentname *n)
 {
 	struct inode *target;
 	struct backing_mutation_guard guard;
@@ -805,6 +815,11 @@ int inode_unlink(struct inode *i, const struct componentname *n)
 	if (readonly(i)) return EROFS;
 	error = inode_lookup(i, n, &target);
 	if (error != 0) return error;
+	error = mount_namespace_check_inode(target);
+	if (error != 0) {
+		inode_release(target);
+		return error;
+	}
 	error = backing_mutation_begin_inode(target, &guard);
 	if (error != 0) {
 		inode_release(target);
@@ -815,7 +830,7 @@ int inode_unlink(struct inode *i, const struct componentname *n)
 		inode_release(target);
 		return EPERM;
 	}
-	if ((target->i_flags & (INODE_ROOT | INODE_MOUNTPOINT |
+	if ((target->i_flags & (INODE_ROOT |
 	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 		backing_mutation_end(&guard);
 		inode_release(target);
@@ -832,7 +847,7 @@ int inode_unlink(struct inode *i, const struct componentname *n)
 	}
 	return error;
 }
-int inode_rmdir(struct inode *i, const struct componentname *n)
+static int inode_rmdir_locked(struct inode *i, const struct componentname *n)
 {
 	struct inode *target;
 	int error;
@@ -840,11 +855,16 @@ int inode_rmdir(struct inode *i, const struct componentname *n)
 	if (readonly(i)) return EROFS;
 	error = inode_lookup(i, n, &target);
 	if (error != 0) return error;
+	error = mount_namespace_check_inode(target);
+	if (error != 0) {
+		inode_release(target);
+		return error;
+	}
 	if (target->i_type != INODE_DIR) {
 		inode_release(target);
 		return ENOTDIR;
 	}
-	if ((target->i_flags & (INODE_ROOT | INODE_MOUNTPOINT |
+	if ((target->i_flags & (INODE_ROOT |
 	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 		inode_release(target);
 		return EBUSY;
@@ -915,19 +935,22 @@ inode_parent_step(struct inode **cursor, int *at_root)
  * The second cursor is Floyd cycle detection: a malformed pre-existing tree
  * is reported as EIO instead of making rename loop forever.
  */
-static int
-inode_rename_ancestor_check(struct inode *source, struct inode *new_parent)
+int
+inode_is_ancestor(struct inode *source, struct inode *new_parent, int *result)
 {
 	struct inode *current = new_parent, *fast = new_parent;
 	int error = 0, at_root;
 
+	if (source == NULL || new_parent == NULL || result == NULL)
+		return EINVAL;
+	*result = 0;
 	inode_ref(current);
 	inode_ref(fast);
 	for (;;) {
 		unsigned step;
 
 		if (inode_same(current, source)) {
-			error = EINVAL;
+			*result = 1;
 			break;
 		}
 		error = inode_parent_step(&current, &at_root);
@@ -958,7 +981,7 @@ out:
 	return error;
 }
 
-int inode_rename(struct inode *od, const struct componentname *on,
+static int inode_rename_locked(struct inode *od, const struct componentname *on,
 		 struct inode *nd, const struct componentname *nn, unsigned flags)
 {
 	struct inode *source, *target;
@@ -974,19 +997,27 @@ int inode_rename(struct inode *od, const struct componentname *on,
 	error = inode_lookup(od, on, &source);
 	if (error != 0)
 		return error;
+	error = mount_namespace_check_inode(source);
+	if (error != 0) {
+		inode_release(source);
+		return error;
+	}
 	error = backing_mutation_begin_inode(source, &source_guard);
 	if (error != 0) {
 		inode_release(source);
 		return error;
 	}
-	if ((source->i_flags & (INODE_ROOT | INODE_MOUNTPOINT |
+	if ((source->i_flags & (INODE_ROOT |
 	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 		backing_mutation_end(&source_guard);
 		inode_release(source);
 		return EBUSY;
 	}
 	if (source->i_type == INODE_DIR && !inode_same(od, nd)) {
-		error = inode_rename_ancestor_check(source, nd);
+		int ancestor;
+		error = inode_is_ancestor(source, nd, &ancestor);
+		if (error == 0 && ancestor)
+			error = EINVAL;
 		if (error != 0) {
 			backing_mutation_end(&source_guard);
 			inode_release(source);
@@ -995,6 +1026,13 @@ int inode_rename(struct inode *od, const struct componentname *on,
 	}
 	error = inode_lookup(nd, nn, &target);
 	if (error == 0) {
+		error = mount_namespace_check_inode(target);
+		if (error != 0) {
+			inode_release(target);
+			backing_mutation_end(&source_guard);
+			inode_release(source);
+			return error;
+		}
 		if (target == source || (target->i_mount == source->i_mount &&
 		    target->i_ino == source->i_ino)) {
 			inode_release(target);
@@ -1010,7 +1048,7 @@ int inode_rename(struct inode *od, const struct componentname *on,
 			return error;
 		}
 		target_guarded = 1;
-		if ((target->i_flags & (INODE_ROOT | INODE_MOUNTPOINT |
+		if ((target->i_flags & (INODE_ROOT |
 		    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 			inode_release(target);
 			backing_mutation_end(&target_guard);
@@ -1059,7 +1097,7 @@ int inode_rename(struct inode *od, const struct componentname *on,
 	inode_release(source);
 	return error;
 }
-int inode_link(struct inode *directory, const struct componentname *name,
+static int inode_link_locked(struct inode *directory, const struct componentname *name,
 	       struct inode *target)
 {
 	struct backing_mutation_guard guard;
@@ -1088,7 +1126,7 @@ int inode_link(struct inode *directory, const struct componentname *name,
 	}
 	return error;
 }
-int inode_symlink(struct inode *directory, const struct componentname *name,
+static int inode_symlink_locked(struct inode *directory, const struct componentname *name,
 		  const char *target,
 		  const struct inode_creation_request *request,
 		  struct inode **result)
@@ -1112,6 +1150,132 @@ int inode_symlink(struct inode *directory, const struct componentname *name,
 	}
 	return error;
 }
+
+/* Join before checking attachments and retain the sleeping gate through the
+ * backend commit. The outer syscall/copy-up owner keeps its own acquisition. */
+static int
+inode_namespace_enter(struct inode *directory, const struct componentname *name,
+	int creation, int *entered)
+{
+	int error;
+	*entered = 0;
+	if (directory == NULL || name == NULL)
+		return EINVAL;
+	*entered = mount_vfs_transaction_join(directory->i_mount);
+	if (readonly(directory))
+		return EROFS;
+	if ((directory->i_flags & INODE_DEAD) != 0)
+		return ENOENT;
+	error = mount_namespace_check_name(directory, name);
+	return creation && error == EBUSY ? EEXIST : error;
+}
+
+int
+inode_create(struct inode *i, const struct componentname *n,
+	const struct inode_creation_request *request, struct inode **r)
+{
+	int entered, error = inode_namespace_enter(i, n, 1, &entered);
+	if (error == 0)
+		error = inode_create_locked(i, n, request, r);
+	if (entered)
+		mount_vfs_transaction_leave(i->i_mount);
+	return error;
+}
+
+int
+inode_mkdir(struct inode *i, const struct componentname *n,
+	const struct inode_creation_request *request, struct inode **r)
+{
+	int entered, error = inode_namespace_enter(i, n, 1, &entered);
+	if (error == 0)
+		error = inode_mkdir_locked(i, n, request, r);
+	if (entered)
+		mount_vfs_transaction_leave(i->i_mount);
+	return error;
+}
+
+int
+inode_mknod(struct inode *i, const struct componentname *n,
+	const struct inode_creation_request *request, struct inode **r)
+{
+	int entered, error = inode_namespace_enter(i, n, 1, &entered);
+	if (error == 0)
+		error = inode_mknod_locked(i, n, request, r);
+	if (entered)
+		mount_vfs_transaction_leave(i->i_mount);
+	return error;
+}
+
+int
+inode_unlink(struct inode *i, const struct componentname *n)
+{
+	int entered, error = inode_namespace_enter(i, n, 0, &entered);
+	if (error == 0)
+		error = inode_unlink_locked(i, n);
+	if (entered)
+		mount_vfs_transaction_leave(i->i_mount);
+	return error;
+}
+
+int
+inode_rmdir(struct inode *i, const struct componentname *n)
+{
+	int entered, error = inode_namespace_enter(i, n, 0, &entered);
+	if (error == 0)
+		error = inode_rmdir_locked(i, n);
+	if (entered)
+		mount_vfs_transaction_leave(i->i_mount);
+	return error;
+}
+
+int
+inode_rename(struct inode *od, const struct componentname *on,
+	struct inode *nd, const struct componentname *nn, unsigned flags)
+{
+	int entered, error;
+	if (od == NULL || nd == NULL || nn == NULL || flags != 0)
+		return EINVAL;
+	if (od->i_mount != nd->i_mount)
+		return EXDEV;
+	error = inode_namespace_enter(od, on, 0, &entered);
+	if (error == 0 && readonly(nd))
+		error = EROFS;
+	if (error == 0 && (nd->i_flags & INODE_DEAD) != 0)
+		error = ENOENT;
+	if (error == 0)
+		error = mount_namespace_check_name(nd, nn);
+	if (error == 0)
+		error = inode_rename_locked(od, on, nd, nn, flags);
+	if (entered)
+		mount_vfs_transaction_leave(od->i_mount);
+	return error;
+}
+
+int
+inode_link(struct inode *directory, const struct componentname *name,
+	struct inode *target)
+{
+	int entered, error = inode_namespace_enter(directory, name, 1, &entered);
+	if (error == 0)
+		error = inode_link_locked(directory, name, target);
+	if (entered)
+		mount_vfs_transaction_leave(directory->i_mount);
+	return error;
+}
+
+int
+inode_symlink(struct inode *directory, const struct componentname *name,
+	const char *target, const struct inode_creation_request *request,
+	struct inode **result)
+{
+	int entered, error = inode_namespace_enter(directory, name, 1, &entered);
+	if (error == 0)
+		error = inode_symlink_locked(directory, name, target, request, result);
+	if (entered)
+		mount_vfs_transaction_leave(directory->i_mount);
+	return error;
+}
+
 ssize_t inode_readlink(struct inode *inode, char *buffer, size_t capacity)
 {
 	if (inode == NULL || buffer == NULL)
@@ -1152,6 +1316,12 @@ inode_truncate_transaction_impl(struct inode *i,
 		return EINVAL;
 	if (i->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) return EBUSY;
 	if (readonly(i)) return EROFS;
+	if (i->i_op != NULL && i->i_op->prepare_mutation != NULL) {
+		error = i->i_op->prepare_mutation(i);
+		result->actual_size = i->i_size;
+		if (error != 0)
+			return error;
+	}
 	delegated = i->i_op != NULL && i->i_op->truncate_limited != NULL;
 	retry:
 	vm_resize = inode_vm_resize_available();

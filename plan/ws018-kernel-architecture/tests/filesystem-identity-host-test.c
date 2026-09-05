@@ -9,6 +9,7 @@
 #include <kern/disk.h>
 #include <kern/fat.h>
 #include <kern/mount.h>
+#include <kern/namei.h>
 #include <kern/partition.h>
 #include <kern/swap.h>
 
@@ -93,6 +94,19 @@ spin_unlock_irqrestore(struct spinlock *lock, unsigned long enabled)
 	(void)lock;
 	(void)enabled;
 }
+
+/* Publication/path mutation is outside this format-identity fixture. These
+ * fail-fast dependencies keep retained mount entrypoints linkable; KA-T121
+ * exercises their real inode/cache/lock path. */
+int mutex_owned(struct mutex *mutex) { (void)mutex; abort(); }
+void spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
+{ (void)lock; (void)rank; (void)name; abort(); }
+int fs_getcwd(const struct cwdinfo *context, char *buffer, size_t capacity)
+{ (void)context; (void)buffer; (void)capacity; abort(); }
+int inode_lookup(struct inode *inode, const struct componentname *name,
+    struct inode **result)
+{ (void)inode; (void)name; (void)result; abort(); }
+void inode_dir_changed(struct inode *inode) { (void)inode; abort(); }
 
 int
 mutex_init(struct mutex *mutex, enum lock_rank rank, const char *name)

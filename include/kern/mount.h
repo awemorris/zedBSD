@@ -91,10 +91,11 @@ struct mount {
 	refcount_t m_refs;
 	struct mutex m_lock;
 	/*
-	 * Serializes generic permission/type checks with one namespace commit.
-	 * Filesystem-private namespace locks are acquired inside this lock.
+	 * All mounts share one sleeping namespace transaction gate. It serializes
+	 * permission checks, namespace commits and mount admission; ordinary file
+	 * I/O does not take it. Stacking filesystems join an already-owned gate.
+	 * Lock order: transaction, namespace spinlock (briefly), filesystem locks.
 	 */
-	struct mutex m_vfs_transaction_storage;
 	struct mutex *m_vfs_transaction_lock;
 	struct wait_queue m_waitq;
 	enum mount_state m_state;
@@ -104,9 +105,10 @@ struct mount {
 	struct disk *m_disk;
 	const struct filesystem_type *m_type;
 	struct inode *m_root;
-	struct inode *m_mountpoint;
 	struct mount *m_parent;
 	struct path m_cover;
+	/* Optional backing entry hidden by this attachment, held by reference. */
+	struct inode *m_covered_inode;
 	struct mount *m_bind_source;
 	struct mount *m_children;
 	struct mount *m_sibling;
@@ -161,12 +163,6 @@ int
 path_equal(
 	const struct path *left,
 	const struct path *right);
-
-int
-mount_rootfs(void);
-
-struct inode *
-mount_root_inode(void);
 
 int
 mount_root_create(
@@ -268,16 +264,6 @@ mount_for_inode(
 	const struct inode *inode);
 
 int
-mount_follow(
-	struct inode *inode,
-	struct inode **result);
-
-int
-mount_cross_parent(
-	struct inode *inode,
-	struct inode **result);
-
-int
 mount_lookup_child(
 	const struct path *directory,
 	const struct componentname *component,
@@ -306,6 +292,24 @@ mount_vfs_transaction_enter(
 void
 mount_vfs_transaction_leave(
 	struct mount *mountp);
+
+/* Return one only when this call acquired the gate; leave only in that case. */
+int
+mount_vfs_transaction_join(
+	struct mount *mountp);
+
+/* Caller holds the namespace transaction through its filesystem commit.
+ * Name checks include attachments in every bind view of the backing parent.
+ * Inode checks reject mount anchors and their ancestors (EBUSY), preserving
+ * reachability and cached mount paths. Ancestor I/O never holds a spinlock. */
+int
+mount_namespace_check_name(
+	struct inode *directory,
+	const struct componentname *name);
+
+int
+mount_namespace_check_inode(
+	struct inode *inode);
 
 unsigned
 mount_count(void);

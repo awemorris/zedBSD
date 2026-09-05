@@ -33,6 +33,15 @@ void spin_init(struct spinlock *s, enum lock_rank r, const char *n)
 { memset(s, 0, sizeof(*s)); s->rank = r; s->name = n; }
 int mutex_init(struct mutex *m, enum lock_rank r, const char *n)
 { memset(m, 0, sizeof(*m)); spin_init(&m->guard, r, n); return 0; }
+/* This fixture exercises mount snapshots, not mount publication/mutation.
+ * Keep accidentally retained host-link entrypoints fail-fast. KA-T121 links
+ * the real inode/cache path with working locks and tests those operations. */
+int mutex_owned(struct mutex *m) { (void)m; abort(); }
+void mutex_lock(struct mutex *m) { (void)m; abort(); }
+void mutex_unlock(struct mutex *m) { (void)m; abort(); }
+int inode_lookup(struct inode *i, const struct componentname *n, struct inode **r)
+{ (void)i; (void)n; (void)r; abort(); }
+void inode_dir_changed(struct inode *i) { (void)i; abort(); }
 int backing_claim_check_mount(struct disk *d, unsigned f)
 { (void)d; (void)f; return 0; }
 unsigned long spin_lock_irqsave(struct spinlock *s)

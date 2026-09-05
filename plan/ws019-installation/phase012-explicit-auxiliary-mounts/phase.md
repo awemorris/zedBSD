@@ -4,7 +4,7 @@ Last updated: 2026-09-05
 
 Phase ID: `ws019-p012`
 
-Status: uncleared in finished q076; auto-mount fix verified, explicit/reboot regression pending
+Status: completed in finished q077; original q076 residual retained below
 
 Parent: [WS019](../ws.md)
 
@@ -43,3 +43,22 @@ before exercising it. The corrected root-level `/q076` test and reboot are
 pending; the declared launch budget was not extended again. See
 [q076 evidence](../tests/q076-results.md). A newly approved validation Queue
 can clear this remaining test gate without further boot-policy changes.
+
+## Subsequent residue audit
+
+The user's 2026-09-05 follow-up found unused synthetic-root and inode-only
+mount scaffolding after the automatic loop's removal. Its bounded deletion
+plan belongs to [ws018-p013](../../ws018-kernel-architecture/phase013-legacy-disk-mount-residue/phase.md),
+not a silent expansion of finished q076. This Phase's existing explicit/reboot
+gate remains uncleared; a future approved Queue may share runtime evidence.
+
+## Q077 residual acceptance — 2026-09-05
+
+Completed by final-source `q077-resume-02` after the p013/p014/p015 corrections.
+Explicit root-level ro/rw/virtual mounts and mutation protection pass; whole-disk
+reload returns EBUSY for ro, rw and the actual root disk. Mounted addition
+persists and exits 3 without live replacement; reboot discovers p2 with no
+automatic auxiliary mounts. MBR round-trip, GPT non-table preservation and
+production-input immutability pass. [Q077 evidence](../../ws018-kernel-architecture/tests/q077-results.md)
+records commands, hashes and both launches. Q076's earlier failure record is
+unchanged; this is new acceptance, not a retroactive PASS for its failed cells.

@@ -89,7 +89,6 @@ struct inode_creation_request {
 #define INODE_ROOT		0x00000001U
 #define INODE_DIRTY		0x00000002U
 #define INODE_DEAD		0x00000004U
-#define INODE_MOUNTPOINT	0x00000008U
 #define INODE_SWAPFILE		0x00000010U
 #define INODE_LOOPFILE		0x00000020U
 #define INODE_NOCACHE_CHILDREN	0x00000040U
@@ -149,6 +148,10 @@ struct inode_ops {
 	    const struct inode_creation_request *, struct inode **);
 	ssize_t (*readlink)(struct inode *, char *, size_t);
 	int (*getattr)(struct inode *, struct stat *);
+	/* Materialize stacking-filesystem state before metadata/content I/O
+	 * locks. Repeated calls do not mutate an already materialized namespace;
+	 * an inner update owning i_io_lock must never acquire the namespace gate. */
+	int (*prepare_mutation)(struct inode *);
 	int (*setattr)(struct inode *, const struct stat *, unsigned);
 	int (*truncate)(struct inode *, off_t);
 	int (*truncate_limited)(struct inode *, const struct inode_truncate_request *, struct inode_truncate_result *);
@@ -358,10 +361,8 @@ int
 inode_rmdir(
 	struct inode *i,
 	const struct componentname *n);
-/*
- * The caller holds the shared mount VFS transaction lock across any
- * permission checks and this namespace commit.
- */
+/* Namespace mutators join the VFS transaction themselves. Callers doing
+ * permission checks must hold it across those checks and the mutation. */
 int
 inode_rename(
 	struct inode *od,
@@ -369,6 +370,13 @@ inode_rename(
 	struct inode *nd,
 	const struct componentname *nn,
 	unsigned flags);
+
+/* Caller holds the VFS transaction; malformed parent chains return EIO. */
+int
+inode_is_ancestor(
+	struct inode *ancestor,
+	struct inode *descendant,
+	int *result);
 
 int
 inode_link(
