@@ -1,4 +1,9 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 #ifndef ZEDBSD_KERN_NET_WLAN_L2_H
 #define ZEDBSD_KERN_NET_WLAN_L2_H
@@ -33,14 +38,29 @@ struct wlan_l2_rx_state {
 	uint64_t group_packet_number[4];
 };
 
-int wlan_l2_build_data(const uint8_t station[6], const uint8_t bssid[6],
-	const uint8_t *ethernet, size_t ethernet_length, int protected_frame,
-	uint8_t key_index, uint64_t packet_number, uint8_t *mpdu,
-	size_t capacity, size_t *mpdu_length);
-int wlan_l2_parse_data(const uint8_t station[6], const uint8_t bssid[6],
-	const uint8_t *mpdu, size_t mpdu_length,
+int
+wlan_l2_build_data(
+	const uint8_t station[6],
+	const uint8_t bssid[6],
+	const uint8_t *ethernet,
+	size_t ethernet_length,
+	int protected_frame,
+	uint8_t key_index,
+	uint64_t packet_number,
+	uint8_t *mpdu,
+	size_t capacity,
+	size_t *mpdu_length);
+
+int
+wlan_l2_parse_data(
+	const uint8_t station[6],
+	const uint8_t bssid[6],
+	const uint8_t *mpdu,
+	size_t mpdu_length,
 	const struct wlan_l2_rx_security *security,
-	struct wlan_l2_rx_state *state, uint8_t *ethernet, size_t capacity,
+	struct wlan_l2_rx_state *state,
+	uint8_t *ethernet,
+	size_t capacity,
 	size_t *ethernet_length);
 
 #endif

@@ -1,4 +1,21 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Process resource limits.
+ *
+ * Each process carries a table of soft and hard limits.  Raising a hard
+ * limit, or a soft limit above the hard one, needs superuser privilege,
+ * and the limits that other subsystems enforce are pushed to them when
+ * they change.
+ */
+
 #include "kern/resource-limit.h"
 
 #include "kern/cred.h"
@@ -12,12 +29,22 @@
 #include <errno.h>
 #include <string.h>
 
+static uint64_t resource_cap(int resource);
+
+/*
+ * Fills a limit table with the defaults of a fresh process.
+ */
 void
-resource_limits_default(struct process_limits *limits)
+resource_limits_default(
+	struct process_limits *limits)
 {
 	uint64_t address_cap;
+
+	/* Ignores a missing table. */
 	if (limits == NULL)
 		return;
+
+	/* Starts every limit at its default. */
 	memset(limits, 0, sizeof(*limits));
 	address_cap = vmspace_address_cap();
 	limits->values[RLIMIT_NOFILE].current = KERN_OPEN_MAX;
@@ -34,71 +61,89 @@ resource_limits_default(struct process_limits *limits)
 	limits->values[RLIMIT_FSIZE].maximum = RLIM_INFINITY;
 }
 
-static uint64_t
-resource_cap(int resource)
-{
-	switch (resource) {
-	case RLIMIT_NOFILE: return KERN_OPEN_MAX;
-	case RLIMIT_STACK: return EXEC_STACK_HARD_MAX;
-	case RLIMIT_AS: return vmspace_address_cap();
-	case RLIMIT_CORE: return 0;
-	case RLIMIT_CPU:
-	case RLIMIT_DATA:
-	case RLIMIT_FSIZE:
-		return RLIM_INFINITY;
-	default: return 0;
-	}
-}
-
+/*
+ * Reads one limit of a process.
+ */
 int
-resource_limit_get(struct process *process, int resource,
+resource_limit_get(
+	struct process *process,
+	int resource,
 	struct rlimit_record *result)
 {
 	unsigned long irq;
-	if (process == NULL || result == NULL || resource < 0 ||
+
+	/* Rejects a missing process or result, or an unknown resource. */
+	if (process == NULL ||
+	    result == NULL ||
+	    resource < 0 ||
 	    resource >= RLIMIT_NLIMITS)
 		return EINVAL;
+
+	/* Copies the limit under the process lock. */
 	irq = spin_lock_irqsave(&process->lock);
 	*result = process->limits.values[resource];
 	spin_unlock_irqrestore(&process->lock, irq);
+
+	/* Reports the copied limit. */
 	return 0;
 }
 
+/*
+ * Changes one limit of a process and pushes it to the enforcing subsystem.
+ *
+ * The change is serialized by the process resource mutex, so the pushed
+ * limit and the recorded one never disagree.
+ */
 int
-resource_limit_set(struct process *process, int resource,
+resource_limit_set(
+	struct process *process,
+	int resource,
 	const struct rlimit_record *requested)
 {
 	struct rlimit_record old;
 	uint64_t cap;
 	unsigned long irq;
-	int privileged, error = 0;
-	if (process == NULL || requested == NULL || resource < 0 ||
-	    resource >= RLIMIT_NLIMITS || requested->current > requested->maximum)
+	int privileged;
+	int error;
+
+	error = 0;
+
+	/* Rejects a malformed request or an unknown resource. */
+	if (process == NULL ||
+	    requested == NULL ||
+	    resource < 0 ||
+	    resource >= RLIMIT_NLIMITS ||
+	    requested->current > requested->maximum)
 		return EINVAL;
+
+	/* Rejects a hard limit above the kernel's own cap. */
 	cap = resource_cap(resource);
 	if (requested->maximum > cap)
 		return EINVAL;
+
 	mutex_lock(&process->resource_lock);
+
+	/* Only the superuser may raise the hard limit or exceed it. */
 	irq = spin_lock_irqsave(&process->lock);
 	old = process->limits.values[resource];
-	privileged = process->cred != NULL &&
-	    cred_is_superuser(process->cred);
+	privileged = process->cred != NULL && cred_is_superuser(process->cred);
 	if (!privileged && requested->maximum > old.maximum)
 		error = EPERM;
 	else if (!privileged && requested->current > old.maximum)
 		error = EPERM;
 	spin_unlock_irqrestore(&process->lock, irq);
+
+	/* Pushes the new soft limit to the subsystem that enforces it. */
 	if (error == 0 && resource == RLIMIT_NOFILE)
-		error = filedesc_set_limit(process->fd,
-		    (unsigned)requested->current);
+		error = filedesc_set_limit(process->fd, (unsigned)requested->current);
 	if (error == 0 && resource == RLIMIT_AS && process->vmspace != NULL)
-		error = vmspace_set_address_limit(process->vmspace,
-		    requested->current);
+		error = vmspace_set_address_limit(process->vmspace, requested->current);
 	if (error == 0 && resource == RLIMIT_STACK && process->vmspace != NULL)
 		vmspace_set_stack_limit(process->vmspace, requested->current);
 	if (error == 0 && resource == RLIMIT_DATA && process->vmspace != NULL)
-		error = vmspace_set_data_limit(process->vmspace,
-		    requested->current);
+		error = vmspace_set_data_limit(process->vmspace, requested->current);
+
+	/* Records the accepted limit and re-arms the CPU limit signal. */
 	irq = spin_lock_irqsave(&process->lock);
 	if (error == 0) {
 		process->limits.values[resource] = *requested;
@@ -106,49 +151,92 @@ resource_limit_set(struct process *process, int resource,
 			process->cpu_limit_signal_second = 0;
 	}
 	spin_unlock_irqrestore(&process->lock, irq);
+
 	mutex_unlock(&process->resource_lock);
+
+	/* Reports the change result. */
 	return error;
 }
 
+/*
+ * Reads the soft limit of one resource, or zero when it cannot be read.
+ */
 uint64_t
-resource_limit_current(struct process *process, int resource)
+resource_limit_current(
+	struct process *process,
+	int resource)
 {
 	struct rlimit_record limit;
-	return resource_limit_get(process, resource, &limit) == 0 ?
-	    limit.current : 0;
+	int error;
+
+	/* Reads the limit. */
+	error = resource_limit_get(process, resource, &limit);
+	if (error != 0)
+		return 0;
+
+	/* Reports the soft limit. */
+	return limit.current;
 }
 
+/*
+ * Pushes the address space limits of a process to a new address space.
+ */
 int
-resource_limit_apply_vm(struct process *process, struct vmspace *vm)
+resource_limit_apply_vm(
+	struct process *process,
+	struct vmspace *vm)
 {
-	struct rlimit_record address, data, stack;
+	struct rlimit_record address;
+	struct rlimit_record data;
+	struct rlimit_record stack;
 	unsigned long irq;
 	int error;
+
+	/* Rejects a missing process or address space. */
 	if (process == NULL || vm == NULL)
 		return EINVAL;
+
+	/* Snapshots the three limits under the process lock. */
 	irq = spin_lock_irqsave(&process->lock);
 	address = process->limits.values[RLIMIT_AS];
 	data = process->limits.values[RLIMIT_DATA];
 	stack = process->limits.values[RLIMIT_STACK];
 	spin_unlock_irqrestore(&process->lock, irq);
+
+	/* Applies them in order, stopping at the first failure. */
 	error = vmspace_set_address_limit(vm, address.current);
 	if (error == 0)
 		vmspace_set_stack_limit(vm, stack.current);
 	if (error == 0)
 		error = vmspace_set_data_limit(vm, data.current);
+
+	/* Reports the application result. */
 	return error;
 }
 
+/*
+ * Enforces the CPU time limit after one more tick of a process.
+ *
+ * Exceeding the hard limit kills the process; exceeding the soft limit
+ * sends SIGXCPU once per second of further execution.
+ */
 void
-resource_limit_cpu_tick(struct process *process, uint64_t total_ticks)
+resource_limit_cpu_tick(
+	struct process *process,
+	uint64_t total_ticks)
 {
 	struct rlimit_record limit;
 	uint64_t elapsed_seconds;
 	unsigned long irq;
-	int signo = 0;
+	int signo;
 
+	signo = 0;
+
+	/* Never limits the kernel's own process. */
 	if (process == NULL || process == &process0)
 		return;
+
+	/* Decides under the process lock which signal, if any, is due. */
 	elapsed_seconds = total_ticks / KERN_CLOCK_HZ;
 	irq = spin_lock_irqsave(&process->lock);
 	limit = process->limits.values[RLIMIT_CPU];
@@ -164,6 +252,43 @@ resource_limit_cpu_tick(struct process *process, uint64_t total_ticks)
 		signo = SIGXCPU;
 	}
 	spin_unlock_irqrestore(&process->lock, irq);
+
+	/* Sends the signal outside the lock. */
 	if (signo != 0)
 		(void)signal_send_process(process, signo);
+}
+
+/* Reports the highest hard limit the kernel supports for a resource. */
+static uint64_t
+resource_cap(
+	int resource)
+{
+	uint64_t cap;
+
+	/* Selects the cap of the resource. */
+	switch (resource) {
+	case RLIMIT_NOFILE:
+		cap = KERN_OPEN_MAX;
+		break;
+	case RLIMIT_STACK:
+		cap = EXEC_STACK_HARD_MAX;
+		break;
+	case RLIMIT_AS:
+		cap = vmspace_address_cap();
+		break;
+	case RLIMIT_CORE:
+		cap = 0;
+		break;
+	case RLIMIT_CPU:
+	case RLIMIT_DATA:
+	case RLIMIT_FSIZE:
+		cap = RLIM_INFINITY;
+		break;
+	default:
+		cap = 0;
+		break;
+	}
+
+	/* Reports the cap. */
+	return cap;
 }

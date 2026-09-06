@@ -1,8 +1,21 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
  * Process virtual-memory ownership and demand paging.
+ *
+ * A vmspace owns a sorted list of regions, each backed by anonymous
+ * memory, a file, or a shared VM object.  Pages are materialized on
+ * demand by vmspace_fault(), which pins the region and marks the page
+ * BUSY so that unmap, protect, fork, and the reclaimer wait rather than
+ * race the HAL mapping.  Per-page metadata lives in slab pages so that
+ * the fault path never depends on the general kernel heap.
  */
 
 #include "kern/vmspace.h"
@@ -28,12 +41,12 @@
 #define VM_PAGE_MAP_RECLAIM_RETRIES 4U
 #define VM_PAGE_MAP_RESERVE_PAGES 4U
 
-extern void vmspace_unmap_retire_checkpoint(struct vmspace *, uintptr_t,
-	size_t) __attribute__((weak));
-extern void vmspace_pin_page_checkpoint(struct vmspace *, size_t, size_t)
-	__attribute__((weak));
-extern void vmspace_object_revoke_checkpoint(struct vmspace *, uintptr_t)
-	__attribute__((weak));
+extern void vmspace_unmap_retire_checkpoint(struct vmspace *vm, uintptr_t start,
+	size_t size) __attribute__((weak));
+extern void vmspace_pin_page_checkpoint(struct vmspace *vm, size_t index,
+	size_t page_count) __attribute__((weak));
+extern void vmspace_object_revoke_checkpoint(struct vmspace *vm,
+	uintptr_t address) __attribute__((weak));
 
 struct vm_page_slab {
 	struct hal_pmem memory;
@@ -77,25 +90,78 @@ struct vm_layout vm_layout;
 static int vm_layout_initialized;
 static atomic_uint_t vmspace_live;
 
+static int alloc_vm_page(struct hal_pmem *memory);
+static int alloc_vm_metadata_page(struct hal_pmem *memory);
+static struct vm_page * vm_page_slab_take_locked(void);
+static struct vm_private_page * vm_private_page_slab_take_locked(void);
+static struct vm_private_page * vm_private_page_alloc_metadata(void);
+static int range_valid(uintptr_t start, size_t size);
+static int overlaps(struct vmspace *vm, uintptr_t start, size_t size);
+static void insert_region(struct vmspace *vm, struct vm_region *region);
+static unsigned reclaim_page_map_reserve(struct vm_page *avoid);
+static struct vm_private_page * private_page_alloc(void);
+static void private_page_attach_new(struct vm_page *page, struct vm_private_page *backing);
+static int vmspace_fork_locked(struct vmspace *source, struct vmspace **result, struct vm_private_page **wait_backing, struct vmspace **failed_copy);
+static int map_region(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, enum vm_region_backing backing, struct file *file, off_t file_offset, uintptr_t data_start, size_t data_size, unsigned flags, size_t commit_size, struct vm_region **result);
+static int prepare_region(uintptr_t start, size_t size, uint32_t prot, enum vm_region_backing backing, struct file *file, off_t file_offset, uintptr_t data_start, size_t data_size, unsigned flags, size_t commit_size, struct vm_region **result);
+static void discard_prepared_region(struct vm_region *region);
+static int vmspace_map_anon_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct vm_region **result);
+static int vmspace_map_anon_fixed_noreplace_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct vm_region **result);
+static int vmspace_map_file_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct file *file, off_t file_offset, uintptr_t data_start, size_t data_size, struct vm_region **result);
 static int vmspace_map_file_shared_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct file *file, off_t file_offset, size_t data_size, struct vm_object *object, struct vm_region **result);
+static int vmspace_map_stack_locked(struct vmspace *vm, uintptr_t top, size_t size, size_t guard_size);
+static struct vm_region * find_region_locked(struct vmspace *vm, uintptr_t address, size_t size);
+static struct vm_page * find_page(struct vm_region *region, uintptr_t address);
+static void vmspace_wait_fault_event(struct vmspace *vm, uint64_t sequence);
+static void vmspace_wait_faults_locked(struct vmspace *vm);
+static int allocate_page_frame(struct vm_private_page *backing, struct vm_page *avoid);
+static int fill_file_page(struct vm_region *region, struct vm_page *page);
+static int prepare_cow_copy(struct vm_page *page, struct vm_private_page *old, struct vm_private_page **result);
+static void vmspace_fault_wake_locked(struct vmspace *vm);
+static int vmspace_check_locked(struct vmspace *vm, uintptr_t address, size_t size, uint32_t required);
+static int vmspace_pin_mapping_ready(struct vmspace *vm, uintptr_t address, uint32_t required);
+static void vmspace_unwire_range_locked(struct vmspace *vm, uintptr_t address, size_t size);
+static int copy_backing(struct vmspace *vm, uintptr_t user_address, void *kernel, size_t size, uint32_t required, int to_user);
+static int vmspace_copy_to_locked(struct vmspace *vm, uintptr_t destination, const void *source, size_t size);
+static int vmspace_copy_from_locked(struct vmspace *vm, void *destination, uintptr_t source, size_t size);
+static int vmspace_find_free_range_bounded_locked(struct vmspace *vm, uintptr_t minimum, uintptr_t maximum, size_t size, size_t alignment, uintptr_t *mapped);
+static int vmspace_find_free_range_locked(struct vmspace *vm, uintptr_t hint, size_t size, size_t alignment, uintptr_t *mapped);
+static int vmspace_map_find_locked(struct vmspace *vm, uintptr_t hint, size_t size, uint32_t prot, uintptr_t *mapped);
+static int vmspace_map_file_find_locked(struct vmspace *vm, uintptr_t hint, size_t size, uint32_t prot, struct file *file, off_t offset, size_t data_size, uintptr_t *mapped);
 static int vmspace_map_file_shared_find_locked(struct vmspace *vm, uintptr_t hint, size_t size, uint32_t prot, struct file *file, off_t offset, size_t data_size, struct vm_object *object, uintptr_t *mapped);
+static void free_vm_page(struct vmspace *vm, struct vm_page *page);
+static void free_region_pages(struct vmspace *vm, struct vm_region *region);
+static void detach_vm_page_for_unmap(struct vmspace *vm, struct vm_page *page);
+static void detach_region_pages_for_unmap(struct vmspace *vm, struct vm_region *region);
+static void release_detached_region_pages(struct vm_region *region);
+static int split_region_prepared(struct vm_region *region, uintptr_t address, struct vm_region *right);
+static int split_region(struct vm_region *region, uintptr_t address);
+static void release_retired_regions(struct vm_region *retired);
+static int vmspace_replace_prepared(struct vmspace *vm, struct vm_region *prepared, struct vm_region **result);
+static int vmspace_set_brk_start_locked(struct vmspace *vm, uintptr_t start, uint64_t static_data_bytes);
+static int vmspace_brk_locked(struct vmspace *vm, uintptr_t requested, uintptr_t *result);
+static int vmspace_unmap_locked(struct vmspace *vm, uintptr_t start, size_t size, struct vm_region **retired);
+static int vmspace_protect_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot);
+static void vmspace_destroy(struct vmspace *vm);
+static int vmspace_set_address_limit_locked(struct vmspace *vm, uint64_t limit);
+static void vmspace_set_stack_limit_locked(struct vmspace *vm, uint64_t limit);
+static int vmspace_set_data_limit_locked(struct vmspace *vm, uint64_t limit);
+static void vmspace_generation_advance_locked(struct vmspace *vm);
 
-static int
-alloc_vm_page(struct hal_pmem *memory)
-{
-	const struct hal_pmem_request request = {
-		HAL_PMEM_PADDR_ANY, PAGE_SIZE, PAGE_SIZE,
-		HAL_PMEM_TYPE_RAM, 0
-	};
-	return hal_pmem_alloc(&request, memory);
-}
-
+/*
+ * Initializes the user address layout and the metadata allocators once.
+ */
 void
-vmspace_layout_init(void)
+vmspace_layout_init(
+	void)
 {
-	uintptr_t minimum, limit;
+	uintptr_t minimum;
+	uintptr_t limit;
+
 	if (vm_layout_initialized)
 		return;
+
+	/* Initializes the slab and reaper locks. */
 	spin_init(&vm_page_slab_lock, LOCK_RANK_VM_OBJECT,
 	    "VM page metadata");
 	spin_init(&vm_private_page_slab_lock, LOCK_RANK_VM_OBJECT,
@@ -104,13 +170,18 @@ vmspace_layout_init(void)
 	    "VM space reaper");
 	vm_page_slabs = NULL;
 	vm_private_page_slabs = NULL;
-	vmspace_reap_head = vmspace_reap_tail = NULL;
+	vmspace_reap_head = NULL;
+	vmspace_reap_tail = NULL;
 	vmspace_reap_notify = NULL;
 	vmspace_reap_notify_argument = NULL;
 	vm_metadata_init();
+
+	/* Takes the user range from the HAL and derives the fixed layout. */
 	hal_page_get_user_range(&minimum, &limit);
-	if (minimum < PAGE_SIZE || (minimum & (PAGE_SIZE - 1U)) != 0 ||
-	    limit <= minimum || (limit & (PAGE_SIZE - 1U)) != 0)
+	if (minimum < PAGE_SIZE ||
+	    (minimum & (PAGE_SIZE - 1U)) != 0 ||
+	    limit <= minimum ||
+	    (limit & (PAGE_SIZE - 1U)) != 0)
 		HAL_FATAL("invalid HAL user address range");
 	vm_layout.user_minimum = minimum;
 	vm_layout.user_limit = limit;
@@ -121,7 +192,8 @@ vmspace_layout_init(void)
 	vm_layout.brk_limit = 0x10000000U;
 	vm_layout.mmap_base = 0x10000000U;
 #endif
-	if (vm_layout.brk_limit >= limit || vm_layout.mmap_base >= limit ||
+	if (vm_layout.brk_limit >= limit ||
+	    vm_layout.mmap_base >= limit ||
 	    limit - minimum <= PAGE_SIZE)
 		HAL_FATAL("user address range too small");
 	vm_layout.stack_top = limit - PAGE_SIZE;
@@ -129,53 +201,12 @@ vmspace_layout_init(void)
 }
 
 /*
- * A fault normally reaches allocate_page_frame(), which can reclaim a user
- * page before retrying physical allocation.  A metadata slab refill happens
- * first, however, so it needs the same bounded retry or memory pressure can
- * fail a fault before reclaim is attempted at all.
- *
- * Never enter reclaim recursively while the caller owns the cross-VM
- * metadata lock.  This also covers vmspace_fork(), whose metadata allocation
- * intentionally remains a nonblocking ENOMEM path while its source VM is
- * locked.  vm_reclaim_one() itself does not allocate mapping metadata, so one
- * unlocked retry is sufficient and cannot recurse through this helper.
+ * Allocates a zeroed page-metadata record from the slab pool, growing
+ * the pool by one physical page when it is empty.
  */
-static int
-alloc_vm_metadata_page(struct hal_pmem *memory)
-{
-	int error = alloc_vm_page(memory);
-
-	if (error == HAL_OK)
-		return HAL_OK;
-	if (vm_metadata_owned() || vm_reclaim_one(NULL) != 0)
-		return error;
-	return alloc_vm_page(memory);
-}
-
-static struct vm_page *
-vm_page_slab_take_locked(void)
-{
-	struct vm_page_slab *slab;
-	unsigned slot;
-
-	for (slab = vm_page_slabs; slab != NULL; slab = slab->next) {
-		if (slab->free_mask == 0)
-			continue;
-		for (slot = 0; slot < VM_PAGE_SLAB_SLOTS; slot++)
-			if ((slab->free_mask & (1U << slot)) != 0)
-				break;
-		if (slot == VM_PAGE_SLAB_SLOTS)
-			HAL_FATAL("invalid VM page slab bitmap");
-		slab->free_mask &= ~(1U << slot);
-		slab->used++;
-		memset(&slab->slots[slot], 0, sizeof(slab->slots[slot]));
-		return &slab->slots[slot];
-	}
-	return NULL;
-}
-
 struct vm_page *
-vm_page_alloc_metadata(void)
+vm_page_alloc_metadata(
+	void)
 {
 	struct hal_pmem memory;
 	struct vm_page_slab *fresh;
@@ -183,18 +214,23 @@ vm_page_alloc_metadata(void)
 	unsigned long irq;
 
 	vmspace_layout_init();
+
+	/* Takes a free slot from an existing slab. */
 	irq = spin_lock_irqsave(&vm_page_slab_lock);
 	page = vm_page_slab_take_locked();
 	spin_unlock_irqrestore(&vm_page_slab_lock, irq);
 	if (page != NULL)
 		return page;
+
+	/* Reclaim or a concurrent free may have returned a slab slot. */
 	if (alloc_vm_metadata_page(&memory) != HAL_OK) {
-		/* Reclaim or a concurrent free may have returned a slab slot. */
 		irq = spin_lock_irqsave(&vm_page_slab_lock);
 		page = vm_page_slab_take_locked();
 		spin_unlock_irqrestore(&vm_page_slab_lock, irq);
 		return page;
 	}
+
+	/* Publishes the new slab unless another one appeared meanwhile. */
 	fresh = memory.vaddr;
 	memset(fresh, 0, PAGE_SIZE);
 	fresh->memory = memory;
@@ -213,30 +249,44 @@ vm_page_alloc_metadata(void)
 	return page;
 }
 
+/*
+ * Returns a page-metadata record to its slab, freeing an emptied slab.
+ */
 void
-vm_page_free_metadata(struct vm_page *page)
+vm_page_free_metadata(
+	struct vm_page *page)
 {
-	struct vm_page_slab **link, *slab;
+	struct vm_page_slab **link;
+	struct vm_page_slab *slab;
 	struct hal_pmem released;
 	uintptr_t address;
 	unsigned long irq;
-	int release = 0;
+	int release;
+	uintptr_t first;
+	uintptr_t end;
+	unsigned slot;
+
+	release = 0;
 
 	if (page == NULL)
 		return;
 	address = (uintptr_t)page;
+
+	/* Finds the slab that contains the record. */
 	irq = spin_lock_irqsave(&vm_page_slab_lock);
-	for (link = &vm_page_slabs; (slab = *link) != NULL;
-	     link = &slab->next) {
-		uintptr_t first = (uintptr_t)&slab->slots[0];
-		uintptr_t end = (uintptr_t)&slab->slots[VM_PAGE_SLAB_SLOTS];
-		unsigned slot;
-		if (address < first || address >= end ||
+	for (link = &vm_page_slabs; *link != NULL; link = &slab->next) {
+		slab = *link;
+		first = (uintptr_t)&slab->slots[0];
+		end = (uintptr_t)&slab->slots[VM_PAGE_SLAB_SLOTS];
+		if (address < first ||
+		    address >= end ||
 		    (address - first) % sizeof(struct vm_page) != 0)
 			continue;
 		slot = (unsigned)((address - first) / sizeof(struct vm_page));
 		if ((slab->free_mask & (1U << slot)) != 0 || slab->used == 0)
 			HAL_FATAL("invalid VM page metadata free");
+
+		/* Clears the slot and unlinks a slab left empty. */
 		memset(page, 0, sizeof(*page));
 		slab->free_mask |= 1U << slot;
 		slab->used--;
@@ -254,94 +304,45 @@ vm_page_free_metadata(struct vm_page *page)
 	HAL_FATAL("foreign VM page metadata free");
 }
 
-static struct vm_private_page *
-vm_private_page_slab_take_locked(void)
-{
-	struct vm_private_page_slab *slab;
-	unsigned slot;
-
-	for (slab = vm_private_page_slabs; slab != NULL; slab = slab->next) {
-		if (slab->free_mask == 0)
-			continue;
-		for (slot = 0; slot < VM_PRIVATE_PAGE_SLAB_SLOTS; slot++)
-			if ((slab->free_mask & (1U << slot)) != 0)
-				break;
-		if (slot == VM_PRIVATE_PAGE_SLAB_SLOTS)
-			HAL_FATAL("invalid VM private metadata slab bitmap");
-		slab->free_mask &= ~(1U << slot);
-		slab->used++;
-		memset(&slab->slots[slot], 0, sizeof(slab->slots[slot]));
-		return &slab->slots[slot];
-	}
-	return NULL;
-}
-
-static struct vm_private_page *
-vm_private_page_alloc_metadata(void)
-{
-	struct hal_pmem memory;
-	struct vm_private_page_slab *fresh;
-	struct vm_private_page *backing;
-	unsigned long irq;
-
-	vmspace_layout_init();
-	irq = spin_lock_irqsave(&vm_private_page_slab_lock);
-	backing = vm_private_page_slab_take_locked();
-	spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
-	if (backing != NULL)
-		return backing;
-	if (alloc_vm_metadata_page(&memory) != HAL_OK) {
-		/* Reclaim or a concurrent free may have returned a slab slot. */
-		irq = spin_lock_irqsave(&vm_private_page_slab_lock);
-		backing = vm_private_page_slab_take_locked();
-		spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
-		return backing;
-	}
-	fresh = memory.vaddr;
-	memset(fresh, 0, PAGE_SIZE);
-	fresh->memory = memory;
-	fresh->free_mask = VM_PRIVATE_PAGE_SLAB_FREE_MASK;
-	irq = spin_lock_irqsave(&vm_private_page_slab_lock);
-	backing = vm_private_page_slab_take_locked();
-	if (backing == NULL) {
-		fresh->next = vm_private_page_slabs;
-		vm_private_page_slabs = fresh;
-		backing = vm_private_page_slab_take_locked();
-		fresh = NULL;
-	}
-	spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
-	if (fresh != NULL && hal_pmem_free(&memory) != HAL_OK)
-		HAL_FATAL("unused VM private metadata slab free failed");
-	return backing;
-}
-
+/*
+ * Returns a private-backing record to its slab, freeing an emptied slab.
+ */
 void
-vm_private_page_free_metadata(struct vm_private_page *backing)
+vm_private_page_free_metadata(
+	struct vm_private_page *backing)
 {
-	struct vm_private_page_slab **link, *slab;
+	struct vm_private_page_slab **link;
+	struct vm_private_page_slab *slab;
 	struct hal_pmem released;
 	uintptr_t address;
 	unsigned long irq;
-	int release = 0;
+	int release;
+	uintptr_t first;
+	uintptr_t end;
+	unsigned slot;
+
+	release = 0;
 
 	if (backing == NULL)
 		return;
 	address = (uintptr_t)backing;
-	irq = spin_lock_irqsave(&vm_private_page_slab_lock);
-	for (link = &vm_private_page_slabs; (slab = *link) != NULL;
-	     link = &slab->next) {
-		uintptr_t first = (uintptr_t)&slab->slots[0];
-		uintptr_t end =
-		    (uintptr_t)&slab->slots[VM_PRIVATE_PAGE_SLAB_SLOTS];
-		unsigned slot;
 
-		if (address < first || address >= end ||
+	/* Finds the slab that contains the record. */
+	irq = spin_lock_irqsave(&vm_private_page_slab_lock);
+	for (link = &vm_private_page_slabs; *link != NULL; link = &slab->next) {
+		slab = *link;
+		first = (uintptr_t)&slab->slots[0];
+		end = (uintptr_t)&slab->slots[VM_PRIVATE_PAGE_SLAB_SLOTS];
+		if (address < first ||
+		    address >= end ||
 		    (address - first) % sizeof(struct vm_private_page) != 0)
 			continue;
 		slot = (unsigned)((address - first) /
 		    sizeof(struct vm_private_page));
 		if ((slab->free_mask & (1U << slot)) != 0 || slab->used == 0)
 			HAL_FATAL("invalid VM private metadata free");
+
+		/* Clears the slot and unlinks a slab left empty. */
 		memset(backing, 0, sizeof(*backing));
 		slab->free_mask |= 1U << slot;
 		slab->used--;
@@ -359,102 +360,66 @@ vm_private_page_free_metadata(struct vm_private_page *backing)
 	HAL_FATAL("foreign VM private metadata free");
 }
 
-static int
-range_valid(uintptr_t start, size_t size)
-{
-	vmspace_layout_init();
-	return size != 0 && (start & (PAGE_SIZE - 1U)) == 0 &&
-		(size & (PAGE_SIZE - 1U)) == 0 &&
-		start >= vm_layout.user_minimum && start < vm_layout.user_limit &&
-		size <= vm_layout.user_limit - start;
-}
-
-int vmspace_user_range_valid(uintptr_t start, size_t size)
-{
-	vmspace_layout_init();
-	return size != 0 && start >= vm_layout.user_minimum &&
-	    start < vm_layout.user_limit && size <= vm_layout.user_limit - start;
-}
-
-static int
-overlaps(struct vmspace *vm, uintptr_t start, size_t size)
-{
-	struct vm_region *region;
-	uintptr_t end = start + size;
-
-	for (region = vm->regions; region != NULL; region = region->next)
-		if (start < region->start + region->size && region->start < end)
-			return 1;
-	return 0;
-}
-
-static void
-insert_region(struct vmspace *vm, struct vm_region *region)
-{
-	struct vm_region **link = &vm->regions;
-	while (*link != NULL && (*link)->start < region->start)
-		link = &(*link)->next;
-	region->next = *link;
-	*link = region;
-}
-
-static int map_region(struct vmspace *, uintptr_t, size_t, uint32_t,
-		      enum vm_region_backing, struct file *, off_t, uintptr_t,
-		      size_t, unsigned, size_t, struct vm_region **);
-static int prepare_region(uintptr_t, size_t, uint32_t,
-		      enum vm_region_backing, struct file *, off_t, uintptr_t,
-		      size_t, unsigned, size_t, struct vm_region **);
-static int allocate_page_frame(struct vm_private_page *, struct vm_page *);
-static struct vm_page *find_page(struct vm_region *, uintptr_t);
-static void vmspace_generation_advance_locked(struct vmspace *);
-static void vmspace_wait_faults_locked(struct vmspace *);
-static void vmspace_fault_wake_locked(struct vmspace *);
-
 /*
- * A page-table miss can require more than the one page returned by a normal
- * frame-allocation retry.  In particular, once the fixed kernel heap is full,
- * the i386 HAL needs one page-backed descriptor and one PTE page at a new PDE
- * boundary.  Reclaim a small bounded reserve while the fault's own mapping is
- * BUSY, then retry the complete fault transaction.
- */
-static unsigned
-reclaim_page_map_reserve(struct vm_page *avoid)
-{
-	unsigned reclaimed;
-
-	for (reclaimed = 0; reclaimed < VM_PAGE_MAP_RESERVE_PAGES; reclaimed++)
-		if (vm_reclaim_private_one(avoid) != 0)
-			break;
-	return reclaimed;
-}
-
-/*
- * A shared-file content writer first makes its object page BUSY.  Existing
- * fault holds drain before this routine is called, so no new reverse mapping
- * can appear until the writer publishes the new cache bytes.  Each mapping is
- * then pinned in metadata, revoked with no VM/object lock held, and finally
- * detached.  hal_page_prot_query() returns A/D state only after the remote TLB
- * acknowledgement, closing the late-store window between a dirty snapshot and
- * unmap.  A write-only mapping cannot be represented read-only by the current
- * HAL contract; conservatively treating it as dirty is safe.
+ * Tests whether a byte range lies entirely inside the user address range.
  */
 int
-vmspace_object_page_revoke(struct vm_object_page *object_page,
+vmspace_user_range_valid(
+	uintptr_t start,
+	size_t size)
+{
+	vmspace_layout_init();
+	if (size == 0)
+		return 0;
+	if (start < vm_layout.user_minimum)
+		return 0;
+	if (start >= vm_layout.user_limit)
+		return 0;
+	if (size > vm_layout.user_limit - start)
+		return 0;
+	return 1;
+}
+
+/*
+ * Revokes every process mapping of a BUSY shared object page and reports
+ * the accessed and dirty state observed while doing so.
+ *
+ * A shared-file content writer first makes its object page BUSY.
+ * Existing fault holds drain before this routine is called, so no new
+ * reverse mapping can appear until the writer publishes the new cache
+ * bytes.  Each mapping is then pinned in metadata, revoked with no
+ * VM/object lock held, and finally detached.  hal_page_prot_query()
+ * returns A/D state only after the remote TLB acknowledgement, closing
+ * the late-store window between a dirty snapshot and unmap.  A
+ * write-only mapping cannot be represented read-only by the current HAL
+ * contract; conservatively treating it as dirty is safe.
+ */
+int
+vmspace_object_page_revoke(
+	struct vm_object_page *object_page,
 	uint32_t *observed_flags)
 {
 	struct vm_object *object;
-	uint32_t observed = 0;
+	uint32_t observed;
+	struct vm_page *mapping;
+	struct vm_region *region;
+	struct vmspace *vm;
+	uint32_t readonly;
+	unsigned long irq;
+	int error;
+	int was_mapped;
+	struct vm_page **link;
+	uint32_t flags;
 
-	if (object_page == NULL || (object = object_page->owner) == NULL)
+	observed = 0;
+
+	if (object_page == NULL)
+		return EINVAL;
+	object = object_page->owner;
+	if (object == NULL)
 		return EINVAL;
 	for (;;) {
-		struct vm_page *mapping;
-		struct vm_region *region;
-		struct vmspace *vm;
-		uint32_t readonly;
-		unsigned long irq;
-		int error, was_mapped;
-
+		/* Takes the next mapping while the page is still BUSY. */
 		vm_metadata_enter();
 		irq = spin_lock_irqsave(&object->lock);
 		if ((object_page->flags & VM_OBJECT_PAGE_BUSY) == 0) {
@@ -474,9 +439,11 @@ vmspace_object_page_revoke(struct vm_object_page *object_page,
 			HAL_FATAL("invalid shared VM reverse mapping");
 		spin_unlock_irqrestore(&object->lock, irq);
 
+		/* Pins the mapping in metadata. */
 		mutex_lock(&vm->lock);
 		irq = spin_lock_irqsave(&object->lock);
-		if (mapping->object_page != object_page || mapping->vm != vm ||
+		if (mapping->object_page != object_page ||
+		    mapping->vm != vm ||
 		    mapping->region != region ||
 		    (mapping->flags & VM_MAPPING_BUSY) != 0)
 			HAL_FATAL("shared VM reverse mapping changed while pinned");
@@ -490,9 +457,9 @@ vmspace_object_page_revoke(struct vm_object_page *object_page,
 		if (vmspace_object_revoke_checkpoint != NULL)
 			vmspace_object_revoke_checkpoint(vm, mapping->address);
 
+		/* Revokes the hardware mapping with no lock held. */
 		if (was_mapped) {
-			uint32_t flags = 0;
-
+			flags = 0;
 			if (readonly != 0) {
 				error = hal_page_prot_query(vm->space,
 				    (void *)mapping->address, PAGE_SIZE, readonly,
@@ -509,22 +476,19 @@ vmspace_object_page_revoke(struct vm_object_page *object_page,
 			observed |= flags;
 		}
 
+		/* Detaches the mapping from the region and the object page. */
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
 		irq = spin_lock_irqsave(&object->lock);
 		if (mapping->object_page != object_page ||
 		    (mapping->flags & VM_MAPPING_BUSY) == 0)
 			HAL_FATAL("shared VM revoke reservation lost");
-		{
-			struct vm_page **link;
-
-			for (link = &region->pages; *link != NULL && *link != mapping;
-			     link = &(*link)->next)
-				;
-			if (*link != mapping)
-				HAL_FATAL("shared VM mapping left region");
-			*link = mapping->next;
-		}
+		link = &region->pages;
+		while (*link != NULL && *link != mapping)
+			link = &(*link)->next;
+		if (*link != mapping)
+			HAL_FATAL("shared VM mapping left region");
+		*link = mapping->next;
 		mapping->flags &= ~(VM_MAPPING_MAPPED | VM_MAPPING_BUSY);
 		vm_object_mapping_remove_locked(object_page, mapping);
 		mapping->object_page = NULL;
@@ -545,48 +509,38 @@ vmspace_object_page_revoke(struct vm_object_page *object_page,
 	return 0;
 }
 
-static struct vm_private_page *
-private_page_alloc(void)
-{
-	struct vm_private_page *backing = vm_private_page_alloc_metadata();
-	if (backing == NULL)
-		return NULL;
-	vm_private_page_init(backing);
-	return backing;
-}
-
-static void
-private_page_attach_new(struct vm_page *page,
-	struct vm_private_page *backing)
-{
-	unsigned long irq = spin_lock_irqsave(&backing->state_lock);
-
-	if (backing->mapping_count != 0 || backing->mappings != NULL)
-		HAL_FATAL("attaching initialized VM private backing twice");
-	backing->mapping_count = 1;
-	page->private_page = backing;
-	page->private_next = backing->mappings;
-	backing->mappings = page;
-	spin_unlock_irqrestore(&backing->state_lock, irq);
-}
-
+/*
+ * Reports the protection a page is mapped with, which excludes write for
+ * a copy-on-write page.
+ */
 uint32_t
-vm_page_effective_prot(const struct vm_page *page)
+vm_page_effective_prot(
+	const struct vm_page *page)
 {
-	uint32_t prot = page->region->prot;
+	uint32_t prot;
+
+	prot = page->region->prot;
 	if ((page->flags & VM_MAPPING_COW) != 0)
 		prot &= ~HAL_SPACE_WRITE;
 	return prot;
 }
 
+/*
+ * Tests whether a page's private backing currently holds a physical
+ * frame.
+ */
 int
-vm_private_page_is_resident(const struct vm_page *page)
+vm_private_page_is_resident(
+	const struct vm_page *page)
 {
 	struct vm_private_page *backing;
 	unsigned long irq;
 	int resident;
 
-	if (page == NULL || (backing = page->private_page) == NULL)
+	if (page == NULL)
+		return 0;
+	backing = page->private_page;
+	if (backing == NULL)
 		return 0;
 	irq = spin_lock_irqsave(&backing->state_lock);
 	resident = (backing->flags & VM_PAGE_RESIDENT) != 0;
@@ -594,28 +548,43 @@ vm_private_page_is_resident(const struct vm_page *page)
 	return resident;
 }
 
+/*
+ * Reports the kernel virtual address of a resident private page, or
+ * zero.
+ */
 uintptr_t
-vm_private_page_vaddr(const struct vm_page *page)
+vm_private_page_vaddr(
+	const struct vm_page *page)
 {
 	struct vm_private_page *backing;
 	unsigned long irq;
 	uintptr_t address;
 
-	if (page == NULL || (backing = page->private_page) == NULL)
+	if (page == NULL)
+		return 0;
+	backing = page->private_page;
+	if (backing == NULL)
 		return 0;
 	irq = spin_lock_irqsave(&backing->state_lock);
-	address = (backing->flags & VM_PAGE_RESIDENT) != 0 ?
-	    (uintptr_t)backing->pmem.vaddr : 0;
+	if ((backing->flags & VM_PAGE_RESIDENT) != 0)
+		address = (uintptr_t)backing->pmem.vaddr;
+	else
+		address = 0;
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 	return address;
 }
 
+/*
+ * Creates an empty vmspace with a fresh HAL address space.
+ */
 struct vmspace *
-vmspace_create(void)
+vmspace_create(
+	void)
 {
-	struct vmspace *vm = kern_calloc(1, sizeof(*vm));
-	vmspace_layout_init();
+	struct vmspace *vm;
 
+	vm = kern_calloc(1, sizeof(*vm));
+	vmspace_layout_init();
 	if (vm == NULL)
 		return NULL;
 	vm->space = hal_mem_create_space();
@@ -623,6 +592,8 @@ vmspace_create(void)
 		kern_free(vm);
 		return NULL;
 	}
+
+	/* Starts with one reference and the maximum limits. */
 	refcount_init(&vm->refs, 1);
 	(void)mutex_init(&vm->lock, LOCK_RANK_VMSPACE, "VM space");
 	waitq_init(&vm->fault_waitq, "VM fault");
@@ -634,610 +605,99 @@ vmspace_create(void)
 	return vm;
 }
 
+/*
+ * Takes a reference on a vmspace unless it is already being destroyed.
+ */
 int
-vmspace_tryref(struct vmspace *vm)
+vmspace_tryref(
+	struct vmspace *vm)
 {
-	return vm != NULL && refcount_tryget(&vm->refs);
+	int acquired;
+
+	if (vm == NULL)
+		return 0;
+	acquired = refcount_tryget(&vm->refs);
+	return acquired;
 }
 
+/*
+ * Takes a reference on a vmspace.
+ */
 void
-vmspace_ref(struct vmspace *vm)
+vmspace_ref(
+	struct vmspace *vm)
 {
 	if (vm != NULL)
 		refcount_get(&vm->refs);
 }
 
-static int
-vmspace_fork_locked(struct vmspace *source, struct vmspace **result,
-	struct vm_private_page **wait_backing, struct vmspace **failed_copy)
-{
-	struct vmspace *copy;
-	struct vm_region *source_region;
-	int error = 0;
-
-	if (source == NULL || source == &kernel_vmspace || result == NULL ||
-	    wait_backing == NULL || failed_copy == NULL)
-		return EINVAL;
-	*wait_backing = NULL;
-	*failed_copy = NULL;
-	vmspace_wait_faults_locked(source);
-	copy = vmspace_create();
-	if (copy == NULL)
-		return ENOMEM;
-	copy->address_limit = source->address_limit;
-	copy->data_limit = source->data_limit;
-	copy->stack_limit = source->stack_limit;
-	for (source_region = source->regions; source_region != NULL;
-	     source_region = source_region->next) {
-		struct vm_region *copy_region;
-		struct vm_page *source_page;
-
-		error = map_region(copy, source_region->start, source_region->size,
-		    source_region->prot, source_region->backing,
-		    source_region->file, source_region->file_offset,
-		    source_region->data_start, source_region->data_size,
-		    source_region->flags, source_region->commit_size,
-		    &copy_region);
-		if (error != 0)
-			goto fail;
-		copy_region->max_prot = source_region->max_prot;
-		if (source_region->object != NULL) {
-			vm_object_ref(source_region->object);
-			copy_region->object = source_region->object;
-			/* Shared object pages are mapped lazily in the child. */
-			continue;
-		}
-		for (source_page = source_region->pages; source_page != NULL;
-		     source_page = source_page->next) {
-			struct vm_private_page *backing;
-			struct vm_page *copy_page;
-			hal_physaddr_t physical = 0;
-			uintptr_t page_address;
-			uint64_t reservation_generation;
-			uint32_t cow_prot;
-			unsigned long state_irq;
-			int resident;
-			int child_mapped = 0;
-			int source_mapped;
-
-			copy_page = vm_page_alloc_metadata();
-			if (copy_page == NULL) {
-				error = ENOMEM;
-				goto fail;
-			}
-			copy_page->vm = copy;
-			copy_page->region = copy_region;
-			copy_page->address = source_page->address;
-			if (source_page->object_page != NULL) {
-				/* MAP_SHARED pages remain lazy in the child. */
-				vm_page_free_metadata(copy_page);
-				continue;
-			}
-			if (source_page->private_page == NULL) {
-				vm_page_free_metadata(copy_page);
-				error = EFAULT;
-				goto fail;
-			}
-			/*
-			 * Pin the source metadata before the backing share.  The backing
-			 * operation excludes reclaim/pins, while the local BUSY marker
-			 * makes unmap/protect/fault wait when the VM locks are dropped for
-			 * the source PTE shootdown.
-			 */
-			if (source_region->hold_count == (unsigned)-1)
-				HAL_FATAL("VM fork region hold overflow");
-			source_region->hold_count++;
-			source_page->flags |= VM_MAPPING_BUSY;
-			backing = source_page->private_page;
-			page_address = source_page->address;
-			cow_prot = source_region->prot & ~HAL_SPACE_WRITE;
-			source_mapped =
-			    (source_page->flags & VM_MAPPING_MAPPED) != 0;
-			reservation_generation = source->generation;
-			/* Read-only private mappings also need COW for later mprotect. */
-			error = vm_page_share_private(source_page, copy_page);
-			if (error != 0) {
-				if (error == EBUSY) {
-					*wait_backing = backing;
-					vm_private_page_ref(*wait_backing);
-				}
-				source_page->flags &= ~VM_MAPPING_BUSY;
-				if (source_region->hold_count == 0)
-					HAL_FATAL("VM fork region hold underflow");
-				source_region->hold_count--;
-				vmspace_fault_wake_locked(source);
-				vm_page_free_metadata(copy_page);
-				goto fail;
-			}
-			copy_page->next = copy_region->pages;
-			copy_region->pages = copy_page;
-			state_irq = spin_lock_irqsave(&backing->state_lock);
-			resident = (backing->flags & VM_PAGE_RESIDENT) != 0;
-			if (resident)
-				physical = backing->pmem.paddr;
-			spin_unlock_irqrestore(&backing->state_lock, state_irq);
-
-			mutex_unlock(&source->lock);
-			vm_metadata_leave();
-			if (resident && source_mapped && hal_page_prot(source->space,
-			    (void *)page_address, PAGE_SIZE, cow_prot) != HAL_OK)
-				error = ENOMEM;
-			if (error == 0 && resident && source_mapped &&
-			    hal_page_map(copy->space, (void *)page_address, physical,
-			    PAGE_SIZE, cow_prot) != HAL_OK)
-				error = ENOMEM;
-			else if (error == 0 && resident && source_mapped)
-				child_mapped = 1;
-			vm_metadata_enter();
-			mutex_lock(&source->lock);
-
-			if (source_page->region != source_region ||
-			    source_page->address != page_address ||
-			    source_page->private_page != backing ||
-			    find_page(source_region, page_address) != source_page)
-				HAL_FATAL("VM fork lost pinned source mapping");
-			if (child_mapped)
-				copy_page->flags |= VM_MAPPING_MAPPED;
-			if (error == 0 && source->generation != reservation_generation)
-				error = EAGAIN;
-			source_page->flags &= ~VM_MAPPING_BUSY;
-			if (source_region->hold_count == 0)
-				HAL_FATAL("VM fork region hold underflow");
-			source_region->hold_count--;
-			vm_private_page_operation_end(backing);
-			vmspace_fault_wake_locked(source);
-			if (error != 0)
-				goto fail;
-			vmspace_generation_advance_locked(source);
-		}
-	}
-	copy->entry = source->entry;
-	copy->brk_start = source->brk_start;
-	copy->brk_current = source->brk_current;
-	copy->static_data_bytes = source->static_data_bytes;
-	copy->stack_guard_bottom = source->stack_guard_bottom;
-	copy->stack_bottom = source->stack_bottom;
-	copy->stack_top = source->stack_top;
-	*result = copy;
-	return 0;
-
-fail:
-	/* Child teardown may free pages or sync objects, so retire it locklessly. */
-	*failed_copy = copy;
-	return error;
-}
-
-static int
-map_region(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot,
-	   enum vm_region_backing backing, struct file *file,
-	   off_t file_offset, uintptr_t data_start, size_t data_size,
-	   unsigned flags, size_t commit_size, struct vm_region **result)
-{
-	struct vm_region *region;
-	uint32_t max_prot = HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC;
-	int error;
-
-	if (vm == NULL || vm == &kernel_vmspace || !range_valid(start, size) ||
-	    overlaps(vm, start, size) ||
-	    (prot & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) != 0)
-		return EINVAL;
-	if ((uint64_t)size > vm->address_limit -
-	    (vm->mapped_virtual_bytes > vm->address_limit ?
-	    vm->address_limit : vm->mapped_virtual_bytes))
-		return ENOMEM;
-	if (backing == VM_BACKING_FILE &&
-	    (file == NULL || file_offset < 0 || data_start < start ||
-	     data_start >= start + size || data_size > start + size - data_start))
-		return EINVAL;
-	if ((flags & VM_REGION_SHARED) != 0 && file != NULL &&
-	    ((file_status_flags_get(file) & O_ACCMODE) == O_RDONLY ||
-	     file->f_ops == NULL || file->f_ops->pwrite == NULL))
-		max_prot &= ~HAL_SPACE_WRITE;
-	if ((prot & ~max_prot) != 0)
-		return EACCES;
-	region = kern_calloc(1, sizeof(*region));
-	if (region == NULL)
-		return ENOMEM;
-	if (commit_size != 0) {
-		error = vm_commit_reserve(commit_size);
-		if (error != 0) {
-			kern_free(region);
-			return error;
-		}
-	}
-	region->start = start;
-	region->size = size;
-	region->prot = prot;
-	region->max_prot = max_prot;
-	region->flags = flags;
-	region->commit_size = commit_size;
-	region->backing = backing;
-	region->file = file;
-	region->file_offset = file_offset;
-	region->data_start = data_start;
-	region->data_size = data_size;
-	if (file != NULL)
-		file_ref(file);
-	insert_region(vm, region);
-	vm->mapped_virtual_bytes += size;
-	if (result != NULL)
-		*result = region;
-	return 0;
-}
-
 /*
- * Build a region which is not yet visible in a vmspace.  MAP_FIXED uses this
- * to reserve every fallible resource before it detaches an old mapping.
+ * Resolves a page fault by mapping the page an address belongs to.
+ *
+ * An existing private page is brought back from swap or copied for a
+ * write to a copy-on-write mapping.  A missing page is filled from the
+ * region's file, its shared object, or zeros.  Map-table pressure is
+ * handled by reclaiming a small reserve and retrying the transaction.
  */
-static int
-prepare_region(uintptr_t start, size_t size, uint32_t prot,
-	enum vm_region_backing backing, struct file *file, off_t file_offset,
-	uintptr_t data_start, size_t data_size, unsigned flags,
-	size_t commit_size, struct vm_region **result)
-{
-	struct vm_region *region;
-	uint32_t max_prot = HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC;
-	int error;
-
-	if (result == NULL || !range_valid(start, size) ||
-	    (prot & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) != 0)
-		return EINVAL;
-	if (backing == VM_BACKING_FILE &&
-	    (file == NULL || file_offset < 0 || data_start < start ||
-	    data_start >= start + size || data_size > start + size - data_start))
-		return EINVAL;
-	if ((flags & VM_REGION_SHARED) != 0 && file != NULL &&
-	    ((file_status_flags_get(file) & O_ACCMODE) == O_RDONLY ||
-	    file->f_ops == NULL || file->f_ops->pwrite == NULL))
-		max_prot &= ~HAL_SPACE_WRITE;
-	if ((prot & ~max_prot) != 0)
-		return EACCES;
-	region = kern_calloc(1, sizeof(*region));
-	if (region == NULL)
-		return ENOMEM;
-	if (commit_size != 0) {
-		error = vm_commit_reserve(commit_size);
-		if (error != 0) {
-			kern_free(region);
-			return error;
-		}
-	}
-	region->start = start;
-	region->size = size;
-	region->prot = prot;
-	region->max_prot = max_prot;
-	region->flags = flags;
-	region->commit_size = commit_size;
-	region->backing = backing;
-	region->file = file;
-	region->file_offset = file_offset;
-	region->data_start = data_start;
-	region->data_size = data_size;
-	if (file != NULL)
-		file_ref(file);
-	*result = region;
-	return 0;
-}
-
-static void
-discard_prepared_region(struct vm_region *region)
-{
-	if (region == NULL)
-		return;
-	if (region->file != NULL)
-		(void)file_close(region->file);
-	if (region->object != NULL)
-		vm_object_put(region->object);
-	if (region->commit_size != 0)
-		vm_commit_release(region->commit_size);
-	kern_free(region);
-}
-
-static int
-vmspace_map_anon_locked(struct vmspace *vm, uintptr_t start, size_t size,
-		 uint32_t prot, struct vm_region **result)
-{
-	return map_region(vm, start, size, prot, VM_BACKING_ANON, NULL,
-			  0, start, 0, 0, prot != 0 ? size : 0, result);
-}
-
-static int
-vmspace_map_anon_fixed_noreplace_locked(struct vmspace *vm, uintptr_t start,
-				 size_t size, uint32_t prot,
-				 struct vm_region **result)
-{
-	if (vm == NULL || !range_valid(start, size))
-		return EINVAL;
-	if (overlaps(vm, start, size))
-		return EEXIST;
-	return vmspace_map_anon_locked(vm, start, size, prot, result);
-}
-
-static int
-vmspace_map_file_locked(struct vmspace *vm, uintptr_t start, size_t size,
-		 uint32_t prot, struct file *file, off_t file_offset,
-		 uintptr_t data_start, size_t data_size,
-		 struct vm_region **result)
-{
-	return map_region(vm, start, size, prot, VM_BACKING_FILE, file,
-			  file_offset, data_start, data_size, 0,
-			  (prot & HAL_SPACE_WRITE) != 0 ? size : 0, result);
-}
-
-/* Publishes a shared region after backing admission has completed. */
-static int
-vmspace_map_file_shared_locked(
-	struct vmspace *vm,
-	uintptr_t start,
-	size_t size,
-	uint32_t prot,
-	struct file *file,
-	off_t file_offset,
-	size_t data_size,
-	struct vm_object *object,
-	struct vm_region **result)
-{
-	struct vm_region *region;
-	int error;
-
-	/* Requires a prepared object and an aligned file offset. */
-	if (object == NULL)
-		return EINVAL;
-
-	/* Rejects offsets that cannot describe shared pages. */
-	if (file_offset < 0 || (file_offset & (PAGE_SIZE - 1U)) != 0)
-		return EINVAL;
-
-	/* Creates the region while its address-space metadata is locked. */
-	error = map_region(
-		vm, start, size, prot, VM_BACKING_FILE, file,
-		file_offset, start, data_size, VM_REGION_SHARED, 0, &region);
-	if (error != 0)
-		return error;
-
-	/* Transfers the prepared shared-object reference to the region. */
-	region->object = object;
-
-	/* Returns the published region when requested. */
-	if (result != NULL)
-		*result = region;
-
-	/* Reports successful publication. */
-	return 0;
-}
-
-static int
-vmspace_map_stack_locked(struct vmspace *vm, uintptr_t top, size_t size,
-		  size_t guard_size)
-{
-	struct vm_region *guard, *stack;
-	uintptr_t bottom, guard_bottom;
-	int error;
-
-	if (vm == NULL || vm == &kernel_vmspace || size == 0 ||
-	    guard_size == 0 || (top & (PAGE_SIZE - 1U)) != 0 ||
-	    (size & (PAGE_SIZE - 1U)) != 0 ||
-	    (guard_size & (PAGE_SIZE - 1U)) != 0 || top > vm_layout.user_limit ||
-	    size > top || guard_size > top - size)
-		return EINVAL;
-	if ((uint64_t)size > vm->stack_limit ||
-	    (uint64_t)size + guard_size > vm->address_limit -
-	    (vm->mapped_virtual_bytes > vm->address_limit ?
-	    vm->address_limit : vm->mapped_virtual_bytes))
-		return ENOMEM;
-	bottom = top - size;
-	guard_bottom = bottom - guard_size;
-	if (!range_valid(guard_bottom, size + guard_size) ||
-	    overlaps(vm, guard_bottom, size + guard_size))
-		return EINVAL;
-	guard = kern_calloc(1, sizeof(*guard));
-	if (guard == NULL)
-		return ENOMEM;
-	stack = kern_calloc(1, sizeof(*stack));
-	if (stack == NULL) {
-		kern_free(guard);
-		return ENOMEM;
-	}
-	error = vm_commit_reserve(size);
-	if (error != 0) {
-		kern_free(stack);
-		kern_free(guard);
-		return error;
-	}
-	guard->start = guard_bottom;
-	guard->size = guard_size;
-	guard->backing = VM_BACKING_ANON;
-	guard->flags = VM_REGION_GUARD | VM_REGION_IMMUTABLE;
-	guard->max_prot = 0;
-	guard->data_start = guard_bottom;
-	stack->start = bottom;
-	stack->size = size;
-	stack->prot = HAL_SPACE_READ | HAL_SPACE_WRITE;
-	stack->max_prot = stack->prot;
-	stack->flags = VM_REGION_STACK | VM_REGION_IMMUTABLE;
-	stack->commit_size = size;
-	stack->backing = VM_BACKING_ANON;
-	stack->data_start = bottom;
-	insert_region(vm, guard);
-	insert_region(vm, stack);
-	vm->mapped_virtual_bytes += size + guard_size;
-	vm->stack_guard_bottom = guard_bottom;
-	vm->stack_bottom = bottom;
-	vm->stack_top = top;
-	return 0;
-}
-
-static struct vm_region *
-find_region_locked(struct vmspace *vm, uintptr_t address, size_t size)
-{
-	struct vm_region *region;
-
-	if (vm == NULL || size == 0 || address > UINTPTR_MAX - size)
-		return NULL;
-	for (region = vm->regions; region != NULL; region = region->next)
-		if (address >= region->start &&
-		    address + size <= region->start + region->size)
-			return region;
-	return NULL;
-}
-
-static struct vm_page *
-find_page(struct vm_region *region, uintptr_t address)
-{
-	struct vm_page *page;
-	address &= ~(uintptr_t)(PAGE_SIZE - 1U);
-	for (page = region->pages; page != NULL; page = page->next)
-		if (page->address == address)
-			return page;
-	return NULL;
-}
-
-static void
-vmspace_wait_fault_event(struct vmspace *vm, uint64_t sequence)
-{
-	unsigned long irq = spin_lock_irqsave(&vm->lock.guard);
-	(void)waitq_sleep(&vm->fault_waitq, &vm->lock.guard, sequence, 0, 0);
-	spin_unlock_irqrestore(&vm->lock.guard, irq);
-}
-
-static void
-vmspace_wait_faults_locked(struct vmspace *vm)
-{
-	for (;;) {
-		struct vm_region *region;
-		int busy = 0;
-		for (region = vm->regions; region != NULL; region = region->next) {
-			struct vm_page *page;
-			if (region->hold_count != 0) {
-				busy = 1;
-				break;
-			}
-			for (page = region->pages; page != NULL; page = page->next)
-				if ((page->flags & VM_MAPPING_BUSY) != 0) {
-					busy = 1;
-					break;
-				}
-			if (busy)
-				break;
-		}
-		if (!busy)
-			return;
-		{
-			uint64_t sequence = waitq_sequence(&vm->fault_waitq);
-			/* Fault completion needs the outer cross-vm metadata lock. */
-			mutex_unlock(&vm->lock);
-			vm_metadata_leave();
-			vmspace_wait_fault_event(vm, sequence);
-			vm_metadata_enter();
-			mutex_lock(&vm->lock);
-		}
-	}
-}
-
-static int
-allocate_page_frame(struct vm_private_page *backing, struct vm_page *avoid)
-{
-	if (alloc_vm_page(&backing->pmem) == HAL_OK)
-		return 0;
-	if (vm_reclaim_one(avoid) != 0 ||
-	    alloc_vm_page(&backing->pmem) != HAL_OK)
-		return ENOMEM;
-	return 0;
-}
-
-static int
-fill_file_page(struct vm_region *region, struct vm_page *page)
-{
-	uintptr_t page_end = page->address + PAGE_SIZE;
-	uintptr_t data_end = region->data_start + region->data_size;
-	uintptr_t read_start = page->address > region->data_start ?
-		page->address : region->data_start;
-	uintptr_t read_end = page_end < data_end ? page_end : data_end;
-	size_t length;
-	off_t offset;
-	ssize_t count;
-
-	memset((void *)page->private_page->pmem.vaddr, 0, PAGE_SIZE);
-	if (read_start >= read_end)
-		return (region->flags & VM_REGION_ELF_ZERO_TAIL) != 0 ? 0 : ENXIO;
-	length = read_end - read_start;
-	if (region->file_offset < 0 ||
-	    (uint64_t)(read_start - region->data_start) >
-	    (sizeof(off_t) == sizeof(int64_t) ? (uint64_t)INT64_MAX :
-	    (uint64_t)INT32_MAX) - (uint64_t)region->file_offset)
-		return EOVERFLOW;
-	offset = region->file_offset +
-		(off_t)(read_start - region->data_start);
-	count = file_pread(region->file,
-		(void *)(page->private_page->pmem.vaddr +
-		    read_start - page->address),
-		length, offset);
-	return count == (ssize_t)length ? 0 : EIO;
-}
-
-/* Build an unlinked replacement while old is exclusively owned by the fault. */
-static int
-prepare_cow_copy(struct vm_page *page, struct vm_private_page *old,
-	struct vm_private_page **result)
-{
-	struct vm_private_page *fresh;
-	unsigned long irq;
-
-	if (page == NULL || old == NULL || result == NULL)
-		return EINVAL;
-	fresh = private_page_alloc();
-	if (fresh == NULL)
-		return ENOMEM;
-	if (allocate_page_frame(fresh, page) != 0) {
-		vm_private_page_put(fresh);
-		return ENOMEM;
-	}
-	memcpy((void *)fresh->pmem.vaddr, (const void *)old->pmem.vaddr,
-	    PAGE_SIZE);
-	irq = spin_lock_irqsave(&fresh->state_lock);
-	fresh->flags = VM_PAGE_RESIDENT | VM_PAGE_DIRTY;
-	if (++fresh->generation == 0)
-		fresh->generation++;
-	spin_unlock_irqrestore(&fresh->state_lock, irq);
-	*result = fresh;
-	return 0;
-}
-
-static void
-vmspace_fault_wake_locked(struct vmspace *vm)
-{
-	unsigned long irq = spin_lock_irqsave(&vm->lock.guard);
-	waitq_wake_all(&vm->fault_waitq);
-	spin_unlock_irqrestore(&vm->lock.guard, irq);
-}
-
 int
-vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
+vmspace_fault(
+	struct vmspace *vm,
+	uintptr_t address,
+	uint32_t required)
 {
-	struct vm_private_page *reserved_backing = NULL;
-	struct vm_object_page *object_page = NULL;
+	struct vm_private_page *reserved_backing;
+	struct vm_object_page *object_page;
 	struct vm_region *region;
 	struct vm_page *page;
 	struct vm_page **link;
-	hal_physaddr_t prepared_physical = 0;
-	uintptr_t page_address = address & ~(uintptr_t)(PAGE_SIZE - 1U);
-	uint64_t prepared_backing_generation = 0;
+	hal_physaddr_t prepared_physical;
+	uintptr_t page_address;
+	uint64_t prepared_backing_generation;
 	uint64_t reservation_generation;
-	off_t object_offset = 0;
-	uint32_t new_reservation_prot = 0;
-	unsigned map_pressure_retries = 0;
-	int error = 0;
-	int mapped = 0;
-	int private_io_owned = 0;
-	int private_io_hold = 0;
+	off_t object_offset;
+	uint32_t new_reservation_prot;
+	unsigned map_pressure_retries;
+	int error;
+	int mapped;
+	int private_io_owned;
+	int private_io_hold;
+	uint64_t sequence;
+	struct vm_private_page *fresh;
+	uint32_t reservation_prot;
+	unsigned long state_irq;
+	int backing_owner;
+	int need_cow;
+	int was_mapped;
+	int old_unmapped;
+	int map_pressure;
+	int retry_fault;
+	int swapped;
+	uint64_t maximum_offset;
+	unsigned long irq;
 
-	if (vm == NULL || vm == &kernel_vmspace ||
-	    (required != HAL_SPACE_READ && required != HAL_SPACE_WRITE &&
+	reserved_backing = NULL;
+	object_page = NULL;
+	prepared_physical = 0;
+	page_address = address & ~(uintptr_t)(PAGE_SIZE - 1U);
+	prepared_backing_generation = 0;
+	object_offset = 0;
+	new_reservation_prot = 0;
+	map_pressure_retries = 0;
+	error = 0;
+	mapped = 0;
+	private_io_owned = 0;
+	private_io_hold = 0;
+
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    (required != HAL_SPACE_READ &&
+	    required != HAL_SPACE_WRITE &&
 	    required != HAL_SPACE_EXEC))
 		return EINVAL;
 	vm_reclaim_note_fault();
 
 retry:
+	/* Finds the region and any existing page, waiting out a BUSY one. */
 	error = 0;
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
@@ -1249,7 +709,7 @@ retry:
 	}
 	page = find_page(region, page_address);
 	if (page != NULL && (page->flags & VM_MAPPING_BUSY) != 0) {
-		uint64_t sequence = waitq_sequence(&vm->fault_waitq);
+		sequence = waitq_sequence(&vm->fault_waitq);
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
 		vmspace_wait_fault_event(vm, sequence);
@@ -1260,17 +720,16 @@ retry:
 		vm_metadata_leave();
 		return 0;
 	}
-	if (page != NULL) {
-		struct vm_private_page *fresh = NULL;
-		uint32_t reservation_prot;
-		unsigned long state_irq;
-		int backing_owner = 0;
-		int need_cow = 0;
-		int was_mapped = 0;
-		int old_unmapped = 0;
-		int map_pressure = 0;
-		int retry_fault = 0;
 
+	/* An existing private page is revived, copied, or simply mapped. */
+	if (page != NULL) {
+		fresh = NULL;
+		backing_owner = 0;
+		need_cow = 0;
+		was_mapped = 0;
+		old_unmapped = 0;
+		map_pressure = 0;
+		retry_fault = 0;
 		if (page->private_page == NULL) {
 			mutex_unlock(&vm->lock);
 			vm_metadata_leave();
@@ -1285,6 +744,7 @@ retry:
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
 
+		/* Takes exclusive I/O ownership of the backing. */
 		error = vm_private_page_io_acquire(reserved_backing);
 		if (error == 0)
 			backing_owner = 1;
@@ -1295,7 +755,8 @@ retry:
 		if (error == 0 &&
 		    (find_region_locked(vm, address, 1) != region ||
 		    find_page(region, page_address) != page ||
-		    page->region != region || page->address != page_address ||
+		    page->region != region ||
+		    page->address != page_address ||
 		    page->private_page != reserved_backing ||
 		    region->prot != reservation_prot ||
 		    (region->prot & required) == 0))
@@ -1310,8 +771,8 @@ retry:
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
 
+		/* Brings a swapped page back and prepares a COW copy. */
 		if (error == 0) {
-			int swapped;
 			state_irq = spin_lock_irqsave(&reserved_backing->state_lock);
 			swapped = (reserved_backing->flags & VM_PAGE_SWAPPED) != 0;
 			spin_unlock_irqrestore(&reserved_backing->state_lock, state_irq);
@@ -1324,9 +785,9 @@ retry:
 			state_irq = spin_lock_irqsave(&reserved_backing->state_lock);
 			if ((reserved_backing->flags &
 			    (VM_PAGE_BUSY | VM_PAGE_RESIDENT)) !=
-			    (VM_PAGE_BUSY | VM_PAGE_RESIDENT))
+			    (VM_PAGE_BUSY | VM_PAGE_RESIDENT)) {
 				error = EIO;
-			else {
+			} else {
 				prepared_backing_generation =
 				    reserved_backing->generation;
 				prepared_physical = reserved_backing->pmem.paddr;
@@ -1334,6 +795,7 @@ retry:
 			spin_unlock_irqrestore(&reserved_backing->state_lock,
 			    state_irq);
 		}
+
 		/* A replacement needs a shootdown, performed with no VM lock held. */
 		if (error == 0 && fresh != NULL && was_mapped) {
 			if (hal_page_unmap(vm->space, (void *)page_address,
@@ -1343,6 +805,7 @@ retry:
 				old_unmapped = 1;
 		}
 
+		/* Revalidates everything and installs the mapping. */
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
 		if (old_unmapped)
@@ -1363,7 +826,8 @@ retry:
 		    (vm->generation != reservation_generation ||
 		    find_region_locked(vm, address, 1) != region ||
 		    find_page(region, page_address) != page ||
-		    page->region != region || page->address != page_address ||
+		    page->region != region ||
+		    page->address != page_address ||
 		    page->private_page != reserved_backing ||
 		    region->prot != reservation_prot ||
 		    (region->prot & required) == 0))
@@ -1374,8 +838,9 @@ retry:
 				error = ENOMEM;
 				map_pressure = 1;
 			} else {
+				/* The mapping owns the creator reference. */
 				vm_page_replace_private(page, fresh);
-				fresh = NULL; /* The mapping owns the creator reference. */
+				fresh = NULL;
 				page->flags &= ~VM_MAPPING_COW;
 				page->flags |= VM_MAPPING_MAPPED;
 			}
@@ -1386,9 +851,12 @@ retry:
 			    vm_page_effective_prot(page)) != HAL_OK) {
 				error = ENOMEM;
 				map_pressure = 1;
-			} else
+			} else {
 				page->flags |= VM_MAPPING_MAPPED;
+			}
 		}
+
+		/* Map-table pressure reclaims a reserve and retries. */
 		if (map_pressure) {
 			mutex_unlock(&vm->lock);
 			vm_metadata_leave();
@@ -1406,6 +874,8 @@ retry:
 			    region->hold_count == 0)
 				HAL_FATAL("VM map-pressure reservation lost");
 		}
+
+		/* Releases the reservation and the backing. */
 		page->flags &= ~VM_MAPPING_BUSY;
 		if (region->hold_count == 0)
 			HAL_FATAL("VM fault region hold underflow");
@@ -1441,6 +911,7 @@ retry:
 	page->address = page_address;
 	page->flags = VM_MAPPING_BUSY;
 
+	/* Links the placeholder unless the page appeared meanwhile. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
 	if (find_region_locked(vm, address, 1) != region ||
@@ -1456,6 +927,7 @@ retry:
 		vm_page_free_metadata(page);
 		goto retry;
 	}
+
 	/* A generation change is allowed only after full region revalidation. */
 	if (vm->generation != reservation_generation &&
 	    find_region_locked(vm, address, 1) != region) {
@@ -1469,9 +941,12 @@ retry:
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
+	/* A shared object page is mapped straight from the object cache. */
 	if (region->object != NULL) {
-		uint64_t maximum_offset = sizeof(off_t) == 8 ?
-		    (uint64_t)INT64_MAX : (uint64_t)INT32_MAX;
+		if (sizeof(off_t) == 8)
+			maximum_offset = (uint64_t)INT64_MAX;
+		else
+			maximum_offset = (uint64_t)INT32_MAX;
 		if (region->file_offset < 0 ||
 		    (uint64_t)region->file_offset +
 		    (uint64_t)(page_address - region->start) > maximum_offset) {
@@ -1488,17 +963,19 @@ retry:
 		    object_page->pmem.paddr, PAGE_SIZE, region->prot) == HAL_OK;
 		if (!mapped) {
 			/*
-			 * The fault hold keeps this cache page out of object reclaim,
-			 * while the BUSY placeholder and region hold keep its VM
-			 * metadata stable.  Reclaim other pages with no VM lock held,
-			 * then retire the placeholder and retry the full transaction.
+			 * The fault hold keeps this cache page out of object
+			 * reclaim, while the BUSY placeholder and region hold
+			 * keep its VM metadata stable.  Reclaim other pages
+			 * with no VM lock held, then retire the placeholder
+			 * and retry the full transaction.
 			 */
 			if (map_pressure_retries < VM_PAGE_MAP_RECLAIM_RETRIES &&
 			    reclaim_page_map_reserve(page) != 0) {
 				map_pressure_retries++;
 				error = EAGAIN;
-			} else
+			} else {
 				error = ENOMEM;
+			}
 			goto remove_placeholder;
 		}
 		page->flags |= VM_PAGE_RESIDENT | VM_MAPPING_MAPPED;
@@ -1518,6 +995,7 @@ retry:
 		return 0;
 	}
 
+	/* A private page gets a new backing, a frame, and its contents. */
 	page->private_page = private_page_alloc();
 	if (page->private_page == NULL) {
 		error = ENOMEM;
@@ -1535,17 +1013,18 @@ retry:
 		error = ENOMEM;
 		goto remove_placeholder;
 	}
-	if (region->backing == VM_BACKING_FILE)
+	if (region->backing == VM_BACKING_FILE) {
 		error = fill_file_page(region, page);
-	else {
+	} else {
 		memset((void *)page->private_page->pmem.vaddr, 0, PAGE_SIZE);
 		error = 0;
 	}
 	if (error == 0) {
-		unsigned long irq = spin_lock_irqsave(
+		irq = spin_lock_irqsave(
 		    &page->private_page->state_lock);
 		page->private_page->flags |= VM_PAGE_RESIDENT;
-		if (++page->private_page->generation == 0)
+		page->private_page->generation++;
+		if (page->private_page->generation == 0)
 			page->private_page->generation++;
 		prepared_backing_generation = page->private_page->generation;
 		prepared_physical = page->private_page->pmem.paddr;
@@ -1553,12 +1032,13 @@ retry:
 	}
 	if (error != 0)
 		goto remove_placeholder;
+
+	/* Revalidates the reservation before mapping the frame. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
 	if (error == 0) {
-		unsigned long irq = spin_lock_irqsave(
+		irq = spin_lock_irqsave(
 		    &reserved_backing->state_lock);
-
 		if ((reserved_backing->flags &
 		    (VM_PAGE_BUSY | VM_PAGE_RESIDENT)) !=
 		    (VM_PAGE_BUSY | VM_PAGE_RESIDENT) ||
@@ -1572,7 +1052,8 @@ retry:
 	if (vm->generation != reservation_generation ||
 	    find_region_locked(vm, address, 1) != region ||
 	    find_page(region, page_address) != page ||
-	    page->region != region || page->address != page_address ||
+	    page->region != region ||
+	    page->address != page_address ||
 	    page->private_page != reserved_backing ||
 	    region->prot != new_reservation_prot ||
 	    (region->prot & required) == 0) {
@@ -1582,11 +1063,12 @@ retry:
 	if (hal_page_map(vm->space, (void *)page_address,
 	    prepared_physical, PAGE_SIZE, region->prot) != HAL_OK) {
 		/*
-		 * The frame allocator already retries after reclaim, but the HAL can
-		 * need another physical page for a new page-table level.  Drop the VM
-		 * locks before reclaim, retire this incomplete fault reservation, and
-		 * retry the complete transaction.  Releasing the prepared frame during
-		 * rollback leaves both it and the reclaimed frame available to a HAL
+		 * The frame allocator already retries after reclaim, but the
+		 * HAL can need another physical page for a new page-table
+		 * level.  Drop the VM locks before reclaim, retire this
+		 * incomplete fault reservation, and retry the complete
+		 * transaction.  Releasing the prepared frame during rollback
+		 * leaves both it and the reclaimed frame available to a HAL
 		 * which needs separate allocation metadata and table storage.
 		 */
 		mutex_unlock(&vm->lock);
@@ -1595,10 +1077,13 @@ retry:
 		    reclaim_page_map_reserve(page) != 0) {
 			map_pressure_retries++;
 			error = EAGAIN;
-		} else
+		} else {
 			error = ENOMEM;
+		}
 		goto remove_placeholder;
 	}
+
+	/* Publishes the mapped page and releases the backing. */
 	mapped = 1;
 	page->flags |= VM_MAPPING_MAPPED;
 	vm_page_track(page);
@@ -1615,6 +1100,7 @@ retry:
 	return 0;
 
 remove_placeholder:
+	/* Undoes a partial mapping and drops an object fault hold. */
 	if (mapped)
 		(void)hal_page_unmap(vm->space, (void *)page_address, PAGE_SIZE);
 	if (object_page != NULL) {
@@ -1624,9 +1110,10 @@ remove_placeholder:
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
 unlink_locked:
-	for (link = &region->pages; *link != NULL && *link != page;
-	    link = &(*link)->next)
-		;
+	/* Unlinks the placeholder and releases the region hold. */
+	link = &region->pages;
+	while (*link != NULL && *link != page)
+		link = &(*link)->next;
 	if (*link == page)
 		*link = page->next;
 	if (region->hold_count == 0)
@@ -1662,39 +1149,21 @@ release_region:
 	return error;
 }
 
-static int
-vmspace_check_locked(struct vmspace *vm, uintptr_t address, size_t size,
-	      uint32_t required)
-{
-	struct vm_region *region;
-	uintptr_t current, end;
-
-	if (vm == NULL || !vmspace_user_range_valid(address, size))
-		return EFAULT;
-	current = address;
-	end = address + size;
-	for (region = vm->regions; region != NULL && current < end;
-	     region = region->next) {
-		uintptr_t region_end = region->start + region->size;
-		if (current < region->start)
-			return EFAULT;
-		if (current >= region_end)
-			continue;
-		if ((region->prot & required) != required)
-			return EFAULT;
-		current = region_end < end ? region_end : end;
-	}
-	return current == end ? 0 : EFAULT;
-}
-
+/*
+ * Releases the pins taken by vmspace_pin_user_pages(), last page first.
+ */
 void
-vmspace_unpin_user_pages(struct vmspace_pinned_page *pages, size_t page_count)
+vmspace_unpin_user_pages(
+	struct vmspace_pinned_page *pages,
+	size_t page_count)
 {
+	struct vmspace_pinned_page *page;
+
 	if (pages == NULL)
 		return;
 	while (page_count != 0) {
-		struct vmspace_pinned_page *page = &pages[--page_count];
-
+		page_count--;
+		page = &pages[page_count];
 		if (page->kind == VMSPACE_PINNED_PRIVATE)
 			vm_private_page_unpin(page->owner.private_page);
 		else if (page->kind == VMSPACE_PINNED_OBJECT)
@@ -1703,64 +1172,47 @@ vmspace_unpin_user_pages(struct vmspace_pinned_page *pages, size_t page_count)
 	}
 }
 
-/* A resident mapping does not need to enter the fault path again merely to
- * acquire another uaccess pin.  This matters when one syscall pins multiple
- * ranges which share a user page: the fault path takes exclusive backing I/O
- * ownership and would otherwise wait for the syscall's first pin. */
-static int
-vmspace_pin_mapping_ready(struct vmspace *vm, uintptr_t address,
-	uint32_t required)
-{
-	struct vm_region *region;
-	struct vm_page *entry;
-	int ready = 0;
-
-	vm_metadata_enter();
-	mutex_lock(&vm->lock);
-	region = find_region_locked(vm, address, 1);
-	entry = region != NULL ? find_page(region, address) : NULL;
-	if (entry != NULL && (region->prot & required) == required &&
-	    (entry->flags & (VM_MAPPING_BUSY | VM_MAPPING_MAPPED)) ==
-	    VM_MAPPING_MAPPED) {
-		if (entry->private_page != NULL &&
-		    vm_private_page_is_resident(entry) &&
-		    ((required & HAL_SPACE_WRITE) == 0 ||
-		    (entry->flags & VM_MAPPING_COW) == 0))
-			ready = 1;
-		else if (entry->object_page != NULL) {
-			struct vm_object_page *page = entry->object_page;
-			struct vm_object *object = page->owner;
-			unsigned long irq;
-
-			if (object != NULL) {
-				irq = spin_lock_irqsave(&object->lock);
-				ready = page->owner == object &&
-				    page->pmem.size != 0 &&
-				    (page->flags & (VM_OBJECT_PAGE_BUSY |
-				    VM_OBJECT_PAGE_ERROR)) == 0;
-				spin_unlock_irqrestore(&object->lock, irq);
-			}
-		}
-	}
-	mutex_unlock(&vm->lock);
-	vm_metadata_leave();
-	return ready;
-}
-
+/*
+ * Pins every page of a user range for kernel access.
+ *
+ * Each page is faulted in first with no VM lock held, then the whole
+ * range is validated and pinned under both metadata locks so that no
+ * unmap, remap, or fork can change page identity in between.  A page
+ * that changed underneath is faulted again.
+ */
 int
-vmspace_pin_user_pages(struct vmspace *vm, uintptr_t address, size_t size,
-	uint32_t required, struct vmspace_pinned_page *pages, size_t page_count)
+vmspace_pin_user_pages(
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size,
+	uint32_t required,
+	struct vmspace_pinned_page *pages,
+	size_t page_count)
 {
 	struct vm_private_page *wait_backing;
-	uintptr_t first, last, current;
+	uintptr_t first;
+	uintptr_t last;
+	uintptr_t current;
 	uint32_t fault_access;
-	size_t expected, index, acquired;
-	int error, refault, wait_fault;
+	size_t expected;
+	size_t index;
+	size_t acquired;
+	int error;
+	int refault;
+	int wait_fault;
 	uint64_t fault_sequence;
+	struct vm_region *region;
+	struct vm_page *entry;
+	int wait_error;
 
-	if (vm == NULL || vm == &kernel_vmspace || pages == NULL || size == 0 ||
+	/* Rejects a malformed request or a result array of the wrong size. */
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    pages == NULL ||
+	    size == 0 ||
 	    (required & ~(HAL_SPACE_READ | HAL_SPACE_WRITE |
-	    HAL_SPACE_EXEC)) != 0 || required == 0 ||
+	    HAL_SPACE_EXEC)) != 0 ||
+	    required == 0 ||
 	    !vmspace_user_range_valid(address, size))
 		return EFAULT;
 	first = address & ~(uintptr_t)(PAGE_SIZE - 1U);
@@ -1769,6 +1221,8 @@ vmspace_pin_user_pages(struct vmspace *vm, uintptr_t address, size_t size,
 	if (page_count != expected)
 		return EINVAL;
 	memset(pages, 0, page_count * sizeof(*pages));
+
+	/* Picks the one concrete access the fault path understands. */
 	if ((required & HAL_SPACE_WRITE) != 0)
 		fault_access = HAL_SPACE_WRITE;
 	else if ((required & HAL_SPACE_READ) != 0)
@@ -1788,6 +1242,12 @@ retry_faults:
 			break;
 	}
 
+	/*
+	 * Validate the complete range before taking the first backing pin.
+	 * Holding both metadata locks until the final pin closes the old
+	 * wire/unlock/rewalk gap in which unmap, remap, or fork could
+	 * change page identity.
+	 */
 	wait_backing = NULL;
 	acquired = 0;
 	refault = 0;
@@ -1796,16 +1256,13 @@ retry_faults:
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
 	error = vmspace_check_locked(vm, address, size, required);
-	/*
-	 * Validate the complete range before taking the first backing pin.  Holding
-	 * both metadata locks until the final pin closes the old wire/unlock/rewalk
-	 * gap in which unmap, remap, or fork could change page identity.
-	 */
 	for (index = 0, current = first; error == 0 && index < page_count;
 	     index++, current += PAGE_SIZE) {
-		struct vm_region *region = find_region_locked(vm, current, 1);
-		struct vm_page *entry = region != NULL ? find_page(region, current) : NULL;
-
+		region = find_region_locked(vm, current, 1);
+		if (region != NULL)
+			entry = find_page(region, current);
+		else
+			entry = NULL;
 		if (entry == NULL) {
 			refault = 1;
 			error = EAGAIN;
@@ -1837,11 +1294,12 @@ retry_faults:
 			}
 		}
 	}
+
+	/* Pins each page's backing. */
 	for (index = 0, current = first; error == 0 && index < page_count;
 	     index++, current += PAGE_SIZE) {
-		struct vm_region *region = find_region_locked(vm, current, 1);
-		struct vm_page *entry = find_page(region, current);
-
+		region = find_region_locked(vm, current, 1);
+		entry = find_page(region, current);
 		if (entry->private_page != NULL) {
 			error = vm_private_page_pin(entry->private_page,
 			    &pages[index].memory);
@@ -1875,8 +1333,7 @@ retry_faults:
 	/* Backing unpin may finish object teardown, so rollback outside VM locks. */
 	vmspace_unpin_user_pages(pages, acquired);
 	if (wait_backing != NULL) {
-		int wait_error = vm_private_page_wait_idle(wait_backing);
-
+		wait_error = vm_private_page_wait_idle(wait_backing);
 		vm_private_page_put(wait_backing);
 		if (wait_error != 0)
 			return wait_error;
@@ -1891,21 +1348,35 @@ retry_faults:
 	return error;
 }
 
+/*
+ * Faults in and wires every page of a user range, undoing the wires on
+ * failure.
+ */
 int
-vmspace_wire_range(struct vmspace *vm, uintptr_t address, size_t size,
-		   uint32_t required)
+vmspace_wire_range(
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size,
+	uint32_t required)
 {
-	uintptr_t page, first, last;
+	uintptr_t page;
+	uintptr_t first;
+	uintptr_t last;
 	uint32_t fault_access;
-	int error = vmspace_check(vm, address, size, required);
+	int error;
+	struct vm_region *region;
+	struct vm_page *entry;
+	uint64_t sequence;
 
+	error = vmspace_check(vm, address, size, required);
 	if (error != 0)
 		return error;
+
 	/*
 	 * vmspace_check() accepts a protection mask, while vmspace_fault()
-	 * describes one concrete access.  A bidirectional uaccess pin asks for
-	 * READ|WRITE and must not pass that mask through as though it were an
-	 * individual fault access.
+	 * describes one concrete access.  A bidirectional uaccess pin asks
+	 * for READ|WRITE and must not pass that mask through as though it
+	 * were an individual fault access.
 	 */
 	if ((required & HAL_SPACE_WRITE) != 0)
 		fault_access = HAL_SPACE_WRITE;
@@ -1913,22 +1384,24 @@ vmspace_wire_range(struct vmspace *vm, uintptr_t address, size_t size,
 		fault_access = HAL_SPACE_READ;
 	else
 		fault_access = HAL_SPACE_EXEC;
-	first = page = address & ~(uintptr_t)(PAGE_SIZE - 1U);
+	page = address & ~(uintptr_t)(PAGE_SIZE - 1U);
+	first = page;
 	last = (address + size - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
-	for (;;) {
-		struct vm_region *region;
-		struct vm_page *entry;
 
+	/* Faults and wires one page at a time, waiting out BUSY pages. */
+	for (;;) {
 		error = vmspace_fault(vm, page, fault_access);
 		if (error != 0)
 			break;
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
 		region = find_region_locked(vm, page, 1);
-		entry = region != NULL ? find_page(region, page) : NULL;
+		if (region != NULL)
+			entry = find_page(region, page);
+		else
+			entry = NULL;
 		if (entry != NULL && (entry->flags & VM_MAPPING_BUSY) != 0) {
-			uint64_t sequence = waitq_sequence(&vm->fault_waitq);
-
+			sequence = waitq_sequence(&vm->fault_waitq);
 			mutex_unlock(&vm->lock);
 			vm_metadata_leave();
 			vmspace_wait_fault_event(vm, sequence);
@@ -1949,14 +1422,17 @@ vmspace_wire_range(struct vmspace *vm, uintptr_t address, size_t size,
 			return 0;
 		page += PAGE_SIZE;
 	}
+
+	/* Unwires the pages wired before the failure. */
 	while (page != first) {
-		struct vm_region *region;
-		struct vm_page *entry;
 		page -= PAGE_SIZE;
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
 		region = find_region_locked(vm, page, 1);
-		entry = region != NULL ? find_page(region, page) : NULL;
+		if (region != NULL)
+			entry = find_page(region, page);
+		else
+			entry = NULL;
 		if (entry != NULL && entry->wire_count != 0)
 			entry->wire_count--;
 		mutex_unlock(&vm->lock);
@@ -1965,888 +1441,42 @@ vmspace_wire_range(struct vmspace *vm, uintptr_t address, size_t size,
 	return error;
 }
 
-static void
-vmspace_unwire_range_locked(struct vmspace *vm, uintptr_t address, size_t size)
-{
-	uintptr_t page, last;
-
-	if (vm == NULL || size == 0 || address > UINTPTR_MAX - size)
-		return;
-	page = address & ~(uintptr_t)(PAGE_SIZE - 1U);
-	last = (address + size - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
-	for (;;) {
-		struct vm_region *region = find_region_locked(vm, page, 1);
-		struct vm_page *entry = region != NULL ? find_page(region, page) : NULL;
-		if (entry != NULL && entry->wire_count != 0)
-			entry->wire_count--;
-		if (page == last)
-			break;
-		page += PAGE_SIZE;
-	}
-}
-
-static int
-copy_backing(struct vmspace *vm, uintptr_t user_address, void *kernel,
-	     size_t size, uint32_t required, int to_user)
-{
-	struct vmspace_pinned_page *pages;
-	uint8_t *bytes = kernel;
-	uintptr_t first, last;
-	size_t page_count, position;
-	int error;
-
-	if (size == 0)
-		return 0;
-	if (kernel == NULL)
-		return EINVAL;
-	if (!vmspace_user_range_valid(user_address, size))
-		return EFAULT;
-	first = user_address & ~(uintptr_t)(PAGE_SIZE - 1U);
-	last = (user_address + size - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
-	page_count = (size_t)((last - first) / PAGE_SIZE) + 1U;
-	if (page_count > SIZE_MAX / sizeof(*pages))
-		return ENOMEM;
-	pages = kern_calloc(page_count, sizeof(*pages));
-	if (pages == NULL)
-		return ENOMEM;
-	error = vmspace_pin_user_pages(vm, user_address, size, required, pages,
-	    page_count);
-	if (error != 0) {
-		kern_free(pages);
-		return error == ENOMEM ? ENOMEM : EFAULT;
-	}
-	position = user_address - first;
-	while (size != 0) {
-		struct vmspace_pinned_page *page =
-		    &pages[position / PAGE_SIZE];
-		size_t offset = position & (PAGE_SIZE - 1U);
-		size_t chunk = PAGE_SIZE - offset;
-
-		if (chunk > size)
-			chunk = size;
-		if (page->kind == VMSPACE_PINNED_PRIVATE) {
-			void *mapped = (uint8_t *)page->memory.vaddr + offset;
-
-			if (to_user) {
-				memcpy(mapped, bytes, chunk);
-				vm_private_page_mark_dirty(
-				    page->owner.private_page);
-			} else {
-				memcpy(bytes, mapped, chunk);
-			}
-			error = 0;
-		} else if (page->kind == VMSPACE_PINNED_OBJECT) {
-			if (to_user)
-				error = vm_object_page_pin_write(
-				    page->owner.object_page, offset, bytes, chunk);
-			else
-				error = vm_object_page_pin_read(
-				    page->owner.object_page, offset, bytes, chunk);
-		} else {
-			error = EFAULT;
-		}
-		if (error != 0)
-			break;
-		bytes += chunk;
-		position += chunk;
-		size -= chunk;
-	}
-	vmspace_unpin_user_pages(pages, page_count);
-	kern_free(pages);
-	return error;
-}
-
-static int
-vmspace_copy_to_locked(struct vmspace *vm, uintptr_t destination,
-		const void *source, size_t size)
-{
-	return copy_backing(vm, destination, (void *)source, size,
-			    HAL_SPACE_WRITE, 1);
-}
-
-static int
-vmspace_copy_from_locked(struct vmspace *vm, void *destination,
-		  uintptr_t source, size_t size)
-{
-	return copy_backing(vm, source, destination, size,
-			    HAL_SPACE_READ, 0);
-}
-
-static int
-vmspace_find_free_range_bounded_locked(struct vmspace *vm, uintptr_t minimum,
-	uintptr_t maximum, size_t size, size_t alignment, uintptr_t *mapped)
-{
-	uintptr_t start, limit;
-	struct vm_region *region;
-
-	vmspace_layout_init();
-	if (vm == NULL || mapped == NULL || size == 0 ||
-	    alignment < PAGE_SIZE || (alignment & (alignment - 1U)) != 0 ||
-	    minimum < vm_layout.user_minimum || maximum > vm_layout.user_limit ||
-	    minimum >= maximum || size > (size_t)(maximum - minimum))
-		return EINVAL;
-	if (size > SIZE_MAX - (PAGE_SIZE - 1U))
-		return EOVERFLOW;
-	size = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
-	limit = maximum;
-	if (vm->stack_guard_bottom != 0 && vm->stack_guard_bottom < limit)
-		limit = vm->stack_guard_bottom;
-	start = minimum;
-	if (start > UINTPTR_MAX - (alignment - 1U))
-		return ENOMEM;
-	start = (start + alignment - 1U) & ~(uintptr_t)(alignment - 1U);
-	for (;;) {
-		int moved = 0;
-		if (start >= limit || size > limit - start)
-			return ENOMEM;
-		for (region = vm->regions; region != NULL; region = region->next) {
-			if (start + size <= region->start)
-				break;
-			if (start < region->start + region->size &&
-			    region->start < start + size) {
-				if (region->start > UINTPTR_MAX - region->size ||
-				    region->start + region->size >
-				    UINTPTR_MAX - (alignment - 1U))
-					return ENOMEM;
-				start = (region->start + region->size + alignment - 1U) &
-					~(uintptr_t)(alignment - 1U);
-				moved = 1;
-				break;
-			}
-		}
-		if (!moved)
-			break;
-	}
-	*mapped = start;
-	return 0;
-}
-
-static int
-vmspace_find_free_range_locked(struct vmspace *vm, uintptr_t hint, size_t size,
-			 size_t alignment, uintptr_t *mapped)
-{
-	vmspace_layout_init();
-	if (hint < vm_layout.mmap_base)
-		hint = vm_layout.mmap_base;
-	if (hint >= vm_layout.user_limit)
-		return ENOMEM;
-	return vmspace_find_free_range_bounded_locked(vm, hint, vm_layout.user_limit,
-	    size, alignment, mapped);
-}
-
-static int
-vmspace_map_find_locked(struct vmspace *vm, uintptr_t hint, size_t size,
-		 uint32_t prot, uintptr_t *mapped)
-{
-	uintptr_t start;
-	int error = vmspace_find_free_range_locked(vm, hint, size, PAGE_SIZE, &start);
-	if (error == 0)
-		error = vmspace_map_anon_locked(vm, start,
-		    (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U), prot, NULL);
-	if (error == 0)
-		*mapped = start;
-	return error;
-}
-
-static int
-vmspace_map_file_find_locked(struct vmspace *vm, uintptr_t hint, size_t size,
-		      uint32_t prot, struct file *file, off_t offset,
-		      size_t data_size, uintptr_t *mapped)
-{
-	uintptr_t start;
-	size_t rounded;
-	int error = vmspace_find_free_range_locked(vm, hint, size, PAGE_SIZE, &start);
-	if (error != 0)
-		return error;
-	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
-	if (data_size > size)
-		data_size = size;
-	error = vmspace_map_file_locked(vm, start, rounded, prot, file, offset,
-	    start, data_size, NULL);
-	if (error == 0)
-		*mapped = start;
-	return error;
-}
-
-/* Chooses an address and transfers a prepared shared-object reference. */
-static int
-vmspace_map_file_shared_find_locked(
-	struct vmspace *vm,
-	uintptr_t hint,
-	size_t size,
-	uint32_t prot,
-	struct file *file,
-	off_t offset,
-	size_t data_size,
-	struct vm_object *object,
-	uintptr_t *mapped)
-{
-	uintptr_t start;
-	size_t rounded;
-	int error;
-
-	/* Finds a valid page-aligned destination before publishing a region. */
-	error = vmspace_find_free_range_locked(vm, hint, size, PAGE_SIZE, &start);
-	if (error != 0)
-		return error;
-
-	/* Bounds the file portion to the requested mapping length. */
-	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
-	if (data_size > size)
-		data_size = size;
-
-	/* Publishes the prepared object only after address selection succeeds. */
-	error = vmspace_map_file_shared_locked(
-		vm, start, rounded, prot, file, offset, data_size, object, NULL);
-	if (error == 0)
-		*mapped = start;
-
-	/* Reports the mapping outcome to the prepared-object owner. */
-	return error;
-}
-
-static void
-free_vm_page(struct vmspace *vm, struct vm_page *page)
-{
-	if (page->object_page != NULL) {
-		if (page->flags & VM_MAPPING_MAPPED)
-			(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
-		vm_object_mapping_remove(page->object_page, page);
-		vm_page_free_metadata(page);
-		return;
-	}
-	if (page->flags & VM_MAPPING_MAPPED)
-		(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
-	vm_page_untrack(page);
-	vm_page_free_metadata(page);
-}
-
-static void
-free_region_pages(struct vmspace *vm, struct vm_region *region)
-{
-	struct vm_page *page;
-
-	while ((page = region->pages) != NULL) {
-		region->pages = page->next;
-		free_vm_page(vm, page);
-	}
-}
-
 /*
- * vmspace_unmap() has two teardown phases.  This first phase runs while both
- * the global VM metadata lock and the vmspace lock are held.  It must remove
- * every hardware and reverse mapping before the region list publishes the
- * virtual address as free.
+ * Writes back the shared object pages of a user range.
  *
- * A private backing can own physical memory or a swap slot.  Take a temporary
- * reference before vm_page_untrack() so that the reverse-map detach cannot be
- * the operation which frees those resources.  The detached vm_page retains
- * that reference solely as a retire token; release_detached_region_pages()
- * drops it after the address has been unpublished and both locks are gone.
+ * Exactly one of MS_ASYNC and MS_SYNC must be set; MS_INVALIDATE
+ * additionally advances the generation so cached translations are
+ * revalidated.
  */
-static void
-detach_vm_page_for_unmap(struct vmspace *vm, struct vm_page *page)
-{
-	struct vm_private_page *backing;
-
-	if ((page->flags & VM_MAPPING_MAPPED) != 0) {
-		if (hal_page_unmap(vm->space, (void *)page->address,
-		    PAGE_SIZE) != HAL_OK)
-			HAL_FATAL("VM unmap commit failed");
-		page->flags &= ~VM_MAPPING_MAPPED;
-	}
-	if (page->object_page != NULL) {
-		vm_object_mapping_remove(page->object_page, page);
-		page->object_page = NULL;
-		page->object_next = NULL;
-		return;
-	}
-	backing = page->private_page;
-	if (backing == NULL)
-		return;
-	vm_private_page_ref(backing);
-	vm_page_untrack(page);
-	/* This pointer now owns only the temporary retirement reference. */
-	page->private_page = backing;
-	page->private_next = NULL;
-}
-
-static void
-detach_region_pages_for_unmap(struct vmspace *vm, struct vm_region *region)
-{
-	struct vm_page *page;
-
-	for (page = region->pages; page != NULL; page = page->next)
-		detach_vm_page_for_unmap(vm, page);
-}
-
-static void
-release_detached_region_pages(struct vm_region *region)
-{
-	struct vm_page *page;
-
-	while ((page = region->pages) != NULL) {
-		region->pages = page->next;
-		/* Drops the private-backing retire token, if there is one. */
-		if (page->private_page != NULL)
-			vm_private_page_put(page->private_page);
-		vm_page_free_metadata(page);
-	}
-}
-
-static int
-split_region_prepared(struct vm_region *region, uintptr_t address,
-	struct vm_region *right)
-{
-	struct vm_page **link;
-	size_t left_size, right_size;
-	uintptr_t original_data_start, original_data_end;
-	uintptr_t left_data_start, left_data_end;
-	uintptr_t right_data_start, right_data_end;
-
-	if (region == NULL || right == NULL || address <= region->start ||
-	    address >= region->start + region->size ||
-	    (address & (PAGE_SIZE - 1U)) != 0)
-		return EINVAL;
-	if (region->hold_count != 0)
-		return EBUSY;
-	if (region->flags & VM_REGION_IMMUTABLE)
-		return EACCES;
-	left_size = address - region->start;
-	right_size = region->size - left_size;
-	original_data_start = region->data_start;
-	original_data_end = region->data_start + region->data_size;
-	*right = *region;
-	right->start = address;
-	right->size = right_size;
-	right_data_start = original_data_start > address ?
-	    original_data_start : address;
-	right_data_end = original_data_end < region->start + region->size ?
-	    original_data_end : region->start + region->size;
-	if (right_data_end < right_data_start)
-		right_data_end = right_data_start;
-	right->data_start = right_data_start;
-	right->data_size = right_data_end - right_data_start;
-	if (region->backing == VM_BACKING_FILE &&
-	    right_data_start > original_data_start)
-		right->file_offset +=
-		    (off_t)(right_data_start - original_data_start);
-	right->commit_size = region->commit_size != 0 ? right_size : 0;
-	right->pages = NULL;
-	if (right->file != NULL)
-		file_ref(right->file);
-	if (right->object != NULL)
-		vm_object_ref(right->object);
-	region->size = left_size;
-	if (original_data_start < address &&
-	    original_data_end > region->start) {
-		left_data_start = original_data_start;
-		left_data_end = original_data_end < address ?
-		    original_data_end : address;
-	} else {
-		left_data_start = region->start;
-		left_data_end = left_data_start;
-	}
-	region->data_start = left_data_start;
-	region->data_size = left_data_end - left_data_start;
-	region->commit_size = region->commit_size != 0 ? left_size : 0;
-	for (link = &region->pages; *link != NULL; ) {
-		struct vm_page *page = *link;
-		if (page->address < address) {
-			link = &page->next;
-			continue;
-		}
-		*link = page->next;
-		page->region = right;
-		page->next = right->pages;
-		right->pages = page;
-	}
-	right->next = region->next;
-	region->next = right;
-	return 0;
-}
-
-static int
-split_region(struct vm_region *region, uintptr_t address)
-{
-	struct vm_region *right = kern_calloc(1, sizeof(*right));
-	int error;
-
-	if (right == NULL)
-		return ENOMEM;
-	error = split_region_prepared(region, address, right);
-	if (error != 0)
-		kern_free(right);
-	return error;
-}
-
-static void
-release_retired_regions(struct vm_region *retired)
-{
-	struct vm_region *region;
-
-	while ((region = retired) != NULL) {
-		retired = region->next;
-		release_detached_region_pages(region);
-		if (region->file != NULL)
-			(void)file_close(region->file);
-		if (region->object != NULL)
-			vm_object_put(region->object);
-		if (region->commit_size != 0)
-			vm_commit_release(region->commit_size);
-		kern_free(region);
-	}
-}
-
-/*
- * Publish a prepared mapping at an exact address.  Two preallocated split
- * records make the metadata commit failure-free after the first old region
- * is changed.
- */
-static int
-vmspace_replace_prepared(struct vmspace *vm, struct vm_region *prepared,
-	struct vm_region **result)
-{
-	struct vm_region *split_first, *split_second;
-	struct vm_region *retired = NULL;
-	struct vm_region *region;
-	struct vm_region **link;
-	uintptr_t start, end;
-	size_t removed = 0;
-	int error = 0;
-
-	if (vm == NULL || vm == &kernel_vmspace || prepared == NULL ||
-	    !range_valid(prepared->start, prepared->size))
-		return EINVAL;
-	split_first = kern_calloc(1, sizeof(*split_first));
-	split_second = kern_calloc(1, sizeof(*split_second));
-	if (split_first == NULL || split_second == NULL) {
-		kern_free(split_first);
-		kern_free(split_second);
-		return ENOMEM;
-	}
-	start = prepared->start;
-	end = start + prepared->size;
-	vm_metadata_enter();
-	mutex_lock(&vm->lock);
-	vmspace_wait_faults_locked(vm);
-	for (region = vm->regions; region != NULL; region = region->next) {
-		struct vm_page *page;
-		uintptr_t overlap_start, overlap_end;
-
-		if (region->start >= end || region->start + region->size <= start)
-			continue;
-		if ((region->flags & VM_REGION_IMMUTABLE) != 0) {
-			error = EINVAL;
-			goto out_locked;
-		}
-		if (region->hold_count != 0) {
-			error = EAGAIN;
-			goto out_locked;
-		}
-		for (page = region->pages; page != NULL; page = page->next)
-			if (page->address < end &&
-			    page->address + PAGE_SIZE > start &&
-			    page->wire_count != 0) {
-				error = EAGAIN;
-				goto out_locked;
-			}
-		overlap_start = region->start > start ? region->start : start;
-		overlap_end = region->start + region->size < end ?
-		    region->start + region->size : end;
-		removed += overlap_end - overlap_start;
-	}
-	if (removed > vm->mapped_virtual_bytes ||
-	    (uint64_t)prepared->size > vm->address_limit -
-	    (vm->mapped_virtual_bytes - removed > vm->address_limit ?
-	    vm->address_limit : vm->mapped_virtual_bytes - removed)) {
-		error = ENOMEM;
-		goto out_locked;
-	}
-	region = find_region_locked(vm, end - 1U, 1);
-	if (region != NULL && end < region->start + region->size) {
-		error = split_region_prepared(region, end, split_first);
-		if (error != 0)
-			goto out_locked;
-		split_first = NULL;
-	}
-	region = find_region_locked(vm, start, 1);
-	if (region != NULL && start > region->start) {
-		struct vm_region *split = split_first != NULL ?
-		    split_first : split_second;
-
-		error = split_region_prepared(region, start, split);
-		if (error != 0)
-			HAL_FATAL("prepared VM split commit failed");
-		if (split == split_first)
-			split_first = NULL;
-		else
-			split_second = NULL;
-	}
-	for (region = vm->regions; region != NULL && region->start < end;
-	     region = region->next)
-		if (region->start >= start)
-			detach_region_pages_for_unmap(vm, region);
-	for (link = &vm->regions; *link != NULL; link = &(*link)->next)
-		if ((*link)->start >= start)
-			break;
-	while ((region = *link) != NULL && region->start < end) {
-		*link = region->next;
-		vm->mapped_virtual_bytes -= region->size;
-		region->next = retired;
-		retired = region;
-	}
-	insert_region(vm, prepared);
-	vm->mapped_virtual_bytes += prepared->size;
-	vmspace_generation_advance_locked(vm);
-	if (result != NULL)
-		*result = prepared;
-
-out_locked:
-	mutex_unlock(&vm->lock);
-	vm_metadata_leave();
-	kern_free(split_first);
-	kern_free(split_second);
-	if (error == 0 && retired != NULL &&
-	    vmspace_unmap_retire_checkpoint != NULL)
-		vmspace_unmap_retire_checkpoint(vm, start, prepared->size);
-	release_retired_regions(retired);
-	return error;
-}
-
-static int
-vmspace_set_brk_start_locked(struct vmspace *vm, uintptr_t start,
-	uint64_t static_data_bytes)
-{
-	if (vm == NULL || vm == &kernel_vmspace || vm->brk_start != 0 ||
-	    (start & (PAGE_SIZE - 1U)) != 0 ||
-	    start < vm_layout.user_minimum || start >= vm_layout.brk_limit ||
-	    overlaps(vm, start, PAGE_SIZE))
-		return EINVAL;
-	if (static_data_bytes > vm->data_limit)
-		return ENOMEM;
-	vm->brk_start = start;
-	vm->brk_current = start;
-	vm->static_data_bytes = static_data_bytes;
-	return 0;
-}
-
-static int
-vmspace_brk_locked(struct vmspace *vm, uintptr_t requested, uintptr_t *result)
-{
-	struct vm_region **link, *region = NULL;
-	uintptr_t old_end, new_end;
-	size_t difference;
-	int error;
-
-	if (vm == NULL || vm == &kernel_vmspace || result == NULL ||
-	    vm->brk_start == 0)
-		return EINVAL;
-	vmspace_wait_faults_locked(vm);
-	if (requested == 0) {
-		*result = vm->brk_current;
-		return 0;
-	}
-	if (requested < vm->brk_start || requested >= vm_layout.brk_limit)
-		return ENOMEM;
-	if (vm->static_data_bytes > vm->data_limit ||
-	    (uint64_t)(requested - vm->brk_start) >
-	    vm->data_limit - vm->static_data_bytes)
-		return ENOMEM;
-	old_end = (vm->brk_current + PAGE_SIZE - 1U) &
-		~(uintptr_t)(PAGE_SIZE - 1U);
-	new_end = (requested + PAGE_SIZE - 1U) &
-		~(uintptr_t)(PAGE_SIZE - 1U);
-	for (link = &vm->regions; *link != NULL; link = &(*link)->next)
-		if (((*link)->flags & VM_REGION_BRK) != 0) {
-			region = *link;
-			break;
-		}
-	if (new_end > old_end) {
-		difference = new_end - old_end;
-		if (region == NULL) {
-			error = map_region(vm, vm->brk_start,
-				new_end - vm->brk_start,
-				HAL_SPACE_READ | HAL_SPACE_WRITE, VM_BACKING_ANON,
-				NULL, 0, vm->brk_start, 0,
-				VM_REGION_BRK | VM_REGION_IMMUTABLE,
-				new_end - vm->brk_start, &region);
-			if (error != 0)
-				return error;
-		} else {
-			if (region->start + region->size != old_end ||
-			    overlaps(vm, old_end, difference))
-				return ENOMEM;
-			if ((uint64_t)difference > vm->address_limit -
-			    (vm->mapped_virtual_bytes > vm->address_limit ?
-			    vm->address_limit : vm->mapped_virtual_bytes))
-				return ENOMEM;
-			error = vm_commit_reserve(difference);
-			if (error != 0)
-				return error;
-			region->size += difference;
-			region->commit_size += difference;
-			vm->mapped_virtual_bytes += difference;
-		}
-	} else if (new_end < old_end) {
-		struct vm_page **page_link;
-		if (region == NULL || region->start + region->size != old_end)
-			return EINVAL;
-		for (page_link = &region->pages; *page_link != NULL; ) {
-			struct vm_page *page = *page_link;
-			if (page->address < new_end) {
-				page_link = &page->next;
-				continue;
-			}
-			*page_link = page->next;
-			free_vm_page(vm, page);
-		}
-		difference = old_end - new_end;
-		vm_commit_release(difference);
-		region->size -= difference;
-		region->commit_size -= difference;
-		vm->mapped_virtual_bytes -= difference;
-		if (region->size == 0) {
-			*link = region->next;
-			kern_free(region);
-		}
-	}
-	vm->brk_current = requested;
-	*result = requested;
-	return 0;
-}
-
-static int
-vmspace_unmap_locked(struct vmspace *vm, uintptr_t start, size_t size,
-	struct vm_region **retired)
-{
-	struct vm_region **link, *region;
-	uintptr_t end;
-	int error;
-
-	if (vm == NULL || vm == &kernel_vmspace || retired == NULL ||
-	    !range_valid(start, size))
-		return EINVAL;
-	vmspace_wait_faults_locked(vm);
-	end = start + size;
-	/* Validate the complete transaction before split_region mutates metadata. */
-	for (region = vm->regions; region != NULL; region = region->next) {
-		struct vm_page *page;
-		if (region->start >= end || region->start + region->size <= start)
-			continue;
-		if ((region->flags & VM_REGION_IMMUTABLE) != 0)
-			return EACCES;
-		for (page = region->pages; page != NULL; page = page->next)
-			if (page->address < end && page->address + PAGE_SIZE > start &&
-			    page->wire_count != 0)
-				return EBUSY;
-	}
-	region = find_region_locked(vm, end - 1U, 1);
-	if (region != NULL && end < region->start + region->size) {
-		error = split_region(region, end);
-		if (error != 0)
-			return error;
-	}
-	region = find_region_locked(vm, start, 1);
-	if (region != NULL && start > region->start) {
-		error = split_region(region, start);
-		if (error != 0)
-			return error;
-	}
-	/*
-	 * All validation, allocation, and splitting is complete.  From this
-	 * point the commit cannot report failure: a HAL failure would leave only
-	 * part of the old range detached, so it is a kernel invariant violation.
-	 * Detach every old PTE/reverse map before unlinking any region.
-	 */
-	for (region = vm->regions; region != NULL && region->start < end;
-	     region = region->next)
-		if (region->start >= start)
-			detach_region_pages_for_unmap(vm, region);
-	for (link = &vm->regions; *link != NULL; link = &(*link)->next)
-		if ((*link)->start >= start)
-			break;
-	while ((region = *link) != NULL && region->start < end) {
-		*link = region->next;
-		vm->mapped_virtual_bytes -= region->size;
-		region->next = *retired;
-		*retired = region;
-	}
-	return 0;
-}
-
-static int
-vmspace_protect_locked(struct vmspace *vm, uintptr_t start, size_t size,
-		uint32_t prot)
-{
-	struct vm_region *region, *first, *end_region;
-	struct vm_page *page, *failed_page = NULL;
-	struct vm_region *failed_region = NULL;
-	uintptr_t end, covered;
-	size_t new_commit = 0;
-	int error;
-
-	if (vm == NULL || vm == &kernel_vmspace || !range_valid(start, size) ||
-	    (prot & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) != 0)
-		return EINVAL;
-	vmspace_wait_faults_locked(vm);
-	end = start + size;
-	covered = start;
-	for (region = vm->regions; region != NULL && covered < end;
-	     region = region->next) {
-		if (covered < region->start)
-			return EINVAL;
-		if (covered >= region->start + region->size)
-			continue;
-		if (region->flags & VM_REGION_IMMUTABLE)
-			return EACCES;
-		if ((prot & ~region->max_prot) != 0)
-			return EACCES;
-		covered = region->start + region->size;
-		if (covered > end)
-			covered = end;
-	}
-	if (covered != end)
-		return EINVAL;
-	end_region = find_region_locked(vm, end - 1U, 1);
-	if (end_region != NULL && end < end_region->start + end_region->size) {
-		error = split_region(end_region, end);
-		if (error != 0)
-			return error;
-	}
-	region = find_region_locked(vm, start, 1);
-	if (start > region->start) {
-		error = split_region(region, start);
-		if (error != 0)
-			return error;
-		region = region->next;
-	}
-	first = region;
-	for (; region != NULL && region->start < end; region = region->next)
-		if (region->commit_size == 0 && region->object == NULL &&
-		    ((region->backing == VM_BACKING_ANON && prot != 0) ||
-		     (region->backing == VM_BACKING_FILE &&
-		      (prot & HAL_SPACE_WRITE) != 0))) {
-			if (new_commit > SIZE_MAX - region->size)
-				return EOVERFLOW;
-			new_commit += region->size;
-		}
-	if (new_commit != 0) {
-		error = vm_commit_reserve(new_commit);
-		if (error != 0)
-			return error;
-	}
-	for (region = first; region != NULL && region->start < end;
-	     region = region->next) {
-		for (page = region->pages; page != NULL; page = page->next) {
-			uint32_t page_prot = (page->flags & VM_MAPPING_COW) ?
-			    (prot & ~HAL_SPACE_WRITE) : prot;
-			int hal_error = HAL_OK;
-
-			if (prot == 0 && (page->flags & VM_MAPPING_MAPPED)) {
-				hal_error = hal_page_unmap(vm->space,
-				    (void *)page->address, PAGE_SIZE);
-				if (hal_error == HAL_OK) {
-					page->flags &= ~VM_MAPPING_MAPPED;
-					page->flags |= VM_MAPPING_PROTECT_REMOVED;
-				}
-			} else if (prot != 0 &&
-			    (page->flags & VM_MAPPING_MAPPED)) {
-				hal_error = hal_page_prot(vm->space,
-				    (void *)page->address, PAGE_SIZE, page_prot);
-			} else if (prot != 0 && page->object_page != NULL) {
-				hal_error = hal_page_map(vm->space,
-				    (void *)page->address,
-				    page->object_page->pmem.paddr, PAGE_SIZE, page_prot);
-				if (hal_error == HAL_OK)
-					page->flags |= VM_MAPPING_MAPPED |
-					    VM_MAPPING_PROTECT_ADDED;
-			} else if (prot != 0 &&
-			    vm_private_page_is_resident(page)) {
-				hal_error = hal_page_map(vm->space,
-				    (void *)page->address,
-				    page->private_page->pmem.paddr, PAGE_SIZE, page_prot);
-				if (hal_error == HAL_OK)
-					page->flags |= VM_MAPPING_MAPPED |
-					    VM_MAPPING_PROTECT_ADDED;
-			}
-			if (hal_error != HAL_OK) {
-				failed_region = region;
-				failed_page = page;
-				goto rollback;
-			}
-		}
-	}
-	for (region = first; region != NULL && region->start < end;
-	     region = region->next) {
-		region->prot = prot;
-		for (page = region->pages; page != NULL; page = page->next)
-			page->flags &= ~(VM_MAPPING_PROTECT_REMOVED |
-			    VM_MAPPING_PROTECT_ADDED);
-		if (region->commit_size == 0 && region->object == NULL &&
-		    ((region->backing == VM_BACKING_ANON && prot != 0) ||
-		     (region->backing == VM_BACKING_FILE &&
-		      (prot & HAL_SPACE_WRITE) != 0)))
-			region->commit_size = region->size;
-	}
-	return 0;
-
-rollback:
-	for (region = first; region != NULL && region->start < end;
-	     region = region->next) {
-		struct vm_page *rollback;
-		for (rollback = region->pages; rollback != NULL;
-		     rollback = rollback->next) {
-			if (region == failed_region && rollback == failed_page)
-				break;
-			if (rollback->flags & VM_MAPPING_PROTECT_ADDED) {
-				if (hal_page_unmap(vm->space,
-				    (void *)rollback->address, PAGE_SIZE) != HAL_OK)
-					HAL_FATAL("VM protection rollback unmap failed");
-				rollback->flags &= ~(VM_MAPPING_MAPPED |
-				    VM_MAPPING_PROTECT_ADDED);
-			} else if (rollback->flags & VM_MAPPING_PROTECT_REMOVED) {
-				hal_physaddr_t physical = rollback->object_page != NULL ?
-				    rollback->object_page->pmem.paddr :
-				    rollback->private_page->pmem.paddr;
-				if (hal_page_map(vm->space,
-				    (void *)rollback->address, physical, PAGE_SIZE,
-				    vm_page_effective_prot(rollback)) != HAL_OK)
-					HAL_FATAL("VM protection rollback map failed");
-				rollback->flags &= ~VM_MAPPING_PROTECT_REMOVED;
-				rollback->flags |= VM_MAPPING_MAPPED;
-			} else if ((rollback->flags & VM_MAPPING_MAPPED) &&
-			    hal_page_prot(vm->space, (void *)rollback->address,
-				PAGE_SIZE, vm_page_effective_prot(rollback)) != HAL_OK) {
-				HAL_FATAL("VM protection rollback failed");
-			}
-		}
-		if (region == failed_region)
-			break;
-	}
-	if (new_commit != 0)
-		vm_commit_release(new_commit);
-	return EINVAL;
-}
-
 int
-vmspace_sync(struct vmspace *vm, uintptr_t start, size_t size, int flags)
+vmspace_sync(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	int flags)
 {
-	uintptr_t current, end;
-	if (vm == NULL || vm == &kernel_vmspace || !range_valid(start, size) ||
+	uintptr_t current;
+	uintptr_t end;
+	struct vm_object *object;
+	struct vm_region *region;
+	uintptr_t overlap_end;
+	off_t offset;
+	int error;
+
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    !range_valid(start, size) ||
 	    (flags & ~(MS_ASYNC | MS_INVALIDATE | MS_SYNC)) != 0 ||
 	    (flags & (MS_ASYNC | MS_SYNC)) == 0 ||
 	    (flags & (MS_ASYNC | MS_SYNC)) == (MS_ASYNC | MS_SYNC))
 		return EINVAL;
+
+	/* Syncs each region's object with no VM lock held. */
 	current = start;
 	end = start + size;
 	while (current < end) {
-		struct vm_object *object = NULL;
-		struct vm_region *region;
-		uintptr_t overlap_end;
-		off_t offset = 0;
-		int error;
-
+		object = NULL;
+		offset = 0;
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
 		region = find_region_locked(vm, current, 1);
@@ -2866,9 +1496,11 @@ vmspace_sync(struct vmspace *vm, uintptr_t start, size_t size, int flags)
 		}
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
-
-		error = object != NULL ? vm_object_sync_range(object, offset,
-		    overlap_end - current, flags) : 0;
+		if (object != NULL)
+			error = vm_object_sync_range(object, offset,
+			    overlap_end - current, flags);
+		else
+			error = 0;
 		if (object != NULL)
 			vm_object_put(object);
 		if (error != 0)
@@ -2885,33 +1517,12 @@ vmspace_sync(struct vmspace *vm, uintptr_t start, size_t size, int flags)
 	return 0;
 }
 
-static void
-vmspace_destroy(struct vmspace *vm)
-{
-	struct vm_region *region;
-
-	vm_metadata_enter();
-	while ((region = vm->regions) != NULL) {
-		vm->regions = region->next;
-		free_region_pages(vm, region);
-		vm_metadata_leave();
-		if (region->file != NULL)
-			(void)file_close(region->file);
-		if (region->object != NULL)
-			vm_object_put(region->object);
-		if (region->commit_size != 0)
-			vm_commit_release(region->commit_size);
-		kern_free(region);
-		vm_metadata_enter();
-	}
-	hal_page_destroy_space(vm->space);
-	(void)atomic_raw_fetch_add_relaxed(&vmspace_live.value, (unsigned)-1);
-	vm_metadata_leave();
-	kern_free(vm);
-}
-
+/*
+ * Drops a reference on a vmspace, destroying it with the last one.
+ */
 void
-vmspace_put(struct vmspace *vm)
+vmspace_put(
+	struct vmspace *vm)
 {
 	if (vm == NULL || vm == &kernel_vmspace)
 		return;
@@ -2919,20 +1530,27 @@ vmspace_put(struct vmspace *vm)
 		vmspace_destroy(vm);
 }
 
+/*
+ * Drops a reference on a vmspace from a non-sleeping context, handing a
+ * final reference to the reaper.
+ */
 void
-vmspace_put_deferred(struct vmspace *vm)
+vmspace_put_deferred(
+	struct vmspace *vm)
 {
-	void (*notify)(void *);
 	void *notify_argument;
 	unsigned long irq;
+	void (*notify)(void *);
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return;
 	if (!refcount_put(&vm->refs))
 		return;
+
 	/*
-	 * Scheduler retirement is non-sleeping.  Transfer final ownership to
-	 * the process reaper instead of entering VFS/object teardown here.
+	 * Scheduler retirement is non-sleeping.  Transfer final ownership
+	 * to the process reaper instead of entering VFS/object teardown
+	 * here.
 	 */
 	vm->reap_next = NULL;
 	irq = spin_lock_irqsave(&vmspace_reap_lock);
@@ -2944,15 +1562,24 @@ vmspace_put_deferred(struct vmspace *vm)
 	notify = vmspace_reap_notify;
 	notify_argument = vmspace_reap_notify_argument;
 	spin_unlock_irqrestore(&vmspace_reap_lock, irq);
-	/* Enqueue owns the wakeup.  The callback is deliberately invoked after
-	 * dropping the queue lock and must only retain a scheduler notification;
-	 * final puts can arrive while higher-ranked VM/reclaim locks are held. */
+
+	/*
+	 * Enqueue owns the wakeup.  The callback is deliberately invoked
+	 * after dropping the queue lock and must only retain a scheduler
+	 * notification; final puts can arrive while higher-ranked
+	 * VM/reclaim locks are held.
+	 */
 	if (notify != NULL)
 		notify(notify_argument);
 }
 
+/*
+ * Installs the callback that wakes the reaper when a vmspace is queued.
+ */
 void
-vmspace_set_reaper_notify(void (*notify)(void *), void *argument)
+vmspace_set_reaper_notify(
+	void (*notify)(void *),
+	void *argument)
 {
 	int pending;
 	unsigned long irq;
@@ -2963,25 +1590,38 @@ vmspace_set_reaper_notify(void (*notify)(void *), void *argument)
 	vmspace_reap_notify_argument = argument;
 	pending = vmspace_reap_head != NULL;
 	spin_unlock_irqrestore(&vmspace_reap_lock, irq);
-	/* A queue item may predate registration.  Publish the retained wake only
-	 * after the callback and argument have been installed atomically. */
+
+	/*
+	 * A queue item may predate registration.  Publish the retained wake
+	 * only after the callback and argument have been installed
+	 * atomically.
+	 */
 	if (pending && notify != NULL)
 		notify(argument);
 }
 
+/*
+ * Destroys every vmspace queued for the reaper and counts them.
+ */
 unsigned
-vmspace_reap_pending(void)
+vmspace_reap_pending(
+	void)
 {
 	struct vmspace *list;
-	unsigned count = 0;
+	unsigned count;
 	unsigned long irq;
+	struct vmspace *next;
 
+	count = 0;
+
+	/* Takes the whole queue, then destroys each entry unlocked. */
 	irq = spin_lock_irqsave(&vmspace_reap_lock);
 	list = vmspace_reap_head;
-	vmspace_reap_head = vmspace_reap_tail = NULL;
+	vmspace_reap_head = NULL;
+	vmspace_reap_tail = NULL;
 	spin_unlock_irqrestore(&vmspace_reap_lock, irq);
 	while (list != NULL) {
-		struct vmspace *next = list->reap_next;
+		next = list->reap_next;
 		list->reap_next = NULL;
 		vmspace_destroy(list);
 		list = next;
@@ -2990,67 +1630,51 @@ vmspace_reap_pending(void)
 	return count;
 }
 
-unsigned vmspace_count(void)
-{ return atomic_load_acquire(&vmspace_live); }
+/*
+ * Reports the number of live user vmspaces.
+ */
+unsigned
+vmspace_count(
+	void)
+{
+	unsigned count;
 
+	count = atomic_load_acquire(&vmspace_live);
+	return count;
+}
+
+/*
+ * Reports the size of the whole user address range.
+ */
 uint64_t
-vmspace_address_cap(void)
+vmspace_address_cap(
+	void)
 {
 	vmspace_layout_init();
 	return (uint64_t)(vm_layout.user_limit - vm_layout.user_minimum);
 }
 
-static int
-vmspace_set_address_limit_locked(struct vmspace *vm, uint64_t limit)
-{
-	if (vm == NULL || vm == &kernel_vmspace || limit > vmspace_address_cap())
-		return EINVAL;
-	vm->address_limit = limit;
-	return 0;
-}
-
-static void
-vmspace_set_stack_limit_locked(struct vmspace *vm, uint64_t limit)
-{
-	if (vm != NULL && vm != &kernel_vmspace)
-		vm->stack_limit = limit;
-}
-
-static int
-vmspace_set_data_limit_locked(struct vmspace *vm, uint64_t limit)
-{
-	uint64_t cap = vmspace_address_cap();
-
-	if (vm == NULL || vm == &kernel_vmspace)
-		return EINVAL;
-	/* RLIM_INFINITY is the public resource-limit representation.  The VM
-	 * still needs a concrete bound for overflow-safe brk arithmetic, so map
-	 * it to the largest addressable user range at this boundary. */
-	if (limit == UINT64_MAX)
-		limit = cap;
-	if (limit > cap)
-		return EINVAL;
-	vm->data_limit = limit;
-	return 0;
-}
-
-static void
-vmspace_generation_advance_locked(struct vmspace *vm)
-{
-	if (++vm->generation == 0)
-		vm->generation++;
-}
-
+/*
+ * Copies a vmspace for fork, sharing private pages copy-on-write.
+ *
+ * A page whose backing is busy is waited for outside the locks and the
+ * whole copy is retried.
+ */
 int
-vmspace_fork(struct vmspace *source, struct vmspace **result)
+vmspace_fork(
+	struct vmspace *source,
+	struct vmspace **result)
 {
 	struct vm_private_page *wait_backing;
 	struct vmspace *failed_copy;
-	int error, wait_error;
+	int error;
+	int wait_error;
+
 	if (source == NULL || source == &kernel_vmspace || result == NULL)
 		return EINVAL;
 	*result = NULL;
 retry:
+	/* Copies under the source locks. */
 	wait_backing = NULL;
 	failed_copy = NULL;
 	vm_metadata_enter();
@@ -3061,6 +1685,8 @@ retry:
 		vmspace_generation_advance_locked(source);
 	mutex_unlock(&source->lock);
 	vm_metadata_leave();
+
+	/* Retires a failed copy and waits out a busy backing. */
 	if (failed_copy != NULL)
 		vmspace_put(failed_copy);
 	if (error == EBUSY && wait_backing != NULL) {
@@ -3075,11 +1701,19 @@ retry:
 	return error;
 }
 
+/*
+ * Maps anonymous memory at a fixed address that must be free.
+ */
 int
-vmspace_map_anon(struct vmspace *vm, uintptr_t start, size_t size,
-	uint32_t prot, struct vm_region **result)
+vmspace_map_anon(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct vm_region **result)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3092,11 +1726,20 @@ vmspace_map_anon(struct vmspace *vm, uintptr_t start, size_t size,
 	return error;
 }
 
+/*
+ * Maps anonymous memory at a fixed address, failing with EEXIST when the
+ * range is in use.
+ */
 int
-vmspace_map_anon_fixed_noreplace(struct vmspace *vm, uintptr_t start,
-	size_t size, uint32_t prot, struct vm_region **result)
+vmspace_map_anon_fixed_noreplace(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct vm_region **result)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3110,26 +1753,55 @@ vmspace_map_anon_fixed_noreplace(struct vmspace *vm, uintptr_t start,
 	return error;
 }
 
+/*
+ * Maps anonymous memory at a fixed address, replacing whatever was there.
+ */
 int
-vmspace_map_anon_fixed(struct vmspace *vm, uintptr_t start, size_t size,
-	uint32_t prot, int shared, struct vm_region **result)
+vmspace_map_anon_fixed(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	int shared,
+	struct vm_region **result)
 {
-	struct vm_object *object = NULL;
-	struct vm_region *prepared = NULL;
-	unsigned flags = shared ? VM_REGION_SHARED : 0;
-	size_t commit_size = !shared && prot != 0 ? size : 0;
+	struct vm_object *object;
+	struct vm_region *prepared;
+	unsigned flags;
+	size_t commit_size;
+	size_t data_size;
 	int error;
 
-	if (vm == NULL || vm == &kernel_vmspace ||
+	object = NULL;
+	prepared = NULL;
+
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
 	    (shared != 0 && shared != 1))
 		return EINVAL;
+
+	/* A shared mapping is backed by an anonymous object; private memory is committed. */
+	if (shared) {
+		flags = VM_REGION_SHARED;
+		commit_size = 0;
+		data_size = size;
+	} else {
+		flags = 0;
+		if (prot != 0)
+			commit_size = size;
+		else
+			commit_size = 0;
+		data_size = 0;
+	}
 	if (shared) {
 		error = vm_object_create_anonymous(size, &object);
 		if (error != 0)
 			return error;
 	}
+
+	/* Prepares the region fully before replacing the old mappings. */
 	error = prepare_region(start, size, prot, VM_BACKING_ANON, NULL, 0,
-	    start, shared ? size : 0, flags, commit_size, &prepared);
+	    start, data_size, flags, commit_size, &prepared);
 	if (error != 0) {
 		if (object != NULL)
 			vm_object_put(object);
@@ -3142,23 +1814,37 @@ vmspace_map_anon_fixed(struct vmspace *vm, uintptr_t start, size_t size,
 	return error;
 }
 
+/*
+ * Maps a new shared anonymous object at a free address near a hint.
+ */
 int
-vmspace_map_anon_shared_find(struct vmspace *vm, uintptr_t hint, size_t size,
-	uint32_t prot, uintptr_t *mapped)
+vmspace_map_anon_shared_find(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	uintptr_t *mapped)
 {
 	struct vm_object *object;
-	struct vm_region *region = NULL;
+	struct vm_region *region;
 	uintptr_t start;
 	size_t rounded;
 	int error;
 
-	if (vm == NULL || vm == &kernel_vmspace || mapped == NULL || size == 0 ||
+	region = NULL;
+
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    mapped == NULL ||
+	    size == 0 ||
 	    size > SIZE_MAX - (PAGE_SIZE - 1U))
 		return EINVAL;
 	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
 	error = vm_object_create_anonymous(rounded, &object);
 	if (error != 0)
 		return error;
+
+	/* Finds a free range and maps the object there. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
 	error = vmspace_find_free_range_locked(vm, hint, rounded, PAGE_SIZE,
@@ -3178,12 +1864,23 @@ vmspace_map_anon_shared_find(struct vmspace *vm, uintptr_t hint, size_t size,
 	return error;
 }
 
+/*
+ * Maps a private file region at a fixed address that must be free.
+ */
 int
-vmspace_map_file(struct vmspace *vm, uintptr_t start, size_t size,
-	uint32_t prot, struct file *file, off_t offset, uintptr_t data_start,
-	size_t data_size, struct vm_region **result)
+vmspace_map_file(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	uintptr_t data_start,
+	size_t data_size,
+	struct vm_region **result)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3198,7 +1895,7 @@ vmspace_map_file(struct vmspace *vm, uintptr_t start, size_t size,
 }
 
 /*
- * Maps a shared file after reserving its backing outside address-space locks.
+ * Maps a shared file region at a fixed address that must be free.
  */
 int
 vmspace_map_file_shared(
@@ -3241,26 +1938,54 @@ vmspace_map_file_shared(
 	return error;
 }
 
+/*
+ * Maps a file region at a fixed address, replacing whatever was there.
+ */
 int
-vmspace_map_file_fixed(struct vmspace *vm, uintptr_t start, size_t size,
-	uint32_t prot, struct file *file, off_t offset, size_t data_size,
-	int shared, struct vm_region **result)
+vmspace_map_file_fixed(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	size_t data_size,
+	int shared,
+	struct vm_region **result)
 {
-	struct vm_object *object = NULL;
-	struct vm_region *prepared = NULL;
-	unsigned flags = shared ? VM_REGION_SHARED : 0;
-	size_t commit_size = !shared && (prot & HAL_SPACE_WRITE) != 0 ?
-	    size : 0;
+	struct vm_object *object;
+	struct vm_region *prepared;
+	unsigned flags;
+	size_t commit_size;
 	int error;
 
-	if (vm == NULL || vm == &kernel_vmspace || file == NULL ||
+	object = NULL;
+	prepared = NULL;
+
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    file == NULL ||
 	    (shared != 0 && shared != 1))
 		return EINVAL;
+
+	/* A shared mapping uses the file's object; a writable private one is committed. */
+	if (shared) {
+		flags = VM_REGION_SHARED;
+		commit_size = 0;
+	} else {
+		flags = 0;
+		if ((prot & HAL_SPACE_WRITE) != 0)
+			commit_size = size;
+		else
+			commit_size = 0;
+	}
 	if (shared) {
 		error = vm_object_get_shared(file, &object);
 		if (error != 0)
 			return error;
 	}
+
+	/* Prepares the region fully before replacing the old mappings. */
 	error = prepare_region(start, size, prot, VM_BACKING_FILE, file, offset,
 	    start, data_size, flags, commit_size, &prepared);
 	if (error != 0) {
@@ -3275,11 +2000,18 @@ vmspace_map_file_fixed(struct vmspace *vm, uintptr_t start, size_t size,
 	return error;
 }
 
+/*
+ * Maps the initial stack and its guard region below a top address.
+ */
 int
-vmspace_map_stack(struct vmspace *vm, uintptr_t top, size_t size,
+vmspace_map_stack(
+	struct vmspace *vm,
+	uintptr_t top,
+	size_t size,
 	size_t guard_size)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3292,10 +2024,17 @@ vmspace_map_stack(struct vmspace *vm, uintptr_t top, size_t size,
 	return error;
 }
 
+/*
+ * Finds the region that contains a range, for inspection only.
+ */
 struct vm_region *
-vmspace_find_region(struct vmspace *vm, uintptr_t address, size_t size)
+vmspace_find_region(
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size)
 {
 	struct vm_region *region;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return NULL;
 	vm_metadata_enter();
@@ -3303,24 +2042,39 @@ vmspace_find_region(struct vmspace *vm, uintptr_t address, size_t size)
 	region = find_region_locked(vm, address, size);
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+
 	/* Compatibility inspection only; callers must not retain the pointer. */
 	return region;
 }
 
+/*
+ * Reports the shared object and offset that back a user range.
+ */
 int
-vmspace_shared_mapping_key(struct vmspace *vm, uintptr_t address, size_t size,
-	struct vm_object **object, uintptr_t *offset)
+vmspace_shared_mapping_key(
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size,
+	struct vm_object **object,
+	uintptr_t *offset)
 {
 	struct vm_region *region;
-	int error = EINVAL;
-	if (vm == NULL || vm == &kernel_vmspace || object == NULL ||
+	int error;
+
+	error = EINVAL;
+
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    object == NULL ||
 	    offset == NULL)
 		return EINVAL;
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
 	region = find_region_locked(vm, address, size);
-	if (region != NULL && (region->flags & VM_REGION_SHARED) != 0 &&
-	    region->object != NULL && region->file_offset >= 0 &&
+	if (region != NULL &&
+	    (region->flags & VM_REGION_SHARED) != 0 &&
+	    region->object != NULL &&
+	    region->file_offset >= 0 &&
 	    (uintmax_t)region->file_offset <= UINTPTR_MAX -
 	    (address - region->start)) {
 		vm_object_ref(region->object);
@@ -3333,11 +2087,18 @@ vmspace_shared_mapping_key(struct vmspace *vm, uintptr_t address, size_t size,
 	return error;
 }
 
+/*
+ * Checks that a user range is mapped with the required protection.
+ */
 int
-vmspace_check(struct vmspace *vm, uintptr_t address, size_t size,
+vmspace_check(
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size,
 	uint32_t required)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EFAULT;
 	vm_metadata_enter();
@@ -3348,8 +2109,14 @@ vmspace_check(struct vmspace *vm, uintptr_t address, size_t size,
 	return error;
 }
 
+/*
+ * Unwires every page of a user range.
+ */
 void
-vmspace_unwire_range(struct vmspace *vm, uintptr_t address, size_t size)
+vmspace_unwire_range(
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size)
 {
 	if (vm == NULL || vm == &kernel_vmspace)
 		return;
@@ -3361,33 +2128,56 @@ vmspace_unwire_range(struct vmspace *vm, uintptr_t address, size_t size)
 	vm_metadata_leave();
 }
 
+/*
+ * Copies kernel memory into a user range.
+ */
 int
-vmspace_copy_to(struct vmspace *vm, uintptr_t destination,
-	const void *source, size_t size)
+vmspace_copy_to(
+	struct vmspace *vm,
+	uintptr_t destination,
+	const void *source,
+	size_t size)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EFAULT;
 	error = vmspace_copy_to_locked(vm, destination, source, size);
 	return error;
 }
 
+/*
+ * Copies a user range into kernel memory.
+ */
 int
-vmspace_copy_from(struct vmspace *vm, void *destination,
-	uintptr_t source, size_t size)
+vmspace_copy_from(
+	struct vmspace *vm,
+	void *destination,
+	uintptr_t source,
+	size_t size)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EFAULT;
 	error = vmspace_copy_from_locked(vm, destination, source, size);
 	return error;
 }
 
+/*
+ * Finds a free aligned range between two bounds.
+ */
 int
-vmspace_find_free_range_bounded(struct vmspace *vm, uintptr_t minimum,
-	uintptr_t maximum, size_t size, size_t alignment, uintptr_t *mapped)
+vmspace_find_free_range_bounded(
+	struct vmspace *vm,
+	uintptr_t minimum,
+	uintptr_t maximum,
+	size_t size,
+	size_t alignment,
+	uintptr_t *mapped)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3399,11 +2189,19 @@ vmspace_find_free_range_bounded(struct vmspace *vm, uintptr_t minimum,
 	return error;
 }
 
+/*
+ * Finds a free aligned range at or above a hint in the mmap area.
+ */
 int
-vmspace_find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
-	size_t alignment, uintptr_t *mapped)
+vmspace_find_free_range(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	size_t alignment,
+	uintptr_t *mapped)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3415,11 +2213,19 @@ vmspace_find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
 	return error;
 }
 
+/*
+ * Maps anonymous memory at a free address near a hint.
+ */
 int
-vmspace_map_find(struct vmspace *vm, uintptr_t hint, size_t size,
-	uint32_t prot, uintptr_t *mapped)
+vmspace_map_find(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	uintptr_t *mapped)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3432,12 +2238,22 @@ vmspace_map_find(struct vmspace *vm, uintptr_t hint, size_t size,
 	return error;
 }
 
+/*
+ * Maps a private file region at a free address near a hint.
+ */
 int
-vmspace_map_file_find(struct vmspace *vm, uintptr_t hint, size_t size,
-	uint32_t prot, struct file *file, off_t offset, size_t data_size,
+vmspace_map_file_find(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	size_t data_size,
 	uintptr_t *mapped)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3452,7 +2268,7 @@ vmspace_map_file_find(struct vmspace *vm, uintptr_t hint, size_t size,
 }
 
 /*
- * Chooses and maps a shared file after completing backing admission.
+ * Maps a shared file region at a free address near a hint.
  */
 int
 vmspace_map_file_shared_find(
@@ -3495,11 +2311,18 @@ vmspace_map_file_shared_find(
 	return error;
 }
 
+/*
+ * Records where the program break starts and how much static data
+ * counts against the data limit.
+ */
 int
-vmspace_set_brk_start(struct vmspace *vm, uintptr_t start,
+vmspace_set_brk_start(
+	struct vmspace *vm,
+	uintptr_t start,
 	uint64_t static_data_bytes)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3512,10 +2335,17 @@ vmspace_set_brk_start(struct vmspace *vm, uintptr_t start,
 	return error;
 }
 
+/*
+ * Moves the program break, or reports it when the request is zero.
+ */
 int
-vmspace_brk(struct vmspace *vm, uintptr_t requested, uintptr_t *result)
+vmspace_brk(
+	struct vmspace *vm,
+	uintptr_t requested,
+	uintptr_t *result)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3528,11 +2358,20 @@ vmspace_brk(struct vmspace *vm, uintptr_t requested, uintptr_t *result)
 	return error;
 }
 
+/*
+ * Unmaps a user range, retiring its regions outside the locks.
+ */
 int
-vmspace_unmap(struct vmspace *vm, uintptr_t start, size_t size)
+vmspace_unmap(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size)
 {
-	struct vm_region *retired = NULL;
+	struct vm_region *retired;
 	int error;
+
+	retired = NULL;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3542,8 +2381,12 @@ vmspace_unmap(struct vmspace *vm, uintptr_t start, size_t size)
 		vmspace_generation_advance_locked(vm);
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
-	/* Test-only weak checkpoint: VA is free and old mappings are detached,
-	 * while heavyweight backing/object retirement has not started yet. */
+
+	/*
+	 * Test-only weak checkpoint: VA is free and old mappings are
+	 * detached, while heavyweight backing/object retirement has not
+	 * started yet.
+	 */
 	if (error == 0 && retired != NULL &&
 	    vmspace_unmap_retire_checkpoint != NULL)
 		vmspace_unmap_retire_checkpoint(vm, start, size);
@@ -3551,11 +2394,18 @@ vmspace_unmap(struct vmspace *vm, uintptr_t start, size_t size)
 	return error;
 }
 
+/*
+ * Changes the protection of a user range.
+ */
 int
-vmspace_protect(struct vmspace *vm, uintptr_t start, size_t size,
+vmspace_protect(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
 	uint32_t prot)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3568,10 +2418,16 @@ vmspace_protect(struct vmspace *vm, uintptr_t start, size_t size,
 	return error;
 }
 
+/*
+ * Sets the limit on mapped virtual bytes.
+ */
 int
-vmspace_set_address_limit(struct vmspace *vm, uint64_t limit)
+vmspace_set_address_limit(
+	struct vmspace *vm,
+	uint64_t limit)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3584,10 +2440,16 @@ vmspace_set_address_limit(struct vmspace *vm, uint64_t limit)
 	return error;
 }
 
+/*
+ * Sets the limit on data segment growth.
+ */
 int
-vmspace_set_data_limit(struct vmspace *vm, uint64_t limit)
+vmspace_set_data_limit(
+	struct vmspace *vm,
+	uint64_t limit)
 {
 	int error;
+
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
 	vm_metadata_enter();
@@ -3600,8 +2462,13 @@ vmspace_set_data_limit(struct vmspace *vm, uint64_t limit)
 	return error;
 }
 
+/*
+ * Sets the limit on stack size.
+ */
 void
-vmspace_set_stack_limit(struct vmspace *vm, uint64_t limit)
+vmspace_set_stack_limit(
+	struct vmspace *vm,
+	uint64_t limit)
 {
 	if (vm == NULL || vm == &kernel_vmspace)
 		return;
@@ -3611,4 +2478,2284 @@ vmspace_set_stack_limit(struct vmspace *vm, uint64_t limit)
 	vmspace_generation_advance_locked(vm);
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+}
+
+/* Allocates one physical page for user memory. */
+static int
+alloc_vm_page(
+	struct hal_pmem *memory)
+{
+	const struct hal_pmem_request request = {
+		HAL_PMEM_PADDR_ANY, PAGE_SIZE, PAGE_SIZE,
+		HAL_PMEM_TYPE_RAM, 0
+	};
+	int error;
+
+	error = hal_pmem_alloc(&request, memory);
+	return error;
+}
+
+/* Allocates a metadata slab page, reclaiming once when not under the metadata lock. */
+static int
+alloc_vm_metadata_page(
+	struct hal_pmem *memory)
+{
+	int error;
+
+	/*
+	 * A fault normally reaches allocate_page_frame(), which can reclaim
+	 * a user page before retrying physical allocation.  A metadata slab
+	 * refill happens first, however, so it needs the same bounded retry
+	 * or memory pressure can fail a fault before reclaim is attempted at
+	 * all.
+	 *
+	 * Never enter reclaim recursively while the caller owns the
+	 * cross-VM metadata lock.  This also covers vmspace_fork(), whose
+	 * metadata allocation intentionally remains a nonblocking ENOMEM
+	 * path while its source VM is locked.  vm_reclaim_one() itself does
+	 * not allocate mapping metadata, so one unlocked retry is sufficient
+	 * and cannot recurse through this helper.
+	 */
+	error = alloc_vm_page(memory);
+	if (error == HAL_OK)
+		return HAL_OK;
+	if (vm_metadata_owned() || vm_reclaim_one(NULL) != 0)
+		return error;
+	error = alloc_vm_page(memory);
+	return error;
+}
+
+/* Takes a zeroed page-metadata slot from any slab; the caller holds the slab lock. */
+static struct vm_page *
+vm_page_slab_take_locked(
+	void)
+{
+	struct vm_page_slab *slab;
+	unsigned slot;
+
+	for (slab = vm_page_slabs; slab != NULL; slab = slab->next) {
+		if (slab->free_mask == 0)
+			continue;
+		for (slot = 0; slot < VM_PAGE_SLAB_SLOTS; slot++) {
+			if ((slab->free_mask & (1U << slot)) != 0)
+				break;
+		}
+		if (slot == VM_PAGE_SLAB_SLOTS)
+			HAL_FATAL("invalid VM page slab bitmap");
+		slab->free_mask &= ~(1U << slot);
+		slab->used++;
+		memset(&slab->slots[slot], 0, sizeof(slab->slots[slot]));
+		return &slab->slots[slot];
+	}
+	return NULL;
+}
+
+/* Takes a zeroed private-backing slot from any slab; the caller holds the slab lock. */
+static struct vm_private_page *
+vm_private_page_slab_take_locked(
+	void)
+{
+	struct vm_private_page_slab *slab;
+	unsigned slot;
+
+	for (slab = vm_private_page_slabs; slab != NULL; slab = slab->next) {
+		if (slab->free_mask == 0)
+			continue;
+		for (slot = 0; slot < VM_PRIVATE_PAGE_SLAB_SLOTS; slot++) {
+			if ((slab->free_mask & (1U << slot)) != 0)
+				break;
+		}
+		if (slot == VM_PRIVATE_PAGE_SLAB_SLOTS)
+			HAL_FATAL("invalid VM private metadata slab bitmap");
+		slab->free_mask &= ~(1U << slot);
+		slab->used++;
+		memset(&slab->slots[slot], 0, sizeof(slab->slots[slot]));
+		return &slab->slots[slot];
+	}
+	return NULL;
+}
+
+/* Allocates a zeroed private-backing record, growing the slab pool when empty. */
+static struct vm_private_page *
+vm_private_page_alloc_metadata(
+	void)
+{
+	struct hal_pmem memory;
+	struct vm_private_page_slab *fresh;
+	struct vm_private_page *backing;
+	unsigned long irq;
+
+	vmspace_layout_init();
+
+	/* Takes a free slot from an existing slab. */
+	irq = spin_lock_irqsave(&vm_private_page_slab_lock);
+	backing = vm_private_page_slab_take_locked();
+	spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
+	if (backing != NULL)
+		return backing;
+
+	/* Reclaim or a concurrent free may have returned a slab slot. */
+	if (alloc_vm_metadata_page(&memory) != HAL_OK) {
+		irq = spin_lock_irqsave(&vm_private_page_slab_lock);
+		backing = vm_private_page_slab_take_locked();
+		spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
+		return backing;
+	}
+
+	/* Publishes the new slab unless another one appeared meanwhile. */
+	fresh = memory.vaddr;
+	memset(fresh, 0, PAGE_SIZE);
+	fresh->memory = memory;
+	fresh->free_mask = VM_PRIVATE_PAGE_SLAB_FREE_MASK;
+	irq = spin_lock_irqsave(&vm_private_page_slab_lock);
+	backing = vm_private_page_slab_take_locked();
+	if (backing == NULL) {
+		fresh->next = vm_private_page_slabs;
+		vm_private_page_slabs = fresh;
+		backing = vm_private_page_slab_take_locked();
+		fresh = NULL;
+	}
+	spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
+	if (fresh != NULL && hal_pmem_free(&memory) != HAL_OK)
+		HAL_FATAL("unused VM private metadata slab free failed");
+	return backing;
+}
+
+/* Tests whether a page-aligned range lies inside the user address range. */
+static int
+range_valid(
+	uintptr_t start,
+	size_t size)
+{
+	vmspace_layout_init();
+	if (size == 0)
+		return 0;
+	if ((start & (PAGE_SIZE - 1U)) != 0)
+		return 0;
+	if ((size & (PAGE_SIZE - 1U)) != 0)
+		return 0;
+	if (start < vm_layout.user_minimum)
+		return 0;
+	if (start >= vm_layout.user_limit)
+		return 0;
+	if (size > vm_layout.user_limit - start)
+		return 0;
+	return 1;
+}
+
+/* Tests whether a range intersects any region. */
+static int
+overlaps(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size)
+{
+	struct vm_region *region;
+	uintptr_t end;
+
+	end = start + size;
+	for (region = vm->regions; region != NULL; region = region->next) {
+		if (start < region->start + region->size && region->start < end)
+			return 1;
+	}
+	return 0;
+}
+
+/* Links a region into the address-sorted list. */
+static void
+insert_region(
+	struct vmspace *vm,
+	struct vm_region *region)
+{
+	struct vm_region **link;
+
+	link = &vm->regions;
+	while (*link != NULL && (*link)->start < region->start)
+		link = &(*link)->next;
+	region->next = *link;
+	*link = region;
+}
+
+/* Reclaims a small reserve of private pages for page-table growth. */
+static unsigned
+reclaim_page_map_reserve(
+	struct vm_page *avoid)
+{
+	unsigned reclaimed;
+
+	/*
+	 * A page-table miss can require more than the one page returned by
+	 * a normal frame-allocation retry.  In particular, once the fixed
+	 * kernel heap is full, the i386 HAL needs one page-backed descriptor
+	 * and one PTE page at a new PDE boundary.  Reclaim a small bounded
+	 * reserve while the fault's own mapping is BUSY, then retry the
+	 * complete fault transaction.
+	 */
+	for (reclaimed = 0; reclaimed < VM_PAGE_MAP_RESERVE_PAGES; reclaimed++) {
+		if (vm_reclaim_private_one(avoid) != 0)
+			break;
+	}
+	return reclaimed;
+}
+
+/* Allocates and initializes a private backing without a frame. */
+static struct vm_private_page *
+private_page_alloc(
+	void)
+{
+	struct vm_private_page *backing;
+
+	backing = vm_private_page_alloc_metadata();
+	if (backing == NULL)
+		return NULL;
+	vm_private_page_init(backing);
+	return backing;
+}
+
+/* Attaches a fresh private backing to its first mapping. */
+static void
+private_page_attach_new(
+	struct vm_page *page,
+	struct vm_private_page *backing)
+{
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if (backing->mapping_count != 0 || backing->mappings != NULL)
+		HAL_FATAL("attaching initialized VM private backing twice");
+	backing->mapping_count = 1;
+	page->private_page = backing;
+	page->private_next = backing->mappings;
+	backing->mappings = page;
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+}
+
+/* Copies a vmspace's regions and shares its private pages; the caller holds the source locks. */
+static int
+vmspace_fork_locked(
+	struct vmspace *source,
+	struct vmspace **result,
+	struct vm_private_page **wait_backing,
+	struct vmspace **failed_copy)
+{
+	struct vmspace *copy;
+	struct vm_region *source_region;
+	int error;
+	struct vm_region *copy_region;
+	struct vm_page *source_page;
+	struct vm_private_page *backing;
+	struct vm_page *copy_page;
+	hal_physaddr_t physical;
+	uintptr_t page_address;
+	uint64_t reservation_generation;
+	uint32_t cow_prot;
+	unsigned long state_irq;
+	int resident;
+	int child_mapped;
+	int source_mapped;
+
+	error = 0;
+
+	if (source == NULL ||
+	    source == &kernel_vmspace ||
+	    result == NULL ||
+	    wait_backing == NULL ||
+	    failed_copy == NULL)
+		return EINVAL;
+	*wait_backing = NULL;
+	*failed_copy = NULL;
+
+	/* Waits for every fault in the source to settle. */
+	vmspace_wait_faults_locked(source);
+	copy = vmspace_create();
+	if (copy == NULL)
+		return ENOMEM;
+	copy->address_limit = source->address_limit;
+	copy->data_limit = source->data_limit;
+	copy->stack_limit = source->stack_limit;
+
+	/* Copies each region, then shares each of its private pages. */
+	for (source_region = source->regions; source_region != NULL;
+	     source_region = source_region->next) {
+		error = map_region(copy, source_region->start, source_region->size,
+		    source_region->prot, source_region->backing,
+		    source_region->file, source_region->file_offset,
+		    source_region->data_start, source_region->data_size,
+		    source_region->flags, source_region->commit_size,
+		    &copy_region);
+		if (error != 0)
+			goto fail;
+		copy_region->max_prot = source_region->max_prot;
+		if (source_region->object != NULL) {
+			vm_object_ref(source_region->object);
+			copy_region->object = source_region->object;
+			/* Shared object pages are mapped lazily in the child. */
+			continue;
+		}
+		for (source_page = source_region->pages; source_page != NULL;
+		     source_page = source_page->next) {
+			physical = 0;
+			child_mapped = 0;
+			copy_page = vm_page_alloc_metadata();
+			if (copy_page == NULL) {
+				error = ENOMEM;
+				goto fail;
+			}
+			copy_page->vm = copy;
+			copy_page->region = copy_region;
+			copy_page->address = source_page->address;
+			if (source_page->object_page != NULL) {
+				/* MAP_SHARED pages remain lazy in the child. */
+				vm_page_free_metadata(copy_page);
+				continue;
+			}
+			if (source_page->private_page == NULL) {
+				vm_page_free_metadata(copy_page);
+				error = EFAULT;
+				goto fail;
+			}
+
+			/*
+			 * Pin the source metadata before the backing share.
+			 * The backing operation excludes reclaim/pins, while
+			 * the local BUSY marker makes unmap/protect/fault wait
+			 * when the VM locks are dropped for the source PTE
+			 * shootdown.
+			 */
+			if (source_region->hold_count == (unsigned)-1)
+				HAL_FATAL("VM fork region hold overflow");
+			source_region->hold_count++;
+			source_page->flags |= VM_MAPPING_BUSY;
+			backing = source_page->private_page;
+			page_address = source_page->address;
+			cow_prot = source_region->prot & ~HAL_SPACE_WRITE;
+			source_mapped =
+			    (source_page->flags & VM_MAPPING_MAPPED) != 0;
+			reservation_generation = source->generation;
+
+			/* Read-only private mappings also need COW for later mprotect. */
+			error = vm_page_share_private(source_page, copy_page);
+			if (error != 0) {
+				if (error == EBUSY) {
+					*wait_backing = backing;
+					vm_private_page_ref(*wait_backing);
+				}
+				source_page->flags &= ~VM_MAPPING_BUSY;
+				if (source_region->hold_count == 0)
+					HAL_FATAL("VM fork region hold underflow");
+				source_region->hold_count--;
+				vmspace_fault_wake_locked(source);
+				vm_page_free_metadata(copy_page);
+				goto fail;
+			}
+			copy_page->next = copy_region->pages;
+			copy_region->pages = copy_page;
+			state_irq = spin_lock_irqsave(&backing->state_lock);
+			resident = (backing->flags & VM_PAGE_RESIDENT) != 0;
+			if (resident)
+				physical = backing->pmem.paddr;
+			spin_unlock_irqrestore(&backing->state_lock, state_irq);
+
+			/* Downgrades the source and maps the child with no VM lock held. */
+			mutex_unlock(&source->lock);
+			vm_metadata_leave();
+			if (resident && source_mapped && hal_page_prot(source->space,
+			    (void *)page_address, PAGE_SIZE, cow_prot) != HAL_OK)
+				error = ENOMEM;
+			if (error == 0 && resident && source_mapped &&
+			    hal_page_map(copy->space, (void *)page_address, physical,
+			    PAGE_SIZE, cow_prot) != HAL_OK)
+				error = ENOMEM;
+			else if (error == 0 && resident && source_mapped)
+				child_mapped = 1;
+			vm_metadata_enter();
+			mutex_lock(&source->lock);
+
+			/* Releases the pin after checking that nothing moved. */
+			if (source_page->region != source_region ||
+			    source_page->address != page_address ||
+			    source_page->private_page != backing ||
+			    find_page(source_region, page_address) != source_page)
+				HAL_FATAL("VM fork lost pinned source mapping");
+			if (child_mapped)
+				copy_page->flags |= VM_MAPPING_MAPPED;
+			if (error == 0 && source->generation != reservation_generation)
+				error = EAGAIN;
+			source_page->flags &= ~VM_MAPPING_BUSY;
+			if (source_region->hold_count == 0)
+				HAL_FATAL("VM fork region hold underflow");
+			source_region->hold_count--;
+			vm_private_page_operation_end(backing);
+			vmspace_fault_wake_locked(source);
+			if (error != 0)
+				goto fail;
+			vmspace_generation_advance_locked(source);
+		}
+	}
+
+	/* Copies the layout bookkeeping. */
+	copy->entry = source->entry;
+	copy->brk_start = source->brk_start;
+	copy->brk_current = source->brk_current;
+	copy->static_data_bytes = source->static_data_bytes;
+	copy->stack_guard_bottom = source->stack_guard_bottom;
+	copy->stack_bottom = source->stack_bottom;
+	copy->stack_top = source->stack_top;
+	*result = copy;
+	return 0;
+
+fail:
+	/* Child teardown may free pages or sync objects, so retire it locklessly. */
+	*failed_copy = copy;
+	return error;
+}
+
+/* Creates a region in a vmspace at a range that must be free; the caller holds the VM locks. */
+static int
+map_region(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	enum vm_region_backing backing,
+	struct file *file,
+	off_t file_offset,
+	uintptr_t data_start,
+	size_t data_size,
+	unsigned flags,
+	size_t commit_size,
+	struct vm_region **result)
+{
+	struct vm_region *region;
+	uint32_t max_prot;
+	uint64_t mapped_bytes;
+	int error;
+
+	max_prot = HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC;
+
+	/* Validates the range, the address limit, and the file description. */
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    !range_valid(start, size) ||
+	    overlaps(vm, start, size) ||
+	    (prot & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) != 0)
+		return EINVAL;
+	mapped_bytes = vm->mapped_virtual_bytes;
+	if (mapped_bytes > vm->address_limit)
+		mapped_bytes = vm->address_limit;
+	if ((uint64_t)size > vm->address_limit - mapped_bytes)
+		return ENOMEM;
+	if (backing == VM_BACKING_FILE &&
+	    (file == NULL || file_offset < 0 || data_start < start ||
+	     data_start >= start + size || data_size > start + size - data_start))
+		return EINVAL;
+
+	/* A shared mapping of an unwritable file can never become writable. */
+	if ((flags & VM_REGION_SHARED) != 0 && file != NULL &&
+	    ((file_status_flags_get(file) & O_ACCMODE) == O_RDONLY ||
+	     file->f_ops == NULL || file->f_ops->pwrite == NULL))
+		max_prot &= ~HAL_SPACE_WRITE;
+	if ((prot & ~max_prot) != 0)
+		return EACCES;
+
+	/* Reserves the commit charge and links the region. */
+	region = kern_calloc(1, sizeof(*region));
+	if (region == NULL)
+		return ENOMEM;
+	if (commit_size != 0) {
+		error = vm_commit_reserve(commit_size);
+		if (error != 0) {
+			kern_free(region);
+			return error;
+		}
+	}
+	region->start = start;
+	region->size = size;
+	region->prot = prot;
+	region->max_prot = max_prot;
+	region->flags = flags;
+	region->commit_size = commit_size;
+	region->backing = backing;
+	region->file = file;
+	region->file_offset = file_offset;
+	region->data_start = data_start;
+	region->data_size = data_size;
+	if (file != NULL)
+		file_ref(file);
+	insert_region(vm, region);
+	vm->mapped_virtual_bytes += size;
+	if (result != NULL)
+		*result = region;
+	return 0;
+}
+
+/* Builds a region that is not yet visible in any vmspace. */
+static int
+prepare_region(
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	enum vm_region_backing backing,
+	struct file *file,
+	off_t file_offset,
+	uintptr_t data_start,
+	size_t data_size,
+	unsigned flags,
+	size_t commit_size,
+	struct vm_region **result)
+{
+	struct vm_region *region;
+	uint32_t max_prot;
+	int error;
+
+	max_prot = HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC;
+
+	/*
+	 * MAP_FIXED uses this to reserve every fallible resource before it
+	 * detaches an old mapping.
+	 */
+	if (result == NULL ||
+	    !range_valid(start, size) ||
+	    (prot & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) != 0)
+		return EINVAL;
+	if (backing == VM_BACKING_FILE &&
+	    (file == NULL || file_offset < 0 || data_start < start ||
+	    data_start >= start + size || data_size > start + size - data_start))
+		return EINVAL;
+
+	/* A shared mapping of an unwritable file can never become writable. */
+	if ((flags & VM_REGION_SHARED) != 0 && file != NULL &&
+	    ((file_status_flags_get(file) & O_ACCMODE) == O_RDONLY ||
+	    file->f_ops == NULL || file->f_ops->pwrite == NULL))
+		max_prot &= ~HAL_SPACE_WRITE;
+	if ((prot & ~max_prot) != 0)
+		return EACCES;
+
+	/* Reserves the commit charge and fills the region in. */
+	region = kern_calloc(1, sizeof(*region));
+	if (region == NULL)
+		return ENOMEM;
+	if (commit_size != 0) {
+		error = vm_commit_reserve(commit_size);
+		if (error != 0) {
+			kern_free(region);
+			return error;
+		}
+	}
+	region->start = start;
+	region->size = size;
+	region->prot = prot;
+	region->max_prot = max_prot;
+	region->flags = flags;
+	region->commit_size = commit_size;
+	region->backing = backing;
+	region->file = file;
+	region->file_offset = file_offset;
+	region->data_start = data_start;
+	region->data_size = data_size;
+	if (file != NULL)
+		file_ref(file);
+	*result = region;
+	return 0;
+}
+
+/* Releases a prepared region that was never published. */
+static void
+discard_prepared_region(
+	struct vm_region *region)
+{
+	if (region == NULL)
+		return;
+	if (region->file != NULL)
+		(void)file_close(region->file);
+	if (region->object != NULL)
+		vm_object_put(region->object);
+	if (region->commit_size != 0)
+		vm_commit_release(region->commit_size);
+	kern_free(region);
+}
+
+/* Maps anonymous memory at a free range; the caller holds the VM locks. */
+static int
+vmspace_map_anon_locked(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct vm_region **result)
+{
+	size_t commit_size;
+	int error;
+
+	/* Inaccessible memory is not committed until it becomes accessible. */
+	if (prot != 0)
+		commit_size = size;
+	else
+		commit_size = 0;
+	error = map_region(vm, start, size, prot, VM_BACKING_ANON, NULL,
+	    0, start, 0, 0, commit_size, result);
+	return error;
+}
+
+/* Maps anonymous memory at a range that must not be in use; the caller holds the VM locks. */
+static int
+vmspace_map_anon_fixed_noreplace_locked(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct vm_region **result)
+{
+	int error;
+
+	if (vm == NULL || !range_valid(start, size))
+		return EINVAL;
+	if (overlaps(vm, start, size))
+		return EEXIST;
+	error = vmspace_map_anon_locked(vm, start, size, prot, result);
+	return error;
+}
+
+/* Maps a private file region at a free range; the caller holds the VM locks. */
+static int
+vmspace_map_file_locked(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t file_offset,
+	uintptr_t data_start,
+	size_t data_size,
+	struct vm_region **result)
+{
+	size_t commit_size;
+	int error;
+
+	/* Only a writable private file mapping needs commit. */
+	if ((prot & HAL_SPACE_WRITE) != 0)
+		commit_size = size;
+	else
+		commit_size = 0;
+	error = map_region(vm, start, size, prot, VM_BACKING_FILE, file,
+	    file_offset, data_start, data_size, 0, commit_size, result);
+	return error;
+}
+
+/* Maps a shared file region at a free range; the caller holds the VM locks. */
+static int
+vmspace_map_file_shared_locked(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t file_offset,
+	size_t data_size,
+	struct vm_object *object,
+	struct vm_region **result)
+{
+	struct vm_region *region;
+	int error;
+
+	/* Requires a prepared object and an aligned file offset. */
+	if (object == NULL)
+		return EINVAL;
+
+	/* Rejects offsets that cannot describe shared pages. */
+	if (file_offset < 0 || (file_offset & (PAGE_SIZE - 1U)) != 0)
+		return EINVAL;
+
+	/* Creates the region while its address-space metadata is locked. */
+	error = map_region(
+		vm, start, size, prot, VM_BACKING_FILE, file,
+		file_offset, start, data_size, VM_REGION_SHARED, 0, &region);
+	if (error != 0)
+		return error;
+
+	/* Transfers the prepared shared-object reference to the region. */
+	region->object = object;
+
+	/* Returns the published region when requested. */
+	if (result != NULL)
+		*result = region;
+
+	/* Reports successful publication. */
+	return 0;
+}
+
+/* Maps the stack and its guard below a top address; the caller holds the VM locks. */
+static int
+vmspace_map_stack_locked(
+	struct vmspace *vm,
+	uintptr_t top,
+	size_t size,
+	size_t guard_size)
+{
+	struct vm_region *guard;
+	struct vm_region *stack;
+	uintptr_t bottom;
+	uintptr_t guard_bottom;
+	uint64_t mapped_bytes;
+	int error;
+
+	/* Validates the geometry against the layout and the limits. */
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    size == 0 ||
+	    guard_size == 0 ||
+	    (top & (PAGE_SIZE - 1U)) != 0 ||
+	    (size & (PAGE_SIZE - 1U)) != 0 ||
+	    (guard_size & (PAGE_SIZE - 1U)) != 0 ||
+	    top > vm_layout.user_limit ||
+	    size > top ||
+	    guard_size > top - size)
+		return EINVAL;
+	mapped_bytes = vm->mapped_virtual_bytes;
+	if (mapped_bytes > vm->address_limit)
+		mapped_bytes = vm->address_limit;
+	if ((uint64_t)size > vm->stack_limit ||
+	    (uint64_t)size + guard_size > vm->address_limit - mapped_bytes)
+		return ENOMEM;
+	bottom = top - size;
+	guard_bottom = bottom - guard_size;
+	if (!range_valid(guard_bottom, size + guard_size) ||
+	    overlaps(vm, guard_bottom, size + guard_size))
+		return EINVAL;
+
+	/* Allocates both regions and the stack's commit charge. */
+	guard = kern_calloc(1, sizeof(*guard));
+	if (guard == NULL)
+		return ENOMEM;
+	stack = kern_calloc(1, sizeof(*stack));
+	if (stack == NULL) {
+		kern_free(guard);
+		return ENOMEM;
+	}
+	error = vm_commit_reserve(size);
+	if (error != 0) {
+		kern_free(stack);
+		kern_free(guard);
+		return error;
+	}
+
+	/* The guard is inaccessible and immutable; the stack is read-write. */
+	guard->start = guard_bottom;
+	guard->size = guard_size;
+	guard->backing = VM_BACKING_ANON;
+	guard->flags = VM_REGION_GUARD | VM_REGION_IMMUTABLE;
+	guard->max_prot = 0;
+	guard->data_start = guard_bottom;
+	stack->start = bottom;
+	stack->size = size;
+	stack->prot = HAL_SPACE_READ | HAL_SPACE_WRITE;
+	stack->max_prot = stack->prot;
+	stack->flags = VM_REGION_STACK | VM_REGION_IMMUTABLE;
+	stack->commit_size = size;
+	stack->backing = VM_BACKING_ANON;
+	stack->data_start = bottom;
+	insert_region(vm, guard);
+	insert_region(vm, stack);
+	vm->mapped_virtual_bytes += size + guard_size;
+	vm->stack_guard_bottom = guard_bottom;
+	vm->stack_bottom = bottom;
+	vm->stack_top = top;
+	return 0;
+}
+
+/* Finds the region that contains a whole range; the caller holds the VM lock. */
+static struct vm_region *
+find_region_locked(
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size)
+{
+	struct vm_region *region;
+
+	if (vm == NULL || size == 0 || address > UINTPTR_MAX - size)
+		return NULL;
+	for (region = vm->regions; region != NULL; region = region->next) {
+		if (address >= region->start &&
+		    address + size <= region->start + region->size)
+			return region;
+	}
+	return NULL;
+}
+
+/* Finds the page record of an address within a region. */
+static struct vm_page *
+find_page(
+	struct vm_region *region,
+	uintptr_t address)
+{
+	struct vm_page *page;
+
+	address &= ~(uintptr_t)(PAGE_SIZE - 1U);
+	for (page = region->pages; page != NULL; page = page->next) {
+		if (page->address == address)
+			return page;
+	}
+	return NULL;
+}
+
+/* Sleeps until the fault wait queue advances past an observed sequence. */
+static void
+vmspace_wait_fault_event(
+	struct vmspace *vm,
+	uint64_t sequence)
+{
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&vm->lock.guard);
+	(void)waitq_sleep(&vm->fault_waitq, &vm->lock.guard, sequence, 0, 0);
+	spin_unlock_irqrestore(&vm->lock.guard, irq);
+}
+
+/* Waits until no region is held and no page is BUSY; the caller holds the VM locks. */
+static void
+vmspace_wait_faults_locked(
+	struct vmspace *vm)
+{
+	struct vm_region *region;
+	int busy;
+	struct vm_page *page;
+	uint64_t sequence;
+
+	for (;;) {
+		/* Scans for any fault in progress. */
+		busy = 0;
+		for (region = vm->regions; region != NULL; region = region->next) {
+			if (region->hold_count != 0) {
+				busy = 1;
+				break;
+			}
+			for (page = region->pages; page != NULL; page = page->next) {
+				if ((page->flags & VM_MAPPING_BUSY) != 0) {
+					busy = 1;
+					break;
+				}
+			}
+			if (busy)
+				break;
+		}
+		if (!busy)
+			return;
+
+		/* Fault completion needs the outer cross-vm metadata lock. */
+		sequence = waitq_sequence(&vm->fault_waitq);
+		mutex_unlock(&vm->lock);
+		vm_metadata_leave();
+		vmspace_wait_fault_event(vm, sequence);
+		vm_metadata_enter();
+		mutex_lock(&vm->lock);
+	}
+}
+
+/* Allocates a frame for a private backing, reclaiming one page on failure. */
+static int
+allocate_page_frame(
+	struct vm_private_page *backing,
+	struct vm_page *avoid)
+{
+	if (alloc_vm_page(&backing->pmem) == HAL_OK)
+		return 0;
+	if (vm_reclaim_one(avoid) != 0)
+		return ENOMEM;
+	if (alloc_vm_page(&backing->pmem) != HAL_OK)
+		return ENOMEM;
+	return 0;
+}
+
+/* Fills a private page from the region's file, zeroing the rest. */
+static int
+fill_file_page(
+	struct vm_region *region,
+	struct vm_page *page)
+{
+	uintptr_t page_end;
+	uintptr_t data_end;
+	uintptr_t read_start;
+	uintptr_t read_end;
+	uint64_t offset_max;
+	size_t length;
+	off_t offset;
+	ssize_t count;
+
+	page_end = page->address + PAGE_SIZE;
+	data_end = region->data_start + region->data_size;
+	if (page->address > region->data_start)
+		read_start = page->address;
+	else
+		read_start = region->data_start;
+	if (page_end < data_end)
+		read_end = page_end;
+	else
+		read_end = data_end;
+
+	/* A page outside the data is zero only for an ELF zero tail. */
+	memset((void *)page->private_page->pmem.vaddr, 0, PAGE_SIZE);
+	if (read_start >= read_end) {
+		if ((region->flags & VM_REGION_ELF_ZERO_TAIL) != 0)
+			return 0;
+		return ENXIO;
+	}
+
+	/* Reads the overlapping bytes at their file offset. */
+	length = read_end - read_start;
+	if (sizeof(off_t) == sizeof(int64_t))
+		offset_max = (uint64_t)INT64_MAX;
+	else
+		offset_max = (uint64_t)INT32_MAX;
+	if (region->file_offset < 0 ||
+	    (uint64_t)(read_start - region->data_start) >
+	    offset_max - (uint64_t)region->file_offset)
+		return EOVERFLOW;
+	offset = region->file_offset +
+		(off_t)(read_start - region->data_start);
+	count = file_pread(region->file,
+		(void *)(page->private_page->pmem.vaddr +
+		    read_start - page->address),
+		length, offset);
+	if (count == (ssize_t)length)
+		return 0;
+	return EIO;
+}
+
+/* Builds an unlinked copy of a private page while the fault owns the old one. */
+static int
+prepare_cow_copy(
+	struct vm_page *page,
+	struct vm_private_page *old,
+	struct vm_private_page **result)
+{
+	struct vm_private_page *fresh;
+	unsigned long irq;
+
+	if (page == NULL || old == NULL || result == NULL)
+		return EINVAL;
+	fresh = private_page_alloc();
+	if (fresh == NULL)
+		return ENOMEM;
+	if (allocate_page_frame(fresh, page) != 0) {
+		vm_private_page_put(fresh);
+		return ENOMEM;
+	}
+	memcpy((void *)fresh->pmem.vaddr, (const void *)old->pmem.vaddr,
+	    PAGE_SIZE);
+	irq = spin_lock_irqsave(&fresh->state_lock);
+	fresh->flags = VM_PAGE_RESIDENT | VM_PAGE_DIRTY;
+	fresh->generation++;
+	if (fresh->generation == 0)
+		fresh->generation++;
+	spin_unlock_irqrestore(&fresh->state_lock, irq);
+	*result = fresh;
+	return 0;
+}
+
+/* Wakes every waiter on the fault queue; the caller holds the VM lock. */
+static void
+vmspace_fault_wake_locked(
+	struct vmspace *vm)
+{
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&vm->lock.guard);
+	waitq_wake_all(&vm->fault_waitq);
+	spin_unlock_irqrestore(&vm->lock.guard, irq);
+}
+
+/* Checks that a range is covered by regions with the required protection; the caller holds the VM lock. */
+static int
+vmspace_check_locked(
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size,
+	uint32_t required)
+{
+	struct vm_region *region;
+	uintptr_t current;
+	uintptr_t end;
+	uintptr_t region_end;
+
+	if (vm == NULL || !vmspace_user_range_valid(address, size))
+		return EFAULT;
+
+	/* Walks the sorted regions, refusing any gap. */
+	current = address;
+	end = address + size;
+	for (region = vm->regions; region != NULL && current < end;
+	     region = region->next) {
+		region_end = region->start + region->size;
+		if (current < region->start)
+			return EFAULT;
+		if (current >= region_end)
+			continue;
+		if ((region->prot & required) != required)
+			return EFAULT;
+		if (region_end < end)
+			current = region_end;
+		else
+			current = end;
+	}
+	if (current == end)
+		return 0;
+	return EFAULT;
+}
+
+/* Tests whether a page can be pinned without entering the fault path. */
+static int
+vmspace_pin_mapping_ready(
+	struct vmspace *vm,
+	uintptr_t address,
+	uint32_t required)
+{
+	struct vm_region *region;
+	struct vm_page *entry;
+	int ready;
+	struct vm_object_page *page;
+	struct vm_object *object;
+	unsigned long irq;
+
+	ready = 0;
+
+	/*
+	 * A resident mapping does not need to enter the fault path again
+	 * merely to acquire another uaccess pin.  This matters when one
+	 * syscall pins multiple ranges which share a user page: the fault
+	 * path takes exclusive backing I/O ownership and would otherwise
+	 * wait for the syscall's first pin.
+	 */
+	vm_metadata_enter();
+	mutex_lock(&vm->lock);
+	region = find_region_locked(vm, address, 1);
+	if (region != NULL)
+		entry = find_page(region, address);
+	else
+		entry = NULL;
+	if (entry != NULL &&
+	    (region->prot & required) == required &&
+	    (entry->flags & (VM_MAPPING_BUSY | VM_MAPPING_MAPPED)) ==
+	    VM_MAPPING_MAPPED) {
+		if (entry->private_page != NULL &&
+		    vm_private_page_is_resident(entry) &&
+		    ((required & HAL_SPACE_WRITE) == 0 ||
+		    (entry->flags & VM_MAPPING_COW) == 0)) {
+			ready = 1;
+		} else if (entry->object_page != NULL) {
+			/* A cached object page must be complete and not in error. */
+			page = entry->object_page;
+			object = page->owner;
+			if (object != NULL) {
+				irq = spin_lock_irqsave(&object->lock);
+				ready = 0;
+				if (page->owner == object &&
+				    page->pmem.size != 0 &&
+				    (page->flags & (VM_OBJECT_PAGE_BUSY |
+				    VM_OBJECT_PAGE_ERROR)) == 0)
+					ready = 1;
+				spin_unlock_irqrestore(&object->lock, irq);
+			}
+		}
+	}
+	mutex_unlock(&vm->lock);
+	vm_metadata_leave();
+	return ready;
+}
+
+/* Unwires every page of a range; the caller holds the VM lock. */
+static void
+vmspace_unwire_range_locked(
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size)
+{
+	uintptr_t page;
+	uintptr_t last;
+	struct vm_region *region;
+	struct vm_page *entry;
+
+	if (vm == NULL || size == 0 || address > UINTPTR_MAX - size)
+		return;
+	page = address & ~(uintptr_t)(PAGE_SIZE - 1U);
+	last = (address + size - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
+	for (;;) {
+		region = find_region_locked(vm, page, 1);
+		if (region != NULL)
+			entry = find_page(region, page);
+		else
+			entry = NULL;
+		if (entry != NULL && entry->wire_count != 0)
+			entry->wire_count--;
+		if (page == last)
+			break;
+		page += PAGE_SIZE;
+	}
+}
+
+/* Copies between kernel memory and a pinned user range in either direction. */
+static int
+copy_backing(
+	struct vmspace *vm,
+	uintptr_t user_address,
+	void *kernel,
+	size_t size,
+	uint32_t required,
+	int to_user)
+{
+	struct vmspace_pinned_page *pages;
+	uint8_t *bytes;
+	uintptr_t first;
+	uintptr_t last;
+	size_t page_count;
+	size_t position;
+	int error;
+	struct vmspace_pinned_page *page;
+	size_t offset;
+	size_t chunk;
+	void *mapped;
+
+	bytes = kernel;
+
+	/* Pins every page of the range. */
+	if (size == 0)
+		return 0;
+	if (kernel == NULL)
+		return EINVAL;
+	if (!vmspace_user_range_valid(user_address, size))
+		return EFAULT;
+	first = user_address & ~(uintptr_t)(PAGE_SIZE - 1U);
+	last = (user_address + size - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
+	page_count = (size_t)((last - first) / PAGE_SIZE) + 1U;
+	if (page_count > SIZE_MAX / sizeof(*pages))
+		return ENOMEM;
+	pages = kern_calloc(page_count, sizeof(*pages));
+	if (pages == NULL)
+		return ENOMEM;
+	error = vmspace_pin_user_pages(vm, user_address, size, required, pages,
+	    page_count);
+	if (error != 0) {
+		kern_free(pages);
+		if (error == ENOMEM)
+			return ENOMEM;
+		return EFAULT;
+	}
+
+	/* Copies one page-bounded chunk at a time. */
+	position = user_address - first;
+	while (size != 0) {
+		page = &pages[position / PAGE_SIZE];
+		offset = position & (PAGE_SIZE - 1U);
+		chunk = PAGE_SIZE - offset;
+		if (chunk > size)
+			chunk = size;
+		if (page->kind == VMSPACE_PINNED_PRIVATE) {
+			mapped = (uint8_t *)page->memory.vaddr + offset;
+			if (to_user) {
+				memcpy(mapped, bytes, chunk);
+				vm_private_page_mark_dirty(
+				    page->owner.private_page);
+			} else {
+				memcpy(bytes, mapped, chunk);
+			}
+			error = 0;
+		} else if (page->kind == VMSPACE_PINNED_OBJECT) {
+			if (to_user)
+				error = vm_object_page_pin_write(
+				    page->owner.object_page, offset, bytes, chunk);
+			else
+				error = vm_object_page_pin_read(
+				    page->owner.object_page, offset, bytes, chunk);
+		} else {
+			error = EFAULT;
+		}
+		if (error != 0)
+			break;
+		bytes += chunk;
+		position += chunk;
+		size -= chunk;
+	}
+	vmspace_unpin_user_pages(pages, page_count);
+	kern_free(pages);
+	return error;
+}
+
+/* Copies kernel memory into a user range. */
+static int
+vmspace_copy_to_locked(
+	struct vmspace *vm,
+	uintptr_t destination,
+	const void *source,
+	size_t size)
+{
+	int error;
+
+	error = copy_backing(vm, destination, (void *)source, size,
+	    HAL_SPACE_WRITE, 1);
+	return error;
+}
+
+/* Copies a user range into kernel memory. */
+static int
+vmspace_copy_from_locked(
+	struct vmspace *vm,
+	void *destination,
+	uintptr_t source,
+	size_t size)
+{
+	int error;
+
+	error = copy_backing(vm, source, destination, size,
+	    HAL_SPACE_READ, 0);
+	return error;
+}
+
+/* Finds a free aligned range between two bounds; the caller holds the VM lock. */
+static int
+vmspace_find_free_range_bounded_locked(
+	struct vmspace *vm,
+	uintptr_t minimum,
+	uintptr_t maximum,
+	size_t size,
+	size_t alignment,
+	uintptr_t *mapped)
+{
+	uintptr_t start;
+	uintptr_t limit;
+	struct vm_region *region;
+	int moved;
+
+	vmspace_layout_init();
+
+	/* Validates the bounds and rounds the size up to pages. */
+	if (vm == NULL ||
+	    mapped == NULL ||
+	    size == 0 ||
+	    alignment < PAGE_SIZE ||
+	    (alignment & (alignment - 1U)) != 0 ||
+	    minimum < vm_layout.user_minimum ||
+	    maximum > vm_layout.user_limit ||
+	    minimum >= maximum ||
+	    size > (size_t)(maximum - minimum))
+		return EINVAL;
+	if (size > SIZE_MAX - (PAGE_SIZE - 1U))
+		return EOVERFLOW;
+	size = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
+	limit = maximum;
+	if (vm->stack_guard_bottom != 0 && vm->stack_guard_bottom < limit)
+		limit = vm->stack_guard_bottom;
+	start = minimum;
+	if (start > UINTPTR_MAX - (alignment - 1U))
+		return ENOMEM;
+	start = (start + alignment - 1U) & ~(uintptr_t)(alignment - 1U);
+
+	/* Slides the candidate past every region it collides with. */
+	for (;;) {
+		moved = 0;
+		if (start >= limit || size > limit - start)
+			return ENOMEM;
+		for (region = vm->regions; region != NULL; region = region->next) {
+			if (start + size <= region->start)
+				break;
+			if (start < region->start + region->size &&
+			    region->start < start + size) {
+				if (region->start > UINTPTR_MAX - region->size ||
+				    region->start + region->size >
+				    UINTPTR_MAX - (alignment - 1U))
+					return ENOMEM;
+				start = (region->start + region->size + alignment - 1U) &
+					~(uintptr_t)(alignment - 1U);
+				moved = 1;
+				break;
+			}
+		}
+		if (!moved)
+			break;
+	}
+	*mapped = start;
+	return 0;
+}
+
+/* Finds a free aligned range at or above a hint in the mmap area; the caller holds the VM lock. */
+static int
+vmspace_find_free_range_locked(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	size_t alignment,
+	uintptr_t *mapped)
+{
+	int error;
+
+	vmspace_layout_init();
+	if (hint < vm_layout.mmap_base)
+		hint = vm_layout.mmap_base;
+	if (hint >= vm_layout.user_limit)
+		return ENOMEM;
+	error = vmspace_find_free_range_bounded_locked(vm, hint, vm_layout.user_limit,
+	    size, alignment, mapped);
+	return error;
+}
+
+/* Maps anonymous memory at a free range near a hint; the caller holds the VM locks. */
+static int
+vmspace_map_find_locked(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	uintptr_t *mapped)
+{
+	uintptr_t start;
+	int error;
+
+	error = vmspace_find_free_range_locked(vm, hint, size, PAGE_SIZE, &start);
+	if (error == 0)
+		error = vmspace_map_anon_locked(vm, start,
+		    (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U), prot, NULL);
+	if (error == 0)
+		*mapped = start;
+	return error;
+}
+
+/* Maps a private file region at a free range near a hint; the caller holds the VM locks. */
+static int
+vmspace_map_file_find_locked(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	size_t data_size,
+	uintptr_t *mapped)
+{
+	uintptr_t start;
+	size_t rounded;
+	int error;
+
+	error = vmspace_find_free_range_locked(vm, hint, size, PAGE_SIZE, &start);
+	if (error != 0)
+		return error;
+	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
+	if (data_size > size)
+		data_size = size;
+	error = vmspace_map_file_locked(vm, start, rounded, prot, file, offset,
+	    start, data_size, NULL);
+	if (error == 0)
+		*mapped = start;
+	return error;
+}
+
+/* Maps a shared file region at a free range near a hint; the caller holds the VM locks. */
+static int
+vmspace_map_file_shared_find_locked(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	size_t data_size,
+	struct vm_object *object,
+	uintptr_t *mapped)
+{
+	uintptr_t start;
+	size_t rounded;
+	int error;
+
+	/* Finds a valid page-aligned destination before publishing a region. */
+	error = vmspace_find_free_range_locked(vm, hint, size, PAGE_SIZE, &start);
+	if (error != 0)
+		return error;
+
+	/* Bounds the file portion to the requested mapping length. */
+	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
+	if (data_size > size)
+		data_size = size;
+
+	/* Publishes the prepared object only after address selection succeeds. */
+	error = vmspace_map_file_shared_locked(
+		vm, start, rounded, prot, file, offset, data_size, object, NULL);
+	if (error == 0)
+		*mapped = start;
+
+	/* Reports the mapping outcome to the prepared-object owner. */
+	return error;
+}
+
+/* Unmaps and frees one page record during teardown. */
+static void
+free_vm_page(
+	struct vmspace *vm,
+	struct vm_page *page)
+{
+	/* An object page only drops its reverse mapping. */
+	if (page->object_page != NULL) {
+		if (page->flags & VM_MAPPING_MAPPED)
+			(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
+		vm_object_mapping_remove(page->object_page, page);
+		vm_page_free_metadata(page);
+		return;
+	}
+	if (page->flags & VM_MAPPING_MAPPED)
+		(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
+	vm_page_untrack(page);
+	vm_page_free_metadata(page);
+}
+
+/* Frees every page of a region during teardown. */
+static void
+free_region_pages(
+	struct vmspace *vm,
+	struct vm_region *region)
+{
+	struct vm_page *page;
+
+	page = region->pages;
+	while (page != NULL) {
+		region->pages = page->next;
+		free_vm_page(vm, page);
+		page = region->pages;
+	}
+}
+
+/* Removes a page's hardware and reverse mappings for unmap; the caller holds the VM locks. */
+static void
+detach_vm_page_for_unmap(
+	struct vmspace *vm,
+	struct vm_page *page)
+{
+	struct vm_private_page *backing;
+
+	/*
+	 * vmspace_unmap() has two teardown phases.  This first phase runs
+	 * while both the global VM metadata lock and the vmspace lock are
+	 * held.  It must remove every hardware and reverse mapping before
+	 * the region list publishes the virtual address as free.
+	 */
+	if ((page->flags & VM_MAPPING_MAPPED) != 0) {
+		if (hal_page_unmap(vm->space, (void *)page->address,
+		    PAGE_SIZE) != HAL_OK)
+			HAL_FATAL("VM unmap commit failed");
+		page->flags &= ~VM_MAPPING_MAPPED;
+	}
+	if (page->object_page != NULL) {
+		vm_object_mapping_remove(page->object_page, page);
+		page->object_page = NULL;
+		page->object_next = NULL;
+		return;
+	}
+
+	/*
+	 * A private backing can own physical memory or a swap slot.  Take a
+	 * temporary reference before vm_page_untrack() so that the
+	 * reverse-map detach cannot be the operation which frees those
+	 * resources.  The detached vm_page retains that reference solely as
+	 * a retire token; release_detached_region_pages() drops it after
+	 * the address has been unpublished and both locks are gone.
+	 */
+	backing = page->private_page;
+	if (backing == NULL)
+		return;
+	vm_private_page_ref(backing);
+	vm_page_untrack(page);
+	page->private_page = backing;
+	page->private_next = NULL;
+}
+
+/* Detaches every page of a region for unmap; the caller holds the VM locks. */
+static void
+detach_region_pages_for_unmap(
+	struct vmspace *vm,
+	struct vm_region *region)
+{
+	struct vm_page *page;
+
+	for (page = region->pages; page != NULL; page = page->next)
+		detach_vm_page_for_unmap(vm, page);
+}
+
+/* Frees the detached pages of a retired region outside the locks. */
+static void
+release_detached_region_pages(
+	struct vm_region *region)
+{
+	struct vm_page *page;
+
+	page = region->pages;
+	while (page != NULL) {
+		region->pages = page->next;
+		/* Drops the private-backing retire token, if there is one. */
+		if (page->private_page != NULL)
+			vm_private_page_put(page->private_page);
+		vm_page_free_metadata(page);
+		page = region->pages;
+	}
+}
+
+/* Splits a region at an address into itself and a preallocated right half. */
+static int
+split_region_prepared(
+	struct vm_region *region,
+	uintptr_t address,
+	struct vm_region *right)
+{
+	struct vm_page **link;
+	size_t left_size;
+	size_t right_size;
+	uintptr_t original_data_start;
+	uintptr_t original_data_end;
+	uintptr_t left_data_start;
+	uintptr_t left_data_end;
+	uintptr_t right_data_start;
+	uintptr_t right_data_end;
+	uintptr_t region_end;
+	struct vm_page *page;
+
+	/* Rejects a split outside the region or of a busy or immutable one. */
+	if (region == NULL ||
+	    right == NULL ||
+	    address <= region->start ||
+	    address >= region->start + region->size ||
+	    (address & (PAGE_SIZE - 1U)) != 0)
+		return EINVAL;
+	if (region->hold_count != 0)
+		return EBUSY;
+	if (region->flags & VM_REGION_IMMUTABLE)
+		return EACCES;
+
+	/* The right half inherits the region and clips the data window. */
+	left_size = address - region->start;
+	right_size = region->size - left_size;
+	original_data_start = region->data_start;
+	original_data_end = region->data_start + region->data_size;
+	region_end = region->start + region->size;
+	*right = *region;
+	right->start = address;
+	right->size = right_size;
+	if (original_data_start > address)
+		right_data_start = original_data_start;
+	else
+		right_data_start = address;
+	if (original_data_end < region_end)
+		right_data_end = original_data_end;
+	else
+		right_data_end = region_end;
+	if (right_data_end < right_data_start)
+		right_data_end = right_data_start;
+	right->data_start = right_data_start;
+	right->data_size = right_data_end - right_data_start;
+	if (region->backing == VM_BACKING_FILE &&
+	    right_data_start > original_data_start)
+		right->file_offset +=
+		    (off_t)(right_data_start - original_data_start);
+	if (region->commit_size != 0)
+		right->commit_size = right_size;
+	else
+		right->commit_size = 0;
+	right->pages = NULL;
+	if (right->file != NULL)
+		file_ref(right->file);
+	if (right->object != NULL)
+		vm_object_ref(right->object);
+
+	/* The left half keeps whatever data lies before the split. */
+	region->size = left_size;
+	if (original_data_start < address &&
+	    original_data_end > region->start) {
+		left_data_start = original_data_start;
+		if (original_data_end < address)
+			left_data_end = original_data_end;
+		else
+			left_data_end = address;
+	} else {
+		left_data_start = region->start;
+		left_data_end = left_data_start;
+	}
+	region->data_start = left_data_start;
+	region->data_size = left_data_end - left_data_start;
+	if (region->commit_size != 0)
+		region->commit_size = left_size;
+	else
+		region->commit_size = 0;
+
+	/* Moves the pages at or above the split to the right half. */
+	link = &region->pages;
+	while (*link != NULL) {
+		page = *link;
+		if (page->address < address) {
+			link = &page->next;
+			continue;
+		}
+		*link = page->next;
+		page->region = right;
+		page->next = right->pages;
+		right->pages = page;
+	}
+	right->next = region->next;
+	region->next = right;
+	return 0;
+}
+
+/* Splits a region at an address, allocating the right half. */
+static int
+split_region(
+	struct vm_region *region,
+	uintptr_t address)
+{
+	struct vm_region *right;
+	int error;
+
+	right = kern_calloc(1, sizeof(*right));
+	if (right == NULL)
+		return ENOMEM;
+	error = split_region_prepared(region, address, right);
+	if (error != 0)
+		kern_free(right);
+	return error;
+}
+
+/* Frees a list of retired regions and their resources outside the locks. */
+static void
+release_retired_regions(
+	struct vm_region *retired)
+{
+	struct vm_region *region;
+
+	region = retired;
+	while (region != NULL) {
+		retired = region->next;
+		release_detached_region_pages(region);
+		if (region->file != NULL)
+			(void)file_close(region->file);
+		if (region->object != NULL)
+			vm_object_put(region->object);
+		if (region->commit_size != 0)
+			vm_commit_release(region->commit_size);
+		kern_free(region);
+		region = retired;
+	}
+}
+
+/* Publishes a prepared region at an exact address, retiring what it overlaps. */
+static int
+vmspace_replace_prepared(
+	struct vmspace *vm,
+	struct vm_region *prepared,
+	struct vm_region **result)
+{
+	struct vm_region *split_first;
+	struct vm_region *split_second;
+	struct vm_region *retired;
+	struct vm_region *region;
+	struct vm_region **link;
+	uintptr_t start;
+	uintptr_t end;
+	size_t removed;
+	int error;
+	struct vm_page *page;
+	uintptr_t overlap_start;
+	uintptr_t overlap_end;
+	struct vm_region *split;
+	uint64_t mapped_bytes;
+
+	retired = NULL;
+	removed = 0;
+	error = 0;
+
+	/*
+	 * Two preallocated split records make the metadata commit
+	 * failure-free after the first old region is changed.
+	 */
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    prepared == NULL ||
+	    !range_valid(prepared->start, prepared->size))
+		return EINVAL;
+	split_first = kern_calloc(1, sizeof(*split_first));
+	split_second = kern_calloc(1, sizeof(*split_second));
+	if (split_first == NULL || split_second == NULL) {
+		kern_free(split_first);
+		kern_free(split_second);
+		return ENOMEM;
+	}
+	start = prepared->start;
+	end = start + prepared->size;
+	vm_metadata_enter();
+	mutex_lock(&vm->lock);
+	vmspace_wait_faults_locked(vm);
+
+	/* Validates every overlapped region and sums the bytes removed. */
+	for (region = vm->regions; region != NULL; region = region->next) {
+		if (region->start >= end || region->start + region->size <= start)
+			continue;
+		if ((region->flags & VM_REGION_IMMUTABLE) != 0) {
+			error = EINVAL;
+			goto out_locked;
+		}
+		if (region->hold_count != 0) {
+			error = EAGAIN;
+			goto out_locked;
+		}
+		for (page = region->pages; page != NULL; page = page->next) {
+			if (page->address < end &&
+			    page->address + PAGE_SIZE > start &&
+			    page->wire_count != 0) {
+				error = EAGAIN;
+				goto out_locked;
+			}
+		}
+		if (region->start > start)
+			overlap_start = region->start;
+		else
+			overlap_start = start;
+		if (region->start + region->size < end)
+			overlap_end = region->start + region->size;
+		else
+			overlap_end = end;
+		removed += overlap_end - overlap_start;
+	}
+	if (removed > vm->mapped_virtual_bytes) {
+		error = ENOMEM;
+		goto out_locked;
+	}
+	mapped_bytes = vm->mapped_virtual_bytes - removed;
+	if (mapped_bytes > vm->address_limit)
+		mapped_bytes = vm->address_limit;
+	if ((uint64_t)prepared->size > vm->address_limit - mapped_bytes) {
+		error = ENOMEM;
+		goto out_locked;
+	}
+
+	/* Splits the regions that straddle either end of the range. */
+	region = find_region_locked(vm, end - 1U, 1);
+	if (region != NULL && end < region->start + region->size) {
+		error = split_region_prepared(region, end, split_first);
+		if (error != 0)
+			goto out_locked;
+		split_first = NULL;
+	}
+	region = find_region_locked(vm, start, 1);
+	if (region != NULL && start > region->start) {
+		if (split_first != NULL)
+			split = split_first;
+		else
+			split = split_second;
+		error = split_region_prepared(region, start, split);
+		if (error != 0)
+			HAL_FATAL("prepared VM split commit failed");
+		if (split == split_first)
+			split_first = NULL;
+		else
+			split_second = NULL;
+	}
+
+	/* Detaches the old mappings, unlinks the old regions, and links the new one. */
+	for (region = vm->regions; region != NULL && region->start < end;
+	     region = region->next) {
+		if (region->start >= start)
+			detach_region_pages_for_unmap(vm, region);
+	}
+	for (link = &vm->regions; *link != NULL; link = &(*link)->next) {
+		if ((*link)->start >= start)
+			break;
+	}
+	region = *link;
+	while (region != NULL && region->start < end) {
+		*link = region->next;
+		vm->mapped_virtual_bytes -= region->size;
+		region->next = retired;
+		retired = region;
+		region = *link;
+	}
+	insert_region(vm, prepared);
+	vm->mapped_virtual_bytes += prepared->size;
+	vmspace_generation_advance_locked(vm);
+	if (result != NULL)
+		*result = prepared;
+
+out_locked:
+	mutex_unlock(&vm->lock);
+	vm_metadata_leave();
+	kern_free(split_first);
+	kern_free(split_second);
+	if (error == 0 && retired != NULL &&
+	    vmspace_unmap_retire_checkpoint != NULL)
+		vmspace_unmap_retire_checkpoint(vm, start, prepared->size);
+	release_retired_regions(retired);
+	return error;
+}
+
+/* Records the program break start; the caller holds the VM locks. */
+static int
+vmspace_set_brk_start_locked(
+	struct vmspace *vm,
+	uintptr_t start,
+	uint64_t static_data_bytes)
+{
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    vm->brk_start != 0 ||
+	    (start & (PAGE_SIZE - 1U)) != 0 ||
+	    start < vm_layout.user_minimum ||
+	    start >= vm_layout.brk_limit ||
+	    overlaps(vm, start, PAGE_SIZE))
+		return EINVAL;
+	if (static_data_bytes > vm->data_limit)
+		return ENOMEM;
+	vm->brk_start = start;
+	vm->brk_current = start;
+	vm->static_data_bytes = static_data_bytes;
+	return 0;
+}
+
+/* Grows or shrinks the program break region; the caller holds the VM locks. */
+static int
+vmspace_brk_locked(
+	struct vmspace *vm,
+	uintptr_t requested,
+	uintptr_t *result)
+{
+	struct vm_region **link;
+	struct vm_region *region;
+	uintptr_t old_end;
+	uintptr_t new_end;
+	uint64_t mapped_bytes;
+	size_t difference;
+	int error;
+	struct vm_page **page_link;
+	struct vm_page *page;
+
+	region = NULL;
+
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    result == NULL ||
+	    vm->brk_start == 0)
+		return EINVAL;
+	vmspace_wait_faults_locked(vm);
+	if (requested == 0) {
+		*result = vm->brk_current;
+		return 0;
+	}
+
+	/* The request must stay within the break area and the data limit. */
+	if (requested < vm->brk_start || requested >= vm_layout.brk_limit)
+		return ENOMEM;
+	if (vm->static_data_bytes > vm->data_limit ||
+	    (uint64_t)(requested - vm->brk_start) >
+	    vm->data_limit - vm->static_data_bytes)
+		return ENOMEM;
+	old_end = (vm->brk_current + PAGE_SIZE - 1U) &
+		~(uintptr_t)(PAGE_SIZE - 1U);
+	new_end = (requested + PAGE_SIZE - 1U) &
+		~(uintptr_t)(PAGE_SIZE - 1U);
+	for (link = &vm->regions; *link != NULL; link = &(*link)->next) {
+		if (((*link)->flags & VM_REGION_BRK) != 0) {
+			region = *link;
+			break;
+		}
+	}
+
+	/* Growth extends or creates the break region; shrinking frees pages. */
+	if (new_end > old_end) {
+		difference = new_end - old_end;
+		if (region == NULL) {
+			error = map_region(vm, vm->brk_start,
+				new_end - vm->brk_start,
+				HAL_SPACE_READ | HAL_SPACE_WRITE, VM_BACKING_ANON,
+				NULL, 0, vm->brk_start, 0,
+				VM_REGION_BRK | VM_REGION_IMMUTABLE,
+				new_end - vm->brk_start, &region);
+			if (error != 0)
+				return error;
+		} else {
+			if (region->start + region->size != old_end ||
+			    overlaps(vm, old_end, difference))
+				return ENOMEM;
+			mapped_bytes = vm->mapped_virtual_bytes;
+			if (mapped_bytes > vm->address_limit)
+				mapped_bytes = vm->address_limit;
+			if ((uint64_t)difference > vm->address_limit - mapped_bytes)
+				return ENOMEM;
+			error = vm_commit_reserve(difference);
+			if (error != 0)
+				return error;
+			region->size += difference;
+			region->commit_size += difference;
+			vm->mapped_virtual_bytes += difference;
+		}
+	} else if (new_end < old_end) {
+		if (region == NULL || region->start + region->size != old_end)
+			return EINVAL;
+		page_link = &region->pages;
+		while (*page_link != NULL) {
+			page = *page_link;
+			if (page->address < new_end) {
+				page_link = &page->next;
+				continue;
+			}
+			*page_link = page->next;
+			free_vm_page(vm, page);
+		}
+		difference = old_end - new_end;
+		vm_commit_release(difference);
+		region->size -= difference;
+		region->commit_size -= difference;
+		vm->mapped_virtual_bytes -= difference;
+		if (region->size == 0) {
+			*link = region->next;
+			kern_free(region);
+		}
+	}
+	vm->brk_current = requested;
+	*result = requested;
+	return 0;
+}
+
+/* Detaches and unlinks the regions of a range; the caller holds the VM locks. */
+static int
+vmspace_unmap_locked(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	struct vm_region **retired)
+{
+	struct vm_region **link;
+	struct vm_region *region;
+	uintptr_t end;
+	int error;
+	struct vm_page *page;
+
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    retired == NULL ||
+	    !range_valid(start, size))
+		return EINVAL;
+	vmspace_wait_faults_locked(vm);
+	end = start + size;
+
+	/* Validate the complete transaction before split_region mutates metadata. */
+	for (region = vm->regions; region != NULL; region = region->next) {
+		if (region->start >= end || region->start + region->size <= start)
+			continue;
+		if ((region->flags & VM_REGION_IMMUTABLE) != 0)
+			return EACCES;
+		for (page = region->pages; page != NULL; page = page->next) {
+			if (page->address < end &&
+			    page->address + PAGE_SIZE > start &&
+			    page->wire_count != 0)
+				return EBUSY;
+		}
+	}
+	region = find_region_locked(vm, end - 1U, 1);
+	if (region != NULL && end < region->start + region->size) {
+		error = split_region(region, end);
+		if (error != 0)
+			return error;
+	}
+	region = find_region_locked(vm, start, 1);
+	if (region != NULL && start > region->start) {
+		error = split_region(region, start);
+		if (error != 0)
+			return error;
+	}
+
+	/*
+	 * All validation, allocation, and splitting is complete.  From this
+	 * point the commit cannot report failure: a HAL failure would leave
+	 * only part of the old range detached, so it is a kernel invariant
+	 * violation.  Detach every old PTE/reverse map before unlinking any
+	 * region.
+	 */
+	for (region = vm->regions; region != NULL && region->start < end;
+	     region = region->next) {
+		if (region->start >= start)
+			detach_region_pages_for_unmap(vm, region);
+	}
+	for (link = &vm->regions; *link != NULL; link = &(*link)->next) {
+		if ((*link)->start >= start)
+			break;
+	}
+	region = *link;
+	while (region != NULL && region->start < end) {
+		*link = region->next;
+		vm->mapped_virtual_bytes -= region->size;
+		region->next = *retired;
+		*retired = region;
+		region = *link;
+	}
+	return 0;
+}
+
+/* Changes the protection of a range, rolling the HAL back on failure; the caller holds the VM locks. */
+static int
+vmspace_protect_locked(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot)
+{
+	struct vm_region *region;
+	struct vm_region *first;
+	struct vm_region *end_region;
+	struct vm_page *page;
+	struct vm_page *failed_page;
+	struct vm_region *failed_region;
+	uintptr_t end;
+	uintptr_t covered;
+	size_t new_commit;
+	int error;
+	uint32_t page_prot;
+	int hal_error;
+	struct vm_page *rollback;
+	hal_physaddr_t physical;
+
+	failed_page = NULL;
+	failed_region = NULL;
+	new_commit = 0;
+
+	if (vm == NULL ||
+	    vm == &kernel_vmspace ||
+	    !range_valid(start, size) ||
+	    (prot & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) != 0)
+		return EINVAL;
+	vmspace_wait_faults_locked(vm);
+
+	/* The range must be fully mapped by mutable regions that allow prot. */
+	end = start + size;
+	covered = start;
+	for (region = vm->regions; region != NULL && covered < end;
+	     region = region->next) {
+		if (covered < region->start)
+			return EINVAL;
+		if (covered >= region->start + region->size)
+			continue;
+		if (region->flags & VM_REGION_IMMUTABLE)
+			return EACCES;
+		if ((prot & ~region->max_prot) != 0)
+			return EACCES;
+		covered = region->start + region->size;
+		if (covered > end)
+			covered = end;
+	}
+	if (covered != end)
+		return EINVAL;
+
+	/* Splits the regions that straddle either end of the range. */
+	end_region = find_region_locked(vm, end - 1U, 1);
+	if (end_region != NULL && end < end_region->start + end_region->size) {
+		error = split_region(end_region, end);
+		if (error != 0)
+			return error;
+	}
+	region = find_region_locked(vm, start, 1);
+	if (start > region->start) {
+		error = split_region(region, start);
+		if (error != 0)
+			return error;
+		region = region->next;
+	}
+	first = region;
+
+	/* A region becoming accessible or writable needs commit first. */
+	for (; region != NULL && region->start < end; region = region->next) {
+		if (region->commit_size == 0 && region->object == NULL &&
+		    ((region->backing == VM_BACKING_ANON && prot != 0) ||
+		     (region->backing == VM_BACKING_FILE &&
+		      (prot & HAL_SPACE_WRITE) != 0))) {
+			if (new_commit > SIZE_MAX - region->size)
+				return EOVERFLOW;
+			new_commit += region->size;
+		}
+	}
+	if (new_commit != 0) {
+		error = vm_commit_reserve(new_commit);
+		if (error != 0)
+			return error;
+	}
+
+	/* Applies the new protection to every resident page. */
+	for (region = first; region != NULL && region->start < end;
+	     region = region->next) {
+		for (page = region->pages; page != NULL; page = page->next) {
+			if (page->flags & VM_MAPPING_COW)
+				page_prot = prot & ~HAL_SPACE_WRITE;
+			else
+				page_prot = prot;
+			hal_error = HAL_OK;
+			if (prot == 0 && (page->flags & VM_MAPPING_MAPPED)) {
+				hal_error = hal_page_unmap(vm->space,
+				    (void *)page->address, PAGE_SIZE);
+				if (hal_error == HAL_OK) {
+					page->flags &= ~VM_MAPPING_MAPPED;
+					page->flags |= VM_MAPPING_PROTECT_REMOVED;
+				}
+			} else if (prot != 0 &&
+			    (page->flags & VM_MAPPING_MAPPED)) {
+				hal_error = hal_page_prot(vm->space,
+				    (void *)page->address, PAGE_SIZE, page_prot);
+			} else if (prot != 0 && page->object_page != NULL) {
+				hal_error = hal_page_map(vm->space,
+				    (void *)page->address,
+				    page->object_page->pmem.paddr, PAGE_SIZE, page_prot);
+				if (hal_error == HAL_OK)
+					page->flags |= VM_MAPPING_MAPPED |
+					    VM_MAPPING_PROTECT_ADDED;
+			} else if (prot != 0 &&
+			    vm_private_page_is_resident(page)) {
+				hal_error = hal_page_map(vm->space,
+				    (void *)page->address,
+				    page->private_page->pmem.paddr, PAGE_SIZE, page_prot);
+				if (hal_error == HAL_OK)
+					page->flags |= VM_MAPPING_MAPPED |
+					    VM_MAPPING_PROTECT_ADDED;
+			}
+			if (hal_error != HAL_OK) {
+				failed_region = region;
+				failed_page = page;
+				goto rollback;
+			}
+		}
+	}
+
+	/* Commits the new protection and the commit charge. */
+	for (region = first; region != NULL && region->start < end;
+	     region = region->next) {
+		region->prot = prot;
+		for (page = region->pages; page != NULL; page = page->next)
+			page->flags &= ~(VM_MAPPING_PROTECT_REMOVED |
+			    VM_MAPPING_PROTECT_ADDED);
+		if (region->commit_size == 0 && region->object == NULL &&
+		    ((region->backing == VM_BACKING_ANON && prot != 0) ||
+		     (region->backing == VM_BACKING_FILE &&
+		      (prot & HAL_SPACE_WRITE) != 0)))
+			region->commit_size = region->size;
+	}
+	return 0;
+
+rollback:
+	/* Restores every page changed before the failure. */
+	for (region = first; region != NULL && region->start < end;
+	     region = region->next) {
+		for (rollback = region->pages; rollback != NULL;
+		     rollback = rollback->next) {
+			if (region == failed_region && rollback == failed_page)
+				break;
+			if (rollback->flags & VM_MAPPING_PROTECT_ADDED) {
+				if (hal_page_unmap(vm->space,
+				    (void *)rollback->address, PAGE_SIZE) != HAL_OK)
+					HAL_FATAL("VM protection rollback unmap failed");
+				rollback->flags &= ~(VM_MAPPING_MAPPED |
+				    VM_MAPPING_PROTECT_ADDED);
+			} else if (rollback->flags & VM_MAPPING_PROTECT_REMOVED) {
+				if (rollback->object_page != NULL)
+					physical = rollback->object_page->pmem.paddr;
+				else
+					physical = rollback->private_page->pmem.paddr;
+				if (hal_page_map(vm->space,
+				    (void *)rollback->address, physical, PAGE_SIZE,
+				    vm_page_effective_prot(rollback)) != HAL_OK)
+					HAL_FATAL("VM protection rollback map failed");
+				rollback->flags &= ~VM_MAPPING_PROTECT_REMOVED;
+				rollback->flags |= VM_MAPPING_MAPPED;
+			} else if ((rollback->flags & VM_MAPPING_MAPPED) &&
+			    hal_page_prot(vm->space, (void *)rollback->address,
+				PAGE_SIZE, vm_page_effective_prot(rollback)) != HAL_OK) {
+				HAL_FATAL("VM protection rollback failed");
+			}
+		}
+		if (region == failed_region)
+			break;
+	}
+	if (new_commit != 0)
+		vm_commit_release(new_commit);
+	return EINVAL;
+}
+
+/* Tears down a vmspace whose last reference is gone. */
+static void
+vmspace_destroy(
+	struct vmspace *vm)
+{
+	struct vm_region *region;
+
+	/* Frees each region's pages under the lock and its resources outside it. */
+	vm_metadata_enter();
+	region = vm->regions;
+	while (region != NULL) {
+		vm->regions = region->next;
+		free_region_pages(vm, region);
+		vm_metadata_leave();
+		if (region->file != NULL)
+			(void)file_close(region->file);
+		if (region->object != NULL)
+			vm_object_put(region->object);
+		if (region->commit_size != 0)
+			vm_commit_release(region->commit_size);
+		kern_free(region);
+		vm_metadata_enter();
+		region = vm->regions;
+	}
+	hal_page_destroy_space(vm->space);
+	(void)atomic_raw_fetch_add_relaxed(&vmspace_live.value, (unsigned)-1);
+	vm_metadata_leave();
+	kern_free(vm);
+}
+
+/* Sets the limit on mapped virtual bytes; the caller holds the VM locks. */
+static int
+vmspace_set_address_limit_locked(
+	struct vmspace *vm,
+	uint64_t limit)
+{
+	if (vm == NULL || vm == &kernel_vmspace || limit > vmspace_address_cap())
+		return EINVAL;
+	vm->address_limit = limit;
+	return 0;
+}
+
+/* Sets the stack size limit; the caller holds the VM locks. */
+static void
+vmspace_set_stack_limit_locked(
+	struct vmspace *vm,
+	uint64_t limit)
+{
+	if (vm != NULL && vm != &kernel_vmspace)
+		vm->stack_limit = limit;
+}
+
+/* Sets the data size limit; the caller holds the VM locks. */
+static int
+vmspace_set_data_limit_locked(
+	struct vmspace *vm,
+	uint64_t limit)
+{
+	uint64_t cap;
+
+	cap = vmspace_address_cap();
+	if (vm == NULL || vm == &kernel_vmspace)
+		return EINVAL;
+
+	/*
+	 * RLIM_INFINITY is the public resource-limit representation.  The
+	 * VM still needs a concrete bound for overflow-safe brk arithmetic,
+	 * so map it to the largest addressable user range at this boundary.
+	 */
+	if (limit == UINT64_MAX)
+		limit = cap;
+	if (limit > cap)
+		return EINVAL;
+	vm->data_limit = limit;
+	return 0;
+}
+
+/* Advances the generation, skipping zero; the caller holds the VM lock. */
+static void
+vmspace_generation_advance_locked(
+	struct vmspace *vm)
+{
+	vm->generation++;
+	if (vm->generation == 0)
+		vm->generation++;
 }

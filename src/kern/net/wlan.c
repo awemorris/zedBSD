@@ -1,4 +1,23 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The WLAN station core.
+ *
+ * A station binds a network device to a radio driver and runs the scan
+ * and WPA2 connection state machines on behalf of the network worker.
+ * Radio callbacks report scan results, frames, and link loss under the
+ * station spinlock; control methods that may sleep in a bus driver are
+ * serialized by a separate control gate.  Scan results are staged per
+ * scan and published as an immutable snapshot for the ioctl interface.
+ */
+
 #include "kern/net/wlan.h"
 
 #include "kern/clock.h"
@@ -114,36 +133,1821 @@ static atomic_uint_t wlan_initialized;
 static int wlan_stopping;
 static int wlan_shutdown_inflight;
 
-static const struct wlan_wpa2_ops station_wpa2_ops;
-static int station_retire_controlled(struct wlan_station *, int);
-static size_t probe_request_build(const struct wlan_station *, int, uint32_t, uint8_t [WLAN_PROBE_REQUEST_MAX_SIZE]);
+static void secure_zero(void *memory, size_t length);
+static uint64_t default_clock(void *context);
+static uint64_t deadline_after(uint64_t now, uint64_t delta);
+static int deadline_checked(uint64_t now, uint64_t delta, uint64_t *result);
+static uint64_t deadline_local(uint64_t now, uint64_t delta, uint64_t total_deadline);
+static uint64_t station_beacon_watch_ticks(uint16_t beacon_interval_tu);
+static void station_beacon_watch_refresh_locked(struct wlan_station *station, uint64_t now);
+static int station_beacon_watch_active_locked(const struct wlan_station *station);
+static int deadline_expired(uint64_t now, uint64_t deadline);
+static void wlan_worker_wakeup(void);
+static int bytes_zero(const void *memory, size_t length);
+static uint32_t channel_frequency(uint32_t channel);
+static int scan_profile_validate(const struct wlan_scan_profile *profile);
+static uint64_t scan_deadline_ticks(uint32_t channel_count);
+static int device_name_matches(const struct net_device *device, const char *name);
+static int header_validate(const struct net_device *device, const struct wlan_ioctl_header *header, size_t size);
+static uint64_t station_now_locked(struct wlan_station *station);
+static int station_generation_locked(struct wlan_station *station, uint64_t *result);
+static void station_clear_connection_locked(struct wlan_station *station);
+static void station_finish_connection_retire_locked(struct wlan_station *station);
+static int station_carrier_down_locked(struct wlan_station *station);
+static uint64_t station_wpa_deadline(struct wlan_station *station);
+static uint64_t station_wpa_cleanup_deadline(struct wlan_station *station);
+static void station_sync_wpa_locked(struct wlan_station *station);
+static int station_wpa_entropy_fill(void *context, void *buffer, size_t length);
+static int station_wpa_radio_start(void *context, uint64_t generation, const uint8_t bssid[6], uint32_t channel, uint64_t deadline, uint64_t *completion_ticks);
+static int station_wpa_transmit(void *context, uint64_t generation, uint64_t cookie, enum wlan_wpa2_tx_kind kind, const uint8_t destination[6], const uint8_t *frame, size_t length, uint64_t deadline);
+static int station_wpa_association_set(void *context, uint64_t generation, const uint8_t bssid[6], uint16_t aid);
+static int station_wpa_association_clear(void *context, uint64_t generation);
+static int station_wpa_key_install(void *context, uint64_t generation, enum wlan_wpa2_key_kind kind, uint8_t key_index, const uint8_t key[16], uint64_t key_generation, uint64_t receive_packet_number);
+static int station_wpa_keys_activate(void *context, uint64_t generation, uint64_t pairwise_key_generation, uint64_t group_key_generation);
+static int station_wpa_key_receive_pn_advance(void *context, uint64_t generation, enum wlan_wpa2_key_kind kind, uint8_t key_index, uint64_t key_generation, uint64_t receive_packet_number);
+static int station_wpa_key_delete(void *context, uint64_t generation, enum wlan_wpa2_key_kind kind, uint8_t key_index, uint64_t key_generation);
+static int station_wpa_authorized_set(void *context, uint64_t generation, int authorized);
+static int station_wpa_radio_stop(void *context, uint64_t generation);
+static int station_link_lost_controlled(struct wlan_station *station, uint64_t generation, int reason);
+static int station_enter(struct wlan_station *station);
+static void station_leave(struct wlan_station *station);
+static void station_control_enter(struct wlan_station *station);
+static void station_control_leave(struct wlan_station *station);
+static int station_find_enter(struct net_device *device, struct wlan_station **result);
+static int station_index_enter(unsigned index, struct wlan_station **result);
+static int bssid_compare(const uint8_t left[6], const uint8_t right[6]);
+static int bssid_valid(const uint8_t bssid[6]);
+static size_t probe_request_build(const struct wlan_station *station, int directed, uint32_t channel, uint8_t frame[WLAN_PROBE_REQUEST_MAX_SIZE]);
+static int cache_entry_worse(const struct wlan_cache_entry *left, const struct wlan_cache_entry *right);
+static int cache_insert_locked(struct wlan_station *station, const struct wlan_bss_record *bss, uint64_t now);
+static void cache_sort_by_bssid(struct wlan_cache_entry *entries, uint32_t count);
+static int bss_security_supported(const struct wlan_bss_record *bss);
+static int station_select_bss_locked(struct wlan_station *station, const uint8_t *ssid, uint32_t ssid_length, struct wlan_bss_record *result);
+static void scan_request_output_locked(struct wlan_station *station, struct wlan_scan_request *request);
+static int ioctl_scan(struct wlan_station *station, struct wlan_scan_request *request);
+static int ioctl_scan_status(struct wlan_station *station, struct wlan_scan_status_request *request);
+static uint32_t entry_age_ms(uint64_t now, uint64_t last_seen);
+static int ioctl_bss(struct wlan_station *station, struct wlan_bss_request *request);
+static int ioctl_connect(struct wlan_station *station, struct wlan_connect_request *request);
+static int station_retire_controlled(struct wlan_station *station, int keep_administrative_up);
+static int station_retire(struct wlan_station *station, int keep_administrative_up);
+static int ioctl_disconnect(struct wlan_station *station, struct wlan_disconnect_request *request);
+static int ioctl_status(struct wlan_station *station, struct wlan_status_request *request);
+static struct net_device * station_finalize_locked(struct wlan_station *station);
+static void station_scan_failed_locked(struct wlan_station *station, int error);
+static int station_scan_publish_locked(struct wlan_station *station, uint64_t generation);
+static void station_scan_stop_result(struct wlan_station *station, uint64_t generation, int error);
+static void station_connection_start(struct wlan_station *station);
+static void station_connection_timer(struct wlan_station *station, uint64_t now);
+static void station_scan_timer(struct wlan_station *station, uint64_t now);
+static void station_timer_run(struct wlan_station *station, uint64_t now);
 
-static void
-secure_zero(void *memory, size_t length)
+static const struct wlan_wpa2_ops station_wpa2_ops = {
+	.entropy_fill = station_wpa_entropy_fill,
+	.radio_start = station_wpa_radio_start,
+	.transmit = station_wpa_transmit,
+	.association_set = station_wpa_association_set,
+	.association_clear = station_wpa_association_clear,
+	.key_install = station_wpa_key_install,
+	.key_receive_pn_advance = station_wpa_key_receive_pn_advance,
+	.key_delete = station_wpa_key_delete,
+	.keys_activate = station_wpa_keys_activate,
+	.authorized_set = station_wpa_authorized_set,
+	.radio_stop = station_wpa_radio_stop
+};
+
+/*
+ * Initializes the station registry once, waiting for a concurrent
+ * initializer to finish.
+ */
+void
+wlan_core_init(
+	void)
 {
-	volatile uint8_t *bytes = memory;
+	unsigned expected;
+	unsigned index;
 
-	while (length-- != 0U)
-		*bytes++ = 0U;
+	expected = 0U;
+
+	/* Only the first caller initializes; later callers wait for it. */
+	if (atomic_load_acquire(&wlan_initialized) == 2U)
+		return;
+	if (!atomic_compare_exchange(&wlan_initialized, &expected, 1U)) {
+		while (atomic_load_acquire(&wlan_initialized) != 2U) {
+			if (sched_yield != NULL)
+				sched_yield();
+			else
+				__asm__ volatile("" ::: "memory");
+		}
+		return;
+	}
+
+	/* Clears every slot and initializes its lock exactly once. */
+	memset(wlan_stations, 0, sizeof(wlan_stations));
+	spin_init(&wlan_registry_lock, LOCK_RANK_SOCKET_REGISTRY,
+	    "wlan-registry");
+	for (index = 0U; index < NET_DEVICE_MAX; index++)
+		spin_init(&wlan_stations[index].lock, LOCK_RANK_NETWORK,
+		    "wlan-station");
+	wlan_stopping = 0;
+	wlan_shutdown_inflight = 0;
+	atomic_store_release(&wlan_initialized, 2U);
 }
 
+/*
+ * Attaches a station to a network device and radio driver.
+ *
+ * The radio must offer scan start and stop together, and either the
+ * complete connection method set or none of it.  Active probing needs a
+ * management transmit method.
+ */
+int
+wlan_station_attach(
+	struct net_device *device,
+	const struct wlan_radio_ops *ops,
+	void *radio_context,
+	const struct wlan_scan_profile *scan_profile,
+	struct wlan_station **result)
+{
+	unsigned long enabled;
+	unsigned index;
+	struct wlan_station *free_station;
+	int error;
+	unsigned long station_enabled;
+
+	free_station = NULL;
+
+	/* Rejects a missing operand, an invalid profile, or a bad address. */
+	if (device == NULL ||
+	    ops == NULL ||
+	    result == NULL ||
+	    scan_profile_validate(scan_profile) != 0)
+		return EINVAL;
+	if (device->hwaddr_len != 6U || !bssid_valid(device->hwaddr))
+		return EINVAL;
+
+	/* Scan methods come in pairs; connection methods come as a set. */
+	if ((ops->scan_channel_start != NULL) != (ops->scan_stop != NULL) ||
+	    ((ops->connect_start != NULL || ops->disconnect != NULL ||
+	    ops->association_set != NULL || ops->association_clear != NULL ||
+	    ops->frame_transmit != NULL || ops->key_install != NULL ||
+	    ops->key_delete != NULL || ops->keys_activate != NULL) &&
+	    (ops->connect_start == NULL ||
+	    ops->disconnect == NULL || ops->association_set == NULL ||
+	    ops->association_clear == NULL || ops->frame_transmit == NULL ||
+	    ops->key_install == NULL || ops->key_delete == NULL ||
+	    ops->keys_activate == NULL)))
+		return EINVAL;
+	if (ops->management_transmit == NULL) {
+		for (index = 0U; index < scan_profile->channel_count; index++) {
+			if ((scan_profile->channels[index].flags &
+			    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED) != 0U)
+				return EINVAL;
+		}
+	}
+	if (atomic_load_acquire(&wlan_initialized) != 2U)
+		wlan_core_init();
+
+	/*
+	 * The caller retains its allocation-owner reference across this
+	 * call.  The station acquires a distinct live reference before any
+	 * device mutation or station publication.
+	 */
+	if (!net_device_ref_live(device))
+		return ENODEV;
+
+	/* Finds a free slot while refusing a duplicate attachment. */
+	enabled = spin_lock_irqsave(&wlan_registry_lock);
+	if (wlan_stopping) {
+		spin_unlock_irqrestore(&wlan_registry_lock, enabled);
+		net_device_release(device);
+		return EBUSY;
+	}
+	for (index = 0; index < NET_DEVICE_MAX; index++) {
+		if (wlan_stations[index].used &&
+		    wlan_stations[index].device == device) {
+			spin_unlock_irqrestore(&wlan_registry_lock, enabled);
+			net_device_release(device);
+			return EEXIST;
+		}
+		if (!wlan_stations[index].used && free_station == NULL)
+			free_station = &wlan_stations[index];
+	}
+	if (free_station == NULL) {
+		spin_unlock_irqrestore(&wlan_registry_lock, enabled);
+		net_device_release(device);
+		return ENOSPC;
+	}
+
+	/*
+	 * Validate and reserve the registry slot before mutating the
+	 * device.  The registry (rank 100) may enter the device carrier
+	 * guard (rank 125); no device operation enters the WLAN registry
+	 * while holding that guard.
+	 */
+	error = net_device_set_carrier(device, 0);
+	if (error != 0) {
+		spin_unlock_irqrestore(&wlan_registry_lock, enabled);
+		net_device_release(device);
+		return error;
+	}
+
+	/*
+	 * The slot lock is initialized exactly once by wlan_core_init().
+	 * Reset only the lifetime payload while the registry excludes all
+	 * timer/admission lookups of this unused slot.
+	 */
+	station_enabled = spin_lock_irqsave(&free_station->lock);
+	memset(&free_station->used, 0,
+	    sizeof(*free_station) - offsetof(struct wlan_station, used));
+	free_station->device = device;
+	free_station->ops = ops;
+	free_station->radio_context = radio_context;
+	free_station->clock = default_clock;
+	free_station->clock_context = NULL;
+	free_station->scan_profile = *scan_profile;
+	free_station->state = WLAN_STATE_DOWN;
+	free_station->scan_state = WLAN_SCAN_IDLE;
+	error = wlan_wpa2_engine_init(&free_station->wpa2,
+	    &station_wpa2_ops, free_station);
+	if (error != 0) {
+		spin_unlock_irqrestore(&free_station->lock,
+		    station_enabled);
+		spin_unlock_irqrestore(&wlan_registry_lock, enabled);
+		net_device_release(device);
+		return error;
+	}
+	free_station->used = 1;
+	spin_unlock_irqrestore(&free_station->lock, station_enabled);
+	*result = free_station;
+	spin_unlock_irqrestore(&wlan_registry_lock, enabled);
+	return 0;
+}
+
+/*
+ * Replaces the scan profile of an idle, administratively down station.
+ */
+int
+wlan_station_scan_profile_update(
+	struct wlan_station *station,
+	const struct wlan_scan_profile *scan_profile)
+{
+	unsigned long enabled;
+	unsigned index;
+	int error;
+
+	/* Validates the profile and takes the station and control gate. */
+	error = scan_profile_validate(scan_profile);
+	if (error != 0)
+		return error;
+	error = station_enter(station);
+	if (error != 0)
+		return error;
+	station_control_enter(station);
+
+	/* Only a fully idle station accepts a new profile. */
+	enabled = spin_lock_irqsave(&station->lock);
+	if (!station->used || station->closing || station->lifecycle_inflight) {
+		error = ENODEV;
+	} else if (station->administrative_up ||
+	    station->state != WLAN_STATE_DOWN ||
+	    station->scan_driver_active ||
+	    station->connect_driver_active ||
+	    station->scan_state == WLAN_SCAN_RUNNING) {
+		error = EBUSY;
+	} else {
+		/* Active probing needs a management transmit method. */
+		error = 0;
+		if (station->ops->management_transmit == NULL) {
+			for (index = 0U; index < scan_profile->channel_count;
+			     index++) {
+				if ((scan_profile->channels[index].flags &
+				    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED) != 0U) {
+					error = EINVAL;
+					break;
+				}
+			}
+		}
+		if (error == 0)
+			station->scan_profile = *scan_profile;
+	}
+	spin_unlock_irqrestore(&station->lock, enabled);
+	station_control_leave(station);
+	station_leave(station);
+	return error;
+}
+
+/*
+ * Marks a station administratively up.
+ */
+int
+wlan_station_open(
+	struct wlan_station *station)
+{
+	unsigned long enabled;
+	int error;
+
+	error = station_enter(station);
+	if (error != 0)
+		return error;
+
+	/* A down or failed station becomes idle. */
+	enabled = spin_lock_irqsave(&station->lock);
+	station->administrative_up = 1U;
+	if (station->state == WLAN_STATE_DOWN ||
+	    station->state == WLAN_STATE_FAILED) {
+		station->state = WLAN_STATE_IDLE;
+		station->terminal_error = 0;
+	}
+	spin_unlock_irqrestore(&station->lock, enabled);
+	station_leave(station);
+	return 0;
+}
+
+/*
+ * Records a BSS reported by the radio during the current scan step.
+ *
+ * The report must match the running scan generation and the channel
+ * being dwelled on; an expired scan wakes the worker to time it out.
+ */
+int
+wlan_station_report_scan_bss(
+	struct wlan_station *station,
+	uint64_t generation,
+	const struct wlan_bss_record *bss)
+{
+	struct wlan_bss_record normalized;
+	unsigned long enabled;
+	uint64_t now;
+	int scan_channel_accepting;
+	int wake_worker;
+	int error;
+	uint32_t expected_frequency;
+	const uint32_t known_security = WLAN_SECURITY_PRIVACY |
+	    WLAN_SECURITY_WPA1 | WLAN_SECURITY_WPA2 | WLAN_SECURITY_TKIP |
+	    WLAN_SECURITY_CCMP | WLAN_SECURITY_PSK |
+	    WLAN_SECURITY_IEEE8021X | WLAN_SECURITY_SAE |
+	    WLAN_SECURITY_PMF_CAPABLE | WLAN_SECURITY_PMF_REQUIRED |
+	    WLAN_SECURITY_UNSUPPORTED_SUITE;
+#ifdef WLAN_TESTING
+	wlan_station_test_hook_fn hook;
+	void *hook_context;
+#endif
+
+	wake_worker = 0;
+
+	/* Rejects a malformed record. */
+	if (bss == NULL ||
+	    bss->ssid_length > WLAN_SSID_MAX ||
+	    channel_frequency(bss->channel) == 0U ||
+	    bss->capability > UINT16_MAX ||
+	    bss->beacon_interval_tu > UINT16_MAX ||
+	    (bss->security & ~known_security) != 0U ||
+	    !bssid_valid(bss->bssid) ||
+	    !bytes_zero(bss->reserved, sizeof(bss->reserved)))
+		return EINVAL;
+	expected_frequency = channel_frequency(bss->channel);
+	if (bss->center_frequency_mhz != expected_frequency)
+		return EINVAL;
+
+	/* Normalizes the record before staging it. */
+	normalized = *bss;
+	memset(normalized.ssid + normalized.ssid_length, 0,
+	    WLAN_SSID_MAX - normalized.ssid_length);
+	normalized.age_ms = 0U;
+	error = station_enter(station);
+	if (error != 0)
+		return error;
+#ifdef WLAN_TESTING
+	/* Runs a one-shot test hook outside the lock. */
+	enabled = spin_lock_irqsave(&station->lock);
+	hook = station->test_report_hook;
+	hook_context = station->test_report_hook_context;
+	station->test_report_hook = NULL;
+	station->test_report_hook_context = NULL;
+	spin_unlock_irqrestore(&station->lock, enabled);
+	if (hook != NULL)
+		hook(hook_context);
+#endif
+
+	/* Accepts the record only for the channel being scanned right now. */
+	enabled = spin_lock_irqsave(&station->lock);
+	now = station_now_locked(station);
+	scan_channel_accepting =
+	    station->scan_step_state == WLAN_SCAN_STEP_DWELL ||
+	    (station->scan_step_state == WLAN_SCAN_STEP_TUNING &&
+	    station->scan_ready_pending);
+	if (station->scan_state != WLAN_SCAN_RUNNING ||
+	    station->scan_generation != generation ||
+	    !scan_channel_accepting ||
+	    station->scan_step_index >= station->scan_profile.channel_count ||
+	    station->scan_profile.channels[station->scan_step_index].channel !=
+	    normalized.channel) {
+		error = ESTALE;
+	} else if (deadline_expired(now, station->scan_deadline) ||
+	    deadline_expired(now, station->scan_step_deadline)) {
+		/*
+		 * Report paths may be IRQ/USB completion context.  They
+		 * never call back into a driver or join their own producer.
+		 * The network worker owns terminal timeout and synchronous
+		 * stop.
+		 */
+		wake_worker = 1;
+		error = ETIMEDOUT;
+	} else {
+		error = cache_insert_locked(station, &normalized, now);
+	}
+	spin_unlock_irqrestore(&station->lock, enabled);
+	if (wake_worker)
+		wlan_worker_wakeup();
+	station_leave(station);
+	return error;
+}
+
+/*
+ * Parses a beacon or probe response and records the BSS it describes.
+ */
+int
+wlan_station_report_scan_frame(
+	struct wlan_station *station,
+	uint64_t generation,
+	const uint8_t *frame,
+	size_t length,
+	int32_t rssi_dbm,
+	uint8_t channel_hint)
+{
+	struct wlan_bss_record bss;
+	int error;
+
+	if (length > WLAN_MANAGEMENT_FRAME_MAX)
+		return EMSGSIZE;
+	error = wlan_frame_parse_bss(frame, length, rssi_dbm, channel_hint,
+	    &bss);
+	if (error != 0)
+		return error;
+	error = wlan_station_report_scan_bss(station, generation, &bss);
+	return error;
+}
+
+/*
+ * Records that the radio has tuned to the requested scan channel.
+ */
+int
+wlan_station_report_scan_channel_ready(
+	struct wlan_station *station,
+	uint64_t generation,
+	uint32_t step_index)
+{
+	unsigned long enabled;
+	int result;
+
+	result = station_enter(station);
+	if (result != 0)
+		return result;
+
+	/* Only the step being tuned accepts the report. */
+	enabled = spin_lock_irqsave(&station->lock);
+	if (station->scan_state != WLAN_SCAN_RUNNING ||
+	    station->scan_generation != generation ||
+	    station->scan_step_state != WLAN_SCAN_STEP_TUNING ||
+	    station->scan_step_index != step_index) {
+		result = ESTALE;
+	} else {
+		station->scan_ready_pending = 1U;
+		result = 0;
+	}
+	spin_unlock_irqrestore(&station->lock, enabled);
+	wlan_worker_wakeup();
+	station_leave(station);
+	return result;
+}
+
+/*
+ * Records a radio error against the running scan for the worker to
+ * apply.
+ */
+int
+wlan_station_report_scan_error(
+	struct wlan_station *station,
+	uint64_t generation,
+	int error)
+{
+	unsigned long enabled;
+	int result;
+
+	if (error <= 0)
+		return EINVAL;
+	result = station_enter(station);
+	if (result != 0)
+		return result;
+
+	/* Keeps the first error of the running scan. */
+	enabled = spin_lock_irqsave(&station->lock);
+	if (station->scan_state != WLAN_SCAN_RUNNING ||
+	    station->scan_generation != generation) {
+		result = ESTALE;
+	} else {
+		if (station->scan_event_error == 0)
+			station->scan_event_error = error;
+		result = 0;
+	}
+	spin_unlock_irqrestore(&station->lock, enabled);
+	wlan_worker_wakeup();
+	station_leave(station);
+	return result;
+}
+
+/*
+ * Reports that the radio lost the link of a connection generation.
+ */
+int
+wlan_station_report_link_loss(
+	struct wlan_station *station,
+	uint64_t generation,
+	int error)
+{
+	int result;
+
+	if (generation == 0U || error <= 0)
+		return EINVAL;
+	result = station_enter(station);
+	if (result != 0)
+		return result;
+	station_control_enter(station);
+	result = station_link_lost_controlled(station, generation, error);
+	station_control_leave(station);
+	station_leave(station);
+	wlan_worker_wakeup();
+	return result;
+}
+
+/*
+ * Delivers a received frame to the scan cache, the WPA2 engine, or the
+ * network device.
+ *
+ * Beacons refresh the beacon watch of a connected station and otherwise
+ * feed the scan cache with probe responses.  Other management frames and
+ * EAPOL go to the WPA2 engine; authorized data frames become Ethernet
+ * packets for the device.
+ */
+int
+wlan_station_report_frame(
+	struct wlan_station *station,
+	const struct wlan_radio_rx_frame *report)
+{
+	struct wlan_bss_record management_bss;
+	struct wlan_l2_rx_security security;
+	struct packet_buf *packet;
+	uint8_t ethernet[WLAN_L2_ETHERNET_MAX];
+	uint16_t frame_control;
+	size_t ethernet_length;
+	unsigned long enabled;
+	uint64_t now;
+	int result;
+
+	packet = NULL;
+	ethernet_length = 0U;
+
+	/* Rejects a malformed report. */
+	if (report == NULL ||
+	    report->frame == NULL ||
+	    report->length < 2U ||
+	    report->length > WLAN_MANAGEMENT_FRAME_MAX ||
+	    report->generation == 0U ||
+	    channel_frequency(report->channel) == 0U ||
+	    report->cipher > WLAN_RADIO_CIPHER_CCMP ||
+	    (report->decrypted != 0U && report->decrypted != 1U) ||
+	    (report->integrity_error != 0U &&
+	    report->integrity_error != 1U) ||
+	    report->key_index > 3U ||
+	    report->packet_number > 0x0000ffffffffffffULL ||
+	    !bytes_zero(report->reserved, sizeof(report->reserved)))
+		return EINVAL;
+	frame_control = (uint16_t)((uint16_t)report->frame[0] |
+	    ((uint16_t)report->frame[1] << 8));
+
+	/* A beacon refreshes the beacon watch; otherwise it feeds the scan. */
+	if ((frame_control & 0x000cU) == 0U &&
+	    ((frame_control & 0x00f0U) == 0x0080U ||
+	    (frame_control & 0x00f0U) == 0x0050U)) {
+		result = wlan_frame_parse_bss(report->frame, report->length,
+		    report->rssi_dbm, report->channel, &management_bss);
+		if (result != 0)
+			return result;
+		if ((frame_control & 0x00f0U) == 0x0080U) {
+			result = station_enter(station);
+			if (result != 0)
+				return result;
+			enabled = spin_lock_irqsave(&station->lock);
+			if (report->generation == station->connection_generation &&
+			    station_beacon_watch_active_locked(station) &&
+			    memcmp(management_bss.bssid, station->selected.bssid,
+			    6U) == 0) {
+				station_beacon_watch_refresh_locked(station,
+				    station_now_locked(station));
+				result = 0;
+			} else {
+				result = ESTALE;
+			}
+			spin_unlock_irqrestore(&station->lock, enabled);
+			station_leave(station);
+			if (result == 0)
+				return 0;
+		}
+		result = wlan_station_report_scan_bss(station,
+		    report->generation, &management_bss);
+		return result;
+	}
+
+	/* Everything else belongs to the current connection. */
+	result = station_enter(station);
+	if (result != 0)
+		return result;
+	station_control_enter(station);
+	enabled = spin_lock_irqsave(&station->lock);
+	if (report->generation != station->connection_generation ||
+	    station->state == WLAN_STATE_DOWN ||
+	    station->state == WLAN_STATE_IDLE ||
+	    station->state == WLAN_STATE_SCANNING ||
+	    station->state == WLAN_STATE_FAILED) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		result = ESTALE;
+		goto out;
+	}
+	now = station_now_locked(station);
+	spin_unlock_irqrestore(&station->lock, enabled);
+	if (report->integrity_error) {
+		result = EACCES;
+		goto out;
+	}
+
+	/* Management frames go to the WPA2 engine or end the connection. */
+	if ((frame_control & 0x000cU) == 0U) {
+		/*
+		 * PMF is outside this first profile.  Management input
+		 * therefore carries neither Protected Frame nor data-key
+		 * metadata.
+		 */
+		if ((frame_control & 0x4000U) != 0U ||
+		    report->key_generation != 0U ||
+		    report->packet_number != 0U ||
+		    report->cipher != WLAN_RADIO_CIPHER_NONE ||
+		    report->decrypted != 0U ||
+		    report->key_index != 0U) {
+			result = EACCES;
+			goto out;
+		}
+		if ((frame_control & (uint16_t)~0x0800U) == 0x00a0U ||
+		    (frame_control & (uint16_t)~0x0800U) == 0x00c0U) {
+			/*
+			 * PMF is outside this profile, so a matching
+			 * unprotected disassociation/deauthentication is
+			 * authoritative.  Frames for another BSS/station are
+			 * ordinary unrelated management traffic.
+			 */
+			if (report->length != 26U ||
+			    memcmp(report->frame + 4U, station->device->hwaddr, 6U) != 0 ||
+			    memcmp(report->frame + 10U, station->selected.bssid, 6U) != 0 ||
+			    memcmp(report->frame + 16U, station->selected.bssid, 6U) != 0) {
+				result = ESTALE;
+				goto out;
+			}
+			result = station_link_lost_controlled(station,
+			    report->generation, ECONNRESET);
+			goto out;
+		}
+		result = wlan_wpa2_engine_receive_management(&station->wpa2,
+		    report->generation, report->frame, report->length, now);
+		goto sync;
+	}
+	if ((frame_control & 0x000cU) != 0x0008U) {
+		result = EPROTONOSUPPORT;
+		goto out;
+	}
+
+	/* Data frames are converted to Ethernet with their key metadata. */
+	memset(&security, 0, sizeof(security));
+	security.key_generation = report->key_generation;
+	security.packet_number = report->packet_number;
+	security.decrypted = report->decrypted;
+	security.cipher_ccmp = report->cipher == WLAN_RADIO_CIPHER_CCMP;
+	security.key_index = report->key_index;
+	result = wlan_l2_parse_data(station->device->hwaddr,
+	    station->selected.bssid, report->frame, report->length, &security,
+	    &station->l2_rx, ethernet, sizeof(ethernet), &ethernet_length);
+	if (result != 0)
+		goto out;
+	if (ethernet_length >= WLAN_L2_ETHERNET_HEADER_SIZE &&
+	    ethernet[12U] == 0x88U && ethernet[13U] == 0x8eU) {
+		/*
+		 * Clear EAPOL is confined to the initial four-way exchange.
+		 * Once a pairwise generation has reached the connected
+		 * lifetime, rekey M1/G1 and every response/retry must arrive
+		 * through the active CCMP domain.  Otherwise an
+		 * unauthenticated clear M1 could close the controlled port.
+		 */
+		if (station->wpa2.connected_lifetime &&
+		    station->wpa2.pairwise_installed &&
+		    ((frame_control & 0x4000U) == 0U ||
+		    report->cipher != WLAN_RADIO_CIPHER_CCMP ||
+		    report->decrypted == 0U || report->key_index != 0U ||
+		    report->key_generation !=
+		    station->l2_rx.pairwise_key_generation)) {
+			result = EACCES;
+			goto out;
+		}
+		result = wlan_wpa2_engine_receive_eapol(&station->wpa2,
+		    report->generation, ethernet + 6U, ethernet,
+		    ethernet + WLAN_L2_ETHERNET_HEADER_SIZE,
+		    ethernet_length - WLAN_L2_ETHERNET_HEADER_SIZE, now);
+		goto sync;
+	}
+
+	/* Only protected data of an authorized station reaches the device. */
+	if (!station->wpa2.authorized ||
+	    (frame_control & 0x4000U) == 0U) {
+		result = EACCES;
+		goto out;
+	}
+	packet = packet_buf_alloc(0U);
+	if (packet == NULL) {
+		result = ENOBUFS;
+		goto out;
+	}
+	if (packet_buf_append(packet, ethernet_length) == NULL) {
+		result = EMSGSIZE;
+		goto out;
+	}
+	memcpy(packet->data, ethernet, ethernet_length);
+	net_device_receive(station->device, packet);
+	packet = NULL;
+	result = 0;
+	goto out;
+
+sync:
+	/* Publishes the engine state the frame produced. */
+	enabled = spin_lock_irqsave(&station->lock);
+	station_sync_wpa_locked(station);
+	spin_unlock_irqrestore(&station->lock, enabled);
+out:
+	if (packet != NULL)
+		packet_buf_free(packet);
+	wlan_crypto_erase(ethernet, sizeof(ethernet));
+	station_control_leave(station);
+	station_leave(station);
+	if (result != 0)
+		wlan_worker_wakeup();
+	return result;
+}
+
+/*
+ * Reports the completion of a transmitted frame to the WPA2 engine or
+ * the device statistics.
+ */
+int
+wlan_station_report_tx_complete(
+	struct wlan_station *station,
+	uint64_t generation,
+	uint64_t cookie,
+	int acknowledged,
+	int error)
+{
+	unsigned long enabled;
+	uint64_t now;
+	int result;
+
+	/* Rejects an inconsistent completion. */
+	if (generation == 0U ||
+	    cookie == 0U ||
+	    error < 0 ||
+	    (acknowledged != 0 && acknowledged != 1) ||
+	    (acknowledged && error != 0))
+		return EINVAL;
+	result = station_enter(station);
+	if (result != 0)
+		return result;
+	station_control_enter(station);
+	enabled = spin_lock_irqsave(&station->lock);
+	if (generation != station->connection_generation) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		result = ESTALE;
+		goto out;
+	}
+	now = station_now_locked(station);
+	spin_unlock_irqrestore(&station->lock, enabled);
+
+	/* An engine frame updates the handshake; a data frame counts errors. */
+	if (cookie == station->wpa2.tx_cookie_active) {
+		result = wlan_wpa2_engine_report_tx(&station->wpa2, generation,
+		    cookie, acknowledged, error, now);
+		enabled = spin_lock_irqsave(&station->lock);
+		station_sync_wpa_locked(station);
+		spin_unlock_irqrestore(&station->lock, enabled);
+	} else if (cookie <= station->transmit_cookie &&
+	    station->wpa2.authorized) {
+		if (!acknowledged || error != 0)
+			net_device_tx_error(station->device);
+		result = 0;
+	} else {
+		result = ESTALE;
+	}
+out:
+	station_control_leave(station);
+	station_leave(station);
+	if (result != 0)
+		wlan_worker_wakeup();
+	return result;
+}
+
+/*
+ * Transmits an Ethernet packet as a protected data frame.
+ *
+ * The packet is consumed whatever the outcome.
+ */
+int
+wlan_station_transmit(
+	struct wlan_station *station,
+	struct packet_buf *packet)
+{
+	struct wlan_radio_tx_request request;
+	uint8_t mpdu[WLAN_L2_MPDU_MAX];
+	unsigned long enabled;
+	size_t mpdu_length;
+	uint64_t now;
+	int result;
+
+	mpdu_length = 0U;
+
+	if (packet == NULL)
+		return EINVAL;
+	result = station_enter(station);
+	if (result != 0) {
+		packet_buf_free(packet);
+		return result;
+	}
+	station_control_enter(station);
+	memset(&request, 0, sizeof(request));
+
+	/* Takes the next packet number and cookie of an authorized link. */
+	enabled = spin_lock_irqsave(&station->lock);
+	if (!station->wpa2.authorized ||
+	    !station->controlled_port ||
+	    station->ops->frame_transmit == NULL) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		result = ENETDOWN;
+		goto out;
+	}
+	if (station->transmit_packet_number >= 0x0000ffffffffffffULL ||
+	    station->transmit_cookie == UINT64_MAX) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		result = EOVERFLOW;
+		goto out;
+	}
+	station->transmit_packet_number++;
+	station->transmit_cookie++;
+	request.generation = station->connection_generation;
+	request.cookie = station->transmit_cookie;
+	request.key_generation = station->wpa2.key_generation;
+	request.packet_number = station->transmit_packet_number;
+	now = station_now_locked(station);
+	request.deadline_ticks = deadline_after(now,
+	    WLAN_CONNECT_TRANSITION_TICKS);
+	spin_unlock_irqrestore(&station->lock, enabled);
+
+	/* Builds the MPDU and hands it to the radio. */
+	result = wlan_l2_build_data(station->device->hwaddr,
+	    station->selected.bssid, packet->data, packet->length, 1, 0U,
+	    request.packet_number, mpdu, sizeof(mpdu), &mpdu_length);
+	if (result != 0)
+		goto out;
+	request.frame_class = WLAN_RADIO_FRAME_DATA;
+	request.encrypted = 1U;
+	request.key_index = 0U;
+	request.frame = mpdu;
+	request.length = mpdu_length;
+	result = station->ops->frame_transmit(station->radio_context, &request);
+out:
+	wlan_crypto_erase(mpdu, sizeof(mpdu));
+	packet_buf_free(packet);
+	station_control_leave(station);
+	station_leave(station);
+	return result;
+}
+
+/*
+ * Dispatches a WLAN ioctl to the station of a network device.
+ *
+ * A connect request's passphrase is preserved only across header and
+ * device validation and is redacted on every return path.
+ */
+int
+wlan_station_ioctl(
+	struct net_device *device,
+	unsigned long request,
+	void *argument)
+{
+	struct wlan_station *station;
+	struct wlan_ioctl_header *header;
+	size_t expected_size;
+	int error;
+	struct wlan_connect_request *connect;
+	uint8_t saved[WLAN_PASSPHRASE_STORAGE];
+
+	if (argument == NULL)
+		return EFAULT;
+	if (atomic_load_acquire(&wlan_initialized) != 2U)
+		wlan_core_init();
+
+	/* A connect request carries a secret that must not outlive the call. */
+	if (request == SIOCSWLANCONNECT) {
+		connect = argument;
+		memcpy(saved, connect->passphrase, sizeof(saved));
+		secure_zero(connect->passphrase, sizeof(connect->passphrase));
+		error = header_validate(device,
+		    (const struct wlan_ioctl_header *)connect, sizeof(*connect));
+		if (error != 0) {
+			secure_zero(saved, sizeof(saved));
+			connect->passphrase_length = 0U;
+			return error;
+		}
+		error = station_find_enter(device, &station);
+		if (error == 0) {
+			memcpy(connect->passphrase, saved, sizeof(saved));
+			error = ioctl_connect(station, connect);
+			station_leave(station);
+		}
+		secure_zero(saved, sizeof(saved));
+		secure_zero(connect->passphrase, sizeof(connect->passphrase));
+		connect->passphrase_length = 0U;
+		return error;
+	}
+
+	/* Every other request is validated by its expected size. */
+	if (request == SIOCSWLANSCAN)
+		expected_size = sizeof(struct wlan_scan_request);
+	else if (request == SIOCGWLANSCAN)
+		expected_size = sizeof(struct wlan_scan_status_request);
+	else if (request == SIOCGWLANBSS)
+		expected_size = sizeof(struct wlan_bss_request);
+	else if (request == SIOCSWLANDISCONNECT)
+		expected_size = sizeof(struct wlan_disconnect_request);
+	else if (request == SIOCGWLANSTATUS)
+		expected_size = sizeof(struct wlan_status_request);
+	else
+		return ENOTTY;
+	header = argument;
+	error = header_validate(device, header, expected_size);
+	if (error != 0)
+		return error;
+	error = station_find_enter(device, &station);
+	if (error != 0)
+		return error;
+	if (request == SIOCSWLANSCAN)
+		error = ioctl_scan(station, argument);
+	else if (request == SIOCGWLANSCAN)
+		error = ioctl_scan_status(station, argument);
+	else if (request == SIOCGWLANBSS)
+		error = ioctl_bss(station, argument);
+	else if (request == SIOCSWLANDISCONNECT)
+		error = ioctl_disconnect(station, argument);
+	else
+		error = ioctl_status(station, argument);
+	station_leave(station);
+	return error;
+}
+
+/*
+ * Retires a station's scan and connection and marks it administratively
+ * down.
+ *
+ * The close is refused while callers are still active on the station.
+ */
+int
+wlan_station_close(
+	struct wlan_station *station)
+{
+	unsigned long enabled;
+	int error;
+
+	if (station == NULL)
+		return ENODEV;
+
+	/* Blocks new callers, then waits for none to be active. */
+	enabled = spin_lock_irqsave(&station->lock);
+	if (!station->used || station->blocked) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		return ENODEV;
+	}
+	if (station->lifecycle_inflight) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		return EBUSY;
+	}
+	station->closing = 1;
+	if (station->active != 0U) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		return EBUSY;
+	}
+	station->lifecycle_inflight = 1;
+	spin_unlock_irqrestore(&station->lock, enabled);
+
+	/* Retires everything; a failure leaves the station closing. */
+	error = station_retire(station, 0);
+	enabled = spin_lock_irqsave(&station->lock);
+	station->lifecycle_inflight = 0;
+	if (error == 0)
+		station->closing = 0;
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return error;
+}
+
+/*
+ * Detaches a station from its device after quiescing the radio.
+ */
+int
+wlan_station_detach(
+	struct wlan_station *station)
+{
+	unsigned long registry_enabled;
+	unsigned long enabled;
+	struct net_device *release_device;
+	int error;
+
+	if (station == NULL || atomic_load_acquire(&wlan_initialized) != 2U)
+		return ENODEV;
+
+	/* Blocks new callers and claims the lifecycle. */
+	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
+	enabled = spin_lock_irqsave(&station->lock);
+	if (!station->used) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+		return ENODEV;
+	}
+	if (station->shutdown_owned ||
+	    station->lifecycle_inflight ||
+	    station->closing) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+		return EBUSY;
+	}
+	if (station->active != 0U) {
+		station->blocked = 1;
+		spin_unlock_irqrestore(&station->lock, enabled);
+		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+		return EBUSY;
+	}
+	station->blocked = 1;
+	station->lifecycle_inflight = 1;
+	spin_unlock_irqrestore(&station->lock, enabled);
+	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+
+	/* Retires the station and quiesces the radio. */
+	station_control_enter(station);
+	error = station_retire_controlled(station, 0);
+	if (error == 0 && station->ops->quiesce != NULL)
+		error = station->ops->quiesce(station->radio_context);
+	station_control_leave(station);
+	if (error != 0) {
+		enabled = spin_lock_irqsave(&station->lock);
+		station->lifecycle_inflight = 0;
+		spin_unlock_irqrestore(&station->lock, enabled);
+		return error;
+	}
+
+	/* Frees the slot unless a shutdown claimed it meanwhile. */
+	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
+	enabled = spin_lock_irqsave(&station->lock);
+	if (station->active != 0U || station->shutdown_owned) {
+		station->lifecycle_inflight = 0;
+		spin_unlock_irqrestore(&station->lock, enabled);
+		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+		return EBUSY;
+	}
+	release_device = station_finalize_locked(station);
+	spin_unlock_irqrestore(&station->lock, enabled);
+	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+	net_device_release(release_device);
+	return 0;
+}
+
+/*
+ * Retires and detaches every station for system shutdown.
+ *
+ * The first pass closes admission to every slot; the second retires each
+ * owned station.  A busy station aborts the shutdown with EBUSY.
+ */
+int
+wlan_station_shutdown_all(
+	void)
+{
+	unsigned long registry_enabled;
+	unsigned index;
+	int first_error;
+	int busy;
+	struct wlan_station *station;
+	unsigned long enabled;
+	struct net_device *release_device;
+	int owned;
+	int error;
+
+	first_error = 0;
+	busy = 0;
+
+	if (atomic_load_acquire(&wlan_initialized) != 2U)
+		return 0;
+
+	/*
+	 * The terminal registry latch prevents attachment and slot reuse
+	 * between the admission-closing pass and the checked retirement
+	 * pass.
+	 */
+	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
+	if (wlan_shutdown_inflight) {
+		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+		return EBUSY;
+	}
+	wlan_shutdown_inflight = 1;
+	wlan_stopping = 1;
+	for (index = 0; index < NET_DEVICE_MAX; index++) {
+		station = &wlan_stations[index];
+		if (!station->used)
+			continue;
+		enabled = spin_lock_irqsave(&station->lock);
+		if (station->lifecycle_inflight) {
+			busy = 1;
+		} else {
+			station->shutdown_owned = 1;
+			station->blocked = 1;
+			station->closing = 0;
+			if (station->active != 0U)
+				busy = 1;
+		}
+		spin_unlock_irqrestore(&station->lock, enabled);
+	}
+	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+	if (busy) {
+		registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
+		wlan_shutdown_inflight = 0;
+		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+		return EBUSY;
+	}
+
+	/* Retires and finalizes every owned station. */
+	for (index = 0; index < NET_DEVICE_MAX; index++) {
+		station = &wlan_stations[index];
+		release_device = NULL;
+		enabled = spin_lock_irqsave(&station->lock);
+		owned = station->used && station->shutdown_owned;
+		spin_unlock_irqrestore(&station->lock, enabled);
+		if (!owned)
+			continue;
+		station_control_enter(station);
+		error = station_retire_controlled(station, 0);
+		if (error == 0 && station->ops->quiesce != NULL)
+			error = station->ops->quiesce(station->radio_context);
+		station_control_leave(station);
+		if (error != 0) {
+			if (first_error == 0)
+				first_error = error;
+			continue;
+		}
+		registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
+		enabled = spin_lock_irqsave(&station->lock);
+		if (station->active != 0U || !station->shutdown_owned) {
+			if (first_error == 0)
+				first_error = EBUSY;
+		} else {
+			release_device = station_finalize_locked(station);
+		}
+		spin_unlock_irqrestore(&station->lock, enabled);
+		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+		if (release_device != NULL)
+			net_device_release(release_device);
+	}
+	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
+	wlan_shutdown_inflight = 0;
+	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+	return first_error;
+}
+
+/*
+ * Runs the connection and scan timers of every station.
+ */
+void
+wlan_timer_run(
+	uint64_t now_ticks)
+{
+	unsigned index;
+	struct wlan_station *station;
+
+	if (atomic_load_acquire(&wlan_initialized) != 2U)
+		return;
+	for (index = 0U; index < NET_DEVICE_MAX; index++) {
+		if (station_index_enter(index, &station) != 0)
+			continue;
+		station_timer_run(station, now_ticks);
+		station_leave(station);
+	}
+}
+
+/*
+ * Reports the earliest deadline of any station, or zero when none is
+ * pending.
+ */
+uint64_t
+wlan_timer_next_deadline(
+	void)
+{
+	uint64_t result;
+	unsigned index;
+	struct wlan_station *station;
+	unsigned long enabled;
+	uint64_t candidate;
+
+	result = 0U;
+
+	if (atomic_load_acquire(&wlan_initialized) != 2U)
+		return 0U;
+	for (index = 0U; index < NET_DEVICE_MAX; index++) {
+		candidate = 0U;
+		if (station_index_enter(index, &station) != 0)
+			continue;
+
+		/* Takes the earliest of the station's live deadlines. */
+		enabled = spin_lock_irqsave(&station->lock);
+		if (station->scan_state == WLAN_SCAN_RUNNING) {
+			candidate = station->scan_deadline;
+			if (station->scan_step_deadline != 0U &&
+			    station->scan_step_deadline < candidate)
+				candidate = station->scan_step_deadline;
+		}
+		if ((station->state == WLAN_STATE_AUTHENTICATING ||
+		    station->state == WLAN_STATE_ASSOCIATING ||
+		    station->state == WLAN_STATE_FOUR_WAY) &&
+		    (candidate == 0U ||
+		    station->connection_deadline < candidate))
+			candidate = station->connection_deadline;
+		if (station->connection_step_deadline != 0U &&
+		    (candidate == 0U ||
+		    station->connection_step_deadline < candidate))
+			candidate = station->connection_step_deadline;
+		if (station->scan_retry_deadline != 0U &&
+		    (candidate == 0U ||
+		    station->scan_retry_deadline < candidate))
+			candidate = station->scan_retry_deadline;
+		if (station->connect_retry_deadline != 0U &&
+		    (candidate == 0U ||
+		    station->connect_retry_deadline < candidate))
+			candidate = station->connect_retry_deadline;
+		if (station->beacon_watch_deadline != 0U &&
+		    (candidate == 0U ||
+		    station->beacon_watch_deadline < candidate))
+			candidate = station->beacon_watch_deadline;
+		spin_unlock_irqrestore(&station->lock, enabled);
+		station_leave(station);
+		if (candidate != 0U && (result == 0U || candidate < result))
+			result = candidate;
+	}
+	return result;
+}
+
+/*
+ * Tests whether any station has timer work due now.
+ */
+int
+wlan_work_pending(
+	void)
+{
+	unsigned index;
+	struct wlan_station *station;
+	unsigned long enabled;
+	uint64_t now;
+	int pending;
+
+	if (atomic_load_acquire(&wlan_initialized) != 2U)
+		return 0;
+	for (index = 0U; index < NET_DEVICE_MAX; index++) {
+		if (station_index_enter(index, &station) != 0)
+			continue;
+		enabled = spin_lock_irqsave(&station->lock);
+		now = station_now_locked(station);
+		pending = (station->scan_state == WLAN_SCAN_RUNNING &&
+		    (station->scan_step_state == WLAN_SCAN_STEP_NEED_TUNE ||
+		    station->scan_ready_pending ||
+		    station->scan_event_error != 0 ||
+		    deadline_expired(now, station->scan_deadline) ||
+		    deadline_expired(now, station->scan_step_deadline))) ||
+		    (station->scan_driver_active &&
+		    station->scan_state != WLAN_SCAN_RUNNING &&
+		    (station->scan_retry_deadline == 0U ||
+		    deadline_expired(now, station->scan_retry_deadline))) ||
+		    station->connect_start_pending ||
+		    deadline_expired(now, station->scan_retry_deadline) ||
+		    (station->connect_stop_pending &&
+		    (station->connect_retry_deadline == 0U ||
+		    deadline_expired(now, station->connect_retry_deadline))) ||
+		    deadline_expired(now, station->beacon_watch_deadline) ||
+		    ((station->state == WLAN_STATE_AUTHENTICATING ||
+		    station->state == WLAN_STATE_ASSOCIATING ||
+		    station->state == WLAN_STATE_FOUR_WAY) &&
+		    (deadline_expired(now, station->connection_deadline) ||
+		    deadline_expired(now,
+		    station->connection_step_deadline)));
+		spin_unlock_irqrestore(&station->lock, enabled);
+		station_leave(station);
+		if (pending)
+			return 1;
+	}
+	return 0;
+}
+
+#ifdef WLAN_TESTING
+/*
+ * Attaches a station with a test clock.
+ */
+int
+wlan_station_test_attach(
+	struct net_device *device,
+	const struct wlan_radio_ops *ops,
+	void *radio_context,
+	const struct wlan_scan_profile *scan_profile,
+	wlan_clock_fn clock,
+	void *clock_context,
+	struct wlan_station **result)
+{
+	unsigned long enabled;
+	int error;
+
+	error = wlan_station_attach(device, ops, radio_context,
+	    scan_profile, result);
+	if (error != 0)
+		return error;
+	enabled = spin_lock_irqsave(&(*result)->lock);
+	if (clock != NULL)
+		(*result)->clock = clock;
+	else
+		(*result)->clock = default_clock;
+	(*result)->clock_context = clock_context;
+	spin_unlock_irqrestore(&(*result)->lock, enabled);
+	return 0;
+}
+
+/*
+ * Installs a one-shot hook that runs on the next scan BSS report.
+ */
+int
+wlan_station_test_set_report_hook(
+	struct wlan_station *station,
+	wlan_station_test_hook_fn hook,
+	void *context)
+{
+	unsigned long enabled;
+	int error;
+
+	error = station_enter(station);
+	if (error != 0)
+		return error;
+	enabled = spin_lock_irqsave(&station->lock);
+	station->test_report_hook = hook;
+	station->test_report_hook_context = context;
+	spin_unlock_irqrestore(&station->lock, enabled);
+	station_leave(station);
+	return 0;
+}
+
+/*
+ * Reports how many callers are waiting for the control gate.
+ */
+unsigned
+wlan_station_test_control_waiters(
+	struct wlan_station *station)
+{
+	unsigned long enabled;
+	unsigned waiters;
+
+	if (station == NULL)
+		return 0U;
+	enabled = spin_lock_irqsave(&station->lock);
+	waiters = station->test_control_waiters;
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return waiters;
+}
+
+/*
+ * Tests whether every secret of a station has been erased.
+ */
+int
+wlan_station_test_secrets_clear(
+	struct wlan_station *station)
+{
+	unsigned long enabled;
+	int clear;
+
+	if (station == NULL)
+		return 1;
+	enabled = spin_lock_irqsave(&station->lock);
+	clear = station->credential_length == 0U &&
+	    bytes_zero(station->credential, sizeof(station->credential)) &&
+	    bytes_zero(station->wpa2.pmk, sizeof(station->wpa2.pmk)) &&
+	    bytes_zero(station->wpa2.ptk, sizeof(station->wpa2.ptk)) &&
+	    bytes_zero(station->wpa2.anonce, sizeof(station->wpa2.anonce)) &&
+	    bytes_zero(station->wpa2.snonce, sizeof(station->wpa2.snonce)) &&
+	    bytes_zero(station->wpa2.gtk, sizeof(station->wpa2.gtk)) &&
+	    bytes_zero(station->wpa2.tx_frame,
+	    sizeof(station->wpa2.tx_frame));
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return clear;
+}
+
+/*
+ * Places a station directly in the authorized state for a test.
+ */
+int
+wlan_station_test_seed_authorized(
+	struct wlan_station *station,
+	const struct wlan_bss_record *bss,
+	uint64_t generation,
+	uint64_t key_generation)
+{
+	static const uint8_t test_rates[WLAN_WPA2_RATE_MAX] = {
+		0x82U, 0x84U, 0x8bU, 0x96U, 0x0cU, 0x12U,
+		0x18U, 0x24U, 0x30U, 0x48U, 0x60U, 0x6cU
+	};
+	unsigned long enabled;
+	uint64_t group_generation;
+	uint64_t now;
+	int error;
+
+	/* Rejects an invalid BSS or generation. */
+	if (station == NULL ||
+	    bss == NULL ||
+	    generation == 0U ||
+	    key_generation == 0U ||
+	    key_generation == UINT64_MAX ||
+	    !bssid_valid(bss->bssid) ||
+	    bss->ssid_length == 0U ||
+	    bss->ssid_length > WLAN_SSID_MAX ||
+	    channel_frequency(bss->channel) == 0U)
+		return EINVAL;
+	group_generation = key_generation + 1U;
+	enabled = spin_lock_irqsave(&station->lock);
+	if (!station->used || !station->administrative_up || station->closing) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		return ENETDOWN;
+	}
+
+	/* Seeds the connection and receive state. */
+	now = station_now_locked(station);
+	station->selected = *bss;
+	station->connection_generation = generation;
+	if (station->next_generation < generation)
+		station->next_generation = generation;
+	station->connection_deadline = deadline_after(now,
+	    WLAN_CONNECT_DEADLINE_TICKS);
+	station->connection_step_deadline = 0U;
+	station->connect_driver_active = 1;
+	station->connect_stop_pending = 0;
+	station->connect_retire_explicit = 0;
+	station->connect_retry_deadline = 0U;
+	station->transmit_packet_number = 0U;
+	station->transmit_cookie = 0U;
+	memset(&station->l2_rx, 0, sizeof(station->l2_rx));
+	station->l2_rx.pairwise_key_generation = key_generation;
+	station->l2_rx.group_key_generation[1] = group_generation;
+	secure_zero(station->credential, sizeof(station->credential));
+	station->credential_length = 0U;
+
+	/* Seeds an authorized WPA2 engine with fixed keys. */
+	memset(&station->wpa2, 0, sizeof(station->wpa2));
+	station->wpa2.ops = &station_wpa2_ops;
+	station->wpa2.callback_context = station;
+	station->wpa2.generation = generation;
+	station->wpa2.key_generation = key_generation;
+	station->wpa2.group_key_generation = group_generation;
+	station->wpa2.next_key_generation = group_generation;
+	station->wpa2.state = WLAN_WPA2_STATE_AUTHORIZED;
+	station->wpa2.configured = 1U;
+	station->wpa2.associated = 1U;
+	station->wpa2.pairwise_installed = 1U;
+	station->wpa2.group_installed = 1U;
+	station->wpa2.authorized = 1U;
+	station->wpa2.connected_lifetime = 1U;
+	station->wpa2.gtk_index = 1U;
+	station->wpa2.protocol_version = 2U;
+	memset(&station->wpa2.profile, 0, sizeof(station->wpa2.profile));
+	memcpy(station->wpa2.profile.station, station->device->hwaddr, 6U);
+	memcpy(station->wpa2.profile.bssid, bss->bssid, 6U);
+	memcpy(station->wpa2.profile.ssid, bss->ssid, bss->ssid_length);
+	station->wpa2.profile.ssid_length = bss->ssid_length;
+	memcpy(station->wpa2.profile.rates, test_rates, sizeof(test_rates));
+	station->wpa2.profile.rate_count = sizeof(test_rates);
+	station->wpa2.profile.channel = bss->channel;
+	station->wpa2.profile.capability = WLAN_LOCAL_ASSOC_CAPABILITY;
+	station->wpa2.profile.listen_interval = 10U;
+	station->wpa2.profile.total_deadline_ticks = station->connection_deadline;
+	station->wpa2.profile.transition_timeout_ticks =
+	    WLAN_CONNECT_TRANSITION_TICKS;
+	station->wpa2.profile.recovery_timeout_ticks =
+	    WLAN_CONNECT_TRANSITION_TICKS * 3U;
+	memset(station->wpa2.pmk, 0x11, sizeof(station->wpa2.pmk));
+	memset(station->wpa2.ptk, 0x22, sizeof(station->wpa2.ptk));
+	memset(station->wpa2.gtk, 0x33, sizeof(station->wpa2.gtk));
+
+	/* Publishes the connected state and raises the carrier. */
+	station->authenticated = 1U;
+	station->associated = 1U;
+	station->key_installed = 1U;
+	station->controlled_port = 1U;
+	station->state = WLAN_STATE_CONNECTED;
+	station_beacon_watch_refresh_locked(station, now);
+	error = net_device_set_carrier(station->device, 1);
+	if (error != 0)
+		station->controlled_port = 0U;
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return error;
+}
+
+/*
+ * Starts a pairwise rekey on an authorized station for a test.
+ */
+int
+wlan_station_test_begin_pairwise_rekey(
+	struct wlan_station *station)
+{
+	unsigned long enabled;
+	int error;
+
+	if (station == NULL)
+		return EINVAL;
+	enabled = spin_lock_irqsave(&station->lock);
+	if (wlan_wpa2_engine_state(&station->wpa2) !=
+	    WLAN_WPA2_STATE_AUTHORIZED ||
+	    !station->wpa2.connected_lifetime ||
+	    !station->wpa2.pairwise_installed) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		return ENOTCONN;
+	}
+
+	/* Closes the controlled port and waits for message 3. */
+	error = station_carrier_down_locked(station);
+	if (error == 0) {
+		station->wpa2.authorized = 0U;
+		station->wpa2.pairwise_rekey = 1U;
+		station->wpa2.state = WLAN_WPA2_STATE_MESSAGE_3;
+		station_sync_wpa_locked(station);
+	}
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return error;
+}
+
+/*
+ * Starts a group rekey on an authorized station for a test.
+ */
+int
+wlan_station_test_begin_group_rekey(
+	struct wlan_station *station)
+{
+	unsigned long enabled;
+
+	if (station == NULL)
+		return EINVAL;
+	enabled = spin_lock_irqsave(&station->lock);
+	if (wlan_wpa2_engine_state(&station->wpa2) !=
+	    WLAN_WPA2_STATE_AUTHORIZED ||
+	    !station->wpa2.connected_lifetime ||
+	    !station->wpa2.authorized ||
+	    !station->wpa2.pairwise_installed ||
+	    !station->wpa2.group_installed) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		return ENOTCONN;
+	}
+	station->wpa2.tx_cookie_active = 0U;
+	station->wpa2.state = WLAN_WPA2_STATE_GROUP_MESSAGE_2_TX;
+	station->wpa2.step_deadline_ticks = deadline_after(
+	    station_now_locked(station), WLAN_CONNECT_TRANSITION_TICKS);
+	station_sync_wpa_locked(station);
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return 0;
+}
+
+/*
+ * Advances a station that is still authenticating to a later handshake
+ * phase for a test.
+ */
+int
+wlan_station_test_set_initial_phase(
+	struct wlan_station *station,
+	uint32_t phase)
+{
+	unsigned long enabled;
+
+	if (station == NULL ||
+	    (phase != WLAN_STATION_TEST_PHASE_ASSOCIATING &&
+	    phase != WLAN_STATION_TEST_PHASE_FOUR_WAY))
+		return EINVAL;
+	enabled = spin_lock_irqsave(&station->lock);
+	if ((wlan_wpa2_engine_state(&station->wpa2) !=
+	    WLAN_WPA2_STATE_AUTH_TX &&
+	    wlan_wpa2_engine_state(&station->wpa2) !=
+	    WLAN_WPA2_STATE_AUTH_RESPONSE) || station->wpa2.connected_lifetime) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		return ENOTCONN;
+	}
+	station->wpa2.tx_cookie_active = 0U;
+	station->wpa2.associated = phase == WLAN_STATION_TEST_PHASE_FOUR_WAY;
+	if (phase == WLAN_STATION_TEST_PHASE_ASSOCIATING)
+		station->wpa2.state = WLAN_WPA2_STATE_ASSOC_RESPONSE;
+	else
+		station->wpa2.state = WLAN_WPA2_STATE_MESSAGE_3;
+	station->wpa2.step_deadline_ticks = deadline_after(
+	    station_now_locked(station), WLAN_CONNECT_TRANSITION_TICKS);
+	station_sync_wpa_locked(station);
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return 0;
+}
+
+/*
+ * Completes a handshake in progress as authorized for a test.
+ */
+int
+wlan_station_test_complete_authorized(
+	struct wlan_station *station,
+	uint64_t key_generation)
+{
+	unsigned long enabled;
+	uint64_t group_generation;
+	int error;
+
+	if (station == NULL ||
+	    key_generation == 0U ||
+	    key_generation == UINT64_MAX)
+		return EINVAL;
+	group_generation = key_generation + 1U;
+	enabled = spin_lock_irqsave(&station->lock);
+	if (!station->connect_driver_active ||
+	    wlan_wpa2_engine_state(&station->wpa2) == WLAN_WPA2_STATE_IDLE ||
+	    wlan_wpa2_engine_state(&station->wpa2) == WLAN_WPA2_STATE_FAILED) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		return ENOTCONN;
+	}
+
+	/* Installs fixed keys and publishes the authorized state. */
+	station->wpa2.key_generation = key_generation;
+	station->wpa2.group_key_generation = group_generation;
+	station->wpa2.next_key_generation = group_generation;
+	station->wpa2.gtk_index = 1U;
+	station->wpa2.associated = 1U;
+	station->wpa2.pairwise_installed = 1U;
+	station->wpa2.group_installed = 1U;
+	station->wpa2.authorized = 1U;
+	station->wpa2.connected_lifetime = 1U;
+	station->wpa2.pairwise_rekey = 0U;
+	station->wpa2.state = WLAN_WPA2_STATE_AUTHORIZED;
+	station->wpa2.step_deadline_ticks = 0U;
+	memset(station->wpa2.ptk, 0x44, sizeof(station->wpa2.ptk));
+	memset(station->wpa2.gtk, 0x55, sizeof(station->wpa2.gtk));
+	memset(&station->l2_rx, 0, sizeof(station->l2_rx));
+	station->l2_rx.pairwise_key_generation = key_generation;
+	station->l2_rx.group_key_generation[1] = group_generation;
+	station->transmit_packet_number = 0U;
+	station_sync_wpa_locked(station);
+	error = net_device_set_carrier(station->device, 1);
+	if (error != 0)
+		station->controlled_port = 0U;
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return error;
+}
+
+/*
+ * Copies the connection state of a station for a test.
+ */
+int
+wlan_station_test_snapshot(
+	struct wlan_station *station,
+	struct wlan_station_test_snapshot *snapshot)
+{
+	unsigned long enabled;
+
+	if (station == NULL || snapshot == NULL)
+		return EINVAL;
+	enabled = spin_lock_irqsave(&station->lock);
+	memset(snapshot, 0, sizeof(*snapshot));
+	snapshot->connection_generation = station->connection_generation;
+	snapshot->connection_deadline = station->connection_deadline;
+	snapshot->connection_step_deadline = station->connection_step_deadline;
+	snapshot->reconnect_deadline = 0U;
+	snapshot->reconnect_next_attempt = 0U;
+	snapshot->reconnect_cleanup_retry = 0U;
+	snapshot->connect_retry_deadline = station->connect_retry_deadline;
+	snapshot->scan_retry_deadline = station->scan_retry_deadline;
+	snapshot->beacon_watch_deadline = station->beacon_watch_deadline;
+	snapshot->pairwise_key_generation =
+	    station->l2_rx.pairwise_key_generation;
+	snapshot->group_key_generation = station->wpa2.group_key_generation;
+	snapshot->pending_pairwise_key_generation =
+	    station->wpa2.pending_pairwise_key_generation;
+	snapshot->pending_group_key_generation =
+	    station->wpa2.pending_group_key_generation;
+	snapshot->pairwise_receive_packet_number =
+	    station->l2_rx.pairwise_packet_number;
+	memcpy(snapshot->group_receive_packet_number,
+	    station->l2_rx.group_packet_number,
+	    sizeof(snapshot->group_receive_packet_number));
+	snapshot->pending_group_receive_packet_number =
+	    station->wpa2.pending_group_receive_packet_number;
+	snapshot->transmit_packet_number = station->transmit_packet_number;
+	snapshot->reconnect_attempts = 0U;
+	snapshot->state = station->state;
+	snapshot->wpa_state = (uint32_t)station->wpa2.state;
+	snapshot->association_capability = station->wpa2.profile.capability;
+	snapshot->reconnect_pending = 0U;
+	snapshot->reconnect_scan_active = 0U;
+	snapshot->controlled_port = station->controlled_port != 0U;
+	snapshot->connect_driver_active = station->connect_driver_active != 0;
+	snapshot->connect_stop_pending = station->connect_stop_pending != 0;
+	snapshot->connect_retire_explicit =
+	    station->connect_retire_explicit != 0;
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return 0;
+}
+
+/*
+ * Transmits an EAPOL frame through the station's WPA2 transmit path for
+ * a test.
+ */
+int
+wlan_station_test_transmit_eapol(
+	struct wlan_station *station,
+	uint64_t cookie,
+	const uint8_t *frame,
+	size_t length)
+{
+	unsigned long enabled;
+	uint64_t generation;
+	uint64_t deadline;
+	int error;
+
+	if (station == NULL || cookie == 0U || frame == NULL || length == 0U)
+		return EINVAL;
+	error = station_enter(station);
+	if (error != 0)
+		return error;
+	station_control_enter(station);
+	enabled = spin_lock_irqsave(&station->lock);
+	generation = station->connection_generation;
+	deadline = deadline_local(station_now_locked(station),
+	    WLAN_CONNECT_TRANSITION_TICKS, station->connection_deadline);
+	spin_unlock_irqrestore(&station->lock, enabled);
+	error = station_wpa_transmit(station, generation, cookie,
+	    WLAN_WPA2_TX_EAPOL, station->selected.bssid, frame, length, deadline);
+	station_control_leave(station);
+	station_leave(station);
+	return error;
+}
+#endif
+
+/* Clears memory in a way the compiler cannot elide. */
+static void
+secure_zero(
+	void *memory,
+	size_t length)
+{
+	volatile uint8_t *bytes;
+
+	bytes = memory;
+	while (length != 0U) {
+		*bytes = 0U;
+		bytes++;
+		length--;
+	}
+}
+
+/* Reads the kernel clock for a station without a test clock. */
 static uint64_t
-default_clock(void *context)
+default_clock(
+	void *context)
 {
 	(void)context;
 	return clock_ticks();
 }
 
+/* Adds a delay to a tick count, saturating at the current time on overflow. */
 static uint64_t
-deadline_after(uint64_t now, uint64_t delta)
+deadline_after(
+	uint64_t now,
+	uint64_t delta)
 {
 	if (UINT64_MAX - now < delta)
 		return now;
 	return now + delta;
 }
 
+/* Adds a delay to a tick count, failing on overflow. */
 static int
-deadline_checked(uint64_t now, uint64_t delta, uint64_t *result)
+deadline_checked(
+	uint64_t now,
+	uint64_t delta,
+	uint64_t *result)
 {
 	if (result == NULL || UINT64_MAX - now < delta)
 		return EOVERFLOW;
@@ -151,25 +1955,35 @@ deadline_checked(uint64_t now, uint64_t delta, uint64_t *result)
 	return 0;
 }
 
+/* Computes a step deadline bounded by an overall deadline. */
 static uint64_t
-deadline_local(uint64_t now, uint64_t delta, uint64_t total_deadline)
+deadline_local(
+	uint64_t now,
+	uint64_t delta,
+	uint64_t total_deadline)
 {
-	uint64_t local = deadline_after(now, delta);
+	uint64_t local;
 
+	local = deadline_after(now, delta);
 	if (total_deadline != 0U && total_deadline < local)
 		return total_deadline;
 	return local;
 }
 
+/* Converts a beacon interval into the ticks of tolerated beacon silence. */
 static uint64_t
-station_beacon_watch_ticks(uint16_t beacon_interval_tu)
+station_beacon_watch_ticks(
+	uint16_t beacon_interval_tu)
 {
 	uint64_t microseconds;
 	uint64_t ticks;
 
-	/* One TU is 1024 microseconds.  Twenty missed beacons tolerates ordinary
-	 * scheduling/airtime jitter; the two/ten-second bounds keep both common
-	 * intervals and malformed/extreme advertisements finite and conservative. */
+	/*
+	 * One TU is 1024 microseconds.  Twenty missed beacons tolerates
+	 * ordinary scheduling/airtime jitter; the two/ten-second bounds keep
+	 * both common intervals and malformed/extreme advertisements finite
+	 * and conservative.
+	 */
 	microseconds = (uint64_t)beacon_interval_tu * 1024U *
 	    WLAN_BEACON_MISS_MULTIPLIER;
 	if (microseconds > (UINT64_MAX - 999999U) / KERN_CLOCK_HZ)
@@ -183,54 +1997,83 @@ station_beacon_watch_ticks(uint16_t beacon_interval_tu)
 	return ticks;
 }
 
+/* Restarts the beacon watch from now; the caller holds the station lock. */
 static void
-station_beacon_watch_refresh_locked(struct wlan_station *station, uint64_t now)
+station_beacon_watch_refresh_locked(
+	struct wlan_station *station,
+	uint64_t now)
 {
 	station->beacon_watch_deadline = deadline_after(now,
 	    station_beacon_watch_ticks(station->selected.beacon_interval_tu));
 }
 
+/* Tests whether the beacon watch applies; the caller holds the station lock. */
 static int
-station_beacon_watch_active_locked(const struct wlan_station *station)
+station_beacon_watch_active_locked(
+	const struct wlan_station *station)
 {
 	if (!station->connect_driver_active ||
 	    station->beacon_watch_deadline == 0U)
 		return 0;
-	/* The common state and nonzero latch are published under this lock after
-	 * authorization.  They remain valid through pairwise (FOUR_WAY) and group
-	 * (CONNECTED) rekey.  Avoid reading engine-private fields here: beacon
-	 * ingestion does not own the serialized WPA control gate. */
-	return station->state == WLAN_STATE_CONNECTED ||
-	    station->state == WLAN_STATE_FOUR_WAY;
+
+	/*
+	 * The common state and nonzero latch are published under this lock
+	 * after authorization.  They remain valid through pairwise
+	 * (FOUR_WAY) and group (CONNECTED) rekey.  Avoid reading
+	 * engine-private fields here: beacon ingestion does not own the
+	 * serialized WPA control gate.
+	 */
+	if (station->state == WLAN_STATE_CONNECTED)
+		return 1;
+	if (station->state == WLAN_STATE_FOUR_WAY)
+		return 1;
+	return 0;
 }
 
+/* Tests whether a nonzero deadline has passed. */
 static int
-deadline_expired(uint64_t now, uint64_t deadline)
+deadline_expired(
+	uint64_t now,
+	uint64_t deadline)
 {
-	return deadline != 0U && now >= deadline;
+	if (deadline == 0U)
+		return 0;
+	if (now < deadline)
+		return 0;
+	return 1;
 }
 
+/* Wakes the network worker when one is linked in. */
 static void
-wlan_worker_wakeup(void)
+wlan_worker_wakeup(
+	void)
 {
 	if (net_worker_wakeup != NULL)
 		net_worker_wakeup();
 }
 
+/* Tests whether a byte range is all zero. */
 static int
-bytes_zero(const void *memory, size_t length)
+bytes_zero(
+	const void *memory,
+	size_t length)
 {
-	const uint8_t *bytes = memory;
+	const uint8_t *bytes;
 
-	while (length-- != 0U) {
-		if (*bytes++ != 0U)
+	bytes = memory;
+	while (length != 0U) {
+		if (*bytes != 0U)
 			return 0;
+		bytes++;
+		length--;
 	}
 	return 1;
 }
 
+/* Maps a channel number to its center frequency, or zero when unknown. */
 static uint32_t
-channel_frequency(uint32_t channel)
+channel_frequency(
+	uint32_t channel)
 {
 	if (channel >= 1U && channel <= 13U)
 		return 2407U + 5U * channel;
@@ -244,19 +2087,25 @@ channel_frequency(uint32_t channel)
 	return 0U;
 }
 
+/* Validates a scan profile's channels, flags, and padding. */
 static int
-scan_profile_validate(const struct wlan_scan_profile *profile)
+scan_profile_validate(
+	const struct wlan_scan_profile *profile)
 {
-	uint32_t index, earlier;
+	uint32_t index;
+	uint32_t earlier;
+	const struct wlan_scan_channel *channel;
 
-	if (profile == NULL || profile->channel_count == 0U ||
+	/* Rejects an empty or oversized profile with nonzero padding. */
+	if (profile == NULL ||
+	    profile->channel_count == 0U ||
 	    profile->channel_count > WLAN_SCAN_CHANNEL_MAX ||
 	    !bytes_zero(profile->reserved, sizeof(profile->reserved)))
 		return EINVAL;
-	for (index = 0U; index < WLAN_SCAN_CHANNEL_MAX; index++) {
-		const struct wlan_scan_channel *channel =
-		    &profile->channels[index];
 
+	/* Every used channel must be known, consistent, and unique. */
+	for (index = 0U; index < WLAN_SCAN_CHANNEL_MAX; index++) {
+		channel = &profile->channels[index];
 		if (index >= profile->channel_count) {
 			if (!bytes_zero(channel, sizeof(*channel)))
 				return EINVAL;
@@ -276,8 +2125,10 @@ scan_profile_validate(const struct wlan_scan_profile *profile)
 	return 0;
 }
 
+/* Computes the overall scan budget for a channel count. */
 static uint64_t
-scan_deadline_ticks(uint32_t channel_count)
+scan_deadline_ticks(
+	uint32_t channel_count)
 {
 	if (channel_count <= 14U)
 		return WLAN_SCAN_DEADLINE_TICKS;
@@ -286,8 +2137,11 @@ scan_deadline_ticks(uint32_t channel_count)
 	    (WLAN_SCAN_TUNE_DEADLINE_TICKS + WLAN_SCAN_DWELL_TICKS);
 }
 
+/* Tests whether an ioctl names a device. */
 static int
-device_name_matches(const struct net_device *device, const char *name)
+device_name_matches(
+	const struct net_device *device,
+	const char *name)
 {
 	unsigned index;
 
@@ -300,9 +2154,12 @@ device_name_matches(const struct net_device *device, const char *name)
 	return 0;
 }
 
+/* Validates an ioctl header against the device and the expected size. */
 static int
-header_validate(const struct net_device *device,
-	const struct wlan_ioctl_header *header, size_t size)
+header_validate(
+	const struct net_device *device,
+	const struct wlan_ioctl_header *header,
+	size_t size)
 {
 	if (device == NULL || header == NULL)
 		return ENODEV;
@@ -313,14 +2170,19 @@ header_validate(const struct net_device *device,
 	return 0;
 }
 
+/* Reads the station clock; the caller holds the station lock. */
 static uint64_t
-station_now_locked(struct wlan_station *station)
+station_now_locked(
+	struct wlan_station *station)
 {
 	return station->clock(station->clock_context);
 }
 
+/* Allocates the next operation generation; the caller holds the station lock. */
 static int
-station_generation_locked(struct wlan_station *station, uint64_t *result)
+station_generation_locked(
+	struct wlan_station *station,
+	uint64_t *result)
 {
 	if (station->next_generation == UINT64_MAX)
 		return EOVERFLOW;
@@ -331,8 +2193,10 @@ station_generation_locked(struct wlan_station *station, uint64_t *result)
 	return 0;
 }
 
+/* Erases the connection state and credential; the caller holds the station lock. */
 static void
-station_clear_connection_locked(struct wlan_station *station)
+station_clear_connection_locked(
+	struct wlan_station *station)
 {
 	secure_zero(station->credential, sizeof(station->credential));
 	station->credential_length = 0U;
@@ -348,11 +2212,16 @@ station_clear_connection_locked(struct wlan_station *station)
 	memset(&station->selected, 0, sizeof(station->selected));
 }
 
+/* Completes a connection retirement and settles the station state; the caller holds the station lock. */
 static void
-station_finish_connection_retire_locked(struct wlan_station *station)
+station_finish_connection_retire_locked(
+	struct wlan_station *station)
 {
-	int explicit_retire = station->connect_retire_explicit;
+	int explicit_retire;
 
+	explicit_retire = station->connect_retire_explicit;
+
+	/* Drops every connection artifact. */
 	station_clear_connection_locked(station);
 	memset(&station->l2_rx, 0, sizeof(station->l2_rx));
 	station->transmit_packet_number = 0U;
@@ -361,32 +2230,49 @@ station_finish_connection_retire_locked(struct wlan_station *station)
 	station->connect_stop_pending = 0;
 	station->connect_retire_explicit = 0;
 	station->connect_retry_deadline = 0U;
+
+	/* An explicit retirement ends idle; an implicit one ends failed. */
 	if (explicit_retire) {
 		if (station->scan_driver_active) {
-			station->state = station->administrative_up ?
-			    WLAN_STATE_FAILED : WLAN_STATE_DOWN;
-			station->terminal_error = station->scan_error != 0 ?
-			    station->scan_error : EBUSY;
+			if (station->administrative_up)
+				station->state = WLAN_STATE_FAILED;
+			else
+				station->state = WLAN_STATE_DOWN;
+			if (station->scan_error != 0)
+				station->terminal_error = station->scan_error;
+			else
+				station->terminal_error = EBUSY;
 		} else {
-			station->state = station->administrative_up ?
-			    WLAN_STATE_IDLE : WLAN_STATE_DOWN;
+			if (station->administrative_up)
+				station->state = WLAN_STATE_IDLE;
+			else
+				station->state = WLAN_STATE_DOWN;
 			station->terminal_error = 0;
 		}
 	} else {
-		station->state = station->administrative_up ?
-		    WLAN_STATE_FAILED : WLAN_STATE_DOWN;
+		if (station->administrative_up)
+			station->state = WLAN_STATE_FAILED;
+		else
+			station->state = WLAN_STATE_DOWN;
 	}
 }
 
+/* Closes the controlled port and drops the carrier; the caller holds the station lock. */
 static int
-station_carrier_down_locked(struct wlan_station *station)
+station_carrier_down_locked(
+	struct wlan_station *station)
 {
+	int error;
+
 	station->controlled_port = 0U;
-	return net_device_set_carrier(station->device, 0);
+	error = net_device_set_carrier(station->device, 0);
+	return error;
 }
 
+/* Computes the deadline of one WPA2 transition within the connection budget. */
 static uint64_t
-station_wpa_deadline(struct wlan_station *station)
+station_wpa_deadline(
+	struct wlan_station *station)
 {
 	unsigned long enabled;
 	uint64_t deadline;
@@ -400,15 +2286,20 @@ station_wpa_deadline(struct wlan_station *station)
 	return deadline;
 }
 
+/* Computes the deadline of a WPA2 cleanup step. */
 static uint64_t
-station_wpa_cleanup_deadline(struct wlan_station *station)
+station_wpa_cleanup_deadline(
+	struct wlan_station *station)
 {
 	unsigned long enabled;
 	uint64_t deadline;
 
-	/* Cleanup is a safety barrier, not another handshake attempt.  It gets a
-	 * fresh finite budget even when the 30-second protocol budget expired;
-	 * otherwise an uncertain CAM write could never be proven absent. */
+	/*
+	 * Cleanup is a safety barrier, not another handshake attempt.  It
+	 * gets a fresh finite budget even when the 30-second protocol budget
+	 * expired; otherwise an uncertain CAM write could never be proven
+	 * absent.
+	 */
 	enabled = spin_lock_irqsave(&station->lock);
 	deadline = deadline_after(station_now_locked(station),
 	    WLAN_CONNECT_TRANSITION_TICKS);
@@ -416,11 +2307,16 @@ station_wpa_cleanup_deadline(struct wlan_station *station)
 	return deadline;
 }
 
+/* Mirrors the WPA2 engine state into the station state; the caller holds the station lock. */
 static void
-station_sync_wpa_locked(struct wlan_station *station)
+station_sync_wpa_locked(
+	struct wlan_station *station)
 {
-	enum wlan_wpa2_state state = wlan_wpa2_engine_state(&station->wpa2);
+	enum wlan_wpa2_state state;
 
+	state = wlan_wpa2_engine_state(&station->wpa2);
+
+	/* Copies the engine's progress flags. */
 	station->connection_step_deadline =
 	    wlan_wpa2_engine_next_deadline(&station->wpa2);
 	station->authenticated = 0U;
@@ -429,6 +2325,8 @@ station_sync_wpa_locked(struct wlan_station *station)
 	    station->wpa2.group_installed != 0U;
 	station->controlled_port = station->wpa2.authorized != 0U;
 	station->retry_count = station->wpa2.retry_count;
+
+	/* Maps the engine state to the visible connection state. */
 	switch (state) {
 	case WLAN_WPA2_STATE_AUTH_TX:
 	case WLAN_WPA2_STATE_AUTH_RESPONSE:
@@ -485,24 +2383,41 @@ station_sync_wpa_locked(struct wlan_station *station)
 	}
 }
 
+/* Fills a buffer with platform entropy for the WPA2 engine. */
 static int
-station_wpa_entropy_fill(void *context, void *buffer, size_t length)
+station_wpa_entropy_fill(
+	void *context,
+	void *buffer,
+	size_t length)
 {
 	(void)context;
-	return hal_entropy_fill != NULL && hal_entropy_fill(buffer, length) ?
-	    0 : EIO;
+	if (hal_entropy_fill == NULL)
+		return EIO;
+	if (!hal_entropy_fill(buffer, length))
+		return EIO;
+	return 0;
 }
 
+/* Starts the radio on the selected BSS for the WPA2 engine. */
 static int
-station_wpa_radio_start(void *context, uint64_t generation,
-	const uint8_t bssid[6], uint32_t channel, uint64_t deadline,
+station_wpa_radio_start(
+	void *context,
+	uint64_t generation,
+	const uint8_t bssid[6],
+	uint32_t channel,
+	uint64_t deadline,
 	uint64_t *completion_ticks)
 {
-	struct wlan_station *station = context;
+	struct wlan_station *station;
 	unsigned long enabled;
 	int error;
 
-	if (station == NULL || bssid == NULL || completion_ticks == NULL ||
+	station = context;
+
+	/* The request must still describe the selected BSS and generation. */
+	if (station == NULL ||
+	    bssid == NULL ||
+	    completion_ticks == NULL ||
 	    station->ops->connect_start == NULL)
 		return EOPNOTSUPP;
 	enabled = spin_lock_irqsave(&station->lock);
@@ -516,6 +2431,8 @@ station_wpa_radio_start(void *context, uint64_t generation,
 		return ESTALE;
 	}
 	spin_unlock_irqrestore(&station->lock, enabled);
+
+	/* Starts the driver and records that a stop is now owed. */
 	error = station->ops->connect_start(station->radio_context, generation,
 	    &station->selected, deadline);
 	*completion_ticks = station->clock(station->clock_context);
@@ -530,25 +2447,41 @@ station_wpa_radio_start(void *context, uint64_t generation,
 	return error;
 }
 
+/* Transmits a management or EAPOL frame for the WPA2 engine. */
 static int
-station_wpa_transmit(void *context, uint64_t generation, uint64_t cookie,
-	enum wlan_wpa2_tx_kind kind, const uint8_t destination[6],
-	const uint8_t *frame, size_t length, uint64_t deadline)
+station_wpa_transmit(
+	void *context,
+	uint64_t generation,
+	uint64_t cookie,
+	enum wlan_wpa2_tx_kind kind,
+	const uint8_t destination[6],
+	const uint8_t *frame,
+	size_t length,
+	uint64_t deadline)
 {
-	struct wlan_station *station = context;
+	struct wlan_station *station;
 	struct wlan_radio_tx_request request;
+	uint8_t mpdu[WLAN_L2_MPDU_MAX];
+	const uint8_t *wire_frame;
+	size_t wire_length;
+	unsigned long enabled;
+	uint64_t key_generation;
+	uint64_t packet_number;
+	int protected_frame;
+	int error;
 	uint8_t ethernet[WLAN_L2_ETHERNET_HEADER_SIZE +
 	    WLAN_WPA2_EAPOL_FRAME_MAX];
-	uint8_t mpdu[WLAN_L2_MPDU_MAX];
-	const uint8_t *wire_frame = frame;
-	size_t wire_length = length;
-	unsigned long enabled;
-	uint64_t key_generation = 0U;
-	uint64_t packet_number = 0U;
-	int protected_frame = 0;
-	int error;
 
-	if (station == NULL || destination == NULL || frame == NULL ||
+	station = context;
+	wire_frame = frame;
+	wire_length = length;
+	key_generation = 0U;
+	packet_number = 0U;
+	protected_frame = 0;
+
+	if (station == NULL ||
+	    destination == NULL ||
+	    frame == NULL ||
 	    station->ops->frame_transmit == NULL)
 		return EOPNOTSUPP;
 	memset(&request, 0, sizeof(request));
@@ -557,11 +2490,14 @@ station_wpa_transmit(void *context, uint64_t generation, uint64_t cookie,
 	} else if (kind == WLAN_WPA2_TX_EAPOL) {
 		if (length > WLAN_WPA2_EAPOL_FRAME_MAX)
 			return EMSGSIZE;
-		/* The initial four-way exchange is clear.  Once a pairwise key is
-		 * active, group-key responses, pairwise-rekey M2/M4, and later
-		 * retransmissions use the active (never staged) generation.  This is
-		 * independent of the controlled port, which is intentionally closed
-		 * during pairwise rekey. */
+
+		/*
+		 * The initial four-way exchange is clear.  Once a pairwise
+		 * key is active, group-key responses, pairwise-rekey M2/M4,
+		 * and later retransmissions use the active (never staged)
+		 * generation.  This is independent of the controlled port,
+		 * which is intentionally closed during pairwise rekey.
+		 */
 		enabled = spin_lock_irqsave(&station->lock);
 		if (station->connection_generation != generation) {
 			spin_unlock_irqrestore(&station->lock, enabled);
@@ -580,6 +2516,8 @@ station_wpa_transmit(void *context, uint64_t generation, uint64_t cookie,
 			key_generation = station->wpa2.key_generation;
 		}
 		spin_unlock_irqrestore(&station->lock, enabled);
+
+		/* Wraps the EAPOL payload in an Ethernet header and a data MPDU. */
 		memcpy(ethernet, destination, 6U);
 		memcpy(ethernet + 6U, station->device->hwaddr, 6U);
 		ethernet[12U] = 0x88U;
@@ -597,6 +2535,8 @@ station_wpa_transmit(void *context, uint64_t generation, uint64_t cookie,
 	} else {
 		return EINVAL;
 	}
+
+	/* Hands the frame to the radio and erases the working copies. */
 	request.generation = generation;
 	request.cookie = cookie;
 	request.deadline_ticks = deadline;
@@ -611,62 +2551,93 @@ station_wpa_transmit(void *context, uint64_t generation, uint64_t cookie,
 	return error;
 }
 
+/* Records the association in the radio for the WPA2 engine. */
 static int
-station_wpa_association_set(void *context, uint64_t generation,
-	const uint8_t bssid[6], uint16_t aid)
+station_wpa_association_set(
+	void *context,
+	uint64_t generation,
+	const uint8_t bssid[6],
+	uint16_t aid)
 {
-	struct wlan_station *station = context;
+	struct wlan_station *station;
+	int error;
 
+	station = context;
 	if (station == NULL || station->ops->association_set == NULL)
 		return EOPNOTSUPP;
-	return station->ops->association_set(station->radio_context,
+	error = station->ops->association_set(station->radio_context,
 	    generation, bssid, aid, station_wpa_deadline(station));
+	return error;
 }
 
+/* Clears the association in the radio for the WPA2 engine. */
 static int
-station_wpa_association_clear(void *context, uint64_t generation)
+station_wpa_association_clear(
+	void *context,
+	uint64_t generation)
 {
-	struct wlan_station *station = context;
+	struct wlan_station *station;
+	int error;
 
+	station = context;
 	if (station == NULL || station->ops->association_clear == NULL)
 		return EOPNOTSUPP;
-	return station->ops->association_clear(station->radio_context,
+	error = station->ops->association_clear(station->radio_context,
 	    generation, station_wpa_cleanup_deadline(station));
+	return error;
 }
 
+/* Installs a pairwise or group key in the radio for the WPA2 engine. */
 static int
-station_wpa_key_install(void *context, uint64_t generation,
-	enum wlan_wpa2_key_kind kind, uint8_t key_index,
-	const uint8_t key[16], uint64_t key_generation,
+station_wpa_key_install(
+	void *context,
+	uint64_t generation,
+	enum wlan_wpa2_key_kind kind,
+	uint8_t key_index,
+	const uint8_t key[16],
+	uint64_t key_generation,
 	uint64_t receive_packet_number)
 {
 	static const uint8_t broadcast[6] = {
 		0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU
 	};
-	struct wlan_station *station = context;
+	struct wlan_station *station;
 	struct wlan_radio_key_request request;
 	unsigned long enabled;
 	int error;
 
+	station = context;
+
+	/* Rejects an unsupported key description. */
 	if (station == NULL || key == NULL || station->ops->key_install == NULL)
 		return EOPNOTSUPP;
-	if (generation == 0U || key_generation == 0U || key_index > 3U ||
+	if (generation == 0U ||
+	    key_generation == 0U ||
+	    key_index > 3U ||
 	    receive_packet_number > 0x0000ffffffffffffULL ||
 	    (kind != WLAN_WPA2_KEY_PAIRWISE &&
 	    kind != WLAN_WPA2_KEY_GROUP) ||
 	    (kind == WLAN_WPA2_KEY_PAIRWISE && key_index != 0U))
 		return EINVAL;
+
+	/* Builds the radio request. */
 	memset(&request, 0, sizeof(request));
 	request.generation = generation;
 	request.key_generation = key_generation;
 	request.deadline_ticks = station_wpa_deadline(station);
 	request.receive_packet_number = receive_packet_number;
-	request.kind = kind == WLAN_WPA2_KEY_PAIRWISE ?
-	    WLAN_RADIO_KEY_PAIRWISE : WLAN_RADIO_KEY_GROUP;
+	if (kind == WLAN_WPA2_KEY_PAIRWISE)
+		request.kind = WLAN_RADIO_KEY_PAIRWISE;
+	else
+		request.kind = WLAN_RADIO_KEY_GROUP;
 	request.key_index = key_index;
-	memcpy(request.address, kind == WLAN_WPA2_KEY_PAIRWISE ?
-	    station->selected.bssid : broadcast, 6U);
+	if (kind == WLAN_WPA2_KEY_PAIRWISE)
+		memcpy(request.address, station->selected.bssid, 6U);
+	else
+		memcpy(request.address, broadcast, 6U);
 	memcpy(request.key, key, sizeof(request.key));
+
+	/* A key that is not staged takes effect on the receive path now. */
 	error = station->ops->key_install(station->radio_context, &request);
 	if (error == 0) {
 		enabled = spin_lock_irqsave(&station->lock);
@@ -688,22 +2659,32 @@ station_wpa_key_install(void *context, uint64_t generation,
 	return error;
 }
 
+/* Activates staged keys in the radio and on the receive path for the WPA2 engine. */
 static int
-station_wpa_keys_activate(void *context, uint64_t generation,
-	uint64_t pairwise_key_generation, uint64_t group_key_generation)
+station_wpa_keys_activate(
+	void *context,
+	uint64_t generation,
+	uint64_t pairwise_key_generation,
+	uint64_t group_key_generation)
 {
-	struct wlan_station *station = context;
+	struct wlan_station *station;
 	unsigned long enabled;
 	int error;
 
-	if (station == NULL || pairwise_key_generation == 0U ||
-	    group_key_generation == 0U || station->ops->keys_activate == NULL)
+	station = context;
+
+	if (station == NULL ||
+	    pairwise_key_generation == 0U ||
+	    group_key_generation == 0U ||
+	    station->ops->keys_activate == NULL)
 		return EOPNOTSUPP;
 	error = station->ops->keys_activate(station->radio_context, generation,
 	    pairwise_key_generation, group_key_generation,
 	    station_wpa_deadline(station));
 	if (error != 0)
 		return error;
+
+	/* Publishes the new generations and resets the counters they own. */
 	enabled = spin_lock_irqsave(&station->lock);
 	if (station->connection_generation != generation) {
 		error = ESTALE;
@@ -725,23 +2706,38 @@ station_wpa_keys_activate(void *context, uint64_t generation,
 	return error;
 }
 
+/* Raises the receive replay floor of a key for the WPA2 engine. */
 static int
-station_wpa_key_receive_pn_advance(void *context, uint64_t generation,
-	enum wlan_wpa2_key_kind kind, uint8_t key_index,
-	uint64_t key_generation, uint64_t receive_packet_number)
+station_wpa_key_receive_pn_advance(
+	void *context,
+	uint64_t generation,
+	enum wlan_wpa2_key_kind kind,
+	uint8_t key_index,
+	uint64_t key_generation,
+	uint64_t receive_packet_number)
 {
-	struct wlan_station *station = context;
+	struct wlan_station *station;
 	unsigned long enabled;
 	uint64_t *floor;
-	int error = 0;
+	uint64_t current_generation;
+	int error;
 
-	if (station == NULL || generation == 0U || key_generation == 0U ||
+	station = context;
+	error = 0;
+
+	if (station == NULL ||
+	    generation == 0U ||
+	    key_generation == 0U ||
 	    key_index > 3U ||
 	    (kind != WLAN_WPA2_KEY_PAIRWISE && kind != WLAN_WPA2_KEY_GROUP) ||
 	    (kind == WLAN_WPA2_KEY_PAIRWISE && key_index != 0U) ||
 	    receive_packet_number > 0x0000ffffffffffffULL)
 		return EINVAL;
 	enabled = spin_lock_irqsave(&station->lock);
+	if (kind == WLAN_WPA2_KEY_PAIRWISE)
+		current_generation = station->l2_rx.pairwise_key_generation;
+	else
+		current_generation = station->l2_rx.group_key_generation[key_index];
 	if (station->connection_generation != generation) {
 		error = ESTALE;
 	} else if (kind == WLAN_WPA2_KEY_GROUP &&
@@ -750,16 +2746,19 @@ station_wpa_key_receive_pn_advance(void *context, uint64_t generation,
 	    station->wpa2.pending_gtk_index == key_index) {
 		/* The staged RSC is published atomically by keys_activate(). */
 		error = 0;
-	} else if ((kind == WLAN_WPA2_KEY_PAIRWISE ?
-	    station->l2_rx.pairwise_key_generation :
-	    station->l2_rx.group_key_generation[key_index]) != key_generation) {
+	} else if (current_generation != key_generation) {
 		error = ESTALE;
 	} else {
-		floor = kind == WLAN_WPA2_KEY_PAIRWISE ?
-		    &station->l2_rx.pairwise_packet_number :
-		    &station->l2_rx.group_packet_number[key_index];
-		/* RX may already have advanced beyond a freshly sampled AP RSC.
-		 * This barrier is therefore max-assignment, never a reset. */
+		if (kind == WLAN_WPA2_KEY_PAIRWISE)
+			floor = &station->l2_rx.pairwise_packet_number;
+		else
+			floor = &station->l2_rx.group_packet_number[key_index];
+
+		/*
+		 * RX may already have advanced beyond a freshly sampled AP
+		 * RSC.  This barrier is therefore max-assignment, never a
+		 * reset.
+		 */
 		if (receive_packet_number > *floor)
 			*floor = receive_packet_number;
 	}
@@ -767,26 +2766,40 @@ station_wpa_key_receive_pn_advance(void *context, uint64_t generation,
 	return error;
 }
 
+/* Deletes a key from the radio and the receive path for the WPA2 engine. */
 static int
-station_wpa_key_delete(void *context, uint64_t generation,
-	enum wlan_wpa2_key_kind kind, uint8_t key_index,
+station_wpa_key_delete(
+	void *context,
+	uint64_t generation,
+	enum wlan_wpa2_key_kind kind,
+	uint8_t key_index,
 	uint64_t key_generation)
 {
-	struct wlan_station *station = context;
+	struct wlan_station *station;
 	unsigned long enabled;
+	enum wlan_radio_key_kind radio_kind;
 	int error;
+
+	station = context;
 
 	if (station == NULL || station->ops->key_delete == NULL)
 		return EOPNOTSUPP;
-	if (generation == 0U || key_generation == 0U || key_index > 3U ||
+	if (generation == 0U ||
+	    key_generation == 0U ||
+	    key_index > 3U ||
 	    (kind != WLAN_WPA2_KEY_PAIRWISE &&
 	    kind != WLAN_WPA2_KEY_GROUP) ||
 	    (kind == WLAN_WPA2_KEY_PAIRWISE && key_index != 0U))
 		return EINVAL;
+	if (kind == WLAN_WPA2_KEY_PAIRWISE)
+		radio_kind = WLAN_RADIO_KEY_PAIRWISE;
+	else
+		radio_kind = WLAN_RADIO_KEY_GROUP;
 	error = station->ops->key_delete(station->radio_context, generation,
-	    kind == WLAN_WPA2_KEY_PAIRWISE ? WLAN_RADIO_KEY_PAIRWISE :
-	    WLAN_RADIO_KEY_GROUP, key_index, key_generation,
+	    radio_kind, key_index, key_generation,
 	    station_wpa_cleanup_deadline(station));
+
+	/* Forgets the generation on the receive path once the radio has. */
 	if (error == 0) {
 		enabled = spin_lock_irqsave(&station->lock);
 		if (kind == WLAN_WPA2_KEY_PAIRWISE &&
@@ -797,20 +2810,25 @@ station_wpa_key_delete(void *context, uint64_t generation,
 		    station->l2_rx.group_key_generation[key_index] ==
 		    key_generation) {
 			station->l2_rx.group_key_generation[key_index] = 0U;
-				station->l2_rx.group_packet_number[key_index] = 0U;
+			station->l2_rx.group_packet_number[key_index] = 0U;
 		}
 		spin_unlock_irqrestore(&station->lock, enabled);
 	}
 	return error;
 }
 
+/* Opens or closes the controlled port for the WPA2 engine. */
 static int
-station_wpa_authorized_set(void *context, uint64_t generation,
+station_wpa_authorized_set(
+	void *context,
+	uint64_t generation,
 	int authorized)
 {
-	struct wlan_station *station = context;
+	struct wlan_station *station;
 	unsigned long enabled;
 	int error;
+
+	station = context;
 
 	if (station == NULL || (authorized != 0 && authorized != 1))
 		return EINVAL;
@@ -819,6 +2837,8 @@ station_wpa_authorized_set(void *context, uint64_t generation,
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ESTALE;
 	}
+
+	/* The port opens only with both keys installed. */
 	if (authorized) {
 		if (!station->wpa2.pairwise_installed ||
 		    !station->wpa2.group_installed) {
@@ -837,12 +2857,17 @@ station_wpa_authorized_set(void *context, uint64_t generation,
 	return error;
 }
 
+/* Stops the radio for the WPA2 engine. */
 static int
-station_wpa_radio_stop(void *context, uint64_t generation)
+station_wpa_radio_stop(
+	void *context,
+	uint64_t generation)
 {
-	struct wlan_station *station = context;
+	struct wlan_station *station;
 	unsigned long enabled;
 	int error;
+
+	station = context;
 
 	if (station == NULL || station->ops->disconnect == NULL)
 		return EOPNOTSUPP;
@@ -856,30 +2881,21 @@ station_wpa_radio_stop(void *context, uint64_t generation)
 	return error;
 }
 
-static const struct wlan_wpa2_ops station_wpa2_ops = {
-	.entropy_fill = station_wpa_entropy_fill,
-	.radio_start = station_wpa_radio_start,
-	.transmit = station_wpa_transmit,
-	.association_set = station_wpa_association_set,
-	.association_clear = station_wpa_association_clear,
-	.key_install = station_wpa_key_install,
-	.key_receive_pn_advance = station_wpa_key_receive_pn_advance,
-	.key_delete = station_wpa_key_delete,
-	.keys_activate = station_wpa_keys_activate,
-	.authorized_set = station_wpa_authorized_set,
-	.radio_stop = station_wpa_radio_stop
-};
-
-/* Caller owns the station control gate.  A link-loss report terminates exactly
- * one connection generation; only a later userspace request may start another. */
+/* Terminates one connection generation after a link loss; the caller holds the control gate. */
 static int
-station_link_lost_controlled(struct wlan_station *station,
-	uint64_t generation, int reason)
+station_link_lost_controlled(
+	struct wlan_station *station,
+	uint64_t generation,
+	int reason)
 {
 	unsigned long enabled;
 	int carrier_error;
 	int error;
 
+	/*
+	 * A link-loss report terminates exactly one connection generation;
+	 * only a later userspace request may start another.
+	 */
 	if (reason <= 0)
 		return EINVAL;
 	enabled = spin_lock_irqsave(&station->lock);
@@ -896,6 +2912,8 @@ station_link_lost_controlled(struct wlan_station *station,
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ENOTCONN;
 	}
+
+	/* Fails the connection, then stops the engine. */
 	carrier_error = station_carrier_down_locked(station);
 	station->terminal_error = reason;
 	station->state = WLAN_STATE_FAILED;
@@ -907,10 +2925,12 @@ station_link_lost_controlled(struct wlan_station *station,
 	station->connect_retry_deadline = 0U;
 	spin_unlock_irqrestore(&station->lock, enabled);
 	error = wlan_wpa2_engine_stop(&station->wpa2);
+
+	/* Retires now, or leaves a stop pending for the timer. */
 	enabled = spin_lock_irqsave(&station->lock);
-	if (error == 0 && !station->connect_driver_active)
+	if (error == 0 && !station->connect_driver_active) {
 		station_finish_connection_retire_locked(station);
-	else {
+	} else {
 		station->connect_stop_pending = 1;
 		station->connect_retry_deadline = deadline_after(
 		    station_now_locked(station), 1U);
@@ -923,8 +2943,10 @@ station_link_lost_controlled(struct wlan_station *station,
 	return carrier_error;
 }
 
+/* Takes an active reference on a station that accepts callers. */
 static int
-station_enter(struct wlan_station *station)
+station_enter(
+	struct wlan_station *station)
 {
 	unsigned long enabled;
 
@@ -944,30 +2966,43 @@ station_enter(struct wlan_station *station)
 	return 0;
 }
 
+/* Drops an active reference on a station. */
 static void
-station_leave(struct wlan_station *station)
+station_leave(
+	struct wlan_station *station)
 {
-	unsigned long enabled = spin_lock_irqsave(&station->lock);
+	unsigned long enabled;
 
+	enabled = spin_lock_irqsave(&station->lock);
 	if (station->active == 0U)
 		__builtin_trap();
 	station->active--;
 	spin_unlock_irqrestore(&station->lock, enabled);
 }
 
-/* Control methods may sleep in a bus driver and therefore cannot run under
- * the station spinlock.  This thread-context serial gate stays held from the
- * state mutation through start/stop completion: a cancellation barrier can
- * never return before an earlier start method has itself returned. */
+/* Takes the serial control gate of a station, yielding while it is held. */
 static void
-station_control_enter(struct wlan_station *station)
+station_control_enter(
+	struct wlan_station *station)
 {
 #ifdef WLAN_TESTING
-	int waiting = 0;
+	int waiting;
 #endif
-	for (;;) {
-		unsigned long enabled = spin_lock_irqsave(&station->lock);
+	unsigned long enabled;
 
+#ifdef WLAN_TESTING
+	waiting = 0;
+#endif
+
+	/*
+	 * Control methods may sleep in a bus driver and therefore cannot run
+	 * under the station spinlock.  This thread-context serial gate stays
+	 * held from the state mutation through start/stop completion: a
+	 * cancellation barrier can never return before an earlier start
+	 * method has itself returned.
+	 */
+	for (;;) {
+		enabled = spin_lock_irqsave(&station->lock);
 		if (!station->control_inflight) {
 			station->control_inflight = 1U;
 #ifdef WLAN_TESTING
@@ -994,35 +3029,47 @@ station_control_enter(struct wlan_station *station)
 	}
 }
 
+/* Releases the control gate of a station. */
 static void
-station_control_leave(struct wlan_station *station)
+station_control_leave(
+	struct wlan_station *station)
 {
-	unsigned long enabled = spin_lock_irqsave(&station->lock);
+	unsigned long enabled;
 
+	enabled = spin_lock_irqsave(&station->lock);
 	if (!station->control_inflight)
 		__builtin_trap();
 	station->control_inflight = 0U;
 	spin_unlock_irqrestore(&station->lock, enabled);
 }
 
+/* Finds the station of a device and takes an active reference on it. */
 static int
-station_find_enter(struct net_device *device, struct wlan_station **result)
+station_find_enter(
+	struct net_device *device,
+	struct wlan_station **result)
 {
 	unsigned long registry_enabled;
 	unsigned index;
-	int error = EOPNOTSUPP;
+	int error;
+	struct wlan_station *station;
+	unsigned long enabled;
+
+	error = EOPNOTSUPP;
 
 	if (device == NULL || result == NULL)
 		return ENODEV;
+
+	/* Rechecks the slot under its own lock before admitting the caller. */
 	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
 	for (index = 0; index < NET_DEVICE_MAX; index++) {
-		struct wlan_station *station = &wlan_stations[index];
-		unsigned long enabled;
-
+		station = &wlan_stations[index];
 		if (!station->used || station->device != device)
 			continue;
 		enabled = spin_lock_irqsave(&station->lock);
-		if (station->used && !station->blocked && !station->closing &&
+		if (station->used &&
+		    !station->blocked &&
+		    !station->closing &&
 		    station->device == device) {
 			if (station->active == UINT_MAX) {
 				error = EOVERFLOW;
@@ -1041,13 +3088,18 @@ station_find_enter(struct net_device *device, struct wlan_station **result)
 	return error;
 }
 
+/* Takes an active reference on the station of a slot index. */
 static int
-station_index_enter(unsigned index, struct wlan_station **result)
+station_index_enter(
+	unsigned index,
+	struct wlan_station **result)
 {
 	struct wlan_station *station;
 	unsigned long registry_enabled;
 	unsigned long enabled;
-	int error = ENODEV;
+	int error;
+
+	error = ENODEV;
 
 	if (index >= NET_DEVICE_MAX || result == NULL)
 		return ENODEV;
@@ -1070,26 +3122,34 @@ station_index_enter(unsigned index, struct wlan_station **result)
 	return error;
 }
 
+/* Orders two BSSIDs. */
 static int
-bssid_compare(const uint8_t left[6], const uint8_t right[6])
+bssid_compare(
+	const uint8_t left[6],
+	const uint8_t right[6])
 {
 	return memcmp(left, right, 6U);
 }
 
+/* Tests whether a BSSID is a nonzero unicast address. */
 static int
-bssid_valid(const uint8_t bssid[6])
+bssid_valid(
+	const uint8_t bssid[6])
 {
 	unsigned index;
-	unsigned nonzero = 0U;
+	unsigned nonzero;
 
+	nonzero = 0U;
 	if ((bssid[0] & 0x01U) != 0U)
 		return 0;
 	for (index = 0; index < 6U; index++)
 		nonzero |= bssid[index];
-	return nonzero != 0U;
+	if (nonzero == 0U)
+		return 0;
+	return 1;
 }
 
-/* Builds a probe advertising rates supported on the current scan channel. */
+/* Builds a probe request, directed at the selected SSID or broadcast. */
 static size_t
 probe_request_build(
 	const struct wlan_station *station,
@@ -1143,9 +3203,10 @@ probe_request_build(
 	return offset + rate_count;
 }
 
-/* True when left is the entry evicted before right. */
+/* Tests whether the left entry is evicted before the right one. */
 static int
-cache_entry_worse(const struct wlan_cache_entry *left,
+cache_entry_worse(
+	const struct wlan_cache_entry *left,
 	const struct wlan_cache_entry *right)
 {
 	if (left->bss.rssi_dbm != right->bss.rssi_dbm)
@@ -1155,14 +3216,20 @@ cache_entry_worse(const struct wlan_cache_entry *left,
 	return bssid_compare(left->bss.bssid, right->bss.bssid) > 0;
 }
 
+/* Adds or refreshes a BSS in the staging cache; the caller holds the station lock. */
 static int
-cache_insert_locked(struct wlan_station *station,
-	const struct wlan_bss_record *bss, uint64_t now)
+cache_insert_locked(
+	struct wlan_station *station,
+	const struct wlan_bss_record *bss,
+	uint64_t now)
 {
 	struct wlan_cache_entry incoming;
 	unsigned index;
-	unsigned worst = 0U;
+	unsigned worst;
 
+	worst = 0U;
+
+	/* A known BSSID is refreshed in place. */
 	for (index = 0; index < station->staging_count; index++) {
 		if (bssid_compare(station->staging[index].bss.bssid,
 		    bss->bssid) != 0)
@@ -1176,9 +3243,12 @@ cache_insert_locked(struct wlan_station *station,
 	incoming.bss.age_ms = 0U;
 	incoming.last_seen = now;
 	if (station->staging_count < WLAN_BSS_MAX) {
-		station->staging[station->staging_count++] = incoming;
+		station->staging[station->staging_count] = incoming;
+		station->staging_count++;
 		return 0;
 	}
+
+	/* A full cache evicts its worst entry when the new one is better. */
 	for (index = 1U; index < station->staging_count; index++) {
 		if (cache_entry_worse(&station->staging[index],
 		    &station->staging[worst]))
@@ -1192,15 +3262,19 @@ cache_insert_locked(struct wlan_station *station,
 	return 0;
 }
 
+/* Sorts cache entries by BSSID with an insertion sort. */
 static void
-cache_sort_by_bssid(struct wlan_cache_entry *entries, uint32_t count)
+cache_sort_by_bssid(
+	struct wlan_cache_entry *entries,
+	uint32_t count)
 {
 	uint32_t index;
+	struct wlan_cache_entry value;
+	uint32_t position;
 
 	for (index = 1U; index < count; index++) {
-		struct wlan_cache_entry value = entries[index];
-		uint32_t position = index;
-
+		value = entries[index];
+		position = index;
 		while (position != 0U && bssid_compare(
 		    entries[position - 1U].bss.bssid, value.bss.bssid) > 0) {
 			entries[position] = entries[position - 1U];
@@ -1210,8 +3284,10 @@ cache_sort_by_bssid(struct wlan_cache_entry *entries, uint32_t count)
 	}
 }
 
+/* Tests whether a BSS offers exactly the WPA2-PSK CCMP profile supported. */
 static int
-bss_security_supported(const struct wlan_bss_record *bss)
+bss_security_supported(
+	const struct wlan_bss_record *bss)
 {
 	const uint32_t required = WLAN_SECURITY_PRIVACY | WLAN_SECURITY_WPA2 |
 	    WLAN_SECURITY_CCMP | WLAN_SECURITY_PSK;
@@ -1219,21 +3295,30 @@ bss_security_supported(const struct wlan_bss_record *bss)
 	    WLAN_SECURITY_PMF_REQUIRED;
 	const uint32_t rejected_suites = WLAN_SECURITY_UNSUPPORTED_SUITE;
 
-	return (bss->security & required) == required &&
-	    (bss->security & (rejected | rejected_suites)) == 0U;
+	if ((bss->security & required) != required)
+		return 0;
+	if ((bss->security & (rejected | rejected_suites)) != 0U)
+		return 0;
+	return 1;
 }
 
+/* Picks the strongest supported BSS of an SSID from the snapshot; the caller holds the station lock. */
 static int
-station_select_bss_locked(struct wlan_station *station, const uint8_t *ssid,
-	uint32_t ssid_length, struct wlan_bss_record *result)
+station_select_bss_locked(
+	struct wlan_station *station,
+	const uint8_t *ssid,
+	uint32_t ssid_length,
+	struct wlan_bss_record *result)
 {
 	uint32_t index;
-	int found = 0;
+	int found;
+	const struct wlan_bss_record *candidate;
 
+	found = 0;
+
+	/* Prefers the higher RSSI, then the lower BSSID. */
 	for (index = 0; index < station->snapshot_count; index++) {
-		const struct wlan_bss_record *candidate =
-		    &station->snapshot[index].bss;
-
+		candidate = &station->snapshot[index].bss;
 		if (candidate->ssid_length != ssid_length ||
 		    memcmp(candidate->ssid, ssid, ssid_length) != 0 ||
 		    !bss_security_supported(candidate))
@@ -1245,666 +3330,15 @@ station_select_bss_locked(struct wlan_station *station, const uint8_t *ssid,
 			found = 1;
 		}
 	}
-	return found ? 0 : ENOENT;
-}
-
-void
-wlan_core_init(void)
-{
-	unsigned expected = 0U;
-	unsigned index;
-
-	if (atomic_load_acquire(&wlan_initialized) == 2U)
-		return;
-	if (!atomic_compare_exchange(&wlan_initialized, &expected, 1U)) {
-		while (atomic_load_acquire(&wlan_initialized) != 2U) {
-			if (sched_yield != NULL)
-				sched_yield();
-			else
-				__asm__ volatile("" ::: "memory");
-		}
-		return;
-	}
-	memset(wlan_stations, 0, sizeof(wlan_stations));
-	spin_init(&wlan_registry_lock, LOCK_RANK_SOCKET_REGISTRY,
-	    "wlan-registry");
-	for (index = 0U; index < NET_DEVICE_MAX; index++)
-		spin_init(&wlan_stations[index].lock, LOCK_RANK_NETWORK,
-		    "wlan-station");
-	wlan_stopping = 0;
-	wlan_shutdown_inflight = 0;
-	atomic_store_release(&wlan_initialized, 2U);
-}
-
-int
-wlan_station_attach(struct net_device *device,
-	const struct wlan_radio_ops *ops, void *radio_context,
-	const struct wlan_scan_profile *scan_profile,
-	struct wlan_station **result)
-{
-	unsigned long enabled;
-	unsigned index;
-	struct wlan_station *free_station = NULL;
-	int error;
-
-	if (device == NULL || ops == NULL || result == NULL ||
-	    scan_profile_validate(scan_profile) != 0)
-		return EINVAL;
-	if (device->hwaddr_len != 6U || !bssid_valid(device->hwaddr))
-		return EINVAL;
-	if ((ops->scan_channel_start != NULL) != (ops->scan_stop != NULL) ||
-	    ((ops->connect_start != NULL || ops->disconnect != NULL ||
-	    ops->association_set != NULL || ops->association_clear != NULL ||
-	    ops->frame_transmit != NULL || ops->key_install != NULL ||
-	    ops->key_delete != NULL || ops->keys_activate != NULL) &&
-	    (ops->connect_start == NULL ||
-	    ops->disconnect == NULL || ops->association_set == NULL ||
-	    ops->association_clear == NULL || ops->frame_transmit == NULL ||
-	    ops->key_install == NULL || ops->key_delete == NULL ||
-	    ops->keys_activate == NULL)))
-		return EINVAL;
-	if (ops->management_transmit == NULL) {
-		for (index = 0U; index < scan_profile->channel_count; index++) {
-			if ((scan_profile->channels[index].flags &
-			    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED) != 0U)
-				return EINVAL;
-		}
-	}
-	if (atomic_load_acquire(&wlan_initialized) != 2U)
-		wlan_core_init();
-	/* The caller retains its allocation-owner reference across this call.
-	 * The station acquires a distinct live reference before any device
-	 * mutation or station publication. */
-	if (!net_device_ref_live(device))
-		return ENODEV;
-	enabled = spin_lock_irqsave(&wlan_registry_lock);
-	if (wlan_stopping) {
-		spin_unlock_irqrestore(&wlan_registry_lock, enabled);
-		net_device_release(device);
-		return EBUSY;
-	}
-	for (index = 0; index < NET_DEVICE_MAX; index++) {
-		if (wlan_stations[index].used &&
-		    wlan_stations[index].device == device) {
-			spin_unlock_irqrestore(&wlan_registry_lock, enabled);
-			net_device_release(device);
-			return EEXIST;
-		}
-		if (!wlan_stations[index].used && free_station == NULL)
-			free_station = &wlan_stations[index];
-	}
-	if (free_station == NULL) {
-		spin_unlock_irqrestore(&wlan_registry_lock, enabled);
-		net_device_release(device);
-		return ENOSPC;
-	}
-	/* Validate and reserve the registry slot before mutating the device.  The
-	 * registry (rank 100) may enter the device carrier guard (rank 125); no
-	 * device operation enters the WLAN registry while holding that guard. */
-	error = net_device_set_carrier(device, 0);
-	if (error != 0) {
-		spin_unlock_irqrestore(&wlan_registry_lock, enabled);
-		net_device_release(device);
-		return error;
-	}
-	{
-		unsigned long station_enabled =
-		    spin_lock_irqsave(&free_station->lock);
-
-		/* The slot lock is initialized exactly once by wlan_core_init().
-		 * Reset only the lifetime payload while the registry excludes all
-		 * timer/admission lookups of this unused slot. */
-		memset(&free_station->used, 0,
-		    sizeof(*free_station) - offsetof(struct wlan_station, used));
-		free_station->device = device;
-		free_station->ops = ops;
-		free_station->radio_context = radio_context;
-		free_station->clock = default_clock;
-		free_station->clock_context = NULL;
-		free_station->scan_profile = *scan_profile;
-		free_station->state = WLAN_STATE_DOWN;
-		free_station->scan_state = WLAN_SCAN_IDLE;
-		error = wlan_wpa2_engine_init(&free_station->wpa2,
-		    &station_wpa2_ops, free_station);
-		if (error != 0) {
-			spin_unlock_irqrestore(&free_station->lock,
-			    station_enabled);
-			spin_unlock_irqrestore(&wlan_registry_lock, enabled);
-			net_device_release(device);
-			return error;
-		}
-		free_station->used = 1;
-		spin_unlock_irqrestore(&free_station->lock, station_enabled);
-	}
-	*result = free_station;
-	spin_unlock_irqrestore(&wlan_registry_lock, enabled);
+	if (!found)
+		return ENOENT;
 	return 0;
 }
 
-int
-wlan_station_scan_profile_update(struct wlan_station *station,
-	const struct wlan_scan_profile *scan_profile)
-{
-	unsigned long enabled;
-	unsigned index;
-	int error;
-
-	error = scan_profile_validate(scan_profile);
-	if (error != 0)
-		return error;
-	error = station_enter(station);
-	if (error != 0)
-		return error;
-	station_control_enter(station);
-	enabled = spin_lock_irqsave(&station->lock);
-	if (!station->used || station->closing || station->lifecycle_inflight) {
-		error = ENODEV;
-	} else if (station->administrative_up ||
-	    station->state != WLAN_STATE_DOWN ||
-	    station->scan_driver_active || station->connect_driver_active ||
-	    station->scan_state == WLAN_SCAN_RUNNING) {
-		error = EBUSY;
-	} else {
-		error = 0;
-		if (station->ops->management_transmit == NULL) {
-			for (index = 0U; index < scan_profile->channel_count;
-			    index++) {
-				if ((scan_profile->channels[index].flags &
-				    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED) != 0U) {
-					error = EINVAL;
-					break;
-				}
-			}
-		}
-		if (error == 0)
-			station->scan_profile = *scan_profile;
-	}
-	spin_unlock_irqrestore(&station->lock, enabled);
-	station_control_leave(station);
-	station_leave(station);
-	return error;
-}
-
-int
-wlan_station_open(struct wlan_station *station)
-{
-	unsigned long enabled;
-	int error = station_enter(station);
-
-	if (error != 0)
-		return error;
-	enabled = spin_lock_irqsave(&station->lock);
-	station->administrative_up = 1U;
-	if (station->state == WLAN_STATE_DOWN ||
-	    station->state == WLAN_STATE_FAILED) {
-		station->state = WLAN_STATE_IDLE;
-		station->terminal_error = 0;
-	}
-	spin_unlock_irqrestore(&station->lock, enabled);
-	station_leave(station);
-	return 0;
-}
-
-int
-wlan_station_report_scan_bss(struct wlan_station *station,
-	uint64_t generation, const struct wlan_bss_record *bss)
-{
-	struct wlan_bss_record normalized;
-	unsigned long enabled;
-	uint64_t now;
-	int scan_channel_accepting;
-	int wake_worker = 0;
-	int error;
-
-	uint32_t expected_frequency;
-	const uint32_t known_security = WLAN_SECURITY_PRIVACY |
-	    WLAN_SECURITY_WPA1 | WLAN_SECURITY_WPA2 | WLAN_SECURITY_TKIP |
-	    WLAN_SECURITY_CCMP | WLAN_SECURITY_PSK |
-	    WLAN_SECURITY_IEEE8021X | WLAN_SECURITY_SAE |
-	    WLAN_SECURITY_PMF_CAPABLE | WLAN_SECURITY_PMF_REQUIRED |
-	    WLAN_SECURITY_UNSUPPORTED_SUITE;
-
-	if (bss == NULL || bss->ssid_length > WLAN_SSID_MAX ||
-	    channel_frequency(bss->channel) == 0U ||
-	    bss->capability > UINT16_MAX ||
-	    bss->beacon_interval_tu > UINT16_MAX ||
-	    (bss->security & ~known_security) != 0U ||
-	    !bssid_valid(bss->bssid) ||
-	    !bytes_zero(bss->reserved, sizeof(bss->reserved)))
-		return EINVAL;
-	expected_frequency = channel_frequency(bss->channel);
-	if (bss->center_frequency_mhz != expected_frequency)
-		return EINVAL;
-	normalized = *bss;
-	memset(normalized.ssid + normalized.ssid_length, 0,
-	    WLAN_SSID_MAX - normalized.ssid_length);
-	normalized.age_ms = 0U;
-	error = station_enter(station);
-	if (error != 0)
-		return error;
-#ifdef WLAN_TESTING
-	{
-		wlan_station_test_hook_fn hook;
-		void *hook_context;
-
-		enabled = spin_lock_irqsave(&station->lock);
-		hook = station->test_report_hook;
-		hook_context = station->test_report_hook_context;
-		station->test_report_hook = NULL;
-		station->test_report_hook_context = NULL;
-		spin_unlock_irqrestore(&station->lock, enabled);
-		if (hook != NULL)
-			hook(hook_context);
-	}
-#endif
-	enabled = spin_lock_irqsave(&station->lock);
-	now = station_now_locked(station);
-	scan_channel_accepting =
-	    station->scan_step_state == WLAN_SCAN_STEP_DWELL ||
-	    (station->scan_step_state == WLAN_SCAN_STEP_TUNING &&
-	    station->scan_ready_pending);
-	if (station->scan_state != WLAN_SCAN_RUNNING ||
-	    station->scan_generation != generation ||
-	    !scan_channel_accepting ||
-	    station->scan_step_index >= station->scan_profile.channel_count ||
-	    station->scan_profile.channels[station->scan_step_index].channel !=
-	    normalized.channel) {
-		error = ESTALE;
-	} else if (deadline_expired(now, station->scan_deadline) ||
-	    deadline_expired(now, station->scan_step_deadline)) {
-		/* Report paths may be IRQ/USB completion context.  They never call
-		 * back into a driver or join their own producer.  The network worker
-		 * owns terminal timeout and synchronous stop. */
-		wake_worker = 1;
-		error = ETIMEDOUT;
-	} else {
-		error = cache_insert_locked(station, &normalized, now);
-	}
-	spin_unlock_irqrestore(&station->lock, enabled);
-	if (wake_worker)
-		wlan_worker_wakeup();
-	station_leave(station);
-	return error;
-}
-
-int
-wlan_station_report_scan_frame(struct wlan_station *station,
-	uint64_t generation, const uint8_t *frame, size_t length,
-	int32_t rssi_dbm, uint8_t channel_hint)
-{
-	struct wlan_bss_record bss;
-	int error;
-
-	if (length > WLAN_MANAGEMENT_FRAME_MAX)
-		return EMSGSIZE;
-	error = wlan_frame_parse_bss(frame, length, rssi_dbm, channel_hint,
-	    &bss);
-	if (error != 0)
-		return error;
-	return wlan_station_report_scan_bss(station, generation, &bss);
-}
-
-int
-wlan_station_report_scan_channel_ready(struct wlan_station *station,
-	uint64_t generation, uint32_t step_index)
-{
-	unsigned long enabled;
-	int result;
-
-	result = station_enter(station);
-	if (result != 0)
-		return result;
-	enabled = spin_lock_irqsave(&station->lock);
-	if (station->scan_state != WLAN_SCAN_RUNNING ||
-	    station->scan_generation != generation ||
-	    station->scan_step_state != WLAN_SCAN_STEP_TUNING ||
-	    station->scan_step_index != step_index) {
-		result = ESTALE;
-	} else {
-		station->scan_ready_pending = 1U;
-		result = 0;
-	}
-	spin_unlock_irqrestore(&station->lock, enabled);
-	wlan_worker_wakeup();
-	station_leave(station);
-	return result;
-}
-
-int
-wlan_station_report_scan_error(struct wlan_station *station,
-	uint64_t generation, int error)
-{
-	unsigned long enabled;
-	int result;
-
-	if (error <= 0)
-		return EINVAL;
-	result = station_enter(station);
-	if (result != 0)
-		return result;
-	enabled = spin_lock_irqsave(&station->lock);
-	if (station->scan_state != WLAN_SCAN_RUNNING ||
-	    station->scan_generation != generation) {
-		result = ESTALE;
-	} else {
-		if (station->scan_event_error == 0)
-			station->scan_event_error = error;
-		result = 0;
-	}
-	spin_unlock_irqrestore(&station->lock, enabled);
-	wlan_worker_wakeup();
-	station_leave(station);
-	return result;
-}
-
-int
-wlan_station_report_link_loss(struct wlan_station *station,
-	uint64_t generation, int error)
-{
-	int result;
-
-	if (generation == 0U || error <= 0)
-		return EINVAL;
-	result = station_enter(station);
-	if (result != 0)
-		return result;
-	station_control_enter(station);
-	result = station_link_lost_controlled(station, generation, error);
-	station_control_leave(station);
-	station_leave(station);
-	wlan_worker_wakeup();
-	return result;
-}
-
-int
-wlan_station_report_frame(struct wlan_station *station,
-	const struct wlan_radio_rx_frame *report)
-{
-	struct wlan_bss_record management_bss;
-	struct wlan_l2_rx_security security;
-	struct packet_buf *packet = NULL;
-	uint8_t ethernet[WLAN_L2_ETHERNET_MAX];
-	uint16_t frame_control;
-	size_t ethernet_length = 0U;
-	unsigned long enabled;
-	uint64_t now;
-	int result;
-
-	if (report == NULL || report->frame == NULL || report->length < 2U ||
-	    report->length > WLAN_MANAGEMENT_FRAME_MAX ||
-	    report->generation == 0U ||
-	    channel_frequency(report->channel) == 0U ||
-	    report->cipher > WLAN_RADIO_CIPHER_CCMP ||
-	    (report->decrypted != 0U && report->decrypted != 1U) ||
-	    (report->integrity_error != 0U &&
-	    report->integrity_error != 1U) || report->key_index > 3U ||
-	    report->packet_number > 0x0000ffffffffffffULL ||
-	    !bytes_zero(report->reserved, sizeof(report->reserved)))
-		return EINVAL;
-	frame_control = (uint16_t)((uint16_t)report->frame[0] |
-	    ((uint16_t)report->frame[1] << 8));
-	if ((frame_control & 0x000cU) == 0U &&
-	    ((frame_control & 0x00f0U) == 0x0080U ||
-	    (frame_control & 0x00f0U) == 0x0050U)) {
-		result = wlan_frame_parse_bss(report->frame, report->length,
-		    report->rssi_dbm, report->channel, &management_bss);
-		if (result != 0)
-			return result;
-		if ((frame_control & 0x00f0U) == 0x0080U) {
-			result = station_enter(station);
-			if (result != 0)
-				return result;
-			enabled = spin_lock_irqsave(&station->lock);
-			if (report->generation == station->connection_generation &&
-			    station_beacon_watch_active_locked(station) &&
-			    memcmp(management_bss.bssid, station->selected.bssid,
-			    6U) == 0) {
-				station_beacon_watch_refresh_locked(station,
-				    station_now_locked(station));
-				result = 0;
-			} else {
-				result = ESTALE;
-			}
-			spin_unlock_irqrestore(&station->lock, enabled);
-			station_leave(station);
-			if (result == 0)
-				return 0;
-		}
-		return wlan_station_report_scan_bss(station,
-		    report->generation, &management_bss);
-	}
-	result = station_enter(station);
-	if (result != 0)
-		return result;
-	station_control_enter(station);
-	enabled = spin_lock_irqsave(&station->lock);
-	if (report->generation != station->connection_generation ||
-	    station->state == WLAN_STATE_DOWN ||
-	    station->state == WLAN_STATE_IDLE ||
-	    station->state == WLAN_STATE_SCANNING ||
-	    station->state == WLAN_STATE_FAILED) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		result = ESTALE;
-		goto out;
-	}
-	now = station_now_locked(station);
-	spin_unlock_irqrestore(&station->lock, enabled);
-	if (report->integrity_error) {
-		result = EACCES;
-		goto out;
-	}
-	if ((frame_control & 0x000cU) == 0U) {
-		/* PMF is outside this first profile.  Management input therefore
-		 * carries neither Protected Frame nor data-key metadata. */
-		if ((frame_control & 0x4000U) != 0U ||
-		    report->key_generation != 0U || report->packet_number != 0U ||
-		    report->cipher != WLAN_RADIO_CIPHER_NONE ||
-		    report->decrypted != 0U || report->key_index != 0U) {
-			result = EACCES;
-			goto out;
-		}
-		if ((frame_control & (uint16_t)~0x0800U) == 0x00a0U ||
-		    (frame_control & (uint16_t)~0x0800U) == 0x00c0U) {
-			/* PMF is outside this profile, so a matching unprotected
-			 * disassociation/deauthentication is authoritative.  Frames for
-			 * another BSS/station are ordinary unrelated management traffic. */
-			if (report->length != 26U ||
-			    memcmp(report->frame + 4U, station->device->hwaddr, 6U) != 0 ||
-			    memcmp(report->frame + 10U, station->selected.bssid, 6U) != 0 ||
-			    memcmp(report->frame + 16U, station->selected.bssid, 6U) != 0) {
-				result = ESTALE;
-				goto out;
-			}
-			result = station_link_lost_controlled(station,
-			    report->generation, ECONNRESET);
-			goto out;
-		}
-		result = wlan_wpa2_engine_receive_management(&station->wpa2,
-		    report->generation, report->frame, report->length, now);
-		goto sync;
-	}
-	if ((frame_control & 0x000cU) != 0x0008U) {
-		result = EPROTONOSUPPORT;
-		goto out;
-	}
-	memset(&security, 0, sizeof(security));
-	security.key_generation = report->key_generation;
-	security.packet_number = report->packet_number;
-	security.decrypted = report->decrypted;
-	security.cipher_ccmp = report->cipher == WLAN_RADIO_CIPHER_CCMP;
-	security.key_index = report->key_index;
-	result = wlan_l2_parse_data(station->device->hwaddr,
-	    station->selected.bssid, report->frame, report->length, &security,
-	    &station->l2_rx, ethernet, sizeof(ethernet), &ethernet_length);
-	if (result != 0)
-		goto out;
-	if (ethernet_length >= WLAN_L2_ETHERNET_HEADER_SIZE &&
-	    ethernet[12U] == 0x88U && ethernet[13U] == 0x8eU) {
-		/* Clear EAPOL is confined to the initial four-way exchange.  Once a
-		 * pairwise generation has reached the connected lifetime, rekey M1/G1
-		 * and every response/retry must arrive through the active CCMP domain.
-		 * Otherwise an unauthenticated clear M1 could close the controlled port. */
-		if (station->wpa2.connected_lifetime &&
-		    station->wpa2.pairwise_installed &&
-		    ((frame_control & 0x4000U) == 0U ||
-		    report->cipher != WLAN_RADIO_CIPHER_CCMP ||
-		    report->decrypted == 0U || report->key_index != 0U ||
-		    report->key_generation !=
-		    station->l2_rx.pairwise_key_generation)) {
-			result = EACCES;
-			goto out;
-		}
-		result = wlan_wpa2_engine_receive_eapol(&station->wpa2,
-		    report->generation, ethernet + 6U, ethernet,
-		    ethernet + WLAN_L2_ETHERNET_HEADER_SIZE,
-		    ethernet_length - WLAN_L2_ETHERNET_HEADER_SIZE, now);
-		goto sync;
-	}
-	if (!station->wpa2.authorized ||
-	    (frame_control & 0x4000U) == 0U) {
-		result = EACCES;
-		goto out;
-	}
-	packet = packet_buf_alloc(0U);
-	if (packet == NULL) {
-		result = ENOBUFS;
-		goto out;
-	}
-	if (packet_buf_append(packet, ethernet_length) == NULL) {
-		result = EMSGSIZE;
-		goto out;
-	}
-	memcpy(packet->data, ethernet, ethernet_length);
-	net_device_receive(station->device, packet);
-	packet = NULL;
-	result = 0;
-	goto out;
-
-sync:
-	enabled = spin_lock_irqsave(&station->lock);
-	station_sync_wpa_locked(station);
-	spin_unlock_irqrestore(&station->lock, enabled);
-out:
-	if (packet != NULL)
-		packet_buf_free(packet);
-	wlan_crypto_erase(ethernet, sizeof(ethernet));
-	station_control_leave(station);
-	station_leave(station);
-	if (result != 0)
-		wlan_worker_wakeup();
-	return result;
-}
-
-int
-wlan_station_report_tx_complete(struct wlan_station *station,
-	uint64_t generation, uint64_t cookie, int acknowledged, int error)
-{
-	unsigned long enabled;
-	uint64_t now;
-	int result;
-
-	if (generation == 0U || cookie == 0U || error < 0 ||
-	    (acknowledged != 0 && acknowledged != 1) ||
-	    (acknowledged && error != 0))
-		return EINVAL;
-	result = station_enter(station);
-	if (result != 0)
-		return result;
-	station_control_enter(station);
-	enabled = spin_lock_irqsave(&station->lock);
-	if (generation != station->connection_generation) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		result = ESTALE;
-		goto out;
-	}
-	now = station_now_locked(station);
-	spin_unlock_irqrestore(&station->lock, enabled);
-	if (cookie == station->wpa2.tx_cookie_active) {
-		result = wlan_wpa2_engine_report_tx(&station->wpa2, generation,
-		    cookie, acknowledged, error, now);
-		enabled = spin_lock_irqsave(&station->lock);
-		station_sync_wpa_locked(station);
-		spin_unlock_irqrestore(&station->lock, enabled);
-	} else if (cookie <= station->transmit_cookie &&
-	    station->wpa2.authorized) {
-		if (!acknowledged || error != 0)
-			net_device_tx_error(station->device);
-		result = 0;
-	} else {
-		result = ESTALE;
-	}
-out:
-	station_control_leave(station);
-	station_leave(station);
-	if (result != 0)
-		wlan_worker_wakeup();
-	return result;
-}
-
-int
-wlan_station_transmit(struct wlan_station *station,
-	struct packet_buf *packet)
-{
-	struct wlan_radio_tx_request request;
-	uint8_t mpdu[WLAN_L2_MPDU_MAX];
-	unsigned long enabled;
-	size_t mpdu_length = 0U;
-	uint64_t now;
-	int result;
-
-	if (packet == NULL)
-		return EINVAL;
-	result = station_enter(station);
-	if (result != 0) {
-		packet_buf_free(packet);
-		return result;
-	}
-	station_control_enter(station);
-	memset(&request, 0, sizeof(request));
-	enabled = spin_lock_irqsave(&station->lock);
-	if (!station->wpa2.authorized || !station->controlled_port ||
-	    station->ops->frame_transmit == NULL) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		result = ENETDOWN;
-		goto out;
-	}
-	if (station->transmit_packet_number >= 0x0000ffffffffffffULL ||
-	    station->transmit_cookie == UINT64_MAX) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		result = EOVERFLOW;
-		goto out;
-	}
-	station->transmit_packet_number++;
-	station->transmit_cookie++;
-	request.generation = station->connection_generation;
-	request.cookie = station->transmit_cookie;
-	request.key_generation = station->wpa2.key_generation;
-	request.packet_number = station->transmit_packet_number;
-	now = station_now_locked(station);
-	request.deadline_ticks = deadline_after(now,
-	    WLAN_CONNECT_TRANSITION_TICKS);
-	spin_unlock_irqrestore(&station->lock, enabled);
-	result = wlan_l2_build_data(station->device->hwaddr,
-	    station->selected.bssid, packet->data, packet->length, 1, 0U,
-	    request.packet_number, mpdu, sizeof(mpdu), &mpdu_length);
-	if (result != 0)
-		goto out;
-	request.frame_class = WLAN_RADIO_FRAME_DATA;
-	request.encrypted = 1U;
-	request.key_index = 0U;
-	request.frame = mpdu;
-	request.length = mpdu_length;
-	result = station->ops->frame_transmit(station->radio_context, &request);
-out:
-	wlan_crypto_erase(mpdu, sizeof(mpdu));
-	packet_buf_free(packet);
-	station_control_leave(station);
-	station_leave(station);
-	return result;
-}
-
+/* Fills the output fields of a scan request; the caller holds the station lock. */
 static void
-scan_request_output_locked(struct wlan_station *station,
+scan_request_output_locked(
+	struct wlan_station *station,
 	struct wlan_scan_request *request)
 {
 	request->generation = station->scan_generation;
@@ -1913,15 +3347,20 @@ scan_request_output_locked(struct wlan_station *station,
 	memset(request->reserved, 0, sizeof(request->reserved));
 }
 
+/* Starts or stops a scan for the scan ioctl. */
 static int
-ioctl_scan(struct wlan_station *station, struct wlan_scan_request *request)
+ioctl_scan(
+	struct wlan_station *station,
+	struct wlan_scan_request *request)
 {
 	unsigned long enabled;
 	uint64_t generation;
 	uint64_t deadline;
 	uint64_t now;
-	int wake_start = 0;
+	int wake_start;
 	int error;
+
+	wake_start = 0;
 
 	if (request->flags != 0U ||
 	    !bytes_zero(request->reserved, sizeof(request->reserved)) ||
@@ -1930,6 +3369,8 @@ ioctl_scan(struct wlan_station *station, struct wlan_scan_request *request)
 		return EINVAL;
 	station_control_enter(station);
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* A start arms a new scan generation for the timer to run. */
 	if (request->action == WLAN_SCAN_START) {
 		if (!station->administrative_up) {
 			error = ENETDOWN;
@@ -1984,6 +3425,8 @@ ioctl_scan(struct wlan_station *station, struct wlan_scan_request *request)
 		error = 0;
 		goto output;
 	}
+
+	/* A stop cancels the scan and leaves the driver stop to the timer. */
 	if (station->scan_state != WLAN_SCAN_RUNNING &&
 	    !station->scan_driver_active) {
 		error = 0;
@@ -2018,8 +3461,10 @@ output:
 	return error;
 }
 
+/* Reports the scan and snapshot state for the scan status ioctl. */
 static int
-ioctl_scan_status(struct wlan_station *station,
+ioctl_scan_status(
+	struct wlan_station *station,
 	struct wlan_scan_status_request *request)
 {
 	unsigned long enabled;
@@ -2030,8 +3475,10 @@ ioctl_scan_status(struct wlan_station *station,
 	request->generation = station->snapshot_generation;
 	request->scan_generation = station->scan_generation;
 	request->cache_sequence = station->cache_sequence;
-	request->deadline_ticks = station->scan_state == WLAN_SCAN_RUNNING ?
-	    station->scan_deadline : 0U;
+	if (station->scan_state == WLAN_SCAN_RUNNING)
+		request->deadline_ticks = station->scan_deadline;
+	else
+		request->deadline_ticks = 0U;
 	request->state = station->scan_state;
 	request->terminal_error = station->scan_error;
 	request->result_count = station->snapshot_count;
@@ -2041,24 +3488,36 @@ ioctl_scan_status(struct wlan_station *station,
 	return 0;
 }
 
+/* Converts the age of a cache entry to saturated milliseconds. */
 static uint32_t
-entry_age_ms(uint64_t now, uint64_t last_seen)
+entry_age_ms(
+	uint64_t now,
+	uint64_t last_seen)
 {
-	uint64_t ticks = now >= last_seen ? now - last_seen : 0U;
+	uint64_t ticks;
 
+	if (now >= last_seen)
+		ticks = now - last_seen;
+	else
+		ticks = 0U;
 	if (ticks > (uint64_t)UINT32_MAX / 10U)
 		return UINT32_MAX;
 	return (uint32_t)(ticks * 10U);
 }
 
+/* Copies one snapshot entry for the BSS ioctl. */
 static int
-ioctl_bss(struct wlan_station *station, struct wlan_bss_request *request)
+ioctl_bss(
+	struct wlan_station *station,
+	struct wlan_bss_request *request)
 {
 	unsigned long enabled;
 
 	if (request->reserved0 != 0U ||
 	    !bytes_zero(request->reserved, sizeof(request->reserved)))
 		return EINVAL;
+
+	/* The request must name the published snapshot and a valid index. */
 	enabled = spin_lock_irqsave(&station->lock);
 	if (request->generation != station->snapshot_generation) {
 		spin_unlock_irqrestore(&station->lock, enabled);
@@ -2078,17 +3537,25 @@ ioctl_bss(struct wlan_station *station, struct wlan_bss_request *request)
 	return 0;
 }
 
+/* Arms a connection to the best BSS of an SSID for the connect ioctl. */
 static int
-ioctl_connect(struct wlan_station *station, struct wlan_connect_request *request)
+ioctl_connect(
+	struct wlan_station *station,
+	struct wlan_connect_request *request)
 {
 	uint8_t credential[WLAN_PASSPHRASE_STORAGE];
 	struct wlan_bss_record selected;
 	unsigned long enabled;
-	uint64_t generation = 0U;
-	uint64_t deadline = 0U;
-	int control_entered = 0;
+	uint64_t generation;
+	uint64_t deadline;
+	int control_entered;
 	int error;
 
+	generation = 0U;
+	deadline = 0U;
+	control_entered = 0;
+
+	/* Takes the passphrase out of the request before validating it. */
 	memcpy(credential, request->passphrase, sizeof(credential));
 	secure_zero(request->passphrase, sizeof(request->passphrase));
 	if (request->ssid_length > WLAN_SSID_MAX ||
@@ -2100,6 +3567,8 @@ ioctl_connect(struct wlan_station *station, struct wlan_connect_request *request
 	}
 	station_control_enter(station);
 	control_entered = 1;
+
+	/* An idle station with a snapshot match starts a new generation. */
 	enabled = spin_lock_irqsave(&station->lock);
 	if (!station->administrative_up) {
 		error = ENETDOWN;
@@ -2109,7 +3578,8 @@ ioctl_connect(struct wlan_station *station, struct wlan_connect_request *request
 		error = EOPNOTSUPP;
 		goto output_locked;
 	}
-	if (station->scan_driver_active || station->connect_driver_active ||
+	if (station->scan_driver_active ||
+	    station->connect_driver_active ||
 	    station->connect_start_pending ||
 	    station->scan_state == WLAN_SCAN_RUNNING ||
 	    (station->state != WLAN_STATE_IDLE &&
@@ -2135,6 +3605,8 @@ ioctl_connect(struct wlan_station *station, struct wlan_connect_request *request
 		error = EBUSY;
 		goto output_locked;
 	}
+
+	/* Records the selection for the timer to start. */
 	station_clear_connection_locked(station);
 	station->selected = selected;
 	memcpy(station->credential, credential, sizeof(station->credential));
@@ -2169,8 +3641,10 @@ done:
 	return error;
 }
 
+/* Stops the scan and connection of a station; the caller holds the control gate. */
 static int
-station_retire_controlled(struct wlan_station *station,
+station_retire_controlled(
+	struct wlan_station *station,
 	int keep_administrative_up)
 {
 	unsigned long enabled;
@@ -2181,10 +3655,14 @@ station_retire_controlled(struct wlan_station *station,
 	int connection_still_active;
 	int engine_stop_needed;
 	int carrier_error;
-	int scan_error = 0;
-	int connection_error = 0;
+	int scan_error;
+	int connection_error;
 	int error;
 
+	scan_error = 0;
+	connection_error = 0;
+
+	/* Cancels everything under the lock and notes what to stop. */
 	enabled = spin_lock_irqsave(&station->lock);
 	if (!keep_administrative_up)
 		station->administrative_up = 0U;
@@ -2210,8 +3688,10 @@ station_retire_controlled(struct wlan_station *station,
 	station->scan_publish_pending = 0U;
 	station->scan_event_error = 0;
 	station->scan_step_deadline = 0U;
-	station->state = station->administrative_up ?
-	    WLAN_STATE_DISCONNECTING : WLAN_STATE_DOWN;
+	if (station->administrative_up)
+		station->state = WLAN_STATE_DISCONNECTING;
+	else
+		station->state = WLAN_STATE_DOWN;
 	station->terminal_error = 0;
 #ifdef WLAN_TESTING
 	station->test_report_hook = NULL;
@@ -2219,6 +3699,7 @@ station_retire_controlled(struct wlan_station *station,
 #endif
 	spin_unlock_irqrestore(&station->lock, enabled);
 
+	/* Stops the scan and the engine outside the lock. */
 	if (stop_scan) {
 		if (station->ops->scan_stop == NULL)
 			scan_error = EOPNOTSUPP;
@@ -2231,9 +3712,12 @@ station_retire_controlled(struct wlan_station *station,
 	enabled = spin_lock_irqsave(&station->lock);
 	connection_still_active = station->connect_driver_active;
 	spin_unlock_irqrestore(&station->lock, enabled);
-	/* engine_stop() owns the key/association/radio ordering.  A direct radio
-	 * stop is only a fallback for an otherwise-idle engine; it must never run
-	 * past an uncertain key-delete barrier. */
+
+	/*
+	 * engine_stop() owns the key/association/radio ordering.  A direct
+	 * radio stop is only a fallback for an otherwise-idle engine; it
+	 * must never run past an uncertain key-delete barrier.
+	 */
 	if (connection_error == 0 && stop_connection &&
 	    connection_still_active) {
 		if (station->ops->disconnect == NULL)
@@ -2249,25 +3733,34 @@ station_retire_controlled(struct wlan_station *station,
 		if (connection_error == 0)
 			connection_error = error;
 	}
+
+	/* Settles the final state and schedules retries for what failed. */
 	enabled = spin_lock_irqsave(&station->lock);
-	if (scan_error == 0)
+	if (scan_error == 0) {
 		station->scan_driver_active = 0;
-	else {
+	} else {
 		station->scan_state = WLAN_SCAN_FAILED;
 		station->scan_error = scan_error;
 	}
-	if (connection_error == 0 && !station->connect_driver_active)
+	if (connection_error == 0 && !station->connect_driver_active) {
 		station_finish_connection_retire_locked(station);
-	else {
+	} else {
 		station->connect_stop_pending = 1;
 		station->connect_retry_deadline = deadline_after(
 		    station_now_locked(station), 1U);
 	}
-	station->terminal_error = scan_error != 0 ? scan_error :
-	    (connection_error != 0 ? connection_error : carrier_error);
-	if (station->terminal_error != 0)
-		station->state = station->administrative_up ?
-		    WLAN_STATE_FAILED : WLAN_STATE_DOWN;
+	if (scan_error != 0)
+		station->terminal_error = scan_error;
+	else if (connection_error != 0)
+		station->terminal_error = connection_error;
+	else
+		station->terminal_error = carrier_error;
+	if (station->terminal_error != 0) {
+		if (station->administrative_up)
+			station->state = WLAN_STATE_FAILED;
+		else
+			station->state = WLAN_STATE_DOWN;
+	}
 	if (station->scan_driver_active && scan_error != 0)
 		station->scan_retry_deadline = deadline_after(
 		    station_now_locked(station), 1U);
@@ -2278,12 +3771,20 @@ station_retire_controlled(struct wlan_station *station,
 	spin_unlock_irqrestore(&station->lock, enabled);
 	if (scan_error != 0 || connection_error != 0 || carrier_error != 0)
 		wlan_worker_wakeup();
-	return scan_error != 0 ? scan_error :
-	    (connection_error != 0 ? connection_error : carrier_error);
+
+	/* Reports the first failure in scan, connection, carrier order. */
+	if (scan_error != 0)
+		return scan_error;
+	if (connection_error != 0)
+		return connection_error;
+	return carrier_error;
 }
 
+/* Stops the scan and connection of a station under the control gate. */
 static int
-station_retire(struct wlan_station *station, int keep_administrative_up)
+station_retire(
+	struct wlan_station *station,
+	int keep_administrative_up)
 {
 	int error;
 
@@ -2293,8 +3794,10 @@ station_retire(struct wlan_station *station, int keep_administrative_up)
 	return error;
 }
 
+/* Retires the connection for the disconnect ioctl. */
 static int
-ioctl_disconnect(struct wlan_station *station,
+ioctl_disconnect(
+	struct wlan_station *station,
 	struct wlan_disconnect_request *request)
 {
 	unsigned long enabled;
@@ -2305,6 +3808,8 @@ ioctl_disconnect(struct wlan_station *station,
 	    !bytes_zero(request->reserved, sizeof(request->reserved)))
 		return EINVAL;
 	station_control_enter(station);
+
+	/* The disconnect takes its own operation generation. */
 	enabled = spin_lock_irqsave(&station->lock);
 	error = station_generation_locked(station, &generation);
 	if (error != 0) {
@@ -2319,10 +3824,16 @@ ioctl_disconnect(struct wlan_station *station,
 	station->operation_generation = generation;
 	station->state = WLAN_STATE_DISCONNECTING;
 	spin_unlock_irqrestore(&station->lock, enabled);
+
+	/* Retires while keeping the station administratively up. */
 	error = station_retire_controlled(station, 1);
 	enabled = spin_lock_irqsave(&station->lock);
-	if (station->administrative_up)
-		station->state = error == 0 ? WLAN_STATE_IDLE : WLAN_STATE_FAILED;
+	if (station->administrative_up) {
+		if (error == 0)
+			station->state = WLAN_STATE_IDLE;
+		else
+			station->state = WLAN_STATE_FAILED;
+	}
 	request->generation = generation;
 	request->state = station->state;
 	request->terminal_error = error;
@@ -2332,8 +3843,11 @@ ioctl_disconnect(struct wlan_station *station,
 	return error;
 }
 
+/* Reports the station state for the status ioctl. */
 static int
-ioctl_status(struct wlan_station *station, struct wlan_status_request *request)
+ioctl_status(
+	struct wlan_station *station,
+	struct wlan_status_request *request)
 {
 	unsigned long enabled;
 
@@ -2344,6 +3858,8 @@ ioctl_status(struct wlan_station *station, struct wlan_status_request *request)
 	request->operation_generation = station->operation_generation;
 	request->scan_generation = station->scan_generation;
 	request->snapshot_generation = station->snapshot_generation;
+
+	/* Reports the deadline of whichever operation is in progress. */
 	if (station->state == WLAN_STATE_AUTHENTICATING ||
 	    station->state == WLAN_STATE_ASSOCIATING ||
 	    station->state == WLAN_STATE_FOUR_WAY)
@@ -2361,9 +3877,12 @@ ioctl_status(struct wlan_station *station, struct wlan_status_request *request)
 	request->key_installed = station->key_installed;
 	request->controlled_port = station->controlled_port;
 	request->retry_count = station->retry_count;
-	request->terminal_error = station->terminal_error != 0 ?
-	    station->terminal_error :
-	    (station->scan_state == WLAN_SCAN_FAILED ? station->scan_error : 0);
+	if (station->terminal_error != 0)
+		request->terminal_error = station->terminal_error;
+	else if (station->scan_state == WLAN_SCAN_FAILED)
+		request->terminal_error = station->scan_error;
+	else
+		request->terminal_error = 0;
 	request->rssi_dbm = station->selected.rssi_dbm;
 	memcpy(request->bssid, station->selected.bssid,
 	    sizeof(request->bssid));
@@ -2377,116 +3896,14 @@ ioctl_status(struct wlan_station *station, struct wlan_status_request *request)
 	return 0;
 }
 
-int
-wlan_station_ioctl(struct net_device *device, unsigned long request,
-	void *argument)
-{
-	struct wlan_station *station;
-	struct wlan_ioctl_header *header;
-	size_t expected_size;
-	int error;
-
-	if (argument == NULL)
-		return EFAULT;
-	if (atomic_load_acquire(&wlan_initialized) != 2U)
-		wlan_core_init();
-	if (request == SIOCSWLANCONNECT) {
-		struct wlan_connect_request *connect = argument;
-		uint8_t saved[WLAN_PASSPHRASE_STORAGE];
-
-		/* Preserve the input only across header/device validation, and make
-		 * every recognized CONNECT return path visibly redacted. */
-		memcpy(saved, connect->passphrase, sizeof(saved));
-		secure_zero(connect->passphrase, sizeof(connect->passphrase));
-		error = header_validate(device,
-		    (const struct wlan_ioctl_header *)connect, sizeof(*connect));
-		if (error != 0) {
-			secure_zero(saved, sizeof(saved));
-			connect->passphrase_length = 0U;
-			return error;
-		}
-		error = station_find_enter(device, &station);
-		if (error == 0) {
-			memcpy(connect->passphrase, saved, sizeof(saved));
-			error = ioctl_connect(station, connect);
-			station_leave(station);
-		}
-		secure_zero(saved, sizeof(saved));
-		secure_zero(connect->passphrase, sizeof(connect->passphrase));
-		connect->passphrase_length = 0U;
-		return error;
-	}
-	if (request == SIOCSWLANSCAN)
-		expected_size = sizeof(struct wlan_scan_request);
-	else if (request == SIOCGWLANSCAN)
-		expected_size = sizeof(struct wlan_scan_status_request);
-	else if (request == SIOCGWLANBSS)
-		expected_size = sizeof(struct wlan_bss_request);
-	else if (request == SIOCSWLANDISCONNECT)
-		expected_size = sizeof(struct wlan_disconnect_request);
-	else if (request == SIOCGWLANSTATUS)
-		expected_size = sizeof(struct wlan_status_request);
-	else
-		return ENOTTY;
-	header = argument;
-	error = header_validate(device, header, expected_size);
-	if (error != 0)
-		return error;
-	error = station_find_enter(device, &station);
-	if (error != 0)
-		return error;
-	if (request == SIOCSWLANSCAN)
-		error = ioctl_scan(station, argument);
-	else if (request == SIOCGWLANSCAN)
-		error = ioctl_scan_status(station, argument);
-	else if (request == SIOCGWLANBSS)
-		error = ioctl_bss(station, argument);
-	else if (request == SIOCSWLANDISCONNECT)
-		error = ioctl_disconnect(station, argument);
-	else
-		error = ioctl_status(station, argument);
-	station_leave(station);
-	return error;
-}
-
-int
-wlan_station_close(struct wlan_station *station)
-{
-	unsigned long enabled;
-	int error;
-
-	if (station == NULL)
-		return ENODEV;
-	enabled = spin_lock_irqsave(&station->lock);
-	if (!station->used || station->blocked) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		return ENODEV;
-	}
-	if (station->lifecycle_inflight) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		return EBUSY;
-	}
-	station->closing = 1;
-	if (station->active != 0U) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		return EBUSY;
-	}
-	station->lifecycle_inflight = 1;
-	spin_unlock_irqrestore(&station->lock, enabled);
-	error = station_retire(station, 0);
-	enabled = spin_lock_irqsave(&station->lock);
-	station->lifecycle_inflight = 0;
-	if (error == 0)
-		station->closing = 0;
-	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
-}
-
+/* Frees a station slot and returns the device to release; the caller holds the station lock. */
 static struct net_device *
-station_finalize_locked(struct wlan_station *station)
+station_finalize_locked(
+	struct wlan_station *station)
 {
-	struct net_device *device = station->device;
+	struct net_device *device;
 
+	device = station->device;
 	station->state = WLAN_STATE_REMOVED;
 	station_clear_connection_locked(station);
 	secure_zero(station->staging, sizeof(station->staging));
@@ -2504,153 +3921,11 @@ station_finalize_locked(struct wlan_station *station)
 	return device;
 }
 
-int
-wlan_station_detach(struct wlan_station *station)
-{
-	unsigned long registry_enabled;
-	unsigned long enabled;
-	struct net_device *release_device;
-	int error;
-
-	if (station == NULL || atomic_load_acquire(&wlan_initialized) != 2U)
-		return ENODEV;
-	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
-	enabled = spin_lock_irqsave(&station->lock);
-	if (!station->used) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-		return ENODEV;
-	}
-	if (station->shutdown_owned || station->lifecycle_inflight ||
-	    station->closing) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-		return EBUSY;
-	}
-	if (station->active != 0U) {
-		station->blocked = 1;
-		spin_unlock_irqrestore(&station->lock, enabled);
-		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-		return EBUSY;
-	}
-	station->blocked = 1;
-	station->lifecycle_inflight = 1;
-	spin_unlock_irqrestore(&station->lock, enabled);
-	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-
-	station_control_enter(station);
-	error = station_retire_controlled(station, 0);
-	if (error == 0 && station->ops->quiesce != NULL)
-		error = station->ops->quiesce(station->radio_context);
-	station_control_leave(station);
-	if (error != 0) {
-		enabled = spin_lock_irqsave(&station->lock);
-		station->lifecycle_inflight = 0;
-		spin_unlock_irqrestore(&station->lock, enabled);
-		return error;
-	}
-	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
-	enabled = spin_lock_irqsave(&station->lock);
-	if (station->active != 0U || station->shutdown_owned) {
-		station->lifecycle_inflight = 0;
-		spin_unlock_irqrestore(&station->lock, enabled);
-		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-		return EBUSY;
-	}
-	release_device = station_finalize_locked(station);
-	spin_unlock_irqrestore(&station->lock, enabled);
-	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-	net_device_release(release_device);
-	return 0;
-}
-
-int
-wlan_station_shutdown_all(void)
-{
-	unsigned long registry_enabled;
-	unsigned index;
-	int first_error = 0;
-	int busy = 0;
-
-	if (atomic_load_acquire(&wlan_initialized) != 2U)
-		return 0;
-	/* The terminal registry latch prevents attachment and slot reuse between
-	 * the admission-closing pass and the checked retirement pass. */
-	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
-	if (wlan_shutdown_inflight) {
-		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-		return EBUSY;
-	}
-	wlan_shutdown_inflight = 1;
-	wlan_stopping = 1;
-	for (index = 0; index < NET_DEVICE_MAX; index++) {
-		struct wlan_station *station = &wlan_stations[index];
-		unsigned long enabled;
-
-		if (!station->used)
-			continue;
-		enabled = spin_lock_irqsave(&station->lock);
-		if (station->lifecycle_inflight) {
-			busy = 1;
-		} else {
-			station->shutdown_owned = 1;
-			station->blocked = 1;
-			station->closing = 0;
-			if (station->active != 0U)
-				busy = 1;
-		}
-		spin_unlock_irqrestore(&station->lock, enabled);
-	}
-	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-	if (busy) {
-		registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
-		wlan_shutdown_inflight = 0;
-		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-		return EBUSY;
-	}
-	for (index = 0; index < NET_DEVICE_MAX; index++) {
-		struct wlan_station *station = &wlan_stations[index];
-		unsigned long enabled;
-		struct net_device *release_device = NULL;
-		int owned;
-		int error;
-
-		enabled = spin_lock_irqsave(&station->lock);
-		owned = station->used && station->shutdown_owned;
-		spin_unlock_irqrestore(&station->lock, enabled);
-		if (!owned)
-			continue;
-		station_control_enter(station);
-		error = station_retire_controlled(station, 0);
-		if (error == 0 && station->ops->quiesce != NULL)
-			error = station->ops->quiesce(station->radio_context);
-		station_control_leave(station);
-		if (error != 0) {
-			if (first_error == 0)
-				first_error = error;
-			continue;
-		}
-		registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
-		enabled = spin_lock_irqsave(&station->lock);
-		if (station->active != 0U || !station->shutdown_owned) {
-			if (first_error == 0)
-				first_error = EBUSY;
-		} else {
-			release_device = station_finalize_locked(station);
-		}
-		spin_unlock_irqrestore(&station->lock, enabled);
-		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-		if (release_device != NULL)
-			net_device_release(release_device);
-	}
-	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
-	wlan_shutdown_inflight = 0;
-	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-	return first_error;
-}
-
+/* Fails the running scan; the caller holds the station lock. */
 static void
-station_scan_failed_locked(struct wlan_station *station, int error)
+station_scan_failed_locked(
+	struct wlan_station *station,
+	int error)
 {
 	station->scan_state = WLAN_SCAN_FAILED;
 	station->scan_error = error;
@@ -2663,8 +3938,10 @@ station_scan_failed_locked(struct wlan_station *station, int error)
 		station->state = WLAN_STATE_IDLE;
 }
 
+/* Publishes the staging cache as the new snapshot; the caller holds the station lock. */
 static int
-station_scan_publish_locked(struct wlan_station *station,
+station_scan_publish_locked(
+	struct wlan_station *station,
 	uint64_t generation)
 {
 	if (station->cache_sequence == UINT64_MAX) {
@@ -2690,13 +3967,20 @@ station_scan_publish_locked(struct wlan_station *station,
 	return 0;
 }
 
+/* Applies the result of a driver scan stop. */
 static void
-station_scan_stop_result(struct wlan_station *station, uint64_t generation,
+station_scan_stop_result(
+	struct wlan_station *station,
+	uint64_t generation,
 	int error)
 {
-	unsigned long enabled = spin_lock_irqsave(&station->lock);
-	uint64_t now = station_now_locked(station);
+	unsigned long enabled;
+	uint64_t now;
 
+	enabled = spin_lock_irqsave(&station->lock);
+	now = station_now_locked(station);
+
+	/* A successful stop publishes a finished scan; a failed one retries. */
 	if (station->scan_generation == generation) {
 		if (error == 0) {
 			station->scan_driver_active = 0;
@@ -2720,8 +4004,10 @@ station_scan_stop_result(struct wlan_station *station, uint64_t generation,
 		wlan_worker_wakeup();
 }
 
+/* Starts the WPA2 engine on a pending connection. */
 static void
-station_connection_start(struct wlan_station *station)
+station_connection_start(
+	struct wlan_station *station)
 {
 	static const uint8_t supported_rates_24[12] = {
 		0x82U, 0x84U, 0x8bU, 0x96U,
@@ -2741,6 +4027,7 @@ station_connection_start(struct wlan_station *station)
 	size_t credential_length;
 	int error;
 
+	/* Takes the pending selection and credential out of the station. */
 	enabled = spin_lock_irqsave(&station->lock);
 	if (!station->connect_start_pending) {
 		spin_unlock_irqrestore(&station->lock, enabled);
@@ -2756,6 +4043,7 @@ station_connection_start(struct wlan_station *station)
 	station->credential_length = 0U;
 	spin_unlock_irqrestore(&station->lock, enabled);
 
+	/* Builds the engine profile for the selected band. */
 	memset(&profile, 0, sizeof(profile));
 	memcpy(profile.station, station->device->hwaddr,
 	    sizeof(profile.station));
@@ -2772,9 +4060,9 @@ station_connection_start(struct wlan_station *station)
 		profile.rate_count = sizeof(supported_rates_5);
 	}
 	profile.channel = selected.channel;
-	profile.capability = WLAN_LOCAL_ASSOC_CAPABILITY |
-	    (selected.channel > 14U ?
-	    WLAN_ASSOC_CAPABILITY_SHORT_SLOT_TIME : 0U);
+	profile.capability = WLAN_LOCAL_ASSOC_CAPABILITY;
+	if (selected.channel > 14U)
+		profile.capability |= WLAN_ASSOC_CAPABILITY_SHORT_SLOT_TIME;
 	profile.listen_interval = 1U;
 	profile.passphrase = credential;
 	profile.passphrase_length = credential_length;
@@ -2785,6 +4073,8 @@ station_connection_start(struct wlan_station *station)
 	    station->clock(station->clock_context));
 	wlan_crypto_erase(&profile, sizeof(profile));
 	secure_zero(credential, sizeof(credential));
+
+	/* Publishes the engine state; an idle engine after a failure fails. */
 	enabled = spin_lock_irqsave(&station->lock);
 	if (station->connection_generation == generation) {
 		station_sync_wpa_locked(station);
@@ -2799,22 +4089,33 @@ station_connection_start(struct wlan_station *station)
 		wlan_worker_wakeup();
 }
 
+/* Drives the connection state machine from the timer. */
 static void
-station_connection_timer(struct wlan_station *station, uint64_t now)
+station_connection_timer(
+	struct wlan_station *station,
+	uint64_t now)
 {
 	unsigned long enabled;
-	uint64_t generation = 0U;
+	uint64_t generation;
 	enum wlan_wpa2_state wpa_state;
-	int cleanup_due = 0;
-	int stop = 0;
-	int error = 0;
+	int cleanup_due;
+	int stop;
+	int error;
 
+	generation = 0U;
+	cleanup_due = 0;
+	stop = 0;
+	error = 0;
+
+	/* A pending start runs first. */
 	enabled = spin_lock_irqsave(&station->lock);
 	if (station->connect_start_pending) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		station_connection_start(station);
 		return;
 	}
+
+	/* An expired beacon watch is a link loss. */
 	wpa_state = wlan_wpa2_engine_state(&station->wpa2);
 	if (deadline_expired(station_now_locked(station),
 	    station->beacon_watch_deadline) &&
@@ -2829,6 +4130,8 @@ station_connection_timer(struct wlan_station *station, uint64_t now)
 		return;
 	}
 	spin_unlock_irqrestore(&station->lock, enabled);
+
+	/* A live engine runs its own timer. */
 	if (wpa_state != WLAN_WPA2_STATE_IDLE &&
 	    wpa_state != WLAN_WPA2_STATE_FAILED) {
 		error = wlan_wpa2_engine_timer(&station->wpa2, now);
@@ -2839,6 +4142,8 @@ station_connection_timer(struct wlan_station *station, uint64_t now)
 			wlan_worker_wakeup();
 		return;
 	}
+
+	/* A failed engine is stopped once its retry deadline passes. */
 	if (wpa_state == WLAN_WPA2_STATE_FAILED) {
 		enabled = spin_lock_irqsave(&station->lock);
 		now = station_now_locked(station);
@@ -2851,9 +4156,9 @@ station_connection_timer(struct wlan_station *station, uint64_t now)
 		error = wlan_wpa2_engine_stop(&station->wpa2);
 		enabled = spin_lock_irqsave(&station->lock);
 		if (error == 0) {
-			if (!station->connect_driver_active)
+			if (!station->connect_driver_active) {
 				station_finish_connection_retire_locked(station);
-			else {
+			} else {
 				station->connect_stop_pending = 1;
 				station->connect_retry_deadline = 0U;
 			}
@@ -2867,6 +4172,8 @@ station_connection_timer(struct wlan_station *station, uint64_t now)
 			wlan_worker_wakeup();
 		return;
 	}
+
+	/* An idle engine with a driver still active owes the radio a stop. */
 	enabled = spin_lock_irqsave(&station->lock);
 	now = station_now_locked(station);
 	if (station->connect_stop_pending &&
@@ -2905,38 +4212,58 @@ station_connection_timer(struct wlan_station *station, uint64_t now)
 		wlan_worker_wakeup();
 }
 
+/* Drives the scan state machine from the timer. */
 static void
-station_scan_timer(struct wlan_station *station, uint64_t now)
+station_scan_timer(
+	struct wlan_station *station,
+	uint64_t now)
 {
 	unsigned iteration;
+	unsigned long enabled;
+	uint64_t generation;
+	uint64_t deadline;
+	uint32_t step;
+	uint32_t channel;
+	int active_probe;
+	int action;
+	int error;
+	uint8_t probe[WLAN_PROBE_REQUEST_MAX_SIZE];
+	size_t probe_length;
 
-	/* Two immediate transitions per channel plus terminal stop are bounded;
-	 * the loop also consumes a ready/error synchronously reported by a fake or
-	 * radio callback without relying on another edge wakeup. */
+	/*
+	 * Two immediate transitions per channel plus terminal stop are
+	 * bounded; the loop also consumes a ready/error synchronously
+	 * reported by a fake or radio callback without relying on another
+	 * edge wakeup.
+	 */
 	for (iteration = 0U;
 	    iteration < WLAN_SCAN_CHANNEL_MAX * 2U + 4U; iteration++) {
-		unsigned long enabled;
-		uint64_t generation = 0U;
-		uint64_t deadline = 0U;
-		uint32_t step = 0U;
-		uint32_t channel = 0U;
-		int active_probe = 0;
-		int action = 0;
-		int error;
-		uint8_t probe[WLAN_PROBE_REQUEST_MAX_SIZE];
-		size_t probe_length = 0U;
+		generation = 0U;
+		deadline = 0U;
+		step = 0U;
+		channel = 0U;
+		active_probe = 0;
+		action = 0;
+		probe_length = 0U;
 
+		/* Decides the next action under the lock. */
 		enabled = spin_lock_irqsave(&station->lock);
 		now = station_now_locked(station);
 		if (station->scan_state == WLAN_SCAN_RUNNING) {
 			generation = station->scan_generation;
 			if (deadline_expired(now, station->scan_deadline)) {
 				station_scan_failed_locked(station, ETIMEDOUT);
-				action = station->scan_driver_active ? 3 : 0;
+				if (station->scan_driver_active)
+					action = 3;
+				else
+					action = 0;
 			} else if (station->scan_event_error != 0) {
 				error = station->scan_event_error;
 				station_scan_failed_locked(station, error);
-				action = station->scan_driver_active ? 3 : 0;
+				if (station->scan_driver_active)
+					action = 3;
+				else
+					action = 0;
 			} else if (station->scan_step_state ==
 			    WLAN_SCAN_STEP_NEED_TUNE) {
 				step = station->scan_step_index;
@@ -2946,8 +4273,12 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 				    station->scan_deadline);
 				station->scan_step_deadline = deadline;
 				station->scan_step_state = WLAN_SCAN_STEP_TUNING;
-				/* Once start is invoked, stop is the mandatory producer
-				 * barrier even when start itself reports an error. */
+
+				/*
+				 * Once start is invoked, stop is the mandatory
+				 * producer barrier even when start itself
+				 * reports an error.
+				 */
 				station->scan_driver_active = 1;
 				action = 1;
 			} else if (station->scan_step_state ==
@@ -2956,7 +4287,10 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 				    station->scan_step_deadline)) {
 					station_scan_failed_locked(station,
 					    ETIMEDOUT);
-					action = station->scan_driver_active ? 3 : 0;
+					if (station->scan_driver_active)
+						action = 3;
+					else
+						action = 0;
 				} else if (station->scan_ready_pending) {
 					station->scan_ready_pending = 0U;
 					station->scan_step_state =
@@ -2969,7 +4303,7 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 					    station->scan_step_index].flags &
 					    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED) != 0U;
 					if (active_probe) {
-						/* Use the tuned channel, independent of cached BSS state. */
+						/* Uses the tuned channel independently of cached BSS state. */
 						channel = station->scan_profile.channels[
 						    station->scan_step_index].channel;
 						probe_length = probe_request_build(station, 0,
@@ -2991,7 +4325,10 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 					    WLAN_SCAN_STEP_NONE;
 					station->scan_step_deadline = 0U;
 					station->scan_publish_pending = 1U;
-					action = station->scan_driver_active ? 4 : 5;
+					if (station->scan_driver_active)
+						action = 4;
+					else
+						action = 5;
 				}
 			}
 		} else if (station->scan_driver_active &&
@@ -3002,8 +4339,8 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 		}
 		spin_unlock_irqrestore(&station->lock, enabled);
 
+		/* Advancing a completed dwell to NEED_TUNE is immediate. */
 		if (action == 0) {
-			/* Advancing a completed dwell to NEED_TUNE is immediate. */
 			enabled = spin_lock_irqsave(&station->lock);
 			active_probe = station->scan_state == WLAN_SCAN_RUNNING &&
 			    station->scan_step_state == WLAN_SCAN_STEP_NEED_TUNE;
@@ -3012,6 +4349,8 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 				continue;
 			return;
 		}
+
+		/* Tunes the radio; a failed start still needs the stop barrier. */
 		if (action == 1) {
 			error = station->ops->scan_channel_start(
 			    station->radio_context, generation, step, channel,
@@ -3028,6 +4367,8 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 			station_scan_stop_result(station, generation, error);
 			return;
 		}
+
+		/* Sends the active probe request. */
 		if (action == 2) {
 			error = station->ops->management_transmit(
 			    station->radio_context, generation, probe, probe_length,
@@ -3044,6 +4385,8 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 			station_scan_stop_result(station, generation, error);
 			return;
 		}
+
+		/* Publishes a finished scan without a driver stop. */
 		if (action == 5) {
 			enabled = spin_lock_irqsave(&station->lock);
 			if (station->scan_generation == generation)
@@ -3052,6 +4395,8 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 			spin_unlock_irqrestore(&station->lock, enabled);
 			return;
 		}
+
+		/* Stops the driver and applies the result. */
 		error = station->ops->scan_stop(station->radio_context,
 		    generation);
 		station_scan_stop_result(station, generation, error);
@@ -3059,493 +4404,14 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 	}
 }
 
+/* Runs both timers of a station under the control gate. */
 static void
-station_timer_run(struct wlan_station *station, uint64_t now)
+station_timer_run(
+	struct wlan_station *station,
+	uint64_t now)
 {
 	station_control_enter(station);
 	station_connection_timer(station, now);
 	station_scan_timer(station, now);
 	station_control_leave(station);
 }
-
-void
-wlan_timer_run(uint64_t now_ticks)
-{
-	unsigned index;
-
-	if (atomic_load_acquire(&wlan_initialized) != 2U)
-		return;
-	for (index = 0U; index < NET_DEVICE_MAX; index++) {
-		struct wlan_station *station;
-
-		if (station_index_enter(index, &station) != 0)
-			continue;
-		station_timer_run(station, now_ticks);
-		station_leave(station);
-	}
-}
-
-uint64_t
-wlan_timer_next_deadline(void)
-{
-	uint64_t result = 0U;
-	unsigned index;
-
-	if (atomic_load_acquire(&wlan_initialized) != 2U)
-		return 0U;
-	for (index = 0U; index < NET_DEVICE_MAX; index++) {
-		struct wlan_station *station;
-		unsigned long enabled;
-		uint64_t candidate = 0U;
-
-		if (station_index_enter(index, &station) != 0)
-			continue;
-		enabled = spin_lock_irqsave(&station->lock);
-		if (station->scan_state == WLAN_SCAN_RUNNING) {
-			candidate = station->scan_deadline;
-			if (station->scan_step_deadline != 0U &&
-			    station->scan_step_deadline < candidate)
-				candidate = station->scan_step_deadline;
-		}
-		if ((station->state == WLAN_STATE_AUTHENTICATING ||
-		    station->state == WLAN_STATE_ASSOCIATING ||
-		    station->state == WLAN_STATE_FOUR_WAY) &&
-		    (candidate == 0U ||
-		    station->connection_deadline < candidate))
-			candidate = station->connection_deadline;
-		if (station->connection_step_deadline != 0U &&
-		    (candidate == 0U ||
-		    station->connection_step_deadline < candidate))
-			candidate = station->connection_step_deadline;
-		if (station->scan_retry_deadline != 0U &&
-		    (candidate == 0U ||
-		    station->scan_retry_deadline < candidate))
-			candidate = station->scan_retry_deadline;
-		if (station->connect_retry_deadline != 0U &&
-		    (candidate == 0U ||
-		    station->connect_retry_deadline < candidate))
-			candidate = station->connect_retry_deadline;
-		if (station->beacon_watch_deadline != 0U &&
-		    (candidate == 0U ||
-		    station->beacon_watch_deadline < candidate))
-			candidate = station->beacon_watch_deadline;
-		spin_unlock_irqrestore(&station->lock, enabled);
-		station_leave(station);
-		if (candidate != 0U && (result == 0U || candidate < result))
-			result = candidate;
-	}
-	return result;
-}
-
-int
-wlan_work_pending(void)
-{
-	unsigned index;
-
-	if (atomic_load_acquire(&wlan_initialized) != 2U)
-		return 0;
-	for (index = 0U; index < NET_DEVICE_MAX; index++) {
-		struct wlan_station *station;
-		unsigned long enabled;
-		uint64_t now;
-		int pending;
-
-		if (station_index_enter(index, &station) != 0)
-			continue;
-		enabled = spin_lock_irqsave(&station->lock);
-		now = station_now_locked(station);
-		pending = (station->scan_state == WLAN_SCAN_RUNNING &&
-		    (station->scan_step_state == WLAN_SCAN_STEP_NEED_TUNE ||
-		    station->scan_ready_pending ||
-		    station->scan_event_error != 0 ||
-		    deadline_expired(now, station->scan_deadline) ||
-		    deadline_expired(now, station->scan_step_deadline))) ||
-		    (station->scan_driver_active &&
-		    station->scan_state != WLAN_SCAN_RUNNING &&
-		    (station->scan_retry_deadline == 0U ||
-		    deadline_expired(now, station->scan_retry_deadline))) ||
-		    station->connect_start_pending ||
-		    deadline_expired(now, station->scan_retry_deadline) ||
-		    (station->connect_stop_pending &&
-		    (station->connect_retry_deadline == 0U ||
-		    deadline_expired(now, station->connect_retry_deadline))) ||
-		    deadline_expired(now, station->beacon_watch_deadline) ||
-		    ((station->state == WLAN_STATE_AUTHENTICATING ||
-		    station->state == WLAN_STATE_ASSOCIATING ||
-		    station->state == WLAN_STATE_FOUR_WAY) &&
-		    (deadline_expired(now, station->connection_deadline) ||
-		    deadline_expired(now,
-		    station->connection_step_deadline)));
-		spin_unlock_irqrestore(&station->lock, enabled);
-		station_leave(station);
-		if (pending)
-			return 1;
-	}
-	return 0;
-}
-
-#ifdef WLAN_TESTING
-int
-wlan_station_test_attach(struct net_device *device,
-	const struct wlan_radio_ops *ops, void *radio_context,
-	const struct wlan_scan_profile *scan_profile, wlan_clock_fn clock,
-	void *clock_context, struct wlan_station **result)
-{
-	unsigned long enabled;
-	int error = wlan_station_attach(device, ops, radio_context,
-	    scan_profile, result);
-
-	if (error != 0)
-		return error;
-	enabled = spin_lock_irqsave(&(*result)->lock);
-	(*result)->clock = clock != NULL ? clock : default_clock;
-	(*result)->clock_context = clock_context;
-	spin_unlock_irqrestore(&(*result)->lock, enabled);
-	return 0;
-}
-
-int
-wlan_station_test_set_report_hook(struct wlan_station *station,
-	wlan_station_test_hook_fn hook, void *context)
-{
-	unsigned long enabled;
-	int error = station_enter(station);
-
-	if (error != 0)
-		return error;
-	enabled = spin_lock_irqsave(&station->lock);
-	station->test_report_hook = hook;
-	station->test_report_hook_context = context;
-	spin_unlock_irqrestore(&station->lock, enabled);
-	station_leave(station);
-	return 0;
-}
-
-unsigned
-wlan_station_test_control_waiters(struct wlan_station *station)
-{
-	unsigned long enabled;
-	unsigned waiters;
-
-	if (station == NULL)
-		return 0U;
-	enabled = spin_lock_irqsave(&station->lock);
-	waiters = station->test_control_waiters;
-	spin_unlock_irqrestore(&station->lock, enabled);
-	return waiters;
-}
-
-int
-wlan_station_test_secrets_clear(struct wlan_station *station)
-{
-	unsigned long enabled;
-	int clear;
-
-	if (station == NULL)
-		return 1;
-	enabled = spin_lock_irqsave(&station->lock);
-	clear = station->credential_length == 0U &&
-	    bytes_zero(station->credential, sizeof(station->credential)) &&
-	    bytes_zero(station->wpa2.pmk, sizeof(station->wpa2.pmk)) &&
-	    bytes_zero(station->wpa2.ptk, sizeof(station->wpa2.ptk)) &&
-	    bytes_zero(station->wpa2.anonce, sizeof(station->wpa2.anonce)) &&
-	    bytes_zero(station->wpa2.snonce, sizeof(station->wpa2.snonce)) &&
-	    bytes_zero(station->wpa2.gtk, sizeof(station->wpa2.gtk)) &&
-	    bytes_zero(station->wpa2.tx_frame,
-	    sizeof(station->wpa2.tx_frame));
-	spin_unlock_irqrestore(&station->lock, enabled);
-	return clear;
-}
-
-int
-wlan_station_test_seed_authorized(struct wlan_station *station,
-	const struct wlan_bss_record *bss, uint64_t generation,
-	uint64_t key_generation)
-{
-	static const uint8_t test_rates[WLAN_WPA2_RATE_MAX] = {
-		0x82U, 0x84U, 0x8bU, 0x96U, 0x0cU, 0x12U,
-		0x18U, 0x24U, 0x30U, 0x48U, 0x60U, 0x6cU
-	};
-	unsigned long enabled;
-	uint64_t group_generation;
-	uint64_t now;
-	int error;
-
-	if (station == NULL || bss == NULL || generation == 0U ||
-	    key_generation == 0U || key_generation == UINT64_MAX ||
-	    !bssid_valid(bss->bssid) || bss->ssid_length == 0U ||
-	    bss->ssid_length > WLAN_SSID_MAX ||
-	    channel_frequency(bss->channel) == 0U)
-		return EINVAL;
-	group_generation = key_generation + 1U;
-	enabled = spin_lock_irqsave(&station->lock);
-	if (!station->used || !station->administrative_up || station->closing) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		return ENETDOWN;
-	}
-	now = station_now_locked(station);
-	station->selected = *bss;
-	station->connection_generation = generation;
-	if (station->next_generation < generation)
-		station->next_generation = generation;
-	station->connection_deadline = deadline_after(now,
-	    WLAN_CONNECT_DEADLINE_TICKS);
-	station->connection_step_deadline = 0U;
-	station->connect_driver_active = 1;
-	station->connect_stop_pending = 0;
-	station->connect_retire_explicit = 0;
-	station->connect_retry_deadline = 0U;
-	station->transmit_packet_number = 0U;
-	station->transmit_cookie = 0U;
-	memset(&station->l2_rx, 0, sizeof(station->l2_rx));
-	station->l2_rx.pairwise_key_generation = key_generation;
-	station->l2_rx.group_key_generation[1] = group_generation;
-	secure_zero(station->credential, sizeof(station->credential));
-	station->credential_length = 0U;
-	memset(&station->wpa2, 0, sizeof(station->wpa2));
-	station->wpa2.ops = &station_wpa2_ops;
-	station->wpa2.callback_context = station;
-	station->wpa2.generation = generation;
-	station->wpa2.key_generation = key_generation;
-	station->wpa2.group_key_generation = group_generation;
-	station->wpa2.next_key_generation = group_generation;
-	station->wpa2.state = WLAN_WPA2_STATE_AUTHORIZED;
-	station->wpa2.configured = 1U;
-	station->wpa2.associated = 1U;
-	station->wpa2.pairwise_installed = 1U;
-	station->wpa2.group_installed = 1U;
-	station->wpa2.authorized = 1U;
-	station->wpa2.connected_lifetime = 1U;
-	station->wpa2.gtk_index = 1U;
-	station->wpa2.protocol_version = 2U;
-	station->wpa2.profile = (struct wlan_wpa2_profile){0};
-	memcpy(station->wpa2.profile.station, station->device->hwaddr, 6U);
-	memcpy(station->wpa2.profile.bssid, bss->bssid, 6U);
-	memcpy(station->wpa2.profile.ssid, bss->ssid, bss->ssid_length);
-	station->wpa2.profile.ssid_length = bss->ssid_length;
-	memcpy(station->wpa2.profile.rates, test_rates, sizeof(test_rates));
-	station->wpa2.profile.rate_count = sizeof(test_rates);
-	station->wpa2.profile.channel = bss->channel;
-	station->wpa2.profile.capability = WLAN_LOCAL_ASSOC_CAPABILITY;
-	station->wpa2.profile.listen_interval = 10U;
-	station->wpa2.profile.total_deadline_ticks = station->connection_deadline;
-	station->wpa2.profile.transition_timeout_ticks =
-	    WLAN_CONNECT_TRANSITION_TICKS;
-	station->wpa2.profile.recovery_timeout_ticks =
-	    WLAN_CONNECT_TRANSITION_TICKS * 3U;
-	memset(station->wpa2.pmk, 0x11, sizeof(station->wpa2.pmk));
-	memset(station->wpa2.ptk, 0x22, sizeof(station->wpa2.ptk));
-	memset(station->wpa2.gtk, 0x33, sizeof(station->wpa2.gtk));
-	station->authenticated = 1U;
-	station->associated = 1U;
-	station->key_installed = 1U;
-	station->controlled_port = 1U;
-	station->state = WLAN_STATE_CONNECTED;
-	station_beacon_watch_refresh_locked(station, now);
-	error = net_device_set_carrier(station->device, 1);
-	if (error != 0)
-		station->controlled_port = 0U;
-	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
-}
-
-int
-wlan_station_test_begin_pairwise_rekey(struct wlan_station *station)
-{
-	unsigned long enabled;
-	int error;
-
-	if (station == NULL)
-		return EINVAL;
-	enabled = spin_lock_irqsave(&station->lock);
-	if (wlan_wpa2_engine_state(&station->wpa2) !=
-	    WLAN_WPA2_STATE_AUTHORIZED || !station->wpa2.connected_lifetime ||
-	    !station->wpa2.pairwise_installed) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		return ENOTCONN;
-	}
-	error = station_carrier_down_locked(station);
-	if (error == 0) {
-		station->wpa2.authorized = 0U;
-		station->wpa2.pairwise_rekey = 1U;
-		station->wpa2.state = WLAN_WPA2_STATE_MESSAGE_3;
-		station_sync_wpa_locked(station);
-	}
-	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
-}
-
-int
-wlan_station_test_begin_group_rekey(struct wlan_station *station)
-{
-	unsigned long enabled;
-
-	if (station == NULL)
-		return EINVAL;
-	enabled = spin_lock_irqsave(&station->lock);
-	if (wlan_wpa2_engine_state(&station->wpa2) !=
-	    WLAN_WPA2_STATE_AUTHORIZED || !station->wpa2.connected_lifetime ||
-	    !station->wpa2.authorized || !station->wpa2.pairwise_installed ||
-	    !station->wpa2.group_installed) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		return ENOTCONN;
-	}
-	station->wpa2.tx_cookie_active = 0U;
-	station->wpa2.state = WLAN_WPA2_STATE_GROUP_MESSAGE_2_TX;
-	station->wpa2.step_deadline_ticks = deadline_after(
-	    station_now_locked(station), WLAN_CONNECT_TRANSITION_TICKS);
-	station_sync_wpa_locked(station);
-	spin_unlock_irqrestore(&station->lock, enabled);
-	return 0;
-}
-
-int
-wlan_station_test_set_initial_phase(struct wlan_station *station,
-	uint32_t phase)
-{
-	unsigned long enabled;
-
-	if (station == NULL ||
-	    (phase != WLAN_STATION_TEST_PHASE_ASSOCIATING &&
-	    phase != WLAN_STATION_TEST_PHASE_FOUR_WAY))
-		return EINVAL;
-	enabled = spin_lock_irqsave(&station->lock);
-	if ((wlan_wpa2_engine_state(&station->wpa2) !=
-	    WLAN_WPA2_STATE_AUTH_TX &&
-	    wlan_wpa2_engine_state(&station->wpa2) !=
-	    WLAN_WPA2_STATE_AUTH_RESPONSE) || station->wpa2.connected_lifetime) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		return ENOTCONN;
-	}
-	station->wpa2.tx_cookie_active = 0U;
-	station->wpa2.associated = phase == WLAN_STATION_TEST_PHASE_FOUR_WAY;
-	station->wpa2.state = phase == WLAN_STATION_TEST_PHASE_ASSOCIATING ?
-	    WLAN_WPA2_STATE_ASSOC_RESPONSE : WLAN_WPA2_STATE_MESSAGE_3;
-	station->wpa2.step_deadline_ticks = deadline_after(
-	    station_now_locked(station), WLAN_CONNECT_TRANSITION_TICKS);
-	station_sync_wpa_locked(station);
-	spin_unlock_irqrestore(&station->lock, enabled);
-	return 0;
-}
-
-int
-wlan_station_test_complete_authorized(struct wlan_station *station,
-	uint64_t key_generation)
-{
-	unsigned long enabled;
-	uint64_t group_generation;
-	int error;
-
-	if (station == NULL || key_generation == 0U ||
-	    key_generation == UINT64_MAX)
-		return EINVAL;
-	group_generation = key_generation + 1U;
-	enabled = spin_lock_irqsave(&station->lock);
-	if (!station->connect_driver_active ||
-	    wlan_wpa2_engine_state(&station->wpa2) == WLAN_WPA2_STATE_IDLE ||
-	    wlan_wpa2_engine_state(&station->wpa2) == WLAN_WPA2_STATE_FAILED) {
-		spin_unlock_irqrestore(&station->lock, enabled);
-		return ENOTCONN;
-	}
-	station->wpa2.key_generation = key_generation;
-	station->wpa2.group_key_generation = group_generation;
-	station->wpa2.next_key_generation = group_generation;
-	station->wpa2.gtk_index = 1U;
-	station->wpa2.associated = 1U;
-	station->wpa2.pairwise_installed = 1U;
-	station->wpa2.group_installed = 1U;
-	station->wpa2.authorized = 1U;
-	station->wpa2.connected_lifetime = 1U;
-	station->wpa2.pairwise_rekey = 0U;
-	station->wpa2.state = WLAN_WPA2_STATE_AUTHORIZED;
-	station->wpa2.step_deadline_ticks = 0U;
-	memset(station->wpa2.ptk, 0x44, sizeof(station->wpa2.ptk));
-	memset(station->wpa2.gtk, 0x55, sizeof(station->wpa2.gtk));
-	memset(&station->l2_rx, 0, sizeof(station->l2_rx));
-	station->l2_rx.pairwise_key_generation = key_generation;
-	station->l2_rx.group_key_generation[1] = group_generation;
-	station->transmit_packet_number = 0U;
-	station_sync_wpa_locked(station);
-	error = net_device_set_carrier(station->device, 1);
-	if (error != 0)
-		station->controlled_port = 0U;
-	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
-}
-
-int
-wlan_station_test_snapshot(struct wlan_station *station,
-	struct wlan_station_test_snapshot *snapshot)
-{
-	unsigned long enabled;
-
-	if (station == NULL || snapshot == NULL)
-		return EINVAL;
-	enabled = spin_lock_irqsave(&station->lock);
-	memset(snapshot, 0, sizeof(*snapshot));
-	snapshot->connection_generation = station->connection_generation;
-	snapshot->connection_deadline = station->connection_deadline;
-	snapshot->connection_step_deadline = station->connection_step_deadline;
-	snapshot->reconnect_deadline = 0U;
-	snapshot->reconnect_next_attempt = 0U;
-	snapshot->reconnect_cleanup_retry = 0U;
-	snapshot->connect_retry_deadline = station->connect_retry_deadline;
-	snapshot->scan_retry_deadline = station->scan_retry_deadline;
-	snapshot->beacon_watch_deadline = station->beacon_watch_deadline;
-	snapshot->pairwise_key_generation =
-	    station->l2_rx.pairwise_key_generation;
-	snapshot->group_key_generation = station->wpa2.group_key_generation;
-	snapshot->pending_pairwise_key_generation =
-	    station->wpa2.pending_pairwise_key_generation;
-	snapshot->pending_group_key_generation =
-	    station->wpa2.pending_group_key_generation;
-	snapshot->pairwise_receive_packet_number =
-	    station->l2_rx.pairwise_packet_number;
-	memcpy(snapshot->group_receive_packet_number,
-	    station->l2_rx.group_packet_number,
-	    sizeof(snapshot->group_receive_packet_number));
-	snapshot->pending_group_receive_packet_number =
-	    station->wpa2.pending_group_receive_packet_number;
-	snapshot->transmit_packet_number = station->transmit_packet_number;
-	snapshot->reconnect_attempts = 0U;
-	snapshot->state = station->state;
-	snapshot->wpa_state = (uint32_t)station->wpa2.state;
-	snapshot->association_capability = station->wpa2.profile.capability;
-	snapshot->reconnect_pending = 0U;
-	snapshot->reconnect_scan_active = 0U;
-	snapshot->controlled_port = station->controlled_port != 0U;
-	snapshot->connect_driver_active = station->connect_driver_active != 0;
-	snapshot->connect_stop_pending = station->connect_stop_pending != 0;
-	snapshot->connect_retire_explicit =
-	    station->connect_retire_explicit != 0;
-	spin_unlock_irqrestore(&station->lock, enabled);
-	return 0;
-}
-
-int
-wlan_station_test_transmit_eapol(struct wlan_station *station,
-	uint64_t cookie, const uint8_t *frame, size_t length)
-{
-	unsigned long enabled;
-	uint64_t generation;
-	uint64_t deadline;
-	int error;
-
-	if (station == NULL || cookie == 0U || frame == NULL || length == 0U)
-		return EINVAL;
-	error = station_enter(station);
-	if (error != 0)
-		return error;
-	station_control_enter(station);
-	enabled = spin_lock_irqsave(&station->lock);
-	generation = station->connection_generation;
-	deadline = deadline_local(station_now_locked(station),
-	    WLAN_CONNECT_TRANSITION_TICKS, station->connection_deadline);
-	spin_unlock_irqrestore(&station->lock, enabled);
-	error = station_wpa_transmit(station, generation, cookie,
-	    WLAN_WPA2_TX_EAPOL, station->selected.bssid, frame, length, deadline);
-	station_control_leave(station);
-	station_leave(station);
-	return error;
-}
-#endif

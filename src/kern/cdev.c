@@ -1,4 +1,21 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The character device registry.
+ *
+ * Each registration publishes an immutable, reference-counted device
+ * generation under a name.  Files opened on a device keep their
+ * generation alive after it is unpublished, and the data finalizer runs
+ * once when the last reference goes away.
+ */
+
 #include "kern/cdev.h"
 #include "kern/file.h"
 #include "kern/kmem.h"
@@ -11,13 +28,32 @@
 static struct cdev *devices[CDEV_MAX] __attribute__((section(".vfs_bss")));
 static unsigned device_count __attribute__((section(".vfs_bss")));
 static uint64_t next_generation __attribute__((section(".vfs_bss")));
+
 static struct spinlock registry_lock = {
 	{ 0 }, LOCK_RANK_DEVICE, "cdev registry", 0, 0
 };
 
+static const struct cdev *file_cdev(struct file *file);
+static int cdev_open_file(struct file *file);
+static int cdev_close_file(struct file *file);
+static ssize_t cdev_read_file(struct file *file, void *buffer, size_t size);
+static ssize_t cdev_write_file(struct file *file, const void *buffer, size_t size);
+static int cdev_ioctl_file(struct file *file, unsigned long request, uintptr_t argument);
+static int cdev_poll_file(struct file *file, short events, short *revents);
 static int cdev_name_valid(const char *name);
 
-/* Unpublishes every character device without invalidating retained refs. */
+const struct file_ops cdev_file_ops = {
+	.open = cdev_open_file,
+	.close = cdev_close_file,
+	.read = cdev_read_file,
+	.write = cdev_write_file,
+	.ioctl = cdev_ioctl_file,
+	.poll = cdev_poll_file,
+};
+
+/*
+ * Unpublishes every character device without invalidating retained refs.
+ */
 void
 cdev_reset(
 	void)
@@ -43,7 +79,9 @@ cdev_reset(
 		cdev_release(retired[index]);
 }
 
-/* Publishes one legacy device and relinquishes the temporary owner ref. */
+/*
+ * Publishes one legacy device and relinquishes the temporary owner ref.
+ */
 int
 cdev_register(
 	const char *name,
@@ -54,15 +92,24 @@ cdev_register(
 	struct cdev *device;
 	int error;
 
+	/* Publishes the device as a managed generation. */
 	error = cdev_register_managed(name, rdev, ops, data, NULL, &device);
 	if (error != 0)
 		return error;
 
+	/* Keeps only the registry's reference. */
 	cdev_release(device);
+
+	/* Reports the published device. */
 	return 0;
 }
 
-/* Publishes one immutable managed device generation. */
+/*
+ * Publishes one immutable managed device generation.
+ *
+ * The caller receives its own reference besides the registry's.  A failed
+ * publication leaves data and its finalizer with the caller.
+ */
 int
 cdev_register_managed(
 	const char *name,
@@ -77,6 +124,7 @@ cdev_register_managed(
 	unsigned long irq;
 	int error;
 
+	/* Rejects a bad name or a missing operation table or result. */
 	if (result != NULL)
 		*result = NULL;
 	if (!cdev_name_valid(name) || ops == NULL || result == NULL)
@@ -86,7 +134,6 @@ cdev_register_managed(
 	device = kern_calloc(1, sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
-
 	strcpy(device->name, name);
 	device->rdev = rdev;
 	device->ops = ops;
@@ -123,10 +170,14 @@ cdev_register_managed(
 	}
 
 	*result = device;
+
+	/* Reports the published generation. */
 	return 0;
 }
 
-/* Unpublishes exactly the supplied device generation. */
+/*
+ * Unpublishes exactly the supplied device generation.
+ */
 int
 cdev_unregister(
 	struct cdev *device)
@@ -136,6 +187,7 @@ cdev_unregister(
 	unsigned long irq;
 	int found;
 
+	/* Rejects a missing device. */
 	if (device == NULL)
 		return EINVAL;
 
@@ -157,24 +209,32 @@ cdev_unregister(
 	}
 	spin_unlock_irqrestore(&registry_lock, irq);
 
+	/* Reports a generation that was not published. */
 	if (!found)
 		return ENOENT;
 
 	/* Releases registry ownership after the namespace is invalidated. */
 	cdev_release(device);
+
+	/* Reports the unpublished generation. */
 	return 0;
 }
 
-/* Retains one immutable device generation. */
+/*
+ * Retains one immutable device generation.
+ */
 void
 cdev_ref(
 	struct cdev *device)
 {
+	/* Ignores a missing device. */
 	if (device != NULL)
 		refcount_get(&device->refs);
 }
 
-/* Releases one generation and runs its terminal data finalizer once. */
+/*
+ * Releases one generation and runs its terminal data finalizer once.
+ */
 void
 cdev_release(
 	struct cdev *device)
@@ -182,11 +242,13 @@ cdev_release(
 	cdev_finalizer_t finalizer;
 	void *data;
 
+	/* Only the last reference finalizes. */
 	if (device == NULL)
 		return;
 	if (!refcount_put(&device->refs))
 		return;
 
+	/* Finalizes the data, then frees the generation. */
 	finalizer = device->finalizer;
 	data = device->data;
 	if (finalizer != NULL)
@@ -194,29 +256,41 @@ cdev_release(
 	kern_free(device);
 }
 
-/* Reports whether the exact generation remains in the visible registry. */
+/*
+ * Reports whether the exact generation remains in the visible registry.
+ */
 int
 cdev_is_published(
 	const struct cdev *device)
 {
+	/* A missing device is not published. */
 	if (device == NULL)
 		return 0;
 
-	return atomic_load_acquire(&device->published) != 0;
+	/* Reads the flag the registry maintains. */
+	if (atomic_load_acquire(&device->published) != 0)
+		return 1;
+	return 0;
 }
 
-/* Returns the immutable identifier assigned at publication. */
+/*
+ * Returns the immutable identifier assigned at publication.
+ */
 uint64_t
 cdev_generation(
 	const struct cdev *device)
 {
+	/* A missing device has no generation. */
 	if (device == NULL)
 		return 0;
 
+	/* Reports the identifier. */
 	return device->generation;
 }
 
-/* Finds and retains the currently published generation for one name. */
+/*
+ * Finds and retains the currently published generation for one name.
+ */
 struct cdev *
 cdev_find_ref(
 	const char *name)
@@ -225,9 +299,11 @@ cdev_find_ref(
 	unsigned index;
 	unsigned long irq;
 
+	/* Rejects a missing name. */
 	if (name == NULL)
 		return NULL;
 
+	/* References the device with the name under the registry lock. */
 	device = NULL;
 	irq = spin_lock_irqsave(&registry_lock);
 	for (index = 0; index < device_count; index++) {
@@ -239,10 +315,13 @@ cdev_find_ref(
 	}
 	spin_unlock_irqrestore(&registry_lock, irq);
 
+	/* Reports the referenced device, or none. */
 	return device;
 }
 
-/* Retains one coherent snapshot of all currently published generations. */
+/*
+ * Retains one coherent snapshot of all currently published generations.
+ */
 unsigned
 cdev_snapshot(
 	struct cdev **snapshot,
@@ -252,20 +331,28 @@ cdev_snapshot(
 	unsigned index;
 	unsigned long irq;
 
+	/* Rejects a missing or empty snapshot array. */
 	if (snapshot == NULL || capacity == 0)
 		return 0;
 
+	/* References as many devices as fit, in registry order. */
 	irq = spin_lock_irqsave(&registry_lock);
-	count = device_count < capacity ? device_count : capacity;
+	count = device_count;
+	if (count > capacity)
+		count = capacity;
 	for (index = 0; index < count; index++) {
 		snapshot[index] = devices[index];
 		cdev_ref(snapshot[index]);
 	}
 	spin_unlock_irqrestore(&registry_lock, irq);
 
+	/* Reports the number of devices in the snapshot. */
 	return count;
 }
 
+/*
+ * Reports the number of published devices.
+ */
 unsigned
 cdev_count(
 	void)
@@ -273,83 +360,196 @@ cdev_count(
 	unsigned count;
 	unsigned long irq;
 
+	/* Samples the count under the registry lock. */
 	irq = spin_lock_irqsave(&registry_lock);
 	count = device_count;
 	spin_unlock_irqrestore(&registry_lock, irq);
+
+	/* Reports the sampled count. */
 	return count;
 }
 
-static const struct cdev *file_cdev(struct file *file)
+/* Finds the device generation behind a file's inode, or none. */
+static const struct cdev *
+file_cdev(
+	struct file *file)
 {
-	return file != NULL && file->f_inode != NULL ? file->f_inode->i_data : NULL;
+	/* A file without an inode has no device. */
+	if (file == NULL)
+		return NULL;
+	if (file->f_inode == NULL)
+		return NULL;
+
+	/* Reports the generation the inode carries. */
+	return file->f_inode->i_data;
 }
 
-static int cdev_open_file(struct file *file)
+/* Opens a file on a device through the device's open operation. */
+static int
+cdev_open_file(
+	struct file *file)
 {
 	const struct cdev *device;
+	int error;
 
+	/* Rejects a missing file. */
 	if (file == NULL)
 		return ENODEV;
+
+	/* Hands the device data to the file. */
 	device = file_cdev(file);
-	file->f_data = device != NULL ? device->data : NULL;
-	return device == NULL ? ENODEV :
-		device->ops->open != NULL ? device->ops->open(file) : 0;
+	if (device != NULL)
+		file->f_data = device->data;
+	else
+		file->f_data = NULL;
+
+	/* A file whose device is gone cannot be opened. */
+	if (device == NULL)
+		return ENODEV;
+
+	/* A device without an open operation opens trivially. */
+	if (device->ops->open == NULL)
+		return 0;
+
+	/* Opens through the device. */
+	error = device->ops->open(file);
+
+	/* Reports the device's result. */
+	return error;
 }
 
-static int cdev_close_file(struct file *file)
+/* Closes a file on a device through the device's close operation. */
+static int
+cdev_close_file(
+	struct file *file)
 {
-	const struct cdev *device = file_cdev(file);
-	return device != NULL && device->ops->close != NULL ?
-		device->ops->close(file) : 0;
+	const struct cdev *device;
+	int error;
+
+	device = file_cdev(file);
+
+	/* Without a device or a close operation there is nothing to do. */
+	if (device == NULL)
+		return 0;
+	if (device->ops->close == NULL)
+		return 0;
+
+	/* Closes through the device. */
+	error = device->ops->close(file);
+
+	/* Reports the device's result. */
+	return error;
 }
 
-static ssize_t cdev_read_file(struct file *file, void *buffer, size_t size)
+/* Reads from a device through its read operation. */
+static ssize_t
+cdev_read_file(
+	struct file *file,
+	void *buffer,
+	size_t size)
 {
-	const struct cdev *device = file_cdev(file);
-	return device != NULL && device->ops->read != NULL ?
-		device->ops->read(file, buffer, size) : -EOPNOTSUPP;
+	const struct cdev *device;
+	ssize_t result;
+
+	device = file_cdev(file);
+
+	/* A device that is gone or cannot read reports EOPNOTSUPP. */
+	if (device == NULL)
+		return -EOPNOTSUPP;
+	if (device->ops->read == NULL)
+		return -EOPNOTSUPP;
+
+	/* Reads through the device. */
+	result = device->ops->read(file, buffer, size);
+
+	/* Reports the device's result. */
+	return result;
 }
 
-static ssize_t cdev_write_file(struct file *file, const void *buffer,
-			       size_t size)
+/* Writes to a device through its write operation. */
+static ssize_t
+cdev_write_file(
+	struct file *file,
+	const void *buffer,
+	size_t size)
 {
-	const struct cdev *device = file_cdev(file);
-	return device != NULL && device->ops->write != NULL ?
-		device->ops->write(file, buffer, size) : -EOPNOTSUPP;
+	const struct cdev *device;
+	ssize_t result;
+
+	device = file_cdev(file);
+
+	/* A device that is gone or cannot write reports EOPNOTSUPP. */
+	if (device == NULL)
+		return -EOPNOTSUPP;
+	if (device->ops->write == NULL)
+		return -EOPNOTSUPP;
+
+	/* Writes through the device. */
+	result = device->ops->write(file, buffer, size);
+
+	/* Reports the device's result. */
+	return result;
 }
 
-static int cdev_ioctl_file(struct file *file, unsigned long request,
-			   uintptr_t argument)
+/* Forwards an ioctl to a device's ioctl operation. */
+static int
+cdev_ioctl_file(
+	struct file *file,
+	unsigned long request,
+	uintptr_t argument)
 {
-	const struct cdev *device = file_cdev(file);
-	return device != NULL && device->ops->ioctl != NULL ?
-		device->ops->ioctl(file, request, argument) : EOPNOTSUPP;
+	const struct cdev *device;
+	int error;
+
+	device = file_cdev(file);
+
+	/* A device that is gone or has no ioctl reports EOPNOTSUPP. */
+	if (device == NULL)
+		return EOPNOTSUPP;
+	if (device->ops->ioctl == NULL)
+		return EOPNOTSUPP;
+
+	/* Forwards the request. */
+	error = device->ops->ioctl(file, request, argument);
+
+	/* Reports the device's result. */
+	return error;
 }
 
-static int cdev_poll_file(struct file *file, short events, short *revents)
+/* Polls a device through its poll operation. */
+static int
+cdev_poll_file(
+	struct file *file,
+	short events,
+	short *revents)
 {
-	const struct cdev *device = file_cdev(file);
+	const struct cdev *device;
+	int error;
+
+	device = file_cdev(file);
+
+	/* Rejects a missing result. */
 	if (revents == NULL)
 		return EINVAL;
+
+	/* A device that is gone reports an error and hangup. */
 	if (device == NULL) {
 		*revents = POLLERR | POLLHUP;
 		return 0;
 	}
+
+	/* A device without a poll operation is never ready. */
 	if (device->ops->poll == NULL) {
 		*revents = 0;
 		return 0;
 	}
-	return device->ops->poll(file, events, revents);
-}
 
-const struct file_ops cdev_file_ops = {
-	.open = cdev_open_file,
-	.close = cdev_close_file,
-	.read = cdev_read_file,
-	.write = cdev_write_file,
-	.ioctl = cdev_ioctl_file,
-	.poll = cdev_poll_file,
-};
+	/* Polls through the device. */
+	error = device->ops->poll(file, events, revents);
+
+	/* Reports the device's result. */
+	return error;
+}
 
 /* Validates one devfs component name. */
 static int
@@ -358,14 +558,17 @@ cdev_name_valid(
 {
 	size_t length;
 
+	/* Rejects a missing name. */
 	if (name == NULL)
 		return 0;
 
+	/* The name must fit the record and contain no slash. */
 	length = strlen(name);
 	if (length == 0 || length >= sizeof(((struct cdev *)0)->name))
 		return 0;
 	if (strchr(name, '/') != NULL)
 		return 0;
 
+	/* Reports a usable name. */
 	return 1;
 }

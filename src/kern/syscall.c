@@ -1,4 +1,24 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The system call layer.
+ *
+ * syscall_dispatch() is the handler the HAL invokes for every user trap.
+ * It copies the arguments, runs one sys_*_call() handler, and applies the
+ * restart policy: a handler interrupted by a transparent stop is
+ * redispatched with its original arguments, an interruptible handler
+ * that returned EINTR is restarted after a handler with SA_RESTART, and
+ * a wait deadline survives the redispatch.  Handlers reach user memory
+ * only through copyin/copyout and pinned uaccess windows.
+ */
+
 #include "kern/syscall.h"
 #include "kern/file.h"
 #include "kern/filedesc.h"
@@ -67,17 +87,217 @@
 #define SYSCALL_PAGE_MASK (ZEDBSD_PAGE_SIZE - 1U)
 #define SYSCALL_ATOMIC_CHUNK 128U
 #define SYSCALL_EXT __attribute__((section(".hightext")))
+#define SYSCALL_SYSCTL_VALUE_MAX 256U
+#define SYSCALL_SYSCTL_OUTPUT_MAX (1024U * 1024U)
+
+#define SIGNAL_VALID_MASK ((sigset_t)(UINT64_MAX >> 1U))
+#define POLL_SIGNAL_BIT(n) \
+	((sigset_t)1ULL << ((unsigned)(n) - 1U))
 
 _Static_assert(KERN_PIPE_BUF <= SYSCALL_IO_CHUNK,
     "writev PIPE_BUF coalescing buffer is too small");
 
-static intptr_t syscall_dispatch(uint32_t, const uintptr_t [6]);
-static intptr_t syscall_dispatch_body(uint32_t, const uintptr_t [6]);
-static struct process *current_process(void);
+struct poll_mask_guard {
+	struct thread *thread;
+	sigset_t saved;
+	unsigned active;
+};
+
+struct sockaddr_output_pin {
+	struct uaccess_pin address;
+	struct uaccess_pin length;
+	socklen_t capacity;
+};
+
+struct syscall_exec_args {
+	char *argv[ZEDBSD_SPAWN_ARG_MAX + 1U];
+	char *envp[ZEDBSD_SPAWN_ENV_MAX + 1U];
+	char strings[ZEDBSD_SPAWN_STRING_MAX];
+	size_t used;
+};
+
+struct syscall_inode_ref {
+	struct inode *inode;
+	struct file *file;
+	struct file *held;
+	struct path path;
+	int has_path;
+};
+
+#ifdef ZEDBSD_USER_ABI_LP64
+struct syscall_iovec {
+	uint64_t base;
+	uint64_t length;
+};
+#else
+struct syscall_iovec {
+	uint32_t base;
+	uint32_t length;
+};
+#endif
+
 static struct mutex user_atomic_lock;
 
+#ifdef ZEDBSD_SYSCALL_STOP_TEST
+#endif
+
+static int poll_mask_enter(uintptr_t address, struct poll_mask_guard *guard);
+static void poll_mask_leave(struct poll_mask_guard *guard, int defer_restore);
+static int poll_mask_defer_restore(const struct poll_mask_guard *guard, int error);
+#ifdef ZEDBSD_SYSCALL_STOP_TEST
+static int syscall_stop_should_redispatch(enum signal_stop_return_result result);
+#endif
+static int poll_timeout(uintptr_t address, uint64_t *deadline, int *immediate);
+static intptr_t sys_ppoll_call(const uintptr_t args[6]);
+static int pselect_pin(uintptr_t address, struct uaccess_pin *pin, fd_set *value);
+static intptr_t sys_pselect_call(const uintptr_t args[6]);
+static intptr_t sys_sysctl_call(const uintptr_t args[6]);
+static struct process *current_process(void);
+static struct ucred * peercred_snapshot_ref(struct process *process, struct zedbsd_peercred *snapshot);
+static int descriptor_socket(struct process *process, int descriptor, struct socket_file_ref *reference);
+static intptr_t socket_result(struct socket_file_ref *reference, intptr_t result);
+static int copy_sockaddr_in(uintptr_t address, socklen_t length, struct sockaddr_storage *storage);
+static int copy_sockaddr_out(uintptr_t address, uintptr_t length_address, const struct sockaddr_storage *storage, socklen_t actual);
+static void sockaddr_output_unpin(struct sockaddr_output_pin *pin);
+static int sockaddr_output_pin(uintptr_t address, uintptr_t length_address, struct sockaddr_output_pin *pin);
+static int copy_sockaddr_out_pinned(const struct sockaddr_output_pin *pin, const struct sockaddr_storage *storage, socklen_t actual);
+static intptr_t sys_socket_call(const uintptr_t args[6]);
+static intptr_t sys_socketpair_call(const uintptr_t args[6]);
+static intptr_t sys_bind_call(const uintptr_t args[6]);
+static intptr_t sys_connect_call(const uintptr_t args[6]);
+static intptr_t sys_listen_call(const uintptr_t args[6]);
+static intptr_t sys_accept_call(const uintptr_t args[6]);
+static intptr_t sys_sendto_call(const uintptr_t args[6]);
+static intptr_t sys_recvfrom_call(const uintptr_t args[6]);
+static intptr_t sys_sendmsg_call(const uintptr_t args[6]);
+static intptr_t sys_recvmsg_call(const uintptr_t args[6]);
+static intptr_t sys_shutdown_call(const uintptr_t args[6]);
+static intptr_t sys_socket_name_call(const uintptr_t args[6], int peer);
+static intptr_t sys_setsockopt_call(const uintptr_t args[6]);
+static intptr_t sys_getsockopt_call(const uintptr_t args[6]);
+static int syscall_context_at(struct process *process, int dirfd, struct cwdinfo *temporary, struct cwdinfo **context, struct file **held);
+static intptr_t sys_open_call(const uintptr_t args[6], int at);
+static intptr_t sys_close_call(const uintptr_t args[6]);
+static SYSCALL_EXT intptr_t sys_read_call(const uintptr_t args[6]);
+static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6]);
+static intptr_t sys_lseek_call(const uintptr_t args[6]);
+static intptr_t sys_fstat_call(const uintptr_t args[6]);
+static uint32_t dirent_type(enum inode_type type);
+static intptr_t sys_getdents_call(const uintptr_t args[6]);
+static intptr_t sys_chdir_call(const uintptr_t args[6]);
+static intptr_t sys_getcwd_call(const uintptr_t args[6]);
+static int vm_prot(int prot, uint32_t *result);
+static intptr_t sys_mmap_call(const uintptr_t args[6]);
+static intptr_t sys_munmap_call(const uintptr_t args[6]);
+static intptr_t sys_mprotect_call(const uintptr_t args[6]);
+static intptr_t sys_msync_call(const uintptr_t args[6]);
+static intptr_t sys_brk_call(const uintptr_t args[6]);
+static intptr_t sys_ioctl_call(const uintptr_t args[6]);
+static intptr_t sys_clock_gettime_call(const uintptr_t args[6]);
+static intptr_t sys_clock_getres_call(const uintptr_t args[6]);
+static intptr_t sys_clock_settime_call(const uintptr_t args[6]);
+static intptr_t sys_timer_create_call(const uintptr_t args[6]);
+static intptr_t sys_timer_delete_call(const uintptr_t args[6]);
+static intptr_t sys_timer_settime_call(const uintptr_t args[6]);
+static intptr_t sys_timer_gettime_call(const uintptr_t args[6]);
+static intptr_t sys_timer_getoverrun_call(const uintptr_t args[6]);
+static intptr_t sys_mount_call(const uintptr_t args[6]);
+static intptr_t sys_unmount_call(const uintptr_t args[6]);
+static intptr_t sys_statvfs_call(const uintptr_t args[6], int by_fd);
+static intptr_t sys_quotactl_call(const uintptr_t args[6]);
+static intptr_t sys_snapshotctl_call(const uintptr_t args[6]);
+static intptr_t sys_nanosleep_call(const uintptr_t args[6]);
+static int copy_exec_vector(uintptr_t address, char **vector, unsigned maximum, struct syscall_exec_args *copy, int optional);
+static SYSCALL_EXT intptr_t sys_positional_call(const uintptr_t args[6], int writing);
+static SYSCALL_EXT intptr_t sys_vector_call(const uintptr_t args[6], int writing);
+static intptr_t sys_fsync_call(const uintptr_t args[6]);
+static intptr_t sys_stat_path_call(const uintptr_t args[6], int at, int nofollow);
+static intptr_t sys_truncate_call(const uintptr_t args[6], int by_fd);
+static SYSCALL_EXT intptr_t sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address, uintptr_t option, int new_dirfd, uintptr_t new_address);
+static intptr_t sys_mutation_call(uint32_t number, const uintptr_t args[6]);
+static intptr_t sys_mutation_at_call(uint32_t number, const uintptr_t args[6]);
+static intptr_t sys_umask_call(const uintptr_t args[6]);
+static int replace_cred(struct process *process, struct ucred *replacement);
+static intptr_t sys_cred_get_call(uint32_t number, const uintptr_t args[6]);
+static int uid_permitted(const struct ucred *cred, uid_t id);
+static int gid_permitted(const struct ucred *cred, gid_t id);
+static intptr_t sys_cred_getres_call(uint32_t number, const uintptr_t args[6]);
+static intptr_t sys_getentropy_call(const uintptr_t args[6]);
+static int user_atomic_copy(const struct uaccess_pin *source, struct uaccess_pin *destination, size_t size);
+static int user_atomic_equal(const struct uaccess_pin *left, const struct uaccess_pin *right, size_t size, int *equal);
+static intptr_t sys_atomic_call(const uintptr_t args[6]);
+static intptr_t sys_cred_set_call(uint32_t number, const uintptr_t args[6]);
+static intptr_t sys_access_call(const uintptr_t args[6]);
+static SYSCALL_EXT int sys_resolve_path_at(struct process *process, int dirfd, uintptr_t address, unsigned namei_flags, struct path *path, struct file **held);
+static int sys_inode_ref_acquire(struct process *process, uintptr_t object, int by_fd, int nofollow, struct syscall_inode_ref *reference);
+static void sys_inode_ref_release(struct syscall_inode_ref *reference);
+static SYSCALL_EXT intptr_t sys_getxattr_call(const uintptr_t args[6], int by_fd, int nofollow);
+static SYSCALL_EXT intptr_t sys_setxattr_call(const uintptr_t args[6], int by_fd, int nofollow);
+static SYSCALL_EXT intptr_t sys_listxattr_call(const uintptr_t args[6], int by_fd, int nofollow);
+static SYSCALL_EXT intptr_t sys_removexattr_call(const uintptr_t args[6], int by_fd, int nofollow);
+static int inode_chmod_allowed(const struct inode *inode, const struct ucred *cred);
+static SYSCALL_EXT intptr_t sys_chmod_common(int dirfd, uintptr_t pathname, int fd, mode_t mode, int flags);
+static SYSCALL_EXT intptr_t sys_chown_common(int dirfd, uintptr_t pathname, int fd, uid_t uid, gid_t gid, int flags);
+static int valid_utime_nsec(long nanoseconds);
+static SYSCALL_EXT intptr_t sys_utimens_common(int dirfd, uintptr_t pathname, int fd, uintptr_t times_address, int flags);
+static SYSCALL_EXT intptr_t sys_faccessat_call(const uintptr_t args[6]);
+static SYSCALL_EXT int sys_parent_path_at(struct process *process, int dirfd, const char *pathname, struct cwdinfo *temporary, struct cwdinfo **context, struct file **held, struct path *parent, struct componentname *name, char storage[NAME_MAX + 1U]);
+static SYSCALL_EXT intptr_t sys_linkat_call(const uintptr_t args[6]);
+static SYSCALL_EXT intptr_t sys_symlinkat_call(const uintptr_t args[6]);
+static SYSCALL_EXT intptr_t sys_readlinkat_call(const uintptr_t args[6]);
+static intptr_t sys_sigaction_call(const uintptr_t args[6]);
+static intptr_t sys_sigprocmask_call(const uintptr_t args[6]);
+static intptr_t sys_sigpending_call(const uintptr_t args[6]);
+static SYSCALL_EXT intptr_t sys_mknodat_call(const uintptr_t args[6]);
+static intptr_t sys_fchdir_call(const uintptr_t args[6]);
+static intptr_t sys_sigaltstack_call(const uintptr_t args[6]);
+static intptr_t sys_sigtimedwait_call(const uintptr_t args[6]);
+static intptr_t sys_sigqueue_call(const uintptr_t args[6]);
+static intptr_t sys_thread_create_call(const uintptr_t args[6]);
+static intptr_t sys_thread_exit_call(const uintptr_t args[6]);
+static int thread_join_claim_locked(struct thread *target, tid_t owner, unsigned stop_redispatch);
+static void thread_join_release_locked(struct thread *target, tid_t owner);
+static intptr_t sys_thread_join_call(const uintptr_t args[6]);
+static intptr_t sys_thread_detach_call(const uintptr_t args[6]);
+static intptr_t sys_thread_self_call(const uintptr_t args[6]);
+static intptr_t sys_thread_kill_call(const uintptr_t args[6]);
+static intptr_t sys_thread_cancel_call(const uintptr_t args[6]);
+static intptr_t sys_usync_call(const uintptr_t args[6]);
+static intptr_t sys_sigsuspend_call(const uintptr_t args[6]);
+static intptr_t sys_sigreturn_call(const uintptr_t args[6]);
+static intptr_t sys_dup_call(const uintptr_t args[6]);
+static intptr_t sys_dup2_call(const uintptr_t args[6], int is_dup3);
+static intptr_t sys_fcntl_call(const uintptr_t args[6]);
+static intptr_t sys_pipe2_call(const uintptr_t args[6], int plain);
+static intptr_t sys_fork_call(const uintptr_t args[6]);
+static intptr_t sys_sched_yield_call(const uintptr_t args[6]);
+static intptr_t sys_times_call(const uintptr_t args[6]);
+static int priority_matches(struct process *target, struct process *caller, int which, id_t who);
+static intptr_t sys_getpriority_call(const uintptr_t args[6]);
+static intptr_t sys_setpriority_call(const uintptr_t args[6]);
+static void ticks_to_timeval(uint64_t ticks, struct timeval *value);
+static intptr_t sys_getrusage_call(const uintptr_t args[6]);
+static int timeval_ticks(const struct timeval *value, uint64_t *ticks);
+static void timer_snapshot(struct process *process, int which, struct itimerval *value);
+static intptr_t sys_getitimer_call(const uintptr_t args[6]);
+static intptr_t sys_setitimer_call(const uintptr_t args[6]);
+static intptr_t sys_execve_call(const uintptr_t args[6]);
+static intptr_t sys_fexecve_call(const uintptr_t args[6]);
+static SYSCALL_EXT intptr_t sys_waitpid_call(const uintptr_t args[6]);
+static SYSCALL_EXT intptr_t sys_waitid_call(const uintptr_t args[6]);
+static SYSCALL_EXT intptr_t sys_resource_limit_call(const uintptr_t args[6], int setting);
+static intptr_t sys_process_identity_call(uint32_t number, const uintptr_t args[6]);
+static intptr_t syscall_dispatch_body(uint32_t number, const uintptr_t args[6]);
+static int syscall_restartable(uint32_t number);
+static intptr_t syscall_dispatch(uint32_t number, const uintptr_t args[6]);
+
+/*
+ * Clears the restart bookkeeping of a thread at the start of a system
+ * call.
+ */
 void
-syscall_restart_state_begin(struct thread *thread)
+syscall_restart_state_begin(
+	struct thread *thread)
 {
 	if (thread == NULL)
 		return;
@@ -86,8 +306,13 @@ syscall_restart_state_begin(struct thread *thread)
 	thread->syscall_wait_deadline_valid = 0;
 }
 
+/*
+ * Clears the restart bookkeeping of a thread at the end of a system
+ * call.
+ */
 void
-syscall_restart_state_finish(struct thread *thread)
+syscall_restart_state_finish(
+	struct thread *thread)
 {
 	if (thread == NULL)
 		return;
@@ -96,12 +321,18 @@ syscall_restart_state_finish(struct thread *thread)
 	thread->syscall_wait_deadline_valid = 0;
 }
 
+/*
+ * Computes a fresh wait deadline and records it for a later redispatch.
+ */
 int
-syscall_restart_deadline_rearm(uint64_t ticks, uint64_t *deadline)
+syscall_restart_deadline_rearm(
+	uint64_t ticks,
+	uint64_t *deadline)
 {
-	struct thread *thread = curthread;
+	struct thread *thread;
 	int error;
 
+	thread = curthread;
 	if (deadline == NULL)
 		return EINVAL;
 	error = kern_deadline_after(sched_ticks(), ticks, deadline);
@@ -112,35 +343,53 @@ syscall_restart_deadline_rearm(uint64_t ticks, uint64_t *deadline)
 	return error;
 }
 
+/*
+ * Reports the wait deadline of a system call, reusing the one recorded
+ * before a transparent stop.
+ */
 int
-syscall_restart_deadline_after(uint64_t ticks, uint64_t *deadline)
+syscall_restart_deadline_after(
+	uint64_t ticks,
+	uint64_t *deadline)
 {
-	struct thread *thread = curthread;
+	struct thread *thread;
+	int error;
 
+	thread = curthread;
 	if (deadline == NULL)
 		return EINVAL;
-	if (thread != NULL && thread->syscall_stop_redispatch &&
+	if (thread != NULL &&
+	    thread->syscall_stop_redispatch &&
 	    thread->syscall_wait_deadline_valid) {
 		*deadline = thread->syscall_wait_deadline;
 		return 0;
 	}
-	return syscall_restart_deadline_rearm(ticks, deadline);
+	error = syscall_restart_deadline_rearm(ticks, deadline);
+	return error;
 }
 
+/*
+ * Prepares a thread to redispatch its system call after a transparent
+ * stop.
+ */
 void
-syscall_restart_prepare_stop(struct thread *thread)
+syscall_restart_prepare_stop(
+	struct thread *thread)
 {
 	struct process *process;
 	unsigned long irq;
 
 	if (thread == NULL)
 		return;
+
+	/*
+	 * ppoll()/pselect() defer restoration for an ordinary caught
+	 * signal.  A transparent stop does not cross a user-handler
+	 * boundary, so restore now before re-entering the syscall.
+	 */
 	process = thread->proc;
 	if (process != NULL) {
 		irq = spin_lock_irqsave(&process->lock);
-		/* ppoll()/pselect() defer restoration for an ordinary caught signal.
-		 * A transparent stop does not cross a user-handler boundary, so restore
-		 * now before re-entering the syscall. */
 		if (thread->signal_suspended) {
 			thread->signal_mask = thread->signal_suspend_mask;
 			thread->signal_suspended = 0;
@@ -150,18 +399,121 @@ syscall_restart_prepare_stop(struct thread *thread)
 	thread->syscall_stop_redispatch = 1;
 }
 
-#define POLL_SIGNAL_BIT(n) \
-	((sigset_t)1ULL << ((unsigned)(n) - 1U))
-#define SIGNAL_VALID_MASK ((sigset_t)(UINT64_MAX >> 1U))
+#ifdef ZEDBSD_SYSCALL_STOP_TEST
+/*
+ * Simulates the stop-redispatch decision of the dispatcher for a test.
+ */
+intptr_t
+syscall_test_stop_ready_cycle(
+	enum signal_stop_return_result stop_result,
+	intptr_t redispatched_result,
+	int *body_calls)
+{
+	if (body_calls == NULL)
+		return -EINVAL;
+	*body_calls = 1;
+	if (!syscall_stop_should_redispatch(stop_result))
+		return -EINTR;
+	(*body_calls)++;
+	return redispatched_result;
+}
 
-struct poll_mask_guard {
-	struct thread *thread;
-	sigset_t saved;
-	unsigned active;
-};
+/*
+ * Runs one temporary signal mask cycle for a test.
+ */
+int
+syscall_test_poll_mask_cycle(
+	uint64_t requested,
+	int error,
+	unsigned stop_interrupted)
+{
+	struct poll_mask_guard guard;
+	int enter_error;
 
+	enter_error = poll_mask_enter((uintptr_t)&requested, &guard);
+	if (enter_error != 0)
+		return enter_error;
+	guard.thread->stop_interrupted = stop_interrupted;
+	poll_mask_leave(&guard, poll_mask_defer_restore(&guard, error));
+	return 0;
+}
+
+/*
+ * Claims a thread for joining on behalf of a test.
+ */
+int
+syscall_test_thread_join_claim(
+	struct thread *target,
+	tid_t owner,
+	unsigned stop_redispatch)
+{
+	int error;
+
+	if (target == NULL)
+		return EINVAL;
+	error = thread_join_claim_locked(target, owner, stop_redispatch);
+	return error;
+}
+
+/*
+ * Releases a join claim on behalf of a test.
+ */
+void
+syscall_test_thread_join_release(
+	struct thread *target,
+	tid_t owner)
+{
+	if (target != NULL)
+		thread_join_release_locked(target, owner);
+}
+
+/*
+ * Runs the thread join handler for a test.
+ */
+intptr_t
+syscall_test_thread_join_call(
+	const uintptr_t args[6])
+{
+	intptr_t result;
+
+	result = sys_thread_join_call(args);
+	return result;
+}
+
+/*
+ * Runs the thread cancel handler for a test.
+ */
+intptr_t
+syscall_test_thread_cancel_call(
+	const uintptr_t args[6])
+{
+	intptr_t result;
+
+	result = sys_thread_cancel_call(args);
+	return result;
+}
+#endif
+
+/*
+ * Initializes the system call layer and registers the dispatcher.
+ */
+void
+syscall_init(
+	void)
+{
+	poll_init();
+	usync_init();
+	(void)mutex_init(&user_atomic_lock, LOCK_RANK_USER_ATOMIC,
+	    "user atomic");
+	hal_syscall_set_handler(syscall_dispatch);
+	signal_init();
+}
+
+/* Installs a temporary signal mask for ppoll() or pselect(). */
 static int
-poll_mask_enter(uintptr_t address, struct poll_mask_guard *guard)
+poll_mask_enter(
+	uintptr_t address,
+	struct poll_mask_guard *guard)
 {
 	struct process *process;
 	sigset_t requested;
@@ -175,9 +527,14 @@ poll_mask_enter(uintptr_t address, struct poll_mask_guard *guard)
 	if (error != 0)
 		return error;
 	guard->thread = curthread;
-	process = guard->thread != NULL ? guard->thread->proc : NULL;
+	if (guard->thread != NULL)
+		process = guard->thread->proc;
+	else
+		process = NULL;
 	if (process == NULL)
 		return EINVAL;
+
+	/* SIGKILL and SIGSTOP can never be masked. */
 	requested &= SIGNAL_VALID_MASK &
 	    ~(POLL_SIGNAL_BIT(SIGKILL) | POLL_SIGNAL_BIT(SIGSTOP));
 	irq = spin_lock_irqsave(&process->lock);
@@ -188,19 +545,27 @@ poll_mask_enter(uintptr_t address, struct poll_mask_guard *guard)
 	return 0;
 }
 
+/* Restores the signal mask saved by poll_mask_enter(), now or at handler entry. */
 static void
-poll_mask_leave(struct poll_mask_guard *guard, int defer_restore)
+poll_mask_leave(
+	struct poll_mask_guard *guard,
+	int defer_restore)
 {
 	struct process *process;
 	unsigned long irq;
-	if (guard == NULL || !guard->active || guard->thread == NULL ||
-	    (process = guard->thread->proc) == NULL)
+
+	if (guard == NULL || !guard->active || guard->thread == NULL)
+		return;
+	process = guard->thread->proc;
+	if (process == NULL)
 		return;
 	irq = spin_lock_irqsave(&process->lock);
 	if (defer_restore) {
-		/* Keep the temporary mask installed until the selected handler is
-		 * entered.  Restoring it here would reopen the classic
-		 * pselect()/ppoll() lost-signal window. */
+		/*
+		 * Keep the temporary mask installed until the selected
+		 * handler is entered.  Restoring it here would reopen the
+		 * classic pselect()/ppoll() lost-signal window.
+		 */
 		guard->thread->signal_suspend_mask = guard->saved;
 		guard->thread->signal_suspended = 1;
 	} else {
@@ -210,50 +575,41 @@ poll_mask_leave(struct poll_mask_guard *guard, int defer_restore)
 	spin_unlock_irqrestore(&process->lock, irq);
 }
 
+/* Tests whether a poll ended by a caught signal must keep its mask until the handler runs. */
 static int
-poll_mask_defer_restore(const struct poll_mask_guard *guard, int error)
+poll_mask_defer_restore(
+	const struct poll_mask_guard *guard,
+	int error)
 {
-	return error == EINTR && guard != NULL && guard->thread != NULL &&
-	    !guard->thread->stop_interrupted;
+	if (error != EINTR)
+		return 0;
+	if (guard == NULL)
+		return 0;
+	if (guard->thread == NULL)
+		return 0;
+	if (guard->thread->stop_interrupted)
+		return 0;
+	return 1;
 }
 
 #ifdef ZEDBSD_SYSCALL_STOP_TEST
+/* Tests whether a stop result asks for a redispatch. */
 static int
-syscall_stop_should_redispatch(enum signal_stop_return_result result)
+syscall_stop_should_redispatch(
+	enum signal_stop_return_result result)
 {
-	return result == SIGNAL_STOP_RETURN_REDISPATCH;
-}
-
-intptr_t
-syscall_test_stop_ready_cycle(enum signal_stop_return_result stop_result,
-	intptr_t redispatched_result, int *body_calls)
-{
-	if (body_calls == NULL)
-		return -EINVAL;
-	*body_calls = 1;
-	if (!syscall_stop_should_redispatch(stop_result))
-		return -EINTR;
-	(*body_calls)++;
-	return redispatched_result;
-}
-
-int
-syscall_test_poll_mask_cycle(uint64_t requested, int error,
-	unsigned stop_interrupted)
-{
-	struct poll_mask_guard guard;
-	int enter_error = poll_mask_enter((uintptr_t)&requested, &guard);
-
-	if (enter_error != 0)
-		return enter_error;
-	guard.thread->stop_interrupted = stop_interrupted;
-	poll_mask_leave(&guard, poll_mask_defer_restore(&guard, error));
+	if (result == SIGNAL_STOP_RETURN_REDISPATCH)
+		return 1;
 	return 0;
 }
 #endif
 
+/* Converts a user timeout into a deadline, reusing one saved across a stop. */
 static int
-poll_timeout(uintptr_t address, uint64_t *deadline, int *immediate)
+poll_timeout(
+	uintptr_t address,
+	uint64_t *deadline,
+	int *immediate)
 {
 	struct timespec timeout;
 	uint64_t ticks;
@@ -263,7 +619,8 @@ poll_timeout(uintptr_t address, uint64_t *deadline, int *immediate)
 	*immediate = 0;
 	if (address == 0)
 		return 0;
-	if (curthread != NULL && curthread->syscall_stop_redispatch &&
+	if (curthread != NULL &&
+	    curthread->syscall_stop_redispatch &&
 	    curthread->syscall_wait_deadline_valid) {
 		*deadline = curthread->syscall_wait_deadline;
 		return 0;
@@ -278,21 +635,31 @@ poll_timeout(uintptr_t address, uint64_t *deadline, int *immediate)
 		*immediate = 1;
 		return 0;
 	}
-	return syscall_restart_deadline_after(ticks, deadline);
+	error = syscall_restart_deadline_after(ticks, deadline);
+	return error;
 }
 
+/* Handles ppoll(2). */
 static intptr_t
-sys_ppoll_call(const uintptr_t args[6])
+sys_ppoll_call(
+	const uintptr_t args[6])
 {
 	struct pollfd fds[KERN_OPEN_MAX];
 	struct uaccess_pin pin;
 	struct poll_mask_guard guard;
-	struct process *process = current_process();
-	nfds_t count = (nfds_t)args[1];
+	struct process *process;
+	nfds_t count;
 	uint64_t deadline;
-	int immediate, ready = 0, error;
+	int immediate;
+	int ready;
+	int error;
 	size_t bytes;
 
+	process = current_process();
+	count = (nfds_t)args[1];
+	ready = 0;
+
+	/* Pins and copies the descriptor array. */
 	memset(&pin, 0, sizeof(pin));
 	memset(&guard, 0, sizeof(guard));
 	if (args[1] > KERN_OPEN_MAX)
@@ -311,6 +678,8 @@ sys_ppoll_call(const uintptr_t args[6])
 	} else {
 		memset(fds, 0, sizeof(fds));
 	}
+
+	/* Waits under the temporary mask and copies the results back. */
 	error = poll_timeout(args[2], &deadline, &immediate);
 	if (error == 0)
 		error = poll_mask_enter(args[3], &guard);
@@ -322,38 +691,69 @@ sys_ppoll_call(const uintptr_t args[6])
 	if (error == 0 && bytes != 0)
 		error = copyout_pinned(&pin, 0, fds, bytes);
 	uaccess_unpin(&pin);
-	return error != 0 ? -error : ready;
+	if (error != 0)
+		return -error;
+	return ready;
 }
 
+/* Pins and copies in one optional fd_set of pselect(). */
 static int
-pselect_pin(uintptr_t address, struct uaccess_pin *pin,
+pselect_pin(
+	uintptr_t address,
+	struct uaccess_pin *pin,
 	fd_set *value)
 {
 	int error;
+
 	memset(pin, 0, sizeof(*pin));
 	memset(value, 0, sizeof(*value));
 	if (address == 0)
 		return 0;
 	error = uaccess_pin(address, sizeof(*value),
 	    HAL_SPACE_READ | HAL_SPACE_WRITE, pin);
-	return error != 0 ? error : copyin_pinned(pin, 0, value,
-	    sizeof(*value));
+	if (error != 0)
+		return error;
+	error = copyin_pinned(pin, 0, value, sizeof(*value));
+	return error;
 }
 
+/* Handles pselect(2) on top of the poll machinery. */
 static intptr_t
-sys_pselect_call(const uintptr_t args[6])
+sys_pselect_call(
+	const uintptr_t args[6])
 {
 	struct pollfd fds[KERN_OPEN_MAX];
-	struct uaccess_pin read_pin, write_pin, except_pin;
-	fd_set input_read, input_write, input_except;
-	fd_set output_read, output_write, output_except;
+	struct uaccess_pin read_pin;
+	struct uaccess_pin write_pin;
+	struct uaccess_pin except_pin;
+	fd_set input_read;
+	fd_set input_write;
+	fd_set input_except;
+	fd_set output_read;
+	fd_set output_write;
+	fd_set output_except;
 	struct poll_mask_guard guard;
-	struct process *process = current_process();
+	struct process *process;
 	uint64_t deadline;
 	uint32_t valid_mask;
-	int nfds = (int)args[0], immediate, ready = 0, error, result = 0;
-	nfds_t count = 0, i;
+	int nfds;
+	int immediate;
+	int ready;
+	int error;
+	int result;
+	nfds_t count;
+	nfds_t i;
+	uint32_t bit;
+	short events;
+	short revents;
 
+	process = current_process();
+	nfds = (int)args[0];
+	ready = 0;
+	result = 0;
+	count = 0;
+
+	/* Pins the three sets. */
 	memset(&read_pin, 0, sizeof(read_pin));
 	memset(&write_pin, 0, sizeof(write_pin));
 	memset(&except_pin, 0, sizeof(except_pin));
@@ -367,14 +767,20 @@ sys_pselect_call(const uintptr_t args[6])
 		error = pselect_pin(args[3], &except_pin, &input_except);
 	if (error != 0)
 		goto out;
-	valid_mask = nfds == 32 ? UINT32_MAX :
-	    (nfds == 0 ? 0U : ((uint32_t)1U << (unsigned)nfds) - 1U);
+
+	/* Converts the sets into a pollfd array. */
+	if (nfds == 32)
+		valid_mask = UINT32_MAX;
+	else if (nfds == 0)
+		valid_mask = 0U;
+	else
+		valid_mask = ((uint32_t)1U << (unsigned)nfds) - 1U;
 	input_read.bits[0] &= valid_mask;
 	input_write.bits[0] &= valid_mask;
 	input_except.bits[0] &= valid_mask;
 	for (i = 0; i < (nfds_t)nfds; i++) {
-		uint32_t bit = (uint32_t)1U << i;
-		short events = 0;
+		bit = (uint32_t)1U << i;
+		events = 0;
 		if ((input_read.bits[0] & bit) != 0)
 			events |= POLLIN | POLLRDNORM;
 		if ((input_write.bits[0] & bit) != 0)
@@ -388,6 +794,8 @@ sys_pselect_call(const uintptr_t args[6])
 			count++;
 		}
 	}
+
+	/* Waits under the temporary mask. */
 	error = poll_timeout(args[4], &deadline, &immediate);
 	if (error == 0)
 		error = poll_mask_enter(args[5], &guard);
@@ -399,12 +807,14 @@ sys_pselect_call(const uintptr_t args[6])
 	if (error != 0)
 		goto out;
 	(void)ready;
+
+	/* Converts the results back into sets. */
 	memset(&output_read, 0, sizeof(output_read));
 	memset(&output_write, 0, sizeof(output_write));
 	memset(&output_except, 0, sizeof(output_except));
 	for (i = 0; i < count; i++) {
-		uint32_t bit = (uint32_t)1U << (unsigned)fds[i].fd;
-		short revents = fds[i].revents;
+		bit = (uint32_t)1U << (unsigned)fds[i].fd;
+		revents = fds[i].revents;
 		if ((revents & POLLNVAL) != 0) {
 			error = EBADF;
 			goto out;
@@ -438,24 +848,39 @@ out:
 	uaccess_unpin(&except_pin);
 	uaccess_unpin(&write_pin);
 	uaccess_unpin(&read_pin);
-	return error != 0 ? -error : result;
+	if (error != 0)
+		return -error;
+	return result;
 }
 
-#define SYSCALL_SYSCTL_VALUE_MAX 256U
-#define SYSCALL_SYSCTL_OUTPUT_MAX (1024U * 1024U)
-
+/* Handles sysctl(2). */
 static intptr_t
-sys_sysctl_call(const uintptr_t args[6])
+sys_sysctl_call(
+	const uintptr_t args[6])
 {
 	int name[CTL_MAXNAME];
 	uint8_t old_value[SYSCALL_SYSCTL_VALUE_MAX];
 	uint8_t new_value[SYSCALL_SYSCTL_VALUE_MAX];
-	uint8_t *old_output = old_value;
-	size_t old_length = 0;
-	unsigned namelen = (unsigned)args[1];
-	struct process *process = current_process();
+	uint8_t *old_output;
+	size_t old_length;
+	unsigned namelen;
+	struct process *process;
+	uint8_t *old_argument;
+	size_t *old_length_argument;
+	uint8_t *new_argument;
+	int superuser;
 	int error;
-	if (args[0] == 0 || namelen == 0 || namelen > CTL_MAXNAME ||
+	int copy_error;
+
+	old_output = old_value;
+	old_length = 0;
+	namelen = (unsigned)args[1];
+	process = current_process();
+
+	/* Copies the name and sizes an output buffer for the old value. */
+	if (args[0] == 0 ||
+	    namelen == 0 ||
+	    namelen > CTL_MAXNAME ||
 	    args[5] > sizeof(new_value))
 		return -EINVAL;
 	error = copyin(args[0], name, namelen * sizeof(name[0]));
@@ -483,35 +908,55 @@ sys_sysctl_call(const uintptr_t args[6])
 		error = EINVAL;
 		goto out;
 	}
-	error = kern_sysctl(name, namelen, args[2] != 0 ? old_output : NULL,
-	    args[3] != 0 ? &old_length : NULL,
-	    args[4] != 0 ? new_value : NULL, (size_t)args[5],
-	    process != NULL && cred_is_superuser(process->cred));
+
+	/* Runs the request and copies the old value and its length back. */
+	if (args[2] != 0)
+		old_argument = old_output;
+	else
+		old_argument = NULL;
+	if (args[3] != 0)
+		old_length_argument = &old_length;
+	else
+		old_length_argument = NULL;
+	if (args[4] != 0)
+		new_argument = new_value;
+	else
+		new_argument = NULL;
+	superuser = process != NULL && cred_is_superuser(process->cred);
+	error = kern_sysctl(name, namelen, old_argument, old_length_argument,
+	    new_argument, (size_t)args[5], superuser);
 	if (args[3] != 0) {
-		int copy_error = copyout(&old_length, args[3], sizeof(old_length));
+		copy_error = copyout(&old_length, args[3], sizeof(old_length));
 		if (copy_error != 0) {
 			error = copy_error;
 			goto out;
 		}
 	}
-	if (error == 0 && args[2] != 0 && old_length != 0) {
+	if (error == 0 && args[2] != 0 && old_length != 0)
 		error = copyout(old_output, args[2], old_length);
-	}
-
 out:
 	if (old_output != old_value)
 		kern_free(old_output);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static struct process *current_process(void)
+/* Reports the process of the current thread, or NULL. */
+static struct process *
+current_process(
+	void)
 {
-	return curthread != NULL ? curthread->proc : NULL;
+	if (curthread == NULL)
+		return NULL;
+	return curthread->proc;
 }
 
+/* Takes a credential reference and fills a peer credential snapshot. */
 static struct ucred *
-peercred_snapshot_ref(struct process *process,
-		      struct zedbsd_peercred *snapshot)
+peercred_snapshot_ref(
+	struct process *process,
+	struct zedbsd_peercred *snapshot)
 {
 	struct ucred *credential;
 
@@ -526,38 +971,61 @@ peercred_snapshot_ref(struct process *process,
 	return credential;
 }
 
+/* Takes a socket reference from a descriptor. */
 static int
-descriptor_socket(struct process *process, int descriptor,
+descriptor_socket(
+	struct process *process,
+	int descriptor,
 	struct socket_file_ref *reference)
 {
-	return process == NULL || process->fd == NULL ? EBADF :
-	    socket_file_ref_get(process->fd, descriptor, reference);
+	int error;
+
+	if (process == NULL || process->fd == NULL)
+		return EBADF;
+	error = socket_file_ref_get(process->fd, descriptor, reference);
+	return error;
 }
 
+/* Drops a socket reference and passes a result through. */
 static intptr_t
-socket_result(struct socket_file_ref *reference, intptr_t result)
+socket_result(
+	struct socket_file_ref *reference,
+	intptr_t result)
 {
 	socket_file_ref_put(reference);
 	return result;
 }
 
+/* Copies a socket address in from user memory. */
 static int
-copy_sockaddr_in(uintptr_t address, socklen_t length,
-		 struct sockaddr_storage *storage)
+copy_sockaddr_in(
+	uintptr_t address,
+	socklen_t length,
+	struct sockaddr_storage *storage)
 {
-	if (address == 0 || storage == NULL || length < sizeof(sa_family_t) ||
+	int error;
+
+	if (address == 0 ||
+	    storage == NULL ||
+	    length < sizeof(sa_family_t) ||
 	    length > sizeof(*storage))
 		return EINVAL;
 	memset(storage, 0, sizeof(*storage));
-	return copyin(address, storage, length);
+	error = copyin(address, storage, length);
+	return error;
 }
 
+/* Copies a socket address and its length out to user memory. */
 static int
-copy_sockaddr_out(uintptr_t address, uintptr_t length_address,
-		  const struct sockaddr_storage *storage, socklen_t actual)
+copy_sockaddr_out(
+	uintptr_t address,
+	uintptr_t length_address,
+	const struct sockaddr_storage *storage,
+	socklen_t actual)
 {
 	socklen_t capacity;
 	int error;
+	socklen_t copied;
 
 	if (address == 0 && length_address == 0)
 		return 0;
@@ -567,22 +1035,22 @@ copy_sockaddr_out(uintptr_t address, uintptr_t length_address,
 	if (error != 0)
 		return error;
 	if (capacity != 0) {
-		socklen_t copied = capacity < actual ? capacity : actual;
+		if (capacity < actual)
+			copied = capacity;
+		else
+			copied = actual;
 		error = copyout(storage, address, copied);
 		if (error != 0)
 			return error;
 	}
-	return copyout(&actual, length_address, sizeof(actual));
+	error = copyout(&actual, length_address, sizeof(actual));
+	return error;
 }
 
-struct sockaddr_output_pin {
-	struct uaccess_pin address;
-	struct uaccess_pin length;
-	socklen_t capacity;
-};
-
+/* Releases the pins of a socket address output. */
 static void
-sockaddr_output_unpin(struct sockaddr_output_pin *pin)
+sockaddr_output_unpin(
+	struct sockaddr_output_pin *pin)
 {
 	if (pin == NULL)
 		return;
@@ -590,9 +1058,12 @@ sockaddr_output_unpin(struct sockaddr_output_pin *pin)
 	uaccess_unpin(&pin->length);
 }
 
+/* Pins the address and length outputs of a socket call before it may sleep. */
 static int
-sockaddr_output_pin(uintptr_t address, uintptr_t length_address,
-		    struct sockaddr_output_pin *pin)
+sockaddr_output_pin(
+	uintptr_t address,
+	uintptr_t length_address,
+	struct sockaddr_output_pin *pin)
 {
 	size_t bytes;
 	int error;
@@ -614,18 +1085,22 @@ sockaddr_output_pin(uintptr_t address, uintptr_t length_address,
 		sockaddr_output_unpin(pin);
 		return error;
 	}
-	bytes = pin->capacity < sizeof(struct sockaddr_storage) ?
-	    pin->capacity : sizeof(struct sockaddr_storage);
+	if (pin->capacity < sizeof(struct sockaddr_storage))
+		bytes = pin->capacity;
+	else
+		bytes = sizeof(struct sockaddr_storage);
 	error = uaccess_pin(address, bytes, PROT_WRITE, &pin->address);
 	if (error != 0)
 		sockaddr_output_unpin(pin);
 	return error;
 }
 
+/* Copies a socket address and its length out through pinned outputs. */
 static int
-copy_sockaddr_out_pinned(const struct sockaddr_output_pin *pin,
-			 const struct sockaddr_storage *storage,
-			 socklen_t actual)
+copy_sockaddr_out_pinned(
+	const struct sockaddr_output_pin *pin,
+	const struct sockaddr_storage *storage,
+	socklen_t actual)
 {
 	size_t copied;
 	int error;
@@ -634,37 +1109,63 @@ copy_sockaddr_out_pinned(const struct sockaddr_output_pin *pin,
 		return EINVAL;
 	if (!pin->length.active)
 		return 0;
-	copied = pin->capacity < actual ? pin->capacity : actual;
-	error = copied == 0 ? 0 :
-	    copyout_pinned(&pin->address, 0, storage, copied);
+	if (pin->capacity < actual)
+		copied = pin->capacity;
+	else
+		copied = actual;
+	if (copied == 0)
+		error = 0;
+	else
+		error = copyout_pinned(&pin->address, 0, storage, copied);
 	if (error == 0)
 		error = copyout_pinned(&pin->length, 0, &actual, sizeof(actual));
 	return error;
 }
 
+/* Handles socket(2). */
 static intptr_t
-sys_socket_call(const uintptr_t args[6])
+sys_socket_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct socket *socket;
-	struct file *file = NULL;
-	int supplied_type = (int)args[1];
-	int type = supplied_type &
-	    ~(SOCK_NONBLOCK | SOCK_CLOEXEC | SOCK_CLOFORK);
-	int file_flags = (supplied_type & SOCK_NONBLOCK) != 0 ? O_NONBLOCK : 0;
-	unsigned descriptor_flags =
-	    ((supplied_type & SOCK_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
-	    ((supplied_type & SOCK_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0);
-	int descriptor, error;
+	struct file *file;
+	int supplied_type;
+	int type;
+	int file_flags;
+	unsigned descriptor_flags;
+	int descriptor;
+	int error;
 
-	if (process == NULL || process->fd == NULL || args[3] != 0 ||
-	    args[4] != 0 || args[5] != 0)
+	process = current_process();
+	file = NULL;
+	supplied_type = (int)args[1];
+	type = supplied_type &
+	    ~(SOCK_NONBLOCK | SOCK_CLOEXEC | SOCK_CLOFORK);
+	if ((supplied_type & SOCK_NONBLOCK) != 0)
+		file_flags = O_NONBLOCK;
+	else
+		file_flags = 0;
+	descriptor_flags = 0;
+	if ((supplied_type & SOCK_CLOEXEC) != 0)
+		descriptor_flags |= FILEDESC_CLOEXEC;
+	if ((supplied_type & SOCK_CLOFORK) != 0)
+		descriptor_flags |= FILEDESC_CLOFORK;
+
+	/* Raw and packet sockets need privilege. */
+	if (process == NULL ||
+	    process->fd == NULL ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0)
 		return -EINVAL;
 	if (type != SOCK_RAW && type != SOCK_DGRAM && type != SOCK_STREAM)
 		return -EINVAL;
 	if (((int)args[0] == AF_PACKET || type == SOCK_RAW) &&
 	    !cred_is_superuser(process->cred))
 		return -EPERM;
+
+	/* Creates the socket, wraps it in a file, and installs a descriptor. */
 	error = socket_create((int)args[0], type, (int)args[2],
 	    &socket);
 	if (error != 0)
@@ -684,30 +1185,57 @@ sys_socket_call(const uintptr_t args[6])
 	return descriptor;
 }
 
+/* Handles socketpair(2). */
 static intptr_t
-sys_socketpair_call(const uintptr_t args[6])
+sys_socketpair_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct ucred *credential;
 	struct zedbsd_peercred creator;
-	struct socket *left_socket = NULL, *right_socket = NULL;
-	struct file *left_file = NULL, *right_file = NULL;
-	int descriptors[2] = { -1, -1 };
-	int supplied_type = (int)args[1];
-	int type = supplied_type &
-	    ~(SOCK_NONBLOCK | SOCK_CLOEXEC | SOCK_CLOFORK);
-	int file_flags = (supplied_type & SOCK_NONBLOCK) != 0 ? O_NONBLOCK : 0;
-	unsigned descriptor_flags =
-	    ((supplied_type & SOCK_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
-	    ((supplied_type & SOCK_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0);
+	struct socket *left_socket;
+	struct socket *right_socket;
+	struct file *left_file;
+	struct file *right_file;
+	int descriptors[2];
+	int supplied_type;
+	int type;
+	int file_flags;
+	unsigned descriptor_flags;
 	int error;
 
-	if (process == NULL || process->fd == NULL || args[3] == 0 ||
-	    args[4] != 0 || args[5] != 0 ||
+	process = current_process();
+	left_socket = NULL;
+	right_socket = NULL;
+	left_file = NULL;
+	right_file = NULL;
+	descriptors[0] = -1;
+	descriptors[1] = -1;
+	supplied_type = (int)args[1];
+	type = supplied_type &
+	    ~(SOCK_NONBLOCK | SOCK_CLOEXEC | SOCK_CLOFORK);
+	if ((supplied_type & SOCK_NONBLOCK) != 0)
+		file_flags = O_NONBLOCK;
+	else
+		file_flags = 0;
+	descriptor_flags = 0;
+	if ((supplied_type & SOCK_CLOEXEC) != 0)
+		descriptor_flags |= FILEDESC_CLOEXEC;
+	if ((supplied_type & SOCK_CLOFORK) != 0)
+		descriptor_flags |= FILEDESC_CLOFORK;
+
+	/* Only AF_UNIX stream and datagram pairs exist. */
+	if (process == NULL ||
+	    process->fd == NULL ||
+	    args[3] == 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0 ||
 	    (type != SOCK_STREAM && type != SOCK_DGRAM))
 		return -EINVAL;
 	if ((int)args[0] != AF_UNIX)
 		return -EAFNOSUPPORT;
+
+	/* Creates both sockets and their files. */
 	credential = peercred_snapshot_ref(process, &creator);
 	if (credential == NULL)
 		return -EINVAL;
@@ -729,6 +1257,8 @@ sys_socketpair_call(const uintptr_t args[6])
 			socket_release(right_socket);
 		return -error;
 	}
+
+	/* Installs both descriptors and reports them. */
 	file_status_flags_update(left_file, O_NONBLOCK, file_flags);
 	file_status_flags_update(right_file, O_NONBLOCK, file_flags);
 	error = filedesc_install_pair(process->fd, left_file, descriptor_flags,
@@ -748,21 +1278,31 @@ sys_socketpair_call(const uintptr_t args[6])
 	return 0;
 }
 
+/* Handles bind(2). */
 static intptr_t
-sys_bind_call(const uintptr_t args[6])
+sys_bind_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct ucred *credential = NULL;
+	struct process *process;
+	struct ucred *credential;
 	struct socket_file_ref reference;
 	struct socket *socket;
 	struct sockaddr_storage address;
+	intptr_t result;
 	int error;
+
+	process = current_process();
+	credential = NULL;
 
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
-	if (socket->ops == NULL || socket->ops->bind == NULL)
-		return socket_result(&reference, -EOPNOTSUPP);
+	if (socket->ops == NULL || socket->ops->bind == NULL) {
+		result = socket_result(&reference, -EOPNOTSUPP);
+		return result;
+	}
+
+	/* A path binding goes through the namespace with the caller's credential. */
 	error = copy_sockaddr_in(args[1], (socklen_t)args[2], &address);
 	if (error == 0 && socket->family == AF_UNIX) {
 		credential = cred_process_ref(process);
@@ -777,88 +1317,156 @@ sys_bind_call(const uintptr_t args[6])
 		error = socket->ops->bind(socket, (struct sockaddr *)&address,
 		    (socklen_t)args[2]);
 	}
-	return socket_result(&reference, error == 0 ? 0 : -error);
+	if (error != 0)
+		result = -error;
+	else
+		result = 0;
+	result = socket_result(&reference, result);
+	return result;
 }
 
+/* Handles connect(2). */
 static intptr_t
-sys_connect_call(const uintptr_t args[6])
+sys_connect_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct ucred *credential = NULL;
+	struct process *process;
+	struct ucred *credential;
 	struct zedbsd_peercred connector;
 	struct socket_file_ref reference;
 	struct socket *socket;
 	struct sockaddr_storage address;
+	intptr_t result;
+	int io_flags;
 	int error;
+
+	process = current_process();
+	credential = NULL;
 
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
-	if (socket->ops == NULL || socket->ops->connect == NULL)
-		return socket_result(&reference, -EOPNOTSUPP);
+	if (socket->ops == NULL || socket->ops->connect == NULL) {
+		result = socket_result(&reference, -EOPNOTSUPP);
+		return result;
+	}
+
+	/* A path connection goes through the namespace with the caller's identity. */
 	error = copy_sockaddr_in(args[1], (socklen_t)args[2], &address);
 	if (error == 0 && socket->family == AF_UNIX) {
 		credential = peercred_snapshot_ref(process, &connector);
-		error = credential == NULL ? EINVAL :
-		    unix_socket_connect_path(socket, process->cwdi, credential,
-		    &connector, (struct sockaddr *)&address, (socklen_t)args[2],
-		    (file_status_flags_get(reference.file) & O_NONBLOCK) != 0 ?
-		    SOCKET_IO_NONBLOCK : 0);
+		if (credential == NULL) {
+			error = EINVAL;
+		} else {
+			if ((file_status_flags_get(reference.file) & O_NONBLOCK) != 0)
+				io_flags = SOCKET_IO_NONBLOCK;
+			else
+				io_flags = 0;
+			error = unix_socket_connect_path(socket, process->cwdi,
+			    credential, &connector, (struct sockaddr *)&address,
+			    (socklen_t)args[2], io_flags);
+		}
 	} else if (error == 0) {
+		if ((file_status_flags_get(reference.file) & O_NONBLOCK) != 0)
+			io_flags = SOCKET_IO_NONBLOCK;
+		else
+			io_flags = 0;
 		error = socket->ops->connect(socket, (struct sockaddr *)&address,
-		    (socklen_t)args[2],
-		    (file_status_flags_get(reference.file) & O_NONBLOCK) != 0 ?
-		    SOCKET_IO_NONBLOCK : 0);
+		    (socklen_t)args[2], io_flags);
 	}
 	cred_release(credential);
-	return socket_result(&reference, error == 0 ? 0 : -error);
+	if (error != 0)
+		result = -error;
+	else
+		result = 0;
+	result = socket_result(&reference, result);
+	return result;
 }
 
+/* Handles listen(2). */
 static intptr_t
-sys_listen_call(const uintptr_t args[6])
+sys_listen_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct socket_file_ref reference;
 	struct socket *socket;
-	struct ucred *credential = NULL;
+	struct ucred *credential;
 	struct zedbsd_peercred listener;
+	intptr_t result;
 	int error;
+
+	process = current_process();
+	credential = NULL;
 
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
+
+	/* A listening AF_UNIX socket records the listener's identity. */
 	if (socket->family == AF_UNIX) {
 		credential = peercred_snapshot_ref(process, &listener);
-		error = credential == NULL ? EINVAL :
-		    unix_socket_listen(socket, (int)args[1], &listener);
+		if (credential == NULL)
+			error = EINVAL;
+		else
+			error = unix_socket_listen(socket, (int)args[1], &listener);
 		cred_release(credential);
-		return socket_result(&reference, error == 0 ? 0 : -error);
+		if (error != 0)
+			result = -error;
+		else
+			result = 0;
+		result = socket_result(&reference, result);
+		return result;
 	}
-	if (socket->ops == NULL || socket->ops->listen == NULL)
-		return socket_result(&reference, -EOPNOTSUPP);
+	if (socket->ops == NULL || socket->ops->listen == NULL) {
+		result = socket_result(&reference, -EOPNOTSUPP);
+		return result;
+	}
 	error = socket->ops->listen(socket, (int)args[1]);
-	return socket_result(&reference, error == 0 ? 0 : -error);
+	if (error != 0)
+		result = -error;
+	else
+		result = 0;
+	result = socket_result(&reference, result);
+	return result;
 }
 
+/* Handles accept(2) and accept4(2). */
 static intptr_t
-sys_accept_call(const uintptr_t args[6])
+sys_accept_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct socket_file_ref reference;
 	struct socket *socket;
 	struct sockaddr_storage address;
 	struct sockaddr_output_pin output;
-	struct socket *accepted = NULL;
-	struct file *file = NULL;
+	struct socket *accepted;
+	struct file *file;
 	struct file *files[1];
 	struct filedesc_reservation reservation;
-	int supplied_flags = (int)args[3];
-	unsigned descriptor_flags =
-	    ((supplied_flags & SOCK_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
-	    ((supplied_flags & SOCK_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0);
-	socklen_t length = sizeof(address);
-	int descriptor, error;
+	struct sockaddr *address_argument;
+	socklen_t *length_argument;
+	int supplied_flags;
+	unsigned descriptor_flags;
+	socklen_t length;
+	int io_flags;
+	int descriptor;
+	intptr_t result;
+	int error;
 
+	process = current_process();
+	accepted = NULL;
+	file = NULL;
+	supplied_flags = (int)args[3];
+	descriptor_flags = 0;
+	if ((supplied_flags & SOCK_CLOEXEC) != 0)
+		descriptor_flags |= FILEDESC_CLOEXEC;
+	if ((supplied_flags & SOCK_CLOFORK) != 0)
+		descriptor_flags |= FILEDESC_CLOFORK;
+	length = sizeof(address);
+
+	/* Validates the flags and the address output pair. */
 	if ((supplied_flags &
 	    ~(SOCK_NONBLOCK | SOCK_CLOEXEC | SOCK_CLOFORK)) != 0 ||
 	    args[4] != 0 || args[5] != 0)
@@ -866,13 +1474,21 @@ sys_accept_call(const uintptr_t args[6])
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
-	if ((args[1] == 0) != (args[2] == 0))
-		return socket_result(&reference, -EINVAL);
-	if (socket->ops == NULL || socket->ops->accept == NULL)
-		return socket_result(&reference, -EOPNOTSUPP);
+	if ((args[1] == 0) != (args[2] == 0)) {
+		result = socket_result(&reference, -EINVAL);
+		return result;
+	}
+	if (socket->ops == NULL || socket->ops->accept == NULL) {
+		result = socket_result(&reference, -EOPNOTSUPP);
+		return result;
+	}
+
+	/* Reserves every output before the accept may sleep. */
 	error = sockaddr_output_pin(args[1], args[2], &output);
-	if (error != 0)
-		return socket_result(&reference, -error);
+	if (error != 0) {
+		result = socket_result(&reference, -error);
+		return result;
+	}
 	memset(&reservation, 0, sizeof(reservation));
 	error = filedesc_reserve_many(process->fd, 1, descriptor_flags,
 	    &reservation);
@@ -881,26 +1497,41 @@ sys_accept_call(const uintptr_t args[6])
 	if (error != 0) {
 		filedesc_abort_reserved(&reservation);
 		sockaddr_output_unpin(&output);
-		return socket_result(&reference, -error);
+		result = socket_result(&reference, -error);
+		return result;
 	}
+
+	/* Accepts a connection. */
 	memset(&address, 0, sizeof(address));
-	error = socket->ops->accept(socket, &accepted,
-	    args[1] != 0 ? (struct sockaddr *)&address : NULL,
-	    args[1] != 0 ? &length : NULL,
-		    (file_status_flags_get(reference.file) & O_NONBLOCK) != 0 ?
-	    SOCKET_IO_NONBLOCK : 0);
+	if (args[1] != 0) {
+		address_argument = (struct sockaddr *)&address;
+		length_argument = &length;
+	} else {
+		address_argument = NULL;
+		length_argument = NULL;
+	}
+	if ((file_status_flags_get(reference.file) & O_NONBLOCK) != 0)
+		io_flags = SOCKET_IO_NONBLOCK;
+	else
+		io_flags = 0;
+	error = socket->ops->accept(socket, &accepted, address_argument,
+	    length_argument, io_flags);
 	if (error != 0) {
 		(void)file_close(file);
 		filedesc_abort_reserved(&reservation);
 		sockaddr_output_unpin(&output);
-		return socket_result(&reference, -error);
+		result = socket_result(&reference, -error);
+		return result;
 	}
 	if (accepted == NULL) {
 		(void)file_close(file);
 		filedesc_abort_reserved(&reservation);
 		sockaddr_output_unpin(&output);
-		return socket_result(&reference, -EIO);
+		result = socket_result(&reference, -EIO);
+		return result;
 	}
+
+	/* Publishes the accepted socket and reports the peer address. */
 	socket_file_ref_put(&reference);
 	error = socket_file_attach(file, accepted);
 	if (error == 0 && (supplied_flags & SOCK_NONBLOCK) != 0)
@@ -925,123 +1556,194 @@ sys_accept_call(const uintptr_t args[6])
 	return descriptor;
 }
 
+/* Handles sendto(2). */
 static intptr_t
-sys_sendto_call(const uintptr_t args[6])
+sys_sendto_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct socket_file_ref reference;
 	struct socket *socket;
 	struct sockaddr_storage address;
-	const struct sockaddr *destination = NULL;
+	const struct sockaddr *destination;
 	void *buffer;
 	ssize_t result;
+	int io_flags;
 	int error;
+	size_t amount;
 
+	process = current_process();
+	destination = NULL;
+
+	/* Validates the flags, the destination pair, and the datagram size. */
 	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
-	if (socket->ops == NULL || socket->ops->sendto == NULL)
-		return socket_result(&reference, -EOPNOTSUPP);
-	if (((int)args[3] & ~SOCKET_SEND_FLAGS) != 0)
-		return socket_result(&reference, -EOPNOTSUPP);
-	if ((args[4] == 0) != (args[5] == 0))
-		return socket_result(&reference, -EINVAL);
+	if (socket->ops == NULL || socket->ops->sendto == NULL) {
+		result = socket_result(&reference, -EOPNOTSUPP);
+		return result;
+	}
+	if (((int)args[3] & ~SOCKET_SEND_FLAGS) != 0) {
+		result = socket_result(&reference, -EOPNOTSUPP);
+		return result;
+	}
+	if ((args[4] == 0) != (args[5] == 0)) {
+		result = socket_result(&reference, -EINVAL);
+		return result;
+	}
 	if (socket->type != SOCK_STREAM &&
-	    args[2] > PACKET_BUF_STORAGE_SIZE)
-		return socket_result(&reference, -EMSGSIZE);
+	    args[2] > PACKET_BUF_STORAGE_SIZE) {
+		result = socket_result(&reference, -EMSGSIZE);
+		return result;
+	}
 	if (args[4] != 0) {
 		error = copy_sockaddr_in(args[4], (socklen_t)args[5], &address);
-		if (error != 0)
-			return socket_result(&reference, -error);
+		if (error != 0) {
+			result = socket_result(&reference, -error);
+			return result;
+		}
 		destination = (const struct sockaddr *)&address;
 	}
+
+	/* An empty send needs no buffer. */
 	if (args[2] == 0) {
-		result = socket->family == AF_UNIX ?
-		    unix_socket_send_message_at(socket, process->cwdi,
-		    process->cred, "", 0,
-		    (int)socket_file_effective_flags(&reference, (int)args[3]),
-		    destination, (socklen_t)args[5], NULL, 0) :
-		    socket->ops->sendto(socket, "", 0,
-		    (int)socket_file_effective_flags(&reference, (int)args[3]),
-		    destination, (socklen_t)args[5]);
-		return socket_result(&reference, result);
+		io_flags = (int)socket_file_effective_flags(&reference, (int)args[3]);
+		if (socket->family == AF_UNIX)
+			result = unix_socket_send_message_at(socket, process->cwdi,
+			    process->cred, "", 0, io_flags, destination,
+			    (socklen_t)args[5], NULL, 0);
+		else
+			result = socket->ops->sendto(socket, "", 0, io_flags,
+			    destination, (socklen_t)args[5]);
+		result = socket_result(&reference, result);
+		return result;
 	}
-	{
-		size_t amount = socket->type == SOCK_STREAM &&
-		    args[2] > SYSCALL_SOCKET_BUFFER_MAX ?
-		    SYSCALL_SOCKET_BUFFER_MAX : (size_t)args[2];
-		buffer = kern_malloc(amount);
-		if (buffer == NULL)
-			return socket_result(&reference, -ENOMEM);
-		error = copyin(args[1], buffer, amount);
-		result = error != 0 ? -error :
-		    socket->family == AF_UNIX ?
-		    unix_socket_send_message_at(socket, process->cwdi,
-		    process->cred, buffer, amount,
-		    (int)socket_file_effective_flags(&reference, (int)args[3]),
-		    destination, (socklen_t)args[5], NULL, 0) :
-		    socket->ops->sendto(socket, buffer, amount,
-		    (int)socket_file_effective_flags(&reference, (int)args[3]),
-		    destination, (socklen_t)args[5]);
-		kern_free(buffer);
+
+	/* Copies at most one buffer's worth and sends it. */
+	if (socket->type == SOCK_STREAM && args[2] > SYSCALL_SOCKET_BUFFER_MAX)
+		amount = SYSCALL_SOCKET_BUFFER_MAX;
+	else
+		amount = (size_t)args[2];
+	buffer = kern_malloc(amount);
+	if (buffer == NULL) {
+		result = socket_result(&reference, -ENOMEM);
+		return result;
 	}
-	return socket_result(&reference, result);
+	error = copyin(args[1], buffer, amount);
+	if (error != 0) {
+		result = -error;
+	} else {
+		io_flags = (int)socket_file_effective_flags(&reference, (int)args[3]);
+		if (socket->family == AF_UNIX)
+			result = unix_socket_send_message_at(socket, process->cwdi,
+			    process->cred, buffer, amount, io_flags, destination,
+			    (socklen_t)args[5], NULL, 0);
+		else
+			result = socket->ops->sendto(socket, buffer, amount,
+			    io_flags, destination, (socklen_t)args[5]);
+	}
+	kern_free(buffer);
+	result = socket_result(&reference, result);
+	return result;
 }
 
+/* Handles recvfrom(2). */
 static intptr_t
-sys_recvfrom_call(const uintptr_t args[6])
+sys_recvfrom_call(
+	const uintptr_t args[6])
 {
 	struct socket_file_ref reference;
 	struct socket *socket;
 	struct sockaddr_storage address;
 	struct sockaddr_output_pin output;
 	struct uaccess_pin data_pin;
-	socklen_t length = sizeof(address);
+	struct sockaddr *address_argument;
+	socklen_t *length_argument;
+	socklen_t length;
 	size_t capacity;
 	void *buffer;
-	uint8_t empty = 0;
+	uint8_t empty;
 	ssize_t result;
 	int error;
+	size_t copied;
 
+	length = sizeof(address);
+	empty = 0;
+
+	/* Validates the flags and the address output pair. */
 	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
-	if (socket->ops == NULL || socket->ops->recvfrom == NULL)
-		return socket_result(&reference, -EOPNOTSUPP);
-	if (((int)args[3] & ~SOCKET_RECV_FLAGS) != 0)
-		return socket_result(&reference, -EOPNOTSUPP);
-	if ((args[4] == 0) != (args[5] == 0))
-		return socket_result(&reference, -EINVAL);
+	if (socket->ops == NULL || socket->ops->recvfrom == NULL) {
+		result = socket_result(&reference, -EOPNOTSUPP);
+		return result;
+	}
+	if (((int)args[3] & ~SOCKET_RECV_FLAGS) != 0) {
+		result = socket_result(&reference, -EOPNOTSUPP);
+		return result;
+	}
+	if ((args[4] == 0) != (args[5] == 0)) {
+		result = socket_result(&reference, -EINVAL);
+		return result;
+	}
+
 	/* A zero-length stream receive is a successful no-op. */
-	if (socket->type == SOCK_STREAM && args[2] == 0)
-		return socket_result(&reference, 0);
-	capacity = socket->type == SOCK_STREAM ?
-	    (args[2] > SYSCALL_SOCKET_BUFFER_MAX ? SYSCALL_SOCKET_BUFFER_MAX :
-	    (size_t)args[2]) :
-	    args[2] > PACKET_BUF_STORAGE_SIZE ? PACKET_BUF_STORAGE_SIZE :
-	    (size_t)args[2];
+	if (socket->type == SOCK_STREAM && args[2] == 0) {
+		result = socket_result(&reference, 0);
+		return result;
+	}
+
+	/* Pins the outputs and allocates a bounded buffer. */
+	if (socket->type == SOCK_STREAM) {
+		if (args[2] > SYSCALL_SOCKET_BUFFER_MAX)
+			capacity = SYSCALL_SOCKET_BUFFER_MAX;
+		else
+			capacity = (size_t)args[2];
+	} else {
+		if (args[2] > PACKET_BUF_STORAGE_SIZE)
+			capacity = PACKET_BUF_STORAGE_SIZE;
+		else
+			capacity = (size_t)args[2];
+	}
 	error = uaccess_pin(args[1], capacity, PROT_WRITE, &data_pin);
-	if (error != 0)
-		return socket_result(&reference, -error);
+	if (error != 0) {
+		result = socket_result(&reference, -error);
+		return result;
+	}
 	error = sockaddr_output_pin(args[4], args[5], &output);
 	if (error != 0) {
 		uaccess_unpin(&data_pin);
-		return socket_result(&reference, -error);
+		result = socket_result(&reference, -error);
+		return result;
 	}
-	buffer = capacity != 0 ? kern_malloc(capacity) : &empty;
+	if (capacity != 0)
+		buffer = kern_malloc(capacity);
+	else
+		buffer = &empty;
 	if (capacity != 0 && buffer == NULL) {
 		sockaddr_output_unpin(&output);
 		uaccess_unpin(&data_pin);
-		return socket_result(&reference, -ENOMEM);
+		result = socket_result(&reference, -ENOMEM);
+		return result;
 	}
+
+	/* Receives and copies the data and the source address out. */
 	memset(&address, 0, sizeof(address));
+	if (args[4] != 0) {
+		address_argument = (struct sockaddr *)&address;
+		length_argument = &length;
+	} else {
+		address_argument = NULL;
+		length_argument = NULL;
+	}
 	result = socket->ops->recvfrom(socket, buffer, capacity,
 	    (int)socket_file_effective_flags(&reference, (int)args[3]),
-	    args[4] != 0 ? (struct sockaddr *)&address : NULL,
-	    args[4] != 0 ? &length : NULL);
+	    address_argument, length_argument);
 	if (result >= 0) {
-		size_t copied = (size_t)result < capacity ?
-		    (size_t)result : capacity;
+		if ((size_t)result < capacity)
+			copied = (size_t)result;
+		else
+			copied = capacity;
 		error = copyout_pinned(&data_pin, 0, buffer, copied);
 		if (error == 0)
 			error = copy_sockaddr_out_pinned(&output, &address, length);
@@ -1052,31 +1754,46 @@ sys_recvfrom_call(const uintptr_t args[6])
 		kern_free(buffer);
 	sockaddr_output_unpin(&output);
 	uaccess_unpin(&data_pin);
-	return socket_result(&reference, result);
+	result = socket_result(&reference, result);
+	return result;
 }
 
+/* Handles sendmsg(2). */
 static intptr_t
-sys_sendmsg_call(const uintptr_t args[6])
+sys_sendmsg_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct sendmsg_args request;
 	struct socket_file_ref reference;
 	struct sockaddr_storage address;
-	struct sockaddr *destination = NULL;
+	struct sockaddr *destination;
 	struct file *files[ZEDBSD_MSG_FD_MAX];
 	int descriptors[ZEDBSD_MSG_FD_MAX];
-	void *buffer = NULL;
-	unsigned index, count = 0;
+	void *buffer;
+	void *data;
+	unsigned index;
+	unsigned count;
 	ssize_t result;
 	int error;
 
-	if (args[1] == 0 || args[2] != 0 || args[3] != 0 || args[4] != 0 ||
+	process = current_process();
+	destination = NULL;
+	buffer = NULL;
+	count = 0;
+
+	/* Copies and validates the request. */
+	if (args[1] == 0 ||
+	    args[2] != 0 ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
 	    args[5] != 0)
 		return -EINVAL;
 	error = copyin(args[1], &request, sizeof(request));
 	if (error != 0)
 		return -error;
-	if (request.reserved != 0 || request.data_length > SIZE_MAX ||
+	if (request.reserved != 0 ||
+	    request.data_length > SIZE_MAX ||
 	    request.name_length > sizeof(address) ||
 	    request.descriptor_count > ZEDBSD_MSG_FD_MAX ||
 	    (request.data_length != 0 && request.data == 0) ||
@@ -1088,27 +1805,36 @@ sys_sendmsg_call(const uintptr_t args[6])
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
 	if (reference.socket->type != SOCK_STREAM &&
-	    request.data_length > PACKET_BUF_STORAGE_SIZE)
-		return socket_result(&reference, -EMSGSIZE);
+	    request.data_length > PACKET_BUF_STORAGE_SIZE) {
+		result = socket_result(&reference, -EMSGSIZE);
+		return result;
+	}
 	if (reference.socket->type == SOCK_STREAM &&
 	    request.data_length > SYSCALL_SOCKET_BUFFER_MAX)
 		request.data_length = SYSCALL_SOCKET_BUFFER_MAX;
+
+	/* Copies the destination, the data, and the descriptors in. */
 	if (request.name_length != 0) {
 		error = copy_sockaddr_in((uintptr_t)request.name,
 		    request.name_length, &address);
-		if (error != 0)
-			return socket_result(&reference, -error);
+		if (error != 0) {
+			result = socket_result(&reference, -error);
+			return result;
+		}
 		destination = (struct sockaddr *)&address;
 	}
 	if (request.data_length != 0) {
 		buffer = kern_malloc((size_t)request.data_length);
-		if (buffer == NULL)
-			return socket_result(&reference, -ENOMEM);
+		if (buffer == NULL) {
+			result = socket_result(&reference, -ENOMEM);
+			return result;
+		}
 		error = copyin((uintptr_t)request.data, buffer,
 		    (size_t)request.data_length);
 		if (error != 0) {
 			kern_free(buffer);
-			return socket_result(&reference, -error);
+			result = socket_result(&reference, -error);
+			return result;
 		}
 	}
 	if (request.descriptor_count != 0) {
@@ -1125,10 +1851,15 @@ sys_sendmsg_call(const uintptr_t args[6])
 			}
 		}
 	}
+
+	/* Only AF_UNIX carries descriptors. */
+	if (request.data_length != 0)
+		data = buffer;
+	else
+		data = "";
 	if (reference.socket->family == AF_UNIX) {
 		result = unix_socket_send_message_at(reference.socket,
-		    process->cwdi, process->cred,
-		    request.data_length != 0 ? buffer : "",
+		    process->cwdi, process->cred, data,
 		    (size_t)request.data_length,
 		    (int)socket_file_effective_flags(&reference,
 		    (int)request.flags), destination, request.name_length, files,
@@ -1140,45 +1871,72 @@ sys_sendmsg_call(const uintptr_t args[6])
 	    reference.socket->ops->sendto == NULL) {
 		result = -EOPNOTSUPP;
 	} else {
-		result = reference.socket->ops->sendto(reference.socket,
-		    request.data_length != 0 ? buffer : "",
+		result = reference.socket->ops->sendto(reference.socket, data,
 		    (size_t)request.data_length,
 		    (int)socket_file_effective_flags(&reference,
 		    (int)request.flags), destination, request.name_length);
 	}
 	kern_free(buffer);
-	return socket_result(&reference, result);
+	result = socket_result(&reference, result);
+	return result;
 fail:
 	for (index = 0; index < count; index++)
 		(void)file_close(files[index]);
 	kern_free(buffer);
-	return socket_result(&reference, -error);
+	result = socket_result(&reference, -error);
+	return result;
 }
 
+/* Handles recvmsg(2). */
 static intptr_t
-sys_recvmsg_call(const uintptr_t args[6])
+sys_recvmsg_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct recvmsg_args request;
 	struct socket_file_ref reference;
 	struct sockaddr_storage address;
 	struct unix_recv_transaction transaction;
 	struct filedesc_reservation reservation;
 	int descriptors[ZEDBSD_MSG_FD_MAX];
-	void *buffer = NULL;
+	void *buffer;
+	void *data;
+	uint8_t *buffer_argument;
+	struct sockaddr *address_argument;
+	socklen_t *name_length_argument;
 	size_t buffer_capacity;
 	socklen_t name_length;
-	unsigned file_count, truncated = 0, index;
+	unsigned file_count;
+	unsigned truncated;
+	unsigned index;
+	unsigned descriptor_flags;
+	unsigned output_flags;
 	ssize_t result;
 	int error;
+	ssize_t wire_result;
+	size_t copied;
+	int receive_flags;
+	int wait_all;
+	ssize_t part;
+	socklen_t amount;
+	socklen_t name_copied;
 
-	if (args[1] == 0 || args[2] != 0 || args[3] != 0 || args[4] != 0 ||
+	process = current_process();
+	buffer = NULL;
+	truncated = 0;
+
+	/* Copies and validates the request. */
+	if (args[1] == 0 ||
+	    args[2] != 0 ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
 	    args[5] != 0)
 		return -EINVAL;
 	error = copyin(args[1], &request, sizeof(request));
 	if (error != 0)
 		return -error;
-	if (request.reserved != 0 || request.reserved2 != 0 ||
+	if (request.reserved != 0 ||
+	    request.reserved2 != 0 ||
 	    request.data_capacity > SIZE_MAX ||
 	    request.name_capacity > sizeof(address) ||
 	    request.descriptor_capacity > ZEDBSD_MSG_FD_MAX ||
@@ -1191,6 +1949,8 @@ sys_recvmsg_call(const uintptr_t args[6])
 		return -EOPNOTSUPP;
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
+
+	/* Bounds the buffer; an empty stream receive completes at once. */
 	buffer_capacity = (size_t)request.data_capacity;
 	if (reference.socket->type == SOCK_STREAM &&
 	    buffer_capacity > SYSCALL_SOCKET_BUFFER_MAX)
@@ -1204,42 +1964,61 @@ sys_recvmsg_call(const uintptr_t args[6])
 		request.descriptor_count = 0;
 		request.output_flags = 0;
 		error = copyout(&request, args[1], sizeof(request));
-		return socket_result(&reference, error != 0 ? -error : 0);
+		if (error != 0)
+			result = -error;
+		else
+			result = 0;
+		result = socket_result(&reference, result);
+		return result;
 	}
 	if (buffer_capacity != 0) {
 		buffer = kern_malloc(buffer_capacity);
-		if (buffer == NULL)
-			return socket_result(&reference, -ENOMEM);
+		if (buffer == NULL) {
+			result = socket_result(&reference, -ENOMEM);
+			return result;
+		}
 	}
 	name_length = request.name_capacity;
+	if (request.name_capacity != 0) {
+		address_argument = (struct sockaddr *)&address;
+		name_length_argument = &name_length;
+	} else {
+		address_argument = NULL;
+		name_length_argument = NULL;
+	}
+
+	/* A non-AF_UNIX socket receives through recvfrom without descriptors. */
 	if (reference.socket->family != AF_UNIX) {
-		ssize_t wire_result = 0;
-		size_t copied;
-		int receive_flags, wait_all;
+		wire_result = 0;
 		if (reference.socket->ops == NULL ||
 		    reference.socket->ops->recvfrom == NULL) {
 			kern_free(buffer);
-			return socket_result(&reference, -EOPNOTSUPP);
+			result = socket_result(&reference, -EOPNOTSUPP);
+			return result;
 		}
 		receive_flags = (int)socket_file_effective_flags(&reference,
 		    (int)request.flags);
+
 		/* Ancillary descriptor flags are meaningful only to AF_UNIX. */
 		receive_flags &= ~(MSG_CMSG_CLOEXEC | MSG_CMSG_CLOFORK);
-		wait_all = reference.socket->type == SOCK_STREAM &&
+		wait_all = 0;
+		if (reference.socket->type == SOCK_STREAM &&
 		    (receive_flags & MSG_WAITALL) != 0 &&
-		    (receive_flags & MSG_PEEK) == 0;
+		    (receive_flags & MSG_PEEK) == 0)
+			wait_all = 1;
 		receive_flags &= ~MSG_WAITALL;
 		if (reference.socket->type != SOCK_STREAM)
 			receive_flags |= MSG_TRUNC;
 		memset(&address, 0, sizeof(address));
 		do {
-			ssize_t part = reference.socket->ops->recvfrom(
-			    reference.socket, buffer_capacity != 0 ?
-			    (uint8_t *)buffer + (size_t)wire_result : (uint8_t *)"",
+			if (buffer_capacity != 0)
+				buffer_argument = (uint8_t *)buffer + (size_t)wire_result;
+			else
+				buffer_argument = (uint8_t *)"";
+			part = reference.socket->ops->recvfrom(
+			    reference.socket, buffer_argument,
 			    buffer_capacity - (size_t)wire_result, receive_flags,
-			    request.name_capacity != 0 ?
-			    (struct sockaddr *)&address : NULL,
-			    request.name_capacity != 0 ? &name_length : NULL);
+			    address_argument, name_length_argument);
 			if (part < 0) {
 				if (wire_result == 0)
 					wire_result = part;
@@ -1251,70 +2030,100 @@ sys_recvmsg_call(const uintptr_t args[6])
 		} while (wait_all && (size_t)wire_result < buffer_capacity);
 		if (wire_result < 0) {
 			kern_free(buffer);
-			return socket_result(&reference, wire_result);
+			result = socket_result(&reference, wire_result);
+			return result;
 		}
-		copied = (size_t)wire_result < buffer_capacity ?
-		    (size_t)wire_result : buffer_capacity;
-		error = copied != 0 ?
-		    copyout(buffer, (uintptr_t)request.data, copied) : 0;
+
+		/* Copies the data and the source address out. */
+		if ((size_t)wire_result < buffer_capacity)
+			copied = (size_t)wire_result;
+		else
+			copied = buffer_capacity;
+		if (copied != 0)
+			error = copyout(buffer, (uintptr_t)request.data, copied);
+		else
+			error = 0;
 		if (error == 0 && request.name_capacity != 0) {
-			socklen_t amount = request.name_capacity < name_length ?
-			    request.name_capacity : name_length;
+			if (request.name_capacity < name_length)
+				amount = request.name_capacity;
+			else
+				amount = name_length;
 			if (amount != 0)
 				error = copyout(&address, (uintptr_t)request.name,
 				    amount);
 		}
-		request.data_length =
-		    ((request.flags & MSG_TRUNC) != 0) ?
-		    (uint64_t)wire_result : (uint64_t)copied;
+		if ((request.flags & MSG_TRUNC) != 0)
+			request.data_length = (uint64_t)wire_result;
+		else
+			request.data_length = (uint64_t)copied;
 		request.name_length = name_length;
 		request.descriptor_count = 0;
-		request.output_flags = (size_t)wire_result > copied ? MSG_TRUNC : 0;
+		if ((size_t)wire_result > copied)
+			request.output_flags = MSG_TRUNC;
+		else
+			request.output_flags = 0;
 		if (error == 0)
 			error = copyout(&request, args[1], sizeof(request));
 		kern_free(buffer);
-		return socket_result(&reference, error != 0 ? -error :
-		    (ssize_t)request.data_length);
+		if (error != 0)
+			result = -error;
+		else
+			result = (ssize_t)request.data_length;
+		result = socket_result(&reference, result);
+		return result;
 	}
+
+	/* Begins an AF_UNIX receive transaction that may carry descriptors. */
 	memset(&transaction, 0, sizeof(transaction));
 	memset(&reservation, 0, sizeof(reservation));
-	result = unix_socket_receive_begin(reference.socket,
-	    buffer_capacity != 0 ? buffer : "", buffer_capacity,
+	if (buffer_capacity != 0)
+		data = buffer;
+	else
+		data = "";
+	result = unix_socket_receive_begin(reference.socket, data,
+	    buffer_capacity,
 	    (int)socket_file_effective_flags(&reference,
 	    (int)request.flags & ~(MSG_CMSG_CLOEXEC | MSG_CMSG_CLOFORK)),
-	    request.name_capacity != 0 ? (struct sockaddr *)&address : NULL,
-	    request.name_capacity != 0 ? &name_length : NULL,
+	    address_argument, name_length_argument,
 	    request.descriptor_capacity, &transaction);
 	if (result < 0) {
 		kern_free(buffer);
-		return socket_result(&reference, result);
+		result = socket_result(&reference, result);
+		return result;
 	}
 	file_count = transaction.file_count;
 	truncated = transaction.control_truncated;
 	if (transaction.active) {
+		descriptor_flags = 0;
+		if ((request.flags & MSG_CMSG_CLOEXEC) != 0)
+			descriptor_flags |= FILEDESC_CLOEXEC;
+		if ((request.flags & MSG_CMSG_CLOFORK) != 0)
+			descriptor_flags |= FILEDESC_CLOFORK;
 		error = filedesc_reserve_many(process->fd, file_count,
-		    ((request.flags & MSG_CMSG_CLOEXEC) != 0 ?
-		    FILEDESC_CLOEXEC : 0) |
-		    ((request.flags & MSG_CMSG_CLOFORK) != 0 ?
-		    FILEDESC_CLOFORK : 0), &reservation);
+		    descriptor_flags, &reservation);
 		if (error != 0) {
 			unix_socket_receive_abort(&transaction);
 			kern_free(buffer);
-			return socket_result(&reference, -error);
+			result = socket_result(&reference, -error);
+			return result;
 		}
 		for (index = 0; index < file_count; index++)
 			descriptors[index] = reservation.slots[index];
 	}
+
+	/* Copies the data, the source address, and the descriptors out. */
 	if (transaction.copied != 0)
 		error = copyout(buffer, (uintptr_t)request.data,
 		    transaction.copied);
 	else
 		error = 0;
 	if (error == 0 && request.name_capacity != 0) {
-		socklen_t copied = request.name_capacity < name_length ?
-		    request.name_capacity : name_length;
-		if (copied != 0)
-			error = copyout(&address, (uintptr_t)request.name, copied);
+		if (request.name_capacity < name_length)
+			name_copied = request.name_capacity;
+		else
+			name_copied = name_length;
+		if (name_copied != 0)
+			error = copyout(&address, (uintptr_t)request.name, name_copied);
 	}
 	if (error == 0 && file_count != 0)
 		error = copyout(descriptors, (uintptr_t)request.descriptors,
@@ -1322,16 +2131,23 @@ sys_recvmsg_call(const uintptr_t args[6])
 	request.data_length = (uint64_t)result;
 	request.name_length = name_length;
 	request.descriptor_count = file_count;
-	request.output_flags = (truncated ? MSG_CTRUNC : 0) |
-	    (transaction.data_truncated ? MSG_TRUNC : 0);
+	output_flags = 0;
+	if (truncated)
+		output_flags |= MSG_CTRUNC;
+	if (transaction.data_truncated)
+		output_flags |= MSG_TRUNC;
+	request.output_flags = output_flags;
 	if (error == 0)
 		error = copyout(&request, args[1], sizeof(request));
 	if (error != 0) {
 		filedesc_abort_reserved(&reservation);
 		unix_socket_receive_abort(&transaction);
 		kern_free(buffer);
-		return socket_result(&reference, -error);
+		result = socket_result(&reference, -error);
+		return result;
 	}
+
+	/* Publishes the descriptors and commits or peeks the transaction. */
 	if (transaction.active) {
 		error = filedesc_commit_reserved(&reservation, transaction.files,
 		    descriptors);
@@ -1339,8 +2155,10 @@ sys_recvmsg_call(const uintptr_t args[6])
 			filedesc_abort_reserved(&reservation);
 			unix_socket_receive_abort(&transaction);
 			kern_free(buffer);
-			return socket_result(&reference, -error);
+			result = socket_result(&reference, -error);
+			return result;
 		}
+
 		/* The descriptor table owns these references after publication. */
 		for (index = 0; index < transaction.file_count; index++)
 			transaction.files[index] = NULL;
@@ -1350,70 +2168,110 @@ sys_recvmsg_call(const uintptr_t args[6])
 			unix_socket_receive_commit(&transaction);
 	}
 	kern_free(buffer);
-	return socket_result(&reference, result);
+	result = socket_result(&reference, result);
+	return result;
 }
 
+/* Handles shutdown(2). */
 static intptr_t
-sys_shutdown_call(const uintptr_t args[6])
+sys_shutdown_call(
+	const uintptr_t args[6])
 {
 	struct socket_file_ref reference;
 	struct socket *socket;
+	intptr_t result;
 	int error;
 
 	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
-	if (socket->ops == NULL || socket->ops->shutdown == NULL)
-		return socket_result(&reference, -EOPNOTSUPP);
+	if (socket->ops == NULL || socket->ops->shutdown == NULL) {
+		result = socket_result(&reference, -EOPNOTSUPP);
+		return result;
+	}
 	error = socket->ops->shutdown(socket, (int)args[1]);
-	return socket_result(&reference, error == 0 ? 0 : -error);
+	if (error != 0)
+		result = -error;
+	else
+		result = 0;
+	result = socket_result(&reference, result);
+	return result;
 }
 
+/* Handles getsockname(2) and getpeername(2). */
 static intptr_t
-sys_socket_name_call(const uintptr_t args[6], int peer)
+sys_socket_name_call(
+	const uintptr_t args[6],
+	int peer)
 {
 	struct socket_file_ref reference;
 	struct socket *socket;
 	struct sockaddr_storage address;
-	socklen_t length = sizeof(address);
+	socklen_t length;
+	intptr_t result;
 	int error;
+
+	length = sizeof(address);
 
 	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
-	if (args[1] == 0 || args[2] == 0)
-		return socket_result(&reference, -EINVAL);
+	if (args[1] == 0 || args[2] == 0) {
+		result = socket_result(&reference, -EINVAL);
+		return result;
+	}
+
+	/* Asks the protocol for the requested end of the connection. */
 	memset(&address, 0, sizeof(address));
 	if (peer) {
-		if (socket->ops == NULL || socket->ops->getpeername == NULL)
-			return socket_result(&reference, -EOPNOTSUPP);
+		if (socket->ops == NULL || socket->ops->getpeername == NULL) {
+			result = socket_result(&reference, -EOPNOTSUPP);
+			return result;
+		}
 		error = socket->ops->getpeername(socket,
 		    (struct sockaddr *)&address, &length);
 	} else {
-		if (socket->ops == NULL || socket->ops->getsockname == NULL)
-			return socket_result(&reference, -EOPNOTSUPP);
+		if (socket->ops == NULL || socket->ops->getsockname == NULL) {
+			result = socket_result(&reference, -EOPNOTSUPP);
+			return result;
+		}
 		error = socket->ops->getsockname(socket,
 		    (struct sockaddr *)&address, &length);
 	}
 	if (error == 0)
 		error = copy_sockaddr_out(args[1], args[2], &address, length);
-	return socket_result(&reference, error == 0 ? 0 : -error);
+	if (error != 0)
+		result = -error;
+	else
+		result = 0;
+	result = socket_result(&reference, result);
+	return result;
 }
 
+/* Handles setsockopt(2). */
 static intptr_t
-sys_setsockopt_call(const uintptr_t args[6])
+sys_setsockopt_call(
+	const uintptr_t args[6])
 {
 	struct socket_file_ref reference;
 	struct socket *socket;
 	uint8_t value[SYSCALL_SOCKET_OPTION_MAX];
+	intptr_t result;
 	int error;
 
 	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
-	if (args[4] > sizeof(value) || (args[4] != 0 && args[3] == 0))
-		return socket_result(&reference, -EINVAL);
-	error = args[4] == 0 ? 0 : copyin(args[3], value, (size_t)args[4]);
+	if (args[4] > sizeof(value) || (args[4] != 0 && args[3] == 0)) {
+		result = socket_result(&reference, -EINVAL);
+		return result;
+	}
+
+	/* The common layer handles generic options; the protocol handles the rest. */
+	if (args[4] == 0)
+		error = 0;
+	else
+		error = copyin(args[3], value, (size_t)args[4]);
 	if (error == 0)
 		error = socket_setsockopt_common(socket, (int)args[1],
 		    (int)args[2], value, (socklen_t)args[4]);
@@ -1421,28 +2279,42 @@ sys_setsockopt_call(const uintptr_t args[6])
 	    socket->ops->setsockopt != NULL)
 		error = socket->ops->setsockopt(socket, (int)args[1],
 		    (int)args[2], value, (socklen_t)args[4]);
-	return socket_result(&reference, error == 0 ? 0 : -error);
+	if (error != 0)
+		result = -error;
+	else
+		result = 0;
+	result = socket_result(&reference, result);
+	return result;
 }
 
+/* Handles getsockopt(2). */
 static intptr_t
-sys_getsockopt_call(const uintptr_t args[6])
+sys_getsockopt_call(
+	const uintptr_t args[6])
 {
 	struct socket_file_ref reference;
 	struct socket *socket;
 	uint8_t value[SYSCALL_SOCKET_OPTION_MAX];
 	socklen_t length;
+	intptr_t result;
 	int error;
 
 	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
-	if (args[3] == 0 || args[4] == 0)
-		return socket_result(&reference, -EINVAL);
+	if (args[3] == 0 || args[4] == 0) {
+		result = socket_result(&reference, -EINVAL);
+		return result;
+	}
 	error = copyin(args[4], &length, sizeof(length));
-	if (error != 0)
-		return socket_result(&reference, -error);
+	if (error != 0) {
+		result = socket_result(&reference, -error);
+		return result;
+	}
 	if (length > sizeof(value))
 		length = sizeof(value);
+
+	/* The common layer handles generic options; the protocol handles the rest. */
 	error = socket_getsockopt_common(socket, (int)args[1], (int)args[2],
 	    value, &length);
 	if (error == ENOPROTOOPT && socket->ops != NULL &&
@@ -1453,13 +2325,22 @@ sys_getsockopt_call(const uintptr_t args[6])
 		error = copyout(value, args[3], length);
 	if (error == 0)
 		error = copyout(&length, args[4], sizeof(length));
-	return socket_result(&reference, error == 0 ? 0 : -error);
+	if (error != 0)
+		result = -error;
+	else
+		result = 0;
+	result = socket_result(&reference, result);
+	return result;
 }
 
+/* Resolves a dirfd into a lookup context, holding the directory file. */
 static int
-syscall_context_at(struct process *process, int dirfd,
-		   struct cwdinfo *temporary, struct cwdinfo **context,
-		   struct file **held)
+syscall_context_at(
+	struct process *process,
+	int dirfd,
+	struct cwdinfo *temporary,
+	struct cwdinfo **context,
+	struct file **held)
 {
 	if (process == NULL || temporary == NULL || context == NULL || held == NULL)
 		return EINVAL;
@@ -1468,6 +2349,8 @@ syscall_context_at(struct process *process, int dirfd,
 		*context = process->cwdi;
 		return 0;
 	}
+
+	/* A descriptor context copies the cwdinfo with the directory as cwd. */
 	*held = filedesc_get_ref(process->fd, dirfd);
 	if (*held == NULL)
 		return EBADF;
@@ -1482,43 +2365,73 @@ syscall_context_at(struct process *process, int dirfd,
 	return 0;
 }
 
-static intptr_t sys_open_call(const uintptr_t args[6], int at)
+/* Handles open(2) and openat(2). */
+static intptr_t
+sys_open_call(
+	const uintptr_t args[6],
+	int at)
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct ucred *credential;
-	struct cwdinfo temporary, *context;
-	struct file *file, *held;
+	struct cwdinfo temporary;
+	struct cwdinfo *context;
+	struct file *file;
+	struct file *held;
 	struct file *files[1];
 	struct filedesc_reservation reservation;
 	char path[PATH_MAX];
-	uintptr_t path_address = at ? args[1] : args[0];
-	int flags = (int)(at ? args[2] : args[1]);
-	mode_t mode = (mode_t)(at ? args[3] : args[2]);
-	int descriptor, error;
+	uintptr_t path_address;
+	int flags;
+	mode_t mode;
+	int dirfd;
+	unsigned descriptor_flags;
+	int descriptor;
+	int error;
+
+	process = current_process();
+	if (at) {
+		path_address = args[1];
+		flags = (int)args[2];
+		mode = (mode_t)args[3];
+		dirfd = (int)args[0];
+	} else {
+		path_address = args[0];
+		flags = (int)args[1];
+		mode = (mode_t)args[2];
+		dirfd = AT_FDCWD;
+	}
+
 	if (process == NULL || process->fd == NULL || process->cwdi == NULL)
 		return -EINVAL;
 	credential = cred_process_ref(process);
 	if (credential == NULL)
 		return -EINVAL;
+
+	/* Reserves the descriptor before opening, then opens with the caller's credential. */
 	memset(&reservation, 0, sizeof(reservation));
 	error = copyinstr(path_address, path, sizeof(path), NULL);
 	held = NULL;
 	if (error == 0 && path[0] == '/')
 		context = process->cwdi;
 	else if (error == 0)
-		error = syscall_context_at(process, at ? (int)args[0] : AT_FDCWD,
-		    &temporary, &context, &held);
-	if (error == 0)
-		error = filedesc_reserve_many(process->fd, 1,
-		    ((flags & O_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
-		    ((flags & O_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0),
+		error = syscall_context_at(process, dirfd, &temporary, &context,
+		    &held);
+	if (error == 0) {
+		descriptor_flags = 0;
+		if ((flags & O_CLOEXEC) != 0)
+			descriptor_flags |= FILEDESC_CLOEXEC;
+		if ((flags & O_CLOFORK) != 0)
+			descriptor_flags |= FILEDESC_CLOFORK;
+		error = filedesc_reserve_many(process->fd, 1, descriptor_flags,
 		    &reservation);
+	}
 	if (error == 0)
 		error = file_openat_cred(context, credential, path,
 		    flags & ~(O_CLOEXEC | O_CLOFORK),
 		    (mode & 07777U) & ~process->umask,
 		    &file);
-	if (held != NULL) (void)file_close(held);
+	if (held != NULL)
+		(void)file_close(held);
 	cred_release(credential);
 	if (error != 0) {
 		filedesc_abort_reserved(&reservation);
@@ -1534,26 +2447,50 @@ static intptr_t sys_open_call(const uintptr_t args[6], int at)
 	return descriptor;
 }
 
-static intptr_t sys_close_call(const uintptr_t args[6])
+/* Handles close(2). */
+static intptr_t
+sys_close_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	int error = process == NULL || process->fd == NULL ? EBADF :
-		filedesc_close(process->fd, (int)args[0]);
-	return error == 0 ? 0 : -error;
+	struct process *process;
+	int error;
+
+	process = current_process();
+	if (process == NULL || process->fd == NULL)
+		error = EBADF;
+	else
+		error = filedesc_close(process->fd, (int)args[0]);
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static SYSCALL_EXT intptr_t sys_read_call(const uintptr_t args[6])
+/* Handles read(2) through a bounce buffer. */
+static SYSCALL_EXT intptr_t
+sys_read_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct file *file;
 	struct file_io io;
 	struct uaccess_pin pin;
 	uint8_t buffer[SYSCALL_IO_CHUNK];
-	size_t done = 0, length = (size_t)args[2];
+	size_t done;
+	size_t length;
 	intptr_t result;
 	int error;
-	if (process == NULL ||
-	    (file = filedesc_get_ref(process->fd, (int)args[0])) == NULL)
+	size_t chunk;
+	ssize_t count;
+
+	process = current_process();
+	done = 0;
+	length = (size_t)args[2];
+
+	/* Pins the user buffer and starts the transfer. */
+	if (process == NULL)
+		return -EBADF;
+	file = filedesc_get_ref(process->fd, (int)args[0]);
+	if (file == NULL)
 		return -EBADF;
 	error = uaccess_pin(args[1], length, HAL_SPACE_WRITE, &pin);
 	if (error != 0) {
@@ -1566,24 +2503,41 @@ static SYSCALL_EXT intptr_t sys_read_call(const uintptr_t args[6])
 		(void)file_close(file);
 		return -error;
 	}
+
+	/* Copies one chunk at a time until the request or the data runs out. */
 	while (done < length) {
-		size_t chunk = length - done > sizeof(buffer) ? sizeof(buffer) : length - done;
-		ssize_t count = file_io_transfer(&io, buffer, chunk);
+		if (length - done > sizeof(buffer))
+			chunk = sizeof(buffer);
+		else
+			chunk = length - done;
+		count = file_io_transfer(&io, buffer, chunk);
 		if (count < 0) {
-			result = done != 0 ? (intptr_t)done : count;
+			if (done != 0)
+				result = (intptr_t)done;
+			else
+				result = count;
 			goto out;
 		}
-		if (count == 0) break;
+		if (count == 0)
+			break;
 		error = copyout_pinned(&pin, done, buffer, (size_t)count);
 		if (error != 0) {
-			result = done != 0 ? (intptr_t)done : -error;
+			if (done != 0)
+				result = (intptr_t)done;
+			else
+				result = -error;
 			goto out;
 		}
 		done += (size_t)count;
-		if ((size_t)count < chunk) break;
-		/* A stream/device read completes after the first successful backend
-		 * transfer.  Re-entering it merely because the syscall bounce buffer
-		 * was filled can turn an available short read into a second block. */
+		if ((size_t)count < chunk)
+			break;
+
+		/*
+		 * A stream/device read completes after the first successful
+		 * backend transfer.  Re-entering it merely because the syscall
+		 * bounce buffer was filled can turn an available short read
+		 * into a second block.
+		 */
 		if (file->f_inode == NULL ||
 		    (file->f_inode->i_type != INODE_REG &&
 		     file->f_inode->i_type != INODE_BLOCK))
@@ -1597,18 +2551,33 @@ out:
 	return result;
 }
 
-static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6])
+/* Handles write(2) through a bounce buffer. */
+static SYSCALL_EXT intptr_t
+sys_write_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct file *file;
 	struct file_io io;
 	struct uaccess_pin pin;
 	uint8_t buffer[SYSCALL_IO_CHUNK];
-	size_t done = 0, length = (size_t)args[2];
+	size_t done;
+	size_t length;
 	intptr_t result;
 	int error;
-	if (process == NULL ||
-	    (file = filedesc_get_ref(process->fd, (int)args[0])) == NULL)
+	size_t chunk;
+	int limited;
+	ssize_t count;
+
+	process = current_process();
+	done = 0;
+	length = (size_t)args[2];
+
+	/* Pins the user buffer and starts the transfer under the size limit. */
+	if (process == NULL)
+		return -EBADF;
+	file = filedesc_get_ref(process->fd, (int)args[0]);
+	if (file == NULL)
 		return -EBADF;
 	error = uaccess_pin(args[1], length, HAL_SPACE_READ, &pin);
 	if (error != 0) {
@@ -1624,13 +2593,19 @@ static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6])
 	}
 	file_io_set_growth_limit(&io,
 	    resource_limit_current(process, RLIMIT_FSIZE));
+
+	/* Copies one chunk at a time; a hit size limit raises SIGXFSZ. */
 	while (done < length) {
-		size_t chunk = length - done > sizeof(buffer) ? sizeof(buffer) : length - done;
-		int limited;
-		ssize_t count;
+		if (length - done > sizeof(buffer))
+			chunk = sizeof(buffer);
+		else
+			chunk = length - done;
 		error = copyin_pinned(&pin, done, buffer, chunk);
 		if (error != 0) {
-			result = done != 0 ? (intptr_t)done : -error;
+			if (done != 0)
+				result = (intptr_t)done;
+			else
+				result = -error;
 			goto out;
 		}
 		count = file_io_transfer(&io, buffer, chunk);
@@ -1638,12 +2613,17 @@ static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6])
 		if (limited)
 			(void)signal_send_thread(curthread, SIGXFSZ);
 		if (count < 0) {
-			result = done != 0 ? (intptr_t)done : count;
+			if (done != 0)
+				result = (intptr_t)done;
+			else
+				result = count;
 			goto out;
 		}
 		done += (size_t)count;
-		if (limited) break;
-		if ((size_t)count < chunk) break;
+		if (limited)
+			break;
+		if ((size_t)count < chunk)
+			break;
 	}
 	result = (intptr_t)done;
 out:
@@ -1653,12 +2633,21 @@ out:
 	return result;
 }
 
-static intptr_t sys_lseek_call(const uintptr_t args[6])
+/* Handles lseek(2). */
+static intptr_t
+sys_lseek_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct file *file = process != NULL ?
-	    filedesc_get_ref(process->fd, (int)args[0]) : NULL;
+	struct process *process;
+	struct file *file;
 	off_t result;
+
+	process = current_process();
+	if (process != NULL)
+		file = filedesc_get_ref(process->fd, (int)args[0]);
+	else
+		file = NULL;
+
 	if (file == NULL)
 		return -EBADF;
 	result = file_seek(file, (off_t)args[1], (int)args[2]);
@@ -1666,48 +2655,84 @@ static intptr_t sys_lseek_call(const uintptr_t args[6])
 	return result;
 }
 
-static intptr_t sys_fstat_call(const uintptr_t args[6])
+/* Handles fstat(2). */
+static intptr_t
+sys_fstat_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct file *file = process != NULL ?
-	    filedesc_get_ref(process->fd, (int)args[0]) : NULL;
+	struct process *process;
+	struct file *file;
 	struct stat status;
 	int error;
-	if (file == NULL) return -EBADF;
+
+	process = current_process();
+	if (process != NULL)
+		file = filedesc_get_ref(process->fd, (int)args[0]);
+	else
+		file = NULL;
+
+	if (file == NULL)
+		return -EBADF;
 	if (file->f_inode == NULL) {
 		(void)file_close(file);
 		return -EINVAL;
 	}
 	error = inode_getattr(file->f_inode, &status);
-	if (error == 0) error = copyout(&status, args[1], sizeof(status));
+	if (error == 0)
+		error = copyout(&status, args[1], sizeof(status));
 	(void)file_close(file);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static uint32_t dirent_type(enum inode_type type)
+/* Maps an inode type to its dirent type code. */
+static uint32_t
+dirent_type(
+	enum inode_type type)
 {
 	switch (type) {
-	case INODE_REG: return ZEDBSD_DT_REG;
-	case INODE_DIR: return ZEDBSD_DT_DIR;
-	case INODE_BLOCK: return ZEDBSD_DT_BLK;
-	case INODE_CHAR: return ZEDBSD_DT_CHR;
-	case INODE_FIFO: return ZEDBSD_DT_FIFO;
-	case INODE_SYMLINK: return ZEDBSD_DT_LNK;
-	case INODE_SOCKET: return ZEDBSD_DT_SOCK;
-	default: return ZEDBSD_DT_UNKNOWN;
+	case INODE_REG:
+		return ZEDBSD_DT_REG;
+	case INODE_DIR:
+		return ZEDBSD_DT_DIR;
+	case INODE_BLOCK:
+		return ZEDBSD_DT_BLK;
+	case INODE_CHAR:
+		return ZEDBSD_DT_CHR;
+	case INODE_FIFO:
+		return ZEDBSD_DT_FIFO;
+	case INODE_SYMLINK:
+		return ZEDBSD_DT_LNK;
+	case INODE_SOCKET:
+		return ZEDBSD_DT_SOCK;
+	default:
+		return ZEDBSD_DT_UNKNOWN;
 	}
 }
 
-static intptr_t sys_getdents_call(const uintptr_t args[6])
+/* Handles getdents(2), one entry per call. */
+static intptr_t
+sys_getdents_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct file *file = process != NULL ?
-	    filedesc_get_ref(process->fd, (int)args[0]) : NULL;
+	struct process *process;
+	struct file *file;
 	struct uaccess_pin pin;
 	struct dirent_record output;
 	struct dirent entry;
-	int eof, error;
-	if (file == NULL) return -EBADF;
+	int eof;
+	int error;
+
+	process = current_process();
+	if (process != NULL)
+		file = filedesc_get_ref(process->fd, (int)args[0]);
+	else
+		file = NULL;
+
+	/* The buffer must hold one record. */
+	if (file == NULL)
+		return -EBADF;
 	if (args[2] < sizeof(output)) {
 		(void)file_close(file);
 		return -EINVAL;
@@ -1717,6 +2742,8 @@ static intptr_t sys_getdents_call(const uintptr_t args[6])
 		(void)file_close(file);
 		return -error;
 	}
+
+	/* Reads one entry and copies it out. */
 	error = file_readdir(file, &entry, &eof);
 	if (error != 0) {
 		uaccess_unpin(&pin);
@@ -1735,58 +2762,101 @@ static intptr_t sys_getdents_call(const uintptr_t args[6])
 	error = copyout_pinned(&pin, 0, &output, sizeof(output));
 	uaccess_unpin(&pin);
 	(void)file_close(file);
-	return error == 0 ? (intptr_t)sizeof(output) : -error;
+	if (error != 0)
+		return -error;
+	return (intptr_t)sizeof(output);
 }
 
-static intptr_t sys_chdir_call(const uintptr_t args[6])
+/* Handles chdir(2). */
+static intptr_t
+sys_chdir_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	char path[PATH_MAX];
 	int error;
-	if (process == NULL || process->cwdi == NULL) return -EINVAL;
+
+	process = current_process();
+	if (process == NULL || process->cwdi == NULL)
+		return -EINVAL;
 	error = copyinstr(args[0], path, sizeof(path), NULL);
-	if (error == 0) error = fs_chdir(process->cwdi, path);
-	return error == 0 ? 0 : -error;
+	if (error == 0)
+		error = fs_chdir(process->cwdi, path);
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_getcwd_call(const uintptr_t args[6])
+/* Handles getcwd(2). */
+static intptr_t
+sys_getcwd_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	char path[PATH_MAX];
 	size_t length;
 	int error;
-	if (process == NULL || process->cwdi == NULL) return -EINVAL;
+
+	process = current_process();
+	if (process == NULL || process->cwdi == NULL)
+		return -EINVAL;
 	error = fs_getcwd(process->cwdi, path, sizeof(path));
-	if (error != 0) return -error;
+	if (error != 0)
+		return -error;
 	length = strlen(path) + 1U;
-	if (length > args[1]) return -ERANGE;
+	if (length > args[1])
+		return -ERANGE;
 	error = copyout(path, args[0], length);
-	return error == 0 ? (intptr_t)args[0] : -error;
+	if (error != 0)
+		return -error;
+	return (intptr_t)args[0];
 }
 
-static int vm_prot(int prot, uint32_t *result)
+/* Converts mmap protection bits into HAL space protection. */
+static int
+vm_prot(
+	int prot,
+	uint32_t *result)
 {
-	uint32_t value = 0;
-	if (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) return EINVAL;
-	if ((prot & (PROT_WRITE | PROT_EXEC)) == (PROT_WRITE | PROT_EXEC)) return EACCES;
-	if (prot & PROT_READ) value |= HAL_SPACE_READ;
-	if (prot & PROT_WRITE) value |= HAL_SPACE_WRITE;
-	if (prot & PROT_EXEC) value |= HAL_SPACE_EXEC;
+	uint32_t value;
+
+	value = 0;
+	if (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC))
+		return EINVAL;
+	if ((prot & (PROT_WRITE | PROT_EXEC)) == (PROT_WRITE | PROT_EXEC))
+		return EACCES;
+	if (prot & PROT_READ)
+		value |= HAL_SPACE_READ;
+	if (prot & PROT_WRITE)
+		value |= HAL_SPACE_WRITE;
+	if (prot & PROT_EXEC)
+		value |= HAL_SPACE_EXEC;
 	*result = value;
 	return 0;
 }
 
-static intptr_t sys_mmap_call(const uintptr_t args[6])
+/* Handles mmap(2). */
+static intptr_t
+sys_mmap_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct file *file = NULL;
+	struct process *process;
+	struct file *file;
 	uintptr_t mapped;
 	uint32_t prot;
-	size_t data_size = 0;
+	size_t data_size;
 	int fixed;
 	int shared;
 	int error;
-	if (process == NULL || process->vmspace == NULL) return -EINVAL;
+	size_t size;
+
+	process = current_process();
+	file = NULL;
+	data_size = 0;
+
+	/* Validates the flags, the length, and the alignment. */
+	if (process == NULL || process->vmspace == NULL)
+		return -EINVAL;
 	if ((args[3] & (MAP_PRIVATE | MAP_SHARED)) != MAP_PRIVATE &&
 	    (args[3] & (MAP_PRIVATE | MAP_SHARED)) != MAP_SHARED)
 		return -EINVAL;
@@ -1803,6 +2873,8 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 		return -EINVAL;
 	if ((args[3] & MAP_FIXED_NOREPLACE) != 0 && args[0] == 0)
 		return -EINVAL;
+
+	/* A file mapping needs a readable regular file and a bounded data size. */
 	if ((args[3] & MAP_ANONYMOUS) != 0) {
 		if ((int)args[4] != -1 || args[5] != 0)
 			return -EINVAL;
@@ -1812,7 +2884,8 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 		file = filedesc_get_ref(process->fd, (int)args[4]);
 		if (file == NULL)
 			return -EBADF;
-		if (file->f_inode == NULL || file->f_inode->i_type != INODE_REG ||
+		if (file->f_inode == NULL ||
+		    file->f_inode->i_type != INODE_REG ||
 		    (file_status_flags_get(file) & O_ACCMODE) == O_WRONLY) {
 			(void)file_close(file);
 			return -EACCES;
@@ -1829,15 +2902,17 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 		if (data_size > args[1])
 			data_size = args[1];
 	}
+
+	/* Picks the mapping primitive for the flag combination. */
 	error = vm_prot((int)args[2], &prot);
 	if (error == 0 && fixed && file != NULL) {
-		size_t size = (args[1] + SYSCALL_PAGE_MASK) &
+		size = (args[1] + SYSCALL_PAGE_MASK) &
 		    ~SYSCALL_PAGE_MASK;
 		error = vmspace_map_file_fixed(process->vmspace, args[0], size,
 		    prot, file, (off_t)args[5], data_size, shared, NULL);
 		mapped = args[0];
 	} else if (error == 0 && fixed) {
-		size_t size = (args[1] + SYSCALL_PAGE_MASK) &
+		size = (args[1] + SYSCALL_PAGE_MASK) &
 		    ~SYSCALL_PAGE_MASK;
 		error = vmspace_map_anon_fixed(process->vmspace, args[0], size,
 		    prot, shared, NULL);
@@ -1856,7 +2931,7 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 		mapped = args[0];
 	} else if (error == 0 &&
 	    (args[3] & MAP_FIXED_NOREPLACE) != 0) {
-		size_t size = (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK;
+		size = (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK;
 		error = vmspace_map_anon_fixed_noreplace(process->vmspace,
 			args[0], size, prot, NULL);
 		mapped = args[0];
@@ -1875,114 +2950,198 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 	}
 	if (file != NULL)
 		(void)file_close(file);
-	return error == 0 ? (intptr_t)mapped : -error;
+	if (error != 0)
+		return -error;
+	return (intptr_t)mapped;
 }
 
-static intptr_t sys_munmap_call(const uintptr_t args[6])
+/* Handles munmap(2). */
+static intptr_t
+sys_munmap_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	size_t size;
 	int error;
+
+	process = current_process();
 	if (args[1] == 0 || args[1] > SIZE_MAX - SYSCALL_PAGE_MASK)
 		return -EINVAL;
 	size = (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK;
-	error = process == NULL ? EINVAL :
-		vmspace_unmap(process->vmspace, args[0], size);
-	return error == 0 ? 0 : -error;
+	if (process == NULL)
+		error = EINVAL;
+	else
+		error = vmspace_unmap(process->vmspace, args[0], size);
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_mprotect_call(const uintptr_t args[6])
+/* Handles mprotect(2). */
+static intptr_t
+sys_mprotect_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	uint32_t prot;
-	int error = vm_prot((int)args[2], &prot);
+	int error;
+
+	process = current_process();
+	error = vm_prot((int)args[2], &prot);
 	if (error == 0 && (args[1] == 0 ||
 	    args[1] > SIZE_MAX - SYSCALL_PAGE_MASK))
 		error = EINVAL;
-	if (error == 0)
-		error = process == NULL ? EINVAL :
-			vmspace_protect(process->vmspace, args[0],
+	if (error == 0) {
+		if (process == NULL)
+			error = EINVAL;
+		else
+			error = vmspace_protect(process->vmspace, args[0],
 			    (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK, prot);
-	return error == 0 ? 0 : -error;
+	}
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_msync_call(const uintptr_t args[6])
+/* Handles msync(2). */
+static intptr_t
+sys_msync_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	size_t size;
 	int error;
+
+	process = current_process();
 	if (args[1] == 0 || args[1] > SIZE_MAX - SYSCALL_PAGE_MASK)
 		return -EINVAL;
 	size = (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK;
-	error = process == NULL ? EINVAL : vmspace_sync(process->vmspace,
-	    args[0], size, (int)args[2]);
-	return error == 0 ? 0 : -error;
+	if (process == NULL)
+		error = EINVAL;
+	else
+		error = vmspace_sync(process->vmspace, args[0], size,
+		    (int)args[2]);
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_brk_call(const uintptr_t args[6])
+/* Handles brk(2). */
+static intptr_t
+sys_brk_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	uintptr_t result;
 	int error;
 
+	process = current_process();
 	if (process == NULL || process->vmspace == NULL)
 		return -EINVAL;
 	error = vmspace_brk(process->vmspace, args[0], &result);
-	return error == 0 ? (intptr_t)result : -error;
+	if (error != 0)
+		return -error;
+	return (intptr_t)result;
 }
 
-static intptr_t sys_ioctl_call(const uintptr_t args[6])
+/* Handles ioctl(2). */
+static intptr_t
+sys_ioctl_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct file *file = process != NULL ?
-	    filedesc_get_ref(process->fd, (int)args[0]) : NULL;
-	int error = file == NULL ? EBADF : file_ioctl(file, args[1], args[2]);
+	struct process *process;
+	struct file *file;
+	int error;
+
+	process = current_process();
+	if (process != NULL)
+		file = filedesc_get_ref(process->fd, (int)args[0]);
+	else
+		file = NULL;
+	if (file == NULL)
+		error = EBADF;
+	else
+		error = file_ioctl(file, args[1], args[2]);
+
 	if (file != NULL)
 		(void)file_close(file);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_clock_gettime_call(const uintptr_t args[6])
+/* Handles clock_gettime(2). */
+static intptr_t
+sys_clock_gettime_call(
+	const uintptr_t args[6])
 {
 	struct timespec time;
-	int error = kern_clock_gettime((clockid_t)args[0], &time);
-	if (error != 0) return -error;
+	int error;
+
+	error = kern_clock_gettime((clockid_t)args[0], &time);
+	if (error != 0)
+		return -error;
 	error = copyout(&time, args[1], sizeof(time));
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_clock_getres_call(const uintptr_t args[6])
+/* Handles clock_getres(2). */
+static intptr_t
+sys_clock_getres_call(
+	const uintptr_t args[6])
 {
 	struct timespec resolution;
-	int error = kern_clock_getres((clockid_t)args[0],
-	    args[1] == 0 ? NULL : &resolution);
+	struct timespec *resolution_argument;
+	int error;
+
+	if (args[1] == 0)
+		resolution_argument = NULL;
+	else
+		resolution_argument = &resolution;
+	error = kern_clock_getres((clockid_t)args[0], resolution_argument);
 	if (error == 0 && args[1] != 0)
 		error = copyout(&resolution, args[1], sizeof(resolution));
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_clock_settime_call(const uintptr_t args[6])
+/* Handles clock_settime(2). */
+static intptr_t
+sys_clock_settime_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct timespec requested;
 	int error;
 
+	process = current_process();
 	if (process == NULL || process->cred == NULL)
 		return -EINVAL;
 	error = copyin(args[1], &requested, sizeof(requested));
 	if (error == 0)
 		error = kern_clock_settime((clockid_t)args[0], &requested,
 		    process->cred);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_timer_create_call(const uintptr_t args[6])
+/* Handles timer_create(2). */
+static intptr_t
+sys_timer_create_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct sigevent event;
-	const struct sigevent *eventp = NULL;
+	const struct sigevent *eventp;
 	timer_t id;
 	int error;
+
+	process = current_process();
+	eventp = NULL;
 
 	if (process == NULL || args[2] == 0)
 		return -EINVAL;
@@ -1992,6 +3151,8 @@ static intptr_t sys_timer_create_call(const uintptr_t args[6])
 			return -error;
 		eventp = &event;
 	}
+
+	/* A timer whose id cannot be reported is deleted again. */
 	error = process_timer_create(process, (clockid_t)args[0], eventp, &id);
 	if (error != 0)
 		return -error;
@@ -2003,71 +3164,119 @@ static intptr_t sys_timer_create_call(const uintptr_t args[6])
 	return 0;
 }
 
-static intptr_t sys_timer_delete_call(const uintptr_t args[6])
+/* Handles timer_delete(2). */
+static intptr_t
+sys_timer_delete_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	int error = process == NULL ? EINVAL :
-	    process_timer_delete(process, (timer_t)args[0]);
-	return error == 0 ? 0 : -error;
-}
-
-static intptr_t sys_timer_settime_call(const uintptr_t args[6])
-{
-	struct process *process = current_process();
-	struct itimerspec requested, previous;
+	struct process *process;
 	int error;
 
+	process = current_process();
+	if (process == NULL)
+		error = EINVAL;
+	else
+		error = process_timer_delete(process, (timer_t)args[0]);
+
+	if (error != 0)
+		return -error;
+	return 0;
+}
+
+/* Handles timer_settime(2). */
+static intptr_t
+sys_timer_settime_call(
+	const uintptr_t args[6])
+{
+	struct process *process;
+	struct itimerspec requested;
+	struct itimerspec previous;
+	struct itimerspec *previous_argument;
+	int error;
+
+	process = current_process();
 	if (process == NULL || args[2] == 0)
 		return -EINVAL;
+	if (args[3] == 0)
+		previous_argument = NULL;
+	else
+		previous_argument = &previous;
 	error = copyin(args[2], &requested, sizeof(requested));
 	if (error == 0)
 		error = process_timer_settime(process, (timer_t)args[0],
-		    (int)args[1], &requested, args[3] == 0 ? NULL : &previous);
+		    (int)args[1], &requested, previous_argument);
 	if (error == 0 && args[3] != 0)
 		error = copyout(&previous, args[3], sizeof(previous));
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_timer_gettime_call(const uintptr_t args[6])
+/* Handles timer_gettime(2). */
+static intptr_t
+sys_timer_gettime_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct itimerspec current;
 	int error;
 
+	process = current_process();
 	if (process == NULL || args[1] == 0)
 		return -EINVAL;
 	error = process_timer_gettime(process, (timer_t)args[0], &current);
 	if (error == 0)
 		error = copyout(&current, args[1], sizeof(current));
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_timer_getoverrun_call(const uintptr_t args[6])
+/* Handles timer_getoverrun(2). */
+static intptr_t
+sys_timer_getoverrun_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	int overrun, error;
+	struct process *process;
+	int overrun;
+	int error;
 
+	process = current_process();
 	if (process == NULL)
 		return -EINVAL;
 	error = process_timer_getoverrun(process, (timer_t)args[0], &overrun);
-	return error == 0 ? overrun : -error;
+	if (error != 0)
+		return -error;
+	return overrun;
 }
 
-static intptr_t sys_mount_call(const uintptr_t args[6])
+/* Handles mount(2). */
+static intptr_t
+sys_mount_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct mount_args requested;
 	struct fat_mount_args internal;
-	char type[NAME_MAX + 1U], directory[PATH_MAX];
-	int flags = (int)args[2];
+	struct fat_mount_args *mount_arguments;
+	char type[NAME_MAX + 1U];
+	char directory[PATH_MAX];
+	int flags;
+	int mount_flags;
 	int error;
 
+	process = current_process();
+	flags = (int)args[2];
+
+	/* Only the superuser mounts, and only with the supported flags. */
 	if (process == NULL || process->cred == NULL)
 		return -EINVAL;
 	if (!cred_is_superuser(process->cred))
 		return -EPERM;
 	if ((flags & ~(int)(MNT_RDONLY | MNT_NOSUID)) != 0)
 		return -EINVAL;
+
+	/* Copies the type, the directory, and the optional arguments. */
 	error = copyinstr(args[0], type, sizeof(type), NULL);
 	if (error == 0)
 		error = copyinstr(args[1], directory, sizeof(directory), NULL);
@@ -2082,20 +3291,33 @@ static intptr_t sys_mount_call(const uintptr_t args[6])
 		if (error == 0 && requested.fspec[0] != '\0')
 			internal.fspec = requested.fspec;
 	}
-	if (error == 0)
-		error = mount(type, directory,
-		    ((flags & MNT_RDONLY) != 0 ? MOUNT_READ_ONLY : 0) |
-		    ((flags & MNT_NOSUID) != 0 ? MOUNT_NOSUID : 0),
-		    internal.fspec != NULL ? &internal : NULL);
-	return error == 0 ? 0 : -error;
+	if (error == 0) {
+		mount_flags = 0;
+		if ((flags & MNT_RDONLY) != 0)
+			mount_flags |= MOUNT_READ_ONLY;
+		if ((flags & MNT_NOSUID) != 0)
+			mount_flags |= MOUNT_NOSUID;
+		if (internal.fspec != NULL)
+			mount_arguments = &internal;
+		else
+			mount_arguments = NULL;
+		error = mount(type, directory, mount_flags, mount_arguments);
+	}
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_unmount_call(const uintptr_t args[6])
+/* Handles unmount(2). */
+static intptr_t
+sys_unmount_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	char directory[PATH_MAX];
 	int error;
 
+	process = current_process();
 	if (process == NULL || process->cred == NULL)
 		return -EINVAL;
 	if (!cred_is_superuser(process->cred))
@@ -2105,20 +3327,31 @@ static intptr_t sys_unmount_call(const uintptr_t args[6])
 	error = copyinstr(args[0], directory, sizeof(directory), NULL);
 	if (error == 0)
 		error = unmount(directory, 0);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_statvfs_call(const uintptr_t args[6], int by_fd)
+/* Handles statvfs(2) and fstatvfs(2). */
+static intptr_t
+sys_statvfs_call(
+	const uintptr_t args[6],
+	int by_fd)
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct statvfs status;
 	struct path path;
-	struct file *file = NULL;
+	struct file *file;
 	char pathname[PATH_MAX];
 	int error;
 
+	process = current_process();
+	file = NULL;
+
 	if (process == NULL || process->cwdi == NULL)
 		return -EINVAL;
+
+	/* Finds the mount by descriptor or by path. */
 	if (by_fd) {
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
@@ -2137,84 +3370,156 @@ static intptr_t sys_statvfs_call(const uintptr_t args[6], int by_fd)
 		(void)file_close(file);
 	if (error == 0)
 		error = copyout(&status, args[1], sizeof(status));
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles quotactl(2). */
 static intptr_t
-sys_quotactl_call(const uintptr_t args[6])
+sys_quotactl_call(
+	const uintptr_t args[6])
 {
-	struct process *process=current_process();
+	struct process *process;
 	struct quota_control request;
 	struct path path;
 	char pathname[PATH_MAX];
-	int error,allowed=0;
-	if(process==NULL||process->cred==NULL||process->cwdi==NULL||args[1]==0)
+	int error;
+	int allowed;
+
+	process = current_process();
+	allowed = 0;
+
+	/* Copies and validates the request. */
+	if (process == NULL ||
+	    process->cred == NULL ||
+	    process->cwdi == NULL ||
+	    args[1] == 0)
 		return -EINVAL;
-	error=copyinstr(args[0],pathname,sizeof(pathname),NULL);
-	if(error==0)error=copyin(args[1],&request,sizeof(request));
-	if(error==0&&(request.size!=sizeof(request)||
-	    request.version!=ZEDBSD_QUOTA_VERSION||
-	    request.type>ZEDBSD_QUOTA_GROUP||
-	    request.command<ZEDBSD_QUOTA_GET||
-	    request.command>ZEDBSD_QUOTA_SYNC))error=EINVAL;
-	if(error==0) {
-		allowed=cred_is_superuser(process->cred);
-		if(request.command==ZEDBSD_QUOTA_GET&&!allowed) {
-			if(request.type==ZEDBSD_QUOTA_USER)
-				allowed=request.id==process->cred->ruid||
-				    request.id==process->cred->euid||
-				    request.id==process->cred->suid;
-			else allowed=cred_in_group(process->cred,(gid_t)request.id);
+	error = copyinstr(args[0], pathname, sizeof(pathname), NULL);
+	if (error == 0)
+		error = copyin(args[1], &request, sizeof(request));
+	if (error == 0 &&
+	    (request.size != sizeof(request) ||
+	    request.version != ZEDBSD_QUOTA_VERSION ||
+	    request.type > ZEDBSD_QUOTA_GROUP ||
+	    request.command < ZEDBSD_QUOTA_GET ||
+	    request.command > ZEDBSD_QUOTA_SYNC))
+		error = EINVAL;
+
+	/* An unprivileged caller may only query its own quotas. */
+	if (error == 0) {
+		allowed = cred_is_superuser(process->cred);
+		if (request.command == ZEDBSD_QUOTA_GET && !allowed) {
+			if (request.type == ZEDBSD_QUOTA_USER) {
+				allowed = 0;
+				if (request.id == process->cred->ruid ||
+				    request.id == process->cred->euid ||
+				    request.id == process->cred->suid)
+					allowed = 1;
+			} else {
+				allowed = cred_in_group(process->cred,
+				    (gid_t)request.id);
+			}
 		}
-		if(!allowed)error=EPERM;
+		if (!allowed)
+			error = EPERM;
 	}
-	if(error==0)error=namei_path_at(process->cwdi,pathname,&path);
-	if(error==0){error=mount_quotactl(path.p_mount,&request);path_release(&path);}
-	if(error==0)error=copyout(&request,args[1],sizeof(request));
-	return error==0?0:-error;
+
+	/* Runs the request on the path's mount and copies it back. */
+	if (error == 0)
+		error = namei_path_at(process->cwdi, pathname, &path);
+	if (error == 0) {
+		error = mount_quotactl(path.p_mount, &request);
+		path_release(&path);
+	}
+	if (error == 0)
+		error = copyout(&request, args[1], sizeof(request));
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles snapshotctl(2). */
 static intptr_t
-sys_snapshotctl_call(const uintptr_t args[6])
+sys_snapshotctl_call(
+	const uintptr_t args[6])
 {
-	struct process *process=current_process();struct snapshot_control request;
-	struct path path;char pathname[PATH_MAX];int error;
-	if(process==NULL||process->cred==NULL||process->cwdi==NULL||args[1]==0)
+	struct process *process;
+	struct snapshot_control request;
+	struct path path;
+	char pathname[PATH_MAX];
+	int error;
+
+	process = current_process();
+
+	/* Only the superuser controls snapshots. */
+	if (process == NULL ||
+	    process->cred == NULL ||
+	    process->cwdi == NULL ||
+	    args[1] == 0)
 		return -EINVAL;
-	if(!cred_is_superuser(process->cred))return -EPERM;
-	error=copyinstr(args[0],pathname,sizeof(pathname),NULL);
-	if(error==0)error=copyin(args[1],&request,sizeof(request));
-	if(error==0&&(request.size!=sizeof(request)||
-	    request.version!=ZEDBSD_SNAPSHOT_VERSION||
-	    request.command<ZEDBSD_SNAPSHOT_CREATE||
-	    request.command>ZEDBSD_SNAPSHOT_STATUS))error=EINVAL;
-	if(error==0)error=namei_path_at(process->cwdi,pathname,&path);
-	if(error==0){error=mount_snapshotctl(path.p_mount,&request);path_release(&path);}
-	if(error==0)error=copyout(&request,args[1],sizeof(request));
-	return error==0?0:-error;
+	if (!cred_is_superuser(process->cred))
+		return -EPERM;
+
+	/* Copies and validates the request, then runs it on the path's mount. */
+	error = copyinstr(args[0], pathname, sizeof(pathname), NULL);
+	if (error == 0)
+		error = copyin(args[1], &request, sizeof(request));
+	if (error == 0 &&
+	    (request.size != sizeof(request) ||
+	    request.version != ZEDBSD_SNAPSHOT_VERSION ||
+	    request.command < ZEDBSD_SNAPSHOT_CREATE ||
+	    request.command > ZEDBSD_SNAPSHOT_STATUS))
+		error = EINVAL;
+	if (error == 0)
+		error = namei_path_at(process->cwdi, pathname, &path);
+	if (error == 0) {
+		error = mount_snapshotctl(path.p_mount, &request);
+		path_release(&path);
+	}
+	if (error == 0)
+		error = copyout(&request, args[1], sizeof(request));
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-static intptr_t sys_nanosleep_call(const uintptr_t args[6])
+/* Handles nanosleep(2). */
+static intptr_t
+sys_nanosleep_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct timespec request;
 	struct timespec remaining;
-	uint64_t ticks, deadline, left;
+	uint64_t ticks;
+	uint64_t deadline;
+	uint64_t left;
 	unsigned long irq;
-	int error = copyin(args[0], &request, sizeof(request));
+	int error;
+	uint64_t now;
 
+	process = current_process();
+	error = copyin(args[0], &request, sizeof(request));
+
+	/* Converts the request into a deadline. */
 	if (process == NULL || curthread == NULL)
 		return -EINVAL;
-	if (error != 0) return -error;
+	if (error != 0)
+		return -error;
 	error = kern_duration_to_ticks_ceil(&request, &ticks);
-	if (error != 0) return -error;
-	if (ticks == 0) return 0;
+	if (error != 0)
+		return -error;
+	if (ticks == 0)
+		return 0;
 	error = kern_deadline_after(sched_ticks(), ticks, &deadline);
-	if (error != 0) return -error;
+	if (error != 0)
+		return -error;
+
+	/* Sleeps until the deadline, a signal, a stop, or termination. */
 	irq = spin_lock_irqsave(&process->lock);
 	for (;;) {
-		uint64_t now;
-
 		now = sched_ticks();
 		if (now >= deadline) {
 			spin_unlock_irqrestore(&process->lock, irq);
@@ -2240,6 +3545,8 @@ static intptr_t sys_nanosleep_call(const uintptr_t args[6])
 			irq = spin_lock_irqsave(&process->lock);
 			continue;
 		}
+
+		/* Reports the remaining time to a caller interrupted by a signal. */
 		left = kern_deadline_remaining(sched_ticks(), deadline);
 		if (args[1] != 0) {
 			remaining.tv_sec = (time_t)(left / KERN_CLOCK_HZ);
@@ -2253,79 +3560,114 @@ static intptr_t sys_nanosleep_call(const uintptr_t args[6])
 	}
 }
 
-struct syscall_exec_args {
-	char *argv[ZEDBSD_SPAWN_ARG_MAX + 1U];
-	char *envp[ZEDBSD_SPAWN_ENV_MAX + 1U];
-	char strings[ZEDBSD_SPAWN_STRING_MAX];
-	size_t used;
-};
-
+/* Copies a NULL-terminated user string vector into the exec argument block. */
 static int
-copy_exec_vector(uintptr_t address, char **vector, unsigned maximum,
-		 struct syscall_exec_args *copy, int optional)
+copy_exec_vector(
+	uintptr_t address,
+	char **vector,
+	unsigned maximum,
+	struct syscall_exec_args *copy,
+	int optional)
 {
 	unsigned index;
+	size_t length;
+	int error;
+#ifdef ZEDBSD_USER_ABI_LP64
+	uintptr_t pointer;
+#else
+	uint32_t pointer;
+#endif
+
+	/* A missing vector is allowed only where the caller says so. */
 	if (address == 0) {
 		if (!optional)
 			return EFAULT;
 		vector[0] = NULL;
 		return 0;
 	}
+
+	/* Copies each string until the terminating null pointer. */
 	for (index = 0; index < maximum; index++) {
-#ifdef ZEDBSD_USER_ABI_LP64
-		uintptr_t pointer;
-#else
-		uint32_t pointer;
-#endif
-		size_t length;
-		int error = copyin(address + index * sizeof(pointer), &pointer,
+		error = copyin(address + index * sizeof(pointer), &pointer,
 				   sizeof(pointer));
 		if (error != 0)
 			return error;
 		if (pointer == 0) {
 			vector[index] = NULL;
-			return index == 0 && !optional ? EINVAL : 0;
+			if (index == 0 && !optional)
+				return EINVAL;
+			return 0;
 		}
 		if (copy->used >= sizeof(copy->strings))
 			return E2BIG;
 		vector[index] = copy->strings + copy->used;
 		error = copyinstr(pointer, vector[index],
 				  sizeof(copy->strings) - copy->used, &length);
-		if (error != 0)
-			return error == ENAMETOOLONG ? E2BIG : error;
+		if (error != 0) {
+			if (error == ENAMETOOLONG)
+				return E2BIG;
+			return error;
+		}
 		copy->used += length;
 	}
 	return E2BIG;
 }
 
+/* Handles pread(2) and pwrite(2) through a bounce buffer. */
 static SYSCALL_EXT intptr_t
-sys_positional_call(const uintptr_t args[6], int writing)
+sys_positional_call(
+	const uintptr_t args[6],
+	int writing)
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct file *file;
 	struct file_io io;
 	struct uaccess_pin pin;
 	uint8_t buffer[SYSCALL_IO_CHUNK];
-	size_t done = 0, length = (size_t)args[2];
-	off_t offset = (off_t)args[3];
+	size_t done;
+	size_t length;
+	off_t offset;
+	uint32_t access;
+	enum file_io_kind operation;
+	struct ucred *credential;
 	intptr_t result;
 	int error;
-	if (process == NULL ||
-	    (file = filedesc_get_ref(process->fd, (int)args[0])) == NULL)
+	size_t chunk;
+	int limited;
+	ssize_t count;
+
+	process = current_process();
+	done = 0;
+	length = (size_t)args[2];
+	offset = (off_t)args[3];
+
+	/* Pins the user buffer and starts the transfer at the offset. */
+	if (process == NULL)
+		return -EBADF;
+	file = filedesc_get_ref(process->fd, (int)args[0]);
+	if (file == NULL)
 		return -EBADF;
 	if (offset < 0) {
 		(void)file_close(file);
 		return -EINVAL;
 	}
-	error = uaccess_pin(args[1], length,
-	    writing ? HAL_SPACE_READ : HAL_SPACE_WRITE, &pin);
+	if (writing)
+		access = HAL_SPACE_READ;
+	else
+		access = HAL_SPACE_WRITE;
+	error = uaccess_pin(args[1], length, access, &pin);
 	if (error != 0) {
 		(void)file_close(file);
 		return -error;
 	}
-	error = file_io_begin_cred(file,
-	    writing ? FILE_IO_PWRITE : FILE_IO_PREAD, offset, 0,
-	    writing ? process->cred : NULL, &io);
+	if (writing) {
+		operation = FILE_IO_PWRITE;
+		credential = process->cred;
+	} else {
+		operation = FILE_IO_PREAD;
+		credential = NULL;
+	}
+	error = file_io_begin_cred(file, operation, offset, 0, credential, &io);
 	if (error != 0) {
 		uaccess_unpin(&pin);
 		(void)file_close(file);
@@ -2334,11 +3676,14 @@ sys_positional_call(const uintptr_t args[6], int writing)
 	if (writing)
 		file_io_set_growth_limit(&io,
 		    resource_limit_current(process, RLIMIT_FSIZE));
+
+	/* Copies one chunk at a time in the requested direction. */
 	while (done < length) {
-		size_t chunk = length - done > sizeof(buffer) ?
-		    sizeof(buffer) : length - done;
-		int limited = 0;
-		ssize_t count;
+		if (length - done > sizeof(buffer))
+			chunk = sizeof(buffer);
+		else
+			chunk = length - done;
+		limited = 0;
 		if (writing) {
 			error = copyin_pinned(&pin, done, buffer, chunk);
 			if (error != 0)
@@ -2351,7 +3696,10 @@ sys_positional_call(const uintptr_t args[6], int writing)
 			count = file_io_transfer(&io, buffer, chunk);
 		}
 		if (count < 0) {
-			result = done != 0 ? (intptr_t)done : count;
+			if (done != 0)
+				result = (intptr_t)done;
+			else
+				result = count;
 			goto out;
 		}
 		if (count == 0)
@@ -2370,7 +3718,10 @@ sys_positional_call(const uintptr_t args[6], int writing)
 	result = (intptr_t)done;
 	goto out;
 copy_error:
-	result = done != 0 ? (intptr_t)done : -error;
+	if (done != 0)
+		result = (intptr_t)done;
+	else
+		result = -error;
 out:
 	file_io_end(&io);
 	uaccess_unpin(&pin);
@@ -2378,25 +3729,42 @@ out:
 	return result;
 }
 
-#ifdef ZEDBSD_USER_ABI_LP64
-struct syscall_iovec { uint64_t base, length; };
-#else
-struct syscall_iovec { uint32_t base, length; };
-#endif
-
+/* Handles readv(2) and writev(2) through a bounce buffer. */
 static SYSCALL_EXT intptr_t
-sys_vector_call(const uintptr_t args[6], int writing)
+sys_vector_call(
+	const uintptr_t args[6],
+	int writing)
 {
 	struct syscall_iovec vectors[16];
 	struct uaccess_pin pins[16];
-	struct process *process = current_process();
-	struct file *file = NULL;
+	struct process *process;
+	struct file *file;
 	struct file_io io;
 	uint8_t buffer[SYSCALL_IO_CHUNK];
-	int count = (int)args[2], i, pinned = 0;
-	intptr_t total = 0;
-	int io_started = 0;
+	int count;
+	int i;
+	int pinned;
+	intptr_t total;
+	int io_started;
 	int error;
+	size_t amount;
+	size_t length;
+	size_t done;
+	size_t chunk;
+	int limited;
+	ssize_t result;
+	uint32_t access;
+	enum file_io_kind operation;
+	struct ucred *credential;
+
+	process = current_process();
+	file = NULL;
+	count = (int)args[2];
+	pinned = 0;
+	total = 0;
+	io_started = 0;
+
+	/* Copies the vector and pins every element. */
 	if (process == NULL || process->fd == NULL)
 		return -EBADF;
 	if (count < 0 || count > 16)
@@ -2408,40 +3776,54 @@ sys_vector_call(const uintptr_t args[6], int writing)
 	error = copyin(args[1], vectors, (size_t)count * sizeof(vectors[0]));
 	if (error != 0)
 		return -error;
+	if (writing)
+		access = HAL_SPACE_READ;
+	else
+		access = HAL_SPACE_WRITE;
 	for (i = 0; i < count; i++) {
 		if (vectors[i].length > (uint64_t)SSIZE_MAX - (uint64_t)total) {
 			error = EINVAL;
 			goto fail;
 		}
 		error = uaccess_pin((uintptr_t)vectors[i].base,
-		    (size_t)vectors[i].length,
-		    writing ? HAL_SPACE_READ : HAL_SPACE_WRITE, &pins[i]);
+		    (size_t)vectors[i].length, access, &pins[i]);
 		if (error != 0)
 			goto fail;
 		pinned++;
 		total += (intptr_t)vectors[i].length;
 	}
+
+	/* Starts the transfer under the size limit. */
 	file = filedesc_get_ref(process->fd, (int)args[0]);
 	if (file == NULL) {
 		error = EBADF;
 		goto fail;
 	}
-	error = file_io_begin_cred(file,
-	    writing ? FILE_IO_WRITE : FILE_IO_READ, 0, 0,
-	    writing ? process->cred : NULL, &io);
+	if (writing) {
+		operation = FILE_IO_WRITE;
+		credential = process->cred;
+	} else {
+		operation = FILE_IO_READ;
+		credential = NULL;
+	}
+	error = file_io_begin_cred(file, operation, 0, 0, credential, &io);
 	if (error != 0)
 		goto fail;
 	io_started = 1;
 	if (writing)
 		file_io_set_growth_limit(&io,
 		    resource_limit_current(process, RLIMIT_FSIZE));
-	/* POSIX requires a writev no larger than PIPE_BUF to be indivisible.
-	 * Coalesce it before the one and only pipe backend call. */
+
+	/*
+	 * POSIX requires a writev no larger than PIPE_BUF to be
+	 * indivisible.  Coalesce it before the one and only pipe backend
+	 * call.
+	 */
 	if (writing && pipe_file_is_pipe(file) &&
 	    (uint64_t)total <= KERN_PIPE_BUF) {
-		size_t amount = 0;
+		amount = 0;
 		for (i = 0; i < count; i++) {
-			size_t length = (size_t)vectors[i].length;
+			length = (size_t)vectors[i].length;
 			error = copyin_pinned(&pins[i], 0, buffer + amount, length);
 			if (error != 0) {
 				total = -error;
@@ -2452,18 +3834,23 @@ sys_vector_call(const uintptr_t args[6], int writing)
 		total = file_io_transfer(&io, buffer, amount);
 		goto out;
 	}
+
+	/* Transfers each element one chunk at a time. */
 	total = 0;
 	for (i = 0; i < count; i++) {
-		size_t done = 0, length = (size_t)vectors[i].length;
+		done = 0;
+		length = (size_t)vectors[i].length;
 		while (done < length) {
-			size_t chunk = length - done > sizeof(buffer) ?
-			    sizeof(buffer) : length - done;
-			int limited = 0;
-			ssize_t result;
+			if (length - done > sizeof(buffer))
+				chunk = sizeof(buffer);
+			else
+				chunk = length - done;
+			limited = 0;
 			if (writing) {
 				error = copyin_pinned(&pins[i], done, buffer, chunk);
 				if (error != 0) {
-					total = total != 0 ? total : -error;
+					if (total == 0)
+						total = -error;
 					goto out;
 				}
 			}
@@ -2474,7 +3861,8 @@ sys_vector_call(const uintptr_t args[6], int writing)
 					(void)signal_send_thread(curthread, SIGXFSZ);
 			}
 			if (result < 0) {
-				total = total != 0 ? total : result;
+				if (total == 0)
+					total = result;
 				goto out;
 			}
 			if (result == 0)
@@ -2483,7 +3871,8 @@ sys_vector_call(const uintptr_t args[6], int writing)
 				error = copyout_pinned(&pins[i], done, buffer,
 				    (size_t)result);
 				if (error != 0) {
-					total = total != 0 ? total : -error;
+					if (total == 0)
+						total = -error;
 					goto out;
 				}
 			}
@@ -2507,56 +3896,103 @@ out:
 		file_io_end(&io);
 	if (file != NULL)
 		(void)file_close(file);
-	while (pinned != 0)
-		uaccess_unpin(&pins[--pinned]);
+	while (pinned != 0) {
+		pinned--;
+		uaccess_unpin(&pins[pinned]);
+	}
 	return total;
 }
 
+/* Handles fsync(2) and fdatasync(2). */
 static intptr_t
-sys_fsync_call(const uintptr_t args[6])
+sys_fsync_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct file *file = process != NULL ?
-	    filedesc_get_ref(process->fd, (int)args[0]) : NULL;
-	int error = file == NULL ? EBADF :
-	    file_vm_inode(file) == NULL ? EINVAL :
-	    vm_object_sync_inode(file_vm_inode(file));
+	struct process *process;
+	struct file *file;
+	struct inode *vm_inode;
+	int error;
+
+	process = current_process();
+	if (process != NULL)
+		file = filedesc_get_ref(process->fd, (int)args[0]);
+	else
+		file = NULL;
+
+	/* Writes the shared cache pages back first. */
+	if (file == NULL) {
+		error = EBADF;
+	} else {
+		vm_inode = file_vm_inode(file);
+		if (vm_inode == NULL)
+			error = EINVAL;
+		else
+			error = vm_object_sync_inode(vm_inode);
+	}
+
 	/* Then flush this descriptor's own backend/open-file state. */
 	if (error == 0 && file != NULL)
 		error = file_fsync(file);
 	if (file != NULL)
 		(void)file_close(file);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles stat(2), lstat(2), and fstatat(2). */
 static intptr_t
-sys_stat_path_call(const uintptr_t args[6], int at, int nofollow)
+sys_stat_path_call(
+	const uintptr_t args[6],
+	int at,
+	int nofollow)
 {
-	struct process *process = current_process();
-	struct cwdinfo temporary, *context;
-	struct file *held = NULL;
+	struct process *process;
+	struct cwdinfo temporary;
+	struct cwdinfo *context;
+	struct file *held;
 	struct path path;
 	struct stat status;
 	char pathname[PATH_MAX];
-	uintptr_t pathname_address = at ? args[1] : args[0];
-	uintptr_t status_address = at ? args[2] : args[1];
+	uintptr_t pathname_address;
+	uintptr_t status_address;
+	int dirfd;
+	unsigned namei_flags;
 	int error;
+
+	process = current_process();
+	held = NULL;
+	if (at) {
+		pathname_address = args[1];
+		status_address = args[2];
+		dirfd = (int)args[0];
+	} else {
+		pathname_address = args[0];
+		status_address = args[1];
+		dirfd = AT_FDCWD;
+	}
+
 	if (process == NULL || process->cwdi == NULL)
 		return -EINVAL;
 	if (at && ((int)args[3] & ~AT_SYMLINK_NOFOLLOW) != 0)
 		return -EINVAL;
+
+	/* Resolves the path in the requested context. */
 	error = copyinstr(pathname_address, pathname, sizeof(pathname), NULL);
 	if (error == 0 && pathname[0] == '/') {
 		context = process->cwdi;
 		held = NULL;
 	} else if (error == 0) {
-		error = syscall_context_at(process, at ? (int)args[0] : AT_FDCWD,
-		    &temporary, &context, &held);
+		error = syscall_context_at(process, dirfd, &temporary, &context,
+		    &held);
 	}
-	if (error == 0)
-		error = namei_path_flags_at(context, pathname,
-			nofollow || (at && ((int)args[3] & AT_SYMLINK_NOFOLLOW) != 0) ?
-			NAMEI_NOFOLLOW_FINAL : 0, &path);
+	if (error == 0) {
+		namei_flags = 0;
+		if (nofollow ||
+		    (at && ((int)args[3] & AT_SYMLINK_NOFOLLOW) != 0))
+			namei_flags = NAMEI_NOFOLLOW_FINAL;
+		error = namei_path_flags_at(context, pathname, namei_flags, &path);
+	}
 	if (error == 0) {
 		error = inode_getattr(path.p_inode, &status);
 		path_release(&path);
@@ -2565,21 +4001,36 @@ sys_stat_path_call(const uintptr_t args[6], int at, int nofollow)
 		error = copyout(&status, status_address, sizeof(status));
 	if (held != NULL)
 		(void)file_close(held);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles truncate(2) and ftruncate(2). */
 static intptr_t
-sys_truncate_call(const uintptr_t args[6], int by_fd)
+sys_truncate_call(
+	const uintptr_t args[6],
+	int by_fd)
 {
-	struct process *process = current_process();
-	struct inode *inode = NULL;
+	struct process *process;
+	struct inode *inode;
 	struct path path;
-	struct file *file = NULL;
+	struct file *file;
 	char pathname[PATH_MAX];
-	off_t length = (off_t)args[1];
-	int error, limit_exceeded = 0;
+	off_t length;
+	int error;
+	int limit_exceeded;
+
+	process = current_process();
+	inode = NULL;
+	file = NULL;
+	length = (off_t)args[1];
+	limit_exceeded = 0;
+
 	if (process == NULL || length < 0)
 		return -EINVAL;
+
+	/* Finds the inode by descriptor or by path. */
 	if (by_fd) {
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
@@ -2598,52 +4049,92 @@ sys_truncate_call(const uintptr_t args[6], int by_fd)
 			return -error;
 		inode = path.p_inode;
 	}
-	if (inode == NULL || inode->i_type != INODE_REG)
-		error = inode != NULL && inode->i_type == INODE_DIR ? EISDIR : EINVAL;
-	else if (!by_fd &&
-	    (error = vfs_access(inode, process->cred, W_OK)) != 0)
-		;
-	else
-		error = inode_truncate_limited_cred(inode, length,
-		    resource_limit_current(process, RLIMIT_FSIZE),
-		    process->cred, &limit_exceeded);
+
+	/* Truncates a writable regular file under the size limit. */
+	if (inode == NULL || inode->i_type != INODE_REG) {
+		if (inode != NULL && inode->i_type == INODE_DIR)
+			error = EISDIR;
+		else
+			error = EINVAL;
+	} else {
+		error = 0;
+		if (!by_fd)
+			error = vfs_access(inode, process->cred, W_OK);
+		if (error == 0)
+			error = inode_truncate_limited_cred(inode, length,
+			    resource_limit_current(process, RLIMIT_FSIZE),
+			    process->cred, &limit_exceeded);
+	}
 	if (limit_exceeded)
 		(void)signal_send_thread(curthread, SIGXFSZ);
 	if (!by_fd)
 		path_release(&path);
 	else
 		(void)file_close(file);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Performs mkdir, unlink, rmdir, or rename with resolved parents. */
 static SYSCALL_EXT intptr_t
-sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
-		    uintptr_t option, int new_dirfd, uintptr_t new_address)
+sys_mutation_common(
+	uint32_t number,
+	int old_dirfd,
+	uintptr_t old_address,
+	uintptr_t option,
+	int new_dirfd,
+	uintptr_t new_address)
 {
-	struct process *process = current_process();
-	struct ucred *credential = NULL;
-	struct cwdinfo temporary, other_temporary, *context, *other_context;
-	struct file *held = NULL, *other_held = NULL;
-	struct path parent, other_parent;
-	struct componentname name, other_name;
+	struct process *process;
+	struct ucred *credential;
+	struct cwdinfo temporary;
+	struct cwdinfo other_temporary;
+	struct cwdinfo *context;
+	struct cwdinfo *other_context;
+	struct file *held;
+	struct file *other_held;
+	struct path parent;
+	struct path other_parent;
+	struct componentname name;
+	struct componentname other_name;
 	struct inode_creation_request creation;
-	struct inode *created = NULL;
-	char pathname[PATH_MAX], other_pathname[PATH_MAX];
-	char storage[NAME_MAX + 1U], other_storage[NAME_MAX + 1U];
+	struct inode *created;
+	struct inode *source;
+	struct inode *target;
+	char pathname[PATH_MAX];
+	char other_pathname[PATH_MAX];
+	char storage[NAME_MAX + 1U];
+	char other_storage[NAME_MAX + 1U];
 	mode_t process_umask;
-	int error, other_valid = 0;
+	int error;
+	int other_valid;
+	struct inode *victim;
+	int target_error;
+
+	process = current_process();
+	credential = NULL;
+	held = NULL;
+	other_held = NULL;
+	created = NULL;
+	source = NULL;
+	target = NULL;
+	other_valid = 0;
+
 	if (process == NULL || process->cwdi == NULL)
 		return -EINVAL;
 	credential = cred_process_ref(process);
 	if (credential == NULL)
 		return -EINVAL;
 	process_umask = process->umask;
+
+	/* Resolves the parent of the first path. */
 	error = copyinstr(old_address, pathname, sizeof(pathname), NULL);
 	if (error != 0)
 		goto out_held;
-	if (pathname[0] == '/')
+	if (pathname[0] == '/') {
 		context = process->cwdi;
-	else {
+	} else {
 		error = syscall_context_at(process, old_dirfd, &temporary,
 		    &context, &held);
 		if (error != 0)
@@ -2653,6 +4144,8 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 	    storage);
 	if (error != 0)
 		goto out_held;
+
+	/* Performs the operation under the mount's namespace transaction. */
 	if (number == ZEDBSD_SYS_mkdir) {
 		mount_vfs_transaction_enter(parent.p_mount);
 		error = inode_creation_request_user(parent.p_inode,
@@ -2665,8 +4158,6 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 		mount_vfs_transaction_leave(parent.p_mount);
 	} else if (number == ZEDBSD_SYS_unlink ||
 	    number == ZEDBSD_SYS_rmdir) {
-		struct inode *victim;
-
 		mount_vfs_transaction_enter(parent.p_mount);
 		error = mount_namespace_check_name(parent.p_inode, &name);
 		if (error == 0)
@@ -2675,14 +4166,15 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 			error = vfs_may_remove(parent.p_inode, victim, credential);
 			inode_release(victim);
 		}
-		if (error == 0)
-			error = number == ZEDBSD_SYS_unlink ?
-			    inode_unlink(parent.p_inode, &name) :
-			    inode_rmdir(parent.p_inode, &name);
+		if (error == 0) {
+			if (number == ZEDBSD_SYS_unlink)
+				error = inode_unlink(parent.p_inode, &name);
+			else
+				error = inode_rmdir(parent.p_inode, &name);
+		}
 		mount_vfs_transaction_leave(parent.p_mount);
 	} else {
-		struct inode *source = NULL, *target = NULL;
-
+		/* A rename resolves the second parent on the same mount. */
 		error = copyinstr(new_address, other_pathname,
 		    sizeof(other_pathname), NULL);
 		if (error == 0 && other_pathname[0] == '/')
@@ -2708,7 +4200,7 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 		if (error == 0)
 			error = inode_lookup(parent.p_inode, &name, &source);
 		if (error == 0) {
-			int target_error = inode_lookup(other_parent.p_inode,
+			target_error = inode_lookup(other_parent.p_inode,
 			    &other_name, &target);
 			if (target_error != 0 && target_error != ENOENT)
 				error = target_error;
@@ -2738,43 +4230,68 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 	if (error == 0)
 		namecache_remove(parent.p_inode, &name);
 	path_release(&parent);
-	out_held:
+out_held:
 	if (held != NULL)
 		(void)file_close(held);
 	if (credential != NULL)
 		cred_release(credential);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles mkdir(2), unlink(2), rmdir(2), and rename(2). */
 static intptr_t
-sys_mutation_call(uint32_t number, const uintptr_t args[6])
+sys_mutation_call(
+	uint32_t number,
+	const uintptr_t args[6])
 {
-	return sys_mutation_common(number, AT_FDCWD, args[0], args[1],
+	intptr_t result;
+
+	result = sys_mutation_common(number, AT_FDCWD, args[0], args[1],
 		AT_FDCWD, args[1]);
+	return result;
 }
 
+/* Handles mkdirat(2), unlinkat(2), and renameat(2). */
 static intptr_t
-sys_mutation_at_call(uint32_t number, const uintptr_t args[6])
+sys_mutation_at_call(
+	uint32_t number,
+	const uintptr_t args[6])
 {
-	if (number == ZEDBSD_SYS_mkdirat)
-		return sys_mutation_common(ZEDBSD_SYS_mkdir, (int)args[0],
+	uint32_t operation;
+	intptr_t result;
+
+	if (number == ZEDBSD_SYS_mkdirat) {
+		result = sys_mutation_common(ZEDBSD_SYS_mkdir, (int)args[0],
 			args[1], args[2], AT_FDCWD, 0);
+		return result;
+	}
 	if (number == ZEDBSD_SYS_unlinkat) {
 		if ((args[2] & ~AT_REMOVEDIR) != 0)
 			return -EINVAL;
-		return sys_mutation_common((args[2] & AT_REMOVEDIR) != 0 ?
-			ZEDBSD_SYS_rmdir : ZEDBSD_SYS_unlink, (int)args[0],
+		if ((args[2] & AT_REMOVEDIR) != 0)
+			operation = ZEDBSD_SYS_rmdir;
+		else
+			operation = ZEDBSD_SYS_unlink;
+		result = sys_mutation_common(operation, (int)args[0],
 			args[1], 0, AT_FDCWD, 0);
+		return result;
 	}
-	return sys_mutation_common(ZEDBSD_SYS_rename, (int)args[0], args[1],
+	result = sys_mutation_common(ZEDBSD_SYS_rename, (int)args[0], args[1],
 		0, (int)args[2], args[3]);
+	return result;
 }
 
+/* Handles umask(2). */
 static intptr_t
-sys_umask_call(const uintptr_t args[6])
+sys_umask_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	mode_t old;
+
+	process = current_process();
 	if (process == NULL)
 		return -EINVAL;
 	old = process->umask;
@@ -2782,27 +4299,53 @@ sys_umask_call(const uintptr_t args[6])
 	return old;
 }
 
+/* Installs a replacement credential on a process. */
 static int
-replace_cred(struct process *process, struct ucred *replacement)
+replace_cred(
+	struct process *process,
+	struct ucred *replacement)
 {
-	return process_cred_replace(process, replacement);
+	int error;
+
+	error = process_cred_replace(process, replacement);
+	return error;
 }
 
+/* Handles getuid(2), geteuid(2), getgid(2), getegid(2), and getgroups(2). */
 static intptr_t
-sys_cred_get_call(uint32_t number, const uintptr_t args[6])
+sys_cred_get_call(
+	uint32_t number,
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct ucred *cred = process != NULL ? cred_current_ref() : NULL;
+	struct process *process;
+	struct ucred *cred;
 	intptr_t result;
-	int error = 0;
+	int error;
+
+	process = current_process();
+	if (process != NULL)
+		cred = cred_current_ref();
+	else
+		cred = NULL;
+	error = 0;
+
 	if (cred == NULL)
 		return -EINVAL;
 	switch (number) {
-	case ZEDBSD_SYS_getuid: result = cred->ruid; break;
-	case ZEDBSD_SYS_geteuid: result = cred->euid; break;
-	case ZEDBSD_SYS_getgid: result = cred->rgid; break;
-	case ZEDBSD_SYS_getegid: result = cred->egid; break;
+	case ZEDBSD_SYS_getuid:
+		result = cred->ruid;
+		break;
+	case ZEDBSD_SYS_geteuid:
+		result = cred->euid;
+		break;
+	case ZEDBSD_SYS_getgid:
+		result = cred->rgid;
+		break;
+	case ZEDBSD_SYS_getegid:
+		result = cred->egid;
+		break;
 	case ZEDBSD_SYS_getgroups:
+		/* A zero count only asks for the group count. */
 		if ((int)args[0] < 0 ||
 		    ((unsigned)args[0] != 0 &&
 		    (unsigned)args[0] < cred->ngroups)) {
@@ -2814,42 +4357,77 @@ sys_cred_get_call(uint32_t number, const uintptr_t args[6])
 			    cred->ngroups * sizeof(cred->groups[0]));
 		result = cred->ngroups;
 		break;
-	default: error = EINVAL; result = 0; break;
+	default:
+		error = EINVAL;
+		result = 0;
+		break;
 	}
 	cred_release(cred);
-	return error == 0 ? result : -error;
+	if (error != 0)
+		return -error;
+	return result;
 }
 
+/* Tests whether a credential may adopt a user id. */
 static int
-uid_permitted(const struct ucred *cred, uid_t id)
+uid_permitted(
+	const struct ucred *cred,
+	uid_t id)
 {
-	return cred_is_superuser(cred) || id == cred->ruid || id == cred->euid ||
-	    id == cred->suid;
+	if (cred_is_superuser(cred))
+		return 1;
+	if (id == cred->ruid)
+		return 1;
+	if (id == cred->euid)
+		return 1;
+	if (id == cred->suid)
+		return 1;
+	return 0;
 }
 
+/* Tests whether a credential may adopt a group id. */
 static int
-gid_permitted(const struct ucred *cred, gid_t id)
+gid_permitted(
+	const struct ucred *cred,
+	gid_t id)
 {
-	return cred_is_superuser(cred) || id == cred->rgid || id == cred->egid ||
-	    id == cred->sgid;
+	if (cred_is_superuser(cred))
+		return 1;
+	if (id == cred->rgid)
+		return 1;
+	if (id == cred->egid)
+		return 1;
+	if (id == cred->sgid)
+		return 1;
+	return 0;
 }
 
+/* Handles getresuid(2) and getresgid(2). */
 static intptr_t
-sys_cred_getres_call(uint32_t number, const uintptr_t args[6])
+sys_cred_getres_call(
+	uint32_t number,
+	const uintptr_t args[6])
 {
-	struct uaccess_pin pins[3] = {{0}};
+	struct uaccess_pin pins[3];
 	struct ucred *cred;
 	uint32_t values[3];
 	size_t i;
-	int error = 0;
+	int error;
 
+	error = 0;
+
+	/* Pins all three outputs before reading the credential. */
+	memset(pins, 0, sizeof(pins));
 	for (i = 0; i < 3; i++) {
 		error = uaccess_pin(args[i], sizeof(values[i]), HAL_SPACE_WRITE,
 		    &pins[i]);
 		if (error != 0)
 			break;
 	}
-	cred = error == 0 ? cred_current_ref() : NULL;
+	if (error == 0)
+		cred = cred_current_ref();
+	else
+		cred = NULL;
 	if (error == 0 && cred == NULL)
 		error = EINVAL;
 	if (error == 0 && number == ZEDBSD_SYS_getresuid) {
@@ -2868,17 +4446,24 @@ sys_cred_getres_call(uint32_t number, const uintptr_t args[6])
 	cred_release(cred);
 	for (i = 0; i < 3; i++)
 		uaccess_unpin(&pins[i]);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles getentropy(2). */
 static intptr_t
-sys_getentropy_call(const uintptr_t args[6])
+sys_getentropy_call(
+	const uintptr_t args[6])
 {
-	struct uaccess_pin pin = {0};
+	struct uaccess_pin pin;
 	uint8_t entropy[GETENTROPY_MAX];
-	size_t size = (size_t)args[1];
+	size_t size;
 	int error;
 
+	size = (size_t)args[1];
+
+	memset(&pin, 0, sizeof(pin));
 	if (size > GETENTROPY_MAX)
 		return -EINVAL;
 	if (size == 0U)
@@ -2892,20 +4477,26 @@ sys_getentropy_call(const uintptr_t args[6])
 		error = copyout_pinned(&pin, 0, entropy, size);
 	memset_explicit(entropy, 0, sizeof(entropy));
 	uaccess_unpin(&pin);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Copies between two pinned user objects in bounded chunks. */
 static int
-user_atomic_copy(const struct uaccess_pin *source,
-	struct uaccess_pin *destination, size_t size)
+user_atomic_copy(
+	const struct uaccess_pin *source,
+	struct uaccess_pin *destination,
+	size_t size)
 {
 	uint8_t bytes[SYSCALL_ATOMIC_CHUNK];
-	size_t offset = 0;
+	size_t offset;
 	int error;
+	size_t amount;
 
+	offset = 0;
 	while (offset < size) {
-		size_t amount = size - offset;
-
+		amount = size - offset;
 		if (amount > sizeof(bytes))
 			amount = sizeof(bytes);
 		error = copyin_pinned(source, offset, bytes, amount);
@@ -2918,19 +4509,24 @@ user_atomic_copy(const struct uaccess_pin *source,
 	return 0;
 }
 
+/* Compares two pinned user objects in bounded chunks. */
 static int
-user_atomic_equal(const struct uaccess_pin *left,
-	const struct uaccess_pin *right, size_t size, int *equal)
+user_atomic_equal(
+	const struct uaccess_pin *left,
+	const struct uaccess_pin *right,
+	size_t size,
+	int *equal)
 {
 	uint8_t left_bytes[SYSCALL_ATOMIC_CHUNK];
 	uint8_t right_bytes[SYSCALL_ATOMIC_CHUNK];
-	size_t offset = 0;
+	size_t offset;
 	int error;
+	size_t amount;
 
+	offset = 0;
 	*equal = 1;
 	while (offset < size) {
-		size_t amount = size - offset;
-
+		amount = size - offset;
 		if (amount > sizeof(left_bytes))
 			amount = sizeof(left_bytes);
 		error = copyin_pinned(left, offset, left_bytes, amount);
@@ -2947,28 +4543,49 @@ user_atomic_equal(const struct uaccess_pin *left,
 	return 0;
 }
 
+/* Handles the atomic(2) fallback for non-lock-free objects. */
 static intptr_t
-sys_atomic_call(const uintptr_t args[6])
+sys_atomic_call(
+	const uintptr_t args[6])
 {
-	struct uaccess_pin object = { 0 };
-	struct uaccess_pin first = { 0 };
-	struct uaccess_pin second = { 0 };
-	size_t size = (size_t)args[3];
-	unsigned operation = (unsigned)args[4];
-	uint32_t object_prot, first_prot, second_prot = 0;
-	int equal = 0;
+	struct uaccess_pin object;
+	struct uaccess_pin first;
+	struct uaccess_pin second;
+	size_t size;
+	unsigned operation;
+	uint32_t object_prot;
+	uint32_t first_prot;
+	uint32_t second_prot;
+	int equal;
 	int error;
 
-	if (size == 0 || operation > ZEDBSD_ATOMIC_COMPARE_EXCHANGE ||
-	    args[0] == 0 || args[1] == 0 ||
+	size = (size_t)args[3];
+	operation = (unsigned)args[4];
+	second_prot = 0;
+	equal = 0;
+
+	/* Pins every operand with the access its operation needs. */
+	memset(&object, 0, sizeof(object));
+	memset(&first, 0, sizeof(first));
+	memset(&second, 0, sizeof(second));
+	if (size == 0 ||
+	    operation > ZEDBSD_ATOMIC_COMPARE_EXCHANGE ||
+	    args[0] == 0 ||
+	    args[1] == 0 ||
 	    (operation >= ZEDBSD_ATOMIC_EXCHANGE && args[2] == 0))
 		return -EINVAL;
-	object_prot = operation == ZEDBSD_ATOMIC_LOAD ? HAL_SPACE_READ :
-	    operation == ZEDBSD_ATOMIC_STORE ? HAL_SPACE_WRITE :
-	    HAL_SPACE_READ | HAL_SPACE_WRITE;
-	first_prot = operation == ZEDBSD_ATOMIC_LOAD ? HAL_SPACE_WRITE :
-	    operation == ZEDBSD_ATOMIC_COMPARE_EXCHANGE ?
-	    HAL_SPACE_READ | HAL_SPACE_WRITE : HAL_SPACE_READ;
+	if (operation == ZEDBSD_ATOMIC_LOAD)
+		object_prot = HAL_SPACE_READ;
+	else if (operation == ZEDBSD_ATOMIC_STORE)
+		object_prot = HAL_SPACE_WRITE;
+	else
+		object_prot = HAL_SPACE_READ | HAL_SPACE_WRITE;
+	if (operation == ZEDBSD_ATOMIC_LOAD)
+		first_prot = HAL_SPACE_WRITE;
+	else if (operation == ZEDBSD_ATOMIC_COMPARE_EXCHANGE)
+		first_prot = HAL_SPACE_READ | HAL_SPACE_WRITE;
+	else
+		first_prot = HAL_SPACE_READ;
 	if (operation == ZEDBSD_ATOMIC_EXCHANGE)
 		second_prot = HAL_SPACE_WRITE;
 	else if (operation == ZEDBSD_ATOMIC_COMPARE_EXCHANGE)
@@ -2982,9 +4599,10 @@ sys_atomic_call(const uintptr_t args[6])
 		goto out;
 
 	/*
-	 * One kernel mutex covers every non-lock-free atomic object, including
-	 * shared mappings seen at different virtual addresses by two processes.
-	 * Pins make every backing page resident before the transaction starts.
+	 * One kernel mutex covers every non-lock-free atomic object,
+	 * including shared mappings seen at different virtual addresses by
+	 * two processes.  Pins make every backing page resident before the
+	 * transaction starts.
 	 */
 	mutex_lock(&user_atomic_lock);
 	switch (operation) {
@@ -3017,18 +4635,36 @@ out:
 	uaccess_unpin(&object);
 	if (error != 0)
 		return -error;
-	return operation == ZEDBSD_ATOMIC_COMPARE_EXCHANGE ? equal : 0;
+	if (operation == ZEDBSD_ATOMIC_COMPARE_EXCHANGE)
+		return equal;
+	return 0;
 }
 
+/* Handles the credential-setting system calls. */
 static intptr_t
-sys_cred_set_call(uint32_t number, const uintptr_t args[6])
+sys_cred_set_call(
+	uint32_t number,
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct ucred *old = process != NULL ? cred_current_ref() : NULL;
+	struct process *process;
+	struct ucred *old;
 	struct ucred *cred;
-	uid_t ruid, euid;
-	gid_t rgid, egid;
+	uid_t ruid;
+	uid_t euid;
+	gid_t rgid;
+	gid_t egid;
+	uid_t uids[3];
+	gid_t gids[3];
+	unsigned i;
 	int error;
+
+	process = current_process();
+	if (process != NULL)
+		old = cred_current_ref();
+	else
+		old = NULL;
+
+	/* Works on a copy of the current credential. */
 	if (old == NULL || process == &process0) {
 		cred_release(old);
 		return -EPERM;
@@ -3040,119 +4676,167 @@ sys_cred_set_call(uint32_t number, const uintptr_t args[6])
 	}
 	switch (number) {
 	case ZEDBSD_SYS_setuid:
-		if (!uid_permitted(old, (uid_t)args[0])) { error = EPERM; break; }
-		if (cred_is_superuser(old))
-			cred->ruid = cred->euid = cred->suid = (uid_t)args[0];
-		else
+		if (!uid_permitted(old, (uid_t)args[0])) {
+			error = EPERM;
+			break;
+		}
+		if (cred_is_superuser(old)) {
+			cred->ruid = (uid_t)args[0];
 			cred->euid = (uid_t)args[0];
+			cred->suid = (uid_t)args[0];
+		} else {
+			cred->euid = (uid_t)args[0];
+		}
 		error = 0;
 		break;
 	case ZEDBSD_SYS_seteuid:
-		if (!uid_permitted(old, (uid_t)args[0])) { error = EPERM; break; }
-		cred->euid = (uid_t)args[0]; error = 0; break;
+		if (!uid_permitted(old, (uid_t)args[0])) {
+			error = EPERM;
+			break;
+		}
+		cred->euid = (uid_t)args[0];
+		error = 0;
+		break;
 	case ZEDBSD_SYS_setgid:
-		if (!gid_permitted(old, (gid_t)args[0])) { error = EPERM; break; }
-		if (cred_is_superuser(old))
-			cred->rgid = cred->egid = cred->sgid = (gid_t)args[0];
-		else
+		if (!gid_permitted(old, (gid_t)args[0])) {
+			error = EPERM;
+			break;
+		}
+		if (cred_is_superuser(old)) {
+			cred->rgid = (gid_t)args[0];
 			cred->egid = (gid_t)args[0];
+			cred->sgid = (gid_t)args[0];
+		} else {
+			cred->egid = (gid_t)args[0];
+		}
 		error = 0;
 		break;
 	case ZEDBSD_SYS_setegid:
-		if (!gid_permitted(old, (gid_t)args[0])) { error = EPERM; break; }
-		cred->egid = (gid_t)args[0]; error = 0; break;
+		if (!gid_permitted(old, (gid_t)args[0])) {
+			error = EPERM;
+			break;
+		}
+		cred->egid = (gid_t)args[0];
+		error = 0;
+		break;
 	case ZEDBSD_SYS_setreuid:
-		ruid = (uid_t)args[0]; euid = (uid_t)args[1];
+		ruid = (uid_t)args[0];
+		euid = (uid_t)args[1];
 		if ((ruid != (uid_t)-1 && !uid_permitted(old, ruid)) ||
 		    (euid != (uid_t)-1 && !uid_permitted(old, euid))) {
-			error = EPERM; break;
+			error = EPERM;
+			break;
 		}
-		if (ruid != (uid_t)-1) cred->ruid = ruid;
-		if (euid != (uid_t)-1) cred->euid = euid;
-		error = 0; break;
+		if (ruid != (uid_t)-1)
+			cred->ruid = ruid;
+		if (euid != (uid_t)-1)
+			cred->euid = euid;
+		error = 0;
+		break;
 	case ZEDBSD_SYS_setregid:
-		rgid = (gid_t)args[0]; egid = (gid_t)args[1];
+		rgid = (gid_t)args[0];
+		egid = (gid_t)args[1];
 		if ((rgid != (gid_t)-1 && !gid_permitted(old, rgid)) ||
 		    (egid != (gid_t)-1 && !gid_permitted(old, egid))) {
-			error = EPERM; break;
+			error = EPERM;
+			break;
 		}
-		if (rgid != (gid_t)-1) cred->rgid = rgid;
-		if (egid != (gid_t)-1) cred->egid = egid;
-		error = 0; break;
-	case ZEDBSD_SYS_setresuid: {
-		uid_t ids[3] = {
-			(uid_t)args[0], (uid_t)args[1], (uid_t)args[2]
-		};
-		unsigned i;
-
+		if (rgid != (gid_t)-1)
+			cred->rgid = rgid;
+		if (egid != (gid_t)-1)
+			cred->egid = egid;
+		error = 0;
+		break;
+	case ZEDBSD_SYS_setresuid:
+		uids[0] = (uid_t)args[0];
+		uids[1] = (uid_t)args[1];
+		uids[2] = (uid_t)args[2];
 		for (i = 0; i < 3; i++) {
-			if (ids[i] != (uid_t)-1 && !uid_permitted(old, ids[i])) {
+			if (uids[i] != (uid_t)-1 && !uid_permitted(old, uids[i])) {
 				error = EPERM;
 				break;
 			}
 		}
 		if (i != 3)
 			break;
-		if (ids[0] != (uid_t)-1)
-			cred->ruid = ids[0];
-		if (ids[1] != (uid_t)-1)
-			cred->euid = ids[1];
-		if (ids[2] != (uid_t)-1)
-			cred->suid = ids[2];
+		if (uids[0] != (uid_t)-1)
+			cred->ruid = uids[0];
+		if (uids[1] != (uid_t)-1)
+			cred->euid = uids[1];
+		if (uids[2] != (uid_t)-1)
+			cred->suid = uids[2];
 		error = 0;
 		break;
-	}
-	case ZEDBSD_SYS_setresgid: {
-		gid_t ids[3] = {
-			(gid_t)args[0], (gid_t)args[1], (gid_t)args[2]
-		};
-		unsigned i;
-
+	case ZEDBSD_SYS_setresgid:
+		gids[0] = (gid_t)args[0];
+		gids[1] = (gid_t)args[1];
+		gids[2] = (gid_t)args[2];
 		for (i = 0; i < 3; i++) {
-			if (ids[i] != (gid_t)-1 && !gid_permitted(old, ids[i])) {
+			if (gids[i] != (gid_t)-1 && !gid_permitted(old, gids[i])) {
 				error = EPERM;
 				break;
 			}
 		}
 		if (i != 3)
 			break;
-		if (ids[0] != (gid_t)-1)
-			cred->rgid = ids[0];
-		if (ids[1] != (gid_t)-1)
-			cred->egid = ids[1];
-		if (ids[2] != (gid_t)-1)
-			cred->sgid = ids[2];
+		if (gids[0] != (gid_t)-1)
+			cred->rgid = gids[0];
+		if (gids[1] != (gid_t)-1)
+			cred->egid = gids[1];
+		if (gids[2] != (gid_t)-1)
+			cred->sgid = gids[2];
 		error = 0;
 		break;
-	}
 	case ZEDBSD_SYS_setgroups:
-		if (!cred_is_superuser(old)) { error = EPERM; break; }
-		if (args[0] > KERN_NGROUPS_MAX) { error = EINVAL; break; }
-		error = args[0] == 0 ? 0 : copyin(args[1], cred->groups,
-		    (size_t)args[0] * sizeof(cred->groups[0]));
-		if (error == 0) cred->ngroups = (unsigned)args[0];
+		if (!cred_is_superuser(old)) {
+			error = EPERM;
+			break;
+		}
+		if (args[0] > KERN_NGROUPS_MAX) {
+			error = EINVAL;
+			break;
+		}
+		if (args[0] == 0)
+			error = 0;
+		else
+			error = copyin(args[1], cred->groups,
+			    (size_t)args[0] * sizeof(cred->groups[0]));
+		if (error == 0)
+			cred->ngroups = (unsigned)args[0];
 		break;
-	default: error = EINVAL; break;
+	default:
+		error = EINVAL;
+		break;
 	}
+
+	/* Installs the copy, or drops it on failure. */
 	if (error == 0) {
 		error = replace_cred(process, cred);
 		if (error != 0)
 			cred_release(cred);
-	} else
+	} else {
 		cred_release(cred);
+	}
 	cred_release(old);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles access(2) with the real credential. */
 static intptr_t
-sys_access_call(const uintptr_t args[6])
+sys_access_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct path path;
 	struct ucred real;
 	char pathname[PATH_MAX];
 	int error;
-	if (process == NULL || process->cred == NULL ||
+
+	process = current_process();
+	if (process == NULL ||
+	    process->cred == NULL ||
 	    ((int)args[1] & ~(R_OK | W_OK | X_OK)) != 0)
 		return -EINVAL;
 	error = copyinstr(args[0], pathname, sizeof(pathname), NULL);
@@ -3165,14 +4849,23 @@ sys_access_call(const uintptr_t args[6])
 		error = vfs_access(path.p_inode, &real, (int)args[1]);
 		path_release(&path);
 	}
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Resolves a user path relative to a dirfd, holding the directory file. */
 static SYSCALL_EXT int
-sys_resolve_path_at(struct process *process, int dirfd, uintptr_t address,
-		    unsigned namei_flags, struct path *path, struct file **held)
+sys_resolve_path_at(
+	struct process *process,
+	int dirfd,
+	uintptr_t address,
+	unsigned namei_flags,
+	struct path *path,
+	struct file **held)
 {
-	struct cwdinfo temporary, *context;
+	struct cwdinfo temporary;
+	struct cwdinfo *context;
 	char pathname[PATH_MAX];
 	int error;
 
@@ -3182,9 +4875,9 @@ sys_resolve_path_at(struct process *process, int dirfd, uintptr_t address,
 	error = copyinstr(address, pathname, sizeof(pathname), NULL);
 	if (error != 0)
 		return error;
-	if (pathname[0] == '/')
+	if (pathname[0] == '/') {
 		context = process->cwdi;
-	else {
+	} else {
 		error = syscall_context_at(process, dirfd, &temporary, &context, held);
 		if (error != 0)
 			return error;
@@ -3197,19 +4890,18 @@ sys_resolve_path_at(struct process *process, int dirfd, uintptr_t address,
 	return error;
 }
 
-struct syscall_inode_ref {
-	struct inode *inode;
-	struct file *file;
-	struct file *held;
-	struct path path;
-	int has_path;
-};
-
+/* Takes an inode reference by descriptor or by path for the xattr calls. */
 static int
-sys_inode_ref_acquire(struct process *process, uintptr_t object, int by_fd,
-	int nofollow, struct syscall_inode_ref *reference)
+sys_inode_ref_acquire(
+	struct process *process,
+	uintptr_t object,
+	int by_fd,
+	int nofollow,
+	struct syscall_inode_ref *reference)
 {
+	unsigned namei_flags;
 	int error;
+
 	memset(reference, 0, sizeof(*reference));
 	if (process == NULL || process->fd == NULL || process->cwdi == NULL)
 		return EINVAL;
@@ -3224,9 +4916,12 @@ sys_inode_ref_acquire(struct process *process, uintptr_t object, int by_fd,
 		reference->inode = reference->file->f_inode;
 		return 0;
 	}
-	error = sys_resolve_path_at(process, AT_FDCWD, object,
-		nofollow ? NAMEI_NOFOLLOW_FINAL : 0, &reference->path,
-		&reference->held);
+	if (nofollow)
+		namei_flags = NAMEI_NOFOLLOW_FINAL;
+	else
+		namei_flags = 0;
+	error = sys_resolve_path_at(process, AT_FDCWD, object, namei_flags,
+		&reference->path, &reference->held);
 	if (error == 0) {
 		reference->inode = reference->path.p_inode;
 		reference->has_path = 1;
@@ -3234,8 +4929,10 @@ sys_inode_ref_acquire(struct process *process, uintptr_t object, int by_fd,
 	return error;
 }
 
+/* Releases an inode reference taken by sys_inode_ref_acquire(). */
 static void
-sys_inode_ref_release(struct syscall_inode_ref *reference)
+sys_inode_ref_release(
+	struct syscall_inode_ref *reference)
 {
 	if (reference->has_path)
 		path_release(&reference->path);
@@ -3245,18 +4942,29 @@ sys_inode_ref_release(struct syscall_inode_ref *reference)
 		(void)file_close(reference->file);
 }
 
+/* Handles getxattr(2), lgetxattr(2), and fgetxattr(2). */
 static SYSCALL_EXT intptr_t
-sys_getxattr_call(const uintptr_t args[6], int by_fd, int nofollow)
+sys_getxattr_call(
+	const uintptr_t args[6],
+	int by_fd,
+	int nofollow)
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct syscall_inode_ref reference;
 	char name[INODE_XATTR_NAME_MAX + 1U];
-	void *value = NULL;
+	void *value;
 	ssize_t result;
-	size_t size = (size_t)args[3];
+	size_t size;
 	int error;
-	if (process == NULL || process->cred == NULL ||
-	    size > INODE_XATTR_SIZE_MAX || (size != 0 && args[2] == 0))
+
+	process = current_process();
+	value = NULL;
+	size = (size_t)args[3];
+
+	if (process == NULL ||
+	    process->cred == NULL ||
+	    size > INODE_XATTR_SIZE_MAX ||
+	    (size != 0 && args[2] == 0))
 		return -EINVAL;
 	error = copyinstr(args[1], name, sizeof(name), NULL);
 	if (error == 0)
@@ -3271,29 +4979,48 @@ sys_getxattr_call(const uintptr_t args[6], int by_fd, int nofollow)
 			return -ENOMEM;
 		}
 	}
+
+	/* A zero size only asks for the attribute length. */
 	result = vfs_getxattr(reference.inode, process->cred, name, value, size);
-	if (result >= 0 && size != 0 && (size_t)result > size)
+	if (result >= 0 && size != 0 && (size_t)result > size) {
 		error = ERANGE;
-	else if (result >= 0 && result != 0 && size != 0)
+	} else if (result >= 0 && result != 0 && size != 0) {
 		error = copyout(value, args[2], (size_t)result);
-	else
-		error = result < 0 ? (int)-result : 0;
+	} else {
+		if (result < 0)
+			error = (int)-result;
+		else
+			error = 0;
+	}
 	kern_free(value);
 	sys_inode_ref_release(&reference);
-	return error == 0 ? result : -error;
+	if (error != 0)
+		return -error;
+	return result;
 }
 
+/* Handles setxattr(2), lsetxattr(2), and fsetxattr(2). */
 static SYSCALL_EXT intptr_t
-sys_setxattr_call(const uintptr_t args[6], int by_fd, int nofollow)
+sys_setxattr_call(
+	const uintptr_t args[6],
+	int by_fd,
+	int nofollow)
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct syscall_inode_ref reference;
 	char name[INODE_XATTR_NAME_MAX + 1U];
-	void *value = NULL;
-	size_t size = (size_t)args[3];
+	void *value;
+	size_t size;
 	int error;
-	if (process == NULL || process->cred == NULL ||
-	    size > INODE_XATTR_SIZE_MAX || (size != 0 && args[2] == 0))
+
+	process = current_process();
+	value = NULL;
+	size = (size_t)args[3];
+
+	if (process == NULL ||
+	    process->cred == NULL ||
+	    size > INODE_XATTR_SIZE_MAX ||
+	    (size != 0 && args[2] == 0))
 		return -EINVAL;
 	error = copyinstr(args[1], name, sizeof(name), NULL);
 	if (error == 0 && size != 0) {
@@ -3312,20 +5039,33 @@ sys_setxattr_call(const uintptr_t args[6], int by_fd, int nofollow)
 		sys_inode_ref_release(&reference);
 	}
 	kern_free(value);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles listxattr(2), llistxattr(2), and flistxattr(2). */
 static SYSCALL_EXT intptr_t
-sys_listxattr_call(const uintptr_t args[6], int by_fd, int nofollow)
+sys_listxattr_call(
+	const uintptr_t args[6],
+	int by_fd,
+	int nofollow)
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct syscall_inode_ref reference;
-	void *list = NULL;
+	void *list;
 	ssize_t result;
-	size_t size = (size_t)args[2];
+	size_t size;
 	int error;
-	if (process == NULL || process->cred == NULL ||
-	    size > INODE_XATTR_SIZE_MAX || (size != 0 && args[1] == 0))
+
+	process = current_process();
+	list = NULL;
+	size = (size_t)args[2];
+
+	if (process == NULL ||
+	    process->cred == NULL ||
+	    size > INODE_XATTR_SIZE_MAX ||
+	    (size != 0 && args[1] == 0))
 		return -EINVAL;
 	error = sys_inode_ref_acquire(process, args[0], by_fd, nofollow,
 		&reference);
@@ -3338,25 +5078,39 @@ sys_listxattr_call(const uintptr_t args[6], int by_fd, int nofollow)
 			return -ENOMEM;
 		}
 	}
+
+	/* A zero size only asks for the list length. */
 	result = vfs_listxattr(reference.inode, process->cred, list, size);
-	if (result >= 0 && size != 0 && (size_t)result > size)
+	if (result >= 0 && size != 0 && (size_t)result > size) {
 		error = ERANGE;
-	else if (result >= 0 && result != 0 && size != 0)
+	} else if (result >= 0 && result != 0 && size != 0) {
 		error = copyout(list, args[1], (size_t)result);
-	else
-		error = result < 0 ? (int)-result : 0;
+	} else {
+		if (result < 0)
+			error = (int)-result;
+		else
+			error = 0;
+	}
 	kern_free(list);
 	sys_inode_ref_release(&reference);
-	return error == 0 ? result : -error;
+	if (error != 0)
+		return -error;
+	return result;
 }
 
+/* Handles removexattr(2), lremovexattr(2), and fremovexattr(2). */
 static SYSCALL_EXT intptr_t
-sys_removexattr_call(const uintptr_t args[6], int by_fd, int nofollow)
+sys_removexattr_call(
+	const uintptr_t args[6],
+	int by_fd,
+	int nofollow)
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct syscall_inode_ref reference;
 	char name[INODE_XATTR_NAME_MAX + 1U];
 	int error;
+
+	process = current_process();
 	if (process == NULL || process->cred == NULL)
 		return -EINVAL;
 	error = copyinstr(args[1], name, sizeof(name), NULL);
@@ -3367,47 +5121,82 @@ sys_removexattr_call(const uintptr_t args[6], int by_fd, int nofollow)
 		error = vfs_removexattr(reference.inode, process->cred, name);
 		sys_inode_ref_release(&reference);
 	}
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Tests whether a credential owns an inode or is the superuser. */
 static int
-inode_chmod_allowed(const struct inode *inode, const struct ucred *cred)
+inode_chmod_allowed(
+	const struct inode *inode,
+	const struct ucred *cred)
 {
-	return inode != NULL && cred != NULL &&
-		(cred_is_superuser(cred) || cred->euid == inode->i_uid);
+	if (inode == NULL)
+		return 0;
+	if (cred == NULL)
+		return 0;
+	if (cred_is_superuser(cred))
+		return 1;
+	if (cred->euid == inode->i_uid)
+		return 1;
+	return 0;
 }
 
+/* Performs chmod, fchmod, or fchmodat. */
 static SYSCALL_EXT intptr_t
-sys_chmod_common(int dirfd, uintptr_t pathname, int fd, mode_t mode, int flags)
+sys_chmod_common(
+	int dirfd,
+	uintptr_t pathname,
+	int fd,
+	mode_t mode,
+	int flags)
 {
-	struct process *process = current_process();
-	struct file *file = NULL, *held = NULL;
+	struct process *process;
+	struct file *file;
+	struct file *held;
 	struct path path;
 	struct inode *inode;
 	struct stat status;
-	int by_fd = fd >= 0, error;
+	unsigned namei_flags;
+	int by_fd;
+	int error;
 
-	if (process == NULL || process->cred == NULL ||
+	process = current_process();
+	file = NULL;
+	held = NULL;
+	by_fd = fd >= 0;
+
+	if (process == NULL ||
+	    process->cred == NULL ||
 	    (flags & ~AT_SYMLINK_NOFOLLOW) != 0)
 		return -EINVAL;
+
+	/* Finds the inode by descriptor or by path. */
 	if (by_fd) {
 		file = filedesc_get_ref(process->fd, fd);
 		if (file == NULL || file->f_inode == NULL) {
-			if (file != NULL) (void)file_close(file);
+			if (file != NULL)
+				(void)file_close(file);
 			return -EBADF;
 		}
 		inode = file->f_inode;
 	} else {
-		error = sys_resolve_path_at(process, dirfd, pathname,
-			(flags & AT_SYMLINK_NOFOLLOW) != 0 ?
-			NAMEI_NOFOLLOW_FINAL : 0, &path, &held);
+		if ((flags & AT_SYMLINK_NOFOLLOW) != 0)
+			namei_flags = NAMEI_NOFOLLOW_FINAL;
+		else
+			namei_flags = 0;
+		error = sys_resolve_path_at(process, dirfd, pathname, namei_flags,
+			&path, &held);
 		if (error != 0)
 			return -error;
 		inode = path.p_inode;
 	}
-	if (!inode_chmod_allowed(inode, process->cred))
+
+	/* A non-member owner cannot set the set-group-id bit. */
+	if (!inode_chmod_allowed(inode, process->cred)) {
 		error = EPERM;
-	else {
+	} else {
 		error = inode_getattr(inode, &status);
 		if (error == 0) {
 			status.st_mode = (status.st_mode & S_IFMT) | (mode & 07777U);
@@ -3417,45 +5206,72 @@ sys_chmod_common(int dirfd, uintptr_t pathname, int fd, mode_t mode, int flags)
 			error = inode_setattr(inode, &status, INODE_ATTR_MODE);
 		}
 	}
-	if (by_fd)
+	if (by_fd) {
 		(void)file_close(file);
-	else {
+	} else {
 		path_release(&path);
-		if (held != NULL) (void)file_close(held);
+		if (held != NULL)
+			(void)file_close(held);
 	}
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Performs chown, lchown, fchown, or fchownat. */
 static SYSCALL_EXT intptr_t
-sys_chown_common(int dirfd, uintptr_t pathname, int fd, uid_t uid, gid_t gid,
-		 int flags)
+sys_chown_common(
+	int dirfd,
+	uintptr_t pathname,
+	int fd,
+	uid_t uid,
+	gid_t gid,
+	int flags)
 {
-	struct process *process = current_process();
-	struct file *file = NULL, *held = NULL;
+	struct process *process;
+	struct file *file;
+	struct file *held;
 	struct path path;
 	struct inode *inode;
 	struct stat status;
-	unsigned mask = 0;
-	int by_fd = fd >= 0, error;
+	unsigned mask;
+	unsigned namei_flags;
+	int by_fd;
+	int error;
 
-	if (process == NULL || process->cred == NULL ||
+	process = current_process();
+	file = NULL;
+	held = NULL;
+	mask = 0;
+	by_fd = fd >= 0;
+
+	if (process == NULL ||
+	    process->cred == NULL ||
 	    (flags & ~AT_SYMLINK_NOFOLLOW) != 0)
 		return -EINVAL;
+
+	/* Finds the inode by descriptor or by path. */
 	if (by_fd) {
 		file = filedesc_get_ref(process->fd, fd);
 		if (file == NULL || file->f_inode == NULL) {
-			if (file != NULL) (void)file_close(file);
+			if (file != NULL)
+				(void)file_close(file);
 			return -EBADF;
 		}
 		inode = file->f_inode;
 	} else {
-		error = sys_resolve_path_at(process, dirfd, pathname,
-			(flags & AT_SYMLINK_NOFOLLOW) != 0 ?
-			NAMEI_NOFOLLOW_FINAL : 0, &path, &held);
+		if ((flags & AT_SYMLINK_NOFOLLOW) != 0)
+			namei_flags = NAMEI_NOFOLLOW_FINAL;
+		else
+			namei_flags = 0;
+		error = sys_resolve_path_at(process, dirfd, pathname, namei_flags,
+			&path, &held);
 		if (error != 0)
 			return -error;
 		inode = path.p_inode;
 	}
+
+	/* Applies the requested ids and clears set-id where required. */
 	error = vfs_may_chown(inode, process->cred, uid, gid);
 	if (error == 0) {
 		error = inode_getattr(inode, &status);
@@ -3467,10 +5283,13 @@ sys_chown_common(int dirfd, uintptr_t pathname, int fd, uid_t uid, gid_t gid,
 			status.st_gid = gid;
 			mask |= INODE_ATTR_GID;
 		}
-		/* A successful unprivileged chown clears set-id even when both
-		 * requested IDs are unchanged (or both are the -1 sentinel).  A
-		 * privileged caller retains the historical behavior of clearing on an
-		 * explicit ownership request. */
+
+		/*
+		 * A successful unprivileged chown clears set-id even when
+		 * both requested IDs are unchanged (or both are the -1
+		 * sentinel).  A privileged caller retains the historical
+		 * behavior of clearing on an explicit ownership request.
+		 */
 		if (error == 0 && (status.st_mode & (S_ISUID | S_ISGID)) != 0 &&
 		    (!cred_is_superuser(process->cred) || uid != (uid_t)-1 ||
 		     gid != (gid_t)-1)) {
@@ -3480,41 +5299,71 @@ sys_chown_common(int dirfd, uintptr_t pathname, int fd, uid_t uid, gid_t gid,
 		if (error == 0 && mask != 0)
 			error = inode_setattr(inode, &status, mask);
 	}
-	if (by_fd)
+	if (by_fd) {
 		(void)file_close(file);
-	else {
+	} else {
 		path_release(&path);
-		if (held != NULL) (void)file_close(held);
+		if (held != NULL)
+			(void)file_close(held);
 	}
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Tests whether a utimens nanosecond field is a valid value or marker. */
 static int
-valid_utime_nsec(long nanoseconds)
+valid_utime_nsec(
+	long nanoseconds)
 {
-	return (nanoseconds >= 0 && nanoseconds < 1000000000L) ||
-		nanoseconds == UTIME_NOW || nanoseconds == UTIME_OMIT;
+	if (nanoseconds >= 0 && nanoseconds < 1000000000L)
+		return 1;
+	if (nanoseconds == UTIME_NOW)
+		return 1;
+	if (nanoseconds == UTIME_OMIT)
+		return 1;
+	return 0;
 }
 
+/* Performs utimensat or futimens. */
 static SYSCALL_EXT intptr_t
-sys_utimens_common(int dirfd, uintptr_t pathname, int fd,
-		   uintptr_t times_address, int flags)
+sys_utimens_common(
+	int dirfd,
+	uintptr_t pathname,
+	int fd,
+	uintptr_t times_address,
+	int flags)
 {
-	struct process *process = current_process();
-	struct file *file = NULL, *held = NULL;
+	struct process *process;
+	struct file *file;
+	struct file *held;
 	struct path path;
 	struct inode *inode;
 	struct stat status;
 	struct timespec times[2];
-	unsigned mask = 0;
-	int by_fd = fd >= 0, explicit_time = 0, error;
+	unsigned mask;
+	unsigned namei_flags;
+	int by_fd;
+	int explicit_time;
+	int error;
 
-	if (process == NULL || process->cred == NULL ||
+	process = current_process();
+	file = NULL;
+	held = NULL;
+	mask = 0;
+	by_fd = fd >= 0;
+	explicit_time = 0;
+
+	if (process == NULL ||
+	    process->cred == NULL ||
 	    (flags & ~AT_SYMLINK_NOFOLLOW) != 0)
 		return -EINVAL;
+
+	/* A missing times array means now for both timestamps. */
 	if (times_address == 0) {
 		memset(times, 0, sizeof(times));
-		times[0].tv_nsec = times[1].tv_nsec = UTIME_NOW;
+		times[0].tv_nsec = UTIME_NOW;
+		times[1].tv_nsec = UTIME_NOW;
 	} else {
 		error = copyin(times_address, times, sizeof(times));
 		if (error != 0)
@@ -3523,40 +5372,50 @@ sys_utimens_common(int dirfd, uintptr_t pathname, int fd,
 		    !valid_utime_nsec(times[1].tv_nsec))
 			return -EINVAL;
 	}
+
+	/* Finds the inode by descriptor or by path. */
 	if (by_fd) {
 		file = filedesc_get_ref(process->fd, fd);
 		if (file == NULL || file->f_inode == NULL) {
-			if (file != NULL) (void)file_close(file);
+			if (file != NULL)
+				(void)file_close(file);
 			return -EBADF;
 		}
 		inode = file->f_inode;
 	} else {
-		error = sys_resolve_path_at(process, dirfd, pathname,
-			(flags & AT_SYMLINK_NOFOLLOW) != 0 ?
-			NAMEI_NOFOLLOW_FINAL : 0, &path, &held);
+		if ((flags & AT_SYMLINK_NOFOLLOW) != 0)
+			namei_flags = NAMEI_NOFOLLOW_FINAL;
+		else
+			namei_flags = 0;
+		error = sys_resolve_path_at(process, dirfd, pathname, namei_flags,
+			&path, &held);
 		if (error != 0)
 			return -error;
 		inode = path.p_inode;
 	}
+
+	/* Builds the attribute mask from the two timestamps. */
 	error = inode_getattr(inode, &status);
 	if (error == 0 && times[0].tv_nsec != UTIME_OMIT) {
-		if (times[0].tv_nsec == UTIME_NOW)
+		if (times[0].tv_nsec == UTIME_NOW) {
 			mask |= INODE_ATTR_ATIME_NOW;
-		else {
+		} else {
 			status.st_atim = times[0];
 			mask |= INODE_ATTR_ATIME;
 			explicit_time = 1;
 		}
 	}
 	if (error == 0 && times[1].tv_nsec != UTIME_OMIT) {
-		if (times[1].tv_nsec == UTIME_NOW)
+		if (times[1].tv_nsec == UTIME_NOW) {
 			mask |= INODE_ATTR_MTIME_NOW;
-		else {
+		} else {
 			status.st_mtim = times[1];
 			mask |= INODE_ATTR_MTIME;
 			explicit_time = 1;
 		}
 	}
+
+	/* An explicit time needs ownership; "now" needs write access. */
 	if (error == 0 && mask != 0 &&
 	    !inode_chmod_allowed(inode, process->cred)) {
 		if (explicit_time)
@@ -3566,30 +5425,49 @@ sys_utimens_common(int dirfd, uintptr_t pathname, int fd,
 	}
 	if (error == 0 && mask != 0)
 		error = inode_setattr(inode, &status, mask);
-	if (by_fd)
+	if (by_fd) {
 		(void)file_close(file);
-	else {
+	} else {
 		path_release(&path);
-		if (held != NULL) (void)file_close(held);
+		if (held != NULL)
+			(void)file_close(held);
 	}
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles faccessat(2). */
 static SYSCALL_EXT intptr_t
-sys_faccessat_call(const uintptr_t args[6])
+sys_faccessat_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct file *held = NULL;
+	struct process *process;
+	struct file *held;
 	struct path path;
 	struct ucred check;
-	int mode = (int)args[2], flags = (int)args[3], error;
+	unsigned namei_flags;
+	int mode;
+	int flags;
+	int error;
 
-	if (process == NULL || process->cred == NULL ||
+	process = current_process();
+	held = NULL;
+	mode = (int)args[2];
+	flags = (int)args[3];
+
+	if (process == NULL ||
+	    process->cred == NULL ||
 	    (mode & ~(R_OK | W_OK | X_OK)) != 0 ||
 	    (flags & ~(AT_EACCESS | AT_SYMLINK_NOFOLLOW)) != 0)
 		return -EINVAL;
-	error = sys_resolve_path_at(process, (int)args[0], args[1],
-		(flags & AT_SYMLINK_NOFOLLOW) != 0 ? NAMEI_NOFOLLOW_FINAL : 0,
+
+	/* Checks with the real credential unless AT_EACCESS is given. */
+	if ((flags & AT_SYMLINK_NOFOLLOW) != 0)
+		namei_flags = NAMEI_NOFOLLOW_FINAL;
+	else
+		namei_flags = 0;
+	error = sys_resolve_path_at(process, (int)args[0], args[1], namei_flags,
 		&path, &held);
 	if (error == 0) {
 		check = *process->cred;
@@ -3602,20 +5480,30 @@ sys_faccessat_call(const uintptr_t args[6])
 	}
 	if (held != NULL)
 		(void)file_close(held);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Resolves the parent directory and final component of a path relative to a dirfd. */
 static SYSCALL_EXT int
-sys_parent_path_at(struct process *process, int dirfd, const char *pathname,
-		   struct cwdinfo *temporary, struct cwdinfo **context,
-		   struct file **held, struct path *parent,
-		   struct componentname *name, char storage[NAME_MAX + 1U])
+sys_parent_path_at(
+	struct process *process,
+	int dirfd,
+	const char *pathname,
+	struct cwdinfo *temporary,
+	struct cwdinfo **context,
+	struct file **held,
+	struct path *parent,
+	struct componentname *name,
+	char storage[NAME_MAX + 1U])
 {
 	int error;
+
 	*held = NULL;
-	if (pathname[0] == '/')
+	if (pathname[0] == '/') {
 		*context = process->cwdi;
-	else {
+	} else {
 		error = syscall_context_at(process, dirfd, temporary, context, held);
 		if (error != 0)
 			return error;
@@ -3628,22 +5516,43 @@ sys_parent_path_at(struct process *process, int dirfd, const char *pathname,
 	return error;
 }
 
+/* Handles linkat(2). */
 static SYSCALL_EXT intptr_t
-sys_linkat_call(const uintptr_t args[6])
+sys_linkat_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct cwdinfo temporary, *context;
-	struct file *old_held = NULL, *new_held = NULL;
-	struct path target, parent;
+	struct process *process;
+	struct cwdinfo temporary;
+	struct cwdinfo *context;
+	struct file *old_held;
+	struct file *new_held;
+	struct path target;
+	struct path parent;
 	struct componentname name;
-	char new_path[PATH_MAX], storage[NAME_MAX + 1U];
-	int flags = (int)args[4], error, parent_valid = 0;
+	char new_path[PATH_MAX];
+	char storage[NAME_MAX + 1U];
+	unsigned namei_flags;
+	int flags;
+	int error;
+	int parent_valid;
 
-	if (process == NULL || process->cred == NULL ||
+	process = current_process();
+	old_held = NULL;
+	new_held = NULL;
+	flags = (int)args[4];
+	parent_valid = 0;
+
+	if (process == NULL ||
+	    process->cred == NULL ||
 	    (flags & ~AT_SYMLINK_FOLLOW) != 0)
 		return -EINVAL;
-	error = sys_resolve_path_at(process, (int)args[0], args[1],
-		(flags & AT_SYMLINK_FOLLOW) != 0 ? 0 : NAMEI_NOFOLLOW_FINAL,
+
+	/* Resolves the target, then the parent of the new name. */
+	if ((flags & AT_SYMLINK_FOLLOW) != 0)
+		namei_flags = 0;
+	else
+		namei_flags = NAMEI_NOFOLLOW_FINAL;
+	error = sys_resolve_path_at(process, (int)args[0], args[1], namei_flags,
 		&target, &old_held);
 	if (error != 0)
 		return -error;
@@ -3653,6 +5562,8 @@ sys_linkat_call(const uintptr_t args[6])
 			&temporary, &context, &new_held, &parent, &name, storage);
 	if (error == 0)
 		parent_valid = 1;
+
+	/* Links under the mount's namespace transaction. */
 	if (error == 0)
 		mount_vfs_transaction_enter(parent.p_mount);
 	if (error == 0)
@@ -3670,28 +5581,44 @@ sys_linkat_call(const uintptr_t args[6])
 	path_release(&target);
 	if (old_held != NULL)
 		(void)file_close(old_held);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles symlinkat(2). */
 static SYSCALL_EXT intptr_t
-sys_symlinkat_call(const uintptr_t args[6])
+sys_symlinkat_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct ucred *credential = NULL;
-	struct cwdinfo temporary, *context;
-	struct file *held = NULL;
+	struct process *process;
+	struct ucred *credential;
+	struct cwdinfo temporary;
+	struct cwdinfo *context;
+	struct file *held;
 	struct path parent;
 	struct componentname name;
 	struct inode_creation_request creation;
-	struct inode *created = NULL;
-	char target[PATH_MAX], pathname[PATH_MAX], storage[NAME_MAX + 1U];
-	int error, parent_valid = 0;
+	struct inode *created;
+	char target[PATH_MAX];
+	char pathname[PATH_MAX];
+	char storage[NAME_MAX + 1U];
+	int error;
+	int parent_valid;
+
+	process = current_process();
+	credential = NULL;
+	held = NULL;
+	created = NULL;
+	parent_valid = 0;
 
 	if (process == NULL || process->cred == NULL)
 		return -EINVAL;
 	credential = cred_process_ref(process);
 	if (credential == NULL)
 		return -EINVAL;
+
+	/* Copies both strings and resolves the parent of the link. */
 	error = copyinstr(args[0], target, sizeof(target), NULL);
 	if (error == 0)
 		error = copyinstr(args[2], pathname, sizeof(pathname), NULL);
@@ -3701,6 +5628,8 @@ sys_symlinkat_call(const uintptr_t args[6])
 		if (error == 0)
 			parent_valid = 1;
 	}
+
+	/* Creates the link under the mount's namespace transaction. */
 	if (error == 0)
 		mount_vfs_transaction_enter(parent.p_mount);
 	if (error == 0)
@@ -3720,18 +5649,26 @@ sys_symlinkat_call(const uintptr_t args[6])
 	if (held != NULL)
 		(void)file_close(held);
 	cred_release(credential);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles readlinkat(2). */
 static SYSCALL_EXT intptr_t
-sys_readlinkat_call(const uintptr_t args[6])
+sys_readlinkat_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct file *held = NULL;
+	struct process *process;
+	struct file *held;
 	struct path path;
 	char buffer[PATH_MAX];
+	size_t capacity;
 	ssize_t count;
 	int error;
+
+	process = current_process();
+	held = NULL;
 
 	if (process == NULL || args[3] == 0)
 		return -EINVAL;
@@ -3739,8 +5676,13 @@ sys_readlinkat_call(const uintptr_t args[6])
 		NAMEI_NOFOLLOW_FINAL, &path, &held);
 	if (error != 0)
 		return -error;
-	count = inode_readlink(path.p_inode, buffer,
-		args[3] < sizeof(buffer) ? (size_t)args[3] : sizeof(buffer));
+
+	/* Reads at most a buffer's worth and copies it out unterminated. */
+	if (args[3] < sizeof(buffer))
+		capacity = (size_t)args[3];
+	else
+		capacity = sizeof(buffer);
+	count = inode_readlink(path.p_inode, buffer, capacity);
 	if (count >= 0)
 		error = copyout(buffer, args[2], (size_t)count);
 	else
@@ -3748,19 +5690,34 @@ sys_readlinkat_call(const uintptr_t args[6])
 	path_release(&path);
 	if (held != NULL)
 		(void)file_close(held);
-	return error == 0 ? count : -error;
+	if (error != 0)
+		return -error;
+	return count;
 }
 
+/* Handles sigaction(2). */
 static intptr_t
-sys_sigaction_call(const uintptr_t args[6])
+sys_sigaction_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	int signo = (int)args[0], error, install = args[1] != 0;
-	struct sigaction action, old;
-	struct signal_action replacement, previous;
+	struct process *process;
+	int signo;
+	int error;
+	int install;
+	struct sigaction action;
+	struct sigaction old;
+	struct signal_action replacement;
+	struct signal_action previous;
+	struct signal_action *replacement_argument;
+
+	process = current_process();
+	signo = (int)args[0];
+	install = args[1] != 0;
 
 	if (process == NULL || signo <= 0 || signo >= NSIG)
 		return -EINVAL;
+
+	/* Validates a new action before touching the process. */
 	if (install) {
 		error = copyin(args[1], &action, sizeof(action));
 		if (error != 0)
@@ -3786,8 +5743,14 @@ sys_sigaction_call(const uintptr_t args[6])
 		replacement.flags = action.sa_flags;
 		replacement.restorer = (uintptr_t)action.sa_restorer;
 	}
-	error = signal_action_set(process, signo,
-	    install ? &replacement : NULL, &previous);
+
+	/* Installs the action and reports the previous one. */
+	if (install)
+		replacement_argument = &replacement;
+	else
+		replacement_argument = NULL;
+	error = signal_action_set(process, signo, replacement_argument,
+	    &previous);
 	if (error != 0)
 		return -error;
 	memset(&old, 0, sizeof(old));
@@ -3803,13 +5766,18 @@ sys_sigaction_call(const uintptr_t args[6])
 	return 0;
 }
 
+/* Handles sigprocmask(2). */
 static intptr_t
-sys_sigprocmask_call(const uintptr_t args[6])
+sys_sigprocmask_call(
+	const uintptr_t args[6])
 {
-	sigset_t set, old;
+	sigset_t set;
+	sigset_t old;
 	unsigned long irq;
-	int operation = (int)args[0];
+	int operation;
 	int error;
+
+	operation = (int)args[0];
 
 	if (curthread == NULL || curthread->proc == NULL)
 		return -EINVAL;
@@ -3823,6 +5791,8 @@ sys_sigprocmask_call(const uintptr_t args[6])
 		    operation != SIG_SETMASK)
 			return -EINVAL;
 	}
+
+	/* Applies the operation under the process lock. */
 	irq = spin_lock_irqsave(&curthread->proc->lock);
 	old = curthread->signal_mask;
 	if (args[1] != 0) {
@@ -3842,12 +5812,15 @@ sys_sigprocmask_call(const uintptr_t args[6])
 	return 0;
 }
 
+/* Handles sigpending(2). */
 static intptr_t
-sys_sigpending_call(const uintptr_t args[6])
+sys_sigpending_call(
+	const uintptr_t args[6])
 {
 	sigset_t pending;
 	unsigned long irq;
 	int error;
+
 	if (curthread == NULL || curthread->proc == NULL || args[0] == 0)
 		return -EINVAL;
 	irq = spin_lock_irqsave(&curthread->proc->lock);
@@ -3855,35 +5828,56 @@ sys_sigpending_call(const uintptr_t args[6])
 	    curthread->proc->signal_pending) & curthread->signal_mask;
 	spin_unlock_irqrestore(&curthread->proc->lock, irq);
 	error = copyout(&pending, args[0], sizeof(pending));
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles mknodat(2). */
 static SYSCALL_EXT intptr_t
-sys_mknodat_call(const uintptr_t args[6])
+sys_mknodat_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct ucred *credential = NULL;
-	struct cwdinfo temporary, *context;
-	struct file *held = NULL;
+	struct process *process;
+	struct ucred *credential;
+	struct cwdinfo temporary;
+	struct cwdinfo *context;
+	struct file *held;
 	struct path parent;
 	struct componentname name;
 	struct inode_creation_request creation;
-	struct inode *created = NULL;
-	char pathname[PATH_MAX], storage[NAME_MAX + 1U];
-	mode_t mode = (mode_t)args[2];
+	struct inode *created;
+	char pathname[PATH_MAX];
+	char storage[NAME_MAX + 1U];
+	mode_t mode;
 	enum inode_type type;
 	mode_t process_umask;
 	int error;
+
+	process = current_process();
+	credential = NULL;
+	held = NULL;
+	created = NULL;
+	mode = (mode_t)args[2];
+
 	if (process == NULL || process->cwdi == NULL)
 		return -EINVAL;
 	credential = cred_process_ref(process);
 	if (credential == NULL)
 		return -EINVAL;
 	process_umask = process->umask;
-	if ((mode & S_IFMT) == S_IFIFO) type = INODE_FIFO;
-	else if ((mode & S_IFMT) == S_IFCHR) type = INODE_CHAR;
-	else if ((mode & S_IFMT) == S_IFBLK) type = INODE_BLOCK;
-	else { error = EOPNOTSUPP; goto out_credential; }
+
+	/* Only FIFOs and, for the superuser, device nodes can be made. */
+	if ((mode & S_IFMT) == S_IFIFO) {
+		type = INODE_FIFO;
+	} else if ((mode & S_IFMT) == S_IFCHR) {
+		type = INODE_CHAR;
+	} else if ((mode & S_IFMT) == S_IFBLK) {
+		type = INODE_BLOCK;
+	} else {
+		error = EOPNOTSUPP;
+		goto out_credential;
+	}
 	if (type == INODE_FIFO && args[3] != 0) {
 		error = EINVAL;
 		goto out_credential;
@@ -3893,13 +5887,15 @@ sys_mknodat_call(const uintptr_t args[6])
 		error = EPERM;
 		goto out_credential;
 	}
+
+	/* Resolves the parent and creates the node under its transaction. */
 	path_init(&parent);
 	error = copyinstr(args[1], pathname, sizeof(pathname), NULL);
 	if (error != 0)
 		goto out_credential;
-	if (pathname[0] == '/')
+	if (pathname[0] == '/') {
 		context = process->cwdi;
-	else {
+	} else {
 		error = syscall_context_at(process, (int)args[0], &temporary,
 		    &context, &held);
 		if (error != 0)
@@ -3921,18 +5917,23 @@ sys_mknodat_call(const uintptr_t args[6])
 	path_release(&parent);
 	if (held != NULL)
 		(void)file_close(held);
-	out_credential:
+out_credential:
 	cred_release(credential);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles fchdir(2). */
 static intptr_t
-sys_fchdir_call(const uintptr_t args[6])
+sys_fchdir_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct file *file;
 	int error;
 
+	process = current_process();
 	if (process == NULL || process->cwdi == NULL || process->fd == NULL)
 		return -EINVAL;
 	file = filedesc_get_ref(process->fd, (int)args[0]);
@@ -3940,25 +5941,36 @@ sys_fchdir_call(const uintptr_t args[6])
 		return -EBADF;
 	error = fs_chdir_path(process->cwdi, &file->f_path);
 	(void)file_close(file);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles sigaltstack(2). */
 static intptr_t
-sys_sigaltstack_call(const uintptr_t args[6])
+sys_sigaltstack_call(
+	const uintptr_t args[6])
 {
-	struct sigaltstack_record requested, old;
+	struct sigaltstack_record requested;
+	struct sigaltstack_record old;
 	int error;
+
 	if (curthread == NULL)
 		return -EINVAL;
+
+	/* Snapshots the current stack, marking it in use when it is. */
 	memset(&old, 0, sizeof(old));
 	old.ss_sp = (uapi_ptr_t)curthread->signal_altstack_base;
 	old.ss_size = curthread->signal_altstack_size;
 	old.ss_flags = (int32_t)curthread->signal_altstack_flags;
 	if (curthread->signal_on_altstack_depth != 0)
 		old.ss_flags |= SS_ONSTACK;
+
+	/* A new stack cannot be installed while the old one is in use. */
 	if (args[0] != 0) {
 		error = copyin(args[0], &requested, sizeof(requested));
-		if (error != 0) return -error;
+		if (error != 0)
+			return -error;
 		if (curthread->signal_on_altstack_depth != 0)
 			return -EPERM;
 		if (requested.ss_flags == SS_DISABLE) {
@@ -3966,7 +5978,8 @@ sys_sigaltstack_call(const uintptr_t args[6])
 			curthread->signal_altstack_size = 0;
 			curthread->signal_altstack_flags = SS_DISABLE;
 		} else {
-			if (requested.ss_flags != 0 || requested.ss_size < MINSIGSTKSZ ||
+			if (requested.ss_flags != 0 ||
+			    requested.ss_size < MINSIGSTKSZ ||
 			    user_range_check((uintptr_t)requested.ss_sp,
 			    (size_t)requested.ss_size, HAL_SPACE_WRITE) != 0)
 				return -EINVAL;
@@ -3977,32 +5990,42 @@ sys_sigaltstack_call(const uintptr_t args[6])
 	}
 	if (args[1] != 0) {
 		error = copyout(&old, args[1], sizeof(old));
-		if (error != 0) return -error;
+		if (error != 0)
+			return -error;
 	}
 	return 0;
 }
 
+/* Handles sigtimedwait(2). */
 static intptr_t
-sys_sigtimedwait_call(const uintptr_t args[6])
+sys_sigtimedwait_call(
+	const uintptr_t args[6])
 {
 	sigset_t set;
 	struct signal_info selected;
 	siginfo_t info;
 	uint64_t deadline;
-	int immediate, signo, error;
+	int immediate;
+	int signo;
+	int error;
+
 	if (curthread == NULL || args[0] == 0)
 		return -EINVAL;
 	error = copyin(args[0], &set, sizeof(set));
-	if (error != 0) return -error;
+	if (error != 0)
+		return -error;
 	error = poll_timeout(args[2], &deadline, &immediate);
 	if (error != 0)
 		return -error;
 	if (immediate)
 		deadline = sched_ticks();
+
+	/* Waits, then converts the kernel signal info to the user layout. */
 	memset(&selected, 0, sizeof(selected));
 	error = signal_timedwait(curthread, set, deadline, args[2] != 0,
 	    &selected, &signo);
-	if (error != 0) return -error;
+	if (error != 0)
+		return -error;
 	memset(&info, 0, sizeof(info));
 	info.si_signo = signo;
 	info.si_errno = selected.error;
@@ -4014,65 +6037,101 @@ sys_sigtimedwait_call(const uintptr_t args[6])
 	memcpy(&info.si_value, &selected.value, sizeof(selected.value));
 	if (args[1] != 0) {
 		error = copyout(&info, args[1], sizeof(info));
-		if (error != 0) return -error;
+		if (error != 0)
+			return -error;
 	}
 	return signo;
 }
 
+/* Handles sigqueue(2). */
 static intptr_t
-sys_sigqueue_call(const uintptr_t args[6])
+sys_sigqueue_call(
+	const uintptr_t args[6])
 {
-	struct process *sender = current_process();
+	struct process *sender;
 	struct process *target;
 	struct signal_info info;
-	pid_t pid = (pid_t)args[0];
-	int signo = (int)args[1], error;
+	pid_t pid;
+	int signo;
+	int error;
+
+	sender = current_process();
+	pid = (pid_t)args[0];
+	signo = (int)args[1];
+
+	/* A null signal only checks permission. */
 	if (sender == NULL || pid <= 0 || signo < 0 || signo >= NSIG)
 		return -EINVAL;
 	error = signal_kill(sender, pid, 0);
-	if (error != 0) return -error;
+	if (error != 0)
+		return -error;
 	if (signo == 0)
 		return 0;
+
+	/* Queues the signal with the sender's identity and value. */
 	target = process_find_ref(pid);
-	if (target == NULL) return -ESRCH;
+	if (target == NULL)
+		return -ESRCH;
 	memset(&info, 0, sizeof(info));
 	info.code = SI_QUEUE;
 	info.pid = sender->pid;
-	info.uid = sender->cred != NULL ? sender->cred->euid : 0;
+	if (sender->cred != NULL)
+		info.uid = sender->cred->euid;
+	else
+		info.uid = 0;
 	info.value = (uint64_t)args[2];
 	error = signal_send_process_info(target, signo, &info);
 	process_release(target);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles thread_create(2). */
 static intptr_t
-sys_thread_create_call(const uintptr_t args[6])
+sys_thread_create_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct thread *thread;
 	struct uaccess_pin pin;
 	tid_t tid;
 	int error;
-	if (process == NULL || process->vmspace == NULL || args[0] == 0 ||
-	    args[1] == 0 || args[4] != 0 || args[5] == 0)
+
+	process = current_process();
+	if (process == NULL ||
+	    process->vmspace == NULL ||
+	    args[0] == 0 ||
+	    args[1] == 0 ||
+	    args[4] != 0 ||
+	    args[5] == 0)
 		return -EINVAL;
+
+	/* The new thread starts only once its id has been reported. */
 	memset(&pin, 0, sizeof(pin));
 	error = uaccess_pin(args[5], sizeof(tid), HAL_SPACE_WRITE, &pin);
-	if (error != 0) return -error;
+	if (error != 0)
+		return -error;
 	error = thread_create(process, args[0], args[1], &thread);
 	if (error == 0) {
 		hal_task_set_tls(thread->task, args[3]);
 		tid = thread->tid;
 		error = copyout_pinned(&pin, 0, &tid, sizeof(tid));
-		if (error == 0) thread_start(thread);
-		else (void)thread_abort_new(thread);
+		if (error == 0)
+			thread_start(thread);
+		else
+			(void)thread_abort_new(thread);
 	}
 	uaccess_unpin(&pin);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles thread_exit(2). */
 static intptr_t
-sys_thread_exit_call(const uintptr_t args[6])
+sys_thread_exit_call(
+	const uintptr_t args[6])
 {
 	if (curthread == NULL || curthread->proc == &process0)
 		return -EINVAL;
@@ -4080,9 +6139,11 @@ sys_thread_exit_call(const uintptr_t args[6])
 	thread_exit(0);
 }
 
-/* Caller holds target->proc->lock. */
+/* Claims a thread for one joiner; the caller holds the process lock. */
 static int
-thread_join_claim_locked(struct thread *target, tid_t owner,
+thread_join_claim_locked(
+	struct thread *target,
+	tid_t owner,
 	unsigned stop_redispatch)
 {
 	if (target->detached)
@@ -4092,12 +6153,18 @@ thread_join_claim_locked(struct thread *target, tid_t owner,
 		target->join_owner_tid = owner;
 		return 0;
 	}
-	return stop_redispatch && target->join_owner_tid == owner ? 0 : EINVAL;
+
+	/* A redispatch after a stop keeps the claim it already owns. */
+	if (stop_redispatch && target->join_owner_tid == owner)
+		return 0;
+	return EINVAL;
 }
 
-/* Caller holds target->proc->lock. */
+/* Releases a joiner's claim on a thread; the caller holds the process lock. */
 static void
-thread_join_release_locked(struct thread *target, tid_t owner)
+thread_join_release_locked(
+	struct thread *target,
+	tid_t owner)
 {
 	if (target->join_claimed && target->join_owner_tid == owner) {
 		target->join_claimed = 0;
@@ -4105,34 +6172,27 @@ thread_join_release_locked(struct thread *target, tid_t owner)
 	}
 }
 
-#ifdef ZEDBSD_SYSCALL_STOP_TEST
-int
-syscall_test_thread_join_claim(struct thread *target, tid_t owner,
-	unsigned stop_redispatch)
-{
-	return target == NULL ? EINVAL :
-	    thread_join_claim_locked(target, owner, stop_redispatch);
-}
-
-void
-syscall_test_thread_join_release(struct thread *target, tid_t owner)
-{
-	if (target != NULL)
-		thread_join_release_locked(target, owner);
-}
-#endif
-
+/* Handles thread_join(2). */
 static intptr_t
-sys_thread_join_call(const uintptr_t args[6])
+sys_thread_join_call(
+	const uintptr_t args[6])
 {
 	struct thread *target;
-	struct process *process = current_process();
+	struct process *process;
 	struct uaccess_pin pin;
 	uintptr_t value;
 	unsigned long irq;
-	int error, pin_active = 0, retain_claim = 0;
+	int error;
+	int pin_active;
+	int retain_claim;
 	unsigned cancelable;
+	unsigned wait_flags;
 	tid_t owner;
+	uint64_t sequence;
+
+	process = current_process();
+	pin_active = 0;
+	retain_claim = 0;
 
 	if (process == NULL || (tid_t)args[0] == curthread->tid)
 		return -EDEADLK;
@@ -4142,9 +6202,12 @@ sys_thread_join_call(const uintptr_t args[6])
 	cancelable = (args[2] & ZEDBSD_THREAD_JOIN_CANCELABLE) != 0;
 	owner = curthread->tid;
 	memset(&pin, 0, sizeof(pin));
+
+	/* Claims the target for this joiner. */
 	target = thread_find_ref((tid_t)args[0]);
 	if (target == NULL || target->proc != process) {
-		if (target != NULL) thread_release(target);
+		if (target != NULL)
+			thread_release(target);
 		return -ESRCH;
 	}
 	irq = spin_lock_irqsave(&process->lock);
@@ -4153,23 +6216,31 @@ sys_thread_join_call(const uintptr_t args[6])
 	spin_unlock_irqrestore(&process->lock, irq);
 	if (error != 0)
 		goto out;
-	/* Pin before waiting or observing a consumable zombie.  A failed copyout
-	 * must leave the target joinable, not reap it and report EFAULT afterward. */
+
+	/*
+	 * Pin before waiting or observing a consumable zombie.  A failed
+	 * copyout must leave the target joinable, not reap it and report
+	 * EFAULT afterward.
+	 */
 	if (args[1] != 0) {
 		error = uaccess_pin(args[1], sizeof(value), HAL_SPACE_WRITE, &pin);
 		if (error != 0)
 			goto release;
 		pin_active = 1;
 	}
+
+	/* Waits for the target to become a zombie. */
 	irq = spin_lock_irqsave(&process->lock);
 	if (cancelable &&
 	    atomic_raw_load_acquire(&curthread->cancel_pending) != 0)
 		error = EINTR;
+	wait_flags = WAITQ_INTERRUPTIBLE;
+	if (cancelable)
+		wait_flags |= WAITQ_CANCELABLE;
 	while (error == 0 && target->state != THREAD_ZOMBIE) {
-		uint64_t sequence = waitq_sequence(&target->join_waitq);
+		sequence = waitq_sequence(&target->join_waitq);
 		error = waitq_sleep(&target->join_waitq, &process->lock,
-		    sequence, 0, WAITQ_INTERRUPTIBLE |
-		    (cancelable ? WAITQ_CANCELABLE : 0));
+		    sequence, 0, wait_flags);
 		if (error == EAGAIN)
 			error = 0;
 		if (error == 0 && cancelable &&
@@ -4179,8 +6250,12 @@ sys_thread_join_call(const uintptr_t args[6])
 	if (error == 0)
 		value = target->user_exit_value;
 	spin_unlock_irqrestore(&process->lock, irq);
-	/* STOP is transparent to userspace.  Keep ownership across that one
-	 * redispatch only; ordinary signal EINTR relinquishes it for another joiner. */
+
+	/*
+	 * STOP is transparent to userspace.  Keep ownership across that one
+	 * redispatch only; ordinary signal EINTR relinquishes it for
+	 * another joiner.
+	 */
 	retain_claim = error == EINTR && curthread->stop_interrupted;
 	if (error == 0 && pin_active)
 		error = copyout_pinned(&pin, 0, &value, sizeof(value));
@@ -4196,42 +6271,60 @@ out:
 	if (pin_active)
 		uaccess_unpin(&pin);
 	thread_release(target);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
-#ifdef ZEDBSD_SYSCALL_STOP_TEST
-intptr_t
-syscall_test_thread_join_call(const uintptr_t args[6])
-{
-	return sys_thread_join_call(args);
-}
-#endif
-
+/* Handles thread_detach(2). */
 static intptr_t
-sys_thread_detach_call(const uintptr_t args[6])
+sys_thread_detach_call(
+	const uintptr_t args[6])
 {
-	struct thread *target = thread_find_ref((tid_t)args[0]);
-	struct process *process = current_process();
+	struct thread *target;
+	struct process *process;
 	unsigned long irq;
-	int error = 0, reap = 0;
+	int error;
+	int reap;
+
+	target = thread_find_ref((tid_t)args[0]);
+	process = current_process();
+	error = 0;
+	reap = 0;
+
 	if (target == NULL || process == NULL || target->proc != process) {
-		if (target != NULL) thread_release(target);
+		if (target != NULL)
+			thread_release(target);
 		return -ESRCH;
 	}
+
+	/* A detached zombie is reaped right away. */
 	irq = spin_lock_irqsave(&process->lock);
-	if (target->detached || target->join_claimed) error = EINVAL;
-	else { target->detached = 1; reap = target->state == THREAD_ZOMBIE; }
+	if (target->detached || target->join_claimed) {
+		error = EINVAL;
+	} else {
+		target->detached = 1;
+		reap = target->state == THREAD_ZOMBIE;
+	}
 	spin_unlock_irqrestore(&process->lock, irq);
-	if (error == 0 && reap) error = thread_wait(target, NULL);
+	if (error == 0 && reap)
+		error = thread_wait(target, NULL);
 	thread_release(target);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles thread_self(2). */
 static intptr_t
-sys_thread_self_call(const uintptr_t args[6])
+sys_thread_self_call(
+	const uintptr_t args[6])
 {
-	if (curthread == NULL || args[2] != 0 || args[3] != 0 ||
-	    args[4] != 0 || args[5] != 0)
+	if (curthread == NULL ||
+	    args[2] != 0 ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0)
 		return -EINVAL;
 	if (args[0] == ZEDBSD_THREAD_SELF_TID && args[1] == 0)
 		return curthread->tid;
@@ -4244,33 +6337,57 @@ sys_thread_self_call(const uintptr_t args[6])
 	return -EINVAL;
 }
 
+/* Handles thread_kill(2). */
 static intptr_t
-sys_thread_kill_call(const uintptr_t args[6])
+sys_thread_kill_call(
+	const uintptr_t args[6])
 {
-	struct thread *target = thread_find_ref((tid_t)args[0]);
-	struct process *process = current_process();
+	struct thread *target;
+	struct process *process;
 	int error;
+
+	target = thread_find_ref((tid_t)args[0]);
+	process = current_process();
+
 	if (target == NULL || process == NULL || target->proc != process) {
-		if (target != NULL) thread_release(target);
+		if (target != NULL)
+			thread_release(target);
 		return -ESRCH;
 	}
-	error = args[1] == 0 ? 0 : signal_send_thread(target, (int)args[1]);
+	if (args[1] == 0)
+		error = 0;
+	else
+		error = signal_send_thread(target, (int)args[1]);
 	thread_release(target);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles thread_cancel(2). */
 static intptr_t
-sys_thread_cancel_call(const uintptr_t args[6])
+sys_thread_cancel_call(
+	const uintptr_t args[6])
 {
-	struct thread *current = curthread;
+	struct thread *current;
 	struct thread *target;
-	unsigned operation = (unsigned)args[1];
+	unsigned operation;
 	unsigned long irq;
 	int pending;
-	if (current == NULL || current->proc == NULL || args[2] != 0 ||
-	    args[3] != 0 || args[4] != 0 || args[5] != 0 ||
+
+	current = curthread;
+	operation = (unsigned)args[1];
+
+	if (current == NULL ||
+	    current->proc == NULL ||
+	    args[2] != 0 ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0 ||
 	    operation > ZEDBSD_THREAD_CANCEL_CLEAR)
 		return -EINVAL;
+
+	/* A request marks another thread of the process and interrupts it. */
 	if (operation == ZEDBSD_THREAD_CANCEL_REQUEST) {
 		target = thread_find_ref((tid_t)args[0]);
 		if (target == NULL || target->proc != current->proc) {
@@ -4281,13 +6398,18 @@ sys_thread_cancel_call(const uintptr_t args[6])
 		irq = spin_lock_irqsave(&target->proc->lock);
 		atomic_raw_store_release(&target->cancel_pending, 1U);
 		spin_unlock_irqrestore(&target->proc->lock, irq);
-		/* This retained interrupt closes the RUNNING-to-wait-registration gap.
-		 * Non-cancelable waits treat it as a spurious wake because they do not
-		 * inspect cancel_pending. */
+
+		/*
+		 * This retained interrupt closes the RUNNING-to-wait-
+		 * registration gap.  Non-cancelable waits treat it as a
+		 * spurious wake because they do not inspect cancel_pending.
+		 */
 		sched_interrupt(target);
 		thread_release(target);
 		return 0;
 	}
+
+	/* A test or clear only applies to the calling thread. */
 	if (args[0] != 0 && (tid_t)args[0] != current->tid)
 		return -EINVAL;
 	irq = spin_lock_irqsave(&current->proc->lock);
@@ -4298,24 +6420,31 @@ sys_thread_cancel_call(const uintptr_t args[6])
 	return pending;
 }
 
-#ifdef ZEDBSD_SYSCALL_STOP_TEST
-intptr_t
-syscall_test_thread_cancel_call(const uintptr_t args[6])
-{
-	return sys_thread_cancel_call(args);
-}
-#endif
-
+/* Handles usync(2), the user synchronization wait and wake primitive. */
 static intptr_t
-sys_usync_call(const uintptr_t args[6])
+sys_usync_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	struct vm_object *shared_object = NULL;
+	struct process *process;
+	struct vm_object *shared_object;
 	struct timespec timeout;
-	uintptr_t key_object, key_offset;
-	uint64_t ticks, deadline = 0;
-	unsigned flags = (unsigned)args[5];
+	uintptr_t key_object;
+	uintptr_t key_offset;
+	uint64_t ticks;
+	uint64_t deadline;
+	unsigned flags;
 	int error;
+	struct timespec now;
+	struct kern_timespec absolute_time;
+	struct kern_timespec current_time;
+	struct kern_timespec duration;
+	clockid_t clock;
+	struct timespec relative;
+
+	process = current_process();
+	shared_object = NULL;
+	deadline = 0;
+	flags = (unsigned)args[5];
 
 	if (process == NULL ||
 	    (flags & ~(ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE |
@@ -4323,6 +6452,8 @@ sys_usync_call(const uintptr_t args[6])
 	    ((flags & ZEDBSD_USYNC_CLOCK_REALTIME) != 0 &&
 	    (flags & ZEDBSD_USYNC_ABSTIME) == 0))
 		return -EINVAL;
+
+	/* A private object is keyed by process; a shared one by its VM object. */
 	if ((flags & ZEDBSD_USYNC_PRIVATE) != 0) {
 		key_object = (uintptr_t)process;
 		key_offset = args[0];
@@ -4333,6 +6464,8 @@ sys_usync_call(const uintptr_t args[6])
 			return -EINVAL;
 		key_object = (uintptr_t)shared_object;
 	}
+
+	/* A wait converts its absolute or relative timeout to a deadline. */
 	if ((unsigned)args[1] == ZEDBSD_USYNC_WAIT) {
 		if (args[4] != 0) {
 			error = EINVAL;
@@ -4340,16 +6473,13 @@ sys_usync_call(const uintptr_t args[6])
 		}
 		if (args[3] != 0) {
 			if ((flags & ZEDBSD_USYNC_ABSTIME) != 0) {
-				struct timespec now;
-				struct kern_timespec absolute_time, current_time;
-				struct kern_timespec duration;
-				clockid_t clock;
-
 				error = copyin(args[3], &timeout, sizeof(timeout));
 				if (error == 0)
 					error = kern_timespec_validate(&timeout);
-				clock = (flags & ZEDBSD_USYNC_CLOCK_REALTIME) != 0 ?
-				    CLOCK_REALTIME : CLOCK_MONOTONIC;
+				if ((flags & ZEDBSD_USYNC_CLOCK_REALTIME) != 0)
+					clock = CLOCK_REALTIME;
+				else
+					clock = CLOCK_MONOTONIC;
 				if (error == 0)
 					error = kern_clock_gettime(clock, &now);
 				if (error == 0) {
@@ -4365,8 +6495,6 @@ sys_usync_call(const uintptr_t args[6])
 					error = kern_timespec_sub(&absolute_time,
 					    &current_time, &duration);
 				if (error == 0) {
-					struct timespec relative;
-
 					relative.tv_sec = (time_t)duration.tv_sec;
 					relative.tv_nsec = (long)duration.tv_nsec;
 					error = kern_duration_to_ticks_ceil(&relative,
@@ -4397,8 +6525,11 @@ sys_usync_call(const uintptr_t args[6])
 		    (flags & ZEDBSD_USYNC_CANCELABLE) != 0);
 		goto out;
 	}
+
+	/* A wake takes only a count. */
 	if ((unsigned)args[1] == ZEDBSD_USYNC_WAKE) {
-		if (args[2] != 0 || args[3] != 0 ||
+		if (args[2] != 0 ||
+		    args[3] != 0 ||
 		    (flags & (ZEDBSD_USYNC_CANCELABLE | ZEDBSD_USYNC_ABSTIME |
 		    ZEDBSD_USYNC_CLOCK_REALTIME)) != 0)
 			error = EINVAL;
@@ -4411,25 +6542,33 @@ sys_usync_call(const uintptr_t args[6])
 out:
 	if (shared_object != NULL)
 		vm_object_put(shared_object);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles sigsuspend(2). */
 static intptr_t
-sys_sigsuspend_call(const uintptr_t args[6])
+sys_sigsuspend_call(
+	const uintptr_t args[6])
 {
 	struct process *process;
 	sigset_t mask;
 	unsigned long irq;
 	int error;
 
-	if (curthread == NULL || (process = curthread->proc) == NULL ||
-	    args[0] == 0)
+	if (curthread == NULL)
+		return -EINVAL;
+	process = curthread->proc;
+	if (process == NULL || args[0] == 0)
 		return -EINVAL;
 	error = copyin(args[0], &mask, sizeof(mask));
 	if (error != 0)
 		return -error;
 	mask &= SIGNAL_VALID_MASK & ~POLL_SIGNAL_BIT(SIGKILL) &
 	    ~POLL_SIGNAL_BIT(SIGSTOP);
+
+	/* Installs the temporary mask and sleeps until a signal is selected. */
 	irq = spin_lock_irqsave(&process->lock);
 	curthread->signal_suspend_mask = curthread->signal_mask;
 	curthread->signal_mask = mask;
@@ -4456,13 +6595,19 @@ sys_sigsuspend_call(const uintptr_t args[6])
 		}
 		sched_sleep_locked(0, &process->lock);
 	}
-	/* The user-return hook restores the original mask before entering the
-	 * selected handler.  Its sigreturn therefore resumes this call at EINTR. */
+
+	/*
+	 * The user-return hook restores the original mask before entering
+	 * the selected handler.  Its sigreturn therefore resumes this call
+	 * at EINTR.
+	 */
 	return -EINTR;
 }
 
+/* Handles sigreturn(2). */
 static intptr_t
-sys_sigreturn_call(const uintptr_t args[6])
+sys_sigreturn_call(
+	const uintptr_t args[6])
 {
 	intptr_t restored;
 	struct thread_signal_level *level;
@@ -4474,7 +6619,10 @@ sys_sigreturn_call(const uintptr_t args[6])
 	int restart;
 	int error;
 
-	if (curthread == NULL || args[0] == 0 || args[1] == 0 ||
+	/* The token and context must match the innermost signal level. */
+	if (curthread == NULL ||
+	    args[0] == 0 ||
+	    args[1] == 0 ||
 	    curthread->signal_depth == 0 ||
 	    (uint32_t)args[0] != curthread->signal_token)
 		return -EINVAL;
@@ -4485,13 +6633,19 @@ sys_sigreturn_call(const uintptr_t args[6])
 	error = copyin(args[1], &context, sizeof(context));
 	if (error != 0)
 		return -error;
-	/* The first signal ABI exposes machine state for diagnosis but does not
-	 * yet permit userland to replace it.  Only the signal mask is mutable. */
+
+	/*
+	 * The first signal ABI exposes machine state for diagnosis but does
+	 * not yet permit userland to replace it.  Only the signal mask is
+	 * mutable.
+	 */
 	restored_mask = context.uc_sigmask & SIGNAL_VALID_MASK &
 	    ~POLL_SIGNAL_BIT(SIGKILL) & ~POLL_SIGNAL_BIT(SIGSTOP);
 	context.uc_sigmask = level->saved_ucontext.uc_sigmask;
 	if (memcmp(&context, &level->saved_ucontext, sizeof(context)) != 0)
 		return -EINVAL;
+
+	/* Restores the machine state and pops the signal level. */
 	restart = level->restart_on_return != 0;
 	restart_number = level->restart_number;
 	memcpy(restart_args, level->restart_args, sizeof(restart_args));
@@ -4504,8 +6658,13 @@ sys_sigreturn_call(const uintptr_t args[6])
 	spin_unlock_irqrestore(&curthread->proc->lock, irq);
 	memset(level, 0, sizeof(*level));
 	curthread->signal_depth--;
-	curthread->signal_token = curthread->signal_depth == 0 ? 0 :
-	    curthread->signal_levels[curthread->signal_depth - 1U].token;
+	if (curthread->signal_depth == 0)
+		curthread->signal_token = 0;
+	else
+		curthread->signal_token =
+		    curthread->signal_levels[curthread->signal_depth - 1U].token;
+
+	/* Arranges the redispatch of an interrupted restartable call. */
 	curthread->syscall_restart_valid = 0;
 	if (restart) {
 		curthread->syscall_restart_number = restart_number;
@@ -4516,23 +6675,37 @@ sys_sigreturn_call(const uintptr_t args[6])
 	return restored;
 }
 
+/* Handles dup(2). */
 static intptr_t
-sys_dup_call(const uintptr_t args[6])
+sys_dup_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
-	int result, error;
+	struct process *process;
+	int result;
+	int error;
+
+	process = current_process();
 	if (process == NULL || process->fd == NULL)
 		return -EBADF;
 	error = filedesc_dup(process->fd, (int)args[0], 0, 0, &result);
-	return error == 0 ? result : -error;
+	if (error != 0)
+		return -error;
+	return result;
 }
 
+/* Handles dup2(2) and dup3(2). */
 static intptr_t
-sys_dup2_call(const uintptr_t args[6], int is_dup3)
+sys_dup2_call(
+	const uintptr_t args[6],
+	int is_dup3)
 {
-	struct process *process = current_process();
-	unsigned flags = 0;
+	struct process *process;
+	unsigned flags;
 	int error;
+
+	process = current_process();
+	flags = 0;
+
 	if (process == NULL || process->fd == NULL)
 		return -EBADF;
 	if (is_dup3) {
@@ -4545,38 +6718,71 @@ sys_dup2_call(const uintptr_t args[6], int is_dup3)
 	}
 	error = filedesc_dup2(process->fd, (int)args[0], (int)args[1],
 	    flags, is_dup3);
-	return error == 0 ? (intptr_t)(int)args[1] : -error;
+	if (error != 0)
+		return -error;
+	return (intptr_t)(int)args[1];
 }
 
+/* Handles fcntl(2). */
 static intptr_t
-sys_fcntl_call(const uintptr_t args[6])
+sys_fcntl_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
+	struct process *target;
 	struct file *file;
+	struct flock_record request;
 	unsigned flags;
-	int result, error, command = (int)args[1];
+	unsigned dup_flags;
+	unsigned descriptor_flags;
+	int owner;
+	int result;
+	int error;
+	int command;
+
+	process = current_process();
+	command = (int)args[1];
+
 	if (process == NULL || process->fd == NULL)
 		return -EBADF;
 	switch (command) {
 	case F_DUPFD:
 	case F_DUPFD_CLOEXEC:
 	case F_DUPFD_CLOFORK:
+		if (command == F_DUPFD_CLOEXEC)
+			dup_flags = FILEDESC_CLOEXEC;
+		else if (command == F_DUPFD_CLOFORK)
+			dup_flags = FILEDESC_CLOFORK;
+		else
+			dup_flags = 0;
 		error = filedesc_dup(process->fd, (int)args[0], (int)args[2],
-		    command == F_DUPFD_CLOEXEC ? FILEDESC_CLOEXEC :
-		    command == F_DUPFD_CLOFORK ? FILEDESC_CLOFORK : 0, &result);
-		return error == 0 ? result : -error;
+		    dup_flags, &result);
+		if (error != 0)
+			return -error;
+		return result;
 	case F_GETFD:
 		error = filedesc_get_flags(process->fd, (int)args[0], &flags);
-		return error == 0 ?
-		    (((flags & FILEDESC_CLOEXEC) != 0 ? FD_CLOEXEC : 0) |
-		    ((flags & FILEDESC_CLOFORK) != 0 ? FD_CLOFORK : 0)) : -error;
+		if (error != 0)
+			return -error;
+		result = 0;
+		if ((flags & FILEDESC_CLOEXEC) != 0)
+			result |= FD_CLOEXEC;
+		if ((flags & FILEDESC_CLOFORK) != 0)
+			result |= FD_CLOFORK;
+		return result;
 	case F_SETFD:
 		if (((int)args[2] & ~(FD_CLOEXEC | FD_CLOFORK)) != 0)
 			return -EINVAL;
+		descriptor_flags = 0;
+		if (((int)args[2] & FD_CLOEXEC) != 0)
+			descriptor_flags |= FILEDESC_CLOEXEC;
+		if (((int)args[2] & FD_CLOFORK) != 0)
+			descriptor_flags |= FILEDESC_CLOFORK;
 		error = filedesc_set_flags(process->fd, (int)args[0],
-		    (((int)args[2] & FD_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
-		    (((int)args[2] & FD_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0));
-		return error == 0 ? 0 : -error;
+		    descriptor_flags);
+		if (error != 0)
+			return -error;
+		return 0;
 	case F_GETFL:
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
@@ -4588,10 +6794,14 @@ sys_fcntl_call(const uintptr_t args[6])
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
 			return -EBADF;
-		/* F_GETFL returns the access mode and immutable open flags as well
-		 * as the flags F_SETFL may change.  Applications conventionally
-		 * pass that value back after toggling O_NONBLOCK or O_APPEND; ignore
-		 * the immutable bits rather than rejecting the standard idiom. */
+
+		/*
+		 * F_GETFL returns the access mode and immutable open flags as
+		 * well as the flags F_SETFL may change.  Applications
+		 * conventionally pass that value back after toggling
+		 * O_NONBLOCK or O_APPEND; ignore the immutable bits rather
+		 * than rejecting the standard idiom.
+		 */
 		file_status_flags_update(file, O_APPEND | O_NONBLOCK,
 		    (int)args[2]);
 		(void)file_close(file);
@@ -4603,14 +6813,16 @@ sys_fcntl_call(const uintptr_t args[6])
 		result = atomic_int_load_acquire(&file->f_signal_owner);
 		(void)file_close(file);
 		error = copyout(&result, args[2], sizeof(result));
-		return error == 0 ? 0 : -error;
-	case F_SETOWN: {
-		int owner = (int)args[2];
-
+		if (error != 0)
+			return -error;
+		return 0;
+	case F_SETOWN:
+		/* The owner must be a process or group in the caller's session. */
+		owner = (int)args[2];
 		if (owner == INT_MIN)
 			return -EINVAL;
 		if (owner > 0) {
-			struct process *target = process_find_ref((pid_t)owner);
+			target = process_find_ref((pid_t)owner);
 			if (target == NULL)
 				return -ESRCH;
 			if (target->session != process->session)
@@ -4630,14 +6842,12 @@ sys_fcntl_call(const uintptr_t args[6])
 		atomic_int_store_release(&file->f_signal_owner, owner);
 		(void)file_close(file);
 		return 0;
-	}
 	case F_GETLK:
 	case F_SETLK:
 	case F_SETLKW:
 	case F_OFD_GETLK:
 	case F_OFD_SETLK:
-	case F_OFD_SETLKW: {
-		struct flock_record request;
+	case F_OFD_SETLKW:
 		error = copyin(args[2], &request, sizeof(request));
 		if (error != 0)
 			return -error;
@@ -4649,30 +6859,48 @@ sys_fcntl_call(const uintptr_t args[6])
 		if (error == 0 &&
 		    (command == F_GETLK || command == F_OFD_GETLK))
 			error = copyout(&request, args[2], sizeof(request));
-		return error == 0 ? 0 : -error;
-	}
+		if (error != 0)
+			return -error;
+		return 0;
 	default:
 		return -EINVAL;
 	}
 }
 
+/* Handles pipe(2) and pipe2(2). */
 static intptr_t
-sys_pipe2_call(const uintptr_t args[6], int plain)
+sys_pipe2_call(
+	const uintptr_t args[6],
+	int plain)
 {
-	struct process *process = current_process();
-	struct file *read_file, *write_file;
-	int descriptors[2] = { -1, -1 };
-	int flags = plain ? 0 : (int)args[1];
+	struct process *process;
+	struct file *read_file;
+	struct file *write_file;
+	int descriptors[2];
+	int flags;
 	unsigned fdflags;
 	int error;
+
+	process = current_process();
+	descriptors[0] = -1;
+	descriptors[1] = -1;
+	if (plain)
+		flags = 0;
+	else
+		flags = (int)args[1];
 
 	if (process == NULL || process->fd == NULL)
 		return -EBADF;
 	error = pipe_create(flags, &read_file, &write_file);
 	if (error != 0)
 		return -error;
-	fdflags = ((flags & O_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
-	    ((flags & O_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0);
+
+	/* Installs both ends and reports them. */
+	fdflags = 0;
+	if ((flags & O_CLOEXEC) != 0)
+		fdflags |= FILEDESC_CLOEXEC;
+	if ((flags & O_CLOFORK) != 0)
+		fdflags |= FILEDESC_CLOFORK;
 	error = filedesc_install_pair(process->fd, read_file, fdflags,
 	    write_file, fdflags, descriptors);
 	if (error == 0)
@@ -4690,43 +6918,72 @@ sys_pipe2_call(const uintptr_t args[6], int plain)
 	return 0;
 }
 
+/* Handles fork(2). */
 static intptr_t
-sys_fork_call(const uintptr_t args[6])
+sys_fork_call(
+	const uintptr_t args[6])
 {
-	struct process *parent = current_process();
+	struct process *parent;
 	struct process *child;
 	int error;
+
+	parent = current_process();
 	(void)args;
 	error = process_fork(parent, &child);
-	return error == 0 ? child->pid : -error;
+	if (error != 0)
+		return -error;
+	return child->pid;
 }
 
+/* Handles sched_yield(2). */
 static intptr_t
-sys_sched_yield_call(const uintptr_t args[6])
+sys_sched_yield_call(
+	const uintptr_t args[6])
 {
-	if (args[0] != 0 || args[1] != 0 || args[2] != 0 || args[3] != 0 ||
-	    args[4] != 0 || args[5] != 0)
+	if (args[0] != 0 ||
+	    args[1] != 0 ||
+	    args[2] != 0 ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0)
 		return -EINVAL;
 	sched_yield();
 	return 0;
 }
 
+/* Handles times(2). */
 static intptr_t
-sys_times_call(const uintptr_t args[6])
+sys_times_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct process_times_record result;
 	size_t record_size;
-	uint64_t user_ticks, system_ticks, child_user_ticks, child_system_ticks;
+	uint64_t user_ticks;
+	uint64_t system_ticks;
+	uint64_t child_user_ticks;
+	uint64_t child_system_ticks;
 	int error;
-	if (process == NULL || args[0] == 0 || args[2] != 0 ||
-	    args[3] != 0 || args[4] != 0 || args[5] != 0)
+
+	process = current_process();
+
+	/* The record size selects the ABI version. */
+	if (process == NULL ||
+	    args[0] == 0 ||
+	    args[2] != 0 ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0)
 		return -EINVAL;
-	record_size = args[1] == 0 ? ZEDBSD_PROCESS_TIMES_V1_SIZE :
-	    (size_t)args[1];
+	if (args[1] == 0)
+		record_size = ZEDBSD_PROCESS_TIMES_V1_SIZE;
+	else
+		record_size = (size_t)args[1];
 	if (record_size != ZEDBSD_PROCESS_TIMES_V1_SIZE &&
 	    record_size != sizeof(result))
 		return -EINVAL;
+
+	/* Samples the accounting counters. */
 	user_ticks = atomic_u64_load_acquire(&process->user_ticks);
 	system_ticks = atomic_u64_load_acquire(&process->system_ticks);
 	child_user_ticks = atomic_u64_load_acquire(&process->child_user_ticks);
@@ -4738,114 +6995,206 @@ sys_times_call(const uintptr_t args[6])
 	result.system_ticks = system_ticks;
 	result.child_system_ticks = child_system_ticks;
 	error = copyout(&result, args[0], record_size);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Tests whether a process is selected by a priority which/who pair. */
 static int
-priority_matches(struct process *target, struct process *caller, int which,
-    id_t who)
+priority_matches(
+	struct process *target,
+	struct process *caller,
+	int which,
+	id_t who)
 {
 	struct ucred *target_cred;
-	uid_t target_euid = (uid_t)-1;
+	uid_t target_euid;
 
+	target_euid = (uid_t)-1;
+
+	/* A zero who names the caller's own process, group, or user. */
 	if (who == 0) {
-		if (which == PRIO_PROCESS) who = (id_t)caller->pid;
-		else if (which == PRIO_PGRP) who = (id_t)caller->pgrp;
-		else if (which == PRIO_USER) who = (id_t)caller->cred->euid;
+		if (which == PRIO_PROCESS)
+			who = (id_t)caller->pid;
+		else if (which == PRIO_PGRP)
+			who = (id_t)caller->pgrp;
+		else if (which == PRIO_USER)
+			who = (id_t)caller->cred->euid;
 	}
-	if (which == PRIO_PROCESS) return target->pid == (pid_t)who;
-	if (which == PRIO_PGRP) return target->pgrp == (pid_t)who;
+	if (which == PRIO_PROCESS) {
+		if (target->pid == (pid_t)who)
+			return 1;
+		return 0;
+	}
+	if (which == PRIO_PGRP) {
+		if (target->pgrp == (pid_t)who)
+			return 1;
+		return 0;
+	}
 	if (which == PRIO_USER) {
 		target_cred = cred_process_ref(target);
 		if (target_cred != NULL) {
 			target_euid = target_cred->euid;
 			cred_release(target_cred);
 		}
-		return target_euid == (uid_t)who;
+		if (target_euid == (uid_t)who)
+			return 1;
+		return 0;
 	}
 	return 0;
 }
 
+/* Handles getpriority(2). */
 static intptr_t
-sys_getpriority_call(const uintptr_t args[6])
+sys_getpriority_call(
+	const uintptr_t args[6])
 {
-	struct process *caller = current_process(), *target;
-	pid_t cursor = -1;
-	int which = (int)args[0], found = 0, best = 20, error;
-	if (caller == NULL || args[2] == 0 || args[3] || args[4] || args[5] ||
+	struct process *caller;
+	struct process *target;
+	pid_t cursor;
+	int which;
+	int found;
+	int best;
+	int error;
+	int value;
+
+	caller = current_process();
+	cursor = -1;
+	which = (int)args[0];
+	found = 0;
+	best = 20;
+
+	if (caller == NULL ||
+	    args[2] == 0 ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0 ||
 	    (which != PRIO_PROCESS && which != PRIO_PGRP && which != PRIO_USER))
 		return -EINVAL;
-	while ((target = process_find_next_ref(cursor)) != NULL) {
+
+	/* Reports the lowest nice value among the selected processes. */
+	for (;;) {
+		target = process_find_next_ref(cursor);
+		if (target == NULL)
+			break;
 		cursor = target->pid;
 		if (priority_matches(target, caller, which, (id_t)args[1])) {
-			int value = atomic_int_load_relaxed(&target->nice_value);
-			if (!found || value < best) best = value;
+			value = atomic_int_load_relaxed(&target->nice_value);
+			if (!found || value < best)
+				best = value;
 			found = 1;
 		}
 		process_release(target);
 	}
-	if (!found) return -ESRCH;
+	if (!found)
+		return -ESRCH;
 	error = copyout(&best, args[2], sizeof(best));
-	return error ? -error : 0;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles setpriority(2). */
 static intptr_t
-sys_setpriority_call(const uintptr_t args[6])
+sys_setpriority_call(
+	const uintptr_t args[6])
 {
-	struct process *caller = current_process(), *target;
-	pid_t cursor = -1;
-	int which=(int)args[0], value=(int)args[2], found=0, denied=0;
-	if(caller==NULL||args[3]||args[4]||args[5]||
-	    (which!=PRIO_PROCESS&&which!=PRIO_PGRP&&which!=PRIO_USER))return -EINVAL;
+	struct process *caller;
+	struct process *target;
+	pid_t cursor;
+	int which;
+	int value;
+	int found;
+	int denied;
+	struct ucred *target_cred;
+	int old;
+
+	caller = current_process();
+	cursor = -1;
+	which = (int)args[0];
+	value = (int)args[2];
+	found = 0;
+	denied = 0;
+
+	if (caller == NULL ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0 ||
+	    (which != PRIO_PROCESS && which != PRIO_PGRP && which != PRIO_USER))
+		return -EINVAL;
 	if (value < -20)
 		value = -20;
 	if (value > 20)
 		value = 20;
-	while((target=process_find_next_ref(cursor))!=NULL){
-		struct ucred *target_cred;
-		cursor=target->pid;
-		if(priority_matches(target,caller,which,(id_t)args[1])){
-			int old=atomic_int_load_relaxed(&target->nice_value);
-			found=1;
+
+	/* Applies the value to every selected process the caller may change. */
+	for (;;) {
+		target = process_find_next_ref(cursor);
+		if (target == NULL)
+			break;
+		cursor = target->pid;
+		if (priority_matches(target, caller, which, (id_t)args[1])) {
+			old = atomic_int_load_relaxed(&target->nice_value);
+			found = 1;
 			target_cred = cred_process_ref(target);
-			if(target_cred==NULL || (caller->cred->euid!=0 && caller->cred->euid!=target_cred->euid)){
+			if (target_cred == NULL ||
+			    (caller->cred->euid != 0 &&
+			    caller->cred->euid != target_cred->euid)) {
 				cred_release(target_cred);
 				process_release(target);
-				denied=1;
+				denied = 1;
 				continue;
 			}
 			cred_release(target_cred);
-			if(value<old && !cred_is_superuser(caller->cred)){
-				denied=1;
+			if (value < old && !cred_is_superuser(caller->cred)) {
+				denied = 1;
 				process_release(target);
 				continue;
 			}
-			atomic_int_store_relaxed(&target->nice_value,value);
+			atomic_int_store_relaxed(&target->nice_value, value);
 		}
 		process_release(target);
 	}
-	return !found ? -ESRCH : denied ? -EPERM : 0;
+	if (!found)
+		return -ESRCH;
+	if (denied)
+		return -EPERM;
+	return 0;
 }
 
+/* Converts scheduler ticks to a timeval. */
 static void
-ticks_to_timeval(uint64_t ticks, struct timeval *value)
+ticks_to_timeval(
+	uint64_t ticks,
+	struct timeval *value)
 {
 	value->tv_sec = (time_t)(ticks / KERN_CLOCK_HZ);
 	value->tv_usec = (long)((ticks % KERN_CLOCK_HZ) *
 	    (1000000U / KERN_CLOCK_HZ));
 }
 
+/* Handles getrusage(2). */
 static intptr_t
-sys_getrusage_call(const uintptr_t args[6])
+sys_getrusage_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct rusage usage;
-	uint64_t user_ticks, system_ticks;
+	uint64_t user_ticks;
+	uint64_t system_ticks;
 	int error;
 
-	if (process == NULL || args[1] == 0 || args[2] != 0 || args[3] != 0 ||
-	    args[4] != 0 || args[5] != 0)
+	process = current_process();
+	if (process == NULL ||
+	    args[1] == 0 ||
+	    args[2] != 0 ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0)
 		return -EINVAL;
+
+	/* Reports the caller's own or its children's CPU time. */
 	memset(&usage, 0, sizeof(usage));
 	if ((int)args[0] == RUSAGE_SELF) {
 		user_ticks = atomic_u64_load_acquire(&process->user_ticks);
@@ -4860,70 +7209,147 @@ sys_getrusage_call(const uintptr_t args[6])
 	ticks_to_timeval(user_ticks, &usage.ru_utime);
 	ticks_to_timeval(system_ticks, &usage.ru_stime);
 	error = copyout(&usage, args[1], sizeof(usage));
-	return error != 0 ? -error : 0;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Converts a timeval to scheduler ticks, rounding up. */
 static int
-timeval_ticks(const struct timeval *value,uint64_t *ticks)
+timeval_ticks(
+	const struct timeval *value,
+	uint64_t *ticks)
 {
-	uint64_t whole, fraction;
-	if(value->tv_sec<0||value->tv_usec<0||value->tv_usec>=1000000)return EINVAL;
-	if((uint64_t)value->tv_sec>UINT64_MAX/KERN_CLOCK_HZ)return EOVERFLOW;
-	whole=(uint64_t)value->tv_sec*KERN_CLOCK_HZ;
-	fraction=((uint64_t)value->tv_usec*KERN_CLOCK_HZ+999999U)/1000000U;
+	uint64_t whole;
+	uint64_t fraction;
+
+	if (value->tv_sec < 0 || value->tv_usec < 0 || value->tv_usec >= 1000000)
+		return EINVAL;
+	if ((uint64_t)value->tv_sec > UINT64_MAX / KERN_CLOCK_HZ)
+		return EOVERFLOW;
+	whole = (uint64_t)value->tv_sec * KERN_CLOCK_HZ;
+	fraction = ((uint64_t)value->tv_usec * KERN_CLOCK_HZ + 999999U) / 1000000U;
 	if (whole > UINT64_MAX - fraction)
 		return EOVERFLOW;
 	*ticks = whole + fraction;
 	return 0;
 }
 
+/* Reads an interval timer into the user layout. */
 static void
-timer_snapshot(struct process *process,int which,struct itimerval *value)
+timer_snapshot(
+	struct process *process,
+	int which,
+	struct itimerval *value)
 {
-	uint64_t remaining, interval;
+	uint64_t remaining;
+	uint64_t interval;
+
 	(void)process_itimer_get(process, which, &remaining, &interval);
-	memset(value,0,sizeof(*value));ticks_to_timeval(remaining,&value->it_value);ticks_to_timeval(interval,&value->it_interval);
+	memset(value, 0, sizeof(*value));
+	ticks_to_timeval(remaining, &value->it_value);
+	ticks_to_timeval(interval, &value->it_interval);
 }
 
+/* Handles getitimer(2). */
 static intptr_t
-sys_getitimer_call(const uintptr_t args[6])
+sys_getitimer_call(
+	const uintptr_t args[6])
 {
-	struct process*p=current_process();struct itimerval value;int which=(int)args[0],error;
-	if(p==NULL||which<0||which>2||args[1]==0||args[2]||args[3]||args[4]||args[5])return -EINVAL;
-	timer_snapshot(p,which,&value);error=copyout(&value,args[1],sizeof(value));return error?-error:0;
-}
+	struct process *process;
+	struct itimerval value;
+	int which;
+	int error;
 
-static intptr_t
-sys_setitimer_call(const uintptr_t args[6])
-{
-	struct process*p=current_process();struct itimerval value,old;uint64_t remaining,interval;int which=(int)args[0],error;
-	if(p==NULL||which<0||which>2||args[1]==0||args[3]||args[4]||args[5])return -EINVAL;
-	error=copyin(args[1],&value,sizeof(value));if(error)return -error;
-	if((error=timeval_ticks(&value.it_value,&remaining))!=0||(error=timeval_ticks(&value.it_interval,&interval))!=0)return -error;
-	{
-		uint64_t old_remaining, old_interval;
-		(void)process_itimer_set(p, which, remaining, interval,
-		    &old_remaining, &old_interval);
-		memset(&old, 0, sizeof(old));
-		ticks_to_timeval(old_remaining, &old.it_value);
-		ticks_to_timeval(old_interval, &old.it_interval);
-	}
-	if(args[2]){error=copyout(&old,args[2],sizeof(old));if(error)return -error;}
+	process = current_process();
+	which = (int)args[0];
+
+	if (process == NULL ||
+	    which < 0 ||
+	    which > 2 ||
+	    args[1] == 0 ||
+	    args[2] != 0 ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0)
+		return -EINVAL;
+	timer_snapshot(process, which, &value);
+	error = copyout(&value, args[1], sizeof(value));
+	if (error != 0)
+		return -error;
 	return 0;
 }
 
+/* Handles setitimer(2). */
 static intptr_t
-sys_execve_call(const uintptr_t args[6])
+sys_setitimer_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
+	struct itimerval value;
+	struct itimerval old;
+	uint64_t remaining;
+	uint64_t interval;
+	int which;
+	int error;
+	uint64_t old_remaining;
+	uint64_t old_interval;
+
+	process = current_process();
+	which = (int)args[0];
+
+	if (process == NULL ||
+	    which < 0 ||
+	    which > 2 ||
+	    args[1] == 0 ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0)
+		return -EINVAL;
+
+	/* Converts both intervals to ticks. */
+	error = copyin(args[1], &value, sizeof(value));
+	if (error != 0)
+		return -error;
+	error = timeval_ticks(&value.it_value, &remaining);
+	if (error != 0)
+		return -error;
+	error = timeval_ticks(&value.it_interval, &interval);
+	if (error != 0)
+		return -error;
+
+	/* Arms the timer and reports the previous setting. */
+	(void)process_itimer_set(process, which, remaining, interval,
+	    &old_remaining, &old_interval);
+	memset(&old, 0, sizeof(old));
+	ticks_to_timeval(old_remaining, &old.it_value);
+	ticks_to_timeval(old_interval, &old.it_interval);
+	if (args[2] != 0) {
+		error = copyout(&old, args[2], sizeof(old));
+		if (error != 0)
+			return -error;
+	}
+	return 0;
+}
+
+/* Handles execve(2). */
+static intptr_t
+sys_execve_call(
+	const uintptr_t args[6])
+{
+	struct process *process;
 	struct syscall_exec_args *copy;
 	char path[PATH_MAX];
 	int error;
+
+	process = current_process();
 	if (process == NULL || args[3] != 0 || args[4] != 0 || args[5] != 0)
 		return -EINVAL;
 	error = copyinstr(args[0], path, sizeof(path), NULL);
 	if (error != 0)
 		return -error;
+
+	/* Copies both vectors into one heap block before the image loads. */
 	copy = kern_calloc(1, sizeof(*copy));
 	if (copy == NULL)
 		return -ENOMEM;
@@ -4935,23 +7361,33 @@ sys_execve_call(const uintptr_t args[6])
 	if (error == 0)
 		error = process_execve(process, path, copy->argv, copy->envp);
 	kern_free(copy);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles fexecve(2). */
 static intptr_t
-sys_fexecve_call(const uintptr_t args[6])
+sys_fexecve_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct syscall_exec_args *copy;
 	struct file *file;
 	int error;
 
-	if (process == NULL || process->fd == NULL || args[3] != 0 ||
-	    args[4] != 0 || args[5] != 0)
+	process = current_process();
+	if (process == NULL ||
+	    process->fd == NULL ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0)
 		return -EINVAL;
 	file = filedesc_get_ref(process->fd, (int)args[0]);
 	if (file == NULL)
 		return -EBADF;
+
+	/* Copies both vectors into one heap block before the image loads. */
 	copy = kern_calloc(1, sizeof(*copy));
 	if (copy == NULL) {
 		(void)file_close(file);
@@ -4966,27 +7402,41 @@ sys_fexecve_call(const uintptr_t args[6])
 		error = process_fexecve(process, file, copy->argv, copy->envp);
 	kern_free(copy);
 	(void)file_close(file);
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles waitpid(2). */
 static SYSCALL_EXT intptr_t
-sys_waitpid_call(const uintptr_t args[6])
+sys_waitpid_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct process_wait_event event;
 	struct uaccess_pin pin;
-	int status = 0;
+	int status;
 	pid_t result;
-	int error = 0;
-	if (args[3] != 0 || args[4] != 0 || args[5] != 0 ||
+	int error;
+
+	process = current_process();
+	status = 0;
+	error = 0;
+
+	if (args[3] != 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0 ||
 	    ((int)args[2] & ~(WNOHANG | WUNTRACED | WCONTINUED)) != 0)
 		return -EINVAL;
+
+	/* Pins the status output before the child can be consumed. */
 	if (args[1] != 0) {
 		error = uaccess_pin(args[1], sizeof(status), HAL_SPACE_WRITE, &pin);
 		if (error != 0)
 			return -error;
-	} else
+	} else {
 		memset(&pin, 0, sizeof(pin));
+	}
 	result = process_wait_select(process, (pid_t)args[0], (int)args[2],
 	    &event);
 	if (result <= 0 || args[1] == 0) {
@@ -5000,6 +7450,8 @@ sys_waitpid_call(const uintptr_t args[6])
 		uaccess_unpin(&pin);
 		return result;
 	}
+
+	/* Reports the status, then consumes the event. */
 	status = event.status;
 	error = copyout_pinned(&pin, 0, &status, sizeof(status));
 	if (error == 0)
@@ -5007,47 +7459,74 @@ sys_waitpid_call(const uintptr_t args[6])
 	if (error != 0)
 		process_wait_abort(&event);
 	uaccess_unpin(&pin);
-	return error == 0 ? result : -error;
+	if (error != 0)
+		return -error;
+	return result;
 }
 
+/* Handles waitid(2). */
 static SYSCALL_EXT intptr_t
-sys_waitid_call(const uintptr_t args[6])
+sys_waitid_call(
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct process_wait_event event;
 	siginfo_t information;
-	idtype_t type = (idtype_t)args[0];
-	id_t id = (id_t)args[1];
-	int options = (int)args[3];
-	pid_t selector, result;
-	unsigned mask = 0;
+	idtype_t type;
+	id_t id;
+	int options;
+	pid_t selector;
+	pid_t result;
+	unsigned mask;
 	int error;
 
-	if (process == NULL || args[2] == 0 || args[4] != 0 || args[5] != 0 ||
+	process = current_process();
+	type = (idtype_t)args[0];
+	id = (id_t)args[1];
+	options = (int)args[3];
+	mask = 0;
+
+	/* Converts the options and the id type into a wait selection. */
+	if (process == NULL ||
+	    args[2] == 0 ||
+	    args[4] != 0 ||
+	    args[5] != 0 ||
 	    (options & ~(WEXITED | WSTOPPED | WCONTINUED | WNOHANG |
 	    WNOWAIT)) != 0)
 		return -EINVAL;
-	if ((options & WEXITED) != 0) mask |= PROCESS_WAIT_EVENT_EXITED;
-	if ((options & WSTOPPED) != 0) mask |= PROCESS_WAIT_EVENT_STOPPED;
-	if ((options & WCONTINUED) != 0) mask |= PROCESS_WAIT_EVENT_CONTINUED;
+	if ((options & WEXITED) != 0)
+		mask |= PROCESS_WAIT_EVENT_EXITED;
+	if ((options & WSTOPPED) != 0)
+		mask |= PROCESS_WAIT_EVENT_STOPPED;
+	if ((options & WCONTINUED) != 0)
+		mask |= PROCESS_WAIT_EVENT_CONTINUED;
 	if (mask == 0)
 		return -EINVAL;
-	if (type == P_ALL)
+	if (type == P_ALL) {
 		selector = -1;
-	else if (type == P_PID && id > 0 && id <= INT32_MAX)
+	} else if (type == P_PID && id > 0 && id <= INT32_MAX) {
 		selector = (pid_t)id;
-	else if (type == P_PGID && id <= INT32_MAX)
-		selector = id == 0 ? 0 : -(pid_t)id;
-	else
+	} else if (type == P_PGID && id <= INT32_MAX) {
+		if (id == 0)
+			selector = 0;
+		else
+			selector = -(pid_t)id;
+	} else {
 		return -EINVAL;
+	}
 	result = process_wait_select_mask(process, selector,
 	    options & WNOHANG, mask, &event);
 	if (result < 0)
 		return result;
+
+	/* Fills the signal information for the selected event. */
 	memset(&information, 0, sizeof(information));
-	if (result == 0)
-		return copyout(&information, args[2], sizeof(information)) == 0 ?
-		    0 : -EFAULT;
+	if (result == 0) {
+		error = copyout(&information, args[2], sizeof(information));
+		if (error != 0)
+			return -EFAULT;
+		return 0;
+	}
 	information.si_signo = SIGCHLD;
 	information.si_pid = event.pid;
 	information.si_uid = event.uid;
@@ -5064,24 +7543,36 @@ sys_waitid_call(const uintptr_t args[6])
 		information.si_code = CLD_KILLED;
 		information.si_status = WTERMSIG(event.status);
 	}
+
+	/* WNOWAIT leaves the event for a later wait. */
 	error = copyout(&information, args[2], sizeof(information));
-	if (error != 0 || (options & WNOWAIT) != 0)
+	if (error != 0 || (options & WNOWAIT) != 0) {
 		process_wait_abort(&event);
-	else {
+	} else {
 		error = process_wait_commit(&event);
 		if (error != 0)
 			process_wait_abort(&event);
 	}
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles getrlimit(2) and setrlimit(2). */
 static SYSCALL_EXT intptr_t
-sys_resource_limit_call(const uintptr_t args[6], int setting)
+sys_resource_limit_call(
+	const uintptr_t args[6],
+	int setting)
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct rlimit_record limit;
 	int error;
-	if (process == NULL || args[2] != 0 || args[3] != 0 || args[4] != 0 ||
+
+	process = current_process();
+	if (process == NULL ||
+	    args[2] != 0 ||
+	    args[3] != 0 ||
+	    args[4] != 0 ||
 	    args[5] != 0)
 		return -EINVAL;
 	if (setting) {
@@ -5093,30 +7584,42 @@ sys_resource_limit_call(const uintptr_t args[6], int setting)
 		if (error == 0)
 			error = copyout(&limit, args[1], sizeof(limit));
 	}
-	return error == 0 ? 0 : -error;
+	if (error != 0)
+		return -error;
+	return 0;
 }
 
+/* Handles the process and session identity system calls. */
 static intptr_t
-sys_process_identity_call(uint32_t number, const uintptr_t args[6])
+sys_process_identity_call(
+	uint32_t number,
+	const uintptr_t args[6])
 {
-	struct process *process = current_process();
+	struct process *process;
 	struct process *target;
 	pid_t pid;
+	pid_t value;
+	intptr_t result;
 	int error;
+
+	process = current_process();
 	if (process == NULL)
 		return -EINVAL;
 	switch (number) {
-	case ZEDBSD_SYS_getpid: return process->pid;
+	case ZEDBSD_SYS_getpid:
+		return process->pid;
 	case ZEDBSD_SYS_getppid:
-		return process_parent_pid(process);
-	case ZEDBSD_SYS_getpgrp: return process->pgrp;
+		result = process_parent_pid(process);
+		return result;
+	case ZEDBSD_SYS_getpgrp:
+		return process->pgrp;
 	case ZEDBSD_SYS_getpgid:
 		pid = (pid_t)args[0];
 		if (pid == 0)
 			return process->pgrp;
 		target = process_find_ref(pid);
 		if (target != NULL) {
-			pid_t value = target->pgrp;
+			value = target->pgrp;
 			process_release(target);
 			return value;
 		}
@@ -5124,16 +7627,19 @@ sys_process_identity_call(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_setpgid:
 		error = process_setpgid(process, (pid_t)args[0],
 		    (pid_t)args[1]);
-		return error == 0 ? 0 : -error;
+		if (error != 0)
+			return -error;
+		return 0;
 	case ZEDBSD_SYS_setsid:
-		return process_setsid(process);
+		result = process_setsid(process);
+		return result;
 	case ZEDBSD_SYS_getsid:
 		pid = (pid_t)args[0];
 		if (pid == 0)
 			return process->session;
 		target = process_find_ref(pid);
 		if (target != NULL) {
-			pid_t value = target->session;
+			value = target->session;
 			process_release(target);
 			return value;
 		}
@@ -5143,99 +7649,282 @@ sys_process_identity_call(uint32_t number, const uintptr_t args[6])
 	}
 }
 
+/* Runs the handler of one system call number. */
 static intptr_t
-syscall_dispatch_body(uint32_t number, const uintptr_t args[6])
+syscall_dispatch_body(
+	uint32_t number,
+	const uintptr_t args[6])
 {
+	intptr_t result;
+	int error;
+
 	switch (number) {
-	case ZEDBSD_SYS_exit: exit1((int)args[0]);
-	case ZEDBSD_SYS_open: return sys_open_call(args, 0);
-	case ZEDBSD_SYS_openat: return sys_open_call(args, 1);
-	case ZEDBSD_SYS_close: return sys_close_call(args);
-	case ZEDBSD_SYS_read: return sys_read_call(args);
-	case ZEDBSD_SYS_write: return sys_write_call(args);
-	case ZEDBSD_SYS_lseek: return sys_lseek_call(args);
-	case ZEDBSD_SYS_fstat: return sys_fstat_call(args);
-	case ZEDBSD_SYS_getdents: return sys_getdents_call(args);
-	case ZEDBSD_SYS_chdir: return sys_chdir_call(args);
-	case ZEDBSD_SYS_fchdir: return sys_fchdir_call(args);
-	case ZEDBSD_SYS_mknodat: return sys_mknodat_call(args);
-	case ZEDBSD_SYS_getcwd: return sys_getcwd_call(args);
-	case ZEDBSD_SYS_mmap: return sys_mmap_call(args);
-	case ZEDBSD_SYS_munmap: return sys_munmap_call(args);
-	case ZEDBSD_SYS_mprotect: return sys_mprotect_call(args);
-	case ZEDBSD_SYS_ioctl: return sys_ioctl_call(args);
-	case ZEDBSD_SYS_sysctl: return sys_sysctl_call(args);
-	case ZEDBSD_SYS_ppoll: return sys_ppoll_call(args);
-	case ZEDBSD_SYS_pselect: return sys_pselect_call(args);
-	case ZEDBSD_SYS_sigaltstack: return sys_sigaltstack_call(args);
-	case ZEDBSD_SYS_sigtimedwait: return sys_sigtimedwait_call(args);
-	case ZEDBSD_SYS_sigqueue: return sys_sigqueue_call(args);
-	case ZEDBSD_SYS_thread_create: return sys_thread_create_call(args);
-	case ZEDBSD_SYS_thread_exit: return sys_thread_exit_call(args);
-	case ZEDBSD_SYS_thread_join: return sys_thread_join_call(args);
-	case ZEDBSD_SYS_thread_detach: return sys_thread_detach_call(args);
-	case ZEDBSD_SYS_thread_self: return sys_thread_self_call(args);
-	case ZEDBSD_SYS_thread_kill: return sys_thread_kill_call(args);
-	case ZEDBSD_SYS_thread_cancel: return sys_thread_cancel_call(args);
-	case ZEDBSD_SYS_usync: return sys_usync_call(args);
-	case ZEDBSD_SYS_clock_gettime: return sys_clock_gettime_call(args);
-	case ZEDBSD_SYS_clock_getres: return sys_clock_getres_call(args);
-	case ZEDBSD_SYS_clock_settime: return sys_clock_settime_call(args);
-	case ZEDBSD_SYS_timer_create: return sys_timer_create_call(args);
-	case ZEDBSD_SYS_timer_delete: return sys_timer_delete_call(args);
-	case ZEDBSD_SYS_timer_settime: return sys_timer_settime_call(args);
-	case ZEDBSD_SYS_timer_gettime: return sys_timer_gettime_call(args);
-	case ZEDBSD_SYS_timer_getoverrun: return sys_timer_getoverrun_call(args);
-	case ZEDBSD_SYS_mount: return sys_mount_call(args);
-	case ZEDBSD_SYS_unmount: return sys_unmount_call(args);
-	case ZEDBSD_SYS_statvfs: return sys_statvfs_call(args, 0);
-	case ZEDBSD_SYS_fstatvfs: return sys_statvfs_call(args, 1);
-	case ZEDBSD_SYS_getxattr: return sys_getxattr_call(args, 0, 0);
-	case ZEDBSD_SYS_lgetxattr: return sys_getxattr_call(args, 0, 1);
-	case ZEDBSD_SYS_fgetxattr: return sys_getxattr_call(args, 1, 0);
-	case ZEDBSD_SYS_setxattr: return sys_setxattr_call(args, 0, 0);
-	case ZEDBSD_SYS_lsetxattr: return sys_setxattr_call(args, 0, 1);
-	case ZEDBSD_SYS_fsetxattr: return sys_setxattr_call(args, 1, 0);
-	case ZEDBSD_SYS_listxattr: return sys_listxattr_call(args, 0, 0);
-	case ZEDBSD_SYS_llistxattr: return sys_listxattr_call(args, 0, 1);
-	case ZEDBSD_SYS_flistxattr: return sys_listxattr_call(args, 1, 0);
-	case ZEDBSD_SYS_removexattr: return sys_removexattr_call(args, 0, 0);
-	case ZEDBSD_SYS_lremovexattr: return sys_removexattr_call(args, 0, 1);
-	case ZEDBSD_SYS_fremovexattr: return sys_removexattr_call(args, 1, 0);
-	case ZEDBSD_SYS_quotactl: return sys_quotactl_call(args);
-	case ZEDBSD_SYS_snapshotctl: return sys_snapshotctl_call(args);
-	case ZEDBSD_SYS_nanosleep: return sys_nanosleep_call(args);
-	case ZEDBSD_SYS_brk: return sys_brk_call(args);
-	case ZEDBSD_SYS_socket: return sys_socket_call(args);
-	case ZEDBSD_SYS_socketpair: return sys_socketpair_call(args);
-	case ZEDBSD_SYS_sendmsg: return sys_sendmsg_call(args);
-	case ZEDBSD_SYS_recvmsg: return sys_recvmsg_call(args);
-	case ZEDBSD_SYS_bind: return sys_bind_call(args);
-	case ZEDBSD_SYS_connect: return sys_connect_call(args);
-	case ZEDBSD_SYS_listen: return sys_listen_call(args);
-	case ZEDBSD_SYS_accept: return sys_accept_call(args);
-	case ZEDBSD_SYS_sendto: return sys_sendto_call(args);
-	case ZEDBSD_SYS_recvfrom: return sys_recvfrom_call(args);
-	case ZEDBSD_SYS_shutdown: return sys_shutdown_call(args);
-	case ZEDBSD_SYS_getsockname: return sys_socket_name_call(args, 0);
-	case ZEDBSD_SYS_getpeername: return sys_socket_name_call(args, 1);
-	case ZEDBSD_SYS_setsockopt: return sys_setsockopt_call(args);
-	case ZEDBSD_SYS_getsockopt: return sys_getsockopt_call(args);
-	case ZEDBSD_SYS_fork: return sys_fork_call(args);
-	case ZEDBSD_SYS_sched_yield: return sys_sched_yield_call(args);
-	case ZEDBSD_SYS_times: return sys_times_call(args);
-	case ZEDBSD_SYS_sync: return -(long)mount_sync_all();
-	case ZEDBSD_SYS_getpriority: return sys_getpriority_call(args);
-	case ZEDBSD_SYS_setpriority: return sys_setpriority_call(args);
-	case ZEDBSD_SYS_getrusage: return sys_getrusage_call(args);
-	case ZEDBSD_SYS_getitimer: return sys_getitimer_call(args);
-	case ZEDBSD_SYS_setitimer: return sys_setitimer_call(args);
-	case ZEDBSD_SYS_execve: return sys_execve_call(args);
-	case ZEDBSD_SYS_fexecve: return sys_fexecve_call(args);
-	case ZEDBSD_SYS_waitpid: return sys_waitpid_call(args);
-	case ZEDBSD_SYS_waitid: return sys_waitid_call(args);
-	case ZEDBSD_SYS_getrlimit: return sys_resource_limit_call(args, 0);
-	case ZEDBSD_SYS_setrlimit: return sys_resource_limit_call(args, 1);
+	case ZEDBSD_SYS_exit:
+		exit1((int)args[0]);
+	case ZEDBSD_SYS_open:
+		result = sys_open_call(args, 0);
+		break;
+	case ZEDBSD_SYS_openat:
+		result = sys_open_call(args, 1);
+		break;
+	case ZEDBSD_SYS_close:
+		result = sys_close_call(args);
+		break;
+	case ZEDBSD_SYS_read:
+		result = sys_read_call(args);
+		break;
+	case ZEDBSD_SYS_write:
+		result = sys_write_call(args);
+		break;
+	case ZEDBSD_SYS_lseek:
+		result = sys_lseek_call(args);
+		break;
+	case ZEDBSD_SYS_fstat:
+		result = sys_fstat_call(args);
+		break;
+	case ZEDBSD_SYS_getdents:
+		result = sys_getdents_call(args);
+		break;
+	case ZEDBSD_SYS_chdir:
+		result = sys_chdir_call(args);
+		break;
+	case ZEDBSD_SYS_fchdir:
+		result = sys_fchdir_call(args);
+		break;
+	case ZEDBSD_SYS_mknodat:
+		result = sys_mknodat_call(args);
+		break;
+	case ZEDBSD_SYS_getcwd:
+		result = sys_getcwd_call(args);
+		break;
+	case ZEDBSD_SYS_mmap:
+		result = sys_mmap_call(args);
+		break;
+	case ZEDBSD_SYS_munmap:
+		result = sys_munmap_call(args);
+		break;
+	case ZEDBSD_SYS_mprotect:
+		result = sys_mprotect_call(args);
+		break;
+	case ZEDBSD_SYS_ioctl:
+		result = sys_ioctl_call(args);
+		break;
+	case ZEDBSD_SYS_sysctl:
+		result = sys_sysctl_call(args);
+		break;
+	case ZEDBSD_SYS_ppoll:
+		result = sys_ppoll_call(args);
+		break;
+	case ZEDBSD_SYS_pselect:
+		result = sys_pselect_call(args);
+		break;
+	case ZEDBSD_SYS_sigaltstack:
+		result = sys_sigaltstack_call(args);
+		break;
+	case ZEDBSD_SYS_sigtimedwait:
+		result = sys_sigtimedwait_call(args);
+		break;
+	case ZEDBSD_SYS_sigqueue:
+		result = sys_sigqueue_call(args);
+		break;
+	case ZEDBSD_SYS_thread_create:
+		result = sys_thread_create_call(args);
+		break;
+	case ZEDBSD_SYS_thread_exit:
+		result = sys_thread_exit_call(args);
+		break;
+	case ZEDBSD_SYS_thread_join:
+		result = sys_thread_join_call(args);
+		break;
+	case ZEDBSD_SYS_thread_detach:
+		result = sys_thread_detach_call(args);
+		break;
+	case ZEDBSD_SYS_thread_self:
+		result = sys_thread_self_call(args);
+		break;
+	case ZEDBSD_SYS_thread_kill:
+		result = sys_thread_kill_call(args);
+		break;
+	case ZEDBSD_SYS_thread_cancel:
+		result = sys_thread_cancel_call(args);
+		break;
+	case ZEDBSD_SYS_usync:
+		result = sys_usync_call(args);
+		break;
+	case ZEDBSD_SYS_clock_gettime:
+		result = sys_clock_gettime_call(args);
+		break;
+	case ZEDBSD_SYS_clock_getres:
+		result = sys_clock_getres_call(args);
+		break;
+	case ZEDBSD_SYS_clock_settime:
+		result = sys_clock_settime_call(args);
+		break;
+	case ZEDBSD_SYS_timer_create:
+		result = sys_timer_create_call(args);
+		break;
+	case ZEDBSD_SYS_timer_delete:
+		result = sys_timer_delete_call(args);
+		break;
+	case ZEDBSD_SYS_timer_settime:
+		result = sys_timer_settime_call(args);
+		break;
+	case ZEDBSD_SYS_timer_gettime:
+		result = sys_timer_gettime_call(args);
+		break;
+	case ZEDBSD_SYS_timer_getoverrun:
+		result = sys_timer_getoverrun_call(args);
+		break;
+	case ZEDBSD_SYS_mount:
+		result = sys_mount_call(args);
+		break;
+	case ZEDBSD_SYS_unmount:
+		result = sys_unmount_call(args);
+		break;
+	case ZEDBSD_SYS_statvfs:
+		result = sys_statvfs_call(args, 0);
+		break;
+	case ZEDBSD_SYS_fstatvfs:
+		result = sys_statvfs_call(args, 1);
+		break;
+	case ZEDBSD_SYS_getxattr:
+		result = sys_getxattr_call(args, 0, 0);
+		break;
+	case ZEDBSD_SYS_lgetxattr:
+		result = sys_getxattr_call(args, 0, 1);
+		break;
+	case ZEDBSD_SYS_fgetxattr:
+		result = sys_getxattr_call(args, 1, 0);
+		break;
+	case ZEDBSD_SYS_setxattr:
+		result = sys_setxattr_call(args, 0, 0);
+		break;
+	case ZEDBSD_SYS_lsetxattr:
+		result = sys_setxattr_call(args, 0, 1);
+		break;
+	case ZEDBSD_SYS_fsetxattr:
+		result = sys_setxattr_call(args, 1, 0);
+		break;
+	case ZEDBSD_SYS_listxattr:
+		result = sys_listxattr_call(args, 0, 0);
+		break;
+	case ZEDBSD_SYS_llistxattr:
+		result = sys_listxattr_call(args, 0, 1);
+		break;
+	case ZEDBSD_SYS_flistxattr:
+		result = sys_listxattr_call(args, 1, 0);
+		break;
+	case ZEDBSD_SYS_removexattr:
+		result = sys_removexattr_call(args, 0, 0);
+		break;
+	case ZEDBSD_SYS_lremovexattr:
+		result = sys_removexattr_call(args, 0, 1);
+		break;
+	case ZEDBSD_SYS_fremovexattr:
+		result = sys_removexattr_call(args, 1, 0);
+		break;
+	case ZEDBSD_SYS_quotactl:
+		result = sys_quotactl_call(args);
+		break;
+	case ZEDBSD_SYS_snapshotctl:
+		result = sys_snapshotctl_call(args);
+		break;
+	case ZEDBSD_SYS_nanosleep:
+		result = sys_nanosleep_call(args);
+		break;
+	case ZEDBSD_SYS_brk:
+		result = sys_brk_call(args);
+		break;
+	case ZEDBSD_SYS_socket:
+		result = sys_socket_call(args);
+		break;
+	case ZEDBSD_SYS_socketpair:
+		result = sys_socketpair_call(args);
+		break;
+	case ZEDBSD_SYS_sendmsg:
+		result = sys_sendmsg_call(args);
+		break;
+	case ZEDBSD_SYS_recvmsg:
+		result = sys_recvmsg_call(args);
+		break;
+	case ZEDBSD_SYS_bind:
+		result = sys_bind_call(args);
+		break;
+	case ZEDBSD_SYS_connect:
+		result = sys_connect_call(args);
+		break;
+	case ZEDBSD_SYS_listen:
+		result = sys_listen_call(args);
+		break;
+	case ZEDBSD_SYS_accept:
+		result = sys_accept_call(args);
+		break;
+	case ZEDBSD_SYS_sendto:
+		result = sys_sendto_call(args);
+		break;
+	case ZEDBSD_SYS_recvfrom:
+		result = sys_recvfrom_call(args);
+		break;
+	case ZEDBSD_SYS_shutdown:
+		result = sys_shutdown_call(args);
+		break;
+	case ZEDBSD_SYS_getsockname:
+		result = sys_socket_name_call(args, 0);
+		break;
+	case ZEDBSD_SYS_getpeername:
+		result = sys_socket_name_call(args, 1);
+		break;
+	case ZEDBSD_SYS_setsockopt:
+		result = sys_setsockopt_call(args);
+		break;
+	case ZEDBSD_SYS_getsockopt:
+		result = sys_getsockopt_call(args);
+		break;
+	case ZEDBSD_SYS_fork:
+		result = sys_fork_call(args);
+		break;
+	case ZEDBSD_SYS_sched_yield:
+		result = sys_sched_yield_call(args);
+		break;
+	case ZEDBSD_SYS_times:
+		result = sys_times_call(args);
+		break;
+	case ZEDBSD_SYS_sync:
+		result = -(long)mount_sync_all();
+		break;
+	case ZEDBSD_SYS_getpriority:
+		result = sys_getpriority_call(args);
+		break;
+	case ZEDBSD_SYS_setpriority:
+		result = sys_setpriority_call(args);
+		break;
+	case ZEDBSD_SYS_getrusage:
+		result = sys_getrusage_call(args);
+		break;
+	case ZEDBSD_SYS_getitimer:
+		result = sys_getitimer_call(args);
+		break;
+	case ZEDBSD_SYS_setitimer:
+		result = sys_setitimer_call(args);
+		break;
+	case ZEDBSD_SYS_execve:
+		result = sys_execve_call(args);
+		break;
+	case ZEDBSD_SYS_fexecve:
+		result = sys_fexecve_call(args);
+		break;
+	case ZEDBSD_SYS_waitpid:
+		result = sys_waitpid_call(args);
+		break;
+	case ZEDBSD_SYS_waitid:
+		result = sys_waitid_call(args);
+		break;
+	case ZEDBSD_SYS_getrlimit:
+		result = sys_resource_limit_call(args, 0);
+		break;
+	case ZEDBSD_SYS_setrlimit:
+		result = sys_resource_limit_call(args, 1);
+		break;
 	case ZEDBSD_SYS_getpid:
 	case ZEDBSD_SYS_getppid:
 	case ZEDBSD_SYS_getpgrp:
@@ -5243,41 +7932,88 @@ syscall_dispatch_body(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_setpgid:
 	case ZEDBSD_SYS_setsid:
 	case ZEDBSD_SYS_getsid:
-		return sys_process_identity_call(number, args);
-	case ZEDBSD_SYS_dup: return sys_dup_call(args);
-	case ZEDBSD_SYS_dup2: return sys_dup2_call(args, 0);
-	case ZEDBSD_SYS_dup3: return sys_dup2_call(args, 1);
-	case ZEDBSD_SYS_fcntl: return sys_fcntl_call(args);
-	case ZEDBSD_SYS_pipe: return sys_pipe2_call(args, 1);
-	case ZEDBSD_SYS_pipe2: return sys_pipe2_call(args, 0);
-	case ZEDBSD_SYS_pread: return sys_positional_call(args, 0);
-	case ZEDBSD_SYS_pwrite: return sys_positional_call(args, 1);
-	case ZEDBSD_SYS_readv: return sys_vector_call(args, 0);
-	case ZEDBSD_SYS_writev: return sys_vector_call(args, 1);
+		result = sys_process_identity_call(number, args);
+		break;
+	case ZEDBSD_SYS_dup:
+		result = sys_dup_call(args);
+		break;
+	case ZEDBSD_SYS_dup2:
+		result = sys_dup2_call(args, 0);
+		break;
+	case ZEDBSD_SYS_dup3:
+		result = sys_dup2_call(args, 1);
+		break;
+	case ZEDBSD_SYS_fcntl:
+		result = sys_fcntl_call(args);
+		break;
+	case ZEDBSD_SYS_pipe:
+		result = sys_pipe2_call(args, 1);
+		break;
+	case ZEDBSD_SYS_pipe2:
+		result = sys_pipe2_call(args, 0);
+		break;
+	case ZEDBSD_SYS_pread:
+		result = sys_positional_call(args, 0);
+		break;
+	case ZEDBSD_SYS_pwrite:
+		result = sys_positional_call(args, 1);
+		break;
+	case ZEDBSD_SYS_readv:
+		result = sys_vector_call(args, 0);
+		break;
+	case ZEDBSD_SYS_writev:
+		result = sys_vector_call(args, 1);
+		break;
 	case ZEDBSD_SYS_fsync:
-	case ZEDBSD_SYS_fdatasync: return sys_fsync_call(args);
-	case ZEDBSD_SYS_stat: return sys_stat_path_call(args, 0, 0);
-	case ZEDBSD_SYS_lstat: return sys_stat_path_call(args, 0, 1);
-	case ZEDBSD_SYS_fstatat: return sys_stat_path_call(args, 1, 0);
-	case ZEDBSD_SYS_truncate: return sys_truncate_call(args, 0);
-	case ZEDBSD_SYS_ftruncate: return sys_truncate_call(args, 1);
+	case ZEDBSD_SYS_fdatasync:
+		result = sys_fsync_call(args);
+		break;
+	case ZEDBSD_SYS_stat:
+		result = sys_stat_path_call(args, 0, 0);
+		break;
+	case ZEDBSD_SYS_lstat:
+		result = sys_stat_path_call(args, 0, 1);
+		break;
+	case ZEDBSD_SYS_fstatat:
+		result = sys_stat_path_call(args, 1, 0);
+		break;
+	case ZEDBSD_SYS_truncate:
+		result = sys_truncate_call(args, 0);
+		break;
+	case ZEDBSD_SYS_ftruncate:
+		result = sys_truncate_call(args, 1);
+		break;
 	case ZEDBSD_SYS_mkdir:
 	case ZEDBSD_SYS_unlink:
 	case ZEDBSD_SYS_rmdir:
-	case ZEDBSD_SYS_rename: return sys_mutation_call(number, args);
+	case ZEDBSD_SYS_rename:
+		result = sys_mutation_call(number, args);
+		break;
 	case ZEDBSD_SYS_mkdirat:
 	case ZEDBSD_SYS_unlinkat:
-	case ZEDBSD_SYS_renameat: return sys_mutation_at_call(number, args);
-	case ZEDBSD_SYS_umask: return sys_umask_call(args);
+	case ZEDBSD_SYS_renameat:
+		result = sys_mutation_at_call(number, args);
+		break;
+	case ZEDBSD_SYS_umask:
+		result = sys_umask_call(args);
+		break;
 	case ZEDBSD_SYS_getuid:
 	case ZEDBSD_SYS_geteuid:
 	case ZEDBSD_SYS_getgid:
 	case ZEDBSD_SYS_getegid:
-	case ZEDBSD_SYS_getgroups: return sys_cred_get_call(number, args);
+	case ZEDBSD_SYS_getgroups:
+		result = sys_cred_get_call(number, args);
+		break;
 	case ZEDBSD_SYS_getresuid:
-	case ZEDBSD_SYS_getresgid: return sys_cred_getres_call(number, args);
-	case ZEDBSD_SYS_getentropy: return sys_getentropy_call(args);
-	case ZEDBSD_SYS_atomic: return sys_atomic_call(args);
+	case ZEDBSD_SYS_getresgid:
+		result = sys_cred_getres_call(number, args);
+		break;
+	case ZEDBSD_SYS_getentropy:
+		result = sys_getentropy_call(args);
+		break;
+	case ZEDBSD_SYS_atomic:
+		result = sys_atomic_call(args);
+		break;
 	case ZEDBSD_SYS_setuid:
 	case ZEDBSD_SYS_seteuid:
 	case ZEDBSD_SYS_setgid:
@@ -5286,54 +8022,96 @@ syscall_dispatch_body(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_setreuid:
 	case ZEDBSD_SYS_setregid:
 	case ZEDBSD_SYS_setresuid:
-	case ZEDBSD_SYS_setresgid: return sys_cred_set_call(number, args);
-	case ZEDBSD_SYS_access: return sys_access_call(args);
-	case ZEDBSD_SYS_sigaction: return sys_sigaction_call(args);
-	case ZEDBSD_SYS_sigprocmask: return sys_sigprocmask_call(args);
-	case ZEDBSD_SYS_sigpending: return sys_sigpending_call(args);
-	case ZEDBSD_SYS_kill: {
-		int error = signal_kill(current_process(), (pid_t)args[0],
+	case ZEDBSD_SYS_setresgid:
+		result = sys_cred_set_call(number, args);
+		break;
+	case ZEDBSD_SYS_access:
+		result = sys_access_call(args);
+		break;
+	case ZEDBSD_SYS_sigaction:
+		result = sys_sigaction_call(args);
+		break;
+	case ZEDBSD_SYS_sigprocmask:
+		result = sys_sigprocmask_call(args);
+		break;
+	case ZEDBSD_SYS_sigpending:
+		result = sys_sigpending_call(args);
+		break;
+	case ZEDBSD_SYS_kill:
+		error = signal_kill(current_process(), (pid_t)args[0],
 		    (int)args[1]);
-		return error == 0 ? 0 : -error;
-	}
-	case ZEDBSD_SYS_sigreturn: return sys_sigreturn_call(args);
-	case ZEDBSD_SYS_msync: return sys_msync_call(args);
+		if (error != 0)
+			result = -error;
+		else
+			result = 0;
+		break;
+	case ZEDBSD_SYS_sigreturn:
+		result = sys_sigreturn_call(args);
+		break;
+	case ZEDBSD_SYS_msync:
+		result = sys_msync_call(args);
+		break;
 	case ZEDBSD_SYS_chmod:
-		return sys_chmod_common(AT_FDCWD, args[0], -1,
+		result = sys_chmod_common(AT_FDCWD, args[0], -1,
 			(mode_t)args[1], 0);
+		break;
 	case ZEDBSD_SYS_fchmod:
-		return sys_chmod_common(AT_FDCWD, 0, (int)args[0],
+		result = sys_chmod_common(AT_FDCWD, 0, (int)args[0],
 			(mode_t)args[1], 0);
+		break;
 	case ZEDBSD_SYS_fchmodat:
-		return sys_chmod_common((int)args[0], args[1], -1,
+		result = sys_chmod_common((int)args[0], args[1], -1,
 			(mode_t)args[2], (int)args[3]);
+		break;
 	case ZEDBSD_SYS_chown:
-	case ZEDBSD_SYS_lchown:
-		return sys_chown_common(AT_FDCWD, args[0], -1,
-			(uid_t)args[1], (gid_t)args[2],
-			number == ZEDBSD_SYS_lchown ? AT_SYMLINK_NOFOLLOW : 0);
-	case ZEDBSD_SYS_fchown:
-		return sys_chown_common(AT_FDCWD, 0, (int)args[0],
+		result = sys_chown_common(AT_FDCWD, args[0], -1,
 			(uid_t)args[1], (gid_t)args[2], 0);
+		break;
+	case ZEDBSD_SYS_lchown:
+		result = sys_chown_common(AT_FDCWD, args[0], -1,
+			(uid_t)args[1], (gid_t)args[2], AT_SYMLINK_NOFOLLOW);
+		break;
+	case ZEDBSD_SYS_fchown:
+		result = sys_chown_common(AT_FDCWD, 0, (int)args[0],
+			(uid_t)args[1], (gid_t)args[2], 0);
+		break;
 	case ZEDBSD_SYS_fchownat:
-		return sys_chown_common((int)args[0], args[1], -1,
+		result = sys_chown_common((int)args[0], args[1], -1,
 			(uid_t)args[2], (gid_t)args[3], (int)args[4]);
+		break;
 	case ZEDBSD_SYS_utimensat:
-		return sys_utimens_common((int)args[0], args[1], -1,
+		result = sys_utimens_common((int)args[0], args[1], -1,
 			args[2], (int)args[3]);
+		break;
 	case ZEDBSD_SYS_futimens:
-		return sys_utimens_common(AT_FDCWD, 0, (int)args[0], args[1], 0);
-	case ZEDBSD_SYS_faccessat: return sys_faccessat_call(args);
-	case ZEDBSD_SYS_linkat: return sys_linkat_call(args);
-	case ZEDBSD_SYS_symlinkat: return sys_symlinkat_call(args);
-	case ZEDBSD_SYS_readlinkat: return sys_readlinkat_call(args);
-	case ZEDBSD_SYS_sigsuspend: return sys_sigsuspend_call(args);
-	default: return -ENOSYS;
+		result = sys_utimens_common(AT_FDCWD, 0, (int)args[0], args[1], 0);
+		break;
+	case ZEDBSD_SYS_faccessat:
+		result = sys_faccessat_call(args);
+		break;
+	case ZEDBSD_SYS_linkat:
+		result = sys_linkat_call(args);
+		break;
+	case ZEDBSD_SYS_symlinkat:
+		result = sys_symlinkat_call(args);
+		break;
+	case ZEDBSD_SYS_readlinkat:
+		result = sys_readlinkat_call(args);
+		break;
+	case ZEDBSD_SYS_sigsuspend:
+		result = sys_sigsuspend_call(args);
+		break;
+	default:
+		result = -ENOSYS;
+		break;
 	}
+	return result;
 }
 
+/* Tests whether a system call is restarted after a handler with SA_RESTART. */
 static int
-syscall_restartable(uint32_t number)
+syscall_restartable(
+	uint32_t number)
 {
 	switch (number) {
 	case ZEDBSD_SYS_read:
@@ -5363,21 +8141,34 @@ syscall_restartable(uint32_t number)
 	}
 }
 
+/* Runs one system call with accounting, redispatch, and restart policy. */
 static intptr_t
-syscall_dispatch(uint32_t number, const uintptr_t args[6])
+syscall_dispatch(
+	uint32_t number,
+	const uintptr_t args[6])
 {
-	struct thread *thread = curthread;
-	struct process *process = thread != NULL ? thread->proc : NULL;
+	struct thread *thread;
+	struct process *process;
 	uintptr_t dispatch_args[HAL_SYSCALL_ARGS];
-	uint32_t dispatch_number = number;
-	int cred_guard = number != ZEDBSD_SYS_exit &&
-	    number != ZEDBSD_SYS_thread_exit;
+	uint32_t dispatch_number;
+	int cred_guard;
 	intptr_t result;
+	enum signal_stop_return_result stop_result;
+
+	thread = curthread;
+	if (thread != NULL)
+		process = thread->proc;
+	else
+		process = NULL;
+	dispatch_number = number;
+	cred_guard = number != ZEDBSD_SYS_exit &&
+	    number != ZEDBSD_SYS_thread_exit;
 
 	/*
-	 * HAL calls the registered dispatcher with the active user frame installed
-	 * and local IRQs masked.  Accounting and interruptibility are generic
-	 * syscall policy; HAL only owns the masked frame-commit boundaries.
+	 * HAL calls the registered dispatcher with the active user frame
+	 * installed and local IRQs masked.  Accounting and interruptibility
+	 * are generic syscall policy; HAL only owns the masked frame-commit
+	 * boundaries.
 	 */
 	if (hal_irq_disable())
 		HAL_FATAL("syscall callback entered with IRQs enabled");
@@ -5387,6 +8178,8 @@ syscall_dispatch(uint32_t number, const uintptr_t args[6])
 	syscall_restart_state_begin(thread);
 	if (cred_guard)
 		process_cred_read_enter(process);
+
+	/* Runs the handler, redispatching after a sigreturn or a transparent stop. */
 	for (;;) {
 		if (thread != NULL && dispatch_number != ZEDBSD_SYS_sigreturn) {
 			thread->syscall_restart_number = dispatch_number;
@@ -5425,9 +8218,8 @@ syscall_dispatch(uint32_t number, const uintptr_t args[6])
 				continue;
 			}
 		} else if (thread != NULL && result == -EINTR) {
-			enum signal_stop_return_result stop_result =
+			stop_result =
 			    signal_stop_before_return(thread);
-
 			if (stop_result == SIGNAL_STOP_RETURN_INTERRUPT)
 				break;
 			if (stop_result == SIGNAL_STOP_RETURN_REDISPATCH) {
@@ -5444,14 +8236,4 @@ syscall_dispatch(uint32_t number, const uintptr_t args[6])
 		HAL_FATAL("syscall callback returned with IRQs disabled");
 	sched_accounting_kernel_leave();
 	return result;
-}
-
-void syscall_init(void)
-{
-	poll_init();
-	usync_init();
-	(void)mutex_init(&user_atomic_lock, LOCK_RANK_USER_ATOMIC,
-	    "user atomic");
-	hal_syscall_set_handler(syscall_dispatch);
-	signal_init();
 }

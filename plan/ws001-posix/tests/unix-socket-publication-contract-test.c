@@ -42,8 +42,9 @@ main(void)
 
 	/* A pathname lookup may retain i_special only after the endpoint confirms
 	 * that this exact path is its committed bind publication. */
-	at = strstr(source, "unix_resolve_endpoint(");
-	limit = at != NULL ? strstr(at, "unix_peer_ref(") : NULL;
+	/* Definition names start a physical line; prototypes and calls do not. */
+	at = strstr(source, "\nunix_resolve_endpoint(");
+	limit = at != NULL ? strstr(at, "\nunix_peer_ref(") : NULL;
 	if (at == NULL || limit == NULL ||
 	    (at = ordered(at, limit, "socket_tryref(socket)")) == NULL ||
 	    (at = ordered(at, limit,
@@ -53,8 +54,8 @@ main(void)
 
 	/* bind() takes path references before the spin lock and publishes the
 	 * referenced path, printable path, and bound bit before unlocking. */
-	at = strstr(source, "unix_socket_bind_path(");
-	limit = at != NULL ? strstr(at, "unix_socket_listen(") : NULL;
+	at = strstr(source, "\nunix_socket_bind_path(");
+	limit = at != NULL ? strstr(at, "\nunix_socket_listen(") : NULL;
 	if (at == NULL || limit == NULL ||
 	    (at = ordered(at, limit, "path_set(&committed_path")) == NULL ||
 	    (at = ordered(at, limit, "spin_lock_irqsave(&socket->lock)")) == NULL ||

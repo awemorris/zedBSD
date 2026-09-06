@@ -180,3 +180,15 @@ controller lock is held; the PC-98 fixture requires publication while its
 lifecycle mutex is held, so final close cannot race a late frame.  KA-T071's
 source audit is host-side; booted node absence and hardware delivery remain
 part of the Phase's amd64 and applicable PC-98 runtime gates.
+
+## P016 / Q084 refactored kernel integration
+
+[Q084 results](q084-results.md) record the source `03436b8` / destination
+`d99865c` merge, retained recent corrections, functional review and successful
+host/build/amd64 runtime gates. The devfs range and UNIX publication fixtures
+now follow the refactored production layout.
+
+`sh plan/ws018-kernel-architecture/tests/run-pty-write-flags-test.sh` runs the
+production PTY slave writer and output ring with a deterministic flag change
+during its wait. The 103-check ordinary/ASan/UBSan runs ensure a short output
+re-reads `O_NONBLOCK`; the uncorrected refactor fails the targeted assertion.

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
-#include "../../../src/kern/devfs-block-range.h"
+#include "../../../src/kern/devfs.c"
 
 #include <errno.h>
 #include <stdint.h>

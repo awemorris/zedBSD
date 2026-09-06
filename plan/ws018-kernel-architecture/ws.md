@@ -4,13 +4,13 @@ Last updated: 2026-09-06
 
 WSID: `ws018`
 
-Status: p001--p012 complete (`q035`); p013/p014/p015 complete (`q077`)
+Status: p001--p015 complete; p016 complete (`q084`)
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws018-p015` (q077 functional audit/corrections)
+Last verified Phase: `ws018-p016` (q084 refactored kernel integration)
 
-Resume point: no selected WS018 Phase remains. Q077 completed legacy residue
+Resume point: no selected WS018 Phase remains. [P016](phase016-kern-refactor-integration/phase.md) completed the refactored kernel integration with current fixes; [q084 evidence](tests/q084-results.md) records host/build/runtime verification and import corrections. Q077 completed legacy residue
 removal, mounted namespace protection and the bounded filesystem functional
 audit/corrections. [Evidence and limits](tests/q077-results.md) include final
 host/build gates and shared QEMU acceptance. Further filesystem requirements
@@ -231,6 +231,8 @@ path in the same bounded change.
 | `ws018-p013` | [Legacy /diskN mount scaffolding removal](phase013-legacy-disk-mount-residue/phase.md) | Complete q077 | Retired graph/six manifests removed; focused/build/shared runtime acceptance passes |
 | `ws018-p014` | [Mounted namespace mutation protection](phase014-mounted-namespace-protection/phase.md) | Complete q077 | Mount protection, admission/cache/overlay corrections and final guest probes pass |
 | `ws018-p015` | [Filesystem-wide risk audit](phase015-filesystem-wide-audit/phase.md) | Complete q077 | Bounded functional audit and UFS/overlay/tmpfs corrections pass; coverage limits recorded |
+
+| `ws018-p016` | [Refactored kernel integration](phase016-kern-refactor-integration/phase.md) | Complete q084 | Refactored kern retains current fixes and passes focused/build/boot gates |
 
 ## WS completion conditions
 

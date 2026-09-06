@@ -98,38 +98,75 @@ struct wlan_wpa2_profile {
  * until those inverse barriers have succeeded.
  */
 struct wlan_wpa2_ops {
-	int (*entropy_fill)(void *context, void *buffer, size_t length);
-	int (*radio_start)(void *context, uint64_t generation,
-		const uint8_t bssid[WLAN_WPA2_MAC_LENGTH], uint32_t channel,
-		uint64_t deadline_ticks, uint64_t *completion_ticks);
-	int (*transmit)(void *context, uint64_t generation, uint64_t cookie,
-		enum wlan_wpa2_tx_kind kind,
-		const uint8_t destination[WLAN_WPA2_MAC_LENGTH],
-		const uint8_t *frame, size_t length, uint64_t deadline_ticks);
-	int (*association_set)(void *context, uint64_t generation,
-		const uint8_t bssid[WLAN_WPA2_MAC_LENGTH], uint16_t aid);
-	int (*association_clear)(void *context, uint64_t generation);
-	int (*key_install)(void *context, uint64_t generation,
-		enum wlan_wpa2_key_kind kind, uint8_t key_index,
-		const uint8_t key[WLAN_WPA2_TK_LENGTH],
-		uint64_t key_generation, uint64_t receive_packet_number);
-	/* Monotonically raises the existing slot's software/hardware receive
-	 * floor.  It must never rewrite the key or lower/reset a live PN. */
-	int (*key_receive_pn_advance)(void *context, uint64_t generation,
-		enum wlan_wpa2_key_kind kind, uint8_t key_index,
-		uint64_t key_generation, uint64_t receive_packet_number);
-	int (*key_delete)(void *context, uint64_t generation,
-		enum wlan_wpa2_key_kind kind, uint8_t key_index,
-		uint64_t key_generation);
-	/* Atomically promotes staged replacement slots after the EAPOL response
+	int (*entropy_fill)(void *context,
+			    void *buffer,
+			    size_t length);
+
+	int (*radio_start)(void *context,
+			   uint64_t generation,
+			   const uint8_t bssid[WLAN_WPA2_MAC_LENGTH],
+			   uint32_t channel,
+			   uint64_t deadline_ticks,
+			   uint64_t *completion_ticks);
+
+	int (*transmit)(void *context,
+			uint64_t generation,
+			uint64_t cookie,
+			enum wlan_wpa2_tx_kind kind,
+			const uint8_t destination[WLAN_WPA2_MAC_LENGTH],
+			const uint8_t *frame,
+			size_t length,
+			uint64_t deadline_ticks);
+
+	int (*association_set)(void *context,
+			       uint64_t generation,
+			       const uint8_t bssid[WLAN_WPA2_MAC_LENGTH],
+			       uint16_t aid);
+
+	int (*association_clear)(void *context,
+				 uint64_t generation);
+
+	int (*key_install)(void *context,
+			   uint64_t generation,
+			   enum wlan_wpa2_key_kind kind,
+			   uint8_t key_index,
+			   const uint8_t key[WLAN_WPA2_TK_LENGTH],
+			   uint64_t key_generation,
+			   uint64_t receive_packet_number);
+
+	/*
+	 * Monotonically raises the existing slot's software/hardware receive
+	 * floor.  It must never rewrite the key or lower/reset a live PN.
+	 */
+	int (*key_receive_pn_advance)(void *context,
+				      uint64_t generation,
+				      enum wlan_wpa2_key_kind kind,
+				      uint8_t key_index,
+				      uint64_t key_generation,
+				      uint64_t receive_packet_number);
+
+	int (*key_delete)(void *context,
+			  uint64_t generation,
+			  enum wlan_wpa2_key_kind kind,
+			  uint8_t key_index,
+			  uint64_t key_generation);
+
+	/*
+	 * Atomically promotes staged replacement slots after the EAPOL response
 	 * is acknowledged.  Success publishes the new pairwise/group generation
-	 * and leaves the old generations as idempotent delete tombstones. */
-	int (*keys_activate)(void *context, uint64_t generation,
-		uint64_t pairwise_key_generation,
-		uint64_t group_key_generation);
-	int (*authorized_set)(void *context, uint64_t generation,
-		int authorized);
-	int (*radio_stop)(void *context, uint64_t generation);
+	 * and leaves the old generations as idempotent delete tombstones.
+	 */
+	int (*keys_activate)(void *context,
+			     uint64_t generation,
+			     uint64_t pairwise_key_generation,
+			     uint64_t group_key_generation);
+
+	int (*authorized_set)(void *context,
+			      uint64_t generation,
+			      int authorized);
+
+	int (*radio_stop)(void *context,
+			  uint64_t generation);
 };
 
 /* This is a private kernel object, deliberately caller-allocated. */
@@ -189,34 +226,70 @@ struct wlan_wpa2_engine {
 	uint8_t group_message_digest[WLAN_SHA1_DIGEST_SIZE];
 };
 
-int wlan_wpa2_engine_init(struct wlan_wpa2_engine *engine,
-	const struct wlan_wpa2_ops *ops, void *callback_context);
-int wlan_wpa2_engine_start(struct wlan_wpa2_engine *engine,
-	uint64_t generation, const struct wlan_wpa2_profile *profile,
+int
+wlan_wpa2_engine_init(
+	struct wlan_wpa2_engine *engine,
+	const struct wlan_wpa2_ops *ops,
+	void *callback_context);
+
+int
+wlan_wpa2_engine_start(
+	struct wlan_wpa2_engine *engine,
+	uint64_t generation,
+	const struct wlan_wpa2_profile *profile,
 	uint64_t now_ticks);
-int wlan_wpa2_engine_receive_management(struct wlan_wpa2_engine *engine,
-	uint64_t generation, const uint8_t *frame, size_t length,
+
+int
+wlan_wpa2_engine_receive_management(
+	struct wlan_wpa2_engine *engine,
+	uint64_t generation,
+	const uint8_t *frame,
+	size_t length,
 	uint64_t now_ticks);
-int wlan_wpa2_engine_receive_eapol(struct wlan_wpa2_engine *engine,
+
+int
+wlan_wpa2_engine_receive_eapol(
+	struct wlan_wpa2_engine *engine,
 	uint64_t generation,
 	const uint8_t source[WLAN_WPA2_MAC_LENGTH],
 	const uint8_t destination[WLAN_WPA2_MAC_LENGTH],
-	const uint8_t *frame, size_t length, uint64_t now_ticks);
-int wlan_wpa2_engine_report_tx(struct wlan_wpa2_engine *engine,
-	uint64_t generation, uint64_t cookie, int acknowledged, int error,
+	const uint8_t *frame,
+	size_t length,
 	uint64_t now_ticks);
-int wlan_wpa2_engine_timer(struct wlan_wpa2_engine *engine,
-	uint64_t now_ticks);
-int wlan_wpa2_engine_stop(struct wlan_wpa2_engine *engine);
 
-enum wlan_wpa2_state wlan_wpa2_engine_state(
+int
+wlan_wpa2_engine_report_tx(
+	struct wlan_wpa2_engine *engine,
+	uint64_t generation,
+	uint64_t cookie,
+	int acknowledged,
+	int error,
+	uint64_t now_ticks);
+
+int
+wlan_wpa2_engine_timer(
+	struct wlan_wpa2_engine *engine,
+	uint64_t now_ticks);
+
+int
+wlan_wpa2_engine_stop(
+	struct wlan_wpa2_engine *engine);
+
+enum wlan_wpa2_state
+wlan_wpa2_engine_state(
 	const struct wlan_wpa2_engine *engine);
-int wlan_wpa2_engine_last_error(const struct wlan_wpa2_engine *engine);
-uint64_t wlan_wpa2_engine_next_deadline(
+
+int
+wlan_wpa2_engine_last_error(
+	const struct wlan_wpa2_engine *engine);
+
+uint64_t
+wlan_wpa2_engine_next_deadline(
 	const struct wlan_wpa2_engine *engine);
 
 #ifdef WLAN_WPA2_TESTING
-int wlan_wpa2_engine_test_secrets_clear(
+int
+wlan_wpa2_engine_test_secrets_clear(
 	const struct wlan_wpa2_engine *engine);
 #endif
 

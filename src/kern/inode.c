@@ -1,4 +1,23 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The inode cache and the generic inode operations.
+ *
+ * Every live inode sits in one cache slot; a slot is reclaimed from an
+ * unreferenced clean inode when the cache is full.  The generic
+ * operations validate a request, check the read-only state of the
+ * mount, call the filesystem's callback, and then maintain the
+ * timestamps, the directory sequence, and the name cache so that every
+ * filesystem gets the same semantics.
+ */
+
 #include "kern/inode.h"
 #include "kern/backing-claim.h"
 #include "kern/cred.h"
@@ -14,25 +33,26 @@
 #include <errno.h>
 #include <string.h>
 
-extern int posix_acl_chmod(struct inode *, mode_t) __attribute__((weak));
-extern int posix_acl_inherit(struct inode *, struct inode *, mode_t *)
+extern int posix_acl_chmod(struct inode *inode, mode_t mode) __attribute__((weak));
+extern int posix_acl_inherit(struct inode *parent, struct inode *child,
+    mode_t *mode) __attribute__((weak));
+extern int vm_object_inode_io_wait(struct inode *inode) __attribute__((weak));
+extern int vm_object_inode_resize_active(struct inode *inode)
     __attribute__((weak));
-extern int vm_object_inode_io_wait(struct inode *) __attribute__((weak));
-extern int vm_object_inode_resize_active(struct inode *)
+extern int vm_object_resize_begin(struct inode *inode, off_t size,
+    struct vm_object_resize *resize) __attribute__((weak));
+extern int vm_object_resize_prepare(struct vm_object_resize *resize)
     __attribute__((weak));
-extern int vm_object_resize_begin(struct inode *, off_t,
-    struct vm_object_resize *) __attribute__((weak));
-extern int vm_object_resize_prepare(struct vm_object_resize *)
+extern void vm_object_resize_commit(struct vm_object_resize *resize, off_t size)
     __attribute__((weak));
-extern void vm_object_resize_commit(struct vm_object_resize *, off_t)
-    __attribute__((weak));
-extern void vm_object_resize_abort(struct vm_object_resize *)
+extern void vm_object_resize_abort(struct vm_object_resize *resize)
     __attribute__((weak));
 
 #define INODE_COMMON_MAX 256U
 #define INODE_CACHE_MAX 512U
 #define VFS_BSS __attribute__((section(".vfs_bss")))
 #define INODE_HIGH __attribute__((section(".hightext")))
+#define INODE_CACHE_RESERVED ((struct inode *)(uintptr_t)1U)
 
 static struct inode common_pool[INODE_COMMON_MAX] VFS_BSS;
 static uint8_t common_used[INODE_COMMON_MAX] VFS_BSS;
@@ -40,121 +60,86 @@ static struct inode *inode_cache[INODE_CACHE_MAX] VFS_BSS;
 static struct spinlock inode_cache_lock = {
 	{ 0 }, LOCK_RANK_INODE, "inode cache", 0, 0
 };
-#define INODE_CACHE_RESERVED ((struct inode *)(uintptr_t)1U)
 
+static int inode_create_locked(struct inode *i, const struct componentname *n, const struct inode_creation_request *request, struct inode **r);
+static int inode_mkdir_locked(struct inode *i, const struct componentname *n, const struct inode_creation_request *request, struct inode **r);
+static int inode_mknod_locked(struct inode *i, const struct componentname *n, const struct inode_creation_request *request, struct inode **r);
+static int inode_unlink_locked(struct inode *i, const struct componentname *n);
+static int inode_rmdir_locked(struct inode *i, const struct componentname *n);
+static int inode_rename_locked(struct inode *od, const struct componentname *on, struct inode *nd, const struct componentname *nn, unsigned flags);
+static int inode_link_locked(struct inode *directory, const struct componentname *name, struct inode *target);
+static int inode_symlink_locked(struct inode *directory, const struct componentname *name, const char *target, const struct inode_creation_request *request, struct inode **result);
+static int common_index(const struct inode *inode);
+static int cache_index(const struct inode *inode);
+static void destroy_inode(struct inode *inode);
+static int reserve_cache_slot(struct inode **victim);
+static int readonly(const struct inode *inode);
+static int inode_content_io_lock(struct inode *inode);
+static int creation_request_valid(const struct inode_creation_request *request);
+static int inode_creation_preserve_acl(struct inode *source, struct inode *child, const char *name);
+static int inode_same(const struct inode *left, const struct inode *right);
+static int inode_parent_step(struct inode **cursor, int *at_root);
+static int inode_vm_resize_available(void);
+static int inode_truncate_transaction_impl(struct inode *i, const struct inode_truncate_request *request, struct inode_truncate_result *result);
+static int inode_truncate_limited_impl(struct inode *i, off_t size, uint64_t growth_limit, const struct ucred *cred, int content_change, int *limit_exceeded);
+static int xattr_name_valid(const char *name);
+static int inode_namespace_enter(struct inode *directory, const struct componentname *name, int creation, int *entered);
+
+/*
+ * Maps an inode type to its stat mode bits.
+ */
 mode_t
-inode_type_mode(enum inode_type type)
+inode_type_mode(
+	enum inode_type type)
 {
 	switch (type) {
-	case INODE_REG: return S_IFREG;
-	case INODE_DIR: return S_IFDIR;
-	case INODE_BLOCK: return S_IFBLK;
-	case INODE_CHAR: return S_IFCHR;
-	case INODE_SYMLINK: return S_IFLNK;
-	case INODE_SOCKET: return S_IFSOCK;
-	case INODE_FIFO: return S_IFIFO;
-	default: return 0;
+	case INODE_REG:
+		return S_IFREG;
+	case INODE_DIR:
+		return S_IFDIR;
+	case INODE_BLOCK:
+		return S_IFBLK;
+	case INODE_CHAR:
+		return S_IFCHR;
+	case INODE_SYMLINK:
+		return S_IFLNK;
+	case INODE_SOCKET:
+		return S_IFSOCK;
+	case INODE_FIFO:
+		return S_IFIFO;
+	default:
+		return 0;
 	}
 }
 
-static int
-common_index(const struct inode *inode)
-{
-	unsigned i;
-	for (i = 0; i < INODE_COMMON_MAX; i++)
-		if (&common_pool[i] == inode)
-			return (int)i;
-	return -1;
-}
-
-static int
-cache_index(const struct inode *inode)
-{
-	unsigned i;
-	for (i = 0; i < INODE_CACHE_MAX; i++)
-		if (inode_cache[i] == inode)
-			return (int)i;
-	return -1;
-}
-
-static void
-destroy_inode(struct inode *inode)
-{
-	struct mount *mountp;
-	void *special;
-	void (*special_destroy)(void *);
-	int pindex;
-	unsigned long irq;
-
-	record_lock_inode_destroy(inode);
-	mutex_lock(&inode->i_lock);
-	special = inode->i_special;
-	special_destroy = inode->i_special_destroy;
-	inode->i_special = NULL;
-	inode->i_special_destroy = NULL;
-	mutex_unlock(&inode->i_lock);
-	if (special != NULL && special_destroy != NULL)
-		special_destroy(special);
-	if (inode->i_op != NULL && inode->i_op->reclaim != NULL)
-		inode->i_op->reclaim(inode);
-	mountp = inode->i_mount;
-	pindex = common_index(inode);
-	if (pindex >= 0) {
-		memset(inode, 0, sizeof(*inode));
-		irq = spin_lock_irqsave(&inode_cache_lock);
-		common_used[pindex] = 0;
-		spin_unlock_irqrestore(&inode_cache_lock, irq);
-	} else if (mountp != NULL && mountp->m_type != NULL &&
-	    mountp->m_type->free_inode != NULL) {
-		mountp->m_type->free_inode(inode);
-	}
-}
-
-static int
-reserve_cache_slot(struct inode **victim)
-{
-	unsigned i;
-	unsigned long irq = spin_lock_irqsave(&inode_cache_lock);
-	*victim = NULL;
-	for (i = 0; i < INODE_CACHE_MAX; i++)
-		if (inode_cache[i] == NULL) {
-			inode_cache[i] = INODE_CACHE_RESERVED;
-			spin_unlock_irqrestore(&inode_cache_lock, irq);
-			return (int)i;
-		}
-	for (i = 0; i < INODE_CACHE_MAX; i++) {
-		struct inode *inode = inode_cache[i];
-		if (inode != INODE_CACHE_RESERVED && refcount_load(&inode->i_refs) == 1 &&
-		    !(inode->i_flags & (INODE_DIRTY | INODE_ROOT))) {
-			inode_cache[i] = INODE_CACHE_RESERVED;
-			(void)refcount_put(&inode->i_refs);
-			*victim = inode;
-			spin_unlock_irqrestore(&inode_cache_lock, irq);
-			return (int)i;
-		}
-	}
-	spin_unlock_irqrestore(&inode_cache_lock, irq);
-	return -1;
-}
-
+/*
+ * Allocates an inode for a mount and enters it in the cache with one
+ * cache reference and one caller reference.
+ */
 struct inode *
-inode_alloc(struct mount *mountp)
+inode_alloc(
+	struct mount *mountp)
 {
-	struct inode *inode = NULL;
+	struct inode *inode;
 	struct inode *victim;
 	unsigned long irq;
 	int slot;
 	unsigned i;
 
+	inode = NULL;
+
+	/* Reserves a cache slot, evicting a clean inode when needed. */
 	slot = reserve_cache_slot(&victim);
 	if (slot < 0)
 		return NULL;
 	if (victim != NULL)
 		destroy_inode(victim);
+
+	/* The filesystem allocates its own inodes; others come from the pool. */
 	if (mountp != NULL && mountp->m_type != NULL &&
-	    mountp->m_type->alloc_inode != NULL)
+	    mountp->m_type->alloc_inode != NULL) {
 		inode = mountp->m_type->alloc_inode(mountp);
-	else {
+	} else {
 		irq = spin_lock_irqsave(&inode_cache_lock);
 		for (i = 0; i < INODE_COMMON_MAX; i++) {
 			if (!common_used[i]) {
@@ -171,10 +156,11 @@ inode_alloc(struct mount *mountp)
 		spin_unlock_irqrestore(&inode_cache_lock, irq);
 		return NULL;
 	}
+
+	/* One cache reference and one reference returned to the caller. */
 	memset(inode, 0, sizeof(*inode));
 	inode->i_mount = mountp;
 	inode->i_dirseq = 1;
-	/* One cache reference and one reference returned to the caller. */
 	refcount_init(&inode->i_refs, 2);
 	(void)mutex_init(&inode->i_io_lock, LOCK_RANK_INODE_IO, "inode I/O");
 	spin_init(&inode->i_vm_lock, LOCK_RANK_VM_RESIZE, "inode VM resize");
@@ -186,15 +172,22 @@ inode_alloc(struct mount *mountp)
 	return inode;
 }
 
+/*
+ * Removes a clean inode held only by the cache and destroys it.
+ */
 void
-inode_free(struct inode *inode)
+inode_free(
+	struct inode *inode)
 {
 	int cindex;
 	unsigned long irq;
 
-	if (inode == NULL || refcount_load(&inode->i_refs) != 1 ||
+	if (inode == NULL ||
+	    refcount_load(&inode->i_refs) != 1 ||
 	    (inode->i_flags & INODE_DIRTY))
 		return;
+
+	/* Rechecks the reference count under the cache lock. */
 	irq = spin_lock_irqsave(&inode_cache_lock);
 	cindex = cache_index(inode);
 	if (cindex < 0 || refcount_load(&inode->i_refs) != 1) {
@@ -207,19 +200,29 @@ inode_free(struct inode *inode)
 	destroy_inode(inode);
 }
 
+/*
+ * Finds a cached inode of a mount by number and takes a reference.
+ */
 int
-inode_get(struct mount *mountp, ino_t ino, struct inode **result)
+inode_get(
+	struct mount *mountp,
+	ino_t ino,
+	struct inode **result)
 {
 	unsigned i;
 	unsigned long irq;
+	struct inode *inode;
+
 	if (mountp == NULL || result == NULL)
 		return EINVAL;
 	irq = spin_lock_irqsave(&inode_cache_lock);
 	for (i = 0; i < INODE_CACHE_MAX; i++) {
-		struct inode *inode = inode_cache[i];
-		if (inode != NULL && inode != INODE_CACHE_RESERVED &&
+		inode = inode_cache[i];
+		if (inode != NULL &&
+		    inode != INODE_CACHE_RESERVED &&
 		    inode->i_mount == mountp &&
-		    inode->i_ino == ino && !(inode->i_flags & INODE_DEAD)) {
+		    inode->i_ino == ino &&
+		    !(inode->i_flags & INODE_DEAD)) {
 			inode_ref(inode);
 			*result = inode;
 			spin_unlock_irqrestore(&inode_cache_lock, irq);
@@ -230,16 +233,29 @@ inode_get(struct mount *mountp, ino_t ino, struct inode **result)
 	return ENOENT;
 }
 
-void inode_ref(struct inode *inode)
+/*
+ * Takes a reference on an inode.
+ */
+void
+inode_ref(
+	struct inode *inode)
 {
 	if (inode != NULL)
 		refcount_get(&inode->i_refs);
 }
 
-void inode_release(struct inode *inode)
+/*
+ * Drops a reference on an inode, freeing a dead one the cache alone
+ * still holds.
+ */
+void
+inode_release(
+	struct inode *inode)
 {
+	unsigned remaining;
+
 	if (inode != NULL) {
-		unsigned remaining = refcount_put_not_last(&inode->i_refs);
+		remaining = refcount_put_not_last(&inode->i_refs);
 		if (remaining == 1 &&
 		    (inode->i_flags & INODE_DEAD) != 0 &&
 		    (inode->i_flags & (INODE_DIRTY | INODE_ROOT)) == 0)
@@ -247,16 +263,26 @@ void inode_release(struct inode *inode)
 	}
 }
 
+/*
+ * Destroys every clean, unreferenced cached inode of a mount.
+ */
 void
-inode_cache_purge_mount(struct mount *mountp)
+inode_cache_purge_mount(
+	struct mount *mountp)
 {
+	struct inode *victim;
+	unsigned long irq;
+	unsigned i;
+	struct inode *inode;
+
+	/* Takes one victim per pass so destruction runs without the lock. */
 	for (;;) {
-		struct inode *victim = NULL;
-		unsigned long irq = spin_lock_irqsave(&inode_cache_lock);
-		unsigned i;
+		victim = NULL;
+		irq = spin_lock_irqsave(&inode_cache_lock);
 		for (i = 0; i < INODE_CACHE_MAX; i++) {
-			struct inode *inode = inode_cache[i];
-			if (inode != NULL && inode != INODE_CACHE_RESERVED &&
+			inode = inode_cache[i];
+			if (inode != NULL &&
+			    inode != INODE_CACHE_RESERVED &&
 			    inode->i_mount == mountp &&
 			    refcount_load(&inode->i_refs) == 1 &&
 			    (inode->i_flags & INODE_DIRTY) == 0) {
@@ -273,50 +299,89 @@ inode_cache_purge_mount(struct mount *mountp)
 	}
 }
 
+/*
+ * Tests whether any inode of a mount is referenced beyond the cache.
+ */
 INODE_HIGH int
-inode_cache_mount_busy(struct mount *mountp)
+inode_cache_mount_busy(
+	struct mount *mountp)
 {
 	unsigned i;
 	unsigned long irq;
-	int busy = 0;
+	struct inode *inode;
+	unsigned allowed;
+	int busy;
+
+	busy = 0;
+
+	/* The root inode also carries the mount's own reference. */
 	irq = spin_lock_irqsave(&inode_cache_lock);
-	for (i = 0; i < INODE_CACHE_MAX; i++)
-		if (inode_cache[i] != NULL &&
-		    inode_cache[i] != INODE_CACHE_RESERVED &&
-		    inode_cache[i]->i_mount == mountp &&
-		    refcount_load(&inode_cache[i]->i_refs) >
-		    (inode_cache[i] == mountp->m_root ? 2U : 1U)) {
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
+		inode = inode_cache[i];
+		if (inode == NULL ||
+		    inode == INODE_CACHE_RESERVED ||
+		    inode->i_mount != mountp)
+			continue;
+		if (inode == mountp->m_root)
+			allowed = 2U;
+		else
+			allowed = 1U;
+		if (refcount_load(&inode->i_refs) > allowed) {
 			busy = 1;
 			break;
 		}
+	}
 	spin_unlock_irqrestore(&inode_cache_lock, irq);
-	return busy ? EBUSY : 0;
+	if (busy)
+		return EBUSY;
+	return 0;
 }
 
+/*
+ * Counts the cached inodes of a mount.
+ */
 INODE_HIGH unsigned
-inode_cache_mount_count(struct mount *mountp)
+inode_cache_mount_count(
+	struct mount *mountp)
 {
-	unsigned i, count = 0;
-	unsigned long irq = spin_lock_irqsave(&inode_cache_lock);
-	for (i = 0; i < INODE_CACHE_MAX; i++)
-		if (inode_cache[i] != NULL && inode_cache[i] != INODE_CACHE_RESERVED &&
+	unsigned i;
+	unsigned count;
+	unsigned long irq;
+
+	count = 0;
+	irq = spin_lock_irqsave(&inode_cache_lock);
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
+		if (inode_cache[i] != NULL &&
+		    inode_cache[i] != INODE_CACHE_RESERVED &&
 		    inode_cache[i]->i_mount == mountp)
 			count++;
+	}
 	spin_unlock_irqrestore(&inode_cache_lock, irq);
 	return count;
 }
 
+/*
+ * Destroys every clean, unreferenced cached inode of every mount.
+ */
 void
-inode_cache_reset(void)
+inode_cache_reset(
+	void)
 {
+	struct inode *victim;
+	unsigned long irq;
+	unsigned i;
+	struct inode *inode;
+
 	namecache_reset();
+
+	/* Takes one victim per pass so destruction runs without the lock. */
 	for (;;) {
-		struct inode *victim = NULL;
-		unsigned long irq = spin_lock_irqsave(&inode_cache_lock);
-		unsigned i;
+		victim = NULL;
+		irq = spin_lock_irqsave(&inode_cache_lock);
 		for (i = 0; i < INODE_CACHE_MAX; i++) {
-			struct inode *inode = inode_cache[i];
-			if (inode != NULL && inode != INODE_CACHE_RESERVED &&
+			inode = inode_cache[i];
+			if (inode != NULL &&
+			    inode != INODE_CACHE_RESERVED &&
 			    refcount_load(&inode->i_refs) == 1 &&
 			    (inode->i_flags & INODE_DIRTY) == 0) {
 				inode_cache[i] = NULL;
@@ -332,21 +397,25 @@ inode_cache_reset(void)
 	}
 }
 
-static int readonly(const struct inode *inode)
-{
-	return inode != NULL && inode->i_mount != NULL &&
-	       (inode->i_mount->m_flags & MOUNT_READ_ONLY);
-}
-
+/*
+ * Looks a name up in a directory through the name cache and the
+ * filesystem.
+ */
 int
-inode_lookup(struct inode *directory, const struct componentname *name,
-	     struct inode **result)
+inode_lookup(
+	struct inode *directory,
+	const struct componentname *name,
+	struct inode **result)
 {
 	struct inode *child;
 	uint64_t sequence;
 	int error;
-	if (directory == NULL || name == NULL || result == NULL ||
-	    name->cn_namelen == 0 || name->cn_namelen > NAME_MAX)
+
+	if (directory == NULL ||
+	    name == NULL ||
+	    result == NULL ||
+	    name->cn_namelen == 0 ||
+	    name->cn_namelen > NAME_MAX)
 		return EINVAL;
 	if (directory->i_type != INODE_DIR)
 		return ENOTDIR;
@@ -355,6 +424,8 @@ inode_lookup(struct inode *directory, const struct componentname *name,
 		return 0;
 	if (directory->i_op == NULL || directory->i_op->lookup == NULL)
 		return EOPNOTSUPP;
+
+	/* A filesystem answer is validated and cached. */
 	sequence = atomic_u64_load_acquire(&directory->i_dirseq);
 	error = directory->i_op->lookup(directory, name, &child);
 	if (error != 0)
@@ -370,30 +441,55 @@ inode_lookup(struct inode *directory, const struct componentname *name,
 	return 0;
 }
 
+/*
+ * Looks a name up in a directory ignoring case, where the filesystem
+ * supports it.
+ */
 int
-inode_lookup_casefold(struct inode *directory,
-		      const struct componentname *name, struct inode **result)
+inode_lookup_casefold(
+	struct inode *directory,
+	const struct componentname *name,
+	struct inode **result)
 {
-	if (directory == NULL || name == NULL || result == NULL ||
-	    name->cn_namelen == 0 || name->cn_namelen > NAME_MAX)
+	int error;
+
+	if (directory == NULL ||
+	    name == NULL ||
+	    result == NULL ||
+	    name->cn_namelen == 0 ||
+	    name->cn_namelen > NAME_MAX)
 		return EINVAL;
 	if (directory->i_type != INODE_DIR)
 		return ENOTDIR;
 	if (directory->i_op == NULL || directory->i_op->lookup_casefold == NULL)
 		return EOPNOTSUPP;
-	return directory->i_op->lookup_casefold(directory, name, result);
+	error = directory->i_op->lookup_casefold(directory, name, result);
+	return error;
 }
 
+/*
+ * Fills a stat record from the filesystem or from the generic fields.
+ */
 int
-inode_getattr(struct inode *inode, struct stat *status)
+inode_getattr(
+	struct inode *inode,
+	struct stat *status)
 {
+	int error;
+
 	if (inode == NULL || status == NULL)
 		return EINVAL;
-	if (inode->i_op != NULL && inode->i_op->getattr != NULL)
-		return inode->i_op->getattr(inode, status);
+	if (inode->i_op != NULL && inode->i_op->getattr != NULL) {
+		error = inode->i_op->getattr(inode, status);
+		return error;
+	}
+
+	/* Derives the record from the cached inode fields. */
 	memset(status, 0, sizeof(*status));
-	status->st_dev = inode->i_mount != NULL && inode->i_mount->m_disk != NULL ?
-		inode->i_mount->m_disk->d_dev : 0;
+	if (inode->i_mount != NULL && inode->i_mount->m_disk != NULL)
+		status->st_dev = inode->i_mount->m_disk->d_dev;
+	else
+		status->st_dev = 0;
 	status->st_ino = inode->i_ino;
 	status->st_mode = inode->i_mode;
 	status->st_nlink = inode->i_linkcount;
@@ -405,15 +501,24 @@ inode_getattr(struct inode *inode, struct stat *status)
 	status->st_mtime = inode->i_mtime.tv_sec;
 	status->st_ctime = inode->i_ctime.tv_sec;
 	status->st_blksize = 512;
-	status->st_blocks = inode->i_size > 0 ?
-	    (blkcnt_t)(((uint64_t)inode->i_size + 511U) / 512U) : 0;
+	if (inode->i_size > 0)
+		status->st_blocks =
+		    (blkcnt_t)(((uint64_t)inode->i_size + 511U) / 512U);
+	else
+		status->st_blocks = 0;
 	return 0;
 }
 
+/*
+ * Sets the selected timestamps of an inode to the current time.
+ */
 void
-inode_touch(struct inode *inode, unsigned mask)
+inode_touch(
+	struct inode *inode,
+	unsigned mask)
 {
 	struct inode_time now;
+
 	if (inode == NULL)
 		return;
 	clock_realtime(&now.tv_sec, &now.tv_nsec);
@@ -425,8 +530,13 @@ inode_touch(struct inode *inode, unsigned mask)
 		inode->i_ctime = now;
 }
 
+/*
+ * Advances a directory's change sequence, purging its name cache
+ * entries when the sequence wraps.
+ */
 void
-inode_dir_changed(struct inode *inode)
+inode_dir_changed(
+	struct inode *inode)
 {
 	uint64_t sequence;
 
@@ -441,33 +551,18 @@ inode_dir_changed(struct inode *inode)
 	}
 }
 
-/* Enter the regular-file content domain before changing privilege metadata.
- * A content/resize owner deliberately drops i_io while revoking mappings and
- * writing old dirty data, so taking the mutex alone would enter the middle of
- * its transaction.  Wait for the publication gate, acquire i_io, then recheck
- * to close that hand-off window. */
-static int
-inode_content_io_lock(struct inode *inode)
-{
-	int error;
-
-	if (vm_object_inode_io_wait == NULL ||
-	    vm_object_inode_resize_active == NULL) {
-		mutex_lock(&inode->i_io_lock);
-		return 0;
-	}
-	for (;;) {
-		error = vm_object_inode_io_wait(inode);
-		if (error != 0)
-			return error;
-		mutex_lock(&inode->i_io_lock);
-		if (!vm_object_inode_resize_active(inode))
-			return 0;
-		mutex_unlock(&inode->i_io_lock);
-	}
-}
-
-int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
+/*
+ * Changes the attributes of an inode.
+ *
+ * A size change runs as a truncate transaction.  Mode and ownership
+ * changes take the inode I/O lock so they cannot restore set-id bits
+ * between a writer's privilege check and its content mutation.
+ */
+int
+inode_setattr(
+	struct inode *i,
+	const struct stat *s,
+	unsigned mask)
 {
 	const unsigned valid = INODE_ATTR_MODE | INODE_ATTR_UID |
 		INODE_ATTR_GID | INODE_ATTR_SIZE | INODE_ATTR_ATIME |
@@ -475,13 +570,17 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 		INODE_ATTR_ATIME_NOW | INODE_ATTR_MTIME_NOW;
 	struct stat requested;
 	struct inode_time now;
-	int held_io = 0;
+	int held_io;
 	int error;
+
+	held_io = 0;
 
 	if (i == NULL || s == NULL || (mask & ~valid) != 0)
 		return EINVAL;
 	if (readonly(i))
 		return EROFS;
+
+	/* Resolves the "now" markers into explicit timestamps. */
 	requested = *s;
 	if (mask & (INODE_ATTR_ATIME_NOW | INODE_ATTR_MTIME_NOW)) {
 		clock_realtime(&now.tv_sec, &now.tv_nsec);
@@ -505,9 +604,13 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 	    (requested.st_mode & S_IFMT) != 0 &&
 	    (requested.st_mode & S_IFMT) != (i->i_mode & S_IFMT))
 		return EINVAL;
-	/* EOF changes use the same VM-visible transaction as ftruncate and
-	 * extending write.  Filesystem setattr callbacks therefore never mutate
-	 * size behind an already-published shared object's generation. */
+
+	/*
+	 * EOF changes use the same VM-visible transaction as ftruncate and
+	 * extending write.  Filesystem setattr callbacks therefore never
+	 * mutate size behind an already-published shared object's
+	 * generation.
+	 */
 	if ((mask & INODE_ATTR_SIZE) != 0) {
 		error = inode_truncate(i, requested.st_size);
 		if (error != 0)
@@ -516,7 +619,8 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 		if (mask == 0)
 			return 0;
 	}
-	/* Copy-up can create/rename upper entries. Complete it before i_io_lock,
+	/*
+	 * Copy-up can create/rename upper entries. Complete it before i_io_lock,
 	 * because namespace creation takes the transaction gate before this lock
 	 * when observing a parent's ownership and set-GID attributes. */
 	if (i->i_op != NULL && i->i_op->prepare_mutation != NULL) {
@@ -524,11 +628,15 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 		if (error != 0)
 			return error;
 	}
-	/* Mode and ownership participate in the same regular-inode I/O domain as
-	 * writes and truncate.  This prevents chmod/chown from restoring set-id
-	 * bits between a writer's privilege-bit invalidation and its backend
-	 * content mutation.  Stacked filesystems naturally acquire outer then
-	 * content-inode locks through their setattr callback. */
+
+	/*
+	 * Mode and ownership participate in the same regular-inode I/O
+	 * domain as writes and truncate.  This prevents chmod/chown from
+	 * restoring set-id bits between a writer's privilege-bit
+	 * invalidation and its backend content mutation.  Stacked
+	 * filesystems naturally acquire outer then content-inode locks
+	 * through their setattr callback.
+	 */
 	if ((mask & (INODE_ATTR_MODE | INODE_ATTR_UID | INODE_ATTR_GID)) != 0 &&
 	    !mutex_owned(&i->i_io_lock)) {
 		error = inode_content_io_lock(i);
@@ -548,6 +656,8 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 		if (error != 0)
 			goto out;
 	}
+
+	/* Mirrors the committed attributes into the cached fields. */
 	if (mask & INODE_ATTR_MODE)
 		i->i_mode = (i->i_mode & S_IFMT) |
 			(requested.st_mode & ~S_IFMT);
@@ -581,46 +691,44 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 	} else if (mask != 0) {
 		inode_touch(i, INODE_ATTR_CTIME);
 	}
-	out:
+out:
 	if (held_io)
 		mutex_unlock(&i->i_io_lock);
 	return error;
 }
-static int
-creation_request_valid(const struct inode_creation_request *request)
-{
-	if (request == NULL ||
-	    request->origin < INODE_CREATION_USER ||
-	    request->origin > INODE_CREATION_PRESERVE ||
-	    request->type <= INODE_NONE || request->type > INODE_FIFO ||
-	    (request->mode & S_IFMT) != 0)
-		return 0;
-	if (request->type != INODE_CHAR && request->type != INODE_BLOCK &&
-	    request->rdev != 0)
-		return 0;
-	if ((request->type == INODE_SOCKET) != (request->special != NULL))
-		return 0;
-	if (request->origin == INODE_CREATION_PRESERVE)
-		return request->source != NULL &&
-		    request->source->i_type == request->type;
-	return request->source == NULL;
-}
 
+/*
+ * Builds a creation request on behalf of a user, checking that the
+ * credential may create in the parent and applying set-group-id
+ * inheritance.
+ */
 int
-inode_creation_request_user(struct inode *parent,
-	const struct ucred *credential, enum inode_type type, mode_t mode,
-	dev_t rdev, void *special, struct inode_creation_request *request)
+inode_creation_request_user(
+	struct inode *parent,
+	const struct ucred *credential,
+	enum inode_type type,
+	mode_t mode,
+	dev_t rdev,
+	void *special,
+	struct inode_creation_request *request)
 {
 	int error;
 
-	if (parent == NULL || credential == NULL || request == NULL ||
-	    type <= INODE_NONE || type > INODE_FIFO || (mode & S_IFMT) != 0)
+	if (parent == NULL ||
+	    credential == NULL ||
+	    request == NULL ||
+	    type <= INODE_NONE ||
+	    type > INODE_FIFO ||
+	    (mode & S_IFMT) != 0)
 		return EINVAL;
 	memset(request, 0, sizeof(*request));
-	/* Authorization and the set-GID/GID snapshot are one metadata
-	 * observation.  inode_setattr() publishes parent mode and ownership under
-	 * i_io_lock; taking the same domain prevents a child from combining an
-	 * old S_ISGID bit with a newly published parent GID. */
+
+	/*
+	 * Authorization and the set-GID/GID snapshot are one metadata
+	 * observation.  inode_setattr() publishes parent mode and ownership
+	 * under i_io_lock; taking the same domain prevents a child from
+	 * combining an old S_ISGID bit with a newly published parent GID.
+	 */
 	error = inode_content_io_lock(parent);
 	if (error != 0)
 		return error;
@@ -633,21 +741,36 @@ inode_creation_request_user(struct inode *parent,
 	request->type = type;
 	request->mode = mode & 07777U;
 	request->uid = credential->euid;
-	request->gid = (parent->i_mode & S_ISGID) != 0 ?
-	    parent->i_gid : credential->egid;
+	if ((parent->i_mode & S_ISGID) != 0)
+		request->gid = parent->i_gid;
+	else
+		request->gid = credential->egid;
 	if (type == INODE_DIR && (parent->i_mode & S_ISGID) != 0)
 		request->mode |= S_ISGID;
 	request->rdev = rdev;
 	request->special = special;
 	mutex_unlock(&parent->i_io_lock);
-	return creation_request_valid(request) ? 0 : EINVAL;
+	if (!creation_request_valid(request))
+		return EINVAL;
+	return 0;
 }
 
+/*
+ * Builds a creation request on behalf of the kernel with explicit
+ * ownership.
+ */
 int
-inode_creation_request_system(enum inode_type type, mode_t mode, uid_t uid,
-	gid_t gid, dev_t rdev, struct inode_creation_request *request)
+inode_creation_request_system(
+	enum inode_type type,
+	mode_t mode,
+	uid_t uid,
+	gid_t gid,
+	dev_t rdev,
+	struct inode_creation_request *request)
 {
-	if (request == NULL || type <= INODE_NONE || type > INODE_FIFO ||
+	if (request == NULL ||
+	    type <= INODE_NONE ||
+	    type > INODE_FIFO ||
 	    (mode & S_IFMT) != 0)
 		return EINVAL;
 	memset(request, 0, sizeof(*request));
@@ -657,14 +780,23 @@ inode_creation_request_system(enum inode_type type, mode_t mode, uid_t uid,
 	request->uid = uid;
 	request->gid = gid;
 	request->rdev = rdev;
-	return creation_request_valid(request) ? 0 : EINVAL;
+	if (!creation_request_valid(request))
+		return EINVAL;
+	return 0;
 }
 
+/*
+ * Builds a creation request that copies the identity of an existing
+ * inode.
+ */
 int
-inode_creation_request_preserve(const struct inode *source,
+inode_creation_request_preserve(
+	const struct inode *source,
 	struct inode_creation_request *request)
 {
-	if (source == NULL || request == NULL || source->i_type <= INODE_NONE ||
+	if (source == NULL ||
+	    request == NULL ||
+	    source->i_type <= INODE_NONE ||
 	    source->i_type > INODE_FIFO)
 		return EINVAL;
 	memset(request, 0, sizeof(*request));
@@ -674,35 +806,32 @@ inode_creation_request_preserve(const struct inode *source,
 	request->uid = source->i_uid;
 	request->gid = source->i_gid;
 	request->rdev = source->i_rdev;
-	request->special = source->i_type == INODE_SOCKET ?
-	    source->i_special : NULL;
+	if (source->i_type == INODE_SOCKET)
+		request->special = source->i_special;
+	else
+		request->special = NULL;
 	request->source = source;
-	return creation_request_valid(request) ? 0 : EINVAL;
+	if (!creation_request_valid(request))
+		return EINVAL;
+	return 0;
 }
 
-static int
-inode_creation_preserve_acl(struct inode *source, struct inode *child,
-	const char *name)
-{
-	struct posix_acl acl;
-	int error;
-
-	error = posix_acl_load(source, name, &acl);
-	if (error == ENODATA || error == EOPNOTSUPP)
-		return 0;
-	if (error != 0)
-		return error;
-	return posix_acl_store(child, name, &acl);
-}
-
+/*
+ * Applies a creation request to a newly created child: mode, ownership,
+ * device number, ACLs, the special endpoint, and timestamps.
+ */
 int
-inode_creation_prepare(struct inode *parent, struct inode *child,
+inode_creation_prepare(
+	struct inode *parent,
+	struct inode *child,
 	const struct inode_creation_request *request)
 {
 	mode_t inherited;
 	int error;
 
-	if (parent == NULL || child == NULL || !creation_request_valid(request) ||
+	if (parent == NULL ||
+	    child == NULL ||
+	    !creation_request_valid(request) ||
 	    child->i_type != request->type ||
 	    (request->special != NULL && request->type != INODE_SOCKET))
 		return EINVAL;
@@ -711,6 +840,8 @@ inode_creation_prepare(struct inode *parent, struct inode *child,
 	child->i_uid = request->uid;
 	child->i_gid = request->gid;
 	child->i_rdev = request->rdev;
+
+	/* A preserved child copies the source ACLs; a new one inherits. */
 	if (request->origin == INODE_CREATION_PRESERVE &&
 	    (request->type == INODE_REG || request->type == INODE_DIR)) {
 		error = inode_creation_preserve_acl((struct inode *)request->source,
@@ -730,11 +861,13 @@ inode_creation_prepare(struct inode *parent, struct inode *child,
 			return error;
 		child->i_mode = inherited;
 	}
+
+	/* A socket binds its endpoint exactly once. */
 	if (request->special != NULL) {
 		mutex_lock(&child->i_lock);
-		if (child->i_special != NULL)
+		if (child->i_special != NULL) {
 			error = EADDRINUSE;
-		else {
+		} else {
 			child->i_special = request->special;
 			error = 0;
 		}
@@ -753,202 +886,476 @@ inode_creation_prepare(struct inode *parent, struct inode *child,
 	return 0;
 }
 
-static int inode_create_locked(struct inode *i, const struct componentname *n,
-		 const struct inode_creation_request *request, struct inode **r)
-{
-	int error;
-	if (i == NULL || n == NULL || r == NULL ||
-	    !creation_request_valid(request) || request->type != INODE_REG)
-		return EINVAL;
-	if (readonly(i)) return EROFS;
-	error = i->i_op != NULL && i->i_op->create != NULL ?
-		i->i_op->create(i, n, request, r) : EOPNOTSUPP;
-	if (error == 0) {
-		inode_dir_changed(i);
-		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-	}
-	return error;
-}
-static int inode_mkdir_locked(struct inode *i, const struct componentname *n,
-		const struct inode_creation_request *request, struct inode **r)
-{
-	int error;
-	if (i == NULL || n == NULL || r == NULL ||
-	    !creation_request_valid(request) || request->type != INODE_DIR)
-		return EINVAL;
-	if (readonly(i)) return EROFS;
-	error = i->i_op != NULL && i->i_op->mkdir != NULL ?
-		i->i_op->mkdir(i, n, request, r) : EOPNOTSUPP;
-	if (error == 0) {
-		inode_dir_changed(i);
-		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-	}
-	return error;
-}
-static int inode_mknod_locked(struct inode *i, const struct componentname *n,
-		const struct inode_creation_request *request, struct inode **r)
-{
-	int error;
-	if (i == NULL || n == NULL || r == NULL ||
-	    !creation_request_valid(request))
-		return EINVAL;
-	if (request->type != INODE_FIFO && request->type != INODE_SOCKET &&
-	    request->type != INODE_CHAR && request->type != INODE_BLOCK)
-		return EOPNOTSUPP;
-	if (readonly(i))
-		return EROFS;
-	error = i->i_op != NULL && i->i_op->mknod != NULL ?
-		i->i_op->mknod(i, n, request, r) :
-		EOPNOTSUPP;
-	if (error == 0) {
-		inode_dir_changed(i);
-		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-	}
-	return error;
-}
-static int inode_unlink_locked(struct inode *i, const struct componentname *n)
-{
-	struct inode *target;
-	struct backing_mutation_guard guard;
-	int error;
-	if (i == NULL || n == NULL) return EINVAL;
-	if (readonly(i)) return EROFS;
-	error = inode_lookup(i, n, &target);
-	if (error != 0) return error;
-	error = mount_namespace_check_inode(target);
-	if (error != 0) {
-		inode_release(target);
-		return error;
-	}
-	error = backing_mutation_begin_inode(target, &guard);
-	if (error != 0) {
-		inode_release(target);
-		return error;
-	}
-	if (target->i_type == INODE_DIR) {
-		backing_mutation_end(&guard);
-		inode_release(target);
-		return EPERM;
-	}
-	if ((target->i_flags & (INODE_ROOT |
-	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
-		backing_mutation_end(&guard);
-		inode_release(target);
-		return EBUSY;
-	}
-	inode_release(target);
-	error = i->i_op != NULL && i->i_op->unlink != NULL ?
-		i->i_op->unlink(i, n) : EOPNOTSUPP;
-	backing_mutation_end(&guard);
-	if (error == 0) {
-		namecache_remove(i, n);
-		inode_dir_changed(i);
-		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-	}
-	return error;
-}
-static int inode_rmdir_locked(struct inode *i, const struct componentname *n)
-{
-	struct inode *target;
-	int error;
-	if (i == NULL || n == NULL) return EINVAL;
-	if (readonly(i)) return EROFS;
-	error = inode_lookup(i, n, &target);
-	if (error != 0) return error;
-	error = mount_namespace_check_inode(target);
-	if (error != 0) {
-		inode_release(target);
-		return error;
-	}
-	if (target->i_type != INODE_DIR) {
-		inode_release(target);
-		return ENOTDIR;
-	}
-	if ((target->i_flags & (INODE_ROOT |
-	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
-		inode_release(target);
-		return EBUSY;
-	}
-	inode_release(target);
-	error = i->i_op != NULL && i->i_op->rmdir != NULL ?
-		i->i_op->rmdir(i, n) : EOPNOTSUPP;
-	if (error == 0) {
-		namecache_remove(i, n);
-		inode_dir_changed(i);
-		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-	}
-	return error;
-}
-
-static int
-inode_same(const struct inode *left, const struct inode *right)
-{
-	return left == right || (left != NULL && right != NULL &&
-	    left->i_mount == right->i_mount && left->i_ino == right->i_ino);
-}
-
 /*
- * Advance one component towards the root.  The VFS transaction lock held by
- * the rename caller keeps every observed ".." entry stable until the final
- * filesystem rename commits.  References are transferred through *cursor.
+ * Reads the target of a symbolic link.
  */
-static int
-inode_parent_step(struct inode **cursor, int *at_root)
+ssize_t
+inode_readlink(
+	struct inode *inode,
+	char *buffer,
+	size_t capacity)
 {
-	static const struct componentname dotdot = {
-		.cn_nameptr = "..",
-		.cn_namelen = 2,
-		.cn_flags = COMPONENT_DOTDOT,
-	};
-	struct inode *current, *parent;
-	int error;
+	ssize_t count;
 
-	if (cursor == NULL || *cursor == NULL || at_root == NULL)
-		return EINVAL;
-	current = *cursor;
-	*at_root = 0;
-	if (current->i_mount == NULL || current->i_mount->m_root == NULL)
-		return EIO;
-	if (inode_same(current, current->i_mount->m_root)) {
-		*at_root = 1;
-		return 0;
-	}
-	error = inode_lookup(current, &dotdot, &parent);
-	if (error != 0)
-		return error;
-	if (parent->i_type != INODE_DIR || parent->i_mount != current->i_mount) {
-		inode_release(parent);
-		return EIO;
-	}
-	if (inode_same(parent, current)) {
-		inode_release(parent);
-		return EIO;
-	}
-	inode_release(current);
-	*cursor = parent;
-	return 0;
+	if (inode == NULL || buffer == NULL)
+		return -EINVAL;
+	if (inode->i_type != INODE_SYMLINK)
+		return -EINVAL;
+	if (inode->i_op != NULL && inode->i_op->readlink != NULL)
+		count = inode->i_op->readlink(inode, buffer, capacity);
+	else
+		count = -EOPNOTSUPP;
+	return count;
 }
 
 /*
- * A directory cannot become a child of itself.  Walk the destination parent
- * chain in the generic layer so every filesystem gets identical semantics.
- * The second cursor is Floyd cycle detection: a malformed pre-existing tree
- * is reported as EIO instead of making rename loop forever.
+ * Runs a truncate transaction under the inode's backing guard.
  */
 int
-inode_is_ancestor(struct inode *source, struct inode *new_parent, int *result)
+inode_truncate_transaction(
+	struct inode *i,
+	const struct inode_truncate_request *request,
+	struct inode_truncate_result *result)
 {
-	struct inode *current = new_parent, *fast = new_parent;
-	int error = 0, at_root;
+	struct backing_mutation_guard guard;
+	int error;
+
+	if (i == NULL || request == NULL) {
+		error = inode_truncate_transaction_impl(i, request, result);
+		return error;
+	}
+	error = backing_mutation_begin_inode(i, &guard);
+	if (error != 0)
+		return error;
+	error = inode_truncate_transaction_impl(i, request, result);
+	backing_mutation_end(&guard);
+	return error;
+}
+
+/*
+ * Truncates a file under a growth limit with a credential.
+ */
+int
+inode_truncate_limited_cred(
+	struct inode *i,
+	off_t size,
+	uint64_t growth_limit,
+	const struct ucred *cred,
+	int *limit_exceeded)
+{
+	int error;
+
+	error = inode_truncate_limited_impl(i, size, growth_limit, cred, 0,
+	    limit_exceeded);
+	return error;
+}
+
+/*
+ * Truncates a file under a growth limit.
+ */
+int
+inode_truncate_limited(
+	struct inode *i,
+	off_t size,
+	uint64_t growth_limit,
+	int *limit_exceeded)
+{
+	int error;
+
+	error = inode_truncate_limited_impl(i, size, growth_limit, NULL, 0,
+	    limit_exceeded);
+	return error;
+}
+
+/*
+ * Truncates a file without a growth limit.
+ */
+int
+inode_truncate(
+	struct inode *i,
+	off_t size)
+{
+	int error;
+
+	error = inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 0, NULL);
+	return error;
+}
+
+/*
+ * Truncates a file as a content change that clears set-id bits.
+ */
+int
+inode_truncate_content_change(
+	struct inode *i,
+	off_t size)
+{
+	int error;
+
+	error = inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 1, NULL);
+	return error;
+}
+
+/*
+ * Reads an extended attribute.
+ */
+ssize_t
+inode_getxattr(
+	struct inode *inode,
+	const char *name,
+	void *value,
+	size_t size)
+{
+	ssize_t count;
+
+	if (inode == NULL ||
+	    !xattr_name_valid(name) ||
+	    (value == NULL && size != 0) ||
+	    size > INODE_XATTR_SIZE_MAX)
+		return -EINVAL;
+	if (inode->i_op != NULL && inode->i_op->getxattr != NULL)
+		count = inode->i_op->getxattr(inode, name, value, size);
+	else
+		count = -EOPNOTSUPP;
+	return count;
+}
+
+/*
+ * Writes an extended attribute.
+ */
+int
+inode_setxattr(
+	struct inode *inode,
+	const char *name,
+	const void *value,
+	size_t size,
+	unsigned flags)
+{
+	int error;
+
+	if (inode == NULL ||
+	    !xattr_name_valid(name) ||
+	    (value == NULL && size != 0) ||
+	    size > INODE_XATTR_SIZE_MAX ||
+	    (flags & ~(INODE_XATTR_CREATE | INODE_XATTR_REPLACE)) != 0 ||
+	    flags == (INODE_XATTR_CREATE | INODE_XATTR_REPLACE))
+		return EINVAL;
+	if (readonly(inode))
+		return EROFS;
+	if (inode->i_op != NULL && inode->i_op->setxattr != NULL)
+		error = inode->i_op->setxattr(inode, name, value, size, flags);
+	else
+		error = EOPNOTSUPP;
+	if (error == 0)
+		inode_touch(inode, INODE_ATTR_CTIME);
+	return error;
+}
+
+/*
+ * Lists the extended attribute names.
+ */
+ssize_t
+inode_listxattr(
+	struct inode *inode,
+	char *list,
+	size_t size)
+{
+	ssize_t count;
+
+	if (inode == NULL ||
+	    (list == NULL && size != 0) ||
+	    size > INODE_XATTR_SIZE_MAX)
+		return -EINVAL;
+	if (inode->i_op != NULL && inode->i_op->listxattr != NULL)
+		count = inode->i_op->listxattr(inode, list, size);
+	else
+		count = -EOPNOTSUPP;
+	return count;
+}
+
+/*
+ * Removes an extended attribute.
+ */
+int
+inode_removexattr(
+	struct inode *inode,
+	const char *name)
+{
+	int error;
+
+	if (inode == NULL || !xattr_name_valid(name))
+		return EINVAL;
+	if (readonly(inode))
+		return EROFS;
+	if (inode->i_op != NULL && inode->i_op->removexattr != NULL)
+		error = inode->i_op->removexattr(inode, name);
+	else
+		error = EOPNOTSUPP;
+	if (error == 0)
+		inode_touch(inode, INODE_ATTR_CTIME);
+	return error;
+}
+
+/*
+ * Writes an inode back through the filesystem.
+ */
+int
+inode_sync(
+	struct inode *i)
+{
+	int error;
+
+	if (i == NULL)
+		return EINVAL;
+	if (i->i_op != NULL && i->i_op->sync != NULL)
+		error = i->i_op->sync(i);
+	else
+		error = 0;
+	return error;
+}
+
+/*
+ * Counts the cached inodes.
+ */
+unsigned
+inode_cache_count(
+	void)
+{
+	unsigned i;
+	unsigned count;
+	unsigned long irq;
+
+	count = 0;
+	irq = spin_lock_irqsave(&inode_cache_lock);
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
+		if (inode_cache[i] != NULL &&
+		    inode_cache[i] != INODE_CACHE_RESERVED)
+			count++;
+	}
+	spin_unlock_irqrestore(&inode_cache_lock, irq);
+	return count;
+}
+
+/*
+ * Creates a regular inode under namespace admission.
+ */
+int
+inode_create(
+	struct inode *i,
+	const struct componentname *n,
+	const struct inode_creation_request *request,
+	struct inode **r)
+{
+	int entered;
+	int error;
+
+	/* Reserves namespace admission before calling the backend. */
+	error = inode_namespace_enter(i, n, 1, &entered);
+
+	if (error == 0)
+		error = inode_create_locked(i, n, request, r);
+	if (entered)
+		mount_vfs_transaction_leave(i->i_mount);
+	return error;
+}
+
+/*
+ * Links an inode under namespace admission.
+ */
+int
+inode_link(
+	struct inode *directory,
+	const struct componentname *name,
+	struct inode *target)
+{
+	int entered;
+	int error;
+
+	/* Reserves namespace admission before calling the backend. */
+	error = inode_namespace_enter(directory, name, 1, &entered);
+
+	if (error == 0)
+		error = inode_link_locked(directory, name, target);
+	if (entered)
+		mount_vfs_transaction_leave(directory->i_mount);
+	return error;
+}
+
+/*
+ * Creates a directory under namespace admission.
+ */
+int
+inode_mkdir(
+	struct inode *i,
+	const struct componentname *n,
+	const struct inode_creation_request *request,
+	struct inode **r)
+{
+	int entered;
+	int error;
+
+	/* Reserves namespace admission before calling the backend. */
+	error = inode_namespace_enter(i, n, 1, &entered);
+
+	if (error == 0)
+		error = inode_mkdir_locked(i, n, request, r);
+	if (entered)
+		mount_vfs_transaction_leave(i->i_mount);
+	return error;
+}
+
+/*
+ * Creates a special inode under namespace admission.
+ */
+int
+inode_mknod(
+	struct inode *i,
+	const struct componentname *n,
+	const struct inode_creation_request *request,
+	struct inode **r)
+{
+	int entered;
+	int error;
+
+	/* Reserves namespace admission before calling the backend. */
+	error = inode_namespace_enter(i, n, 1, &entered);
+
+	if (error == 0)
+		error = inode_mknod_locked(i, n, request, r);
+	if (entered)
+		mount_vfs_transaction_leave(i->i_mount);
+	return error;
+}
+
+/*
+ * Renames an entry while retaining both namespace reservations.
+ */
+int
+inode_rename(
+	struct inode *od,
+	const struct componentname *on,
+	struct inode *nd,
+	const struct componentname *nn,
+	unsigned flags)
+{
+	int entered, error;
+
+	if (od == NULL || nd == NULL || nn == NULL || flags != 0)
+		return EINVAL;
+	if (od->i_mount != nd->i_mount)
+		return EXDEV;
+	error = inode_namespace_enter(od, on, 0, &entered);
+	if (error == 0 && readonly(nd))
+		error = EROFS;
+	if (error == 0 && (nd->i_flags & INODE_DEAD) != 0)
+		error = ENOENT;
+	if (error == 0)
+		error = mount_namespace_check_name(nd, nn);
+	if (error == 0)
+		error = inode_rename_locked(od, on, nd, nn, flags);
+	if (entered)
+		mount_vfs_transaction_leave(od->i_mount);
+	return error;
+}
+
+/*
+ * Removes a directory while retaining namespace admission.
+ */
+int
+inode_rmdir(
+	struct inode *i,
+	const struct componentname *n)
+{
+	int entered;
+	int error;
+
+	/* Reserves namespace admission before calling the backend. */
+	error = inode_namespace_enter(i, n, 0, &entered);
+
+	if (error == 0)
+		error = inode_rmdir_locked(i, n);
+	if (entered)
+		mount_vfs_transaction_leave(i->i_mount);
+	return error;
+}
+
+/*
+ * Creates a symbolic link under namespace admission.
+ */
+int
+inode_symlink(
+	struct inode *directory,
+	const struct componentname *name,
+	const char *target,
+	const struct inode_creation_request *request,
+	struct inode **result)
+{
+	int entered;
+	int error;
+
+	/* Reserves namespace admission before calling the backend. */
+	error = inode_namespace_enter(directory, name, 1, &entered);
+
+	if (error == 0)
+		error = inode_symlink_locked(directory, name, target, request, result);
+	if (entered)
+		mount_vfs_transaction_leave(directory->i_mount);
+	return error;
+}
+
+/*
+ * Unlinks a name while retaining namespace admission.
+ */
+int
+inode_unlink(
+	struct inode *i,
+	const struct componentname *n)
+{
+	int entered;
+	int error;
+
+	/* Reserves namespace admission before calling the backend. */
+	error = inode_namespace_enter(i, n, 0, &entered);
+
+	if (error == 0)
+		error = inode_unlink_locked(i, n);
+	if (entered)
+		mount_vfs_transaction_leave(i->i_mount);
+	return error;
+}
+
+/*
+ * Checks ancestry without permitting malformed parent cycles.
+ */
+int
+inode_is_ancestor(
+	struct inode *source,
+	struct inode *new_parent,
+	int *result)
+{
+	struct inode *current;
+	struct inode *fast;
+	int error;
+	int at_root;
+	unsigned step;
 
 	if (source == NULL || new_parent == NULL || result == NULL)
 		return EINVAL;
 	*result = 0;
+
+	current = new_parent;
+	fast = new_parent;
+	error = 0;
+
+	/*
+	 * A directory cannot become a child of itself.  Walk the
+	 * destination parent chain in the generic layer so every filesystem
+	 * gets identical semantics.  The second cursor is Floyd cycle
+	 * detection: a malformed pre-existing tree is reported as EIO
+	 * instead of making rename loop forever.
+	 */
 	inode_ref(current);
 	inode_ref(fast);
 	for (;;) {
-		unsigned step;
-
 		if (inode_same(current, source)) {
 			*result = 1;
 			break;
@@ -956,7 +1363,6 @@ inode_is_ancestor(struct inode *source, struct inode *new_parent, int *result)
 		error = inode_parent_step(&current, &at_root);
 		if (error != 0 || at_root)
 			break;
-
 		if (fast == NULL)
 			continue;
 		for (step = 0; step < 2; step++) {
@@ -981,19 +1387,243 @@ out:
 	return error;
 }
 
-static int inode_rename_locked(struct inode *od, const struct componentname *on,
-		 struct inode *nd, const struct componentname *nn, unsigned flags)
+/*
+ * Creates a regular file in a directory.
+ */
+static int
+inode_create_locked(
+	struct inode *i,
+	const struct componentname *n,
+	const struct inode_creation_request *request,
+	struct inode **r)
 {
-	struct inode *source, *target;
-	struct backing_mutation_guard source_guard, target_guard;
-	int target_guarded = 0;
 	int error;
+
+	if (i == NULL ||
+	    n == NULL ||
+	    r == NULL ||
+	    !creation_request_valid(request) ||
+	    request->type != INODE_REG)
+		return EINVAL;
+	if (readonly(i))
+		return EROFS;
+	if (i->i_op != NULL && i->i_op->create != NULL)
+		error = i->i_op->create(i, n, request, r);
+	else
+		error = EOPNOTSUPP;
+	if (error == 0) {
+		inode_dir_changed(i);
+		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	}
+	return error;
+}
+
+/*
+ * Creates a directory in a directory.
+ */
+static int
+inode_mkdir_locked(
+	struct inode *i,
+	const struct componentname *n,
+	const struct inode_creation_request *request,
+	struct inode **r)
+{
+	int error;
+
+	if (i == NULL ||
+	    n == NULL ||
+	    r == NULL ||
+	    !creation_request_valid(request) ||
+	    request->type != INODE_DIR)
+		return EINVAL;
+	if (readonly(i))
+		return EROFS;
+	if (i->i_op != NULL && i->i_op->mkdir != NULL)
+		error = i->i_op->mkdir(i, n, request, r);
+	else
+		error = EOPNOTSUPP;
+	if (error == 0) {
+		inode_dir_changed(i);
+		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	}
+	return error;
+}
+
+/*
+ * Creates a FIFO, socket, or device node in a directory.
+ */
+static int
+inode_mknod_locked(
+	struct inode *i,
+	const struct componentname *n,
+	const struct inode_creation_request *request,
+	struct inode **r)
+{
+	int error;
+
+	if (i == NULL ||
+	    n == NULL ||
+	    r == NULL ||
+	    !creation_request_valid(request))
+		return EINVAL;
+	if (request->type != INODE_FIFO &&
+	    request->type != INODE_SOCKET &&
+	    request->type != INODE_CHAR &&
+	    request->type != INODE_BLOCK)
+		return EOPNOTSUPP;
+	if (readonly(i))
+		return EROFS;
+	if (i->i_op != NULL && i->i_op->mknod != NULL)
+		error = i->i_op->mknod(i, n, request, r);
+	else
+		error = EOPNOTSUPP;
+	if (error == 0) {
+		inode_dir_changed(i);
+		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	}
+	return error;
+}
+
+/*
+ * Removes a non-directory name from a directory.
+ */
+static int
+inode_unlink_locked(
+	struct inode *i,
+	const struct componentname *n)
+{
+	struct inode *target;
+	struct backing_mutation_guard guard;
+	int error;
+
+	if (i == NULL || n == NULL)
+		return EINVAL;
+	if (readonly(i))
+		return EROFS;
+
+	/* The target must be an ordinary object with no special role. */
+	error = inode_lookup(i, n, &target);
+	if (error != 0)
+		return error;
+
+	/* Preserves mounted and bound namespace anchors. */
+	error = mount_namespace_check_inode(target);
+	if (error != 0) {
+		inode_release(target);
+		return error;
+	}
+	error = backing_mutation_begin_inode(target, &guard);
+	if (error != 0) {
+		inode_release(target);
+		return error;
+	}
+	if (target->i_type == INODE_DIR) {
+		backing_mutation_end(&guard);
+		inode_release(target);
+		return EPERM;
+	}
+	if ((target->i_flags & (INODE_ROOT |
+	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+		backing_mutation_end(&guard);
+		inode_release(target);
+		return EBUSY;
+	}
+	inode_release(target);
+	if (i->i_op != NULL && i->i_op->unlink != NULL)
+		error = i->i_op->unlink(i, n);
+	else
+		error = EOPNOTSUPP;
+	backing_mutation_end(&guard);
+	if (error == 0) {
+		namecache_remove(i, n);
+		inode_dir_changed(i);
+		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	}
+	return error;
+}
+
+/*
+ * Removes a directory name from a directory.
+ */
+static int
+inode_rmdir_locked(
+	struct inode *i,
+	const struct componentname *n)
+{
+	struct inode *target;
+	int error;
+
+	if (i == NULL || n == NULL)
+		return EINVAL;
+	if (readonly(i))
+		return EROFS;
+
+	/* The target must be a directory with no special role. */
+	error = inode_lookup(i, n, &target);
+	if (error != 0)
+		return error;
+
+	/* Preserves mounted and bound namespace anchors. */
+	error = mount_namespace_check_inode(target);
+	if (error != 0) {
+		inode_release(target);
+		return error;
+	}
+	if (target->i_type != INODE_DIR) {
+		inode_release(target);
+		return ENOTDIR;
+	}
+	if ((target->i_flags & (INODE_ROOT |
+	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+		inode_release(target);
+		return EBUSY;
+	}
+	inode_release(target);
+	if (i->i_op != NULL && i->i_op->rmdir != NULL)
+		error = i->i_op->rmdir(i, n);
+	else
+		error = EOPNOTSUPP;
+	if (error == 0) {
+		namecache_remove(i, n);
+		inode_dir_changed(i);
+		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	}
+	return error;
+}
+
+/*
+ * Renames a name within one mount.
+ *
+ * A directory is checked against becoming its own descendant, a
+ * replaced target must match the source's kind, and both objects are
+ * guarded against backing reclaim across the filesystem rename.
+ */
+static int
+inode_rename_locked(
+	struct inode *od,
+	const struct componentname *on,
+	struct inode *nd,
+	const struct componentname *nn,
+	unsigned flags)
+{
+	struct inode *source;
+	struct inode *target;
+	struct backing_mutation_guard source_guard;
+	struct backing_mutation_guard target_guard;
+	int target_guarded;
+	int error;
+	int ancestor;
+
+	target_guarded = 0;
+
 	if (od == NULL || on == NULL || nd == NULL || nn == NULL || flags != 0)
 		return EINVAL;
 	if (od->i_mount != nd->i_mount)
 		return EXDEV;
 	if (readonly(od) || readonly(nd))
 		return EROFS;
+
+	/* Guards the source and checks it may move. */
 	error = inode_lookup(od, on, &source);
 	if (error != 0)
 		return error;
@@ -1014,7 +1644,6 @@ static int inode_rename_locked(struct inode *od, const struct componentname *on,
 		return EBUSY;
 	}
 	if (source->i_type == INODE_DIR && !inode_same(od, nd)) {
-		int ancestor;
 		error = inode_is_ancestor(source, nd, &ancestor);
 		if (error == 0 && ancestor)
 			error = EINVAL;
@@ -1024,6 +1653,8 @@ static int inode_rename_locked(struct inode *od, const struct componentname *on,
 			return error;
 		}
 	}
+
+	/* Guards a replaced target and checks it matches the source's kind. */
 	error = inode_lookup(nd, nn, &target);
 	if (error == 0) {
 		error = mount_namespace_check_inode(target);
@@ -1076,8 +1707,12 @@ static int inode_rename_locked(struct inode *od, const struct componentname *on,
 		inode_release(source);
 		return error;
 	}
-	error = od->i_op != NULL && od->i_op->rename != NULL ?
-		od->i_op->rename(od, on, nd, nn, flags) : EOPNOTSUPP;
+
+	/* Runs the filesystem rename and updates both directories. */
+	if (od->i_op != NULL && od->i_op->rename != NULL)
+		error = od->i_op->rename(od, on, nd, nn, flags);
+	else
+		error = EOPNOTSUPP;
 	if (error == 0) {
 		namecache_remove(od, on);
 		namecache_remove(nd, nn);
@@ -1097,11 +1732,19 @@ static int inode_rename_locked(struct inode *od, const struct componentname *on,
 	inode_release(source);
 	return error;
 }
-static int inode_link_locked(struct inode *directory, const struct componentname *name,
-	       struct inode *target)
+
+/*
+ * Adds a hard link to a non-directory within one mount.
+ */
+static int
+inode_link_locked(
+	struct inode *directory,
+	const struct componentname *name,
+	struct inode *target)
 {
 	struct backing_mutation_guard guard;
 	int error;
+
 	if (directory == NULL || name == NULL || target == NULL)
 		return EINVAL;
 	if (directory->i_type != INODE_DIR)
@@ -1115,8 +1758,10 @@ static int inode_link_locked(struct inode *directory, const struct componentname
 	error = backing_mutation_begin_inode(target, &guard);
 	if (error != 0)
 		return error;
-	error = directory->i_op != NULL && directory->i_op->link != NULL ?
-		directory->i_op->link(directory, name, target) : EOPNOTSUPP;
+	if (directory->i_op != NULL && directory->i_op->link != NULL)
+		error = directory->i_op->link(directory, name, target);
+	else
+		error = EOPNOTSUPP;
 	backing_mutation_end(&guard);
 	if (error == 0) {
 		inode_dir_changed(directory);
@@ -1126,14 +1771,26 @@ static int inode_link_locked(struct inode *directory, const struct componentname
 	}
 	return error;
 }
-static int inode_symlink_locked(struct inode *directory, const struct componentname *name,
-		  const char *target,
-		  const struct inode_creation_request *request,
-		  struct inode **result)
+
+/*
+ * Creates a symbolic link in a directory.
+ */
+static int
+inode_symlink_locked(
+	struct inode *directory,
+	const struct componentname *name,
+	const char *target,
+	const struct inode_creation_request *request,
+	struct inode **result)
 {
 	int error;
-	if (directory == NULL || name == NULL || target == NULL || result == NULL ||
-	    !creation_request_valid(request) || request->type != INODE_SYMLINK)
+
+	if (directory == NULL ||
+	    name == NULL ||
+	    target == NULL ||
+	    result == NULL ||
+	    !creation_request_valid(request) ||
+	    request->type != INODE_SYMLINK)
 		return EINVAL;
 	if (directory->i_type != INODE_DIR)
 		return ENOTDIR;
@@ -1141,9 +1798,11 @@ static int inode_symlink_locked(struct inode *directory, const struct componentn
 		return ENOENT;
 	if (readonly(directory))
 		return EROFS;
-	error = directory->i_op != NULL && directory->i_op->symlink != NULL ?
-		directory->i_op->symlink(directory, name, target, request, result) :
-		EOPNOTSUPP;
+	if (directory->i_op != NULL && directory->i_op->symlink != NULL)
+		error = directory->i_op->symlink(directory, name, target, request,
+		    result);
+	else
+		error = EOPNOTSUPP;
 	if (error == 0) {
 		inode_dir_changed(directory);
 		inode_touch(directory, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
@@ -1151,171 +1810,320 @@ static int inode_symlink_locked(struct inode *directory, const struct componentn
 	return error;
 }
 
-/* Join before checking attachments and retain the sleeping gate through the
- * backend commit. The outer syscall/copy-up owner keeps its own acquisition. */
+/* Reports the pool index of a pool inode, or -1. */
 static int
-inode_namespace_enter(struct inode *directory, const struct componentname *name,
-	int creation, int *entered)
+common_index(
+	const struct inode *inode)
+{
+	unsigned i;
+
+	for (i = 0; i < INODE_COMMON_MAX; i++) {
+		if (&common_pool[i] == inode)
+			return (int)i;
+	}
+	return -1;
+}
+
+/* Reports the cache slot of an inode, or -1. */
+static int
+cache_index(
+	const struct inode *inode)
+{
+	unsigned i;
+
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
+		if (inode_cache[i] == inode)
+			return (int)i;
+	}
+	return -1;
+}
+
+/* Tears down an inode that has left the cache. */
+static void
+destroy_inode(
+	struct inode *inode)
+{
+	struct mount *mountp;
+	void *special;
+	int pindex;
+	unsigned long irq;
+
+	void (*special_destroy)(void *);
+
+	/* Destroys the special endpoint, then lets the filesystem reclaim. */
+	record_lock_inode_destroy(inode);
+	mutex_lock(&inode->i_lock);
+	special = inode->i_special;
+	special_destroy = inode->i_special_destroy;
+	inode->i_special = NULL;
+	inode->i_special_destroy = NULL;
+	mutex_unlock(&inode->i_lock);
+	if (special != NULL && special_destroy != NULL)
+		special_destroy(special);
+	if (inode->i_op != NULL && inode->i_op->reclaim != NULL)
+		inode->i_op->reclaim(inode);
+
+	/* Returns the storage to the pool or to the filesystem. */
+	mountp = inode->i_mount;
+	pindex = common_index(inode);
+	if (pindex >= 0) {
+		memset(inode, 0, sizeof(*inode));
+		irq = spin_lock_irqsave(&inode_cache_lock);
+		common_used[pindex] = 0;
+		spin_unlock_irqrestore(&inode_cache_lock, irq);
+	} else if (mountp != NULL && mountp->m_type != NULL &&
+	    mountp->m_type->free_inode != NULL) {
+		mountp->m_type->free_inode(inode);
+	}
+}
+
+/* Reserves a cache slot, evicting a clean unreferenced inode if needed. */
+static int
+reserve_cache_slot(
+	struct inode **victim)
+{
+	unsigned i;
+	unsigned long irq;
+	struct inode *inode;
+
+	irq = spin_lock_irqsave(&inode_cache_lock);
+	*victim = NULL;
+
+	/* A free slot is reserved directly. */
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
+		if (inode_cache[i] == NULL) {
+			inode_cache[i] = INODE_CACHE_RESERVED;
+			spin_unlock_irqrestore(&inode_cache_lock, irq);
+			return (int)i;
+		}
+	}
+
+	/* Otherwise a clean inode held only by the cache is evicted. */
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
+		inode = inode_cache[i];
+		if (inode != INODE_CACHE_RESERVED && refcount_load(&inode->i_refs) == 1 &&
+		    !(inode->i_flags & (INODE_DIRTY | INODE_ROOT))) {
+			inode_cache[i] = INODE_CACHE_RESERVED;
+			(void)refcount_put(&inode->i_refs);
+			*victim = inode;
+			spin_unlock_irqrestore(&inode_cache_lock, irq);
+			return (int)i;
+		}
+	}
+	spin_unlock_irqrestore(&inode_cache_lock, irq);
+	return -1;
+}
+
+/* Tests whether an inode lives on a read-only mount. */
+static int
+readonly(
+	const struct inode *inode)
+{
+	if (inode == NULL)
+		return 0;
+	if (inode->i_mount == NULL)
+		return 0;
+	if ((inode->i_mount->m_flags & MOUNT_READ_ONLY) != 0)
+		return 1;
+	return 0;
+}
+
+/* Takes a regular file's I/O lock outside any content or resize transaction. */
+static int
+inode_content_io_lock(
+	struct inode *inode)
 {
 	int error;
-	*entered = 0;
-	if (directory == NULL || name == NULL)
-		return EINVAL;
-	*entered = mount_vfs_transaction_join(directory->i_mount);
-	if (readonly(directory))
-		return EROFS;
-	if ((directory->i_flags & INODE_DEAD) != 0)
-		return ENOENT;
-	error = mount_namespace_check_name(directory, name);
-	return creation && error == EBUSY ? EEXIST : error;
+
+	/*
+	 * Enter the regular-file content domain before changing privilege
+	 * metadata.  A content/resize owner deliberately drops i_io while
+	 * revoking mappings and writing old dirty data, so taking the mutex
+	 * alone would enter the middle of its transaction.  Wait for the
+	 * publication gate, acquire i_io, then recheck to close that
+	 * hand-off window.
+	 */
+	if (vm_object_inode_io_wait == NULL ||
+	    vm_object_inode_resize_active == NULL) {
+		mutex_lock(&inode->i_io_lock);
+		return 0;
+	}
+	for (;;) {
+		error = vm_object_inode_io_wait(inode);
+		if (error != 0)
+			return error;
+		mutex_lock(&inode->i_io_lock);
+		if (!vm_object_inode_resize_active(inode))
+			return 0;
+		mutex_unlock(&inode->i_io_lock);
+	}
 }
 
-int
-inode_create(struct inode *i, const struct componentname *n,
-	const struct inode_creation_request *request, struct inode **r)
-{
-	int entered, error = inode_namespace_enter(i, n, 1, &entered);
-	if (error == 0)
-		error = inode_create_locked(i, n, request, r);
-	if (entered)
-		mount_vfs_transaction_leave(i->i_mount);
-	return error;
-}
-
-int
-inode_mkdir(struct inode *i, const struct componentname *n,
-	const struct inode_creation_request *request, struct inode **r)
-{
-	int entered, error = inode_namespace_enter(i, n, 1, &entered);
-	if (error == 0)
-		error = inode_mkdir_locked(i, n, request, r);
-	if (entered)
-		mount_vfs_transaction_leave(i->i_mount);
-	return error;
-}
-
-int
-inode_mknod(struct inode *i, const struct componentname *n,
-	const struct inode_creation_request *request, struct inode **r)
-{
-	int entered, error = inode_namespace_enter(i, n, 1, &entered);
-	if (error == 0)
-		error = inode_mknod_locked(i, n, request, r);
-	if (entered)
-		mount_vfs_transaction_leave(i->i_mount);
-	return error;
-}
-
-int
-inode_unlink(struct inode *i, const struct componentname *n)
-{
-	int entered, error = inode_namespace_enter(i, n, 0, &entered);
-	if (error == 0)
-		error = inode_unlink_locked(i, n);
-	if (entered)
-		mount_vfs_transaction_leave(i->i_mount);
-	return error;
-}
-
-int
-inode_rmdir(struct inode *i, const struct componentname *n)
-{
-	int entered, error = inode_namespace_enter(i, n, 0, &entered);
-	if (error == 0)
-		error = inode_rmdir_locked(i, n);
-	if (entered)
-		mount_vfs_transaction_leave(i->i_mount);
-	return error;
-}
-
-int
-inode_rename(struct inode *od, const struct componentname *on,
-	struct inode *nd, const struct componentname *nn, unsigned flags)
-{
-	int entered, error;
-	if (od == NULL || nd == NULL || nn == NULL || flags != 0)
-		return EINVAL;
-	if (od->i_mount != nd->i_mount)
-		return EXDEV;
-	error = inode_namespace_enter(od, on, 0, &entered);
-	if (error == 0 && readonly(nd))
-		error = EROFS;
-	if (error == 0 && (nd->i_flags & INODE_DEAD) != 0)
-		error = ENOENT;
-	if (error == 0)
-		error = mount_namespace_check_name(nd, nn);
-	if (error == 0)
-		error = inode_rename_locked(od, on, nd, nn, flags);
-	if (entered)
-		mount_vfs_transaction_leave(od->i_mount);
-	return error;
-}
-
-int
-inode_link(struct inode *directory, const struct componentname *name,
-	struct inode *target)
-{
-	int entered, error = inode_namespace_enter(directory, name, 1, &entered);
-	if (error == 0)
-		error = inode_link_locked(directory, name, target);
-	if (entered)
-		mount_vfs_transaction_leave(directory->i_mount);
-	return error;
-}
-
-int
-inode_symlink(struct inode *directory, const struct componentname *name,
-	const char *target, const struct inode_creation_request *request,
-	struct inode **result)
-{
-	int entered, error = inode_namespace_enter(directory, name, 1, &entered);
-	if (error == 0)
-		error = inode_symlink_locked(directory, name, target, request, result);
-	if (entered)
-		mount_vfs_transaction_leave(directory->i_mount);
-	return error;
-}
-
-ssize_t inode_readlink(struct inode *inode, char *buffer, size_t capacity)
-{
-	if (inode == NULL || buffer == NULL)
-		return -EINVAL;
-	if (inode->i_type != INODE_SYMLINK)
-		return -EINVAL;
-	return inode->i_op != NULL && inode->i_op->readlink != NULL ?
-		inode->i_op->readlink(inode, buffer, capacity) : -EOPNOTSUPP;
-}
-
+/* Tests whether a creation request is internally consistent. */
 static int
-inode_vm_resize_available(void)
+creation_request_valid(
+	const struct inode_creation_request *request)
 {
-	return vm_object_inode_io_wait != NULL &&
-	    vm_object_inode_resize_active != NULL &&
-	    vm_object_resize_begin != NULL &&
-	    vm_object_resize_prepare != NULL &&
-	    vm_object_resize_commit != NULL &&
-	    vm_object_resize_abort != NULL;
+	if (request == NULL ||
+	    request->origin < INODE_CREATION_USER ||
+	    request->origin > INODE_CREATION_PRESERVE ||
+	    request->type <= INODE_NONE ||
+	    request->type > INODE_FIFO ||
+	    (request->mode & S_IFMT) != 0)
+		return 0;
+	if (request->type != INODE_CHAR && request->type != INODE_BLOCK &&
+	    request->rdev != 0)
+		return 0;
+	if ((request->type == INODE_SOCKET) != (request->special != NULL))
+		return 0;
+
+	/* Only a preserving request names a source, and it must match. */
+	if (request->origin == INODE_CREATION_PRESERVE) {
+		if (request->source == NULL)
+			return 0;
+		if (request->source->i_type != request->type)
+			return 0;
+		return 1;
+	}
+	if (request->source != NULL)
+		return 0;
+	return 1;
 }
 
+/* Copies one ACL attribute from a source inode to a new child. */
 static int
-inode_truncate_transaction_impl(struct inode *i,
+inode_creation_preserve_acl(
+	struct inode *source,
+	struct inode *child,
+	const char *name)
+{
+	struct posix_acl acl;
+	int error;
+
+	error = posix_acl_load(source, name, &acl);
+	if (error == ENODATA || error == EOPNOTSUPP)
+		return 0;
+	if (error != 0)
+		return error;
+	error = posix_acl_store(child, name, &acl);
+	return error;
+}
+
+/* Tests whether two inode pointers name the same object. */
+static int
+inode_same(
+	const struct inode *left,
+	const struct inode *right)
+{
+	if (left == right)
+		return 1;
+	if (left == NULL || right == NULL)
+		return 0;
+	if (left->i_mount != right->i_mount)
+		return 0;
+	if (left->i_ino != right->i_ino)
+		return 0;
+	return 1;
+}
+
+/* Moves a cursor one component towards the root, transferring the reference. */
+static int
+inode_parent_step(
+	struct inode **cursor,
+	int *at_root)
+{
+	static const struct componentname dotdot = {
+		.cn_nameptr = "..",
+		.cn_namelen = 2,
+		.cn_flags = COMPONENT_DOTDOT,
+	};
+	struct inode *current;
+	struct inode *parent;
+	int error;
+
+	/*
+	 * The VFS transaction lock held by the rename caller keeps every
+	 * observed ".." entry stable until the final filesystem rename
+	 * commits.
+	 */
+	if (cursor == NULL || *cursor == NULL || at_root == NULL)
+		return EINVAL;
+	current = *cursor;
+	*at_root = 0;
+	if (current->i_mount == NULL || current->i_mount->m_root == NULL)
+		return EIO;
+	if (inode_same(current, current->i_mount->m_root)) {
+		*at_root = 1;
+		return 0;
+	}
+
+	/* The parent must be a directory of the same mount other than itself. */
+	error = inode_lookup(current, &dotdot, &parent);
+	if (error != 0)
+		return error;
+	if (parent->i_type != INODE_DIR || parent->i_mount != current->i_mount) {
+		inode_release(parent);
+		return EIO;
+	}
+	if (inode_same(parent, current)) {
+		inode_release(parent);
+		return EIO;
+	}
+	inode_release(current);
+	*cursor = parent;
+	return 0;
+}
+
+/* Tests whether the VM object resize protocol is linked in. */
+static int
+inode_vm_resize_available(
+	void)
+{
+	if (vm_object_inode_io_wait == NULL)
+		return 0;
+	if (vm_object_inode_resize_active == NULL)
+		return 0;
+	if (vm_object_resize_begin == NULL)
+		return 0;
+	if (vm_object_resize_prepare == NULL)
+		return 0;
+	if (vm_object_resize_commit == NULL)
+		return 0;
+	if (vm_object_resize_abort == NULL)
+		return 0;
+	return 1;
+}
+
+/* Runs a truncate transaction under the inode I/O lock with a published resize. */
+static int
+inode_truncate_transaction_impl(
+	struct inode *i,
 	const struct inode_truncate_request *request,
 	struct inode_truncate_result *result)
 {
 	struct vm_object_resize resize;
 	struct inode_truncate_result local_result;
+	struct inode_truncate_result inner;
 	int delegated;
 	int vm_resize;
 	int error;
 
+	/* Reports the current size even on a rejected request. */
 	if (result == NULL)
 		result = &local_result;
 	memset(result, 0, sizeof(*result));
-	result->actual_size = i != NULL ? i->i_size : 0;
+	if (i != NULL)
+		result->actual_size = i->i_size;
+	else
+		result->actual_size = 0;
 	if (i == NULL || request == NULL || request->size < 0)
 		return EINVAL;
-	if (i->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) return EBUSY;
-	if (readonly(i)) return EROFS;
+	if (i->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE))
+		return EBUSY;
+	if (readonly(i))
+		return EROFS;
+
+	/* Prepares copy-up before entering the inode I/O domain. */
 	if (i->i_op != NULL && i->i_op->prepare_mutation != NULL) {
 		error = i->i_op->prepare_mutation(i);
 		result->actual_size = i->i_size;
@@ -1323,7 +2131,8 @@ inode_truncate_transaction_impl(struct inode *i,
 			return error;
 	}
 	delegated = i->i_op != NULL && i->i_op->truncate_limited != NULL;
-	retry:
+retry:
+	/* Takes the I/O lock outside any published resize. */
 	vm_resize = inode_vm_resize_available();
 	if (vm_resize) {
 		error = vm_object_inode_io_wait(i);
@@ -1331,15 +2140,20 @@ inode_truncate_transaction_impl(struct inode *i,
 			return error;
 	}
 	mutex_lock(&i->i_io_lock);
+
 	/* Close the publication-to-i_io acquisition window. */
 	if (vm_resize && vm_object_inode_resize_active(i)) {
 		mutex_unlock(&i->i_io_lock);
 		goto retry;
 	}
-	/* RLIMIT_FSIZE constrains growth, not shrinking or replacement of data in
-	 * a file which was already larger when the process limit was lowered.
-	 * Check under i_io_lock so another writer cannot change the comparison
-	 * between validation and the filesystem truncate transaction. */
+
+	/*
+	 * RLIMIT_FSIZE constrains growth, not shrinking or replacement of
+	 * data in a file which was already larger when the process limit
+	 * was lowered.  Check under i_io_lock so another writer cannot
+	 * change the comparison between validation and the filesystem
+	 * truncate transaction.
+	 */
 	if (!delegated && request->size > i->i_size &&
 	    (uint64_t)request->size > request->growth_limit) {
 		result->limit_exceeded = 1;
@@ -1347,6 +2161,8 @@ inode_truncate_transaction_impl(struct inode *i,
 		mutex_unlock(&i->i_io_lock);
 		return EFBIG;
 	}
+
+	/* Publishes and prepares the resize. */
 	memset(&resize, 0, sizeof(resize));
 	if (vm_resize) {
 		error = vm_object_resize_begin(i, request->size, &resize);
@@ -1360,8 +2176,11 @@ inode_truncate_transaction_impl(struct inode *i,
 		}
 	}
 	if (resize.active) {
-		/* Fault I/O which predates begin may already be committed to taking
-		 * i_io_lock, so preparation must wait without holding it. */
+		/*
+		 * Fault I/O which predates begin may already be committed to
+		 * taking i_io_lock, so preparation must wait without holding
+		 * it.
+		 */
 		mutex_unlock(&i->i_io_lock);
 		error = vm_object_resize_prepare(&resize);
 		mutex_lock(&i->i_io_lock);
@@ -1371,14 +2190,19 @@ inode_truncate_transaction_impl(struct inode *i,
 			return error;
 		}
 	}
-	/* Exclude exec/content publication while removing privilege bits.  Doing
-	 * this immediately before the backend mutation prevents an executable
-	 * image from observing new bytes with the old set-id mode. */
+
+	/*
+	 * Exclude exec/content publication while removing privilege bits.
+	 * Doing this immediately before the backend mutation prevents an
+	 * executable image from observing new bytes with the old set-id
+	 * mode.
+	 */
 	if (!delegated &&
 	    (request->credential != NULL || request->content_change)) {
-		error = request->content_change ?
-		    vfs_clear_setid_on_content_change(i) :
-		    vfs_clear_setid_on_write(i, request->credential);
+		if (request->content_change)
+			error = vfs_clear_setid_on_content_change(i);
+		else
+			error = vfs_clear_setid_on_write(i, request->credential);
 		if (error != 0) {
 			if (resize.active)
 				vm_object_resize_abort(&resize);
@@ -1386,15 +2210,19 @@ inode_truncate_transaction_impl(struct inode *i,
 			return error;
 		}
 	}
-	if (delegated) {
-		struct inode_truncate_result inner;
 
+	/* Runs the filesystem truncate and commits the published size. */
+	if (delegated) {
 		memset(&inner, 0, sizeof(inner));
 		inner.actual_size = i->i_size;
 		error = i->i_op->truncate_limited(i, request, &inner);
-		/* A stacking backend must report the final content inode's size on
-		 * every outcome.  Publish it even after EIO: the mutation may have
-		 * crossed its irreversible backend boundary before failing. */
+
+		/*
+		 * A stacking backend must report the final content inode's
+		 * size on every outcome.  Publish it even after EIO: the
+		 * mutation may have crossed its irreversible backend boundary
+		 * before failing.
+		 */
 		if (inner.actual_size < 0) {
 			if (error == 0)
 				error = EIO;
@@ -1408,8 +2236,10 @@ inode_truncate_transaction_impl(struct inode *i,
 		if (error == 0)
 			inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	} else {
-		error = i->i_op != NULL && i->i_op->truncate != NULL ?
-			i->i_op->truncate(i, request->size) : EOPNOTSUPP;
+		if (i->i_op != NULL && i->i_op->truncate != NULL)
+			error = i->i_op->truncate(i, request->size);
+		else
+			error = EOPNOTSUPP;
 		if (error == 0) {
 			i->i_size = request->size;
 			result->actual_size = request->size;
@@ -1417,9 +2247,12 @@ inode_truncate_transaction_impl(struct inode *i,
 				vm_object_resize_commit(&resize, request->size);
 			inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 		} else {
-			/* Set-id removal is irreversible even if the backend reports a
-			 * later error.  The plain backend contract has not published a
-			 * changed EOF, so abort only the tentative resize state. */
+			/*
+			 * Set-id removal is irreversible even if the backend
+			 * reports a later error.  The plain backend contract
+			 * has not published a changed EOF, so abort only the
+			 * tentative resize state.
+			 */
 			if (resize.active) {
 				i->i_size = resize.old_size;
 				vm_object_resize_abort(&resize);
@@ -1431,27 +2264,14 @@ inode_truncate_transaction_impl(struct inode *i,
 	return error;
 }
 
-int
-inode_truncate_transaction(struct inode *i,
-	const struct inode_truncate_request *request,
-	struct inode_truncate_result *result)
-{
-	struct backing_mutation_guard guard;
-	int error;
-
-	if (i == NULL || request == NULL)
-		return inode_truncate_transaction_impl(i, request, result);
-	error = backing_mutation_begin_inode(i, &guard);
-	if (error != 0)
-		return error;
-	error = inode_truncate_transaction_impl(i, request, result);
-	backing_mutation_end(&guard);
-	return error;
-}
-
+/* Builds a truncate request and runs it as a transaction. */
 static int
-inode_truncate_limited_impl(struct inode *i, off_t size,
-	uint64_t growth_limit, const struct ucred *cred, int content_change,
+inode_truncate_limited_impl(
+	struct inode *i,
+	off_t size,
+	uint64_t growth_limit,
+	const struct ucred *cred,
+	int content_change,
 	int *limit_exceeded)
 {
 	const struct inode_truncate_request request = {
@@ -1469,114 +2289,45 @@ inode_truncate_limited_impl(struct inode *i, off_t size,
 	return error;
 }
 
-int
-inode_truncate_limited_cred(struct inode *i, off_t size,
-	uint64_t growth_limit, const struct ucred *cred, int *limit_exceeded)
-{
-	return inode_truncate_limited_impl(i, size, growth_limit, cred, 0,
-	    limit_exceeded);
-}
-
-int
-inode_truncate_limited(struct inode *i, off_t size, uint64_t growth_limit,
-	int *limit_exceeded)
-{
-	return inode_truncate_limited_impl(i, size, growth_limit, NULL, 0,
-	    limit_exceeded);
-}
-
-int
-inode_truncate(struct inode *i, off_t size)
-{
-	return inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 0, NULL);
-}
-
-int
-inode_truncate_content_change(struct inode *i, off_t size)
-{
-	return inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 1, NULL);
-}
-
+/* Tests whether an extended attribute name is non-empty and bounded. */
 static int
-xattr_name_valid(const char *name)
+xattr_name_valid(
+	const char *name)
 {
 	size_t length;
+
 	if (name == NULL)
 		return 0;
-	for (length = 0; length <= INODE_XATTR_NAME_MAX && name[length] != '\0';
-	    length++) ;
-	return length != 0 && length <= INODE_XATTR_NAME_MAX;
+	length = 0;
+	while (length <= INODE_XATTR_NAME_MAX && name[length] != '\0')
+		length++;
+	if (length == 0)
+		return 0;
+	if (length > INODE_XATTR_NAME_MAX)
+		return 0;
+	return 1;
 }
 
-ssize_t
-inode_getxattr(struct inode *inode, const char *name, void *value, size_t size)
-{
-	if (inode == NULL || !xattr_name_valid(name) ||
-	    (value == NULL && size != 0) || size > INODE_XATTR_SIZE_MAX)
-		return -EINVAL;
-	return inode->i_op != NULL && inode->i_op->getxattr != NULL ?
-		inode->i_op->getxattr(inode, name, value, size) : -EOPNOTSUPP;
-}
-
-int
-inode_setxattr(struct inode *inode, const char *name, const void *value,
-	size_t size, unsigned flags)
-{
-	int error;
-	if (inode == NULL || !xattr_name_valid(name) ||
-	    (value == NULL && size != 0) || size > INODE_XATTR_SIZE_MAX ||
-	    (flags & ~(INODE_XATTR_CREATE | INODE_XATTR_REPLACE)) != 0 ||
-	    flags == (INODE_XATTR_CREATE | INODE_XATTR_REPLACE))
-		return EINVAL;
-	if (readonly(inode))
-		return EROFS;
-	error = inode->i_op != NULL && inode->i_op->setxattr != NULL ?
-		inode->i_op->setxattr(inode, name, value, size, flags) :
-		EOPNOTSUPP;
-	if (error == 0)
-		inode_touch(inode, INODE_ATTR_CTIME);
-	return error;
-}
-
-ssize_t
-inode_listxattr(struct inode *inode, char *list, size_t size)
-{
-	if (inode == NULL || (list == NULL && size != 0) ||
-	    size > INODE_XATTR_SIZE_MAX)
-		return -EINVAL;
-	return inode->i_op != NULL && inode->i_op->listxattr != NULL ?
-		inode->i_op->listxattr(inode, list, size) : -EOPNOTSUPP;
-}
-
-int
-inode_removexattr(struct inode *inode, const char *name)
+/*
+ * Join before checking attachments and retain the sleeping gate through the
+ * backend commit. The outer syscall/copy-up owner keeps its own acquisition. */
+static int
+inode_namespace_enter(
+	struct inode *directory,
+	const struct componentname *name,
+	int creation,
+	int *entered)
 {
 	int error;
-	if (inode == NULL || !xattr_name_valid(name))
+
+	*entered = 0;
+	if (directory == NULL || name == NULL)
 		return EINVAL;
-	if (readonly(inode))
+	*entered = mount_vfs_transaction_join(directory->i_mount);
+	if (readonly(directory))
 		return EROFS;
-	error = inode->i_op != NULL && inode->i_op->removexattr != NULL ?
-		inode->i_op->removexattr(inode, name) : EOPNOTSUPP;
-	if (error == 0)
-		inode_touch(inode, INODE_ATTR_CTIME);
-	return error;
-}
-
-int inode_sync(struct inode *i)
-{
-	if (i == NULL) return EINVAL;
-	return i->i_op != NULL && i->i_op->sync != NULL ? i->i_op->sync(i) : 0;
-}
-
-unsigned
-inode_cache_count(void)
-{
-	unsigned i, count = 0;
-	unsigned long irq = spin_lock_irqsave(&inode_cache_lock);
-	for (i = 0; i < INODE_CACHE_MAX; i++)
-		count += inode_cache[i] != NULL &&
-		    inode_cache[i] != INODE_CACHE_RESERVED;
-	spin_unlock_irqrestore(&inode_cache_lock, irq);
-	return count;
+	if ((directory->i_flags & INODE_DEAD) != 0)
+		return ENOENT;
+	error = mount_namespace_check_name(directory, name);
+	return creation && error == EBUSY ? EEXIST : error;
 }

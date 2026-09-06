@@ -1,4 +1,22 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The backing-store claim registry.
+ *
+ * A swap, loop, or formatting owner claims the FAT file or raw disk range backing
+ * it, and every filesystem or raw write reserves the object or range it is
+ * about to mutate.  The registry rejects a mutation that would alias a live
+ * claim, so a backing object cannot change underneath its owner, and it
+ * rejects a claim that would alias a mutation already in flight.
+ */
+
 #include <kern/backing-claim.h>
 
 #include <kern/disk.h>
@@ -54,23 +72,44 @@ struct backing_mutation {
 static struct backing_claim *claims[BACKING_CLAIM_MAX];
 static struct backing_mutation mutations[BACKING_MUTATION_MAX];
 static uint64_t mutation_generation;
-static struct spinlock claim_lock = {
-    {0}, LOCK_RANK_BACKING_CLAIM, "backing claims", 0, 0};
 
-/* Host fixtures and early boot may not provide a current thread. */
+static struct spinlock claim_lock = {
+	{0},
+	LOCK_RANK_BACKING_CLAIM,
+	"backing claims",
+	0,
+	0
+};
+
+/*
+ * Host fixtures and early boot may not provide a current thread.
+ */
 struct thread;
 extern struct thread *thread_current(void) __attribute__((weak));
-extern int fat_file_backing_identity(struct inode *, struct disk **, uint64_t *)
-    __attribute__((weak));
+extern int fat_file_backing_identity(struct inode *, struct disk **, uint64_t *) __attribute__((weak));
 
-/* Before the scheduler publishes a current thread, the kernel executes boot
- * filesystem I/O serially.  Give that execution context a stable identity so
- * nested FAT -> buffer-cache -> direct-I/O mutations can retain ownership.
+/*
+ * Before the scheduler publishes a current thread, the kernel
+ * executes boot filesystem I/O serially.  Give that execution context
+ * a stable identity so nested FAT -> buffer-cache -> direct-I/O
+ * mutations can retain ownership.
  */
 static const unsigned char early_boot_execution_token;
 
+/*
+ * Forward declarations.
+ */
+static const void *current_execution(void);
+static int canonical_range(struct disk *disk, uint64_t block, uint64_t count, struct backing_range *result);
 static int inode_key(struct inode *inode, struct backing_object_key *key);
+static int range_overlap(const struct backing_range *left, const struct backing_range *right);
+static int range_contains(const struct backing_range *outer, const struct backing_range *inner);
+static int range_equal(const struct backing_range *left, const struct backing_range *right);
+static int claim_contains_range(const struct backing_claim *claim, const struct backing_range *range);
 static int key_equal(const struct backing_object_key *left, const struct backing_object_key *right);
+static struct backing_range key_volume(const struct backing_object_key *key);
+static int claim_insert(struct backing_claim *claim);
+static int mutation_reserve(const struct backing_object_key *key, const struct backing_range *range, const struct backing_range *filesystem_volume, const struct backing_claim *owner, int filesystem, struct backing_mutation_guard *guard);
 
 /*
  * Compares an inode against a retained claim's canonical backing identity.
@@ -109,321 +148,308 @@ backing_claim_inode_matches(
 	return 0;
 }
 
-static const void *
-current_execution(void)
-{
-	struct thread *thread = thread_current != NULL ? thread_current() : NULL;
-
-	return thread != NULL ? (const void *)thread
-			      : (const void *)&early_boot_execution_token;
-}
-
-static int
-canonical_range(struct disk *disk, uint64_t block, uint64_t count,
-		struct backing_range *result)
-{
-	struct disk *first_leaf, *last_leaf;
-	uint64_t first, last;
-	int error;
-
-	if (disk == NULL || result == NULL || count == 0 ||
-	    block >= disk->d_block_count || count > disk->d_block_count - block)
-		return EINVAL;
-	error = disk_resolve_range(disk, block, 1, &first_leaf, &first);
-	if (error != 0)
-		return error;
-	error =
-	    disk_resolve_range(disk, block + count - 1U, 1, &last_leaf, &last);
-	if (error != 0)
-		return error;
-	if (first_leaf != last_leaf || last < first || last == UINT64_MAX)
-		return EIO;
-	result->leaf = first_leaf;
-	result->first = first;
-	result->last = last + 1U;
-	return 0;
-}
-
-static int
-inode_key(struct inode *inode, struct backing_object_key *key)
-{
-	struct backing_range volume;
-	struct disk *disk;
-	uint64_t object;
-	int error;
-
-	if (inode == NULL || key == NULL || inode->i_type != INODE_REG)
-		return EINVAL;
-	if (inode->i_mount == NULL || inode->i_mount->m_disk == NULL)
-		return EOPNOTSUPP;
-	if (inode->i_mount->m_type != &fat_filesystem_type)
-		return EOPNOTSUPP;
-	if (fat_file_backing_identity != NULL)
-		error = fat_file_backing_identity(inode, &disk, &object);
-	else {
-		/* Compatibility for focused host fixtures that predate the FAT
-		 * identity helper. Production kernels always provide the
-		 * helper.
-		 */
-		disk = inode->i_mount->m_disk;
-		object = inode->i_ino;
-		error = 0;
-	}
-	if (error != 0)
-		return error;
-	error = canonical_range(disk, 0, disk->d_block_count, &volume);
-	if (error != 0)
-		return error;
-	key->leaf = volume.leaf;
-	key->volume_first = volume.first;
-	key->volume_last = volume.last;
-	key->object = object;
-	return 0;
-}
-
-static int
-range_overlap(const struct backing_range *left,
-	      const struct backing_range *right)
-{
-	return left->leaf == right->leaf && left->first < right->last &&
-	       right->first < left->last;
-}
-
-static int
-range_contains(const struct backing_range *outer,
-	       const struct backing_range *inner)
-{
-	return outer->leaf == inner->leaf && outer->first <= inner->first &&
-	       inner->last <= outer->last;
-}
-
-static int
-range_equal(const struct backing_range *left,
-	    const struct backing_range *right)
-{
-	return left->leaf == right->leaf && left->first == right->first &&
-	       left->last == right->last;
-}
-
-static int
-claim_contains_range(const struct backing_claim *claim,
-		     const struct backing_range *range)
-{
-	unsigned i;
-
-	for (i = 0; i < claim->range_count; i++)
-		if (range_contains(&claim->ranges[i], range))
-			return 1;
-	return 0;
-}
-
-static int
-key_equal(const struct backing_object_key *left,
-	  const struct backing_object_key *right)
-{
-	return left->leaf == right->leaf &&
-	       left->volume_first == right->volume_first &&
-	       left->volume_last == right->volume_last &&
-	       left->object == right->object;
-}
-
-static struct backing_range
-key_volume(const struct backing_object_key *key)
-{
-	struct backing_range range;
-	range.leaf = key->leaf;
-	range.first = key->volume_first;
-	range.last = key->volume_last;
-	return range;
-}
-
-static int
-claim_insert(struct backing_claim *claim)
-{
-	unsigned index;
-	for (index = 0; index < BACKING_CLAIM_MAX; index++)
-		if (claims[index] == NULL) {
-			claims[index] = claim;
-			claim->registered = 1;
-			return 0;
-		}
-	return ENOSPC;
-}
-
+/*
+ * Registers a preparing claim on the FAT file behind an inode.
+ *
+ * The claim is registered before its extents are known, so no mutation of
+ * the file, and none of the volume while the claim is still preparing, can
+ * slip in while the owner resolves the file layout.  backing_claim_finalize()
+ * publishes the extents and backing_claim_release() withdraws the claim.
+ */
 int
-backing_claim_prepare_inode(struct inode *inode, enum backing_claim_owner owner,
-			    struct backing_claim **result)
+backing_claim_prepare_inode(
+	struct inode *inode,
+	enum backing_claim_owner owner,
+	struct backing_claim **result)
 {
 	struct backing_claim *claim;
+	struct backing_claim *existing;
 	struct backing_range volume;
-	unsigned i, j;
+	struct backing_range br;
+	unsigned i;
+	unsigned j;
 	unsigned long irq;
 	int error;
 
+	/* Rejects a missing result pointer or an unknown owner kind. */
 	if (result == NULL ||
 	    (owner != BACKING_CLAIM_SWAP && owner != BACKING_CLAIM_LOOP &&
 	     owner != BACKING_CLAIM_FORMAT))
 		return EINVAL;
+
 	*result = NULL;
+
+	/* Allocates the claim record. */
 	claim = kern_calloc(1, sizeof(*claim));
 	if (claim == NULL)
 		return ENOMEM;
+
+	/* Resolves the canonical identity of the backing file. */
 	error = inode_key(inode, &claim->key);
 	if (error != 0) {
 		kern_free(claim);
 		return error;
 	}
+
+	/* Describes a keyed claim whose extents are still pending. */
 	claim->owner = owner;
 	claim->key_valid = 1;
 	claim->preparing = 1;
 	volume = key_volume(&claim->key);
+
 	irq = spin_lock_irqsave(&claim_lock);
+
+	/* Rejects every registered claim that aliases the same file. */
 	for (i = 0; i < BACKING_CLAIM_MAX; i++) {
-		struct backing_claim *existing = claims[i];
+		existing = claims[i];
 		if (existing == NULL)
 			continue;
-		if ((existing->key_valid &&
-		     key_equal(&claim->key, &existing->key)) ||
-		    (existing->preparing && existing->key_valid &&
-		     range_overlap(&volume, &(struct backing_range){
-						existing->key.leaf,
-						existing->key.volume_first,
-						existing->key.volume_last}))) {
+
+		br.leaf = existing->key.leaf;
+		br.first = existing->key.volume_first;
+		br.last = existing->key.volume_last;
+
+		/* An identical keyed claim always conflicts. */
+		if (existing->key_valid &&
+		    key_equal(&claim->key, &existing->key)) {
 			error = EBUSY;
 			goto out_locked;
 		}
-		for (j = 0; j < existing->range_count; j++)
-			if (!existing->key_valid &&
-			    range_overlap(&volume, &existing->ranges[j])) {
-				error = EBUSY;
-				goto out_locked;
+
+		/* A keyed claim that is still preparing owns its whole volume. */
+		if (existing->preparing &&
+		    existing->key_valid &&
+		    range_overlap(&volume, &br)) {
+			error = EBUSY;
+			goto out_locked;
+		}
+
+		/* A raw claim conflicts through any extent inside the volume. */
+		if (!existing->key_valid) {
+			for (j = 0; j < existing->range_count; j++) {
+				if (range_overlap(&volume, &existing->ranges[j])) {
+					error = EBUSY;
+					goto out_locked;
+				}
 			}
+		}
 	}
+
+	/* Rejects every reserved mutation that aliases the file or volume. */
 	for (i = 0; i < BACKING_MUTATION_MAX; i++) {
 		if (!mutations[i].used)
 			continue;
-		if ((mutations[i].key_valid &&
-		     key_equal(&claim->key, &mutations[i].key)) ||
-		    (!mutations[i].key_valid && mutations[i].range_valid &&
-		     range_overlap(&volume, &mutations[i].range))) {
+
+		/* A keyed mutation of the same file conflicts. */
+		if (mutations[i].key_valid &&
+		    key_equal(&claim->key, &mutations[i].key)) {
+			error = EBUSY;
+			goto out_locked;
+		}
+
+		/* A raw mutation inside the volume conflicts. */
+		if (!mutations[i].key_valid &&
+		    mutations[i].range_valid &&
+		    range_overlap(&volume, &mutations[i].range)) {
 			error = EBUSY;
 			goto out_locked;
 		}
 	}
+
+	/* Publishes the preparing claim. */
 	error = claim_insert(claim);
+
 out_locked:
 	spin_unlock_irqrestore(&claim_lock, irq);
+
+	/* Releases a claim that could not be registered. */
 	if (error != 0) {
 		kern_free(claim);
 		return error;
 	}
+
 	*result = claim;
+
+	/* Reports the registered preparing claim. */
 	return 0;
 }
 
+/*
+ * Publishes the extents of a preparing claim.
+ *
+ * Every extent must lie inside the claimed file's volume, must not touch an
+ * extent of another claim, and must not touch a reserved raw mutation.
+ * Success ends the preparing state; failure leaves the claim preparing so
+ * that the owner can still release it.
+ */
 int
-backing_claim_finalize(struct backing_claim *claim,
-		       const struct backing_claim_extent *extents,
-		       unsigned count)
+backing_claim_finalize(
+	struct backing_claim *claim,
+	const struct backing_claim_extent *extents,
+	unsigned count)
 {
-	struct backing_range *ranges = NULL;
-	unsigned i, j, k;
+	struct backing_range *ranges;
+	struct backing_claim *existing;
+	unsigned i;
+	unsigned j;
+	unsigned k;
 	unsigned long irq;
-	int error = 0;
+	int error;
 
-	if (claim == NULL || !claim->registered || !claim->preparing ||
+	ranges = NULL;
+	error = 0;
+
+	/* Rejects an unregistered, already final, or inconsistent request. */
+	if (claim == NULL ||
+	    !claim->registered ||
+	    !claim->preparing ||
 	    (count != 0 && extents == NULL))
 		return EINVAL;
+
+	/* Canonicalizes every extent and confines it to the claimed volume. */
 	if (count != 0) {
 		ranges = kern_calloc(count, sizeof(*ranges));
 		if (ranges == NULL)
 			return ENOMEM;
+
 		for (i = 0; i < count; i++) {
-			error =
-			    canonical_range(extents[i].disk, extents[i].block,
-					    extents[i].block_count, &ranges[i]);
-			if (error != 0 || ranges[i].leaf != claim->key.leaf ||
-			    ranges[i].first < claim->key.volume_first ||
-			    ranges[i].last > claim->key.volume_last) {
-				if (error == 0)
-					error = EXDEV;
+			error = canonical_range(
+				extents[i].disk,
+				extents[i].block,
+				extents[i].block_count,
+				&ranges[i]);
+			if (error != 0) {
 				kern_free(ranges);
 				return error;
 			}
+
+			/* An extent outside the claimed volume is a foreign device. */
+			if (ranges[i].leaf != claim->key.leaf ||
+			    ranges[i].first < claim->key.volume_first ||
+			    ranges[i].last > claim->key.volume_last) {
+				kern_free(ranges);
+				return EXDEV;
+			}
 		}
 	}
+
 	irq = spin_lock_irqsave(&claim_lock);
+
+	/* Rejects an extent that overlaps another claim's published extent. */
 	for (i = 0; i < BACKING_CLAIM_MAX; i++) {
-		struct backing_claim *existing = claims[i];
+		existing = claims[i];
 		if (existing == NULL || existing == claim)
 			continue;
-		for (j = 0; j < count; j++)
-			for (k = 0; k < existing->range_count; k++)
-				if (range_overlap(&ranges[j],
-						  &existing->ranges[k])) {
+
+		for (j = 0; j < count; j++) {
+			for (k = 0; k < existing->range_count; k++) {
+				if (range_overlap(&ranges[j], &existing->ranges[k])) {
 					error = EBUSY;
 					goto out_locked;
 				}
+			}
+		}
 	}
+
+	/* Rejects an extent that overlaps a reserved raw mutation. */
 	for (i = 0; i < BACKING_MUTATION_MAX; i++) {
-		if (!mutations[i].used || mutations[i].key_valid ||
+		if (!mutations[i].used ||
+		    mutations[i].key_valid ||
 		    !mutations[i].range_valid)
 			continue;
-		for (j = 0; j < count; j++)
+
+		for (j = 0; j < count; j++) {
 			if (range_overlap(&ranges[j], &mutations[i].range)) {
 				error = EBUSY;
 				goto out_locked;
 			}
+		}
 	}
+
+	/* Publishes the extents and ends the preparing state. */
 	claim->ranges = ranges;
 	claim->range_count = count;
 	claim->preparing = 0;
 	ranges = NULL;
+
 out_locked:
 	spin_unlock_irqrestore(&claim_lock, irq);
+
+	/* Frees the extents only when they were not published. */
 	kern_free(ranges);
+
+	/* Reports the finalization result. */
 	return error;
 }
 
+/*
+ * Registers a final claim on one raw disk range.
+ *
+ * A raw claim needs no finalization because its single extent is canonical
+ * from the start.  The range must not sit on a writable mount, alias a keyed
+ * claim's volume, overlap another claim's extent, or overlap a reserved
+ * mutation.
+ */
 int
-backing_claim_prepare_disk(struct disk *disk, uint64_t block, uint64_t count,
-			   enum backing_claim_owner owner,
-			   struct backing_claim **result)
+backing_claim_prepare_disk(
+	struct disk *disk,
+	uint64_t block,
+	uint64_t count,
+	enum backing_claim_owner owner,
+	struct backing_claim **result)
 {
 	struct backing_claim *claim;
-	unsigned i, j;
+	struct backing_claim *existing;
+	struct backing_range volume;
+	unsigned i;
+	unsigned j;
 	unsigned long irq;
 	int error;
 
+	/* Rejects a missing result pointer or an unknown owner kind. */
 	if (result == NULL ||
 	    (owner != BACKING_CLAIM_SWAP && owner != BACKING_CLAIM_LOOP))
 		return EINVAL;
+
 	*result = NULL;
+
+	/* Refuses a disk that carries a writable mount. */
 	error = mount_disk_writable_busy(disk);
 	if (error != 0)
 		return error;
+
+	/* Allocates the claim record. */
 	claim = kern_calloc(1, sizeof(*claim));
 	if (claim == NULL)
 		return ENOMEM;
+
+	/* Allocates the single extent. */
 	claim->ranges = kern_calloc(1, sizeof(*claim->ranges));
 	if (claim->ranges == NULL) {
 		kern_free(claim);
 		return ENOMEM;
 	}
+
+	/* Canonicalizes the requested range. */
 	error = canonical_range(disk, block, count, claim->ranges);
 	if (error != 0) {
 		kern_free(claim->ranges);
 		kern_free(claim);
 		return error;
 	}
+
 	claim->owner = owner;
 	claim->range_count = 1;
+
 	irq = spin_lock_irqsave(&claim_lock);
+
+	/* Rejects every registered claim whose volume or extents overlap. */
 	for (i = 0; i < BACKING_CLAIM_MAX; i++) {
-		struct backing_claim *existing = claims[i];
-		struct backing_range volume;
+		existing = claims[i];
 		if (existing == NULL)
 			continue;
+
+		/* A keyed claim owns its whole volume. */
 		if (existing->key_valid) {
 			volume = key_volume(&existing->key);
 			if (range_overlap(&claim->ranges[0], &volume)) {
@@ -431,100 +457,673 @@ backing_claim_prepare_disk(struct disk *disk, uint64_t block, uint64_t count,
 				goto out_locked;
 			}
 		}
-		for (j = 0; j < existing->range_count; j++)
-			if (range_overlap(&claim->ranges[0],
-					  &existing->ranges[j])) {
+
+		/* Every published extent excludes the range. */
+		for (j = 0; j < existing->range_count; j++) {
+			if (range_overlap(&claim->ranges[0], &existing->ranges[j])) {
 				error = EBUSY;
 				goto out_locked;
 			}
+		}
 	}
-	for (i = 0; i < BACKING_MUTATION_MAX; i++)
-		if (mutations[i].used && mutations[i].range_valid &&
+
+	/* Rejects every reserved mutation that overlaps the range. */
+	for (i = 0; i < BACKING_MUTATION_MAX; i++) {
+		if (mutations[i].used &&
+		    mutations[i].range_valid &&
 		    range_overlap(&claim->ranges[0], &mutations[i].range)) {
 			error = EBUSY;
 			goto out_locked;
 		}
+	}
+
+	/* Publishes the claim. */
 	error = claim_insert(claim);
+
 out_locked:
 	spin_unlock_irqrestore(&claim_lock, irq);
+
+	/* Releases a claim that could not be registered. */
 	if (error != 0) {
 		kern_free(claim->ranges);
 		kern_free(claim);
 		return error;
 	}
-	/* Retain the LIVE-mount rescan as a defensive validation.  A writable
-	 * mount that is still PREPARING holds a whole-volume mutation reservation,
-	 * so claim insertion above either observes that reservation or precedes it.
+
+	/*
+	 * Retain the LIVE-mount rescan as a defensive validation.  A
+	 * writable mount that is still PREPARING holds a whole-volume
+	 * mutation reservation, so claim insertion above either
+	 * observes that reservation or precedes it.
 	 */
 	error = mount_disk_writable_busy(disk);
 	if (error != 0) {
 		backing_claim_release(claim);
 		return error;
 	}
+
 	*result = claim;
+
+	/* Reports the registered claim. */
 	return 0;
 }
 
+/*
+ * Withdraws a claim and frees its record.
+ *
+ * A NULL claim is ignored so that error paths can release unconditionally.
+ */
 void
-backing_claim_release(struct backing_claim *claim)
+backing_claim_release(
+	struct backing_claim *claim)
 {
 	unsigned i;
 	unsigned long irq;
+
+	/* Ignores a missing claim. */
 	if (claim == NULL)
 		return;
+
+	/* Unregisters the claim from the registry slot that holds it. */
 	irq = spin_lock_irqsave(&claim_lock);
-	for (i = 0; i < BACKING_CLAIM_MAX; i++)
+	for (i = 0; i < BACKING_CLAIM_MAX; i++) {
 		if (claims[i] == claim) {
 			claims[i] = NULL;
 			claim->registered = 0;
 			break;
 		}
+	}
 	spin_unlock_irqrestore(&claim_lock, irq);
+
+	/* Frees the extents and the record. */
 	kern_free(claim->ranges);
 	kern_free(claim);
 }
 
-static int
-mutation_reserve(const struct backing_object_key *key,
-		 const struct backing_range *range,
-		 const struct backing_range *filesystem_volume,
-		 const struct backing_claim *owner,
-		 int filesystem,
-		 struct backing_mutation_guard *guard)
+/*
+ * Reserves an unowned mutation of the FAT file behind an inode.
+ */
+int
+backing_mutation_begin_inode(
+	struct inode *inode,
+	struct backing_mutation_guard *guard)
 {
-	const struct backing_claim *effective_owner = owner;
-	const struct backing_mutation *inherited = NULL;
-	const void *execution = current_execution();
-	struct backing_range effective_volume;
-	unsigned free_slot = BACKING_MUTATION_MAX, i, j;
-	unsigned long irq;
-	int effective_filesystem = filesystem;
-	int effective_volume_valid = filesystem_volume != NULL;
-	int owner_registered = 0;
-	int error = 0;
+	int error;
 
+	/* Delegates to the owner-aware form without an owner. */
+	error = backing_mutation_begin_inode_claimed(inode, NULL, guard);
+
+	/* Reports the reservation result. */
+	return error;
+}
+
+/*
+ * Reserves a mutation of the FAT file behind an inode on behalf of an
+ * optional owning claim.
+ *
+ * A file that cannot back a swap object needs no reservation: the guard is
+ * left inactive and the mutation may proceed.
+ */
+int
+backing_mutation_begin_inode_claimed(
+	struct inode *inode,
+	const struct backing_claim *owner,
+	struct backing_mutation_guard *guard)
+{
+	struct backing_object_key key;
+	int error;
+
+	/* Rejects a missing guard. */
+	if (guard == NULL)
+		return EINVAL;
+
+	/* Resolves the canonical identity of the backing file. */
+	error = inode_key(inode, &key);
+
+	/*
+	 * Swap files are FAT-only.  Other files retain their existing
+	 * local INODE_LOOPFILE exclusion and cannot alias a FAT swap
+	 * claim.
+	 */
+	if (error == EOPNOTSUPP || error == EINVAL) {
+		memset(guard, 0, sizeof(*guard));
+		return 0;
+	}
+
+	/* Propagates any other identity failure. */
+	if (error != 0)
+		return error;
+
+	/* Reserves the keyed mutation. */
+	error = mutation_reserve(&key, NULL, NULL, owner, 0, guard);
+
+	/* Reports the reservation result. */
+	return error;
+}
+
+/*
+ * Reserves a raw mutation of one disk range on behalf of an optional
+ * owning claim.
+ */
+int
+backing_mutation_begin_disk(
+	struct disk *disk,
+	uint64_t block,
+	uint64_t count,
+	const struct backing_claim *owner,
+	struct backing_mutation_guard *guard)
+{
+	struct backing_range range;
+	int error;
+
+	/* Canonicalizes the range. */
+	error = canonical_range(disk, block, count, &range);
+	if (error != 0)
+		return error;
+
+	/* Reserves the raw mutation. */
+	error = mutation_reserve(NULL, &range, NULL, owner, 0, guard);
+
+	/* Reports the reservation result. */
+	return error;
+}
+
+/*
+ * Reserves a filesystem-initiated mutation of one disk range.
+ *
+ * The whole volume accompanies the range so that a nested raw write on the
+ * same execution can inherit the filesystem's ownership.
+ */
+int
+backing_mutation_begin_disk_filesystem(
+	struct disk *disk,
+	uint64_t block,
+	uint64_t count,
+	struct backing_mutation_guard *guard)
+{
+	struct backing_range range;
+	struct backing_range volume;
+	int error;
+
+	/* Canonicalizes the range. */
+	error = canonical_range(disk, block, count, &range);
+	if (error != 0)
+		return error;
+
+	/* Canonicalizes the whole volume that contains it. */
+	error = canonical_range(disk, 0, disk->d_block_count, &volume);
+	if (error != 0)
+		return error;
+
+	/* Reserves the filesystem mutation. */
+	error = mutation_reserve(NULL, &range, &volume, NULL, 1, guard);
+
+	/* Reports the reservation result. */
+	return error;
+}
+
+/*
+ * Releases a mutation reservation.
+ *
+ * The slot is cleared only while it still carries this guard's generation,
+ * so a stale guard can never release a later reservation.
+ */
+void
+backing_mutation_end(
+	struct backing_mutation_guard *guard)
+{
+	unsigned long irq;
+
+	/* Ignores a missing or inactive guard. */
+	if (guard == NULL ||
+	    !guard->active ||
+	    guard->slot >= BACKING_MUTATION_MAX)
+		return;
+
+	/* Clears the slot that still belongs to this guard. */
+	irq = spin_lock_irqsave(&claim_lock);
+	if (mutations[guard->slot].used &&
+	    mutations[guard->slot].generation == guard->generation) {
+		memset(&mutations[guard->slot], 0, sizeof(mutations[guard->slot]));
+	}
+	spin_unlock_irqrestore(&claim_lock, irq);
+
+	/* Deactivates the guard. */
+	memset(guard, 0, sizeof(*guard));
+}
+
+/*
+ * Checks whether a raw range could be mutated on behalf of an owner.
+ *
+ * The check reserves and immediately releases the mutation, so it reports
+ * the verdict a real mutation would receive at this moment.
+ */
+int
+backing_claim_check_disk(
+	struct disk *disk,
+	uint64_t block,
+	uint64_t count,
+	const struct backing_claim *owner)
+{
+	struct backing_mutation_guard guard;
+	int error;
+
+	/* Probes the reservation and releases it again. */
+	error = backing_mutation_begin_disk(disk, block, count, owner, &guard);
+	if (error == 0)
+		backing_mutation_end(&guard);
+
+	/* Reports the probe result. */
+	return error;
+}
+
+/*
+ * Checks whether a disk may be mounted with the requested flags.
+ *
+ * A read-only mount never conflicts.  A writable mount conflicts with any
+ * keyed claim on the volume and with any claim extent inside it.
+ */
+int
+backing_claim_check_mount(
+	struct disk *disk,
+	unsigned flags)
+{
+	struct backing_claim *claim;
+	struct backing_range range;
+	unsigned i;
+	unsigned j;
+	unsigned long irq;
+	int error;
+
+	/* Permits a read-only mount unconditionally. */
+	if ((flags & MOUNT_READ_ONLY) != 0)
+		return 0;
+
+	/* Canonicalizes the whole volume. */
+	error = canonical_range(disk, 0, disk->d_block_count, &range);
+	if (error != 0)
+		return error;
+
+	/* Rejects the mount while any claim lives on the volume. */
+	irq = spin_lock_irqsave(&claim_lock);
+	for (i = 0; i < BACKING_CLAIM_MAX; i++) {
+		claim = claims[i];
+		if (claim == NULL)
+			continue;
+
+		/* A keyed claim on the same leaf conflicts through its volume. */
+		if (claim->key_valid &&
+		    claim->key.leaf == range.leaf &&
+		    claim->key.volume_first < range.last &&
+		    range.first < claim->key.volume_last) {
+			error = EBUSY;
+			goto out;
+		}
+
+		/* Any published extent inside the volume conflicts. */
+		for (j = 0; j < claim->range_count; j++) {
+			if (range_overlap(&range, &claim->ranges[j])) {
+				error = EBUSY;
+				goto out;
+			}
+		}
+	}
+
+	error = 0;
+
+out:
+	spin_unlock_irqrestore(&claim_lock, irq);
+
+	/* Reports the mount verdict. */
+	return error;
+}
+
+/*
+ * Checks whether a disk may be torn down.
+ *
+ * Teardown has exactly the conflicts of a writable mount.
+ */
+int
+backing_claim_check_teardown(
+	struct disk *disk)
+{
+	int error;
+
+	/* Reuses the writable-mount verdict. */
+	error = backing_claim_check_mount(disk, 0);
+
+	/* Reports the teardown verdict. */
+	return error;
+}
+
+/* Identifies the executing context that owns nested mutations. */
+static const void *
+current_execution(
+	void)
+{
+	struct thread *thread;
+
+	/* Reads the current thread only while the scheduler provides one. */
+	thread = NULL;
+	if (thread_current != NULL)
+		thread = thread_current();
+
+	/* Uses the thread as the execution identity. */
+	if (thread != NULL)
+		return (const void *)thread;
+
+	/* Falls back to the serial early-boot identity. */
+	return (const void *)&early_boot_execution_token;
+}
+
+/* Resolves a disk range to one half-open range on a single leaf device. */
+static int
+canonical_range(
+	struct disk *disk,
+	uint64_t block,
+	uint64_t count,
+	struct backing_range *result)
+{
+	struct disk *first_leaf;
+	struct disk *last_leaf;
+	uint64_t first;
+	uint64_t last;
+	int error;
+
+	/* Rejects an empty range or one that leaves the disk. */
+	if (disk == NULL ||
+	    result == NULL ||
+	    count == 0 ||
+	    block >= disk->d_block_count ||
+	    count > disk->d_block_count - block)
+		return EINVAL;
+
+	/* Resolves the first block. */
+	error = disk_resolve_range(disk, block, 1, &first_leaf, &first);
+	if (error != 0)
+		return error;
+
+	/* Resolves the last block. */
+	error = disk_resolve_range(disk, block + count - 1U, 1, &last_leaf, &last);
+	if (error != 0)
+		return error;
+
+	/* Rejects a range that spans leaves or cannot be represented. */
+	if (first_leaf != last_leaf || last < first || last == UINT64_MAX)
+		return EIO;
+
+	/* Publishes the half-open leaf range. */
+	result->leaf = first_leaf;
+	result->first = first;
+	result->last = last + 1U;
+
+	/* Reports the canonical range. */
+	return 0;
+}
+
+/* Derives the backing object key of a FAT regular file. */
+static int
+inode_key(
+	struct inode *inode,
+	struct backing_object_key *key)
+{
+	struct backing_range volume;
+	struct disk *disk;
+	uint64_t object;
+	int error;
+
+	/* Rejects anything but a regular file. */
+	if (inode == NULL || key == NULL || inode->i_type != INODE_REG)
+		return EINVAL;
+
+	/* Rejects a file without a disk-backed mount. */
+	if (inode->i_mount == NULL || inode->i_mount->m_disk == NULL)
+		return EOPNOTSUPP;
+
+	/* Rejects a file outside FAT. */
+	if (inode->i_mount->m_type != &fat_filesystem_type)
+		return EOPNOTSUPP;
+
+	/* Resolves the file identity through the FAT helper when present. */
+	if (fat_file_backing_identity != NULL) {
+		error = fat_file_backing_identity(inode, &disk, &object);
+	} else {
+		/*
+		 * Compatibility for focused host fixtures that predate the FAT
+		 * identity helper.  Production kernels always provide the helper.
+		 */
+		disk = inode->i_mount->m_disk;
+		object = inode->i_ino;
+		error = 0;
+	}
+
+	/* Propagates an identity failure. */
+	if (error != 0)
+		return error;
+
+	/* Canonicalizes the whole volume that holds the file. */
+	error = canonical_range(disk, 0, disk->d_block_count, &volume);
+	if (error != 0)
+		return error;
+
+	/* Publishes the key. */
+	key->leaf = volume.leaf;
+	key->volume_first = volume.first;
+	key->volume_last = volume.last;
+	key->object = object;
+
+	/* Reports the derived key. */
+	return 0;
+}
+
+/* Tests whether two leaf ranges share at least one block. */
+static int
+range_overlap(
+	const struct backing_range *left,
+	const struct backing_range *right)
+{
+	/* Ranges on different leaves never overlap. */
+	if (left->leaf != right->leaf)
+		return 0;
+
+	/* A range that ends before the other begins does not overlap. */
+	if (left->first >= right->last)
+		return 0;
+	if (right->first >= left->last)
+		return 0;
+
+	/* Reports an overlap. */
+	return 1;
+}
+
+/* Tests whether one leaf range lies completely inside another. */
+static int
+range_contains(
+	const struct backing_range *outer,
+	const struct backing_range *inner)
+{
+	/* Ranges on different leaves never contain each other. */
+	if (outer->leaf != inner->leaf)
+		return 0;
+
+	/* Both ends of the inner range must stay inside the outer range. */
+	if (outer->first > inner->first)
+		return 0;
+	if (inner->last > outer->last)
+		return 0;
+
+	/* Reports containment. */
+	return 1;
+}
+
+/* Tests whether two leaf ranges are identical. */
+static int
+range_equal(
+	const struct backing_range *left,
+	const struct backing_range *right)
+{
+	/* Every field must match. */
+	if (left->leaf != right->leaf)
+		return 0;
+	if (left->first != right->first)
+		return 0;
+	if (left->last != right->last)
+		return 0;
+
+	/* Reports equality. */
+	return 1;
+}
+
+/* Tests whether one of a claim's published extents contains a range. */
+static int
+claim_contains_range(
+	const struct backing_claim *claim,
+	const struct backing_range *range)
+{
+	unsigned i;
+
+	/* Searches the published extents for one that contains the range. */
+	for (i = 0; i < claim->range_count; i++) {
+		if (range_contains(&claim->ranges[i], range))
+			return 1;
+	}
+
+	/* Reports that no extent contains the range. */
+	return 0;
+}
+
+/* Tests whether two backing object keys name the same object. */
+static int
+key_equal(
+	const struct backing_object_key *left,
+	const struct backing_object_key *right)
+{
+	/* Every field must match. */
+	if (left->leaf != right->leaf)
+		return 0;
+	if (left->volume_first != right->volume_first)
+		return 0;
+	if (left->volume_last != right->volume_last)
+		return 0;
+	if (left->object != right->object)
+		return 0;
+
+	/* Reports equality. */
+	return 1;
+}
+
+/* Returns the whole-volume range recorded in a backing object key. */
+static struct backing_range
+key_volume(
+	const struct backing_object_key *key)
+{
+	struct backing_range range;
+
+	/* Copies the volume bounds. */
+	range.leaf = key->leaf;
+	range.first = key->volume_first;
+	range.last = key->volume_last;
+
+	/* Reports the volume range. */
+	return range;
+}
+
+/* Stores a claim in the first free registry slot. */
+static int
+claim_insert(
+	struct backing_claim *claim)
+{
+	unsigned index;
+
+	/* Registers the claim in the first free slot. */
+	for (index = 0; index < BACKING_CLAIM_MAX; index++) {
+		if (claims[index] == NULL) {
+			claims[index] = claim;
+			claim->registered = 1;
+			return 0;
+		}
+	}
+
+	/* Reports a full registry. */
+	return ENOSPC;
+}
+
+/*
+ * Reserves one mutation slot after checking it against every claim and
+ * every reservation already in flight.
+ */
+static int
+mutation_reserve(
+	const struct backing_object_key *key,
+	const struct backing_range *range,
+	const struct backing_range *filesystem_volume,
+	const struct backing_claim *owner,
+	int filesystem,
+	struct backing_mutation_guard *guard)
+{
+	const struct backing_claim *effective_owner;
+	const struct backing_mutation *inherited;
+	const void *execution;
+	struct backing_claim *claim;
+	struct backing_range effective_volume;
+	struct backing_range volume;
+	struct backing_range br;
+	uint64_t selected_generation;
+	unsigned free_slot;
+	unsigned i;
+	unsigned j;
+	unsigned long irq;
+	int effective_filesystem;
+	int effective_volume_valid;
+	int owner_registered;
+	int error;
+
+	/* Starts from the ownership the caller stated. */
+	effective_owner = owner;
+	inherited = NULL;
+	execution = current_execution();
+	free_slot = BACKING_MUTATION_MAX;
+	effective_filesystem = filesystem;
+	effective_volume_valid = filesystem_volume != NULL;
+	owner_registered = 0;
+	error = 0;
 	if (filesystem_volume != NULL)
 		effective_volume = *filesystem_volume;
 
+	/* Rejects a missing guard. */
 	if (guard == NULL)
 		return EINVAL;
+
 	memset(guard, 0, sizeof(*guard));
+
 	irq = spin_lock_irqsave(&claim_lock);
-	/* buf_writeback enters the direct-I/O layer below disk_write_filesystem().
-	 * Its cache-line write can be wider than the initiating sector, so inherit
-	 * the newest overlapping filesystem range from this execution.  A raw
-	 * write cannot borrow an unrelated inode claim merely because it runs on
-	 * the same thread.
+
+	/*
+	 * buf_writeback enters the direct-I/O layer below
+	 * disk_write_filesystem().  Its cache-line write can be wider
+	 * than the initiating sector, so inherit the newest
+	 * overlapping filesystem range from this execution.  A raw
+	 * write cannot borrow an unrelated inode claim merely because
+	 * it runs on the same thread.
 	 */
-	if (range != NULL && !filesystem && owner == NULL)
-		for (i = 0; i < BACKING_MUTATION_MAX; i++)
-			if (mutations[i].used && mutations[i].filesystem &&
-			    mutations[i].range_valid &&
-			    mutations[i].execution == execution &&
-			    range_overlap(&mutations[i].range, range) &&
-			    (inherited == NULL || mutations[i].generation >
-						  inherited->generation))
-				inherited = &mutations[i];
+	if (range != NULL && !filesystem && owner == NULL) {
+		for (i = 0; i < BACKING_MUTATION_MAX; i++) {
+			if (!mutations[i].used ||
+			    !mutations[i].filesystem ||
+			    !mutations[i].range_valid ||
+			    mutations[i].execution != execution)
+				continue;
+			if (!range_overlap(&mutations[i].range, range))
+				continue;
+			if (inherited != NULL &&
+			    mutations[i].generation <= inherited->generation)
+				continue;
+
+			inherited = &mutations[i];
+		}
+	}
+
+	/* Adopts the inherited filesystem ownership and volume. */
 	if (inherited != NULL) {
 		effective_filesystem = 1;
 		effective_owner = inherited->owner;
@@ -533,100 +1132,142 @@ mutation_reserve(const struct backing_object_key *key,
 			effective_volume_valid = 1;
 		}
 	}
-	/* A loop backing write owns the claimed inode before entering FAT.  Carry
-	 * that owner only into an explicitly marked filesystem write on the same
-	 * canonical volume.
-	 */
-	if (effective_filesystem && effective_owner == NULL && range != NULL &&
-	    effective_volume_valid) {
-		uint64_t selected_generation = 0;
 
-		for (i = 0; i < BACKING_MUTATION_MAX; i++)
-			if (mutations[i].used && mutations[i].key_valid &&
-			    mutations[i].execution == execution &&
-			    mutations[i].owner != NULL &&
-			    range_equal(&(struct backing_range){
-				mutations[i].key.leaf,
-				mutations[i].key.volume_first,
-				mutations[i].key.volume_last},
-				&effective_volume) &&
-			    mutations[i].generation > selected_generation) {
-				effective_owner = mutations[i].owner;
-				selected_generation = mutations[i].generation;
-			}
+	/*
+	 * A loop backing write owns the claimed inode before entering
+	 * FAT.  Carry that owner only into an explicitly marked
+	 * filesystem write on the same canonical volume.
+	 */
+	if (effective_filesystem &&
+	    effective_owner == NULL &&
+	    range != NULL &&
+	    effective_volume_valid) {
+		selected_generation = 0;
+
+		/* Selects the newest owned keyed mutation on the same volume. */
+		for (i = 0; i < BACKING_MUTATION_MAX; i++) {
+			if (!mutations[i].used ||
+			    !mutations[i].key_valid ||
+			    mutations[i].execution != execution ||
+			    mutations[i].owner == NULL)
+				continue;
+
+			br.leaf = mutations[i].key.leaf;
+			br.first = mutations[i].key.volume_first;
+			br.last = mutations[i].key.volume_last;
+			if (!range_equal(&br, &effective_volume))
+				continue;
+			if (mutations[i].generation <= selected_generation)
+				continue;
+
+			effective_owner = mutations[i].owner;
+			selected_generation = mutations[i].generation;
+		}
 	}
+
+	/* Validates the owner against its own registered claim. */
 	if (effective_owner != NULL) {
-		for (i = 0; i < BACKING_CLAIM_MAX; i++)
+		/* The owner must still be registered. */
+		for (i = 0; i < BACKING_CLAIM_MAX; i++) {
 			if (claims[i] == effective_owner) {
 				owner_registered = 1;
 				break;
 			}
+		}
 		if (!owner_registered) {
 			error = EINVAL;
 			goto out;
 		}
+
+		/* A keyed mutation must name the owner's own file. */
 		if (key != NULL &&
 		    (!effective_owner->key_valid ||
 		     !key_equal(key, &effective_owner->key))) {
 			error = EBUSY;
 			goto out;
 		}
-		/* A directly supplied owner authorizes only its published extents.
-		 * Filesystem ownership inferred from an inode mutation is intentionally
-		 * broader because FAT must also update allocation metadata.
+
+		/*
+		 * A directly supplied owner authorizes only its
+		 * published extents.  Filesystem ownership inferred
+		 * from an inode mutation is intentionally broader
+		 * because FAT must also update allocation metadata.
 		 */
-		if (range != NULL && owner != NULL &&
+		if (range != NULL &&
+		    owner != NULL &&
 		    !claim_contains_range(effective_owner, range)) {
 			error = EBUSY;
 			goto out;
 		}
-		if (range != NULL && effective_filesystem &&
+
+		/* A filesystem write must stay inside the owner's volume. */
+		br.leaf = effective_owner->key.leaf;
+		br.first = effective_owner->key.volume_first;
+		br.last = effective_owner->key.volume_last;
+		if (range != NULL &&
+		    effective_filesystem &&
 		    effective_owner->key_valid &&
-		    !range_contains(&(struct backing_range){
-			effective_owner->key.leaf,
-			effective_owner->key.volume_first,
-			effective_owner->key.volume_last}, range)) {
+		    !range_contains(&br, range)) {
 			error = EBUSY;
 			goto out;
 		}
 	}
+
+	/* Rejects the mutation when it aliases any other registered claim. */
 	for (i = 0; i < BACKING_CLAIM_MAX; i++) {
-		struct backing_claim *claim = claims[i];
-		struct backing_range volume;
+		claim = claims[i];
 		if (claim == NULL || claim == effective_owner)
 			continue;
-		if (key != NULL && claim->key_valid &&
+
+		/* A keyed mutation of another claim's file conflicts. */
+		if (key != NULL &&
+		    claim->key_valid &&
 		    key_equal(key, &claim->key)) {
 			error = EBUSY;
 			goto out;
 		}
+
+		/* A raw range is checked against the claim's volume and extents. */
 		if (claim->key_valid && range != NULL) {
 			volume = key_volume(&claim->key);
-			/* Truly unowned raw aliases may change FAT allocation metadata,
-			 * not merely the requested data sectors, so reject their complete
-			 * volume.  An explicitly supplied owner was already restricted to
-			 * its own published extents above; let that direct I/O coexist with
-			 * disjoint inode claims while still rejecting another claim's exact
-			 * data extents.  Trusted filesystem writes have the same exact-
-			 * extent exclusion while retaining their metadata-update latitude.
+
+			/*
+			 * Truly unowned raw aliases may change FAT
+			 * allocation metadata, not merely the
+			 * requested data sectors, so reject their
+			 * complete volume.  An explicitly supplied
+			 * owner was already restricted to its own
+			 * published extents above; let that direct
+			 * I/O coexist with disjoint inode claims
+			 * while still rejecting another claim's exact
+			 * data extents.  Trusted filesystem writes
+			 * have the same exact- extent exclusion while
+			 * retaining their metadata-update latitude.
 			 */
-			if (range_overlap(range, &volume) && !effective_filesystem &&
+			if (range_overlap(range, &volume) &&
+			    !effective_filesystem &&
 			    effective_owner == NULL) {
 				error = EBUSY;
 				goto out;
 			}
-			for (j = 0; j < claim->range_count; j++)
+
+			for (j = 0; j < claim->range_count; j++) {
 				if (range_overlap(range, &claim->ranges[j])) {
 					error = EBUSY;
 					goto out;
 				}
-		} else if (range != NULL)
-			for (j = 0; j < claim->range_count; j++)
+			}
+		} else if (range != NULL) {
+			for (j = 0; j < claim->range_count; j++) {
 				if (range_overlap(range, &claim->ranges[j])) {
 					error = EBUSY;
 					goto out;
 				}
-		if (key != NULL && !claim->key_valid)
+			}
+		}
+
+		/* A keyed mutation conflicts with a raw claim inside its volume. */
+		if (key != NULL && !claim->key_valid) {
 			for (j = 0; j < claim->range_count; j++) {
 				volume = key_volume(key);
 				if (range_overlap(&volume, &claim->ranges[j])) {
@@ -634,16 +1275,22 @@ mutation_reserve(const struct backing_object_key *key,
 					goto out;
 				}
 			}
+		}
 	}
-	for (i = 0; i < BACKING_MUTATION_MAX; i++)
+
+	/* Finds a free reservation slot. */
+	for (i = 0; i < BACKING_MUTATION_MAX; i++) {
 		if (!mutations[i].used) {
 			free_slot = i;
 			break;
 		}
+	}
 	if (free_slot == BACKING_MUTATION_MAX) {
 		error = EAGAIN;
 		goto out;
 	}
+
+	/* Records the effective ownership of the reservation. */
 	mutations[free_slot].used = 1;
 	mutations[free_slot].owner = effective_owner;
 	mutations[free_slot].execution = execution;
@@ -652,9 +1299,13 @@ mutation_reserve(const struct backing_object_key *key,
 		mutations[free_slot].filesystem_volume = effective_volume;
 		mutations[free_slot].filesystem_volume_valid = 1;
 	}
+
+	/* Assigns a nonzero generation so a stale guard cannot match. */
 	mutations[free_slot].generation = ++mutation_generation;
 	if (mutations[free_slot].generation == 0)
 		mutations[free_slot].generation = ++mutation_generation;
+
+	/* Records the mutated object or range. */
 	if (key != NULL) {
 		mutations[free_slot].key = *key;
 		mutations[free_slot].key_valid = 1;
@@ -664,130 +1315,15 @@ mutation_reserve(const struct backing_object_key *key,
 		mutations[free_slot].range = *range;
 		mutations[free_slot].range_valid = 1;
 	}
+
+	/* Hands the slot to the guard. */
 	guard->slot = free_slot;
 	guard->generation = mutations[free_slot].generation;
 	guard->active = 1;
+
 out:
 	spin_unlock_irqrestore(&claim_lock, irq);
+
+	/* Reports the reservation result. */
 	return error;
-}
-
-int
-backing_mutation_begin_inode(struct inode *inode,
-			     struct backing_mutation_guard *guard)
-{
-	return backing_mutation_begin_inode_claimed(inode, NULL, guard);
-}
-
-int
-backing_mutation_begin_inode_claimed(struct inode *inode,
-				     const struct backing_claim *owner,
-				     struct backing_mutation_guard *guard)
-{
-	struct backing_object_key key;
-	if (guard == NULL)
-		return EINVAL;
-	int error = inode_key(inode, &key);
-	/* Swap files are FAT-only.  Other files retain their existing local
-	 * INODE_LOOPFILE exclusion and cannot alias a FAT swap claim. */
-	if (error == EOPNOTSUPP || error == EINVAL) {
-		memset(guard, 0, sizeof(*guard));
-		return 0;
-	}
-	return error != 0 ? error :
-	       mutation_reserve(&key, NULL, NULL, owner, 0, guard);
-}
-
-int
-backing_mutation_begin_disk(struct disk *disk, uint64_t block, uint64_t count,
-			    const struct backing_claim *owner,
-			    struct backing_mutation_guard *guard)
-{
-	struct backing_range range;
-	int error = canonical_range(disk, block, count, &range);
-	return error != 0 ? error
-			  : mutation_reserve(NULL, &range, NULL, owner, 0, guard);
-}
-
-int
-backing_mutation_begin_disk_filesystem(struct disk *disk, uint64_t block,
-				       uint64_t count,
-				       struct backing_mutation_guard *guard)
-{
-	struct backing_range range, volume;
-	int error = canonical_range(disk, block, count, &range);
-	if (error == 0)
-		error = canonical_range(disk, 0, disk->d_block_count, &volume);
-	return error != 0
-		   ? error
-		   : mutation_reserve(NULL, &range, &volume, NULL, 1, guard);
-}
-
-void
-backing_mutation_end(struct backing_mutation_guard *guard)
-{
-	unsigned long irq;
-	if (guard == NULL || !guard->active ||
-	    guard->slot >= BACKING_MUTATION_MAX)
-		return;
-	irq = spin_lock_irqsave(&claim_lock);
-	if (mutations[guard->slot].used &&
-	    mutations[guard->slot].generation == guard->generation)
-		memset(&mutations[guard->slot], 0,
-		       sizeof(mutations[guard->slot]));
-	spin_unlock_irqrestore(&claim_lock, irq);
-	memset(guard, 0, sizeof(*guard));
-}
-
-int
-backing_claim_check_disk(struct disk *disk, uint64_t block, uint64_t count,
-			 const struct backing_claim *owner)
-{
-	struct backing_mutation_guard guard;
-	int error =
-	    backing_mutation_begin_disk(disk, block, count, owner, &guard);
-	if (error == 0)
-		backing_mutation_end(&guard);
-	return error;
-}
-
-int
-backing_claim_check_mount(struct disk *disk, unsigned flags)
-{
-	struct backing_range range;
-	unsigned i, j;
-	unsigned long irq;
-	int error;
-	if ((flags & MOUNT_READ_ONLY) != 0)
-		return 0;
-	error = canonical_range(disk, 0, disk->d_block_count, &range);
-	if (error != 0)
-		return error;
-	irq = spin_lock_irqsave(&claim_lock);
-	for (i = 0; i < BACKING_CLAIM_MAX; i++) {
-		struct backing_claim *claim = claims[i];
-		if (claim == NULL)
-			continue;
-		if (claim->key_valid && claim->key.leaf == range.leaf &&
-		    claim->key.volume_first < range.last &&
-		    range.first < claim->key.volume_last) {
-			error = EBUSY;
-			goto out;
-		}
-		for (j = 0; j < claim->range_count; j++)
-			if (range_overlap(&range, &claim->ranges[j])) {
-				error = EBUSY;
-				goto out;
-			}
-	}
-	error = 0;
-out:
-	spin_unlock_irqrestore(&claim_lock, irq);
-	return error;
-}
-
-int
-backing_claim_check_teardown(struct disk *disk)
-{
-	return backing_claim_check_mount(disk, 0);
 }

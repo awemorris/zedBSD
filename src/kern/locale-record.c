@@ -1,5 +1,16 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-/* Kernel-only built-in locale records; the filesystem locale DB is userland. */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Kernel-only built-in locale records; the filesystem locale DB is userland.
+ */
+
 #include "libc/locale-db.h"
 
 #include <locale.h>
@@ -34,42 +45,93 @@ static const char *const utf8_values[ZEDBSD_LOCALE_KEY_COUNT] = {
 #undef ZEDBSD_LOCALE_UTF8_VALUE
 };
 
+/*
+ * Selects the built-in record for a locale name.
+ *
+ * Every UTF-8 spelling selects the UTF-8 record; anything else, including
+ * a missing name, selects the C locale.
+ */
 struct zed_locale_record *
-zed_locale_record_load(const char *name)
+zed_locale_record_load(
+	const char *name)
 {
-	return name != NULL &&
-		       (!strcmp(name, "C.UTF-8") || !strcmp(name, "C.utf8") ||
-			!strcmp(name, "UTF-8"))
-		   ? &utf8_locale
-		   : &c_locale;
+	/* A missing name means the C locale. */
+	if (name == NULL)
+		return &c_locale;
+
+	/* Recognizes the accepted UTF-8 spellings. */
+	if (!strcmp(name, "C.UTF-8"))
+		return &utf8_locale;
+	if (!strcmp(name, "C.utf8"))
+		return &utf8_locale;
+	if (!strcmp(name, "UTF-8"))
+		return &utf8_locale;
+
+	/* Falls back to the C locale. */
+	return &c_locale;
 }
 
+/*
+ * Reports the name of a locale record.
+ */
 const char *
-zed_locale_record_name(const struct zed_locale_record *record)
+zed_locale_record_name(
+	const struct zed_locale_record *record)
 {
-	return record != NULL ? record->name : "C";
+	/* A missing record reads as the C locale. */
+	if (record == NULL)
+		return "C";
+
+	/* Reports the recorded name. */
+	return record->name;
 }
 
+/*
+ * Reports the value of one locale key in a record.
+ */
 const char *
-zed_locale_record_value(const struct zed_locale_record *record,
-			enum zedbsd_locale_key key)
+zed_locale_record_value(
+	const struct zed_locale_record *record,
+	enum zedbsd_locale_key key)
 {
+	/* An invalid key has an empty value. */
 	if (key <= ZEDBSD_LOCALE_KEY_INVALID || key >= ZEDBSD_LOCALE_KEY_COUNT)
 		return "";
-	return record != NULL && record->utf8 ? utf8_values[key]
-					      : c_values[key];
+
+	/* Selects the UTF-8 table only for a UTF-8 record. */
+	if (record != NULL && record->utf8)
+		return utf8_values[key];
+
+	/* Reports the C locale value. */
+	return c_values[key];
 }
 
+/*
+ * Tests whether a locale record uses UTF-8.
+ */
 unsigned
-zed_locale_record_utf8(const struct zed_locale_record *record)
+zed_locale_record_utf8(
+	const struct zed_locale_record *record)
 {
-	return record != NULL ? record->utf8 : 0;
+	/* A missing record is not UTF-8. */
+	if (record == NULL)
+		return 0;
+
+	/* Reports the recorded flag. */
+	return record->utf8;
 }
 
+/*
+ * Reports the locale category that owns a key.
+ */
 int
-zed_locale_key_category(enum zedbsd_locale_key key)
+zed_locale_key_category(
+	enum zedbsd_locale_key key)
 {
-	return key > ZEDBSD_LOCALE_KEY_INVALID && key < ZEDBSD_LOCALE_KEY_COUNT
-		   ? key_categories[key]
-		   : -1;
+	/* An invalid key belongs to no category. */
+	if (key <= ZEDBSD_LOCALE_KEY_INVALID || key >= ZEDBSD_LOCALE_KEY_COUNT)
+		return -1;
+
+	/* Reports the recorded category. */
+	return key_categories[key];
 }

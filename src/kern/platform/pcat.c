@@ -1,4 +1,20 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The PC/AT platform.
+ *
+ * Boot storage comes from the BIOS IDE units; PCI, USB, and the configured
+ * network and graphics drivers are registered before the host bridge is
+ * probed.  The debug console is the Bochs/QEMU port 0xe9 when enabled.
+ */
+
 #include "kern/platform.h"
 #include "kern/disk.h"
 #include "kern/clock.h"
@@ -38,9 +54,6 @@
 #if CONFIG_DRIVER_USB_RTL8822BU
 #include <drivers/usb-rtl8822bu.h>
 #endif
-#if CONFIG_KERNEL_USB_HID_CHECKPOINT
-int usb_hid_checkpoint_driver_register(void);
-#endif
 #include <drivers/pci.h>
 #include <drivers/usb.h>
 #if CONFIG_DRIVER_NE2000
@@ -52,25 +65,59 @@ int usb_hid_checkpoint_driver_register(void);
 #include <errno.h>
 #include <hal/hal.h>
 
+#if CONFIG_KERNEL_USB_HID_CHECKPOINT
+int usb_hid_checkpoint_driver_register(void);
+#endif
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+int ws004_pci_msi_qemu_register(void);
+void ws004_pci_msi_qemu_raise(void);
+#endif
+
+/*
+ * Initializes the PC/AT platform and enumerates its boot devices.
+ *
+ * Every configured driver is registered with the PCI and USB cores before
+ * the host bridge is probed, so that the devices found there bind at once.
+ * The BIOS IDE units become the boot device table.
+ */
 size_t
-kern_platform_init(const struct boot_handoff *handoff,
-    struct boot_device *devices, size_t capacity)
+kern_platform_init(
+	const struct boot_handoff *handoff,
+	struct boot_device *devices,
+	size_t capacity)
 {
-	size_t count = 0;
-	if (handoff == 0 || devices == 0 || capacity == 0 ||
+	struct disk *disk;
+	struct boot_device *device;
+	size_t count;
+	unsigned slot;
+	unsigned i;
+#if CONFIG_DRIVER_NE2000
+	int network_error;
+#endif
+
+	count = 0;
+
+	/* Rejects a missing table or a handoff that is not a multiboot one. */
+	if (handoff == 0 ||
+	    devices == 0 ||
+	    capacity == 0 ||
 	    handoff->magic != ZEDBSD_HANDOFF_MAGIC ||
-	    handoff->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT) return 0;
+	    handoff->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT)
+		return 0;
+
+	/* Selects the partition scheme and starts with no disks. */
 	partition_set_scheme(&partition_scheme_pcat_auto);
 	disk_registry_reset();
+
+	/* Brings up the PCI core and, under test, the MSI fixture. */
 	if (drv_pci_init() != 0)
 		hal_printf("pci: core initialization failed\n");
 #ifdef ZEDBSD_TEST_CHECKPOINTS
-	{
-		extern int ws004_pci_msi_qemu_register(void);
-		if (ws004_pci_msi_qemu_register() != 0)
-			hal_printf("WS004 MSI fixture registration failed\n");
-	}
+	if (ws004_pci_msi_qemu_register() != 0)
+		hal_printf("WS004 MSI fixture registration failed\n");
 #endif
+
+	/* Brings up the USB core and registers the USB device drivers. */
 	if (drv_usb_init() != 0)
 		hal_printf("usb: core initialization failed\n");
 #if CONFIG_DRIVER_USB_STORAGE
@@ -96,6 +143,8 @@ kern_platform_init(const struct boot_handoff *handoff,
 	if (drv_usb_hid_driver_register() != 0)
 		hal_printf("usb: HID input driver registration failed\n");
 #endif
+
+	/* Registers the PCI drivers: host controllers, NVMe, WLAN, graphics. */
 #if CONFIG_DRIVER_PCI_UHCI
 	if (drv_pci_uhci_driver_register() != 0)
 		hal_printf("usb: UHCI PCI driver registration failed\n");
@@ -120,58 +169,82 @@ kern_platform_init(const struct boot_handoff *handoff,
 	if (pcat_graphics_pci_register() != 0)
 		hal_printf("graphics: PCI driver registration failed\n");
 #endif
+
+	/* Probes the host bridge, which binds the registered drivers. */
 	if (drv_pci_pcat_init() != 0)
 		hal_printf("pci: PC/AT host initialization failed\n");
 #ifdef ZEDBSD_TEST_CHECKPOINTS
 	else
 		drv_pci_dump();
 #endif
+
+	/* Lists every BIOS IDE unit as a boot device. */
 	(void)pcat_ide_init();
-	for (unsigned slot = 0; slot < 4U && count < capacity; slot++) {
-		struct disk *disk = pcat_ide_bios_unit((uint8_t)(0x80U+slot));
-		struct boot_device *device;
-		if (disk == 0) continue;
+	for (slot = 0; slot < 4U && count < capacity; slot++) {
+		disk = pcat_ide_bios_unit((uint8_t)(0x80U + slot));
+		if (disk == 0)
+			continue;
 		device = &devices[count];
-		device->device_class=ZEDBSD_DEV_IDE; device->display_index=(uint8_t)count;
-		device->bios_id=(uint8_t)(0x80U+slot); device->flags=ZEDBSD_DEV_PRESENT;
+		device->device_class = ZEDBSD_DEV_IDE;
+		device->display_index = (uint8_t)count;
+		device->bios_id = (uint8_t)(0x80U + slot);
+		device->flags = ZEDBSD_DEV_PRESENT;
 		if (device->bios_id == handoff->boot_bios_id)
 			device->flags |= ZEDBSD_DEV_BOOT_ORIGIN;
-		device->sector_size=512; device->cylinders=0; device->heads=0;
-		device->sectors=0; device->controller_location=(uint8_t)slot;
-		for (unsigned i=0;i<sizeof(device->reserved);i++) device->reserved[i]=0;
+		device->sector_size = 512;
+		device->cylinders = 0;
+		device->heads = 0;
+		device->sectors = 0;
+		device->controller_location = (uint8_t)slot;
+		for (i = 0; i < sizeof(device->reserved); i++)
+			device->reserved[i] = 0;
 		count++;
 	}
-#if CONFIG_DRIVER_NE2000
-	{
-		int network_error = pcat_ne2000_init();
 
-		if (network_error == 0)
-			hal_printf("net: ISA NE2000 at 0x300 irq 10 registered "
-			    "as ne0\n");
-		else if (network_error != ENODEV)
-			hal_printf("net: ISA NE2000 initialization failed (%d)\n",
-			    network_error);
-	}
+	/* Attaches the ISA NE2000 when one is configured and present. */
+#if CONFIG_DRIVER_NE2000
+	network_error = pcat_ne2000_init();
+	if (network_error == 0)
+		hal_printf("net: ISA NE2000 at 0x300 irq 10 registered "
+		    "as ne0\n");
+	else if (network_error != ENODEV)
+		hal_printf("net: ISA NE2000 initialization failed (%d)\n",
+		    network_error);
 #endif
+
+	/* Prepares the graphics driver. */
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
 	if (!pcat_graphics_prepare())
 		hal_printf("graphics: PC/AT driver unavailable\n");
 #endif
+
+	/* Reports the number of boot devices. */
 	return count;
 }
 
-void kern_platform_refresh_devices(const struct boot_device *d, size_t n)
+/*
+ * Finishes device discovery once interrupts are enabled.
+ *
+ * The USB roots are probed and the platform waits a bounded time for boot
+ * storage to appear before NVMe namespaces are probed, so that a PCI
+ * namespace cannot make removable boot media look absent.
+ */
+void
+kern_platform_refresh_devices(
+	const struct boot_device *d,
+	size_t n)
 {
 	uint64_t deadline;
 
 	(void)d;
 	(void)n;
+
+	/* Raises the MSI fixture interrupt under test. */
 #ifdef ZEDBSD_TEST_CHECKPOINTS
-	{
-		extern void ws004_pci_msi_qemu_raise(void);
-		ws004_pci_msi_qemu_raise();
-	}
+	ws004_pci_msi_qemu_raise();
 #endif
+
+	/* Probes the USB roots and readies the PCI WLAN devices. */
 #if CONFIG_DRIVER_PCI_UHCI
 	drv_pci_uhci_probe_roots();
 #endif
@@ -184,6 +257,8 @@ void kern_platform_refresh_devices(const struct boot_device *d, size_t n)
 #if CONFIG_DRIVER_PCI_INTEL_AX211
 	drv_pci_intel_ax211_devices_ready();
 #endif
+
+	/* Waits up to five seconds for the first disk to arrive. */
 	if (disk_count() != 0)
 		goto nvme;
 	deadline = clock_ticks() + 5U * KERN_CLOCK_HZ;
@@ -194,36 +269,74 @@ void kern_platform_refresh_devices(const struct boot_device *d, size_t n)
 		hal_printf("boot: boot-storage wait expired\n");
 nvme:
 	(void)0;
-	/* Probe NVMe namespaces after removable boot media has had its existing
-	 * bounded discovery window.  A present PCI namespace must not make
-	 * USB-root discovery look complete before the removable device arrives. */
+
+	/*
+	 * Probes NVMe namespaces after removable boot media has had its bounded
+	 * discovery window.  A present PCI namespace must not make USB-root
+	 * discovery look complete before the removable device arrives.
+	 */
 #if CONFIG_DRIVER_PCI_NVME
 	drv_pci_nvme_probe_namespaces();
 #endif
 }
 
+/*
+ * Initializes the platform input devices.
+ */
 int
-kern_platform_input_init(void)
+kern_platform_input_init(
+	void)
 {
+	int error;
+
+	/*
+	 * USB enumeration precedes VFS input construction.  The platform-input
+	 * boundary runs after input core and console registration, so dynamic
+	 * HID publication preserves console event0 and its subscriber route.
+	 */
 #if CONFIG_DRIVER_USB_HID && !CONFIG_KERNEL_USB_HID_CHECKPOINT
-	/* USB enumeration precedes VFS input construction.  The platform-input
-	 * boundary runs after input core and console registration, so dynamic HID
-	 * publication preserves console event0 and its subscriber route. */
 	drv_usb_hid_input_ready();
 #endif
-	return pcat_ps2_mouse_init();
+
+	/* Attaches the PS/2 mouse. */
+	error = pcat_ps2_mouse_init();
+
+	/* Reports the mouse attachment result. */
+	return error;
 }
 
-struct disk *kern_platform_block_device(const struct boot_device *device)
+/*
+ * Finds the disk behind a boot device.
+ */
+struct disk *
+kern_platform_block_device(
+	const struct boot_device *device)
 {
-	if (device == 0 || device->device_class != ZEDBSD_DEV_IDE) return 0;
-	return pcat_ide_bios_unit(device->bios_id);
+	struct disk *disk;
+
+	/* Only BIOS IDE units are boot devices on this platform. */
+	if (device == 0 || device->device_class != ZEDBSD_DEV_IDE)
+		return 0;
+
+	/* Looks up the unit by its BIOS identifier. */
+	disk = pcat_ide_bios_unit(device->bios_id);
+
+	/* Reports the disk, or none. */
+	return disk;
 }
 
-void kern_platform_debug_write(const char *text)
+/*
+ * Writes text to the debug console port.
+ */
+void
+kern_platform_debug_write(
+	const char *text)
 {
+	uint8_t c;
+
+	/* Emits every byte to port 0xe9 when the debug console is enabled. */
 	while (text != 0 && *text != '\0') {
-		uint8_t c = (uint8_t)*text++;
+		c = (uint8_t)*text++;
 #ifdef HAL_PCAT_DEBUGCON
 		__asm__ volatile("outb %0,$0xe9" : : "a"(c));
 #else
@@ -231,13 +344,37 @@ void kern_platform_debug_write(const char *text)
 #endif
 	}
 }
-void kern_platform_halt(void) { for (;;) __asm__ volatile("cli; hlt"); }
-void kern_platform_reboot(void)
+
+/*
+ * Halts the CPU forever.
+ */
+void
+kern_platform_halt(
+	void)
 {
-	for (unsigned spin=0;spin<1000000U;spin++) {
-		uint8_t status; __asm__ volatile("inb $0x64,%0":"=a"(status));
-		if (!(status&2U)) break;
+	/* Halts with interrupts disabled, and again after any wakeup. */
+	for (;;)
+		__asm__ volatile("cli; hlt");
+}
+
+/*
+ * Reboots the machine through the keyboard controller.
+ */
+void
+kern_platform_reboot(
+	void)
+{
+	unsigned spin;
+	uint8_t status;
+
+	/* Waits a bounded time for the controller input buffer to drain. */
+	for (spin = 0; spin < 1000000U; spin++) {
+		__asm__ volatile("inb $0x64,%0" : "=a"(status));
+		if (!(status & 2U))
+			break;
 	}
-	__asm__ volatile("movb $0xfe,%%al; outb %%al,$0x64":::"eax");
+
+	/* Pulses the CPU reset line, then halts in case that fails. */
+	__asm__ volatile("movb $0xfe,%%al; outb %%al,$0x64" ::: "eax");
 	kern_platform_halt();
 }

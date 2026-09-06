@@ -1,8 +1,20 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
 /*
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * zedBSD kernel bring-up bridge.
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The kernel entry points and the kernel heap.
+ *
+ * kernel_entry() validates the boot handoff, brings up the core subsystems
+ * in dependency order, starts the secondary CPUs, discovers the platform
+ * devices, and hands over to kernel_main().  Small allocations come from a
+ * fixed heap in the kernel image and large ones from page-backed physical
+ * memory, both under one lock domain shared with libc's malloc.
  */
 
 #include <stddef.h>
@@ -31,12 +43,6 @@
 #define KERNEL_HEAP_SIZE (512U * 1024U)
 #define KERNEL_LARGE_THRESHOLD (2U * ZEDBSD_PAGE_SIZE)
 #define KERNEL_ALLOCATION_ALIGNMENT 16U
-static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
-    __attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
-static struct heap_allocator kernel_heap;
-static atomic_uint_t kernel_heap_lock;
-static uint8_t kernel_heap_libc_lock_active[HAL_CPU_MAX];
-static uint8_t kernel_heap_libc_irq_enabled[HAL_CPU_MAX];
 
 struct kernel_large_allocation {
 	struct kernel_large_allocation *next;
@@ -44,48 +50,68 @@ struct kernel_large_allocation {
 	struct hal_pmem memory;
 };
 
+static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
+    __attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
+static struct heap_allocator kernel_heap;
+static atomic_uint_t kernel_heap_lock;
+static uint8_t kernel_heap_libc_lock_active[HAL_CPU_MAX];
+static uint8_t kernel_heap_libc_irq_enabled[HAL_CPU_MAX];
 static struct kernel_large_allocation *kernel_large_allocations;
 
 extern char __kernel_vma_start[], __kernel_vma_end[];
 
-static bool
-kernel_heap_lock_enter(void)
-{
-	bool enabled = hal_irq_disable();
-	while (!atomic_try_acquire_zero(&kernel_heap_lock))
-		hal_compiler_barrier();
-	return enabled;
-}
+static bool kernel_heap_lock_enter(void);
+static void kernel_heap_lock_leave(bool enabled);
+static void *kernel_alloc(size_t size);
+static void kernel_free(void *pointer);
 
 /*
- * libc's malloc/free compatibility entry points use the same active heap as
- * kern_malloc/kern_free.  The weak libc hooks are intentionally no-ops for
- * single-threaded freestanding consumers, so the kernel must override them and
- * join the one kernel-heap lock domain.
+ * Takes the kernel heap lock on behalf of libc's malloc.
+ *
+ * libc's malloc/free compatibility entry points use the same active heap
+ * as kern_malloc/kern_free.  The weak libc hooks are intentionally no-ops
+ * for single-threaded freestanding consumers, so the kernel overrides them
+ * and joins the one kernel-heap lock domain.  The interrupt state is kept
+ * per CPU because libc gives the unlock no argument to carry it.
  */
 void
-__libc_heap_lock(void)
+__libc_heap_lock(
+	void)
 {
 	hal_cpu_id_t cpu;
-	bool enabled = hal_irq_disable();
+	bool enabled;
 
+	enabled = hal_irq_disable();
 	cpu = hal_cpu_current();
+
+	/* Traps on a recursive lock, which would deadlock below. */
 	if (cpu >= HAL_CPU_MAX || kernel_heap_libc_lock_active[cpu] != 0)
 		HAL_FATAL("recursive libc kernel heap lock");
+
+	/* Spins for the lock, then records the interrupt state for the unlock. */
 	while (!atomic_try_acquire_zero(&kernel_heap_lock))
 		hal_compiler_barrier();
 	kernel_heap_libc_irq_enabled[cpu] = enabled ? 1U : 0U;
 	kernel_heap_libc_lock_active[cpu] = 1U;
 }
 
+/*
+ * Releases the kernel heap lock on behalf of libc's free.
+ */
 void
-__libc_heap_unlock(void)
+__libc_heap_unlock(
+	void)
 {
-	hal_cpu_id_t cpu = hal_cpu_current();
+	hal_cpu_id_t cpu;
 	bool enabled;
 
+	cpu = hal_cpu_current();
+
+	/* Traps on an unlock without a matching lock. */
 	if (cpu >= HAL_CPU_MAX || kernel_heap_libc_lock_active[cpu] == 0)
 		HAL_FATAL("unbalanced libc kernel heap unlock");
+
+	/* Releases the lock and restores the interrupt state saved by the lock. */
 	enabled = kernel_heap_libc_irq_enabled[cpu] != 0;
 	kernel_heap_libc_lock_active[cpu] = 0;
 	kernel_heap_libc_irq_enabled[cpu] = 0;
@@ -94,16 +120,16 @@ __libc_heap_unlock(void)
 		hal_irq_enable();
 }
 
-static void
-kernel_heap_lock_leave(bool enabled)
-{
-	atomic_store_release(&kernel_heap_lock, 0U);
-	if (enabled)
-		hal_irq_enable();
-}
-
+/*
+ * Allocates kernel memory.
+ *
+ * Small requests are served from the fixed heap; large ones, and small ones
+ * the fragmented heap cannot serve, get page-backed physical memory with a
+ * hidden header that records the allocation for kern_free().
+ */
 void *
-kern_malloc(size_t size)
+kern_malloc(
+	size_t size)
 {
 	struct kernel_large_allocation *large;
 	struct hal_pmem_request request;
@@ -112,23 +138,29 @@ kern_malloc(size_t size)
 	size_t header_size;
 	bool enabled;
 
+	/* Tries the fixed heap first for a small request. */
 	if (size < KERNEL_LARGE_THRESHOLD) {
 		enabled = kernel_heap_lock_enter();
 		result = heap_allocator_alloc(&kernel_heap, size);
 		kernel_heap_lock_leave(enabled);
 		if (result != NULL)
 			return result;
+
 		/*
 		 * The fixed heap is deliberately small and can become
-		 * fragmented. A failed sub-threshold allocation must still be
+		 * fragmented.  A failed sub-threshold allocation must still be
 		 * allowed to use a page-backed allocation while physical memory
 		 * remains available.
 		 */
 	}
+
+	/* Sizes the hidden header and rejects a request that overflows with it. */
 	header_size = (sizeof(*large) + KERNEL_ALLOCATION_ALIGNMENT - 1U) &
 		      ~(size_t)(KERNEL_ALLOCATION_ALIGNMENT - 1U);
 	if (size > SIZE_MAX - header_size)
 		return NULL;
+
+	/* Allocates page-aligned physical memory for the header and the block. */
 	memset(&request, 0, sizeof(request));
 	request.paddr = HAL_PMEM_PADDR_ANY;
 	request.size = size + header_size;
@@ -136,6 +168,8 @@ kern_malloc(size_t size)
 	request.type = HAL_PMEM_TYPE_RAM;
 	if (hal_pmem_alloc(&request, &memory) != HAL_OK)
 		return NULL;
+
+	/* Fills the header and links it into the large allocation list. */
 	large = memory.vaddr;
 	memset(large, 0, header_size);
 	large->pointer = (uint8_t *)memory.vaddr + header_size;
@@ -145,63 +179,104 @@ kern_malloc(size_t size)
 	kernel_large_allocations = large;
 	kernel_heap_lock_leave(enabled);
 	result = large->pointer;
+
+	/* Reports the block after the header. */
 	return result;
 }
 
+/*
+ * Allocates zeroed kernel memory for an array.
+ */
 void *
-kern_calloc(size_t count, size_t size)
+kern_calloc(
+	size_t count,
+	size_t size)
 {
 	void *result;
 	size_t total;
+
+	/* Rejects an array whose total size overflows. */
 	if (count != 0 && size > SIZE_MAX / count)
 		return NULL;
+
+	/* Allocates and clears the array. */
 	total = count * size;
 	result = kern_malloc(total);
 	if (result != NULL)
 		memset(result, 0, total);
+
+	/* Reports the array, or none. */
 	return result;
 }
 
+/*
+ * Frees kernel memory from either allocator.
+ *
+ * A pointer inside the fixed heap goes back to it; anything else must be a
+ * recorded large allocation, and freeing an unknown pointer is fatal.
+ */
 void
-kern_free(void *pointer)
+kern_free(
+	void *pointer)
 {
-	struct kernel_large_allocation **link, *large = NULL;
+	struct kernel_large_allocation **link;
+	struct kernel_large_allocation *large;
 	struct hal_pmem memory;
+	uintptr_t address;
 	bool enabled;
-	uintptr_t address = (uintptr_t)pointer;
 
+	large = NULL;
+	address = (uintptr_t)pointer;
+
+	/* Ignores a null pointer. */
 	if (pointer == NULL)
 		return;
+
 	enabled = kernel_heap_lock_enter();
+
+	/* Returns a fixed heap block to the heap. */
 	if (address >= (uintptr_t)kernel_heap.begin &&
 	    address < (uintptr_t)kernel_heap.end) {
 		heap_allocator_free(&kernel_heap, pointer);
 		kernel_heap_lock_leave(enabled);
 		return;
 	}
+
+	/* Unlinks the large allocation that owns the pointer. */
 	for (link = &kernel_large_allocations; *link != NULL;
-	     link = &(*link)->next)
+	     link = &(*link)->next) {
 		if ((*link)->pointer == pointer) {
 			large = *link;
 			*link = large->next;
 			break;
 		}
-	if (large != NULL) {
-		memory = large->memory;
 	}
+	if (large != NULL)
+		memory = large->memory;
+
 	kernel_heap_lock_leave(enabled);
+
+	/* Releases the physical memory outside the lock. */
 	if (large == NULL)
 		HAL_FATAL("invalid kernel allocation free");
 	if (hal_pmem_free(&memory) != HAL_OK)
 		HAL_FATAL("kernel large allocation free failed");
 }
 
+/*
+ * Reports the kernel heap and image statistics.
+ */
 void
-kern_memory_get_stats(struct kern_memory_stats *stats)
+kern_memory_get_stats(
+	struct kern_memory_stats *stats)
 {
 	bool enabled;
+
+	/* Ignores a missing result. */
 	if (stats == NULL)
 		return;
+
+	/* Samples the heap under its lock. */
 	enabled = kernel_heap_lock_enter();
 	stats->heap_fixed = KERNEL_HEAP_SIZE;
 	stats->heap_current = heap_allocator_current(&kernel_heap);
@@ -213,31 +288,34 @@ kern_memory_get_stats(struct kern_memory_stats *stats)
 	kernel_heap_lock_leave(enabled);
 }
 
-static void *
-kernel_alloc(size_t size)
-{
-	return kern_malloc(size);
-}
-static void
-kernel_free(void *pointer)
-{
-	kern_free(pointer);
-}
-
+/*
+ * Enters the kernel from the boot loader on the boot CPU.
+ *
+ * The subsystems come up in dependency order, the secondary CPUs are
+ * started and joined to the scheduler, and platform device discovery runs
+ * before kernel_main() takes over.  Any failure is fatal.
+ */
 void
-kernel_entry(const void *handoff)
+kernel_entry(
+	const void *handoff)
 {
-	const struct boot_handoff *h = handoff;
 	static struct boot_device devices[KERN_PLATFORM_MAX_DEVICES];
+	const struct boot_handoff *h;
 	size_t device_count;
 
-	if (h == NULL || h->magic != ZEDBSD_HANDOFF_MAGIC ||
+	h = handoff;
+
+	/* Refuses a handoff that is missing, foreign, or truncated. */
+	if (h == NULL ||
+	    h->magic != ZEDBSD_HANDOFF_MAGIC ||
 	    (h->version != ZEDBSD_HANDOFF_VERSION_PC98 &&
 	     h->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT &&
 	     h->version != ZEDBSD_HANDOFF_VERSION_SUN4U &&
 	     h->version != ZEDBSD_HANDOFF_VERSION_X68K) ||
 	    h->size < sizeof(*h))
 		hal_fatal(__FILE__, __LINE__, "invalid zedBSD handoff");
+
+	/* Brings up the log, the heap, and the core subsystems. */
 	kern_log_init();
 	kern_logf("boot: kernel heap, process, and scheduler initialization\n");
 	heap_allocator_init(&kernel_heap, kernel_heap_storage,
@@ -254,6 +332,8 @@ kernel_entry(const void *handoff)
 	if (buf_init() != 0)
 		hal_fatal(__FILE__, __LINE__,
 			  "buffer cache initialization failed");
+
+	/* Starts the secondary CPUs and joins them to the scheduler. */
 	if (thread_prepare_secondaries(hal_cpu_count()) != 0)
 		hal_fatal(__FILE__, __LINE__,
 			  "secondary thread allocation failed");
@@ -263,8 +343,8 @@ kernel_entry(const void *handoff)
 		hal_fatal(__FILE__, __LINE__,
 			  "secondary scheduler startup failed");
 	thread_attach_secondaries();
-	/* Synchronize the shared kernel translation domain with newly ready
-	 * CPUs. */
+
+	/* Synchronizes the shared kernel translation domain with the new CPUs. */
 	hal_page_flush_tlb_range(HAL_SPACE_SYS, __kernel_vma_start,
 				 ZEDBSD_PAGE_SIZE);
 	if (kern_cpu_notify_probe() != HAL_OK)
@@ -276,6 +356,8 @@ kernel_entry(const void *handoff)
 		   (unsigned)(hal_pmem_get_total_size() / (1024U * 1024U)),
 		   (unsigned)(1000U / HAL_TIMER_FREQUENCY));
 	kern_logf("boot: CPUs ready: %u\n", hal_cpu_count());
+
+	/* Starts the reaper and the network stack. */
 	if (process_reaper_start() != 0)
 		hal_fatal(__FILE__, __LINE__,
 			  "process reaper initialization failed");
@@ -283,22 +365,83 @@ kernel_entry(const void *handoff)
 		hal_fatal(__FILE__, __LINE__,
 			  "network subsystem initialization failed");
 
+	/* Discovers the platform devices. */
 	kern_logf("boot: platform device discovery\n");
 	device_count =
 	    kern_platform_init(h, devices, KERN_PLATFORM_MAX_DEVICES);
 	kern_logf("boot: platform devices detected: %u\n",
 		  (unsigned)device_count);
+
+	/* Enables interrupts before deferred device work that needs them. */
 	hal_irq_enable();
-	/* Deferred device work may submit interrupt-driven I/O. */
 	kern_platform_refresh_devices(devices, device_count);
+
+	/* Hands over to the kernel proper. */
 	kernel_main(h, devices, (unsigned)device_count);
 }
 
+/*
+ * Enters the kernel on a secondary CPU.
+ */
 void
-kernel_secondary_entry(hal_cpu_id_t cpu)
+kernel_secondary_entry(
+	hal_cpu_id_t cpu)
 {
+	/* Refuses the boot CPU or a CPU that is not the caller. */
 	if (cpu == 0 || cpu != hal_cpu_current())
 		hal_fatal(__FILE__, __LINE__, "invalid secondary CPU entry");
+
+	/* Joins the thread system and the scheduler. */
 	thread_init_secondary(cpu);
 	sched_secondary_init(cpu);
+}
+
+/* Disables interrupts and takes the kernel heap lock. */
+static bool
+kernel_heap_lock_enter(
+	void)
+{
+	bool enabled;
+
+	enabled = hal_irq_disable();
+
+	/* Spins for the lock. */
+	while (!atomic_try_acquire_zero(&kernel_heap_lock))
+		hal_compiler_barrier();
+
+	/* Reports whether interrupts were enabled. */
+	return enabled;
+}
+
+/* Releases the kernel heap lock and restores the interrupt state. */
+static void
+kernel_heap_lock_leave(
+	bool enabled)
+{
+	atomic_store_release(&kernel_heap_lock, 0U);
+
+	/* Re-enables interrupts only when they were enabled before. */
+	if (enabled)
+		hal_irq_enable();
+}
+
+/* Allocates memory for the HAL. */
+static void *
+kernel_alloc(
+	size_t size)
+{
+	void *result;
+
+	result = kern_malloc(size);
+
+	/* Reports the allocation. */
+	return result;
+}
+
+/* Frees memory for the HAL. */
+static void
+kernel_free(
+	void *pointer)
+{
+	kern_free(pointer);
 }
