@@ -22,6 +22,7 @@ static atomic_uint checks;
 static atomic_size_t live_allocations;
 static atomic_uint allocation_forbidden;
 static atomic_uint forbidden_allocations;
+static unsigned cancel_failures;
 
 #define CHECK(expression) do { \
 	unsigned check_number = atomic_fetch_add_explicit(&checks, 1U, \
@@ -405,6 +406,11 @@ static int
 fake_dequeue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 {
 	struct fake_controller *controller = controller_from_hcd(hcd);
+
+	if (cancel_failures != 0) {
+		cancel_failures--;
+		return EIO;
+	}
 
 	if (controller->held_data == urb) {
 		controller->held_data = NULL;

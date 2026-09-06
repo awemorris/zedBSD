@@ -714,6 +714,12 @@ drv_usb_urb_alloc(
 	struct drv_usb_device *d,
 	struct drv_usb_endpoint *e,
 	unsigned iso_count);
+/* Synchronous staging remains alive under the HCD reference after a failed
+ * cancel. Reserve outside reclaim/driver locks; setup rejects oversized data
+ * and callbacks. Failed wait may retain ownership and setup then returns EBUSY.
+ * Caller memory is never touched by a late completion. */
+int
+drv_usb_urb_reserve_sync(struct drv_usb_urb *urb, size_t capacity);
 void
 drv_usb_urb_free(
 	struct drv_usb_urb *u);
@@ -767,11 +773,10 @@ int
 drv_usb_urb_drain(
 	struct drv_usb_urb *u,
 	unsigned timeout_ms);
-/* Synchronous reusable URBs have no callback.  In addition to a terminal
- * status, wait until the HCD has dropped its private ownership so the caller
- * can immediately call drv_usb_urb_setup*() on the same object.  If a timeout
- * cancellation cannot retire the HCD request immediately, this ownership
- * barrier may extend past the requested transfer timeout. */
+/* Synchronous URBs have no callback. Success includes HCD retirement.
+ * With reserve_sync (or zero data), failed cancellation returns finitely:
+ * caller memory is isolated, but setup remains EBUSY until checked retirement.
+ * Unbuffered callers must retain their buffer through the ownership barrier. */
 int
 drv_usb_urb_wait_reusable(
 	struct drv_usb_urb *u);

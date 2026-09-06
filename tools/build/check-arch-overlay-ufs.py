@@ -21,9 +21,38 @@ def parse_files(items):
     return result
 
 
+def large_directories(fs):
+    """Report the current writer's one-block directory limit, also on RO roots."""
+    pending = [("/", 2)]
+    seen = set()
+    result = []
+    while pending:
+        path, ino = pending.pop()
+        if ino in seen:
+            continue
+        seen.add(ino)
+        raw = fs.inode(ino)
+        if fs.u16(raw, 0) & 0o170000 != 0o040000:
+            continue
+        size = fs.u64(raw, 8)
+        if size > fs.bsize:
+            result.append((path, ino, size))
+        for name, child, _ in fs.entries(ino):
+            if name not in (".", ".."):
+                pending.append((path.rstrip("/") + "/" + name, child))
+    return sorted(result)
+
+
 def check(args):
     checker=load_checker(); checker.check(args.image)
     fs=checker.UFS1(args.image.read_bytes()); files=parse_files(args.file)
+    oversized = large_directories(fs)
+    for path, ino, size in oversized:
+        print(f'{args.image}: directory update limit: {path} inode={ino} '
+              f'size={size} block={fs.bsize}')
+    if args.writable_directory_limit and oversized:
+        raise SystemExit('image exceeds current UFS directory mutation limit')
+    print(f'{args.image}: multi-block directories={len(oversized)}')
     if fs.read_file(fs.lookup('/lib/arch.id'))!=(args.profile+'\n').encode():
         raise SystemExit('wrong /lib/arch.id')
     if fs.read_file(fs.lookup('/etc/zedbsd-root')) != \
@@ -54,6 +83,8 @@ def main():
     parser=argparse.ArgumentParser(); parser.add_argument('--profile',choices=PROFILES,required=True)
     parser.add_argument('--image',type=Path,required=True); parser.add_argument('--file',action='append',default=[])
     parser.add_argument('--mode',action='append',default=[])
+    parser.add_argument('--writable-directory-limit', action='store_true',
+                        help='reject directories the current writer cannot mutate')
     check(parser.parse_args())
 
 

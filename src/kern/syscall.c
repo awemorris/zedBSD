@@ -80,6 +80,11 @@
 #include <stdlib.h>
 
 #define SYSCALL_IO_CHUNK 512U
+#ifndef ZEDBSD_SYSCALL_REGULAR_CHUNK
+#define ZEDBSD_SYSCALL_REGULAR_CHUNK 4096U
+#endif
+_Static_assert(ZEDBSD_SYSCALL_REGULAR_CHUNK >= SYSCALL_IO_CHUNK &&
+    ZEDBSD_SYSCALL_REGULAR_CHUNK <= 16384U, "bounded regular I/O buffer");
 #define SYSCALL_SOCKET_BUFFER_MAX (64U * 1024U)
 #define SOCKET_SEND_FLAGS (MSG_DONTWAIT | MSG_NOSIGNAL)
 #define SOCKET_RECV_FLAGS (MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC | MSG_WAITALL)
@@ -179,6 +184,7 @@ static int syscall_context_at(struct process *process, int dirfd, struct cwdinfo
 static intptr_t sys_open_call(const uintptr_t args[6], int at);
 static intptr_t sys_close_call(const uintptr_t args[6]);
 static SYSCALL_EXT intptr_t sys_read_call(const uintptr_t args[6]);
+static uint8_t *syscall_regular_buffer(struct file *file, size_t length, uint8_t *fallback, size_t *capacity);
 static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6]);
 static intptr_t sys_lseek_call(const uintptr_t args[6]);
 static intptr_t sys_fstat_call(const uintptr_t args[6]);
@@ -2465,6 +2471,25 @@ sys_close_call(
 	return 0;
 }
 
+/* Allocate before file_io_begin takes the file/VM lease. Allocation pressure
+ * falls back to the established small buffer; pipes retain PIPE_BUF behavior. */
+static uint8_t *
+syscall_regular_buffer(struct file *file, size_t length, uint8_t *fallback,
+	size_t *capacity)
+{
+	uint8_t *buffer;
+
+	*capacity = SYSCALL_IO_CHUNK;
+	if (length <= SYSCALL_IO_CHUNK || file->f_inode == NULL ||
+	    file->f_inode->i_type != INODE_REG)
+		return fallback;
+	buffer = kern_malloc(ZEDBSD_SYSCALL_REGULAR_CHUNK);
+	if (buffer == NULL)
+		return fallback;
+	*capacity = ZEDBSD_SYSCALL_REGULAR_CHUNK;
+	return buffer;
+}
+
 /* Handles read(2) through a bounce buffer. */
 static SYSCALL_EXT intptr_t
 sys_read_call(
@@ -2474,7 +2499,9 @@ sys_read_call(
 	struct file *file;
 	struct file_io io;
 	struct uaccess_pin pin;
-	uint8_t buffer[SYSCALL_IO_CHUNK];
+	uint8_t small_buffer[SYSCALL_IO_CHUNK];
+	uint8_t *buffer = small_buffer;
+	size_t capacity = sizeof(small_buffer);
 	size_t done;
 	size_t length;
 	intptr_t result;
@@ -2497,8 +2524,11 @@ sys_read_call(
 		(void)file_close(file);
 		return -error;
 	}
+	buffer = syscall_regular_buffer(file, length, small_buffer, &capacity);
 	error = file_io_begin(file, FILE_IO_READ, 0, 0, &io);
 	if (error != 0) {
+		if (buffer != small_buffer)
+			kern_free(buffer);
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return -error;
@@ -2506,8 +2536,8 @@ sys_read_call(
 
 	/* Copies one chunk at a time until the request or the data runs out. */
 	while (done < length) {
-		if (length - done > sizeof(buffer))
-			chunk = sizeof(buffer);
+		if (length - done > capacity)
+			chunk = capacity;
 		else
 			chunk = length - done;
 		count = file_io_transfer(&io, buffer, chunk);
@@ -2546,6 +2576,8 @@ sys_read_call(
 	result = (intptr_t)done;
 out:
 	file_io_end(&io);
+	if (buffer != small_buffer)
+		kern_free(buffer);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -2560,7 +2592,9 @@ sys_write_call(
 	struct file *file;
 	struct file_io io;
 	struct uaccess_pin pin;
-	uint8_t buffer[SYSCALL_IO_CHUNK];
+	uint8_t small_buffer[SYSCALL_IO_CHUNK];
+	uint8_t *buffer = small_buffer;
+	size_t capacity = sizeof(small_buffer);
 	size_t done;
 	size_t length;
 	intptr_t result;
@@ -2584,9 +2618,12 @@ sys_write_call(
 		(void)file_close(file);
 		return -error;
 	}
+	buffer = syscall_regular_buffer(file, length, small_buffer, &capacity);
 	error = file_io_begin_cred(file, FILE_IO_WRITE, 0, 0, process->cred,
 	    &io);
 	if (error != 0) {
+		if (buffer != small_buffer)
+			kern_free(buffer);
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return -error;
@@ -2596,8 +2633,8 @@ sys_write_call(
 
 	/* Copies one chunk at a time; a hit size limit raises SIGXFSZ. */
 	while (done < length) {
-		if (length - done > sizeof(buffer))
-			chunk = sizeof(buffer);
+		if (length - done > capacity)
+			chunk = capacity;
 		else
 			chunk = length - done;
 		error = copyin_pinned(&pin, done, buffer, chunk);
@@ -2628,6 +2665,8 @@ sys_write_call(
 	result = (intptr_t)done;
 out:
 	file_io_end(&io);
+	if (buffer != small_buffer)
+		kern_free(buffer);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -3623,7 +3662,9 @@ sys_positional_call(
 	struct file *file;
 	struct file_io io;
 	struct uaccess_pin pin;
-	uint8_t buffer[SYSCALL_IO_CHUNK];
+	uint8_t small_buffer[SYSCALL_IO_CHUNK];
+	uint8_t *buffer = small_buffer;
+	size_t capacity = sizeof(small_buffer);
 	size_t done;
 	size_t length;
 	off_t offset;
@@ -3667,8 +3708,11 @@ sys_positional_call(
 		operation = FILE_IO_PREAD;
 		credential = NULL;
 	}
+	buffer = syscall_regular_buffer(file, length, small_buffer, &capacity);
 	error = file_io_begin_cred(file, operation, offset, 0, credential, &io);
 	if (error != 0) {
+		if (buffer != small_buffer)
+			kern_free(buffer);
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return -error;
@@ -3679,8 +3723,8 @@ sys_positional_call(
 
 	/* Copies one chunk at a time in the requested direction. */
 	while (done < length) {
-		if (length - done > sizeof(buffer))
-			chunk = sizeof(buffer);
+		if (length - done > capacity)
+			chunk = capacity;
 		else
 			chunk = length - done;
 		limited = 0;
@@ -3724,6 +3768,8 @@ copy_error:
 		result = -error;
 out:
 	file_io_end(&io);
+	if (buffer != small_buffer)
+		kern_free(buffer);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -3740,7 +3786,9 @@ sys_vector_call(
 	struct process *process;
 	struct file *file;
 	struct file_io io;
-	uint8_t buffer[SYSCALL_IO_CHUNK];
+	uint8_t small_buffer[SYSCALL_IO_CHUNK];
+	uint8_t *buffer = small_buffer;
+	size_t capacity = sizeof(small_buffer);
 	int count;
 	int i;
 	int pinned;
@@ -3806,6 +3854,8 @@ sys_vector_call(
 		operation = FILE_IO_READ;
 		credential = NULL;
 	}
+	buffer = syscall_regular_buffer(file, (size_t)total, small_buffer,
+	    &capacity);
 	error = file_io_begin_cred(file, operation, 0, 0, credential, &io);
 	if (error != 0)
 		goto fail;
@@ -3841,8 +3891,8 @@ sys_vector_call(
 		done = 0;
 		length = (size_t)vectors[i].length;
 		while (done < length) {
-			if (length - done > sizeof(buffer))
-				chunk = sizeof(buffer);
+			if (length - done > capacity)
+				chunk = capacity;
 			else
 				chunk = length - done;
 			limited = 0;
@@ -3894,6 +3944,8 @@ fail:
 out:
 	if (io_started)
 		file_io_end(&io);
+	if (buffer != small_buffer)
+		kern_free(buffer);
 	if (file != NULL)
 		(void)file_close(file);
 	while (pinned != 0) {

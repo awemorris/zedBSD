@@ -4,6 +4,10 @@ Last updated: 2026-09-06
 
 Status: active
 
+Current queue: [q086](queue.md), authorized 2026-09-06: FS/USB functional
+corrections from report-4, coherent I/O and [50 acceptance stories](fs-acceptance-50.md).
+WS018 p017–p019 and WS004 p049 are selected follow-ups; q085 remains completed.
+
 ## 1. Purpose
 
 This is the authoritative program-wide plan. It assigns permanent workstream

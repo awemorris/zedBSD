@@ -2058,11 +2058,11 @@ exercise_ep0_serialization(struct fake_controller *controller,
 	CHECK(thrd_create(&timed_worker, control_thread, &timed) == thrd_success);
 	CHECK(wait_for_control(controller, base) != NULL);
 	wait_for_nonzero(&controller->dequeue_count);
-	settle_threads();
-	CHECK(atomic_load_explicit(&timed.done, memory_order_acquire) == 0U);
+	wait_for_nonzero(&timed.done);
+	CHECK(timed.result == ETIMEDOUT);
 
-	/* The next EP0 caller stays outside the HCD until the timed-out owner
-	 * has terminal status, no callback, and no HCD ownership. */
+	/* The first caller returns finitely. Its isolated retained request still
+	 * excludes the next EP0 caller until checked HCD ownership release. */
 	CHECK(thrd_create(&follower_worker, control_thread, &follower) ==
 	    thrd_success);
 	wait_for_nonzero(&follower.started);

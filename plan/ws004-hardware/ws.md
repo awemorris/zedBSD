@@ -4,6 +4,9 @@ Last updated: 2026-09-06
 
 WSID: `ws004`
 
+Q086 selects [p049 finite USB storage recovery](phase049-storage-recovery/phase.md),
+following fs-report-4. It is authorized and pending the baseline checkpoint.
+
 Status: active follow-up; q071 completed the reopened W52 RTL8822BU path and
 the asynchronous WLAN ownership boundary, and the user accepted the shared
 real-hardware result. Other NVMe, AX211, ECM, and refactor follow-ups remain.

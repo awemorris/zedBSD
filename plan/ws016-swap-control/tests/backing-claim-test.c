@@ -319,6 +319,8 @@ main(void)
 	backing_mutation_end(&guard);
 	assert(backing_claim_check_mount(&partition, 0) == 0);
 
+	puts("S26 PASS production claim excludes ordinary inode mutation and raw aliases until release");
+
 	/* Runtime ordering differs from boot activation: the root/data loop
 	 * claims already exist when swapon publishes a third, disjoint inode
 	 * claim.  Direct swap I/O carrying that owner must remain confined to its

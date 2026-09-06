@@ -111,6 +111,7 @@ struct drv_usb_device {
 	unsigned report_disconnect;
 	atomic_uint_t selection_gate;
 	atomic_uint_t control_gate;
+	atomic_uint_t control_inflight;
 	atomic_uint_t submit_gate;
 	atomic_uint_t binding_transactions;
 	atomic_uint_t disconnect_barrier;
@@ -151,6 +152,8 @@ struct drv_usb_urb {
 	struct drv_usb_device *device;
 	struct drv_usb_endpoint *endpoint;
 	void *buffer;
+	void *sync_buffer, *sync_client;
+	size_t sync_capacity;
 	size_t length, actual_length;
 	unsigned flags, timeout_ms;
 	drv_usb_urb_callback_t callback;
@@ -162,6 +165,7 @@ struct drv_usb_urb {
 	unsigned terminal_claimed;
 	unsigned hcd_owned;
 	unsigned control_admitted;
+	unsigned control_counted;
 	struct drv_usb_interface *io_interface;
 	struct drv_usb_interface *binding_owner;
 	struct usb_submit_commit *submit_commit;
@@ -404,7 +408,16 @@ interface_publish_claim(struct drv_usb_interface *interface,
 static int
 device_control_try_lock(struct drv_usb_device *device)
 {
-	return atomic_try_acquire_zero(&device->control_gate) ? 0 : EBUSY;
+	if (!atomic_try_acquire_zero(&device->control_gate))
+		return EBUSY;
+	/* A timed-out synchronous caller may release its transaction while its
+	 * isolated URB is still retained. EP0 remains unavailable until the HCD
+	 * drops that request, independently of the caller's bounded wait. */
+	if (atomic_load_acquire(&device->control_inflight) != 0) {
+		atomic_store_release(&device->control_gate, 0U);
+		return EBUSY;
+	}
+	return 0;
 }
 
 static int
@@ -1810,6 +1823,7 @@ urb_put(struct drv_usb_urb *urb)
 	device = urb->device;
 	if (urb->iso_packets != NULL)
 		hal_free(urb->iso_packets);
+	hal_free(urb->sync_buffer);
 	hal_free(urb);
 	device_urb_put(device);
 }
@@ -1945,6 +1959,10 @@ urb_admission_put(struct drv_usb_urb *urb)
 	urb->binding_owner = NULL;
 	urb->io_interface = NULL;
 	urb->control_admitted = USB_CONTROL_ADMISSION_NONE;
+	if (urb->control_counted) {
+		urb->control_counted = 0;
+		atomic_store_release(&urb->device->control_inflight, 0U);
+	}
 	if (binding_owner != NULL)
 		io_gate_exit(&binding_owner->binding_gate);
 	if (io_interface != NULL)
@@ -1964,12 +1982,16 @@ urb_admission_get(struct drv_usb_urb *urb,
 
 	*submitting_owner = NULL;
 	if (endpoint == &device->endpoint0) {
-		if (urb->control_admitted == USB_CONTROL_ADMISSION_EXTERNAL)
-			return 0;
-		error = device_control_try_lock(device);
-		if (error == 0)
+		if (urb->control_admitted != USB_CONTROL_ADMISSION_EXTERNAL) {
+			error = device_control_try_lock(device);
+			if (error != 0)
+				return error;
 			urb->control_admitted = USB_CONTROL_ADMISSION_OWNED;
-		return error;
+		}
+		if (!atomic_try_acquire_zero(&device->control_inflight))
+			return EBUSY;
+		urb->control_counted = 1U;
+		return 0;
 	}
 	if (!endpoint_retained_by_device(device, endpoint))
 		return EINVAL;
@@ -2992,7 +3014,55 @@ struct drv_usb_urb *drv_usb_urb_alloc(struct drv_usb_device *device,
 	return urb;
 }
 void drv_usb_urb_free(struct drv_usb_urb*u){if(u)urb_put(u);}
-int drv_usb_urb_setup(struct drv_usb_urb*u,void*b,size_t n,unsigned f,unsigned t,drv_usb_urb_callback_t cb,void*a){if(!u||hal_atomic_load_acquire(&u->status)==DRV_USB_URB_PENDING||(!b&&n))return EINVAL;if(hal_atomic_load_acquire(&u->hcd_owned))return EBUSY;u->buffer=b;u->length=n;u->flags=f;u->timeout_ms=t;u->callback=cb;u->callback_argument=a;u->actual_length=0;hal_atomic_store_relaxed(&u->terminal_claimed,0U);hal_atomic_store_release(&u->status,DRV_USB_URB_IDLE);return 0;}
+/* Reserve before entering reclaim or a class-driver I/O lock. The HCD-owned
+ * reference retains this storage even if a failed cancellation outlives wait. */
+int
+drv_usb_urb_reserve_sync(struct drv_usb_urb *u, size_t capacity)
+{
+	void *buffer;
+
+	if (u == NULL || u->iso_packet_count != 0)
+		return EINVAL;
+	if (hal_atomic_load_acquire(&u->hcd_owned) != 0 ||
+	    hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING)
+		return EBUSY;
+	if (capacity <= u->sync_capacity)
+		return 0;
+	buffer = hal_malloc(capacity);
+	if (buffer == NULL)
+		return ENOMEM;
+	hal_free(u->sync_buffer);
+	u->sync_buffer = buffer;
+	u->sync_capacity = capacity;
+	return 0;
+}
+
+int
+drv_usb_urb_setup(struct drv_usb_urb *u, void *b, size_t n, unsigned f,
+	unsigned t, drv_usb_urb_callback_t cb, void *a)
+{
+	if (u == NULL || (b == NULL && n != 0))
+		return EINVAL;
+	if (hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING ||
+	    hal_atomic_load_acquire(&u->hcd_owned) != 0)
+		return EBUSY;
+	if (u->sync_buffer != NULL && (cb != NULL || n > u->sync_capacity))
+		return EINVAL;
+	u->sync_client = u->sync_buffer != NULL ? b : NULL;
+	u->buffer = u->sync_buffer != NULL ? u->sync_buffer : b;
+	if (n != 0 && u->sync_buffer != NULL)
+		memcpy(u->sync_buffer, b, n);
+	u->length = n;
+	u->flags = f;
+	u->timeout_ms = t;
+	u->callback = cb;
+	u->callback_argument = a;
+	u->actual_length = 0;
+	hal_atomic_store_relaxed(&u->terminal_claimed, 0U);
+	hal_atomic_store_release(&u->status, DRV_USB_URB_IDLE);
+	return 0;
+}
+
 int
 drv_usb_urb_setup_control_flags(struct drv_usb_urb *u,
 	const struct drv_usb_control_request *r, void *b, size_t n,
@@ -3117,7 +3187,7 @@ drv_usb_urb_wait(struct drv_usb_urb *urb)
 	if (urb == NULL)
 		return EINVAL;
 	deadline = urb->timeout_ms ?
-	    sched_ticks() + (urb->timeout_ms + 9U) / 10U : 0;
+	    sched_ticks() + ((uint64_t)urb->timeout_ms + 9U) / 10U : 0;
 	for (;;) {
 		/* Keep the atomic observation inside the switch expression.  Besides
 		 * making the single-load terminal mapping explicit, this avoids GCC's
@@ -3185,27 +3255,39 @@ drv_usb_urb_drain(struct drv_usb_urb *u, unsigned timeout_ms)
 int
 drv_usb_urb_wait_reusable(struct drv_usb_urb *u)
 {
-	int error;
-	enum drv_usb_urb_status status;
+	int error, drained;
+	unsigned attempt;
 
 	if (u == NULL || u->callback != NULL)
 		return EINVAL;
 	error = drv_usb_urb_wait(u);
-	for (;;) {
-		status = hal_atomic_load_acquire(&u->status);
-		if (status != DRV_USB_URB_PENDING)
-			break;
-		/* A failed cancellation may outlive the caller's timeout.  A
-		 * reusable synchronous URB cannot return while the HCD may still
-		 * access its buffer; preserve the timeout result but extend the
-		 * ownership barrier. */
+	/* A hard cancel failure used to leave this caller waiting forever. Retry
+	 * checked retirement, then detach only the caller's view of an isolated
+	 * buffer. Never forge completion or release the HCD reference. */
+	for (attempt = 0; attempt < 2U &&
+	    hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING;
+	    attempt++) {
+		(void)urb_cancel_to(u, DRV_USB_URB_TIMEOUT);
 		sched_yield();
 	}
-	if (status == DRV_USB_URB_IDLE)
-		return error;
-	(void)drv_usb_urb_drain(u, 0);
-	return error;
+	drained = drv_usb_urb_drain(u, 1000U);
+	if (drained != 0 && u->sync_buffer == NULL && u->length != 0) {
+		/* Legacy unbuffered users still own their buffer until retirement.
+		 * All core synchronous helpers and storage reserve staging. */
+		(void)drv_usb_urb_drain(u, 0);
+		drained = 0;
+	}
+	if (drained == 0 && u->sync_client != NULL &&
+	    u->actual_length <= u->length &&
+	    ((u->endpoint->type == DRV_USB_TRANSFER_CONTROL &&
+	      (u->control.request_type & DRV_USB_DIR_IN) != 0) ||
+	     (u->endpoint->type != DRV_USB_TRANSFER_CONTROL &&
+	      (u->endpoint->descriptor.address & DRV_USB_DIR_IN) != 0)))
+		memcpy(u->sync_client, u->sync_buffer, u->actual_length);
+	u->sync_client = NULL;
+	return error != 0 ? error : drained;
 }
+
 enum drv_usb_urb_status drv_usb_urb_status(const struct drv_usb_urb*u){return u?hal_atomic_load_acquire(&u->status):DRV_USB_URB_IO_ERROR;}
 size_t drv_usb_urb_actual_length(const struct drv_usb_urb*u){enum drv_usb_urb_status status;if(!u)return 0;status=hal_atomic_load_acquire(&u->status);return status==DRV_USB_URB_PENDING?0:u->actual_length;}
 void*drv_usb_urb_buffer(const struct drv_usb_urb*u){return u?u->buffer:NULL;}
@@ -3236,7 +3318,9 @@ usb_control_locked(struct drv_usb_device *device, uint8_t request_type,
 	if (urb == NULL)
 		return device_is_disconnecting(device) ||
 		    device_is_quarantined(device) ? ENODEV : ENOMEM;
-	error = drv_usb_urb_setup_control(urb, &control, buffer, length,
+	error = drv_usb_urb_reserve_sync(urb, length);
+	if (error == 0)
+		error = drv_usb_urb_setup_control(urb, &control, buffer, length,
 	    timeout_ms, NULL, NULL);
 	if (error == 0) {
 		urb->control_admitted = USB_CONTROL_ADMISSION_EXTERNAL;
@@ -3280,7 +3364,9 @@ sync_data(struct drv_usb_device *device, struct drv_usb_endpoint *endpoint,
 	urb = drv_usb_urb_alloc(device, endpoint, 0);
 	if (urb == NULL)
 		return ENOMEM;
-	error = drv_usb_urb_setup(urb, buffer, length, 0, timeout_ms, NULL, NULL);
+	error = drv_usb_urb_reserve_sync(urb, length);
+	if (error == 0)
+		error = drv_usb_urb_setup(urb, buffer, length, 0, timeout_ms, NULL, NULL);
 	if (error == 0)
 		error = drv_usb_urb_submit(urb);
 	if (error == 0)

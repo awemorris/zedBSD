@@ -309,10 +309,9 @@ main(void)
 	assert(stop_calls == 1);
 	assert(bus_count(&ownership_hcd, NULL) == 0);
 
-	/* A failed timeout cancellation must not let a synchronous reusable URB
-	 * escape while the HCD still owns its request or buffer.  Complete it
-	 * after drv_usb_urb_wait() has exhausted its cancellation grace period;
-	 * wait_reusable() preserves ETIMEDOUT but waits for ownership release. */
+	/* Zero-data synchronous waits may return after bounded cancel/drain grace.
+	 * Ownership remains with the HCD; reuse is forbidden until late completion.
+	 * No caller buffer is exposed by this retained request. */
 	quiesce_calls = 0;
 	stop_calls = 0;
 	fake_ticks = 0;
@@ -326,7 +325,11 @@ main(void)
 	dequeue_result = EBUSY;
 	complete_at_tick = 250;
 	assert(drv_usb_urb_wait_reusable(urb) == ETIMEDOUT);
-	assert(fake_ticks >= 250);
+	assert(fake_ticks < 250);
+	assert(drv_usb_urb_status(urb) == DRV_USB_URB_PENDING);
+	assert(drv_usb_urb_setup(urb, NULL, 0, 0, 0, NULL, NULL) == EBUSY);
+	while (fake_ticks < 250)
+		sched_yield();
 	assert(complete_at_tick == 0);
 	assert(drv_usb_urb_status(urb) == DRV_USB_URB_COMPLETE);
 	pending_urb = NULL;

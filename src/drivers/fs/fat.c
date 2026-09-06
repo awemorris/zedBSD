@@ -86,6 +86,8 @@ struct fat_mount_state {
 };
 
 struct fat_file_state {
+	const struct fat_loop_extent *loop_map;
+	unsigned loop_map_count;
 	struct fat_mount_state *mount;
 	struct inode *owner;
 	uint64_t size;
@@ -4338,6 +4340,114 @@ fat_open_file(struct file *file)
 	return error;
 }
 
+/* Called under the FAT mount lock and the ordinary file/VM I/O lease.
+ * Mapped operations never resize or publish allocation metadata. */
+static ssize_t
+fat_loop_transfer(struct file *file, struct fat_file_state *state,
+	void *buffer, size_t length, off_t offset, int writing)
+{
+	struct fat_mount_state *mount = state->mount;
+	uint64_t block, remaining;
+	size_t done = 0;
+	unsigned i;
+	int error;
+
+	if (file->f_backing_claim == NULL ||
+	    offset < 0 || ((uint64_t)offset & 511U) != 0 ||
+	    (length & 511U) != 0 || (uint64_t)offset > state->size ||
+	    length > state->size - (uint64_t)offset)
+		return -EINVAL;
+	if (writing && mount->read_only)
+		return -EROFS;
+	/* Drain before invalidating; never discard an earlier failed dirty write.
+	 * The lock excludes all other readers of the single FAT sector slot. */
+	error = fat_engine_flush(mount);
+	if (error != 0)
+		return -error;
+	fat_engine_invalidate(mount);
+	block = (uint64_t)offset / 512U;
+	remaining = length / 512U;
+	for (i = 0; i < state->loop_map_count && remaining != 0; i++) {
+		const struct fat_loop_extent *extent = &state->loop_map[i];
+		uint64_t within, amount;
+
+		if (block < extent->file_block)
+			return -EIO;
+		within = block - extent->file_block;
+		if (within >= extent->count)
+			continue;
+		amount = extent->count - within;
+		if (amount > remaining)
+			amount = remaining;
+		if (writing)
+			error = disk_write_filesystem(mount->disk,
+			    extent->disk_block + within, (uint32_t)amount,
+			    (uint8_t *)buffer + done);
+		else
+			error = disk_read(mount->disk, extent->disk_block + within,
+			    (uint32_t)amount, (uint8_t *)buffer + done);
+		if (error != 0)
+			return done != 0 ? (ssize_t)done : -error;
+		done += (size_t)amount * 512U;
+		block += amount;
+		remaining -= amount;
+	}
+	return remaining == 0 ? (ssize_t)done : -EIO;
+}
+
+int
+fat_file_set_loop_map(struct file *file, const struct fat_loop_extent *map,
+	unsigned count)
+{
+	struct fat_mount_state *mount;
+	struct fat_file_state *state;
+	uint64_t next = 0;
+	unsigned i;
+	int error = 0;
+
+	if (file == NULL || file->f_inode == NULL ||
+	    file->f_inode->i_mount == NULL ||
+	    file->f_inode->i_mount->m_type != &fat_filesystem_type ||
+	    ((map == NULL) != (count == 0)))
+		return EINVAL;
+	mount = fat_mount_state(file->f_inode->i_mount);
+	mutex_lock(&mount->lock);
+	state = fat_file_get(file);
+	if (state == NULL) {
+		error = EIO;
+		goto out;
+	}
+	if (map != NULL) {
+		if (file->f_backing_claim == NULL || mount->disk->d_block_size != 512U) {
+			error = EINVAL;
+			goto out;
+		}
+		for (i = 0; i < count; i++) {
+			if (map[i].file_block != next || map[i].count == 0 ||
+			    map[i].disk_block > mount->disk->d_block_count ||
+			    map[i].count > mount->disk->d_block_count - map[i].disk_block ||
+			    next > UINT64_MAX - map[i].count) {
+				error = EIO;
+				goto out;
+			}
+			next += map[i].count;
+		}
+		if (state->size % 512U != 0 || next != state->size / 512U) {
+			error = EIO;
+			goto out;
+		}
+		error = fat_engine_flush(mount);
+		if (error != 0)
+			goto out;
+		fat_engine_invalidate(mount);
+	}
+	state->loop_map = map;
+	state->loop_map_count = count;
+out:
+	mutex_unlock(&mount->lock);
+	return error;
+}
+
 static ssize_t
 fat_pread_file_unlocked(struct file *file, void *buffer, size_t length,
 			off_t offset)
@@ -4352,6 +4462,9 @@ fat_pread_file_unlocked(struct file *file, void *buffer, size_t length,
 	if (length > (size_t)(file->f_inode->i_size - offset))
 		length = (size_t)(file->f_inode->i_size - offset);
 	count = length > UINT32_MAX ? UINT32_MAX : (uint32_t)length;
+	if (state->loop_map != NULL && file->f_backing_claim != NULL &&
+	    offset >= 0 && ((uint64_t)offset & 511U) == 0 && (count & 511U) == 0)
+		return fat_loop_transfer(file, state, buffer, count, offset, 0);
 	result = fat_raw_read(state, (uint64_t)offset,
 					 buffer, count, NULL, NULL);
 	if (result != 0)
@@ -4456,6 +4569,8 @@ fat_pwrite_file_unlocked(struct file *file, const void *buffer, size_t length,
 	if ((uint64_t)offset > UINT32_MAX ||
 	    (uint64_t)count > UINT32_MAX - (uint64_t)offset)
 		return -EFBIG;
+	if (state->loop_map != NULL && file->f_backing_claim != NULL)
+		return fat_loop_transfer(file, state, (void *)buffer, length, offset, 1);
 	result = fat_raw_write(state, (uint64_t)offset,
 					  buffer, count);
 	if (result != 0)

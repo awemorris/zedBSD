@@ -27,6 +27,8 @@
 
 struct loop_extent_collection {
 	struct backing_claim_extent *extents;
+	struct fat_loop_extent *map;
+	uint64_t next_block;
 	unsigned count;
 	unsigned capacity;
 };
@@ -37,12 +39,17 @@ loop_collect_extent(uint64_t file_block, uint64_t disk_block, uint32_t count,
 {
 	struct loop_extent_collection *collection = argument;
 
-	(void)file_block;
+	if (file_block != collection->next_block || count == 0 ||
+	    file_block > UINT64_MAX - count)
+		return EIO;
+	collection->next_block += count;
 	if (collection->count == UINT32_MAX)
 		return E2BIG;
 	if (collection->extents != NULL) {
 		if (collection->count >= collection->capacity)
 			return EAGAIN;
+		collection->map[collection->count] =
+		    (struct fat_loop_extent){file_block, disk_block, count};
 		collection->extents[collection->count].block = disk_block;
 		collection->extents[collection->count].block_count = count;
 	}
@@ -51,7 +58,8 @@ loop_collect_extent(uint64_t file_block, uint64_t disk_block, uint32_t count,
 }
 
 static int
-loop_finalize_claim(struct file *backing, struct backing_claim *claim)
+loop_finalize_claim(struct file *backing, struct backing_claim *claim,
+	struct fat_loop_extent **map, unsigned *map_count)
 {
 	struct loop_extent_collection collection;
 	struct disk *disk;
@@ -70,17 +78,32 @@ loop_finalize_claim(struct file *backing, struct backing_claim *claim)
 	    kern_calloc(collection.count, sizeof(*collection.extents));
 	if (collection.extents == NULL)
 		return ENOMEM;
+	collection.map = kern_calloc(collection.count, sizeof(*collection.map));
+	if (collection.map == NULL) {
+		kern_free(collection.extents);
+		return ENOMEM;
+	}
 	collection.capacity = collection.count;
+	collection.next_block = 0;
 	collection.count = 0;
 	error = fat_file_extents(backing, loop_collect_extent, &collection);
 	if (error != 0)
 		goto out;
+	if (collection.next_block != (uint64_t)backing->f_inode->i_size / 512U) {
+		error = EIO;
+		goto out;
+	}
 	disk = backing->f_inode->i_mount->m_disk;
 	for (i = 0; i < collection.count; i++)
 		collection.extents[i].disk = disk;
 	error =
 	    backing_claim_finalize(claim, collection.extents, collection.count);
 out:
+	if (error == 0) {
+		*map = collection.map;
+		*map_count = collection.count;
+	} else
+		kern_free(collection.map);
 	kern_free(collection.extents);
 	return error;
 }
@@ -95,6 +118,7 @@ struct loop_device {
 	struct inode *backing_inode;
 	struct disk *disk;
 	struct backing_claim *claim;
+	struct fat_loop_extent *map;
 	uint64_t size_bytes;
 };
 
@@ -144,6 +168,8 @@ loop_submit(struct disk *disk, struct bio *bio)
 	    bio->b_block_count > LOOP_MAX_TRANSFER_BLOCKS)
 		return EINVAL;
 	bytes64 = (uint64_t)bio->b_block_count * LOOP_SECTOR_SIZE;
+	if (bio->b_mapped_block > UINT64_MAX / LOOP_SECTOR_SIZE)
+		return EOVERFLOW;
 	offset64 = bio->b_mapped_block * LOOP_SECTOR_SIZE;
 	if (offset64 > loop->size_bytes ||
 	    bytes64 > loop->size_bytes - offset64 || offset64 > INT32_MAX ||
@@ -251,6 +277,8 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	int error;
 	unsigned long irq;
 	struct backing_claim *claim = NULL;
+	struct fat_loop_extent *map = NULL;
+	unsigned map_count = 0;
 
 	if (disk_out == NULL)
 		return EINVAL;
@@ -262,10 +290,11 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	error = backing_claim_prepare_inode(backing_inode, BACKING_CLAIM_LOOP,
 					    &claim);
 	if (error == 0)
-		error = loop_finalize_claim(backing, claim);
+		error = loop_finalize_claim(backing, claim, &map, &map_count);
 	else if (error == EOPNOTSUPP)
 		error = 0;
 	if (error != 0) {
+		kern_free(map);
 		backing_claim_release(claim);
 		return error;
 	}
@@ -273,6 +302,7 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	if ((backing->f_inode->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) !=
 	    0) {
 		spin_unlock_irqrestore(&loop_lock, irq);
+		kern_free(map);
 		backing_claim_release(claim);
 		return EBUSY;
 	}
@@ -284,6 +314,7 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 		}
 	if (loop == NULL) {
 		spin_unlock_irqrestore(&loop_lock, irq);
+		kern_free(map);
 		backing_claim_release(claim);
 		return ENOSPC;
 	}
@@ -316,6 +347,14 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	loop->disk = disk;
 	loop->claim = claim;
 	backing->f_backing_claim = claim;
+	loop->map = map;
+	if (map != NULL) {
+		error = fat_file_set_loop_map(backing, map, map_count);
+		if (error != 0) {
+			(void)disk_destroy(disk);
+			goto fail_refs;
+		}
+	}
 	loop->size_bytes = (uint64_t)(uint32_t)backing->f_inode->i_size;
 	error = disk_create(disk);
 	if (error != 0) {
@@ -337,6 +376,9 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	return 0;
 
 fail_refs:
+	if (map != NULL && backing->f_backing_claim != NULL)
+		(void)fat_file_set_loop_map(backing, NULL, 0);
+	kern_free(map);
 	irq = spin_lock_irqsave(&loop_lock);
 	backing_inode->i_flags &= ~INODE_LOOPFILE;
 	spin_unlock_irqrestore(&loop_lock, irq);
@@ -417,6 +459,9 @@ loop_detach(struct disk *disk)
 	loop->backing_inode->i_flags &= ~INODE_LOOPFILE;
 	spin_unlock_irqrestore(&loop_lock, irq);
 	inode_release(loop->backing_inode);
+	if (loop->map != NULL)
+		(void)fat_file_set_loop_map(loop->backing, NULL, 0);
+	kern_free(loop->map);
 	loop->backing->f_backing_claim = NULL;
 	backing_claim_release(loop->claim);
 	(void)file_close(loop->backing);

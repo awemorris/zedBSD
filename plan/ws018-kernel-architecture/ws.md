@@ -6,6 +6,12 @@ WSID: `ws018`
 
 Status: p001--p015 complete; p016 complete (`q084`)
 
+Q086 follow-up: [p017 baseline](phase017-storage-baseline/phase.md),
+[p018 coherent I/O](phase018-storage-io-path/phase.md), and
+[p019 50-story acceptance](phase019-storage-acceptance/phase.md) are authorized
+and selected. Resume at q086; the older no-selected-phase statement below
+describes the q084 closure.
+
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws018-p016` (q084 refactored kernel integration)

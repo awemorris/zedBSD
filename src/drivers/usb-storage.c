@@ -73,6 +73,9 @@ struct usb_storage {
 	uint8_t write_cache_enabled;
 	uint8_t dpofua;
 	int flush_error;
+	int transport_error;
+	int media_error;
+	uint64_t command_deadline;
 	enum drv_usb_scsi_flush_policy flush_policy;
 #ifdef ZEDBSD_TEST_CHECKPOINTS
 	unsigned checkpoint_read_sequence;
@@ -117,6 +120,22 @@ static void put_be16(uint8_t value[2], uint16_t number)
 	value[1] = (uint8_t)number;
 }
 
+/* One command budget includes its recovery and REQUEST SENSE. Ownership
+ * retirement has its own bounded grace in the USB core. */
+static unsigned
+storage_timeout(struct usb_storage *storage, unsigned timeout)
+{
+	uint64_t now, remaining;
+
+	if (storage->command_deadline == 0)
+		return timeout;
+	now = sched_ticks();
+	if (now >= storage->command_deadline)
+		return 0;
+	remaining = (storage->command_deadline - now) * 10U;
+	return remaining < timeout ? (unsigned)remaining : timeout;
+}
+
 /*
  * USB storage can back swap.  Allocate its synchronous URBs while the device
  * is attached rather than while reclaim is trying to create a free page.
@@ -134,12 +153,14 @@ storage_urb_transfer(struct usb_storage *storage, struct drv_usb_urb *urb,
 #ifdef ZEDBSD_TEST_CHECKPOINTS
 	unsigned checkpoint_sequence = 0;
 #else
-	(void)storage;
 	(void)checkpoint;
 #endif
 
 	if (actual != NULL)
 		*actual = 0;
+	timeout = storage_timeout(storage, timeout);
+	if (timeout == 0)
+		return ETIMEDOUT;
 	error = drv_usb_urb_setup(urb, buffer, length, flags, timeout, NULL,
 	    NULL);
 	if (error == 0)
@@ -210,6 +231,9 @@ storage_control(struct usb_storage *storage, uint8_t request_type,
 	uint64_t deadline = 0;
 	int error;
 
+	timeout = storage_timeout(storage, timeout);
+	if (timeout == 0)
+		return ETIMEDOUT;
 	if (length > UINT16_MAX)
 		return EINVAL;
 	if (actual != NULL)
@@ -249,7 +273,13 @@ storage_urbs_alloc(struct usb_storage *storage)
 	storage->bulk_out_urb =
 	    drv_usb_urb_alloc(storage->device, storage->bulk_out, 0);
 	if (storage->control_urb != NULL && storage->bulk_in_urb != NULL &&
-	    storage->bulk_out_urb != NULL)
+	    storage->bulk_out_urb != NULL &&
+	    drv_usb_urb_reserve_sync(storage->control_urb,
+	        DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE) == 0 &&
+	    drv_usb_urb_reserve_sync(storage->bulk_in_urb,
+	        DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE) == 0 &&
+	    drv_usb_urb_reserve_sync(storage->bulk_out_urb,
+	        DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE) == 0)
 		return 0;
 	drv_usb_urb_free(storage->bulk_out_urb);
 	drv_usb_urb_free(storage->bulk_in_urb);
@@ -300,6 +330,7 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 	size_t actual, data_actual = 0, processed;
 	int error;
 
+	storage->transport_error = 0;
 	if (transferred != NULL)
 		*transferred = 0;
 	if (command_failed != NULL)
@@ -364,6 +395,12 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 	actual = 0;
 	error = storage_bulk(storage, storage->bulk_in, &csw,
 	    sizeof(csw), BOT_TIMEOUT_MS, &actual, NULL);
+	if (error == EPIPE) {
+		error = drv_usb_endpoint_clear_halt(storage->bulk_in);
+		if (error == 0)
+			error = storage_bulk(storage, storage->bulk_in, &csw,
+			    sizeof(csw), BOT_TIMEOUT_MS, &actual, NULL);
+	}
 	if (error != 0 || actual != sizeof(csw) ||
 	    get_le32(csw.signature) != BOT_CSW_SIGNATURE ||
 	    get_le32(csw.tag) != tag) {
@@ -408,7 +445,7 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 	}
 	hal_printf("usb-storage: BOT phase-error residue=%u\n", residue);
 transport_error:
-	(void)bot_reset(storage);
+	storage->transport_error = 1;
 	return error != 0 ? error : EIO;
 }
 
@@ -438,15 +475,52 @@ bot_command_sense_locked(struct usb_storage *storage, const void *cdb,
 	struct drv_usb_scsi_sense *sense, size_t *transferred,
 	int report_command_failed)
 {
-	int command_failed = 0;
-	int error;
+	struct drv_usb_scsi_sense local_sense;
+	unsigned reset_done = 0, ua_retried = 0;
+	int command_failed, error;
+	uint64_t now = sched_ticks();
 
-	if (sense != NULL)
+	storage->command_deadline = now + (3U * BOT_TIMEOUT_MS + 9U) / 10U;
+	if (sense == NULL)
+		sense = &local_sense;
+	for (;;) {
 		memset(sense, 0, sizeof(*sense));
-	error = bot_command_locked(storage, cdb, cdb_length, buffer, length,
-	    input, transferred, &command_failed, report_command_failed);
-	if (command_failed != 0 && sense != NULL)
-		(void)request_sense_locked(storage, sense);
+		command_failed = 0;
+		error = bot_command_locked(storage, cdb, cdb_length, buffer,
+		    length, input, transferred, &command_failed,
+		    report_command_failed);
+		if (error == 0)
+			break;
+		if (sched_ticks() >= storage->command_deadline)
+			break;
+		/* This storage object retains the original USB device. The core
+		 * closes admission on disconnect; a replacement binds a different
+		 * object and cannot inherit this operation's reset authorization. */
+		if (drv_usb_device_state(storage->device) !=
+		    DRV_USB_STATE_CONFIGURED)
+			break;
+		if (storage->transport_error != 0) {
+			if (reset_done != 0 || bot_reset(storage) != 0)
+				break;
+			reset_done = 1;
+			continue;
+		}
+		if (command_failed == 0 ||
+		    request_sense_locked(storage, sense) != 0)
+			break;
+		/* ASCQ 00 only: do not interpret arbitrary reset/medium-change
+		 * indications as proof that our class reset caused them. */
+		if (reset_done == 0 || ua_retried != 0 || !sense->valid ||
+		    sense->key != 0x06U || sense->asc != 0x29U ||
+		    sense->ascq != 0x00U) {
+			if (sense->valid && (sense->key == 0x06U ||
+			    (sense->key == 0x02U && sense->asc == 0x3aU)))
+				storage->media_error = EIO;
+			break;
+		}
+		ua_retried = 1;
+	}
+	storage->command_deadline = 0;
 	return error;
 }
 
@@ -631,7 +705,9 @@ static int storage_submit(struct disk *disk, struct bio *bio)
 
 	memset(&sense, 0, sizeof(sense));
 	mutex_lock(&storage->lock);
-	if (storage->flush_error != 0 &&
+	if (storage->media_error != 0) {
+		error = storage->media_error;
+	} else if (storage->flush_error != 0 &&
 	    (bio->b_op == BIO_WRITE || bio->b_op == BIO_FLUSH)) {
 		error = storage->flush_error;
 	} else if (bio->b_op == BIO_FLUSH) {
@@ -777,6 +853,20 @@ static int storage_attach(struct drv_usb_interface *interface,
 		hal_free(storage);
 		return error;
 	}
+	/* READ CAPACITY may describe 4KiB (or larger) logical sectors. Bound
+	 * BIOs by bytes, not the historical sixteen 512-byte blocks. */
+	if (storage->block_size > DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE) {
+		error = drv_usb_urb_reserve_sync(storage->bulk_in_urb,
+		    storage->block_size);
+		if (error == 0)
+			error = drv_usb_urb_reserve_sync(storage->bulk_out_urb,
+			    storage->block_size);
+		if (error != 0) {
+			storage_urbs_free(storage);
+			hal_free(storage);
+			return error;
+		}
+	}
 	disk = disk_alloc();
 	if (disk == NULL) {
 		storage_urbs_free(storage);
@@ -796,7 +886,10 @@ static int storage_attach(struct drv_usb_interface *interface,
 		DISK_READ_ONLY : 0);
 	disk->d_block_size = storage->block_size;
 	disk->d_block_count = storage->block_count;
-	disk->d_max_transfer_blocks = 16U;
+	disk->d_max_transfer_blocks =
+	    DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE / storage->block_size;
+	if (disk->d_max_transfer_blocks == 0)
+		disk->d_max_transfer_blocks = 1;
 	disk->d_ops = &storage_disk_ops;
 	disk->d_data = storage;
 	storage->disk = disk;

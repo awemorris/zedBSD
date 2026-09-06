@@ -16,6 +16,10 @@
 #include <string.h>
 
 #define XHCI_USBCMD 0x00U
+#ifndef ZEDBSD_XHCI_IMOD
+#define ZEDBSD_XHCI_IMOD 4000U
+#endif
+_Static_assert(ZEDBSD_XHCI_IMOD <= 65535U, "xHCI IMOD interval range");
 #define XHCI_USBSTS 0x04U
 #define XHCI_PAGESIZE 0x08U
 #define XHCI_CRCR 0x18U
@@ -2908,7 +2912,7 @@ xhci_start(struct drv_usb_hcd *h)
 	wr32(c->runtime, 0x28U, 1);
 	wr64(c->runtime, 0x30U, c->erst_memory.device_address);
 	wr64(c->runtime, 0x38U, c->event_memory.device_address);
-	wr32(c->runtime, 0x24U, 4000U);
+	wr32(c->runtime, 0x24U, ZEDBSD_XHCI_IMOD);
 	wr32(c->runtime, 0x20U, 2U);
 	wr32(c->operational, XHCI_CONFIG, c->max_slots);
 	wr32(c->operational, XHCI_USBSTS, 0xffffffffU);

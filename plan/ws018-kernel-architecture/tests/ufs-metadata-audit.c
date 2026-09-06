@@ -58,6 +58,7 @@ static unsigned char medium[4096];
 static unsigned char storage[512 * 512], durable[512 * 512];
 static int storage_mode, failure_write, failure_write_again, failure_sync, commit_error;
 static unsigned storage_writes, storage_syncs, functional_checks;
+static unsigned storage_data_reads;
 #define REQUIRE(x) do { __atomic_add_fetch(&functional_checks, 1U, __ATOMIC_RELAXED); if (!(x)) { \
  fprintf(stderr, "UFS%d functional check failed at line %d: %s\n", \
  UFS_AUDIT_VERSION, __LINE__, #x); abort(); } } while (0)
@@ -118,6 +119,7 @@ int disk_read(struct disk *disk, uint64_t first, uint32_t count, void *buffer)
 	(void)disk;
 	if (storage_mode) {
 		REQUIRE(first + count <= 512);
+		if (first == 160) storage_data_reads++;
 		memcpy(buffer, storage + first * 512, count * 512);
 		if (pause_read) { pause_read = 0; host_gate_pause(1); }
 		return 0;

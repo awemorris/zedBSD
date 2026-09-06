@@ -640,7 +640,7 @@ pwrite_inode(struct inode *inode,const void *buffer,size_t length,off_t offset)
 		if(amount>length-done)amount=length-done;
 		error=bmap(inode,lbn,&fragment);
 		if(error!=0){final_error=error;break;}
-		if(fragment==0){error=bmap_ensure(inode,lbn,&fragment);if(error){final_error=error;break;}memset(scratch,0,ms->super.bsize);}else{error=read_block(inode->i_mount,fragment,scratch);if(error){final_error=error;break;}}
+		if(fragment==0){error=bmap_ensure(inode,lbn,&fragment);if(error){final_error=error;break;}memset(scratch,0,ms->super.bsize);}else if(within!=0 || amount!=ms->super.bsize){error=read_block(inode->i_mount,fragment,scratch);if(error){final_error=error;break;}}
 		memcpy(scratch+within,(const uint8_t *)buffer+done,amount);error=write_block(inode->i_mount,fragment,scratch);if(error){final_error=error;break;}done+=amount;
 		if((uint64_t)inode->i_size<(uint64_t)offset+done)inode->i_size=(off_t)((uint64_t)offset+done);
 	}

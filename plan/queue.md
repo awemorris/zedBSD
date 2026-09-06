@@ -1,34 +1,20 @@
-# Queue q085: Wi-Fi command stories and recovery
+# Queue q086: FS/USB functional corrections and 50 acceptance stories
 
 Date: 2026-09-06
-Status: finished
+Status: in-progress
+Baseline: 02eeed5
+Authorization: user explicitly requested this plan, queue and execution.
+Timebox: progress review every 90 active minutes, inherited from q085.
 
-The user explicitly authorizes a coherent structural rewrite based on the static
-report, followed by acceptance using the saved
-30 managed command scenarios and implementation corrections until all pass.
-The frozen source is `a3f1ea3`; Q084 remains archived and complete.
-
-Result 2026-09-06: accepted review-3 design implemented; all 30 actual host
-command/daemon/child stories pass ordinary and ASan/UBSan execution. Focused
-common WLAN, AX211 PCI/boot/runtime and RTL8822BU/RTL8822B lifecycle gates,
-applicable userland regressions and serialized amd64/PCAT/PC98 builds pass.
-No real RF or QEMU boot was performed. No commit was made.
-
-Evidence: [P048 implementation/lifecycle results](ws004-hardware/phase048-wlan-deferred-stop/results.md)
-and [P012 individual acceptance results](ws005-networking/phase012-wifi-command-scenarios/results.md).
-Review dispositions and earlier checkpoints remain in their phase directories.
-
-| Priority | WS / Phase | Status | Purpose / dependency |
+| Order | Phase | Status | Purpose / dependency |
 | --- | --- | --- | --- |
-| 0 | [ws004-p048](ws004-hardware/phase048-wlan-deferred-stop/phase.md) | completed | Independent checked stop, visible completion and managed retirement implemented and verified |
-| 1 | [ws004-p047](ws004-hardware/phase047-wlan-driver-lifecycle-review/phase.md) | completed | Driver lifecycle corrections verified with P048 focused runtime fixtures |
-| 2 | [ws005-p012](ws005-networking/phase012-wifi-command-scenarios/phase.md) | completed | All 30 command/recovery stories, normal/sanitizer, maintained regressions and builds pass |
+| 1 | [ws018-p017](ws018-kernel-architecture/phase017-storage-baseline/phase.md) | in-progress | Baseline, four cells, image audit |
+| 2 | [ws004-p049](ws004-hardware/phase049-storage-recovery/phase.md) | pending | Finite USB ownership and BOT recovery before latch |
+| 3 | [ws018-p018](ws018-kernel-architecture/phase018-storage-io-path/phase.md) | pending | Coherent loop map and batched local FS I/O |
+| 4 | [ws018-p019](ws018-kernel-architecture/phase019-storage-acceptance/phase.md) | pending | 50 stories, native persistence, Wi-Fi regression and builds |
 
-Current authorization: the user accepted the review-3 design and explicitly
-requested implementation through scenario acceptance. The preceding stop before
-acceptance is released. P048 defines the added finite implementation scope;
-P012 retains the 30-story acceptance contract. Execute in the order above.
-
-P012 defines the finite scope and gates. Review progress each 90 active minutes;
-complete authorized useful work and retain real failures until corrected.
-No commits, aggregate make check, private credential reuse or unrelated WS work.
+Design: [implementation plan](fs-report-implementation-1.md).
+Acceptance: [50 scenarios](fs-acceptance-50.md).
+Q085 is archived unchanged. No commits or aggregate make check.
+Keep retained DMA ownership distinct from successful recovery; record native
+and hardware coverage separately. Do not mark unrun acceptance completed.

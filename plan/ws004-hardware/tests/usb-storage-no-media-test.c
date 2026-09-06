@@ -43,6 +43,25 @@ struct drv_usb_urb {
 };
 
 static struct drv_usb_device fixture_device;
+static int (*transfer_override)(struct drv_usb_urb *);
+static int bio_error;
+static size_t bio_bytes;
+static unsigned device_disconnected;
+enum drv_usb_device_state
+drv_usb_device_state(const struct drv_usb_device *device)
+{
+	(void)device;
+	return device_disconnected ? DRV_USB_STATE_NOT_ATTACHED :
+	    DRV_USB_STATE_CONFIGURED;
+}
+
+int
+drv_usb_urb_reserve_sync(struct drv_usb_urb *urb, size_t capacity)
+{
+	(void)urb;
+	(void)capacity;
+	return 0;
+}
 static struct drv_usb_endpoint fixture_bulk_in = { DRV_USB_DIR_IN };
 static struct drv_usb_endpoint fixture_bulk_out = { DRV_USB_DIR_OUT };
 static unsigned live_allocations;
@@ -281,6 +300,9 @@ drv_usb_urb_submit(struct drv_usb_urb *urb)
 {
 	uint8_t *bytes = urb->buffer;
 
+	if (transfer_override != NULL)
+		return transfer_override(urb);
+
 	if (urb->endpoint == NULL) {
 		CHECK(urb->control.request == USB_MASS_STORAGE_GET_MAX_LUN);
 		CHECK(urb->length == 1U);
@@ -394,8 +416,8 @@ void
 bio_complete(struct bio *bio, int error, size_t transferred)
 {
 	(void)bio;
-	(void)error;
-	(void)transferred;
+	bio_error = error;
+	bio_bytes = transferred;
 }
 
 static void
