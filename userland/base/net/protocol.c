@@ -15,14 +15,17 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 static int parse_decimal(const char *, size_t, uint32_t *);
 static int send_all(int, const void *, size_t);
-static int read_all(int, void *, size_t);
+static int read_all(int, void *, size_t, uint64_t);
+static int wait_input(int, uint64_t);
 static uint16_t load_u16(const unsigned char *);
 static uint32_t load_u32(const unsigned char *);
 static void store_u16(unsigned char *, uint16_t);
@@ -293,9 +296,24 @@ networkd_protocol_read_frame(
 	size_t capacity,
 	size_t maximum)
 {
+	return networkd_protocol_read_frame_timed(descriptor, header, payload,
+	    capacity, maximum, 0U);
+}
+
+/* Bounds the whole response, including trickled header and payload bytes. */
+int
+networkd_protocol_read_frame_timed(
+	int descriptor,
+	struct networkd_protocol_header *header,
+	void *payload,
+	size_t capacity,
+	size_t maximum,
+	unsigned seconds)
+{
 	char outer[NETWORKD_PROTOCOL_HEADER_MAX];
+	struct timespec now;
+	uint64_t deadline;
 	size_t outer_length;
-	ssize_t count;
 
 	/* Validates caller-owned storage before reading input. */
 	if (header == NULL || maximum > capacity ||
@@ -305,16 +323,17 @@ networkd_protocol_read_frame(
 	}
 
 	/* Reads one independently bounded newline-terminated header. */
+	deadline = 0U;
+	if (seconds != 0U) {
+		if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+			return -1;
+		deadline = ((uint64_t)now.tv_sec + seconds) * 1000000ULL +
+		    (uint64_t)now.tv_nsec / 1000U;
+	}
 	outer_length = 0U;
 	while (outer_length < sizeof(outer)) {
-		count = read(descriptor, outer + outer_length, 1U);
-		if (count < 0 && errno == EINTR)
-			continue;
-		if (count <= 0) {
-			if (count == 0)
-				errno = EPIPE;
+		if (read_all(descriptor, outer + outer_length, 1U, deadline) != 0)
 			return -1;
-		}
 		outer_length++;
 		if (outer[outer_length - 1U] == '\n')
 			break;
@@ -334,7 +353,7 @@ networkd_protocol_read_frame(
 
 	/* Reads exactly the declared payload extent. */
 	if (header->payload_length != 0U &&
-	    read_all(descriptor, payload, header->payload_length) != 0)
+	    read_all(descriptor, payload, header->payload_length, deadline) != 0)
 		return -1;
 
 	/* Reports successful completion. */
@@ -425,7 +444,8 @@ static int
 read_all(
 	int descriptor,
 	void *storage,
-	size_t length)
+	size_t length,
+	uint64_t deadline)
 {
 	unsigned char *bytes;
 	ssize_t count;
@@ -435,6 +455,8 @@ read_all(
 	bytes = storage;
 	offset = 0U;
 	while (offset < length) {
+		if (deadline != 0U && wait_input(descriptor, deadline) != 0)
+			return -1;
 		count = read(descriptor, bytes + offset, length - offset);
 		if (count < 0 && errno == EINTR)
 			continue;
@@ -448,6 +470,40 @@ read_all(
 
 	/* Reports successful completion. */
 	return 0;
+}
+
+/* Waits without renewing the transaction deadline on partial data or signals. */
+static int
+wait_input(
+	int descriptor,
+	uint64_t deadline)
+{
+	struct timespec now;
+	struct pollfd input;
+	uint64_t current;
+	uint64_t remaining;
+	int result;
+
+	for (;;) {
+		if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+			return -1;
+		current = (uint64_t)now.tv_sec * 1000000ULL +
+		    (uint64_t)now.tv_nsec / 1000U;
+		if (current >= deadline) {
+			errno = ETIMEDOUT;
+			return -1;
+		}
+		remaining = (deadline - current + 999U) / 1000U;
+		input.fd = descriptor;
+		input.events = POLLIN;
+		input.revents = 0;
+		result = poll(&input, 1U,
+		    remaining > INT_MAX ? INT_MAX : (int)remaining);
+		if (result > 0)
+			return 0;
+		if (result < 0 && errno != EINTR)
+			return -1;
+	}
 }
 
 /* Loads one protocol-order 16-bit value. */

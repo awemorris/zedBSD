@@ -63,6 +63,13 @@ struct wlan_station {
 	int blocked;
 	int closing;
 	int lifecycle_inflight;
+	int hardware_quiesce;
+	int stop_pending;
+	int stop_work_active;
+	int stop_retry_disabled;
+	int stop_error;
+	unsigned stop_attempts;
+	uint64_t stop_retry_deadline;
 	int shutdown_owned;
 	unsigned control_inflight;
 	unsigned active;
@@ -193,6 +200,7 @@ static int station_retire_controlled(struct wlan_station *station, int keep_admi
 static int station_retire(struct wlan_station *station, int keep_administrative_up);
 static int ioctl_disconnect(struct wlan_station *station, struct wlan_disconnect_request *request);
 static int ioctl_status(struct wlan_station *station, struct wlan_status_request *request);
+static int station_status_device(struct net_device *device, struct wlan_status_request *request);
 static struct net_device * station_finalize_locked(struct wlan_station *station);
 static void station_scan_failed_locked(struct wlan_station *station, int error);
 static int station_scan_publish_locked(struct wlan_station *station, uint64_t generation);
@@ -1099,6 +1107,10 @@ wlan_station_ioctl(
 	error = header_validate(device, header, expected_size);
 	if (error != 0)
 		return error;
+	/* Read-only observation does not join the mutable-operation admission gate.
+	 * Registry + station locks protect this snapshot even during checked stop. */
+	if (request == SIOCGWLANSTATUS)
+		return station_status_device(device, argument);
 	error = station_find_enter(device, &station);
 	if (error != 0)
 		return error;
@@ -1160,6 +1172,167 @@ wlan_station_close(
 	return error;
 }
 
+/* Publishes close intent before the driver starts its synchronous join. */
+void
+wlan_station_stop_request(struct wlan_station *station)
+{
+	unsigned long enabled;
+
+	if (station == NULL)
+		return;
+	enabled = spin_lock_irqsave(&station->lock);
+	if (station->used) {
+		station->stop_pending = 1;
+		station->stop_retry_deadline = 0U;
+	}
+	spin_unlock_irqrestore(&station->lock, enabled);
+}
+
+/* Only the checked close owner records completion or arms a bounded retry. */
+void
+wlan_station_stop_complete(struct wlan_station *station, int error)
+{
+	unsigned long enabled;
+	uint64_t delay;
+
+	if (station == NULL)
+		return;
+	enabled = spin_lock_irqsave(&station->lock);
+	if (station->used) {
+		station->stop_pending = error != 0;
+		station->stop_error = error;
+		station->stop_retry_deadline = 0U;
+		if (error == 0)
+			station->stop_attempts = 0U;
+		else {
+			if (station->stop_attempts < 5U)
+				station->stop_attempts++;
+			delay = (uint64_t)KERN_CLOCK_HZ <<
+			    (station->stop_attempts - 1U);
+			station->stop_retry_deadline = deadline_after(
+			    station_now_locked(station), delay);
+		}
+	}
+	spin_unlock_irqrestore(&station->lock, enabled);
+}
+
+/* Open may not reuse an epoch while independent retirement still owns it. */
+int
+wlan_station_stop_busy(struct wlan_station *station)
+{
+	unsigned long enabled;
+	int busy;
+
+	if (station == NULL)
+		return 0;
+	enabled = spin_lock_irqsave(&station->lock);
+	busy = station->used && (station->stop_pending || station->stop_work_active);
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return busy;
+}
+
+/* Teardown wins future work, but must join any already claimed callback. */
+int
+wlan_station_stop_cancel(struct wlan_station *station)
+{
+	unsigned long enabled;
+	int error;
+
+	if (station == NULL)
+		return 0;
+	enabled = spin_lock_irqsave(&station->lock);
+	station->stop_retry_disabled = 1;
+	error = station->stop_work_active ? EBUSY : 0;
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return error;
+}
+
+/* A separate thread retries stopped interfaces without network-worker progress.
+ * The work pin is distinct from active: the callback itself must acquire the
+ * common close barrier. Detach/shutdown cannot finalize a work-pinned station. */
+void
+wlan_retirement_run(uint64_t now_ticks)
+{
+	struct wlan_station *station;
+	unsigned long enabled;
+	unsigned index;
+	int run;
+	int error;
+
+	if (atomic_load_acquire(&wlan_initialized) != 2U)
+		return;
+	for (index = 0U; index < NET_DEVICE_MAX; index++) {
+		station = &wlan_stations[index];
+		enabled = spin_lock_irqsave(&station->lock);
+		run = station->used && !station->blocked && !station->shutdown_owned &&
+		    station->stop_pending && !station->stop_work_active &&
+		    !station->stop_retry_disabled && !station->lifecycle_inflight &&
+		    station->active == 0U && !station->control_inflight &&
+		    station->stop_retry_deadline != 0U &&
+		    now_ticks >= station->stop_retry_deadline &&
+		    station->ops->stop_retry != NULL;
+		if (run)
+			station->stop_work_active = 1;
+		spin_unlock_irqrestore(&station->lock, enabled);
+		if (!run)
+			continue;
+		error = station->ops->stop_retry(station->radio_context);
+		wlan_station_stop_complete(station, error);
+		enabled = spin_lock_irqsave(&station->lock);
+		station->stop_work_active = 0;
+		spin_unlock_irqrestore(&station->lock, enabled);
+	}
+}
+
+/*
+ * Holds an idle common station closed while its driver stops hardware.
+ * No radio callback or wait runs here; existing callers must retire first.
+ */
+int
+wlan_station_quiesce_begin(
+	struct wlan_station *station)
+{
+	unsigned long enabled;
+
+	/* Prevents a reset from racing another lifecycle owner or admitted caller. */
+	if (station == NULL)
+		return ENODEV;
+	enabled = spin_lock_irqsave(&station->lock);
+	if (!station->used || station->blocked) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		return ENODEV;
+	}
+	station->closing = 1;
+	if (station->active != 0U || station->control_inflight ||
+	    station->lifecycle_inflight) {
+		spin_unlock_irqrestore(&station->lock, enabled);
+		return EBUSY;
+	}
+	station->lifecycle_inflight = 1;
+	station->hardware_quiesce = 1;
+	spin_unlock_irqrestore(&station->lock, enabled);
+	return 0;
+}
+
+/*
+ * Releases the hardware-stop barrier without forgetting common ownership.
+ * The driver must retry close after a successful stop; failures stay closed.
+ */
+void
+wlan_station_quiesce_end(
+	struct wlan_station *station)
+{
+	unsigned long enabled;
+
+	/* Requires the paired barrier owner and leaves admission closed for reconciliation. */
+	enabled = spin_lock_irqsave(&station->lock);
+	if (!station->hardware_quiesce || !station->lifecycle_inflight)
+		__builtin_trap();
+	station->hardware_quiesce = 0;
+	station->lifecycle_inflight = 0;
+	spin_unlock_irqrestore(&station->lock, enabled);
+}
+
 /*
  * Detaches a station from its device after quiescing the radio.
  */
@@ -1183,7 +1356,7 @@ wlan_station_detach(
 		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
 		return ENODEV;
 	}
-	if (station->shutdown_owned ||
+	if (station->shutdown_owned || station->stop_work_active ||
 	    station->lifecycle_inflight ||
 	    station->closing) {
 		spin_unlock_irqrestore(&station->lock, enabled);
@@ -1273,7 +1446,8 @@ wlan_station_shutdown_all(
 		if (!station->used)
 			continue;
 		enabled = spin_lock_irqsave(&station->lock);
-		if (station->lifecycle_inflight) {
+		if (station->lifecycle_inflight || station->stop_work_active ||
+		    (station->stop_pending && !station->stop_retry_disabled)) {
 			busy = 1;
 		} else {
 			station->shutdown_owned = 1;
@@ -2266,6 +2440,12 @@ station_carrier_down_locked(
 
 	station->controlled_port = 0U;
 	error = net_device_set_carrier(station->device, 0);
+
+	/* A removed referenced device already has no public carrier.  This proves
+	 * only carrier absence, never the success of a key or radio inverse. */
+	if (error == ENODEV && station->device != NULL &&
+	    !net_device_carrier(station->device))
+		error = 0;
 	return error;
 }
 
@@ -2953,7 +3133,7 @@ station_enter(
 	if (station == NULL)
 		return ENODEV;
 	enabled = spin_lock_irqsave(&station->lock);
-	if (!station->used || station->blocked || station->closing) {
+	if (!station->used || station->blocked || station->closing || station->stop_pending) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ENODEV;
 	}
@@ -3070,6 +3250,7 @@ station_find_enter(
 		if (station->used &&
 		    !station->blocked &&
 		    !station->closing &&
+		    !station->stop_pending &&
 		    station->device == device) {
 			if (station->active == UINT_MAX) {
 				error = EOVERFLOW;
@@ -3107,7 +3288,8 @@ station_index_enter(
 	station = &wlan_stations[index];
 	if (station->used) {
 		enabled = spin_lock_irqsave(&station->lock);
-		if (station->used && !station->blocked && !station->closing) {
+		if (station->used && !station->blocked && !station->closing &&
+		    !station->stop_pending) {
 			if (station->active != UINT_MAX) {
 				station->active++;
 				*result = station;
@@ -3738,7 +3920,7 @@ station_retire_controlled(
 	enabled = spin_lock_irqsave(&station->lock);
 	if (scan_error == 0) {
 		station->scan_driver_active = 0;
-	} else {
+	} else if (scan_error != EBUSY) {
 		station->scan_state = WLAN_SCAN_FAILED;
 		station->scan_error = scan_error;
 	}
@@ -3843,6 +4025,26 @@ ioctl_disconnect(
 	return error;
 }
 
+/* Registry ownership protects a read-only snapshot without delaying stop. */
+static int
+station_status_device(struct net_device *device, struct wlan_status_request *request)
+{
+	unsigned long enabled;
+	unsigned index;
+	int error;
+
+	error = EOPNOTSUPP;
+	enabled = spin_lock_irqsave(&wlan_registry_lock);
+	for (index = 0U; index < NET_DEVICE_MAX; index++) {
+		if (wlan_stations[index].used && wlan_stations[index].device == device) {
+			error = ioctl_status(&wlan_stations[index], request);
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&wlan_registry_lock, enabled);
+	return error;
+}
+
 /* Reports the station state for the status ioctl. */
 static int
 ioctl_status(
@@ -3891,6 +4093,13 @@ ioctl_status(
 	request->center_frequency_mhz =
 	    station->selected.center_frequency_mhz;
 	request->security = station->selected.security;
+	request->stop_flags = station->stop_pending ? WLAN_STATUS_STOP_PENDING : 0U;
+	request->stop_error = station->stop_error;
+	if (station->stop_pending) {
+		request->state = WLAN_STATE_DISCONNECTING;
+		request->administrative_up = 0U;
+		request->controlled_port = 0U;
+	}
 	memset(request->reserved, 0, sizeof(request->reserved));
 	spin_unlock_irqrestore(&station->lock, enabled);
 	return 0;
@@ -3994,7 +4203,8 @@ station_scan_stop_result(
 			}
 			station->scan_retry_deadline = 0U;
 		} else {
-			if (station->scan_publish_pending)
+			/* An asynchronous abort still in flight is retryable, not scan failure. */
+			if (station->scan_publish_pending && error != EBUSY)
 				station_scan_failed_locked(station, error);
 			station->scan_retry_deadline = deadline_after(now, 1U);
 		}
@@ -4264,6 +4474,11 @@ station_scan_timer(
 					action = 3;
 				else
 					action = 0;
+			} else if (station->scan_publish_pending && station->scan_driver_active &&
+			    deadline_expired(now, station->scan_retry_deadline)) {
+				/* Final async stop can be busy while the scan stays RUNNING.
+				 * It must retry before any snapshot can become COMPLETE. */
+				action = 4;
 			} else if (station->scan_step_state ==
 			    WLAN_SCAN_STEP_NEED_TUNE) {
 				step = station->scan_step_index;

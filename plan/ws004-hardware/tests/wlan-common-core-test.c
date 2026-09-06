@@ -37,6 +37,9 @@ struct fake_radio {
 	int connect_start_error;
 	int disconnect_error;
 	int quiesce_error;
+	int stop_retry_error;
+	unsigned stop_retry_calls;
+	struct block_gate *stop_gate;
 	struct wlan_radio_tx_request last_tx;
 	uint8_t last_tx_frame[WLAN_MANAGEMENT_FRAME_MAX];
 	uint64_t tx_packet_numbers[64];
@@ -95,6 +98,7 @@ struct timer_task {
 
 static void block_gate_hook(void *context);
 static void test_scan_probe_band_rates(void);
+static void test_deferred_stop(void);
 int sched_yield(void);
 
 static unsigned worker_wake_calls;
@@ -189,6 +193,12 @@ uint64_t
 clock_ticks(void)
 {
 	return 0U;
+}
+
+int
+net_device_carrier(const struct net_device *device)
+{
+	return device != NULL && device->carrier != 0U;
 }
 
 int
@@ -401,6 +411,28 @@ fake_quiesce(void *context)
 	return fake->quiesce_error;
 }
 
+static int
+fake_stop_retry(void *context)
+{
+	struct fake_radio *fake = context;
+	int error;
+
+	fake->stop_retry_calls++;
+	if (fake->stop_gate != NULL)
+		block_gate_hook(fake->stop_gate);
+	if (fake->stop_retry_error != 0)
+		return fake->stop_retry_error;
+	error = wlan_station_close(fake->station);
+	if (error != 0)
+		return error;
+	error = wlan_station_quiesce_begin(fake->station);
+	if (error != 0)
+		return error;
+	fake->quiesce_calls++;
+	wlan_station_quiesce_end(fake->station);
+	return wlan_station_close(fake->station);
+}
+
 static const struct wlan_radio_ops fake_ops = {
 	.scan_channel_start = fake_scan_channel_start,
 	.scan_stop = fake_scan_stop,
@@ -413,7 +445,8 @@ static const struct wlan_radio_ops fake_ops = {
 	.key_install = fake_key_install,
 	.key_delete = fake_key_delete,
 	.keys_activate = fake_keys_activate,
-	.quiesce = fake_quiesce
+	.quiesce = fake_quiesce,
+	.stop_retry = fake_stop_retry
 };
 
 static const struct wlan_radio_ops scan_only_ops = {
@@ -1317,6 +1350,99 @@ test_scan_probe_band_rates(
 	assert(net_device_reference_balance == 0);
 }
 
+static void *
+retirement_main(void *argument)
+{
+	struct fake_radio *fake = argument;
+
+	wlan_retirement_run(fake->now);
+	return NULL;
+}
+
+/* Real common ownership and status, with only the hardware close result injected. */
+static void
+test_deferred_stop(void)
+{
+	struct net_device device;
+	struct wlan_station *station;
+	struct wlan_status_request status;
+	struct fake_radio fake;
+	struct block_gate gate;
+	pthread_t thread;
+
+	memset(&device, 0, sizeof(device));
+	memset(&fake, 0, sizeof(fake));
+	memcpy(device.name, "wlan0", 6U);
+	device.hwaddr_len = 6U;
+	device.hwaddr[0] = 2U;
+	device.flags = NET_DEVICE_UP;
+	fake.now = 1000U;
+	assert(wlan_station_test_attach(&device, &fake_ops, &fake,
+	    &test_scan_profile, fake_clock, &fake, &station) == 0);
+	fake.station = station;
+	assert(wlan_station_open(station) == 0);
+	wlan_station_stop_request(station);
+	wlan_station_stop_complete(station, EBUSY);
+	assert(wlan_station_stop_busy(station));
+	assert(wlan_station_open(station) == ENODEV);
+	request_header(&status, sizeof(status), "wlan0");
+	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
+	assert(status.stop_flags == WLAN_STATUS_STOP_PENDING);
+	assert(status.stop_error == EBUSY && status.administrative_up == 0U);
+	assert(status.state == WLAN_STATE_DISCONNECTING);
+	wlan_retirement_run(1099U);
+	assert(fake.stop_retry_calls == 0U);
+	fake.now = 1100U;
+	fake.stop_retry_error = EIO;
+	wlan_retirement_run(fake.now);
+	assert(fake.stop_retry_calls == 1U && fake.quiesce_calls == 0U);
+	assert(net_device_reference_balance == 1);
+	wlan_retirement_run(1299U);
+	assert(fake.stop_retry_calls == 1U);
+	fake.now = 1300U;
+	fake.stop_retry_error = 0;
+	wlan_retirement_run(fake.now);
+	assert(fake.stop_retry_calls == 2U && fake.quiesce_calls == 1U);
+	assert(!wlan_station_stop_busy(station));
+	request_header(&status, sizeof(status), "wlan0");
+	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
+	assert(status.stop_flags == 0U && status.stop_error == 0);
+	assert(status.state == WLAN_STATE_DOWN);
+	assert(wlan_station_open(station) == 0);
+
+	/* A claimed retry pins context, excludes teardown/open and permits status. */
+	block_gate_init(&gate);
+	fake.stop_gate = &gate;
+	wlan_station_stop_request(station);
+	wlan_station_stop_complete(station, EBUSY);
+	fake.now = 1400U;
+	assert(pthread_create(&thread, NULL, retirement_main, &fake) == 0);
+	block_gate_wait(&gate);
+	assert(wlan_station_detach(station) == EBUSY);
+	assert(wlan_station_stop_cancel(station) == EBUSY);
+	assert(wlan_station_stop_busy(station));
+	request_header(&status, sizeof(status), "wlan0");
+	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
+	assert(status.stop_flags == WLAN_STATUS_STOP_PENDING);
+	block_gate_release(&gate);
+	assert(pthread_join(thread, NULL) == 0);
+	block_gate_destroy(&gate);
+	assert(wlan_station_stop_cancel(station) == 0);
+	assert(wlan_station_detach(station) == 0);
+	assert(net_device_reference_balance == 0);
+
+	/* Reusing the registry slot cannot inherit an old retry or cancellation. */
+	memset(&fake, 0, sizeof(fake));
+	assert(wlan_station_test_attach(&device, &fake_ops, &fake,
+	    &test_scan_profile, fake_clock, &fake, &station) == 0);
+	fake.station = station;
+	wlan_retirement_run(100000U);
+	assert(fake.stop_retry_calls == 0U);
+	assert(wlan_station_detach(station) == 0);
+	assert(net_device_reference_balance == 0);
+	puts("wlan deferred stop: retry, status, failure retention, concurrent cancel/reuse PASS");
+}
+
 static void
 test_core(void)
 {
@@ -1812,9 +1938,7 @@ test_core(void)
 	query.generation = first_scan_generation;
 	assert(wlan_station_ioctl(&device, SIOCGWLANBSS, &query) == 0);
 
-	/* A failed final stop is terminal for that generation.  The later cleanup
-	 * retry may retire the producer, but must never commit or flip FAILED to
-	 * COMPLETE. */
+	/* A busy final stop is still pending; publish only after actual retirement. */
 	request_header(&scan, sizeof(scan), "wlan0");
 	scan.action = WLAN_SCAN_START;
 	assert(wlan_station_ioctl(&device, SIOCSWLANSCAN, &scan) == 0);
@@ -1823,16 +1947,17 @@ test_core(void)
 	scan_complete(station, &fake, scan.generation);
 	request_header(&scan_status, sizeof(scan_status), "wlan0");
 	assert(wlan_station_ioctl(&device, SIOCGWLANSCAN, &scan_status) == 0);
-	assert(scan_status.state == WLAN_SCAN_FAILED &&
-	    scan_status.terminal_error == EBUSY &&
+	assert(scan_status.state == WLAN_SCAN_RUNNING &&
+	    scan_status.terminal_error == 0 &&
 	    scan_status.generation == first_scan_generation);
 	fake.scan_stop_error = 0;
 	fake.now++;
 	wlan_timer_run(fake.now);
 	request_header(&scan_status, sizeof(scan_status), "wlan0");
 	assert(wlan_station_ioctl(&device, SIOCGWLANSCAN, &scan_status) == 0);
-	assert(scan_status.state == WLAN_SCAN_FAILED &&
-	    scan_status.generation == first_scan_generation);
+	assert(scan_status.state == WLAN_SCAN_COMPLETE &&
+	    scan_status.generation == scan.generation);
+	first_scan_generation = scan.generation;
 
 	/* Driver error is an IRQ-safe persistent latch; only the worker calls the
 	 * synchronous stop barrier and publishes the terminal state. */
@@ -2105,7 +2230,7 @@ test_core(void)
 	fake.scan_stop_error = EBUSY;
 	assert(wlan_station_close(station) == EBUSY);
 	request_header(&status, sizeof(status), "wlan0");
-	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == ENODEV);
+	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
 	fake.scan_stop_error = 0;
 	assert(wlan_station_close(station) == 0);
 	assert(wlan_station_test_secrets_clear(station));
@@ -2133,12 +2258,20 @@ test_core(void)
 		    &report) == 0);
 		block_gate_wait(&gate);
 		fake.quiesce_error = EBUSY;
+		wlan_station_stop_request(shutdown_station);
+		wlan_station_stop_complete(shutdown_station, EBUSY);
 		assert(wlan_station_shutdown_all() == EBUSY);
 		block_gate_release(&gate);
 		assert(pthread_join(thread, NULL) == 0);
 		assert(report.error == 0);
 		block_gate_destroy(&gate);
 	}
+	/* Shutdown cannot consume a pending work token; the independent thread
+	 * may still finish it after the registry has closed new attachments. */
+	assert(net_device_reference_balance == 2);
+	shutdown_fake.now += 100U;
+	wlan_retirement_run(shutdown_fake.now);
+	assert(!wlan_station_stop_busy(shutdown_station));
 	assert(wlan_station_shutdown_all() == EBUSY);
 	assert(net_device_reference_balance == 1);
 	assert_station_retired(shutdown_station);
@@ -2147,7 +2280,7 @@ test_core(void)
 	wlan_timer_run(shutdown_fake.now);
 	assert(shutdown_fake.scan_start_calls == shutdown_scan_calls);
 	request_header(&status, sizeof(status), "wlan0");
-	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == ENODEV);
+	assert(wlan_station_ioctl(&device, SIOCGWLANSTATUS, &status) == 0);
 	assert(wlan_station_test_secrets_clear(station));
 	unsupported_device.carrier = 1U;
 	unsupported_device.flags |= NET_DEVICE_RUNNING;
@@ -2167,6 +2300,8 @@ int
 main(void)
 {
 	test_frame_parser();
+	wlan_core_init();
+	test_deferred_stop();
 	test_core();
 	assert(wlan_station_shutdown_all() == 0);
 	return 0;

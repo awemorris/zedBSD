@@ -65,6 +65,7 @@ static struct {
 	unsigned clock_fail_at;
 	unsigned clock_stalled;
 	unsigned auto_scan;
+	unsigned connect_missing_until;
 	unsigned connect_busy_once;
 	unsigned connect_fatal;
 	unsigned connect_immediate_fatal;
@@ -76,6 +77,8 @@ static struct {
 	unsigned connect_retry_once;
 	unsigned stdout_tty;
 	unsigned interface_up;
+	uint32_t stop_flags;
+	int status_error;
 	unsigned output_overflow;
 	unsigned secret_eintr_once;
 	unsigned secret_eintr_seen;
@@ -120,6 +123,8 @@ static int fixture_ferror(FILE *);
 static int fixture_isatty(int);
 static void fixture_expect_machine_terminal(const char *, int);
 static void fixture_machine_connect(void);
+static void fixture_machine_rapid_scans(void);
+int fixture_validate_wifi_stream(const void *, size_t, int);
 static void fixture_machine_secret_failures(void);
 static void fixture_machine_simple_operations(void);
 static void fixture_disconnect_retry(void);
@@ -574,7 +579,8 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 		request->generation = FIXTURE_SCAN_GENERATION;
 		request->terminal_error = 0;
 		if (request->action == WLAN_SCAN_START) {
-			fixture_require(fixture.scan_starts == 0U, "scan",
+			fixture_require(fixture.scan_starts == 0U ||
+			    fixture.connect_missing_until != 0U, "scan",
 			    "duplicate start");
 			fixture.scan_starts++;
 			request->state = WLAN_SCAN_RUNNING;
@@ -677,7 +683,8 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 			fixture_errno = EBUSY;
 			return -1;
 		}
-		if (fixture.auto_scan && fixture.connect_attempts == 1U) {
+		if ((fixture.auto_scan && fixture.connect_attempts == 1U) ||
+		    fixture.connect_attempts <= fixture.connect_missing_until) {
 			fixture_errno = ENOENT;
 			return -1;
 		}
@@ -703,13 +710,18 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 		    sizeof(*header), sizeof(*request) - sizeof(*header)), "status",
 		    "status request input");
 		fixture_record(command, 0U);
+		if (fixture.status_error != 0) {
+			fixture_errno = fixture.status_error;
+			return -1;
+		}
+		request->stop_flags = fixture.stop_flags;
 		if (!fixture.connect_seen) {
 			request->scan_generation = FIXTURE_SCAN_GENERATION;
 			request->snapshot_generation = FIXTURE_SCAN_GENERATION;
 			request->cache_sequence = 1U;
 			request->state = WLAN_STATE_IDLE;
 			request->scan_state = WLAN_SCAN_COMPLETE;
-			request->administrative_up = 1U;
+			request->administrative_up = fixture.interface_up;
 			return 0;
 		}
 		if (fixture.connect_generation_replaced) {
@@ -874,6 +886,36 @@ fixture_machine_connect(void)
 	    "authorized=1 error=0\n") != NULL &&
 	    strstr(fixture.output, FIXTURE_PASSPHRASE) == NULL,
 	    "machine connect", "connect records or secret output");
+}
+
+/* Many quick scan completions must not overflow the real daemon consumer. */
+static void
+fixture_machine_rapid_scans(void)
+{
+	static const uint8_t secret[] = FIXTURE_PASSPHRASE;
+	char interface[] = "wlan0";
+	char ssid[] = FIXTURE_SSID;
+	char *arguments[] = { "wifi", "--machine", "--passphrase-fd=4",
+	    interface, "connect", ssid, NULL };
+	const char *selecting;
+
+	fixture_reset();
+	fixture.auto_scan = 1U;
+	fixture.connect_missing_until = 80U;
+	fixture.secret_input = secret;
+	fixture.secret_input_length = sizeof(secret) - 1U;
+	fixture_require(fixture_invoke(6, arguments, NULL, 0U) == 0,
+	    "rapid scan stream", "eventual connect");
+	fixture_require(fixture.connect_attempts == 81U,
+	    "rapid scan stream", "more selection rounds than the record ceiling");
+	fixture_expect_machine_terminal("rapid scan stream", 0);
+	selecting = strstr(fixture.output, "state=selecting");
+	fixture_require(selecting != NULL &&
+	    strstr(selecting + 1, "state=selecting") == NULL,
+	    "rapid scan stream", "one machine selection announcement");
+	fixture_require(fixture_validate_wifi_stream(fixture.output,
+	    fixture.output_length, 0) == 0, "rapid scan stream",
+	    "production daemon accepts the producer's complete stream");
 }
 
 static void
@@ -1353,10 +1395,17 @@ fixture_quiet_interface_control(void)
 	    "quiet interface", "down status");
 	fixture_require(fixture_invoke(4, down, NULL, 0U) == 0,
 	    "quiet interface", "idempotent down status");
-	fixture_require(fixture.interface_up == 0U && fixture.ioctl_calls == 6U,
+	fixture_require(fixture.interface_up == 0U && fixture.ioctl_calls == 8U,
 	    "quiet interface", "down state or ioctl count");
 	fixture_require(fixture.output_length == 0U &&
 	    fixture.error_length == 0U, "quiet interface", "unexpected output");
+	fixture.stop_flags = WLAN_STATUS_STOP_PENDING;
+	fixture_require(fixture_invoke(4, down, NULL, 0U) == 1,
+	    "pending down", "administrative down falsely proved physical stop");
+	fixture.stop_flags = 0U;
+	fixture.status_error = EIO;
+	fixture_require(fixture_invoke(4, down, NULL, 0U) == 1,
+	    "unobserved down", "status failure falsely proved physical stop");
 }
 
 static void
@@ -1837,6 +1886,7 @@ int
 main(void)
 {
 	fixture_machine_connect();
+	fixture_machine_rapid_scans();
 	fixture_machine_secret_failures();
 	fixture_machine_simple_operations();
 	fixture_disconnect_retry();

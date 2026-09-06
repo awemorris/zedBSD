@@ -53,6 +53,24 @@ static const struct fixture_call *fixture_calls;
 static size_t fixture_call_count;
 static size_t fixture_call_index;
 
+/* This preparation-only fixture has no enclosing request deadline. */
+int
+netutil_ifindex(int descriptor, const char *name, uint32_t *result)
+{
+	(void)descriptor;
+	(void)name;
+	(void)result;
+	/* These preparation results contain no list cache to look up. */
+	expect(0, "unexpected observation identity lookup");
+	return -1;
+}
+
+uint64_t
+netutil_monotonic_us(void)
+{
+	return 1000000ULL;
+}
+
 /*
  * Provides the test libc error slot.
  */

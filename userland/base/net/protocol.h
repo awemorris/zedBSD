@@ -33,6 +33,15 @@
 #define NETWORKD_ROLLBACK_DIAGNOSTIC_MAX	512U
 #define NETWORKD_ROLLBACK_PATH_MAX	255U
 
+/* One daemon transaction, including teardown; clients allow transport margin. */
+#define NETWORKD_WIFI_CLEANUP_SECONDS	10U
+#define NETWORKD_WIFI_TRANSPORT_MARGIN	15U
+/* A wired request can first wait for a background Wi-Fi actor to retire. */
+#define NETWORKD_CONTROL_YIELD_SECONDS	(NETWORKD_WIFI_CLEANUP_SECONDS + 5U)
+#define NETWORKD_WIFI_REQUEST_SECONDS(op) \
+	((op) == NETWORKD_OP_WIFI_CONNECT || (op) == NETWORKD_OP_WIFI_ENABLE ? \
+	90U : ((op) == NETWORKD_OP_WIFI_PROFILES_CHANGED ? 2U : 30U))
+
 enum networkd_opcode {
 	NETWORKD_OP_SHOW = 1,
 	NETWORKD_OP_UP = 2,
@@ -123,5 +132,7 @@ int networkd_protocol_write_frame(int,
 int networkd_protocol_read_frame(int, struct networkd_protocol_header *,
 	void *, size_t, size_t);
 void networkd_protocol_clear(void *, size_t);
+int networkd_protocol_read_frame_timed(int, struct networkd_protocol_header *,
+	void *, size_t, size_t, unsigned);
 
 #endif

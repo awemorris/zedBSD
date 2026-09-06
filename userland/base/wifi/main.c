@@ -633,6 +633,7 @@ interface_command(int descriptor, const char *interface,
 	size_t interface_length, int bring_up)
 {
 	struct ifreq request;
+	struct wlan_status_request status;
 	int error;
 
 	if (interface == NULL || interface_length == 0U ||
@@ -648,6 +649,15 @@ interface_command(int descriptor, const char *interface,
 	else
 		request.ifr_flags &= (int)~IFF_UP;
 	error = ioctl_error(descriptor, SIOCSIFFLAGS, &request);
+	/* Administrative down alone cannot prove a void driver close succeeded. */
+	if (error == 0 && !bring_up) {
+		error = status_request(descriptor, interface, interface_length, &status);
+		if (error == 0 && (status.stop_flags & WLAN_STATUS_STOP_PENDING) != 0U)
+			error = EBUSY;
+		if (error == 0 && (status.administrative_up || status.associated ||
+		    status.key_installed || status.controlled_port))
+			error = EBUSY;
+	}
 	if (error == 0) {
 		if (wifi_machine) {
 			if (printf("WIFI1 interface administrative=%u\n",
@@ -833,6 +843,7 @@ connect_command(int descriptor, const char *interface,
 	int busy_announced = 0;
 	int retry_announced = 0;
 	int scan_owned = 0;
+	int selecting_announced = 0;
 	int start_announced = 0;
 	int error;
 
@@ -1074,7 +1085,7 @@ connect_command(int descriptor, const char *interface,
 				continue;
 			}
 			scan_owned = 0;
-			if (!wifi_quiet &&
+			if (!wifi_quiet && (!wifi_machine || !selecting_announced) &&
 			    ((wifi_machine &&
 			    printf("WIFI1 connect state=selecting generation=0 "
 			    "error=0\n") < 0) ||
@@ -1083,6 +1094,7 @@ connect_command(int descriptor, const char *interface,
 				error = EIO;
 				goto out_secret;
 			}
+			selecting_announced = 1;
 			error = monotonic_ticks(&now, &frequency);
 			if (error != 0 || now >= deadline) {
 				error = error != 0 ? error : ETIMEDOUT;
@@ -1552,7 +1564,7 @@ print_status(const struct wlan_status_request *status)
 		    "snapshot-generation=%llu administrative=%u "
 		    "authenticated=%u associated=%u key=%u authorized=%u "
 		    "retries=%u error=%d deadline=%llu bssid=%s channel=%u "
-		    "frequency=%u rssi=%d security=%08x\n", status->state,
+		    "frequency=%u rssi=%d security=%08x stop-pending=%u stop-error=%d\n", status->state,
 		    status->scan_state,
 		    (unsigned long long)status->operation_generation,
 		    (unsigned long long)status->scan_generation,
@@ -1564,7 +1576,8 @@ print_status(const struct wlan_status_request *status)
 		    (unsigned long long)status->deadline_ticks,
 		    hexadecimal_bssid, status->channel,
 		    status->center_frequency_mhz, status->rssi_dbm,
-		    status->security) < 0)
+		    status->security, (status->stop_flags & WLAN_STATUS_STOP_PENDING) != 0U,
+		    status->stop_error) < 0)
 			return EIO;
 		return 0;
 	}
@@ -1578,6 +1591,10 @@ print_status(const struct wlan_status_request *status)
 	    status->key_installed != 0U ? "yes" : "no",
 	    status->controlled_port != 0U ? "yes" : "no",
 	    status->retry_count, status->terminal_error) < 0)
+		return EIO;
+	if (printf(" stop-pending=%s stop-error=%d",
+	    (status->stop_flags & WLAN_STATUS_STOP_PENDING) != 0U ? "yes" : "no",
+	    status->stop_error) < 0)
 		return EIO;
 	if (status->deadline_ticks != 0U &&
 	    printf(" deadline=%llu",

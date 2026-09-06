@@ -50,6 +50,10 @@ _Static_assert(sizeof(struct wlan_status_request) == 136U,
     "WLAN status layout");
 _Static_assert(offsetof(struct wlan_status_request, bssid) == 104U,
     "WLAN status BSSID offset");
+_Static_assert(offsetof(struct wlan_status_request, stop_flags) == 120U,
+    "WLAN stop flags occupy the first v1 reserved word");
+_Static_assert(offsetof(struct wlan_status_request, stop_error) == 124U,
+    "WLAN stop error occupies the second v1 reserved word");
 
 #define ASSERT_IOCTL(command, number, type) \
 	_Static_assert(IOC_SIZE(command) == sizeof(type), "encoded size"); \

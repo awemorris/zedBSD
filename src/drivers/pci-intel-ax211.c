@@ -193,6 +193,10 @@ struct ax211_pci_controller {
 	unsigned detaching;
 	unsigned ready;
 	unsigned quarantined;
+	/* True only after every runtime/DMA owner passed the checked stop. */
+	unsigned session_stopped;
+	unsigned close_pending;
+	uint64_t reject_log_deadline;
 	unsigned net_live;
 	unsigned station_attached;
 };
@@ -230,6 +234,8 @@ static int ax211_pci_operations_join_locked(
 	struct ax211_pci_controller *controller, uint64_t deadline);
 static int ax211_pci_station_close_wait(struct wlan_station *station,
 	uint64_t deadline);
+static int ax211_pci_close_locked(struct ax211_pci_controller *);
+static int ax211_pci_log_rejection(struct ax211_pci_controller *);
 static void ax211_pci_recovery_latch_locked(
 	struct ax211_pci_controller *controller, int error);
 static int ax211_pci_recovery_run_locked(
@@ -425,6 +431,7 @@ static int ax211_radio_keys_activate(void *context, uint64_t generation,
 	uint64_t pairwise_key_generation, uint64_t group_key_generation,
 	uint64_t deadline);
 static int ax211_radio_quiesce(void *context);
+static int ax211_radio_stop_retry(void *context);
 
 static const struct drv_pci_id ax211_pci_ids[] = {
 	{
@@ -459,7 +466,8 @@ static const struct wlan_radio_ops ax211_radio_ops = {
 	.key_install = ax211_radio_key_install,
 	.key_delete = ax211_radio_key_delete,
 	.keys_activate = ax211_radio_keys_activate,
-	.quiesce = ax211_radio_quiesce
+	.quiesce = ax211_radio_quiesce,
+	.stop_retry = ax211_radio_stop_retry
 };
 
 static const struct net_device_ops ax211_net_ops = {
@@ -1392,7 +1400,7 @@ ax211_pci_recovery_run_locked(
 		ax211_pci_operation_leave_locked(controller);
 	stop_error = ax211_pci_session_stop(controller);
 	controller->recovery_running = 0U;
-	controller->quarantined = 1U;
+	controller->quarantined = stop_error != 0;
 	if (pin_error != 0 && pin_error != ENODEV)
 		hal_printf("intel-ax211: recovery station pin failed (%d)\n",
 		    pin_error);
@@ -1418,6 +1426,9 @@ ax211_pci_graph_detach(
 	uint64_t deadline;
 	int error;
 
+	error = wlan_station_stop_cancel(controller->station);
+	if (error != 0)
+		return error;
 	controller->operation_admission_open = 0U;
 	deadline = ax211_pci_lifecycle_deadline();
 	error = ax211_pci_operations_join_locked(controller, deadline);
@@ -1429,7 +1440,7 @@ ax211_pci_graph_detach(
 	/* Both joins may synchronously invoke radio callbacks.  Admission is
 	 * already closed; drop the hardware lifecycle lock across those edges. */
 	mutex_unlock(&controller->lifecycle_lock);
-	error = ax211_pci_station_close_wait(station, deadline);
+	error = ax211_pci_station_close_wait(station, ax211_pci_lifecycle_deadline());
 	if (error == 0 || error == ENODEV)
 		error = wlan_station_detach(station);
 	mutex_lock(&controller->lifecycle_lock);
@@ -1462,6 +1473,7 @@ ax211_pci_session_stop(
 		    (unsigned)controller->connection_generation,
 		    controller->association.phase, controller->association.step);
 	controller->operation_admission_open = 0U;
+	controller->session_stopped = 0U;
 	controller->recovery_pending = 0U;
 	controller->recovery_error = 0;
 	controller->recovery_generation = 0U;
@@ -1525,6 +1537,7 @@ ax211_pci_session_stop(
 	}
 	if (result == 0) {
 		ax211_pci_connection_clear(controller);
+		controller->session_stopped = 1U;
 		/* A global reset is stronger than a failed per-resource rollback. */
 		association_result = 0;
 	}
@@ -2253,6 +2266,8 @@ ax211_pci_scan_command_dispatch(
 		    &controller->scan_session, bytes, length,
 		    controller->hardware_epoch, now);
 		if (result == INTEL_AX211_SCAN_SESSION_OK) {
+			/* This report only latches under station->lock and wakes the worker;
+			 * unlike TX completion, it cannot synchronously call a radio op. */
 			report_result = wlan_station_report_scan_channel_ready(
 			    controller->station,
 			    controller->scan_session.common_generation,
@@ -2378,6 +2393,7 @@ ax211_pci_rx_dispatch(
 			(void)intel_ax211_bss_cache_observe(
 			    &controller->bss_staging_cache, &bss_entry);
 		}
+		/* Scan observation copies/latches data without entering radio callbacks. */
 		(void)wlan_station_report_scan_frame(controller->station,
 		    controller->scan_session.common_generation, mpdu.frame,
 		    mpdu.length, mpdu.rssi_dbm, mpdu.channel);
@@ -2411,6 +2427,7 @@ ax211_pci_scan_report_error(
 		    (unsigned)controller->scan_session.common_generation,
 		    result, error, controller->scan_session.phase);
 		ax211_pci_bss_staging_discard(controller);
+		/* This latch only wakes common work; lifecycle_lock remains the owner. */
 		(void)wlan_station_report_scan_error(controller->station,
 		    controller->scan_session.common_generation, error);
 	}
@@ -3649,7 +3666,7 @@ ax211_pci_key_fail_closed(
 	    controller->association.phase, controller->association.step,
 	    controller->association.resources);
 	stop_error = ax211_pci_session_stop(controller);
-	controller->quarantined = 1U;
+	controller->quarantined = stop_error != 0;
 	if (stop_error != 0)
 		return stop_error;
 	return error != 0 ? error : EIO;
@@ -3881,15 +3898,32 @@ ax211_net_open(
 	if (controller == NULL)
 		return ENODEV;
 	mutex_lock(&controller->lifecycle_lock);
+
+	/* Independent retirement must release its epoch before open can reuse it. */
+	if (wlan_station_stop_busy(controller->station)) {
+		mutex_unlock(&controller->lifecycle_lock);
+		return EBUSY;
+	}
+	/* Finishes an earlier stopped epoch before publishing a fresh scan profile. */
+	if (!controller->detaching && controller->ready && controller->station_attached &&
+	    (controller->close_pending || controller->session_stopped)) {
+		error = ax211_pci_close_locked(controller);
+		if (error != 0) {
+			mutex_unlock(&controller->lifecycle_lock);
+			return error;
+		}
+	}
 	if (controller->detaching || !controller->ready ||
 	    controller->quarantined || !controller->station_attached)
 		error = ENODEV;
 	else if (controller->runtime_active)
-		error = 0;
+		error = controller->operation_admission_open &&
+		    !controller->recovery_pending && !controller->recovery_running ? 0 : EBUSY;
 	else if (controller->operations_active != 0U)
 		error = EBUSY;
 	else {
 		controller->operation_admission_open = 0U;
+		controller->session_stopped = 0U;
 		dma_device = drv_pci_device_dma(controller->device);
 		memset(&table, 0, sizeof(table));
 		memset(&nvm, 0, sizeof(nvm));
@@ -4058,16 +4092,61 @@ ax211_net_open(
 	return error;
 }
 
+/* Reconciles common retirement only after all driver operations can be joined. */
+static int
+ax211_pci_close_locked(
+	struct ax211_pci_controller *controller)
+{
+	struct wlan_station *station;
+	int error;
+	int stop_error;
+
+	/* Denies new forwards while preserving every existing lease until it returns. */
+	controller->close_pending = 1U;
+	controller->operation_admission_open = 0U;
+	error = ax211_pci_operations_join_locked(controller, ax211_pci_lifecycle_deadline());
+	if (error != 0)
+		return error;
+	station = controller->station_attached ? controller->station : NULL;
+
+	/* Gives common retirement its own bounded window outside the callback mutex. */
+	mutex_unlock(&controller->lifecycle_lock);
+	error = station == NULL ? ENODEV :
+	    ax211_pci_station_close_wait(station, ax211_pci_lifecycle_deadline());
+	mutex_lock(&controller->lifecycle_lock);
+	if (error != 0 && ax211_pci_log_rejection(controller))
+		hal_printf("intel-ax211: common close requires checked stop (%d)\n", error);
+
+	/* A failed inverse still requires a checked stop, never a reset under a live pin. */
+	if (controller->operations_active != 0U)
+		return EBUSY;
+	stop_error = wlan_station_quiesce_begin(station);
+	if (stop_error != 0)
+		return stop_error;
+	stop_error = ax211_pci_session_stop(controller);
+	wlan_station_quiesce_end(station);
+	controller->quarantined = stop_error != 0;
+	if (stop_error != 0)
+		return stop_error;
+
+	/* Successful global stop lets outstanding key/association inverses prove absence. */
+	mutex_unlock(&controller->lifecycle_lock);
+	error = ax211_pci_station_close_wait(station, ax211_pci_lifecycle_deadline());
+	mutex_lock(&controller->lifecycle_lock);
+	if (error == 0)
+		controller->close_pending = 0U;
+	return error;
+}
+
+/* Closes the epoch without losing the ability to retry an incomplete close. */
 static void
 ax211_net_close(
 	struct net_device *device)
 {
 	struct ax211_pci_controller *controller;
-	struct wlan_station *station;
-	uint64_t deadline;
-	int stop_error;
 	int error;
 
+	/* Retires carrier visibility before closing driver admission. */
 	if (device == NULL)
 		return;
 	(void)net_device_set_carrier(device, 0);
@@ -4075,25 +4154,28 @@ ax211_net_close(
 	if (controller == NULL)
 		return;
 	mutex_lock(&controller->lifecycle_lock);
-	controller->operation_admission_open = 0U;
-	deadline = ax211_pci_lifecycle_deadline();
-	error = ax211_pci_operations_join_locked(controller, deadline);
-	station = error == 0 && controller->station_attached ?
-	    controller->station : NULL;
+	wlan_station_stop_request(controller->station);
+	error = ax211_pci_close_locked(controller);
+	wlan_station_stop_complete(controller->station, error);
+	if (error != 0 && ax211_pci_log_rejection(controller))
+		hal_printf("intel-ax211: checked close pending (%d)\n", error);
 	mutex_unlock(&controller->lifecycle_lock);
-	if (error == 0 && station != NULL)
-		error = ax211_pci_station_close_wait(station, deadline);
-	mutex_lock(&controller->lifecycle_lock);
-	if (error == 0 || error == ENODEV) {
-		stop_error = ax211_pci_session_stop(controller);
-		if (stop_error != 0)
-			error = stop_error;
-	}
-	if (error != 0 && error != ENODEV) {
-		controller->quarantined = 1U;
-		hal_printf("intel-ax211: checked close failed (%d)\n", error);
-	}
-	mutex_unlock(&controller->lifecycle_lock);
+}
+
+/* Bounds repeated rejection diagnostics while the lifecycle mutex is held. */
+static int
+ax211_pci_log_rejection(
+	struct ax211_pci_controller *controller)
+{
+	uint64_t now;
+
+	/* Keeps the first diagnostic and emits at most one retry diagnostic per second. */
+	now = clock_ticks();
+	if (now < controller->reject_log_deadline)
+		return 0;
+	controller->reject_log_deadline = UINT64_MAX - now < KERN_CLOCK_HZ ?
+	    UINT64_MAX : now + KERN_CLOCK_HZ;
+	return 1;
 }
 
 /* Keeps Ethernet conversion and CCMP framing in the common WLAN station. */
@@ -4267,12 +4349,17 @@ ax211_net_ioctl(
 	mutex_lock(&controller->lifecycle_lock);
 	if (!controller->station_attached || controller->detaching)
 		result = ENODEV;
+	else if (request == SIOCGWLANSTATUS || request == SIOCGWLANSCAN ||
+	    request == SIOCGWLANBSS ||
+	    (request == SIOCSWLANDISCONNECT && controller->session_stopped))
+		result = 0;
 	else if (!controller->runtime_active || controller->quarantined ||
 	    controller->recovery_pending || controller->recovery_running)
 		result = ENETDOWN;
 	else
 		result = 0;
-	if (request == SIOCSWLANCONNECT && result != 0)
+	if (request == SIOCSWLANCONNECT && result != 0 &&
+	    ax211_pci_log_rejection(controller))
 		hal_printf("intel-ax211: connect ioctl rejected result=%d runtime=%u "
 		    "quarantined=%u recovery=%u/%u attached=%u detaching=%u\n",
 		    result, controller->runtime_active, controller->quarantined,
@@ -4319,7 +4406,7 @@ ax211_radio_scan_channel_start(
 
 	mutex_lock(&controller->lifecycle_lock);
 	if (!controller->ready || controller->detaching ||
-	    controller->quarantined || controller->recovery_pending ||
+	    controller->quarantined || controller->close_pending || controller->recovery_pending ||
 	    controller->recovery_running || !controller->runtime_active ||
 	    !controller->scan_initialized || !controller->station_attached ||
 	    controller->station == NULL) {
@@ -4456,13 +4543,11 @@ ax211_radio_scan_stop(
 	    "error=%d\n", (unsigned)generation, phase, result, error);
 	ax211_pci_bss_staging_discard(controller);
 	cleanup_error = ax211_pci_session_stop(controller);
-	controller->quarantined = 1U;
-	if (cleanup_error != 0)
-		error = cleanup_error;
-	if (error == 0)
-		error = EIO;
+	controller->quarantined = cleanup_error != 0;
 	mutex_unlock(&controller->lifecycle_lock);
-	return error;
+
+	/* The scan failed, but a proven global stop completed its retirement. */
+	return cleanup_error;
 }
 
 static int
@@ -4485,17 +4570,19 @@ ax211_radio_connect_start(
 	    clock_ticks() >= deadline)
 		return EINVAL;
 	mutex_lock(&controller->lifecycle_lock);
-	if (!controller->runtime_active || controller->quarantined ||
+	if (!controller->runtime_active || controller->close_pending || controller->quarantined ||
 	    controller->recovery_pending || controller->recovery_running ||
 	    !controller->tx_ring_allocated || controller->association_initialized ||
 	    controller->connection_generation != 0U) {
-		hal_printf("intel-ax211: connect admission rejected runtime=%u "
-		    "quarantined=%u recovery=%u/%u tx-ring=%u association=%u "
-		    "generation=%u\n", controller->runtime_active,
-		    controller->quarantined, controller->recovery_pending,
-		    controller->recovery_running, controller->tx_ring_allocated,
-		    controller->association_initialized,
-		    (unsigned)controller->connection_generation);
+		if (ax211_pci_log_rejection(controller)) {
+			hal_printf("intel-ax211: connect admission rejected runtime=%u "
+			    "quarantined=%u recovery=%u/%u tx-ring=%u association=%u "
+			    "generation=%u\n", controller->runtime_active,
+			    controller->quarantined, controller->recovery_pending,
+			    controller->recovery_running, controller->tx_ring_allocated,
+			    controller->association_initialized,
+			    (unsigned)controller->connection_generation);
+		}
 		result = controller->runtime_active ? EBUSY : ENETDOWN;
 		mutex_unlock(&controller->lifecycle_lock);
 		return result;
@@ -4586,7 +4673,7 @@ ax211_radio_disconnect(
 			    controller->association.phase,
 			    controller->association.step,
 			    controller->association.failure);
-		if (result != 0 && controller->runtime_active)
+		if (result != 0 && result != ESTALE && controller->runtime_active)
 			result = ax211_pci_key_fail_closed(controller, result);
 	}
 	mutex_unlock(&controller->lifecycle_lock);
@@ -4613,15 +4700,18 @@ ax211_radio_management_transmit(
 	    deadline == 0U)
 		return EINVAL;
 	mutex_lock(&controller->lifecycle_lock);
-	if (!controller->runtime_active || controller->recovery_pending ||
+	if (!controller->runtime_active || controller->close_pending ||
+	    controller->recovery_pending ||
 	    controller->recovery_running || !controller->tx_ring.enabled ||
 	    controller->connection_generation != generation) {
-		hal_printf("intel-ax211: management TX rejected runtime=%u "
-		    "recovery=%u/%u ring=%u expected-generation=%u generation=%u\n",
-		    controller->runtime_active, controller->recovery_pending,
-		    controller->recovery_running, controller->tx_ring.enabled,
-		    (unsigned)controller->connection_generation,
-		    (unsigned)generation);
+		if (ax211_pci_log_rejection(controller)) {
+			hal_printf("intel-ax211: management TX rejected runtime=%u "
+			    "recovery=%u/%u ring=%u expected-generation=%u generation=%u\n",
+			    controller->runtime_active, controller->recovery_pending,
+			    controller->recovery_running, controller->tx_ring.enabled,
+			    (unsigned)controller->connection_generation,
+			    (unsigned)generation);
+		}
 		result = ENETDOWN;
 	} else {
 		memset(&request, 0, sizeof(request));
@@ -4666,7 +4756,8 @@ ax211_radio_association_set(
 	    deadline == 0U || clock_ticks() >= deadline)
 		return EINVAL;
 	mutex_lock(&controller->lifecycle_lock);
-	if (!controller->runtime_active || controller->recovery_pending ||
+	if (!controller->runtime_active || controller->close_pending ||
+	    controller->recovery_pending ||
 	    controller->recovery_running ||
 	    !controller->association_initialized ||
 	    !controller->selected_bss_valid)
@@ -4741,7 +4832,7 @@ ax211_radio_association_clear(
 	else {
 		controller->control_deadline_ticks = deadline;
 		result = ax211_pci_assoc_rollback(controller, generation);
-		if (result != 0 && controller->runtime_active)
+		if (result != 0 && result != ESTALE && controller->runtime_active)
 			result = ax211_pci_key_fail_closed(controller, result);
 	}
 	mutex_unlock(&controller->lifecycle_lock);
@@ -4765,7 +4856,8 @@ ax211_radio_frame_transmit(
 	    request->length == 0U || request->deadline_ticks == 0U)
 		return EINVAL;
 	mutex_lock(&controller->lifecycle_lock);
-	if (!controller->runtime_active || controller->recovery_pending ||
+	if (!controller->runtime_active || controller->close_pending ||
+	    controller->recovery_pending ||
 	    controller->recovery_running || !controller->tx_ring.enabled)
 		result = ENETDOWN;
 	else if (controller->connection_generation != request->generation)
@@ -4841,7 +4933,8 @@ ax211_radio_key_install(
 		return EINVAL;
 	mutex_lock(&controller->lifecycle_lock);
 	memset(&key, 0, sizeof(key));
-	if (!controller->runtime_active || controller->recovery_pending ||
+	if (!controller->runtime_active || controller->close_pending ||
+	    controller->recovery_pending ||
 	    controller->recovery_running || !controller->keys_initialized)
 		result = ENETDOWN;
 	else if (controller->connection_generation != request->generation)
@@ -4951,7 +5044,10 @@ ax211_radio_key_delete(
 	    INTEL_AX211_KEY_PAIRWISE : INTEL_AX211_KEY_GROUP_KEY;
 	memset(command, 0, sizeof(command));
 	mutex_lock(&controller->lifecycle_lock);
-	if (!controller->runtime_active ||
+	/* A proven global stop retired every key, including the core's pending inverse. */
+	if (controller->session_stopped)
+		result = 0;
+	else if (!controller->runtime_active ||
 	    (controller->recovery_pending && !controller->recovery_running) ||
 	    !controller->keys_initialized)
 		result = ENETDOWN;
@@ -5032,7 +5128,8 @@ ax211_radio_keys_activate(
 	    clock_ticks() >= deadline)
 		return EINVAL;
 	mutex_lock(&controller->lifecycle_lock);
-	if (!controller->runtime_active || controller->recovery_pending ||
+	if (!controller->runtime_active || controller->close_pending ||
+	    controller->recovery_pending ||
 	    controller->recovery_running || !controller->keys_initialized)
 		result = ENETDOWN;
 	else if (controller->connection_generation != generation)
@@ -5095,6 +5192,20 @@ ax211_radio_keys_activate(
 	}
 	mutex_unlock(&controller->lifecycle_lock);
 	return result;
+}
+
+/* The common work pin retains this context; hardware access stays serialized. */
+static int
+ax211_radio_stop_retry(void *context)
+{
+	struct ax211_pci_controller *controller;
+	int error;
+
+	controller = context;
+	mutex_lock(&controller->lifecycle_lock);
+	error = ax211_pci_close_locked(controller);
+	mutex_unlock(&controller->lifecycle_lock);
+	return error;
 }
 
 static int

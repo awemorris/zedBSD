@@ -139,6 +139,10 @@ struct wlan_radio_ops {
 		uint64_t pairwise_key_generation,
 		uint64_t group_key_generation, uint64_t deadline_ticks);
 	int (*quiesce)(void *context);
+	/* Independent retirement thread; no common control/active lease is held.
+	 * The driver serializes hardware access and retries its complete close.
+	 * Success proves hardware stop AND common ownership reconciliation. */
+	int (*stop_retry)(void *context);
 };
 
 void wlan_core_init(void);
@@ -164,6 +168,23 @@ int wlan_station_open(struct wlan_station *station);
  * join result: an already admitted callback must retire before retry.  A
  * driver-stop/quiesce error likewise retains the complete object for retry. */
 int wlan_station_close(struct wlan_station *station);
+/* Driver close publishes intent before joining, then records the result.
+ * Failed results arm independent retry; success alone removes pending state. */
+void wlan_station_stop_request(struct wlan_station *station);
+void wlan_station_stop_complete(struct wlan_station *station, int error);
+int wlan_station_stop_busy(struct wlan_station *station);
+/* Terminal driver teardown cancels future retries, returning EBUSY while an
+ * existing retry owns the station/context. Retry teardown after dropping locks. */
+int wlan_station_stop_cancel(struct wlan_station *station);
+/* Called only by the independent retirement thread, or a deterministic fixture.
+ * Station ownership protects the device and driver context across each callback. */
+void wlan_retirement_run(uint64_t now_ticks);
+/* Holds common admission closed across a driver's checked hardware stop.
+ * begin requires every common caller to have returned; EBUSY keeps closing set
+ * to refuse new callers. end keeps closing set
+ * until wlan_station_close retries the exact outstanding inverses. */
+int wlan_station_quiesce_begin(struct wlan_station *station);
+void wlan_station_quiesce_end(struct wlan_station *station);
 int wlan_station_detach(struct wlan_station *station);
 /* Terminal shutdown closes every admission gate in one pass and returns
  * EBUSY if an admitted operation still needs to be joined by a retry. */

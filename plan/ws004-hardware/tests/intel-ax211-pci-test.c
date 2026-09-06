@@ -194,6 +194,11 @@ struct wlan_station {
 	const struct wlan_radio_ops *ops;
 	void *radio_context;
 	unsigned live;
+	unsigned stop_pending;
+	unsigned stop_work_active;
+	unsigned stop_disabled;
+	unsigned barrier;
+	int stop_error;
 };
 
 static void fixture_event(struct drv_pci_device *device, char event);
@@ -1098,6 +1103,59 @@ wlan_station_detach(
 	published_station = NULL;
 	free(station);
 	return 0;
+}
+
+/* Common ownership is a boundary here; the separate common-core fixture tests
+ * its real locks/work pin. These adapters assert the PCI caller's lock contract. */
+void
+wlan_station_stop_request(struct wlan_station *station)
+{
+	if (station != NULL)
+		station->stop_pending = 1U;
+}
+
+void
+wlan_station_stop_complete(struct wlan_station *station, int error)
+{
+	if (station != NULL) {
+		station->stop_pending = error != 0;
+		station->stop_error = error;
+	}
+}
+
+int
+wlan_station_stop_busy(struct wlan_station *station)
+{
+	return station != NULL && (station->stop_pending || station->stop_work_active);
+}
+
+int
+wlan_station_stop_cancel(struct wlan_station *station)
+{
+	if (station == NULL)
+		return 0;
+	station->stop_disabled = 1U;
+	return station->stop_work_active ? EBUSY : 0;
+}
+
+int
+wlan_station_quiesce_begin(struct wlan_station *station)
+{
+	if (station == NULL)
+		return ENODEV;
+	assert(allocated_controller->lifecycle_lock.locked == 1U);
+	if (fail_station_close || station->barrier)
+		return EBUSY;
+	station->barrier = 1U;
+	return 0;
+}
+
+void
+wlan_station_quiesce_end(struct wlan_station *station)
+{
+	assert(station != NULL && station->barrier);
+	assert(allocated_controller->lifecycle_lock.locked == 1U);
+	station->barrier = 0U;
 }
 
 int
@@ -2926,7 +2984,7 @@ test_common_up_down_up_lifecycle(void)
 	published_device->ops->close(published_device);
 	assert(fixture_station_close_busy_retries == 0U);
 	assert(fixture_yield_count == 2U);
-	assert(station_closes == 3U && published_station->live == 0U);
+	assert(station_closes == 4U && published_station->live == 0U);
 	assert(controller->runtime_active == 0U);
 	assert(controller->operation_admission_open == 0U);
 	assert(controller->active_dma == NULL);
@@ -2936,7 +2994,7 @@ test_common_up_down_up_lifecycle(void)
 	assert(controller->runtime_active == 1U);
 	assert(controller->operation_admission_open == 1U);
 	published_device->ops->close(published_device);
-	assert(station_closes == 4U && published_station->live == 0U);
+	assert(station_closes == 8U && published_station->live == 0U);
 	assert(controller->runtime_active == 0U);
 	assert(dma_allocations == dma_frees);
 	assert(ax211_pci_detach(&device, 0U) == 0);
@@ -3130,7 +3188,7 @@ test_tx_kick_schedules_recovery(void)
 	assert(reported_link_loss_error == EIO);
 	assert(published_device->carrier == 0U);
 	assert(controller->runtime_active == 0U);
-	assert(controller->quarantined == 1U);
+	assert(controller->quarantined == 0U && controller->session_stopped);
 	assert(controller->active_dma == NULL);
 	assert(dma_allocations == dma_frees);
 	assert(ax211_pci_detach(&device, 0U) == 0);
@@ -3208,7 +3266,7 @@ test_recovery_join_retries_without_free(void)
 	assert(controller->recovery_pending == 0U);
 	assert(controller->runtime_active == 0U);
 	assert(controller->active_dma == NULL);
-	assert(controller->quarantined == 1U);
+	assert(controller->quarantined == 0U && controller->session_stopped);
 	assert(dma_allocations == dma_frees);
 	assert(ax211_pci_detach(&device, 0U) == 0);
 }
@@ -3438,10 +3496,12 @@ test_scan_session_and_rx_poll_integration(void)
 	assert(scan_error_reports == 1U);
 	assert(scan_report_generation == common_generation);
 	assert(scan_report_error == EIO);
+	/* The scan error remains reported; a checked global stop proves that its
+	 * inverse completed even though the original scan failed. */
 	assert(published_station->ops->scan_stop(controller,
-	    common_generation) == EIO);
+	    common_generation) == 0);
 	assert(controller->runtime_active == 0U);
-	assert(controller->quarantined == 1U);
+	assert(controller->quarantined == 0U && controller->session_stopped);
 	assert(published_station->ops->scan_stop(controller,
 	    common_generation) == 0);
 	assert(ax211_pci_detach(&device, 0U) == 0);
@@ -4134,7 +4194,7 @@ test_association_failure_unwind_and_tx_timeout(void)
 	assert(strstr(log_buffer, "UMAC firmware error") != NULL);
 	assert(controller->mmio.nic_lock_depth == 0U);
 	assert(controller->runtime_active == 0U);
-	assert(controller->quarantined == 1U);
+	assert(controller->quarantined == 0U && controller->session_stopped);
 	assert(dma_allocations == dma_frees);
 	assert(ax211_pci_detach(&device, 0U) == 0);
 
@@ -4150,7 +4210,7 @@ test_association_failure_unwind_and_tx_timeout(void)
 	assert(published_station->ops->connect_start(controller, 42U, &bss,
 	    deadline) != 0);
 	assert(controller->runtime_active == 0U);
-	assert(controller->quarantined == 1U);
+	assert(controller->quarantined == 0U && controller->session_stopped);
 	assert(dma_allocations == dma_frees);
 	fixture_command_timeout = 0U;
 	assert(ax211_pci_detach(&device, 0U) == 0);
@@ -4172,7 +4232,7 @@ test_association_failure_unwind_and_tx_timeout(void)
 	assert(fixture_mcast_command_order != 0U);
 	assert(fixture_power_command_order == fixture_mcast_command_order + 1U);
 	assert(controller->runtime_active == 0U);
-	assert(controller->quarantined == 1U);
+	assert(controller->quarantined == 0U && controller->session_stopped);
 	assert(dma_allocations == dma_frees);
 	assert(ax211_pci_detach(&device, 0U) == 0);
 
@@ -4193,7 +4253,7 @@ test_association_failure_unwind_and_tx_timeout(void)
 	assert(fixture_mcast_command_order != 0U);
 	assert(fixture_power_command_order == fixture_mcast_command_order + 1U);
 	assert(controller->runtime_active == 0U);
-	assert(controller->quarantined == 1U);
+	assert(controller->quarantined == 0U && controller->session_stopped);
 	assert(dma_allocations == dma_frees);
 	assert(ax211_pci_detach(&device, 0U) == 0);
 
@@ -4223,9 +4283,64 @@ test_association_failure_unwind_and_tx_timeout(void)
 	assert(published_device->ops->poll_receive(published_device, 1U) == 0U);
 	assert(tx_completion_reports == 1U && reported_tx_cookie == 99U);
 	assert(controller->runtime_active == 0U);
-	assert(controller->quarantined == 1U);
+	assert(controller->quarantined == 0U && controller->session_stopped);
 	assert(dma_allocations == dma_frees);
 	assert(ax211_pci_detach(&device, 0U) == 0);
+}
+
+/* A retained PCI lease prevents reset; independent retry later completes close
+ * without invoking open or polling the administratively down interface. */
+static void
+test_independent_close_retry(void)
+{
+	struct ax211_pci_controller *controller;
+	struct wlan_station *station;
+	struct drv_pci_device device;
+	unsigned frees;
+	int error;
+
+	fixture_reset(&device);
+	assert(drv_pci_intel_ax211_driver_register() == 0);
+	assert(ax211_pci_attach(&device, &ax211_pci_ids[0]) == 0);
+	drv_pci_intel_ax211_devices_ready();
+	controller = device.driver_data;
+	assert(published_device->ops->open(published_device) == 0);
+	mutex_lock(&controller->lifecycle_lock);
+	assert(ax211_pci_operation_enter_locked(controller, &station) == 0);
+	mutex_unlock(&controller->lifecycle_lock);
+	frees = dma_frees;
+	published_device->ops->close(published_device);
+	assert(station->stop_pending && station->stop_error == ETIMEDOUT);
+	assert(controller->close_pending && !controller->operation_admission_open);
+	assert(controller->active_dma != NULL && dma_frees == frees);
+	assert(published_device->ops->open(published_device) == EBUSY);
+	mutex_lock(&controller->lifecycle_lock);
+	ax211_pci_operation_leave_locked(controller);
+	mutex_unlock(&controller->lifecycle_lock);
+
+	/* The first independently scheduled attempt still fails its checked drain. */
+	device.failure = FIXTURE_FAIL_IRQ_DRAIN;
+	station->stop_work_active = 1U;
+	error = station->ops->stop_retry(controller);
+	assert(error != 0);
+	wlan_station_stop_complete(station, error);
+	station->stop_work_active = 0U;
+	assert(station->stop_pending && controller->active_dma != NULL);
+	assert(dma_frees == frees);
+	device.failure = FIXTURE_FAIL_NONE;
+	station->stop_work_active = 1U;
+	error = station->ops->stop_retry(controller);
+	assert(error == 0);
+	wlan_station_stop_complete(station, error);
+	assert(published_device->ops->open(published_device) == EBUSY);
+	station->stop_work_active = 0U;
+	assert(!station->stop_pending && !station->live && !controller->close_pending);
+	assert(controller->session_stopped && controller->active_dma == NULL);
+	assert(dma_allocations == dma_frees);
+	assert(published_device->ops->open(published_device) == 0);
+	published_device->ops->close(published_device);
+	assert(ax211_pci_detach(&device, 0U) == 0);
+	assert(controller_frees == 1U && dma_allocations == dma_frees);
 }
 
 int
@@ -4243,6 +4358,7 @@ main(void)
 	test_open_failure_unwind();
 	test_checked_runtime_drain_retry();
 	test_common_up_down_up_lifecycle();
+	test_independent_close_retry();
 	test_transmit_lease_detach_join();
 	test_malformed_rx_is_dropped();
 	test_failed_key_add_scrubs_plaintext();

@@ -65,6 +65,8 @@ struct networkd_wifi_record_cursor {
 	size_t offset;
 };
 
+static int (*child_wait_pump)(void);
+
 static const struct networkd_wifi_operation networkd_wifi_operations[] = {
 	{ "up", "up", NULL, NETWORKD_WIFI_OPERATION_SIMPLE },
 	{ "down", "down", NULL, NETWORKD_WIFI_OPERATION_SIMPLE },
@@ -401,6 +403,14 @@ networkd_wifi_child_parse_list(
 	return 0;
 }
 
+/* Installs the single-threaded daemon's optional control-service callback. */
+void
+networkd_wifi_child_set_pump(
+	int (*pump)(void))
+{
+	child_wait_pump = pump;
+}
+
 /* Finds one supported primitive operation. */
 static const struct networkd_wifi_operation *
 find_operation(
@@ -546,13 +556,17 @@ static int
 open_pipe(
 	int descriptors[2])
 {
+	int saved_error;
+
 	/* Creates and marks both pipe ends close-on-exec. */
 	if (pipe(descriptors) != 0)
 		return -1;
 	if (fcntl(descriptors[0], F_SETFD, FD_CLOEXEC) != 0 ||
 	    fcntl(descriptors[1], F_SETFD, FD_CLOEXEC) != 0) {
+		saved_error = errno;
 		close_descriptor(&descriptors[0]);
 		close_descriptor(&descriptors[1]);
+		errno = saved_error;
 		return -1;
 	}
 
@@ -932,7 +946,7 @@ write_secret(
 		return errno != 0 ? errno : EIO;
 	}
 
-	/* Publishes EOF and clears the local secret immediately after delivery. */
+	/* Publishes EOF; retained secret bytes are needed for final redaction. */
 	if (state->secret_pipe[1] >= 0 &&
 	    state->secret_offset == state->secret_length) {
 		close_descriptor(&state->secret_pipe[1]);
@@ -966,6 +980,8 @@ reap_child(
 		return EAGAIN;
 
 	/* Reports an unrecoverable wait failure. */
+	if (errno == ECHILD)
+		state->child_reaped = 1;
 	return errno != 0 ? errno : ECHILD;
 }
 
@@ -988,6 +1004,11 @@ poll_child(
 	/* Advances all process and channel state without extending the deadline. */
 	while (!state->child_reaped || state->output_pipe[0] >= 0 ||
 	    state->diagnostic_pipe[0] >= 0) {
+		if (child_wait_pump != NULL) {
+			function_result = child_wait_pump();
+			if (function_result != 0)
+				break;
+		}
 		drain_result = append_output(state, result, &end_of_file);
 		if (drain_result != 0 && function_result == 0)
 			function_result = drain_result;
@@ -1020,6 +1041,9 @@ poll_child(
 		}
 
 		/* Waits for any channel transition under the finite interval. */
+		/* EOF can precede exit; periodically reap even with no open pipes. */
+		if (!state->child_reaped && milliseconds > 20)
+			milliseconds = 20;
 		descriptors[0].fd = state->secret_pipe[1];
 		descriptors[0].events = state->secret_pipe[1] >= 0 ? POLLOUT : 0;
 		descriptors[0].revents = 0;
@@ -1083,6 +1107,8 @@ terminate_child(
 			if (remaining_milliseconds(&grace_deadline,
 			    &milliseconds) != 0 || milliseconds == 0)
 				break;
+			if (milliseconds > 20)
+				milliseconds = 20;
 			descriptors[0].fd = state->output_pipe[0];
 			descriptors[0].events = state->output_pipe[0] >= 0 ?
 			    POLLIN : 0;

@@ -17,6 +17,7 @@
 #include "userland/base/networkd/wifi-child.h"
 
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +38,7 @@ static int fixture_wifi_child_parse_list(const struct networkd_wifi_child_result
 static void fixture_protocol_clear(void *, size_t);
 static uint64_t fixture_monotonic_us(void);
 static int fixture_ifindex(int, const char *, uint32_t *);
+static int fixture_ioctl(int, unsigned long, ...);
 
 #define networkd_wifi_child_run fixture_wifi_child_run
 #define networkd_wifi_child_result_clear fixture_wifi_child_result_clear
@@ -44,9 +46,11 @@ static int fixture_ifindex(int, const char *, uint32_t *);
 #define networkd_protocol_clear fixture_protocol_clear
 #define netutil_monotonic_us fixture_monotonic_us
 #define netutil_ifindex fixture_ifindex
+#define ioctl fixture_ioctl
 #define main networkd_program_main
 #include "userland/base/networkd/main.c"
 #undef main
+#undef ioctl
 #undef netutil_ifindex
 #undef netutil_monotonic_us
 #undef networkd_protocol_clear
@@ -331,6 +335,11 @@ fixture_wifi_child_run(
 		result->child_exit_status = (int)radio_index;
 		return 0;
 	}
+	if (strcmp(operation, "disconnect") == 0) {
+		expect(managed_wlan.state == NETWORKD_WLAN_RETIRING,
+		    "failed connect requires a checked L2 retirement");
+		return 0;
+	}
 
 	/* Records each actual connect while enforcing sole state ownership. */
 	expect(strcmp(operation, "connect") == 0,
@@ -419,6 +428,29 @@ fixture_monotonic_us(
 	return fixture_now;
 }
 
+/* Resolves retained device identity for the production retirement barrier. */
+static int
+fixture_ioctl(int descriptor, unsigned long command, ...)
+{
+	struct ifreq *request;
+	va_list arguments;
+	size_t index;
+
+	(void)descriptor;
+	expect(command == SIOCGIFNAME, "only inverse identity lookup expected");
+	va_start(arguments, command);
+	request = va_arg(arguments, struct ifreq *);
+	va_end(arguments);
+	for (index = 0U; index < fixture_radio_count; index++) {
+		if ((uint32_t)request->ifr_ifindex == fixture_radios[index].ifindex) {
+			strcpy(request->ifr_name, fixture_radios[index].interface);
+			return 0;
+		}
+	}
+	fixture_errno = ENODEV;
+	return -1;
+}
+
 /* Resolves one fixture radio without consulting the host kernel. */
 static int
 fixture_ifindex(
@@ -442,8 +474,9 @@ test_automatic_profile_then_radio_order(
 	void)
 {
 	struct wifi_conf_model model;
-	const struct wifi_conf_profile *selected;
-	size_t selected_radio;
+	struct networkd_wifi_candidate candidates[NETWORKD_WLAN_ATTEMPTS];
+	size_t count;
+	size_t total;
 	int selection_result;
 
 	/* Installs deliberately nonlexical radio names and mixed profiles. */
@@ -462,21 +495,18 @@ test_automatic_profile_then_radio_order(
 	fixture_visible[2][0] = 1U;
 	fixture_visible[2][1] = 1U;
 
-	/* Walks the candidate order used by successive actual attempts. */
-	selection_result = select_profile_radio(fixture_radios,
-	    fixture_radio_count, &model, 0U, &selected, &selected_radio,
-	    fixture_now + 1U);
-	expect(selection_result == 0 &&
-	    selected == &model.profiles[1] && selected_radio == 0U,
-	    "first auto profile on first stable radio");
-	expect(select_profile_radio(fixture_radios, fixture_radio_count,
-	    &model, 1U, &selected, &selected_radio, fixture_now + 1U) == 0 &&
-	    selected == &model.profiles[1] && selected_radio == 1U,
-	    "first auto profile on second stable radio");
-	expect(select_profile_radio(fixture_radios, fixture_radio_count,
-	    &model, 2U, &selected, &selected_radio, fixture_now + 1U) == 0 &&
-	    selected == &model.profiles[2] && selected_radio == 0U,
-	    "second auto profile follows first profile radios");
+	/* One visibility wave freezes all candidates in production order. */
+	selection_result = collect_profile_radios(fixture_radios,
+	    fixture_radio_count, &model, 0U, candidates, &count, &total,
+	    fixture_now + 10000000ULL);
+	expect(selection_result == 0 && count == 4U && total == 4U,
+	    "complete candidate wave");
+	expect(candidates[0].profile == &model.profiles[1] && candidates[0].radio == 0U,
+	    "first automatic profile and stable radio");
+	expect(candidates[1].profile == &model.profiles[1] && candidates[1].radio == 1U,
+	    "second radio for first profile");
+	expect(candidates[2].profile == &model.profiles[2] && candidates[2].radio == 0U,
+	    "next profile follows all first-profile radios");
 }
 
 /* Requires manual selection to use the first stable radio which sees SSID. */
@@ -502,7 +532,7 @@ test_manual_stable_radio_order(
 
 	/* Refuses to prefer the lexically earlier or faster-looking radio. */
 	expect(select_manual_radio(fixture_radios, fixture_radio_count,
-	    &model.profiles[0], &selected_radio, fixture_now + 1U) == 0 &&
+	    &model.profiles[0], &selected_radio, fixture_now + 10000000ULL) == 0 &&
 	    selected_radio == 1U, "manual stable radio order");
 }
 

@@ -29,7 +29,8 @@ enum networkd_managed_wlan_state {
 	NETWORKD_WLAN_CONNECTING,
 	NETWORKD_WLAN_CONNECTED,
 	NETWORKD_WLAN_MANUAL_DISCONNECTED,
-	NETWORKD_WLAN_RECONNECTING
+	NETWORKD_WLAN_RECONNECTING,
+	NETWORKD_WLAN_RETIRING
 };
 
 enum networkd_managed_wlan_action {
@@ -56,6 +57,8 @@ struct networkd_managed_l3 {
 	int default_route_owned;
 	struct networkd_managed_route default_route;
 	int resolver_present;
+	/* An oversized external file is present, but never an owned byte token. */
+	int resolver_oversized;
 	int resolver_owned;
 	size_t resolver_length;
 	unsigned char resolver[NETWORKD_MANAGED_RESOLVER_MAX];
@@ -77,11 +80,15 @@ struct networkd_managed_wlan_connection {
 	unsigned char ssid[WLAN_SSID_MAX];
 	size_t ssid_length;
 	int owns_l3;
+	int device_removed;
 	struct networkd_managed_l3 l3;
+	int l3_pending;
+	struct networkd_managed_l3 l3_before;
 };
 
 struct networkd_managed_wlan {
 	enum networkd_managed_wlan_state state;
+	enum networkd_managed_wlan_state retire_target;
 	uid_t owner_uid;
 	int owner_valid;
 	struct networkd_managed_wlan_connection connection;
@@ -93,7 +100,10 @@ int networkd_managed_wlan_disable(struct networkd_managed_wlan *);
 int networkd_managed_wlan_owner_matches(const struct networkd_managed_wlan *, uid_t);
 int networkd_managed_wlan_begin_connect(struct networkd_managed_wlan *, const char *, uint32_t, uint64_t, const void *, size_t);
 int networkd_managed_wlan_commit_l3(struct networkd_managed_wlan *, const struct networkd_managed_l3 *);
+int networkd_managed_wlan_begin_l3(struct networkd_managed_wlan *, const struct networkd_managed_l3 *);
+int networkd_managed_wlan_track_l3(struct networkd_managed_wlan *, const struct networkd_managed_l3 *);
 int networkd_managed_wlan_finish_connection(struct networkd_managed_wlan *, enum networkd_managed_wlan_state);
+int networkd_managed_wlan_begin_retire(struct networkd_managed_wlan *, enum networkd_managed_wlan_state);
 int networkd_managed_wlan_plan_l3_cleanup(const struct networkd_managed_wlan *, uint32_t, const struct networkd_managed_l3 *, struct networkd_managed_l3_cleanup *);
 enum networkd_managed_wlan_action networkd_managed_wlan_event(struct networkd_managed_wlan *, const struct rtm_ifinfo *);
 void networkd_managed_wlan_recovery_complete(struct networkd_managed_wlan *, int);

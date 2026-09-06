@@ -56,6 +56,8 @@
 #define NETWORKD_WLAN_DHCP_SECONDS	10U
 #define NETWORKD_WLAN_RESCAN_SECONDS	5U
 #define NETWORKD_WLAN_ATTEMPTS	4U
+#define NETWORKD_WIFI_STATUS_RESERVE	128U
+#define NETWORKD_CONTROL_INPUT_MAX	4U
 
 enum networkd_client_role {
 	NETWORKD_CLIENT_ROOT,
@@ -95,14 +97,98 @@ struct networkd_wlan_radio {
 	char interface[IFNAMSIZ];
 	uint32_t ifindex;
 	int ready;
+	int administrative_up;
+	int association_active;
+	uint32_t scan_state;
+	uint32_t stop_flags;
+	int observation_error;
+};
+
+/* Owns all temporary data for exactly one managed Wi-Fi request. */
+struct networkd_wifi_request {
+	struct wifi_conf_model profiles;
+	struct networkd_wlan_radio radios[NETWORKD_WLAN_RADIO_MAX];
+	size_t radio_count;
+	/* Keep diagnostic and final policy records even when radio output fills. */
+	char output[NETWORKD_RESPONSE_OUTPUT_MAX - NETWORKD_DIAGNOSTIC_MAX - 4U];
+	size_t output_length;
+	char diagnostic[WIFI_CONF_DIAGNOSTIC_MAX];
+	const char *stage;
+};
+
+/* All subordinate waits consume one actor-owned interval. */
+struct networkd_wifi_work {
+	uint64_t deadline;
+	int background;
+	int cancelled;
+	int cleanup;
+	int profiles_changed;
+};
+
+/* Read-only observations let status clients inspect an ongoing RF operation. */
+struct networkd_wifi_observation {
+	char interface[IFNAMSIZ];
+	uint32_t ifindex;
+	uint64_t observed_at;
+	char *output;
+	size_t output_length;
+};
+
+struct networkd_wifi_pending {
+	struct networkd_request request;
+	struct zedbsd_peercred peer;
+	enum networkd_client_role role;
+};
+
+struct networkd_wifi_candidate {
+	const struct wifi_conf_profile *profile;
+	size_t radio;
+};
+
+/* Partial request bytes belong to transport, never to an RF transaction. */
+struct networkd_control_input {
+	int active;
+	int descriptor;
+	uint64_t deadline;
+	struct zedbsd_peercred peer;
+	enum networkd_client_role role;
+	size_t used;
+	unsigned char bytes[NETWORKD_PROTOCOL_HEADER_MAX + NETWORKD_REQUEST_MAX + 1U];
 };
 
 static volatile sig_atomic_t stopping;
 static struct networkd_managed_wlan managed_wlan;
+static struct networkd_wlan_radio known_wlan_radios[NETWORKD_WLAN_RADIO_MAX];
+static size_t known_wlan_radio_count;
+static int wifi_disable_pending;
 static struct networkd_confirmed confirmed;
 static int route_events = -1;
 static uint64_t route_event_sequence;
 static uint64_t automatic_retry_at;
+static unsigned retirement_retry_seconds = NETWORKD_WLAN_RESCAN_SECONDS;
+static size_t automatic_candidate_skip;
+static struct networkd_wifi_work wifi_work;
+static struct networkd_wifi_observation wifi_observations[NETWORKD_WLAN_RADIO_MAX];
+static size_t wifi_observation_bytes;
+static struct networkd_wifi_pending wifi_pending;
+static int wifi_pending_client = -1;
+static int control_listener = -1;
+static int (*wifi_wait_pump)(void);
+static struct networkd_control_input control_inputs[NETWORKD_CONTROL_INPUT_MAX];
+static int control_input_pending(void);
+static int receive_wait_request(struct networkd_request *, struct zedbsd_peercred *, enum networkd_client_role *);
+static int service_wifi_wait(void);
+static void remember_wifi_observation(const char *, const struct networkd_wifi_child_result *);
+static void clear_wifi_observation(size_t);
+static int append_wifi_snapshot(const char *, const char *, size_t, uint64_t, char *, size_t, size_t *);
+static void send_wifi_observation(int, const struct networkd_request *);
+static void wifi_profiles_changed(const struct zedbsd_peercred *);
+static void dispatch_pending_wifi(void);
+static void wifi_work_begin(uint32_t, int);
+static void wifi_work_end(void);
+static void recover_managed_connection(void);
+static void retry_managed_retirement(void);
+static void schedule_retirement_retry(void);
 
 static int scan_group_record(char *line, struct networkd_group_scan *scan);
 static int validate_network_group_database(void);
@@ -112,8 +198,8 @@ static int close_listener(struct networkd_listener *listener);
 static int remove_stale_listener(void);
 static int open_listener(struct networkd_listener *listener);
 static int open_route_events(void);
-static int process_route_events(int);
-static void process_route_event(const struct rtm_ifinfo *, int);
+static int process_route_events(void);
+static void process_route_event(const struct rtm_ifinfo *);
 static void recover_managed_wlan(void);
 static void schedule_automatic_work(unsigned);
 static int automatic_poll_timeout(void);
@@ -122,6 +208,7 @@ static int event_poll_timeout(void);
 static void run_confirmed_due(void);
 static void run_due_work(void);
 static int retire_managed_connection(enum networkd_managed_wlan_state, int);
+static int retire_removed_connection(enum networkd_managed_wlan_state);
 static int retire_managed_policy(void);
 static void notify_init(const char *record);
 static int write_all(int descriptor, const char *buffer, size_t length);
@@ -133,9 +220,16 @@ static int operation_allowed(enum networkd_client_role role,
 			     const char *operation);
 static void handle_request(int, enum networkd_client_role,
 	const struct zedbsd_peercred *);
+static void dispatch_request(int, struct networkd_request *, enum networkd_client_role, const struct zedbsd_peercred *);
+static void send_wired_observation(int, const struct networkd_request *);
 static void handle_wifi_request(int, struct networkd_request *,
 	const struct zedbsd_peercred *);
-static void clear_wifi_request_storage(struct networkd_wifi_child_result *, struct networkd_wlan_radio *, size_t, struct wifi_conf_model *, char *, size_t, char *, size_t);
+static int wifi_request_list(struct networkd_wifi_request *);
+static int wifi_request_enable(struct networkd_wifi_request *, const struct zedbsd_peercred *);
+static int wifi_request_stop(struct networkd_wifi_request *, int);
+static int wifi_request_connect(struct networkd_wifi_request *, const struct networkd_request *);
+static int wifi_request_prepare(struct networkd_wifi_request *);
+static void process_wifi_request(int, struct networkd_request *, const struct zedbsd_peercred *);
 static int read_request(int descriptor, struct networkd_request *request);
 static int read_request_end(int descriptor);
 static int decode_request(struct networkd_request *request);
@@ -158,17 +252,25 @@ static int interface_index(const char *, uint32_t *);
 static int interface_flags(const char *, int *);
 static int interface_index_name_matches(uint32_t, const char *);
 static int wlan_connected(const char *);
+static int managed_connection_usable(void);
 static int run_wifi(const char *, const char *, const struct wifi_conf_profile *, unsigned, struct networkd_wifi_child_result *);
-static int wifi_output_without_terminal(const struct networkd_wifi_child_result *, char *, size_t, size_t *);
+static int append_wifi_records(const char *, const char *, size_t, char *, size_t, size_t *);
 static int append_wifi_output(const char *, const struct networkd_wifi_child_result *, char *, size_t, size_t *);
 static int enumerate_wlan_radios(struct networkd_wlan_radio *, size_t, size_t *);
 static int prepare_wlan_radios(struct networkd_wlan_radio *, size_t, char *, size_t, size_t *);
+static int run_wifi_append(const char *, const char *, char *, size_t, size_t *);
+static int prepare_wlan_radio(struct networkd_wlan_radio *, char *, size_t, size_t *);
 static int stop_wlan_radios(const struct networkd_wlan_radio *, size_t, int);
-static int select_profile_radio(const struct networkd_wlan_radio *, size_t, const struct wifi_conf_model *, size_t, const struct wifi_conf_profile **, size_t *, uint64_t);
+static int wlan_radio_status(const struct networkd_wlan_radio *, struct wlan_status_request *);
+static int wifi_disable_defer(void);
+static int collect_profile_radios(const struct networkd_wlan_radio *, size_t, const struct wifi_conf_model *, size_t, struct networkd_wifi_candidate *, size_t *, size_t *, uint64_t);
+static unsigned wifi_selection_timeout(uint64_t);
 static int select_manual_radio(const struct networkd_wlan_radio *, size_t, const struct wifi_conf_profile *, size_t *, uint64_t);
 static int connect_automatic(const struct networkd_wlan_radio *, size_t, const struct wifi_conf_model *, uint64_t, char *, size_t, size_t *, int *);
 static void stop_losing_scans(const struct networkd_wlan_radio *, size_t, size_t);
 static int run_managed_connect(const char *, const struct wifi_conf_profile *, enum networkd_managed_wlan_state, uint64_t, char *, size_t, size_t *, int *);
+static int acquire_managed_l3(const char *, uint64_t);
+static int reconcile_pending_l3(void);
 static const struct wifi_conf_profile *find_profile(const struct wifi_conf_model *, const void *, size_t);
 static int load_policy(uid_t, struct wifi_conf_model *, char *, size_t);
 static int owner_allowed(const struct zedbsd_peercred *);
@@ -178,7 +280,7 @@ static int snapshot_interface_l3(const char *, uint32_t *, struct networkd_manag
 static int snapshot_managed_l3(const struct networkd_managed_wlan *, struct networkd_managed_l3 *);
 static int snapshot_resolver(struct networkd_managed_l3 *);
 static void identify_l3_ownership(const char *, const struct networkd_managed_l3 *, struct networkd_managed_l3 *);
-static int clear_interface_l3(const struct networkd_managed_wlan *);
+static int clear_interface_l3(struct networkd_managed_wlan *);
 static int find_interface_default(int, uint32_t, struct networkd_managed_l3 *);
 static int delete_interface_default_exact(int, const struct networkd_managed_route *);
 static int route_matches_owned(const struct rtentry *, const struct networkd_managed_route *);
@@ -186,7 +288,6 @@ static int managed_routes_equal(const struct networkd_managed_route *, const str
 static int get_interface_ipv4(int, const char *, unsigned long, uint32_t *);
 static int set_interface_ipv4(int, const char *, unsigned long, uint32_t);
 static int unlink_owned_resolver(const struct networkd_managed_wlan *);
-static int run_command(char *const arguments[], unsigned timeout_seconds, char diagnostic[CHILD_OUTPUT_MAX]);
 static int run_command_until(char *const [], unsigned, uint64_t,
 	char [CHILD_OUTPUT_MAX]);
 static void clean_diagnostic(char *text);
@@ -208,6 +309,7 @@ main(
 	int status;
 	int poll_result;
 	int poll_timeout;
+	size_t index;
 	struct pollfd descriptors[2];
 	struct zedbsd_peercred peer;
 	enum networkd_client_role role;
@@ -256,10 +358,23 @@ main(
 		return 1;
 	}
 	notify_init("READY\n");
+	control_listener = listener.descriptor;
+	wifi_wait_pump = service_wifi_wait;
+	networkd_wifi_child_set_pump(service_wifi_wait);
 
 	/* Polls control and interface events without a one-second accept delay. */
 	while (!stopping) {
+		if (wifi_pending_client >= 0) {
+			dispatch_pending_wifi();
+			continue;
+		}
+
+		/* Continues partial requests accepted by the previous background wait. */
+		if (control_input_pending())
+			(void)service_wifi_wait();
 		run_due_work();
+		if (wifi_pending_client >= 0)
+			continue;
 		descriptors[0].fd = listener.descriptor;
 		descriptors[0].events = POLLIN;
 		descriptors[0].revents = 0;
@@ -268,6 +383,8 @@ main(
 		descriptors[1].events = POLLIN;
 		descriptors[1].revents = 0;
 		poll_timeout = event_poll_timeout();
+		if (control_input_pending() && (poll_timeout < 0 || poll_timeout > 20))
+			poll_timeout = 20;
 		poll_result = poll(descriptors, 2U, poll_timeout);
 		if (poll_result < 0) {
 			if (errno == EINTR)
@@ -279,7 +396,7 @@ main(
 			continue;
 		}
 		if ((descriptors[1].revents & (POLLIN | POLLERR | POLLHUP)) != 0 &&
-		    process_route_events(1) != 0) {
+		    process_route_events() != 0) {
 			(void)close(route_events);
 			route_events = -1;
 		}
@@ -296,9 +413,6 @@ main(
 				send_error(client, EACCES,
 				    "authentication failed");
 			close(client);
-			if (managed_wlan.state == NETWORKD_WLAN_RECONNECTING &&
-			    !networkd_confirmed_active(&confirmed))
-				recover_managed_wlan();
 			if (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING &&
 			    automatic_retry_at == 0U)
 				schedule_automatic_work(
@@ -311,6 +425,26 @@ main(
 			break;
 	}
 	status = stopping ? 0 : 1;
+	if (wifi_pending_client >= 0) {
+		send_response(wifi_pending_client, wifi_pending.request.header.request_id,
+		    wifi_pending.request.header.opcode, NETWORKD_RESULT_ERROR, EINTR,
+		    "networkd stopping", NULL, 0U);
+		(void)close(wifi_pending_client);
+		wifi_pending_client = -1;
+		networkd_protocol_clear(&wifi_pending, sizeof(wifi_pending));
+	}
+	control_listener = -1;
+
+	/* Releases optional observations and incomplete transports on shutdown. */
+	for (index = 0U; index < NETWORKD_WLAN_RADIO_MAX; index++)
+		clear_wifi_observation(index);
+	for (index = 0U; index < NETWORKD_CONTROL_INPUT_MAX; index++) {
+		if (control_inputs[index].active)
+			(void)close(control_inputs[index].descriptor);
+	}
+	networkd_protocol_clear(control_inputs, sizeof(control_inputs));
+	wifi_wait_pump = NULL;
+	networkd_wifi_child_set_pump(NULL);
 	networkd_confirmed_reset(&confirmed);
 	if (retire_managed_policy() != 0)
 		status = 1;
@@ -799,7 +933,7 @@ open_route_events(
 /* Drains every currently queued fixed-width interface event. */
 static int
 process_route_events(
-	int allow_recovery)
+	void)
 {
 	struct rtm_ifinfo event;
 	ssize_t count;
@@ -811,7 +945,7 @@ process_route_events(
 		if (count == (ssize_t)sizeof(event)) {
 			if (event.rtm_sequence > route_event_sequence)
 				route_event_sequence = event.rtm_sequence;
-			process_route_event(&event, allow_recovery);
+			process_route_event(&event);
 			continue;
 		}
 		if (count < 0 && errno == EINTR)
@@ -824,82 +958,132 @@ process_route_events(
 			saved = EINVAL;
 		else
 			saved = errno != 0 ? errno : EIO;
-		(void)retire_managed_policy();
+		/* Losing the event channel cannot recursively run policy teardown. */
+		if (managed_wlan.connection.interface[0] != '\0') {
+			if (managed_wlan.state != NETWORKD_WLAN_RETIRING)
+				(void)networkd_managed_wlan_begin_retire(&managed_wlan,
+				    NETWORKD_WLAN_AUTO_SEARCHING);
+			schedule_automatic_work(0U);
+		}
 		errno = saved;
 		return -1;
 	}
 }
 
-/* Reconciles one event with the sole global managed-WLAN connection. */
+/* Records event-driven intent; child work is owned only by the outer loop. */
 static void
 process_route_event(
-	const struct rtm_ifinfo *event,
-	int allow_recovery)
+	const struct rtm_ifinfo *event)
 {
 	struct networkd_managed_wlan_connection *connection;
 	enum networkd_managed_wlan_action action;
 	int flags;
 
-	/* Lets the pure state object validate identity and ordering first. */
 	action = networkd_managed_wlan_event(&managed_wlan, event);
+	connection = &managed_wlan.connection;
+
+	/* A manual teardown target survives carrier, overflow and removal events. */
+	if (managed_wlan.state == NETWORKD_WLAN_RETIRING) {
+		if (action == NETWORKD_WLAN_ACTION_RETIRE)
+			connection->device_removed = 1;
+		if (action != NETWORKD_WLAN_ACTION_NONE)
+			schedule_automatic_work(0U);
+		return;
+	}
 	if (action == NETWORKD_WLAN_ACTION_NONE) {
 		if (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING)
 			schedule_automatic_work(0U);
 		return;
 	}
-	connection = &managed_wlan.connection;
-
-	/* Preserves a live connection after an overflow resnapshot. */
-	if (action == NETWORKD_WLAN_ACTION_RESNAPSHOT) {
-		if (connection->interface[0] == '\0')
-			return;
-		if (interface_index_name_matches(connection->ifindex,
-		    connection->interface) == 0 &&
-		    interface_flags(connection->interface, &flags) == 0 &&
-		    (flags & (IFF_UP | IFF_RUNNING)) ==
-		    (IFF_UP | IFF_RUNNING) && wlan_connected(
-		    connection->interface))
-			return;
-		(void)retire_managed_connection(
-		    NETWORKD_WLAN_AUTO_SEARCHING, 1);
-		schedule_automatic_work(0U);
-		return;
-	}
-
-	/* A removed device cannot be safely addressed by its former name. */
 	if (action == NETWORKD_WLAN_ACTION_RETIRE) {
-		(void)retire_managed_connection(
-		    NETWORKD_WLAN_AUTO_SEARCHING, 0);
+		connection->device_removed = 1;
+		(void)networkd_managed_wlan_begin_retire(&managed_wlan,
+		    NETWORKD_WLAN_AUTO_SEARCHING);
+		schedule_automatic_work(0U);
+		return;
+	}
+	if (connection->interface[0] == '\0') {
 		schedule_automatic_work(0U);
 		return;
 	}
 
-	/* Requires the same live interface to remain administratively enabled. */
 	if (interface_index_name_matches(connection->ifindex,
-	    connection->interface) != 0 ||
-	    interface_flags(connection->interface, &flags) != 0 ||
-	    (flags & IFF_UP) == 0) {
-		(void)retire_managed_connection(
-		    NETWORKD_WLAN_AUTO_SEARCHING, 1);
-		schedule_automatic_work(0U);
+	    connection->interface) == 0 &&
+	    interface_flags(connection->interface, &flags) == 0 &&
+	    (flags & IFF_UP) != 0) {
+		if ((flags & IFF_RUNNING) != 0 && managed_connection_usable()) {
+			networkd_managed_wlan_recovery_complete(&managed_wlan, 1);
+			return;
+		}
+		if (action == NETWORKD_WLAN_ACTION_RECOVER) {
+			schedule_automatic_work(0U);
+			return;
+		}
+	}
+	(void)networkd_managed_wlan_begin_retire(&managed_wlan,
+	    NETWORKD_WLAN_AUTO_SEARCHING);
+	schedule_automatic_work(0U);
+}
+
+/* Gives same-profile RF recovery the same cancellation and deadline contract. */
+static void
+recover_managed_wlan(
+	void)
+{
+	if (managed_wlan.state != NETWORKD_WLAN_RECONNECTING)
+		return;
+	automatic_retry_at = 0U;
+	wifi_work_begin(NETWORKD_OP_WIFI_CONNECT, 1);
+	recover_managed_connection();
+	wifi_work_end();
+}
+
+/* Retries only the retained teardown target, never a fresh RF connection. */
+static void
+retry_managed_retirement(
+	void)
+{
+	enum networkd_managed_wlan_state target;
+	struct networkd_wifi_request work;
+
+	if (managed_wlan.state != NETWORKD_WLAN_RETIRING)
+		return;
+	automatic_retry_at = 0U;
+	if (wifi_disable_pending) {
+		memset(&work, 0, sizeof(work));
+		wifi_work_begin(NETWORKD_OP_WIFI_DISABLE, 1);
+		(void)wifi_request_stop(&work, 1);
+		wifi_work_end();
 		return;
 	}
+	target = managed_wlan.retire_target;
+	wifi_work_begin(NETWORKD_OP_WIFI_DISCONNECT, 1);
+	(void)retire_managed_connection(target, 1);
+	wifi_work_end();
 
-	/* Treats a stale wakeup as an observation, not a reconnect command. */
-	if ((flags & IFF_RUNNING) != 0 &&
-	    wlan_connected(connection->interface)) {
-		networkd_managed_wlan_recovery_complete(&managed_wlan, 1);
-		return;
+	/* Failed retirement already owns a backed-off retry; success may resume search. */
+	if (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING)
+		schedule_automatic_work(NETWORKD_WLAN_RESCAN_SECONDS);
+}
+
+/* Backs off persistent OS failures without abandoning an unresolved token. */
+static void
+schedule_retirement_retry(
+	void)
+{
+	/* Retains a finite retry interval and allows explicit commands to retry sooner. */
+	automatic_retry_at = netutil_monotonic_us() +
+	    (uint64_t)retirement_retry_seconds * 1000000ULL;
+	if (retirement_retry_seconds < 60U) {
+		retirement_retry_seconds *= 2U;
+		if (retirement_retry_seconds > 60U)
+			retirement_retry_seconds = 60U;
 	}
-
-	/* Starts the one finite child only from the ordinary event loop. */
-	if (allow_recovery)
-		recover_managed_wlan();
 }
 
 /* Runs one ordinary 30-second reconnect using a freshly loaded secret. */
 static void
-recover_managed_wlan(
+recover_managed_connection(
 	void)
 {
 	struct networkd_wifi_child_result result;
@@ -944,12 +1128,12 @@ recover_managed_wlan(
 	wifi_conf_explicit_clear(ssid, sizeof(ssid));
 
 	/* Coalesces every event which arrived while the child owned recovery. */
-	(void)process_route_events(0);
+	(void)process_route_events();
 	if (managed_wlan.state != NETWORKD_WLAN_RECONNECTING)
 		return;
 	if (interface_flags(interface, &flags) != 0 ||
 	    (flags & (IFF_UP | IFF_RUNNING)) != (IFF_UP | IFF_RUNNING) ||
-	    !wlan_connected(interface))
+	    !managed_connection_usable())
 		succeeded = 0;
 
 	/* Retains L3 on success and returns failure to automatic searching. */
@@ -979,7 +1163,9 @@ schedule_automatic_work(
 	uint64_t now;
 
 	/* Keeps no background deadline outside the automatic-search state. */
-	if (managed_wlan.state != NETWORKD_WLAN_AUTO_SEARCHING) {
+	if (managed_wlan.state != NETWORKD_WLAN_AUTO_SEARCHING &&
+	    managed_wlan.state != NETWORKD_WLAN_RECONNECTING &&
+	    managed_wlan.state != NETWORKD_WLAN_RETIRING) {
 		automatic_retry_at = 0U;
 		return;
 	}
@@ -998,7 +1184,9 @@ automatic_poll_timeout(
 	uint64_t now;
 
 	/* Disabled, connected, and manually disconnected policies do not wake. */
-	if (managed_wlan.state != NETWORKD_WLAN_AUTO_SEARCHING) {
+	if (managed_wlan.state != NETWORKD_WLAN_AUTO_SEARCHING &&
+	    managed_wlan.state != NETWORKD_WLAN_RECONNECTING &&
+	    managed_wlan.state != NETWORKD_WLAN_RETIRING) {
 		automatic_retry_at = 0U;
 		return -1;
 	}
@@ -1021,13 +1209,12 @@ run_automatic_work(
 	struct networkd_wlan_radio radios[NETWORKD_WLAN_RADIO_MAX];
 	struct wifi_conf_model model;
 	char diagnostic[WIFI_CONF_DIAGNOSTIC_MAX];
-	char output[NETWORKD_RESPONSE_MAX];
-	size_t output_length;
 	size_t radio_count;
 	uint64_t deadline;
 	int no_candidate;
 	int saved;
 	int ready;
+	int changed;
 
 	/* Claims the current wakeup and initializes all secret-bearing storage. */
 	if (managed_wlan.state != NETWORKD_WLAN_AUTO_SEARCHING) {
@@ -1035,11 +1222,10 @@ run_automatic_work(
 		return;
 	}
 	automatic_retry_at = 0U;
+	wifi_work_begin(NETWORKD_OP_WIFI_ENABLE, 1);
 	memset(radios, 0, sizeof(radios));
 	wifi_conf_model_init(&model);
 	memset(diagnostic, 0, sizeof(diagnostic));
-	memset(output, 0, sizeof(output));
-	output_length = 0U;
 	radio_count = 0U;
 	no_candidate = 0;
 
@@ -1053,10 +1239,12 @@ run_automatic_work(
 		ready = load_policy(managed_wlan.owner_uid, &model, diagnostic,
 		    sizeof(diagnostic)) == 0;
 	if (ready) {
-		deadline = netutil_monotonic_us() + 90000000ULL;
+		deadline = wifi_work.deadline -
+		    NETWORKD_WIFI_CLEANUP_SECONDS * 1000000ULL;
 		if (connect_automatic(radios, radio_count, &model, deadline,
-		    output, NETWORKD_RESPONSE_OUTPUT_MAX, &output_length,
-		    &no_candidate) != 0 && !no_candidate) {
+		    NULL, 0U, NULL,
+		    &no_candidate) != 0 && !no_candidate &&
+		    !wifi_work.cancelled && !wifi_work.profiles_changed) {
 			saved = errno != 0 ? errno : EIO;
 			fprintf(stderr, "networkd: automatic Wi-Fi attempt: %s\n",
 			    strerror(saved));
@@ -1066,11 +1254,13 @@ run_automatic_work(
 	/* Releases credentials and retries only after a finite idle interval. */
 	wifi_conf_model_clear(&model);
 	wifi_conf_explicit_clear(diagnostic, sizeof(diagnostic));
-	networkd_protocol_clear(output, sizeof(output));
 	networkd_protocol_clear(radios, sizeof(radios));
-	automatic_retry_at = 0U;
-	if (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING)
-		schedule_automatic_work(NETWORKD_WLAN_RESCAN_SECONDS);
+	changed = wifi_work.profiles_changed;
+	wifi_work_end();
+	if (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING) {
+		automatic_retry_at = 0U;
+		schedule_automatic_work(changed ? 0U : NETWORKD_WLAN_RESCAN_SECONDS);
+	}
 }
 
 /* Selects the earliest volatile networkd deadline. */
@@ -1119,8 +1309,14 @@ run_due_work(
 {
 	run_confirmed_due();
 	if (!networkd_confirmed_active(&confirmed) &&
-	    automatic_poll_timeout() == 0)
-		run_automatic_work();
+	    automatic_poll_timeout() == 0) {
+		if (managed_wlan.state == NETWORKD_WLAN_RETIRING)
+			retry_managed_retirement();
+		else if (managed_wlan.state == NETWORKD_WLAN_RECONNECTING)
+			recover_managed_wlan();
+		else
+			run_automatic_work();
+	}
 }
 
 /* Retires the sole connection while preserving its active policy owner. */
@@ -1142,9 +1338,13 @@ retire_managed_connection(
 
 	/* Moves an already idle enabled policy directly to its requested state. */
 	connection = &managed_wlan.connection;
+	if (networkd_managed_wlan_begin_retire(&managed_wlan, next_state) != 0)
+		return -1;
 	if (connection->interface[0] == '\0')
 		return networkd_managed_wlan_finish_connection(&managed_wlan,
 		    next_state);
+	if (!normalize || connection->device_removed)
+		return retire_removed_connection(next_state);
 	cleanup_error = 0;
 	cleanup_stage = "identity";
 	disconnect_error = 0;
@@ -1159,11 +1359,17 @@ retire_managed_connection(
 		if (interface_index_name_matches(connection->ifindex,
 		    connection->interface) != 0) {
 			cleanup_error = errno != 0 ? errno : ENODEV;
+			if (cleanup_error == ENODEV || cleanup_error == ENXIO) {
+				connection->device_removed = 1;
+				return retire_removed_connection(next_state);
+			}
 		} else {
 			memset(&result, 0, sizeof(result));
+			wifi_work.cleanup = 1;
 			if (run_wifi(connection->interface, "disconnect", NULL,
 			    10U, &result) != 0)
 				cleanup_error = errno != 0 ? errno : EIO;
+			wifi_work.cleanup = 0;
 			disconnect_error = cleanup_error;
 			cleanup_stage = "wifi-disconnect";
 			child_terminal = result.terminal_error;
@@ -1171,7 +1377,14 @@ retire_managed_connection(
 			child_signal = result.child_term_signal;
 			child_records = result.output_records;
 			networkd_wifi_child_result_clear(&result);
-			if (connection->owns_l3) {
+			if (cleanup_error == 0 && connection->l3_pending &&
+			    reconcile_pending_l3() != 0) {
+				cleanup_error = errno != 0 ? errno : EIO;
+				l3_error = cleanup_error;
+				cleanup_stage = "l3-snapshot";
+			}
+			/* Preserve L3 until L2 retirement is proven, then retry as needed. */
+			if (cleanup_error == 0 && connection->owns_l3) {
 				if (clear_interface_l3(&managed_wlan) != 0) {
 					l3_error = errno;
 					if (cleanup_error == 0) {
@@ -1202,6 +1415,7 @@ retire_managed_connection(
 
 	/* Retains the exact ownership token until cleanup can be retried. */
 	if (cleanup_error != 0) {
+		schedule_retirement_retry();
 		errno = cleanup_error;
 		return -1;
 	}
@@ -1210,7 +1424,43 @@ retire_managed_connection(
 	return 0;
 }
 
-/* Normalizes every WLAN radio before clearing the daemon policy record. */
+/* A removed device owns no live interface tuple; preserve any replacement. */
+static int
+retire_removed_connection(
+	enum networkd_managed_wlan_state next_state)
+{
+	struct networkd_managed_wlan_connection *connection;
+	struct networkd_managed_l3 current;
+	int saved;
+
+	connection = &managed_wlan.connection;
+	/* Interface resources vanished; a partial DHCP resolver file may remain. */
+	if (connection->l3_pending) {
+		memset(&current, 0, sizeof(current));
+		if (snapshot_resolver(&current) != 0) {
+			saved = errno;
+			networkd_protocol_clear(&current, sizeof(current));
+			schedule_retirement_retry();
+			errno = saved;
+			return -1;
+		}
+		identify_l3_ownership(connection->interface, &connection->l3_before,
+		    &current);
+		(void)networkd_managed_wlan_track_l3(&managed_wlan, &current);
+		networkd_protocol_clear(&current, sizeof(current));
+	}
+	if (connection->owns_l3 && connection->l3.resolver_owned &&
+	    unlink_owned_resolver(&managed_wlan) != 0 &&
+	    errno != ESTALE && errno != ENOENT) {
+		saved = errno != 0 ? errno : EIO;
+		schedule_retirement_retry();
+		errno = saved;
+		return -1;
+	}
+	return networkd_managed_wlan_finish_connection(&managed_wlan, next_state);
+}
+
+/* Clears policy only after bounded normalization succeeds; failures retain ownership. */
 static int
 retire_managed_policy(
 	void)
@@ -1220,11 +1470,12 @@ retire_managed_policy(
 	int first_error;
 
 	/* Retires exact managed state before applying the global disabled state. */
+	wifi_work_begin(NETWORKD_OP_WIFI_DISABLE, 0);
 	memset(radios, 0, sizeof(radios));
 	radio_count = 0U;
 	first_error = 0;
 	if (managed_wlan.state != NETWORKD_WLAN_DISABLED &&
-	    retire_managed_connection(NETWORKD_WLAN_AUTO_SEARCHING, 1) != 0)
+	    retire_managed_connection(NETWORKD_WLAN_MANUAL_DISCONNECTED, 1) != 0)
 		first_error = errno != 0 ? errno : EIO;
 
 	/* A service start or stop leaves every discovered radio physically down. */
@@ -1237,11 +1488,12 @@ retire_managed_policy(
 		first_error = errno != 0 ? errno : EIO;
 	}
 	networkd_protocol_clear(radios, sizeof(radios));
-	networkd_managed_wlan_init(&managed_wlan);
+	wifi_work_end();
 	if (first_error != 0) {
 		errno = first_error;
 		return -1;
 	}
+	networkd_managed_wlan_init(&managed_wlan);
 	return 0;
 }
 
@@ -1400,7 +1652,7 @@ operation_allowed(
 	return function_result;
 }
 
-/* Supports the handle request operation. */
+/* Reads one request before dispatching it through the common admission path. */
 static void
 handle_request(
 	int client,
@@ -1408,6 +1660,24 @@ handle_request(
 	const struct zedbsd_peercred *peer)
 {
 	struct networkd_request request;
+
+	/* Retains decoded storage until the synchronous dispatcher returns. */
+	memset(&request, 0, sizeof(request));
+	if (read_request(client, &request) != 0)
+		send_error(client, errno, "malformed request");
+	else
+		dispatch_request(client, &request, role, peer);
+	networkd_protocol_clear(&request, sizeof(request));
+}
+
+/* Applies the same admission and transaction checks to immediate and queued work. */
+static void
+dispatch_request(
+	int client,
+	struct networkd_request *request,
+	enum networkd_client_role role,
+	const struct zedbsd_peercred *peer)
+{
 	char response[NETWORKD_RESPONSE_MAX];
 	char diagnostic[CHILD_OUTPUT_MAX];
 	const char *operation;
@@ -1416,7 +1686,7 @@ handle_request(
 	int result;
 	int error;
 
-	memset(&request, 0, sizeof(request));
+	/* Initializes one terminal response without consuming transport again. */
 	result = -1;
 	error = EINVAL;
 	response_length = 0U;
@@ -1424,21 +1694,13 @@ handle_request(
 	diagnostic[0] = '\0';
 	mutation_deadline = 0U;
 
-	/* Reads and validates one exact length-framed request. */
-	if (read_request(client, &request) != 0) {
-		send_error(client, errno, "malformed request");
-		networkd_protocol_clear(&request, sizeof(request));
-		return;
-	}
-
 	/* Applies peer authorization before operation dispatch. */
-	NCOM_TRACE("daemon-read-done", request.header.opcode);
-	operation = operation_name(request.header.opcode);
+	NCOM_TRACE("daemon-read-done", request->header.opcode);
+	operation = operation_name(request->header.opcode);
 	if (operation == NULL || !operation_allowed(role, operation)) {
-		send_response(client, request.header.request_id,
-		    request.header.opcode, NETWORKD_RESULT_ERROR, EPERM,
+		send_response(client, request->header.request_id,
+		    request->header.opcode, NETWORKD_RESULT_ERROR, EPERM,
 		    "authorization", NULL, 0U);
-		networkd_protocol_clear(&request, sizeof(request));
 		return;
 	}
 
@@ -1446,29 +1708,28 @@ handle_request(
 	run_confirmed_due();
 
 	/* Owns confirmed-commit control without ever opening net.conf. */
-	if (request.header.opcode >= NETWORKD_OP_CONFIRMED_ARM &&
-	    request.header.opcode <= NETWORKD_OP_CONFIRMED_CHECK) {
-		if (request.header.opcode == NETWORKD_OP_CONFIRMED_CHECK) {
-			result = networkd_confirmed_check(&confirmed, request.token);
+	if (request->header.opcode >= NETWORKD_OP_CONFIRMED_ARM &&
+	    request->header.opcode <= NETWORKD_OP_CONFIRMED_CHECK) {
+		if (request->header.opcode == NETWORKD_OP_CONFIRMED_CHECK) {
+			result = networkd_confirmed_check(&confirmed, request->token);
 			error = result == 0 ? 0 : errno;
-		} else if (request.header.opcode == NETWORKD_OP_CONFIRMED_ARM) {
+		} else if (request->header.opcode == NETWORKD_OP_CONFIRMED_ARM) {
 			result = networkd_confirmed_arm(&confirmed,
-			    request.rollback_path, peer->euid, request.timeout,
+			    request->rollback_path, peer->euid, request->timeout,
 			    netutil_monotonic_us(), rollback_validate, NULL,
-			    &request.token, diagnostic, sizeof(diagnostic));
+			    &request->token, diagnostic, sizeof(diagnostic));
 			error = result == 0 ? 0 : errno;
 			if (result == 0) {
-				send_token_response(client, request.header.request_id,
-				    request.header.opcode, request.token);
-				networkd_protocol_clear(&request, sizeof(request));
+				send_token_response(client, request->header.request_id,
+				    request->header.opcode, request->token);
 				networkd_protocol_clear(diagnostic,
 				    sizeof(diagnostic));
 				return;
 			}
-		} else if (request.header.opcode ==
+		} else if (request->header.opcode ==
 		    NETWORKD_OP_CONFIRMED_DISARM) {
 			result = networkd_confirmed_disarm(&confirmed,
-			    request.token);
+			    request->token);
 			error = result == 0 ? 0 : errno;
 		} else {
 			result = networkd_confirmed_rollback(&confirmed,
@@ -1477,69 +1738,65 @@ handle_request(
 			response_length = strlen(response);
 		}
 		if (result == 0) {
-			send_response(client, request.header.request_id,
-			    request.header.opcode, NETWORKD_RESULT_OK, 0, NULL,
+			send_response(client, request->header.request_id,
+			    request->header.opcode, NETWORKD_RESULT_OK, 0, NULL,
 			    response_length != 0U ? response : NULL,
 			    response_length);
 		} else {
-			send_response(client, request.header.request_id,
-			    request.header.opcode,
-			    request.header.opcode == NETWORKD_OP_CONFIRMED_ROLLBACK &&
+			send_response(client, request->header.request_id,
+			    request->header.opcode,
+			    request->header.opcode == NETWORKD_OP_CONFIRMED_ROLLBACK &&
 			    response_length != 0U ? NETWORKD_RESULT_DEGRADED :
 			    NETWORKD_RESULT_ERROR, error != 0 ? error : EIO,
 			    diagnostic[0] != '\0' ? diagnostic : operation,
 			    response_length != 0U ? response : NULL,
 			    response_length);
 		}
-		networkd_protocol_clear(&request, sizeof(request));
 		networkd_protocol_clear(response, sizeof(response));
 		networkd_protocol_clear(diagnostic, sizeof(diagnostic));
 		return;
 	}
 
 	/* Serializes every wired mutation with the volatile transaction owner. */
-	if (request.header.opcode >= NETWORKD_OP_UP &&
-	    request.header.opcode <= NETWORKD_OP_DNS_CLEAR &&
-	    request.header.opcode != NETWORKD_OP_RELOAD &&
-	    networkd_confirmed_check(&confirmed, request.token) != 0) {
+	if (request->header.opcode >= NETWORKD_OP_UP &&
+	    request->header.opcode <= NETWORKD_OP_DNS_CLEAR &&
+	    request->header.opcode != NETWORKD_OP_RELOAD &&
+	    networkd_confirmed_check(&confirmed, request->token) != 0) {
 		error = errno != 0 ? errno : EBUSY;
-		send_response(client, request.header.request_id,
-		    request.header.opcode, NETWORKD_RESULT_ERROR, error,
+		send_response(client, request->header.request_id,
+		    request->header.opcode, NETWORKD_RESULT_ERROR, error,
 		    "confirmed transaction", NULL, 0U);
-		networkd_protocol_clear(&request, sizeof(request));
 		return;
 	}
-	if (request.token != 0U)
+	if (request->token != 0U)
 		mutation_deadline = confirmed.deadline;
 
 	/* WLAN mutations cannot occupy the loop past a wired rollback deadline. */
 	if (networkd_confirmed_active(&confirmed) &&
-	    request.header.opcode >= NETWORKD_OP_WIFI_ENABLE &&
-	    request.header.opcode <= NETWORKD_OP_WIFI_PROFILES_CHANGED &&
-	    request.header.opcode != NETWORKD_OP_WIFI_LIST) {
-		send_response(client, request.header.request_id,
-		    request.header.opcode, NETWORKD_RESULT_ERROR, EBUSY,
+	    request->header.opcode >= NETWORKD_OP_WIFI_ENABLE &&
+	    request->header.opcode <= NETWORKD_OP_WIFI_PROFILES_CHANGED &&
+	    request->header.opcode != NETWORKD_OP_WIFI_LIST) {
+		send_response(client, request->header.request_id,
+		    request->header.opcode, NETWORKD_RESULT_ERROR, EBUSY,
 		    "confirmed transaction", NULL, 0U);
-		networkd_protocol_clear(&request, sizeof(request));
 		return;
 	}
 
 	/* Delegates the complete typed WLAN family to its bounded orchestrator. */
-	if (request.header.opcode >= NETWORKD_OP_WIFI_ENABLE &&
-	    request.header.opcode <= NETWORKD_OP_WIFI_PROFILES_CHANGED) {
-		handle_wifi_request(client, &request, peer);
-		networkd_protocol_clear(&request, sizeof(request));
+	if (request->header.opcode >= NETWORKD_OP_WIFI_ENABLE &&
+	    request->header.opcode <= NETWORKD_OP_WIFI_PROFILES_CHANGED) {
+		handle_wifi_request(client, request, peer);
 		networkd_protocol_clear(response, sizeof(response));
 		networkd_protocol_clear(diagnostic, sizeof(diagnostic));
 		return;
 	}
 
 	/* Dispatches the validated operation through absolute child paths. */
-	NCOM_TRACE("daemon-execute-enter", request.header.opcode);
-	result = execute_wired_request(&request, response, sizeof(response),
+	NCOM_TRACE("daemon-execute-enter", request->header.opcode);
+	result = execute_wired_request(request, response, sizeof(response),
 	    diagnostic, sizeof(diagnostic), &response_length, &error,
 	    mutation_deadline);
-	NCOM_TRACE("daemon-execute-done", request.header.opcode);
+	NCOM_TRACE("daemon-execute-done", request->header.opcode);
 	if (mutation_deadline != 0U &&
 	    netutil_monotonic_us() >= mutation_deadline) {
 		run_confirmed_due();
@@ -1550,20 +1807,19 @@ handle_request(
 	}
 
 	/* Sends one correlated terminal response and clears request storage. */
-	NCOM_TRACE("daemon-response-enter", request.header.opcode);
+	NCOM_TRACE("daemon-response-enter", request->header.opcode);
 	if (result == 0) {
-		send_response(client, request.header.request_id,
-		    request.header.opcode, NETWORKD_RESULT_OK, 0, NULL,
+		send_response(client, request->header.request_id,
+		    request->header.opcode, NETWORKD_RESULT_OK, 0, NULL,
 		    response_length != 0U ? response : NULL, response_length);
 	} else {
-		send_response(client, request.header.request_id,
-		    request.header.opcode, NETWORKD_RESULT_ERROR,
+		send_response(client, request->header.request_id,
+		    request->header.opcode, NETWORKD_RESULT_ERROR,
 		    error != 0 ? error : EIO,
 		    diagnostic[0] != '\0' ? diagnostic : operation,
 		    NULL, 0U);
 	}
-	NCOM_TRACE("daemon-response-done", request.header.opcode);
-	networkd_protocol_clear(&request, sizeof(request));
+	NCOM_TRACE("daemon-response-done", request->header.opcode);
 	networkd_protocol_clear(response, sizeof(response));
 	networkd_protocol_clear(diagnostic, sizeof(diagnostic));
 }
@@ -1842,438 +2098,838 @@ rollback_parse(
 #undef ROLLBACK_REJECT
 }
 
-/* Clears every handler buffer which can contain policy or child data. */
-static void
-clear_wifi_request_storage(
-	struct networkd_wifi_child_result *child_result,
-	struct networkd_wlan_radio *radios,
-	size_t radios_size,
-	struct wifi_conf_model *model,
-	char *diagnostic,
-	size_t diagnostic_size,
-	char *output,
-	size_t output_size)
+/* Prepares radios using one request-owned response buffer. */
+static int
+wifi_request_prepare(
+	struct networkd_wifi_request *work)
 {
-	/* Clears credentials first, followed by nonsecret operation snapshots. */
-	wifi_conf_model_clear(model);
-	wifi_conf_explicit_clear(diagnostic, diagnostic_size);
-	networkd_wifi_child_result_clear(child_result);
-	networkd_protocol_clear(radios, radios_size);
-	networkd_protocol_clear(output, output_size);
+	/* Retirement may have changed the preflight administrative/scan snapshot. */
+	work->stage = "refresh WLAN radios";
+	memset(work->radios, 0, sizeof(work->radios));
+	if (enumerate_wlan_radios(work->radios, NETWORKD_WLAN_RADIO_MAX,
+	    &work->radio_count) != 0)
+		return -1;
+	work->stage = "prepare WLAN radios";
+	return prepare_wlan_radios(work->radios, work->radio_count,
+	    work->output, (sizeof(work->output) - NETWORKD_WIFI_STATUS_RESERVE), &work->output_length);
 }
 
-/* Composes each public WLAN request from bounded primitive commands. */
+/* Lists every radio independently and retains useful partial observations. */
+static int
+wifi_request_list(
+	struct networkd_wifi_request *work)
+{
+	struct networkd_wifi_child_result child;
+	size_t index;
+	int first_error;
+	int error;
+	int count;
+
+	work->stage = "enumerate WLAN radios";
+	if (enumerate_wlan_radios(work->radios, NETWORKD_WLAN_RADIO_MAX,
+	    &work->radio_count) != 0)
+		return -1;
+	first_error = 0;
+	for (index = 0U; index < work->radio_count; index++) {
+		memset(&child, 0, sizeof(child));
+		if (work->radios[index].observation_error != 0 ||
+		    work->radios[index].stop_flags != 0U) {
+			error = work->radios[index].observation_error != 0 ?
+			    work->radios[index].observation_error : EBUSY;
+			count = snprintf(work->output + work->output_length,
+			    sizeof(work->output) - NETWORKD_WIFI_STATUS_RESERVE - work->output_length,
+			    "interface=%s stop-pending=%u status-error=%d\n",
+			    work->radios[index].interface,
+			    (work->radios[index].stop_flags & WLAN_STATUS_STOP_PENDING) != 0U,
+			    work->radios[index].observation_error);
+			if (count < 0 || (size_t)count >= sizeof(work->output) -
+			    NETWORKD_WIFI_STATUS_RESERVE - work->output_length) {
+				errno = EOVERFLOW;
+				return -1;
+			}
+			work->output_length += (size_t)count;
+		} else if (run_wifi(work->radios[index].interface, "list", NULL,
+		    5U, &child) == 0) {
+			error = append_wifi_snapshot(work->radios[index].interface,
+			    (const char *)child.output, child.output_length, 0U,
+			    work->output, (sizeof(work->output) - NETWORKD_WIFI_STATUS_RESERVE),
+			    &work->output_length) == 0 ? 0 : errno;
+		} else {
+			error = child.terminal_error != 0 ? child.terminal_error : EIO;
+			count = snprintf(work->output + work->output_length,
+			    (sizeof(work->output) - NETWORKD_WIFI_STATUS_RESERVE) - work->output_length,
+			    "interface=%s list-error=%d\n",
+			    work->radios[index].interface, error);
+			if (count < 0 || (size_t)count >=
+			    (sizeof(work->output) - NETWORKD_WIFI_STATUS_RESERVE) - work->output_length) {
+				networkd_wifi_child_result_clear(&child);
+				errno = EOVERFLOW;
+				return -1;
+			}
+			work->output_length += (size_t)count;
+		}
+		networkd_wifi_child_result_clear(&child);
+
+		/* Preserves the overflow result even if an earlier radio failed differently. */
+		if (error == EOVERFLOW) {
+			work->stage = "Wi-Fi list output truncated";
+			errno = EOVERFLOW;
+			return -1;
+		}
+		if (error != 0 && first_error == 0)
+			first_error = error;
+	}
+	work->stage = "partial Wi-Fi list";
+	errno = first_error;
+	return first_error == 0 ? 0 : -1;
+}
+
+/* Validates a prospective owner before publishing its enabled intent. */
+static int
+wifi_request_enable(
+	struct networkd_wifi_request *work,
+	const struct zedbsd_peercred *peer)
+{
+	if (wifi_disable_pending) {
+		errno = EBUSY;
+		return -1;
+	}
+	work->stage = "load Wi-Fi profiles";
+	if (load_policy(peer->euid, &work->profiles, work->diagnostic,
+	    sizeof(work->diagnostic)) != 0 && errno != ENOENT)
+		return -1;
+	work->stage = "enumerate WLAN radios";
+	if (enumerate_wlan_radios(work->radios, NETWORKD_WLAN_RADIO_MAX,
+	    &work->radio_count) != 0)
+		return -1;
+
+	/* An unchanged live owner is already enabled. */
+	if (networkd_managed_wlan_owner_matches(&managed_wlan, peer->euid) &&
+	    managed_wlan.state == NETWORKD_WLAN_CONNECTED &&
+	    managed_connection_usable())
+		return 0;
+
+	work->stage = "retire prior Wi-Fi connection";
+	if (managed_wlan.state != NETWORKD_WLAN_DISABLED &&
+	    retire_managed_connection(NETWORKD_WLAN_AUTO_SEARCHING, 1) != 0)
+		return -1;
+	work->stage = "enable Wi-Fi policy";
+	if (networkd_managed_wlan_enable(&managed_wlan, peer->euid) != 0)
+		return -1;
+
+	/* RF association belongs to scheduled work, never to enable dispatch. */
+	automatic_candidate_skip = 0U;
+	schedule_automatic_work(0U);
+	return wifi_request_prepare(work);
+}
+
+/* Pauses automatic policy before fallible teardown and radio normalization. */
+static int
+wifi_request_stop(
+	struct networkd_wifi_request *work,
+	int disable)
+{
+	if (!disable && wifi_disable_pending) {
+		errno = EBUSY;
+		return -1;
+	}
+	if (disable)
+		wifi_disable_pending = 1;
+	automatic_retry_at = 0U;
+	work->stage = "retire Wi-Fi connection";
+	automatic_candidate_skip = 0U;
+	if (managed_wlan.owner_valid &&
+	    retire_managed_connection(NETWORKD_WLAN_MANUAL_DISCONNECTED, 1) != 0)
+		return disable ? wifi_disable_defer() : -1;
+	if (!disable && managed_wlan.state == NETWORKD_WLAN_DISABLED)
+		return 0;
+	if (!disable)
+		return wifi_request_prepare(work);
+	work->stage = "enumerate WLAN radios";
+	if (enumerate_wlan_radios(work->radios, NETWORKD_WLAN_RADIO_MAX,
+	    &work->radio_count) != 0)
+		return wifi_disable_defer();
+	/* Never report disabled while normalization has an unresolved failure. */
+	work->stage = "normalize WLAN radios";
+	if (stop_wlan_radios(work->radios, work->radio_count, 1) != 0)
+		return wifi_disable_defer();
+	work->stage = "disable Wi-Fi policy";
+	if (networkd_managed_wlan_disable(&managed_wlan) != 0)
+		return wifi_disable_defer();
+	wifi_disable_pending = 0;
+	return 0;
+}
+
+/* Global radio normalization may remain pending even without an L2 token. */
+static int
+wifi_disable_defer(void)
+{
+	int saved;
+
+	saved = errno != 0 ? errno : EIO;
+	managed_wlan.state = NETWORKD_WLAN_RETIRING;
+	managed_wlan.retire_target = NETWORKD_WLAN_MANUAL_DISCONNECTED;
+	schedule_retirement_retry();
+	errno = saved;
+	return -1;
+}
+
+/* Performs an explicit target transaction after complete nonmutating preflight. */
+static int
+wifi_request_connect(
+	struct networkd_wifi_request *work,
+	const struct networkd_request *request)
+{
+	const struct wifi_conf_profile *profile;
+	uint64_t selection_deadline;
+	uint64_t deadline;
+	size_t winner;
+	int l2_succeeded;
+
+	if (wifi_disable_pending) {
+		errno = EBUSY;
+		return -1;
+	}
+	work->stage = "Wi-Fi is disabled";
+	if (managed_wlan.state == NETWORKD_WLAN_DISABLED) {
+		errno = EPERM;
+		return -1;
+	}
+	work->stage = "load Wi-Fi profiles";
+	if (load_policy(managed_wlan.owner_uid, &work->profiles,
+	    work->diagnostic, sizeof(work->diagnostic)) != 0)
+		return -1;
+	work->stage = "unknown Wi-Fi profile";
+	profile = find_profile(&work->profiles, request->ssid, request->ssid_length);
+	if (profile == NULL) {
+		errno = ENOENT;
+		return -1;
+	}
+	work->stage = "enumerate WLAN radios";
+	if (enumerate_wlan_radios(work->radios, NETWORKD_WLAN_RADIO_MAX,
+	    &work->radio_count) != 0)
+		return -1;
+	if (work->radio_count == 0U) {
+		work->stage = "no WLAN radio";
+		errno = ENODEV;
+		return -1;
+	}
+
+	/* This covers connected, reconnecting, connecting and retiring identities. */
+	automatic_retry_at = 0U;
+	work->stage = "retire current Wi-Fi connection";
+	if (retire_managed_connection(NETWORKD_WLAN_MANUAL_DISCONNECTED, 1) != 0)
+		return -1;
+	if (wifi_request_prepare(work) != 0)
+		return -1;
+	deadline = wifi_work.deadline -
+	    NETWORKD_WIFI_CLEANUP_SECONDS * 1000000ULL;
+	selection_deadline = netutil_monotonic_us() +
+	    NETWORKD_WLAN_SCAN_SECONDS * 1000000ULL;
+	if (selection_deadline > deadline)
+		selection_deadline = deadline;
+	work->stage = "Wi-Fi SSID not visible";
+	if (select_manual_radio(work->radios, work->radio_count, profile,
+	    &winner, selection_deadline) != 0)
+		return -1;
+	l2_succeeded = 0;
+	work->stage = "wifi connect";
+	if (run_managed_connect(work->radios[winner].interface, profile,
+	    NETWORKD_WLAN_MANUAL_DISCONNECTED, deadline, work->output,
+	    (sizeof(work->output) - NETWORKD_WIFI_STATUS_RESERVE), &work->output_length, &l2_succeeded) != 0) {
+		if (l2_succeeded)
+			work->stage = "DHCP transaction";
+		return -1;
+	}
+	stop_losing_scans(work->radios, work->radio_count, winner);
+	return 0;
+}
+
+/* Dispatches one policy operation, then emits and clears one terminal result. */
+static void
+process_wifi_request(
+	int client,
+	struct networkd_request *request,
+	const struct zedbsd_peercred *peer)
+{
+	struct networkd_wifi_request work;
+	uint32_t opcode;
+	uint32_t status;
+	int result;
+	int error;
+
+	memset(&work, 0, sizeof(work));
+	work.stage = "Wi-Fi policy";
+	opcode = request->header.opcode;
+	result = -1;
+	error = EINVAL;
+
+	if (route_events >= 0 && process_route_events() != 0) {
+		(void)close(route_events);
+		route_events = -1;
+	}
+	if (peer == NULL) {
+		errno = EACCES;
+	} else if (opcode != NETWORKD_OP_WIFI_LIST &&
+	    opcode != NETWORKD_OP_WIFI_ENABLE &&
+	    opcode != NETWORKD_OP_WIFI_PROFILES_CHANGED && !owner_allowed(peer)) {
+		work.stage = "Wi-Fi policy owner";
+		errno = EPERM;
+	} else {
+		switch (opcode) {
+		case NETWORKD_OP_WIFI_LIST:
+			result = wifi_request_list(&work);
+			break;
+		case NETWORKD_OP_WIFI_ENABLE:
+			result = wifi_request_enable(&work, peer);
+			break;
+		case NETWORKD_OP_WIFI_DISABLE:
+			result = wifi_request_stop(&work, 1);
+			break;
+		case NETWORKD_OP_WIFI_DISCONNECT:
+			result = wifi_request_stop(&work, 0);
+			break;
+		case NETWORKD_OP_WIFI_CONNECT:
+			result = wifi_request_connect(&work, request);
+			break;
+		case NETWORKD_OP_WIFI_PROFILES_CHANGED:
+			wifi_profiles_changed(peer);
+			result = 0;
+			break;
+		default:
+			errno = EINVAL;
+			break;
+		}
+	}
+	error = result == 0 ? 0 : (errno != 0 ? errno : EIO);
+	status = result == 0 ? NETWORKD_RESULT_OK : NETWORKD_RESULT_ERROR;
+	if (result != 0 && (managed_wlan.state == NETWORKD_WLAN_RETIRING ||
+	    opcode == NETWORKD_OP_WIFI_LIST))
+		status = NETWORKD_RESULT_DEGRADED;
+
+	/* Makes output exhaustion visible even when complete earlier lines survive. */
+	if (opcode == NETWORKD_OP_WIFI_LIST && error == EOVERFLOW) {
+		memcpy(work.output + work.output_length, "wifi output-truncated=1\n", 24U);
+		work.output_length += 24U;
+	}
+
+	/* A policy observation is useful even when one radio or stage failed. */
+	if (append_managed_status(work.output, sizeof(work.output),
+	    &work.output_length) != 0 && error == 0) {
+		error = errno != 0 ? errno : EOVERFLOW;
+		status = NETWORKD_RESULT_ERROR;
+		work.stage = "Wi-Fi status output";
+	}
+	send_response(client, request->header.request_id, opcode, status, error,
+	    error == 0 ? NULL : (work.diagnostic[0] != '\0' ?
+	    work.diagnostic : work.stage), work.output, work.output_length);
+	wifi_conf_model_clear(&work.profiles);
+	networkd_protocol_clear(&work, sizeof(work));
+}
+
+/* Releases one cached radio without changing managed policy. */
+static void
+clear_wifi_observation(
+	size_t slot)
+{
+	/* Accounts only allocated record bytes, never the metadata array. */
+	wifi_observation_bytes -= wifi_observations[slot].output_length;
+	free(wifi_observations[slot].output);
+	memset(&wifi_observations[slot], 0, sizeof(wifi_observations[slot]));
+}
+
+/* Retains nonsecret records under one total response-sized allocation budget. */
+static void
+remember_wifi_observation(
+	const char *interface,
+	const struct networkd_wifi_child_result *result)
+{
+	uint32_t ifindex;
+	size_t index;
+	size_t slot;
+	size_t oldest;
+	size_t empty;
+	char *output;
+
+	/* Rejects an invalid result or vanished identity before replacing a cache. */
+	if (result->output_length == 0U ||
+	    result->output_length > NETWORKD_RESPONSE_OUTPUT_MAX ||
+	    result->output_records > NETWORKD_WIFI_CHILD_RECORD_MAX ||
+	    interface_index(interface, &ifindex) != 0)
+		return;
+
+	/* Finds an existing name before considering any earlier empty slot. */
+	slot = NETWORKD_WLAN_RADIO_MAX;
+	empty = NETWORKD_WLAN_RADIO_MAX;
+	oldest = 0U;
+	for (index = 0U; index < NETWORKD_WLAN_RADIO_MAX; index++) {
+		if (wifi_observations[index].output != NULL &&
+		    strcmp(wifi_observations[index].interface, interface) == 0) {
+			slot = index;
+			break;
+		}
+		if (wifi_observations[index].output == NULL)
+			empty = index;
+		if (wifi_observations[index].observed_at <
+		    wifi_observations[oldest].observed_at)
+			oldest = index;
+	}
+	if (slot == NETWORKD_WLAN_RADIO_MAX)
+		slot = empty == NETWORKD_WLAN_RADIO_MAX ? oldest : empty;
+	clear_wifi_observation(slot);
+
+	/* Evicts old observations until the global allocation bound permits a copy. */
+	while (wifi_observation_bytes + result->output_length >
+	    NETWORKD_RESPONSE_OUTPUT_MAX) {
+		oldest = NETWORKD_WLAN_RADIO_MAX;
+		for (index = 0U; index < NETWORKD_WLAN_RADIO_MAX; index++) {
+			if (wifi_observations[index].output != NULL &&
+			    (oldest == NETWORKD_WLAN_RADIO_MAX ||
+			    wifi_observations[index].observed_at <
+			    wifi_observations[oldest].observed_at))
+				oldest = index;
+		}
+		if (oldest == NETWORKD_WLAN_RADIO_MAX)
+			return;
+		clear_wifi_observation(oldest);
+	}
+
+	/* Allocation failure loses only optional observations, never policy state. */
+	output = malloc(result->output_length);
+	if (output == NULL)
+		return;
+	memcpy(output, result->output, result->output_length);
+	strcpy(wifi_observations[slot].interface, interface);
+	wifi_observations[slot].ifindex = ifindex;
+	wifi_observations[slot].observed_at = netutil_monotonic_us();
+	wifi_observations[slot].output = output;
+	wifi_observations[slot].output_length = result->output_length;
+	wifi_observation_bytes += result->output_length;
+}
+
+/* Emits the same snapshot metadata for fresh and cached observations. */
+static int
+append_wifi_snapshot(
+	const char *interface,
+	const char *records,
+	size_t length,
+	uint64_t age,
+	char *output,
+	size_t capacity,
+	size_t *used)
+{
+	char metadata[128];
+	int count;
+	int result;
+
+	/* Makes missing and evicted caches explicit within the ordinary list grammar. */
+	if (records == NULL)
+		count = snprintf(metadata, sizeof(metadata),
+		    "interface=%s snapshot-age-ms=unknown scan-snapshot=not-yet-observed\n",
+		    interface);
+	else
+		count = snprintf(metadata, sizeof(metadata),
+		    "interface=%s snapshot-age-ms=%llu scan-snapshot=available\n",
+		    interface, (unsigned long long)age);
+
+	/* Publishes only a complete metadata line. */
+	if (count < 0 || (size_t)count >= sizeof(metadata) ||
+	    *used > capacity || (size_t)count > capacity - *used) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	memcpy(output + *used, metadata, (size_t)count);
+	*used += (size_t)count;
+
+	/* Appends available records using the same converter as fresh results. */
+	if (records != NULL) {
+		result = append_wifi_records(interface, records, length,
+		    output, capacity, used);
+		return result;
+	}
+	return 0;
+}
+
+/* Observes an ongoing actor without allocating another policy/credential frame. */
+static void
+send_wifi_observation(
+	int client,
+	const struct networkd_request *request)
+{
+	struct networkd_wlan_radio radios[NETWORKD_WLAN_RADIO_MAX];
+	char *output;
+	size_t capacity;
+	size_t used;
+	size_t count;
+	size_t radio;
+	size_t slot;
+	uint64_t now;
+	uint64_t age;
+	int result;
+	int saved;
+
+	/* Keeps this callback's stack independent of the credential and record limits. */
+	capacity = NETWORKD_RESPONSE_OUTPUT_MAX - NETWORKD_DIAGNOSTIC_MAX - 4U;
+	output = malloc(capacity);
+	if (output == NULL) {
+		send_response(client, request->header.request_id, request->header.opcode,
+		    NETWORKD_RESULT_ERROR, ENOMEM, "Wi-Fi observation", NULL, 0U);
+		return;
+	}
+	used = 0U;
+	count = 0U;
+	result = enumerate_wlan_radios(radios, NETWORKD_WLAN_RADIO_MAX, &count);
+	now = netutil_monotonic_us();
+
+	/* Matches cached data against both the current name and interface identity. */
+	for (radio = 0U; result == 0 && radio < count; radio++) {
+		for (slot = 0U; slot < NETWORKD_WLAN_RADIO_MAX; slot++) {
+			if (wifi_observations[slot].output != NULL &&
+			    wifi_observations[slot].ifindex == radios[radio].ifindex &&
+			    strcmp(wifi_observations[slot].interface,
+			    radios[radio].interface) == 0)
+				break;
+		}
+		age = 0U;
+		if (slot != NETWORKD_WLAN_RADIO_MAX &&
+		    now >= wifi_observations[slot].observed_at)
+			age = (now - wifi_observations[slot].observed_at) / 1000U;
+		result = append_wifi_snapshot(radios[radio].interface,
+		    slot == NETWORKD_WLAN_RADIO_MAX ? NULL : wifi_observations[slot].output,
+		    slot == NETWORKD_WLAN_RADIO_MAX ? 0U : wifi_observations[slot].output_length,
+		    age, output, capacity - NETWORKD_WIFI_STATUS_RESERVE, &used);
+	}
+
+	/* Reserves an explicit truncation marker and final state even for partial output. */
+	saved = result == 0 ? 0 : (errno != 0 ? errno : EIO);
+	if (saved == EOVERFLOW) {
+		memcpy(output + used, "wifi output-truncated=1\n", 24U);
+		used += 24U;
+	}
+	if (append_managed_status(output, capacity, &used) != 0 && saved == 0)
+		saved = errno != 0 ? errno : EOVERFLOW;
+	send_response(client, request->header.request_id, request->header.opcode,
+	    saved == 0 ? NETWORKD_RESULT_OK : NETWORKD_RESULT_DEGRADED, saved,
+	    saved == 0 ? NULL : "Wi-Fi observation", output, used);
+	free(output);
+}
+
+/* Serves read-only wired status without entering a request or child transaction. */
+static void
+send_wired_observation(
+	int client,
+	const struct networkd_request *request)
+{
+	char *output;
+	int result;
+	int error;
+
+	/* Uses a bounded temporary buffer instead of growing the active RF stack. */
+	output = malloc(NETWORKD_RESPONSE_OUTPUT_MAX);
+	if (output == NULL) {
+		send_response(client, request->header.request_id, request->header.opcode,
+		    NETWORKD_RESULT_ERROR, ENOMEM, "SHOW", NULL, 0U);
+		return;
+	}
+	result = show_interfaces(request->interface[0] != '\0' ?
+	    request->interface : NULL, output, NETWORKD_RESPONSE_OUTPUT_MAX);
+	error = result == 0 ? 0 : (errno != 0 ? errno : EIO);
+	send_response(client, request->header.request_id, request->header.opcode,
+	    result == 0 ? NETWORKD_RESULT_OK : NETWORKD_RESULT_ERROR, error,
+	    result == 0 ? NULL : "SHOW", result == 0 ? output : NULL,
+	    result == 0 ? strlen(output) : 0U);
+	free(output);
+}
+
+/* Preserves local profile publication while waking the applicable policy only. */
+static void
+wifi_profiles_changed(
+	const struct zedbsd_peercred *peer)
+{
+	if (peer == NULL || !networkd_managed_wlan_owner_matches(&managed_wlan,
+	    peer->euid))
+		return;
+	automatic_candidate_skip = 0U;
+	if (wifi_work.background)
+		wifi_work.profiles_changed = 1;
+	if (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING)
+		schedule_automatic_work(0U);
+}
+
+/* Resumes deferred control only after the interrupted actor has unwound. */
+static void
+dispatch_pending_wifi(
+	void)
+{
+	int client;
+
+	client = wifi_pending_client;
+	wifi_pending_client = -1;
+	dispatch_request(client, &wifi_pending.request, wifi_pending.role,
+	    &wifi_pending.peer);
+	(void)close(client);
+	networkd_protocol_clear(&wifi_pending, sizeof(wifi_pending));
+}
+
+/* Reports whether the outer loop must continue receiving an accepted request. */
+static int
+control_input_pending(
+	void)
+{
+	size_t index;
+
+	/* Retains a short poll interval only while bounded ingress slots are occupied. */
+	for (index = 0U; index < NETWORKD_CONTROL_INPUT_MAX; index++) {
+		if (control_inputs[index].active)
+			return 1;
+	}
+	return 0;
+}
+
+/* Receives available bytes without charging a stalled client to the RF wait. */
+static int
+receive_wait_request(
+	struct networkd_request *request,
+	struct zedbsd_peercred *peer,
+	enum networkd_client_role *role)
+{
+	struct networkd_control_input *input;
+	struct pollfd ready;
+	struct timeval timeout;
+	unsigned char *newline;
+	size_t index;
+	size_t header_length;
+	size_t iteration;
+	ssize_t count;
+	int client;
+	int error;
+	int complete;
+
+	/* Admits at most one new peer per callback under a fixed four-client bound. */
+	for (index = 0U; index < NETWORKD_CONTROL_INPUT_MAX; index++) {
+		if (!control_inputs[index].active)
+			break;
+	}
+	ready.fd = control_listener;
+	ready.events = POLLIN;
+	ready.revents = 0;
+	if (index < NETWORKD_CONTROL_INPUT_MAX && poll(&ready, 1U, 0) > 0 &&
+	    (ready.revents & POLLIN) != 0) {
+		client = accept4(control_listener, NULL, NULL, SOCK_CLOEXEC);
+		if (client >= 0) {
+			input = &control_inputs[index];
+			timeout.tv_sec = 0;
+			timeout.tv_usec = 200000;
+
+			/* Bounds response backpressure independently of partial request input. */
+			if (setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout,
+			    sizeof(timeout)) != 0 ||
+			    authenticate_client(client, &input->peer, &input->role) != 0) {
+				(void)close(client);
+				memset(input, 0, sizeof(*input));
+			} else {
+				input->descriptor = client;
+				input->deadline = netutil_monotonic_us() + 5000000ULL;
+				input->active = 1;
+			}
+		}
+	}
+
+	/* Consumes bounded chunks, including EOF, without waiting for another byte. */
+	for (index = 0U; index < NETWORKD_CONTROL_INPUT_MAX; index++) {
+		input = &control_inputs[index];
+		if (!input->active)
+			continue;
+		error = 0;
+		complete = 0;
+		if (netutil_monotonic_us() >= input->deadline)
+			error = ETIMEDOUT;
+		for (iteration = 0U; error == 0 && iteration < 2U; iteration++) {
+			count = recv(input->descriptor, input->bytes + input->used,
+			    sizeof(input->bytes) - input->used, MSG_DONTWAIT);
+			if (count < 0) {
+				if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
+					error = errno != 0 ? errno : EIO;
+				break;
+			}
+			if (count == 0) {
+				complete = 1;
+				break;
+			}
+			input->used += (size_t)count;
+			if (input->used == sizeof(input->bytes))
+				error = EMSGSIZE;
+		}
+
+		/* Requires an exact header/payload and write-side EOF before admission. */
+		if (complete && error == 0) {
+			newline = memchr(input->bytes, '\n', input->used);
+			header_length = newline == NULL ? 0U :
+			    (size_t)(newline - input->bytes) + 1U;
+			if (header_length == 0U || header_length > NETWORKD_PROTOCOL_HEADER_MAX) {
+				error = EINVAL;
+			} else if (networkd_protocol_header_decode((char *)input->bytes,
+			    header_length, &request->header) != 0) {
+				error = errno != 0 ? errno : EINVAL;
+			} else if (request->header.payload_length > NETWORKD_REQUEST_MAX ||
+			    request->header.payload_length != input->used - header_length) {
+				error = EMSGSIZE;
+			} else {
+				memcpy(request->payload, input->bytes + header_length,
+				    request->header.payload_length);
+				if (decode_request(request) != 0)
+					error = errno != 0 ? errno : EINVAL;
+			}
+		}
+
+		/* Detaches complete transport before any dispatcher can invoke another wait. */
+		if (complete && error == 0) {
+			client = input->descriptor;
+			memcpy(peer, &input->peer, sizeof(*peer));
+			*role = input->role;
+			networkd_protocol_clear(input, sizeof(*input));
+			return client;
+		}
+
+		/* Drops malformed or expired peers while continuing other accepted inputs. */
+		if (error != 0) {
+			send_error(input->descriptor, error, "incomplete or malformed request");
+			(void)close(input->descriptor);
+			networkd_protocol_clear(input, sizeof(*input));
+			networkd_protocol_clear(request, sizeof(*request));
+		}
+	}
+
+	/* Leaves incomplete peers owned by their original absolute ingress deadline. */
+	return -1;
+}
+
+/* Services reads/notifications; defers stop intent without recursive mutation. */
+static int
+service_wifi_wait(
+	void)
+{
+	struct networkd_request request;
+	struct zedbsd_peercred peer;
+	enum networkd_client_role role;
+	int client;
+	int error;
+	int deferred;
+	uint64_t cleanup_deadline;
+
+	if (wifi_work.cleanup)
+		return 0;
+	if (stopping || wifi_work.cancelled)
+		return EINTR;
+	if (control_listener < 0)
+		return 0;
+	memset(&request, 0, sizeof(request));
+	client = receive_wait_request(&request, &peer, &role);
+	if (client < 0)
+		return 0;
+	deferred = 0;
+	if (wifi_work.deadline == 0U) {
+		dispatch_request(client, &request, role, &peer);
+	} else if (operation_name(request.header.opcode) == NULL ||
+	    !operation_allowed(role, operation_name(request.header.opcode))) {
+		send_response(client, request.header.request_id, request.header.opcode,
+		    NETWORKD_RESULT_ERROR, EPERM, "operation denied", NULL, 0U);
+	} else if (request.header.opcode == NETWORKD_OP_SHOW) {
+		send_wired_observation(client, &request);
+	} else if (!networkd_confirmed_active(&confirmed) &&
+	    (request.header.opcode == NETWORKD_OP_CONFIRMED_CHECK ||
+	    request.header.opcode == NETWORKD_OP_CONFIRMED_DISARM)) {
+		/* The inactive transaction cannot roll back or interrupt RF work. */
+		if (request.header.opcode == NETWORKD_OP_CONFIRMED_CHECK)
+			error = networkd_confirmed_check(&confirmed, request.token);
+		else
+			error = networkd_confirmed_disarm(&confirmed, request.token);
+		error = error == 0 ? 0 : (errno != 0 ? errno : EIO);
+		send_response(client, request.header.request_id, request.header.opcode,
+		    error == 0 ? NETWORKD_RESULT_OK : NETWORKD_RESULT_ERROR, error,
+		    error == 0 ? NULL : "confirmed transaction", NULL, 0U);
+	} else if (request.header.opcode == NETWORKD_OP_WIFI_LIST ||
+	    (request.header.opcode == NETWORKD_OP_WIFI_ENABLE &&
+	    networkd_managed_wlan_owner_matches(&managed_wlan, peer.euid) &&
+	    (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING ||
+	    managed_wlan.state == NETWORKD_WLAN_CONNECTING ||
+	    managed_wlan.state == NETWORKD_WLAN_CONNECTED ||
+	    managed_wlan.state == NETWORKD_WLAN_RECONNECTING))) {
+		send_wifi_observation(client, &request);
+	} else if (request.header.opcode == NETWORKD_OP_WIFI_PROFILES_CHANGED) {
+		wifi_profiles_changed(&peer);
+		send_response(client, request.header.request_id, request.header.opcode,
+		    NETWORKD_RESULT_OK, 0, NULL, NULL, 0U);
+	} else {
+		error = EBUSY;
+		if (wifi_work.background &&
+		    (request.header.opcode < NETWORKD_OP_WIFI_ENABLE ||
+		    ((request.header.opcode == NETWORKD_OP_WIFI_DISCONNECT ||
+		    request.header.opcode == NETWORKD_OP_WIFI_DISABLE) &&
+		    owner_allowed(&peer)))) {
+			wifi_pending_client = client;
+			wifi_pending.role = role;
+			memcpy(&wifi_pending.request, &request, sizeof(request));
+			memcpy(&wifi_pending.peer, &peer, sizeof(peer));
+			wifi_work.cancelled = 1;
+
+			/* Queued control waits only for the reserved cleanup interval. */
+			cleanup_deadline = netutil_monotonic_us() +
+			    NETWORKD_WIFI_CLEANUP_SECONDS * 1000000ULL;
+			if (wifi_work.deadline > cleanup_deadline)
+				wifi_work.deadline = cleanup_deadline;
+			deferred = 1;
+		} else {
+			if (request.header.opcode != NETWORKD_OP_WIFI_ENABLE &&
+			    request.header.opcode >= NETWORKD_OP_WIFI_ENABLE &&
+			    request.header.opcode <= NETWORKD_OP_WIFI_PROFILES_CHANGED &&
+			    !owner_allowed(&peer))
+				error = EPERM;
+			send_response(client, request.header.request_id, request.header.opcode,
+			    NETWORKD_RESULT_ERROR, error,
+			    "Wi-Fi operation in progress; retry", NULL, 0U);
+		}
+	}
+	networkd_protocol_clear(&request, sizeof(request));
+	if (!deferred)
+		(void)close(client);
+	return deferred ? EINTR : 0;
+}
+
+/* Starts one actor transaction; every exit goes through its outer wrapper. */
+static void
+wifi_work_begin(
+	uint32_t opcode,
+	int background)
+{
+	memset(&wifi_work, 0, sizeof(wifi_work));
+	wifi_work.deadline = netutil_monotonic_us() +
+	    NETWORKD_WIFI_REQUEST_SECONDS(opcode) * 1000000ULL;
+	wifi_work.background = background;
+}
+
+/* Drops the completed transaction without changing persistent policy intent. */
+static void
+wifi_work_end(
+	void)
+{
+	memset(&wifi_work, 0, sizeof(wifi_work));
+
+	/* Starts the next independent retirement at the initial retry interval. */
+	if (managed_wlan.state != NETWORKD_WLAN_RETIRING)
+		retirement_retry_seconds = NETWORKD_WLAN_RESCAN_SECONDS;
+}
+
+/* Gives every primitive and transaction stage the same absolute request end. */
 static void
 handle_wifi_request(
 	int client,
 	struct networkd_request *request,
 	const struct zedbsd_peercred *peer)
 {
-	struct networkd_wifi_child_result child_result;
-	struct networkd_wlan_radio radios[NETWORKD_WLAN_RADIO_MAX];
-	struct wifi_conf_model model;
-	const struct wifi_conf_profile *profile;
-	char output[NETWORKD_RESPONSE_MAX];
-	char diagnostic[WIFI_CONF_DIAGNOSTIC_MAX];
-	size_t output_length;
-	size_t radio_count;
-	size_t radio_index;
-	uint64_t deadline;
-	uint64_t now;
-	int no_candidate;
-	int l2_succeeded;
-	int result;
-	int error;
-
-	/* Initializes all bounded public and secret-bearing storage. */
-	memset(&child_result, 0, sizeof(child_result));
-	memset(radios, 0, sizeof(radios));
-	wifi_conf_model_init(&model);
-	memset(output, 0, sizeof(output));
-	memset(diagnostic, 0, sizeof(diagnostic));
-	output_length = 0U;
-	radio_count = 0U;
-	result = -1;
-	error = EINVAL;
-	if (route_events >= 0 && process_route_events(0) != 0) {
-		(void)close(route_events);
-		route_events = -1;
-	}
-
-	/* Lists the global policy followed by every radio's current scan cache. */
-	if (request->header.opcode == NETWORKD_OP_WIFI_LIST) {
-		result = append_managed_status(output,
-		    NETWORKD_RESPONSE_OUTPUT_MAX, &output_length);
-		if (result == 0)
-			result = enumerate_wlan_radios(radios,
-			    NETWORKD_WLAN_RADIO_MAX, &radio_count);
-		for (radio_index = 0U; result == 0 &&
-		    radio_index < radio_count; radio_index++) {
-			result = run_wifi(radios[radio_index].interface, "list",
-			    NULL, 10U, &child_result);
-			if (result == 0) {
-				result = append_wifi_output(
-				    radios[radio_index].interface, &child_result,
-				    output, NETWORKD_RESPONSE_OUTPUT_MAX,
-				    &output_length);
-			}
-			error = child_result.terminal_error;
-			networkd_wifi_child_result_clear(&child_result);
-		}
-		if (result == 0) {
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_OK, 0, NULL,
-			    output, output_length);
-		} else {
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_ERROR,
-			    error != 0 ? error : errno, "wifi list", NULL, 0U);
-		}
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-
-	/* Applies active-owner access control to every state-changing request. */
-	if (request->header.opcode != NETWORKD_OP_WIFI_ENABLE &&
-	    request->header.opcode != NETWORKD_OP_WIFI_PROFILES_CHANGED &&
-	    !owner_allowed(peer)) {
-		send_response(client, request->header.request_id,
-		    request->header.opcode, NETWORKD_RESULT_ERROR, EPERM,
-		    "Wi-Fi policy owner", NULL, 0U);
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-
-	/* An explicit connection requires an already enabled policy owner. */
-	if (request->header.opcode == NETWORKD_OP_WIFI_CONNECT &&
-	    managed_wlan.state == NETWORKD_WLAN_DISABLED) {
-		send_response(client, request->header.request_id,
-		    request->header.opcode, NETWORKD_RESULT_ERROR, EPERM,
-		    "Wi-Fi is disabled", NULL, 0U);
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-
-	/* Validates a manual profile before changing a live link or radio. */
-	profile = NULL;
-	if (request->header.opcode == NETWORKD_OP_WIFI_CONNECT) {
-		if (load_policy(managed_wlan.owner_uid, &model, diagnostic,
-		    sizeof(diagnostic)) != 0) {
-			error = errno;
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_ERROR,
-			    error != 0 ? error : EIO, diagnostic[0] != '\0' ?
-			    diagnostic : "load Wi-Fi profiles", NULL, 0U);
-			clear_wifi_request_storage(&child_result, radios,
-			    sizeof(radios), &model, diagnostic,
-			    sizeof(diagnostic), output, sizeof(output));
-			return;
-		}
-		profile = find_profile(&model, request->ssid,
-		    request->ssid_length);
-		if (profile == NULL) {
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_ERROR, ENOENT,
-			    "unknown Wi-Fi profile", NULL, 0U);
-			clear_wifi_request_storage(&child_result, radios,
-			    sizeof(radios), &model, diagnostic,
-			    sizeof(diagnostic), output, sizeof(output));
-			return;
-		}
-	}
-
-	/* Validates a prospective policy owner before retiring the current owner. */
-	if (request->header.opcode == NETWORKD_OP_WIFI_ENABLE) {
-		result = load_policy(peer->euid, &model, diagnostic,
-		    sizeof(diagnostic));
-		if (result != 0 && errno != ENOENT) {
-			error = errno != 0 ? errno : EIO;
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_ERROR, error,
-			    diagnostic[0] != '\0' ? diagnostic :
-			    "load Wi-Fi profiles", NULL, 0U);
-			clear_wifi_request_storage(&child_result, radios,
-			    sizeof(radios), &model, diagnostic, sizeof(diagnostic),
-			    output, sizeof(output));
-			return;
-		}
-		if (enumerate_wlan_radios(radios, NETWORKD_WLAN_RADIO_MAX,
-		    &radio_count) != 0) {
-			error = errno != 0 ? errno : EIO;
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_ERROR, error,
-			    "enumerate WLAN radios", NULL, 0U);
-			clear_wifi_request_storage(&child_result, radios,
-			    sizeof(radios), &model, diagnostic, sizeof(diagnostic),
-			    output, sizeof(output));
-			return;
-		}
-	}
-
-	/* Disables policy after disconnecting and lowering every WLAN radio. */
-	if (request->header.opcode == NETWORKD_OP_WIFI_DISABLE) {
-		if (managed_wlan.state != NETWORKD_WLAN_DISABLED &&
-		    retire_managed_connection(NETWORKD_WLAN_AUTO_SEARCHING,
-		    1) != 0) {
-			error = errno;
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_DEGRADED,
-			    error != 0 ? error : EIO, "retire Wi-Fi", NULL, 0U);
-			clear_wifi_request_storage(&child_result, radios,
-			    sizeof(radios), &model, diagnostic,
-			    sizeof(diagnostic), output, sizeof(output));
-			return;
-		}
-		if (enumerate_wlan_radios(radios, NETWORKD_WLAN_RADIO_MAX,
-		    &radio_count) == 0)
-			result = stop_wlan_radios(radios, radio_count, 1);
-		else
-			result = -1;
-		error = errno;
-		if (networkd_managed_wlan_disable(&managed_wlan) != 0 &&
-		    result == 0) {
-			result = -1;
-			error = errno;
-		}
-		if (result == 0) {
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_OK, 0, NULL,
-			    NULL, 0U);
-		} else {
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_ERROR,
-			    error != 0 ? error : EIO, "wifi disable", NULL, 0U);
-		}
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-
-	/* Leaves radios scanning but pauses automatic connection selection. */
-	if (request->header.opcode == NETWORKD_OP_WIFI_DISCONNECT) {
-		result = retire_managed_connection(
-		    NETWORKD_WLAN_MANUAL_DISCONNECTED, 1);
-		error = errno;
-		if (result != 0) {
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_DEGRADED,
-			    error != 0 ? error : EIO, "retire Wi-Fi", NULL, 0U);
-			clear_wifi_request_storage(&child_result, radios,
-			    sizeof(radios), &model, diagnostic,
-			    sizeof(diagnostic), output, sizeof(output));
-			return;
-		}
-		if (enumerate_wlan_radios(radios, NETWORKD_WLAN_RADIO_MAX,
-		    &radio_count) == 0 && prepare_wlan_radios(radios,
-		    radio_count, NULL, 0U, NULL) != 0 && result == 0) {
-			result = -1;
-			error = errno;
-		}
-		if (result == 0) {
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_OK, 0, NULL,
-			    NULL, 0U);
-		} else {
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_ERROR,
-			    error != 0 ? error : EIO, "wifi disconnect", NULL, 0U);
-		}
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-
-	/* A profile notification affects only its currently active owner. */
-	if (request->header.opcode == NETWORKD_OP_WIFI_PROFILES_CHANGED &&
-	    (peer == NULL || !networkd_managed_wlan_owner_matches(
-	    &managed_wlan, peer->euid))) {
-		send_response(client, request->header.request_id,
-		    request->header.opcode, NETWORKD_RESULT_OK, 0, NULL,
-		    NULL, 0U);
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-	if (request->header.opcode == NETWORKD_OP_WIFI_PROFILES_CHANGED) {
-		if (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING)
-			schedule_automatic_work(0U);
-		send_response(client, request->header.request_id,
-		    request->header.opcode, NETWORKD_RESULT_OK, 0, NULL,
-		    NULL, 0U);
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-
-	/* Enable retires the prior connection before preparing the new policy. */
-	if (request->header.opcode == NETWORKD_OP_WIFI_ENABLE) {
-		if (managed_wlan.state != NETWORKD_WLAN_DISABLED &&
-		    retire_managed_connection(NETWORKD_WLAN_AUTO_SEARCHING,
-		    1) != 0) {
-			error = errno;
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_DEGRADED,
-			    error != 0 ? error : EIO, "retire prior Wi-Fi owner",
-			    NULL, 0U);
-			clear_wifi_request_storage(&child_result, radios,
-			    sizeof(radios), &model, diagnostic,
-			    sizeof(diagnostic), output, sizeof(output));
-			return;
-		}
-	}
-	if (request->header.opcode == NETWORKD_OP_WIFI_CONNECT &&
-	    managed_wlan.state == NETWORKD_WLAN_CONNECTED &&
-	    retire_managed_connection(NETWORKD_WLAN_MANUAL_DISCONNECTED,
-	    1) != 0) {
-		error = errno;
-		send_response(client, request->header.request_id,
-		    request->header.opcode, NETWORKD_RESULT_DEGRADED,
-		    error != 0 ? error : EIO, "retire current Wi-Fi", NULL, 0U);
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-
-	/* Connect discovers radios after enable's pre-mutation policy validation. */
-	if (request->header.opcode != NETWORKD_OP_WIFI_ENABLE &&
-	    enumerate_wlan_radios(radios, NETWORKD_WLAN_RADIO_MAX,
-	    &radio_count) != 0) {
-		error = errno != 0 ? errno : EIO;
-		send_response(client, request->header.request_id,
-		    request->header.opcode, NETWORKD_RESULT_ERROR, error,
-		    "enumerate WLAN radios", NULL, 0U);
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-	if (request->header.opcode == NETWORKD_OP_WIFI_CONNECT &&
-	    radio_count == 0U) {
-		send_response(client, request->header.request_id,
-		    request->header.opcode, NETWORKD_RESULT_ERROR, ENODEV,
-		    "no WLAN radio", NULL, 0U);
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-
-	/* Enables each usable radio and starts an asynchronous scan generation. */
-	if (radio_count != 0U && prepare_wlan_radios(radios, radio_count, output,
-	    NETWORKD_RESPONSE_OUTPUT_MAX, &output_length) != 0) {
-		error = errno;
-		if (request->header.opcode == NETWORKD_OP_WIFI_ENABLE)
-			(void)stop_wlan_radios(radios, radio_count, 1);
-		send_response(client, request->header.request_id,
-		    request->header.opcode, NETWORKD_RESULT_ERROR,
-		    error != 0 ? error : EIO, "prepare WLAN radios", NULL, 0U);
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-
-	/* Publishes the new owner only after its store and radios are usable. */
-	if (request->header.opcode == NETWORKD_OP_WIFI_ENABLE &&
-	    networkd_managed_wlan_enable(&managed_wlan, peer->euid) != 0) {
-		error = errno != 0 ? errno : EIO;
-		(void)stop_wlan_radios(radios, radio_count, 1);
-		send_response(client, request->header.request_id,
-		    request->header.opcode, NETWORKD_RESULT_ERROR, error,
-		    "wifi enable", NULL, 0U);
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-
-	/* Manual connect selects its validated profile's first observing radio. */
-	if (request->header.opcode == NETWORKD_OP_WIFI_CONNECT) {
-		now = netutil_monotonic_us();
-		deadline = now + NETWORKD_WLAN_SCAN_SECONDS * 1000000ULL;
-		if (select_manual_radio(radios, radio_count, profile,
-		    &radio_index, deadline) != 0) {
-			error = errno;
-			(void)networkd_managed_wlan_finish_connection(&managed_wlan,
-			    NETWORKD_WLAN_MANUAL_DISCONNECTED);
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_ERROR,
-			    error != 0 ? error : ETIMEDOUT,
-			    "Wi-Fi SSID not visible", NULL, 0U);
-			clear_wifi_request_storage(&child_result, radios,
-			    sizeof(radios), &model, diagnostic,
-			    sizeof(diagnostic), output, sizeof(output));
-			return;
-		}
-		deadline = netutil_monotonic_us() + 60000000ULL;
-		l2_succeeded = 0;
-		result = run_managed_connect(radios[radio_index].interface,
-		    profile, NETWORKD_WLAN_MANUAL_DISCONNECTED, deadline,
-		    output, NETWORKD_RESPONSE_OUTPUT_MAX, &output_length,
-		    &l2_succeeded);
-		error = errno;
-		if (result != 0) {
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_ERROR,
-			    error != 0 ? error : EIO,
-			    l2_succeeded ? "dhcp" : "wifi connect", NULL, 0U);
-			clear_wifi_request_storage(&child_result, radios,
-			    sizeof(radios), &model, diagnostic,
-			    sizeof(diagnostic), output, sizeof(output));
-			return;
-		}
-		stop_losing_scans(radios, radio_count, radio_index);
-	} else if (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING &&
-	    radio_count != 0U) {
-		/* Auto uses profile order, then stable WLAN discovery order. */
-		deadline = netutil_monotonic_us() + 90000000ULL;
-		no_candidate = 0;
-		result = connect_automatic(radios, radio_count, &model,
-		    deadline, output, NETWORKD_RESPONSE_OUTPUT_MAX,
-		    &output_length, &no_candidate);
-		if (result != 0 && !no_candidate) {
-			error = errno;
-			send_response(client, request->header.request_id,
-			    request->header.opcode, NETWORKD_RESULT_ERROR,
-			    error != 0 ? error : EIO, "automatic Wi-Fi connect",
-			    NULL, 0U);
-			clear_wifi_request_storage(&child_result, radios,
-			    sizeof(radios), &model, diagnostic,
-			    sizeof(diagnostic), output, sizeof(output));
-			return;
-		}
-	}
-
-	/* A missing automatic candidate is an enabled idle success. */
-	if (append_managed_status(output, NETWORKD_RESPONSE_OUTPUT_MAX,
-	    &output_length) != 0) {
-		error = errno;
-		send_response(client, request->header.request_id,
-		    request->header.opcode, NETWORKD_RESULT_ERROR, error,
-		    "wifi status", NULL, 0U);
-		clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-		    &model, diagnostic, sizeof(diagnostic), output,
-		    sizeof(output));
-		return;
-	}
-	send_response(client, request->header.request_id,
-	    request->header.opcode, NETWORKD_RESULT_OK, 0, NULL,
-	    output_length != 0U ? output : NULL, output_length);
-
-	/* Clears every buffer which may have held profile credentials. */
-	clear_wifi_request_storage(&child_result, radios, sizeof(radios),
-	    &model, diagnostic, sizeof(diagnostic), output, sizeof(output));
+	wifi_work_begin(request->header.opcode, 0);
+	process_wifi_request(client, request, peer);
+	wifi_work_end();
 }
 
 /* Reads and decodes one complete request frame. */
@@ -2298,9 +2954,9 @@ read_request(
 		return -1;
 
 	/* Reads and semantically validates one request payload. */
-	if (networkd_protocol_read_frame(descriptor, &request->header,
+	if (networkd_protocol_read_frame_timed(descriptor, &request->header,
 	    request->payload, sizeof(request->payload),
-	    NETWORKD_REQUEST_MAX) != 0 || read_request_end(descriptor) != 0 ||
+	    NETWORKD_REQUEST_MAX, 5U) != 0 || read_request_end(descriptor) != 0 ||
 	    decode_request(request) != 0)
 		return -1;
 
@@ -2811,6 +3467,29 @@ wlan_connected(
 	return result;
 }
 
+/* A reusable connection needs its live L2 port and a completed usable L3 state. */
+static int
+managed_connection_usable(
+	void)
+{
+	struct networkd_managed_l3 current;
+	int flags;
+	int usable;
+
+	if (managed_wlan.connection.interface[0] == '\0' ||
+	    !managed_wlan.connection.owns_l3 || managed_wlan.connection.l3_pending)
+		return 0;
+	memset(&current, 0, sizeof(current));
+	usable = interface_index_name_matches(managed_wlan.connection.ifindex,
+	    managed_wlan.connection.interface) == 0 &&
+	    interface_flags(managed_wlan.connection.interface, &flags) == 0 &&
+	    (flags & (IFF_UP | IFF_RUNNING)) == (IFF_UP | IFF_RUNNING) &&
+	    wlan_connected(managed_wlan.connection.interface) &&
+	    snapshot_managed_l3(&managed_wlan, &current) == 0 && current.address != 0U;
+	networkd_protocol_clear(&current, sizeof(current));
+	return usable;
+}
+
 /* Runs one private machine-mode wifi primitive. */
 static int
 run_wifi(
@@ -2824,7 +3503,38 @@ run_wifi(
 	const void *passphrase;
 	size_t ssid_length;
 	size_t passphrase_length;
+	uint64_t remaining;
+	uint64_t limit;
+	uint64_t now;
 	int function_result;
+
+	if (!wifi_work.cleanup && wifi_wait_pump != NULL &&
+	    (function_result = wifi_wait_pump()) != 0) {
+		networkd_wifi_child_result_clear(result);
+		result->terminal_error = function_result;
+		errno = function_result;
+		return -1;
+	}
+
+	/* Keep the last teardown interval available after selection expires. */
+	if (wifi_work.deadline != 0U) {
+		limit = wifi_work.deadline;
+		if (strcmp(operation, "disconnect") != 0 &&
+		    strcmp(operation, "search-stop") != 0 &&
+		    strcmp(operation, "down") != 0)
+			limit -= NETWORKD_WIFI_CLEANUP_SECONDS * 1000000ULL;
+		now = netutil_monotonic_us();
+		remaining = limit > now ? (limit - now) / 1000000ULL : 0U;
+		/* Include the runner's one-second termination grace in this bound. */
+		if (remaining <= 1U) {
+			networkd_wifi_child_result_clear(result);
+			result->terminal_error = ETIMEDOUT;
+			errno = ETIMEDOUT;
+			return -1;
+		}
+		if (timeout >= remaining)
+			timeout = (unsigned)remaining - 1U;
+	}
 
 	/* Supplies counted credential views only to connect. */
 	ssid = profile != NULL ? profile->ssid : NULL;
@@ -2833,60 +3543,78 @@ run_wifi(
 	passphrase_length = profile != NULL ? profile->passphrase_length : 0U;
 	function_result = networkd_wifi_child_run(interface, operation, ssid,
 	    ssid_length, passphrase, passphrase_length, timeout, result);
+	if (function_result == 0 && strcmp(operation, "list") == 0)
+		remember_wifi_observation(interface, result);
 	if (function_result != 0)
 		errno = result->terminal_error != 0 ?
 		    result->terminal_error : EIO;
 	return function_result;
 }
 
-/* Converts private WIFI1 records into bounded public output lines. */
+/* Converts complete private records directly into public source-prefixed lines. */
 static int
-wifi_output_without_terminal(
-	const struct networkd_wifi_child_result *result,
+append_wifi_records(
+	const char *interface,
+	const char *records,
+	size_t length,
 	char *output,
 	size_t capacity,
-	size_t *output_length)
+	size_t *used)
 {
-	static const char prefix[] = "WIFI1 ";
+	static const char private_prefix[] = "WIFI1 ";
 	static const char terminal[] = "terminal ";
-	size_t line_start;
-	size_t line_end;
-	size_t length;
-	size_t used;
+	char prefix[IFNAMSIZ + 16U];
+	size_t start;
+	size_t end;
+	size_t prefix_length;
+	int count;
 
-	/* Copies every nonterminal record after removing its private prefix. */
-	if (result == NULL || output == NULL || output_length == NULL)
+	/* Rejects invalid spans before computing remaining capacity. */
+	if (records == NULL || output == NULL || used == NULL || *used > capacity) {
+		errno = EINVAL;
 		return -1;
-	line_start = 0U;
-	used = 0U;
-	while (line_start < result->output_length) {
-		line_end = line_start;
-		while (line_end < result->output_length &&
-		    result->output[line_end] != '\n')
-			line_end++;
-		if (line_end == result->output_length ||
-		    line_end - line_start < sizeof(prefix) - 1U ||
-		    memcmp(result->output + line_start, prefix,
-		    sizeof(prefix) - 1U) != 0) {
+	}
+	count = snprintf(prefix, sizeof(prefix), "interface=%s ", interface);
+	if (count < 0 || (size_t)count >= sizeof(prefix)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	prefix_length = (size_t)count;
+
+	/* Copies one complete record at a time without a second 32 KB stack buffer. */
+	start = 0U;
+	while (start < length) {
+		end = start;
+		while (end < length && records[end] != '\n')
+			end++;
+
+		/* Requires the producer's version marker and a complete line. */
+		if (end == length || end - start < sizeof(private_prefix) - 1U ||
+		    memcmp(records + start, private_prefix, sizeof(private_prefix) - 1U) != 0) {
 			errno = EILSEQ;
 			return -1;
 		}
-		line_start += sizeof(prefix) - 1U;
-		length = line_end - line_start;
-		if (length >= sizeof(terminal) - 1U &&
-		    memcmp(result->output + line_start, terminal,
-		    sizeof(terminal) - 1U) == 0)
-			break;
-		if (length + 1U > capacity - used) {
+		start += sizeof(private_prefix) - 1U;
+
+		/* Omits only the private terminal record from public output. */
+		if (end - start >= sizeof(terminal) - 1U &&
+		    memcmp(records + start, terminal, sizeof(terminal) - 1U) == 0)
+			return 0;
+
+		/* Leaves the output cursor at the last complete line on overflow. */
+		if (prefix_length + end - start + 1U > capacity - *used) {
 			errno = EOVERFLOW;
 			return -1;
 		}
-		memcpy(output + used, result->output + line_start, length);
-		used += length;
-		output[used++] = '\n';
-		line_start = line_end + 1U;
+		memcpy(output + *used, prefix, prefix_length);
+		*used += prefix_length;
+		memcpy(output + *used, records + start, end - start);
+		*used += end - start;
+		output[(*used)++] = '\n';
+		start = end + 1U;
 	}
-	*output_length = used;
+
+	/* Reports complete conversion of the available records. */
 	return 0;
 }
 
@@ -2899,51 +3627,16 @@ append_wifi_output(
 	size_t capacity,
 	size_t *output_length)
 {
-	char plain[NETWORKD_WIFI_CHILD_OUTPUT_MAX];
-	char prefix[IFNAMSIZ + 16U];
-	size_t plain_length;
-	size_t line_start;
-	size_t line_end;
-	size_t prefix_length;
-	int count;
+	int status;
 
-	/* Converts the private records before adding a public source prefix. */
-	memset(plain, 0, sizeof(plain));
-	plain_length = 0U;
-	if (wifi_output_without_terminal(result, plain, sizeof(plain),
-	    &plain_length) != 0)
-		return -1;
-	count = snprintf(prefix, sizeof(prefix), "interface=%s ", interface);
-	if (count < 0 || (size_t)count >= sizeof(prefix)) {
-		errno = EOVERFLOW;
+	/* Shares conversion between fresh primitive results and cached records. */
+	if (result == NULL || result->output_length > sizeof(result->output)) {
+		errno = EINVAL;
 		return -1;
 	}
-	prefix_length = (size_t)count;
-
-	/* Prefixes every complete line without changing its machine fields. */
-	line_start = 0U;
-	while (line_start < plain_length) {
-		line_end = line_start;
-		while (line_end < plain_length && plain[line_end] != '\n')
-			line_end++;
-		if (line_end == plain_length || prefix_length +
-		    line_end - line_start + 1U > capacity - *output_length) {
-			networkd_protocol_clear(plain, sizeof(plain));
-			errno = EOVERFLOW;
-			return -1;
-		}
-		memcpy(output + *output_length, prefix, prefix_length);
-		*output_length += prefix_length;
-		memcpy(output + *output_length, plain + line_start,
-		    line_end - line_start);
-		*output_length += line_end - line_start;
-		output[(*output_length)++] = '\n';
-		line_start = line_end + 1U;
-	}
-	networkd_protocol_clear(plain, sizeof(plain));
-
-	/* Reports successful bounded composition. */
-	return 0;
+	status = append_wifi_records(interface, (const char *)result->output, result->output_length,
+	    output, capacity, output_length);
+	return status;
 }
 
 /* Enumerates WLAN interfaces in the kernel's stable interface order. */
@@ -2958,11 +3651,15 @@ enumerate_wlan_radios(
 	unsigned interface_count;
 	unsigned index;
 	size_t count;
+	size_t known;
+	uint32_t ifindex;
+	int status_error;
 	int descriptor;
 	int saved;
 
 	/* Obtains the canonical interface list through the generic socket API. */
-	if (radios == NULL || radio_count == NULL || capacity == 0U) {
+	if (radios == NULL || radio_count == NULL || capacity == 0U ||
+	    capacity > NETWORKD_WLAN_RADIO_MAX) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -2981,13 +3678,35 @@ enumerate_wlan_radios(
 
 	/* A successful WLAN status ioctl classifies one interface as a radio. */
 	for (index = 0U; index < interface_count; index++) {
+		if (netutil_ifindex(descriptor, interfaces[index].ifr_name, &ifindex) != 0) {
+			if (errno == ENODEV || errno == ENXIO)
+				continue;
+			saved = errno;
+			free(interfaces);
+			(void)close(descriptor);
+			errno = saved;
+			return -1;
+		}
 		memset(&status, 0, sizeof(status));
 		memcpy(status.ifr_name, interfaces[index].ifr_name,
 		    sizeof(status.ifr_name));
 		status.version = WLAN_ABI_VERSION;
 		status.size = sizeof(status);
-		if (ioctl(descriptor, SIOCGWLANSTATUS, &status) != 0)
-			continue;
+		status_error = ioctl(descriptor, SIOCGWLANSTATUS, &status) == 0 ? 0 : errno;
+		for (known = 0U; known < known_wlan_radio_count; known++) {
+			if (known_wlan_radios[known].ifindex == ifindex &&
+			    strcmp(known_wlan_radios[known].interface, status.ifr_name) == 0)
+				break;
+		}
+		if (status_error != 0 && known == known_wlan_radio_count) {
+			if (status_error == EOPNOTSUPP || status_error == ENOTTY)
+				continue;
+			/* Unknown observation failure cannot prove this is not a radio. */
+			free(interfaces);
+			(void)close(descriptor);
+			errno = status_error;
+			return -1;
+		}
 		if (count == capacity) {
 			free(interfaces);
 			(void)close(descriptor);
@@ -2996,14 +3715,14 @@ enumerate_wlan_radios(
 		}
 		memcpy(radios[count].interface, interfaces[index].ifr_name,
 		    sizeof(radios[count].interface));
-		if (netutil_ifindex(descriptor, radios[count].interface,
-		    &radios[count].ifindex) != 0) {
-			saved = errno;
-			free(interfaces);
-			(void)close(descriptor);
-			errno = saved;
-			return -1;
-		}
+		radios[count].ifindex = ifindex;
+		radios[count].observation_error = status_error;
+		radios[count].stop_flags = status.stop_flags;
+		radios[count].administrative_up = status.administrative_up != 0U;
+		radios[count].association_active =
+		    status.state >= WLAN_STATE_AUTHENTICATING &&
+		    status.state <= WLAN_STATE_DISCONNECTING;
+		radios[count].scan_state = status.scan_state;
 		count++;
 	}
 	free(interfaces);
@@ -3012,12 +3731,75 @@ enumerate_wlan_radios(
 		return -1;
 	errno = saved;
 	*radio_count = count;
+	memcpy(known_wlan_radios, radios, count * sizeof(*radios));
+	known_wlan_radio_count = count;
 
 	/* Reports a possibly empty, stable-order radio list. */
 	return 0;
 }
 
-/* Raises every WLAN radio and starts one asynchronous scan generation. */
+
+/* Runs one nonsecret preparation primitive with uniform output and cleanup. */
+static int
+run_wifi_append(
+	const char *interface,
+	const char *operation,
+	char *output,
+	size_t capacity,
+	size_t *output_length)
+{
+	struct networkd_wifi_child_result child;
+	int result;
+	int saved;
+
+	memset(&child, 0, sizeof(child));
+	result = run_wifi(interface, operation, NULL, 10U, &child);
+	if (result == 0 && output != NULL && output_length != NULL)
+		result = append_wifi_output(interface, &child, output, capacity,
+		    output_length);
+	saved = errno;
+	networkd_wifi_child_result_clear(&child);
+	errno = saved;
+	return result;
+}
+
+/* Reuses administrative and scan state already observed during enumeration. */
+static int
+prepare_wlan_radio(
+	struct networkd_wlan_radio *radio,
+	char *output,
+	size_t capacity,
+	size_t *output_length)
+{
+	radio->ready = 0;
+	if (radio->observation_error != 0 || radio->stop_flags != 0U) {
+		errno = radio->observation_error != 0 ? radio->observation_error : EBUSY;
+		return -1;
+	}
+	/* Existing direct associations cannot become a second managed L2 link. */
+	if (radio->association_active) {
+		if (run_wifi_append(radio->interface, "disconnect", output,
+		    capacity, output_length) != 0)
+			return -1;
+		radio->association_active = 0;
+	}
+	if (!radio->administrative_up) {
+		if (run_wifi_append(radio->interface, "up", output,
+		    capacity, output_length) != 0)
+			return -1;
+		radio->administrative_up = 1;
+	}
+	if (radio->scan_state != WLAN_SCAN_RUNNING) {
+		if (run_wifi_append(radio->interface, "search-start", output,
+		    capacity, output_length) != 0)
+			return -1;
+		radio->scan_state = WLAN_SCAN_RUNNING;
+	}
+	radio->ready = 1;
+	return 0;
+}
+
+/* Isolates each radio failure while requiring at least one usable radio. */
 static int
 prepare_wlan_radios(
 	struct networkd_wlan_radio *radios,
@@ -3026,66 +3808,57 @@ prepare_wlan_radios(
 	size_t capacity,
 	size_t *output_length)
 {
-	struct networkd_wifi_child_result result;
 	size_t index;
 	size_t prepared;
-	int error;
 	int first_error;
 
-	/* Applies the same primitive sequence in stable discovery order. */
-	memset(&result, 0, sizeof(result));
 	prepared = 0U;
 	first_error = 0;
 	for (index = 0U; index < radio_count; index++) {
-		if (run_wifi(radios[index].interface, "up", NULL, 10U,
-		    &result) != 0) {
-			if (first_error == 0)
-				first_error = errno != 0 ? errno : EIO;
-			networkd_wifi_child_result_clear(&result);
-			continue;
-		}
-		if (output != NULL && output_length != NULL &&
-		    append_wifi_output(radios[index].interface, &result, output,
-		    capacity, output_length) != 0) {
-			error = errno != 0 ? errno : EIO;
-			networkd_wifi_child_result_clear(&result);
-			errno = error;
-			return -1;
-		}
-		networkd_wifi_child_result_clear(&result);
-		if (run_wifi(radios[index].interface, "search-start", NULL,
-		    10U, &result) != 0) {
-			if (first_error == 0)
-				first_error = errno != 0 ? errno : EIO;
-			networkd_wifi_child_result_clear(&result);
-			continue;
-		}
-		if (output != NULL && output_length != NULL &&
-		    append_wifi_output(radios[index].interface, &result, output,
-		    capacity, output_length) != 0) {
-			error = errno != 0 ? errno : EIO;
-			networkd_wifi_child_result_clear(&result);
-			errno = error;
-			return -1;
-		}
-		networkd_wifi_child_result_clear(&result);
-		radios[index].ready = 1;
-		prepared++;
+		if (prepare_wlan_radio(&radios[index], output, capacity,
+		    output_length) == 0)
+			prepared++;
+		else if (first_error == 0)
+			first_error = errno != 0 ? errno : EIO;
 	}
 	if (radio_count != 0U && prepared == 0U) {
 		errno = first_error != 0 ? first_error : EIO;
 		return -1;
 	}
-	if (first_error != 0 && prepared != 0U)
-		fprintf(stderr,
-		    "networkd: one or more WLAN radios could not scan: %s\n",
+	if (first_error != 0)
+		fprintf(stderr, "networkd: some WLAN radios could not prepare: %s\n",
 		    strerror(first_error));
-
-	/* Reports that every usable discovered radio is scanning. */
 	return 0;
 }
 
-/* Stops scanning, disconnects, and optionally lowers every WLAN radio. */
+/* Reads an exact retained radio identity; a transient status error is not absence. */
+static int
+wlan_radio_status(const struct networkd_wlan_radio *radio,
+	struct wlan_status_request *status)
+{
+	int descriptor;
+	int error;
+	int saved;
+
+	if (interface_index_name_matches(radio->ifindex, radio->interface) != 0)
+		return -1;
+	descriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (descriptor < 0)
+		return -1;
+	memset(status, 0, sizeof(*status));
+	memcpy(status->ifr_name, radio->interface, sizeof(status->ifr_name));
+	status->version = WLAN_ABI_VERSION;
+	status->size = sizeof(*status);
+	error = ioctl(descriptor, SIOCGWLANSTATUS, status);
+	saved = errno;
+	(void)close(descriptor);
+	if (error == 0)
+		return interface_index_name_matches(radio->ifindex, radio->interface);
+	errno = saved;
+	return -1;
+}
+
+/* Stops all radios, retaining failures until checked physical stop is observed. */
 static int
 stop_wlan_radios(
 	const struct networkd_wlan_radio *radios,
@@ -3093,32 +3866,59 @@ stop_wlan_radios(
 	int lower)
 {
 	struct networkd_wifi_child_result result;
+	struct wlan_status_request status;
 	size_t index;
 	int first_error;
+	int error;
 
-	/* Attempts complete normalization while retaining the first failure. */
 	memset(&result, 0, sizeof(result));
 	first_error = 0;
 	for (index = 0U; index < radio_count; index++) {
-		if (run_wifi(radios[index].interface, "disconnect", NULL, 10U,
-		    &result) != 0 && first_error == 0)
-			first_error = errno;
-		networkd_wifi_child_result_clear(&result);
-		if (run_wifi(radios[index].interface, "search-stop", NULL, 10U,
-		    &result) != 0 && first_error == 0)
-			first_error = errno;
-		networkd_wifi_child_result_clear(&result);
-		if (lower && run_wifi(radios[index].interface, "down", NULL,
-		    10U, &result) != 0 && first_error == 0)
-			first_error = errno;
-		networkd_wifi_child_result_clear(&result);
+		/* An old identity disappearing permits retirement, never mutation of
+		 * the replacement. Only the identity query can establish absence. */
+		if (interface_index_name_matches(radios[index].ifindex,
+		    radios[index].interface) != 0) {
+			if (errno != ENODEV && errno != ENXIO && first_error == 0)
+				first_error = errno;
+			continue;
+		}
+		error = 0;
+		if (wlan_radio_status(&radios[index], &status) != 0)
+			error = errno;
+		else if ((status.stop_flags & WLAN_STATUS_STOP_PENDING) != 0U)
+			error = EBUSY;
+		if (error == 0) {
+			if (run_wifi(radios[index].interface, "disconnect", NULL, 10U,
+			    &result) != 0)
+				error = errno;
+			networkd_wifi_child_result_clear(&result);
+			if (run_wifi(radios[index].interface, "search-stop", NULL, 10U,
+			    &result) != 0 && error == 0)
+				error = errno;
+			networkd_wifi_child_result_clear(&result);
+			if (lower) {
+				/* A checked full stop supersedes earlier inverse errors. */
+				if (run_wifi(radios[index].interface, "down", NULL, 10U,
+				    &result) != 0)
+					error = errno;
+				networkd_wifi_child_result_clear(&result);
+				if (wlan_radio_status(&radios[index], &status) != 0)
+					error = errno;
+				else if (status.stop_flags != 0U || status.administrative_up ||
+				    status.associated || status.key_installed ||
+				    status.controlled_port || status.scan_state == WLAN_SCAN_RUNNING)
+					error = EBUSY;
+				else
+					error = 0;
+			}
+		}
+		if (error != 0 && first_error == 0)
+			first_error = error;
 	}
 	if (first_error != 0) {
 		errno = first_error;
 		return -1;
 	}
-
-	/* Reports complete normalization of every discovered radio. */
 	return 0;
 }
 
@@ -3194,7 +3994,7 @@ owner_allowed(
 	if (peer->euid == 0)
 		return 1;
 	if (managed_wlan.state == NETWORKD_WLAN_DISABLED)
-		return 0;
+		return 1;
 	return networkd_managed_wlan_owner_matches(&managed_wlan, peer->euid);
 }
 
@@ -3216,6 +4016,8 @@ managed_state_name(
 		return "manual-disconnected";
 	if (state == NETWORKD_WLAN_RECONNECTING)
 		return "reconnecting";
+	if (state == NETWORKD_WLAN_RETIRING)
+		return "disconnecting";
 
 	/* Keeps a corrupted internal value visibly distinct. */
 	return "invalid";
@@ -3247,15 +4049,34 @@ append_managed_status(
 	return 0;
 }
 
-/* Selects the first automatic profile and radio in their stable orders. */
+/* Includes child termination grace in the remaining selection interval. */
+static unsigned
+wifi_selection_timeout(
+	uint64_t deadline)
+{
+	uint64_t now;
+	uint64_t seconds;
+
+	now = netutil_monotonic_us();
+	if (now >= deadline)
+		return 0U;
+	seconds = (deadline - now) / 1000000ULL;
+	if (seconds <= 1U)
+		return 0U;
+	seconds--;
+	return seconds > 5U ? 5U : (unsigned)seconds;
+}
+
+/* Freezes one bounded candidate wave in profile order then radio order. */
 static int
-select_profile_radio(
+collect_profile_radios(
 	const struct networkd_wlan_radio *radios,
 	size_t radio_count,
 	const struct wifi_conf_model *model,
 	size_t skip,
-	const struct wifi_conf_profile **selected_profile,
-	size_t *selected_radio,
+	struct networkd_wifi_candidate *candidates,
+	size_t *candidate_count,
+	size_t *total_count,
 	uint64_t deadline)
 {
 	struct networkd_wifi_child_result result;
@@ -3267,14 +4088,18 @@ select_profile_radio(
 	size_t profile_index;
 	size_t radio_index;
 	size_t candidate_index;
+	unsigned valid_scans;
+	unsigned timeout;
+	int first_error;
 	int automatic_present;
 	int all_terminal;
 	int parse_error;
 
 	/* Initializes a complete bounded visibility matrix. */
-	if (radios == NULL || model == NULL || selected_profile == NULL ||
-	    selected_radio == NULL || radio_count == 0U ||
-	    radio_count > NETWORKD_WLAN_RADIO_MAX) {
+	if (radios == NULL || model == NULL || candidates == NULL ||
+	    candidate_count == NULL || total_count == NULL || radio_count == 0U ||
+	    radio_count > NETWORKD_WLAN_RADIO_MAX ||
+	    model->profile_count > WIFI_CONF_PROFILE_MAX) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -3282,8 +4107,11 @@ select_profile_radio(
 	memset(&parsed, 0, sizeof(parsed));
 	memset(terminal, 0, sizeof(terminal));
 	memset(visible, 0, sizeof(visible));
-	*selected_profile = NULL;
-	*selected_radio = 0U;
+	*candidate_count = 0U;
+	*total_count = 0U;
+	valid_scans = 0U;
+	first_error = 0;
+	all_terminal = 0;
 	automatic_present = 0;
 	for (profile_index = 0U; profile_index < model->profile_count;
 	    profile_index++) {
@@ -3303,14 +4131,27 @@ select_profile_radio(
 
 	/* Waits for each radio's current asynchronous scan to become terminal. */
 	while (netutil_monotonic_us() < deadline) {
+		if (wifi_wait_pump != NULL && wifi_wait_pump() != 0) {
+			errno = EINTR;
+			return -1;
+		}
 		for (radio_index = 0U; radio_index < radio_count;
 		    radio_index++) {
 			if (terminal[radio_index])
 				continue;
+			timeout = wifi_selection_timeout(deadline);
+			if (timeout == 0U)
+				break;
 			if (run_wifi(radios[radio_index].interface, "list", NULL,
-			    5U, &result) != 0) {
+			    timeout, &result) != 0) {
+				if (first_error == 0)
+					first_error = errno != 0 ? errno : EIO;
 				terminal[radio_index] = 1U;
 				networkd_wifi_child_result_clear(&result);
+				if (wifi_work.cancelled) {
+					errno = EINTR;
+					return -1;
+				}
 				continue;
 			}
 			parse_error = 0;
@@ -3330,9 +4171,16 @@ select_profile_radio(
 				terminal[radio_index] = parsed.scan_terminal != 0;
 			}
 			networkd_wifi_child_result_clear(&result);
+			if (parse_error == 0 && parsed.scan_complete)
+				valid_scans++;
 			if (parse_error != 0) {
-				errno = parse_error;
-				return -1;
+				if (first_error == 0)
+					first_error = parse_error;
+				/* A malformed radio must not hide another usable radio. */
+				terminal[radio_index] = 1U;
+				for (profile_index = 0U;
+				    profile_index < model->profile_count; profile_index++)
+					visible[profile_index][radio_index] = 0U;
 			}
 		}
 
@@ -3343,31 +4191,33 @@ select_profile_radio(
 			if (!terminal[radio_index])
 				all_terminal = 0;
 		}
-		if (all_terminal) {
-			candidate_index = 0U;
-			for (profile_index = 0U;
-			    profile_index < model->profile_count; profile_index++) {
-				if (!model->profiles[profile_index].automatic)
-					continue;
-				for (radio_index = 0U; radio_index < radio_count;
-				    radio_index++) {
-					if (visible[profile_index][radio_index] &&
-					    candidate_index++ == skip) {
-						*selected_profile =
-						    &model->profiles[profile_index];
-						*selected_radio = radio_index;
-						return 0;
-					}
-				}
-			}
-			errno = ENOENT;
-			return -1;
-		}
+		if (all_terminal)
+			break;
 		(void)nanosleep(&delay, NULL);
 	}
 
-	/* A nonterminal radio keeps selection unresolved until the fixed limit. */
-	errno = ETIMEDOUT;
+	/* A slow radio cannot permanently conceal another completed snapshot. */
+	candidate_index = 0U;
+	for (profile_index = 0U; profile_index < model->profile_count;
+	    profile_index++) {
+		if (!model->profiles[profile_index].automatic)
+			continue;
+		for (radio_index = 0U; radio_index < radio_count; radio_index++) {
+			if (!visible[profile_index][radio_index])
+				continue;
+			if ((*total_count)++ >= skip &&
+			    candidate_index < NETWORKD_WLAN_ATTEMPTS) {
+				candidates[candidate_index].profile = &model->profiles[profile_index];
+				candidates[candidate_index].radio = radio_index;
+				candidate_index++;
+			}
+		}
+	}
+	*candidate_count = candidate_index;
+	if (candidate_index != 0U)
+		return 0;
+	errno = valid_scans != 0U ? ENOENT :
+	    (first_error != 0 ? first_error : (all_terminal ? EIO : ETIMEDOUT));
 	return -1;
 }
 
@@ -3387,8 +4237,8 @@ select_manual_radio(
 	unsigned char visible[NETWORKD_WLAN_RADIO_MAX];
 	size_t radio_index;
 	size_t prior;
+	unsigned timeout;
 	int earlier_terminal;
-	int saved;
 
 	/* Initializes one bounded visibility result for each stable-order radio. */
 	if (radios == NULL || profile == NULL || selected_radio == NULL ||
@@ -3410,22 +4260,32 @@ select_manual_radio(
 
 	/* Polls all asynchronous scans without preferring the fastest radio. */
 	while (netutil_monotonic_us() < deadline) {
+		if (wifi_wait_pump != NULL && wifi_wait_pump() != 0) {
+			errno = EINTR;
+			return -1;
+		}
 		for (radio_index = 0U; radio_index < radio_count;
 		    radio_index++) {
 			if (terminal[radio_index])
 				continue;
+			timeout = wifi_selection_timeout(deadline);
+			if (timeout == 0U)
+				break;
 			if (run_wifi(radios[radio_index].interface, "list", NULL,
-			    5U, &result) != 0) {
+			    timeout, &result) != 0) {
 				terminal[radio_index] = 1U;
 				networkd_wifi_child_result_clear(&result);
+				if (wifi_work.cancelled) {
+					errno = EINTR;
+					return -1;
+				}
 				continue;
 			}
 			if (networkd_wifi_child_parse_list(&result, profile->ssid,
 			    profile->ssid_length, &parsed) != 0) {
-				saved = errno;
 				networkd_wifi_child_result_clear(&result);
-				errno = saved;
-				return -1;
+				terminal[radio_index] = 1U;
+				continue;
 			}
 			terminal[radio_index] = parsed.scan_terminal != 0;
 			visible[radio_index] = parsed.scan_complete &&
@@ -3459,12 +4319,18 @@ select_manual_radio(
 		(void)nanosleep(&delay, NULL);
 	}
 
-	/* Reports that at least one radio never delivered a terminal scan. */
+	/* At the fixed limit, choose among the radios that actually completed. */
+	for (radio_index = 0U; radio_index < radio_count; radio_index++) {
+		if (visible[radio_index]) {
+			*selected_radio = radio_index;
+			return 0;
+		}
+	}
 	errno = ETIMEDOUT;
 	return -1;
 }
 
-/* Connects the first visible automatic profile under one total deadline. */
+/* Tries a frozen candidate wave without renewing selection or work deadlines. */
 static int
 connect_automatic(
 	const struct networkd_wlan_radio *radios,
@@ -3476,59 +4342,70 @@ connect_automatic(
 	size_t *output_length,
 	int *no_candidate)
 {
-	const struct wifi_conf_profile *profile;
-	size_t radio_index;
+	struct networkd_wifi_candidate candidates[NETWORKD_WLAN_ATTEMPTS];
+	size_t count;
+	size_t total;
 	size_t attempt;
+	size_t attempted;
+	size_t radio;
 	uint64_t selection_deadline;
-	uint64_t now;
 	int l2_succeeded;
-	int last_error;
-	int result;
+	int saved;
 
-	/* Reserves at most the first 30 seconds for deterministic visibility. */
 	if (no_candidate == NULL) {
 		errno = EINVAL;
 		return -1;
 	}
 	*no_candidate = 0;
-	last_error = ENOENT;
-	for (attempt = 0U; attempt < NETWORKD_WLAN_ATTEMPTS; attempt++) {
-		now = netutil_monotonic_us();
-		selection_deadline = now +
-		    NETWORKD_WLAN_SCAN_SECONDS * 1000000ULL;
-		if (selection_deadline > deadline)
-			selection_deadline = deadline;
-		result = select_profile_radio(radios, radio_count, model, attempt,
-		    &profile, &radio_index, selection_deadline);
-		if (result != 0) {
-			if (attempt == 0U &&
-			    (errno == ENOENT || errno == ETIMEDOUT))
-				*no_candidate = 1;
-			if (attempt != 0U && errno == ENOENT)
-				errno = last_error;
-			return -1;
-		}
-
-		/* Keeps one association active while trying candidates in order. */
+	memset(candidates, 0, sizeof(candidates));
+	selection_deadline = netutil_monotonic_us() +
+	    NETWORKD_WLAN_SCAN_SECONDS * 1000000ULL;
+	if (selection_deadline > deadline)
+		selection_deadline = deadline;
+	if (collect_profile_radios(radios, radio_count, model, automatic_candidate_skip,
+	    candidates, &count, &total, selection_deadline) != 0) {
+		automatic_candidate_skip = 0U;
+		if (errno == ENOENT || errno == ETIMEDOUT)
+			*no_candidate = 1;
+		return -1;
+	}
+	if (wifi_work.profiles_changed) {
+		automatic_candidate_skip = 0U;
+		errno = EAGAIN;
+		return -1;
+	}
+	saved = ENOENT;
+	attempted = 0U;
+	for (attempt = 0U; attempt < count; attempt++) {
+		attempted++;
+		radio = candidates[attempt].radio;
 		l2_succeeded = 0;
-		result = run_managed_connect(radios[radio_index].interface,
-		    profile, NETWORKD_WLAN_AUTO_SEARCHING, deadline, output,
-		    output_capacity, output_length, &l2_succeeded);
-		if (result == 0) {
-			stop_losing_scans(radios, radio_count, radio_index);
+		if (run_managed_connect(radios[radio].interface,
+		    candidates[attempt].profile, NETWORKD_WLAN_AUTO_SEARCHING,
+		    deadline, output, output_capacity, output_length, &l2_succeeded) == 0) {
+			stop_losing_scans(radios, radio_count, radio);
+			automatic_candidate_skip = 0U;
 			return 0;
 		}
-		last_error = errno != 0 ? errno : EIO;
-		if (netutil_monotonic_us() >= deadline) {
-			errno = last_error;
-			return -1;
-		}
+		saved = errno != 0 ? errno : EIO;
+		if (wifi_work.cancelled || wifi_work.profiles_changed ||
+		    managed_wlan.connection.interface[0] != '\0' ||
+		    netutil_monotonic_us() >= deadline)
+			break;
 	}
-	errno = last_error;
+	/* Later waves must reach candidates beyond a repeatedly failing prefix. */
+	if (wifi_work.profiles_changed)
+		automatic_candidate_skip = 0U;
+	else {
+		automatic_candidate_skip += attempted;
+		if (automatic_candidate_skip >= total)
+			automatic_candidate_skip = 0U;
+	}
+	errno = saved;
 	return -1;
 }
 
-/* Performs one L2 connection and DHCP transaction with managed handoff. */
+/* Performs one L2/DHCP transaction with a single failure-retirement path. */
 static int
 run_managed_connect(
 	const char *interface,
@@ -3540,150 +4417,138 @@ run_managed_connect(
 	size_t *output_length,
 	int *l2_succeeded)
 {
-	struct networkd_wifi_child_result child_result;
-	struct networkd_managed_l3 previous_l3;
-	struct networkd_managed_l3 committed_l3;
+	struct networkd_wifi_child_result child;
+	uint64_t now;
+	uint32_t ifindex;
+	unsigned timeout;
+	int result;
+	int saved;
+
+	*l2_succeeded = 0;
+	if (route_events >= 0 && process_route_events() != 0) {
+		(void)close(route_events);
+		route_events = -1;
+	}
+	now = netutil_monotonic_us();
+	if (now >= deadline || deadline - now < 1000000ULL) {
+		errno = ETIMEDOUT;
+		return -1;
+	}
+	if (interface_index(interface, &ifindex) != 0)
+		return -1;
+	if (networkd_managed_wlan_begin_connect(&managed_wlan, interface,
+	    ifindex, route_event_sequence, profile->ssid, profile->ssid_length) != 0)
+		return -1;
+
+	memset(&child, 0, sizeof(child));
+	timeout = (unsigned)((deadline - now) / 1000000ULL);
+	if (timeout > NETWORKD_WLAN_CONNECT_SECONDS)
+		timeout = NETWORKD_WLAN_CONNECT_SECONDS;
+	result = run_wifi(interface, "connect", profile, timeout, &child);
+	if (result == 0) {
+		*l2_succeeded = 1;
+		if (output != NULL && output_length != NULL)
+			result = append_wifi_output(interface, &child, output,
+			    output_capacity, output_length);
+	}
+	saved = errno;
+	networkd_wifi_child_result_clear(&child);
+	errno = saved;
+	if (result == 0)
+		result = acquire_managed_l3(interface, deadline);
+
+	/* A stopped child is never substituted for a proven L2/L3 retirement. */
+	saved = errno;
+	if (result != 0 && retire_managed_connection(failure_state, 1) != 0)
+		saved = errno;
+	errno = saved;
+	return result;
+}
+
+/* Records the baseline before DHCP and commits only a complete transaction. */
+static int
+acquire_managed_l3(
+	const char *interface,
+	uint64_t deadline)
+{
+	struct networkd_managed_l3 before;
+	struct networkd_managed_l3 after;
 	char diagnostic[CHILD_OUTPUT_MAX];
 	char seconds[16];
 	char *arguments[5];
 	uint64_t now;
 	uint32_t ifindex;
-	uint32_t previous_ifindex;
-	unsigned child_timeout;
-	unsigned dhcp_timeout;
-	int error;
+	unsigned timeout;
+	int result;
+	int saved;
 
-	/* Initializes the complete transaction result. */
-	memset(&child_result, 0, sizeof(child_result));
+	memset(&before, 0, sizeof(before));
+	memset(&after, 0, sizeof(after));
 	memset(diagnostic, 0, sizeof(diagnostic));
-	*l2_succeeded = 0;
-
-	/* Binds the selected radio identity after consuming queued events. */
-	if (route_events >= 0 && process_route_events(0) != 0) {
-		(void)close(route_events);
-		route_events = -1;
+	result = snapshot_interface_l3(interface, &ifindex, &before);
+	if (result == 0 && ifindex != managed_wlan.connection.ifindex) {
+		errno = ENODEV;
+		result = -1;
 	}
-	if (interface_index(interface, &ifindex) != 0)
-		return -1;
-	if (networkd_managed_wlan_begin_connect(&managed_wlan, interface,
-	    ifindex, route_event_sequence, profile->ssid,
-	    profile->ssid_length) != 0)
-		return -1;
-
-	/* Lets the wifi command own one finite scan/select/connect sequence. */
+	if (result == 0)
+		result = networkd_managed_wlan_begin_l3(&managed_wlan, &before);
 	now = netutil_monotonic_us();
-	if (now >= deadline) {
-		(void)networkd_managed_wlan_finish_connection(&managed_wlan,
-		    failure_state);
+	if (result == 0 && (now >= deadline || deadline - now < 1000000ULL)) {
 		errno = ETIMEDOUT;
-		return -1;
+		result = -1;
 	}
-	child_timeout = (unsigned)((deadline - now + 999999ULL) / 1000000ULL);
-	if (child_timeout > NETWORKD_WLAN_CONNECT_SECONDS)
-		child_timeout = NETWORKD_WLAN_CONNECT_SECONDS;
-	if (run_wifi(interface, "connect", profile, child_timeout,
-	    &child_result) != 0) {
-		error = errno;
-		networkd_wifi_child_result_clear(&child_result);
-		(void)networkd_managed_wlan_finish_connection(&managed_wlan,
-		    failure_state);
-		errno = error;
-		return -1;
+	if (result == 0) {
+		timeout = (unsigned)((deadline - now) / 1000000ULL);
+		if (timeout > NETWORKD_WLAN_DHCP_SECONDS)
+			timeout = NETWORKD_WLAN_DHCP_SECONDS;
+		(void)snprintf(seconds, sizeof(seconds), "%u", timeout);
+		arguments[0] = "/sbin/dhcpc";
+		arguments[1] = "-t";
+		arguments[2] = seconds;
+		arguments[3] = (char *)interface;
+		arguments[4] = NULL;
+		result = run_command_until(arguments, timeout, deadline, diagnostic);
 	}
-	*l2_succeeded = 1;
-	if (append_wifi_output(interface, &child_result, output,
-	    output_capacity, output_length) != 0) {
-		error = errno;
-		networkd_wifi_child_result_clear(&child_result);
-		(void)retire_managed_connection(failure_state, 1);
-		errno = error;
-		return -1;
+	if (result == 0)
+		result = snapshot_managed_l3(&managed_wlan, &after);
+	if (result == 0 && (after.address == 0U || !wlan_connected(interface))) {
+		errno = ENETDOWN;
+		result = -1;
 	}
-	networkd_wifi_child_result_clear(&child_result);
-
-	/* Acquires L3 only after authorization and within the same deadline. */
-	memset(&previous_l3, 0, sizeof(previous_l3));
-	memset(&committed_l3, 0, sizeof(committed_l3));
-	if (snapshot_interface_l3(interface, &previous_ifindex,
-	    &previous_l3) != 0) {
-		error = errno;
-		(void)retire_managed_connection(failure_state, 1);
-		networkd_protocol_clear(&previous_l3, sizeof(previous_l3));
-		networkd_protocol_clear(&committed_l3, sizeof(committed_l3));
-		errno = error;
-		return -1;
-	}
-	if (previous_ifindex != managed_wlan.connection.ifindex) {
-		error = ENODEV;
-		(void)retire_managed_connection(failure_state, 1);
-		networkd_protocol_clear(&previous_l3, sizeof(previous_l3));
-		networkd_protocol_clear(&committed_l3, sizeof(committed_l3));
-		errno = error;
-		return -1;
-	}
-	now = netutil_monotonic_us();
-	if (now >= deadline || deadline - now < 1000000ULL) {
-		(void)retire_managed_connection(failure_state, 1);
-		networkd_protocol_clear(&previous_l3, sizeof(previous_l3));
-		networkd_protocol_clear(&committed_l3, sizeof(committed_l3));
-		errno = ETIMEDOUT;
-		return -1;
-	}
-	dhcp_timeout = (unsigned)((deadline - now) / 1000000ULL);
-	if (dhcp_timeout > NETWORKD_WLAN_DHCP_SECONDS)
-		dhcp_timeout = NETWORKD_WLAN_DHCP_SECONDS;
-	if (snprintf(seconds, sizeof(seconds), "%u", dhcp_timeout) < 0) {
-		(void)retire_managed_connection(failure_state, 1);
-		networkd_protocol_clear(&previous_l3, sizeof(previous_l3));
-		networkd_protocol_clear(&committed_l3, sizeof(committed_l3));
-		errno = EIO;
-		return -1;
-	}
-	arguments[0] = "/sbin/dhcpc";
-	arguments[1] = "-t";
-	arguments[2] = seconds;
-	arguments[3] = (char *)interface;
-	arguments[4] = NULL;
-	if (run_command(arguments, dhcp_timeout, diagnostic) != 0) {
-		error = errno != 0 ? errno : EIO;
-		(void)retire_managed_connection(failure_state, 1);
-		networkd_protocol_clear(diagnostic, sizeof(diagnostic));
-		networkd_protocol_clear(&previous_l3, sizeof(previous_l3));
-		networkd_protocol_clear(&committed_l3, sizeof(committed_l3));
-		errno = error;
-		return -1;
+	if (result == 0) {
+		identify_l3_ownership(interface, &before, &after);
+		result = networkd_managed_wlan_commit_l3(&managed_wlan, &after);
 	}
 
-	/* Captures and publishes the exact post-DHCP ownership token. */
-	if (snapshot_managed_l3(&managed_wlan, &committed_l3) != 0) {
-		error = errno;
-		fprintf(stderr,
-		    "networkd: %s: post-DHCP ownership snapshot degraded; "
-		    "preserving unverified L3: %s\n",
-		    interface, strerror(error));
-		(void)retire_managed_connection(failure_state, 1);
-		networkd_protocol_clear(diagnostic, sizeof(diagnostic));
-		networkd_protocol_clear(&previous_l3, sizeof(previous_l3));
-		networkd_protocol_clear(&committed_l3, sizeof(committed_l3));
-		errno = error;
-		return -1;
-	}
-	identify_l3_ownership(interface, &previous_l3,
-	    &committed_l3);
-	if (networkd_managed_wlan_commit_l3(&managed_wlan,
-	    &committed_l3) != 0) {
-		error = errno;
-		(void)retire_managed_connection(failure_state, 1);
-		networkd_protocol_clear(diagnostic, sizeof(diagnostic));
-		networkd_protocol_clear(&previous_l3, sizeof(previous_l3));
-		networkd_protocol_clear(&committed_l3, sizeof(committed_l3));
-		errno = error;
-		return -1;
-	}
+	/* On failure the retained baseline remains available to retirement. */
+	saved = errno;
 	networkd_protocol_clear(diagnostic, sizeof(diagnostic));
-	networkd_protocol_clear(&previous_l3, sizeof(previous_l3));
-	networkd_protocol_clear(&committed_l3, sizeof(committed_l3));
-	return 0;
+	networkd_protocol_clear(&before, sizeof(before));
+	networkd_protocol_clear(&after, sizeof(after));
+	errno = saved;
+	return result;
+}
+
+/* Reconstructs partial DHCP ownership before retrying a failed transaction. */
+static int
+reconcile_pending_l3(
+	void)
+{
+	struct networkd_managed_l3 current;
+	int result;
+	int saved;
+
+	memset(&current, 0, sizeof(current));
+	result = snapshot_managed_l3(&managed_wlan, &current);
+	if (result == 0) {
+		identify_l3_ownership(managed_wlan.connection.interface,
+		    &managed_wlan.connection.l3_before, &current);
+		result = networkd_managed_wlan_track_l3(&managed_wlan, &current);
+	}
+	saved = errno;
+	networkd_protocol_clear(&current, sizeof(current));
+	errno = saved;
+	return result;
 }
 
 /* Captures one interface's exact current IPv4, route, and resolver state. */
@@ -3795,6 +4660,7 @@ snapshot_resolver(
 		return -1;
 	}
 	snapshot->resolver_present = 0;
+	snapshot->resolver_oversized = 0;
 	snapshot->resolver_owned = 0;
 	snapshot->resolver_length = 0U;
 	networkd_protocol_clear(snapshot->resolver, sizeof(snapshot->resolver));
@@ -3830,13 +4696,21 @@ snapshot_resolver(
 		do {
 			count = read(descriptor, &extra, sizeof(extra));
 		} while (count < 0 && errno == EINTR);
-		if (count != 0) {
-			saved = count < 0 ? errno : EOVERFLOW;
+		if (count < 0) {
+			saved = errno;
 			(void)close(descriptor);
 			networkd_protocol_clear(snapshot->resolver,
 			    sizeof(snapshot->resolver));
 			errno = saved;
 			return -1;
+		}
+
+		/* Preserve oversized external files without blocking unrelated L3 work. */
+		if (count > 0) {
+			snapshot->resolver_oversized = 1;
+			used = 0U;
+			networkd_protocol_clear(snapshot->resolver,
+			    sizeof(snapshot->resolver));
 		}
 	}
 	if (close(descriptor) != 0) {
@@ -3849,7 +4723,7 @@ snapshot_resolver(
 	snapshot->resolver_present = 1;
 	snapshot->resolver_length = used;
 
-	/* Reports exact present or absent file state. */
+	/* Reports exact bytes, absence, or an explicitly unowned oversized file. */
 	return 0;
 }
 
@@ -3879,7 +4753,12 @@ identify_l3_ownership(
 
 	/* Owns resolver data only when dhcpc replaced the preexisting file. */
 	committed->resolver_owned = 0;
+
+	/* An unbounded file can never become a bounded ownership token. */
+	if (committed->resolver_oversized)
+		return;
 	changed = previous->resolver_present != committed->resolver_present ||
+	    previous->resolver_oversized != committed->resolver_oversized ||
 	    previous->resolver_length != committed->resolver_length;
 	if (!changed && committed->resolver_length != 0U)
 		changed = memcmp(previous->resolver, committed->resolver,
@@ -3903,9 +4782,9 @@ identify_l3_ownership(
 /* Clears only L3 resources still equal to one managed ownership token. */
 static int
 clear_interface_l3(
-	const struct networkd_managed_wlan *record)
+	struct networkd_managed_wlan *record)
 {
-	const struct networkd_managed_wlan_connection *connection;
+	struct networkd_managed_wlan_connection *connection;
 	struct networkd_managed_l3_cleanup cleanup;
 	struct networkd_managed_l3 current;
 	uint32_t current_ifindex;
@@ -3929,7 +4808,21 @@ clear_interface_l3(
 		return -1;
 	planned = networkd_managed_wlan_plan_l3_cleanup(record,
 	    current_ifindex, &current, &cleanup);
-	first_error = planned == 0 ? 0 : errno;
+	if (planned != 0 && errno != ESTALE) {
+		networkd_protocol_clear(&current, sizeof(current));
+		return -1;
+	}
+	/* A changed resource belongs to its new writer, not to this old token. */
+	if (planned != 0) {
+		if (!cleanup.clear_ipv4)
+			connection->l3.ipv4_owned = 0;
+		if (!cleanup.delete_default_route)
+			connection->l3.default_route_owned = 0;
+		if (!cleanup.unlink_resolver)
+			connection->l3.resolver_owned = 0;
+		fprintf(stderr, "networkd: preserved externally changed Wi-Fi L3 state\n");
+	}
+	first_error = 0;
 
 	/* Revalidates and clears only an unchanged owned IPv4 tuple. */
 	descriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -3950,18 +4843,27 @@ clear_interface_l3(
 		} else if (address != connection->l3.address ||
 		    netmask != connection->l3.netmask ||
 		    broadcast != connection->l3.broadcast) {
-			if (first_error == 0)
-				first_error = ESTALE;
+			connection->l3.ipv4_owned = 0;
 		} else {
 			if (set_interface_ipv4(descriptor, connection->interface,
-			    SIOCSIFNETMASK, 0U) != 0 && first_error == 0)
+			    SIOCSIFNETMASK, 0U) != 0)
 				first_error = errno;
+			else
+				connection->l3.netmask = 0U;
 			if (set_interface_ipv4(descriptor, connection->interface,
-			    SIOCSIFBRDADDR, 0U) != 0 && first_error == 0)
-				first_error = errno;
+			    SIOCSIFBRDADDR, 0U) != 0) {
+				if (first_error == 0)
+					first_error = errno;
+			} else
+				connection->l3.broadcast = 0U;
 			if (set_interface_ipv4(descriptor, connection->interface,
-			    SIOCSIFADDR, 0U) != 0 && first_error == 0)
-				first_error = errno;
+			    SIOCSIFADDR, 0U) != 0) {
+				if (first_error == 0)
+					first_error = errno;
+			} else
+				connection->l3.address = 0U;
+			if (first_error == 0)
+				connection->l3.ipv4_owned = 0;
 		}
 	}
 
@@ -3971,9 +4873,12 @@ clear_interface_l3(
 		    connection->interface) != 0 ||
 		    delete_interface_default_exact(descriptor,
 		    &connection->l3.default_route) != 0) {
-			if (first_error == 0)
+			if (errno == ESTALE || errno == ENOENT)
+				connection->l3.default_route_owned = 0;
+			else if (first_error == 0)
 				first_error = errno;
-		}
+		} else
+			connection->l3.default_route_owned = 0;
 	}
 	if (descriptor >= 0 && close(descriptor) != 0 && first_error == 0)
 		first_error = errno;
@@ -3983,9 +4888,12 @@ clear_interface_l3(
 		if (interface_index_name_matches(connection->ifindex,
 		    connection->interface) != 0 ||
 		    unlink_owned_resolver(record) != 0) {
-			if (first_error == 0)
+			if (errno == ESTALE || errno == ENOENT)
+				connection->l3.resolver_owned = 0;
+			else if (first_error == 0)
 				first_error = errno;
-		}
+		} else
+			connection->l3.resolver_owned = 0;
 	}
 	networkd_protocol_clear(&current, sizeof(current));
 	networkd_protocol_clear(&cleanup, sizeof(cleanup));
@@ -4195,7 +5103,7 @@ unlink_owned_resolver(
 	memset(&current, 0, sizeof(current));
 	if (snapshot_resolver(&current) != 0)
 		return -1;
-	equal = current.resolver_present &&
+	equal = current.resolver_present && !current.resolver_oversized &&
 	    current.resolver_length == connection->l3.resolver_length;
 	if (equal && current.resolver_length != 0U)
 		equal = memcmp(current.resolver, connection->l3.resolver,
@@ -4214,16 +5122,6 @@ unlink_owned_resolver(
 	return result;
 }
 
-/* Supports the run command operation. */
-static int
-run_command(
-	char *const arguments[],
-	unsigned timeout_seconds,
-	char diagnostic[CHILD_OUTPUT_MAX])
-{
-	return run_command_until(arguments, timeout_seconds, 0U, diagnostic);
-}
-
 /* Runs one child with both an operation bound and an optional transaction deadline. */
 static int
 run_command_until(
@@ -4236,16 +5134,29 @@ run_command_until(
 	ssize_t count;
 	char temporary[96];
 	int output, status, child_done;
+	int child_error;
 	int standard_output, standard_error;
 	pid_t child;
-	unsigned ticks, tick_limit;
+	uint64_t now;
+	uint64_t operation_deadline;
 
 	status = 0;
 	child_done = 0;
-	ticks = 0;
-	tick_limit = timeout_seconds * 100U;
-
+	child_error = 0;
+	now = netutil_monotonic_us();
+	operation_deadline = now + (uint64_t)timeout_seconds * 1000000ULL;
+	if (deadline == 0U || deadline > operation_deadline)
+		deadline = operation_deadline;
+	if (wifi_work.deadline != 0U && (deadline == 0U ||
+	    deadline > wifi_work.deadline -
+	    NETWORKD_WIFI_CLEANUP_SECONDS * 1000000ULL))
+		deadline = wifi_work.deadline -
+		    NETWORKD_WIFI_CLEANUP_SECONDS * 1000000ULL;
 	diagnostic[0] = '\0';
+	if (now >= deadline) {
+		errno = ETIMEDOUT;
+		return -1;
+	}
 
 	/* Handles a failed snprintf operation. */
 	if (snprintf(temporary, sizeof(temporary), "/run/networkd-child.%ld",
@@ -4292,31 +5203,46 @@ run_command_until(
 
 	/* Checks the child process state. */
 	if (child < 0) {
+		child_error = errno;
 		close(output);
 		unlink(temporary);
+		errno = child_error;
 
 		/* Reports operation failure. */
 		return -1;
 	}
 	while (!child_done) {
+		if (wifi_wait_pump != NULL)
+			child_error = wifi_wait_pump();
+		if (child_error == 0 && netutil_monotonic_us() >= deadline)
+			child_error = ETIMEDOUT;
 		result = waitpid(child, &status, WNOHANG);
 
 		/* Checks the operation result. */
 		if (result == child)
 			child_done = 1;
-		else if (result < 0 && errno != EINTR)
+		else if (result < 0 && errno != EINTR) {
+			child_error = errno != 0 ? errno : EIO;
+			/* ECHILD means there is no remaining child to signal. */
+			if (child_error != ECHILD) {
+				(void)kill(child, SIGKILL);
+				do {
+					result = waitpid(child, &status, 0);
+				} while (result < 0 && errno == EINTR);
+			}
 			child_done = 1;
+		}
 
 		/* Handles the child done condition. */
 		if (child_done)
 			break;
 
-		/* Handles the ticks condition. */
-		if (ticks++ >= tick_limit ||
-		    (deadline != 0U && netutil_monotonic_us() >= deadline)) {
+		/* Cancellation, deadline and wait errors retain their exact cause. */
+		if (child_error != 0) {
 			(void)kill(child, SIGKILL);
-			(void)waitpid(child, &status, 0);
-			errno = ETIMEDOUT;
+			do {
+				result = waitpid(child, &status, 0);
+			} while (result < 0 && errno == EINTR);
 			break;
 		}
 		usleep(10000);
@@ -4335,8 +5261,10 @@ run_command_until(
 	clean_diagnostic(diagnostic);
 
 	/* Handles the ticks condition. */
-	if (ticks > tick_limit)
+	if (child_error != 0) {
+		errno = child_error;
 		return -1;
+	}
 
 	/* Handles a failed WIFEXITED operation. */
 	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {

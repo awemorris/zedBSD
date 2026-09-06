@@ -2315,7 +2315,7 @@ radio_channel_apply(struct rtl8822b_radio *radio, uint8_t channel,
 		(void)journal_rollback(radio, &journal);
 		/* A transport fault makes continued RF operation untrustworthy. */
 		radio_emergency_off(radio);
-		memset(radio, 0, sizeof(*radio));
+		radio->state = RTL8822B_RADIO_STOPPING;
 		return error;
 	}
 	radio->channel = channel;
@@ -3166,7 +3166,7 @@ rtl8822b_radio_power_on(struct rtl8822b_radio *radio,
 		error = radio_usb_phy_profile(radio, deadline_ticks);
 	if (error != 0) {
 		radio_emergency_off(radio);
-		memset(radio, 0, sizeof(*radio));
+		radio->state = RTL8822B_RADIO_STOPPING;
 		return error;
 	}
 	radio->state = RTL8822B_RADIO_POWERED;
@@ -3335,6 +3335,8 @@ rtl8822b_radio_stop(struct rtl8822b_radio *radio,
 		return EINVAL;
 	if (radio->state == RTL8822B_RADIO_OFF)
 		return 0;
+	radio->state = RTL8822B_RADIO_STOPPING;
+	radio->power_limits_valid = 0U;
 	error = radio_write(radio, RTL8822B_REG_TX_PAUSE, 1U, 0xffU,
 	    deadline_ticks);
 	if (error != 0)
@@ -3362,8 +3364,10 @@ rtl8822b_radio_stop(struct rtl8822b_radio *radio,
 		first_error = error;
 	if (first_error != 0)
 		radio_emergency_off(radio);
-	/* Even a disconnected transport must leave this object retryable. */
-	memset(radio, 0, sizeof(*radio));
+	/* Preserve transport and state after failure: OFF would make the next stop
+	 * report success without issuing the still-unconfirmed hardware inverse. */
+	if (first_error == 0)
+		memset(radio, 0, sizeof(*radio));
 	return first_error;
 }
 

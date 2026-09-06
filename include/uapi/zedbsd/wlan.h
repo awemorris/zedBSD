@@ -139,6 +139,8 @@ struct wlan_disconnect_request {
 	uint32_t reserved[5];
 };
 
+#define WLAN_STATUS_STOP_PENDING 0x00000001U
+
 struct wlan_status_request {
 	char ifr_name[IFNAMSIZ];
 	uint32_t version;
@@ -163,7 +165,11 @@ struct wlan_status_request {
 	uint8_t reserved0;
 	uint32_t center_frequency_mhz;
 	uint32_t security;
-	uint32_t reserved[4];
+	/* Output only, occupying v1 reserved words without changing ioctl size.
+	 * Pending includes failed stops; stop_error is the latest checked error. */
+	uint32_t stop_flags;
+	int32_t stop_error;
+	uint32_t reserved[2];
 };
 
 #define ZEDBSD_WLAN_IOCTL_GROUP 'W'

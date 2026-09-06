@@ -66,6 +66,9 @@ struct drv_usb_urb {
 
 struct wlan_station {
 	unsigned marker;
+	int stop_pending;
+	int stop_error;
+	int barrier;
 };
 
 #define RTL8822B_HOST_TEST 1
@@ -1752,9 +1755,58 @@ wlan_station_attach(struct net_device *device,
 	if (station_attach_error != 0)
 		return station_attach_error;
 	fake_station.marker = 0x8822U;
+	fake_station.stop_pending = 0;
+	fake_station.stop_error = 0;
+	fake_station.barrier = 0;
 	*result = &fake_station;
 	station_attached = 1U;
 	return 0;
+}
+
+void
+wlan_station_stop_request(struct wlan_station *station)
+{
+	if (station != NULL)
+		station->stop_pending = 1;
+}
+
+void
+wlan_station_stop_complete(struct wlan_station *station, int error)
+{
+	if (station != NULL) {
+		station->stop_pending = error != 0;
+		station->stop_error = error;
+	}
+}
+
+int
+wlan_station_stop_busy(struct wlan_station *station)
+{
+	return station != NULL && station->stop_pending;
+}
+
+int
+wlan_station_stop_cancel(struct wlan_station *station)
+{
+	return station != NULL && station->barrier ? EBUSY : 0;
+}
+
+int
+wlan_station_quiesce_begin(struct wlan_station *station)
+{
+	if (station == NULL)
+		return ENODEV;
+	if (station->barrier)
+		return EBUSY;
+	station->barrier = 1;
+	return 0;
+}
+
+void
+wlan_station_quiesce_end(struct wlan_station *station)
+{
+	assert(station != NULL && station->barrier);
+	station->barrier = 0;
 }
 
 int
@@ -4266,7 +4318,7 @@ test_first_open_software_scan(void)
 	assert(rtl8822bu_management_transmit(adapter, 42U, probe,
 	    sizeof(probe), deadline) == ENETDOWN);
 	fake_net_device.ops->close(&fake_net_device);
-	assert(station_close_calls == 1U && !adapter->opened &&
+	assert(station_close_calls == 2U && !adapter->opened &&
 	    adapter->radio.state == RTL8822B_RADIO_OFF);
 	assert(rtl8822bu_detach(&interface, 0U) == 0);
 	assert(interface.driver_data == NULL && allocations == 0U);
@@ -4853,7 +4905,7 @@ test_scan_channel_transport_failure_recovery(void)
 		assert(rtl8822bu_scan_channel_start(adapter, 43U, 6U, 7U,
 		    deadline) == expected_error);
 		transport_forced_absent = 0U;
-		assert(adapter->radio.state == RTL8822B_RADIO_OFF);
+		assert(adapter->radio.state == RTL8822B_RADIO_STOPPING);
 		assert(!adapter->firmware_running && !adapter->radio_running &&
 		    adapter->opened && adapter->quarantined);
 		assert(adapter->scan_generation == 0U && adapter->scan_channel == 0U);
@@ -4913,7 +4965,8 @@ test_scan_channel_transport_failure_recovery(void)
 		} else {
 			assert(adapter->quarantined && !adapter->radio_running &&
 			    !adapter->firmware_running &&
-			    adapter->radio.state == RTL8822B_RADIO_OFF);
+			    adapter->radio.state == (mode == 2U ?
+			    RTL8822B_RADIO_STOPPING : RTL8822B_RADIO_OFF));
 			if (mode == 1U)
 				assert(!adapter->opened);
 		}
@@ -4947,7 +5000,7 @@ test_close_finite_station_join(void)
 	assert(fake_net_device.ops->open(&fake_net_device) == 0);
 	station_close_busy_count = 3U;
 	fake_net_device.ops->close(&fake_net_device);
-	assert(station_close_calls == 4U && station_close_busy_count == 0U);
+	assert(station_close_calls == 5U && station_close_busy_count == 0U);
 	assert(!adapter->opened && !adapter->quarantined &&
 	    adapter->radio.state == RTL8822B_RADIO_OFF);
 	assert(rtl8822bu_detach(&interface, 0U) == 0);
@@ -4965,10 +5018,14 @@ test_close_finite_station_join(void)
 	before = clock_ticks();
 	fake_net_device.ops->close(&fake_net_device);
 	assert(clock_ticks() >= before + RTL8822BU_STATION_CLOSE_TIMEOUT_TICKS);
-	assert(adapter->quarantined && adapter->opened &&
-	    adapter->radio.state == RTL8822B_RADIO_STARTED &&
-	    adapter->rx_urb->status == DRV_USB_URB_PENDING);
+	assert(!adapter->quarantined && !adapter->opened &&
+	    adapter->radio.state == RTL8822B_RADIO_OFF &&
+	    fake_station.stop_pending && adapter->close_pending);
 	station_close_error = 0;
+	assert(fake_net_device.ops->open(&fake_net_device) == EBUSY);
+	wlan_station_stop_complete(&fake_station,
+	    rtl8822bu_radio_ops.stop_retry(adapter));
+	assert(!fake_station.stop_pending && !adapter->close_pending);
 	assert(rtl8822bu_detach(&interface, 0U) == 0);
 	assert(interface.driver_data == NULL && allocations == 0U);
 }

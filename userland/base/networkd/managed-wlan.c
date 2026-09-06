@@ -173,9 +173,23 @@ networkd_managed_wlan_begin_connect(
 	return 0;
 }
 
-/*
- * Commits a successful connection with its exact L3 ownership token.
- */
+/* Retains the pre-DHCP baseline until success or failed-work reconciliation. */
+int
+networkd_managed_wlan_begin_l3(
+	struct networkd_managed_wlan *managed,
+	const struct networkd_managed_l3 *before)
+{
+	if (managed == NULL || managed->state != NETWORKD_WLAN_CONNECTING ||
+	    managed->connection.l3_pending || !managed_l3_valid(before)) {
+		errno = EINVAL;
+		return -1;
+	}
+	memcpy(&managed->connection.l3_before, before, sizeof(*before));
+	managed->connection.l3_pending = 1;
+	return 0;
+}
+
+/* Commits success only after retaining the transaction's exact L3 claims. */
 int
 networkd_managed_wlan_commit_l3(
 	struct networkd_managed_wlan *managed,
@@ -183,6 +197,23 @@ networkd_managed_wlan_commit_l3(
 {
 	/* Requires one active connection transaction. */
 	if (managed == NULL || managed->state != NETWORKD_WLAN_CONNECTING) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (networkd_managed_wlan_track_l3(managed, snapshot) != 0)
+		return -1;
+	managed->state = NETWORKD_WLAN_CONNECTED;
+	return 0;
+}
+
+/* Tracks even partial DHCP changes without asserting connection success. */
+int
+networkd_managed_wlan_track_l3(
+	struct networkd_managed_wlan *managed,
+	const struct networkd_managed_l3 *snapshot)
+{
+	if (managed == NULL || (managed->state != NETWORKD_WLAN_CONNECTING &&
+	    managed->state != NETWORKD_WLAN_RETIRING)) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -200,15 +231,35 @@ networkd_managed_wlan_commit_l3(
 		return -1;
 	}
 
-	/* Publishes the complete ownership snapshot and connected state. */
+	/* Replaces the baseline only after a verifiable ownership snapshot. */
 	memcpy(
 		&managed->connection.l3,
 		snapshot,
 		sizeof(managed->connection.l3));
 	managed->connection.owns_l3 = 1;
-	managed->state = NETWORKD_WLAN_CONNECTED;
+	managed->connection.l3_pending = 0;
+	clear_bytes(&managed->connection.l3_before,
+	    sizeof(managed->connection.l3_before));
 
 	/* Reports successful ownership transfer. */
+	return 0;
+}
+
+/* Records teardown intent before any fallible OS or child operation. */
+int
+networkd_managed_wlan_begin_retire(
+	struct networkd_managed_wlan *managed,
+	enum networkd_managed_wlan_state next_state)
+{
+	if (managed == NULL || !managed->owner_valid || !idle_state(next_state)) {
+		errno = EINVAL;
+		return -1;
+	}
+	managed->retire_target = next_state;
+	if (connection_active(managed))
+		managed->state = NETWORKD_WLAN_RETIRING;
+	else
+		managed->state = next_state;
 	return 0;
 }
 
@@ -324,7 +375,7 @@ networkd_managed_wlan_plan_l3_cleanup(
 
 	/* Unlinks only an owned resolver file with byte-identical contents. */
 	if (connection->l3.resolver_owned) {
-		resolver_equal = current->resolver_present &&
+		resolver_equal = current->resolver_present && !current->resolver_oversized &&
 		    current->resolver_length == connection->l3.resolver_length;
 		if (resolver_equal && current->resolver_length != 0U) {
 			resolver_equal = memcmp(
@@ -515,6 +566,11 @@ managed_l3_valid(
 	if (!snapshot->resolver_present && snapshot->resolver_length != 0U)
 		return 0;
 	if (snapshot->resolver_owned && !snapshot->resolver_present)
+		return 0;
+
+	/* Oversized external contents cannot authorize deletion or byte comparison. */
+	if (snapshot->resolver_oversized && (!snapshot->resolver_present ||
+	    snapshot->resolver_owned || snapshot->resolver_length != 0U))
 		return 0;
 
 	/* Accepts one internally consistent bounded snapshot. */

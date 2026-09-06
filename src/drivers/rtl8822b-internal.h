@@ -149,7 +149,9 @@ struct rtl8822b_radio_transport {
 enum rtl8822b_radio_state {
 	RTL8822B_RADIO_OFF = 0,
 	RTL8822B_RADIO_POWERED = 1,
-	RTL8822B_RADIO_STARTED = 2
+	RTL8822B_RADIO_STARTED = 2,
+	/* No forward operations; retained transport permits checked stop retry. */
+	RTL8822B_RADIO_STOPPING = 3
 };
 
 struct rtl8822b_radio {

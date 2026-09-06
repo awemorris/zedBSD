@@ -72,6 +72,7 @@ static void test_preloop_failure_redaction(void);
 static void test_timeout_and_reaping(void);
 static void test_argument_validation_and_simple_operation(void);
 static void test_list_result_parser(void);
+static void test_eof_before_exit(void);
 
 /* Runs either one exec fixture or the complete parent-side test suite. */
 int
@@ -92,6 +93,7 @@ main(
 	test_timeout_and_reaping();
 	test_argument_validation_and_simple_operation();
 	test_list_result_parser();
+	test_eof_before_exit();
 
 	/* Reports successful completion. */
 	puts("networkd wifi child test: PASS");
@@ -360,6 +362,15 @@ fixture_child_main(
 	char diagnostic[NETWORKD_WIFI_CHILD_DIAGNOSTIC_MAX + 2U];
 
 	/* Selects one deterministic child behavior. */
+	if (strcmp(mode, "eof-before-exit") == 0 ||
+	    strcmp(mode, "eof-then-hang") == 0) {
+		fixture_write_all(STDOUT_FILENO, "WIFI1 terminal ok 0\n", 20U);
+		close(STDOUT_FILENO);
+		close(STDERR_FILENO);
+		/* Leave an observable EOF-to-exit window in the real host process. */
+		usleep(strcmp(mode, "eof-then-hang") == 0 ? 5000000U : 100000U);
+		return 0;
+	}
 	if (strcmp(mode, "success") == 0) {
 		fixture_write_all(STDOUT_FILENO, "WIFI1 state connected\n"
 		    "WIFI1 terminal ok 0\n",
@@ -705,6 +716,28 @@ test_terminal_and_protocol_failures(
 	    errno == ENOENT && result.child_exit_status == 127,
 	    "exec failure");
 	fixture_expect_reaped("exec failure reap");
+	networkd_wifi_child_result_clear(&result);
+}
+
+/* Requires prompt reaping after EOF without accepting an unbounded child. */
+static void
+test_eof_before_exit(void)
+{
+	struct networkd_wifi_child_result result;
+	double started;
+
+	started = fixture_monotonic_seconds();
+	fixture_expect(fixture_run("eof-before-exit", 5U, &result) == 0,
+	    "EOF before successful exit");
+	fixture_expect(fixture_monotonic_seconds() - started < 1.0,
+	    "EOF must not consume the primitive deadline");
+	fixture_expect_reaped("EOF successful reap");
+	started = fixture_monotonic_seconds();
+	fixture_expect(fixture_run("eof-then-hang", 1U, &result) != 0 &&
+	    errno == ETIMEDOUT, "closed pipes do not prove child completion");
+	fixture_expect(fixture_monotonic_seconds() - started < 2.5,
+	    "closed-pipe child still has a deadline");
+	fixture_expect_reaped("EOF timeout reap");
 	networkd_wifi_child_result_clear(&result);
 }
 

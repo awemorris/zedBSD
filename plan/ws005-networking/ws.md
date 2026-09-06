@@ -1,10 +1,13 @@
 # WS005: networking and WLAN
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 WSID: `ws005`
 
-Status: complete (`q071`). The global `net wifi` policy, authenticated ZNV2
+Status: p001--p011 historically complete (`q071`); p012 complete (`q085`).
+The user's manual observations were addressed by the P012 structural rewrite
+and P048 integration; all 30 ordinary/sanitized host stories and regressions pass.
+Historical hardware acceptance below predates these changes. The global `net wifi` policy, authenticated ZNV2
 control path, daemon-side credential loading, fixed primitive-child boundary,
 30-second userspace retry, link-event recovery, W52 RTL8822BU path, automatic
 gates, and consolidated physical check all pass. On 2026-09-05 the user
@@ -24,7 +27,11 @@ non-root mutating network ioctls.  Its focused, analyzer, sanitizer, full
 build, and PC-98 native runtime gates pass.  The earlier RTL8156 carrier,
 DHCP, ping, and external-fetch path remains passing.
 
-Resume point: no Phase remains. P002's historical per-interface/profile-
+Current result: [p012](phase012-wifi-command-scenarios/phase.md) under q085 is
+complete after the acceptance release. See [30 individual results](phase012-wifi-command-scenarios/results.md)
+and [review dispositions](phase012-wifi-command-scenarios/review2-response.md).
+The direct nonblocking list contract is preserved. Physical RTL8822BU/AX211 RF
+and QEMU boot were not tested in this cycle. P002's historical per-interface/profile-
 forwarding clauses are explicitly superseded by the 2026-09-05 global-policy
 amendment completed through p006/p007/p011.
 WS004 p026 is also complete:
@@ -58,6 +65,7 @@ Shared tests: [WS005 test index](tests/README.md)
 | [`ws005-p009`](phase009-wlan-minimum-connectivity/phase.md) | Complete (`q059`) | One USB-passthrough development run reached scan, authorized carrier, DHCP, two 3/3 ping checks, an 84255-byte fetch, disconnect, and down |
 | [`ws005-p010`](phase010-wifi-primitive-hardening/phase.md) | Complete (`q071`) | `/sbin/wifi` owns the finite 30-second scan/select/connect sequence and its focused boundary/redaction gates pass |
 | [`ws005-p011`](phase011-networkd-managed-wlan-reconnect/phase.md) | Complete (`q071`) | Authenticated policy ownership, four persistent states, link events, and one same-SSID recovery child pass |
+| [`ws005-p012`](phase012-wifi-command-scenarios/phase.md) | Complete (`q085`) | Coherent managed rewrite and P048 integration; 30/30 ordinary and sanitized stories, maintained regressions and three builds pass; RF untested |
 
 `ws002-p020` remains historical ownership of the current wired
 `networkd`/`net` baseline; it is not renumbered into this WS. Native device and

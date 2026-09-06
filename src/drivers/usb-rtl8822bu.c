@@ -86,7 +86,11 @@
  */
 #define RTL8822BU_RADIO_OPEN_TIMEOUT_TICKS      (15U * KERN_CLOCK_HZ)
 #define RTL8822BU_RADIO_STOP_TIMEOUT_TICKS       (1U * KERN_CLOCK_HZ)
-#define RTL8822BU_STATION_CLOSE_TIMEOUT_TICKS     (1U * KERN_CLOCK_HZ)
+/* Four key inverses, association clear, radio disconnect, TX report retirement,
+ * and scheduling margin share this finite common-close retry window. */
+#define RTL8822BU_STATION_CLOSE_TIMEOUT_TICKS \
+	(RTL8822BU_TX_REPORT_RETIRE_TICKS + 5U * WLAN_CONNECT_TRANSITION_TICKS + RTL8822BU_SECURITY_TIMEOUT_TICKS + KERN_CLOCK_HZ)
+#define RTL8822BU_ACTIVITY_JOIN_TICKS            (5U * KERN_CLOCK_HZ)
 #define RTL8822BU_MICROSECONDS_PER_SECOND                 1000000ULL
 #define RTL8822BU_RELAXATIONS_PER_MICROSECOND                  128U
 
@@ -326,6 +330,9 @@ struct rtl8822bu_adapter {
 	uint64_t rx_completed_generation;
 	struct rtl8822bu_rx_completion_context rx_completion[2];
 	unsigned radio_operations_active;
+	unsigned hardware_stopped;
+	unsigned close_pending;
+	uint64_t diagnostic_deadline;
 	/* Set under lock before any CAM/BSSID transition.  TX admission and the
 	 * operation lease are checked/changed by the same lock, closing the race
 	 * between the final admitted USB transfer and the hardware queue drain. */
@@ -366,6 +373,11 @@ struct rtl8822bu_adapter {
 	uint64_t phy_sample_generation;
 	uint32_t scan_channel;
 };
+
+static int rtl8822bu_log_error(struct rtl8822bu_adapter *);
+static int rtl8822bu_close_locked(struct rtl8822bu_adapter *);
+static int rtl8822bu_stop_retry(void *context);
+static int rtl8822bu_wait_activity(struct rtl8822bu_adapter *);
 
 static uint32_t
 rtl8822bu_scan_channel_count(const struct rtl8822bu_board_info *board)
@@ -1008,7 +1020,27 @@ rtl8822bu_register_control(
 	return error;
 }
 
-/* Completes the RTL8822B USB processing-delay transaction without recursion. */
+/* Emits at most one repetitive transport diagnostic per adapter per second. */
+static int
+rtl8822bu_log_error(
+	struct rtl8822bu_adapter *adapter)
+{
+	unsigned long enabled;
+	uint64_t now;
+	int emit;
+
+	/* Rate limiting affects only logging; every caller retains its original error. */
+	now = clock_ticks();
+	enabled = spin_lock_irqsave(&adapter->lock);
+	emit = now >= adapter->diagnostic_deadline;
+	if (emit)
+		adapter->diagnostic_deadline = UINT64_MAX - now < KERN_CLOCK_HZ ?
+		    UINT64_MAX : now + KERN_CLOCK_HZ;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	return emit;
+}
+
+/* Completes an ON-section register transaction using its original deadline. */
 static int
 rtl8822bu_register_processing_delay(
 	struct rtl8822bu_adapter *adapter,
@@ -1033,7 +1065,7 @@ rtl8822bu_register_processing_delay(
 		error = EIO;
 
 	/* Localizes failures without printing the transferred register value. */
-	if (error != 0) {
+	if (error != 0 && rtl8822bu_log_error(adapter)) {
 		hal_printf("usb-rtl8822bu: processing-delay-error actual=%u "
 		    "error=%d\n", (unsigned)actual, error);
 	}
@@ -1079,7 +1111,7 @@ rtl8822bu_register_transfer(
 		error = EIO;
 
 	/* Identifies a failed control operation without exposing register data. */
-	if (error != 0) {
+	if (error != 0 && rtl8822bu_log_error(adapter)) {
 		hal_printf("usb-rtl8822bu: control-error reg=%04x width=%u "
 		    "write=%u actual=%u error=%d\n", reg, (unsigned)width,
 		    (unsigned)write, (unsigned)actual, error);
@@ -2067,17 +2099,30 @@ rtl8822bu_poll_exit(struct rtl8822bu_adapter *adapter)
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 }
 
-static void
-rtl8822bu_wait_activity(struct rtl8822bu_adapter *adapter)
+/* Joins existing producers without holding the lifecycle forever. */
+static int
+rtl8822bu_wait_activity(
+	struct rtl8822bu_adapter *adapter)
 {
+	unsigned long enabled;
+	unsigned active;
+	uint64_t deadline;
+	int error;
+
+	/* Keeps all buffers owned if an admitted producer outlives the join window. */
+	error = rtl8822bu_deadline_after(RTL8822BU_ACTIVITY_JOIN_TICKS, &deadline);
+	if (error != 0)
+		return error;
 	for (;;) {
-		unsigned long enabled = spin_lock_irqsave(&adapter->lock);
-		unsigned active = adapter->starts_active + adapter->polls_active +
+		enabled = spin_lock_irqsave(&adapter->lock);
+		active = adapter->starts_active + adapter->polls_active +
 		    adapter->radio_operations_active;
 
 		spin_unlock_irqrestore(&adapter->lock, enabled);
 		if (active == 0U)
-			return;
+			return 0;
+		if (clock_ticks() >= deadline)
+			return ETIMEDOUT;
 		sched_yield();
 	}
 }
@@ -2101,19 +2146,23 @@ rtl8822bu_rx_stop(struct rtl8822bu_adapter *adapter)
 	adapter->rx_completed_generation = 0U;
 	adapter->rx_generation_barrier = 0U;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
-	rtl8822bu_wait_activity(adapter);
-	status = drv_usb_urb_status(adapter->rx_urb);
-	if (status == DRV_USB_URB_PENDING)
-		(void)drv_usb_urb_cancel(adapter->rx_urb);
-	error = drv_usb_urb_drain(adapter->rx_urb,
-	    RTL8822BU_RX_DRAIN_TIMEOUT_MS);
+	error = rtl8822bu_wait_activity(adapter);
+
+	/* Do not cancel or release storage while a producer may still submit it. */
+	if (error == 0) {
+		status = drv_usb_urb_status(adapter->rx_urb);
+		if (status == DRV_USB_URB_PENDING)
+			(void)drv_usb_urb_cancel(adapter->rx_urb);
+		error = drv_usb_urb_drain(adapter->rx_urb,
+		    RTL8822BU_RX_DRAIN_TIMEOUT_MS);
+	}
 	enabled = spin_lock_irqsave(&adapter->lock);
 	adapter->stopping = 0U;
 	adapter->rx_rearm_active = 0U;
+	adapter->closing = 0U;
 	if (error != 0)
 		adapter->quarantined = 1U;
 	else {
-		adapter->closing = 0U;
 		adapter->rx_error_streak = 0U;
 	}
 	spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -2255,6 +2304,15 @@ rtl8822bu_hardware_stop_locked(struct rtl8822bu_adapter *adapter)
 
 	error = rtl8822bu_rx_stop(adapter);
 	enabled = spin_lock_irqsave(&adapter->lock);
+	adapter->hardware_stopped = 0U;
+
+	/* A join failure cannot authorize resetting a radio under an active caller. */
+	if (adapter->starts_active != 0U || adapter->polls_active != 0U ||
+	    adapter->radio_operations_active != 0U) {
+		adapter->quarantined = 1U;
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+		return error != 0 ? error : EBUSY;
+	}
 	if (adapter->transport_absent) {
 		/* FORCE detach arrives after the USB core has permanently closed
 		 * transfers for this device generation.  A drained host producer plus
@@ -2270,6 +2328,7 @@ rtl8822bu_hardware_stop_locked(struct rtl8822bu_adapter *adapter)
 			    sizeof(adapter->tx_reports));
 			adapter->tx_report_next = 0U;
 			adapter->quarantined = 0U;
+			adapter->hardware_stopped = 1U;
 			adapter->recovery_pending = 0U;
 			adapter->recovery_active = 0U;
 			adapter->recovery_error = 0;
@@ -2329,7 +2388,9 @@ rtl8822bu_hardware_stop_locked(struct rtl8822bu_adapter *adapter)
 		memset(adapter->tx_reports, 0, sizeof(adapter->tx_reports));
 		adapter->tx_report_next = 0U;
 		adapter->tx_quiescing = 0U;
-		adapter->quarantined = 0U;
+		/* Device reset does not prove that a timed-out host URB was drained. */
+		adapter->quarantined = error != 0;
+		adapter->hardware_stopped = error == 0;
 		adapter->recovery_pending = 0U;
 		adapter->recovery_error = 0;
 		adapter->recovery_cleanup_attempts = 0U;
@@ -3204,12 +3265,13 @@ rtl8822bu_scan_channel_start(void *context, uint64_t generation,
 		    (unsigned long long)deadline, (unsigned)adapter->radio.state);
 		/* Invalid caller input is rejected above without touching hardware.
 		 * Once the core has entered channel programming, however, a failed
-		 * transaction fail-closes the radio and clears its state.  Mirror that
-		 * terminal hardware state here so no later callback can observe stale
+		 * transaction closes admission and retains unconfirmed stop state. Mirror
+		 * that state here so no later callback can observe stale
 		 * firmware/radio-running flags or keep admitting RX/TX work.  opened is
 		 * retained until checked recovery or teardown drains the outstanding URB. */
 		enabled = spin_lock_irqsave(&adapter->lock);
-		if (adapter->radio.state == RTL8822B_RADIO_OFF) {
+		if (adapter->radio.state == RTL8822B_RADIO_OFF ||
+		    adapter->radio.state == RTL8822B_RADIO_STOPPING) {
 			adapter->firmware_running = 0U;
 			adapter->radio_running = 0U;
 			adapter->scan_generation = 0U;
@@ -3502,7 +3564,8 @@ rtl8822bu_connect_start(void *context, uint64_t generation,
 		if (error == 0)
 			error = adapter->ready ? ENETDOWN : ENODEV;
 		adapter->connection_preparing = 0U;
-		if (adapter->radio.state == RTL8822B_RADIO_OFF) {
+		if (adapter->radio.state == RTL8822B_RADIO_OFF ||
+		    adapter->radio.state == RTL8822B_RADIO_STOPPING) {
 			adapter->firmware_running = 0U;
 			adapter->radio_running = 0U;
 			adapter->quarantined = 1U;
@@ -3512,7 +3575,7 @@ rtl8822bu_connect_start(void *context, uint64_t generation,
 	if (error != 0 && error != EBUSY) {
 		enabled = spin_lock_irqsave(&adapter->lock);
 		/* Channel programming is journaled and either succeeds or turns the
-		 * radio off.  No CAM/BSSID mutation occurs on this normal preparation
+		 * radio unavailable. No CAM/BSSID mutation occurs on this normal preparation
 		 * path, so a started radio has proved that there is nothing to undo.
 		 * This avoids clearing all twelve owned CAM slots before the first
 		 * authentication frame; that redundant defensive work can consume the
@@ -3652,7 +3715,9 @@ rtl8822bu_association_clear(void *context, uint64_t generation,
 	now = clock_ticks();
 	enabled = spin_lock_irqsave(&adapter->lock);
 	rtl8822bu_tx_report_reap_locked(adapter, now);
-	if (adapter->connection_generation != generation) {
+	if (adapter->hardware_stopped) {
+		error = 0;
+	} else if (adapter->connection_generation != generation) {
 		error = ESTALE;
 	} else if (adapter->transport_absent) {
 		/* Physical absence proves the device-side association no longer
@@ -4324,7 +4389,9 @@ rtl8822bu_key_delete_checked(struct rtl8822bu_adapter *adapter,
 	}
 	uncertain = location != RTL8822BU_KEY_ABSENT &&
 	    (adapter->cam_uncertain_mask & (1U << slot)) != 0U;
-	if (adapter->connection_generation != generation) {
+	if (adapter->hardware_stopped) {
+		error = 0;
+	} else if (adapter->connection_generation != generation) {
 		error = ESTALE;
 	} else if (adapter->transport_absent) {
 		/* A FORCE detach is itself proof that every hardware CAM entry is
@@ -4761,7 +4828,8 @@ static const struct wlan_radio_ops rtl8822bu_radio_ops = {
 	.key_install = rtl8822bu_key_install,
 	.key_delete = rtl8822bu_key_delete,
 	.keys_activate = rtl8822bu_keys_activate,
-	.quiesce = rtl8822bu_quiesce
+	.quiesce = rtl8822bu_quiesce,
+	.stop_retry = rtl8822bu_stop_retry
 };
 
 /* Sends one bounded H2C command through the initialized private command queue. */
@@ -4942,6 +5010,8 @@ rtl8822bu_hardware_start_locked(struct rtl8822bu_adapter *adapter)
 		error = adapter->quarantined ? EIO : EBUSY;
 	else
 		error = 0;
+	if (error == 0)
+		adapter->hardware_stopped = 0U;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	if (error != 0)
 		goto done;
@@ -4994,6 +5064,8 @@ static int
 rtl8822bu_open(struct net_device *device)
 {
 	struct rtl8822bu_adapter *adapter = device->driver_data;
+	unsigned long enabled;
+	int retry_close;
 	int error, cleanup_error;
 
 	/* net_device_create() makes the name visible before station attachment.
@@ -5001,6 +5073,23 @@ rtl8822bu_open(struct net_device *device)
 	if (!rtl8822bu_ready_station(adapter, NULL))
 		return ENODEV;
 	mutex_lock(&adapter->lifecycle_lock);
+
+	/* Retry an incomplete stop before deciding whether fresh hardware may start. */
+	if (wlan_station_stop_busy(adapter->station)) {
+		mutex_unlock(&adapter->lifecycle_lock);
+		return EBUSY;
+	}
+	enabled = spin_lock_irqsave(&adapter->lock);
+	retry_close = adapter->close_pending || adapter->quarantined ||
+	    adapter->closing || adapter->stopping;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	if (retry_close) {
+		error = rtl8822bu_close_locked(adapter);
+		if (error != 0) {
+			mutex_unlock(&adapter->lifecycle_lock);
+			return error;
+		}
+	}
 	error = net_device_set_carrier(device, 0);
 	if (error == 0)
 		error = rtl8822bu_hardware_start_locked(adapter);
@@ -5245,27 +5334,74 @@ rtl8822bu_runtime_recover(struct rtl8822bu_adapter *adapter)
 	mutex_unlock(&adapter->lifecycle_lock);
 }
 
-static void
-rtl8822bu_close(struct net_device *device)
+/* Retires common ownership around a checked host and device stop. */
+static int
+rtl8822bu_close_locked(
+	struct rtl8822bu_adapter *adapter)
 {
-	struct rtl8822bu_adapter *adapter = device->driver_data;
 	struct wlan_station *station;
 	unsigned long enabled;
 	int error;
+	int stop_error;
 
-	mutex_lock(&adapter->lifecycle_lock);
-	(void)net_device_set_carrier(device, 0);
+	/* Records retryable close intent without disabling the inverse radio callbacks. */
 	enabled = spin_lock_irqsave(&adapter->lock);
+	adapter->close_pending = 1U;
 	station = adapter->station;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	error = rtl8822bu_station_close_wait(station);
-	if (error == 0 || error == ENODEV)
-		(void)rtl8822bu_hardware_stop_locked(adapter);
-	else {
-		enabled = spin_lock_irqsave(&adapter->lock);
-		adapter->quarantined = 1U;
-		spin_unlock_irqrestore(&adapter->lock, enabled);
-	}
+	if (error != 0 && rtl8822bu_log_error(adapter))
+		hal_printf("usb-rtl8822bu: common close requires checked stop (%d)\n", error);
+
+	/* The hardware helper joins producers and retains all storage on join failure. */
+	stop_error = wlan_station_quiesce_begin(station);
+	if (stop_error != 0)
+		return stop_error;
+	stop_error = rtl8822bu_hardware_stop_locked(adapter);
+	wlan_station_quiesce_end(station);
+	if (stop_error != 0)
+		return stop_error;
+
+	/* Reset proves old keys and association absent; finish the core's exact inverses. */
+	error = rtl8822bu_station_close_wait(station);
+	enabled = spin_lock_irqsave(&adapter->lock);
+	if (error == 0)
+		adapter->close_pending = 0U;
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+	return error;
+}
+
+/* The station work pin retains the adapter across a checked stop retry. */
+static int
+rtl8822bu_stop_retry(void *context)
+{
+	struct rtl8822bu_adapter *adapter;
+	int error;
+
+	adapter = context;
+	mutex_lock(&adapter->lifecycle_lock);
+	error = rtl8822bu_close_locked(adapter);
+	mutex_unlock(&adapter->lifecycle_lock);
+	return error;
+}
+
+/* Failed synchronous close arms independent checked retirement. */
+static void
+rtl8822bu_close(
+	struct net_device *device)
+{
+	struct rtl8822bu_adapter *adapter;
+	int error;
+
+	/* Keeps the lifecycle owner until hardware and common retirement finish. */
+	adapter = device->driver_data;
+	mutex_lock(&adapter->lifecycle_lock);
+	(void)net_device_set_carrier(device, 0);
+	wlan_station_stop_request(adapter->station);
+	error = rtl8822bu_close_locked(adapter);
+	wlan_station_stop_complete(adapter->station, error);
+	if (error != 0 && rtl8822bu_log_error(adapter))
+		hal_printf("usb-rtl8822bu: checked close pending (%d)\n", error);
 	mutex_unlock(&adapter->lifecycle_lock);
 }
 
@@ -5611,6 +5747,11 @@ rtl8822bu_teardown(struct drv_usb_interface *interface,
 	enabled = spin_lock_irqsave(&adapter->lock);
 	station = adapter->station;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
+	error = wlan_station_stop_cancel(station);
+	if (error != 0) {
+		mutex_unlock(&adapter->lifecycle_lock);
+		return error;
+	}
 	if (station != NULL && adapter->station_attached) {
 		error = wlan_station_close(station);
 		if (error != 0 && error != ENODEV) {

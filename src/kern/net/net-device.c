@@ -298,8 +298,9 @@ net_device_gone(
 		device_wait_callbacks(device, 0, 0);
 
 	/*
-	 * close() is the driver retirement boundary: asynchronous producers
-	 * must no longer be able to reach driver_data when it returns.
+	 * close() closes admission. A driver retaining an incomplete checked stop
+	 * must pin its context/device and join that independent retirement work in
+	 * its bus detach barrier before releasing any resources or driver_data.
 	 */
 	if (call_close)
 		device->ops->close(device);

@@ -7,6 +7,12 @@ WSID: `ws004`
 Status: active follow-up; q071 completed the reopened W52 RTL8822BU path and
 the asynchronous WLAN ownership boundary, and the user accepted the shared
 real-hardware result. Other NVMe, AX211, ECM, and refactor follow-ups remain.
+Q085 completes [p047](phase047-wlan-driver-lifecycle-review/phase.md) and
+[p048](phase048-wlan-deferred-stop/phase.md): driver review corrections,
+independent checked stop and observable completion pass focused production
+runtime fixtures, all 30 P012 host stories and three builds. See
+[evidence and RF coverage limits](phase048-wlan-deferred-stop/results.md).
+No physical RF or QEMU boot was performed in this cycle.
 q041 completed p016 checked legacy-HCD
 request retirement. q047 completed p031 legacy-HCD concurrent scheduling and
 root hotplug plus p032 checked endpoint/device recovery. P033's
@@ -55,7 +61,7 @@ speculative fix. On 2026-09-04 the user explicitly reopened p041 as the
 independently proven 5-GHz capability addition, then added p044 to supersede
 p030's kernel-owned automatic reconnect while retaining p030's other lifecycle
 evidence. Q071 completed both and the shared physical WLAN check. AX211 quality
-work remains deferred; no other accepted or deferred
+work was subsequently reopened only for p047's selected lifecycle corrections; no other accepted or deferred
 WS004 boundary is reopened.
 
 On 2026-09-06 the user selected the different Archer T3U Plus on the authorized
@@ -198,6 +204,8 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p044`](phase044-wlan-async-operation-boundary/phase.md) | Complete (`q071`) | Prompt asynchronous kernel generations, generic carrier/removal events, no hidden kernel retry, and userspace 30-second retry ownership pass |
 | [`ws004-p045`](phase045-archer-t3u-plus-feasibility/phase.md) | Complete; user-requested feasibility | Exact `0138` HS/SS identity, missing-file diagnosis, pinned GitHub firmware acquisition and Linux dual-band passive scan pass; no zedBSD implementation claim |
 | [`ws004-p046`](phase046-archer-t3u-plus-driver/phase.md) | Completed (`q083`) | Exact SuperSpeed T3U Plus passes three cycles per band, HTTP checksum and final fresh reopen/down |
+| [`ws004-p047`](phase047-wlan-driver-lifecycle-review/phase.md) | Complete (`q085`) | Driver review corrections verified by common, AX211 PCI/boot/runtime and RTL lifecycle fixtures with P048 |
+| [`ws004-p048`](phase048-wlan-deferred-stop/phase.md) | Complete (`q085`) | Independent checked stop, protected lifetime and observable completion; focused gates, P012 30 stories and three builds pass; RF untested |
 
 ### MSI follow-up register
 

@@ -1,23 +1,34 @@
-# Queue q084: Refactored kernel integration
+# Queue q085: Wi-Fi command stories and recovery
 
 Date: 2026-09-06
 Status: finished
 
-The user's explicit import request authorizes this finite integration and its
-necessary corrections and verification. Inputs are frozen at source `03436b8`
-and destination `d99865c`, sharing ancestor `a143d5a`.
+The user explicitly authorizes a coherent structural rewrite based on the static
+report, followed by acceptance using the saved
+30 managed command scenarios and implementation corrections until all pass.
+The frozen source is `a3f1ea3`; Q084 remains archived and complete.
+
+Result 2026-09-06: accepted review-3 design implemented; all 30 actual host
+command/daemon/child stories pass ordinary and ASan/UBSan execution. Focused
+common WLAN, AX211 PCI/boot/runtime and RTL8822BU/RTL8822B lifecycle gates,
+applicable userland regressions and serialized amd64/PCAT/PC98 builds pass.
+No real RF or QEMU boot was performed. No commit was made.
+
+Evidence: [P048 implementation/lifecycle results](ws004-hardware/phase048-wlan-deferred-stop/results.md)
+and [P012 individual acceptance results](ws005-networking/phase012-wifi-command-scenarios/results.md).
+Review dispositions and earlier checkpoints remain in their phase directories.
 
 | Priority | WS / Phase | Status | Purpose / dependency |
 | --- | --- | --- | --- |
-| 1 | [ws018-p016](ws018-kernel-architecture/phase016-kern-refactor-integration/phase.md) | completed | Import refactored kern while preserving current storage, filesystem, VM, swap and WLAN fixes; verify host/build/boot behavior |
+| 0 | [ws004-p048](ws004-hardware/phase048-wlan-deferred-stop/phase.md) | completed | Independent checked stop, visible completion and managed retirement implemented and verified |
+| 1 | [ws004-p047](ws004-hardware/phase047-wlan-driver-lifecycle-review/phase.md) | completed | Driver lifecycle corrections verified with P048 focused runtime fixtures |
+| 2 | [ws005-p012](ws005-networking/phase012-wifi-command-scenarios/phase.md) | completed | All 30 command/recovery stories, normal/sanitizer, maintained regressions and builds pass |
 
-Review progress after 90 active minutes. Scope and gates are defined in P016.
-No commits, aggregate make check, private material or unrelated source imports.
+Current authorization: the user accepted the review-3 design and explicitly
+requested implementation through scenario acceptance. The preceding stop before
+acceptance is released. P048 defines the added finite implementation scope;
+P012 retains the 30-story acceptance contract. Execute in the order above.
 
-## Result
-
-Completed. The refactored kernel retains all identified current fixes; focused
-host gates, amd64/PCAT/PC98 builds and both amd64 storage/formatter runtime cells
-pass. Import defects and source-layout-sensitive fixtures were corrected.
-See [q084 results](ws018-kernel-architecture/tests/q084-results.md) for provenance,
-preservation decisions, evidence and coverage limits. No commits were made.
+P012 defines the finite scope and gates. Review progress each 90 active minutes;
+complete authorized useful work and retain real failures until corrected.
+No commits, aggregate make check, private credential reuse or unrelated WS work.

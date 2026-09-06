@@ -1152,6 +1152,23 @@ assert_radio_off(const struct fake_radio *fake,
 	assert((fake->registers[0x00ecU] & 0x07000000U) == 0U);
 }
 
+/* Emergency cleanup closes admission without proving the full stop transaction. */
+static void
+assert_radio_unavailable(const struct fake_radio *fake,
+	const struct rtl8822b_radio *radio)
+{
+	if (radio->state == RTL8822B_RADIO_OFF) {
+		assert_radio_off(fake, radio);
+		return;
+	}
+	assert(radio->state == RTL8822B_RADIO_STOPPING);
+	assert(radio->transport.read != NULL);
+	assert(!rtl8822b_radio_active_scan_allowed(radio, 1U));
+	assert((fake->registers[0x0100U] & 0xffU) == 0U);
+	assert((fake->registers[0x001fU] & 0x07U) == 0U);
+	assert((fake->registers[0x00ecU] & 0x07000000U) == 0U);
+}
+
 /* Verifies absolute deadlines through startup, retuning and expired cleanup. */
 static void
 test_radio_transport_deadline(
@@ -1192,7 +1209,7 @@ test_radio_transport_deadline(
 	    fake->expected_deadline) == ETIMEDOUT);
 	assert(fake->finite_deadline_calls == calls);
 	assert(fake->cleanup_deadline_calls != 0U);
-	assert_radio_off(fake, &radio);
+	assert_radio_unavailable(fake, &radio);
 	fake_radio_destroy(fake);
 }
 
@@ -1575,7 +1592,7 @@ test_radio_lifecycle(void)
 		if (error == 0)
 			error = rtl8822b_radio_start(&failed_radio, UINT64_MAX);
 		assert(error == EIO);
-		assert_radio_off(failed, &failed_radio);
+		assert_radio_unavailable(failed, &failed_radio);
 		fake_radio_destroy(failed);
 	}
 
@@ -1586,7 +1603,7 @@ test_radio_lifecycle(void)
 		baseline->fail_write_at = fail_at;
 		assert(rtl8822b_radio_set_channel(&radio, 6U,
 		    UINT64_MAX) == EIO);
-		assert_radio_off(baseline, &radio);
+		assert_radio_unavailable(baseline, &radio);
 		baseline->fail_write_at = SIZE_MAX;
 	}
 
@@ -1603,12 +1620,13 @@ test_radio_deadline_and_stop_retry(void)
 	struct fake_radio *fake = fake_radio_create();
 	struct rtl8822b_radio_transport transport = fake_radio_transport(fake);
 	struct rtl8822b_radio radio;
+	size_t stop_writes;
 
 	memset(&radio, 0, sizeof(radio));
 	fake->automatic_power_ack = 0;
 	assert(rtl8822b_radio_power_on(&radio, &transport, &board, 200U) ==
 	    ETIMEDOUT);
-	assert_radio_off(fake, &radio);
+	assert_radio_unavailable(fake, &radio);
 	assert(fake->read_count < RTL8822B_EFUSE_PHYSICAL_SIZE);
 
 	fake_radio_destroy(fake);
@@ -1620,7 +1638,7 @@ test_radio_deadline_and_stop_retry(void)
 	fake->automatic_llt_ack = 0;
 	assert(rtl8822b_radio_start(&radio, fake->now + 200U) ==
 	    ETIMEDOUT);
-	assert_radio_off(fake, &radio);
+	assert_radio_unavailable(fake, &radio);
 	assert(fake->read_count < RTL8822B_EFUSE_PHYSICAL_SIZE);
 
 	fake_radio_destroy(fake);
@@ -1631,7 +1649,7 @@ test_radio_deadline_and_stop_retry(void)
 	    UINT64_MAX) == 0);
 	fake->automatic_rf_lut_ack = 0;
 	assert(rtl8822b_radio_start(&radio, UINT64_MAX) == ETIMEDOUT);
-	assert_radio_off(fake, &radio);
+	assert_radio_unavailable(fake, &radio);
 	assert(fake->write_count < RADIO_TRACE_MAX);
 
 	fake_radio_destroy(fake);
@@ -1642,9 +1660,19 @@ test_radio_deadline_and_stop_retry(void)
 	    UINT64_MAX) == 0);
 	fake->fail_write_at = fake->write_count;
 	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == EIO);
-	assert_radio_off(fake, &radio);
-	/* A disconnected/error stop still leaves the object reusable. */
+	assert(radio.state == RTL8822B_RADIO_STOPPING);
+	stop_writes = fake->write_count;
+	assert(rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == EINVAL);
+	assert(rtl8822b_radio_start(&radio, UINT64_MAX) == EINVAL);
+	assert(rtl8822b_radio_set_channel(&radio, 1U, UINT64_MAX) == EINVAL);
+	assert(fake->write_count == stop_writes);
+	/* A failed stop retains the transport; retry must issue the inverse again
+	 * without a new power-on that could hide incomplete teardown. */
+	stop_writes = fake->write_count;
 	fake->fail_write_at = SIZE_MAX;
+	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	assert(fake->write_count > stop_writes);
+	assert_radio_off(fake, &radio);
 	transport = fake_radio_transport(fake);
 	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == 0);
@@ -2002,7 +2030,7 @@ test_radio_wlan_only(
 		memset(&radio, 0, sizeof(radio));
 		assert(rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
 		assert(rtl8822b_radio_start(&radio, UINT64_MAX) == EIO);
-		assert_radio_off(fake, &radio);
+		assert_radio_unavailable(fake, &radio);
 		fake_radio_destroy(fake);
 	}
 
@@ -2035,7 +2063,7 @@ test_radio_wlan_only(
 				deadline = grant_tick + 50U;
 		}
 		assert(rtl8822b_radio_start(&radio, deadline) == error);
-		assert_radio_off(fake, &radio);
+		assert_radio_unavailable(fake, &radio);
 
 		/* A permanently busy port admits no command and stops at either bound. */
 		if (failure >= 10U) {
@@ -2248,7 +2276,7 @@ test_management_band_rates(
 		make_probe_request(frame, &board);
 		fake->fail_write_at = fake->write_count + 8U;
 		assert(rtl8822b_radio_set_channel(&radio, 1U, UINT64_MAX) == EIO);
-		assert_radio_off(fake, &radio);
+		assert_radio_unavailable(fake, &radio);
 
 		/* Refuse both encoders after rollback leaves the radio unavailable. */
 		length = sizeof(wire);
@@ -2360,7 +2388,7 @@ test_radio_usb_profiles(
 		memset(&radio, 0, sizeof(radio));
 		assert(rtl8822b_radio_power_on(&radio, &transport, &board,
 		    UINT64_MAX) == EIO);
-		assert_radio_off(fake, &radio);
+		assert_radio_unavailable(fake, &radio);
 		assert(fake->registers[0xff0cU] == 0U);
 		fake_radio_destroy(fake);
 	}

@@ -830,6 +830,9 @@ backend_exchange_result(
 		goto unavailable;
 
 	/* Bounds transport stalls independently of operation policy. */
+	if (opcode < NETWORKD_OP_WIFI_ENABLE &&
+	    opcode != NETWORKD_OP_CONFIRMED_DISARM)
+		response_seconds += NETWORKD_CONTROL_YIELD_SECONDS;
 	if (opcode == NETWORKD_OP_CONFIRMED_DISARM) {
 		send_timeout.tv_sec = 0;
 		send_timeout.tv_usec = 250000;
@@ -862,9 +865,10 @@ backend_exchange_result(
 
 	/* Reads one bounded, correlated terminal response. */
 	NCOM_TRACE("client-receive-enter", opcode);
-	if (networkd_protocol_read_frame(descriptor, &response,
+	if (networkd_protocol_read_frame_timed(descriptor, &response,
 	    response_payload, sizeof(response_payload),
-	    NETWORKD_RESPONSE_MAX) != 0)
+	    NETWORKD_RESPONSE_MAX,
+	    opcode == NETWORKD_OP_CONFIRMED_DISARM ? 0U : response_seconds) != 0)
 		goto unavailable;
 	NCOM_TRACE("client-close-enter", opcode);
 	close(descriptor);
@@ -1291,7 +1295,8 @@ command_help(
 	     "  net dns address...          replace resolver name servers\n"
 	     "  net wifi set-key SSID PASSPHRASE [auto]\n"
 	     "                              save a local WPA2 profile\n"
-	     "  net wifi enable             enable managed Wi-Fi\n"
+	     "  net wifi enable             enable policy; association runs in background\n"
+	     "                              use net wifi list to observe connection state\n"
 	     "  net wifi disable            disable managed Wi-Fi\n"
 	     "  net wifi list               show managed Wi-Fi state\n"
 	     "  net wifi connect SSID       connect a saved profile\n"
@@ -1434,13 +1439,10 @@ wifi_backend(
 		return 1;
 
 	/* Selects the bounded wait and diagnostic policy for this operation. */
-	response_seconds = 15U;
+	response_seconds = NETWORKD_WIFI_REQUEST_SECONDS(opcode) +
+	    NETWORKD_WIFI_TRANSPORT_MARGIN;
 	report_errors = 1;
-	if (opcode == NETWORKD_OP_WIFI_ENABLE ||
-	    opcode == NETWORKD_OP_WIFI_CONNECT)
-		response_seconds = 100U;
-	else if (opcode == NETWORKD_OP_WIFI_PROFILES_CHANGED) {
-		response_seconds = 5U;
+	if (opcode == NETWORKD_OP_WIFI_PROFILES_CHANGED) {
 		report_errors = 0;
 	}
 

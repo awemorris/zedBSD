@@ -217,6 +217,12 @@ net_device_release(struct net_device *device)
 }
 
 int
+net_device_carrier(const struct net_device *device)
+{
+	return device != NULL && device->carrier != 0U;
+}
+
+int
 net_device_set_carrier(struct net_device *device, int carrier)
 {
 	assert(device != NULL);

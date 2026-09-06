@@ -70,6 +70,13 @@ static unsigned clear_calls;
 static char diagnostic[2048];
 static size_t diagnostic_length;
 
+/* Retirement-only calls run outside a client request in this fixture. */
+uint64_t
+netutil_monotonic_us(void)
+{
+	return 1000000ULL;
+}
+
 /* Supplies the project libc error slot independently of host errno values. */
 int *
 __libc_errno_location(void)
@@ -83,7 +90,8 @@ main(
 	void)
 {
 	run_case(0, 0, 0, 2U, 0, NULL);
-	run_case(ENODEV, 0, 0, 0U, ENODEV, "stage=identity");
+	run_case(ENODEV, 0, 0, 0U, 0, NULL);
+	run_case(EIO, 0, 0, 0U, EIO, "stage=identity");
 	run_case(0, EBUSY, 0, 0U, EBUSY, "stage=wifi-disconnect");
 	run_case(0, EBUSY, 0, 1U, EBUSY, "stage=wifi-disconnect");
 	run_case(0, 0, EBUSY, 2U, EBUSY, "stage=l3");
@@ -145,16 +153,18 @@ run_case(
 		    managed_wlan.connection.interface[0] == '\0', "success retires token");
 	} else {
 		expect(fixture_errno == expected, "first error survives diagnostic errno");
-		expect(managed_wlan.state == NETWORKD_WLAN_CONNECTED &&
+		expect(managed_wlan.state == NETWORKD_WLAN_RETIRING &&
 		    strcmp(managed_wlan.connection.interface, "wlan0") == 0,
 		    "failure preserves connection token");
-		expect(managed_wlan.connection.owns_l3 == (identity != 0 || l3 != 0),
-		    "successful L3 retirement keeps its existing semantics");
+		expect(managed_wlan.connection.owns_l3 ==
+		    (identity != 0 || child != 0 || l3 != 0),
+		    "failed L2 retirement preserves L3 until retry");
 		expect(strstr(diagnostic, stage) != NULL, "first failing stage");
 		(void)snprintf(expected_metadata, sizeof(expected_metadata),
 		    "error=%d disconnect-error=%d l3-error=%d child-error=%d "
 		    "child-exit=%d child-signal=0 child-records=%u",
-		    expected, child, l3, child, child != 0 && records != 0U ? 1 : 0,
+		    expected, child, child == 0 ? l3 : 0, child,
+		    child != 0 && records != 0U ? 1 : 0,
 		    records);
 		expect(strstr(diagnostic, expected_metadata) != NULL,
 		    "separate structured child and L3 outcomes");

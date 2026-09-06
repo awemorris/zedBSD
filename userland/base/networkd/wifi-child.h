@@ -51,6 +51,7 @@ struct networkd_wifi_list_result {
 
 int networkd_wifi_child_run(const char *, const char *, const void *, size_t,
 	const void *, size_t, unsigned, struct networkd_wifi_child_result *);
+void networkd_wifi_child_set_pump(int (*)(void));
 void networkd_wifi_child_result_clear(struct networkd_wifi_child_result *);
 int networkd_wifi_child_parse_list(const struct networkd_wifi_child_result *,
 	const void *, size_t, struct networkd_wifi_list_result *);

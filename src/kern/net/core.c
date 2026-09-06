@@ -62,6 +62,7 @@ static struct packet_buf *input_dequeue(void);
 static unsigned poll_devices(void);
 static int work_pending(void);
 static void network_worker(void *argument);
+static void wlan_retirement_worker(void *argument);
 
 static const struct net_device_ops loopback_ops = {
     .open = loopback_open,
@@ -205,11 +206,19 @@ net_init(
 	if (error != 0)
 		return error;
 
-	/* Creates the worker and publishes it before it runs. */
-	error = kthread_create(network_worker, NULL, SCHED_PRIORITY_DEFAULT,
-			       &worker_thread);
+	/* Retirement may wait in a driver while the packet worker progresses.
+	 * Create both threads before starting either. */
+	error = kthread_create(wlan_retirement_worker, NULL, SCHED_PRIORITY_DEFAULT,
+	    &worker);
 	if (error != 0)
 		return error;
+	error = kthread_create(network_worker, NULL, SCHED_PRIORITY_DEFAULT,
+			       &worker_thread);
+	if (error != 0) {
+		(void)thread_abort_new(worker);
+		return error;
+	}
+	thread_start(worker);
 	irq = spin_lock_irqsave(&input_lock);
 	worker = worker_thread;
 	spin_unlock_irqrestore(&input_lock, irq);
@@ -296,6 +305,23 @@ net_get_stats(
 }
 
 /* Advances the producer generation, skipping zero; the caller holds the lock. */
+/* A persistent bounded poll avoids lost wakeups and works while interfaces are
+ * down. Per-station backoff controls actual stop attempts; no packet admission
+ * or network-worker callback is needed to make retirement progress. */
+static void
+wlan_retirement_worker(void *argument)
+{
+	uint64_t now;
+
+	(void)argument;
+	for (;;) {
+		wlan_retirement_run(clock_ticks());
+		now = clock_ticks();
+		sched_sleep(now < UINT64_MAX - KERN_CLOCK_HZ ?
+		    now + KERN_CLOCK_HZ : UINT64_MAX);
+	}
+}
+
 static void
 worker_generation_advance_locked(
 	void)
