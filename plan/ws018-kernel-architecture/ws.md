@@ -1,6 +1,6 @@
 # WS018: kernel source ownership and interface consolidation
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 WSID: `ws018`
 
@@ -15,6 +15,11 @@ removal, mounted namespace protection and the bounded filesystem functional
 audit/corrections. [Evidence and limits](tests/q077-results.md) include final
 host/build gates and shared QEMU acceptance. Further filesystem requirements
 need their own bounded Phase/Queue; no universal absence-of-bugs claim is made.
+
+The user's 2026-09-06 [WS024 direction](../ws024-unified-ufs/ws.md) replaces
+p003's future two-driver architecture with one 64-bit implementation named
+UFS. P003's completed result remains historical evidence. Consolidation and
+image migration belong to WS024 and are not yet queued.
 
 Shared tests: [WS018 test index](tests/README.md)
 

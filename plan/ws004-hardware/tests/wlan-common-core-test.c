@@ -48,7 +48,7 @@ struct fake_radio {
 	uint32_t scan_steps[256];
 	uint32_t scan_channels[256];
 	uint64_t scan_deadlines[256];
-	uint8_t management_frame[64];
+	uint8_t management_frame[68];
 	size_t management_length;
 	uint64_t management_deadline;
 	uint8_t hwaddr[6];
@@ -94,6 +94,7 @@ struct timer_task {
 };
 
 static void block_gate_hook(void *context);
+static void test_scan_probe_band_rates(void);
 int sched_yield(void);
 
 static unsigned worker_wake_calls;
@@ -1219,6 +1220,103 @@ test_common_wpa_lifecycle(struct net_device *device,
 	}
 }
 
+/* Checks the real scan worker's rate elements across both band transitions. */
+static void
+test_scan_probe_band_rates(
+	void)
+{
+	static const uint8_t channels[] = { 1U, 36U, 40U, 44U, 48U, 11U };
+	static const uint8_t rates_24[] = { 0x82U, 0x84U, 0x8bU, 0x96U };
+	static const uint8_t rates_5[] = {
+		0x8cU, 0x12U, 0x98U, 0x24U, 0xb0U, 0x48U, 0x60U, 0x6cU
+	};
+	struct net_device device;
+	struct wlan_station *station;
+	struct wlan_scan_profile profile;
+	struct wlan_scan_request scan;
+	struct wlan_scan_status_request status;
+	struct fake_radio fake;
+	const uint8_t *rates;
+	size_t rate_count;
+	unsigned index;
+	unsigned byte;
+
+	/* Creates a scan-only device with synchronous channel-ready completion. */
+	memset(&device, 0, sizeof(device));
+	memset(&fake, 0, sizeof(fake));
+	memset(&profile, 0, sizeof(profile));
+	memcpy(device.name, "wlan0", 6U);
+	device.hwaddr_len = 6U;
+	device.hwaddr[0] = 0x02U;
+	device.hwaddr[5] = 0x75U;
+	device.flags = NET_DEVICE_UP;
+	memcpy(fake.hwaddr, device.hwaddr, 6U);
+	fake.scan_start_report_ready = 1;
+	profile.channel_count = sizeof(channels);
+
+	/* Tunes all four supported W52 channels between two ordinary 2.4-GHz steps. */
+	for (index = 0U; index < sizeof(channels); index++) {
+		profile.channels[index].channel = channels[index];
+		profile.channels[index].center_frequency_mhz = channels[index] <= 14U ?
+		    2407U + channels[index] * 5U : 5000U + channels[index] * 5U;
+		profile.channels[index].flags = WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED;
+	}
+
+	/* Starts a fresh scan through the same station ioctl used by userspace. */
+	assert(wlan_station_test_attach(&device, &scan_only_ops, &fake,
+	    &profile, fake_clock, &fake, &station) == 0);
+	fake.station = station;
+	assert(wlan_station_open(station) == 0);
+	request_header(&scan, sizeof(scan), device.name);
+	scan.action = WLAN_SCAN_START;
+	assert(wlan_station_ioctl(&device, SIOCSWLANSCAN, &scan) == 0);
+
+	/* Verifies each emitted management frame rather than a duplicate encoder. */
+	for (index = 0U; index < sizeof(channels); index++) {
+		wlan_timer_run(fake.now);
+		assert(fake.scan_start_calls == index + 1U);
+		assert(fake.management_calls == index + 1U);
+		assert(fake.scan_channels[index] == channels[index]);
+		rates = rates_24;
+		rate_count = sizeof(rates_24);
+
+		/* Requires the standard OFDM set on W52 and excludes all CCK rates. */
+		if (index >= 1U && index <= 4U) {
+			rates = rates_5;
+			rate_count = sizeof(rates_5);
+		}
+
+		/* Checks the complete wildcard SSID and supported-rate elements. */
+		assert(fake.management_length == 28U + rate_count);
+		assert(fake.management_frame[0] == 0x40U);
+		assert(fake.management_frame[24U] == 0U);
+		assert(fake.management_frame[25U] == 0U);
+		assert(fake.management_frame[26U] == 1U);
+		assert(fake.management_frame[27U] == rate_count);
+		assert(memcmp(fake.management_frame + 28U, rates, rate_count) == 0);
+		assert(memcmp(fake.management_frame + 10U, device.hwaddr, 6U) == 0);
+
+		/* Keeps probe receiver and BSSID addresses broadcast on both bands. */
+		for (byte = 0U; byte < 6U; byte++) {
+			assert(fake.management_frame[4U + byte] == 0xffU);
+			assert(fake.management_frame[16U + byte] == 0xffU);
+		}
+
+		/* Advances the completed dwell into the next channel's transaction. */
+		fake.now += WLAN_SCAN_DWELL_TICKS;
+	}
+
+	/* Requires normal completion and retires the temporary station cleanly. */
+	wlan_timer_run(fake.now);
+	request_header(&status, sizeof(status), device.name);
+	assert(wlan_station_ioctl(&device, SIOCGWLANSCAN, &status) == 0);
+	assert(status.state == WLAN_SCAN_COMPLETE);
+	assert(fake.scan_stop_calls == 1U);
+	assert(wlan_station_close(station) == 0);
+	assert(wlan_station_detach(station) == 0);
+	assert(net_device_reference_balance == 0);
+}
+
 static void
 test_core(void)
 {
@@ -1289,6 +1387,7 @@ test_core(void)
 	unsupported_device.flags = NET_DEVICE_UP;
 	shutdown_device.flags = NET_DEVICE_UP;
 	wlan_core_init();
+	test_scan_probe_band_rates();
 	profile = test_scan_profile;
 	invalid_profile = profile;
 	invalid_profile.channel_count = 0U;

@@ -31,6 +31,7 @@
 #define RTL8822B_SYS_CFG1_RTL_ID     0x00800000U
 #define RTL8822B_SYS_CFG1_RF_2T2R    0x08000000U
 #define RTL8822B_CUT_G                       6U
+#define RTL8822B_CUT_D                       3U
 
 #define RTL8822B_RX_PKT_LENGTH_MASK      0x3fffU
 #define RTL8822B_RX_CRC_ERROR            0x4000U
@@ -60,6 +61,7 @@
 #define RTL8822B_REG_AFE_CTRL1                 0x0024U
 #define RTL8822B_REG_GPIO_MUX                  0x0040U
 #define RTL8822B_REG_LED_CFG                   0x004cU
+#define RTL8822B_REG_COEX_OWNER                0x0073U
 #define RTL8822B_REG_MCUFW_CTRL                0x0080U
 #define RTL8822B_REG_SYS_STATUS1               0x00f4U
 #define RTL8822B_REG_WLRF1                     0x00ecU
@@ -162,8 +164,14 @@
 #define RTL8822B_REG_RFE_PATH_SOURCE           0x1990U
 #define RTL8822B_REG_RFE_IO_DIRECTION          0x0974U
 #define RTL8822B_REG_MRC                       0x0850U
+#define RTL8822B_REG_COEX_ACCESS               0x1700U
+#define RTL8822B_REG_COEX_WRITE                0x1704U
+#define RTL8822B_REG_COEX_READ                 0x1708U
 #define RTL8822B_REG_USB_CPWM                  0xfe57U
 #define RTL8822B_REG_USB_RPWM                  0xfe58U
+#define RTL8822B_REG_USB3_PHY_ADDRESS          0xff0cU
+#define RTL8822B_REG_USB3_PHY_DATA_LOW         0xff0dU
+#define RTL8822B_REG_USB3_PHY_DATA_HIGH        0xff0eU
 
 #define RTL8822B_MCUFW_INIT_READY              0x8000U
 #define RTL8822B_RPWM_ACK                        0x40U
@@ -186,8 +194,10 @@
 #define RTL8822B_EFUSE_5G_BW40_OFFSET              0x12U
 #define RTL8822B_EFUSE_5G_HT1_DIFF_OFFSET          0x20U
 #define RTL8822B_LEGACY_RATE_COUNT                    12U
+#define RTL8822B_CHANNEL_PLAN_WORLD_ETSI1           0x26U
 #define RTL8822B_CHANNEL_PLAN_MKK1_MKK1             0x27U
 #define RTL8822B_CHANNEL_PLAN_REALTEK_DEFINE        0x7fU
+#define RTL8822B_CHANNEL_PLAN_HARDWARE_ONLY         0x80U
 
 #define RTL8822B_CR_ALL_ENABLE                     0xffU
 #define RTL8822B_CR_RX_ENABLE_MASK                 0x8aU
@@ -213,6 +223,11 @@
 #define RTL8822B_H2C_QUEUE_SIZE                   1024U
 #define RTL8822B_LLT_POLL_MAX                     1000U
 #define RTL8822B_LLT_POLL_DELAY_US                  10U
+#define RTL8822B_COEX_READY                   0x20000000U
+#define RTL8822B_COEX_POLL_MAX                     1000U
+#define RTL8822B_COEX_POLL_DELAY_US                  10U
+#define RTL8822B_COEX_GRANT_MASK                  0xff80U
+#define RTL8822B_COEX_WLAN_GRANT                  0x7700U
 
 struct rtl8822b_phy_table_section {
 	uint8_t domain;
@@ -257,6 +272,13 @@ static const uint8_t rtl8822b_firmware_digest[32] = {
 	0xd8, 0xad, 0x92, 0xac, 0x2b, 0xef, 0xd3, 0x5d,
 	0xb1, 0xc9, 0xe3, 0x66, 0x2d, 0x8d, 0x84, 0x18
 };
+
+static int radio_usb_phy_profile(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
+static int radio_usb_profile(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
+static int radio_board_wlan_only(const struct rtl8822b_radio *radio);
+static int radio_coex_ready(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
+static int radio_coex_grant_read(struct rtl8822b_radio *radio, uint32_t *value, uint64_t deadline_ticks);
+static int radio_wlan_only_profile(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
 
 static uint16_t
 load_le16(const uint8_t *bytes)
@@ -652,6 +674,8 @@ firmware_walk_segment(const struct rtl8822b_firmware_view *view,
 		chunk.destination = destination + (uint32_t)offset;
 		chunk.length = (uint32_t)length;
 		chunk.wire_payload_length = (uint32_t)length;
+
+		/* Avoid full packets on both 512-byte HS and 1024-byte SS pipes. */
 		if ((length + RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE) % 512U == 0U)
 			chunk.wire_payload_length++;
 		chunk.first = offset == 0U;
@@ -719,6 +743,32 @@ rtl8822b_firmware_walk(const struct rtl8822b_firmware_view *view,
 }
 
 #ifdef RTL8822B_TESTING
+/*
+ * Exercises production segment geometry independently of the pinned image size.
+ */
+int
+rtl8822b_test_firmware_segment(
+	const struct rtl8822b_firmware_view *view,
+	size_t length,
+	rtl8822b_firmware_chunk_fn callback,
+	void *context)
+{
+	int error;
+
+	/* Reject incomplete fixtures before entering the production walker. */
+	if (view == NULL || callback == NULL)
+		return EINVAL;
+
+	/* Walk a single DMEM segment through the real chunk planner. */
+	error = firmware_walk_segment(view, RTL8822B_FIRMWARE_SEGMENT_DMEM,
+	    0U, length, 0x10000U, callback, context);
+	if (error != 0)
+		return error;
+
+	/* Report the completed geometry check. */
+	return 0;
+}
+
 int
 rtl8822b_test_firmware_walk(const struct rtl8822b_firmware_view *view,
 	const uint8_t expected_digest[32],
@@ -901,18 +951,42 @@ channel_is_w52(uint8_t channel)
 	    channel == 48U;
 }
 
+/*
+ * Admits calibrated channels from the supported factory policy profiles.
+ */
 int
 rtl8822b_board_active_channel_allowed(
 	const struct rtl8822bu_board_info *board, uint8_t channel)
 {
+	/* Reject absent board facts before evaluating channel policy. */
 	if (board == NULL)
 		return 0;
+
+	/* Preserve the existing calibrated 2.4-GHz subset. */
 	if (channel >= 1U && channel <= 11U)
 		return board_tx_power_2g_valid(board);
+
+	/* Require both the non-DFS subset and its factory power calibration. */
 	if (!channel_is_w52(channel) ||
-	    !board_tx_power_5g_w52_valid(board) ||
-	    board->country_code[0] != 'J' || board->country_code[1] != 'P')
+	    !board_tx_power_5g_w52_valid(board))
 		return 0;
+
+	/*
+	 * The measured erased-country profile enforces hardware plan 0x26.
+	 * Bit 7 forbids software override; the remaining bits name WORLD_ETSI1,
+	 * whose non-DFS channels include 36/40/44/48. Retain the raw board facts
+	 * and the existing minimum FCC/ETSI/MKK power ceilings.
+	 */
+	if (board->country_code[0] == 0xffU &&
+	    board->country_code[1] == 0xffU &&
+	    board->channel_plan == (RTL8822B_CHANNEL_PLAN_HARDWARE_ONLY |
+	    RTL8822B_CHANNEL_PLAN_WORLD_ETSI1))
+		return 1;
+
+	/* Preserve the original Japan policy for all other admitted boards. */
+	if (board->country_code[0] != 'J' || board->country_code[1] != 'P')
+		return 0;
+
 	/* 0x7f delegates the channel plan to the retained JP country code. */
 	return board->channel_plan == RTL8822B_CHANNEL_PLAN_MKK1_MKK1 ||
 	    board->channel_plan == RTL8822B_CHANNEL_PLAN_REALTEK_DEFINE;
@@ -984,19 +1058,29 @@ clamp_rssi(int32_t value)
 	return value;
 }
 
+/*
+ * Parses one bounded USB receive record and its applicable metadata.
+ */
 int
-rtl8822b_rx_packet_parse(const uint8_t *bytes, size_t length,
+rtl8822b_rx_packet_parse(
+	const uint8_t *bytes,
+	size_t length,
 	struct rtl8822b_rx_packet *packet)
 {
 	struct rtl8822b_rx_packet result;
 	uint32_t word0, word1, word2, word3, word4;
 	size_t packet_length, driver_info_length, shift, payload_offset;
 	size_t occupied, aligned;
+	int32_t power_a, power_b;
+	uint8_t page;
 	int is_c2h;
 
+	/* Refuses missing storage before clearing the output record. */
 	if (bytes == NULL || packet == NULL)
 		return EINVAL;
 	memset(packet, 0, sizeof(*packet));
+
+	/* Requires the complete descriptor before decoding its layout. */
 	if (length < RTL8822B_RX_DESCRIPTOR_SIZE)
 		return EINVAL;
 	word0 = load_le32(bytes);
@@ -1009,34 +1093,71 @@ rtl8822b_rx_packet_parse(const uint8_t *bytes, size_t length,
 	driver_info_length = ((word0 >> RTL8822B_RX_DRV_INFO_SHIFT) &
 	    RTL8822B_RX_DRV_INFO_MASK) * 8U;
 	shift = (word0 >> RTL8822B_RX_SHIFT_SHIFT) & RTL8822B_RX_SHIFT_MASK;
-	if (packet_length == 0U ||
-	    (!is_c2h && packet_length > RTL8822B_RX_MPDU_MAX) ||
-	    (word0 & RTL8822B_RX_CRC_ERROR) != 0U ||
-	    (driver_info_length != 0U &&
-	    driver_info_length != RTL8822B_RX_PHY_INFO_SIZE) ||
-	    ((word0 & RTL8822B_RX_PHY_STATUS) != 0U &&
-	    driver_info_length == 0U) ||
-	    (word3 & RTL8822B_RX_RATE_MASK) >= RTL8822B_RX_RATE_MAX)
+
+	/* Requires a nonempty payload for both frames and firmware messages. */
+	if (packet_length == 0U)
 		return EINVAL;
+
+	/* Applies over-the-air receive semantics only to ordinary frames. */
+	if (!is_c2h) {
+		/* Retains the supported frame, rate and PHY layout checks. */
+		if (packet_length > RTL8822B_RX_MPDU_MAX ||
+		    (word0 & RTL8822B_RX_CRC_ERROR) != 0U ||
+		    (driver_info_length != 0U &&
+		     driver_info_length != RTL8822B_RX_PHY_INFO_SIZE) ||
+		    ((word0 & RTL8822B_RX_PHY_STATUS) != 0U &&
+		     driver_info_length == 0U) ||
+		    (word3 & RTL8822B_RX_RATE_MASK) >= RTL8822B_RX_RATE_MAX)
+			return EINVAL;
+	}
+
+	/* Bounds descriptor-provided offsets even for firmware messages. */
 	if (shift > SIZE_MAX - RTL8822B_RX_DESCRIPTOR_SIZE ||
 	    driver_info_length > SIZE_MAX - RTL8822B_RX_DESCRIPTOR_SIZE - shift)
 		return EOVERFLOW;
 	payload_offset = RTL8822B_RX_DESCRIPTOR_SIZE + shift +
 	    driver_info_length;
+
+	/* Keeps the entire payload inside the received transfer. */
 	if (payload_offset > length || packet_length > length - payload_offset)
 		return EINVAL;
 	occupied = payload_offset + packet_length;
+
+	/* Checks the aggregate alignment before rounding the record length. */
 	if (occupied > SIZE_MAX - 7U)
 		return EOVERFLOW;
 	aligned = (occupied + 7U) & ~(size_t)7U;
+
+	/* Allows an unpadded final record only at the exact transfer end. */
 	if (aligned > length) {
+		/* Rejects a partial trailing alignment region. */
 		if (occupied != length)
 			return EINVAL;
 		aligned = occupied;
 	}
 
+	/* Initializes shared layout fields and absent receive metadata. */
 	memset(&result, 0, sizeof(result));
 	result.aggregate_length = aligned;
+	result.payload = bytes + payload_offset;
+	result.rssi_dbm = -128;
+
+	/* Firmware notifications have no meaningful frame or PHY status. */
+	if (is_c2h) {
+		/* Requires the command identifier and sequence before publication. */
+		if (packet_length < 2U)
+			return EINVAL;
+		result.kind = RTL8822B_RX_C2H;
+		result.payload_length = packet_length;
+		result.c2h_id = result.payload[0];
+		result.c2h_sequence = result.payload[1];
+		*packet = result;
+
+		/* Publishes only the bounded command and its transport layout. */
+		return 0;
+	}
+
+	/* Decodes metadata belonging to an ordinary received frame. */
 	result.rate = (uint8_t)(word3 & RTL8822B_RX_RATE_MASK);
 	result.bandwidth = (uint8_t)((word4 >>
 	    RTL8822B_RX_BANDWIDTH_SHIFT) & RTL8822B_RX_BANDWIDTH_MASK);
@@ -1047,41 +1168,37 @@ rtl8822b_rx_packet_parse(const uint8_t *bytes, size_t length,
 	    (word0 & RTL8822B_RX_SOFTWARE_DECRYPT) != 0U;
 	result.mac_id = (uint8_t)(word1 & RTL8822B_RX_MAC_ID_MASK);
 	result.icv_error = (word0 & RTL8822B_RX_ICV_ERROR) != 0U;
-	result.rssi_dbm = -128;
-	if ((word0 & RTL8822B_RX_PHY_STATUS) != 0U) {
-		uint8_t page;
-		int32_t power_a;
 
+	/* Interprets the validated PHY record only when the frame carries it. */
+	if ((word0 & RTL8822B_RX_PHY_STATUS) != 0U) {
 		result.phy_info = bytes + RTL8822B_RX_DESCRIPTOR_SIZE + shift;
 		result.phy_info_length = driver_info_length;
 		page = result.phy_info[0] & 0x0fU;
+
+		/* Refuses unsupported PHY pages before reading their power fields. */
 		if (page != 0U && page != 1U)
 			return EINVAL;
 		power_a = (int32_t)result.phy_info[1] - 110;
 		result.rssi_dbm = clamp_rssi(power_a);
-		if (page == 1U) {
-			int32_t power_b = (int32_t)result.phy_info[2] - 110;
 
+		/* Selects the stronger path when the PHY page reports both paths. */
+		if (page == 1U) {
+			power_b = (int32_t)result.phy_info[2] - 110;
+
+			/* Preserves the first path when the second path is weaker. */
 			if (power_b > result.rssi_dbm)
 				result.rssi_dbm = clamp_rssi(power_b);
 		}
 	}
 
-	result.payload = bytes + payload_offset;
-	if (is_c2h) {
-		if (packet_length < 2U)
-			return EINVAL;
-		result.kind = RTL8822B_RX_C2H;
-		result.payload_length = packet_length;
-		result.c2h_id = result.payload[0];
-		result.c2h_sequence = result.payload[1];
-	} else {
-		if (packet_length <= RTL8822B_RX_FCS_SIZE)
-			return EINVAL;
-		result.kind = RTL8822B_RX_FRAME;
-		result.payload_length = packet_length - RTL8822B_RX_FCS_SIZE;
-	}
+	/* Excludes the trailing FCS from a nonempty received frame. */
+	if (packet_length <= RTL8822B_RX_FCS_SIZE)
+		return EINVAL;
+	result.kind = RTL8822B_RX_FRAME;
+	result.payload_length = packet_length - RTL8822B_RX_FCS_SIZE;
 	*packet = result;
+
+	/* Publishes the validated frame with its applicable receive metadata. */
 	return 0;
 }
 
@@ -1234,7 +1351,7 @@ radio_read(struct rtl8822b_radio *radio, uint16_t address, unsigned width,
 	if (error != 0)
 		return error;
 	error = radio_error(radio->transport.read(radio->transport.context,
-	    address, width, value));
+	    address, width, value, deadline_ticks));
 	if (error != 0)
 		return error;
 	if (width == 1U)
@@ -1261,7 +1378,7 @@ radio_write(struct rtl8822b_radio *radio, uint16_t address, unsigned width,
 	else if (width == 2U)
 		value &= 0xffffU;
 	error = radio_error(radio->transport.write(radio->transport.context,
-	    address, width, value));
+	    address, width, value, deadline_ticks));
 	if (error != 0)
 		return error;
 	return radio_deadline_check(radio, deadline_ticks);
@@ -1763,6 +1880,7 @@ journal_rollback(struct rtl8822b_radio *radio,
 {
 	int first_error = 0;
 
+	/* Give rollback transfers the transport's finite local cleanup budget. */
 	while (journal->count != 0U) {
 		const struct rtl8822b_journal_entry *entry =
 		    &journal->entries[--journal->count];
@@ -1775,11 +1893,11 @@ journal_rollback(struct rtl8822b_radio *radio,
 			error = radio_error(radio->transport.write(
 			    radio->transport.context,
 			    sipi, 4U, ((uint32_t)entry->address << 20) |
-			    (entry->value & RTL8822B_RF_VALUE_MASK)));
+			    (entry->value & RTL8822B_RF_VALUE_MASK), UINT64_MAX));
 		} else {
 			error = radio_error(radio->transport.write(
 			    radio->transport.context, entry->address, entry->width,
-			    entry->value));
+			    entry->value, UINT64_MAX));
 		}
 		if (error != 0 && first_error == 0)
 			first_error = error;
@@ -1795,25 +1913,27 @@ radio_emergency_off(struct rtl8822b_radio *radio)
 	if (radio == NULL || radio->transport.read == NULL ||
 	    radio->transport.write == NULL)
 		return;
+
+	/* Stop RF even after the failed operation's absolute deadline has elapsed. */
 	(void)radio->transport.write(radio->transport.context,
-	    RTL8822B_REG_TX_PAUSE, 1U, 0xffU);
+	    RTL8822B_REG_TX_PAUSE, 1U, 0xffU, UINT64_MAX);
 	(void)radio->transport.write(radio->transport.context,
-	    RTL8822B_REG_CR, 1U, 0U);
+	    RTL8822B_REG_CR, 1U, 0U, UINT64_MAX);
 	if (radio->transport.read(radio->transport.context,
-	    RTL8822B_REG_SYS_FUNC_EN, 1U, &value) == 0)
+	    RTL8822B_REG_SYS_FUNC_EN, 1U, &value, UINT64_MAX) == 0)
 		(void)radio->transport.write(radio->transport.context,
 		    RTL8822B_REG_SYS_FUNC_EN, 1U,
-		    value & ~RTL8822B_BB_RESET_BITS);
+		    value & ~RTL8822B_BB_RESET_BITS, UINT64_MAX);
 	if (radio->transport.read(radio->transport.context,
-	    RTL8822B_REG_RF_CTRL, 1U, &value) == 0)
+	    RTL8822B_REG_RF_CTRL, 1U, &value, UINT64_MAX) == 0)
 		(void)radio->transport.write(radio->transport.context,
 		    RTL8822B_REG_RF_CTRL, 1U,
-		    value & ~RTL8822B_RF_ENABLE_BITS);
+		    value & ~RTL8822B_RF_ENABLE_BITS, UINT64_MAX);
 	if (radio->transport.read(radio->transport.context,
-	    RTL8822B_REG_WLRF1, 4U, &value) == 0)
+	    RTL8822B_REG_WLRF1, 4U, &value, UINT64_MAX) == 0)
 		(void)radio->transport.write(radio->transport.context,
 		    RTL8822B_REG_WLRF1, 4U,
-		    value & ~RTL8822B_WLRF_ENABLE_BITS);
+		    value & ~RTL8822B_WLRF_ENABLE_BITS, UINT64_MAX);
 }
 
 static int
@@ -2504,14 +2624,57 @@ radio_fifo_3bulkout_profile(struct rtl8822b_radio *radio,
 	return error;
 }
 
+/* Configures the USB3 PHY adjustment required by RTL8822B cut D. */
 static int
-radio_usb_high_speed_profile(struct rtl8822b_radio *radio,
+radio_usb_phy_profile(
+	struct rtl8822b_radio *radio,
 	uint64_t deadline_ticks)
 {
 	int error;
 
-	/* HS USB: DMA mode, four-beat burst count, and 512-byte burst size. */
-	error = radio_write(radio, RTL8822B_REG_RXDMA_MODE, 1U, 0x1eU,
+	/* Preserve all other cuts' PHY state. */
+	if (radio->board.chip.cut != RTL8822B_CUT_D)
+		return 0;
+
+	/* Apply upstream's USB3 PHY table at either enumerated USB speed. */
+	error = radio_write(radio, RTL8822B_REG_USB3_PHY_DATA_LOW, 1U,
+	    0x41U, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Stage the high byte before triggering the PHY register write. */
+	error = radio_write(radio, RTL8822B_REG_USB3_PHY_DATA_HIGH, 1U,
+	    0xa8U, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Write PHY address one without requesting a USB mode switch. */
+	error = radio_write(radio, RTL8822B_REG_USB3_PHY_ADDRESS, 1U,
+	    0x81U, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Report the completed PHY adjustment. */
+	return 0;
+}
+
+/* Configures DMA and RTL8822B v1 aggregation for the actual USB speed. */
+static int
+radio_usb_profile(
+	struct rtl8822b_radio *radio,
+	uint64_t deadline_ticks)
+{
+	uint32_t rxdma_mode;
+	int error;
+
+	/* Select four-beat DMA bursts with the validated endpoint packet size. */
+	if (radio->transport.usb_bulk_max_packet_size == 1024U)
+		rxdma_mode = 0x0eU;
+	else
+		rxdma_mode = 0x1eU;
+
+	/* Program burst size before enabling the existing aggregate format. */
+	error = radio_write(radio, RTL8822B_REG_RXDMA_MODE, 1U, rxdma_mode,
 	    deadline_ticks);
 	if (error == 0)
 		error = radio_update(radio, RTL8822B_REG_TXDMA_OFFSET_CHECK, 2U,
@@ -2555,10 +2718,12 @@ radio_phy_trx_mode(struct rtl8822b_radio *radio,
 	if (error == 0)
 		error = radio_update(radio, RTL8822B_REG_TX_PATH_SELECT, 4U,
 		    0x40000000U, 0x40000000U, deadline_ticks);
-	if (error == 0 && path_bits == 1U)
+
+	/* Select path A for one stream whenever A is enabled, including A+B. */
+	if (error == 0 && (path_bits & 1U) != 0U)
 		error = radio_update(radio, RTL8822B_REG_CDD_TX_PATH, 4U,
 		    0xfff00000U, 0x00100000U, deadline_ticks);
-	if (error == 0 && path_bits == 1U)
+	if (error == 0 && (path_bits & 1U) != 0U)
 		error = radio_update(radio, RTL8822B_REG_ADC_INITIAL, 4U,
 		    0xf0000000U, 0x80000000U, deadline_ticks);
 	if (error == 0)
@@ -2572,7 +2737,9 @@ radio_phy_trx_mode(struct rtl8822b_radio *radio,
 	if (error == 0)
 		error = radio_update(radio, RTL8822B_REG_RX_DESCRIPTOR, 4U,
 		    0x00440000U, 0U, deadline_ticks);
-	if (error == 0 && path_bits == 1U)
+
+	/* Use path A for both CCK receive selections when A+B is enabled. */
+	if (error == 0 && (path_bits & 1U) != 0U)
 		error = radio_update(radio, RTL8822B_REG_ADC_INITIAL, 4U,
 		    0x0f000000U, 0U, deadline_ticks);
 	if (error == 0)
@@ -2650,6 +2817,155 @@ radio_phy_rfe_post_table(struct rtl8822b_radio *radio,
 		error = radio_update(radio, RTL8822B_REG_RFE_IO_DIRECTION, 4U,
 		    0x00000c3fU, 0x00000c3fU, deadline_ticks);
 	return error;
+}
+
+/* Identifies a programmed board which explicitly has no Bluetooth coexistence. */
+static int
+radio_board_wlan_only(
+	const struct rtl8822b_radio *radio)
+{
+	/* Preserve unprogrammed and Bluetooth-combination board behavior. */
+	if (radio->board.rf_board_option == 0xffU ||
+	    (radio->board.rf_board_option & 0xe0U) == 0x20U)
+		return 0;
+
+	/* Report the vendor efuse definition of a known WLAN-only board. */
+	return 1;
+}
+
+/* Waits for the indirect coexistence port within the shared startup deadline. */
+static int
+radio_coex_ready(
+	struct rtl8822b_radio *radio,
+	uint64_t deadline_ticks)
+{
+	uint32_t value;
+	unsigned attempt;
+	int error;
+
+	/* Retain the upstream finite 1000-read, ten-microsecond polling limit. */
+	for (attempt = 0U; attempt < RTL8822B_COEX_POLL_MAX; attempt++) {
+		/* Propagate transport and deadline failures before examining readiness. */
+		error = radio_read(radio, RTL8822B_REG_COEX_ACCESS, 4U, &value, deadline_ticks);
+		if (error != 0)
+			return error;
+
+		/* Admit the next transaction only after the preceding command completes. */
+		if ((value & RTL8822B_COEX_READY) != 0U)
+			return 0;
+
+		/* Bound each retry by both elapsed time and the fixed poll count. */
+		error = radio_delay(radio, RTL8822B_COEX_POLL_DELAY_US, deadline_ticks);
+		if (error != 0)
+			return error;
+	}
+
+	/* Report a permanently busy indirect port without starting another command. */
+	return ETIMEDOUT;
+}
+
+/* Reads the grant-control register through the checked indirect port. */
+static int
+radio_coex_grant_read(
+	struct rtl8822b_radio *radio,
+	uint32_t *value,
+	uint64_t deadline_ticks)
+{
+	int error;
+
+	/* Join any preceding indirect command before selecting register 0x38. */
+	error = radio_coex_ready(radio, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Select the four-byte grant register for reading. */
+	error = radio_write(radio, RTL8822B_REG_COEX_ACCESS, 4U, 0x800f0038U, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Wait for completion before accepting the returned register contents. */
+	error = radio_coex_ready(radio, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Return the checked data transfer to the startup owner. */
+	error = radio_read(radio, RTL8822B_REG_COEX_READ, 4U, value, deadline_ticks);
+	return error;
+}
+
+/* Gives a known WLAN-only board its software grants and antenna-switch ownership. */
+static int
+radio_wlan_only_profile(
+	struct rtl8822b_radio *radio,
+	uint64_t deadline_ticks)
+{
+	uint32_t value;
+	int error;
+
+	/* Avoid changing grants or switch ownership for unknown or Bluetooth boards. */
+	if (!radio_board_wlan_only(radio))
+		return 0;
+
+	/* Preserve unrelated grant-register state while disabling LTE arbitration. */
+	error = radio_coex_grant_read(radio, &value, deadline_ticks);
+	if (error != 0)
+		return error;
+	value = (value & ~RTL8822B_COEX_GRANT_MASK) | RTL8822B_COEX_WLAN_GRANT;
+
+	/* Reserve the indirect port before publishing its write data. */
+	error = radio_coex_ready(radio, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Set both GNT_WL controls high and both GNT_BT controls low. */
+	error = radio_write(radio, RTL8822B_REG_COEX_WRITE, 4U, value, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Commit the four grant fields through the chip's indirect command. */
+	error = radio_write(radio, RTL8822B_REG_COEX_ACCESS, 4U, 0xc00f0038U, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Require the requested grant state before transferring path ownership. */
+	error = radio_coex_grant_read(radio, &value, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Reject an accepted transfer whose hardware grant state did not change. */
+	if ((value & RTL8822B_COEX_GRANT_MASK) != RTL8822B_COEX_WLAN_GRANT)
+		return EIO;
+
+	/* Select WLAN ownership while preserving debug and other system mux bits. */
+	error = radio_update(radio, RTL8822B_REG_COEX_OWNER, 1U, 0x04U, 0x04U, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Verify ownership before enabling the external WLAN antenna switch. */
+	error = radio_read(radio, RTL8822B_REG_COEX_OWNER, 1U, &value, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Reject an ownership write which did not reach the hardware. */
+	if ((value & 0x04U) == 0U)
+		return EIO;
+
+	/* Route the external DPDT switch to BB software control. */
+	error = radio_update(radio, RTL8822B_REG_LED_CFG, 4U, 0x01800000U, 0x01000000U, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Verify only the selected mux bits without interpreting unrelated state. */
+	error = radio_read(radio, RTL8822B_REG_LED_CFG, 4U, &value, deadline_ticks);
+	if (error != 0)
+		return error;
+
+	/* Keep startup closed when switch ownership could not be established. */
+	if ((value & 0x01800000U) != 0x01000000U)
+		return EIO;
+
+	/* Report the checked WLAN-only profile before channel TX is unpaused. */
+	return 0;
 }
 
 static int
@@ -2809,6 +3125,8 @@ rtl8822b_radio_power_on(struct rtl8822b_radio *radio,
 	if (radio == NULL || transport == NULL || board == NULL ||
 	    transport->read == NULL || transport->write == NULL ||
 	    transport->now_ticks == NULL || transport->delay_us == NULL ||
+	    (transport->usb_bulk_max_packet_size != 512U &&
+	     transport->usb_bulk_max_packet_size != 1024U) ||
 	    radio->state != RTL8822B_RADIO_OFF ||
 	    !mac_address_valid(board->mac_address) ||
 	    (board->chip.rf_path_count != 1U &&
@@ -2842,6 +3160,10 @@ rtl8822b_radio_power_on(struct rtl8822b_radio *radio,
 		    sizeof(rtl8822b_power_enable[0]), deadline_ticks);
 	if (error == 0)
 		error = radio_post_power(radio, deadline_ticks);
+
+	/* Prepare the cut-dependent USB PHY before firmware transfer starts. */
+	if (error == 0)
+		error = radio_usb_phy_profile(radio, deadline_ticks);
 	if (error != 0) {
 		radio_emergency_off(radio);
 		memset(radio, 0, sizeof(*radio));
@@ -2863,7 +3185,7 @@ rtl8822b_radio_start(struct rtl8822b_radio *radio,
 	/* Firmware has already been checked and started by the caller. */
 	error = radio_fifo_3bulkout_profile(radio, deadline_ticks);
 	if (error == 0)
-		error = radio_usb_high_speed_profile(radio, deadline_ticks);
+		error = radio_usb_profile(radio, deadline_ticks);
 	if (error == 0)
 		error = radio_minimum_mac_profile(radio, deadline_ticks);
 	if (error == 0)
@@ -2900,6 +3222,12 @@ rtl8822b_radio_start(struct rtl8822b_radio *radio,
 		error = radio_phy_trx_mode(radio, deadline_ticks);
 	if (error == 0)
 		error = radio_phy_rfe_post_table(radio, deadline_ticks);
+
+	/* Establish grants and switch ownership while initialization TX is paused. */
+	if (error == 0)
+		error = radio_wlan_only_profile(radio, deadline_ticks);
+
+	/* Program the initial channel before the final transmitter admission. */
 	if (error == 0)
 		error = radio_channel_apply(radio, 1U, 0, deadline_ticks);
 	if (error == 0)
@@ -3110,6 +3438,8 @@ radio_management_frame_prepare(const struct rtl8822b_radio *radio,
 	if (frame_length > SIZE_MAX - RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE)
 		return EOVERFLOW;
 	total = RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + frame_length;
+
+	/* Avoid full packets on both supported USB bulk packet sizes. */
 	if (total % 512U == 0U) {
 		if (total == SIZE_MAX)
 			return EOVERFLOW;
@@ -3123,6 +3453,12 @@ radio_management_frame_prepare(const struct rtl8822b_radio *radio,
 	    (1U << 24) | (1U << 26) | (1U << 31));
 	store_le32(wire + 4U, (18U << 8) | (8U << 16));
 	store_le32(wire + 12U, (1U << 8) | (1U << 10));
+
+	/* Use 6 Mbps OFDM on W52 and retain 1 Mbps CCK on 2.4 GHz. */
+	if (radio->channel > 14U)
+		store_le32(wire + 16U, 4U);
+
+	/* Finalize the descriptor checksum after selecting the basic rate. */
 	store_le32(wire + 32U, 1U << 15);
 	for (index = 0U; index < 16U; index++)
 		checksum ^= load_le16(wire + index * 2U);

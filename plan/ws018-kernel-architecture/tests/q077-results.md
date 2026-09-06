@@ -1,6 +1,6 @@
 # Q077 functional correction results
 
-Date: 2026-09-05. Parent: [Queue](../../queue.md).
+Date: 2026-09-05. Parent: [Queue](../../queue-q077.md).
 Baseline HEAD: `d97e21c`; all work remains uncommitted on top of the inherited
 q076/q077 working tree. [Findings and coverage](q077-filesystem-audit.md).
 

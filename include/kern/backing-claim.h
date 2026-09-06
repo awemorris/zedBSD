@@ -11,6 +11,7 @@ struct inode;
 enum backing_claim_owner {
 	BACKING_CLAIM_SWAP = 1,
 	BACKING_CLAIM_LOOP = 2,
+	BACKING_CLAIM_FORMAT = 3,
 };
 
 struct backing_claim_extent {
@@ -34,6 +35,8 @@ int backing_claim_prepare_disk(struct disk *, uint64_t, uint64_t,
 			       enum backing_claim_owner,
 			       struct backing_claim **);
 void backing_claim_release(struct backing_claim *);
+int backing_claim_inode_matches(const struct backing_claim *, struct inode *,
+				int *);
 
 int backing_mutation_begin_inode(struct inode *,
 				 struct backing_mutation_guard *);

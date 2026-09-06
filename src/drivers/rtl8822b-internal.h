@@ -124,7 +124,9 @@ struct rtl8822bu_board_info {
 };
 
 /*
- * Register callbacks return a positive errno value.  delay_us() must check
+ * Register callbacks return a positive errno value and bound every transfer
+ * and retry by deadline_ticks.  UINT64_MAX selects the transport's finite
+ * local operation budget for emergency cleanup.  delay_us() must check
  * deadline_ticks before and while waiting; it must never sleep beyond that
  * absolute monotonic deadline.  The radio object copies this structure, so a
  * caller may use a temporary transport value.  A radio object must be zero
@@ -132,10 +134,12 @@ struct rtl8822bu_board_info {
  */
 struct rtl8822b_radio_transport {
 	void *context;
+	/* Retain the validated HS (512) or SS (1024) bulk packet size. */
+	uint16_t usb_bulk_max_packet_size;
 	int (*read)(void *context, uint16_t address, unsigned width,
-	    uint32_t *value);
+	    uint32_t *value, uint64_t deadline_ticks);
 	int (*write)(void *context, uint16_t address, unsigned width,
-	    uint32_t value);
+	    uint32_t value, uint64_t deadline_ticks);
 	uint64_t (*now_ticks)(void *context);
 	int (*delay_us)(void *context, uint32_t microseconds,
 	    uint64_t deadline_ticks);
@@ -212,7 +216,7 @@ int rtl8822b_rx_aggregate_walk(const uint8_t *bytes, size_t length,
 /*
  * The staged order is power_on, caller-owned firmware download, start, RX
  * arm, and finally WLAN publication.  start never claims success for tables
- * alone: it completes the three-bulk-OUT/HS USB queues, minimum MAC timing,
+ * alone: it completes the three-bulk-OUT USB queues, minimum MAC timing,
  * MAC/BB/AGC/RF profile, channel 1, and a factory-calibrated, worldwide-
  * bounded legacy 2.4-GHz TXAGC profile.  HT/VHT TXAGC remains disabled.
  * The q058 extension admits the bounded legacy-rate management, EAPOL, and
@@ -279,6 +283,9 @@ int rtl8822b_data_frame_prepare(const struct rtl8822b_radio *radio,
 	size_t *wire_length);
 
 #ifdef RTL8822B_TESTING
+int rtl8822b_test_firmware_segment(
+	const struct rtl8822b_firmware_view *view, size_t length,
+	rtl8822b_firmware_chunk_fn callback, void *context);
 int rtl8822b_test_firmware_validate(const uint8_t *data, size_t length,
 	const uint8_t expected_digest[32],
 	struct rtl8822b_firmware_view *view);

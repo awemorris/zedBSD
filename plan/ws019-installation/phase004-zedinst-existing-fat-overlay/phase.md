@@ -1,6 +1,6 @@
 # WS019 Phase 004: existing-FAT overlay `/bin/zedinst`
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 Phase ID: `ws019-p004`
 
@@ -74,3 +74,32 @@ later installer feature.
 Stop if FAT cannot provide a bounded same-filesystem publication primitive,
 if installer source identity cannot be proven, or if success would require
 rewriting an existing non-identical file.
+
+## Readiness findings after q078/q079
+
+The formatter prerequisites now have implementation and focused evidence;
+their separate runtime results are recorded under p008/p009. They do not
+resolve these pre-implementation boundaries for the installer:
+
+- The loader knows the physical ESP and selected configuration filesystem,
+  but the retained kernel data does not prove both identities. An explicitly
+  configured `boot0` may differ from loader origin. Define the promised
+  provenance interface before using it to choose immutable source artifacts.
+- Noct 2.0.1 provides file I/O, process execution and hashing, but the present
+  target bindings do not export the required descriptor ioctl, no-follow open,
+  fsync, ftruncate, mount and rename operations. Specify a bounded native
+  primitive helper or bindings extension while retaining Noct as the installer.
+- Existing rename replaces a destination; a prior lookup does not provide
+  atomic no-replace publication. Specify a primitive serialized with the
+  filesystem namespace mutation, together with a durable publication barrier.
+  FAT directory descriptors currently do not implement fsync.
+- Blank FAT creation accepts the representable root-owned mode `0755` with
+  zero umask; ordinary `touch` mode `0666` is refused. Target growth of a
+  32-MiB staging file exceeded 120 seconds in q078 while allocating about
+  20 MiB. Formatter acceptance uses preallocated zero inputs and therefore
+  does not establish bounded installer staging performance.
+
+These are concrete dependency/design findings, not installer acceptance.
+Resolve them in bounded prerequisite contracts before selecting p004 code
+implementation. Do not substitute mount listings for source provenance or
+check-then-rename for no-replace publication.

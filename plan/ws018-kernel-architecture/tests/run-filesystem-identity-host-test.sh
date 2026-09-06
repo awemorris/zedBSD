@@ -23,6 +23,7 @@ compile src/kern/mount.c mount.o
 compile src/kern/block-identity.c block-identity.o
 compile src/drivers/fs/fat.c fat.o
 compile src/kern/swap.c swap.o
+compile src/kern/swap-format.c swap-format.o
 compile src/drivers/fs/ufs1/ufs1-endian.c ufs1-endian.o
 compile src/drivers/fs/ufs1/ufs1-super.c ufs1-super.o
 compile src/drivers/fs/ufs1/ufs1-vfs.c ufs1-vfs.o

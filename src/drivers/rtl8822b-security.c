@@ -87,7 +87,7 @@ reg_read(struct rtl8822b_radio *radio, uint16_t address, unsigned width,
 	    radio->transport.read == NULL || value == NULL)
 		return ENETDOWN;
 	return radio->transport.read(radio->transport.context, address, width,
-	    value);
+	    value, deadline);
 }
 
 static int
@@ -100,7 +100,7 @@ reg_write(struct rtl8822b_radio *radio, uint16_t address, unsigned width,
 	    radio->transport.write == NULL)
 		return ENETDOWN;
 	return radio->transport.write(radio->transport.context, address, width,
-	    value);
+	    value, deadline);
 }
 
 static int
@@ -400,6 +400,8 @@ rtl8822b_data_frame_prepare(const struct rtl8822b_radio *radio,
 	if (frame_length > SIZE_MAX - RTL8822B_DATA_TX_DESCRIPTOR_SIZE)
 		return EOVERFLOW;
 	total = RTL8822B_DATA_TX_DESCRIPTOR_SIZE + frame_length;
+
+	/* Avoid full packets on both 512-byte HS and 1024-byte SS pipes. */
 	if (total % 512U == 0U) {
 		if (total == SIZE_MAX)
 			return EOVERFLOW;

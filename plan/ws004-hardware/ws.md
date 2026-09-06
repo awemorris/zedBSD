@@ -1,6 +1,6 @@
 # WS004: hardware expansion
 
-Last updated: 2026-09-04
+Last updated: 2026-09-06
 
 WSID: `ws004`
 
@@ -57,6 +57,21 @@ p030's kernel-owned automatic reconnect while retaining p030's other lifecycle
 evidence. Q071 completed both and the shared physical WLAN check. AX211 quality
 work remains deferred; no other accepted or deferred
 WS004 boundary is reopened.
+
+On 2026-09-06 the user selected the different Archer T3U Plus on the authorized
+SSH host for feasibility first. P045 completes that investigation: exact
+`2357:0138`, measured High-Speed and post-Linux-switch SuperSpeed descriptors,
+the unchanged GitHub firmware pin, and standard Linux initialization plus
+2.4-GHz/channel-44 passive scan are verified. The original Debian error was
+missing firmware, not observed binary incompatibility. P046 records the completed
+driver identity/USB-speed extension and zedBSD acceptance. The subsequent
+user request authorizes p046 execution and explicitly requires both bands.
+Q081 cell 4 passes 2.4-GHz channel 1 and 5-GHz channel 44 authorization, DHCP,
+ping, HTTP checksum and down on the actual cut-D/RFE3/Wi-Fi-only board at
+SuperSpeed. Q082 found EBUSY during normal managed disconnect. Q083 adds bounded
+completion in the wifi primitive and passes three full cycles per band plus
+final fresh reopen/down. P046 and q083 are completed. The actual 5-GHz data
+acceptance is 20-MHz W52 channel 44 at SuperSpeed.
 
 Parent: [master plan](../master.md)
 
@@ -181,6 +196,8 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p042`](phase042-rtl8822bu-24ghz-connect-reproduction/phase.md) | Complete (`q069`) | The one exact scan-visible channel-1 attempt connected and authorized with zero retries/error; the user's 2.4-GHz `ENOENT` did not reproduce |
 | [`ws004-p043`](phase043-rtl8822bu-physical-connect-ux/phase.md) | Complete (`q070`) | The origin/main correction passes focused regressions and the user-confirmed physical RTL8822BU path; scan-before-connect, bounded progress, controlled-port authorization, disconnect/down/up reuse, quiet output, and 64-bit diagnostics are accepted |
 | [`ws004-p044`](phase044-wlan-async-operation-boundary/phase.md) | Complete (`q071`) | Prompt asynchronous kernel generations, generic carrier/removal events, no hidden kernel retry, and userspace 30-second retry ownership pass |
+| [`ws004-p045`](phase045-archer-t3u-plus-feasibility/phase.md) | Complete; user-requested feasibility | Exact `0138` HS/SS identity, missing-file diagnosis, pinned GitHub firmware acquisition and Linux dual-band passive scan pass; no zedBSD implementation claim |
+| [`ws004-p046`](phase046-archer-t3u-plus-driver/phase.md) | Completed (`q083`) | Exact SuperSpeed T3U Plus passes three cycles per band, HTTP checksum and final fresh reopen/down |
 
 ### MSI follow-up register
 
@@ -292,6 +309,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-36 | Complete as `ws004-p043` (`q070`) | Physical RTL8822BU scan-before-connect, one 30-second connection state machine, explicit primitive up/down and quiet mode, and measured real-xHCI timeout correction | HW-24--HW-26, q069, newly repeatable physical observations | Automatic gates pass and the user-confirmed origin/main correction works on the physical RTL8822BU target; p043 is closed |
 | HW-37 | Complete as `ws004-p041` (`q071`) | Japan W52 channels 36/40/44/48 with checked 5-GHz programming, scan, secure L2, and one useful-IP path | HW-24--HW-26 and the accepted q070 baseline | Focused band/rollback and 2.4-GHz regression gates plus the shared physical result pass |
 | HW-38 | Complete as `ws004-p044` (`q071`) | Asynchronous WLAN scan/single-attempt connect boundary and generic link-event delivery, with no kernel-owned high-level reconnect | HW-23--HW-26, HW-37 | HW-T42 and the shared physical result pass |
+| HW-39 | Completed as `ws004-p045` and `p046`/`q083` | Archer T3U Plus `2357:0138` using the existing RTL8822BU core and optional GitHub firmware | HW-24--HW-26, HW-38 | HW-T43/q083 verifies both USB profiles and cut-D/RFE3 support; physical SuperSpeed acceptance passes three cycles each on 2.4-GHz channel 1 and 20-MHz W52 channel 44 plus final reopen/down |
 
 ## 4. NVMe sequence
 
@@ -314,7 +332,13 @@ part of the USB-root milestone or the read-only hardware checkpoint.
 
 ## 5. WLAN sequence
 
-The first WLAN target is now the USB TP-Link Archer T3U Nano, ahead of the
+The most recent completed extension is [Archer T3U Plus p045/p046](phase046-archer-t3u-plus-driver/phase.md).
+It reuses the accepted station/firmware foundations below, but has its own
+exact `0138` identity and measured High-Speed/SuperSpeed profiles. The Nano
+history remains the first-device baseline; Linux success for the Plus does
+not replace zedBSD hardware acceptance.
+
+The first WLAN target was the USB TP-Link Archer T3U Nano, ahead of the
 Latitude's built-in PCI WLAN. The FCC V1.0 record supplies documentary
 RTL8822BU family evidence and the software USB identity is TP-Link
 `2357:012e`; the earlier RTL8828BU guess is rejected. The purchased Japan-market

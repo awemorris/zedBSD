@@ -197,7 +197,12 @@ struct file {
 	unsigned f_mount_cursor;
 	void *f_data;
 	struct backing_claim *f_backing_claim;
+	/* Published under the regular inode I/O lock; final close releases it. */
+	struct backing_claim *f_format_claim;
+	uint64_t f_format_size;
 };
+
+int file_format_reserve(struct file *, uint64_t);
 
 int
 file_openat(

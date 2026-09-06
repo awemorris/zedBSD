@@ -30,11 +30,108 @@ extern void vm_object_read_checkpoint(struct inode *, size_t, size_t)
 #define VM_OBJECT_DATA __attribute__((section(".vfs_bss")))
 #define VM_OBJECT_FAULT_RECLAIM_RETRIES 4U
 #define VM_OBJECT_FAULT_RESERVE_PAGES 4U
+#define VM_OBJECT_BACKING_SNAPSHOT_MAX 192U
 
 static struct vm_object *shared_objects VM_OBJECT_DATA;
 static unsigned object_count VM_OBJECT_DATA;
 static atomic_uint_t object_pages VM_OBJECT_DATA;
 static atomic_uint_t object_registry_lock VM_OBJECT_DATA;
+
+static int vm_object_get_shared_internal(struct file *file, struct vm_object **result);
+static bool registry_lock(void);
+static void registry_unlock(bool enabled);
+
+/*
+ * Admits shared mappings before a competing backing claim can be published.
+ */
+int
+vm_object_get_shared(
+	struct file *file,
+	struct vm_object **result)
+{
+	struct backing_mutation_guard guard;
+	struct inode *inode;
+	int error;
+
+	/* Validates the final content inode before reserving admission. */
+	if (file == NULL || result == NULL)
+		return EINVAL;
+	inode = file_vm_inode(file);
+
+	/* Rejects files without an authoritative content inode. */
+	if (inode == NULL)
+		return EINVAL;
+
+	/* Keeps claim preparation out until the shared object becomes visible. */
+	error = backing_mutation_begin_inode(inode, &guard);
+	if (error != 0)
+		return error;
+
+	/* Publishes the mapping before releasing the admission reservation. */
+	error = vm_object_get_shared_internal(file, result);
+	backing_mutation_end(&guard);
+	return error;
+}
+
+/*
+ * Rejects cached shared objects that alias a retained backing-file claim.
+ *
+ * Admission is already closed by the claim before this registry inspection.
+ */
+int
+vm_object_backing_busy(
+	const struct backing_claim *claim)
+{
+	struct inode **inodes;
+	struct vm_object *object;
+	unsigned count;
+	unsigned index;
+	int error;
+	int matched;
+	bool enabled;
+
+	/* Rejects incomplete queries before taking registry references. */
+	if (claim == NULL)
+		return EINVAL;
+
+	/* Bounds temporary memory independently of concurrent registry growth. */
+	inodes = kern_calloc(VM_OBJECT_BACKING_SNAPSHOT_MAX, sizeof(*inodes));
+	if (inodes == NULL)
+		return ENOMEM;
+
+	/* Pins each content inode while its shared object remains registered. */
+	count = 0;
+	error = 0;
+	enabled = registry_lock();
+	for (object = shared_objects; object != NULL; object = object->next) {
+		/* Refuses an oversized snapshot instead of overlooking an alias. */
+		if (count == VM_OBJECT_BACKING_SNAPSHOT_MAX) {
+			error = EBUSY;
+			break;
+		}
+		inodes[count] = object->inode;
+		inode_ref(inodes[count]);
+		count++;
+	}
+	registry_unlock(enabled);
+
+	/* Resolves sleeping FAT identities after dropping the registry spinlock. */
+	for (index = 0; index < count && error == 0; index++) {
+		error = backing_claim_inode_matches(claim, inodes[index], &matched);
+
+		/* Includes retained caches so stale writeback cannot cross formatting. */
+		if (error == 0 && matched)
+			error = EBUSY;
+	}
+
+	/* Releases every inode even when an earlier comparison failed. */
+	for (index = 0; index < count; index++)
+		inode_release(inodes[index]);
+	kern_free(inodes);
+
+	/* Reports either a complete absence of aliases or the refusal reason. */
+	return error;
+}
 
 static bool
 registry_lock(void)
@@ -283,8 +380,9 @@ page_overlaps(const struct vm_object_page *page, uint64_t start, uint64_t end)
 	return page_end > start && page_start < end;
 }
 
-int
-vm_object_get_shared(struct file *file, struct vm_object **result)
+/* Publishes or references a shared object while admission is reserved. */
+static int
+vm_object_get_shared_internal(struct file *file, struct vm_object **result)
 {
 	struct vm_object *object;
 	struct inode *inode;

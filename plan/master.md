@@ -1,6 +1,6 @@
 # zedBSD master plan
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 Status: active
 
@@ -464,7 +464,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q050 completed both VFS prerequisites discovered by q041 | `ws001-p022` and `ws001-p023` complete with production-linked faults and abrupt-stop/remount evidence | Retain p022/p023 as regressions and select the next unresolved p020 audit item; WS005 consumed the released VFS dependencies | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; q066 completed p025's automatic HAL counter milestone while the completed Latitude USB/network and CF-SV7 USB-root milestones remain intact | p025's API split, private calibration, complete-CPU-set validation, positive/negative SMP KVM evidence, and configured build matrix pass; p024 still awaits one V13 boot and p018/p019 remain | Share p025's sole remaining physical multicore observation with p038's final direct boot rather than creating an intermediate human block | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active follow-up; q071 completed the RTL8822BU W52 path and asynchronous WLAN ownership boundary | p041/p044 and the shared WS005 real-hardware WLAN acceptance pass; prior USB, NVMe QEMU, and WLAN milestones remain intact | Resume the independent Latitude NVMe, AX211 direct-boot, deferred ECM accounting, or evidence-driven WLAN-refactor follow-ups | [WS004](ws004-hardware/ws.md) |
+| `ws004` | Hardware expansion | P046 completed in q083; Archer T3U Plus dual-band acceptance | Exact SuperSpeed unit passes three cycles per band plus final reopen/down with the existing firmware pin; prior q071/Nano acceptance remains intact | Select any later hardware follow-up separately; physical HS, DFS/wider channels and throughput remain outside this acceptance | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Complete (`q071`) | Six interface-free `net wifi` forms, authenticated ZNV2 policy, daemon-side credential reads, one managed connection, 30-second userspace retry, link-event recovery, automatic gates, and the accepted real-hardware W52 result pass | No Phase remains; extract a new requirement before resuming | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p008 complete after q048 automatic evidence and the user's physical USB HID confirmation | Report-Protocol HID works on hardware; `/dev/mouse` is absent and Xzed already uses evdev-only input | Queue p009 to remove event/key-state `/dev/console` UAPI while preserving ordinary character/TTY input | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
@@ -479,11 +479,12 @@ allowed to block first communication unless the normal path depends on them.
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Queue-ready; permission ceiling selected | No Phase started; p001 Queue-ready | After WS022, Queue p001--p004; RW mappings may return from RO to RW within their original maximum | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | p001--p012 complete (`q035`); p013/p014/p015 complete (`q077`) | Legacy removal and bounded functional corrections pass host/build/runtime | No selected WS018 Phase remains; retain audit coverage limits | [WS018](ws018-kernel-architecture/ws.md) |
-| `ws019` | Installation and disk administration | Active; q077 storage acceptance complete | p002/p003 and p010/p011/p012 complete | New Queue for p008/p009 formatters, then p004/p005 installer work | [WS019](ws019-installation/ws.md) |
+| `ws019` | Installation and disk administration | Active; q079 formatters complete | p002/p003, p008/p009 and p010/p011/p012 complete | Resolve p004 provenance/publication prerequisites before p004/p005 installer work | [WS019](ws019-installation/ws.md) |
 | `ws020` | Intel Mac UEFI bring-up and generic image variants | Complete (user physical confirmation, 2026-09-05) | Automatic Variant/GPT/QEMU gates and successful Intel Mac real-hardware operation pass | No Phase remains; explicit acceptance supersedes the older five-run campaign | [WS020](ws020-intel-mac/ws.md) |
 | `ws021` | Reproducible x86 LLVM toolchain and sysroots | Complete (`q064`) | LLVM 23.1.0 cache/source paths, amd64/i386 sysroots, all x86 target/loader builds, four CI configurations, six-cell amd64 firmware matrix, i386 PC/AT and PC-98, and target noct non-JIT/JIT/BeUI gates pass | No current Phase; the source-build path and pinned `rev-0` cache remain supported in parallel | [WS021](ws021-llvm-toolchain/ws.md) |
 | `ws022` | ELF `PT_TLS` and static thread-local storage | Queue-ready; WS021 dependency satisfied | No Phase started | Queue p001 to freeze the x86 TLS/TCB ABI and fixtures, then implement p002/p003 | [WS022](ws022-elf-tls/ws.md) |
 | `ws023` | i386/amd64 HAL coding-style conformance | Complete (`q067`) | All 88 C/header files, focused/strict gates, four configured builds, and four x86 runtime cells pass; API/ABI review found no delta | No current Phase; retain the q067 evidence and extract pre-existing risks separately if prioritized | [WS023](ws023-x86-hal-style/ws.md) |
+| `ws024` | Single 64-bit UFS | Planned; user direction recorded, not queued | No Phase started; UFS1/UFS2 consolidation is settled | Freeze p001 format/migration contract, then unify driver, formatters and image consumers; scheduling remains for a later Queue | [WS024](ws024-unified-ufs/ws.md) |
 
 ## 4. Milestones
 
@@ -609,7 +610,7 @@ The user's subsequent `/diskN` audit request found supporting residue even
 though the generating boot loop is gone: unused synthetic rootfs, inode-only
 mount traversal, unset mountpoint field/marker and six manifest dependencies.
 [WS018 p013](ws018-kernel-architecture/phase013-legacy-disk-mount-residue/phase.md)
-was approved and executed in [q077](queue.md). Its mandatory mounted-directory
+was approved and executed in [q077](queue-q077.md). Its mandatory mounted-directory
 test reproduced a baseline bug, before and after cleanup. The user's explicit
 follow-up selects [p014](ws018-kernel-architecture/phase014-mounted-namespace-protection/phase.md)
 for thorough namespace/alias/lifetime audit and correction, with a four-active-
@@ -626,10 +627,13 @@ final shared QEMU cell pass, closing WS018 p013--p015 and WS019 p010--p012.
 [Q077 evidence and limits](ws018-kernel-architecture/tests/q077-results.md)
 retain both launches and final image identity. No installer or formatter was run.
 
-1. Next Queue: WS019 in dependency order:
-   p008 target UFS1-in-file `/sbin/mkfs`, p009
-   target ZEDSWAP2-in-file `/sbin/mkswap`, p004 Noct `/bin/zedinst`, then p005
-   consolidated QEMU NVMe installation acceptance. No template image or live
+1. WS019 p008 target UFS1-in-file `/sbin/mkfs` and p009 target
+   ZEDSWAP2-in-file `/sbin/mkswap` completed in q079.
+   [Final acceptance](ws019-installation/tests/q079-results.md) includes target
+   formatting, active swap exclusion, generated overlay/swap boot and
+   two-reboot persistence. Next resolve p004 source provenance, Noct primitive
+   bindings, atomic no-replace publication and staging-allocation cost, then
+   p004 Noct `/bin/zedinst` and p005 QEMU NVMe installation acceptance. No template image or live
    `DATA.IMG`/`SWAPFILE` copy is permitted.
 2. WS022 p001--p003: freeze and implement compiler-emitted static ELF
    `PT_TLS` for amd64/i386 initial threads and pthreads. Dynamic `dlopen()` TLS
@@ -652,6 +656,30 @@ Queue remains finite even though the user authorized repeated Queue creation;
 on finishing one Queue, construct the next from the order above and continue
 until stopped or no judgment-free Phase remains.
 
+On 2026-09-06 the user requested recording [WS024](ws024-unified-ufs/ws.md):
+consolidate UFS1/UFS2 into one 64-bit implementation named UFS. This is a
+settled future direction, superseding WS018 p003's two-driver architecture.
+The request records the WS only; it does not select an implementation Queue
+or reorder the wave above. WS019's current q079 UFS1 results remain valid
+until the unified formatter/image transition is implemented under WS024.
+
+The user's next explicit request on 2026-09-06 selects Archer T3U Plus
+feasibility on `awe@10.0.10.25`. [WS004 p045](ws004-hardware/phase045-archer-t3u-plus-feasibility/phase.md)
+records the completed inventory and reversible Linux probe/scan: the unchanged
+GitHub firmware works, the original Debian error is a missing file, and the
+exact `2357:0138` has both measured HS and SS profiles. [P046](ws004-hardware/phase046-archer-t3u-plus-driver/phase.md)
+records the driver extension and zedBSD acceptance plan. This request is for
+feasibility first. The subsequent user instruction explicitly authorizes saving
+and executing p046, including both 2.4-GHz and 5-GHz communication. Q081 cell 4 passes
+both-band authorization, DHCP, ping, HTTP checksum and down on the exact
+SuperSpeed adapter. Q082 then found EBUSY during normal managed disconnect.
+Q083 adds bounded primitive-level completion and passes three complete cycles
+per band plus final fresh reopen/down. P046 and q083 are completed;
+q079 through q082 are archived and finished. Acceptance is this actual
+SuperSpeed unit on channel 1 and 20-MHz W52 channel 44.
+Supplied runtime credentials are stored
+only in the user-authorized private file and are not recorded in planning books.
+
 ## 7. Decisions that gate new Phases
 
 | Decision | Owning WS | Required before |
@@ -664,6 +692,7 @@ until stopped or no judgment-free Phase remains.
 | USB Ethernet interface descriptors and, for vendor-specific interfaces, VID:PID/controller family | WS003/WS004/WS005 | Choose CDC ECM/NCM class frontend or Realtek-family frontend for HW-12/NET-10; ACM is inapplicable |
 | USB Ethernet asynchronous TX statistics | WS004 p017 | Resolved and implemented by q054 for NCM: packets/bytes count driver acceptance; later `STALL`, `TIMEOUT`, `DISCONNECTED`, or `IO_ERROR` adds exactly one `tx_errors` and no `tx_dropped`; administrative `CANCELLED` adds neither. ECM is a separate future consumer of the common helper |
 | First USB WLAN identity | WS004/WS005 | Resolved in q055 and refined for q056: the Japan-labelled unit has no printed hardware revision, so its retained exact `2357:012e`, `bcdDevice=2.10`, `ff/ff/ff`, five-endpoint descriptor is authoritative. Firmware is the separately selected `userland/firmware/rtl8822b/` entry, fetched from one immutable GitHub revision and hash-verified; V1.0 remains documentary family evidence only |
+| Additional Archer T3U Plus identity | WS004 p045/p046 | Feasibility verified for exact `2357:0138`: HS `0210/0210`, 512-byte bulk endpoints; after Linux mode switch SS `0300/0300`, 1024-byte bulk and measured companions. Existing pinned firmware initializes and passively scans on Linux. Q081 cell 4 proves both-band zedBSD data on the measured cut-D/RFE3 board at SuperSpeed; q083/p046 is complete after three cycles per band and final fresh reopen/down; actual 5-GHz data acceptance is 20-MHz W52 channel 44 |
 | Built-in PCI WLAN identity | WS004/WS005 | Resolved as RTL8822CE `10ec:c822`, subsystem `10ec:c130`; retained as a later target after the Archer-first sequence |
 | Intel test-machine identity and firmware | WS004 p037 | Resolved in q061: the AX201 hypothesis is corrected to exact AX211/CNVio2 PCI `8086:51f0`, subsystem `8086:4090`, revision `01`; selected `iwlwifi-so-a0-gf-a0-89.ucode`, PNVM, official `linux-firmware` `20260410` bytes, clear license, and direct-boot boundary are frozen in HW-T37 |
 | WLAN firmware source layout | WS004/WS005 | Resolved: menuconfig divides userland into Base, X11, Firmware, and Packages. Per-device firmware entries live under `userland/firmware/rtl8822b`, future `rtl8822c`, and p038 `intelax211`; they fetch only when selected, install bytes below `/lib/firmware`, and retain the applicable license. P037 freezes AX211's exact `-89.ucode`/PNVM bytes and terms before implementation |
@@ -690,6 +719,7 @@ until stopped or no judgment-free Phase remains.
 | Installer payload discovery | WS013 p002 | Resolved for q031: search same-physical-disk FAT16/FAT32; zero `/zedbsd.cfg` candidates is fatal, multiple candidates warn and use the deterministic first, and omitted `boot0` defaults to the selected config FAT while an explicit value is preserved |
 | Installed UEFI `LoadOptions` precedence | WS013 p002/p003 | Resolved for q031: ignore LoadOptions on the required `zedbsd.cfg` path; do not merge or override the configuration |
 | Installer source-image stability | WS019 p004/p008/p009 | Resolved on 2026-09-05: no templates. `zedinst` creates unpublished regular files and invokes target `/sbin/mkfs` for existing UFS1 and `/sbin/mkswap` for existing ZEDSWAP2; it never copies the live overlay upper or active swap |
+| UFS1/UFS2 consolidation | WS024 / WS018 / WS019 | Resolved on 2026-09-06: one filesystem named UFS with one 64-bit implementation on both 32-bit and 64-bit CPUs. Use the current UFS2 codec as the implementation starting point, preserve required features, and migrate driver/formatter/boot/image consumers together. P001 freezes disk identification, limits and old-image handling; separate permanent UFS1/UFS2 implementations are no longer the target. Recorded only, not queued. |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
 | Confirmed-commit ownership and bounds | WS011 p005--p008 | Resolved on 2026-09-05: interactive originating `net` owns candidate/token in memory and alone writes `/etc/net.conf` on ordinary commit; networkd owns only the volatile timer/open `/tmp` rollback program and never touches that file; client loss makes confirmation/adoption impossible, while explicit rollback or timeout remains; p005 freezes all size/time/lock/acknowledgement bounds; p007 owns automatic QEMU acceptance and p008 the later physical remote observation |
 | Authoritative Noct repository, build sequence, and release | WS008 | Resolved by q063: official `awemorris/NoctLang` release `v2.0.1`, tag commit `ed621e79139f55d06dd1a474243afbf0ce5efe0a`, archive size `2524680`, and SHA-256 `68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f` are the common host/target identity. Both `--path` forms, toolchain/ordinary build, amd64 target package, and q35/xHCI non-JIT/JIT/BeUI gates pass. The target-only two-hunk final-link patch is explicitly not BeUI; Remacs and i386/PC-98 target support remain outside the accepted scope. |

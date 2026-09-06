@@ -20,6 +20,7 @@
 #define WLAN_BEACON_MISS_MULTIPLIER 20U
 #define WLAN_BEACON_WATCH_MIN_TICKS (2U * KERN_CLOCK_HZ)
 #define WLAN_BEACON_WATCH_MAX_TICKS (10U * KERN_CLOCK_HZ)
+#define WLAN_PROBE_REQUEST_MAX_SIZE (24U + 2U + WLAN_SSID_MAX + 2U + 8U)
 
 extern void net_worker_wakeup(void) __attribute__((weak));
 extern void sched_yield(void) __attribute__((weak));
@@ -115,6 +116,7 @@ static int wlan_shutdown_inflight;
 
 static const struct wlan_wpa2_ops station_wpa2_ops;
 static int station_retire_controlled(struct wlan_station *, int);
+static size_t probe_request_build(const struct wlan_station *, int, uint32_t, uint8_t [WLAN_PROBE_REQUEST_MAX_SIZE]);
 
 static void
 secure_zero(void *memory, size_t length)
@@ -1087,18 +1089,42 @@ bssid_valid(const uint8_t bssid[6])
 	return nonzero != 0U;
 }
 
+/* Builds a probe advertising rates supported on the current scan channel. */
 static size_t
-probe_request_build(const struct wlan_station *station, int directed,
-	uint8_t frame[64])
+probe_request_build(
+	const struct wlan_station *station,
+	int directed,
+	uint32_t channel,
+	uint8_t frame[WLAN_PROBE_REQUEST_MAX_SIZE])
 {
 	static const uint8_t broadcast[6] = {
 		0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU
 	};
-	static const uint8_t rates[4] = { 0x82U, 0x84U, 0x8bU, 0x96U };
-	size_t ssid_length = directed ? station->selected.ssid_length : 0U;
+	static const uint8_t rates_24[4] = { 0x82U, 0x84U, 0x8bU, 0x96U };
+	static const uint8_t rates_5[8] = {
+		0x8cU, 0x12U, 0x98U, 0x24U, 0xb0U, 0x48U, 0x60U, 0x6cU
+	};
+	const uint8_t *rates;
+	size_t rate_count;
+	size_t ssid_length;
 	size_t offset;
 
-	memset(frame, 0, 64U);
+	/* Bounds the directed form before copying any selected SSID bytes. */
+	ssid_length = directed ? station->selected.ssid_length : 0U;
+	if (ssid_length > WLAN_SSID_MAX)
+		return 0U;
+
+	/* Keeps 2.4-GHz behavior and advertises legacy OFDM rates on 5 GHz. */
+	if (channel <= 14U) {
+		rates = rates_24;
+		rate_count = sizeof(rates_24);
+	} else {
+		rates = rates_5;
+		rate_count = sizeof(rates_5);
+	}
+
+	/* Leaves capacity for a maximum-length SSID and all eight OFDM rates. */
+	memset(frame, 0, WLAN_PROBE_REQUEST_MAX_SIZE);
 	frame[0] = 0x40U;
 	memcpy(frame + 4U, broadcast, sizeof(broadcast));
 	memcpy(frame + 10U, station->device->hwaddr, 6U);
@@ -1106,11 +1132,15 @@ probe_request_build(const struct wlan_station *station, int directed,
 	frame[24] = 0U;
 	frame[25] = (uint8_t)ssid_length;
 	memcpy(frame + 26U, station->selected.ssid, ssid_length);
+
+	/* Appends the rate element after the complete SSID element. */
 	offset = 26U + ssid_length;
 	frame[offset++] = 1U;
-	frame[offset++] = sizeof(rates);
-	memcpy(frame + offset, rates, sizeof(rates));
-	return offset + sizeof(rates);
+	frame[offset++] = (uint8_t)rate_count;
+	memcpy(frame + offset, rates, rate_count);
+
+	/* Reports the encoded frame length without the unused buffer tail. */
+	return offset + rate_count;
 }
 
 /* True when left is the entry evicted before right. */
@@ -2893,7 +2923,7 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 		int active_probe = 0;
 		int action = 0;
 		int error;
-		uint8_t probe[64];
+		uint8_t probe[WLAN_PROBE_REQUEST_MAX_SIZE];
 		size_t probe_length = 0U;
 
 		enabled = spin_lock_irqsave(&station->lock);
@@ -2939,8 +2969,11 @@ station_scan_timer(struct wlan_station *station, uint64_t now)
 					    station->scan_step_index].flags &
 					    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED) != 0U;
 					if (active_probe) {
+						/* Use the tuned channel, independent of cached BSS state. */
+						channel = station->scan_profile.channels[
+						    station->scan_step_index].channel;
 						probe_length = probe_request_build(station, 0,
-						    probe);
+						    channel, probe);
 						action = 2;
 					}
 				}

@@ -1,6 +1,6 @@
 # WS019: installation and disk administration
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 WSID: `ws019`
 
@@ -14,14 +14,19 @@ separately non-table-writing.
 
 Parent: [master plan](../master.md)
 
-Last verified Phases: `ws019-p010`, `ws019-p011`, `ws019-p012`, q077
+Last verified Phases: `ws019-p008`, `ws019-p009`, q079; p010--p012 retained from q077
 
-Resume point: select a new finite Queue for the later formatter/installer work.
-P010/p011/p012 runtime acceptance is complete; see
-[q077 evidence](../ws018-kernel-architecture/tests/q077-results.md).
-P008 mkfs, p009 mkswap, p004 zedinst and p005 installation acceptance remain
-later work. The 2026-09-05 user decision supersedes the old kernel GPT query
-and read-only-only diskpart milestone; all diskpart parsing/writing is userspace.
+Resume point: p008/p009 are completed with q078 implementation and q079
+isolated acceptance. P004 installer implementation awaits the documented
+source-provenance, primitive-binding, no-replace publication and staging-cost
+prerequisite contracts. P005 follows p004. P010/p011/p012 acceptance remains
+complete; see [q077 evidence](../ws018-kernel-architecture/tests/q077-results.md).
+
+Future filesystem direction: [WS024](../ws024-unified-ufs/ws.md) records the
+2026-09-06 user decision to replace UFS1/UFS2 with one 64-bit UFS implementation.
+Its formatter/image migration will move the installer contract to
+`mkfs -t ufs FILE`. P008/q079 describe the completed current UFS1 baseline;
+this planning record does not claim that the unified command exists yet.
 
 Shared tests: [WS019 test index](tests/README.md)
 
@@ -174,8 +179,8 @@ the running overlay upper or active swap. It generates the direct
   block path to 4096-byte sectors and revalidated both in q076.
 - Installer source/boot provenance formerly assigned to p002 remains an
   explicit p004 pre-implementation gap; it is not part of the minimal UAPI.
-- Target-side UFS-in-file and swap-in-file initializers do not yet exist and
-  are explicit installer-v1 prerequisites in p008/p009. FAT32 formatting and
+- Target-side UFS1-in-file and swap-in-file initializers completed p008/p009
+  in q079; their descriptor reservation and runtime acceptance are recorded. FAT32 formatting and
   block-device formatting remain outside installer v1.
 
 ## Phase registry
@@ -189,8 +194,8 @@ the running overlay upper or active swap. It generates the direct
 | `ws019-p005` | [QEMU NVMe overlay-install acceptance](phase005-qemu-nvme-overlay-install/phase.md) | Planned; follows p002--p004 and p008/p009 | Run the frozen non-partition-formatting QEMU NVMe acceptance |
 | `ws019-p006` | Whole-disk GPT creation and filesystem provisioning | Future; not designed | Add destructive initialization only after a separate safety/product review |
 | `ws019-p007` | Native-root installation | Future; not designed | Add `rootpart=` installation without changing or weakening p001--p005 |
-| `ws019-p008` | [target `/sbin/mkfs`](phase008-target-mkfs/phase.md) | Planned; follows p002 | Create a bounded UFS1 filesystem in a newly created regular file without formatting its containing partition |
-| `ws019-p009` | [target `/sbin/mkswap`](phase009-target-mkswap/phase.md) | Planned; follows p002 | Create the existing ZEDSWAP2 format in a newly created regular file with bounded size and publication |
+| `ws019-p008` | [target `/sbin/mkfs`](phase008-target-mkfs/phase.md) | Completed q079 | Create a bounded UFS1 filesystem in a newly created regular file without formatting its containing partition |
+| `ws019-p009` | [target `/sbin/mkswap`](phase009-target-mkswap/phase.md) | Completed q079 | Create the existing ZEDSWAP2 format in a newly created regular file with bounded size and publication |
 
 | `ws019-p010` | [conservative partition reload](phase010-conservative-partition-reload/phase.md) | Complete q077 | Explicit ro/rw/root EBUSY and reboot acceptance pass |
 | `ws019-p011` | [userspace existing-table editing](phase011-userspace-partition-editing/phase.md) | Complete q077 | Mounted-add exit 3, no live replacement and reboot discovery pass |
@@ -233,3 +238,12 @@ p008/p009; immutable installer templates are not part of this WS.
 - UEFI 2.10 defines ESP FAT, `EFI/BOOT/BOOT{machine}.EFI`, partition
   discovery, and SimpleFS:
   <https://uefi.org/specs/UEFI/2.10/13_Protocols_Media_Access.html>.
+
+## Q078 continuation
+
+Q078 implements p008/p009 using a descriptor-owned FAT-file reservation and
+shared production parsers. The old comprehensive storage-snapshot prerequisite
+is superseded by p002's diagnostic-only result; it is not restored. Formatter
+completion is established by [q079 final acceptance](tests/q079-results.md).
+P004 source provenance and bounded publication remain independent prerequisites
+for the later installer Queue; its Phase records the concrete readiness gaps.

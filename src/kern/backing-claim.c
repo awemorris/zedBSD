@@ -69,6 +69,46 @@ extern int fat_file_backing_identity(struct inode *, struct disk **, uint64_t *)
  */
 static const unsigned char early_boot_execution_token;
 
+static int inode_key(struct inode *inode, struct backing_object_key *key);
+static int key_equal(const struct backing_object_key *left, const struct backing_object_key *right);
+
+/*
+ * Compares an inode against a retained claim's canonical backing identity.
+ *
+ * The caller keeps the claim alive throughout this sleeping identity query.
+ */
+int
+backing_claim_inode_matches(
+	const struct backing_claim *claim,
+	struct inode *inode,
+	int *matched)
+{
+	struct backing_object_key key;
+	int error;
+
+	/* Rejects an incomplete query before resolving filesystem identity. */
+	if (claim == NULL || inode == NULL || matched == NULL)
+		return EINVAL;
+	*matched = 0;
+
+	/* Limits inode comparisons to file-backed claims. */
+	if (!claim->registered || !claim->key_valid)
+		return EINVAL;
+
+	/* Treats unsupported filesystems as unrelated backing objects. */
+	error = inode_key(inode, &key);
+	if (error == EOPNOTSUPP)
+		return 0;
+
+	/* Propagates a failed identity query rather than overlooking an alias. */
+	if (error != 0)
+		return error;
+
+	/* Publishes the physical-volume and directory-entry comparison. */
+	*matched = key_equal(&claim->key, &key);
+	return 0;
+}
+
 static const void *
 current_execution(void)
 {
@@ -221,7 +261,8 @@ backing_claim_prepare_inode(struct inode *inode, enum backing_claim_owner owner,
 	int error;
 
 	if (result == NULL ||
-	    (owner != BACKING_CLAIM_SWAP && owner != BACKING_CLAIM_LOOP))
+	    (owner != BACKING_CLAIM_SWAP && owner != BACKING_CLAIM_LOOP &&
+	     owner != BACKING_CLAIM_FORMAT))
 		return EINVAL;
 	*result = NULL;
 	claim = kern_calloc(1, sizeof(*claim));

@@ -10,6 +10,7 @@
 struct fake_transport {
 	uint32_t registers[0x700U / 4U];
 	uint64_t now;
+	uint64_t expected_deadline;
 	uint16_t fail_read_address;
 	unsigned reads;
 	unsigned writes;
@@ -21,14 +22,21 @@ struct fake_transport {
 };
 
 static void radio_init(struct rtl8822b_radio *, struct fake_transport *);
+static void test_data_usb_boundaries(void);
 
 static int
-fake_read(void *context, uint16_t address, unsigned width, uint32_t *value)
+fake_read(void *context, uint16_t address, unsigned width, uint32_t *value,
+	uint64_t deadline_ticks)
 {
 	struct fake_transport *fake = context;
 	uint32_t full;
 	unsigned shift;
 
+	/* Require the security owner to retain its absolute register-transfer deadline. */
+	if (fake->expected_deadline != 0U)
+		assert(deadline_ticks == fake->expected_deadline);
+	if (fake->now >= deadline_ticks)
+		return ETIMEDOUT;
 	fake->reads++;
 	if (fake->fail_read_address == address) {
 		fake->fail_read_address = 0U;
@@ -79,12 +87,18 @@ test_tx_queue_empty_snapshot(void)
 }
 
 static int
-fake_write(void *context, uint16_t address, unsigned width, uint32_t value)
+fake_write(void *context, uint16_t address, unsigned width, uint32_t value,
+	uint64_t deadline_ticks)
 {
 	struct fake_transport *fake = context;
 	uint32_t mask;
 	unsigned shift = (address & 3U) * 8U;
 
+	/* Check writes and CAM transactions against the original security deadline. */
+	if (fake->expected_deadline != 0U)
+		assert(deadline_ticks == fake->expected_deadline);
+	if (fake->now >= deadline_ticks)
+		return ETIMEDOUT;
 	fake->writes++;
 	if (fake->fail_write != 0U && fake->writes == fake->fail_write)
 		return EIO;
@@ -127,6 +141,7 @@ radio_init(struct rtl8822b_radio *radio, struct fake_transport *fake)
 	radio->channel = 1U;
 	radio->power_limits_valid = 1U;
 	radio->transport.context = fake;
+	radio->transport.usb_bulk_max_packet_size = 512U;
 	radio->transport.read = fake_read;
 	radio->transport.write = fake_write;
 	radio->transport.now_ticks = fake_now;
@@ -149,6 +164,9 @@ test_association_and_cam(void)
 	radio_init(&radio, &fake);
 	for (index = 0U; index < sizeof(key); index++)
 		key[index] = (uint8_t)(index + 1U);
+
+	/* Keep the supplied deadline across association and every CAM transaction. */
+	fake.expected_deadline = 100U;
 	assert(rtl8822b_security_enable(&radio, 100U) == 0);
 	assert((fake.registers[0x100U / 4U] & 0x200U) != 0U);
 	assert((fake.registers[0x680U / 4U] & 0xcfU) == 0xcfU);
@@ -185,7 +203,10 @@ test_association_and_cam(void)
 	assert((fake.cam_value[25] & 0x8000U) != 0U);
 	assert(rtl8822b_cam_clear(&radio, 5U, 100U) == 0);
 	assert(fake.cam_value[26] == 0U);
-	assert(rtl8822b_security_clear_association(&radio, 100U) == 0);
+
+	/* Accept a later caller's different absolute deadline without reusing the old one. */
+	fake.expected_deadline = 137U;
+	assert(rtl8822b_security_clear_association(&radio, 137U) == 0);
 	assert((fake.registers[0x608U / 4U] & 0x40U) == 0U);
 	assert((fake.registers[0x100U / 4U] & 0x30000U) == 0U);
 }
@@ -246,6 +267,86 @@ test_descriptor(void)
 	    sizeof(frame), 1, 0U, 0U, &length) == ENOSPC);
 }
 
+/* Checks payload integrity and short USB packets with and without CCMP. */
+static void
+test_data_usb_boundaries(
+	void)
+{
+	struct rtl8822b_radio radio;
+	struct fake_transport fake;
+	uint8_t frame[1536];
+	uint8_t wire[1540];
+	size_t boundary;
+	size_t base;
+	size_t frame_length;
+	size_t expected;
+	size_t length;
+	unsigned neighbor;
+	unsigned speed;
+	unsigned encrypted;
+	unsigned index;
+	uint16_t checksum;
+
+	/* Retain a recognizable payload behind a valid unicast data header. */
+	memset(&fake, 0, sizeof(fake));
+	radio_init(&radio, &fake);
+	memset(frame, 0x5a, sizeof(frame));
+	frame[0] = 0x08U;
+	frame[1] = 0x41U;
+	frame[4] = 2U;
+
+	/* Exercise every adjacent size around the first three HS boundaries. */
+	for (boundary = 512U; boundary <= 1536U; boundary += 512U) {
+		/* Include the 1024-byte SuperSpeed boundary in the same matrix. */
+		for (neighbor = 0U; neighbor < 3U; neighbor++) {
+			base = boundary - 1U + neighbor;
+			frame_length = base - 48U;
+			expected = base + (neighbor == 1U ? 1U : 0U);
+
+			/* Check the encoder at both transport packet sizes. */
+			for (speed = 0U; speed < 2U; speed++) {
+				radio.transport.usb_bulk_max_packet_size =
+				    speed == 0U ? 512U : 1024U;
+
+				/* Preserve the MAC frame size with either security mode. */
+				for (encrypted = 0U; encrypted < 2U; encrypted++) {
+					memset(wire, 0xa5, sizeof(wire));
+					assert(rtl8822b_data_frame_prepare(&radio, wire,
+					    sizeof(wire), frame, frame_length,
+					    (int)encrypted, 7U, 0x321U, &length) == 0);
+					assert(length == expected);
+					assert(length % radio.transport.
+					    usb_bulk_max_packet_size != 0U);
+					assert((size_t)(wire[0] |
+					    ((uint16_t)wire[1] << 8)) ==
+					    frame_length);
+					assert(((wire[6] >> 6) & 3U) ==
+					    (encrypted ? 3U : 0U));
+					assert(memcmp(wire + 48U, frame,
+					    frame_length) == 0);
+					assert(wire[length] == 0xa5U);
+
+					/* Check the one-byte terminator on exact boundaries. */
+					if (neighbor == 1U)
+						assert(wire[length - 1U] == 0U);
+
+					/* Verify checksum and refuse a buffer missing one byte. */
+					checksum = 0U;
+					for (index = 0U; index < 16U; index++) {
+						checksum ^= (uint16_t)wire[index * 2U] |
+						    ((uint16_t)wire[index * 2U + 1U] << 8);
+					}
+					assert(checksum == 0U);
+					assert(rtl8822b_data_frame_prepare(&radio, wire,
+					    expected - 1U, frame, frame_length,
+					    (int)encrypted, 7U, 0x321U, &length) == ENOSPC);
+					assert(length == 0U);
+				}
+			}
+		}
+	}
+}
+
 int
 main(void)
 {
@@ -253,6 +354,7 @@ main(void)
 	test_cam_failure_rollback();
 	test_tx_queue_empty_snapshot();
 	test_descriptor();
+	test_data_usb_boundaries();
 	puts("rtl8822b security fixture: PASS");
 	return 0;
 }

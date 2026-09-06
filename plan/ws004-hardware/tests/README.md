@@ -40,6 +40,7 @@ Parent: [WS004](../ws.md)
 | HW-T40 | i915 foundations | Device-independent UAPI/model tests pass; modeset/scanout/reset require target-hardware evidence |
 | HW-T41 | RTL8822BU Japan W52 | Exact channel-44 RF/BB/CCA/RFE/TXAGC, W52 profile membership, invalid-regulatory/DFS rejection, rollback, and 2.4-GHz regressions pass; one `10.0.10.25` passthrough run reaches ch44/5220-MHz scan, secure L2, DHCP, LAN-peer ping, bounded fetch, disconnect, and down |
 | HW-T42 | Asynchronous WLAN operation/event boundary | Scan/connect admission returns promptly, one generation advances asynchronously, terminal failure or post-success link loss never starts a kernel reconnect, and bounded `RTM_IFINFO` carrier/removal delivery survives overflow, subscription races, detach, and ifindex reuse |
+| HW-T43 | Archer T3U Plus identity/firmware/transport | P045 records exact `2357:0138` HS/SS descriptors and unchanged firmware feasibility; p046/q083 completes three cycles per band and final reopen/down on the actual SuperSpeed unit, with 20-MHz W52 channel-44 data acceptance |
 
 QEMU/model and physical-hardware results are always separate evidence fields.
 
@@ -1149,3 +1150,46 @@ then proves poll wakeup, bounded overflow/resnapshot, startup ordering,
 removal, shutdown, and ifindex/device-generation reuse without a WLAN-private
 blocking ioctl. WS005 p010/p011 separately prove the userspace 30-second retry
 and daemon orchestration.
+
+## HW-T43 Archer T3U Plus
+
+[The intake evidence](archer-t3u-plus-intake.md) closes p045's user-requested
+feasibility investigation. It records the initial High-Speed profile, Linux's
+switch to SuperSpeed, exact firmware identity, successful passive reception
+on 2.4 GHz and channel 44, corrected diagnostic attempts and host restoration.
+P046/q081 implements the exact profiles and passes dual-band zedBSD data.
+[Q082 evidence](q082-results.md) exposes an intermittent normal-disconnect
+failure; [Q083 evidence](q083-results.md) completes bounded retirement handling,
+three cycles per band and the final post-5-GHz reopen check.
+No existing Nano hardware result is generalized to the new product.
+
+[Q080 evidence](q080-results.md) records the implementation and bounded
+exact-device trials. The optional `wlan-probe-qemu.mk` overlay installs
+`wlan-probe-guest.c` into a disposable root filesystem; it provisions the
+production private Wi-Fi store without terminal echo, then exercises ordinary
+`net wifi` commands. `run-rtl8822bu-passthrough.py` runs on the authorized Linux
+host as root, taking its credential JSON solely from stdin. It requires an
+unbound exact adapter and the independent management route, redacts retained
+console output, bounds the guest lifetime, and deletes the credential-bearing
+guest image on exit. Finish all configured builds before preparing, hashing
+and copying the overlay image for a hardware trial.
+
+[Q081 evidence](q081-results.md) continues the localized TX-report investigation.
+Its optional runner `--usbmon` flag requires Linux usbmon/debugfs and the
+adjacent `rtl8822bu_usbmon.py` module. It retains only target bulk descriptor
+fields, control-transfer timing metadata and bounded counters; frame payloads
+and unrelated USB devices are excluded. Descriptor observations supplement the guest's checked TX result,
+without substituting host USB acceptance for wireless completion.
+
+The runner accepts `--cycles 1`, `2` or `3` for bounded sequential dual-band
+checks. All cycles share the 20-minute guest deadline and stop at the first
+failure. Final reopen requires a newer completed scan generation and a down
+status with authentication, association, key and authorization cleared.
+
+Q083's ordinary command-path regressions reuse
+[run-wifi-command-test.sh](../../ws005-networking/tests/run-wifi-command-test.sh).
+The targeted
+[run-networkd-retire-stage-test.sh](../../ws005-networking/tests/run-networkd-retire-stage-test.sh)
+checks retirement error attribution, first-error/ownership preservation and
+exclusion of child contents from failure logs in ordinary, sanitizer and
+analyzer modes.

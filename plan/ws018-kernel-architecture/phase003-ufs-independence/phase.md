@@ -1,6 +1,6 @@
 # WS018 Phase 003: independent UFS1 and UFS2 implementations
 
-Last updated: 2026-08-28
+Last updated: 2026-09-06
 
 WSID: `ws018`
 
@@ -9,6 +9,11 @@ Phase ID: `p003`
 Combined ID: `ws018-p003`
 
 Status: Complete (`q025`)
+
+Future direction: the user's 2026-09-06 decision in
+[WS024](../../ws024-unified-ufs/ws.md) supersedes the separate-driver target
+with one 64-bit implementation named UFS. This Phase and its q025 evidence
+remain the completed historical baseline; consolidation is new work in WS024.
 
 Parent: [WS018](../ws.md)
 

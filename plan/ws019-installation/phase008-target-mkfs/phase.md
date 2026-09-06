@@ -1,6 +1,6 @@
 # WS019 Phase 008: target `/sbin/mkfs`
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 WSID: `ws019`
 
@@ -8,7 +8,13 @@ Phase ID: `p008`
 
 Combined ID: `ws019-p008`
 
-Status: planned; follows p002 and precedes p004
+Status: completed in q079 after q078 implementation
+
+Planned successor: [WS024](../../ws024-unified-ufs/ws.md) records the user's
+2026-09-06 single-UFS/64-bit direction. Its p003 owns migration of this
+completed UFS1 formatter to `mkfs -t ufs FILE`, retaining the reservation and
+verification contract. The current command remains as recorded below until
+that later implementation is selected and completed.
 
 Parent: [WS019](../ws.md)
 
@@ -31,7 +37,8 @@ mkfs -t ufs1 FILE
 - The initial implementation accepts only `ufs1`; unknown or omitted types
   fail before mutation.
 - A mounted, root, active overlay, active swap, non-regular, aliased, or
-  otherwise busy object is refused using the stable p002 storage snapshot.
+  otherwise busy object is refused using a descriptor-owned backing reservation. P002's completed
+  diagnostic mount listing is not an exclusion token.
 - The command opens the object without following a final symlink, validates
   its identity after open, obtains exclusive access for the operation, and
   revalidates size and identity before publishing success.
@@ -70,3 +77,38 @@ this command only after preflight and explicit installer confirmation.
 
 Adding block-device or partition formatting, UFS2, labels, resize, or repair
 requires a later Phase with an explicit destructive-operation contract.
+
+## Q078 implementation boundary
+
+The first implementation supports pre-sized FAT-backed regular files with
+canonical identity and complete allocated extents; other containing
+filesystems fail with `EOPNOTSUPP` before content writes. A descriptor-owned
+reservation excludes other content/namespace mutations and swap/loop
+activation until final close. Idle descriptors and read-only verification
+opens remain possible; shared mappings/cache objects and in-flight mutations
+prevent acquisition. Private read snapshots do not grant backing mutation.
+
+The original descriptor retains its reservation while the command reopens
+read-only and compares identity/size. Kernel production parsers are linked
+into the target tools; no generic probe ioctl or comprehensive storage
+snapshot is added. Failure never prints success and never resizes the file.
+
+UFS1 accepts 1024-byte-aligned sizes from 4,194,304 to 130,940,928 bytes,
+matching the maintained backend geometry. The initial tree includes both
+128-KiB overlay journals and `/etc/zedbsd-root`, matching the data-image
+builder with fixture permissions fixed by `umask 022`. Installer v1 still
+selects exactly 32 MiB. Geometry and initialized structures are compared
+against the maintained builder, not only against the new generator itself.
+
+## Completion evidence
+
+[Q078 implementation and diagnosed attempts](../tests/q078-results.md) and
+[Q079 final acceptance](../tests/q079-results.md) close this Phase. Production-
+linked normal/sanitizer fixtures and all three supported builds pass. The
+isolated QEMU cell passes target formatting, refusals, swap activation and
+deactivation, generated overlay/swap boot, two-reboot persistence, and
+production-input/GPT/FAT/sentinel invariance.
+
+Only required reserved metadata and allocated initial contents are initialized;
+unused areas are not an erasure guarantee. The fixture supplies pre-sized
+zero files, so installer staging-allocation performance remains a p004 finding.

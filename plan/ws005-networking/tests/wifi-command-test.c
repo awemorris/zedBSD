@@ -50,6 +50,20 @@ static struct {
 	unsigned connect_seen;
 	unsigned connect_redacted;
 	unsigned disconnect_seen;
+	unsigned disconnect_attempts;
+	unsigned disconnect_busy;
+	unsigned disconnect_advance_ticks;
+	unsigned identity_queries;
+	unsigned identity_replace;
+	unsigned interrupt_on_identity;
+	unsigned interrupt_on_clock_at;
+	int identity_index;
+	int identity_error;
+	int disconnect_error;
+	uint32_t disconnect_reply_state;
+	int disconnect_terminal_error;
+	unsigned clock_fail_at;
+	unsigned clock_stalled;
 	unsigned auto_scan;
 	unsigned connect_busy_once;
 	unsigned connect_fatal;
@@ -108,6 +122,7 @@ static void fixture_expect_machine_terminal(const char *, int);
 static void fixture_machine_connect(void);
 static void fixture_machine_secret_failures(void);
 static void fixture_machine_simple_operations(void);
+static void fixture_disconnect_retry(void);
 
 #define socket fixture_socket
 #define ioctl fixture_ioctl
@@ -208,6 +223,8 @@ fixture_reset(void)
 	    (const uint8_t *)FIXTURE_PASSPHRASE;
 	fixture.expected_passphrase_length = sizeof(FIXTURE_PASSPHRASE) - 1U;
 	fixture.scan_result_count = 1U;
+	fixture.identity_index = 9;
+	fixture.disconnect_reply_state = WLAN_STATE_IDLE;
 	fixture_errno = 0;
 }
 
@@ -365,10 +382,18 @@ fixture_clock_gettime(clockid_t clock, struct timespec *now)
 {
 	fixture_require(clock == CLOCK_MONOTONIC && now != NULL, "clock",
 	    "clock request");
+	fixture.clock_calls++;
+	if (fixture.interrupt_on_clock_at != 0U &&
+	    fixture.clock_calls == fixture.interrupt_on_clock_at)
+		fixture_require(raise(SIGINT) == 0, "clock", "raise SIGINT");
+	if (fixture.clock_fail_at != 0U &&
+	    fixture.clock_calls == fixture.clock_fail_at) {
+		fixture_errno = EIO;
+		return -1;
+	}
 	now->tv_sec = (time_t)(fixture.ticks / FIXTURE_CLOCK_HZ);
 	now->tv_nsec = (long)((fixture.ticks % FIXTURE_CLOCK_HZ) *
 	    (1000000000U / FIXTURE_CLOCK_HZ));
-	fixture.clock_calls++;
 	return 0;
 }
 
@@ -403,8 +428,9 @@ fixture_nanosleep(const struct timespec *delay, struct timespec *remaining)
 		return -1;
 	}
 	nanoseconds = (uint64_t)delay->tv_nsec;
-	fixture.ticks += (nanoseconds * FIXTURE_CLOCK_HZ + 999999999ULL) /
-	    1000000000ULL;
+	if (!fixture.clock_stalled)
+		fixture.ticks += (nanoseconds * FIXTURE_CLOCK_HZ + 999999999ULL) /
+		    1000000000ULL;
 	fixture.sleep_calls++;
 	return 0;
 }
@@ -499,6 +525,25 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 	va_start(arguments, command);
 	argument = va_arg(arguments, void *);
 	va_end(arguments);
+	if (command == SIOCGIFINDEX) {
+		struct ifreq *request = argument;
+
+		fixture_require(strcmp(request->ifr_name, "wlan0") == 0 &&
+		    fixture_bytes_zero(&request->ifr_ifru, sizeof(request->ifr_ifru)),
+		    "disconnect identity", "fresh interface query");
+		fixture_record(command, 0U);
+		fixture.identity_queries++;
+		if (fixture.interrupt_on_identity)
+			fixture_require(raise(SIGTERM) == 0,
+			    "disconnect identity", "raise SIGTERM");
+		if (fixture.identity_error != 0) {
+			fixture_errno = fixture.identity_error;
+			return -1;
+		}
+		request->ifr_ifindex = fixture.identity_index +
+		    (fixture.identity_replace && fixture.identity_queries > 1U ? 1 : 0);
+		return 0;
+	}
 	if (command == SIOCGIFFLAGS || command == SIOCSIFFLAGS) {
 		struct ifreq *request = argument;
 
@@ -741,8 +786,23 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 		    fixture_bytes_zero(request->reserved,
 			sizeof(request->reserved)), "disconnect", "request input");
 		fixture_record(command, 0U);
+		fixture.disconnect_attempts++;
+		fixture.ticks += fixture.disconnect_advance_ticks;
+		if (fixture.disconnect_busy != 0U || fixture.disconnect_error != 0) {
+			fixture_errno = fixture.disconnect_busy != 0U ? EBUSY :
+			    fixture.disconnect_error;
+			if (fixture.disconnect_busy != 0U)
+				fixture.disconnect_busy--;
+			/* A failed ioctl may leave output bytes; the retry must reset them. */
+			request->generation = 123U;
+			request->state = WLAN_STATE_CONNECTED;
+			request->terminal_error = fixture_errno;
+			memset(request->reserved, 0xa5, sizeof(request->reserved));
+			return -1;
+		}
 		request->generation = FIXTURE_CONNECT_GENERATION;
-		request->state = WLAN_STATE_IDLE;
+		request->state = fixture.disconnect_reply_state;
+		request->terminal_error = fixture.disconnect_terminal_error;
 		fixture.disconnect_seen = 1U;
 		return 0;
 	}
@@ -995,6 +1055,133 @@ fixture_machine_simple_operations(void)
 }
 
 static void
+fixture_disconnect_retry(void)
+{
+	char interface[] = "wlan0";
+	char *arguments[] = { "wifi", "--machine", interface, "disconnect",
+	    NULL };
+	unsigned scenario;
+	unsigned attempts;
+	unsigned sleeps;
+	int error;
+
+	for (scenario = 0U; scenario < 18U; scenario++) {
+		fixture_reset();
+		error = 0;
+		attempts = 1U;
+		sleeps = 0U;
+		switch (scenario) {
+		case 0U:
+			fixture.disconnect_busy = 2U;
+			attempts = 3U;
+			sleeps = 2U;
+			break;
+		case 1U:
+		case 2U:
+			fixture.disconnect_busy = 1000U;
+			fixture.clock_stalled = scenario == 2U;
+			error = ETIMEDOUT;
+			attempts = 50U;
+			sleeps = 50U;
+			break;
+		case 3U:
+			fixture.disconnect_error = EACCES;
+			error = EACCES;
+			break;
+		case 4U:
+			fixture.disconnect_busy = 1U;
+			fixture.identity_replace = 1U;
+			error = ENODEV;
+			sleeps = 1U;
+			break;
+		case 5U:
+			fixture.clock_fail_at = 2U;
+			error = EIO;
+			attempts = 0U;
+			break;
+		case 6U:
+			fixture.disconnect_busy = 1U;
+			fixture.interrupt_on_sleep = 1U;
+			error = EINTR;
+			sleeps = 1U;
+			break;
+		case 7U:
+			fixture.disconnect_busy = 1U;
+			fixture.disconnect_advance_ticks = 500U;
+			error = ETIMEDOUT;
+			break;
+		case 8U:
+			/* A successful checked inverse remains completion evidence
+			 * even if its blocking ioctl outlasted retry admission. */
+			fixture.disconnect_advance_ticks = 500U;
+			break;
+		case 9U:
+			fixture.disconnect_reply_state = WLAN_STATE_CONNECTED;
+			error = EIO;
+			break;
+		case 10U:
+			fixture.disconnect_terminal_error = EACCES;
+			error = EACCES;
+			break;
+		case 11U:
+			fixture.ticks = UINT64_MAX - 100U;
+			error = EOVERFLOW;
+			attempts = 0U;
+			break;
+		case 12U:
+			fixture.identity_index = 0;
+			error = ENODEV;
+			attempts = 0U;
+			break;
+		case 13U:
+			fixture.identity_error = ENODEV;
+			error = ENODEV;
+			attempts = 0U;
+			break;
+		case 14U:
+			fixture.disconnect_busy = 1U;
+			fixture.clock_fail_at = 3U;
+			error = EIO;
+			break;
+		case 15U:
+			fixture.interrupt_on_identity = 1U;
+			error = EINTR;
+			attempts = 0U;
+			break;
+		case 16U:
+			fixture.interrupt_on_clock_at = 2U;
+			error = EINTR;
+			attempts = 0U;
+			break;
+		case 17U:
+			fixture.disconnect_reply_state = WLAN_STATE_DOWN;
+			break;
+		}
+		fixture_require(fixture_invoke(4, arguments, NULL, 0U) ==
+		    (error == 0 ? 0 : 1), "disconnect retry", "exit status");
+		fixture_expect_machine_terminal("disconnect retry", error);
+		fixture_require(fixture.disconnect_attempts == attempts &&
+		    fixture.sleep_calls == sleeps, "disconnect retry",
+		    "retry admission or wait count");
+		fixture_require(fixture.scan_starts == 0U &&
+		    fixture.connect_admissions == 0U &&
+		    fixture.socket_calls == 1U && fixture.close_calls == 1U,
+		    "disconnect retry", "unrelated operation or socket lifetime");
+		if (scenario == 1U || scenario == 2U)
+			fixture_require(fixture.ticks ==
+			    (scenario == 1U ? 600U : 100U), "disconnect retry",
+			    "fixed deadline or stopped-clock bound");
+		if (scenario == 4U)
+			fixture_require(fixture.identity_queries == 2U,
+			    "disconnect retry", "replacement identity not checked");
+	}
+	fixture_reset();
+	fixture_require(disconnect_command(FIXTURE_DESCRIPTOR, NULL, 0U) ==
+	    EINVAL && fixture.ioctl_calls == 0U && fixture.clock_calls == 0U,
+	    "disconnect validation", "invalid input reached operation");
+}
+
+static void
 fixture_expect_output_order(void)
 {
 	static const char *const markers[] = {
@@ -1030,6 +1217,7 @@ fixture_normal_sequence(void)
 		SIOCGWLANSTATUS,
 		SIOCGWLANSTATUS,
 		SIOCGWLANSTATUS,
+		SIOCGIFINDEX,
 		SIOCSWLANDISCONNECT,
 		SIOCSWLANSCAN
 	};
@@ -1067,7 +1255,7 @@ fixture_normal_sequence(void)
 		fixture_require(fixture.trace[index].command == expected[index],
 		    "normal", "ioctl sequence");
 	fixture_require(fixture.trace[0].scan_action == WLAN_SCAN_START &&
-	    fixture.trace[10].scan_action == WLAN_SCAN_STOP, "normal",
+	    fixture.trace[11].scan_action == WLAN_SCAN_STOP, "normal",
 	    "scan action sequence");
 	fixture_require(fixture.socket_calls == 6U && fixture.close_calls == 6U,
 	    "normal", "socket lifecycle");
@@ -1078,7 +1266,7 @@ fixture_normal_sequence(void)
 	    fixture.request_clear_calls == 1U &&
 	    fixture.argv_clear_calls >= 2U, "normal", "secret clearing");
 	fixture_require(fixture.connect_status_polls == 4U &&
-	    fixture.sleep_calls == 3U && fixture.clock_calls == 4U, "normal",
+	    fixture.sleep_calls == 3U && fixture.clock_calls == 6U, "normal",
 	    "bounded connect wait");
 	fixture_require(!fixture.output_overflow &&
 	    fixture.output_length < FIXTURE_OUTPUT_MAX &&
@@ -1651,6 +1839,7 @@ main(void)
 	fixture_machine_connect();
 	fixture_machine_secret_failures();
 	fixture_machine_simple_operations();
+	fixture_disconnect_retry();
 	fixture_normal_sequence();
 	fixture_auto_scan_connect();
 	fixture_transient_connect_busy();

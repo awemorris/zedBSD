@@ -77,6 +77,9 @@ struct vm_layout vm_layout;
 static int vm_layout_initialized;
 static atomic_uint_t vmspace_live;
 
+static int vmspace_map_file_shared_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct file *file, off_t file_offset, size_t data_size, struct vm_object *object, struct vm_region **result);
+static int vmspace_map_file_shared_find_locked(struct vmspace *vm, uintptr_t hint, size_t size, uint32_t prot, struct file *file, off_t offset, size_t data_size, struct vm_object *object, uintptr_t *mapped);
+
 static int
 alloc_vm_page(struct hal_pmem *memory)
 {
@@ -961,29 +964,45 @@ vmspace_map_file_locked(struct vmspace *vm, uintptr_t start, size_t size,
 			  (prot & HAL_SPACE_WRITE) != 0 ? size : 0, result);
 }
 
+/* Publishes a shared region after backing admission has completed. */
 static int
-vmspace_map_file_shared_locked(struct vmspace *vm, uintptr_t start, size_t size,
-			uint32_t prot, struct file *file, off_t file_offset,
-			size_t data_size, struct vm_region **result)
+vmspace_map_file_shared_locked(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t file_offset,
+	size_t data_size,
+	struct vm_object *object,
+	struct vm_region **result)
 {
-	struct vm_object *object;
 	struct vm_region *region;
 	int error;
 
+	/* Requires a prepared object and an aligned file offset. */
+	if (object == NULL)
+		return EINVAL;
+
+	/* Rejects offsets that cannot describe shared pages. */
 	if (file_offset < 0 || (file_offset & (PAGE_SIZE - 1U)) != 0)
 		return EINVAL;
-	error = vm_object_get_shared(file, &object);
+
+	/* Creates the region while its address-space metadata is locked. */
+	error = map_region(
+		vm, start, size, prot, VM_BACKING_FILE, file,
+		file_offset, start, data_size, VM_REGION_SHARED, 0, &region);
 	if (error != 0)
 		return error;
-	error = map_region(vm, start, size, prot, VM_BACKING_FILE, file,
-	    file_offset, start, data_size, VM_REGION_SHARED, 0, &region);
-	if (error != 0) {
-		vm_object_put(object);
-		return error;
-	}
+
+	/* Transfers the prepared shared-object reference to the region. */
 	region->object = object;
+
+	/* Returns the published region when requested. */
 	if (result != NULL)
 		*result = region;
+
+	/* Reports successful publication. */
 	return 0;
 }
 
@@ -2149,26 +2168,40 @@ vmspace_map_file_find_locked(struct vmspace *vm, uintptr_t hint, size_t size,
 	return error;
 }
 
+/* Chooses an address and transfers a prepared shared-object reference. */
 static int
-vmspace_map_file_shared_find_locked(struct vmspace *vm, uintptr_t hint,
-				    size_t size,
-			     uint32_t prot, struct file *file, off_t offset,
-			     size_t data_size, uintptr_t *mapped)
+vmspace_map_file_shared_find_locked(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	size_t data_size,
+	struct vm_object *object,
+	uintptr_t *mapped)
 {
 	uintptr_t start;
 	size_t rounded;
-	int error = vmspace_find_free_range_locked(vm, hint, size, PAGE_SIZE,
-	    &start);
+	int error;
+
+	/* Finds a valid page-aligned destination before publishing a region. */
+	error = vmspace_find_free_range_locked(vm, hint, size, PAGE_SIZE, &start);
 	if (error != 0)
 		return error;
+
+	/* Bounds the file portion to the requested mapping length. */
 	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
 	if (data_size > size)
 		data_size = size;
-	error = vmspace_map_file_shared_locked(vm, start, rounded, prot, file,
-	    offset,
-	    data_size, NULL);
+
+	/* Publishes the prepared object only after address selection succeeds. */
+	error = vmspace_map_file_shared_locked(
+		vm, start, rounded, prot, file, offset, data_size, object, NULL);
 	if (error == 0)
 		*mapped = start;
+
+	/* Reports the mapping outcome to the prepared-object owner. */
 	return error;
 }
 
@@ -3164,22 +3197,47 @@ vmspace_map_file(struct vmspace *vm, uintptr_t start, size_t size,
 	return error;
 }
 
+/*
+ * Maps a shared file after reserving its backing outside address-space locks.
+ */
 int
-vmspace_map_file_shared(struct vmspace *vm, uintptr_t start, size_t size,
-	uint32_t prot, struct file *file, off_t offset, size_t data_size,
+vmspace_map_file_shared(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	size_t data_size,
 	struct vm_region **result)
 {
+	struct vm_object *object;
 	int error;
+
+	/* Rejects unsupported address spaces before acquiring a shared object. */
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
+	/* Resolves FAT identity before taking higher-ranked VM metadata locks. */
+	error = vm_object_get_shared(file, &object);
+	if (error != 0)
+		return error;
+
+	/* Publishes the region while the object makes formatting admission busy. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
-	error = vmspace_map_file_shared_locked(vm, start, size, prot, file,
-	    offset, data_size, result);
+	error = vmspace_map_file_shared_locked(
+		vm, start, size, prot, file, offset, data_size, object, result);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+
+	/* Releases failed preparation after leaving address-space locks. */
+	if (error != 0)
+		vm_object_put(object);
+
+	/* Reports publication or its exact failure. */
 	return error;
 }
 
@@ -3393,22 +3451,47 @@ vmspace_map_file_find(struct vmspace *vm, uintptr_t hint, size_t size,
 	return error;
 }
 
+/*
+ * Chooses and maps a shared file after completing backing admission.
+ */
 int
-vmspace_map_file_shared_find(struct vmspace *vm, uintptr_t hint, size_t size,
-	uint32_t prot, struct file *file, off_t offset, size_t data_size,
+vmspace_map_file_shared_find(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	size_t data_size,
 	uintptr_t *mapped)
 {
+	struct vm_object *object;
 	int error;
-	if (vm == NULL || vm == &kernel_vmspace)
+
+	/* Rejects incomplete requests before taking a shared-object reference. */
+	if (vm == NULL || vm == &kernel_vmspace || mapped == NULL)
 		return EINVAL;
+
+	/* Resolves FAT identity before taking higher-ranked VM metadata locks. */
+	error = vm_object_get_shared(file, &object);
+	if (error != 0)
+		return error;
+
+	/* Selects and publishes the region while the object excludes formatting. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
-	error = vmspace_map_file_shared_find_locked(vm, hint, size, prot, file,
-	    offset, data_size, mapped);
+	error = vmspace_map_file_shared_find_locked(
+		vm, hint, size, prot, file, offset, data_size, object, mapped);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+
+	/* Releases failed preparation outside address-space locks. */
+	if (error != 0)
+		vm_object_put(object);
+
+	/* Reports publication or its exact failure. */
 	return error;
 }
 

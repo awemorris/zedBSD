@@ -10,7 +10,7 @@ Parent: [WS019](../ws.md)
 
 Tests: [WS019 test index](../tests/README.md)
 
-Queue: [q076](../../queue.md)
+Queue: [q076](../../queue-q076.md)
 
 ## Objective / supersession
 

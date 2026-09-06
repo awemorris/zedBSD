@@ -27,6 +27,17 @@
 #define FIXTURE_RX_RELEASE_ENABLE 0x00040000U
 #define FIXTURE_RXDMA_IDLE        0x00020000U
 
+static void test_radio_usb_profiles(void);
+static void test_usb_tx_boundaries(void);
+static int check_firmware_boundary(void *context, const struct rtl8822b_firmware_chunk *chunk);
+static void assert_management_rate(const struct rtl8822b_radio *radio, unsigned rate);
+static void test_management_band_rates(void);
+static void test_hardware_etsi_plan(void);
+static void test_c2h_rx_metadata(void);
+static void test_radio_trx_path_a(void);
+static void test_radio_wlan_only(void);
+static void test_radio_transport_deadline(void);
+
 static void
 put_le16(uint8_t *bytes, uint16_t value)
 {
@@ -627,6 +638,113 @@ test_rx(void)
 	}
 }
 
+/* Verifies that firmware events ignore frame status but retain layout bounds. */
+static void
+test_c2h_rx_metadata(void)
+{
+	struct rtl8822b_rx_packet packet;
+	struct rx_state state;
+	uint8_t bytes[160];
+	uint8_t aggregate[120];
+	size_t offset;
+	size_t occupied;
+	size_t aligned;
+	size_t count;
+	uint32_t word0;
+	unsigned info_units;
+	unsigned shift;
+	int error;
+
+	/* Marks every irrelevant frame-status field while keeping a valid C2H. */
+	memset(bytes, 0, sizeof(bytes));
+	word0 = 5U | 0x0000c000U | (7U << 20) | 0x0c000000U;
+	put_le32(bytes, word0);
+	put_le32(bytes + 4U, 0x7fU);
+	put_le32(bytes + 8U, 0x10000000U);
+	put_le32(bytes + 12U, 0x7fU);
+	put_le32(bytes + 16U, 0x30U);
+	put_le32(bytes + 20U, UINT32_MAX);
+	bytes[24U] = 0x03U;
+	bytes[25U] = 0x9aU;
+	error = rtl8822b_rx_packet_parse(bytes, 32U, &packet);
+	assert(error == 0);
+	assert(packet.kind == RTL8822B_RX_C2H);
+	assert(packet.payload == bytes + 24U);
+	assert(packet.payload_length == 5U);
+	assert(packet.c2h_id == 0x03U && packet.c2h_sequence == 0x9aU);
+	assert(packet.aggregate_length == 32U);
+	assert(packet.rate == 0U && packet.bandwidth == 0U);
+	assert(packet.tsf_low == 0U && packet.rssi_dbm == -128);
+	assert(packet.phy_info == NULL && packet.phy_info_length == 0U);
+	assert(packet.encryption_type == 0U && !packet.software_decrypted);
+	assert(packet.mac_id == 0U && !packet.icv_error);
+
+	/* Rejects the same frame-status violations without the C2H discriminator. */
+	put_le32(bytes + 8U, 0U);
+	error = rtl8822b_rx_packet_parse(bytes, 32U, &packet);
+	assert(error == EINVAL);
+	assert(packet.payload == NULL && packet.payload_length == 0U);
+
+	/* Exercises every encoded padding offset without interpreting PHY bytes. */
+	for (info_units = 0U; info_units < 16U; info_units++) {
+		/* Covers each shift and both complete and truncated record ends. */
+		for (shift = 0U; shift < 4U; shift++) {
+			/* Supplies a command after bounded, deliberately unknown PHY data. */
+			memset(bytes, 0xff, sizeof(bytes));
+			word0 = 5U | (info_units << 16) | (shift << 24) |
+			    0x04000000U;
+			put_le32(bytes, word0);
+			put_le32(bytes + 8U, 0x10000000U);
+			offset = 24U + info_units * 8U + shift;
+			bytes[offset] = 0x03U;
+			bytes[offset + 1U] = 0x9aU;
+			occupied = offset + 5U;
+			aligned = (occupied + 7U) & ~(size_t)7U;
+			error = rtl8822b_rx_packet_parse(bytes, aligned, &packet);
+			assert(error == 0);
+			assert(packet.kind == RTL8822B_RX_C2H);
+			assert(packet.payload == bytes + offset);
+			assert(packet.payload_length == 5U);
+			assert(packet.c2h_id == 0x03U);
+			assert(packet.c2h_sequence == 0x9aU);
+			assert(packet.aggregate_length == aligned);
+			assert(packet.phy_info == NULL && packet.phy_info_length == 0U);
+			assert(packet.rate == 0U && packet.rssi_dbm == -128);
+
+			/* Accepts a complete unpadded final record. */
+			error = rtl8822b_rx_packet_parse(bytes, occupied, &packet);
+			assert(error == 0);
+			assert(packet.aggregate_length == occupied);
+
+			/* Rejects a truncated command without publishing partial metadata. */
+			error = rtl8822b_rx_packet_parse(bytes, occupied - 1U, &packet);
+			assert(error == EINVAL);
+			assert(packet.payload == NULL && packet.payload_length == 0U);
+
+			/* Retains the rule against a partially present alignment suffix. */
+			if (aligned > occupied + 1U) {
+				error = rtl8822b_rx_packet_parse(bytes, occupied + 1U, &packet);
+				assert(error == EINVAL);
+			}
+		}
+	}
+
+	/* Keeps a valid frame and C2H visible through whole-aggregate preflight. */
+	make_rx_aggregate(aggregate);
+	put_le32(aggregate + 88U, 5U | 0x04004000U);
+	put_le32(aggregate + 88U + 12U, 0x7fU);
+	memset(&state, 0, sizeof(state));
+	state.fail_at = UINT_MAX;
+	error = rtl8822b_rx_aggregate_walk(
+		aggregate,
+		sizeof(aggregate),
+		check_rx_packet,
+		&state,
+		&count);
+	assert(error == 0);
+	assert(count == 2U && state.index == 2U);
+}
+
 static uint32_t
 fixture_random(uint32_t *state)
 {
@@ -694,11 +812,23 @@ struct fake_radio {
 	size_t thirteen_us_delays;
 	size_t yields;
 	uint64_t now;
+	uint64_t expected_deadline;
+	size_t finite_deadline_calls;
+	size_t cleanup_deadline_calls;
 	uint64_t delay_microseconds;
 	int automatic_power_ack;
 	int automatic_rpwm_ack;
 	int automatic_llt_ack;
 	int automatic_rf_lut_ack;
+	uint32_t coex_grants;
+	size_t coex_reads;
+	size_t coex_fail_read_at;
+	size_t coex_commands;
+	uint64_t coex_first_read_tick;
+	int coex_busy;
+	int coex_drop_write;
+	int coex_drop_owner;
+	int coex_drop_dpdt;
 };
 
 static struct fake_radio *
@@ -717,6 +847,8 @@ fake_radio_create(void)
 	fake->automatic_rpwm_ack = 1;
 	fake->automatic_llt_ack = 1;
 	fake->automatic_rf_lut_ack = 1;
+	fake->coex_fail_read_at = SIZE_MAX;
+	fake->registers[0x1700U] = 0x20000000U;
 	fake->registers[0x0100U] = 0xeaU;
 	fake->registers[0x0006U] = 0x02U;
 	fake->registers[0x2860U] = 0x00000c01U;
@@ -738,15 +870,41 @@ fake_radio_destroy(struct fake_radio *fake)
 
 static int
 fake_radio_read(void *context, uint16_t address, unsigned width,
-	uint32_t *value)
+	uint32_t *value, uint64_t deadline_ticks)
 {
 	struct fake_radio *fake = context;
 
 	assert(value != NULL);
 	assert(width == 1U || width == 2U || width == 4U);
+
+	/* Verify exact caller deadlines separately from bounded emergency cleanup. */
+	if (deadline_ticks == UINT64_MAX) {
+		fake->cleanup_deadline_calls++;
+	} else {
+		fake->finite_deadline_calls++;
+		if (fake->expected_deadline != 0U)
+			assert(deadline_ticks == fake->expected_deadline);
+	}
+	if (fake->now >= deadline_ticks)
+		return ETIMEDOUT;
 	if (fake->read_count++ == fake->fail_read_at)
 		return EIO;
+
+	/* Model independent transport failures and the indirect port's ready signal. */
+	if (address == 0x1700U || address == 0x1708U) {
+		/* Retain the start of grant polling for a real shared-deadline test. */
+		if (fake->coex_reads == 0U)
+			fake->coex_first_read_tick = fake->now;
+
+		/* Fail the requested grant-port operation without changing its output. */
+		if (fake->coex_reads++ == fake->coex_fail_read_at)
+			return EIO;
+	}
 	*value = fake->registers[address];
+
+	/* A busy port never admits a new command. */
+	if (address == 0x1700U && fake->coex_busy)
+		*value &= ~0x20000000U;
 	if (width == 1U)
 		*value &= 0xffU;
 	else if (width == 2U)
@@ -757,12 +915,23 @@ fake_radio_read(void *context, uint16_t address, unsigned width,
 
 static int
 fake_radio_write(void *context, uint16_t address, unsigned width,
-	uint32_t value)
+	uint32_t value, uint64_t deadline_ticks)
 {
 	struct fake_radio *fake = context;
 	uint32_t mask;
 
 	assert(width == 1U || width == 2U || width == 4U);
+
+	/* Preserve the absolute budget instead of inventing a fresh callback deadline. */
+	if (deadline_ticks == UINT64_MAX) {
+		fake->cleanup_deadline_calls++;
+	} else {
+		fake->finite_deadline_calls++;
+		if (fake->expected_deadline != 0U)
+			assert(deadline_ticks == fake->expected_deadline);
+	}
+	if (fake->now >= deadline_ticks)
+		return ETIMEDOUT;
 	if (fake->write_count++ == fake->fail_write_at)
 		return EIO;
 	assert(fake->trace_count < RADIO_TRACE_MAX);
@@ -773,6 +942,29 @@ fake_radio_write(void *context, uint16_t address, unsigned width,
 	mask = width == 1U ? 0xffU : width == 2U ? 0xffffU : UINT32_MAX;
 	fake->registers[address] = (fake->registers[address] & ~mask) |
 	    (value & mask);
+
+	/* Model the hardware indirect grant register separately from its data window. */
+	if (address == 0x1700U && width == 4U) {
+		assert(value == 0x800f0038U || value == 0xc00f0038U);
+		fake->coex_commands++;
+
+		/* Complete reads and writes without fabricating a requested grant state. */
+		if (value == 0x800f0038U) {
+			fake->registers[0x1708U] = fake->coex_grants;
+		} else if (!fake->coex_drop_write) {
+			fake->coex_grants = fake->registers[0x1704U];
+		}
+		fake->registers[address] |= 0x20000000U;
+	}
+
+	/* Accepted but ineffective ownership writes must fail the production readback. */
+	if (address == 0x0073U && fake->coex_drop_owner)
+		fake->registers[address] &= ~0x04U;
+
+	/* Keep the DPDT selection stale only when the WLAN-only profile selects it. */
+	if (address == 0x004cU && fake->coex_drop_dpdt &&
+	    (value & 0x01800000U) == 0x01000000U)
+		fake->registers[address] &= ~0x01800000U;
 	if (address == FIXTURE_REG_RX_PACKET_NUMBER && width == 4U &&
 	    (value & FIXTURE_RX_RELEASE_ENABLE) != 0U)
 		fake->registers[address] |= FIXTURE_RXDMA_IDLE;
@@ -838,6 +1030,7 @@ fake_radio_transport(struct fake_radio *fake)
 
 	memset(&transport, 0, sizeof(transport));
 	transport.context = fake;
+	transport.usb_bulk_max_packet_size = 512U;
 	transport.read = fake_radio_read;
 	transport.write = fake_radio_write;
 	transport.now_ticks = fake_radio_now;
@@ -959,6 +1152,50 @@ assert_radio_off(const struct fake_radio *fake,
 	assert((fake->registers[0x00ecU] & 0x07000000U) == 0U);
 }
 
+/* Verifies absolute deadlines through startup, retuning and expired cleanup. */
+static void
+test_radio_transport_deadline(
+	void)
+{
+	struct rtl8822bu_board_info board;
+	struct rtl8822b_radio_transport transport;
+	struct rtl8822b_radio radio;
+	struct fake_radio *fake;
+	size_t calls;
+
+	/* Require every startup register callback to retain the same caller budget. */
+	fake = fake_radio_create();
+	board = fake_board(3U);
+	board.chip.cut = 3U;
+	transport = fake_radio_transport(fake);
+	transport.usb_bulk_max_packet_size = 1024U;
+	memset(&radio, 0, sizeof(radio));
+	fake->expected_deadline = 1000000U;
+	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	    fake->expected_deadline) == 0);
+	assert(rtl8822b_radio_start(&radio, fake->expected_deadline) == 0);
+	assert(fake->finite_deadline_calls != 0U);
+	assert(fake->cleanup_deadline_calls == 0U);
+
+	/* Carry a different channel deadline through every register and RF operation. */
+	calls = fake->finite_deadline_calls;
+	fake->expected_deadline = fake->now + 100000U;
+	assert(rtl8822b_radio_set_channel(&radio, 44U,
+	    fake->expected_deadline) == 0);
+	assert(fake->finite_deadline_calls > calls);
+	assert(fake->cleanup_deadline_calls == 0U);
+
+	/* Reject an expired operation while still allowing the bounded emergency stop. */
+	calls = fake->finite_deadline_calls;
+	fake->expected_deadline = fake->now;
+	assert(rtl8822b_radio_set_channel(&radio, 6U,
+	    fake->expected_deadline) == ETIMEDOUT);
+	assert(fake->finite_deadline_calls == calls);
+	assert(fake->cleanup_deadline_calls != 0U);
+	assert_radio_off(fake, &radio);
+	fake_radio_destroy(fake);
+}
+
 static void
 test_radio_txagc_clamps(void)
 {
@@ -1050,7 +1287,7 @@ test_radio_lifecycle(void)
 	struct rtl8822b_radio_transport transport;
 	struct rtl8822b_radio radio;
 	struct fake_radio *baseline = fake_radio_create();
-	size_t stages[16];
+	size_t stages[18];
 	size_t stage_count = 0U;
 	uint8_t frame[26];
 	uint8_t directed_frame[64];
@@ -1312,6 +1549,13 @@ test_radio_lifecycle(void)
 	stages[stage_count++] = trace_find(baseline, 1U, 0x0e90U, 4U,
 	    0x00030000U);
 	stages[stage_count++] = trace_find_address(baseline, 1U, 0x0c08U, 4U);
+	stages[stage_count++] = trace_find(baseline, 1U, 0x093cU, 4U,
+	    0x001c0642U);
+	stages[stage_count] = trace_find(baseline,
+	    stages[stage_count - 1U] + 1U, 0x0a04U, 4U, 0x81ff800cU);
+	stage_count++;
+	stages[stage_count++] = trace_find(baseline, 1U, 0x0a04U, 4U,
+	    0x80ff800cU);
 	stages[stage_count++] = trace_find_address(baseline, 1U, 0x1990U, 4U);
 	stages[stage_count++] = trace_find(baseline, 1U, 0x0483U, 1U, 0U);
 	stages[stage_count++] = trace_find(baseline, 1U, 0x1d00U, 4U,
@@ -1570,9 +1814,687 @@ test_radio_profile_costs(void)
 	    "max-delay=%llu us\n", maximum_writes, maximum_reads,
 	    (unsigned long long)maximum_delay);
 	/* Pinned tables make this an executable 15-second timeout rationale. */
-	assert(maximum_writes == 3108U);
-	assert(maximum_reads == 137U);
+	assert(maximum_writes == 3117U);
+	assert(maximum_reads == 151U);
 	assert(maximum_delay == 412326U);
+}
+
+/* Checks the one-stream and CCK path selection on both supported RF layouts. */
+static void
+test_radio_trx_path_a(
+	void)
+{
+	static const uint8_t rfes[] = { 2U, 3U };
+	static const uint8_t cuts[] = { 1U, 3U };
+	static const uint16_t packets[] = { 512U, 1024U };
+	struct rtl8822bu_board_info board;
+	struct rtl8822b_radio_transport transport;
+	struct rtl8822b_radio radio;
+	struct fake_radio *fake;
+	size_t profile;
+	size_t speed;
+	size_t selection;
+	size_t transmit;
+	unsigned paths;
+
+	/* Cover the older RFE2 and measured cut-D/RFE3 board at both USB speeds. */
+	for (profile = 0U; profile < sizeof(rfes); profile++) {
+		for (speed = 0U; speed < sizeof(packets) / sizeof(packets[0]);
+		    speed++) {
+			for (paths = 1U; paths <= 2U; paths++) {
+				/* Run the production table and post-table initialization. */
+				fake = fake_radio_create();
+				transport = fake_radio_transport(fake);
+				transport.usb_bulk_max_packet_size = packets[speed];
+				board = fake_board(rfes[profile]);
+				board.chip.cut = cuts[profile];
+				board.chip.rf_path_count = (uint8_t)paths;
+				memset(&radio, 0, sizeof(radio));
+				assert(rtl8822b_radio_power_on(&radio, &transport,
+				    &board, UINT64_MAX) == 0);
+				assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+
+				/* Require path A for one stream and CCK, preserving other bits. */
+				assert(fake->registers[0x093cU] == 0x001c0642U);
+				assert(fake->registers[0x0a04U] == 0x80ff800cU);
+				assert((fake->registers[0x0940U] & 0xfff0U) ==
+				    (paths == 1U ? 0x0010U : 0x0430U));
+				assert((fake->registers[0x080cU] & 0xffU) ==
+				    (paths == 1U ? 0x11U : 0x33U));
+				selection = trace_find(fake, 0U, 0x0a04U, 4U,
+				    0x80ff800cU);
+				transmit = trace_find(fake, selection + 1U,
+				    0x0522U, 1U, 0U);
+				assert(selection < transmit);
+
+				/* Preserve the selection across either band's channel setup. */
+				assert(rtl8822b_radio_set_channel(&radio, 44U,
+				    UINT64_MAX) == 0);
+				assert(rtl8822b_radio_set_channel(&radio, 6U,
+				    UINT64_MAX) == 0);
+				assert(fake->registers[0x093cU] == 0x001c0642U);
+				assert(fake->registers[0x0a04U] == 0x80ff800cU);
+
+				/* Release each full startup before exercising another profile. */
+				assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+				assert_radio_off(fake, &radio);
+				fake_radio_destroy(fake);
+			}
+		}
+	}
+}
+
+/* Verifies known WLAN-only grants, switch selection and startup failure boundaries. */
+static void
+test_radio_wlan_only(
+	void)
+{
+	static const uint8_t options[] = { 0x00U, 0x01U, 0xffU, 0x20U, 0x3fU };
+	struct rtl8822bu_board_info board;
+	struct rtl8822b_radio_transport transport;
+	struct rtl8822b_radio radio;
+	struct fake_radio *fake;
+	uint8_t physical[RTL8822B_EFUSE_PHYSICAL_SIZE];
+	uint8_t logical[RTL8822B_EFUSE_LOGICAL_SIZE];
+	size_t stages[6];
+	size_t first;
+	size_t grant_write;
+	size_t owner;
+	size_t dpdt;
+	size_t band;
+	size_t unpause;
+	size_t index;
+	size_t stage;
+	uint64_t grant_tick;
+	uint64_t deadline;
+	unsigned failure;
+	int eligible;
+	int error;
+
+	/* Parse the cut-D/RFE3 hardware policy with explicit synthetic board-option bytes. */
+	make_efuse(physical, logical);
+	logical[0xb8U] = 0xa6U;
+	logical[0xcaU] = 3U;
+	logical[0xcbU] = 0xffU;
+	logical[0xccU] = 0xffU;
+	grant_tick = 0U;
+
+	/* Exercise programmed WLAN-only, unknown and Bluetooth-combination boards. */
+	for (index = 0U; index < sizeof(options); index++) {
+		/* Enter the production path through efuse parsing at SuperSpeed. */
+		logical[0xc1U] = options[index];
+		assert(rtl8822bu_board_parse(logical, sizeof(logical),
+		    (3U << 12) | (1U << 27), &board) == 0);
+		assert(board.rf_board_option == options[index]);
+		fake = fake_radio_create();
+		fake->coex_grants = 0x1234a580U;
+		fake->registers[0x0073U] = 0xabU;
+		fake->registers[0x004cU] = 0x00812345U;
+		transport = fake_radio_transport(fake);
+		transport.usb_bulk_max_packet_size = 1024U;
+		memset(&radio, 0, sizeof(radio));
+		assert(rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
+		assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+		eligible = index < 2U;
+
+		/* Preserve all unrelated grant and ownership bits on eligible boards. */
+		if (eligible) {
+			assert(fake->coex_commands == 3U);
+			assert(fake->coex_grants == 0x12347700U);
+			assert(fake->registers[0x0073U] == 0xafU);
+			assert((fake->registers[0x004cU] & 0x01800000U) == 0x01000000U);
+			assert((fake->registers[0x004cU] & 0x007fffffU) == 0x00012345U);
+			assert((fake->registers[0x0cbcU] & 0x300U) == 0x200U);
+		} else {
+			assert(fake->coex_commands == 0U && fake->coex_reads == 0U);
+			assert(fake->coex_grants == 0x1234a580U);
+			assert(fake->registers[0x0073U] == 0xabU);
+			assert((fake->registers[0x004cU] & 0x01800000U) == 0x00800000U);
+			assert((fake->registers[0x0cbcU] & 0x300U) == 0x200U);
+		}
+
+		/* Retain each new acquisition boundary for independent failing-write runs. */
+		if (index == 1U) {
+			first = trace_find(fake, 0U, 0x1700U, 4U, 0x800f0038U);
+			grant_write = trace_find(fake, first, 0x1704U, 4U, 0x12347700U);
+			owner = trace_find(fake, grant_write, 0x0073U, 1U, 0xafU);
+			dpdt = trace_find_address(fake, owner, 0x004cU, 4U);
+			band = trace_find(fake, dpdt, 0x0cbcU, 4U, 0x200U);
+			unpause = trace_find(fake, band, 0x0522U, 1U, 0U);
+			assert(first < grant_write && grant_write < owner && owner < dpdt);
+			assert(dpdt < band && band < unpause);
+			stages[0] = first;
+			stages[1] = grant_write;
+			stages[2] = grant_write + 1U;
+			stages[3] = grant_write + 2U;
+			stages[4] = owner;
+			stages[5] = dpdt;
+			grant_tick = fake->coex_first_read_tick;
+		}
+
+		/* Preserve unrelated switch bits through W52 and 2.4-GHz round trips. */
+		fake->registers[0x0cbcU] |= 0x80000000U;
+		assert(rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
+		assert((fake->registers[0x0cbcU] & 0x300U) == 0x100U);
+		assert((fake->registers[0x0cbcU] & 0x80000000U) != 0U);
+		assert(rtl8822b_radio_set_channel(&radio, 6U, UINT64_MAX) == 0);
+		assert((fake->registers[0x0cbcU] & 0x300U) == 0x200U);
+		assert((fake->registers[0x0cbcU] & 0x80000000U) != 0U);
+		assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+		assert_radio_off(fake, &radio);
+		fake_radio_destroy(fake);
+	}
+
+	/* Parse one explicit WLAN-only board for all transport-failure cases. */
+	logical[0xc1U] = 0x01U;
+	assert(rtl8822bu_board_parse(logical, sizeof(logical),
+	    (3U << 12) | (1U << 27), &board) == 0);
+
+	/* Fail every new startup write and require the existing checked radio reset. */
+	for (stage = 0U; stage < sizeof(stages) / sizeof(stages[0]); stage++) {
+		fake = fake_radio_create();
+		fake->coex_grants = 0x1234a580U;
+		fake->registers[0x0073U] = 0xabU;
+		fake->registers[0x004cU] = 0x00812345U;
+		fake->fail_write_at = stages[stage];
+		transport = fake_radio_transport(fake);
+		transport.usb_bulk_max_packet_size = 1024U;
+		memset(&radio, 0, sizeof(radio));
+		assert(rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
+		assert(rtl8822b_radio_start(&radio, UINT64_MAX) == EIO);
+		assert_radio_off(fake, &radio);
+		fake_radio_destroy(fake);
+	}
+
+	/* Reject every grant-port read failure, ineffective writes and bounded busy ports. */
+	for (failure = 0U; failure < 12U; failure++) {
+		fake = fake_radio_create();
+		fake->coex_grants = 0x1234a580U;
+		transport = fake_radio_transport(fake);
+		transport.usb_bulk_max_packet_size = 1024U;
+		memset(&radio, 0, sizeof(radio));
+		assert(rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
+		deadline = UINT64_MAX;
+		error = EIO;
+
+		/* Select one real failure boundary without changing production behavior. */
+		if (failure < 7U) {
+			fake->coex_fail_read_at = failure;
+		} else if (failure == 7U) {
+			fake->coex_drop_write = 1;
+		} else if (failure == 8U) {
+			fake->coex_drop_owner = 1;
+		} else if (failure == 9U) {
+			fake->coex_drop_dpdt = 1;
+		} else {
+			fake->coex_busy = 1;
+			error = ETIMEDOUT;
+
+			/* Let the shared deadline expire during grant readiness polling. */
+			if (failure == 11U)
+				deadline = grant_tick + 50U;
+		}
+		assert(rtl8822b_radio_start(&radio, deadline) == error);
+		assert_radio_off(fake, &radio);
+
+		/* A permanently busy port admits no command and stops at either bound. */
+		if (failure >= 10U) {
+			assert(fake->coex_commands == 0U);
+			assert(fake->coex_reads <= 1000U);
+			assert(fake->coex_reads == 1000U || failure == 11U);
+			assert(fake->coex_reads > 0U);
+		}
+		fake_radio_destroy(fake);
+	}
+}
+
+/* Checks probe and deauthentication rates from the radio's current channel. */
+static void
+assert_management_rate(
+	const struct rtl8822b_radio *radio,
+	unsigned rate)
+{
+	static const uint8_t bssid[6] = { 0x02U, 1U, 2U, 3U, 4U, 5U };
+	uint8_t frame[26];
+	uint8_t wire[80];
+	size_t length;
+	unsigned kind;
+	unsigned index;
+	uint16_t checksum;
+
+	/* Check both management paths which share the production encoder. */
+	make_probe_request(frame, &radio->board);
+	for (kind = 0U; kind < 2U; kind++) {
+		/* Construct each frame through its ordinary public entry point. */
+		if (kind == 0U) {
+			assert(rtl8822b_radio_management_frame_prepare(radio, wire,
+			    sizeof(wire), frame, sizeof(frame), &length) == 0);
+		} else {
+			assert(rtl8822b_radio_deauthentication_prepare(radio, wire,
+			    sizeof(wire), bssid, radio->board.mac_address,
+			    3U, &length) == 0);
+			assert(wire[48U] == 0xc0U);
+			assert(get_le16(wire + 72U) == 3U);
+		}
+
+		/* Require fixed basic-rate selection and unchanged descriptor shape. */
+		assert(length == 74U);
+		assert((get_le32(wire + 12U) & (1U << 8)) != 0U);
+		assert((get_le32(wire + 16U) & 0x7fU) == rate);
+		assert(((get_le32(wire + 4U) >> 8) & 0x1fU) == 18U);
+
+		/* Include the selected rate in the hardware descriptor checksum. */
+		checksum = 0U;
+		for (index = 0U; index < 16U; index++)
+			checksum ^= get_le16(wire + index * 2U);
+		assert(checksum == 0U);
+	}
+}
+
+/* Checks the measured forced-ETSI board without inferring a country code. */
+static void
+test_hardware_etsi_plan(
+	void)
+{
+	static const uint8_t channels[] = { 36U, 40U, 44U, 48U };
+	static const uint8_t rejected_channels[] = {
+		0U, 12U, 14U, 35U, 37U, 49U, 52U, 64U,
+		100U, 140U, 149U, 165U, 255U
+	};
+	static const uint8_t rejected_profiles[][3] = {
+		{ 0x26U, 0xffU, 0xffU }, { 0x27U, 0xffU, 0xffU },
+		{ 0x7fU, 0xffU, 0xffU }, { 0xffU, 0xffU, 0xffU },
+		{ 0xa7U, 0xffU, 0xffU }, { 0xa5U, 0xffU, 0xffU },
+		{ 0x80U, 0xffU, 0xffU }, { 0xa6U, 'J', 'P' },
+		{ 0xa6U, 'U', 'S' }, { 0xa6U, 'D', 'E' },
+		{ 0xa6U, 0xffU, 'P' }, { 0xa6U, 'J', 0xffU },
+		{ 0xa6U, 0U, 0U }
+	};
+	struct rtl8822bu_board_info board;
+	struct rtl8822bu_board_info changed;
+	struct rtl8822b_radio_transport transport;
+	struct rtl8822b_radio radio;
+	struct fake_radio *fake;
+	uint8_t physical[RTL8822B_EFUSE_PHYSICAL_SIZE];
+	uint8_t logical[RTL8822B_EFUSE_LOGICAL_SIZE];
+	size_t index;
+	unsigned path;
+	unsigned group;
+
+	/* Parse cut D/RFE 3 with the observed raw hardware policy bytes. */
+	make_efuse(physical, logical);
+	logical[0xb8U] = 0xa6U;
+	logical[0xcaU] = 3U;
+	logical[0xcbU] = 0xffU;
+	logical[0xccU] = 0xffU;
+	assert(rtl8822bu_board_parse(logical, sizeof(logical),
+	    (3U << 12) | (1U << 27), &board) == 0);
+	assert(board.channel_plan == 0xa6U);
+	assert(board.country_code[0] == 0xffU && board.country_code[1] == 0xffU);
+	assert(board.chip.cut == 3U && board.rfe_option == 3U);
+
+	/* Admit only the existing non-DFS 5-GHz subset. */
+	for (index = 0U; index < sizeof(channels); index++)
+		assert(rtl8822b_board_active_channel_allowed(&board, channels[index]));
+	for (index = 0U; index < sizeof(rejected_channels); index++)
+		assert(!rtl8822b_board_active_channel_allowed(&board,
+		    rejected_channels[index]));
+	assert(rtl8822b_board_active_channel_allowed(&board, 1U));
+	assert(rtl8822b_board_active_channel_allowed(&board, 11U));
+
+	/* Reject unforced, unknown, missing and contradictory policy profiles. */
+	for (index = 0U; index < sizeof(rejected_profiles) /
+	    sizeof(rejected_profiles[0]); index++) {
+		changed = board;
+		changed.channel_plan = rejected_profiles[index][0];
+		changed.country_code[0] = rejected_profiles[index][1];
+		changed.country_code[1] = rejected_profiles[index][2];
+		assert(!rtl8822b_board_active_channel_allowed(&changed, 44U));
+		assert(rtl8822b_board_active_channel_allowed(&changed, 1U));
+	}
+
+	/* Keep both original Japan plan cases admitted. */
+	changed = board;
+	changed.country_code[0] = 'J';
+	changed.country_code[1] = 'P';
+	changed.channel_plan = 0x27U;
+	assert(rtl8822b_board_active_channel_allowed(&changed, 44U));
+	changed.channel_plan = 0x7fU;
+	assert(rtl8822b_board_active_channel_allowed(&changed, 44U));
+
+	/* Check every consumed calibration group and path before policy admission. */
+	for (path = 0U; path < 2U; path++) {
+		/* Reject missing and out-of-range W52 group calibration. */
+		for (group = 0U; group < 2U; group++) {
+			changed = board;
+			changed.tx_power_5g[path].bw40_base[group] = 0x40U;
+			assert(!rtl8822b_board_active_channel_allowed(&changed, 44U));
+			changed.tx_power_5g[path].bw40_base[group] = 0xffU;
+			assert(!rtl8822b_board_active_channel_allowed(&changed, 44U));
+		}
+
+		/* Reject invalid signed OFDM differences from direct board callers. */
+		changed = board;
+		changed.tx_power_5g[path].ofdm_diff = -9;
+		assert(!rtl8822b_board_active_channel_allowed(&changed, 44U));
+		changed.tx_power_5g[path].ofdm_diff = 8;
+		assert(!rtl8822b_board_active_channel_allowed(&changed, 44U));
+	}
+
+	/* Exercise the new board through ordinary SuperSpeed radio startup. */
+	fake = fake_radio_create();
+	transport = fake_radio_transport(fake);
+	transport.usb_bulk_max_packet_size = 1024U;
+	memset(&radio, 0, sizeof(radio));
+	assert(rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
+	assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+	assert(rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
+	assert_management_rate(&radio, 4U);
+	assert(radio.board.channel_plan == 0xa6U);
+	assert(radio.board.country_code[0] == 0xffU &&
+	    radio.board.country_code[1] == 0xffU);
+	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	assert_radio_off(fake, &radio);
+	fake_radio_destroy(fake);
+}
+
+/* Verifies W52 rates, the 2.4-GHz return and failed channel transitions. */
+static void
+test_management_band_rates(
+	void)
+{
+	static const uint8_t channels[] = { 1U, 36U, 40U, 44U, 48U, 11U, 1U };
+	static const uint8_t bssid[6] = { 0x02U, 1U, 2U, 3U, 4U, 5U };
+	struct rtl8822bu_board_info board;
+	struct rtl8822b_radio_transport transport;
+	struct rtl8822b_radio radio;
+	struct fake_radio *fake;
+	uint8_t frame[26];
+	uint8_t wire[80];
+	size_t length;
+	size_t index;
+	unsigned speed;
+
+	/* Select rates solely from the live channel at both USB packet sizes. */
+	for (speed = 0U; speed < 2U; speed++) {
+		/* Start the real radio transaction with a calibrated Japan board. */
+		fake = fake_radio_create();
+		board = fake_board(2U);
+		transport = fake_radio_transport(fake);
+		transport.usb_bulk_max_packet_size = speed == 0U ? 512U : 1024U;
+		memset(&radio, 0, sizeof(radio));
+		assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+		    UINT64_MAX) == 0);
+		assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+
+		/* Visit every W52 channel and return to the accepted CCK profile. */
+		for (index = 0U; index < sizeof(channels); index++) {
+			assert(rtl8822b_radio_set_channel(&radio, channels[index],
+			    UINT64_MAX) == 0);
+			assert(radio.channel == channels[index]);
+			assert_management_rate(&radio, index >= 1U && index <= 4U ?
+			    4U : 0U);
+		}
+
+		/* A rejected unsupported channel must not change the selected rate. */
+		assert(rtl8822b_radio_set_channel(&radio, 52U,
+		    UINT64_MAX) == EOPNOTSUPP);
+		assert(radio.channel == 1U);
+		assert_management_rate(&radio, 0U);
+		assert(rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
+		assert_management_rate(&radio, 4U);
+
+		/* Fail an actual W52-to-2.4-GHz register transaction. */
+		make_probe_request(frame, &board);
+		fake->fail_write_at = fake->write_count + 8U;
+		assert(rtl8822b_radio_set_channel(&radio, 1U, UINT64_MAX) == EIO);
+		assert_radio_off(fake, &radio);
+
+		/* Refuse both encoders after rollback leaves the radio unavailable. */
+		length = sizeof(wire);
+		assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+		    sizeof(wire), frame, sizeof(frame), &length) != 0);
+		assert(length == 0U);
+		length = sizeof(wire);
+		assert(rtl8822b_radio_deauthentication_prepare(&radio, wire,
+		    sizeof(wire), bssid, board.mac_address, 3U, &length) == EPERM);
+		assert(length == 0U);
+		fake_radio_destroy(fake);
+	}
+}
+
+/* Checks both packet sizes, every supported cut and PHY failure rollback. */
+static void
+test_radio_usb_profiles(
+	void)
+{
+	struct rtl8822bu_board_info board;
+	struct rtl8822b_radio_transport transport;
+	struct rtl8822b_radio radio;
+	struct fake_radio *fake;
+	size_t phy_start;
+	size_t index;
+	unsigned speed;
+	unsigned cut;
+	unsigned stage;
+	unsigned phy_writes;
+
+	/* Reject unsupported transport sizes before any register access. */
+	fake = fake_radio_create();
+	board = fake_board(2U);
+	transport = fake_radio_transport(fake);
+	memset(&radio, 0, sizeof(radio));
+	transport.usb_bulk_max_packet_size = 0U;
+	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	    UINT64_MAX) == EINVAL);
+	transport.usb_bulk_max_packet_size = 64U;
+	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	    UINT64_MAX) == EINVAL);
+	assert(fake->write_count == 0U && fake->read_count == 0U);
+	fake_radio_destroy(fake);
+
+	/* Exercise the cut table at both enumerated USB speeds. */
+	phy_start = SIZE_MAX;
+	for (speed = 0U; speed < 2U; speed++) {
+		/* Preserve non-D cuts and check D's ordered three-register write. */
+		for (cut = 0U; cut <= 6U; cut++) {
+			/* Power up through the same private transport used by USB. */
+			fake = fake_radio_create();
+			board = fake_board(2U);
+			board.chip.cut = (uint8_t)cut;
+			transport = fake_radio_transport(fake);
+			transport.usb_bulk_max_packet_size = speed == 0U ?
+			    512U : 1024U;
+			memset(&radio, 0, sizeof(radio));
+			assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+			    UINT64_MAX) == 0);
+
+			/* Count only USB PHY register writes in the complete trace. */
+			phy_writes = 0U;
+			for (index = 0U; index < fake->trace_count; index++) {
+				/* Identify the PHY data and trigger registers. */
+				if (fake->trace[index].address >= 0xff0cU &&
+				    fake->trace[index].address <= 0xff0eU)
+					phy_writes++;
+			}
+
+			/* Check the exact cut-D value and write order. */
+			if (cut == 3U) {
+				assert(phy_writes == 3U);
+				phy_start = trace_find(fake, 0U, 0xff0dU, 1U,
+				    0x41U);
+				assert(fake->trace[phy_start + 1U].address ==
+				    0xff0eU);
+				assert(fake->trace[phy_start + 1U].value == 0xa8U);
+				assert(fake->trace[phy_start + 2U].address ==
+				    0xff0cU);
+				assert(fake->trace[phy_start + 2U].value == 0x81U);
+			} else {
+				assert(phy_writes == 0U);
+			}
+
+			/* Check speed-specific DMA and speed-independent v1 aggregate. */
+			assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+			assert((fake->registers[0x0290U] & 0xffU) ==
+			    (speed == 0U ? 0x1eU : 0x0eU));
+			assert((fake->registers[0x0280U] & 0xffffU) == 0x2005U);
+			assert(rtl8822b_radio_set_channel(&radio, 44U,
+			    UINT64_MAX) == 0);
+			assert(rtl8822b_radio_active_scan_allowed(&radio, 44U));
+			assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+			assert_radio_off(fake, &radio);
+			fake_radio_destroy(fake);
+		}
+	}
+
+	/* Fail each cut-D PHY write and require complete radio rollback. */
+	assert(phy_start != SIZE_MAX);
+	for (stage = 0U; stage < 3U; stage++) {
+		/* Inject one failure at the selected production write. */
+		fake = fake_radio_create();
+		board = fake_board(2U);
+		board.chip.cut = 3U;
+		transport = fake_radio_transport(fake);
+		transport.usb_bulk_max_packet_size = 1024U;
+		fake->fail_write_at = phy_start + stage;
+		memset(&radio, 0, sizeof(radio));
+		assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+		    UINT64_MAX) == EIO);
+		assert_radio_off(fake, &radio);
+		assert(fake->registers[0xff0cU] == 0U);
+		fake_radio_destroy(fake);
+	}
+}
+
+/* Verifies the actual firmware chunk planner and descriptor at a boundary. */
+static int
+check_firmware_boundary(
+	void *context,
+	const struct rtl8822b_firmware_chunk *chunk)
+{
+	size_t *expected;
+	uint8_t descriptor[RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE];
+	uint16_t checksum;
+	size_t total;
+	unsigned index;
+
+	/* Preserve the memory destination length independently of USB padding. */
+	expected = context;
+	assert(chunk->length == expected[0]);
+	assert(chunk->wire_payload_length == expected[1]);
+	assert(chunk->file_offset == 0U && chunk->destination == 0x10000U);
+	assert(chunk->first && chunk->last && !chunk->checksum_continue);
+	total = chunk->wire_payload_length + sizeof(descriptor);
+	assert(total % 512U != 0U && total % 1024U != 0U);
+	assert(rtl8822b_firmware_tx_descriptor(descriptor,
+	    chunk->wire_payload_length) == 0);
+	assert(get_le16(descriptor) == expected[1]);
+
+	/* Check descriptor integrity after the padded payload length is stored. */
+	checksum = 0U;
+	for (index = 0U; index < 16U; index++)
+		checksum ^= get_le16(descriptor + index * 2U);
+	assert(checksum == 0U);
+	expected[2]++;
+
+	/* Report this accepted chunk. */
+	return 0;
+}
+
+/* Checks short-packet termination and payload preservation around USB sizes. */
+static void
+test_usb_tx_boundaries(
+	void)
+{
+	struct rtl8822b_firmware_view view;
+	struct rtl8822b_radio radio;
+	uint8_t frame[1536];
+	uint8_t wire[1540];
+	size_t expected[3];
+	size_t frame_length;
+	size_t expected_wire;
+	size_t wire_length;
+	size_t offset;
+	size_t ie_length;
+	size_t remaining;
+	size_t boundary;
+	size_t wire_base;
+	unsigned neighbor;
+	unsigned speed;
+	unsigned index;
+	uint16_t checksum;
+
+	/* Exercise each neighborhood using valid production probe requests. */
+	memset(&radio, 0, sizeof(radio));
+	radio.board = fake_board(2U);
+	radio.state = RTL8822B_RADIO_STARTED;
+	radio.channel = 1U;
+	radio.power_limits_valid = 1U;
+	memset(&view, 0, sizeof(view));
+	view.size = sizeof(frame);
+	for (boundary = 512U; boundary <= 1536U; boundary += 512U) {
+		/* Test one byte below, exactly at and one byte above each boundary. */
+		for (neighbor = 0U; neighbor < 3U; neighbor++) {
+			/* Keep the firmware's destination count independent of padding. */
+			wire_base = boundary - 1U + neighbor;
+			frame_length = wire_base - 48U;
+			expected_wire = wire_base + (neighbor == 1U ? 1U : 0U);
+			expected[0] = frame_length;
+			expected[1] = expected_wire - 48U;
+			expected[2] = 0U;
+			assert(rtl8822b_test_firmware_segment(&view, frame_length,
+			    check_firmware_boundary, expected) == 0);
+			assert(expected[2] == 1U);
+
+			/* Fill a valid wildcard probe with bounded vendor information. */
+			memset(frame, 0x5a, sizeof(frame));
+			make_probe_request(frame, &radio.board);
+			offset = 26U;
+			while (offset < frame_length) {
+				/* Avoid leaving an incomplete final information element. */
+				remaining = frame_length - offset;
+				assert(remaining >= 2U);
+				ie_length = remaining > 257U ? 255U : remaining - 2U;
+
+				/* Reserve two bytes when the next element would be short. */
+				if (remaining - ie_length - 2U == 1U)
+					ie_length--;
+				frame[offset] = 221U;
+				frame[offset + 1U] = (uint8_t)ie_length;
+				offset += ie_length + 2U;
+			}
+
+			/* Check the same encoder on both validated USB profiles. */
+			for (speed = 0U; speed < 2U; speed++) {
+				radio.transport.usb_bulk_max_packet_size =
+				    speed == 0U ? 512U : 1024U;
+				memset(wire, 0xa5, sizeof(wire));
+				assert(rtl8822b_radio_management_frame_prepare(&radio,
+				    wire, sizeof(wire), frame, frame_length,
+				    &wire_length) == 0);
+				assert(wire_length == expected_wire);
+				assert(wire_length %
+				    radio.transport.usb_bulk_max_packet_size != 0U);
+				assert(get_le16(wire) == frame_length);
+				assert(memcmp(wire + 48U, frame, frame_length) == 0);
+				assert(wire[wire_length] == 0xa5U);
+
+				/* Require zero padding only when the unpadded size was full. */
+				if (neighbor == 1U)
+					assert(wire[wire_length - 1U] == 0U);
+
+				/* Validate descriptor checksum and exact-capacity refusal. */
+				checksum = 0U;
+				for (index = 0U; index < 16U; index++)
+					checksum ^= get_le16(wire + index * 2U);
+				assert(checksum == 0U);
+				assert(rtl8822b_radio_management_frame_prepare(&radio,
+				    wire, expected_wire - 1U, frame, frame_length,
+				    &wire_length) == ENOSPC);
+				assert(wire_length == 0U);
+			}
+		}
+	}
 }
 
 static void
@@ -1613,13 +2535,21 @@ main(int argc, char **argv)
 	test_firmware();
 	test_efuse();
 	test_rx();
+	test_c2h_rx_metadata();
 	test_bounded_random_inputs();
 	test_radio_table_interpreter();
+	test_radio_transport_deadline();
 	test_radio_txagc_clamps();
 	test_radio_lifecycle();
 	test_radio_deadline_and_stop_retry();
 	test_radio_already_powered_rebind();
 	test_radio_profile_costs();
+	test_radio_trx_path_a();
+	test_radio_wlan_only();
+	test_management_band_rates();
+	test_hardware_etsi_plan();
+	test_radio_usb_profiles();
+	test_usb_tx_boundaries();
 	if (argc == 2)
 		test_pinned_blob(argv[1]);
 	else

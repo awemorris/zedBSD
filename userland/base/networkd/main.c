@@ -1131,6 +1131,13 @@ retire_managed_connection(
 {
 	struct networkd_managed_wlan_connection *connection;
 	struct networkd_wifi_child_result result;
+	const char *cleanup_stage;
+	unsigned child_records;
+	int child_terminal;
+	int child_exit;
+	int child_signal;
+	int disconnect_error;
+	int l3_error;
 	int cleanup_error;
 
 	/* Moves an already idle enabled policy directly to its requested state. */
@@ -1139,6 +1146,13 @@ retire_managed_connection(
 		return networkd_managed_wlan_finish_connection(&managed_wlan,
 		    next_state);
 	cleanup_error = 0;
+	cleanup_stage = "identity";
+	disconnect_error = 0;
+	l3_error = 0;
+	child_terminal = 0;
+	child_exit = 0;
+	child_signal = 0;
+	child_records = 0U;
 
 	/* Never mutates a later device which reused the recorded identity. */
 	if (normalize) {
@@ -1150,11 +1164,20 @@ retire_managed_connection(
 			if (run_wifi(connection->interface, "disconnect", NULL,
 			    10U, &result) != 0)
 				cleanup_error = errno != 0 ? errno : EIO;
+			disconnect_error = cleanup_error;
+			cleanup_stage = "wifi-disconnect";
+			child_terminal = result.terminal_error;
+			child_exit = result.child_exit_status;
+			child_signal = result.child_term_signal;
+			child_records = result.output_records;
 			networkd_wifi_child_result_clear(&result);
 			if (connection->owns_l3) {
 				if (clear_interface_l3(&managed_wlan) != 0) {
-					if (cleanup_error == 0)
-						cleanup_error = errno;
+					l3_error = errno;
+					if (cleanup_error == 0) {
+						cleanup_error = l3_error;
+						cleanup_stage = "l3";
+					}
 				} else {
 					connection->owns_l3 = 0;
 					networkd_protocol_clear(&connection->l3,
@@ -1166,6 +1189,14 @@ retire_managed_connection(
 			fprintf(stderr,
 			    "networkd: %s: managed cleanup degraded: %s\n",
 			    connection->interface, strerror(cleanup_error));
+			/* Distinguish child/setup failure from later L3 cleanup without
+			 * exposing any child output, diagnostics, or connection identity. */
+			fprintf(stderr,
+			    "networkd: managed-cleanup stage=%s error=%d "
+			    "disconnect-error=%d l3-error=%d child-error=%d "
+			    "child-exit=%d child-signal=%d child-records=%u\n",
+			    cleanup_stage, cleanup_error, disconnect_error, l3_error,
+			    child_terminal, child_exit, child_signal, child_records);
 		}
 	}
 

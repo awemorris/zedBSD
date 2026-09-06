@@ -1,6 +1,14 @@
 # Q077 resume preparation — 2026-09-05
 
-Parent: [p013](phase.md). Execution authority and limits: [q077](../../queue.md).
+Status checked: 2026-09-06. This is a historical preparation checkpoint,
+superseded by the [completed q077 results](../tests/q077-results.md).
+P013, p014 and p015 are complete; the next-action list and unconsumed budgets
+below describe the state before that completion and must not trigger a rerun.
+Use the [current WS018 resume point](../ws.md) and [current Queue](../../queue.md)
+for present work. The separately planned UFS unification belongs to
+[WS024](../../ws024-unified-ufs/ws.md).
+
+Parent: [p013](phase.md). Execution authority and limits: [q077](../../queue-q077.md).
 
 This checkpoint prepares continuation; it does not complete p013/p014/p015 or
 start the shared QEMU campaign.

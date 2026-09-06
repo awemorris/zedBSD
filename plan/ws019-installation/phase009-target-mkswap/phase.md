@@ -1,6 +1,6 @@
 # WS019 Phase 009: target `/sbin/mkswap`
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 WSID: `ws019`
 
@@ -8,7 +8,7 @@ Phase ID: `p009`
 
 Combined ID: `ws019-p009`
 
-Status: planned; follows p002 and precedes p004
+Status: completed in q079 after q078 implementation
 
 Parent: [WS019](../ws.md)
 
@@ -29,10 +29,12 @@ mkswap FILE
 - `FILE` must already exist, be a writable regular file, and have the exact
   desired page-aligned size. `mkswap` neither creates nor resizes it.
 - A mounted, root, overlay, already active swap, non-regular, aliased, or
-  otherwise busy object is refused using the stable p002 storage snapshot.
+  otherwise busy object is refused using a descriptor-owned backing reservation. P002's completed
+  diagnostic mount listing is not an exclusion token.
 - The command opens without following a final symlink, validates the opened
   identity and size, obtains exclusive access, and writes the production
-  ZEDSWAP2 header and slot map used by WS016. It does not invent a new swap
+  ZEDSWAP2 header and page-aligned slot area used by WS016. The
+  allocation bitmap is kernel memory, not an on-disk slot map. It does not invent a new swap
   format or silently fall back to ZEDSWAP1.
 - Success is printed only after flush, reopen, production-parser validation,
   and a checked slot count derived from the file size.
@@ -64,3 +66,35 @@ this command only after preflight and explicit installer confirmation.
 
 Adding block-device swap, labels, resize, activation inside `mkswap`, or a new
 format version requires a later Phase and does not broaden installer v1.
+
+## Q078 implementation boundary
+
+The first implementation supports pre-sized FAT-backed regular files with
+canonical identity and complete allocated extents; other containing
+filesystems fail with `EOPNOTSUPP` before content writes. A descriptor-owned
+reservation excludes other content/namespace mutations and swap/loop
+activation until final close. Idle descriptors and read-only verification
+opens remain possible; shared mappings/cache objects and in-flight mutations
+prevent acquisition. Private read snapshots do not grant backing mutation.
+
+The original descriptor retains its reservation while the command reopens
+read-only and compares identity/size. Kernel production parsers are linked
+into the target tools; no generic probe ioctl or comprehensive storage
+snapshot is added. Failure never prints success and never resizes the file.
+
+ZEDSWAP2 accepts 4096-byte-aligned sizes from 8192 through 2,147,479,552
+bytes, bounded for the existing file-backed path on both user ABIs. Slot count
+is `bytes / 4096 - 1`; installer v1 selects 64 MiB and 16,383 slots.
+
+## Completion evidence
+
+[Q078 implementation and diagnosed attempts](../tests/q078-results.md) and
+[Q079 final acceptance](../tests/q079-results.md) close this Phase. Production-
+linked normal/sanitizer fixtures and all three supported builds pass. The
+isolated QEMU cell passes target formatting, refusals, swap activation and
+deactivation, generated overlay/swap boot, two-reboot persistence, and
+production-input/GPT/FAT/sentinel invariance.
+
+Only required reserved metadata and allocated initial contents are initialized;
+unused areas are not an erasure guarantee. The fixture supplies pre-sized
+zero files, so installer staging-allocation performance remains a p004 finding.

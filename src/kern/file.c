@@ -8,6 +8,9 @@
 #include "kern/cred.h"
 #include "kern/record-lock.h"
 #include "kern/vm-object.h"
+#include "kern/fat.h"
+#include "kern/kmem.h"
+#include "kern/uaccess.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -15,6 +18,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <zedbsd/fcntl.h>
 
 #define FILE_MAX 192U
 #define VFS_BSS __attribute__((section(".vfs_bss")))
@@ -32,6 +36,20 @@ static uint8_t file_used[FILE_MAX] VFS_BSS;
 static struct spinlock file_pool_lock = {
 	{ 0 }, LOCK_RANK_FILE, "file pool", 0, 0
 };
+
+struct file_format_extents {
+	struct backing_claim_extent *entries;
+	struct disk *disk;
+	uint64_t blocks;
+	uint64_t next_block;
+	unsigned count;
+	unsigned capacity;
+};
+
+static int file_format_reserve_locked(struct file *file, uint64_t size);
+static int file_format_collect_extent(uint64_t file_block, uint64_t disk_block, uint32_t count, void *argument);
+static int file_format_finalize(struct file *file, struct backing_claim *claim, uint64_t size);
+static int file_format_ioctl(struct file *file, uintptr_t argument);
 
 extern int vm_object_inode_io_wait(struct inode *) __attribute__((weak));
 extern int vm_object_inode_resize_active(struct inode *)
@@ -60,6 +78,39 @@ extern void vm_object_content_read_end(struct inode *) __attribute__((weak));
 extern int vm_object_cache_published(struct inode *) __attribute__((weak));
 extern void file_regular_io_lock_checkpoint(struct inode *)
 	__attribute__((weak));
+extern int vm_object_backing_busy(const struct backing_claim *)
+	__attribute__((weak));
+
+/*
+ * Reserves fixed-size formatting through an existing FAT file description.
+ *
+ * Idle readers remain usable; competing content and activation mutations fail.
+ */
+int
+file_format_reserve(
+	struct file *file,
+	uint64_t size)
+{
+	int error;
+
+	/* Rejects descriptors that cannot represent a regular backing object. */
+	if (file == NULL)
+		return EBADF;
+
+	/* Validates the object before taking its regular-file I/O mutex. */
+	if (file->f_inode == NULL || file->f_inode->i_type != INODE_REG)
+		return EINVAL;
+
+	/* Serializes reservation publication with positional and ordinary I/O. */
+	mutex_lock(&file->f_lock);
+	mutex_lock(&file->f_inode->i_io_lock);
+	error = file_format_reserve_locked(file, size);
+	mutex_unlock(&file->f_inode->i_io_lock);
+	mutex_unlock(&file->f_lock);
+
+	/* Reports the reservation result without changing descriptor position. */
+	return error;
+}
 
 static struct file *
 file_alloc(void)
@@ -318,6 +369,10 @@ file_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 {
 	if (file == NULL)
 		return EBADF;
+
+	/* Handles the regular-file lease before filesystem-specific ioctls. */
+	if (request == ZEDBSD_FILE_FORMAT_RESERVE)
+		return file_format_ioctl(file, argument);
 	if (file->f_ops == NULL || file->f_ops->ioctl == NULL)
 		return EOPNOTSUPP;
 	/* ioctl backends synchronize their own state.  A blocking ioctl must not
@@ -709,6 +764,7 @@ file_io_begin_cred(struct file *file, enum file_io_kind kind, off_t offset,
 	if (writing && file->f_inode != NULL &&
 	    file->f_inode->i_type == INODE_REG) {
 		int error = backing_mutation_begin_inode_claimed(file->f_inode,
+		    file->f_format_claim != NULL ? file->f_format_claim :
 		    (internal_flags & FILE_IO_LOOP_BACKING) != 0 ?
 		    file->f_backing_claim : NULL, &io->backing_guard);
 		if (error != 0) {
@@ -777,6 +833,25 @@ file_io_transfer(struct file_io *io, void *buffer, size_t length)
 	file = io->file;
 	memset(&resize, 0, sizeof(resize));
 	memset(&content, 0, sizeof(content));
+
+	/* Keeps every formatter transfer inside its original, immutable EOF. */
+	if (file_io_is_write(io->kind) && file->f_format_claim != NULL) {
+		/* Rejects append even when descriptor flags changed after reservation. */
+		if (io->append_requested ||
+		    (file_status_flags_get(file) & O_APPEND) != 0)
+			return -EINVAL;
+
+		/* Refuses stale backing metadata before calling the filesystem. */
+		if (file->f_inode->i_size < 0 ||
+		    (uint64_t)file->f_inode->i_size != file->f_format_size)
+			return -ESTALE;
+
+		/* Rejects the whole transfer rather than extending or clipping it. */
+		if (io->offset < 0 ||
+		    (uint64_t)io->offset > file->f_format_size ||
+		    (uint64_t)length > file->f_format_size - (uint64_t)io->offset)
+			return -EFBIG;
+	}
 
 	/* A published MAP_SHARED object is the read source of truth.  Once selected,
 	 * its inode read lease stays in struct file_io until file_io_end(), covering
@@ -1337,6 +1412,12 @@ file_close(struct file *file)
 	record_lock_release_file(file);
 	if (file->f_ops != NULL && file->f_ops->close != NULL)
 		error = file->f_ops->close(file);
+
+	/* Releases owner exclusion only after the final backend close completes. */
+	if (file->f_format_claim != NULL) {
+		backing_claim_release(file->f_format_claim);
+		file->f_format_claim = NULL;
+	}
 	if (file->f_path.p_inode != NULL)
 		path_release(&file->f_path);
 	else if (file->f_inode != NULL)
@@ -1378,4 +1459,210 @@ file_count(void)
 		count += file_used[i] != 0;
 	spin_unlock_irqrestore(&file_pool_lock, irq);
 	return count;
+}
+
+/* Copies and validates the fixed-width formatter request. */
+static int
+file_format_ioctl(
+	struct file *file,
+	uintptr_t argument)
+{
+	struct zedbsd_file_format_reserve request;
+	int error;
+
+	/* Copies the complete request before making any reservation. */
+	error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+
+	/* Rejects unsupported versions and nonzero extension fields. */
+	if (request.version != ZEDBSD_FILE_FORMAT_VERSION ||
+	    request.struct_size != sizeof(request) ||
+	    request.reserved[0] != 0 || request.reserved[1] != 0)
+		return EINVAL;
+
+	/* Reserves the opened object using its expected byte count. */
+	error = file_format_reserve(file, request.size_bytes);
+	return error;
+}
+
+/* Records complete, ordered FAT data extents without admitting holes. */
+static int
+file_format_collect_extent(
+	uint64_t file_block,
+	uint64_t disk_block,
+	uint32_t count,
+	void *argument)
+{
+	struct file_format_extents *collection;
+	struct backing_claim_extent *entry;
+
+	/* Checks the exact logical coverage before counting another extent. */
+	collection = argument;
+	if (count == 0 || file_block != collection->next_block ||
+	    file_block > collection->blocks ||
+	    count > collection->blocks - file_block)
+		return EIO;
+
+	/* Bounds the allocation count independently of file size. */
+	if (collection->count == UINT32_MAX)
+		return E2BIG;
+
+	/* Fills the array on the second traversal only. */
+	if (collection->entries != NULL) {
+		if (collection->count >= collection->capacity)
+			return EAGAIN;
+		entry = &collection->entries[collection->count];
+		entry->disk = collection->disk;
+		entry->block = disk_block;
+		entry->block_count = count;
+	}
+
+	/* Advances the expected contiguous logical position. */
+	collection->count++;
+	collection->next_block += count;
+	return 0;
+}
+
+/* Publishes the exact physical extents protected by the prepared claim. */
+static int
+file_format_finalize(
+	struct file *file,
+	struct backing_claim *claim,
+	uint64_t size)
+{
+	struct file_format_extents collection;
+	int error;
+
+	/* Counts complete extents while the preparing claim prevents mutation. */
+	memset(&collection, 0, sizeof(collection));
+	collection.disk = file->f_inode->i_mount->m_disk;
+	collection.blocks = size / 512U;
+	error = fat_file_extents(file, file_format_collect_extent, &collection);
+	if (error != 0)
+		return error;
+
+	/* Requires the complete preallocated file rather than a sparse prefix. */
+	if (collection.count == 0 || collection.next_block != collection.blocks)
+		return EIO;
+
+	/* Allocates the bounded physical extent array. */
+	collection.entries = kern_calloc(
+		collection.count,
+		sizeof(*collection.entries));
+	if (collection.entries == NULL)
+		return ENOMEM;
+
+	/* Resolves the same coverage for canonical-range publication. */
+	collection.capacity = collection.count;
+	collection.count = 0;
+	collection.next_block = 0;
+	error = fat_file_extents(file, file_format_collect_extent, &collection);
+	if (error == 0 && collection.next_block != collection.blocks)
+		error = EIO;
+
+	/* Checks overlap with existing claims before making the extents active. */
+	if (error == 0) {
+		error = backing_claim_finalize(
+			claim,
+			collection.entries,
+			collection.count);
+	}
+
+	/* Releases temporary extent storage on every outcome. */
+	kern_free(collection.entries);
+	return error;
+}
+
+/* Validates and publishes one lease while descriptor and inode I/O are held. */
+static int
+file_format_reserve_locked(
+	struct file *file,
+	uint64_t size)
+{
+	struct inode *inode;
+	struct mount *mountp;
+	struct backing_claim *claim;
+	int flags;
+	int error;
+
+	/* Requires an explicit non-symlink, read/write description. */
+	flags = file_status_flags_get(file);
+	if ((flags & O_ACCMODE) != O_RDWR)
+		return EBADF;
+
+	/* Rejects append and truncation descriptions before claiming the file. */
+	if ((flags & O_NOFOLLOW) == 0 ||
+	    (flags & (O_APPEND | O_TRUNC)) != 0)
+		return EINVAL;
+
+	/* Limits the first implementation to canonical FAT-backed files. */
+	inode = file->f_inode;
+	mountp = inode->i_mount;
+	if (mountp == NULL || mountp->m_type != &fat_filesystem_type ||
+	    mountp->m_disk == NULL || file_vm_inode(file) != inode)
+		return EOPNOTSUPP;
+
+	/* Requires the sector unit used by the production FAT extent interface. */
+	if (mountp->m_disk->d_block_size != 512U)
+		return EOPNOTSUPP;
+
+	/* Refuses read-only media and mounts even for a previously writable FD. */
+	if ((mountp->m_flags & MOUNT_READ_ONLY) != 0 ||
+	    (mountp->m_disk->d_flags & DISK_READ_ONLY) != 0)
+		return EROFS;
+
+	/* Refuses active backing objects and a second reservation on this FD. */
+	if (file->f_format_claim != NULL || file->f_backing_claim != NULL ||
+	    (inode->i_flags & (INODE_ROOT | INODE_DEAD |
+	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0)
+		return EBUSY;
+
+	/* Requires complete sectors at exactly the caller's existing size. */
+	if (size == 0 || size > (uint64_t)OFF_T_MAX || size % 512U != 0)
+		return EINVAL;
+
+	/* Refuses changed identity metadata before any formatting write. */
+	if (inode->i_size < 0 || (uint64_t)inode->i_size != size)
+		return ESTALE;
+
+	/* Requires VM admission support rather than granting an incomplete lease. */
+	if (vm_object_backing_busy == NULL)
+		return EOPNOTSUPP;
+
+	/* Excludes competing I/O, raw aliases, and swap or loop activation. */
+	error = backing_claim_prepare_inode(inode, BACKING_CLAIM_FORMAT, &claim);
+	if (error != 0)
+		return error;
+
+	/* Rejects published shared mappings and retained dirty cache aliases. */
+	error = vm_object_backing_busy(claim);
+	if (error != 0) {
+		backing_claim_release(claim);
+		return error;
+	}
+
+	/* Freezes the exact physical extent set while the claim still prepares. */
+	error = file_format_finalize(file, claim, size);
+	if (error != 0) {
+		backing_claim_release(claim);
+		return error;
+	}
+
+	/* Revalidates the caller's size before publishing owner write capability. */
+	if (inode->i_size < 0 || (uint64_t)inode->i_size != size) {
+		backing_claim_release(claim);
+		return ESTALE;
+	}
+
+	/* Refuses an inode removed before its canonical claim was acquired. */
+	if ((inode->i_flags & INODE_DEAD) != 0) {
+		backing_claim_release(claim);
+		return ESTALE;
+	}
+
+	/* Publishes a lease whose lifetime follows the open file description. */
+	file->f_format_size = size;
+	file->f_format_claim = claim;
+	return 0;
 }

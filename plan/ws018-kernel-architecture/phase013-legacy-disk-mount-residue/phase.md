@@ -19,7 +19,7 @@ Tests: [WS018 test index](../tests/README.md)
 The user identifies automatic `/diskN` mounts as obsolete PC-9800 Linux-loader
 heritage and requires removal, not a compatibility switch. The current request
 initially authorized audit/planning; the subsequent user request explicitly
-authorizes Queue selection and execution through [q077](../../queue.md).
+authorizes Queue selection and execution through [q077](../../queue-q077.md).
 Q076 remains finished; this Phase does not reopen its execution budget or clear
 its outstanding runtime gates. The required new finite approval was obtained as q077.
 
@@ -138,10 +138,11 @@ completion, record uncleared with a concrete resume condition and stop.
 Historical planning result on 2026-09-05: residue found and bounded removal scope recorded.
 No production code, tests, runtime state, images or Queue authorization changed.
 
-## Execution update
+## Historical execution update before q077 completion
 
-Current continuation entry: [2026-09-05 resume preparation](resume.md), including
-fresh focused host results, working-tree assumptions and remaining gates.
+Historical checkpoint: [2026-09-05 resume preparation](resume.md), including
+the then-current focused results, working-tree assumptions and remaining gates.
+The final result below supersedes this checkpoint; p013--p015 are complete.
 
 Approved q077 removed the retired graph and six manifest references. KA-T120,
 ordinary traversal/flag tests, storage/claims/identity/FAT regressions and three

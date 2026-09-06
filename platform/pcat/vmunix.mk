@@ -119,7 +119,7 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o \
 	$(BUILD)/src/kern/mount.o \
 	$(BUILD)/src/kern/tmpfs.o \
 	$(BUILD)/src/kern/overlayfs.o \
-	$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/swap.o \
+	$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/swap.o $(BUILD)/src/kern/swap-format.o \
 	$(BUILD)/src/kern/backing-claim.o \
 	$(BUILD)/src/kern/swap-source.o $(BUILD)/src/kern/swap-control.o \
 	$(BUILD)/src/kern/swap-boot.o \

@@ -157,6 +157,9 @@ struct vm_object_content {
 	unsigned prepared;
 };
 
+struct backing_claim;
+int vm_object_backing_busy(const struct backing_claim *);
+
 int
 vm_object_get_shared(
 	struct file *file,

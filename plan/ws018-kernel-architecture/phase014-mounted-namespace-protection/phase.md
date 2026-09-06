@@ -18,7 +18,7 @@ p013 cleanup: `rmdir=0 expected=17 callbacks=1` (zedBSD EBUSY is 17). Both norma
 and ASan/UBSan runs fail. This is host evidence, not yet a real-FAT guest result.
 
 The user's subsequent explicit request authorizes thorough audit and fixing
-this bug, including directly related namespace/lifetime problems. [q077](../../queue.md)
+this bug, including directly related namespace/lifetime problems. [q077](../../queue-q077.md)
 selects this Phase; its scope supersedes p013's stop on the discovered defect.
 Do not restore the dead synthetic rootfs or obsolete marker as a workaround.
 

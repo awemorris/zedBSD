@@ -26,8 +26,10 @@
 #include <zedbsd/wlan.h>
 
 #define WIFI_CONNECT_SECONDS		30U
+#define WIFI_DISCONNECT_SECONDS		5U
 #define WIFI_POLL_NANOSECONDS		100000000L
 #define WIFI_FALLBACK_POLLS		((WIFI_CONNECT_SECONDS * 1000000000ULL) / WIFI_POLL_NANOSECONDS)
+#define WIFI_DISCONNECT_POLLS		((WIFI_DISCONNECT_SECONDS * 1000000000ULL) / WIFI_POLL_NANOSECONDS)
 #define WIFI_ESCAPED_SSID_SIZE		(WLAN_SSID_MAX * 4U + 3U)
 #define WIFI_ESCAPED_INTERFACE_SIZE	(IFNAMSIZ * 4U + 3U)
 #define WIFI_HEX_SSID_SIZE		(WLAN_SSID_MAX * 2U + 1U)
@@ -316,6 +318,7 @@ main(int argc, char **argv)
 				       interface_length);
 		break;
 	case WIFI_OPERATION_CONNECT:
+	case WIFI_OPERATION_DISCONNECT:
 		wifi_interrupted = 0;
 		previous_interrupt = signal(SIGINT, interrupt_handler);
 		if (previous_interrupt == SIG_ERR) {
@@ -328,22 +331,17 @@ main(int argc, char **argv)
 			(void)signal(SIGINT, previous_interrupt);
 			break;
 		}
-		error = connect_command(descriptor,
-					argv[1],
-					interface_length,
-					argv[3],
-					ssid_length,
-					passphrase,
-					passphrase_length);
+		if (operation == WIFI_OPERATION_CONNECT)
+			error = connect_command(descriptor,
+			    argv[1], interface_length, argv[3], ssid_length,
+			    passphrase, passphrase_length);
+		else
+			error = disconnect_command(descriptor, argv[1],
+			    interface_length);
 		if (signal(SIGTERM, previous_terminate) == SIG_ERR && error == 0)
 			error = errno != 0 ? errno : EIO;
 		if (signal(SIGINT, previous_interrupt) == SIG_ERR && error == 0)
 			error = errno != 0 ? errno : EIO;
-		break;
-	case WIFI_OPERATION_DISCONNECT:
-		error = disconnect_command(descriptor,
-					   argv[1],
-					   interface_length);
 		break;
 	case WIFI_OPERATION_NONE:
 		/* fall-thru */
@@ -1169,23 +1167,99 @@ cancel_connection(int descriptor, const char *interface,
 	return error;
 }
 
-/* Disconnects synchronously; the kernel barrier has already lowered carrier. */
+/* Joins transient disconnect ownership under one finite retry-admission window. */
 static int
-disconnect_command(int descriptor, const char *interface,
+disconnect_command(
+	int descriptor,
+	const char *interface,
 	size_t interface_length)
 {
 	struct wlan_disconnect_request request;
+	struct ifreq identity;
+	uint64_t now;
+	uint64_t frequency;
+	uint64_t current_frequency;
+	uint64_t deadline;
+	unsigned attempt;
+	int ifindex;
 	int error;
 
 	error = request_header(&request, sizeof(request), interface,
 	    interface_length);
 	if (error != 0)
 		return error;
-	error = ioctl_error(descriptor, SIOCSWLANDISCONNECT, &request);
-	if (error == 0 && request.state != WLAN_STATE_IDLE &&
-	    request.state != WLAN_STATE_DOWN)
-		error = request.terminal_error != 0 ?
-		    request.terminal_error : EIO;
+	error = monotonic_ticks(&now, &frequency);
+	if (error != 0)
+		return error;
+	if (now > UINT64_MAX - WIFI_DISCONNECT_SECONDS * frequency)
+		return EOVERFLOW;
+	deadline = now + WIFI_DISCONNECT_SECONDS * frequency;
+	ifindex = 0;
+	for (attempt = 0U;; attempt++) {
+		if (wifi_interrupted) {
+			error = EINTR;
+			break;
+		}
+		/* The counter also bounds a clock which stops advancing. */
+		if (attempt >= WIFI_DISCONNECT_POLLS) {
+			error = ETIMEDOUT;
+			break;
+		}
+		memset(&identity, 0, sizeof(identity));
+		memcpy(identity.ifr_name, interface, interface_length);
+		error = ioctl_error(descriptor, SIOCGIFINDEX, &identity);
+		if (error != 0)
+			break;
+		if (identity.ifr_ifindex <= 0 ||
+		    (ifindex != 0 && ifindex != identity.ifr_ifindex)) {
+			error = ENODEV;
+			break;
+		}
+		ifindex = identity.ifr_ifindex;
+		error = monotonic_ticks(&now, &current_frequency);
+		if (error != 0)
+			break;
+		if (current_frequency != frequency) {
+			error = EIO;
+			break;
+		}
+		if (now >= deadline) {
+			error = ETIMEDOUT;
+			break;
+		}
+		/* Every attempt has a fresh zeroed ABI request.  Only EBUSY denotes
+		 * retryable ownership; a successful checked inverse may finish after
+		 * the admission deadline and still provides completion evidence. */
+		error = request_header(&request, sizeof(request), interface,
+		    interface_length);
+		if (error != 0)
+			break;
+		if (wifi_interrupted) {
+			error = EINTR;
+			break;
+		}
+		error = ioctl_error(descriptor, SIOCSWLANDISCONNECT, &request);
+		if (error != EBUSY)
+			break;
+		clear_bytes(&request, sizeof(request));
+		error = monotonic_ticks(&now, &current_frequency);
+		if (error != 0)
+			break;
+		if (current_frequency != frequency) {
+			error = EIO;
+			break;
+		}
+		error = wait_slice(now, deadline, frequency);
+		if (error != 0)
+			break;
+	}
+	if (error == 0) {
+		if (request.terminal_error != 0)
+			error = request.terminal_error;
+		else if (request.state != WLAN_STATE_IDLE &&
+		    request.state != WLAN_STATE_DOWN)
+			error = EIO;
+	}
 	if (error == 0) {
 		if (wifi_machine) {
 			if (printf("WIFI1 connect state=%u generation=%llu error=%d\n",
