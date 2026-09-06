@@ -1,7 +1,7 @@
 # ws018-p017: Storage baseline and image audit
 
 Date: 2026-09-06
-Status: pending
+Status: completed
 Queue: q086
 Authorization: user's explicit plan/50 scenarios/queue/execute request.
 Scope: Record source, expose experimental controls, inspect current image directory sizes; compare four operation-count cells and clearly identify hardware-only measurements.
@@ -14,3 +14,5 @@ remaining work in results.md. No commit, no make check, make -j16 serialized.
 Completion requires implemented scope and its applicable acceptance gates;
 unrun native checks are not passes.
 
+
+Evidence: [results](results.md).

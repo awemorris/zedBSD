@@ -1,6 +1,8 @@
 # q086 FS/USB acceptance — 50 short stories
 
-Date: 2026-09-06. Status: defined; execution pending.
+Date: 2026-09-06. Status: 50/50 PASS in q086; see [results](ws018-kernel-architecture/phase019-storage-acceptance/results.md).
+These are the historical q086 definitions. Q087 supersedes S37's 4096-byte
+splitting with request-sized transfers; see [new acceptance and evidence](ws018-kernel-architecture/phase020-syscall-request-batching/results.md).
 Each row is a short sequence with a recovery/postcondition, not an assertion count.
 Production-source host fixtures inject near-normal errors deterministically.
 Native integration uses disposable images and grouped boots; only S49 requires
@@ -60,4 +62,3 @@ if the row explicitly requires native execution.
 | S48 | 統合 | native FAT/loop/UFS/overlay一連操作 | 実kernel上で永続化経路が動く |
 | S49 | 統合 | 一括sync→一度再起動→読戻し | 永続性確認、毎シナリオ再起動不要 |
 | S50 | 統合 | Wi-Fi30既存stories再実行 | 今回変更でcommand/daemon契約を壊さない |
-

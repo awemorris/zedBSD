@@ -14,6 +14,7 @@
 
 #define REQUIRE(x) do { if (!(x)) { +printf("q086 FAIL line=%d errno=%d\n", __LINE__, errno); return 1; } } while (0)
 static unsigned char data[65536], check[65536];
+static unsigned char large[256 * 1024 + 1];
 static struct wifi_conf_model profiles;
 
 static int store_check(int directory, const char *key)
@@ -92,6 +93,18 @@ int main(int argc, char **argv)
 	REQUIRE(read(fd, check, sizeof(check)) == sizeof(check));
 	REQUIRE(memcmp(data, check, sizeof(data)) == 0);
 	puts("S37 PASS native 64KiB regular write/read");
+	/* Cross the current syscall cap on real page-backed kernel allocations. */
+	int large_fd = open("/q087-large", O_CREAT | O_TRUNC | O_RDWR, 0600);
+	REQUIRE(large_fd >= 0);
+	for (unsigned i = 0; i < sizeof(large); i++) large[i] = (unsigned char)(i * 17);
+	REQUIRE(write(large_fd, large, sizeof(large)) == sizeof(large));
+	REQUIRE(lseek(large_fd, 0, SEEK_SET) == 0);
+	memset(large, 0, sizeof(large));
+	REQUIRE(read(large_fd, large, sizeof(large)) == sizeof(large));
+	for (unsigned i = 0; i < sizeof(large); i++) REQUIRE(large[i] == (unsigned char)(i * 17));
+	REQUIRE(fsync(large_fd) == 0 && close(large_fd) == 0);
+	REQUIRE(unlink("/q087-large") == 0);
+	puts("q087 PASS native 256KiB+1 write/read with real kernel allocation and cap crossing");
 	memset(check, 0x65, 777);
 	REQUIRE(pwrite(fd, check, 777, 101) == 777);
 	REQUIRE(lseek(fd, 0, SEEK_CUR) == sizeof(data));

@@ -4,23 +4,16 @@ Last updated: 2026-09-06
 
 WSID: `ws018`
 
-Status: p001--p015 complete; p016 complete (`q084`)
-
-Q086 follow-up: [p017 baseline](phase017-storage-baseline/phase.md),
-[p018 coherent I/O](phase018-storage-io-path/phase.md), and
-[p019 50-story acceptance](phase019-storage-acceptance/phase.md) are authorized
-and selected. Resume at q086; the older no-selected-phase statement below
-describes the q084 closure.
+Status: p001--p020 complete (q087).
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws018-p016` (q084 refactored kernel integration)
-
-Resume point: no selected WS018 Phase remains. [P016](phase016-kern-refactor-integration/phase.md) completed the refactored kernel integration with current fixes; [q084 evidence](tests/q084-results.md) records host/build/runtime verification and import corrections. Q077 completed legacy residue
-removal, mounted namespace protection and the bounded filesystem functional
-audit/corrections. [Evidence and limits](tests/q077-results.md) include final
-host/build gates and shared QEMU acceptance. Further filesystem requirements
-need their own bounded Phase/Queue; no universal absence-of-bugs claim is made.
+Q086 completed [p017 baseline](phase017-storage-baseline/results.md),
+[p018 coherent I/O](phase018-storage-io-path/results.md), and
+[p019 50-story acceptance](phase019-storage-acceptance/results.md).
+[P020 request-sized syscall I/O](phase020-syscall-request-batching/results.md)
+completed the user's request to remove 4KiB backend splitting; no selected phase remains.
+Broader filesystem/USB work remains in the [follow-up matrix](../fs-report-followups.md).
 
 The user's 2026-09-06 [WS024 direction](../ws024-unified-ufs/ws.md) replaces
 p003's future two-driver architecture with one 64-bit implementation named

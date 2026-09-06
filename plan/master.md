@@ -4,9 +4,10 @@ Last updated: 2026-09-06
 
 Status: active
 
-Current queue: [q086](queue.md), authorized 2026-09-06: FS/USB functional
-corrections from report-4, coherent I/O and [50 acceptance stories](fs-acceptance-50.md).
-WS018 p017–p019 and WS004 p049 are selected follow-ups; q085 remains completed.
+Current queue: [q087](queue.md), finished 2026-09-06: request-sized regular
+file syscall I/O ([WS018 p020 results](ws018-kernel-architecture/phase020-syscall-request-batching/results.md)). [Q086](queue-q086.md) completed all four phases
+and [50 acceptance stories](ws018-kernel-architecture/phase019-storage-acceptance/results.md).
+Broader FS/USB work remains in the [follow-up matrix](fs-report-followups.md).
 
 ## 1. Purpose
 
@@ -482,7 +483,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Queue-ready; permission ceiling selected | No Phase started; p001 Queue-ready | After WS022, Queue p001--p004; RW mappings may return from RO to RW within their original maximum | [WS017](ws017-lfb-graphics/ws.md) |
-| `ws018` | Kernel source ownership and interface consolidation | p001--p015 complete; p016 complete (`q084`) | Refactored kern preserves current fixes; focused host gates, three x86 builds and amd64 storage/formatter runtime pass | No selected WS018 Phase remains; retain integration/audit coverage limits | [WS018](ws018-kernel-architecture/ws.md) |
+| `ws018` | Kernel source ownership and interface consolidation | p001--p020 complete (`q087`) | q086 FS/USB 50-story gate; q087 request-sized syscall transfers, three x86 builds and native USB-root persistence pass | No selected phase remains; larger I/O/writeback and other review work stay in the FS follow-up matrix | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Active; q079 formatters complete | p002/p003, p008/p009 and p010/p011/p012 complete | Resolve p004 provenance/publication prerequisites before p004/p005 installer work | [WS019](ws019-installation/ws.md) |
 | `ws020` | Intel Mac UEFI bring-up and generic image variants | Complete (user physical confirmation, 2026-09-05) | Automatic Variant/GPT/QEMU gates and successful Intel Mac real-hardware operation pass | No Phase remains; explicit acceptance supersedes the older five-run campaign | [WS020](ws020-intel-mac/ws.md) |
 | `ws021` | Reproducible x86 LLVM toolchain and sysroots | Complete (`q064`) | LLVM 23.1.0 cache/source paths, amd64/i386 sysroots, all x86 target/loader builds, four CI configurations, six-cell amd64 firmware matrix, i386 PC/AT and PC-98, and target noct non-JIT/JIT/BeUI gates pass | No current Phase; the source-build path and pinned `rev-0` cache remain supported in parallel | [WS021](ws021-llvm-toolchain/ws.md) |

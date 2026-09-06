@@ -81,10 +81,10 @@
 
 #define SYSCALL_IO_CHUNK 512U
 #ifndef ZEDBSD_SYSCALL_REGULAR_CHUNK
-#define ZEDBSD_SYSCALL_REGULAR_CHUNK 4096U
+#define ZEDBSD_SYSCALL_REGULAR_CHUNK (256U * 1024U)
 #endif
 _Static_assert(ZEDBSD_SYSCALL_REGULAR_CHUNK >= SYSCALL_IO_CHUNK &&
-    ZEDBSD_SYSCALL_REGULAR_CHUNK <= 16384U, "bounded regular I/O buffer");
+    ZEDBSD_SYSCALL_REGULAR_CHUNK <= 256U * 1024U, "bounded regular I/O buffer");
 #define SYSCALL_SOCKET_BUFFER_MAX (64U * 1024U)
 #define SOCKET_SEND_FLAGS (MSG_DONTWAIT | MSG_NOSIGNAL)
 #define SOCKET_RECV_FLAGS (MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC | MSG_WAITALL)
@@ -2471,23 +2471,33 @@ sys_close_call(
 	return 0;
 }
 
-/* Allocate before file_io_begin takes the file/VM lease. Allocation pressure
- * falls back to the established small buffer; pipes retain PIPE_BUF behavior. */
+/* Preserve the request size up to a bounded cap, allocating before the file/VM
+ * lease. Large kern_malloc allocations need contiguous physical backing: try
+ * progressively smaller buffers under pressure, then the existing stack
+ * buffer. Pipes and other nonregular files retain their original behavior. */
 static uint8_t *
 syscall_regular_buffer(struct file *file, size_t length, uint8_t *fallback,
 	size_t *capacity)
 {
 	uint8_t *buffer;
+	size_t size;
 
 	*capacity = SYSCALL_IO_CHUNK;
 	if (length <= SYSCALL_IO_CHUNK || file->f_inode == NULL ||
 	    file->f_inode->i_type != INODE_REG)
 		return fallback;
-	buffer = kern_malloc(ZEDBSD_SYSCALL_REGULAR_CHUNK);
-	if (buffer == NULL)
-		return fallback;
-	*capacity = ZEDBSD_SYSCALL_REGULAR_CHUNK;
-	return buffer;
+	size = length;
+	if (size > ZEDBSD_SYSCALL_REGULAR_CHUNK)
+		size = ZEDBSD_SYSCALL_REGULAR_CHUNK;
+	while (size > SYSCALL_IO_CHUNK) {
+		buffer = kern_malloc(size);
+		if (buffer != NULL) {
+			*capacity = size;
+			return buffer;
+		}
+		size /= 2U;
+	}
+	return fallback;
 }
 
 /* Handles read(2) through a bounce buffer. */
