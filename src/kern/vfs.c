@@ -14,7 +14,7 @@
  * the physical disks for partitions, mounts the boot and swap sources
  * named by the boot parameters, selects the native or overlay root, and
  * mounts the runtime filesystems under it.  Platforms without a boot
- * parameter source fall back to the legacy UFS1 autoroot.
+ * parameter source fall back to the legacy UFS autoroot.
  */
 
 #include "kern/vfs.h"
@@ -23,8 +23,7 @@
 #include "kern/block-identity.h"
 #include "kern/fat.h"
 #include "kern/file.h"
-#include "kern/ufs1.h"
-#include "kern/ufs2.h"
+#include "kern/ufs.h"
 #include "kern/mount.h"
 #include "kern/partition.h"
 #include "kern/platform.h"
@@ -124,7 +123,7 @@ static int vfs_ensure_root_directory(const struct path *root, const char *name, 
 static void vfs_log_boot_handoff(const struct boot_handoff *handoff, unsigned device_count);
 static void vfs_scan_physical_disks(const struct boot_handoff *handoff, struct disk *boot_physical, struct disk **loader_boot_partition);
 #if defined(VFS_LEGACY_NULL_AUTOROOT)
-static VFS_HIGH int ufs1_root_marker_matches(struct disk *disk, int *matches);
+static VFS_HIGH int ufs_root_marker_matches(struct disk *disk, int *matches);
 #if defined(HAL_ARCH_ARM64)
 static void vfs_legacy_overlay_setup_init(struct vfs_legacy_overlay_setup *setup);
 static int vfs_legacy_overlay_setup_cleanup(struct vfs_legacy_overlay_setup *setup);
@@ -239,14 +238,9 @@ kern_vfs_init(
 		error = vfs_fail("register FAT", error);
 		return error;
 	}
-	error = filesystem_register(&ufs1_filesystem_type);
+	error = filesystem_register(&ufs_filesystem_type);
 	if (error != 0) {
-		error = vfs_fail("register UFS1", error);
-		return error;
-	}
-	error = filesystem_register(&ufs2_filesystem_type);
-	if (error != 0) {
-		error = vfs_fail("register UFS2", error);
+		error = vfs_fail("register UFS", error);
 		return error;
 	}
 	error = filesystem_register(&devfs_type);
@@ -905,13 +899,13 @@ vfs_scan_physical_disks(
 }
 
 #if defined(VFS_LEGACY_NULL_AUTOROOT)
-/* Tests whether a disk carries the legacy UFS1 root marker file. */
+/* Tests whether a disk carries the legacy UFS root marker file. */
 static VFS_HIGH int
-ufs1_root_marker_matches(
+ufs_root_marker_matches(
 	struct disk *disk,
 	int *matches)
 {
-	static const char expected[] = "zedBSD ufs1 root v1\n";
+	static const char expected[] = "zedBSD ufs root v1\n";
 	struct mount *mountp;
 	struct path marker;
 	struct file *file;
@@ -922,10 +916,10 @@ ufs1_root_marker_matches(
 	mountp = NULL;
 	file = NULL;
 
-	/* A disk that is not a UFS1 filesystem simply does not match. */
+	/* A disk that is not a UFS filesystem simply does not match. */
 	*matches = 0;
 	path_init(&marker);
-	error = mount_private("ufs1", disk, MOUNT_READ_ONLY, NULL, &mountp);
+	error = mount_private("ufs", disk, MOUNT_READ_ONLY, NULL, &mountp);
 	if (error == EOPNOTSUPP || error == EINVAL || error == EROFS)
 		return 0;
 	if (error != 0)
@@ -1115,7 +1109,7 @@ fail:
 }
 #endif
 
-/* Mounts the legacy root: a marked UFS1 partition, an ARM overlay, or the boot partition. */
+/* Mounts the legacy root: a marked UFS partition, an ARM overlay, or the boot partition. */
 static VFS_HIGH int
 vfs_mount_legacy_root(
 	struct disk *boot_partition,
@@ -1140,7 +1134,7 @@ vfs_mount_legacy_root(
 		return error;
 	}
 
-	/* Looks for exactly one marked UFS1 root among the sibling partitions. */
+	/* Looks for exactly one marked UFS root among the sibling partitions. */
 	for (index = 0; index < partition_count(); index++) {
 		partition = partition_at(index);
 		matches = 0;
@@ -1149,15 +1143,15 @@ vfs_mount_legacy_root(
 		    partition->p_disk == boot_partition ||
 		    partition->p_parent != boot_physical)
 			continue;
-		error = ufs1_root_marker_matches(partition->p_disk, &matches);
+		error = ufs_root_marker_matches(partition->p_disk, &matches);
 		if (error != 0) {
-			error = vfs_fail("inspect legacy UFS1 root candidate", error);
+			error = vfs_fail("inspect legacy UFS root candidate", error);
 			return error;
 		}
 		if (!matches)
 			continue;
 		if (root_partition != NULL) {
-			error = vfs_fail("ambiguous legacy UFS1 root candidates",
+			error = vfs_fail("ambiguous legacy UFS root candidates",
 			    EINVAL);
 			return error;
 		}
@@ -1165,7 +1159,7 @@ vfs_mount_legacy_root(
 	}
 
 #if defined(HAL_ARCH_ARM64)
-	/* Without a UFS1 root, ARM tries the image overlay. */
+	/* Without a UFS root, ARM tries the image overlay. */
 	if (root_partition == NULL) {
 		error = vfs_mount_legacy_arm_overlay(boot_partition, root_out);
 		if (error == 0)
@@ -1175,14 +1169,14 @@ vfs_mount_legacy_root(
 	}
 #endif
 
-	/* Mounts the UFS1 root when one was found. */
+	/* Mounts the UFS root when one was found. */
 	if (root_partition != NULL) {
 		disk_ref(root_partition);
 		args.fspec = root_partition->d_name;
 		error = mount_root_create("auto", 0, &args, root_out);
 		if (error != 0) {
 			disk_release(root_partition);
-			error = vfs_fail("mount legacy UFS1 root", error);
+			error = vfs_fail("mount legacy UFS root", error);
 			return error;
 		}
 		*root_disk_out = root_partition;

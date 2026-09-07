@@ -6,6 +6,24 @@ findings of reports 1–3. Report-4 supersedes the mistaken claims in those repo
 The 50 acceptance stories cover q086's defined implementation and preserved
 contracts, not the absence of every filesystem/USB defect.
 
+Ownership update, 2026-09-07: the user approved the buffer/cache direction and
+requested independent [WS025](ws025-io-memory-cache/ws.md). The original q086
+results below remain historical evidence. Planned ownership of the selected
+follow-ups is now:
+
+| Follow-up | Current planned owner |
+| --- | --- |
+| syscall scratch, downstream cache/UFS/USB run sizing | WS025 p006--p009 |
+| CG/indirect/allocation and FAT cache/cursor/operation batching | WS025 p010--p014; carry into WS024's unified UFS |
+| file page cache, dirty indices/error reporting, budgets/reclaim/write-back | WS025 p015--p021 |
+| async/SG/DMA, sense/media recovery, measured IMOD | WS025 p019/p023--p025/p030; existing WS004 retirement/device contracts retained |
+| amd64 memory reporting/direct map/allocator and DMA address constraints | WS025 p002--p005 |
+
+Unrelated claim/name/tmpfs indices, copy-up/directory algorithms, enumeration,
+command-ring restart, external hubs, and other unselected hardware findings
+keep their existing owners. The table below is not a claim that WS025 has
+already corrected these findings. Queue q087 remains finished.
+
 | Findings | q086 result | Next bounded work / owner |
 | --- | --- | --- |
 | 1, 2, 5, 7, 20 | Loop data uses retained logical extents and parent cache inside the normal file/VM transaction; FAT slot coherence preserved. Full FAT write validation preserved. | General FAT read cursor, validated write generations, batching of non-loop FAT data/mirrors; WS018 |

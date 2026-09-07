@@ -78,6 +78,7 @@ struct overlay_metadata {
 };
 
 struct overlay_mount_state {
+	struct mount *owner;
 	struct path upper_root;
 	struct path lower_root;
 	unsigned flags;
@@ -185,7 +186,9 @@ static OVERLAY_HIGH int overlay_write_record(struct file *file, unsigned sector,
 static OVERLAY_HIGH unsigned overlay_metadata_count(const struct overlay_metadata entries[OVERLAY_METADATA_MAX]);
 static OVERLAY_HIGH int overlay_metadata_sorted_index(const struct overlay_metadata entries[OVERLAY_METADATA_MAX], const char *after);
 static OVERLAY_HIGH int overlay_journal_compact(struct overlay_mount_state *state);
+static OVERLAY_HIGH int overlay_journal_compact_impl(struct overlay_mount_state *state);
 static OVERLAY_HIGH int overlay_journal_append(struct overlay_mount_state *state, unsigned opcode, const char *path);
+static OVERLAY_HIGH int overlay_journal_append_impl(struct overlay_mount_state *state, unsigned opcode, const char *path);
 static OVERLAY_HIGH struct overlay_inode_info * overlay_info(const struct inode *inode);
 static OVERLAY_HIGH int overlay_slot_index(const struct inode *inode);
 static OVERLAY_HIGH struct inode * overlay_alloc_inode(struct mount *mountp);
@@ -243,7 +246,7 @@ static OVERLAY_HIGH ssize_t overlay_pread(struct file *file, void *buffer, size_
 static OVERLAY_HIGH ssize_t overlay_pread_internal(struct file *file, void *buffer, size_t size, off_t offset, unsigned flags);
 static OVERLAY_HIGH ssize_t overlay_read(struct file *file, void *buffer, size_t size);
 static OVERLAY_HIGH ssize_t overlay_pwrite(struct file *file, const void *buffer, size_t size, off_t offset);
-static OVERLAY_HIGH ssize_t overlay_pwrite_internal(struct file *file, const void *buffer, size_t size, off_t offset, unsigned flags, const struct ucred *credential);
+static OVERLAY_HIGH ssize_t overlay_pwrite_internal(struct file *file, const void *buffer, size_t size, off_t offset, unsigned flags, const struct ucred *credential, const struct io_context *context);
 #ifdef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
 static int overlay_host_truncate_limited(struct inode *inode, const struct inode_truncate_request *request, struct inode_truncate_result *result);
 #endif
@@ -414,7 +417,7 @@ overlay_content_host_pwrite(
 	outer->f_data = &file_info;
 	outer->f_inode->i_data = &inode_info;
 	count = overlay_pwrite_internal(outer, buffer, size, offset, flags,
-	    credential);
+	    credential, NULL);
 	outer->f_data = saved_file_data;
 	outer->f_inode->i_data = saved_inode_data;
 	outer->f_inode->i_op = saved_inode_ops;
@@ -1131,7 +1134,7 @@ overlay_metadata_sorted_index(
 
 /* Writes the whole table as a new epoch into the other journal slot. */
 static OVERLAY_HIGH int
-overlay_journal_compact(
+overlay_journal_compact_impl(
 	struct overlay_mount_state *state)
 {
 	uint8_t record[OVERLAY_RECORD_BYTES];
@@ -1206,6 +1209,7 @@ overlay_journal_compact(
 		strcpy(previous, state->metadata[index].path);
 	}
 
+
 	/* Writes the commit record and makes the slot durable. */
 	memset(record, 0, sizeof(record));
 	memcpy(record, "ZOVLCMT\0", 8);
@@ -1221,7 +1225,7 @@ overlay_journal_compact(
 	if (error == 0)
 		error = file_fsync(state->journal[target]);
 	if (error == 0)
-		error = mount_sync(state->upper_root.p_mount);
+		error = mount_sync_backend(state->upper_root.p_mount);
 	if (error != 0)
 		return error;
 
@@ -1232,9 +1236,24 @@ overlay_journal_compact(
 	return 0;
 }
 
+/* Keeps the logical journal boundary active until all of its work finishes. */
+static OVERLAY_HIGH int
+overlay_journal_compact(struct overlay_mount_state *state)
+{
+	int error;
+
+	if (state->owner != NULL)
+		io_epoch_begin(&state->owner->m_write_epoch);
+	error = overlay_journal_compact_impl(state);
+	if (state->owner != NULL)
+		io_epoch_end(&state->owner->m_write_epoch);
+	return error;
+}
+
+
 /* Appends an operation to the journal and applies it to the table. */
 static OVERLAY_HIGH int
-overlay_journal_append(
+overlay_journal_append_impl(
 	struct overlay_mount_state *state,
 	unsigned opcode,
 	const char *path)
@@ -1276,6 +1295,7 @@ overlay_journal_append(
 			return error;
 	}
 
+
 	/* Writes the record durably, then applies it. */
 	sequence = state->sequence + 1U;
 	memset(record, 0, sizeof(record));
@@ -1302,6 +1322,21 @@ overlay_journal_append(
 	state->journal_generation++;
 	return 0;
 }
+
+/* Keeps the logical journal boundary active until all of its work finishes. */
+static OVERLAY_HIGH int
+overlay_journal_append(struct overlay_mount_state *state, unsigned opcode, const char *path)
+{
+	int error;
+
+	if (state->owner != NULL)
+		io_epoch_begin(&state->owner->m_write_epoch);
+	error = overlay_journal_append_impl(state, opcode, path);
+	if (state->owner != NULL)
+		io_epoch_end(&state->owner->m_write_epoch);
+	return error;
+}
+
 
 /* Reports the overlay information of an inode, or NULL. */
 static OVERLAY_HIGH struct overlay_inode_info *
@@ -2078,7 +2113,7 @@ overlay_materialization_complete(
 				    &entry->created_upper);
 			if (cleanup_error == 0)
 				cleanup_error = one_error;
-			one_error = mount_sync(entry->parent_upper.p_mount);
+			one_error = mount_sync_backend(entry->parent_upper.p_mount);
 			if (cleanup_error == 0)
 				cleanup_error = one_error;
 		}
@@ -2199,7 +2234,7 @@ overlay_ensure_upper_dir_tracked(
 		path_init(&created_path);
 		path_set(&created_path, parent_upper.p_mount, created);
 		if (created_new)
-			error = mount_sync(parent_upper.p_mount);
+			error = mount_sync_backend(parent_upper.p_mount);
 		if (error == 0) {
 			overlay_install_upper(directory, &created_path);
 			if (created_new && transaction != NULL) {
@@ -2230,7 +2265,7 @@ overlay_ensure_upper_dir_tracked(
 			cleanup_error = inode_rmdir(parent_upper.p_inode, &name);
 			if (cleanup_error != 0)
 				overlay_install_upper(directory, &created_path);
-			sync_error = mount_sync(parent_upper.p_mount);
+			sync_error = mount_sync_backend(parent_upper.p_mount);
 			if (cleanup_error == 0)
 				cleanup_error = sync_error;
 			if (cleanup_error != 0) {
@@ -2493,7 +2528,7 @@ overlay_copy_up_regular(
 			renamed = 1;
 	}
 	if (renamed) {
-		error = mount_sync(parent_upper.p_mount);
+		error = mount_sync_backend(parent_upper.p_mount);
 		if (error == 0) {
 			path_set(&final_path, parent_upper.p_mount, temp_inode);
 			overlay_install_upper(inode, &final_path);
@@ -2510,7 +2545,7 @@ overlay_copy_up_regular(
 				&final_name);
 			if (cleanup_error == 0)
 				final_removed = 1;
-			sync_error = mount_sync(parent_upper.p_mount);
+			sync_error = mount_sync_backend(parent_upper.p_mount);
 			if (cleanup_error == 0)
 				cleanup_error = sync_error;
 			if (cleanup_error == 0) {
@@ -2538,7 +2573,7 @@ out:
 	if (!renamed && temp_inode != NULL && parent_upper.p_inode != NULL) {
 		cleanup_error = inode_unlink(parent_upper.p_inode,
 			&temp_name_component);
-		sync_error = mount_sync(parent_upper.p_mount);
+		sync_error = mount_sync_backend(parent_upper.p_mount);
 		if (cleanup_error == 0)
 			cleanup_error = sync_error;
 		if (cleanup_error != 0) {
@@ -2683,7 +2718,7 @@ overlay_finish_new(
 			return EIO;
 		return error;
 	}
-	error = mount_sync(upper.p_mount);
+	error = mount_sync_backend(upper.p_mount);
 	if (error == 0 && (overlay_metadata_flags(state, relative) &
 	    OVERLAY_META_WHITEOUT) != 0) {
 		error = overlay_journal_append(state,
@@ -2724,7 +2759,7 @@ overlay_finish_new(
 		if (cleanup_error == 0)
 			cleanup_error = one_error;
 	}
-	one_error = mount_sync(upper.p_mount);
+	one_error = mount_sync_backend(upper.p_mount);
 	if (cleanup_error == 0)
 		cleanup_error = one_error;
 	if (cleanup_error != 0)
@@ -3016,7 +3051,7 @@ out:
 	 */
 	if (!renamed && created != NULL) {
 		cleanup_error = inode_unlink(parent_upper.p_inode, &temporary);
-		sync_error = mount_sync(parent_upper.p_mount);
+		sync_error = mount_sync_backend(parent_upper.p_mount);
 		if (cleanup_error == 0)
 			cleanup_error = sync_error;
 		if (cleanup_error != 0) {
@@ -3435,7 +3470,7 @@ overlay_rename(
 	namecache_remove(new_directory, new_name);
 
 	/* Makes the rename durable and drops a whiteout on the new name. */
-	error = mount_sync(new_parent_upper.p_mount);
+	error = mount_sync_backend(new_parent_upper.p_mount);
 	if (error != 0)
 		goto out;
 	if ((overlay_metadata_flags(state, new_relative) &
@@ -3596,7 +3631,7 @@ overlay_remove(
 	inode_dir_changed(directory);
 	namecache_remove(directory, name);
 	overlay_retire_inode(target);
-	error = target_upper.p_inode != NULL ? mount_sync(parent_upper.p_mount) : 0;
+	error = target_upper.p_inode != NULL ? mount_sync_backend(parent_upper.p_mount) : 0;
 out:
 	path_release(&parent_lower);
 	inode_release(target);
@@ -3670,7 +3705,7 @@ overlay_truncate_upper(
 	overlay_refresh(inode);
 	result->actual_size = inode->i_size;
 	if (error == 0)
-		error = mount_sync(upper.p_mount);
+		error = mount_sync_backend(upper.p_mount);
 	path_release(&upper);
 	return error;
 }
@@ -3758,7 +3793,7 @@ overlay_setattr(
 		error = inode_setattr(upper.p_inode, status, mask);
 	if (error == 0) {
 		overlay_refresh(inode);
-		error = mount_sync(upper.p_mount);
+		error = mount_sync_backend(upper.p_mount);
 	}
 	path_release(&upper);
 	return error;
@@ -3931,7 +3966,8 @@ overlay_pwrite_internal(
 	size_t size,
 	off_t offset,
 	unsigned flags,
-	const struct ucred *credential)
+	const struct ucred *credential,
+	const struct io_context *context)
 {
 	struct overlay_file_info *info;
 	ssize_t count;
@@ -3940,8 +3976,8 @@ overlay_pwrite_internal(
 
 	if (info == NULL)
 		return -EIO;
-	count = file_pwrite_internal_cred(info->real, buffer, size, offset,
-	    flags | FILE_IO_VM_OBJECT, credential);
+	count = file_pwrite_context(info->real, buffer, size, offset,
+	    flags | FILE_IO_VM_OBJECT, credential, context);
 	overlay_refresh(file->f_inode);
 	return count;
 }
@@ -3992,12 +4028,12 @@ overlay_regular_fsync(
 
 	info = file->f_data;
 	if (info != NULL)
-		error = file_fsync(info->real);
+		error = file_fsync_backend(info->real);
 	else
 		error = EIO;
 
 	if (error == 0)
-		error = mount_sync(file->f_inode->i_mount);
+		error = mount_sync_backend(file->f_inode->i_mount);
 	return error;
 }
 
@@ -4305,7 +4341,7 @@ overlay_directory_fsync(
 	error = file_fsync(state->journal[state->active_slot]);
 	if (error != 0)
 		return error;
-	error = mount_sync(state->upper_root.p_mount);
+	error = mount_sync_backend(state->upper_root.p_mount);
 	return error;
 }
 
@@ -4452,6 +4488,7 @@ overlay_mount_impl(
 	    "overlay copy-up");
 	path_set(&state->upper_root, args->upper.p_mount, args->upper.p_inode);
 	path_set(&state->lower_root, args->lower.p_mount, args->lower.p_inode);
+	state->owner = mountp;
 	state->flags = args->flags;
 	state->next_ino = 2;
 	state->identities[0].state = OVERLAY_ID_ACTIVE;
@@ -4465,7 +4502,7 @@ overlay_mount_impl(
 	/* Removes temporaries left by an interrupted copy-up. */
 	error = overlay_cleanup_temps(&state->upper_root, 0, &visited, &deleted);
 	if (error == 0 && deleted != 0)
-		error = mount_sync(state->upper_root.p_mount);
+		error = mount_sync_backend(state->upper_root.p_mount);
 	if (error != 0)
 		goto fail_state;
 
@@ -4503,7 +4540,7 @@ overlay_sync_mount(
 		return 0;
 	error = file_fsync(state->journal[state->active_slot]);
 	if (error == 0)
-		error = mount_sync(state->upper_root.p_mount);
+		error = mount_sync_backend(state->upper_root.p_mount);
 	return error;
 }
 

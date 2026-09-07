@@ -104,6 +104,7 @@ int main(void)
 		unsigned char buffer[512];
 		fixture_reset(&interface, 0, 0x70);
 		stage = resets = commands = opcode_commands = csw_reads = 0;
+		persistence_invalidations=0;persistence_disk=NULL;
 		cbw_fail = cbw_short = csw_stalls = bad_tag = bad_residue = 0;
 		ua_left = ua_after_reset = disconnect_on_failure = device_disconnected = 0;
 		fault_opcode = 0; ua_key = 6; ua_asc = 0x29; ua_ascq = 0;
@@ -152,6 +153,8 @@ int main(void)
 			if (id == 11 || id == 12) run_bio(&s, BIO_WRITE, buffer, EIO);
 		}
 		CHECK(resets <= 1 && opcode_commands <= 4);
+		CHECK(persistence_invalidations==resets);
+		if(resets)CHECK(persistence_disk==&disk);
 		if (id == 2) CHECK(resets == 0 && opcode_commands == 1 && csw_reads == 2);
 		if (id == 9 || id == 13) CHECK(resets == 1 && opcode_commands == 3);
 		if (id == 10 || id == 18) CHECK(resets == 0 && opcode_commands == 1);

@@ -20,6 +20,7 @@
 
 static atomic_uint checks;
 static atomic_size_t live_allocations;
+static atomic_uint allocation_failure_countdown;
 static atomic_uint allocation_forbidden;
 static atomic_uint forbidden_allocations;
 static unsigned cancel_failures;
@@ -43,6 +44,9 @@ hal_malloc(size_t size)
 	    memory_order_acquire) != 0)
 		(void)atomic_fetch_add_explicit(&forbidden_allocations, 1U,
 		    memory_order_relaxed);
+	if (atomic_load(&allocation_failure_countdown) != 0 &&
+	    atomic_fetch_sub(&allocation_failure_countdown, 1U) == 1U)
+		return NULL;
 	pointer = malloc(size);
 	if (pointer != NULL)
 		(void)atomic_fetch_add_explicit(&live_allocations, 1U,

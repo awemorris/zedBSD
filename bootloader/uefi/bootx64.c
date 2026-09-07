@@ -27,6 +27,7 @@
 #define HIGH_PD_OFFSET 0x5000U
 #define HANDOFF_OFFSET 0x6000U
 #define MEMORY_RANGES_OFFSET 0x7000U
+#define BOOT_ALLOCATIONS_OFFSET 0xa000U
 #define FRAMEBUFFER_PD_OFFSET 0x9000U
 #define TRANSITION_STACK_TOP 0x10000U
 
@@ -45,7 +46,7 @@
 extern uint8_t zbl_transition_start[];
 extern uint8_t zbl_transition_end[];
 
-_Static_assert(ZBL6_HANDOFF_V5_UEFI_SIZE <=
+_Static_assert(ZBL6_HANDOFF_V6_UEFI_SIZE <=
 	       MEMORY_RANGES_OFFSET - HANDOFF_OFFSET,
 	       "UEFI parameter handoff must fit its low-memory slot");
 
@@ -232,14 +233,14 @@ framebuffer_stage(const struct zbl6_framebuffer *framebuffer, unsigned stage)
 
 static void
 framebuffer_map_error(const struct zbl6_framebuffer *framebuffer,
-		      enum zbl_uefi_map_result result)
+		      enum zbl_memory_result result)
 {
 	volatile uint32_t *pixels =
 	    (volatile uint32_t *)(uintptr_t)framebuffer->physical_base;
 	unsigned block, origin_x, x, y;
 
-	if (result <= ZBL_UEFI_MAP_OK || result > ZBL_UEFI_MAP_EMPTY)
-		result = ZBL_UEFI_MAP_INVALID_ARGUMENT;
+	if (result <= ZBL_MEMORY_OK || result > ZBL_MEMORY_OVERLAP)
+		result = ZBL_MEMORY_INVALID;
 	origin_x = framebuffer->width - DIAGNOSTIC_PANEL_WIDTH;
 	for (block = 0; block < (unsigned)result; block++)
 		for (y = 0; y < 6U; y++)
@@ -886,9 +887,9 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 	uint64_t *high_pdpt = (void *)(low + HIGH_PDPT_OFFSET);
 	uint64_t *high_pd = (void *)(low + HIGH_PD_OFFSET);
 	uint64_t *framebuffer_pd = (void *)(low + FRAMEBUFFER_PD_OFFSET);
-	struct zbl6_handoff_v5_uefi *handoff =
+	struct zbl6_handoff_v6_uefi *handoff =
 	    (void *)(low + HANDOFF_OFFSET);
-	struct zbl6_handoff_v3 *common = &handoff->common.common;
+	struct zbl6_handoff_v3 *common = &handoff->prefix.common.common;
 	UINTN transition_size =
 	    (UINTN)(zbl_transition_end - zbl_transition_start);
 	unsigned index;
@@ -924,19 +925,20 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 		    (framebuffer_aligned + (uint64_t)index * 0x200000ULL) |
 		    PTE_PRESENT | PTE_WRITE | PTE_LARGE;
 	common->magic = ZBL6_HANDOFF_MAGIC;
-	common->version = ZBL6_HANDOFF_V5_VERSION;
+	common->version = ZBL6_HANDOFF_V6_VERSION;
 	common->size = sizeof(*handoff);
 	common->flags = ZBL6_HANDOFF_FLAG_UEFI |
 			ZBL6_HANDOFF_FLAG_MEMORY_MAP |
 			ZBL6_HANDOFF_FLAG_FRAMEBUFFER |
 			ZBL6_HANDOFF_FLAG_BOOT_UUID |
-			ZBL6_HANDOFF_FLAG_BOOT_PARAMETERS;
+			ZBL6_HANDOFF_FLAG_BOOT_PARAMETERS |
+			ZBL6_HANDOFF_FLAG_BOOT_ALLOCATIONS;
 	common->boot_drive = 0x80;
 	common->root_partition_scheme = partition_scheme;
 	common->root_partition_index = ZBL6_PARTITION_INDEX_UNKNOWN;
 	common->loader_partition_index = ZBL6_PARTITION_INDEX_UNKNOWN;
 	common->memory_range_entry_size =
-	    sizeof(struct zbl6_memory_range);
+	    sizeof(struct zbl6_memory_range_v6);
 	common->memory_ranges = low_base + MEMORY_RANGES_OFFSET;
 	common->kernel_phys_start = plan->physical_start;
 	common->kernel_phys_end = plan->physical_end;
@@ -947,8 +949,8 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 	common->framebuffer_height = framebuffer->height;
 	common->framebuffer_stride = framebuffer->stride;
 	common->framebuffer_format = framebuffer->format;
-	handoff->common.boot_volume_serial = boot_volume_serial;
-	byte_copy(&handoff->parameters, parameters, sizeof(*parameters));
+	handoff->prefix.common.boot_volume_serial = boot_volume_serial;
+	byte_copy(&handoff->prefix.parameters, parameters, sizeof(*parameters));
 }
 
 EFI_STATUS EFIAPI
@@ -971,13 +973,14 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	UINT32 descriptor_version;
 	UINT64 kernel_file_size;
 	EFI_MEMORY_DESCRIPTOR *map = 0;
-	struct zbl6_handoff_v5_uefi *handoff;
+	struct zbl6_handoff_v6_uefi *handoff;
 	struct zbl6_handoff_v3 *handoff_common;
 	struct zbl6_framebuffer framebuffer;
 	struct zbl_uefi_framebuffer_mapping framebuffer_mapping;
-	struct zbl6_memory_range *ranges;
+	struct zbl6_memory_range_v6 *ranges;
+	struct zbl6_boot_allocation *allocations;
 	uint32_t range_count;
-	enum zbl_uefi_map_result map_result;
+	enum zbl_memory_result map_result;
 	int kernel_pages_allocated = 0;
 	int low_pages_allocated = 0;
 	int map_allocated = 0;
@@ -1084,7 +1087,7 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	    discovered.fat.volume_serial, (uint8_t)discovered.path.style,
 	    &configuration.parameter_record);
 	handoff = (void *)(uintptr_t)(low_address + HANDOFF_OFFSET);
-	handoff_common = &handoff->common.common;
+	handoff_common = &handoff->prefix.common.common;
 	ranges = (void *)(uintptr_t)(low_address + MEMORY_RANGES_OFFSET);
 	handoff_common->rsdp = find_acpi_rsdp(system);
 	if (handoff_common->rsdp == 0)
@@ -1121,6 +1124,45 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 		    0, 0, low_address, LOW_BLOCK_PAGES, low_pages_allocated,
 		    kernel_address, kernel_pages);
 	map_allocated = 1;
+	allocations = (void *)(uintptr_t)(low_address + BOOT_ALLOCATIONS_OFFSET);
+	allocations[0].base = plan.physical_start;
+	allocations[0].size = (plan.physical_end + PAGE_SIZE - 1U) / PAGE_SIZE * PAGE_SIZE - plan.physical_start;
+	allocations[0].owner = ZBL6_BOOT_OWNER_KERNEL;
+	allocations[0].lifetime = ZBL6_BOOT_KEEP;
+	allocations[1].base = low_address;
+	allocations[1].size = LOW_BLOCK_PAGES * PAGE_SIZE;
+	allocations[1].owner = ZBL6_BOOT_OWNER_BOOTSTRAP;
+	allocations[1].lifetime = ZBL6_BOOT_AFTER_INIT;
+	allocations[2].base = (uintptr_t)loaded->ImageBase & ~(uint64_t)(PAGE_SIZE - 1U);
+	if ((uintptr_t)loaded->ImageBase > UINT64_MAX - (PAGE_SIZE - 1U) ||
+	    loaded->ImageSize > UINT64_MAX - (uintptr_t)loaded->ImageBase - (PAGE_SIZE - 1U))
+		fail_boot_allocations(&context, "Loaded image extent", EFI_LOAD_ERROR,
+		    map, map_allocated, low_address, LOW_BLOCK_PAGES,
+		    low_pages_allocated, kernel_address, kernel_pages);
+	allocations[2].size = ((uintptr_t)loaded->ImageBase + loaded->ImageSize + PAGE_SIZE - 1U) /
+	    PAGE_SIZE * PAGE_SIZE - allocations[2].base;
+	allocations[2].owner = ZBL6_BOOT_OWNER_LOADER;
+	allocations[2].lifetime = ZBL6_BOOT_AFTER_INIT;
+	allocations[3].base = (uintptr_t)map & ~(uint64_t)(PAGE_SIZE - 1U);
+	if ((uintptr_t)map > UINT64_MAX - (PAGE_SIZE - 1U) ||
+	    map_capacity > UINT64_MAX - (uintptr_t)map - (PAGE_SIZE - 1U))
+		fail_boot_allocations(&context, "Map buffer extent", EFI_LOAD_ERROR,
+		    map, map_allocated, low_address, LOW_BLOCK_PAGES,
+		    low_pages_allocated, kernel_address, kernel_pages);
+	allocations[3].size = ((uintptr_t)map + map_capacity + PAGE_SIZE - 1U) /
+	    PAGE_SIZE * PAGE_SIZE - allocations[3].base;
+	allocations[3].owner = ZBL6_BOOT_OWNER_MEMORY_MAP;
+	allocations[3].lifetime = ZBL6_BOOT_AFTER_INIT;
+	handoff->memory.source = ZBL6_MEMORY_SOURCE_UEFI;
+	handoff->memory.flags = ZBL6_MEMORY_MAP_COMPLETE;
+	handoff->memory.range_entry_size = sizeof(*ranges);
+	handoff->memory.ranges = handoff_common->memory_ranges;
+	handoff->memory.allocation_count = 4;
+	handoff->memory.allocation_entry_size = sizeof(*allocations);
+	handoff->memory.allocations = low_address + BOOT_ALLOCATIONS_OFFSET;
+	handoff->memory.bootstrap_cr3 = handoff_common->bootstrap_cr3;
+	handoff->memory.kernel_phys_start = plan.physical_start;
+	handoff->memory.kernel_phys_end = plan.physical_end;
 	/* Validate a non-final snapshot while console and failure reporting are
 	 * still available.  The final snapshot is normalized only after boot
 	 * services have exited so its map key is consumed immediately. */
@@ -1131,12 +1173,12 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 		fail_boot_allocations(&context, "Preflight memory map", status,
 		    map, map_allocated, low_address, LOW_BLOCK_PAGES,
 		    low_pages_allocated, kernel_address, kernel_pages);
-	map_result = zbl_uefi_normalize_memory_map(
+	map_result = zbl_uefi_normalize_memory_map_v6(
 	    map, map_size, descriptor_size, ranges, MAX_MEMORY_RANGES,
 	    &range_count);
-	if (map_result != ZBL_UEFI_MAP_OK) {
+	if (map_result != ZBL_MEMORY_OK) {
 		console_ascii(&context, "UEFI map rejected: ");
-		console_ascii(&context, zbl_uefi_map_result_name(map_result));
+		console_hex64(&context, "code ", map_result);
 		console_ascii(&context, "\n");
 		fail_boot_allocations(&context, "Normalize memory map",
 		    EFI_LOAD_ERROR, map, map_allocated, low_address,
@@ -1173,16 +1215,17 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 		    low_pages_allocated, kernel_address, kernel_pages);
 	framebuffer_stage(&framebuffer, 1U);
 	debug_port("A64 UEFI BOOT SERVICES EXITED\n");
-	map_result = zbl_uefi_normalize_memory_map(
+	map_result = zbl_uefi_normalize_memory_map_v6(
 	    map, map_size, descriptor_size, ranges, MAX_MEMORY_RANGES,
 	    &range_count);
-	if (map_result != ZBL_UEFI_MAP_OK) {
+	if (map_result != ZBL_MEMORY_OK) {
 		framebuffer_map_error(&framebuffer, map_result);
 		debug_port("A64 UEFI FINAL MAP REJECTED\n");
 		halt();
 	}
 	framebuffer_stage(&framebuffer, 2U);
 	handoff_common->memory_range_count = range_count;
+	handoff->memory.range_count = range_count;
 	debug_port("A64 UEFI EXIT\n");
 	((transition_fn)(uintptr_t)(low_address + LOW_TRAMPOLINE_OFFSET))(
 	    handoff_common->bootstrap_cr3, low_address + TRANSITION_STACK_TOP,

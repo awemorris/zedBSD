@@ -70,7 +70,7 @@ AMD64_CPPFLAGS := -nostdinc \
 	-Iinclude -Isrc -I. \
 	-DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON \
 	-DZEDBSD_USER_ABI_LP64 \
-	-DPCAT_VGA_APERTURE_ADDRESS=0xffffffff800a0000ULL \
+	-DPCAT_VGA_APERTURE_ADDRESS=0xffffffffc1400000ULL \
 	-DPCAT_CIRRUS_APERTURE_ADDRESS=0xffffffffc0000000ULL
 AMD64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 AMD64_CFLAGS := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
@@ -81,7 +81,7 @@ AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
 
 AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/x86/boot-parameters.c \
 	src/hal/amd64/asm.c src/hal/amd64/lib.c \
-	src/hal/amd64/page.c src/hal/amd64/space.c \
+	src/hal/pmem-constraints.c src/hal/amd64/page.c src/hal/amd64/pmem-range.c src/hal/amd64/ram-map.c src/hal/amd64/framebuffer-map.c src/hal/amd64/space.c \
 	src/hal/amd64/acpi-window.c src/hal/amd64/cmain.c \
 	src/hal/amd64/descriptor.c src/hal/amd64/int.c src/hal/amd64/irq.c \
 	src/hal/amd64/msi-source.c \
@@ -171,7 +171,7 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/swap.c src/kern/swap-format.c src/kern/backing-claim.c src/kern/swap-source.c \
 	src/kern/swap-control.c src/kern/swap-boot.c \
 	src/kern/swap-fat.c \
-	src/kern/vm-reclaim.c src/kern/buf.c src/kern/sysctl.c \
+	src/kern/vm-reclaim.c src/kern/buf.c src/kern/io-stats.c src/kern/io-pool.c src/kern/io-scratch.c src/kern/cache-memory.c src/kern/readahead.c src/kern/readahead-worker.c src/kern/writeback.c src/kern/writeback-domain.c src/kern/writeback-policy.c src/kern/io-error.c src/kern/cache-worker.c src/kern/sysctl.c \
 	src/kern/resource.c src/kern/poll.c src/kern/usync.c \
 	src/kern/resource-limit.c \
 	src/kern/disk.c src/kern/partition.c \
@@ -211,7 +211,7 @@ AMD64_KERNEL_SOURCES += \
 	src/drivers/graphics/pcat/font.c
 endif
 AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
-	$(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES)
+	$(KERN_UFS_SOURCES)
 AMD64_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
 ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
 AMD64_KERNEL_SOURCES += plan/ws004-hardware/tests/pci-msi-qemu.c
@@ -226,8 +226,11 @@ AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS) \
 	$(AMD64_KERNEL_LIBC_OBJS)
 ifneq ($(strip $(ZEDBSD_CONFIG)),)
 $(AMD64_VMUNIX_OBJS): $(ZEDBSD_CONFIG)
+$(AMD64_VMUNIX_OBJS): platform/amd64/vmunix.mk
 endif
 $(AMD64_VMUNIX_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
+# -MMD omits installed system headers. A refreshed ABI must rebuild consumers.
+$(AMD64_VMUNIX_OBJS): $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
 $(BUILD)/kern64/src/kern/vfs.o \
 	$(BUILD)/kern64/src/kern/platform/pcat.o: \
 	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
@@ -244,6 +247,10 @@ $(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.c
 
 # Shared x86 HAL sources must use the amd64 flags as well.  Without this
 # rule the generic i386 pattern can leave a 32-bit object in build/amd64.
+$(BUILD)/src/hal/pmem-constraints.o: src/hal/pmem-constraints.c
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
+
 $(BUILD)/src/hal/x86/%.o: src/hal/x86/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
@@ -365,7 +372,8 @@ $(BUILD)/bootloader/bios-fat-directory.i386.o: \
 		-c $< -o $@
 
 AMD64_BOOTZBSD_HELPERS := $(BUILD)/bootloader/bios-zedbsd-config.i386.o \
-	$(BUILD)/bootloader/bios-fat-directory.i386.o
+	$(BUILD)/bootloader/bios-fat-directory.i386.o \
+	$(BUILD)/bootloader/bios-memory-map.i386.o $(BUILD)/bootloader/common-memory-map.i386.o
 
 $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
 	$(AMD64_BOOTZBSD_HELPERS) $(BIOS_LOADER)/bootzbsd.ld
@@ -431,7 +439,7 @@ $(BUILD)/uefi/transition.o: $(UEFI_LOADER)/transition.S
 
 $(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
 	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/framebuffer.o \
-	$(BUILD)/uefi/memory-map.o \
+	$(BUILD)/uefi/memory-map.o $(BUILD)/uefi/memory-map-v6.o $(BUILD)/uefi/common-memory-map.o \
 	$(BUILD)/uefi/volume-discovery.o $(BUILD)/uefi/zedbsd-config.o \
 	$(BUILD)/uefi/transition.o \
 	platform/amd64/tools/check-bootx64.noct
@@ -479,7 +487,7 @@ AMD64_USER_READLINE_OBJ := $(BUILD)/user64/userland/base/libedit/readline.o
 AMD64_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 AMD64_USER_ELF_CHECK := tools/build/check-user-elf.noct
 
-$(BUILD)/user64/%.o: %.c
+$(BUILD)/user64/%.o: %.c $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) \
 		-fno-strict-aliasing -MMD -MP -c $< -o $@
@@ -854,8 +862,8 @@ $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 		--swapfile $(SWAP_IMAGE) $@
 
 $(BUILD)/ufs-root.img: $(AMD64_ARCH_UFS_IMAGE) \
-	$(BUILD_TOOLS_DIR)/make-ufs1-root-image.py tools/build/ufs1_format.py
-	$(PYTHON) $(BUILD_TOOLS_DIR)/make-ufs1-root-image.py --force \
+	$(BUILD_TOOLS_DIR)/make-ufs-root-image.py tools/build/ufs_format.py
+	$(PYTHON) $(BUILD_TOOLS_DIR)/make-ufs-root-image.py --force \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) $@
 
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1-native.bin \
@@ -1327,3 +1335,25 @@ CHECK_RUN_TARGETS += amd64-hal-compile
 	posix-phase3-qemu-test posix-phase4-qemu-test posix-phase5-qemu-test \
 	posix-phase6-qemu-test posix-phase7-qemu-test posix-phase8-qemu-test \
 	posix-phase85-qemu-test posix-phase10-qemu-test
+
+$(BUILD)/uefi/memory-map-v6.o: $(UEFI_LOADER)/memory-map-v6.c $(UEFI_LOADER)/memory-map.h bootloader/common/memory-map.h bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -I. -c $< -o $@
+
+$(BUILD)/uefi/common-memory-map.o: bootloader/common/memory-map.c bootloader/common/memory-map.h bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -I. -c $< -o $@
+
+$(BUILD)/bootloader/bios-memory-map.i386.o: bootloader/bios/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+		-fno-stack-protector -fno-asynchronous-unwind-tables \
+		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+		-c $< -o $@
+
+$(BUILD)/bootloader/common-memory-map.i386.o: bootloader/common/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+		-fno-stack-protector -fno-asynchronous-unwind-tables \
+		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+		-c $< -o $@

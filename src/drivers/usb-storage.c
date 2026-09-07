@@ -10,8 +10,11 @@
 #include <errno.h>
 #include <hal/hal.h>
 #include <kern/disk.h>
+#include <kern/partition.h>
+#include <kern/io-stats.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
+#include <kern/thread.h>
 #include <string.h>
 
 #define USB_MASS_STORAGE_CLASS 0x08U
@@ -54,6 +57,14 @@ struct storage_read_checkpoint {
 	uint16_t blocks;
 };
 
+enum storage_media_state {
+	STORAGE_ONLINE,
+	STORAGE_RECONFIGURE,
+	STORAGE_REVALIDATE,
+	STORAGE_ABSENT,
+	STORAGE_FAILED
+};
+
 struct usb_storage {
 	struct drv_usb_interface *interface;
 	struct drv_usb_device *device;
@@ -64,8 +75,13 @@ struct usb_storage {
 	struct drv_usb_urb *bulk_out_urb;
 	struct disk *disk;
 	struct mutex lock;
+	struct mutex control_lock;
+	struct thread *control_worker;
+	volatile unsigned control_ready;
+	volatile unsigned control_stopping;
 	uint32_t next_tag;
 	uint32_t block_size;
+	size_t transfer_size;
 	uint64_t block_count;
 	uint8_t lun;
 	uint8_t write_protected;
@@ -74,7 +90,10 @@ struct usb_storage {
 	uint8_t dpofua;
 	int flush_error;
 	int transport_error;
-	int media_error;
+	enum storage_media_state media_state;
+	struct drv_usb_scsi_sense last_sense;
+	unsigned media_retired;
+	unsigned partitions_pending;
 	uint64_t command_deadline;
 	enum drv_usb_scsi_flush_policy flush_policy;
 #ifdef ZEDBSD_TEST_CHECKPOINTS
@@ -290,6 +309,40 @@ storage_urbs_alloc(struct usb_storage *storage)
 	return ENOMEM;
 }
 
+/* Reserves ordinary transfers separately from the controller's reclaim reserve. */
+static int
+storage_transfer_reserve(
+	struct usb_storage *storage)
+{
+	int error;
+
+	/* Keeps the established byte limit on controllers without the paired callbacks. */
+	storage->transfer_size = DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE;
+	if (!(drv_usb_device_hcd_capabilities(storage->device) &
+	    DRV_USB_HCD_CAP_TRANSFER_RESERVE))
+		return 0;
+
+	/* Leaves unusually large logical sectors on their existing one-block path. */
+	if (storage->block_size > DRV_USB_TRANSFER_RESERVE_MAX_SIZE)
+		return 0;
+	error = drv_usb_urb_reserve_transfer(storage->control_urb,
+	    DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE);
+	if (error != 0)
+		return error;
+	error = drv_usb_urb_reserve_transfer(storage->bulk_in_urb,
+	    DRV_USB_TRANSFER_RESERVE_MAX_SIZE);
+	if (error != 0)
+		return error;
+	error = drv_usb_urb_reserve_transfer(storage->bulk_out_urb,
+	    DRV_USB_TRANSFER_RESERVE_MAX_SIZE);
+	if (error != 0)
+		return error;
+	storage->transfer_size = DRV_USB_TRANSFER_RESERVE_MAX_SIZE;
+
+	/* Publishes the effective limit only after every reservation is ready. */
+	return 0;
+}
+
 static void
 storage_urbs_free(struct usb_storage *storage)
 {
@@ -305,6 +358,8 @@ static int bot_reset(struct usb_storage *storage)
 {
 	size_t actual = 0;
 	int error;
+
+	disk_persistence_forget(storage->disk);
 	error = storage_control(storage,
 	    DRV_USB_DIR_OUT | DRV_USB_REQUEST_CLASS | DRV_USB_RECIP_INTERFACE,
 	    USB_MASS_STORAGE_RESET, 0, drv_usb_interface_number(storage->interface),
@@ -357,6 +412,11 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 		checkpoint = &read_checkpoint;
 	}
 
+	/* Counts wire attempts, including retries and failed CBWs. */
+	io_stats_record(cbw.command[0] == SCSI_READ_10 ? IO_USB_READ10 :
+	    (cbw.command[0] == 0x2aU ? IO_USB_WRITE10 :
+	    (cbw.command[0] == SCSI_SYNCHRONIZE_CACHE_10 ?
+	    IO_USB_SYNC_CACHE : IO_USB_OTHER)), length);
 	actual = 0;
 	error = storage_bulk(storage, storage->bulk_out, &cbw,
 	    sizeof(cbw), BOT_TIMEOUT_MS, &actual, NULL);
@@ -469,6 +529,69 @@ request_sense_locked(struct usb_storage *storage,
 	return error;
 }
 
+/* Refreshes policy within the original command's lock and deadline. */
+static int
+storage_reconfigure_locked(
+	struct usb_storage *storage)
+{
+	struct drv_usb_scsi_cache_info cache;
+	struct drv_usb_scsi_sense sense;
+	enum drv_usb_scsi_flush_policy policy, previous;
+	uint8_t mode_command[6], sync_command[10], mode[64];
+	size_t actual;
+	int error, failed;
+
+	previous = storage->flush_policy;
+	storage->media_state = STORAGE_RECONFIGURE;
+	disk_persistence_forget(storage->disk);
+	memset(&cache, 0, sizeof(cache));
+	memset(mode, 0, sizeof(mode));
+	memset(&sense, 0, sizeof(sense));
+	(void)drv_usb_scsi_make_mode_sense6_cache_cdb(mode_command,
+	    sizeof(mode_command), sizeof(mode));
+	error = bot_command_locked(storage, mode_command, sizeof(mode_command),
+	    mode, sizeof(mode), 1, &actual, &failed, 1);
+	if (error != 0)
+		goto fail;
+	(void)drv_usb_scsi_parse_mode_sense6_cache(mode, actual, &cache);
+	if (!cache.header_valid) {
+		error = EIO;
+		goto fail;
+	}
+	/* Flush the old policy's accepted writes before publishing a new policy. */
+	memset(sync_command, 0, sizeof(sync_command));
+	sync_command[0] = SCSI_SYNCHRONIZE_CACHE_10;
+	error = bot_command_locked(storage, sync_command, sizeof(sync_command),
+	    NULL, 0, 0, NULL, &failed, 1);
+	if (error != 0 && failed && request_sense_locked(storage, &sense) == 0) {
+		storage->last_sense = sense;
+	}
+	policy = drv_usb_scsi_select_flush_policy(&cache, error == 0, &sense);
+	/* A newly advertised FUA/cache-disabled policy cannot prove older writes. */
+	if (error != 0 &&
+	    (!drv_usb_scsi_sense_is_invalid_opcode(&sense) ||
+	     (previous != DRV_USB_SCSI_FLUSH_FUA &&
+	      previous != DRV_USB_SCSI_FLUSH_WRITE_THROUGH)))
+		goto fail;
+	if (!drv_usb_scsi_flush_policy_allows_write(policy)) {
+		error = EOPNOTSUPP;
+		goto fail;
+	}
+	storage->write_protected = cache.write_protected;
+	storage->cache_known = cache.cache_valid;
+	storage->write_cache_enabled = cache.write_cache_enabled;
+	storage->dpofua = cache.dpofua;
+	storage->flush_policy = policy;
+	if (storage->disk != NULL && cache.write_protected)
+		storage->disk->d_flags |= DISK_READ_ONLY;
+	storage->media_state = STORAGE_ONLINE;
+	return 0;
+fail:
+	storage->media_state = STORAGE_FAILED;
+	disk_media_revoke(storage->disk);
+	return error;
+}
+
 static int
 bot_command_sense_locked(struct usb_storage *storage, const void *cdb,
 	size_t cdb_length, void *buffer, size_t length, int input,
@@ -476,9 +599,16 @@ bot_command_sense_locked(struct usb_storage *storage, const void *cdb,
 	int report_command_failed)
 {
 	struct drv_usb_scsi_sense local_sense;
-	unsigned reset_done = 0, ua_retried = 0;
+	enum drv_usb_scsi_recovery action;
+	unsigned reset_done = 0, ua_retried = 0, mode_retried = 0;
+	uint8_t retry_cdb[16];
 	int command_failed, error;
 	uint64_t now = sched_ticks();
+
+	if (cdb == NULL || cdb_length == 0 || cdb_length > sizeof(retry_cdb))
+		return EINVAL;
+	memcpy(retry_cdb, cdb, cdb_length);
+	cdb = retry_cdb;
 
 	storage->command_deadline = now + (3U * BOT_TIMEOUT_MS + 9U) / 10U;
 	if (sense == NULL)
@@ -508,14 +638,49 @@ bot_command_sense_locked(struct usb_storage *storage, const void *cdb,
 		if (command_failed == 0 ||
 		    request_sense_locked(storage, sense) != 0)
 			break;
+		storage->last_sense = *sense;
+		action = drv_usb_scsi_recovery_action(sense);
+		if (action == DRV_USB_SCSI_RECOVERY_MODE && storage->disk != NULL &&
+		    mode_retried == 0) {
+			mode_retried = 1;
+			error = storage_reconfigure_locked(storage);
+			if (error != 0)
+				break;
+			if (retry_cdb[0] == 0x2aU) {
+				if (storage->write_protected) {
+					error = EROFS;
+					break;
+				}
+				retry_cdb[1] &= ~0x08U;
+				if (drv_usb_scsi_flush_policy_uses_fua(storage->flush_policy))
+					retry_cdb[1] |= 0x08U;
+			}
+			if (retry_cdb[0] == SCSI_SYNCHRONIZE_CACHE_10 &&
+			    !drv_usb_scsi_flush_policy_uses_sync_cache(storage->flush_policy)) {
+				error = 0;
+				break;
+			}
+			continue;
+		}
 		/* ASCQ 00 only: do not interpret arbitrary reset/medium-change
 		 * indications as proof that our class reset caused them. */
-		if (reset_done == 0 || ua_retried != 0 || !sense->valid ||
-		    sense->key != 0x06U || sense->asc != 0x29U ||
-		    sense->ascq != 0x00U) {
-			if (sense->valid && (sense->key == 0x06U ||
-			    (sense->key == 0x02U && sense->asc == 0x3aU)))
-				storage->media_error = EIO;
+		if (reset_done == 0 || ua_retried != 0 ||
+		    action != DRV_USB_SCSI_RECOVERY_RESET) {
+			/* Initial readiness may consume power-on attention before
+			 * any disk or cached medium identity exists. Its bounded
+			 * probe retries still require success before publication.
+			 * Later commands must retain media-change failures. */
+			if (storage->disk != NULL && action != DRV_USB_SCSI_RECOVERY_NONE) {
+				if (action == DRV_USB_SCSI_RECOVERY_MODE) {
+					storage->media_state = STORAGE_FAILED;
+					disk_media_revoke(storage->disk);
+				} else {
+					storage->media_state = action == DRV_USB_SCSI_RECOVERY_MEDIA ?
+					    STORAGE_REVALIDATE : action == DRV_USB_SCSI_RECOVERY_ABSENT ?
+					    STORAGE_ABSENT : STORAGE_FAILED;
+					disk_media_revoke(storage->disk);
+				}
+			}
 			break;
 		}
 		ua_retried = 1;
@@ -705,8 +870,8 @@ static int storage_submit(struct disk *disk, struct bio *bio)
 
 	memset(&sense, 0, sizeof(sense));
 	mutex_lock(&storage->lock);
-	if (storage->media_error != 0) {
-		error = storage->media_error;
+	if (storage->media_state != STORAGE_ONLINE) {
+		error = EIO;
 	} else if (storage->flush_error != 0 &&
 	    (bio->b_op == BIO_WRITE || bio->b_op == BIO_FLUSH)) {
 		error = storage->flush_error;
@@ -804,11 +969,234 @@ static const struct disk_ops storage_disk_ops = {
 	.ioctl = storage_ioctl
 };
 
+/* Publishes a probed medium without consuming the class/control owner on error. */
+static int
+storage_publish_disk(
+	struct usb_storage *storage)
+{
+	struct disk *disk;
+	int error;
+
+	if (storage->disk != NULL)
+		return EBUSY;
+	/* Builds normal core/HCD reserves before publishing a usable disk. */
+	error = storage_transfer_reserve(storage);
+	if (error != 0) {
+		return error;
+	}
+	/* READ CAPACITY may describe 4KiB (or larger) logical sectors. Bound
+	 * BIOs by bytes, not the historical sixteen 512-byte blocks. */
+	if (storage->block_size > DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE) {
+		error = drv_usb_urb_reserve_sync(storage->bulk_in_urb,
+		    storage->block_size);
+		if (error == 0)
+			error = drv_usb_urb_reserve_sync(storage->bulk_out_urb,
+			    storage->block_size);
+		if (error != 0) {
+			return error;
+		}
+	}
+	disk = disk_alloc();
+	if (disk == NULL) {
+		return ENOSPC;
+	}
+	error = disk_alloc_sd_name(disk);
+	if (error != 0) {
+		(void)disk_destroy(disk);
+		return error;
+	}
+	disk->d_flags = DISK_REMOVABLE |
+	    (drv_usb_scsi_flush_policy_requires_read_only(
+		 storage->flush_policy, storage->write_protected) ?
+		DISK_READ_ONLY : 0);
+	/* Cache-disabled or working SYNCHRONIZE CACHE policy establishes persistence. */
+	if (drv_usb_scsi_flush_policy_allows_write(storage->flush_policy))
+		disk->d_flags |= DISK_FLUSH_PROOF;
+	disk->d_block_size = storage->block_size;
+	disk->d_block_count = storage->block_count;
+	disk->d_max_transfer_blocks =
+	    storage->transfer_size / storage->block_size;
+	if (disk->d_max_transfer_blocks == 0)
+		disk->d_max_transfer_blocks = 1;
+	disk->d_ops = &storage_disk_ops;
+	disk->d_data = storage;
+	storage->disk = disk;
+	error = disk_create(disk);
+	if (error != 0) {
+		storage->disk = NULL;
+		(void)disk_destroy(disk);
+		return error;
+	}
+	hal_printf("usb-storage: %s blocks=%u block-size=%u cache=%s "
+	    "dpofua=%s flush=%s%s\n",
+	    disk->d_name, (uint32_t)disk->d_block_count, disk->d_block_size,
+	    storage->cache_known == 0 ? "unknown" :
+	    storage->write_cache_enabled != 0 ? "write-back" : "disabled",
+	    storage->dpofua != 0 ? "yes" : "no",
+	    flush_policy_name(storage->flush_policy),
+	    (disk->d_flags & DISK_READ_ONLY) != 0 ? " read-only" : "");
+	return 0;
+}
+
+/* Publishes replacement partitions outside the recursive command mutex. */
+static int
+storage_refresh_partitions(
+	struct usb_storage *storage)
+{
+	int error;
+
+	/* Retries temporary ownership/allocation failures on a later control pass. */
+	error = partition_reload(storage->disk);
+	if (error == 0 || error == EINVAL || error == EOPNOTSUPP)
+		storage->partitions_pending = 0;
+
+	/* Leaves a whole-disk filesystem usable when it has no partition table. */
+	if (error == EINVAL || error == EOPNOTSUPP)
+		return 0;
+	return error;
+}
+
+/* Executes one bounded pass under control ownership, never from a submitted BIO. */
+static int
+storage_control_step(
+	struct usb_storage *storage)
+{
+	uint8_t ready[6] = { SCSI_TEST_UNIT_READY };
+	int error, absent;
+
+	if (drv_usb_device_state(storage->device) != DRV_USB_STATE_CONFIGURED)
+		return ENODEV;
+	mutex_lock(&storage->lock);
+	if (storage->media_state == STORAGE_ONLINE) {
+		error = bot_command_sense_locked(storage, ready, sizeof(ready),
+		    NULL, 0, 0, NULL, NULL, 0);
+		mutex_unlock(&storage->lock);
+		if (error == 0 && storage->partitions_pending)
+			error = storage_refresh_partitions(storage);
+		return error;
+	}
+	if (storage->media_state != STORAGE_REVALIDATE && storage->media_state != STORAGE_ABSENT) {
+		mutex_unlock(&storage->lock);
+		return EIO;
+	}
+	if (storage->disk != NULL) {
+		if (!storage->media_retired) {
+			error = partition_retire_media(storage->disk);
+			if (error != 0) {
+				mutex_unlock(&storage->lock);
+				return error;
+			}
+			storage->media_retired = 1;
+		}
+		error = disk_destroy(storage->disk);
+		if (error != 0) {
+			mutex_unlock(&storage->lock);
+			return error;
+		}
+		storage->disk = NULL;
+		storage->media_retired = 0;
+	}
+	/* Fresh policy is permitted only after complete old-identity retirement. */
+	storage->flush_error = 0;
+	storage->transport_error = 0;
+	storage->write_protected = 0;
+	storage->cache_known = 0;
+	storage->write_cache_enabled = 0;
+	storage->dpofua = 0;
+	storage->flush_policy = DRV_USB_SCSI_FLUSH_UNSAFE;
+	storage->block_size = 0;
+	storage->block_count = 0;
+	storage->partitions_pending = 0;
+	storage_urbs_free(storage);
+	error = storage_urbs_alloc(storage);
+	mutex_unlock(&storage->lock);
+	if (error != 0)
+		return error;
+	absent = 0;
+	error = scsi_probe(storage, &absent);
+	mutex_lock(&storage->lock);
+	if (error != 0) {
+		storage->media_state = absent ? STORAGE_ABSENT : STORAGE_REVALIDATE;
+	} else {
+		storage->media_state = STORAGE_ONLINE;
+		error = storage_publish_disk(storage);
+		if (error != 0)
+			storage->media_state = STORAGE_REVALIDATE;
+		else
+			storage->partitions_pending = 1;
+	}
+	mutex_unlock(&storage->lock);
+	if (error == 0 && storage->partitions_pending)
+		error = storage_refresh_partitions(storage);
+	return error;
+}
+
+/* Polls readiness outside submitted BIOs, with class lifetime held until join. */
+static void
+storage_control_worker(
+	void *argument)
+{
+	struct usb_storage *storage = argument;
+
+	while (!atomic_raw_load_acquire(&storage->control_ready)) {
+		if (atomic_raw_load_acquire(&storage->control_stopping))
+			return;
+		kernel_wait_task();
+	}
+	while (!atomic_raw_load_acquire(&storage->control_stopping)) {
+		mutex_lock(&storage->control_lock);
+		if (!atomic_raw_load_acquire(&storage->control_stopping))
+			(void)storage_control_step(storage);
+		mutex_unlock(&storage->control_lock);
+		if (!atomic_raw_load_acquire(&storage->control_stopping))
+			sched_sleep(sched_ticks() + 100U);
+	}
+}
+
+/* Allocates before disk publication and waits for the attach-ready handshake. */
+static int
+storage_control_start(
+	struct usb_storage *storage)
+{
+	int error;
+
+	error = kthread_create(storage_control_worker, storage, SCHED_PRIORITY_DEFAULT,
+	    &storage->control_worker);
+	if (error == 0)
+		thread_start(storage->control_worker);
+	return error;
+}
+
+/* Never waits with a command/control mutex held; failed joins retain ownership. */
+static int
+storage_control_stop(
+	struct usb_storage *storage)
+{
+	struct thread *worker;
+	uint64_t deadline;
+	int error;
+
+	worker = storage->control_worker;
+	if (worker == NULL)
+		return 0;
+	atomic_raw_store_release(&storage->control_stopping, 1U);
+	kernel_notify_task(worker->task);
+	deadline = sched_ticks() + 2000U;
+	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) != THREAD_ZOMBIE) {
+		if (sched_ticks() >= deadline)
+			return EBUSY;
+		sched_yield();
+	}
+	error = thread_wait(worker, NULL);
+	if (error == 0)
+		storage->control_worker = NULL;
+	return error;
+}
+
 static int storage_attach(struct drv_usb_interface *interface,
 	const struct drv_usb_id *id)
 {
 	struct usb_storage *storage;
-	struct disk *disk;
 	uint8_t maximum_lun = 0;
 	size_t actual = 0;
 	int error, medium_absent = 0;
@@ -829,6 +1217,7 @@ static int storage_attach(struct drv_usb_interface *interface,
 		return ENODEV;
 	}
 	(void)mutex_init(&storage->lock, LOCK_RANK_DISK, "usb-storage");
+	(void)mutex_init(&storage->control_lock, LOCK_RANK_DEVICE, "usb-storage control");
 	error = storage_urbs_alloc(storage);
 	if (error != 0) {
 		hal_free(storage);
@@ -842,74 +1231,35 @@ static int storage_attach(struct drv_usb_interface *interface,
 		hal_printf("usb-storage: only LUN 0 of %u is supported\n",
 		    (unsigned)maximum_lun + 1U);
 	error = scsi_probe(storage, &medium_absent);
-	if (error != 0) {
-		if (medium_absent != 0) {
-			(void)drv_usb_interface_set_driver_data(interface, storage);
-			hal_printf("usb-storage: LUN %u has no medium; "
-			    "reader attached without a disk\n", storage->lun);
-			return 0;
-		}
-		storage_urbs_free(storage);
-		hal_free(storage);
-		return error;
-	}
-	/* READ CAPACITY may describe 4KiB (or larger) logical sectors. Bound
-	 * BIOs by bytes, not the historical sixteen 512-byte blocks. */
-	if (storage->block_size > DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE) {
-		error = drv_usb_urb_reserve_sync(storage->bulk_in_urb,
-		    storage->block_size);
-		if (error == 0)
-			error = drv_usb_urb_reserve_sync(storage->bulk_out_urb,
-			    storage->block_size);
-		if (error != 0) {
-			storage_urbs_free(storage);
-			hal_free(storage);
-			return error;
-		}
-	}
-	disk = disk_alloc();
-	if (disk == NULL) {
-		storage_urbs_free(storage);
-		hal_free(storage);
-		return ENOSPC;
-	}
-	error = disk_alloc_sd_name(disk);
-	if (error != 0) {
-		(void)disk_destroy(disk);
-		storage_urbs_free(storage);
-		hal_free(storage);
-		return error;
-	}
-	disk->d_flags = DISK_REMOVABLE |
-	    (drv_usb_scsi_flush_policy_requires_read_only(
-		 storage->flush_policy, storage->write_protected) ?
-		DISK_READ_ONLY : 0);
-	disk->d_block_size = storage->block_size;
-	disk->d_block_count = storage->block_count;
-	disk->d_max_transfer_blocks =
-	    DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE / storage->block_size;
-	if (disk->d_max_transfer_blocks == 0)
-		disk->d_max_transfer_blocks = 1;
-	disk->d_ops = &storage_disk_ops;
-	disk->d_data = storage;
-	storage->disk = disk;
-	error = disk_create(disk);
-	if (error != 0) {
-		(void)disk_destroy(disk);
-		storage_urbs_free(storage);
-		hal_free(storage);
-		return error;
+	if (error != 0 && !medium_absent)
+		goto fail;
+	if (medium_absent)
+		storage->media_state = STORAGE_ABSENT;
+	error = storage_control_start(storage);
+	if (error != 0)
+		goto fail;
+	if (!medium_absent) {
+		error = storage_publish_disk(storage);
+		if (error != 0)
+			goto fail;
 	}
 	(void)drv_usb_interface_set_driver_data(interface, storage);
-	hal_printf("usb-storage: %s blocks=%u block-size=%u cache=%s "
-	    "dpofua=%s flush=%s%s\n",
-	    disk->d_name, (uint32_t)disk->d_block_count, disk->d_block_size,
-	    storage->cache_known == 0 ? "unknown" :
-	    storage->write_cache_enabled != 0 ? "write-back" : "disabled",
-	    storage->dpofua != 0 ? "yes" : "no",
-	    flush_policy_name(storage->flush_policy),
-	    (disk->d_flags & DISK_READ_ONLY) != 0 ? " read-only" : "");
+	atomic_raw_store_release(&storage->control_ready, 1U);
+	kernel_notify_task(storage->control_worker->task);
+	if (medium_absent)
+		hal_printf("usb-storage: LUN %u has no medium; reader attached without a disk\n", storage->lun);
 	return 0;
+fail:
+	if (storage_control_stop(storage) != 0) {
+		/* Retain a class owner so a later detach can finish the failed join. */
+		storage->media_state = STORAGE_FAILED;
+		(void)drv_usb_interface_set_driver_data(interface, storage);
+		hal_printf("usb-storage: attach error=%d; control owner retained for stop\n", error);
+		return 0;
+	}
+	storage_urbs_free(storage);
+	hal_free(storage);
+	return error;
 }
 
 static int storage_detach(struct drv_usb_interface *interface, unsigned flags)
@@ -919,17 +1269,31 @@ static int storage_detach(struct drv_usb_interface *interface, unsigned flags)
 	(void)flags;
 	if (storage == NULL)
 		return 0;
+	mutex_lock(&storage->control_lock);
 	if (storage->disk != NULL) {
-		error = disk_gone_if_idle(storage->disk);
-		if (error != 0)
-			return error;
+		if (!storage->media_retired) {
+			error = disk_media_status(storage->disk) != 0 ?
+			    partition_retire_media(storage->disk) : disk_gone_if_idle(storage->disk);
+			if (error != 0)
+				goto unlock;
+			storage->media_retired = 1;
+		}
 		error = disk_destroy(storage->disk);
 		if (error != 0)
-			return error;
+			goto unlock;
+		storage->disk = NULL;
 	}
+	atomic_raw_store_release(&storage->control_stopping, 1U);
+	mutex_unlock(&storage->control_lock);
+	error = storage_control_stop(storage);
+	if (error != 0)
+		return error;
 	storage_urbs_free(storage);
 	hal_free(storage);
 	return 0;
+unlock:
+	mutex_unlock(&storage->control_lock);
+	return error;
 }
 
 static const struct drv_usb_id storage_ids[] = {{

@@ -14,12 +14,12 @@ fixture="$root/plan/ws004-hardware/tests/xhci-concurrent-urbs-test.c"
 function_fixture="$root/plan/ws004-hardware/tests/usb-function-model-test.c"
 
 # shellcheck disable=SC2086
-$cc $common "$fixture" -o "$work/xhci-concurrent"
+$cc $common "$fixture" "$root/src/kern/io-stats.c" -o "$work/xhci-concurrent"
 "$work/xhci-concurrent"
 
 # shellcheck disable=SC2086
 $cc $common -fsanitize=address,undefined -fno-omit-frame-pointer \
-	"$fixture" -o "$work/xhci-concurrent-sanitize"
+	"$fixture" "$root/src/kern/io-stats.c" -o "$work/xhci-concurrent-sanitize"
 # LeakSanitizer cannot run under the PTY/ptrace harness used by Codex; this
 # fixture owns no heap allocation, while ASan bounds and UBSan remain active.
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
@@ -41,11 +41,11 @@ usb="$root/src/drivers/usb.c"
 # return until drv_usb_hcd_complete() drops HCD ownership after callback return.
 # shellcheck disable=SC2086
 $cc $common -pthread "$usb" "$function_fixture" \
-	-o "$work/usb-function-model"
+	"$root/src/kern/io-stats.c" -o "$work/usb-function-model"
 "$work/usb-function-model"
 # shellcheck disable=SC2086
 $cc $common -pthread -fsanitize=address,undefined -fno-omit-frame-pointer \
-	"$usb" "$function_fixture" -o "$work/usb-function-model-sanitize"
+	"$usb" "$function_fixture" "$root/src/kern/io-stats.c" -o "$work/usb-function-model-sanitize"
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 	"$work/usb-function-model-sanitize"
 # shellcheck disable=SC2086

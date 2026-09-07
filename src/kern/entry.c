@@ -23,6 +23,8 @@
 
 #include "libc/heap.h"
 #include "hal/hal.h"
+#include "kern/io-pool.h"
+#include "kern/cache-memory.h"
 #include "kern/boot.h"
 #include "kern/atomic.h"
 #include "kern/buf.h"
@@ -329,6 +331,7 @@ kernel_entry(
 	syscall_init();
 	sched_init();
 	sysctl_init();
+	cache_memory_init();
 	if (buf_init() != 0)
 		hal_fatal(__FILE__, __LINE__,
 			  "buffer cache initialization failed");
@@ -343,6 +346,11 @@ kernel_entry(
 		hal_fatal(__FILE__, __LINE__,
 			  "secondary scheduler startup failed");
 	thread_attach_secondaries();
+
+	/* Builds nonblocking I/O scratch before mounting filesystems or loading init. */
+	io_pool_init();
+	if (cache_worker_init() != 0)
+		kern_logf("cache: worker scratch unavailable; writeback remains disabled\n");
 
 	/* Synchronizes the shared kernel translation domain with the new CPUs. */
 	hal_page_flush_tlb_range(HAL_SPACE_SYS, __kernel_vma_start,

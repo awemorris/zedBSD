@@ -4,7 +4,7 @@ Last updated: 2026-09-06
 
 Phase ID: `ws024-p001`
 
-Status: planned; not queued
+Status: completed; Queue q100; see [results](results.md)
 
 Parent: [WS024](../ws.md)
 
@@ -32,3 +32,5 @@ required behavior from both existing drivers and all image consumers.
 
 Complete when p002/p003 can implement this contract without reopening the
 unification decision or guessing about the handling of existing data.
+
+Frozen implementation contract: [format-contract](../format-contract.md); [acceptance](../tests/acceptance.md).

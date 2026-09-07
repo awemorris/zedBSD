@@ -27,6 +27,10 @@ bsp_kernel_handoff(
 uint64_t
 bsp_mem_probe(void);
 
+int bsp_boot_allocation(uint32_t index, uint64_t *base, uint64_t *size);
+uint32_t bsp_memory_source(void);
+int bsp_mem_attributes(uint32_t index, uint64_t *attributes);
+
 uint32_t
 bsp_mem_range_count(void);
 
@@ -48,6 +52,8 @@ bsp_acpi_rsdp(void);
 void
 pcat_cons_init(void);
 
+void pcat_cons_paging_ready(void);
+
 void
 pcat_cons_irq_init(void);
 
@@ -57,5 +63,7 @@ pcat_cons_output_begin(void);
 void
 pcat_cons_output_end(
 	uint64_t token);
+
+int bsp_boot_allocation_lifetime(uint32_t index, uint32_t *lifetime);
 
 #endif

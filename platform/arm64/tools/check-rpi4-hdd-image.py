@@ -70,7 +70,7 @@ def check(args: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory(prefix="zedbsd-rpi4-root-check-") as work:
         inner = Path(work) / "aarch64.img"
         inner.write_bytes(extract(args.image, "rootfs.img"))
-        checker = Path(__file__).with_name("check-arch-overlay-image.py")
+        checker = Path(__file__).resolve().parents[3] / "tools/build/check-arch-overlay-image.py"
         subprocess.run(["python3", str(checker), "--profile", "aarch64",
                         "--image", str(inner)], check=True)
     print("Raspberry Pi 4 image check: PASS")

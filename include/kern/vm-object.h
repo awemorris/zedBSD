@@ -24,7 +24,10 @@
 
 struct file;
 struct inode;
+struct mount;
 struct vm_page;
+struct writeback_budget;
+struct writeback_ticket;
 
 #define VM_OBJECT_PAGE_DIRTY	0x0001U
 #define VM_OBJECT_PAGE_BUSY	0x0002U
@@ -37,9 +40,42 @@ struct vm_page;
 #define VM_OBJECT_RESIZING	0x00000004U
 #define VM_OBJECT_CONTENT	0x00000008U
 #define VM_OBJECT_ANONYMOUS	0x00000010U
+#define VM_OBJECT_CACHE_REFERENCE	0x00000020U
+
+/* Caller-owned speculative fill; zero-initialize and never copy a live token.
+ * Request whole pages; prepare clips the final page only at authoritative EOF. */
+#define VM_OBJECT_PREFETCH_PAGES 16U
+struct disk;
+struct vm_object;
+struct vm_object_page;
+struct vm_object_prefetch {
+	struct vm_object *object;
+	struct disk *disk;
+	struct vm_object_page *pages[VM_OBJECT_PREFETCH_PAGES];
+	off_t offset;
+	size_t length;
+	uint64_t size_generation;
+	uint64_t content_generation;
+	unsigned count;
+};
+int vm_object_prefetch_prepare(struct inode *inode, off_t offset, size_t length, struct vm_object_prefetch *fill);
+/* Valid completion consumes the token, including short/error/stale results. */
+int vm_object_prefetch_complete(struct vm_object_prefetch *fill, const void *bytes, ssize_t received, size_t *published);
+void vm_object_prefetch_abort(struct vm_object_prefetch *fill);
+
+int vm_object_read_coherent_useful(struct inode *, off_t, void *, size_t, ssize_t *, size_t *);
+
+size_t vm_object_reclaim_clean(size_t target);
 
 struct vm_object_page {
+	uint64_t prefetch_size_generation;
+	unsigned prefetch_valid;
+	unsigned prefetch_frontier;
+	unsigned prefetch_used;
+	/* Optional ordinary-write dirty ownership; separate from physical charge. */
+	struct writeback_budget *writeback_budget;
 	struct vm_object *owner;
+	struct vm_page_slab *metadata_slab;
 	off_t offset;
 	struct hal_pmem pmem;
 	unsigned flags;
@@ -61,9 +97,18 @@ struct vm_object_page {
 	uint64_t content_generation;
 	struct vm_page *mappings;
 	struct vm_object_page *next;
+
+	/* Intrusive ordered lookup; page identity stays stable across rotations. */
+	struct vm_object_page *index_left;
+	struct vm_object_page *index_right;
+	unsigned index_height;
+	struct vm_object_page *dirty_previous;
+	struct vm_object_page *dirty_next;
+	unsigned dirty_linked;
 };
 
 struct vm_object {
+	uint64_t registry_generation;
 	/*
 	 * One registry reference plus one reference for every mapped region.
 	 */
@@ -116,6 +161,8 @@ struct vm_object {
 	struct file *write_file;
 	struct inode *inode;
 	struct vm_object_page *pages;
+	struct vm_object_page *page_index;
+	struct vm_object_page *dirty_pages;
 
 	/*
 	 * Resize-discarded pages retained only until pre-existing pins drain.
@@ -148,6 +195,8 @@ struct vm_object_resize {
  * is committed as exactly that prefix; a negative result is aborted.
  */
 struct vm_object_content {
+	/* Borrowed only during a successfully prepared delayed content commit. */
+	struct writeback_ticket *writeback_ticket;
 	struct inode *inode;
 	struct vm_object_resize *resize_owner;
 	off_t offset;
@@ -159,6 +208,15 @@ struct vm_object_content {
 
 struct backing_claim;
 int vm_object_backing_busy(const struct backing_claim *);
+
+/* Optional clean retention; prepare runs before inode/position locks. */
+void vm_object_cache_prepare(struct file *file);
+int vm_object_cache_pin(struct inode *inode, struct vm_object **result);
+void vm_object_cache_unpin(struct vm_object *object);
+int vm_object_writeback_prepare(struct file *file, struct vm_object **result);
+void vm_object_writeback_release(struct vm_object *object);
+int vm_object_content_prepare_delayed(struct vm_object_content *content, struct vm_object *object, struct writeback_ticket *ticket);
+unsigned vm_object_cache_drain(struct mount *mount);
 
 int
 vm_object_get_shared(
@@ -246,6 +304,10 @@ vm_object_sync_range(
 	off_t offset,
 	size_t size,
 	int flags);
+
+/* Caller-owned scratch allows an independent syncer to drain under pressure. */
+int vm_object_sync_inode_buffer(struct inode *inode, void *scratch, size_t capacity);
+int vm_object_sync_mount_buffer(struct mount *mount, void *scratch, size_t capacity);
 
 int
 vm_object_sync_inode(

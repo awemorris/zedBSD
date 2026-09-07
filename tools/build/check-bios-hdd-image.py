@@ -71,10 +71,10 @@ def check(args: argparse.Namespace) -> None:
             fail("active partition lies outside the image")
         if args.ufs_root is not None:
             if not args.ufs_root.is_file() or args.ufs_root.stat().st_size % 512:
-                fail("invalid UFS1 root input")
+                fail("invalid UFS root input")
             root_blocks = args.ufs_root.stat().st_size // 512
             if entries[1] != (0, 0xA5, start + blocks, root_blocks):
-                fail("second MBR entry does not describe the UFS1 root")
+                fail("second MBR entry does not describe the UFS root")
             empty_tail = [(0, 0, 0, 0), (0, 0, 0, 0)]
             if args.machine == "pc98":
                 # Native PC-98 Stage 1 stores its IPL sector-count word at
@@ -82,9 +82,9 @@ def check(args: argparse.Namespace) -> None:
                 # fourth MBR entry's block-count field.
                 empty_tail[1] = (0, 0, 0, 9 << 16)
             if entries[2:] != empty_tail:
-                fail("unexpected MBR partition after the UFS1 root")
+                fail("unexpected MBR partition after the UFS root")
             if start + blocks + root_blocks > size // 512:
-                fail("UFS1 root partition lies outside the image")
+                fail("UFS root partition lies outside the image")
 
         stage2_lba = 1 if args.machine == "pcat" else 2
         if args.machine == "pc98":
@@ -240,12 +240,12 @@ def check(args: argparse.Namespace) -> None:
             while remaining:
                 chunk = stream.read(min(1024 * 1024, remaining))
                 if not chunk:
-                    fail("truncated UFS1 root partition")
+                    fail("truncated UFS root partition")
                 digest.update(chunk)
                 remaining -= len(chunk)
         if digest.digest() != expected_hash:
-            fail("UFS1 root partition content differs from the input")
-        checker = Path(__file__).with_name("check-ufs1-image.py")
+            fail("UFS root partition content differs from the input")
+        checker = Path(__file__).with_name("check-ufs-image.py")
         subprocess.run(["python3", str(checker), str(args.ufs_root)],
                        check=True)
     print(f"BIOS image check: PASS ({args.machine}, partition {index}, "

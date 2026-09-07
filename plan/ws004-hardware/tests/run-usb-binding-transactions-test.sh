@@ -14,12 +14,12 @@ fixture="$root/plan/ws004-hardware/tests/usb-binding-transactions-test.c"
 # The fixture directly includes the production USB core so private binding
 # states remain testable without adding a public transaction/query API.
 # shellcheck disable=SC2086
-$cc $common -pthread "$fixture" -o "$work/usb-binding-transactions"
+$cc $common -pthread "$fixture" "$root/src/kern/io-stats.c" -o "$work/usb-binding-transactions"
 "$work/usb-binding-transactions"
 
 # shellcheck disable=SC2086
 $cc $common -pthread -fsanitize=address,undefined -fno-omit-frame-pointer \
-	"$fixture" -o "$work/usb-binding-transactions-sanitize"
+	"$fixture" "$root/src/kern/io-stats.c" -o "$work/usb-binding-transactions-sanitize"
 # LeakSanitizer cannot run under the PTY/ptrace harness.  The fixture's own
 # allocation accounting remains the exact end-of-run leak gate.
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \

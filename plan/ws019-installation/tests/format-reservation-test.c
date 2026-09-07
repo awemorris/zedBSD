@@ -65,10 +65,14 @@ struct mapping_thread {
 	int error;
 };
 
+#ifdef ZEDBSD_FILE_CACHE_HOST
+int ws025_writeback_eligible(struct file *, off_t, size_t);
 const struct filesystem_type fat_filesystem_type = {
-	"fat", 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-	NULL, NULL, NULL, NULL
+	.fs_name = "fat", .writeback_range = ws025_writeback_eligible
 };
+#else
+const struct filesystem_type fat_filesystem_type = { .fs_name = "fat" };
+#endif
 
 static unsigned checks;
 static unsigned allocation_count;
@@ -1461,3 +1465,7 @@ test_vmspace_entrypoints(void)
 	CHECK(vm_mutex_depth == 0);
 	close_fixture(&fixture);
 }
+
+/* This fixture models storage identity without a live disk registry. */
+void disk_ref(struct disk *disk) { (void)disk; }
+void disk_release(struct disk *disk) { (void)disk; }

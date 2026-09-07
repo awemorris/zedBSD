@@ -632,7 +632,7 @@ xattr_namespace_access(
 
 	/*
 	 * Filesystem control metadata is never a user-managed xattr,
-	 * including for uid 0.  The UFS2 control path calls its backend
+	 * including for uid 0.  The UFS control path calls its backend
 	 * directly.
 	 */
 	if (strcmp(name, "system.zedbsd.quota") == 0)

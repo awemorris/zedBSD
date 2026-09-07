@@ -23,7 +23,7 @@ build_and_run()
 		"$repo_dir/src/drivers/fs/fat.c" -o "$temporary/fat-$name.o"
 	# shellcheck disable=SC2086
 	"${CC:-cc}" $common_flags $extra_flags "$test_source" \
-		"$temporary/fat-$name.o" -Wl,--gc-sections \
+		"$temporary/fat-$name.o" "$repo_dir/src/kern/io-stats.c" -Wl,--gc-sections \
 		-o "$temporary/ka-t100-101-$name"
 	if [ "$name" = sanitize ]; then
 		ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \

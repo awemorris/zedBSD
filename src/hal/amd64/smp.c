@@ -446,7 +446,7 @@ start_one(
 	int error;
 
 	/* Resolves and validates the low-memory trampoline image. */
-	destination = amd64_phys_to_direct(AMD64_AP_TRAMPOLINE);
+	destination = (void *)(uintptr_t)AMD64_AP_TRAMPOLINE;
 	image_size = (size_t)(amd64_ap_trampoline_end -
 	    amd64_ap_trampoline_start);
 	if (timecounter_valid == NULL || image_size == 0 || image_size > 4096U)

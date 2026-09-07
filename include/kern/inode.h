@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <kern/atomic.h>
+#include <kern/io-error.h>
 #include <kern/lock.h>
 
 /*
@@ -164,6 +165,7 @@ struct inode_ops {
 };
 
 struct inode {
+	struct io_error_state i_write_error;
 	enum inode_type i_type;
 	ino_t i_ino;
 	struct mount *i_mount;

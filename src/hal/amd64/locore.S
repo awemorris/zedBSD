@@ -25,8 +25,14 @@ amd64_start:
 	cmpw $ZBL6_HANDOFF_V4_VERSION, 4(%rdi)
 	je .Lentry_stage_framebuffer
 	cmpw $ZBL6_HANDOFF_V5_VERSION, 4(%rdi)
-	jne .Lentry_stage_done
+	jne .Lentry_stage_v6
 	cmpw $ZBL6_HANDOFF_V5_UEFI_SIZE, 6(%rdi)
+	je .Lentry_stage_framebuffer
+	jmp .Lentry_stage_done
+.Lentry_stage_v6:
+	cmpw $ZBL6_HANDOFF_V6_VERSION, 4(%rdi)
+	jne .Lentry_stage_done
+	cmpw $ZBL6_HANDOFF_V6_UEFI_SIZE, 6(%rdi)
 	jne .Lentry_stage_done
 .Lentry_stage_framebuffer:
 	movq ZBL6_HANDOFF_V3_FRAMEBUFFER_BASE_OFFSET(%rdi), %r8

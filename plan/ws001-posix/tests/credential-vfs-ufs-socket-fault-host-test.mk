@@ -9,77 +9,63 @@ CPPFLAGS := -DZEDBSD_USER_ABI_LP64 -I$(REPO)/include \
 	-I$(REPO)/include/uapi -I$(REPO)/src -I$(REPO)/libc/include -I$(REPO)
 CFLAGS := -std=c11 -O0 -Wall -Wextra -Werror -ffunction-sections \
 	-fdata-sections
-LDFLAGS := -Wl,--gc-sections
+LDFLAGS := -Wl,--gc-sections $(REPO)/src/kern/io-stats.c
 TEST := $(REPO)/plan/ws001-posix/tests/credential-vfs-ufs-socket-fault-host-test.c
 SELF := $(lastword $(MAKEFILE_LIST))
 SANITIZER_CFLAGS := -std=c11 -O0 -g -Wall -Wextra -Werror \
 	-ffunction-sections -fdata-sections -fsanitize=address,undefined \
 	-fno-omit-frame-pointer
-SANITIZER_LDFLAGS := -Wl,--gc-sections -fsanitize=address,undefined
+SANITIZER_LDFLAGS := -Wl,--gc-sections -fsanitize=address,undefined $(REPO)/src/kern/io-stats.c
 ANALYZER_CFLAGS := -std=c11 -O0 -g -Wall -Wextra -Werror -fanalyzer \
 	-ffunction-sections -fdata-sections
 
 .PHONY: all run sanitize analyze
 all: run
 
-run: $(OUT)/ufs1-test $(OUT)/ufs2-test
-	$(OUT)/ufs1-test
-	$(OUT)/ufs2-test
+run:  $(OUT)/ufs-test
+
+	$(OUT)/ufs-test
 
 sanitize:
 	$(MAKE) -f $(SELF) OUT=$(OUT)-sanitizer \
 		CFLAGS='$(SANITIZER_CFLAGS)' LDFLAGS='$(SANITIZER_LDFLAGS)' run
 
-analyze: $(OUT)/ufs1-analyzer-test $(OUT)/ufs2-analyzer-test
-	$(OUT)/ufs1-analyzer-test
-	$(OUT)/ufs2-analyzer-test
+analyze:  $(OUT)/ufs-analyzer-test
+
+	$(OUT)/ufs-analyzer-test
 
 $(OUT):
 	mkdir -p $@
 
-$(OUT)/ufs1.o: $(REPO)/src/drivers/fs/ufs1/ufs1-vfs.c $(SELF) | $(OUT)
+
+
+
+
+$(OUT)/ufs.o: $(REPO)/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 	$(OBJCOPY) \
-		--redefine-sym restore_directory_block=ws001_ufs1_restore_directory_block \
-		--redefine-sym discard_new_inode_after_error=ws001_ufs1_discard_new_inode_after_error \
-		--redefine-sym ufs1_mknod=ws001_ufs1_mknod \
+		--redefine-sym restore_directory_block=ws001_ufs_restore_directory_block \
+		--redefine-sym discard_new_inode_after_error=ws001_ufs_discard_new_inode_after_error \
+		--redefine-sym ufs_mknod=ws001_ufs_mknod \
 		$@
 	$(OBJCOPY) \
-		--globalize-symbol=ws001_ufs1_restore_directory_block \
-		--globalize-symbol=ws001_ufs1_discard_new_inode_after_error \
-		--globalize-symbol=ws001_ufs1_mknod $@
+		--globalize-symbol=ws001_ufs_restore_directory_block \
+		--globalize-symbol=ws001_ufs_discard_new_inode_after_error \
+		--globalize-symbol=ws001_ufs_mknod $@
 
-$(OUT)/ufs1-endian.o: $(REPO)/src/drivers/fs/ufs1/ufs1-endian.c $(SELF) | $(OUT)
+$(OUT)/ufs-endian.o: $(REPO)/src/drivers/fs/ufs/ufs-endian.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
-$(OUT)/ufs2.o: $(REPO)/src/drivers/fs/ufs2/ufs2-vfs.c $(SELF) | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
-	$(OBJCOPY) \
-		--redefine-sym restore_directory_block=ws001_ufs2_restore_directory_block \
-		--redefine-sym discard_new_inode_after_error=ws001_ufs2_discard_new_inode_after_error \
-		--redefine-sym ufs2_mknod=ws001_ufs2_mknod \
-		$@
-	$(OBJCOPY) \
-		--globalize-symbol=ws001_ufs2_restore_directory_block \
-		--globalize-symbol=ws001_ufs2_discard_new_inode_after_error \
-		--globalize-symbol=ws001_ufs2_mknod $@
 
-$(OUT)/ufs2-endian.o: $(REPO)/src/drivers/fs/ufs2/ufs2-endian.c $(SELF) | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
-$(OUT)/ufs1-test: $(TEST) $(OUT)/ufs1.o $(OUT)/ufs1-endian.o
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DWS001_P022_UFS1 $^ $(LDFLAGS) -o $@
-
-$(OUT)/ufs2-test: $(TEST) $(OUT)/ufs2.o $(OUT)/ufs2-endian.o
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DWS001_P022_UFS2 $^ $(LDFLAGS) -o $@
+$(OUT)/ufs-test: $(TEST) $(OUT)/ufs.o $(OUT)/ufs-endian.o
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DWS001_P022_UFS $^ $(LDFLAGS) -o $@
 
 # Analyzer scope is the programmable fixture.  The UFS production/endian
 # objects retain the ordinary warning profile and are linked into the binary
 # that is executed after the analyzer pass.
-$(OUT)/ufs1-analyzer-test: $(TEST) $(OUT)/ufs1.o $(OUT)/ufs1-endian.o
-	$(CC) $(CPPFLAGS) $(ANALYZER_CFLAGS) -DWS001_P022_UFS1 $^ \
-		$(LDFLAGS) -o $@
 
-$(OUT)/ufs2-analyzer-test: $(TEST) $(OUT)/ufs2.o $(OUT)/ufs2-endian.o
-	$(CC) $(CPPFLAGS) $(ANALYZER_CFLAGS) -DWS001_P022_UFS2 $^ \
+
+$(OUT)/ufs-analyzer-test: $(TEST) $(OUT)/ufs.o $(OUT)/ufs-endian.o
+	$(CC) $(CPPFLAGS) $(ANALYZER_CFLAGS) -DWS001_P022_UFS $^ \
 		$(LDFLAGS) -o $@

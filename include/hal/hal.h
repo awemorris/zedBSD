@@ -561,9 +561,36 @@ struct hal_pmem {
 	uint32_t attr;
 };
 
+/* Optional owned kernel scratch mappings. Capability is currently amd64-only.
+ * Callers on portable paths must check the optional symbols before use.
+ * Reserve allocates no frames; populate owns independent RAM pages. A pin
+ * protects the returned VA and its page lookup until the matching unpin.
+ * Release refuses active pins and retires translations before freeing RAM.
+ * One returned PA describes one page, never a physically contiguous run. */
+#define HAL_VMAP_MAX_SIZE (128U * 1024U)
+struct hal_vmap;
+unsigned hal_vmap_capabilities(void);
+int hal_vmap_reserve(size_t size, struct hal_vmap **result);
+int hal_vmap_populate(struct hal_vmap *mapping, uint64_t minimum, uint64_t maximum);
+int hal_vmap_pin(struct hal_vmap *mapping, void **address);
+void hal_vmap_unpin(struct hal_vmap *mapping);
+int hal_vmap_release(struct hal_vmap *mapping);
+int hal_kernel_page_lookup(const void *address, hal_physaddr_t *physical);
+
 int
 hal_pmem_alloc(
 	const struct hal_pmem_request *request,
+	struct hal_pmem *desc);
+
+/* RAM-only constraints: inclusive byte limits and an optional power-of-two
+ * segment boundary. Existing request fields retain their initialization ABI.
+ * A rollback failure returns HAL_ERR_STATE with the retained descriptor. */
+int
+hal_pmem_alloc_range(
+	const struct hal_pmem_request *request,
+	uint64_t minimum,
+	uint64_t maximum,
+	uint64_t boundary,
 	struct hal_pmem *desc);
 
 /*
@@ -588,6 +615,20 @@ struct hal_memory_stats {
 	uint32_t task_count;
 	uint32_t space_count;
 	uint32_t page_table_count;
+	/* Optional boot-range observations; zero validity means unavailable. */
+	uint32_t boot_ranges_valid;
+	uint32_t boot_range_count;
+	uint64_t boot_usable_bytes;
+	uint64_t boot_highest_end;
+	uint64_t boot_usable_highest_end;
+	uint64_t direct_mapped_bytes;
+	uint64_t allocator_initial_bytes;
+	uint64_t boot_reclaim_bytes;
+	uint64_t allocator_metadata_bytes;
+	uint64_t allocator_scan_words;
+	uint64_t allocator_max_extent_scan_words;
+	uint64_t allocator_max_irqoff_cycles;
+	uint32_t boot_memory_source;
 };
 
 void

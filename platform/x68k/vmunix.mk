@@ -90,7 +90,7 @@ X68K_EARLY_C_SOURCES := \
 	src/hal/m68k/bsp-x68k/handoff.c \
 	src/hal/m68k/bsp-x68k/irq.c \
 	src/hal/m68k/bsp-x68k/memory-map.c \
-	src/hal/m68k/bsp-x68k/pmem.c \
+	src/hal/pmem-constraints.c src/hal/m68k/bsp-x68k/pmem.c \
 	src/hal/m68k/bsp-x68k/scsi.c \
 	src/hal/m68k/bsp-x68k/timer.c
 X68K_EARLY_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(X68K_EARLY_C_SOURCES)) \
@@ -117,7 +117,7 @@ X68K_KERNEL_SOURCES := \
 	src/drivers/x68k-mb89352.c src/drivers/x68k-spc-disk.c \
 	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process-timer.c src/kern/lock.c src/kern/klog.c src/kern/waitq.c \
-	src/kern/buf.c src/kern/sysctl.c src/kern/resource.c \
+	src/kern/buf.c src/kern/io-stats.c src/kern/io-pool.c src/kern/io-scratch.c src/kern/cache-memory.c src/kern/readahead.c src/kern/readahead-worker.c src/kern/writeback.c src/kern/writeback-domain.c src/kern/writeback-policy.c src/kern/io-error.c src/kern/cache-worker.c src/kern/sysctl.c src/kern/resource.c \
 	src/kern/resource-limit.c src/kern/poll.c src/kern/usync.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/vm-lock.c src/kern/vmspace.c \
 	src/kern/vm-object.c src/kern/vm-commit.c src/kern/filedesc.c \
@@ -135,7 +135,7 @@ X68K_KERNEL_SOURCES := \
 	src/kern/system-swap-device.c src/kern/system-device.c src/kern/shutdown.c \
 	src/kern/init.c
 X68K_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
-	$(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES)
+	$(KERN_UFS_SOURCES)
 X68K_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
 X68K_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(X68K_KERNEL_SOURCES))
 X68K_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURCES))
@@ -381,3 +381,7 @@ rootfs: $(BUILD)/rootfs/.stamp
 	$(X68K_KERNEL_LIBC_OBJS:.o=.d) $(X68K_STAGE2_OBJS:.o=.d)
 -include $(X68K_AUDIT_C_OBJS:.o=.d)
 -include $(X68K_USER_OBJS:.o=.d)
+
+$(BUILD)/src/hal/pmem-constraints.o: src/hal/pmem-constraints.c
+	@mkdir -p $(dir $@)
+	$(M68K_CC) $(M68K_CPPFLAGS) $(M68K_KERNEL_CFLAGS) -MMD -MP -c $< -o $@

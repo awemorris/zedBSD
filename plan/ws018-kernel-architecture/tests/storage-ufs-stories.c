@@ -1,6 +1,6 @@
 /* Production UFS private operations; deterministic physical error injection.
  * SPDX-License-Identifier: Zlib */
-#define UFS_AUDIT_VERSION 1
+#define UFS_AUDIT_VERSION 2
 #define main ufs_regression_main
 #include "ufs-metadata-audit.c"
 #undef main
@@ -31,7 +31,7 @@ int main(void)
 	free(fs.cg);
 	storage_fixture(&fs, &node, &mountp, &disk, 0, 1);
 	failure_write = 4; failure_write_again = 5; commit_error = 1;
-	uint32_t fragment = 0;
+	uint64_t fragment = 0;
 	REQUIRE(bmap_ensure(&node.inode, 0, &fragment) == EIO);
 	REQUIRE(!fs.writable);
 	failure_write = failure_write_again = failure_sync = 0;

@@ -157,8 +157,8 @@ def check(args: argparse.Namespace) -> None:
             actual = image.read(args.ufs_root.stat().st_size)
         if hashlib.sha256(actual).digest() != hashlib.sha256(
                 args.ufs_root.read_bytes()).digest():
-            fail("slice d differs from UFS1 root input")
-        checker = Path(__file__).with_name("check-ufs1-image.py")
+            fail("slice d differs from UFS root input")
+        checker = Path(__file__).resolve().parents[3] / "tools/build/check-ufs-image.py"
         subprocess.run(["python3", str(checker), str(args.ufs_root)],
                        check=True)
     print("SPARC V9 image check: PASS")

@@ -14,6 +14,8 @@
 
 #include "kern/disk.h"
 #include "kern/atomic.h"
+#include <kern/io-epoch.h>
+#include <kern/io-error.h>
 #include "kern/backing-claim.h"
 #include "kern/lock.h"
 #include "kern/waitq.h"
@@ -35,6 +37,7 @@
 #define MOUNT_PRIVATE_INTERNAL	0x00000002U
 #define FILESYSTEM_NODEV	0x00000001U
 
+struct file;
 struct inode;
 struct mount;
 struct componentname;
@@ -82,12 +85,20 @@ struct filesystem_type {
 	void (*unmount)(struct mount *);
 	struct inode *(*alloc_inode)(struct mount *);
 	void (*free_inode)(struct inode *);
+	/* Caller holds the inode I/O lease. 1: allocated existing data,
+	 * 0: through required, negative errno: validation failure. */
+	int (*writeback_range)(struct file *, off_t, size_t);
 };
 
 struct mount {
 	char m_path[ZEDBSD_PATH_MAX];
 	char m_name[NAME_MAX + 1U];
 	unsigned m_flags;
+	struct io_epoch m_write_epoch;
+	struct io_error_state m_write_error;
+	/* Shared metadata failures have no single data-inode owner. */
+	struct io_error_state m_metadata_error;
+	volatile uint64_t m_write_error_cursor;
 	refcount_t m_refs;
 	struct mutex m_lock;
 	/*
@@ -216,6 +227,10 @@ unmount_private(
 int
 mount_is_private(
 	const struct mount *mountp);
+
+/* Internal filesystem barrier: never reenters VM or consumes sync errors. */
+int mount_sync_backend(struct mount *mountp);
+int mount_sync_buffer(struct mount *mountp, void *scratch, size_t capacity);
 
 int
 mount_sync(

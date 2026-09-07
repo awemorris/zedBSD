@@ -20,6 +20,6 @@ for mode in normal sanitize; do
 		"$repo/src/kern/vm-object.c" \
 		"$repo/src/kern/vmspace.c" \
 		"$repo/plan/ws019-installation/tests/format-reservation-test.c" \
-		-Wl,--gc-sections -pthread -o "$out/$mode"
+		-Wl,--gc-sections -pthread "$repo/src/kern/io-stats.c" -o "$out/$mode"
 	timeout 30 "$out/$mode"
 done

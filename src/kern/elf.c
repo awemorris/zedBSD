@@ -12,13 +12,14 @@
  *
  * A 32-bit or 64-bit image is read through a file content lease, its
  * headers are normalized into one representation, and every PT_LOAD
- * segment is validated before anything is mapped.  Segments are copied
- * into anonymous private pages while the lease is held, so a later
- * change to the file cannot reach the running program.  A position
+ * segment is validated before anything is mapped.  Immutable full text
+ * pages retain a pinned cache snapshot; writable data and mutable files
+ * are copied while the content lease is held.  A position
  * independent main program and an interpreter are placed at a load bias
  * found in the free address space.
  */
 
+#include "kern/io-pool.h"
 #include "kern/elf.h"
 #include "kern/exec.h"
 #include "kern/file.h"
@@ -114,6 +115,7 @@ static int power_of_two64(uint64_t value);
 static uint32_t segment_prot(uint32_t flags);
 static int read_headers(struct file_content_lease *lease, unsigned elf_class, struct normalized_header *header, struct normalized_program **programs_out, uint64_t *file_size_out);
 static int copy_segment_snapshot(struct file_content_lease *lease, struct vmspace *vm, uintptr_t destination, off_t source, size_t size);
+static int load_segment_snapshot(struct file_content_lease *lease, struct vmspace *vm, uintptr_t destination, off_t source, size_t size, uint32_t prot);
 static int validate_and_load(struct file_content_lease *lease, struct vmspace *vm, unsigned elf_class, enum elf_load_role role, struct normalized_image *image);
 static void copy_image32(struct elf32_image_info *destination, const struct normalized_image *source);
 static void copy_image64(struct elf64_image_info *destination, const struct normalized_image *source);
@@ -157,7 +159,7 @@ elf32_load(
 	int error;
 
 	/* Holds the file content while it is read. */
-	error = file_content_lease_begin(file, &lease);
+	error = file_exec_snapshot_begin(file, &lease);
 	if (error != 0)
 		return error;
 	error = elf32_load_content(&lease, vm, image);
@@ -185,7 +187,7 @@ elf32_load_interpreter(
 		return EINVAL;
 
 	/* Holds the file content while the interpreter is loaded. */
-	error = file_content_lease_begin(file, &lease);
+	error = file_exec_snapshot_begin(file, &lease);
 	if (error != 0)
 		return error;
 	error = validate_and_load(&lease, vm, ELFCLASS32,
@@ -237,7 +239,7 @@ elf64_load(
 	int error;
 
 	/* Holds the file content while it is read. */
-	error = file_content_lease_begin(file, &lease);
+	error = file_exec_snapshot_begin(file, &lease);
 	if (error != 0)
 		return error;
 	error = elf64_load_content(&lease, vm, image);
@@ -265,7 +267,7 @@ elf64_load_interpreter(
 		return EINVAL;
 
 	/* Holds the file content while the interpreter is loaded. */
-	error = file_content_lease_begin(file, &lease);
+	error = file_exec_snapshot_begin(file, &lease);
 	if (error != 0)
 		return error;
 	error = validate_and_load(&lease, vm, ELFCLASS64, ELF_LOAD_INTERPRETER,
@@ -680,7 +682,7 @@ read_headers(
 	return 0;
 }
 
-/* Copies file bytes into the address space one page at a time. */
+/* Copies file bytes through a bounded pool run or a small stack fallback. */
 static int
 copy_segment_snapshot(
 	struct file_content_lease *lease,
@@ -689,7 +691,9 @@ copy_segment_snapshot(
 	off_t source,
 	size_t size)
 {
+	uint8_t fallback[512];
 	uint8_t *buffer;
+	size_t capacity;
 	size_t done;
 	size_t chunk;
 	ssize_t count;
@@ -702,13 +706,14 @@ copy_segment_snapshot(
 	if (size == 0)
 		return 0;
 
-	/* Bounces every page through a kernel buffer. */
-	buffer = kern_malloc(PAGE_SIZE);
+	/* Borrows without waiting while the executable content lease is held. */
+	capacity = sizeof(fallback);
+	buffer = io_pool_borrow(size, &capacity);
 	if (buffer == NULL)
-		return ENOMEM;
+		buffer = fallback;
 	while (done < size) {
-		if (size - done > PAGE_SIZE)
-			chunk = PAGE_SIZE;
+		if (size - done > capacity)
+			chunk = capacity;
 		else
 			chunk = size - done;
 		if ((uint64_t)source + done > ELF_OFF_MAX) {
@@ -729,9 +734,59 @@ copy_segment_snapshot(
 			break;
 		done += chunk;
 	}
-	kern_free(buffer);
+	if (buffer != fallback)
+		io_pool_release(buffer);
 
 	/* Reports the copy result. */
+	return error;
+}
+
+/* Shares immutable full pages, retaining private edge and BSS pages. */
+static int
+load_segment_snapshot(
+	struct file_content_lease *lease,
+	struct vmspace *vm,
+	uintptr_t destination,
+	off_t source,
+	size_t size,
+	uint32_t prot)
+{
+	struct file_exec_snapshot *snapshot;
+	uintptr_t first, end;
+	size_t leading, shared;
+	int error;
+
+	if (!lease->shared_read || lease->read_object == NULL ||
+	    (prot & HAL_SPACE_WRITE) != 0 || size < PAGE_SIZE)
+		return copy_segment_snapshot(lease, vm, destination, source, size);
+	first = (destination + PAGE_SIZE - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
+	end = (destination + size) & ~(uintptr_t)(PAGE_SIZE - 1U);
+	if (first >= end)
+		return copy_segment_snapshot(lease, vm, destination, source, size);
+	leading = first - destination;
+	shared = end - first;
+	if (((uint64_t)source + leading) % PAGE_SIZE != 0)
+		return copy_segment_snapshot(lease, vm, destination, source, size);
+
+	/* Optional cache admission fails back before altering the original mapping. */
+	error = file_exec_snapshot_create(lease, source + (off_t)leading,
+	    shared, &snapshot);
+	if (error == ENOMEM || error == EAGAIN || error == EOPNOTSUPP)
+		return copy_segment_snapshot(lease, vm, destination, source, size);
+	if (error != 0)
+		return error;
+	error = vmspace_unmap(vm, first, shared);
+	if (error == 0)
+		error = vmspace_map_exec_snapshot(vm, first, prot, snapshot);
+	file_exec_snapshot_put(snapshot);
+	if (error != 0)
+		return error;
+
+	/* Never copy over shared text; only partial file pages need private bytes. */
+	error = copy_segment_snapshot(lease, vm, destination, source, leading);
+	if (error == 0)
+		error = copy_segment_snapshot(lease, vm, end,
+		    source + (off_t)(leading + shared), size - leading - shared);
 	return error;
 }
 
@@ -1045,8 +1100,9 @@ validate_and_load(
 		 * lease is released.  Build anonymous private pages while the
 		 * lease is held, rather than leaving PT_LOAD as a later file
 		 * fault which could splice bytes from a newer image.  The
-		 * temporary mapping is writable but never executable; final
-		 * protection is published after the copy.
+		 * temporary mapping is writable but never executable.  Immutable
+		 * full text pages replace its interior with pinned cache mappings;
+		 * final protection is published after private edges are copied.
 		 */
 		error = vmspace_map_anon_fixed_noreplace(vm, map_start, map_end - map_start,
 		    HAL_SPACE_READ | HAL_SPACE_WRITE, NULL);
@@ -1054,8 +1110,9 @@ validate_and_load(
 			goto rollback;
 		mapped_start[mapped_count] = map_start;
 		mapped_size[mapped_count++] = map_end - map_start;
-		error = copy_segment_snapshot(lease, vm, data_start,
-		    (off_t)segment->offset, (size_t)segment->filesz);
+		error = load_segment_snapshot(lease, vm, data_start,
+		    (off_t)segment->offset, (size_t)segment->filesz,
+		    initial_segment_prot(segment));
 		if (error != 0)
 			goto rollback;
 		error = vmspace_protect(vm, map_start, map_end - map_start,

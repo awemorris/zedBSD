@@ -34,6 +34,8 @@ int backing_claim_finalize(struct backing_claim *,
 int backing_claim_prepare_disk(struct disk *, uint64_t, uint64_t,
 			       enum backing_claim_owner,
 			       struct backing_claim **);
+/* Retain an already owned claim; only final release removes its protection. */
+void backing_claim_ref(const struct backing_claim *);
 void backing_claim_release(struct backing_claim *);
 int backing_claim_inode_matches(const struct backing_claim *, struct inode *,
 				int *);
@@ -49,6 +51,8 @@ int backing_mutation_begin_disk(struct disk *, uint64_t, uint64_t,
 int backing_mutation_begin_disk_filesystem(
 	struct disk *, uint64_t, uint64_t, struct backing_mutation_guard *);
 void backing_mutation_end(struct backing_mutation_guard *);
+/* Serializes old-media retirement against existing and newly published claims. */
+int backing_mutation_begin_retired_disk(struct disk *, struct backing_mutation_guard *);
 
 int backing_claim_check_disk(struct disk *, uint64_t, uint64_t,
 			     const struct backing_claim *);

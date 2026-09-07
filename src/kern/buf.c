@@ -19,19 +19,28 @@
  */
 
 #include "kern/buf.h"
+#include "kern/io-stats.h"
+#include "kern/io-pool.h"
 #include "kern/disk.h"
 #include "kern/page.h"
+#include "kern/cache-memory.h"
 
 #include <errno.h>
 #include <string.h>
 
+extern int cache_memory_reserve(enum cache_memory_kind, size_t, int) __attribute__((weak));
+extern void cache_memory_commit(enum cache_memory_kind, size_t) __attribute__((weak));
+extern void cache_memory_cancel(enum cache_memory_kind, size_t) __attribute__((weak));
+extern void cache_memory_release(enum cache_memory_kind, size_t) __attribute__((weak));
+extern size_t cache_memory_reclaim(size_t) __attribute__((weak));
+
 #define BUF_HASH_BUCKETS 64U
 #define BUF_MIN_BYTES (64U * 1024U)
-#define BUF_MAX_DEFAULT (16U * 1024U * 1024U)
 #ifndef CONFIG_BUF_CACHE_KIB
 #define CONFIG_BUF_CACHE_KIB 0
 #endif
 #define BUF_SLAB_BYTES ZEDBSD_PAGE_SIZE
+#define BUF_RUN_LINES (KERN_IO_BATCH_MAX / ZEDBSD_PAGE_SIZE)
 
 struct thread;
 struct thread *thread_current(void);
@@ -45,6 +54,9 @@ struct buf_slab {
 };
 
 static struct spinlock cache_lock;
+static struct spinlock dirty_index_lock;
+static struct buf *dirty_head;
+static struct buf *dirty_tail;
 static struct mutex cache_control;
 static struct buf *cache_hash[BUF_HASH_BUCKETS];
 static struct buf *lru_head;
@@ -74,10 +86,10 @@ static void lru_add_locked(struct buf *buffer);
 static void hash_remove_locked(struct buf *buffer);
 static struct buf * hash_find_locked(struct disk *disk, uint64_t block);
 static void stat_add(volatile uint64_t *counter, uint64_t value);
-static int reserve_bytes(size_t size);
-static void cancel_reservation(size_t size);
+static int reserve_bytes(size_t size, int metadata);
+static void cancel_reservation(size_t size, int metadata);
 static void commit_reservation(size_t size, int metadata);
-static int alloc_pmem(size_t size, struct hal_pmem *memory);
+static int alloc_pmem(size_t size, struct hal_pmem *memory, int metadata);
 static int slab_grow(void);
 static struct buf * alloc_metadata(void);
 static void free_metadata(struct buf *buffer);
@@ -86,9 +98,17 @@ static int busy_acquire(struct buf *buffer);
 static void drop_caller_reference(struct buf *buffer);
 static int read_buffer(struct buf *buffer);
 static int acquire_line(struct disk *disk, uint64_t block, int read_data, struct buf **result);
+static int reference_line(struct disk *disk, uint64_t block, struct buf **result);
+static int transfer_run(struct disk *disk, uint64_t block, uint64_t remaining, void *data, int write, uint32_t *transferred, const struct io_context *context);
+static void release_run(struct buf **lines, unsigned count, unsigned busy);
+static void finish_run_line(struct buf *buffer, uint64_t generation, int write, int error);
 static int disk_cache_range(struct disk *disk, struct disk **leaf_out, uint64_t *start_out, uint64_t *end_out);
 static int evict_one(struct disk *disk, uint64_t start, uint64_t end, int range, unsigned flags, size_t *freed);
 static int writeback_one_reclaimable(void);
+static void dirty_link(struct buf *buffer);
+static void dirty_clear(struct buf *buffer);
+static void dirty_unlink_locked(struct buf *buffer);
+static struct buf *dirty_reference(struct disk *disk, uint64_t start, uint64_t end, int reclaim);
 
 /*
  * Initializes the buffer cache with its default byte cap.
@@ -111,6 +131,7 @@ buf_init(
 
 	/* Sets up the locks and the empty hash table. */
 	spin_init(&cache_lock, LOCK_RANK_BUFCACHE, "buffer cache");
+	spin_init(&dirty_index_lock, LOCK_RANK_DIRTY_INDEX, "dirty buffer index");
 	if (mutex_init(&cache_control, LOCK_RANK_BUFCACHE,
 	    "buffer cache control") != 0)
 		return ENOMEM;
@@ -125,8 +146,6 @@ buf_init(
 #endif
 	if (value < BUF_MIN_BYTES)
 		value = BUF_MIN_BYTES;
-	if (value > BUF_MAX_DEFAULT)
-		value = BUF_MAX_DEFAULT;
 	value &= ~(uint64_t)(ZEDBSD_PAGE_SIZE - 1U);
 	cache_max_bytes = value;
 	cache_initialized = 1;
@@ -213,6 +232,8 @@ buf_mark_dirty(
 
 	/* Advances the generation, skipping zero, and sets the flags. */
 	irq = spin_lock_irqsave(&buffer->b_lock);
+	if (buffer->b_generation == UINT64_MAX)
+		buffer->b_flags |= BUF_GENERATION_EXHAUSTED;
 	buffer->b_generation++;
 	if (buffer->b_generation == 0)
 		buffer->b_generation++;
@@ -221,6 +242,7 @@ buf_mark_dirty(
 	if (!(buffer->b_flags & BUF_DIRTY)) {
 		buffer->b_flags |= BUF_DIRTY;
 		stat_add(&cache_dirty_bytes, buffer->b_size);
+		dirty_link(buffer);
 	}
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
 }
@@ -235,13 +257,31 @@ int
 buf_writeback(
 	struct buf *buffer)
 {
+	int error;
+
+	error = buf_writeback_context(buffer, NULL);
+	return error;
+}
+
+/* Executes the synchronous operation with explicit inherited provenance. */
+int
+buf_writeback_context(
+	struct buf *buffer,
+	const struct io_context *context)
+{
 	uint64_t generation;
+	struct io_context drain;
 	int error;
 	unsigned long irq;
 
 	/* Rejects a missing buffer. */
 	if (buffer == NULL)
 		return EINVAL;
+
+	/* Rejects unsupported provenance before changing buffer completion state. */
+	error = io_context_child(&drain, context, IO_CONTEXT_DRAIN);
+	if (error != 0)
+		return error;
 
 	/* A clean buffer needs nothing; an invalid dirty one cannot be written. */
 	irq = spin_lock_irqsave(&buffer->b_lock);
@@ -260,8 +300,8 @@ buf_writeback(
 	buffer->b_io_inflight = 1;
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
 	stat_add(&stat_write_bios, 1);
-	error = disk_write_direct(buffer->b_disk, buffer->b_block,
-	    buffer->b_block_count, buffer->b_data);
+	error = disk_write_direct_context(buffer->b_disk, buffer->b_block,
+	    buffer->b_block_count, buffer->b_data, &drain);
 
 	/* Records the outcome; only an unmodified buffer becomes clean. */
 	irq = spin_lock_irqsave(&buffer->b_lock);
@@ -270,6 +310,7 @@ buf_writeback(
 	buffer->b_error = error;
 	if (error == 0 && generation == buffer->b_dirty_generation) {
 		buffer->b_flags &= ~(BUF_DIRTY | BUF_ERROR);
+		dirty_clear(buffer);
 		stat_add(&cache_dirty_bytes,
 		    (uint64_t)-(int64_t)buffer->b_size);
 	} else if (error != 0) {
@@ -281,6 +322,138 @@ buf_writeback(
 
 	/* Reports the write result. */
 	return error;
+}
+
+/*
+ * Releases a metadata copy's bounded cache pins and disk lifetime reference.
+ */
+void
+buf_view_release(
+	struct buf_view *view)
+{
+	unsigned index;
+
+	/* Drops references without changing another caller's busy ownership. */
+	if (view == NULL)
+		return;
+	for (index = 0; index < view->count; index++)
+		drop_caller_reference(view->lines[index]);
+	if (view->disk != NULL)
+		disk_release(view->disk);
+	memset(view, 0, sizeof(*view));
+}
+
+/*
+ * Checks the content generations of pinned cache identities without performing I/O.
+ */
+int
+buf_view_matches(
+	const struct buf_view *view)
+{
+	struct buf *buffer;
+	unsigned index;
+	unsigned long irq;
+	int matches;
+
+	/* Rejects an unpublished copy token. */
+	if (view == NULL || !view->valid || view->count == 0)
+		return 0;
+
+	/* Every matching generation remained unchanged since before the original copy. */
+	for (index = 0; index < view->count; index++) {
+		buffer = view->lines[index];
+		irq = spin_lock_irqsave(&buffer->b_lock);
+		matches = !buffer->b_busy && !buffer->b_io_inflight &&
+		    buffer->b_generation == view->generations[index] &&
+		    (buffer->b_flags & BUF_VALID) != 0 &&
+		    (buffer->b_flags & (BUF_INVALID | BUF_ERROR | BUF_DIRTY |
+		     BUF_GENERATION_EXHAUSTED)) == 0;
+		spin_unlock_irqrestore(&buffer->b_lock, irq);
+		if (!matches)
+			return 0;
+	}
+
+	/* Reports an unchanged cached copy at this observation point. */
+	return 1;
+}
+
+/*
+ * Copies a bounded metadata range and retains a generation-checked common-cache view.
+ * Resource pressure falls back to the ordinary cache read with no persistent pins.
+ */
+int
+buf_read_view(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	void *data,
+	struct buf_view *view)
+{
+	struct disk *leaf;
+	struct buf *buffer;
+	uint64_t mapped;
+	uint64_t end;
+	unsigned index;
+	unsigned long irq;
+	int eligible;
+	int error;
+
+	/* Clears an old token and validates this range before preparing any pins. */
+	if (view == NULL)
+		return EINVAL;
+	buf_view_release(view);
+	error = disk_resolve_range(disk, block, count, &leaf, &mapped);
+	if (error != 0)
+		return error;
+	if (data == NULL || count == 0)
+		return EINVAL;
+	if (leaf->d_block_size == 0 || count > KERN_IO_BATCH_MAX / leaf->d_block_size) {
+		error = buf_read(disk, block, count, data);
+		return error;
+	}
+	view->disk = disk;
+	disk_ref(disk);
+	end = mapped + count;
+
+	/* Prepares all references without holding any line busy over allocation or reclaim. */
+	while (mapped < end && view->count < BUF_VIEW_MAX_LINES) {
+		error = reference_line(leaf, mapped, &buffer);
+		if (error != 0)
+			break;
+		view->lines[view->count++] = buffer;
+		mapped = buffer->b_block + buffer->b_block_count;
+	}
+	if (mapped < end) {
+		buf_view_release(view);
+		error = buf_read(disk, block, count, data);
+		return error;
+	}
+
+	/* Samples generations before copying so concurrent modification cannot be hidden. */
+	eligible = 1;
+	for (index = 0; index < view->count; index++) {
+		buffer = view->lines[index];
+		irq = spin_lock_irqsave(&buffer->b_lock);
+		view->generations[index] = buffer->b_generation;
+		if (buffer->b_busy || buffer->b_io_inflight)
+			eligible = 0;
+		spin_unlock_irqrestore(&buffer->b_lock, irq);
+	}
+	error = buf_read(disk, block, count, data);
+	if (error != 0) {
+		buf_view_release(view);
+
+		/* Drops optional pins before one ordinary retry under nested-cache pressure. */
+		if (error == ENOMEM)
+			error = buf_read(disk, block, count, data);
+		return error;
+	}
+	view->valid = eligible;
+	if (!buf_view_matches(view))
+		buf_view_release(view);
+
+	/* Returns the copied bytes even when no reusable token could be retained. */
+	return 0;
 }
 
 /*
@@ -301,6 +474,7 @@ buf_read(
 	struct buf *buffer;
 	uint64_t offset_blocks;
 	uint64_t amount_blocks;
+	uint32_t run_blocks;
 
 	out = data;
 
@@ -313,9 +487,19 @@ buf_read(
 	if (error != 0)
 		return error;
 
+	io_stats_record(IO_BUF_READ, (uint64_t)count * leaf->d_block_size);
+
 	/* Copies out of each cached line in turn. */
 	end = mapped + count;
 	while (mapped < end) {
+		error = transfer_run(leaf, mapped, end - mapped, out, 0, &run_blocks, NULL);
+		if (error != 0)
+			return error;
+		if (run_blocks != 0) {
+			mapped += run_blocks;
+			out += (size_t)run_blocks * leaf->d_block_size;
+			continue;
+		}
 		error = acquire_line(leaf, mapped, 1, &buffer);
 		if (error != 0)
 			return error;
@@ -347,6 +531,21 @@ buf_write(
 	uint32_t count,
 	const void *data)
 {
+	int error;
+
+	error = buf_write_context(disk, block, count, data, NULL);
+	return error;
+}
+
+/* Executes the synchronous operation with explicit inherited provenance. */
+int
+buf_write_context(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	const void *data,
+	const struct io_context *context)
+{
 	struct disk *leaf;
 	uint64_t mapped;
 	uint64_t end;
@@ -359,6 +558,7 @@ buf_write(
 	uint64_t offset_blocks;
 	uint64_t amount_blocks;
 	int full;
+	uint32_t run_blocks;
 
 	in = data;
 
@@ -368,14 +568,28 @@ buf_write(
 	if (disk->d_flags & DISK_READ_ONLY)
 		return EROFS;
 
+	error = io_context_validate(context);
+	if (error != 0)
+		return error;
+
 	/* Resolves the range to the leaf disk. */
 	error = disk_resolve_range(disk, block, count, &leaf, &mapped);
 	if (error != 0)
 		return error;
 
+	io_stats_record(IO_BUF_WRITE, (uint64_t)count * leaf->d_block_size);
+
 	/* Copies into each line in turn and writes it back. */
 	end = mapped + count;
 	while (mapped < end) {
+		error = transfer_run(leaf, mapped, end - mapped, (void *)in, 1, &run_blocks, context);
+		if (error != 0)
+			return error;
+		if (run_blocks != 0) {
+			mapped += run_blocks;
+			in += (size_t)run_blocks * leaf->d_block_size;
+			continue;
+		}
 		if (leaf->d_block_size > ZEDBSD_PAGE_SIZE)
 			line_bytes = leaf->d_block_size;
 		else
@@ -400,7 +614,7 @@ buf_write(
 		    offset_blocks * leaf->d_block_size, in,
 		    (size_t)(amount_blocks * leaf->d_block_size));
 		buf_mark_dirty(buffer);
-		error = buf_writeback(buffer);
+		error = buf_writeback_context(buffer, context);
 		buf_release(buffer);
 		if (error != 0)
 			return error;
@@ -424,9 +638,6 @@ buf_sync(
 	uint64_t end;
 	int error;
 	struct buf *candidate;
-	unsigned bucket;
-	unsigned long irq;
-	struct buf *buffer;
 
 	/* Resolves the disk's block range on its leaf. */
 	error = disk_cache_range(disk, &leaf, &start, &end);
@@ -435,24 +646,7 @@ buf_sync(
 
 	/* Writes back one dirty buffer at a time until none is left. */
 	for (;;) {
-		candidate = NULL;
-		irq = spin_lock_irqsave(&cache_lock);
-		for (bucket = 0; bucket < BUF_HASH_BUCKETS && candidate == NULL;
-		     bucket++) {
-			for (buffer = cache_hash[bucket]; buffer != NULL;
-			     buffer = buffer->b_hash_next) {
-				if (buffer->b_disk == leaf &&
-				    buffer->b_block < end &&
-				    buffer->b_block + buffer->b_block_count > start &&
-				    (buffer->b_flags & BUF_DIRTY)) {
-					refcount_get(&buffer->b_refs);
-					lru_remove_locked(buffer);
-					candidate = buffer;
-					break;
-				}
-			}
-		}
-		spin_unlock_irqrestore(&cache_lock, irq);
+		candidate = dirty_reference(leaf, start, end, 0);
 		if (candidate == NULL)
 			return 0;
 		error = busy_acquire(candidate);
@@ -535,6 +729,32 @@ buf_invalidate(
 	/* Evicts every overlapping buffer. */
 	for (;;) {
 		error = evict_one(leaf, start, end, 1, flags, &freed);
+		if (error == ENOENT)
+			return 0;
+		if (error != 0)
+			return error;
+	}
+}
+
+/*
+ * Discards a revoked physical medium without ordinary I/O admission.
+ *
+ * The retirement owner excludes external disk users before calling this.
+ * Raw physical geometry belongs to the retained object, never a new medium.
+ */
+int
+buf_discard_media(
+	struct disk *disk)
+{
+	size_t freed;
+	int error;
+
+	if (disk == NULL || disk->d_parent != NULL ||
+	    !atomic_raw_load_acquire(&disk->d_media_revoked))
+		return EINVAL;
+	for (;;) {
+		error = evict_one(disk, 0, disk->d_block_count, 1,
+		    BUF_INVALIDATE_DISCARD, &freed);
 		if (error == ENOENT)
 			return 0;
 		if (error != 0)
@@ -814,12 +1034,26 @@ stat_add(
 /* Reserves bytes under the cap, reclaiming once when they do not fit. */
 static int
 reserve_bytes(
-	size_t size)
+	size_t size,
+	int metadata)
 {
+	enum cache_memory_kind kind;
+	int error;
 	unsigned attempt;
 	unsigned long irq;
 
-	/* Tries before and after one reclaim pass. */
+	/* Reserves shared ownership before the component cap and physical allocation. */
+	kind = metadata ? CACHE_MEMORY_BUF_META : CACHE_MEMORY_BUF_DATA;
+	if (cache_memory_reserve != NULL) {
+		error = cache_memory_reserve(kind, size, 1);
+		if (error != 0 && cache_memory_reclaim != NULL &&
+		    cache_memory_reclaim(size) != 0)
+			error = cache_memory_reserve(kind, size, 1);
+		if (error != 0)
+			return error;
+	}
+
+	/* Tries before and after one clean reclaim pass. */
 	for (attempt = 0; attempt < 2U; attempt++) {
 		irq = spin_lock_irqsave(&cache_lock);
 		if (cache_current_bytes <= cache_max_bytes &&
@@ -831,9 +1065,13 @@ reserve_bytes(
 			return 0;
 		}
 		spin_unlock_irqrestore(&cache_lock, irq);
-		if (buf_reclaim(size, BUF_RECLAIM_WRITE) == 0)
+		if (buf_reclaim(size, 0) == 0)
 			break;
 	}
+
+	/* Returns shared credit when the component cap cannot admit ownership. */
+	if (cache_memory_cancel != NULL)
+		cache_memory_cancel(kind, size);
 
 	/* Reports that the bytes do not fit. */
 	return ENOMEM;
@@ -842,7 +1080,8 @@ reserve_bytes(
 /* Gives back a reservation that was not committed. */
 static void
 cancel_reservation(
-	size_t size)
+	size_t size,
+	int metadata)
 {
 	unsigned long irq;
 
@@ -850,6 +1089,9 @@ cancel_reservation(
 	if (cache_reserved_bytes >= size)
 		cache_reserved_bytes -= size;
 	spin_unlock_irqrestore(&cache_lock, irq);
+	if (cache_memory_cancel != NULL)
+		cache_memory_cancel(metadata ? CACHE_MEMORY_BUF_META :
+		    CACHE_MEMORY_BUF_DATA, size);
 }
 
 /* Converts a reservation into data or metadata usage. */
@@ -868,13 +1110,17 @@ commit_reservation(
 	else
 		cache_data_bytes += size;
 	spin_unlock_irqrestore(&cache_lock, irq);
+	if (cache_memory_commit != NULL)
+		cache_memory_commit(metadata ? CACHE_MEMORY_BUF_META :
+		    CACHE_MEMORY_BUF_DATA, size);
 }
 
 /* Allocates page-aligned physical memory reserved against the cap. */
 static int
 alloc_pmem(
 	size_t size,
-	struct hal_pmem *memory)
+	struct hal_pmem *memory,
+	int metadata)
 {
 	size_t reserved;
 	const struct hal_pmem_request request = {
@@ -888,11 +1134,11 @@ alloc_pmem(
 		return ENOMEM;
 	reserved = (size + ZEDBSD_PAGE_SIZE - 1U) &
 	    ~(size_t)(ZEDBSD_PAGE_SIZE - 1U);
-	if (reserve_bytes(reserved) != 0)
+	if (reserve_bytes(reserved, metadata) != 0)
 		return ENOMEM;
 	error = hal_pmem_alloc(&request, memory);
 	if (error != HAL_OK) {
-		cancel_reservation(reserved);
+		cancel_reservation(reserved, metadata);
 		if (error == HAL_ERR_NOMEM)
 			return ENOMEM;
 		return EIO;
@@ -904,13 +1150,14 @@ alloc_pmem(
 	 * rounding.
 	 */
 	if (memory->size > reserved) {
-		if (reserve_bytes(memory->size - reserved) != 0) {
-			(void)hal_pmem_free(memory);
-			cancel_reservation(reserved);
+		if (reserve_bytes(memory->size - reserved, metadata) != 0) {
+			if (hal_pmem_free(memory) != HAL_OK)
+				HAL_FATAL("buffer allocation rollback failed");
+			cancel_reservation(reserved, metadata);
 			return ENOMEM;
 		}
 	} else if (memory->size < reserved) {
-		cancel_reservation(reserved - memory->size);
+		cancel_reservation(reserved - memory->size, metadata);
 	}
 
 	/* Reports the reserved allocation. */
@@ -925,20 +1172,23 @@ slab_grow(
 	struct hal_pmem memory;
 	struct buf_slab *slab;
 	size_t header;
+	size_t charged;
 	unsigned capacity;
 	int error;
 	unsigned long irq;
 
 	header = slab_header_size();
-	error = alloc_pmem(BUF_SLAB_BYTES, &memory);
+	error = alloc_pmem(BUF_SLAB_BYTES, &memory, 1);
 
 	/* Rejects a failed allocation or a slab the free mask cannot cover. */
 	if (error != 0)
 		return error;
+	charged = memory.size;
 	capacity = (unsigned)((BUF_SLAB_BYTES - header) / sizeof(struct buf));
 	if (capacity == 0 || capacity > 64U) {
-		(void)hal_pmem_free(&memory);
-		cancel_reservation(BUF_SLAB_BYTES);
+		if (hal_pmem_free(&memory) != HAL_OK)
+			HAL_FATAL("buffer slab rollback failed");
+		cancel_reservation(charged, 1);
 		return EOVERFLOW;
 	}
 
@@ -951,7 +1201,7 @@ slab_grow(
 		slab->free_mask = UINT64_MAX;
 	else
 		slab->free_mask = ((uint64_t)1 << capacity) - 1U;
-	commit_reservation(BUF_SLAB_BYTES, 1);
+	commit_reservation(memory.size, 1);
 
 	/* Publishes the slab. */
 	irq = spin_lock_irqsave(&cache_lock);
@@ -1005,6 +1255,7 @@ free_metadata(
 	unsigned slot;
 	struct hal_pmem release;
 	int free_slab;
+	size_t released_bytes;
 	unsigned long irq;
 	struct buf_slab **link;
 
@@ -1029,15 +1280,20 @@ free_metadata(
 			}
 		}
 		release = slab->memory;
-		cache_current_bytes -= BUF_SLAB_BYTES;
-		cache_metadata_bytes -= BUF_SLAB_BYTES;
+		cache_current_bytes -= release.size;
+		cache_metadata_bytes -= release.size;
 		free_slab = 1;
 	}
 	spin_unlock_irqrestore(&cache_lock, irq);
 
 	/* Releases the slab memory unlocked. */
-	if (free_slab)
-		(void)hal_pmem_free(&release);
+	if (free_slab) {
+		released_bytes = release.size;
+		if (hal_pmem_free(&release) != HAL_OK)
+			HAL_FATAL("buffer metadata retirement failed");
+		if (cache_memory_release != NULL)
+			cache_memory_release(CACHE_MEMORY_BUF_META, released_bytes);
+	}
 }
 
 /* Frees a buffer's data, disk reference, and header. */
@@ -1056,7 +1312,10 @@ free_buffer(
 
 	/* Frees the data and un-accounts it. */
 	if (size != 0) {
-		(void)hal_pmem_free(&memory);
+		if (hal_pmem_free(&memory) != HAL_OK)
+			HAL_FATAL("buffer data retirement failed");
+		if (cache_memory_release != NULL)
+			cache_memory_release(CACHE_MEMORY_BUF_DATA, size);
 		irq = spin_lock_irqsave(&cache_lock);
 		cache_current_bytes -= size;
 		cache_data_bytes -= size;
@@ -1065,7 +1324,7 @@ free_buffer(
 
 	/* Drops the disk pin and the header. */
 	if (disk != NULL)
-		disk_release(disk);
+		disk_buffer_release(disk);
 	free_metadata(buffer);
 }
 
@@ -1158,12 +1417,46 @@ read_buffer(
 	return error;
 }
 
-/* Finds or creates the busy, referenced line holding a leaf block. */
+/* Acquires one referenced line, with no other line ownership while waiting. */
 static int
 acquire_line(
 	struct disk *disk,
 	uint64_t block,
 	int read_data,
+	struct buf **result)
+{
+	struct buf *buffer;
+	int error;
+
+	/* Prepares the reference before taking busy ownership. */
+	error = reference_line(disk, block, &buffer);
+	if (error != 0)
+		return error;
+	error = busy_acquire(buffer);
+	if (error != 0) {
+		drop_caller_reference(buffer);
+		return error;
+	}
+
+	/* Fills a missing line only when the caller needs its previous contents. */
+	if (read_data) {
+		error = read_buffer(buffer);
+		if (error != 0) {
+			buf_release(buffer);
+			return error;
+		}
+	}
+	*result = buffer;
+
+	/* Returns the single busy line. */
+	return 0;
+}
+
+/* Pins a line without taking busy ownership or performing its data I/O. */
+static int
+reference_line(
+	struct disk *disk,
+	uint64_t block,
 	struct buf **result)
 {
 	struct buf *buffer;
@@ -1209,18 +1502,6 @@ acquire_line(
 			stat_add(&stat_hits, 1);
 			if (candidate != NULL)
 				free_buffer(candidate);
-			error = busy_acquire(buffer);
-			if (error != 0) {
-				drop_caller_reference(buffer);
-				return error;
-			}
-			if (read_data && !(buffer->b_flags & BUF_VALID)) {
-				error = read_buffer(buffer);
-				if (error != 0) {
-					buf_release(buffer);
-					return error;
-				}
-			}
 			*result = buffer;
 			return 0;
 		}
@@ -1232,23 +1513,27 @@ acquire_line(
 			if (candidate == NULL)
 				return ENOMEM;
 			error = alloc_pmem((size_t)(line_blocks * disk->d_block_size),
-			    &memory);
+			    &memory, 0);
 			if (error != 0) {
 				free_metadata(candidate);
 				return error;
 			}
 			commit_reservation(memory.size, 0);
-			candidate->b_disk = disk;
-			disk_ref(disk);
 			candidate->b_block = line_block;
 			candidate->b_block_count = (uint32_t)line_blocks;
 			candidate->b_size = memory.size;
 			candidate->b_memory = memory;
 			candidate->b_data = memory.vaddr;
+			error = disk_buffer_acquire(disk);
+			if (error != 0) {
+				free_buffer(candidate);
+				return error;
+			}
+			candidate->b_disk = disk;
 			refcount_init(&candidate->b_refs, 2);
 			spin_init(&candidate->b_lock, LOCK_RANK_BUF, "buffer");
 			waitq_init(&candidate->b_waitq, "buffer state");
-			candidate->b_busy = 1;
+			candidate->b_busy = 0;
 		}
 
 		/* Inserts the candidate unless another thread won the race. */
@@ -1263,16 +1548,198 @@ acquire_line(
 		spin_unlock_irqrestore(&cache_lock, irq);
 		stat_add(&stat_misses, 1);
 		stat_add(&stat_buffers, 1);
-		if (read_data) {
-			error = read_buffer(candidate);
-			if (error != 0) {
-				buf_release(candidate);
-				return error;
-			}
-		}
 		*result = candidate;
 		return 0;
 	}
+}
+
+/* Drops busy ownership before releasing every prepared reference. */
+static void
+release_run(
+	struct buf **lines,
+	unsigned count,
+	unsigned busy)
+{
+	unsigned index;
+
+	/* Releases acquired lines and then the references without ownership. */
+	for (index = 0; index < count; index++) {
+		if (index < busy)
+			buf_release(lines[index]);
+		else
+			drop_caller_reference(lines[index]);
+	}
+}
+
+/* Publishes one line's confirmed completion or retains its retryable contents. */
+static void
+finish_run_line(
+	struct buf *buffer,
+	uint64_t generation,
+	int write,
+	int error)
+{
+	unsigned long irq;
+
+	/* Changes completion state while preserving a newer dirty generation. */
+	irq = spin_lock_irqsave(&buffer->b_lock);
+	buffer->b_io_state = BUF_IO_IDLE;
+	buffer->b_io_inflight = 0;
+	buffer->b_error = error;
+	if (write) {
+		if (error == 0 && generation == buffer->b_dirty_generation) {
+			buffer->b_flags &= ~(BUF_DIRTY | BUF_ERROR);
+			dirty_clear(buffer);
+			stat_add(&cache_dirty_bytes, (uint64_t)-(int64_t)buffer->b_size);
+		} else if (error != 0) {
+			buffer->b_flags |= BUF_DIRTY | BUF_VALID | BUF_ERROR;
+			stat_add(&stat_writeback_errors, 1);
+		}
+	} else if (error == 0) {
+		buffer->b_flags |= BUF_VALID;
+		buffer->b_flags &= ~BUF_ERROR;
+	} else {
+		buffer->b_flags &= ~BUF_VALID;
+		buffer->b_flags |= BUF_ERROR;
+	}
+	waitq_wake_all(&buffer->b_waitq);
+	spin_unlock_irqrestore(&buffer->b_lock, irq);
+}
+
+/* Transfers full adjacent lines using caller storage, without a staging pool. */
+static int
+transfer_run(
+	struct disk *disk,
+	uint64_t block,
+	uint64_t remaining,
+	void *data,
+	int write,
+	uint32_t *transferred,
+	const struct io_context *context)
+{
+	struct buf *lines[BUF_RUN_LINES];
+	uint64_t generations[BUF_RUN_LINES];
+	uint64_t line_bytes;
+	uint32_t line_blocks;
+	uint32_t completed;
+	unsigned count;
+	unsigned index;
+	unsigned acquired;
+	unsigned long irq;
+	int error;
+	int line_error;
+	uint8_t *bytes;
+
+	/* Leaves partial lines and small requests to the single-line path. */
+	*transferred = 0;
+	line_bytes = disk->d_block_size > ZEDBSD_PAGE_SIZE ?
+	    disk->d_block_size : ZEDBSD_PAGE_SIZE;
+	if (disk->d_block_size == 0 ||
+	    (disk->d_block_size & (disk->d_block_size - 1U)) != 0 ||
+	    line_bytes > KERN_IO_BATCH_MAX / 2U) {
+		io_stats_record(IO_BUF_SINGLE_GEOMETRY, 0);
+		return 0;
+	}
+	line_blocks = (uint32_t)(line_bytes / disk->d_block_size);
+	if (block % line_blocks != 0 || remaining / line_blocks < 2U) {
+		io_stats_record(IO_BUF_SINGLE_GEOMETRY, 0);
+		return 0;
+	}
+	count = (unsigned)(remaining / line_blocks > KERN_IO_BATCH_MAX / line_bytes ?
+	    KERN_IO_BATCH_MAX / line_bytes : remaining / line_blocks);
+
+	/* Pins and allocates all lines before acquiring any busy ownership. */
+	for (index = 0; index < count; index++) {
+		error = reference_line(disk, block + (uint64_t)index * line_blocks,
+		    &lines[index]);
+		if (error != 0) {
+			release_run(lines, index, 0);
+			io_stats_record(IO_BUF_SINGLE_MEMORY, 0);
+			return 0;
+		}
+		/* Avoids preparing cold successors when this read already reaches a hit. */
+		if (!write) {
+			irq = spin_lock_irqsave(&lines[index]->b_lock);
+			line_error = (lines[index]->b_flags & BUF_VALID) != 0;
+			spin_unlock_irqrestore(&lines[index]->b_lock, irq);
+			if (line_error) {
+				drop_caller_reference(lines[index]);
+				count = index;
+				break;
+			}
+		}
+	}
+
+	/* Never waits for another line while owning one; a conflict shortens to one. */
+	acquired = 0;
+	for (index = 0; index < count; index++) {
+		irq = spin_lock_irqsave(&lines[index]->b_lock);
+		if (lines[index]->b_busy || lines[index]->b_io_inflight) {
+			spin_unlock_irqrestore(&lines[index]->b_lock, irq);
+			release_run(lines, count, acquired);
+			io_stats_record(IO_BUF_SINGLE_BUSY, 0);
+			return 0;
+		}
+		lines[index]->b_busy = 1;
+		acquired++;
+
+		/* Ends a cold read run before its first cache hit. */
+		if (!write && (lines[index]->b_flags & BUF_VALID)) {
+			spin_unlock_irqrestore(&lines[index]->b_lock, irq);
+			release_run(lines + index, count - index, 1);
+			count = index;
+			acquired = index;
+			break;
+		}
+		spin_unlock_irqrestore(&lines[index]->b_lock, irq);
+	}
+	if (count < 2U) {
+		release_run(lines, count, acquired);
+		io_stats_record(IO_BUF_SINGLE_HIT, 0);
+		return 0;
+	}
+
+	/* Copies accepted writes into their durable retry owner before submitting. */
+	bytes = data;
+	for (index = 0; index < count; index++) {
+		if (write) {
+			memcpy(lines[index]->b_data, bytes + index * line_bytes, (size_t)line_bytes);
+			buf_mark_dirty(lines[index]);
+		}
+		irq = spin_lock_irqsave(&lines[index]->b_lock);
+		generations[index] = lines[index]->b_dirty_generation;
+		lines[index]->b_io_state = write ? BUF_IO_WRITING : BUF_IO_READING;
+		lines[index]->b_io_inflight = 1;
+		spin_unlock_irqrestore(&lines[index]->b_lock, irq);
+	}
+
+	/* Carries a contiguous caller buffer to the device's splitting boundary. */
+	stat_add(write ? &stat_write_bios : &stat_read_bios, 1);
+	io_stats_record(write ? IO_BUF_RUN_WRITE : IO_BUF_RUN_READ, count * line_bytes);
+	error = disk_transfer_progress_context(disk, write ? BIO_WRITE : BIO_READ, block,
+	    count * line_blocks, data, &completed, context);
+
+	/* Publishes only complete lines in the confirmed prefix; uncertainty stays dirty. */
+	for (index = 0; index < count; index++) {
+		line_error = error;
+		if ((index + 1U) * line_blocks <= completed) {
+			line_error = 0;
+			if (!write) {
+				memcpy(lines[index]->b_data, bytes + index * line_bytes,
+				    (size_t)line_bytes);
+			}
+		} else if (line_error == 0) {
+			line_error = EIO;
+		}
+		finish_run_line(lines[index], generations[index], write, line_error);
+	}
+	release_run(lines, count, count);
+	if (error != 0)
+		return error;
+	*transferred = count * line_blocks;
+
+	/* Reports the complete run. */
+	return 0;
 }
 
 /* Resolves the whole block range of a disk on its leaf. */
@@ -1319,6 +1786,7 @@ evict_one(
 	unsigned long irq;
 	struct buf *buffer;
 	unsigned long birq;
+	unsigned long dirty_irq;
 	unsigned bucket;
 
 	candidate = NULL;
@@ -1334,14 +1802,18 @@ evict_one(
 		if (refcount_load(&buffer->b_refs) != 1)
 			continue;
 		birq = spin_lock_irqsave(&buffer->b_lock);
-		if (buffer->b_busy ||
+		dirty_irq = spin_lock_irqsave(&dirty_index_lock);
+		if (refcount_load(&buffer->b_refs) != 1 || buffer->b_busy ||
 		    buffer->b_io_inflight ||
 		    ((buffer->b_flags & BUF_DIRTY) &&
 		     !(flags & BUF_INVALIDATE_DISCARD))) {
+			spin_unlock_irqrestore(&dirty_index_lock, dirty_irq);
 			spin_unlock_irqrestore(&buffer->b_lock, birq);
 			continue;
 		}
+		dirty_unlink_locked(buffer);
 		buffer->b_flags |= BUF_INVALID;
+		spin_unlock_irqrestore(&dirty_index_lock, dirty_irq);
 		spin_unlock_irqrestore(&buffer->b_lock, birq);
 		lru_remove_locked(buffer);
 		hash_remove_locked(buffer);
@@ -1388,31 +1860,9 @@ writeback_one_reclaimable(
 {
 	struct buf *candidate;
 	int error;
-	unsigned long irq;
-	struct buf *buffer;
-	unsigned long birq;
 
-	candidate = NULL;
-	irq = spin_lock_irqsave(&cache_lock);
-
-	/* Walks the LRU from the tail for an unreferenced, idle, dirty buffer. */
-	for (buffer = lru_tail; buffer != NULL;
-	     buffer = buffer->b_lru_prev) {
-		if (refcount_load(&buffer->b_refs) != 1)
-			continue;
-		birq = spin_lock_irqsave(&buffer->b_lock);
-		if (!buffer->b_busy &&
-		    !buffer->b_io_inflight &&
-		    (buffer->b_flags & BUF_DIRTY)) {
-			refcount_get(&buffer->b_refs);
-			lru_remove_locked(buffer);
-			candidate = buffer;
-			spin_unlock_irqrestore(&buffer->b_lock, birq);
-			break;
-		}
-		spin_unlock_irqrestore(&buffer->b_lock, birq);
-	}
-	spin_unlock_irqrestore(&cache_lock, irq);
+	/* Pins an indexed dirty candidate before dropping the index guard. */
+	candidate = dirty_reference(NULL, 0, 0, 1);
 	if (candidate == NULL)
 		return ENOENT;
 
@@ -1425,3 +1875,5 @@ writeback_one_reclaimable(
 	/* Reports the writeback result. */
 	return error;
 }
+
+#include "buf-dirty.inc"

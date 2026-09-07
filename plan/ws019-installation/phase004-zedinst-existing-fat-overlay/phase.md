@@ -103,3 +103,11 @@ These are concrete dependency/design findings, not installer acceptance.
 Resolve them in bounded prerequisite contracts before selecting p004 code
 implementation. Do not substitute mount listings for source provenance or
 check-then-rename for no-replace publication.
+
+## Unified formatter dependency (q101)
+
+Use `mkfs -t ufs FILE` and the ordinary profile under the existing reservation
+transaction. WS024 is implementing the driver/producer migration and retains
+old-media rejection and fresh-file initialization boundaries. Do not infer
+in-place conversion from the new public name. This update does not start the
+installer phase; its existing prerequisites still apply.

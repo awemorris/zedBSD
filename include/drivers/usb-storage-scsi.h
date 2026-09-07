@@ -17,6 +17,44 @@ struct drv_usb_scsi_sense {
 	uint8_t response_code;
 };
 
+enum drv_usb_scsi_recovery {
+	DRV_USB_SCSI_RECOVERY_NONE,
+	DRV_USB_SCSI_RECOVERY_RESET,
+	DRV_USB_SCSI_RECOVERY_MODE,
+	DRV_USB_SCSI_RECOVERY_MEDIA,
+	DRV_USB_SCSI_RECOVERY_ABSENT,
+	DRV_USB_SCSI_RECOVERY_FAILED
+};
+
+/* Classifies current attention; the command owner separately authorizes retry.
+ * ASC/ASCQ assignments: https://www.t10.org/lists/asc-num.txt
+ * Deferred sense never authorizes resetting/reconfiguring the current command. */
+static __inline enum drv_usb_scsi_recovery
+drv_usb_scsi_recovery_action(
+	const struct drv_usb_scsi_sense *sense)
+{
+	if (sense == NULL || !sense->valid)
+		return DRV_USB_SCSI_RECOVERY_NONE;
+	if (sense->key != 0x06U &&
+	    !(sense->key == 0x02U && sense->asc == 0x3aU))
+		return DRV_USB_SCSI_RECOVERY_NONE;
+	if (sense->response_code != 0x70U && sense->response_code != 0x72U)
+		return DRV_USB_SCSI_RECOVERY_FAILED;
+	if (sense->key == 0x02U)
+		return DRV_USB_SCSI_RECOVERY_ABSENT;
+	/* Removable devices can report ejection as Unit Attention, not readiness. */
+	if (sense->asc == 0x3aU && sense->ascq == 0)
+		return DRV_USB_SCSI_RECOVERY_ABSENT;
+	if (sense->asc == 0x29U && sense->ascq == 0)
+		return DRV_USB_SCSI_RECOVERY_RESET;
+	if (sense->asc == 0x2aU && sense->ascq == 0x01U)
+		return DRV_USB_SCSI_RECOVERY_MODE;
+	if ((sense->asc == 0x28U && sense->ascq == 0) ||
+	    (sense->asc == 0x2aU && sense->ascq == 0x09U))
+		return DRV_USB_SCSI_RECOVERY_MEDIA;
+	return DRV_USB_SCSI_RECOVERY_FAILED;
+}
+
 /*
  * Independently validated portions of a MODE SENSE(6) response.  A valid
  * four-byte header can establish write protection even when the descriptor

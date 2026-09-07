@@ -20,20 +20,20 @@ common="-std=c11 -Wall -Wextra -Werror -Wno-unused-function \
 # duplicated test implementations.
 cc $common -O2 -Wl,--gc-sections \
 	"$repo/plan/ws006-input/tests/usb-hid-driver-test.c" \
-	"$repo/src/drivers/hid/hid-report.c" -o "$ordinary"
+	"$repo/src/drivers/hid/hid-report.c" "$repo/src/kern/io-stats.c" -o "$ordinary"
 "$ordinary"
 
 cc $common -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
 	-Wl,--gc-sections \
 	"$repo/plan/ws006-input/tests/usb-hid-driver-test.c" \
-	"$repo/src/drivers/hid/hid-report.c" -o "$sanitized"
+	"$repo/src/drivers/hid/hid-report.c" "$repo/src/kern/io-stats.c" -o "$sanitized"
 ASAN_OPTIONS=detect_leaks=1 "$sanitized"
 
-cc $common -O2 "$hotplug_fixture" -o "$hotplug_ordinary"
+cc $common -O2 "$hotplug_fixture" "$repo/src/kern/io-stats.c" -o "$hotplug_ordinary"
 "$hotplug_ordinary"
 
 cc $common -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
-	"$hotplug_fixture" -o "$hotplug_sanitized"
+	"$hotplug_fixture" "$repo/src/kern/io-stats.c" -o "$hotplug_sanitized"
 ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
 	"$hotplug_sanitized"
 

@@ -66,6 +66,7 @@ static unsigned inode_destructions;
 static unsigned namecache_removes;
 static unsigned namecache_purges;
 static unsigned fail_kern_allocations;
+static size_t fail_kern_allocation_size;
 static enum bootfat_type current_type;
 static const char *current_stage = "startup";
 static unsigned current_fault_ordinal;
@@ -105,7 +106,8 @@ static unsigned current_fault_ordinal;
 void *
 kern_malloc(size_t size)
 {
-	if (fail_kern_allocations != 0U) {
+	if (fail_kern_allocations != 0U &&
+	    (fail_kern_allocation_size == 0 || fail_kern_allocation_size == size)) {
 		fail_kern_allocations--;
 		return NULL;
 	}
@@ -1530,6 +1532,8 @@ check_mount_sync_open_writer(struct memory_image *image, struct mount *mountp)
 	CHECK(writer.f_ops->pwrite(&writer, payload, sizeof(payload) - 1U,
 	    (off_t)sizeof(zeros)) == (ssize_t)(sizeof(payload) - 1U));
 	CHECK(inode->i_size == wanted_size);
+	/* Measure this mount-sync call independently of ordered allocation flushes. */
+	syncs_before = image->syncs;
 	CHECK_ERROR(mountp->m_type->sync(mountp), 0);
 	CHECK(image->syncs == syncs_before + 1U);
 	writes_after_sync = image->writes;
@@ -2460,8 +2464,9 @@ check_dotdot_rename_faults(void)
 		inode_release(b);
 		host_unmount(&mountp);
 	}
-	CHECK(consumed == 5U);
-	CHECK(ordinal == 6U);
+	/* Require exhaustive actual writes after same-sector coalescing. */
+	CHECK(consumed > 0U && consumed + 1U == ordinal);
+	CHECK(ordinal <= 16U);
 	free(checkpoint);
 	destroy_image(&image);
 }
@@ -2614,8 +2619,9 @@ check_sector_boundary_lfn_unlink_faults(void)
 		CHECK(mount_free_blocks(&mountp) == free_before + 1U);
 		host_unmount(&mountp);
 	}
-	CHECK(consumed == 4U);
-	CHECK(ordinal == 5U);
+	/* Require exhaustive actual writes after same-sector coalescing. */
+	CHECK(consumed > 0U && consumed + 1U == ordinal);
+	CHECK(ordinal <= 16U);
 	free(checkpoint);
 	destroy_image(&image);
 }
@@ -2735,8 +2741,9 @@ check_sector_boundary_lfn_rename_faults(void)
 		CHECK(mount_free_blocks(&mountp) == free_before + 1U);
 		host_unmount(&mountp);
 	}
-	CHECK(consumed == 8U);
-	CHECK(ordinal == 9U);
+	/* Require exhaustive actual writes after same-sector coalescing. */
+	CHECK(consumed > 0U && consumed + 1U == ordinal);
+	CHECK(ordinal <= 24U);
 	free(checkpoint);
 	destroy_image(&image);
 }
@@ -2928,7 +2935,8 @@ check_lfn_unlink_faults(void)
 		CHECK(mount_free_blocks(&mountp) == free_before + 1U);
 		host_unmount(&mountp);
 	}
-	CHECK(consumed >= 2U);
+	/* Cover every actual write, including a whole LFN run in one sector. */
+	CHECK(consumed > 0U && consumed + 1U == ordinal);
 	CHECK(ordinal <= 32U);
 	free(checkpoint);
 	destroy_image(&image);
@@ -3103,6 +3111,8 @@ check_partial_grow_faults(void)
 	uint8_t *checkpoint;
 	uint64_t free_before;
 	unsigned ordinal;
+	unsigned write_count;
+	unsigned writes_before;
 
 	current_type = ZEDBSD_FAT16;
 	current_stage = "partial cluster growth setup";
@@ -3119,9 +3129,18 @@ check_partial_grow_faults(void)
 	CHECK(checkpoint != NULL);
 	memcpy(checkpoint, image.bytes, (size_t)image.sectors * SECTOR_SIZE);
 
-	/* FAT16 with two FAT copies performs six writes while adding the second
-	 * cluster: zero, new EOC copies, old-tail link copies, and payload. */
-	for (ordinal = 1U; ordinal <= 6U; ordinal++) {
+	/* Measure the current growth sequence, then fail every actual write boundary. */
+	CHECK_ERROR(host_mount(&image, 0U, &mountp), 0);
+	CHECK_ERROR(lookup_child(mountp.m_root, "GROW.TXT", &inode), 0);
+	CHECK_ERROR(host_file_open(inode, O_RDWR, &file), 0);
+	writes_before = image.write_attempts;
+	CHECK(file.f_ops->pwrite(&file, "X", 1U, 512) == 1);
+	write_count = image.write_attempts - writes_before;
+	CHECK(write_count > 0U && write_count <= 16U);
+	CHECK_ERROR(host_file_close(&file), 0);
+	inode_release(inode);
+	host_unmount(&mountp);
+	for (ordinal = 1U; ordinal <= write_count; ordinal++) {
 		current_stage = "partial cluster growth retry";
 		current_fault_ordinal = ordinal;
 		memcpy(image.bytes, checkpoint,
@@ -3328,9 +3347,12 @@ run_partial_shrink_sweep(struct memory_image *image, const uint8_t *checkpoint,
 	CHECK_ERROR(host_mount(image, 0U, &mountp), 0);
 	CHECK_ERROR(lookup_child(mountp.m_root, "SHRINK.TXT", &inode), 0);
 	CHECK_ERROR(host_file_open(inode, O_RDWR, &file), 0);
+	/* Target the old-chain recovery allocation, not optional batch workspace. */
+	fail_kern_allocation_size = (size_t)released_clusters * sizeof(uint32_t);
 	fail_kern_allocations = 1U;
 	CHECK_ERROR(inode->i_op->truncate(inode, wanted_size), ENOMEM);
 	CHECK(fail_kern_allocations == 0U);
+	fail_kern_allocation_size = 0;
 	verify_failed_truncate_state(image, &mountp, inode, &file, expected,
 	    free_before);
 	CHECK_ERROR(inode->i_op->truncate(inode, wanted_size), 0);
@@ -3437,7 +3459,7 @@ check_failed_create_restores_end_marker(void)
 	    ZEDBSD_FAT32);
 	memcpy(saved, root + 4U * 32U, sizeof(saved));
 	CHECK_ERROR(host_mount(&image, 0U, &mountp), 0);
-	schedule_write_failure(&image, 2U);
+	schedule_write_failure(&image, 1U);
 	CHECK_ERROR(create_child(mountp.m_root, "Rollback End Marker.txt",
 	    &created), EIO);
 	CHECK(created == NULL);
@@ -3458,10 +3480,8 @@ check_failed_create_restores_end_marker(void)
 	host_unmount(&mountp);
 	destroy_image(&image);
 
-	/* Repeat with a second fault in the first rollback flush.  Restoration
-	 * continues while the mount is still writable; a later exact-slot flush
-	 * persists the complete sector, but any rollback error still freezes it.
-	 */
+	/* Fail the grouped publication and its single rollback write. Even if this
+	 * medium kept the old bytes, unconfirmed restoration must freeze writes. */
 	current_stage = "double-fault create restores FAT end marker";
 	current_fault_ordinal = 2U;
 	created = NULL;
@@ -3471,7 +3491,7 @@ check_failed_create_restores_end_marker(void)
 	    ZEDBSD_FAT32);
 	memcpy(saved, root + 4U * 32U, sizeof(saved));
 	CHECK_ERROR(host_mount(&image, 0U, &mountp), 0);
-	schedule_two_write_failures(&image, 2U, 3U);
+	schedule_two_write_failures(&image, 1U, 2U);
 	CHECK_ERROR(create_child(mountp.m_root, "Rollback End Marker.txt",
 	    &created), EIO);
 	CHECK(created == NULL);
@@ -3646,4 +3666,13 @@ main(void)
 	printf("KA-T100/KA-T101: PASS (%u checks; native FAT12/16/32 VFS, "
 	    "two FAT copies, 1024-byte logical sectors)\n", checks);
 	return 0;
+}
+
+/* Synchronous media adapter retains the production context validation. */
+int
+disk_write_filesystem_context(struct disk *disk, uint64_t block, uint32_t count,
+    const void *data, const struct io_context *context)
+{
+	int error = io_context_validate(context);
+	return error != 0 ? error : disk_write_filesystem(disk, block, count, data);
 }

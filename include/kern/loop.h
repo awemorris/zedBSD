@@ -23,6 +23,9 @@ enum loop_flags {
 	LOOP_READ_WRITE = 0x0002U,
 };
 
+/* Returns a referenced backing disk; EOPNOTSUPP identifies a non-loop disk. */
+int loop_backing_disk_ref(struct disk *disk, struct disk **result);
+
 int
 loop_init(void);
 

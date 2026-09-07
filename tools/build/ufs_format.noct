@@ -1,0 +1,16 @@
+require zedbuild;
+
+func ufsBuildProfile(backend, size, root, output, profile) {
+    var command = zbShellQuote(backend) + " ufs " + size + " " +
+                  zbShellQuote(root) + " " + zbShellQuote(output);
+    if (profile == "journal-snapshot") {
+        command = command + " --profile=journal-snapshot";
+    } else if (profile != "ordinary") {
+        zbFail("unsupported UFS profile");
+    }
+    if (System.shell(command) != 0) { zbFail("UFS backend failed"); }
+}
+
+func ufsBuild(backend, size, root, output) {
+    ufsBuildProfile(backend, size, root, output, "ordinary");
+}

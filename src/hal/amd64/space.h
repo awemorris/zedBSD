@@ -38,11 +38,19 @@ struct amd64_space {
 };
 
 void amd64_space_init(void);
+uintptr_t amd64_image_to_phys(const void *address);
+int amd64_early_table_page(uint64_t *physical, int mapped);
+int amd64_early_reservation(uint32_t index, uint64_t *physical, uint64_t *size);
+uint64_t amd64_direct_mapped_bytes(void);
 int amd64_mmio_map_ecam(paddr_t physical, size_t size, void **result);
 const void *amd64_acpi_map_physical(paddr_t physical, size_t size);
 uintptr_t amd64_direct_to_phys(const void *address);
 void *amd64_phys_to_direct(uintptr_t address);
 uintptr_t amd64_system_cr3(void);
 void amd64_tlb_interrupt(void);
+
+int amd64_acpi_page_reserved(uint64_t physical);
+void amd64_acpi_finish_discovery(void);
+void amd64_boot_memory_release(void);
 
 #endif

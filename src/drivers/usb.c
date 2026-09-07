@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <hal/hal.h>
 #include <kern/atomic.h>
+#include <kern/io-stats.h>
 #include <kern/sched.h>
 #include <string.h>
 
@@ -154,6 +155,9 @@ struct drv_usb_urb {
 	void *buffer;
 	void *sync_buffer, *sync_client;
 	size_t sync_capacity;
+	unsigned sync_shared;
+	void *transfer_reservation;
+	size_t transfer_capacity;
 	size_t length, actual_length;
 	unsigned flags, timeout_ms;
 	drv_usb_urb_callback_t callback;
@@ -518,7 +522,7 @@ void drv_usb_shutdown(void)
 			error = detach_interfaces(device);
 			if (error != 0) {
 				hal_printf(
-				    "usb%u: device %u driver shutdown failed (%d); host controller retained\n",
+				    "usb%u: device %u driver shutdown failed (%d); class resources retained\n",
 				    bus->number, device->address, error);
 				retain = 1;
 			}
@@ -552,6 +556,9 @@ void drv_usb_shutdown(void)
 		}
 		/* A failed class/device teardown keeps callback-visible HCD memory,
 		 * but the checked HCD quiesce above still stops DMA before reboot. */
+		if (retain && bus->hcd->ops->quiesce != NULL)
+			hal_printf("usb%u: host controller quiesced; resources retained\n",
+			    bus->number);
 		if (!retain && bus->hcd->ops->stop != NULL)
 			bus->hcd->ops->stop(bus->hcd);
 		usb_topology_lock();
@@ -574,7 +581,16 @@ int drv_usb_hcd_register(struct drv_usb_hcd *hcd, struct drv_usb_bus **result)
 	    hcd->ops->endpoint_reset == NULL ||
 	    ((hcd->ops->endpoint_enable == NULL) !=
 	    (hcd->ops->endpoint_disable == NULL)) || result == NULL ||
-	    (hcd->capabilities & ~DRV_USB_HCD_CAP_CONCURRENT_URBS) != 0)
+	    (hcd->capabilities & ~(DRV_USB_HCD_CAP_CONCURRENT_URBS |
+	    DRV_USB_HCD_CAP_TRANSFER_RESERVE |
+	    DRV_USB_HCD_CAP_SHARED_STAGING)) != 0 ||
+	    ((hcd->ops->urb_reserve == NULL) != (hcd->ops->urb_unreserve == NULL)) ||
+	    (((hcd->capabilities & DRV_USB_HCD_CAP_SHARED_STAGING) != 0) !=
+	     (hcd->ops->urb_reserve_buffer != NULL)) ||
+	    ((hcd->capabilities & DRV_USB_HCD_CAP_SHARED_STAGING) != 0 &&
+	     (hcd->capabilities & DRV_USB_HCD_CAP_TRANSFER_RESERVE) == 0) ||
+	    (((hcd->capabilities & DRV_USB_HCD_CAP_TRANSFER_RESERVE) != 0) !=
+	     (hcd->ops->urb_reserve != NULL)))
 		return EINVAL;
 	bus = hal_malloc(sizeof(*bus)); if (bus == NULL) return ENOMEM;
 	memset(bus, 0, sizeof(*bus)); bus->number = next_bus_number++;
@@ -1821,9 +1837,17 @@ urb_put(struct drv_usb_urb *urb)
 	if (!refcount_put(&urb->references))
 		return;
 	device = urb->device;
+	if (urb->transfer_reservation != NULL) {
+		device->bus->hcd->ops->urb_unreserve(device->bus->hcd,
+		    urb->transfer_reservation);
+		io_stats_record(IO_USB_TRANSFER_RESERVE_FREE, urb->transfer_capacity);
+	}
 	if (urb->iso_packets != NULL)
 		hal_free(urb->iso_packets);
-	hal_free(urb->sync_buffer);
+	if (urb->sync_buffer != NULL && !urb->sync_shared)
+		io_stats_record(IO_USB_BUFFER_FREE, urb->sync_capacity);
+	if (!urb->sync_shared)
+		hal_free(urb->sync_buffer);
 	hal_free(urb);
 	device_urb_put(device);
 }
@@ -3028,13 +3052,115 @@ drv_usb_urb_reserve_sync(struct drv_usb_urb *u, size_t capacity)
 		return EBUSY;
 	if (capacity <= u->sync_capacity)
 		return 0;
+	if (u->sync_shared)
+		return drv_usb_urb_reserve_transfer(u, capacity);
 	buffer = hal_malloc(capacity);
 	if (buffer == NULL)
 		return ENOMEM;
+	io_stats_record(IO_USB_BUFFER_ALLOC, capacity);
+	if (u->sync_buffer != NULL)
+		io_stats_record(IO_USB_BUFFER_FREE, u->sync_capacity);
 	hal_free(u->sync_buffer);
 	u->sync_buffer = buffer;
 	u->sync_capacity = capacity;
 	return 0;
+}
+
+/*
+ * Reserves core staging and HCD backing before entering the I/O path.
+ * The caller exclusively owns an idle URB; active or retained resources cannot grow.
+ */
+int
+drv_usb_urb_reserve_transfer(
+	struct drv_usb_urb *urb,
+	size_t capacity)
+{
+	struct drv_usb_hcd *hcd;
+	void *buffer;
+	void *reservation;
+	void *shared_buffer;
+	size_t shared_capacity;
+	int shared;
+	int error;
+
+	/* Validates the reservation owner and controller contract. */
+	if (urb == NULL || capacity == 0 || urb->iso_packet_count != 0)
+		return EINVAL;
+	if (hal_atomic_load_acquire(&urb->hcd_owned) != 0 ||
+	    hal_atomic_load_acquire(&urb->status) == DRV_USB_URB_PENDING)
+		return EBUSY;
+	hcd = urb->device->bus->hcd;
+	if (!(hcd->capabilities & DRV_USB_HCD_CAP_TRANSFER_RESERVE) ||
+	    hcd->ops->urb_reserve == NULL || hcd->ops->urb_unreserve == NULL)
+		return EOPNOTSUPP;
+	if (capacity > DRV_USB_TRANSFER_RESERVE_MAX_SIZE)
+		return EMSGSIZE;
+	if (capacity <= urb->transfer_capacity)
+		return 0;
+	shared = (hcd->capabilities & DRV_USB_HCD_CAP_SHARED_STAGING) != 0;
+	if (shared && hcd->ops->urb_reserve_buffer == NULL)
+		return EOPNOTSUPP;
+
+	/* Keeps the old core staging intact until both replacement allocations succeed. */
+	buffer = NULL;
+	if (!shared && capacity > urb->sync_capacity) {
+		buffer = hal_malloc(capacity);
+		if (buffer == NULL)
+			return ENOMEM;
+	}
+	reservation = NULL;
+	error = hcd->ops->urb_reserve(hcd, urb, capacity, &reservation);
+	if (error != 0) {
+		hal_free(buffer);
+		return error;
+	}
+	if (reservation == NULL)
+		__builtin_trap();
+	shared_buffer = NULL;
+	shared_capacity = 0;
+	if (shared) {
+		shared_buffer = hcd->ops->urb_reserve_buffer(hcd, reservation,
+		    &shared_capacity);
+		if (shared_buffer == NULL || shared_capacity < capacity) {
+			hcd->ops->urb_unreserve(hcd, reservation);
+			return EIO;
+		}
+	}
+
+	/* Replaces idle resources only after the complete new reservation is available. */
+	if (urb->transfer_reservation != NULL) {
+		hcd->ops->urb_unreserve(hcd, urb->transfer_reservation);
+		io_stats_record(IO_USB_TRANSFER_RESERVE_FREE, urb->transfer_capacity);
+	}
+	urb->transfer_reservation = reservation;
+	urb->transfer_capacity = capacity;
+	io_stats_record(IO_USB_TRANSFER_RESERVE_ALLOC, capacity);
+	if (buffer != NULL || shared) {
+		if (buffer != NULL)
+			io_stats_record(IO_USB_BUFFER_ALLOC, capacity);
+		if (urb->sync_buffer != NULL && !urb->sync_shared)
+			io_stats_record(IO_USB_BUFFER_FREE, urb->sync_capacity);
+		if (!urb->sync_shared)
+			hal_free(urb->sync_buffer);
+		urb->sync_buffer = shared ? shared_buffer : buffer;
+		urb->sync_capacity = capacity;
+		urb->sync_shared = shared;
+	}
+
+	/* Publishes an allocation-free capacity for subsequent synchronous submissions. */
+	return 0;
+}
+
+/*
+ * Returns HCD-owned reservation metadata under the caller's existing URB reference.
+ */
+void *
+drv_usb_urb_transfer_reservation(
+	const struct drv_usb_urb *urb)
+{
+	if (urb == NULL)
+		return NULL;
+	return urb->transfer_reservation;
 }
 
 int
@@ -3046,12 +3172,18 @@ drv_usb_urb_setup(struct drv_usb_urb *u, void *b, size_t n, unsigned f,
 	if (hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING ||
 	    hal_atomic_load_acquire(&u->hcd_owned) != 0)
 		return EBUSY;
+	if (u->transfer_capacity != 0 && n > u->transfer_capacity)
+		return EINVAL;
 	if (u->sync_buffer != NULL && (cb != NULL || n > u->sync_capacity))
 		return EINVAL;
 	u->sync_client = u->sync_buffer != NULL ? b : NULL;
 	u->buffer = u->sync_buffer != NULL ? u->sync_buffer : b;
-	if (n != 0 && u->sync_buffer != NULL)
+	if (n != 0 && u->sync_buffer != NULL && b != u->sync_buffer &&
+	    (u->endpoint->type == DRV_USB_TRANSFER_CONTROL ||
+	     (u->endpoint->descriptor.address & DRV_USB_DIR_IN) == 0)) {
 		memcpy(u->sync_buffer, b, n);
+		io_stats_record(IO_USB_STAGING_COPY, n);
+	}
 	u->length = n;
 	u->flags = f;
 	u->timeout_ms = t;
@@ -3271,6 +3403,8 @@ drv_usb_urb_wait_reusable(struct drv_usb_urb *u)
 		sched_yield();
 	}
 	drained = drv_usb_urb_drain(u, 1000U);
+	if (drained != 0 && u->sync_buffer != NULL)
+		io_stats_record(IO_USB_BUFFER_RETAINED, u->sync_capacity);
 	if (drained != 0 && u->sync_buffer == NULL && u->length != 0) {
 		/* Legacy unbuffered users still own their buffer until retirement.
 		 * All core synchronous helpers and storage reserve staging. */
@@ -3278,12 +3412,16 @@ drv_usb_urb_wait_reusable(struct drv_usb_urb *u)
 		drained = 0;
 	}
 	if (drained == 0 && u->sync_client != NULL &&
+	    u->sync_client != u->sync_buffer &&
 	    u->actual_length <= u->length &&
 	    ((u->endpoint->type == DRV_USB_TRANSFER_CONTROL &&
 	      (u->control.request_type & DRV_USB_DIR_IN) != 0) ||
 	     (u->endpoint->type != DRV_USB_TRANSFER_CONTROL &&
 	      (u->endpoint->descriptor.address & DRV_USB_DIR_IN) != 0)))
+	{
 		memcpy(u->sync_client, u->sync_buffer, u->actual_length);
+		io_stats_record(IO_USB_STAGING_COPY, u->actual_length);
+	}
 	u->sync_client = NULL;
 	return error != 0 ? error : drained;
 }

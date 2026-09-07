@@ -19,8 +19,10 @@
  * only through copyin/copyout and pinned uaccess windows.
  */
 
+#include "kern/io-pool.h"
 #include "kern/syscall.h"
 #include "kern/file.h"
+#include "kern/io-stats.h"
 #include "kern/filedesc.h"
 #include "kern/cred.h"
 #include "kern/clock.h"
@@ -80,11 +82,6 @@
 #include <stdlib.h>
 
 #define SYSCALL_IO_CHUNK 512U
-#ifndef ZEDBSD_SYSCALL_REGULAR_CHUNK
-#define ZEDBSD_SYSCALL_REGULAR_CHUNK (256U * 1024U)
-#endif
-_Static_assert(ZEDBSD_SYSCALL_REGULAR_CHUNK >= SYSCALL_IO_CHUNK &&
-    ZEDBSD_SYSCALL_REGULAR_CHUNK <= 256U * 1024U, "bounded regular I/O buffer");
 #define SYSCALL_SOCKET_BUFFER_MAX (64U * 1024U)
 #define SOCKET_SEND_FLAGS (MSG_DONTWAIT | MSG_NOSIGNAL)
 #define SOCKET_RECV_FLAGS (MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC | MSG_WAITALL)
@@ -92,7 +89,7 @@ _Static_assert(ZEDBSD_SYSCALL_REGULAR_CHUNK >= SYSCALL_IO_CHUNK &&
 #define SYSCALL_PAGE_MASK (ZEDBSD_PAGE_SIZE - 1U)
 #define SYSCALL_ATOMIC_CHUNK 128U
 #define SYSCALL_EXT __attribute__((section(".hightext")))
-#define SYSCALL_SYSCTL_VALUE_MAX 256U
+#define SYSCALL_SYSCTL_VALUE_MAX 512U
 #define SYSCALL_SYSCTL_OUTPUT_MAX (1024U * 1024U)
 
 #define SIGNAL_VALID_MASK ((sigset_t)(UINT64_MAX >> 1U))
@@ -2471,33 +2468,21 @@ sys_close_call(
 	return 0;
 }
 
-/* Preserve the request size up to a bounded cap, allocating before the file/VM
- * lease. Large kern_malloc allocations need contiguous physical backing: try
- * progressively smaller buffers under pressure, then the existing stack
- * buffer. Pipes and other nonregular files retain their original behavior. */
+/* Borrows shared scratch without allocation or waiting; streams retain stack I/O. */
 static uint8_t *
 syscall_regular_buffer(struct file *file, size_t length, uint8_t *fallback,
 	size_t *capacity)
 {
 	uint8_t *buffer;
-	size_t size;
 
 	*capacity = SYSCALL_IO_CHUNK;
 	if (length <= SYSCALL_IO_CHUNK || file->f_inode == NULL ||
 	    file->f_inode->i_type != INODE_REG)
 		return fallback;
-	size = length;
-	if (size > ZEDBSD_SYSCALL_REGULAR_CHUNK)
-		size = ZEDBSD_SYSCALL_REGULAR_CHUNK;
-	while (size > SYSCALL_IO_CHUNK) {
-		buffer = kern_malloc(size);
-		if (buffer != NULL) {
-			*capacity = size;
-			return buffer;
-		}
-		size /= 2U;
-	}
-	return fallback;
+	buffer = io_pool_borrow(length, capacity);
+	if (buffer == NULL)
+		return fallback;
+	return buffer;
 }
 
 /* Handles read(2) through a bounce buffer. */
@@ -2538,7 +2523,7 @@ sys_read_call(
 	error = file_io_begin(file, FILE_IO_READ, 0, 0, &io);
 	if (error != 0) {
 		if (buffer != small_buffer)
-			kern_free(buffer);
+			io_pool_release(buffer);
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return -error;
@@ -2550,6 +2535,7 @@ sys_read_call(
 			chunk = capacity;
 		else
 			chunk = length - done;
+		io_stats_record(IO_SYSCALL_READ, chunk);
 		count = file_io_transfer(&io, buffer, chunk);
 		if (count < 0) {
 			if (done != 0)
@@ -2585,9 +2571,9 @@ sys_read_call(
 	}
 	result = (intptr_t)done;
 out:
-	file_io_end(&io);
+	result = file_io_complete(&io, result);
 	if (buffer != small_buffer)
-		kern_free(buffer);
+		io_pool_release(buffer);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -2633,7 +2619,7 @@ sys_write_call(
 	    &io);
 	if (error != 0) {
 		if (buffer != small_buffer)
-			kern_free(buffer);
+			io_pool_release(buffer);
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return -error;
@@ -2655,6 +2641,7 @@ sys_write_call(
 				result = -error;
 			goto out;
 		}
+		io_stats_record(IO_SYSCALL_WRITE, chunk);
 		count = file_io_transfer(&io, buffer, chunk);
 		limited = file_io_take_growth_limit_hit(&io);
 		if (limited)
@@ -2674,9 +2661,9 @@ sys_write_call(
 	}
 	result = (intptr_t)done;
 out:
-	file_io_end(&io);
+	result = file_io_complete(&io, result);
 	if (buffer != small_buffer)
-		kern_free(buffer);
+		io_pool_release(buffer);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -3722,7 +3709,7 @@ sys_positional_call(
 	error = file_io_begin_cred(file, operation, offset, 0, credential, &io);
 	if (error != 0) {
 		if (buffer != small_buffer)
-			kern_free(buffer);
+			io_pool_release(buffer);
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return -error;
@@ -3742,11 +3729,13 @@ sys_positional_call(
 			error = copyin_pinned(&pin, done, buffer, chunk);
 			if (error != 0)
 				goto copy_error;
+			io_stats_record(IO_SYSCALL_WRITE, chunk);
 			count = file_io_transfer(&io, buffer, chunk);
 			limited = file_io_take_growth_limit_hit(&io);
 			if (limited)
 				(void)signal_send_thread(curthread, SIGXFSZ);
 		} else {
+			io_stats_record(IO_SYSCALL_READ, chunk);
 			count = file_io_transfer(&io, buffer, chunk);
 		}
 		if (count < 0) {
@@ -3777,9 +3766,9 @@ copy_error:
 	else
 		result = -error;
 out:
-	file_io_end(&io);
+	result = file_io_complete(&io, result);
 	if (buffer != small_buffer)
-		kern_free(buffer);
+		io_pool_release(buffer);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -3891,6 +3880,7 @@ sys_vector_call(
 			}
 			amount += length;
 		}
+		io_stats_record(IO_SYSCALL_WRITE, amount);
 		total = file_io_transfer(&io, buffer, amount);
 		goto out;
 	}
@@ -3914,6 +3904,7 @@ sys_vector_call(
 					goto out;
 				}
 			}
+			io_stats_record(writing ? IO_SYSCALL_WRITE : IO_SYSCALL_READ, chunk);
 			result = file_io_transfer(&io, buffer, chunk);
 			if (writing) {
 				limited = file_io_take_growth_limit_hit(&io);
@@ -3953,9 +3944,9 @@ fail:
 	total = -error;
 out:
 	if (io_started)
-		file_io_end(&io);
+		total = file_io_complete(&io, total);
 	if (buffer != small_buffer)
-		kern_free(buffer);
+		io_pool_release(buffer);
 	if (file != NULL)
 		(void)file_close(file);
 	while (pinned != 0) {
@@ -3972,7 +3963,6 @@ sys_fsync_call(
 {
 	struct process *process;
 	struct file *file;
-	struct inode *vm_inode;
 	int error;
 
 	process = current_process();
@@ -3981,19 +3971,12 @@ sys_fsync_call(
 	else
 		file = NULL;
 
-	/* Writes the shared cache pages back first. */
-	if (file == NULL) {
+	/* Uses one drain and observer owner for both direct and syscall fsync. */
+	if (file == NULL)
 		error = EBADF;
-	} else {
-		vm_inode = file_vm_inode(file);
-		if (vm_inode == NULL)
-			error = EINVAL;
-		else
-			error = vm_object_sync_inode(vm_inode);
-	}
-
-	/* Then flush this descriptor's own backend/open-file state. */
-	if (error == 0 && file != NULL)
+	else if (file_vm_inode(file) == NULL)
+		error = EINVAL;
+	else
 		error = file_fsync(file);
 	if (file != NULL)
 		(void)file_close(file);

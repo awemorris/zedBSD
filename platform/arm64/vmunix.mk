@@ -17,7 +17,7 @@ ARM64_CFLAGS := -march=armv8-a -mno-outline-atomics -mgeneral-regs-only -ffreest
 	-Os -Wall -Wextra -Werror
 
 ARM64_BOOT_C := src/hal/cpu-up.c src/hal/arm64/asm.c src/hal/arm64/lib.c \
-	src/hal/arm64/page.c src/hal/arm64/space.c \
+	src/hal/pmem-constraints.c src/hal/arm64/page.c src/hal/arm64/space.c \
 	src/hal/arm64/int.c src/hal/arm64/irq.c \
 	src/hal/arm64/task.c \
 	src/hal/arm64/cmain.c src/hal/arm64/bsp-rpi4/uart.c \
@@ -38,7 +38,7 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/vfs.c src/kern/swap.c src/kern/swap-format.c src/kern/backing-claim.c src/kern/swap-source.c \
 	src/kern/swap-control.c \
 	src/kern/swap-boot.c \
-	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/buf.c \
+	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/buf.c src/kern/io-stats.c src/kern/io-pool.c src/kern/io-scratch.c src/kern/cache-memory.c src/kern/readahead.c src/kern/readahead-worker.c src/kern/writeback.c src/kern/writeback-domain.c src/kern/writeback-policy.c src/kern/io-error.c src/kern/cache-worker.c \
 	src/kern/sysctl.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
 	src/kern/resource-limit.c \
 	src/drivers/loop.c \
@@ -65,7 +65,7 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/system-swap-device.c src/kern/system-device.c src/kern/shutdown.c \
 	src/kern/init.c
 ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
-	$(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES)
+	$(KERN_UFS_SOURCES)
 ARM64_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
 ARM64_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
 ARM64_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
@@ -424,18 +424,19 @@ $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AARCH64_ARCH_UFS_IMAGE),aarch64,$(AAR
 rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/ufs-root.img: $(AARCH64_ARCH_UFS_IMAGE) \
-	tools/build/make-ufs1-root-image.py tools/build/ufs1_format.py
-	$(PYTHON) tools/build/make-ufs1-root-image.py --force \
+	tools/build/make-ufs-root-image.py tools/build/ufs_format.py
+	$(PYTHON) tools/build/make-ufs-root-image.py --force \
 		--arch-profile aarch64 --arch-image $(AARCH64_ARCH_UFS_IMAGE) $@
 
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/vmunix \
-	$(AARCH64_ARCH_IMAGE) $(BUILD)/ufs-root.img \
+	$(AARCH64_ARCH_IMAGE) $(BUILD)/ufs-root.img $(DATA_IMAGE) $(SWAP_IMAGE) \
 	$(ARM64_PLATFORM)/config.txt \
 	platform/arm64/tools/make-rpi4-ufs-root-hdd-image.py \
-	platform/arm64/tools/make-rpi4-hdd-image.py tools/build/check-ufs1-image.py
+	platform/arm64/tools/make-rpi4-hdd-image.py tools/build/check-ufs-image.py
 	$(PYTHON) platform/arm64/tools/make-rpi4-ufs-root-hdd-image.py --force \
 		--kernel $(BUILD)/vmunix --arch-image $(AARCH64_ARCH_IMAGE) \
-		--ufs-root $(BUILD)/ufs-root.img \
+		--ufs-root $(BUILD)/ufs-root.img --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) \
 		--config $(ARM64_PLATFORM)/config.txt \
 		--firmware-dir vendor/raspberrypi-firmware/boot $@
 
@@ -469,3 +470,7 @@ $(BUILD)/vmunix: $(BUILD)/kernel.elf \
 	$(ARM64_KERNEL_LIBC_OBJS:.o=.d)
 
 -include $(ARM64_USER_OBJS:.o=.d)
+
+$(BUILD)/src/hal/pmem-constraints.o: src/hal/pmem-constraints.c
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) $(ARM64_CPPFLAGS) $(ARM64_CFLAGS) -MMD -MP -c $< -o $@

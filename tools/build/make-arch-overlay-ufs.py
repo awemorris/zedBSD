@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create an architecture-specific UFS1 root filesystem image."""
+"""Create an architecture-specific UFS root filesystem image."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from ufs1_format import create
+from ufs_format import create
 
 DESTINATION=re.compile(
     r"/(bin|sbin|lib|etc|var|home|usr)(?:/[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}){1,4}")
@@ -45,7 +45,7 @@ def build(args: argparse.Namespace) -> None:
         (root/"shm").chmod(0o1777)
         (root/"lib"/"arch.id").write_text(args.profile+"\n",encoding="ascii")
         (root/"etc"/"zedbsd-root").write_text(
-            "zedBSD ufs1 root v1\n", encoding="ascii")
+            "zedBSD ufs root v1\n", encoding="ascii")
         for destination,source in files.items():
             target=root/destination.lstrip("/"); target.parent.mkdir(parents=True,exist_ok=True)
             shutil.copy2(source,target)

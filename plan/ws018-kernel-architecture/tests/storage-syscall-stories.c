@@ -9,6 +9,9 @@
 #include <string.h>
 #include <sys/types.h>
 
+#include "kern/io-stats.h"
+#include "kern/io-pool.h"
+#define ZEDBSD_SYSCALL_REGULAR_CHUNK KERN_IO_BATCH_MAX
 #include "storage-syscall-config.h"
 #ifndef SSIZE_MAX
 #define SSIZE_MAX INTPTR_MAX
@@ -41,8 +44,22 @@ static void *curthread;
 static struct process *current_process(void) { return &process; }
 static struct file *filedesc_get_ref(void *fd, int n) { (void)fd; (void)n; return &file; }
 static int file_close(struct file *f) { (void)f; return 0; }
-static void *kern_malloc(size_t n) { assert(!held); if (fail_alloc || n > alloc_ceiling) return NULL; void *p = malloc(n); if (p) { allocations++; allocated_size = n; } return p; }
-static void kern_free(void *p) { assert(allocations); allocations--; free(p); }
+/* This syscall-boundary model controls reserve availability; the WS025 pool
+ * fixture separately tests the production owner and absence of warm allocation. */
+void *io_pool_borrow(size_t wanted, size_t *capacity)
+{
+	void *p;
+	size_t n = wanted <= KERN_IO_SMALL_SIZE ? KERN_IO_SMALL_SIZE : KERN_IO_BATCH_MAX;
+	assert(!held);
+	if (fail_alloc) return NULL;
+	if (n > alloc_ceiling) n = KERN_IO_SMALL_SIZE;
+	if (n > alloc_ceiling) return NULL;
+	p = malloc(n);
+	if (p) { allocations++; allocated_size = n; *capacity = n; }
+	return p;
+}
+void io_pool_release(void *p)
+{ assert(allocations); allocations--; free(p); }
 static int uaccess_pin(uintptr_t base, size_t n, unsigned access, struct uaccess_pin *p)
 { (void)n; (void)access; p->base = (void *)base; pins++; return 0; }
 static void uaccess_unpin(struct uaccess_pin *p) { (void)p; assert(pins); pins--; }
@@ -51,6 +68,13 @@ static int file_io_begin(struct file *f, int kind, off_t x, int y, struct file_i
 static int file_io_begin_cred(struct file *f, int kind, off_t x, int y, void *cred, struct file_io *io)
 { (void)cred; return file_io_begin(f,kind,x,y,io); }
 static void file_io_end(struct file_io *io) { (void)io; assert(held); held = 0; }
+static int completion_error;
+static unsigned completions;
+static ssize_t file_io_complete(struct file_io *io, ssize_t result)
+{
+ file_io_end(io);completions++;
+ return completion_error && result>=0 ? -completion_error : result;
+}
 static void file_io_set_growth_limit(struct file_io *io, uint64_t n) { (void)io; (void)n; }
 static uint64_t resource_limit_current(struct process *p, int n) { (void)p; (void)n; return UINT64_MAX; }
 static int file_io_take_growth_limit_hit(struct file_io *io) { (void)io; return limit_hit; }
@@ -96,7 +120,7 @@ int main(void)
 	assert(sys_write_call(args) == 65536 && calls == 128);
 	fail_alloc = 0; file.offset = 0; assert(sys_read_call(args) == 65536);
 	assert(!held && !pins && !allocations);
-	puts("S42 PASS allocation pressure falls back to small buffer and next I/O succeeds");
+	puts("S42 PASS pool exhaustion falls back to stack buffer and next I/O succeeds");
 
 	/* All entry paths use the actual production helper, including current default. */
 	unsigned expected = (65536 + ZEDBSD_SYSCALL_REGULAR_CHUNK - 1) / ZEDBSD_SYSCALL_REGULAR_CHUNK;
@@ -122,11 +146,11 @@ int main(void)
 		assert(calls == (args[2]+ZEDBSD_SYSCALL_REGULAR_CHUNK-1)/ZEDBSD_SYSCALL_REGULAR_CHUNK);
 		assert(!held && !pins && !allocations);
 	}
-	args[2] = 65536; alloc_ceiling = 8192; file.offset = 0; calls = 0;
+	args[2] = 65536; alloc_ceiling = 4096; file.offset = 0; calls = 0;
 	assert(sys_write_call(args) == 65536);
-	if (ZEDBSD_SYSCALL_REGULAR_CHUNK > 8192) assert(allocated_size == 8192 && calls == 8);
+	assert(allocated_size == 4096 && calls == 16);
 	alloc_ceiling = SIZE_MAX;
-	puts("q087 PASS request/cap boundaries and progressive allocation fallback");
+	puts("q087/WS025 PASS request/cap boundaries and small-pool fallback");
 
 	args[2] = ZEDBSD_SYSCALL_REGULAR_CHUNK + 1;
 	for (unsigned mode = 0; mode < 6; mode++) {
@@ -150,6 +174,18 @@ int main(void)
 	assert(sys_write_call(args) == 37 && calls == 1 && signals == 1);
 	short_backend = limit_hit = 0;
 	puts("q087 PASS short/EOF/backend/copy/begin failures on six paths; growth-limit signal");
+
+	/* The public write variants preserve the checked completion result. */
+	completion_error = EIO;
+	for (unsigned mode = 0; mode < 3; mode++) {
+		file.offset = 0; calls = completions = 0;
+		args[2] = 65536; args[3] = 0; v[0].length = 65536; va[2] = 1;
+		intptr_t got = mode == 0 ? sys_write_call(args) :
+		    mode == 1 ? sys_positional_call(args,1) : sys_vector_call(va,1);
+		assert(got == -EIO && completions == 1 && !held && !pins && !allocations);
+	}
+	completion_error = 0;
+	puts("WS025 PASS scalar/positional/vector checked completion errors");
 
 	inode.i_type = 3; file.offset = 0; calls = 0;
 	assert(sys_read_call(args) == 512 && calls == 1);

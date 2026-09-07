@@ -9,19 +9,19 @@ work=$(mktemp -d "$temporary_root/usb-hcd-zero-packet.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 
 cc=${CC:-cc}
-common='-std=c11 -Wall -Wextra -Werror'
+common="-std=c11 -Wall -Wextra -Werror -I$root/include -I$root/include/uapi"
 fixture="$root/plan/ws004-hardware/tests/usb-hcd-zero-packet-test.c"
 xhci="$root/src/drivers/pci-xhci.c"
 ehci="$root/src/drivers/pci-ehci.c"
 uhci="$root/src/drivers/pci-uhci.c"
 
 # shellcheck disable=SC2086
-$cc $common "$fixture" -o "$work/usb-hcd-zero-packet"
+$cc $common "$fixture" "$root/src/kern/io-stats.c" -o "$work/usb-hcd-zero-packet"
 "$work/usb-hcd-zero-packet"
 
 # shellcheck disable=SC2086
 $cc $common -fsanitize=address,undefined -fno-omit-frame-pointer \
-	"$fixture" -o "$work/usb-hcd-zero-packet-sanitize"
+	"$fixture" "$root/src/kern/io-stats.c" -o "$work/usb-hcd-zero-packet-sanitize"
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 	"$work/usb-hcd-zero-packet-sanitize"
 

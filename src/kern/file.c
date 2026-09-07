@@ -19,6 +19,10 @@
  */
 
 #include "kern/file.h"
+#include "kern/io-stats.h"
+#include "kern/cache-memory.h"
+#include "kern/disk.h"
+#include "kern/page.h"
 #include "kern/namei.h"
 #include "kern/cred.h"
 #include "kern/record-lock.h"
@@ -34,6 +38,34 @@
 #include <string.h>
 #include <unistd.h>
 #include <zedbsd/fcntl.h>
+
+extern void readahead_reset(struct readahead_state *) __attribute__((weak));
+extern void readahead_cancel(struct file *) __attribute__((weak));
+extern int readahead_demand_begin(void) __attribute__((weak));
+extern void readahead_demand_end(void) __attribute__((weak));
+extern int readahead_observe(struct readahead_state *, uint64_t, size_t, uint64_t, uint64_t, int, struct readahead_request *) __attribute__((weak));
+extern int readahead_submit(struct file *, struct inode *, const struct readahead_request *) __attribute__((weak));
+extern void cache_memory_get_stats(struct cache_memory_stats *) __attribute__((weak));
+static void file_readahead_reset_owned(struct file *file);
+static void file_readahead_completed(struct file *file, struct inode *inode, off_t start, ssize_t result, off_t eof, uint64_t generation, uint64_t useful);
+extern int vm_object_read_coherent_useful(struct inode *, off_t, void *, size_t, ssize_t *, size_t *) __attribute__((weak));
+extern int disk_cache_acquire(struct disk *, struct disk **) __attribute__((weak));
+extern void disk_cache_release(struct disk *) __attribute__((weak));
+
+extern void io_error_record(struct io_error_state *, int) __attribute__((weak));
+extern void io_error_snapshot(struct io_error_state *, struct io_error_snapshot *) __attribute__((weak));
+extern int io_error_observe(const struct io_error_snapshot *, volatile uint64_t *) __attribute__((weak));
+
+extern int writeback_mount_admit(struct mount *, struct writeback_ticket *) __attribute__((weak));
+extern void writeback_pressure(struct writeback_budget *) __attribute__((weak));
+extern void writeback_ticket_release(struct writeback_ticket *) __attribute__((weak));
+extern int vm_object_writeback_prepare(struct file *, struct vm_object **) __attribute__((weak));
+extern void vm_object_writeback_release(struct vm_object *) __attribute__((weak));
+extern int vm_object_content_prepare_delayed(struct vm_object_content *, struct vm_object *, struct writeback_ticket *) __attribute__((weak));
+static void file_io_writeback_prepare(struct file_io *io, int flags);
+static void file_io_resources_release(struct file_io *io);
+
+extern int vm_object_sync_inode(struct inode *) __attribute__((weak));
 
 #define FILE_MAX 192U
 #define VFS_BSS __attribute__((section(".vfs_bss")))
@@ -89,9 +121,15 @@ extern int vm_object_cache_published(struct inode *inode) __attribute__((weak));
 extern void file_regular_io_lock_checkpoint(struct inode *inode)
 	__attribute__((weak));
 
+extern void vm_object_cache_prepare(struct file *) __attribute__((weak));
+extern int vm_object_cache_pin(struct inode *, struct vm_object **) __attribute__((weak));
+extern void vm_object_cache_unpin(struct vm_object *) __attribute__((weak));
+static void file_io_cache_read_prepare(struct file_io *io);
+extern unsigned vm_object_cache_drain(struct mount *) __attribute__((weak));
 extern int vm_object_backing_busy(const struct backing_claim *)
 	__attribute__((weak));
 
+static int file_fsync_backend_locked(struct file *file);
 static int file_format_reserve_locked(struct file *file, uint64_t size);
 static int file_format_collect_extent(uint64_t file_block, uint64_t disk_block, uint32_t count, void *argument);
 static int file_format_finalize(struct file *file, struct backing_claim *claim, uint64_t size);
@@ -126,6 +164,10 @@ file_format_reserve(
 	/* Validates the object before taking its regular-file I/O mutex. */
 	if (file->f_inode == NULL || file->f_inode->i_type != INODE_REG)
 		return EINVAL;
+
+	/* Closes optional readers before taking any descriptor or inode mutex. */
+	if (vm_object_cache_drain != NULL)
+		(void)vm_object_cache_drain(NULL);
 
 	/* Serializes reservation publication with positional and ordinary I/O. */
 	mutex_lock(&file->f_lock);
@@ -186,7 +228,8 @@ file_openat_cred(
 	if (context == NULL || path == NULL || result == NULL)
 		return EINVAL;
 	if ((flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND |
-		       O_DIRECTORY | O_NONBLOCK | O_NOCTTY | O_NOFOLLOW)) != 0 ||
+		       O_DIRECTORY | O_NONBLOCK | O_NOCTTY | O_NOFOLLOW |
+		       O_SYNC | O_DSYNC)) != 0 ||
 	    (flags & O_ACCMODE) > O_RDWR ||
 	    ((flags & O_EXCL) != 0 && (flags & O_CREAT) == 0))
 		return EINVAL;
@@ -354,7 +397,7 @@ file_open_resolved(
 		return EINVAL;
 	if ((flags & (O_CREAT | O_EXCL | O_TRUNC)) != 0 ||
 	    (flags & ~(O_ACCMODE | O_APPEND | O_DIRECTORY | O_NONBLOCK |
-	    O_NOCTTY | O_NOFOLLOW)) != 0 ||
+	    O_NOCTTY | O_NOFOLLOW | O_SYNC | O_DSYNC)) != 0 ||
 	    (flags & O_ACCMODE) > O_RDWR)
 		return EINVAL;
 	if ((flags & O_DIRECTORY) != 0 && resolved->p_inode->i_type != INODE_DIR)
@@ -608,9 +651,79 @@ fail_file:
 	return error;
 }
 
-/*
- * Reads from a leased file within the size the lease captured.
- */
+/* Selects a shared immutable-input lease without weakening mutable snapshots. */
+int
+file_exec_snapshot_begin(struct file *file, struct file_content_lease *lease)
+{
+	struct inode *inode;
+	struct mount *mountp;
+	int error;
+
+	/* All unsupported identities retain the existing exclusive snapshot protocol. */
+	inode = file != NULL ? file_vm_inode(file) : NULL;
+	mountp = inode != NULL ? inode->i_mount : NULL;
+	if (lease == NULL || inode == NULL || inode != file->f_inode ||
+	    inode->i_type != INODE_REG || file->f_ops == NULL ||
+	    file->f_ops->pread == NULL ||
+	    (file_status_flags_get(file) & O_ACCMODE) == O_WRONLY ||
+	    file->f_backing_claim != NULL || file->f_format_claim != NULL ||
+	    mountp == NULL || (mountp->m_flags & MOUNT_READ_ONLY) == 0 ||
+	    mountp->m_disk == NULL || (mountp->m_disk->d_flags & DISK_READ_ONLY) == 0 ||
+	    disk_cache_acquire == NULL || disk_cache_release == NULL ||
+	    !file_vm_content_available())
+		return file_content_lease_begin(file, lease);
+	memset(lease, 0, sizeof(*lease));
+	if (inode->i_size < 0 || (uint64_t)inode->i_size > SIZE_MAX)
+		return inode->i_size < 0 ? EIO : EFBIG;
+	file_ref(file);
+	error = disk_cache_acquire(mountp->m_disk, &lease->read_disk);
+	if (error != 0)
+		goto fail;
+	if (vm_object_cache_prepare != NULL)
+		vm_object_cache_prepare(file);
+
+	/* Shared readers coexist; wait only when a replacement already owns the inode. */
+	for (;;) {
+		mutex_lock(&inode->i_io_lock);
+		error = vm_object_content_read_begin(inode);
+		if (error != EBUSY && error != EAGAIN)
+			break;
+		mutex_unlock(&inode->i_io_lock);
+		error = vm_object_inode_io_wait(inode);
+		if (error != 0)
+			goto fail;
+	}
+	if (error == 0 && (inode->i_size < 0 || (uint64_t)inode->i_size > SIZE_MAX)) {
+		error = inode->i_size < 0 ? EIO : EFBIG;
+		vm_object_content_read_end(inode);
+	}
+	if (error == 0) {
+		lease->file = file;
+		lease->io_inode = lease->content_inode = inode;
+		lease->size = inode->i_size;
+		lease->active = lease->shared_read = 1;
+	}
+	mutex_unlock(&inode->i_io_lock);
+	if (error != 0)
+		goto fail;
+
+	/* Optional cache refusal keeps the same content gate and serialized backend. */
+	if (vm_object_cache_pin != NULL && vm_object_cache_unpin != NULL &&
+	    vm_object_read_coherent != NULL)
+		(void)vm_object_cache_pin(inode, &lease->read_object);
+	return 0;
+
+fail:
+	if (lease->read_disk != NULL)
+		disk_cache_release(lease->read_disk);
+	memset(lease, 0, sizeof(*lease));
+	(void)file_close(file);
+	return error;
+}
+
+#include "file-exec-snapshot.inc"
+
+/* Reads from a leased file within the size the lease captured. */
 ssize_t
 file_content_lease_pread(
 	struct file_content_lease *lease,
@@ -619,6 +732,7 @@ file_content_lease_pread(
 	off_t offset)
 {
 	ssize_t count;
+	int error;
 
 	if (lease == NULL ||
 	    !lease->active ||
@@ -630,8 +744,14 @@ file_content_lease_pread(
 		return 0;
 	if ((uint64_t)length > (uint64_t)(lease->size - offset))
 		length = (size_t)(lease->size - offset);
-	count = file_pread_internal(lease->file, buffer, length, offset,
-	    FILE_IO_VM_OBJECT | FILE_IO_INODE_IO_OWNED);
+	if (lease->shared_read && lease->read_object != NULL) {
+		error = vm_object_read_coherent(lease->content_inode, offset, buffer, length, &count);
+		if (error != 0)
+			return error == ENOENT ? -EIO : -error;
+	} else {
+		count = file_pread_internal(lease->file, buffer, length, offset,
+		    FILE_IO_VM_OBJECT | (lease->shared_read ? 0 : FILE_IO_INODE_IO_OWNED));
+	}
 	if (count > (ssize_t)length)
 		return -EIO;
 	if (count > 0)
@@ -651,6 +771,18 @@ file_content_lease_end(
 	if (lease == NULL || !lease->active || lease->file == NULL)
 		return;
 	file = lease->file;
+	if (lease->shared_read) {
+		vm_object_content_read_end(lease->content_inode);
+		if (lease->read_object != NULL)
+			vm_object_cache_unpin(lease->read_object);
+		if (lease->read_disk != NULL)
+			disk_cache_release(lease->read_disk);
+		if (lease->transferred)
+			inode_touch(file->f_inode, INODE_ATTR_ATIME);
+		memset(lease, 0, sizeof(*lease));
+		(void)file_close(file);
+		return;
+	}
 	vm_object_content_abort(&lease->content);
 	if (lease->held_visible_gate)
 		vm_object_content_read_end(lease->io_inode);
@@ -680,6 +812,7 @@ file_io_begin_cred(
 	struct file_io *io)
 {
 	int flags;
+	unsigned long context_irq;
 	int writing;
 	int positional;
 	struct backing_claim *claim;
@@ -691,13 +824,15 @@ file_io_begin_cred(
 	    kind < FILE_IO_READ ||
 	    kind > FILE_IO_PWRITE ||
 	    (internal_flags & ~(FILE_IO_LOOP_BACKING | FILE_IO_VM_OBJECT |
-	    FILE_IO_INODE_IO_OWNED | FILE_IO_CONTENT_CHANGE)) != 0 ||
+	    FILE_IO_INODE_IO_OWNED | FILE_IO_CONTENT_CHANGE | FILE_IO_DRAIN |
+	    FILE_IO_ORDERED)) != 0 ||
 	    ((internal_flags & FILE_IO_INODE_IO_OWNED) != 0 &&
 	    (internal_flags & FILE_IO_VM_OBJECT) == 0))
 		return EINVAL;
 	positional = file_io_is_positional(kind);
 	writing = file_io_is_write(kind);
-	if (!writing && (internal_flags & FILE_IO_CONTENT_CHANGE) != 0)
+	if (!writing && (internal_flags & (FILE_IO_CONTENT_CHANGE | FILE_IO_DRAIN |
+	    FILE_IO_ORDERED)) != 0)
 		return EINVAL;
 	if (positional && offset < 0)
 		return EINVAL;
@@ -735,16 +870,55 @@ file_io_begin_cred(
 	if (file->f_inode != NULL && file->f_inode->i_type == INODE_REG &&
 	    (io->content_inode == NULL ||
 	     io->content_inode->i_type != INODE_REG)) {
+		file_io_resources_release(io);
 		memset(io, 0, sizeof(*io));
 		return EIO;
+	}
+	/* Carries synchronous provenance independently of the current thread. */
+	io->context.flags = IO_CONTEXT_THROUGH;
+	io->context.origin_inode = io->content_inode;
+	if (writing && (internal_flags & (FILE_IO_VM_OBJECT | FILE_IO_DRAIN)) != 0)
+		io->context.flags |= IO_CONTEXT_DRAIN;
+	if ((internal_flags & FILE_IO_ORDERED) != 0)
+		io->context.flags |= IO_CONTEXT_ORDERED | IO_CONTEXT_DRAIN;
+	if (io->content_inode != NULL) {
+		context_irq = spin_lock_irqsave(&io->content_inode->i_vm_lock);
+		io->context.content_generation = io->content_inode->i_vm_content_generation;
+		spin_unlock_irqrestore(&io->content_inode->i_vm_lock, context_irq);
 	}
 	io->credential = credential;
 	io->kind = kind;
 	io->offset = offset;
 	io->internal_flags = internal_flags;
+	io->synchronous = writing && internal_flags == 0 &&
+	    (flags & (O_SYNC | O_DSYNC)) != 0 && file->f_inode != NULL &&
+	    (file->f_inode->i_type == INODE_REG || file->f_inode->i_type == INODE_BLOCK);
 	io->append_requested = 0;
 	if (!positional && writing && (flags & O_APPEND) != 0)
 		io->append_requested = 1;
+
+	/* Captures a stream witness before acquiring any inode/content lease. */
+	if (internal_flags == 0 && io->content_inode != NULL &&
+	    file->f_backing_claim == NULL && file->f_format_claim == NULL &&
+	    readahead_demand_begin != NULL && readahead_demand_end != NULL) {
+		if (mutex_trylock(&file->f_lock)) {
+			if (writing)
+				file_readahead_reset_owned(file);
+			io->readahead_generation = file->f_readahead.generation;
+			io->readahead_observer = 1;
+			mutex_unlock(&file->f_lock);
+		}
+		if (readahead_demand_begin() == 0)
+			io->readahead_demand = 1;
+	}
+
+	/* Prepares optional cache ownership before position and inode locks. */
+	if (!writing && internal_flags == 0 && io->content_inode != NULL &&
+	    vm_object_cache_prepare != NULL)
+		vm_object_cache_prepare(file);
+
+	/* Reserves delayed ownership before all position and content leases. */
+	file_io_writeback_prepare(io, flags);
 
 	/*
 	 * Only regular files and block devices use the generic shared
@@ -758,13 +932,18 @@ file_io_begin_cred(
 		io->held_position = 1;
 	}
 
+	/* Pins cached reads before any speculative backend can serialize them. */
+	file_io_cache_read_prepare(io);
+
 	/* A regular file takes its I/O lock and, for a stacked write, the content inode's. */
 	if (file->f_inode != NULL && file->f_inode->i_type == INODE_REG &&
-	    (internal_flags & FILE_IO_INODE_IO_OWNED) == 0) {
+	    (internal_flags & FILE_IO_INODE_IO_OWNED) == 0 &&
+	    io->read_object == NULL) {
 		error = file_regular_io_lock(file->f_inode, internal_flags);
 		if (error != 0) {
 			if (io->held_position)
 				mutex_unlock(&file->f_lock);
+			file_io_resources_release(io);
 			memset(io, 0, sizeof(*io));
 			return error;
 		}
@@ -778,6 +957,7 @@ file_io_begin_cred(
 				mutex_unlock(&file->f_inode->i_io_lock);
 				if (io->held_position)
 					mutex_unlock(&file->f_lock);
+				file_io_resources_release(io);
 				memset(io, 0, sizeof(*io));
 				return error;
 			}
@@ -798,6 +978,7 @@ file_io_begin_cred(
 						vm_object_content_read_end(file->f_inode);
 					if (io->held_position)
 						mutex_unlock(&file->f_lock);
+					file_io_resources_release(io);
 					memset(io, 0, sizeof(*io));
 					return error;
 				}
@@ -825,6 +1006,7 @@ file_io_begin_cred(
 				mutex_unlock(&file->f_inode->i_io_lock);
 			if (io->held_position)
 				mutex_unlock(&file->f_lock);
+			file_io_resources_release(io);
 			memset(io, 0, sizeof(*io));
 			return error;
 		}
@@ -839,6 +1021,7 @@ file_io_begin_cred(
 		if (io->append_requested && io->content_inode != NULL)
 			io->offset = io->content_inode->i_size;
 	}
+	io->readahead_start = io->offset;
 	return 0;
 }
 
@@ -912,8 +1095,10 @@ file_io_transfer(
 	uint64_t limit_existing;
 	uint64_t current_existing;
 	size_t requested_length;
+	size_t useful;
 	int resize_error;
 	int content_error;
+	int delayed_eligible;
 	ssize_t result;
 	ssize_t cached;
 	int cache_published;
@@ -930,6 +1115,8 @@ file_io_transfer(
 	if (io == NULL || io->file == NULL || (buffer == NULL && length != 0))
 		return -EINVAL;
 	file = io->file;
+	io_stats_record(file_io_is_write(io->kind) ? IO_FILE_WRITE : IO_FILE_READ,
+	    length);
 	memset(&resize, 0, sizeof(resize));
 	memset(&content, 0, sizeof(content));
 
@@ -953,14 +1140,15 @@ file_io_transfer(
 	}
 
 	/*
-	 * A published MAP_SHARED object is the read source of truth.  Once
+	 * A published shared cache is the read source of truth.  Once
 	 * selected, its inode read lease stays in struct file_io until
-	 * file_io_end(), covering every syscall copy/iovec chunk.  Faulting
-	 * a cache miss performs internal backend I/O, so the outer i_io
-	 * mutex is dropped only while the lease keeps normal writers and EOF
-	 * changes excluded.
+	 * file_io_end(), covering every syscall copy/iovec chunk.  Pinned
+	 * reads reach resident pages without the backend inode mutex.  The
+	 * fallback drops that mutex while the shared lease excludes writers
+	 * and EOF changes; actual cache misses retain internal backend locking.
 	 */
-	if (length != 0 && !file_io_is_write(io->kind) && io->held_inode_io &&
+	if (length != 0 && !file_io_is_write(io->kind) &&
+	    (io->held_inode_io || io->read_object != NULL) &&
 	    (io->internal_flags & FILE_IO_VM_OBJECT) == 0 &&
 	    vm_object_read_coherent != NULL &&
 	    vm_object_content_read_begin != NULL &&
@@ -1006,12 +1194,27 @@ read_cache_retry:
 		}
 		if (!io->coherent_read)
 			goto backend_transfer;
-		mutex_unlock(&file->f_inode->i_io_lock);
-		io->held_inode_io = 0;
-		content_error = vm_object_read_coherent(io->content_inode, io->offset,
-		    buffer, length, &cached);
-		mutex_lock(&file->f_inode->i_io_lock);
-		io->held_inode_io = 1;
+		if (io->held_inode_io) {
+			mutex_unlock(&file->f_inode->i_io_lock);
+			io->held_inode_io = 0;
+		}
+		useful = 0;
+		if (vm_object_read_coherent_useful != NULL) {
+			content_error = vm_object_read_coherent_useful(io->content_inode,
+			    io->offset, buffer, length, &cached, &useful);
+		} else {
+			content_error = vm_object_read_coherent(io->content_inode, io->offset,
+			    buffer, length, &cached);
+		}
+		io->readahead_useful += useful;
+		if (io->read_object == NULL) {
+			mutex_lock(&file->f_inode->i_io_lock);
+			io->held_inode_io = 1;
+		}
+
+		/* Never enter an unprotected backend if a pinned identity is lost. */
+		if (content_error == ENOENT && io->read_object != NULL)
+			return -EIO;
 		if (content_error == ENOENT) {
 			/*
 			 * Final-mapping teardown flushed the old cache before
@@ -1184,8 +1387,25 @@ resize_retry:
 				vm_object_resize_abort(&resize);
 			goto transaction_retry;
 		}
+		/* Proves allocation after publishing the final content gate. */
+		delayed_eligible = 0;
+		if (io->writeback_object != NULL && !resize.active &&
+		    file->f_inode->i_mount->m_type->writeback_range != NULL) {
+			delayed_eligible = file->f_inode->i_mount->m_type->writeback_range(
+			    file, io->offset, length);
+			if (delayed_eligible < 0) {
+				vm_object_content_abort(&content);
+				return delayed_eligible;
+			}
+		}
 		file_io_regular_locks_drop(io);
-		content_error = vm_object_content_prepare(&content);
+		content_error = EAGAIN;
+		if (delayed_eligible > 0) {
+			content_error = vm_object_content_prepare_delayed(&content,
+			    io->writeback_object, &io->writeback_ticket);
+		}
+		if (content_error == EAGAIN)
+			content_error = vm_object_content_prepare(&content);
 		if (file_io_regular_locks_reacquire(io) != 0) {
 			vm_object_content_abort(&content);
 			if (resize.active)
@@ -1233,69 +1453,78 @@ resize_retry:
 		io->setid_prepared = 1;
 	}
 
-	/* Runs the backend operation. */
-	switch (io->kind) {
-	case FILE_IO_READ:
-		if (io->held_position)
-			file->f_offset = io->offset;
-		result = file->f_ops->read(file, buffer, length);
-		if (result > 0 && io->held_position)
-			io->offset = file->f_offset;
-		break;
-	case FILE_IO_WRITE:
-		forward_flags = io->internal_flags;
-		if (io->held_content_inode_io ||
-		    (io->internal_flags & FILE_IO_INODE_IO_OWNED) != 0)
-			forward_flags |= FILE_IO_VM_OBJECT | FILE_IO_INODE_IO_OWNED;
+	/* Records logical mutation before any backend or leaf write is accepted. */
+	if (length != 0 && file_io_is_write(io->kind) &&
+	    file->f_inode != NULL && file->f_inode->i_mount != NULL)
+		io_epoch_begin(&file->f_inode->i_mount->m_write_epoch);
 
-		/*
-		 * A stacking backend must receive the originating credential
-		 * and content-change marker.  The outer file_io owns
-		 * f_offset/O_APPEND, so its positional internal callback is
-		 * also the canonical forwarding path for ordinary
-		 * write/writev.
-		 */
-		if ((io->credential != NULL || forward_flags != 0) &&
-		    file->f_ops->pwrite_internal != NULL) {
-			result = file->f_ops->pwrite_internal(file, buffer, length,
-			    io->offset, forward_flags, io->credential);
-			if (result > 0)
-				io->offset += result;
-		} else {
+	/* Accepts prepared delayed bytes into the same coherent content transaction. */
+	if (content.writeback_ticket != NULL) {
+		result = (ssize_t)length;
+		io->offset += result;
+	} else {
+		/* Runs the backend operation. */
+		switch (io->kind) {
+		case FILE_IO_READ:
 			if (io->held_position)
 				file->f_offset = io->offset;
-			result = file->f_ops->write(file, buffer, length);
+			result = file->f_ops->read(file, buffer, length);
 			if (result > 0 && io->held_position)
 				io->offset = file->f_offset;
+			break;
+		case FILE_IO_WRITE:
+			forward_flags = io->internal_flags;
+			if (io->held_content_inode_io ||
+			    (io->internal_flags & FILE_IO_INODE_IO_OWNED) != 0)
+				forward_flags |= FILE_IO_VM_OBJECT | FILE_IO_INODE_IO_OWNED;
+
+			/*
+			 * A stacking backend must receive the originating credential
+			 * and content-change marker.  The outer file_io owns
+			 * f_offset/O_APPEND, so its positional internal callback is
+			 * also the canonical forwarding path for ordinary
+			 * write/writev.
+			 */
+			if (file->f_ops->pwrite_internal != NULL) {
+				result = file->f_ops->pwrite_internal(file, buffer, length,
+				    io->offset, forward_flags, io->credential, &io->context);
+				if (result > 0)
+					io->offset += result;
+			} else {
+				if (io->held_position)
+					file->f_offset = io->offset;
+				result = file->f_ops->write(file, buffer, length);
+				if (result > 0 && io->held_position)
+					io->offset = file->f_offset;
+			}
+			break;
+		case FILE_IO_PREAD:
+			if (io->internal_flags != 0 &&
+			    file->f_ops->pread_internal != NULL)
+				result = file->f_ops->pread_internal(file, buffer, length,
+				    io->offset, io->internal_flags);
+			else
+				result = file->f_ops->pread(file, buffer, length, io->offset);
+			if (result > 0)
+				io->offset += result;
+			break;
+		case FILE_IO_PWRITE:
+			forward_flags = io->internal_flags;
+			if (io->held_content_inode_io ||
+			    (io->internal_flags & FILE_IO_INODE_IO_OWNED) != 0)
+				forward_flags |= FILE_IO_VM_OBJECT | FILE_IO_INODE_IO_OWNED;
+			if (file->f_ops->pwrite_internal != NULL)
+				result = file->f_ops->pwrite_internal(file, buffer, length,
+				    io->offset, forward_flags, io->credential, &io->context);
+			else
+				result = file->f_ops->pwrite(file, buffer, length, io->offset);
+			if (result > 0)
+				io->offset += result;
+			break;
+		default:
+			result = -EINVAL;
+			break;
 		}
-		break;
-	case FILE_IO_PREAD:
-		if (io->internal_flags != 0 &&
-		    file->f_ops->pread_internal != NULL)
-			result = file->f_ops->pread_internal(file, buffer, length,
-			    io->offset, io->internal_flags);
-		else
-			result = file->f_ops->pread(file, buffer, length, io->offset);
-		if (result > 0)
-			io->offset += result;
-		break;
-	case FILE_IO_PWRITE:
-		forward_flags = io->internal_flags;
-		if (io->held_content_inode_io ||
-		    (io->internal_flags & FILE_IO_INODE_IO_OWNED) != 0)
-			forward_flags |= FILE_IO_VM_OBJECT | FILE_IO_INODE_IO_OWNED;
-		if ((forward_flags != 0 || io->credential != NULL) &&
-		    file->f_ops->pwrite_internal != NULL)
-			result = file->f_ops->pwrite_internal(file, buffer, length,
-			    io->offset, forward_flags, io->credential);
-		else
-			result = file->f_ops->pwrite(file, buffer, length, io->offset);
-		if (result > 0)
-			io->offset += result;
-		break;
-	default:
-		result = -EINVAL;
-		break;
 	}
 
 	/* Commits or aborts the published content and resize. */
@@ -1316,8 +1545,60 @@ resize_retry:
 			vm_object_resize_abort(&resize);
 		}
 	}
+	if (length != 0 && file_io_is_write(io->kind) &&
+	    file->f_inode != NULL && file->f_inode->i_mount != NULL)
+		io_epoch_end(&file->f_inode->i_mount->m_write_epoch);
 	if (result > 0)
 		io->transferred = 1;
+	return result;
+}
+
+/*
+ * Completes one public transfer and reports its synchronous durability boundary.
+ */
+ssize_t
+file_io_complete(
+	struct file_io *io,
+	ssize_t result)
+{
+	struct file *file;
+	struct inode *inode;
+	off_t start;
+	off_t eof;
+	uint64_t generation;
+	uint64_t useful;
+	unsigned observe;
+	unsigned synchronize;
+	int error;
+
+	/* Samples authoritative EOF while the coherent read still owns its content lease. */
+	if (io == NULL || io->file == NULL)
+		return result;
+	file = io->file;
+	inode = io->content_inode;
+	start = io->readahead_start;
+	generation = io->readahead_generation;
+	useful = io->readahead_useful;
+	observe = io->readahead_demand && io->readahead_observer &&
+	    !file_io_is_write(io->kind) &&
+	    (io->held_content_read || result <= 0) && inode != NULL;
+	eof = observe && io->held_content_read ? inode->i_size : 0;
+	synchronize = io->synchronous && io->transferred &&
+	    (io->context.flags & (IO_CONTEXT_DRAIN | IO_CONTEXT_ORDERED)) == 0;
+	file_io_end(io);
+
+	/* Admits optional work only after all demand leases and priority ownership leave. */
+	if (observe)
+		file_readahead_completed(file, inode, start, result, eof, generation, useful);
+
+	/* Uses full fsync for both flags; O_DSYNC permits this stronger guarantee. */
+	if (synchronize) {
+		error = file_fsync(file);
+		if (error != 0 && result >= 0)
+			return -error;
+	}
+
+	/* Preserves a prior transfer error while recording any later flush failure. */
 	return result;
 }
 
@@ -1370,6 +1651,7 @@ file_io_end(
 	if (io->held_position)
 		mutex_unlock(&file->f_lock);
 	backing_mutation_end(&io->backing_guard);
+	file_io_resources_release(io);
 	memset(io, 0, sizeof(*io));
 }
 
@@ -1468,16 +1750,47 @@ file_pwrite_internal_cred(
 	unsigned internal_flags,
 	const struct ucred *credential)
 {
+	ssize_t result;
+
+	result = file_pwrite_context(file, buffer, length, offset,
+	    internal_flags, credential, NULL);
+	return result;
+}
+
+/*
+ * Writes through a synchronous child operation with explicit inherited provenance.
+ */
+ssize_t
+file_pwrite_context(
+	struct file *file,
+	const void *buffer,
+	size_t length,
+	off_t offset,
+	unsigned internal_flags,
+	const struct ucred *credential,
+	const struct io_context *context)
+{
 	struct file_io io;
+	struct io_context inherited;
 	ssize_t result;
 	int error;
 
+	/* Validates inherited context before taking any file or content lease. */
+	error = io_context_child(&inherited, context, 0);
+	if (error != 0)
+		return -error;
 	error = file_io_begin_cred(file, FILE_IO_PWRITE, offset,
 	    internal_flags, credential, &io);
 	if (error != 0)
 		return -error;
+	if (context != NULL) {
+		inherited.flags |= io.context.flags;
+		io.context = inherited;
+	}
+	if ((internal_flags & FILE_IO_LOOP_BACKING) != 0)
+		io.context.claim = file->f_backing_claim;
 	result = file_io_transfer(&io, (void *)buffer, length);
-	file_io_end(&io);
+	result = file_io_complete(&io, result);
 	return result;
 }
 
@@ -1616,6 +1929,8 @@ file_seek(
 			file->f_mount_cursor = 0;
 		base = target;
 	}
+	if (base >= 0)
+		file_readahead_reset_owned(file);
 	mutex_unlock(&file->f_lock);
 	return base;
 }
@@ -1627,25 +1942,89 @@ int
 file_fsync(
 	struct file *file)
 {
+	struct inode *inode;
+	struct io_error_snapshot snapshot;
 	int error;
+	int observed;
 
+	/* Serializes one open-description drain and its error acknowledgement. */
 	if (file == NULL)
 		return EINVAL;
 	mutex_lock(&file->f_lock);
-	if (file->f_ops != NULL && file->f_ops->fsync != NULL) {
-		error = file->f_ops->fsync(file);
-	} else if (file->f_inode != NULL &&
-	    file->f_inode->i_type == INODE_DIR) {
-		/* Directory durability is an explicit filesystem capability. */
-		error = EOPNOTSUPP;
-	} else {
-		if (file->f_inode != NULL)
-			error = inode_sync(file->f_inode);
-		else
-			error = 0;
+	inode = file_vm_inode(file);
+	error = 0;
+	if (inode != NULL && vm_object_sync_inode != NULL)
+		error = vm_object_sync_inode(inode);
+
+	/* Preserves the current drain failure even after an earlier notification. */
+	if (error == 0)
+		error = file_fsync_backend_locked(file);
+
+	/* Records storage failures without converting unsupported operations to history. */
+	if (inode != NULL && error != 0 && error != EINVAL && error != EBADF &&
+	    error != EOPNOTSUPP && io_error_record != NULL) {
+		io_error_record(&inode->i_write_error, error);
+		if (inode->i_mount != NULL)
+			io_error_record(&inode->i_mount->m_write_error, error);
+	}
+
+	/* Acknowledges only the captured event actually represented by this result. */
+	if (inode != NULL && io_error_snapshot != NULL && io_error_observe != NULL) {
+		io_error_snapshot(&inode->i_write_error, &snapshot);
+		if (error == 0 || error == snapshot.error) {
+			observed = io_error_observe(&snapshot, &file->f_write_error_cursor);
+			if (error == 0)
+				error = observed;
+		}
+	}
+	/* A shared metadata checkpoint failure must reach every independent opener. */
+	if (inode != NULL && inode->i_mount != NULL &&
+	    io_error_snapshot != NULL && io_error_observe != NULL) {
+		io_error_snapshot(&inode->i_mount->m_metadata_error, &snapshot);
+		if (error == 0 || error == snapshot.error) {
+			observed = io_error_observe(&snapshot, &file->f_metadata_error_cursor);
+			if (error == 0)
+				error = observed;
+		}
 	}
 	mutex_unlock(&file->f_lock);
 	return error;
+}
+
+/*
+ * Drains a stacked backend after its caller already owns shared-page writeback.
+ *
+ * This does not start another VM drain or consume a user description's error
+ * cursor. The upper operation records and reports any resulting storage error.
+ */
+int
+file_fsync_backend(
+	struct file *file)
+{
+	int error;
+
+	/* Serializes the backend description without re-entering inode VM ownership. */
+	if (file == NULL)
+		return EINVAL;
+	mutex_lock(&file->f_lock);
+	error = file_fsync_backend_locked(file);
+	mutex_unlock(&file->f_lock);
+	return error;
+}
+
+/*
+ * Invalidates speculative work when a descriptor owner drops an open description.
+ */
+void
+file_readahead_invalidate(
+	struct file *file)
+{
+	/* Serializes close against pending observations and optional admission. */
+	if (file == NULL)
+		return;
+	mutex_lock(&file->f_lock);
+	file_readahead_reset_owned(file);
+	mutex_unlock(&file->f_lock);
 }
 
 /*
@@ -1665,6 +2044,9 @@ file_close(
 		return EBADF;
 	if (!refcount_put(&file->f_refs))
 		return 0;
+
+	/* The last reference owns the description exclusively, including its stream state. */
+	file_readahead_reset_owned(file);
 
 	/* Releases the record locks, the backend state, and the path. */
 	record_lock_release_file(file);
@@ -1957,7 +2339,7 @@ file_io_once(
 	if (error != 0)
 		return -error;
 	result = file_io_transfer(&io, buffer, length);
-	file_io_end(&io);
+	result = file_io_complete(&io, result);
 	return result;
 }
 
@@ -2165,4 +2547,187 @@ file_format_reserve_locked(
 	file->f_format_size = size;
 	file->f_format_claim = claim;
 	return 0;
+}
+
+/* Drains only backend/open-file state while the description lock is held. */
+static int
+file_fsync_backend_locked(
+	struct file *file)
+{
+	int error;
+
+	/* Preserves explicit directory durability capability and backend behavior. */
+	if (file->f_ops != NULL && file->f_ops->fsync != NULL)
+		error = file->f_ops->fsync(file);
+	else if (file->f_inode != NULL && file->f_inode->i_type == INODE_DIR)
+		error = EOPNOTSUPP;
+	else if (file->f_inode != NULL)
+		error = inode_sync(file->f_inode);
+	else
+		error = 0;
+	return error;
+}
+
+/* Prepares optional delayed ownership only for an ordinary direct-content write. */
+static void
+file_io_writeback_prepare(
+	struct file_io *io,
+	int flags)
+{
+	struct file *file;
+	int error;
+
+	/* Requires complete modules and excludes every mandatory-through operation. */
+	file = io->file;
+	if (!file_io_is_write(io->kind) || io->internal_flags != 0 ||
+	    io->content_inode == NULL || io->content_inode != file->f_inode ||
+	    (flags & (O_APPEND | O_SYNC | O_DSYNC)) != 0 ||
+	    file->f_format_claim != NULL || file->f_backing_claim != NULL ||
+	    writeback_mount_admit == NULL || writeback_ticket_release == NULL ||
+	    vm_object_writeback_prepare == NULL || vm_object_writeback_release == NULL ||
+	    vm_object_content_prepare_delayed == NULL)
+		return;
+	error = writeback_mount_admit(file->f_inode->i_mount, &io->writeback_ticket);
+	if (error != 0)
+		return;
+	error = vm_object_writeback_prepare(file, &io->writeback_object);
+	if (error != 0)
+		writeback_ticket_release(&io->writeback_ticket);
+}
+
+/* Selects an existing cache while shared leases exclude content replacement. */
+static void
+file_io_cache_read_prepare(
+	struct file_io *io)
+{
+	struct file *file;
+	int error;
+
+	/* Leaves internal and claimed backend operations on their serialized path. */
+	file = io->file;
+	if (file_io_is_write(io->kind) || io->internal_flags != 0 ||
+	    io->content_inode == NULL || file->f_backing_claim != NULL ||
+	    file->f_format_claim != NULL || vm_object_cache_pin == NULL ||
+	    vm_object_cache_unpin == NULL || vm_object_read_coherent == NULL ||
+	    vm_object_cache_published == NULL ||
+	    vm_object_content_read_begin == NULL || vm_object_content_read_end == NULL)
+		return;
+
+	/* Protects stacked identity before taking the final inode's shared lease. */
+	if (io->content_inode != file->f_inode) {
+		error = vm_object_content_read_begin(file->f_inode);
+		if (error != 0)
+			return;
+		io->held_visible_gate = 1;
+	}
+	error = vm_object_content_read_begin(io->content_inode);
+	if (error == 0) {
+		error = vm_object_cache_pin(io->content_inode, &io->read_object);
+		if (error == 0) {
+			io->held_content_read = 1;
+			io->coherent_read = 1;
+			return;
+		}
+		vm_object_content_read_end(io->content_inode);
+	}
+
+	/* Releases our gates before falling back to any blocking inode acquisition. */
+	if (io->held_visible_gate) {
+		vm_object_content_read_end(file->f_inode);
+		io->held_visible_gate = 0;
+	}
+}
+
+/* Returns optional ownership only after the caller has released every I/O lease. */
+static void
+file_io_resources_release(
+	struct file_io *io)
+{
+	/* Drops the read identity only after the outer transaction releases its locks. */
+	if (io->read_object != NULL) {
+		vm_object_cache_unpin(io->read_object);
+		io->read_object = NULL;
+	}
+
+	/* Ends VM ownership while the live ticket still protects its physical budget. */
+	if (io->writeback_object != NULL) {
+		vm_object_writeback_release(io->writeback_object);
+		io->writeback_object = NULL;
+	}
+	if (io->writeback_ticket.budget != NULL) {
+		if (writeback_pressure != NULL)
+			writeback_pressure(io->writeback_ticket.budget);
+		writeback_ticket_release(&io->writeback_ticket);
+	}
+
+	/* Balances priority on successful completion and every failed begin path. */
+	if (io->readahead_demand) {
+		readahead_demand_end();
+		io->readahead_demand = 0;
+	}
+}
+
+/* Resets under the description lock, or under exclusive final-reference ownership. */
+static void
+file_readahead_reset_owned(
+	struct file *file)
+{
+	/* Cancels identities before final pool reuse without waiting for running I/O. */
+	if (readahead_reset != NULL)
+		readahead_reset(&file->f_readahead);
+	if (readahead_cancel != NULL)
+		readahead_cancel(file);
+}
+
+/* Predicts after demand completion without allowing a prior seek/close to restart work. */
+static void
+file_readahead_completed(
+	struct file *file,
+	struct inode *inode,
+	off_t start,
+	ssize_t result,
+	off_t eof,
+	uint64_t generation,
+	uint64_t useful)
+{
+	struct readahead_request request;
+	struct cache_memory_stats memory;
+	uint64_t previous;
+	int pressure;
+	int error;
+
+	/* Keeps optional services absent from reduced kernels semantically harmless. */
+	if (readahead_observe == NULL || readahead_submit == NULL)
+		return;
+	pressure = 0;
+	if (cache_memory_get_stats != NULL) {
+		cache_memory_get_stats(&memory);
+		pressure = memory.resizing || memory.free_bytes <= memory.reserve_bytes ||
+		    memory.resident_bytes >= memory.target_bytes;
+	}
+
+	/* Skips contended optional state without waiting behind a newer transaction. */
+	if (!mutex_trylock(&file->f_lock))
+		return;
+
+	/* Rejects an observation invalidated after its transaction began. */
+	if (file->f_readahead.generation != generation) {
+		mutex_unlock(&file->f_lock);
+		return;
+	}
+	if (result <= 0 || start < 0 || eof < 0) {
+		file_readahead_reset_owned(file);
+		mutex_unlock(&file->f_lock);
+		return;
+	}
+	previous = file->f_readahead.generation;
+	error = readahead_observe(&file->f_readahead, (uint64_t)start,
+	    (size_t)result, (uint64_t)eof, useful, pressure, &request);
+	if (file->f_readahead.generation != previous && readahead_cancel != NULL)
+		readahead_cancel(file);
+	mutex_unlock(&file->f_lock);
+
+	/* Queue refusal never changes the already completed demand result. */
+	if (error == 0 && request.length != 0)
+		(void)readahead_submit(file, inode, &request);
 }

@@ -7,9 +7,8 @@ repo_dir=$(CDPATH= cd -- "$test_dir/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-fs-identity.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
-ufs1_dir=$repo_dir/src/drivers/fs/ufs1
-ufs2_dir=$repo_dir/src/drivers/fs/ufs2
-common_flags="-std=c11 -DZEDBSD_USER_ABI_LP64 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -I$repo_dir/include -I$repo_dir/include/uapi -I$repo_dir/src -I$repo_dir/libc/include -I$repo_dir -I$ufs1_dir -I$ufs2_dir"
+ufs_dir=$repo_dir/src/drivers/fs/ufs
+common_flags="-std=c11 -DZEDBSD_USER_ABI_LP64 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -I$repo_dir/include -I$repo_dir/include/uapi -I$repo_dir/src -I$repo_dir/libc/include -I$repo_dir -I$ufs_dir"
 
 compile()
 {
@@ -19,17 +18,15 @@ compile()
 	"${CC:-cc}" $common_flags -c "$repo_dir/$source" -o "$temporary/$object"
 }
 
+compile src/kern/io-stats.c io-stats.o
 compile src/kern/mount.c mount.o
 compile src/kern/block-identity.c block-identity.o
 compile src/drivers/fs/fat.c fat.o
 compile src/kern/swap.c swap.o
 compile src/kern/swap-format.c swap-format.o
-compile src/drivers/fs/ufs1/ufs1-endian.c ufs1-endian.o
-compile src/drivers/fs/ufs1/ufs1-super.c ufs1-super.o
-compile src/drivers/fs/ufs1/ufs1-vfs.c ufs1-vfs.o
-compile src/drivers/fs/ufs2/ufs2-endian.c ufs2-endian.o
-compile src/drivers/fs/ufs2/ufs2-super.c ufs2-super.o
-compile src/drivers/fs/ufs2/ufs2-vfs.c ufs2-vfs.o
+compile src/drivers/fs/ufs/ufs-endian.c ufs-endian.o
+compile src/drivers/fs/ufs/ufs-super.c ufs-super.o
+compile src/drivers/fs/ufs/ufs-vfs.c ufs-vfs.o
 
 # shellcheck disable=SC2086
 "${CC:-cc}" $common_flags \

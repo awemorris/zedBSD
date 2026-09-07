@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate an architecture-specific zedBSD UFS1 root image."""
+"""Validate an architecture-specific zedBSD UFS root image."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import hashlib
 import struct
 from pathlib import Path
 
-from check_ufs1_import import load_checker
+from check_ufs_import import load_checker
 
 PROFILES={"i386":(1,3),"amd64":(2,62),"aarch64":(2,183)}
 
@@ -34,7 +34,7 @@ def large_directories(fs):
         raw = fs.inode(ino)
         if fs.u16(raw, 0) & 0o170000 != 0o040000:
             continue
-        size = fs.u64(raw, 8)
+        size = fs.u64(raw, 16)
         if size > fs.bsize:
             result.append((path, ino, size))
         for name, child, _ in fs.entries(ino):
@@ -45,7 +45,7 @@ def large_directories(fs):
 
 def check(args):
     checker=load_checker(); checker.check(args.image)
-    fs=checker.UFS1(args.image.read_bytes()); files=parse_files(args.file)
+    fs=checker.UFS(args.image.read_bytes()); files=parse_files(args.file)
     oversized = large_directories(fs)
     for path, ino, size in oversized:
         print(f'{args.image}: directory update limit: {path} inode={ino} '
@@ -56,7 +56,7 @@ def check(args):
     if fs.read_file(fs.lookup('/lib/arch.id'))!=(args.profile+'\n').encode():
         raise SystemExit('wrong /lib/arch.id')
     if fs.read_file(fs.lookup('/etc/zedbsd-root')) != \
-            b'zedBSD ufs1 root v1\n':
+            b'zedBSD ufs root v1\n':
         raise SystemExit('wrong /etc/zedbsd-root marker')
     expected_class,expected_machine=PROFILES[args.profile]
     shell_ino=fs.lookup('/bin/sh')
@@ -76,7 +76,7 @@ def check(args):
         actual = fs.u16(fs.inode(fs.lookup(destination)), 0) & 0o7777
         if actual != int(mode_text, 8):
             raise SystemExit(f'mode mismatch: {destination}')
-    print(f'{args.image}: {args.profile} UFS1 root OK')
+    print(f'{args.image}: {args.profile} UFS root OK')
 
 
 def main():

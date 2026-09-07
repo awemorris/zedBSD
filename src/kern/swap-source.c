@@ -39,6 +39,8 @@
 #include <sys/stat.h>
 #include <string.h>
 
+extern unsigned vm_object_cache_drain(struct mount *) __attribute__((weak));
+
 #define FAT_SWAP_EXTENT_MAX 1024U
 
 extern int disk_write_direct_claimed(struct disk *, uint64_t, uint32_t,
@@ -208,6 +210,9 @@ kern_swap_source_prepare_file(
 	if (error != 0)
 		goto out;
 	data->disk_opened = 1;
+	/* Retires optional caches before reserving independent backing ownership. */
+	if (vm_object_cache_drain != NULL)
+		(void)vm_object_cache_drain(NULL);
 	error = backing_claim_prepare_inode(file->f_inode, BACKING_CLAIM_SWAP,
 	    &data->claim);
 	if (error != 0)

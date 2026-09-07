@@ -11,6 +11,7 @@
 #include "kern/fat.h"
 #include "kern/block-identity.h"
 #include "kern/kmem.h"
+#include <kern/io-stats.h>
 #include "kern/namecache.h"
 #include "kern/namei.h"
 
@@ -30,6 +31,7 @@
 #define FAT_INODE_ORPHANED 0x01U
 #define FAT_EPOCH_1980 315532800L
 #define FAT_METADATA_MAX 32U
+#define FAT_CLEAN_SLOTS 4U
 #define FAT_LFN_MAX_UNITS 255U
 #define FAT_LFN_MAX_ENTRIES ((FAT_LFN_MAX_UNITS + 12U) / 13U)
 
@@ -53,7 +55,22 @@ struct fat_metadata_table {
 	unsigned count;
 };
 
+/* Retains only clean copies; the original active buffer owns all mutation. */
+struct fat_clean_sector {
+	uint8_t bytes[512];
+	uint32_t lba;
+	unsigned valid;
+};
+
+struct fat_chain_cursor {
+	uint32_t index;
+	uint32_t cluster;
+};
+
 struct fat_mount_state {
+	/* Borrowed only while lock serializes the synchronous operation. */
+	const struct io_context *write_context;
+	struct mount *owner;
 	struct disk *disk;
 	struct mutex lock;
 	struct fat_metadata_table *metadata;
@@ -76,6 +93,9 @@ struct fat_mount_state {
 	uint8_t type;
 	uint8_t fat16_layout;
 	uint8_t fat32_layout;
+	struct fat_clean_sector clean_sectors[FAT_CLEAN_SLOTS];
+	unsigned clean_rotor;
+	uint64_t chain_generation;
 	uint8_t sector_cache[512];
 	uint32_t sector_cache_lba;
 	uint8_t sector_cache_valid;
@@ -94,6 +114,12 @@ struct fat_file_state {
 	uint32_t first_cluster;
 	uint32_t directory_lba;
 	uint16_t directory_offset;
+	struct fat_chain_cursor chain_cursor;
+	uint64_t cursor_generation;
+	uint64_t cursor_offset;
+	uint32_t cursor_first;
+	uint32_t cursor_last;
+	unsigned cursor_valid;
 	uint8_t directory_dirty;
 	uint8_t pending_close;
 	uint8_t used;
@@ -107,6 +133,24 @@ struct fat_inode_info {
 	uint8_t fi_attributes;
 	uint8_t fi_flags;
 };
+
+static void fat_chain_invalidate(struct fat_mount_state *state);
+static int fat_raw_get_cluster_copy(struct fat_mount_state *filesystem, uint32_t cluster, unsigned copy, uint32_t *value);
+static int fat_raw_extend_cluster(struct fat_mount_state *filesystem, uint32_t tail, uint32_t *added);
+static int fat_raw_allocate_run(struct fat_mount_state *filesystem, uint32_t tail, uint32_t wanted, uint32_t *first);
+static int fat_writeback_range(struct file *file, off_t offset, size_t length);
+static int fat_file_validate_at(struct fat_file_state *file, uint64_t offset, struct fat_chain_cursor *cursor, uint32_t *last);
+static void fat_file_save_cursor(struct fat_file_state *file, const struct fat_chain_cursor *cursor, uint64_t end, uint64_t generation, uint32_t last);
+
+/* Retires all shared chain proofs before a mutation or external invalidation. */
+static void
+fat_chain_invalidate(
+	struct fat_mount_state *state)
+{
+	if (state->chain_generation != UINT64_MAX)
+		state->chain_generation++;
+	io_stats_record(IO_FAT_CHAIN_INVALIDATE, 0);
+}
 
 static struct fat_inode_info *
 fat_inode(struct inode *inode)
@@ -159,11 +203,17 @@ static int
 fat_sector_write(struct fat_mount_state *state, uint32_t lba,
 		 const void *buffer)
 {
+	struct io_context context;
+	int error;
+
 	if (state == NULL || state->disk == NULL || buffer == NULL)
 		return EINVAL;
 	if (state->read_only)
 		return EROFS;
-	return disk_write_filesystem(state->disk, lba, 1, buffer);
+	error = io_context_child(&context, state->write_context, IO_CONTEXT_ORDERED);
+	if (error != 0)
+		return error;
+	return disk_write_filesystem_context(state->disk, lba, 1, buffer, &context);
 }
 
 static int fat_engine_flush(
@@ -177,8 +227,11 @@ static int fat_engine_flush(
 		return 0;
 	result = fat_sector_write(filesystem, filesystem->sector_cache_lba,
 				  filesystem->sector_cache);
-	if (result == 0)
+	if (result == 0) {
 		filesystem->sector_cache_dirty = 0;
+		if (filesystem->owner != NULL)
+			io_epoch_end(&filesystem->owner->m_write_epoch);
+	}
 	return result;
 }
 
@@ -186,38 +239,78 @@ static void fat_engine_invalidate(struct fat_mount_state *filesystem)
 {
 	if (!filesystem)
 		return;
+	if (filesystem->sector_cache_dirty && filesystem->owner != NULL)
+		io_epoch_end(&filesystem->owner->m_write_epoch);
 	filesystem->sector_cache_valid = 0;
 	filesystem->sector_cache_dirty = 0;
+	memset(filesystem->clean_sectors, 0, sizeof(filesystem->clean_sectors));
+	fat_chain_invalidate(filesystem);
 }
 
-static int fat_engine_read_sector_result(
-	struct fat_mount_state *filesystem, uint32_t lba,
+/* Switches the mutable window without retaining additional dirty owners. */
+static int
+fat_engine_read_sector_result(
+	struct fat_mount_state *filesystem,
+	uint32_t lba,
 	const uint8_t **sector)
 {
+	struct fat_clean_sector *slot;
+	uint8_t saved[512];
+	unsigned index, found;
 	int result;
 
-	if (!filesystem || !sector)
+	/* Validates the request and preserves the active mutable identity. */
+	if (filesystem == NULL || sector == NULL)
 		return EINVAL;
 	if (lba >= filesystem->total_sectors)
 		return EIO;
-	if (filesystem->sector_cache_valid &&
-	    filesystem->sector_cache_lba == lba) {
+	if (filesystem->sector_cache_valid && filesystem->sector_cache_lba == lba) {
+		io_stats_record(IO_FAT_SECTOR_HIT, 512);
 		*sector = filesystem->sector_cache;
 		return 0;
 	}
-	if (filesystem->sector_cache_dirty) {
-		result = fat_engine_flush(filesystem);
-		if (result != 0)
-			return result;
+
+	/* Completes the old mutable sector before retaining any clean copy. */
+	result = fat_engine_flush(filesystem);
+	if (result != 0)
+		return result;
+	found = 0;
+	for (index = 0; index < FAT_CLEAN_SLOTS; index++) {
+		slot = &filesystem->clean_sectors[index];
+		if (slot->valid && slot->lba == lba) {
+			memcpy(saved, slot->bytes, sizeof(saved));
+			slot->valid = 0;
+			found = 1;
+			break;
+		}
+	}
+
+	/* Retains the previous clean window within the fixed mount-owned budget. */
+	if (filesystem->sector_cache_valid) {
+		slot = &filesystem->clean_sectors[filesystem->clean_rotor];
+		filesystem->clean_rotor = (filesystem->clean_rotor + 1U) % FAT_CLEAN_SLOTS;
+		memcpy(slot->bytes, filesystem->sector_cache, sizeof(slot->bytes));
+		slot->lba = filesystem->sector_cache_lba;
+		slot->valid = 1;
 	}
 	filesystem->sector_cache_valid = 0;
 	filesystem->sector_cache_dirty = 0;
-	result = fat_sector_read(filesystem, lba, filesystem->sector_cache);
-	if (result != 0)
-		return result;
+
+	/* Copies a retained clean sector or performs the existing read on a miss. */
+	if (found) {
+		memcpy(filesystem->sector_cache, saved, sizeof(saved));
+		io_stats_record(IO_FAT_SECTOR_HIT, 512);
+	} else {
+		io_stats_record(IO_FAT_SECTOR_MISS, 512);
+		result = fat_sector_read(filesystem, lba, filesystem->sector_cache);
+		if (result != 0)
+			return result;
+	}
 	filesystem->sector_cache_lba = lba;
 	filesystem->sector_cache_valid = 1;
-	*sector = filesystem->sector_cache;
+ *sector = filesystem->sector_cache;
+
+	/* Publishes the sole mutable window. */
 	return 0;
 }
 
@@ -245,6 +338,8 @@ static int fat_engine_mark_sector_dirty(
 		return EROFS;
 	if (!filesystem->sector_cache_valid)
 		return EIO;
+	if (filesystem->owner != NULL && !filesystem->sector_cache_dirty)
+		io_epoch_begin(&filesystem->owner->m_write_epoch);
 	filesystem->sector_cache_dirty = 1;
 	return 0;
 }
@@ -451,13 +546,23 @@ static int fat_engine_read_chain(
 	uint32_t cluster = fat_file->first_cluster;
 	uint32_t position, skip, within, since_update = 0;
 	uint8_t *output = buffer;
+	struct fat_chain_cursor cursor = {0, 0};
+	uint32_t last;
+	uint64_t generation, end;
+	int validation;
 
 	if (offset > 0xffffffffU || !next_cluster)
 		return EINVAL;
 	if (!valid_cluster(cluster, end_of_chain))
 		return EIO;
+	generation = fat->chain_generation;
+	end = offset + length;
+	validation = fat_file_validate_at(file, offset, &cursor, &last);
+	if (validation != 0)
+		return validation;
+	cluster = cursor.cluster;
 	position = (uint32_t)offset;
-	skip = position / 512;
+	skip = position / 512 - cursor.index * fat->sectors_per_cluster;
 	within = position & 511;
 	while (skip >= fat->sectors_per_cluster) {
 		int result = next_cluster(filesystem, cluster,
@@ -468,6 +573,7 @@ static int fat_engine_read_chain(
 		if (!valid_cluster(cluster, end_of_chain))
 			return EIO;
 		skip -= fat->sectors_per_cluster;
+		cursor.index++;
 	}
 	while (length) {
 		uint32_t lba;
@@ -498,6 +604,7 @@ static int fat_engine_read_chain(
 			int result;
 
 			skip = 0;
+			cursor.index++;
 			result = next_cluster(filesystem, cluster, &cluster);
 			if (result != 0)
 				return result;
@@ -505,6 +612,8 @@ static int fat_engine_read_chain(
 				return EIO;
 		}
 	}
+	cursor.cluster = cluster;
+	fat_file_save_cursor(file, &cursor, end, generation, last);
 	return 0;
 }
 
@@ -1227,6 +1336,7 @@ static int fat_raw_next_cluster(
 	const uint8_t *sector;
 	int result;
 
+	io_stats_record(IO_FAT_CHAIN_STEP, 0);
 	if (!next_cluster || !fat_raw_valid_cluster(fat, cluster))
 		return EIO;
 	offset = fat_raw_entry_offset(fat, cluster);
@@ -1370,45 +1480,113 @@ fat_raw_set_cluster_copy(struct fat_mount_state *filesystem,
 	return result;
 }
 
+/* Capture a mirror's entry without assuming that every copy already agrees. */
 static int
-fat_raw_set_cluster(struct fat_mount_state *filesystem, uint32_t cluster,
+fat_raw_get_cluster_copy(struct fat_mount_state *filesystem, uint32_t cluster,
+    unsigned copy, uint32_t *value)
+{
+	const uint8_t *sector;
+	uint32_t offset;
+	uint32_t lba;
+	uint8_t low;
+	uint8_t high;
+	int error;
+
+	/* Read the selected copy through the ordinary coherent sector window. */
+	offset = fat_raw_entry_offset(filesystem, cluster);
+	if (copy > (UINT32_MAX - filesystem->fat_start) / filesystem->fat_sectors)
+		return EIO;
+	lba = filesystem->fat_start + copy * filesystem->fat_sectors;
+	if ((offset >> 9) > UINT32_MAX - lba)
+		return EIO;
+	lba += offset >> 9;
+	error = fat_engine_read_sector_result(filesystem, lba, &sector);
+	if (error != 0)
+		return error;
+
+	/* Decode aligned entries and retain each copy's reserved high bits on rewrite. */
+	if (filesystem->type == ZEDBSD_FAT32) {
+		*value = fat_engine_get32(sector + (offset & 511U)) & 0x0fffffffU;
+		return 0;
+	}
+	if (filesystem->type == ZEDBSD_FAT16) {
+		*value = fat_engine_get16(sector + (offset & 511U));
+		return 0;
+	}
+
+	/* Preserve the first packed byte before switching a sector-boundary window. */
+	low = sector[offset & 511U];
+	if ((offset & 511U) == 511U) {
+		if (lba == UINT32_MAX)
+			return EIO;
+		error = fat_engine_read_sector_result(filesystem, lba + 1U, &sector);
+		if (error != 0)
+			return error;
+		high = sector[0];
+	} else {
+		high = sector[(offset & 511U) + 1U];
+	}
+	*value = (uint32_t)low | ((uint32_t)high << 8);
+	*value = (cluster & 1U) ? *value >> 4 : *value & 0xfffU;
+	return 0;
+}
+
+/* Retain a bounded stack fallback with independent old values for every mirror. */
+static int
+fat_raw_set_cluster_immediate(struct fat_mount_state *filesystem, uint32_t cluster,
 	uint32_t value)
 {
-	struct fat_mount_state *fat = filesystem;
-	uint32_t old_value;
+	uint32_t old_values[256];
 	unsigned copy;
-	int result, rollback = 0;
+	int result;
+	int rollback;
+	int error;
 
-	if (!fat_raw_valid_cluster(fat, cluster))
+	/* Capture every old entry before changing any copy. */
+	if (!fat_raw_valid_cluster(filesystem, cluster))
 		return EIO;
-	result = fat_raw_next_cluster(filesystem, cluster, &old_value);
+	for (copy = 0; copy < filesystem->number_of_fats; copy++) {
+		result = fat_raw_get_cluster_copy(filesystem, cluster, copy, &old_values[copy]);
+		if (result != 0)
+			return result;
+	}
+	result = fat_engine_flush(filesystem);
+	if (result == 0)
+		result = disk_sync(filesystem->disk);
 	if (result != 0)
 		return result;
-	for (copy = 0; copy < fat->number_of_fats; copy++) {
-		result = fat_raw_set_cluster_copy(filesystem, cluster, value,
-			copy);
+	fat_chain_invalidate(filesystem);
+
+	/* Preserve initialization-before-link and confirm all mirror updates. */
+	for (copy = 0; copy < filesystem->number_of_fats; copy++) {
+		result = fat_raw_set_cluster_copy(filesystem, cluster, value, copy);
 		if (result != 0)
 			break;
 	}
 	if (result == 0)
+		result = disk_sync(filesystem->disk);
+	if (result == 0)
 		return 0;
 
-	/* The cache still contains an unflushed update after a failed write.
-	 * Restore every copy before returning so retry cannot publish half of a
-	 * mirrored FAT update as a side effect.  A healthy volume keeps all
-	 * copies equal, so the primary value is also the rollback value for its
-	 * mirrors. */
-	for (copy = 0; copy < fat->number_of_fats; copy++) {
-		int error = fat_raw_set_cluster_copy(filesystem, cluster,
-			old_value, copy);
-
+	/* Restore even the copy whose write or final flush reported failure. */
+	rollback = 0;
+	for (copy = 0; copy < filesystem->number_of_fats; copy++) {
+		error = fat_raw_set_cluster_copy(filesystem, cluster, old_values[copy], copy);
 		if (rollback == 0 && error != 0)
 			rollback = error;
 	}
+	error = disk_sync(filesystem->disk);
+	if (rollback == 0)
+		rollback = error;
 	if (rollback != 0)
 		filesystem->read_only = 1;
+	fat_engine_invalidate(filesystem);
+
+	/* Keep an uncertain mirror set unavailable for further writes. */
 	return rollback != 0 ? rollback : result;
 }
+
+#include "fat-batch.inc"
 
 static uint32_t fat_raw_dir_cluster(const struct fat_mount_state *fat,
 				  const uint8_t raw[32])
@@ -1433,11 +1611,7 @@ static uint32_t fat_raw_root_cluster(const struct fat_mount_state *fat)
 	return fat->type == ZEDBSD_FAT32 ? fat->root_cluster : 0;
 }
 
-/* Per-operation position only: never retained after releasing the mount lock. */
-struct fat_chain_cursor {
-	uint32_t index;
-	uint32_t cluster;
-};
+/* Validates the whole chain before publishing a reusable position. */
 
 static int
 fat_raw_validate_chain_at(struct fat_mount_state *filesystem,
@@ -1495,6 +1669,60 @@ fat_raw_validate_chain_at(struct fat_mount_state *filesystem,
 	return EIO;
 }
 
+/* Reuses only the next sequential position in an already validated chain. */
+static int
+fat_file_validate_at(
+	struct fat_file_state *file,
+	uint64_t offset,
+	struct fat_chain_cursor *cursor,
+	uint32_t *last)
+{
+	uint32_t wanted;
+	int error;
+
+	wanted = (uint32_t)(offset / ((uint64_t)file->mount->sectors_per_cluster * 512U));
+	if (file->cursor_valid && file->cursor_offset == offset &&
+	    file->cursor_generation == file->mount->chain_generation &&
+	    file->cursor_generation != UINT64_MAX &&
+	    file->cursor_first == file->first_cluster &&
+	    file->chain_cursor.index <= wanted &&
+	    fat_raw_valid_cluster(file->mount, file->chain_cursor.cluster)) {
+		*cursor = file->chain_cursor;
+		*last = file->cursor_last;
+		file->cursor_valid = 0;
+		io_stats_record(IO_FAT_CURSOR_HIT, 0);
+		return 0;
+	}
+
+	/* Consumes the old proof before fallible validation or subsequent I/O. */
+	file->cursor_valid = 0;
+	error = fat_raw_validate_chain_at(file->mount, file->first_cluster,
+	    wanted, cursor, last);
+	return error;
+}
+
+/* Publishes a successful operation only if its validated chain stayed unchanged. */
+static void
+fat_file_save_cursor(
+	struct fat_file_state *file,
+	const struct fat_chain_cursor *cursor,
+	uint64_t end,
+	uint64_t generation,
+	uint32_t last)
+{
+	file->cursor_valid = 0;
+	if (generation == UINT64_MAX || generation != file->mount->chain_generation ||
+	    cursor->cluster == 0)
+		return;
+	file->chain_cursor = *cursor;
+	file->cursor_generation = generation;
+	file->cursor_offset = end;
+	file->cursor_first = file->first_cluster;
+	file->cursor_last = last;
+	file->cursor_valid = 1;
+}
+
+
 static int
 fat_raw_validate_chain(struct fat_mount_state *filesystem,
 	uint32_t first_cluster)
@@ -1510,6 +1738,9 @@ static int fat_raw_free_chain(
 	uint32_t *clusters;
 	uint32_t cluster = first_cluster, count = 0, index;
 	int result;
+	int admitted;
+	unsigned batch, item;
+	struct fat_entry_change changes[FAT_BATCH_ENTRIES];
 
 	if (!first_cluster)
 		return 0;
@@ -1546,8 +1777,25 @@ static int fat_raw_free_chain(
 			goto out;
 		cluster = next;
 	}
-	for (index = 0; index < count; index++) {
-		result = fat_raw_set_cluster(filesystem, clusters[index], 0);
+	index = 0;
+	while (index < count) {
+		/* Stage a bounded free prefix while retaining the complete recovery chain. */
+		batch = count - index > FAT_BATCH_ENTRIES ? FAT_BATCH_ENTRIES : count - index;
+		for (item = 0; item < batch; item++) {
+			changes[item].cluster = clusters[index + item];
+			changes[item].value = 0;
+		}
+		result = fat_table_transaction(filesystem, changes, batch, &admitted);
+
+		/* Split before admission when scattered sectors exceed the image budget. */
+		while (!admitted && result == E2BIG && batch > 1) {
+			batch /= 2;
+			result = fat_table_transaction(filesystem, changes, batch, &admitted);
+		}
+		if (!admitted && (result == ENOMEM || result == E2BIG)) {
+			batch = 1;
+			result = fat_raw_set_cluster(filesystem, clusters[index], 0);
+		}
 		if (result != 0) {
 			uint32_t restore;
 			int rollback = 0;
@@ -1570,6 +1818,7 @@ static int fat_raw_free_chain(
 			}
 			goto out;
 		}
+		index += batch;
 	}
 	result = 0;
 out:
@@ -1681,6 +1930,147 @@ static int fat_raw_allocate_cluster(
 		return result;
 	return fat_raw_set_cluster(filesystem, *cluster,
 				 fat_raw_end_of_chain(filesystem));
+}
+
+/* Initialize a free cluster before staging its same-sector tail link. */
+static int
+fat_raw_extend_cluster(
+	struct fat_mount_state *filesystem,
+	uint32_t tail,
+	uint32_t *added)
+{
+	int error;
+
+	/* Keep the unallocated cluster private under the mount mutation lock. */
+	error = fat_raw_find_free_cluster(filesystem, added);
+	if (error != 0)
+		return error;
+	error = fat_raw_zero_cluster(filesystem, *added);
+	if (error != 0)
+		return error;
+	error = fat_link_initialized_cluster(filesystem, tail, *added);
+
+	/* Report the fully published link or its completed rollback. */
+	return error;
+}
+
+/* Prepare an initialized private chain before linking it into an existing file. */
+static int
+fat_raw_allocate_run(
+	struct fat_mount_state *filesystem,
+	uint32_t tail,
+	uint32_t wanted,
+	uint32_t *first)
+{
+	struct fat_entry_change changes[FAT_BATCH_ENTRIES];
+	uint32_t clusters[FAT_BATCH_ENTRIES];
+	uint32_t cluster;
+	uint32_t offset;
+	uint32_t sector;
+	uint32_t cluster_bytes;
+	uint32_t limit;
+	unsigned count;
+	unsigned n;
+	unsigned bytes;
+	unsigned entries;
+	int combined;
+	int admitted;
+	int error;
+	int rollback;
+
+	/* Bound initialization work and leave room for a same-sector old-tail link. */
+	*first = 0;
+	cluster_bytes = (uint32_t)filesystem->sectors_per_cluster * 512U;
+	limit = 65536U / cluster_bytes;
+	if (limit == 0)
+		limit = 1;
+	if (limit > FAT_BATCH_ENTRIES - (tail != 0))
+		limit = FAT_BATCH_ENTRIES - (tail != 0);
+	if (wanted < limit)
+		limit = wanted;
+	if (limit == 0)
+		return EINVAL;
+	bytes = filesystem->type == ZEDBSD_FAT32 ? 4U : 2U;
+	count = 0;
+	sector = 0;
+
+	/* Reserve identities under the mount lock without publishing FAT entries. */
+	while (count < limit) {
+		error = fat_raw_find_free_cluster(filesystem, &cluster);
+		if (error == ENOSPC && count != 0)
+			break;
+		if (error != 0)
+			return error;
+		for (n = 0; n < count; n++) {
+			if (clusters[n] == cluster)
+				break;
+		}
+		if (n != count)
+			break;
+		offset = fat_raw_entry_offset(filesystem, cluster);
+		if (count != 0 && (offset / 512U != sector ||
+		    (offset + bytes - 1U) / 512U != sector)) {
+			filesystem->allocation_hint = cluster;
+			break;
+		}
+		sector = offset / 512U;
+		error = fat_raw_zero_cluster(filesystem, cluster);
+		if (error != 0)
+			return error;
+		clusters[count++] = cluster;
+		if ((offset + bytes - 1U) / 512U != sector)
+			break;
+	}
+
+	/* Encode a complete private chain, with its final endpoint already initialized. */
+	for (n = 0; n < count; n++) {
+		changes[n].cluster = clusters[n];
+		changes[n].value = n + 1U < count ? clusters[n + 1U] : fat_raw_end_of_chain(filesystem);
+	}
+	entries = count;
+	combined = 0;
+	if (tail != 0) {
+		offset = fat_raw_entry_offset(filesystem, tail);
+		if (offset / 512U == sector && (offset + bytes - 1U) / 512U == sector &&
+		    (fat_raw_entry_offset(filesystem, clusters[0]) + bytes - 1U) / 512U == sector) {
+			changes[entries].cluster = tail;
+			changes[entries++].value = clusters[0];
+			combined = 1;
+		}
+	}
+	error = fat_table_transaction(filesystem, changes, entries, &admitted);
+
+	/* Preserve progress under workspace pressure without publishing unused candidates. */
+	if (!admitted && (error == ENOMEM || error == E2BIG)) {
+		if (tail != 0)
+			error = fat_link_initialized_cluster(filesystem, tail, clusters[0]);
+		else
+			error = fat_raw_set_cluster(filesystem, clusters[0], fat_raw_end_of_chain(filesystem));
+		if (error == 0)
+			*first = clusters[0];
+		return error;
+	}
+	if (error != 0)
+		return error;
+
+	/* Link across sectors only after the entire new chain is durably readable. */
+	if (tail != 0 && !combined) {
+		error = fat_raw_set_cluster(filesystem, tail, clusters[0]);
+		if (error != 0) {
+			if (filesystem->read_only)
+				return error;
+			rollback = fat_raw_free_chain(filesystem, clusters[0]);
+			if (rollback != 0) {
+				filesystem->read_only = 1;
+				return rollback;
+			}
+			return error;
+		}
+	}
+
+	/* Return only the published initialized chain head. */
+	*first = clusters[0];
+	return 0;
 }
 
 static int fat_raw_directory_entry(
@@ -1931,6 +2321,7 @@ static void
 fat_file_bind(struct fat_file_state *file, struct fat_mount_state *mount)
 {
 	file->mount = mount;
+	file->cursor_valid = 0;
 	file->size = 0;
 	file->first_cluster = 0;
 	file->directory_lba = 0;
@@ -2006,22 +2397,9 @@ fat_raw_advance_cluster(struct fat_file_state *file, uint32_t cluster,
 	if (fat_raw_is_end(file->mount, *next)) {
 		if (!allocate)
 			return EIO;
-		result = fat_raw_allocate_cluster(file->mount, next);
+		result = fat_raw_extend_cluster(file->mount, cluster, next);
 		if (result != 0)
 			return result;
-		result = fat_raw_set_cluster(file->mount, cluster, *next);
-		if (result != 0) {
-			int rollback;
-
-			/* The new cluster is not reachable until the tail link
-			 * succeeds.  Return it to the free pool on failure. */
-			rollback = fat_raw_set_cluster(file->mount, *next, 0);
-			if (rollback != 0) {
-				file->mount->read_only = 1;
-				return rollback;
-			}
-			return result;
-		}
 	} else if (!fat_raw_valid_cluster(file->mount, *next)) {
 		return EIO;
 	}
@@ -2080,10 +2458,20 @@ static int fat_raw_write_bytes(
 	uint32_t cluster_bytes = (uint32_t)fat->sectors_per_cluster * 512U;
 	uint32_t position = offset;
 	uint32_t cluster;
+	uint32_t wanted;
 	int result;
 
 	if (length == 0U)
 		return 0;
+	/* Populate an empty file with one bounded initialized chain. */
+	if (file->first_cluster == 0 && position == 0) {
+		wanted = (uint32_t)(((uint64_t)length + cluster_bytes - 1U) / cluster_bytes);
+		result = fat_raw_allocate_run(fat, 0, wanted, &cluster);
+		if (result != 0)
+			return result;
+		file->first_cluster = cluster;
+		file->directory_dirty = 1;
+	}
 	result = fat_raw_cluster_at(file, position / cluster_bytes, 1, &cluster,
 		cursor);
 	if (result != 0)
@@ -2128,7 +2516,13 @@ static int fat_raw_write_bytes(
 
 			if (cursor->index >= fat->cluster_count)
 				return EIO;
-			result = fat_raw_advance_cluster(file, cluster, 1, &next);
+			result = fat_raw_next_cluster(fat, cluster, &next);
+			if (result == 0 && fat_raw_is_end(fat, next)) {
+				wanted = (uint32_t)(((uint64_t)length + cluster_bytes - 1U) / cluster_bytes);
+				result = fat_raw_allocate_run(fat, cluster, wanted, &next);
+			}
+			if (result == 0 && !fat_raw_valid_cluster(fat, next))
+				result = EIO;
 			if (result != 0)
 				return result;
 			cluster = next;
@@ -2193,6 +2587,7 @@ static int fat_raw_write(
 	struct fat_file_state *state = file;
 	uint64_t end;
 	uint64_t old_size;
+	uint64_t generation;
 	uint32_t old_first, old_last = 0;
 	struct fat_chain_cursor cursor = {0U, 0U};
 	uint8_t old_directory_dirty;
@@ -2205,21 +2600,18 @@ static int fat_raw_write(
 		return EINVAL;
 	if (!length)
 		return 0;
+	generation = file->mount->chain_generation;
 	end = offset + length;
 	old_first = state->first_cluster;
 	old_size = file->size;
 	old_directory_dirty = state->directory_dirty;
 	if (file->first_cluster) {
-		uint32_t cluster_bytes =
-			(uint32_t)file->mount->sectors_per_cluster * 512U;
 		uint64_t first_offset = offset < old_size ? offset : old_size;
 
 		/* Full validation precedes all writes, including corruption beyond
 		 * the requested range.  Retain only this call's start and old tail
 		 * so data/zero-fill/growth do not repeat the same validated walk. */
-		result = fat_raw_validate_chain_at(file->mount,
-			file->first_cluster, (uint32_t)first_offset / cluster_bytes,
-			&cursor, end > old_size ? &old_last : NULL);
+		result = fat_file_validate_at(file, first_offset, &cursor, &old_last);
 		if (result != 0)
 			return result;
 	}
@@ -2247,6 +2639,7 @@ static int fat_raw_write(
 		file->size = end;
 		file->directory_dirty = 1;
 	}
+	fat_file_save_cursor(file, &cursor, end, generation, old_last);
 	return 0;
 }
 
@@ -2438,19 +2831,9 @@ static int fat_raw_extend_directory(
 	}
 	if (steps == fat->cluster_count)
 		return EIO;
-	result = fat_raw_allocate_cluster(filesystem, &added);
+	result = fat_raw_extend_cluster(filesystem, last, &added);
 	if (result != 0)
 		return result;
-	result = fat_raw_set_cluster(filesystem, last, added);
-	if (result != 0) {
-		int rollback = fat_raw_set_cluster(filesystem, added, 0);
-
-		if (rollback != 0) {
-			filesystem->read_only = 1;
-			return rollback;
-		}
-		return result;
-	}
 	return 0;
 }
 
@@ -2514,58 +2897,32 @@ fat_raw_restore_directory_entry(struct fat_mount_state *filesystem,
 	return result == 0 ? fat_engine_flush(filesystem) : result;
 }
 
-static int fat_raw_write_directory_entry(
-	struct fat_mount_state *filesystem,
-	const struct fat_directory *directory, uint32_t index,
-	const uint8_t entry[32], uint32_t *written_lba,
-	uint16_t *written_offset)
-{
-	uint32_t lba;
-	uint16_t offset;
-	const uint8_t *raw;
-	uint8_t *sector;
-	int result;
-
-	result = fat_raw_directory_entry(
-		filesystem, directory, index, &lba, &offset, &raw);
-	if (result != 0)
-		return result;
-	(void)raw;
-	result = fat_engine_write_sector_result(filesystem, lba, &sector);
-	if (result != 0)
-		return result;
-	copy_bytes(sector + offset, entry, 32);
-	result = fat_engine_mark_sector_dirty(filesystem);
-	if (result == 0)
-		result = fat_engine_flush(filesystem);
-	if (result == 0) {
-		if (written_lba != 0) *written_lba = lba;
-		if (written_offset != 0) *written_offset = offset;
-	}
-	return result;
-}
-
-static FAT_MUTATION int fat_raw_restore_directory_entries(
-	struct fat_mount_state *filesystem, const uint32_t *lbas,
-	const uint16_t *offsets, const uint8_t entries[][32], unsigned count);
-
-static FAT_MUTATION int fat32_create_entry(
+/* Stage an entire long-name run and publish its short-name sector last. */
+static FAT_MUTATION int
+fat32_create_entry(
 	struct fat_mount_state *filesystem,
 	const struct fat_directory *parent,
-	const struct fat_component *component, uint8_t attributes,
-	uint32_t first_cluster, uint32_t size, uint32_t *entry_lba,
+	const struct fat_component *component,
+	uint8_t attributes,
+	uint32_t first_cluster,
+	uint32_t size,
+	uint32_t *entry_lba,
 	uint16_t *entry_offset)
 {
 	uint16_t units[FAT_LFN_MAX_UNITS];
-	uint8_t sfn[11], raw[32];
-	uint8_t saved[FAT_LFN_MAX_ENTRIES + 1U][32];
-	unsigned unit_count, lfn_count, serial, written = 0, i;
-	uint32_t saved_lba[FAT_LFN_MAX_ENTRIES + 1U];
-	uint16_t saved_offset[FAT_LFN_MAX_ENTRIES + 1U];
-	uint32_t first_index = 0, sfn_lba = 0;
-	uint16_t sfn_offset = 0;
-	int result, rollback;
+	uint8_t sfn[11];
+	uint8_t entries[FAT_LFN_MAX_ENTRIES + 1U][32];
+	uint32_t lbas[FAT_LFN_MAX_ENTRIES + 1U];
+	uint16_t offsets[FAT_LFN_MAX_ENTRIES + 1U];
+	const uint8_t *existing;
+	unsigned unit_count;
+	unsigned lfn_count;
+	unsigned serial;
+	unsigned n;
+	uint32_t first_index;
+	int result;
 
+	/* Select an unused short alias before reserving directory positions. */
 	if (!fat_utf8_to_utf16(component->text, units, &unit_count))
 		return EINVAL;
 	for (serial = 1; serial <= 999999U; serial++) {
@@ -2580,53 +2937,37 @@ static FAT_MUTATION int fat32_create_entry(
 	if (serial > 999999U)
 		return ENOSPC;
 	lfn_count = (unit_count + 12U) / 13U;
-	result = fat_raw_find_free_run(filesystem, parent, lfn_count + 1U,
-				     &first_index);
+	first_index = 0;
+	result = fat_raw_find_free_run(filesystem, parent, lfn_count + 1U, &first_index);
 	if (result != 0)
 		return result;
-	/* A directory end marker is semantic state, not merely a free slot.
-	 * Snapshot every slot before the first write so a failed multi-entry
-	 * create restores 0x00 markers and any bytes hidden beyond them exactly.
-	 */
-	for (i = 0; i < lfn_count + 1U; i++) {
-		const uint8_t *existing;
 
-		result = fat_raw_directory_entry(filesystem, parent,
-			first_index + i, &saved_lba[i], &saved_offset[i],
-			&existing);
+	/* Resolve the full run while all original end-marker semantics remain intact. */
+	for (n = 0; n <= lfn_count; n++) {
+		result = fat_raw_directory_entry(filesystem, parent, first_index + n,
+		    &lbas[n], &offsets[n], &existing);
 		if (result != 0)
 			return result;
-		copy_bytes(saved[i], existing, sizeof(saved[i]));
 	}
-	for (i = 0; i < lfn_count; i++) {
-		unsigned ordinal = lfn_count - i;
-		fat_lfn_build_entry(raw, units, unit_count, ordinal,
-				    fat_lfn_checksum(sfn));
-		written++;
-		result = fat_raw_write_directory_entry(filesystem, parent,
-			first_index + i, raw, 0, 0);
-		if (result != 0)
-			goto rollback;
-	}
-	clear_bytes(raw, sizeof(raw));
-	copy_bytes(raw, sfn, 11);
-	raw[11] = attributes;
-	fat_raw_put_dir_cluster(filesystem, raw, first_cluster);
-	put32(raw + 28, size);
-	written++;
-	result = fat_raw_write_directory_entry(filesystem, parent,
-		first_index + lfn_count, raw, &sfn_lba, &sfn_offset);
+
+	/* Build private LFN and SFN entries before capturing shared sector images. */
+	for (n = 0; n < lfn_count; n++)
+		fat_lfn_build_entry(entries[n], units, unit_count, lfn_count - n, fat_lfn_checksum(sfn));
+	memset(entries[lfn_count], 0, 32U);
+	memcpy(entries[lfn_count], sfn, 11U);
+	entries[lfn_count][11] = attributes;
+	fat_raw_put_dir_cluster(filesystem, entries[lfn_count], first_cluster);
+	put32(entries[lfn_count] + 28, size);
+	result = fat_directory_transaction(filesystem, lbas, offsets, entries, lfn_count + 1U, 1);
 	if (result != 0)
-		goto rollback;
-	if (entry_lba != 0)
-		*entry_lba = sfn_lba;
-	if (entry_offset != 0)
-		*entry_offset = sfn_offset;
+		return result;
+
+	/* Return the committed public entry identity. */
+	if (entry_lba != NULL)
+		*entry_lba = lbas[lfn_count];
+	if (entry_offset != NULL)
+		*entry_offset = offsets[lfn_count];
 	return 0;
-rollback:
-	rollback = fat_raw_restore_directory_entries(filesystem, saved_lba,
-		saved_offset, saved, written);
-	return rollback != 0 ? rollback : result;
 }
 
 static FAT_MUTATION int
@@ -2739,127 +3080,65 @@ static FAT_MUTATION int fat_raw_create(
 	return result;
 }
 
+/* Remove a bounded long/short-name run with one image per affected sector. */
 static FAT_MUTATION int
-fat_raw_mark_deleted(struct fat_mount_state *filesystem, uint32_t lba,
-		   uint16_t offset)
+fat_raw_delete_location(
+	struct fat_mount_state *filesystem,
+	const struct fat_directory *parent,
+	uint32_t target_lba,
+	uint16_t target_offset)
 {
-	uint8_t *sector;
+	uint32_t limit;
+	uint32_t index;
+	uint32_t lba;
+	uint16_t offset;
+	const uint8_t *raw;
+	uint32_t lbas[FAT_LFN_MAX_ENTRIES + 1U];
+	uint16_t offsets[FAT_LFN_MAX_ENTRIES + 1U];
+	uint8_t entries[FAT_LFN_MAX_ENTRIES + 1U][32];
+	uint8_t target[32];
+	unsigned count;
+	unsigned n;
 	int result;
 
-	result = fat_engine_write_sector_result(filesystem, lba, &sector);
-	if (result != 0)
-		return result;
-	sector[offset] = 0xe5;
-	result = fat_engine_mark_sector_dirty(filesystem);
-	return result == 0 ? fat_engine_flush(filesystem) : result;
-}
-
-static FAT_MUTATION int
-fat_raw_restore_directory_entries(struct fat_mount_state *filesystem,
-	const uint32_t *lbas, const uint16_t *offsets,
-	const uint8_t entries[][32], unsigned count)
-{
-	unsigned i;
-	int rollback = 0;
-
-	for (i = 0; i < count; i++) {
-		uint8_t *sector;
-		int error;
-
-		error = fat_engine_write_sector_result(filesystem, lbas[i],
-		    &sector);
-		if (error != 0) {
-			if (rollback == 0)
-				rollback = error;
-			continue;
-		}
-		copy_bytes(sector + offsets[i], entries[i], 32U);
-		error = fat_engine_mark_sector_dirty(filesystem);
-		if (error == 0)
-			error = fat_engine_flush(filesystem);
-		if (rollback == 0 && error != 0)
-			rollback = error;
-	}
-	if (rollback != 0)
-		filesystem->read_only = 1;
-	return rollback;
-}
-
-static FAT_MUTATION int
-fat_raw_delete_location(struct fat_mount_state *filesystem,
-		      const struct fat_directory *parent, uint32_t target_lba,
-		      uint16_t target_offset)
-{
-	struct fat_mount_state *fat = filesystem;
-	uint32_t limit = parent->first_cluster == 0 ? fat->root_entries :
-		fat->cluster_count * (uint32_t)fat->sectors_per_cluster *
-		FAT16_ENTRIES_PER_SECTOR;
-	uint32_t index;
-
+	/* Find the public short-name entry before walking its bounded LFN prefix. */
+	limit = parent->first_cluster == 0 ? filesystem->root_entries :
+	    filesystem->cluster_count * (uint32_t)filesystem->sectors_per_cluster * FAT16_ENTRIES_PER_SECTOR;
 	for (index = 0; index < limit; index++) {
-		uint32_t lba;
-		uint16_t offset;
-		const uint8_t *raw;
-		int result = fat_raw_directory_entry(
-			filesystem, parent, index, &lba, &offset, &raw);
+		result = fat_raw_directory_entry(filesystem, parent, index, &lba, &offset, &raw);
 		if (result != 0)
 			return result;
-		if (lba != target_lba || offset != target_offset)
-			continue;
-		/* Save the bounded LFN run and SFN before mutation.  A failed sector
-		 * write may leave the cache dirty with the attempted deletion, so the
-		 * failed entry itself is included in rollback. */
-		{
-			uint32_t saved_lba[FAT_LFN_MAX_ENTRIES + 1U];
-			uint16_t saved_offset[FAT_LFN_MAX_ENTRIES + 1U];
-			uint8_t saved[FAT_LFN_MAX_ENTRIES + 1U][32];
-			uint8_t target[32];
-			unsigned saved_count = 0, attempted = 0, i;
-
-			copy_bytes(target, raw, sizeof(target));
-			while (index != 0) {
-				uint32_t previous_lba;
-				uint16_t previous_offset;
-				const uint8_t *previous;
-
-				result = fat_raw_directory_entry(filesystem, parent,
-					index - 1U, &previous_lba,
-					&previous_offset, &previous);
-				if (result != 0)
-					return result;
-				if (previous[11] != 0x0fU || previous[0] == 0xe5)
-					break;
-				if (saved_count >= FAT_LFN_MAX_ENTRIES)
-					return EIO;
-				saved_lba[saved_count] = previous_lba;
-				saved_offset[saved_count] = previous_offset;
-				copy_bytes(saved[saved_count], previous, 32U);
-				saved_count++;
-				index--;
-			}
-			if (saved_count >= FAT_LFN_MAX_ENTRIES + 1U)
-				return EIO;
-			saved_lba[saved_count] = target_lba;
-			saved_offset[saved_count] = target_offset;
-			copy_bytes(saved[saved_count], target, 32U);
-			saved_count++;
-			for (i = 0; i < saved_count; i++) {
-				attempted = i + 1U;
-				result = fat_raw_mark_deleted(filesystem,
-					saved_lba[i], saved_offset[i]);
-				if (result != 0) {
-					int rollback =
-					    fat_raw_restore_directory_entries(filesystem,
-					    saved_lba, saved_offset, saved,
-					    attempted);
-
-					return rollback != 0 ? rollback : result;
-				}
-			}
-			return 0;
-		}
+		if (lba == target_lba && offset == target_offset)
+			break;
 	}
-	return ENOENT;
+	if (index == limit)
+		return ENOENT;
+	memcpy(target, raw, sizeof(target));
+	count = 0;
+
+	/* Collect all associated records before changing directory interpretation. */
+	while (index != 0) {
+		result = fat_raw_directory_entry(filesystem, parent, index - 1U, &lba, &offset, &raw);
+		if (result != 0)
+			return result;
+		if (raw[11] != 0x0fU || raw[0] == 0xe5)
+			break;
+		if (count >= FAT_LFN_MAX_ENTRIES)
+			return EIO;
+		lbas[count] = lba;
+		offsets[count] = offset;
+		memcpy(entries[count++], raw, 32U);
+		index--;
+	}
+	lbas[count] = target_lba;
+	offsets[count] = target_offset;
+	memcpy(entries[count++], target, 32U);
+	for (n = 0; n < count; n++)
+		entries[n][0] = 0xe5;
+	result = fat_directory_transaction(filesystem, lbas, offsets, entries, count, 0);
+
+	/* Return with either complete deletion or restored original sector contents. */
+	return result;
 }
 
 static FAT_MUTATION int
@@ -2949,6 +3228,9 @@ fat_raw_mkdir(struct fat_mount_state *filesystem, const char *path,
 		return result;
 	result = fat_raw_initialize_directory(filesystem, cluster,
 		parent.first_cluster);
+	/* Make the child's dot entries durable before publishing its parent name. */
+	if (result == 0)
+		result = disk_sync(filesystem->disk);
 	if (result == 0)
 		result = fat_raw_insert_entry(filesystem, &parent, &component,
 			0x10U, cluster, 0, &lba, &offset);
@@ -3964,6 +4246,7 @@ static ssize_t fat_read_file(struct file *, void *, size_t);
 static ssize_t fat_write_file(struct file *, const void *, size_t);
 static ssize_t fat_pread_file(struct file *, void *, size_t, off_t);
 static ssize_t fat_pwrite_file(struct file *, const void *, size_t, off_t);
+static ssize_t fat_pwrite_context(struct file *file, const void *buffer, size_t length, off_t offset, unsigned flags, const struct ucred *credential, const struct io_context *context);
 static int fat_readdir(struct file *, struct dirent *, int *);
 static int fat_open_file(struct file *);
 static int fat_fsync(struct file *);
@@ -3990,6 +4273,7 @@ static const struct file_ops fat_regular_ops = {
     .write = fat_write_file,
     .pread = fat_pread_file,
     .pwrite = fat_pwrite_file,
+    .pwrite_internal = fat_pwrite_context,
     .fsync = fat_fsync,
     .close = fat_close_file,
 };
@@ -4380,9 +4664,9 @@ fat_loop_transfer(struct file *file, struct fat_file_state *state,
 		if (amount > remaining)
 			amount = remaining;
 		if (writing)
-			error = disk_write_filesystem(mount->disk,
+			error = disk_write_filesystem_context(mount->disk,
 			    extent->disk_block + within, (uint32_t)amount,
-			    (uint8_t *)buffer + done);
+			    (uint8_t *)buffer + done, mount->write_context);
 		else
 			error = disk_read(mount->disk, extent->disk_block + within,
 			    (uint32_t)amount, (uint8_t *)buffer + done);
@@ -4587,6 +4871,39 @@ fat_pwrite_file(struct file *file, const void *buffer, size_t length,
 	ssize_t count;
 	mutex_lock(&state->lock);
 	count = fat_pwrite_file_unlocked(file, buffer, length, offset);
+	mutex_unlock(&state->lock);
+	return count;
+}
+
+/* Preserve synchronous provenance under the same lock as FAT mutation. */
+static ssize_t
+fat_pwrite_context(
+	struct file *file,
+	const void *buffer,
+	size_t length,
+	off_t offset,
+	unsigned flags,
+	const struct ucred *credential,
+	const struct io_context *context)
+{
+	struct fat_mount_state *state;
+	struct io_context child;
+	const struct io_context *previous;
+	ssize_t count;
+	int error;
+
+	/* The generic file layer already authorized flags and credentials. */
+	(void)flags;
+	(void)credential;
+	error = io_context_child(&child, context, IO_CONTEXT_DRAIN);
+	if (error != 0)
+		return -error;
+	state = fat_mount_state(file->f_inode->i_mount);
+	mutex_lock(&state->lock);
+	previous = state->write_context;
+	state->write_context = &child;
+	count = fat_pwrite_file_unlocked(file, buffer, length, offset);
+	state->write_context = previous;
 	mutex_unlock(&state->lock);
 	return count;
 }
@@ -5466,6 +5783,7 @@ fat_mount_impl(struct mount *mountp)
 	state->metadata = &fat_metadata_tables[i];
 	(void)mutex_init(&state->lock, LOCK_RANK_INODE, "FAT mount");
 	state->disk = mountp->m_disk;
+	state->owner = mountp;
 	state->read_only =
 	    (mountp->m_flags & MOUNT_READ_ONLY) != 0 ||
 	    (mountp->m_disk->d_flags & DISK_READ_ONLY) != 0;
@@ -5610,7 +5928,52 @@ fat_statvfs(struct mount *mountp, struct statvfs *result)
 	return error;
 }
 
+/* Proves an overwrite stays within a complete existing cluster chain. */
+static int
+fat_writeback_range(
+	struct file *file,
+	off_t offset,
+	size_t length)
+{
+	struct fat_mount_state *mount;
+	struct fat_file_state *state;
+	struct fat_chain_cursor cursor;
+	uint32_t wanted;
+	int error;
+
+	/* Rejects ranges which require file growth or allocation. */
+	if (offset < 0 || length == 0 || file->f_inode->i_type != INODE_REG)
+		return 0;
+
+	/* Uses the already opened private writer without creating open state. */
+	mount = fat_mount_state(file->f_inode->i_mount);
+	mutex_lock(&mount->lock);
+	state = file->f_data;
+	if (mount->read_only || state == NULL || state->loop_map != NULL ||
+	    offset > file->f_inode->i_size ||
+	    (uint64_t)length > (uint64_t)(file->f_inode->i_size - offset)) {
+		mutex_unlock(&mount->lock);
+		return 0;
+	}
+
+	/* Validates the full chain and rejects a tail before the requested byte. */
+	wanted = (uint32_t)(((uint64_t)offset + length - 1U) /
+	    ((uint64_t)mount->sectors_per_cluster * 512U));
+	error = fat_raw_validate_chain_at(mount,
+	    fat_inode(file->f_inode)->fi_first_cluster, wanted, &cursor, NULL);
+	mutex_unlock(&mount->lock);
+	if (error != 0)
+		return -error;
+
+	/* Reports only the requested, valid cluster position as eligible. */
+	if (cursor.index != wanted || !fat_raw_valid_cluster(mount, cursor.cluster))
+		return 0;
+
+	return 1;
+}
+
 const struct filesystem_type fat_filesystem_type = {
+    .writeback_range = fat_writeback_range,
     .fs_name = "fat",
     .probe = fat_probe,
     .identify = fat_identify,

@@ -12,12 +12,15 @@
 #ifndef ZEDBSD_KERN_FILE_H
 #define ZEDBSD_KERN_FILE_H
 
+#include <kern/readahead.h>
 #include "kern/inode.h"
 #include "kern/mount.h"
 #include "kern/backing-claim.h"
 #include "kern/atomic.h"
+#include "kern/io-context.h"
 #include "kern/lock.h"
 #include "kern/vm-object.h"
+#include "kern/writeback.h"
 #include <fcntl.h>
 #include <limits.h>
 #include <stddef.h>
@@ -47,6 +50,8 @@
 #define FILE_IO_VM_OBJECT	0x00000002U
 #define FILE_IO_INODE_IO_OWNED	0x00000004U
 #define FILE_IO_CONTENT_CHANGE	0x00000008U
+#define FILE_IO_DRAIN		0x00000010U
+#define FILE_IO_ORDERED		0x00000020U
 
 struct cwdinfo;
 struct ucred;
@@ -60,6 +65,14 @@ enum file_io_kind {
 };
 
 struct file_io {
+	off_t readahead_start;
+	uint64_t readahead_generation;
+	unsigned readahead_demand;
+	unsigned readahead_observer;
+	uint64_t readahead_useful;
+	struct writeback_ticket writeback_ticket;
+	struct vm_object *writeback_object;
+	struct io_context context;
 	struct file *file;
 
 	/*
@@ -79,6 +92,7 @@ struct file_io {
 	enum file_io_kind kind;
 	off_t offset;
 	unsigned internal_flags;
+	unsigned synchronous;
 	unsigned held_position;
 	unsigned held_inode_io;
 
@@ -107,6 +121,7 @@ struct file_io {
 	 */
 	unsigned held_content_read;
 	unsigned coherent_read;
+	struct vm_object *read_object;
 
 	/*
 	 * O_APPEND selects the final content inode's EOF once, at the
@@ -133,14 +148,19 @@ struct file_io {
 };
 
 /*
- * An exclusive, immutable view of one regular file.  Begin revokes
+ * A stable view of one regular file. The ordinary begin is exclusive: it revokes
  * writable MAP_SHARED translations, writes their dirty cache image to
  * the backend and then keeps the inode content transaction plus i_io
  * lock until end.  This is intended for multi-read consumers such as
  * exec image loading, not ordinary read(2), whose shared lease is
- * carried by struct file_io.
+ * carried by struct file_io. file_exec_snapshot_begin may instead select a
+ * shared content gate and cache pin for an immutable direct input; that lease
+ * holds no inode I/O mutex across reads. Both forms use the same pread/end API.
  */
 struct file_content_lease {
+	struct vm_object *read_object;
+	struct disk *read_disk;
+	unsigned shared_read;
 	struct file *file;
 	struct inode *io_inode;
 	struct inode *content_inode;
@@ -170,7 +190,7 @@ struct file_ops {
 	 * the lower inode's generic coherence transaction.
 	 */
 	ssize_t (*pread_internal)(struct file *, void *, size_t, off_t, unsigned);
-	ssize_t (*pwrite_internal)(struct file *, const void *, size_t, off_t, unsigned, const struct ucred *);
+	ssize_t (*pwrite_internal)(struct file *, const void *, size_t, off_t, unsigned, const struct ucred *, const struct io_context *);
 	int (*readdir)(struct file *, struct dirent *, int *);
 	off_t (*seek)(struct file *, off_t, int);
 	int (*ioctl)(struct file *, unsigned long, uintptr_t);
@@ -180,6 +200,9 @@ struct file_ops {
 };
 
 struct file {
+	struct readahead_state f_readahead;
+	volatile uint64_t f_write_error_cursor;
+	volatile uint64_t f_metadata_error_cursor;
 	struct path f_path;
 	struct inode *f_inode;
 	struct inode *f_vm_inode;
@@ -266,6 +289,11 @@ file_io_transfer(
 	void *buffer,
 	size_t length);
 
+ssize_t
+file_io_complete(
+	struct file_io *io,
+	ssize_t result);
+
 void
 file_io_end(
 	struct file_io *io);
@@ -274,6 +302,24 @@ int
 file_content_lease_begin(
 	struct file *file,
 	struct file_content_lease *lease);
+
+/* Immutable direct inputs may use a shared cache lease; others retain copy semantics. */
+int file_exec_snapshot_begin(struct file *file, struct file_content_lease *lease);
+
+/* Immutable full cache pages; references may outlive the loader's input lease. */
+struct file_exec_snapshot {
+	refcount_t refs;
+	struct file_content_lease input;
+	off_t offset;
+	size_t length;
+	size_t memory_bytes;
+	size_t page_count;
+	struct vm_object_page *pages[];
+};
+int file_exec_snapshot_create(struct file_content_lease *input, off_t offset,
+    size_t length, struct file_exec_snapshot **result);
+void file_exec_snapshot_ref(struct file_exec_snapshot *snapshot);
+void file_exec_snapshot_put(struct file_exec_snapshot *snapshot);
 
 ssize_t
 file_content_lease_pread(
@@ -322,6 +368,8 @@ file_pwrite_internal(
 	off_t offset,
 	unsigned internal_flags);
 
+ssize_t file_pwrite_context(struct file *file, const void *buffer, size_t length, off_t offset, unsigned flags, const struct ucred *credential, const struct io_context *context);
+
 ssize_t
 file_pwrite_internal_cred(
 	struct file *file,
@@ -358,9 +406,13 @@ file_ioctl(
 /*
  * Flush this open file/backend; VM pages are synchronized by vm-object.
  */
+int file_fsync_backend(struct file *file);
+
 int
 file_fsync(
 	struct file *file);
+
+void file_readahead_invalidate(struct file *file);
 
 int
 file_close(

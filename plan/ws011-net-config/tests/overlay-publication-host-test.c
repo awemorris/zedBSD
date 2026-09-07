@@ -114,7 +114,7 @@ inode_rename(struct inode *old_directory, const struct componentname *old_name,
 }
 
 int
-mount_sync(struct mount *mount)
+mount_sync_backend(struct mount *mount)
 {
     if (mount == &overlay_mount)
         return ws011_overlay_sync_mount(mount);
@@ -302,3 +302,6 @@ main(void)
         "synthetic backend/locks)\n", checks);
     return EXIT_SUCCESS;
 }
+
+/* Models the explicit lower backend drain without a VM layer in this fixture. */
+int file_fsync_backend(struct file *file) { return file_fsync(file); }

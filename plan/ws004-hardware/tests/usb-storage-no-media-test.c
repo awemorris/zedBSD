@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef int tid_t; /* Host libc has no zedBSD kernel thread identifier. */
 #include "../../../src/drivers/usb-storage.c"
 
 static unsigned checks;
@@ -62,6 +63,12 @@ drv_usb_urb_reserve_sync(struct drv_usb_urb *urb, size_t capacity)
 	(void)capacity;
 	return 0;
 }
+#ifndef USB_STORAGE_CUSTOM_HOST
+unsigned drv_usb_device_hcd_capabilities(const struct drv_usb_device *device)
+{ (void)device; return 0; }
+int drv_usb_urb_reserve_transfer(struct drv_usb_urb *urb, size_t capacity)
+{ (void)urb; (void)capacity; return EOPNOTSUPP; }
+#endif
 static struct drv_usb_endpoint fixture_bulk_in = { DRV_USB_DIR_IN };
 static struct drv_usb_endpoint fixture_bulk_out = { DRV_USB_DIR_OUT };
 static unsigned live_allocations;
@@ -164,6 +171,39 @@ sched_ticks(void)
 void
 sched_yield(void)
 {
+}
+
+/* Controlled scheduler boundary; native tests execute the real worker loop. */
+static struct thread control_thread;
+static unsigned control_live;
+static int control_create_error, control_join_error;
+static unsigned control_hold_stop, control_run_loop;
+int kthread_create(void (*entry)(void *),void *argument,int priority,struct thread **out)
+{
+	(void)priority;CHECK(!control_live);
+	if(control_create_error)return control_create_error;
+	memset(&control_thread,0,sizeof(control_thread));
+	control_thread.kernel_entry=entry;control_thread.kernel_arg=argument;
+	control_thread.task=(hal_task_t)&control_thread;control_thread.state=THREAD_NEW;
+	control_live=1;*out=&control_thread;return 0;
+}
+void thread_start(struct thread *thread)
+{ CHECK(thread==&control_thread && control_live);thread->state=THREAD_SLEEPING; }
+void kernel_notify_task(hal_task_t task)
+{
+	struct usb_storage *storage=control_thread.kernel_arg;
+	CHECK(task==(hal_task_t)&control_thread && control_live);
+	if(storage->control_stopping && !control_hold_stop)control_thread.state=THREAD_ZOMBIE;
+}
+void kernel_wait_task(void)
+{ struct usb_storage *s=control_thread.kernel_arg;CHECK(control_run_loop);s->control_ready=1; }
+void sched_sleep(uint64_t deadline)
+{ struct usb_storage *s=control_thread.kernel_arg;(void)deadline;CHECK(control_run_loop && !s->lock.locked && !s->control_lock.locked);s->control_stopping=1; }
+int thread_wait(struct thread *thread,int *status)
+{
+	(void)status;CHECK(thread==&control_thread && control_live);
+	if(control_join_error)return control_join_error;
+	CHECK(thread->state==THREAD_ZOMBIE);thread->state=THREAD_DEAD;control_live=0;return 0;
 }
 
 int
@@ -373,6 +413,7 @@ drv_usb_driver_register(struct drv_usb_driver *driver)
 	return 0;
 }
 
+#ifndef USB_STORAGE_CUSTOM_HOST
 struct disk *
 disk_alloc(void)
 {
@@ -404,6 +445,7 @@ disk_gone_if_idle(struct disk *disk)
 	return EIO;
 }
 
+
 int
 disk_destroy(struct disk *disk)
 {
@@ -412,6 +454,30 @@ disk_destroy(struct disk *disk)
 	return EIO;
 }
 
+#endif
+static unsigned persistence_invalidations;
+static struct disk *persistence_disk;
+void disk_persistence_invalidate(struct disk *disk)
+{ persistence_invalidations++; persistence_disk=disk; }
+void disk_persistence_forget(struct disk *disk)
+{ persistence_invalidations++; persistence_disk=disk; }
+void disk_media_revoke(struct disk *disk)
+{ CHECK(disk!=NULL);disk->d_media_revoked=1; }
+int disk_media_status(const struct disk *disk)
+{ return disk==NULL || disk->d_media_revoked ? ENXIO : 0; }
+#ifndef USB_STORAGE_CUSTOM_HOST
+int disk_media_retire(struct disk *disk) { (void)disk;return EBUSY; }
+#endif
+int partition_retire_media(struct disk *disk) { return disk_media_retire(disk); }
+static unsigned partition_reload_calls;
+static int partition_reload_error;
+int partition_reload(struct disk *disk)
+{
+	struct usb_storage *storage = disk->d_data;
+	CHECK(storage->lock.locked == 0);
+	partition_reload_calls++;
+	return partition_reload_error;
+}
 void
 bio_complete(struct bio *bio, int error, size_t transferred)
 {

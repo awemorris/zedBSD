@@ -18,11 +18,11 @@ xhci="$root/src/drivers/pci-xhci.c"
 
 # Exact endpoint-context and compatibility corpus.
 # shellcheck disable=SC2086
-$cc $common "$fixture" -o "$work/xhci-ss-interrupt"
+$cc $common "$fixture" "$root/src/kern/io-stats.c" -o "$work/xhci-ss-interrupt"
 "$work/xhci-ss-interrupt"
 # shellcheck disable=SC2086
 $cc $common -fsanitize=address,undefined -fno-omit-frame-pointer \
-	"$fixture" -o "$work/xhci-ss-interrupt-sanitize"
+	"$fixture" "$root/src/kern/io-stats.c" -o "$work/xhci-ss-interrupt-sanitize"
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 	"$work/xhci-ss-interrupt-sanitize"
 # shellcheck disable=SC2086
@@ -31,11 +31,11 @@ $cc $common -fanalyzer -c "$fixture" \
 
 # Existing pure xHCI arithmetic remains unchanged.
 # shellcheck disable=SC2086
-$cc $common "$xhci_model" -o "$work/xhci-model"
+$cc $common "$xhci_model" "$root/src/kern/io-stats.c" -o "$work/xhci-model"
 "$work/xhci-model"
 # shellcheck disable=SC2086
 $cc $common -fsanitize=address,undefined -fno-omit-frame-pointer \
-	"$xhci_model" -o "$work/xhci-model-sanitize"
+	"$xhci_model" "$root/src/kern/io-stats.c" -o "$work/xhci-model-sanitize"
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 	"$work/xhci-model-sanitize"
 # shellcheck disable=SC2086
@@ -45,11 +45,11 @@ $cc $common -fanalyzer -c "$xhci_model" \
 # Production USB parsing proves host-endian retention and the typed accessor.
 # shellcheck disable=SC2086
 $cc $common -pthread "$usb" "$function_fixture" \
-	-o "$work/usb-function-model"
+	"$root/src/kern/io-stats.c" -o "$work/usb-function-model"
 "$work/usb-function-model"
 # shellcheck disable=SC2086
 $cc $common -pthread -fsanitize=address,undefined -fno-omit-frame-pointer \
-	"$usb" "$function_fixture" -o "$work/usb-function-model-sanitize"
+	"$usb" "$function_fixture" "$root/src/kern/io-stats.c" -o "$work/usb-function-model-sanitize"
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 	"$work/usb-function-model-sanitize"
 # shellcheck disable=SC2086

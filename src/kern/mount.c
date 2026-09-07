@@ -18,6 +18,8 @@
  */
 
 #include "kern/mount.h"
+#include "kern/writeback.h"
+#include "kern/readahead.h"
 #include "kern/backing-claim.h"
 #include "kern/file.h"
 #include "kern/inode.h"
@@ -40,6 +42,23 @@
 #define MOUNT_HIGH
 #endif
 
+struct mount_io_boundary {
+	struct writeback_unmount writeback;
+	struct readahead_boundary readahead;
+};
+
+extern int readahead_boundary_begin(struct readahead_boundary *, struct mount *) __attribute__((weak));
+extern void readahead_boundary_end(struct readahead_boundary *) __attribute__((weak));
+extern int writeback_unmount_begin(struct mount *, struct writeback_unmount *) __attribute__((weak));
+extern void writeback_unmount_finish(struct writeback_unmount *, int) __attribute__((weak));
+
+extern unsigned vm_object_cache_drain(struct mount *) __attribute__((weak));
+extern int vm_object_sync_mount_buffer(struct mount *, void *, size_t) __attribute__((weak));
+
+extern void io_error_record(struct io_error_state *, int) __attribute__((weak));
+extern void io_error_snapshot(struct io_error_state *, struct io_error_snapshot *) __attribute__((weak));
+extern int io_error_observe(const struct io_error_snapshot *, volatile uint64_t *) __attribute__((weak));
+
 static struct mount mounts[MOUNT_MAX] __attribute__((section(".vfs_bss")));
 static uint8_t mount_used[MOUNT_MAX] __attribute__((section(".vfs_bss")));
 static struct mount *mount_head;
@@ -50,6 +69,8 @@ static unsigned filesystem_count;
 static struct spinlock namespace_lock;
 static struct mutex namespace_transaction;
 
+static int mount_io_quiesce(struct mount *mountp, struct mount_io_boundary *boundary);
+static void mount_io_finish(struct mount_io_boundary *boundary, int committed);
 static struct mount * mount_alloc(void);
 static void mount_free(struct mount *mountp);
 static int identity_text_zero(const char *text, size_t capacity);
@@ -755,20 +776,86 @@ mount_is_private(
  * Flushes a mount's filesystem.
  */
 int
+mount_sync_backend(
+	struct mount *mountp)
+{
+	int error;
+
+	/* Rejects a missing backend before dispatching a filesystem-only barrier. */
+	if (mountp == NULL || mountp->m_type == NULL)
+		return EINVAL;
+	error = 0;
+	if (mountp->m_type->sync != NULL)
+		error = mountp->m_type->sync(mountp);
+
+	/* Retains failures without certifying VM data or consuming an observer cursor. */
+	if (error != 0) {
+		io_epoch_mark(&mountp->m_write_epoch);
+		if (error != EINVAL && error != EBADF && error != EOPNOTSUPP &&
+		    io_error_record != NULL)
+			io_error_record(&mountp->m_write_error, error);
+	}
+	return error;
+}
+
+/*
+ * Drains VM content and the filesystem before certifying a mount sync frontier.
+ */
+int
 mount_sync(
 	struct mount *mountp)
 {
 	int error;
 
+	/* Uses optional shared scratch for ordinary callers. */
+	error = mount_sync_buffer(mountp, NULL, 0);
+	return error;
+}
+
+/*
+ * Drains and certifies a mount with independently reserved worker scratch.
+ */
+int
+mount_sync_buffer(
+	struct mount *mountp,
+	void *scratch,
+	size_t capacity)
+{
+	int error;
+	int observed;
+	struct io_error_snapshot snapshot;
+	uint64_t target;
+
 	/* Rejects a mount without a type. */
 	if (mountp == NULL || mountp->m_type == NULL)
 		return EINVAL;
 
-	/* A type without a sync routine has nothing to flush. */
-	if (mountp->m_type->sync != NULL)
+	target = io_epoch_target(&mountp->m_write_epoch);
+
+	/* Drains authoritative VM data before publishing the filesystem barrier. */
+	error = 0;
+	if (vm_object_sync_mount_buffer != NULL)
+		error = vm_object_sync_mount_buffer(mountp, scratch, capacity);
+	if (error == 0 && mountp->m_type->sync != NULL)
 		error = mountp->m_type->sync(mountp);
-	else
-		error = 0;
+	if (error == 0)
+		io_epoch_complete(&mountp->m_write_epoch, target);
+	else {
+		io_epoch_mark(&mountp->m_write_epoch);
+		if (error != EINVAL && error != EBADF && error != EOPNOTSUPP &&
+		    io_error_record != NULL)
+			io_error_record(&mountp->m_write_error, error);
+	}
+
+	/* Mount sync observes independently of every open file description. */
+	if (io_error_snapshot != NULL && io_error_observe != NULL) {
+		io_error_snapshot(&mountp->m_write_error, &snapshot);
+		if (error == 0 || error == snapshot.error) {
+			observed = io_error_observe(&snapshot, &mountp->m_write_error_cursor);
+			if (error == 0)
+				error = observed;
+		}
+	}
 	return error;
 }
 
@@ -1170,31 +1257,55 @@ MOUNT_HIGH int
 unmount_private(
 	struct mount *mountp)
 {
+	struct mount_io_boundary boundary = { 0 };
+	unsigned expected_refs;
 	unsigned long irq;
 	int error, entered;
 
 	if (!mount_is_private(mountp))
 		return EINVAL;
+
+	/* Joins optional reads before draining VM ownership or counting mount references. */
+	error = mount_io_quiesce(mountp, &boundary);
+	if (error != 0)
+		return error;
+	expected_refs = 1;
+	if (boundary.writeback.mount != NULL)
+		expected_refs++;
+
+	/* Drains dirty cache handles before counting external mount references. */
+	if (vm_object_sync_mount_buffer != NULL) {
+		error = vm_object_sync_mount_buffer(mountp, NULL, 0);
+		if (error != 0) {
+			mount_io_finish(&boundary, 0);
+			return error;
+		}
+	}
+	if (vm_object_cache_drain != NULL)
+		(void)vm_object_cache_drain(mountp);
 	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
 	if (!mount_is_private(mountp) || mountp->m_state != MOUNT_STATE_LIVE ||
-	    mountp->m_children != NULL || refcount_load(&mountp->m_refs) != 1) {
+	    mountp->m_children != NULL || refcount_load(&mountp->m_refs) != expected_refs) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
 		if (entered)
 			mount_vfs_transaction_leave(mountp);
+		mount_io_finish(&boundary, 0);
 		return EBUSY;
 	}
 	mountp->m_state = MOUNT_STATE_DYING;
 	spin_unlock_irqrestore(&namespace_lock, irq);
 	if (entered)
 		mount_vfs_transaction_leave(mountp);
-	error = prepare_filesystem_destroy(mountp, 1);
+	error = prepare_filesystem_destroy(mountp, expected_refs);
 	if (error != 0) {
 		irq = spin_lock_irqsave(&namespace_lock);
 		mountp->m_state = MOUNT_STATE_LIVE;
 		spin_unlock_irqrestore(&namespace_lock, irq);
+		mount_io_finish(&boundary, 0);
 		return error;
 	}
+	mount_io_finish(&boundary, 1);
 	finalize_filesystem_destroy(mountp);
 	mount_free(mountp);
 
@@ -1234,6 +1345,8 @@ unmount(
 	int flags)
 {
 	struct mount *mountp;
+	struct mount_io_boundary boundary = { 0 };
+	unsigned expected_refs;
 	unsigned long irq;
 	int error;
 	int entered;
@@ -1245,6 +1358,30 @@ unmount(
 	if (mountp == NULL)
 		return ENOENT;
 
+	/* Joins optional reads before draining VM ownership or counting mount references. */
+	error = mount_io_quiesce(mountp, &boundary);
+	if (error != 0) {
+		mount_release(mountp);
+		return error;
+	}
+	expected_refs = 2;
+	if (boundary.writeback.mount != NULL)
+		expected_refs++;
+
+	/* Preserves failed dirty owners instead of misreporting their handles as busy. */
+	if (vm_object_sync_mount_buffer != NULL) {
+		error = vm_object_sync_mount_buffer(mountp, NULL, 0);
+		if (error != 0) {
+			mount_io_finish(&boundary, 0);
+			mount_release(mountp);
+			return error;
+		}
+	}
+
+	/* Drops clean cache paths before the namespace reference check. */
+	if (vm_object_cache_drain != NULL)
+		(void)vm_object_cache_drain(mountp);
+
 	/* The root, a dying mount, or a busy one cannot be unmounted. */
 	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
@@ -1252,14 +1389,16 @@ unmount(
 		spin_unlock_irqrestore(&namespace_lock, irq);
 		if (entered)
 			mount_vfs_transaction_leave(mountp);
+		mount_io_finish(&boundary, 0);
 		mount_release(mountp);
 		return EBUSY;
 	}
 	if (mountp->m_children != NULL ||
-	    refcount_load(&mountp->m_refs) != 2) {
+	    refcount_load(&mountp->m_refs) != expected_refs) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
 		if (entered)
 			mount_vfs_transaction_leave(mountp);
+		mount_io_finish(&boundary, 0);
 		mount_release(mountp);
 		return EBUSY;
 	}
@@ -1274,7 +1413,7 @@ unmount(
 	 * Readers cannot acquire new references or fall through to covered data.
 	 * Sync and teardown may call back through an overlay into the VFS. */
 	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) == 0) {
-		error = prepare_filesystem_destroy(mountp, 2);
+		error = prepare_filesystem_destroy(mountp, expected_refs);
 		if (error != 0) {
 			entered = mount_vfs_transaction_join(mountp);
 			irq = spin_lock_irqsave(&namespace_lock);
@@ -1282,11 +1421,14 @@ unmount(
 			spin_unlock_irqrestore(&namespace_lock, irq);
 			if (entered)
 				mount_vfs_transaction_leave(mountp);
+			mount_io_finish(&boundary, 0);
 			mount_release(mountp);
 			return error;
 		}
+		mount_io_finish(&boundary, 1);
 		finalize_filesystem_destroy(mountp);
 	}
+	mount_io_finish(&boundary, 1);
 	entered = mount_vfs_transaction_join(mountp);
 	inode_dir_changed(mountp->m_cover.p_inode);
 	detach_mount(mountp);
@@ -2035,4 +2177,48 @@ unlink_global(
 			*link = mountp->m_next;
 			return;
 		}
+}
+
+/* Joins optional readers before reversible writeback and filesystem teardown. */
+static int
+mount_io_quiesce(
+	struct mount *mountp,
+	struct mount_io_boundary *boundary)
+{
+	int error;
+
+	/* Requires both halves of each optional lifecycle provider before changing state. */
+	if (readahead_boundary_begin != NULL && readahead_boundary_end == NULL)
+		return EOPNOTSUPP;
+	if (writeback_unmount_begin != NULL && writeback_unmount_finish == NULL)
+		return EOPNOTSUPP;
+	if (readahead_boundary_begin != NULL) {
+		error = readahead_boundary_begin(&boundary->readahead, mountp);
+		if (error != 0)
+			return error;
+	}
+
+	/* Keeps the read gate closed while writeback pauses and drains the same mount. */
+	if (writeback_unmount_begin != NULL) {
+		error = writeback_unmount_begin(mountp, &boundary->writeback);
+		if (error != 0) {
+			if (readahead_boundary_end != NULL)
+				readahead_boundary_end(&boundary->readahead);
+			return error;
+		}
+	}
+	return 0;
+}
+
+/* Restores an aborted mount boundary or releases a successfully quiesced identity. */
+static void
+mount_io_finish(
+	struct mount_io_boundary *boundary,
+	int committed)
+{
+	/* Restores writeback before admitting fresh optional readers after rollback. */
+	if (writeback_unmount_finish != NULL)
+		writeback_unmount_finish(&boundary->writeback, committed);
+	if (readahead_boundary_end != NULL)
+		readahead_boundary_end(&boundary->readahead);
 }

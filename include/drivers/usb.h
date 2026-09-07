@@ -79,6 +79,9 @@
 
 /* The HCD accepts one active URB per endpoint instead of one per controller. */
 #define DRV_USB_HCD_CAP_CONCURRENT_URBS	(1U << 0)
+#define DRV_USB_HCD_CAP_TRANSFER_RESERVE	(1U << 1)
+#define DRV_USB_HCD_CAP_SHARED_STAGING	(1U << 2)
+#define DRV_USB_TRANSFER_RESERVE_MAX_SIZE (64U * 1024U)
 
 #define DRV_USB_DETACH_FORCE	(1U << 0)
 #define DRV_USB_DETACH_QUIET	(1U << 1)
@@ -386,6 +389,14 @@ struct drv_usb_hcd_ops {
 		*root_port_reset)(
 		struct drv_usb_hcd *,
 		unsigned);
+	/* Paired optional callbacks: reserve while idle, release only after retirement.
+	 * The core owns the returned opaque reservation until the last URB reference. */
+	int (*urb_reserve)(struct drv_usb_hcd *, struct drv_usb_urb *, size_t, void **);
+	void (*urb_unreserve)(struct drv_usb_hcd *, void *);
+	/* Optional CPU view owned by the opaque reservation through final retirement.
+	 * The core borrows this pointer; it must never free it independently. */
+	void *(*urb_reserve_buffer)(struct drv_usb_hcd *, void *, size_t *);
+
 };
 
 struct drv_usb_hcd {
@@ -720,6 +731,14 @@ drv_usb_urb_alloc(
  * Caller memory is never touched by a late completion. */
 int
 drv_usb_urb_reserve_sync(struct drv_usb_urb *urb, size_t capacity);
+/* Reserves both synchronous core staging and HCD request/DMA atomically.
+ * Requires exclusive idle caller ownership; failure retains the prior reservation. */
+int
+drv_usb_urb_reserve_transfer(struct drv_usb_urb *urb, size_t capacity);
+/* HCD accessor: valid only while the caller holds the URB's ownership/reference. */
+void *
+drv_usb_urb_transfer_reservation(const struct drv_usb_urb *urb);
+
 void
 drv_usb_urb_free(
 	struct drv_usb_urb *u);

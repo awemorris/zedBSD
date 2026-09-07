@@ -462,8 +462,7 @@ ZEDBSD_CHECK_TARGETS := check softfloat-host-test \
 	posix2024-utility-matrix-check \
 	susv4-libc-host-test crypt-host-test gettext-catalog-host-test \
 	userland-command-host-test menuconfig-host-test \
-	ufs1-format-host-test ufs2-format-host-test ufs1-format-python-test \
-	ufs2-format-python-test overlay-journal-format-host-test
+	ufs-format-host-test ufs-format-python-test overlay-journal-format-host-test
 
 # Scripts invoked from make receive the configured architecture and build tree.
 export ZEDBSD_ARCH := $(ZEDBSD_ARCHITECTURE)
@@ -539,18 +538,13 @@ KERN_BLOCK_IDENTITY_OBJS := $(patsubst %.c,$(BUILD)/%.o,\
 	$(KERN_BLOCK_IDENTITY_SOURCES))
 KERN_FAT_SOURCES := src/drivers/fs/fat.c
 KERN_FAT_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_FAT_SOURCES))
-KERN_UFS1_SOURCES := \
-	src/drivers/fs/ufs1/ufs1-endian.c \
-	src/drivers/fs/ufs1/ufs1-super.c \
-	src/drivers/fs/ufs1/ufs1-vfs.c
-KERN_UFS1_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_UFS1_SOURCES))
-KERN_UFS2_SOURCES := \
-	src/drivers/fs/ufs2/ufs2-endian.c \
-	src/drivers/fs/ufs2/ufs2-super.c \
-	src/drivers/fs/ufs2/ufs2-vfs.c \
-	src/drivers/fs/ufs2/ufs2-journal.c \
-	src/drivers/fs/ufs2/ufs2-snapshot.c
-KERN_UFS2_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_UFS2_SOURCES))
+KERN_UFS_SOURCES := \
+	src/drivers/fs/ufs/ufs-endian.c \
+	src/drivers/fs/ufs/ufs-super.c \
+	src/drivers/fs/ufs/ufs-vfs.c \
+	src/drivers/fs/ufs/ufs-journal.c \
+	src/drivers/fs/ufs/ufs-snapshot.c
+KERN_UFS_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_UFS_SOURCES))
 KERN_ACL_SOURCES := src/kern/posix-acl.c
 KERN_ACL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_ACL_SOURCES))
 KERN_QUOTA_SOURCES := src/kern/quota.c
@@ -606,11 +600,11 @@ DATA_IMAGE := build/data.img
 SWAP_IMAGE := build/swapfile
 DATA_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-data-image.noct \
 	$(BUILD_TOOLS_DIR)/overlay_journal_format.noct \
-	$(BUILD_TOOLS_DIR)/ufs1_format.noct $(ZEDBSD_IMAGE_HOST)
+	$(BUILD_TOOLS_DIR)/ufs_format.noct $(ZEDBSD_IMAGE_HOST)
 ARCH_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-image.py \
 	$(BUILD_TOOLS_DIR)/check-arch-overlay-image.py
 ARCH_UFS_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.noct \
-	$(BUILD_TOOLS_DIR)/ufs1_format.noct $(ZEDBSD_IMAGE_HOST)
+	$(BUILD_TOOLS_DIR)/ufs_format.noct $(ZEDBSD_IMAGE_HOST)
 ZEDBSD_ACCOUNT_INPUTS := userland/base/etc/passwd userland/base/etc/group \
 	userland/base/etc/shadow
 ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \

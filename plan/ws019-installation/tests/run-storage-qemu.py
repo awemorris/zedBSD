@@ -99,7 +99,7 @@ class Guest:
         self.commands.flush()
         keys = {" ": "spc", "/": "slash", "-": "minus", ".": "dot",
                 ":": "shift-semicolon", "$": "shift-4", "?": "shift-slash",
-                "_": "shift-minus"}
+                "_": "shift-minus", "=": "equal"}
         for char in text:
             if "a" <= char <= "z" or "0" <= char <= "9":
                 key = char

@@ -25,6 +25,9 @@
 #include "kern/page.h"
 #include "kern/sched.h"
 #include "kern/vm-lock.h"
+#include "kern/cache-memory.h"
+
+extern size_t cache_memory_reclaim(size_t) __attribute__((weak));
 
 #include <errno.h>
 #include <hal/hal.h>
@@ -961,13 +964,17 @@ out:
 }
 
 /*
- * Reclaims one page, trying private pages before object pages.
+ * Reclaims clean cache first, then private or writeback-backed pages.
  */
 int
 vm_reclaim_one(
 	struct vm_page *avoid)
 {
 	int result;
+
+	/* Returns disposable cache before initiating private-page swap or writeback. */
+	if (cache_memory_reclaim != NULL && cache_memory_reclaim(PAGE_SIZE) != 0)
+		return 0;
 
 	/* A private page is the first choice. */
 	result = vm_reclaim_private_one(avoid);

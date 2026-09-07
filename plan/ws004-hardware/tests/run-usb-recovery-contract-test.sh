@@ -27,12 +27,12 @@ header="$root/include/drivers/usb.h"
 # assertions cover exact latch/gate/generation/quarantine and recovery-URB
 # ownership without adding test-only public accessors.
 # shellcheck disable=SC2086
-$cc $common -pthread "$fixture" -o "$work/usb-recovery-contract"
+$cc $common -pthread "$fixture" "$root/src/kern/io-stats.c" -o "$work/usb-recovery-contract"
 "$work/usb-recovery-contract"
 
 # shellcheck disable=SC2086
 $cc $common -pthread -fsanitize=address,undefined -fno-omit-frame-pointer \
-	"$fixture" -o "$work/usb-recovery-contract-sanitize"
+	"$fixture" "$root/src/kern/io-stats.c" -o "$work/usb-recovery-contract-sanitize"
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 	"$work/usb-recovery-contract-sanitize"
 
@@ -51,11 +51,11 @@ $cc $common -pthread -fanalyzer \
 # mandatory endpoint_reset operation and the core's IRQ-gate dependency.
 # shellcheck disable=SC2086
 $cc $common -pthread "$usb" "$function_fixture" \
-	-o "$work/usb-function-model"
+	"$root/src/kern/io-stats.c" -o "$work/usb-function-model"
 "$work/usb-function-model"
 # shellcheck disable=SC2086
 $cc $common -I"$root" "$usb" "$unregister_fixture" \
-	-o "$work/usb-hcd-unregister"
+	"$root/src/kern/io-stats.c" -o "$work/usb-hcd-unregister"
 "$work/usb-hcd-unregister"
 TMPDIR="$temporary_root" "$binding_runner"
 

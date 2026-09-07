@@ -59,3 +59,11 @@ selection is sufficient and must be distinguished from a zedBSD-created
 
 Return to design if OVMF cannot exercise the no-installer-Boot-variable path,
 if payload selection is nondeterministic, or if any unmanaged byte changes.
+
+## Unified formatter dependency (q101)
+
+Use `mkfs -t ufs FILE` and the ordinary profile under the existing reservation
+transaction. WS024 is implementing the driver/producer migration and retains
+old-media rejection and fresh-file initialization boundaries. Do not infer
+in-place conversion from the new public name. This update does not start the
+installer phase; its existing prerequisites still apply.

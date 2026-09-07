@@ -767,20 +767,20 @@ run_overlay_stage_one(void)
 	if (durability_stage_one(DURABILITY_DIRECTORY, 0) != 0)
 		return failure("overlay-directory-fsync");
 	progress("overlay-durability-end");
-	if (mount_external("ufs2", fspec) != 0 ||
+	if (mount_external("ufs", fspec) != 0 ||
 	    read_word(EXTERNAL_MOUNT "/.p015-backend", backend,
-	    sizeof(backend)) != 0 || strcmp(backend, "ufs2") != 0 ||
+	    sizeof(backend)) != 0 || strcmp(backend, "ufs") != 0 ||
 	    run_suite(EXTERNAL_MOUNT "/suite", 1, 1) != 0 ||
 	    unmount(EXTERNAL_MOUNT, 0) != 0 ||
-	    remount_external(fspec, "ufs2") != 0 ||
+	    remount_external(fspec, "ufs") != 0 ||
 	    validate_suite(EXTERNAL_MOUNT "/suite", 1, 1) != 0 ||
 	    durability_stage_one(EXTERNAL_DURABILITY, 1) != 0)
-		return failure("ufs2-remount");
+		return failure("ufs-remount");
 	if (write_stage_marker("overlay\n") != 0)
 		return failure("overlay-stage-marker");
-	printf("WS001-P015 STAGE1 PASS scenario=overlay backend=ufs2 "
+	printf("WS001-P015 STAGE1 PASS scenario=overlay backend=ufs "
 	    "overlay-hardlink=EOPNOTSUPP overlay-socket=PASS\n");
-	printf("WS001-P023 STAGE1 PASS scenario=overlay backend=ufs2\n");
+	printf("WS001-P023 STAGE1 PASS scenario=overlay backend=ufs\n");
 	fflush(stdout);
 	return 0;
 }
@@ -800,12 +800,12 @@ run_overlay(void)
 	    expect_object("/p015-lower-only", "nonroot", S_IFREG, 0600U,
 	    TEST_UID, TEST_GID, NULL) != 0 ||
 	    durability_validate(DURABILITY_DIRECTORY) != 0 ||
-	    mount_external("ufs2", fspec) != 0 ||
+	    mount_external("ufs", fspec) != 0 ||
 	    validate_suite(EXTERNAL_MOUNT "/suite", 1, 1) != 0 ||
 	    durability_validate(EXTERNAL_DURABILITY) != 0)
 		return failure("overlay-reboot-validate");
 	printf("WS001-P015 PASS scenario=overlay\n");
-	printf("WS001-P023 PASS scenario=overlay backend=ufs2\n");
+	printf("WS001-P023 PASS scenario=overlay backend=ufs\n");
 	fflush(stdout);
 	return 0;
 }
@@ -826,8 +826,8 @@ run_native_stage_one(void)
 	if (durability_stage_one(DURABILITY_DIRECTORY, 1) != 0 ||
 	    write_stage_marker("native\n") != 0)
 		return failure("native-directory-fsync");
-	printf("WS001-P015 STAGE1 PASS scenario=native backend=ufs1\n");
-	printf("WS001-P023 STAGE1 PASS scenario=native backend=ufs1\n");
+	printf("WS001-P015 STAGE1 PASS scenario=native backend=ufs\n");
+	printf("WS001-P023 STAGE1 PASS scenario=native backend=ufs\n");
 	fflush(stdout);
 	return 0;
 }
@@ -847,8 +847,8 @@ run_native(void)
 	    TEST_UID, TEST_GID, NULL) != 0 ||
 	    durability_validate(DURABILITY_DIRECTORY) != 0)
 		return failure("native-reboot-validate");
-	printf("WS001-P015 PASS scenario=native-ufs1\n");
-	printf("WS001-P023 PASS scenario=native-ufs1\n");
+	printf("WS001-P015 PASS scenario=native-ufs\n");
+	printf("WS001-P023 PASS scenario=native-ufs\n");
 	fflush(stdout);
 	return 0;
 }

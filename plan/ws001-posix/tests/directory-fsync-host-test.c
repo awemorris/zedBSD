@@ -8,22 +8,18 @@
 #include <kern/file.h>
 #include <kern/overlayfs.h>
 
-#if defined(WS001_P023_UFS1_MUTATION) || \
-    defined(WS001_P023_UFS2_MUTATION)
+#if defined(WS001_P023_UFS_MUTATION)
 #include <kern/disk.h>
 #include <kern/kmem.h>
 #include <kern/mount.h>
 #include <kern/namei.h>
 #endif
 
-#if defined(WS001_P023_UFS1_MUTATION)
-#include "drivers/fs/ufs1/ufs1-disk.h"
-#include "drivers/fs/ufs1/ufs1-endian.h"
-#elif defined(WS001_P023_UFS2_MUTATION)
+#if defined(WS001_P023_UFS_MUTATION)
 #include <kern/quota.h>
-#include "drivers/fs/ufs2/ufs2-consistency.h"
-#include "drivers/fs/ufs2/ufs2-disk.h"
-#include "drivers/fs/ufs2/ufs2-endian.h"
+#include "drivers/fs/ufs/ufs-consistency.h"
+#include "drivers/fs/ufs/ufs-disk.h"
+#include "drivers/fs/ufs/ufs-endian.h"
 #endif
 
 #include <errno.h>
@@ -164,8 +160,7 @@ static int disk_result;
 static struct inode *expected_inode;
 static struct disk *expected_disk;
 
-extern int ufs1_file_sync(struct file *);
-extern int ufs2_file_sync(struct file *);
+extern int ufs_file_sync(struct file *);
 
 static void
 event(char value)
@@ -241,277 +236,23 @@ test_ufs_one(const char *name, int (*sync_function)(struct file *))
 int
 main(void)
 {
-	test_ufs_one("ufs1", ufs1_file_sync);
-	test_ufs_one("ufs2", ufs2_file_sync);
+	test_ufs_one("ufs", ufs_file_sync);
 	printf("ws001-p016 UFS order/error propagation: PASS (%u checks)\n",
 	    checks);
 	return EXIT_SUCCESS;
 }
 
-#elif defined(WS001_P023_UFS1_MUTATION)
+#elif defined(WS001_P023_UFS_MUTATION)
 
-/*
- * q050 adds a production-backed namespace-mutation cell to the earlier
- * directory-fsync dispatch/order fixture.  dir_replace() is the exact UFS1
- * primitive used by rename-over-existing.  The object build makes only that
- * private symbol visible; these mirrors are fixture-local and are not ABI.
- */
-struct fixture_ufs1_mount_state {
-	struct ufs1_super super;
-	struct mutex namespace_lock;
-	struct mutex lock;
-	uint8_t *cg;
-	uint32_t cg_iusedoff;
-	uint32_t cg_freeoff;
-	uint32_t cg_nextfreeoff;
-	uint32_t active_cg;
-	uint32_t rotor_cg;
-	int writable;
-};
+/* Use the real internal layouts instead of stale test-side structure copies. */
+#include "drivers/fs/ufs/ufs-private.h"
+#define fixture_ufs_mount_state ufs_mount_state
+#define fixture_ufs_inode_info ufs_inode_info
 
-struct fixture_ufs1_inode_info {
-	struct inode inode;
-	uint32_t direct[UFS1_NDADDR];
-	uint32_t indirect[UFS1_NIADDR];
-	uint32_t disk_flags;
-	uint32_t blocks;
-	uint32_t generation;
-	uint8_t shortlink[60];
-};
 
-#define FIXTURE_SECTOR_SIZE UFS1_SECTOR_SIZE
-#define FIXTURE_SECTORS 64U
-#define FIXTURE_DIRECTORY_FRAGMENT 10U
-#define FIXTURE_OLD_INO 41U
-#define FIXTURE_NEW_INO 99U
 
-struct fixture_write_result {
-	int error;
-	int commit;
-};
 
-static uint8_t fixture_disk[FIXTURE_SECTORS * FIXTURE_SECTOR_SIZE];
-static struct fixture_write_result write_results[4];
-static unsigned read_calls;
-static unsigned write_calls;
-
-extern int ufs1_dir_replace(struct inode *, const struct componentname *,
-    uint32_t, uint8_t, uint32_t *, uint8_t *);
-
-void
-mutex_lock(struct mutex *mutex)
-{
-	CHECK(mutex != NULL);
-}
-
-void
-mutex_unlock(struct mutex *mutex)
-{
-	CHECK(mutex != NULL);
-}
-
-void *
-kern_malloc(size_t size)
-{
-	return malloc(size);
-}
-
-void *
-kern_calloc(size_t count, size_t size)
-{
-	return calloc(count, size);
-}
-
-void
-kern_free(void *pointer)
-{
-	free(pointer);
-}
-
-int
-disk_read(struct disk *disk, uint64_t block, uint32_t count, void *data)
-{
-	CHECK(disk != NULL);
-	CHECK(data != NULL);
-	CHECK(count <= FIXTURE_SECTORS);
-	CHECK(block <= FIXTURE_SECTORS - count);
-	memcpy(data, fixture_disk + block * FIXTURE_SECTOR_SIZE,
-	    (size_t)count * FIXTURE_SECTOR_SIZE);
-	read_calls++;
-	return 0;
-}
-
-int
-disk_write(struct disk *disk, uint64_t block, uint32_t count,
-    const void *data)
-{
-	struct fixture_write_result result;
-
-	CHECK(disk != NULL);
-	CHECK(data != NULL);
-	CHECK(count <= FIXTURE_SECTORS);
-	CHECK(block <= FIXTURE_SECTORS - count);
-	CHECK(write_calls < sizeof(write_results) / sizeof(write_results[0]));
-	result = write_results[write_calls++];
-	if (result.commit)
-		memcpy(fixture_disk + block * FIXTURE_SECTOR_SIZE, data,
-		    (size_t)count * FIXTURE_SECTOR_SIZE);
-	return result.error;
-}
-
-static uint8_t *
-directory_block(void)
-{
-	return fixture_disk + FIXTURE_DIRECTORY_FRAGMENT * FIXTURE_SECTOR_SIZE;
-}
-
-static void
-initialize_directory(struct fixture_ufs1_mount_state *state,
-    struct fixture_ufs1_inode_info *directory, struct mount *mount,
-    struct disk *disk)
-{
-	uint8_t *block;
-
-	memset(fixture_disk, 0xa5, sizeof(fixture_disk));
-	memset(write_results, 0, sizeof(write_results));
-	memset(state, 0, sizeof(*state));
-	memset(directory, 0, sizeof(*directory));
-	memset(mount, 0, sizeof(*mount));
-	memset(disk, 0, sizeof(*disk));
-	read_calls = 0;
-	write_calls = 0;
-
-	state->super.bsize = FIXTURE_SECTOR_SIZE;
-	state->super.fsize = FIXTURE_SECTOR_SIZE;
-	state->super.frag = 1;
-	state->super.fsbtodb = 0;
-	state->super.size = FIXTURE_SECTORS;
-	state->writable = 1;
-	mount->m_data = state;
-	mount->m_disk = disk;
-	disk->d_block_size = FIXTURE_SECTOR_SIZE;
-	disk->d_block_count = FIXTURE_SECTORS;
-	directory->inode.i_mount = mount;
-	directory->inode.i_type = INODE_DIR;
-	directory->inode.i_size = UFS1_DIRBLKSIZ;
-	directory->direct[0] = FIXTURE_DIRECTORY_FRAGMENT;
-
-	block = directory_block();
-	memset(block, 0, FIXTURE_SECTOR_SIZE);
-	ufs1_put32(block, 0, FIXTURE_OLD_INO, 0);
-	ufs1_put16(block, 4, UFS1_DIRBLKSIZ, 0);
-	block[6] = 8;
-	block[7] = 6;
-	memcpy(block + 8, "victim", 6);
-}
-
-static void
-test_ufs1_namespace_write_failure(void)
-{
-	static const struct componentname victim = { "victim", 6, 0 };
-	struct fixture_ufs1_mount_state state;
-	struct fixture_ufs1_inode_info directory;
-	struct mount mount;
-	struct disk disk;
-	uint8_t original[FIXTURE_SECTOR_SIZE];
-	uint32_t old_number;
-	uint8_t old_type;
-
-	initialize_directory(&state, &directory, &mount, &disk);
-	memcpy(original, directory_block(), sizeof(original));
-	write_results[0] = (struct fixture_write_result){ 0, 1 };
-	CHECK_ERROR(ufs1_dir_replace(&directory.inode, &victim,
-	    FIXTURE_NEW_INO, 4, &old_number, &old_type), 0);
-	CHECK(old_number == FIXTURE_OLD_INO);
-	CHECK(old_type == 8);
-	CHECK(ufs1_get32(directory_block(), 0, 0) == FIXTURE_NEW_INO);
-	CHECK(directory_block()[6] == 4);
-	CHECK(memcmp(directory_block() + 8, "victim", 6) == 0);
-	CHECK(read_calls == 1U);
-	CHECK(write_calls == 1U);
-
-	/* A conventional failed write leaves the old block, and the production
-	 * rollback still rewrites the captured original before returning EIO. */
-	initialize_directory(&state, &directory, &mount, &disk);
-	memcpy(original, directory_block(), sizeof(original));
-	write_results[0] = (struct fixture_write_result){ EIO, 0 };
-	write_results[1] = (struct fixture_write_result){ 0, 1 };
-	CHECK_ERROR(ufs1_dir_replace(&directory.inode, &victim,
-	    FIXTURE_NEW_INO, 4, &old_number, &old_type), EIO);
-	CHECK(memcmp(directory_block(), original, sizeof(original)) == 0);
-	CHECK(read_calls == 1U);
-	CHECK(write_calls == 2U);
-	CHECK(state.writable == 1);
-
-	/* A backend may report failure after changing media.  The same rollback
-	 * must remove that uncertain namespace mutation as well. */
-	initialize_directory(&state, &directory, &mount, &disk);
-	memcpy(original, directory_block(), sizeof(original));
-	write_results[0] = (struct fixture_write_result){ EIO, 1 };
-	write_results[1] = (struct fixture_write_result){ 0, 1 };
-	CHECK_ERROR(ufs1_dir_replace(&directory.inode, &victim,
-	    FIXTURE_NEW_INO, 4, &old_number, &old_type), EIO);
-	CHECK(memcmp(directory_block(), original, sizeof(original)) == 0);
-	CHECK(write_calls == 2U);
-	CHECK(state.writable == 1);
-
-	/* If even rollback fails, its error wins and the mount is quarantined. */
-	initialize_directory(&state, &directory, &mount, &disk);
-	write_results[0] = (struct fixture_write_result){ EIO, 1 };
-	write_results[1] = (struct fixture_write_result){ ENOSPC, 0 };
-	CHECK_ERROR(ufs1_dir_replace(&directory.inode, &victim,
-	    FIXTURE_NEW_INO, 4, &old_number, &old_type), ENOSPC);
-	CHECK(write_calls == 2U);
-	CHECK(state.writable == 0);
-}
-
-int
-main(void)
-{
-	test_ufs1_namespace_write_failure();
-	printf("ws001-p023 UFS1 namespace write/rollback: PASS (%u checks)\n",
-	    checks);
-	return EXIT_SUCCESS;
-}
-
-#elif defined(WS001_P023_UFS2_MUTATION)
-
-/* UFS2 intentionally receives its own complete fixture implementation. */
-struct fixture_ufs2_mount_state {
-	struct ufs2_super super;
-	struct mutex namespace_lock;
-	struct mutex lock;
-	struct mutex journal_lock;
-	uint8_t *cg;
-	uint32_t cg_iusedoff;
-	uint32_t cg_freeoff;
-	uint32_t cg_nextfreeoff;
-	uint32_t active_cg;
-	uint32_t rotor_cg;
-	struct ufs2_journal journal;
-	struct ufs2_snapshot snapshot;
-	struct ufs2_snapshot_entry *snapshot_map;
-	struct disk *snapshot_disk;
-	struct mutex snapshot_lock;
-	struct quota_state quota;
-	int journal_enabled;
-	int snapshot_available;
-	int writable;
-};
-
-struct fixture_ufs2_inode_info {
-	struct inode inode;
-	uint64_t extattr[UFS2_NXADDR];
-	uint32_t extattr_size;
-	uint64_t direct[UFS2_NDADDR];
-	uint64_t indirect[UFS2_NIADDR];
-	uint32_t disk_flags;
-	uint64_t blocks;
-	uint32_t generation;
-	uint8_t shortlink[120];
-};
-
-#define FIXTURE_SECTOR_SIZE UFS2_SECTOR_SIZE
+#define FIXTURE_SECTOR_SIZE UFS_SECTOR_SIZE
 #define FIXTURE_SECTORS 64U
 #define FIXTURE_DIRECTORY_FRAGMENT 10U
 #define FIXTURE_OLD_INO 41U
@@ -528,7 +269,7 @@ static unsigned read_calls;
 static unsigned write_calls;
 static unsigned inactive_consistency_calls;
 
-extern int ufs2_dir_replace(struct inode *, const struct componentname *,
+extern int ufs_dir_replace(struct inode *, const struct componentname *,
     uint32_t, uint8_t, uint32_t *, uint8_t *);
 
 void
@@ -593,7 +334,7 @@ disk_write(struct disk *disk, uint64_t block, uint32_t count,
 }
 
 int
-ufs2_snapshot_preserve(struct ufs2_snapshot *snapshot, uint64_t first,
+ufs_snapshot_preserve(struct ufs_snapshot *snapshot, uint64_t first,
     uint32_t count)
 {
 	(void)snapshot;
@@ -603,8 +344,16 @@ ufs2_snapshot_preserve(struct ufs2_snapshot *snapshot, uint64_t first,
 	return EIO;
 }
 
+#include "../../ws025-io-memory-cache/tests/journal-view-stubs-host.inc"
+int ufs_journal_read(struct ufs_journal *journal, uint64_t first,
+    uint32_t count, void *buffer)
+{
+ (void)journal;(void)first;(void)count;(void)buffer;
+ inactive_consistency_calls++;
+ return EIO;
+}
 int
-ufs2_journal_commit(struct ufs2_journal *journal, uint64_t target,
+ufs_journal_commit(struct ufs_journal *journal, uint64_t target,
     const void *payload, uint32_t sectors)
 {
 	(void)journal;
@@ -622,8 +371,8 @@ directory_block(void)
 }
 
 static void
-initialize_directory(struct fixture_ufs2_mount_state *state,
-    struct fixture_ufs2_inode_info *directory, struct mount *mount,
+initialize_directory(struct fixture_ufs_mount_state *state,
+    struct fixture_ufs_inode_info *directory, struct mount *mount,
     struct disk *disk)
 {
 	uint8_t *block;
@@ -650,24 +399,24 @@ initialize_directory(struct fixture_ufs2_mount_state *state,
 	disk->d_block_count = FIXTURE_SECTORS;
 	directory->inode.i_mount = mount;
 	directory->inode.i_type = INODE_DIR;
-	directory->inode.i_size = UFS2_DIRBLKSIZ;
+	directory->inode.i_size = UFS_DIRBLKSIZ;
 	directory->direct[0] = FIXTURE_DIRECTORY_FRAGMENT;
 
 	block = directory_block();
 	memset(block, 0, FIXTURE_SECTOR_SIZE);
-	ufs2_put32(block, 0, FIXTURE_OLD_INO, 0);
-	ufs2_put16(block, 4, UFS2_DIRBLKSIZ, 0);
+	ufs_put32(block, 0, FIXTURE_OLD_INO, 0);
+	ufs_put16(block, 4, UFS_DIRBLKSIZ, 0);
 	block[6] = 8;
 	block[7] = 6;
 	memcpy(block + 8, "victim", 6);
 }
 
 static void
-test_ufs2_namespace_write_failure(void)
+test_ufs_namespace_write_failure(void)
 {
 	static const struct componentname victim = { "victim", 6, 0 };
-	struct fixture_ufs2_mount_state state;
-	struct fixture_ufs2_inode_info directory;
+	struct fixture_ufs_mount_state state;
+	struct fixture_ufs_inode_info directory;
 	struct mount mount;
 	struct disk disk;
 	uint8_t original[FIXTURE_SECTOR_SIZE];
@@ -677,11 +426,11 @@ test_ufs2_namespace_write_failure(void)
 	initialize_directory(&state, &directory, &mount, &disk);
 	memcpy(original, directory_block(), sizeof(original));
 	write_results[0] = (struct fixture_write_result){ 0, 1 };
-	CHECK_ERROR(ufs2_dir_replace(&directory.inode, &victim,
+	CHECK_ERROR(ufs_dir_replace(&directory.inode, &victim,
 	    FIXTURE_NEW_INO, 4, &old_number, &old_type), 0);
 	CHECK(old_number == FIXTURE_OLD_INO);
 	CHECK(old_type == 8);
-	CHECK(ufs2_get32(directory_block(), 0, 0) == FIXTURE_NEW_INO);
+	CHECK(ufs_get32(directory_block(), 0, 0) == FIXTURE_NEW_INO);
 	CHECK(directory_block()[6] == 4);
 	CHECK(memcmp(directory_block() + 8, "victim", 6) == 0);
 	CHECK(read_calls == 1U);
@@ -692,7 +441,7 @@ test_ufs2_namespace_write_failure(void)
 	memcpy(original, directory_block(), sizeof(original));
 	write_results[0] = (struct fixture_write_result){ EIO, 0 };
 	write_results[1] = (struct fixture_write_result){ 0, 1 };
-	CHECK_ERROR(ufs2_dir_replace(&directory.inode, &victim,
+	CHECK_ERROR(ufs_dir_replace(&directory.inode, &victim,
 	    FIXTURE_NEW_INO, 4, &old_number, &old_type), EIO);
 	CHECK(memcmp(directory_block(), original, sizeof(original)) == 0);
 	CHECK(read_calls == 1U);
@@ -704,7 +453,7 @@ test_ufs2_namespace_write_failure(void)
 	memcpy(original, directory_block(), sizeof(original));
 	write_results[0] = (struct fixture_write_result){ EIO, 1 };
 	write_results[1] = (struct fixture_write_result){ 0, 1 };
-	CHECK_ERROR(ufs2_dir_replace(&directory.inode, &victim,
+	CHECK_ERROR(ufs_dir_replace(&directory.inode, &victim,
 	    FIXTURE_NEW_INO, 4, &old_number, &old_type), EIO);
 	CHECK(memcmp(directory_block(), original, sizeof(original)) == 0);
 	CHECK(write_calls == 2U);
@@ -714,7 +463,7 @@ test_ufs2_namespace_write_failure(void)
 	initialize_directory(&state, &directory, &mount, &disk);
 	write_results[0] = (struct fixture_write_result){ EIO, 1 };
 	write_results[1] = (struct fixture_write_result){ ENOSPC, 0 };
-	CHECK_ERROR(ufs2_dir_replace(&directory.inode, &victim,
+	CHECK_ERROR(ufs_dir_replace(&directory.inode, &victim,
 	    FIXTURE_NEW_INO, 4, &old_number, &old_type), ENOSPC);
 	CHECK(write_calls == 2U);
 	CHECK(state.writable == 0);
@@ -724,8 +473,8 @@ test_ufs2_namespace_write_failure(void)
 int
 main(void)
 {
-	test_ufs2_namespace_write_failure();
-	printf("ws001-p023 UFS2 namespace write/rollback: PASS (%u checks)\n",
+	test_ufs_namespace_write_failure();
+	printf("ws001-p023 UFS namespace write/rollback: PASS (%u checks)\n",
 	    checks);
 	return EXIT_SUCCESS;
 }
@@ -755,6 +504,7 @@ struct fixture_overlay_metadata {
 };
 
 struct fixture_overlay_mount_state {
+	struct mount *owner;
 	struct path upper_root;
 	struct path lower_root;
 	unsigned flags;
@@ -768,6 +518,7 @@ struct fixture_overlay_mount_state {
 	uint64_t sequence;
 	uint32_t journal_generation;
 	uint16_t temp_counter;
+	struct mutex copy_up_lock;
 };
 
 struct fixture_overlay_inode_info {
@@ -867,7 +618,7 @@ file_close(struct file *file)
 }
 
 int
-mount_sync(struct mount *mount)
+mount_sync_backend(struct mount *mount)
 {
 	CHECK(mount == expected_upper_mount);
 	event('M');
@@ -985,3 +736,15 @@ main(void)
 #else
 #error select one WS001 p016 fixture
 #endif
+
+/* Models the explicit lower backend drain without a VM layer in this fixture. */
+int file_fsync_backend(struct file *file) { return file_fsync(file); }
+
+/* Synchronous media adapter retains the production context validation. */
+int
+disk_write_context(struct disk *disk, uint64_t block, uint32_t count,
+    const void *data, const struct io_context *context)
+{
+	int error = io_context_validate(context);
+	return error != 0 ? error : disk_write(disk, block, count, data);
+}

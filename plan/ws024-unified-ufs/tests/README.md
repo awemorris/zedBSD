@@ -1,20 +1,26 @@
-# WS024 test index
+# Unified UFS acceptance fixtures
 
-Last updated: 2026-09-06
+The [acceptance matrix](acceptance.md) defines the final WS gates. A passed
+focused fixture does not claim all matrix rows.
 
-Parent: [WS024](../ws.md)
+- `run-driver-host.py OUT`: production unified metadata, allocation/truncate,
+  run, view and journal/snapshot consistency in ordinary + sanitizer variants.
+- `run-width-host.py OUT`: real freestanding LP64 and ILP32 mapping and size
+  boundary executables, independent of missing host i386 libc headers.
+- `ufs-super-host.c`: both-endian canonical and malformed geometry decoder gate.
+- `run-formatter-images.py OUT`: target/C/Python producer agreement, ordinary
+  and explicit persistence profiles, dynamic group count and sparse maximum.
+- `run-formatter-fault-host.sh`: maintained formatter failure, corruption,
+  prefilled backing, bounded I/O and Noct agreement gates.
+- `features.mk` / `run-features-qemu.py OUT`: public syscall namespace, extattr,
+  user/group quota, mounted snapshot, remount and reboot acceptance. Build the
+  normal amd64 image and `ws024-features-fixture` sequentially first. Runtime
+  copies the protected source image and creates a disposable secondary medium.
 
-Planned acceptance; no fixture or test execution is claimed by this record.
-P001 freezes concrete bounds and the selected implementation Queue supplies
-its finite runtime budget.
+OUT must be a fresh directory below this WS's `temp/`, except the WS025 native
+baseline which retains its owner and writes below WS025 `temp/`. Never run tests
+against external user media. Historical completed Queue results stay unchanged.
 
-| Area | Required result |
-| --- | --- |
-| Format and width | One documented format; checked 64-bit addressing on 32/64-bit ABIs; explicit limits and legacy-image rejection |
-| Driver behavior | Ordinary I/O and metadata, endian handling, extended attributes, persistent quotas, journal/snapshot recovery and lifecycle remain passing |
-| Generation | Target and host output matches the selected production format; retained reservation/refusal/flush/read-back cases pass |
-| Boot and persistence | Native and overlay roots boot; generated upper data persists across unmount/remount and reboot |
-| Retirement | One active driver/registration/formatter path; no permanent UFS1/UFS2 fork or stale build consumer |
-
-Place reusable fixtures here and disposable diagnostics under the WS `temp/`
-directory. Retain earlier WS018/WS019 results as historical baselines.
+- `platform-images.py OUT`: ARM64/RPi4/SPARC packaging with explicit synthetic inputs; no boot claim.
+- `retirement-inventory.py OUT.json`: active source/path and three supported kernel symbol audit.
+- `run-features-qemu.py OUT LEGACY_IMAGE [reject]`: preserved legacy UFS2 read-only mount, or UFS1 rejection, with whole-media hashes.

@@ -4,7 +4,7 @@ Last updated: 2026-09-06
 
 Phase ID: `ws024-p002`
 
-Status: planned; follows p001, not queued
+Status: completed (q101); final consolidated acceptance and retirement follow in p004
 
 Parent: [WS024](../ws.md)
 
@@ -29,3 +29,5 @@ UFS2 codec as the baseline and preserving required behavior from both drivers.
 
 This Phase does not introduce an unrelated filesystem feature, generic cache
 redesign or new block-device formatter.
+
+Implementation follows [q100 format contract](../format-contract.md) and [acceptance](../tests/acceptance.md).

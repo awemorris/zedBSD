@@ -250,8 +250,12 @@ check_in_loop_growth_faults(enum bootfat_type type, unsigned scale)
 	current_fault_ordinal = 0U;
 }
 
+
+#ifndef FAT_CURSOR_MAIN
+#define FAT_CURSOR_MAIN main
+#endif
 int
-main(void)
+FAT_CURSOR_MAIN(void)
 {
 	static const struct {
 		enum bootfat_type type;

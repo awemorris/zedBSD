@@ -4,7 +4,7 @@ Last updated: 2026-09-06
 
 Phase ID: `ws024-p003`
 
-Status: planned; follows p001/p002, not queued
+Status: completed (q101); legacy fixture dependency retirement and full integration follow in p004
 
 Parent: [WS024](../ws.md)
 
@@ -32,3 +32,5 @@ the same unified UFS format and public name.
 
 Keep FAT containers, partition tables, swap format and the existing installer
 mutation boundary intact. Apply the p001 legacy-image transition explicitly.
+
+Implementation follows [q100 format contract](../format-contract.md) and [acceptance](../tests/acceptance.md).

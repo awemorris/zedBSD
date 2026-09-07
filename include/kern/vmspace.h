@@ -40,6 +40,7 @@ vmspace_user_range_valid(
 
 struct file;
 struct vm_object;
+struct file_exec_snapshot;
 struct vm_object_page;
 struct vm_private_page;
 struct vm_region;
@@ -154,6 +155,7 @@ struct vm_region {
 	enum vm_region_backing backing;
 	struct file *file;
 	struct vm_object *object;
+	struct file_exec_snapshot *snapshot;
 	off_t file_offset;
 	uintptr_t data_start;
 	size_t data_size;
@@ -222,6 +224,10 @@ struct vmspace_pinned_page {
 };
 
 extern struct vmspace kernel_vmspace;
+
+/* Maps an already pinned immutable range privately at an unoccupied address. */
+int vmspace_map_exec_snapshot(struct vmspace *vm, uintptr_t start, uint32_t prot,
+    struct file_exec_snapshot *snapshot);
 
 struct vmspace *
 vmspace_create(void);

@@ -46,6 +46,8 @@ struct backing_range {
 };
 
 struct backing_claim {
+	refcount_t refs;
+	struct disk *pinned_leaf;
 	enum backing_claim_owner owner;
 	struct backing_object_key key;
 	struct backing_range *ranges;
@@ -68,6 +70,8 @@ struct backing_mutation {
 	unsigned filesystem;
 	unsigned used;
 };
+
+extern int vm_object_backing_busy(const struct backing_claim *) __attribute__((weak));
 
 static struct backing_claim *claims[BACKING_CLAIM_MAX];
 static struct backing_mutation mutations[BACKING_MUTATION_MAX];
@@ -183,6 +187,7 @@ backing_claim_prepare_inode(
 	claim = kern_calloc(1, sizeof(*claim));
 	if (claim == NULL)
 		return ENOMEM;
+	refcount_init(&claim->refs, 1);
 
 	/* Resolves the canonical identity of the backing file. */
 	error = inode_key(inode, &claim->key);
@@ -266,6 +271,15 @@ out_locked:
 	if (error != 0) {
 		kern_free(claim);
 		return error;
+	}
+
+	/* Tests VM ownership after closing admission, outside the claim spinlock. */
+	if (vm_object_backing_busy != NULL) {
+		error = vm_object_backing_busy(claim);
+		if (error != 0) {
+			backing_claim_release(claim);
+			return error;
+		}
 	}
 
 	*result = claim;
@@ -422,6 +436,7 @@ backing_claim_prepare_disk(
 	claim = kern_calloc(1, sizeof(*claim));
 	if (claim == NULL)
 		return ENOMEM;
+	refcount_init(&claim->refs, 1);
 
 	/* Allocates the single extent. */
 	claim->ranges = kern_calloc(1, sizeof(*claim->ranges));
@@ -513,6 +528,15 @@ out_locked:
  *
  * A NULL claim is ignored so that error paths can release unconditionally.
  */
+/* Retains a claim already owned by the caller across deferred I/O. */
+void
+backing_claim_ref(
+	const struct backing_claim *claim)
+{
+	if (claim != NULL)
+		refcount_get(&((struct backing_claim *)claim)->refs);
+}
+
 void
 backing_claim_release(
 	struct backing_claim *claim)
@@ -521,7 +545,7 @@ backing_claim_release(
 	unsigned long irq;
 
 	/* Ignores a missing claim. */
-	if (claim == NULL)
+	if (claim == NULL || !refcount_put(&claim->refs))
 		return;
 
 	/* Unregisters the claim from the registry slot that holds it. */
@@ -535,6 +559,8 @@ backing_claim_release(
 	}
 	spin_unlock_irqrestore(&claim_lock, irq);
 
+	/* The claim keeps its canonical device identity alive through final release. */
+	disk_release(claim->pinned_leaf);
 	/* Frees the extents and the record. */
 	kern_free(claim->ranges);
 	kern_free(claim);
@@ -626,6 +652,27 @@ backing_mutation_begin_disk(
 
 	/* Reports the reservation result. */
 	return error;
+}
+
+/*
+ * Reserves teardown of a retained, revoked physical medium.
+ *
+ * Its retained geometry is used only for exclusion, never data access.
+ */
+int
+backing_mutation_begin_retired_disk(
+	struct disk *disk,
+	struct backing_mutation_guard *guard)
+{
+	struct backing_range range;
+
+	if (disk == NULL || disk->d_parent != NULL || disk->d_block_count == 0 ||
+	    !atomic_raw_load_acquire(&disk->d_media_revoked))
+		return EINVAL;
+	range.leaf = disk;
+	range.first = 0;
+	range.last = disk->d_block_count;
+	return mutation_reserve(NULL, &range, NULL, NULL, 0, guard);
 }
 
 /*
@@ -1038,6 +1085,8 @@ claim_insert(
 	/* Registers the claim in the first free slot. */
 	for (index = 0; index < BACKING_CLAIM_MAX; index++) {
 		if (claims[index] == NULL) {
+			claim->pinned_leaf = claim->key_valid ? claim->key.leaf : claim->ranges[0].leaf;
+			disk_ref(claim->pinned_leaf);
 			claims[index] = claim;
 			claim->registered = 1;
 			return 0;

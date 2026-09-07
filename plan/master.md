@@ -1,13 +1,26 @@
 # zedBSD master plan
 
-Last updated: 2026-09-06
+Last updated: 2026-09-08
 
 Status: active
 
-Current queue: [q087](queue.md), finished 2026-09-06: request-sized regular
+Current queue: [q122](queue.md), finished. WS025 mandatory p001–p026 and required WS024 are complete, with integration acceptance, final policy and performance evidence. Conditional p027–p030 are explicitly not adopted and retain planned resume criteria.
+[q089](queue-q089.md) completed typed BIOS/UEFI memory handoff; [q090](queue-q090.md)
+completed sparse RAM mapping and early table ownership, including 16 GiB boots.
+[q088](queue-q088.md) completed p001: counters, FS50/Wi-Fi30, three x86 builds and
+404 native samples. [Baseline results](ws025-io-memory-cache/phase001-baseline-contracts/results.md).
+The user authorized successive finite Queues through WS025 completion on
+2026-09-07. Previous [q087](queue-q087.md) finished 2026-09-06: request-sized regular
 file syscall I/O ([WS018 p020 results](ws018-kernel-architecture/phase020-syscall-request-batching/results.md)). [Q086](queue-q086.md) completed all four phases
 and [50 acceptance stories](ws018-kernel-architecture/phase019-storage-acceptance/results.md).
 Broader FS/USB work remains in the [follow-up matrix](fs-report-followups.md).
+
+The user approved the buffer/cache direction on 2026-09-07 and requested an
+independent [WS025](ws025-io-memory-cache/ws.md), including removal of the
+amd64 1 GiB RAM limit and loader-side memory reporting limits. Its detailed
+design, 30 Phases, and acceptance matrix are recorded. The completed p001 baseline
+confirms downstream I/O splitting and the allocator cap. p002/p003 now retain and map
+high RAM; p004 proceeds under q091 with normal high-memory publication still gated.
 
 ## 1. Purpose
 
@@ -483,13 +496,14 @@ allowed to block first communication unless the normal path depends on them.
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Queue-ready; permission ceiling selected | No Phase started; p001 Queue-ready | After WS022, Queue p001--p004; RW mappings may return from RO to RW within their original maximum | [WS017](ws017-lfb-graphics/ws.md) |
-| `ws018` | Kernel source ownership and interface consolidation | p001--p020 complete (`q087`) | q086 FS/USB 50-story gate; q087 request-sized syscall transfers, three x86 builds and native USB-root persistence pass | No selected phase remains; larger I/O/writeback and other review work stay in the FS follow-up matrix | [WS018](ws018-kernel-architecture/ws.md) |
+| `ws018` | Kernel source ownership and interface consolidation | p001--p020 complete (`q087`) | q086 FS/USB 50-story gate; q087 request-sized syscall transfers, three x86 builds and native USB-root persistence pass | No selected phase remains; I/O/cache/write-back follow-up is planned under WS025, with unrelated residuals retained in the FS follow-up matrix | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Active; q079 formatters complete | p002/p003, p008/p009 and p010/p011/p012 complete | Resolve p004 provenance/publication prerequisites before p004/p005 installer work | [WS019](ws019-installation/ws.md) |
 | `ws020` | Intel Mac UEFI bring-up and generic image variants | Complete (user physical confirmation, 2026-09-05) | Automatic Variant/GPT/QEMU gates and successful Intel Mac real-hardware operation pass | No Phase remains; explicit acceptance supersedes the older five-run campaign | [WS020](ws020-intel-mac/ws.md) |
 | `ws021` | Reproducible x86 LLVM toolchain and sysroots | Complete (`q064`) | LLVM 23.1.0 cache/source paths, amd64/i386 sysroots, all x86 target/loader builds, four CI configurations, six-cell amd64 firmware matrix, i386 PC/AT and PC-98, and target noct non-JIT/JIT/BeUI gates pass | No current Phase; the source-build path and pinned `rev-0` cache remain supported in parallel | [WS021](ws021-llvm-toolchain/ws.md) |
 | `ws022` | ELF `PT_TLS` and static thread-local storage | Queue-ready; WS021 dependency satisfied | No Phase started | Queue p001 to freeze the x86 TLS/TCB ABI and fixtures, then implement p002/p003 | [WS022](ws022-elf-tls/ws.md) |
 | `ws023` | i386/amd64 HAL coding-style conformance | Complete (`q067`) | All 88 C/header files, focused/strict gates, four configured builds, and four x86 runtime cells pass; API/ABI review found no delta | No current Phase; retain the q067 evidence and extract pre-existing risks separately if prioritized | [WS023](ws023-x86-hal-style/ws.md) |
-| `ws024` | Single 64-bit UFS | Planned; user direction recorded, not queued | No Phase started; UFS1/UFS2 consolidation is settled | Freeze p001 format/migration contract, then unify driver, formatters and image consumers; scheduling remains for a later Queue | [WS024](ws024-unified-ufs/ws.md) |
+| `ws024` | Single 64-bit UFS | Complete (q102) | p001–p004 complete; U01–U24 selected acceptance, storage 50/50, WiFi 30, three builds and source retirement pass | WS025 batching consumes the single unified owner | [WS024](ws024-unified-ufs/ws.md) |
+| `ws025` | I/O, cache and physical-memory redesign | Completed; mandatory p001–p026 and required WS024 | Host/sanitizer, 14 RAM cells, USB/NVMe, media recovery/shutdown, FS50 50/50, Wi-Fi30 30/30 and 404 performance samples pass; ordinary artifacts restored; physical gate user-accepted | Conditional p027–p030 explicitly not adopted; resume only on their recorded measurement/hardware criteria | [WS025](ws025-io-memory-cache/ws.md) |
 
 ## 4. Milestones
 
@@ -577,6 +591,13 @@ WS004 p022-p025 NVMe driver/read-only hardware acceptance
 
 WS004 SMP/IRQ/timer/reset + WS001 POSIX boundary
   +-- WS015 μITRON asymmetric RT domain -- WS009 public API and timing contract
+
+WS018 q086/q087 + WS003/WS004 x86 boot/DMA foundation
+  +-- WS025 memory handoff -> separate RAM direct map -> allocator/DMA -> high RAM
+  +-- WS025 pool/cache/UFS/USB runs -> metadata batching -> file cache/reclaim
+       -> dirty/error/drain -> data write-back -> async/readahead/SG
+WS024 single UFS/format/image migration (write-through remains sufficient)
+  + WS025 data/dirty/persistence contracts -> WS025 unified metadata journal/write-back
 
 WS001 compliance and WS009 documentation cross all workstreams.
 WS010 supplies host-side build and test scripting used by all workstreams.
@@ -685,10 +706,21 @@ SuperSpeed unit on channel 1 and 20-MHz W52 channel 44.
 Supplied runtime credentials are stored
 only in the user-authorized private file and are not recorded in planning books.
 
+On 2026-09-07 the user approved [buffer-plan-codex-2.md](buffer-plan-codex-2.md)
+and explicitly released the former diagnostic amd64 1 GiB memory limit.
+[WS025](ws025-io-memory-cache/ws.md) records the requested independent design
+and Phase decomposition. UEFI already preserves high range addresses; kernel
+accounting/mapping/allocation still cap them, while BIOS needs an E820 range
+handoff. The plan separates the small bootstrap map from the permanent RAM
+map, and requires DMA constraints before high RAM is generally allocated.
+The user subsequently authorized autonomous execution through WS025 completion.
+P001--p005 are complete under q088--q092; q093 selects p006 without repeated approval.
+
 ## 7. Decisions that gate new Phases
 
 | Decision | Owning WS | Required before |
 | --- | --- | --- |
+| I/O/cache redesign and amd64 1 GiB removal | WS025 | Resolved on 2026-09-07: buffer-plan-codex-2 direction approved; remove the diagnostic RAM limit and loader reporting truncation, use typed firmware ranges with separate permanent RAM mapping and constrained DMA; detailed M/W/P recorded; autonomous execution authorized, p001--p010 completed under q088--q097; q098 p012 complete; q099 p014 complete |
 | Exact Latitude BIOS, boot mode, PCI/USB topology and IDs | WS003 | Driver selection and hardware acceptance |
 | Exact CF-SV7 DMI identity, firmware settings, CPU/APIC mode, PCI/USB topology, and IDs | WS003 | Later device-specific driver selection; p020 early IRQ and p021 portable-GPT work do not depend on the remaining inventory |
 | Intel Mac identity, firmware, and target-medium inventory | WS020 | p004 physical acceptance only; no exact capacity match is required because the fixed GPT extent may precede the physical end |
@@ -724,7 +756,7 @@ only in the user-authorized private file and are not recorded in planning books.
 | Installer payload discovery | WS013 p002 | Resolved for q031: search same-physical-disk FAT16/FAT32; zero `/zedbsd.cfg` candidates is fatal, multiple candidates warn and use the deterministic first, and omitted `boot0` defaults to the selected config FAT while an explicit value is preserved |
 | Installed UEFI `LoadOptions` precedence | WS013 p002/p003 | Resolved for q031: ignore LoadOptions on the required `zedbsd.cfg` path; do not merge or override the configuration |
 | Installer source-image stability | WS019 p004/p008/p009 | Resolved on 2026-09-05: no templates. `zedinst` creates unpublished regular files and invokes target `/sbin/mkfs` for existing UFS1 and `/sbin/mkswap` for existing ZEDSWAP2; it never copies the live overlay upper or active swap |
-| UFS1/UFS2 consolidation | WS024 / WS018 / WS019 | Resolved on 2026-09-06: one filesystem named UFS with one 64-bit implementation on both 32-bit and 64-bit CPUs. Use the current UFS2 codec as the implementation starting point, preserve required features, and migrate driver/formatter/boot/image consumers together. P001 freezes disk identification, limits and old-image handling; separate permanent UFS1/UFS2 implementations are no longer the target. Recorded only, not queued. |
+| UFS1/UFS2 consolidation | WS024 / WS018 / WS019 | Resolved on 2026-09-06: one filesystem named UFS with one 64-bit implementation on both 32-bit and 64-bit CPUs. Use the current UFS2 codec as the implementation starting point, preserve required features, and migrate driver/formatter/boot/image consumers together. P001 freezes disk identification, limits and old-image handling; separate permanent UFS1/UFS2 implementations are no longer the target. Contract frozen by q100; implementation active in q101 as a WS025 dependency. |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
 | Confirmed-commit ownership and bounds | WS011 p005--p008 | Resolved on 2026-09-05: interactive originating `net` owns candidate/token in memory and alone writes `/etc/net.conf` on ordinary commit; networkd owns only the volatile timer/open `/tmp` rollback program and never touches that file; client loss makes confirmation/adoption impossible, while explicit rollback or timeout remains; p005 freezes all size/time/lock/acknowledgement bounds; p007 owns automatic QEMU acceptance and p008 the later physical remote observation |
 | Authoritative Noct repository, build sequence, and release | WS008 | Resolved by q063: official `awemorris/NoctLang` release `v2.0.1`, tag commit `ed621e79139f55d06dd1a474243afbf0ce5efe0a`, archive size `2524680`, and SHA-256 `68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f` are the common host/target identity. Both `--path` forms, toolchain/ordinary build, amd64 target package, and q35/xHCI non-JIT/JIT/BeUI gates pass. The target-only two-hunk final-link patch is explicitly not BeUI; Remacs and i386/PC-98 target support remain outside the accepted scope. |

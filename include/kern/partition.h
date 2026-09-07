@@ -23,6 +23,8 @@
 #define PARTITION_HAS_LABEL	0x0002U
 #define PARTITION_HAS_UUID	0x0004U
 
+int partition_retire_media(struct disk *parent);
+
 struct partition {
 	struct disk *p_parent;
 	struct disk *p_disk;

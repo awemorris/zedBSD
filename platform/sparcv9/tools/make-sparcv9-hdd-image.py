@@ -134,7 +134,7 @@ def create(args: argparse.Namespace) -> None:
     if args.ufs_root is not None:
         require(args.ufs_root)
         if args.ufs_root.stat().st_size % SECTOR_SIZE:
-            raise SystemExit("UFS1 root image is not sector aligned")
+            raise SystemExit("UFS root image is not sector aligned")
     if args.output.exists() and not args.force:
         raise SystemExit(f"output exists (use --force): {args.output}")
 
@@ -152,7 +152,7 @@ def create(args: argparse.Namespace) -> None:
     fat_sectors = UFS_FAT_SECTORS if root_sectors else image_sectors - FAT_LBA
     root_lba = FAT_LBA + fat_sectors
     if root_lba % SECTORS_PER_CYLINDER or root_lba + root_sectors > image_sectors:
-        raise SystemExit("UFS1 root does not fit cylinder-aligned slice d")
+        raise SystemExit("UFS root does not fit cylinder-aligned slice d")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=args.output.name + ".", dir=args.output.parent

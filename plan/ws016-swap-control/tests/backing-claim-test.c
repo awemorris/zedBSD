@@ -410,8 +410,37 @@ main(void)
 	assert(backing_claim_prepare_disk(&partition, 0, partition.d_block_count,
 					  BACKING_CLAIM_SWAP,
 					  &raw_claim) == 0);
+	assert(refcount_load(&leaf.d_refs) == 1);
+	backing_claim_ref(raw_claim);
 	backing_claim_release(raw_claim);
+	assert(refcount_load(&leaf.d_refs) == 1);
+	backing_claim_release(raw_claim);
+	assert(refcount_load(&leaf.d_refs) == 0);
 
-	puts("SWAP-T003/T004 backing claims: PASS");
+
+	assert(backing_mutation_begin_retired_disk(&leaf, &guard) == EINVAL);
+	leaf.d_media_revoked = 1;
+	assert(backing_claim_prepare_disk(&partition, 0, 1, BACKING_CLAIM_SWAP, &raw_claim) == 0);
+	assert(backing_mutation_begin_retired_disk(&leaf, &guard) == EBUSY);
+	backing_claim_release(raw_claim);
+	assert(backing_mutation_begin_retired_disk(&leaf, &guard) == 0);
+	assert(backing_claim_prepare_disk(&partition, 0, 1, BACKING_CLAIM_SWAP, &raw_claim) == EBUSY);
+	backing_mutation_end(&guard);
+	assert(refcount_load(&leaf.d_refs) == 0);
+	puts("SWAP-T003/T004 backing claims and revoked-media exclusion: PASS");
 	return 0;
+}
+
+/* Claim-held physical identities remain pinned through their final owner. */
+void disk_ref(struct disk *disk)
+{
+	if (disk != NULL)
+		__atomic_add_fetch(&disk->d_refs.value, 1, __ATOMIC_RELAXED);
+}
+void disk_release(struct disk *disk)
+{
+	if (disk != NULL) {
+		if (__atomic_fetch_sub(&disk->d_refs.value, 1, __ATOMIC_RELAXED) == 0)
+			abort();
+	}
 }

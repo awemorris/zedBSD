@@ -1362,6 +1362,106 @@ enter_protected_mode:
 	.long 0x10000 + protected_entry
 	.word 0x08
 
+/* Collects complete 20/24-byte E820 records before leaving BIOS services. */
+collect_e820:
+	push es
+	push ds
+	pop es
+	xor ebx, ebx
+	mov dword ptr [e820_count], 0
+	mov dword ptr [e820_count + 4], 0
+.Le820_next:
+	cmp dword ptr [e820_count], ZBL6_MAX_MEMORY_RANGES
+	jae fatal_memory
+	mov eax, dword ptr [e820_count]
+	imul edi, eax, 24
+	add edi, offset e820_raw
+	mov dword ptr [edi + 20], 1
+	mov eax, 0xe820
+	mov edx, 0x534d4150
+	mov ecx, 24
+	push ds
+	push es
+	int 0x15
+	pop es
+	pop ds
+	setc byte ptr [e820_carry]
+.code16gcc
+	push ebx
+	push ecx
+	push eax
+	movzx eax, byte ptr [e820_carry]
+	push eax
+	mov eax, ZBL6_MAX_MEMORY_RANGES
+	push eax
+	mov eax, offset e820_raw
+	push eax
+	mov eax, offset e820_count
+	push eax
+	call zbl_bios_e820_accept
+	add esp, 28
+.code16
+	test eax, eax
+	jz .Le820_next
+	cmp eax, 1
+	je .Le820_complete
+	cmp eax, 2
+	jne fatal_memory
+	/* Only an unavailable first call retains the explicit legacy form. */
+	mov si, offset msg_e820_legacy
+	call16 puts
+	pop es
+	ret16
+.Le820_complete:
+	/* C receives offsets in the loader's DS, using its 32-bit call ABI. */
+.code16gcc
+	mov eax, offset long_memory + ZBL6_MEMORY_COUNT_OFFSET
+	push eax
+	mov eax, ZBL6_MAX_MEMORY_RANGES
+	push eax
+	mov eax, offset e820_ranges
+	push eax
+	push dword ptr [e820_count]
+	mov eax, offset e820_raw
+	push eax
+	call zbl_bios_normalize_memory_map
+	add esp, 20
+.code16
+	test eax, eax
+	jnz fatal_memory
+	/* Derives the exact loaded extent from validated ELF64 load records. */
+	mov esi, offset ph_table
+	movzx ecx, word ptr [ph_load_count]
+	mov ebx, 0xffffffff
+	xor edx, edx
+.Le820_kernel:
+	mov eax, dword ptr [esi + 4]
+	cmp eax, ebx
+	jae 1f
+	mov ebx, eax
+1:	add eax, dword ptr [esi + 12]
+	jc fatal_memory
+	cmp eax, edx
+	jbe 2f
+	mov edx, eax
+2:	add esi, PH_RECORD_SIZE
+	loop .Le820_kernel
+	mov dword ptr [long_memory + ZBL6_MEMORY_KERNEL_START_OFFSET], ebx
+	mov dword ptr [long_memory + ZBL6_MEMORY_KERNEL_END_OFFSET], edx
+	mov dword ptr [e820_allocations], ebx
+	add edx, 4095
+	jc fatal_memory
+	and edx, 0xfffff000
+	sub edx, ebx
+	mov dword ptr [e820_allocations + 8], edx
+	mov word ptr [long_handoff + ZBL6_HANDOFF_VERSION_OFFSET], ZBL6_HANDOFF_V6_VERSION
+	mov word ptr [long_handoff + ZBL6_HANDOFF_SIZE_OFFSET], ZBL6_HANDOFF_V6_BIOS_SIZE
+	or word ptr [long_handoff + ZBL6_HANDOFF_FLAGS_OFFSET], ZBL6_HANDOFF_FLAG_MEMORY_MAP | ZBL6_HANDOFF_FLAG_BOOT_ALLOCATIONS
+	mov si, offset msg_e820_ok
+	call16 puts
+	pop es
+	ret16
+
 /* Build a one-GiB identity map and the usual ffffffff80000000 window. */
 enter_long_mode:
 	mov eax, 0x80000000
@@ -1390,6 +1490,7 @@ enter_long_mode:
 	mov dword ptr [long_handoff + ZBL6_HANDOFF_MEM_LOWER_OFFSET], eax
 	mov eax, dword ptr [mbi_mem_upper]
 	mov dword ptr [long_handoff + ZBL6_HANDOFF_MEM_UPPER_OFFSET], eax
+	call16 collect_e820
 	call16 unreal_gs
 	mov edi, 0x00050000
 	mov ecx, 0x6000 / 4
@@ -1525,6 +1626,7 @@ fatal_path:
 fatal_config:    mov al, 'C'; jmp fatal
 fatal_elf:       mov al, 'E'; jmp fatal
 fatal_elf64:     mov al, '6'; jmp fatal
+fatal_memory:    mov al, 'R'; jmp fatal
 fatal_disk:      mov al, 'D'
 fatal:
 	push ax
@@ -1538,6 +1640,8 @@ fatal:
 1:	hlt
 	jmp 1b
 
+msg_e820_ok:   .asciz "E820 v6 complete\n"
+msg_e820_legacy: .asciz "E820 unavailable: legacy memory fallback\n"
 msg_start:     .asciz "S4 "
 msg_mbr:       .asciz "MB "
 msg_partition: .asciz "P1 "
@@ -1670,6 +1774,28 @@ long_handoff:
 	.long 0
 	.space ZBL6_HANDOFF_FB_SIZE - ZBL6_HANDOFF_SIZE
 	.space ZEDBSD_BOOT_PARAMETER_RECORD_SIZE
+long_memory:
+	.long ZBL6_MEMORY_SOURCE_BIOS_E820, ZBL6_MEMORY_MAP_COMPLETE
+	.long 0, ZBL6_MEMORY_RANGE_V6_SIZE
+	.long 0x10000 + e820_ranges, 0
+	.long 4, ZBL6_BOOT_ALLOCATION_SIZE
+	.long 0x10000 + e820_allocations, 0
+	.quad 0x50000, 0, 0
+.balign 8
+e820_allocations:
+	.quad 0, 0
+	.long ZBL6_BOOT_OWNER_KERNEL, ZBL6_BOOT_KEEP
+	.quad 0x10000, 0x10000
+	.long ZBL6_BOOT_OWNER_LOADER, ZBL6_BOOT_AFTER_INIT
+	.quad 0x50000, 0x6000
+	.long ZBL6_BOOT_OWNER_BOOTSTRAP, ZBL6_BOOT_AFTER_INIT
+	.quad 0x9d000, 0x2000
+	.long ZBL6_BOOT_OWNER_STACK, ZBL6_BOOT_AFTER_INIT
+e820_count: .long 0, 0
+e820_carry: .byte 0
+.balign 8
+e820_raw: .space ZBL6_MAX_MEMORY_RANGES * 24
+e820_ranges: .space ZBL6_MAX_MEMORY_RANGES * ZBL6_MEMORY_RANGE_V6_SIZE
 
 fat_cache: .space 1024
 directory_state: .space ZBL_BIOS_FAT_DIRECTORY_STATE_SIZE

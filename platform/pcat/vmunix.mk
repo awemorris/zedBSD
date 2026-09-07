@@ -11,7 +11,7 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 HAL_PCAT_SOURCES := src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/x86/rtc.c src/hal/x86/boot-parameters.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c \
 	src/hal/i386/mps.c src/hal/i386/acpi.c src/hal/i386/lapic.c \
 	src/hal/i386/ioapic.c \
-	src/hal/i386/page.c src/hal/i386/space.c src/hal/i386/int.c \
+	src/hal/pmem-constraints.c src/hal/i386/page.c src/hal/i386/space.c src/hal/i386/int.c \
 	src/hal/i386/cmain.c src/hal/i386/task.c \
 	src/hal/i386/bsp-pcat/boot.c src/hal/i386/bsp-pcat/cons.c \
 	src/hal/i386/bsp-pcat/pic.c src/hal/i386/bsp-pcat/pit.c
@@ -35,7 +35,7 @@ endif
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/process-timer.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/klog.o $(BUILD)/src/kern/waitq.o \
-	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/sysctl.o \
+	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/io-stats.o $(BUILD)/src/kern/io-pool.o $(BUILD)/src/kern/io-scratch.o $(BUILD)/src/kern/cache-memory.o $(BUILD)/src/kern/readahead.o $(BUILD)/src/kern/readahead-worker.o $(BUILD)/src/kern/writeback.o $(BUILD)/src/kern/writeback-domain.o $(BUILD)/src/kern/writeback-policy.o $(BUILD)/src/kern/io-error.o $(BUILD)/src/kern/cache-worker.o $(BUILD)/src/kern/sysctl.o \
 	$(BUILD)/src/kern/resource.o \
 	$(BUILD)/src/kern/resource-limit.o \
 	$(BUILD)/src/kern/poll.o \
@@ -140,8 +140,9 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o \
 	$(BUILD)/src/kern/platform/pcat.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PCAT_OBJS) $(KERN_OBJS) $(KERN_BLOCK_IDENTITY_OBJS) \
-	$(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
+	$(KERN_UFS_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
 $(VMUNIX_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
+$(VMUNIX_OBJS): $(ZEDBSD_SYSROOT_I386)/.zedbsd-sysroot-complete
 
 vmunix: $(BUILD)/vmunix
 
@@ -214,7 +215,8 @@ $(BUILD)/bootloader/bios-fat-directory.i386.o: \
 		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
 		-c $< -o $@
 PCAT_BOOTZBSD_HELPERS := $(BUILD)/bootloader/bios-zedbsd-config.i386.o \
-	$(BUILD)/bootloader/bios-fat-directory.i386.o
+	$(BUILD)/bootloader/bios-fat-directory.i386.o \
+	$(BUILD)/bootloader/bios-memory-map.i386.o $(BUILD)/bootloader/common-memory-map.i386.o
 $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
 	$(PCAT_BOOTZBSD_HELPERS) $(BIOS_LOADER)/bootzbsd.ld
 	$(LD) -m elf_i386 -T $(BIOS_LOADER)/bootzbsd.ld \
@@ -310,8 +312,8 @@ $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 		--swapfile $(SWAP_IMAGE) --size-mib 177 --fat-size-mib 176 $@
 
 $(BUILD)/ufs-root.img: $(I386_ARCH_UFS_IMAGE) \
-	$(BUILD_TOOLS_DIR)/make-ufs1-root-image.py tools/build/ufs1_format.py
-	$(PYTHON) $(BUILD_TOOLS_DIR)/make-ufs1-root-image.py --force \
+	$(BUILD_TOOLS_DIR)/make-ufs-root-image.py tools/build/ufs_format.py
+	$(PYTHON) $(BUILD_TOOLS_DIR)/make-ufs-root-image.py --force \
 		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) $@
 
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
@@ -687,3 +689,22 @@ kern-compile: $(KERN_OBJS)
 	@echo "zedBSD kernel glue compile check: PASS"
 CHECK_RUN_TARGETS += hal-pcat-compile kern-compile
 .PHONY: hal-pcat-compile kern-compile
+
+$(BUILD)/bootloader/bios-memory-map.i386.o: bootloader/bios/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+		-fno-stack-protector -fno-asynchronous-unwind-tables \
+		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+		-c $< -o $@
+
+$(BUILD)/bootloader/common-memory-map.i386.o: bootloader/common/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+		-fno-stack-protector -fno-asynchronous-unwind-tables \
+		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+		-c $< -o $@
+
+# Order user compilation after publication of the current UAPI headers.
+$(BUILD)/userland/%.o: userland/%.c $(ZEDBSD_SYSROOT_I386)/.zedbsd-sysroot-complete
+	@mkdir -p $(dir $@)
+	$(OBJ_CC) $(OBJ_CPPFLAGS) $(OBJ_CFLAGS) -MMD -MP -c $< -o $@

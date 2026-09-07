@@ -22,11 +22,14 @@ source-provenance, primitive-binding, no-replace publication and staging-cost
 prerequisite contracts. P005 follows p004. P010/p011/p012 acceptance remains
 complete; see [q077 evidence](../ws018-kernel-architecture/tests/q077-results.md).
 
-Future filesystem direction: [WS024](../ws024-unified-ufs/ws.md) records the
-2026-09-06 user decision to replace UFS1/UFS2 with one 64-bit UFS implementation.
-Its formatter/image migration will move the installer contract to
-`mkfs -t ufs FILE`. P008/q079 describe the completed current UFS1 baseline;
-this planning record does not claim that the unified command exists yet.
+Current filesystem integration: [WS024](../ws024-unified-ufs/ws.md), q101,
+implements the user's single 64-bit UFS decision. The installer consumes
+`mkfs -t ufs FILE` for ordinary images. The explicit
+`mkfs -t ufs --profile=journal-snapshot FILE` profile reserves persistence regions
+inside the existing file size; it is not the installer's default. Keep the
+same descriptor reservation, fixed size, identity and flush/readback boundary.
+P008/q079 remain historical evidence for the former UFS1 baseline. Full WS024
+retirement acceptance is still underway.
 
 Shared tests: [WS019 test index](tests/README.md)
 

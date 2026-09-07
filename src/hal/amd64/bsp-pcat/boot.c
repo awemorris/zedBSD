@@ -44,8 +44,10 @@ typedef char zbl6_kernel_unknown_partition_index_must_match[
 static struct zbl6_handoff boot_info;
 static struct zbl6_handoff_v2 boot_info_v2;
 static struct zbl6_framebuffer boot_framebuffer;
-static struct zbl6_memory_range boot_memory_range[MAX_BOOT_MEMORY_RANGES];
+static struct zbl6_memory_range_v6 boot_memory_range[MAX_BOOT_MEMORY_RANGES];
 static uint32_t boot_memory_range_count;
+static struct zbl6_memory_handoff boot_memory;
+static struct zbl6_boot_allocation boot_allocations[ZBL6_MAX_BOOT_ALLOCATIONS];
 static struct boot_handoff kernel_handoff;
 static uint64_t total_memory;
 static uint8_t boot_font[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
@@ -53,6 +55,7 @@ static int boot_font_valid;
 static char boot_selector[15];
 static char boot_parameters[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE];
 
+static void accept_memory(const struct zbl6_memory_handoff *memory, uint32_t source);
 static int handoff_name_is(const char *name, const char *expected);
 static char hex_digit(unsigned value);
 static void set_boot_uuid(uint32_t serial);
@@ -74,12 +77,14 @@ bsp_boot_init(
 	const struct zbl6_handoff_framebuffer *raw_framebuffer;
 	const struct vga_font_handoff *font;
 	const struct zbl6_memory_range *source;
+	const struct zbl6_memory_handoff *memory;
 	uint64_t previous_end;
 	uint64_t highest;
 	uint64_t end;
 	uint32_t index;
 	int bios_form;
 	int v5;
+	int v6;
 	int framebuffer_version;
 	int uuid_version;
 	int partition_valid;
@@ -112,11 +117,14 @@ bsp_boot_init(
 	if (form == ZBL6_HANDOFF_FORM_INVALID)
 		HAL_FATAL("unsupported amd64 ZBL6 handoff");
 
+	v6 = form == ZBL6_HANDOFF_FORM_V6_BIOS || form == ZBL6_HANDOFF_FORM_V6_UEFI;
+	hal_memset(&boot_memory, 0, sizeof(boot_memory));
+
 	/* Preserves BIOS and UEFI forms through their distinct contracts. */
 	if (form == ZBL6_HANDOFF_FORM_LEGACY_BIOS ||
-	    form == ZBL6_HANDOFF_FORM_V5_BIOS) {
+	    form == ZBL6_HANDOFF_FORM_V5_BIOS || form == ZBL6_HANDOFF_FORM_V6_BIOS) {
 		raw_framebuffer = raw_boot_info;
-		v5 = form == ZBL6_HANDOFF_FORM_V5_BIOS;
+		v5 = form == ZBL6_HANDOFF_FORM_V5_BIOS || v6;
 
 		/* Validates the legacy BIOS drive and partition ordinals. */
 		if (raw->boot_drive < 0x80U ||
@@ -163,24 +171,30 @@ bsp_boot_init(
 		if (parameter_result != X86_BOOT_PARAMETERS_OK)
 			HAL_FATAL("invalid amd64 BIOS boot parameters");
 
-		/* Builds the single legacy usable-memory range below one GiB. */
-		total_memory = 0x100000ULL +
-		    (uint64_t)boot_info.mem_upper_kib * 1024ULL;
-		if (total_memory > 0x40000000ULL)
-			total_memory = 0x40000000ULL;
-		boot_memory_range_count = 1;
-		boot_memory_range[0].base = 0;
-		boot_memory_range[0].size = total_memory;
-		boot_memory_range[0].type = ZBL6_MEMORY_USABLE;
-		boot_memory_range[0].flags = 0;
+		if (v6) {
+			accept_memory(&((const struct zbl6_handoff_v6_bios *)raw)->memory,
+			    ZBL6_MEMORY_SOURCE_BIOS_E820);
+		} else {
+			/* Builds the single legacy usable-memory range below one GiB. */
+			total_memory = 0x100000ULL +
+			    (uint64_t)boot_info.mem_upper_kib * 1024ULL;
+			if (total_memory > 0x40000000ULL)
+				total_memory = 0x40000000ULL;
+			boot_memory_range_count = 1;
+			boot_memory_range[0].base = 0;
+			boot_memory_range[0].size = total_memory;
+			boot_memory_range[0].type = ZBL6_MEMORY_USABLE;
+			boot_memory_range[0].flags = 0;
+			boot_memory_range[0].attributes = 0;
+		}
 	} else {
 		previous_end = 0;
 		framebuffer_version =
 		    raw->version == ZBL6_HANDOFF_V3_VERSION ||
 		    raw->version == ZBL6_HANDOFF_V4_VERSION ||
-		    raw->version == ZBL6_HANDOFF_V5_VERSION;
+		    raw->version == ZBL6_HANDOFF_V5_VERSION || v6;
 		uuid_version = raw->version == ZBL6_HANDOFF_V4_VERSION ||
-		    raw->version == ZBL6_HANDOFF_V5_VERSION;
+		    raw->version == ZBL6_HANDOFF_V5_VERSION || v6;
 
 		/* Rejects an invalid UEFI boot drive before partition validation. */
 		if (raw_v2->boot_drive < 0x80U)
@@ -197,12 +211,12 @@ bsp_boot_init(
 		    raw_v2->memory_range_count == 0 ||
 		    raw_v2->memory_range_count > MAX_BOOT_MEMORY_RANGES ||
 		    raw_v2->memory_range_entry_size !=
-		    sizeof(struct zbl6_memory_range) ||
+		    (v6 ? sizeof(struct zbl6_memory_range_v6) : sizeof(struct zbl6_memory_range)) ||
 		    (raw_v2->memory_ranges & 7U) != 0 ||
 		    raw_v2->memory_ranges >= 0x40000000ULL ||
 		    raw_v2->memory_range_count >
 		    (0x40000000ULL - raw_v2->memory_ranges) /
-		    sizeof(struct zbl6_memory_range) ||
+		    (v6 ? sizeof(struct zbl6_memory_range_v6) : sizeof(struct zbl6_memory_range)) ||
 		    raw_v2->kernel_phys_start != 0x00200000ULL ||
 		    raw_v2->kernel_phys_end <= raw_v2->kernel_phys_start ||
 		    raw_v2->kernel_phys_end > 0x01200000ULL ||
@@ -238,7 +252,7 @@ bsp_boot_init(
 			set_boot_uuid(raw_v4->boot_volume_serial);
 
 		/* Copies V5 parameters or establishes an empty legacy record. */
-		if (raw->version == ZBL6_HANDOFF_V5_VERSION) {
+		if (raw->version == ZBL6_HANDOFF_V5_VERSION || v6) {
 			parameter_result = x86_boot_parameter_record_copy(
 				boot_parameters,
 				&raw_v5_uefi->parameters,
@@ -254,41 +268,54 @@ bsp_boot_init(
 		if (parameter_result != X86_BOOT_PARAMETERS_OK)
 			HAL_FATAL("invalid amd64 UEFI boot parameters");
 
-		/* Copies and validates the ordered UEFI memory map. */
-		source = (const void *)(uintptr_t)raw_v2->memory_ranges;
-		boot_memory_range_count = raw_v2->memory_range_count;
-		for (index = 0; index < boot_memory_range_count; index++) {
-			boot_memory_range[index] = source[index];
+		if (v6) {
+			memory = &((const struct zbl6_handoff_v6_uefi *)raw)->memory;
+			if (memory->range_count != raw_v2->memory_range_count ||
+			    memory->range_entry_size != raw_v2->memory_range_entry_size ||
+			    memory->ranges != raw_v2->memory_ranges ||
+			    memory->bootstrap_cr3 != raw_v2->bootstrap_cr3 ||
+			    memory->kernel_phys_start != raw_v2->kernel_phys_start ||
+			    memory->kernel_phys_end != raw_v2->kernel_phys_end)
+				HAL_FATAL("inconsistent amd64 memory handoff");
+			accept_memory(memory, ZBL6_MEMORY_SOURCE_UEFI);
+		} else {
+			/* Copies and validates the ordered UEFI memory map. */
+			source = (const void *)(uintptr_t)raw_v2->memory_ranges;
+			boot_memory_range_count = raw_v2->memory_range_count;
+			for (index = 0; index < boot_memory_range_count; index++) {
+				boot_memory_range[index].base = source[index].base;
+				boot_memory_range[index].size = source[index].size;
+				boot_memory_range[index].type = source[index].type;
+				boot_memory_range[index].flags = source[index].flags;
+				boot_memory_range[index].attributes = 0;
 
-			/* Validates this aligned, bounded, and recognized range. */
-			if (boot_memory_range[index].size == 0 ||
-			    (boot_memory_range[index].base & 0xfffU) != 0 ||
-			    (boot_memory_range[index].size & 0xfffU) != 0 ||
-			    boot_memory_range[index].base >
-			    UINT64_MAX - boot_memory_range[index].size ||
-			    boot_memory_range[index].type < ZBL6_MEMORY_USABLE ||
-			    boot_memory_range[index].type > ZBL6_MEMORY_MMIO)
-				HAL_FATAL("invalid amd64 memory range");
+				/* Validates this aligned, bounded, and recognized range. */
+				if (boot_memory_range[index].size == 0 ||
+				    (boot_memory_range[index].base & 0xfffU) != 0 ||
+				    (boot_memory_range[index].size & 0xfffU) != 0 ||
+				    boot_memory_range[index].base >
+				    UINT64_MAX - boot_memory_range[index].size ||
+				    boot_memory_range[index].type < ZBL6_MEMORY_USABLE ||
+				    boot_memory_range[index].type > ZBL6_MEMORY_MMIO)
+					HAL_FATAL("invalid amd64 memory range");
 
-			/* Requires ascending, nonoverlapping ranges. */
-			end = boot_memory_range[index].base +
-			    boot_memory_range[index].size;
-			if (index != 0 &&
-			    boot_memory_range[index].base < previous_end)
-				HAL_FATAL("overlapping amd64 memory ranges");
-			previous_end = end;
+				/* Requires ascending, nonoverlapping ranges. */
+				end = boot_memory_range[index].base +
+				    boot_memory_range[index].size;
+				if (index != 0 &&
+				    boot_memory_range[index].base < previous_end)
+					HAL_FATAL("overlapping amd64 memory ranges");
+				previous_end = end;
 
-			/* Tracks the highest end of usable memory. */
-			if (end > highest &&
-			    boot_memory_range[index].type == ZBL6_MEMORY_USABLE)
-				highest = end;
-		}
+				/* Tracks the highest end of usable memory. */
+				if (end > highest &&
+				    boot_memory_range[index].type == ZBL6_MEMORY_USABLE)
+					highest = end;
+			}
 
-		/* Caps allocator-visible memory at the direct-map limit. */
-		if (highest > 0x40000000ULL)
-			total_memory = 0x40000000ULL;
-		else
+			/* Reports full firmware geometry; the allocator applies its own limit. */
 			total_memory = highest;
+		}
 	}
 
 	/* Requires enough memory for the loaded kernel and initial services. */
@@ -371,7 +398,7 @@ uint64_t
 bsp_mem_probe(
 	void)
 {
-	/* Returns the validated and direct-map-capped total. */
+	/* Returns the highest usable firmware address, including holes. */
 	return total_memory;
 }
 
@@ -427,10 +454,14 @@ bsp_physical_range_mappable(
 	int legacy;
 
 	/* Classifies the handoff before validating the requested extent. */
-	legacy = boot_info_v2.magic != ZBL6_HANDOFF_MAGIC;
+	legacy = boot_info_v2.magic != ZBL6_HANDOFF_MAGIC && boot_memory.source == 0;
 	if (size == 0 || physical > UINT64_MAX - size)
 		return 0;
 	end = physical + size;
+	/* BIOS ACPI discovery reads the BDA, EBDA and ROM search window.
+	 * The entire low MiB stays reserved independently of E820 types. */
+	if (boot_memory.source == ZBL6_MEMORY_SOURCE_BIOS_E820 && end <= 0x100000U)
+		return 1;
 
 	/*
 	 * The v1 BIOS handoff has only a usable-memory total. SeaBIOS places
@@ -456,6 +487,7 @@ bsp_physical_range_mappable(
 		if (boot_memory_range[index].base <= physical &&
 		    end <= range_end &&
 		    (type == ZBL6_MEMORY_RESERVED ||
+		    type == ZBL6_MEMORY_BOOT_RECLAIM ||
 		    type == ZBL6_MEMORY_ACPI_RECLAIM ||
 		    type == ZBL6_MEMORY_ACPI_NVS))
 			return 1;
@@ -605,4 +637,71 @@ accept_framebuffer(
 	boot_framebuffer.height = height;
 	boot_framebuffer.stride = stride;
 	boot_framebuffer.format = format;
+}
+
+/* Copies the complete map and ownership records before reclaim can begin. */
+static void
+accept_memory(const struct zbl6_memory_handoff *memory, uint32_t source)
+{
+	uint32_t i;
+	uint64_t end;
+
+	if (!zbl6_memory_envelope_valid(memory, source))
+		HAL_FATAL("invalid amd64 v6 memory envelope");
+	boot_memory = *memory;
+	hal_memcpy(boot_memory_range, (const void *)(uintptr_t)memory->ranges,
+	    (size_t)memory->range_count * sizeof(boot_memory_range[0]));
+	hal_memcpy(boot_allocations, (const void *)(uintptr_t)memory->allocations,
+	    (size_t)memory->allocation_count * sizeof(boot_allocations[0]));
+	if (!zbl6_memory_contents_valid(&boot_memory, boot_memory_range, boot_allocations))
+		HAL_FATAL("invalid amd64 v6 memory ownership");
+	boot_memory_range_count = memory->range_count;
+	total_memory = 0;
+	for (i = 0; i < boot_memory_range_count; i++) {
+		end = boot_memory_range[i].base + boot_memory_range[i].size;
+		if (boot_memory_range[i].type == ZBL6_MEMORY_USABLE && end > total_memory)
+			total_memory = end;
+	}
+}
+
+/* Reports the memory-map source, with zero denoting legacy geometry. */
+uint32_t
+bsp_memory_source(void)
+{
+	return boot_memory.source;
+}
+
+/* Returns the firmware-specific attributes without truncating UEFI bits. */
+int
+bsp_mem_attributes(uint32_t index, uint64_t *attributes)
+{
+	if (index >= boot_memory_range_count || attributes == NULL)
+		return 0;
+	*attributes = boot_memory_range[index].attributes;
+	return 1;
+}
+
+/* Returns boot reservations retained independently of the firmware map. */
+int
+bsp_boot_allocation(uint32_t index, uint64_t *base, uint64_t *size)
+{
+	if (index >= boot_memory.allocation_count || base == NULL || size == NULL)
+		return 0;
+	*base = boot_allocations[index].base;
+	*size = boot_allocations[index].size;
+	return 1;
+}
+
+/*
+ * Reports the validated lifetime of a retained boot allocation.
+ */
+int
+bsp_boot_allocation_lifetime(
+	uint32_t index,
+	uint32_t *lifetime)
+{
+	if (index >= boot_memory.allocation_count || lifetime == NULL)
+		return 0;
+	*lifetime = boot_allocations[index].lifetime;
+	return 1;
 }

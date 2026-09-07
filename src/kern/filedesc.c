@@ -27,6 +27,8 @@
 #include <errno.h>
 #include <string.h>
 
+extern void file_readahead_invalidate(struct file *) __attribute__((weak));
+
 static atomic_uint_t filedesc_live;
 
 static void slot_make_free(struct filedesc_entry *entry);
@@ -105,8 +107,11 @@ filedesc_destroy(
 			record_lock_release_process_inode(fd->owner,
 			    detached[descriptor]->f_inode);
 	}
-	for (descriptor = 0; descriptor < count; descriptor++)
+	for (descriptor = 0; descriptor < count; descriptor++) {
+		if (file_readahead_invalidate != NULL)
+			file_readahead_invalidate(detached[descriptor]);
 		(void)file_close(detached[descriptor]);
+	}
 
 	(void)atomic_raw_fetch_add_relaxed(&filedesc_live.value, (unsigned)-1);
 	kern_free(fd);
@@ -285,6 +290,10 @@ filedesc_take(
 	/* Releases the process's record locks on the file. */
 	if ((*result)->f_inode != NULL)
 		record_lock_release_process_inode(fd->owner, (*result)->f_inode);
+
+	/* Invalidates descriptor work separately from temporary syscall reference drops. */
+	if (file_readahead_invalidate != NULL)
+		file_readahead_invalidate(*result);
 
 	/* Reports the detached file. */
 	return 0;
@@ -582,8 +591,11 @@ filedesc_dup2(
 	/* Closes the displaced file after releasing its record locks. */
 	if (displaced != NULL && displaced->f_inode != NULL)
 		record_lock_release_process_inode(fd->owner, displaced->f_inode);
-	if (displaced != NULL)
+	if (displaced != NULL) {
+		if (file_readahead_invalidate != NULL)
+			file_readahead_invalidate(displaced);
 		(void)file_close(displaced);
+	}
 
 	/* Reports the duplicated descriptor. */
 	return 0;
@@ -904,8 +916,11 @@ filedesc_close_on_exec(
 			record_lock_release_process_inode(fd->owner,
 			    detached[descriptor]->f_inode);
 	}
-	for (descriptor = 0; descriptor < count; descriptor++)
+	for (descriptor = 0; descriptor < count; descriptor++) {
+		if (file_readahead_invalidate != NULL)
+			file_readahead_invalidate(detached[descriptor]);
 		(void)file_close(detached[descriptor]);
+	}
 }
 
 /* Marks a slot free. */

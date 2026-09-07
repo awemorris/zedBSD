@@ -2,7 +2,7 @@
 set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 test_dir=$repo/plan/ws005-networking/tests
-work=$repo/plan/ws005-networking/temp/q085-wifi-scenarios/stories
+work=${STORY_OUTPUT:-$repo/plan/ws005-networking/temp/q085-wifi-scenarios/stories}
 mkdir -p "$work"
 cc=${CC:-cc}
 variant=${STORY_VARIANT:-ordinary}

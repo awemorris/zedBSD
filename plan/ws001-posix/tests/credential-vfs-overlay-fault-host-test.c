@@ -506,7 +506,7 @@ namecache_remove(struct inode *directory,
 }
 
 int
-mount_sync(struct mount *mount)
+mount_sync_backend(struct mount *mount)
 {
 	CHECK(mount == &upper_mount);
 	CHECK(mount_calls < sizeof(mount_results) / sizeof(mount_results[0]));
@@ -1300,4 +1300,16 @@ main(void)
 	printf("ws001-p022 overlay create/copy-up fault matrix: PASS "
 	    "(%u checks)\n", checks);
 	return EXIT_SUCCESS;
+}
+
+/* Models the explicit lower backend drain without a VM layer in this fixture. */
+int file_fsync_backend(struct file *file) { return file_fsync(file); }
+
+ssize_t file_pwrite_context(struct file *file, const void *buffer, size_t length,
+    off_t offset, unsigned flags, const struct ucred *credential,
+    const struct io_context *context)
+{
+	int error = io_context_validate(context);
+	if (error != 0) return -error;
+	return file_pwrite_internal_cred(file, buffer, length, offset, flags, credential);
 }

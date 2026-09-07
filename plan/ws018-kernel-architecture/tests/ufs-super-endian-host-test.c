@@ -11,47 +11,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(KA_UFS1)
-#include "ufs1-disk.h"
-#include "ufs1-endian.h"
-#include "ufs1-super.h"
-#define FS_NAME "UFS1"
-#define FS_STRUCT_SIZE UFS1_FS_STRUCT_SIZE
-#define FS_MAGIC_OFFSET UFS1_FS_MAGIC
-#define FS_MAGIC UFS1_MAGIC
-#define GET16 ufs1_get16
-#define GET32 ufs1_get32
-#define GET64 ufs1_get64
-#define PUT16 ufs1_put16
-#define PUT32 ufs1_put32
-#define PUT64 ufs1_put64
-#elif defined(KA_UFS2)
-#include "ufs2-disk.h"
-#include "ufs2-super.h"
-#if defined(KA_LEGACY_UFS_COMMON)
-#include "ufs1-endian.h"
-#define GET16 ufs1_get16
-#define GET32 ufs1_get32
-#define GET64 ufs1_get64
-#define PUT16 ufs1_put16
-#define PUT32 ufs1_put32
-#define PUT64 ufs1_put64
-#else
-#include "ufs2-endian.h"
-#define GET16 ufs2_get16
-#define GET32 ufs2_get32
-#define GET64 ufs2_get64
-#define PUT16 ufs2_put16
-#define PUT32 ufs2_put32
-#define PUT64 ufs2_put64
-#endif
-#define FS_NAME "UFS2"
-#define FS_STRUCT_SIZE UFS2_FS_STRUCT_SIZE
-#define FS_MAGIC_OFFSET UFS2_FS_MAGIC
-#define FS_MAGIC UFS2_MAGIC
-#else
-#error "define exactly one of KA_UFS1 or KA_UFS2"
-#endif
+#include "ufs-disk.h"
+#include "ufs-super.h"
+#include "ufs-endian.h"
+#define GET16 ufs_get16
+#define GET32 ufs_get32
+#define GET64 ufs_get64
+#define PUT16 ufs_put16
+#define PUT32 ufs_put32
+#define PUT64 ufs_put64
+#define FS_NAME "UFS"
+#define FS_STRUCT_SIZE UFS_FS_STRUCT_SIZE
+#define FS_MAGIC_OFFSET UFS_FS_MAGIC
+#define FS_MAGIC UFS_MAGIC
 
 static unsigned checks;
 
@@ -92,92 +64,43 @@ test_endian_helpers(void)
 	CHECK(GET64(buffer, 25, 1) == UINT64_C(0x0123456789abcdef));
 }
 
-#if defined(KA_UFS1)
 static void
 build_superblock(uint8_t *buffer, int swapped)
 {
-	memset(buffer, 0, UFS1_SBLOCK_SIZE);
-	PUT32(buffer, UFS1_FS_SBLKNO, 8, swapped);
-	PUT32(buffer, UFS1_FS_CBLKNO, 16, swapped);
-	PUT32(buffer, UFS1_FS_IBLKNO, 24, swapped);
-	PUT32(buffer, UFS1_FS_DBLKNO, 40, swapped);
-	PUT32(buffer, UFS1_FS_OLD_CGOFFSET, 0, swapped);
-	PUT32(buffer, UFS1_FS_OLD_CGMASK, 0, swapped);
-	PUT32(buffer, UFS1_FS_OLD_SIZE, 4096, swapped);
-	PUT32(buffer, UFS1_FS_OLD_DSIZE, 3000, swapped);
-	PUT32(buffer, UFS1_FS_NCG, 1, swapped);
-	PUT32(buffer, UFS1_FS_BSIZE, 8192, swapped);
-	PUT32(buffer, UFS1_FS_FSIZE, 1024, swapped);
-	PUT32(buffer, UFS1_FS_FRAG, 8, swapped);
-	PUT32(buffer, UFS1_FS_BSHIFT, 13, swapped);
-	PUT32(buffer, UFS1_FS_FSHIFT, 10, swapped);
-	PUT32(buffer, UFS1_FS_FRAGSHIFT, 3, swapped);
-	PUT32(buffer, UFS1_FS_FSBTODB, 1, swapped);
-	PUT32(buffer, UFS1_FS_SBSIZE, UFS1_FS_STRUCT_SIZE, swapped);
-	PUT32(buffer, UFS1_FS_NINDIR, 2048, swapped);
-	PUT32(buffer, UFS1_FS_INOPB, 64, swapped);
-	PUT32(buffer, UFS1_FS_CSSIZE, 0, swapped);
-	PUT32(buffer, UFS1_FS_CGSIZE, 512, swapped);
-	PUT32(buffer, UFS1_FS_IPG, 64, swapped);
-	PUT32(buffer, UFS1_FS_FPG, 4096, swapped);
-	PUT32(buffer, UFS1_FS_MAXSYMLINKLEN, 60, swapped);
-	PUT32(buffer, UFS1_FS_INODEFMT, UFS1_44INODEFMT, swapped);
-	PUT64(buffer, UFS1_FS_MAXFILESIZE, UINT64_C(0x7fffffff), swapped);
-	PUT32(buffer, UFS1_FS_MAGIC, UFS1_MAGIC, swapped);
+	memset(buffer, 0, UFS_SBLOCK_SIZE);
+	PUT32(buffer, UFS_FS_SBLKNO, 64, swapped);
+	PUT32(buffer, UFS_FS_CBLKNO, 72, swapped);
+	PUT32(buffer, UFS_FS_IBLKNO, 80, swapped);
+	PUT32(buffer, UFS_FS_DBLKNO, 96, swapped);
+	PUT32(buffer, UFS_FS_NCG, 1, swapped);
+	PUT32(buffer, UFS_FS_BSIZE, 8192, swapped);
+	PUT32(buffer, UFS_FS_FSIZE, 1024, swapped);
+	PUT32(buffer, UFS_FS_FRAG, 8, swapped);
+	PUT32(buffer, UFS_FS_BSHIFT, 13, swapped);
+	PUT32(buffer, UFS_FS_FSHIFT, 10, swapped);
+	PUT32(buffer, UFS_FS_FRAGSHIFT, 3, swapped);
+	PUT32(buffer, UFS_FS_FSBTODB, 1, swapped);
+	PUT32(buffer, UFS_FS_SBSIZE, UFS_FS_STRUCT_SIZE, swapped);
+	PUT32(buffer, UFS_FS_NINDIR, 1024, swapped);
+	PUT32(buffer, UFS_FS_INOPB, 32, swapped);
+	PUT32(buffer, UFS_FS_CSSIZE, 0, swapped);
+	PUT32(buffer, UFS_FS_CGSIZE, 512, swapped);
+	PUT32(buffer, UFS_FS_IPG, 32, swapped);
+	PUT32(buffer, UFS_FS_FPG, 8192, swapped);
+	PUT64(buffer, UFS_FS_SBLOCKLOC, UFS_SBLOCK_OFFSET, swapped);
+	PUT64(buffer, UFS_FS_SIZE, 8192, swapped);
+	PUT64(buffer, UFS_FS_DSIZE, 7000, swapped);
+	PUT32(buffer, UFS_FS_MAXSYMLINKLEN, 120, swapped);
+	PUT64(buffer, UFS_FS_MAXFILESIZE, UINT64_C(0x7fffffffffff), swapped);
+	PUT32(buffer, UFS_FS_MAGIC, UFS_MAGIC, swapped);
 }
 
 static int
 decode_superblock(const uint8_t *buffer, size_t length, uint64_t sectors,
 	int *swapped)
 {
-	struct ufs1_super super;
-	int error = ufs1_super_decode(buffer, length, sectors, &super);
-
-	if (error == 0) {
-		CHECK(super.size == 4096);
-		CHECK(super.bsize == 8192);
-		*swapped = super.swapped;
-	}
-	return error;
-}
-#else
-static void
-build_superblock(uint8_t *buffer, int swapped)
-{
-	memset(buffer, 0, UFS2_SBLOCK_SIZE);
-	PUT32(buffer, UFS2_FS_SBLKNO, 64, swapped);
-	PUT32(buffer, UFS2_FS_CBLKNO, 72, swapped);
-	PUT32(buffer, UFS2_FS_IBLKNO, 80, swapped);
-	PUT32(buffer, UFS2_FS_DBLKNO, 96, swapped);
-	PUT32(buffer, UFS2_FS_NCG, 1, swapped);
-	PUT32(buffer, UFS2_FS_BSIZE, 8192, swapped);
-	PUT32(buffer, UFS2_FS_FSIZE, 1024, swapped);
-	PUT32(buffer, UFS2_FS_FRAG, 8, swapped);
-	PUT32(buffer, UFS2_FS_BSHIFT, 13, swapped);
-	PUT32(buffer, UFS2_FS_FSHIFT, 10, swapped);
-	PUT32(buffer, UFS2_FS_FRAGSHIFT, 3, swapped);
-	PUT32(buffer, UFS2_FS_FSBTODB, 1, swapped);
-	PUT32(buffer, UFS2_FS_SBSIZE, UFS2_FS_STRUCT_SIZE, swapped);
-	PUT32(buffer, UFS2_FS_NINDIR, 1024, swapped);
-	PUT32(buffer, UFS2_FS_INOPB, 32, swapped);
-	PUT32(buffer, UFS2_FS_CSSIZE, 0, swapped);
-	PUT32(buffer, UFS2_FS_CGSIZE, 512, swapped);
-	PUT32(buffer, UFS2_FS_IPG, 32, swapped);
-	PUT32(buffer, UFS2_FS_FPG, 8192, swapped);
-	PUT64(buffer, UFS2_FS_SBLOCKLOC, UFS2_SBLOCK_OFFSET, swapped);
-	PUT64(buffer, UFS2_FS_SIZE, 8192, swapped);
-	PUT64(buffer, UFS2_FS_DSIZE, 7000, swapped);
-	PUT32(buffer, UFS2_FS_MAXSYMLINKLEN, 120, swapped);
-	PUT64(buffer, UFS2_FS_MAXFILESIZE, UINT64_C(0x7fffffffffff), swapped);
-	PUT32(buffer, UFS2_FS_MAGIC, UFS2_MAGIC, swapped);
-}
-
-static int
-decode_superblock(const uint8_t *buffer, size_t length, uint64_t sectors,
-	int *swapped)
-{
-	struct ufs2_super super;
-	int error = ufs2_super_decode(buffer, length, sectors, &super);
+	struct ufs_super super;
+	int error = ufs_super_decode(buffer, length, sectors, &super);
 
 	if (error == 0) {
 		CHECK(super.size == 8192);
@@ -186,7 +109,6 @@ decode_superblock(const uint8_t *buffer, size_t length, uint64_t sectors,
 	}
 	return error;
 }
-#endif
 
 static void
 test_superblock_decode(void)

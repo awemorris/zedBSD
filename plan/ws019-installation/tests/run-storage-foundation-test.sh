@@ -16,7 +16,7 @@ for mode in ordinary sanitize; do
 	${HOSTCC:-cc} $common $extra \
 		"$repo/plan/ws019-installation/tests/storage-foundation-test.c" \
 		"$repo/src/drivers/disklabel/mbr.c" \
-		-Wl,--gc-sections -o "$temporary/$mode"
+		-Wl,--gc-sections "$repo/src/kern/io-stats.c" -o "$temporary/$mode"
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$temporary/$mode"
 done
 for arch in amd64 i386; do

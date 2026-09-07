@@ -24,6 +24,7 @@
 #include "bsp-pcat/lapic.h"
 
 void amd64_page_init(void);
+void amd64_range_page_init(void);
 void amd64_int_init(void);
 void kernel_entry(const void *handoff);
 
@@ -50,6 +51,7 @@ amd64_cmain(
 	/* Establishes kernel paging and address-space management. */
 	amd64_page_init();
 	amd64_space_init();
+	amd64_range_page_init();
 	hal_puts("A64 PAGING PASS\n");
 
 	/* Installs the BSP descriptor and interrupt tables. */
@@ -68,6 +70,9 @@ amd64_cmain(
 	if (error != HAL_OK)
 		HAL_FATAL("amd64 Local APIC initialization failed");
 	amd64_smp_init(&acpi);
+
+	/* Retires loader ownership after the last boot discovery consumer. */
+	amd64_boot_memory_release();
 
 	/* Enables external interrupts, the scheduler clock, and console input. */
 	irq_init(&acpi);

@@ -13,10 +13,8 @@
 #include <kern/partition.h>
 #include <kern/swap.h>
 
-#include "ufs1-disk.h"
-#include "ufs1-endian.h"
-#include "ufs2-disk.h"
-#include "ufs2-endian.h"
+#include "ufs-disk.h"
+#include "ufs-endian.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -25,12 +23,11 @@
 #include <string.h>
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
-#define TEST_METADATA_BYTES (UFS2_SBLOCK_OFFSET + UFS2_SBLOCK_SIZE)
+#define TEST_METADATA_BYTES (UFS_SBLOCK_OFFSET + UFS_SBLOCK_SIZE)
 #define TEST_DISK_MAX 8U
 #define TEST_PARTITION_MAX 4U
 
-int ufs1_identify(struct disk *, struct block_identity *);
-int ufs2_identify(struct disk *, struct block_identity *);
+int ufs_identify(struct disk *, struct block_identity *);
 
 struct test_disk_state {
 	uint8_t metadata[TEST_METADATA_BYTES];
@@ -438,15 +435,9 @@ static const struct filesystem_type callback_b_type = {
 	.mount = dummy_mount,
 };
 
-static const struct filesystem_type ufs1_type = {
-	.fs_name = "ufs1-identity-test",
-	.identify = ufs1_identify,
-	.mount = dummy_mount,
-};
-
-static const struct filesystem_type ufs2_type = {
-	.fs_name = "ufs2-identity-test",
-	.identify = ufs2_identify,
+static const struct filesystem_type ufs_type = {
+	.fs_name = "ufs-identity-test",
+	.identify = ufs_identify,
 	.mount = dummy_mount,
 };
 
@@ -531,74 +522,39 @@ build_fat(struct disk *disk, struct test_disk_state *state,
 }
 
 static void
-build_ufs1(struct disk *disk, struct test_disk_state *state, int swapped)
+build_ufs(struct disk *disk, struct test_disk_state *state, int swapped)
 {
-	uint8_t *super = state->metadata + UFS1_SBLOCK_OFFSET;
+	uint8_t *super = state->metadata + UFS_SBLOCK_OFFSET;
 
 	disk->d_block_count = 16384U;
-	ufs1_put32(super, UFS1_FS_SBLKNO, 8U, swapped);
-	ufs1_put32(super, UFS1_FS_CBLKNO, 16U, swapped);
-	ufs1_put32(super, UFS1_FS_IBLKNO, 24U, swapped);
-	ufs1_put32(super, UFS1_FS_DBLKNO, 40U, swapped);
-	ufs1_put32(super, UFS1_FS_OLD_SIZE, 4096U, swapped);
-	ufs1_put32(super, UFS1_FS_OLD_DSIZE, 3000U, swapped);
-	ufs1_put32(super, UFS1_FS_NCG, 1U, swapped);
-	ufs1_put32(super, UFS1_FS_BSIZE, 8192U, swapped);
-	ufs1_put32(super, UFS1_FS_FSIZE, 1024U, swapped);
-	ufs1_put32(super, UFS1_FS_FRAG, 8U, swapped);
-	ufs1_put32(super, UFS1_FS_BSHIFT, 13U, swapped);
-	ufs1_put32(super, UFS1_FS_FSHIFT, 10U, swapped);
-	ufs1_put32(super, UFS1_FS_FRAGSHIFT, 3U, swapped);
-	ufs1_put32(super, UFS1_FS_FSBTODB, 1U, swapped);
-	ufs1_put32(super, UFS1_FS_SBSIZE, UFS1_FS_STRUCT_SIZE, swapped);
-	ufs1_put32(super, UFS1_FS_NINDIR, 2048U, swapped);
-	ufs1_put32(super, UFS1_FS_INOPB, 64U, swapped);
-	ufs1_put32(super, UFS1_FS_CGSIZE, 512U, swapped);
-	ufs1_put32(super, UFS1_FS_IPG, 64U, swapped);
-	ufs1_put32(super, UFS1_FS_FPG, 4096U, swapped);
-	ufs1_put32(super, UFS1_FS_MAXSYMLINKLEN, 60U, swapped);
-	ufs1_put32(super, UFS1_FS_INODEFMT, UFS1_44INODEFMT, swapped);
-	ufs1_put64(super, UFS1_FS_MAXFILESIZE, UINT64_C(0x7fffffff), swapped);
-	ufs1_put32(super, UFS1_FS_ID, UINT32_C(0x11223344), swapped);
-	ufs1_put32(super, UFS1_FS_ID + 4U, UINT32_C(0xaabbccdd), swapped);
-	memcpy(super + UFS1_FS_VOLNAME, "UFS ONE", 7U);
-	ufs1_put32(super, UFS1_FS_MAGIC, UFS1_MAGIC, swapped);
-}
-
-static void
-build_ufs2(struct disk *disk, struct test_disk_state *state, int swapped)
-{
-	uint8_t *super = state->metadata + UFS2_SBLOCK_OFFSET;
-
-	disk->d_block_count = 16384U;
-	ufs2_put32(super, UFS2_FS_SBLKNO, 64U, swapped);
-	ufs2_put32(super, UFS2_FS_CBLKNO, 72U, swapped);
-	ufs2_put32(super, UFS2_FS_IBLKNO, 80U, swapped);
-	ufs2_put32(super, UFS2_FS_DBLKNO, 96U, swapped);
-	ufs2_put32(super, UFS2_FS_NCG, 1U, swapped);
-	ufs2_put32(super, UFS2_FS_BSIZE, 8192U, swapped);
-	ufs2_put32(super, UFS2_FS_FSIZE, 1024U, swapped);
-	ufs2_put32(super, UFS2_FS_FRAG, 8U, swapped);
-	ufs2_put32(super, UFS2_FS_BSHIFT, 13U, swapped);
-	ufs2_put32(super, UFS2_FS_FSHIFT, 10U, swapped);
-	ufs2_put32(super, UFS2_FS_FRAGSHIFT, 3U, swapped);
-	ufs2_put32(super, UFS2_FS_FSBTODB, 1U, swapped);
-	ufs2_put32(super, UFS2_FS_SBSIZE, UFS2_FS_STRUCT_SIZE, swapped);
-	ufs2_put32(super, UFS2_FS_NINDIR, 1024U, swapped);
-	ufs2_put32(super, UFS2_FS_INOPB, 32U, swapped);
-	ufs2_put32(super, UFS2_FS_CGSIZE, 512U, swapped);
-	ufs2_put32(super, UFS2_FS_IPG, 32U, swapped);
-	ufs2_put32(super, UFS2_FS_FPG, 8192U, swapped);
-	ufs2_put64(super, UFS2_FS_SBLOCKLOC, UFS2_SBLOCK_OFFSET, swapped);
-	ufs2_put64(super, UFS2_FS_SIZE, 8192U, swapped);
-	ufs2_put64(super, UFS2_FS_DSIZE, 7000U, swapped);
-	ufs2_put32(super, UFS2_FS_MAXSYMLINKLEN, 120U, swapped);
-	ufs2_put64(super, UFS2_FS_MAXFILESIZE,
+	ufs_put32(super, UFS_FS_SBLKNO, 64U, swapped);
+	ufs_put32(super, UFS_FS_CBLKNO, 72U, swapped);
+	ufs_put32(super, UFS_FS_IBLKNO, 80U, swapped);
+	ufs_put32(super, UFS_FS_DBLKNO, 96U, swapped);
+	ufs_put32(super, UFS_FS_NCG, 1U, swapped);
+	ufs_put32(super, UFS_FS_BSIZE, 8192U, swapped);
+	ufs_put32(super, UFS_FS_FSIZE, 1024U, swapped);
+	ufs_put32(super, UFS_FS_FRAG, 8U, swapped);
+	ufs_put32(super, UFS_FS_BSHIFT, 13U, swapped);
+	ufs_put32(super, UFS_FS_FSHIFT, 10U, swapped);
+	ufs_put32(super, UFS_FS_FRAGSHIFT, 3U, swapped);
+	ufs_put32(super, UFS_FS_FSBTODB, 1U, swapped);
+	ufs_put32(super, UFS_FS_SBSIZE, UFS_FS_STRUCT_SIZE, swapped);
+	ufs_put32(super, UFS_FS_NINDIR, 1024U, swapped);
+	ufs_put32(super, UFS_FS_INOPB, 32U, swapped);
+	ufs_put32(super, UFS_FS_CGSIZE, 512U, swapped);
+	ufs_put32(super, UFS_FS_IPG, 32U, swapped);
+	ufs_put32(super, UFS_FS_FPG, 8192U, swapped);
+	ufs_put64(super, UFS_FS_SBLOCKLOC, UFS_SBLOCK_OFFSET, swapped);
+	ufs_put64(super, UFS_FS_SIZE, 8192U, swapped);
+	ufs_put64(super, UFS_FS_DSIZE, 7000U, swapped);
+	ufs_put32(super, UFS_FS_MAXSYMLINKLEN, 120U, swapped);
+	ufs_put64(super, UFS_FS_MAXFILESIZE,
 	    UINT64_C(0x7fffffffffff), swapped);
-	ufs2_put32(super, UFS2_FS_ID, UINT32_C(0x55667788), swapped);
-	ufs2_put32(super, UFS2_FS_ID + 4U, UINT32_C(0x99aabbcc), swapped);
-	memcpy(super + UFS2_FS_VOLNAME, "UFS TWO", 7U);
-	ufs2_put32(super, UFS2_FS_MAGIC, UFS2_MAGIC, swapped);
+	ufs_put32(super, UFS_FS_ID, UINT32_C(0x55667788), swapped);
+	ufs_put32(super, UFS_FS_ID + 4U, UINT32_C(0x99aabbcc), swapped);
+	memcpy(super + UFS_FS_VOLNAME, "UFS TWO", 7U);
+	ufs_put32(super, UFS_FS_MAGIC, UFS_MAGIC, swapped);
 }
 
 static void
@@ -702,21 +658,13 @@ test_filesystem_formats(void)
 	build_fat(&disk, &state, ZEDBSD_FAT32);
 	expect_identity(&disk, "vfat", "1234-ABCD", "IDENTITY");
 
-	disk_initialize(&disk, &state, "ufs1le", 1U);
-	build_ufs1(&disk, &state, 0);
-	expect_identity(&disk, "ufs1", "11223344AABBCCDD", "UFS ONE");
+	disk_initialize(&disk, &state, "ufsle", 1U);
+	build_ufs(&disk, &state, 0);
+	expect_identity(&disk, "ufs", "5566778899AABBCC", "UFS TWO");
 
-	disk_initialize(&disk, &state, "ufs1be", 1U);
-	build_ufs1(&disk, &state, 1);
-	expect_identity(&disk, "ufs1", "11223344AABBCCDD", "UFS ONE");
-
-	disk_initialize(&disk, &state, "ufs2le", 1U);
-	build_ufs2(&disk, &state, 0);
-	expect_identity(&disk, "ufs2", "5566778899AABBCC", "UFS TWO");
-
-	disk_initialize(&disk, &state, "ufs2be", 1U);
-	build_ufs2(&disk, &state, 1);
-	expect_identity(&disk, "ufs2", "5566778899AABBCC", "UFS TWO");
+	disk_initialize(&disk, &state, "ufsbe", 1U);
+	build_ufs(&disk, &state, 1);
+	expect_identity(&disk, "ufs", "5566778899AABBCC", "UFS TWO");
 
 	disk_initialize(&disk, &state, "blank", 256U);
 	CHECK(block_identity_get(&disk, &identity) == ENOENT);
@@ -736,8 +684,8 @@ test_filesystem_formats(void)
 
 	/* Keep the crash-safety regression after other bounded-error coverage. */
 	disk_initialize(&disk, &state, "bad-ufs", 16384U);
-	ufs1_put32(state.metadata + UFS1_SBLOCK_OFFSET, UFS1_FS_MAGIC,
-	    UFS1_MAGIC, 0);
+	ufs_put32(state.metadata + UFS_SBLOCK_OFFSET, UFS_FS_MAGIC,
+	    UFS_MAGIC, 0);
 	CHECK(block_identity_get(&disk, &identity) == EINVAL);
 }
 
@@ -812,7 +760,7 @@ test_filesystem_selectors(void)
 	disk_initialize(&fat, &fat_state, "selector-fat", 1U);
 	build_fat(&fat, &fat_state, ZEDBSD_FAT16);
 	disk_initialize(&ufs, &ufs_state, "selector-ufs", 1U);
-	build_ufs1(&ufs, &ufs_state, 0);
+	build_ufs(&ufs, &ufs_state, 0);
 	test_disks[0] = &fat;
 	test_disks[1] = &ufs;
 	test_disk_count = 2U;
@@ -823,10 +771,10 @@ test_filesystem_selectors(void)
 	CHECK(block_identity_resolve("LABEL=identity", &result) == 0);
 	CHECK(result == &fat);
 	disk_release(result);
-	CHECK(block_identity_resolve("UUID=11223344aabbccdd", &result) == 0);
+	CHECK(block_identity_resolve("UUID=5566778899aabbcc", &result) == 0);
 	CHECK(result == &ufs);
 	disk_release(result);
-	CHECK(block_identity_resolve("LABEL=ufs one", &result) == 0);
+	CHECK(block_identity_resolve("LABEL=ufs two", &result) == 0);
 	CHECK(result == &ufs);
 	disk_release(result);
 
@@ -842,7 +790,7 @@ test_filesystem_selectors(void)
 	disk_initialize(&hard_error, &hard_error_state, "selector-error", 16384U);
 	hard_error_state.read_error = EIO;
 	disk_initialize(&target, &target_state, "selector-target", 1U);
-	build_ufs2(&target, &target_state, 1);
+	build_ufs(&target, &target_state, 1);
 	test_disks[0] = &hard_error;
 	test_disks[1] = &target;
 	test_disk_count = 2U;
@@ -876,7 +824,7 @@ test_swap_hybrid_and_cache(void)
 	expect_identity(&swap_disk, "swap", "0102030405060708", "swap-data");
 
 	disk_initialize(&hybrid, &hybrid_state, "hybrid", 1U);
-	build_ufs1(&hybrid, &hybrid_state, 0);
+	build_ufs(&hybrid, &hybrid_state, 0);
 	build_swap(&hybrid, &hybrid_state);
 	CHECK(block_identity_get(&hybrid, &identity) == EEXIST);
 	CHECK(hybrid.d_identity_valid == 0U);
@@ -911,8 +859,7 @@ main(void)
 	CHECK(filesystem_register(&callback_a_type) == 0);
 	CHECK(filesystem_register(&callback_b_type) == 0);
 	CHECK(filesystem_register(&fat_filesystem_type) == 0);
-	CHECK(filesystem_register(&ufs1_type) == 0);
-	CHECK(filesystem_register(&ufs2_type) == 0);
+	CHECK(filesystem_register(&ufs_type) == 0);
 
 	test_dispatcher();
 	test_filesystem_formats();
@@ -921,4 +868,13 @@ main(void)
 	test_swap_hybrid_and_cache();
 	printf("KA-T030/KA-T031: PASS (%u checks)\n", checks);
 	return 0;
+}
+
+/* Synchronous media adapter retains the production context validation. */
+int
+disk_write_filesystem_context(struct disk *disk, uint64_t block, uint32_t count,
+    const void *data, const struct io_context *context)
+{
+	int error = io_context_validate(context);
+	return error != 0 ? error : disk_write_filesystem(disk, block, count, data);
 }

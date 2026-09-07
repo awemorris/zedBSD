@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <errno.h>
 
 static unsigned sequence;
 static unsigned net_sequence;
@@ -11,6 +12,16 @@ static unsigned pci_sequence;
 static unsigned net_calls;
 static unsigned usb_calls;
 static unsigned pci_calls;
+
+static int begin_error, sync_error;
+static unsigned begins, syncs, aborts, commits;
+int writeback_shutdown_begin(void) { begins++; return begin_error; }
+int mount_sync_all(void) { syncs++; if (!sync_error) ++sequence; return sync_error; }
+void writeback_shutdown_finish(int committed)
+{
+ if (committed) { commits++; ++sequence; }
+ else aborts++;
+}
 
 void
 net_shutdown_for_boot(void)
@@ -42,13 +53,23 @@ sched_yield(void)
 int
 main(void)
 {
-	system_shutdown_prepare();
-	assert(net_sequence == 1);
-	assert(usb_sequence == 2);
-	assert(pci_sequence == 3);
+	begin_error = EIO;
+	assert(system_shutdown_prepare() == EIO);
+	assert(begins == 1 && syncs == 0 && aborts == 0 && commits == 0);
+	assert(net_calls == 0 && usb_calls == 0 && pci_calls == 0);
+	begin_error = 0; sync_error = EIO;
+	assert(system_shutdown_prepare() == EIO);
+	assert(begins == 2 && syncs == 1 && aborts == 1 && commits == 0);
+	assert(net_calls == 0 && usb_calls == 0 && pci_calls == 0);
+	sync_error = 0;
+	assert(system_shutdown_prepare() == 0);
+	assert(begins == 3 && syncs == 2 && aborts == 1 && commits == 1);
+	assert(net_sequence == 3);
+	assert(usb_sequence == 4);
+	assert(pci_sequence == 5);
 	assert(net_calls == 1 && usb_calls == 1 && pci_calls == 1);
 	/* The common boundary is process-wide and idempotent. */
-	system_shutdown_prepare();
+	assert(system_shutdown_prepare() == 0);
 	assert(net_calls == 1 && usb_calls == 1 && pci_calls == 1);
 	puts("system shutdown ordering: PASS");
 	return 0;

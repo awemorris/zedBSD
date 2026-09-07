@@ -19,9 +19,9 @@ WS001_P015_NATIVE_ROOT := $(BUILD)/ws001-p015-native-root.img
 WS001_P015_OVERLAY_IMAGE := $(BUILD)/tests/ws001-p022-overlay.img
 WS001_P015_NATIVE_IMAGE := $(BUILD)/tests/ws001-p022-native.img
 WS001_P015_FAT_IMAGE := $(BUILD)/tests/ws001-p022-fat.img
-WS001_P015_UFS2_ROOT := $(BUILD)/tests/ws001-p022-ufs2-root
-WS001_P015_UFS2_STAMP := $(WS001_P015_UFS2_ROOT)/.stamp
-WS001_P015_UFS2_IMAGE := $(BUILD)/tests/ws001-p022-ufs2.img
+WS001_P015_UFS_ROOT := $(BUILD)/tests/ws001-p022-ufs-root
+WS001_P015_UFS_STAMP := $(WS001_P015_UFS_ROOT)/.stamp
+WS001_P015_UFS_IMAGE := $(BUILD)/tests/ws001-p022-ufs.img
 WS001_P015_FAT_ROOT := $(BUILD)/tests/ws001-p022-fat-root
 WS001_P015_FAT_STAMP := $(WS001_P015_FAT_ROOT)/.stamp
 WS001_P015_FAT_EXTERNAL := $(BUILD)/tests/ws001-p022-fat-external.img
@@ -74,26 +74,26 @@ $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(WS001_P015_FAT_UFS),amd64,\
 	--file /etc/ws001-p015-scenario=plan/ws001-posix/tests/credential-vfs-fat.txt))
 
 $(WS001_P015_NATIVE_ROOT): $(WS001_P015_NATIVE_ARCH_UFS) \
-	$(BUILD_TOOLS_DIR)/make-ufs1-root-image.py tools/build/ufs1_format.py
-	$(PYTHON) $(BUILD_TOOLS_DIR)/make-ufs1-root-image.py --force \
+	$(BUILD_TOOLS_DIR)/make-ufs-root-image.py tools/build/ufs_format.py
+	$(PYTHON) $(BUILD_TOOLS_DIR)/make-ufs-root-image.py --force \
 		--arch-profile amd64 --arch-image $(WS001_P015_NATIVE_ARCH_UFS) $@
 
-$(WS001_P015_UFS2_STAMP): \
-	plan/ws001-posix/tests/credential-vfs-ufs2.txt
-	@rm -rf $(WS001_P015_UFS2_ROOT)
-	@mkdir -p $(WS001_P015_UFS2_ROOT)/writable
-	@cp plan/ws001-posix/tests/credential-vfs-ufs2.txt \
-		$(WS001_P015_UFS2_ROOT)/.p015-backend
+$(WS001_P015_UFS_STAMP): \
+	plan/ws001-posix/tests/credential-vfs-ufs.txt
+	@rm -rf $(WS001_P015_UFS_ROOT)
+	@mkdir -p $(WS001_P015_UFS_ROOT)/writable
+	@cp plan/ws001-posix/tests/credential-vfs-ufs.txt \
+		$(WS001_P015_UFS_ROOT)/.p015-backend
 	@touch $@
 
-$(WS001_P015_UFS2_IMAGE): $(WS001_P015_UFS2_STAMP) \
+$(WS001_P015_UFS_IMAGE): $(WS001_P015_UFS_STAMP) \
 	$(BUILD_TOOLS_DIR)/make-ufs-test-image.py \
-	$(BUILD_TOOLS_DIR)/ufs1_format.py $(BUILD_TOOLS_DIR)/ufs2_format.py
+	$(BUILD_TOOLS_DIR)/ufs_format.py
 	@mkdir -p $(dir $@)
 	PYTHONPATH=$(BUILD_TOOLS_DIR) $(PYTHON) \
 		$(BUILD_TOOLS_DIR)/make-ufs-test-image.py $@ \
-		--format ufs2 --size-mib 16 --journal-mib 4 \
-		--root $(WS001_P015_UFS2_ROOT)
+		--format ufs --size-mib 20 --profile=journal-snapshot \
+		--root $(WS001_P015_UFS_ROOT)
 
 $(WS001_P015_FAT_STAMP): plan/ws001-posix/tests/credential-vfs-fat.txt \
 	plan/ws001-posix/tests/credential-vfs-fat-unixmode.txt
@@ -183,5 +183,5 @@ $(WS001_P015_NATIVE_IMAGE): $(WS001_P015_FAT_IMAGE)
 ws001-p015-guest-probe: $(WS001_P015_PROGRAM)
 ws001-p015-qemu-images: $(WS001_P015_OVERLAY_IMAGE) \
 	$(WS001_P015_NATIVE_IMAGE) $(WS001_P015_FAT_IMAGE) \
-	$(WS001_P015_UFS2_IMAGE) $(WS001_P015_FAT_EXTERNAL)
+	$(WS001_P015_UFS_IMAGE) $(WS001_P015_FAT_EXTERNAL)
 ws001-p022-p023-qemu-images: ws001-p015-qemu-images

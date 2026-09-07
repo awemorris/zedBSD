@@ -31,7 +31,7 @@ SPARCV9_EARLY_SOURCES := src/hal/sparcv9/locore.S \
 SPARCV9_EARLY_C_SOURCES := src/hal/cpu-up.c src/hal/sparcv9/cmain.c \
 	src/hal/sparcv9/runtime.c src/hal/sparcv9/io.c \
 	src/hal/sparcv9/trap.c src/hal/sparcv9/irq.c \
-	src/hal/sparcv9/timer.c src/hal/sparcv9/page.c \
+	src/hal/sparcv9/timer.c src/hal/pmem-constraints.c src/hal/sparcv9/page.c \
 	src/hal/sparcv9/space.c src/hal/sparcv9/task.c \
 	src/hal/sparcv9/bsp-sun4u/boot.c \
 	src/hal/sparcv9/bsp-sun4u/uart.c \
@@ -47,7 +47,7 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/vfs.c src/kern/swap.c src/kern/swap-format.c src/kern/backing-claim.c src/kern/swap-source.c \
 	src/kern/swap-control.c \
 	src/kern/swap-boot.c \
-	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/buf.c \
+	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/buf.c src/kern/io-stats.c src/kern/io-pool.c src/kern/io-scratch.c src/kern/cache-memory.c src/kern/readahead.c src/kern/readahead-worker.c src/kern/writeback.c src/kern/writeback-domain.c src/kern/writeback-policy.c src/kern/io-error.c src/kern/cache-worker.c \
 	src/kern/sysctl.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
 	src/kern/resource-limit.c \
 	src/drivers/loop.c \
@@ -72,7 +72,7 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/system-swap-device.c \
 	src/kern/system-device.c src/kern/shutdown.c src/kern/init.c
 SPARCV9_KERNEL_SOURCES += $(KERN_NET_SOURCES) \
-	$(KERN_BLOCK_IDENTITY_SOURCES) $(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES)
+	$(KERN_BLOCK_IDENTITY_SOURCES) $(KERN_UFS_SOURCES)
 SPARCV9_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
 SPARCV9_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
 SPARCV9_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
@@ -544,9 +544,9 @@ $(BUILD)/ufs-root.img: $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
 	$(SPARCV9_DYNAMIC_DIR)/rpathtest.so \
 	$(SPARCV9_DYNAMIC_DIR)/verstest.so \
 	$(SPARCV9_DYNAMIC_DIR)/versuse.so \
-	tools/build/make-ufs1-root-image.py \
-	tools/build/ufs1_format.py
-	$(PYTHON) tools/build/make-ufs1-root-image.py --force \
+	tools/build/make-ufs-root-image.py \
+	tools/build/ufs_format.py
+	$(PYTHON) tools/build/make-ufs-root-image.py --force \
 		--arch-profile sparcv9 --native-shell $(BUILD)/bin/sh \
 		--native-sysctl $(BUILD)/bin/sysctl \
 		--native-rtld $(SPARCV9_DYNAMIC_DIR)/ld.so \
@@ -563,7 +563,7 @@ $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh \
 	$(BUILD)/boot/stage1.bin $(BUILD)/boot/stage2.bin \
 	$(BUILD)/ufs-root.img platform/sparcv9/tools/make-sparcv9-hdd-image.py \
 	platform/sparcv9/tools/check-sparcv9-hdd-image.py \
-	tools/build/check-ufs1-image.py
+	tools/build/check-ufs-image.py
 	$(PYTHON) platform/sparcv9/tools/make-sparcv9-hdd-image.py --force \
 		--stage1 $(BUILD)/boot/stage1.bin \
 		--stage2 $(BUILD)/boot/stage2.bin \
@@ -575,3 +575,7 @@ $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh \
 	$(SPARCV9_STAGE1_OBJS:.o=.d) $(SPARCV9_STAGE2_OBJS:.o=.d)
 -include $(SPARCV9_KERNEL_OBJS:.o=.d) $(SPARCV9_KERNEL_LIBC_OBJS:.o=.d)
 -include $(SPARCV9_USER_OBJS:.o=.d)
+
+$(BUILD)/src/hal/pmem-constraints.o: src/hal/pmem-constraints.c
+	@mkdir -p $(dir $@)
+	$(SPARCV9_CC) $(SPARCV9_CPPFLAGS) $(SPARCV9_CFLAGS) -MMD -MP -c $< -o $@

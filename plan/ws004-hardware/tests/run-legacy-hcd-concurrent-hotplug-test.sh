@@ -22,12 +22,12 @@ qemu_runner="$root/plan/ws004-hardware/tests/run-legacy-hcd-concurrent-hotplug-q
 qemu_config="$root/plan/ws004-hardware/tests/config-amd64-legacy-hcd.mk"
 
 # shellcheck disable=SC2086
-$cc $common "$fixture" -o "$work/legacy-hcd-concurrent"
+$cc $common "$fixture" "$root/src/kern/io-stats.c" -o "$work/legacy-hcd-concurrent"
 "$work/legacy-hcd-concurrent"
 
 # shellcheck disable=SC2086
 $cc $common -fsanitize=address,undefined -fno-omit-frame-pointer \
-	"$fixture" -o "$work/legacy-hcd-concurrent-sanitize"
+	"$fixture" "$root/src/kern/io-stats.c" -o "$work/legacy-hcd-concurrent-sanitize"
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 	"$work/legacy-hcd-concurrent-sanitize"
 

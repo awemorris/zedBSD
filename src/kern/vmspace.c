@@ -101,6 +101,7 @@ static void insert_region(struct vmspace *vm, struct vm_region *region);
 static unsigned reclaim_page_map_reserve(struct vm_page *avoid);
 static struct vm_private_page * private_page_alloc(void);
 static void private_page_attach_new(struct vm_page *page, struct vm_private_page *backing);
+static int vmspace_exec_cache_fault(struct vmspace *vm, struct vm_region *region, struct vm_page *page, uint32_t required);
 static int vmspace_fork_locked(struct vmspace *source, struct vmspace **result, struct vm_private_page **wait_backing, struct vmspace **failed_copy);
 static int map_region(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, enum vm_region_backing backing, struct file *file, off_t file_offset, uintptr_t data_start, size_t data_size, unsigned flags, size_t commit_size, struct vm_region **result);
 static int prepare_region(uintptr_t start, size_t size, uint32_t prot, enum vm_region_backing backing, struct file *file, off_t file_offset, uintptr_t data_start, size_t data_size, unsigned flags, size_t commit_size, struct vm_region **result);
@@ -671,6 +672,7 @@ vmspace_fault(
 	int old_unmapped;
 	int map_pressure;
 	int retry_fault;
+	int snapshot_cached;
 	int swapped;
 	uint64_t maximum_offset;
 	unsigned long irq;
@@ -716,6 +718,17 @@ retry:
 		goto retry;
 	}
 	if (page != NULL && page->object_page != NULL) {
+		if (region->snapshot != NULL && (required == HAL_SPACE_WRITE ||
+		    (page->flags & VM_MAPPING_MAPPED) == 0)) {
+			page->flags |= VM_MAPPING_BUSY;
+			region->hold_count++;
+			mutex_unlock(&vm->lock);
+			vm_metadata_leave();
+			error = vmspace_exec_cache_fault(vm, region, page, required);
+			if (error == EAGAIN)
+				goto retry;
+			return error;
+		}
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
 		return 0;
@@ -942,7 +955,8 @@ retry:
 	vm_metadata_leave();
 
 	/* A shared object page is mapped straight from the object cache. */
-	if (region->object != NULL) {
+	if (region->object != NULL || region->snapshot != NULL) {
+		snapshot_cached = region->snapshot != NULL;
 		if (sizeof(off_t) == 8)
 			maximum_offset = (uint64_t)INT64_MAX;
 		else
@@ -955,12 +969,28 @@ retry:
 		}
 		object_offset = region->file_offset +
 		    (off_t)(page_address - region->start);
-		error = vm_object_fault(region->object, object_offset, &object_page);
+		if (region->snapshot != NULL &&
+		    (object_offset < region->snapshot->offset ||
+		    (uint64_t)(object_offset - region->snapshot->offset) >= region->snapshot->length)) {
+			error = EFAULT;
+			goto remove_placeholder;
+		}
+		error = vm_object_fault(region->snapshot != NULL ?
+		    region->snapshot->input.read_object : region->object, object_offset, &object_page);
 		if (error != 0)
 			goto remove_placeholder;
+		if (region->snapshot != NULL) {
+			if (object_page != region->snapshot->pages[
+			    (size_t)(object_offset - region->snapshot->offset) / PAGE_SIZE]) {
+				error = EIO;
+				goto remove_placeholder;
+			}
+			page->flags |= VM_MAPPING_COW;
+		}
 		page->object_page = object_page;
 		mapped = hal_page_map(vm->space, (void *)page_address,
-		    object_page->pmem.paddr, PAGE_SIZE, region->prot) == HAL_OK;
+		    object_page->pmem.paddr, PAGE_SIZE,
+		    region->snapshot != NULL ? region->prot & ~HAL_SPACE_WRITE : region->prot) == HAL_OK;
 		if (!mapped) {
 			/*
 			 * The fault hold keeps this cache page out of object
@@ -992,6 +1022,8 @@ retry:
 		vmspace_fault_wake_locked(vm);
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
+		if (required == HAL_SPACE_WRITE && snapshot_cached)
+			goto retry;
 		return 0;
 	}
 
@@ -1277,6 +1309,13 @@ retry_faults:
 		if ((entry->private_page == NULL) ==
 		    (entry->object_page == NULL)) {
 			error = EFAULT;
+			break;
+		}
+		if ((required & HAL_SPACE_WRITE) != 0 &&
+		    (entry->flags & VM_MAPPING_COW) != 0) {
+			/* Private cache pages also require COW before a writable pin. */
+			refault = 1;
+			error = EAGAIN;
 			break;
 		}
 		if (entry->private_page != NULL) {
@@ -2786,6 +2825,10 @@ vmspace_fork_locked(
 		if (error != 0)
 			goto fail;
 		copy_region->max_prot = source_region->max_prot;
+		if (source_region->snapshot != NULL) {
+			file_exec_snapshot_ref(source_region->snapshot);
+			copy_region->snapshot = source_region->snapshot;
+		}
 		if (source_region->object != NULL) {
 			vm_object_ref(source_region->object);
 			copy_region->object = source_region->object;
@@ -3070,6 +3113,8 @@ discard_prepared_region(
 		(void)file_close(region->file);
 	if (region->object != NULL)
 		vm_object_put(region->object);
+	if (region->snapshot != NULL)
+		file_exec_snapshot_put(region->snapshot);
 	if (region->commit_size != 0)
 		vm_commit_release(region->commit_size);
 	kern_free(region);
@@ -3541,7 +3586,9 @@ vmspace_pin_mapping_ready(
 		    ((required & HAL_SPACE_WRITE) == 0 ||
 		    (entry->flags & VM_MAPPING_COW) == 0)) {
 			ready = 1;
-		} else if (entry->object_page != NULL) {
+		} else if (entry->object_page != NULL &&
+		    ((required & HAL_SPACE_WRITE) == 0 ||
+		    (entry->flags & VM_MAPPING_COW) == 0)) {
 			/* A cached object page must be complete and not in error. */
 			page = entry->object_page;
 			object = page->owner;
@@ -4058,6 +4105,8 @@ split_region_prepared(
 		file_ref(right->file);
 	if (right->object != NULL)
 		vm_object_ref(right->object);
+	if (right->snapshot != NULL)
+		file_exec_snapshot_ref(right->snapshot);
 
 	/* The left half keeps whatever data lies before the split. */
 	region->size = left_size;
@@ -4130,6 +4179,8 @@ release_retired_regions(
 			(void)file_close(region->file);
 		if (region->object != NULL)
 			vm_object_put(region->object);
+		if (region->snapshot != NULL)
+			file_exec_snapshot_put(region->snapshot);
 		if (region->commit_size != 0)
 			vm_commit_release(region->commit_size);
 		kern_free(region);
@@ -4691,6 +4742,8 @@ vmspace_destroy(
 			(void)file_close(region->file);
 		if (region->object != NULL)
 			vm_object_put(region->object);
+		if (region->snapshot != NULL)
+			file_exec_snapshot_put(region->snapshot);
 		if (region->commit_size != 0)
 			vm_commit_release(region->commit_size);
 		kern_free(region);
@@ -4759,3 +4812,5 @@ vmspace_generation_advance_locked(
 	if (vm->generation == 0)
 		vm->generation++;
 }
+
+#include "vmspace-exec.inc"

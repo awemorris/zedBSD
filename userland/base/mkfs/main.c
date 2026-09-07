@@ -8,10 +8,10 @@
  */
 
 /*
- * Initializes the maintained UFS1 format in an existing regular file.
+ * Initializes the maintained UFS format in an existing regular file.
  */
 
-#include "ufs1-format.h"
+#include "ufs-format.h"
 #include "userland/base/common/format-file.h"
 
 #include <inttypes.h>
@@ -19,7 +19,7 @@
 #include <string.h>
 
 /*
- * Runs the explicit UFS1 regular-file formatter.
+ * Runs the explicit UFS regular-file formatter.
  */
 int
 main(
@@ -27,26 +27,43 @@ main(
 	char **argv)
 {
 	static const struct format_file_ops ops = {
-		ufs1_format_validate_size, ufs1_format_write, ufs1_format_verify
+		ufs_format_validate_size, ufs_format_write, ufs_format_verify
 	};
+	static const struct format_file_ops feature_ops = {
+		ufs_format_validate_size, ufs_format_feature_write, ufs_format_feature_verify
+	};
+	const struct format_file_ops *selected;
+	const char *path;
 	uint64_t size;
 	int error;
 
-	/* Requires exactly the supported type and one explicit existing file. */
-	if (argc != 4 || strcmp(argv[1], "-t") != 0 ||
-	    strcmp(argv[2], "ufs1") != 0) {
-		fprintf(stderr, "usage: mkfs -t ufs1 FILE\n");
+	/* Require an explicit format and an optional supported profile. */
+	if ((argc != 4 && argc != 5) || strcmp(argv[1], "-t") != 0 ||
+	    strcmp(argv[2], "ufs") != 0) {
+		fprintf(stderr, "usage: mkfs -t ufs [--profile=journal-snapshot] FILE\n");
 		return 2;
+	}
+	selected = &ops;
+	path = argv[3];
+
+	/* Bind profile callbacks before entering the descriptor-owned transaction. */
+	if (argc == 5) {
+		if (strcmp(argv[3], "--profile=journal-snapshot") != 0) {
+			fprintf(stderr, "mkfs: unsupported profile\n");
+			return 2;
+		}
+		selected = &feature_ops;
+		path = argv[4];
 	}
 
 	/* Performs generation and durable verification under one reservation. */
-	error = format_file_run(argv[3], &ops, &size);
+	error = format_file_run(path, selected, &size);
 	if (error != 0) {
-		fprintf(stderr, "mkfs: %s: %s\n", argv[3], strerror(error));
+		fprintf(stderr, "mkfs: %s: %s\n", path, strerror(error));
 		return 1;
 	}
 
 	/* Reports success only after flush, reopen, validation and close. */
-	printf("mkfs: %s: ufs1 initialized (%" PRIu64 " bytes)\n", argv[3], size);
+	printf("mkfs: %s: ufs initialized (%" PRIu64 " bytes)\n", path, size);
 	return 0;
 }

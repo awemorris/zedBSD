@@ -21,13 +21,13 @@ with tempfile.TemporaryDirectory(prefix="q086-directory-") as work:
     image = work / "large.ufs"
     subprocess.run([str(REPO / "build/zedimage-host"), "ufs", str(16 * 1024 * 1024),
                     str(tree), str(image)], check=True)
-    fs = ufs.UFS1(image.read_bytes())
+    fs = ufs.UFS(image.read_bytes())
     fs.validate()
     large = checker.large_directories(fs)
     assert len(large) == 1 and large[0][0] == "/" and large[0][2] > fs.bsize
     print("S34 PASS actual zedimage producer multi-block directory detected:", large)
 for image in [REPO / "build/arch-images/amd64.ufs", REPO / "build/data.img"]:
-    fs = ufs.UFS1(image.read_bytes())
+    fs = ufs.UFS(image.read_bytes())
     fs.validate()
     large = checker.large_directories(fs)
     assert not large, (image, large)

@@ -17,6 +17,11 @@
 
 #include "kern/sysctl.h"
 #include "kern/buf.h"
+#include "kern/io-stats.h"
+#include "kern/cache-memory.h"
+#include "kern/writeback.h"
+#include "kern/readahead.h"
+#include "kern/mount.h"
 #include "kern/klog.h"
 #include "kern/lock.h"
 
@@ -37,6 +42,7 @@ struct sysctl_leaf {
 static const struct sysctl_leaf leaves[] = {
 	{{ CTL_HW, HW_NCPU, 0 }, 2, "hw.ncpu"},
 	{{ CTL_HW, HW_NCPUONLINE, 0 }, 2, "hw.ncpuonline"},
+	{{ CTL_HW, HW_MEMORY_STATS, 0 }, 2, "hw.memory.stats"},
 	{{ CTL_KERN, KERN_MSGBUF, 0 }, 2, "kern.msgbuf"},
 	{{ CTL_KERN, KERN_MSGBUF_SIZE, 0 }, 2, "kern.msgbuf_size"},
 	{{ CTL_KERN, KERN_MSGBUF_DROPPED, 0 }, 2, "kern.msgbuf_dropped"},
@@ -49,11 +55,18 @@ static const struct sysctl_leaf leaves[] = {
 	 "vfs.bufcache.dirty_bytes"},
 	{{ CTL_VFS, VFS_BUFCACHE, VFS_BUFCACHE_STATS }, 3,
 	 "vfs.bufcache.stats"},
+	{{ CTL_VFS, VFS_IO, VFS_IO_STATS }, 3, "vfs.io.stats"},
+	{{ CTL_VFS, VFS_CACHE_MEMORY, VFS_CACHE_MEMORY_STATS }, 3, "vfs.cache_memory.stats"},
+	{{ CTL_VFS, VFS_CACHE_MEMORY, VFS_CACHE_MEMORY_TARGET }, 3, "vfs.cache_memory.target_bytes"},
+	{{ CTL_VFS, VFS_READAHEAD, VFS_READAHEAD_STATS }, 3, "vfs.readahead.stats"},
+	{{ CTL_VFS, VFS_WRITEBACK, VFS_WRITEBACK_STATS }, 3, "vfs.writeback.stats"},
+	{{ CTL_VFS, VFS_WRITEBACK, VFS_WRITEBACK_CONTROL }, 3, "vfs.writeback.control"},
 };
 
 static struct spinlock hostname_lock;
 static char hostname[ZEDBSD_HOST_NAME_MAX + 1U] = "zedbsd";
 
+static int sysctl_writeback(const int *name, void *oldp, size_t *oldlenp, const void *newp, size_t newlen, int superuser);
 static int oid_compare(const int *a, unsigned alen, const int *b, unsigned blen);
 static const struct sysctl_leaf *find_oid(const int *oid, unsigned oidlen);
 static int sysctl_output(void *oldp, size_t *oldlenp, const void *value, size_t size);
@@ -87,6 +100,11 @@ kern_sysctl(
 	int superuser)
 {
 	struct bufcache_stats stats;
+	struct io_stats io_stats;
+	struct cache_memory_stats cache_memory;
+	struct readahead_report readahead;
+	struct memory_stats memory;
+	struct hal_memory_stats hal_memory;
 	const char *new_name;
 	uint64_t value;
 	uint32_t cpus;
@@ -116,6 +134,34 @@ kern_sysctl(
 			return EPERM;
 		error = sysctl_output(oldp, oldlenp, &cpus, sizeof(cpus));
 		return error;
+	}
+
+	/* Distinguishes reported RAM from the allocator's address span. */
+	if (namelen == 2 && name[0] == CTL_HW && name[1] == HW_MEMORY_STATS) {
+		if (newp != NULL || newlen != 0)
+			return EPERM;
+		memset(&hal_memory, 0, sizeof(hal_memory));
+		hal_memory_get_stats(&hal_memory);
+		memset(&memory, 0, sizeof(memory));
+		memory.version = MEMORY_STATS_VERSION;
+		memory.boot_ranges_valid = hal_memory.boot_ranges_valid;
+		memory.boot_range_count = hal_memory.boot_range_count;
+		memory.boot_usable_bytes = hal_memory.boot_usable_bytes;
+		memory.boot_highest_end = hal_memory.boot_highest_end;
+		memory.boot_usable_highest_end = hal_memory.boot_usable_highest_end;
+		memory.direct_mapped_bytes = hal_memory.direct_mapped_bytes;
+		memory.allocator_initial_bytes = hal_memory.allocator_initial_bytes;
+		memory.boot_reclaim_bytes = hal_memory.boot_reclaim_bytes;
+		memory.allocator_metadata_bytes = hal_memory.allocator_metadata_bytes;
+		memory.allocator_scan_words = hal_memory.allocator_scan_words;
+		memory.allocator_max_extent_scan_words = hal_memory.allocator_max_extent_scan_words;
+		memory.allocator_max_irqoff_cycles = hal_memory.allocator_max_irqoff_cycles;
+		memory.boot_memory_source = hal_memory.boot_memory_source;
+		memory.physical_managed_bytes = hal_memory.physical_total;
+		memory.physical_reserved_bytes = hal_memory.physical_reserved;
+		memory.physical_allocated_bytes = hal_memory.physical_allocated;
+		memory.physical_free_bytes = hal_memory.physical_free;
+		return sysctl_output(oldp, oldlenp, &memory, sizeof(memory));
 	}
 
 	/* Handles the kernel leaves. */
@@ -198,6 +244,55 @@ kern_sysctl(
 		/* Reports an unknown kernel leaf. */
 		return ENOENT;
 	}
+
+	/* Exposes cumulative I/O events without allowing counter resets. */
+	if (namelen == 3 && name[0] == CTL_VFS &&
+	    name[1] == VFS_IO && name[2] == VFS_IO_STATS) {
+		if (newp != NULL || newlen != 0)
+			return EPERM;
+		io_stats_snapshot(&io_stats);
+		return sysctl_output(oldp, oldlenp, &io_stats, sizeof(io_stats));
+	}
+
+	/* Exposes optional read accounting with explicit conservative byte attribution. */
+	if (namelen == 3 && name[0] == CTL_VFS &&
+	    name[1] == VFS_READAHEAD && name[2] == VFS_READAHEAD_STATS) {
+		if (newp != NULL || newlen != 0)
+			return EPERM;
+		readahead_report(&readahead);
+		error = sysctl_output(oldp, oldlenp, &readahead, sizeof(readahead));
+		return error;
+	}
+
+	/* Exposes shared ownership and commits only successful clean-cache shrinks. */
+	if (namelen == 3 && name[0] == CTL_VFS && name[1] == VFS_CACHE_MEMORY) {
+		cache_memory_get_stats(&cache_memory);
+		if (name[2] == VFS_CACHE_MEMORY_STATS) {
+			if (newp != NULL || newlen != 0)
+				return EPERM;
+			error = sysctl_output(oldp, oldlenp, &cache_memory, sizeof(cache_memory));
+			return error;
+		}
+		if (name[2] != VFS_CACHE_MEMORY_TARGET)
+			return ENOENT;
+		value = cache_memory.target_bytes;
+		error = sysctl_output(oldp, oldlenp, &value, sizeof(value));
+		if (error != 0)
+			return error;
+		if (newp == NULL)
+			return newlen == 0 ? 0 : EINVAL;
+		if (!superuser)
+			return EPERM;
+		if (newlen != sizeof(value))
+			return EINVAL;
+		memcpy(&value, newp, sizeof(value));
+		error = cache_memory_set_target(value);
+		return error;
+	}
+
+	/* Dispatches the explicit per-mount writeback policy interface. */
+	if (namelen == 3 && name[0] == CTL_VFS && name[1] == VFS_WRITEBACK)
+		return sysctl_writeback(name, oldp, oldlenp, newp, newlen, superuser);
 
 	/* Everything else must be a known buffer cache leaf. */
 	if (namelen != 3 ||
@@ -407,4 +502,56 @@ sysctl_meta(
 
 	/* Reports an unknown meta operation. */
 	return ENOENT;
+}
+
+/* Validates control before changing policy and sizes reports before filling them. */
+static int
+sysctl_writeback(
+	const int *name,
+	void *oldp,
+	size_t *oldlenp,
+	const void *newp,
+	size_t newlen,
+	int superuser)
+{
+	struct writeback_control request;
+	struct mount *mount;
+	size_t capacity;
+	int error;
+
+	/* Supports size queries without allocating a large intermediate report. */
+	if (name[2] == VFS_WRITEBACK_STATS) {
+		if (newp != NULL || newlen != 0)
+			return EPERM;
+		if (oldlenp == NULL)
+			return oldp == NULL ? 0 : EINVAL;
+		capacity = *oldlenp;
+		*oldlenp = sizeof(struct writeback_report);
+		if (oldp == NULL)
+			return 0;
+		if (capacity < sizeof(struct writeback_report))
+			return ENOMEM;
+		writeback_policy_report(oldp);
+		return 0;
+	}
+
+	/* Restricts mutations to exact versioned root-only requests on a live mount. */
+	if (name[2] != VFS_WRITEBACK_CONTROL)
+		return ENOENT;
+	if (!superuser)
+		return EPERM;
+	if (newp == NULL)
+		return EOPNOTSUPP;
+	if (newlen != sizeof(request) || oldp != NULL || oldlenp != NULL)
+		return EINVAL;
+	memcpy(&request, newp, sizeof(request));
+	if (request.version != WRITEBACK_REPORT_VERSION || request.enabled > 1 ||
+	    request.path[0] != '/' || memchr(request.path, '\0', sizeof(request.path)) == NULL)
+		return EINVAL;
+	mount = mount_find_ref(request.path);
+	if (mount == NULL)
+		return ENOENT;
+	error = writeback_mount_set(mount, (int)request.enabled);
+	mount_release(mount);
+	return error;
 }

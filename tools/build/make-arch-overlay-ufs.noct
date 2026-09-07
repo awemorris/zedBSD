@@ -1,5 +1,5 @@
 require zedbuild;
-require ufs1_format;
+require ufs_format;
 
 func splitSpec(spec, option) {
     var at=String.indexOf(spec,"="); if(at<=0){zbFail(option+" requires DESTINATION=VALUE");}
@@ -25,7 +25,7 @@ func main(args){
     prepare=prepare+" && ln -s ../run "+zbShellQuote(root+"/var/run")+
             " && chmod 1777 "+zbShellQuote(root+"/tmp")+" "+zbShellQuote(root+"/shm");
     if(System.shell(prepare)!=0){zbFail("cannot prepare architecture staging root");}
-    FileUtil.writeText(root+"/lib/arch.id",profile+"\n"); FileUtil.writeText(root+"/etc/zedbsd-root","zedBSD ufs1 root v1\n");
+    FileUtil.writeText(root+"/lib/arch.id",profile+"\n"); FileUtil.writeText(root+"/etc/zedbsd-root","zedBSD ufs root v1\n");
     var haveSh=false;
     for(i in 0..Array.size(files)){var pair=splitSpec(files[i],"--file");var dest=pair[0];var source=pair[1];if(dest=="/bin/sh"){haveSh=true;}var target=root+dest;if(System.shell("mkdir -p "+zbShellQuote(zbParent(target))+" && cp -p "+zbShellQuote(source)+" "+zbShellQuote(target))!=0){zbFail("cannot install manifest file: "+dest);}}
     if(!haveSh){zbFail("profile manifest must contain /bin/sh");}

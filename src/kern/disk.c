@@ -18,13 +18,21 @@
  */
 
 #include "kern/disk.h"
+#include "kern/io-stats.h"
 #include "kern/backing-claim.h"
 #include "kern/buf.h"
 #include "kern/sched.h"
 #include "kern/atomic.h"
 #include "kern/test-checkpoint.h"
+#include <kern/bio-async.h>
+#include <kern/cache-memory.h>
+#include <kern/io-pool.h>
+#include <kern/inode.h>
+#include <kern/thread.h>
+#include <kern/page.h>
 
 #include <errno.h>
+#include <limits.h>
 #include <hal/hal.h>
 #include <string.h>
 #include <zedbsd/block.h>
@@ -45,6 +53,8 @@ extern void hal_irq_enable(void) __attribute__((weak));
 #define DISK_HIGH
 #endif
 
+extern void io_error_record(struct io_error_state *, int) __attribute__((weak));
+
 static struct disk disks[DISK_MAX];
 static uint8_t disk_used[DISK_MAX];
 static struct disk *disk_head;
@@ -52,6 +62,9 @@ static unsigned live_count;
 static dev_t next_dev = 1;
 static atomic_uint_t disk_registry_lock;
 
+static void disk_write_accept(struct disk *leaf, struct bio *bio);
+static void disk_write_retire(struct disk *leaf, struct bio *bio, int error, size_t transferred);
+static void disk_persistence_invalidate_locked(struct disk *leaf);
 static bool disk_lock(void);
 static void disk_unlock(bool enabled);
 static int disk_index(const struct disk *disk);
@@ -61,11 +74,16 @@ static int name_valid(const char name[DISK_NAME_MAX]);
 static int sd_name(char name[DISK_NAME_MAX], unsigned number);
 static int name_append_unsigned(char name[DISK_NAME_MAX], unsigned *at, unsigned value);
 static void disk_copy_info(const struct disk *disk, struct disk_info *info);
-static int disk_transfer_direct(struct disk *disk, enum bio_op op, uint64_t block, uint32_t count, void *data, const struct backing_claim *claim);
+static int bio_admit(struct disk *disk, struct bio *bio);
+static int bio_dispatch(struct bio *bio);
+static int disk_transfer_direct(struct disk *disk, enum bio_op op, uint64_t block, uint32_t count, void *data, const struct backing_claim *claim, uint32_t *completed, const struct io_context *context);
 static struct disk *disk_leaf(struct disk *disk);
 static int disk_reload_idle(struct disk *parent);
+static int disk_media_idle_locked(struct disk *parent, unsigned extra);
 static int disk_reload_replace_locked(struct disk *parent, struct disk **new_disks, unsigned count);
-static int disk_cached_transfer(struct disk *disk, uint64_t block, uint32_t count, void *data, int write);
+static int disk_cache_enter(struct disk *disk, struct disk **leaf_out);
+static void disk_cache_leave(struct disk *leaf);
+static int disk_cached_transfer(struct disk *disk, uint64_t block, uint32_t count, void *data, int write, struct buf_view *view, const struct io_context *context);
 
 /*
  * Reserves one otherwise idle physical disk for partition-table reload.
@@ -84,6 +102,7 @@ disk_reload_begin(
 	if (parent == NULL ||
 	    disk_index(parent) < 0 ||
 	    parent->d_state != DISK_LIVE ||
+	    disk_media_status(parent) != 0 ||
 	    parent->d_parent != NULL ||
 	    (parent->d_flags & DISK_PARTITION) != 0 ||
 	    owner == NULL) {
@@ -307,6 +326,17 @@ disk_create(
 	}
 
 	/* A reload owns every child namespace change beneath its physical disk. */
+	if (disk->d_media_backing != NULL &&
+	    (disk->d_parent != NULL || disk_index(disk->d_media_backing) < 0 ||
+	     disk->d_media_backing->d_state != DISK_LIVE ||
+	     disk_media_status(disk->d_media_backing) != 0)) {
+		disk_unlock(enabled);
+		return ENXIO;
+	}
+	if (disk->d_parent != NULL && disk_media_status(disk->d_parent) != 0) {
+		disk_unlock(enabled);
+		return ENXIO;
+	}
 	if (disk->d_parent != NULL && disk_leaf(disk)->d_reload_owner != NULL) {
 		disk_unlock(enabled);
 		return EBUSY;
@@ -328,6 +358,8 @@ disk_create(
 	disk->d_next = NULL;
 	if (disk->d_parent != NULL)
 		refcount_get(&disk->d_parent->d_refs);
+	if (disk->d_media_backing != NULL)
+		refcount_get(&disk->d_media_backing->d_refs);
 	tail = &disk_head;
 	while (*tail != NULL)
 		tail = &(*tail)->d_next;
@@ -375,6 +407,7 @@ disk_gone(
 		}
 	}
 	disk->d_next = NULL;
+	disk_persistence_invalidate(disk);
 	disk->d_state = DISK_GONE;
 out:
 	disk_unlock(enabled);
@@ -457,6 +490,7 @@ disk_gone_if_idle(
 		}
 	}
 	disk->d_next = NULL;
+	disk_persistence_invalidate(disk);
 	disk->d_state = DISK_GONE;
 	disk_unlock(enabled);
 	error = 0;
@@ -505,8 +539,10 @@ disk_destroy(
 
 	/* Drops the parent reference and clears the slot. */
 	parent = disk->d_parent;
-	if (disk->d_parent != NULL)
+	if (disk->d_state == DISK_GONE && parent != NULL)
 		(void)refcount_put_not_last(&parent->d_refs);
+	if (disk->d_state == DISK_GONE && disk->d_media_backing != NULL)
+		(void)refcount_put_not_last(&disk->d_media_backing->d_refs);
 	zero_bytes(disk, sizeof(*disk));
 	disk_used[i] = 0;
 	disk_unlock(enabled);
@@ -676,6 +712,48 @@ disk_release(
 }
 
 /*
+ * Acquires a separately counted resident-buffer pin before cache publication.
+ */
+int
+disk_buffer_acquire(
+	struct disk *disk)
+{
+	bool enabled;
+	int error;
+
+	enabled = disk_lock();
+	error = 0;
+	if (disk == NULL || disk_index(disk) < 0 || disk->d_state != DISK_LIVE ||
+	    disk_media_status(disk) != 0)
+		error = ENXIO;
+	else if (disk->d_buffer_refs == UINT_MAX)
+		error = EOVERFLOW;
+	else {
+		disk->d_buffer_refs++;
+		refcount_get(&disk->d_refs);
+	}
+	disk_unlock(enabled);
+	return error;
+}
+
+/*
+ * Releases one resident-buffer pin, including after medium revocation.
+ */
+void
+disk_buffer_release(
+	struct disk *disk)
+{
+	bool enabled;
+
+	enabled = disk_lock();
+	if (disk == NULL || disk_index(disk) < 0 || disk->d_buffer_refs == 0)
+		HAL_FATAL("disk buffer reference underflow");
+	disk->d_buffer_refs--;
+	(void)refcount_put_not_last(&disk->d_refs);
+	disk_unlock(enabled);
+}
+
+/*
  * Empties the registry and the buffer cache.
  */
 void
@@ -724,7 +802,7 @@ disk_block_info(
 	enabled = disk_lock();
 	if (disk == NULL ||
 	    disk_index(disk) < 0 ||
-	    disk->d_state != DISK_LIVE) {
+	    disk->d_state != DISK_LIVE || disk_media_status(disk) != 0) {
 		disk_unlock(enabled);
 		return ENXIO;
 	}
@@ -836,7 +914,7 @@ disk_open(
 	/* Rejects a missing, unknown, or dead disk. */
 	if (disk == NULL ||
 	    disk_index(disk) < 0 ||
-	    disk->d_state != DISK_LIVE) {
+	    disk->d_state != DISK_LIVE || disk_media_status(disk) != 0) {
 		disk_unlock(enabled);
 		return ENXIO;
 	}
@@ -856,7 +934,7 @@ disk_open(
 	enabled = disk_lock();
 	disk->d_opening--;
 	if (error == 0) {
-		if (disk->d_state != DISK_LIVE) {
+		if (disk->d_state != DISK_LIVE || disk_media_status(disk) != 0) {
 			error = ENXIO;
 		} else {
 			disk->d_open_count++;
@@ -960,7 +1038,7 @@ disk_ioctl(
 	/* Rejects a missing, unknown, or dead disk. */
 	if (disk == NULL ||
 	    disk_index(disk) < 0 ||
-	    disk->d_state != DISK_LIVE) {
+	    disk->d_state != DISK_LIVE || disk_media_status(disk) != 0) {
 		disk_unlock(enabled);
 		return ENXIO;
 	}
@@ -980,28 +1058,277 @@ disk_ioctl(
 }
 
 /*
+ * Invalidates proof without changing outstanding request ownership.
+ */
+void
+disk_persistence_invalidate(
+	struct disk *disk)
+{
+	struct disk *leaf;
+	unsigned long irq;
+
+	/* Invalidates the live object's physical ancestry under its state lock. */
+	if (disk == NULL)
+		return;
+	leaf = disk_leaf(disk);
+	irq = spin_lock_irqsave(&leaf->d_lock);
+	disk_persistence_invalidate_locked(leaf);
+	if (leaf->d_media_epoch != UINT64_MAX)
+		leaf->d_media_epoch++;
+	spin_unlock_irqrestore(&leaf->d_lock, irq);
+}
+
+/*
+ * Retires durability proof while the same-medium command owner recovers.
+ */
+void
+disk_persistence_forget(
+	struct disk *disk)
+{
+	struct disk *leaf;
+	unsigned long irq;
+
+	if (disk == NULL)
+		return;
+	leaf = disk_leaf(disk);
+	irq = spin_lock_irqsave(&leaf->d_lock);
+	disk_persistence_invalidate_locked(leaf);
+	spin_unlock_irqrestore(&leaf->d_lock, irq);
+}
+
+/*
+ * Closes the original medium without touching its outstanding owners.
+ */
+void
+disk_media_revoke(
+	struct disk *disk)
+{
+	struct disk *leaf;
+	bool enabled;
+
+	if (disk == NULL)
+		return;
+	leaf = disk_leaf(disk);
+	enabled = disk_lock();
+	if (!atomic_raw_load_acquire(&leaf->d_media_revoked)) {
+		atomic_raw_store_release(&leaf->d_media_revoked, 1U);
+		disk_persistence_invalidate(leaf);
+	}
+	disk_unlock(enabled);
+}
+
+/*
+ * Retires unused revoked ancestry without writing its old buffers to media.
+ */
+int
+disk_media_retire(
+	struct disk *disk)
+{
+	struct backing_mutation_guard guard;
+	struct disk **link, *child;
+	bool enabled;
+	int error, index;
+
+	error = backing_mutation_begin_retired_disk(disk, &guard);
+	if (error != 0)
+		return error;
+	enabled = disk_lock();
+	error = disk_media_idle_locked(disk, 0);
+	if (error != 0) {
+		disk_unlock(enabled);
+		backing_mutation_end(&guard);
+		return error;
+	}
+	/* The extra pin also excludes a concurrent retirement attempt. */
+	refcount_get(&disk->d_refs);
+	disk_unlock(enabled);
+	error = buf_discard_media(disk);
+	enabled = disk_lock();
+	if (error == 0)
+		error = disk_media_idle_locked(disk, 1);
+	if (error == 0 && disk->d_buffer_refs != 0)
+		error = EBUSY;
+	if (error == 0) {
+		/* All fallible checks precede removal of any published child. */
+		for (link = &disk_head; *link != NULL;) {
+			child = *link;
+			if (child != disk && child->d_parent != disk) {
+				link = &child->d_next;
+				continue;
+			}
+			*link = child->d_next;
+			live_count--;
+			if (child == disk) {
+				disk->d_next = NULL;
+				disk->d_state = DISK_GONE;
+			} else {
+				index = disk_index(child);
+				(void)refcount_put_not_last(&disk->d_refs);
+				zero_bytes(child, sizeof(*child));
+				disk_used[index] = 0;
+			}
+		}
+	}
+	(void)refcount_put_not_last(&disk->d_refs);
+	disk_unlock(enabled);
+	backing_mutation_end(&guard);
+	return error;
+}
+
+/* Checks external users separately from resident cache pins; registry locked. */
+static int
+disk_media_idle_locked(
+	struct disk *parent,
+	unsigned extra)
+{
+	struct disk *child;
+	uint64_t expected;
+
+	if (parent == NULL || disk_index(parent) < 0 ||
+	    parent->d_state != DISK_LIVE || parent->d_parent != NULL ||
+	    !atomic_raw_load_acquire(&parent->d_media_revoked))
+		return EINVAL;
+	if (parent->d_open_count || parent->d_opening || parent->d_closing ||
+	    parent->d_inflight || parent->d_cache_users || parent->d_reload_owner)
+		return EBUSY;
+	expected = UINT64_C(1) + extra + parent->d_buffer_refs;
+	for (child = disk_head; child != NULL; child = child->d_next) {
+		if (child == parent || disk_leaf(child) != parent)
+			continue;
+		if (child->d_parent != parent || !(child->d_flags & DISK_PARTITION) ||
+		    child->d_open_count || child->d_opening || child->d_closing ||
+		    child->d_inflight || child->d_cache_users || child->d_buffer_refs ||
+		    child->d_reload_owner || refcount_load(&child->d_refs) != 1)
+			return EBUSY;
+		expected++;
+	}
+	return refcount_load(&parent->d_refs) == expected ? 0 : EBUSY;
+}
+
+/*
+ * Tests media admission independently of reference ownership and transport.
+ */
+int
+disk_media_status(
+	const struct disk *disk)
+{
+	if (disk == NULL)
+		return ENXIO;
+	while (disk != NULL) {
+		if (atomic_raw_load_acquire(&disk->d_media_revoked))
+			return ENXIO;
+		if (disk->d_parent != NULL)
+			disk = disk->d_parent;
+		else
+			disk = disk->d_media_backing;
+	}
+	return 0;
+}
+
+/* Retires a proof epoch; saturation never aliases a previously valid proof. */
+static void
+disk_persistence_invalidate_locked(
+	struct disk *leaf)
+{
+	leaf->d_stable_valid = 0;
+	if (leaf->d_persist_epoch != UINT64_MAX)
+		leaf->d_persist_epoch++;
+}
+
+/* Appends an accepted write before the driver can complete it. */
+static void
+disk_write_accept(
+	struct disk *leaf,
+	struct bio *bio)
+{
+	unsigned long irq;
+
+	/* Serializes the accepted frontier and intrusive outstanding order. */
+	if (bio->b_op != BIO_WRITE)
+		return;
+	irq = spin_lock_irqsave(&leaf->d_lock);
+	if (leaf->d_write_accepted != UINT64_MAX)
+		leaf->d_write_accepted++;
+	else
+		disk_persistence_invalidate_locked(leaf);
+	bio->b_write_sequence = leaf->d_write_accepted;
+	bio->b_write_previous = leaf->d_write_tail;
+	bio->b_write_next = NULL;
+	if (leaf->d_write_tail != NULL)
+		leaf->d_write_tail->b_write_next = bio;
+	else
+		leaf->d_write_head = bio;
+	leaf->d_write_tail = bio;
+	spin_unlock_irqrestore(&leaf->d_lock, irq);
+}
+
+/* Removes caller-owned storage before completion publication, preserving holes. */
+static void
+disk_write_retire(
+	struct disk *leaf,
+	struct bio *bio,
+	int error,
+	size_t transferred)
+{
+	unsigned long irq;
+	uint64_t expected;
+
+	/* Treats every transport error as an uncertain persistence boundary. */
+	irq = spin_lock_irqsave(&leaf->d_lock);
+	expected = (uint64_t)bio->b_block_count * leaf->d_block_size;
+	if (error != 0 || (bio->b_op == BIO_WRITE && transferred != expected))
+		disk_persistence_invalidate_locked(leaf);
+
+	/* Detaches the write even when later writes completed first. */
+	if (bio->b_op == BIO_WRITE) {
+		if (bio->b_write_previous != NULL)
+			bio->b_write_previous->b_write_next = bio->b_write_next;
+		else
+			leaf->d_write_head = bio->b_write_next;
+		if (bio->b_write_next != NULL)
+			bio->b_write_next->b_write_previous = bio->b_write_previous;
+		else
+			leaf->d_write_tail = bio->b_write_previous;
+		bio->b_write_previous = NULL;
+		bio->b_write_next = NULL;
+		if (leaf->d_write_head != NULL)
+			leaf->d_write_completed = leaf->d_write_head->b_write_sequence - 1U;
+		else
+			leaf->d_write_completed = leaf->d_write_accepted;
+		waitq_wake_all(&leaf->d_waitq);
+	}
+	spin_unlock_irqrestore(&leaf->d_lock, irq);
+}
+
+/*
  * Submits a bio to the leaf disk that owns its blocks.
  *
  * The block range is checked at every level of the partition stack,
  * and the leaf's in-flight count and reference are held until
  * bio_complete().
  */
-int
-bio_submit(
+static int
+bio_admit(
 	struct disk *disk,
 	struct bio *bio)
 {
 	struct disk *leaf;
 	uint64_t mapped;
+	unsigned long context_irq;
 	int error;
 	bool enabled;
 
 	/* Rejects a missing operand, a reused bio, or a dead disk. */
 	if (disk == NULL ||
 	    bio == NULL ||
+	    (bio->b_op != BIO_READ && bio->b_op != BIO_WRITE && bio->b_op != BIO_FLUSH) ||
 	    bio->b_state != BIO_NEW ||
 	    disk->d_state != DISK_LIVE)
 		return EINVAL;
+
+	error = io_context_validate(&bio->b_context);
+	if (error != 0)
+		return error;
 
 	/* Initializes the completion state on first use. */
 	if (!bio->b_initialized) {
@@ -1045,7 +1372,8 @@ bio_submit(
 
 	/* Marks the bio submitted and pins the leaf. */
 	enabled = disk_lock();
-	if (disk->d_state != DISK_LIVE || leaf->d_state != DISK_LIVE) {
+	if (disk->d_state != DISK_LIVE || leaf->d_state != DISK_LIVE ||
+	    disk_media_status(disk) != 0) {
 		disk_unlock(enabled);
 		return ENXIO;
 	}
@@ -1067,9 +1395,49 @@ bio_submit(
 	refcount_get(&leaf->d_refs);
 	disk_unlock(enabled);
 
-	/* Hands the bio to the driver, undoing the pin when it refuses. */
-	error = leaf->d_ops->submit(leaf, bio);
+	context_irq = spin_lock_irqsave(&leaf->d_lock);
+	bio->b_context.media_disk = leaf;
+	bio->b_context.media_generation = leaf->d_media_epoch;
+	spin_unlock_irqrestore(&leaf->d_lock, context_irq);
+	disk_write_accept(leaf, bio);
+
+	return 0;
+}
+
+/* Driver dispatch is separated from admission for bounded worker queues. */
+static int
+bio_dispatch(
+	struct bio *bio)
+{
+	struct disk *leaf;
+
+	leaf = bio->b_leaf_disk;
+	if (disk_media_status(leaf) != 0)
+		return ESTALE;
+	io_stats_record(bio->b_op == BIO_FLUSH ? IO_DRIVER_FLUSH :
+	    (bio->b_op == BIO_READ ? IO_DRIVER_READ : IO_DRIVER_WRITE),
+	    bio->b_op == BIO_FLUSH ? 0 :
+	    (uint64_t)bio->b_block_count * leaf->d_block_size);
+	return leaf->d_ops->submit(leaf, bio);
+}
+
+/* Retains legacy refusal semantics: a refused synchronous BIO has no callback. */
+int
+bio_submit(
+	struct disk *disk,
+	struct bio *bio)
+{
+	struct disk *leaf;
+	bool enabled;
+	int error;
+
+	error = bio_admit(disk, bio);
+	if (error != 0)
+		return error;
+	leaf = bio->b_leaf_disk;
+	error = bio_dispatch(bio);
 	if (error != 0) {
+		disk_write_retire(leaf, bio, error, 0);
 		enabled = disk_lock();
 		leaf->d_inflight--;
 		(void)refcount_put_not_last(&leaf->d_refs);
@@ -1077,8 +1445,6 @@ bio_submit(
 		bio->b_leaf_disk = NULL;
 		disk_unlock(enabled);
 	}
-
-	/* Reports the submission result. */
 	return error;
 }
 
@@ -1110,11 +1476,27 @@ bio_complete(
 		return;
 	}
 	leaf = bio->b_leaf_disk;
+	if (leaf != NULL && disk_media_status(leaf) != 0) {
+		error = ESTALE;
+		transferred = 0;
+	}
+	if (error == 0 && leaf != NULL && bio->b_op == BIO_WRITE &&
+	    transferred != (uint64_t)bio->b_block_count * leaf->d_block_size)
+		error = EIO;
+	io_stats_record(bio->b_op == BIO_FLUSH ? IO_COMPLETE_FLUSH :
+	    (bio->b_op == BIO_READ ? IO_COMPLETE_READ : IO_COMPLETE_WRITE),
+	    transferred);
+	if (error != 0)
+		io_stats_record(IO_COMPLETE_ERROR, transferred);
+	if (error != 0 && leaf != NULL && bio->b_op != BIO_READ &&
+	    io_error_record != NULL)
+		io_error_record(&leaf->d_write_error, error);
 	bio->b_error = error;
 	bio->b_transferred = transferred;
-	bio->b_state = BIO_COMPLETED;
-	waitq_wake_all(&bio->b_waitq);
-	spin_unlock_irqrestore(&bio->b_lock, bio_irq);
+
+	/* Captures all caller-owned fields before making storage reusable. */
+	done = bio->b_done;
+	disk_write_retire(leaf, bio, error, transferred);
 
 	/* Unpins the leaf. */
 	enabled = disk_lock();
@@ -1122,8 +1504,12 @@ bio_complete(
 		leaf->d_inflight--;
 	if (leaf != NULL)
 		(void)refcount_put_not_last(&leaf->d_refs);
-	done = bio->b_done;
 	disk_unlock(enabled);
+
+	/* Publishes completion only after all leaf accounting is finished. */
+	bio->b_state = BIO_COMPLETED;
+	waitq_wake_all(&bio->b_waitq);
+	spin_unlock_irqrestore(&bio->b_lock, bio_irq);
 
 	/* Runs the completion callback unlocked. */
 	if (done != NULL)
@@ -1151,7 +1537,7 @@ disk_resolve_range(
 	    mapped_out == NULL ||
 	    count == 0)
 		return EINVAL;
-	if (disk->d_state != DISK_LIVE)
+	if (disk->d_state != DISK_LIVE || disk_media_status(disk) != 0)
 		return ENXIO;
 	if (block >= disk->d_block_count || count > disk->d_block_count - block)
 		return EOVERFLOW;
@@ -1195,7 +1581,7 @@ bio_wait(
 	uint64_t sequence;
 
 	/* Rejects a missing or never-submitted bio. */
-	if (bio == NULL || !bio->b_initialized)
+	if (bio == NULL || !bio->b_initialized || bio->b_done != NULL)
 		return EINVAL;
 
 	/* Finds the current thread when the scheduler is linked in. */
@@ -1249,18 +1635,76 @@ int
 bio_flush(
 	struct disk *disk)
 {
+	struct disk *leaf;
 	struct bio bio;
-	int error;
+	struct thread *thread;
+	uint64_t target, epoch, sequence;
+	unsigned long irq;
+	int error, reusable;
 
-	/* Submits a flush bio and waits for it. */
+	/* Retains reload admission even when a proof avoids physical I/O. */
+	error = disk_cache_enter(disk, &leaf);
+	if (error != 0)
+		return error;
+	thread = thread_current != NULL ? thread_current() : NULL;
+	irq = spin_lock_irqsave(&leaf->d_lock);
+	target = leaf->d_write_accepted;
+
+	/* Waits for earlier flush ownership and holes in this captured prefix. */
+	while (leaf->d_flush_busy || leaf->d_write_completed < target) {
+		sequence = waitq_sequence(&leaf->d_waitq);
+		if (thread == NULL) {
+			spin_unlock_irqrestore(&leaf->d_lock, irq);
+			hal_compiler_barrier();
+			irq = spin_lock_irqsave(&leaf->d_lock);
+		} else {
+			error = waitq_sleep(&leaf->d_waitq, &leaf->d_lock, sequence, 0, 0);
+			if (error != 0 && error != EAGAIN) {
+				spin_unlock_irqrestore(&leaf->d_lock, irq);
+				disk_cache_leave(leaf);
+				return error;
+			}
+		}
+	}
+
+	/* Uses only an explicit driver guarantee in the same unexpired epoch. */
+	epoch = leaf->d_persist_epoch;
+	reusable = (leaf->d_flags & DISK_FLUSH_PROOF) != 0 &&
+	    target != UINT64_MAX && epoch != UINT64_MAX &&
+	    leaf->d_stable_valid && leaf->d_stable_epoch == epoch &&
+	    leaf->d_write_stable >= target;
+	if (reusable) {
+		spin_unlock_irqrestore(&leaf->d_lock, irq);
+		disk_cache_leave(leaf);
+		return 0;
+	}
+	leaf->d_flush_busy = 1;
+	spin_unlock_irqrestore(&leaf->d_lock, irq);
+
+	/* Issues a real barrier after the complete captured prefix. */
 	memset(&bio, 0, sizeof(bio));
 	bio.b_op = BIO_FLUSH;
 	error = bio_submit(disk, &bio);
-	if (error != 0)
-		return error;
-	error = bio_wait(&bio);
+	if (error == 0)
+		error = bio_wait(&bio);
 
-	/* Reports the flush result. */
+	/* Publishes this target only; later accepted writes need another barrier. */
+	irq = spin_lock_irqsave(&leaf->d_lock);
+	if (error == 0 && (leaf->d_flags & DISK_FLUSH_PROOF) != 0 &&
+	    epoch == leaf->d_persist_epoch &&
+	    epoch != UINT64_MAX && target != UINT64_MAX) {
+		leaf->d_write_stable = target;
+		leaf->d_stable_epoch = epoch;
+		leaf->d_stable_valid = 1;
+	} else {
+		disk_persistence_invalidate_locked(leaf);
+	}
+	leaf->d_flush_busy = 0;
+	waitq_wake_all(&leaf->d_waitq);
+	spin_unlock_irqrestore(&leaf->d_lock, irq);
+	disk_cache_leave(leaf);
+
+	/* Preserves the physical barrier result for upper dirty owners. */
 	return error;
 }
 
@@ -1276,7 +1720,7 @@ disk_read_direct(
 {
 	int error;
 
-	error = disk_transfer_direct(disk, BIO_READ, block, count, data, NULL);
+	error = disk_transfer_direct(disk, BIO_READ, block, count, data, NULL, NULL, NULL);
 
 	/* Reports the transfer result. */
 	return error;
@@ -1292,12 +1736,63 @@ disk_write_direct(
 	uint32_t count,
 	const void *data)
 {
+	return disk_write_direct_context(disk, block, count, data, NULL);
+}
+
+int
+disk_write_direct_context(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	const void *data,
+	const struct io_context *context)
+{
 	int error;
 
 	error = disk_transfer_direct(disk, BIO_WRITE, block, count, (void *)data,
-				     NULL);
+				     NULL, NULL, context);
 
 	/* Reports the transfer result. */
+	return error;
+}
+
+/*
+ * Reports only the prefix covered by completely successful direct BIOs.
+ * A failing or short BIO contributes nothing, even if it reports some bytes.
+ */
+int
+disk_transfer_progress(
+	struct disk *disk,
+	enum bio_op op,
+	uint64_t block,
+	uint32_t count,
+	void *data,
+	uint32_t *completed)
+{
+	return disk_transfer_progress_context(disk, op, block, count, data, completed, NULL);
+}
+
+int
+disk_transfer_progress_context(
+	struct disk *disk,
+	enum bio_op op,
+	uint64_t block,
+	uint32_t count,
+	void *data,
+	uint32_t *completed,
+	const struct io_context *context)
+{
+	int error;
+
+	/* Requires an output and a data operation. */
+	if (completed == NULL)
+		return EINVAL;
+	*completed = 0;
+	if (op != BIO_READ && op != BIO_WRITE)
+		return EINVAL;
+	error = disk_transfer_direct(disk, op, block, count, data, NULL, completed, context);
+
+	/* Reports the transfer outcome independently of its confirmed prefix. */
 	return error;
 }
 
@@ -1318,7 +1813,7 @@ disk_write_direct_claimed(
 	if (claim == NULL)
 		return EINVAL;
 	error = disk_transfer_direct(disk, BIO_WRITE, block, count, (void *)data,
-				     claim);
+				     claim, NULL, NULL);
 
 	/* Reports the transfer result. */
 	return error;
@@ -1355,10 +1850,53 @@ disk_read(
 {
 	int error;
 
-	error = disk_cached_transfer(disk, block, count, data, 0);
+	error = disk_cached_transfer(disk, block, count, data, 0, NULL, NULL);
 
 	/* Reports the read result. */
 	return error;
+}
+
+/*
+ * Copies metadata while retaining only bounded common-cache reference tokens.
+ */
+int
+disk_read_view(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	void *data,
+	struct buf_view *view)
+{
+	int error;
+
+	/* Applies the same lifecycle admission as ordinary cached I/O. */
+	error = disk_cached_transfer(disk, block, count, data, 0, view, NULL);
+	return error;
+}
+
+/*
+ * Validates metadata copies only while their disk remains admitted and unchanged.
+ */
+int
+disk_view_matches(
+	struct disk *disk,
+	const struct buf_view *view)
+{
+	struct disk *leaf;
+	int matches;
+	int error;
+
+	/* Rejects a different mount/device lifetime or an inadmissible disk. */
+	if (view == NULL || view->disk != disk)
+		return 0;
+	error = disk_cache_enter(disk, &leaf);
+	if (error != 0)
+		return 0;
+	matches = buf_view_matches(view);
+	disk_cache_leave(leaf);
+
+	/* Reports a valid copy at this observation point. */
+	return matches;
 }
 
 /*
@@ -1371,14 +1909,29 @@ disk_write(
 	uint32_t count,
 	const void *data)
 {
+	return disk_write_context(disk, block, count, data, NULL);
+}
+
+int
+disk_write_context(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	const void *data,
+	const struct io_context *context)
+{
 	struct backing_mutation_guard guard;
 	int error;
+
+	error = io_context_validate(context);
+	if (error != 0)
+		return error;
 
 	/* Excludes conflicting claims on the range for the write. */
 	error = backing_mutation_begin_disk(disk, block, count, NULL, &guard);
 	if (error != 0)
 		return error;
-	error = disk_cached_transfer(disk, block, count, (void *)data, 1);
+	error = disk_cached_transfer(disk, block, count, (void *)data, 1, NULL, context);
 	backing_mutation_end(&guard);
 
 	/* Reports the write result. */
@@ -1395,15 +1948,30 @@ disk_write_filesystem(
 	uint32_t count,
 	const void *data)
 {
+	return disk_write_filesystem_context(disk, block, count, data, NULL);
+}
+
+int
+disk_write_filesystem_context(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	const void *data,
+	const struct io_context *context)
+{
 	struct backing_mutation_guard guard;
 	int error;
+
+	error = io_context_validate(context);
+	if (error != 0)
+		return error;
 
 	/* Excludes conflicting claims under the filesystem's own guard. */
 	error = backing_mutation_begin_disk_filesystem(disk, block, count,
 						       &guard);
 	if (error != 0)
 		return error;
-	error = disk_cached_transfer(disk, block, count, (void *)data, 1);
+	error = disk_cached_transfer(disk, block, count, (void *)data, 1, NULL, context);
 	backing_mutation_end(&guard);
 
 	/* Reports the write result. */
@@ -1519,7 +2087,8 @@ disk_reload_replace_locked(
 		}
 		*link = disk->d_next;
 		disk->d_next = NULL;
-		disk->d_state = DISK_GONE;
+		disk_persistence_invalidate(disk);
+	disk->d_state = DISK_GONE;
 		live_count--;
 	}
 
@@ -1542,25 +2111,26 @@ disk_reload_replace_locked(
 }
 
 /* Keeps cache hits under the same reload admission boundary as physical I/O. */
+/* Admits a cached access under the disk's reload and lifetime barriers. */
 static int
-disk_cached_transfer(
+disk_cache_enter(
 	struct disk *disk,
-	uint64_t block,
-	uint32_t count,
-	void *data,
-	int write)
+	struct disk **leaf_out)
 {
 	struct disk *leaf;
 	bool enabled;
-	int error;
 
-	/* Admits only a live disk and the reload owner's physical-disk requests. */
 	enabled = disk_lock();
-	if (disk == NULL || disk->d_state != DISK_LIVE) {
+	if (disk == NULL || disk->d_state != DISK_LIVE ||
+	    disk_media_status(disk) != 0) {
 		disk_unlock(enabled);
 		return ENXIO;
 	}
 	leaf = disk_leaf(disk);
+	if (leaf->d_state != DISK_LIVE) {
+		disk_unlock(enabled);
+		return ENXIO;
+	}
 	if (leaf->d_reload_owner != NULL &&
 	    (disk != leaf || thread_current == NULL ||
 	     leaf->d_reload_owner != thread_current())) {
@@ -1568,16 +2138,52 @@ disk_cached_transfer(
 		return EBUSY;
 	}
 	leaf->d_cache_users++;
+	refcount_get(&leaf->d_refs);
 	disk_unlock(enabled);
+	*leaf_out = leaf;
 
-	/* Retains cache ownership even when no physical I/O is required. */
-	if (write)
-		error = buf_write(disk, block, count, data);
-	else
-		error = buf_read(disk, block, count, data);
+	/* Returns the admitted leaf identity. */
+	return 0;
+}
+
+/* Releases one cached-access admission. */
+static void
+disk_cache_leave(
+	struct disk *leaf)
+{
+	bool enabled;
+
 	enabled = disk_lock();
 	leaf->d_cache_users--;
+	(void)refcount_put_not_last(&leaf->d_refs);
 	disk_unlock(enabled);
+}
+
+/* Performs cached I/O without holding the registry lock over buffer operations. */
+static int
+disk_cached_transfer(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	void *data,
+	int write,
+	struct buf_view *view,
+	const struct io_context *context)
+{
+	struct disk *leaf;
+	int error;
+
+	/* Retains lifecycle admission even when no physical I/O is required. */
+	error = disk_cache_enter(disk, &leaf);
+	if (error != 0)
+		return error;
+	if (write)
+		error = buf_write_context(disk, block, count, data, context);
+	else if (view != NULL)
+		error = buf_read_view(disk, block, count, data, view);
+	else
+		error = buf_read(disk, block, count, data);
+	disk_cache_leave(leaf);
 
 	/* Preserves the cache operation's result. */
 	return error;
@@ -1772,8 +2378,11 @@ disk_transfer_direct(
 	uint64_t block,
 	uint32_t count,
 	void *data,
-	const struct backing_claim *claim)
+	const struct backing_claim *claim,
+	uint32_t *completed,
+	const struct io_context *context)
 {
+	struct io_context child;
 	uint8_t *bytes;
 	struct backing_mutation_guard guard;
 	int guarded;
@@ -1782,6 +2391,11 @@ disk_transfer_direct(
 	struct bio bio;
 	size_t expected;
 
+	if (completed != NULL)
+		*completed = 0;
+	error = io_context_child(&child, context, IO_CONTEXT_DRAIN);
+	if (error != 0)
+		return error;
 	bytes = data;
 	guarded = 0;
 
@@ -1809,6 +2423,7 @@ disk_transfer_direct(
 		    chunk > disk->d_max_transfer_blocks)
 			chunk = disk->d_max_transfer_blocks;
 		memset(&bio, 0, sizeof(bio));
+		bio.b_context = child;
 		bio.b_op = op;
 		bio.b_block = block;
 		bio.b_block_count = chunk;
@@ -1833,6 +2448,8 @@ disk_transfer_direct(
 				backing_mutation_end(&guard);
 			return EIO;
 		}
+		if (completed != NULL)
+			*completed += chunk;
 		block += chunk;
 		count -= chunk;
 		bytes += expected;
@@ -1843,3 +2460,40 @@ disk_transfer_direct(
 	/* Reports the completed transfer. */
 	return 0;
 }
+
+/*
+ * Admits file-cache access under the block device lifecycle barrier.
+ */
+int
+disk_cache_acquire(
+	struct disk *disk,
+	struct disk **leaf)
+{
+	int error;
+
+	/* Requires an output token before taking the device reference. */
+	if (leaf == NULL)
+		return EINVAL;
+	*leaf = NULL;
+	error = disk_cache_enter(disk, leaf);
+
+	/* Reports the acquired token or the lifecycle refusal. */
+	return error;
+}
+
+/*
+ * Releases a previously admitted file-cache access.
+ */
+void
+disk_cache_release(
+	struct disk *leaf)
+{
+	/* Ignores callers whose filesystem has no block backing. */
+	if (leaf == NULL)
+		return;
+	disk_cache_leave(leaf);
+}
+
+#include "disk-async.inc"
+
+#include "disk-vector.inc"

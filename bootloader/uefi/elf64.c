@@ -6,7 +6,7 @@
 #define PF_X    1U
 #define EM_X86_64 62U
 #define ET_EXEC 2U
-#define AMD64_DIRECT_BASE 0xffffffff80000000ULL
+#define AMD64_IMAGE_BASE 0xffffffff80000000ULL
 #define KERNEL_PHYS_START 0x00200000ULL
 #define KERNEL_PHYS_LIMIT 0x01200000ULL
 
@@ -78,7 +78,7 @@ zbl_elf64_plan(const void *buffer, uint64_t file_size_limit,
 		    ph->paddr < KERNEL_PHYS_START ||
 		    ph->paddr >= KERNEL_PHYS_LIMIT ||
 		    ph->memsz > KERNEL_PHYS_LIMIT - ph->paddr ||
-		    ph->vaddr != AMD64_DIRECT_BASE + ph->paddr ||
+		    ph->vaddr != AMD64_IMAGE_BASE + ph->paddr ||
 		    (ph->paddr & 0xfffU) != 0 || ph->align < 0x1000U ||
 		    (ph->align & (ph->align - 1U)) != 0 ||
 		    ph->offset > file_size_limit ||

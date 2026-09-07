@@ -1,6 +1,6 @@
 # WS018: kernel source ownership and interface consolidation
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
 
 WSID: `ws018`
 
@@ -14,6 +14,12 @@ Q086 completed [p017 baseline](phase017-storage-baseline/results.md),
 [P020 request-sized syscall I/O](phase020-syscall-request-batching/results.md)
 completed the user's request to remove 4KiB backend splitting; no selected phase remains.
 Broader filesystem/USB work remains in the [follow-up matrix](../fs-report-followups.md).
+
+On 2026-09-07 the user approved the buffer/cache redesign and requested the
+independent [WS025](../ws025-io-memory-cache/ws.md). I/O batching, cache
+ownership/reclaim, staged write-back, and amd64 all-RAM utilization are planned
+there. This does not reopen or renumber the completed WS018 Phases; unrelated
+residual findings remain in the follow-up matrix.
 
 The user's 2026-09-06 [WS024 direction](../ws024-unified-ufs/ws.md) replaces
 p003's future two-driver architecture with one 64-bit implementation named

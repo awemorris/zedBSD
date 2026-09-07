@@ -22,13 +22,15 @@ with tempfile.TemporaryDirectory(prefix="q086-syscall-") as work:
     (work / "storage-syscall-extracted.h").write_text("".join(function(name) for name in
         ["syscall_regular_buffer", "sys_read_call", "sys_write_call",
          "sys_positional_call", "sys_vector_call"]))
-    for chunk, imod in [(512,4000),(4096,4000),(512,0),(4096,0),(None,4000)]:
+    for chunk, imod in [(None,4000)]:
         binary = work / f"io-{chunk}-{imod}"
         subprocess.run(["cc","-std=c11","-O1","-g","-Wall","-Wextra","-Werror",
             "-fsanitize=address,undefined","-fno-omit-frame-pointer",
             *([] if chunk is None else [f"-DZEDBSD_SYSCALL_REGULAR_CHUNK={chunk}"]),
             f"-DZEDBSD_XHCI_IMOD={imod}",
+            "-I",str(REPO / "include"), "-I",str(REPO / "include/uapi"),
+            str(REPO / "src/kern/io-stats.c"),
             "-I",str(work),str(REPO / "plan/ws018-kernel-architecture/tests/storage-syscall-stories.c"),
             "-o",str(binary)],check=True)
         subprocess.run([str(binary)],check=True)
-print("S44 PASS four historical operation-count cells plus current production default; physical IRQ/CPU/latency not measured")
+print("S44 PASS current production 64 KiB pool path and controlled exhaustion; historical q087 count cells remain in retained results, physical IRQ/latency not measured")

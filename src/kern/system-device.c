@@ -117,7 +117,9 @@ system_ioctl(
 		/* Only init may halt the machine. */
 		if (curthread->proc->pid != 1)
 			return EPERM;
-		system_shutdown_prepare();
+		error = system_shutdown_prepare();
+		if (error != 0)
+			return error;
 		kern_platform_halt();
 		error = 0;
 		break;
@@ -125,7 +127,9 @@ system_ioctl(
 		/* Only init may reboot the machine. */
 		if (curthread->proc->pid != 1)
 			return EPERM;
-		system_shutdown_prepare();
+		error = system_shutdown_prepare();
+		if (error != 0)
+			return error;
 		kern_platform_reboot();
 		error = 0;
 		break;

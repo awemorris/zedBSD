@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <hal/hal.h>
 #include <kern/atomic.h>
+#include <kern/io-stats.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
@@ -86,10 +87,16 @@ struct xhci_device {
 	unsigned completions_busy;
 	struct xhci_device *next;
 };
+struct xhci_urb_reservation;
+
 struct xhci_request {
 	struct drv_usb_urb *urb;
 	struct xhci_device *device;
 	struct drv_dma_buffer bounce;
+	struct drv_dma_vector *vector;
+	void *staging;
+	unsigned normal_count;
+	struct drv_dma_segment normal[DRV_DMA_VECTOR_MAX_SEGMENTS];
 	struct xhci_endpoint *endpoint;
 	size_t length;
 	unsigned first_trb;
@@ -101,11 +108,21 @@ struct xhci_request {
 	unsigned short_seen;
 	unsigned stall_publication;
 	unsigned reserved;
+	struct xhci_urb_reservation *reservation;
+	uint64_t reservation_generation;
 	size_t short_actual;
 	size_t completion_actual, completion_residual;
 	unsigned completion_trb_offset;
 	enum drv_usb_urb_status terminal_status;
 	struct xhci_request *completion_next;
+};
+struct xhci_urb_reservation {
+	struct xhci_request request;
+	struct drv_dma_buffer backing;
+	struct drv_dma_vector *vector;
+	size_t capacity;
+	uint64_t generation;
+	unsigned busy;
 };
 struct xhci_controller {
 	struct drv_pci_device *pci;
@@ -155,6 +172,12 @@ struct xhci_controller {
 
 static struct xhci_controller *controllers;
 
+static int xhci_urb_reserve(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb, size_t capacity, void **result);
+static void xhci_urb_unreserve(struct drv_usb_hcd *hcd, void *opaque);
+static void *xhci_urb_reserve_buffer(struct drv_usb_hcd *hcd, void *opaque, size_t *capacity);
+static int xhci_sg_plan(struct xhci_request *request, size_t length);
+static int xhci_sg_short(const struct xhci_request *request, unsigned offset, size_t residual, size_t *actual);
+static void xhci_sg_enqueue(struct xhci_ring *ring, const struct xhci_request *request, int input, size_t packet_size, int zero_packet);
 static void xhci_request_release(struct xhci_controller *,
 	struct xhci_request *);
 
@@ -382,12 +405,24 @@ xhci_pci_release(struct xhci_controller *controller)
 	return 0;
 }
 
+static void xhci_mark_quarantined(struct xhci_controller *controller);
+
+/* Counts first entry into retained controller ownership, not retained bytes. */
+static void
+xhci_mark_quarantined(
+	struct xhci_controller *controller)
+{
+	if (!controller->quarantined)
+		io_stats_record(IO_XHCI_QUARANTINE, 0);
+	controller->quarantined = 1;
+}
+
 static void
 xhci_quarantine(struct xhci_controller *controller, const char *stage,
 	int error)
 {
 	if (!controller->quarantined) {
-		controller->quarantined = 1;
+		xhci_mark_quarantined(controller);
 		drv_pci_device_set_driver_data(controller->pci, controller);
 		controller->next = controllers;
 		controllers = controller;
@@ -1191,10 +1226,14 @@ transfer_claim(struct xhci_controller *c, const struct xhci_trb *event)
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		return 1;
 	}
-	if (control_request == NULL && request->input && code == 13U)
-		normal_short_valid = drv_xhci_normal_short_actual(
-		    request->bounce.device_address, request->length, trb_offset,
-		    residual, &actual);
+	if (control_request == NULL && request->input && code == 13U) {
+		if (request->vector != NULL)
+			normal_short_valid = xhci_sg_short(request, trb_offset, residual, &actual);
+		else
+			normal_short_valid = drv_xhci_normal_short_actual(
+			    request->bounce.device_address, request->length, trb_offset,
+			    residual, &actual);
+	}
 	if (request->short_seen)
 		actual = request->short_actual;
 	request->terminal_status = (code == 1U ||
@@ -1280,9 +1319,12 @@ xhci_completion_finish(struct xhci_controller *c,
 			    request->port, request->input ? "in" : "out");
 	}
 	if (request->terminal_status == DRV_USB_URB_COMPLETE &&
-	    request->input && request->completion_actual != 0)
-		memcpy(drv_usb_urb_buffer(urb), request->bounce.address,
+	    request->input && request->completion_actual != 0 &&
+	    drv_usb_urb_buffer(urb) != request->staging) {
+		memcpy(drv_usb_urb_buffer(urb), request->staging,
 		    request->completion_actual);
+		io_stats_record(IO_XHCI_BOUNCE_COPY, request->completion_actual);
+	}
 	drv_usb_urb_set_hcd_data(urb, NULL);
 	/* Return request/DMA ownership before terminal publication, allowing a
 	 * callback to submit a different URB immediately.  The completed URB stays
@@ -1676,17 +1718,48 @@ xhci_endpoint_reset(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
  * which is needed to free a page.  USB storage serializes its BOT stages, so
  * one request and one bounded coherent buffer reserved at start are sufficient
  * for its reclaim-safe transfers even while unrelated endpoints remain
- * active.  Ordinary traffic, including persistent networking, always uses the
- * dynamic path.  A caller marks larger storage I/O ordinary before submit.
+ * active.  URBs with normal reservations use their own request/DMA first.
+ * Other ordinary traffic, including persistent networking, uses the dynamic path.
  */
 static struct xhci_request *
 xhci_request_alloc(struct xhci_controller *c, struct drv_usb_hcd *h,
-	size_t length, unsigned flags, int *error)
+	size_t length, unsigned flags, struct drv_usb_urb *urb, int *error)
 {
 	struct xhci_request *request;
 	enum drv_xhci_reserve_action action;
 	unsigned long irq;
 	int allocation_error;
+
+	struct xhci_urb_reservation *reservation;
+
+	/* Borrows this URB's normal reserve without consuming the reclaim reserve. */
+	reservation = drv_usb_urb_transfer_reservation(urb);
+	if (reservation != NULL) {
+		irq = spin_lock_irqsave(&c->active_lock);
+		if (reservation->busy || length > reservation->capacity) {
+			*error = reservation->busy ? EBUSY : EMSGSIZE;
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			return NULL;
+		}
+		if (reservation->generation == UINT64_MAX) {
+			*error = EOVERFLOW;
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			return NULL;
+		}
+		reservation->generation++;
+		reservation->busy = 1U;
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		request = &reservation->request;
+		memset(request, 0, sizeof(*request));
+		request->reservation = reservation;
+		request->reservation_generation = reservation->generation;
+		request->bounce = reservation->backing;
+		request->vector = reservation->vector;
+		request->staging = reservation->vector != NULL ?
+		    drv_dma_vector_address(reservation->vector) : reservation->backing.address;
+		*error = 0;
+		return request;
+	}
 
 	if ((flags & DRV_USB_URB_RECLAIM_SAFE) != 0) {
 		irq = spin_lock_irqsave(&c->active_lock);
@@ -1707,6 +1780,7 @@ xhci_request_alloc(struct xhci_controller *c, struct drv_usb_hcd *h,
 		memset(request, 0, sizeof(*request));
 		request->reserved = 1U;
 		request->bounce = c->transfer_reserve;
+		request->staging = request->bounce.address;
 		*error = 0;
 		return request;
 	}
@@ -1716,6 +1790,7 @@ xhci_request_alloc(struct xhci_controller *c, struct drv_usb_hcd *h,
 		*error = ENOMEM;
 		return NULL;
 	}
+	io_stats_record(IO_XHCI_REQUEST_ALLOC, sizeof(*request));
 	memset(request, 0, sizeof(*request));
 	allocation_error = drv_dma_alloc_coherent(h->dma,
 	    length != 0 ? length : 8U, 64U, &request->bounce);
@@ -1725,6 +1800,7 @@ xhci_request_alloc(struct xhci_controller *c, struct drv_usb_hcd *h,
 		return NULL;
 	}
 	*error = 0;
+	request->staging = request->bounce.address;
 	return request;
 }
 
@@ -1732,6 +1808,24 @@ static void
 xhci_request_release(struct xhci_controller *c, struct xhci_request *request)
 {
 	unsigned long irq;
+
+	struct xhci_urb_reservation *reservation;
+
+	/* Retires a normal reserved request while preserving its permanent backing. */
+	reservation = request->reservation;
+	if (reservation != NULL) {
+		irq = spin_lock_irqsave(&c->active_lock);
+		if (!reservation->busy ||
+		    request->reservation_generation != reservation->generation ||
+		    (request->endpoint != NULL && request->endpoint->active == request)) {
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			__builtin_trap();
+		}
+		memset(request, 0, sizeof(*request));
+		reservation->busy = 0;
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return;
+	}
 
 	if (!request->reserved) {
 		drv_dma_free_coherent(c->hcd.dma, &request->bounce);
@@ -1808,6 +1902,106 @@ xhci_operation_leave(struct xhci_controller *c)
 	spin_unlock_irqrestore(&c->active_lock, irq);
 }
 
+/* Reserves an idle URB's request and DMA, aligned to avoid a 64 KiB control boundary. */
+static int
+xhci_urb_reserve(
+	struct drv_usb_hcd *hcd,
+	struct drv_usb_urb *urb,
+	size_t capacity,
+	void **result)
+{
+	struct xhci_controller *controller;
+	struct xhci_urb_reservation *reservation;
+	size_t alignment;
+	int error;
+
+	/* Holds the controller operation barrier while allocating backing. */
+	if (result == NULL || capacity == 0 || capacity > DRV_USB_TRANSFER_RESERVE_MAX_SIZE)
+		return EINVAL;
+	*result = NULL;
+	controller = hcd_controller(hcd);
+	error = xhci_operation_enter(controller);
+	if (error != 0)
+		return error;
+	reservation = hal_malloc(sizeof(*reservation));
+	if (reservation == NULL) {
+		xhci_operation_leave(controller);
+		return ENOMEM;
+	}
+	memset(reservation, 0, sizeof(*reservation));
+	reservation->capacity = capacity;
+	if (drv_usb_urb_endpoint(urb) != NULL &&
+	    drv_usb_endpoint_type(drv_usb_urb_endpoint(urb)) == DRV_USB_TRANSFER_BULK) {
+		error = drv_dma_vector_create(hcd->dma, capacity, &reservation->vector);
+		if (error == 0) {
+			*result = reservation;
+			xhci_operation_leave(controller);
+			return 0;
+		}
+		if (error != EOPNOTSUPP) {
+			hal_free(reservation);
+			xhci_operation_leave(controller);
+			return error;
+		}
+	}
+
+	/* Aligns each power-of-two bounded payload inside one transfer boundary. */
+	alignment = 64U;
+	while (alignment < capacity)
+		alignment *= 2U;
+	error = drv_dma_alloc_coherent(hcd->dma, capacity, alignment, &reservation->backing);
+	if (error != 0) {
+		hal_free(reservation);
+		xhci_operation_leave(controller);
+		return error;
+	}
+	*result = reservation;
+	xhci_operation_leave(controller);
+
+	/* Returns the idle reservation to its URB owner. */
+	return 0;
+}
+
+/* Shares the reservation's lifetime-stable CPU staging with USB core. */
+static void *
+xhci_urb_reserve_buffer(
+	struct drv_usb_hcd *hcd,
+	void *opaque,
+	size_t *capacity)
+{
+	struct xhci_urb_reservation *reservation;
+
+	(void)hcd;
+	reservation = opaque;
+	if (reservation == NULL || capacity == NULL)
+		return NULL;
+	*capacity = reservation->capacity;
+	return reservation->vector != NULL ? drv_dma_vector_address(reservation->vector) :
+	    reservation->backing.address;
+}
+
+/* Frees an URB reservation only after all HCD references and DMA have retired. */
+static void
+xhci_urb_unreserve(
+	struct drv_usb_hcd *hcd,
+	void *opaque)
+{
+	struct xhci_urb_reservation *reservation;
+
+	reservation = opaque;
+	if (reservation == NULL)
+		return;
+	if (reservation->busy)
+		__builtin_trap();
+	if (reservation->vector != NULL) {
+		if (drv_dma_vector_free(reservation->vector) != 0)
+			HAL_FATAL("xHCI reservation DMA retirement failed");
+	} else {
+		drv_dma_free_coherent(hcd->dma, &reservation->backing);
+	}
+	hal_free(reservation);
+}
+
 static void
 xhci_submission_leave(struct xhci_controller *c)
 {
@@ -1881,7 +2075,7 @@ xhci_urb_enqueue(struct drv_usb_hcd *h, struct drv_usb_urb *u)
 	c->endpoint_recoveries_busy++;
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
-	r = xhci_request_alloc(c, h, length, drv_usb_urb_flags(u), &e);
+	r = xhci_request_alloc(c, h, length, drv_usb_urb_flags(u), u, &e);
 	if (r == NULL) {
 		irq = spin_lock_irqsave(&c->active_lock);
 		xhci_recovery_leave_locked(c, ep);
@@ -1895,12 +2089,29 @@ xhci_urb_enqueue(struct drv_usb_hcd *h, struct drv_usb_urb *u)
 	r->length = length;
 	r->input = q ? (q->request_type & DRV_USB_DIR_IN) != 0
 		     : drv_usb_endpoint_is_input(drv_usb_urb_endpoint(u));
-	if (!r->input && length)
-		memcpy(r->bounce.address, drv_usb_urb_buffer(u), length);
+	if (!r->input && length && r->staging != drv_usb_urb_buffer(u)) {
+		memcpy(r->staging, drv_usb_urb_buffer(u), length);
+		io_stats_record(IO_XHCI_BOUNCE_COPY, length);
+	}
+	if (length != 0 && r->staging == drv_usb_urb_buffer(u))
+		io_stats_record(IO_XHCI_SHARED_STAGING, length);
 	dma = r->bounce.device_address;
 	input = r->input;
 	if (q == NULL) {
-		normal_count = normal_trb_count(dma, length);
+		if (r->vector != NULL) {
+			e = xhci_sg_plan(r, length);
+			if (e != 0) {
+				xhci_request_release(c, r);
+				irq = spin_lock_irqsave(&c->active_lock);
+				xhci_recovery_leave_locked(c, ep);
+				spin_unlock_irqrestore(&c->active_lock, irq);
+				xhci_submission_leave(c);
+				return e;
+			}
+			normal_count = r->normal_count;
+		} else {
+			normal_count = normal_trb_count(dma, length);
+		}
 		zero_packet = drv_usb_endpoint_type(drv_usb_urb_endpoint(u)) ==
 		    DRV_USB_TRANSFER_BULK && !input && length != 0 &&
 		    (drv_usb_urb_flags(u) & DRV_USB_URB_ZERO_PACKET) != 0 &&
@@ -1982,8 +2193,14 @@ xhci_urb_enqueue(struct drv_usb_hcd *h, struct drv_usb_urb *u)
 			((uint64_t)status_words.parameter_high << 32),
 		    status_words.status, status_words.control);
 	} else {
-		(void)enqueue_normal(&ep->ring, dma, length, input,
-		    maximum_packet_size, zero_packet);
+		if (r->vector != NULL) {
+			xhci_sg_enqueue(&ep->ring, r, input, maximum_packet_size, zero_packet);
+			if (r->normal_count > 1U)
+				io_stats_record(IO_XHCI_SG_TD, length);
+		} else {
+			(void)enqueue_normal(&ep->ring, dma, length, input,
+			    maximum_packet_size, zero_packet);
+		}
 	}
 	wr32(c->doorbells, d->slot * 4U, dci);
 	xhci_recovery_leave_locked(c, ep);
@@ -2829,7 +3046,7 @@ xhci_stop(struct drv_usb_hcd *h)
 
 	error = xhci_release_resources(h);
 	if (error != 0)
-		c->quarantined = 1U;
+		xhci_mark_quarantined(c);
 }
 
 static int
@@ -3100,6 +3317,9 @@ static const struct drv_usb_hcd_ops xhci_ops = {
     .device_quiesce = xhci_guarded_device_quiesce,
     .device_disable = xhci_guarded_device_disable,
     .urb_enqueue = xhci_urb_enqueue,
+    .urb_reserve = xhci_urb_reserve,
+    .urb_unreserve = xhci_urb_unreserve,
+    .urb_reserve_buffer = xhci_urb_reserve_buffer,
     .urb_dequeue = xhci_guarded_urb_dequeue,
     .endpoint_enable = xhci_guarded_endpoint_enable,
     .endpoint_disable = xhci_guarded_endpoint_disable,
@@ -3253,7 +3473,8 @@ xhci_attach(struct drv_pci_device *d, const struct drv_pci_id *id)
 	c->hcd.ops = &xhci_ops;
 	c->hcd.dma = drv_pci_device_dma(d);
 	c->hcd.root_port_count = c->ports;
-	c->hcd.capabilities = DRV_USB_HCD_CAP_CONCURRENT_URBS;
+	c->hcd.capabilities = DRV_USB_HCD_CAP_CONCURRENT_URBS |
+	    DRV_USB_HCD_CAP_TRANSFER_RESERVE | DRV_USB_HCD_CAP_SHARED_STAGING;
 	c->hcd.private_data[0] = (uintptr_t)c;
 	stage = "ownership";
 	if ((e = ownership(c)) != 0)
@@ -3345,7 +3566,7 @@ xhci_detach(struct drv_pci_device *d, unsigned flags)
 			if (had_worker && error == EBUSY)
 				(void)xhci_worker_start(c);
 			else
-				c->quarantined = 1;
+				xhci_mark_quarantined(c);
 			return error;
 		}
 		c->hcd_registered = 0;
@@ -3355,14 +3576,14 @@ xhci_detach(struct drv_pci_device *d, unsigned flags)
 	if (!c->dma_quiesced) {
 		error = xhci_stop_checked(&c->hcd);
 		if (error != 0) {
-			c->quarantined = 1;
+			xhci_mark_quarantined(c);
 			return error;
 		}
 	}
 	if (c->irq_cookie != NULL) {
 		error = xhci_irq_disestablish(c);
 		if (error != 0) {
-			c->quarantined = 1;
+			xhci_mark_quarantined(c);
 			return error;
 		}
 	}
@@ -3372,7 +3593,7 @@ xhci_detach(struct drv_pci_device *d, unsigned flags)
 	}
 	error = xhci_pci_release(c);
 	if (error != 0) {
-		c->quarantined = 1;
+		xhci_mark_quarantined(c);
 		return error;
 	}
 	drv_pci_device_set_driver_data(d, NULL);
@@ -3409,3 +3630,5 @@ drv_pci_xhci_probe_roots(void)
 		c->root_ready = 1;
 	}
 }
+
+#include "pci-xhci-sg.inc"

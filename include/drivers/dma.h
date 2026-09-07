@@ -21,6 +21,10 @@
 
 struct drv_dma_device;
 struct drv_dma_mapping;
+struct drv_dma_vector;
+
+#define DRV_DMA_VECTOR_MAX_SEGMENTS 32U
+#define DRV_DMA_VECTOR_MAX_SIZE (64U * 1024U)
 
 enum drv_dma_direction {
 	DRV_DMA_TO_DEVICE,
@@ -65,6 +69,18 @@ int drv_dma_device_is_coherent(const struct drv_dma_device *device);
 
 int drv_dma_alloc_coherent(struct drv_dma_device *device, size_t size,
 			   size_t alignment, struct drv_dma_buffer *buffer);
+
+/* Owned coherent staging with a CPU-contiguous view and bounded DMA segments.
+ * The caller excludes CPU mutation during DMA and retains this owner until
+ * hardware retirement. Query results do not outlive the owner. Free may fail
+ * while backing retirement is refused; retry with the same retained owner. */
+int drv_dma_vector_create(struct drv_dma_device *device, size_t size,
+	struct drv_dma_vector **result);
+int drv_dma_vector_free(struct drv_dma_vector *vector);
+void *drv_dma_vector_address(const struct drv_dma_vector *vector);
+unsigned drv_dma_vector_count(const struct drv_dma_vector *vector);
+int drv_dma_vector_segment(const struct drv_dma_vector *vector, unsigned index,
+	struct drv_dma_segment *segment);
 void drv_dma_free_coherent(struct drv_dma_device *device,
 			   struct drv_dma_buffer *buffer);
 

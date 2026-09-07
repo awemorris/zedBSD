@@ -1,10 +1,10 @@
 # WS024: one 64-bit UFS implementation
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
 
 WSID: `ws024`
 
-Status: planned; user direction recorded, not queued
+Status: completed (q102); p001–p004 complete; unified production owner and selected U01–U24 acceptance pass
 
 Parent: [master plan](../master.md)
 
@@ -20,6 +20,14 @@ file-size/offset handling. Keeping separate UFS1 and UFS2 implementations is
 not the target architecture. This request records a workstream; it does not
 start implementation or add work to the finished q079 Queue. Scheduling
 relative to the existing implementation wave remains for a later Queue.
+
+The approved 2026-09-07 [WS025](../ws025-io-memory-cache/ws.md) owns the
+cross-layer I/O/cache/physical-memory redesign. Its p021 consumes WS024's
+single driver, format, image migration and journal/snapshot foundation for
+ordered metadata write-back. WS024 can complete with write-through behavior;
+it must not depend on completion of WS025 write-back. Earlier WS025 batching
+changes are carried into the single driver rather than retained as a second
+UFS1 production implementation.
 
 ## Objective
 
@@ -106,10 +114,10 @@ whether to unify.
 
 | Phase | Status | Required result |
 | --- | --- | --- |
-| [ws024-p001](phase001-format-and-migration-contract/phase.md) | Planned | Freeze one 64-bit disk/CLI contract, feature inventory and old-image transition |
-| [ws024-p002](phase002-single-driver/phase.md) | Planned | Implement the unified driver and core registration with required feature preservation |
-| [ws024-p003](phase003-formatters-and-image-consumers/phase.md) | Planned | Unify target mkfs, host builders, boot/image consumers and installer contracts |
-| [ws024-p004](phase004-acceptance-and-retirement/phase.md) | Planned | Pass width/functional/boot acceptance and remove superseded production paths |
+| [ws024-p001](phase001-format-and-migration-contract/phase.md) | Completed (q100) | Freeze one 64-bit disk/CLI contract, feature inventory and old-image transition |
+| [ws024-p002](phase002-single-driver/phase.md) | Completed (q101) | Implement the unified driver and core registration with required feature preservation |
+| [ws024-p003](phase003-formatters-and-image-consumers/phase.md) | Completed (q101) | Unify target mkfs, host builders, boot/image consumers and installer contracts |
+| [ws024-p004](phase004-acceptance-and-retirement/phase.md) | Complete (q102) | Pass width/functional/boot acceptance and remove superseded production paths |
 
 ## Completion conditions
 
@@ -128,3 +136,5 @@ whether to unify.
   no retired active UFS1/UFS2 driver or formatter branch.
 
 Shared tests: [WS024 test index](tests/README.md).
+
+Frozen details and existing ABI limits: [format contract](format-contract.md).

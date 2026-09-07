@@ -4,7 +4,7 @@ Last updated: 2026-09-06
 
 Phase ID: `ws024-p004`
 
-Status: planned; follows p002/p003, not queued
+Status: completed (q102); see [results](results.md)
 
 Parent: [WS024](../ws.md)
 

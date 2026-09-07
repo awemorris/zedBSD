@@ -35,6 +35,8 @@ int main(void)
 	CHECK(drv_usb_urb_setup(urb, client, 512, 0, 10, NULL, NULL) == 0);
 	printf("S05 PASS cancel failure then checked retry retires ownership\n");
 
+	/* Seed device-owned input staging: IN setup does not copy caller bytes. */
+	memset(drv_usb_urb_buffer(urb), 0x35, 512);
 	CHECK(drv_usb_urb_submit(urb) == 0);
 	cancel_failures = 100;
 	start = sched_ticks();

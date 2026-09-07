@@ -12,24 +12,24 @@ BASE_CFLAGS := -std=c11 -O0 -Wall -Wextra -Werror -ffunction-sections \
 CFLAGS := $(BASE_CFLAGS) $(CFLAGS_EXTRA)
 PRODUCTION_CFLAGS_EXTRA ?= $(CFLAGS_EXTRA)
 PRODUCTION_CFLAGS := $(BASE_CFLAGS) $(PRODUCTION_CFLAGS_EXTRA)
-LDFLAGS := -Wl,--gc-sections $(LDFLAGS_EXTRA)
+LDFLAGS := -Wl,--gc-sections $(LDFLAGS_EXTRA) $(REPO)/src/kern/io-stats.c
 TEST := $(REPO)/plan/ws001-posix/tests/directory-fsync-host-test.c
 SELF := $(lastword $(MAKEFILE_LIST))
 
 .PHONY: all run mutation-run run-sanitize analyze
 all: run
 
-run: $(OUT)/vfs-test $(OUT)/ufs-test $(OUT)/ufs1-mutation-test \
-	$(OUT)/ufs2-mutation-test $(OUT)/overlay-test
+run: $(OUT)/vfs-test $(OUT)/ufs-test  \
+	$(OUT)/ufs-mutation-test $(OUT)/overlay-test
 	$(OUT)/vfs-test
 	$(OUT)/ufs-test
-	$(OUT)/ufs1-mutation-test
-	$(OUT)/ufs2-mutation-test
+
+	$(OUT)/ufs-mutation-test
 	$(OUT)/overlay-test
 
-mutation-run: $(OUT)/ufs1-mutation-test $(OUT)/ufs2-mutation-test
-	$(OUT)/ufs1-mutation-test
-	$(OUT)/ufs2-mutation-test
+mutation-run:  $(OUT)/ufs-mutation-test
+
+	$(OUT)/ufs-mutation-test
 
 run-sanitize:
 	$(MAKE) -f $(firstword $(MAKEFILE_LIST)) \
@@ -51,41 +51,32 @@ $(OUT)/file.o: $(REPO)/src/kern/file.c $(SELF) | $(OUT)
 $(OUT)/vfs-test: $(TEST) $(OUT)/file.o
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DWS001_P016_VFS $^ $(LDFLAGS) -o $@
 
-$(OUT)/ufs1.o: $(REPO)/src/drivers/fs/ufs1/ufs1-vfs.c $(SELF) | $(OUT)
-	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
-	$(OBJCOPY) --globalize-symbol=ufs1_file_sync $@
 
-$(OUT)/ufs2.o: $(REPO)/src/drivers/fs/ufs2/ufs2-vfs.c $(SELF) | $(OUT)
-	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
-	$(OBJCOPY) --globalize-symbol=ufs2_file_sync $@
 
-$(OUT)/ufs-test: $(TEST) $(OUT)/ufs1.o $(OUT)/ufs2.o
+$(OUT)/ufs.o: $(REPO)/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
+	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
+	$(OBJCOPY) --globalize-symbol=ufs_file_sync $@
+
+$(OUT)/ufs-test: $(TEST)  $(OUT)/ufs.o
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DWS001_P016_UFS $^ $(LDFLAGS) -o $@
 
-$(OUT)/ufs1-mutation.o: $(REPO)/src/drivers/fs/ufs1/ufs1-vfs.c $(SELF) | $(OUT)
+
+
+
+
+
+
+$(OUT)/ufs-mutation.o: $(REPO)/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
-	$(OBJCOPY) --redefine-sym=dir_replace=ufs1_dir_replace $@
-	$(OBJCOPY) --globalize-symbol=ufs1_dir_replace $@
+	$(OBJCOPY) --redefine-sym=dir_replace=ufs_dir_replace $@
+	$(OBJCOPY) --globalize-symbol=ufs_dir_replace $@
 
-$(OUT)/ufs1-endian.o: $(REPO)/src/drivers/fs/ufs1/ufs1-endian.c $(SELF) | $(OUT)
-	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
-
-$(OUT)/ufs1-mutation-test: $(TEST) $(OUT)/ufs1-mutation.o \
-	$(OUT)/ufs1-endian.o
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DWS001_P023_UFS1_MUTATION $^ \
-		$(LDFLAGS) -o $@
-
-$(OUT)/ufs2-mutation.o: $(REPO)/src/drivers/fs/ufs2/ufs2-vfs.c $(SELF) | $(OUT)
-	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
-	$(OBJCOPY) --redefine-sym=dir_replace=ufs2_dir_replace $@
-	$(OBJCOPY) --globalize-symbol=ufs2_dir_replace $@
-
-$(OUT)/ufs2-endian.o: $(REPO)/src/drivers/fs/ufs2/ufs2-endian.c $(SELF) | $(OUT)
+$(OUT)/ufs-endian.o: $(REPO)/src/drivers/fs/ufs/ufs-endian.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
 
-$(OUT)/ufs2-mutation-test: $(TEST) $(OUT)/ufs2-mutation.o \
-	$(OUT)/ufs2-endian.o
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DWS001_P023_UFS2_MUTATION $^ \
+$(OUT)/ufs-mutation-test: $(TEST) $(OUT)/ufs-mutation.o \
+	$(OUT)/ufs-endian.o
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DWS001_P023_UFS_MUTATION $^ \
 		$(LDFLAGS) -o $@
 
 $(OUT)/overlay.o: $(REPO)/src/kern/overlayfs.c $(SELF) | $(OUT)

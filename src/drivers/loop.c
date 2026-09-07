@@ -7,6 +7,7 @@
 #include "kern/backing-claim.h"
 #include "kern/block-identity.h"
 #include "kern/disk.h"
+#include "kern/io-stats.h"
 #include "kern/fat.h"
 #include "kern/file.h"
 #include "kern/inode.h"
@@ -21,6 +22,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+
+extern unsigned vm_object_cache_drain(struct mount *) __attribute__((weak));
 
 #define LOOP_SECTOR_SIZE 512U
 #define LOOP_MAX_TRANSFER_BLOCKS 128U
@@ -152,13 +155,18 @@ loop_submit(struct disk *disk, struct bio *bio)
 {
 	struct loop_device *loop = disk != NULL ? disk->d_data : NULL;
 	uint64_t offset64, bytes64;
+	struct io_context context;
 	ssize_t done;
 	int error = 0;
 
 	if (loop == NULL || !loop->attached || loop->detaching)
 		return ENXIO;
+	error = io_context_child(&context, &bio->b_context, IO_CONTEXT_DRAIN);
+	if (error != 0)
+		return error;
 	if (bio->b_op == BIO_FLUSH) {
-		error = file_fsync(loop->backing);
+		io_stats_record(IO_LOOP_FLUSH, 0);
+		error = file_fsync_backend(loop->backing);
 		bio_complete(bio, error, 0);
 		return 0;
 	}
@@ -175,15 +183,17 @@ loop_submit(struct disk *disk, struct bio *bio)
 	    bytes64 > loop->size_bytes - offset64 || offset64 > INT32_MAX ||
 	    bytes64 > (uint64_t)INT32_MAX - offset64)
 		return EOVERFLOW;
+	io_stats_record(bio->b_op == BIO_READ ? IO_LOOP_READ : IO_LOOP_WRITE,
+	    bytes64);
 	if (bio->b_op == BIO_READ)
 		done = file_pread(loop->backing, bio->b_data, (size_t)bytes64,
 				  (off_t)offset64);
 	else if ((loop->flags & LOOP_READ_WRITE) == 0)
 		done = -EROFS;
 	else
-		done = file_pwrite_internal(loop->backing, bio->b_data,
-					    (size_t)bytes64, (off_t)offset64,
-					    FILE_IO_LOOP_BACKING);
+		done = file_pwrite_context(loop->backing, bio->b_data,
+		    (size_t)bytes64, (off_t)offset64,
+		    FILE_IO_LOOP_BACKING | FILE_IO_DRAIN, NULL, &context);
 	if (done < 0)
 		error = (int)-done;
 	else if ((uint64_t)done != bytes64)
@@ -213,6 +223,48 @@ loop_init(void)
 	memset(loops, 0, sizeof(loops));
 	for (i = 0; i < LOOP_MAX_DEVICES; i++)
 		loops[i].index = i;
+	return 0;
+}
+
+/*
+ * Pins an attached loop's backing disk without changing block-address ancestry.
+ */
+int
+loop_backing_disk_ref(
+	struct disk *disk,
+	struct disk **result)
+{
+	struct loop_device *loop;
+	struct disk *backing;
+	unsigned long irq;
+	unsigned index;
+
+	/* Distinguishes unsupported drivers from a recognized loop in teardown. */
+	if (disk == NULL || result == NULL)
+		return EINVAL;
+	*result = NULL;
+	if (disk->d_ops != &loop_disk_ops)
+		return EOPNOTSUPP;
+
+	/* Pins the backing while detach cannot withdraw its retained file owner. */
+	backing = NULL;
+	irq = spin_lock_irqsave(&loop_lock);
+	for (index = 0; index < LOOP_MAX_DEVICES; index++) {
+		loop = &loops[index];
+		if (loop->disk != disk || !loop->attached || loop->detaching)
+			continue;
+		if (loop->backing_inode != NULL && loop->backing_inode->i_mount != NULL)
+			backing = loop->backing_inode->i_mount->m_disk;
+		if (backing != NULL)
+			disk_ref(backing);
+		break;
+	}
+	spin_unlock_irqrestore(&loop_lock, irq);
+	if (backing == NULL)
+		return ENXIO;
+
+	/* Transfers one ordinary disk reference to the caller. */
+	*result = backing;
 	return 0;
 }
 
@@ -247,7 +299,7 @@ loop_backing_valid(struct file *backing, unsigned flags)
 	if (inode->i_type != INODE_REG || inode->i_size <= 0 ||
 	    ((uint32_t)inode->i_size & (LOOP_SECTOR_SIZE - 1U)) != 0)
 		return EINVAL;
-	if ((uint64_t)(uint32_t)inode->i_size > (uint64_t)INT32_MAX)
+	if ((uint64_t)inode->i_size > (uint64_t)INT32_MAX)
 		return EFBIG;
 	if (flags == LOOP_READ_WRITE &&
 	    (file_status_flags_get(backing) & O_ACCMODE) == O_RDONLY)
@@ -286,6 +338,9 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	error = loop_backing_valid(backing, flags);
 	if (error != 0)
 		return error;
+	/* Retires optional caches before reserving independent backing ownership. */
+	if (vm_object_cache_drain != NULL)
+		(void)vm_object_cache_drain(NULL);
 	backing_inode = backing->f_inode;
 	error = backing_claim_prepare_inode(backing_inode, BACKING_CLAIM_LOOP,
 					    &claim);
@@ -341,6 +396,9 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	disk->d_max_transfer_blocks = LOOP_MAX_TRANSFER_BLOCKS;
 	disk->d_ops = &loop_disk_ops;
 	disk->d_data = loop;
+	/* Keeps media admission tied to the backing without remapping loop blocks. */
+	if (backing_inode->i_mount != NULL)
+		disk->d_media_backing = backing_inode->i_mount->m_disk;
 	loop->flags = flags;
 	loop->backing = backing;
 	loop->backing_inode = backing->f_inode;
@@ -444,7 +502,7 @@ loop_detach(struct disk *disk)
 	loop->detaching = true;
 	spin_unlock_irqrestore(&loop_lock, irq);
 	if ((loop->flags & LOOP_READ_WRITE) != 0) {
-		error = file_fsync(loop->backing);
+		error = file_fsync_backend(loop->backing);
 		if (error != 0)
 			goto retryable;
 	}

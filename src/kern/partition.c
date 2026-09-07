@@ -42,6 +42,7 @@ static int reload_check_mbr(struct disk *disk, uint8_t *sector);
 static int reload_prepare_candidates(struct disk *parent, struct reload_workspace *work, unsigned scanned, unsigned *count);
 static void reload_release_candidates(struct reload_workspace *work, unsigned count);
 static int partition_reload_owned(struct disk *parent, struct reload_workspace *work);
+static int partition_create_owned(struct partition *source);
 
 /*
  * Selects the partition scheme used by later scans.
@@ -100,6 +101,53 @@ partition_scan(
  */
 int
 partition_create_disk(
+	struct partition *source)
+{
+	int error;
+
+	/* Excludes concurrent pool replacement and media retirement. */
+	if (!atomic_try_acquire_zero(&partition_reloading))
+		return EBUSY;
+	error = partition_create_owned(source);
+	atomic_store_release(&partition_reloading, 0);
+
+	/* Reports publication without retaining the pool reservation. */
+	return error;
+}
+
+/*
+ * Retires an idle old medium and its pooled partition records together.
+ */
+int
+partition_retire_media(
+	struct disk *parent)
+{
+	unsigned i;
+	int error;
+
+	/* Keeps old partition slots reserved until registry retirement finishes. */
+	if (!atomic_try_acquire_zero(&partition_reloading))
+		return EBUSY;
+	error = disk_media_retire(parent);
+	if (error == 0) {
+		/* Clears records only after every old child has been withdrawn. */
+		for (i = 0; i < PARTITION_POOL_MAX; i++) {
+			if (partitions[i].p_disk != NULL &&
+			    partitions[i].p_parent == parent) {
+				memset(&partitions[i], 0, sizeof(partitions[i]));
+				(void)atomic_raw_fetch_add_release(&partitions_count, (unsigned)-1);
+			}
+		}
+	}
+	atomic_store_release(&partition_reloading, 0);
+
+	/* Preserves all pool records when retirement was refused. */
+	return error;
+}
+
+/* Publishes one partition while the caller excludes pool replacement. */
+static int
+partition_create_owned(
 	struct partition *source)
 {
 	struct partition *partition;

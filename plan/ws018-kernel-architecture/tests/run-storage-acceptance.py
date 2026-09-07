@@ -47,7 +47,7 @@ for variant in ["ordinary", "sanitize"]:
         ("fat", ["plan/ws018-kernel-architecture/tests/storage-fat-stories.c",
                  "src/drivers/fs/fat.c"], ["-DZEDBSD_USER_ABI_LP64", "-Ilibc/include"]),
         ("ufs", ["plan/ws018-kernel-architecture/tests/storage-ufs-stories.c",
-                 "src/drivers/fs/ufs1/ufs1-endian.c", "src/kern/quota.c"],
+                 "src/drivers/fs/ufs/ufs-endian.c", "src/kern/quota.c"],
                  ["-DZEDBSD_USER_ABI_LP64", "-Ilibc/include", "-pthread"])]:
         binary = output / f"{label}-{variant}"
         objects = []
@@ -61,6 +61,7 @@ for variant in ["ordinary", "sanitize"]:
                 "-c","plan/ws018-kernel-architecture/tests/mount-thread-host.c","-o",str(thread)])
             objects.append(str(thread))
         run(f"{label}-{variant}-compile", [*common, *flags, *extra, *files, *objects,
+            "src/kern/io-stats.c",
             "-Wl,--gc-sections", "-o", str(binary)])
         run(f"{label}-{variant}", ["timeout","60s",str(binary)], environment)
 
@@ -69,7 +70,8 @@ run("claim", ["sh","plan/ws016-swap-control/tests/run-backing-claim-test.sh"])
 run("images", ["python3","plan/ws018-kernel-architecture/tests/storage-image-stories.py"])
 for variant in ["ordinary","sanitize"]:
     text = run("wifi-" + variant, ["sh","plan/ws005-networking/tests/run-wifi-stories.sh"],
-               {"STORY_VARIANT": variant})
+               {"STORY_VARIANT": variant,
+                "STORY_OUTPUT": str(REPO / "plan/ws005-networking/temp" / (output.name + "-wifi"))})
     assert set(map(int, re.findall(r"^story (\d+) PASS\b", text, re.M))) == set(range(1,31))
 observed.add(50)
 if args.native:
@@ -77,10 +79,14 @@ if args.native:
                        str(output / "native-usb"), "--usb"])
 result = {f"S{i:02d}": "PASS" if i in observed else "UNRUN" for i in range(1,51)}
 (output / "results.json").write_text(json.dumps(result, indent=2) + "\n")
-sources = subprocess.check_output(["git","ls-files","src","include","tools/build"], cwd=REPO, text=True).splitlines()
+sources = subprocess.check_output(["git","ls-files","--cached","--others","--exclude-standard","src","include","tools/build"], cwd=REPO, text=True).splitlines()
 with (output / "source.sha256").open("w") as log:
-    for name in sources:
-        log.write(hashlib.sha256((REPO / name).read_bytes()).hexdigest() + "  " + name + "\n")
+    for name in sorted(set(sources)):
+        path = REPO / name
+        if path.is_file():
+            log.write(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + name + "\n")
+(output / "source-deleted.json").write_text(json.dumps(sorted(
+    name for name in set(sources) if not (REPO / name).exists()), indent=2) + "\n")
 missing = sorted(set(range(1,51)) - observed)
 print(f"q086: {50-len(missing)}/50 PASS; unrun={missing}", flush=True)
 if missing:

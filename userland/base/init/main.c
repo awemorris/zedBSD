@@ -1054,13 +1054,20 @@ shutdown_system(
 
 	system_action = action == INIT_ACTION_REBOOT ? ZEDBSD_SYSTEM_REBOOT
 						     : ZEDBSD_SYSTEM_HALT;
-	system_descriptor = open("/dev/system", O_RDONLY);
-
-	/* Handles a failed ioctl operation. */
-	if (system_descriptor < 0 ||
-	    ioctl(system_descriptor, system_action) != 0) {
-		fprintf(stderr, "init: final system action failed: %s\n",
+	/* Keeps the requested action pending while storage can still recover. */
+	for (;;) {
+		system_descriptor = open("/dev/system", O_RDONLY);
+		if (system_descriptor >= 0) {
+			if (ioctl(system_descriptor, system_action) == 0) {
+				(void)close(system_descriptor);
+				break;
+			}
+		}
+		fprintf(stderr, "init: final system action failed: %s; retrying in 5 seconds\n",
 			strerror(errno));
+		if (system_descriptor >= 0)
+			(void)close(system_descriptor);
+		(void)sleep(5);
 	}
 
 	/* Continue until the operation reaches a terminal state. */

@@ -104,13 +104,17 @@ static void check_cli(void);
 
 /* Route command grammar through the real frontend and independent fake format. */
 #define main mkfs_cli_main
-#define ufs1_format_validate_size fake_validate
-#define ufs1_format_write fake_write
-#define ufs1_format_verify fake_verify
+#define ufs_format_validate_size fake_validate
+#define ufs_format_write fake_write
+#define ufs_format_verify fake_verify
+#define ufs_format_feature_write fake_write
+#define ufs_format_feature_verify fake_verify
 #include "userland/base/mkfs/main.c"
-#undef ufs1_format_verify
-#undef ufs1_format_write
-#undef ufs1_format_validate_size
+#undef ufs_format_feature_verify
+#undef ufs_format_feature_write
+#undef ufs_format_verify
+#undef ufs_format_write
+#undef ufs_format_validate_size
 #undef main
 
 /* Apply the same admission fixture to the swap command's separate grammar. */
@@ -691,19 +695,21 @@ check_cli(void)
 {
 	static char *mkfs_cases[][6] = {
 		{ "mkfs", NULL, NULL, NULL, NULL, NULL },
-		{ "mkfs", "-t", "ufs1", NULL, NULL, NULL },
+		{ "mkfs", "-t", "ufs", NULL, NULL, NULL },
 		{ "mkfs", "-t", "ufs2", "/staging/image", NULL, NULL },
-		{ "mkfs", "-f", "ufs1", "/staging/image", NULL, NULL },
-		{ "mkfs", "-t", "ufs1", "/staging/image", "extra", NULL }
+		{ "mkfs", "-t", "ufs1", "/staging/image", NULL, NULL },
+		{ "mkfs", "-f", "ufs", "/staging/image", NULL, NULL },
+		{ "mkfs", "-t", "ufs", "/staging/image", "extra", NULL }
 	};
-	static const int mkfs_counts[] = { 1, 3, 4, 4, 5 };
+	static const int mkfs_counts[] = { 1, 3, 4, 4, 4, 5 };
 	static char *swap_cases[][4] = {
 		{ "mkswap", NULL, NULL, NULL },
 		{ "mkswap", "--format=v1", NULL, NULL },
 		{ "mkswap", "/staging/image", "extra", NULL }
 	};
 	static const int swap_counts[] = { 1, 2, 3 };
-	char *valid_mkfs[] = { "mkfs", "-t", "ufs1", "/staging/image", NULL };
+	char *valid_mkfs[] = { "mkfs", "-t", "ufs", "/staging/image", NULL };
+	char *feature_mkfs[] = { "mkfs", "-t", "ufs", "--profile=journal-snapshot", "/staging/image", NULL };
 	char *valid_swap[] = { "mkswap", "/staging/image", NULL };
 	size_t index;
 	int result;
@@ -729,6 +735,10 @@ check_cli(void)
 	result = mkfs_cli_main(4, valid_mkfs);
 	require_check(result == 0 && verify_calls == 1U, "mkfs success requires completed verification");
 	require_check(!writer_open && !reader_open && !lease_held, "mkfs success releases ownership");
+	reset_scenario();
+	result = mkfs_cli_main(5, feature_mkfs);
+	require_check(result == 0 && verify_calls == 1U, "feature profile completes same reservation lifecycle");
+	require_check(!writer_open && !reader_open && !lease_held, "feature profile releases ownership");
 	reset_scenario();
 	result = mkswap_cli_main(2, valid_swap);
 	require_check(result == 0 && verify_calls == 1U, "mkswap success requires completed verification");

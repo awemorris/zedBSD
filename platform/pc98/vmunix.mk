@@ -19,7 +19,7 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-Iinclude -Isrc -Isrc/hal/i386 -I. \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PC98
 HAL_PC98_SOURCES := \
-	src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c src/hal/i386/page.c \
+	src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c src/hal/pmem-constraints.c src/hal/i386/page.c \
 	src/hal/i386/mps.c src/hal/i386/acpi.c src/hal/i386/lapic.c \
 	src/hal/i386/ioapic.c \
 	src/hal/i386/space.c src/hal/i386/int.c src/hal/i386/cmain.c \
@@ -53,7 +53,7 @@ endif
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/process-timer.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/klog.o $(BUILD)/src/kern/waitq.o \
-	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/sysctl.o \
+	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/io-stats.o $(BUILD)/src/kern/io-pool.o $(BUILD)/src/kern/io-scratch.o $(BUILD)/src/kern/cache-memory.o $(BUILD)/src/kern/readahead.o $(BUILD)/src/kern/readahead-worker.o $(BUILD)/src/kern/writeback.o $(BUILD)/src/kern/writeback-domain.o $(BUILD)/src/kern/writeback-policy.o $(BUILD)/src/kern/io-error.o $(BUILD)/src/kern/cache-worker.o $(BUILD)/src/kern/sysctl.o \
 	$(BUILD)/src/kern/resource.o \
 	$(BUILD)/src/kern/resource-limit.o \
 	$(BUILD)/src/kern/poll.o \
@@ -86,7 +86,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/init.o \
 	$(PC98_GRAPHICS_OBJS) \
 	$(KERN_NET_OBJS) \
-	$(KERN_BLOCK_IDENTITY_OBJS) $(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS)
+	$(KERN_BLOCK_IDENTITY_OBJS) $(KERN_UFS_OBJS)
 
 $(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/platform/pc98.o: \
 	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
@@ -129,6 +129,7 @@ STAGE2_OBJS = \
 	$(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PC98_OBJS) $(KERN_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
 $(STAGE2_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
+$(STAGE2_OBJS): $(ZEDBSD_SYSROOT_I386)/.zedbsd-sysroot-complete
 
 vmunix: $(BUILD)/vmunix
 
@@ -731,3 +732,8 @@ $(BUILD)/tests/hal-pc98-keyboard-host-test: \
 
 HOST_TEST_BINARIES += $(BUILD)/tests/hal-pc98-keyboard-host-test
 CHECK_RUN_TARGETS += hal-pc98-compile kern-compile
+
+# Order user compilation after publication of the current UAPI headers.
+$(BUILD)/userland/%.o: userland/%.c $(ZEDBSD_SYSROOT_I386)/.zedbsd-sysroot-complete
+	@mkdir -p $(dir $@)
+	$(OBJ_CC) $(OBJ_CPPFLAGS) $(OBJ_CFLAGS) -MMD -MP -c $< -o $@

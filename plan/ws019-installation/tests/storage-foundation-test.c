@@ -25,7 +25,7 @@ int cred_is_superuser(const struct ucred *c) { (void)c; return superuser; }
 void cred_release(struct ucred *c) { (void)c; }
 void *kern_calloc(size_t n, size_t s) { return alloc_error ? NULL : calloc(n, s); }
 void kern_free(void *p) { free(p); }
-#define CHECK(x) do { checks++; if (!(x)) { \
+#define CHECK(x) do { __atomic_add_fetch(&checks,1,__ATOMIC_RELAXED); if (!(x)) { \
 	fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #x); abort(); \
 } } while (0)
 
@@ -44,17 +44,22 @@ int inode_lookup(struct inode *i, const struct componentname *n, struct inode **
 void inode_dir_changed(struct inode *i) { (void)i; abort(); }
 int backing_claim_check_mount(struct disk *d, unsigned f)
 { (void)d; (void)f; return 0; }
+
+#ifndef STORAGE_FOUNDATION_CUSTOM_LOCK
 unsigned long spin_lock_irqsave(struct spinlock *s)
 { CHECK(!s->held.value); s->held.value = 1; locked++; return 0; }
 void spin_unlock_irqrestore(struct spinlock *s, unsigned long irq)
 { (void)irq; CHECK(s->held.value); s->held.value = 0; locked--; }
+#endif
 void waitq_init(struct wait_queue *q, const char *n)
 { memset(q, 0, sizeof(*q)); q->name = n; }
-uint64_t waitq_sequence(const struct wait_queue *q) { return q->sequence; }
+uint64_t waitq_sequence(const struct wait_queue *q) { return __atomic_load_n(&q->sequence,__ATOMIC_ACQUIRE); }
+#ifndef STORAGE_FOUNDATION_CUSTOM_WAIT
 void waitq_wake_all(struct wait_queue *q) { q->sequence++; }
 int waitq_sleep(struct wait_queue *q, struct spinlock *s, uint64_t o,
 	uint64_t d, unsigned f)
 { (void)q; (void)s; (void)o; (void)d; (void)f; abort(); }
+#endif
 void inode_ref(struct inode *n) { refcount_get(&n->i_refs); }
 void inode_release(struct inode *n) { (void)refcount_put_not_last(&n->i_refs); }
 int fs_getcwd(const struct cwdinfo *c, char *b, size_t n)
@@ -74,6 +79,9 @@ void buf_reset(void) {}
 int buf_sync(struct disk *d) { (void)d; return io_error; }
 int buf_read(struct disk *d, uint64_t b, uint32_t n, void *p)
 { return disk_read_direct(d, b, n, p); }
+int buf_read_view(struct disk *d, uint64_t b, uint32_t n, void *p, struct buf_view *v)
+{ (void)v; return buf_read(d, b, n, p); }
+int buf_view_matches(const struct buf_view *v) { return v->valid; }
 int buf_write(struct disk *d, uint64_t b, uint32_t n, const void *p)
 { return disk_write_direct(d, b, n, p); }
 int buf_invalidate_disk(struct disk *d, unsigned f) { (void)d; (void)f; return 0; }
@@ -212,6 +220,7 @@ static void test_reload(void)
 	unsigned held_count, iteration;
 	dev_t old_dev;
 	unsigned char byte[512];
+	struct buf_view view = {0};
 	disk_registry_reset(); partition_reset();
 	partition_set_scheme(&partition_scheme_mbr);
 	d = disk_alloc(); CHECK(d != NULL);
@@ -259,10 +268,15 @@ static void test_reload(void)
 	CHECK(partition_reload(d) == ENOSPC);
 	CHECK(partition_count() == 1 && child->d_dev == old_dev);
 	while (held_count) CHECK(disk_destroy(held[--held_count]) == 0);
+	view.disk=d;view.valid=1;
+	CHECK(disk_view_matches(d,&view));
+	CHECK(!disk_view_matches(child,&view));
 	CHECK(disk_reload_begin(d) == 0);
 	CHECK(disk_open(d) == EBUSY && disk_open(child) == EBUSY);
 	CHECK(disk_reload_begin(d) == EBUSY);
 	current_owner = 2;
+	CHECK(!disk_view_matches(d,&view));
+	CHECK(disk_read_view(d,0,1,byte,&view)==EBUSY);
 	CHECK(disk_read(d, 0, 1, byte) == EBUSY);
 	CHECK(disk_write(d, 0, 1, byte) == EBUSY);
 	CHECK(disk_read_direct(d, 0, 1, byte) == EBUSY);
@@ -272,6 +286,11 @@ static void test_reload(void)
 	CHECK(disk_read(child, 0, 1, byte) == EBUSY);
 	disk_gone(child); CHECK(child->d_state == DISK_LIVE);
 	disk_reload_end(d);
+	CHECK(disk_view_matches(d,&view));
+	d->d_state=DISK_GONE;
+	CHECK(!disk_view_matches(d,&view));
+	CHECK(disk_read_view(child,0,1,byte,&view)==ENXIO);
+	d->d_state=DISK_LIVE;
 	CHECK(partition_reload(d) == 0 && partition_count() == 3);
 	CHECK(disk_open_by_dev(old_dev, &found) == ENXIO);
 	found = disk_find("nvme0n1p1"); CHECK(found && found->d_dev != old_dev);

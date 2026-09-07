@@ -3,10 +3,12 @@
 #define main fat_regression_main
 #define disk_read media_read
 #define disk_write_filesystem media_write
+#define disk_write_filesystem_context media_write_context
 #include "fat-native-vfs-host-test.c"
 #undef main
 #undef disk_read
 #undef disk_write_filesystem
+#undef disk_write_filesystem_context
 #include "../../../src/kern/buf.c"
 static int extent_fault;
 static unsigned live_claims;
@@ -40,17 +42,30 @@ int block_identity_get(struct disk *disk, struct block_identity *identity)
 void spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
 { (void)rank; (void)name; memset(lock, 0, sizeof(*lock)); }
 int hal_printf(const char *format, ...) { (void)format; return 0; }
+void hal_fatal(const char *file, int line, const char *message)
+{ fprintf(stderr, "%s:%d %s\n", file, line, message); abort(); }
 int disk_read(struct disk *disk, uint64_t block, uint32_t count, void *data)
 { return buf_read(disk, block, count, data); }
 int disk_write_filesystem(struct disk *disk, uint64_t block, uint32_t count, const void *data)
 { return buf_write(disk, block, count, data); }
 int disk_write_direct(struct disk *disk, uint64_t block, uint32_t count, const void *data)
 { return memory_transfer(disk, block, count, (void *)data, 1); }
+int disk_transfer_progress(struct disk *disk, enum bio_op op, uint64_t block,
+    uint32_t count, void *data, uint32_t *completed)
+{
+	int error = memory_transfer(disk, block, count, data, op == BIO_WRITE);
+	*completed = error == 0 ? count : 0;
+	return error;
+}
 int disk_resolve_range(struct disk *disk, uint64_t block, uint32_t count,
     struct disk **leaf, uint64_t *mapped)
 { if (block > disk->d_block_count || count > disk->d_block_count - block) return EIO; *leaf = disk; *mapped = block; return 0; }
 void disk_ref(struct disk *disk) { (void)disk; }
 void disk_release(struct disk *disk) { (void)disk; }
+int disk_buffer_acquire(struct disk *disk)
+{ if(disk->d_media_revoked)return ENXIO;disk->d_buffer_refs++;return 0; }
+void disk_buffer_release(struct disk *disk)
+{ CHECK(disk->d_buffer_refs);disk->d_buffer_refs--; }
 struct thread *thread_current(void) { return NULL; }
 int hal_pmem_alloc(const struct hal_pmem_request *r, struct hal_pmem *m)
 { memset(m, 0, sizeof(*m)); m->size = r->size; m->vaddr = aligned_alloc(4096, r->size); return m->vaddr ? HAL_OK : HAL_ERR_NOMEM; }
@@ -63,7 +78,7 @@ int waitq_sleep(struct wait_queue *q, struct spinlock *lock, uint64_t seq, uint6
 { (void)q; (void)lock; (void)seq; (void)flags; (void)ticks; abort(); }
 ssize_t file_pread(struct file *f, void *b, size_t n, off_t o) { return f->f_ops->pread(f,b,n,o); }
 ssize_t file_pwrite_internal(struct file *f, const void *b, size_t n, off_t o, unsigned flags)
-{ CHECK(flags == FILE_IO_LOOP_BACKING); return f->f_ops->pwrite(f,b,n,o); }
+{ CHECK(flags == (FILE_IO_LOOP_BACKING | FILE_IO_DRAIN)); return f->f_ops->pwrite(f,b,n,o); }
 int file_fsync(struct file *f) { return f->f_ops->fsync(f); }
 static int completion_error;
 static size_t completion_bytes;
@@ -161,6 +176,11 @@ int main(void)
 	CHECK(fat_file_set_loop_map(&file, NULL, 0) == 0); file.f_backing_claim = NULL;
 	CHECK(loop_init() == 0);
 	struct disk *attached = NULL;
+	off_t saved_size = inode->i_size;
+	inode->i_size = (off_t)((UINT64_C(1) << 32) + 512U);
+	CHECK(loop_attach_file(&file, LOOP_READ_WRITE, &attached) == EFBIG);
+	CHECK(attached == NULL && live_claims == 0);
+	inode->i_size = saved_size;
 	extent_fault = 1;
 	CHECK(loop_attach_file(&file, LOOP_READ_WRITE, &attached) == EIO);
 	CHECK(attached == NULL && live_claims == 0);
@@ -201,4 +221,36 @@ int main(void)
 	buf_reset(); destroy_image(&image);
 	puts("S32 PASS full FAT write-chain validation rejects distant corruption before mutation");
 	return 0;
+}
+
+/* Models the explicit lower backend drain without a VM layer in this fixture. */
+int file_fsync_backend(struct file *file) { return file_fsync(file); }
+
+ssize_t file_pwrite_context(struct file *file, const void *buffer, size_t length,
+    off_t offset, unsigned flags, const struct ucred *credential,
+    const struct io_context *context)
+{
+	(void)credential;
+	CHECK(io_context_validate(context) == 0);
+	CHECK((context->flags & IO_CONTEXT_DRAIN) != 0);
+	CHECK(flags == (FILE_IO_LOOP_BACKING | FILE_IO_DRAIN));
+	return file->f_ops->pwrite_internal(file, buffer, length, offset, flags,
+	    credential, context);
+}
+
+int disk_write_filesystem_context(struct disk *disk, uint64_t block,
+    uint32_t count, const void *data, const struct io_context *context)
+{ return buf_write_context(disk, block, count, data, context); }
+int disk_write_direct_context(struct disk *disk, uint64_t block,
+    uint32_t count, const void *data, const struct io_context *context)
+{
+	CHECK(io_context_validate(context) == 0);
+	return disk_write_direct(disk, block, count, data);
+}
+int disk_transfer_progress_context(struct disk *disk, enum bio_op op,
+    uint64_t block, uint32_t count, void *data, uint32_t *completed,
+    const struct io_context *context)
+{
+	CHECK(io_context_validate(context) == 0);
+	return disk_transfer_progress(disk, op, block, count, data, completed);
 }

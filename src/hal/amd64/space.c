@@ -20,10 +20,15 @@
 #include "bsp-pcat/lapic.h"
 #include "defs.h"
 #include "percpu.h"
+#include "ram-map.h"
+#include "framebuffer-map.h"
 #include "smp.h"
 #include "space.h"
 
 #define AMD64_USER_LIMIT 0x0000800000000000ULL
+
+_Static_assert(AMD64_RAM_BASE == AMD64_DIRECT_BASE, "RAM window base agreement");
+_Static_assert(AMD64_RAM_LIMIT == AMD64_DIRECT_LIMIT, "RAM window size agreement");
 
 #define AMD64_ACPI_PDPT_INDEX 509U
 #define AMD64_ACPI_WINDOW_BASE 0xffffffff40000000ULL
@@ -50,6 +55,8 @@ struct amd64_shootdown_request {
 typedef char amd64_user_pointer_window_assert[
 	AMD64_USER_LIMIT - 1U <= (uintptr_t)INTPTR_MAX ? 1 : -1];
 
+extern char __kernel_virt_start[];
+extern char __kernel_virt_end[];
 extern char __kernel_phys_start[];
 extern char __kernel_phys_end[];
 extern char __kernel_text_phys_start[];
@@ -64,12 +71,20 @@ static uint64_t system_pdpt[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64_t system_pd[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64_t system_kernel_pt[8][512]
 	__attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_identity_pdpt[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_identity_pd[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_identity_pt[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_legacy_pt[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_framebuffer_edges[2][512] __attribute__((aligned(PAGE_SIZE)));
+static struct amd64_ram_builder ram_builder;
+static int ram_active;
 static uint64_t system_mmio_pd[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64_t system_acpi_pd[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64_t
     system_acpi_pt[AMD64_ACPI_WINDOW_PT_COUNT][512]
 	__attribute__((aligned(PAGE_SIZE)));
 static struct amd64_acpi_window acpi_window;
+static int acpi_discovery_finished;
 static paddr_t acpi_physical_max;
 static unsigned ecam_pd_used;
 static uintptr_t system_cr3;
@@ -82,6 +97,12 @@ static struct amd64_shootdown_request
     shootdowns[AMD64_SHOOTDOWN_REQUESTS];
 
 static paddr_t cpu_physical_max(void);
+static int ram_allocate(void *context, uint64_t *physical, uint64_t **table);
+static uint64_t *ram_resolve(void *context, uint64_t physical);
+static void build_ram_map(const struct zbl6_framebuffer *framebuffer);
+static void map_legacy_image_alias(void);
+static int arena_is_mapped(void);
+static void verify_ram_map(void);
 static void table_count_drop(void);
 static int alloc_page(struct hal_pmem *memory);
 static bool registry_lock_enter(void);
@@ -107,8 +128,16 @@ uintptr_t
 amd64_direct_to_phys(
 	const void *address)
 {
-	/* Reports the offset within the direct physical map. */
-	return (uintptr_t)address - (uintptr_t)AMD64_DIRECT_BASE;
+	uint64_t physical;
+	uint64_t entry;
+
+	if ((uintptr_t)address < (uintptr_t)AMD64_DIRECT_BASE ||
+	    (uintptr_t)address - (uintptr_t)AMD64_DIRECT_BASE >= AMD64_DIRECT_LIMIT)
+		return UINTPTR_MAX;
+	physical = (uintptr_t)address - (uintptr_t)AMD64_DIRECT_BASE;
+	if (!ram_active || !amd64_ram_lookup(&ram_builder, physical, &entry))
+		return UINTPTR_MAX;
+	return (uintptr_t)physical;
 }
 
 /*
@@ -118,8 +147,31 @@ void *
 amd64_phys_to_direct(
 	uintptr_t address)
 {
-	/* Reports the corresponding direct-map address. */
+	uint64_t entry;
+
+	if (!ram_active || !amd64_ram_lookup(&ram_builder, address, &entry))
+		return NULL;
 	return (void *)((uintptr_t)AMD64_DIRECT_BASE + address);
+}
+
+/*
+ * Converts only linker-owned image addresses, independently of RAM aliases.
+ */
+uintptr_t
+amd64_image_to_phys(
+	const void *address)
+{
+	if ((uintptr_t)address < (uintptr_t)__kernel_virt_start ||
+	    (uintptr_t)address >= (uintptr_t)__kernel_virt_end)
+		return UINTPTR_MAX;
+	return (uintptr_t)address - (uintptr_t)AMD64_IMAGE_BASE;
+}
+
+/* Reports actual mapped RAM bytes rather than the virtual window's span. */
+uint64_t
+amd64_direct_mapped_bytes(void)
+{
+	return ram_active ? ram_builder.mapped_bytes : 0;
 }
 
 /*
@@ -149,9 +201,8 @@ amd64_space_init(
 	unsigned first_chunk;
 	unsigned chunks;
 	unsigned chunk;
-	unsigned count;
+	uint64_t framebuffer_tables[2];
 	uint64_t efer;
-	uint64_t end;
 	uint64_t flags;
 	uintptr_t cr0;
 	uintptr_t cr4;
@@ -179,13 +230,6 @@ amd64_space_init(
 	acpi_physical_max = cpu_physical_max();
 	ecam_pd_used = 0;
 
-	/* Builds the large-page direct physical map. */
-	for (index = 0; index < 512; index++) {
-		system_pd[index] = (uint64_t)index * 0x200000ULL |
-		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE | AMD64_PTE_LARGE |
-		    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
-	}
-
 	/* Validates the bounded kernel permission window. */
 	first_chunk = (unsigned)(kernel_start / 0x200000U);
 	chunks = (unsigned)((kernel_end + 0x1fffffU) / 0x200000U) -
@@ -200,6 +244,8 @@ amd64_space_init(
 		/* Assigns permissions to every kernel page in this chunk. */
 		for (index = 0; index < 512; index++) {
 			physical = base + (uintptr_t)index * PAGE_SIZE;
+			if (physical < kernel_start || physical >= kernel_end)
+				continue;
 			flags = AMD64_PTE_PRESENT | AMD64_PTE_GLOBAL |
 			    AMD64_PTE_NX;
 
@@ -219,7 +265,7 @@ amd64_space_init(
 
 		/* Links the populated kernel leaf table into the direct map. */
 		system_pd[first_chunk + chunk] =
-		    amd64_direct_to_phys(system_kernel_pt[chunk]) |
+		    amd64_image_to_phys(system_kernel_pt[chunk]) |
 		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 	}
 
@@ -239,54 +285,52 @@ amd64_space_init(
 	    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
 	    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
 
-	/* Maps the firmware framebuffer when its extent fits the window. */
+	/* Maps framebuffer edges at 4 KiB granularity to exclude adjacent RAM. */
 	if (framebuffer != NULL) {
-		base = framebuffer->physical_base & ~0x1fffffULL;
-		end = framebuffer->physical_base + framebuffer->size;
-		count = (unsigned)((end - base + 0x1fffffULL) /
-		    0x200000ULL);
-
-		/* Rejects a framebuffer outside the reserved page-directory range. */
-		if (count == 0 || count > AMD64_FRAMEBUFFER_PD_COUNT)
-			HAL_FATAL("amd64 framebuffer MMIO window exceeded");
-
-		/* Maps every framebuffer large page uncached. */
-		for (index = 0; index < count; index++) {
-			system_mmio_pd[AMD64_FRAMEBUFFER_PD_FIRST + index] =
-			    (base + (uint64_t)index * 0x200000ULL) |
-			    AMD64_PTE_PRESENT | AMD64_PTE_WRITE |
-			    AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
-			    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
-		}
+		framebuffer_tables[0] = amd64_image_to_phys(system_framebuffer_edges[0]);
+		framebuffer_tables[1] = amd64_image_to_phys(system_framebuffer_edges[1]);
+		if (!amd64_framebuffer_map(&system_mmio_pd[AMD64_FRAMEBUFFER_PD_FIRST],
+		    AMD64_FRAMEBUFFER_PD_COUNT, system_framebuffer_edges, framebuffer_tables,
+		    framebuffer->physical_base, framebuffer->size, acpi_physical_max))
+			HAL_FATAL("amd64 framebuffer MMIO geometry invalid");
 	}
 
-	/* Permits AP execution through the low trampoline mapping. */
-	system_pd[0] &= ~AMD64_PTE_NX;
+	/* Gives legacy VGA/ROM its own uncached window, outside the RAM map. */
+	for (index = 0; index < 0x60000U / PAGE_SIZE; index++)
+		system_legacy_pt[index] = (0xa0000U + (uint64_t)index * PAGE_SIZE) |
+		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE | AMD64_PTE_NOCACHE |
+		    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+	system_mmio_pd[10] = amd64_image_to_phys(system_legacy_pt) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 
-	/* Connects the direct-map page directory. */
-	system_pdpt[0] = amd64_direct_to_phys(system_pd) |
+	/* Retains only the AP trampoline in the low identity map. */
+	system_identity_pt[AMD64_AP_TRAMPOLINE / PAGE_SIZE] = AMD64_AP_TRAMPOLINE |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	system_identity_pd[0] = amd64_image_to_phys(system_identity_pt) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	system_identity_pdpt[0] = amd64_image_to_phys(system_identity_pd) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 
 	/* Connects every ACPI window page table. */
 	for (index = 0; index < AMD64_ACPI_WINDOW_PT_COUNT; index++) {
 		system_acpi_pd[index] =
-		    amd64_direct_to_phys(system_acpi_pt[index]) |
+		    amd64_image_to_phys(system_acpi_pt[index]) |
 		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 	}
 
 	/* Connects the ACPI, direct-map, and fixed-MMIO directories. */
 	system_pdpt[AMD64_ACPI_PDPT_INDEX] =
-	    amd64_direct_to_phys(system_acpi_pd) |
+	    amd64_image_to_phys(system_acpi_pd) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
-	system_pdpt[510] = amd64_direct_to_phys(system_pd) |
+	system_pdpt[510] = amd64_image_to_phys(system_pd) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
-	system_pdpt[511] = amd64_direct_to_phys(system_mmio_pd) |
+	system_pdpt[511] = amd64_image_to_phys(system_mmio_pd) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 
 	/* Publishes the high and temporary low PML4 roots. */
-	system_pml4[511] = amd64_direct_to_phys(system_pdpt) |
+	system_pml4[511] = amd64_image_to_phys(system_pdpt) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
-	system_pml4[0] = amd64_direct_to_phys(system_pdpt) |
+	system_pml4[0] = amd64_image_to_phys(system_identity_pdpt) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 
 	/* Enables execute-disable, global pages, and supervisor write protection. */
@@ -299,9 +343,19 @@ amd64_space_init(
 	cr0 |= 0x10000U;
 	__asm__ volatile("movq %0,%%cr0" : : "r"(cr0) : "memory");
 
+	build_ram_map(framebuffer);
+
 	/* Activates and records the completed system page-table root. */
-	system_cr3 = amd64_direct_to_phys(system_pml4);
+	system_cr3 = amd64_image_to_phys(system_pml4);
 	asm_load_cr3(system_cr3);
+	ram_active = 1;
+	pcat_cons_paging_ready();
+	verify_ram_map();
+	hal_printf("A64 RAM MAP bytes=%llu tables=%llu large=%llu small=%llu\n",
+	    (unsigned long long)ram_builder.mapped_bytes,
+	    (unsigned long long)ram_builder.table_pages,
+	    (unsigned long long)ram_builder.large_pages,
+	    (unsigned long long)ram_builder.small_pages);
 	__atomic_store_n(
 	    &AMD64_CURRENT_SPACE,
 	    HAL_SPACE_SYS,
@@ -369,6 +423,14 @@ amd64_acpi_map_physical(
 	mappable = bsp_physical_range_mappable(page_physical, page_span);
 	if (!mappable)
 		return NULL;
+
+	/* Prevents late discovery from reading BootServices pages already reused. */
+	if (acpi_discovery_finished) {
+		for (page = page_physical; page < page_physical + page_span; page += PAGE_SIZE) {
+			if (!amd64_acpi_page_reserved(page))
+				return NULL;
+		}
+	}
 
 	/* Reserves slots for all newly required pages. */
 	reserved = amd64_acpi_window_reserve(
@@ -471,6 +533,7 @@ hal_mem_create_space(
 	struct amd64_space *space;
 	bool enabled;
 	int status;
+	unsigned index;
 
 	/* Allocates the software address-space record. */
 	space = hal_malloc(sizeof(*space));
@@ -490,7 +553,8 @@ hal_mem_create_space(
 	/* Initializes the user root with the shared system mapping. */
 	space->pml4 = space->pml4_memory.vaddr;
 	hal_memset(space->pml4, 0, PAGE_SIZE);
-	space->pml4[511] = system_pml4[511];
+	for (index = 256; index < 512; index++)
+		space->pml4[index] = system_pml4[index];
 	space->magic = AMD64_SPACE_MAGIC;
 	space->space_id = __atomic_fetch_add(
 	    &next_space_id,
@@ -679,6 +743,7 @@ hal_page_map(
 	uintptr_t address;
 	uintptr_t offset;
 	uintptr_t rollback;
+	uint64_t ram_entry;
 	bool enabled;
 	int entered;
 
@@ -705,6 +770,13 @@ hal_page_map(
 	/* Rejects a physical extent outside the direct-map limit. */
 	if (size > AMD64_DIRECT_LIMIT - physical)
 		return HAL_ERR_INVALID;
+
+	/* A present RAM alias is required; holes and MMIO are never user RAM. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		if (!amd64_ram_lookup(&ram_builder, physical + offset, &ram_entry) ||
+		    (ram_entry & AMD64_PTE_WRITE) == 0)
+			return HAL_ERR_INVALID;
+	}
 
 	/* Requires at least one useful access permission. */
 	if (!(attr & (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)))
@@ -1581,8 +1653,9 @@ walk_leaf(
 
 			/* Links the new subordinate table into its parent. */
 			entry = (uintptr_t)page->memory.paddr |
-			    AMD64_PTE_PRESENT | AMD64_PTE_WRITE |
-			    AMD64_PTE_USER;
+			    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+			if (address < AMD64_USER_LIMIT)
+				entry |= AMD64_PTE_USER;
 			table[index] = entry;
 		}
 
@@ -1883,3 +1956,253 @@ service_shootdowns(
 		    __ATOMIC_RELEASE);
 	}
 }
+
+/* Reserves each early table while its old bootstrap alias remains reachable. */
+static int
+ram_allocate(void *context, uint64_t *physical, uint64_t **table)
+{
+	UNUSED_PARAMETER(context);
+	if (!amd64_early_table_page(physical, ram_active)) {
+		hal_printf("A64 RAM ARENA NEED bytes=%u tables=%llu mapped=%llu active=%u\n",
+		    PAGE_SIZE, (unsigned long long)ram_builder.table_pages,
+		    (unsigned long long)ram_builder.mapped_bytes, ram_active);
+		return 0;
+	}
+	*table = (void *)((ram_active ? (uintptr_t)AMD64_DIRECT_BASE :
+	    (uintptr_t)AMD64_IMAGE_BASE) + *physical);
+	hal_memset(*table, 0, PAGE_SIZE);
+	return 1;
+}
+
+/* Resolves table ownership before and after the permanent CR3 transition. */
+static uint64_t *
+ram_resolve(void *context, uint64_t physical)
+{
+	UNUSED_PARAMETER(context);
+	if ((!ram_active && physical >= AMD64_BOOTSTRAP_LIMIT) ||
+	    physical >= AMD64_DIRECT_LIMIT || (physical & (PAGE_SIZE - 1U)) != 0)
+		return NULL;
+	return (void *)((ram_active ? (uintptr_t)AMD64_DIRECT_BASE :
+	    (uintptr_t)AMD64_IMAGE_BASE) + physical);
+}
+
+/* Builds sparse RAM aliases and fixes shared upper-half roots before fork. */
+static void
+build_ram_map(const struct zbl6_framebuffer *framebuffer)
+{
+	uint64_t base;
+	uint64_t size;
+	uint64_t end;
+	uint64_t next;
+	uint64_t attributes;
+	uint64_t before;
+	uint64_t flags;
+	uint64_t cache_flags;
+	uint64_t physical;
+	uint64_t *table;
+	uint64_t boundaries[8];
+	uint32_t type;
+	uint32_t index;
+	unsigned slot;
+	enum amd64_ram_result result;
+
+	hal_memset(&ram_builder, 0, sizeof(ram_builder));
+	ram_builder.root = system_pml4;
+	ram_builder.allocate = ram_allocate;
+	ram_builder.resolve = ram_resolve;
+	ram_builder.physical_max = acpi_physical_max;
+	/* Empty PDPTs ensure later kernel/vmap changes reach every process. */
+	for (index = 256; index < 511; index++) {
+		if (!ram_allocate(NULL, &physical, &table))
+			HAL_FATAL("amd64 early shared-root arena exhausted");
+		system_pml4[index] = physical | AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+		ram_builder.table_pages++;
+	}
+	boundaries[0] = (uintptr_t)__kernel_text_phys_start;
+	boundaries[1] = (uintptr_t)__kernel_text_phys_end;
+	boundaries[2] = (uintptr_t)__kernel_rodata_phys_start;
+	boundaries[3] = (uintptr_t)__kernel_rodata_phys_end;
+	boundaries[4] = 0xa0000U;
+	boundaries[5] = 0x100000U;
+	boundaries[6] = framebuffer == NULL ? 0 : framebuffer->physical_base & ~4095ULL;
+	boundaries[7] = framebuffer == NULL ? 0 :
+	    (framebuffer->physical_base + framebuffer->size + 4095U) & ~4095ULL;
+	for (index = 0; index < bsp_mem_range_count(); index++) {
+		if (!bsp_mem_range(index, &base, &size, &type) || !bsp_mem_attributes(index, &attributes))
+			HAL_FATAL("amd64 RAM range disappeared");
+		if (type != ZBL6_MEMORY_USABLE && type != ZBL6_MEMORY_BOOT_RECLAIM)
+			continue;
+		end = (base + size) & ~4095ULL;
+		base = (base + 4095U) & ~4095ULL;
+		cache_flags = 0;
+		/* The image, user mappings and table walker currently require WB RAM.
+		 * Do not create a different-cache alias for a non-WB-only range. */
+		if (bsp_memory_source() == ZBL6_MEMORY_SOURCE_UEFI && (attributes & 8U) == 0)
+			HAL_FATAL("unsupported amd64 non-WB RAM attributes");
+		while (base < end) {
+			next = end;
+			for (slot = 0; slot < 8; slot++)
+				if (boundaries[slot] > base && boundaries[slot] < next)
+					next = boundaries[slot];
+			if ((base >= boundaries[4] && base < boundaries[5]) ||
+			    (framebuffer != NULL && base >= boundaries[6] && base < boundaries[7])) {
+				base = next;
+				continue;
+			}
+			flags = cache_flags | AMD64_PTE_NX | AMD64_PTE_GLOBAL;
+			if (!(base >= boundaries[0] && base < boundaries[1]) &&
+			    !(base >= boundaries[2] && base < boundaries[3]))
+				flags |= AMD64_PTE_WRITE;
+			before = ram_builder.mapped_bytes;
+			result = amd64_ram_map(&ram_builder, base, next - base, flags);
+			if (result == AMD64_RAM_NOMEM && !ram_active && arena_is_mapped()) {
+				/* Return from all walks before invalidating bootstrap aliases. */
+				base += ram_builder.mapped_bytes - before;
+				system_cr3 = amd64_image_to_phys(system_pml4);
+				asm_load_cr3(system_cr3);
+				ram_active = 1;
+				pcat_cons_paging_ready();
+				hal_puts("A64 RAM ARENA extending into mapped RAM\n");
+				result = amd64_ram_map(&ram_builder, base, next - base, flags);
+			}
+			if (result != AMD64_RAM_OK) {
+				hal_printf("A64 RAM MAP FAIL result=%u base=%llu size=%llu tables=%llu\n",
+				    result, (unsigned long long)base, (unsigned long long)(next - base),
+				    (unsigned long long)ram_builder.table_pages);
+				HAL_FATAL("amd64 RAM map construction failed");
+			}
+			base = next;
+		}
+	}
+	/* Old UEFI maps classify loader-owned kernel pages as reserved RAM. */
+	if (bsp_memory_source() == 0)
+		map_legacy_image_alias();
+}
+
+/* Maps only the known loaded image, without treating other legacy reservations as RAM. */
+static void
+map_legacy_image_alias(void)
+{
+	uint64_t physical;
+	uint64_t entry;
+	uint64_t flags;
+	enum amd64_ram_result result;
+
+	/* Preserves the same text/rodata W^X aliases used by typed RAM ranges. */
+	for (physical = (uintptr_t)__kernel_phys_start;
+	     physical < (uintptr_t)__kernel_phys_end; physical += PAGE_SIZE) {
+		if (amd64_ram_lookup(&ram_builder, physical, &entry))
+			continue;
+		flags = AMD64_PTE_NX | AMD64_PTE_GLOBAL;
+		if (!(physical >= (uintptr_t)__kernel_text_phys_start && physical < (uintptr_t)__kernel_text_phys_end) &&
+		    !(physical >= (uintptr_t)__kernel_rodata_phys_start && physical < (uintptr_t)__kernel_rodata_phys_end))
+			flags |= AMD64_PTE_WRITE;
+		result = amd64_ram_map(&ram_builder, physical, PAGE_SIZE, flags);
+		if (result != AMD64_RAM_OK)
+			HAL_FATAL("amd64 legacy kernel RAM alias failed");
+	}
+}
+
+/* Requires every table alias to survive before abandoning bootstrap pointers. */
+static int
+arena_is_mapped(void)
+{
+	uint64_t base;
+	uint64_t size;
+	uint64_t offset;
+	uint64_t entry;
+	uint32_t index;
+
+	for (index = 0; amd64_early_reservation(index, &base, &size); index++)
+		for (offset = 0; offset < size; offset += PAGE_SIZE)
+			if (!amd64_ram_lookup(&ram_builder, base + offset, &entry))
+				return 0;
+	return 1;
+}
+
+/* Checks W^X aliases and reads one available RAM page beyond each old limit. */
+static void
+verify_ram_map(void)
+{
+	uint64_t entry;
+	uint64_t base;
+	uint64_t size;
+	uint64_t probe;
+	uint64_t boundary;
+	uint64_t low_bytes;
+	uint64_t high_bytes;
+	uint32_t index;
+	uint32_t type;
+	volatile const uint8_t *pointer;
+	volatile uint8_t observed;
+
+	low_bytes = 0;
+	high_bytes = 0;
+	for (index = 0; amd64_early_reservation(index, &base, &size); index++) {
+		if (base < AMD64_BOOTSTRAP_LIMIT)
+			low_bytes += size;
+		else
+			high_bytes += size;
+	}
+	if (low_bytes + high_bytes != ram_builder.table_pages * PAGE_SIZE)
+		HAL_FATAL("amd64 table arena accounting invariant failed");
+	hal_printf("A64 RAM ARENA low=%llu high=%llu runs=%u root=%llu\n",
+	    (unsigned long long)low_bytes, (unsigned long long)high_bytes,
+	    index, (unsigned long long)system_cr3);
+	if (!arena_is_mapped() || amd64_phys_to_direct(0xb8000U) != NULL ||
+	    amd64_direct_to_phys(system_pml4) != UINTPTR_MAX ||
+	    amd64_image_to_phys(system_pml4) != system_cr3)
+		HAL_FATAL("amd64 RAM/image conversion invariant failed");
+	if (!amd64_ram_lookup(&ram_builder, (uintptr_t)__kernel_text_phys_start, &entry) ||
+	    (entry & AMD64_PTE_WRITE) != 0 || (entry & AMD64_PTE_NX) == 0 ||
+	    !amd64_ram_lookup(&ram_builder, (uintptr_t)__kernel_rodata_phys_start, &entry) ||
+	    (entry & AMD64_PTE_WRITE) != 0 || (entry & AMD64_PTE_NX) == 0)
+		HAL_FATAL("amd64 RAM alias permission invariant failed");
+	for (boundary = 1ULL << 30; boundary <= (1ULL << 32); boundary <<= 2) {
+		for (index = 0; index < bsp_mem_range_count(); index++) {
+			if (!bsp_mem_range(index, &base, &size, &type) || type != ZBL6_MEMORY_USABLE)
+				continue;
+			probe = base > boundary ? base : boundary;
+			if (probe >= base + size || PAGE_SIZE > base + size - probe)
+				continue;
+			pointer = amd64_phys_to_direct((uintptr_t)probe);
+			if (pointer == NULL || amd64_direct_to_phys((const void *)pointer) != probe)
+				HAL_FATAL("amd64 high RAM round-trip failed");
+			observed = *pointer;
+			(void)observed;
+			hal_printf("A64 RAM PROBE boundary=%llu physical=%llu read=ok\n",
+			    (unsigned long long)boundary, (unsigned long long)probe);
+			break;
+		}
+	}
+}
+
+/*
+ * Preserves every persistent ACPI mapping during boot-owner retirement.
+ * Discovery completes before this boot-only ownership query is used.
+ */
+int
+amd64_acpi_page_reserved(
+	uint64_t physical)
+{
+	unsigned index;
+
+	/* Searches physical slots; duplicate aliases retain the same owner. */
+	for (index = 0; index < acpi_window.used; index++) {
+		if (acpi_window.slot_physical[index] == physical)
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * Freezes physical ACPI ownership before reclaiming firmware boot memory.
+ * Existing persistent pages remain accessible; new discovery must run earlier.
+ */
+void
+amd64_acpi_finish_discovery(void)
+{
+	acpi_discovery_finished = 1;
+}
+
+#include "space-vmap.inc"

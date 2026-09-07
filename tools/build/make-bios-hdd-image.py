@@ -118,7 +118,7 @@ def create(args: argparse.Namespace) -> None:
     if blocks <= 0:
         raise SystemExit("image is too small for the LBA 2048 partition")
     if args.ufs_root is not None and root_start + root_blocks > total_sectors:
-        raise SystemExit("FAT16 and UFS1 partitions exceed the image")
+        raise SystemExit("FAT16 and UFS partitions exceed the image")
     stage1 = bytearray(args.stage1.read_bytes())
     stage2 = args.stage2.read_bytes()
     if len(stage1) != 512 or stage1[510:512] != b"\x55\xaa":

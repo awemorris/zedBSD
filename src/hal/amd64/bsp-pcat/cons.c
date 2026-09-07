@@ -22,7 +22,7 @@
 #include "bootloader/include/amd64-handoff.h"
 #include "drivers/graphics/pcat/vgafont.h"
 
-#define VGA_MEMORY	((volatile uint16_t *)((uintptr_t)AMD64_DIRECT_BASE + 0x000b8000U))
+#define VGA_MEMORY vga_memory
 #define VGA_INDEX	0x3d4U
 #define VGA_DATA	0x3d5U
 
@@ -53,6 +53,7 @@ struct console_output_token {
 	int interrupts_enabled;
 };
 
+static volatile uint16_t *vga_memory = (volatile uint16_t *)((uintptr_t)AMD64_IMAGE_BASE + 0xb8000U);
 static unsigned cursor_row;
 static unsigned cursor_column;
 static uint8_t current_attribute = 0x07U;
@@ -2444,4 +2445,11 @@ keyboard_interrupt(
 	/* Wakes consumers before completing the hardware interrupt. */
 	hal_cons_wait_queue_notify_all(waiters);
 	hal_irq_send_eoi(acknowledge);
+}
+
+/* Switches VGA access after the permanent uncached window becomes present. */
+void
+pcat_cons_paging_ready(void)
+{
+	vga_memory = (volatile uint16_t *)((uintptr_t)AMD64_LEGACY_MMIO_BASE + 0x18000U);
 }

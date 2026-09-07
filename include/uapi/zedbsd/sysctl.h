@@ -21,6 +21,16 @@
 #define CTL_SYSCTL_OIDNAME	3
 
 #define VFS_BUFCACHE	1
+#define VFS_IO	2
+#define VFS_CACHE_MEMORY	3
+#define VFS_WRITEBACK	4
+#define VFS_READAHEAD	5
+#define VFS_READAHEAD_STATS	1
+#define VFS_WRITEBACK_STATS	1
+#define VFS_WRITEBACK_CONTROL	2
+#define VFS_CACHE_MEMORY_STATS	1
+#define VFS_CACHE_MEMORY_TARGET	2
+#define VFS_IO_STATS	1
 #define VFS_BUFCACHE_MAX_BYTES	1
 #define VFS_BUFCACHE_CURRENT_BYTES	2
 #define VFS_BUFCACHE_DIRTY_BYTES	3
@@ -28,6 +38,31 @@
 
 #define HW_NCPU	1
 #define HW_NCPUONLINE	2
+#define HW_MEMORY_STATS	3
+
+/* Firmware RAM and actually managed RAM are distinct. */
+#define MEMORY_STATS_VERSION 2U
+struct memory_stats {
+	uint32_t version;
+	uint32_t boot_ranges_valid;
+	uint64_t boot_range_count;
+	uint64_t boot_usable_bytes;
+	uint64_t boot_highest_end;
+	uint64_t boot_usable_highest_end;
+	uint64_t direct_mapped_bytes;
+	uint64_t allocator_initial_bytes;
+	uint64_t physical_managed_bytes;
+	uint64_t physical_reserved_bytes;
+	uint64_t physical_allocated_bytes;
+	uint64_t physical_free_bytes;
+	uint64_t boot_reclaim_bytes;
+	uint64_t allocator_metadata_bytes;
+	uint64_t allocator_scan_words;
+	uint64_t allocator_max_extent_scan_words;
+	uint64_t allocator_max_irqoff_cycles;
+	uint32_t boot_memory_source;
+	uint32_t reserved;
+};
 
 #define KERN_MSGBUF	1
 #define KERN_MSGBUF_SIZE	2

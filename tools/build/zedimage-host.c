@@ -14,15 +14,15 @@
 #include <time.h>
 #include <unistd.h>
 
-enum { FRAG=1024, BLOCK=8192, FRAGS=8, IPG=256, INODE_SIZE=128,
-       SBLK=8, CBLK=16, IBLK=24, DBLK=56, MAX_INODES=768,
+enum { FRAG=1024, BLOCK=8192, FRAGS=8, IPG=256, INODE_SIZE=256,
+       SBLK=64, CBLK=72, IBLK=80, DBLK=144, MAX_GROUPS=64, MAX_INODES=16384,
        DEFAULT_CYLINDER_GROUPS=2 };
 enum { IFDIR=0040000, IFREG=0100000, IFLNK=0120000 };
 struct child { char *name; uint32_t ino; uint8_t type; };
 struct node { struct child *v; size_t n, cap; unsigned mode; };
 struct image {
     uint8_t *data; size_t size; uint32_t fragments, ncg, fpg, cgsize;
-    uint32_t cg_next[8], next_ino; uint8_t *used_frag[8], used_ino[8][IPG];
+    uint32_t cg_next[MAX_GROUPS], next_ino; uint8_t *used_frag[MAX_GROUPS], used_ino[MAX_GROUPS][IPG];
     struct node nodes[MAX_INODES];
 };
 
@@ -41,29 +41,52 @@ static void add_child(struct image *im,uint32_t parent,const char *name,uint32_t
 }
 static uint32_t alloc_ino(struct image *im){while(im->next_ino<im->ncg*IPG){uint32_t i=im->next_ino++,cg=i/IPG,x=i%IPG;if(!im->used_ino[cg][x]){im->used_ino[cg][x]=1;return i;}}fail("inode table full");return 0;}
 static uint32_t alloc_block(struct image *im,const uint8_t *p,size_t n){
-    for(uint32_t cg=0;cg<im->ncg;cg++){uint32_t s=(im->cg_next[cg]+7)&~7U,nd=cg_ndblk(im,cg);if(s+8>nd)continue;im->cg_next[cg]=s+8;for(unsigned j=0;j<8;j++)im->used_frag[cg][s+j]=1;uint32_t f=cg_base(im,cg)+s;if(n)memcpy(im->data+(size_t)f*FRAG,p,n);return f;}fail("UFS1 image full");return 0;
+    for(uint32_t cg=0;cg<im->ncg;cg++){uint32_t s=(im->cg_next[cg]+7)&~7U,nd=cg_ndblk(im,cg);if(s+8>nd)continue;im->cg_next[cg]=s+8;for(unsigned j=0;j<8;j++)im->used_frag[cg][s+j]=1;uint32_t f=cg_base(im,cg)+s;if(n)memcpy(im->data+(size_t)f*FRAG,p,n);return f;}fail("UFS image full");return 0;
 }
 static uint32_t indirect(struct image *im,const uint32_t *blocks,size_t n,unsigned depth,uint32_t *meta){
-    uint8_t raw[BLOCK]={0};size_t count=0;if(depth==1){for(size_t i=0;i<n;i++)p32(raw+4*count++,blocks[i]);}
-    else {size_t span=1;for(unsigned d=1;d<depth;d++)span*=BLOCK/4;for(size_t pos=0;pos<n;pos+=span){size_t take=n-pos<span?n-pos:span;uint32_t q=indirect(im,blocks+pos,take,depth-1,meta);p32(raw+4*count++,q);}}
+    uint8_t raw[BLOCK]={0};size_t count=0;if(depth==1){for(size_t i=0;i<n;i++)p64(raw+8*count++,blocks[i]);}
+    else {size_t span=1;for(unsigned d=1;d<depth;d++)span*=BLOCK/8;for(size_t pos=0;pos<n;pos+=span){size_t take=n-pos<span?n-pos:span;uint32_t q=indirect(im,blocks+pos,take,depth-1,meta);p64(raw+8*count++,q);}}
     (*meta)++;return alloc_block(im,raw,sizeof(raw));
 }
 static void write_inode(struct image *im,uint32_t ino,unsigned mode,unsigned links,uint64_t size,const uint32_t *blocks,size_t n){
-    uint8_t *r=inode_at(im,ino);memset(r,0,INODE_SIZE);p16(r,mode);p16(r+2,links);p64(r+8,size);size_t direct=n<12?n:12;for(size_t i=0;i<direct;i++)p32(r+40+4*i,blocks[i]);
-    size_t pos=direct;uint32_t meta=0;for(unsigned depth=1;depth<=3&&pos<n;depth++){size_t cap=1;for(unsigned d=0;d<depth;d++)cap*=BLOCK/4;size_t take=n-pos<cap?n-pos:cap;p32(r+88+4*(depth-1),indirect(im,blocks+pos,take,depth,&meta));pos+=take;}if(pos<n)fail("file exceeds triple indirect range");p32(r+104,(uint32_t)((n+meta)*16));p32(r+108,ino);
+    uint8_t *r=inode_at(im,ino);memset(r,0,INODE_SIZE);p16(r,mode);p16(r+2,links);p64(r+16,size);p32(r+12,BLOCK);size_t direct=n<12?n:12;for(size_t i=0;i<direct;i++)p64(r+112+8*i,blocks[i]);
+    size_t pos=direct;uint32_t meta=0;for(unsigned depth=1;depth<=3&&pos<n;depth++){size_t cap=1;for(unsigned d=0;d<depth;d++)cap*=BLOCK/8;size_t take=n-pos<cap?n-pos:cap;p64(r+208+8*(depth-1),indirect(im,blocks+pos,take,depth,&meta));pos+=take;}if(pos<n)fail("file exceeds triple indirect range");p64(r+24,(uint64_t)(n+meta)*16);p32(r+80,ino);
 }
 static uint32_t add_dir(struct image *im,uint32_t parent,const char *name,unsigned mode){uint32_t ino=alloc_ino(im);im->nodes[ino].mode=mode;write_inode(im,ino,IFDIR|mode,2,0,NULL,0);add_child(im,parent,name,ino,4);return ino;}
 static uint32_t child_dir(struct image *im,uint32_t parent,const char *name){for(size_t i=0;i<im->nodes[parent].n;i++)if(im->nodes[parent].v[i].type==4&&!strcmp(im->nodes[parent].v[i].name,name))return im->nodes[parent].v[i].ino;return 0;}
 static void add_file_data(struct image *im,uint32_t parent,const char *name,const uint8_t *data,size_t size,unsigned mode){
     uint32_t ino=alloc_ino(im);size_t nb=(size+BLOCK-1)/BLOCK;uint32_t *blocks=calloc(nb?nb:1,sizeof(*blocks));if(!blocks)die("calloc");for(size_t i=0;i<nb;i++){size_t n=size-i*BLOCK<BLOCK?size-i*BLOCK:BLOCK;blocks[i]=alloc_block(im,data+i*BLOCK,n);}write_inode(im,ino,IFREG|mode,1,size,blocks,nb);free(blocks);add_child(im,parent,name,ino,8);
 }
-static void add_symlink(struct image *im,uint32_t parent,const char *name,const char *target){size_t n=strlen(target);if(n>60)fail("inline symlink too long");uint32_t ino=alloc_ino(im);write_inode(im,ino,IFLNK|0777,1,n,NULL,0);memcpy(inode_at(im,ino)+40,target,n);add_child(im,parent,name,ino,10);}
+static void add_symlink(struct image *im,uint32_t parent,const char *name,const char *target){size_t n=strlen(target);if(n>120)fail("inline symlink too long");uint32_t ino=alloc_ino(im);write_inode(im,ino,IFLNK|0777,1,n,NULL,0);memcpy(inode_at(im,ino)+112,target,n);add_child(im,parent,name,ino,10);}
 static int namecmp(const void *a,const void *b){const char *const *x=a,*const *y=b;return strcmp(*x,*y);}
 static void add_tree(struct image *im,const char *path,uint32_t parent){
     DIR *d=opendir(path);if(!d)die(path);char **names=NULL;size_t n=0,cap=0;struct dirent *e;while((e=readdir(d)))if(strcmp(e->d_name,".")&&strcmp(e->d_name,"..")){if(n==cap){cap=cap?cap*2:16;names=realloc(names,cap*sizeof(*names));if(!names)die("realloc");}names[n++]=strdup(e->d_name);}closedir(d);qsort(names,n,sizeof(*names),namecmp);
     for(size_t i=0;i<n;i++){size_t z=strlen(path)+strlen(names[i])+2;char *p=malloc(z);snprintf(p,z,"%s/%s",path,names[i]);struct stat st;if(lstat(p,&st))die(p);if(S_ISLNK(st.st_mode)){char target[256];ssize_t m=readlink(p,target,sizeof(target)-1);if(m<0)die(p);target[m]=0;add_symlink(im,parent,names[i],target);}else if(S_ISDIR(st.st_mode)){uint32_t ino=child_dir(im,parent,names[i]);if(!ino)ino=add_dir(im,parent,names[i],st.st_mode&07777);add_tree(im,p,ino);}else if(S_ISREG(st.st_mode)){FILE *f=fopen(p,"rb");if(!f)die(p);uint8_t *buf=malloc(st.st_size?st.st_size:1);if(st.st_size&&fread(buf,1,st.st_size,f)!=(size_t)st.st_size)die(p);fclose(f);add_file_data(im,parent,names[i],buf,st.st_size,st.st_mode&07777);free(buf);}free(p);free(names[i]);}free(names);
 }
-static void superblock(struct image *im){uint8_t *s=im->data+8192;struct {int o;uint32_t v;} v[]={{8,SBLK},{12,CBLK},{16,IBLK},{20,DBLK},{36,im->fragments},{40,0},{44,im->ncg},{48,BLOCK},{52,FRAG},{56,FRAGS},{80,13},{84,10},{96,3},{100,1},{104,1376},{116,BLOCK/4},{120,64},{160,im->cgsize},{184,IPG},{188,im->fpg},{1320,60},{1324,2},{1372,0x011954}};uint32_t dsize=0;for(uint32_t cg=0;cg<im->ncg;cg++){uint32_t n=cg_ndblk(im,cg);if(n>DBLK)dsize+=n-DBLK;}v[5].v=dsize;for(size_t i=0;i<sizeof(v)/sizeof(v[0]);i++)p32(s+v[i].o,v[i].v);p64(s+1328,0x7fffffffffffffffULL);s[144]=0x7a;s[145]=0x65;s[146]=0x64;s[147]=0x42;s[148]=0x53;s[149]=0x44;s[150]=1;s[151]=0;s[209]=1;}
+static void
+superblock(struct image *im)
+{
+    uint8_t *s = im->data + 65536;
+    struct { int offset; uint32_t value; } fields[] = {
+        {8,SBLK}, {12,CBLK}, {16,IBLK}, {20,DBLK}, {44,im->ncg},
+        {48,BLOCK}, {52,FRAG}, {56,FRAGS}, {80,13}, {84,10}, {96,3},
+        {100,1}, {104,1376}, {116,BLOCK/8}, {120,BLOCK/INODE_SIZE},
+        {160,im->cgsize}, {184,IPG}, {188,im->fpg}, {1320,120},
+        {1372,0x19540119}
+    };
+    size_t i;
+
+    /* Publish the canonical 64-bit inode and address geometry. */
+    for (i = 0; i < sizeof(fields)/sizeof(fields[0]); i++)
+        p32(s + fields[i].offset, fields[i].value);
+    p64(s + 1000, 65536);
+    p64(s + 1080, im->fragments);
+    p64(s + 1088, im->fragments - im->ncg * DBLK);
+    p64(s + 1096, DBLK);
+    p64(s + 1328, UINT64_C(0x7fffffffffffffff));
+    memcpy(s + 144, "zedBSD\001", 8);
+    s[209] = 1;
+}
 static void finish_dirs(struct image *im){
     uint32_t parent[MAX_INODES]={0};parent[2]=2;for(uint32_t ino=2;ino<MAX_INODES;ino++)for(size_t j=0;j<im->nodes[ino].n;j++)if(im->nodes[ino].v[j].type==4)parent[im->nodes[ino].v[j].ino]=ino;
     for(uint32_t ino=2;ino<MAX_INODES;ino++){struct node *node=&im->nodes[ino];if(!node->mode)continue;size_t cap=1024,len=0,last=(size_t)-1;uint8_t *dir=calloc(1,cap);size_t total=node->n+2;for(size_t j=0;j<total;j++){const char *name=j==0?".":j==1?"..":node->v[j-2].name;uint32_t target=j==0?ino:j==1?parent[ino]:node->v[j-2].ino;uint8_t type=j<2?4:node->v[j-2].type;size_t nl=strlen(name),minimum=(8+nl+3)&~3U,within=len%512;if(within+minimum>512){p16(dir+last+4,512-(last%512));size_t pad=512-within;if(len+pad>cap){cap*=2;dir=realloc(dir,cap);memset(dir+len,0,cap-len);}len+=pad;last=(size_t)-1;}while(len+minimum>cap){size_t old=cap;cap*=2;dir=realloc(dir,cap);memset(dir+old,0,cap-old);}memset(dir+len,0,minimum);p32(dir+len,target);p16(dir+len+4,minimum);dir[len+6]=type;dir[len+7]=nl;memcpy(dir+len+8,name,nl);last=len;len+=minimum;}if(last!=(size_t)-1){p16(dir+last+4,512-(last%512));if(len%512){size_t end=(len+511)&~511U;while(end>cap){size_t old=cap;cap*=2;dir=realloc(dir,cap);memset(dir+old,0,cap-old);}memset(dir+len,0,end-len);len=end;}}
@@ -71,9 +94,130 @@ static void finish_dirs(struct image *im){
     }
 }
 static void finish_cg(struct image *im){uint32_t totals[4]={0};for(uint32_t ci=0;ci<im->ncg;ci++){uint32_t base=cg_base(im,ci),nd=cg_ndblk(im,ci);uint8_t *cg=im->data+(base+CBLK)*FRAG;unsigned ndir=0,nifree=0,nbfree=0,nffree=0;for(unsigned i=0;i<IPG;i++){if(im->used_ino[ci][i]){if(ci*IPG+i<MAX_INODES&&im->nodes[ci*IPG+i].mode)ndir++;cg[168+i/8]|=1U<<(i&7);}else nifree++;}for(uint32_t f=0;f<nd;f++)if(!im->used_frag[ci][f])cg[200+f/8]|=1U<<(f&7);for(uint32_t f=0;f+8<=nd;f+=8){int all=1;for(unsigned j=0;j<8;j++)if(im->used_frag[ci][f+j])all=0;if(all)nbfree++;}unsigned freec=0;for(uint32_t f=0;f<nd;f++)if(!im->used_frag[ci][f])freec++;nffree=freec-nbfree*8;struct{int o;uint32_t v;}v[]={{4,0x090255},{12,ci},{20,nd},{24,ndir},{28,nbfree},{32,nifree},{36,nffree},{92,168},{96,200},{100,im->cgsize},{116,IPG},{120,IPG}};for(size_t i=0;i<sizeof(v)/sizeof(v[0]);i++)p32(cg+v[i].o,v[i].v);totals[0]+=ndir;totals[1]+=nbfree;totals[2]+=nifree;totals[3]+=nffree;}
-    uint8_t *s=im->data+8192;for(int i=0;i<4;i++)p32(s+192+4*i,totals[i]);for(uint32_t ci=1;ci<im->ncg;ci++)memcpy(im->data+(cg_base(im,ci)+SBLK)*FRAG,s,8192);
+    uint8_t *s=im->data+65536;for(int i=0;i<4;i++)p64(s+1008+8*i,totals[i]);for(uint32_t ci=1;ci<im->ncg;ci++)memcpy(im->data+(cg_base(im,ci)+SBLK)*FRAG,s,8192);
 }
-static void create_ufs(const char *root,const char *out,size_t size){struct image im={0};if(size<4*1024*1024||size%FRAG)fail("bad UFS1 size");im.size=size;im.data=calloc(1,size);if(!im.data)die("calloc image");im.fragments=size/FRAG;im.ncg=DEFAULT_CYLINDER_GROUPS;im.fpg=((im.fragments+im.ncg-1U)/im.ncg+7U)&~7U;if((im.ncg-1U)*im.fpg>=im.fragments)fail("bad UFS1 cylinder groups");im.cgsize=200+(im.fpg+7)/8;if(im.cgsize>BLOCK)fail("cylinder group bitmap too large");for(uint32_t cg=0;cg<im.ncg;cg++){uint32_t nd=cg_ndblk(&im,cg);im.cg_next[cg]=DBLK;im.used_frag[cg]=calloc(im.fpg,1);if(!im.used_frag[cg])die("calloc fragment map");for(uint32_t i=0;i<DBLK&&i<nd;i++)im.used_frag[cg][i]=1;}im.used_ino[0][0]=im.used_ino[0][1]=im.used_ino[0][2]=1;im.next_ino=3;im.nodes[2].mode=0755;superblock(&im);write_inode(&im,2,IFDIR|0755,2,0,NULL,0);add_tree(&im,root,2);if(!child_dir(&im,2,"etc")){uint32_t etc=add_dir(&im,2,"etc",0755);static const uint8_t marker[]="zedBSD ufs1 root v1\n";add_file_data(&im,etc,"zedbsd-root",marker,sizeof(marker)-1,0644);}finish_dirs(&im);finish_cg(&im);FILE*f=fopen(out,"wb");if(!f)die(out);if(fwrite(im.data,1,size,f)!=size)die(out);if(fclose(f))die(out);}
+/* Computes the existing persistence locator digest. */
+static uint32_t
+ufs_digest(const uint8_t *bytes, size_t length)
+{
+    uint32_t value = UINT32_C(2166136261);
+    size_t i;
+
+    /* Preserve the version-one checksum representation. */
+    for (i = 0; i < length; i++) {
+        value ^= bytes[i];
+        value *= UINT32_C(16777619);
+    }
+    return value;
+}
+
+/* Writes optional journal and inactive snapshot records in a separate tail. */
+static void
+ufs_tail(struct image *im)
+{
+    uint64_t end = (uint64_t)im->fragments * 2;
+    uint64_t cursor = end + 257;
+    uint8_t *record = im->data + end * 512;
+
+    /* Initialize both locators and the inactive snapshot control. */
+    memcpy(record, "ZUJ2", 4);
+    p32(record + 4, 2); p32(record + 8, 256); p64(record + 12, end);
+    p32(record + 24, ufs_digest(record, 24));
+    record = im->data + cursor * 512;
+    memcpy(record, "ZSL1", 4);
+    p32(record + 4, 1); p32(record + 8, 2049);
+    p64(record + 16, cursor); p64(record + 24, end);
+    p32(record + 32, ufs_digest(record, 32));
+    record += 512;
+    memcpy(record, "ZSN1", 4);
+    p32(record + 4, 1); p32(record + 16, 1024); p64(record + 24, end);
+    p32(record + 32, ufs_digest(record, 32));
+}
+
+/* Builds one bounded image with the selected explicit persistence profile. */
+static void
+create_ufs(const char *root, const char *out, size_t size, int profile)
+{
+    struct image im = {0};
+    uint32_t cg, nd, i, etc;
+    size_t child;
+    int marker_found;
+    FILE *file;
+    static const uint8_t marker[] = "zedBSD ufs root v1\n";
+
+    /* Reject sizes before narrowing counts or allocating the host image. */
+    if (size < 4U*1024U*1024U || size > UINT64_C(2147482624) || size % FRAG)
+        fail("bad UFS size");
+    im.size = size;
+    im.data = calloc(1, size);
+    if (!im.data)
+        die("calloc image");
+    im.fragments = (size - (profile ? 2307U*512U : 0U)) / FRAG;
+    im.ncg = DEFAULT_CYLINDER_GROUPS;
+
+    /* Expand the group count while keeping each bitmap within one block. */
+    for (;;) {
+        im.fpg = ((im.fragments + im.ncg - 1U) / im.ncg + 7U) & ~7U;
+        im.cgsize = 200U + (im.fpg + 7U) / 8U;
+        if (im.cgsize <= BLOCK)
+            break;
+        im.ncg++;
+        if (im.ncg > MAX_GROUPS)
+            fail("too many UFS cylinder groups");
+    }
+    if (im.fragments - (im.ncg - 1U)*im.fpg <= DBLK)
+        fail("UFS final group has no data space");
+
+    /* Reserve metadata in every cylinder group. */
+    for (cg = 0; cg < im.ncg; cg++) {
+        nd = cg_ndblk(&im, cg);
+        im.cg_next[cg] = DBLK;
+        im.used_frag[cg] = calloc(im.fpg, 1);
+        if (!im.used_frag[cg])
+            die("calloc fragment map");
+        for (i = 0; i < DBLK && i < nd; i++)
+            im.used_frag[cg][i] = 1;
+    }
+    im.used_ino[0][0] = im.used_ino[0][1] = im.used_ino[0][2] = 1;
+    im.next_ino = 3;
+    im.nodes[2].mode = 0755;
+    superblock(&im);
+    write_inode(&im, 2, IFDIR|0755, 2, 0, NULL, 0);
+    add_tree(&im, root, 2);
+
+    /* Add the root marker even when the source already has an etc directory. */
+    etc = child_dir(&im, 2, "etc");
+    if (!etc)
+        etc = add_dir(&im, 2, "etc", 0755);
+    marker_found = 0;
+    for (child = 0; child < im.nodes[etc].n; child++) {
+        if (!strcmp(im.nodes[etc].v[child].name, "zedbsd-root"))
+            marker_found = 1;
+    }
+    if (!marker_found)
+        add_file_data(&im, etc, "zedbsd-root", marker, sizeof(marker)-1, 0644);
+    finish_dirs(&im);
+    finish_cg(&im);
+    if (profile)
+        ufs_tail(&im);
+
+    /* Write the completed image and release all host allocations. */
+    file = fopen(out, "wb");
+    if (!file)
+        die(out);
+    if (fwrite(im.data, 1, size, file) != size)
+        die(out);
+    if (fclose(file))
+        die(out);
+    for (cg = 0; cg < im.ncg; cg++)
+        free(im.used_frag[cg]);
+    for (i = 0; i < MAX_INODES; i++) {
+        for (child = 0; child < im.nodes[i].n; child++)
+            free(im.nodes[i].v[child].name);
+        free(im.nodes[i].v);
+    }
+    free(im.data);
+}
 
 static uint32_t crc32_more(uint32_t crc,const uint8_t *p,size_t n){crc^=0xffffffffU;while(n--){crc^=*p++;for(int j=0;j<8;j++)crc=(crc>>1)^((crc&1)?0xedb88320U:0);}return crc^0xffffffffU;}
 static uint8_t *read_all(const char *path,size_t *size){struct stat st;if(stat(path,&st))die(path);FILE*f=fopen(path,"rb");if(!f)die(path);uint8_t*p=malloc(st.st_size?st.st_size:1);if(!p)die("malloc");if(st.st_size&&fread(p,1,st.st_size,f)!=(size_t)st.st_size)die(path);fclose(f);*size=st.st_size;return p;}
@@ -215,4 +359,22 @@ static void disk_create_variant(struct diskopt *o){
     o->layout=NULL;o->gpt=!strcmp(layout,"hybrid");disk_create(o);o->layout=layout;
 }
 static void parse_disk(int argc,char **argv){struct diskopt o={.size_mib=129,.fat_mib=128};for(int i=2;i<argc;i++){char*a=argv[i];if(!strcmp(a,"--gpt"))o.gpt=1;else if(!strcmp(a,"--force"))o.force=1;else if(!strcmp(a,"--fragment-kernel"))o.fragment_kernel=1;else if(!strcmp(a,"--machine")&&++i<argc)o.machine=argv[i];else if(!strcmp(a,"--stage1")&&++i<argc)o.stage1=argv[i];else if(!strcmp(a,"--stage2")&&++i<argc)o.stage2=argv[i];else if(!strcmp(a,"--partition-pbr")&&++i<argc)o.pbr=argv[i];else if(!strcmp(a,"--bootzbsd")&&++i<argc)o.bootzbsd=argv[i];else if(!strcmp(a,"--kernel")&&++i<argc)o.kernel=argv[i];else if(!strcmp(a,"--bootx64")&&++i<argc)o.bootx64=argv[i];else if(!strcmp(a,"--zedbsd-config")&&++i<argc)o.zedbsd_config=argv[i];else if(!strcmp(a,"--arch-image")&&++i<argc)o.arch=argv[i];else if(!strcmp(a,"--data-image")&&++i<argc)o.data=argv[i];else if(!strcmp(a,"--swapfile")&&++i<argc)o.swap=argv[i];else if(!strcmp(a,"--ufs-root")&&++i<argc)o.ufs_root=argv[i];else if(!strcmp(a,"--layout")&&++i<argc)o.layout=argv[i];else if(!strcmp(a,"--size-mib")&&++i<argc)o.size_mib=parse_positive_int(argv[i],"invalid disk size");else if(!strcmp(a,"--fat-size-mib")&&++i<argc)o.fat_mib=parse_positive_int(argv[i],"invalid FAT size");else if((!strcmp(a,"--checker")||!strcmp(a,"--arch-profile")||!strcmp(a,"--arch-format"))&&++i<argc){}else if(a[0]!='-')o.output=a;else fail("unsupported disk argument");}if(o.layout&&o.size_mib==129&&o.fat_mib==128){o.size_mib=177;o.fat_mib=176;}disk_create(&o);}
-int main(int argc,char **argv){if(argc>=2&&!strcmp(argv[1],"ufs")){if(argc!=5)fail("usage: zedimage-host ufs SIZE ROOT OUTPUT");char *end;unsigned long long size=strtoull(argv[2],&end,0);if(*end)fail("invalid size");create_ufs(argv[3],argv[4],(size_t)size);return 0;}if(argc>=2&&!strcmp(argv[1],"disk")){parse_disk(argc,argv);return 0;}fail("usage: zedimage-host ufs|disk ...");return 1;}
+int main(int argc,char **argv)
+{
+    uint64_t size;
+    int profile;
+    if(argc>=2&&!strcmp(argv[1],"ufs")) {
+        if(argc!=5&&argc!=6)
+            fail("usage: zedimage-host ufs SIZE ROOT OUTPUT [--profile=journal-snapshot]");
+        profile=argc==6;
+        if(profile&&strcmp(argv[5],"--profile=journal-snapshot"))
+            fail("unsupported UFS profile");
+        size=parse_u64(argv[2],"invalid UFS size");
+        if(size>SIZE_MAX||size>UINT64_C(2147482624))
+            fail("UFS image exceeds producer limit");
+        create_ufs(argv[3],argv[4],(size_t)size,profile);
+        return 0;
+    }
+    if(argc>=2&&!strcmp(argv[1],"disk")){parse_disk(argc,argv);return 0;}
+    fail("usage: zedimage-host ufs|disk ...");return 1;
+}
