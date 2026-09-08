@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef LIBC__X11_XLIB_H
+#ifndef LIBC_X11_XLIB_H
 #define LIBC_X11_XLIB_H
 
 #include <X11/X.h>

@@ -109,7 +109,7 @@ static int lower_hex_value(unsigned char, unsigned *);
 static int record_fixed_hex(struct networkd_wifi_record_cursor *, size_t, unsigned char);
 static int record_u32_hex(struct networkd_wifi_record_cursor *, unsigned char, uint32_t *);
 static int record_ssid_hex(struct networkd_wifi_record_cursor *, const unsigned char *, size_t, int *);
-static int parse_scan_record(const unsigned char *, size_t, uint32_t *, unsigned *);
+static int parse_scan_record(const unsigned char *, size_t, uint32_t *, unsigned *, uint64_t *);
 static int parse_bss_record(const unsigned char *, size_t, unsigned, const unsigned char *, size_t, int *, int *);
 static int parse_positive_decimal(const unsigned char *, size_t, int *);
 static int contains_bytes(const void *, size_t, const void *, size_t);
@@ -288,6 +288,7 @@ networkd_wifi_child_parse_list(
 	size_t record_length;
 	size_t offset;
 	uint32_t scan_state;
+	uint64_t snapshot_generation;
 	unsigned bss_count;
 	unsigned bss_index;
 	int machine_error;
@@ -337,7 +338,8 @@ networkd_wifi_child_parse_list(
 		record,
 		record_length,
 		&scan_state,
-		&bss_count);
+		&bss_count,
+		&snapshot_generation);
 	if (function_result != 0) {
 		errno = NETWORKD_WIFI_CHILD_MALFORMED;
 		return -1;
@@ -392,6 +394,7 @@ networkd_wifi_child_parse_list(
 
 	/* Publishes the exact scan-state classification after full validation. */
 	parsed->scan_state = scan_state;
+	parsed->snapshot_generation = snapshot_generation;
 	parsed->scan_complete = scan_state == WLAN_SCAN_COMPLETE;
 	parsed->scan_terminal = scan_state == WLAN_SCAN_COMPLETE ||
 	    scan_state == WLAN_SCAN_CANCELLED ||
@@ -1471,7 +1474,8 @@ parse_scan_record(
 	const unsigned char *record,
 	size_t record_length,
 	uint32_t *scan_state,
-	unsigned *bss_count)
+	unsigned *bss_count,
+	uint64_t *snapshot_generation)
 {
 	struct networkd_wifi_record_cursor cursor;
 	uint64_t state;
@@ -1483,7 +1487,8 @@ parse_scan_record(
 	int function_result;
 
 	/* Initializes a counted cursor over exactly one record. */
-	if (record == NULL || scan_state == NULL || bss_count == NULL)
+	if (record == NULL || scan_state == NULL || bss_count == NULL ||
+	    snapshot_generation == NULL)
 		return NETWORKD_WIFI_CHILD_MALFORMED;
 	cursor.bytes = record;
 	cursor.length = record_length;
@@ -1542,6 +1547,7 @@ parse_scan_record(
 		return NETWORKD_WIFI_CHILD_MALFORMED;
 	*scan_state = (uint32_t)state;
 	*bss_count = (unsigned)results;
+	*snapshot_generation = generation;
 
 	/* Reports one complete canonical scan record. */
 	return 0;

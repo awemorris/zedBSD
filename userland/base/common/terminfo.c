@@ -11,7 +11,7 @@
  * Implements shared userland terminfo support.
  */
 
-#include "userland/base/common/terminfo.h"
+#include <terminfo.h>
 
 #include <ctype.h>
 #include <errno.h>

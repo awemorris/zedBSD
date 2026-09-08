@@ -20,5 +20,7 @@ main(void)
 		return 1;
 	if (strcmp(strerror(ETIMEDOUT), "Connection timed out") != 0)
 		return 1;
+	if (strcmp(strerror(ECONNRESET), "Connection reset by peer") != 0)
+		return 1;
 	return 0;
 }

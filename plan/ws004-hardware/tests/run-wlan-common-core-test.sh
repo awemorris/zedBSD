@@ -11,10 +11,10 @@ cc=${CC:-cc}
 host_includes="-I$test_dir/host-include -I$repo_root/include/uapi -I$repo_root/include -I$repo_root/src"
 abi_includes="-I$repo_root/libc/include -I$repo_root/include/uapi -I$repo_root/include -I$repo_root/src"
 warnings="-std=c11 -Wall -Wextra -Werror"
-sources="$repo_root/src/kern/net/wlan.c $repo_root/src/kern/net/wlan-frame.c \
-$repo_root/src/kern/net/wlan-crypto.c \
-$repo_root/src/kern/net/wlan-wpa2-codec.c \
-$repo_root/src/kern/net/wlan-wpa2.c $repo_root/src/kern/net/wlan-l2.c"
+sources="$repo_root/src/kern/net/wifi/wlan.c $repo_root/src/kern/net/wifi/wlan-frame.c \
+$repo_root/src/kern/net/wifi/wlan-crypto.c \
+$repo_root/src/kern/net/wifi/wlan-wpa2-codec.c \
+$repo_root/src/kern/net/wifi/wlan-wpa2.c $repo_root/src/kern/net/wifi/wlan-l2.c"
 fixture="$test_dir/wlan-common-core-test.c"
 layout="$test_dir/wlan-uapi-layout-test.c"
 

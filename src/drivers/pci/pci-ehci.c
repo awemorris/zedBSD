@@ -352,6 +352,37 @@ static int ehci_runtime_operational(struct ehci_controller *controller);
 static int ehci_attach(struct drv_pci_device *device, const struct drv_pci_id *id);
 static int ehci_detach(struct drv_pci_device *device, unsigned flags);
 
+/* Device operation and registration tables. */
+static const struct drv_usb_hcd_ops ehci_ops = {
+	.start = ehci_start,
+	.quiesce = ehci_quiesce,
+	.stop = ehci_stop,
+	.urb_enqueue = ehci_urb_enqueue,
+	.urb_dequeue = ehci_urb_dequeue,
+	.endpoint_enable = ehci_endpoint_enable,
+	.endpoint_disable = ehci_endpoint_disable,
+	.endpoint_reset = ehci_endpoint_reset,
+	.frame_number = ehci_frame_number,
+	.root_hub_status = ehci_root_status,
+	.root_hub_control = ehci_root_control
+};
+
+static const struct drv_pci_id ehci_ids[] = {
+	{
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		0x0c0320U, 0xffffffU, 0
+	}
+};
+
+static struct drv_pci_driver ehci_driver = {
+	.name = "ehci",
+	.ids = ehci_ids,
+	.id_count = 1,
+	.attach = ehci_attach,
+	.detach = ehci_detach
+};
+
 /*
  * Registers this driver with the PCI bus.
  */
@@ -5476,33 +5507,3 @@ ehci_detach(
 /*
  * EHCI
  */
-
-static const struct drv_usb_hcd_ops ehci_ops = {
-	.start = ehci_start,
-	.quiesce = ehci_quiesce,
-	.stop = ehci_stop,
-	.urb_enqueue = ehci_urb_enqueue,
-	.urb_dequeue = ehci_urb_dequeue,
-	.endpoint_enable = ehci_endpoint_enable,
-	.endpoint_disable = ehci_endpoint_disable,
-	.endpoint_reset = ehci_endpoint_reset,
-	.frame_number = ehci_frame_number,
-	.root_hub_status = ehci_root_status,
-	.root_hub_control = ehci_root_control
-};
-
-static const struct drv_pci_id ehci_ids[] = {
-	{
-		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-		0x0c0320U, 0xffffffU, 0
-	}
-};
-
-static struct drv_pci_driver ehci_driver = {
-	.name = "ehci",
-	.ids = ehci_ids,
-	.id_count = 1,
-	.attach = ehci_attach,
-	.detach = ehci_detach
-};

@@ -5,6 +5,12 @@
  * SPDX-License-Identifier: Zlib
  */
 
+/*
+ * XXX:
+ *  - Describe what this is for.
+ *  - If it is not used, just remove.
+ */
+
 #ifndef LIBC_ZEDBSD_LOCALE_FORMAT_H
 #define LIBC_ZEDBSD_LOCALE_FORMAT_H
 
@@ -99,7 +105,7 @@ enum zedbsd_locale_key {
 	ZEDBSD_LOCALE_KEY_##name,
 	ZEDBSD_LOCALE_KEYS(ZEDBSD_LOCALE_ENUM)
 #undef ZEDBSD_LOCALE_ENUM
-	    ZEDBSD_LOCALE_KEY_COUNT
+	ZEDBSD_LOCALE_KEY_COUNT
 };
 
 static inline uint32_t

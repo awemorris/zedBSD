@@ -1,14 +1,16 @@
 # WS025: I/O・キャッシュ・物理メモリ管理の段階的再設計
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 WSID: `ws025`
 
-Status: mandatory p001–p026 completed; p031 in-progress; 必須 p001–p026 と依存 WS024 完了。q122 の統合受け入れ・既定設定・性能観測まで完了。条件付き p027–p030 は採用条件未成立のため今回は見送り、再開条件を記録した planned とする。実機 gate はユーザー判断によるクリア扱い。
+Status: mandatory p001–p026 completed; p031 uncleared; p032–p035 completed; q124 finished; 必須 p001–p026 と依存 WS024 完了。q122 の統合受け入れ・既定設定・性能観測まで完了。条件付き p027–p030 は採用条件未成立のため今回は見送り、再開条件を記録した planned とする。実機 gate はユーザー判断によるクリア扱い。
 
 Parent: [master plan](../master.md)
 
-追加計画: [p031 ドライバ配置・命名・規約統一](phase031-driver-layout-style/phase.md) は構成合意済み・q123 で実行中。p027–p030 に先行する。q122 の完了記録は維持し、追加 Phase は未完了として扱う。
+追加計画: [p031 ドライバ配置・命名・規約統一](phase031-driver-layout-style/phase.md) は構成合意済み・q123 は uncleared で終了。p027–p030 に先行する。q122 の完了記録は維持し、追加 Phase は未完了として扱う。
+
+追加実行 (2026-09-09): p032 は通常 PC98 overlay/native の永続化・正常停止、loader 16/16、PCAT/amd64 build/login を確認し completed。q124 は p033 AX211 の自動接続・DHCP・復旧を実行中。
 
 ## 目的と承認済みの判断
 
@@ -92,6 +94,7 @@ p001 は q088 で completed（[results](phase001-baseline-contracts/results.md)�
 | [p029](phase029-uas/phase.md) | 条件付き: UAS driver | p019/p024、対応実機と descriptor |
 | [p030](phase030-imod-measurement/phase.md) | 条件付き: IMOD 実機比較・設定判断 | p009/p025、対応実機 |
 | [p031](phase031-driver-layout-style/phase.md) | ドライバ配置・統合・drv_命名・coding-style適用、mkfs独立化とコマンド整理 | p026。p027–p030 の実装に先行 |
+| [p032](phase032-pc98-boot-regression/phase.md) | PC-98 QEMU 起動回帰の再現・原因修正・通常起動と操作の受け入れ | 現行リファクタリング済みツリー。残りの機能 Phase に先行 |
 
 ## 実装 wave と中間完了点
 
@@ -148,3 +151,17 @@ p025–p026 and explicit conditional adoption decisions remain.
 ホスト／sanitizer、14 RAM構成、USB/NVMe、媒体交換、終了、FS50/Wi-Fi30が合格。
 通常artifactへ復帰済み。旧journal v1互換は維持せず、ZUJ2 v2に統一。
 前掲のq105等の「次」「残り」は履歴であり、この節と先頭Statusを最終状態とする。
+
+## 2026-09-09 回帰修正 queue
+
+q123 は p031 uncleared で終了。q124 で p032 を完了し、[p033 AX211 自動接続・DHCP](phase033-ax211-wifi-dhcp-regression/phase.md) を第二項目として実行中。p031 の残件判定と p027–p030 より回帰修正を優先する。
+
+2026-09-09 追加: q124 に [p034](phase034-ax211-operation-recovery/phase.md) を追加（pending、最新依頼で実行承認済み）。AX211 の直接 up/down/connect 反復後の無限エラーを再現・修正する。p033 実機試験後に実行。
+
+q124 進捗: p033 DHCP 復旧中に AX211 の反復 rollback エラーを実機再現したため、p034 を in-progress として原因修正を先行する。p033 は受け入れ未完了のまま保持する。
+
+追加依頼: q124 に [p035](phase035-multi-radio-selection/phase.md) を追加（pending、実行承認済み）。AX211＋RTL8822BU の同時自動接続と遅延を確認・修正する。p034 反復試験後に開始。
+
+q124 最新: p032–p034 completed、p035 in-progress。2 seed のAX211実機反復とDHCP/取消し復旧の全gate完了。追加の複数無線 baseline を実行する。
+
+q124 最終: p032–p035 completed / finished。[p035結果](phase035-multi-radio-selection/results.md)：二台の両操作順序・反復・取消し復旧、AX211単独反復、36 storiesと3 architecture build完了。OFFER/bound観測約40秒→約6.5秒（同一enable→鍵登録系列）。firmware assert自体は残存事項として分離した。

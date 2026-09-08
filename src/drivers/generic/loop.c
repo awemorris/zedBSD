@@ -68,6 +68,17 @@ static int loop_ioctl(struct disk *disk, unsigned long request, void *argument);
 static int loop_submit(struct disk *disk, struct bio *bio);
 
 /*
+ * Loopback Device
+ */
+
+static const struct disk_ops loop_disk_ops = {
+	.open = loop_open,
+	.close = loop_close,
+	.submit = loop_submit,
+	.ioctl = loop_ioctl,
+};
+
+/*
  * Implements the drv loop init operation.
  */
 int
@@ -825,15 +836,3 @@ loop_submit(
 	/* Succeeded. */
 	return 0;
 }
-
-/*
- * Loopback Device
- */
-
-static const struct disk_ops loop_disk_ops = {
-	.open = loop_open,
-	.close = loop_close,
-	.submit = loop_submit,
-	.ioctl = loop_ioctl,
-};
-

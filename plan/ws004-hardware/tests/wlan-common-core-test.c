@@ -829,6 +829,7 @@ scan_drive_to_dwell(struct wlan_station *station, struct fake_radio *fake,
 	assert(fake->management_frame[26] == 1U &&
 	    fake->management_frame[27] == 4U);
 	assert(fake->management_deadline == fake->now + WLAN_SCAN_DWELL_TICKS);
+	assert(wlan_station_report_scan_channel_complete(station, generation, 0U) == EINVAL);
 }
 
 static void
@@ -1444,6 +1445,103 @@ test_deferred_stop(void)
 }
 
 static void
+test_offloaded_scan(void)
+{
+	struct net_device device;
+	struct fake_radio fake;
+	struct wlan_station *station;
+	struct wlan_scan_profile profile;
+	struct wlan_scan_request scan;
+	struct wlan_scan_status_request status;
+	uint64_t generation;
+
+	memset(&device, 0, sizeof(device));
+	memset(&fake, 0, sizeof(fake));
+	memcpy(device.name, "wlan0", 6U);
+	device.flags = NET_DEVICE_UP;
+	device.hwaddr_len = 6U;
+	device.hwaddr[0] = 2U;
+	memcpy(fake.hwaddr, device.hwaddr, 6U);
+	fake.now = 100U;
+	profile = test_scan_profile;
+	profile.channels[0].flags = WLAN_SCAN_CHANNEL_OFFLOADED_DWELL;
+	profile.channel_count = 2U;
+	profile.channels[1] = profile.channels[0];
+	profile.channels[1].channel = 1U;
+	profile.channels[1].center_frequency_mhz = 2412U;
+	assert(wlan_station_test_attach(&device, &fake_ops, &fake,
+	    &profile, fake_clock, &fake, &station) == 0);
+	fake.station = station;
+	assert(wlan_station_open(station) == 0);
+
+	/* READY is admission only; matching firmware completion ends dwell. */
+	request_header(&scan, sizeof(scan), "wlan0");
+	scan.action = WLAN_SCAN_START;
+	assert(wlan_station_ioctl(&device, SIOCSWLANSCAN, &scan) == 0);
+	generation = scan.generation;
+	wlan_timer_run(fake.now);
+	assert(wlan_station_report_scan_channel_complete(station, generation, 0U) == ESTALE);
+	assert(wlan_station_report_scan_channel_ready(station, generation, 0U) == 0);
+	assert(wlan_station_report_scan_channel_complete(station, generation + 1U, 0U) == ESTALE);
+	assert(wlan_station_report_scan_channel_complete(station, generation, 1U) == ESTALE);
+	assert(wlan_station_report_scan_channel_complete(station, generation, 0U) == 0);
+	wlan_timer_run(fake.now);
+	wlan_timer_run(fake.now);
+	assert(fake.scan_start_calls == 2U && fake.scan_stop_calls == 0U);
+	assert(wlan_station_report_scan_channel_complete(station, generation, 0U) == ESTALE);
+	assert(wlan_station_report_scan_channel_ready(station, generation, 1U) == 0);
+	wlan_timer_run(fake.now);
+	assert(wlan_station_report_scan_channel_complete(station, generation, 1U) == 0);
+	fake.scan_stop_error = EBUSY;
+	wlan_timer_run(fake.now);
+	request_header(&status, sizeof(status), "wlan0");
+	assert(wlan_station_ioctl(&device, SIOCGWLANSCAN, &status) == 0);
+	assert(status.state == WLAN_SCAN_RUNNING);
+	assert(fake.management_calls == 0U);
+	assert(fake.scan_stop_calls == 1U);
+	assert(!wlan_work_pending());
+	fake.scan_stop_error = 0;
+	fake.now += 100U;
+	wlan_timer_run(fake.now);
+	assert(wlan_station_ioctl(&device, SIOCGWLANSCAN, &status) == 0);
+	assert(status.state == WLAN_SCAN_COMPLETE);
+	assert(wlan_station_report_scan_channel_complete(station, generation, 0U) == ESTALE);
+
+	/* No completion event must fail instead of publishing an empty success. */
+	scan.action = WLAN_SCAN_START;
+	assert(wlan_station_ioctl(&device, SIOCSWLANSCAN, &scan) == 0);
+	wlan_timer_run(fake.now);
+	assert(wlan_station_report_scan_channel_ready(station, scan.generation, 0U) == 0);
+	wlan_timer_run(fake.now);
+	fake.now += WLAN_SCAN_DWELL_TICKS;
+	wlan_timer_run(fake.now);
+	assert(wlan_station_ioctl(&device, SIOCGWLANSCAN, &status) == 0);
+	assert(status.state == WLAN_SCAN_RUNNING);
+	fake.now += WLAN_SCAN_OFFLOAD_DEADLINE_TICKS;
+	wlan_timer_run(fake.now);
+	assert(wlan_station_ioctl(&device, SIOCGWLANSCAN, &status) == 0);
+	assert(status.state == WLAN_SCAN_FAILED && status.terminal_error == ETIMEDOUT);
+
+	/* Cancellation rejects the late event and a restart uses a new token. */
+	scan.action = WLAN_SCAN_START;
+	assert(wlan_station_ioctl(&device, SIOCSWLANSCAN, &scan) == 0);
+	generation = scan.generation;
+	wlan_timer_run(fake.now);
+	assert(wlan_station_report_scan_channel_ready(station, generation, 0U) == 0);
+	scan.action = WLAN_SCAN_STOP;
+	assert(wlan_station_ioctl(&device, SIOCSWLANSCAN, &scan) == 0);
+	assert(wlan_station_report_scan_channel_complete(station, generation, 0U) == ESTALE);
+	wlan_timer_run(fake.now);
+	scan.action = WLAN_SCAN_START;
+	assert(wlan_station_ioctl(&device, SIOCSWLANSCAN, &scan) == 0);
+	assert(scan.generation != generation);
+	assert(wlan_station_report_scan_channel_complete(station, generation, 0U) == ESTALE);
+	assert(wlan_station_detach(station) == 0);
+	assert(net_device_reference_balance == 0);
+	puts("wlan offloaded dwell: early/stale completion, stop barrier, missing event PASS");
+}
+
+static void
 test_core(void)
 {
 	static const uint8_t target[] = { 'n', 'e', 't' };
@@ -1730,8 +1828,11 @@ test_core(void)
 	bss = make_bss(2U, target, sizeof(target), -30);
 	assert(wlan_station_report_scan_bss(station, first_scan_generation,
 	    &bss) == 0);
+	/* Multiple received BSS records share a tick within the dwell window. */
+	fake.now++;
 	for (index = 3U; index <= 64U; index++) {
-		fake.now++;
+		if (index == 4U)
+			fake.now++;
 		bss = make_bss((uint8_t)index, filler, sizeof(filler), -100);
 		assert(wlan_station_report_scan_bss(station,
 		    first_scan_generation, &bss) == 0);
@@ -2120,6 +2221,9 @@ test_core(void)
 	assert(unsupported.management_calls == 0U);
 	unsupported.now += WLAN_SCAN_DWELL_TICKS;
 	wlan_timer_run(unsupported.now);
+	assert(unsupported.scan_start_calls == 1U);
+	unsupported.now += WLAN_SCAN_PASSIVE_DWELL_TICKS - WLAN_SCAN_DWELL_TICKS;
+	wlan_timer_run(unsupported.now);
 	assert(unsupported.scan_steps[1] == 1U &&
 	    unsupported.scan_channels[1] == 14U);
 	assert(wlan_station_report_scan_channel_ready(unsupported_station,
@@ -2299,9 +2403,12 @@ test_core(void)
 int
 main(void)
 {
+	/* Active software scan must not spend a full second per channel. */
+	assert(WLAN_SCAN_DWELL_TICKS <= 20U);
 	test_frame_parser();
 	wlan_core_init();
 	test_deferred_stop();
+	test_offloaded_scan();
 	test_core();
 	assert(wlan_station_shutdown_all() == 0);
 	return 0;

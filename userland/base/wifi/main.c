@@ -627,7 +627,7 @@ search_command(int descriptor, const char *interface,
 	return error;
 }
 
-/* Changes only the existing generic administrative interface state. */
+/* Reconciles explicit administrative intent with the radio lifecycle. */
 static int
 interface_command(int descriptor, const char *interface,
 	size_t interface_length, int bring_up)
@@ -644,17 +644,46 @@ interface_command(int descriptor, const char *interface,
 	error = ioctl_error(descriptor, SIOCGIFFLAGS, &request);
 	if (error != 0)
 		return error;
+	/* A checked driver retirement can leave the generic administrative hold up. */
+	if (bring_up && (request.ifr_flags & IFF_UP) != 0) {
+		/* Do not claim or reopen an epoch still owned by retirement. */
+		error = status_request(descriptor, interface, interface_length, &status);
+		if (error != 0)
+			return error;
+		if (status.stop_flags != 0U)
+			return EBUSY;
+
+		/* Recycle only a stopped radio; repeated up preserves a live link. */
+		if (!status.administrative_up) {
+			request.ifr_flags &= (int)~IFF_UP;
+			error = ioctl_error(descriptor, SIOCSIFFLAGS, &request);
+			if (error != 0)
+				return error;
+
+			/* A void close hook cannot by itself prove that hardware stopped. */
+			error = status_request(descriptor, interface, interface_length, &status);
+			if (error != 0)
+				return error;
+			if (status.stop_flags != 0U || status.administrative_up ||
+			    status.associated || status.key_installed || status.controlled_port)
+				return EBUSY;
+		}
+	}
+
+	/* Applies the requested state through the generic administrative owner. */
 	if (bring_up)
 		request.ifr_flags |= IFF_UP;
 	else
 		request.ifr_flags &= (int)~IFF_UP;
 	error = ioctl_error(descriptor, SIOCSIFFLAGS, &request);
-	/* Administrative down alone cannot prove a void driver close succeeded. */
-	if (error == 0 && !bring_up) {
+	/* Report success only after the radio confirms the requested state. */
+	if (error == 0) {
 		error = status_request(descriptor, interface, interface_length, &status);
 		if (error == 0 && (status.stop_flags & WLAN_STATUS_STOP_PENDING) != 0U)
 			error = EBUSY;
-		if (error == 0 && (status.administrative_up || status.associated ||
+		if (error == 0 && bring_up && !status.administrative_up)
+			error = ENETDOWN;
+		if (error == 0 && !bring_up && (status.administrative_up || status.associated ||
 		    status.key_installed || status.controlled_port))
 			error = EBUSY;
 	}
@@ -919,7 +948,10 @@ connect_command(int descriptor, const char *interface,
 				clear_bytes(&status, sizeof(status));
 				return 0;
 			}
-			if (!retryable_connect_error(error))
+			/* The daemon owns subsequent attempts after an admitted failure.
+			 * Starting a full scan here can outlive its child deadline and
+			 * cause the parent to cancel useful work repeatedly. */
+			if (wifi_machine || !retryable_connect_error(error))
 				goto out_cancel_connection;
 			attempt_error = error;
 			error = monotonic_ticks(&now, &frequency);

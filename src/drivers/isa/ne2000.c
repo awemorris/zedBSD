@@ -51,6 +51,16 @@ static void ne2000_write_data16(void *cookie, uint16_t value);
 static int ne2000_reset(void *cookie);
 static void ne2000_irq_handler(int irq, hal_irq_ack_t acknowledge, void *argument);
 
+/* Device operation and registration tables. */
+static const struct dp8390_bus_ops ne2000_bus_ops = {
+	.read_reg = ne2000_read_reg,
+	.write_reg = ne2000_write_reg,
+	.read_data8 = ne2000_read_data8,
+	.read_data16 = ne2000_read_data16,
+	.write_data16 = ne2000_write_data16,
+	.reset = ne2000_reset,
+};
+
 /*
  * Implements the drv pcat ne2000 init operation.
  */
@@ -303,12 +313,3 @@ ne2000_irq_handler(
 /*
  * ISA NE2000
  */
-
-static const struct dp8390_bus_ops ne2000_bus_ops = {
-	.read_reg = ne2000_read_reg,
-	.write_reg = ne2000_write_reg,
-	.read_data8 = ne2000_read_data8,
-	.read_data16 = ne2000_read_data16,
-	.write_data16 = ne2000_write_data16,
-	.reset = ne2000_reset,
-};

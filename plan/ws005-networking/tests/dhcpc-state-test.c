@@ -32,7 +32,6 @@ static int fixture_fsync(int);
 static int fixture_rename(const char *, const char *);
 static int fixture_unlink(const char *);
 static pid_t fixture_getpid(void);
-static int fixture_printf(const char *, ...);
 static char *fixture_strerror(int);
 static sighandler_t fixture_signal(int, sighandler_t);
 static unsigned fixture_alarm(unsigned);
@@ -56,7 +55,6 @@ static int fixture_dhcp_parse(const uint8_t *, size_t, uint32_t,
 #define rename fixture_rename
 #define unlink fixture_unlink
 #define getpid fixture_getpid
-#define printf fixture_printf
 #define strerror fixture_strerror
 #define signal fixture_signal
 #define alarm fixture_alarm
@@ -69,7 +67,6 @@ static int fixture_dhcp_parse(const uint8_t *, size_t, uint32_t,
 #undef dhcp_build
 #undef alarm
 #undef signal
-#undef printf
 #undef getpid
 #undef unlink
 #undef rename
@@ -132,8 +129,13 @@ struct fake_interface {
 	uint64_t receive_timeout_us;
 	int route_present;
 	struct rtentry route;
-	char output[2048];
-	size_t output_used;
+	unsigned console_opens;
+	unsigned console_closes;
+	unsigned console_fail;
+	unsigned duplicate_offer;
+	unsigned rejected_packets;
+	char console_output[2048];
+	size_t console_used;
 	char resolver_current[256];
 	char resolver_temporary[256];
 	size_t resolver_temporary_used;
@@ -462,6 +464,10 @@ fixture_recvfrom(int descriptor, void *buffer, size_t length, int flags,
 static int
 fixture_close(int descriptor)
 {
+	if (descriptor == 13) {
+		fake.console_closes++;
+		return 0;
+	}
 	if (descriptor == 12) {
 		if (!fake.resolver_fd_open)
 			fail("resolver descriptor closed twice");
@@ -480,6 +486,16 @@ fixture_close(int descriptor)
 static int
 fixture_open(const char *path, int flags, ...)
 {
+	if (strcmp(path, "/dev/console") == 0) {
+		if (flags != (O_WRONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC))
+			fail("console open must not acquire a terminal or block");
+		fake.console_opens++;
+		if (fake.console_fail) {
+			errno = EIO;
+			return -1;
+		}
+		return 13;
+	}
 	if (fake.fail_resolver_open) {
 		errno = EIO;
 		return -1;
@@ -498,6 +514,14 @@ fixture_open(const char *path, int flags, ...)
 static ssize_t
 fixture_write(int descriptor, const void *buffer, size_t length)
 {
+	if (descriptor == 13) {
+		if (fake.console_used + length >= sizeof(fake.console_output))
+			fail("console event overflow");
+		memcpy(fake.console_output + fake.console_used, buffer, length);
+		fake.console_used += length;
+		fake.console_output[fake.console_used] = '\0';
+		return (ssize_t)length;
+	}
 	if (descriptor != 12 || !fake.resolver_fd_open ||
 	    fake.resolver_temporary_used + length >=
 		sizeof(fake.resolver_temporary))
@@ -562,24 +586,6 @@ fixture_getpid(void)
 	return 42;
 }
 
-static int
-fixture_printf(const char *format, ...)
-{
-	int count;
-	va_list arguments;
-
-	if (fake.output_used >= sizeof(fake.output))
-		return -1;
-	va_start(arguments, format);
-	count = vsnprintf(fake.output + fake.output_used,
-	    sizeof(fake.output) - fake.output_used, format, arguments);
-	va_end(arguments);
-	if (count < 0 || (size_t)count >= sizeof(fake.output) - fake.output_used)
-		return -1;
-	fake.output_used += (size_t)count;
-	return count;
-}
-
 static char *
 fixture_strerror(int error)
 {
@@ -636,6 +642,12 @@ fixture_dhcp_parse(const uint8_t *packet, size_t length, uint32_t xid,
 	(void)length;
 	(void)xid;
 	(void)mac;
+	if (fake.rejected_packets != 0U) {
+		fake.rejected_packets--;
+		fake.now += 100000U;
+		errno = EINVAL;
+		return -1;
+	}
 	memset(lease, 0, sizeof(*lease));
 	lease->address = htonl(UINT32_C(0x0a000002));
 	lease->server_identifier = htonl(UINT32_C(0x0a000001));
@@ -644,6 +656,11 @@ fixture_dhcp_parse(const uint8_t *packet, size_t length, uint32_t xid,
 		return 0;
 	}
 	if (fake.last_message_type == DHCP_REQUEST && fake.serve_ack) {
+		if (fake.duplicate_offer != 0U) {
+			fake.duplicate_offer--;
+			lease->message_type = DHCP_OFFER;
+			return 0;
+		}
 		lease->message_type = DHCP_ACK;
 		lease->netmask = htonl(UINT32_C(0xffffff00));
 		lease->broadcast = htonl(UINT32_C(0x0a0000ff));
@@ -820,7 +837,7 @@ test_route_snapshot_failure_preserves_state(void)
 	fake.fail_route_get_once = 1U;
 	if (dhcpc_program_main(4, arguments) != 1 || fake.discover_seen != 0 ||
 	    fake.route_delete_count != 0 || fake.route_add_count != 0 ||
-	    strstr(fake.output, "route: Input/output error") == NULL)
+	    strstr(fake.console_output, "route: Input/output error") == NULL)
 		fail("route snapshot failure was not isolated before DHCP");
 	require_default_route_exact(&expected);
 	require_original_state();
@@ -840,7 +857,7 @@ test_route_delete_failure_restores_state(void)
 	fake.fail_route_delete_once = 1U;
 	if (dhcpc_program_main(4, arguments) != 1 || fake.discover_seen != 0 ||
 	    fake.route_delete_count != 1U || fake.route_add_count != 1U ||
-	    strstr(fake.output, "route: Input/output error") == NULL)
+	    strstr(fake.console_output, "route: Input/output error") == NULL)
 		fail("route delete failure was not rolled back before DHCP");
 	require_default_route_exact(&expected);
 	require_original_state();
@@ -860,7 +877,7 @@ test_static_default_offer_timeout_rollback(void)
 	    htonl(UINT32_C(0xc0000201)));
 	expected = fake.route;
 	if (dhcpc_program_main(4, arguments) != 1 ||
-	    strstr(fake.output, "offer: Connection timed out") == NULL ||
+	    strstr(fake.console_output, "offer: Connection timed out") == NULL ||
 	    fake.route_delete_count != 1U || fake.route_add_count != 1U)
 		fail("offer timeout did not roll back the early route transaction");
 	require_default_route_exact(&expected);
@@ -880,7 +897,7 @@ test_static_default_send_failure_rollback(void)
 	    htonl(UINT32_C(0xc0000201)));
 	expected = fake.route;
 	if (dhcpc_program_main(4, arguments) != 1 || fake.discover_seen != 1U ||
-	    strstr(fake.output, "offer: Input/output error") == NULL ||
+	    strstr(fake.console_output, "offer: Input/output error") == NULL ||
 	    fake.route_delete_count != 1U || fake.route_add_count != 1U)
 		fail("send failure did not roll back the early route transaction");
 	require_default_route_exact(&expected);
@@ -904,7 +921,7 @@ test_static_default_configuration_failure_rollback(void)
 	    htonl(UINT32_C(0xc0000201)));
 	expected = fake.route;
 	if (dhcpc_program_main(4, arguments) != 1 ||
-	    strstr(fake.output, "configuration: Input/output error") == NULL ||
+	    strstr(fake.console_output, "configuration: Input/output error") == NULL ||
 	    fake.route_delete_count != 1U || fake.route_add_count != 1U)
 		fail("configuration failure did not restore the early route");
 	require_default_route_exact(&expected);
@@ -924,7 +941,7 @@ test_invalid_receive_deadline(void)
 		fail("invalid receive stream returned success");
 	if (fake.receive_count > 10U)
 		fail("invalid receive stream escaped the total deadline");
-	if (strstr(fake.output, "offer: Connection timed out") == NULL)
+	if (strstr(fake.console_output, "offer: Connection timed out") == NULL)
 		fail("invalid receive timeout stage was not retained");
 	require_original_state();
 }
@@ -940,7 +957,7 @@ test_ack_timeout_stage(void)
 	fake.serve_offer = 1U;
 	if (dhcpc_program_main(4, arguments) != 1 || fake.discover_seen != 1U ||
 	    fake.request_seen != 1U ||
-	    strstr(fake.output, "ack: Connection timed out") == NULL)
+	    strstr(fake.console_output, "ack: Connection timed out") == NULL)
 		fail("ACK timeout stage was not retained");
 	require_original_state();
 }
@@ -966,7 +983,7 @@ test_static_default_route_rollback(void)
 	if (dhcpc_program_main(4, arguments) != 1 ||
 	    fake.route_add_count != 2U ||
 	    fake.route_delete_count != 2U ||
-	    strstr(fake.output, "resolver: Input/output error") == NULL)
+	    strstr(fake.console_output, "resolver: Input/output error") == NULL)
 		fail("static default route was not restored transactionally");
 	require_default_route_exact(&expected);
 	require_original_state();
@@ -1075,7 +1092,7 @@ test_resolver_failure_preserves_old(enum resolver_failure failure)
 	    fake.resolver_close_count != 1U ||
 	    fake.resolver_unlink_count != 1U || fake.resolver_fd_open ||
 	    fake.resolver_temporary_used != 0 || fake.close_count != 2U ||
-	    strstr(fake.output, "resolver: Input/output error") == NULL)
+	    strstr(fake.console_output, "resolver: Input/output error") == NULL)
 		fail("resolver failure did not preserve old state and errno");
 	if (failure == RESOLVER_WRITE_FAILURE &&
 	    (fake.resolver_write_count != 1U ||
@@ -1114,7 +1131,7 @@ test_route_rollback_failure_diagnostic(void)
 	set_fake_default_route(RTF_UP | RTF_GATEWAY | RTF_STATIC,
 	    htonl(UINT32_C(0xc0000201)));
 	if (dhcpc_program_main(4, arguments) != 1 ||
-	    strstr(fake.output, "rollback: Input/output error") == NULL)
+	    strstr(fake.console_output, "rollback: Input/output error") == NULL)
 		fail("route rollback failure was not diagnosed");
 	require_original_state();
 }
@@ -1143,6 +1160,74 @@ test_actual_dhcp_ciaddr_zero(void)
 			fail("actual REQUEST ciaddr was not zero");
 }
 
+/* Exercises console reporting at the actual DHCP transaction boundaries. */
+static void
+test_console_events(void)
+{
+	char *arguments[] = {"dhcpc", "-t", "1", "ue0", NULL};
+	const char *offer;
+	const char *bound;
+
+	reset_fake();
+	fake.carrier_after_sleeps = 0;
+	fake.send_succeeds = 1U;
+	fake.serve_offer = 1U;
+	fake.serve_ack = 1U;
+	fake.rejected_packets = 2U;
+	fake.duplicate_offer = 2U;
+	if (dhcpc_program_main(4, arguments) != 0)
+		fail("console DHCP success");
+	offer = strstr(fake.console_output, "offered 10.0.0.2 by 10.0.0.1");
+	bound = strstr(fake.console_output, "bound 10.0.0.2/24 lease 3600");
+	if (offer == NULL || bound == NULL || offer >= bound ||
+	    strstr(offer + 1, "offered") != NULL ||
+	    fake.console_opens != 4U || fake.console_closes != 4U)
+		fail("console selected OFFER and committed lease must appear once in order");
+
+	reset_fake();
+	fake.carrier_after_sleeps = 0;
+	fake.send_succeeds = 1U;
+	fake.serve_offer = 1U;
+	if (dhcpc_program_main(4, arguments) != 1 ||
+	    strstr(fake.console_output, "offered") == NULL ||
+	    strstr(fake.console_output, "bound") != NULL ||
+	    strstr(fake.console_output, "ack: Connection timed out") == NULL)
+		fail("OFFER must not imply ACK or committed configuration");
+	require_original_state();
+
+	reset_fake();
+	fake.carrier_after_sleeps = 0;
+	fake.send_succeeds = 1U;
+	fake.invalid_receive_count = 100U;
+	if (dhcpc_program_main(4, arguments) != 1 ||
+	    strstr(fake.console_output, "offered") != NULL ||
+	    strstr(fake.console_output, "bound") != NULL)
+		fail("invalid packets cannot publish lease events");
+
+	reset_fake();
+	fake.carrier_after_sleeps = 0;
+	fake.send_succeeds = 1U;
+	fake.serve_offer = 1U;
+	fake.serve_ack = 1U;
+	fake.lease_dns = 1U;
+	fake.fail_resolver_open = 1U;
+	if (dhcpc_program_main(4, arguments) != 1 ||
+	    strstr(fake.console_output, "bound") != NULL)
+		fail("failed resolver commit cannot announce a bound lease");
+	require_original_state();
+
+	reset_fake();
+	fake.carrier_after_sleeps = 0;
+	fake.send_succeeds = 1U;
+	fake.serve_offer = 1U;
+	fake.serve_ack = 1U;
+	fake.console_fail = 1U;
+	if (dhcpc_program_main(4, arguments) != 0 ||
+	    fake.address.s_addr != htonl(UINT32_C(0x0a000002)) ||
+	    fake.console_closes != 0U)
+		fail("unavailable console must not fail the DHCP transaction");
+}
+
 int
 main(void)
 {
@@ -1169,6 +1254,7 @@ main(void)
 	test_resolver_failure_preserves_old(RESOLVER_RENAME_FAILURE);
 	test_success_commits_lease();
 	test_actual_dhcp_ciaddr_zero();
+	test_console_events();
 	puts("dhcpc state test: PASS");
 	return 0;
 }

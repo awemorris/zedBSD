@@ -119,6 +119,8 @@ struct wlan_station {
 	uint32_t scan_step_index;
 	uint32_t scan_step_state;
 	uint32_t scan_ready_pending;
+	/* Firmware completion remains latched until the worker advances. */
+	uint32_t scan_complete_pending;
 	uint32_t scan_publish_pending;
 	int32_t scan_event_error;
 	uint64_t scan_step_deadline;
@@ -680,6 +682,56 @@ wlan_station_report_scan_channel_ready(
 	wlan_worker_wakeup();
 	station_leave(station);
 	return result;
+}
+
+/* Records firmware completion without invoking a radio callback. */
+int
+wlan_station_report_scan_channel_complete(
+	struct wlan_station *station,
+	uint64_t generation,
+	uint32_t step_index)
+{
+	unsigned long enabled;
+	int result;
+
+	/* Pins the station while the notification is admitted. */
+	result = station_enter(station);
+	if (result != 0)
+		return result;
+
+	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Rejects notifications from a retired generation or channel. */
+	if (station->scan_state != WLAN_SCAN_RUNNING ||
+	    station->scan_generation != generation ||
+	    station->scan_step_index != step_index ||
+	    step_index >= station->scan_profile.channel_count) {
+		result = ESTALE;
+	} else if ((station->scan_profile.channels[step_index].flags &
+	    WLAN_SCAN_CHANNEL_OFFLOADED_DWELL) == 0U) {
+		/* Software dwell is owned exclusively by the common timer. */
+		result = EINVAL;
+	} else if (station->scan_step_state != WLAN_SCAN_STEP_DWELL &&
+	    !(station->scan_step_state == WLAN_SCAN_STEP_TUNING &&
+	    station->scan_ready_pending)) {
+		/* Completion cannot precede acceptance of the start command. */
+		result = ESTALE;
+	} else {
+		/* Retains an early completion even before READY is consumed. */
+		station->scan_complete_pending = 1U;
+		result = 0;
+	}
+
+	spin_unlock_irqrestore(&station->lock, enabled);
+
+	/* The worker owns channel advance and the final producer barrier. */
+	wlan_worker_wakeup();
+	station_leave(station);
+	if (result != 0)
+		return result;
+
+	/* Succeeded: the matching completion is queued for the worker. */
+	return 0;
 }
 
 /*
@@ -1800,6 +1852,7 @@ wlan_work_pending(
 		pending = (station->scan_state == WLAN_SCAN_RUNNING &&
 		    (station->scan_step_state == WLAN_SCAN_STEP_NEED_TUNE ||
 		    station->scan_ready_pending ||
+		    station->scan_complete_pending ||
 		    station->scan_event_error != 0 ||
 		    deadline_expired(now, station->scan_deadline) ||
 		    deadline_expired(now, station->scan_step_deadline))) ||
@@ -2590,7 +2643,8 @@ scan_profile_validate(
 		if (channel_frequency(channel->channel) == 0U ||
 		    channel->center_frequency_mhz !=
 		    channel_frequency(channel->channel) ||
-		    (channel->flags & ~WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED) != 0U ||
+		    (channel->flags & ~(WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED |
+		    WLAN_SCAN_CHANNEL_OFFLOADED_DWELL)) != 0U ||
 		    channel->reserved != 0U)
 			return EINVAL;
 		for (earlier = 0U; earlier < index; earlier++) {
@@ -2611,7 +2665,7 @@ scan_deadline_ticks(
 		return WLAN_SCAN_DEADLINE_TICKS;
 	return WLAN_SCAN_DEADLINE_TICKS +
 	    (uint64_t)(channel_count - 14U) *
-	    (WLAN_SCAN_TUNE_DEADLINE_TICKS + WLAN_SCAN_DWELL_TICKS);
+	    (WLAN_SCAN_TUNE_DEADLINE_TICKS + WLAN_SCAN_OFFLOAD_DEADLINE_TICKS);
 }
 
 /* Tests whether an ioctl names a device. */
@@ -4095,6 +4149,7 @@ ioctl_scan(
 		station->scan_step_index = 0U;
 		station->scan_step_state = WLAN_SCAN_STEP_NEED_TUNE;
 		station->scan_ready_pending = 0U;
+		station->scan_complete_pending = 0U;
 		station->scan_publish_pending = 0U;
 		station->scan_event_error = 0;
 		station->scan_step_deadline = 0U;
@@ -4124,6 +4179,7 @@ ioctl_scan(
 	/* Cancels the scan, leaving the driver stop to the timer when one is needed. */
 	station->scan_step_state = WLAN_SCAN_STEP_NONE;
 	station->scan_ready_pending = 0U;
+	station->scan_complete_pending = 0U;
 	station->scan_publish_pending = 0U;
 	station->scan_event_error = 0;
 	station->scan_step_deadline = 0U;
@@ -4417,6 +4473,7 @@ station_retire_controlled(
 	/* Leaves the station down, or waiting to come back up. */
 	station->scan_step_state = WLAN_SCAN_STEP_NONE;
 	station->scan_ready_pending = 0U;
+	station->scan_complete_pending = 0U;
 	station->scan_publish_pending = 0U;
 	station->scan_event_error = 0;
 	station->scan_step_deadline = 0U;
@@ -4749,6 +4806,7 @@ station_scan_failed_locked(
 	station->scan_step_state = WLAN_SCAN_STEP_NONE;
 	station->scan_step_deadline = 0U;
 	station->scan_ready_pending = 0U;
+	station->scan_complete_pending = 0U;
 	station->scan_publish_pending = 0U;
 	station->scan_event_error = 0;
 	if (station->state == WLAN_STATE_SCANNING)
@@ -4779,6 +4837,7 @@ station_scan_publish_locked(
 	station->scan_step_state = WLAN_SCAN_STEP_NONE;
 	station->scan_step_deadline = 0U;
 	station->scan_ready_pending = 0U;
+	station->scan_complete_pending = 0U;
 	station->scan_publish_pending = 0U;
 	station->scan_event_error = 0;
 	if (station->state == WLAN_STATE_SCANNING)
@@ -5071,8 +5130,10 @@ station_scan_timer(
 	unsigned long enabled;
 	uint64_t generation;
 	uint64_t deadline;
+	uint64_t dwell;
 	uint32_t step;
 	uint32_t channel;
+	uint32_t channel_flags;
 	int active_probe;
 	int action;
 	int error;
@@ -5152,13 +5213,22 @@ station_scan_timer(
 					station->scan_ready_pending = 0U;
 					station->scan_step_state =
 					    WLAN_SCAN_STEP_DWELL;
-					deadline = deadline_local(now,
-					    WLAN_SCAN_DWELL_TICKS,
+					channel_flags = station->scan_profile.channels[
+					    station->scan_step_index].flags;
+
+					/* Firmware owns dwell and must report completion. */
+					if (channel_flags & WLAN_SCAN_CHANNEL_OFFLOADED_DWELL) {
+						dwell = WLAN_SCAN_OFFLOAD_DEADLINE_TICKS;
+					} else if (channel_flags & WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED) {
+						dwell = WLAN_SCAN_DWELL_TICKS;
+						active_probe = 1;
+					} else {
+						dwell = WLAN_SCAN_PASSIVE_DWELL_TICKS;
+					}
+
+					deadline = deadline_local(now, dwell,
 					    station->scan_deadline);
 					station->scan_step_deadline = deadline;
-					active_probe = (station->scan_profile.channels[
-					    station->scan_step_index].flags &
-					    WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED) != 0U;
 					if (active_probe) {
 						/* Uses the tuned channel independently of cached BSS state. */
 						channel = station->scan_profile.channels[
@@ -5169,10 +5239,20 @@ station_scan_timer(
 					}
 				}
 			} else if (station->scan_step_state ==
-			    WLAN_SCAN_STEP_DWELL && deadline_expired(now,
-			    station->scan_step_deadline)) {
-				if (station->scan_step_index + 1U <
+			    WLAN_SCAN_STEP_DWELL && (station->scan_complete_pending ||
+			    deadline_expired(now, station->scan_step_deadline))) {
+				channel_flags = station->scan_profile.channels[
+				    station->scan_step_index].flags;
+
+				/* A missing firmware event is failure, never completion. */
+				if ((channel_flags & WLAN_SCAN_CHANNEL_OFFLOADED_DWELL) &&
+				    !station->scan_complete_pending) {
+					station_scan_failed_locked(station, ETIMEDOUT);
+					action = 3;
+				} else if (station->scan_step_index + 1U <
 				    station->scan_profile.channel_count) {
+					/* The next channel needs its own completion. */
+					station->scan_complete_pending = 0U;
 					station->scan_step_index++;
 					station->scan_step_state =
 					    WLAN_SCAN_STEP_NEED_TUNE;
@@ -5182,6 +5262,7 @@ station_scan_timer(
 					    WLAN_SCAN_STEP_NONE;
 					station->scan_step_deadline = 0U;
 					station->scan_publish_pending = 1U;
+					station->scan_complete_pending = 0U;
 					if (station->scan_driver_active)
 						action = 4;
 					else

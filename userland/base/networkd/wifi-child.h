@@ -42,6 +42,7 @@ struct networkd_wifi_child_result {
 };
 
 struct networkd_wifi_list_result {
+	uint64_t snapshot_generation;
 	uint32_t scan_state;
 	int scan_terminal;
 	int scan_complete;

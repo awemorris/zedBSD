@@ -75,8 +75,12 @@ static struct {
 	unsigned scan_never_completes;
 	unsigned scan_generation_replaced;
 	unsigned connect_retry_once;
+	int connect_retry_error;
 	unsigned stdout_tty;
 	unsigned interface_up;
+	unsigned radio_stopped;
+	unsigned interface_opens;
+	unsigned interface_closes;
 	uint32_t stop_flags;
 	int status_error;
 	unsigned output_overflow;
@@ -557,9 +561,16 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 		fixture_record(command, 0U);
 		if (command == SIOCGIFFLAGS)
 			request->ifr_flags = fixture.interface_up ? IFF_UP : 0;
-		else
-			fixture.interface_up =
-			    (request->ifr_flags & IFF_UP) != 0U;
+		else if ((request->ifr_flags & IFF_UP) != 0U) {
+			if (!fixture.interface_up) {
+				fixture.interface_opens++;
+				fixture.interface_up = 1U;
+				fixture.radio_stopped = 0U;
+			}
+		} else if (fixture.interface_up) {
+			fixture.interface_closes++;
+			fixture.interface_up = 0U;
+		}
 		return 0;
 	}
 	header = argument;
@@ -721,7 +732,7 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 			request->cache_sequence = 1U;
 			request->state = WLAN_STATE_IDLE;
 			request->scan_state = WLAN_SCAN_COMPLETE;
-			request->administrative_up = fixture.interface_up;
+			request->administrative_up = fixture.interface_up && !fixture.radio_stopped;
 			return 0;
 		}
 		if (fixture.connect_generation_replaced) {
@@ -767,7 +778,8 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 				fixture_fill_status(request, WLAN_STATE_AUTHENTICATING);
 			} else {
 				fixture_fill_status(request, WLAN_STATE_FAILED);
-				request->terminal_error = ETIMEDOUT;
+				request->terminal_error = fixture.connect_retry_error != 0 ?
+				    fixture.connect_retry_error : ETIMEDOUT;
 				request->retry_count = 1U;
 			}
 			fixture.connect_status_polls++;
@@ -886,6 +898,36 @@ fixture_machine_connect(void)
 	    "authorized=1 error=0\n") != NULL &&
 	    strstr(fixture.output, FIXTURE_PASSPHRASE) == NULL,
 	    "machine connect", "connect records or secret output");
+}
+
+/* networkd, rather than its child, owns retries after an admitted failure. */
+static void
+fixture_machine_terminal_owner(void)
+{
+	static const uint8_t secret[] = FIXTURE_PASSPHRASE;
+	static const int errors[] = { ETIMEDOUT, ECONNRESET };
+	char interface[] = "wlan0";
+	char ssid[] = FIXTURE_SSID;
+	char *arguments[] = { "wifi", "--machine", "--passphrase-fd=4",
+	    interface, "connect", ssid, NULL };
+	unsigned index;
+
+	for (index = 0U; index < sizeof(errors) / sizeof(errors[0]); index++) {
+		fixture_reset();
+		fixture.secret_input = secret;
+		fixture.secret_input_length = sizeof(secret) - 1U;
+		fixture.connect_retry_once = 1U;
+		fixture.connect_retry_error = errors[index];
+		fixture_require(fixture_invoke(6, arguments, NULL, 0U) == 1,
+		    "machine retry owner", "failed generation must return to networkd");
+		fixture_expect_machine_terminal("machine retry owner", errors[index]);
+		fixture_require(fixture.connect_admissions == 1U &&
+		    fixture.scan_starts == 0U && fixture.secret_close_calls == 1U,
+		    "machine retry owner", "child must not start a second scan or connection");
+		fixture_require(strstr(fixture.output, "state=retrying") == NULL &&
+		    strstr(fixture.output, FIXTURE_PASSPHRASE) == NULL,
+		    "machine retry owner", "terminal failure or secret output");
+	}
 }
 
 /* Many quick scan completions must not overflow the real daemon consumer. */
@@ -1022,6 +1064,30 @@ fixture_machine_simple_operations(void)
 	fixture_require(strstr(fixture.output,
 	    "WIFI1 interface administrative=1\n") != NULL,
 	    "machine up", "interface record");
+
+	/* A stopped radio can retain generic UP after independent retirement. */
+	fixture_reset();
+	fixture.interface_up = 1U;
+	fixture.radio_stopped = 1U;
+	fixture_require(fixture_invoke(4, up, NULL, 0U) == 0,
+	    "machine recover up", "exit status");
+	fixture_require(!fixture.radio_stopped && fixture.interface_opens == 1U &&
+	    fixture.interface_closes == 1U, "machine recover up",
+	    "generic UP concealed a stopped radio");
+	fixture_require(fixture_invoke(4, up, NULL, 0U) == 0,
+	    "machine repeated up", "exit status");
+	fixture_require(fixture.interface_opens == 1U && fixture.interface_closes == 1U,
+	    "machine repeated up", "healthy radio was restarted");
+
+	fixture_reset();
+	fixture.interface_up = 1U;
+	fixture.radio_stopped = 1U;
+	fixture.stop_flags = WLAN_STATUS_STOP_PENDING;
+	fixture_require(fixture_invoke(4, up, NULL, 0U) == 1,
+	    "machine pending up", "unfinished retirement reported success");
+	fixture_expect_machine_terminal("machine pending up", EBUSY);
+	fixture_require(fixture.interface_opens == 0U && fixture.interface_closes == 0U,
+	    "machine pending up", "retirement ownership was disturbed");
 
 	fixture_reset();
 	fixture.interface_up = 1U;
@@ -1395,7 +1461,7 @@ fixture_quiet_interface_control(void)
 	    "quiet interface", "down status");
 	fixture_require(fixture_invoke(4, down, NULL, 0U) == 0,
 	    "quiet interface", "idempotent down status");
-	fixture_require(fixture.interface_up == 0U && fixture.ioctl_calls == 8U,
+	fixture_require(fixture.interface_up == 0U && fixture.ioctl_calls == 9U,
 	    "quiet interface", "down state or ioctl count");
 	fixture_require(fixture.output_length == 0U &&
 	    fixture.error_length == 0U, "quiet interface", "unexpected output");
@@ -1886,6 +1952,7 @@ int
 main(void)
 {
 	fixture_machine_connect();
+	fixture_machine_terminal_owner();
 	fixture_machine_rapid_scans();
 	fixture_machine_secret_failures();
 	fixture_machine_simple_operations();

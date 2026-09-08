@@ -145,6 +145,29 @@ static int storage_control_stop(struct usb_storage *storage);
 static int storage_attach(struct drv_usb_interface *interface, const struct drv_usb_id *id);
 static int storage_detach(struct drv_usb_interface *interface, unsigned flags);
 
+/* Device operation and registration tables. */
+static const struct disk_ops storage_disk_ops = {
+	.submit = storage_submit,
+	.ioctl = storage_ioctl
+};
+
+static const struct drv_usb_id storage_ids[] = {
+	{
+		.match_flags = DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS | DRV_USB_ID_IF_PROTOCOL,
+		.interface_class = USB_MASS_STORAGE_CLASS,
+		.interface_subclass = USB_MASS_STORAGE_SCSI,
+		.interface_protocol = USB_MASS_STORAGE_BULK_ONLY
+	}
+};
+
+static struct drv_usb_driver storage_driver = {
+	.name = "usb-storage",
+	.ids = storage_ids,
+	.id_count = sizeof(storage_ids) / sizeof(storage_ids[0]),
+	.attach = storage_attach,
+	.detach = storage_detach
+};
+
 /*
  * Registers this driver with the USB subsystem.
  */
@@ -2009,25 +2032,3 @@ unlock:
 /*
  * USB Mass Storage Class
  */
-
-static const struct disk_ops storage_disk_ops = {
-	.submit = storage_submit,
-	.ioctl = storage_ioctl
-};
-
-static const struct drv_usb_id storage_ids[] = {
-	{
-		.match_flags = DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS | DRV_USB_ID_IF_PROTOCOL,
-		.interface_class = USB_MASS_STORAGE_CLASS,
-		.interface_subclass = USB_MASS_STORAGE_SCSI,
-		.interface_protocol = USB_MASS_STORAGE_BULK_ONLY
-	}
-};
-
-static struct drv_usb_driver storage_driver = {
-	.name = "usb-storage",
-	.ids = storage_ids,
-	.id_count = sizeof(storage_ids) / sizeof(storage_ids[0]),
-	.attach = storage_attach,
-	.detach = storage_detach
-};

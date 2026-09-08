@@ -192,6 +192,36 @@ static ssize_t input_read(struct file *file, void *buffer, size_t size);
 static int input_ioctl(struct file *file, unsigned long request, uintptr_t argument);
 static int input_poll(struct file *file, short requested, short *returned);
 static int copy_info_text(char *destination, const char *source);
+static void bit_set(unsigned long *bits, unsigned bit);
+static void bit_clear(unsigned long *bits, unsigned bit);
+static int capability_bits_mutable(struct input_capability_state *state, unsigned type, unsigned long **bits, size_t *size);
+static int capability_code_valid(unsigned type, unsigned code);
+static void report_init(struct input_report *report, struct input_device *device);
+static void report_event(struct input_report *report, uint64_t milliseconds, uint16_t type, uint16_t code, int32_t value, const struct hal_key_event *key_event);
+static struct input_device *file_device(struct file *file);
+static struct input_reader *file_reader(struct file *file);
+static int producer_callback_enter(struct input_device *device);
+static void producer_callback_leave(struct input_device *device);
+static int copy_text(const char *text, unsigned long request, uintptr_t argument);
+static size_t ioctl_size(unsigned long request);
+static int copy_bits(const uint8_t *bits, size_t bit_size, size_t capacity, uintptr_t argument);
+static int copy_capability_bits(const struct input_device *device, unsigned type, size_t capacity, uintptr_t argument);
+static int copy_key_state(struct input_device *device, size_t capacity, uintptr_t argument);
+static int copy_abs_info(struct input_device *device, unsigned axis, uintptr_t argument);
+static void input_device_resync_begin(struct input_device *device, uint32_t key_flags);
+static void input_device_resync_snapshot(struct input_device *device, const struct hal_key_event *key_event);
+static void input_device_resync_end(struct input_device *device);
+static int function_number(const char *symbol);
+static void update_modifier(struct input_keymap_state *state, const char *symbol, int down, int press);
+
+/* Operations published by each input character device. */
+static const struct cdev_ops input_ops = {
+	.open = input_open,
+	.close = input_close,
+	.read = input_read,
+	.ioctl = input_ioctl,
+	.poll = input_poll,
+};
 
 /*
  * Brings the input subsystem into service.
@@ -2572,11 +2602,3 @@ update_modifier(
 /*
  * Input device
  */
-
-static const struct cdev_ops input_ops = {
-	.open = input_open,
-	.close = input_close,
-	.read = input_read,
-	.ioctl = input_ioctl,
-	.poll = input_poll,
-};

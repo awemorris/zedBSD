@@ -141,6 +141,35 @@ struct nvme_io_slot {
 	int error;
 };
 
+/* Lifecycle records embedded in each controller. */
+struct drv_nvme_detach_flush_lifecycle {
+	unsigned required;
+	unsigned attempt_active;
+	unsigned attempts;
+	unsigned completed;
+	unsigned unavailable;
+};
+
+struct drv_nvme_shutdown_lifecycle {
+	unsigned running;
+	unsigned completed;
+	unsigned admission_attempted;
+	unsigned admission_stopped;
+	unsigned shutdown_attempted;
+	unsigned shutdown_completed;
+	unsigned disable_attempted;
+	unsigned controller_disabled;
+	unsigned master_attempted;
+	unsigned master_disabled;
+	unsigned hardware_dma_safe;
+	unsigned failure_count;
+	int admission_error;
+	int shutdown_error;
+	int disable_error;
+	int master_error;
+	int first_error;
+};
+
 struct nvme_controller {
 	struct drv_nvme_lifecycle lifecycle;
 	struct drv_nvme_detach_flush_lifecycle detach_flush;
@@ -239,33 +268,9 @@ struct nvme_controller {
  * already-gone disk.  This controller-wide ledger is deliberately separate
  * from the per-command lifecycle above.
  */
-struct drv_nvme_detach_flush_lifecycle {
-	unsigned required;
-	unsigned attempt_active;
-	unsigned attempts;
-	unsigned completed;
-	unsigned unavailable;
-};
 
-struct drv_nvme_shutdown_lifecycle {
-	unsigned running;
-	unsigned completed;
-	unsigned admission_attempted;
-	unsigned admission_stopped;
-	unsigned shutdown_attempted;
-	unsigned shutdown_completed;
-	unsigned disable_attempted;
-	unsigned controller_disabled;
-	unsigned master_attempted;
-	unsigned master_disabled;
-	unsigned hardware_dma_safe;
-	unsigned failure_count;
-	int admission_error;
-	int shutdown_error;
-	int disable_error;
-	int master_error;
-	int first_error;
-};
+
+
 
 struct drv_nvme_shutdown_ops {
 	int (*stop_admission)(void *context);
@@ -287,6 +292,149 @@ static int nvme_io_queue_create(struct nvme_controller *controller, int recovery
 static int nvme_io_recover(struct nvme_controller *controller);
 static int nvme_io_lifecycles_quiesce(struct nvme_controller *controller);
 static void nvme_io_fail_all_locked(struct nvme_controller *controller, int error);
+
+static int nvme_attach(struct drv_pci_device *device, const struct drv_pci_id *id);
+static int nvme_detach(struct drv_pci_device *device, unsigned flags);
+static int nvme_disk_submit(struct disk *disk, struct bio *bio);
+static void nvme_lifecycle_bar_release(void *context);
+static int nvme_lifecycle_bar_restore(void *context);
+static void nvme_lifecycle_bar_unmap(void *context);
+static int nvme_lifecycle_controller_disable(void *context);
+static void nvme_lifecycle_dma_free(void *context);
+static int nvme_lifecycle_irq_drain(void *context);
+static void nvme_lifecycle_irq_free(void *context);
+static int nvme_lifecycle_irq_remove(void *context);
+static int nvme_lifecycle_master_disable(void *context);
+static int nvme_lifecycle_pci_restore(void *context);
+static void nvme_shutdown(struct drv_pci_device *device);
+static int nvme_shutdown_bus_master_disable(void *context);
+static int nvme_shutdown_controller_disable(void *context);
+static int nvme_shutdown_normal(void *context);
+static int nvme_shutdown_stop_admission(void *context);
+
+/* Device operation and registration tables. */
+static const struct drv_nvme_shutdown_ops nvme_shutdown_operations = {
+	.stop_admission = nvme_shutdown_stop_admission,
+	.shutdown_normal = nvme_shutdown_normal,
+	.controller_disable = nvme_shutdown_controller_disable,
+	.bus_master_disable = nvme_shutdown_bus_master_disable,
+};
+
+static const struct drv_nvme_lifecycle_ops nvme_lifecycle_operations = {
+	.controller_disable = nvme_lifecycle_controller_disable,
+	.bus_master_disable = nvme_lifecycle_master_disable,
+	.irq_disestablish = nvme_lifecycle_irq_remove,
+	.irq_drain = nvme_lifecycle_irq_drain,
+	.irq_free = nvme_lifecycle_irq_free,
+	.dma_free = nvme_lifecycle_dma_free,
+	.bar_unmap = nvme_lifecycle_bar_unmap,
+	.bar_restore = nvme_lifecycle_bar_restore,
+	.pci_state_restore = nvme_lifecycle_pci_restore,
+	.bar_release = nvme_lifecycle_bar_release,
+};
+
+static const struct disk_ops nvme_disk_ops = {
+	.submit = nvme_disk_submit,
+};
+
+static const struct drv_pci_id nvme_ids[] = {
+	{
+		.vendor = DRV_PCI_ANY_ID,
+		.device = DRV_PCI_ANY_ID,
+		.subvendor = DRV_PCI_ANY_ID,
+		.subdevice = DRV_PCI_ANY_ID,
+		.class_code = DRV_NVME_PCI_CLASS,
+		.class_mask = 0xffffffU,
+	},
+};
+
+static struct drv_pci_driver nvme_driver = {
+	.name = "nvme",
+	.ids = nvme_ids,
+	.id_count = sizeof(nvme_ids) / sizeof(nvme_ids[0]),
+	.attach = nvme_attach,
+	.detach = nvme_detach,
+	.shutdown = nvme_shutdown,
+};
+
+static __inline void drv_nvme_lifecycle_init(struct drv_nvme_lifecycle *lifecycle);
+static __inline int drv_nvme_lifecycle_record(struct drv_nvme_lifecycle *lifecycle, enum drv_nvme_lifecycle_event event);
+static __inline int drv_nvme_lifecycle_fail(struct drv_nvme_lifecycle *lifecycle, int error);
+static __inline int drv_nvme_lifecycle_cleanup(struct drv_nvme_lifecycle *lifecycle, const struct drv_nvme_lifecycle_ops *ops, void *context);
+static __inline void drv_nvme_detach_flush_init(struct drv_nvme_detach_flush_lifecycle *lifecycle);
+static __inline int drv_nvme_detach_flush_require(struct drv_nvme_detach_flush_lifecycle *lifecycle);
+static __inline int drv_nvme_detach_flush_begin(struct drv_nvme_detach_flush_lifecycle *lifecycle, int queue_available);
+static __inline int drv_nvme_detach_flush_finish(struct drv_nvme_detach_flush_lifecycle *lifecycle, int error);
+static __inline void drv_nvme_io_lifecycle_init(struct drv_nvme_io_lifecycle *lifecycle);
+static __inline int drv_nvme_io_lifecycle_online(struct drv_nvme_io_lifecycle *lifecycle);
+static __inline int drv_nvme_io_lifecycle_begin_bio(struct drv_nvme_io_lifecycle *lifecycle);
+static __inline int drv_nvme_io_lifecycle_submit(struct drv_nvme_io_lifecycle *lifecycle, uint16_t command_id, int uses_payload_dma);
+static __inline int drv_nvme_io_lifecycle_complete_command(struct drv_nvme_io_lifecycle *lifecycle, uint16_t command_id);
+static __inline int drv_nvme_io_lifecycle_complete_bio(struct drv_nvme_io_lifecycle *lifecycle);
+static __inline int drv_nvme_io_lifecycle_stop(struct drv_nvme_io_lifecycle *lifecycle);
+static __inline int drv_nvme_io_lifecycle_fault(struct drv_nvme_io_lifecycle *lifecycle);
+static __inline int drv_nvme_io_lifecycle_quiesced(struct drv_nvme_io_lifecycle *lifecycle);
+static __inline int drv_nvme_io_lifecycle_quarantine(struct drv_nvme_io_lifecycle *lifecycle);
+static __inline int drv_nvme_io_lifecycle_resolve_quarantine(struct drv_nvme_io_lifecycle *lifecycle, int hardware_quiesced, int irq_quiesced);
+static __inline int drv_nvme_io_lifecycle_release(struct drv_nvme_io_lifecycle *lifecycle);
+static __inline void drv_nvme_shutdown_lifecycle_init(struct drv_nvme_shutdown_lifecycle *lifecycle);
+static __inline void drv_nvme_shutdown_lifecycle_record_error(struct drv_nvme_shutdown_lifecycle *lifecycle, int error);
+static __inline int drv_nvme_shutdown_lifecycle_run(struct drv_nvme_shutdown_lifecycle *lifecycle, const struct drv_nvme_shutdown_ops *ops, void *context);
+static int nvme_detach_owned(struct nvme_controller *controller);
+static uint32_t nvme_read32(const struct nvme_controller *controller, size_t offset);
+static uint64_t nvme_read64(const struct nvme_controller *controller, size_t offset);
+static void nvme_write32(struct nvme_controller *controller, size_t offset, uint32_t value);
+static void nvme_write64(struct nvme_controller *controller, size_t offset, uint64_t value);
+static uint64_t nvme_timeout_ticks(unsigned milliseconds);
+static int nvme_wait_ready(struct nvme_controller *controller, int expected_ready);
+static int nvme_wait_shutdown_complete(struct nvme_controller *controller);
+static int nvme_bus_master_disable(struct nvme_controller *controller);
+static int nvme_pci_quiesce(struct nvme_controller *controller);
+static int nvme_message_irq_mask(struct nvme_controller *controller);
+static int nvme_message_irq_save_and_mask(struct nvme_controller *controller);
+static int nvme_message_irq_restore(struct nvme_controller *controller);
+static int nvme_runtime_irq_mask(struct nvme_controller *controller, unsigned *capability_out, uint16_t *control_out);
+static int nvme_runtime_irq_restore(struct nvme_controller *controller, unsigned capability, uint16_t control);
+static int nvme_controller_disable(struct nvme_controller *controller);
+static int nvme_controller_shutdown_normal(struct nvme_controller *controller);
+static int nvme_stop_admission(struct nvme_controller *controller);
+static void nvme_detach_release(struct nvme_controller *controller, int resume);
+static int nvme_detach_claim(struct drv_pci_device *device, struct nvme_controller **result);
+static int nvme_shutdown_claim(struct drv_pci_device *device, struct nvme_controller **result);
+static int nvme_irq_remove(struct nvme_controller *controller);
+static int nvme_irq_drain(struct nvme_controller *controller);
+static void nvme_dma_free(struct nvme_controller *controller);
+static int nvme_restore_bar(struct nvme_controller *controller);
+static int nvme_cleanup(struct nvme_controller *controller);
+static void nvme_publish_controller(struct nvme_controller *controller);
+static void nvme_unpublish_controller(struct nvme_controller *controller);
+static unsigned nvme_irq_admin_locked(struct nvme_controller *controller);
+static struct nvme_io_slot * nvme_io_completion_owner_locked(struct nvme_controller *controller, uint16_t command_id);
+static unsigned nvme_irq_io_locked(struct nvme_controller *controller);
+static int nvme_irq(void *argument);
+static int nvme_admin_execute_mode(struct nvme_controller *controller, struct drv_nvme_command *command, uint32_t *result, int recovery_command);
+static int nvme_admin_execute(struct nvme_controller *controller, struct drv_nvme_command *command, uint32_t *result);
+static int nvme_identify(struct nvme_controller *controller, uint32_t namespace_id, uint8_t selector);
+static int nvme_io_wait_locked(struct nvme_controller *controller, struct wait_queue *waitq, uint64_t deadline, unsigned long *irq);
+static int nvme_io_ensure_online(struct nvme_controller *controller);
+static int nvme_io_begin_bio(struct nvme_controller *controller, enum bio_op operation, int *owned);
+static void nvme_io_end_bio(struct nvme_controller *controller, enum bio_op operation);
+static int nvme_io_command_id_in_use_locked(struct nvme_controller *controller, uint16_t command_id);
+static uint16_t nvme_io_next_command_id_locked(struct nvme_controller *controller);
+static int nvme_io_slot_acquire(struct nvme_controller *controller, struct nvme_io_slot **result);
+static int nvme_io_post(struct nvme_controller *controller, struct nvme_io_slot *slot, const struct drv_nvme_command *command, int uses_payload);
+static int nvme_io_wait_completion(struct nvme_controller *controller, struct nvme_io_slot *slot, int *recovery_owner);
+static int nvme_io_claim_recovery_locked(struct nvme_controller *controller);
+static void nvme_io_slot_release(struct nvme_controller *controller, struct nvme_io_slot *slot);
+static int nvme_io_execute(struct nvme_controller *controller, uint8_t opcode, uint64_t first_block, uint32_t block_count, void *bytes);
+static int nvme_io_flush_internal(struct nvme_controller *controller);
+static int nvme_probe_permitted(struct nvme_controller *controller);
+static int nvme_probe_namespace(struct nvme_controller *controller);
+static int nvme_dma_allocate(struct nvme_controller *controller);
+static void nvme_io_dma_free_unpublished(struct nvme_controller *controller);
+static int nvme_io_queue_memory_reset(struct nvme_controller *controller);
+static int nvme_admin_queue_memory_reset(struct nvme_controller *controller);
+static void nvme_io_quarantine(struct nvme_controller *controller, int error, int dma_unsafe);
 
 /*
  * Registers this driver with the PCI bus.
@@ -5145,47 +5293,3 @@ fail:
 /*
  * NVMe
  */
-
-static const struct drv_nvme_shutdown_ops nvme_shutdown_operations = {
-	.stop_admission = nvme_shutdown_stop_admission,
-	.shutdown_normal = nvme_shutdown_normal,
-	.controller_disable = nvme_shutdown_controller_disable,
-	.bus_master_disable = nvme_shutdown_bus_master_disable,
-};
-
-static const struct drv_nvme_lifecycle_ops nvme_lifecycle_operations = {
-	.controller_disable = nvme_lifecycle_controller_disable,
-	.bus_master_disable = nvme_lifecycle_master_disable,
-	.irq_disestablish = nvme_lifecycle_irq_remove,
-	.irq_drain = nvme_lifecycle_irq_drain,
-	.irq_free = nvme_lifecycle_irq_free,
-	.dma_free = nvme_lifecycle_dma_free,
-	.bar_unmap = nvme_lifecycle_bar_unmap,
-	.bar_restore = nvme_lifecycle_bar_restore,
-	.pci_state_restore = nvme_lifecycle_pci_restore,
-	.bar_release = nvme_lifecycle_bar_release,
-};
-
-static const struct disk_ops nvme_disk_ops = {
-	.submit = nvme_disk_submit,
-};
-
-static const struct drv_pci_id nvme_ids[] = {
-	{
-		.vendor = DRV_PCI_ANY_ID,
-		.device = DRV_PCI_ANY_ID,
-		.subvendor = DRV_PCI_ANY_ID,
-		.subdevice = DRV_PCI_ANY_ID,
-		.class_code = DRV_NVME_PCI_CLASS,
-		.class_mask = 0xffffffU,
-	},
-};
-
-static struct drv_pci_driver nvme_driver = {
-	.name = "nvme",
-	.ids = nvme_ids,
-	.id_count = sizeof(nvme_ids) / sizeof(nvme_ids[0]),
-	.attach = nvme_attach,
-	.detach = nvme_detach,
-	.shutdown = nvme_shutdown,
-};

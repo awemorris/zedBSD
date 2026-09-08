@@ -5,27 +5,43 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef LIBC_ZEDBSD_ATOMIC_COMPILER_H
-#define LIBC_ZEDBSD_ATOMIC_COMPILER_H
+/*
+ * XXX:
+ *  - Describe what this is for.
+ *  - Move this file under libc/include/
+ */
 
+#ifndef LIBC_ATOMIC_COMPILER_H
+#define LIBC_ATOMIC_COMPILER_H
+
+/*
+ * XXX: Rename these __ZEDBSD_* to __LIBC_*
+ */
 /* Compiler-specific implementation details for the ISO C atomic facade. */
-#define __ZEDBSD_ATOMIC_BOOL_LOCK_FREE	__GCC_ATOMIC_BOOL_LOCK_FREE
-#define __ZEDBSD_ATOMIC_CHAR_LOCK_FREE	__GCC_ATOMIC_CHAR_LOCK_FREE
+#define __ZEDBSD_ATOMIC_BOOL_LOCK_FREE		__GCC_ATOMIC_BOOL_LOCK_FREE
+#define __ZEDBSD_ATOMIC_CHAR_LOCK_FREE		__GCC_ATOMIC_CHAR_LOCK_FREE
 #define __ZEDBSD_ATOMIC_CHAR16_T_LOCK_FREE	__GCC_ATOMIC_CHAR16_T_LOCK_FREE
 #define __ZEDBSD_ATOMIC_CHAR32_T_LOCK_FREE	__GCC_ATOMIC_CHAR32_T_LOCK_FREE
 #define __ZEDBSD_ATOMIC_WCHAR_T_LOCK_FREE	__GCC_ATOMIC_WCHAR_T_LOCK_FREE
-#define __ZEDBSD_ATOMIC_SHORT_LOCK_FREE	__GCC_ATOMIC_SHORT_LOCK_FREE
-#define __ZEDBSD_ATOMIC_INT_LOCK_FREE	__GCC_ATOMIC_INT_LOCK_FREE
-#define __ZEDBSD_ATOMIC_LONG_LOCK_FREE	__GCC_ATOMIC_LONG_LOCK_FREE
-#define __ZEDBSD_ATOMIC_LLONG_LOCK_FREE	__GCC_ATOMIC_LLONG_LOCK_FREE
+#define __ZEDBSD_ATOMIC_SHORT_LOCK_FREE		__GCC_ATOMIC_SHORT_LOCK_FREE
+#define __ZEDBSD_ATOMIC_INT_LOCK_FREE		__GCC_ATOMIC_INT_LOCK_FREE
+#define __ZEDBSD_ATOMIC_LONG_LOCK_FREE		__GCC_ATOMIC_LONG_LOCK_FREE
+#define __ZEDBSD_ATOMIC_LLONG_LOCK_FREE		__GCC_ATOMIC_LLONG_LOCK_FREE
 #define __ZEDBSD_ATOMIC_POINTER_LOCK_FREE	__GCC_ATOMIC_POINTER_LOCK_FREE
 
-#define __ZEDBSD_MEMORY_ORDER_RELAXED	__ATOMIC_RELAXED
-#define __ZEDBSD_MEMORY_ORDER_CONSUME	__ATOMIC_CONSUME
-#define __ZEDBSD_MEMORY_ORDER_ACQUIRE	__ATOMIC_ACQUIRE
-#define __ZEDBSD_MEMORY_ORDER_RELEASE	__ATOMIC_RELEASE
-#define __ZEDBSD_MEMORY_ORDER_ACQ_REL	__ATOMIC_ACQ_REL
-#define __ZEDBSD_MEMORY_ORDER_SEQ_CST	__ATOMIC_SEQ_CST
+/*
+ * XXX: Rename these __ZEDBSD_* to __LIBC_*
+ */
+#define __ZEDBSD_MEMORY_ORDER_RELAXED		__ATOMIC_RELAXED
+#define __ZEDBSD_MEMORY_ORDER_CONSUME		__ATOMIC_CONSUME
+#define __ZEDBSD_MEMORY_ORDER_ACQUIRE		__ATOMIC_ACQUIRE
+#define __ZEDBSD_MEMORY_ORDER_RELEASE		__ATOMIC_RELEASE
+#define __ZEDBSD_MEMORY_ORDER_ACQ_REL		__ATOMIC_ACQ_REL
+#define __ZEDBSD_MEMORY_ORDER_SEQ_CST		__ATOMIC_SEQ_CST
+
+/*
+ * XXX: Rename these __ZEDBSD_* to __LIBC_*
+ */
 
 #define __zedbsd_atomic_store(object, desired, order) \
 	do { \
@@ -57,22 +73,15 @@
 		    &__zedbsd_atomic_desired, (weak), (success), (failure)); \
 	})
 
-#define __zedbsd_atomic_is_lock_free(object) \
-	__atomic_is_lock_free(sizeof(*(object)), (object))
-#define __zedbsd_atomic_thread_fence(order)	__atomic_thread_fence(order)
-#define __zedbsd_atomic_signal_fence(order)	__atomic_signal_fence(order)
-#define __zedbsd_atomic_fetch_add(object, operand, order) \
-	__atomic_fetch_add((object), (operand), (order))
-#define __zedbsd_atomic_fetch_sub(object, operand, order) \
-	__atomic_fetch_sub((object), (operand), (order))
-#define __zedbsd_atomic_fetch_or(object, operand, order) \
-	__atomic_fetch_or((object), (operand), (order))
-#define __zedbsd_atomic_fetch_xor(object, operand, order) \
-	__atomic_fetch_xor((object), (operand), (order))
-#define __zedbsd_atomic_fetch_and(object, operand, order) \
-	__atomic_fetch_and((object), (operand), (order))
-#define __zedbsd_atomic_flag_test_and_set(object, order) \
-	__atomic_test_and_set((object), (order))
-#define __zedbsd_atomic_flag_clear(object, order)	__atomic_clear((object), (order))
+#define __zedbsd_atomic_is_lock_free(object) 			__atomic_is_lock_free(sizeof(*(object)), (object))
+#define __zedbsd_atomic_thread_fence(order)			__atomic_thread_fence(order)
+#define __zedbsd_atomic_signal_fence(order)			__atomic_signal_fence(order)
+#define __zedbsd_atomic_fetch_add(object, operand, order)	__atomic_fetch_add((object), (operand), (order))
+#define __zedbsd_atomic_fetch_sub(object, operand, order) 	__atomic_fetch_sub((object), (operand), (order))
+#define __zedbsd_atomic_fetch_or(object, operand, order)	__atomic_fetch_or((object), (operand), (order))
+#define __zedbsd_atomic_fetch_xor(object, operand, order)	__atomic_fetch_xor((object), (operand), (order))
+#define __zedbsd_atomic_fetch_and(object, operand, order) 	__atomic_fetch_and((object), (operand), (order))
+#define __zedbsd_atomic_flag_test_and_set(object, order) 	__atomic_test_and_set((object), (order))
+#define __zedbsd_atomic_flag_clear(object, order)		__atomic_clear((object), (order))
 
 #endif

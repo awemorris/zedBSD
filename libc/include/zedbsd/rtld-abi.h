@@ -5,12 +5,21 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef LIBC_ZEDBSD_RTLD_ABI_H
-#define LIBC_ZEDBSD_RTLD_ABI_H
+/*
+ * XXX:
+ *  - Describe What this is for.
+ *  - Move this file under libc/include/
+ */
+
+#ifndef LIBC_RTLD_ABI_H
+#define LIBC_RTLD_ABI_H
 
 #include <stddef.h>
 #include <stdint.h>
 
+/*
+ * XXX: Rename the following ZEDBSD_* to KERN_*
+ */
 #define ZEDBSD_RTLD_ABI_VERSION 4U
 #define ZEDBSD_RTLD_DLERROR_SIZE 192U
 
@@ -33,10 +42,12 @@ struct __rtld_tcb {
 };
 
 /*
- * Data-based import table used by libc.so.  Function relocations on SPARC V9
- * require a writable/executable PLT, while a read-only table needs only data
- * relocations.  Keeping the table in the ABI also gives the private contract
- * an explicit version and size for future extension.
+ * Data-based import table used by libc.so.
+ *
+ * Function relocations on SPARC V9 require a writable/executable PLT,
+ * while a read-only table needs only data relocations.  Keeping the
+ * table in the ABI also gives the private contract an explicit
+ * version and size for future extension.
  */
 struct __rtld_exports {
 	uint32_t abi_version;

@@ -5,6 +5,12 @@
  * SPDX-License-Identifier: Zlib
  */
 
+/*
+ * XXX:
+ *  - Describe what this is for.
+ *  - If it is not used, just remove.
+ */
+
 #ifndef LIBC_ZEDBSD_CATALOG_FORMAT_H
 #define LIBC_ZEDBSD_CATALOG_FORMAT_H
 

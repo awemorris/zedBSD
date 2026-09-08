@@ -1,11 +1,11 @@
 # zedBSD master plan
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 Status: active
 
-Current queue: [q123](queue.md), in-progress for p031; [q122](queue-q122.md) finished. WS025 mandatory p001–p026 and required WS024 are complete, with integration acceptance, final policy and performance evidence. Conditional p027–p030 are explicitly not adopted and retain planned resume criteria.
-Additional planning: [ws025-p031](ws025-io-memory-cache/phase031-driver-layout-style/phase.md) records the agreed driver layout, naming/style consolidation and userland separation. In progress under q123; precedes any p027–p030 implementation. q122 remains finished.
+Current queue: [q124](queue.md), finished / p032–p035 completed; [q123](queue-q123.md) finished with p031 uncleared; [q122](queue-q122.md) finished. WS025 mandatory p001–p026 and required WS024 are complete, with integration acceptance, final policy and performance evidence. Conditional p027–p030 are explicitly not adopted and retain planned resume criteria.
+Additional planning: [ws025-p031](ws025-io-memory-cache/phase031-driver-layout-style/phase.md) records the agreed driver layout, naming/style consolidation and userland separation. q123 finished with p031 uncleared; regressions p032/p033 take priority before remaining p031 review and any p027–p030 implementation. q122 remains finished.
 [q089](queue-q089.md) completed typed BIOS/UEFI memory handoff; [q090](queue-q090.md)
 completed sparse RAM mapping and early table ownership, including 16 GiB boots.
 [q088](queue-q088.md) completed p001: counters, FS50/Wi-Fi30, three x86 builds and
@@ -22,6 +22,8 @@ amd64 1 GiB RAM limit and loader-side memory reporting limits. Its detailed
 design, 30 Phases, and acceptance matrix are recorded. The completed p001 baseline
 confirms downstream I/O splitting and the allocator cap. p002/p003 now retain and map
 high RAM; p004 proceeds under q091 with normal high-memory publication still gated.
+
+Priority update (2026-09-09): [ws025-p032](ws025-io-memory-cache/phase032-pc98-boot-regression/results.md) completed: i386 stack overflow repaired; PC98 overlay/native persistent sessions, loader 16/16, PCAT/amd64 builds and login smoke pass. AX211 automatic connection/DHCP regression p033 is in progress under q124.
 
 ## 1. Purpose
 
@@ -504,7 +506,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws022` | ELF `PT_TLS` and static thread-local storage | Queue-ready; WS021 dependency satisfied | No Phase started | Queue p001 to freeze the x86 TLS/TCB ABI and fixtures, then implement p002/p003 | [WS022](ws022-elf-tls/ws.md) |
 | `ws023` | i386/amd64 HAL coding-style conformance | Complete (`q067`) | All 88 C/header files, focused/strict gates, four configured builds, and four x86 runtime cells pass; API/ABI review found no delta | No current Phase; retain the q067 evidence and extract pre-existing risks separately if prioritized | [WS023](ws023-x86-hal-style/ws.md) |
 | `ws024` | Single 64-bit UFS | Complete (q102) | p001–p004 complete; U01–U24 selected acceptance, storage 50/50, WiFi 30, three builds and source retirement pass | WS025 batching consumes the single unified owner | [WS024](ws024-unified-ufs/ws.md) |
-| `ws025` | I/O, cache and physical-memory redesign | Mandatory p001–p026 and required WS024 completed; additional p031 planned | Host/sanitizer, 14 RAM cells, USB/NVMe, media recovery/shutdown, FS50 50/50, Wi-Fi30 30/30 and 404 performance samples pass; ordinary artifacts restored; physical gate user-accepted | p031 driver refactoring planned before p027–p030; conditional extensions retain their measurement/hardware criteria | [WS025](ws025-io-memory-cache/ws.md) |
+| `ws025` | I/O, cache and physical-memory redesign | Mandatory p001–p026 and required WS024 completed; p031 uncleared, p032–p035 completed | Host/sanitizer, 14 RAM cells, USB/NVMe, media recovery/shutdown, FS50 50/50, Wi-Fi30 30/30 and 404 performance samples pass; ordinary artifacts restored; physical gate user-accepted | q124 handles post-refactor boot/Wi-Fi regressions; conditional p027–p030 retain their measurement/hardware criteria | [WS025](ws025-io-memory-cache/ws.md) |
 
 ## 4. Milestones
 
@@ -827,3 +829,15 @@ Stop the active Phase and update its state before changing the plan when:
   policy.
 - a hard-real-time or POSIX-crash-survival claim cannot be supported by the
   selected core, interrupt, firmware, memory, or shared-kernel isolation model.
+
+2026-09-09: ユーザー承認の q124 で PC-98 起動回復を優先し、続いて AX211 VFIO の net wifi 自動接続・DHCP・復旧と初回 OFFER 通知を実装・検証する。
+
+2026-09-09 追加: q124 に [ws025-p034](ws025-io-memory-cache/phase034-ax211-operation-recovery/phase.md) を追加（pending、最新依頼で実行承認済み）。AX211 の直接 up/down/connect 反復後の無限エラーを再現・修正する。p033 実機試験後に実行。
+
+q124 進捗: p033 DHCP 復旧中に AX211 の反復 rollback エラーを実機再現したため、p034 を in-progress として原因修正を先行する。p033 は受け入れ未完了のまま保持する。
+
+追加依頼: q124 に [ws025-p035](ws025-io-memory-cache/phase035-multi-radio-selection/phase.md) を追加（pending、実行承認済み）。AX211＋RTL8822BU の同時自動接続と遅延を確認・修正する。p034 反復試験後に開始。
+
+q124 最新: p032–p034 completed。AX211 反復24操作、association cancel、DHCP loss/recovery とホスト復元完了。p035 複数無線 baseline 実行中。
+
+q124 最終: p032–p035 completed / Queue finished。複数Wi-Fi待機短縮、両radio実通信、取消し復旧、単独AX211反復、3 architecture buildまで完了。[p035実行結果](ws025-io-memory-cache/phase035-multi-radio-selection/results.md)に測定条件と残存firmware assertを記録した。

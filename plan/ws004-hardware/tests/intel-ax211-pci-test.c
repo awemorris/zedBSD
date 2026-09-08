@@ -126,6 +126,7 @@ static unsigned scan_abort_count;
 static unsigned scan_abort_ack_count;
 static unsigned scan_notification_count;
 static unsigned scan_ready_reports;
+static unsigned scan_complete_reports;
 static unsigned scan_frame_reports;
 static unsigned scan_error_reports;
 static unsigned rx_decode_count;
@@ -220,6 +221,7 @@ static void test_malformed_rx_is_dropped(void);
 static void test_failed_key_add_scrubs_plaintext(void);
 static void test_tx_kick_schedules_recovery(void);
 static void test_recovery_join_retries_without_free(void);
+static void test_failed_poll_stop_uses_retirement(void);
 static void test_notification_layout_versions(void);
 static void test_receive_copy_replenish_and_poll_boundary(void);
 static void test_scan_session_and_rx_poll_integration(void);
@@ -320,6 +322,7 @@ fixture_reset(
 	scan_abort_ack_count = 0U;
 	scan_notification_count = 0U;
 	scan_ready_reports = 0U;
+	scan_complete_reports = 0U;
 	scan_frame_reports = 0U;
 	scan_error_reports = 0U;
 	rx_decode_count = 0U;
@@ -2344,6 +2347,20 @@ wlan_station_report_scan_channel_ready(
 }
 
 int
+wlan_station_report_scan_channel_complete(
+	struct wlan_station *station,
+	uint64_t generation,
+	uint32_t step_index)
+{
+	assert(station == published_station);
+	assert(allocated_controller->lifecycle_lock.locked == 1U);
+	assert(generation == allocated_controller->scan_session.common_generation);
+	assert(step_index == allocated_controller->scan_step_index);
+	scan_complete_reports++;
+	return 0;
+}
+
+int
 wlan_station_report_scan_frame(
 	struct wlan_station *station,
 	uint64_t generation,
@@ -3085,6 +3102,8 @@ test_failed_key_add_scrubs_plaintext(void)
 	struct drv_pci_device device;
 	uint64_t deadline;
 	size_t index;
+	unsigned frees;
+	int error;
 
 	fixture_reset(&device);
 	assert(drv_pci_intel_ax211_driver_register() == 0);
@@ -3116,13 +3135,32 @@ test_failed_key_add_scrubs_plaintext(void)
 	assert(controller->quarantined == 1U);
 	assert(controller->runtime_active == 0U);
 	assert(controller->active_dma != NULL);
+	assert(published_station->stop_pending);
+	assert(controller->close_pending);
+	assert(published_device->ops->open(published_device) == EBUSY);
 	assert(controller->staged_pairwise_key.valid == 1U);
 	assert(controller->staged_pairwise_key.programmed == 1U);
 	for (index = 0U;
 	    index < sizeof(controller->staged_pairwise_key.request.key);
 	    index++)
 		assert(controller->staged_pairwise_key.request.key[index] == 0U);
+	/* A failed independent retry retains DMA; the next checked retry recovers. */
+	frees = dma_frees;
+	published_station->stop_work_active = 1U;
+	error = published_station->ops->stop_retry(controller);
+	assert(error != 0 && dma_frees == frees);
+	wlan_station_stop_complete(published_station, error);
+	published_station->stop_work_active = 0U;
 	device.failure = FIXTURE_FAIL_NONE;
+	published_station->stop_work_active = 1U;
+	error = published_station->ops->stop_retry(controller);
+	assert(error == 0);
+	wlan_station_stop_complete(published_station, error);
+	published_station->stop_work_active = 0U;
+	assert(!controller->quarantined && controller->session_stopped);
+	assert(controller->active_dma == NULL && dma_allocations == dma_frees);
+	assert(published_device->ops->open(published_device) == 0);
+	published_device->ops->close(published_device);
 	assert(ax211_pci_detach(&device, 0U) == 0);
 }
 
@@ -3268,6 +3306,47 @@ test_recovery_join_retries_without_free(void)
 	assert(controller->active_dma == NULL);
 	assert(controller->quarantined == 0U && controller->session_stopped);
 	assert(dma_allocations == dma_frees);
+	assert(ax211_pci_detach(&device, 0U) == 0);
+}
+
+/* Fatal poll cleanup must remain retryable after the receive path is disabled. */
+static void
+test_failed_poll_stop_uses_retirement(void)
+{
+	struct ax211_pci_controller *controller;
+	struct drv_pci_device device;
+	unsigned frees;
+	int error;
+
+	fixture_reset(&device);
+	assert(drv_pci_intel_ax211_driver_register() == 0);
+	assert(ax211_pci_attach(&device, &ax211_pci_ids[0]) == 0);
+	drv_pci_intel_ax211_devices_ready();
+	controller = device.driver_data;
+	assert(published_device->ops->open(published_device) == 0);
+
+	/* Inject a fatal runtime event and an unproven interrupt drain. */
+	mutex_lock(&controller->lifecycle_lock);
+	ax211_pci_recovery_latch_locked(controller, EIO);
+	mutex_unlock(&controller->lifecycle_lock);
+	device.failure = FIXTURE_FAIL_IRQ_DRAIN;
+	frees = dma_frees;
+	assert(published_device->ops->poll_receive(published_device, 1U) == 0U);
+	assert(!controller->runtime_active && controller->quarantined);
+	assert(published_station->stop_pending && controller->close_pending);
+	assert(dma_frees == frees && controller->active_dma != NULL);
+
+	/* No subsequent RX poll is needed to retire the failed epoch. */
+	device.failure = FIXTURE_FAIL_NONE;
+	published_station->stop_work_active = 1U;
+	error = published_station->ops->stop_retry(controller);
+	assert(error == 0);
+	wlan_station_stop_complete(published_station, error);
+	published_station->stop_work_active = 0U;
+	assert(!controller->quarantined && controller->session_stopped);
+	assert(dma_allocations == dma_frees);
+	assert(published_device->ops->open(published_device) == 0);
+	published_device->ops->close(published_device);
 	assert(ax211_pci_detach(&device, 0U) == 0);
 }
 
@@ -3435,6 +3514,7 @@ test_scan_session_and_rx_poll_integration(void)
 	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
 	assert(scan_start_ack_count == 1U);
 	assert(scan_ready_reports == 1U);
+	assert(scan_complete_reports == 0U);
 	assert(scan_report_generation == common_generation);
 	assert(scan_report_step == 0U);
 	assert(controller->scan_session.phase ==
@@ -3461,6 +3541,7 @@ test_scan_session_and_rx_poll_integration(void)
 	    INTEL_AX211_SCAN_GROUP_LEGACY, 0x80U, payload, sizeof(payload));
 	assert(published_device->ops->poll_receive(published_device, 1U) == 1U);
 	assert(scan_notification_count == 1U);
+	assert(scan_complete_reports == 1U);
 	assert(controller->scan_session.phase ==
 	    INTEL_AX211_SCAN_SESSION_TERMINAL);
 	assert(published_station->ops->scan_stop(controller,
@@ -3540,6 +3621,7 @@ test_association_key_tx_rx_disconnect_sequence(void)
 	assert(published_device->ops->open(published_device) == 0);
 	assert(scan_profile_updates == 1U);
 	assert(published_profile.channels[10U].channel == 36U);
+	assert(published_profile.channels[10U].flags == WLAN_SCAN_CHANNEL_OFFLOADED_DWELL);
 	scan_generation = UINT64_C(0x100000029);
 	deadline = clock_ticks() + 100U;
 	assert(published_station->ops->scan_channel_start(controller,
@@ -4364,6 +4446,7 @@ main(void)
 	test_failed_key_add_scrubs_plaintext();
 	test_tx_kick_schedules_recovery();
 	test_recovery_join_retries_without_free();
+	test_failed_poll_stop_uses_retirement();
 	test_notification_layout_versions();
 	test_receive_copy_replenish_and_poll_boundary();
 	test_scan_session_and_rx_poll_integration();

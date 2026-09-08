@@ -235,6 +235,7 @@ strerror(int error)
 	case EACCES: return "Permission denied";
 	case ENETDOWN: return "Network is down";
 	case ETIMEDOUT: return "Connection timed out";
+	case ECONNRESET: return "Connection reset by peer";
 	case ESRCH: return "No such process";
 	case ECHILD: return "No child process";
 	case E2BIG: return "Argument list too long";

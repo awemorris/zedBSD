@@ -11,7 +11,7 @@
  * Implements the zedBSD userland curses component.
  */
 
-#include "userland/base/curses/curses.h"
+#include <curses.h>
 
 #include "userland/base/common/terminfo.h"
 

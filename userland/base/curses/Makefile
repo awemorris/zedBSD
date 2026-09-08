@@ -7,4 +7,4 @@ endif
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,curses,curses terminal library,*,y,\
 	library,userland/base/curses/curses.c userland/base/common/terminfo.c,y,\
 	base,base/curses,base/terminfo,,library,$(ZEDBSD_CURSES_DATA),\
-	userland/base/curses/curses.h))
+	libc/include/curses.h))

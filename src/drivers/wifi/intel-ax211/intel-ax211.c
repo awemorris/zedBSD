@@ -1422,6 +1422,7 @@ static int ax211_pci_station_close_wait(struct wlan_station *station, uint64_t d
 static int ax211_pci_close_locked(struct ax211_pci_controller *);
 static int ax211_pci_log_rejection(struct ax211_pci_controller *);
 static void ax211_pci_recovery_latch_locked(struct ax211_pci_controller *controller, int error);
+static void ax211_pci_stop_defer_locked(struct ax211_pci_controller *controller, int error);
 static int ax211_pci_recovery_run_locked(struct ax211_pci_controller *controller);
 static void ax211_pci_list_add(struct ax211_pci_controller *controller);
 static int ax211_pci_list_remove(struct ax211_pci_controller *controller);
@@ -2870,6 +2871,8 @@ ax211_pci_recovery_run_locked(
 
 	/* Checks the operation status. */
 	if (stop_error != 0) {
+		/* An inactive, quarantined runtime cannot drive another poll retry. */
+		ax211_pci_stop_defer_locked(controller, stop_error);
 		hal_printf("intel-ax211: fatal poll cleanup failed (%d)\n",
 			   stop_error);
 	}
@@ -3068,6 +3071,32 @@ ax211_pci_session_stop(
 
 	/* Returns the computed result. */
 	return result;
+}
+
+/* Transfers an incomplete global stop to the independent retirement owner. */
+static void
+ax211_pci_stop_defer_locked(
+	struct ax211_pci_controller *controller,
+	int error)
+{
+	/* An existing close owner will publish its own checked result. */
+	if (controller->close_pending)
+		return;
+
+	/* Keeps new operations out until the retained hardware epoch is retired. */
+	controller->close_pending = 1U;
+	controller->operation_admission_open = 0U;
+
+	/* Stops common timer callbacks and arms its bounded retirement retry. */
+	wlan_station_stop_request(controller->station);
+	wlan_station_stop_complete(controller->station, error);
+
+	/* Preserves the first failure without repeating firmware rollback logs. */
+	hal_printf("intel-ax211: global stop deferred error=%d runtime-state=%u "
+		   "irq=%u/%u dma-retained=%u\n",
+		   error, controller->runtime_start.state,
+		   controller->irq_established, controller->irq_allocated,
+		   controller->runtime_start.dma_prepared);
 }
 
 /* Reads the PCIe LTR-enable policy without broadening the device match. */
@@ -3931,6 +3960,7 @@ ax211_pci_runtime_scan_profile(
 			return EINVAL;
 		profile->channels[index].channel = source->channel[index];
 		profile->channels[index].center_frequency_mhz = frequency;
+		profile->channels[index].flags = WLAN_SCAN_CHANNEL_OFFLOADED_DWELL;
 	}
 
 	/* Succeeded. */
@@ -4157,6 +4187,7 @@ ax211_pci_scan_notification_dispatch(
 	const uint8_t *payload;
 	struct intel_ax211_scan_session_event reported;
 	int result;
+	int report_result;
 
 	/* Handles the controller condition. */
 	if (!controller->scan_initialized)
@@ -4189,6 +4220,19 @@ ax211_pci_scan_notification_dispatch(
 	/* Checks the operation result. */
 	if (result == INTEL_AX211_SCAN_SESSION_ABORTED)
 		ax211_pci_bss_staging_discard(controller);
+
+	/* Advances the common channel only after a validated firmware event. */
+	if (result == INTEL_AX211_SCAN_SESSION_COMPLETE) {
+		report_result = wlan_station_report_scan_channel_complete(
+			controller->station,
+			reported.common_generation,
+			controller->scan_step_index);
+		if (report_result != 0 && report_result != ESTALE &&
+		    report_result != ENODEV) {
+			ax211_pci_scan_report_error(controller,
+			    INTEL_AX211_SCAN_SESSION_FAILED);
+		}
+	}
 
 	/* Checks the operation result. */
 	if (result == INTEL_AX211_SCAN_SESSION_OK ||
@@ -6035,8 +6079,15 @@ ax211_pci_key_fail_closed(
 		   controller->association.resources);
 	stop_error = ax211_pci_session_stop(controller);
 	controller->quarantined = stop_error != 0;
-	if (stop_error != 0)
+
+	/* The independent owner can retry after this radio callback returns. */
+	if (stop_error != 0) {
+		ax211_pci_stop_defer_locked(controller, stop_error);
+
+		/* Reports the unproven stop; no resource absence is claimed. */
 		return stop_error;
+	}
+
 
 	/* Returns the computed result. */
 	return error != 0 ? error : EIO;
@@ -7543,7 +7594,7 @@ ax211_radio_disconnect(
 
 		/* Checks the operation result. */
 		result = ax211_pci_assoc_rollback(controller, generation);
-		if (result != 0) {
+		if (result != 0 && ax211_pci_log_rejection(controller)) {
 			hal_printf("intel-ax211: association rollback failed "
 				   "generation=%u result=%d phase=%u step=%u "
 				   "failure=%d\n",

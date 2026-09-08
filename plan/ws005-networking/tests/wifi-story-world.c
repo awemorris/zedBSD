@@ -245,6 +245,7 @@ int story_ioctl(int fd, unsigned long command, ...)
  }
  if (command == SIOCSWLANCONNECT) {
   struct wlan_connect_request *request = argument;
+  radio->connection_attempts++;
   if (radio->connect_error) { errno = radio->connect_error; return -1; }
   if (radio->rapid_scan > 0) { radio->rapid_scan--; errno = ENOENT; return -1; }
   if (!radio->up || radio->stop_pending) { errno = ENETDOWN; return -1; }

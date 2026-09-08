@@ -91,6 +91,7 @@ static void finish(void)
 static void run_story(unsigned id)
 {
  unsigned before;
+ uint64_t selection_started;
  pid_t child;
  reset(id);
  switch (id) {
@@ -212,6 +213,57 @@ static void run_story(unsigned id)
   key("scenario-A", 0); command("enable", 1); story->child_wait_fault = 1;
   command("connect scenario-A", 0); story_check(story->child_wait_fault == 0, "lost wait result injected on connect");
   command("connect scenario-A", 1); finish(); break;
+ case 31:
+  /* The scan finishes during the idle interval after selection timed out. */
+  story->radios[1].present = 0;
+  story->radios[0].scan_delay = 100000;
+  key("scenario-A", 1); command("enable", 1); tick();
+  state(NETWORKD_WLAN_AUTO_SEARCHING);
+  story->radios[0].scan = WLAN_SCAN_COMPLETE;
+  story->radios[0].snapshot = story->radios[0].generation;
+  tick();
+  state(NETWORKD_WLAN_CONNECTED);
+  story_check(story->radios[0].scans == 1, "late completed scan must be consumed before restarting");
+  finish(); break;
+ case 32:
+  /* Consuming an empty snapshot must still allow a later fresh scan. */
+  story->radios[1].present = 0;
+  story->radios[0].scan_delay = 100000;
+  story->radios[0].visible = 0;
+  key("scenario-A", 1); command("enable", 1); tick();
+  story->radios[0].scan = WLAN_SCAN_COMPLETE;
+  story->radios[0].snapshot = story->radios[0].generation;
+  tick(); state(NETWORKD_WLAN_AUTO_SEARCHING);
+  story->radios[0].visible = 1;
+  story->radios[0].scan_delay = 0;
+  tick(); state(NETWORKD_WLAN_CONNECTED);
+  story_check(story->radios[0].scans == 2, "consumed empty scan must refresh for a newly visible AP");
+  finish(); break;
+ case 33:
+  story->radios[0].scan_delay = 100000;
+  key("scenario-A", 1); command("enable", 1); selection_started = story->now;
+  connected("wlan1");
+  story_check(story->now - selection_started < 10000000ULL, "ready later radio must not wait for slow earlier radio");
+  finish(); break;
+ case 34:
+  story->radios[1].scan_delay = 100000;
+  key("scenario-A", 1); command("enable", 1); selection_started = story->now;
+  connected("wlan0");
+  story_check(story->now - selection_started < 10000000ULL, "ready first radio must not wait for slow later radio");
+  finish(); break;
+ case 35:
+  story->radios[0].scan_delay = 100000;
+  key("scenario-A", 0); command("enable", 1); selection_started = story->now;
+  command("connect scenario-A", 1); connected("wlan1");
+  story_check(story->now - selection_started < 5000000ULL, "manual target uses a completed radio without ordering wait");
+  finish(); break;
+ case 36:
+  story->radios[0].connect_error = EIO;
+  story->radios[1].scan_delay = 3;
+  key("scenario-A", 1); command("enable", 1); connected("wlan1");
+  story_check(story->radios[0].connection_attempts != 0, "early failing candidate was exercised");
+  finish(); break;
+
  }
  printf("story %02u PASS steps=%u simulated-us=%llu\n", id, steps, (unsigned long long)story->now);
  fflush(stdout);
@@ -224,7 +276,7 @@ int main(void)
  story = mmap(NULL, sizeof(*story), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
  story_check(story != MAP_FAILED, "shared radio boundary");
  if (getenv("STORY_ID")) only = (unsigned)atoi(getenv("STORY_ID"));
- for (id = 1; id <= 30; id++) if (!only || only == id) run_story(id);
+ for (id = 1; id <= 36; id++) if (!only || only == id) run_story(id);
  story_daemon_reset(); munmap(story, sizeof(*story));
  for (fd = 0; fd < 256; fd++) after += fcntl(fd, F_GETFD) != -1;
  story_check(after == before, "all parent pipe/socket/temporary descriptors retired");

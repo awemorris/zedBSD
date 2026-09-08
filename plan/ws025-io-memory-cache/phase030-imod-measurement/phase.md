@@ -12,6 +12,8 @@ Parent: [WS025](../ws.md)
 
 追加の先行条件: [ws025-p031](../phase031-driver-layout-style/phase.md) のドライバ整理を完了してから実装する。下記の旧ソースパスは p031 の移行表で解決する。既存の採用条件は維持する。
 
+追加の回帰 gate: [ws025-p032](../phase032-pc98-boot-regression/phase.md) の PC-98 QEMU 起動回復を完了してから実装へ進む。
+
 ## 目的と境界
 
 IRQ latency と負荷を測定し、既定値を変えるか維持するか決める。

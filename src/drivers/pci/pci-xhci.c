@@ -300,6 +300,44 @@ static int xhci_detach(struct drv_pci_device *d, unsigned flags);
 
 _Static_assert(ZEDBSD_XHCI_IMOD <= 65535U, "xHCI IMOD interval range");
 
+/* Device operation and registration tables. */
+static const struct drv_usb_hcd_ops xhci_ops = {
+	.start = xhci_start,
+	.quiesce = xhci_quiesce,
+	.stop = xhci_stop,
+	.device_enable = xhci_guarded_device_enable,
+	.device_set_address = xhci_guarded_set_address,
+	.device_quiesce = xhci_guarded_device_quiesce,
+	.device_disable = xhci_guarded_device_disable,
+	.urb_enqueue = xhci_urb_enqueue,
+	.urb_reserve = xhci_urb_reserve,
+	.urb_unreserve = xhci_urb_unreserve,
+	.urb_reserve_buffer = xhci_urb_reserve_buffer,
+	.urb_dequeue = xhci_guarded_urb_dequeue,
+	.endpoint_enable = xhci_guarded_endpoint_enable,
+	.endpoint_disable = xhci_guarded_endpoint_disable,
+	.endpoint_reset = xhci_guarded_endpoint_reset,
+	.frame_number = xhci_guarded_frame,
+	.root_hub_status = xhci_guarded_root_status,
+	.root_hub_control = xhci_guarded_root_control,
+	.root_port_reset = xhci_guarded_root_port_reset};
+
+static const struct drv_pci_id ids[] = {
+	{
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		0x0c0330U, 0xffffffU, 0
+	}
+};
+
+static struct drv_pci_driver driver = {
+	.name = "xhci",
+	.ids = ids,
+	.id_count = 1,
+	.attach = xhci_attach,
+	.detach = xhci_detach
+};
+
 /*
  * Registers this driver with the PCI bus.
  */
@@ -5550,40 +5588,3 @@ xhci_sg_enqueue(
 /*
  * XHCI
  */
-
-static const struct drv_usb_hcd_ops xhci_ops = {
-	.start = xhci_start,
-	.quiesce = xhci_quiesce,
-	.stop = xhci_stop,
-	.device_enable = xhci_guarded_device_enable,
-	.device_set_address = xhci_guarded_set_address,
-	.device_quiesce = xhci_guarded_device_quiesce,
-	.device_disable = xhci_guarded_device_disable,
-	.urb_enqueue = xhci_urb_enqueue,
-	.urb_reserve = xhci_urb_reserve,
-	.urb_unreserve = xhci_urb_unreserve,
-	.urb_reserve_buffer = xhci_urb_reserve_buffer,
-	.urb_dequeue = xhci_guarded_urb_dequeue,
-	.endpoint_enable = xhci_guarded_endpoint_enable,
-	.endpoint_disable = xhci_guarded_endpoint_disable,
-	.endpoint_reset = xhci_guarded_endpoint_reset,
-	.frame_number = xhci_guarded_frame,
-	.root_hub_status = xhci_guarded_root_status,
-	.root_hub_control = xhci_guarded_root_control,
-	.root_port_reset = xhci_guarded_root_port_reset};
-
-static const struct drv_pci_id ids[] = {
-	{
-		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-		0x0c0330U, 0xffffffU, 0
-	}
-};
-
-static struct drv_pci_driver driver = {
-	.name = "xhci",
-	.ids = ids,
-	.id_count = 1,
-	.attach = xhci_attach,
-	.detach = xhci_detach
-};

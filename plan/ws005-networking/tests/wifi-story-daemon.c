@@ -2,6 +2,8 @@
 #include "wifi-story.h"
 #define socket story_socket
 #define ioctl story_ioctl
+/* Selection waits and child waits share the same advancing test clock. */
+#define nanosleep story_nanosleep
 #define setsockopt story_setsockopt
 #define getsockopt story_getsockopt
 #define open story_open

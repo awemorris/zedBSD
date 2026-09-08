@@ -17,7 +17,7 @@ struct story_radio {
  int connect_error;
  unsigned connect_delay;
  unsigned index, generation, snapshot, connect_generation;
- unsigned connections, down_calls;
+ unsigned connections, down_calls, connection_attempts;
  uint32_t address, netmask, broadcast;
  char ssid[33];
 };

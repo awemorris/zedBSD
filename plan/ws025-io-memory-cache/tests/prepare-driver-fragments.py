@@ -5,6 +5,7 @@ These files are disposable views, never alternate production implementations.
 The native kernel builds and runtime gates exercise the complete translation units.
 """
 from pathlib import Path
+import argparse
 import hashlib
 import json
 import re
@@ -14,7 +15,7 @@ PHASE = REPO / 'plan/ws025-io-memory-cache/phase031-driver-layout-style'
 OUTPUT = REPO / 'plan/ws025-io-memory-cache/temp/p031-driver-fragments'
 
 
-def prepare():
+def prepare(selected=None):
     rows = [line.split('\t') for line in (PHASE / 'source-map.tsv').read_text().splitlines()[1:]]
     counts = {}
     for old, new in rows:
@@ -22,6 +23,8 @@ def prepare():
     dependencies = json.loads((PHASE / "fragment-headers.json").read_text())
     manifest = {}
     for old, new in rows:
+        if selected is not None and new not in selected:
+            continue
         if counts[new] == 1:
             continue
         source = (REPO / new).read_text()
@@ -48,4 +51,6 @@ def prepare():
 
 
 if __name__ == '__main__':
-    prepare()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source", action="append", help="Prepare only the named consolidated production source")
+    prepare(parser.parse_args().source)

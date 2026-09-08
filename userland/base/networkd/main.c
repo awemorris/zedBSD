@@ -100,6 +100,9 @@ struct networkd_wlan_radio {
 	int administrative_up;
 	int association_active;
 	uint32_t scan_state;
+	uint64_t snapshot_generation;
+	/* Last validated snapshot considered by selection for this device identity. */
+	uint64_t consumed_snapshot_generation;
 	uint32_t stop_flags;
 	int observation_error;
 };
@@ -260,6 +263,7 @@ static int enumerate_wlan_radios(struct networkd_wlan_radio *, size_t, size_t *)
 static int prepare_wlan_radios(struct networkd_wlan_radio *, size_t, char *, size_t, size_t *);
 static int run_wifi_append(const char *, const char *, char *, size_t, size_t *);
 static int prepare_wlan_radio(struct networkd_wlan_radio *, char *, size_t, size_t *);
+static void consume_wlan_snapshot(const struct networkd_wlan_radio *, uint64_t);
 static int stop_wlan_radios(const struct networkd_wlan_radio *, size_t, int);
 static int wlan_radio_status(const struct networkd_wlan_radio *, struct wlan_status_request *);
 static int wifi_disable_defer(void);
@@ -1229,7 +1233,7 @@ run_automatic_work(
 	radio_count = 0U;
 	no_candidate = 0;
 
-	/* Starts a fresh generation before considering current automatic profiles. */
+	/* Keeps an unconsumed completed scan available to the current profiles. */
 	ready = enumerate_wlan_radios(radios, NETWORKD_WLAN_RADIO_MAX,
 	    &radio_count) == 0 && radio_count != 0U;
 	if (ready)
@@ -2646,10 +2650,14 @@ static void
 wifi_profiles_changed(
 	const struct zedbsd_peercred *peer)
 {
+	size_t index;
+
 	if (peer == NULL || !networkd_managed_wlan_owner_matches(&managed_wlan,
 	    peer->euid))
 		return;
 	automatic_candidate_skip = 0U;
+	for (index = 0U; index < known_wlan_radio_count; index++)
+		known_wlan_radios[index].consumed_snapshot_generation = 0U;
 	if (wifi_work.background)
 		wifi_work.profiles_changed = 1;
 	if (managed_wlan.state == NETWORKD_WLAN_AUTO_SEARCHING)
@@ -3723,6 +3731,11 @@ enumerate_wlan_radios(
 		    status.state >= WLAN_STATE_AUTHENTICATING &&
 		    status.state <= WLAN_STATE_DISCONNECTING;
 		radios[count].scan_state = status.scan_state;
+		radios[count].snapshot_generation = status.snapshot_generation;
+		radios[count].consumed_snapshot_generation = 0U;
+		if (known < known_wlan_radio_count)
+			radios[count].consumed_snapshot_generation =
+			    known_wlan_radios[known].consumed_snapshot_generation;
 		count++;
 	}
 	free(interfaces);
@@ -3771,6 +3784,8 @@ prepare_wlan_radio(
 	size_t capacity,
 	size_t *output_length)
 {
+	int reuse_snapshot;
+
 	radio->ready = 0;
 	if (radio->observation_error != 0 || radio->stop_flags != 0U) {
 		errno = radio->observation_error != 0 ? radio->observation_error : EBUSY;
@@ -3782,14 +3797,20 @@ prepare_wlan_radio(
 		    capacity, output_length) != 0)
 			return -1;
 		radio->association_active = 0;
+		radio->scan_state = WLAN_SCAN_IDLE;
 	}
 	if (!radio->administrative_up) {
 		if (run_wifi_append(radio->interface, "up", output,
 		    capacity, output_length) != 0)
 			return -1;
 		radio->administrative_up = 1;
+		radio->scan_state = WLAN_SCAN_IDLE;
 	}
-	if (radio->scan_state != WLAN_SCAN_RUNNING) {
+	/* A scan can finish after the previous selection deadline, during idle. */
+	reuse_snapshot = radio->scan_state == WLAN_SCAN_COMPLETE &&
+	    radio->snapshot_generation != 0U &&
+	    radio->snapshot_generation != radio->consumed_snapshot_generation;
+	if (radio->scan_state != WLAN_SCAN_RUNNING && !reuse_snapshot) {
 		if (run_wifi_append(radio->interface, "search-start", output,
 		    capacity, output_length) != 0)
 			return -1;
@@ -3797,6 +3818,26 @@ prepare_wlan_radio(
 	}
 	radio->ready = 1;
 	return 0;
+}
+
+/* Remembers consumption only for the exact interface observed by selection. */
+static void
+consume_wlan_snapshot(
+	const struct networkd_wlan_radio *radio,
+	uint64_t generation)
+{
+	size_t index;
+
+	if (generation == 0U)
+		return;
+	for (index = 0U; index < known_wlan_radio_count; index++) {
+		if (known_wlan_radios[index].ifindex != radio->ifindex)
+			continue;
+		if (strcmp(known_wlan_radios[index].interface, radio->interface) != 0)
+			continue;
+		known_wlan_radios[index].consumed_snapshot_generation = generation;
+		return;
+	}
 }
 
 /* Isolates each radio failure while requiring at least one usable radio. */
@@ -4088,6 +4129,7 @@ collect_profile_radios(
 	size_t profile_index;
 	size_t radio_index;
 	size_t candidate_index;
+	size_t available;
 	unsigned valid_scans;
 	unsigned timeout;
 	int first_error;
@@ -4119,6 +4161,12 @@ collect_profile_radios(
 			automatic_present = 1;
 	}
 	if (!automatic_present) {
+		/* No profile can consume this wave; still allow future discovery. */
+		for (radio_index = 0U; radio_index < radio_count; radio_index++) {
+			if (radios[radio_index].scan_state == WLAN_SCAN_COMPLETE)
+				consume_wlan_snapshot(&radios[radio_index],
+				    radios[radio_index].snapshot_generation);
+		}
 		errno = ENOENT;
 		return -1;
 	}
@@ -4129,7 +4177,7 @@ collect_profile_radios(
 			terminal[radio_index] = 1U;
 	}
 
-	/* Waits for each radio's current asynchronous scan to become terminal. */
+	/* Observes each radio without making a ready candidate await another scan. */
 	while (netutil_monotonic_us() < deadline) {
 		if (wifi_wait_pump != NULL && wifi_wait_pump() != 0) {
 			errno = EINTR;
@@ -4166,6 +4214,9 @@ collect_profile_radios(
 					parse_error = errno;
 					break;
 				}
+				if (parsed.scan_complete)
+					consume_wlan_snapshot(&radios[radio_index],
+					    parsed.snapshot_generation);
 				if (parsed.scan_complete && parsed.ssid_supported)
 					visible[profile_index][radio_index] = 1U;
 				terminal[radio_index] = parsed.scan_terminal != 0;
@@ -4174,6 +4225,9 @@ collect_profile_radios(
 			if (parse_error == 0 && parsed.scan_complete)
 				valid_scans++;
 			if (parse_error != 0) {
+				/* Retry a malformed completed observation with a fresh scan. */
+				consume_wlan_snapshot(&radios[radio_index],
+				    radios[radio_index].snapshot_generation);
 				if (first_error == 0)
 					first_error = parse_error;
 				/* A malformed radio must not hide another usable radio. */
@@ -4184,7 +4238,20 @@ collect_profile_radios(
 			}
 		}
 
-		/* Chooses only after all earlier radios have terminal snapshots. */
+		/* Freeze usable observations now; profile/radio order breaks current ties. */
+		available = 0U;
+		for (profile_index = 0U; profile_index < model->profile_count;
+		    profile_index++) {
+			for (radio_index = 0U; radio_index < radio_count; radio_index++) {
+				if (visible[profile_index][radio_index])
+					available++;
+			}
+		}
+
+		/* A skipped prefix still waits for later candidates or a terminal wave. */
+		if (available > skip)
+			break;
+
 		all_terminal = 1;
 		for (radio_index = 0U; radio_index < radio_count;
 		    radio_index++) {
@@ -4236,7 +4303,6 @@ select_manual_radio(
 	unsigned char terminal[NETWORKD_WLAN_RADIO_MAX];
 	unsigned char visible[NETWORKD_WLAN_RADIO_MAX];
 	size_t radio_index;
-	size_t prior;
 	unsigned timeout;
 	int earlier_terminal;
 
@@ -4293,15 +4359,10 @@ select_manual_radio(
 			networkd_wifi_child_result_clear(&result);
 		}
 
-		/* A candidate wins only after every earlier radio is resolved. */
+		/* Select among completed observations, without waiting for unseen radios. */
 		for (radio_index = 0U; radio_index < radio_count;
 		    radio_index++) {
-			earlier_terminal = 1;
-			for (prior = 0U; prior < radio_index; prior++) {
-				if (!terminal[prior])
-					earlier_terminal = 0;
-			}
-			if (visible[radio_index] && earlier_terminal) {
+			if (visible[radio_index]) {
 				*selected_radio = radio_index;
 				return 0;
 			}
@@ -4507,6 +4568,8 @@ acquire_managed_l3(
 		arguments[2] = seconds;
 		arguments[3] = (char *)interface;
 		arguments[4] = NULL;
+		fprintf(stderr, "networkd: %s: Wi-Fi authenticated; acquiring DHCP\n",
+		    interface);
 		result = run_command_until(arguments, timeout, deadline, diagnostic);
 	}
 	if (result == 0)

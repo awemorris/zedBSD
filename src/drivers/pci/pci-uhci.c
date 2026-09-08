@@ -265,6 +265,39 @@ static int uhci_runtime_operational(struct uhci_controller *controller);
 static int uhci_attach(struct drv_pci_device *device, const struct drv_pci_id *id);
 static int uhci_detach(struct drv_pci_device *device, unsigned flags);
 
+/* Device operation and registration tables. */
+static const struct drv_usb_hcd_ops uhci_ops = {
+	.start = uhci_start,
+	.quiesce = uhci_quiesce,
+	.stop = uhci_stop,
+	.urb_enqueue = uhci_urb_enqueue,
+	.urb_dequeue = uhci_urb_dequeue,
+	.endpoint_enable = uhci_endpoint_enable,
+	.endpoint_disable = uhci_endpoint_disable,
+	.endpoint_reset = uhci_endpoint_reset,
+	.frame_number = uhci_frame_number,
+	.root_hub_status = uhci_root_hub_status,
+	.root_hub_control = uhci_root_hub_control
+};
+
+static const struct drv_pci_id uhci_ids[] = {
+	{
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		0x0c0300U,
+		0xffffffU,
+		0
+	}
+};
+
+static struct drv_pci_driver uhci_driver = {
+	.name = "uhci",
+	.ids = uhci_ids,
+	.id_count = 1,
+	.attach = uhci_attach,
+	.detach = uhci_detach
+};
+
 /*
  * Registers this driver with the PCI bus.
  */
@@ -4397,35 +4430,3 @@ uhci_detach(
 /*
  * UHCI
  */
-
-static const struct drv_usb_hcd_ops uhci_ops = {
-	.start = uhci_start,
-	.quiesce = uhci_quiesce,
-	.stop = uhci_stop,
-	.urb_enqueue = uhci_urb_enqueue,
-	.urb_dequeue = uhci_urb_dequeue,
-	.endpoint_enable = uhci_endpoint_enable,
-	.endpoint_disable = uhci_endpoint_disable,
-	.endpoint_reset = uhci_endpoint_reset,
-	.frame_number = uhci_frame_number,
-	.root_hub_status = uhci_root_hub_status,
-	.root_hub_control = uhci_root_hub_control
-};
-
-static const struct drv_pci_id uhci_ids[] = {
-	{
-		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-		0x0c0300U,
-		0xffffffU,
-		0
-	}
-};
-
-static struct drv_pci_driver uhci_driver = {
-	.name = "uhci",
-	.ids = uhci_ids,
-	.id_count = 1,
-	.attach = uhci_attach,
-	.detach = uhci_detach
-};

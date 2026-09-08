@@ -14,13 +14,19 @@
 
 #define WLAN_SCAN_DEADLINE_TICKS 1500ULL
 #define WLAN_SCAN_TUNE_DEADLINE_TICKS 50ULL
-#define WLAN_SCAN_DWELL_TICKS 100ULL
+/* Software scans listen for 100 ms actively, or 200 ms without probes. */
+#define WLAN_SCAN_DWELL_TICKS 10ULL
+#define WLAN_SCAN_PASSIVE_DWELL_TICKS 20ULL
+/* Firmware completion is required; this is a timeout, never a dwell delay. */
+#define WLAN_SCAN_OFFLOAD_DEADLINE_TICKS 100ULL
 #define WLAN_CONNECT_DEADLINE_TICKS 3000ULL
 #define WLAN_CONNECT_TRANSITION_TICKS 100ULL
 #define WLAN_MANAGEMENT_FRAME_MAX 2304U
 
 #define WLAN_SCAN_CHANNEL_MAX 51U
 #define WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED 0x00000001U
+/* The driver reports completion after firmware finishes the channel scan. */
+#define WLAN_SCAN_CHANNEL_OFFLOADED_DWELL 0x00000002U
 
 struct wlan_scan_channel {
 	uint32_t channel;
@@ -206,9 +212,11 @@ int wlan_station_report_scan_frame(struct wlan_station *station,
  * completion must enqueue a bounded copy and let its poll path call these. */
 int wlan_station_report_scan_bss(struct wlan_station *station,
 	uint64_t generation, const struct wlan_bss_record *bss);
-/* These two methods are IRQ-safe latches: they never invoke driver methods,
+/* These methods are IRQ-safe latches: they never invoke driver methods,
  * wait for a control gate, parse frames, or publish a snapshot. */
 int wlan_station_report_scan_channel_ready(struct wlan_station *station,
+	uint64_t generation, uint32_t step_index);
+int wlan_station_report_scan_channel_complete(struct wlan_station *station,
 	uint64_t generation, uint32_t step_index);
 int wlan_station_report_scan_error(struct wlan_station *station,
 	uint64_t generation, int error);

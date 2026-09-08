@@ -39,7 +39,7 @@ for mode in ordinary sanitize; do
 		-Wall -Wextra -Werror -Wdeclaration-after-statement $extra \
 		-I"$repo" -idirafter "$repo/include" \
 		"$repo/plan/ws019-installation/tests/swap-format-test.c" \
-		"$repo/src/kern/swap-format.c" "$temporary/formatter-$mode.o" \
+		"$repo/userland/base/mkswap/swap-codec.c" "$temporary/formatter-$mode.o" \
 		-o "$temporary/test-$mode"
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
 		"$temporary/test-$mode" "$temporary/output-$mode.img" \

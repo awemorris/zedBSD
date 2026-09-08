@@ -24,6 +24,8 @@ run_timeout=${AX211_VFIO_RUN_TIMEOUT:-600}
 cpu=${AX211_VFIO_CPU:-host,+invtsc}
 device=/sys/bus/pci/devices/$bdf
 qemu_pid=
+usb_wlan_port=${AX211_VFIO_USB_WLAN_PORT:-}
+usb_node=
 
 fail()
 {
@@ -85,6 +87,17 @@ restore_host()
 	    fuser "/dev/vfio/$group" >/dev/null 2>&1; then
 		restore_failed=1
 	fi
+	if [ -n "$usb_node" ]; then
+		[ "$(cat "$usb_node/idVendor" 2>/dev/null)" = 2357 ] || restore_failed=1
+		[ "$(cat "$usb_node/idProduct" 2>/dev/null)" = 0138 ] || restore_failed=1
+		[ ! -L "$usb_node:1.0/driver" ] || restore_failed=1
+		usb_address=$(cat "$usb_node/devnum" 2>/dev/null)
+		usb_file=$(printf '/dev/bus/usb/%03d/%03d' "$usb_bus" "$usb_address")
+		if fuser "$usb_file" >/dev/null 2>&1; then
+			restore_failed=1
+		fi
+		[ "$restore_failed" -ne 0 ] || echo "AX211-VFIO: USB WLAN $usb_wlan_port released" >&2
+	fi
 	if [ "$restore_failed" -eq 0 ]; then
 		echo "AX211-VFIO: restored $bdf to iwlwifi" >&2
 	else
@@ -137,6 +150,26 @@ group_devices=$(find "/sys/kernel/iommu_groups/$group/devices" \
 [ "$group_devices" = "$bdf" ] || fail "IOMMU group $group is not a singleton"
 [ -e "$device/reset" ] || fail "$bdf has no PCI reset operation"
 
+# The optional companion is exact-matched and is never the SSH USB Ethernet.
+set --
+if [ -n "$usb_wlan_port" ]; then
+	case $usb_wlan_port in
+		*[!0-9.-]*|*-*-*|*..*|.*|*.) fail "invalid USB topology" ;;
+	esac
+	usb_bus=${usb_wlan_port%%-*}
+	usb_hostport=${usb_wlan_port#*-}
+	[ "$usb_bus" != "$usb_wlan_port" ] || fail "USB topology needs bus-port"
+	usb_node=/sys/bus/usb/devices/$usb_wlan_port
+	[ "$(cat "$usb_node/idVendor")" = 2357 ] || fail "USB WLAN vendor mismatch"
+	[ "$(cat "$usb_node/idProduct")" = 0138 ] || fail "USB WLAN product mismatch"
+	[ ! -L "$usb_node:1.0/driver" ] || fail "USB WLAN must be unbound before this fixture"
+	usb_real=$(readlink -f "$usb_node")
+	route_real=$(readlink -f "/sys/class/net/$safe_route_device/device")
+	case $route_real in "$usb_real"/*) fail "USB WLAN carries SSH route" ;; esac
+	set -- -device "usb-host,bus=xhci.0,hostbus=$usb_bus,hostport=$usb_hostport,id=rtl8822bu"
+	echo "AX211-VFIO: companion USB WLAN $usb_wlan_port 2357:0138" >&2
+fi
+
 mkdir -p "$work_dir"
 chmod 0700 "$work_dir"
 cp --sparse=always "$image" "$work_dir/guest.img"
@@ -160,7 +193,7 @@ timeout --foreground --kill-after=10 "${run_timeout}s" "$qemu" \
 	-device qemu-xhci,id=xhci \
 	-drive if=none,id=usbboot,file="$work_dir/guest.img",format=raw \
 	-device usb-storage,bus=xhci.0,drive=usbboot,id=bootstick,bootindex=1 \
-	-device vfio-pci,host="$bdf",id=ax211 \
+	-device vfio-pci,host="$bdf",id=ax211 "$@" \
 	-vga std -display none -serial none \
 	-debugcon file:"$work_dir/debugcon.log" \
 	-monitor unix:"$work_dir/monitor.sock",server=on,wait=off \

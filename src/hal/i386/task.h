@@ -18,7 +18,12 @@
 #include "asm.h"
 #include "int.h"
 
-#define SYS_STACK_SIZE 8192U
+/*
+ * exec traverses overlay -> UFS -> loop -> FAT -> buffered disk I/O while
+ * retaining syscall and pathname frames.  Eight KiB leaves no room for a
+ * timer interrupt on that path; reserve sixteen KiB as on amd64.
+ */
+#define SYS_STACK_SIZE 16384U
 
 struct task_resume_frame {
 	uint32_t gs, fs, es, ds;

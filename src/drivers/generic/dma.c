@@ -71,6 +71,10 @@ static int device_operation_begin(struct drv_dma_device *device, int allow_destr
 static int dma_vector_segments(struct drv_dma_vector *vector);
 static int dma_vector_backing_free(struct drv_dma_vector *vector);
 
+static void device_operation_end(struct drv_dma_device *device);
+static int address_fits(const struct drv_dma_device *device, uint64_t address, size_t size);
+static int is_power_of_two(uint64_t value);
+
 /*
  * Implements the drv dma device create operation.
  */

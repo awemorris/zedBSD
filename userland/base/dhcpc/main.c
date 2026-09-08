@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <net/route.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +38,7 @@ struct snapshot {
 
 static volatile sig_atomic_t timed_out;
 
+static void report_event(const char *format, ...);
 static int usage(void);
 static int select_interface(int descriptor, char name[IFNAMSIZ]);
 static int if_request(int descriptor, const char *name, unsigned long command, struct ifreq *request);
@@ -157,7 +159,7 @@ main(
 
 	/* Handles the control condition. */
 	if (control < 0) {
-		printf("dhcpc: socket: %s\n", strerror(errno));
+		report_event("dhcpc: socket: %s\n", strerror(errno));
 
 		/* Reports operation failure. */
 		return 1;
@@ -165,7 +167,7 @@ main(
 
 	/* Handles a failed select interface operation. */
 	if (interface[0] == '\0' && select_interface(control, interface) != 0) {
-		printf("dhcpc: select interface: %s\n", strerror(errno));
+		report_event("dhcpc: select interface: %s\n", strerror(errno));
 		close(control);
 
 		/* Reports operation failure. */
@@ -245,7 +247,7 @@ main(
 
 		/* Handles the verbose condition. */
 		if (verbose)
-			printf("dhcpc: %s: broadcasting discover\n", interface);
+			report_event("dhcpc: %s: broadcasting discover\n", interface);
 
 		/* Continue until the operation reaches a terminal state. */
 		for (;;) {
@@ -284,12 +286,17 @@ main(
 		errno = ETIMEDOUT;
 		goto socket_fail;
 	}
-		value_local.s_addr = offer.address;
-		inet_ntop(AF_INET, &value_local, text, sizeof(text));
-	printf("dhcpc: %s: offered %s", interface, text);
+	/* Only the first validated, selected OFFER reaches this point. */
+	value_local.s_addr = offer.address;
+	inet_ntop(AF_INET, &value_local, text, sizeof(text));
+	{
+		char server_text[16];
+
 		value_local.s_addr = offer.server_identifier;
-		inet_ntop(AF_INET, &value_local, text, sizeof(text));
-	printf(" by %s\n", text);
+		inet_ntop(AF_INET, &value_local, server_text, sizeof(server_text));
+		report_event("dhcpc: %s: offered %s by %s\n",
+		    interface, text, server_text);
+	}
 
 	/* Continue while the operation condition remains true. */
 	failure_stage = "ack";
@@ -387,13 +394,13 @@ main(
 		netutil_mask_prefix(value_local, &prefix);
 		value_local.s_addr = lease.address;
 		inet_ntop(AF_INET, &value_local, text, sizeof(text));
-	printf("dhcpc: %s: address %s/%u\n", interface, text, prefix);
+	report_event("dhcpc: %s: address %s/%u\n", interface, text, prefix);
 
 	/* Handles the lease condition. */
 	if (lease.router_count != 0) {
 		value_local.s_addr = lease.routers[0];
 		inet_ntop(AF_INET, &value_local, text, sizeof(text));
-		printf("dhcpc: %s: default route %s\n", interface, text);
+		report_event("dhcpc: %s: default route %s\n", interface, text);
 	}
 
 	/* Handles the lease condition. */
@@ -402,7 +409,7 @@ main(
 		for (i = 0; i < lease.dns_count; i++) {
 			value_local.s_addr = lease.dns_servers[i];
 			inet_ntop(AF_INET, &value_local, text, sizeof(text));
-			printf("dhcpc: %s: dns %s\n", interface, text);
+			report_event("dhcpc: %s: dns %s\n", interface, text);
 		}
 		failure_stage = "resolver";
 
@@ -410,7 +417,13 @@ main(
 		if (write_resolver(interface, &lease) != 0)
 			goto socket_fail;
 	}
-	printf("dhcpc: %s: lease %u seconds\n", interface, lease.lease_time);
+	report_event("dhcpc: %s: lease %u seconds\n", interface, lease.lease_time);
+
+	/* ACK alone is insufficient: address, route and resolver are now committed. */
+	value_local.s_addr = lease.address;
+	inet_ntop(AF_INET, &value_local, text, sizeof(text));
+	report_event("dhcpc: %s: bound %s/%u lease %u seconds\n",
+	    interface, text, prefix, lease.lease_time);
 	(void)alarm(0);
 	close(socket_);
 	close(control);
@@ -446,13 +459,13 @@ fail:
 	    restore_interface(control, interface, &saved) != 0 &&
 	    rollback_error == 0)
 		rollback_error = errno;
-	printf("dhcpc: %s: %s: %s\n", interface, failure_stage,
+	report_event("dhcpc: %s: %s: %s\n", interface, failure_stage,
 	       strerror(saved_errno));
 
 	/* Handles an operation failure. */
 	if (rollback_error != 0) {
 		error = rollback_error;
-		printf("dhcpc: %s: rollback: %s\n", interface,
+		report_event("dhcpc: %s: rollback: %s\n", interface,
 		       strerror(error));
 	}
 	close(control);
@@ -460,6 +473,37 @@ fail:
 
 	/* Reports operation failure. */
 	return 1;
+}
+
+/* Publishes DHCP progress directly to the system console. */
+static void
+report_event(
+	const char *format,
+	...)
+{
+	char message[256];
+	va_list arguments;
+	int length;
+	int descriptor;
+	int saved;
+
+	/* Diagnostics cannot change a DHCP transaction's outcome or errno. */
+	saved = errno;
+	va_start(arguments, format);
+	length = vsnprintf(message, sizeof(message), format, arguments);
+	va_end(arguments);
+	if (length < 0 || (size_t)length >= sizeof(message)) {
+		errno = saved;
+		return;
+	}
+	/* One bounded, best-effort write cannot hold up the transaction. */
+	descriptor = open("/dev/console",
+	    O_WRONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC);
+	if (descriptor >= 0) {
+		(void)write(descriptor, message, (size_t)length);
+		(void)close(descriptor);
+	}
+	errno = saved;
 }
 
 /* Supports the usage operation. */

@@ -205,6 +205,78 @@ static unsigned usb_hid_registered;
 
 static uint16_t usb_hid_le16(const uint8_t *bytes);
 
+static int usb_hid_attach(struct drv_usb_interface *interface, const struct drv_usb_id *id);
+static int usb_hid_detach(struct drv_usb_interface *interface, unsigned flags);
+static int usb_hid_match(struct drv_usb_interface *interface, const struct drv_usb_id *id);
+
+/* Device operation and registration tables. */
+static const struct drv_usb_id usb_hid_ids[] = {
+	{
+		.match_flags = DRV_USB_ID_IF_CLASS,
+		.interface_class = USB_HID_CLASS
+	}
+};
+
+static struct drv_usb_driver usb_hid_driver = {
+	.name = "usb-hid",
+	.ids = usb_hid_ids,
+	.id_count = sizeof(usb_hid_ids) / sizeof(usb_hid_ids[0]),
+	.match = usb_hid_match,
+	.attach = usb_hid_attach,
+	.detach = usb_hid_detach
+};
+
+static int usb_hid_report_descriptor_length(struct drv_usb_interface *interface, size_t *result);
+static int usb_hid_endpoint_capacity(struct drv_usb_interface *interface, struct drv_usb_endpoint *endpoint, size_t *result);
+static int usb_hid_find_endpoint(struct drv_usb_interface *interface, struct drv_usb_endpoint **result);
+static int usb_hid_fetch_layout(struct usb_hid *hid);
+static int usb_hid_set_report_protocol(struct usb_hid *hid);
+static int usb_hid_has_capability(const struct usb_hid *hid, uint16_t type, uint16_t code);
+static void usb_hid_identity(struct usb_hid *hid);
+static void usb_hid_completion(struct drv_usb_urb *urb, void *argument);
+static int usb_hid_begin_submit(struct usb_hid *hid);
+static void usb_hid_end_submit(struct usb_hid *hid);
+static int usb_hid_arm(struct usb_hid *hid);
+static struct usb_hid_report_state * usb_hid_report_state(struct usb_hid *hid, uint8_t report_id);
+static void usb_hid_publish_report(struct usb_hid *hid, const uint8_t *buffer, size_t length);
+static unsigned usb_hid_take_work(struct usb_hid *hid, int *stopping);
+static void usb_hid_unpublish(struct usb_hid *hid);
+static void usb_hid_runtime_stop(struct usb_hid *hid, const char *stage, int error, int transfer_status);
+static void usb_hid_worker(void *argument);
+static int usb_hid_join_worker(struct usb_hid *hid);
+static void usb_hid_close_admission(struct usb_hid *hid);
+static int usb_hid_activate(struct usb_hid *hid, int activation_claimed);
+static void usb_hid_pending_remove(struct usb_hid *hid);
+static uint32_t item_unsigned(const uint8_t *data, size_t size);
+static int32_t sign_extend(uint32_t value, unsigned bits);
+static int item_signed(const uint8_t *data, size_t size, int32_t *result);
+static void local_clear(struct hid_local_state *local);
+static int usage_value(const struct hid_global_state *global, const uint8_t *data, size_t size, uint32_t *result);
+static int local_validate(const struct hid_local_state *local);
+static int local_usage_at(const struct hid_local_state *local, uint32_t index, uint32_t *usage);
+static struct hid_report_description * find_report(struct hid_report_layout *layout, uint8_t id);
+static const struct hid_report_description * find_report_const(const struct hid_report_layout *layout, uint8_t id);
+static int add_report(struct hid_report_layout *layout, uint8_t id, struct hid_report_description **result);
+static int add_capability(struct hid_report_layout *layout, uint16_t type, uint16_t code);
+static int add_absolute_axis(struct hid_report_layout *layout, uint16_t code, int32_t minimum, int32_t maximum);
+static uint16_t keyboard_code(uint16_t usage);
+static int usage_to_event(uint32_t usage, unsigned input_flags, uint16_t *type, uint16_t *code, uint8_t *kind);
+static int logical_maximum(const struct hid_global_state *global, int32_t *result);
+static int logical_range_fits_field(int32_t minimum, int32_t maximum, uint32_t bit_size);
+static int add_field(struct hid_parser *parser, struct hid_report_description *report, uint32_t bit_offset, uint32_t usage_minimum, uint32_t usage_maximum, int32_t logical_minimum, int32_t logical_maximum, uint16_t type, uint16_t code, uint8_t bit_size, uint8_t kind);
+static int add_keyboard_array_capabilities(struct hid_report_layout *layout, uint32_t minimum, uint32_t maximum);
+static int parse_input(struct hid_parser *parser, uint32_t flags);
+static int parse_main(struct hid_parser *parser, unsigned tag, const uint8_t *data, size_t size);
+static int parse_global(struct hid_parser *parser, unsigned tag, const uint8_t *data, size_t size);
+static int parse_local(struct hid_parser *parser, unsigned tag, const uint8_t *data, size_t size);
+static int parse_descriptor(struct hid_parser *parser);
+static struct hid_report_layout * layout_allocate(void);
+static int boot_layout_begin(struct hid_report_layout **result, struct hid_report_layout **layout_result, struct hid_report_description **report_result);
+static int extract_value(const uint8_t *data, size_t length, uint32_t bit_offset, uint8_t bit_size, uint32_t *result);
+static int decode_field_value(const struct hid_report_field *field, const uint8_t *data, size_t length, uint32_t *raw_result, int32_t *value_result);
+static int key_already_present(const struct hid_report_input *input, uint16_t code);
+static int append_value(struct hid_report_input *input, uint16_t type, uint16_t code, int32_t value);
+
 /*
  * Registers this driver with the USB subsystem.
  */
@@ -3335,19 +3407,3 @@ usb_hid_le16(
 /*
  * USB HID
  */
-
-static const struct drv_usb_id usb_hid_ids[] = {
-	{
-		.match_flags = DRV_USB_ID_IF_CLASS,
-		.interface_class = USB_HID_CLASS
-	}
-};
-
-static struct drv_usb_driver usb_hid_driver = {
-	.name = "usb-hid",
-	.ids = usb_hid_ids,
-	.id_count = sizeof(usb_hid_ids) / sizeof(usb_hid_ids[0]),
-	.match = usb_hid_match,
-	.attach = usb_hid_attach,
-	.detach = usb_hid_detach
-};

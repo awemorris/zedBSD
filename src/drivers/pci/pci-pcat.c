@@ -53,6 +53,17 @@ static void pcat_unmap_bar(void *context, struct drv_pci_mapping *mapping);
 static int pcat_allocate_irqs(void *context, struct drv_pci_device *device, enum drv_pci_irq_type type, unsigned minimum, unsigned maximum, struct drv_pci_irq *irqs, unsigned *count);
 static void pcat_free_irqs(void *context, struct drv_pci_device *device, struct drv_pci_irq *irqs, unsigned count);
 
+/* Device operation and registration tables. */
+static const struct drv_pci_bus_ops pcat_bus_ops = {
+	.config_space_size = 4096,
+	.config_read = pcat_config_read,
+	.config_write = pcat_config_write,
+	.map_bar = pcat_map_bar,
+	.unmap_bar = pcat_unmap_bar,
+	.allocate_irqs = pcat_allocate_irqs,
+	.free_irqs = pcat_free_irqs
+};
+
 /*
  * Implements the drv pci pcat init operation.
  */
@@ -659,13 +670,3 @@ pcat_free_irqs(
 /*
  * PC/AT PCI
  */
-
-static const struct drv_pci_bus_ops pcat_bus_ops = {
-	.config_space_size = 4096,
-	.config_read = pcat_config_read,
-	.config_write = pcat_config_write,
-	.map_bar = pcat_map_bar,
-	.unmap_bar = pcat_unmap_bar,
-	.allocate_irqs = pcat_allocate_irqs,
-	.free_irqs = pcat_free_irqs
-};
