@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_SHADOW_H
-#define ZEDBSD_SHADOW_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_SHADOW_H
+#define LIBC_SHADOW_H
 
 #include <stddef.h>
 

@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_STDDEF_H
-#define ZEDBSD_STDDEF_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_STDDEF_H
+#define LIBC_STDDEF_H
 
 typedef __SIZE_TYPE__ size_t;
 typedef __PTRDIFF_TYPE__ ptrdiff_t;

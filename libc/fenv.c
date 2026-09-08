@@ -1,10 +1,19 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #include <fenv.h>
 
-/* Floating-point is implemented in software, so the environment is kept per
+/*
+ * Floating-point is implemented in software, so the environment is kept per
  * execution context by libc instead of being read from a hardware control
  * register.  The weak process-wide cell is replaced by a TLS implementation
- * in userland when threading is active. */
+ * in userland when threading is active.
+ */
+
 static fenv_t default_environment = { 0U, FE_TONEAREST };
 
 __attribute__((weak)) fenv_t *

@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_NL_TYPES_H
-#define ZEDBSD_NL_TYPES_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_NL_TYPES_H
+#define LIBC_NL_TYPES_H
 
 #include <stdint.h>
 

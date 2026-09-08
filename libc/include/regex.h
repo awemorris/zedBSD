@@ -1,7 +1,16 @@
-/* POSIX regular expressions; TRE-compatible public layout. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_REGEX_H
-#define ZEDBSD_REGEX_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * POSIX regular expressions; TRE-compatible public layout.
+ */
+
+#ifndef LIBC_REGEX_H
+#define LIBC_REGEX_H
 
 #include <stddef.h>
 

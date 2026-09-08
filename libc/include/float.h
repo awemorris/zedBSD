@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_FLOAT_H
-#define ZEDBSD_FLOAT_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_FLOAT_H
+#define LIBC_FLOAT_H
 
 #define FLT_RADIX 2
 #define FLT_MANT_DIG 24

@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_LIMITS_H
-#define ZEDBSD_LIMITS_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_LIMITS_H
+#define LIBC_LIMITS_H
 
 #define NAME_MAX 255
 #define PATH_MAX 256

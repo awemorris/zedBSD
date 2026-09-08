@@ -1,6 +1,13 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_LANGINFO_H
-#define ZEDBSD_LANGINFO_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_LANGINFO_H
+#define LIBC_LANGINFO_H
+
 #include <zedbsd/locale-format.h>
 
 typedef int nl_item;

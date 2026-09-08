@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_RTLD_ABI_H
-#define ZEDBSD_RTLD_ABI_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_ZEDBSD_RTLD_ABI_H
+#define LIBC_ZEDBSD_RTLD_ABI_H
 
 #include <stddef.h>
 #include <stdint.h>

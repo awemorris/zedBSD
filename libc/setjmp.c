@@ -1,5 +1,14 @@
-/* Compiler-assisted, architecture-neutral nonlocal jumps.
- * SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Compiler-assisted, architecture-neutral nonlocal jumps.
+ */
+
 #include <setjmp.h>
 
 void

@@ -1,5 +1,13 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_NETINET_IN_H
-#define ZEDBSD_NETINET_IN_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_NETINET_IN_H
+#define LIBC_NETINET_IN_H
+
 #include <zedbsd/netinet.h>
+
 #endif

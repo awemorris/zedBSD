@@ -1,7 +1,15 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_WCTYPE_H
-#define ZEDBSD_WCTYPE_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_WCTYPE_H
+#define LIBC_WCTYPE_H
+
 #include <wchar.h>
+
 #ifdef ZEDBSD_REGEX_HOST_TEST
 typedef unsigned long wctype_t;
 typedef const int *wctrans_t;
@@ -9,6 +17,7 @@ typedef const int *wctrans_t;
 typedef uint32_t wctype_t;
 typedef uint32_t wctrans_t;
 #endif
+
 int iswalnum(wint_t);
 int iswalpha(wint_t);
 int iswblank(wint_t);
@@ -27,4 +36,5 @@ wctype_t wctype(const char *);
 int iswctype(wint_t, wctype_t);
 wctrans_t wctrans(const char *);
 wint_t towctrans(wint_t, wctrans_t);
+
 #endif

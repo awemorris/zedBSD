@@ -1,6 +1,17 @@
-/* SUSv4 file tree walking interface. SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_FTW_H
-#define ZEDBSD_FTW_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * SUSv4 file tree walking interface.
+ */
+
+#ifndef LIBC_FTW_H
+#define LIBC_FTW_H
+
 #include <zedbsd/features.h>
 #include <sys/stat.h>
 

@@ -1,4 +1,14 @@
-/* XSI compatibility wrappers that require no new kernel mechanism. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * XSI compatibility wrappers that require no new kernel mechanism.
+ */
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -17,7 +27,9 @@
 static int concurrency_hint;
 
 int pthread_getconcurrency(void)
-{ return __atomic_load_n(&concurrency_hint, __ATOMIC_RELAXED); }
+{
+	return __atomic_load_n(&concurrency_hint, __ATOMIC_RELAXED);
+}
 
 int pthread_setconcurrency(int value)
 {

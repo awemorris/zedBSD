@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_UTMPX_H
-#define ZEDBSD_UTMPX_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_UTMPX_H
+#define LIBC_UTMPX_H
 
 #include <stdint.h>
 #include <sys/types.h>

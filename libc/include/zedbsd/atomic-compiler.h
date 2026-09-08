@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_ATOMIC_COMPILER_H
-#define ZEDBSD_ATOMIC_COMPILER_H
+#ifndef LIBC_ZEDBSD_ATOMIC_COMPILER_H
+#define LIBC_ZEDBSD_ATOMIC_COMPILER_H
 
 /* Compiler-specific implementation details for the ISO C atomic facade. */
 #define __ZEDBSD_ATOMIC_BOOL_LOCK_FREE	__GCC_ATOMIC_BOOL_LOCK_FREE

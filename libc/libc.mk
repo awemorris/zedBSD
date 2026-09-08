@@ -1,7 +1,5 @@
-# Freestanding libc subset for zedBSD.
-#
-# Historically this code was built and tested independently (M3) before
-# being linked into vmunix at a later integration milestone.
+# zedBSD libc
+# Copyright (C) 2026 Awe Morris
 
 ZEDBSD_LIBC_CC ?= $(CC)
 ZEDBSD_LIBC_NM ?= $(if $(NM),$(NM),nm)

@@ -1,10 +1,25 @@
 /*
- * zedBSD ndbm implementation. The .pag format is little-endian ZDBM v1:
- * magic[8], u32 count, then repeated u32 key-size, u32 value-size and bytes.
- * The companion .dir file identifies the format and prevents accidental use
- * of an incompatible host DBM database.
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * ndbm implementation.
+ *
+ * The .pag format is little-endian ZDBM v1:
+ *  - u8 magic[8]
+ *  - u32 count
+ *  - then repeated:
+ *    - u32 key-size
+ *    - u32 value-size
+ *    - and bytes.
+ *
+ * The companion .dir file identifies the format and prevents
+ * accidental use of an incompatible host DBM database.
+ */
+
 #include <errno.h>
 #include <fcntl.h>
 #include <ndbm.h>
@@ -15,6 +30,7 @@
 #include <unistd.h>
 
 struct dbm_record { unsigned char *key, *value; uint32_t key_size, value_size; };
+
 struct __zedbsd_dbm {
 	char *base;
 	struct dbm_record *records;

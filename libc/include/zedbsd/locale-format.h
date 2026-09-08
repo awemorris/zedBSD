@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_LOCALE_FORMAT_H
-#define ZEDBSD_LOCALE_FORMAT_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_ZEDBSD_LOCALE_FORMAT_H
+#define LIBC_ZEDBSD_LOCALE_FORMAT_H
 
 #include <stdint.h>
 

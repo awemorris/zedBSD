@@ -1,4 +1,14 @@
-/* Canonical pathname construction with symlink resolution delegated to VFS. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Canonical pathname construction with symlink resolution delegated to VFS.
+ */
+
 #include <errno.h>
 #include <limits.h>
 #include <stdlib.h>

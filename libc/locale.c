@@ -1,8 +1,14 @@
 /*
- * zedBSD C/POSIX and C.UTF-8 locale core
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * C/POSIX and C.UTF-8 locale core
+ */
+
 #include "libc/stdio-internal.h"
 #include "libc/locale-db.h"
 #include <errno.h>

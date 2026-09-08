@@ -1,4 +1,14 @@
-/* ISO C and XSI time additions. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * ISO C and XSI time additions.
+ */
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>

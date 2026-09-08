@@ -1,4 +1,14 @@
-/* XSI DES bit-array compatibility and byte swapping. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * XSI DES bit-array compatibility and byte swapping.
+ */
+
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>

@@ -1,4 +1,14 @@
-/* SUS file-tree traversal. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * SUS file-tree traversal.
+ */
+
 #include <dirent.h>
 #include <errno.h>
 #include <ftw.h>

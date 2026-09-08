@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_STDALIGN_H
-#define ZEDBSD_STDALIGN_H
+#ifndef LIBC_STDALIGN_H
+#define LIBC_STDALIGN_H
 
 #ifndef __cplusplus
 #define alignas	_Alignas

@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_NET_ETHERNET_H
-#define ZEDBSD_NET_ETHERNET_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_NET_ETHERNET_H
+#define LIBC_NET_ETHERNET_H
 
 #define ETH_ALEN 6
 #define ETH_HLEN 14

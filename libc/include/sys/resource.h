@@ -1,22 +1,30 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_SYS_RESOURCE_H
-#define ZEDBSD_SYS_RESOURCE_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_SYS_RESOURCE_H
+#define LIBC_SYS_RESOURCE_H
 
 #include <stdint.h>
 #include <zedbsd/resource.h>
 #include <sys/time.h>
-
-typedef uint64_t rlim_t;
-struct rlimit {
-	rlim_t rlim_cur;
-	rlim_t rlim_max;
-};
 
 #define PRIO_PROCESS 0
 #define PRIO_PGRP 1
 #define PRIO_USER 2
 #define RUSAGE_SELF 0
 #define RUSAGE_CHILDREN (-1)
+
+typedef uint64_t rlim_t;
+
+struct rlimit {
+	rlim_t rlim_cur;
+	rlim_t rlim_max;
+};
+
 struct rusage {
 	struct timeval ru_utime, ru_stime;
 	long ru_maxrss, ru_ixrss, ru_idrss, ru_isrss;

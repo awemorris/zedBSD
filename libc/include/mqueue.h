@@ -1,6 +1,13 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_MQUEUE_H
-#define ZEDBSD_MQUEUE_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_MQUEUE_H
+#define LIBC_MQUEUE_H
+
 #include <signal.h>
 #include <sys/types.h>
 #include <time.h>

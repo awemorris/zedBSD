@@ -1,4 +1,14 @@
-/* SUSv4 hash, linear, queue, and tree search interfaces. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * SUSv4 hash, linear, queue, and tree search interfaces.
+ */
+
 #include <errno.h>
 #include <search.h>
 #include <stdint.h>

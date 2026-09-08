@@ -1,4 +1,14 @@
-/* Process-wide UNIX-datagram syslog client. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Process-wide UNIX-datagram syslog client.
+ */
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>

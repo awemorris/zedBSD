@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_FEATURES_H
-#define ZEDBSD_FEATURES_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_ZEDBSD_FEATURES_H
+#define LIBC_ZEDBSD_FEATURES_H
 
 /*
  * Application feature selections are inputs and are never overwritten here.

@@ -1,5 +1,14 @@
-/* ISO C and commonly used BSD string extensions. SPDX-License-Identifier: Zlib
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * ISO C and commonly used BSD string extensions.
+ */
+
 #include <ctype.h>
 #include <endian.h>
 #include <stddef.h>

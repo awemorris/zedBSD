@@ -1,4 +1,14 @@
-/* Remaining ISO C stdio interfaces and common BSD conveniences. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Remaining ISO C stdio interfaces and common BSD conveniences.
+ */
+
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>

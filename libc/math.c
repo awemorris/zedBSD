@@ -1,9 +1,12 @@
 /*
- * zedBSD mathematical library.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
  *
- * This is a clean implementation based on the identities documented beside
- * each approximation.  It deliberately uses only public zedBSD interfaces.
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Mathematical library.
  */
 
 #include <errno.h>

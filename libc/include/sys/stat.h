@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_SYS_STAT_H
-#define ZEDBSD_SYS_STAT_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_SYS_STAT_H
+#define LIBC_SYS_STAT_H
 
 #include <sys/types.h>
 #include <sys/time.h>

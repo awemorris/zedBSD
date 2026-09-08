@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_SYS_IOCTL_H
-#define ZEDBSD_SYS_IOCTL_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_SYS_IOCTL_H
+#define LIBC_SYS_IOCTL_H
 
 #include <zedbsd/features.h>
 #include <stddef.h>

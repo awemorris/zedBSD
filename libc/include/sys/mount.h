@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_SYS_MOUNT_H
-#define ZEDBSD_SYS_MOUNT_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_SYS_MOUNT_H
+#define LIBC_SYS_MOUNT_H
 
 #include <stdint.h>
 

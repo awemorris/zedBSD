@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_SETJMP_H
-#define ZEDBSD_SETJMP_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_SETJMP_H
+#define LIBC_SETJMP_H
 
 #include <zedbsd/features.h>
 #include <signal.h>
@@ -26,7 +32,9 @@ typedef struct {
 	 (void)((environment)[0].save_mask &&                                  \
 		sigprocmask(SIG_SETMASK, NULL, &(environment)[0].mask)),       \
 	 setjmp((environment)[0].jump))
+
 void siglongjmp(sigjmp_buf, int) __attribute__((__noreturn__));
+
 #if __ZEDBSD_LEGACY_VISIBLE
 #define _setjmp(environment) setjmp(environment)
 void _longjmp(jmp_buf, int) __attribute__((__noreturn__));

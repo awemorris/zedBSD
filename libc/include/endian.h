@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_ENDIAN_H
-#define ZEDBSD_ENDIAN_H
+#ifndef LIBC_ENDIAN_H
+#define LIBC_ENDIAN_H
 
 #include <stdint.h>
 

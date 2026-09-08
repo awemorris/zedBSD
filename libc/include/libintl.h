@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_LIBINTL_H
-#define ZEDBSD_LIBINTL_H
+#ifndef LIBC_LIBINTL_H
+#define LIBC_LIBINTL_H
 
 #include <limits.h>
 #include <locale.h>

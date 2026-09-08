@@ -1,4 +1,14 @@
-/* ISO C and commonly used BSD stdlib interfaces. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * ISO C and commonly used BSD stdlib interfaces.
+ */
+
 #include "libc/heap.h"
 
 #include <errno.h>

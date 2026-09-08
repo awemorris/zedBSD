@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_STDIO_H
-#define ZEDBSD_STDIO_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_STDIO_H
+#define LIBC_STDIO_H
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -83,15 +89,12 @@ int setvbuf(FILE *stream, char *buffer, int mode, size_t size);
 void setbuf(FILE *stream, char *buffer);
 int rename(const char *, const char *);
 int remove(const char *);
-
 int asprintf(char **, const char *, ...);
 int vasprintf(char **, const char *, va_list);
 char *fgetln(FILE *, size_t *);
 const char *fmtcheck(const char *, const char *);
 int fpurge(FILE *);
-FILE *funopen(const void *, int (*)(void *, char *, int),
-	      int (*)(void *, const char *, int),
-	      fpos_t (*)(void *, fpos_t, int), int (*)(void *));
+FILE *funopen(const void *, int (*)(void *, char *, int), int (*)(void *, const char *, int), fpos_t (*)(void *, fpos_t, int), int (*)(void *));
 void setbuffer(FILE *, char *, int);
 int setlinebuf(FILE *);
 

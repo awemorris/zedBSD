@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_FENV_H
-#define ZEDBSD_FENV_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_FENV_H
+#define LIBC_FENV_H
 
 typedef unsigned int fexcept_t;
 typedef struct {

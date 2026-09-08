@@ -1,10 +1,12 @@
 /*
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_ERRNO_H
-#define ZEDBSD_ERRNO_H
+#ifndef LIBC_ERRNO_H
+#define LIBC_ERRNO_H
 
 int *__libc_errno_location(void);
 #define errno (*__libc_errno_location())

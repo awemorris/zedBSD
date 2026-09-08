@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_STDBOOL_H
-#define ZEDBSD_STDBOOL_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_STDBOOL_H
+#define LIBC_STDBOOL_H
 
 #define bool _Bool
 #define true 1

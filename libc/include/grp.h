@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_GRP_H
-#define ZEDBSD_GRP_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_GRP_H
+#define LIBC_GRP_H
 
 #include <stddef.h>
 #include <sys/types.h>

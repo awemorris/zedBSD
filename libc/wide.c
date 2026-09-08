@@ -1,8 +1,14 @@
 /*
- * zedBSD wide-character utility and stream support
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * Wide-character utility and stream support
+ */
+
 #include "libc/stdio-internal.h"
 #include <errno.h>
 #include <locale.h>

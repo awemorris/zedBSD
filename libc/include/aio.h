@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_AIO_H
-#define ZEDBSD_AIO_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_AIO_H
+#define LIBC_AIO_H
 
 #include <signal.h>
 #include <stddef.h>
@@ -39,7 +45,6 @@ int aio_read(struct aiocb *);
 ssize_t aio_return(struct aiocb *);
 int aio_suspend(const struct aiocb *const [], int, const struct timespec *);
 int aio_write(struct aiocb *);
-int lio_listio(int, struct aiocb *restrict const [restrict], int,
-	struct sigevent *restrict);
+int lio_listio(int, struct aiocb *restrict const [restrict], int, struct sigevent *restrict);
 
 #endif

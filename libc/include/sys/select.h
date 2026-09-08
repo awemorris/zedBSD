@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_SYS_SELECT_H
-#define ZEDBSD_SYS_SELECT_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_SYS_SELECT_H
+#define LIBC_SYS_SELECT_H
 
 #include <zedbsd/select.h>
 #include <signal.h>
@@ -15,7 +21,6 @@
 #define FD_ISSET(fd, set) (((set)->bits[0] & ((uint32_t)1U << (unsigned)(fd))) != 0U)
 
 int select(int, fd_set *, fd_set *, fd_set *, struct timeval *);
-int pselect(int, fd_set *, fd_set *, fd_set *, const struct timespec *,
-	const sigset_t *);
+int pselect(int, fd_set *, fd_set *, fd_set *, const struct timespec *, const sigset_t *);
 
 #endif

@@ -1,5 +1,13 @@
-#ifndef _X11_KEYSYM_H_
-#define _X11_KEYSYM_H_
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_X11_KEYSYM_H_
+#define LIBC_X11_KEYSYM_H_
+
 #define XK_BackSpace 0xff08
 #define XK_Return 0xff0d
 #define XK_Escape 0xff1b
@@ -13,4 +21,5 @@
 #define XK_End 0xff57
 #define XK_Insert 0xff63
 #define XK_Delete 0xffff
+
 #endif

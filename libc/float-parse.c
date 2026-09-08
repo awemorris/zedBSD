@@ -1,6 +1,12 @@
 /*
- * Floating-point string conversion for zedBSD.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Floating-point string conversion.
  *
  * Decimal conversion uses integer long division and passes guard, round and
  * sticky bits directly to the zedBSD IEEE packer.  It therefore performs one

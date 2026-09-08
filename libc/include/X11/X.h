@@ -1,19 +1,15 @@
-#ifndef _X11_X_H_
-#define _X11_X_H_
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_X11_X_H
+#define LIBC_X11_X_H
+
 #include <stdint.h>
-typedef uint32_t XID;
-typedef XID Window;
-typedef XID Drawable;
-typedef XID Font;
-typedef XID Pixmap;
-typedef XID Colormap;
-typedef XID Cursor;
-typedef uint32_t Atom;
-typedef uint32_t Time;
-typedef uint32_t KeySym;
-typedef uint8_t KeyCode;
-typedef int Bool;
-typedef unsigned long Mask;
+
 #define False 0
 #define True 1
 #define None 0L
@@ -50,4 +46,19 @@ typedef unsigned long Mask;
 #define StructureNotifyMask (1L<<17)
 #define SubstructureNotifyMask (1L<<19)
 #define SubstructureRedirectMask (1L<<20)
+
+typedef uint32_t XID;
+typedef XID Window;
+typedef XID Drawable;
+typedef XID Font;
+typedef XID Pixmap;
+typedef XID Colormap;
+typedef XID Cursor;
+typedef uint32_t Atom;
+typedef uint32_t Time;
+typedef uint32_t KeySym;
+typedef uint8_t KeyCode;
+typedef int Bool;
+typedef unsigned long Mask;
+
 #endif

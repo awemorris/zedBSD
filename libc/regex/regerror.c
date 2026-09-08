@@ -1,4 +1,8 @@
-/* Derived from musl libc; SPDX-License-Identifier: MIT */
+/*
+ * Derived from musl libc
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <regex.h>
 #include <stdio.h>
 #include <string.h>

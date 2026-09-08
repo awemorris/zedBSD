@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_ASSERT_H
-#define ZEDBSD_ASSERT_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_ASSERT_H
+#define LIBC_ASSERT_H
 
 #ifdef NDEBUG
 #define assert(expression) ((void)0)

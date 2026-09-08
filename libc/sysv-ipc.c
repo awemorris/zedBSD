@@ -1,9 +1,18 @@
 /*
- * System V IPC compatibility backed by zedBSD's kernel POSIX IPC objects.
- * Stable integer IDs map to private names, so unrelated processes using the
- * same key reach the same kernel object while permissions remain kernel-owned.
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * System V IPC compatibility backed by kernel POSIX IPC objects.
+ *
+ * Stable integer IDs map to private names, so unrelated processes
+ * using the same key reach the same kernel object while permissions
+ * remain kernel-owned.
+ */
+
 #include <errno.h>
 #include <fcntl.h>
 #include <mqueue.h>

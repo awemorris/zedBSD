@@ -1,4 +1,14 @@
-/* XSI/BSD additive-feedback random generator and radix-64 conversion. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * XSI/BSD additive-feedback random generator and radix-64 conversion.
+ */
+
 #include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>

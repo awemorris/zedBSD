@@ -1,7 +1,13 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* Pure SCSI-2 CDB, response, and transfer-boundary helpers. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
+/*
+ * Pure SCSI-2 CDB, response, and transfer-boundary helpers.
+ */
 
 #include "x68k-mb89352.h"
 

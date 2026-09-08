@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef ZEDBSD_STDATOMIC_H
-#define ZEDBSD_STDATOMIC_H
+#ifndef LIBC_STDATOMIC_H
+#define LIBC_STDATOMIC_H
 
 #include <stdbool.h>
 #include <stddef.h>

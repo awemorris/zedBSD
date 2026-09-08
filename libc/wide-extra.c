@@ -1,4 +1,14 @@
-/* Remaining ISO C wide-character and UTF conversion interfaces. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * ISO C wide-character and UTF conversion interfaces.
+ */
+
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>

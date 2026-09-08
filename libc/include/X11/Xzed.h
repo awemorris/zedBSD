@@ -1,10 +1,19 @@
-#ifndef _X11_XZED_H_
-#define _X11_XZED_H_
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_X11_XZED_H_
+#define LIBC_X11_XZED_H_
 
 #include <X11/Xlib.h>
 
-/* Xzed-private string property used by desktop components.  The path names
- * an XPM file installed by the application package. */
+/*
+ * Xzed-private string property used by desktop components.  The path
+ * names an XPM file installed by the application package.
+ */
 #define XZED_ICON_PATH_ATOM ((Atom)0x5a000001U)
 
 #define XZED_CURSOR_LEFT_PTR 68U

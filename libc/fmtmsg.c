@@ -1,4 +1,14 @@
-/* XSI formatted diagnostic messages. SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * XSI formatted diagnostic messages.
+ */
+
 #include <errno.h>
 #include <fcntl.h>
 #include <fmtmsg.h>

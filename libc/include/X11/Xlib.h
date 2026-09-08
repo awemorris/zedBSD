@@ -1,6 +1,22 @@
-#ifndef _X11_XLIB_H_
-#define _X11_XLIB_H_
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC__X11_XLIB_H
+#define LIBC_X11_XLIB_H
+
 #include <X11/X.h>
+
+#define DefaultScreen(d) XDefaultScreen(d)
+#define RootWindow(d,s) XRootWindow((d),(s))
+#define DefaultRootWindow(d) XRootWindow((d),XDefaultScreen(d))
+#define BlackPixel(d,s) XBlackPixel((d),(s))
+#define WhitePixel(d,s) XWhitePixel((d),(s))
+#define ConnectionNumber(d) XConnectionNumber(d)
+
 typedef struct _XDisplay Display;
 typedef struct _XGC *GC;
 typedef struct { short lbearing,rbearing,width,ascent,descent; unsigned short attributes; } XCharStruct;
@@ -12,9 +28,12 @@ typedef struct { int type; unsigned long serial; Bool send_event; Display *displ
 typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window parent,window; } XMapRequestEvent;
 typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window event,window,above; int x,y,width,height,border_width; Bool override_redirect; } XConfigureEvent;
 typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window window,root,subwindow; Time time; int x,y,x_root,y_root; unsigned int state,keycode; Bool same_screen; } XKeyEvent;
+
 typedef XKeyEvent XButtonEvent;
 typedef XKeyEvent XMotionEvent;
+
 typedef union _XEvent { int type; XAnyEvent xany; XExposeEvent xexpose; XKeyEvent xkey; XButtonEvent xbutton; XMotionEvent xmotion; XMapRequestEvent xmaprequest; XConfigureEvent xconfigure; long pad[24]; } XEvent;
+
 Display *XOpenDisplay(const char *);
 int XCloseDisplay(Display *);
 int XDefaultScreen(Display *);
@@ -59,10 +78,5 @@ int XPending(Display *);
 int XFlush(Display *);
 int XSync(Display *,Bool);
 KeySym XLookupKeysym(XKeyEvent *,int);
-#define DefaultScreen(d) XDefaultScreen(d)
-#define RootWindow(d,s) XRootWindow((d),(s))
-#define DefaultRootWindow(d) XRootWindow((d),XDefaultScreen(d))
-#define BlackPixel(d,s) XBlackPixel((d),(s))
-#define WhitePixel(d,s) XWhitePixel((d),(s))
-#define ConnectionNumber(d) XConnectionNumber(d)
+
 #endif

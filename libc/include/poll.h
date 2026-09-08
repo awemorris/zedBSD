@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_POLL_H
-#define ZEDBSD_POLL_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_POLL_H
+#define LIBC_POLL_H
 
 #include <zedbsd/poll.h>
 #include <signal.h>

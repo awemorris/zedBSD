@@ -1,30 +1,20 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_PTHREAD_H
-#define ZEDBSD_PTHREAD_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_PTHREAD_H
+#define LIBC_PTHREAD_H
+
 #include <stddef.h>
 #include <stdint.h>
 #include <signal.h>
 #include <sched.h>
 #include <time.h>
 #include <sys/types.h>
-typedef tid_t pthread_t;
-typedef unsigned pthread_key_t;
-typedef struct __pthread_attr { size_t stacksize, guardsize; void *stackaddr; int detachstate, stackset; struct sched_param schedparam; } pthread_attr_t;
-typedef struct { volatile uint32_t locked; pthread_t owner; unsigned count, type, pshared, robust; } pthread_mutex_t;
-typedef struct { unsigned type, pshared, robust; } pthread_mutexattr_t;
-typedef struct { volatile uint32_t sequence; unsigned pshared, clock; } pthread_cond_t;
-typedef struct { unsigned clock, pshared; } pthread_condattr_t;
-typedef struct { volatile uint32_t state; } pthread_once_t;
-typedef struct { volatile uint32_t guard, sequence; unsigned readers, writer, pshared; } pthread_rwlock_t;
-typedef struct { unsigned pshared; } pthread_rwlockattr_t;
-typedef struct { volatile uint32_t guard, sequence; unsigned count, trip, pshared; } pthread_barrier_t;
-typedef struct { unsigned pshared; } pthread_barrierattr_t;
-typedef volatile uint32_t pthread_spinlock_t;
-struct __pthread_cleanup {
-	void (*routine)(void *);
-	void *argument;
-	struct __pthread_cleanup *previous;
-};
+
 #define PTHREAD_MUTEX_INITIALIZER {0,0,0,0,0,0}
 #define PTHREAD_COND_INITIALIZER {0,0,CLOCK_REALTIME}
 #define PTHREAD_ONCE_INIT {0}
@@ -45,6 +35,27 @@ struct __pthread_cleanup {
 #define PTHREAD_CANCEL_ASYNCHRONOUS 1
 #define PTHREAD_STACK_MIN 65536U
 #define PTHREAD_BARRIER_SERIAL_THREAD (-1)
+
+typedef tid_t pthread_t;
+typedef unsigned pthread_key_t;
+typedef struct __pthread_attr { size_t stacksize, guardsize; void *stackaddr; int detachstate, stackset; struct sched_param schedparam; } pthread_attr_t;
+typedef struct { volatile uint32_t locked; pthread_t owner; unsigned count, type, pshared, robust; } pthread_mutex_t;
+typedef struct { unsigned type, pshared, robust; } pthread_mutexattr_t;
+typedef struct { volatile uint32_t sequence; unsigned pshared, clock; } pthread_cond_t;
+typedef struct { unsigned clock, pshared; } pthread_condattr_t;
+typedef struct { volatile uint32_t state; } pthread_once_t;
+typedef struct { volatile uint32_t guard, sequence; unsigned readers, writer, pshared; } pthread_rwlock_t;
+typedef struct { unsigned pshared; } pthread_rwlockattr_t;
+typedef struct { volatile uint32_t guard, sequence; unsigned count, trip, pshared; } pthread_barrier_t;
+typedef struct { unsigned pshared; } pthread_barrierattr_t;
+typedef volatile uint32_t pthread_spinlock_t;
+
+struct __pthread_cleanup {
+	void (*routine)(void *);
+	void *argument;
+	struct __pthread_cleanup *previous;
+};
+
 int pthread_create(pthread_t *,const pthread_attr_t *,void *(*)(void *),void *);
 void pthread_exit(void *) __attribute__((__noreturn__));
 int pthread_join(pthread_t,void **); int pthread_detach(pthread_t);
@@ -103,10 +114,13 @@ int pthread_setconcurrency(int);
 void __pthread_cleanup_push(struct __pthread_cleanup *,
 	void (*)(void *),void *);
 void __pthread_cleanup_pop(struct __pthread_cleanup *,int);
+
 #define pthread_cleanup_push(routine,argument) do { \
 	struct __pthread_cleanup __pthread_cleanup_record; \
 	__pthread_cleanup_push(&__pthread_cleanup_record,(routine),(argument));
+
 #define pthread_cleanup_pop(execute) \
 	__pthread_cleanup_pop(&__pthread_cleanup_record,(execute)); \
 } while (0)
+
 #endif

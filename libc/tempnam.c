@@ -1,5 +1,14 @@
-/* Legacy temporary pathname generation; callers should prefer mkstemp.
- * SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Legacy temporary pathname generation, callers should prefer mkstemp.
+ */
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>

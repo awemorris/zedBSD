@@ -1,13 +1,21 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef ZEDBSD_STDIO_INTERNAL_H
 #define ZEDBSD_STDIO_INTERNAL_H
 
 #include <stdio.h>
 #include <stdint.h>
 
-/* FILE is deliberately opaque outside libc.  The first five fields retain
+/*
+ * FILE is deliberately opaque outside libc.  The first five fields retain
  * the legacy kernel-mode adapter layout while that adapter is being retired;
- * no application ABI depends on them. */
+ * no application ABI depends on them.
+ */
 struct __stdio_file {
 	void *context;
 	uint64_t position;

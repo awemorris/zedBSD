@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_DLFCN_H
-#define ZEDBSD_DLFCN_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_DLFCN_H
+#define LIBC_DLFCN_H
 
 #define RTLD_LAZY   0x0001
 #define RTLD_NOW    0x0002

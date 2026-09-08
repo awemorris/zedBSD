@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_PWD_H
-#define ZEDBSD_PWD_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_PWD_H
+#define LIBC_PWD_H
 
 #include <stddef.h>
 #include <sys/types.h>
@@ -17,8 +23,7 @@ struct passwd {
 
 struct passwd *getpwnam(const char *);
 struct passwd *getpwuid(uid_t);
-int getpwnam_r(const char *, struct passwd *, char *, size_t,
-	struct passwd **);
+int getpwnam_r(const char *, struct passwd *, char *, size_t, struct passwd **);
 int getpwuid_r(uid_t, struct passwd *, char *, size_t, struct passwd **);
 void setpwent(void);
 struct passwd *getpwent(void);

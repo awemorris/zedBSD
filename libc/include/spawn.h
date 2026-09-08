@@ -1,6 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef ZEDBSD_SPAWN_H
-#define ZEDBSD_SPAWN_H
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_SPAWN_H
+#define LIBC_SPAWN_H
 
 #include <fcntl.h>
 #include <signal.h>
@@ -14,6 +20,7 @@
 
 #define ZEDBSD_SPAWN_ACTION_MAX 16
 #define ZEDBSD_SPAWN_PATH_MAX 256
+
 struct __spawn_action {
 	int operation;
 	int descriptor;
@@ -22,10 +29,12 @@ struct __spawn_action {
 	mode_t mode;
 	char path[ZEDBSD_SPAWN_PATH_MAX];
 };
+
 typedef struct {
 	unsigned count;
 	struct __spawn_action actions[ZEDBSD_SPAWN_ACTION_MAX];
 } posix_spawn_file_actions_t;
+
 typedef struct {
 	short flags;
 	pid_t pgroup;
@@ -33,18 +42,14 @@ typedef struct {
 	sigset_t sigdefault;
 } posix_spawnattr_t;
 
-int posix_spawn(pid_t *, const char *, const posix_spawn_file_actions_t *,
-	const posix_spawnattr_t *, char *const [], char *const []);
-int posix_spawnp(pid_t *, const char *, const posix_spawn_file_actions_t *,
-	const posix_spawnattr_t *, char *const [], char *const []);
+int posix_spawn(pid_t *, const char *, const posix_spawn_file_actions_t *, const posix_spawnattr_t *, char *const [], char *const []);
+int posix_spawnp(pid_t *, const char *, const posix_spawn_file_actions_t *, const posix_spawnattr_t *, char *const [], char *const []);
 int posix_spawn_file_actions_init(posix_spawn_file_actions_t *);
 int posix_spawn_file_actions_destroy(posix_spawn_file_actions_t *);
 int posix_spawn_file_actions_addclose(posix_spawn_file_actions_t *, int);
 int posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t *, int, int);
-int posix_spawn_file_actions_addopen(posix_spawn_file_actions_t *, int,
-	const char *, int, mode_t);
-int posix_spawn_file_actions_addchdir(posix_spawn_file_actions_t *,
-	const char *);
+int posix_spawn_file_actions_addopen(posix_spawn_file_actions_t *, int, const char *, int, mode_t);
+int posix_spawn_file_actions_addchdir(posix_spawn_file_actions_t *, const char *);
 int posix_spawn_file_actions_addfchdir(posix_spawn_file_actions_t *, int);
 int posix_spawnattr_init(posix_spawnattr_t *);
 int posix_spawnattr_destroy(posix_spawnattr_t *);
