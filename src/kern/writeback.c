@@ -171,9 +171,11 @@ writeback_budget_attach(
 			error = EEXIST;
 			break;
 		}
+
 		if (budgets[index] == NULL && available == WRITEBACK_DEVICE_MAX)
 			available = index;
 	}
+
 	if (error == 0 && available == WRITEBACK_DEVICE_MAX)
 		error = EAGAIN;
 
@@ -183,6 +185,7 @@ writeback_budget_attach(
 		budget->disk = leaf;
 		budgets[available] = budget;
 	}
+
 	budget_unlock(enabled);
 
 	/* Drops the device reference that a refused registration does not keep. */
@@ -217,6 +220,7 @@ writeback_budget_detach(
 		budget_unlock(enabled);
 		return ENOENT;
 	}
+
 	if (budget->dirty != 0 ||
 	    budget->reserved != 0 ||
 	    budget->tickets != 0) {
@@ -229,6 +233,7 @@ writeback_budget_detach(
 		if (budgets[index] == budget)
 			budgets[index] = NULL;
 	}
+
 	disk = budget->disk;
 	memset(budget, 0, sizeof(*budget));
 	budget_unlock(enabled);
@@ -260,6 +265,7 @@ writeback_budget_quiesce(
 		budget_unlock(irq);
 		return ENOENT;
 	}
+
 	budget->quiescing = (unsigned)enabled;
 	budget_unlock(irq);
 
@@ -442,6 +448,7 @@ writeback_budget_snapshot(
 		if (budgets[index] != NULL)
 			stats->devices++;
 	}
+
 	budget_unlock(enabled);
 }
 
@@ -470,6 +477,7 @@ writeback_budget_read(
 		budget_unlock(enabled);
 		return ENOENT;
 	}
+
 	*snapshot = *budget;
 	budget_unlock(enabled);
 
@@ -512,6 +520,7 @@ writeback_domain_acquire(
 			if (tokens[index] == token)
 				break;
 		}
+
 		if (index != count || count == IO_CONTEXT_DEPTH_MAX) {
 			disk_cache_release(token);
 			error = ELOOP;
@@ -534,6 +543,7 @@ writeback_domain_acquire(
 			error = 0;
 			break;
 		}
+
 		if (error != 0)
 			break;
 
@@ -576,14 +586,17 @@ writeback_mount_set(
 	if (error != 0)
 		return error;
 	mutex_lock(&policy_control);
+
 	if (atomic_load_acquire(&policy_shutdown) != 0) {
 		mutex_unlock(&policy_control);
 		return EBUSY;
 	}
+
 	if (enabled)
 		error = policy_enable(mount);
 	else
 		error = policy_disable(mount);
+
 	mutex_unlock(&policy_control);
 
 	/* Reports the failure. */
@@ -609,16 +622,19 @@ writeback_shutdown_begin(
 	if (error != 0)
 		return error;
 	mutex_lock(&policy_control);
+
 	if (atomic_load_acquire(&policy_shutdown) != 0) {
 		mutex_unlock(&policy_control);
 		return EBUSY;
 	}
+
 	for (index = 0; index < WRITEBACK_DEVICE_MAX; index++) {
 		if (workers[index].unmount != NULL) {
 			mutex_unlock(&policy_control);
 			return EBUSY;
 		}
 	}
+
 	atomic_store_release(&policy_shutdown, 1);
 
 	/* Joins each worker before lending its reserved payload to the final drain. */
@@ -632,6 +648,7 @@ writeback_shutdown_begin(
 			return error;
 		}
 	}
+
 	mutex_unlock(&policy_control);
 
 	/* The shutdown gate retains the policy table without holding locks over I/O. */
@@ -645,6 +662,7 @@ writeback_shutdown_begin(
 			return error;
 		}
 	}
+
 	return 0;
 }
 
@@ -664,15 +682,18 @@ writeback_shutdown_finish(
 	if (atomic_load_acquire(&policy_initialized) != 2)
 		return;
 	mutex_lock(&policy_control);
+
 	if (atomic_load_acquire(&policy_shutdown) != 1) {
 		mutex_unlock(&policy_control);
 		return;
 	}
+
 	if (!committed) {
 		for (index = 0; index < WRITEBACK_DEVICE_MAX; index++) {
 			if (workers[index].state == WB_PAUSED)
 				worker_restore(&workers[index]);
 		}
+
 		atomic_store_release(&policy_shutdown, 0);
 		mutex_unlock(&policy_control);
 		return;
@@ -688,6 +709,7 @@ writeback_shutdown_finish(
 		if (mount != NULL)
 			mount_release(mount);
 	}
+
 	for (index = 0; index < WRITEBACK_DEVICE_MAX; index++) {
 		irq = spin_lock_irqsave(&policy_registry);
 		workers[index].state = WB_OFF;
@@ -700,7 +722,9 @@ writeback_shutdown_finish(
 			spin_unlock_irqrestore(&policy_registry, irq);
 		}
 	}
+
 	atomic_store_release(&policy_shutdown, 2);
+
 	mutex_unlock(&policy_control);
 }
 
@@ -722,15 +746,18 @@ writeback_unmount_begin(
 	if (atomic_load_acquire(&policy_initialized) != 2)
 		return 0;
 	mutex_lock(&policy_control);
+
 	if (atomic_load_acquire(&policy_shutdown) != 0) {
 		mutex_unlock(&policy_control);
 		return EBUSY;
 	}
+
 	policy = policy_find(mount);
 	if (policy == NULL) {
 		mutex_unlock(&policy_control);
 		return 0;
 	}
+
 	worker = policy->worker;
 	if (worker->unmount != NULL) {
 		mutex_unlock(&policy_control);
@@ -743,6 +770,7 @@ writeback_unmount_begin(
 		mutex_unlock(&policy_control);
 		return error;
 	}
+
 	error = worker_sync_mount(mount, worker->memory.vaddr);
 	if (error != 0) {
 		worker_restore(worker);
@@ -754,7 +782,9 @@ writeback_unmount_begin(
 	token->mount = mount;
 	token->worker = worker;
 	worker->unmount = token;
+
 	mutex_unlock(&policy_control);
+
 	return 0;
 }
 
@@ -777,6 +807,7 @@ writeback_unmount_finish(
 	if (token == NULL || token->mount == NULL)
 		return;
 	mutex_lock(&policy_control);
+
 	worker = token->worker;
 	mount = token->mount;
 	policy = policy_find(mount);
@@ -794,11 +825,14 @@ writeback_unmount_finish(
 	/* Removes the retained mount before it can be destroyed by the namespace. */
 	siblings = worker_siblings(policy);
 	irq = spin_lock_irqsave(&policy_registry);
+
 	policy->mount = NULL;
 	policy->worker = NULL;
 	if (siblings == 0)
 		worker->state = WB_OFF;
+
 	spin_unlock_irqrestore(&policy_registry, irq);
+
 	mount_release(mount);
 	if (siblings != 0) {
 		worker_restore(worker);
@@ -812,6 +846,7 @@ writeback_unmount_finish(
 			spin_unlock_irqrestore(&policy_registry, irq);
 		}
 	}
+
 	mutex_unlock(&policy_control);
 }
 
@@ -828,10 +863,13 @@ writeback_mount_active(struct mount *mount)
 	if (mount == NULL || atomic_load_acquire(&policy_initialized) != 2)
 		return 0;
 	irq = spin_lock_irqsave(&policy_registry);
+
 	policy = policy_find(mount);
 	active = atomic_load_acquire(&policy_shutdown) == 0 &&
 	    policy != NULL && policy->worker->state == WB_LIVE;
+
 	spin_unlock_irqrestore(&policy_registry, irq);
+
 	return active;
 }
 
@@ -853,17 +891,20 @@ writeback_mount_admit(
 	if (atomic_load_acquire(&policy_initialized) != 2)
 		return EAGAIN;
 	irq = spin_lock_irqsave(&policy_registry);
+
 	policy = policy_find(mount);
 	if (atomic_load_acquire(&policy_shutdown) != 0 ||
 	    policy == NULL || policy->worker->state != WB_LIVE) {
 		spin_unlock_irqrestore(&policy_registry, irq);
 		return EAGAIN;
 	}
+
 	error = writeback_ticket_reserve(&policy->worker->budget, ticket);
 	if (error != 0) {
 		policy->worker->requested = 1;
 		waitq_wake_all(&policy->worker->wake);
 	}
+
 	spin_unlock_irqrestore(&policy_registry, irq);
 
 	/* Reports the failure. */
@@ -895,6 +936,7 @@ writeback_pressure(
 	if (snapshot.dirty < totals.device_high / 2U && totals.dirty < totals.low)
 		return;
 	irq = spin_lock_irqsave(&policy_registry);
+
 	for (index = 0; index < WRITEBACK_DEVICE_MAX; index++) {
 		if (&workers[index].budget != budget || workers[index].state != WB_LIVE)
 			continue;
@@ -902,6 +944,7 @@ writeback_pressure(
 		waitq_wake_all(&workers[index].wake);
 		break;
 	}
+
 	spin_unlock_irqrestore(&policy_registry, irq);
 }
 
@@ -922,10 +965,12 @@ writeback_policy_snapshot(
 	if (atomic_load_acquire(&policy_initialized) != 2)
 		return;
 	irq = spin_lock_irqsave(&policy_registry);
+
 	for (index = 0; index < MOUNT_MAX; index++) {
 		if (policies[index].mount != NULL)
 			stats->mounts++;
 	}
+
 	for (index = 0; index < WRITEBACK_DEVICE_MAX; index++) {
 		stats->memory_bytes += workers[index].memory.size;
 		stats->passes += workers[index].passes;
@@ -936,6 +981,7 @@ writeback_policy_snapshot(
 		if (workers[index].last_error != 0)
 			stats->last_error = workers[index].last_error;
 	}
+
 	spin_unlock_irqrestore(&policy_registry, irq);
 }
 
@@ -978,6 +1024,7 @@ writeback_policy_report(
 
 	/* Copies stable policy identities while control cannot withdraw their owners. */
 	irq = spin_lock_irqsave(&policy_registry);
+
 	for (index = 0; index < WRITEBACK_DEVICE_MAX; index++) {
 		worker = &workers[index];
 		header.memory_bytes += worker->memory.size;
@@ -989,6 +1036,7 @@ writeback_policy_report(
 		if (worker->last_error != 0)
 			header.last_error = worker->last_error;
 	}
+
 	for (index = 0; index < MOUNT_MAX; index++) {
 		if (policies[index].mount == NULL)
 			continue;
@@ -1002,17 +1050,21 @@ writeback_policy_report(
 			memcpy(entry.device, worker->leaf->d_name, sizeof(entry.device));
 			entry.device[sizeof(entry.device) - 1U] = '\0';
 		}
+
 		if (writeback_budget_read(&worker->budget, &budget) == 0) {
 			entry.device_dirty = budget.dirty;
 			entry.device_reserved = budget.reserved;
 			entry.device_tickets = budget.tickets;
 		}
+
 		entry.state = worker->state;
 		memcpy(output + offsetof(struct writeback_report, mounts) +
 		    header.count * sizeof(entry), &entry, sizeof(entry));
 		header.count++;
 	}
+
 	memcpy(output, &header, sizeof(header));
+
 	spin_unlock_irqrestore(&policy_registry, irq);
 }
 
@@ -1099,6 +1151,7 @@ policy_initialize(void)
 		atomic_store_release(&policy_initialized, 0);
 		return error;
 	}
+
 	spin_init(&policy_registry, LOCK_RANK_WRITEBACK_REGISTRY, "writeback registry");
 	for (index = 0; index < WRITEBACK_DEVICE_MAX; index++)
 		waitq_init(&workers[index].wake, "writeback worker");
@@ -1117,6 +1170,7 @@ policy_find(struct mount *mount)
 		if (policies[index].mount == mount)
 			return &policies[index];
 	}
+
 	return NULL;
 }
 
@@ -1136,6 +1190,7 @@ worker_prepare(struct writeback_worker *worker)
 			return error;
 		worker->attached = 1;
 	}
+
 	if (worker->memory.size == 0) {
 		memset(&memory, 0, sizeof(memory));
 		error = io_scratch_alloc(WB_MEMORY, 1, &memory);
@@ -1144,12 +1199,14 @@ worker_prepare(struct writeback_worker *worker)
 				HAL_FATAL("writeback allocation rollback failed");
 			return ENOMEM;
 		}
+
 		error = cache_memory_reserve(CACHE_MEMORY_WORKER, memory.size, 0);
 		if (error != 0) {
 			if (io_scratch_free(&memory) != HAL_OK)
 				HAL_FATAL("writeback accounting rollback failed");
 			return error;
 		}
+
 		cache_memory_commit(CACHE_MEMORY_WORKER, memory.size);
 		memset(memory.vaddr, 0, memory.size);
 		irq = spin_lock_irqsave(&policy_registry);
@@ -1166,6 +1223,7 @@ worker_prepare(struct writeback_worker *worker)
 		worker->started = 1;
 		thread_start(thread);
 	}
+
 	return 0;
 }
 
@@ -1190,18 +1248,23 @@ worker_dispose(struct writeback_worker *worker)
 		worker->charged = 0;
 		spin_unlock_irqrestore(&policy_registry, irq);
 	}
+
 	if (worker->attached) {
 		error = writeback_budget_detach(&worker->budget);
 		if (error != 0)
 			HAL_FATAL("writeback disposal retained dirty owners");
 		worker->attached = 0;
 	}
+
 	irq = spin_lock_irqsave(&policy_registry);
+
 	leaf = worker->leaf;
 	worker->leaf = NULL;
 	worker->state = WB_OFF;
 	worker->requested = 0;
+
 	spin_unlock_irqrestore(&policy_registry, irq);
+
 	if (leaf != NULL)
 		disk_cache_release(leaf);
 	return 0;
@@ -1234,6 +1297,7 @@ policy_enable(struct mount *mount)
 			break;
 		}
 	}
+
 	if (policy == NULL)
 		return ENOSPC;
 	error = writeback_domain_acquire(mount->m_disk, &leaf);
@@ -1248,6 +1312,7 @@ policy_enable(struct mount *mount)
 			break;
 		}
 	}
+
 	if (worker == NULL) {
 		for (index = 0; index < WRITEBACK_DEVICE_MAX; index++) {
 			if (workers[index].leaf == NULL) {
@@ -1255,10 +1320,12 @@ policy_enable(struct mount *mount)
 				break;
 			}
 		}
+
 		if (worker == NULL) {
 			disk_cache_release(leaf);
 			return EAGAIN;
 		}
+
 		irq = spin_lock_irqsave(&policy_registry);
 		worker->leaf = leaf;
 		spin_unlock_irqrestore(&policy_registry, irq);
@@ -1267,6 +1334,7 @@ policy_enable(struct mount *mount)
 		if (worker->unmount != NULL)
 			return EBUSY;
 	}
+
 	error = worker_prepare(worker);
 	if (error != 0) {
 		(void)worker_dispose(worker);
@@ -1284,11 +1352,14 @@ policy_enable(struct mount *mount)
 	/* Publishes the retained mount after worker construction succeeds. */
 	mount_ref(mount);
 	irq = spin_lock_irqsave(&policy_registry);
+
 	policy->mount = mount;
 	policy->worker = worker;
 	worker->state = WB_LIVE;
 	waitq_wake_all(&worker->wake);
+
 	spin_unlock_irqrestore(&policy_registry, irq);
+
 	return 0;
 }
 
@@ -1302,8 +1373,10 @@ worker_restore(struct writeback_worker *worker)
 	if (writeback_budget_quiesce(&worker->budget, 0) != 0)
 		HAL_FATAL("writeback restore lost budget");
 	irq = spin_lock_irqsave(&policy_registry);
+
 	worker->state = WB_LIVE;
 	waitq_wake_all(&worker->wake);
+
 	spin_unlock_irqrestore(&policy_registry, irq);
 }
 
@@ -1342,16 +1415,21 @@ policy_disable(struct mount *mount)
 			worker_restore(worker);
 			return error != 0 ? error : EBUSY;
 		}
+
 		error = worker_dispose(worker);
 		if (error != 0) {
 			worker_restore(worker);
 			return error;
 		}
 	}
+
 	irq = spin_lock_irqsave(&policy_registry);
+
 	policy->mount = NULL;
 	policy->worker = NULL;
+
 	spin_unlock_irqrestore(&policy_registry, irq);
+
 	mount_release(mount);
 	if (siblings != 0)
 		worker_restore(worker);
@@ -1383,6 +1461,7 @@ worker_run(void *argument)
 			(void)waitq_sleep(&worker->wake, &policy_registry, sequence,
 			    worker->state == WB_LIVE ? deadline : 0, 0);
 		}
+
 		worker->requested = 0;
 		worker->busy = 1;
 		snapshot = (struct mount **)((char *)worker->memory.vaddr + WRITEBACK_TICKET_BYTES);
@@ -1393,6 +1472,7 @@ worker_run(void *argument)
 			snapshot[count] = policies[index].mount;
 			mount_ref(snapshot[count++]);
 		}
+
 		spin_unlock_irqrestore(&policy_registry, irq);
 
 		/* Drains independent mounts with scratch that cannot be borrowed recursively. */
@@ -1403,12 +1483,14 @@ worker_run(void *argument)
 				first_error = error;
 			mount_release(snapshot[index]);
 		}
+
 		irq = spin_lock_irqsave(&policy_registry);
 		worker->passes++;
 		if (first_error != 0) {
 			worker->errors++;
 			worker->last_error = first_error;
 		}
+
 		worker->busy = 0;
 		deadline = clock_ticks() + WB_AGE;
 		waitq_wake_all(&worker->wake);
@@ -1430,9 +1512,9 @@ worker_sync_mount(
 		return error;
 
 	/* Flushes backend metadata without certifying unrelated concurrent VM writes. */
-	error = mount_sync_backend(mount);
 
 	/* Reports the failure. */
+	error = mount_sync_backend(mount);
 	if (error != 0)
 		return error;
 
@@ -1450,14 +1532,18 @@ worker_pause(struct writeback_worker *worker)
 	int error;
 
 	irq = spin_lock_irqsave(&policy_registry);
+
 	worker->state = WB_PAUSED;
+
 	spin_unlock_irqrestore(&policy_registry, irq);
+
 	error = writeback_budget_quiesce(&worker->budget, 1);
 	if (error != 0)
 		HAL_FATAL("writeback pause lost budget");
 
 	/* Waits without holding a file/content lease; a signal restores the old policy. */
 	irq = spin_lock_irqsave(&policy_registry);
+
 	for (;;) {
 		error = writeback_budget_read(&worker->budget, &snapshot);
 		if (error != 0)
@@ -1473,7 +1559,9 @@ worker_pause(struct writeback_worker *worker)
 			return error;
 		}
 	}
+
 	spin_unlock_irqrestore(&policy_registry, irq);
+
 	return 0;
 }
 
@@ -1491,5 +1579,6 @@ worker_siblings(struct writeback_mount_policy *policy)
 		    policies[index].worker == policy->worker)
 			count++;
 	}
+
 	return count;
 }

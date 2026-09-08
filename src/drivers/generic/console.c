@@ -91,6 +91,34 @@ static unsigned event_head, event_tail, event_used;
 
 static void console_drain_input_locked(void);
 
+/*
+ * Forward declaration.
+ */
+static struct console_open *console_open_state(struct file *file);
+static unsigned console_file_vt(struct file *file);
+static int console_open_file(struct file *file);
+static int console_close_file(struct file *file);
+static int console_capability_add(struct input_capability *capabilities, size_t *count, uint16_t code);
+static int console_capabilities(const struct hal_cons_input_info *hal_info, struct input_capability *capabilities, size_t *count);
+static int console_input_take(int consume, int wait);
+static struct console_source_state * console_source_find(struct input_device *source, int create);
+static uint32_t console_source_active_key(struct console_source_state *source, const struct input_report_event *item, uint32_t translated);
+static void console_dispatch_enqueue(uint32_t translated, unsigned device_id, unsigned repeat);
+static void console_input_subscriber(void *context, const struct input_report *report);
+static void console_deliver(uint32_t translated, unsigned device_id, unsigned overflow, unsigned repeat);
+static void console_dispatch_worker(void *argument);
+static void console_input_worker(void *argument);
+static ssize_t console_event_read(struct file *file, void *buffer, size_t size);
+static ssize_t console_read(struct file *file, void *buffer, size_t size);
+static ssize_t console_write(struct file *file, const void *buffer, size_t size);
+static int console_write_at(uintptr_t argument);
+static int console_ioctl(struct file *file, unsigned long request, uintptr_t argument);
+static int console_poll(struct file *file, short events, short *revents);
+static ssize_t vt_read(struct file *file, void *buffer, size_t size);
+static ssize_t vt_write(struct file *file, const void *buffer, size_t size);
+static int vt_poll(struct file *file, short events, short *revents);
+static int vt_ioctl(struct file *file, unsigned long request, uintptr_t argument);
+
 /* Supports the console drain input locked operation. */
 static void
 console_drain_input_locked(
@@ -106,7 +134,6 @@ console_drain_input_locked(
 }
 
 #ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
-static struct console_open *console_open_state(struct file *file);
 
 /* Supports the console open state operation. */
 static struct console_open *
@@ -116,8 +143,6 @@ console_open_state(
 	/* Returns the computed result. */
 	return file != NULL ? file->f_data : NULL;
 }
-
-static unsigned console_file_vt(struct file *file);
 
 /* Supports the console file vt operation. */
 static unsigned
@@ -129,8 +154,6 @@ console_file_vt(
 	/* Returns the computed result. */
 	return state != NULL ? state->vt : 0U;
 }
-
-static int console_open_file(struct file *file);
 
 /* Supports the console open file operation. */
 static int
@@ -149,8 +172,6 @@ console_open_file(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int console_close_file(struct file *file);
 
 /* Supports the console close file operation. */
 static int
@@ -171,7 +192,9 @@ console_close_file(
 		event_head = event_tail = event_used = 0;
 		waitq_wake_all(&input_waitq);
 	}
+
 	spin_unlock_irqrestore(&input_lock, irq);
+
 	kern_free(state);
 	file->f_data = NULL;
 	poll_notify();
@@ -179,8 +202,6 @@ console_close_file(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int console_capability_add(struct input_capability *capabilities, size_t *count, uint16_t code);
 
 /* Supports the console capability add operation. */
 static int
@@ -198,10 +219,10 @@ console_capability_add(
 	for (index = 0; index < *count; index++) {
 		/* Handles the capabilities condition. */
 		if (capabilities[index].type == EV_KEY &&
-		    capabilities[index].code == code)
-
+		    capabilities[index].code == code) {
 			/* Reports successful completion. */
 			return 0;
+		}
 	}
 
 	/* Checks the remaining item count. */
@@ -214,8 +235,6 @@ console_capability_add(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int console_capabilities(const struct hal_cons_input_info *hal_info, struct input_capability *capabilities, size_t *count);
 
 /* Supports the console capabilities operation. */
 static int
@@ -238,22 +257,22 @@ console_capabilities(
 		/* Process each element required by the operation. */
 		for (character = 1; character < 0x80U; character++) {
 			char symbol[2] = {(char)character, '\0'};
+
+			/* Checks the operation status. */
 			error_local = console_capability_add(
 				capabilities, count,
 				drv_input_key_from_symbol(symbol));
-
-			/* Checks the operation status. */
 			if (error_local != 0)
 				return error_local;
 		}
 	}
+
 	/* Process each remaining element. */
 	for (index = 0; index < hal_info->symbol_count; index++) {
+		/* Checks the operation status. */
 		error_local1 = console_capability_add(
 			capabilities, count,
 			drv_input_key_from_symbol(hal_info->symbols[index]));
-
-		/* Checks the operation status. */
 		if (error_local1 != 0)
 			return error_local1;
 	}
@@ -261,8 +280,6 @@ console_capabilities(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int console_input_take(int consume, int wait);
 
 /* Supports the console input take operation. */
 static int
@@ -287,10 +304,9 @@ console_input_take(
 		for (;;) {
 			state = early_keymap;
 
+			/* Handles the available condition. */
 			available = wait ? hal_cons_read_event(&event)
 					 : hal_cons_poll_event(&event);
-
-			/* Handles the available condition. */
 			if (!available)
 				return -1;
 
@@ -343,10 +359,10 @@ console_input_take(
 
 			/* Checks the drv input keymap translate result. */
 			if (!drv_input_keymap_translate(&state, &event,
-							&translated))
-
+							&translated)) {
 				/* Reports operation failure. */
 				return -1;
+			}
 
 			/* Handles the consume condition. */
 			if (consume)
@@ -356,7 +372,9 @@ console_input_take(
 			return (int)translated;
 		}
 	}
+
 	irq = spin_lock_irqsave(&input_lock);
+
 	/* Continue while the operation condition remains true. */
 	while (input_used == 0) {
 		/* Handles the wait condition. */
@@ -366,11 +384,12 @@ console_input_take(
 			/* Reports operation failure. */
 			return -1;
 		}
+
 		sequence = waitq_sequence(&input_waitq);
-		error = waitq_sleep(&input_waitq, &input_lock, sequence, 0,
-				    WAITQ_INTERRUPTIBLE);
 
 		/* Checks the operation status. */
+		error = waitq_sleep(&input_waitq, &input_lock, sequence, 0,
+				    WAITQ_INTERRUPTIBLE);
 		if (error == EINTR) {
 			spin_unlock_irqrestore(&input_lock, irq);
 
@@ -378,6 +397,7 @@ console_input_take(
 			return -EINTR;
 		}
 	}
+
 	result = (int)input_events[input_tail];
 
 	/* Handles the consume condition. */
@@ -385,6 +405,7 @@ console_input_take(
 		input_tail = (input_tail + 1U) % CONSOLE_INPUT_EVENTS;
 		input_used--;
 	}
+
 	spin_unlock_irqrestore(&input_lock, irq);
 
 	/* Returns the computed result. */
@@ -398,13 +419,13 @@ int
 drv_console_input_poll_event(
 	void)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the console input take result. */
-	function_result = console_input_take(0, 0);
+	error = console_input_take(0, 0);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 /*
  * Implements the drv console input read event operation.
@@ -413,17 +434,15 @@ int
 drv_console_input_read_event(
 	void)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the console input take result. */
-	function_result = console_input_take(1, 1);
+	error = console_input_take(1, 1);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 #endif
-
-static struct console_source_state * console_source_find(struct input_device *source, int create);
 
 /* Supports the console source find operation. */
 static struct console_source_state *
@@ -454,8 +473,6 @@ console_source_find(
 	/* Returns the computed result. */
 	return empty;
 }
-
-static uint32_t console_source_active_key(struct console_source_state *source, const struct input_report_event *item, uint32_t translated);
 
 /* Supports the console source active key operation. */
 static uint32_t
@@ -528,8 +545,6 @@ console_source_active_key(
 	return translated;
 }
 
-static void console_dispatch_enqueue(uint32_t translated, unsigned device_id, unsigned repeat);
-
 /* Supports the console dispatch enqueue operation. */
 static void
 console_dispatch_enqueue(
@@ -553,15 +568,15 @@ console_dispatch_enqueue(
 			event.overflow =
 				dispatch_events[dispatch_tail].overflow;
 		}
+
 		dispatch_tail = (dispatch_tail + 1U) % CONSOLE_DISPATCH_EVENTS;
 		dispatch_used--;
 	}
+
 	dispatch_events[dispatch_head] = event;
 	dispatch_head = (dispatch_head + 1U) % CONSOLE_DISPATCH_EVENTS;
 	dispatch_used++;
 }
-
-static void console_input_subscriber(void *context, const struct input_report *report);
 
 /* Translation is deliberately completed in this bounded callback.  The dispatch ring may lose old output under overload, but it can never lose a modifier transition from the per-source translation state. */
 static void
@@ -591,9 +606,8 @@ console_input_subscriber(
 
 	/* Handles the report condition. */
 	if ((report->flags & INPUT_REPORT_RESYNC_BEGIN) != 0) {
-		source = console_source_find(report->device, 1);
-
 		/* Handles the source availability. */
+		source = console_source_find(report->device, 1);
 		if (source != NULL) {
 			memset(source, 0, sizeof(*source));
 			source->source = report->device;
@@ -604,22 +618,22 @@ console_input_subscriber(
 				(report->flags & INPUT_REPORT_LOCK_KANA) != 0;
 			source->resyncing = 1;
 		}
+
 		spin_unlock_irqrestore(&input_lock, irq);
 
 		/* Returns the computed result. */
 		return;
 	}
-	source = console_source_find(report->device, report->flags == 0);
 
 	/* Handles the report condition. */
+	source = console_source_find(report->device, report->flags == 0);
 	if ((report->flags & INPUT_REPORT_SNAPSHOT) != 0) {
 		/* Handles the source availability. */
 		if (source != NULL && source->resyncing) {
 			/* Process each remaining element. */
 			for (index = 0; index < report->event_count; index++) {
-				item_local = &report->events[index];
-
 				/* Handles the item local condition. */
+				item_local = &report->events[index];
 				if (item_local->event.type != EV_KEY ||
 				    item_local->event.value != 1 ||
 				    item_local->symbol[0] == '\0')
@@ -641,10 +655,12 @@ console_input_subscriber(
 						source, item_local,
 						translated_local);
 				}
+
 				source->keymap.caps_lock = caps;
 				source->keymap.kana_lock = kana;
 			}
 		}
+
 		spin_unlock_irqrestore(&input_lock, irq);
 
 		/* Returns the computed result. */
@@ -666,9 +682,8 @@ console_input_subscriber(
 	if (source != NULL && !source->resyncing) {
 		/* Process each remaining element. */
 		for (index = 0; index < report->event_count; index++) {
-			item_local1 = &report->events[index];
-
 			/* Handles the item local1 condition. */
+			item_local1 = &report->events[index];
 			if (item_local1->event.type != EV_KEY)
 				continue;
 
@@ -737,6 +752,7 @@ console_input_subscriber(
 	/* Handles the queued condition. */
 	if (queued)
 		waitq_wake_all(&dispatch_waitq);
+
 	spin_unlock_irqrestore(&input_lock, irq);
 }
 
@@ -787,9 +803,11 @@ drv_console_input_ownership_test_pop(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	event = dispatch_events[dispatch_tail];
 	dispatch_tail = (dispatch_tail + 1U) % CONSOLE_DISPATCH_EVENTS;
 	dispatch_used--;
+
 	spin_unlock_irqrestore(&input_lock, irq);
 
 	/* Handles the translated availability. */
@@ -821,9 +839,8 @@ drv_console_input_ownership_test_state(
 	struct console_source_state *source;
 	unsigned long irq = spin_lock_irqsave(&input_lock);
 
-	source = console_source_find(device, 0);
-
 	/* Handles the source availability. */
+	source = console_source_find(device, 0);
 	if (source == NULL || code > KEY_MAX) {
 		spin_unlock_irqrestore(&input_lock, irq);
 
@@ -849,6 +866,7 @@ drv_console_input_ownership_test_state(
 	/* Handles the resyncing availability. */
 	if (resyncing != NULL)
 		*resyncing = source->resyncing;
+
 	spin_unlock_irqrestore(&input_lock, irq);
 
 	/* Reports operation failure. */
@@ -866,11 +884,10 @@ drv_console_input_ownership_test_drain(
 
 	input_started = started != 0;
 	console_drain_input_locked();
+
 	spin_unlock_irqrestore(&input_lock, irq);
 }
 #else
-
-static void console_deliver(uint32_t translated, unsigned device_id, unsigned overflow, unsigned repeat);
 
 /* Supports the console deliver operation. */
 static void
@@ -886,14 +903,14 @@ console_deliver(
 
 	/* Handles the event owner availability. */
 	if (event_owner != NULL) {
-		flags = overflow != 0 ? ZEDBSD_CONSOLE_INPUT_FLAG_OVERFLOW : 0;
-
 		/* Handles the event used condition. */
+		flags = overflow != 0 ? ZEDBSD_CONSOLE_INPUT_FLAG_OVERFLOW : 0;
 		if (event_used == CONSOLE_EVENT_RECORDS) {
 			event_tail = (event_tail + 1U) % CONSOLE_EVENT_RECORDS;
 			event_used--;
 			flags |= ZEDBSD_CONSOLE_INPUT_FLAG_OVERFLOW;
 		}
+
 		record = &event_records[event_head];
 		memset(record, 0, sizeof(*record));
 		record->timestamp_ns = clock_milliseconds(NULL) * 1000000ULL;
@@ -919,6 +936,7 @@ console_deliver(
 			input_tail = (input_tail + 1U) % CONSOLE_INPUT_EVENTS;
 			input_used--;
 		}
+
 		input_events[input_head] = translated;
 		input_head = (input_head + 1U) % CONSOLE_INPUT_EVENTS;
 		input_used++;
@@ -928,10 +946,9 @@ console_deliver(
 	} else {
 		spin_unlock_irqrestore(&input_lock, irq);
 	}
+
 	poll_notify();
 }
-
-static void console_dispatch_worker(void *argument);
 
 /* Supports the console dispatch worker operation. */
 static void
@@ -952,6 +969,7 @@ console_dispatch_worker(
 			(void)waitq_sleep(&dispatch_waitq, &input_lock,
 					  sequence, 0, 0);
 		}
+
 		event = dispatch_events[dispatch_tail];
 		dispatch_tail = (dispatch_tail + 1U) % CONSOLE_DISPATCH_EVENTS;
 		dispatch_used--;
@@ -960,8 +978,6 @@ console_dispatch_worker(
 				event.overflow, event.repeat);
 	}
 }
-
-static void console_input_worker(void *argument);
 
 /* Supports the console input worker operation. */
 static void
@@ -978,8 +994,6 @@ console_input_worker(
 			drv_input_device_emit_key_event(keyboard_input, &event);
 	}
 }
-
-static ssize_t console_event_read(struct file *file, void *buffer, size_t size);
 
 /* Supports the console event read operation. */
 static ssize_t
@@ -999,6 +1013,7 @@ console_event_read(
 		return -EINVAL;
 	capacity = size / sizeof(struct console_input_event);
 	irq = spin_lock_irqsave(&input_lock);
+
 	/* Continue while the operation condition remains true. */
 	while (event_used == 0) {
 		/* Checks the file status flags get result. */
@@ -1008,11 +1023,12 @@ console_event_read(
 			/* Returns the computed result. */
 			return -EAGAIN;
 		}
+
 		sequence = waitq_sequence(&input_waitq);
-		error = waitq_sleep(&input_waitq, &input_lock, sequence, 0,
-				    WAITQ_INTERRUPTIBLE);
 
 		/* Checks the operation status. */
+		error = waitq_sleep(&input_waitq, &input_lock, sequence, 0,
+				    WAITQ_INTERRUPTIBLE);
 		if (error == EINTR) {
 			spin_unlock_irqrestore(&input_lock, irq);
 
@@ -1026,6 +1042,7 @@ console_event_read(
 		event_tail = (event_tail + 1U) % CONSOLE_EVENT_RECORDS;
 		event_used--;
 	}
+
 	spin_unlock_irqrestore(&input_lock, irq);
 
 	/* Computes the function result. */
@@ -1034,8 +1051,6 @@ console_event_read(
 	/* Returns the computed result. */
 	return function_result;
 }
-
-static ssize_t console_read(struct file *file, void *buffer, size_t size);
 
 /* Supports the console read operation. */
 static ssize_t
@@ -1064,8 +1079,6 @@ console_read(
 	return function_result;
 }
 
-static ssize_t console_write(struct file *file, const void *buffer, size_t size);
-
 /* Supports the console write operation. */
 static ssize_t
 console_write(
@@ -1085,8 +1098,6 @@ console_write(
 	return result;
 }
 
-static int console_write_at(uintptr_t argument);
-
 /* Supports the console write at operation. */
 static int
 console_write_at(
@@ -1104,13 +1115,13 @@ console_write_at(
 	/* Handles the request condition. */
 	if (request.row >= HAL_CONS_ROWS ||
 	    request.column >= HAL_CONS_COLUMNS ||
-	    request.length > CONSOLE_WRITE_MAX)
-
+	    request.length > CONSOLE_WRITE_MAX) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = copyin(request.address, text, request.length);
+	}
 
 	/* Checks the operation status. */
+	error = copyin(request.address, text, request.length);
 	if (error != 0)
 		return error;
 	text[request.length] = '\0';
@@ -1125,8 +1136,6 @@ console_write_at(
 	/* Returns the computed result. */
 	return function_result;
 }
-
-static int console_ioctl(struct file *file, unsigned long request, uintptr_t argument);
 
 /* Supports the console ioctl operation. */
 static int
@@ -1170,9 +1179,8 @@ console_ioctl(
 		return 0;
 	case ZEDBSD_CONSOLE_CLEAR_ROW:
 
-		error = copyin(argument, &row, sizeof(row));
-
 		/* Checks the operation status. */
+		error = copyin(argument, &row, sizeof(row));
 		if (error != 0)
 			return error;
 
@@ -1185,9 +1193,8 @@ console_ioctl(
 		return 0;
 	case ZEDBSD_CONSOLE_CLEAR_TO_EOL:
 
-		error = copyin(argument, &position, sizeof(position));
-
 		/* Checks the operation status. */
+		error = copyin(argument, &position, sizeof(position));
 		if (error != 0)
 			return error;
 
@@ -1214,9 +1221,8 @@ console_ioctl(
 		return function_result;
 	case ZEDBSD_CONSOLE_SET_CURSOR:
 
-		error = copyin(argument, &cursor_local1, sizeof(cursor_local1));
-
 		/* Checks the operation status. */
+		error = copyin(argument, &cursor_local1, sizeof(cursor_local1));
 		if (error != 0)
 			return error;
 
@@ -1230,9 +1236,8 @@ console_ioctl(
 		return function_result;
 	case ZEDBSD_CONSOLE_SHOW_CURSOR:
 
-		error = copyin(argument, &cursor_local2, sizeof(cursor_local2));
-
 		/* Checks the operation status. */
+		error = copyin(argument, &cursor_local2, sizeof(cursor_local2));
 		if (error != 0)
 			return error;
 		hal_cons_show_cursor(cursor_local2.visible != 0);
@@ -1248,11 +1253,10 @@ console_ioctl(
 	case ZEDBSD_CONSOLE_POLL_EVENT:
 	case ZEDBSD_CONSOLE_READ_EVENT:
 
+		/* Validates the current value. */
 		value = request == ZEDBSD_CONSOLE_POLL_EVENT
 				? console_input_take(0, 0)
 				: console_input_take(1, 1);
-
-		/* Validates the current value. */
 		if (value == -EINTR)
 			return EINTR;
 
@@ -1267,9 +1271,9 @@ console_ioctl(
 		/* Returns the computed result. */
 		return function_result;
 	case ZEDBSD_CONSOLE_GET_INPUT_MODE:
-		open_local = console_open_state(file);
 
 		/* Handles the open local availability. */
+		open_local = console_open_state(file);
 		if (open_local == NULL)
 			return ENODEV;
 		mode_local.mode = open_local->input_mode;
@@ -1282,27 +1286,27 @@ console_ioctl(
 		/* Returns the computed result. */
 		return function_result;
 	case ZEDBSD_CONSOLE_SET_INPUT_MODE:
-		open_local3 = console_open_state(file);
 
 		/* Handles the open local3 availability. */
+		open_local3 = console_open_state(file);
 		if (open_local3 == NULL)
 			return ENODEV;
-		error = copyin(argument, &mode_local4, sizeof(mode_local4));
 
 		/* Checks the operation status. */
+		error = copyin(argument, &mode_local4, sizeof(mode_local4));
 		if (error != 0)
 			return error;
 
 		/* Handles the mode local4 condition. */
 		if ((mode_local4.mode != ZEDBSD_CONSOLE_INPUT_TEXT &&
 		     mode_local4.mode != ZEDBSD_CONSOLE_INPUT_EVENT) ||
-		    mode_local4.flags != 0)
-
+		    mode_local4.flags != 0) {
 			/* Returns the computed result. */
 			return EINVAL;
-		irq_local = spin_lock_irqsave(&input_lock);
+		}
 
 		/* Handles the event owner availability. */
+		irq_local = spin_lock_irqsave(&input_lock);
 		if (mode_local4.mode == ZEDBSD_CONSOLE_INPUT_EVENT &&
 		    event_owner != NULL && event_owner != open_local3) {
 			spin_unlock_irqrestore(&input_lock, irq_local);
@@ -1326,9 +1330,8 @@ console_ioctl(
 		return 0;
 	case ZEDBSD_CONSOLE_KEY_STATE:
 
-		error = copyin(argument, &key, sizeof(key));
-
 		/* Checks the operation status. */
+		error = copyin(argument, &key, sizeof(key));
 		if (error != 0)
 			return error;
 		key.down = hal_cons_key_state((int)key.key);
@@ -1359,8 +1362,6 @@ console_ioctl(
 	}
 }
 
-static int console_poll(struct file *file, short events, short *revents);
-
 /* Supports the console poll operation. */
 static int
 console_poll(
@@ -1368,7 +1369,7 @@ console_poll(
 	short events,
 	short *revents)
 {
-	int function_result;
+	int error;
 	unsigned long irq;
 	short result;
 	struct console_open *state = console_open_state(file);
@@ -1376,9 +1377,9 @@ console_poll(
 	/* Handles the state availability. */
 	if (state != NULL && state->input_mode == ZEDBSD_CONSOLE_INPUT_EVENT) {
 		result = events & (POLLOUT | POLLWRNORM);
-		irq = spin_lock_irqsave(&input_lock);
 
 		/* Handles the event used condition. */
+		irq = spin_lock_irqsave(&input_lock);
 		if (event_used != 0)
 			result |= events & (POLLIN | POLLRDNORM);
 		spin_unlock_irqrestore(&input_lock, irq);
@@ -1388,14 +1389,12 @@ console_poll(
 	}
 
 	/* Obtains the tty vt poll result. */
-	function_result =
+	error =
 		tty_vt_poll(console_file_vt(file), file, events, revents);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static ssize_t vt_read(struct file *file, void *buffer, size_t size);
 
 /* Supports the vt read operation. */
 static ssize_t
@@ -1413,8 +1412,6 @@ vt_read(
 	/* Returns the computed result. */
 	return function_result;
 }
-
-static ssize_t vt_write(struct file *file, const void *buffer, size_t size);
 
 /* Supports the vt write operation. */
 static ssize_t
@@ -1434,8 +1431,6 @@ vt_write(
 	return result;
 }
 
-static int vt_poll(struct file *file, short events, short *revents);
-
 /* Supports the vt poll operation. */
 static int
 vt_poll(
@@ -1443,17 +1438,15 @@ vt_poll(
 	short events,
 	short *revents)
 {
-	int function_result;
+	int error;
 	unsigned vt = (unsigned)((uintptr_t)file->f_data - 1U);
 
 	/* Obtains the tty vt poll result. */
-	function_result = tty_vt_poll(vt, file, events, revents);
+	error = tty_vt_poll(vt, file, events, revents);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static int vt_ioctl(struct file *file, unsigned long request, uintptr_t argument);
 
 /* Supports the vt ioctl operation. */
 static int
@@ -1462,14 +1455,14 @@ vt_ioctl(
 	unsigned long request,
 	uintptr_t argument)
 {
-	int function_result;
+	int error;
 	unsigned vt = (unsigned)((uintptr_t)file->f_data - 1U);
 
 	/* Obtains the tty vt ioctl result. */
-	function_result = tty_vt_ioctl(vt, file, request, argument);
+	error = tty_vt_ioctl(vt, file, request, argument);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static const struct cdev_ops vt_ops = {
@@ -1511,14 +1504,14 @@ drv_console_device_register(
 				HAL_CONS_INPUT_REPEAT)) != 0 ||
 	    ((hal_info.flags & HAL_CONS_INPUT_REPEAT) != 0 &&
 	     (hal_info.flags & HAL_CONS_INPUT_RELEASE) == 0) ||
-	    (hal_info.symbol_count != 0 && hal_info.symbols == NULL))
-
+	    (hal_info.symbol_count != 0 && hal_info.symbols == NULL)) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = console_capabilities(&hal_info, capabilities,
-				     &capability_count);
+	}
 
 	/* Checks the operation status. */
+	error = console_capabilities(&hal_info, capabilities,
+				     &capability_count);
 	if (error != 0)
 		return error;
 	memset(&keyboard_info, 0, sizeof(keyboard_info));
@@ -1550,55 +1543,55 @@ drv_console_device_register(
 	early_resyncing = 0;
 	memset(console_sources, 0, sizeof(console_sources));
 	memset(&console_subscription, 0, sizeof(console_subscription));
-	error = tty_console_init();
 
 	/* Checks the operation status. */
+	error = tty_console_init();
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = kthread_create(console_input_worker, NULL,
 			       SCHED_PRIORITY_DEFAULT, &producer);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = kthread_create(console_dispatch_worker, NULL,
 			       SCHED_PRIORITY_DEFAULT, &dispatcher);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
-	error = cdev_register("console", 0x00010000U, &console_ops,
-			      (void *)(uintptr_t)1U);
 
 	/* Checks the operation status. */
+	error = cdev_register("console", 0x00010000U, &console_ops,
+			      (void *)(uintptr_t)1U);
 	if (error != 0)
 		goto fail;
 	/* Process each remaining element. */
 	for (i_index_for = 0; i_index_for < tty_vt_count(); i_index_for++) {
 		char name[] = "ttyv0";
 		name[4] = (char)('0' + i_index_for);
+
+		/* Checks the operation status. */
 		error = cdev_register(name, (dev_t)(0x00010010U + i_index_for),
 				      &vt_ops,
 				      (void *)(uintptr_t)(i_index_for + 1U));
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto fail;
 	}
+
+	/* Checks the operation status. */
 	error = tty_pty_register();
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
+
+	/* Checks the operation status. */
 	error = drv_input_device_register(&keyboard_info, &keyboard_input);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
+
+	/* Checks the operation status. */
 	error = drv_input_subscribe(&console_subscription,
 				    console_input_subscriber, NULL);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 	input_started = 1;

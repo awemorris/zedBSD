@@ -52,6 +52,23 @@ static const uint8_t ax211_pnvm_digest[32] = {
 
 static uint32_t ax211_rotate_right(uint32_t value, unsigned amount);
 
+/*
+ * Forward declaration.
+ */
+static uint32_t ax211_get_be32(const uint8_t *bytes);
+static void ax211_put_be32(uint8_t *bytes, uint32_t value);
+static void ax211_sha256_transform(struct ax211_sha256_context *context, const uint8_t block[64]);
+static void ax211_sha256_init(struct ax211_sha256_context *context);
+static int ax211_sha256_update(struct ax211_sha256_context *context, const uint8_t *bytes, size_t length);
+static void ax211_sha256_final(struct ax211_sha256_context *context, uint8_t digest[32]);
+static int ax211_sha256(const void *data, size_t length, uint8_t digest[32]);
+static int ax211_digest_matches(const uint8_t *bytes, size_t length, const uint8_t expected[32]);
+static void ax211_release_bytes(uint8_t **bytes, size_t exact_size);
+static int ax211_files_state(const struct intel_ax211_firmware_files *files, int *owned);
+static int ax211_read_exact_file(const char *path, size_t exact_size, const uint8_t digest[32], uint8_t **bytes);
+static int ax211_parse_ucode(const uint8_t *bytes, size_t length, struct intel_ax211_firmware_manifest *manifest);
+static int ax211_inspect_pnvm(const uint8_t *bytes, size_t length, struct intel_ax211_pnvm_inventory *inventory);
+
 /* Supports the ax211 rotate right operation. */
 static uint32_t
 ax211_rotate_right(
@@ -62,8 +79,6 @@ ax211_rotate_right(
 	return (value >> amount) | (value << (32U - amount));
 }
 
-static uint32_t ax211_get_be32(const uint8_t *bytes);
-
 /* Supports the ax211 get be32 operation. */
 static uint32_t
 ax211_get_be32(
@@ -73,8 +88,6 @@ ax211_get_be32(
 	return ((uint32_t)bytes[0] << 24) | ((uint32_t)bytes[1] << 16) |
 	       ((uint32_t)bytes[2] << 8) | (uint32_t)bytes[3];
 }
-
-static void ax211_put_be32(uint8_t *bytes, uint32_t value);
 
 /* Supports the ax211 put be32 operation. */
 static void
@@ -87,8 +100,6 @@ ax211_put_be32(
 	bytes[2] = (uint8_t)(value >> 8);
 	bytes[3] = (uint8_t)value;
 }
-
-static void ax211_sha256_transform(struct ax211_sha256_context *context, const uint8_t block[64]);
 
 /* Supports the ax211 sha256 transform operation. */
 static void
@@ -117,6 +128,7 @@ ax211_sha256_transform(
 		schedule[index] = schedule[index - 16U] + s0_local +
 				  schedule[index - 7U] + s1_local;
 	}
+
 	a = context->state[0];
 	b = context->state[1];
 	c = context->state[2];
@@ -148,6 +160,7 @@ ax211_sha256_transform(
 		b = a;
 		a = temporary1_local + temporary2_local;
 	}
+
 	context->state[0] += a;
 	context->state[1] += b;
 	context->state[2] += c;
@@ -158,8 +171,6 @@ ax211_sha256_transform(
 	context->state[7] += h;
 	drv_intel_ax211_scrub(schedule, sizeof(schedule));
 }
-
-static void ax211_sha256_init(struct ax211_sha256_context *context);
 
 /* Supports the ax211 sha256 init operation. */
 static void
@@ -173,8 +184,6 @@ ax211_sha256_init(
 	memset(context, 0, sizeof(*context));
 	memcpy(context->state, initial, sizeof(initial));
 }
-
-static int ax211_sha256_update(struct ax211_sha256_context *context, const uint8_t *bytes, size_t length);
 
 /* Supports the ax211 sha256 update operation. */
 static int
@@ -216,8 +225,6 @@ ax211_sha256_update(
 	return 0;
 }
 
-static void ax211_sha256_final(struct ax211_sha256_context *context, uint8_t digest[32]);
-
 /* Supports the ax211 sha256 final operation. */
 static void
 ax211_sha256_final(
@@ -236,20 +243,20 @@ ax211_sha256_final(
 		ax211_sha256_transform(context, context->block);
 		context->used = 0U;
 	}
+
 	memset(context->block + context->used, 0, 56U - context->used);
 	/* Process each remaining element. */
 	for (index = 0; index < 8U; index++) {
 		context->block[63U - index] =
 			(uint8_t)(bit_length >> (index * 8U));
 	}
+
 	ax211_sha256_transform(context, context->block);
 	/* Process each remaining element. */
 	for (index = 0; index < 8U; index++)
 		ax211_put_be32(digest + index * 4U, context->state[index]);
 	drv_intel_ax211_scrub(context, sizeof(*context));
 }
-
-static int ax211_sha256(const void *data, size_t length, uint8_t digest[32]);
 
 /* Supports the ax211 sha256 operation. */
 static int
@@ -265,9 +272,9 @@ ax211_sha256(
 	if (digest == NULL || (data == NULL && length != 0U))
 		return EINVAL;
 	ax211_sha256_init(&context);
-	error = ax211_sha256_update(&context, data, length);
 
 	/* Checks the operation status. */
+	error = ax211_sha256_update(&context, data, length);
 	if (error == 0)
 		ax211_sha256_final(&context, digest);
 	else
@@ -281,8 +288,6 @@ ax211_sha256(
 	return 0;
 }
 
-static int ax211_digest_matches(const uint8_t *bytes, size_t length, const uint8_t expected[32]);
-
 /* Supports the ax211 digest matches operation. */
 static int
 ax211_digest_matches(
@@ -295,9 +300,8 @@ ax211_digest_matches(
 	unsigned index;
 	int error;
 
-	error = ax211_sha256(bytes, length, actual);
-
 	/* Checks the operation status. */
+	error = ax211_sha256(bytes, length, actual);
 	if (error != 0)
 		return error;
 	/* Process each remaining element. */
@@ -308,8 +312,6 @@ ax211_digest_matches(
 	/* Returns the computed result. */
 	return difference == 0U ? 0 : EILSEQ;
 }
-
-static void ax211_release_bytes(uint8_t **bytes, size_t exact_size);
 
 /* Supports the ax211 release bytes operation. */
 static void
@@ -340,8 +342,6 @@ drv_intel_ax211_firmware_files_release(
 	memset(files, 0, sizeof(*files));
 }
 
-static int ax211_files_state(const struct intel_ax211_firmware_files *files, int *owned);
-
 /* Supports the ax211 files state operation. */
 static int
 ax211_files_state(
@@ -355,9 +355,9 @@ ax211_files_state(
 	if (files == NULL || owned == NULL)
 		return EINVAL;
 	ucode_present = files->ucode_bytes != NULL;
-	pnvm_present = files->pnvm_bytes != NULL;
 
 	/* Handles the ucode present condition. */
+	pnvm_present = files->pnvm_bytes != NULL;
 	if (!ucode_present && !pnvm_present) {
 		*owned = 0;
 		/* Returns the computed result. */
@@ -369,16 +369,14 @@ ax211_files_state(
 	/* Handles the ucode present condition. */
 	if (!ucode_present || !pnvm_present ||
 	    files->ucode_size != INTEL_AX211_FIRMWARE_SIZE ||
-	    files->pnvm_size != INTEL_AX211_PNVM_SIZE)
-
+	    files->pnvm_size != INTEL_AX211_PNVM_SIZE) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	*owned = 1;
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int ax211_read_exact_file(const char *path, size_t exact_size, const uint8_t digest[32], uint8_t **bytes);
 
 /* Supports the ax211 read exact file operation. */
 static int
@@ -401,14 +399,13 @@ ax211_read_exact_file(
 	if (path == NULL || digest == NULL || bytes == NULL)
 		return EINVAL;
 	memset(&lease, 0, sizeof(lease));
-	error = file_openat(&kern_cwdinfo, path, O_RDONLY | O_NOFOLLOW, 0,
-			    &file);
 
 	/* Checks the operation status. */
+	error = file_openat(&kern_cwdinfo, path, O_RDONLY | O_NOFOLLOW, 0,
+			    &file);
 	if (error == 0) {
-		error = file_content_lease_begin(file, &lease);
-
 		/* Checks the operation status. */
+		error = file_content_lease_begin(file, &lease);
 		if (error == 0)
 			lease_active = 1;
 	}
@@ -420,18 +417,16 @@ ax211_read_exact_file(
 
 	/* Checks the operation status. */
 	if (error == 0) {
-		result = kern_malloc(exact_size);
-
 		/* Handles the result availability. */
+		result = kern_malloc(exact_size);
 		if (result == NULL)
 			error = ENOMEM;
 	}
 	while (error == 0 && offset < exact_size) {
+		/* Checks the remaining item count. */
 		count = file_content_lease_pread(&lease, result + offset,
 						 exact_size - offset,
 						 (off_t)offset);
-
-		/* Checks the remaining item count. */
 		if (count < 0)
 			error = (int)-count;
 		else if (count == 0 || (size_t)count > exact_size - offset)
@@ -446,9 +441,8 @@ ax211_read_exact_file(
 
 	/* Handles the file availability. */
 	if (file != NULL) {
-		close_error = file_close(file);
-
 		/* Checks the operation status. */
+		close_error = file_close(file);
 		if (error == 0 && close_error != 0)
 			error = close_error;
 	}
@@ -471,8 +465,6 @@ ax211_read_exact_file(
 	return 0;
 }
 
-static int ax211_parse_ucode(const uint8_t *bytes, size_t length, struct intel_ax211_firmware_manifest *manifest);
-
 /* Supports the ax211 parse ucode operation. */
 static int
 ax211_parse_ucode(
@@ -480,30 +472,28 @@ ax211_parse_ucode(
 	size_t length,
 	struct intel_ax211_firmware_manifest *manifest)
 {
-	int function_result;
+	int error;
 
 #ifdef INTEL_AX211_FIRMWARE_LOADER_HOST_TEST
 
 	/* Obtains the intel ax211 firmware loader host parse result. */
-	function_result =
+	error =
 		intel_ax211_firmware_loader_host_parse(bytes, length, manifest);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 
 #else
 
 	/* Obtains the drv intel ax211 firmware parse result. */
-	function_result =
+	error =
 		drv_intel_ax211_firmware_parse(bytes, length, manifest);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 
 #endif
 }
-
-static int ax211_inspect_pnvm(const uint8_t *bytes, size_t length, struct intel_ax211_pnvm_inventory *inventory);
 
 /* Supports the ax211 inspect pnvm operation. */
 static int
@@ -512,25 +502,25 @@ ax211_inspect_pnvm(
 	size_t length,
 	struct intel_ax211_pnvm_inventory *inventory)
 {
-	int function_result;
+	int error;
 
 #ifdef INTEL_AX211_FIRMWARE_LOADER_HOST_TEST
 
 	/* Obtains the intel ax211 firmware loader host inspect pnvm result. */
-	function_result = intel_ax211_firmware_loader_host_inspect_pnvm(
+	error = intel_ax211_firmware_loader_host_inspect_pnvm(
 		bytes, length, inventory);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 
 #else
 
 	/* Obtains the drv intel ax211 pnvm inspect result. */
-	function_result =
+	error =
 		drv_intel_ax211_pnvm_inspect(bytes, length, inventory);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 
 #endif
 }
@@ -546,17 +536,16 @@ drv_intel_ax211_firmware_files_load(
 	int owned;
 	int error;
 
-	error = ax211_files_state(files, &owned);
-
 	/* Checks the operation status. */
+	error = ax211_files_state(files, &owned);
 	if (error != 0)
 		return error;
 	memset(&candidate, 0, sizeof(candidate));
+
+	/* Checks the operation status. */
 	error = ax211_read_exact_file(
 		INTEL_AX211_FIRMWARE_VFS_PATH, INTEL_AX211_FIRMWARE_SIZE,
 		ax211_ucode_digest, &candidate.ucode_bytes);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		candidate.ucode_size = INTEL_AX211_FIRMWARE_SIZE;
 
@@ -569,11 +558,10 @@ drv_intel_ax211_firmware_files_load(
 
 	/* Checks the operation status. */
 	if (error == 0) {
+		/* Checks the operation status. */
 		error = ax211_read_exact_file(
 			INTEL_AX211_PNVM_VFS_PATH, INTEL_AX211_PNVM_SIZE,
 			ax211_pnvm_digest, &candidate.pnvm_bytes);
-
-		/* Checks the operation status. */
 		if (error == 0)
 			candidate.pnvm_size = INTEL_AX211_PNVM_SIZE;
 	}
@@ -610,12 +598,12 @@ drv_intel_ax211_firmware_loader_test_sha256(
 	size_t length,
 	uint8_t digest[32])
 {
-	int function_result;
+	int error;
 
 	/* Obtains the ax211 sha256 result. */
-	function_result = ax211_sha256(data, length, digest);
+	error = ax211_sha256(data, length, digest);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 #endif

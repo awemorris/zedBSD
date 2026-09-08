@@ -76,18 +76,24 @@ record_lock_inode_destroy(
 
 	/* Detaches the state from the inode. */
 	mutex_lock(&inode->i_lock);
+
 	state = inode->i_record_locks;
 	inode->i_record_locks = NULL;
+
 	mutex_unlock(&inode->i_lock);
+
 	if (state == NULL)
 		return;
 
 	/* Takes the locks away from any waiters, then frees everything. */
 	irq = spin_lock_irqsave(&state->lock);
+
 	locks = state->head;
 	state->head = NULL;
 	waitq_wake_all(&state->waiters);
+
 	spin_unlock_irqrestore(&state->lock, irq);
+
 	lock_list_free(locks);
 	kern_free(state);
 }
@@ -171,6 +177,7 @@ record_lock_fcntl(
 			request->type = F_UNLCK;
 			return 0;
 		}
+
 		return ENOMEM;
 	}
 
@@ -200,6 +207,7 @@ record_lock_fcntl(
 				else
 					request->pid = ((struct process *)conflict->owner)->pid;
 			}
+
 			spin_unlock_irqrestore(&state->lock, irq);
 			return 0;
 		}
@@ -210,6 +218,7 @@ record_lock_fcntl(
 				spin_unlock_irqrestore(&state->lock, irq);
 				return EAGAIN;
 			}
+
 			sequence = waitq_sequence(&state->waiters);
 			error = waitq_sleep(&state->waiters, &state->lock,
 			    sequence, 0, WAITQ_INTERRUPTIBLE);
@@ -239,6 +248,7 @@ record_lock_fcntl(
 					needed++;
 			}
 		}
+
 		spin_unlock_irqrestore(&state->lock, irq);
 
 		/* Replaces the range, retrying if the state moved meanwhile. */
@@ -274,12 +284,14 @@ record_lock_release_process_inode(
 
 	/* Unlinks the process's locks onto a garbage list. */
 	irq = spin_lock_irqsave(&state->lock);
+
 	for (link = &state->head; *link != NULL;) {
 		lock = *link;
 		if (lock->owner_is_file || lock->owner != owner) {
 			link = &lock->next;
 			continue;
 		}
+
 		*link = lock->next;
 		lock->next = garbage;
 		garbage = lock;
@@ -290,6 +302,7 @@ record_lock_release_process_inode(
 		state->generation++;
 		waitq_wake_all(&state->waiters);
 	}
+
 	spin_unlock_irqrestore(&state->lock, irq);
 
 	lock_list_free(garbage);
@@ -319,12 +332,14 @@ record_lock_release_file(
 
 	/* Unlinks the file's locks onto a garbage list. */
 	irq = spin_lock_irqsave(&state->lock);
+
 	for (link = &state->head; *link != NULL;) {
 		lock = *link;
 		if (!lock->owner_is_file || lock->owner != file) {
 			link = &lock->next;
 			continue;
 		}
+
 		*link = lock->next;
 		lock->next = garbage;
 		garbage = lock;
@@ -335,6 +350,7 @@ record_lock_release_file(
 		state->generation++;
 		waitq_wake_all(&state->waiters);
 	}
+
 	spin_unlock_irqrestore(&state->lock, irq);
 
 	lock_list_free(garbage);
@@ -379,9 +395,8 @@ record_lock_state_get(
 	struct record_lock_state *state;
 	struct record_lock_state *candidate;
 
-	candidate = NULL;
-
 	/* There is no state without an inode. */
+	candidate = NULL;
 	if (inode == NULL)
 		return NULL;
 
@@ -398,13 +413,16 @@ record_lock_state_get(
 
 	/* Installs the candidate unless the inode already has a state. */
 	mutex_lock(&inode->i_lock);
+
 	state = inode->i_record_locks;
 	if (state == NULL && candidate != NULL) {
 		inode->i_record_locks = candidate;
 		state = candidate;
 		candidate = NULL;
 	}
+
 	mutex_unlock(&inode->i_lock);
+
 	if (candidate != NULL)
 		kern_free(candidate);
 
@@ -456,6 +474,7 @@ normalize_range(
 	} else {
 		return EINVAL;
 	}
+
 	error = add_i64(base, request->start, &point);
 	if (error != 0)
 		return error;
@@ -642,12 +661,14 @@ replace_owner_range(
 			lock_list_free(nodes);
 			return ENOMEM;
 		}
+
 		node->next = nodes;
 		nodes = node;
 	}
 
 	/* Retries from the caller if the state or a conflict changed meanwhile. */
 	irq = spin_lock_irqsave(&state->lock);
+
 	if (state->generation != expected ||
 	    (type != F_UNLCK && find_conflict(state, owner, owner_is_file,
 	    start, end, type))) {
@@ -667,6 +688,7 @@ replace_owner_range(
 			link = &lock->next;
 			continue;
 		}
+
 		*link = lock->next;
 		if (lock->start < start) {
 			before = nodes;
@@ -676,6 +698,7 @@ replace_owner_range(
 			before->type = lock->type;
 			insert_sorted(state, before);
 		}
+
 		if (lock->end > end) {
 			after = nodes;
 			nodes = nodes->next;
@@ -684,6 +707,7 @@ replace_owner_range(
 			after->type = lock->type;
 			insert_sorted(state, after);
 		}
+
 		lock->next = garbage;
 		garbage = lock;
 	}
@@ -702,6 +726,7 @@ replace_owner_range(
 	merged = coalesce_locked(state);
 	state->generation++;
 	waitq_wake_all(&state->waiters);
+
 	spin_unlock_irqrestore(&state->lock, irq);
 
 	/* Frees the unused, removed, and merged nodes outside the lock. */

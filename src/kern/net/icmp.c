@@ -83,9 +83,12 @@ icmp_socket_create(
 
 	/* Registers it for delivery. */
 	irq = spin_lock_irqsave(&icmp_registry_lock);
+
 	endpoint->next = icmp_sockets;
 	icmp_sockets = endpoint;
+
 	spin_unlock_irqrestore(&icmp_registry_lock, irq);
+
 	*result = &endpoint->inet.socket;
 
 	/* Reports the created socket. */
@@ -107,9 +110,9 @@ icmp_init(
 	    "ICMP socket registry");
 
 	/* Receives ICMP packets from IPv4. */
-	error = ipv4_protocol_register(IPPROTO_ICMP, icmp_input);
 
 	/* Reports why the registration failed. */
+	error = ipv4_protocol_register(IPPROTO_ICMP, icmp_input);
 	if (error != 0)
 		return error;
 
@@ -136,9 +139,9 @@ icmp_bind(
 	int error;
 
 	endpoint = icmp_endpoint(socket);
-	error = inet_socket_bind(&endpoint->inet, address, length);
 
 	/* Reports why the bind failed. */
+	error = inet_socket_bind(&endpoint->inet, address, length);
 	if (error != 0)
 		return error;
 
@@ -160,9 +163,9 @@ icmp_connect(
 	(void)io_flags;
 
 	endpoint = icmp_endpoint(socket);
-	error = inet_socket_connect(&endpoint->inet, address, length);
 
 	/* Reports why the connect failed. */
+	error = inet_socket_connect(&endpoint->inet, address, length);
 	if (error != 0)
 		return error;
 
@@ -219,6 +222,7 @@ icmp_sendto(
 		packet_buf_free(packet);
 		return -EMSGSIZE;
 	}
+
 	memcpy(payload, buffer, length);
 
 	/* Computes the checksum over the message with the field cleared. */
@@ -308,9 +312,9 @@ icmp_getsockname(
 	int error;
 
 	endpoint = icmp_endpoint(socket);
-	error = inet_socket_getsockname(&endpoint->inet, address, length);
 
 	/* Reports why the lookup failed. */
+	error = inet_socket_getsockname(&endpoint->inet, address, length);
 	if (error != 0)
 		return error;
 
@@ -329,9 +333,9 @@ icmp_getpeername(
 	int error;
 
 	endpoint = icmp_endpoint(socket);
-	error = inet_socket_getpeername(&endpoint->inet, address, length);
 
 	/* Reports why the lookup failed. */
+	error = inet_socket_getpeername(&endpoint->inet, address, length);
 	if (error != 0)
 		return error;
 
@@ -352,12 +356,14 @@ icmp_close(
 
 	/* Unlinks the endpoint from the registry. */
 	irq = spin_lock_irqsave(&icmp_registry_lock);
+
 	for (link = &icmp_sockets; *link != NULL; link = &(*link)->next) {
 		if (*link == endpoint) {
 			*link = endpoint->next;
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&icmp_registry_lock, irq);
 
 	kern_free(endpoint);
@@ -382,22 +388,24 @@ icmp_deliver(
 
 	/* References every socket under the registry lock. */
 	irq = spin_lock_irqsave(&icmp_registry_lock);
+
 	for (endpoint = icmp_sockets; endpoint != NULL; endpoint = endpoint->next) {
 		if (count < SOCKET_MAX && socket_tryref(&endpoint->inet.socket))
 			snapshot[count++] = endpoint;
 	}
+
 	spin_unlock_irqrestore(&icmp_registry_lock, irq);
 
 	/* Queues a copy on each socket whose address filters match. */
 	for (index = 0; index < count; index++) {
-		endpoint = snapshot[index];
-
 		/* Skips a socket bound or connected to other addresses. */
+		endpoint = snapshot[index];
 		if (endpoint->inet.local_address != 0 &&
 		    endpoint->inet.local_address != destination) {
 			socket_release(&endpoint->inet.socket);
 			continue;
 		}
+
 		if ((endpoint->inet.inet_flags & INET_SOCKET_CONNECTED) &&
 		    endpoint->inet.remote_address != source) {
 			socket_release(&endpoint->inet.socket);
@@ -410,12 +418,14 @@ icmp_deliver(
 			socket_release(&endpoint->inet.socket);
 			continue;
 		}
+
 		copy = packet_buf_copy_region(packet, packet->l3_offset,
 		    packet->l3_length);
 		if (copy == NULL) {
 			socket_release(&endpoint->inet.socket);
 			continue;
 		}
+
 		copy->l3_offset = 0;
 		copy->l3_length = packet->l3_length;
 		if (packet->l4_offset >= packet->l3_offset)

@@ -99,6 +99,7 @@ kern_platform_init(
 	} else if (network_error != ENODEV) {
 		hal_printf("net: LGY-98 initialization failed (%d)\n", network_error);
 	}
+
 #endif
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
 	/* Prepares the graphics driver, reporting its absence. */
@@ -136,9 +137,9 @@ kern_platform_input_init(
 	int error;
 
 	/* Starts the bus mouse driver. */
-	error = drv_pc98_busmouse_init();
 
 	/* Reports why the driver failed. */
+	error = drv_pc98_busmouse_init();
 	if (error != 0)
 		return error;
 

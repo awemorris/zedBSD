@@ -94,9 +94,12 @@ udp_socket_create(
 
 	/* Registers it for delivery. */
 	irq = spin_lock_irqsave(&udp_registry_lock);
+
 	endpoint->next = udp_sockets;
 	udp_sockets = endpoint;
+
 	spin_unlock_irqrestore(&udp_registry_lock, irq);
+
 	*result = &endpoint->inet.socket;
 
 	/* Reports the created socket. */
@@ -119,9 +122,9 @@ udp_init(
 	    "UDP socket registry");
 
 	/* Receives UDP datagrams from IPv4. */
-	error = ipv4_protocol_register(IPPROTO_UDP, udp_input);
 
 	/* Reports why the registration failed. */
+	error = ipv4_protocol_register(IPPROTO_UDP, udp_input);
 	if (error != 0)
 		return error;
 
@@ -186,6 +189,7 @@ udp_allocate_port_locked(
 			endpoint->inet.inet_flags |= INET_SOCKET_BOUND;
 			return 0;
 		}
+
 		endpoint->inet.local_port = 0;
 	}
 
@@ -203,7 +207,9 @@ udp_allocate_port(
 
 	/* Allocates under the registry lock. */
 	irq = spin_lock_irqsave(&udp_registry_lock);
+
 	error = udp_allocate_port_locked(endpoint);
+
 	spin_unlock_irqrestore(&udp_registry_lock, irq);
 
 	/* Reports why the allocation failed. */
@@ -226,22 +232,25 @@ udp_bind(
 	unsigned long socket_irq;
 	int error;
 
-	endpoint = udp_endpoint(socket);
-
 	/* A socket binds only once. */
+	endpoint = udp_endpoint(socket);
 	if ((endpoint->inet.inet_flags & INET_SOCKET_BOUND) != 0)
 		return EINVAL;
 
 	/* Freezes the reuse option, then takes the address. */
 	socket_irq = spin_lock_irqsave(&socket->lock);
+
 	endpoint->inet.bind_reuse_address = socket->reuse_address;
+
 	spin_unlock_irqrestore(&socket->lock, socket_irq);
+
 	error = inet_socket_bind(&endpoint->inet, address, length);
 	if (error != 0)
 		return error;
 
 	/* Allocates or validates the port, undoing the bind on failure. */
 	irq = spin_lock_irqsave(&udp_registry_lock);
+
 	if (endpoint->inet.local_port == 0)
 		error = udp_allocate_port_locked(endpoint);
 	else if (udp_port_in_use_locked(endpoint, 0))
@@ -253,6 +262,7 @@ udp_bind(
 		endpoint->inet.bind_reuse_address = 0;
 		endpoint->inet.inet_flags &= ~INET_SOCKET_BOUND;
 	}
+
 	spin_unlock_irqrestore(&udp_registry_lock, irq);
 
 	/* Reports why the bind failed. */
@@ -281,9 +291,9 @@ udp_connect(
 
 	/* Takes the remote address under the registry lock. */
 	irq = spin_lock_irqsave(&udp_registry_lock);
-	error = inet_socket_connect(&endpoint->inet, address, length);
 
 	/* A remote port is required, and a local one is allocated if missing. */
+	error = inet_socket_connect(&endpoint->inet, address, length);
 	if (error == 0 && endpoint->inet.remote_port == 0)
 		error = EADDRNOTAVAIL;
 	if (error == 0 && endpoint->inet.local_port == 0)
@@ -295,6 +305,7 @@ udp_connect(
 		endpoint->inet.remote_port = 0;
 		endpoint->inet.inet_flags &= ~INET_SOCKET_CONNECTED;
 	}
+
 	spin_unlock_irqrestore(&udp_registry_lock, irq);
 
 	/* Reports why the connect failed. */
@@ -351,6 +362,7 @@ udp_sendto(
 	} else {
 		return -EDESTADDRREQ;
 	}
+
 	if (destination == 0 || destination_port == 0)
 		return -EADDRNOTAVAIL;
 
@@ -417,6 +429,7 @@ udp_sendto(
 		error = ENOBUFS;
 		goto fail;
 	}
+
 	udp = packet_buf_append(packet, sizeof(*udp));
 	payload = packet_buf_append(packet, length);
 	if (udp == NULL || payload == NULL) {
@@ -424,6 +437,7 @@ udp_sendto(
 		error = ENOBUFS;
 		goto fail;
 	}
+
 	memset(udp, 0, sizeof(*udp));
 	if (length != 0)
 		memcpy(payload, buffer, length);
@@ -524,9 +538,9 @@ udp_getsockname(
 	int error;
 
 	endpoint = udp_endpoint(socket);
-	error = inet_socket_getsockname(&endpoint->inet, address, length);
 
 	/* Reports why the lookup failed. */
+	error = inet_socket_getsockname(&endpoint->inet, address, length);
 	if (error != 0)
 		return error;
 
@@ -545,9 +559,9 @@ udp_getpeername(
 	int error;
 
 	endpoint = udp_endpoint(socket);
-	error = inet_socket_getpeername(&endpoint->inet, address, length);
 
 	/* Reports why the lookup failed. */
+	error = inet_socket_getpeername(&endpoint->inet, address, length);
 	if (error != 0)
 		return error;
 
@@ -583,10 +597,10 @@ udp_setsockopt(
 	}
 
 	/* Forwards the other options to the internet socket layer. */
-	error = inet_socket_setsockopt(&endpoint->inet, level, option, value,
-	    length);
 
 	/* Reports why the option failed. */
+	error = inet_socket_setsockopt(&endpoint->inet, level, option, value,
+	    length);
 	if (error != 0)
 		return error;
 
@@ -607,9 +621,8 @@ udp_getsockopt(
 	int enabled;
 	int error;
 
-	endpoint = udp_endpoint(socket);
-
 	/* SO_BROADCAST is read from the endpoint flags. */
+	endpoint = udp_endpoint(socket);
 	if (level == SOL_SOCKET && option == SO_BROADCAST) {
 		if (value == NULL || length == NULL || *length < sizeof(enabled))
 			return EINVAL;
@@ -620,10 +633,10 @@ udp_getsockopt(
 	}
 
 	/* Forwards the other options to the internet socket layer. */
-	error = inet_socket_getsockopt(&endpoint->inet, level, option, value,
-	    length);
 
 	/* Reports why the option failed. */
+	error = inet_socket_getsockopt(&endpoint->inet, level, option, value,
+	    length);
 	if (error != 0)
 		return error;
 
@@ -644,12 +657,14 @@ udp_close(
 
 	/* Unlinks the endpoint from the registry. */
 	irq = spin_lock_irqsave(&udp_registry_lock);
+
 	for (link = &udp_sockets; *link != NULL; link = &(*link)->next) {
 		if (*link == endpoint) {
 			*link = endpoint->next;
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&udp_registry_lock, irq);
 
 	kern_free(endpoint);
@@ -688,6 +703,7 @@ udp_input(
 		packet_buf_free(packet);
 		return EINVAL;
 	}
+
 	checksum = wire_get16(udp->checksum);
 	if (checksum != 0 &&
 	    net_checksum_pseudo(source, destination, IPPROTO_UDP,
@@ -700,6 +716,7 @@ udp_input(
 	source_port = wire_get16(udp->source);
 	destination_port = wire_get16(udp->destination);
 	irq = spin_lock_irqsave(&udp_registry_lock);
+
 	for (endpoint = udp_sockets; endpoint != NULL; endpoint = endpoint->next) {
 		if (endpoint->inet.local_port != destination_port ||
 		    (endpoint->inet.local_address != 0 &&
@@ -712,11 +729,14 @@ udp_input(
 			best = endpoint;
 			break;
 		}
+
 		if (best == NULL)
 			best = endpoint;
 	}
+
 	if (best != NULL && !socket_tryref(&best->inet.socket))
 		best = NULL;
+
 	spin_unlock_irqrestore(&udp_registry_lock, irq);
 
 	/* Drops a datagram nobody listens for. */

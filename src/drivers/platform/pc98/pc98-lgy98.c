@@ -60,18 +60,6 @@ static const struct net_device_ops lgy_net_ops = {
 	.poll_receive = lgy_poll_receive,
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv pc98 lgy98 init operation.
  */
@@ -95,14 +83,14 @@ drv_pc98_lgy98_init(
 	lgy_dp.rx_start_page = LGY_RX_START;
 	lgy_dp.stop_page = LGY_STOP;
 	lgy_dp.dcr = LGY_DCR;
-	error = drv_dp8390_read_prom(&lgy_dp, prom);
 
 	/* Checks the operation status. */
+	error = drv_dp8390_read_prom(&lgy_dp, prom);
 	if (error != 0)
 		return error;
-	lgy_device = net_device_alloc();
 
 	/* Handles the lgy device availability. */
+	lgy_device = net_device_alloc();
 	if (lgy_device == NULL)
 		return ENOSPC;
 	strcpy(lgy_device->name, "ne0");
@@ -110,9 +98,9 @@ drv_pc98_lgy98_init(
 	lgy_device->hwaddr_len = 6;
 	lgy_device->flags = NET_DEVICE_BROADCAST;
 	memcpy(lgy_device->hwaddr, prom, 6);
-	error = drv_dp8390_attach(&lgy_dp, lgy_device);
 
 	/* Checks the operation status. */
+	error = drv_dp8390_attach(&lgy_dp, lgy_device);
 	if (error == 0) {
 		lgy_dp_ops = lgy_device->ops;
 		lgy_device->ops = &lgy_net_ops;
@@ -146,9 +134,9 @@ drv_pc98_lgy98_init(
 	/* Handles the lgy device condition. */
 	if (lgy_device->open_count != 0)
 		net_device_close(lgy_device);
-	registered = net_device_find_ref("ne0");
 
 	/* Handles the registered condition. */
+	registered = net_device_find_ref("ne0");
 	if (registered == lgy_device)
 		gone_error = net_device_gone(lgy_device);
 	net_device_release(registered);
@@ -314,13 +302,13 @@ lgy_transmit(
 	struct net_device *device,
 	struct packet_buf *packet)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = lgy_dp_ops->transmit(device, packet);
+	error = lgy_dp_ops->transmit(device, packet);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the lgy poll receive operation. */

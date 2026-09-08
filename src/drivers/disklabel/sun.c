@@ -10,10 +10,6 @@ static int scan(const struct partition_scheme *s, struct disk *d, struct partiti
 const struct partition_scheme drv_partition_scheme_sun = {.name = "sun",
 							  .scan = scan};
 
-
-
-
-
 /* Supports the be16 operation. */
 static uint16_t
 be16(
@@ -51,10 +47,10 @@ scan(
 
 	/* Checks the disk read result. */
 	if (d->d_block_size != 512U || disk_read(d, 0, 1, sector) != 0 ||
-	    be16(sector + 508) != 0xdabeU)
-
+	    be16(sector + 508) != 0xdabeU) {
 		/* Reports operation failure. */
 		return -1;
+	}
 	/* Process each element required by the operation. */
 	for (i = 0; i < 256U; i++)
 		sum ^= be16(sector + i * 2U);
@@ -63,9 +59,9 @@ scan(
 	if (sum != 0)
 		return -1;
 	heads = be16(sector + 436);
-	sectors = be16(sector + 438);
 
 	/* Handles the heads condition. */
+	sectors = be16(sector + 438);
 	if (!heads || !sectors)
 		return -1;
 	/* Process each remaining element. */

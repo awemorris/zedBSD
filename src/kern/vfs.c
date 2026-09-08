@@ -194,6 +194,7 @@ kern_vfs_init(
 		error = vfs_fail("handoff", EINVAL);
 		return error;
 	}
+
 	parameters = kern_boot_parameters_current();
 	if (parameters == NULL) {
 		error = vfs_fail("boot parameter state", EINVAL);
@@ -237,43 +238,51 @@ kern_vfs_init(
 		error = vfs_fail("register FAT", error);
 		return error;
 	}
+
 	error = filesystem_register(&drv_ufs_filesystem_type);
 	if (error != 0) {
 		error = vfs_fail("register UFS", error);
 		return error;
 	}
+
 	error = filesystem_register(&devfs_type);
 	if (error != 0) {
 		error = vfs_fail("register devfs", error);
 		return error;
 	}
+
 	error = filesystem_register(&tmpfs_type);
 	if (error != 0) {
 		error = vfs_fail("register tmpfs", error);
 		return error;
 	}
+
 	error = drv_overlayfs_init();
 	if (error != 0) {
 		error = vfs_fail("register overlayfs", error);
 		return error;
 	}
+
 	drv_input_core_init();
 	error = drv_console_device_register();
 	if (error != 0) {
 		error = vfs_fail("register console", error);
 		return error;
 	}
+
 	error = kern_platform_input_init();
 	if (error != 0) {
 		error = vfs_fail("initialize platform input", error);
 		return error;
 	}
+
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
 	error = drv_graphics_device_register();
 	if (error != 0) {
 		error = vfs_fail("register graphics", error);
 		return error;
 	}
+
 #endif
 	error = drv_system_device_register();
 	if (error != 0) {
@@ -304,6 +313,7 @@ kern_vfs_init(
 			error = vfs_fail("activate legacy runtime swap manager", error);
 			return error;
 		}
+
 		error = kern_boot_source_retain_configured(&boot_sources);
 		if (error != 0) {
 			(void)kern_swap_source_set_abort(&swap_sources);
@@ -311,8 +321,10 @@ kern_vfs_init(
 			error = vfs_fail("retain legacy runtime boot slots", error);
 			return error;
 		}
+
 		goto root_ready;
 	}
+
 #endif
 
 	/* Mounts the boot sources named by the parameters. */
@@ -328,6 +340,7 @@ kern_vfs_init(
 			    boot_sources.cleanup_error);
 		return error;
 	}
+
 	for (i = 0; i < KERN_BOOT_SOURCE_SLOT_COUNT; i++) {
 		if (!boot_sources.slot[i].configured)
 			continue;
@@ -467,10 +480,12 @@ kern_vfs_init(
 			    kern_boot_parameters_swap(parameters,
 				source->parameter_index), source->slot_count);
 		}
+
 		if (swap_get_stats(&swap_sources.backend, &total, &free_slots) == 0)
 			VFS_LOG("swap: active sources=%u total=%u free=%u\n",
 			    swap_sources.count, total, free_slots);
 	}
+
 #if defined(VFS_LEGACY_NULL_AUTOROOT)
 root_ready:
 #endif
@@ -516,12 +531,14 @@ root_ready:
 		error = mount_at("tmpfs", &dev_path, "shm", 0, NULL,
 				 &shm_mount);
 	}
+
 	if (error == 0) {
 		path_set(&shm_path, shm_mount, shm_mount->m_root);
 		failure_stage = "bind /dev/shm at /shm";
 		error =
 		    mount_bind_at(&shm_path, &root_path, "shm", NULL);
 	}
+
 	path_release(&shm_path);
 	path_release(&dev_path);
 	if (error != 0)
@@ -542,6 +559,7 @@ root_ready:
 		disk_ref(root_partition);
 		swap_control_context.native_root = root_partition;
 	}
+
 	memset(&registration, 0, sizeof(registration));
 	registration.sources = &swap_sources;
 	registration.resolver = &vfs_swap_resolver;
@@ -553,6 +571,7 @@ root_ready:
 		swap_control_context.native_root = NULL;
 		goto out_root;
 	}
+
 	path_release(&root_path);
 	disk_release(root_partition);
 
@@ -562,9 +581,9 @@ root_ready:
 out_root:
 	path_release(&root_path);
 	disk_release(root_partition);
-	error = vfs_fail(failure_stage, error);
 
 	/* Reports the failed stage. */
+	error = vfs_fail(failure_stage, error);
 	if (error != 0)
 		return error;
 
@@ -582,9 +601,8 @@ vfs_swap_resolve_path(
 	struct vfs_swap_control_context *context;
 	int error;
 
-	context = opaque;
-
 	/* Rejects a missing context, selector, or result. */
+	context = opaque;
 	if (context == NULL || selector == NULL || result == NULL)
 		return EINVAL;
 
@@ -593,10 +611,10 @@ vfs_swap_resolve_path(
 		error = namei_path_at(&kern_cwdinfo, selector, result);
 		return error;
 	}
-	error = kern_boot_source_runtime_lookup(context->boot_sources, selector,
-	    result);
 
 	/* Reports the failure. */
+	error = kern_boot_source_runtime_lookup(context->boot_sources, selector,
+	    result);
 	if (error != 0)
 		return error;
 
@@ -622,9 +640,9 @@ vfs_swap_resolve_disk(
 	error = kern_boot_source_selector_validate(selector);
 	if (error != 0)
 		return error;
-	error = block_identity_resolve(selector, result);
 
 	/* Reports the failure. */
+	error = block_identity_resolve(selector, result);
 	if (error != 0)
 		return error;
 
@@ -675,9 +693,8 @@ vfs_swap_validate_raw(
 	struct vfs_disk_range source;
 	int error;
 
-	context = opaque;
-
 	/* Rejects a missing context or candidate. */
+	context = opaque;
 	if (context == NULL || candidate == NULL)
 		return EINVAL;
 
@@ -742,6 +759,7 @@ vfs_ensure_root_directory(
 		inode_release(inode);
 		return error;
 	}
+
 	if (error != ENOENT)
 		return error;
 
@@ -841,6 +859,7 @@ vfs_scan_physical_disks(
 		else if (disk != NULL)
 			disk_release(disk);
 	}
+
 	if (boot_physical != NULL)
 		boot_name = boot_physical->d_name;
 	else
@@ -866,6 +885,7 @@ vfs_scan_physical_disks(
 			disk_release(physical[i]);
 			continue;
 		}
+
 		for (slot = 0; slot < count; slot++) {
 			if (entries[slot].p_block_count == 0) {
 				VFS_LOG("vfs: %s partition %u has zero blocks; "
@@ -873,6 +893,7 @@ vfs_scan_physical_disks(
 				    entries[slot].p_index + 1U);
 				continue;
 			}
+
 			partition_error = partition_create_disk(&entries[slot]);
 			if (partition_error != 0) {
 				VFS_LOG("vfs: %s partition %u create failed "
@@ -880,6 +901,7 @@ vfs_scan_physical_disks(
 				    entries[slot].p_index + 1U, partition_error);
 				continue;
 			}
+
 			VFS_LOG(
 			    "vfs: %s partition %u start=%08X:%08X "
 			    "data=%08X:%08X blocks=%08X:%08X\n",
@@ -921,6 +943,7 @@ vfs_scan_physical_disks(
 			if (matches)
 				*loader_boot_partition = entries[slot].p_disk;
 		}
+
 		disk_release(physical[i]);
 	}
 }
@@ -958,6 +981,7 @@ ufs_root_marker_matches(
 		error = 0;
 		goto out;
 	}
+
 	if (error != 0)
 		goto out;
 	error = file_open_resolved(&marker, O_RDONLY, &file);
@@ -968,6 +992,7 @@ ufs_root_marker_matches(
 		error = (int)-count;
 		goto out;
 	}
+
 	*matches = count == (ssize_t)(sizeof(expected) - 1U) &&
 		   memcmp(value, expected, sizeof(expected) - 1U) == 0;
 out:
@@ -1016,6 +1041,7 @@ vfs_legacy_overlay_setup_cleanup(
 		if (error == 0)
 			setup->upper_mount = NULL;
 	}
+
 	if (setup->lower_mount != NULL) {
 		error = unmount_private(setup->lower_mount);
 		if (first_error == 0 && error != 0)
@@ -1023,6 +1049,7 @@ vfs_legacy_overlay_setup_cleanup(
 		if (error == 0)
 			setup->lower_mount = NULL;
 	}
+
 	if (setup->upper_loop != NULL) {
 		error = drv_loop_detach(setup->upper_loop);
 		if (first_error == 0 && error != 0)
@@ -1030,6 +1057,7 @@ vfs_legacy_overlay_setup_cleanup(
 		if (error == 0)
 			setup->upper_loop = NULL;
 	}
+
 	if (setup->lower_loop != NULL) {
 		error = drv_loop_detach(setup->lower_loop);
 		if (first_error == 0 && error != 0)
@@ -1037,6 +1065,7 @@ vfs_legacy_overlay_setup_cleanup(
 		if (error == 0)
 			setup->lower_loop = NULL;
 	}
+
 	if (setup->boot_mount != NULL) {
 		error = unmount_private(setup->boot_mount);
 		if (first_error == 0 && error != 0)
@@ -1044,6 +1073,7 @@ vfs_legacy_overlay_setup_cleanup(
 		if (error == 0)
 			setup->boot_mount = NULL;
 	}
+
 	return first_error;
 }
 
@@ -1085,8 +1115,10 @@ vfs_mount_legacy_arm_overlay(
 			error = vfs_fail("release legacy boot mount", cleanup_error);
 			return error;
 		}
+
 		return ENOENT;
 	}
+
 	if (error != 0)
 		goto fail;
 
@@ -1140,9 +1172,9 @@ fail:
 		    cleanup_error);
 
 	/* Reports the stage that failed. */
-	error = vfs_fail(stage, error);
 
 	/* Reports the failure. */
+	error = vfs_fail(stage, error);
 	if (error != 0)
 		return error;
 
@@ -1190,6 +1222,7 @@ vfs_mount_legacy_root(
 			error = vfs_fail("inspect legacy UFS root candidate", error);
 			return error;
 		}
+
 		if (!matches)
 			continue;
 		if (root_partition != NULL) {
@@ -1197,6 +1230,7 @@ vfs_mount_legacy_root(
 			    EINVAL);
 			return error;
 		}
+
 		root_partition = partition->p_disk;
 	}
 
@@ -1209,6 +1243,7 @@ vfs_mount_legacy_root(
 		if (error != ENOENT)
 			return error;
 	}
+
 #endif
 
 	/* Mounts the UFS root when one was found. */
@@ -1221,6 +1256,7 @@ vfs_mount_legacy_root(
 			error = vfs_fail("mount legacy UFS root", error);
 			return error;
 		}
+
 		*root_disk_out = root_partition;
 		return 0;
 	}
@@ -1232,6 +1268,7 @@ vfs_mount_legacy_root(
 		error = vfs_fail("mount legacy boot partition root", error);
 		return error;
 	}
+
 	disk_ref(boot_partition);
 	*root_disk_out = boot_partition;
 	return 0;
@@ -1270,6 +1307,7 @@ vfs_overlay_setup_cleanup(
 		if (error == 0)
 			setup->upper_mount = NULL;
 	}
+
 	if (setup->lower_mount != NULL) {
 		error = unmount_private(setup->lower_mount);
 		if (first_error == 0 && error != 0)
@@ -1277,6 +1315,7 @@ vfs_overlay_setup_cleanup(
 		if (error == 0)
 			setup->lower_mount = NULL;
 	}
+
 	if (setup->upper_loop != NULL) {
 		error = drv_loop_detach(setup->upper_loop);
 		if (first_error == 0 && error != 0)
@@ -1284,6 +1323,7 @@ vfs_overlay_setup_cleanup(
 		if (error == 0)
 			setup->upper_loop = NULL;
 	}
+
 	if (setup->lower_loop != NULL) {
 		error = drv_loop_detach(setup->lower_loop);
 		if (first_error == 0 && error != 0)
@@ -1291,18 +1331,21 @@ vfs_overlay_setup_cleanup(
 		if (error == 0)
 			setup->lower_loop = NULL;
 	}
+
 	if (setup->upper_file != NULL) {
 		error = file_close(setup->upper_file);
 		if (first_error == 0 && error != 0)
 			first_error = error;
 		setup->upper_file = NULL;
 	}
+
 	if (setup->lower_file != NULL) {
 		error = file_close(setup->lower_file);
 		if (first_error == 0 && error != 0)
 			first_error = error;
 		setup->lower_file = NULL;
 	}
+
 	path_release(&setup->upper_file_path);
 	path_release(&setup->lower_file_path);
 	return first_error;
@@ -1319,10 +1362,12 @@ vfs_overlay_setup_release_transient(
 		(void)file_close(setup->upper_file);
 		setup->upper_file = NULL;
 	}
+
 	if (setup->lower_file != NULL) {
 		(void)file_close(setup->lower_file);
 		setup->lower_file = NULL;
 	}
+
 	path_release(&setup->upper_file_path);
 	path_release(&setup->lower_file_path);
 }
@@ -1368,6 +1413,7 @@ vfs_mount_overlay_root(
 		error = EINVAL;
 		goto fail;
 	}
+
 	if (path_equal(&setup.lower_file_path, &setup.upper_file_path) ||
 	    (setup.lower_file_path.p_mount->m_disk != NULL &&
 	     setup.upper_file_path.p_mount->m_disk != NULL &&
@@ -1378,6 +1424,7 @@ vfs_mount_overlay_root(
 		error = EEXIST;
 		goto fail;
 	}
+
 	if ((setup.upper_file_path.p_mount->m_flags & MOUNT_READ_ONLY) != 0 ||
 	    setup.upper_file_path.p_mount->m_disk == NULL ||
 	    (setup.upper_file_path.p_mount->m_disk->d_flags &
@@ -1440,6 +1487,7 @@ vfs_mount_overlay_root(
 		stage = "retain overlay boot slot";
 		goto fail;
 	}
+
 	stage = "release unused boot slots";
 	error = kern_boot_source_release_unused(&boot_sources);
 	if (error != 0)
@@ -1467,9 +1515,9 @@ fail:
 		    cleanup_error);
 
 	/* Reports the stage that failed. */
-	error = vfs_fail(stage, error);
 
 	/* Reports the failure. */
+	error = vfs_fail(stage, error);
 	if (error != 0)
 		return error;
 
@@ -1495,16 +1543,19 @@ vfs_resolve_native_root(
 		error = vfs_fail("validate rootpart selector", error);
 		return error;
 	}
+
 	error = block_identity_resolve(selector, &disk);
 	if (error != 0) {
 		error = vfs_fail("resolve rootpart selector", error);
 		return error;
 	}
+
 	if ((disk->d_flags & DISK_PARTITION) == 0) {
 		disk_release(disk);
 		error = vfs_fail("validate rootpart partition", EINVAL);
 		return error;
 	}
+
 	VFS_LOG("vfs: rootpart selector %s resolved to /dev/%s\n", selector,
 	    disk->d_name);
 	*root_disk_out = disk;
@@ -1534,17 +1585,20 @@ vfs_mount_native_root(
 			error = vfs_fail("retain rootpart boot slot", error);
 			return error;
 		}
+
 		error = kern_boot_source_release_unused(&boot_sources);
 		if (error != 0) {
 			error = vfs_fail("release unused boot slots", error);
 			return error;
 		}
+
 		error = kern_boot_source_promote_root(&boot_sources, boot_slot,
 		    root_out);
 		if (error != 0) {
 			error = vfs_fail("promote rootpart boot slot", error);
 			return error;
 		}
+
 		VFS_LOG("vfs: rootpart reuses boot%u FAT mount\n", boot_slot);
 	} else {
 		error = kern_boot_source_release_unused(&boot_sources);
@@ -1552,6 +1606,7 @@ vfs_mount_native_root(
 			error = vfs_fail("release unused boot slots", error);
 			return error;
 		}
+
 		args.fspec = disk->d_name;
 		error = mount_root_create("auto", 0, &args, root_out);
 		if (error != 0) {
@@ -1559,5 +1614,6 @@ vfs_mount_native_root(
 			return error;
 		}
 	}
+
 	return 0;
 }

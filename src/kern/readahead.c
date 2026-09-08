@@ -110,6 +110,7 @@ readahead_reset(
 		state->exhausted = 1;
 		return;
 	}
+
 	state->generation++;
 }
 
@@ -196,9 +197,9 @@ readahead_observe(
 		first = state->issued_end;
 	if (first >= limit || first >= eof)
 		return 0;
-	available = limit - first;
 
 	/* Refills in half-window runs instead of submitting another page on every read. */
+	available = limit - first;
 	if (available < READAHEAD_MIN_WINDOW / 2U && limit != eof_rounded)
 		return 0;
 	if (available > READAHEAD_REQUEST_MAX)
@@ -295,6 +296,7 @@ readahead_submit(
 		mutex_unlock(&control);
 		return EAGAIN;
 	}
+
 	if (!readahead_current(&origin->f_readahead, request)) {
 		mutex_unlock(&origin->f_lock);
 		disk_cache_release(leaf);
@@ -304,6 +306,7 @@ readahead_submit(
 
 	/* Shares a physical worker while any of its jobs retain that device identity. */
 	irq = spin_lock_irqsave(&registry);
+
 	worker = NULL;
 	empty = NULL;
 	for (index = 0; index < RA_WORKERS; index++) {
@@ -316,9 +319,11 @@ readahead_submit(
 			if (job->leaf == leaf)
 				worker = &workers[index];
 		}
+
 		if (used == 0 && empty == NULL)
 			empty = &workers[index];
 	}
+
 	if (worker == NULL)
 		worker = empty;
 	job = NULL;
@@ -330,6 +335,7 @@ readahead_submit(
 			}
 		}
 	}
+
 	if (job == NULL || blocked(mount) || next_order == UINT64_MAX) {
 		counters.refusals++;
 		spin_unlock_irqrestore(&registry, irq);
@@ -347,8 +353,10 @@ readahead_submit(
 	job->state = RA_PREPARING;
 	counters.jobs++;
 	counters.requested_bytes += request->length;
+
 	spin_unlock_irqrestore(&registry, irq);
 	mutex_unlock(&origin->f_lock);
+
 	error = prepare_worker(worker);
 	if (error == 0)
 		error = vm_object_prefetch_prepare(inode, offset, request->length, &job->fill);
@@ -360,10 +368,13 @@ readahead_submit(
 
 	/* Hands the private fill to its worker, including already canceled preparations. */
 	irq = spin_lock_irqsave(&registry);
+
 	job->state = RA_QUEUED;
 	waitq_wake_all(&worker->wake);
+
 	spin_unlock_irqrestore(&registry, irq);
 	mutex_unlock(&control);
+
 	return 0;
 }
 
@@ -383,6 +394,7 @@ readahead_cancel(
 	if (origin == NULL || atomic_load_acquire(&initialized) != 2)
 		return;
 	irq = spin_lock_irqsave(&registry);
+
 	for (index = 0; index < RA_WORKERS; index++) {
 		for (slot = 0; slot < RA_SLOTS; slot++) {
 			job = &workers[index].jobs[slot];
@@ -391,8 +403,10 @@ readahead_cancel(
 			job->origin = NULL;
 			job->canceled = 1;
 		}
+
 		waitq_wake_all(&workers[index].wake);
 	}
+
 	spin_unlock_irqrestore(&registry, irq);
 }
 
@@ -411,10 +425,13 @@ readahead_demand_begin(
 	if (error != 0)
 		return error;
 	irq = spin_lock_irqsave(&registry);
+
 	if (counters.demand == ~0U)
 		HAL_FATAL("readahead demand counter overflow");
 	counters.demand++;
+
 	spin_unlock_irqrestore(&registry, irq);
+
 	return 0;
 }
 
@@ -430,6 +447,7 @@ readahead_demand_end(
 
 	/* Balances only transactions that called demand_begin. */
 	irq = spin_lock_irqsave(&registry);
+
 	if (counters.demand == 0)
 		HAL_FATAL("readahead demand counter underflow");
 	counters.demand--;
@@ -437,6 +455,7 @@ readahead_demand_end(
 		for (index = 0; index < RA_WORKERS; index++)
 			waitq_wake_all(&workers[index].wake);
 	}
+
 	spin_unlock_irqrestore(&registry, irq);
 }
 
@@ -459,6 +478,7 @@ readahead_boundary_begin(
 	if (error != 0)
 		return error;
 	irq = spin_lock_irqsave(&registry);
+
 	boundary->mount = mount;
 	boundary->next = boundaries;
 	boundary->active = 1;
@@ -475,7 +495,9 @@ readahead_boundary_begin(
 			return error;
 		}
 	}
+
 	spin_unlock_irqrestore(&registry, irq);
+
 	return 0;
 }
 
@@ -493,6 +515,7 @@ readahead_boundary_end(
 	if (boundary == NULL || atomic_load_acquire(&initialized) != 2)
 		return;
 	irq = spin_lock_irqsave(&registry);
+
 	for (link = &boundaries; *link != NULL; link = &(*link)->next) {
 		if (*link == boundary) {
 			*link = boundary->next;
@@ -500,6 +523,7 @@ readahead_boundary_end(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&registry, irq);
 }
 
@@ -517,8 +541,10 @@ readahead_consumed(
 	if (atomic_load_acquire(&initialized) != 2)
 		return;
 	irq = spin_lock_irqsave(&registry);
+
 	counters.useful_bytes += useful;
 	counters.unused_bytes += unused;
+
 	spin_unlock_irqrestore(&registry, irq);
 }
 
@@ -539,9 +565,11 @@ readahead_snapshot(
 	if (atomic_load_acquire(&initialized) != 2)
 		return;
 	irq = spin_lock_irqsave(&registry);
+
 	*stats = counters;
 	for (index = 0; index < RA_WORKERS; index++)
 		stats->memory_bytes += workers[index].memory.size;
+
 	spin_unlock_irqrestore(&registry, irq);
 }
 
@@ -593,6 +621,7 @@ readahead_trim(
 	if (atomic_load_acquire(&initialized) != 2)
 		return 0;
 	mutex_lock(&control);
+
 	error = 0;
 	for (index = 0; index < RA_WORKERS; index++) {
 		worker = &workers[index];
@@ -602,6 +631,7 @@ readahead_trim(
 			if (worker->jobs[slot].state != RA_FREE)
 				busy = 1;
 		}
+
 		memory = worker->memory;
 		spin_unlock_irqrestore(&registry, irq);
 		if (busy || memory.size == 0)
@@ -610,11 +640,13 @@ readahead_trim(
 			error = EIO;
 			continue;
 		}
+
 		cache_memory_release(CACHE_MEMORY_WORKER, worker->memory.size);
 		irq = spin_lock_irqsave(&registry);
 		memset(&worker->memory, 0, sizeof(worker->memory));
 		spin_unlock_irqrestore(&registry, irq);
 	}
+
 	mutex_unlock(&control);
 
 	/* Reports the failure. */
@@ -645,6 +677,7 @@ initialize(
 		atomic_store_release(&initialized, 0);
 		return error;
 	}
+
 	spin_init(&registry, LOCK_RANK_READAHEAD_REGISTRY, "readahead registry");
 	waitq_init(&changed, "readahead retirement");
 	for (index = 0; index < RA_WORKERS; index++)
@@ -665,6 +698,7 @@ blocked(
 		if (boundary->mount == NULL || boundary->mount == mount)
 			return 1;
 	}
+
 	return 0;
 }
 
@@ -687,12 +721,14 @@ prepare_worker(
 				HAL_FATAL("readahead allocation rollback failed");
 			return ENOMEM;
 		}
+
 		error = cache_memory_reserve(CACHE_MEMORY_WORKER, memory.size, 1);
 		if (error != 0) {
 			if (io_scratch_free(&memory) != HAL_OK)
 				HAL_FATAL("readahead accounting rollback failed");
 			return error;
 		}
+
 		cache_memory_commit(CACHE_MEMORY_WORKER, memory.size);
 		irq = spin_lock_irqsave(&registry);
 		worker->memory = memory;
@@ -707,6 +743,7 @@ prepare_worker(
 		worker->started = 1;
 		thread_start(thread);
 	}
+
 	return 0;
 }
 
@@ -728,6 +765,7 @@ next_job(
 		if (best == NULL || job->order < best->order)
 			best = job;
 	}
+
 	return best;
 }
 
@@ -756,6 +794,7 @@ run_worker(
 			(void)waitq_sleep(&worker->wake, &registry, sequence, 0, 0);
 			job = next_job(worker);
 		}
+
 		job->state = RA_RUNNING;
 		canceled = job->canceled;
 		requested = job->fill.length;
@@ -810,10 +849,12 @@ retire_job(
 	if (leaf != NULL)
 		disk_cache_release(leaf);
 	irq = spin_lock_irqsave(&registry);
+
 	memset(job, 0, sizeof(*job));
 	counters.jobs--;
 	waitq_wake_all(&changed);
 	waitq_wake_all(&worker->wake);
+
 	spin_unlock_irqrestore(&registry, irq);
 }
 
@@ -835,6 +876,7 @@ cancel_mount(
 			job->canceled = 1;
 			job->origin = NULL;
 		}
+
 		waitq_wake_all(&workers[index].wake);
 	}
 }
@@ -856,5 +898,6 @@ mount_busy(
 				return 1;
 		}
 	}
+
 	return 0;
 }

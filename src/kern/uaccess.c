@@ -48,9 +48,9 @@ user_range_check(
 
 	/* Asks the current vmspace about the range. */
 	vm = current_vmspace();
-	error = vmspace_check(vm, address, size, prot);
 
 	/* Reports why the check failed. */
+	error = vmspace_check(vm, address, size, prot);
 	if (error != 0)
 		return error;
 
@@ -172,6 +172,7 @@ uaccess_pin_vmspace(
 		vmspace_put(vm);
 		return ENOMEM;
 	}
+
 	pages = kern_calloc(page_count, sizeof(*pages));
 	if (pages == NULL) {
 		vmspace_put(vm);
@@ -216,9 +217,9 @@ uaccess_pin(
 
 	/* Pins the range in the current vmspace. */
 	vm = current_vmspace();
-	error = uaccess_pin_vmspace(vm, address, size, prot, pin);
 
 	/* Reports why the pin failed. */
+	error = uaccess_pin_vmspace(vm, address, size, prot, pin);
 	if (error != 0)
 		return error;
 
@@ -295,6 +296,7 @@ copyin_pinned(
 		} else {
 			error = EFAULT;
 		}
+
 		if (error != 0)
 			return error;
 
@@ -367,6 +369,7 @@ copyout_pinned(
 		} else {
 			error = EFAULT;
 		}
+
 		if (error != 0)
 			return error;
 
@@ -402,9 +405,9 @@ copyin(
 
 	/* Copies through the current vmspace. */
 	vm = current_vmspace();
-	error = vmspace_copy_from(vm, destination, source, size);
 
 	/* Reports why the copy failed. */
+	error = vmspace_copy_from(vm, destination, source, size);
 	if (error != 0)
 		return error;
 
@@ -435,9 +438,9 @@ copyout(
 
 	/* Copies through the current vmspace. */
 	vm = current_vmspace();
-	error = vmspace_copy_to(vm, destination, source, size);
 
 	/* Reports why the copy failed. */
+	error = vmspace_copy_to(vm, destination, source, size);
 	if (error != 0)
 		return error;
 
@@ -492,6 +495,7 @@ copyinstr(
 				return 0;
 			}
 		}
+
 		used += chunk;
 	}
 

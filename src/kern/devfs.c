@@ -337,6 +337,7 @@ devfs_fixed_inode(
 
 	/* The mount-local mutex permits allocation and victim reclaim to sleep. */
 	mutex_lock(&directory->i_mount->m_lock);
+
 	error = inode_get(directory->i_mount, number, &inode);
 	if (error != 0) {
 		/* Recreates an evicted directory with the root's operations. */
@@ -345,6 +346,7 @@ devfs_fixed_inode(
 			mutex_unlock(&directory->i_mount->m_lock);
 			return ENOSPC;
 		}
+
 		inode->i_type = INODE_DIR;
 		inode->i_ino = number;
 		inode->i_op = directory->i_op;
@@ -353,6 +355,7 @@ devfs_fixed_inode(
 		inode->i_mode = S_IFDIR | 0555U;
 		inode->i_flags = INODE_NOCACHE_CHILDREN;
 	}
+
 	mutex_unlock(&directory->i_mount->m_lock);
 
 	*result = inode;
@@ -386,6 +389,7 @@ devfs_lookup(
 			error = inode_get(directory->i_mount, 1, result);
 			return error;
 		}
+
 		inode_ref(directory);
 		*result = directory;
 		return 0;
@@ -402,6 +406,7 @@ devfs_lookup(
 				return ENOENT;
 			number = number * 10U + (digit - '0');
 		}
+
 		if (number > UINT32_MAX || !tty_pty_exists((unsigned)number))
 			return ENOENT;
 
@@ -420,6 +425,7 @@ devfs_lookup(
 			inode->i_mode = S_IFCHR | 0620U;
 			inode->i_rdev = (dev_t)(0x00020000U + number);
 		}
+
 		*result = inode;
 		return 0;
 	}
@@ -446,10 +452,12 @@ devfs_lookup(
 		error = devfs_fixed_inode(directory, DEVFS_SHM_INO, result);
 		return error;
 	}
+
 	if (component_equal(component, "pts")) {
 		error = devfs_fixed_inode(directory, DEVFS_PTS_INO, result);
 		return error;
 	}
+
 	if (component_equal(component, "input")) {
 		error = devfs_fixed_inode(directory, DEVFS_INPUT_INO, result);
 		return error;
@@ -462,6 +470,7 @@ devfs_lookup(
 		cdev_release(device);
 		return error;
 	}
+
 	if (device != NULL)
 		cdev_release(device);
 
@@ -485,6 +494,7 @@ devfs_lookup(
 		inode->i_mode = S_IFBLK | 0600U;
 		inode->i_rdev = info.dev;
 	}
+
 	*result = inode;
 
 	/* Reports the block inode. */
@@ -559,6 +569,7 @@ devfs_directory_add_cdevs(
 			entry->generation = generation;
 			entry->character = 1;
 		}
+
 		cdev_release(device);
 	}
 }
@@ -636,6 +647,7 @@ devfs_dir_open(
 			    (ino_t)(DEVFS_PTS_INO_BASE + indices[index]);
 			entry->type = INODE_CHAR;
 		}
+
 		file->f_data = state;
 		return 0;
 	}
@@ -678,6 +690,7 @@ devfs_dir_open(
 		    (uint64_t)disks[index].dev);
 		entry->type = INODE_BLOCK;
 	}
+
 	file->f_data = state;
 
 	/* Reports the opened directory. */
@@ -757,6 +770,7 @@ block_open(
 		disk_close(disk);
 		return EOPNOTSUPP;
 	}
+
 	file->f_data = disk;
 
 	/* Reports the opened disk. */
@@ -825,12 +839,14 @@ block_pread(
 				return (ssize_t)total;
 			return -error;
 		}
+
 		error = disk_read(disk, block, 1, bounce);
 		if (error != 0) {
 			if (total != 0)
 				return (ssize_t)total;
 			return -error;
 		}
+
 		memcpy(output + total, bounce + within, count);
 		total += count;
 		position += count;
@@ -900,9 +916,9 @@ block_pwrite(
 	if (error != 0)
 		return -error;
 	position = range.position;
-	length = range.length;
 
 	/* Excludes other mutations of the touched sectors. */
+	length = range.length;
 	if (length != 0) {
 		first = position / block_size;
 		last = (position + length - 1U) / block_size;
@@ -924,6 +940,7 @@ block_pwrite(
 				return (ssize_t)total;
 			return -error;
 		}
+
 		if (within != 0 || count != block_size) {
 			error = disk_read(disk, block, 1, bounce);
 			if (error != 0) {
@@ -935,6 +952,7 @@ block_pwrite(
 		} else {
 			memset(bounce, 0, sizeof(bounce));
 		}
+
 		memcpy(bounce + within, input + total, count);
 		error = disk_write(disk, block, 1, bounce);
 		if (error != 0) {
@@ -943,9 +961,11 @@ block_pwrite(
 				return (ssize_t)total;
 			return -error;
 		}
+
 		total += count;
 		position += count;
 	}
+
 	backing_mutation_end(&guard);
 
 	/* Reports the bytes written. */
@@ -982,9 +1002,9 @@ block_fsync(
 		return ENXIO;
 
 	/* Flushes the disk. */
-	error = disk_sync(file->f_data);
 
 	/* Reports why the flush failed. */
+	error = disk_sync(file->f_data);
 	if (error != 0)
 		return error;
 
@@ -1045,9 +1065,9 @@ block_ioctl(
 	}
 
 	/* Forwards everything else to the disk. */
-	error = disk_ioctl(file->f_data, request, (void *)argument);
 
 	/* Reports why the disk's failed. */
+	error = disk_ioctl(file->f_data, request, (void *)argument);
 	if (error != 0)
 		return error;
 

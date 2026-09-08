@@ -71,6 +71,7 @@ device_operation_begin(
 		error = EOVERFLOW;
 	else
 		device->active_operations++;
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Reports the failure. */
@@ -96,6 +97,7 @@ device_operation_end(
 	if (device->active_operations == 0)
 		__builtin_trap();
 	device->active_operations--;
+
 	spin_unlock_irqrestore(&device->lock, irq);
 }
 
@@ -150,13 +152,13 @@ drv_dma_device_create(
 	    constraints->max_segment_size == 0 ||
 	    (constraints->segment_boundary != 0 &&
 	     (!is_power_of_two(constraints->segment_boundary) ||
-	      constraints->max_segment_size > constraints->segment_boundary)))
-
+	      constraints->max_segment_size > constraints->segment_boundary))) {
 		/* Returns the computed result. */
 		return EINVAL;
-	device = hal_malloc(sizeof(*device));
+	}
 
 	/* Handles the device availability. */
+	device = hal_malloc(sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
 	memset(device, 0, sizeof(*device));
@@ -180,6 +182,7 @@ drv_dma_device_destroy(
 	if (device == NULL)
 		return EINVAL;
 	irq = spin_lock_irqsave(&device->lock);
+
 	device->destroying = 1;
 
 	/* Handles the allocations availability. */
@@ -190,7 +193,9 @@ drv_dma_device_destroy(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	spin_unlock_irqrestore(&device->lock, irq);
+
 	hal_free(device);
 
 	/* Reports successful completion. */
@@ -208,10 +213,10 @@ drv_dma_device_address_bits(
 
 	/* Checks the device operation begin result. */
 	if (device == NULL ||
-	    device_operation_begin((struct drv_dma_device *)device, 0) != 0)
-
+	    device_operation_begin((struct drv_dma_device *)device, 0) != 0) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	result = device->constraints.address_bits;
 	device_operation_end((struct drv_dma_device *)device);
 
@@ -229,10 +234,10 @@ drv_dma_device_max_segment_size(
 
 	/* Checks the device operation begin result. */
 	if (device == NULL ||
-	    device_operation_begin((struct drv_dma_device *)device, 0) != 0)
-
+	    device_operation_begin((struct drv_dma_device *)device, 0) != 0) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	result = device->constraints.max_segment_size;
 	device_operation_end((struct drv_dma_device *)device);
 
@@ -250,10 +255,10 @@ drv_dma_device_is_coherent(
 
 	/* Checks the device operation begin result. */
 	if (device == NULL ||
-	    device_operation_begin((struct drv_dma_device *)device, 0) != 0)
-
+	    device_operation_begin((struct drv_dma_device *)device, 0) != 0) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	result = device->constraints.coherent;
 	device_operation_end((struct drv_dma_device *)device);
 
@@ -283,9 +288,9 @@ drv_dma_alloc_coherent(
 	if (device == NULL || buffer == NULL || size == 0)
 		return EINVAL;
 	io_stats_record(IO_DMA_REQUEST, size);
-	error = device_operation_begin(device, 0);
 
 	/* Checks the operation status. */
+	error = device_operation_begin(device, 0);
 	if (error != 0)
 		return error;
 
@@ -296,15 +301,16 @@ drv_dma_alloc_coherent(
 		/* Returns the computed result. */
 		return EINVAL;
 	}
-	allocation = hal_malloc(sizeof(*allocation));
 
 	/* Handles the allocation availability. */
+	allocation = hal_malloc(sizeof(*allocation));
 	if (allocation == NULL) {
 		device_operation_end(device);
 
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	memset(allocation, 0, sizeof(*allocation));
 	request.paddr = HAL_PMEM_PADDR_ANY;
 	request.size = size;
@@ -326,10 +332,10 @@ drv_dma_alloc_coherent(
 	 * backing. */
 	if (boundary < hal_page_get_page_size(1))
 		boundary = 0;
-	error = hal_pmem_alloc_range(&request, 0, maximum, boundary,
-				     &allocation->memory);
 
 	/* Checks the operation status. */
+	error = hal_pmem_alloc_range(&request, 0, maximum, boundary,
+				     &allocation->memory);
 	if (error != HAL_OK ||
 	    !address_fits(device, allocation->memory.paddr,
 			  allocation->memory.size) ||
@@ -347,6 +353,7 @@ drv_dma_alloc_coherent(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	allocation_bytes = allocation->memory.size;
 
 	/* Accounts mandatory backing before publishing device ownership. */
@@ -364,9 +371,9 @@ drv_dma_alloc_coherent(
 			return ENOMEM;
 		}
 	}
-	irq = spin_lock_irqsave(&device->lock);
 
 	/* Handles the device condition. */
+	irq = spin_lock_irqsave(&device->lock);
 	if (device->destroying) {
 		spin_unlock_irqrestore(&device->lock, irq);
 
@@ -383,10 +390,13 @@ drv_dma_alloc_coherent(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	allocation->payload_size = size;
 	allocation->next = device->allocations;
 	device->allocations = allocation;
+
 	spin_unlock_irqrestore(&device->lock, irq);
+
 	buffer->address = allocation->memory.vaddr;
 	buffer->device_address = allocation->memory.paddr;
 	buffer->size = size;
@@ -424,6 +434,7 @@ drv_dma_free_coherent(
 	if (device_operation_begin(device, 1) != 0)
 		return;
 	irq = spin_lock_irqsave(&device->lock);
+
 	allocation = (struct dma_allocation *)buffer->private_data[0];
 	/* Process each linked entry. */
 	for (link = &device->allocations; *link != NULL;
@@ -435,6 +446,7 @@ drv_dma_free_coherent(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Handles the found condition. */
@@ -448,6 +460,7 @@ drv_dma_free_coherent(
 				cache_memory_release(CACHE_MEMORY_DMA,
 						     released_size);
 			}
+
 			io_stats_record(IO_DMA_FREE, released_size);
 		} else {
 			/*
@@ -462,9 +475,11 @@ drv_dma_free_coherent(
 			/* Returns the computed result. */
 			return;
 		}
+
 		hal_free(allocation);
 		memset(buffer, 0, sizeof(*buffer));
 	}
+
 	device_operation_end(device);
 }
 
@@ -488,13 +503,13 @@ drv_dma_map(
 
 	/* Handles the device availability. */
 	if (device == NULL || address == NULL || size == 0 || result == NULL ||
-	    direction < DRV_DMA_TO_DEVICE || direction > DRV_DMA_BIDIRECTIONAL)
-
+	    direction < DRV_DMA_TO_DEVICE || direction > DRV_DMA_BIDIRECTIONAL) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = device_operation_begin(device, 0);
+	}
 
 	/* Checks the operation status. */
+	error = device_operation_begin(device, 0);
 	if (error != 0)
 		return error;
 
@@ -505,18 +520,18 @@ drv_dma_map(
 		/* Returns the computed result. */
 		return EINVAL;
 	}
-	mapping = hal_malloc(sizeof(*mapping));
 
 	/* Handles the mapping availability. */
+	mapping = hal_malloc(sizeof(*mapping));
 	if (mapping == NULL) {
 		device_operation_end(device);
 
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
-	irq = spin_lock_irqsave(&device->lock);
 
 	/* Handles the device condition. */
+	irq = spin_lock_irqsave(&device->lock);
 	if (device->destroying) {
 		spin_unlock_irqrestore(&device->lock, irq);
 		hal_free(mapping);
@@ -525,12 +540,12 @@ drv_dma_map(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	/* Process each linked entry. */
 	for (allocation = device->allocations; allocation != NULL;
 	     allocation = allocation->next) {
-		base = (uintptr_t)allocation->memory.vaddr;
-
 		/* Handles the start condition. */
+		base = (uintptr_t)allocation->memory.vaddr;
 		if (start < base || start - base > allocation->payload_size ||
 		    size > allocation->payload_size - (start - base))
 			continue;
@@ -545,7 +560,9 @@ drv_dma_map(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	spin_unlock_irqrestore(&device->lock, irq);
+
 	hal_free(mapping);
 	device_operation_end(device);
 
@@ -666,9 +683,9 @@ drv_dma_vector_create(
 	/* Handles the device availability. */
 	if (device == NULL || size == 0 || size > DRV_DMA_VECTOR_MAX_SIZE)
 		return EINVAL;
-	error = device_operation_begin(device, 0);
 
 	/* Checks the operation status. */
+	error = device_operation_begin(device, 0);
 	if (error != 0)
 		return error;
 
@@ -679,15 +696,16 @@ drv_dma_vector_create(
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
 	}
-	vector = hal_malloc(sizeof(*vector));
 
 	/* Handles the vector availability. */
+	vector = hal_malloc(sizeof(*vector));
 	if (vector == NULL) {
 		device_operation_end(device);
 
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	memset(vector, 0, sizeof(*vector));
 	vector->device = device;
 	vector->size = size;
@@ -707,9 +725,8 @@ drv_dma_vector_create(
 	    hal_vmap_unpin != NULL && hal_vmap_release != NULL &&
 	    hal_kernel_page_lookup != NULL && hal_vmap_capabilities() != 0 &&
 	    hal_vmap_reserve(rounded, &vector->mapping) == HAL_OK) {
-		error = hal_vmap_populate(vector->mapping, 0, maximum);
-
 		/* Checks the operation status. */
+		error = hal_vmap_populate(vector->mapping, 0, maximum);
 		if (error == HAL_OK)
 			error = hal_vmap_pin(vector->mapping, &vector->address);
 
@@ -731,10 +748,9 @@ drv_dma_vector_create(
 
 	/* Constrained coherent storage is the mask/capability fallback. */
 	if (vector->mapping == NULL) {
+		/* Checks the operation status. */
 		error = drv_dma_alloc_coherent(device, size, 64U,
 					       &vector->contiguous);
-
-		/* Checks the operation status. */
 		if (error == 0) {
 			vector->address = vector->contiguous.address;
 			error = dma_vector_segments(vector);
@@ -747,16 +763,15 @@ drv_dma_vector_create(
 
 	/* Handles the cache memory reserve availability. */
 	if (cache_memory_reserve != NULL) {
+		/* Checks the operation status. */
 		error = cache_memory_reserve(CACHE_MEMORY_DMA, vector->charged,
 					     0);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto fail;
 	}
-	irq = spin_lock_irqsave(&device->lock);
 
 	/* Handles the device condition. */
+	irq = spin_lock_irqsave(&device->lock);
 	if (device->destroying || device->vector_count == UINT_MAX) {
 		spin_unlock_irqrestore(&device->lock, irq);
 
@@ -766,7 +781,9 @@ drv_dma_vector_create(
 		error = EBUSY;
 		goto fail;
 	}
+
 	device->vector_count++;
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Handles the cache memory commit availability. */
@@ -810,14 +827,14 @@ drv_dma_vector_free(
 	if (vector == NULL)
 		return EINVAL;
 	device = vector->device;
-	error = device_operation_begin(device, 1);
 
 	/* Checks the operation status. */
+	error = device_operation_begin(device, 1);
 	if (error != 0)
 		return error;
-	error = dma_vector_backing_free(vector);
 
 	/* Checks the operation status. */
+	error = dma_vector_backing_free(vector);
 	if (error != 0) {
 		device_operation_end(device);
 
@@ -835,7 +852,9 @@ drv_dma_vector_free(
 	if (device->vector_count == 0)
 		HAL_FATAL("DMA vector owner underflow");
 	device->vector_count--;
+
 	spin_unlock_irqrestore(&device->lock, irq);
+
 	hal_free(vector);
 	device_operation_end(device);
 
@@ -904,18 +923,18 @@ dma_vector_segments(
 			/* Checks the hal kernel page lookup result. */
 			if (hal_kernel_page_lookup((char *)vector->address +
 							   offset,
-						   &physical) != HAL_OK)
-
+						   &physical) != HAL_OK) {
 				/* Returns the computed result. */
 				return EIO;
+			}
 			length = 4096U - offset % 4096U;
 		} else {
 			physical = vector->contiguous.device_address + offset;
 			length = vector->size - offset;
 		}
-		remaining = vector->size - offset;
 
 		/* Checks the current data length. */
+		remaining = vector->size - offset;
 		if (length > remaining)
 			length = remaining;
 
@@ -930,11 +949,11 @@ dma_vector_segments(
 		/* Checks the address fits result. */
 		if (!address_fits(device, physical, length))
 			return EOVERFLOW;
+
+		/* Handles the previous availability. */
 		previous = vector->count != 0
 				   ? &vector->segments[vector->count - 1U]
 				   : NULL;
-
-		/* Handles the previous availability. */
 		if (previous != NULL &&
 		    previous->length <= UINT64_MAX - previous->address &&
 		    previous->address + previous->length == physical &&
@@ -950,6 +969,7 @@ dma_vector_segments(
 			vector->segments[vector->count].address = physical;
 			vector->segments[vector->count++].length = length;
 		}
+
 		offset += length;
 	}
 
@@ -979,6 +999,7 @@ dma_vector_backing_free(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		vector->mapping = NULL;
 	} else if (vector->contiguous.address != NULL) {
 		drv_dma_free_coherent(vector->device, &vector->contiguous);
@@ -987,6 +1008,7 @@ dma_vector_backing_free(
 		if (vector->contiguous.address != NULL)
 			return EBUSY;
 	}
+
 	vector->address = NULL;
 
 	/* Reports successful completion. */

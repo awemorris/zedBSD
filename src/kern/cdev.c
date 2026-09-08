@@ -63,13 +63,16 @@ cdev_reset(
 
 	/* Removes the complete visible registry in one locked operation. */
 	irq = spin_lock_irqsave(&registry_lock);
+
 	count = device_count;
 	for (index = 0; index < count; index++) {
 		retired[index] = devices[index];
 		devices[index] = NULL;
 		atomic_store_release(&retired[index]->published, 0);
 	}
+
 	device_count = 0;
+
 	spin_unlock_irqrestore(&registry_lock, irq);
 
 	/* Drops each registry ref after the namespace is atomically empty. */
@@ -143,12 +146,14 @@ cdev_register_managed(
 	/* Validates uniqueness and assigns the immutable generation at publish. */
 	error = 0;
 	irq = spin_lock_irqsave(&registry_lock);
+
 	for (index = 0; index < device_count; index++) {
 		if (!strcmp(devices[index]->name, name)) {
 			error = EEXIST;
 			break;
 		}
 	}
+
 	if (error == 0 && device_count >= CDEV_MAX)
 		error = ENOSPC;
 	if (error == 0 && next_generation == UINT64_MAX)
@@ -159,6 +164,7 @@ cdev_register_managed(
 		devices[device_count++] = device;
 		atomic_store_release(&device->published, 1);
 	}
+
 	spin_unlock_irqrestore(&registry_lock, irq);
 
 	/* A failed publication leaves data and its finalizer with the caller. */
@@ -192,12 +198,14 @@ cdev_unregister(
 	/* Removes the exact pointer so a same-name generation cannot alias it. */
 	found = 0;
 	irq = spin_lock_irqsave(&registry_lock);
+
 	for (index = 0; index < device_count; index++) {
 		if (devices[index] == device) {
 			found = 1;
 			break;
 		}
 	}
+
 	if (found) {
 		for (move = index + 1U; move < device_count; move++)
 			devices[move - 1U] = devices[move];
@@ -205,6 +213,7 @@ cdev_unregister(
 		devices[device_count] = NULL;
 		atomic_store_release(&device->published, 0);
 	}
+
 	spin_unlock_irqrestore(&registry_lock, irq);
 
 	/* Reports a generation that was not published. */
@@ -304,6 +313,7 @@ cdev_find_ref(
 	/* References the device with the name under the registry lock. */
 	device = NULL;
 	irq = spin_lock_irqsave(&registry_lock);
+
 	for (index = 0; index < device_count; index++) {
 		if (!strcmp(devices[index]->name, name)) {
 			device = devices[index];
@@ -311,6 +321,7 @@ cdev_find_ref(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&registry_lock, irq);
 
 	/* Reports the referenced device, or none. */
@@ -335,6 +346,7 @@ cdev_snapshot(
 
 	/* References as many devices as fit, in registry order. */
 	irq = spin_lock_irqsave(&registry_lock);
+
 	count = device_count;
 	if (count > capacity)
 		count = capacity;
@@ -342,6 +354,7 @@ cdev_snapshot(
 		snapshot[index] = devices[index];
 		cdev_ref(snapshot[index]);
 	}
+
 	spin_unlock_irqrestore(&registry_lock, irq);
 
 	/* Reports the number of devices in the snapshot. */
@@ -360,7 +373,9 @@ cdev_count(
 
 	/* Samples the count under the registry lock. */
 	irq = spin_lock_irqsave(&registry_lock);
+
 	count = device_count;
+
 	spin_unlock_irqrestore(&registry_lock, irq);
 
 	/* Reports the sampled count. */
@@ -410,9 +425,9 @@ cdev_open_file(
 		return 0;
 
 	/* Opens through the device. */
-	error = device->ops->open(file);
 
 	/* Reports why the device's failed. */
+	error = device->ops->open(file);
 	if (error != 0)
 		return error;
 
@@ -428,18 +443,17 @@ cdev_close_file(
 	const struct cdev *device;
 	int error;
 
-	device = file_cdev(file);
-
 	/* Without a device or a close operation there is nothing to do. */
+	device = file_cdev(file);
 	if (device == NULL)
 		return 0;
 	if (device->ops->close == NULL)
 		return 0;
 
 	/* Closes through the device. */
-	error = device->ops->close(file);
 
 	/* Reports why the device's failed. */
+	error = device->ops->close(file);
 	if (error != 0)
 		return error;
 
@@ -457,9 +471,8 @@ cdev_read_file(
 	const struct cdev *device;
 	ssize_t result;
 
-	device = file_cdev(file);
-
 	/* A device that is gone or cannot read reports EOPNOTSUPP. */
+	device = file_cdev(file);
 	if (device == NULL)
 		return -EOPNOTSUPP;
 	if (device->ops->read == NULL)
@@ -482,9 +495,8 @@ cdev_write_file(
 	const struct cdev *device;
 	ssize_t result;
 
-	device = file_cdev(file);
-
 	/* A device that is gone or cannot write reports EOPNOTSUPP. */
+	device = file_cdev(file);
 	if (device == NULL)
 		return -EOPNOTSUPP;
 	if (device->ops->write == NULL)
@@ -507,18 +519,17 @@ cdev_ioctl_file(
 	const struct cdev *device;
 	int error;
 
-	device = file_cdev(file);
-
 	/* A device that is gone or has no ioctl reports EOPNOTSUPP. */
+	device = file_cdev(file);
 	if (device == NULL)
 		return EOPNOTSUPP;
 	if (device->ops->ioctl == NULL)
 		return EOPNOTSUPP;
 
 	/* Forwards the request. */
-	error = device->ops->ioctl(file, request, argument);
 
 	/* Reports why the device's failed. */
+	error = device->ops->ioctl(file, request, argument);
 	if (error != 0)
 		return error;
 
@@ -536,9 +547,8 @@ cdev_poll_file(
 	const struct cdev *device;
 	int error;
 
-	device = file_cdev(file);
-
 	/* Rejects a missing result. */
+	device = file_cdev(file);
 	if (revents == NULL)
 		return EINVAL;
 
@@ -555,9 +565,9 @@ cdev_poll_file(
 	}
 
 	/* Polls through the device. */
-	error = device->ops->poll(file, events, revents);
 
 	/* Reports why the device's failed. */
+	error = device->ops->poll(file, events, revents);
 	if (error != 0)
 		return error;
 

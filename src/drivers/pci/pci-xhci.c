@@ -188,6 +188,105 @@ static void xhci_request_release(struct xhci_controller *, struct xhci_request *
 /* Supports the rd8 operation. */
 static uint8_t rd8(volatile uint8_t *b, unsigned o);
 
+/*
+ * Forward declaration.
+ */
+static uint32_t rd32(volatile uint8_t *b, unsigned o);
+static void wr32(volatile uint8_t *b, unsigned o, uint32_t v);
+static void wr8(volatile uint8_t *b, unsigned o, uint8_t v);
+static void wr64(volatile uint8_t *b, unsigned o, uint64_t v);
+static struct xhci_controller *hcd_controller(struct drv_usb_hcd *h);
+static int wait_bits(volatile uint8_t *b, unsigned o, uint32_t mask, uint32_t wanted);
+static void xhci_bar_raw(struct drv_pci_device *device, enum drv_pci_bar_type type, uint32_t *low, uint32_t *high);
+static void xhci_pci_identity(struct drv_pci_device *device);
+static int xhci_restore_bar(struct xhci_controller *controller);
+static int xhci_bus_master_disable(struct xhci_controller *controller);
+static int xhci_pci_quiesce(struct xhci_controller *controller);
+static void xhci_legacy_release(struct xhci_controller *controller);
+static int xhci_pci_release(struct xhci_controller *controller);
+static void xhci_mark_quarantined(struct xhci_controller *controller);
+static void xhci_quarantine(struct xhci_controller *controller, const char *stage, int error);
+static int ring_alloc(struct xhci_controller *c, struct xhci_ring *r);
+static void ring_free(struct xhci_controller *c, struct xhci_ring *r);
+static uint64_t ring_push(struct xhci_ring *r, uint64_t parameter, uint32_t status, uint32_t control);
+static int event_take(struct xhci_controller *c, struct xhci_trb *out);
+static void event_lock(struct xhci_controller *c);
+static void event_unlock(struct xhci_controller *c);
+static int transfer_claim(struct xhci_controller *c, const struct xhci_trb *event);
+static void xhci_completion_drain(struct xhci_controller *c);
+static unsigned xhci_endpoint_state(struct xhci_controller *c, struct xhci_device *d, unsigned dci);
+static void port_change_defer(struct xhci_controller *c);
+static uint64_t xhci_event_pointer(const struct xhci_trb *event);
+static int command_ex(struct xhci_controller *c, uint64_t parameter, uint32_t status, uint32_t control, unsigned *slot, unsigned *completion);
+static int command(struct xhci_controller *c, uint64_t parameter, uint32_t status, uint32_t control, unsigned *slot);
+static int ownership(struct xhci_controller *c);
+static void fill_slot(struct xhci_controller *c, struct xhci_device *d, void *context, unsigned entries);
+static void fill_endpoint(struct xhci_controller *c, void *context, struct xhci_endpoint *ep, const struct drv_xhci_endpoint_context_words *encoded);
+static struct xhci_device *xhci_usb_device(struct drv_usb_device *u);
+static struct xhci_device *xhci_slot_device_locked(struct xhci_controller *c, unsigned slot);
+static struct xhci_request * xhci_event_request_locked(struct xhci_controller *c, const struct xhci_trb *event, unsigned *trb_offset);
+static int xhci_request_publish_locked(struct xhci_controller *c, struct xhci_request *request);
+static int xhci_request_unlink_locked(struct xhci_controller *c, struct xhci_request *request);
+static void xhci_recovery_leave_locked(struct xhci_controller *c, struct xhci_endpoint *endpoint);
+static int xhci_device_recovery_busy_locked(const struct xhci_device *device);
+static int xhci_device_request_busy_locked(const struct xhci_device *device);
+static void xhci_default_owner_release(struct xhci_controller *c, struct xhci_device *d);
+static void xhci_device_release(struct drv_usb_hcd *h, struct xhci_device *d);
+static int xhci_device_enable(struct drv_usb_hcd *h, struct drv_usb_device *u);
+static int xhci_set_address(struct drv_usb_hcd *h, struct drv_usb_device *u, unsigned address);
+static void xhci_device_disable(struct drv_usb_hcd *h, struct drv_usb_device *u);
+static int xhci_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep);
+static int xhci_endpoint_disable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep);
+static void xhci_completion_finish(struct xhci_controller *c, struct xhci_request *request);
+static int xhci_irq(void *argument);
+static void xhci_port_worker(void *argument);
+static int xhci_worker_start(struct xhci_controller *c);
+static void xhci_worker_stop(struct xhci_controller *c);
+static unsigned normal_trb_count(uint64_t address, size_t length);
+static uint64_t enqueue_normal(struct xhci_ring *ring, uint64_t address, size_t length, int input, size_t maximum_packet_size, int zero_packet);
+static int xhci_endpoint_restart_empty(struct xhci_controller *c, struct xhci_device *d, struct xhci_endpoint *endpoint, unsigned dci);
+static int xhci_endpoint_recover(struct xhci_controller *c, struct xhci_device *d, struct xhci_endpoint *endpoint, unsigned dci);
+static int xhci_endpoint_reset(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep);
+static struct xhci_request *xhci_request_alloc(struct xhci_controller *c, struct drv_usb_hcd *h, size_t length, unsigned flags, struct drv_usb_urb *urb, int *error);
+static int xhci_submission_enter(struct xhci_controller *c);
+static int xhci_operation_enter(struct xhci_controller *c);
+static void xhci_operation_leave(struct xhci_controller *c);
+static void xhci_submission_leave(struct xhci_controller *c);
+static int xhci_urb_enqueue(struct drv_usb_hcd *h, struct drv_usb_urb *u);
+static int xhci_cancel_request(struct xhci_controller *c, struct xhci_device *d, struct xhci_request *r);
+static int xhci_urb_dequeue(struct drv_usb_hcd *h, struct drv_usb_urb *u);
+static int xhci_endpoint_quiesce(struct xhci_controller *c, struct xhci_device *d, unsigned dci);
+static int xhci_device_quiesce(struct drv_usb_hcd *h, struct drv_usb_device *u);
+static uint32_t xhci_frame(struct drv_usb_hcd *h);
+static int xhci_root_status(struct drv_usb_hcd *h, void *b, size_t n, size_t *a);
+static int xhci_root_control(struct drv_usb_hcd *h, const struct drv_usb_control_request *r, void *b, size_t n, size_t *a);
+static int xhci_root_port_reset(struct drv_usb_hcd *h, unsigned port);
+static void xhci_scratchpads_free(struct xhci_controller *c);
+static int xhci_scratchpads_alloc(struct xhci_controller *c);
+static void xhci_controller_drain_requests(struct xhci_controller *c);
+static int xhci_submission_quiesce(struct xhci_controller *c);
+static int xhci_irq_quiesce(struct xhci_controller *c);
+static int xhci_irq_disestablish(struct xhci_controller *c);
+static int xhci_quiesce(struct drv_usb_hcd *h);
+static int xhci_release_resources(struct drv_usb_hcd *h);
+static void xhci_stop(struct drv_usb_hcd *h);
+static int xhci_stop_checked(struct drv_usb_hcd *h);
+static int xhci_start(struct drv_usb_hcd *h);
+static int xhci_guarded_device_enable(struct drv_usb_hcd *h, struct drv_usb_device *u);
+static int xhci_guarded_set_address(struct drv_usb_hcd *h, struct drv_usb_device *u, unsigned address);
+static int xhci_guarded_device_quiesce(struct drv_usb_hcd *h, struct drv_usb_device *u);
+static void xhci_guarded_device_disable(struct drv_usb_hcd *h, struct drv_usb_device *u);
+static int xhci_guarded_urb_dequeue(struct drv_usb_hcd *h, struct drv_usb_urb *u);
+static int xhci_guarded_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *endpoint);
+static int xhci_guarded_endpoint_reset(struct drv_usb_hcd *h, struct drv_usb_endpoint *endpoint);
+static int xhci_guarded_endpoint_disable(struct drv_usb_hcd *h, struct drv_usb_endpoint *endpoint);
+static uint32_t xhci_guarded_frame(struct drv_usb_hcd *h);
+static int xhci_guarded_root_status(struct drv_usb_hcd *h, void *buffer, size_t length, size_t *actual);
+static int xhci_guarded_root_control(struct drv_usb_hcd *h, const struct drv_usb_control_request *request, void *buffer, size_t length, size_t *actual);
+static int xhci_guarded_root_port_reset(struct drv_usb_hcd *h, unsigned port);
+static int xhci_attach(struct drv_pci_device *d, const struct drv_pci_id *id);
+static int xhci_detach(struct drv_pci_device *d, unsigned flags);
+
 /* Supports the rd8 operation. */
 static uint8_t
 rd8(
@@ -198,7 +297,6 @@ rd8(
 	return b[o];
 }
 /* Supports the rd32 operation. */
-static uint32_t rd32(volatile uint8_t *b, unsigned o);
 
 /* Supports the rd32 operation. */
 static uint32_t
@@ -210,7 +308,6 @@ rd32(
 	return *(volatile uint32_t *)(b + o);
 }
 /* Supports the wr32 operation. */
-static void wr32(volatile uint8_t *b, unsigned o, uint32_t v);
 
 /* Supports the wr32 operation. */
 static void
@@ -224,7 +321,6 @@ wr32(
 	hal_io_mb();
 }
 /* Supports the wr8 operation. */
-static void wr8(volatile uint8_t *b, unsigned o, uint8_t v);
 
 /* Supports the wr8 operation. */
 static void
@@ -237,7 +333,6 @@ wr8(
 	hal_io_mb();
 }
 /* Supports the wr64 operation. */
-static void wr64(volatile uint8_t *b, unsigned o, uint64_t v);
 
 /* Supports the wr64 operation. */
 static void
@@ -250,7 +345,6 @@ wr64(
 	wr32(b, o + 4U, (uint32_t)(v >> 32));
 }
 /* Supports the hcd controller operation. */
-static struct xhci_controller *hcd_controller(struct drv_usb_hcd *h);
 
 /* Supports the hcd controller operation. */
 static struct xhci_controller *
@@ -262,7 +356,6 @@ hcd_controller(
 }
 
 /* Supports the wait bits operation. */
-static int wait_bits(volatile uint8_t *b, unsigned o, uint32_t mask, uint32_t wanted);
 
 /* Supports the wait bits operation. */
 static int
@@ -277,9 +370,8 @@ wait_bits(
 
 	/* Process each element required by the operation. */
 	for (n = 0; n < XHCI_TIMEOUT; n++) {
-		value = rd32(b, o);
-
 		/* Checks the drv xhci mmio32 valid result. */
+		value = rd32(b, o);
 		if (!drv_xhci_mmio32_valid(value))
 			return EIO;
 
@@ -293,7 +385,6 @@ wait_bits(
 }
 
 /* Supports the xhci bar raw operation. */
-static void xhci_bar_raw(struct drv_pci_device *device, enum drv_pci_bar_type type, uint32_t *low, uint32_t *high);
 
 /* Supports the xhci bar raw operation. */
 static void
@@ -316,7 +407,6 @@ xhci_bar_raw(
 }
 
 /* Supports the xhci pci identity operation. */
-static void xhci_pci_identity(struct drv_pci_device *device);
 
 /* Supports the xhci pci identity operation. */
 static void
@@ -329,9 +419,9 @@ xhci_pci_identity(
 
 	drv_pci_device_address(device, &address);
 	bus = drv_pci_device_bus(device);
-	bridge = bus != NULL ? drv_pci_bus_bridge(bus) : NULL;
 
 	/* Handles the bridge availability. */
+	bridge = bus != NULL ? drv_pci_bus_bridge(bus) : NULL;
 	if (bridge != NULL) {
 		drv_pci_device_address(bridge, &bridge_address);
 		hal_printf("xhci: pci %04x:%02x:%02x.%u id=%04x:%04x "
@@ -357,7 +447,6 @@ xhci_pci_identity(
 }
 
 /* Supports the xhci restore bar operation. */
-static int xhci_restore_bar(struct xhci_controller *controller);
 
 /* Supports the xhci restore bar operation. */
 static int
@@ -371,9 +460,9 @@ xhci_restore_bar(
 	/* Handles the controller condition. */
 	if (!controller->original_bar_valid)
 		return 0;
-	error = drv_pci_device_bar(controller->pci, 0, &current);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_bar(controller->pci, 0, &current);
 	if (error != 0)
 		return error;
 
@@ -390,7 +479,6 @@ xhci_restore_bar(
 }
 
 /* Supports the xhci bus master disable operation. */
-static int xhci_bus_master_disable(struct xhci_controller *controller);
 
 /* Supports the xhci bus master disable operation. */
 static int
@@ -400,15 +488,14 @@ xhci_bus_master_disable(
 	uint16_t command;
 	int error;
 
-	error = drv_pci_device_set_bus_master(controller->pci, false);
-
 	/* Checks the operation status. */
+	error = drv_pci_device_set_bus_master(controller->pci, false);
 	if (error != 0)
 		return error;
-	error = drv_pci_device_config_read16(controller->pci, XHCI_PCI_COMMAND,
-					     &command);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_read16(controller->pci, XHCI_PCI_COMMAND,
+					     &command);
 	if (error != 0)
 		return error;
 
@@ -417,7 +504,6 @@ xhci_bus_master_disable(
 }
 
 /* Supports the xhci pci quiesce operation. */
-static int xhci_pci_quiesce(struct xhci_controller *controller);
 
 /* Supports the xhci pci quiesce operation. */
 static int
@@ -427,23 +513,22 @@ xhci_pci_quiesce(
 	uint16_t command;
 	int error;
 
+	/* Checks the operation status. */
 	error = drv_pci_device_config_read16(controller->pci, XHCI_PCI_COMMAND,
 					     &command);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = drv_pci_device_config_write16(
 		controller->pci, XHCI_PCI_COMMAND,
 		(uint16_t)(command & ~XHCI_PCI_COMMAND_ENABLE));
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = drv_pci_device_config_read16(controller->pci, XHCI_PCI_COMMAND,
-					     &command);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_read16(controller->pci, XHCI_PCI_COMMAND,
+					     &command);
 	if (error != 0)
 		return error;
 
@@ -452,7 +537,6 @@ xhci_pci_quiesce(
 }
 
 /* Supports the xhci legacy release operation. */
-static void xhci_legacy_release(struct xhci_controller *controller);
 
 /* Supports the xhci legacy release operation. */
 static void
@@ -465,10 +549,10 @@ xhci_legacy_release(
 	/* Checks the drv xhci region fits result. */
 	if (!controller->legacy_claimed || controller->capability == NULL ||
 	    !drv_xhci_region_fits(controller->mapping.size,
-				  controller->legacy_offset, 8U))
-
+				  controller->legacy_offset, 8U)) {
 		/* Returns the computed result. */
 		return;
+	}
 	control = rd32(controller->capability, controller->legacy_offset + 4U);
 	control = drv_xhci_legacy_control_restore(control,
 						  controller->legacy_control);
@@ -480,7 +564,6 @@ xhci_legacy_release(
 }
 
 /* Supports the xhci pci release operation. */
-static int xhci_pci_release(struct xhci_controller *controller);
 
 /* Supports the xhci pci release operation. */
 static int
@@ -501,6 +584,7 @@ xhci_pci_release(
 		/* Returns the computed result. */
 		return master_error;
 	}
+
 	xhci_legacy_release(controller);
 
 	/* Handles the controller condition. */
@@ -508,14 +592,14 @@ xhci_pci_release(
 		drv_pci_device_unmap_bar(controller->pci, &controller->mapping);
 		controller->bar_mapped = 0;
 	}
-	bar_error = xhci_restore_bar(controller);
 
 	/* Checks the operation status. */
+	bar_error = xhci_restore_bar(controller);
 	if (bar_error != 0) {
 		hal_printf("xhci: BAR0 restore failed (%d)\n", bar_error);
-		quiesce_error = xhci_pci_quiesce(controller);
 
 		/* Checks the operation status. */
+		quiesce_error = xhci_pci_quiesce(controller);
 		if (quiesce_error != 0) {
 			hal_printf("xhci: PCI quiesce after BAR failure failed "
 				   "(%d)\n",
@@ -528,16 +612,15 @@ xhci_pci_release(
 
 	/* Handles the controller condition. */
 	if (controller->pci_state_saved) {
+		/* Checks the operation status. */
 		error = drv_pci_device_restore_enable_state(
 			controller->pci, &controller->pci_enable_state);
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			hal_printf("xhci: PCI command restore failed (%d)\n",
 				   error);
-			quiesce_error = xhci_pci_quiesce(controller);
 
 			/* Checks the operation status. */
+			quiesce_error = xhci_pci_quiesce(controller);
 			if (quiesce_error != 0) {
 				hal_printf("xhci: PCI command failure quiesce "
 					   "failed (%d)\n",
@@ -547,6 +630,7 @@ xhci_pci_release(
 			/* Returns the computed result. */
 			return error;
 		}
+
 		controller->pci_state_saved = 0;
 	}
 
@@ -559,8 +643,6 @@ xhci_pci_release(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static void xhci_mark_quarantined(struct xhci_controller *controller);
 
 /* Counts first entry into retained controller ownership, not retained bytes. */
 /* Supports the xhci mark quarantined operation. */
@@ -575,7 +657,6 @@ xhci_mark_quarantined(
 }
 
 /* Supports the xhci quarantine operation. */
-static void xhci_quarantine(struct xhci_controller *controller, const char *stage, int error);
 
 /* Supports the xhci quarantine operation. */
 static void
@@ -591,13 +672,13 @@ xhci_quarantine(
 		controller->next = controllers;
 		controllers = controller;
 	}
+
 	hal_printf("xhci: attach quarantined at %s (%d); controller ownership "
 		   "retained\n",
 		   stage, error);
 }
 
 /* Supports the ring alloc operation. */
-static int ring_alloc(struct xhci_controller *c, struct xhci_ring *r);
 
 /* Supports the ring alloc operation. */
 static int
@@ -619,7 +700,6 @@ ring_alloc(
 	return 0;
 }
 /* Supports the ring free operation. */
-static void ring_free(struct xhci_controller *c, struct xhci_ring *r);
 
 /* Supports the ring free operation. */
 static void
@@ -633,7 +713,6 @@ ring_free(
 	memset(r, 0, sizeof(*r));
 }
 /* Supports the ring push operation. */
-static uint64_t ring_push(struct xhci_ring *r, uint64_t parameter, uint32_t status, uint32_t control);
 
 /* Supports the ring push operation. */
 static uint64_t
@@ -674,7 +753,6 @@ ring_push(
 }
 
 /* Supports the event take operation. */
-static int event_take(struct xhci_controller *c, struct xhci_trb *out);
 
 /* Supports the event take operation. */
 static int
@@ -695,6 +773,7 @@ event_take(
 		c->event_dequeue = 0;
 		c->event_cycle ^= 1U;
 	}
+
 	wr64(c->runtime, 0x38U,
 	     (c->event_memory.device_address + c->event_dequeue * sizeof(*t)) |
 		     8U);
@@ -704,7 +783,6 @@ event_take(
 }
 
 /* Supports the event lock operation. */
-static void event_lock(struct xhci_controller *c);
 
 /* Supports the event lock operation. */
 static void
@@ -717,7 +795,6 @@ event_lock(
 }
 
 /* Supports the event unlock operation. */
-static void event_unlock(struct xhci_controller *c);
 
 /* Supports the event unlock operation. */
 static void
@@ -727,12 +804,7 @@ event_unlock(
 	__atomic_store_n(&c->event_busy, 0U, __ATOMIC_RELEASE);
 }
 
-static int transfer_claim(struct xhci_controller *c, const struct xhci_trb *event);
-static void xhci_completion_drain(struct xhci_controller *c);
-static unsigned xhci_endpoint_state(struct xhci_controller *c, struct xhci_device *d, unsigned dci);
-
 /* Supports the port change defer operation. */
-static void port_change_defer(struct xhci_controller *c);
 
 /* Supports the port change defer operation. */
 static void
@@ -745,15 +817,14 @@ port_change_defer(
 	if (!c->root_ready)
 		return;
 	c->port_pending = 1U;
-	worker = c->port_worker;
 
 	/* Handles the worker condition. */
+	worker = c->port_worker;
 	if (worker)
 		kernel_notify_task(worker->task);
 }
 
 /* Supports the xhci event pointer operation. */
-static uint64_t xhci_event_pointer(const struct xhci_trb *event);
 
 /* Supports the xhci event pointer operation. */
 static uint64_t
@@ -766,7 +837,6 @@ xhci_event_pointer(
 }
 
 /* Supports the command ex operation. */
-static int command_ex(struct xhci_controller *c, uint64_t parameter, uint32_t status, uint32_t control, unsigned *slot, unsigned *completion);
 
 /* Supports the command ex operation. */
 static int
@@ -831,9 +901,9 @@ command_ex(
 		} else {
 			available = event_take(c, &event);
 		}
-		type = available ? (event.control >> 10) & 0x3fU : 0;
 
 		/* Handles the available condition. */
+		type = available ? (event.control >> 10) & 0x3fU : 0;
 		if (available && type == 32U)
 			(void)transfer_claim(c, &event);
 		event_unlock(c);
@@ -873,16 +943,18 @@ command_ex(
 		/* Handles the completion condition. */
 		if (completion)
 			*completion = (event.status >> 24) & 0xffU;
-		result = ((event.status >> 24) & 0xffU) == 1U ? 0 : EIO;
 
 		/* Checks the operation result. */
+		result = ((event.status >> 24) & 0xffU) == 1U ? 0 : EIO;
 		if (result) {
 			hal_printf("xhci: command %u failed, completion=%u\n",
 				   (control >> 10) & 0x3fU,
 				   (event.status >> 24) & 0xffU);
 		}
+
 		break;
 	}
+
 	event_lock(c);
 	c->command_address = 0;
 	c->command_event_ready = 0;
@@ -915,7 +987,6 @@ command_ex(
 }
 
 /* Supports the command operation. */
-static int command(struct xhci_controller *c, uint64_t parameter, uint32_t status, uint32_t control, unsigned *slot);
 
 /* Supports the command operation. */
 static int
@@ -926,17 +997,16 @@ command(
 	uint32_t control,
 	unsigned *slot)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the command ex result. */
-	function_result = command_ex(c, parameter, status, control, slot, NULL);
+	error = command_ex(c, parameter, status, control, slot, NULL);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ownership operation. */
-static int ownership(struct xhci_controller *c);
 
 /* Supports the ownership operation. */
 static int
@@ -955,16 +1025,16 @@ ownership(
 
 	/* Checks the drv xhci region fits result. */
 	if (offset != 0 && (offset < 0x20U ||
-			    !drv_xhci_region_fits(c->mapping.size, offset, 4U)))
-
+			    !drv_xhci_region_fits(c->mapping.size, offset, 4U))) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	/* Continue while the operation condition remains true. */
 	while (offset != 0) {
 		cap = rd32(c->capability, offset);
-		id = cap & 0xffU;
 
 		/* Handles the id condition. */
+		id = cap & 0xffU;
 		if (id == 0U || id == 0xffU)
 			return EIO;
 
@@ -998,6 +1068,7 @@ ownership(
 				/* Returns the computed result. */
 				return ETIMEDOUT;
 			}
+
 			control = rd32(c->capability, offset + 4U);
 			wr32(c->capability, offset + 4U,
 			     drv_xhci_legacy_control_disable(control));
@@ -1011,10 +1082,10 @@ ownership(
 				return EIO;
 			}
 		}
-		step = drv_xhci_extended_capability_next(c->mapping.size,
-							 offset, cap, &next);
 
 		/* Handles the step condition. */
+		step = drv_xhci_extended_capability_next(c->mapping.size,
+							 offset, cap, &next);
 		if (step < 0)
 			return EIO;
 
@@ -1029,7 +1100,6 @@ ownership(
 }
 
 /* Supports the fill slot operation. */
-static void fill_slot(struct xhci_controller *c, struct xhci_device *d, void *context, unsigned entries);
 
 /* Supports the fill slot operation. */
 static void
@@ -1046,7 +1116,6 @@ fill_slot(
 	w[1] = drv_usb_device_port(d->usb) << 16;
 }
 /* Supports the fill endpoint operation. */
-static void fill_endpoint(struct xhci_controller *c, void *context, struct xhci_endpoint *ep, const struct drv_xhci_endpoint_context_words *encoded);
 
 /* Supports the fill endpoint operation. */
 static void
@@ -1070,7 +1139,6 @@ fill_endpoint(
 	w[4] = encoded->word4;
 }
 /* Supports the xhci usb device operation. */
-static struct xhci_device *xhci_usb_device(struct drv_usb_device *u);
 
 /* Supports the xhci usb device operation. */
 static struct xhci_device *
@@ -1086,7 +1154,6 @@ xhci_usb_device(
 }
 
 /* Supports the xhci slot device locked operation. */
-static struct xhci_device *xhci_slot_device_locked(struct xhci_controller *c, unsigned slot);
 
 /* Supports the xhci slot device locked operation. */
 static struct xhci_device *
@@ -1108,7 +1175,6 @@ xhci_slot_device_locked(
 }
 
 /* Supports the xhci event request locked operation. */
-static struct xhci_request * xhci_event_request_locked(struct xhci_controller *c, const struct xhci_trb *event, unsigned *trb_offset);
 
 /* Supports the xhci event request locked operation. */
 static struct xhci_request *
@@ -1128,31 +1194,30 @@ xhci_event_request_locked(
 	/* Handles the dci condition. */
 	if (dci == 0 || dci >= 32U)
 		return NULL;
-	device = xhci_slot_device_locked(c, slot);
 
 	/* Handles the device availability. */
+	device = xhci_slot_device_locked(c, slot);
 	if (device == NULL)
 		return NULL;
 	endpoint = &device->endpoints[dci];
-	request = endpoint->active;
 
 	/* Checks the drv xhci transfer event matches result. */
+	request = endpoint->active;
 	if (request == NULL || request->device != device ||
 	    request->endpoint != endpoint ||
 	    !drv_xhci_transfer_event_matches(
 		    endpoint->ring.dma.device_address, XHCI_RING_TRBS,
 		    request->slot, request->dci, request->first_trb,
-		    request->trb_count, pointer, slot, dci, trb_offset))
-
+		    request->trb_count, pointer, slot, dci, trb_offset)) {
 		/* Reports that no result is available. */
 		return NULL;
+	}
 
 	/* Returns the computed result. */
 	return request;
 }
 
 /* Supports the xhci request publish locked operation. */
-static int xhci_request_publish_locked(struct xhci_controller *c, struct xhci_request *request);
 
 /* Supports the xhci request publish locked operation. */
 static int
@@ -1175,7 +1240,6 @@ xhci_request_publish_locked(
 }
 
 /* Supports the xhci request unlink locked operation. */
-static int xhci_request_unlink_locked(struct xhci_controller *c, struct xhci_request *request);
 
 /* Supports the xhci request unlink locked operation. */
 static int
@@ -1198,7 +1262,6 @@ xhci_request_unlink_locked(
 }
 
 /* Supports the xhci recovery leave locked operation. */
-static void xhci_recovery_leave_locked(struct xhci_controller *c, struct xhci_endpoint *endpoint);
 
 /* Supports the xhci recovery leave locked operation. */
 static void
@@ -1215,7 +1278,6 @@ xhci_recovery_leave_locked(
 }
 
 /* Supports the xhci device recovery busy locked operation. */
-static int xhci_device_recovery_busy_locked(const struct xhci_device *device);
 
 /* Supports the xhci device recovery busy locked operation. */
 static int
@@ -1236,7 +1298,6 @@ xhci_device_recovery_busy_locked(
 }
 
 /* Supports the xhci device request busy locked operation. */
-static int xhci_device_request_busy_locked(const struct xhci_device *device);
 
 /* Supports the xhci device request busy locked operation. */
 static int
@@ -1257,7 +1318,6 @@ xhci_device_request_busy_locked(
 }
 
 /* Supports the xhci default owner release operation. */
-static void xhci_default_owner_release(struct xhci_controller *c, struct xhci_device *d);
 
 /* Supports the xhci default owner release operation. */
 static void
@@ -1270,16 +1330,15 @@ xhci_default_owner_release(
 	/* Handles the d availability. */
 	if (d == NULL || !d->default_owned)
 		return;
-	expected = d->slot;
 
 	/* Checks the hal atomic compare exchange acq rel result. */
+	expected = d->slot;
 	if (hal_atomic_compare_exchange_acq_rel(&c->default_slot, &expected,
 						0U))
 		d->default_owned = 0;
 }
 
 /* Supports the xhci device release operation. */
-static void xhci_device_release(struct drv_usb_hcd *h, struct xhci_device *d);
 
 /* Supports the xhci device release operation. */
 static void
@@ -1300,10 +1359,11 @@ xhci_device_release(
 		/* Returns the computed result. */
 		return;
 	}
+
 	xhci_default_owner_release(c, d);
-	irq = spin_lock_irqsave(&c->active_lock);
 
 	/* Checks the xhci device request busy locked result. */
+	irq = spin_lock_irqsave(&c->active_lock);
 	if (xhci_device_request_busy_locked(d) ||
 	    xhci_device_recovery_busy_locked(d) || d->completions_busy != 0) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
@@ -1324,6 +1384,7 @@ xhci_device_release(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
 	/* Handles the address availability. */
@@ -1331,6 +1392,7 @@ xhci_device_release(
 		((uint64_t *)c->dcbaa.address)[d->slot] = 0;
 		hal_io_wmb();
 	}
+
 	/* Process each element required by the operation. */
 	for (i = 1; i < 32; i++)
 		ring_free(c, &d->endpoints[i].ring);
@@ -1346,7 +1408,6 @@ xhci_device_release(
 }
 
 /* Supports the xhci device enable operation. */
-static int xhci_device_enable(struct drv_usb_hcd *h, struct drv_usb_device *u);
 
 /* Supports the xhci device enable operation. */
 static int
@@ -1371,9 +1432,9 @@ xhci_device_enable(
 	/* Checks the hal atomic load acquire result. */
 	if (hal_atomic_load_acquire(&c->default_slot) != 0)
 		return EBUSY;
-	d = hal_malloc(sizeof(*d));
 
 	/* Checks the current descriptor. */
+	d = hal_malloc(sizeof(*d));
 	if (!d)
 		return ENOMEM;
 	memset(d, 0, sizeof(*d));
@@ -1386,6 +1447,7 @@ xhci_device_enable(
 		/* Returns the computed result. */
 		return EINVAL;
 	}
+
 	portsc = rd32(c->operational, XHCI_PORTSC(drv_usb_device_port(u) - 1U));
 	d->speed_id = drv_xhci_port_speed_id(portsc);
 
@@ -1404,6 +1466,7 @@ xhci_device_enable(
 		/* Returns the computed result. */
 		return e ? e : EIO;
 	}
+
 	d->slot = slot;
 
 	/*
@@ -1411,9 +1474,11 @@ xhci_device_enable(
 	 * through checked Disable Slot before any controller-visible DMA is
 	 * freed. */
 	irq = spin_lock_irqsave(&c->active_lock);
+
 	d->next = c->devices;
 	c->devices = d;
 	(void)drv_usb_device_set_hcd_data(u, 0, (uintptr_t)d);
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
 	/* Checks the drv dma alloc coherent result. */
@@ -1438,32 +1503,34 @@ xhci_device_enable(
 	control = (uint32_t *)input;
 	control[1] = 3U;
 	fill_slot(c, d, input + c->context_size, 1);
+
+	/* Checks the drv xhci endpoint context encode result. */
 	packet = drv_usb_device_speed(u) >= DRV_USB_SPEED_SUPER	 ? 512U
 		 : drv_usb_device_speed(u) >= DRV_USB_SPEED_HIGH ? 64U
 								 : 8U;
-
-	/* Checks the drv xhci endpoint context encode result. */
 	if (!drv_xhci_endpoint_context_encode(drv_usb_device_speed(u), 4U,
 					      (uint16_t)packet, 0, NULL,
 					      &endpoint_context)) {
 		e = EINVAL;
 		goto fail;
 	}
+
 	fill_endpoint(c, input + 2U * c->context_size, &d->endpoints[1],
 		      &endpoint_context);
-	expected = 0;
 
 	/* Checks the hal atomic compare exchange acq rel result. */
+	expected = 0;
 	if (!hal_atomic_compare_exchange_acq_rel(&c->default_slot, &expected,
 						 slot)) {
 		e = EBUSY;
 		goto fail;
 	}
+
 	d->default_owned = 1U;
-	e = command(c, d->input_context.device_address, 0,
-		    XHCI_TRB_TYPE(11) | (1U << 9) | XHCI_TRB_SLOT(slot), NULL);
 
 	/* Handles the e condition. */
+	e = command(c, d->input_context.device_address, 0,
+		    XHCI_TRB_TYPE(11) | (1U << 9) | XHCI_TRB_SLOT(slot), NULL);
 	if (e)
 		goto fail;
 	d->context_entries = 1;
@@ -1491,7 +1558,6 @@ fail:
 }
 
 /* Supports the xhci set address operation. */
-static int xhci_set_address(struct drv_usb_hcd *h, struct drv_usb_device *u, unsigned address);
 
 /* Supports the xhci set address operation. */
 static int
@@ -1531,16 +1597,16 @@ xhci_set_address(
 	/* Handles the attempt condition. */
 	if (attempt == 1000U)
 		return EBUSY;
-	descriptor = drv_usb_device_descriptor(u);
 
 	/* Checks the drv xhci ep0 max packet size result. */
+	descriptor = drv_usb_device_descriptor(u);
 	if (descriptor == NULL ||
 	    !drv_xhci_ep0_max_packet_size(drv_usb_device_speed(u),
 					  descriptor->endpoint0_max_packet_size,
-					  &packet))
-
+					  &packet)) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	dequeue = d->endpoints[1].ring.dma.device_address +
 		  (uint64_t)d->endpoints[1].ring.enqueue *
 			  sizeof(struct xhci_trb);
@@ -1556,10 +1622,10 @@ xhci_set_address(
 	fill_slot(c, d, input + c->context_size, 1U);
 	memset(input + 2U * c->context_size, 0, c->context_size);
 	memcpy(input + 2U * c->context_size, ep0.words, sizeof(ep0.words));
-	error = command(c, d->input_context.device_address, 0,
-			XHCI_TRB_TYPE(11) | XHCI_TRB_SLOT(d->slot), NULL);
 
 	/* Checks the operation status. */
+	error = command(c, d->input_context.device_address, 0,
+			XHCI_TRB_TYPE(11) | XHCI_TRB_SLOT(d->slot), NULL);
 	if (error == 0)
 		xhci_default_owner_release(c, d);
 
@@ -1572,7 +1638,6 @@ xhci_set_address(
 }
 
 /* Supports the xhci device disable operation. */
-static void xhci_device_disable(struct drv_usb_hcd *h, struct drv_usb_device *u);
 
 /* Supports the xhci device disable operation. */
 static void
@@ -1595,11 +1660,11 @@ xhci_device_disable(
 		/* Returns the computed result. */
 		return;
 	}
+
 	xhci_device_release(h, d);
 }
 
 /* Supports the xhci endpoint enable operation. */
-static int xhci_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep);
 
 /* Supports the xhci endpoint enable operation. */
 static int
@@ -1625,14 +1690,14 @@ xhci_endpoint_enable(
 		return ENODEV;
 	desc = drv_usb_endpoint_descriptor(usbep);
 	number = desc->address & 15U;
-	dci = number * 2U + ((desc->address & DRV_USB_DIR_IN) ? 1U : 0U);
 
 	/* Handles the dci condition. */
+	dci = number * 2U + ((desc->address & DRV_USB_DIR_IN) ? 1U : 0U);
 	if (dci < 2U || dci >= 32U)
 		return EINVAL;
-	ep = &d->endpoints[dci];
 
 	/* Handles the ep condition. */
+	ep = &d->endpoints[dci];
 	if (ep->enabled)
 		return 0;
 	/* Dispatch the selected syntax or record type. */
@@ -1650,16 +1715,16 @@ xhci_endpoint_enable(
 		type = 4U;
 		break;
 	}
-	companion = drv_usb_endpoint_superspeed_companion(usbep);
 
 	/* Checks the drv xhci endpoint context encode result. */
+	companion = drv_usb_endpoint_superspeed_companion(usbep);
 	if (!drv_xhci_endpoint_context_encode(drv_usb_device_speed(d->usb),
 					      type, desc->maximum_packet_size,
 					      desc->interval, companion,
-					      &endpoint_context))
-
+					      &endpoint_context)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the address availability. */
 	if (ep->ring.dma.address == NULL) {
@@ -1671,6 +1736,7 @@ xhci_endpoint_enable(
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	ep->dci = dci;
 	input = d->input_context.address;
 	memset(input, 0, 4096U);
@@ -1680,10 +1746,10 @@ xhci_endpoint_enable(
 	fill_slot(c, d, input + c->context_size, entries);
 	fill_endpoint(c, input + (dci + 1U) * c->context_size, ep,
 		      &endpoint_context);
-	e = command(c, d->input_context.device_address, 0,
-		    XHCI_TRB_TYPE(12) | XHCI_TRB_SLOT(d->slot), NULL);
 
 	/* Handles the e condition. */
+	e = command(c, d->input_context.device_address, 0,
+		    XHCI_TRB_TYPE(12) | XHCI_TRB_SLOT(d->slot), NULL);
 	if (e) {
 		/* Handles the ring allocated condition. */
 		if (ring_allocated) {
@@ -1694,6 +1760,7 @@ xhci_endpoint_enable(
 		/* Returns the computed result. */
 		return e;
 	}
+
 	d->context_entries = entries;
 	ep->enabled = 1;
 
@@ -1701,7 +1768,6 @@ xhci_endpoint_enable(
 	return 0;
 }
 /* Supports the xhci endpoint disable operation. */
-static int xhci_endpoint_disable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep);
 
 /* Supports the xhci endpoint disable operation. */
 static int
@@ -1721,10 +1787,10 @@ xhci_endpoint_disable(
 	/* Checks the current descriptor. */
 	if (!d)
 		return ENODEV;
-	dci = (drv_usb_endpoint_address(usbep) & 15U) * 2U +
-	      (drv_usb_endpoint_is_input(usbep) ? 1U : 0U);
 
 	/* Handles the dci condition. */
+	dci = (drv_usb_endpoint_address(usbep) & 15U) * 2U +
+	      (drv_usb_endpoint_is_input(usbep) ? 1U : 0U);
 	if (dci < 2U || dci >= 32U)
 		return EINVAL;
 
@@ -1732,9 +1798,9 @@ xhci_endpoint_disable(
 	if (!d->endpoints[dci].enabled)
 		return 0;
 	ep = &d->endpoints[dci];
-	irq = spin_lock_irqsave(&c->active_lock);
 
 	/* Handles the active availability. */
+	irq = spin_lock_irqsave(&c->active_lock);
 	if (ep->active != NULL || ep->recovering || d->quiescing) {
 		error = d->quiescing ? ENODEV : EBUSY;
 		spin_unlock_irqrestore(&c->active_lock, irq);
@@ -1748,13 +1814,16 @@ xhci_endpoint_disable(
 		__builtin_trap();
 	ep->recovering = 1U;
 	c->endpoint_recoveries_busy++;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
+
 	/* Process each element required by the operation. */
 	for (entries = 31U; entries > 1U; entries--) {
 		/* Handles the entries condition. */
 		if (entries != dci && d->endpoints[entries].enabled)
 			break;
 	}
+
 	input = d->input_context.address;
 	memset(input, 0, 4096U);
 	control = (uint32_t *)input;
@@ -1769,6 +1838,7 @@ xhci_endpoint_disable(
 	if (error == 0)
 		ep->enabled = 0;
 	xhci_recovery_leave_locked(c, ep);
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
 	/* Checks the operation status. */
@@ -1797,9 +1867,9 @@ transfer_claim(
 	int normal_short_valid = 1;
 
 	irq = spin_lock_irqsave(&c->active_lock);
-	request = xhci_event_request_locked(c, event, &trb_offset);
 
 	/* Handles the request availability. */
+	request = xhci_event_request_locked(c, event, &trb_offset);
 	if (request == NULL) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
@@ -1816,6 +1886,7 @@ transfer_claim(
 		/* Reports operation failure. */
 		return 1;
 	}
+
 	control_request = drv_usb_urb_control_request(request->urb);
 	actual = residual < request->length ? request->length - residual : 0;
 
@@ -1885,9 +1956,9 @@ transfer_claim(
 	/* Checks the atomic raw fetch add relaxed result. */
 	if (atomic_raw_fetch_add_relaxed(&c->completion_busy, 1U) == UINT_MAX)
 		__builtin_trap();
-	device = request->device;
 
 	/* Checks the xhci request unlink locked result. */
+	device = request->device;
 	if (device->completions_busy == UINT_MAX ||
 	    !xhci_request_unlink_locked(c, request))
 		__builtin_trap();
@@ -1899,6 +1970,7 @@ transfer_claim(
 	else
 		c->completion_head = request;
 	c->completion_tail = request;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
 	/* Reports operation failure. */
@@ -1906,7 +1978,6 @@ transfer_claim(
 }
 
 /* Supports the xhci completion finish operation. */
-static void xhci_completion_finish(struct xhci_controller *c, struct xhci_request *request);
 
 /* Supports the xhci completion finish operation. */
 static void
@@ -1965,6 +2036,7 @@ xhci_completion_finish(
 		io_stats_record(IO_XHCI_BOUNCE_COPY,
 				request->completion_actual);
 	}
+
 	drv_usb_urb_set_hcd_data(urb, NULL);
 
 	/*
@@ -1992,6 +2064,7 @@ xhci_completion_finish(
 	if (device->completions_busy == 0)
 		__builtin_trap();
 	device->completions_busy--;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
 	/* Checks the atomic raw fetch add release result. */
@@ -2009,21 +2082,20 @@ xhci_completion_drain(
 	struct xhci_request *request;
 	unsigned long irq;
 
-	irq = spin_lock_irqsave(&c->active_lock);
-
 	/* Classifies the current input character. */
+	irq = spin_lock_irqsave(&c->active_lock);
 	if (c->completion_dispatch_busy) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
 		/* Returns the computed result. */
 		return;
 	}
+
 	c->completion_dispatch_busy = 1U;
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		request = c->completion_head;
-
 		/* Handles the request availability. */
+		request = c->completion_head;
 		if (request == NULL) {
 			c->completion_tail = NULL;
 			c->completion_dispatch_busy = 0;
@@ -2032,6 +2104,7 @@ xhci_completion_drain(
 			/* Returns the computed result. */
 			return;
 		}
+
 		c->completion_head = request->completion_next;
 
 		/* Handles the completion head availability. */
@@ -2044,7 +2117,6 @@ xhci_completion_drain(
 	}
 }
 /* Supports the xhci irq operation. */
-static int xhci_irq(void *argument);
 
 /* Supports the xhci irq operation. */
 static int
@@ -2062,9 +2134,9 @@ xhci_irq(
 	/* Checks the atomic raw fetch add relaxed result. */
 	if (atomic_raw_fetch_add_relaxed(&c->irq_busy, 1U) == UINT_MAX)
 		__builtin_trap();
-	status = rd32(c->operational, XHCI_USBSTS);
 
 	/* Checks the operation status. */
+	status = rd32(c->operational, XHCI_USBSTS);
 	if (!(status & (XHCI_STS_EINT | XHCI_STS_FATAL)))
 		goto out;
 	wr32(c->operational, XHCI_USBSTS, status);
@@ -2073,9 +2145,9 @@ xhci_irq(
 	for (;;) {
 		event_lock(c);
 		available = event_take(c, &event);
-		type = available ? (event.control >> 10) & 0x3fU : 0;
 
 		/* Handles the available condition. */
+		type = available ? (event.control >> 10) & 0x3fU : 0;
 		if (available && type == 32U)
 			(void)transfer_claim(c, &event);
 		event_unlock(c);
@@ -2105,6 +2177,7 @@ xhci_irq(
 					   event.parameter_high,
 					   event.parameter_low);
 			}
+
 			event_unlock(c);
 		} else if (type == 34U)
 			port_change_defer(c);
@@ -2127,7 +2200,6 @@ out:
 }
 
 /* Supports the xhci port worker operation. */
-static void xhci_port_worker(void *argument);
 
 /* Supports the xhci port worker operation. */
 static void
@@ -2148,12 +2220,12 @@ xhci_port_worker(
 			drv_usb_hcd_root_hub_changed(&c->hcd);
 			continue;
 		}
+
 		kernel_wait_task();
 	}
 }
 
 /* Supports the xhci worker start operation. */
-static int xhci_worker_start(struct xhci_controller *c);
 
 /* Supports the xhci worker start operation. */
 static int
@@ -2165,10 +2237,10 @@ xhci_worker_start(
 
 	c->port_stopping = 0;
 	c->port_pending = 0;
-	error = kthread_create(xhci_port_worker, c, SCHED_PRIORITY_DEFAULT,
-			       &worker);
 
 	/* Checks the operation status. */
+	error = kthread_create(xhci_port_worker, c, SCHED_PRIORITY_DEFAULT,
+			       &worker);
 	if (error)
 		return error;
 	c->port_worker = worker;
@@ -2179,7 +2251,6 @@ xhci_worker_start(
 }
 
 /* Supports the xhci worker stop operation. */
-static void xhci_worker_stop(struct xhci_controller *c);
 
 /* Supports the xhci worker stop operation. */
 static void
@@ -2201,7 +2272,6 @@ xhci_worker_stop(
 }
 
 /* Supports the normal trb count operation. */
-static unsigned normal_trb_count(uint64_t address, size_t length);
 
 /* Supports the normal trb count operation. */
 static unsigned
@@ -2217,9 +2287,8 @@ normal_trb_count(
 		return 1;
 	/* Process each remaining element. */
 	while (length != 0) {
-		chunk = 0x10000U - (size_t)(address & 0xffffU);
-
 		/* Handles the chunk condition. */
+		chunk = 0x10000U - (size_t)(address & 0xffffU);
 		if (chunk > length)
 			chunk = length;
 		address += chunk;
@@ -2232,7 +2301,6 @@ normal_trb_count(
 }
 
 /* Supports the enqueue normal operation. */
-static uint64_t enqueue_normal(struct xhci_ring *ring, uint64_t address, size_t length, int input, size_t maximum_packet_size, int zero_packet);
 
 /* Supports the enqueue normal operation. */
 static uint64_t
@@ -2276,9 +2344,9 @@ enqueue_normal(
 		/* Validates the current input. */
 		if (input)
 			control |= DRV_XHCI_TRB_ISP;
-		final = count == 0 && !zero_packet;
 
 		/* Handles the final condition. */
+		final = count == 0 && !zero_packet;
 		if (!final)
 			control |= XHCI_TRB_CHAIN;
 		else
@@ -2310,7 +2378,6 @@ enqueue_normal(
 }
 
 /* Supports the xhci endpoint restart empty operation. */
-static int xhci_endpoint_restart_empty(struct xhci_controller *c, struct xhci_device *d, struct xhci_endpoint *endpoint, unsigned dci);
 
 /* Supports the xhci endpoint restart empty operation. */
 static int
@@ -2336,19 +2403,18 @@ xhci_endpoint_restart_empty(
 	deadline = sched_ticks() + 100U;
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		state = xhci_endpoint_state(c, d, dci);
-
 		/* Handles the state condition. */
+		state = xhci_endpoint_state(c, d, dci);
 		if (state == DRV_XHCI_ENDPOINT_RUNNING)
 			return 0;
 
 		/* Checks the operation status. */
 		if (state == DRV_XHCI_ENDPOINT_DISABLED ||
 		    state == DRV_XHCI_ENDPOINT_HALTED ||
-		    state == DRV_XHCI_ENDPOINT_ERROR)
-
+		    state == DRV_XHCI_ENDPOINT_ERROR) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 
 		/* Classifies the current input character. */
 		if (c->controller_stopping || c->dma_quiesced || d->quiescing)
@@ -2362,7 +2428,6 @@ xhci_endpoint_restart_empty(
 }
 
 /* Supports the xhci endpoint recover operation. */
-static int xhci_endpoint_recover(struct xhci_controller *c, struct xhci_device *d, struct xhci_endpoint *endpoint, unsigned dci);
 
 /* Supports the xhci endpoint recover operation. */
 static int
@@ -2383,15 +2448,16 @@ xhci_endpoint_recover(
 	/* Process each element required by the operation. */
 	for (attempt = 0; attempt < 8U; attempt++) {
 		state = xhci_endpoint_state(c, d, dci);
-		action = drv_xhci_recovery_action(
-			(enum drv_xhci_endpoint_state)state);
 
 		/* Handles the attempt condition. */
+		action = drv_xhci_recovery_action(
+			(enum drv_xhci_endpoint_state)state);
 		if (attempt != 0 && state == previous_state &&
 		    action == previous_action) {
 			error = EIO;
 			break;
 		}
+
 		previous_state = state;
 		previous_action = action;
 		completion = 0;
@@ -2414,20 +2480,20 @@ xhci_endpoint_recover(
 				  (uint64_t)endpoint->ring.enqueue *
 					  sizeof(struct xhci_trb);
 			dequeue |= endpoint->ring.cycle ? 1U : 0U;
+
+			/* Checks the operation status. */
 			error = command_ex(c, dequeue, 0,
 					   XHCI_TRB_TYPE(16) | (dci << 16) |
 						   XHCI_TRB_SLOT(d->slot),
 					   NULL, &completion);
-
-			/* Checks the operation status. */
 			if (error == 0) {
+				/* Checks the operation status. */
 				error = xhci_endpoint_restart_empty(
 					c, d, endpoint, dci);
-
-				/* Checks the operation status. */
 				if (error == 0)
 					return 0;
 			}
+
 			break;
 		case DRV_XHCI_CANCEL_STOP_ENDPOINT:
 		case DRV_XHCI_CANCEL_QUIESCE_CONTROLLER:
@@ -2443,6 +2509,7 @@ xhci_endpoint_recover(
 		if (error != 0 && completion != 19U)
 			break;
 	}
+
 	hal_printf("xhci: slot %u endpoint %u recovery failed (%d, "
 		   "completion=%u, state=%u); new TD rejected\n",
 		   d->slot, dci, error, completion, state);
@@ -2452,7 +2519,6 @@ xhci_endpoint_recover(
 }
 
 /* Supports the xhci endpoint reset operation. */
-static int xhci_endpoint_reset(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep);
 
 /* Supports the xhci endpoint reset operation. */
 static int
@@ -2472,15 +2538,15 @@ xhci_endpoint_reset(
 	/* Handles the usbep availability. */
 	if (usbep == NULL)
 		return EINVAL;
-	d = xhci_usb_device(drv_usb_endpoint_device(usbep));
 
 	/* Handles the d availability. */
+	d = xhci_usb_device(drv_usb_endpoint_device(usbep));
 	if (d == NULL)
 		return ENODEV;
-	dci = (drv_usb_endpoint_address(usbep) & 15U) * 2U +
-	      (drv_usb_endpoint_is_input(usbep) ? 1U : 0U);
 
 	/* Handles the dci condition. */
+	dci = (drv_usb_endpoint_address(usbep) & 15U) * 2U +
+	      (drv_usb_endpoint_is_input(usbep) ? 1U : 0U);
 	if (dci < 2U || dci >= 32U)
 		return EINVAL;
 	endpoint = &d->endpoints[dci];
@@ -2503,11 +2569,11 @@ xhci_endpoint_reset(
 			/* Returns the computed result. */
 			return error;
 		}
+
+		/* Handles the admission condition. */
 		admission = drv_xhci_endpoint_reset_admit(
 			endpoint->active != NULL, endpoint->recovering,
 			endpoint->stall_publishing);
-
-		/* Handles the admission condition. */
 		if (admission == DRV_XHCI_ENDPOINT_RESET_ACQUIRE) {
 			/* Classifies the current input character. */
 			if (c->endpoint_recoveries_busy == UINT_MAX)
@@ -2517,6 +2583,7 @@ xhci_endpoint_reset(
 			spin_unlock_irqrestore(&c->active_lock, irq);
 			break;
 		}
+
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
 		/* Handles the admission condition. */
@@ -2541,6 +2608,7 @@ xhci_endpoint_reset(
 	    (d->quiescing || c->controller_stopping || c->dma_quiesced))
 		error = ENODEV;
 	xhci_recovery_leave_locked(c, endpoint);
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
 	/* Reports the failure. */
@@ -2552,7 +2620,6 @@ xhci_endpoint_reset(
 }
 
 /* Reclaim may reach a USB-backed swap source after consuming the last free physical page.  A transfer on that path must not allocate the DMA page which is needed to free a page.  USB storage serializes its BOT stages, so one request and one bounded coherent buffer reserved at start are sufficient for its reclaim-safe transfers even while unrelated endpoints remain active.  URBs with normal reservations use their own request/DMA first. Other ordinary traffic, including persistent networking, uses the dynamic path. */
-static struct xhci_request *xhci_request_alloc(struct xhci_controller *c, struct drv_usb_hcd *h, size_t length, unsigned flags, struct drv_usb_urb *urb, int *error);
 
 /* Supports the xhci request alloc operation. */
 static struct xhci_request *
@@ -2574,13 +2641,12 @@ xhci_request_alloc(
 	/*
  * Borrows this URB's normal reserve without consuming the reclaim
 	 * reserve. */
-	reservation = drv_usb_urb_transfer_reservation(urb);
 
 	/* Handles the reservation availability. */
+	reservation = drv_usb_urb_transfer_reservation(urb);
 	if (reservation != NULL) {
-		irq = spin_lock_irqsave(&c->active_lock);
-
 		/* Handles the reservation condition. */
+		irq = spin_lock_irqsave(&c->active_lock);
 		if (reservation->busy || length > reservation->capacity) {
 			*error = reservation->busy ? EBUSY : EMSGSIZE;
 			spin_unlock_irqrestore(&c->active_lock, irq);
@@ -2597,6 +2663,7 @@ xhci_request_alloc(
 			/* Reports that no result is available. */
 			return NULL;
 		}
+
 		reservation->generation++;
 		reservation->busy = 1U;
 		spin_unlock_irqrestore(&c->active_lock, irq);
@@ -2618,12 +2685,12 @@ xhci_request_alloc(
 	/* Checks the active flags. */
 	if ((flags & DRV_USB_URB_RECLAIM_SAFE) != 0) {
 		irq = spin_lock_irqsave(&c->active_lock);
+
+		/* Handles the action condition. */
 		action = drv_xhci_reserve_action(
 			1, length, c->transfer_reserve.size,
 			c->transfer_reserve.address != NULL,
 			c->transfer_reserve_busy != 0);
-
-		/* Handles the action condition. */
 		if (action != DRV_XHCI_RESERVE_USE) {
 			spin_unlock_irqrestore(&c->active_lock, irq);
 			*error = action == DRV_XHCI_RESERVE_BUSY ? EBUSY
@@ -2634,6 +2701,7 @@ xhci_request_alloc(
 			/* Reports that no result is available. */
 			return NULL;
 		}
+
 		c->transfer_reserve_busy = 1U;
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		request = &c->transfer_request;
@@ -2646,26 +2714,27 @@ xhci_request_alloc(
 		return request;
 	}
 
-	request = hal_malloc(sizeof(*request));
-
 	/* Handles the request availability. */
+	request = hal_malloc(sizeof(*request));
 	if (request == NULL) {
 		*error = ENOMEM;
 		/* Reports that no result is available. */
 		return NULL;
 	}
+
 	io_stats_record(IO_XHCI_REQUEST_ALLOC, sizeof(*request));
 	memset(request, 0, sizeof(*request));
-	allocation_error = drv_dma_alloc_coherent(
-		h->dma, length != 0 ? length : 8U, 64U, &request->bounce);
 
 	/* Checks the operation status. */
+	allocation_error = drv_dma_alloc_coherent(
+		h->dma, length != 0 ? length : 8U, 64U, &request->bounce);
 	if (allocation_error != 0) {
 		hal_free(request);
 		*error = allocation_error;
 		/* Reports that no result is available. */
 		return NULL;
 	}
+
 	*error = 0;
 	request->staging = request->bounce.address;
 
@@ -2687,9 +2756,9 @@ xhci_request_release(
 	/*
  * Retires a normal reserved request while preserving its permanent
 	 * backing. */
-	reservation = request->reservation;
 
 	/* Handles the reservation availability. */
+	reservation = request->reservation;
 	if (reservation != NULL) {
 		irq = spin_lock_irqsave(&c->active_lock);
 
@@ -2702,6 +2771,7 @@ xhci_request_release(
 			spin_unlock_irqrestore(&c->active_lock, irq);
 			__builtin_trap();
 		}
+
 		memset(request, 0, sizeof(*request));
 		reservation->busy = 0;
 		spin_unlock_irqrestore(&c->active_lock, irq);
@@ -2718,9 +2788,9 @@ xhci_request_release(
 		/* Returns the computed result. */
 		return;
 	}
-	irq = spin_lock_irqsave(&c->active_lock);
 
 	/* Handles the endpoint availability. */
+	irq = spin_lock_irqsave(&c->active_lock);
 	if (request->endpoint != NULL && request->endpoint->active == request) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		__builtin_trap();
@@ -2731,13 +2801,14 @@ xhci_request_release(
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		__builtin_trap();
 	}
+
 	memset(request, 0, sizeof(*request));
 	c->transfer_reserve_busy = 0;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 }
 
 /* Supports the xhci submission enter operation. */
-static int xhci_submission_enter(struct xhci_controller *c);
 
 /* Supports the xhci submission enter operation. */
 static int
@@ -2746,9 +2817,8 @@ xhci_submission_enter(
 {
 	unsigned long irq;
 
-	irq = spin_lock_irqsave(&c->active_lock);
-
 	/* Classifies the current input character. */
+	irq = spin_lock_irqsave(&c->active_lock);
 	if (c->controller_stopping || c->dma_quiesced) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
@@ -2761,7 +2831,9 @@ xhci_submission_enter(
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		__builtin_trap();
 	}
+
 	c->submissions_busy++;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
 	/* Reports successful completion. */
@@ -2769,7 +2841,6 @@ xhci_submission_enter(
 }
 
 /* HCD callbacks other than start/stop/quiesce may use controller MMIO, command/event rings, or device DMA without submitting an URB.  Track them independently so a port worker which entered enumeration just before USB shutdown cannot race the final controller-DMA release. */
-static int xhci_operation_enter(struct xhci_controller *c);
 
 /* Supports the xhci operation enter operation. */
 static int
@@ -2778,9 +2849,8 @@ xhci_operation_enter(
 {
 	unsigned long irq;
 
-	irq = spin_lock_irqsave(&c->active_lock);
-
 	/* Classifies the current input character. */
+	irq = spin_lock_irqsave(&c->active_lock);
 	if (c->controller_stopping || c->dma_quiesced) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
@@ -2793,7 +2863,9 @@ xhci_operation_enter(
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		__builtin_trap();
 	}
+
 	c->operations_busy++;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
 	/* Reports successful completion. */
@@ -2801,7 +2873,6 @@ xhci_operation_enter(
 }
 
 /* Supports the xhci operation leave operation. */
-static void xhci_operation_leave(struct xhci_controller *c);
 
 /* Supports the xhci operation leave operation. */
 static void
@@ -2810,14 +2881,15 @@ xhci_operation_leave(
 {
 	unsigned long irq;
 
-	irq = spin_lock_irqsave(&c->active_lock);
-
 	/* Classifies the current input character. */
+	irq = spin_lock_irqsave(&c->active_lock);
 	if (c->operations_busy == 0) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		__builtin_trap();
 	}
+
 	c->operations_busy--;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 }
 
@@ -2837,26 +2909,27 @@ xhci_urb_reserve(
 
 	/* Holds the controller operation barrier while allocating backing. */
 	if (result == NULL || capacity == 0 ||
-	    capacity > DRV_USB_TRANSFER_RESERVE_MAX_SIZE)
-
+	    capacity > DRV_USB_TRANSFER_RESERVE_MAX_SIZE) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	*result = NULL;
 	controller = hcd_controller(hcd);
-	error = xhci_operation_enter(controller);
 
 	/* Checks the operation status. */
+	error = xhci_operation_enter(controller);
 	if (error != 0)
 		return error;
-	reservation = hal_malloc(sizeof(*reservation));
 
 	/* Handles the reservation availability. */
+	reservation = hal_malloc(sizeof(*reservation));
 	if (reservation == NULL) {
 		xhci_operation_leave(controller);
 
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	memset(reservation, 0, sizeof(*reservation));
 	reservation->capacity = capacity;
 
@@ -2864,10 +2937,9 @@ xhci_urb_reserve(
 	if (drv_usb_urb_endpoint(urb) != NULL &&
 	    drv_usb_endpoint_type(drv_usb_urb_endpoint(urb)) ==
 		    DRV_USB_TRANSFER_BULK) {
+		/* Checks the operation status. */
 		error = drv_dma_vector_create(hcd->dma, capacity,
 					      &reservation->vector);
-
-		/* Checks the operation status. */
 		if (error == 0) {
 			*result = reservation;
 			xhci_operation_leave(controller);
@@ -2893,10 +2965,10 @@ xhci_urb_reserve(
 	/* Continue while the operation condition remains true. */
 	while (alignment < capacity)
 		alignment *= 2U;
-	error = drv_dma_alloc_coherent(hcd->dma, capacity, alignment,
-				       &reservation->backing);
 
 	/* Checks the operation status. */
+	error = drv_dma_alloc_coherent(hcd->dma, capacity, alignment,
+				       &reservation->backing);
 	if (error != 0) {
 		hal_free(reservation);
 		xhci_operation_leave(controller);
@@ -2904,6 +2976,7 @@ xhci_urb_reserve(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	*result = reservation;
 	xhci_operation_leave(controller);
 
@@ -2923,9 +2996,9 @@ xhci_urb_reserve_buffer(
 	struct xhci_urb_reservation *reservation;
 
 	(void)hcd;
-	reservation = opaque;
 
 	/* Handles the reservation availability. */
+	reservation = opaque;
 	if (reservation == NULL || capacity == NULL)
 		return NULL;
 	*capacity = reservation->capacity;
@@ -2947,9 +3020,8 @@ xhci_urb_unreserve(
 {
 	struct xhci_urb_reservation *reservation;
 
-	reservation = opaque;
-
 	/* Handles the reservation availability. */
+	reservation = opaque;
 	if (reservation == NULL)
 		return;
 
@@ -2965,11 +3037,11 @@ xhci_urb_unreserve(
 	} else {
 		drv_dma_free_coherent(hcd->dma, &reservation->backing);
 	}
+
 	hal_free(reservation);
 }
 
 /* Supports the xhci submission leave operation. */
-static void xhci_submission_leave(struct xhci_controller *c);
 
 /* Supports the xhci submission leave operation. */
 static void
@@ -2978,19 +3050,19 @@ xhci_submission_leave(
 {
 	unsigned long irq;
 
-	irq = spin_lock_irqsave(&c->active_lock);
-
 	/* Classifies the current input character. */
+	irq = spin_lock_irqsave(&c->active_lock);
 	if (c->submissions_busy == 0) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		__builtin_trap();
 	}
+
 	c->submissions_busy--;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 }
 
 /* Supports the xhci urb enqueue operation. */
-static int xhci_urb_enqueue(struct drv_usb_hcd *h, struct drv_usb_urb *u);
 
 /* Supports the xhci urb enqueue operation. */
 static int
@@ -3015,9 +3087,8 @@ xhci_urb_enqueue(
 	unsigned long irq;
 	int e, input, zero_packet = 0;
 
-	e = xhci_submission_enter(c);
-
 	/* Handles the e condition. */
+	e = xhci_submission_enter(c);
 	if (e != 0)
 		return e;
 
@@ -3028,28 +3099,28 @@ xhci_urb_enqueue(
 		/* Returns the computed result. */
 		return ENODEV;
 	}
+
+	/* Handles the dci condition. */
 	dci = q ? 1U
 		: ((drv_usb_endpoint_address(drv_usb_urb_endpoint(u)) & 15U) *
 			   2U +
 		   (drv_usb_endpoint_is_input(drv_usb_urb_endpoint(u)) ? 1U
 								       : 0U));
-
-	/* Handles the dci condition. */
 	if (dci == 0 || dci >= 32U) {
 		xhci_submission_leave(c);
 
 		/* Returns the computed result. */
 		return EINVAL;
 	}
+
 	ep = &d->endpoints[dci];
 
 	/* Handles the q availability. */
 	if (q == NULL) {
+		/* Handles the maximum packet size condition. */
 		maximum_packet_size = drv_usb_endpoint_max_packet_size(
 					      drv_usb_urb_endpoint(u)) &
 				      0x7ffU;
-
-		/* Handles the maximum packet size condition. */
 		if (maximum_packet_size == 0) {
 			xhci_submission_leave(c);
 
@@ -3057,6 +3128,7 @@ xhci_urb_enqueue(
 			return EINVAL;
 		}
 	}
+
 	irq = spin_lock_irqsave(&c->active_lock);
 
 	/* Handles the active availability. */
@@ -3077,11 +3149,11 @@ xhci_urb_enqueue(
 		__builtin_trap();
 	ep->recovering = 1U;
 	c->endpoint_recoveries_busy++;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
-	r = xhci_request_alloc(c, h, length, drv_usb_urb_flags(u), u, &e);
-
 	/* Handles the r availability. */
+	r = xhci_request_alloc(c, h, length, drv_usb_urb_flags(u), u, &e);
 	if (r == NULL) {
 		irq = spin_lock_irqsave(&c->active_lock);
 		xhci_recovery_leave_locked(c, ep);
@@ -3091,6 +3163,7 @@ xhci_urb_enqueue(
 		/* Returns the computed result. */
 		return e;
 	}
+
 	r->urb = u;
 	r->device = d;
 	r->endpoint = ep;
@@ -3114,9 +3187,8 @@ xhci_urb_enqueue(
 	if (q == NULL) {
 		/* Handles the vector availability. */
 		if (r->vector != NULL) {
-			e = xhci_sg_plan(r, length);
-
 			/* Handles the e condition. */
+			e = xhci_sg_plan(r, length);
 			if (e != 0) {
 				xhci_request_release(c, r);
 				irq = spin_lock_irqsave(&c->active_lock);
@@ -3127,10 +3199,12 @@ xhci_urb_enqueue(
 				/* Returns the computed result. */
 				return e;
 			}
+
 			normal_count = r->normal_count;
 		} else {
 			normal_count = normal_trb_count(dma, length);
 		}
+
 		zero_packet =
 			drv_usb_endpoint_type(drv_usb_urb_endpoint(u)) ==
 				DRV_USB_TRANSFER_BULK &&
@@ -3159,11 +3233,11 @@ xhci_urb_enqueue(
 		setup = 0;
 
 		memcpy(&setup, q, sizeof(*q));
+
+		/* Checks the drv xhci control setup words result. */
 		control_data = length == 0 ? DRV_XHCI_CONTROL_NO_DATA
 			       : input	   ? DRV_XHCI_CONTROL_DATA_IN
 					   : DRV_XHCI_CONTROL_DATA_OUT;
-
-		/* Checks the drv xhci control setup words result. */
 		if (!drv_xhci_control_setup_words(setup, control_data,
 						  &setup_words) ||
 		    (length != 0 &&
@@ -3181,6 +3255,7 @@ xhci_urb_enqueue(
 			return EINVAL;
 		}
 	}
+
 	r->slot = d->slot;
 	r->dci = dci;
 	r->port = drv_usb_device_port(drv_usb_urb_device(u));
@@ -3203,6 +3278,7 @@ xhci_urb_enqueue(
 			e = d->quiescing || c->controller_stopping ? ENODEV
 								   : EBUSY;
 		}
+
 		xhci_recovery_leave_locked(c, ep);
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		xhci_request_release(c, r);
@@ -3211,6 +3287,7 @@ xhci_urb_enqueue(
 		/* Returns the computed result. */
 		return e;
 	}
+
 	r->first_trb = ep->ring.enqueue;
 	r->trb_count = q != NULL ? (length ? 3U : 2U)
 				 : normal_count + (zero_packet ? 1U : 0U);
@@ -3240,6 +3317,7 @@ xhci_urb_enqueue(
 					   << 32),
 				  data_words.status, data_words.control);
 		}
+
 		(void)ring_push(
 			&ep->ring,
 			(uint64_t)status_words.parameter_low |
@@ -3259,9 +3337,12 @@ xhci_urb_enqueue(
 					     maximum_packet_size, zero_packet);
 		}
 	}
+
 	wr32(c->doorbells, d->slot * 4U, dci);
 	xhci_recovery_leave_locked(c, ep);
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
+
 	xhci_submission_leave(c);
 
 	/* Reports successful completion. */
@@ -3280,10 +3361,10 @@ xhci_endpoint_state(
 
 	/* Handles the d availability. */
 	if (d == NULL || dci == 0 || dci >= 32U ||
-	    d->output_context.address == NULL)
-
+	    d->output_context.address == NULL) {
 		/* Returns the computed result. */
 		return 7U;
+	}
 	context = (volatile uint32_t *)((uint8_t *)d->output_context.address +
 					(size_t)dci * c->context_size);
 	hal_io_rmb();
@@ -3293,7 +3374,6 @@ xhci_endpoint_state(
 }
 
 /* Supports the xhci cancel request operation. */
-static int xhci_cancel_request(struct xhci_controller *c, struct xhci_device *d, struct xhci_request *r);
 
 /* Supports the xhci cancel request operation. */
 static int
@@ -3318,14 +3398,15 @@ xhci_cancel_request(
 	for (attempt = 0; attempt < 8U; attempt++) {
 		state = (enum drv_xhci_endpoint_state)xhci_endpoint_state(
 			c, d, r->dci);
-		action = drv_xhci_cancel_action(state, c->dma_quiesced != 0);
 
 		/* Handles the attempt condition. */
+		action = drv_xhci_cancel_action(state, c->dma_quiesced != 0);
 		if (attempt != 0 && state == previous_state &&
 		    action == previous_action) {
 			error = EIO;
 			goto retain;
 		}
+
 		previous_state = state;
 		previous_action = action;
 		completion = 0;
@@ -3358,12 +3439,12 @@ xhci_cancel_request(
 				  (uint64_t)ep->ring.enqueue *
 					  sizeof(struct xhci_trb);
 			dequeue |= ep->ring.cycle ? 1U : 0U;
+
+			/* Checks the operation status. */
 			error = command_ex(c, dequeue, 0,
 					   XHCI_TRB_TYPE(16) | (r->dci << 16) |
 						   XHCI_TRB_SLOT(d->slot),
 					   NULL, &completion);
-
-			/* Checks the operation status. */
 			if (error == 0) {
 				/*
  * Set TR Dequeue is the DMA-ownership boundary.
@@ -3383,10 +3464,10 @@ xhci_cancel_request(
 							1, 0);
 					goto release;
 				}
-				error = xhci_endpoint_restart_empty(c, d, ep,
-								    r->dci);
 
 				/* Checks the operation status. */
+				error = xhci_endpoint_restart_empty(c, d, ep,
+								    r->dci);
 				if (error == 0) {
 					releasable =
 						drv_xhci_request_resources_releasable(
@@ -3394,6 +3475,7 @@ xhci_cancel_request(
 					goto release;
 				}
 			}
+
 			break;
 		case DRV_XHCI_CANCEL_QUIESCE_CONTROLLER:
 		default:
@@ -3408,15 +3490,18 @@ xhci_cancel_request(
 		if (error != 0 && completion != 19U)
 			goto retain;
 	}
+
 	error = EIO;
 
 retain:
-	irq = spin_lock_irqsave(&c->active_lock);
 
 	/* Handles the r condition. */
+	irq = spin_lock_irqsave(&c->active_lock);
 	if (r->endpoint->active == r)
 		r->cancelling = 2U;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
+
 	hal_printf("xhci: slot %u endpoint %u port %u cancel failed (%d, "
 		   "completion=%u, state=%u); request and DMA retained\n",
 		   r->slot, r->dci, r->port, error, completion,
@@ -3430,16 +3515,18 @@ release:
 	/* Handles the releasable condition. */
 	if (!releasable)
 		goto retain;
-	irq = spin_lock_irqsave(&c->active_lock);
 
 	/* Checks the xhci request unlink locked result. */
+	irq = spin_lock_irqsave(&c->active_lock);
 	if (!xhci_request_unlink_locked(c, r)) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
+
 	drv_usb_urb_set_hcd_data(r->urb, NULL);
 	xhci_request_release(c, r);
 
@@ -3448,7 +3535,6 @@ release:
 }
 
 /* Supports the xhci urb dequeue operation. */
-static int xhci_urb_dequeue(struct drv_usb_hcd *h, struct drv_usb_urb *u);
 
 /* Supports the xhci urb dequeue operation. */
 static int
@@ -3456,7 +3542,7 @@ xhci_urb_dequeue(
 	struct drv_usb_hcd *h,
 	struct drv_usb_urb *u)
 {
-	int function_result;
+	int error;
 	struct xhci_controller *c = hcd_controller(h);
 	struct xhci_device *d;
 	struct xhci_endpoint *endpoint;
@@ -3465,12 +3551,13 @@ xhci_urb_dequeue(
 	unsigned dci;
 	unsigned long irq;
 
-	d = xhci_usb_device(drv_usb_urb_device(u));
-
 	/* Handles the d availability. */
+	d = xhci_usb_device(drv_usb_urb_device(u));
 	if (d == NULL)
 		return ENODEV;
 	control = drv_usb_urb_control_request(u);
+
+	/* Handles the dci condition. */
 	dci = control != NULL
 		      ? 1U
 		      : (drv_usb_endpoint_address(drv_usb_urb_endpoint(u)) &
@@ -3479,15 +3566,13 @@ xhci_urb_dequeue(
 					 drv_usb_urb_endpoint(u))
 					 ? 1U
 					 : 0U);
-
-	/* Handles the dci condition. */
 	if (dci == 0 || dci >= 32U)
 		return EINVAL;
 	endpoint = &d->endpoints[dci];
 	irq = spin_lock_irqsave(&c->active_lock);
-	r = endpoint->active;
 
 	/* Handles the r availability. */
+	r = endpoint->active;
 	if (r == NULL || r->urb != u || r->device != d || r->dci != dci) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
@@ -3502,18 +3587,19 @@ xhci_urb_dequeue(
 		/* Returns the computed result. */
 		return EALREADY;
 	}
+
 	r->cancelling = 1U;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
 	/* Obtains the xhci cancel request result. */
-	function_result = xhci_cancel_request(c, d, r);
+	error = xhci_cancel_request(c, d, r);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the xhci endpoint quiesce operation. */
-static int xhci_endpoint_quiesce(struct xhci_controller *c, struct xhci_device *d, unsigned dci);
 
 /* Supports the xhci endpoint quiesce operation. */
 static int
@@ -3534,13 +3620,13 @@ xhci_endpoint_quiesce(
 		return 0;
 	/* Process each element required by the operation. */
 	for (attempt = 0; attempt < 8U; attempt++) {
-		state = xhci_endpoint_state(c, d, dci);
-
 		/* Handles the attempt condition. */
+		state = xhci_endpoint_state(c, d, dci);
 		if (attempt != 0 && state == previous_state) {
 			error = EIO;
 			break;
 		}
+
 		previous_state = state;
 		completion = 0;
 
@@ -3568,12 +3654,12 @@ xhci_endpoint_quiesce(
 				  (uint64_t)endpoint->ring.enqueue *
 					  sizeof(struct xhci_trb);
 			dequeue |= endpoint->ring.cycle ? 1U : 0U;
+
+			/* Checks the operation status. */
 			error = command_ex(c, dequeue, 0,
 					   XHCI_TRB_TYPE(16) | (dci << 16) |
 						   XHCI_TRB_SLOT(d->slot),
 					   NULL, &completion);
-
-			/* Checks the operation status. */
 			if (error == 0)
 				return 0;
 		} else {
@@ -3584,6 +3670,7 @@ xhci_endpoint_quiesce(
 		if (error != 0 && completion != 19U)
 			break;
 	}
+
 	hal_printf("xhci: slot %u endpoint %u teardown quiesce failed (%d, "
 		   "completion=%u, state=%u); slot retained\n",
 		   d->slot, dci, error, completion, state);
@@ -3593,7 +3680,6 @@ xhci_endpoint_quiesce(
 }
 
 /* Supports the xhci device quiesce operation. */
-static int xhci_device_quiesce(struct drv_usb_hcd *h, struct drv_usb_device *u);
 
 /* Supports the xhci device quiesce operation. */
 static int
@@ -3637,6 +3723,7 @@ xhci_device_quiesce(
 			spin_unlock_irqrestore(&c->active_lock, irq);
 			break;
 		}
+
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
 		/* Checks the sched ticks result. */
@@ -3648,6 +3735,7 @@ xhci_device_quiesce(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		sched_yield();
 	}
 
@@ -3664,9 +3752,8 @@ xhci_device_quiesce(
 		irq = spin_lock_irqsave(&c->active_lock);
 		/* Process each element required by the operation. */
 		for (dci = 1; dci < 32U; dci++) {
-			candidate = d->endpoints[dci].active;
-
 			/* Handles the candidate availability. */
+			candidate = d->endpoints[dci].active;
 			if (candidate == NULL || (attempted & (1U << dci)) != 0)
 				continue;
 
@@ -3675,19 +3762,20 @@ xhci_device_quiesce(
 				wait_for_cancel = 1U;
 				continue;
 			}
+
 			candidate->cancelling = 1U;
 			attempted |= 1U << dci;
 			r = candidate;
 			urb = candidate->urb;
 			break;
 		}
+
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
 		/* Handles the r availability. */
 		if (r != NULL) {
-			error = xhci_cancel_request(c, d, r);
-
 			/* Checks the operation status. */
+			error = xhci_cancel_request(c, d, r);
 			if (error != 0) {
 				/* Checks the operation status. */
 				if (first_error == 0)
@@ -3700,6 +3788,7 @@ xhci_device_quiesce(
 				drv_usb_hcd_complete(
 					h, urb, DRV_USB_URB_DISCONNECTED, 0);
 			}
+
 			continue;
 		}
 
@@ -3714,6 +3803,7 @@ xhci_device_quiesce(
 				first_error = EBUSY;
 			break;
 		}
+
 		sched_yield();
 	}
 
@@ -3749,13 +3839,14 @@ xhci_device_quiesce(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		sched_yield();
 	}
+
 	/* Process each element required by the operation. */
 	for (dci = 1; dci < 32U; dci++) {
-		error = xhci_endpoint_quiesce(c, d, dci);
-
 		/* Checks the operation status. */
+		error = xhci_endpoint_quiesce(c, d, dci);
 		if (error != 0)
 			return error;
 	}
@@ -3772,10 +3863,10 @@ xhci_device_quiesce(
 		/* Returns the computed result. */
 		return d->slot_disabled ? 0 : EIO;
 	}
-	error = command_ex(c, 0, 0, XHCI_TRB_TYPE(10) | XHCI_TRB_SLOT(d->slot),
-			   NULL, &completion);
 
 	/* Checks the operation status. */
+	error = command_ex(c, 0, 0, XHCI_TRB_TYPE(10) | XHCI_TRB_SLOT(d->slot),
+			   NULL, &completion);
 	if (error != 0) {
 		hal_printf("xhci: slot %u Disable Slot failed (%d, "
 			   "completion=%u); rings and contexts retained\n",
@@ -3796,7 +3887,6 @@ xhci_device_quiesce(
 }
 
 /* Supports the xhci frame operation. */
-static uint32_t xhci_frame(struct drv_usb_hcd *h);
 
 /* Supports the xhci frame operation. */
 static uint32_t
@@ -3813,7 +3903,6 @@ xhci_frame(
 	return function_result;
 }
 /* Supports the xhci root status operation. */
-static int xhci_root_status(struct drv_usb_hcd *h, void *b, size_t n, size_t *a);
 
 /* Supports the xhci root status operation. */
 static int
@@ -3845,7 +3934,6 @@ xhci_root_status(
 	return 0;
 }
 /* Supports the xhci root control operation. */
-static int xhci_root_control(struct drv_usb_hcd *h, const struct drv_usb_control_request *r, void *b, size_t n, size_t *a);
 
 /* Supports the xhci root control operation. */
 static int
@@ -3866,9 +3954,9 @@ xhci_root_control(
 	if (!r || r->index < 1 || r->index > c->ports)
 		return EINVAL;
 	p = r->index - 1U;
-	s = rd32(c->operational, XHCI_PORTSC(p));
 
 	/* Handles the r condition. */
+	s = rd32(c->operational, XHCI_PORTSC(p));
 	if (r->request == 0 && b && n >= 4) {
 		speed = (s >> 10) & 15U;
 
@@ -3946,9 +4034,8 @@ xhci_root_control(
 
 	/* Handles the r condition. */
 	if (r->request == 1) {
-		change = 0;
-
 		/* Handles the r condition. */
+		change = 0;
 		if (r->value == 16)
 			change = 1U << 17;
 		else if (r->value == 17)
@@ -3993,7 +4080,6 @@ xhci_root_control(
 }
 
 /* Supports the xhci root port reset operation. */
-static int xhci_root_port_reset(struct drv_usb_hcd *h, unsigned port);
 
 /* Supports the xhci root port reset operation. */
 static int
@@ -4012,9 +4098,9 @@ xhci_root_port_reset(
 	if (port == 0 || port > c->ports)
 		return EINVAL;
 	index = port - 1U;
-	portsc = rd32(c->operational, XHCI_PORTSC(index));
 
 	/* Handles the portsc condition. */
+	portsc = rd32(c->operational, XHCI_PORTSC(index));
 	if (portsc == UINT32_MAX)
 		return EIO;
 
@@ -4032,9 +4118,9 @@ xhci_root_port_reset(
 		     (portsc & XHCI_PORT_PP) |
 			     (portsc & (XHCI_PORT_CHANGE & ~XHCI_PORT_CSC)));
 	}
-	portsc = rd32(c->operational, XHCI_PORTSC(index));
 
 	/* Handles the portsc condition. */
+	portsc = rd32(c->operational, XHCI_PORTSC(index));
 	if (portsc == UINT32_MAX)
 		return EIO;
 
@@ -4047,26 +4133,26 @@ xhci_root_port_reset(
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		portsc = rd32(c->operational, XHCI_PORTSC(index));
-		decision = drv_xhci_port_reset_status(portsc);
 
 		/* Handles the decision condition. */
+		decision = drv_xhci_port_reset_status(portsc);
 		if (decision == DRV_XHCI_PORT_RESET_SUCCESS) {
 			wr32(c->operational, XHCI_PORTSC(index),
 			     (portsc & XHCI_PORT_PP) |
 				     (portsc &
 				      (XHCI_PORT_CHANGE & ~XHCI_PORT_CSC)));
-			portsc = rd32(c->operational, XHCI_PORTSC(index));
 
 			/* Handles the portsc condition. */
+			portsc = rd32(c->operational, XHCI_PORTSC(index));
 			if (portsc == UINT32_MAX)
 				return EIO;
 
 			/* Handles the portsc condition. */
 			if ((portsc & XHCI_PORT_CSC) != 0 ||
-			    (portsc & XHCI_PORT_CCS) == 0)
-
+			    (portsc & XHCI_PORT_CCS) == 0) {
 				/* Returns the computed result. */
 				return ENODEV;
+			}
 
 			/*
  * Two 10-ms ticks guarantee at least one full
@@ -4082,18 +4168,18 @@ xhci_root_port_reset(
  * The mandatory recovery delay is part of reset.
 			 * Preserve a detach/reinsert edge which arrives during
 			 * that interval too. */
-			portsc = rd32(c->operational, XHCI_PORTSC(index));
 
 			/* Handles the portsc condition. */
+			portsc = rd32(c->operational, XHCI_PORTSC(index));
 			if (portsc == UINT32_MAX)
 				return EIO;
 
 			/* Handles the portsc condition. */
 			if ((portsc & XHCI_PORT_CSC) != 0 ||
-			    (portsc & XHCI_PORT_CCS) == 0)
-
+			    (portsc & XHCI_PORT_CCS) == 0) {
 				/* Returns the computed result. */
 				return ENODEV;
+			}
 			hal_printf("xhci: port %u reset complete portsc=%08x\n",
 				   port, portsc);
 
@@ -4114,6 +4200,7 @@ xhci_root_port_reset(
 			break;
 		sched_yield();
 	}
+
 	hal_printf("xhci: port %u reset timed out portsc=%08x\n", port, portsc);
 
 	/* Returns the computed result. */
@@ -4121,7 +4208,6 @@ xhci_root_port_reset(
 }
 
 /* Supports the xhci scratchpads free operation. */
-static void xhci_scratchpads_free(struct xhci_controller *c);
 
 /* Supports the xhci scratchpads free operation. */
 static void
@@ -4140,6 +4226,7 @@ xhci_scratchpads_free(
 						      &c->scratchpads[i]);
 			}
 		}
+
 		hal_free(c->scratchpads);
 		c->scratchpads = NULL;
 	}
@@ -4150,7 +4237,6 @@ xhci_scratchpads_free(
 }
 
 /* Supports the xhci scratchpads alloc operation. */
-static int xhci_scratchpads_alloc(struct xhci_controller *c);
 
 /* Supports the xhci scratchpads alloc operation. */
 static int
@@ -4172,25 +4258,25 @@ xhci_scratchpads_alloc(
 		return ENOMEM;
 	memset(c->scratchpads, 0,
 	       sizeof(*c->scratchpads) * c->scratchpad_count);
+
+	/* Handles the e condition. */
 	e = drv_dma_alloc_coherent(
 		c->hcd.dma, (size_t)c->scratchpad_count * sizeof(uint64_t), 64U,
 		&c->scratchpad_array);
-
-	/* Handles the e condition. */
 	if (e)
 		goto fail;
 	memset(c->scratchpad_array.address, 0, c->scratchpad_array.size);
 	array = c->scratchpad_array.address;
 	/* Process each remaining element. */
 	for (i = 0; i < c->scratchpad_count; i++) {
+		/* Handles the e condition. */
 		e = drv_dma_alloc_coherent(c->hcd.dma, 4096U, 4096U,
 					   &c->scratchpads[i]);
-
-		/* Handles the e condition. */
 		if (e)
 			goto fail;
 		array[i] = c->scratchpads[i].device_address;
 	}
+
 	((uint64_t *)c->dcbaa.address)[0] = c->scratchpad_array.device_address;
 
 	/* Reports successful completion. */
@@ -4203,7 +4289,6 @@ fail:
 }
 
 /* HCHalted, PCI bus-master disable, and IRQ drain are all prerequisites for this software-only ownership drop.  Until then an endpoint owner remains published even when a cancellation command failed, so a late Transfer Event can never alias a reused ring slot. */
-static void xhci_controller_drain_requests(struct xhci_controller *c);
 
 /* Supports the xhci controller drain requests operation. */
 static void
@@ -4227,9 +4312,8 @@ xhci_controller_drain_requests(
 		     device = device->next) {
 			/* Process each element required by the operation. */
 			for (dci = 1; dci < 32U; dci++) {
-				request = device->endpoints[dci].active;
-
 				/* Handles the request availability. */
+				request = device->endpoints[dci].active;
 				if (request != NULL)
 					break;
 			}
@@ -4271,9 +4355,8 @@ xhci_controller_drain_requests(
 		 * active_lock. */
 		drv_usb_hcd_complete(&c->hcd, urb, DRV_USB_URB_DISCONNECTED, 0);
 
-		irq = spin_lock_irqsave(&c->active_lock);
-
 		/* Handles the device condition. */
+		irq = spin_lock_irqsave(&c->active_lock);
 		if (device->completions_busy == 0)
 			__builtin_trap();
 		device->completions_busy--;
@@ -4287,7 +4370,6 @@ xhci_controller_drain_requests(
 }
 
 /* Supports the xhci submission quiesce operation. */
-static int xhci_submission_quiesce(struct xhci_controller *c);
 
 /* Supports the xhci submission quiesce operation. */
 static int
@@ -4300,8 +4382,11 @@ xhci_submission_quiesce(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&c->active_lock);
+
 	c->controller_stopping = 1U;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
+
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		irq = spin_lock_irqsave(&c->active_lock);
@@ -4311,14 +4396,14 @@ xhci_submission_quiesce(
 		active = c->active_count;
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		completion = atomic_raw_load_acquire(&c->completion_busy);
-		command = atomic_raw_load_acquire(&c->command_busy);
 
 		/* Handles the recovery condition. */
+		command = atomic_raw_load_acquire(&c->command_busy);
 		if (!recovery && !operations && !submissions && !completion &&
-		    !command)
-
+		    !command) {
 			/* Reports successful completion. */
 			return 0;
+		}
 
 		/* Checks the sched ticks result. */
 		if (sched_ticks() - started >= 100U) {
@@ -4332,12 +4417,12 @@ xhci_submission_quiesce(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		sched_yield();
 	}
 }
 
 /* Supports the xhci irq quiesce operation. */
-static int xhci_irq_quiesce(struct xhci_controller *c);
 
 /* Supports the xhci irq quiesce operation. */
 static int
@@ -4356,6 +4441,7 @@ xhci_irq_quiesce(
 			/* Returns the computed result. */
 			return EIO;
 		}
+
 		sched_yield();
 	}
 
@@ -4364,7 +4450,6 @@ xhci_irq_quiesce(
 }
 
 /* Supports the xhci irq disestablish operation. */
-static int xhci_irq_disestablish(struct xhci_controller *c);
 
 /* Supports the xhci irq disestablish operation. */
 static int
@@ -4390,10 +4475,9 @@ xhci_irq_disestablish(
 	 * drains; only a successful retry owns and frees the cookie. */
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
+		/* Checks the operation status. */
 		error = drv_pci_device_disestablish_irq_checked(c->pci,
 								c->irq_cookie);
-
-		/* Checks the operation status. */
 		if (error != EBUSY)
 			break;
 
@@ -4405,6 +4489,7 @@ xhci_irq_disestablish(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		sched_yield();
 	}
 
@@ -4417,6 +4502,7 @@ xhci_irq_disestablish(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	c->irq_cookie = NULL;
 
 	/* Obtains the xhci irq quiesce result. */
@@ -4427,7 +4513,6 @@ xhci_irq_disestablish(
 }
 
 /* Supports the xhci quiesce operation. */
-static int xhci_quiesce(struct drv_usb_hcd *h);
 
 /* Supports the xhci quiesce operation. */
 static int
@@ -4441,9 +4526,9 @@ xhci_quiesce(
 	/* Classifies the current input character. */
 	if (c->dma_quiesced)
 		return 0;
-	barrier_error = xhci_submission_quiesce(c);
 
 	/* Checks the operation status. */
+	barrier_error = xhci_submission_quiesce(c);
 	if (barrier_error != 0)
 		return barrier_error;
 	iman = rd32(c->runtime, 0x20U);
@@ -4453,9 +4538,9 @@ xhci_quiesce(
 	     command & ~(XHCI_CMD_RUN | XHCI_CMD_INTE));
 	halt_error = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_HALTED,
 			       XHCI_STS_HALTED);
-	master_error = xhci_bus_master_disable(c);
 
 	/* Checks the operation status. */
+	master_error = xhci_bus_master_disable(c);
 	if (halt_error != 0) {
 		hal_printf("xhci: stop did not reach HCHalted (halt=%d "
 			   "master=%d); retaining DMA/IRQ state\n",
@@ -4473,9 +4558,9 @@ xhci_quiesce(
 		/* Returns the computed result. */
 		return master_error;
 	}
-	barrier_error = xhci_irq_disestablish(c);
 
 	/* Checks the operation status. */
+	barrier_error = xhci_irq_disestablish(c);
 	if (barrier_error != 0)
 		return barrier_error;
 
@@ -4491,7 +4576,6 @@ xhci_quiesce(
 }
 
 /* Supports the xhci release resources operation. */
-static int xhci_release_resources(struct drv_usb_hcd *h);
 
 /* Supports the xhci release resources operation. */
 static int
@@ -4510,8 +4594,11 @@ xhci_release_resources(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	memset(&transfer_reserve, 0, sizeof(transfer_reserve));
 	irq = spin_lock_irqsave(&c->active_lock);
+
+	/* Handles the resources safe condition. */
 	resources_safe = c->controller_stopping && c->active_count == 0 &&
 			 !c->transfer_reserve_busy && !c->operations_busy &&
 			 !c->submissions_busy && !c->endpoint_recoveries_busy &&
@@ -4521,12 +4608,11 @@ xhci_release_resources(
 			 atomic_raw_load_acquire(&c->completion_busy) == 0 &&
 			 atomic_raw_load_acquire(&c->command_busy) == 0 &&
 			 atomic_raw_load_acquire(&c->irq_busy) == 0;
-
-	/* Handles the resources safe condition. */
 	if (resources_safe) {
 		transfer_reserve = c->transfer_reserve;
 		memset(&c->transfer_reserve, 0, sizeof(c->transfer_reserve));
 	}
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
 	/* Handles the resources safe condition. */
@@ -4566,7 +4652,6 @@ xhci_release_resources(
 }
 
 /* Supports the xhci stop operation. */
-static void xhci_stop(struct drv_usb_hcd *h);
 
 /* Supports the xhci stop operation. */
 static void
@@ -4576,15 +4661,13 @@ xhci_stop(
 	struct xhci_controller *c = hcd_controller(h);
 	int error;
 
-	error = xhci_release_resources(h);
-
 	/* Checks the operation status. */
+	error = xhci_release_resources(h);
 	if (error != 0)
 		xhci_mark_quarantined(c);
 }
 
 /* Supports the xhci stop checked operation. */
-static int xhci_stop_checked(struct drv_usb_hcd *h);
 
 /* Supports the xhci stop checked operation. */
 static int
@@ -4594,9 +4677,8 @@ xhci_stop_checked(
 	int function_result;
 	int error;
 
-	error = xhci_quiesce(h);
-
 	/* Checks the operation status. */
+	error = xhci_quiesce(h);
 	if (error != 0)
 		return error;
 
@@ -4608,7 +4690,6 @@ xhci_stop_checked(
 }
 
 /* Supports the xhci start operation. */
-static int xhci_start(struct drv_usb_hcd *h);
 
 /* Supports the xhci start operation. */
 static int
@@ -4628,18 +4709,18 @@ xhci_start(
 
 	/* Checks the wait bits result. */
 	if ((e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_HALTED,
-			   XHCI_STS_HALTED)) != 0)
-
+			   XHCI_STS_HALTED)) != 0) {
 		/* Returns the computed result. */
 		return e;
+	}
 	wr32(c->operational, XHCI_USBCMD, XHCI_CMD_RESET);
 
 	/* Checks the wait bits result. */
 	if ((e = wait_bits(c->operational, XHCI_USBCMD, XHCI_CMD_RESET, 0)) !=
-	    0)
-
+	    0) {
 		/* Returns the computed result. */
 		return e;
+	}
 
 	/* Checks the wait bits result. */
 	if ((e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_CNR, 0)) != 0)
@@ -4663,9 +4744,12 @@ xhci_start(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	c->controller_stopping = 0;
 	c->dma_quiesced = 0;
+
 	spin_unlock_irqrestore(&c->active_lock, irq);
+
 	c->command_failed = 0;
 	c->default_slot = 0;
 
@@ -4717,15 +4801,15 @@ xhci_start(
 	wr32(c->operational, XHCI_CONFIG, c->max_slots);
 	wr32(c->operational, XHCI_USBSTS, 0xffffffffU);
 	wr32(c->operational, XHCI_USBCMD, XHCI_CMD_RUN | XHCI_CMD_INTE);
-	e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_HALTED, 0);
 
 	/* Handles the e condition. */
+	e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_HALTED, 0);
 	if (!e)
 		return 0;
 fail:
-	stop_error = xhci_stop_checked(h);
 
 	/* Checks the operation status. */
+	stop_error = xhci_stop_checked(h);
 	if (stop_error != 0)
 		return stop_error;
 
@@ -4734,7 +4818,6 @@ fail:
 }
 
 /* Supports the xhci guarded device enable operation. */
-static int xhci_guarded_device_enable(struct drv_usb_hcd *h, struct drv_usb_device *u);
 
 /* Supports the xhci guarded device enable operation. */
 static int
@@ -4760,7 +4843,6 @@ xhci_guarded_device_enable(
 }
 
 /* Supports the xhci guarded set address operation. */
-static int xhci_guarded_set_address(struct drv_usb_hcd *h, struct drv_usb_device *u, unsigned address);
 
 /* Supports the xhci guarded set address operation. */
 static int
@@ -4787,7 +4869,6 @@ xhci_guarded_set_address(
 }
 
 /* Supports the xhci guarded device quiesce operation. */
-static int xhci_guarded_device_quiesce(struct drv_usb_hcd *h, struct drv_usb_device *u);
 
 /* Supports the xhci guarded device quiesce operation. */
 static int
@@ -4813,7 +4894,6 @@ xhci_guarded_device_quiesce(
 }
 
 /* Supports the xhci guarded device disable operation. */
-static void xhci_guarded_device_disable(struct drv_usb_hcd *h, struct drv_usb_device *u);
 
 /* Supports the xhci guarded device disable operation. */
 static void
@@ -4831,7 +4911,6 @@ xhci_guarded_device_disable(
 }
 
 /* Supports the xhci guarded urb dequeue operation. */
-static int xhci_guarded_urb_dequeue(struct drv_usb_hcd *h, struct drv_usb_urb *u);
 
 /* Supports the xhci guarded urb dequeue operation. */
 static int
@@ -4857,7 +4936,6 @@ xhci_guarded_urb_dequeue(
 }
 
 /* Supports the xhci guarded endpoint enable operation. */
-static int xhci_guarded_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *endpoint);
 
 /* Supports the xhci guarded endpoint enable operation. */
 static int
@@ -4883,7 +4961,6 @@ xhci_guarded_endpoint_enable(
 }
 
 /* Supports the xhci guarded endpoint reset operation. */
-static int xhci_guarded_endpoint_reset(struct drv_usb_hcd *h, struct drv_usb_endpoint *endpoint);
 
 /* Supports the xhci guarded endpoint reset operation. */
 static int
@@ -4909,7 +4986,6 @@ xhci_guarded_endpoint_reset(
 }
 
 /* Supports the xhci guarded endpoint disable operation. */
-static int xhci_guarded_endpoint_disable(struct drv_usb_hcd *h, struct drv_usb_endpoint *endpoint);
 
 /* Supports the xhci guarded endpoint disable operation. */
 static int
@@ -4920,9 +4996,8 @@ xhci_guarded_endpoint_disable(
 	struct xhci_controller *c = hcd_controller(h);
 	int error;
 
-	error = xhci_operation_enter(c);
-
 	/* Checks the operation status. */
+	error = xhci_operation_enter(c);
 	if (error != 0)
 		return error;
 	error = xhci_endpoint_disable(h, endpoint);
@@ -4937,7 +5012,6 @@ xhci_guarded_endpoint_disable(
 }
 
 /* Supports the xhci guarded frame operation. */
-static uint32_t xhci_guarded_frame(struct drv_usb_hcd *h);
 
 /* Supports the xhci guarded frame operation. */
 static uint32_t
@@ -4958,7 +5032,6 @@ xhci_guarded_frame(
 }
 
 /* Supports the xhci guarded root status operation. */
-static int xhci_guarded_root_status(struct drv_usb_hcd *h, void *buffer, size_t length, size_t *actual);
 
 /* Supports the xhci guarded root status operation. */
 static int
@@ -4986,7 +5059,6 @@ xhci_guarded_root_status(
 }
 
 /* Supports the xhci guarded root control operation. */
-static int xhci_guarded_root_control(struct drv_usb_hcd *h, const struct drv_usb_control_request *request, void *buffer, size_t length, size_t *actual);
 
 /* Supports the xhci guarded root control operation. */
 static int
@@ -5015,7 +5087,6 @@ xhci_guarded_root_control(
 }
 
 /* Supports the xhci guarded root port reset operation. */
-static int xhci_guarded_root_port_reset(struct drv_usb_hcd *h, unsigned port);
 
 /* Supports the xhci guarded root port reset operation. */
 static int
@@ -5062,7 +5133,6 @@ static const struct drv_usb_hcd_ops xhci_ops = {
 	.root_port_reset = xhci_guarded_root_port_reset};
 
 /* Supports the xhci attach operation. */
-static int xhci_attach(struct drv_pci_device *d, const struct drv_pci_id *id);
 
 /* Supports the xhci attach operation. */
 static int
@@ -5084,9 +5154,9 @@ xhci_attach(
 	int cleanup_error, e;
 
 	(void)id;
-	c = hal_malloc(sizeof(*c));
 
 	/* Classifies the current input character. */
+	c = hal_malloc(sizeof(*c));
 	if (!c)
 		return ENOMEM;
 	memset(c, 0, sizeof(*c));
@@ -5096,39 +5166,39 @@ xhci_attach(
 	xhci_pci_identity(d);
 	drv_pci_device_address(d, &address);
 	stage = "BAR claim";
-	e = drv_pci_device_claim_bar(d, 0);
 
 	/* Handles the e condition. */
+	e = drv_pci_device_claim_bar(d, 0);
 	if (e != 0)
 		goto fail;
 	c->bar_claimed = 1;
 	stage = "BAR inspection";
-	e = drv_pci_device_bar(d, 0, &c->original_bar);
 
 	/* Handles the e condition. */
+	e = drv_pci_device_bar(d, 0, &c->original_bar);
 	if (e != 0)
 		goto fail;
 	c->original_bar_valid = 1;
 	xhci_bar_raw(d, c->original_bar.type, &original_low, &original_high);
 	stage = "PCI command save";
-	e = drv_pci_device_config_read16(d, XHCI_PCI_COMMAND, &command_before);
 
 	/* Handles the e condition. */
+	e = drv_pci_device_config_read16(d, XHCI_PCI_COMMAND, &command_before);
 	if (e != 0)
 		goto fail;
-	e = drv_pci_device_save_enable_state(d, &c->pci_enable_state);
 
 	/* Handles the e condition. */
+	e = drv_pci_device_save_enable_state(d, &c->pci_enable_state);
 	if (e != 0)
 		goto fail;
 	c->pci_state_saved = 1;
 	stage = "BAR map";
+
+	/* Handles the e condition. */
 	e = drv_pci_device_map_bar(d, 0,
 				   DRV_PCI_MAP_READ | DRV_PCI_MAP_WRITE |
 					   DRV_PCI_MAP_NOCACHE,
 				   &c->mapping);
-
-	/* Handles the e condition. */
 	if (e != 0)
 		goto fail;
 	c->bar_mapped = 1;
@@ -5143,6 +5213,7 @@ xhci_attach(
 		e = EIO;
 		goto fail;
 	}
+
 	xhci_bar_raw(d, mapped_bar.type, &mapped_low, &mapped_high);
 	hal_printf("xhci: pci %04x:%02x:%02x.%u BAR0 type=%u size=%08x:%08x "
 		   "original=%08x:%08x/%08x:%08x final=%08x:%08x/%08x:%08x "
@@ -5197,6 +5268,7 @@ xhci_attach(
 		e = EIO;
 		goto fail;
 	}
+
 	hal_io_mb();
 
 	c->capability = c->mapping.address;
@@ -5214,6 +5286,7 @@ xhci_attach(
 		snapshot.doorbell_offset_raw = rd32(c->capability, 0x14U);
 		snapshot.runtime_offset_raw = rd32(c->capability, 0x18U);
 	}
+
 	reasons = drv_xhci_capability_validate(&snapshot);
 	hal_printf("xhci: pci %04x:%02x:%02x.%u caps len=%02x version=%04x "
 		   "hcs1=%08x hcs2=%08x hcc1=%08x dboff=%08x rtsoff=%08x "
@@ -5232,6 +5305,7 @@ xhci_attach(
 		stage = "capabilities";
 		goto fail;
 	}
+
 	doorbell_offset = snapshot.doorbell_offset_raw & ~3U;
 	runtime_offset = snapshot.runtime_offset_raw & ~31U;
 	c->max_slots = snapshot.structural_parameters1 & 0xffU;
@@ -5251,14 +5325,14 @@ xhci_attach(
 			      DRV_USB_HCD_CAP_TRANSFER_RESERVE |
 			      DRV_USB_HCD_CAP_SHARED_STAGING;
 	c->hcd.private_data[0] = (uintptr_t)c;
-	stage = "ownership";
 
 	/* Checks the ownership result. */
+	stage = "ownership";
 	if ((e = ownership(c)) != 0)
 		goto fail;
-	stage = "PCI bus master";
 
 	/* Checks the drv pci device set bus master result. */
+	stage = "PCI bus master";
 	if ((e = drv_pci_device_set_bus_master(d, true)) != 0)
 		goto fail;
 	stage = "IRQ allocation";
@@ -5273,15 +5347,15 @@ xhci_attach(
 					      1, 1, &c->irq, &count)) != 0)
 		goto fail;
 	c->irq_allocated = 1;
-	stage = "IRQ establishment";
 
 	/* Checks the drv pci device establish irq result. */
+	stage = "IRQ establishment";
 	if ((e = drv_pci_device_establish_irq(d, &c->irq, xhci_irq, c, "xhci",
 					      &c->irq_cookie)) != 0)
 		goto fail;
-	stage = "controller start";
 
 	/* Checks the drv usb hcd register result. */
+	stage = "controller start";
 	if ((e = drv_usb_hcd_register(&c->hcd, &c->bus)) != 0)
 		goto fail;
 	c->hcd_registered = 1;
@@ -5289,16 +5363,17 @@ xhci_attach(
 
 	/* Checks the xhci worker start result. */
 	if ((e = xhci_worker_start(c)) != 0) {
-		unregister_error = drv_usb_hcd_unregister(&c->hcd);
-
 		/* Checks the operation status. */
+		unregister_error = drv_usb_hcd_unregister(&c->hcd);
 		if (unregister_error != 0) {
 			e = unregister_error;
 			goto fail;
 		}
+
 		c->hcd_registered = 0;
 		goto fail;
 	}
+
 	drv_pci_device_set_driver_data(d, c);
 	c->next = controllers;
 	controllers = c;
@@ -5324,9 +5399,8 @@ fail:
 
 	/* Handles the irq cookie availability. */
 	if (c->irq_cookie != NULL) {
-		cleanup_error = xhci_irq_disestablish(c);
-
 		/* Checks the operation status. */
+		cleanup_error = xhci_irq_disestablish(c);
 		if (cleanup_error != 0) {
 			xhci_quarantine(c, "IRQ disestablish", cleanup_error);
 
@@ -5340,9 +5414,9 @@ fail:
 		drv_pci_device_free_irqs(d, &c->irq, 1);
 		c->irq_allocated = 0;
 	}
-	cleanup_error = xhci_pci_release(c);
 
 	/* Checks the operation status. */
+	cleanup_error = xhci_pci_release(c);
 	if (cleanup_error != 0) {
 		hal_printf("xhci: attach failed at %s (%d)\n", stage, e);
 		xhci_quarantine(c, "PCI release", cleanup_error);
@@ -5350,6 +5424,7 @@ fail:
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	hal_printf("xhci: attach failed at %s (%d)\n", stage, e);
 	hal_free(c);
 
@@ -5357,7 +5432,6 @@ fail:
 	return e;
 }
 /* Supports the xhci detach operation. */
-static int xhci_detach(struct drv_pci_device *d, unsigned flags);
 
 /* Supports the xhci detach operation. */
 static int
@@ -5374,17 +5448,16 @@ xhci_detach(
 	/* Classifies the current input character. */
 	if (!c)
 		return 0;
-	had_worker = c->port_worker != NULL;
 
 	/* Handles the had worker condition. */
+	had_worker = c->port_worker != NULL;
 	if (had_worker)
 		xhci_worker_stop(c);
 
 	/* Classifies the current input character. */
 	if (c->hcd_registered) {
-		error = drv_usb_hcd_unregister(&c->hcd);
-
 		/* Checks the operation status. */
+		error = drv_usb_hcd_unregister(&c->hcd);
 		if (error) {
 			/* Checks the operation status. */
 			if (had_worker && error == EBUSY)
@@ -5395,6 +5468,7 @@ xhci_detach(
 			/* Returns the computed result. */
 			return error;
 		}
+
 		c->hcd_registered = 0;
 
 		/* Classifies the current input character. */
@@ -5404,9 +5478,8 @@ xhci_detach(
 
 	/* Classifies the current input character. */
 	if (!c->dma_quiesced) {
-		error = xhci_stop_checked(&c->hcd);
-
 		/* Checks the operation status. */
+		error = xhci_stop_checked(&c->hcd);
 		if (error != 0) {
 			xhci_mark_quarantined(c);
 
@@ -5417,9 +5490,8 @@ xhci_detach(
 
 	/* Handles the irq cookie availability. */
 	if (c->irq_cookie != NULL) {
-		error = xhci_irq_disestablish(c);
-
 		/* Checks the operation status. */
+		error = xhci_irq_disestablish(c);
 		if (error != 0) {
 			xhci_mark_quarantined(c);
 
@@ -5433,15 +5505,16 @@ xhci_detach(
 		drv_pci_device_free_irqs(d, &c->irq, 1);
 		c->irq_allocated = 0;
 	}
-	error = xhci_pci_release(c);
 
 	/* Checks the operation status. */
+	error = xhci_pci_release(c);
 	if (error != 0) {
 		xhci_mark_quarantined(c);
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	drv_pci_device_set_driver_data(d, NULL);
 	/* Process each linked entry. */
 	for (link = &controllers; *link != NULL; link = &(*link)->next) {
@@ -5451,6 +5524,7 @@ xhci_detach(
 			break;
 		}
 	}
+
 	hal_free(c);
 
 	/* Reports successful completion. */
@@ -5474,13 +5548,13 @@ int
 drv_pci_xhci_driver_register(
 	void)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv pci driver register result. */
-	function_result = drv_pci_driver_register(&driver);
+	error = drv_pci_driver_register(&driver);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 /*
  * Implements the drv pci xhci probe roots operation.
@@ -5521,14 +5595,14 @@ xhci_sg_plan(
 	unsigned index, count;
 
 	request->normal_count = 0;
-	count = drv_dma_vector_count(request->vector);
 
 	/* Checks the remaining item count. */
+	count = drv_dma_vector_count(request->vector);
 	if (count == 0 || count > DRV_DMA_VECTOR_MAX_SEGMENTS ||
-	    length > DRV_DMA_VECTOR_MAX_SIZE)
-
+	    length > DRV_DMA_VECTOR_MAX_SIZE) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Checks the current data length. */
 	if (length == 0) {
@@ -5539,6 +5613,7 @@ xhci_sg_plan(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	remaining = length;
 	/* Process each remaining element. */
 	for (index = 0; index < count && remaining != 0; index++) {
@@ -5546,28 +5621,27 @@ xhci_sg_plan(
 		if (drv_dma_vector_segment(request->vector, index, &segment) !=
 			    0 ||
 		    segment.length == 0 ||
-		    segment.length - 1U > UINT64_MAX - segment.address)
-
+		    segment.length - 1U > UINT64_MAX - segment.address) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 
 		/* Handles the segment condition. */
 		if (segment.length > remaining)
 			segment.length = remaining;
 		/* Process each remaining element. */
 		while (segment.length != 0) {
-			chunk = 0x10000U - (size_t)(segment.address & 0xffffU);
-
 			/* Handles the chunk condition. */
+			chunk = 0x10000U - (size_t)(segment.address & 0xffffU);
 			if (chunk > segment.length)
 				chunk = segment.length;
 
 			/* Handles the request condition. */
 			if (request->normal_count ==
-			    DRV_DMA_VECTOR_MAX_SEGMENTS)
-
+			    DRV_DMA_VECTOR_MAX_SEGMENTS) {
 				/* Returns the computed result. */
 				return E2BIG;
+			}
 			request->normal[request->normal_count].address =
 				segment.address;
 			request->normal[request->normal_count++].length = chunk;
@@ -5595,10 +5669,10 @@ xhci_sg_short(
 	/* Handles the actual availability. */
 	if (actual == NULL || offset >= request->normal_count ||
 	    request->normal[offset].length == 0 ||
-	    residual > request->normal[offset].length)
-
+	    residual > request->normal[offset].length) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	prefix = 0;
 	/* Process each remaining element. */
 	for (index = 0; index < offset; index++)
@@ -5627,16 +5701,16 @@ xhci_sg_enqueue(
 	for (index = 0; index < request->normal_count; index++) {
 		cumulative += request->normal[index].length;
 		final = index + 1U == request->normal_count && !zero_packet;
-		control = XHCI_TRB_TYPE(1) |
-			  (final ? XHCI_TRB_IOC : XHCI_TRB_CHAIN);
 
 		/* Validates the current input. */
+		control = XHCI_TRB_TYPE(1) |
+			  (final ? XHCI_TRB_IOC : XHCI_TRB_CHAIN);
 		if (input)
 			control |= DRV_XHCI_TRB_ISP;
-		td_size = drv_xhci_normal_td_size(request->length, cumulative,
-						  packet_size, final);
 
 		/* Handles the zero packet condition. */
+		td_size = drv_xhci_normal_td_size(request->length, cumulative,
+						  packet_size, final);
 		if (zero_packet && td_size < 31U)
 			td_size++;
 		(void)ring_push(ring, request->normal[index].address,

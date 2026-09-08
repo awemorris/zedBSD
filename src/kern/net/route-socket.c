@@ -62,9 +62,9 @@ route_socket_init(
 		"route socket registry");
 
 	/* Registers the read-only routing socket family. */
-	error = socket_family_register(AF_ROUTE, &route_family);
 
 	/* Reports why the registration failed. */
+	error = socket_family_register(AF_ROUTE, &route_family);
 	if (error != 0)
 		return error;
 
@@ -110,6 +110,7 @@ route_socket_notify(
 
 	/* Assigns the next nonzero global event sequence. */
 	irq = spin_lock_irqsave(&route_registry_lock);
+
 	route_event_sequence++;
 
 	/* Skips zero when the sequence counter wraps. */
@@ -139,6 +140,7 @@ route_socket_notify(
 	}
 
 	/* Releases the registry after completing the stable snapshot. */
+
 	spin_unlock_irqrestore(&route_registry_lock, irq);
 
 	/* Delivers the record independently to every retained listener. */
@@ -156,9 +158,9 @@ route_uapi_flags(
 	unsigned result;
 
 	/* Starts with no public interface properties. */
-	result = 0U;
 
 	/* Exposes administrative readiness. */
+	result = 0U;
 	if ((flags & NET_DEVICE_UP) != 0U)
 		result |= IFF_UP;
 
@@ -295,8 +297,10 @@ route_recvfrom(
 
 	/* Returns the consumed packet to the endpoint's fixed pool. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	packet->next = endpoint->free_packets;
 	endpoint->free_packets = packet;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Reports the copied or complete record length. */
@@ -352,6 +356,7 @@ route_close(
 	}
 
 	/* Releases the listener registry before freeing endpoint storage. */
+
 	spin_unlock_irqrestore(&route_registry_lock, irq);
 
 	/* Releases the endpoint's unused packet pool and storage. */
@@ -401,8 +406,10 @@ route_create(
 
 	/* Publishes the initialized endpoint to interface notifications. */
 	irq = spin_lock_irqsave(&route_registry_lock);
+
 	endpoint->next = route_sockets;
 	route_sockets = endpoint;
+
 	spin_unlock_irqrestore(&route_registry_lock, irq);
 
 	/* Returns the initialized socket to its caller. */
@@ -423,9 +430,9 @@ route_enqueue(
 	unsigned long irq;
 
 	/* Locks the endpoint across queue selection and publication. */
-	irq = spin_lock_irqsave(&endpoint->socket.lock);
 
 	/* Ignores a listener that began closing after the registry snapshot. */
+	irq = spin_lock_irqsave(&endpoint->socket.lock);
 	if (endpoint->socket.lifecycle != SOCKET_OPEN) {
 		spin_unlock_irqrestore(&endpoint->socket.lock, irq);
 		return;
@@ -442,9 +449,8 @@ route_enqueue(
 	    sizeof(*output) > endpoint->socket.receive_hiwat_bytes ||
 	    endpoint->socket.receive_bytes >
 	    endpoint->socket.receive_hiwat_bytes - sizeof(*output)) {
-		packet = endpoint->socket.receive_head;
-
 		/* Removes the oldest queued packet when one is available. */
+		packet = endpoint->socket.receive_head;
 		if (packet != NULL) {
 			endpoint->socket.receive_head = packet->next;
 
@@ -459,9 +465,8 @@ route_enqueue(
 		/* Marks the next retained record as following lost state. */
 		endpoint->overflow_pending = 1U;
 	} else {
-		packet = endpoint->free_packets;
-
 		/* Removes one packet from the unused endpoint pool. */
+		packet = endpoint->free_packets;
 		if (packet != NULL) {
 			endpoint->free_packets = packet->next;
 			packet->next = NULL;
@@ -496,12 +501,14 @@ route_enqueue(
 	} else {
 		endpoint->socket.receive_head = packet;
 	}
+
 	endpoint->socket.receive_tail = packet;
 	endpoint->socket.receive_packets++;
 	endpoint->socket.receive_bytes += packet->length;
 
 	/* Wakes one receiver after publishing the complete queue state. */
 	waitq_wake_one(&endpoint->socket.receive_waitq);
+
 	spin_unlock_irqrestore(&endpoint->socket.lock, irq);
 
 	/* Wakes pollers after making the event readable. */

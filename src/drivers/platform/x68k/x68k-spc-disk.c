@@ -45,17 +45,6 @@ static const struct disk_ops spc_ops = {
 	.ioctl = spc_ioctl,
 };
 
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv x68k spc disk init operation.
  */
@@ -70,10 +59,10 @@ drv_x68k_spc_disk_init(
 	/* Handles the bus availability. */
 	if (bus == NULL || bus->read == NULL || bus->write == NULL ||
 	    initiator_id > 7U || boot_target_id >= SPC_TARGET_COUNT ||
-	    initiator_id == boot_target_id)
-
+	    initiator_id == boot_target_id) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	controller_bus = *bus;
 	controller_initiator = initiator_id;
 	present_count = 0;
@@ -136,25 +125,25 @@ probe_target(
 	/* Checks the unit ready result. */
 	if (!unit_ready(unit))
 		return 0;
-	error = drv_x68k_spc_pio_inquiry(&controller_bus, controller_initiator,
-					 target_id, SPC_LUN, inquiry, &result);
 
 	/* Checks the operation status. */
+	error = drv_x68k_spc_pio_inquiry(&controller_bus, controller_initiator,
+					 target_id, SPC_LUN, inquiry, &result);
 	if (error != X68K_SPC_OK || (inquiry[0] & 0xe0U) != 0 ||
-	    (inquiry[0] & 0x1fU) != 0)
-
+	    (inquiry[0] & 0x1fU) != 0) {
 		/* Reports successful completion. */
 		return 0;
+	}
+
+	/* Checks the operation status. */
 	error = drv_x68k_spc_pio_read_capacity10(
 		&controller_bus, controller_initiator, target_id, SPC_LUN,
 		capacity, &result);
-
-	/* Checks the operation status. */
 	if (error != X68K_SPC_OK ||
-	    drv_x68k_scsi_parse_capacity10(capacity, &blocks, &block_size) != 0)
-
+	    drv_x68k_scsi_parse_capacity10(capacity, &blocks, &block_size) != 0) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	unit->disk = disk_alloc();
 
 	/* Handles the disk availability. */
@@ -169,6 +158,7 @@ probe_target(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	unit->ordinal = present_count;
 	unit->disk->d_flags = (inquiry[1] & 0x80U) != 0 ? DISK_REMOVABLE : 0;
 	unit->disk->d_block_size = block_size;
@@ -184,6 +174,7 @@ probe_target(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	sanitize(vendor, inquiry + 8U, 8U);
 	sanitize(product, inquiry + 16U, 16U);
 	sanitize(revision, inquiry + 32U, 4U);
@@ -207,11 +198,10 @@ unit_ready(
 
 	/* Process each element required by the operation. */
 	for (attempt = 0; attempt < 3U; attempt++) {
+		/* Checks the operation status. */
 		error = drv_x68k_spc_pio_test_unit_ready(
 			&controller_bus, controller_initiator, unit->target_id,
 			SPC_LUN, &result);
-
-		/* Checks the operation status. */
 		if (error == X68K_SPC_OK)
 			return 1;
 
@@ -222,10 +212,10 @@ unit_ready(
 		/* Handles the unit condition. */
 		if (unit->sense.key != SCSI_SENSE_UNIT_ATTENTION &&
 		    !(unit->sense.key == SCSI_SENSE_NOT_READY &&
-		      unit->sense.asc == SCSI_ASC_BECOMING_READY))
-
+		      unit->sense.asc == SCSI_ASC_BECOMING_READY)) {
 			/* Reports successful completion. */
 			return 0;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -242,17 +232,17 @@ request_sense(
 	int error;
 
 	unit->sense_valid = 0;
+
+	/* Checks the operation status. */
 	error = drv_x68k_spc_pio_request_sense(
 		&controller_bus, controller_initiator, unit->target_id, SPC_LUN,
 		response, &result);
-
-	/* Checks the operation status. */
 	if (error != X68K_SPC_OK ||
 	    drv_x68k_scsi_parse_sense(response, sizeof(response),
-				      &unit->sense) != 0)
-
+				      &unit->sense) != 0) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	unit->sense_valid = 1;
 
 	/* Reports successful completion. */
@@ -355,10 +345,10 @@ read_write(
 		/* Handles the lba condition. */
 		if (lba > UINT32_MAX)
 			return EOVERFLOW;
-		chunk = drv_x68k_scsi_transfer_chunk(
-			lba, blocks, unit->disk->d_block_count, SPC_MAX_BLOCKS);
 
 		/* Handles the chunk condition. */
+		chunk = drv_x68k_scsi_transfer_chunk(
+			lba, blocks, unit->disk->d_block_count, SPC_MAX_BLOCKS);
 		if (chunk == 0)
 			return EOVERFLOW;
 		do {
@@ -402,6 +392,7 @@ read_write(
 			/* Returns the computed result. */
 			return function_result;
 		}
+
 		lba += chunk;
 		blocks -= chunk;
 		bytes += (size_t)chunk * X68K_SCSI_BLOCK_SIZE;
@@ -441,6 +432,7 @@ spc_submit(
 	} else {
 		error = EOPNOTSUPP;
 	}
+
 	bio_complete(bio, error,
 		     error == 0
 			     ? (size_t)bio->b_block_count * disk->d_block_size

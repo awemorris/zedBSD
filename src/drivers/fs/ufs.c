@@ -433,9 +433,9 @@ journal_checkpoint_locked(
 	/* Handles the ms condition. */
 	if (!ms->journal_enabled)
 		return 0;
-	error = io_context_child(&child, NULL, IO_CONTEXT_ORDERED);
 
 	/* Checks the operation status. */
+	error = io_context_child(&child, NULL, IO_CONTEXT_ORDERED);
 	if (error != 0)
 		return error;
 	ms->journal_io.context = &child;
@@ -468,17 +468,17 @@ observed_disk_read(
 	uint32_t count,
 	void *buffer)
 {
-	int function_result;
+	int error;
 
 	io_stats_record(IO_UFS_READ,
 			disk != NULL ? (uint64_t)count * disk->d_block_size
 				     : 0);
 
 	/* Obtains the disk read result. */
-	function_result = disk_read(disk, block, count, buffer);
+	error = disk_read(disk, block, count, buffer);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 #define UFS_IFMT 0170000U
@@ -499,14 +499,14 @@ journal_read(
 	uint32_t count,
 	void *buffer)
 {
-	int function_result;
+	int error;
 	struct ufs_io_owner *owner = context;
 
 	/* Obtains the observed disk read result. */
-	function_result = observed_disk_read(owner->disk, lba, count, buffer);
+	error = observed_disk_read(owner->disk, lba, count, buffer);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the journal write operation. */
@@ -522,9 +522,8 @@ journal_write(
 	struct io_context child;
 	int error;
 
-	error = io_context_child(&child, owner->context, IO_CONTEXT_ORDERED);
-
 	/* Checks the operation status. */
+	error = io_context_child(&child, owner->context, IO_CONTEXT_ORDERED);
 	if (error != 0)
 		return error;
 	io_stats_record(IO_UFS_WRITE,
@@ -543,14 +542,14 @@ static int
 journal_flush(
 	void *context)
 {
-	int function_result;
+	int error;
 	struct ufs_io_owner *owner = context;
 
 	/* Obtains the disk sync result. */
-	function_result = disk_sync(owner->disk);
+	error = disk_sync(owner->disk);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static uint32_t locator_get32(const uint8_t *p);
@@ -631,9 +630,9 @@ journal_image_alloc(
  * Obtains backing without holding a metadata or journal mutation lock.
 	 */
 	memset(&memory, 0, sizeof(memory));
-	error = hal_pmem_alloc(&request, &memory);
 
 	/* Checks the operation status. */
+	error = hal_pmem_alloc(&request, &memory);
 	if (error != HAL_OK || memory.vaddr == NULL ||
 	    memory.size < UFS_JOURNAL_IMAGE_BYTES) {
 		/* Checks the hal pmem free result. */
@@ -647,9 +646,9 @@ journal_image_alloc(
 	/*
  * Charges the allocator's complete rounded backing to shared metadata
 	 * memory. */
-	error = cache_memory_reserve(CACHE_MEMORY_BUF_META, memory.size, 0);
 
 	/* Checks the operation status. */
+	error = cache_memory_reserve(CACHE_MEMORY_BUF_META, memory.size, 0);
 	if (error != 0) {
 		/* Checks the hal pmem free result. */
 		if (hal_pmem_free(&memory) != HAL_OK)
@@ -658,12 +657,13 @@ journal_image_alloc(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	cache_memory_commit(CACHE_MEMORY_BUF_META, memory.size);
 	ms->journal_memory = memory;
-	error = drv_ufs_journal_bind_image(&ms->journal, memory.vaddr,
-					   memory.size);
 
 	/* Checks the operation status. */
+	error = drv_ufs_journal_bind_image(&ms->journal, memory.vaddr,
+					   memory.size);
 	if (error != 0)
 		journal_image_free(ms);
 
@@ -689,9 +689,9 @@ journal_image_free(
 	/*
  * Failed mount recovery may retain durable redo, but has no admitted
 	 * readers. */
-	bytes = ms->journal_memory.size;
 
 	/* Handles the bytes condition. */
+	bytes = ms->journal_memory.size;
 	if (bytes == 0)
 		return;
 	drv_ufs_journal_views_close(&ms->journal);
@@ -723,9 +723,9 @@ journal_discover(
 	/* Checks the current endpoint. */
 	if (end >= mountp->m_disk->d_block_count)
 		return 0;
-	error = observed_disk_read(mountp->m_disk, end, 1, locator);
 
 	/* Checks the operation status. */
+	error = observed_disk_read(mountp->m_disk, end, 1, locator);
 	if (error != 0)
 		return error;
 
@@ -736,25 +736,25 @@ journal_discover(
 	/* Handles the memcmp condition. */
 	if (memcmp(locator, "ZUJ2", 4) != 0)
 		return 0;
-	sectors = locator_get32(locator + 8);
 
 	/* Checks the locator get32 result. */
+	sectors = locator_get32(locator + 8);
 	if (locator_get32(locator + 4) != 2U ||
 	    locator_get64(locator + 12) != end ||
 	    locator_get32(locator + 24) != locator_digest(locator, 24) ||
 	    sectors < 18U ||
-	    (uint64_t)sectors + 1U > mountp->m_disk->d_block_count - end)
-
+	    (uint64_t)sectors + 1U > mountp->m_disk->d_block_count - end) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	ms->journal_io.disk = mountp->m_disk;
 	io.context = &ms->journal_io;
 	io.read = journal_read;
 	io.write = journal_write;
 	io.flush = journal_flush;
-	error = drv_ufs_journal_init(&ms->journal, &io, end + 1U, sectors, end);
 
 	/* Checks the operation status. */
+	error = drv_ufs_journal_init(&ms->journal, &io, end + 1U, sectors, end);
 	if (error == 0)
 		error = journal_image_alloc(ms);
 
@@ -790,32 +790,31 @@ snapshot_discover(
 	/* Checks the current endpoint. */
 	if (end >= mountp->m_disk->d_block_count)
 		return 0;
-	error = observed_disk_read(mountp->m_disk, end, 1, locator);
 
 	/* Checks the operation status. */
+	error = observed_disk_read(mountp->m_disk, end, 1, locator);
 	if (error != 0)
 		return error;
 
 	/* Handles the memcmp condition. */
 	if (memcmp(locator, "ZUJ2", 4) == 0) {
-		sectors = locator_get32(locator + 8);
-
 		/* Checks the locator get32 result. */
+		sectors = locator_get32(locator + 8);
 		if (locator_get32(locator + 4) != 2U ||
 		    locator_get64(locator + 12) != end ||
-		    sectors > mountp->m_disk->d_block_count - end - 1U)
-
+		    sectors > mountp->m_disk->d_block_count - end - 1U) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 		cursor = end + 1U + sectors;
 	}
 
 	/* Checks the current cursor position. */
 	if (cursor >= mountp->m_disk->d_block_count)
 		return 0;
-	error = observed_disk_read(mountp->m_disk, cursor, 1, locator);
 
 	/* Checks the operation status. */
+	error = observed_disk_read(mountp->m_disk, cursor, 1, locator);
 	if (error != 0)
 		return error;
 
@@ -830,10 +829,10 @@ snapshot_discover(
 	    locator_get64(locator + 24) != end ||
 	    locator_get32(locator + 32) != locator_digest(locator, 32) ||
 	    sectors < 3U ||
-	    (uint64_t)sectors + 1U > mountp->m_disk->d_block_count - cursor)
-
+	    (uint64_t)sectors + 1U > mountp->m_disk->d_block_count - cursor) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	max_records = (sectors - 1U) / 2U;
 #if SIZE_MAX == UINT32_MAX
 
@@ -852,10 +851,10 @@ snapshot_discover(
 	io.read = journal_read;
 	io.write = journal_write;
 	io.flush = journal_flush;
-	error = drv_ufs_snapshot_init(&ms->snapshot, &io, end, cursor + 1U,
-				      sectors, ms->snapshot_map, map_count);
 
 	/* Checks the operation status. */
+	error = drv_ufs_snapshot_init(&ms->snapshot, &io, end, cursor + 1U,
+				      sectors, ms->snapshot_map, map_count);
 	if (error == 0)
 		error = drv_ufs_snapshot_open(&ms->snapshot);
 
@@ -867,6 +866,7 @@ snapshot_discover(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	ms->snapshot_available = 1;
 
 	/* Reports successful completion. */
@@ -909,9 +909,9 @@ write_sectors_impl(
 	/* Handles the ms availability. */
 	if (ms != NULL && ms->journal_enabled) {
 		mutex_lock(&ms->journal_lock);
-		error_local1 = journal_checkpoint_locked(mountp);
 
 		/* Checks the operation status. */
+		error_local1 = journal_checkpoint_locked(mountp);
 		if (error_local1 == 0) {
 			journal_wait_readers(ms);
 			ms->journal_io.context = context;
@@ -958,9 +958,8 @@ write_sectors_context(
 	struct io_context child;
 	int error;
 
-	error = io_context_child(&child, context, IO_CONTEXT_ORDERED);
-
 	/* Checks the operation status. */
+	error = io_context_child(&child, context, IO_CONTEXT_ORDERED);
 	if (error != 0)
 		return error;
 	io_epoch_begin(&mountp->m_write_epoch);
@@ -983,14 +982,14 @@ write_sectors(
 	uint32_t count,
 	const void *buffer)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the write sectors context result. */
-	function_result =
+	error =
 		write_sectors_context(mountp, lba, count, buffer, NULL);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static const struct inode_ops ufs_inode_ops;
@@ -1047,9 +1046,9 @@ journal_read_image(
 	 * copy. */
 	if (!ms->journal_enabled)
 		return ENOENT;
-	error = drv_ufs_journal_view_acquire(&ms->journal, &view);
 
 	/* Checks the operation status. */
+	error = drv_ufs_journal_view_acquire(&ms->journal, &view);
 	if (error != 0)
 		return error;
 	error = drv_ufs_journal_view_copy(&view, first, count, buffer);
@@ -1080,9 +1079,8 @@ read_metadata_sectors(
 	struct ufs_mount_state *ms = state(mountp);
 	int error;
 
-	error = journal_read_image(ms, first, count, buffer);
-
 	/* Checks the operation status. */
+	error = journal_read_image(ms, first, count, buffer);
 	if (error != ENOENT)
 		return error;
 
@@ -1121,7 +1119,7 @@ read_block(
 	uint64_t fragment,
 	void *buffer)
 {
-	int function_result;
+	int error;
 	const struct ufs_super *s = &state(mountp)->super;
 
 	/* Handles the fragment condition. */
@@ -1137,12 +1135,12 @@ read_block(
 		return EIO;
 
 	/* Obtains the read metadata sectors result. */
-	function_result =
+	error =
 		read_metadata_sectors(mountp, fragment << s->fsbtodb,
 				      s->bsize / UFS_SECTOR_SIZE, buffer);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int write_block(struct mount *mountp, uint64_t fragment, const void *buffer);
@@ -1154,23 +1152,23 @@ write_block(
 	uint64_t fragment,
 	const void *buffer)
 {
-	int function_result;
+	int error;
 	const struct ufs_super *s = &state(mountp)->super;
 
 	/* Handles the fragment condition. */
 	if (fragment == 0 || fragment >= s->size ||
-	    s->frag > s->size - fragment)
-
+	    s->frag > s->size - fragment) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Obtains the write sectors result. */
-	function_result =
+	error =
 		write_sectors(mountp, (uint64_t)fragment << s->fsbtodb,
 			      s->bsize / UFS_SECTOR_SIZE, buffer);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static size_t content_run_bytes(struct inode *inode, uint64_t logical, uint64_t first, size_t remaining, int writing, int *mapping_error);
@@ -1185,7 +1183,7 @@ read_content_block(
 	uint64_t fragment,
 	void *buffer)
 {
-	int function_result;
+	int error;
 	const struct ufs_super *s = &state(mountp)->super;
 
 	/* Handles the fragment condition. */
@@ -1194,10 +1192,10 @@ read_content_block(
 		io_stats_record(IO_UFS_CONTENT_READ, s->bsize);
 
 	/* Obtains the read block result. */
-	function_result = read_block(mountp, fragment, buffer);
+	error = read_block(mountp, fragment, buffer);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the write content block operation. */
@@ -1207,7 +1205,7 @@ write_content_block(
 	uint64_t fragment,
 	const void *buffer)
 {
-	int function_result;
+	int error;
 	const struct ufs_super *s = &state(mountp)->super;
 
 	/* Handles the fragment condition. */
@@ -1216,10 +1214,10 @@ write_content_block(
 		io_stats_record(IO_UFS_CONTENT_WRITE, s->bsize);
 
 	/* Obtains the write block result. */
-	function_result = write_block(mountp, fragment, buffer);
+	error = write_block(mountp, fragment, buffer);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the write content context operation. */
@@ -1230,26 +1228,25 @@ write_content_context(
 	const void *buffer,
 	const struct io_context *context)
 {
-	int function_result;
+	int error;
 	const struct ufs_super *super;
 
-	super = &state(mountp)->super;
-
 	/* Handles the fragment condition. */
+	super = &state(mountp)->super;
 	if (fragment == 0 || fragment >= super->size ||
-	    super->frag > super->size - fragment)
-
+	    super->frag > super->size - fragment) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	io_stats_record(IO_UFS_CONTENT_WRITE, super->bsize);
 
 	/* Obtains the write sectors context result. */
-	function_result = write_sectors_context(
+	error = write_sectors_context(
 		mountp, fragment << super->fsbtodb,
 		super->bsize / UFS_SECTOR_SIZE, buffer, context);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int bit_test(const uint8_t *map, uint32_t bit);
@@ -1328,10 +1325,10 @@ load_cg_image(
  * Drops the home-view identity when committed redo supplies the working
 	 * image. */
 	ms = state(mountp);
-	error = journal_read_image(ms, fragment << ms->super.fsbtodb,
-				   ms->super.bsize / UFS_SECTOR_SIZE, ms->cg);
 
 	/* Checks the operation status. */
+	error = journal_read_image(ms, fragment << ms->super.fsbtodb,
+				   ms->super.bsize / UFS_SECTOR_SIZE, ms->cg);
 	if (error == 0) {
 		buf_view_release(&ms->cg_view);
 		io_stats_record(IO_UFS_CG_HIT, ms->super.bsize);
@@ -1400,23 +1397,24 @@ load_cg_locked(
 	/* Handles the cg condition. */
 	if (cg >= ms->super.ncg)
 		return EINVAL;
-	fragment = cgstart(&ms->super, cg) + ms->super.cblkno;
 
 	/* Handles the fragment condition. */
+	fragment = cgstart(&ms->super, cg) + ms->super.cblkno;
 	if (fragment >= ms->super.size ||
-	    ms->super.frag > ms->super.size - fragment)
-
+	    ms->super.frag > ms->super.size - fragment) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = load_cg_image(mountp, cg, fragment);
+	}
 
 	/* Checks the operation status. */
+	error = load_cg_image(mountp, cg, fragment);
 	if (error != 0) {
 		ms->cg_valid = 0;
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	ms->cg_valid = 0;
 	ndblk = cg_ndblk(&ms->super, cg);
 	inode_map_bytes = (ms->super.ipg + 7U) / 8U;
@@ -1452,6 +1450,7 @@ load_cg_locked(
 		/* Returns the computed result. */
 		return EINVAL;
 	}
+
 	ms->active_cg = cg;
 	ms->cg_valid = 1;
 	ms->cg_dirty = 0;
@@ -1478,15 +1477,15 @@ valid_inode_fragment(
 	/* Process each element required by the operation. */
 	for (cg = 0; cg < super->ncg; cg++) {
 		start = cgstart(super, cg);
-		ndblk = cg_ndblk(super, cg);
 
 		/* Handles the fragment condition. */
+		ndblk = cg_ndblk(super, cg);
 		if (fragment >= start + super->dblkno &&
 		    fragment < start + ndblk &&
-		    super->frag <= start + ndblk - fragment)
-
+		    super->frag <= start + ndblk - fragment) {
 			/* Reports operation failure. */
 			return 1;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -1504,11 +1503,10 @@ prepare_super_summaries(
 	struct ufs_mount_state *ms = state(mountp);
 	int error;
 
+	/* Checks the operation status. */
 	error = read_metadata_sectors(
 		mountp, UFS_SBLOCK_OFFSET / UFS_SECTOR_SIZE,
 		UFS_SBLOCK_SIZE / UFS_SECTOR_SIZE, buffer);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		drv_ufs_put64(buffer, UFS_FS_CSTOTAL_NDIR,
 			      ms->super.cstotal_ndir, ms->super.swapped);
@@ -1538,19 +1536,19 @@ write_super_summaries(
 	uint8_t *buffer;
 	int error;
 
-	buffer = kern_malloc(UFS_SBLOCK_SIZE);
-
 	/* Handles the buffer availability. */
+	buffer = kern_malloc(UFS_SBLOCK_SIZE);
 	if (buffer == NULL)
 		return ENOMEM;
-	error = prepare_super_summaries(mountp, buffer);
 
 	/* Checks the operation status. */
+	error = prepare_super_summaries(mountp, buffer);
 	if (error == 0) {
 		error = write_sectors(
 			mountp, UFS_SBLOCK_OFFSET / UFS_SECTOR_SIZE,
 			UFS_SBLOCK_SIZE / UFS_SECTOR_SIZE, buffer);
 	}
+
 	kern_free(buffer);
 
 	/* Reports the failure. */
@@ -1582,17 +1580,17 @@ write_cg(
 
 	/* Handles the fault condition. */
 	if (KERN_TEST_FAULT(KERN_TEST_FAULT_UFS_CG_WRITE, UINT32_MAX,
-			    UINT32_MAX, &fault))
-
+			    UINT32_MAX, &fault)) {
 		/* Returns the computed result. */
 		return fault.error != 0 ? fault.error : EIO;
+	}
+
+	/* Checks the operation status. */
 	error = write_sectors(
 		mountp,
 		(cgstart(&ms->super, ms->active_cg) + ms->super.cblkno)
 			<< ms->super.fsbtodb,
 		ms->super.bsize / UFS_SECTOR_SIZE, ms->cg);
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = write_super_summaries(mountp);
 
@@ -1646,15 +1644,16 @@ adjust_directory_count(
 	int error;
 
 	mutex_lock(&ms->lock);
-	error = load_cg_locked(mountp, cg);
 
 	/* Checks the operation status. */
+	error = load_cg_locked(mountp, cg);
 	if (error != 0) {
 		mutex_unlock(&ms->lock);
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	count = drv_ufs_get32(ms->cg, UFS_CG_NDIR, ms->super.swapped);
 	old_total = ms->super.cstotal_ndir;
 
@@ -1667,9 +1666,9 @@ adjust_directory_count(
 			      ms->super.swapped);
 		ms->super.cstotal_ndir =
 			delta < 0 ? old_total - 1U : old_total + 1U;
-		error = write_cg(mountp);
 
 		/* Checks the operation status. */
+		error = write_cg(mountp);
 		if (error != 0) {
 			drv_ufs_put32(ms->cg, UFS_CG_NDIR, count,
 				      ms->super.swapped);
@@ -1677,6 +1676,7 @@ adjust_directory_count(
 			error = write_cg_rollback(mountp, error);
 		}
 	}
+
 	mutex_unlock(&ms->lock);
 
 	/* Reports the failure. */
@@ -1724,19 +1724,19 @@ allocate_block_compat(
 	uint64_t old_total;
 	int error;
 
-	error = quota_reserve(&ms->quota, uid, gid, 1, 0, quota_now(), &charge);
-
 	/* Checks the operation status. */
+	error = quota_reserve(&ms->quota, uid, gid, 1, 0, quota_now(), &charge);
 	if (error != 0)
 		return error;
 	error = ENOSPC;
 	mutex_lock(&ms->lock);
+
 	/* Process each element required by the operation. */
 	for (attempt = 0; attempt < ms->super.ncg; attempt++) {
 		cg = (ms->rotor_cg + attempt) % ms->super.ncg;
-		error = load_cg_locked(mountp, cg);
 
 		/* Checks the operation status. */
+		error = load_cg_locked(mountp, cg);
 		if (error != 0)
 			break;
 		error = ENOSPC;
@@ -1770,17 +1770,18 @@ allocate_block_compat(
 					bit_set(map, fragment + n);
 				break;
 			}
+
 			drv_ufs_put32(ms->cg, UFS_CG_NBFREE, free - 1U,
 				      ms->super.swapped);
 			ms->super.cstotal_nbfree = old_total - 1U;
-			error = write_cg(mountp);
 
 			/* Checks the operation status. */
+			error = write_cg(mountp);
 			if (error == 0) {
 				zero = kern_calloc(1, ms->super.bsize);
-				absolute = cgstart(&ms->super, cg) + fragment;
 
 				/* Handles the zero availability. */
+				absolute = cgstart(&ms->super, cg) + fragment;
 				if (zero == NULL) {
 					error = ENOMEM;
 				} else {
@@ -1807,6 +1808,7 @@ allocate_block_compat(
 				*result = cgstart(&ms->super, cg) + fragment;
 				ms->rotor_cg = cg;
 			}
+
 			break;
 		}
 
@@ -1814,6 +1816,7 @@ allocate_block_compat(
 		if (error != ENOSPC)
 			break;
 	}
+
 	mutex_unlock(&ms->lock);
 
 	/* Checks the operation status. */
@@ -1872,10 +1875,10 @@ allocation_allocate(
 	if (!context->active)
 		return EINVAL;
 	io_stats_record(IO_UFS_ALLOCATE, state(context->mountp)->super.bsize);
-	error = allocate_block_compat(context->mountp, context->uid,
-				      context->gid, result);
 
 	/* Reports the failure. */
+	error = allocate_block_compat(context->mountp, context->uid,
+				      context->gid, result);
 	if (error != 0)
 		return error;
 
@@ -1915,15 +1918,16 @@ allocate_block(
 	int error;
 
 	allocation_begin(&context, mountp, uid, gid);
-	error = allocation_allocate(&context, result);
 
 	/* Checks the operation status. */
+	error = allocation_allocate(&context, result);
 	if (error != 0) {
 		allocation_abort(&context);
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	allocation_commit(&context);
 
 	/* Reports successful completion. */
@@ -1951,9 +1955,9 @@ free_block(
 	/* Process each element required by the operation. */
 	for (cg = 0; cg < ms->super.ncg; cg++) {
 		start = cgstart(&ms->super, cg);
-		ndblk = cg_ndblk(&ms->super, cg);
 
 		/* Handles the fragment condition. */
+		ndblk = cg_ndblk(&ms->super, cg);
 		if (fragment >= start + ms->super.dblkno &&
 		    fragment + ms->super.frag <= start + ndblk) {
 			local = (uint32_t)(fragment - start);
@@ -1965,15 +1969,16 @@ free_block(
 	if (cg == ms->super.ncg)
 		return EIO;
 	mutex_lock(&ms->lock);
-	error = load_cg_locked(mountp, cg);
 
 	/* Checks the operation status. */
+	error = load_cg_locked(mountp, cg);
 	if (error != 0) {
 		mutex_unlock(&ms->lock);
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	map = ms->cg + ms->cg_freeoff;
 	/* Process each element required by the operation. */
 	for (n = 0; n < ms->super.frag; n++) {
@@ -1985,24 +1990,25 @@ free_block(
 			return EIO;
 		}
 	}
-	free = drv_ufs_get32(ms->cg, UFS_CG_NBFREE, ms->super.swapped);
 
 	/* Handles the free condition. */
+	free = drv_ufs_get32(ms->cg, UFS_CG_NBFREE, ms->super.swapped);
 	if (free == UINT32_MAX) {
 		mutex_unlock(&ms->lock);
 
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	old_total = ms->super.cstotal_nbfree;
 	/* Process each element required by the operation. */
 	for (n = 0; n < ms->super.frag; n++)
 		bit_set(map, local + n);
 	drv_ufs_put32(ms->cg, UFS_CG_NBFREE, free + 1U, ms->super.swapped);
 	ms->super.cstotal_nbfree = old_total + 1U;
-	error = write_cg(mountp);
 
 	/* Checks the operation status. */
+	error = write_cg(mountp);
 	if (error != 0) {
 		/* Process each element required by the operation. */
 		for (n = 0; n < ms->super.frag; n++)
@@ -2011,6 +2017,7 @@ free_block(
 		ms->super.cstotal_nbfree = old_total;
 		error = write_cg_rollback(mountp, error);
 	}
+
 	mutex_unlock(&ms->lock);
 
 	/* Checks the operation status. */
@@ -2047,19 +2054,19 @@ allocate_inode_number(
 	uint64_t old_total;
 	int error;
 
-	error = quota_reserve(&ms->quota, uid, gid, 0, 1, quota_now(), &charge);
-
 	/* Checks the operation status. */
+	error = quota_reserve(&ms->quota, uid, gid, 0, 1, quota_now(), &charge);
 	if (error != 0)
 		return error;
 	error = ENOSPC;
 	mutex_lock(&ms->lock);
+
 	/* Process each element required by the operation. */
 	for (attempt = 0; attempt < ms->super.ncg; attempt++) {
 		cg = (ms->rotor_cg + attempt) % ms->super.ncg;
-		error = load_cg_locked(mountp, cg);
 
 		/* Checks the operation status. */
+		error = load_cg_locked(mountp, cg);
 		if (error != 0)
 			break;
 		error = ENOSPC;
@@ -2069,10 +2076,9 @@ allocate_inode_number(
 		     ino < ms->super.ipg; ino++) {
 			/* Checks the bit test result. */
 			if (!bit_test(map, ino)) {
+				/* Handles the free condition. */
 				free = drv_ufs_get32(ms->cg, UFS_CG_NIFREE,
 						     ms->super.swapped);
-
-				/* Handles the free condition. */
 				if (free == 0)
 					break;
 				old_total = ms->super.cstotal_nifree;
@@ -2080,9 +2086,9 @@ allocate_inode_number(
 				drv_ufs_put32(ms->cg, UFS_CG_NIFREE, free - 1U,
 					      ms->super.swapped);
 				ms->super.cstotal_nifree = old_total - 1U;
-				error = write_cg(mountp);
 
 				/* Checks the operation status. */
+				error = write_cg(mountp);
 				if (error != 0) {
 					bit_clear(map, ino);
 					drv_ufs_put32(ms->cg, UFS_CG_NIFREE,
@@ -2094,6 +2100,7 @@ allocate_inode_number(
 					*number = cg * ms->super.ipg + ino;
 					ms->rotor_cg = cg;
 				}
+
 				break;
 			}
 		}
@@ -2102,6 +2109,7 @@ allocate_inode_number(
 		if (error != ENOSPC)
 			break;
 	}
+
 	mutex_unlock(&ms->lock);
 
 	/* Checks the operation status. */
@@ -2139,46 +2147,48 @@ free_inode_number(
 	if (number <= UFS_ROOT_INO || cg >= ms->super.ncg)
 		return EIO;
 	mutex_lock(&ms->lock);
-	error = load_cg_locked(mountp, cg);
 
 	/* Checks the operation status. */
+	error = load_cg_locked(mountp, cg);
 	if (error != 0) {
 		mutex_unlock(&ms->lock);
 
 		/* Returns the computed result. */
 		return error;
 	}
-	map = ms->cg + ms->cg_iusedoff;
 
 	/* Checks the bit test result. */
+	map = ms->cg + ms->cg_iusedoff;
 	if (!bit_test(map, local)) {
 		mutex_unlock(&ms->lock);
 
 		/* Returns the computed result. */
 		return EIO;
 	}
-	free = drv_ufs_get32(ms->cg, UFS_CG_NIFREE, ms->super.swapped);
 
 	/* Handles the free condition. */
+	free = drv_ufs_get32(ms->cg, UFS_CG_NIFREE, ms->super.swapped);
 	if (free == UINT32_MAX) {
 		mutex_unlock(&ms->lock);
 
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	old_total = ms->super.cstotal_nifree;
 	bit_clear(map, local);
 	drv_ufs_put32(ms->cg, UFS_CG_NIFREE, free + 1U, ms->super.swapped);
 	ms->super.cstotal_nifree = old_total + 1U;
-	error = write_cg(mountp);
 
 	/* Checks the operation status. */
+	error = write_cg(mountp);
 	if (error != 0) {
 		bit_set(map, local);
 		drv_ufs_put32(ms->cg, UFS_CG_NIFREE, free, ms->super.swapped);
 		ms->super.cstotal_nifree = old_total;
 		error = write_cg_rollback(mountp, error);
 	}
+
 	mutex_unlock(&ms->lock);
 
 	/* Checks the operation status. */
@@ -2225,17 +2235,17 @@ indirect_entry(
 
 	/* Checks the current index. */
 	if (index >= super->nindir || fragment >= super->size ||
-	    super->frag > super->size - fragment)
-
+	    super->frag > super->size - fragment) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	byte_offset = (uint64_t)index * 8U;
 	lba = ((uint64_t)fragment << super->fsbtodb) +
 	      byte_offset / UFS_SECTOR_SIZE;
 	io_stats_record(IO_UFS_INDIRECT_WINDOW, sizeof(sector));
-	error = read_metadata_sectors(mountp, lba, 1, sector);
 
 	/* Checks the operation status. */
+	error = read_metadata_sectors(mountp, lba, 1, sector);
 	if (error == 0) {
 		*result = drv_ufs_get64(sector,
 					(size_t)(byte_offset % UFS_SECTOR_SIZE),
@@ -2279,6 +2289,7 @@ bmap(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	logical -= UFS_NDADDR;
 	/* Process each element required by the operation. */
 	for (level = 0; level < UFS_NIADDR; level++) {
@@ -2306,13 +2317,14 @@ bmap(
 			divisor *= s->nindir;
 		index = (uint32_t)(logical / divisor);
 		logical %= divisor;
-		error = indirect_entry(inode->i_mount, fragment, index,
-				       &fragment);
 
 		/* Checks the operation status. */
+		error = indirect_entry(inode->i_mount, fragment, index,
+				       &fragment);
 		if (error != 0 || fragment == 0)
 			break;
 	}
+
 	*result = fragment;
 
 	/* Reports the failure. */
@@ -2354,10 +2366,9 @@ bmap_ensure(
 	if (logical < UFS_NDADDR) {
 		/* Handles the ui condition. */
 		if (ui->direct[logical] == 0) {
+			/* Checks the operation status. */
 			error = allocate_block(inode->i_mount, inode->i_uid,
 					       inode->i_gid, &allocated_local);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				return error;
 			ui->direct[logical] = allocated_local;
@@ -2366,9 +2377,9 @@ bmap_ensure(
 			/*
  * Make the allocation reachable before user data I/O.
 			 */
-			error = persist_inode(inode);
 
 			/* Checks the operation status. */
+			error = persist_inode(inode);
 			if (error != 0) {
 				ui->direct[logical] = 0;
 				ui->blocks -= s->bsize / UFS_SECTOR_SIZE;
@@ -2377,9 +2388,9 @@ bmap_ensure(
  * Failure can follow a committed write
 				 * (including replay). Confirm pointer removal
 				 * before recycling the allocation. */
-				rollback_local = persist_inode(inode);
 
 				/* Handles the rollback local condition. */
+				rollback_local = persist_inode(inode);
 				if (rollback_local == 0) {
 					rollback_local = disk_sync(
 						inode->i_mount->m_disk);
@@ -2400,10 +2411,12 @@ bmap_ensure(
 				return error;
 			}
 		}
+
 		*result = ui->direct[logical];
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	logical -= UFS_NDADDR;
 	/* Process each element required by the operation. */
 	for (level = 0; level < UFS_NIADDR; level++) {
@@ -2421,21 +2434,20 @@ bmap_ensure(
 	/* Handles the level condition. */
 	if (level == UFS_NIADDR)
 		return EFBIG;
-	root = &ui->indirect[level];
 
 	/* Handles the root condition. */
+	root = &ui->indirect[level];
 	if (*root == 0) {
+		/* Checks the operation status. */
 		error = allocate_block(inode->i_mount, inode->i_uid,
 				       inode->i_gid, &allocated_local2);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 		*root = allocated_local2;
 		ui->blocks += s->bsize / UFS_SECTOR_SIZE;
-		error = persist_inode(inode);
 
 		/* Checks the operation status. */
+		error = persist_inode(inode);
 		if (error != 0) {
 			*root = 0;
 			ui->blocks -= s->bsize / UFS_SECTOR_SIZE;
@@ -2444,9 +2456,9 @@ bmap_ensure(
  * Failure can follow a committed write (including
 			 * replay). Confirm pointer removal before recycling the
 			 * allocation. */
-			rollback_local1 = persist_inode(inode);
 
 			/* Handles the rollback local1 condition. */
+			rollback_local1 = persist_inode(inode);
 			if (rollback_local1 == 0)
 				rollback_local1 =
 					disk_sync(inode->i_mount->m_disk);
@@ -2466,6 +2478,7 @@ bmap_ensure(
 			return error;
 		}
 	}
+
 	fragment = *root;
 	/* Process each element required by the operation. */
 	for (depth = level + 1U; depth != 0; depth--) {
@@ -2476,29 +2489,29 @@ bmap_ensure(
 			divisor *= s->nindir;
 		index = (uint32_t)(logical / divisor);
 		logical %= divisor;
-		block = kern_malloc(s->bsize);
 
 		/* Handles the block availability. */
+		block = kern_malloc(s->bsize);
 		if (block == NULL)
 			return ENOMEM;
-		error = read_block(inode->i_mount, fragment, block);
 
 		/* Checks the operation status. */
+		error = read_block(inode->i_mount, fragment, block);
 		if (error != 0) {
 			kern_free(block);
 
 			/* Returns the computed result. */
 			return error;
 		}
-		next = drv_ufs_get64(block, (size_t)index * 8U, s->swapped);
 
 		/* Handles the next condition. */
+		next = drv_ufs_get64(block, (size_t)index * 8U, s->swapped);
 		if (next == 0) {
 			allocated_local3 = 0;
-			error = allocate_block(inode->i_mount, inode->i_uid,
-					       inode->i_gid, &next);
 
 			/* Checks the operation status. */
+			error = allocate_block(inode->i_mount, inode->i_uid,
+					       inode->i_gid, &next);
 			if (error == 0) {
 				allocated_local3 = next;
 				drv_ufs_put64(block, (size_t)index * 8U, next,
@@ -2550,16 +2563,20 @@ bmap_ensure(
 							->writable = 0;
 					}
 				}
+
 				kern_free(block);
 
 				/* Returns the computed result. */
 				return error;
 			}
+
 			ui->blocks += s->bsize / UFS_SECTOR_SIZE;
 		}
+
 		kern_free(block);
 		fragment = next;
 	}
+
 	*result = fragment;
 	/* Reports successful completion. */
 	return 0;
@@ -2587,17 +2604,17 @@ content_run_bytes(
  * Bounds the mapping scan to one indirect leaf and the common byte
 	 * limit. */
 	*mapping_error = 0;
-	super = &state(inode->i_mount)->super;
 
 	/* Handles the first condition. */
+	super = &state(inode->i_mount)->super;
 	if (first == 0 || first >= super->size ||
-	    super->frag > super->size - first)
-
+	    super->frag > super->size - first) {
 		/* Reports successful completion. */
 		return 0;
-	maximum = remaining / super->bsize;
+	}
 
 	/* Handles the maximum condition. */
+	maximum = remaining / super->bsize;
 	if (maximum > KERN_IO_BATCH_MAX / super->bsize)
 		maximum = KERN_IO_BATCH_MAX / super->bsize;
 
@@ -2632,9 +2649,8 @@ content_run_bytes(
 		return 0;
 	/* Process each element required by the operation. */
 	for (blocks = 1; blocks < maximum; blocks++) {
-		error = bmap(inode, logical + blocks, &next);
-
 		/* Checks the operation status. */
+		error = bmap(inode, logical + blocks, &next);
 		if (error != 0) {
 			*mapping_error = error;
 			break;
@@ -2695,23 +2711,24 @@ pread_inode(
 		position = (uint64_t)offset + done;
 		logical = position / super->bsize;
 		within = (size_t)(position % super->bsize);
-		error = bmap(inode, logical, &fragment);
 
 		/* Checks the operation status. */
+		error = bmap(inode, logical, &fragment);
 		if (error != 0) {
 			kern_free(scratch);
 
 			/* Returns the computed result. */
 			return done != 0 ? (ssize_t)done : -error;
 		}
+
 		mapping_error = 0;
+
+		/* Handles the amount condition. */
 		amount = within == 0
 				 ? content_run_bytes(inode, logical, fragment,
 						     length - done, 0,
 						     &mapping_error)
 				 : 0;
-
-		/* Handles the amount condition. */
 		if (amount != 0) {
 			io_stats_record(IO_UFS_CONTENT_READ, amount);
 			error = observed_disk_read(
@@ -2724,23 +2741,22 @@ pread_inode(
  * Allocates edge scratch only when the request needs
 			 * it. */
 			if (scratch == NULL) {
-				scratch = kern_malloc(super->bsize);
-
 				/* Handles the scratch availability. */
+				scratch = kern_malloc(super->bsize);
 				if (scratch == NULL) {
 					return done != 0 ? (ssize_t)done
 							 : -ENOMEM;
 				}
 			}
-			amount = super->bsize - within;
 
 			/* Handles the amount condition. */
+			amount = super->bsize - within;
 			if (amount > length - done)
 				amount = length - done;
-			error = read_content_block(inode->i_mount, fragment,
-						   scratch);
 
 			/* Checks the operation status. */
+			error = read_content_block(inode->i_mount, fragment,
+						   scratch);
 			if (error == 0) {
 				memcpy((uint8_t *)buffer + done,
 				       scratch + within, amount);
@@ -2754,12 +2770,14 @@ pread_inode(
 			/* Returns the computed result. */
 			return done != 0 ? (ssize_t)done : -error;
 		}
+
 		done += amount;
 
 		/* Checks the operation status. */
 		if (mapping_error != 0)
 			break;
 	}
+
 	kern_free(scratch);
 
 	/* Reports the successfully read prefix. */
@@ -2845,12 +2863,14 @@ encode_inode_locked(
 			drv_ufs_put64(raw, UFS_DI_DB + n * 8U, ui->direct[n],
 				      ms->super.swapped);
 		}
+
 		/* Process each element required by the operation. */
 		for (n = 0; n < UFS_NIADDR; n++) {
 			drv_ufs_put64(raw, UFS_DI_IB + n * 8U, ui->indirect[n],
 				      ms->super.swapped);
 		}
 	}
+
 	drv_ufs_put64(raw, UFS_DI_BLOCKS, ui->blocks, ms->super.swapped);
 	drv_ufs_put32(raw, UFS_DI_UID, inode->i_uid, ms->super.swapped);
 	drv_ufs_put32(raw, UFS_DI_GID, inode->i_gid, ms->super.swapped);
@@ -2866,9 +2886,9 @@ prepare_inode_locked(
 	int error;
 
 	*location = inode_fragment(inode);
-	error = read_block(inode->i_mount, *location, block);
 
 	/* Checks the operation status. */
+	error = read_block(inode->i_mount, *location, block);
 	if (error != 0)
 		return error;
 	encode_inode_locked(inode, block);
@@ -2886,14 +2906,13 @@ persist_inode_locked(
 	uint64_t fragment;
 	int error;
 
-	block = kern_malloc(state(inode->i_mount)->super.bsize);
-
 	/* Handles the block availability. */
+	block = kern_malloc(state(inode->i_mount)->super.bsize);
 	if (block == NULL)
 		return ENOMEM;
-	error = prepare_inode_locked(inode, block, &fragment);
 
 	/* Checks the operation status. */
+	error = prepare_inode_locked(inode, block, &fragment);
 	if (error == 0)
 		error = write_block(inode->i_mount, fragment, block);
 	kern_free(block);
@@ -2917,7 +2936,9 @@ persist_inode(
 	/* Serialize the complete shared-block read/modify/write operation. */
 	ms = state(inode->i_mount);
 	mutex_lock(&ms->lock);
+
 	error = persist_inode_locked(inode);
+
 	mutex_unlock(&ms->lock);
 
 	/* Report the original serialization result. */
@@ -2972,9 +2993,9 @@ metadata_group_commit(
 	/*
  * Carries the logical owner through every snapshot and journal
 	 * durability step. */
-	error = io_context_child(&child, context, IO_CONTEXT_ORDERED);
 
 	/* Checks the operation status. */
+	error = io_context_child(&child, context, IO_CONTEXT_ORDERED);
 	if (error != 0)
 		return error;
 
@@ -2994,14 +3015,14 @@ metadata_group_commit(
 		 * overwrite any. */
 		/* Process each remaining element. */
 		for (n = 0; n < count; n++) {
+			/* Checks the operation status. */
 			error = drv_ufs_snapshot_preserve(&ms->snapshot,
 							  extents[n].target,
 							  extents[n].sectors);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				break;
 		}
+
 		ms->snapshot_io.context = NULL;
 	}
 
@@ -3009,9 +3030,9 @@ metadata_group_commit(
 	if (error == 0) {
 		mutex_lock(&ms->journal_lock);
 		error = journal_checkpoint_locked(mountp);
-		sequence = 0;
 
 		/* Checks the operation status. */
+		sequence = 0;
 		if (error == 0) {
 			journal_wait_readers(ms);
 			ms->journal_io.context = &child;
@@ -3019,10 +3040,9 @@ metadata_group_commit(
 
 			/* Handles the deferred condition. */
 			if (deferred) {
+				/* Checks the operation status. */
 				error = drv_ufs_journal_publishv(
 					&ms->journal, extents, count);
-
-				/* Checks the operation status. */
 				if (error != 0 &&
 				    ms->journal.pending_sequence != 0) {
 					(void)drv_ufs_journal_drain(
@@ -3130,13 +3150,13 @@ metadata_image_get(
 
 	/* Handles the fragment condition. */
 	if (fragment == 0 || ms->super.fsbtodb >= 64U ||
-	    fragment > (UINT64_MAX >> ms->super.fsbtodb))
-
+	    fragment > (UINT64_MAX >> ms->super.fsbtodb)) {
 		/* Returns the computed result. */
 		return EIO;
-	sector = fragment << ms->super.fsbtodb;
+	}
 
 	/* Handles the sector condition. */
+	sector = fragment << ms->super.fsbtodb;
 	if (sector > UINT64_MAX - sectors)
 		return EIO;
 
@@ -3145,9 +3165,8 @@ metadata_image_get(
 	 * overlap. */
 	/* Process each remaining element. */
 	for (n = 0; n < images->count; n++) {
-		extent = &images->extents[n];
-
 		/* Handles the extent condition. */
+		extent = &images->extents[n];
 		if (extent->target == sector) {
 			*result = images->memory + n * ms->super.bsize;
 			/* Reports successful completion. */
@@ -3156,10 +3175,10 @@ metadata_image_get(
 
 		/* Handles the sector condition. */
 		if (sector < extent->target + extent->sectors &&
-		    extent->target < sector + sectors)
-
+		    extent->target < sector + sectors) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 	}
 
 	/*
@@ -3168,9 +3187,9 @@ metadata_image_get(
 	if (images->count >= images->capacity)
 		return ENOSPC;
 	block = images->memory + images->count * ms->super.bsize;
-	error = read_block(images->mountp, fragment, block);
 
 	/* Checks the operation status. */
+	error = read_block(images->mountp, fragment, block);
 	if (error != 0)
 		return error;
 
@@ -3204,9 +3223,9 @@ metadata_image_inode(
 		return EXDEV;
 
 	/* Preserves any sibling edits already present in this private block. */
-	error = metadata_image_get(images, inode_fragment(prepared), &block);
 
 	/* Checks the operation status. */
+	error = metadata_image_get(images, inode_fragment(prepared), &block);
 	if (error != 0)
 		return error;
 	encode_inode_locked(prepared, block);
@@ -3291,23 +3310,23 @@ allocation_group_commit(
 	 * held. */
 	mountp = inode->i_mount;
 	ms = state(mountp);
-	error = prepare_inode_locked(&run->image.inode, run->dinode, &fragment);
 
 	/* Checks the operation status. */
+	error = prepare_inode_locked(&run->image.inode, run->dinode, &fragment);
 	if (error != 0)
 		return error;
-	error = prepare_super_summaries(mountp, run->summaries);
 
 	/* Checks the operation status. */
+	error = prepare_super_summaries(mountp, run->summaries);
 	if (error != 0)
 		return error;
 
 	/* Handles the fault condition. */
 	if (KERN_TEST_FAULT(KERN_TEST_FAULT_UFS_CG_WRITE, UINT32_MAX,
-			    UINT32_MAX, &fault))
-
+			    UINT32_MAX, &fault)) {
 		/* Returns the computed result. */
 		return fault.error != 0 ? fault.error : EIO;
+	}
 
 	/*
  * Describes disjoint shared blocks; core validation precedes every redo
@@ -3401,6 +3420,7 @@ allocation_missing_path(
 		logical %= divisor;
 		depth--;
 	}
+
 	run->index = run->tree_indices[run->tree_count - 1U];
 	run->new_leaf = run->tree_images[run->tree_count - 1U];
 
@@ -3445,6 +3465,7 @@ allocation_run_leaf(
 			    ui->direct[logical + n] != 0)
 				break;
 		}
+
 		*count = n;
 		/* Reports successful completion. */
 		return 0;
@@ -3482,6 +3503,7 @@ allocation_run_leaf(
 				/* Reports successful completion. */
 				return 0;
 			}
+
 			run->root_level = level;
 			run->missing_root = parent == 0;
 
@@ -3491,10 +3513,10 @@ allocation_run_leaf(
 				run->tree_targets[0] = parent;
 				run->tree_indices[0] = parent_index;
 			}
-			error = allocation_missing_path(run, super, logical,
-							depth);
 
 			/* Checks the operation status. */
+			error = allocation_missing_path(run, super, logical,
+							depth);
 			if (error != 0)
 				return error;
 
@@ -3504,9 +3526,9 @@ allocation_run_leaf(
 			/* Reports successful completion. */
 			return 0;
 		}
-		error = read_block(inode->i_mount, fragment, run->old_leaf);
 
 		/* Checks the operation status. */
+		error = read_block(inode->i_mount, fragment, run->old_leaf);
 		if (error != 0)
 			return error;
 
@@ -3526,6 +3548,7 @@ allocation_run_leaf(
 			run->index = index;
 			break;
 		}
+
 		parent = fragment;
 		parent_index = index;
 		fragment = drv_ufs_get64(run->old_leaf, index * 8U,
@@ -3543,6 +3566,7 @@ allocation_run_leaf(
 				  super->swapped) != 0)
 			break;
 	}
+
 	*count = n;
 	memcpy(run->new_leaf, run->old_leaf, super->bsize);
 
@@ -3574,9 +3598,9 @@ allocation_run_reserve(
 	/* Process each element required by the operation. */
 	for (attempt = 0; attempt < ms->super.ncg; attempt++) {
 		cg = (ms->rotor_cg + attempt) % ms->super.ncg;
-		error = load_cg_locked(inode->i_mount, cg);
 
 		/* Checks the operation status. */
+		error = load_cg_locked(inode->i_mount, cg);
 		if (error != 0)
 			return error;
 		map = ms->cg + ms->cg_freeoff;
@@ -3621,15 +3645,15 @@ allocation_run_reserve(
 			/*
  * Save the entire current group before changing its
 			 * ownership. */
-			free_blocks = drv_ufs_get32(ms->cg, UFS_CG_NBFREE,
-						    ms->super.swapped);
 
 			/* Handles the free blocks condition. */
+			free_blocks = drv_ufs_get32(ms->cg, UFS_CG_NBFREE,
+						    ms->super.swapped);
 			if (free_blocks < count ||
-			    ms->super.cstotal_nbfree < count)
-
+			    ms->super.cstotal_nbfree < count) {
 				/* Returns the computed result. */
 				return EIO;
+			}
 			memcpy(run->old_cg, ms->cg, ms->super.bsize);
 			run->old_total = ms->super.cstotal_nbfree;
 			run->count = count;
@@ -3667,9 +3691,9 @@ allocation_run_abort(
  * Restore original reachability when a metadata write may have landed.
 	 */
 	ms = state(inode->i_mount);
-	error = 0;
 
 	/* Handles the run condition. */
+	error = 0;
 	if (run->published) {
 		/* Handles the run condition. */
 		if (run->leaf != 0) {
@@ -3701,9 +3725,9 @@ allocation_run_abort(
 	 * here. */
 	memcpy(ms->cg, run->old_cg, ms->super.bsize);
 	ms->super.cstotal_nbfree = run->old_total;
-	error = write_cg(inode->i_mount);
 
 	/* Checks the operation status. */
+	error = write_cg(inode->i_mount);
 	if (error == 0)
 		error = disk_sync(inode->i_mount->m_disk);
 
@@ -3742,6 +3766,7 @@ allocation_run_release(
 		else
 			quota_rollback(&run->charges[n]);
 	}
+
 	kern_free(run->tree_memory);
 	kern_free(run->memory);
 	kern_free(run);
@@ -3771,15 +3796,15 @@ allocation_write_run(
  * Bound content by the current transfer and journal payload contracts.
 	 */
 	ms = state(inode->i_mount);
-	bytes = length < UFS_ALLOCATION_BYTES ? length : UFS_ALLOCATION_BYTES;
 
 	/* Handles the ms condition. */
+	bytes = length < UFS_ALLOCATION_BYTES ? length : UFS_ALLOCATION_BYTES;
 	if (ms->journal_enabled &&
 	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U)
 		bytes = (ms->journal.sector_count - 2U) * UFS_SECTOR_SIZE;
-	count = (unsigned)(bytes / ms->super.bsize);
 
 	/* Checks the remaining item count. */
+	count = (unsigned)(bytes / ms->super.bsize);
 	if (count > UFS_ALLOCATION_BLOCKS)
 		count = UFS_ALLOCATION_BLOCKS;
 
@@ -3791,22 +3816,21 @@ allocation_write_run(
  * Declines an oversized group before changing either quota or
 	 * allocation state. */
 	if (ms->journal_enabled) {
-		bytes = 3U * ms->super.bsize + UFS_SBLOCK_SIZE;
-
 		/* Handles the bytes condition. */
+		bytes = 3U * ms->super.bsize + UFS_SBLOCK_SIZE;
 		if (bytes / UFS_SECTOR_SIZE > UFS_JOURNAL_GROUP_SECTORS ||
-		    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U)
-
+		    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U) {
 			/* Reports successful completion. */
 			return 0;
+		}
 	}
 
 	/*
  * Decline optimization before reservation when bounded memory is
 	 * unavailable. */
-	run = kern_calloc(1, sizeof(*run));
 
 	/* Handles the run availability. */
+	run = kern_calloc(1, sizeof(*run));
 	if (run == NULL)
 		return 0;
 	run->grouped = ms->journal_enabled;
@@ -3820,6 +3844,7 @@ allocation_write_run(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	run->old_cg = run->memory;
 	run->old_leaf = run->memory + ms->super.bsize;
 	run->new_leaf = run->old_leaf + ms->super.bsize;
@@ -3843,9 +3868,9 @@ allocation_write_run(
 		/* Returns the computed result. */
 		return -EROFS;
 	}
-	error = allocation_run_leaf(inode, logical, &count, run);
 
 	/* Checks the operation status. */
+	error = allocation_run_leaf(inode, logical, &count, run);
 	if (error != 0 || count == 0) {
 		mutex_unlock(&ms->lock);
 		allocation_run_release(run, 0);
@@ -3858,10 +3883,9 @@ allocation_write_run(
  * Preflights every changed path block before reserving quota or
 	 * allocation. */
 	if (run->tree_count != 0) {
+		/* Handles the bytes condition. */
 		bytes = (2U + run->tree_count) * ms->super.bsize +
 			UFS_SBLOCK_SIZE;
-
-		/* Handles the bytes condition. */
 		if (bytes / UFS_SECTOR_SIZE > UFS_JOURNAL_GROUP_SECTORS ||
 		    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U) {
 			mutex_unlock(&ms->lock);
@@ -3882,10 +3906,9 @@ allocation_write_run(
 	 * prefix. */
 	/* Process each remaining element. */
 	for (n = 0; n < count; n++) {
+		/* Checks the operation status. */
 		error = quota_reserve(&ms->quota, inode->i_uid, inode->i_gid, 1,
 				      0, quota_now(), &run->charges[n]);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			break;
 		run->reserved++;
@@ -3903,9 +3926,9 @@ allocation_write_run(
 	/*
  * Reserves bitmap ownership under the same lock as the prepared
 	 * reference path. */
-	error = allocation_run_reserve(inode, run);
 
 	/* Checks the operation status. */
+	error = allocation_run_reserve(inode, run);
 	if (error != 0) {
 		mutex_unlock(&ms->lock);
 
@@ -3917,6 +3940,7 @@ allocation_write_run(
 		/* Returns the computed result. */
 		return -error;
 	}
+
 	io_stats_record(IO_UFS_ALLOC_BEGIN, 0);
 	bytes = (run->count - run->missing_nodes) * ms->super.bsize;
 	/* Process each remaining element. */
@@ -3968,6 +3992,7 @@ allocation_write_run(
 					run->first + next++ * ms->super.frag;
 			}
 		}
+
 		/* Process each remaining element. */
 		for (n = 0; n + 1U < run->tree_count; n++) {
 			drv_ufs_put64(
@@ -3980,8 +4005,10 @@ allocation_write_run(
 			run->image.indirect[run->root_level] =
 				run->tree_targets[0];
 		}
+
 		run->leaf = run->tree_targets[run->tree_count - 1U];
 	}
+
 	/* Process each remaining element. */
 	for (n = 0; n < run->count - run->missing_nodes; n++) {
 		/* Handles the run condition. */
@@ -3994,6 +4021,7 @@ allocation_write_run(
 				run->first + n * ms->super.frag;
 		}
 	}
+
 	run->image.blocks +=
 		(uint64_t)run->count * ms->super.bsize / UFS_SECTOR_SIZE;
 
@@ -4054,13 +4082,16 @@ allocation_write_run(
 			ms->cg_dirty = 0;
 			retained = 0;
 		}
+
 		io_stats_record(IO_UFS_ALLOC_ABORT, 0);
 	} else {
 		rollback = allocation_run_abort(inode, run);
 		retained = rollback != 0;
 		io_stats_record(IO_UFS_ALLOC_ABORT, 0);
 	}
+
 	mutex_unlock(&ms->lock);
+
 	allocation_run_release(run, retained);
 
 	/* Return only completely initialized and published content. */
@@ -4114,19 +4145,18 @@ xattr_release_location(
 	 */
 	/* Process each element required by the operation. */
 	for (cg = 0; cg < super->ncg; cg++) {
-		start = cgstart(super, cg);
-
 		/* Checks the cg ndblk result. */
+		start = cgstart(super, cg);
 		if (child < start || child - start < super->dblkno ||
 		    child - start >= cg_ndblk(super, cg))
 			continue;
 		*local = (uint32_t)(child - start);
 		/* Checks the cg ndblk result. */
 		if (*local % super->frag != 0 ||
-		    super->frag > cg_ndblk(super, cg) - *local)
-
+		    super->frag > cg_ndblk(super, cg) - *local) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		*group = cg;
 		/* Reports successful completion. */
 		return 0;
@@ -4178,24 +4208,23 @@ xattr_existing_locked(
 	/* Handles the ui condition. */
 	if (ui->blocks <
 		    (uint64_t)count * (ms->super.bsize / UFS_SECTOR_SIZE) ||
-	    ms->super.cstotal_nbfree > UINT64_MAX - released)
-
+	    ms->super.cstotal_nbfree > UINT64_MAX - released) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/*
  * Verifies the retained payload block remains allocated before
 	 * replacing it. */
 	if (keep != 0) {
+		/* Checks the operation status. */
 		error = xattr_release_location(&ms->super, ui->extattr[0], &cg,
 					       &local);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
-		error = load_cg_locked(inode->i_mount, cg);
 
 		/* Checks the operation status. */
+		error = load_cg_locked(inode->i_mount, cg);
 		if (error != 0)
 			return error;
 		/* Process each element required by the operation. */
@@ -4204,6 +4233,7 @@ xattr_existing_locked(
 			if (bit_test(ms->cg + ms->cg_freeoff, local + n))
 				return EIO;
 		}
+
 		memset(group->data, 0, ms->super.bsize);
 		memcpy(group->data, area, length);
 	}
@@ -4220,9 +4250,9 @@ xattr_existing_locked(
 			if (ui->extattr[n] == child)
 				return EIO;
 		}
-		error = xattr_release_location(&ms->super, child, &cg, &local);
 
 		/* Checks the operation status. */
+		error = xattr_release_location(&ms->super, child, &cg, &local);
 		if (error != 0)
 			return error;
 		/* Process each remaining element. */
@@ -4234,9 +4264,8 @@ xattr_existing_locked(
 
 		/* Handles the slot condition. */
 		if (slot == group->group_count) {
-			error = load_cg_locked(inode->i_mount, cg);
-
 			/* Checks the operation status. */
+			error = load_cg_locked(inode->i_mount, cg);
 			if (error != 0)
 				return error;
 			memcpy(group->cg[slot], ms->cg, ms->super.bsize);
@@ -4256,10 +4285,10 @@ xattr_existing_locked(
 				return EIO;
 			bit_set(group->cg[slot] + n, local + cg);
 		}
-		free_blocks = drv_ufs_get32(group->cg[slot], UFS_CG_NBFREE,
-					    ms->super.swapped);
 
 		/* Handles the free blocks condition. */
+		free_blocks = drv_ufs_get32(group->cg[slot], UFS_CG_NBFREE,
+					    ms->super.swapped);
 		if (free_blocks == UINT32_MAX)
 			return EIO;
 		drv_ufs_put32(group->cg[slot], UFS_CG_NBFREE, free_blocks + 1U,
@@ -4278,19 +4307,18 @@ xattr_existing_locked(
 	group->image.extattr_size = (uint32_t)length;
 	group->image.blocks -=
 		(uint64_t)released * (ms->super.bsize / UFS_SECTOR_SIZE);
-	error = prepare_inode_locked(&group->image.inode, group->dinode,
-				     &fragment);
 
 	/* Checks the operation status. */
+	error = prepare_inode_locked(&group->image.inode, group->dinode,
+				     &fragment);
 	if (error != 0)
 		return error;
 
 	/* Handles the released condition. */
 	if (released != 0) {
+		/* Checks the operation status. */
 		error = prepare_super_summaries(inode->i_mount,
 						group->summaries);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 		drv_ufs_put64(group->summaries, UFS_FS_CSTOTAL_NBFREE,
@@ -4333,6 +4361,7 @@ xattr_existing_locked(
 		extents[extent_count].payload = group->data;
 		extent_count++;
 	}
+
 	extents[extent_count].target = fragment << ms->super.fsbtodb;
 	extents[extent_count].sectors = ms->super.bsize / UFS_SECTOR_SIZE;
 	extents[extent_count].payload = group->dinode;
@@ -4350,9 +4379,9 @@ xattr_existing_locked(
 		ui->extattr_size = group->image.extattr_size;
 		ui->blocks = group->image.blocks;
 		ms->super.cstotal_nbfree += released;
-		quota_error = 0;
 
 		/* Handles the released condition. */
+		quota_error = 0;
 		if (released != 0) {
 			quota_error = quota_release(&ms->quota, inode->i_uid,
 						    inode->i_gid, released, 0);
@@ -4415,9 +4444,9 @@ xattr_existing_group(
 	if (!ms->journal_enabled)
 		return 0;
 	*handled = 1;
-	keep = length != 0;
 
 	/* Handles the area availability. */
+	keep = length != 0;
 	if (length > ms->super.bsize || (keep != 0 && area == NULL))
 		return EINVAL;
 
@@ -4440,6 +4469,7 @@ xattr_existing_group(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	unique = 0;
 
 	/*
@@ -4447,10 +4477,9 @@ xattr_existing_group(
 	 * group. */
 	/* Process each remaining element. */
 	for (n = keep; n < count; n++) {
+		/* Checks the operation status. */
 		error = xattr_release_location(&ms->super, ui->extattr[n],
 					       &groups[n], &local);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 		/* Process each element required by the operation. */
@@ -4464,9 +4493,9 @@ xattr_existing_group(
 		if (j == n)
 			unique++;
 	}
-	bytes = (unique + 1U + keep) * ms->super.bsize;
 
 	/* Checks the remaining item count. */
+	bytes = (unique + 1U + keep) * ms->super.bsize;
 	if (count > keep)
 		bytes += UFS_SBLOCK_SIZE;
 
@@ -4482,9 +4511,9 @@ xattr_existing_group(
 	/*
  * Allocates the changed maps, dinode, optional payload and optional
 	 * totals. */
-	group = kern_calloc(1, sizeof(*group));
 
 	/* Handles the group availability. */
+	group = kern_calloc(1, sizeof(*group));
 	if (group == NULL)
 		return ENOMEM;
 	group->memory = kern_malloc(bytes);
@@ -4496,6 +4525,7 @@ xattr_existing_group(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	/* Process each element required by the operation. */
 	for (n = 0; n < unique; n++)
 		group->cg[n] = group->memory + n * ms->super.bsize;
@@ -4503,8 +4533,11 @@ xattr_existing_group(
 	group->data = group->dinode + ms->super.bsize;
 	group->summaries = group->data + keep * ms->super.bsize;
 	mutex_lock(&ms->lock);
+
 	error = xattr_existing_locked(inode, group, count, area, length);
+
 	mutex_unlock(&ms->lock);
+
 	kern_free(group->memory);
 	kern_free(group);
 
@@ -4525,9 +4558,9 @@ xattr_release_group(
 	int error;
 
 	/* Keeps the clear caller's explicit handled/result convention. */
-	error = xattr_existing_group(inode, NULL, 0, handled);
 
 	/* Reports the failure. */
+	error = xattr_existing_group(inode, NULL, 0, handled);
 	if (error != 0)
 		return error;
 
@@ -4585,9 +4618,9 @@ initial_block_candidate(
 	/* Process each element required by the operation. */
 	for (attempt = 0; attempt < ms->super.ncg; attempt++) {
 		cg = (ms->rotor_cg + attempt) % ms->super.ncg;
-		error = load_cg_locked(inode->i_mount, cg);
 
 		/* Checks the operation status. */
+		error = load_cg_locked(inode->i_mount, cg);
 		if (error != 0)
 			return error;
 		ndblk = cg_ndblk(&ms->super, cg);
@@ -4615,10 +4648,10 @@ initial_block_candidate(
 
 				/* Handles the free blocks condition. */
 				if (free_blocks == 0 ||
-				    ms->super.cstotal_nbfree == 0)
-
+				    ms->super.cstotal_nbfree == 0) {
 					/* Returns the computed result. */
 					return EIO;
+				}
 				memcpy(group->images.cg[0], ms->cg,
 				       ms->super.bsize);
 
@@ -4631,6 +4664,7 @@ initial_block_candidate(
 							  ms->cg_freeoff,
 						  local + n);
 				}
+
 				drv_ufs_put32(group->images.cg[0],
 					      UFS_CG_NBFREE, free_blocks - 1U,
 					      ms->super.swapped);
@@ -4641,6 +4675,7 @@ initial_block_candidate(
 				/* Reports successful completion. */
 				return 0;
 			}
+
 			local += ms->super.frag;
 		}
 	}
@@ -4687,10 +4722,10 @@ initial_block_locked(
 	if (kind == UFS_INITIAL_XATTR) {
 		/* Handles the ui condition. */
 		if (ui->extattr_size != 0 || ui->extattr[0] != 0 ||
-		    ui->extattr[1] != 0)
-
+		    ui->extattr[1] != 0) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 	} else {
 		/* Handles the inode condition. */
 		if (inode->i_type != INODE_DIR || inode->i_size != 0)
@@ -4701,6 +4736,7 @@ initial_block_locked(
 			if (ui->direct[n] != 0)
 				return EIO;
 		}
+
 		/* Process each element required by the operation. */
 		for (n = 0; n < UFS_NIADDR; n++) {
 			/* Handles the ui condition. */
@@ -4708,9 +4744,9 @@ initial_block_locked(
 				return EIO;
 		}
 	}
-	error = initial_block_candidate(inode, group);
 
 	/* Checks the operation status. */
+	error = initial_block_candidate(inode, group);
 	if (error != 0)
 		return error;
 
@@ -4731,16 +4767,17 @@ initial_block_locked(
 	} else {
 		images->image.direct[0] = group->fragment;
 	}
+
 	images->image.blocks += ms->super.bsize / UFS_SECTOR_SIZE;
+
+	/* Checks the operation status. */
 	error = prepare_inode_locked(&images->image.inode, images->dinode,
 				     &dinode_fragment);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = prepare_super_summaries(inode->i_mount, images->summaries);
 
 	/* Checks the operation status. */
+	error = prepare_super_summaries(inode->i_mount, images->summaries);
 	if (error != 0)
 		return error;
 	drv_ufs_put64(images->summaries, UFS_FS_CSTOTAL_NBFREE,
@@ -4780,6 +4817,7 @@ initial_block_locked(
 		} else {
 			ui->direct[0] = group->fragment;
 		}
+
 		ui->blocks = images->image.blocks;
 	}
 
@@ -4832,9 +4870,9 @@ initial_block_group(
 		/* Returns the computed result. */
 		return EINVAL;
 	}
-	bytes = 3U * ms->super.bsize + UFS_SBLOCK_SIZE;
 
 	/* Handles the ms condition. */
+	bytes = 3U * ms->super.bsize + UFS_SBLOCK_SIZE;
 	if (ms->journal.sector_count <= 2U ||
 	    bytes / UFS_SECTOR_SIZE > UFS_JOURNAL_GROUP_SECTORS ||
 	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U) {
@@ -4844,9 +4882,9 @@ initial_block_group(
 	}
 
 	/* Allocates all private images before reserving quota. */
-	group = kern_calloc(1, sizeof(*group));
 
 	/* Handles the group availability. */
+	group = kern_calloc(1, sizeof(*group));
 	if (group == NULL)
 		return ENOMEM;
 	group->images.memory = kern_malloc(bytes);
@@ -4858,14 +4896,15 @@ initial_block_group(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	group->images.cg[0] = group->images.memory;
 	group->images.dinode = group->images.memory + ms->super.bsize;
 	group->images.data = group->images.dinode + ms->super.bsize;
 	group->images.summaries = group->images.data + ms->super.bsize;
-	error = quota_reserve(&ms->quota, inode->i_uid, inode->i_gid, 1, 0,
-			      quota_now(), &group->charge);
 
 	/* Checks the operation status. */
+	error = quota_reserve(&ms->quota, inode->i_uid, inode->i_gid, 1, 0,
+			      quota_now(), &group->charge);
 	if (error == 0) {
 		mutex_lock(&ms->lock);
 		error = initial_block_locked(inode, kind, area, length, group);
@@ -4879,6 +4918,7 @@ initial_block_group(
 			quota_rollback(&group->charge);
 		mutex_unlock(&ms->lock);
 	}
+
 	kern_free(group->images.memory);
 	kern_free(group);
 
@@ -4905,10 +4945,10 @@ xattr_allocate_group(
 	int error;
 
 	/* Preserves the xattr caller's admission and errno contract. */
-	error = initial_block_group(inode, UFS_INITIAL_XATTR, area, length,
-				    handled);
 
 	/* Reports the failure. */
+	error = initial_block_group(inode, UFS_INITIAL_XATTR, area, length,
+				    handled);
 	if (error != 0)
 		return error;
 
@@ -4927,10 +4967,10 @@ directory_backing_group(
 	/*
  * Leaves size and link counts untouched until a later namespace
 	 * operation. */
-	error = initial_block_group(inode, UFS_INITIAL_DIRECTORY, NULL, 0,
-				    handled);
 
 	/* Reports the failure. */
+	error = initial_block_group(inode, UFS_INITIAL_DIRECTORY, NULL, 0,
+				    handled);
 	if (error != 0)
 		return error;
 
@@ -4964,9 +5004,9 @@ pwrite_inode_context(
 	ssize_t allocated;
 
 	/* Validates the request before taking the inode's mutation lock. */
-	ms = state(inode->i_mount);
 
 	/* Handles the ms condition. */
+	ms = state(inode->i_mount);
 	if (!ms->writable)
 		return -EROFS;
 
@@ -4977,10 +5017,10 @@ pwrite_inode_context(
 	/* Handles the uint64 t condition. */
 	if ((uint64_t)offset + length > ms->super.maxfilesize ||
 	    (uint64_t)offset + length >
-		    (sizeof(off_t) == 8 ? INT64_MAX : INT32_MAX))
-
+		    (sizeof(off_t) == 8 ? INT64_MAX : INT32_MAX)) {
 		/* Returns the computed result. */
 		return -EFBIG;
+	}
 	scratch = NULL;
 	done = 0;
 	final_error = 0;
@@ -4995,9 +5035,9 @@ pwrite_inode_context(
 		position = (uint64_t)offset + done;
 		logical = position / ms->super.bsize;
 		within = (size_t)(position % ms->super.bsize);
-		error = bmap(inode, logical, &fragment);
 
 		/* Checks the operation status. */
+		error = bmap(inode, logical, &fragment);
 		if (error != 0) {
 			final_error = error;
 			break;
@@ -5007,11 +5047,10 @@ pwrite_inode_context(
  * Initialize new full blocks with a private
 		 * allocation/publication batch. */
 		if (fragment == 0 && within == 0) {
+			/* Handles the allocated condition. */
 			allocated = allocation_write_run(
 				inode, (const uint8_t *)buffer + done,
 				length - done, logical, context);
-
-			/* Handles the allocated condition. */
 			if (allocated < 0) {
 				final_error = (int)-allocated;
 				break;
@@ -5024,22 +5063,21 @@ pwrite_inode_context(
 				continue;
 			}
 		}
-		eligible = 0;
 
 		/* Handles the within condition. */
+		eligible = 0;
 		if (within == 0 && position < (uint64_t)inode->i_size) {
-			eligible = length - done;
-
 			/* Handles the eligible condition. */
+			eligible = length - done;
 			if (eligible > (uint64_t)inode->i_size - position) {
 				eligible = (size_t)((uint64_t)inode->i_size -
 						    position);
 			}
 		}
-		amount = content_run_bytes(inode, logical, fragment, eligible,
-					   1, &mapping_error);
 
 		/* Handles the amount condition. */
+		amount = content_run_bytes(inode, logical, fragment, eligible,
+					   1, &mapping_error);
 		if (amount != 0) {
 			io_stats_record(IO_UFS_CONTENT_WRITE, amount);
 			error = write_sectors_context(
@@ -5052,40 +5090,39 @@ pwrite_inode_context(
  * Keeps the established allocation/zero and
 			 * partial-block path. */
 			if (scratch == NULL) {
-				scratch = kern_malloc(ms->super.bsize);
-
 				/* Handles the scratch availability. */
+				scratch = kern_malloc(ms->super.bsize);
 				if (scratch == NULL) {
 					final_error = ENOMEM;
 					break;
 				}
 			}
-			amount = ms->super.bsize - within;
 
 			/* Handles the amount condition. */
+			amount = ms->super.bsize - within;
 			if (amount > length - done)
 				amount = length - done;
 
 			/* Handles the fragment condition. */
 			if (fragment == 0) {
-				error = bmap_ensure(inode, logical, &fragment);
-
 				/* Checks the operation status. */
+				error = bmap_ensure(inode, logical, &fragment);
 				if (error != 0) {
 					final_error = error;
 					break;
 				}
+
 				memset(scratch, 0, ms->super.bsize);
 			} else if (within != 0 || amount != ms->super.bsize) {
+				/* Checks the operation status. */
 				error = read_content_block(inode->i_mount,
 							   fragment, scratch);
-
-				/* Checks the operation status. */
 				if (error != 0) {
 					final_error = error;
 					break;
 				}
 			}
+
 			memcpy(scratch + within, (const uint8_t *)buffer + done,
 			       amount);
 			error = write_content_context(inode->i_mount, fragment,
@@ -5097,6 +5134,7 @@ pwrite_inode_context(
 			final_error = error;
 			break;
 		}
+
 		done += amount;
 		metadata_dirty = 1;
 
@@ -5115,13 +5153,14 @@ pwrite_inode_context(
  * Preserves the existing metadata publication and partial-result
 	 * convention. */
 	if (done != 0 && metadata_dirty) {
-		error = persist_inode(inode);
-
 		/* Checks the operation status. */
+		error = persist_inode(inode);
 		if (error != 0 && final_error == 0)
 			final_error = error;
 	}
+
 	mutex_unlock(&inode->i_lock);
+
 	kern_free(scratch);
 
 	/*
@@ -5200,29 +5239,28 @@ release_group_locked(
 		return EIO;
 	/* Process each element required by the operation. */
 	for (cg = 0; cg < ms->super.ncg; cg++) {
-		start = cgstart(&ms->super, cg);
-
 		/* Checks the cg ndblk result. */
+		start = cgstart(&ms->super, cg);
 		if (child < start || child - start < ms->super.dblkno ||
 		    child - start >= cg_ndblk(&ms->super, cg))
 			continue;
-		local = (uint32_t)(child - start);
 
 		/* Checks the cg ndblk result. */
+		local = (uint32_t)(child - start);
 		if (local % ms->super.frag != 0 ||
-		    ms->super.frag > cg_ndblk(&ms->super, cg) - local)
-
+		    ms->super.frag > cg_ndblk(&ms->super, cg) - local) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		break;
 	}
 
 	/* Handles the cg condition. */
 	if (cg == ms->super.ncg)
 		return EIO;
-	error = load_cg_locked(inode->i_mount, cg);
 
 	/* Checks the operation status. */
+	error = load_cg_locked(inode->i_mount, cg);
 	if (error != 0)
 		return error;
 	memcpy(group->cg, ms->cg, ms->super.bsize);
@@ -5232,6 +5270,7 @@ release_group_locked(
 		if (bit_test(group->cg + ms->cg_freeoff, local + n))
 			return EIO;
 	}
+
 	free_blocks =
 		drv_ufs_get32(group->cg, UFS_CG_NBFREE, ms->super.swapped);
 
@@ -5249,9 +5288,9 @@ release_group_locked(
 		/* Checks the current index. */
 		if (index >= ms->super.nindir)
 			return EIO;
-		error = read_block(inode->i_mount, parent, group->parent);
 
 		/* Checks the operation status. */
+		error = read_block(inode->i_mount, parent, group->parent);
 		if (error != 0)
 			return error;
 		current = drv_ufs_get64(group->parent, index * 8U,
@@ -5272,15 +5311,15 @@ release_group_locked(
 	if (current != child)
 		return EIO;
 	group->image.blocks -= ms->super.bsize / UFS_SECTOR_SIZE;
+
+	/* Checks the operation status. */
 	error = prepare_inode_locked(&group->image.inode, group->dinode,
 				     &fragment);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = prepare_super_summaries(inode->i_mount, group->summaries);
 
 	/* Checks the operation status. */
+	error = prepare_super_summaries(inode->i_mount, group->summaries);
 	if (error != 0)
 		return error;
 
@@ -5327,10 +5366,10 @@ release_group_locked(
 		memcpy(ui->indirect, group->image.indirect,
 		       sizeof(ui->indirect));
 		ui->blocks = group->image.blocks;
-		quota_error = quota_release(&ms->quota, inode->i_uid,
-					    inode->i_gid, 1, 0);
 
 		/* Checks the operation status. */
+		quota_error = quota_release(&ms->quota, inode->i_uid,
+					    inode->i_gid, 1, 0);
 		if (quota_error != 0) {
 			ms->writable = 0;
 
@@ -5377,22 +5416,22 @@ release_group(
  * Keeps oversized or non-journal releases on the existing ordered path.
 	 */
 	*handled = 0;
-	bytes = (parent != 0 ? 3U : 2U) * ms->super.bsize + UFS_SBLOCK_SIZE;
 
 	/* Handles the ms condition. */
+	bytes = (parent != 0 ? 3U : 2U) * ms->super.bsize + UFS_SBLOCK_SIZE;
 	if (!ms->journal_enabled)
 		return 0;
 
 	/* Handles the bytes condition. */
 	if (bytes / UFS_SECTOR_SIZE > UFS_JOURNAL_GROUP_SECTORS ||
-	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U)
-
+	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	*handled = 1;
-	group = kern_calloc(1, sizeof(*group));
 
 	/* Handles the group availability. */
+	group = kern_calloc(1, sizeof(*group));
 	if (group == NULL)
 		return ENOMEM;
 	group->memory = kern_malloc(3U * ms->super.bsize + UFS_SBLOCK_SIZE);
@@ -5404,13 +5443,17 @@ release_group(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	group->cg = group->memory;
 	group->dinode = group->cg + ms->super.bsize;
 	group->parent = group->dinode + ms->super.bsize;
 	group->summaries = group->parent + ms->super.bsize;
 	mutex_lock(&ms->lock);
+
 	error = release_group_locked(inode, parent, index, child, group);
+
 	mutex_unlock(&ms->lock);
+
 	kern_free(group->memory);
 	kern_free(group);
 
@@ -5461,18 +5504,19 @@ detach_inode_block(
 			if (pointer == &ui->indirect[index])
 				break;
 		}
+
 		index += UFS_NDADDR;
 	}
-	error = release_group(inode, 0, index, fragment, &handled);
 
 	/* Handles the handled condition. */
+	error = release_group(inode, 0, index, fragment, &handled);
 	if (handled)
 		return error;
 	*pointer = 0;
 	ui->blocks -= sectors;
-	error = persist_inode(inode);
 
 	/* Checks the operation status. */
+	error = persist_inode(inode);
 	if (error == 0)
 		error = disk_sync(inode->i_mount->m_disk);
 
@@ -5521,14 +5565,14 @@ truncate_indirect(
 	/* Handles the root condition. */
 	if (root == 0)
 		return 0;
-	block = kern_malloc(ms->super.bsize);
 
 	/* Handles the block availability. */
+	block = kern_malloc(ms->super.bsize);
 	if (block == NULL)
 		return ENOMEM;
-	error = read_block(inode->i_mount, root, block);
 
 	/* Checks the operation status. */
+	error = read_block(inode->i_mount, root, block);
 	if (error != 0)
 		goto out;
 	/* Process each remaining element. */
@@ -5546,10 +5590,9 @@ truncate_indirect(
 		if (depth == 1U) {
 			remove = child_base >= keep;
 		} else if (child_base + child_span > keep) {
+			/* Checks the operation status. */
 			error = truncate_indirect(inode, child, depth - 1U,
 						  child_base, keep, &remove);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				goto out;
 		}
@@ -5565,9 +5608,9 @@ truncate_indirect(
 			error = EIO;
 			goto out;
 		}
-		error = release_group(inode, root, index, child, &handled);
 
 		/* Handles the handled condition. */
+		error = release_group(inode, root, index, child, &handled);
 		if (handled) {
 			/* Checks the operation status. */
 			if (error != 0)
@@ -5576,10 +5619,11 @@ truncate_indirect(
 				      ms->super.swapped);
 			continue;
 		}
+
 		drv_ufs_put64(block, (size_t)index * 8U, 0, ms->super.swapped);
-		error = write_block(inode->i_mount, root, block);
 
 		/* Checks the operation status. */
+		error = write_block(inode->i_mount, root, block);
 		if (error == 0)
 			error = disk_sync(inode->i_mount->m_disk);
 
@@ -5596,6 +5640,7 @@ truncate_indirect(
 			goto out;
 		}
 	}
+
 out:
 	kern_free(block);
 
@@ -5632,39 +5677,39 @@ ufs_truncate(
 	if (size < 0 || (uint64_t)size > ms->super.maxfilesize)
 		return EFBIG;
 	mutex_lock(&inode->i_lock);
+
 	keep = ((uint64_t)size + ms->super.bsize - 1U) / ms->super.bsize;
 
 	/* Checks the current data size. */
 	if (size < inode->i_size && size != 0 && size % ms->super.bsize != 0) {
 		fragment = 0;
-		error = bmap(inode, (uint64_t)size / ms->super.bsize,
-			     &fragment);
 
 		/* Checks the operation status. */
+		error = bmap(inode, (uint64_t)size / ms->super.bsize,
+			     &fragment);
 		if (error != 0)
 			goto out;
 
 		/* Handles the fragment condition. */
 		if (fragment != 0) {
-			block = kern_malloc(ms->super.bsize);
-
 			/* Handles the block availability. */
+			block = kern_malloc(ms->super.bsize);
 			if (block == NULL) {
 				error = ENOMEM;
 				goto out;
 			}
-			error = read_content_block(inode->i_mount, fragment,
-						   block);
 
 			/* Checks the operation status. */
+			error = read_content_block(inode->i_mount, fragment,
+						   block);
 			if (error != 0)
 				goto out;
 			memset(block + size % ms->super.bsize, 0,
 			       ms->super.bsize - size % ms->super.bsize);
-			error = write_content_block(inode->i_mount, fragment,
-						    block);
 
 			/* Checks the operation status. */
+			error = write_content_block(inode->i_mount, fragment,
+						    block);
 			if (error != 0)
 				goto out;
 		}
@@ -5678,19 +5723,19 @@ ufs_truncate(
 		/* Handles the uint64 t condition. */
 		if ((uint64_t)n < keep)
 			continue;
-		error = detach_inode_block(inode, &ui->direct[n]);
 
 		/* Checks the operation status. */
+		error = detach_inode_block(inode, &ui->direct[n]);
 		if (error != 0)
 			goto out;
 	}
+
 	base = UFS_NDADDR;
 	/* Process each element required by the operation. */
 	for (n = 0; n < UFS_NIADDR; n++) {
+		/* Checks the operation status. */
 		error = truncate_indirect(inode, ui->indirect[n], n + 1U, base,
 					  keep, &empty);
-
-		/* Checks the operation status. */
 		if (error == 0 && empty)
 			error = detach_inode_block(inode, &ui->indirect[n]);
 
@@ -5699,10 +5744,12 @@ ufs_truncate(
 			goto out;
 		base += indirect_span(&ms->super, n + 1U);
 	}
+
 	inode->i_size = size;
 	error = persist_inode(inode);
 out:
 	kern_free(block);
+
 	mutex_unlock(&inode->i_lock);
 
 	/* Reports the failure. */
@@ -5764,17 +5811,17 @@ inode_size_values(
 
 	/* Handles the disk size condition. */
 	if (disk_size >
-	    (sizeof(off_t) == 8 ? (uint64_t)INT64_MAX : (uint64_t)INT32_MAX))
-
+	    (sizeof(off_t) == 8 ? (uint64_t)INT64_MAX : (uint64_t)INT32_MAX)) {
 		/* Returns the computed result. */
 		return EFBIG;
+	}
 
 	/* Handles the disk blocks condition. */
 	if (disk_blocks >
-	    (sizeof(blkcnt_t) == 8 ? (uint64_t)INT64_MAX : (uint64_t)INT32_MAX))
-
+	    (sizeof(blkcnt_t) == 8 ? (uint64_t)INT64_MAX : (uint64_t)INT32_MAX)) {
 		/* Returns the computed result. */
 		return EOVERFLOW;
+	}
 	*size = disk_size;
 	*blocks = disk_blocks;
 	/* Reports successful completion. */
@@ -5802,14 +5849,14 @@ decode_inode_raw(
 	/*
  * Validates the disk representation before populating the private
 	 * inode. */
-	mode = drv_ufs_get16(raw, UFS_DI_MODE, s->swapped);
 
 	/* Checks the mode type result. */
+	mode = drv_ufs_get16(raw, UFS_DI_MODE, s->swapped);
 	if (mode_type(mode) == INODE_NONE)
 		return EOPNOTSUPP;
-	error = inode_size_values(raw, s, &disk_size, &disk_blocks);
 
 	/* Checks the operation status. */
+	error = inode_size_values(raw, s, &disk_size, &disk_blocks);
 	if (error != 0)
 		return error;
 	ui = info(inode);
@@ -5853,12 +5900,14 @@ decode_inode_raw(
 			ui->direct[n] = drv_ufs_get64(raw, UFS_DI_DB + n * 8U,
 						      s->swapped);
 		}
+
 		/* Process each element required by the operation. */
 		for (n = 0; n < UFS_NIADDR; n++) {
 			ui->indirect[n] = drv_ufs_get64(raw, UFS_DI_IB + n * 8U,
 							s->swapped);
 		}
 	}
+
 	ui->disk_flags = drv_ufs_get32(raw, UFS_DI_FLAGS, s->swapped);
 	ui->blocks = disk_blocks;
 	ui->generation = drv_ufs_get32(raw, UFS_DI_GEN, s->swapped);
@@ -5876,11 +5925,11 @@ decode_inode_raw(
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	/* Process each element required by the operation. */
 	for (n = 0; n < UFS_NXADDR; n++) {
-		needed = ui->extattr_size > n * s->bsize;
-
 		/* Checks the valid inode fragment result. */
+		needed = ui->extattr_size > n * s->bsize;
 		if ((needed && ui->extattr[n] == 0) ||
 		    (!needed && ui->extattr[n] != 0) ||
 		    (needed && !valid_inode_fragment(s, ui->extattr[n]))) {
@@ -5900,6 +5949,7 @@ decode_inode_raw(
 				return EIO;
 			}
 		}
+
 		/* Process each element required by the operation. */
 		for (n = 0; n < UFS_NIADDR; n++) {
 			/* Checks the valid inode fragment result. */
@@ -5908,6 +5958,7 @@ decode_inode_raw(
 			}
 		}
 	}
+
 	inode->i_op = &ufs_inode_ops;
 	inode->i_fop = inode->i_type == INODE_DIR    ? &ufs_directory_ops
 		       : inode->i_type == INODE_REG  ? &ufs_regular_ops
@@ -5945,51 +5996,52 @@ load_inode_locked(
 	cg = number / s->ipg;
 	index = number % s->ipg;
 	fragment = cgstart(s, cg) + s->iblkno + (index / s->inopb) * s->frag;
-	block = kern_malloc(s->bsize);
 
 	/* Handles the block availability. */
+	block = kern_malloc(s->bsize);
 	if (block == NULL)
 		return ENOMEM;
-	error = read_block(mountp, fragment, block);
 
 	/* Checks the operation status. */
+	error = read_block(mountp, fragment, block);
 	if (error != 0) {
 		kern_free(block);
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	raw = block + (index % s->inopb) * UFS_DINODE_SIZE;
-	mode = drv_ufs_get16(raw, UFS_DI_MODE, s->swapped);
 
 	/* Checks the mode type result. */
+	mode = drv_ufs_get16(raw, UFS_DI_MODE, s->swapped);
 	if (mode_type(mode) == INODE_NONE) {
 		kern_free(block);
 
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
 	}
-	error = inode_size_values(raw, s, &disk_size, &disk_blocks);
 
 	/* Checks the operation status. */
+	error = inode_size_values(raw, s, &disk_size, &disk_blocks);
 	if (error != 0) {
 		kern_free(block);
 
 		/* Returns the computed result. */
 		return error;
 	}
-	inode = inode_alloc(mountp);
 
 	/* Handles the inode availability. */
+	inode = inode_alloc(mountp);
 	if (inode == NULL) {
 		kern_free(block);
 
 		/* Returns the computed result. */
 		return ENOSPC;
 	}
-	error = decode_inode_raw(inode, raw, number, 0);
 
 	/* Checks the operation status. */
+	error = decode_inode_raw(inode, raw, number, 0);
 	if (error != 0) {
 		inode->i_flags |= INODE_DEAD;
 		inode_release(inode);
@@ -5998,6 +6050,7 @@ load_inode_locked(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	kern_free(block);
 	*result = inode;
 	/* Reports successful completion. */
@@ -6071,9 +6124,9 @@ next_dirent(
 		/* Handles the uint64 t condition. */
 		if ((uint64_t)*cursor % UFS_DIRBLKSIZ > UFS_DIRBLKSIZ - 8U)
 			return EIO;
-		count = pread_inode(directory, head, sizeof(head), *cursor);
 
 		/* Checks the remaining item count. */
+		count = pread_inode(directory, head, sizeof(head), *cursor);
 		if (count != sizeof(head))
 			return EIO;
 		*number = drv_ufs_get32(
@@ -6081,24 +6134,25 @@ next_dirent(
 		reclen = drv_ufs_get16(
 			head, 4, state(directory->i_mount)->super.swapped);
 		*type = head[6];
-		namelen = head[7];
 
 		/* Handles the reclen condition. */
+		namelen = head[7];
 		if (reclen < 8U || (reclen & 3U) != 0 ||
 		    8U + namelen > reclen ||
 		    (uint64_t)*cursor % UFS_DIRBLKSIZ + reclen >
 			    UFS_DIRBLKSIZ ||
 		    (uint64_t)reclen >
-			    (uint64_t)directory->i_size - (uint64_t)*cursor)
-
+			    (uint64_t)directory->i_size - (uint64_t)*cursor) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 
 		/* Checks the pread inode result. */
 		if (namelen != 0 && pread_inode(directory, name, namelen,
-						*cursor + 8) != namelen)
+						*cursor + 8) != namelen) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		name[namelen] = '\0';
 		*cursor += reclen;
 		/* Handles the number condition. */
@@ -6181,14 +6235,14 @@ dir_find_record(
 	if (directory->i_size < 0 ||
 	    (uint64_t)directory->i_size > ms->super.bsize ||
 	    (uint64_t)directory->i_size % UFS_DIRBLKSIZ != 0 ||
-	    info(directory)->direct[0] == 0)
-
+	    info(directory)->direct[0] == 0) {
 		/* Returns the computed result. */
 		return EIO;
-	error = read_block(directory->i_mount, info(directory)->direct[0],
-			   block);
+	}
 
 	/* Checks the operation status. */
+	error = read_block(directory->i_mount, info(directory)->direct[0],
+			   block);
 	if (error)
 		return error;
 	/* Process each remaining element. */
@@ -6199,6 +6253,7 @@ dir_find_record(
 			/* Returns the computed result. */
 			return EIO;
 		}
+
 		uint32_t ino = drv_ufs_get32(block, pos, ms->super.swapped);
 		uint16_t reclen =
 			drv_ufs_get16(block, pos + 4U, ms->super.swapped);
@@ -6208,10 +6263,10 @@ dir_find_record(
 		if (reclen < 8U || (reclen & 3U) != 0 ||
 		    pos % UFS_DIRBLKSIZ + reclen > UFS_DIRBLKSIZ ||
 		    pos + reclen > (uint32_t)directory->i_size ||
-		    8U + nlen > reclen)
-
+		    8U + nlen > reclen) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 
 		/* Handles the ino condition. */
 		if (ino != 0 && nlen == name->cn_namelen &&
@@ -6222,6 +6277,7 @@ dir_find_record(
 			/* Reports successful completion. */
 			return 0;
 		}
+
 		prev = pos;
 		pos += reclen;
 	}
@@ -6260,12 +6316,13 @@ dir_add(
 		if (name->cn_nameptr[pos] == '/')
 			return EINVAL;
 	}
+
 	pos = 0;
 	need = dir_minimum((uint8_t)name->cn_namelen);
 	block = kern_calloc(1, ms->super.bsize);
-	original = kern_malloc(ms->super.bsize);
 
 	/* Handles the block availability. */
+	original = kern_malloc(ms->super.bsize);
 	if (block == NULL || original == NULL) {
 		kern_free(block);
 		kern_free(original);
@@ -6273,7 +6330,9 @@ dir_add(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	mutex_lock(&directory->i_lock);
+
 	old_size = directory->i_size;
 	old_direct = ui->direct[0];
 	old_blocks = ui->blocks;
@@ -6287,9 +6346,8 @@ dir_add(
 
 	/* Handles the ui condition. */
 	if (ui->direct[0] == 0) {
-		error = directory_backing_group(directory, &handled);
-
 		/* Handles the handled condition. */
+		error = directory_backing_group(directory, &handled);
 		if (handled) {
 			/* Checks the operation status. */
 			if (error != 0)
@@ -6301,20 +6359,19 @@ dir_add(
 			old_direct = ui->direct[0];
 			old_blocks = ui->blocks;
 		} else {
+			/* Checks the operation status. */
 			error = allocate_block(
 				directory->i_mount, directory->i_uid,
 				directory->i_gid, &ui->direct[0]);
-
-			/* Checks the operation status. */
 			if (error)
 				goto out;
 			allocated = ui->direct[0];
 			ui->blocks += ms->super.bsize / UFS_SECTOR_SIZE;
 		}
 	}
-	error = read_block(directory->i_mount, ui->direct[0], block);
 
 	/* Checks the operation status. */
+	error = read_block(directory->i_mount, ui->direct[0], block);
 	if (error)
 		goto out;
 	memcpy(original, block, ms->super.bsize);
@@ -6326,6 +6383,7 @@ dir_add(
 			error = EIO;
 			goto out;
 		}
+
 		uint16_t reclen =
 			drv_ufs_get16(block, pos + 4U, ms->super.swapped);
 		uint8_t nlen = block[pos + 7U];
@@ -6355,6 +6413,7 @@ dir_add(
 					    block);
 			goto commit;
 		}
+
 		pos += reclen;
 	}
 
@@ -6363,6 +6422,7 @@ dir_add(
 		error = ENOSPC;
 		goto out;
 	}
+
 	pos = (uint32_t)directory->i_size;
 	drv_ufs_put32(block, pos, number, ms->super.swapped);
 	drv_ufs_put16(block, pos + 4U, UFS_DIRBLKSIZ, ms->super.swapped);
@@ -6384,9 +6444,9 @@ commit:
 		directory->i_size = old_size;
 		ui->direct[0] = old_direct;
 		ui->blocks = old_blocks;
-		error = persist_inode(directory);
 
 		/* Checks the operation status. */
+		error = persist_inode(directory);
 		if (error == 0)
 			error = disk_sync(directory->i_mount->m_disk);
 
@@ -6394,10 +6454,9 @@ commit:
 		if (error != 0) {
 			ms->writable = 0;
 		} else if (ms->writable && allocated != 0) {
+			/* Checks the operation status. */
 			error = free_block(directory->i_mount, allocated,
 					   directory->i_uid, directory->i_gid);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				ms->writable = 0;
 		}
@@ -6406,6 +6465,7 @@ commit:
 		if (error == 0)
 			error = rollback;
 	}
+
 out:
 
 	/* Checks the operation status. */
@@ -6413,9 +6473,9 @@ out:
 		directory->i_size = old_size;
 		ui->direct[0] = old_direct;
 		ui->blocks = old_blocks;
-		rollback = persist_inode(directory);
 
 		/* Handles the rollback condition. */
+		rollback = persist_inode(directory);
 		if (rollback == 0)
 			rollback = disk_sync(directory->i_mount->m_disk);
 
@@ -6435,7 +6495,9 @@ out:
 			}
 		}
 	}
+
 	mutex_unlock(&directory->i_lock);
+
 	kern_free(original);
 	kern_free(block);
 
@@ -6471,11 +6533,12 @@ dir_remove(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	mutex_lock(&directory->i_lock);
-	error = dir_find_record(directory, name, block, &offset, &previous,
-				number);
 
 	/* Checks the operation status. */
+	error = dir_find_record(directory, name, block, &offset, &previous,
+				number);
 	if (error == 0) {
 		memcpy(original, block, ms->super.bsize);
 		uint16_t reclen =
@@ -6491,17 +6554,19 @@ dir_remove(
 		} else {
 			drv_ufs_put32(block, offset, 0, ms->super.swapped);
 		}
-		error = write_block(directory->i_mount,
-				    info(directory)->direct[0], block);
 
 		/* Checks the operation status. */
+		error = write_block(directory->i_mount,
+				    info(directory)->direct[0], block);
 		if (error != 0) {
 			error = restore_directory_block(
 				directory, info(directory)->direct[0], original,
 				error);
 		}
 	}
+
 	mutex_unlock(&directory->i_lock);
+
 	kern_free(original);
 	kern_free(block);
 
@@ -6539,28 +6604,31 @@ dir_replace(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	mutex_lock(&directory->i_lock);
-	error = dir_find_record(directory, name, block, &offset, &previous,
-				old_number);
 
 	/* Checks the operation status. */
+	error = dir_find_record(directory, name, block, &offset, &previous,
+				old_number);
 	if (error == 0) {
 		memcpy(original, block, ms->super.bsize);
 		(void)previous;
 		*old_type = block[offset + 6U];
 		drv_ufs_put32(block, offset, number, ms->super.swapped);
 		block[offset + 6U] = type;
-		error = write_block(directory->i_mount,
-				    info(directory)->direct[0], block);
 
 		/* Checks the operation status. */
+		error = write_block(directory->i_mount,
+				    info(directory)->direct[0], block);
 		if (error != 0) {
 			error = restore_directory_block(
 				directory, info(directory)->direct[0], original,
 				error);
 		}
 	}
+
 	mutex_unlock(&directory->i_lock);
+
 	kern_free(original);
 	kern_free(block);
 
@@ -6607,6 +6675,7 @@ detach_new_socket_special(
 		inode->i_special = NULL;
 		inode->i_special_destroy = NULL;
 	}
+
 	mutex_unlock(&inode->i_lock);
 }
 
@@ -6647,6 +6716,7 @@ discard_new_inode(
 		/* Returns the computed result. */
 		return function_result;
 	}
+
 	detach_new_socket_special(inode);
 	/* Process each element required by the operation. */
 	for (n = 1; n < UFS_NDADDR; n++) {
@@ -6659,6 +6729,7 @@ discard_new_inode(
 			return EIO;
 		}
 	}
+
 	/* Process each element required by the operation. */
 	for (n = 0; n < UFS_NIADDR; n++) {
 		/* Handles the ui condition. */
@@ -6670,11 +6741,13 @@ discard_new_inode(
 			return EIO;
 		}
 	}
+
 	/* Process each element required by the operation. */
 	for (n = 0; n < UFS_NXADDR; n++) {
 		extattr[n] = ui->extattr[n];
 		ui->extattr[n] = 0;
 	}
+
 	inode->i_mode = 0;
 	inode->i_type = INODE_NONE;
 	inode->i_linkcount = 0;
@@ -6682,9 +6755,9 @@ discard_new_inode(
 	ui->direct[0] = 0;
 	ui->extattr_size = 0;
 	ui->blocks = 0;
-	cleanup = persist_inode(inode);
 
 	/* Handles the cleanup condition. */
+	cleanup = persist_inode(inode);
 	if (cleanup == 0)
 		cleanup = disk_sync(inode->i_mount->m_disk);
 
@@ -6709,36 +6782,34 @@ discard_new_inode(
 
 	/* Handles the directory counted condition. */
 	if (directory_counted) {
-		cleanup = adjust_directory_count(inode->i_mount, number, -1);
-
 		/* Checks the operation status. */
+		cleanup = adjust_directory_count(inode->i_mount, number, -1);
 		if (error == 0 && cleanup != 0)
 			error = cleanup;
 	}
 
 	/* Handles the block condition. */
 	if (block != 0) {
-		cleanup = free_block(inode->i_mount, block, uid, gid);
-
 		/* Checks the operation status. */
+		cleanup = free_block(inode->i_mount, block, uid, gid);
 		if (error == 0 && cleanup != 0)
 			error = cleanup;
 	}
+
 	/* Process each element required by the operation. */
 	for (n = 0; n < UFS_NXADDR; n++) {
 		/* Handles the extattr condition. */
 		if (extattr[n] != 0) {
+			/* Checks the operation status. */
 			cleanup = free_block(inode->i_mount, extattr[n], uid,
 					     gid);
-
-			/* Checks the operation status. */
 			if (error == 0 && cleanup != 0)
 				error = cleanup;
 		}
 	}
-	cleanup = free_inode_number(inode->i_mount, number, uid, gid);
 
 	/* Checks the operation status. */
+	cleanup = free_inode_number(inode->i_mount, number, uid, gid);
 	if (error == 0 && cleanup != 0)
 		error = cleanup;
 
@@ -6777,6 +6848,7 @@ discard_new_inode_after_error(
 		/* Returns the computed result. */
 		return original_error;
 	}
+
 	cleanup = discard_new_inode(inode, directory_counted);
 
 	/* Returns the computed result. */
@@ -6828,14 +6900,14 @@ reserve_inode_locked(
 	/*
  * Validates the requested kind before selecting an unowned inode slot.
 	 */
-	ms = state(inode->i_mount);
 
 	/* Handles the ms condition. */
+	ms = state(inode->i_mount);
 	if (!ms->writable)
 		return EROFS;
-	kind = inode_type_mode(request->type);
 
 	/* Handles the kind condition. */
+	kind = inode_type_mode(request->type);
 	if (kind == 0 || inode->i_ino != 0)
 		return EINVAL;
 	found = 0;
@@ -6845,9 +6917,9 @@ reserve_inode_locked(
 	/* Finds a free number while excluding all allocation-map mutations. */
 	for (attempt = 0; attempt < ms->super.ncg; attempt++) {
 		cg = (ms->rotor_cg + attempt) % ms->super.ncg;
-		error = load_cg_locked(inode->i_mount, cg);
 
 		/* Checks the operation status. */
+		error = load_cg_locked(inode->i_mount, cg);
 		if (error != 0)
 			return error;
 		local = cg == 0 ? UFS_ROOT_INO + 1U : 0U;
@@ -6869,15 +6941,15 @@ reserve_inode_locked(
 	if (!found)
 		return ENOSPC;
 	free_inodes = drv_ufs_get32(ms->cg, UFS_CG_NIFREE, ms->super.swapped);
-	directories = drv_ufs_get32(ms->cg, UFS_CG_NDIR, ms->super.swapped);
 
 	/* Handles the free inodes condition. */
+	directories = drv_ufs_get32(ms->cg, UFS_CG_NDIR, ms->super.swapped);
 	if (free_inodes == 0 || ms->super.cstotal_nifree == 0 ||
 	    (is_directory && (directories == UINT32_MAX ||
-			      ms->super.cstotal_ndir == UINT64_MAX)))
-
+			      ms->super.cstotal_ndir == UINT64_MAX))) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/*
  * Initializes all persistent ownership fields before making the slot
@@ -6899,26 +6971,26 @@ reserve_inode_locked(
 	memset(image->extattr, 0, sizeof(image->extattr));
 	memset(image->shortlink, 0, sizeof(image->shortlink));
 	fragment = inode_fragment(&image->inode);
-	error = read_block(inode->i_mount, fragment, group->images.dinode);
 
 	/* Checks the operation status. */
+	error = read_block(inode->i_mount, fragment, group->images.dinode);
 	if (error != 0)
 		return error;
 	raw = group->images.dinode +
 	      (local % ms->super.inopb) * UFS_DINODE_SIZE;
-	generation = drv_ufs_get32(raw, UFS_DI_GEN, ms->super.swapped) + 1U;
 
 	/* Handles the generation condition. */
+	generation = drv_ufs_get32(raw, UFS_DI_GEN, ms->super.swapped) + 1U;
 	if (generation == 0)
 		generation = 1;
 	memset(raw, 0, UFS_DINODE_SIZE);
 	image->generation = generation;
 	encode_inode_locked(&image->inode, group->images.dinode);
 	drv_ufs_put32(raw, UFS_DI_GEN, generation, ms->super.swapped);
-	error = prepare_super_summaries(inode->i_mount,
-					group->images.summaries);
 
 	/* Checks the operation status. */
+	error = prepare_super_summaries(inode->i_mount,
+					group->images.summaries);
 	if (error != 0)
 		return error;
 
@@ -6939,6 +7011,7 @@ reserve_inode_locked(
 		drv_ufs_put64(group->images.summaries, UFS_FS_CSTOTAL_NDIR,
 			      ms->super.cstotal_ndir + 1U, ms->super.swapped);
 	}
+
 	extents[0].target = (cgstart(&ms->super, cg) + ms->super.cblkno)
 			    << ms->super.fsbtodb;
 	extents[0].sectors = ms->super.bsize / UFS_SECTOR_SIZE;
@@ -7006,9 +7079,9 @@ reserve_inode_group(
 	 * mount. */
 	ms = state(inode->i_mount);
 	bytes = 2U * ms->super.bsize + UFS_SBLOCK_SIZE;
-	group = kern_calloc(1, sizeof(*group));
 
 	/* Handles the group availability. */
+	group = kern_calloc(1, sizeof(*group));
 	if (group == NULL)
 		return ENOMEM;
 	group->images.memory = kern_malloc(bytes);
@@ -7020,13 +7093,14 @@ reserve_inode_group(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	group->images.cg = group->images.memory;
 	group->images.dinode = group->images.cg + ms->super.bsize;
 	group->images.summaries = group->images.dinode + ms->super.bsize;
-	error = quota_reserve(&ms->quota, request->uid, request->gid, 0, 1,
-			      quota_now(), &group->charge);
 
 	/* Checks the operation status. */
+	error = quota_reserve(&ms->quota, request->uid, request->gid, 0, 1,
+			      quota_now(), &group->charge);
 	if (error == 0) {
 		mutex_lock(&inode->i_lock);
 		mutex_lock(&ms->lock);
@@ -7042,6 +7116,7 @@ reserve_inode_group(
 		mutex_unlock(&ms->lock);
 		mutex_unlock(&inode->i_lock);
 	}
+
 	kern_free(group->images.memory);
 	kern_free(group);
 
@@ -7087,23 +7162,22 @@ new_inode(
  * Admit the complete preparation chain, including first directory
 	 * backing. */
 	reservation_bytes = 3U * ms->super.bsize + UFS_SBLOCK_SIZE;
+
+	/* Handles the grouped condition. */
 	grouped = ms->journal_enabled && ms->journal.sector_count > 2U &&
 		  reservation_bytes / UFS_SECTOR_SIZE <=
 			  UFS_JOURNAL_GROUP_SECTORS &&
 		  reservation_bytes / UFS_SECTOR_SIZE <=
 			  ms->journal.sector_count - 2U;
-
-	/* Handles the grouped condition. */
 	if (grouped) {
-		inode = inode_alloc(mountp);
-
 		/* Handles the inode availability. */
+		inode = inode_alloc(mountp);
 		if (inode == NULL)
 			return ENOSPC;
 		inode->i_op = &ufs_inode_ops;
-		error = reserve_inode_group(inode, request);
 
 		/* Checks the operation status. */
+		error = reserve_inode_group(inode, request);
 		if (error != 0) {
 			inode->i_flags |= INODE_DEAD;
 			inode_release(inode);
@@ -7111,23 +7185,22 @@ new_inode(
 			/* Returns the computed result. */
 			return error;
 		}
+
 		number = (uint32_t)inode->i_ino;
 		directory_counted = request->type == INODE_DIR;
 	} else {
+		/* Checks the operation status. */
 		error = allocate_inode_number(mountp, request->uid,
 					      request->gid, &number);
-
-		/* Checks the operation status. */
 		if (error)
 			return error;
-		inode = inode_alloc(mountp);
 
 		/* Handles the inode availability. */
+		inode = inode_alloc(mountp);
 		if (inode == NULL) {
+			/* Checks the operation status. */
 			error = free_inode_number(mountp, number, request->uid,
 						  request->gid);
-
-			/* Checks the operation status. */
 			if (error != 0) {
 				state(mountp)->writable = 0;
 
@@ -7139,6 +7212,7 @@ new_inode(
 			return ENOSPC;
 		}
 	}
+
 	inode->i_ino = number;
 	inode->i_type = request->type;
 	inode->i_linkcount = grouped ? 0 : links;
@@ -7151,9 +7225,9 @@ new_inode(
 	/* Handles the grouped condition. */
 	if (!grouped)
 		info(inode)->generation = number;
-	error = inode_creation_prepare(directory, inode, request);
 
 	/* Checks the operation status. */
+	error = inode_creation_prepare(directory, inode, request);
 	if (error != 0) {
 		/* Obtains the discard new inode after error result. */
 		function_result = discard_new_inode_after_error(
@@ -7162,9 +7236,9 @@ new_inode(
 		/* Returns the computed result. */
 		return function_result;
 	}
-	error = persist_inode(inode);
 
 	/* Checks the operation status. */
+	error = persist_inode(inode);
 	if (error) {
 		/* Obtains the discard new inode after error result. */
 		function_result = discard_new_inode_after_error(
@@ -7176,9 +7250,8 @@ new_inode(
 
 	/* Handles the request condition. */
 	if (request->type == INODE_DIR && !directory_counted) {
-		error = adjust_directory_count(mountp, number, 1);
-
 		/* Checks the operation status. */
+		error = adjust_directory_count(mountp, number, 1);
 		if (error != 0) {
 			/* Obtains the discard new inode after error result. */
 			function_result = discard_new_inode_after_error(
@@ -7188,6 +7261,7 @@ new_inode(
 			return function_result;
 		}
 	}
+
 	*result = inode;
 	/* Reports successful completion. */
 	return 0;
@@ -7307,14 +7381,14 @@ remove_group_locked(
 
 	/* Handles the target condition. */
 	if (target->i_linkcount == 0 ||
-	    (removing_directory && directory->i_linkcount == 0))
-
+	    (removing_directory && directory->i_linkcount == 0)) {
 		/* Returns the computed result. */
 		return EIO;
-	error = dir_find_record(directory, name, group->directory, &offset,
-				&previous, &number);
+	}
 
 	/* Checks the operation status. */
+	error = dir_find_record(directory, name, group->directory, &offset,
+				&previous, &number);
 	if (error != 0)
 		return error;
 
@@ -7334,6 +7408,7 @@ remove_group_locked(
 	} else {
 		drv_ufs_put32(group->directory, offset, 0, ms->super.swapped);
 	}
+
 	memcpy(&group->image, info(target), sizeof(group->image));
 
 	/* Handles the removing directory condition. */
@@ -7341,10 +7416,10 @@ remove_group_locked(
 		group->image.inode.i_linkcount = 0;
 	else
 		group->image.inode.i_linkcount--;
-	error = prepare_inode_locked(&group->image.inode, group->dinode,
-				     &fragment);
 
 	/* Checks the operation status. */
+	error = prepare_inode_locked(&group->image.inode, group->dinode,
+				     &fragment);
 	if (error != 0)
 		return error;
 
@@ -7355,18 +7430,17 @@ remove_group_locked(
 		memcpy(&group->parent_image, info(directory),
 		       sizeof(group->parent_image));
 		group->parent_image.inode.i_linkcount--;
-		parent_fragment = inode_fragment(directory);
 
 		/* Handles the parent fragment condition. */
+		parent_fragment = inode_fragment(directory);
 		if (parent_fragment == fragment) {
 			encode_inode_locked(&group->parent_image.inode,
 					    group->dinode);
 		} else {
+			/* Checks the operation status. */
 			error = prepare_inode_locked(&group->parent_image.inode,
 						     group->parent_dinode,
 						     &parent_fragment);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				return error;
 			extents[2].target = parent_fragment
@@ -7439,23 +7513,23 @@ remove_group(
 		/* Returns the computed result. */
 		return EINVAL;
 	}
-	bytes = 2U * ms->super.bsize;
 
 	/* Checks the inode fragment result. */
+	bytes = 2U * ms->super.bsize;
 	if (target->i_type == INODE_DIR &&
 	    inode_fragment(directory) != inode_fragment(target))
 		bytes += ms->super.bsize;
 
 	/* Handles the bytes condition. */
 	if (bytes / UFS_SECTOR_SIZE > UFS_JOURNAL_GROUP_SECTORS ||
-	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U)
-
+	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	*handled = 1;
-	group = kern_calloc(1, sizeof(*group));
 
 	/* Handles the group availability. */
+	group = kern_calloc(1, sizeof(*group));
 	if (group == NULL)
 		return ENOMEM;
 	group->memory = kern_malloc(bytes);
@@ -7467,13 +7541,16 @@ remove_group(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	group->directory = group->memory;
 	group->dinode = group->memory + ms->super.bsize;
 	group->parent_dinode = group->dinode + ms->super.bsize;
 	mutex_lock(&directory->i_lock);
 	mutex_lock(&target->i_lock);
 	mutex_lock(&ms->lock);
+
 	error = remove_group_locked(directory, name, target, group);
+
 	mutex_unlock(&ms->lock);
 	mutex_unlock(&target->i_lock);
 	mutex_unlock(&directory->i_lock);
@@ -7486,6 +7563,7 @@ remove_group(
 		namecache_remove(directory, name);
 		inode_dir_changed(directory);
 	}
+
 	kern_free(group->memory);
 	kern_free(group);
 
@@ -7548,10 +7626,10 @@ directory_image_insert(
 	/* Handles the directory condition. */
 	if (directory->i_size < 0 ||
 	    (uint64_t)directory->i_size > ms->super.bsize ||
-	    (uint64_t)directory->i_size % UFS_DIRBLKSIZ != 0)
-
+	    (uint64_t)directory->i_size % UFS_DIRBLKSIZ != 0) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	need = dir_minimum((uint8_t)name->cn_namelen);
 
 	/*
@@ -7562,29 +7640,29 @@ directory_image_insert(
 	while (pos < (uint32_t)directory->i_size) {
 		/* Handles the uint32 t condition. */
 		if ((uint32_t)directory->i_size - pos < 8U ||
-		    pos % UFS_DIRBLKSIZ > UFS_DIRBLKSIZ - 8U)
-
+		    pos % UFS_DIRBLKSIZ > UFS_DIRBLKSIZ - 8U) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		number = drv_ufs_get32(block, pos, ms->super.swapped);
 		length = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
 		namesize = block[pos + 7U];
-		minimum = dir_minimum(namesize);
 
 		/* Checks the current data length. */
+		minimum = dir_minimum(namesize);
 		if (length < minimum || (length & 3U) != 0 ||
 		    pos % UFS_DIRBLKSIZ + length > UFS_DIRBLKSIZ ||
-		    length > (uint32_t)directory->i_size - pos)
-
+		    length > (uint32_t)directory->i_size - pos) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 
 		/* Handles the number condition. */
 		if (number != 0 && namesize == name->cn_namelen &&
-		    memcmp(block + pos + 8U, name->cn_nameptr, namesize) == 0)
-
+		    memcmp(block + pos + 8U, name->cn_nameptr, namesize) == 0) {
 			/* Returns the computed result. */
 			return EEXIST;
+		}
 
 		/* Handles the at condition. */
 		if (at == UINT32_MAX) {
@@ -7597,6 +7675,7 @@ directory_image_insert(
 				available = length - minimum;
 			}
 		}
+
 		pos += length;
 	}
 
@@ -7604,10 +7683,10 @@ directory_image_insert(
 	if (at == UINT32_MAX) {
 		/* Handles the uint64 t condition. */
 		if ((uint64_t)directory->i_size + UFS_DIRBLKSIZ >
-		    ms->super.bsize)
-
+		    ms->super.bsize) {
 			/* Returns the computed result. */
 			return ENOSPC;
+		}
 		at = (uint32_t)directory->i_size;
 		available = UFS_DIRBLKSIZ;
 		directory->i_size += UFS_DIRBLKSIZ;
@@ -7618,19 +7697,20 @@ directory_image_insert(
 		pos = 0;
 		/* Continue while the operation condition remains true. */
 		while (pos < at) {
+			/* Handles the pos condition. */
 			length = drv_ufs_get16(block, pos + 4U,
 					       ms->super.swapped);
-
-			/* Handles the pos condition. */
 			if (pos + length > at) {
 				drv_ufs_put16(block, pos + 4U,
 					      (uint16_t)(at - pos),
 					      ms->super.swapped);
 				break;
 			}
+
 			pos += length;
 		}
 	}
+
 	drv_ufs_put32(block, at, (uint32_t)target->i_ino, ms->super.swapped);
 	drv_ufs_put16(block, at + 4U, available, ms->super.swapped);
 	block[at + 6U] = dir_type(target->i_type);
@@ -7665,32 +7745,32 @@ link_group_locked(
 	       sizeof(group->directory_image));
 	memcpy(&group->target_image, info(target), sizeof(group->target_image));
 	group->target_image.inode.i_linkcount++;
+
+	/* Checks the operation status. */
 	error = metadata_image_get(&group->images, info(directory)->direct[0],
 				   &group->directory);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = directory_image_insert(&group->directory_image.inode, name,
-				       target, group->directory);
 
 	/* Checks the operation status. */
+	error = directory_image_insert(&group->directory_image.inode, name,
+				       target, group->directory);
 	if (error != 0)
 		return error;
 
 	/*
  * Encodes all changed dinodes into unique, shared physical block
 	 * images. */
+
+	/* Checks the operation status. */
 	error = metadata_image_inode(&group->images,
 				     &group->directory_image.inode);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = metadata_image_inode(&group->images,
-				     &group->target_image.inode);
 
 	/* Checks the operation status. */
+	error = metadata_image_inode(&group->images,
+				     &group->target_image.inode);
 	if (error != 0)
 		return error;
 	error = metadata_group_commit(directory->i_mount, group->images.extents,
@@ -7735,20 +7815,20 @@ link_group(
 	/* Checks the info result. */
 	if (!ms->journal_enabled || info(directory)->direct[0] == 0)
 		return 0;
+
+	/* Handles the bytes condition. */
 	bytes = (inode_fragment(directory) == inode_fragment(target) ? 2U
 								     : 3U) *
 		ms->super.bsize;
-
-	/* Handles the bytes condition. */
 	if (bytes / UFS_SECTOR_SIZE > UFS_JOURNAL_GROUP_SECTORS ||
-	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U)
-
+	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	*handled = 1;
-	group = kern_calloc(1, sizeof(*group));
 
 	/* Handles the group availability. */
+	group = kern_calloc(1, sizeof(*group));
 	if (group == NULL)
 		return ENOMEM;
 	group->memory = kern_malloc(bytes);
@@ -7760,12 +7840,15 @@ link_group(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	metadata_images_init(&group->images, directory->i_mount, group->memory,
 			     bytes);
 	mutex_lock(&directory->i_lock);
 	mutex_lock(&target->i_lock);
 	mutex_lock(&ms->lock);
+
 	error = link_group_locked(directory, name, target, group);
+
 	mutex_unlock(&ms->lock);
 	mutex_unlock(&target->i_lock);
 	mutex_unlock(&directory->i_lock);
@@ -7776,6 +7859,7 @@ link_group(
 		namecache_remove(directory, name);
 		inode_dir_changed(directory);
 	}
+
 	kern_free(group->memory);
 	kern_free(group);
 
@@ -7820,15 +7904,15 @@ directory_image_change(
 	uint8_t namesize;
 
 	/* Bounds traversal before inspecting record bytes. */
-	ms = state(directory->i_mount);
 
 	/* Handles the directory condition. */
+	ms = state(directory->i_mount);
 	if (directory->i_size < 0 ||
 	    (uint64_t)directory->i_size > ms->super.bsize ||
-	    (uint64_t)directory->i_size % UFS_DIRBLKSIZ != 0)
-
+	    (uint64_t)directory->i_size % UFS_DIRBLKSIZ != 0) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	pos = 0;
 	previous = found = prior = UINT32_MAX;
 
@@ -7841,18 +7925,18 @@ directory_image_change(
 		if ((uint32_t)directory->i_size - pos < 8U)
 			return EIO;
 		length = drv_ufs_get16(block, pos + 4U, ms->super.swapped);
-		namesize = block[pos + 7U];
 
 		/* Checks the dir minimum result. */
+		namesize = block[pos + 7U];
 		if (length < dir_minimum(namesize) || (length & 3U) != 0 ||
 		    pos % UFS_DIRBLKSIZ + length > UFS_DIRBLKSIZ ||
-		    length > (uint32_t)directory->i_size - pos)
-
+		    length > (uint32_t)directory->i_size - pos) {
 			/* Returns the computed result. */
 			return EIO;
-		number = drv_ufs_get32(block, pos, ms->super.swapped);
+		}
 
 		/* Handles the number condition. */
+		number = drv_ufs_get32(block, pos, ms->super.swapped);
 		if (number != 0 && namesize == name->cn_namelen &&
 		    memcmp(block + pos + 8U, name->cn_nameptr, namesize) == 0) {
 			/* Handles the found condition. */
@@ -7861,6 +7945,7 @@ directory_image_change(
 			found = pos;
 			prior = previous;
 		}
+
 		previous = pos;
 		pos += length;
 	}
@@ -7914,9 +7999,9 @@ rename_group_locked(
 	/*
  * Copies only locked inode state and keeps a single image for identical
 	 * parents. */
-	ms = state(old_directory->i_mount);
 
 	/* Handles the ms condition. */
+	ms = state(old_directory->i_mount);
 	if (!ms->writable)
 		return EROFS;
 	memcpy(&group->old_image, info(old_directory),
@@ -7930,10 +8015,10 @@ rename_group_locked(
 
 	/* Validates all link transitions before editing namespace bytes. */
 	if (source->i_linkcount == 0 ||
-	    (target != NULL && target->i_linkcount == 0))
-
+	    (target != NULL && target->i_linkcount == 0)) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Handles the moving directory condition. */
 	if (moving_directory && old_directory != new_directory) {
@@ -7971,22 +8056,22 @@ rename_group_locked(
 	/*
  * Removes the old name first so a full same-parent directory can reuse
 	 * its space. */
+
+	/* Checks the operation status. */
 	error = metadata_image_get(&group->images,
 				   info(old_directory)->direct[0], &old_block);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = directory_image_change(old_image, old_block, old_name,
 				       (uint32_t)source->i_ino, 0, 0);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = metadata_image_get(&group->images,
-				   info(new_directory)->direct[0], &new_block);
 
 	/* Checks the operation status. */
+	error = metadata_image_get(&group->images,
+				   info(new_directory)->direct[0], &new_block);
 	if (error != 0)
 		return error;
 
@@ -8008,18 +8093,17 @@ rename_group_locked(
  * Reparents a moved directory in the same transaction as its visible
 	 * names. */
 	if (moving_directory && old_directory != new_directory) {
+		/* Checks the operation status. */
 		error = metadata_image_get(
 			&group->images, info(source)->direct[0], &child_block);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
+
+		/* Checks the operation status. */
 		error = directory_image_change(source, child_block, &dotdot,
 					       (uint32_t)old_directory->i_ino,
 					       (uint32_t)new_directory->i_ino,
 					       4);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 	}
@@ -8027,30 +8111,29 @@ rename_group_locked(
 	/*
  * Merges all changed dinodes without reloading shared physical blocks.
 	 */
-	error = metadata_image_inode(&group->images, old_image);
 
 	/* Checks the operation status. */
+	error = metadata_image_inode(&group->images, old_image);
 	if (error != 0)
 		return error;
 
 	/* Handles the new image condition. */
 	if (new_image != old_image) {
-		error = metadata_image_inode(&group->images, new_image);
-
 		/* Checks the operation status. */
+		error = metadata_image_inode(&group->images, new_image);
 		if (error != 0)
 			return error;
 	}
 
 	/* Handles the target availability. */
 	if (target != NULL) {
+		/* Checks the operation status. */
 		error = metadata_image_inode(&group->images,
 					     &group->target_image.inode);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 	}
+
 	error = metadata_group_commit(
 		old_directory->i_mount, group->images.extents,
 		group->images.count, NULL, &group->outcome);
@@ -8121,10 +8204,10 @@ rename_group(
 	*handled = 1;
 	/* Handles the source condition. */
 	if (source == old_directory || source == new_directory ||
-	    target == old_directory || target == new_directory)
-
+	    target == old_directory || target == new_directory) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/*
  * Counts distinct blocks so shared dinodes do not unnecessarily exhaust
@@ -8133,9 +8216,9 @@ rename_group(
 	fragments[1] = info(new_directory)->direct[0];
 	fragments[2] = inode_fragment(old_directory);
 	fragments[3] = inode_fragment(new_directory);
-	count = 4;
 
 	/* Handles the source condition. */
+	count = 4;
 	if (source->i_type == INODE_DIR && old_directory != new_directory)
 		fragments[count++] = info(source)->direct[0];
 
@@ -8160,9 +8243,9 @@ rename_group(
 		if (j == n)
 			unique++;
 	}
-	bytes = unique * ms->super.bsize;
 
 	/* Handles the ms condition. */
+	bytes = unique * ms->super.bsize;
 	if (ms->journal.sector_count <= 2U ||
 	    bytes / UFS_SECTOR_SIZE > UFS_JOURNAL_GROUP_SECTORS ||
 	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U) {
@@ -8172,9 +8255,9 @@ rename_group(
 	}
 
 	/* Allocates the operation and its exact private block storage. */
-	group = kern_calloc(1, sizeof(*group));
 
 	/* Handles the group availability. */
+	group = kern_calloc(1, sizeof(*group));
 	if (group == NULL)
 		return ENOMEM;
 	group->memory = kern_malloc(bytes);
@@ -8186,12 +8269,13 @@ rename_group(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	metadata_images_init(&group->images, old_directory->i_mount,
 			     group->memory, bytes);
 	locks[0] = old_directory;
-	lock_count = 1;
 
 	/* Handles the new directory condition. */
+	lock_count = 1;
 	if (new_directory != old_directory)
 		locks[lock_count++] = new_directory;
 	locks[lock_count++] = source;
@@ -8207,8 +8291,10 @@ rename_group(
 	for (n = 0; n < lock_count; n++)
 		mutex_lock(&locks[n]->i_lock);
 	mutex_lock(&ms->lock);
+
 	error = rename_group_locked(old_directory, old_name, new_directory,
 				    new_name, source, target, group);
+
 	mutex_unlock(&ms->lock);
 
 	/*
@@ -8234,6 +8320,7 @@ rename_group(
 		    old_directory != new_directory)
 			inode_dir_changed(source);
 	}
+
 	kern_free(group->memory);
 	kern_free(group);
 
@@ -8277,9 +8364,9 @@ creation_group_locked(
 	int is_directory;
 
 	/* Rejects stale identities before editing either private dinode. */
-	ms = state(directory->i_mount);
 
 	/* Handles the ms condition. */
+	ms = state(directory->i_mount);
 	if (!ms->writable)
 		return EROFS;
 
@@ -8287,13 +8374,13 @@ creation_group_locked(
 	if (directory->i_type != INODE_DIR || target->i_linkcount != 0 ||
 	    target->i_ino <= UFS_ROOT_INO || target->i_ino > UINT32_MAX ||
 	    inode_type_mode(target->i_type) == 0 ||
-	    info(directory)->direct[0] == 0)
-
+	    info(directory)->direct[0] == 0) {
 		/* Returns the computed result. */
 		return EIO;
-	is_directory = target->i_type == INODE_DIR;
+	}
 
 	/* Handles the directory condition. */
+	is_directory = target->i_type == INODE_DIR;
 	if (is_directory && directory->i_linkcount == UINT16_MAX)
 		return EMLINK;
 
@@ -8308,32 +8395,32 @@ creation_group_locked(
 	/* Handles the directory condition. */
 	if (is_directory)
 		group->directory_image.inode.i_linkcount++;
+
+	/* Checks the operation status. */
 	error = metadata_image_get(&group->images, info(directory)->direct[0],
 				   &group->directory);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = directory_image_insert(&group->directory_image.inode, name,
-				       target, group->directory);
 
 	/* Checks the operation status. */
+	error = directory_image_insert(&group->directory_image.inode, name,
+				       target, group->directory);
 	if (error != 0)
 		return error;
 
 	/*
  * Merges shared parent and child slots before issuing any home
 	 * mutation. */
+
+	/* Checks the operation status. */
 	error = metadata_image_inode(&group->images,
 				     &group->directory_image.inode);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = metadata_image_inode(&group->images,
-				     &group->target_image.inode);
 
 	/* Checks the operation status. */
+	error = metadata_image_inode(&group->images,
+				     &group->target_image.inode);
 	if (error != 0)
 		return error;
 	error = metadata_group_commit(directory->i_mount, group->images.extents,
@@ -8381,18 +8468,18 @@ creation_group(
 	if (directory == target || directory->i_mount != target->i_mount)
 		return EINVAL;
 	ms = state(directory->i_mount);
-	bytes = 3U * ms->super.bsize;
 
 	/* Handles the ms condition. */
+	bytes = 3U * ms->super.bsize;
 	if (!ms->journal_enabled || ms->journal.sector_count <= 2U ||
 	    bytes / UFS_SECTOR_SIZE > UFS_JOURNAL_GROUP_SECTORS ||
-	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U)
-
+	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U) {
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
-	group = kern_calloc(1, sizeof(*group));
+	}
 
 	/* Handles the group availability. */
+	group = kern_calloc(1, sizeof(*group));
 	if (group == NULL)
 		return ENOMEM;
 	group->memory = kern_malloc(bytes);
@@ -8411,13 +8498,12 @@ creation_group(
 	metadata_images_init(&group->images, directory->i_mount, group->memory,
 			     bytes);
 	mutex_lock(&directory->i_lock);
-	error = 0;
 
 	/* Checks the info result. */
+	error = 0;
 	if (info(directory)->direct[0] == 0) {
-		error = directory_backing_group(directory, &handled);
-
 		/* Checks the operation status. */
+		error = directory_backing_group(directory, &handled);
 		if (error == 0 && !handled)
 			error = EOPNOTSUPP;
 	}
@@ -8430,7 +8516,9 @@ creation_group(
 		mutex_unlock(&ms->lock);
 		mutex_unlock(&target->i_lock);
 	}
+
 	mutex_unlock(&directory->i_lock);
+
 	*outcome = group->outcome;
 
 	/*
@@ -8440,6 +8528,7 @@ creation_group(
 		namecache_remove(directory, name);
 		inode_dir_changed(directory);
 	}
+
 	kern_free(group->memory);
 	kern_free(group);
 
@@ -8468,9 +8557,9 @@ creation_publish(
 
 	/* Returns ownership to the generic successful-creation wrapper. */
 	*result = NULL;
-	error = creation_group(directory, name, target, &outcome);
 
 	/* Checks the operation status. */
+	error = creation_group(directory, name, target, &outcome);
 	if (error == 0) {
 		*result = target;
 		/* Reports successful completion. */
@@ -8491,10 +8580,10 @@ creation_publish(
 	/*
  * Reclaims only a child whose name publication was definitely not
 	 * admitted. */
-	error = discard_new_inode_after_error(
-		target, target->i_type == INODE_DIR, error);
 
 	/* Reports the failure. */
+	error = discard_new_inode_after_error(
+		target, target->i_type == INODE_DIR, error);
 	if (error != 0)
 		return error;
 
@@ -8526,9 +8615,9 @@ ufs_create(
 		error = EROFS;
 		goto out;
 	}
-	error = ufs_lookup(directory, name, &existing);
 
 	/* Checks the operation status. */
+	error = ufs_lookup(directory, name, &existing);
 	if (error == 0) {
 		inode_release(existing);
 		error = EEXIST;
@@ -8538,9 +8627,9 @@ ufs_create(
 	/* Checks the operation status. */
 	if (error != ENOENT)
 		goto out;
-	error = new_inode(directory, request, 1, &inode);
 
 	/* Checks the operation status. */
+	error = new_inode(directory, request, 1, &inode);
 	if (error)
 		goto out;
 
@@ -8549,15 +8638,17 @@ ufs_create(
 		error = creation_publish(directory, name, inode, result);
 		goto out;
 	}
-	error = dir_add(directory, name, (uint32_t)inode->i_ino, 8);
 
 	/* Checks the operation status. */
+	error = dir_add(directory, name, (uint32_t)inode->i_ino, 8);
 	if (error) {
 		error = discard_new_inode_after_error(inode, 0, error);
 		goto out;
 	}
+
 	*result = inode;
 out:
+
 	mutex_unlock(&ms->namespace_lock);
 
 	/* Reports the failure. */
@@ -8598,9 +8689,9 @@ ufs_mkdir(
 		error = EROFS;
 		goto out;
 	}
-	error = ufs_lookup(directory, name, &existing);
 
 	/* Checks the operation status. */
+	error = ufs_lookup(directory, name, &existing);
 	if (error == 0) {
 		inode_release(existing);
 		error = EEXIST;
@@ -8610,14 +8701,14 @@ ufs_mkdir(
 	/* Checks the operation status. */
 	if (error != ENOENT)
 		goto out;
-	error = new_inode(directory, request, 2, &inode);
 
 	/* Checks the operation status. */
+	error = new_inode(directory, request, 2, &inode);
 	if (error)
 		goto out;
-	error = dir_add(inode, &dot, (uint32_t)inode->i_ino, 4);
 
 	/* Checks the operation status. */
+	error = dir_add(inode, &dot, (uint32_t)inode->i_ino, 4);
 	if (error == 0)
 		error = dir_add(inode, &dotdot, (uint32_t)directory->i_ino, 4);
 
@@ -8636,10 +8727,13 @@ ufs_mkdir(
 		error = discard_new_inode_after_error(inode, 1, error);
 		goto out;
 	}
+
 	mutex_lock(&directory->i_lock);
+
 	old_directory_links = directory->i_linkcount;
 	directory->i_linkcount++;
 	error = persist_inode(directory);
+
 	mutex_unlock(&directory->i_lock);
 
 	/* Checks the operation status. */
@@ -8648,9 +8742,8 @@ ufs_mkdir(
 	} else {
 		name_removed = 0;
 
-		rollback_error = dir_remove(directory, name, &removed);
-
 		/* Checks the operation status. */
+		rollback_error = dir_remove(directory, name, &removed);
 		if (rollback_error == 0) {
 			name_removed = 1;
 
@@ -8671,9 +8764,8 @@ ufs_mkdir(
 			ms->writable = 0;
 			inode_release(inode);
 		} else {
-			cleanup = discard_new_inode(inode, 1);
-
 			/* Checks the operation status. */
+			cleanup = discard_new_inode(inode, 1);
 			if (rollback_error == 0 && cleanup != 0)
 				rollback_error = cleanup;
 
@@ -8686,7 +8778,9 @@ ufs_mkdir(
 		if (rollback_error != 0)
 			error = rollback_error;
 	}
+
 out:
+
 	mutex_unlock(&ms->namespace_lock);
 
 	/* Reports the failure. */
@@ -8714,10 +8808,10 @@ ufs_mknod(
 	/* Handles the request availability. */
 	if (request == NULL ||
 	    (request->type != INODE_FIFO && request->type != INODE_SOCKET &&
-	     request->type != INODE_CHAR && request->type != INODE_BLOCK))
-
+	     request->type != INODE_CHAR && request->type != INODE_BLOCK)) {
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
+	}
 	*result = NULL;
 	/* Handles the ms condition. */
 	if (!ms->writable)
@@ -8729,9 +8823,9 @@ ufs_mknod(
 		error = EROFS;
 		goto out;
 	}
-	error = ufs_lookup(directory, name, &existing);
 
 	/* Checks the operation status. */
+	error = ufs_lookup(directory, name, &existing);
 	if (error == 0) {
 		inode_release(existing);
 		error = EEXIST;
@@ -8741,9 +8835,9 @@ ufs_mknod(
 	/* Checks the operation status. */
 	if (error != ENOENT)
 		goto out;
-	error = new_inode(directory, request, 1, &inode);
 
 	/* Checks the operation status. */
+	error = new_inode(directory, request, 1, &inode);
 	if (error != 0)
 		goto out;
 
@@ -8752,16 +8846,18 @@ ufs_mknod(
 		error = creation_publish(directory, name, inode, result);
 		goto out;
 	}
-	error = dir_add(directory, name, (uint32_t)inode->i_ino,
-			dir_type(request->type));
 
 	/* Checks the operation status. */
+	error = dir_add(directory, name, (uint32_t)inode->i_ino,
+			dir_type(request->type));
 	if (error != 0) {
 		error = discard_new_inode_after_error(inode, 0, error);
 		goto out;
 	}
+
 	*result = inode;
 out:
+
 	mutex_unlock(&ms->namespace_lock);
 
 	/* Reports the failure. */
@@ -8796,9 +8892,9 @@ ufs_unlink(
 		error = EROFS;
 		goto out;
 	}
-	error = ufs_lookup(directory, name, &target);
 
 	/* Checks the operation status. */
+	error = ufs_lookup(directory, name, &target);
 	if (error)
 		goto out;
 
@@ -8807,6 +8903,7 @@ ufs_unlink(
 		error = EISDIR;
 		goto out;
 	}
+
 	error = remove_group(directory, name, target, &handled);
 
 	/* Handles the handled condition. */
@@ -8814,9 +8911,9 @@ ufs_unlink(
 		goto out;
 	old_links = target->i_linkcount;
 	old_flags = target->i_flags;
-	error = dir_remove(directory, name, &number);
 
 	/* Checks the operation status. */
+	error = dir_remove(directory, name, &number);
 	if (error == 0) {
 		removed = 1;
 		mutex_lock(&target->i_lock);
@@ -8832,6 +8929,7 @@ ufs_unlink(
 			if (target->i_linkcount == 0)
 				target->i_flags |= INODE_DEAD;
 		}
+
 		mutex_unlock(&target->i_lock);
 	}
 
@@ -8853,8 +8951,10 @@ ufs_unlink(
 		if (rollback_error != 0)
 			ms->writable = 0;
 	}
+
 out:
 	inode_release(target);
+
 	mutex_unlock(&ms->namespace_lock);
 
 	/* Reports the failure. */
@@ -8917,9 +9017,9 @@ ufs_rmdir(
 		error = EROFS;
 		goto out;
 	}
-	error = ufs_lookup(directory, name, &target);
 
 	/* Checks the operation status. */
+	error = ufs_lookup(directory, name, &target);
 	if (error)
 		goto out;
 
@@ -8928,13 +9028,14 @@ ufs_rmdir(
 		error = ENOTDIR;
 		goto out;
 	}
-	empty = directory_empty(target);
 
 	/* Handles the empty condition. */
+	empty = directory_empty(target);
 	if (empty <= 0) {
 		error = empty == 0 ? ENOTEMPTY : -empty;
 		goto out;
 	}
+
 	error = remove_group(directory, name, target, &handled);
 
 	/* Handles the handled condition. */
@@ -8943,9 +9044,9 @@ ufs_rmdir(
 	old_target_links = target->i_linkcount;
 	old_target_flags = target->i_flags;
 	old_directory_links = directory->i_linkcount;
-	error = dir_remove(directory, name, &number);
 
 	/* Checks the operation status. */
+	error = dir_remove(directory, name, &number);
 	if (error == 0) {
 		removed = 1;
 		mutex_lock(&target->i_lock);
@@ -8988,8 +9089,10 @@ ufs_rmdir(
 		if (rollback_error != 0)
 			ms->writable = 0;
 	}
+
 out:
 	inode_release(target);
+
 	mutex_unlock(&ms->namespace_lock);
 
 	/* Reports the failure. */
@@ -9047,10 +9150,10 @@ ufs_rename(
 	if (old_directory == new_directory &&
 	    old_name->cn_namelen == new_name->cn_namelen &&
 	    memcmp(old_name->cn_nameptr, new_name->cn_nameptr,
-		   old_name->cn_namelen) == 0)
-
+		   old_name->cn_namelen) == 0) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	mutex_lock(&ms->namespace_lock);
 
@@ -9059,14 +9162,14 @@ ufs_rename(
 		error = EROFS;
 		goto out;
 	}
-	error = ufs_lookup(old_directory, old_name, &source);
 
 	/* Checks the operation status. */
+	error = ufs_lookup(old_directory, old_name, &source);
 	if (error != 0)
 		goto out;
-	error = ufs_lookup(new_directory, new_name, &target);
 
 	/* Checks the operation status. */
+	error = ufs_lookup(new_directory, new_name, &target);
 	if (error == 0) {
 		target_exists = 1;
 
@@ -9092,9 +9195,8 @@ ufs_rename(
 
 		/* Handles the target condition. */
 		if (target->i_type == INODE_DIR) {
-			empty = directory_empty(target);
-
 			/* Handles the empty condition. */
+			empty = directory_empty(target);
 			if (empty <= 0) {
 				error = empty == 0 ? ENOTEMPTY : -empty;
 				goto out;
@@ -9105,6 +9207,7 @@ ufs_rename(
 	} else {
 		goto out;
 	}
+
 	error = rename_group(old_directory, old_name, new_directory, new_name,
 			     source, target, &handled);
 
@@ -9134,9 +9237,9 @@ ufs_rename(
 	/* Checks the operation status. */
 	if (error != 0)
 		goto out;
-	error = dir_remove(old_directory, old_name, &removed);
 
 	/* Checks the operation status. */
+	error = dir_remove(old_directory, old_name, &removed);
 	if (error != 0) {
 		/* Handles the target exists condition. */
 		if (target_exists) {
@@ -9147,6 +9250,7 @@ ufs_rename(
 			(void)dir_remove(new_directory, new_name,
 					 &ignored_local1);
 		}
+
 		goto out;
 	}
 
@@ -9155,15 +9259,15 @@ ufs_rename(
 		error = EIO;
 		goto out;
 	}
+
 	namespace_committed = 1;
 
 	/* Handles the source condition. */
 	if (source->i_type == INODE_DIR && old_directory != new_directory) {
+		/* Checks the operation status. */
 		error = dir_replace(source, &dotdot_local,
 				    (uint32_t)new_directory->i_ino, 4,
 				    &old_parent, &old_parent_type);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto out;
 		dotdot_changed = 1;
@@ -9228,6 +9332,7 @@ ufs_rename(
 			mutex_unlock(&old_directory->i_lock);
 		}
 	}
+
 out:
 
 	/* Checks the operation status. */
@@ -9269,6 +9374,7 @@ out:
 				rollback_error = EIO;
 			mutex_unlock(&target->i_lock);
 		}
+
 		mutex_lock(&old_directory->i_lock);
 		old_directory->i_linkcount = old_old_directory_links;
 
@@ -9292,8 +9398,10 @@ out:
 		if (rollback_error != 0)
 			ms->writable = 0;
 	}
+
 	inode_release(target);
 	inode_release(source);
+
 	mutex_unlock(&ms->namespace_lock);
 
 	/* Reports the failure. */
@@ -9333,6 +9441,7 @@ ufs_link(
 		error = EROFS;
 		goto out;
 	}
+
 	mutex_lock(&target->i_lock);
 
 	/* Handles the target condition. */
@@ -9341,10 +9450,11 @@ ufs_link(
 		error = EMLINK;
 		goto out;
 	}
+
 	mutex_unlock(&target->i_lock);
-	error = ufs_lookup(directory, name, &existing);
 
 	/* Checks the operation status. */
+	error = ufs_lookup(directory, name, &existing);
 	if (error == 0) {
 		inode_release(existing);
 		error = EEXIST;
@@ -9354,15 +9464,15 @@ ufs_link(
 	/* Checks the operation status. */
 	if (error != ENOENT)
 		goto out;
-	error = link_group(directory, name, target, &handled);
 
 	/* Handles the handled condition. */
+	error = link_group(directory, name, target, &handled);
 	if (handled)
 		goto out;
-	error = dir_add(directory, name, (uint32_t)target->i_ino,
-			dir_type(target->i_type));
 
 	/* Checks the operation status. */
+	error = dir_add(directory, name, (uint32_t)target->i_ino,
+			dir_type(target->i_type));
 	if (error == 0) {
 		/*
  * inode_link() applies the in-memory increment after this
@@ -9390,7 +9500,9 @@ ufs_link(
 				ms->writable = 0;
 		}
 	}
+
 out:
+
 	mutex_unlock(&ms->namespace_lock);
 
 	/* Reports the failure. */
@@ -9419,10 +9531,10 @@ ufs_symlink(
 
 	/* Checks the state result. */
 	if (length > state(directory->i_mount)->super.maxsymlinklen ||
-	    length > 120U)
-
+	    length > 120U) {
 		/* Returns the computed result. */
 		return ENAMETOOLONG;
+	}
 	*result = NULL;
 	mutex_lock(&ms->namespace_lock);
 
@@ -9431,9 +9543,9 @@ ufs_symlink(
 		error = EROFS;
 		goto out;
 	}
-	error = ufs_lookup(directory, name, &existing);
 
 	/* Checks the operation status. */
+	error = ufs_lookup(directory, name, &existing);
 	if (error == 0) {
 		inode_release(existing);
 		error = EEXIST;
@@ -9443,16 +9555,16 @@ ufs_symlink(
 	/* Checks the operation status. */
 	if (error != ENOENT)
 		goto out;
-	error = new_inode(directory, request, 1, &inode);
 
 	/* Checks the operation status. */
+	error = new_inode(directory, request, 1, &inode);
 	if (error)
 		goto out;
 	inode->i_size = (off_t)length;
 	memcpy(info(inode)->shortlink, target, length);
-	error = persist_inode(inode);
 
 	/* Checks the operation status. */
+	error = persist_inode(inode);
 	if (error == 0 && inode->i_linkcount == 0) {
 		error = creation_publish(directory, name, inode, result);
 		goto out;
@@ -9467,8 +9579,10 @@ ufs_symlink(
 		error = discard_new_inode_after_error(inode, 0, error);
 		goto out;
 	}
+
 	*result = inode;
 out:
+
 	mutex_unlock(&ms->namespace_lock);
 
 	/* Reports the failure. */
@@ -9585,9 +9699,9 @@ ufs_pwrite_context(
 
 	(void)flags;
 	(void)credential;
-	error = io_context_validate(context);
 
 	/* Checks the operation status. */
+	error = io_context_validate(context);
 	if (error != 0)
 		return -error;
 
@@ -9657,9 +9771,8 @@ ufs_readlink(
 	/* Handles the uint64 t condition. */
 	if ((uint64_t)inode->i_size <= ms->super.maxsymlinklen &&
 	    inode->i_size <= 120) {
-		n = (size_t)inode->i_size;
-
 		/* Checks the current item count. */
+		n = (size_t)inode->i_size;
 		if (n > length)
 			n = length;
 		memcpy(buffer, info(inode)->shortlink, n);
@@ -9700,10 +9813,10 @@ extattr_name(
 
 	/* Handles the name availability. */
 	if (name == NULL || name_space == NULL || stored == NULL ||
-	    stored_length == NULL)
-
+	    stored_length == NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Selects the matching prefix. */
 	if (strncmp(name, "user.", 5) == 0) {
@@ -9711,9 +9824,9 @@ extattr_name(
 		part = name + 5;
 	} else if (strncmp(name, "system.", 7) == 0) {
 		*name_space = UFS_EXTATTR_NAMESPACE_SYSTEM;
-		part = name + 7;
 
 		/* Selects the matching prefix. */
+		part = name + 7;
 		if (strncmp(part, "security.", 9) == 0)
 			return EINVAL;
 	} else if (strncmp(name, "security.", 9) == 0) {
@@ -9723,6 +9836,7 @@ extattr_name(
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
 	}
+
 	*stored_length = strlen(part);
 	/* Handles the stored length condition. */
 	if (*stored_length == 0 || *stored_length > 255U)
@@ -9765,17 +9879,16 @@ extattr_load(
 	/* Handles the block count condition. */
 	if (block_count == 0 || block_count > UFS_NXADDR)
 		return EIO;
-	area = kern_calloc(block_count, ms->super.bsize);
 
 	/* Handles the area availability. */
+	area = kern_calloc(block_count, ms->super.bsize);
 	if (area == NULL)
 		return ENOMEM;
 	/* Process each remaining element. */
 	for (index = 0; index < block_count; index++) {
+		/* Checks the operation status. */
 		error = read_block(inode->i_mount, ui->extattr[index],
 				   area + index * ms->super.bsize);
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			kern_free(area);
 
@@ -9790,9 +9903,9 @@ extattr_load(
 		record = drv_ufs_get32(area, offset, ms->super.swapped);
 		padding = area[offset + 5U];
 		name_length = area[offset + 6U];
-		base = extattr_align(UFS_EXTATTR_HEADER_SIZE + name_length);
 
 		/* Handles the record condition. */
+		base = extattr_align(UFS_EXTATTR_HEADER_SIZE + name_length);
 		if (record < base || (record & 7U) != 0 ||
 		    record > ui->extattr_size - offset ||
 		    padding > record - base ||
@@ -9801,6 +9914,7 @@ extattr_load(
 			goto invalid;
 		offset += record;
 	}
+
 	*result = area;
 	/* Reports successful completion. */
 	return 0;
@@ -9863,6 +9977,7 @@ extattr_find(
 			/* Reports successful completion. */
 			return 0;
 		}
+
 		offset += record;
 	}
 
@@ -9896,16 +10011,16 @@ extattr_publish(
 	old_ext[0] = ui->extattr[0];
 	old_ext[1] = ui->extattr[1];
 	old_blocks = ui->blocks;
+
+	/* Handles the uint64 t condition. */
 	old_count = old_size == 0 ? 0U
 				  : (old_size + ms->super.bsize - 1U) /
 					    ms->super.bsize;
-
-	/* Handles the uint64 t condition. */
 	if ((uint64_t)old_count * (ms->super.bsize / UFS_SECTOR_SIZE) >
-	    old_blocks)
-
+	    old_blocks) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Handles the old size condition. */
 	if (old_size != 0)
@@ -9934,15 +10049,16 @@ extattr_publish(
 			/* Returns the computed result. */
 			return error;
 		}
+
 		ui->extattr_size = 0;
 		ui->extattr[0] = 0;
 		ui->extattr[1] = 0;
 		ui->blocks = old_blocks -
 			     (uint64_t)old_count *
 				     (ms->super.bsize / UFS_SECTOR_SIZE);
-		error = persist_inode(inode);
 
 		/* Checks the operation status. */
+		error = persist_inode(inode);
 		if (error == 0)
 			error = disk_sync(inode->i_mount->m_disk);
 
@@ -9961,6 +10077,7 @@ extattr_publish(
 			/* Returns the computed result. */
 			return error;
 		}
+
 		/* Process each remaining element. */
 		for (index = 0; index < old_count; index++) {
 			/* Checks the free block result. */
@@ -9972,11 +10089,13 @@ extattr_publish(
 				break;
 			}
 		}
+
 		kern_free(old_area);
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	error = xattr_existing_group(inode, area, length, &handled);
 
 	/* Handles the handled condition. */
@@ -9999,31 +10118,31 @@ extattr_publish(
 			return error;
 		}
 	}
-	block = kern_calloc(1, ms->super.bsize);
 
 	/* Handles the block availability. */
+	block = kern_calloc(1, ms->super.bsize);
 	if (block == NULL) {
 		kern_free(old_area);
 
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	memcpy(block, area, length);
 
 	/* Handles the old ext condition. */
 	if (old_ext[0] == 0) {
+		/* Checks the operation status. */
 		error = allocate_block(inode->i_mount, inode->i_uid,
 				       inode->i_gid, &new_fragment);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto out;
 	} else {
 		new_fragment = old_ext[0];
 	}
-	error = write_block(inode->i_mount, new_fragment, block);
 
 	/* Checks the operation status. */
+	error = write_block(inode->i_mount, new_fragment, block);
 	if (error != 0)
 		goto rollback_data;
 	ui->extattr_size = (uint32_t)length;
@@ -10032,9 +10151,9 @@ extattr_publish(
 	ui->blocks = old_blocks -
 		     (uint64_t)old_count * (ms->super.bsize / UFS_SECTOR_SIZE) +
 		     ms->super.bsize / UFS_SECTOR_SIZE;
-	error = persist_inode(inode);
 
 	/* Checks the operation status. */
+	error = persist_inode(inode);
 	if (error == 0)
 		error = disk_sync(inode->i_mount->m_disk);
 
@@ -10049,15 +10168,16 @@ extattr_publish(
 		ms->writable = 0;
 		error = rollback;
 	}
+
 	goto out;
 rollback_metadata:
 	ui->extattr_size = old_size;
 	ui->extattr[0] = old_ext[0];
 	ui->extattr[1] = old_ext[1];
 	ui->blocks = old_blocks;
-	rollback = persist_inode(inode);
 
 	/* Handles the rollback condition. */
+	rollback = persist_inode(inode);
 	if (rollback == 0)
 		rollback = disk_sync(inode->i_mount->m_disk);
 
@@ -10069,6 +10189,7 @@ rollback_metadata:
 		ms->writable = 0;
 		goto out;
 	}
+
 rollback_data:
 
 	/* Handles the old ext condition. */
@@ -10107,15 +10228,14 @@ ufs_getxattr(
 	size_t area_length, content_at, content_length;
 	int error;
 
-	error = extattr_name(name, &name_space, &stored, &stored_length);
-
 	/* Checks the operation status. */
+	error = extattr_name(name, &name_space, &stored, &stored_length);
 	if (error != 0)
 		return -error;
 	mutex_lock(&inode->i_lock);
-	error = extattr_load(inode, &area, &area_length);
 
 	/* Checks the operation status. */
+	error = extattr_load(inode, &area, &area_length);
 	if (error == 0) {
 		error = extattr_find(inode, area, area_length, name_space,
 				     stored, stored_length, NULL, NULL,
@@ -10129,7 +10249,9 @@ ufs_getxattr(
 	/* Checks the operation status. */
 	if (error == 0 && value != NULL && content_length != 0)
 		memcpy(value, area + content_at, content_length);
+
 	mutex_unlock(&inode->i_lock);
+
 	kern_free(area);
 
 	/* Returns the computed result. */
@@ -10159,28 +10281,28 @@ ufs_setxattr(
 	/* Handles the value availability. */
 	if (value == NULL && size != 0)
 		return EINVAL;
-	error = extattr_name(name, &name_space, &stored, &stored_length);
 
 	/* Checks the operation status. */
+	error = extattr_name(name, &name_space, &stored, &stored_length);
 	if (error != 0)
 		return error;
-	base = extattr_align(UFS_EXTATTR_HEADER_SIZE + stored_length);
 
 	/* Checks the current data size. */
+	base = extattr_align(UFS_EXTATTR_HEADER_SIZE + stored_length);
 	if (size > ms->super.bsize || base > ms->super.bsize - size)
 		return E2BIG;
 	new_record = extattr_align(base + size);
 	padding = new_record - base - size;
 	mutex_lock(&inode->i_lock);
-	error = extattr_load(inode, &area, &area_length);
 
 	/* Checks the operation status. */
+	error = extattr_load(inode, &area, &area_length);
 	if (error != 0)
 		goto out;
-	found = extattr_find(inode, area, area_length, name_space, stored,
-			     stored_length, &at, &old_record, NULL, NULL) == 0;
 
 	/* Checks the active flags. */
+	found = extattr_find(inode, area, area_length, name_space, stored,
+			     stored_length, &at, &old_record, NULL, NULL) == 0;
 	if ((flags & INODE_XATTR_CREATE) != 0 && found) {
 		error = EEXIST;
 		goto out;
@@ -10191,16 +10313,16 @@ ufs_setxattr(
 		error = ENODATA;
 		goto out;
 	}
-	new_length = area_length - (found ? old_record : 0U) + new_record;
 
 	/* Handles the new length condition. */
+	new_length = area_length - (found ? old_record : 0U) + new_record;
 	if (new_length > ms->super.bsize) {
 		error = ENOSPC;
 		goto out;
 	}
-	updated = kern_calloc(1, ms->super.bsize);
 
 	/* Handles the updated availability. */
+	updated = kern_calloc(1, ms->super.bsize);
 	if (updated == NULL) {
 		error = ENOMEM;
 		goto out;
@@ -10225,9 +10347,12 @@ ufs_setxattr(
 		       area + at + (found ? old_record : 0U),
 		       area_length - at - (found ? old_record : 0U));
 	}
+
 	error = extattr_publish(inode, updated, new_length);
 out:
+
 	mutex_unlock(&inode->i_lock);
+
 	kern_free(updated);
 	kern_free(area);
 
@@ -10259,9 +10384,9 @@ ufs_listxattr(
 	int error;
 
 	mutex_lock(&inode->i_lock);
-	error = extattr_load(inode, &area, &area_length);
 
 	/* Checks the operation status. */
+	error = extattr_load(inode, &area, &area_length);
 	if (error != 0)
 		goto out;
 	/* Process each remaining element. */
@@ -10299,11 +10424,15 @@ ufs_listxattr(
 			memcpy(list + needed + prefix_length, disk_name, nlen);
 			list[needed + prefix_length + nlen] = '\0';
 		}
+
 		needed += prefix_length + nlen + 1U;
 		offset += record;
 	}
+
 out:
+
 	mutex_unlock(&inode->i_lock);
+
 	kern_free(area);
 
 	/* Returns the computed result. */
@@ -10327,30 +10456,29 @@ ufs_removexattr(
 	/* Handles the ms condition. */
 	if (!ms->writable)
 		return EROFS;
-	error = extattr_name(name, &name_space, &stored, &stored_length);
 
 	/* Checks the operation status. */
+	error = extattr_name(name, &name_space, &stored, &stored_length);
 	if (error != 0)
 		return error;
 	mutex_lock(&inode->i_lock);
-	error = extattr_load(inode, &area, &area_length);
 
 	/* Checks the operation status. */
+	error = extattr_load(inode, &area, &area_length);
 	if (error != 0)
 		goto out;
+
+	/* Checks the operation status. */
 	error = extattr_find(inode, area, area_length, name_space, stored,
 			     stored_length, &at, &record, NULL, NULL);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto out;
-	new_length = area_length - record;
 
 	/* Handles the new length condition. */
+	new_length = area_length - record;
 	if (new_length != 0) {
-		updated = kern_calloc(1, ms->super.bsize);
-
 		/* Handles the updated availability. */
+		updated = kern_calloc(1, ms->super.bsize);
 		if (updated == NULL) {
 			error = ENOMEM;
 			goto out;
@@ -10366,9 +10494,12 @@ ufs_removexattr(
 			       area_length - at - record);
 		}
 	}
+
 	error = extattr_publish(inode, updated, new_length);
 out:
+
 	mutex_unlock(&inode->i_lock);
+
 	kern_free(updated);
 	kern_free(area);
 
@@ -10453,30 +10584,29 @@ ufs_setattr(
 
 	/* Checks the valid disk time result. */
 	if ((mask & INODE_ATTR_ATIME) != 0 &&
-	    !valid_disk_time(status->st_atime, atime_nsec))
-
+	    !valid_disk_time(status->st_atime, atime_nsec)) {
 		/* Returns the computed result. */
 		return EOVERFLOW;
+	}
 
 	/* Checks the valid disk time result. */
 	if ((mask & INODE_ATTR_MTIME) != 0 &&
-	    !valid_disk_time(status->st_mtime, mtime_nsec))
-
+	    !valid_disk_time(status->st_mtime, mtime_nsec)) {
 		/* Returns the computed result. */
 		return EOVERFLOW;
+	}
 
 	/* Checks the valid disk time result. */
 	if ((mask & INODE_ATTR_CTIME) != 0 &&
-	    !valid_disk_time(status->st_ctime, ctime_nsec))
-
+	    !valid_disk_time(status->st_ctime, ctime_nsec)) {
 		/* Returns the computed result. */
 		return EOVERFLOW;
+	}
 
 	/* Handles the mask condition. */
 	if ((mask & INODE_ATTR_SIZE) != 0) {
-		error = ufs_truncate(inode, status->st_size);
-
 		/* Checks the operation status. */
+		error = ufs_truncate(inode, status->st_size);
 		if (error != 0)
 			return error;
 	}
@@ -10490,6 +10620,7 @@ ufs_setattr(
 		/* Returns the computed result. */
 		return EROFS;
 	}
+
 	old_mode = inode->i_mode;
 	old_uid = inode->i_uid;
 	old_gid = inode->i_gid;
@@ -10503,6 +10634,8 @@ ufs_setattr(
 			(mask & INODE_ATTR_UID) != 0 ? status->st_uid : old_uid;
 		new_gid =
 			(mask & INODE_ATTR_GID) != 0 ? status->st_gid : old_gid;
+
+		/* Checks the operation status. */
 		error = quota_transfer_begin(
 			&state(inode->i_mount)->quota, old_uid, old_gid,
 			new_uid, new_gid,
@@ -10510,14 +10643,13 @@ ufs_setattr(
 				(state(inode->i_mount)->super.bsize /
 				 UFS_SECTOR_SIZE),
 			1, quota_now(), &quota_transfer_state);
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			mutex_unlock(&inode->i_lock);
 
 			/* Returns the computed result. */
 			return error;
 		}
+
 		quota_moved = old_uid != new_uid || old_gid != new_gid;
 	}
 
@@ -10552,9 +10684,9 @@ ufs_setattr(
 		inode->i_ctime.tv_sec = status->st_ctime;
 		inode->i_ctime.tv_nsec = ctime_nsec;
 	}
-	error = persist_inode(inode);
 
 	/* Checks the operation status. */
+	error = persist_inode(inode);
 	if (error != 0) {
 		/* Handles the quota moved condition. */
 		if (quota_moved)
@@ -10568,6 +10700,7 @@ ufs_setattr(
 	} else if (quota_moved) {
 		quota_transfer_commit(&quota_transfer_state);
 	}
+
 	mutex_unlock(&inode->i_lock);
 
 	/* Reports the failure. */
@@ -10598,9 +10731,11 @@ ufs_inode_sync(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	error = state(inode->i_mount)->writable ? persist_inode(inode)
 		: (inode->i_mount->m_flags & MOUNT_READ_ONLY) != 0 ? 0
 								   : EROFS;
+
 	mutex_unlock(&inode->i_lock);
 
 	/* Reports the failure. */
@@ -10658,22 +10793,24 @@ retire_inode_locked(
 	if (inode->i_ino <= UFS_ROOT_INO ||
 	    (uint64_t)inode->i_ino >= (uint64_t)ms->super.ncg * ms->super.ipg ||
 	    inode->i_linkcount != 0 || inode->i_size != 0 || ui->blocks != 0 ||
-	    ui->extattr_size != 0)
-
+	    ui->extattr_size != 0) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	/* Process each element required by the operation. */
 	for (n = 0; n < UFS_NDADDR; n++) {
 		/* Handles the ui condition. */
 		if (ui->direct[n] != 0)
 			return EIO;
 	}
+
 	/* Process each element required by the operation. */
 	for (n = 0; n < UFS_NIADDR; n++) {
 		/* Handles the ui condition. */
 		if (ui->indirect[n] != 0)
 			return EIO;
 	}
+
 	/* Process each element required by the operation. */
 	for (n = 0; n < UFS_NXADDR; n++) {
 		/* Handles the ui condition. */
@@ -10686,9 +10823,9 @@ retire_inode_locked(
 	 * edits. */
 	cg = inode->i_ino / ms->super.ipg;
 	local = inode->i_ino % ms->super.ipg;
-	error = load_cg_locked(inode->i_mount, cg);
 
 	/* Checks the operation status. */
+	error = load_cg_locked(inode->i_mount, cg);
 	if (error != 0)
 		return error;
 
@@ -10697,28 +10834,28 @@ retire_inode_locked(
 		return EIO;
 	free_inodes = drv_ufs_get32(ms->cg, UFS_CG_NIFREE, ms->super.swapped);
 	directories = drv_ufs_get32(ms->cg, UFS_CG_NDIR, ms->super.swapped);
-	is_directory = inode->i_type == INODE_DIR;
 
 	/* Handles the free inodes condition. */
+	is_directory = inode->i_type == INODE_DIR;
 	if (free_inodes >= ms->super.ipg ||
 	    ms->super.cstotal_nifree == UINT64_MAX ||
-	    (is_directory && (directories == 0 || ms->super.cstotal_ndir == 0)))
-
+	    (is_directory && (directories == 0 || ms->super.cstotal_ndir == 0))) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	memcpy(group->cg, ms->cg, ms->super.bsize);
 	memcpy(&group->image, ui, sizeof(group->image));
 	group->image.inode.i_mode = 0;
 	group->image.inode.i_type = INODE_NONE;
+
+	/* Checks the operation status. */
 	error = prepare_inode_locked(&group->image.inode, group->dinode,
 				     &fragment);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = prepare_super_summaries(inode->i_mount, group->summaries);
 
 	/* Checks the operation status. */
+	error = prepare_super_summaries(inode->i_mount, group->summaries);
 	if (error != 0)
 		return error;
 
@@ -10738,6 +10875,7 @@ retire_inode_locked(
 		drv_ufs_put64(group->summaries, UFS_FS_CSTOTAL_NDIR,
 			      ms->super.cstotal_ndir - 1U, ms->super.swapped);
 	}
+
 	extents[0].target = (cgstart(&ms->super, cg) + ms->super.cblkno)
 			    << ms->super.fsbtodb;
 	extents[0].sectors = ms->super.bsize / UFS_SECTOR_SIZE;
@@ -10770,10 +10908,10 @@ retire_inode_locked(
  * Prevents final-reference retry from writing an already
 		 * reusable identity. */
 		inode->i_ino = 0;
-		quota_error = quota_release(&ms->quota, inode->i_uid,
-					    inode->i_gid, 0, 1);
 
 		/* Checks the operation status. */
+		quota_error = quota_release(&ms->quota, inode->i_uid,
+					    inode->i_gid, 0, 1);
 		if (quota_error != 0) {
 			ms->writable = 0;
 
@@ -10813,19 +10951,19 @@ retire_inode_group(
 	/* Declines unsupported profiles before any metadata mutation. */
 	ms = state(inode->i_mount);
 	*handled = 0;
-	bytes = 2U * ms->super.bsize + UFS_SBLOCK_SIZE;
 
 	/* Handles the ms condition. */
+	bytes = 2U * ms->super.bsize + UFS_SBLOCK_SIZE;
 	if (!ms->journal_enabled || ms->journal.sector_count <= 2U ||
 	    bytes / UFS_SECTOR_SIZE > UFS_JOURNAL_GROUP_SECTORS ||
-	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U)
-
+	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	*handled = 1;
-	group = kern_calloc(1, sizeof(*group));
 
 	/* Handles the group availability. */
+	group = kern_calloc(1, sizeof(*group));
 	if (group == NULL)
 		return ENOMEM;
 	group->memory = kern_malloc(bytes);
@@ -10837,14 +10975,18 @@ retire_inode_group(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	group->cg = group->memory;
 	group->dinode = group->cg + ms->super.bsize;
 	group->summaries = group->dinode + ms->super.bsize;
 	mutex_lock(&inode->i_lock);
 	mutex_lock(&ms->lock);
+
 	error = retire_inode_locked(inode, group);
+
 	mutex_unlock(&ms->lock);
 	mutex_unlock(&inode->i_lock);
+
 	kern_free(group->memory);
 	kern_free(group);
 
@@ -10884,21 +11026,23 @@ reclaim_unlinked_inode(
 	/*
  * Keeps every remaining reference reachable until its own release
 	 * commits. */
-	error = ufs_truncate(inode, 0);
 
 	/* Checks the operation status. */
+	error = ufs_truncate(inode, 0);
 	if (error != 0)
 		return error;
 	mutex_lock(&inode->i_lock);
+
 	error = extattr_publish(inode, NULL, 0);
+
 	mutex_unlock(&inode->i_lock);
 
 	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = retire_inode_group(inode, &handled);
 
 	/* Handles the handled condition. */
+	error = retire_inode_group(inode, &handled);
 	if (handled)
 		return error;
 
@@ -10906,24 +11050,24 @@ reclaim_unlinked_inode(
  * Preserves the ordered retirement path for profiles outside group
 	 * admission. */
 	if (inode->i_type == INODE_DIR) {
+		/* Checks the operation status. */
 		error = adjust_directory_count(inode->i_mount,
 					       (uint32_t)inode->i_ino, -1);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 	}
+
 	inode->i_mode = 0;
 	inode->i_type = INODE_NONE;
 	ui->blocks = 0;
-	error = persist_inode(inode);
 
 	/* Checks the operation status. */
+	error = persist_inode(inode);
 	if (error != 0)
 		return error;
-	error = disk_sync(inode->i_mount->m_disk);
 
 	/* Checks the operation status. */
+	error = disk_sync(inode->i_mount->m_disk);
 	if (error != 0)
 		return error;
 	error = free_inode_number(inode->i_mount, (uint32_t)inode->i_ino,
@@ -10952,10 +11096,10 @@ ufs_reclaim(
  * Ignores identities whose lifetime does not permit filesystem
 	 * retirement. */
 	if (inode->i_linkcount != 0 || inode->i_ino <= UFS_ROOT_INO ||
-	    !state(inode->i_mount)->writable)
-
+	    !state(inode->i_mount)->writable) {
 		/* Returns the computed result. */
 		return;
+	}
 
 	/*
  * The callback has no errno channel; explicit owners call the checked
@@ -10977,27 +11121,28 @@ creation_unlink_group(
 	int error;
 
 	/* Reserves one dinode image before acquiring metadata ownership. */
-	ms = state(inode->i_mount);
 
 	/* Handles the inode condition. */
+	ms = state(inode->i_mount);
 	if (inode->i_ino <= UFS_ROOT_INO)
 		return EINVAL;
-	image = kern_malloc(sizeof(*image) + ms->super.bsize);
 
 	/* Handles the image availability. */
+	image = kern_malloc(sizeof(*image) + ms->super.bsize);
 	if (image == NULL)
 		return ENOMEM;
 	block = (uint8_t *)(image + 1);
 	memset(&outcome, 0, sizeof(outcome));
 	mutex_lock(&inode->i_lock);
 	mutex_lock(&ms->lock);
+
 	memcpy(image, info(inode), sizeof(*image));
 	image->inode.i_linkcount = 0;
+
+	/* Checks the operation status. */
 	error = ms->writable
 			? prepare_inode_locked(&image->inode, block, &fragment)
 			: EROFS;
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		extent.target = fragment << ms->super.fsbtodb;
 		extent.sectors = ms->super.bsize / UFS_SECTOR_SIZE;
@@ -11013,8 +11158,10 @@ creation_unlink_group(
 		inode->i_linkcount = 0;
 		inode->i_flags |= INODE_DEAD;
 	}
+
 	mutex_unlock(&ms->lock);
 	mutex_unlock(&inode->i_lock);
+
 	kern_free(image);
 
 	/*
@@ -11040,9 +11187,9 @@ discard_reserved_inode(
  * Detaches borrowed endpoints before any final-reference destruction is
 	 * possible. */
 	detach_new_socket_special(inode);
-	error = creation_unlink_group(inode);
 
 	/* Checks the operation status. */
+	error = creation_unlink_group(inode);
 	if (error == 0)
 		error = reclaim_unlinked_inode(inode);
 
@@ -11051,6 +11198,7 @@ discard_reserved_inode(
 		inode->i_ino = 0;
 		inode->i_flags |= INODE_DEAD;
 	}
+
 	inode_release(inode);
 
 	/*
@@ -11157,19 +11305,20 @@ ufs_read_super(
 	/* Handles the disk availability. */
 	if (disk == NULL || disk->d_block_size != UFS_SECTOR_SIZE)
 		return EOPNOTSUPP;
-	buffer = kern_malloc(UFS_SBLOCK_SIZE);
 
 	/* Handles the buffer availability. */
+	buffer = kern_malloc(UFS_SBLOCK_SIZE);
 	if (buffer == NULL)
 		return ENOMEM;
-	error = observed_disk_read(disk, UFS_SBLOCK_OFFSET / UFS_SECTOR_SIZE,
-				   UFS_SBLOCK_SIZE / UFS_SECTOR_SIZE, buffer);
 
 	/* Checks the operation status. */
+	error = observed_disk_read(disk, UFS_SBLOCK_OFFSET / UFS_SECTOR_SIZE,
+				   UFS_SBLOCK_SIZE / UFS_SECTOR_SIZE, buffer);
 	if (error == 0) {
 		error = drv_ufs_super_decode(buffer, UFS_SBLOCK_SIZE,
 					     disk->d_block_count, super);
 	}
+
 	kern_free(buffer);
 
 	/* Reports the failure. */
@@ -11234,6 +11383,7 @@ ufs_identity_label(
 					? (char)input[index]
 					: '_';
 	}
+
 	output[end] = '\0';
 }
 
@@ -11259,20 +11409,20 @@ drv_ufs_identify(
 	if (disk->d_block_size != UFS_SECTOR_SIZE)
 		return EOPNOTSUPP;
 	first_block = UFS_SBLOCK_OFFSET / UFS_SECTOR_SIZE;
-	block_count = UFS_SBLOCK_SIZE / UFS_SECTOR_SIZE;
 
 	/* Handles the disk condition. */
+	block_count = UFS_SBLOCK_SIZE / UFS_SECTOR_SIZE;
 	if (disk->d_block_count < first_block + block_count)
 		return EOPNOTSUPP;
-	buffer = kern_malloc(UFS_SBLOCK_SIZE);
 
 	/* Handles the buffer availability. */
+	buffer = kern_malloc(UFS_SBLOCK_SIZE);
 	if (buffer == NULL)
 		return ENOMEM;
-	error = disk_read_direct(disk, first_block, (uint32_t)block_count,
-				 buffer);
 
 	/* Checks the operation status. */
+	error = disk_read_direct(disk, first_block, (uint32_t)block_count,
+				 buffer);
 	if (error == 0) {
 		error = drv_ufs_super_decode(buffer, UFS_SBLOCK_SIZE,
 					     disk->d_block_count, &super);
@@ -11289,15 +11439,16 @@ drv_ufs_identify(
 	strcpy(identity->type, "ufs");
 	identity->flags |= ZEDBSD_BLKID_TYPE;
 	first = drv_ufs_get32(buffer, UFS_FS_ID, super.swapped);
-	second = drv_ufs_get32(buffer, UFS_FS_ID + 4U, super.swapped);
 
 	/* Handles the first condition. */
+	second = drv_ufs_get32(buffer, UFS_FS_ID + 4U, super.swapped);
 	if (first != 0U || second != 0U) {
 		ufs_identity_hex32(identity->uuid, first);
 		ufs_identity_hex32(identity->uuid + 8U, second);
 		identity->uuid[16] = '\0';
 		identity->flags |= ZEDBSD_BLKID_UUID;
 	}
+
 	ufs_identity_label(identity->label, sizeof(identity->label),
 			   buffer + UFS_FS_VOLNAME, UFS_FS_VOLNAME_SIZE);
 
@@ -11322,14 +11473,15 @@ ufs_write_clean(
 	uint8_t *buffer;
 	int error;
 
-	buffer = kern_malloc(UFS_SBLOCK_SIZE);
-
 	/* Handles the buffer availability. */
+	buffer = kern_malloc(UFS_SBLOCK_SIZE);
 	if (buffer == NULL)
 		return ENOMEM;
 	mutex_lock(&ms->lock);
 	mutex_lock(&ms->journal_lock);
+
 	error = journal_checkpoint_locked(mountp);
+
 	mutex_unlock(&ms->journal_lock);
 
 	/* Checks the operation status. */
@@ -11354,7 +11506,9 @@ ufs_write_clean(
 	/* Checks the operation status. */
 	if (error == 0)
 		ms->super.clean = clean;
+
 	mutex_unlock(&ms->lock);
+
 	kern_free(buffer);
 
 	/* Reports the failure. */
@@ -11371,14 +11525,14 @@ static int
 ufs_probe(
 	struct disk *disk)
 {
-	int function_result;
+	int error;
 	struct ufs_super s;
 
 	/* Obtains the ufs read super result. */
-	function_result = ufs_read_super(disk, &s);
+	error = ufs_read_super(disk, &s);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int ufs_quota_rebuild(struct mount *mountp);
@@ -11396,16 +11550,14 @@ ufs_quota_rebuild(
 	uint32_t cg, index;
 	int error = 0;
 
-	block = kern_malloc(ms->super.bsize);
-
 	/* Handles the block availability. */
+	block = kern_malloc(ms->super.bsize);
 	if (block == NULL)
 		return ENOMEM;
 	/* Process each element required by the operation. */
 	for (cg = 0; cg < ms->super.ncg && error == 0; cg++) {
-		error = load_cg_locked(mountp, cg);
-
 		/* Checks the operation status. */
+		error = load_cg_locked(mountp, cg);
 		if (error != 0)
 			break;
 		/* Process each remaining element. */
@@ -11415,27 +11567,29 @@ ufs_quota_rebuild(
 				continue;
 			fragment = cgstart(&ms->super, cg) + ms->super.iblkno +
 				   (index / ms->super.inopb) * ms->super.frag;
-			error = read_block(mountp, fragment, block);
 
 			/* Checks the operation status. */
+			error = read_block(mountp, fragment, block);
 			if (error != 0)
 				break;
 			raw = block +
 			      (index % ms->super.inopb) * UFS_DINODE_SIZE;
-			mode = drv_ufs_get16(raw, UFS_DI_MODE,
-					     ms->super.swapped);
 
 			/* Validates the selected mode. */
+			mode = drv_ufs_get16(raw, UFS_DI_MODE,
+					     ms->super.swapped);
 			if (mode == 0)
 				continue;
-			blocks = drv_ufs_get64(raw, UFS_DI_BLOCKS,
-					       ms->super.swapped);
 
 			/* Handles the blocks condition. */
+			blocks = drv_ufs_get64(raw, UFS_DI_BLOCKS,
+					       ms->super.swapped);
 			if (blocks % (ms->super.bsize / UFS_SECTOR_SIZE) != 0) {
 				error = EIO;
 				break;
 			}
+
+			/* Checks the operation status. */
 			error = quota_rebuild_add(
 				&ms->quota,
 				drv_ufs_get32(raw, UFS_DI_UID,
@@ -11444,12 +11598,11 @@ ufs_quota_rebuild(
 					      ms->super.swapped),
 				blocks / (ms->super.bsize / UFS_SECTOR_SIZE),
 				1);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				break;
 		}
 	}
+
 	kern_free(block);
 
 	/* Reports the failure. */
@@ -11473,9 +11626,8 @@ ufs_quota_load(
 	ssize_t length, loaded;
 	int error;
 
-	length = ufs_getxattr(root, UFS_QUOTA_XATTR, NULL, 0);
-
 	/* Checks the current data length. */
+	length = ufs_getxattr(root, UFS_QUOTA_XATTR, NULL, 0);
 	if (length == -ENODATA)
 		return 0;
 
@@ -11486,9 +11638,9 @@ ufs_quota_load(
 	/* Checks the current data length. */
 	if (length == 0 || (size_t)length > ms->super.bsize)
 		return EINVAL;
-	buffer = kern_malloc((size_t)length);
 
 	/* Handles the buffer availability. */
+	buffer = kern_malloc((size_t)length);
 	if (buffer == NULL)
 		return ENOMEM;
 	loaded = ufs_getxattr(root, UFS_QUOTA_XATTR, buffer, (size_t)length);
@@ -11532,6 +11684,7 @@ snapshot_disk_submit(
 					      bio->b_block_count, bio->b_data);
 		mutex_unlock(&ms->snapshot_lock);
 	}
+
 	bio_complete(bio, error,
 		     error == 0 && bio->b_op == BIO_READ
 			     ? (size_t)bio->b_block_count * UFS_SECTOR_SIZE
@@ -11582,21 +11735,23 @@ snapshot_disk_publish(
 			disk->d_name[7] = (char)('0' + number);
 			disk->d_name[8] = '\0';
 		}
+
 		disk->d_flags = DISK_READ_ONLY;
 		disk->d_block_size = UFS_SECTOR_SIZE;
 		disk->d_block_count = ms->snapshot.volume_sectors;
 		disk->d_max_transfer_blocks = 128;
 		disk->d_ops = &snapshot_disk_ops;
 		disk->d_data = ms;
-		error = disk_create(disk);
 
 		/* Checks the operation status. */
+		error = disk_create(disk);
 		if (error == 0) {
 			ms->snapshot_disk = disk;
 
 			/* Reports successful completion. */
 			return 0;
 		}
+
 		(void)disk_destroy(disk);
 
 		/* Checks the operation status. */
@@ -11621,14 +11776,14 @@ snapshot_disk_remove(
 	/* Handles the disk availability. */
 	if (disk == NULL)
 		return 0;
-	error = disk_gone_if_idle(disk);
 
 	/* Checks the operation status. */
+	error = disk_gone_if_idle(disk);
 	if (error != 0)
 		return error;
-	error = disk_destroy(disk);
 
 	/* Checks the operation status. */
+	error = disk_destroy(disk);
 	if (error == 0)
 		ms->snapshot_disk = NULL;
 
@@ -11672,15 +11827,15 @@ ufs_quota_persist(
 	/* Handles the m root availability. */
 	if (!ms->writable || mountp->m_root == NULL)
 		return EROFS;
-	buffer = kern_malloc(ms->super.bsize);
 
 	/* Handles the buffer availability. */
+	buffer = kern_malloc(ms->super.bsize);
 	if (buffer == NULL)
 		return ENOMEM;
-	error = quota_export_config(&ms->quota, buffer, ms->super.bsize,
-				    &length);
 
 	/* Checks the operation status. */
+	error = quota_export_config(&ms->quota, buffer, ms->super.bsize,
+				    &length);
 	if (error == 0) {
 		error = ufs_setxattr(mountp->m_root, UFS_QUOTA_XATTR, buffer,
 				     length, 0);
@@ -11735,30 +11890,30 @@ orphan_recover_one(
  * Requires grouped release and retirement before permitting recovery
 	 * mutations. */
 	ms = state(mountp);
-	bytes = 3U * ms->super.bsize + UFS_SBLOCK_SIZE;
 
 	/* Handles the ms condition. */
+	bytes = 3U * ms->super.bsize + UFS_SBLOCK_SIZE;
 	if (ms->journal.sector_count <= 2U ||
 	    bytes / UFS_SECTOR_SIZE > UFS_JOURNAL_GROUP_SECTORS ||
-	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U)
-
+	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U) {
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
+	}
 	memset(owner, 0, sizeof(*owner));
 	owner->inode.i_mount = mountp;
 	(void)mutex_init(&owner->inode.i_lock, LOCK_RANK_INODE, "ufs orphan");
-	error = decode_inode_raw(&owner->inode, raw, number, 1);
 
 	/* Checks the operation status. */
+	error = decode_inode_raw(&owner->inode, raw, number, 1);
 	if (error != 0)
 		return error;
 
 	/*
  * Reuses checked pointer/xattr/bitmap owners and their conservative
 	 * outcomes. */
-	error = reclaim_unlinked_inode(&owner->inode);
 
 	/* Reports the failure. */
+	error = reclaim_unlinked_inode(&owner->inode);
 	if (error != 0)
 		return error;
 
@@ -11788,9 +11943,8 @@ orphan_scan_locked(
 	map_bytes = ((size_t)ms->super.ipg + 7U) / 8U;
 	/* Process each element required by the operation. */
 	for (cg = 0; cg < ms->super.ncg; cg++) {
-		error = load_cg_locked(mountp, cg);
-
 		/* Checks the operation status. */
+		error = load_cg_locked(mountp, cg);
 		if (error != 0)
 			return error;
 		memcpy(scan->bitmap, ms->cg + ms->cg_iusedoff, map_bytes);
@@ -11803,9 +11957,9 @@ orphan_scan_locked(
 			/* Checks the bit test result. */
 			if (!bit_test(scan->bitmap, index))
 				continue;
-			number = (uint64_t)cg * ms->super.ipg + index;
 
 			/* Handles the number condition. */
+			number = (uint64_t)cg * ms->super.ipg + index;
 			if (number <= UFS_ROOT_INO)
 				continue;
 
@@ -11814,22 +11968,22 @@ orphan_scan_locked(
 				return EOVERFLOW;
 			fragment = cgstart(&ms->super, cg) + ms->super.iblkno +
 				   (index / ms->super.inopb) * ms->super.frag;
-			error = read_block(mountp, fragment, scan->block);
 
 			/* Checks the operation status. */
+			error = read_block(mountp, fragment, scan->block);
 			if (error != 0)
 				return error;
-			raw = scan->block +
-			      (index % ms->super.inopb) * UFS_DINODE_SIZE;
 
 			/* Checks the drv ufs get16 result. */
+			raw = scan->block +
+			      (index % ms->super.inopb) * UFS_DINODE_SIZE;
 			if (drv_ufs_get16(raw, UFS_DI_NLINK,
 					  ms->super.swapped) != 0)
 				continue;
-			error = orphan_recover_one(mountp, (uint32_t)number,
-						   raw, &scan->inode);
 
 			/* Checks the operation status. */
+			error = orphan_recover_one(mountp, (uint32_t)number,
+						   raw, &scan->inode);
 			if (error != 0)
 				return error;
 		}
@@ -11853,18 +12007,18 @@ orphan_recover(
 	/*
  * Keeps readonly and nonjournal admission free of orphan-reclamation
 	 * writes. */
-	ms = state(mountp);
 
 	/* Handles the ms condition. */
+	ms = state(mountp);
 	if (!ms->writable || !ms->journal_enabled)
 		return 0;
 
 	/* Handles the m root availability. */
 	if (mountp->m_root != NULL)
 		return EBUSY;
-	scan = kern_calloc(1, sizeof(*scan) + 2U * ms->super.bsize);
 
 	/* Handles the scan availability. */
+	scan = kern_calloc(1, sizeof(*scan) + 2U * ms->super.bsize);
 	if (scan == NULL)
 		return ENOMEM;
 	scan->bitmap = (uint8_t *)(scan + 1);
@@ -11874,12 +12028,14 @@ orphan_recover(
  * Excludes namespace users while each checked owner takes its metadata
 	 * locks. */
 	mutex_lock(&ms->namespace_lock);
-	error = orphan_scan_locked(mountp, scan);
 
 	/* Checks the operation status. */
+	error = orphan_scan_locked(mountp, scan);
 	if (error != 0)
 		ms->writable = 0;
+
 	mutex_unlock(&ms->namespace_lock);
+
 	kern_free(scan);
 
 	/*
@@ -11917,26 +12073,27 @@ ufs_mount_impl(
 	/* Handles the mountp availability. */
 	if (mountp == NULL || mountp->m_disk == NULL)
 		return EINVAL;
-	ms = kern_calloc(1, sizeof(*ms));
 
 	/* Handles the ms availability. */
+	ms = kern_calloc(1, sizeof(*ms));
 	if (ms == NULL)
 		return ENOMEM;
-	error = ufs_read_super(mountp->m_disk, &ms->super);
 
 	/* Checks the operation status. */
+	error = ufs_read_super(mountp->m_disk, &ms->super);
 	if (error) {
 		kern_free(ms);
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	mountp->m_data = ms;
 	(void)mutex_init(&ms->journal_lock, LOCK_RANK_DEVICE, "ufs journal");
 	(void)mutex_init(&ms->snapshot_lock, LOCK_RANK_DEVICE, "ufs snapshot");
+
+	/* Checks the operation status. */
 	error = journal_discover(mountp, ms);
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		mountp->m_data = NULL;
 		ufs_state_free(ms);
@@ -11944,9 +12101,9 @@ ufs_mount_impl(
 		/* Returns the computed result. */
 		return error;
 	}
+
+	/* Checks the operation status. */
 	error = snapshot_discover(mountp, ms);
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		mountp->m_data = NULL;
 		ufs_state_free(ms);
@@ -11954,6 +12111,7 @@ ufs_mount_impl(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	(void)mutex_init(&ms->namespace_lock, LOCK_RANK_NAMESPACE,
 			 "ufs namespace");
 	(void)mutex_init(&ms->lock, LOCK_RANK_INODE, "ufs mount");
@@ -11968,11 +12126,11 @@ ufs_mount_impl(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	/* Process each element required by the operation. */
 	for (cg = 0; cg < ms->super.ncg; cg++) {
-		error = load_cg_locked(mountp, cg);
-
 		/* Checks the operation status. */
+		error = load_cg_locked(mountp, cg);
 		if (error != 0)
 			break;
 		ndblk = cg_ndblk(&ms->super, cg);
@@ -11987,6 +12145,7 @@ ufs_mount_impl(
 				break;
 			}
 		}
+
 		/* Process each element required by the operation. */
 		for (fragment = ndblk; error == 0 && fragment < ms->super.fpg;
 		     fragment++) {
@@ -12007,6 +12166,7 @@ ufs_mount_impl(
 			error = EINVAL;
 			break;
 		}
+
 		total_ndir +=
 			drv_ufs_get32(ms->cg, UFS_CG_NDIR, ms->super.swapped);
 		total_nbfree +=
@@ -12066,13 +12226,13 @@ ufs_mount_impl(
 			/* Returns the computed result. */
 			return EROFS;
 		}
+
 		ms->writable = 1;
 
 		/* Handles the summaries rebuilt condition. */
 		if (summaries_rebuilt) {
-			error = write_super_summaries(mountp);
-
 			/* Checks the operation status. */
+			error = write_super_summaries(mountp);
 			if (error != 0) {
 				mountp->m_data = NULL;
 				ufs_state_free(ms);
@@ -12082,15 +12242,16 @@ ufs_mount_impl(
 			}
 		}
 	}
-	error = load_inode(mountp, UFS_ROOT_INO, &root);
 
 	/* Checks the operation status. */
+	error = load_inode(mountp, UFS_ROOT_INO, &root);
 	if (error || root->i_type != INODE_DIR) {
 		/* Checks the operation status. */
 		if (!error) {
 			root->i_flags |= INODE_DEAD;
 			inode_release(root);
 		}
+
 		mountp->m_data = NULL;
 		ufs_state_free(ms);
 
@@ -12102,9 +12263,9 @@ ufs_mount_impl(
  * A malformed root must not become the namespace anchor.  Validate the
 	 * mandatory entries while the mount is still private and unpublished.
 	 */
-	error = next_dirent(root, &cursor, &number, &type, name);
 
 	/* Checks the operation status. */
+	error = next_dirent(root, &cursor, &number, &type, name);
 	if (error == 0 && (number != UFS_ROOT_INO || strcmp(name, ".") != 0))
 		error = EIO;
 
@@ -12139,9 +12300,8 @@ ufs_mount_impl(
  * Do not dirty an image until every read-only mount validation,
 	 * including the root inode, has succeeded. */
 	if (ms->writable) {
-		error = ufs_write_clean(mountp, 0);
-
 		/* Checks the operation status. */
+		error = ufs_write_clean(mountp, 0);
 		if (error) {
 			root->i_flags |= INODE_DEAD;
 			inode_release(root);
@@ -12152,6 +12312,7 @@ ufs_mount_impl(
 			return error;
 		}
 	}
+
 	root->i_flags |= INODE_ROOT;
 	mountp->m_root = root;
 
@@ -12183,12 +12344,15 @@ ufs_sync(
 		return EINVAL;
 	mutex_lock(&ms->lock);
 	mutex_lock(&ms->journal_lock);
+
 	error = journal_checkpoint_locked(mountp);
+
 	mutex_unlock(&ms->journal_lock);
 
 	/* Checks the operation status. */
 	if (error == 0)
 		error = disk_sync(mountp->m_disk);
+
 	mutex_unlock(&ms->lock);
 
 	/* Reports the failure. */
@@ -12213,6 +12377,7 @@ ufs_statvfs(
 	if (ms == NULL || result == NULL)
 		return EINVAL;
 	mutex_lock(&ms->lock);
+
 	nbfree = ms->super.cstotal_nbfree;
 	nffree = ms->super.cstotal_nffree;
 	nifree = ms->super.cstotal_nifree;
@@ -12226,6 +12391,7 @@ ufs_statvfs(
 	result->f_ffree = nifree;
 	result->f_favail = nifree;
 	result->f_namemax = NAME_MAX;
+
 	mutex_unlock(&ms->lock);
 
 	/* Reports successful completion. */
@@ -12254,14 +12420,14 @@ ufs_quotactl(
 	/* Dispatch the selected operation case. */
 	switch (request->command) {
 	case ZEDBSD_QUOTA_GET:
-		error = quota_get(&ms->quota, type, request->id, &record);
 
 		/* Checks the operation status. */
+		error = quota_get(&ms->quota, type, request->id, &record);
 		if (error != 0)
 			return error;
-		error = quota_enabled(&ms->quota, type, &enabled);
 
 		/* Checks the operation status. */
+		error = quota_enabled(&ms->quota, type, &enabled);
 		if (error != 0)
 			return error;
 		request->flags = enabled ? ZEDBSD_QUOTA_F_ENABLED : 0;
@@ -12307,15 +12473,14 @@ ufs_quotactl(
 
 	/* Handles the mutating condition. */
 	if (mutating) {
-		saved = kern_malloc(ms->super.bsize);
-
 		/* Handles the saved availability. */
+		saved = kern_malloc(ms->super.bsize);
 		if (saved == NULL)
 			return ENOMEM;
-		error = quota_export_config(&ms->quota, saved, ms->super.bsize,
-					    &saved_length);
 
 		/* Checks the operation status. */
+		error = quota_export_config(&ms->quota, saved, ms->super.bsize,
+					    &saved_length);
 		if (error != 0) {
 			kern_free(saved);
 
@@ -12323,6 +12488,7 @@ ufs_quotactl(
 			return error;
 		}
 	}
+
 	/* Dispatch the selected operation case. */
 	switch (request->command) {
 	case ZEDBSD_QUOTA_SET:
@@ -12332,13 +12498,14 @@ ufs_quotactl(
 		record.block_hard = request->block_hard;
 		record.inode_soft = request->inode_soft;
 		record.inode_hard = request->inode_hard;
-		error = quota_set(&ms->quota, type, &record);
 
 		/* Checks the operation status. */
+		error = quota_set(&ms->quota, type, &record);
 		if (error == 0 && request->grace_seconds != 0) {
 			error = quota_set_grace(&ms->quota,
 						request->grace_seconds);
 		}
+
 		break;
 	case ZEDBSD_QUOTA_ENABLE:
 		error = quota_enable(&ms->quota, type, 1);
@@ -12423,6 +12590,7 @@ ufs_snapshotctl(
 			(void)drv_ufs_snapshot_delete(&ms->snapshot);
 			mutex_unlock(&ms->snapshot_lock);
 		}
+
 		break;
 	case ZEDBSD_SNAPSHOT_DELETE:
 		/* Handles the ms condition. */
@@ -12432,9 +12600,9 @@ ufs_snapshotctl(
 		/* Handles the ms condition. */
 		if (!ms->snapshot.active)
 			return ENOENT;
-		error = snapshot_disk_remove(ms);
 
 		/* Checks the operation status. */
+		error = snapshot_disk_remove(ms);
 		if (error != 0)
 			return error;
 		mutex_lock(&ms->snapshot_lock);
@@ -12475,7 +12643,7 @@ static int
 ufs_prepare_unmount(
 	struct mount *mountp)
 {
-	int function_result;
+	int error;
 	struct ufs_mount_state *ms = state(mountp);
 
 	/* Handles the ms availability. */
@@ -12483,11 +12651,11 @@ ufs_prepare_unmount(
 		return EBUSY;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		ms != NULL && ms->writable ? ufs_write_clean(mountp, 1) : 0;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 static void ufs_unmount(struct mount *mountp);
 
@@ -12545,9 +12713,8 @@ ufs_writeback_range(
 	last = ((uint64_t)offset + length - 1U) / ms->super.bsize;
 	/* Process each element required by the operation. */
 	for (; logical <= last; logical++) {
-		error = bmap(inode, logical, &fragment);
-
 		/* Checks the operation status. */
+		error = bmap(inode, logical, &fragment);
 		if (error != 0 || fragment == 0) {
 			mutex_unlock(&inode->i_lock);
 
@@ -12557,6 +12724,7 @@ ufs_writeback_range(
 	}
 
 	/* Reports an entirely allocated overwrite. */
+
 	mutex_unlock(&inode->i_lock);
 
 	/* Reports operation failure. */
@@ -12842,10 +13010,10 @@ drv_ufs_journal_init(
 	if (journal == NULL || io == NULL || io->read == NULL ||
 	    io->write == NULL || io->flush == NULL || count < 3U ||
 	    first > UINT64_MAX - count || home_sectors == 0 ||
-	    home_sectors >= first)
-
+	    home_sectors >= first) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(journal, 0, sizeof(*journal));
 	journal->io = *io;
 	journal->first_sector = first;
@@ -12871,10 +13039,10 @@ drv_ufs_journal_bind_image(
  * Rejects incomplete storage and live ownership without changing the
 	 * binding. */
 	if (journal == NULL || (image == NULL && bytes != 0) ||
-	    (image != NULL && bytes < UFS_JOURNAL_IMAGE_BYTES))
-
+	    (image != NULL && bytes < UFS_JOURNAL_IMAGE_BYTES)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the journal condition. */
 	if (journal->pending_sequence != 0)
@@ -12914,10 +13082,10 @@ drv_ufs_journal_publishv(
  * Validates every extent and the complete footprint before modifying
 	 * the slot. */
 	if (journal == NULL || extents == NULL || count == 0 ||
-	    count > UFS_JOURNAL_EXTENTS)
-
+	    count > UFS_JOURNAL_EXTENTS) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the journal condition. */
 	if (journal->poisoned)
@@ -12945,30 +13113,31 @@ drv_ufs_journal_publishv(
 		/* Handles the payload availability. */
 		if (extents[index].payload == NULL ||
 		    extents[index].sectors == 0 ||
-		    extents[index].sectors > UFS_JOURNAL_GROUP_SECTORS - total)
-
+		    extents[index].sectors > UFS_JOURNAL_GROUP_SECTORS - total) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 		entry = descriptor + GROUP_HEADER + index * GROUP_ENTRY;
 		put64(entry, extents[index].target);
 		put32(entry + 8, extents[index].sectors);
 		total += extents[index].sectors;
 	}
+
 	put32(descriptor + 20, total);
 	put32(descriptor + 28, group_checksum(descriptor));
-	error = group_validate(journal, descriptor);
 
 	/* Checks the operation status. */
+	error = group_validate(journal, descriptor);
 	if (error != 0)
 		return EINVAL;
 
 	/*
  * Refuses a live slot instead of overwriting committed or unresolved
 	 * ownership. */
-	error = journal->io.read(journal->io.context, journal->first_sector, 1,
-				 commit);
 
 	/* Checks the operation status. */
+	error = journal->io.read(journal->io.context, journal->first_sector, 1,
+				 commit);
 	if (error != 0)
 		return error;
 
@@ -12986,6 +13155,7 @@ drv_ufs_journal_publishv(
 		      checksum(extents[index].payload,
 			       (size_t)extents[index].sectors * SECTOR_SIZE));
 	}
+
 	put32(descriptor + 28, group_checksum(descriptor));
 	memset(commit, 0, sizeof(commit));
 	put32(commit, COMMIT_MAGIC);
@@ -13005,14 +13175,15 @@ drv_ufs_journal_publishv(
 	/*
  * Makes old commit evidence unreachable before publishing immutable
 	 * redo bytes. */
-	error = clear_record(journal, journal->first_sector +
-					      journal->sector_count - 1U);
 
 	/* Checks the operation status. */
+	error = clear_record(journal, journal->first_sector +
+					      journal->sector_count - 1U);
 	if (error == 0) {
 		error = journal->io.write(journal->io.context,
 					  journal->first_sector, 1, descriptor);
 	}
+
 	cursor = journal->first_sector + 1U;
 	/* Process each remaining element. */
 	for (index = 0; error == 0 && index < count; index++) {
@@ -13074,9 +13245,9 @@ drv_ufs_journal_commitv(
 	/*
  * Preserves the operation error even when recovery establishes a safe
 	 * slot. */
-	error = drv_ufs_journal_publishv(journal, extents, count);
 
 	/* Checks the operation status. */
+	error = drv_ufs_journal_publishv(journal, extents, count);
 	if (error == 0)
 		error = drv_ufs_journal_checkpoint(journal);
 
@@ -13102,7 +13273,7 @@ int
 drv_ufs_journal_checkpoint(
 	struct ufs_journal *journal)
 {
-	int function_result;
+	int error;
 
 	/*
  * Requires recovery to resolve an interrupted publication before normal
@@ -13121,18 +13292,18 @@ drv_ufs_journal_checkpoint(
 	/* Handles the journal condition. */
 	if (journal->pending_clearing) {
 		/* Obtains the journal finish result. */
-		function_result = journal_finish(journal);
+		error = journal_finish(journal);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Obtains the journal replay result. */
-	function_result = journal_replay(journal, journal->pending_sequence,
+	error = journal_replay(journal, journal->pending_sequence,
 					 journal->pending_digest, 1, NULL);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -13153,9 +13324,9 @@ drv_ufs_journal_drain(
 	/* Handles the journal condition. */
 	if (journal->poisoned)
 		return EIO;
-	error = drv_ufs_journal_checkpoint(journal);
 
 	/* Checks the operation status. */
+	error = drv_ufs_journal_checkpoint(journal);
 	if (error != 0 && journal->pending_sequence != 0 &&
 	    drv_ufs_journal_replay(journal) != 0) {
 		journal->poisoned = 1;
@@ -13180,7 +13351,7 @@ drv_ufs_journal_commit(
 	const void *payload,
 	uint32_t sectors)
 {
-	int function_result;
+	int error;
 	struct ufs_journal_extent extent;
 
 	/*
@@ -13191,10 +13362,10 @@ drv_ufs_journal_commit(
 	extent.payload = payload;
 
 	/* Obtains the drv ufs journal commitv result. */
-	function_result = drv_ufs_journal_commitv(journal, &extent, 1);
+	error = drv_ufs_journal_commitv(journal, &extent, 1);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Checks the entire descriptor without including its own checksum field. */
@@ -13232,17 +13403,17 @@ group_validate(
 	const uint8_t *prior;
 
 	/* Validates the fixed header and bounded record count. */
-	count = get32(descriptor + 16);
 
 	/* Checks the get32 result. */
+	count = get32(descriptor + 16);
 	if (get32(descriptor) != DESC_MAGIC ||
 	    get32(descriptor + 4) != GROUP_VERSION ||
 	    get64(descriptor + 8) == 0 || get64(descriptor + 8) == UINT64_MAX ||
 	    count == 0 || count > UFS_JOURNAL_EXTENTS ||
-	    get32(descriptor + 28) != group_checksum(descriptor))
-
+	    get32(descriptor + 28) != group_checksum(descriptor)) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/*
  * Checks all addresses before reading payloads or changing persistent
@@ -13252,37 +13423,38 @@ group_validate(
 	for (index = 0; index < count; index++) {
 		entry = descriptor + GROUP_HEADER + index * GROUP_ENTRY;
 		target = get64(entry);
-		sectors = get32(entry + 8);
 
 		/* Handles the sectors condition. */
+		sectors = get32(entry + 8);
 		if (sectors == 0 ||
 		    sectors > UFS_JOURNAL_GROUP_SECTORS - total ||
 		    target >= journal->home_sectors ||
-		    sectors > journal->home_sectors - target)
-
+		    sectors > journal->home_sectors - target) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		/* Process each remaining element. */
 		for (other = 0; other < index; other++) {
 			prior = descriptor + GROUP_HEADER + other * GROUP_ENTRY;
-			previous = get64(prior);
 
 			/* Checks the get32 result. */
+			previous = get64(prior);
 			if (target < previous + get32(prior + 8) &&
-			    previous < target + sectors)
-
+			    previous < target + sectors) {
 				/* Returns the computed result. */
 				return EIO;
+			}
 		}
+
 		total += sectors;
 	}
 
 	/* Checks the get32 result. */
 	if (total != get32(descriptor + 20) ||
-	    total > journal->sector_count - 2U)
-
+	    total > journal->sector_count - 2U) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -13295,7 +13467,7 @@ int
 drv_ufs_journal_replay(
 	struct ufs_journal *journal)
 {
-	int function_result;
+	int error;
 
 	/*
  * Boot recovery may discard incomplete redo without claiming a new
@@ -13306,19 +13478,19 @@ drv_ufs_journal_replay(
 	/* Handles the journal condition. */
 	if (journal->pending_clearing) {
 		/* Obtains the journal finish result. */
-		function_result = journal_finish(journal);
+		error = journal_finish(journal);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Obtains the journal replay result. */
-	function_result = journal_replay(
+	error = journal_replay(
 		journal, journal->pending_ready ? journal->pending_sequence : 0,
 		journal->pending_ready ? journal->pending_digest : 0, 1, NULL);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Requires a caller's committed identity when checkpoint follows publication. */
@@ -13355,14 +13527,14 @@ journal_replay(
 	 * identity. */
 	if (journal->image_valid) {
 		memcpy(descriptor, journal->image, SECTOR_SIZE);
-		sequence = get64(descriptor + 8);
 
 		/* Checks the get32 result. */
+		sequence = get64(descriptor + 8);
 		if (sequence != expected_sequence ||
-		    get32(descriptor + 28) != expected_digest)
-
+		    get32(descriptor + 28) != expected_digest) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		count = get32(descriptor + 16);
 	} else {
 		/*
@@ -13374,10 +13546,10 @@ journal_replay(
 		/*
  * An empty descriptor is the durable terminal state of the
 		 * slot. */
-		error = journal->io.read(journal->io.context,
-					 journal->first_sector, 1, descriptor);
 
 		/* Checks the operation status. */
+		error = journal->io.read(journal->io.context,
+					 journal->first_sector, 1, descriptor);
 		if (error != 0)
 			return error;
 
@@ -13393,31 +13565,31 @@ journal_replay(
 			/* Reports successful completion. */
 			return 0;
 		}
-		error = group_validate(journal, descriptor);
 
 		/* Checks the operation status. */
+		error = group_validate(journal, descriptor);
 		if (error != 0)
 			return error;
 
 		/*
  * A writer must verify its own group, not merely any valid redo
 		 * transaction. */
-		sequence = get64(descriptor + 8);
 
 		/* Checks the get32 result. */
+		sequence = get64(descriptor + 8);
 		if (expected_sequence != 0 &&
 		    (sequence != expected_sequence ||
-		     get32(descriptor + 28) != expected_digest))
-
+		     get32(descriptor + 28) != expected_digest)) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		count = get32(descriptor + 16);
+
+		/* Checks the operation status. */
 		error = journal->io.read(journal->io.context,
 					 journal->first_sector +
 						 journal->sector_count - 1U,
 					 1, commit);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 
@@ -13432,9 +13604,9 @@ journal_replay(
 			/* Handles the expected sequence condition. */
 			if (expected_sequence != 0)
 				return EIO;
-			error = clear_record(journal, journal->first_sector);
 
 			/* Checks the operation status. */
+			error = clear_record(journal, journal->first_sector);
 			if (error == 0) {
 				journal->pending_sequence = 0;
 				journal->pending_digest = 0;
@@ -13449,12 +13621,11 @@ journal_replay(
  * Fetches one bounded immutable payload image when the owner
 		 * supplied storage. */
 		if (journal->image != NULL) {
+			/* Checks the operation status. */
 			error = journal->io.read(journal->io.context,
 						 journal->first_sector + 1U,
 						 get32(descriptor + 20),
 						 journal->image + SECTOR_SIZE);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				return error;
 		}
@@ -13474,14 +13645,14 @@ journal_replay(
 					       SECTOR_SIZE);
 					offset += SECTOR_SIZE;
 				} else {
+					/* Checks the operation status. */
 					error = journal->io.read(
 						journal->io.context, cursor++,
 						1, sector);
-
-					/* Checks the operation status. */
 					if (error != 0)
 						return error;
 				}
+
 				/* Process each remaining element. */
 				for (byte = 0; byte < SECTOR_SIZE; byte++) {
 					digest ^= sector[byte];
@@ -13538,26 +13709,24 @@ journal_replay(
 	cursor = journal->first_sector + 1U;
 	/* Process each remaining element. */
 	for (index = 0; index < count; index++) {
-		entry = descriptor + GROUP_HEADER + index * GROUP_ENTRY;
-
 		/* Handles the journal condition. */
+		entry = descriptor + GROUP_HEADER + index * GROUP_ENTRY;
 		if (journal->image_valid) {
+			/* Checks the operation status. */
 			error = journal->io.write(
 				journal->io.context, get64(entry),
 				get32(entry + 8), journal->image + offset);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				return error;
 			offset += get32(entry + 8) * SECTOR_SIZE;
 			continue;
 		}
+
 		/* Process each element required by the operation. */
 		for (part = 0; part < get32(entry + 8); part++) {
+			/* Checks the operation status. */
 			error = journal->io.read(journal->io.context, cursor++,
 						 1, sector);
-
-			/* Checks the operation status. */
 			if (error == 0) {
 				error = journal->io.write(journal->io.context,
 							  get64(entry) + part,
@@ -13569,9 +13738,9 @@ journal_replay(
 				return error;
 		}
 	}
-	error = journal->io.flush(journal->io.context);
 
 	/* Checks the operation status. */
+	error = journal->io.flush(journal->io.context);
 	if (error != 0)
 		return error;
 
@@ -13597,9 +13766,9 @@ journal_finish(
 	/*
  * Keeps the home-durable witness until clearing also crosses its flush
 	 * boundary. */
-	error = clear_record(journal, journal->first_sector);
 
 	/* Checks the operation status. */
+	error = clear_record(journal, journal->first_sector);
 	if (error != 0)
 		return error;
 	journal_close_views(journal);
@@ -13644,10 +13813,10 @@ drv_ufs_journal_read(
 	if (journal == NULL || buffer == NULL || count == 0 ||
 	    count > UFS_JOURNAL_GROUP_SECTORS ||
 	    first >= journal->home_sectors ||
-	    count > journal->home_sectors - first)
-
+	    count > journal->home_sectors - first) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the journal condition. */
 	if (journal->poisoned)
@@ -13670,10 +13839,10 @@ drv_ufs_journal_read(
 	/*
  * Validates the entire pending group before exposing any of its
 	 * payloads. */
-	error = journal_replay(journal, journal->pending_sequence,
-			       journal->pending_digest, 0, descriptor);
 
 	/* Checks the operation status. */
+	error = journal_replay(journal, journal->pending_sequence,
+			       journal->pending_digest, 0, descriptor);
 	if (error != 0)
 		return error;
 
@@ -13691,9 +13860,9 @@ drv_ufs_journal_read(
 		for (index = 0; index < get32(descriptor + 16); index++) {
 			entry = descriptor + GROUP_HEADER + index * GROUP_ENTRY;
 			target = get64(entry);
-			sectors = get32(entry + 8);
 
 			/* Handles the current condition. */
+			sectors = get32(entry + 8);
 			if (current >= target && current - target < sectors) {
 				source = cursor + current - target;
 
@@ -13702,6 +13871,7 @@ drv_ufs_journal_read(
 					run = (uint32_t)(sectors -
 							 (current - target));
 				}
+
 				break;
 			}
 
@@ -13721,14 +13891,14 @@ drv_ufs_journal_read(
 					       SECTOR_SIZE,
 			       (size_t)run * SECTOR_SIZE);
 		} else {
+			/* Checks the operation status. */
 			error = journal->io.read(
 				journal->io.context, source, run,
 				(uint8_t *)buffer + (size_t)done * SECTOR_SIZE);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				return error;
 		}
+
 		done += run;
 	}
 
@@ -13879,19 +14049,19 @@ journal_view_transfer(
 			entry = view->image + GROUP_HEADER +
 				index * GROUP_ENTRY;
 			target = get64(entry);
-			sectors = get32(entry + 8);
 
 			/* Handles the current condition. */
+			sectors = get32(entry + 8);
 			if (current >= target && current - target < sectors) {
-				run = sectors - (uint32_t)(current - target);
-
 				/* Handles the run condition. */
+				run = sectors - (uint32_t)(current - target);
 				if (run > count - done)
 					run = count - done;
 				offset += (uint32_t)(current - target) *
 					  SECTOR_SIZE;
 				break;
 			}
+
 			offset += sectors * SECTOR_SIZE;
 		}
 
@@ -13904,6 +14074,7 @@ journal_view_transfer(
 			memcpy((uint8_t *)buffer + (size_t)done * SECTOR_SIZE,
 			       view->image + offset, (size_t)run * SECTOR_SIZE);
 		}
+
 		done += run;
 	}
 
@@ -13926,18 +14097,18 @@ drv_ufs_journal_view_copy(
 	/* Bounds the entire request before resolving or copying any segment. */
 	if (view == NULL || view->journal == NULL || buffer == NULL ||
 	    count == 0 || count > UFS_JOURNAL_GROUP_SECTORS ||
-	    first >= view->home_sectors || count > view->home_sectors - first)
-
+	    first >= view->home_sectors || count > view->home_sectors - first) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = journal_view_transfer(view, first, count, buffer, 0);
+	}
 
 	/* Checks the operation status. */
+	error = journal_view_transfer(view, first, count, buffer, 0);
 	if (error != 0)
 		return error;
-	error = journal_view_transfer(view, first, count, buffer, 1);
 
 	/* Reports the failure. */
+	error = journal_view_transfer(view, first, count, buffer, 1);
 	if (error != 0)
 		return error;
 
@@ -14075,9 +14246,8 @@ map_find(
 	size_t start = hash_sector(sector, snapshot->map_count), slot = start;
 
 	do {
-		entry = &snapshot->map[slot];
-
 		/* Handles the entry condition. */
+		entry = &snapshot->map[slot];
 		if (entry->sector == sector)
 			return entry;
 
@@ -14157,13 +14327,13 @@ drv_ufs_snapshot_init(
 	/* Handles the snapshot availability. */
 	if (snapshot == NULL || io == NULL || io->read == NULL ||
 	    io->write == NULL || io->flush == NULL || volume == 0 ||
-	    sectors < 3U || map == NULL || map_count < 2U)
-
+	    sectors < 3U || map == NULL || map_count < 2U) {
 		/* Returns the computed result. */
 		return EINVAL;
-	records = (sectors - 1U) / 2U;
+	}
 
 	/* Handles the records condition. */
+	records = (sectors - 1U) / 2U;
 	if (records == 0 || map_count < (size_t)records * 2U)
 		return EINVAL;
 	memset(snapshot, 0, sizeof(*snapshot));
@@ -14199,10 +14369,10 @@ drv_ufs_snapshot_open(
 	map_clear(snapshot);
 	snapshot->active = 0;
 	snapshot->next_record = 0;
-	error = snapshot->io.read(snapshot->io.context, snapshot->first_sector,
-				  1, control);
 
 	/* Checks the operation status. */
+	error = snapshot->io.read(snapshot->io.context, snapshot->first_sector,
+				  1, control);
 	if (error != 0)
 		return error;
 
@@ -14214,10 +14384,10 @@ drv_ufs_snapshot_open(
 	if (snapshot_get32(control + 4) != SNAPSHOT_VERSION ||
 	    snapshot_get32(control + 16) != snapshot->max_records ||
 	    snapshot_get64(control + 24) != snapshot->volume_sectors ||
-	    snapshot_get32(control + 32) != digest(control, 32))
-
+	    snapshot_get32(control + 32) != digest(control, 32)) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Checks the snapshot get32 result. */
 	if (snapshot_get32(control + 8) == 0)
@@ -14226,19 +14396,18 @@ drv_ufs_snapshot_open(
 	/* Checks the snapshot get32 result. */
 	if (snapshot_get32(control + 8) != SNAPSHOT_ACTIVE)
 		return EIO;
-	count = snapshot_get32(control + 12);
 
 	/* Checks the remaining item count. */
+	count = snapshot_get32(control + 12);
 	if (count > snapshot->max_records)
 		return EIO;
 	/* Process each remaining element. */
 	for (record = 0; record < count; record++) {
+		/* Checks the operation status. */
 		error = snapshot->io.read(snapshot->io.context,
 					  snapshot->first_sector + 1U +
 						  (uint64_t)record * 2U,
 					  1, header);
-
-		/* Checks the operation status. */
 		if (error == 0) {
 			error = snapshot->io.read(snapshot->io.context,
 						  snapshot->first_sector + 2U +
@@ -14249,22 +14418,23 @@ drv_ufs_snapshot_open(
 		/* Checks the operation status. */
 		if (error != 0)
 			return error;
-		target = snapshot_get64(header + 8);
 
 		/* Checks the snapshot get32 result. */
+		target = snapshot_get64(header + 8);
 		if (snapshot_get32(header) != RECORD_MAGIC ||
 		    snapshot_get32(header + 4) != SNAPSHOT_VERSION ||
 		    target >= snapshot->volume_sectors ||
 		    snapshot_get32(header + 16) != digest(data, sizeof(data)) ||
 		    snapshot_get32(header + 20) != digest(header, 20) ||
 		    (entry = map_find(snapshot, target, 1)) == NULL ||
-		    entry->sector != UFS_SNAPSHOT_EMPTY)
-
+		    entry->sector != UFS_SNAPSHOT_EMPTY) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		entry->sector = target;
 		entry->record = record;
 	}
+
 	snapshot->next_record = count;
 	snapshot->active = 1;
 
@@ -14288,9 +14458,9 @@ drv_ufs_snapshot_create(
 	/* Handles the snapshot condition. */
 	if (snapshot->active)
 		return EBUSY;
-	error = write_control(snapshot, 1, 0);
 
 	/* Checks the operation status. */
+	error = write_control(snapshot, 1, 0);
 	if (error == 0) {
 		map_clear(snapshot);
 		snapshot->next_record = 0;
@@ -14324,10 +14494,10 @@ drv_ufs_snapshot_preserve(
 	/* Handles the snapshot availability. */
 	if (snapshot == NULL || count == 0 ||
 	    first >= snapshot->volume_sectors ||
-	    count > snapshot->volume_sectors - first)
-
+	    count > snapshot->volume_sectors - first) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the snapshot condition. */
 	if (!snapshot->active)
@@ -14336,9 +14506,8 @@ drv_ufs_snapshot_preserve(
 	for (n = 0; n < count; n++) {
 		target = first + n;
 
-		entry = map_find(snapshot, target, 1);
-
 		/* Handles the entry availability. */
+		entry = map_find(snapshot, target, 1);
 		if (entry == NULL)
 			return ENOSPC;
 
@@ -14350,18 +14519,18 @@ drv_ufs_snapshot_preserve(
 		if (snapshot->next_record >= snapshot->max_records)
 			return ENOSPC;
 		record = snapshot->next_record;
-		error = snapshot->io.read(snapshot->io.context, target, 1,
-					  data);
 
 		/* Checks the operation status. */
+		error = snapshot->io.read(snapshot->io.context, target, 1,
+					  data);
 		if (error != 0)
 			return error;
+
+		/* Checks the operation status. */
 		error = snapshot->io.write(snapshot->io.context,
 					   snapshot->first_sector + 2U +
 						   (uint64_t)record * 2U,
 					   1, data);
-
-		/* Checks the operation status. */
 		if (error == 0)
 			error = snapshot->io.flush(snapshot->io.context);
 		memset(header, 0, sizeof(header));
@@ -14419,20 +14588,20 @@ drv_ufs_snapshot_read(
 	/* Handles the snapshot availability. */
 	if (snapshot == NULL || buffer == NULL || count == 0 ||
 	    !snapshot->active || first >= snapshot->volume_sectors ||
-	    count > snapshot->volume_sectors - first)
-
+	    count > snapshot->volume_sectors - first) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	/* Process each remaining element. */
 	for (n = 0; n < count; n++) {
 		entry = map_find(snapshot, first + n, 0);
 		source = entry == NULL ? first + n
 				       : snapshot->first_sector + 2U +
 						 (uint64_t)entry->record * 2U;
-		error = snapshot->io.read(snapshot->io.context, source, 1,
-					  bytes + (size_t)n * SECTOR_SIZE);
 
 		/* Checks the operation status. */
+		error = snapshot->io.read(snapshot->io.context, source, 1,
+					  bytes + (size_t)n * SECTOR_SIZE);
 		if (error != 0)
 			return error;
 	}
@@ -14457,9 +14626,9 @@ drv_ufs_snapshot_delete(
 	/* Handles the snapshot condition. */
 	if (!snapshot->active)
 		return ENOENT;
-	error = write_control(snapshot, 0, 0);
 
 	/* Checks the operation status. */
+	error = write_control(snapshot, 0, 0);
 	if (error == 0) {
 		snapshot->active = 0;
 		snapshot->next_record = 0;
@@ -14509,9 +14678,9 @@ drv_ufs_super_decode(
 	/* Handles the buffer availability. */
 	if (buffer == NULL || super == NULL || length < UFS_FS_STRUCT_SIZE)
 		return EINVAL;
-	magic = drv_ufs_get32(buffer, UFS_FS_MAGIC, 0);
 
 	/* Handles the magic condition. */
+	magic = drv_ufs_get32(buffer, UFS_FS_MAGIC, 0);
 	if (magic == UFS_MAGIC)
 		swapped = 0;
 	else if (drv_ufs_get32(buffer, UFS_FS_MAGIC, 1) == UFS_MAGIC)
@@ -14562,10 +14731,10 @@ drv_ufs_super_decode(
 
 	/* Handles the super condition. */
 	if (super->fsize < UFS_SECTOR_SIZE ||
-	    super->fsize % UFS_SECTOR_SIZE != 0)
-
+	    super->fsize % UFS_SECTOR_SIZE != 0) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	medium_fragments = sectors / (super->fsize / UFS_SECTOR_SIZE);
 	last_cg_start = super->ncg == 0
 				? UINT64_MAX
@@ -14604,10 +14773,10 @@ drv_ufs_super_decode(
 	    super->cstotal_ndir > (uint64_t)super->ncg * super->ipg ||
 	    super->cstotal_nifree > (uint64_t)super->ncg * super->ipg ||
 	    super->cstotal_nbfree > super->dsize / super->frag ||
-	    super->cstotal_nffree > super->dsize)
-
+	    super->cstotal_nffree > super->dsize) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Reports successful completion. */
 	return 0;

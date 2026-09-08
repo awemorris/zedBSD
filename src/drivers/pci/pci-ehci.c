@@ -370,98 +370,6 @@ static struct drv_pci_driver ehci_driver = {.name = "ehci",
 					    .attach = ehci_attach,
 					    .detach = ehci_detach};
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv pci ehci driver register operation.
  */
@@ -469,13 +377,13 @@ int
 drv_pci_ehci_driver_register(
 	void)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv pci driver register result. */
-	function_result = drv_pci_driver_register(&ehci_driver);
+	error = drv_pci_driver_register(&ehci_driver);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -494,9 +402,9 @@ drv_pci_ehci_probe_roots(
 		/* Handles the controller condition. */
 		if (controller->quarantined)
 			continue;
-		changed = ehci_root_ports_changed(controller);
 
 		/* Handles the controller condition. */
+		changed = ehci_root_ports_changed(controller);
 		if (controller->quarantined)
 			continue;
 
@@ -545,6 +453,7 @@ ehci_root_ports_changed(
 					"ehci: root-port register unavailable; "
 					"controller quarantined\n");
 			}
+
 			ehci_retirement_worker_wakeup(controller);
 
 			/* Reports successful completion. */
@@ -554,6 +463,7 @@ ehci_root_ports_changed(
 
 	/* Takes the pending root-port change flags. */
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	changed = __atomic_exchange_n(&controller->root_force_scan, 0U,
 				      __ATOMIC_ACQ_REL) != 0 ||
 		  __atomic_exchange_n(&controller->root_pending, 0U,
@@ -571,7 +481,9 @@ ehci_root_ports_changed(
 			changed = 1;
 		controller->root_port_status[index] = current[index];
 	}
+
 	controller->root_port_status_valid = 1;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Returns the computed result. */
@@ -627,9 +539,9 @@ ehci_retirement_worker_wakeup(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&controller->active_lock);
-	worker = controller->retirement_worker;
 
 	/* Checks the atomic load n result. */
+	worker = controller->retirement_worker;
 	if (worker == NULL || controller->retirement_joining ||
 	    __atomic_load_n(&controller->retirement_stopping,
 			    __ATOMIC_ACQUIRE) != 0) {
@@ -638,8 +550,10 @@ ehci_retirement_worker_wakeup(
 		/* Returns the computed result. */
 		return;
 	}
+
 	__atomic_store_n(&controller->retirement_pending, 1U, __ATOMIC_RELEASE);
 	kernel_notify_task(worker->task);
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
@@ -651,9 +565,8 @@ ehci_root_worker_arm(
 	struct thread *worker;
 	unsigned long irq;
 
-	irq = spin_lock_irqsave(&controller->active_lock);
-
 	/* Checks the atomic load n result. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (controller->root_worker == NULL || controller->root_joining ||
 	    __atomic_load_n(&controller->root_stopping, __ATOMIC_ACQUIRE) !=
 		    0) {
@@ -662,11 +575,13 @@ ehci_root_worker_arm(
 		/* Returns the computed result. */
 		return;
 	}
+
 	__atomic_store_n(&controller->root_force_scan, 1U, __ATOMIC_RELEASE);
 	controller->root_ready = 1;
 	controller->root_wake_generation++;
 	worker = controller->root_worker;
 	kernel_notify_task(worker->task);
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
@@ -749,7 +664,7 @@ ehci_port_finish_reset(
 	unsigned port,
 	uint32_t snapshot)
 {
-	int function_result;
+	int error;
 	uint64_t started = sched_ticks();
 	uint32_t status;
 
@@ -780,10 +695,10 @@ ehci_port_finish_reset(
 	if ((status & (EHCI_PORT_CONNECT | EHCI_PORT_ENABLE |
 		       EHCI_PORT_OWNER)) == EHCI_PORT_CONNECT) {
 		/* Obtains the ehci port handoff result. */
-		function_result = ehci_port_handoff(controller, port, status);
+		error = ehci_port_handoff(controller, port, status);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Reports successful completion. */
@@ -813,10 +728,10 @@ ehci_ownership(
 	while (eecp >= 0x40U && guard++ < 32U) {
 		/* Checks the drv pci device config read32 result. */
 		if (drv_pci_device_config_read32(controller->pci, eecp,
-						 &capability) != 0)
-
+						 &capability) != 0) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 
 		/* Handles the capability condition. */
 		if ((capability & 0xffU) == 1U) {
@@ -824,19 +739,19 @@ ehci_ownership(
 
 			/* Checks the drv pci device config write32 result. */
 			if (drv_pci_device_config_write32(controller->pci, eecp,
-							  capability) != 0)
-
+							  capability) != 0) {
 				/* Returns the computed result. */
 				return EIO;
+			}
 			/* Process each element required by the operation. */
 			for (guard = 0; guard < 1000000U; guard++) {
 				/* Checks the drv pci device config read32 result. */
 				if (drv_pci_device_config_read32(
 					    controller->pci, eecp,
-					    &capability) != 0)
-
+					    &capability) != 0) {
 					/* Returns the computed result. */
 					return EIO;
+				}
 
 				/* Handles the capability condition. */
 				if ((capability & 0x00010000U) == 0)
@@ -846,6 +761,7 @@ ehci_ownership(
 			/* Returns the computed result. */
 			return ETIMEDOUT;
 		}
+
 		eecp = (capability >> 8) & 0xffU;
 	}
 
@@ -926,10 +842,10 @@ ehci_periodic_reserve_locked(
 	    request->periodic_period == 0 ||
 	    request->periodic_period > EHCI_PERIODIC_FRAMES ||
 	    (request->periodic_period & (request->periodic_period - 1U)) != 0 ||
-	    request->periodic_phase >= request->periodic_period)
-
+	    request->periodic_phase >= request->periodic_period) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	/* Process each element required by the operation. */
 	for (frame = request->periodic_phase; frame < EHCI_PERIODIC_FRAMES;
 	     frame += request->periodic_period) {
@@ -942,12 +858,13 @@ ehci_periodic_reserve_locked(
 
 			/* Handles the controller condition. */
 			if (controller->periodic_budget[frame][microframe] >
-			    EHCI_PERIODIC_BUDGET_BITS - request->periodic_cost)
-
+			    EHCI_PERIODIC_BUDGET_BITS - request->periodic_cost) {
 				/* Returns the computed result. */
 				return ENOSPC;
+			}
 		}
 	}
+
 	/* Process each element required by the operation. */
 	for (frame = request->periodic_phase; frame < EHCI_PERIODIC_FRAMES;
 	     frame += request->periodic_period) {
@@ -962,6 +879,7 @@ ehci_periodic_reserve_locked(
 			}
 		}
 	}
+
 	request->periodic_service_mask = service_mask;
 	request->periodic_reserved = true;
 
@@ -999,6 +917,7 @@ ehci_periodic_release_locked(
 				(uint16_t)request->periodic_cost;
 		}
 	}
+
 	request->periodic_reserved = false;
 	request->periodic_service_mask = 0;
 }
@@ -1023,6 +942,7 @@ ehci_schedule_release(
 		drv_dma_free_coherent(controller->hcd.dma,
 				      &controller->reclaim_request.bounce);
 	}
+
 	memset(&controller->reclaim_request, 0,
 	       sizeof(controller->reclaim_request));
 
@@ -1062,39 +982,38 @@ ehci_schedule_initialize(
 	unsigned index;
 	int error;
 
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(controller->hcd.dma, 4096U, 4096U,
 				       &controller->periodic);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(
 		controller->hcd.dma,
 		EHCI_PERIODIC_NODES * sizeof(*controller->periodic_skeleton),
 		64U, &controller->periodic_skeleton_memory);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
+
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(controller->hcd.dma, 4096U, 64U,
 				       &controller->async_head_memory);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
+
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(controller->hcd.dma, 4096U, 64U,
 				       &controller->reclaim_request.schedule);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
+
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(
 		controller->hcd.dma,
 		DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE +
 			sizeof(struct drv_usb_control_request),
 		64U, &controller->reclaim_request.bounce);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 
@@ -1107,6 +1026,7 @@ ehci_schedule_initialize(
 		error = EOVERFLOW;
 		goto fail;
 	}
+
 	controller->reclaim_request.reclaim_reserved = true;
 
 	controller->periodic_skeleton =
@@ -1131,6 +1051,7 @@ ehci_schedule_initialize(
 		qh->next = EHCI_LINK_TERM;
 		qh->alternate = EHCI_LINK_TERM;
 	}
+
 	frames = controller->periodic.address;
 	/* Process each remaining element. */
 	for (index = 0; index < EHCI_PERIODIC_FRAMES; index++) {
@@ -1212,31 +1133,33 @@ ehci_start(
 	int run_started = 0;
 	int stop_error;
 
-	error = ehci_ownership(controller);
-
 	/* Checks the operation status. */
+	error = ehci_ownership(controller);
 	if (error != 0)
 		return error;
-	error = ehci_schedule_initialize(controller);
 
 	/* Checks the operation status. */
+	error = ehci_schedule_initialize(controller);
 	if (error != 0)
 		return error;
 
 	/* Clears the hardware-stop state a previous run left behind. */
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	controller->hardware_stop_in_progress = 0;
 	controller->hardware_stopped = 0;
 	controller->hardware_stop_waiters = 0;
 	controller->hardware_stop_generation = 0;
 	controller->hardware_stop_result_generation = 0;
 	controller->hardware_stop_error = 0;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	wr32(controller->operational, EHCI_USBCMD,
 	     rd32(controller->operational, EHCI_USBCMD) & ~EHCI_CMD_RUN);
-	error = ehci_wait_schedule_status(controller, EHCI_STS_HALTED, 0);
 
 	/* Checks the operation status. */
+	error = ehci_wait_schedule_status(controller, EHCI_STS_HALTED, 0);
 	if (error != 0)
 		goto fail;
 	wr32(controller->operational, EHCI_USBCMD, EHCI_CMD_RESET);
@@ -1253,6 +1176,7 @@ ehci_start(
 		error = ETIMEDOUT;
 		goto fail;
 	}
+
 	wr32(controller->operational, EHCI_CTRLDSSEGMENT, 0);
 	wr32(controller->operational, EHCI_PERIODICLISTBASE,
 	     (uint32_t)controller->periodic.device_address);
@@ -1276,27 +1200,34 @@ ehci_start(
 				error = EIO;
 				goto fail;
 			}
+
 			ehci_port_write(controller, port, status,
 					EHCI_PORT_POWER, 0, 0);
 		}
+
 		sched_sleep(sched_ticks() + EHCI_PORT_POWER_GOOD_TICKS);
 	}
+
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	controller->dma_quiesced = 0;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	wr32(controller->operational, EHCI_USBCMD,
 	     EHCI_CMD_RUN | EHCI_CMD_ASYNC | EHCI_CMD_PERIODIC);
 	run_started = 1;
+
+	/* Checks the operation status. */
 	error = ehci_wait_schedule_status(controller,
 					  EHCI_STS_ASYNC | EHCI_STS_PERIODIC,
 					  EHCI_STS_HALTED);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 
 	/* Resets every list and counter the controller drives. */
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	controller->quiescing = 0;
 	controller->builders = 0;
 	controller->active_count = 0;
@@ -1322,6 +1253,7 @@ ehci_start(
 	       sizeof(controller->periodic_microframe_phase_next));
 	memset(controller->periodic_budget, 0,
 	       sizeof(controller->periodic_budget));
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Reports successful completion. */
@@ -1336,13 +1268,16 @@ fail:
 		/* Returns the computed result. */
 		return error;
 	}
+
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	controller->quiescing = 1;
 	controller->quarantined = 1;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
-	stop_error = ehci_hardware_stop(controller, "start failure");
 
 	/* Checks the operation status. */
+	stop_error = ehci_hardware_stop(controller, "start failure");
 	if (stop_error == 0) {
 		irq = spin_lock_irqsave(&controller->active_lock);
 		controller->dma_quiesced = 1;
@@ -1381,9 +1316,8 @@ ehci_hardware_stop(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		irq = spin_lock_irqsave(&controller->active_lock);
-
 		/* Handles the controller condition. */
+		irq = spin_lock_irqsave(&controller->active_lock);
 		if (controller->hardware_stopped) {
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 
@@ -1403,6 +1337,7 @@ ehci_hardware_stop(
 				/* Returns the computed result. */
 				return EBUSY;
 			}
+
 			controller->hardware_stop_waiters++;
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 			break;
@@ -1424,6 +1359,7 @@ ehci_hardware_stop(
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 			goto stop_owner;
 		}
+
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
 		/* Checks the sched ticks result. */
@@ -1464,6 +1400,7 @@ ehci_hardware_stop(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		sched_yield();
 	}
@@ -1492,6 +1429,7 @@ stop_owner:
 					 EHCI_CMD_ASYNC));
 		}
 	}
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Handles the mmio invalid condition. */
@@ -1517,9 +1455,11 @@ stop_owner:
 				halt_error = ETIMEDOUT;
 				break;
 			}
+
 			sched_yield();
 		}
 	}
+
 	master_error = ehci_bus_master_disable(controller);
 	irq_error = ehci_irq_disestablish(controller);
 
@@ -1542,6 +1482,7 @@ stop_owner:
 	controller->hardware_stopped = error == 0;
 	controller->hardware_stop_result_generation = generation;
 	controller->hardware_stop_in_progress = 0;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Checks the operation status. */
@@ -1567,15 +1508,14 @@ ehci_bus_master_disable(
 	uint16_t command;
 	int error;
 
-	error = drv_pci_device_set_bus_master(controller->pci, false);
-
 	/* Checks the operation status. */
+	error = drv_pci_device_set_bus_master(controller->pci, false);
 	if (error != 0)
 		return error;
-	error = drv_pci_device_config_read16(controller->pci, EHCI_PCI_COMMAND,
-					     &command);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_read16(controller->pci, EHCI_PCI_COMMAND,
+					     &command);
 	if (error != 0)
 		return error;
 
@@ -1597,10 +1537,9 @@ ehci_irq_disestablish(
 	started = sched_ticks();
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
+		/* Checks the operation status. */
 		error = drv_pci_device_disestablish_irq_checked(
 			controller->pci, controller->irq_cookie);
-
-		/* Checks the operation status. */
 		if (error != EBUSY)
 			break;
 
@@ -1612,6 +1551,7 @@ ehci_irq_disestablish(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		sched_yield();
 	}
 
@@ -1624,6 +1564,7 @@ ehci_irq_disestablish(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	controller->irq_cookie = NULL;
 
 	/* Reports successful completion. */
@@ -1677,10 +1618,10 @@ ehci_add_qtd(
 	if (request->qtd_count >= EHCI_MAX_QTDS)
 		return E2BIG;
 	qtd = &request->qtds[request->qtd_count];
-	physical = (uint32_t)request->schedule.device_address + 128U +
-		   request->qtd_count * sizeof(*qtd);
 
 	/* Handles the request condition. */
+	physical = (uint32_t)request->schedule.device_address + 128U +
+		   request->qtd_count * sizeof(*qtd);
 	if (request->qtd_count != 0)
 		request->qtds[request->qtd_count - 1U].next = physical;
 	qtd->next = EHCI_LINK_TERM;
@@ -1722,13 +1663,14 @@ ehci_request_free(
 		request->schedule = schedule;
 		request->bounce = bounce;
 		request->reclaim_reserved = true;
-		irq = spin_lock_irqsave(&controller->active_lock);
 
 		/* Handles the controller condition. */
+		irq = spin_lock_irqsave(&controller->active_lock);
 		if (!controller->reclaim_request_busy) {
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 			__builtin_trap();
 		}
+
 		controller->reclaim_request_busy = 0;
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
@@ -1777,6 +1719,7 @@ ehci_reclaim_request_acquire(
 		controller->reclaim_request_busy = 1U;
 	schedule = request->schedule;
 	bounce = request->bounce;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Checks the operation status. */
@@ -1808,9 +1751,9 @@ ehci_periodic_parameters(
 	/* The 1,024-frame list can represent at most 8,192 microframes. */
 	if (interval > 14U)
 		return ENOTSUP;
-	microframes = 1U << (interval - 1U);
 
 	/* Handles the microframes condition. */
+	microframes = 1U << (interval - 1U);
 	if (microframes == 1U) {
 		*period = 1U;
 		*service_mask = 0xffU;
@@ -1872,37 +1815,36 @@ ehci_build_request(
 	/* Checks the drv usb device speed result. */
 	if (drv_usb_device_speed(device) != DRV_USB_SPEED_HIGH)
 		return ENOTSUP;
-	type = drv_usb_endpoint_type(endpoint);
 
 	/* Handles the type condition. */
+	type = drv_usb_endpoint_type(endpoint);
 	if (type == DRV_USB_TRANSFER_ISOCHRONOUS)
 		return ENOTSUP;
 
 	/* Handles the type condition. */
 	if (type != DRV_USB_TRANSFER_CONTROL && type != DRV_USB_TRANSFER_BULK &&
-	    type != DRV_USB_TRANSFER_INTERRUPT)
-
+	    type != DRV_USB_TRANSFER_INTERRUPT) {
 		/* Returns the computed result. */
 		return EINVAL;
-	control = drv_usb_urb_control_request(urb);
+	}
 
 	/* Handles the control availability. */
+	control = drv_usb_urb_control_request(urb);
 	if ((control != NULL) != (type == DRV_USB_TRANSFER_CONTROL))
 		return EINVAL;
-	descriptor = drv_usb_endpoint_descriptor(endpoint);
 
 	/* Handles the descriptor availability. */
+	descriptor = drv_usb_endpoint_descriptor(endpoint);
 	if (descriptor == NULL || length > SIZE_MAX - 8U)
 		return EINVAL;
 	endpoint_number = drv_usb_endpoint_address(endpoint) & 15U;
 
 	/* Handles the type condition. */
 	if (type == DRV_USB_TRANSFER_INTERRUPT) {
+		/* Checks the operation status. */
 		error = ehci_periodic_parameters(descriptor->interval, &toggle,
 						 &service_mask,
 						 &microframe_slots);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 	}
@@ -1924,10 +1866,10 @@ ehci_build_request(
 	     (endpoint_number != 0 ||
 	      (packet_raw != 8U && packet_raw != 64U))) ||
 	    (type == DRV_USB_TRANSFER_BULK && packet_raw != 512U) ||
-	    (type == DRV_USB_TRANSFER_INTERRUPT && packet > 1024U))
-
+	    (type == DRV_USB_TRANSFER_INTERRUPT && packet > 1024U)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/*
  * The common USB core starts endpoint zero at eight bytes until the
@@ -1937,13 +1879,14 @@ ehci_build_request(
 		packet = 64U;
 		mult = 1U;
 	}
+
 	zero_packet = control == NULL && type == DRV_USB_TRANSFER_BULK &&
 		      !drv_usb_endpoint_is_input(endpoint) && length != 0 &&
 		      (drv_usb_urb_flags(urb) & DRV_USB_URB_ZERO_PACKET) != 0 &&
 		      length % packet == 0;
-	data_qtds = length / 0x4000U + (length % 0x4000U != 0);
 
 	/* Handles the type condition. */
+	data_qtds = length / 0x4000U + (length % 0x4000U != 0);
 	if (type == DRV_USB_TRANSFER_CONTROL) {
 		/* Handles the data qtds condition. */
 		if (data_qtds > EHCI_MAX_QTDS - 2U)
@@ -1963,20 +1906,19 @@ ehci_build_request(
 
 	/* Checks the drv usb urb flags result. */
 	if ((drv_usb_urb_flags(urb) & DRV_USB_URB_RECLAIM_SAFE) != 0) {
+		/* Checks the operation status. */
 		error = ehci_reclaim_request_acquire(controller, length,
 						     &request);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 	} else {
-		request = hal_malloc(sizeof(*request));
-
 		/* Handles the request availability. */
+		request = hal_malloc(sizeof(*request));
 		if (request == NULL)
 			return ENOMEM;
 		memset(request, 0, sizeof(*request));
 	}
+
 	request->urb = urb;
 	request->endpoint = endpoint;
 	request->state = EHCI_REQUEST_ACTIVE;
@@ -2000,22 +1942,21 @@ ehci_build_request(
 
 	/* Handles the request condition. */
 	if (!request->reclaim_reserved) {
+		/* Checks the operation status. */
 		error = drv_dma_alloc_coherent(controller->hcd.dma, 4096U, 64U,
 					       &request->schedule);
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			hal_free(request);
 
 			/* Returns the computed result. */
 			return error;
 		}
+
+		/* Checks the operation status. */
 		error = drv_dma_alloc_coherent(
 			controller->hcd.dma,
 			length + sizeof(struct drv_usb_control_request), 64U,
 			&request->bounce);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto fail;
 	}
@@ -2026,6 +1967,7 @@ ehci_build_request(
 		error = EOVERFLOW;
 		goto fail;
 	}
+
 	memset(request->schedule.address, 0, 4096U);
 	request->qh = request->schedule.address;
 	request->qtds =
@@ -2037,10 +1979,10 @@ ehci_build_request(
 	/* Handles the control availability. */
 	if (control != NULL) {
 		memcpy(request->bounce.address, control, sizeof(*control));
-		error = ehci_add_qtd(request, EHCI_PID_SETUP, 0, 8U,
-				     (uint32_t)request->bounce.device_address);
 
 		/* Checks the operation status. */
+		error = ehci_add_qtd(request, EHCI_PID_SETUP, 0, 8U,
+				     (uint32_t)request->bounce.device_address);
 		if (error != 0)
 			goto fail;
 		request->input = (control->request_type & DRV_USB_DIR_IN) != 0;
@@ -2050,6 +1992,7 @@ ehci_build_request(
 			memcpy((uint8_t *)request->bounce.address + 8U,
 			       drv_usb_urb_buffer(urb), length);
 		}
+
 		request->data_first = request->qtd_count;
 		toggle = 1U;
 		/* Process each remaining element. */
@@ -2079,11 +2022,11 @@ ehci_build_request(
 			toggle ^= ((chunk_local + packet - 1U) / packet) & 1U;
 			request->data_count++;
 		}
+
+		/* Checks the operation status. */
 		error = ehci_add_qtd(
 			request, request->input ? EHCI_PID_OUT : EHCI_PID_IN,
 			1U, 0, 0);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto fail;
 	} else {
@@ -2097,6 +2040,7 @@ ehci_build_request(
 			memcpy((uint8_t *)request->bounce.address + 8U,
 			       drv_usb_urb_buffer(urb), length);
 		}
+
 		/* Process each remaining element. */
 		while (offset < length) {
 			chunk_local1 = length - offset > 0x4000U
@@ -2128,15 +2072,15 @@ ehci_build_request(
 
 		/* Checks the current data length. */
 		if (length == 0 || zero_packet) {
+			/* Checks the operation status. */
 			error = ehci_add_qtd(request,
 					     request->input ? EHCI_PID_IN
 							    : EHCI_PID_OUT,
 					     toggle, 0, 0);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				goto fail;
 		}
+
 		request->data_count = request->qtd_count;
 	}
 
@@ -2230,6 +2174,7 @@ ehci_active_remove_locked(
 		/* Returns the computed result. */
 		return;
 	}
+
 	__builtin_trap();
 }
 
@@ -2261,6 +2206,7 @@ ehci_async_insert_locked(
 		hal_io_wmb();
 		controller->async_head->horizontal = ehci_request_link(request);
 	}
+
 	controller->async_last = request;
 	request->linked = true;
 }
@@ -2307,6 +2253,7 @@ ehci_async_unlink_locked(
 			return EIO;
 		controller->async_last = previous;
 	}
+
 	request->schedule_previous = NULL;
 	request->schedule_next = NULL;
 	request->linked = false;
@@ -2385,10 +2332,10 @@ ehci_periodic_unlink_locked(
 	/* Handles the request condition. */
 	if (!request->linked ||
 	    request->schedule_class != EHCI_SCHEDULE_PERIODIC ||
-	    request->periodic_node >= EHCI_PERIODIC_NODES)
-
+	    request->periodic_node >= EHCI_PERIODIC_NODES) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the previous availability. */
 	if (previous != NULL) {
@@ -2400,10 +2347,10 @@ ehci_periodic_unlink_locked(
 	} else {
 		/* Handles the controller condition. */
 		if (controller->periodic_heads[request->periodic_node] !=
-		    request)
-
+		    request) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		controller->periodic_heads[request->periodic_node] = next;
 		controller->periodic_skeleton[request->periodic_node]
 			.horizontal = next_link;
@@ -2432,6 +2379,7 @@ ehci_builder_leave(
 	if (controller->builders == 0)
 		__builtin_trap();
 	controller->builders--;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
@@ -2461,9 +2409,8 @@ ehci_periodic_update_acquire(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		irq = spin_lock_irqsave(&controller->active_lock);
-
 		/* Handles the retirement condition. */
+		irq = spin_lock_irqsave(&controller->active_lock);
 		if (!retirement &&
 		    (controller->quiescing || controller->dma_quiesced ||
 		     controller->quarantined)) {
@@ -2486,6 +2433,7 @@ ehci_periodic_update_acquire(
 			/* Reports successful completion. */
 			return 0;
 		}
+
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
 		/* Checks the sched ticks result. */
@@ -2506,6 +2454,7 @@ ehci_periodic_update_release(
 	if (!controller->periodic_updating)
 		__builtin_trap();
 	controller->periodic_updating = 0;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
@@ -2514,7 +2463,7 @@ static int
 ehci_periodic_pause(
 	struct ehci_controller *controller)
 {
-	int function_result;
+	int error;
 	uint32_t command;
 	uint32_t status;
 	unsigned long irq;
@@ -2532,6 +2481,7 @@ ehci_periodic_pause(
 		/* Returns the computed result. */
 		return ENODEV;
 	}
+
 	command = rd32(controller->operational, EHCI_USBCMD);
 	status = rd32(controller->operational, EHCI_USBSTS);
 	hal_io_mb();
@@ -2551,14 +2501,15 @@ ehci_periodic_pause(
 	/* Keep RUN and ASE intact so bulk/control traffic continues. */
 	wr32(controller->operational, EHCI_USBCMD,
 	     command & ~EHCI_CMD_PERIODIC);
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Obtains the ehci wait schedule status result. */
-	function_result = ehci_wait_schedule_status(
+	error = ehci_wait_schedule_status(
 		controller, 0, EHCI_STS_PERIODIC | EHCI_STS_HALTED);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ehci periodic resume operation. */
@@ -2566,7 +2517,7 @@ static int
 ehci_periodic_resume(
 	struct ehci_controller *controller)
 {
-	int function_result;
+	int error;
 	uint32_t command;
 	uint32_t status;
 	unsigned long irq;
@@ -2584,6 +2535,7 @@ ehci_periodic_resume(
 		/* Returns the computed result. */
 		return ENODEV;
 	}
+
 	command = rd32(controller->operational, EHCI_USBCMD);
 	status = rd32(controller->operational, EHCI_USBSTS);
 	hal_io_mb();
@@ -2598,15 +2550,17 @@ ehci_periodic_resume(
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	wr32(controller->operational, EHCI_USBCMD, command | EHCI_CMD_PERIODIC);
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Obtains the ehci wait schedule status result. */
-	function_result = ehci_wait_schedule_status(
+	error = ehci_wait_schedule_status(
 		controller, EHCI_STS_PERIODIC, EHCI_STS_HALTED);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ehci publish async request operation. */
@@ -2654,6 +2608,7 @@ ehci_publish_async_request(
 			/* Reports successful completion. */
 			return 0;
 		}
+
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		ehci_unpublished_request_discard(controller, request);
 
@@ -2680,18 +2635,17 @@ ehci_publish_periodic_request(
 	int error;
 	int resume_error;
 
-	error = ehci_periodic_update_acquire(controller, 0);
-
 	/* Checks the operation status. */
+	error = ehci_periodic_update_acquire(controller, 0);
 	if (error != 0) {
 		ehci_unpublished_request_discard(controller, request);
 
 		/* Returns the computed result. */
 		return error;
 	}
-	error = ehci_periodic_pause(controller);
 
 	/* Checks the operation status. */
+	error = ehci_periodic_pause(controller);
 	if (error != 0) {
 		irq = spin_lock_irqsave(&controller->active_lock);
 		ehci_controller_fail_locked(controller, error,
@@ -2744,6 +2698,7 @@ ehci_publish_periodic_request(
 					[microframe_index] &
 				(slots - 1U);
 		}
+
 		frame_start = controller->periodic_phase_next[level] &
 			      (request->periodic_period - 1U);
 		error = ENOSPC;
@@ -2767,10 +2722,9 @@ ehci_publish_periodic_request(
 				service_mask = (uint8_t)(base_service_mask
 							 << microframe_phase);
 
+				/* Checks the operation status. */
 				error = ehci_periodic_reserve_locked(
 					controller, request, service_mask);
-
-				/* Checks the operation status. */
 				if (error == 0) {
 					request->qh->capabilities =
 						(request->qh->capabilities &
@@ -2788,6 +2742,7 @@ ehci_publish_periodic_request(
 							 1U) &
 							(slots - 1U);
 					}
+
 					accepted = 1;
 					break;
 				}
@@ -2810,7 +2765,9 @@ ehci_publish_periodic_request(
 			error = 0;
 		}
 	}
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	resume_error = ehci_periodic_resume(controller);
 	ehci_periodic_update_release(controller);
 
@@ -2893,12 +2850,13 @@ ehci_urb_enqueue(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	controller->builders++;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
-	error = ehci_build_request(controller, urb, &request);
-
 	/* Checks the operation status. */
+	error = ehci_build_request(controller, urb, &request);
 	if (error != 0) {
 		ehci_builder_leave(controller);
 
@@ -3087,24 +3045,23 @@ ehci_request_actual(
 
 	/* Process each remaining element. */
 	for (index = 0; index < request->data_count; index++) {
-		qtd_index = request->data_first + index;
-
 		/* Handles the qtd index condition. */
+		qtd_index = request->data_first + index;
 		if (qtd_index >= request->qtd_count)
 			break;
-		token = request->qtds[qtd_index].token;
 
 		/* Handles the token condition. */
+		token = request->qtds[qtd_index].token;
 		if ((token & EHCI_QTD_ACTIVE) != 0)
 			break;
-		remaining = (token >> 16) & 0x7fffU;
 
 		/* Handles the remaining condition. */
+		remaining = (token >> 16) & 0x7fffU;
 		if (remaining > request->requested[qtd_index])
 			break;
-		transferred = request->requested[qtd_index] - remaining;
 
 		/* Handles the actual condition. */
+		transferred = request->requested[qtd_index] - remaining;
 		if (actual > length || transferred > length - actual)
 			break;
 		actual += transferred;
@@ -3159,6 +3116,7 @@ ehci_retirement_report(
 			error = request->failure_error;
 			break;
 		}
+
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
 		/* Handles the stage availability. */
@@ -3184,10 +3142,10 @@ ehci_retirement_begin_iaa_locked(
 	if (request->state != EHCI_REQUEST_DEACTIVATING ||
 	    request->schedule_class != EHCI_SCHEDULE_ASYNC ||
 	    controller->retirement_head != request ||
-	    controller->iaa_owner != NULL)
-
+	    controller->iaa_owner != NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/*
  * periodic_updating owns USBCMD while it crosses the PSS barrier. Since
@@ -3202,18 +3160,18 @@ ehci_retirement_begin_iaa_locked(
 
 	/* Checks the operation status. */
 	if (status == UINT32_MAX || command == UINT32_MAX ||
-	    (status & (EHCI_STS_HSE | EHCI_STS_HALTED)) != 0)
-
+	    (status & (EHCI_STS_HSE | EHCI_STS_HALTED)) != 0) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Handles the command condition. */
 	if ((command & (EHCI_CMD_RUN | EHCI_CMD_ASYNC)) !=
 		    (EHCI_CMD_RUN | EHCI_CMD_ASYNC) ||
-	    (status & EHCI_STS_ASYNC) == 0)
-
+	    (status & EHCI_STS_ASYNC) == 0) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Handles the command condition. */
 	if ((command & EHCI_CMD_IAAD) != 0)
@@ -3229,9 +3187,9 @@ ehci_retirement_begin_iaa_locked(
 		if (status == UINT32_MAX || (status & EHCI_STS_IAA) != 0)
 			return EIO;
 	}
-	error = ehci_async_unlink_locked(controller, request);
 
 	/* Checks the operation status. */
+	error = ehci_async_unlink_locked(controller, request);
 	if (error != 0)
 		return error;
 	hal_io_wmb();
@@ -3264,10 +3222,10 @@ ehci_retirement_observe_iaa_locked(
 	if (request->state != EHCI_REQUEST_WAIT_IAA ||
 	    controller->iaa_owner != request ||
 	    request->retirement_generation == 0 ||
-	    request->retirement_generation != controller->retirement_generation)
-
+	    request->retirement_generation != controller->retirement_generation) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the request condition. */
 	if (!request->iaa_observed)
@@ -3281,10 +3239,10 @@ ehci_retirement_observe_iaa_locked(
 	    (status & (EHCI_STS_HSE | EHCI_STS_HALTED)) != 0 ||
 	    (status & EHCI_STS_ASYNC) == 0 ||
 	    (command & (EHCI_CMD_RUN | EHCI_CMD_ASYNC)) !=
-		    (EHCI_CMD_RUN | EHCI_CMD_ASYNC))
-
+		    (EHCI_CMD_RUN | EHCI_CMD_ASYNC)) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/*
  * INTx acknowledgement belongs to the IRQ handler.  Its software latch
@@ -3346,6 +3304,7 @@ ehci_complete_retired_request(
 	} else {
 		result = DRV_USB_URB_DISCONNECTED;
 	}
+
 	stall_publication =
 		result == DRV_USB_URB_STALL &&
 		(drv_usb_endpoint_type(endpoint) == DRV_USB_TRANSFER_BULK ||
@@ -3380,17 +3339,21 @@ ehci_complete_retired_request(
 	controller->completion_inflight++;
 	ehci_active_remove_locked(controller, request);
 	(void)drv_usb_urb_set_hcd_data(urb, NULL);
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	ehci_request_free(controller, request);
 	drv_usb_hcd_complete(&controller->hcd, urb, result, actual);
-	irq = spin_lock_irqsave(&controller->active_lock);
 
 	/* Handles the controller condition. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (controller->completion_inflight == 0) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		__builtin_trap();
 	}
+
 	controller->completion_inflight--;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
@@ -3405,9 +3368,8 @@ ehci_retire_periodic_request(
 	int resume_error;
 	int complete = 0;
 
-	irq = spin_lock_irqsave(&controller->active_lock);
-
 	/* Handles the controller condition. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (controller->retirement_head != request ||
 	    request->state != EHCI_REQUEST_DEACTIVATING) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -3421,23 +3383,23 @@ ehci_retire_periodic_request(
 	 * barrier.  Time queued behind earlier requests is deliberately
 	 * excluded. */
 	request->retirement_started = sched_ticks();
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
-	error = ehci_periodic_update_acquire(controller, 1);
-
 	/* Checks the operation status. */
+	error = ehci_periodic_update_acquire(controller, 1);
 	if (error != 0)
 		goto fail;
-	error = ehci_periodic_pause(controller);
 
 	/* Checks the operation status. */
+	error = ehci_periodic_pause(controller);
 	if (error != 0) {
 		ehci_periodic_update_release(controller);
 		goto fail;
 	}
-	irq = spin_lock_irqsave(&controller->active_lock);
 
 	/* Handles the controller condition. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (controller->retirement_head != request ||
 	    request->state != EHCI_REQUEST_DEACTIVATING) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -3447,14 +3409,16 @@ ehci_retire_periodic_request(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
-	error = ehci_periodic_unlink_locked(controller, request);
 
 	/* Checks the operation status. */
+	error = ehci_periodic_unlink_locked(controller, request);
 	if (error == 0) {
 		request->state = EHCI_REQUEST_WAIT_PERIODIC;
 		hal_io_wmb();
 	}
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	resume_error = ehci_periodic_resume(controller);
 	ehci_periodic_update_release(controller);
 
@@ -3474,6 +3438,7 @@ ehci_retire_periodic_request(
 		ehci_retirement_finish_locked(controller, request);
 		complete = request->state == EHCI_REQUEST_COMPLETING;
 	}
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Handles the complete condition. */
@@ -3485,9 +3450,12 @@ ehci_retire_periodic_request(
 
 fail:
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	ehci_controller_fail_locked(controller, error,
 				    "periodic schedule retirement");
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	ehci_retirement_report(controller);
 
 	/* Reports the failure. */
@@ -3514,9 +3482,9 @@ ehci_retirement_progress(
 		error = 0;
 
 		irq = spin_lock_irqsave(&controller->active_lock);
-		request = controller->retirement_head;
 
 		/* Checks the atomic load n result. */
+		request = controller->retirement_head;
 		if (request == NULL ||
 		    __atomic_load_n(&controller->retirement_stopping,
 				    __ATOMIC_ACQUIRE) != 0) {
@@ -3582,6 +3550,7 @@ ehci_retirement_progress(
 					? "async-advance acknowledgement"
 					: "async-ring unlink");
 		}
+
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
 		/* Checks the operation status. */
@@ -3602,6 +3571,7 @@ ehci_retirement_progress(
 				/* Returns the computed result. */
 				return;
 			}
+
 			sched_yield();
 			continue;
 		}
@@ -3668,9 +3638,9 @@ ehci_root_worker_stop(
 	int error;
 
 	irq = spin_lock_irqsave(&controller->active_lock);
-	worker = controller->root_worker;
 
 	/* Handles the worker availability. */
+	worker = controller->root_worker;
 	if (worker == NULL) {
 		/* Handles the controller condition. */
 		if (controller->root_joining) {
@@ -3679,6 +3649,7 @@ ehci_root_worker_stop(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		__atomic_store_n(&controller->root_stopping, 1U,
 				 __ATOMIC_RELEASE);
 		controller->root_ready = 0;
@@ -3696,6 +3667,7 @@ ehci_root_worker_stop(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	__atomic_store_n(&controller->root_stopping, 1U, __ATOMIC_RELEASE);
 	controller->root_ready = 0;
 	controller->root_wake_generation++;
@@ -3714,8 +3686,11 @@ ehci_root_worker_stop(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	controller->root_joining = 1;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	/* Continue while the operation condition remains true. */
 	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) !=
 	       THREAD_ZOMBIE)
@@ -3727,16 +3702,20 @@ ehci_root_worker_stop(
 	    !controller->root_joining)
 		__builtin_trap();
 	controller->root_worker = NULL;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	error = thread_wait(worker, NULL);
-	irq = spin_lock_irqsave(&controller->active_lock);
 
 	/* Handles the root worker availability. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (!controller->root_joining || controller->root_worker != NULL) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		__builtin_trap();
 	}
+
 	controller->root_joining = 0;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Reports the failure. */
@@ -3758,10 +3737,10 @@ ehci_retirement_worker(
 	for (;;) {
 		/* Checks the atomic load n result. */
 		if (__atomic_load_n(&controller->retirement_stopping,
-				    __ATOMIC_ACQUIRE) != 0)
-
+				    __ATOMIC_ACQUIRE) != 0) {
 			/* Returns the computed result. */
 			return;
+		}
 
 		/* Checks the atomic load n result. */
 		if (__atomic_load_n(&controller->fatal_pending,
@@ -3776,6 +3755,7 @@ ehci_retirement_worker(
 			ehci_retirement_progress(controller);
 			continue;
 		}
+
 		kernel_wait_task();
 	}
 }
@@ -3789,9 +3769,8 @@ ehci_retirement_worker_start(
 	unsigned long irq;
 	int error;
 
-	irq = spin_lock_irqsave(&controller->active_lock);
-
 	/* Handles the retirement worker availability. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (controller->retirement_worker != NULL ||
 	    controller->retirement_joining) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -3799,26 +3778,31 @@ ehci_retirement_worker_start(
 		/* Returns the computed result. */
 		return EALREADY;
 	}
+
 	__atomic_store_n(&controller->retirement_stopping, 0U,
 			 __ATOMIC_RELEASE);
 	__atomic_store_n(&controller->retirement_pending, 0U, __ATOMIC_RELEASE);
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
-	error = kthread_create(ehci_retirement_worker, controller,
-			       SCHED_PRIORITY_DEFAULT, &worker);
 
 	/* Checks the operation status. */
+	error = kthread_create(ehci_retirement_worker, controller,
+			       SCHED_PRIORITY_DEFAULT, &worker);
 	if (error != 0)
 		return error;
-	irq = spin_lock_irqsave(&controller->active_lock);
 
 	/* Handles the retirement worker availability. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (controller->retirement_worker != NULL ||
 	    controller->retirement_joining) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		__builtin_trap();
 	}
+
 	controller->retirement_worker = worker;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	thread_start(worker);
 
 	/* Reports successful completion. */
@@ -3835,9 +3819,9 @@ ehci_retirement_worker_stop(
 	int error;
 
 	irq = spin_lock_irqsave(&controller->active_lock);
-	worker = controller->retirement_worker;
 
 	/* Handles the worker availability. */
+	worker = controller->retirement_worker;
 	if (worker == NULL) {
 		/* Handles the controller condition. */
 		if (controller->retirement_joining) {
@@ -3846,6 +3830,7 @@ ehci_retirement_worker_stop(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
 		/* Reports successful completion. */
@@ -3864,35 +3849,43 @@ ehci_retirement_worker_stop(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	controller->retirement_joining = 1;
 	__atomic_store_n(&controller->retirement_stopping, 1U,
 			 __ATOMIC_RELEASE);
 	kernel_notify_task(worker->task);
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	/* Continue while the operation condition remains true. */
 	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) !=
 	       THREAD_ZOMBIE)
 		sched_yield();
-	irq = spin_lock_irqsave(&controller->active_lock);
 
 	/* Handles the controller condition. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (controller->retirement_worker != worker ||
 	    !controller->retirement_joining) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		__builtin_trap();
 	}
+
 	controller->retirement_worker = NULL;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	error = thread_wait(worker, NULL);
-	irq = spin_lock_irqsave(&controller->active_lock);
 
 	/* Handles the retirement worker availability. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (!controller->retirement_joining ||
 	    controller->retirement_worker != NULL) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		__builtin_trap();
 	}
+
 	controller->retirement_joining = 0;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Reports the failure. */
@@ -3916,9 +3909,9 @@ ehci_urb_dequeue(
 	int inline_retirement;
 
 	irq = spin_lock_irqsave(&controller->active_lock);
-	request = drv_usb_urb_hcd_data(urb);
 
 	/* Checks the ehci request is active locked result. */
+	request = drv_usb_urb_hcd_data(urb);
 	if (request == NULL || request->urb != urb ||
 	    !ehci_request_is_active_locked(controller, request)) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -3938,9 +3931,11 @@ ehci_urb_dequeue(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	ehci_retirement_begin_locked(controller, request, EHCI_RETIRE_CANCEL,
 				     DRV_USB_URB_CANCELLED);
 	inline_retirement = curthread == controller->retirement_worker;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Handles the inline retirement condition. */
@@ -3951,9 +3946,8 @@ ehci_urb_dequeue(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		irq = spin_lock_irqsave(&controller->active_lock);
-
 		/* Checks the ehci request is active locked result. */
+		irq = spin_lock_irqsave(&controller->active_lock);
 		if (!ehci_request_is_active_locked(controller, request) ||
 		    request->urb != urb ||
 		    drv_usb_urb_hcd_data(urb) != request) {
@@ -3998,6 +3992,7 @@ ehci_urb_dequeue(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
 		/* Handles the inline retirement condition. */
@@ -4023,9 +4018,8 @@ ehci_root_worker(
 	for (;;) {
 		dispatch = 0;
 
-		irq = spin_lock_irqsave(&controller->active_lock);
-
 		/* Checks the atomic load n result. */
+		irq = spin_lock_irqsave(&controller->active_lock);
 		if (__atomic_load_n(&controller->root_stopping,
 				    __ATOMIC_ACQUIRE) != 0) {
 			spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -4033,6 +4027,7 @@ ehci_root_worker(
 			/* Returns the computed result. */
 			return;
 		}
+
 		observed_generation = controller->root_wake_generation;
 		ready = controller->root_ready != 0;
 		spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -4050,6 +4045,7 @@ ehci_root_worker(
 				controller->root_dispatching = 1;
 				dispatch = 1;
 			}
+
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 		}
 
@@ -4061,9 +4057,9 @@ ehci_root_worker(
 			 * remain independent of both IRQ context and the
 			 * request-retirement worker. */
 			drv_usb_hcd_root_hub_changed(&controller->hcd);
-			irq = spin_lock_irqsave(&controller->active_lock);
 
 			/* Handles the controller condition. */
+			irq = spin_lock_irqsave(&controller->active_lock);
 			if (!controller->root_dispatching)
 				__builtin_trap();
 			controller->root_dispatching = 0;
@@ -4077,9 +4073,9 @@ ehci_root_worker(
 		 * bit is raised. The generation check and locked scheduler
 		 * handoff close the check-to-sleep window for PCD, arm, and
 		 * stop notifications. */
-		irq = spin_lock_irqsave(&controller->active_lock);
 
 		/* Checks the atomic load n result. */
+		irq = spin_lock_irqsave(&controller->active_lock);
 		if (__atomic_load_n(&controller->root_stopping,
 				    __ATOMIC_ACQUIRE) != 0) {
 			spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -4093,6 +4089,7 @@ ehci_root_worker(
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 			continue;
 		}
+
 		sched_sleep_locked(sched_ticks() + EHCI_ROOT_POLL_TICKS,
 				   &controller->active_lock);
 		spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -4108,15 +4105,15 @@ ehci_root_worker_start(
 	unsigned long irq;
 	int error;
 
-	irq = spin_lock_irqsave(&controller->active_lock);
-
 	/* Handles the root worker availability. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (controller->root_worker != NULL || controller->root_joining) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
 		/* Returns the computed result. */
 		return EALREADY;
 	}
+
 	controller->root_ready = 0;
 	controller->root_dispatching = 0;
 	controller->root_wake_generation = 1;
@@ -4126,22 +4123,26 @@ ehci_root_worker_start(
 	__atomic_store_n(&controller->root_force_scan, 1U, __ATOMIC_RELEASE);
 	memset(controller->root_port_status, 0,
 	       sizeof(controller->root_port_status));
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
-	error = kthread_create(ehci_root_worker, controller,
-			       SCHED_PRIORITY_DEFAULT, &worker);
 
 	/* Checks the operation status. */
+	error = kthread_create(ehci_root_worker, controller,
+			       SCHED_PRIORITY_DEFAULT, &worker);
 	if (error != 0)
 		return error;
-	irq = spin_lock_irqsave(&controller->active_lock);
 
 	/* Handles the root worker availability. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (controller->root_worker != NULL || controller->root_joining) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 		__builtin_trap();
 	}
+
 	controller->root_worker = worker;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
+
 	thread_start(worker);
 
 	/* Reports successful completion. */
@@ -4157,14 +4158,16 @@ ehci_root_worker_request_stop(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	__atomic_store_n(&controller->root_stopping, 1U, __ATOMIC_RELEASE);
 	controller->root_ready = 0;
 	controller->root_wake_generation++;
-	worker = controller->root_worker;
 
 	/* Handles the worker availability. */
+	worker = controller->root_worker;
 	if (worker != NULL && !controller->root_joining)
 		kernel_notify_task(worker->task);
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
@@ -4177,9 +4180,9 @@ ehci_root_event_defer(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&controller->active_lock);
-	worker = controller->root_worker;
 
 	/* Checks the atomic load n result. */
+	worker = controller->root_worker;
 	if (worker == NULL || controller->root_joining ||
 	    __atomic_load_n(&controller->root_stopping, __ATOMIC_ACQUIRE) !=
 		    0) {
@@ -4188,9 +4191,11 @@ ehci_root_event_defer(
 		/* Returns the computed result. */
 		return;
 	}
+
 	__atomic_store_n(&controller->root_pending, 1U, __ATOMIC_RELEASE);
 	controller->root_wake_generation++;
 	kernel_notify_task(worker->task);
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
@@ -4208,6 +4213,7 @@ ehci_quiesce_requests(
 	int wake = 0;
 
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	/* Process each element required by the operation. */
 	for (request = controller->active; request != NULL;
 	     request = request->active_next) {
@@ -4230,7 +4236,9 @@ ehci_quiesce_requests(
 					     DRV_USB_URB_DISCONNECTED);
 		wake = 1;
 	}
+
 	inline_retirement = curthread == controller->retirement_worker;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Handles the wake condition. */
@@ -4247,9 +4255,8 @@ ehci_quiesce_requests(
 		failed = 0;
 		failure_error = EIO;
 
-		irq = spin_lock_irqsave(&controller->active_lock);
-
 		/* Handles the controller condition. */
+		irq = spin_lock_irqsave(&controller->active_lock);
 		if (controller->active_count == 0 &&
 		    controller->completion_inflight == 0 &&
 		    controller->reclaim_request_busy == 0) {
@@ -4258,6 +4265,7 @@ ehci_quiesce_requests(
 			/* Reports successful completion. */
 			return 0;
 		}
+
 		/* Process each element required by the operation. */
 		for (request = controller->active; request != NULL;
 		     request = request->active_next) {
@@ -4270,6 +4278,7 @@ ehci_quiesce_requests(
 						: EIO;
 			break;
 		}
+
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
 		/* Checks the operation status. */
@@ -4308,6 +4317,7 @@ ehci_report_shutdown_evidence(
 
 	/* Tests that nothing is left in flight or running. */
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	ready = controller->dma_quiesced && controller->hardware_stopped &&
 		!controller->hardware_stop_in_progress &&
 		controller->hardware_stop_waiters == 0 &&
@@ -4329,7 +4339,9 @@ ehci_report_shutdown_evidence(
 		controller->shutdown_evidence_reported = 1;
 		report = 1;
 	}
+
 #endif
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Handles the ready condition. */
@@ -4362,19 +4374,20 @@ ehci_quiesce(
 	int root_error;
 
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	controller->quiescing = 1;
 
 	/* Handles the controller condition. */
 	if (controller->dma_quiesced) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
-		root_error = ehci_root_worker_stop(controller, 1);
 
 		/* Checks the operation status. */
+		root_error = ehci_root_worker_stop(controller, 1);
 		if (root_error != 0)
 			return root_error;
-		error = ehci_retirement_worker_stop(controller);
 
 		/* Checks the operation status. */
+		error = ehci_retirement_worker_stop(controller);
 		if (error != 0)
 			return error;
 
@@ -4384,6 +4397,7 @@ ehci_quiesce(
 		/* Returns the computed result. */
 		return function_result;
 	}
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/*
@@ -4395,10 +4409,10 @@ ehci_quiesce(
 	for (;;) {
 		fatal_pending = __atomic_load_n(&controller->fatal_pending,
 						__ATOMIC_ACQUIRE);
-		fatal_stopping = __atomic_load_n(&controller->fatal_stopping,
-						 __ATOMIC_ACQUIRE);
 
 		/* Handles the fatal pending condition. */
+		fatal_stopping = __atomic_load_n(&controller->fatal_stopping,
+						 __ATOMIC_ACQUIRE);
 		if (!fatal_pending && !fatal_stopping)
 			break;
 
@@ -4412,21 +4426,20 @@ ehci_quiesce(
 		sched_yield();
 	}
 
-	root_error = ehci_root_worker_stop(controller, 1);
-
 	/* Checks the operation status. */
+	root_error = ehci_root_worker_stop(controller, 1);
 	if (root_error != 0)
 		return root_error;
 	started = sched_ticks();
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		irq = spin_lock_irqsave(&controller->active_lock);
-
 		/* Handles the controller condition. */
+		irq = spin_lock_irqsave(&controller->active_lock);
 		if (controller->builders == 0) {
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 			break;
 		}
+
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
 		/* Checks the sched ticks result. */
@@ -4434,6 +4447,7 @@ ehci_quiesce(
 			return EBUSY;
 		sched_yield();
 	}
+
 	request_error = ehci_quiesce_requests(controller);
 
 	/*
@@ -4441,9 +4455,9 @@ ehci_quiesce(
 	 * an asynchronous stop owner.  The shutdown caller must join the
 	 * serialized hardware barrier before returning even when request DMA
 	 * remains retained. */
-	error = ehci_hardware_stop(controller, "quiesce");
 
 	/* Checks the operation status. */
+	error = ehci_hardware_stop(controller, "quiesce");
 	if (error != 0)
 		return error;
 	irq = spin_lock_irqsave(&controller->active_lock);
@@ -4468,10 +4482,11 @@ ehci_quiesce(
 	    controller->retirement_head != NULL ||
 	    controller->iaa_owner != NULL || controller->periodic_updating)
 		__builtin_trap();
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
-	error = ehci_retirement_worker_stop(controller);
 
 	/* Checks the operation status. */
+	error = ehci_retirement_worker_stop(controller);
 	if (error != 0)
 		return error;
 
@@ -4493,6 +4508,7 @@ ehci_stop(
 
 	/* Tests that nothing is left in flight or running. */
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	releasable = controller->dma_quiesced && controller->active == NULL &&
 		     controller->active_count == 0 &&
 		     controller->completion_inflight == 0 &&
@@ -4508,6 +4524,7 @@ ehci_stop(
 		     !controller->retirement_joining &&
 		     controller->root_worker == NULL &&
 		     !controller->root_joining && !controller->root_dispatching;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Handles the releasable condition. */
@@ -4519,6 +4536,7 @@ ehci_stop(
 		/* Returns the computed result. */
 		return;
 	}
+
 	ehci_schedule_release(controller);
 }
 
@@ -4587,15 +4605,15 @@ ehci_endpoint_reset(
 		   1U) {
 		error = EIO;
 	} else {
-		error = drv_usb_endpoint_set_hcd_data(endpoint, 0, 0);
-
 		/* Checks the operation status. */
+		error = drv_usb_endpoint_set_hcd_data(endpoint, 0, 0);
 		if (error == 0) {
 			error = drv_usb_endpoint_set_hcd_data(
 				endpoint, EHCI_ENDPOINT_STALL_PUBLISHING_SLOT,
 				0);
 		}
 	}
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Reports the failure. */
@@ -4641,9 +4659,8 @@ ehci_root_status(
 	memset(bits, 0, bytes);
 	/* Process each remaining element. */
 	for (port = 0; port < hcd->root_port_count; port++) {
-		status = rd32(controller->operational, EHCI_PORTSC(port));
-
 		/* Checks the operation status. */
+		status = rd32(controller->operational, EHCI_PORTSC(port));
 		if (status == UINT32_MAX)
 			return EIO;
 
@@ -4681,22 +4698,21 @@ ehci_root_control(
 
 	/* Handles the request availability. */
 	if (request == NULL || request->index < 1 ||
-	    request->index > hcd->root_port_count)
-
+	    request->index > hcd->root_port_count) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	port = request->index - 1U;
-	status = rd32(controller->operational, EHCI_PORTSC(port));
 
 	/* Checks the operation status. */
+	status = rd32(controller->operational, EHCI_PORTSC(port));
 	if (status == UINT32_MAX)
 		return EIO;
 
 	/* Handles the buffer availability. */
 	if (request->request == 0 && buffer != NULL && size >= 4U) {
-		value = 0;
-
 		/* Checks the operation status. */
+		value = 0;
 		if ((status & EHCI_PORT_OWNER) == 0) {
 			/* Checks the operation status. */
 			if ((status & EHCI_PORT_CONNECT) != 0)
@@ -4772,6 +4788,7 @@ ehci_root_control(
 			/* Reports successful completion. */
 			return 0;
 		}
+
 		ehci_port_write(controller, port, status,
 				EHCI_PORT_RESET | EHCI_PORT_POWER,
 				EHCI_PORT_ENABLE, 0);
@@ -4787,10 +4804,9 @@ ehci_root_control(
 	if (request->request == 1) {
 		/* Handles the request condition. */
 		if (request->value == 4) {
+			/* Checks the operation status. */
 			error_local1 = ehci_port_finish_reset(controller, port,
 							      status);
-
-			/* Checks the operation status. */
 			if (error_local1 != 0)
 				return error_local1;
 		} else if (request->value == 16) {
@@ -4848,6 +4864,7 @@ ehci_irq(
 	int wake_root = 0;
 
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	status = rd32(controller->operational, EHCI_USBSTS);
 	hal_io_mb();
 
@@ -4864,15 +4881,16 @@ ehci_irq(
 			hal_printf("ehci: invalid IRQ status; controller "
 				   "quarantined\n");
 		}
+
 		ehci_retirement_report(controller);
 		ehci_retirement_worker_wakeup(controller);
 
 		/* Reports operation failure. */
 		return 1;
 	}
-	acknowledge = status & EHCI_STS_ALL;
 
 	/* Handles the acknowledge condition. */
+	acknowledge = status & EHCI_STS_ALL;
 	if (acknowledge == 0) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
@@ -4890,9 +4908,8 @@ ehci_irq(
 		wake_retirement = 1;
 	} else if ((status & EHCI_STS_IAA) != 0 &&
 		   controller->iaa_owner != NULL) {
-		iaa_request = controller->iaa_owner;
-
 		/* Handles the iaa request condition. */
+		iaa_request = controller->iaa_owner;
 		if (iaa_request->state != EHCI_REQUEST_WAIT_IAA ||
 		    iaa_request->retirement_generation == 0 ||
 		    iaa_request->retirement_generation !=
@@ -4939,6 +4956,7 @@ ehci_irq(
 				fatal_event = 1;
 				wake_retirement = 1;
 			}
+
 			iaa_request = NULL;
 		} else if (!fatal_event && iaa_request != NULL &&
 			   !iaa_request->iaa_observed) {
@@ -4972,6 +4990,7 @@ ehci_irq(
 			wake_retirement = 1;
 		}
 	}
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Handles the fatal event condition. */
@@ -5037,6 +5056,7 @@ ehci_unpublish(
 		*link = controller->next;
 		break;
 	}
+
 	controller->next = NULL;
 	controller->listed = 0;
 }
@@ -5052,6 +5072,7 @@ ehci_pci_release(
 
 	/* Tests that no worker or stop is still running. */
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	releasable = controller->retirement_worker == NULL &&
 		     !controller->retirement_joining &&
 		     controller->root_worker == NULL &&
@@ -5060,6 +5081,7 @@ ehci_pci_release(
 		     !controller->hardware_stop_in_progress &&
 		     controller->hardware_stop_waiters == 0 &&
 		     controller->reclaim_request_busy == 0;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Handles the address availability. */
@@ -5068,16 +5090,15 @@ ehci_pci_release(
 	    controller->async_head_memory.address != NULL ||
 	    controller->reclaim_request.schedule.address != NULL ||
 	    controller->reclaim_request.bounce.address != NULL ||
-	    !controller->dma_quiesced)
-
+	    !controller->dma_quiesced) {
 		/* Returns the computed result. */
 		return EBUSY;
+	}
 
 	/* Handles the controller condition. */
 	if (controller->pci_state_saved) {
-		error = ehci_bus_master_disable(controller);
-
 		/* Checks the operation status. */
+		error = ehci_bus_master_disable(controller);
 		if (error != 0)
 			return error;
 	}
@@ -5093,10 +5114,9 @@ ehci_pci_release(
 
 	/* Handles the controller condition. */
 	if (controller->pci_state_saved) {
+		/* Checks the operation status. */
 		error = drv_pci_device_restore_enable_state(
 			controller->pci, &controller->pci_enable_state);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 		controller->pci_state_saved = 0;
@@ -5129,9 +5149,9 @@ ehci_cleanup(
 	 * teardown.  Reject before closing either worker or HCD admission when
 	 * the caller cannot own both joins, or another caller already owns one.
 	 */
-	irq = spin_lock_irqsave(&controller->active_lock);
 
 	/* Handles the controller condition. */
+	irq = spin_lock_irqsave(&controller->active_lock);
 	if (controller->root_worker == curthread || controller->root_joining ||
 	    controller->retirement_worker == curthread ||
 	    controller->retirement_joining) {
@@ -5140,8 +5160,10 @@ ehci_cleanup(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	had_root = controller->root_worker != NULL;
 	root_was_ready = controller->root_ready;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Handles the controller condition. */
@@ -5150,14 +5172,14 @@ ehci_cleanup(
  * Detach/attach-unwind runs outside the USB topology lock, so
 		 * close and join the root producer before unregister enters
 		 * that lock. */
-		error = ehci_root_worker_stop(controller, 1);
 
 		/* Checks the operation status. */
+		error = ehci_root_worker_stop(controller, 1);
 		if (error != 0)
 			return error;
-		error = drv_usb_hcd_unregister(&controller->hcd);
 
 		/* Checks the operation status. */
+		error = drv_usb_hcd_unregister(&controller->hcd);
 		if (error != 0) {
 			/*
  * EBUSY before quiesce leaves the HCD live.  Restore
@@ -5180,20 +5202,21 @@ ehci_cleanup(
 			/* Returns the computed result. */
 			return error;
 		}
+
 		controller->hcd_registered = 0;
 	} else {
 		/*
  * Defensive attach-unwind path: a worker must never outlive its
 		 * controller even if registration did not become externally
 		 * visible. */
-		error = ehci_root_worker_stop(controller, 1);
 
 		/* Checks the operation status. */
+		error = ehci_root_worker_stop(controller, 1);
 		if (error != 0)
 			return error;
-		error = ehci_retirement_worker_stop(controller);
 
 		/* Checks the operation status. */
+		error = ehci_retirement_worker_stop(controller);
 		if (error != 0)
 			return error;
 	}
@@ -5208,18 +5231,17 @@ ehci_cleanup(
 	    controller->async_head_memory.address != NULL ||
 	    controller->reclaim_request.schedule.address != NULL ||
 	    controller->reclaim_request.bounce.address != NULL) {
-		irq = spin_lock_irqsave(&controller->active_lock);
-
 		/* Handles the controller condition. */
+		irq = spin_lock_irqsave(&controller->active_lock);
 		if (controller->dma_quiesced) {
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 			ehci_schedule_release(controller);
 		} else {
 			spin_unlock_irqrestore(&controller->active_lock, irq);
-			error = ehci_hardware_stop(controller,
-						   "attach cleanup");
 
 			/* Checks the operation status. */
+			error = ehci_hardware_stop(controller,
+						   "attach cleanup");
 			if (error != 0)
 				return error;
 			irq = spin_lock_irqsave(&controller->active_lock);
@@ -5255,6 +5277,7 @@ ehci_runtime_operational(
 
 	/* Tests that the controller is registered and running. */
 	irq = spin_lock_irqsave(&controller->active_lock);
+
 	operational =
 		controller->hcd_registered && !controller->quarantined &&
 		!controller->quiescing && !controller->dma_quiesced &&
@@ -5267,6 +5290,7 @@ ehci_runtime_operational(
 			0 &&
 		__atomic_load_n(&controller->fatal_stopping,
 				__ATOMIC_ACQUIRE) == 0;
+
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/* Returns the computed result. */
@@ -5287,9 +5311,9 @@ ehci_attach(
 	int error;
 
 	(void)id;
-	controller = hal_malloc(sizeof(*controller));
 
 	/* Handles the controller availability. */
+	controller = hal_malloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
@@ -5299,27 +5323,27 @@ ehci_attach(
 	controller->dma_quiesced = 1;
 	controller->quiescing = 1;
 	stage = "BAR claim";
-	error = drv_pci_device_claim_bar(device, 0);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_claim_bar(device, 0);
 	if (error != 0)
 		goto fail;
 	controller->bar_claimed = 1;
 	stage = "PCI command save";
-	error = drv_pci_device_save_enable_state(device,
-						 &controller->pci_enable_state);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_save_enable_state(device,
+						 &controller->pci_enable_state);
 	if (error != 0)
 		goto fail;
 	controller->pci_state_saved = 1;
 	stage = "BAR map";
+
+	/* Checks the operation status. */
 	error = drv_pci_device_map_bar(device, 0,
 				       DRV_PCI_MAP_READ | DRV_PCI_MAP_WRITE |
 					       DRV_PCI_MAP_NOCACHE,
 				       &controller->registers);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 	controller->bar_mapped = 1;
@@ -5338,51 +5362,52 @@ ehci_attach(
 		stage = "capabilities";
 		goto fail;
 	}
+
 	controller->hcd.name = "EHCI";
 	controller->hcd.ops = &ehci_ops;
 	controller->hcd.dma = drv_pci_device_dma(device);
 	controller->hcd.root_port_count = ports;
 	controller->hcd.capabilities = DRV_USB_HCD_CAP_CONCURRENT_URBS;
 	controller->hcd.private_data[0] = (uintptr_t)controller;
-	stage = "PCI enable";
 
 	/* Checks the operation status. */
+	stage = "PCI enable";
 	if ((error = drv_pci_device_enable_memory(device)) != 0 ||
 	    (error = drv_pci_device_set_bus_master(device, true)) != 0)
 		goto fail;
 	stage = "HCD registration";
-	error = drv_usb_hcd_register(&controller->hcd, &controller->bus);
 
 	/* Checks the operation status. */
+	error = drv_usb_hcd_register(&controller->hcd, &controller->bus);
 	if (error != 0)
 		goto fail;
 	controller->hcd_registered = 1;
 	stage = "IRQ allocation";
-	error = drv_pci_device_allocate_irqs(device, DRV_PCI_IRQ_ALLOW_INTX, 1,
-					     1, &controller->irq, &count);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_allocate_irqs(device, DRV_PCI_IRQ_ALLOW_INTX, 1,
+					     1, &controller->irq, &count);
 	if (error != 0)
 		goto fail;
 	controller->irq_allocated = 1;
 	stage = "IRQ establishment";
+
+	/* Checks the operation status. */
 	error = drv_pci_device_establish_irq(device, &controller->irq, ehci_irq,
 					     controller, "ehci",
 					     &controller->irq_cookie);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 	stage = "retirement worker";
-	error = ehci_retirement_worker_start(controller);
 
 	/* Checks the operation status. */
+	error = ehci_retirement_worker_start(controller);
 	if (error != 0)
 		goto fail;
 	stage = "root hotplug worker";
-	error = ehci_root_worker_start(controller);
 
 	/* Checks the operation status. */
+	error = ehci_root_worker_start(controller);
 	if (error != 0)
 		goto fail;
 	wr32(controller->operational, EHCI_USBINTR,
@@ -5398,9 +5423,9 @@ ehci_attach(
 	return 0;
 
 fail:
-	cleanup_error = ehci_cleanup(controller);
 
 	/* Checks the operation status. */
+	cleanup_error = ehci_cleanup(controller);
 	if (cleanup_error != 0) {
 		controller->quarantined = 1;
 		ehci_publish(controller);
@@ -5411,6 +5436,7 @@ fail:
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	hal_free(controller);
 
 	/* Reports the failure. */
@@ -5435,9 +5461,9 @@ ehci_detach(
 	/* Handles the controller availability. */
 	if (controller == NULL)
 		return 0;
-	error = ehci_cleanup(controller);
 
 	/* Checks the operation status. */
+	error = ehci_cleanup(controller);
 	if (error != 0) {
 		/*
  * An early detach can legitimately race a worker or live USB
@@ -5450,6 +5476,7 @@ ehci_detach(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	ehci_unpublish(controller);
 	drv_pci_device_set_driver_data(device, NULL);
 	hal_free(controller);

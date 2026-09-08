@@ -225,6 +225,7 @@ kern_sysctl(
 					return 0;
 				return EINVAL;
 			}
+
 			capacity = *oldlenp;
 			needed = kern_log_snapshot(NULL, 0, NULL);
 			*oldlenp = needed;
@@ -271,6 +272,7 @@ kern_sysctl(
 			error = sysctl_output(oldp, oldlenp, &cache_memory, sizeof(cache_memory));
 			return error;
 		}
+
 		if (name[2] != VFS_CACHE_MEMORY_TARGET)
 			return ENOENT;
 		value = cache_memory.target_bytes;
@@ -313,6 +315,7 @@ kern_sysctl(
 				return 0;
 			return EINVAL;
 		}
+
 		if (!superuser)
 			return EPERM;
 		if (newlen != sizeof(value))
@@ -457,6 +460,7 @@ sysctl_meta(
 				return error;
 			}
 		}
+
 		return ENOENT;
 	}
 
@@ -492,6 +496,7 @@ sysctl_meta(
 				continue;
 			next = &leaves[i];
 		}
+
 		if (next == NULL)
 			return ENOENT;
 		error = sysctl_output(oldp, oldlenp, next->oid, next->oidlen * sizeof(int));

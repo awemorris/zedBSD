@@ -65,7 +65,9 @@ poll_notify(
 
 	/* Wakes every waiting poll. */
 	irq = spin_lock_irqsave(&channel.lock);
+
 	waitq_wake_all(&channel.waitq);
+
 	spin_unlock_irqrestore(&channel.lock, irq);
 }
 
@@ -108,7 +110,9 @@ poll_wait(
 
 	/* Sleeps under the channel lock. */
 	irq = spin_lock_irqsave(&channel.lock);
+
 	error = waitq_sleep(&channel.waitq, &channel.lock, observed, deadline, flags);
+
 	spin_unlock_irqrestore(&channel.lock, irq);
 
 	/* Reports why the sleep failed. */
@@ -172,6 +176,7 @@ file_poll(
 			result |= POLLERR | POLLHUP;
 			break;
 		}
+
 		if (access != O_WRONLY)
 			result |= events & (POLLIN | POLLRDNORM);
 		if (access != O_RDONLY)
@@ -220,9 +225,8 @@ kern_poll_wait(
 	/* Scans, then sleeps for the next change, until something is ready. */
 	observed = poll_sequence();
 	for (;;) {
-		error = poll_scan(process, fds, count, ready);
-
 		/* Stops on a scan error, a ready descriptor, or an immediate poll. */
+		error = poll_scan(process, fds, count, ready);
 		if (error != 0 || *ready != 0 || immediate)
 			return error;
 
@@ -238,6 +242,7 @@ kern_poll_wait(
 			*ready = 0;
 			return 0;
 		}
+
 		if (error != 0 && error != EAGAIN)
 			return error;
 

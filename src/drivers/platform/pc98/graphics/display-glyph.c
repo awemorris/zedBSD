@@ -40,9 +40,9 @@ drv_pc98_unicode_to_jis(
 	/* Handles the codepoint condition. */
 	if (codepoint > 0xffffU)
 		return 0;
-	value = (uint16_t)codepoint;
 
 	/* Validates the current value. */
+	value = (uint16_t)codepoint;
 	if (value < 0x80U)
 		return (uint16_t)(0x2000U | value);
 
@@ -77,28 +77,28 @@ drv_pc98_glyph_get_bitmap(
 	unsigned *width,
 	unsigned *height)
 {
-	int function_result;
+	int error;
 	uint16_t jis;
 
 	/* Handles the backend availability. */
 	if (backend == NULL || font == NULL || width == NULL ||
 	    height == NULL || codepoint > 0x10ffffU ||
-	    (codepoint >= 0xd800U && codepoint <= 0xdfffU))
-
+	    (codepoint >= 0xd800U && codepoint <= 0xdfffU)) {
 		/* Reports successful completion. */
 		return 0;
-	jis = drv_pc98_unicode_to_jis(codepoint);
+	}
 
 	/* Handles the jis condition. */
+	jis = drv_pc98_unicode_to_jis(codepoint);
 	if (jis == 0)
 		jis = drv_pc98_unicode_to_jis('?');
 	*width = glyph_width(jis);
 	*height = 16U;
 	/* Obtains the read font result. */
-	function_result = read_font(backend, jis, font);
+	error = read_font(backend, jis, font);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -131,10 +131,10 @@ drv_pc98_glyph_make_hal(
 	/* Handles the hal availability. */
 	if (hal == NULL || backend == NULL || backend->display == NULL ||
 	    backend->port_in8 == NULL || backend->port_out8 == NULL ||
-	    backend->cg_window == NULL)
-
+	    backend->cg_window == NULL) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	memset(hal, 0, sizeof(*hal));
 	hal->context = backend;
 	hal->measure = glyph_measure;
@@ -168,10 +168,10 @@ read_font(
 
 	/* Handles the port in8 availability. */
 	if (backend->port_in8 == NULL || backend->port_out8 == NULL ||
-	    backend->cg_window == NULL)
-
+	    backend->cg_window == NULL) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Handles the special condition. */
 	if (!special) {
@@ -187,6 +187,7 @@ read_font(
 			}
 		}
 	}
+
 	memset(font, 0, 32);
 	wait_vsync(backend);
 	backend->port_out8(backend->io_context, 0x68, 0x0b);
@@ -265,9 +266,9 @@ glyph_measure(
 	/* Handles the width availability. */
 	if (width == NULL || height == NULL)
 		return 0;
-	jis = drv_pc98_unicode_to_jis(codepoint);
 
 	/* Handles the jis condition. */
+	jis = drv_pc98_unicode_to_jis(codepoint);
 	if (jis == 0)
 		jis = drv_pc98_unicode_to_jis('?');
 	*width = glyph_width(jis);
@@ -325,10 +326,10 @@ glyph_draw(
 	if (backend == NULL || backend->display == NULL ||
 	    backend->display->fill == NULL ||
 	    backend->display->pattern_fill == NULL ||
-	    !read_font(backend, jis, font))
-
+	    !read_font(backend, jis, font)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	rectangle.x = x;
 	rectangle.y = y;
@@ -337,10 +338,10 @@ glyph_draw(
 
 	/* Checks the fill result. */
 	if (!backend->display->fill(backend->display->context, &rectangle,
-				    background))
-
+				    background)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Process each element required by the operation. */
 	for (band = 0; band < 2U; band++) {
@@ -356,10 +357,10 @@ glyph_draw(
 				    backend->display->context, &rectangle,
 				    foreground,
 				    font_pattern(font, width / 8U, column,
-						 band * 8U)))
-
+						 band * 8U))) {
 				/* Reports successful completion. */
 				return 0;
+			}
 		}
 	}
 

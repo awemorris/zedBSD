@@ -51,9 +51,8 @@ spin_trylock(
 {
 	unsigned cpu;
 
-	cpu = hal_cpu_current();
-
 	/* Traps on a recursive acquisition by the owning CPU. */
+	cpu = hal_cpu_current();
 	if (atomic_load_acquire(&lock->held) != 0 &&
 	    lock->owner_valid &&
 	    lock->owner_cpu == cpu)
@@ -94,9 +93,8 @@ spin_unlock(
 {
 	unsigned cpu;
 
-	cpu = hal_cpu_current();
-
 	/* Traps unless this CPU is the recorded owner. */
+	cpu = hal_cpu_current();
 	if (atomic_load_acquire(&lock->held) == 0 ||
 	    !lock->owner_valid ||
 	    lock->owner_cpu != cpu)
@@ -218,15 +216,16 @@ mutex_owned(
 	unsigned long irq;
 	int owned;
 
-	thread = thread_current();
-
 	/* Reports no ownership without a mutex or a current thread. */
+	thread = thread_current();
 	if (mutex == NULL || thread == NULL)
 		return 0;
 
 	/* Samples the ownership under the guard. */
 	irq = spin_lock_irqsave(&mutex->guard);
+
 	owned = mutex->locked && mutex->owner == thread;
+
 	spin_unlock_irqrestore(&mutex->guard, irq);
 
 	/* Reports the sampled ownership. */
@@ -248,9 +247,8 @@ mutex_lock_interruptible(
 	uint64_t sequence;
 	int error;
 
-	thread = thread_current();
-
 	/* Rejects a missing mutex or current thread. */
+	thread = thread_current();
 	if (mutex == NULL || thread == NULL)
 		return EINVAL;
 
@@ -263,14 +261,14 @@ mutex_lock_interruptible(
 	/* Sleeps on the waiter queue until the mutex becomes free. */
 	while (mutex->locked) {
 		sequence = waitq_sequence(&mutex->waiters);
+
+		/* Gives up the wait on an interruption. */
 		error = waitq_sleep(
 			&mutex->waiters,
 			&mutex->guard,
 			sequence,
 			0,
 			WAITQ_INTERRUPTIBLE);
-
-		/* Gives up the wait on an interruption. */
 		if (error == EINTR) {
 			spin_unlock_irqrestore(&mutex->guard, irq);
 			return EINTR;
@@ -280,6 +278,7 @@ mutex_lock_interruptible(
 	/* Takes ownership. */
 	mutex->locked = 1;
 	mutex->owner = thread;
+
 	spin_unlock_irqrestore(&mutex->guard, irq);
 
 	/* Reports the acquisition. */
@@ -349,9 +348,8 @@ mutex_wait(
 	uint64_t sequence;
 	int error;
 
-	thread = thread_current();
-
 	/* Rejects a missing mutex, condition, or current thread. */
+	thread = thread_current();
 	if (mutex == NULL || condition == NULL || thread == NULL)
 		return EINVAL;
 
@@ -376,6 +374,7 @@ mutex_wait(
 	/* Takes ownership back. */
 	mutex->locked = 1;
 	mutex->owner = thread;
+
 	spin_unlock_irqrestore(&mutex->guard, irq);
 
 	/* Reports why the condition wait failed. */

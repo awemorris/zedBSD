@@ -18,11 +18,6 @@ const struct partition_scheme drv_partition_scheme_mbr = {
 	.scan = mbr_scan,
 };
 
-
-
-
-
-
 /* Supports the get32 operation. */
 static uint32_t
 get32(
@@ -58,6 +53,7 @@ mbr_partuuid(
 		/* Returns the computed result. */
 		return;
 	}
+
 	/* Process each element required by the operation. */
 	for (shift = 32; shift != 0; shift -= 4)
 		output[at++] = hex((signature >> (shift - 4)) & 15U);

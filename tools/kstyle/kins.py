@@ -31,16 +31,23 @@ def main():
         spec = spec.rstrip('\n')
         if not spec.strip() or spec.startswith('#'):
             continue
-        name, anchor, occ, comment = spec.split(';;', 3)
+        parts = spec.split(';;')
+        if len(parts) < 4:
+            sys.exit('bad spec: ' + spec)
+        name = parts[0]
+        comment = parts[-1]
+        occ = parts[-2]
+        anchor = ';;'.join(parts[1:-2])
         start = find_function(lines, name)
         if start is None:
             sys.exit('function not found: ' + name)
-        pat = re.compile(anchor)
+        pats = [re.compile(part) for part in anchor.split('\\n')]
         depth = 0
         seen = 0
         hit = None
         for i in range(start, len(lines)):
-            if pat.search(lines[i]):
+            if all(k < len(lines) - i and pats[k].search(lines[i + k])
+                   for k in range(len(pats))):
                 seen += 1
                 if seen == int(occ):
                     hit = i

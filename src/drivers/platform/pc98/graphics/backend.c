@@ -82,6 +82,7 @@ drv_pc98_graphics_backend_enter(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	mode->width = info.width;
 	mode->height = info.height;
 	mode->bits_per_pixel = info.bits_per_pixel;
@@ -115,7 +116,7 @@ drv_pc98_graphics_backend_fill(
 	const struct graphics_rect *rect,
 	uint32_t color)
 {
-	int function_result;
+	int error;
 	struct pc98_display_rect native;
 
 	/* Handles the rect availability. */
@@ -127,11 +128,11 @@ drv_pc98_graphics_backend_fill(
 	native.height = rect->height;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		native_display.fill(native_display.context, &native, color);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -145,15 +146,15 @@ drv_pc98_graphics_backend_line(
 	unsigned y1,
 	uint32_t color)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = native_display.line != NULL &&
+	error = native_display.line != NULL &&
 			  native_display.line(native_display.context, x0, y0,
 					      x1, y1, color);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -165,7 +166,7 @@ drv_pc98_graphics_backend_pattern_fill(
 	uint32_t color,
 	uint64_t pattern)
 {
-	int function_result;
+	int error;
 	struct pc98_display_rect native;
 
 	/* Handles the rect availability. */
@@ -177,11 +178,11 @@ drv_pc98_graphics_backend_pattern_fill(
 	native.height = rect->height;
 
 	/* Computes the function result. */
-	function_result = native_display.pattern_fill(native_display.context,
+	error = native_display.pattern_fill(native_display.context,
 						      &native, color, pattern);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -195,7 +196,7 @@ drv_pc98_graphics_backend_blit(
 	uint64_t pattern,
 	int patterned)
 {
-	int function_result;
+	int error;
 	struct pc98_display_image native;
 	unsigned i;
 
@@ -217,22 +218,22 @@ drv_pc98_graphics_backend_blit(
 	/* Handles the patterned condition. */
 	if (patterned) {
 		/* Computes the function result. */
-		function_result =
+		error =
 			native_display.draw_image_pattern != NULL &&
 			native_display.draw_image_pattern(
 				native_display.context, x, y, &native, pattern);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Computes the function result. */
-	function_result = native_display.draw_image != NULL &&
+	error = native_display.draw_image != NULL &&
 			  native_display.draw_image(native_display.context, x,
 						    y, &native);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -243,7 +244,7 @@ drv_pc98_graphics_backend_flush(
 	const struct graphics_rect *rectangles,
 	size_t count)
 {
-	int function_result;
+	int error;
 	struct pc98_display_rect native[32];
 	size_t i;
 
@@ -259,11 +260,11 @@ drv_pc98_graphics_backend_flush(
 	}
 
 	/* Computes the function result. */
-	function_result = native_display.flush(
+	error = native_display.flush(
 		native_display.context, count == 0 ? NULL : native, count);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -276,14 +277,14 @@ drv_pc98_graphics_backend_get_glyph(
 	unsigned *width,
 	unsigned *height)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv pc98 glyph get bitmap result. */
-	function_result = drv_pc98_glyph_get_bitmap(&display.glyph, codepoint,
+	error = drv_pc98_glyph_get_bitmap(&display.glyph, codepoint,
 						    font, width, height);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -293,9 +294,8 @@ int
 drv_pc98_graphics_prepare(
 	void)
 {
-	backend_prepared = 0;
-
 	/* Checks the pc98 graphics prepare hardware result. */
+	backend_prepared = 0;
 	if (!pc98_graphics_prepare_hardware())
 		return 0;
 	backend_prepared = 1;
@@ -338,6 +338,7 @@ pc98_graphics_prepare_hardware(
 		if (hal_pmem_alloc(&request, &gdc_memory[i]) != HAL_OK)
 			goto fail;
 	}
+
 	request.paddr = CIRRUS_PADDR;
 	request.size = 4U * 1024U * 1024U;
 
@@ -409,15 +410,15 @@ static int
 display_reset(
 	void *context)
 {
-	int function_result;
+	int error;
 
 	(void)context;
 
 	/* Obtains the pc98 display graphics start result. */
-	function_result = pc98_display_graphics_start();
+	error = pc98_display_graphics_start();
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the display stop operation. */
@@ -425,13 +426,13 @@ static int
 display_stop(
 	void *context)
 {
-	int function_result;
+	int error;
 
 	(void)context;
 
 	/* Obtains the pc98 display graphics stop result. */
-	function_result = pc98_display_graphics_stop();
+	error = pc98_display_graphics_stop();
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }

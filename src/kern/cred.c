@@ -150,9 +150,8 @@ cred_current(
 {
 	struct thread *thread;
 
-	thread = thread_current();
-
 	/* There is no credential without a current thread and process. */
+	thread = thread_current();
 	if (thread == NULL)
 		return NULL;
 	if (thread->proc == NULL)
@@ -172,9 +171,8 @@ cred_current_ref(
 	struct thread *thread;
 	struct ucred *cred;
 
-	thread = thread_current();
-
 	/* There is no credential without a current thread. */
+	thread = thread_current();
 	if (thread == NULL)
 		return NULL;
 
@@ -261,6 +259,7 @@ vfs_access(
 		error = posix_acl_check_access(&acl, inode, cred, requested);
 		return error;
 	}
+
 	if (error != ENODATA && error != EOPNOTSUPP)
 		return error;
 
@@ -271,9 +270,9 @@ vfs_access(
 		shift = 3U;
 	else
 		shift = 0U;
-	bits = (inode->i_mode >> shift) & 7U;
 
 	/* Every requested access must be granted by those bits. */
+	bits = (inode->i_mode >> shift) & 7U;
 	if (((requested & R_OK) != 0 && (bits & 4U) == 0) ||
 	    ((requested & W_OK) != 0 && (bits & 2U) == 0) ||
 	    ((requested & X_OK) != 0 && (bits & 1U) == 0))
@@ -300,9 +299,9 @@ vfs_may_create(
 		return ENOTDIR;
 
 	/* Creation needs write and search permission on the directory. */
-	error = vfs_access(parent, cred, W_OK | X_OK);
 
 	/* Reports the access check. */
+	error = vfs_access(parent, cred, W_OK | X_OK);
 	if (error != 0)
 		return error;
 
@@ -436,9 +435,9 @@ vfs_clear_setid_on_content_change(
 	if (error != 0)
 		return error;
 	status.st_mode &= ~(mode_t)(S_ISUID | S_ISGID);
-	error = inode_setattr(inode, &status, INODE_ATTR_MODE);
 
 	/* Reports the mode update. */
+	error = inode_setattr(inode, &status, INODE_ATTR_MODE);
 	if (error != 0)
 		return error;
 
@@ -465,9 +464,9 @@ vfs_clear_setid_on_write(
 		return 0;
 
 	/* Clears the bits as for any content change. */
-	error = vfs_clear_setid_on_content_change(inode);
 
 	/* Reports why the clearing failed. */
+	error = vfs_clear_setid_on_content_change(inode);
 	if (error != 0)
 		return error;
 
@@ -523,9 +522,9 @@ vfs_setxattr(
 		return error;
 
 	/* Writes the attribute. */
-	error = inode_setxattr(inode, name, value, size, flags);
 
 	/* Reports why the write failed. */
+	error = inode_setxattr(inode, name, value, size, flags);
 	if (error != 0)
 		return error;
 
@@ -592,14 +591,17 @@ vfs_listxattr(
 			kern_free(all);
 			return -EIO;
 		}
+
 		length++;
 		if (length > 6 && memcmp(all + offset, "user.", 5) == 0) {
 			if (list != NULL && visible + length <= size)
 				memcpy(list + visible, all + offset, length);
 			visible += length;
 		}
+
 		offset += length;
 	}
+
 	kern_free(all);
 
 	/* A buffer too small for the visible names is an error. */
@@ -627,9 +629,9 @@ vfs_removexattr(
 		return error;
 
 	/* Removes the attribute. */
-	error = inode_removexattr(inode, name);
 
 	/* Reports why the removal failed. */
+	error = inode_removexattr(inode, name);
 	if (error != 0)
 		return error;
 

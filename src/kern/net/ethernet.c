@@ -124,6 +124,7 @@ ethernet_input(
 		packet_buf_free(packet);
 		return EINVAL;
 	}
+
 	packet->l3_offset = (uint16_t)(packet->data - packet->storage);
 	for (index = 0; index < protocol_count; index++) {
 		if (protocols[index].type == type) {
@@ -172,6 +173,7 @@ ethernet_output(
 		packet_buf_free(packet);
 		return ENOBUFS;
 	}
+
 	memcpy(header, destination, 6);
 	memcpy(header + 6, device->hwaddr, 6);
 	header[12] = (uint8_t)(type >> 8);
@@ -180,9 +182,9 @@ ethernet_output(
 	packet->protocol = type;
 
 	/* Hands the frame to the device. */
-	error = net_device_transmit(device, packet);
 
 	/* Reports why the transmit failed. */
+	error = net_device_transmit(device, packet);
 	if (error != 0)
 		return error;
 

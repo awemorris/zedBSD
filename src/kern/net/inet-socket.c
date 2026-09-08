@@ -120,6 +120,7 @@ inet_interface_configuration(
 		if (broadcast != NULL)
 			*broadcast = interface->broadcast;
 	}
+
 	interface_unlock(enabled);
 
 	/* Reports why the lookup failed. */
@@ -211,6 +212,7 @@ inet_socket_bind(
 				break;
 			}
 		}
+
 		interface_unlock(enabled);
 		if (ifindex == 0)
 			return EADDRNOTAVAIL;
@@ -237,9 +239,8 @@ inet_socket_connect(
 {
 	const struct sockaddr_in *input;
 
-	input = (const struct sockaddr_in *)address;
-
 	/* Rejects a missing socket or anything but a complete AF_INET address. */
+	input = (const struct sockaddr_in *)address;
 	if (inet == NULL ||
 	    address == NULL ||
 	    length < sizeof(*input) ||
@@ -312,9 +313,8 @@ inet_socket_getsockname(
 {
 	int error;
 
-	error = inet_socket_name(inet, address, length, 0);
-
 	/* Reports why the lookup failed. */
+	error = inet_socket_name(inet, address, length, 0);
 	if (error != 0)
 		return error;
 
@@ -333,9 +333,8 @@ inet_socket_getpeername(
 {
 	int error;
 
-	error = inet_socket_name(inet, address, length, 1);
-
 	/* Reports why the lookup failed. */
+	error = inet_socket_name(inet, address, length, 1);
 	if (error != 0)
 		return error;
 
@@ -471,6 +470,7 @@ inet_socket_ioctl(
 		error = route_ioctl(command, argument);
 		return error;
 	}
+
 	if (command == SIOCGIFCONF) {
 		error = inet_ioctl_ifconf(argument);
 		return error;
@@ -507,6 +507,7 @@ inet_socket_ioctl(
 		net_device_release(device);
 		return error;
 	}
+
 	if (!net_device_is_live(device)) {
 		net_device_release(device);
 		return ENODEV;
@@ -533,6 +534,7 @@ inet_socket_ioctl(
 			   (net_device_flags_get(device) & NET_DEVICE_UP)) {
 			net_device_close(device);
 		}
+
 		net_device_release(device);
 		return 0;
 	case SIOCGIFHWADDR:
@@ -560,6 +562,7 @@ inet_socket_ioctl(
 			net_device_release(device);
 			return ENODEV;
 		}
+
 		set_ifreq_address(&request, address);
 		break;
 	case SIOCGIFNETMASK:
@@ -568,6 +571,7 @@ inet_socket_ioctl(
 			net_device_release(device);
 			return ENODEV;
 		}
+
 		set_ifreq_address(&request, netmask);
 		break;
 	case SIOCGIFBRDADDR:
@@ -577,6 +581,7 @@ inet_socket_ioctl(
 			net_device_release(device);
 			return ENODEV;
 		}
+
 		set_ifreq_address(&request, broadcast);
 		break;
 	case SIOCSIFADDR:
@@ -588,6 +593,7 @@ inet_socket_ioctl(
 			net_device_release(device);
 			return EAFNOSUPPORT;
 		}
+
 		value = net_ntohl(input->sin_addr.s_addr);
 
 		/* Updates the interface record under the lock. */
@@ -598,6 +604,7 @@ inet_socket_ioctl(
 			net_device_release(device);
 			return ENODEV;
 		}
+
 		old_address = interface->address;
 		old_netmask = interface->netmask;
 		if (command == SIOCSIFADDR)
@@ -660,15 +667,16 @@ inet_socket_init(
 		if (interfaces[index].device != NULL)
 			references[count++] = interfaces[index].device;
 	}
+
 	memset(interfaces, 0, sizeof(interfaces));
 	interface_unlock(enabled);
 	for (index = 0; index < count; index++)
 		net_device_release(references[index]);
 
 	/* Registers the family. */
-	error = socket_family_register(AF_INET, &inet_family);
 
 	/* Reports why the registration failed. */
+	error = socket_family_register(AF_INET, &inet_family);
 	if (error != 0)
 		return error;
 
@@ -703,6 +711,7 @@ inet_interface_purge_device(
 			       sizeof(interfaces[index]));
 		}
 	}
+
 	interface_unlock(enabled);
 	for (index = 0; index < count; index++)
 		net_device_release(references[index]);
@@ -796,10 +805,12 @@ interface_ensure(
 			break;
 		}
 	}
+
 	if (free_index == NET_DEVICE_MAX) {
 		error = ENOSPC;
 		goto out;
 	}
+
 	if (!net_device_ref_live(device)) {
 		error = ENODEV;
 		goto out;
@@ -820,6 +831,7 @@ interface_ensure(
 		       sizeof(interfaces[free_index]));
 		error = ENODEV;
 	}
+
 out:
 	interface_unlock(enabled);
 	if (release_device != NULL)
@@ -987,9 +999,9 @@ inet_ioctl_ifconf(
 
 	/* Reports the bytes copied. */
 	configuration.ifc_len = copied;
-	error = copyout(&configuration, argument, sizeof(configuration));
 
 	/* Reports why the copy failed. */
+	error = copyout(&configuration, argument, sizeof(configuration));
 	if (error != 0)
 		return error;
 
@@ -1201,6 +1213,7 @@ inet_ioctl_wlan(
 		error = EFAULT;
 		goto out;
 	}
+
 	error = copyin(argument, &request, size);
 	if (error != 0)
 		goto out;
@@ -1214,11 +1227,13 @@ inet_ioctl_wlan(
 		error = ENODEV;
 		goto out;
 	}
+
 	capabilities = net_device_capabilities_get(device);
 	if (!net_device_is_live(device)) {
 		error = ENODEV;
 		goto out_device;
 	}
+
 	if ((capabilities & NET_DEVICE_CAP_WLAN) == 0) {
 		error = EOPNOTSUPP;
 		goto out_device;
@@ -1237,6 +1252,7 @@ inet_ioctl_wlan(
 				  sizeof(request.connect.passphrase));
 		request.connect.passphrase_length = 0;
 	}
+
 	error = copyout(&request, argument, size);
 	goto out;
 
@@ -1267,10 +1283,12 @@ inet_create(
 		error = icmp_socket_create(protocol, result);
 		return error;
 	}
+
 	if (type == SOCK_DGRAM) {
 		error = udp_socket_create(protocol, result);
 		return error;
 	}
+
 	if (type == SOCK_STREAM) {
 		error = tcp_socket_create(protocol, result);
 		return error;

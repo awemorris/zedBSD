@@ -113,6 +113,7 @@ process_timer_create(
 		event.sigev_notify = SIGEV_SIGNAL;
 		event.sigev_signo = SIGALRM;
 	}
+
 	if (event.sigev_notify != SIGEV_NONE &&
 	    event.sigev_notify != SIGEV_SIGNAL)
 		return EOPNOTSUPP;
@@ -129,6 +130,7 @@ process_timer_create(
 	 */
 	irq = spin_lock_irqsave(&process_timer_lock);
 	process_irq = spin_lock_irqsave(&owner->lock);
+
 	if (owner->state != PROCESS_RUNNING && owner->state != PROCESS_STOPPED) {
 		spin_unlock_irqrestore(&owner->lock, process_irq);
 		spin_unlock_irqrestore(&process_timer_lock, irq);
@@ -140,11 +142,13 @@ process_timer_create(
 		if (process_timers[slot].owner == NULL)
 			break;
 	}
+
 	if (slot == PROCESS_TIMER_MAX) {
 		spin_unlock_irqrestore(&owner->lock, process_irq);
 		spin_unlock_irqrestore(&process_timer_lock, irq);
 		return EAGAIN;
 	}
+
 	KERN_TEST_CHECKPOINT(KERN_TEST_PROCESS_TIMER_CREATE_ADMITTED, owner);
 
 	/* Clears the slot under a new non-zero generation. */
@@ -160,6 +164,7 @@ process_timer_create(
 	process_timers[slot].event = event;
 	process_ref(owner);
 	*result = timer_id(slot, process_timers[slot].generation);
+
 	spin_unlock_irqrestore(&owner->lock, process_irq);
 	spin_unlock_irqrestore(&process_timer_lock, irq);
 
@@ -182,6 +187,7 @@ process_timer_delete(
 
 	/* Frees the slot under the lock, keeping the owner to release after. */
 	irq = spin_lock_irqsave(&process_timer_lock);
+
 	error = timer_lookup_locked(owner, id, &slot);
 	if (error == 0) {
 		release = process_timers[slot].owner;
@@ -192,7 +198,9 @@ process_timer_delete(
 	} else {
 		release = NULL;
 	}
+
 	spin_unlock_irqrestore(&process_timer_lock, irq);
+
 	process_release(release);
 
 	/* Reports why the lookup failed. */
@@ -227,6 +235,7 @@ process_timer_gettime(
 
 	/* Samples the timer's clock and converts under the lock. */
 	irq = spin_lock_irqsave(&process_timer_lock);
+
 	error = timer_lookup_locked(owner, id, &slot);
 	if (error == 0) {
 		timer = &process_timers[slot];
@@ -243,6 +252,7 @@ process_timer_gettime(
 			units_to_timespec(timer->interval, units, &result->it_interval);
 		}
 	}
+
 	spin_unlock_irqrestore(&process_timer_lock, irq);
 
 	/* Reports why the lookup or snapshot failed. */
@@ -334,6 +344,7 @@ process_timer_settime(
 	 * selected check succeeds.
 	 */
 	irq = spin_lock_irqsave(&process_timer_lock);
+
 	error = timer_lookup_locked(owner, id, &slot);
 	if (error != 0) {
 		spin_unlock_irqrestore(&process_timer_lock, irq);
@@ -363,12 +374,14 @@ process_timer_settime(
 		else
 			now_ticks = clock_ticks();
 	}
+
 	if (error == 0 && value != 0) {
 		if ((flags & TIMER_ABSTIME) != 0)
 			deadline = value;
 		else
 			error = kern_deadline_after(now_ticks, value, &deadline);
 	}
+
 	if (error != 0) {
 		spin_unlock_irqrestore(&process_timer_lock, irq);
 		return error;
@@ -386,6 +399,7 @@ process_timer_settime(
 		units_to_timespec(remaining, units, &old_snapshot.it_value);
 		units_to_timespec(timer->interval, units, &old_snapshot.it_interval);
 	}
+
 	KERN_TEST_CHECKPOINT(KERN_TEST_PROCESS_TIMER_SETTIME_SNAPSHOT, owner);
 
 	/* Commits the new setting. */
@@ -396,6 +410,7 @@ process_timer_settime(
 	process_timers[slot].armed = value != 0;
 	if (previous != NULL)
 		*previous = old_snapshot;
+
 	spin_unlock_irqrestore(&process_timer_lock, irq);
 
 	/* Reports the armed or disarmed timer. */
@@ -421,9 +436,11 @@ process_timer_getoverrun(
 
 	/* Reads the count under the lock. */
 	irq = spin_lock_irqsave(&process_timer_lock);
+
 	error = timer_lookup_locked(owner, id, &slot);
 	if (error == 0)
 		*result = process_timers[slot].overrun;
+
 	spin_unlock_irqrestore(&process_timer_lock, irq);
 
 	/* Reports why the lookup failed. */
@@ -536,6 +553,7 @@ process_timer_tick(
 			notifications[count].overrun = timer->pending_overrun;
 			count++;
 		}
+
 		spin_unlock_irqrestore(&process_timer_lock, irq);
 
 		/* Sends the batch outside the lock, marking failures for retry. */
@@ -572,6 +590,7 @@ process_timer_notification_complete(
 
 	/* Completes only the notification of the same timer generation. */
 	irq = spin_lock_irqsave(&process_timer_lock);
+
 	timer = &process_timers[slot];
 	if (timer->owner == owner &&
 	    timer->generation == generation &&
@@ -581,6 +600,7 @@ process_timer_notification_complete(
 		timer->notification_pending = 0;
 		timer->notification_retry = 0;
 	}
+
 	spin_unlock_irqrestore(&process_timer_lock, irq);
 }
 
@@ -602,6 +622,7 @@ process_timer_notification_failed(
 
 	/* Marks only the notification of the same timer generation. */
 	irq = spin_lock_irqsave(&process_timer_lock);
+
 	timer = &process_timers[slot];
 	if (timer->owner == owner &&
 	    timer->generation == generation &&
@@ -609,6 +630,7 @@ process_timer_notification_failed(
 		timer->notification_pending = 0;
 		timer->notification_retry = 1;
 	}
+
 	spin_unlock_irqrestore(&process_timer_lock, irq);
 }
 
@@ -627,6 +649,7 @@ process_timer_cleanup(
 
 	/* Frees the process's slots, counting the references to drop. */
 	irq = spin_lock_irqsave(&process_timer_lock);
+
 	for (slot = 0; slot < PROCESS_TIMER_MAX; slot++) {
 		if (process_timers[slot].owner == owner) {
 			process_timers[slot].owner = NULL;
@@ -636,6 +659,7 @@ process_timer_cleanup(
 			releases++;
 		}
 	}
+
 	spin_unlock_irqrestore(&process_timer_lock, irq);
 
 	/* Drops the references outside the lock. */
@@ -723,14 +747,14 @@ timer_lookup_locked(
 	unsigned slot;
 
 	raw = (uint32_t)id;
-	encoded = raw & TIMER_SLOT_MASK;
 
 	/* Slots are encoded from one so that a zero identifier is invalid. */
+	encoded = raw & TIMER_SLOT_MASK;
 	if (encoded == 0)
 		return EINVAL;
-	slot = encoded - 1U;
 
 	/* The slot must hold the owner's timer of the same generation. */
+	slot = encoded - 1U;
 	if (slot >= PROCESS_TIMER_MAX ||
 	    process_timers[slot].owner != owner ||
 	    process_timers[slot].generation != raw >> TIMER_SLOT_BITS)
@@ -756,9 +780,9 @@ realtime_units(
 		return error;
 
 	/* Converts it to nanoseconds. */
-	error = timespec_to_units(&now, KERN_NSEC_PER_SEC, result);
 
 	/* Reports why the conversion failed. */
+	error = timespec_to_units(&now, KERN_NSEC_PER_SEC, result);
 	if (error != 0)
 		return error;
 
@@ -809,9 +833,9 @@ timer_clock_snapshot_locked(
 		return 0;
 
 	/* Reads the real-time clock. */
-	error = realtime_units(now_realtime);
 
 	/* Reports why the clock read failed. */
+	error = realtime_units(now_realtime);
 	if (error != 0)
 		return error;
 

@@ -155,41 +155,6 @@ static struct drv_usb_driver storage_driver = {
 	.attach = storage_attach,
 	.detach = storage_detach};
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv usb storage driver register operation.
  */
@@ -197,13 +162,13 @@ int
 drv_usb_storage_driver_register(
 	void)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv usb driver register result. */
-	function_result = drv_usb_driver_register(&storage_driver);
+	error = drv_usb_driver_register(&storage_driver);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the get le32 operation. */
@@ -280,9 +245,9 @@ storage_timeout(
 	/* Handles the storage condition. */
 	if (storage->command_deadline == 0)
 		return timeout;
-	now = sched_ticks();
 
 	/* Handles the now condition. */
+	now = sched_ticks();
 	if (now >= storage->command_deadline)
 		return 0;
 	remaining = (storage->command_deadline - now) * 10U;
@@ -316,15 +281,15 @@ storage_urb_transfer(
 	/* Handles the actual availability. */
 	if (actual != NULL)
 		*actual = 0;
-	timeout = storage_timeout(storage, timeout);
 
 	/* Handles the timeout condition. */
+	timeout = storage_timeout(storage, timeout);
 	if (timeout == 0)
 		return ETIMEDOUT;
-	error = drv_usb_urb_setup(urb, buffer, length, flags, timeout, NULL,
-				  NULL);
 
 	/* Checks the operation status. */
+	error = drv_usb_urb_setup(urb, buffer, length, flags, timeout, NULL,
+				  NULL);
 	if (error == 0)
 		error = drv_usb_urb_submit(urb);
 #ifdef ZEDBSD_TEST_CHECKPOINTS
@@ -350,6 +315,7 @@ storage_urb_transfer(
 			checkpoint->lba, (unsigned)checkpoint->blocks,
 			(unsigned)length);
 	}
+
 #endif
 
 	/* Checks the operation status. */
@@ -373,6 +339,7 @@ storage_urb_transfer(
 			(unsigned)length, (unsigned)drv_usb_urb_status(urb),
 			(unsigned)drv_usb_urb_actual_length(urb), error);
 	}
+
 #endif
 
 	/* Handles the actual availability. */
@@ -398,7 +365,7 @@ storage_bulk(
 	size_t *actual,
 	const struct storage_read_checkpoint *checkpoint)
 {
-	int function_result;
+	int error;
 	struct drv_usb_urb *urb;
 
 	/* Handles the endpoint condition. */
@@ -412,11 +379,11 @@ storage_bulk(
 		return EINVAL;
 
 	/* Obtains the storage urb transfer result. */
-	function_result = storage_urb_transfer(storage, urb, buffer, length,
+	error = storage_urb_transfer(storage, urb, buffer, length,
 					       timeout, actual, checkpoint);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the storage control operation. */
@@ -442,9 +409,8 @@ storage_control(
 	uint64_t deadline = 0;
 	int error;
 
-	timeout = storage_timeout(storage, timeout);
-
 	/* Handles the timeout condition. */
+	timeout = storage_timeout(storage, timeout);
 	if (timeout == 0)
 		return ETIMEDOUT;
 
@@ -462,13 +428,13 @@ storage_control(
 
 		deadline = UINT64_MAX - now < ticks ? UINT64_MAX : now + ticks;
 	}
+
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
+		/* Checks the operation status. */
 		error = drv_usb_urb_setup_control_flags(
 			storage->control_urb, &control, buffer, length, flags,
 			timeout, NULL, NULL);
-
-		/* Checks the operation status. */
 		if (error == 0)
 			error = drv_usb_urb_submit(storage->control_urb);
 
@@ -481,6 +447,7 @@ storage_control(
 			error = ETIMEDOUT;
 			break;
 		}
+
 		sched_yield();
 	}
 
@@ -519,10 +486,10 @@ storage_urbs_alloc(
 	    drv_usb_urb_reserve_sync(storage->bulk_in_urb,
 				     DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE) == 0 &&
 	    drv_usb_urb_reserve_sync(storage->bulk_out_urb,
-				     DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE) == 0)
-
+				     DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE) == 0) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	drv_usb_urb_free(storage->bulk_out_urb);
 	drv_usb_urb_free(storage->bulk_in_urb);
 	drv_usb_urb_free(storage->control_urb);
@@ -548,32 +515,32 @@ storage_transfer_reserve(
 
 	/* Checks the drv usb device hcd capabilities result. */
 	if (!(drv_usb_device_hcd_capabilities(storage->device) &
-	      DRV_USB_HCD_CAP_TRANSFER_RESERVE))
-
+	      DRV_USB_HCD_CAP_TRANSFER_RESERVE)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/*
  * Leaves unusually large logical sectors on their existing one-block
 	 * path. */
 	if (storage->block_size > DRV_USB_TRANSFER_RESERVE_MAX_SIZE)
 		return 0;
+
+	/* Checks the operation status. */
 	error = drv_usb_urb_reserve_transfer(storage->control_urb,
 					     DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = drv_usb_urb_reserve_transfer(storage->bulk_in_urb,
 					     DRV_USB_TRANSFER_RESERVE_MAX_SIZE);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = drv_usb_urb_reserve_transfer(storage->bulk_out_urb,
-					     DRV_USB_TRANSFER_RESERVE_MAX_SIZE);
 
 	/* Checks the operation status. */
+	error = drv_usb_urb_reserve_transfer(storage->bulk_out_urb,
+					     DRV_USB_TRANSFER_RESERVE_MAX_SIZE);
 	if (error != 0)
 		return error;
 	storage->transfer_size = DRV_USB_TRANSFER_RESERVE_MAX_SIZE;
@@ -607,19 +574,19 @@ bot_reset(
 
 	/* Drops what was cached and resets the interface. */
 	disk_persistence_forget(storage->disk);
+
+	/* Checks the operation status. */
 	error = storage_control(storage,
 				DRV_USB_DIR_OUT | DRV_USB_REQUEST_CLASS |
 					DRV_USB_RECIP_INTERFACE,
 				USB_MASS_STORAGE_RESET, 0,
 				drv_usb_interface_number(storage->interface),
 				NULL, 0, 1000U, &actual);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = drv_usb_endpoint_clear_halt(storage->bulk_in);
 
 	/* Checks the operation status. */
+	error = drv_usb_endpoint_clear_halt(storage->bulk_in);
 	if (error == 0)
 		error = drv_usb_endpoint_clear_halt(storage->bulk_out);
 
@@ -666,16 +633,16 @@ bot_command_locked(
 		*command_failed = 0;
 	/* Handles the cdb availability. */
 	if (cdb == NULL || cdb_length == 0 ||
-	    cdb_length > sizeof(cbw.command) || length > UINT32_MAX)
-
+	    cdb_length > sizeof(cbw.command) || length > UINT32_MAX) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(&cbw, 0, sizeof(cbw));
 	memset(&csw, 0, sizeof(csw));
 	put_le32(cbw.signature, BOT_CBW_SIGNATURE);
-	tag = ++storage->next_tag;
 
 	/* Handles the tag condition. */
+	tag = ++storage->next_tag;
 	if (tag == 0)
 		tag = ++storage->next_tag;
 	put_le32(cbw.tag, tag);
@@ -705,10 +672,10 @@ bot_command_locked(
 					      : IO_USB_OTHER)),
 		length);
 	actual = 0;
-	error = storage_bulk(storage, storage->bulk_out, &cbw, sizeof(cbw),
-			     BOT_TIMEOUT_MS, &actual, NULL);
 
 	/* Checks the operation status. */
+	error = storage_bulk(storage, storage->bulk_out, &cbw, sizeof(cbw),
+			     BOT_TIMEOUT_MS, &actual, NULL);
 	if (error != 0 || actual != sizeof(cbw)) {
 		hal_printf(
 			"usb-storage: BOT CBW error=%d actual=%u expected=%u\n",
@@ -728,9 +695,8 @@ bot_command_locked(
 
 		/* Checks the operation status. */
 		if (error == EPIPE) {
-			halt_error = drv_usb_endpoint_clear_halt(endpoint);
-
 			/* Checks the operation status. */
+			halt_error = drv_usb_endpoint_clear_halt(endpoint);
 			if (halt_error != 0) {
 				error = halt_error;
 			} else {
@@ -750,15 +716,15 @@ bot_command_locked(
 			goto transport_error;
 		}
 	}
+
 	actual = 0;
-	error = storage_bulk(storage, storage->bulk_in, &csw, sizeof(csw),
-			     BOT_TIMEOUT_MS, &actual, NULL);
 
 	/* Checks the operation status. */
+	error = storage_bulk(storage, storage->bulk_in, &csw, sizeof(csw),
+			     BOT_TIMEOUT_MS, &actual, NULL);
 	if (error == EPIPE) {
-		error = drv_usb_endpoint_clear_halt(storage->bulk_in);
-
 		/* Checks the operation status. */
+		error = drv_usb_endpoint_clear_halt(storage->bulk_in);
 		if (error == 0) {
 			error = storage_bulk(storage, storage->bulk_in, &csw,
 					     sizeof(csw), BOT_TIMEOUT_MS,
@@ -776,17 +742,17 @@ bot_command_locked(
 			   get_le32(csw.tag), tag);
 		goto transport_error;
 	}
-	csw_result = drv_usb_bot_classify_csw_status(csw.status);
 
 	/* Handles the csw result condition. */
+	csw_result = drv_usb_bot_classify_csw_status(csw.status);
 	if (csw_result == DRV_USB_BOT_CSW_INVALID) {
 		hal_printf("usb-storage: BOT invalid CSW status=%u\n",
 			   (unsigned)csw.status);
 		goto transport_error;
 	}
-	residue = get_le32(csw.residue);
 
 	/* Handles the uint64 t condition. */
+	residue = get_le32(csw.residue);
 	if ((uint64_t)residue > length) {
 		hal_printf("usb-storage: BOT residue=%u exceeds transfer=%u\n",
 			   residue, (unsigned)length);
@@ -829,6 +795,7 @@ bot_command_locked(
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	hal_printf("usb-storage: BOT phase-error residue=%u\n", residue);
 transport_error:
 	storage->transport_error = 1;
@@ -853,15 +820,15 @@ request_sense_locked(
 	/* Handles the decoded availability. */
 	if (decoded != NULL)
 		memset(decoded, 0, sizeof(*decoded));
-	error = bot_command_locked(storage, command, sizeof(command), sense,
-				   sizeof(sense), 1, &actual, NULL, 1);
 
 	/* Checks the operation status. */
+	error = bot_command_locked(storage, command, sizeof(command), sense,
+				   sizeof(sense), 1, &actual, NULL, 1);
 	if (error == 0 && decoded != NULL &&
-	    !drv_usb_scsi_parse_sense(sense, actual, decoded))
-
+	    !drv_usb_scsi_parse_sense(sense, actual, decoded)) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -892,10 +859,10 @@ storage_reconfigure_locked(
 	memset(&sense, 0, sizeof(sense));
 	(void)drv_usb_scsi_make_mode_sense6_cache_cdb(
 		mode_command, sizeof(mode_command), sizeof(mode));
-	error = bot_command_locked(storage, mode_command, sizeof(mode_command),
-				   mode, sizeof(mode), 1, &actual, &failed, 1);
 
 	/* Checks the operation status. */
+	error = bot_command_locked(storage, mode_command, sizeof(mode_command),
+				   mode, sizeof(mode), 1, &actual, &failed, 1);
 	if (error != 0)
 		goto fail;
 	(void)drv_usb_scsi_parse_mode_sense6_cache(mode, actual, &cache);
@@ -911,14 +878,15 @@ storage_reconfigure_locked(
 	 * policy. */
 	memset(sync_command, 0, sizeof(sync_command));
 	sync_command[0] = SCSI_SYNCHRONIZE_CACHE_10;
-	error = bot_command_locked(storage, sync_command, sizeof(sync_command),
-				   NULL, 0, 0, NULL, &failed, 1);
 
 	/* Checks the operation status. */
+	error = bot_command_locked(storage, sync_command, sizeof(sync_command),
+				   NULL, 0, 0, NULL, &failed, 1);
 	if (error != 0 && failed &&
 	    request_sense_locked(storage, &sense) == 0) {
 		storage->last_sense = sense;
 	}
+
 	policy = drv_usb_scsi_select_flush_policy(&cache, error == 0, &sense);
 
 	/*
@@ -934,6 +902,7 @@ storage_reconfigure_locked(
 		error = EOPNOTSUPP;
 		goto fail;
 	}
+
 	storage->write_protected = cache.write_protected;
 	storage->cache_known = cache.cache_valid;
 	storage->write_cache_enabled = cache.write_cache_enabled;
@@ -994,11 +963,11 @@ bot_command_sense_locked(
 	for (;;) {
 		memset(sense, 0, sizeof(*sense));
 		command_failed = 0;
+
+		/* Checks the operation status. */
 		error = bot_command_locked(
 			storage, cdb, cdb_length, buffer, length, input,
 			transferred, &command_failed, report_command_failed);
-
-		/* Checks the operation status. */
 		if (error == 0)
 			break;
 
@@ -1029,15 +998,15 @@ bot_command_sense_locked(
 		    request_sense_locked(storage, sense) != 0)
 			break;
 		storage->last_sense = *sense;
-		action = drv_usb_scsi_recovery_action(sense);
 
 		/* Handles the disk availability. */
+		action = drv_usb_scsi_recovery_action(sense);
 		if (action == DRV_USB_SCSI_RECOVERY_MODE &&
 		    storage->disk != NULL && mode_retried == 0) {
 			mode_retried = 1;
-			error = storage_reconfigure_locked(storage);
 
 			/* Checks the operation status. */
+			error = storage_reconfigure_locked(storage);
 			if (error != 0)
 				break;
 
@@ -1048,6 +1017,7 @@ bot_command_sense_locked(
 					error = EROFS;
 					break;
 				}
+
 				retry_cdb[1] &= ~0x08U;
 
 				/* Checks the drv usb scsi flush policy uses fua result. */
@@ -1063,6 +1033,7 @@ bot_command_sense_locked(
 				error = 0;
 				break;
 			}
+
 			continue;
 		}
 
@@ -1093,10 +1064,13 @@ bot_command_sense_locked(
 					disk_media_revoke(storage->disk);
 				}
 			}
+
 			break;
 		}
+
 		ua_retried = 1;
 	}
+
 	storage->command_deadline = 0;
 
 	/* Reports the failure. */
@@ -1123,9 +1097,11 @@ bot_command_sense_report(
 	int error;
 
 	mutex_lock(&storage->lock);
+
 	error = bot_command_sense_locked(storage, cdb, cdb_length, buffer,
 					 length, input, sense, transferred,
 					 report_command_failed);
+
 	mutex_unlock(&storage->lock);
 
 	/* Reports the failure. */
@@ -1148,15 +1124,15 @@ bot_command_sense(
 	struct drv_usb_scsi_sense *sense,
 	size_t *transferred)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the bot command sense report result. */
-	function_result =
+	error =
 		bot_command_sense_report(storage, cdb, cdb_length, buffer,
 					 length, input, sense, transferred, 1);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the bot command operation. */
@@ -1170,14 +1146,14 @@ bot_command(
 	int input,
 	size_t *transferred)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the bot command sense result. */
-	function_result = bot_command_sense(storage, cdb, cdb_length, buffer,
+	error = bot_command_sense(storage, cdb, cdb_length, buffer,
 					    length, input, NULL, transferred);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the flush policy name operation. */
@@ -1224,10 +1200,10 @@ scsi_configure_flush_policy(
 		/* Returns the computed result. */
 		return;
 	}
-	error = bot_command_sense(storage, mode_command, sizeof(mode_command),
-				  mode, sizeof(mode), 1, &sense, &actual);
 
 	/* Checks the operation status. */
+	error = bot_command_sense(storage, mode_command, sizeof(mode_command),
+				  mode, sizeof(mode), 1, &sense, &actual);
 	if (error == 0) {
 		(void)drv_usb_scsi_parse_mode_sense6_cache(mode, actual,
 							   &cache);
@@ -1306,10 +1282,10 @@ scsi_probe(
 		*medium_absent = 0;
 
 	memset(inquiry, 0, sizeof(inquiry));
-	error = bot_command(storage, inquiry_command, sizeof(inquiry_command),
-			    inquiry, sizeof(inquiry), 1, &actual);
 
 	/* Checks the operation status. */
+	error = bot_command(storage, inquiry_command, sizeof(inquiry_command),
+			    inquiry, sizeof(inquiry), 1, &actual);
 	if (error != 0)
 		return error;
 
@@ -1319,11 +1295,10 @@ scsi_probe(
 	removable = actual >= 2U && (inquiry[1] & 0x80U) != 0;
 	/* Process each element required by the operation. */
 	for (attempt = 0; attempt < 3U; attempt++) {
+		/* Checks the operation status. */
 		error = bot_command_sense_report(storage, ready_command,
 						 sizeof(ready_command), NULL, 0,
 						 0, &sense, NULL, 0);
-
-		/* Checks the operation status. */
 		if (error == 0)
 			break;
 
@@ -1355,12 +1330,13 @@ scsi_probe(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	memset(capacity, 0, sizeof(capacity));
+
+	/* Checks the operation status. */
 	error = bot_command_sense(storage, capacity_command,
 				  sizeof(capacity_command), capacity,
 				  sizeof(capacity), 1, NULL, &actual);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
@@ -1368,9 +1344,9 @@ scsi_probe(
 	if (actual < sizeof(capacity))
 		return EIO;
 	last_block = get_be32(capacity);
-	block_size = get_be32(capacity + 4);
 
 	/* Handles the last block condition. */
+	block_size = get_be32(capacity + 4);
 	if (last_block == UINT32_MAX || block_size == 0)
 		return EOVERFLOW;
 	storage->block_size = block_size;
@@ -1440,20 +1416,22 @@ storage_submit(
 			error = bio->b_op == BIO_WRITE ? EROFS : EIO;
 			goto out;
 		}
+
 		opcode = command[0];
 		put_be32(command + 2, (uint32_t)bio->b_mapped_block);
 		put_be16(command + 7, (uint16_t)bio->b_block_count);
 		expected = (size_t)bio->b_block_count * disk->d_block_size;
+
+		/* Checks the operation status. */
 		error = bot_command_sense_locked(
 			storage, command, sizeof(command), bio->b_data,
 			expected, bio->b_op == BIO_READ, &sense, &actual, 1);
-
-		/* Checks the operation status. */
 		if (error == 0 && actual != expected)
 			error = EIO;
 	}
 
 out:
+
 	mutex_unlock(&storage->lock);
 
 	/* Checks the operation status. */
@@ -1486,6 +1464,7 @@ out:
 				   bio->b_block_count, error);
 		}
 	}
+
 	bio_complete(bio, error,
 		     error == 0 && bio->b_op != BIO_FLUSH ? expected : 0);
 
@@ -1530,9 +1509,9 @@ storage_publish_disk(
 		return EBUSY;
 
 	/* Builds normal core/HCD reserves before publishing a usable disk. */
-	error = storage_transfer_reserve(storage);
 
 	/* Checks the operation status. */
+	error = storage_transfer_reserve(storage);
 	if (error != 0) {
 		return error;
 	}
@@ -1541,10 +1520,9 @@ storage_publish_disk(
  * READ CAPACITY may describe 4KiB (or larger) logical sectors. Bound
 	 * BIOs by bytes, not the historical sixteen 512-byte blocks. */
 	if (storage->block_size > DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE) {
+		/* Checks the operation status. */
 		error = drv_usb_urb_reserve_sync(storage->bulk_in_urb,
 						 storage->block_size);
-
-		/* Checks the operation status. */
 		if (error == 0) {
 			error = drv_usb_urb_reserve_sync(storage->bulk_out_urb,
 							 storage->block_size);
@@ -1555,21 +1533,22 @@ storage_publish_disk(
 			return error;
 		}
 	}
-	disk = disk_alloc();
 
 	/* Handles the disk availability. */
+	disk = disk_alloc();
 	if (disk == NULL) {
 		return ENOSPC;
 	}
-	error = disk_alloc_sd_name(disk);
 
 	/* Checks the operation status. */
+	error = disk_alloc_sd_name(disk);
 	if (error != 0) {
 		(void)disk_destroy(disk);
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	disk->d_flags =
 		DISK_REMOVABLE |
 		(drv_usb_scsi_flush_policy_requires_read_only(
@@ -1593,9 +1572,9 @@ storage_publish_disk(
 	disk->d_ops = &storage_disk_ops;
 	disk->d_data = storage;
 	storage->disk = disk;
-	error = disk_create(disk);
 
 	/* Checks the operation status. */
+	error = disk_create(disk);
 	if (error != 0) {
 		storage->disk = NULL;
 		(void)disk_destroy(disk);
@@ -1603,6 +1582,7 @@ storage_publish_disk(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	hal_printf("usb-storage: %s blocks=%u block-size=%u cache=%s "
 		   "dpofua=%s flush=%s%s\n",
 		   disk->d_name, (uint32_t)disk->d_block_count,
@@ -1628,9 +1608,9 @@ storage_refresh_partitions(
 	/*
  * Retries temporary ownership/allocation failures on a later control
 	 * pass. */
-	error = partition_reload(storage->disk);
 
 	/* Checks the operation status. */
+	error = partition_reload(storage->disk);
 	if (error == 0 || error == EINVAL || error == EOPNOTSUPP)
 		storage->partitions_pending = 0;
 
@@ -1688,26 +1668,27 @@ storage_control_step(
 	if (storage->disk != NULL) {
 		/* Handles the storage condition. */
 		if (!storage->media_retired) {
-			error = partition_retire_media(storage->disk);
-
 			/* Checks the operation status. */
+			error = partition_retire_media(storage->disk);
 			if (error != 0) {
 				mutex_unlock(&storage->lock);
 
 				/* Returns the computed result. */
 				return error;
 			}
+
 			storage->media_retired = 1;
 		}
-		error = disk_destroy(storage->disk);
 
 		/* Checks the operation status. */
+		error = disk_destroy(storage->disk);
 		if (error != 0) {
 			mutex_unlock(&storage->lock);
 
 			/* Returns the computed result. */
 			return error;
 		}
+
 		storage->disk = NULL;
 		storage->media_retired = 0;
 	}
@@ -1727,6 +1708,7 @@ storage_control_step(
 	storage->partitions_pending = 0;
 	storage_urbs_free(storage);
 	error = storage_urbs_alloc(storage);
+
 	mutex_unlock(&storage->lock);
 
 	/* Checks the operation status. */
@@ -1742,14 +1724,15 @@ storage_control_step(
 			absent ? STORAGE_ABSENT : STORAGE_REVALIDATE;
 	} else {
 		storage->media_state = STORAGE_ONLINE;
-		error = storage_publish_disk(storage);
 
 		/* Checks the operation status. */
+		error = storage_publish_disk(storage);
 		if (error != 0)
 			storage->media_state = STORAGE_REVALIDATE;
 		else
 			storage->partitions_pending = 1;
 	}
+
 	mutex_unlock(&storage->lock);
 
 	/* Checks the operation status. */
@@ -1799,11 +1782,10 @@ storage_control_start(
 {
 	int error;
 
+	/* Checks the operation status. */
 	error = kthread_create(storage_control_worker, storage,
 			       SCHED_PRIORITY_DEFAULT,
 			       &storage->control_worker);
-
-	/* Checks the operation status. */
 	if (error == 0)
 		thread_start(storage->control_worker);
 
@@ -1824,9 +1806,8 @@ storage_control_stop(
 	uint64_t deadline;
 	int error;
 
-	worker = storage->control_worker;
-
 	/* Handles the worker availability. */
+	worker = storage->control_worker;
 	if (worker == NULL)
 		return 0;
 	atomic_raw_store_release(&storage->control_stopping, 1U);
@@ -1840,9 +1821,9 @@ storage_control_stop(
 			return EBUSY;
 		sched_yield();
 	}
-	error = thread_wait(worker, NULL);
 
 	/* Checks the operation status. */
+	error = thread_wait(worker, NULL);
 	if (error == 0)
 		storage->control_worker = NULL;
 
@@ -1867,9 +1848,8 @@ storage_attach(
 
 	(void)id;
 
-	storage = hal_malloc(sizeof(*storage));
-
 	/* Handles the storage availability. */
+	storage = hal_malloc(sizeof(*storage));
 	if (storage == NULL)
 		return ENOMEM;
 	memset(storage, 0, sizeof(*storage));
@@ -1887,12 +1867,13 @@ storage_attach(
 		/* Returns the computed result. */
 		return ENODEV;
 	}
+
 	(void)mutex_init(&storage->lock, LOCK_RANK_DISK, "usb-storage");
 	(void)mutex_init(&storage->control_lock, LOCK_RANK_DEVICE,
 			 "usb-storage control");
-	error = storage_urbs_alloc(storage);
 
 	/* Checks the operation status. */
+	error = storage_urbs_alloc(storage);
 	if (error != 0) {
 		hal_free(storage);
 
@@ -1911,29 +1892,29 @@ storage_attach(
 		hal_printf("usb-storage: only LUN 0 of %u is supported\n",
 			   (unsigned)maximum_lun + 1U);
 	}
-	error = scsi_probe(storage, &medium_absent);
 
 	/* Checks the operation status. */
+	error = scsi_probe(storage, &medium_absent);
 	if (error != 0 && !medium_absent)
 		goto fail;
 
 	/* Handles the medium absent condition. */
 	if (medium_absent)
 		storage->media_state = STORAGE_ABSENT;
-	error = storage_control_start(storage);
 
 	/* Checks the operation status. */
+	error = storage_control_start(storage);
 	if (error != 0)
 		goto fail;
 
 	/* Handles the medium absent condition. */
 	if (!medium_absent) {
-		error = storage_publish_disk(storage);
-
 		/* Checks the operation status. */
+		error = storage_publish_disk(storage);
 		if (error != 0)
 			goto fail;
 	}
+
 	(void)drv_usb_interface_set_driver_data(interface, storage);
 	atomic_raw_store_release(&storage->control_ready, 1U);
 	kernel_notify_task(storage->control_worker->task);
@@ -1963,6 +1944,7 @@ fail:
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	storage_urbs_free(storage);
 	hal_free(storage);
 
@@ -1994,27 +1976,28 @@ storage_detach(
 	if (storage->disk != NULL) {
 		/* Handles the storage condition. */
 		if (!storage->media_retired) {
+			/* Checks the operation status. */
 			error = disk_media_status(storage->disk) != 0
 					? partition_retire_media(storage->disk)
 					: disk_gone_if_idle(storage->disk);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				goto unlock;
 			storage->media_retired = 1;
 		}
-		error = disk_destroy(storage->disk);
 
 		/* Checks the operation status. */
+		error = disk_destroy(storage->disk);
 		if (error != 0)
 			goto unlock;
 		storage->disk = NULL;
 	}
+
 	atomic_raw_store_release(&storage->control_stopping, 1U);
+
 	mutex_unlock(&storage->control_lock);
-	error = storage_control_stop(storage);
 
 	/* Checks the operation status. */
+	error = storage_control_stop(storage);
 	if (error != 0)
 		return error;
 	storage_urbs_free(storage);
@@ -2023,6 +2006,7 @@ storage_detach(
 	/* Reports successful completion. */
 	return 0;
 unlock:
+
 	mutex_unlock(&storage->control_lock);
 
 	/* Reports the failure. */

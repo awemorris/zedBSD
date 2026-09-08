@@ -204,9 +204,9 @@ drv_intel_ax211_mmio_prepare_card_hw(
 	mmio->master_disable_timed_out = 0;
 
 	/* Tries the ordinary ownership handshake first. */
-	result = ax211_set_hw_ready(mmio);
 
 	/* Checks the operation result. */
+	result = ax211_set_hw_ready(mmio);
 	if (result == INTEL_AX211_MMIO_OK) {
 		mmio->prepared = 1;
 
@@ -219,9 +219,9 @@ drv_intel_ax211_mmio_prepare_card_hw(
 		return result;
 
 	/* Runs the finite wake-and-retry fallback. */
-	result = ax211_prepare_fallback(mmio);
 
 	/* Checks the operation result. */
+	result = ax211_prepare_fallback(mmio);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
@@ -253,16 +253,16 @@ drv_intel_ax211_mmio_sw_reset(
 	mmio->apm_ready = 0;
 
 	/* Requests the AX210-family CSR reset. */
-	result = ax211_csr_set_bits(mmio, AX211_CSR_RESET, AX211_RESET_SW);
 
 	/* Checks the operation result. */
+	result = ax211_csr_set_bits(mmio, AX211_CSR_RESET, AX211_RESET_SW);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
 	/* Observes the documented reset settling time. */
-	result = ax211_delay(mmio, AX211_SW_RESET_DELAY_US);
 
 	/* Checks the operation result. */
+	result = ax211_delay(mmio, AX211_SW_RESET_DELAY_US);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
@@ -295,52 +295,52 @@ drv_intel_ax211_mmio_apm_init(
 
 	/* Keeps L0s from racing L1A receive wakeup. */
 	mmio->apm_ready = 0;
-	result = ax211_csr_set_bits(mmio, AX211_CSR_GIO_CHICKEN_BITS,
-				    AX211_GIO_L1A_NO_L0S_RX);
 
 	/* Checks the operation result. */
+	result = ax211_csr_set_bits(mmio, AX211_CSR_GIO_CHICKEN_BITS,
+				    AX211_GIO_L1A_NO_L0S_RX);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
 	/* Raises the host-processor-event wait threshold. */
-	result = ax211_csr_set_bits(mmio, AX211_CSR_DBG_HPET_MEM_REG,
-				    AX211_HPET_WAIT_THRESHOLD);
 
 	/* Checks the operation result. */
+	result = ax211_csr_set_bits(mmio, AX211_CSR_DBG_HPET_MEM_REG,
+				    AX211_HPET_WAIT_THRESHOLD);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
 	/* Permits management traffic to wake the PCIe link. */
-	result = ax211_csr_set_bits(mmio, AX211_CSR_HW_IF_CONFIG_REG,
-				    AX211_HW_IF_HAP_WAKE_L1A);
 
 	/* Checks the operation result. */
+	result = ax211_csr_set_bits(mmio, AX211_CSR_HW_IF_CONFIG_REG,
+				    AX211_HW_IF_HAP_WAKE_L1A);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
 	/* Disables unsupported L0s without disabling L1. */
-	result = ax211_csr_set_bits(mmio, AX211_CSR_GIO_REG,
-				    AX211_GIO_L0S_DISABLED);
 
 	/* Checks the operation result. */
+	result = ax211_csr_set_bits(mmio, AX211_CSR_GIO_REG,
+				    AX211_GIO_L0S_DISABLED);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
 	/* Moves the adapter from D0U into its active power state. */
-	result = ax211_csr_set_bits(mmio, AX211_CSR_GP_CNTRL,
-				    AX211_GP_INIT_DONE);
 
 	/* Checks the operation result. */
+	result = ax211_csr_set_bits(mmio, AX211_CSR_GP_CNTRL,
+				    AX211_GP_INIT_DONE);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
 	/* Waits only for the clock indication required by PRPH access. */
+
+	/* Checks the operation result. */
 	result = ax211_poll_csr(
 		mmio, AX211_CSR_GP_CNTRL, AX211_GP_MAC_CLOCK_READY,
 		AX211_GP_MAC_CLOCK_READY, AX211_APM_CLOCK_TIMEOUT_US,
 		AX211_GENERAL_POLL_US, INTEL_AX211_MMIO_WAIT_APM_CLOCK);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
@@ -458,20 +458,19 @@ drv_intel_ax211_mmio_nic_lock(
 	}
 
 	/* Requests access and gives the power controller time to react. */
+
+	/* Checks the operation result. */
 	result = ax211_csr_set_bits(mmio, AX211_CSR_GP_CNTRL,
 				    AX211_GP_MAC_ACCESS_REQ);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
-	result = ax211_delay(mmio, AX211_NIC_REQUEST_SETTLE_US);
 
 	/* Checks the operation result. */
+	result = ax211_delay(mmio, AX211_NIC_REQUEST_SETTLE_US);
 	if (result != INTEL_AX211_MMIO_OK) {
+		/* Handles the clear result condition. */
 		clear_result = ax211_csr_clear_bits(mmio, AX211_CSR_GP_CNTRL,
 						    AX211_GP_MAC_ACCESS_REQ);
-
-		/* Handles the clear result condition. */
 		if (clear_result != INTEL_AX211_MMIO_OK) {
 			mmio->apm_ready = 0;
 
@@ -484,18 +483,17 @@ drv_intel_ax211_mmio_nic_lock(
 	}
 
 	/* Requires a running clock and a device which is not going to sleep. */
+
+	/* Checks the operation result. */
 	result = ax211_poll_csr(
 		mmio, AX211_CSR_GP_CNTRL, AX211_GP_MAC_CLOCK_READY,
 		AX211_GP_MAC_CLOCK_READY | AX211_GP_GOING_TO_SLEEP,
 		AX211_NIC_OWNERSHIP_TIMEOUT_US, AX211_GENERAL_POLL_US,
 		INTEL_AX211_MMIO_WAIT_NIC_OWNERSHIP);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK) {
+		/* Handles the clear result condition. */
 		clear_result = ax211_csr_clear_bits(mmio, AX211_CSR_GP_CNTRL,
 						    AX211_GP_MAC_ACCESS_REQ);
-
-		/* Handles the clear result condition. */
 		if (clear_result != INTEL_AX211_MMIO_OK) {
 			mmio->apm_ready = 0;
 
@@ -538,10 +536,10 @@ drv_intel_ax211_mmio_nic_unlock(
 		return INTEL_AX211_MMIO_OK;
 
 	/* Drops the hardware request at the outermost boundary. */
-	result = ax211_csr_clear_bits(mmio, AX211_CSR_GP_CNTRL,
-				      AX211_GP_MAC_ACCESS_REQ);
 
 	/* Checks the operation result. */
+	result = ax211_csr_clear_bits(mmio, AX211_CSR_GP_CNTRL,
+				      AX211_GP_MAC_ACCESS_REQ);
 	if (result != INTEL_AX211_MMIO_OK) {
 		mmio->apm_ready = 0;
 
@@ -570,9 +568,9 @@ drv_intel_ax211_mmio_read_mac(
 		return INTEL_AX211_MMIO_INVALID;
 
 	memset(candidate, 0, sizeof(candidate));
-	result = drv_intel_ax211_mmio_nic_lock(mmio);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_mmio_nic_lock(mmio);
 	if (result != INTEL_AX211_MMIO_OK) {
 		ax211_scrub(candidate, sizeof(candidate));
 
@@ -581,10 +579,10 @@ drv_intel_ax211_mmio_read_mac(
 	}
 
 	/* Prefers the OEM strap value when it is a usable unicast address. */
-	result = ax211_read_mac_words(mmio, AX211_CSR_MAC_ADDRESS0_STRAP,
-				      AX211_CSR_MAC_ADDRESS1_STRAP, candidate);
 
 	/* Checks the ax211 mac valid result. */
+	result = ax211_read_mac_words(mmio, AX211_CSR_MAC_ADDRESS0_STRAP,
+				      AX211_CSR_MAC_ADDRESS1_STRAP, candidate);
 	if (result == INTEL_AX211_MMIO_OK && !ax211_mac_valid(candidate)) {
 		ax211_scrub(candidate, sizeof(candidate));
 		result = ax211_read_mac_words(mmio, AX211_CSR_MAC_ADDRESS0_OTP,
@@ -599,9 +597,9 @@ drv_intel_ax211_mmio_read_mac(
 	/*
  * Never publishes an address until its ownership reference is released.
 	 */
-	unlock_result = drv_intel_ax211_mmio_nic_unlock(mmio);
 
 	/* Handles the unlock result condition. */
+	unlock_result = drv_intel_ax211_mmio_nic_unlock(mmio);
 	if (unlock_result != INTEL_AX211_MMIO_OK)
 		result = unlock_result;
 
@@ -703,23 +701,23 @@ drv_intel_ax211_mmio_publish_gen3(
 	/*
  * Publishes the context physical address low word before its high word.
 	 */
-	result = ax211_publish_address(mmio, AX211_CSR_CTXT_INFO_ADDR,
-				       boot->context_address);
 
 	/* Checks the operation result. */
+	result = ax211_publish_address(mmio, AX211_CSR_CTXT_INFO_ADDR,
+				       boot->context_address);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
 	/* Publishes the IML physical address before its byte length. */
+
+	/* Checks the operation result. */
 	result = ax211_publish_address(mmio, AX211_CSR_IML_DATA_ADDR,
 				       boot->iml_address);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
-	result = ax211_csr_write(mmio, AX211_CSR_IML_SIZE_ADDR, boot->iml_size);
 
 	/* Checks the operation result. */
+	result = ax211_csr_write(mmio, AX211_CSR_IML_SIZE_ADDR, boot->iml_size);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
@@ -741,17 +739,17 @@ drv_intel_ax211_mmio_publish_gen3(
 		return result;
 
 	/* Acquires ownership before the LTR bootstrap and UMAC PRPH write. */
-	result = drv_intel_ax211_mmio_nic_lock(mmio);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_mmio_nic_lock(mmio);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
 	/* Applies the non-integrated SO/GF bootstrap latency contract. */
-	result = ax211_csr_write(mmio, AX211_CSR_LTR_LONG_VAL_AD,
-				 AX211_LTR_BOOTSTRAP);
 
 	/* Checks the operation result. */
+	result = ax211_csr_write(mmio, AX211_CSR_LTR_LONG_VAL_AD,
+				 AX211_LTR_BOOTSTRAP);
 	if (result != INTEL_AX211_MMIO_OK) {
 		(void)drv_intel_ax211_mmio_nic_unlock(mmio);
 
@@ -788,10 +786,10 @@ ax211_profile_valid(
 
 	/* Handles the profile condition. */
 	if (profile->mac_type != INTEL_AX211_MMIO_MAC_SO &&
-	    profile->mac_type != INTEL_AX211_MMIO_MAC_SOF)
-
+	    profile->mac_type != INTEL_AX211_MMIO_MAC_SOF) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Handles the profile condition. */
 	if (profile->rf_type != INTEL_AX211_MMIO_RF_GF)
@@ -843,30 +841,29 @@ static int
 ax211_set_hw_ready(
 	struct intel_ax211_mmio *mmio)
 {
-	int function_result;
+	int error;
 	int result;
 
+	/* Checks the operation result. */
 	result = ax211_csr_set_bits(mmio, AX211_CSR_HW_IF_CONFIG_REG,
 				    AX211_HW_IF_NIC_READY);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = ax211_poll_csr(
 		mmio, AX211_CSR_HW_IF_CONFIG_REG, AX211_HW_IF_NIC_READY,
 		AX211_HW_IF_NIC_READY, AX211_HW_READY_TIMEOUT_US,
 		AX211_HW_READY_POLL_US, INTEL_AX211_MMIO_WAIT_HW_READY);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
 	/* Obtains the ax211 csr write result. */
-	function_result = ax211_csr_write(mmio, AX211_CSR_MBOX_SET_REG,
+	error = ax211_csr_write(mmio, AX211_CSR_MBOX_SET_REG,
 					  AX211_MBOX_OS_ALIVE);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Sets CSR bits through a checked read-modify-write operation. */
@@ -876,22 +873,21 @@ ax211_csr_set_bits(
 	uint32_t offset,
 	uint32_t bits)
 {
-	int function_result;
+	int error;
 	uint32_t value;
 	int result;
 
-	result = ax211_csr_read(mmio, offset, &value);
-
 	/* Checks the operation result. */
+	result = ax211_csr_read(mmio, offset, &value);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 	value |= bits;
 
 	/* Obtains the ax211 csr write result. */
-	function_result = ax211_csr_write(mmio, offset, value);
+	error = ax211_csr_write(mmio, offset, value);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Reads one CSR and converts a backend failure into a private result. */
@@ -949,18 +945,18 @@ ax211_poll_csr(
 		return INTEL_AX211_MMIO_INVALID;
 
 	/* Creates a checked absolute deadline. */
-	result = ax211_clock(mmio, &start);
 
 	/* Checks the operation result. */
+	result = ax211_clock(mmio, &start);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
 	/* Handles the uint64 t condition. */
 	if ((uint64_t)timeout_us > UINT64_MAX - start)
 		return INTEL_AX211_MMIO_CLOCK;
-	deadline = start + (uint64_t)timeout_us;
 
 	/* Handles the trace deadline availability. */
+	deadline = start + (uint64_t)timeout_us;
 	if (mmio->ops->trace_deadline != NULL) {
 		mmio->ops->trace_deadline(mmio->argument, wait, start,
 					  deadline);
@@ -971,9 +967,8 @@ ax211_poll_csr(
 	maximum_iterations = timeout_us / step_us + 2U;
 	/* Process each element required by the operation. */
 	for (iteration = 0U; iteration < maximum_iterations; iteration++) {
-		result = ax211_csr_read(mmio, offset, &value);
-
 		/* Checks the operation result. */
+		result = ax211_csr_read(mmio, offset, &value);
 		if (result != INTEL_AX211_MMIO_OK)
 			return result;
 
@@ -981,9 +976,8 @@ ax211_poll_csr(
 		if ((value & mask) == (expected & mask))
 			return INTEL_AX211_MMIO_OK;
 
-		result = ax211_clock(mmio, &current);
-
 		/* Checks the operation result. */
+		result = ax211_clock(mmio, &current);
 		if (result != INTEL_AX211_MMIO_OK)
 			return result;
 
@@ -995,14 +989,13 @@ ax211_poll_csr(
 		if (current >= deadline)
 			return INTEL_AX211_MMIO_TIMEOUT;
 
-		result = ax211_delay(mmio, step_us);
-
 		/* Checks the operation result. */
+		result = ax211_delay(mmio, step_us);
 		if (result != INTEL_AX211_MMIO_OK)
 			return result;
-		result = ax211_clock(mmio, &current);
 
 		/* Checks the operation result. */
+		result = ax211_clock(mmio, &current);
 		if (result != INTEL_AX211_MMIO_OK)
 			return result;
 
@@ -1054,15 +1047,15 @@ ax211_prepare_fallback(
 	int result;
 
 	/* Keeps the PCIe link awake while requesting ownership. */
+
+	/* Checks the operation result. */
 	result = ax211_csr_set_bits(mmio, AX211_CSR_DBG_LINK_PWR_MGMT_REG,
 				    AX211_LINK_POWER_MANAGEMENT_DISABLED);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
-	result = ax211_delay(mmio, AX211_PREPARE_SETTLE_US);
 
 	/* Checks the operation result. */
+	result = ax211_delay(mmio, AX211_PREPARE_SETTLE_US);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
@@ -1070,36 +1063,34 @@ ax211_prepare_fallback(
 	polled_us = 0U;
 	/* Process each remaining element. */
 	for (retry = 0U; retry < AX211_PREPARE_RETRY_COUNT; retry++) {
+		/* Checks the operation result. */
 		result = ax211_csr_set_bits(mmio, AX211_CSR_HW_IF_CONFIG_REG,
 					    AX211_HW_IF_PREPARE);
-
-		/* Checks the operation result. */
 		if (result != INTEL_AX211_MMIO_OK)
 			return result;
 
 		/* Rechecks readiness at 200-us fallback intervals. */
 		do {
-			result = ax211_set_hw_ready(mmio);
-
 			/* Checks the operation result. */
+			result = ax211_set_hw_ready(mmio);
 			if (result == INTEL_AX211_MMIO_OK)
 				return INTEL_AX211_MMIO_OK;
 
 			/* Checks the operation result. */
 			if (result != INTEL_AX211_MMIO_TIMEOUT)
 				return result;
-			result = ax211_delay(mmio, AX211_PREPARE_RETRY_POLL_US);
 
 			/* Checks the operation result. */
+			result = ax211_delay(mmio, AX211_PREPARE_RETRY_POLL_US);
 			if (result != INTEL_AX211_MMIO_OK)
 				return result;
 			polled_us += AX211_PREPARE_RETRY_POLL_US;
 		} while (polled_us < AX211_PREPARE_TOTAL_POLL_US);
 
 		/* Separates hardware-prepare attempts by 25 ms. */
-		result = ax211_delay(mmio, AX211_PREPARE_RETRY_DELAY_US);
 
 		/* Checks the operation result. */
+		result = ax211_delay(mmio, AX211_PREPARE_RETRY_DELAY_US);
 		if (result != INTEL_AX211_MMIO_OK)
 			return result;
 	}
@@ -1115,22 +1106,21 @@ ax211_csr_clear_bits(
 	uint32_t offset,
 	uint32_t bits)
 {
-	int function_result;
+	int error;
 	uint32_t value;
 	int result;
 
-	result = ax211_csr_read(mmio, offset, &value);
-
 	/* Checks the operation result. */
+	result = ax211_csr_read(mmio, offset, &value);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 	value &= ~bits;
 
 	/* Obtains the ax211 csr write result. */
-	function_result = ax211_csr_write(mmio, offset, value);
+	error = ax211_csr_write(mmio, offset, value);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Retains the first stop failure while later cleanup stages still run. */
@@ -1175,9 +1165,9 @@ ax211_read_mac_words(
 
 	first = 0U;
 	second = 0U;
-	result = ax211_csr_read(mmio, first_offset, &first);
 
 	/* Checks the operation result. */
+	result = ax211_csr_read(mmio, first_offset, &first);
 	if (result == INTEL_AX211_MMIO_OK)
 		result = ax211_csr_read(mmio, second_offset, &second);
 
@@ -1245,19 +1235,18 @@ ax211_publish_address(
 	uint32_t offset,
 	uint64_t address)
 {
-	int function_result;
+	int error;
 	int result;
 
-	result = ax211_csr_write(mmio, offset, (uint32_t)address);
-
 	/* Checks the operation result. */
+	result = ax211_csr_write(mmio, offset, (uint32_t)address);
 	if (result != INTEL_AX211_MMIO_OK)
 		return result;
 
 	/* Obtains the ax211 csr write result. */
-	function_result =
+	error =
 		ax211_csr_write(mmio, offset + 4U, (uint32_t)(address >> 32));
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }

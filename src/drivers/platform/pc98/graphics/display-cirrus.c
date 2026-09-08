@@ -351,13 +351,13 @@ coregraph_mode_640x480(
 	seq_write(backend, 0x12U, 0);
 	/* Process each remaining element. */
 	for (i = 0; i < sizeof(seq_index); i++) {
-		value_local = seq_value[i];
-
 		/* Handles the seq index condition. */
+		value_local = seq_value[i];
 		if (seq_index[i] == 0x07U && bits_per_pixel == 24U)
 			value_local = 0x15U;
 		seq_write(backend, seq_index[i], value_local);
 	}
+
 	seq_write(backend, 0x0fU,
 		  (uint8_t)((seq_read(backend, 0x0fU) & 0xdfU) | 0x20U));
 	out8(backend, CIRRUS_IO + 2U, 0xe3U);
@@ -366,13 +366,13 @@ coregraph_mode_640x480(
 	crtc_write(backend, 0x11U, 0x20U);
 	/* Process each remaining element. */
 	for (i = 0; i < sizeof(crtc); i++) {
-		value_local1 = crtc[i];
-
 		/* Checks the current index. */
+		value_local1 = crtc[i];
 		if (i == 0x13U && bits_per_pixel == 24U)
 			value_local1 = 0xf0U;
 		crtc_write(backend, (uint8_t)i, value_local1);
 	}
+
 	/* Process each remaining element. */
 	for (i = 0; i < sizeof(graphics); i++)
 		gfx_write(backend, (uint8_t)i, graphics[i]);
@@ -382,6 +382,7 @@ coregraph_mode_640x480(
 		out8(backend, CIRRUS_IO, (uint8_t)i);
 		out8(backend, CIRRUS_IO, attribute[i]);
 	}
+
 	(void)in8(backend, CIRRUS_STATUS);
 	out8(backend, CIRRUS_IO, 0x20U);
 	hidden_dac_write(backend, bits_per_pixel == 24U ? 0xc5U : 0x20U);
@@ -441,6 +442,7 @@ write_pixel(
 		/* Returns the computed result. */
 		return;
 	}
+
 	pixel = backend->framebuffer + y * PC98_DISPLAY_CIRRUS_STRIDE_24 +
 		x * 3U;
 	pixel[0] = (uint8_t)color;
@@ -465,10 +467,10 @@ cirrus_enter(
 	/* Checks the coregraph id present result. */
 	if (backend == NULL || info == NULL || backend->port_in8 == NULL ||
 	    backend->port_out8 == NULL || backend->framebuffer == NULL ||
-	    !coregraph_id_present(backend))
-
+	    !coregraph_id_present(backend)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	bits_per_pixel = info->preferred_bits_per_pixel == 24U ? 24U : 8U;
 	stride = bits_per_pixel == 24U ? PC98_DISPLAY_CIRRUS_STRIDE_24
 				       : PC98_DISPLAY_CIRRUS_STRIDE_8;
@@ -486,9 +488,9 @@ cirrus_enter(
  * The motherboard ID is only a hint; validate the temporarily woken
 	 * VGA. */
 	seq_write(backend, 0x06U, 0x12U);
-	chip = crtc_read(backend, 0x27U);
 
 	/* Handles the chip condition. */
+	chip = crtc_read(backend, 0x27U);
 	if (chip == 0 || chip == 0xffU)
 		goto fail;
 	wab_write(backend, WAB_REG_LINEAR, 0xf0U);
@@ -584,6 +586,7 @@ cirrus_fill(
 		/* Reports operation failure. */
 		return 1;
 	}
+
 	/* Process each element required by the operation. */
 	for (y = rect->y; y < rect->y + rect->height; y++) {
 		row_local1 = backend->framebuffer +
@@ -630,9 +633,9 @@ cirrus_line(
 		/* Checks the current horizontal value. */
 		if (x == target_x && y == target_y)
 			break;
-		twice_error = error * 2;
 
 		/* Checks the operation status. */
+		twice_error = error * 2;
 		if (twice_error >= delta_y) {
 			error += delta_y;
 			x += step_x;
@@ -718,6 +721,7 @@ cirrus_draw_image_common(
 				rgb = ((uint32_t)source[0] << 16) |
 				      ((uint32_t)source[1] << 8) | source[2];
 			}
+
 			write_pixel(backend, destination_x + x,
 				    destination_y + y, rgb);
 		}
@@ -735,14 +739,14 @@ cirrus_draw_image(
 	unsigned y,
 	const struct pc98_display_image *image)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the cirrus draw image common result. */
-	function_result =
+	error =
 		cirrus_draw_image_common(context, x, y, image, UINT64_MAX);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the cirrus draw image pattern operation. */
@@ -754,14 +758,14 @@ cirrus_draw_image_pattern(
 	const struct pc98_display_image *image,
 	uint64_t pattern)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the cirrus draw image common result. */
-	function_result =
+	error =
 		cirrus_draw_image_common(context, x, y, image, pattern);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the cirrus flush operation. */

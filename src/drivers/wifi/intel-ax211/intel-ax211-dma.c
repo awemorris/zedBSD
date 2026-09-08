@@ -101,24 +101,24 @@ drv_intel_ax211_dma_prepare_boot(
 
 	/* Handles the device availability. */
 	if (device == NULL || resources == NULL || firmware_length == 0U ||
-	    resources->device != NULL || resources->boot_prepared)
-
+	    resources->device != NULL || resources->boot_prepared) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
+
+	/* Checks the operation status. */
 	error = ax211_boot_manifest_validate(firmware_bytes, firmware_length,
 					     manifest);
-
-	/* Checks the operation status. */
 	if (error != 0 ||
 	    !drv_intel_ax211_mac_type_supported(
-		    (uint16_t)((hardware_revision & 0xfff0U) >> 4)))
-
+		    (uint16_t)((hardware_revision & 0xfff0U) >> 4))) {
 		/* Returns the computed result. */
 		return error != 0 ? error : EINVAL;
+	}
 	resources->device = device;
-	error = ax211_fixed_buffers_allocate(resources);
 
 	/* Checks the operation status. */
+	error = ax211_fixed_buffers_allocate(resources);
 	if (error == 0) {
 		error = ax211_firmware_buffers_allocate(
 			resources, firmware_bytes, firmware_length, manifest);
@@ -143,6 +143,7 @@ drv_intel_ax211_dma_prepare_boot(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	resources->boot_prepared = 1U;
 
 	/* Reports successful completion. */
@@ -170,18 +171,17 @@ drv_intel_ax211_dma_prepare_pnvm(
 	    resources->pnvm_prepared || pnvm_length != INTEL_AX211_PNVM_SIZE ||
 	    manifest->section_count == 0U ||
 	    manifest->section_count > INTEL_AX211_MAX_PNVM_SECTIONS ||
-	    manifest->total_length == 0U || manifest->total_length > UINT32_MAX)
-
+	    manifest->total_length == 0U || manifest->total_length > UINT32_MAX) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	error = ax211_buffer_allocate(resources, &resources->pnvm_table,
 				      INTEL_AX211_PNVM_ADDRESS_TABLE_SIZE, 1U);
 	/* Process each remaining element. */
 	for (index = 0U; index < manifest->section_count && error == 0;
 	     index++) {
-		section = &manifest->section[index];
-
 		/* Checks the ax211 range valid result. */
+		section = &manifest->section[index];
 		if (section->length == 0U ||
 		    !ax211_range_valid(section->file_offset, section->length,
 				       pnvm_length) ||
@@ -189,11 +189,11 @@ drv_intel_ax211_dma_prepare_pnvm(
 			error = EINVAL;
 			continue;
 		}
+
+		/* Checks the operation status. */
 		error = ax211_buffer_allocate(resources,
 					      &resources->pnvm[index],
 					      section->length, 1U);
-
-		/* Checks the operation status. */
 		if (error == 0) {
 			memcpy(resources->pnvm[index].address,
 			       pnvm_bytes + section->file_offset,
@@ -217,18 +217,21 @@ drv_intel_ax211_dma_prepare_pnvm(
 				resources,
 				&resources->pnvm[resources->pnvm_count]);
 		}
+
 		resources->pnvm_total_length = 0U;
 		ax211_buffer_release(resources, &resources->pnvm_table);
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	table = resources->pnvm_table.address;
 	/* Process each remaining element. */
 	for (index = 0U; index < resources->pnvm_count; index++) {
 		ax211_put_le64(table + index * 8U,
 			       resources->pnvm[index].device_address);
 	}
+
 	ax211_put_le64((uint8_t *)resources->scratch.address +
 			       AX211_SCRATCH_PNVM_BASE_OFFSET,
 		       resources->pnvm_table.device_address);
@@ -252,10 +255,10 @@ drv_intel_ax211_dma_release_boot_images(
 
 	/* Handles the resources availability. */
 	if (resources == NULL || resources->device == NULL ||
-	    !resources->boot_prepared || resources->boot_images_released)
-
+	    !resources->boot_prepared || resources->boot_images_released) {
 		/* Returns the computed result. */
 		return;
+	}
 	count = resources->firmware_count;
 	/* Process each remaining element. */
 	while (count != 0U) {
@@ -268,6 +271,7 @@ drv_intel_ax211_dma_release_boot_images(
 				resources, &resources->firmware[count].buffer);
 		}
 	}
+
 	ax211_buffer_release(resources, &resources->iml);
 	resources->boot_images_released = 1U;
 }
@@ -292,12 +296,14 @@ drv_intel_ax211_dma_release(
 		/* Returns the computed result. */
 		return;
 	}
+
 	count = resources->pnvm_count;
 	/* Process each remaining element. */
 	while (count != 0U) {
 		count--;
 		ax211_buffer_release(resources, &resources->pnvm[count]);
 	}
+
 	ax211_buffer_release(resources, &resources->pnvm_table);
 	count = resources->rx_buffer_count;
 	/* Process each remaining element. */
@@ -305,6 +311,7 @@ drv_intel_ax211_dma_release(
 		count--;
 		ax211_buffer_release(resources, &resources->rx_buffer[count]);
 	}
+
 	count = resources->firmware_count;
 	/* Process each remaining element. */
 	while (count != 0U) {
@@ -312,6 +319,7 @@ drv_intel_ax211_dma_release(
 		ax211_buffer_release(resources,
 				     &resources->firmware[count].buffer);
 	}
+
 	ax211_buffer_release(resources, &resources->iml);
 	ax211_buffer_release(resources, &resources->rx_status);
 	ax211_buffer_release(resources, &resources->rx_completion);
@@ -351,33 +359,32 @@ ax211_boot_manifest_validate(
 		    manifest->runtime_count ||
 	    manifest->iml_length != INTEL_AX211_IML_SIZE ||
 	    !ax211_range_valid(manifest->iml_offset, manifest->iml_length,
-			       firmware_length))
-
+			       firmware_length)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	cpu_separator = manifest->lmac_count;
 	paging_separator = cpu_separator + manifest->umac_count + 1U;
 	/* Process each remaining element. */
 	for (index = 0U; index < manifest->runtime_count; index++) {
-		section = &manifest->runtime[index];
-
 		/* Checks the current index. */
+		section = &manifest->runtime[index];
 		if (index == cpu_separator) {
 			/* Handles the section condition. */
 			if (section->destination !=
 				    INTEL_AX211_CPU1_CPU2_SEPARATOR ||
-			    section->length != 0U)
-
+			    section->length != 0U) {
 				/* Returns the computed result. */
 				return EINVAL;
+			}
 		} else if (index == paging_separator) {
 			/* Handles the section condition. */
 			if (section->destination !=
 				    INTEL_AX211_PAGING_SEPARATOR ||
-			    section->length != 0U)
-
+			    section->length != 0U) {
 				/* Returns the computed result. */
 				return EINVAL;
+			}
 		} else if (section->destination ==
 				   INTEL_AX211_CPU1_CPU2_SEPARATOR ||
 			   section->destination ==
@@ -415,10 +422,9 @@ ax211_fixed_buffers_allocate(
 {
 	int error;
 
+	/* Checks the operation status. */
 	error = ax211_buffer_allocate(resources, &resources->context,
 				      INTEL_AX211_CONTEXT_INFO_GEN3_SIZE, 1U);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = ax211_buffer_allocate(resources, &resources->scratch,
 					      INTEL_AX211_PRPH_SCRATCH_SIZE,
@@ -504,10 +510,9 @@ ax211_buffer_allocate(
 {
 	int error;
 
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(resources->device, size, alignment,
 				       buffer);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
@@ -524,6 +529,7 @@ ax211_buffer_allocate(
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	memset(buffer->address, 0, buffer->size);
 
 	/* Reports successful completion. */
@@ -547,14 +553,14 @@ ax211_firmware_buffers_allocate(
 	/* Checks the ax211 range valid result. */
 	if (!ax211_range_valid(manifest->iml_offset, manifest->iml_length,
 			       length) ||
-	    manifest->iml_length != INTEL_AX211_IML_SIZE)
-
+	    manifest->iml_length != INTEL_AX211_IML_SIZE) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = ax211_buffer_allocate(resources, &resources->iml,
-				      manifest->iml_length, 1U);
+	}
 
 	/* Checks the operation status. */
+	error = ax211_buffer_allocate(resources, &resources->iml,
+				      manifest->iml_length, 1U);
 	if (error != 0)
 		return error;
 	memcpy(resources->iml.address, bytes + manifest->iml_offset,
@@ -562,9 +568,8 @@ ax211_firmware_buffers_allocate(
 	/* Process each remaining element. */
 	for (index = 0U; index < manifest->runtime_count && error == 0;
 	     index++) {
-		section = &manifest->runtime[index];
-
 		/* Handles the section condition. */
+		section = &manifest->runtime[index];
 		if (section->destination == INTEL_AX211_CPU1_CPU2_SEPARATOR) {
 			image_class = INTEL_AX211_DMA_IMAGE_UMAC;
 			continue;
@@ -585,11 +590,12 @@ ax211_firmware_buffers_allocate(
 			error = EINVAL;
 			continue;
 		}
+
 		image = &resources->firmware[resources->firmware_count];
-		error = ax211_buffer_allocate(resources, &image->buffer,
-					      section->length, 1U);
 
 		/* Checks the operation status. */
+		error = ax211_buffer_allocate(resources, &image->buffer,
+					      section->length, 1U);
 		if (error == 0) {
 			memcpy(image->buffer.address,
 			       bytes + section->file_offset, section->length);
@@ -620,21 +626,20 @@ ax211_rx_buffers_allocate(
 	/* Process each remaining element. */
 	for (index = 0U; index < INTEL_AX211_RX_RING_SIZE && error == 0;
 	     index++) {
+		/* Checks the operation status. */
 		error = ax211_buffer_allocate(
 			resources, &resources->rx_buffer[index],
 			INTEL_AX211_RX_BUFFER_SIZE, INTEL_AX211_RX_BUFFER_SIZE);
-
-		/* Checks the operation status. */
 		if (error == 0) {
 			resources->rx_buffer_count++;
 			descriptor =
 				(uint8_t *)resources->rx_transfer.address +
 				index * INTEL_AX211_RX_TRANSFER_DESCRIPTOR_SIZE;
+
+			/* Checks the operation result. */
 			result = drv_intel_ax211_rx_transfer_descriptor_encode(
 				descriptor, (uint16_t)index,
 				resources->rx_buffer[index].device_address);
-
-			/* Checks the operation result. */
 			if (result != INTEL_AX211_OK)
 				error = EINVAL;
 		}
@@ -674,9 +679,8 @@ ax211_scratch_build(
 		       resources->rx_transfer.device_address);
 	/* Process each remaining element. */
 	for (index = 0U; index < resources->firmware_count; index++) {
-		image = &resources->firmware[index];
-
 		/* Handles the image condition. */
+		image = &resources->firmware[index];
 		if (image->image_class == INTEL_AX211_DMA_IMAGE_LMAC) {
 			/* Handles the lmac condition. */
 			if (lmac >= 64U)
@@ -696,6 +700,7 @@ ax211_scratch_build(
 			/* Returns the computed result. */
 			return EINVAL;
 		}
+
 		ax211_put_le64(scratch + offset, image->buffer.device_address);
 	}
 
@@ -779,5 +784,6 @@ ax211_buffer_release(
 		AX211_DMA_SCRUB(buffer->address, buffer->size);
 		drv_dma_free_coherent(resources->device, buffer);
 	}
+
 	memset(buffer, 0, sizeof(*buffer));
 }

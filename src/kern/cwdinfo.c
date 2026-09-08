@@ -48,13 +48,16 @@ cwdinfo_clone(
 
 	/* Takes references to the source paths under the source lock. */
 	irq = spin_lock_irqsave((struct spinlock *)&source->lock);
+
 	if (source->root.p_inode == NULL || source->cwd.p_inode == NULL) {
 		spin_unlock_irqrestore((struct spinlock *)&source->lock, irq);
 		kern_free(copy);
 		return EINVAL;
 	}
+
 	path_set(&copy->root, source->root.p_mount, source->root.p_inode);
 	path_set(&copy->cwd, source->cwd.p_mount, source->cwd.p_inode);
+
 	spin_unlock_irqrestore((struct spinlock *)&source->lock, irq);
 
 	*result = copy;

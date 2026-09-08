@@ -64,6 +64,20 @@ void ws018_pc98_mouse_test_outb(uint16_t, uint8_t);
 #else
 static uint8_t inb(uint16_t port);
 
+/*
+ * Forward declaration.
+ */
+static void outb(uint16_t port, uint8_t value);
+static uint8_t read_nibble(uint8_t control);
+static void read_sample(int32_t *dx, int32_t *dy, uint32_t *buttons);
+static void mouse_publish(int32_t dx, int32_t dy, uint32_t previous, uint32_t buttons);
+static void mouse_service_irq(hal_irq_ack_t acknowledge);
+static void mouse_service(void *argument);
+static int mouse_start(void);
+static void mouse_stop(void);
+static int mouse_input_open(void *context);
+static void mouse_input_close(void *context);
+
 /* Supports the inb operation. */
 static uint8_t
 inb(
@@ -77,8 +91,6 @@ inb(
 	return value;
 }
 
-static void outb(uint16_t port, uint8_t value);
-
 /* Supports the outb operation. */
 static void
 outb(
@@ -88,8 +100,6 @@ outb(
 	__asm__ volatile("outb %0,%w1" : : "a"(value), "Nd"(port));
 }
 #endif
-
-static uint8_t read_nibble(uint8_t control);
 
 /* Supports the read nibble operation. */
 static uint8_t
@@ -106,8 +116,6 @@ read_nibble(
 	/* Returns the computed result. */
 	return function_result;
 }
-
-static void read_sample(int32_t *dx, int32_t *dy, uint32_t *buttons);
 
 /* Supports the read sample operation. */
 static void
@@ -140,8 +148,6 @@ read_sample(
 	if ((state & PORTA_RIGHT_RELEASED) == 0)
 		*buttons |= MOUSE_BUTTON_RIGHT;
 }
-
-static void mouse_publish(int32_t dx, int32_t dy, uint32_t previous, uint32_t buttons);
 
 /* Supports the mouse publish operation. */
 static void
@@ -176,10 +182,9 @@ mouse_publish(
 		drv_input_device_emit(mouse_input, EV_KEY, BTN_MIDDLE,
 				      (buttons & MOUSE_BUTTON_MIDDLE) != 0);
 	}
+
 	drv_input_device_emit(mouse_input, EV_SYN, SYN_REPORT, 0);
 }
-
-static void mouse_service_irq(hal_irq_ack_t acknowledge);
 
 /* Supports the mouse service irq operation. */
 static void
@@ -195,23 +200,23 @@ mouse_service_irq(
 	/* Handles the mouse active condition. */
 	if (mouse_active) {
 		read_sample(&dx, &dy, &buttons);
-		previous = last_buttons;
 
 		/* Handles the dx condition. */
+		previous = last_buttons;
 		if (dx != 0 || dy != 0 || buttons != previous) {
 			last_buttons = buttons;
 			report = 1;
 		}
 	}
+
 	hal_irq_send_eoi(acknowledge);
 
 	/* Handles the report condition. */
 	if (report)
 		mouse_publish(dx, dy, previous, buttons);
+
 	mutex_unlock(&lifecycle_lock);
 }
-
-static void mouse_service(void *argument);
 
 /* Supports the mouse service operation. */
 static void
@@ -230,8 +235,6 @@ mouse_service(
 	}
 }
 
-static int mouse_start(void);
-
 /* Supports the mouse start operation. */
 static int
 mouse_start(
@@ -242,10 +245,9 @@ mouse_start(
 
 	/* Handles the worker started condition. */
 	if (!worker_started) {
+		/* Checks the operation status. */
 		error = kthread_create(mouse_service, NULL, SCHED_PRIOR_LOW,
 				       &worker);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 		worker_started = 1;
@@ -259,8 +261,6 @@ mouse_start(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static void mouse_stop(void);
 
 /* Supports the mouse stop operation. */
 static void
@@ -276,8 +276,6 @@ mouse_stop(
 		last_buttons = 0;
 	}
 }
-
-static int mouse_input_open(void *context);
 
 /* Supports the mouse input open operation. */
 static int
@@ -300,6 +298,7 @@ mouse_input_open(
 	} else {
 		reader_count++;
 	}
+
 	mutex_unlock(&lifecycle_lock);
 
 	/* Reports the failure. */
@@ -309,8 +308,6 @@ mouse_input_open(
 	/* Succeeded. */
 	return 0;
 }
-
-static void mouse_input_close(void *context);
 
 /* Supports the mouse input close operation. */
 static void
@@ -323,6 +320,7 @@ mouse_input_close(
 	/* Handles the reader count condition. */
 	if (reader_count != 0 && --reader_count == 0)
 		mouse_stop();
+
 	mutex_unlock(&lifecycle_lock);
 }
 
@@ -333,7 +331,7 @@ int
 drv_pc98_busmouse_init(
 	void)
 {
-	int function_result;
+	int error;
 	const struct input_device_info mouse_info = {
 		.name = "NEC PC-98 bus mouse",
 		.physical_path = "pc98/ppi-mouse0",
@@ -359,8 +357,8 @@ drv_pc98_busmouse_init(
 	mouse_active = 0;
 
 	/* Obtains the drv input device register result. */
-	function_result = drv_input_device_register(&mouse_info, &mouse_input);
+	error = drv_input_device_register(&mouse_info, &mouse_input);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }

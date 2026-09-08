@@ -76,24 +76,6 @@ static int sd_ioctl(struct disk *disk, unsigned long request, void *argument);
 
 static const struct disk_ops sd_ops = {.submit = sd_submit, .ioctl = sd_ioctl};
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv rpi4 sdhci init operation.
  */
@@ -109,9 +91,9 @@ drv_rpi4_sdhci_init(
 	hal_printf("sdhci: base=%p caps=%x present=%x version=%x\n",
 		   (void *)physical_base, r32(REG_CAPABILITIES),
 		   r32(REG_PRESENT), r16(0xfe));
-	error = controller_init();
 
 	/* Checks the operation status. */
+	error = controller_init();
 	if (error) {
 		hal_printf("sdhci: init error=%u status=%x present=%x\n",
 			   (unsigned)error, r32(REG_INT_STATUS),
@@ -120,6 +102,7 @@ drv_rpi4_sdhci_init(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	unit.disk = disk_alloc();
 
 	/* Handles the unit condition. */
@@ -139,15 +122,16 @@ drv_rpi4_sdhci_init(
 	unit.disk->d_max_transfer_blocks = 1;
 	unit.disk->d_ops = &sd_ops;
 	unit.disk->d_data = &unit;
-	error = disk_create(unit.disk);
 
 	/* Checks the operation status. */
+	error = disk_create(unit.disk);
 	if (error) {
 		unit.disk = 0;
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	hal_printf("sdhci: mmcblk0 ready (%s addressing)\n",
 		   unit.high_capacity ? "block" : "byte");
 
@@ -211,6 +195,7 @@ controller_init(
 		if (counter() >= deadline)
 			return ETIMEDOUT;
 	}
+
 	w8(REG_POWER_CONTROL, 0x0fU);
 	w8(REG_TIMEOUT_CONTROL, 0x0eU);
 	w32(REG_INT_ENABLE, 0xffffffffU);
@@ -231,22 +216,22 @@ controller_init(
 		/* Returns the computed result. */
 		return error;
 	}
-	error = command(8, 0x1aaU, CMD_RESP_SHORT | CMD_CRC | CMD_INDEX,
-			&response);
 
 	/* Checks the operation status. */
+	error = command(8, 0x1aaU, CMD_RESP_SHORT | CMD_CRC | CMD_INDEX,
+			&response);
 	if (error) {
 		hal_printf("sdhci: CMD8 error=%u irq=%x\n", (unsigned)error,
 			   last_error_status);
 	} else {
 		hal_printf("sdhci: CMD8 response=%x\n", response);
 	}
+
 	unit.rca = 0;
 	deadline = counter() + frequency() * 2U;
 	do {
-		error = app_command(41, 0x40300000U, CMD_RESP_SHORT, &response);
-
 		/* Checks the operation status. */
+		error = app_command(41, 0x40300000U, CMD_RESP_SHORT, &response);
 		if (error == 0 && (response & 0x80000000U))
 			break;
 	} while (counter() < deadline);
@@ -259,6 +244,7 @@ controller_init(
 		/* Returns the computed result. */
 		return ETIMEDOUT;
 	}
+
 	unit.high_capacity = (response & 0x40000000U) != 0;
 
 	/* Checks the operation status. */
@@ -277,6 +263,7 @@ controller_init(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	unit.rca = response >> 16;
 
 	/* Handles the unit condition. */
@@ -304,10 +291,10 @@ controller_init(
 	/* Checks the operation status. */
 	if (!unit.high_capacity &&
 	    (error = command(16, 512, CMD_RESP_SHORT | CMD_CRC | CMD_INDEX,
-			     0)) != 0)
-
+			     0)) != 0) {
 		/* Returns the computed result. */
 		return error;
+	}
 
 	/* Checks the operation status. */
 	if ((error = set_clock(25000000U)) != 0) {
@@ -407,9 +394,8 @@ set_clock(
 	w16(REG_CLOCK_CONTROL, (uint16_t)(encoded | 1U));
 	deadline = counter() + frequency();
 	do {
-		clock = r16(REG_CLOCK_CONTROL);
-
 		/* Handles the clock condition. */
+		clock = r16(REG_CLOCK_CONTROL);
 		if (clock & 2U)
 			break;
 	} while (counter() < deadline);
@@ -446,17 +432,17 @@ command(
 	/* Checks the active flags. */
 	if (flags & CMD_DATA)
 		inhibit |= PRESENT_DATA_INHIBIT;
-	error = wait_bits(REG_PRESENT, inhibit, 0);
 
 	/* Checks the operation status. */
+	error = wait_bits(REG_PRESENT, inhibit, 0);
 	if (error)
 		return error;
 	w32(REG_INT_STATUS, 0xffffffffU);
 	w32(REG_ARGUMENT, argument);
 	w16(REG_COMMAND, (uint16_t)((index << 8) | flags));
-	error = wait_interrupt(INT_CMD_COMPLETE);
 
 	/* Checks the operation status. */
+	error = wait_interrupt(INT_CMD_COMPLETE);
 	if (error)
 		return error;
 
@@ -497,9 +483,8 @@ wait_interrupt(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		status = r32(REG_INT_STATUS);
-
 		/* Checks the operation status. */
+		status = r32(REG_INT_STATUS);
 		if (status & (INT_ERROR | INT_ERROR_MASK)) {
 			last_error_status = status;
 			w32(REG_INT_STATUS, status);
@@ -564,10 +549,10 @@ transfer_block(
 	w16(REG_BLOCK_SIZE, 512);
 	w16(REG_BLOCK_COUNT, 1);
 	w16(REG_TRANSFER_MODE, write ? 0 : XFER_READ);
-	error = command(write ? 24U : 17U, argument,
-			CMD_RESP_SHORT | CMD_CRC | CMD_INDEX | CMD_DATA, 0);
 
 	/* Checks the operation status. */
+	error = command(write ? 24U : 17U, argument,
+			CMD_RESP_SHORT | CMD_CRC | CMD_INDEX | CMD_DATA, 0);
 	if (error)
 		return error;
 
@@ -623,6 +608,7 @@ sd_submit(
 			(unsigned)bio->b_op, bio->b_mapped_block,
 			bio->b_block_count, error, r32(REG_INT_STATUS));
 	}
+
 	bio_complete(bio, error, error ? 0 : (size_t)bio->b_block_count * 512U);
 	(void)disk;
 

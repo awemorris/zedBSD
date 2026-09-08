@@ -87,9 +87,9 @@ kernel_timer_handler(
 	/* Advances the shared tick from the boot CPU only. */
 	if (cpu == 0)
 		(void)atomic_u64_fetch_add_relaxed(&kernel_ticks, 1U);
-	now = atomic_u64_load_acquire(&kernel_ticks);
 
 	/* Expires process timers from the boot CPU only. */
+	now = atomic_u64_load_acquire(&kernel_ticks);
 	if (cpu == 0)
 		process_timer_tick(now);
 
@@ -267,9 +267,9 @@ kern_timespec_add(
 	/* Adds the fields and normalizes the nanosecond carry. */
 	result->tv_sec = a->tv_sec + b->tv_sec;
 	result->tv_nsec = a->tv_nsec + b->tv_nsec;
-	error = kern_timespec_normalize(result);
 
 	/* Reports why the normalization failed. */
+	error = kern_timespec_normalize(result);
 	if (error != 0)
 		return error;
 
@@ -300,9 +300,9 @@ kern_timespec_sub(
 	/* Subtracts by adding the negated subtrahend. */
 	negated.tv_sec = -b->tv_sec;
 	negated.tv_nsec = -b->tv_nsec;
-	error = kern_timespec_add(a, &negated, result);
 
 	/* Reports why the addition failed. */
+	error = kern_timespec_add(a, &negated, result);
 	if (error != 0)
 		return error;
 
@@ -359,10 +359,10 @@ kern_duration_to_ticks_ceil(
 		return EOVERFLOW;
 
 	/* Rounds the nanosecond fraction up to whole ticks. */
-	fraction = ((uint64_t)duration->tv_nsec * KERN_CLOCK_HZ +
-	    KERN_NSEC_PER_SEC - 1U) / KERN_NSEC_PER_SEC;
 
 	/* Rejects a total that would overflow the tick count. */
+	fraction = ((uint64_t)duration->tv_nsec * KERN_CLOCK_HZ +
+	    KERN_NSEC_PER_SEC - 1U) / KERN_NSEC_PER_SEC;
 	if (seconds * KERN_CLOCK_HZ > UINT64_MAX - fraction)
 		return EOVERFLOW;
 
@@ -451,6 +451,7 @@ kern_clock_gettime(
 			if (before == after)
 				break;
 		}
+
 		error = kern_timespec_add(&monotonic, &offset, &value);
 		if (error != 0)
 			return error;

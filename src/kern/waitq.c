@@ -125,6 +125,7 @@ waitq_sleep(
 			thread->stop_interrupted = 1;
 			return EINTR;
 		}
+
 		if (pending)
 			return EINTR;
 
@@ -292,6 +293,7 @@ waitq_remove(
 			token->queue = NULL;
 			return;
 		}
+
 		previous = *link;
 	}
 }

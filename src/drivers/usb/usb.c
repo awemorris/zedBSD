@@ -327,9 +327,9 @@ drv_usb_shutdown(
 	uint64_t generation;
 
 	usb_topology_lock();
-	generation = ++usb_shutdown_generation;
 
 	/* Handles the generation condition. */
+	generation = ++usb_shutdown_generation;
 	if (generation == 0)
 		generation = ++usb_shutdown_generation;
 	usb_topology_unlock();
@@ -354,6 +354,7 @@ drv_usb_shutdown(
 			/* Returns the computed result. */
 			return;
 		}
+
 		bus->lifecycle_claimed = 1U;
 		bus->shutdown_attempt_generation = generation;
 
@@ -376,9 +377,8 @@ drv_usb_shutdown(
 		/* Process each linked entry. */
 		for (device = bus->devices; device != NULL;
 		     device = device->next) {
-			error = detach_interfaces(device);
-
 			/* Checks the operation status. */
+			error = detach_interfaces(device);
 			if (error != 0) {
 				hal_printf("usb%u: device %u driver shutdown "
 					   "failed (%d); class resources "
@@ -395,9 +395,8 @@ drv_usb_shutdown(
 		/* Process each linked entry. */
 		for (device = bus->devices; device != NULL;
 		     device = device->next) {
-			error = device_quiesce(bus, device);
-
 			/* Checks the operation status. */
+			error = device_quiesce(bus, device);
 			if (error != 0)
 				retain = 1;
 		}
@@ -408,11 +407,11 @@ drv_usb_shutdown(
 		 * The bus claim prevents concurrent unregister/free while the
 		 * pointer is borrowed. */
 		usb_topology_unlock();
+
+		/* Checks the operation status. */
 		error = bus->hcd->ops->quiesce == NULL
 				? 0
 				: bus->hcd->ops->quiesce(bus->hcd);
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			hal_printf("usb%u: host controller stop failed\n",
 				   bus->number);
@@ -485,13 +484,13 @@ drv_usb_hcd_register(
 	    ((hcd->capabilities & DRV_USB_HCD_CAP_SHARED_STAGING) != 0 &&
 	     (hcd->capabilities & DRV_USB_HCD_CAP_TRANSFER_RESERVE) == 0) ||
 	    (((hcd->capabilities & DRV_USB_HCD_CAP_TRANSFER_RESERVE) != 0) !=
-	     (hcd->ops->urb_reserve != NULL)))
-
+	     (hcd->ops->urb_reserve != NULL))) {
 		/* Returns the computed result. */
 		return EINVAL;
-	bus = hal_malloc(sizeof(*bus));
+	}
 
 	/* Handles the bus availability. */
+	bus = hal_malloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
 	memset(bus, 0, sizeof(*bus));
@@ -506,6 +505,7 @@ drv_usb_hcd_register(
 		/* Returns the computed result. */
 		return EOVERFLOW;
 	}
+
 	bus->ports = hal_malloc(((size_t)hcd->root_port_count + 1U) *
 				sizeof(*bus->ports));
 
@@ -516,6 +516,7 @@ drv_usb_hcd_register(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	memset(bus->ports, 0,
 	       ((size_t)hcd->root_port_count + 1U) * sizeof(*bus->ports));
 	bus->root_hub = allocate_root_hub(bus);
@@ -528,9 +529,9 @@ drv_usb_hcd_register(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
-	error = hcd->ops->start(hcd);
 
 	/* Checks the operation status. */
+	error = hcd->ops->start(hcd);
 	if (error != 0) {
 		hal_free(bus->root_hub);
 		hal_free(bus->ports);
@@ -539,6 +540,7 @@ drv_usb_hcd_register(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	usb_topology_lock();
 	bus->next = usb_buses;
 	usb_buses = bus;
@@ -579,6 +581,7 @@ drv_usb_hcd_unregister(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		bus->lifecycle_claimed = 1U;
 		hal_atomic_store_release(&bus->stopping, 1U);
 		device_begin_disconnect(bus->root_hub);
@@ -591,9 +594,8 @@ drv_usb_hcd_unregister(
 
 		/* Handles the quiesce availability. */
 		if (hcd->ops->quiesce != NULL) {
-			error = hcd->ops->quiesce(hcd);
-
 			/* Checks the operation status. */
+			error = hcd->ops->quiesce(hcd);
 			if (error != 0) {
 				usb_topology_lock();
 
@@ -607,6 +609,7 @@ drv_usb_hcd_unregister(
 				return error;
 			}
 		}
+
 		usb_topology_lock();
 		state = hal_atomic_load_acquire(&bus->root_hub->lifecycle);
 		/* Continue until the operation reaches a terminal state. */
@@ -635,6 +638,7 @@ drv_usb_hcd_unregister(
 				    state | USB_DEVICE_LIFECYCLE_FINALIZING))
 				break;
 		}
+
 		usb_topology_unlock();
 		hcd->ops->stop(hcd);
 		usb_topology_lock();
@@ -656,6 +660,7 @@ drv_usb_hcd_unregister(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	usb_topology_unlock();
 
 	/* Returns the computed result. */
@@ -680,10 +685,10 @@ drv_usb_decode_superspeed_endpoint_companion(
 
 	/* Handles the bytes condition. */
 	if (bytes[0] != sizeof(descriptor) ||
-	    bytes[1] != DRV_USB_DESCRIPTOR_SUPERSPEED_ENDPOINT_COMPANION)
-
+	    bytes[1] != DRV_USB_DESCRIPTOR_SUPERSPEED_ENDPOINT_COMPANION) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	descriptor.length = bytes[0];
 	descriptor.descriptor_type = bytes[1];
 	descriptor.maximum_burst = bytes[2];
@@ -712,9 +717,9 @@ drv_usb_hcd_root_hub_changed(
 	unsigned port;
 
 	usb_topology_lock();
-	bus = find_hcd_bus(hcd);
 
 	/* Checks the hal atomic load acquire result. */
+	bus = find_hcd_bus(hcd);
 	if (bus == NULL || hal_atomic_load_acquire(&bus->stopping) != 0 ||
 	    hcd->ops->root_hub_control == NULL) {
 		usb_topology_unlock();
@@ -722,26 +727,27 @@ drv_usb_hcd_root_hub_changed(
 		/* Returns the computed result. */
 		return;
 	}
+
 	/* Process each remaining element. */
 	for (port = 1; port <= hcd->root_port_count; port++) {
 		status = 0;
 
 		replace_generation = 0;
 
-		error = root_port_status(hcd, port, &status);
-
 		/* Checks the operation status. */
+		error = root_port_status(hcd, port, &status);
 		if (error != 0)
 			continue;
-		error = root_port_acknowledge_changes(hcd, port, status);
 
 		/* Checks the operation status. */
+		error = root_port_acknowledge_changes(hcd, port, status);
 		if (error != 0) {
 			hal_printf("usb%u: port %u change acknowledge failed "
 				   "(%d)\n",
 				   bus->number, port, error);
 			continue;
 		}
+
 		connected = (status & 1U) != 0;
 		enabled = (status & 2U) != 0;
 		connection_changed = (status & (1U << 16)) != 0;
@@ -755,6 +761,7 @@ drv_usb_hcd_root_hub_changed(
 			usb_generation_next(
 				&bus->ports[port].connection_generation);
 		}
+
 		port_disabled = connected && !enabled &&
 				(!initial &&
 				 (bus->ports[port].enabled || enable_changed));
@@ -821,6 +828,7 @@ drv_usb_hcd_root_hub_changed(
 				   bus->number, port, error);
 		}
 	}
+
 	usb_topology_unlock();
 }
 
@@ -1109,16 +1117,16 @@ int
 drv_usb_device_is_tearing_down(
 	const struct drv_usb_device *device)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		device != NULL && (hal_atomic_load_acquire(&device->lifecycle) &
 				   (USB_DEVICE_LIFECYCLE_DISCONNECTING |
 				    USB_DEVICE_LIFECYCLE_FINALIZING)) != 0;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -1211,9 +1219,9 @@ drv_usb_device_reset(
 	 * all-or-nothing preflight condition for this synchronous API. */
 	if (!atomic_try_acquire_zero(&usb_topology_gate))
 		return EBUSY;
-	bus = device->bus;
 
 	/* Handles the bus availability. */
+	bus = device->bus;
 	if (bus == NULL || device == bus->root_hub || device->parent == NULL) {
 		error = EINVAL;
 		goto out;
@@ -1233,9 +1241,9 @@ drv_usb_device_reset(
 		error = ENODEV;
 		goto out;
 	}
-	error = root_port_status(bus->hcd, device->port, &port_status);
 
 	/* Checks the operation status. */
+	error = root_port_status(bus->hcd, device->port, &port_status);
 	if (error != 0)
 		goto out;
 
@@ -1246,6 +1254,7 @@ drv_usb_device_reset(
 		error = ENODEV;
 		goto out;
 	}
+
 	device_generation = device->generation;
 	port_generation = bus->ports[device->port].connection_generation;
 
@@ -1254,6 +1263,7 @@ drv_usb_device_reset(
 		error = EBUSY;
 		goto out;
 	}
+
 	binding_closed = 1;
 
 	/* Checks the atomic try acquire zero result. */
@@ -1261,22 +1271,23 @@ drv_usb_device_reset(
 		error = EBUSY;
 		goto out;
 	}
+
 	selection_locked = 1;
 	configuration = device_active_configuration(device);
-	error = configuration_effective_owner(configuration, &effective_owner);
 
 	/* Checks the operation status. */
+	error = configuration_effective_owner(configuration, &effective_owner);
 	if (error != 0)
 		goto out;
 	(void)effective_owner;
-	error = configuration_close_io(configuration, closed, &closed_count);
 
 	/* Checks the operation status. */
+	error = configuration_close_io(configuration, closed, &closed_count);
 	if (error != 0)
 		goto out;
-	error = device_control_try_lock(device);
 
 	/* Checks the operation status. */
+	error = device_control_try_lock(device);
 	if (error != 0)
 		goto out;
 	control_locked = 1;
@@ -1294,9 +1305,9 @@ drv_usb_device_reset(
 				: EBUSY;
 		goto out;
 	}
-	error = device_disable_active_endpoints(device);
 
 	/* Checks the operation status. */
+	error = device_disable_active_endpoints(device);
 	if (error != 0)
 		goto out;
 
@@ -1305,10 +1316,10 @@ drv_usb_device_reset(
 	 * are still intact.  Recheck the captured physical generation
 	 * immediately before the destructive boundary and compensate this
 	 * invocation on failure. */
-	error = device_reset_connection_check(bus, device, device_generation,
-					      port_generation);
 
 	/* Checks the operation status. */
+	error = device_reset_connection_check(bus, device, device_generation,
+					      port_generation);
 	if (error != 0) {
 		identity_error = error;
 		proof_error = identity_error == ENODEV
@@ -1343,6 +1354,7 @@ drv_usb_device_reset(
 			device_quarantine_recovery(
 				device, "device reset identity", error);
 		}
+
 		goto out;
 	}
 
@@ -1351,9 +1363,8 @@ drv_usb_device_reset(
 	 * boundary.  Do not use device_quiesce(): that helper is for terminal
 	 * teardown and may relink the object or change its quarantine state. */
 	if (bus->hcd->ops->device_quiesce != NULL) {
-		error = bus->hcd->ops->device_quiesce(bus->hcd, device);
-
 		/* Checks the operation status. */
+		error = bus->hcd->ops->device_quiesce(bus->hcd, device);
 		if (error != 0)
 			goto fail_destructive;
 
@@ -1374,10 +1385,9 @@ drv_usb_device_reset(
 	 * port. */
 	if (bus->hcd->ops->device_quiesce != NULL ||
 	    bus->hcd->ops->device_disable != NULL) {
+		/* Checks the operation status. */
 		error = device_reset_connection_check(
 			bus, device, device_generation, port_generation);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto fail_destructive;
 	}
@@ -1391,10 +1401,10 @@ drv_usb_device_reset(
 	/* Checks the operation status. */
 	if (error != 0)
 		goto fail_destructive;
-	error = device_reset_connection_check(bus, device, device_generation,
-					      port_generation);
 
 	/* Checks the operation status. */
+	error = device_reset_connection_check(bus, device, device_generation,
+					      port_generation);
 	if (error != 0)
 		goto fail_destructive;
 	bus->ports[device->port].connected = 1U;
@@ -1405,18 +1415,17 @@ drv_usb_device_reset(
 
 	/* Handles the device enable availability. */
 	if (bus->hcd->ops->device_enable != NULL) {
-		error = bus->hcd->ops->device_enable(bus->hcd, device);
-
 		/* Checks the operation status. */
+		error = bus->hcd->ops->device_enable(bus->hcd, device);
 		if (error != 0) {
 			device->address = old_address;
 			goto fail_destructive;
 		}
 	}
-	error = device_reset_connection_check(bus, device, device_generation,
-					      port_generation);
 
 	/* Checks the operation status. */
+	error = device_reset_connection_check(bus, device, device_generation,
+					      port_generation);
 	if (error != 0)
 		goto fail_destructive;
 
@@ -1443,25 +1452,25 @@ drv_usb_device_reset(
 		goto fail_destructive;
 	device->state = DRV_USB_STATE_ADDRESS;
 	usb_delay_ticks(USB_ADDRESS_RECOVERY_TICKS);
+
+	/* Checks the operation status. */
 	error = device_reset_connection_check(bus, device, device_generation,
 					      port_generation);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail_destructive;
-	error = configuration_restore(device, configuration);
 
 	/* Checks the operation status. */
+	error = configuration_restore(device, configuration);
 	if (error != 0)
 		goto fail_destructive;
 
 	/*
  * This final non-acknowledging sample is both the post-configuration
 	 * seam and the publication barrier for all retained binding objects. */
-	error = device_reset_connection_check(bus, device, device_generation,
-					      port_generation);
 
 	/* Checks the operation status. */
+	error = device_reset_connection_check(bus, device, device_generation,
+					      port_generation);
 	if (error != 0)
 		goto fail_destructive;
 	device_publish_configuration(device, configuration);
@@ -1525,10 +1534,10 @@ drv_usb_device_set_configuration(
 	/* Handles the device availability. */
 	if (device == NULL || device->parent == NULL ||
 	    (device->state != DRV_USB_STATE_ADDRESS &&
-	     device->state != DRV_USB_STATE_CONFIGURED))
-
+	     device->state != DRV_USB_STATE_CONFIGURED)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the device is disconnecting condition. */
 	if (device_is_disconnecting(device) || device_is_quarantined(device))
@@ -1564,9 +1573,9 @@ drv_usb_device_set_configuration(
 		error = ENODEV;
 		goto out;
 	}
-	old = device_active_configuration(device);
 
 	/* Handles the old condition. */
+	old = device_active_configuration(device);
 	if (old == target) {
 		error = 0;
 		goto out;
@@ -1581,29 +1590,28 @@ drv_usb_device_set_configuration(
 		error = EBUSY;
 		goto out;
 	}
-	error = device_control_try_lock(device);
 
 	/* Checks the operation status. */
+	error = device_control_try_lock(device);
 	if (error != 0)
 		goto out;
 	control_locked = 1;
 
 	/* Handles the old availability. */
 	if (old != NULL) {
-		error = configuration_disable_endpoints(old);
-
 		/* Checks the operation status. */
+		error = configuration_disable_endpoints(old);
 		if (error != 0)
 			goto out;
 	}
+
+	/* Checks the operation status. */
 	error = usb_control_locked(device,
 				   DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
 					   DRV_USB_RECIP_DEVICE,
 				   USB_REQ_SET_CONFIGURATION,
 				   (uint16_t)configuration_value, 0, NULL, 0,
 				   USB_CONTROL_TIMEOUT_MS, &actual);
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		/*
  * STALL rejects the request without changing the selected
@@ -1614,6 +1622,7 @@ drv_usb_device_set_configuration(
 						    error);
 			goto out;
 		}
+
 		rollback_error =
 			old == NULL ? 0 : configuration_enable_endpoints(old);
 
@@ -1622,19 +1631,19 @@ drv_usb_device_set_configuration(
 			device_quarantine_selection(device, "set-configuration",
 						    rollback_error);
 		}
+
 		goto out;
 	}
 
 	/* Handles the target availability. */
 	if (target != NULL) {
 		configuration_select_defaults(target);
-		error = configuration_enable_endpoints(target);
 
 		/* Checks the operation status. */
+		error = configuration_enable_endpoints(target);
 		if (error != 0) {
-			rollback_error = 0;
-
 			/* Checks the device is quarantined result. */
+			rollback_error = 0;
 			if (!device_is_quarantined(device)) {
 				rollback_error =
 					configuration_restore(device, old);
@@ -1646,11 +1655,12 @@ drv_usb_device_set_configuration(
 					device, "configuration-enable",
 					rollback_error);
 			}
+
 			goto out;
 		}
-		error = configuration_reset_endpoints(target);
 
 		/* Checks the operation status. */
+		error = configuration_reset_endpoints(target);
 		if (error != 0) {
 			/*
  * SET_CONFIGURATION has succeeded; schedule
@@ -1661,6 +1671,7 @@ drv_usb_device_set_configuration(
 			goto out;
 		}
 	}
+
 	device_publish_configuration(device, target);
 	device->interfaces = target == NULL ? NULL : target->interfaces;
 	device->state = target == NULL ? DRV_USB_STATE_ADDRESS
@@ -1707,44 +1718,42 @@ drv_usb_device_get_string(
 
 	/* Handles the device availability. */
 	if (device == NULL || index == 0 || index > UINT8_MAX ||
-	    language > UINT16_MAX || buffer == NULL || capacity == 0)
-
+	    language > UINT16_MAX || buffer == NULL || capacity == 0) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	buffer[0] = '\0';
-	selected_language = (uint16_t)language;
 
 	/* Handles the selected language condition. */
+	selected_language = (uint16_t)language;
 	if (selected_language == 0) {
+		/* Checks the operation status. */
 		error = usb_string_descriptor(device, 0, 0, descriptor,
 					      &descriptor_length);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 
 		/* Handles the descriptor length condition. */
 		if (descriptor_length < 4U)
 			return EILSEQ;
-		selected_language = (uint16_t)(descriptor[2] |
-					       ((uint16_t)descriptor[3] << 8));
 
 		/* Handles the selected language condition. */
+		selected_language = (uint16_t)(descriptor[2] |
+					       ((uint16_t)descriptor[3] << 8));
 		if (selected_language == 0)
 			return EILSEQ;
 	}
-	error = usb_string_descriptor(device, (uint8_t)index, selected_language,
-				      descriptor, &descriptor_length);
 
 	/* Checks the operation status. */
+	error = usb_string_descriptor(device, (uint8_t)index, selected_language,
+				      descriptor, &descriptor_length);
 	if (error != 0)
 		return error;
 	/* Process each remaining element. */
 	for (offset = 2; offset < descriptor_length; offset += 2U) {
+		/* Handles the codepoint condition. */
 		codepoint = descriptor[offset] |
 			    ((uint32_t)descriptor[offset + 1U] << 8);
-
-		/* Handles the codepoint condition. */
 		if (codepoint >= 0xd800U && codepoint <= 0xdbffU) {
 			/* Checks the current offset. */
 			if (offset + 3U >= descriptor_length) {
@@ -1753,16 +1762,17 @@ drv_usb_device_get_string(
 				/* Returns the computed result. */
 				return EILSEQ;
 			}
-			low = descriptor[offset + 2U] |
-			      ((uint32_t)descriptor[offset + 3U] << 8);
 
 			/* Handles the low condition. */
+			low = descriptor[offset + 2U] |
+			      ((uint32_t)descriptor[offset + 3U] << 8);
 			if (low < 0xdc00U || low > 0xdfffU) {
 				buffer[0] = '\0';
 
 				/* Returns the computed result. */
 				return EILSEQ;
 			}
+
 			codepoint = 0x10000U + ((codepoint - 0xd800U) << 10) +
 				    (low - 0xdc00U);
 			offset += 2U;
@@ -1772,9 +1782,9 @@ drv_usb_device_get_string(
 			/* Returns the computed result. */
 			return EILSEQ;
 		}
-		error = utf8_append(buffer, capacity, &used, codepoint);
 
 		/* Checks the operation status. */
+		error = utf8_append(buffer, capacity, &used, codepoint);
 		if (error != 0) {
 			buffer[0] = '\0';
 
@@ -1782,6 +1792,7 @@ drv_usb_device_get_string(
 			return error;
 		}
 	}
+
 	buffer[used] = '\0';
 
 	/* Reports successful completion. */
@@ -1830,17 +1841,19 @@ drv_usb_urb_alloc(
 			/* Reports that no result is available. */
 			return NULL;
 		}
+
 		atomic_store_release(&device->selection_gate, 0U);
 	}
-	urb = hal_malloc(sizeof(*urb));
 
 	/* Handles the urb availability. */
+	urb = hal_malloc(sizeof(*urb));
 	if (urb == NULL) {
 		device_urb_put(device);
 
 		/* Reports that no result is available. */
 		return NULL;
 	}
+
 	memset(urb, 0, sizeof(*urb));
 	refcount_init(&urb->references, 1U);
 	urb->device = device;
@@ -1860,6 +1873,7 @@ drv_usb_urb_alloc(
 			/* Reports that no result is available. */
 			return NULL;
 		}
+
 		memset(urb->iso_packets, 0,
 		       sizeof(*urb->iso_packets) * iso_count);
 	}
@@ -1888,7 +1902,7 @@ drv_usb_urb_reserve_sync(
 	struct drv_usb_urb *u,
 	size_t capacity)
 {
-	int function_result;
+	int error;
 	void *buffer;
 
 	/* Handles the u availability. */
@@ -1897,10 +1911,10 @@ drv_usb_urb_reserve_sync(
 
 	/* Checks the hal atomic load acquire result. */
 	if (hal_atomic_load_acquire(&u->hcd_owned) != 0 ||
-	    hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING)
-
+	    hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING) {
 		/* Returns the computed result. */
 		return EBUSY;
+	}
 
 	/* Handles the capacity condition. */
 	if (capacity <= u->sync_capacity)
@@ -1909,14 +1923,14 @@ drv_usb_urb_reserve_sync(
 	/* Handles the u condition. */
 	if (u->sync_shared) {
 		/* Obtains the drv usb urb reserve transfer result. */
-		function_result = drv_usb_urb_reserve_transfer(u, capacity);
+		error = drv_usb_urb_reserve_transfer(u, capacity);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
-	buffer = hal_malloc(capacity);
 
 	/* Handles the buffer availability. */
+	buffer = hal_malloc(capacity);
 	if (buffer == NULL)
 		return ENOMEM;
 	io_stats_record(IO_USB_BUFFER_ALLOC, capacity);
@@ -1954,18 +1968,18 @@ drv_usb_urb_reserve_transfer(
 
 	/* Checks the hal atomic load acquire result. */
 	if (hal_atomic_load_acquire(&urb->hcd_owned) != 0 ||
-	    hal_atomic_load_acquire(&urb->status) == DRV_USB_URB_PENDING)
-
+	    hal_atomic_load_acquire(&urb->status) == DRV_USB_URB_PENDING) {
 		/* Returns the computed result. */
 		return EBUSY;
-	hcd = urb->device->bus->hcd;
+	}
 
 	/* Handles the urb reserve availability. */
+	hcd = urb->device->bus->hcd;
 	if (!(hcd->capabilities & DRV_USB_HCD_CAP_TRANSFER_RESERVE) ||
-	    hcd->ops->urb_reserve == NULL || hcd->ops->urb_unreserve == NULL)
-
+	    hcd->ops->urb_reserve == NULL || hcd->ops->urb_unreserve == NULL) {
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
+	}
 
 	/* Handles the capacity condition. */
 	if (capacity > DRV_USB_TRANSFER_RESERVE_MAX_SIZE)
@@ -1974,29 +1988,29 @@ drv_usb_urb_reserve_transfer(
 	/* Handles the capacity condition. */
 	if (capacity <= urb->transfer_capacity)
 		return 0;
-	shared = (hcd->capabilities & DRV_USB_HCD_CAP_SHARED_STAGING) != 0;
 
 	/* Handles the urb reserve buffer availability. */
+	shared = (hcd->capabilities & DRV_USB_HCD_CAP_SHARED_STAGING) != 0;
 	if (shared && hcd->ops->urb_reserve_buffer == NULL)
 		return EOPNOTSUPP;
 
 	/*
  * Keeps the old core staging intact until both replacement allocations
 	 * succeed. */
-	buffer = NULL;
 
 	/* Handles the shared condition. */
+	buffer = NULL;
 	if (!shared && capacity > urb->sync_capacity) {
-		buffer = hal_malloc(capacity);
-
 		/* Handles the buffer availability. */
+		buffer = hal_malloc(capacity);
 		if (buffer == NULL)
 			return ENOMEM;
 	}
+
 	reservation = NULL;
-	error = hcd->ops->urb_reserve(hcd, urb, capacity, &reservation);
 
 	/* Checks the operation status. */
+	error = hcd->ops->urb_reserve(hcd, urb, capacity, &reservation);
 	if (error != 0) {
 		hal_free(buffer);
 
@@ -2008,14 +2022,13 @@ drv_usb_urb_reserve_transfer(
 	if (reservation == NULL)
 		__builtin_trap();
 	shared_buffer = NULL;
-	shared_capacity = 0;
 
 	/* Handles the shared condition. */
+	shared_capacity = 0;
 	if (shared) {
+		/* Handles the shared buffer availability. */
 		shared_buffer = hcd->ops->urb_reserve_buffer(hcd, reservation,
 							     &shared_capacity);
-
-		/* Handles the shared buffer availability. */
 		if (shared_buffer == NULL || shared_capacity < capacity) {
 			hcd->ops->urb_unreserve(hcd, reservation);
 
@@ -2032,6 +2045,7 @@ drv_usb_urb_reserve_transfer(
 		io_stats_record(IO_USB_TRANSFER_RESERVE_FREE,
 				urb->transfer_capacity);
 	}
+
 	urb->transfer_reservation = reservation;
 	urb->transfer_capacity = capacity;
 	io_stats_record(IO_USB_TRANSFER_RESERVE_ALLOC, capacity);
@@ -2094,10 +2108,10 @@ drv_usb_urb_setup(
 
 	/* Checks the hal atomic load acquire result. */
 	if (hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING ||
-	    hal_atomic_load_acquire(&u->hcd_owned) != 0)
-
+	    hal_atomic_load_acquire(&u->hcd_owned) != 0) {
 		/* Returns the computed result. */
 		return EBUSY;
+	}
 
 	/* Handles the u condition. */
 	if (u->transfer_capacity != 0 && n > u->transfer_capacity)
@@ -2116,6 +2130,7 @@ drv_usb_urb_setup(
 		memcpy(u->sync_buffer, b, n);
 		io_stats_record(IO_USB_STAGING_COPY, n);
 	}
+
 	u->length = n;
 	u->flags = f;
 	u->timeout_ms = t;
@@ -2147,13 +2162,13 @@ drv_usb_urb_setup_control_flags(
 
 	/* Handles the u availability. */
 	if (u == NULL || r == NULL ||
-	    u->endpoint->type != DRV_USB_TRANSFER_CONTROL)
-
+	    u->endpoint->type != DRV_USB_TRANSFER_CONTROL) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = drv_usb_urb_setup(u, b, n, f, t, cb, a);
+	}
 
 	/* Checks the operation status. */
+	error = drv_usb_urb_setup(u, b, n, f, t, cb, a);
 	if (error == 0)
 		u->control = *r;
 
@@ -2178,14 +2193,14 @@ drv_usb_urb_setup_control(
 	drv_usb_urb_callback_t cb,
 	void *a)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv usb urb setup control flags result. */
-	function_result =
+	error =
 		drv_usb_urb_setup_control_flags(u, r, b, n, 0, t, cb, a);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -2199,10 +2214,10 @@ drv_usb_urb_setup_isochronous(
 {
 	/* Handles the u condition. */
 	if (!u || !p || n != u->iso_packet_count ||
-	    u->endpoint->type != DRV_USB_TRANSFER_ISOCHRONOUS)
-
+	    u->endpoint->type != DRV_USB_TRANSFER_ISOCHRONOUS) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memcpy(u->iso_packets, p, n * sizeof(*p));
 
 	/* Reports successful completion. */
@@ -2235,9 +2250,9 @@ drv_usb_urb_submit(
 	/* Checks the hal atomic load acquire result. */
 	if (hal_atomic_load_acquire(&urb->status) == DRV_USB_URB_PENDING)
 		return EINVAL;
-	device = urb->device;
 
 	/* Checks the hal atomic load acquire result. */
+	device = urb->device;
 	if (hal_atomic_load_acquire(&device->bus->stopping) != 0)
 		return EBUSY;
 
@@ -2248,9 +2263,9 @@ drv_usb_urb_submit(
 	/* Checks the endpoint is halted result. */
 	if (endpoint_is_halted(device, urb->endpoint))
 		return EPIPE;
-	error = io_gate_enter(&device->submit_gate);
 
 	/* Checks the operation status. */
+	error = io_gate_enter(&device->submit_gate);
 	if (error != 0) {
 		/* Computes the function result. */
 		function_result = device_is_disconnecting(device) ||
@@ -2261,14 +2276,14 @@ drv_usb_urb_submit(
 		/* Returns the computed result. */
 		return function_result;
 	}
-	error = urb_hcd_get(urb);
 
 	/* Checks the operation status. */
+	error = urb_hcd_get(urb);
 	if (error != 0)
 		goto out_submit;
-	error = urb_admission_get(urb, &submitting_owner);
 
 	/* Checks the operation status. */
+	error = urb_admission_get(urb, &submitting_owner);
 	if (error != 0)
 		goto out_hcd;
 
@@ -2287,6 +2302,7 @@ drv_usb_urb_submit(
 		error = EPIPE;
 		goto out_hcd;
 	}
+
 	urb->actual_length = 0;
 	hal_atomic_store_relaxed(&urb->terminal_claimed, 0U);
 	commit.device = device;
@@ -2315,10 +2331,9 @@ drv_usb_urb_submit(
 
 	/* Checks the atomic load acquire result. */
 	if (atomic_load_acquire(&commit.finished) == 0) {
+		/* Handles the claimed availability. */
 		claimed = __atomic_exchange_n(&urb->submit_commit, NULL,
 					      __ATOMIC_ACQ_REL);
-
-		/* Handles the claimed availability. */
 		if (claimed != NULL)
 			submit_commit_finish(urb, claimed);
 	}
@@ -2364,13 +2379,13 @@ int
 drv_usb_urb_cancel(
 	struct drv_usb_urb *u)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the urb cancel to result. */
-	function_result = urb_cancel_to(u, DRV_USB_URB_CANCELLED);
+	error = urb_cancel_to(u, DRV_USB_URB_CANCELLED);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -2423,18 +2438,17 @@ drv_usb_urb_wait(
 
 		/* Checks the sched ticks result. */
 		if (deadline != 0 && sched_ticks() >= deadline) {
-			error = urb_cancel_to(urb, DRV_USB_URB_TIMEOUT);
-
 			/* Checks the operation status. */
+			error = urb_cancel_to(urb, DRV_USB_URB_TIMEOUT);
 			if (error == 0)
 				continue;
 
 			/* Checks the operation status. */
 			if (error != EBUSY && error != EINVAL &&
-			    error != EALREADY)
-
+			    error != EALREADY) {
 				/* Returns the computed result. */
 				return error;
+			}
 
 			/* Handles the cancel deadline condition. */
 			if (cancel_deadline == 0)
@@ -2446,6 +2460,7 @@ drv_usb_urb_wait(
 			sched_yield();
 			continue;
 		}
+
 		hal_compiler_barrier();
 	}
 }
@@ -2475,12 +2490,13 @@ drv_usb_urb_drain(
 
 		deadline = UINT64_MAX - now < ticks ? UINT64_MAX : now + ticks;
 	}
+
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		status = hal_atomic_load_acquire(&u->status);
-		owned = hal_atomic_load_acquire(&u->hcd_owned);
 
 		/* Checks the operation status. */
+		owned = hal_atomic_load_acquire(&u->hcd_owned);
 		if (status != DRV_USB_URB_PENDING && owned == 0)
 			return 0;
 
@@ -2518,9 +2534,9 @@ drv_usb_urb_wait_reusable(
 		(void)urb_cancel_to(u, DRV_USB_URB_TIMEOUT);
 		sched_yield();
 	}
-	drained = drv_usb_urb_drain(u, 1000U);
 
 	/* Handles the sync buffer availability. */
+	drained = drv_usb_urb_drain(u, 1000U);
 	if (drained != 0 && u->sync_buffer != NULL)
 		io_stats_record(IO_USB_BUFFER_RETAINED, u->sync_capacity);
 
@@ -2544,6 +2560,7 @@ drv_usb_urb_wait_reusable(
 		memcpy(u->sync_client, u->sync_buffer, u->actual_length);
 		io_stats_record(IO_USB_STAGING_COPY, u->actual_length);
 	}
+
 	u->sync_client = NULL;
 
 	/* Returns the computed result. */
@@ -2700,9 +2717,9 @@ drv_usb_control(
 	/* Handles the device availability. */
 	if (device == NULL || length > UINT16_MAX)
 		return EINVAL;
-	error = device_control_lock(device, timeout_ms);
 
 	/* Checks the operation status. */
+	error = device_control_lock(device, timeout_ms);
 	if (error != 0)
 		return error;
 	error = usb_control_locked(device, request_type, request, value, index,
@@ -2729,15 +2746,15 @@ drv_usb_bulk(
 	unsigned t,
 	size_t *a)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = e && e->type == DRV_USB_TRANSFER_BULK
+	error = e && e->type == DRV_USB_TRANSFER_BULK
 				  ? sync_data(d, e, b, n, t, a)
 				  : EINVAL;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -2752,15 +2769,15 @@ drv_usb_interrupt(
 	unsigned t,
 	size_t *a)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = e && e->type == DRV_USB_TRANSFER_INTERRUPT
+	error = e && e->type == DRV_USB_TRANSFER_INTERRUPT
 				  ? sync_data(d, e, b, n, t, a)
 				  : EINVAL;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -3043,9 +3060,9 @@ drv_usb_interface_set_alternate(
 	if (interface == NULL)
 		return EINVAL;
 	device = interface->device;
-	target = interface_find_alternate(interface, alternate_setting);
 
 	/* Handles the target availability. */
+	target = interface_find_alternate(interface, alternate_setting);
 	if (target == NULL)
 		return ENOENT;
 
@@ -3070,30 +3087,32 @@ drv_usb_interface_set_alternate(
 		error = ENODEV;
 		goto out;
 	}
-	old = interface_active_alternate(interface);
 
 	/* Handles the old condition. */
+	old = interface_active_alternate(interface);
 	if (old == target) {
 		error = 0;
 		goto out;
 	}
-	error = io_gate_close_empty(&interface->io_gate);
 
 	/* Checks the operation status. */
+	error = io_gate_close_empty(&interface->io_gate);
 	if (error != 0)
 		goto out;
 	interface_locked = 1;
-	error = device_control_try_lock(device);
 
 	/* Checks the operation status. */
+	error = device_control_try_lock(device);
 	if (error != 0)
 		goto out;
 	control_locked = 1;
-	error = host_interface_disable(old);
 
 	/* Checks the operation status. */
+	error = host_interface_disable(old);
 	if (error != 0)
 		goto out;
+
+	/* Checks the operation status. */
 	error = usb_control_locked(device,
 				   DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
 					   DRV_USB_RECIP_INTERFACE,
@@ -3101,8 +3120,6 @@ drv_usb_interface_set_alternate(
 				   target->descriptor.alternate_setting,
 				   old->descriptor.interface_number, NULL, 0,
 				   USB_CONTROL_TIMEOUT_MS, &actual);
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		/*
  * A STALL leaves the old alternate selected. A timeout or I/O
@@ -3113,22 +3130,22 @@ drv_usb_interface_set_alternate(
 						    error);
 			goto out;
 		}
-		rollback_error = host_interface_enable(old);
 
 		/* Checks the operation status. */
+		rollback_error = host_interface_enable(old);
 		if (rollback_error != 0) {
 			device_quarantine_selection(device, "set-interface",
 						    rollback_error);
 		}
+
 		goto out;
 	}
-	error = host_interface_enable(target);
 
 	/* Checks the operation status. */
+	error = host_interface_enable(target);
 	if (error != 0) {
-		rollback_error = 0;
-
 		/* Checks the device is quarantined result. */
+		rollback_error = 0;
 		if (!device_is_quarantined(device)) {
 			rollback_error = usb_control_locked(
 				device,
@@ -3142,9 +3159,8 @@ drv_usb_interface_set_alternate(
 
 		/* Checks the operation status. */
 		if (rollback_error == 0 && !device_is_quarantined(device)) {
-			rollback_error = host_interface_enable(old);
-
 			/* Checks the operation status. */
+			rollback_error = host_interface_enable(old);
 			if (rollback_error == 0) {
 				rollback_error =
 					host_interface_reset_endpoints(old);
@@ -3156,11 +3172,12 @@ drv_usb_interface_set_alternate(
 			device_quarantine_selection(device, "alternate-enable",
 						    rollback_error);
 		}
+
 		goto out;
 	}
-	error = host_interface_reset_endpoints(target);
 
 	/* Checks the operation status. */
+	error = host_interface_reset_endpoints(target);
 	if (error != 0) {
 		/*
  * SET_INTERFACE has succeeded.  A host reset failure leaves the
@@ -3169,6 +3186,7 @@ drv_usb_interface_set_alternate(
 		device_quarantine_selection(device, "alternate-reset", error);
 		goto out;
 	}
+
 	interface_publish_alternate(interface, target);
 	error = 0;
 
@@ -3209,14 +3227,14 @@ drv_usb_interface_claim(
 	/* Handles the owner availability. */
 	if (owner == NULL || target == NULL || owner == target ||
 	    owner->device != target->device ||
-	    owner->configuration != target->configuration)
-
+	    owner->configuration != target->configuration) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	device = owner->device;
-	error = device_binding_enter(device);
 
 	/* Checks the operation status. */
+	error = device_binding_enter(device);
 	if (error != 0)
 		return error;
 
@@ -3231,17 +3249,17 @@ drv_usb_interface_claim(
 		error = ENODEV;
 		goto out_device;
 	}
-	owner_state = atomic_load_acquire(&owner->binding_state);
 
 	/* Handles the owner state condition. */
+	owner_state = atomic_load_acquire(&owner->binding_state);
 	if (owner_state != USB_BINDING_PROBING &&
 	    owner_state != USB_BINDING_BOUND) {
 		error = EPERM;
 		goto out_device;
 	}
-	error = io_gate_enter(&owner->binding_submitters);
 
 	/* Checks the operation status. */
+	error = io_gate_enter(&owner->binding_submitters);
 	if (error != 0)
 		goto out_device;
 
@@ -3251,9 +3269,9 @@ drv_usb_interface_claim(
 		error = EBUSY;
 		goto out_device;
 	}
-	error = io_gate_close_empty(&target->io_gate);
 
 	/* Checks the operation status. */
+	error = io_gate_close_empty(&target->io_gate);
 	if (error != 0) {
 		binding_submitter_put(owner);
 		goto out_device;
@@ -3267,6 +3285,7 @@ drv_usb_interface_claim(
 		error = EBUSY;
 		goto out_device;
 	}
+
 	interface_publish_claim(target, owner);
 	io_gate_open(&target->io_gate);
 	binding_submitter_put(owner);
@@ -3299,9 +3318,9 @@ drv_usb_interface_release(
 	if (owner == NULL || target == NULL || owner->device != target->device)
 		return EINVAL;
 	device = owner->device;
-	error = device_binding_enter(device);
 
 	/* Checks the operation status. */
+	error = device_binding_enter(device);
 	if (error != 0)
 		return error;
 
@@ -3310,17 +3329,17 @@ drv_usb_interface_release(
 		error = EPERM;
 		goto out_device;
 	}
-	owner_state = atomic_load_acquire(&owner->binding_state);
 
 	/* Handles the owner state condition. */
+	owner_state = atomic_load_acquire(&owner->binding_state);
 	if (owner_state != USB_BINDING_PROBING &&
 	    owner_state != USB_BINDING_BOUND) {
 		error = EPERM;
 		goto out_device;
 	}
-	error = io_gate_enter(&owner->binding_submitters);
 
 	/* Checks the operation status. */
+	error = io_gate_enter(&owner->binding_submitters);
 	if (error != 0)
 		goto out_device;
 
@@ -3345,6 +3364,7 @@ drv_usb_interface_release(
 		error = EPERM;
 		goto out_device;
 	}
+
 	interface_publish_claim(target, NULL);
 	io_gate_open(&target->io_gate);
 	binding_submitter_put(owner);
@@ -3490,9 +3510,9 @@ drv_usb_host_interface_extra(
 	/* Continue while the operation condition remains true. */
 	while (offset < end) {
 		descriptor_length = raw[offset];
-		descriptor_type = raw[offset + 1U];
 
 		/* Handles the descriptor type condition. */
+		descriptor_type = raw[offset + 1U];
 		if (descriptor_type != DRV_USB_DESCRIPTOR_ENDPOINT &&
 		    descriptor_type !=
 			    DRV_USB_DESCRIPTOR_SUPERSPEED_ENDPOINT_COMPANION &&
@@ -3506,6 +3526,7 @@ drv_usb_host_interface_extra(
 				return 0;
 			}
 		}
+
 		offset += descriptor_length;
 	}
 
@@ -3563,9 +3584,9 @@ drv_usb_interface_find_endpoint(
 	/* Handles the interface availability. */
 	if (interface == NULL)
 		return NULL;
-	alternate = interface_active_alternate(interface);
 
 	/* Handles the alternate availability. */
+	alternate = interface_active_alternate(interface);
 	if (alternate == NULL)
 		return NULL;
 
@@ -3590,10 +3611,10 @@ drv_usb_interface_find_endpoint(
 		/* Handles the alternate condition. */
 		if (alternate->endpoints[index].type == type &&
 		    (alternate->endpoints[index].descriptor.address &
-		     DRV_USB_DIR_IN) == direction)
-
+		     DRV_USB_DIR_IN) == direction) {
 			/* Returns the computed result. */
 			return &alternate->endpoints[index];
+		}
 	}
 
 	/* Reports that no result is available. */
@@ -3737,32 +3758,32 @@ drv_usb_endpoint_clear_halt(
 	    endpoint->alternate == NULL ||
 	    (endpoint->type != DRV_USB_TRANSFER_BULK &&
 	     endpoint->type != DRV_USB_TRANSFER_INTERRUPT) ||
-	    (endpoint->descriptor.address & 0x0fU) == 0)
-
+	    (endpoint->descriptor.address & 0x0fU) == 0) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	interface = endpoint->interface;
-	device = interface->device;
 
 	/* Checks the endpoint retained by device result. */
+	device = interface->device;
 	if (!endpoint_retained_by_device(device, endpoint))
 		return ENODEV;
 
 	/* Checks the device is disconnecting result. */
 	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
-	    hal_atomic_load_acquire(&device->bus->stopping) != 0)
-
+	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
 		/* Returns the computed result. */
 		return ENODEV;
-	error = device_binding_enter(device);
+	}
 
 	/* Checks the operation status. */
+	error = device_binding_enter(device);
 	if (error != 0)
 		return error;
 	binding_entered = 1;
-	error = endpoint_binding_pin(interface, &owner);
 
 	/* Checks the operation status. */
+	error = endpoint_binding_pin(interface, &owner);
 	if (error != 0)
 		goto out;
 
@@ -3771,6 +3792,7 @@ drv_usb_endpoint_clear_halt(
 		error = EBUSY;
 		goto out;
 	}
+
 	selection_locked = 1;
 
 	/* Checks the device is disconnecting result. */
@@ -3783,15 +3805,15 @@ drv_usb_endpoint_clear_halt(
 		error = ENODEV;
 		goto out;
 	}
-	error = io_gate_close_empty(&interface->io_gate);
 
 	/* Checks the operation status. */
+	error = io_gate_close_empty(&interface->io_gate);
 	if (error != 0)
 		goto out;
 	interface_locked = 1;
-	error = device_control_try_lock(device);
 
 	/* Checks the operation status. */
+	error = device_control_try_lock(device);
 	if (error != 0)
 		goto out;
 	control_locked = 1;
@@ -3802,9 +3824,9 @@ drv_usb_endpoint_clear_halt(
 		error = ENODEV;
 		goto out;
 	}
-	error = endpoint_clear_halt_request(device, endpoint, &accepted);
 
 	/* Checks the operation status. */
+	error = endpoint_clear_halt_request(device, endpoint, &accepted);
 	if (error != 0) {
 		/* Checks the operation status. */
 		if (accepted && error != EPIPE &&
@@ -3824,10 +3846,10 @@ drv_usb_endpoint_clear_halt(
 		error = ENODEV;
 		goto out;
 	}
-	error = device->bus->hcd->ops->endpoint_reset(device->bus->hcd,
-						      endpoint);
 
 	/* Checks the operation status. */
+	error = device->bus->hcd->ops->endpoint_reset(device->bus->hcd,
+						      endpoint);
 	if (error != 0) {
 		/* Checks the device is disconnecting result. */
 		if (device_is_disconnecting(device) ||
@@ -3845,6 +3867,7 @@ drv_usb_endpoint_clear_halt(
 		error = ENODEV;
 		goto out;
 	}
+
 	endpoint_publish_halted(device, endpoint, 0U);
 	error = 0;
 
@@ -3890,9 +3913,9 @@ drv_usb_id_match(
 	/* Handles the id availability. */
 	if (id == NULL || interface == NULL)
 		return 0;
-	alternate = interface_active_alternate(interface);
 
 	/* Handles the alternate availability. */
+	alternate = interface_active_alternate(interface);
 	if (alternate == NULL)
 		return 0;
 	device_descriptor = &interface->device->descriptor;
@@ -3955,13 +3978,13 @@ int
 drv_usb_interface_probe(
 	struct drv_usb_interface *interface)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the interface probe internal result. */
-	function_result = interface_probe_internal(interface, NULL);
+	error = interface_probe_internal(interface, NULL);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -3980,14 +4003,14 @@ drv_usb_interface_detach(
 	if (interface == NULL)
 		return EINVAL;
 	device = interface->device;
-	error = device_binding_enter(device);
 
 	/* Checks the operation status. */
+	error = device_binding_enter(device);
 	if (error != 0)
 		return error;
-	state = atomic_load_acquire(&interface->binding_state);
 
 	/* Handles the driver availability. */
+	state = atomic_load_acquire(&interface->binding_state);
 	if (interface->driver == NULL || state == USB_BINDING_DEAD)
 		error = EINVAL;
 	else if (state != USB_BINDING_BOUND &&
@@ -4023,9 +4046,9 @@ drv_usb_driver_register(
 		if (e->driver == d)
 			return EEXIST;
 	}
-	e = hal_malloc(sizeof(*e));
 
 	/* Handles the e condition. */
+	e = hal_malloc(sizeof(*e));
 	if (!e)
 		return ENOMEM;
 	e->driver = d;
@@ -4116,6 +4139,7 @@ device_begin_disconnect(
 		/* Returns the computed result. */
 		return;
 	}
+
 	(void)hal_atomic_fetch_or_release(&device->lifecycle,
 					  USB_DEVICE_LIFECYCLE_DISCONNECTING);
 
@@ -4158,10 +4182,10 @@ io_gate_close(
 	while ((state & USB_IO_GATE_CLOSED) == 0) {
 		/* Handles the atomic compare exchange condition. */
 		if (atomic_compare_exchange(gate, &state,
-					    state | USB_IO_GATE_CLOSED))
-
+					    state | USB_IO_GATE_CLOSED)) {
 			/* Returns the computed result. */
 			return;
+		}
 	}
 }
 
@@ -4177,9 +4201,8 @@ detach_interfaces(
 	/* Process each linked entry. */
 	for (interface = device->interfaces; interface != NULL;
 	     interface = interface->next) {
-		state = atomic_load_acquire(&interface->binding_state);
-
 		/* Handles the driver availability. */
+		state = atomic_load_acquire(&interface->binding_state);
 		if (interface->driver == NULL || state == USB_BINDING_DEAD)
 			continue;
 
@@ -4217,10 +4240,10 @@ interface_binding_detach(
 
 	/* Checks the atomic compare exchange result. */
 	if (!atomic_compare_exchange(&interface->binding_state, &expected_state,
-				     USB_BINDING_UNBINDING))
-
+				     USB_BINDING_UNBINDING)) {
 		/* Returns the computed result. */
 		return expected_state == USB_BINDING_DEAD ? EINVAL : EBUSY;
+	}
 	io_gate_close(&interface->binding_gate);
 	io_gate_close(&interface->binding_submitters);
 	/* Process each remaining element. */
@@ -4245,6 +4268,7 @@ interface_binding_detach(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	interface_binding_clear(interface);
 
 	/* Reports successful completion. */
@@ -4273,6 +4297,7 @@ interface_binding_clear(
 			io_gate_open(&sibling->io_gate);
 		}
 	}
+
 	interface->driver = NULL;
 	interface->driver_data = NULL;
 	atomic_store_release(&interface->binding_gate, USB_IO_GATE_CLOSED);
@@ -4311,17 +4336,17 @@ static int
 io_gate_close_empty(
 	atomic_uint_t *gate)
 {
-	int function_result;
+	int error;
 	unsigned expected = 0;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		atomic_compare_exchange(gate, &expected, USB_IO_GATE_CLOSED)
 			? 0
 			: EBUSY;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the interface publish claim operation. */
@@ -4364,9 +4389,9 @@ device_quiesce(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
-	error = bus->hcd->ops->device_quiesce(bus->hcd, device);
 
 	/* Checks the operation status. */
+	error = bus->hcd->ops->device_quiesce(bus->hcd, device);
 	if (error == 0 && drv_usb_device_hcd_urb_count(device) != 0)
 		error = EBUSY;
 
@@ -4384,6 +4409,7 @@ device_quiesce(
 			   "device and DMA retained\n",
 			   bus->number, device->address, device->port, error);
 	}
+
 	hal_atomic_store_release(&device->quarantined, 1U);
 	device_link(bus, device);
 
@@ -4400,13 +4426,13 @@ static int
 device_is_quarantined(
 	const struct drv_usb_device *device)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = hal_atomic_load_acquire(&device->quarantined) != 0;
+	error = hal_atomic_load_acquire(&device->quarantined) != 0;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the device link operation. */
@@ -4542,10 +4568,10 @@ root_port_acknowledge_changes(
 			continue;
 		request.value = change_features[index];
 		actual = 0;
-		error = hcd->ops->root_hub_control(hcd, &request, NULL, 0,
-						   &actual);
 
 		/* Checks the operation status. */
+		error = hcd->ops->root_hub_control(hcd, &request, NULL, 0,
+						   &actual);
 		if (error != 0)
 			return error;
 	}
@@ -4593,13 +4619,13 @@ static int
 device_is_disconnecting(
 	const struct drv_usb_device *device)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv usb device is tearing down result. */
-	function_result = drv_usb_device_is_tearing_down(device);
+	error = drv_usb_device_is_tearing_down(device);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the destroy device operation. */
@@ -4608,7 +4634,7 @@ destroy_device(
 	struct drv_usb_bus *bus,
 	struct drv_usb_device *device)
 {
-	int function_result;
+	int error;
 	int detach_error, quiesce_error;
 
 	/* Handles the device availability. */
@@ -4621,9 +4647,9 @@ destroy_device(
  * Admission is closed before detach.  Even a class-driver failure must
 	 * reach the checked DMA barrier before the bus owner may release
 	 * memory. */
-	quiesce_error = device_quiesce(bus, device);
 
 	/* Checks the operation status. */
+	quiesce_error = device_quiesce(bus, device);
 	if (quiesce_error == 0 && bus->hcd->ops->device_quiesce == NULL)
 		quiesce_error = device_disable_active_endpoints(device);
 
@@ -4636,19 +4662,21 @@ destroy_device(
 				   bus->number, device->address, device->port,
 				   detach_error);
 		}
+
 		hal_atomic_store_release(&device->quarantined, 1U);
 		device_link(bus, device);
 
 		/* Returns the computed result. */
 		return detach_error != 0 ? detach_error : quiesce_error;
 	}
+
 	device->report_disconnect = 1U;
 
 	/* Obtains the device release result. */
-	function_result = device_release(bus, device);
+	error = device_release(bus, device);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the device disable active endpoints operation. */
@@ -4656,18 +4684,18 @@ static int
 device_disable_active_endpoints(
 	struct drv_usb_device *device)
 {
-	int function_result;
+	int error;
 	struct drv_usb_configuration *configuration =
 		device_active_configuration(device);
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		configuration == NULL
 			? 0
 			: configuration_disable_endpoints(configuration);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the device active configuration operation. */
@@ -4699,18 +4727,17 @@ configuration_disable_endpoints(
 	/* Process each linked entry. */
 	for (interface = configuration->interfaces; interface != NULL;
 	     interface = interface->next) {
+		/* Checks the operation status. */
 		error = host_interface_disable(
 			interface_active_alternate(interface));
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			/* Process each remaining element. */
 			while (disabled_count != 0) {
 				interface = disabled[--disabled_count];
-				rollback = host_interface_enable(
-					interface_active_alternate(interface));
 
 				/* Checks the operation status. */
+				rollback = host_interface_enable(
+					interface_active_alternate(interface));
 				if (rollback_error == 0 && rollback != 0)
 					rollback_error = rollback;
 			}
@@ -4726,6 +4753,7 @@ configuration_disable_endpoints(
 			/* Returns the computed result. */
 			return error;
 		}
+
 		disabled[disabled_count++] = interface;
 	}
 
@@ -4748,10 +4776,9 @@ host_interface_disable(
 		return 0;
 	/* Process each remaining element. */
 	for (index = 0; index < alternate->endpoint_count; index++) {
+		/* Checks the operation status. */
 		error = hcd->ops->endpoint_disable(
 			hcd, &alternate->endpoints[index]);
-
-		/* Checks the operation status. */
 		if (error == 0)
 			continue;
 
@@ -4761,10 +4788,10 @@ host_interface_disable(
 		/* Process each remaining element. */
 		for (rollback_index = index; rollback_index != 0;) {
 			rollback_index--;
-			rollback = hcd->ops->endpoint_enable(
-				hcd, &alternate->endpoints[rollback_index]);
 
 			/* Checks the operation status. */
+			rollback = hcd->ops->endpoint_enable(
+				hcd, &alternate->endpoints[rollback_index]);
 			if (rollback_error == 0 && rollback != 0)
 				rollback_error = rollback;
 		}
@@ -4797,6 +4824,7 @@ device_quarantine_selection(
 			   "quarantined\n",
 			   device->bus->number, device->address, stage, error);
 	}
+
 	hal_atomic_store_release(&device->quarantined, 1U);
 	io_gate_close(&device->submit_gate);
 }
@@ -4831,10 +4859,9 @@ host_interface_enable(
 		return 0;
 	/* Process each remaining element. */
 	for (index = 0; index < alternate->endpoint_count; index++) {
+		/* Checks the operation status. */
 		error = hcd->ops->endpoint_enable(hcd,
 						  &alternate->endpoints[index]);
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			/*
  * Only endpoints enabled by this invocation are
@@ -4843,11 +4870,11 @@ host_interface_enable(
 			/* Process each remaining element. */
 			for (rollback_index = index; rollback_index != 0;) {
 				rollback_index--;
+
+				/* Checks the operation status. */
 				rollback = hcd->ops->endpoint_disable(
 					hcd,
 					&alternate->endpoints[rollback_index]);
-
-				/* Checks the operation status. */
 				if (rollback_error == 0 && rollback != 0)
 					rollback_error = rollback;
 			}
@@ -4905,6 +4932,7 @@ device_release(
 					device->port,
 					state & USB_DEVICE_LIFECYCLE_URB_MASK);
 			}
+
 			hal_atomic_store_release(&device->quarantined, 1U);
 			device_link(bus, device);
 
@@ -4922,6 +4950,7 @@ device_release(
 			    state | USB_DEVICE_LIFECYCLE_FINALIZING))
 			break;
 	}
+
 	device_finalize(bus, device);
 
 	/* Reports successful completion. */
@@ -4987,6 +5016,7 @@ free_configurations(
 			free_configuration(&device->configurations[index]);
 		hal_free(device->configurations);
 	}
+
 	device->configurations = NULL;
 	device->configuration_count = 0;
 	device_publish_configuration(device, NULL);
@@ -5015,6 +5045,7 @@ free_configuration(
 				hal_free(alternate->endpoints);
 			hal_free(alternate);
 		}
+
 		hal_free(interface);
 	}
 
@@ -5049,23 +5080,22 @@ legacy_root_port_reset(
 	size_t actual = 0;
 	int error;
 
-	error = hcd->ops->root_hub_control(hcd, &request, NULL, 0, &actual);
-
 	/* Checks the operation status. */
+	error = hcd->ops->root_hub_control(hcd, &request, NULL, 0, &actual);
 	if (error != 0)
 		return error;
 	usb_delay_ticks(5U);
 	request.request = 1;
-	error = hcd->ops->root_hub_control(hcd, &request, NULL, 0, &actual);
 
 	/* Checks the operation status. */
+	error = hcd->ops->root_hub_control(hcd, &request, NULL, 0, &actual);
 	if (error != 0)
 		return error;
 	request.request = 3;
 	request.value = 1;
-	error = hcd->ops->root_hub_control(hcd, &request, NULL, 0, &actual);
 
 	/* Checks the operation status. */
+	error = hcd->ops->root_hub_control(hcd, &request, NULL, 0, &actual);
 	if (error != 0)
 		return error;
 	usb_delay_ticks(USB_RESET_RECOVERY_TICKS);
@@ -5102,9 +5132,8 @@ enumerate_port(
 	unsigned configuration_index, other, packet;
 	int address = 0, cleanup_error, error = 0, preferred_score;
 
-	device = hal_malloc(sizeof(*device));
-
 	/* Handles the device availability. */
+	device = hal_malloc(sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
 	memset(device, 0, sizeof(*device));
@@ -5127,12 +5156,13 @@ enumerate_port(
 
 	/* Handles the device enable availability. */
 	if (bus->hcd->ops->device_enable != NULL) {
-		error = bus->hcd->ops->device_enable(bus->hcd, device);
-
 		/* Checks the operation status. */
+		error = bus->hcd->ops->device_enable(bus->hcd, device);
 		if (error != 0)
 			goto fail;
 	}
+
+	/* Checks the operation status. */
 	error = drv_usb_control(device,
 				DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD |
 					DRV_USB_RECIP_DEVICE,
@@ -5140,8 +5170,6 @@ enumerate_port(
 				(uint16_t)(DRV_USB_DESCRIPTOR_DEVICE << 8), 0,
 				first, sizeof(first), USB_CONTROL_TIMEOUT_MS,
 				&actual);
-
-	/* Checks the operation status. */
 	if (error != 0 || actual != sizeof(first)) {
 		/* Checks the operation status. */
 		if (error == 0)
@@ -5156,13 +5184,14 @@ enumerate_port(
 		error = EIO;
 		goto fail;
 	}
+
 	device->descriptor.length = first[0];
 	device->descriptor.descriptor_type = first[1];
 	device->descriptor.endpoint0_max_packet_size = first[7];
 	device->endpoint0.descriptor.maximum_packet_size = (uint16_t)packet;
-	address = allocate_address(bus);
 
 	/* Handles the address condition. */
+	address = allocate_address(bus);
 	if (address < 0) {
 		address = 0;
 		error = ENOSPC;
@@ -5201,6 +5230,8 @@ enumerate_port(
 		goto fail;
 	device->state = DRV_USB_STATE_ADDRESS;
 	usb_delay_ticks(USB_ADDRESS_RECOVERY_TICKS);
+
+	/* Checks the operation status. */
 	error = drv_usb_control(device,
 				DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD |
 					DRV_USB_RECIP_DEVICE,
@@ -5208,8 +5239,6 @@ enumerate_port(
 				(uint16_t)(DRV_USB_DESCRIPTOR_DEVICE << 8), 0,
 				&device->descriptor, sizeof(device->descriptor),
 				USB_CONTROL_TIMEOUT_MS, &actual);
-
-	/* Checks the operation status. */
 	if (error != 0 || actual != sizeof(device->descriptor)) {
 		/* Checks the operation status. */
 		if (error == 0)
@@ -5224,6 +5253,7 @@ enumerate_port(
 		error = EINVAL;
 		goto fail;
 	}
+
 	device->configuration_count = device->descriptor.configuration_count;
 	device->configurations = hal_malloc(device->configuration_count *
 					    sizeof(*device->configurations));
@@ -5233,17 +5263,17 @@ enumerate_port(
 		error = ENOMEM;
 		goto fail;
 	}
+
 	memset(device->configurations, 0,
 	       device->configuration_count * sizeof(*device->configurations));
 	/* Process each remaining element. */
 	for (configuration_index = 0;
 	     configuration_index < device->configuration_count;
 	     configuration_index++) {
+		/* Checks the operation status. */
 		error = enumerate_configuration(
 			device, configuration_index,
 			&device->configurations[configuration_index]);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto fail;
 		/* Process each remaining element. */
@@ -5270,11 +5300,12 @@ enumerate_port(
 		error = ENOMEM;
 		goto fail;
 	}
+
 	preferred = device_preferred_configuration(device, &preferred_score);
-	error = drv_usb_device_set_configuration(
-		device, preferred->descriptor.configuration_value);
 
 	/* Checks the operation status. */
+	error = drv_usb_device_set_configuration(
+		device, preferred->descriptor.configuration_value);
 	if (error != 0)
 		goto fail;
 	device_link(bus, device);
@@ -5305,12 +5336,13 @@ fail:
 	if (error == 0)
 		error = EIO;
 	device_begin_disconnect(device);
-	cleanup_error = device_quiesce(bus, device);
 
 	/* Checks the operation status. */
+	cleanup_error = device_quiesce(bus, device);
 	if (cleanup_error != 0) {
 		return error;
 	}
+
 	device_release(bus, device);
 
 	/* Reports the failure. */
@@ -5395,6 +5427,8 @@ enumerate_configuration(
 	int error;
 
 	/* Reads the header of the configuration descriptor. */
+
+	/* Checks the operation status. */
 	error = drv_usb_control(
 		device,
 		DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD |
@@ -5403,8 +5437,6 @@ enumerate_configuration(
 		(uint16_t)((DRV_USB_DESCRIPTOR_CONFIGURATION << 8) | index), 0,
 		&descriptor, sizeof(descriptor), USB_CONTROL_TIMEOUT_MS,
 		&actual);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
@@ -5412,15 +5444,17 @@ enumerate_configuration(
 	if (actual != sizeof(descriptor) ||
 	    descriptor.length < sizeof(descriptor) ||
 	    descriptor.descriptor_type != DRV_USB_DESCRIPTOR_CONFIGURATION ||
-	    descriptor.total_length < descriptor.length)
-
+	    descriptor.total_length < descriptor.length) {
 		/* Returns the computed result. */
 		return EIO;
-	raw = hal_malloc(descriptor.total_length);
+	}
 
 	/* Handles the raw availability. */
+	raw = hal_malloc(descriptor.total_length);
 	if (raw == NULL)
 		return ENOMEM;
+
+	/* Checks the operation status. */
 	error = drv_usb_control(
 		device,
 		DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD |
@@ -5428,8 +5462,6 @@ enumerate_configuration(
 		USB_REQ_GET_DESCRIPTOR,
 		(uint16_t)((DRV_USB_DESCRIPTOR_CONFIGURATION << 8) | index), 0,
 		raw, descriptor.total_length, USB_CONTROL_TIMEOUT_MS, &actual);
-
-	/* Checks the operation status. */
 	if (error != 0 || actual != descriptor.total_length) {
 		hal_free(raw);
 
@@ -5478,6 +5510,7 @@ parse_configuration(
 		error = EINVAL;
 		goto fail;
 	}
+
 	memcpy(&descriptor, raw, sizeof(descriptor));
 
 	/* Checks the file descriptor. */
@@ -5490,10 +5523,11 @@ parse_configuration(
 		error = EINVAL;
 		goto fail;
 	}
+
 	configuration->descriptor = descriptor;
-	error = configuration_iads_prepare(configuration, raw, length);
 
 	/* Checks the operation status. */
+	error = configuration_iads_prepare(configuration, raw, length);
 	if (error != 0)
 		goto fail;
 	interface_tail = &configuration->interfaces;
@@ -5501,9 +5535,9 @@ parse_configuration(
 	/* Process each remaining element. */
 	while (offset < length) {
 		descriptor_length = raw[offset];
-		descriptor_type = raw[offset + 1U];
 
 		/* Handles the descriptor type condition. */
+		descriptor_type = raw[offset + 1U];
 		if (descriptor_type == DRV_USB_DESCRIPTOR_INTERFACE) {
 			/* Handles the descriptor length condition. */
 			if (descriptor_length < sizeof(interface_descriptor)) {
@@ -5520,9 +5554,11 @@ parse_configuration(
 					error = EINVAL;
 					goto fail;
 				}
+
 				current_alternate->raw_length =
 					offset - current_alternate->raw_offset;
 			}
+
 			memcpy(&interface_descriptor, raw + offset,
 			       sizeof(interface_descriptor));
 
@@ -5532,11 +5568,11 @@ parse_configuration(
 				error = EINVAL;
 				goto fail;
 			}
+
+			/* Handles the current interface availability. */
 			current_interface = configuration_find_interface(
 				configuration,
 				interface_descriptor.interface_number);
-
-			/* Handles the current interface availability. */
 			if (current_interface == NULL) {
 				/* Handles the configuration condition. */
 				if (configuration->interface_count ==
@@ -5544,6 +5580,7 @@ parse_configuration(
 					error = EINVAL;
 					goto fail;
 				}
+
 				current_interface =
 					hal_malloc(sizeof(*current_interface));
 
@@ -5552,6 +5589,7 @@ parse_configuration(
 					error = ENOMEM;
 					goto fail;
 				}
+
 				memset(current_interface, 0,
 				       sizeof(*current_interface));
 				current_interface->device = device;
@@ -5580,6 +5618,7 @@ parse_configuration(
 				error = EINVAL;
 				goto fail;
 			}
+
 			current_alternate =
 				hal_malloc(sizeof(*current_alternate));
 
@@ -5588,6 +5627,7 @@ parse_configuration(
 				error = ENOMEM;
 				goto fail;
 			}
+
 			memset(current_alternate, 0,
 			       sizeof(*current_alternate));
 			current_alternate->interface = current_interface;
@@ -5607,11 +5647,13 @@ parse_configuration(
 					error = ENOMEM;
 					goto fail;
 				}
+
 				memset(current_alternate->endpoints, 0,
 				       interface_descriptor.endpoint_count *
 					       sizeof(*current_alternate
 							       ->endpoints));
 			}
+
 			alternate_tail = &current_interface->alternates;
 			/* Continue while the operation condition remains true. */
 			while (*alternate_tail != NULL)
@@ -5629,11 +5671,12 @@ parse_configuration(
 				error = EINVAL;
 				goto fail;
 			}
+
 			memcpy(&endpoint_descriptor, raw + offset,
 			       sizeof(endpoint_descriptor));
-			endpoint_number = endpoint_descriptor.address & 0x0fU;
 
 			/* Handles the endpoint number condition. */
+			endpoint_number = endpoint_descriptor.address & 0x0fU;
 			if (endpoint_number == 0 ||
 			    (endpoint_descriptor.address & 0x70U) != 0 ||
 			    (endpoint_descriptor.attributes & 3U) ==
@@ -5642,6 +5685,7 @@ parse_configuration(
 				error = EINVAL;
 				goto fail;
 			}
+
 			/* Process each remaining element. */
 			for (endpoint_index = 0;
 			     endpoint_index < current_alternate->endpoint_count;
@@ -5654,6 +5698,7 @@ parse_configuration(
 					goto fail;
 				}
 			}
+
 			current_endpoint =
 				&current_alternate->endpoints
 					 [current_alternate->endpoint_count++];
@@ -5673,6 +5718,7 @@ parse_configuration(
 				error = EINVAL;
 				goto fail;
 			}
+
 			current_endpoint->companion_valid = 1U;
 			current_endpoint = NULL;
 		} else if (descriptor_type ==
@@ -5682,6 +5728,7 @@ parse_configuration(
 				error = EINVAL;
 				goto fail;
 			}
+
 			memcpy(&configuration->iads[iad_index++], raw + offset,
 			       sizeof(configuration->iads[0]));
 			current_endpoint = NULL;
@@ -5698,6 +5745,7 @@ parse_configuration(
 				current_alternate->extra_count++;
 			current_endpoint = NULL;
 		}
+
 		offset += descriptor_length;
 	}
 
@@ -5709,6 +5757,7 @@ parse_configuration(
 			error = EINVAL;
 			goto fail;
 		}
+
 		current_alternate->raw_length =
 			offset - current_alternate->raw_offset;
 	}
@@ -5719,6 +5768,7 @@ parse_configuration(
 		error = EINVAL;
 		goto fail;
 	}
+
 	/* Process each linked entry. */
 	for (current_interface = configuration->interfaces;
 	     current_interface != NULL;
@@ -5731,17 +5781,18 @@ parse_configuration(
 			error = EINVAL;
 			goto fail;
 		}
+
 		interface_publish_alternate(current_interface,
 					    current_alternate);
 	}
-	error = configuration_endpoint_addresses_validate(configuration);
 
 	/* Checks the operation status. */
+	error = configuration_endpoint_addresses_validate(configuration);
 	if (error != 0)
 		goto fail;
-	error = configuration_iads_validate(configuration);
 
 	/* Checks the operation status. */
+	error = configuration_iads_validate(configuration);
 	if (error != 0)
 		goto fail;
 
@@ -5780,10 +5831,10 @@ configuration_iads_prepare(
 
 		/* Handles the descriptor length condition. */
 		if (descriptor_length < 2U ||
-		    descriptor_length > length - offset)
-
+		    descriptor_length > length - offset) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 
 		/* Handles the descriptor type condition. */
 		if (descriptor_type ==
@@ -5792,12 +5843,13 @@ configuration_iads_prepare(
 			if (descriptor_length !=
 				    sizeof(struct
 					   drv_usb_interface_association_descriptor) ||
-			    count == DRV_USB_MAX_IADS)
-
+			    count == DRV_USB_MAX_IADS) {
 				/* Returns the computed result. */
 				return EINVAL;
+			}
 			count++;
 		}
+
 		offset += descriptor_length;
 	}
 
@@ -5812,6 +5864,7 @@ configuration_iads_prepare(
 		memset(configuration->iads, 0,
 		       count * sizeof(*configuration->iads));
 	}
+
 	configuration->iad_count = count;
 
 	/* Reports successful completion. */
@@ -5831,10 +5884,10 @@ configuration_find_interface(
 	     interface = interface->next) {
 		/* Handles the interface condition. */
 		if (interface->alternates->descriptor.interface_number ==
-		    number)
-
+		    number) {
 			/* Returns the computed result. */
 			return interface;
+		}
 	}
 
 	/* Reports that no result is available. */
@@ -5938,20 +5991,21 @@ configuration_iads_validate(
 	for (left = 0; left < configuration->iad_count; left++) {
 		iad = &configuration->iads[left];
 		first = iad->first_interface;
-		end = first + iad->interface_count;
 
 		/* Handles the iad condition. */
+		end = first + iad->interface_count;
 		if (iad->interface_count == 0 || end > (unsigned)UINT8_MAX + 1U)
 			return EINVAL;
 		/* Process each element required by the operation. */
 		for (; first < end; first++) {
 			/* Checks the configuration find interface result. */
 			if (configuration_find_interface(configuration,
-							 first) == NULL)
-
+							 first) == NULL) {
 				/* Returns the computed result. */
 				return EINVAL;
+			}
 		}
+
 		/* Process each element required by the operation. */
 		for (right = 0; right < left; right++) {
 			other = &configuration->iads[right];
@@ -5960,10 +6014,10 @@ configuration_iads_validate(
 
 			/* Handles the iad condition. */
 			if (iad->first_interface < other_end &&
-			    other->first_interface < end)
-
+			    other->first_interface < end) {
 				/* Returns the computed result. */
 				return EINVAL;
+			}
 		}
 	}
 
@@ -6033,16 +6087,15 @@ interface_registered_driver_score(
 
 	/* Process each linked entry. */
 	for (entry = usb_drivers; entry != NULL; entry = entry->next) {
-		id = drv_usb_driver_find_id(entry->driver, interface);
-
 		/* Handles the id availability. */
+		id = drv_usb_driver_find_id(entry->driver, interface);
 		if (id == NULL)
 			continue;
+
+		/* Handles the score condition. */
 		score = entry->driver->match != NULL
 				? entry->driver->match(interface, id)
 				: 1;
-
-		/* Handles the score condition. */
 		if (score > best)
 			best = score;
 	}
@@ -6071,9 +6124,9 @@ interface_probe_internal(
 	if (interface == NULL)
 		return EINVAL;
 	device = interface->device;
-	error = device_binding_enter(device);
 
 	/* Checks the operation status. */
+	error = device_binding_enter(device);
 	if (error != 0)
 		return error;
 
@@ -6093,9 +6146,9 @@ interface_probe_internal(
 		error = EBUSY;
 		goto out;
 	}
-	expected_state = USB_BINDING_DEAD;
 
 	/* Checks the atomic compare exchange result. */
+	expected_state = USB_BINDING_DEAD;
 	if (!atomic_compare_exchange(&interface->binding_state, &expected_state,
 				     USB_BINDING_PROBING)) {
 		error = EBUSY;
@@ -6120,18 +6173,18 @@ interface_probe_internal(
 		error = ENODEV;
 		goto out;
 	}
+
 	/* Process each linked entry. */
 	for (entry = usb_drivers; entry != NULL; entry = entry->next) {
-		id = drv_usb_driver_find_id(entry->driver, interface);
-
 		/* Handles the id availability. */
+		id = drv_usb_driver_find_id(entry->driver, interface);
 		if (id == NULL)
 			continue;
+
+		/* Handles the score condition. */
 		score = entry->driver->match != NULL
 				? entry->driver->match(interface, id)
 				: 1;
-
-		/* Handles the score condition. */
 		if (score > best) {
 			best = score;
 			driver = entry->driver;
@@ -6155,14 +6208,15 @@ interface_probe_internal(
 	io_gate_open(&interface->binding_gate);
 	io_gate_open(&interface->binding_submitters);
 	io_gate_open(&interface->io_gate);
-	error = driver->attach != NULL ? driver->attach(interface, id) : 0;
 
 	/* Checks the operation status. */
+	error = driver->attach != NULL ? driver->attach(interface, id) : 0;
 	if (error == 0) {
 		atomic_store_release(&interface->binding_state,
 				     USB_BINDING_BOUND);
 		goto out;
 	}
+
 	cleanup_error = interface_binding_detach(
 		interface, DRV_USB_DETACH_ATTACH_FAILED, USB_BINDING_PROBING);
 	(void)cleanup_error;
@@ -6186,9 +6240,8 @@ device_binding_enter(
 	int function_result;
 	int error;
 
-	error = io_gate_enter(&device->binding_transactions);
-
 	/* Checks the operation status. */
+	error = io_gate_enter(&device->binding_transactions);
 	if (error != 0) {
 		/* Computes the function result. */
 		function_result =
@@ -6222,10 +6275,10 @@ io_gate_enter(
 	for (;;) {
 		/* Handles the state condition. */
 		if ((state & USB_IO_GATE_CLOSED) != 0 ||
-		    (state & USB_IO_GATE_COUNT_MASK) == USB_IO_GATE_COUNT_MASK)
-
+		    (state & USB_IO_GATE_COUNT_MASK) == USB_IO_GATE_COUNT_MASK) {
 			/* Returns the computed result. */
 			return EBUSY;
+		}
 
 		/* Handles the atomic compare exchange condition. */
 		if (atomic_compare_exchange(gate, &state, state + 1U))
@@ -6240,9 +6293,8 @@ io_gate_exit(
 {
 	unsigned previous;
 
-	previous = atomic_raw_fetch_add_release(&gate->value, (unsigned)-1);
-
 	/* Handles the previous condition. */
+	previous = atomic_raw_fetch_add_release(&gate->value, (unsigned)-1);
 	if ((previous & USB_IO_GATE_COUNT_MASK) == 0)
 		__builtin_trap();
 
@@ -6272,9 +6324,8 @@ interface_report_probe(
 	struct drv_usb_driver *driver;
 	unsigned bus, address;
 
-	descriptor = drv_usb_interface_descriptor(interface);
-
 	/* Handles the descriptor availability. */
+	descriptor = drv_usb_interface_descriptor(interface);
 	if (descriptor == NULL)
 		return;
 	bus = interface->device->bus->number;
@@ -6343,10 +6394,10 @@ urb_publish_terminal(
 
 	/* Handles the urb availability. */
 	if (urb == NULL || status == DRV_USB_URB_IDLE ||
-	    status == DRV_USB_URB_PENDING)
-
+	    status == DRV_USB_URB_PENDING) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Checks the hal atomic load acquire result. */
 	if (hal_atomic_load_acquire(&urb->status) != DRV_USB_URB_PENDING)
@@ -6356,10 +6407,10 @@ urb_publish_terminal(
  * Completion and successful cancellation can both publish the terminal
 	 * state.  Whichever path arrives first must release the short submit
 	 * gates before a callback can re-enter detach or disconnect. */
-	commit = __atomic_exchange_n(&urb->submit_commit, NULL,
-				     __ATOMIC_ACQ_REL);
 
 	/* Handles the commit availability. */
+	commit = __atomic_exchange_n(&urb->submit_commit, NULL,
+				     __ATOMIC_ACQ_REL);
 	if (commit != NULL)
 		submit_commit_finish(urb, commit);
 	else
@@ -6370,10 +6421,10 @@ urb_publish_terminal(
 
 	/* Checks the hal atomic compare exchange acq rel result. */
 	if (!hal_atomic_compare_exchange_acq_rel(&urb->terminal_claimed,
-						 &expected, 1U))
-
+						 &expected, 1U)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/*
  * Publish the protocol halt before the terminal status and callback.
@@ -6518,9 +6569,9 @@ urb_put(
 	/* Checks the refcount put result. */
 	if (!refcount_put(&urb->references))
 		return;
-	device = urb->device;
 
 	/* Handles the transfer reservation availability. */
+	device = urb->device;
 	if (urb->transfer_reservation != NULL) {
 		device->bus->hcd->ops->urb_unreserve(device->bus->hcd,
 						     urb->transfer_reservation);
@@ -6578,14 +6629,13 @@ configuration_effective_owner(
 	/* Process each linked entry. */
 	for (interface = configuration->interfaces; interface != NULL;
 	     interface = interface->next) {
-		owner = interface_binding_owner(interface);
-
 		/* Handles the owner availability. */
+		owner = interface_binding_owner(interface);
 		if (owner == NULL)
 			continue;
-		state = atomic_load_acquire(&owner->binding_state);
 
 		/* Handles the state condition. */
+		state = atomic_load_acquire(&owner->binding_state);
 		if (state != USB_BINDING_PROBING && state != USB_BINDING_BOUND)
 			return EBUSY;
 
@@ -6647,6 +6697,7 @@ configuration_close_io(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		closed[(*closed_count)++] = interface;
 	}
 
@@ -6689,9 +6740,8 @@ device_reset_connection_check(
 	uint32_t status = 0;
 	int error;
 
-	error = root_port_status(bus->hcd, device->port, &status);
-
 	/* Checks the operation status. */
+	error = root_port_status(bus->hcd, device->port, &status);
 	if (error != 0)
 		return error;
 
@@ -6701,10 +6751,10 @@ device_reset_connection_check(
 	 * detach/reinsert which happens between two restore operations. */
 	if ((status & 3U) != 3U || (status & (1U << 16)) != 0 ||
 	    device->generation != device_generation ||
-	    bus->ports[device->port].connection_generation != port_generation)
-
+	    bus->ports[device->port].connection_generation != port_generation) {
 		/* Returns the computed result. */
 		return ENODEV;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -6724,18 +6774,17 @@ configuration_enable_endpoints(
 	/* Process each linked entry. */
 	for (interface = configuration->interfaces; interface != NULL;
 	     interface = interface->next) {
+		/* Checks the operation status. */
 		error = host_interface_enable(
 			interface_active_alternate(interface));
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			/* Process each remaining element. */
 			while (enabled_count != 0) {
 				interface = enabled[--enabled_count];
-				rollback = host_interface_disable(
-					interface_active_alternate(interface));
 
 				/* Checks the operation status. */
+				rollback = host_interface_disable(
+					interface_active_alternate(interface));
 				if (rollback_error == 0 && rollback != 0)
 					rollback_error = rollback;
 			}
@@ -6750,6 +6799,7 @@ configuration_enable_endpoints(
 			/* Returns the computed result. */
 			return error;
 		}
+
 		enabled[enabled_count++] = interface;
 	}
 
@@ -6769,6 +6819,7 @@ device_quarantine_recovery(
 		hal_printf("usb%u: device %u %s failed (%d); quarantined\n",
 			   device->bus->number, device->address, stage, error);
 	}
+
 	hal_atomic_store_release(&device->quarantined, 1U);
 	io_gate_close(&device->submit_gate);
 }
@@ -6799,9 +6850,9 @@ usb_control_locked(
 	/* Handles the device is disconnecting condition. */
 	if (device_is_disconnecting(device) || device_is_quarantined(device))
 		return ENODEV;
-	urb = drv_usb_urb_alloc(device, NULL, 0);
 
 	/* Handles the urb availability. */
+	urb = drv_usb_urb_alloc(device, NULL, 0);
 	if (urb == NULL) {
 		/* Computes the function result. */
 		function_result = device_is_disconnecting(device) ||
@@ -6812,9 +6863,9 @@ usb_control_locked(
 		/* Returns the computed result. */
 		return function_result;
 	}
-	error = drv_usb_urb_reserve_sync(urb, length);
 
 	/* Checks the operation status. */
+	error = drv_usb_urb_reserve_sync(urb, length);
 	if (error == 0) {
 		error = drv_usb_urb_setup_control(urb, &control, buffer, length,
 						  timeout_ms, NULL, NULL);
@@ -6868,6 +6919,8 @@ configuration_restore(
 		/* Returns the computed result. */
 		return function_result;
 	}
+
+	/* Checks the operation status. */
 	error = usb_control_locked(
 		device,
 		DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
@@ -6875,18 +6928,17 @@ configuration_restore(
 		USB_REQ_SET_CONFIGURATION,
 		configuration->descriptor.configuration_value, 0, NULL, 0,
 		USB_CONTROL_TIMEOUT_MS, &actual);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 	/* Process each linked entry. */
 	for (interface = configuration->interfaces; interface != NULL;
 	     interface = interface->next) {
-		alternate = interface_active_alternate(interface);
-
 		/* Handles the alternate condition. */
+		alternate = interface_active_alternate(interface);
 		if (alternate->descriptor.alternate_setting == 0)
 			continue;
+
+		/* Checks the operation status. */
 		error = usb_control_locked(
 			device,
 			DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
@@ -6895,11 +6947,10 @@ configuration_restore(
 			alternate->descriptor.alternate_setting,
 			alternate->descriptor.interface_number, NULL, 0,
 			USB_CONTROL_TIMEOUT_MS, &actual);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 	}
+
 	error = configuration_enable_endpoints(configuration);
 
 	/* Computes the function result. */
@@ -6932,14 +6983,14 @@ configuration_reset_endpoints(
 		/* Process each remaining element. */
 		for (index = 0; index < alternate_local->endpoint_count;
 		     index++) {
+			/* Checks the operation status. */
 			error = hcd->ops->endpoint_reset(
 				hcd, &alternate_local->endpoints[index]);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				return error;
 		}
 	}
+
 	/* Process each linked entry. */
 	for (interface = configuration->interfaces; interface != NULL;
 	     interface = interface->next) {
@@ -6982,10 +7033,10 @@ configuration_has_owners(
 		/* Checks the atomic load acquire result. */
 		if (atomic_load_acquire(&interface->binding_state) !=
 			    USB_BINDING_DEAD ||
-		    interface_claim_owner(interface) != NULL)
-
+		    interface_claim_owner(interface) != NULL) {
 			/* Reports operation failure. */
 			return 1;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -7021,6 +7072,8 @@ usb_string_descriptor(
 	int error;
 
 	/* Reads the header to learn how long the string is. */
+
+	/* Checks the operation status. */
 	error = drv_usb_control(
 		device,
 		DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD |
@@ -7028,17 +7081,17 @@ usb_string_descriptor(
 		USB_REQ_GET_DESCRIPTOR,
 		(uint16_t)((DRV_USB_DESCRIPTOR_STRING << 8) | index), language,
 		header, sizeof(header), USB_CONTROL_TIMEOUT_MS, &actual);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
 	/* Handles the actual condition. */
 	if (actual != sizeof(header) || header[0] < 2U ||
-	    (header[0] & 1U) != 0 || header[1] != DRV_USB_DESCRIPTOR_STRING)
-
+	    (header[0] & 1U) != 0 || header[1] != DRV_USB_DESCRIPTOR_STRING) {
 		/* Returns the computed result. */
 		return EILSEQ;
+	}
+
+	/* Checks the operation status. */
 	error = drv_usb_control(
 		device,
 		DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD |
@@ -7046,17 +7099,15 @@ usb_string_descriptor(
 		USB_REQ_GET_DESCRIPTOR,
 		(uint16_t)((DRV_USB_DESCRIPTOR_STRING << 8) | index), language,
 		descriptor, header[0], USB_CONTROL_TIMEOUT_MS, &actual);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
 	/* Handles the actual condition. */
 	if (actual != header[0] || descriptor[0] != header[0] ||
-	    descriptor[1] != DRV_USB_DESCRIPTOR_STRING)
-
+	    descriptor[1] != DRV_USB_DESCRIPTOR_STRING) {
 		/* Returns the computed result. */
 		return EILSEQ;
+	}
 	*descriptor_length = actual;
 	/* Reports successful completion. */
 	return 0;
@@ -7075,10 +7126,10 @@ utf8_append(
 
 	/* Handles the codepoint condition. */
 	if (codepoint == 0 || codepoint > 0x10ffffU ||
-	    (codepoint >= 0xd800U && codepoint <= 0xdfffU))
-
+	    (codepoint >= 0xd800U && codepoint <= 0xdfffU)) {
 		/* Returns the computed result. */
 		return EILSEQ;
+	}
 
 	/* Handles the codepoint condition. */
 	if (codepoint < 0x80U) {
@@ -7126,17 +7177,17 @@ device_urb_get(
 		if ((state & (USB_DEVICE_LIFECYCLE_DISCONNECTING |
 			      USB_DEVICE_LIFECYCLE_FINALIZING)) != 0 ||
 		    (state & USB_DEVICE_LIFECYCLE_URB_MASK) ==
-			    USB_DEVICE_LIFECYCLE_URB_MASK)
-
+			    USB_DEVICE_LIFECYCLE_URB_MASK) {
 			/* Reports successful completion. */
 			return 0;
+		}
 
 		/* Checks the hal atomic compare exchange acq rel result. */
 		if (hal_atomic_compare_exchange_acq_rel(&device->lifecycle,
-							&state, state + 1U))
-
+							&state, state + 1U)) {
 			/* Reports operation failure. */
 			return 1;
+		}
 	}
 }
 
@@ -7152,19 +7203,19 @@ endpoint_retained_by_device(
 
 	/* Handles the device availability. */
 	if (device == NULL || endpoint == NULL || endpoint->interface == NULL ||
-	    endpoint->alternate == NULL)
-
+	    endpoint->alternate == NULL) {
 		/* Reports successful completion. */
 		return 0;
-	interface = endpoint->interface;
+	}
 
 	/* Handles the configuration availability. */
+	interface = endpoint->interface;
 	if (interface->device != device || interface->configuration == NULL ||
 	    interface->configuration->device != device ||
-	    endpoint->alternate->interface != interface)
-
+	    endpoint->alternate->interface != interface) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	/* Process each linked entry. */
 	for (alternate = interface->alternates; alternate != NULL;
 	     alternate = alternate->next) {
@@ -7193,14 +7244,14 @@ endpoint_is_halted(
 	const struct drv_usb_device *device,
 	const struct drv_usb_endpoint *endpoint)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = endpoint_uses_halt(device, endpoint) &&
+	error = endpoint_uses_halt(device, endpoint) &&
 			  atomic_load_acquire(&endpoint->halted) != 0;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the urb hcd get operation. */
@@ -7212,10 +7263,10 @@ urb_hcd_get(
 
 	/* Checks the hal atomic compare exchange acq rel result. */
 	if (!hal_atomic_compare_exchange_acq_rel(&urb->hcd_owned, &expected,
-						 1U))
-
+						 1U)) {
 		/* Returns the computed result. */
 		return EBUSY;
+	}
 
 	/*
  * The submitting caller owns a reference until this function returns,
@@ -7248,9 +7299,8 @@ urb_admission_get(
 	if (endpoint == &device->endpoint0) {
 		/* Handles the urb condition. */
 		if (urb->control_admitted != USB_CONTROL_ADMISSION_EXTERNAL) {
-			error = device_control_try_lock(device);
-
 			/* Checks the operation status. */
+			error = device_control_try_lock(device);
 			if (error != 0)
 				return error;
 			urb->control_admitted = USB_CONTROL_ADMISSION_OWNED;
@@ -7269,15 +7319,15 @@ urb_admission_get(
 	if (!endpoint_retained_by_device(device, endpoint))
 		return EINVAL;
 	interface = endpoint->interface;
-	error = io_gate_enter(&interface->io_gate);
 
 	/* Checks the operation status. */
+	error = io_gate_enter(&interface->io_gate);
 	if (error != 0)
 		return error;
 	urb->io_interface = interface;
-	error = binding_admission_enter(urb, interface, submitting_owner);
 
 	/* Checks the operation status. */
+	error = binding_admission_enter(urb, interface, submitting_owner);
 	if (error != 0) {
 		urb_admission_put(urb);
 
@@ -7311,19 +7361,19 @@ binding_admission_enter(
 	int error;
 
 	*submitting_owner = NULL;
-	owner = interface_binding_owner(interface);
 
 	/* Handles the owner availability. */
+	owner = interface_binding_owner(interface);
 	if (owner == NULL)
 		return 0;
-	state = atomic_load_acquire(&owner->binding_state);
 
 	/* Handles the state condition. */
+	state = atomic_load_acquire(&owner->binding_state);
 	if (state != USB_BINDING_PROBING && state != USB_BINDING_BOUND)
 		return ENODEV;
-	error = io_gate_enter(&owner->binding_submitters);
 
 	/* Checks the operation status. */
+	error = io_gate_enter(&owner->binding_submitters);
 	if (error != 0) {
 		state = atomic_load_acquire(&owner->binding_state);
 
@@ -7333,19 +7383,20 @@ binding_admission_enter(
 			       ? error
 			       : ENODEV;
 	}
+
 	*submitting_owner = owner;
-	state = atomic_load_acquire(&owner->binding_state);
 
 	/* Handles the state condition. */
+	state = atomic_load_acquire(&owner->binding_state);
 	if (state != USB_BINDING_PROBING && state != USB_BINDING_BOUND) {
 		binding_submitter_put(owner);
 		*submitting_owner = NULL;
 		/* Returns the computed result. */
 		return ENODEV;
 	}
-	error = io_gate_enter(&owner->binding_gate);
 
 	/* Checks the operation status. */
+	error = io_gate_enter(&owner->binding_gate);
 	if (error != 0) {
 		binding_submitter_put(owner);
 		*submitting_owner = NULL;
@@ -7357,9 +7408,9 @@ binding_admission_enter(
 			       ? error
 			       : ENODEV;
 	}
-	state = atomic_load_acquire(&owner->binding_state);
 
 	/* Checks the interface binding owner result. */
+	state = atomic_load_acquire(&owner->binding_state);
 	if ((state != USB_BINDING_PROBING && state != USB_BINDING_BOUND) ||
 	    interface_binding_owner(interface) != owner) {
 		io_gate_exit(&owner->binding_gate);
@@ -7368,6 +7419,7 @@ binding_admission_enter(
 		/* Returns the computed result. */
 		return ENODEV;
 	}
+
 	urb->binding_owner = owner;
 
 	/* Reports successful completion. */
@@ -7385,9 +7437,9 @@ urb_cancel_to(
 	/* Checks the hal atomic load acquire result. */
 	if (!u || hal_atomic_load_acquire(&u->status) != DRV_USB_URB_PENDING)
 		return EINVAL;
-	e = u->device->bus->hcd->ops->urb_dequeue(u->device->bus->hcd, u);
 
 	/* Handles the e condition. */
+	e = u->device->bus->hcd->ops->urb_dequeue(u->device->bus->hcd, u);
 	if (e)
 		return e;
 	published = urb_publish_terminal(u, terminal, 0);
@@ -7414,6 +7466,7 @@ device_control_lock(
 
 		deadline = UINT64_MAX - now < ticks ? UINT64_MAX : now + ticks;
 	}
+
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		/* Checks the device control try lock result. */
@@ -7422,10 +7475,10 @@ device_control_lock(
 
 		/* Handles the device is disconnecting condition. */
 		if (device_is_disconnecting(device) ||
-		    device_is_quarantined(device))
-
+		    device_is_quarantined(device)) {
 			/* Returns the computed result. */
 			return ENODEV;
+		}
 
 		/* Checks the hal atomic load acquire result. */
 		if (hal_atomic_load_acquire(&device->bus->stopping) != 0)
@@ -7454,14 +7507,14 @@ sync_data(
 	/* Handles the device availability. */
 	if (device == NULL || endpoint == NULL)
 		return EINVAL;
-	urb = drv_usb_urb_alloc(device, endpoint, 0);
 
 	/* Handles the urb availability. */
+	urb = drv_usb_urb_alloc(device, endpoint, 0);
 	if (urb == NULL)
 		return ENOMEM;
-	error = drv_usb_urb_reserve_sync(urb, length);
 
 	/* Checks the operation status. */
+	error = drv_usb_urb_reserve_sync(urb, length);
 	if (error == 0) {
 		error = drv_usb_urb_setup(urb, buffer, length, 0, timeout_ms,
 					  NULL, NULL);
@@ -7504,13 +7557,13 @@ host_interface_reset_endpoints(
 	 * visible only inside a subsequently quarantined device. */
 	/* Process each remaining element. */
 	for (index = 0; index < alternate->endpoint_count; index++) {
+		/* Checks the operation status. */
 		error = hcd->ops->endpoint_reset(hcd,
 						 &alternate->endpoints[index]);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 	}
+
 	/* Process each remaining element. */
 	for (index = 0; index < alternate->endpoint_count; index++) {
 		endpoint_publish_halted(device, &alternate->endpoints[index],
@@ -7533,19 +7586,19 @@ endpoint_binding_pin(
 	int error;
 
 	*pinned_owner = NULL;
-	owner = interface_binding_owner(interface);
 
 	/* Handles the owner availability. */
+	owner = interface_binding_owner(interface);
 	if (owner == NULL)
 		return ENODEV;
-	state = atomic_load_acquire(&owner->binding_state);
 
 	/* Handles the state condition. */
+	state = atomic_load_acquire(&owner->binding_state);
 	if (state != USB_BINDING_PROBING && state != USB_BINDING_BOUND)
 		return ENODEV;
-	error = io_gate_enter(&owner->binding_submitters);
 
 	/* Checks the operation status. */
+	error = io_gate_enter(&owner->binding_submitters);
 	if (error != 0) {
 		/* Computes the function result. */
 		function_result =
@@ -7564,9 +7617,9 @@ endpoint_binding_pin(
 		/* Returns the computed result. */
 		return ENODEV;
 	}
-	error = io_gate_enter(&owner->binding_gate);
 
 	/* Checks the operation status. */
+	error = io_gate_enter(&owner->binding_gate);
 	if (error != 0) {
 		binding_submitter_put(owner);
 
@@ -7589,6 +7642,7 @@ endpoint_binding_pin(
 		/* Returns the computed result. */
 		return ENODEV;
 	}
+
 	*pinned_owner = owner;
 	/* Reports successful completion. */
 	return 0;
@@ -7614,17 +7668,17 @@ endpoint_clear_halt_request(
 	/* Handles the urb availability. */
 	if (urb == NULL)
 		return ENODEV;
+
+	/* Checks the operation status. */
 	error = drv_usb_urb_setup_control_flags(
 		urb, &request, NULL, 0, DRV_USB_URB_RECLAIM_SAFE,
 		USB_CONTROL_TIMEOUT_MS, NULL, NULL);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 	urb->control_admitted = USB_CONTROL_ADMISSION_EXTERNAL;
-	error = drv_usb_urb_submit(urb);
 
 	/* Checks the operation status. */
+	error = drv_usb_urb_submit(urb);
 	if (error != 0)
 		return error;
 	*accepted = 1U;

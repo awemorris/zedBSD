@@ -67,9 +67,9 @@ packet_socket_init(
 	    "packet socket registry");
 
 	/* Registers AF_PACKET. */
-	error = socket_family_register(AF_PACKET, &packet_family);
 
 	/* Reports why the registration failed. */
+	error = socket_family_register(AF_PACKET, &packet_family);
 	if (error != 0)
 		return error;
 
@@ -101,23 +101,25 @@ packet_socket_deliver(
 
 	/* References every socket under the registry lock. */
 	irq = spin_lock_irqsave(&packet_registry_lock);
+
 	for (endpoint = packet_sockets; endpoint != NULL;
 	     endpoint = endpoint->next) {
 		if (count < SOCKET_MAX && socket_tryref(&endpoint->socket))
 			snapshot[count++] = endpoint;
 	}
+
 	spin_unlock_irqrestore(&packet_registry_lock, irq);
 
 	/* Queues a copy on each socket whose filter matches the frame. */
 	for (index = 0; index < count; index++) {
-		endpoint = snapshot[index];
-
 		/* Skips a socket bound to another interface or protocol. */
+		endpoint = snapshot[index];
 		if (endpoint->ifindex != 0 &&
 		    endpoint->ifindex != packet->device->ifindex) {
 			socket_release(&endpoint->socket);
 			continue;
 		}
+
 		if (endpoint->protocol != 0 &&
 		    endpoint->protocol != ETHERNET_TYPE_ALL &&
 		    endpoint->protocol != packet->protocol) {
@@ -236,6 +238,7 @@ packet_sendto(
 	} else {
 		ifindex = endpoint->ifindex;
 	}
+
 	device = net_device_find_by_index_ref(ifindex);
 	if (device == NULL)
 		return -ENODEV;
@@ -252,12 +255,14 @@ packet_sendto(
 		net_device_release(device);
 		return -ENOBUFS;
 	}
+
 	data = packet_buf_append(packet, length);
 	if (data == NULL) {
 		packet_buf_free(packet);
 		net_device_release(device);
 		return -EMSGSIZE;
 	}
+
 	memcpy(data, buffer, length);
 
 	/* Transmits it as is. */
@@ -340,12 +345,14 @@ packet_close(
 
 	/* Unlinks the endpoint from the registry. */
 	irq = spin_lock_irqsave(&packet_registry_lock);
+
 	for (link = &packet_sockets; *link != NULL; link = &(*link)->next) {
 		if (*link != endpoint)
 			continue;
 		*link = endpoint->next;
 		break;
 	}
+
 	spin_unlock_irqrestore(&packet_registry_lock, irq);
 
 	kern_free(endpoint);
@@ -375,9 +382,12 @@ packet_create(
 
 	/* Registers it for delivery. */
 	irq = spin_lock_irqsave(&packet_registry_lock);
+
 	endpoint->next = packet_sockets;
 	packet_sockets = endpoint;
+
 	spin_unlock_irqrestore(&packet_registry_lock, irq);
+
 	*result = &endpoint->socket;
 
 	/* Reports the created socket. */

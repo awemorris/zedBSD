@@ -266,11 +266,13 @@ tty_vt_activate(
 
 	/* Clears the screen and re-renders the console's history. */
 	irq = spin_lock_irqsave(&console_output_lock);
+
 	active_vt = vt;
 	console_escape_state[vt] = 0;
 	hal_cons_clear();
 	tty_render(vt, vt_history[vt], vt_history_used[vt]);
 	hal_cons_update_cursor();
+
 	spin_unlock_irqrestore(&console_output_lock, irq);
 
 	/* Reports the switched console. */
@@ -309,6 +311,7 @@ tty_console_input_event(
 		(void)tty_vt_activate(key - INPUT_KEY_F1);
 		return;
 	}
+
 	tty = &console_ttys[active_vt];
 
 	/*
@@ -360,6 +363,7 @@ tty_console_input_event(
 	default:
 		break;
 	}
+
 	if (sequence != NULL) {
 		accepted = 0;
 		irq = spin_lock_irqsave(&tty->lock);
@@ -369,10 +373,12 @@ tty_console_input_event(
 				tty->input[tty->input_head] = (uint8_t)sequence[index];
 				tty->input_head = (tty->input_head + 1U) % TTY_INPUT_MAX;
 			}
+
 			tty->input_used += sequence_length;
 			waitq_wake_all(&tty->read_waitq);
 			accepted = 1;
 		}
+
 		spin_unlock_irqrestore(&tty->lock, irq);
 		if (accepted)
 			poll_notify();
@@ -397,8 +403,11 @@ tty_console_input_event(
 
 	/* Runs the line discipline and delivers its echo and signal. */
 	irq = spin_lock_irqsave(&tty->lock);
+
 	tty_input_byte_locked(tty, byte, &result);
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	if (result.notify)
 		poll_notify();
 	if (!result.output_stopped)
@@ -449,8 +458,11 @@ tty_vt_read(
 
 	/* Reads in the mode the terminal is in. */
 	irq = spin_lock_irqsave(&tty->lock);
+
 	canonical = tty->termios.c_lflag & ICANON;
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	nonblocking = (file_status_flags_get(file) & O_NONBLOCK) != 0;
 	if (canonical)
 		result = tty_read_canonical(tty, buffer, size, nonblocking);
@@ -505,8 +517,11 @@ tty_vt_write(
 
 	/* Expands newlines to carriage return and newline under ONLCR. */
 	irq = spin_lock_irqsave(&tty->lock);
+
 	oflag = tty->termios.c_oflag;
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	if ((oflag & (OPOST | ONLCR)) == (OPOST | ONLCR)) {
 		start = 0;
 		for (i = 0; i < size; i++) {
@@ -517,6 +532,7 @@ tty_vt_write(
 				start = i + 1U;
 			}
 		}
+
 		if (start < size)
 			tty_echo(tty, bytes + start, size - start);
 	} else {
@@ -568,9 +584,8 @@ tty_console_ioctl(
 {
 	int error;
 
-	error = tty_vt_ioctl(0, file, request, argument);
-
 	/* Reports the failure. */
+	error = tty_vt_ioctl(0, file, request, argument);
 	if (error != 0)
 		return error;
 
@@ -592,9 +607,9 @@ tty_vt_ioctl(
 
 	if (vt >= TTY_VT_COUNT)
 		return ENODEV;
-	error = tty_ioctl_instance(&console_ttys[vt], file, request, argument);
 
 	/* Reports the failure. */
+	error = tty_ioctl_instance(&console_ttys[vt], file, request, argument);
 	if (error != 0)
 		return error;
 
@@ -613,9 +628,8 @@ tty_console_poll(
 {
 	int error;
 
-	error = tty_vt_poll(0, file, events, revents);
-
 	/* Reports the failure. */
+	error = tty_vt_poll(0, file, events, revents);
 	if (error != 0)
 		return error;
 
@@ -651,6 +665,7 @@ tty_vt_poll(
 
 	/* Readable with a record or input byte; writable unless flow-stopped. */
 	irq = spin_lock_irqsave(&tty->lock);
+
 	if ((tty->termios.c_lflag & ICANON) != 0)
 		readable = tty->record_used != 0;
 	else
@@ -659,7 +674,9 @@ tty_vt_poll(
 		result |= events & (POLLIN | POLLRDNORM);
 	if (!tty->output_stopped)
 		result |= events & (POLLOUT | POLLWRNORM);
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	*revents = result;
 
 	/* Reports the readiness. */
@@ -707,6 +724,7 @@ tty_detach_process(
 
 	/* A stale association only needs the process side cleared. */
 	irq = spin_lock_irqsave(&tty->lock);
+
 	if (tty->association_generation != generation) {
 		spin_unlock_irqrestore(&tty->lock, irq);
 		process_controlling_tty_detach_one(process, tty, generation);
@@ -721,7 +739,9 @@ tty_detach_process(
 		tty->foreground_pgrp = 0;
 		tty_advance_association_locked(tty);
 	}
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	if (session != 0)
 		process_controlling_tty_detach_session(session, tty, generation);
 	else
@@ -750,7 +770,9 @@ tty_pty_exists(
 
 	/* Samples the active flag under the pair lock. */
 	irq = spin_lock_irqsave(&pty_pairs[index].lock);
+
 	result = pty_pairs[index].active;
+
 	spin_unlock_irqrestore(&pty_pairs[index].lock, irq);
 
 	/* Reports the sampled flag. */
@@ -810,9 +832,9 @@ tty_pty_register(
 		pair->slave.winsize.ws_col = HAL_CONS_COLUMNS;
 		pair->slave.association_generation = 1;
 	}
-	error = cdev_register("ptmx", 0x00010001U, &pty_ptmx_ops, NULL);
 
 	/* Reports why the registration failed. */
+	error = cdev_register("ptmx", 0x00010001U, &pty_ptmx_ops, NULL);
 	if (error != 0)
 		return error;
 
@@ -924,6 +946,7 @@ tty_console_csi(
 				hal_cons_clear_row(row);
 			(void)hal_cons_set_cursor(0U, 0U);
 		}
+
 		break;
 	case 'A':
 		if (amount < state.row)
@@ -967,6 +990,7 @@ tty_console_csi(
 		} else if (!console_escape_has_parameter[vt] || amount == 0U) {
 			hal_cons_clear_to_eol();
 		}
+
 		break;
 	default:
 		break;
@@ -1003,8 +1027,10 @@ tty_render(
 				console_escape_state[vt] = 1U;
 				index++;
 			}
+
 			continue;
 		}
+
 		if (console_escape_state[vt] == 1U) {
 			byte = bytes[index];
 			index++;
@@ -1017,8 +1043,10 @@ tty_render(
 				hal_cons_write_n(bytes + index - 1U, 1U);
 				console_escape_state[vt] = 0U;
 			}
+
 			continue;
 		}
+
 		if (bytes[index] >= '0' && bytes[index] <= '9') {
 			console_escape_has_parameter[vt] = 1U;
 			if (console_escape_parameter[vt] < 1000U)
@@ -1027,6 +1055,7 @@ tty_render(
 			index++;
 			continue;
 		}
+
 		tty_console_csi(vt, (unsigned char)bytes[index]);
 		index++;
 		console_escape_state[vt] = 0U;
@@ -1044,14 +1073,14 @@ tty_echo(
 	unsigned long irq;
 	size_t drop;
 
-	vt = (unsigned)(tty - console_ttys);
-
 	/* Ignores a pseudo terminal or an empty write. */
+	vt = (unsigned)(tty - console_ttys);
 	if (vt >= TTY_VT_COUNT || length == 0)
 		return;
 
 	/* Keeps the newest history, dropping the oldest to make room. */
 	irq = spin_lock_irqsave(&console_output_lock);
+
 	if (length >= TTY_VT_HISTORY) {
 		bytes += length - TTY_VT_HISTORY;
 		length = TTY_VT_HISTORY;
@@ -1062,10 +1091,12 @@ tty_echo(
 		    vt_history_used[vt] - drop);
 		vt_history_used[vt] -= drop;
 	}
+
 	memcpy(vt_history[vt] + vt_history_used[vt], bytes, length);
 	vt_history_used[vt] += length;
 	if (vt == active_vt)
 		tty_render(vt, bytes, length);
+
 	spin_unlock_irqrestore(&console_output_lock, irq);
 }
 
@@ -1187,6 +1218,7 @@ tty_input_byte_locked(
 	} else if (byte == '\n' && (tty->termios.c_iflag & INLCR) != 0) {
 		byte = '\r';
 	}
+
 	if ((tty->termios.c_iflag & ISTRIP) != 0)
 		byte &= 0x7fU;
 	lflag = tty->termios.c_lflag;
@@ -1205,6 +1237,7 @@ tty_input_byte_locked(
 			tty_echo_append(result, '^');
 			tty_echo_append(result, '\b');
 		}
+
 		result->notify = 1;
 		goto out;
 	}
@@ -1223,6 +1256,7 @@ tty_input_byte_locked(
 		result->output_stopped = 1;
 		goto out;
 	}
+
 	if (!quoted && (tty->termios.c_iflag & IXON) != 0 &&
 	    tty_cc_matches(tty, VSTART, byte)) {
 		tty->output_stopped = 0;
@@ -1301,6 +1335,7 @@ tty_input_byte_locked(
 				tty->edit[tty->edit_used] = byte;
 				tty->edit_used++;
 			}
+
 			tty_commit_locked(tty, 0);
 			if ((lflag & (ECHO | ECHONL)) != 0)
 				tty_echo_append(result, byte);
@@ -1320,6 +1355,7 @@ tty_input_byte_locked(
 		if ((lflag & ECHO) != 0)
 			tty_echo_character(tty, result, byte);
 	}
+
 	result->notify = 1;
 out:
 	result->output_flags = tty->termios.c_oflag;
@@ -1342,9 +1378,12 @@ tty_process_controls(
 
 	/* The session and the association generation must both match. */
 	irq = spin_lock_irqsave(&tty->lock);
+
 	generation = tty->association_generation;
 	session = tty->session;
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	if (session != process->session)
 		return 0;
 	if (!process_controlling_tty_matches(process, tty, generation))
@@ -1401,21 +1440,25 @@ tty_assign_controlling(
 
 	/* Takes a free terminal, or one already held by this session. */
 	irq = spin_lock_irqsave(&tty->lock);
+
 	if (tty->session != 0 && tty->session != process->session) {
 		spin_unlock_irqrestore(&tty->lock, irq);
 		return EPERM;
 	}
+
 	if (tty->association_generation == 0)
 		tty->association_generation = 1;
 	claimed = tty->session == 0;
 	tty->session = process->session;
 	tty->foreground_pgrp = process->pgrp;
 	generation = tty->association_generation;
+
 	spin_unlock_irqrestore(&tty->lock, irq);
 
 	/* Publishes the association on the process, undoing a lost race. */
 	error = process_controlling_tty_attach(process, tty, generation);
 	irq = spin_lock_irqsave(&tty->lock);
+
 	if (tty->association_generation != generation ||
 	    tty->session != process->session)
 		error = EBUSY;
@@ -1427,7 +1470,9 @@ tty_assign_controlling(
 		tty->foreground_pgrp = 0;
 		tty_advance_association_locked(tty);
 	}
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	if (error != 0)
 		process_controlling_tty_detach_one(process, tty, generation);
 
@@ -1479,6 +1524,7 @@ tty_background(
 				return EIO;
 			return 0;
 		}
+
 		if (process_pgrp_is_orphaned(process))
 			return EIO;
 		if (decision != 0) {
@@ -1520,6 +1566,7 @@ tty_wait_output_enabled(
 			spin_unlock_irqrestore(&tty->lock, irq);
 			return EAGAIN;
 		}
+
 		sequence = waitq_sequence(&tty->write_waitq);
 		error = waitq_sleep(&tty->write_waitq, &tty->lock, sequence, 0,
 		    WAITQ_INTERRUPTIBLE);
@@ -1528,11 +1575,14 @@ tty_wait_output_enabled(
 			return error;
 		}
 	}
+
 	if (tty->hungup) {
 		spin_unlock_irqrestore(&tty->lock, irq);
 		return EIO;
 	}
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	return 0;
 }
 
@@ -1560,10 +1610,12 @@ tty_read_canonical(
 			spin_unlock_irqrestore(&tty->lock, irq);
 			return 0;
 		}
+
 		if (nonblocking) {
 			spin_unlock_irqrestore(&tty->lock, irq);
 			return -EAGAIN;
 		}
+
 		sequence = waitq_sequence(&tty->read_waitq);
 		error = waitq_sleep(&tty->read_waitq, &tty->lock, sequence, 0,
 		    WAITQ_INTERRUPTIBLE);
@@ -1584,11 +1636,14 @@ tty_read_canonical(
 		memcpy(output, record->data + record->offset, count);
 		record->offset += count;
 	}
+
 	if (record->offset == record->length) {
 		tty->record_tail = (tty->record_tail + 1U) % TTY_RECORDS;
 		tty->record_used--;
 	}
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	poll_notify();
 
 	/* Reports the bytes read. */
@@ -1618,6 +1673,7 @@ tty_read_noncanonical(
 	/* Reads the VMIN and VTIME settings this read has to honour. */
 	output = buffer;
 	irq = spin_lock_irqsave(&tty->lock);
+
 	minimum = tty->termios.c_cc[VMIN];
 	deciseconds = tty->termios.c_cc[VTIME];
 	deadline = 0;
@@ -1653,6 +1709,7 @@ tty_read_noncanonical(
 			spin_unlock_irqrestore(&tty->lock, irq);
 			return 0;
 		}
+
 		if (nonblocking) {
 			spin_unlock_irqrestore(&tty->lock, irq);
 			return -EAGAIN;
@@ -1672,8 +1729,10 @@ tty_read_noncanonical(
 				spin_unlock_irqrestore(&tty->lock, irq);
 				return -error;
 			}
+
 			timed_input_used = tty->input_used;
 		}
+
 		error = waitq_sleep(&tty->read_waitq, &tty->lock, sequence,
 		    deadline, WAITQ_INTERRUPTIBLE);
 		if (error == ETIMEDOUT)
@@ -1693,7 +1752,9 @@ tty_read_noncanonical(
 		tty->input_tail = (tty->input_tail + 1U) % TTY_INPUT_MAX;
 		tty->input_used--;
 	}
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	poll_notify();
 
 	/* Reports the bytes read. */
@@ -1784,6 +1845,7 @@ tty_ioctl_instance(
 			if (error != 0)
 				return error;
 		}
+
 		irq = spin_lock_irqsave(&tty->lock);
 		if (request == TCSETSF)
 			tty_flush_input_locked(tty);
@@ -1795,6 +1857,7 @@ tty_ioctl_instance(
 			tty->output_stopped_by_ixon = 0;
 			flow_resumed = 1;
 		}
+
 		tty->termios = termios_value;
 		waitq_wake_all(&tty->read_waitq);
 		waitq_wake_all(&tty->write_waitq);
@@ -1893,11 +1956,13 @@ tty_ioctl_instance(
 			spin_unlock_irqrestore(&tty->lock, irq);
 			poll_notify();
 		}
+
 		if (queue != TCIFLUSH) {
 			error = tty_backend_flush_output(tty, file);
 			if (error != 0)
 				return error;
 		}
+
 		return 0;
 	case TCXONC:
 		/* Suspends or resumes output, or sends a flow character. */
@@ -1922,12 +1987,14 @@ tty_ioctl_instance(
 				if (action == TCOON)
 					waitq_wake_all(&tty->write_waitq);
 			}
+
 			spin_unlock_irqrestore(&tty->lock, irq);
 			if (error == 0)
 				tty_backend_set_flow(tty, action == TCOOFF);
 			poll_notify();
 			return error;
 		}
+
 		irq = spin_lock_irqsave(&tty->lock);
 		if (action == TCIOFF)
 			character = tty->termios.c_cc[VSTOP];
@@ -2006,10 +2073,12 @@ pty_output_bytes(
 			pair->output_head = (pair->output_head + 1U) % PTY_OUTPUT_MAX;
 			pair->output_used++;
 		}
+
 		if (done != 0) {
 			waitq_wake_all(&pair->output_waitq);
 			poll_notify();
 		}
+
 		if (done == length)
 			break;
 		if (!pair->active || !pair->master_open) {
@@ -2018,12 +2087,14 @@ pty_output_bytes(
 				return (ssize_t)done;
 			return -EIO;
 		}
+
 		if (nonblocking) {
 			spin_unlock_irqrestore(&pair->lock, irq);
 			if (done != 0)
 				return (ssize_t)done;
 			return -EAGAIN;
 		}
+
 		sequence = waitq_sequence(&pair->output_waitq);
 		error = waitq_sleep(&pair->output_waitq, &pair->lock,
 		    sequence, 0, WAITQ_INTERRUPTIBLE);
@@ -2034,6 +2105,7 @@ pty_output_bytes(
 			return -error;
 		}
 	}
+
 	spin_unlock_irqrestore(&pair->lock, irq);
 
 	/* Reports the bytes queued. */
@@ -2051,6 +2123,7 @@ tty_backend_pair(
 		if (&pty_pairs[index].slave == tty)
 			return &pty_pairs[index];
 	}
+
 	return NULL;
 }
 
@@ -2063,14 +2136,15 @@ tty_backend_set_flow(
 	struct pty_pair *pair;
 	unsigned long irq;
 
-	pair = tty_backend_pair(tty);
-
 	/* A console has no master to tell. */
+	pair = tty_backend_pair(tty);
 	if (pair == NULL)
 		return;
 	irq = spin_lock_irqsave(&pair->lock);
+
 	pair->slave_output_stopped = stopped != 0;
 	waitq_wake_all(&pair->output_waitq);
+
 	spin_unlock_irqrestore(&pair->lock, irq);
 }
 
@@ -2095,6 +2169,7 @@ tty_backend_drain(
 
 	/* Sleeps while bytes remain and the master can still read them. */
 	irq = spin_lock_irqsave(&pair->lock);
+
 	while (pair->active && pair->master_open && pair->output_used != 0) {
 		sequence = waitq_sequence(&pair->output_waitq);
 		error = waitq_sleep(&pair->output_waitq, &pair->lock, sequence,
@@ -2104,11 +2179,14 @@ tty_backend_drain(
 			return error;
 		}
 	}
+
 	if (!pair->active || !pair->master_open) {
 		spin_unlock_irqrestore(&pair->lock, irq);
 		return EIO;
 	}
+
 	spin_unlock_irqrestore(&pair->lock, irq);
+
 	return 0;
 }
 
@@ -2131,15 +2209,19 @@ tty_backend_flush_output(
 
 	/* Empties the ring while the master is open. */
 	irq = spin_lock_irqsave(&pair->lock);
+
 	if (!pair->active || !pair->master_open) {
 		spin_unlock_irqrestore(&pair->lock, irq);
 		return EIO;
 	}
+
 	pair->output_head = 0;
 	pair->output_tail = 0;
 	pair->output_used = 0;
 	waitq_wake_all(&pair->output_waitq);
+
 	spin_unlock_irqrestore(&pair->lock, irq);
+
 	poll_notify();
 	return 0;
 }
@@ -2155,9 +2237,8 @@ tty_backend_send_control(
 	ssize_t result;
 	int nonblocking;
 
-	pair = tty_backend_pair(tty);
-
 	/* A virtual console has no peer serial line to receive flow characters. */
+	pair = tty_backend_pair(tty);
 	if (pair == NULL)
 		return 0;
 
@@ -2188,8 +2269,11 @@ pty_input_byte(
 
 	/* Runs the line discipline. */
 	irq = spin_lock_irqsave(&tty->lock);
+
 	tty_input_byte_locked(tty, byte, &result);
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	if (result.flow_changed)
 		tty_backend_set_flow(tty, result.output_stopped);
 	if (result.notify)
@@ -2231,6 +2315,7 @@ pty_master_open(
 	if (handle == NULL)
 		return ENFILE;
 	irq = spin_lock_irqsave(&pty_registry_lock);
+
 	for (i = 0; i < PTY_MAX; i++) {
 		if (!pty_pairs[i].active) {
 			pair = &pty_pairs[i];
@@ -2249,7 +2334,9 @@ pty_master_open(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&pty_registry_lock, irq);
+
 	if (pair == NULL) {
 		kern_free(handle);
 		return ENOSPC;
@@ -2257,6 +2344,7 @@ pty_master_open(
 
 	/* Resets the slave, detaching any session of its previous life. */
 	irq = spin_lock_irqsave(&pair->slave.lock);
+
 	old_session = pair->slave.session;
 	old_association_generation = pair->slave.association_generation;
 	tty_advance_association_locked(&pair->slave);
@@ -2268,7 +2356,9 @@ pty_master_open(
 	pair->slave.output_stopped = 0;
 	pair->slave.output_stopped_by_ixon = 0;
 	pair->slave.literal_next = 0;
+
 	spin_unlock_irqrestore(&pair->slave.lock, irq);
+
 	if (old_session > 0)
 		process_controlling_tty_detach_session(old_session, &pair->slave,
 		    old_association_generation);
@@ -2308,15 +2398,18 @@ pty_master_close(
 	/* Marks the master closed; the pair dies with the last slave. */
 	pair = handle->pair;
 	irq = spin_lock_irqsave(&pair->lock);
+
 	if (pty_handle_valid_locked(handle)) {
 		pair->master_open = 0;
 		deactivate = pair->slave_opens == 0;
 		waitq_wake_all(&pair->output_waitq);
 	}
+
 	spin_unlock_irqrestore(&pair->lock, irq);
 
 	/* Hangs up the slave and releases its session. */
 	irq = spin_lock_irqsave(&pair->slave.lock);
+
 	pair->slave.hungup = 1;
 	pair->slave.output_stopped = 0;
 	pair->slave.output_stopped_by_ixon = 0;
@@ -2328,9 +2421,12 @@ pty_master_close(
 		pair->slave.foreground_pgrp = 0;
 		tty_advance_association_locked(&pair->slave);
 	}
+
 	waitq_wake_all(&pair->slave.read_waitq);
 	waitq_wake_all(&pair->slave.write_waitq);
+
 	spin_unlock_irqrestore(&pair->slave.lock, irq);
+
 	if (session > 0)
 		process_controlling_tty_detach_session(session, &pair->slave,
 		    association_generation);
@@ -2345,6 +2441,7 @@ pty_master_close(
 		pair->active = 0;
 		spin_unlock_irqrestore(&pty_registry_lock, irq);
 	}
+
 	kern_free(handle);
 	file->f_data = NULL;
 	poll_notify();
@@ -2379,6 +2476,7 @@ pty_master_read(
 	/* Waits for output while the slave is open and not flow-stopped. */
 	pair = handle->pair;
 	irq = spin_lock_irqsave(&pair->lock);
+
 	while (pty_handle_valid_locked(handle) &&
 	    (pair->output_used == 0 || pair->slave_output_stopped) &&
 	    (!pair->slave_ever_opened || pair->slave_opens != 0)) {
@@ -2386,6 +2484,7 @@ pty_master_read(
 			spin_unlock_irqrestore(&pair->lock, irq);
 			return -EAGAIN;
 		}
+
 		sequence = waitq_sequence(&pair->output_waitq);
 		error = waitq_sleep(&pair->output_waitq, &pair->lock, sequence, 0,
 		    WAITQ_INTERRUPTIBLE);
@@ -2394,10 +2493,12 @@ pty_master_read(
 			return -error;
 		}
 	}
+
 	if (!pty_handle_valid_locked(handle)) {
 		spin_unlock_irqrestore(&pair->lock, irq);
 		return -EIO;
 	}
+
 	if (pair->output_used == 0) {
 		spin_unlock_irqrestore(&pair->lock, irq);
 		return 0;
@@ -2413,8 +2514,11 @@ pty_master_read(
 		pair->output_tail = (pair->output_tail + 1U) % PTY_OUTPUT_MAX;
 		pair->output_used--;
 	}
+
 	waitq_wake_all(&pair->output_waitq);
+
 	spin_unlock_irqrestore(&pair->lock, irq);
+
 	poll_notify();
 
 	/* Reports the bytes read. */
@@ -2444,12 +2548,14 @@ pty_master_write(
 	/* The slave must still be there to receive. */
 	pair = handle->pair;
 	irq = spin_lock_irqsave(&pair->lock);
+
 	if (!pty_handle_valid_locked(handle) ||
 	    !pair->master_open ||
 	    (pair->slave_ever_opened && pair->slave_opens == 0)) {
 		spin_unlock_irqrestore(&pair->lock, irq);
 		return -EIO;
 	}
+
 	spin_unlock_irqrestore(&pair->lock, irq);
 
 	/* Feeds each byte through the line discipline. */
@@ -2525,6 +2631,7 @@ pty_master_poll(
 	/* Readable with slave output; writable while a slave can read. */
 	pair = handle->pair;
 	irq = spin_lock_irqsave(&pair->lock);
+
 	if (!pty_handle_valid_locked(handle)) {
 		result = POLLERR | POLLHUP;
 	} else {
@@ -2537,7 +2644,9 @@ pty_master_poll(
 		if (pair->slave_ever_opened && pair->slave_opens == 0)
 			result |= POLLHUP;
 	}
+
 	spin_unlock_irqrestore(&pair->lock, irq);
+
 	*revents = result;
 	return 0;
 }
@@ -2554,9 +2663,8 @@ pty_slave_open(
 	unsigned index;
 	unsigned long irq;
 
-	encoded = (uintptr_t)file->f_inode->i_data;
-
 	/* The device node encodes the pair index plus one. */
+	encoded = (uintptr_t)file->f_inode->i_data;
 	if (encoded == 0)
 		return ENXIO;
 	index = (unsigned)(encoded - 1U);
@@ -2569,6 +2677,7 @@ pty_slave_open(
 	/* The pair must be live with its master open and unlocked. */
 	pair = &pty_pairs[index];
 	irq = spin_lock_irqsave(&pair->lock);
+
 	if (!pair->active || !pair->master_open || pair->locked) {
 		spin_unlock_irqrestore(&pair->lock, irq);
 		kern_free(handle);
@@ -2576,12 +2685,15 @@ pty_slave_open(
 			return EACCES;
 		return ENXIO;
 	}
+
 	pair->slave_opens++;
 	pair->slave_ever_opened = 1;
 	handle->pair = pair;
 	handle->generation = pair->generation;
 	handle->master = 0;
+
 	spin_unlock_irqrestore(&pair->lock, irq);
+
 	file->f_data = handle;
 
 	/* A session leader without O_NOCTTY takes the slave as its terminal. */
@@ -2617,6 +2729,7 @@ pty_slave_close(
 	/* The last slave close wakes the master and may free the pair. */
 	pair = handle->pair;
 	irq = spin_lock_irqsave(&pair->lock);
+
 	if (pty_handle_valid_locked(handle) && pair->slave_opens != 0) {
 		pair->slave_opens--;
 		if (pair->slave_opens == 0) {
@@ -2624,12 +2737,15 @@ pty_slave_close(
 			deactivate = !pair->master_open;
 		}
 	}
+
 	spin_unlock_irqrestore(&pair->lock, irq);
+
 	if (deactivate) {
 		irq = spin_lock_irqsave(&pty_registry_lock);
 		pair->active = 0;
 		spin_unlock_irqrestore(&pty_registry_lock, irq);
 	}
+
 	kern_free(handle);
 	file->f_data = NULL;
 	poll_notify();
@@ -2670,8 +2786,11 @@ pty_slave_read(
 
 	/* Reads in the mode the terminal is in. */
 	irq = spin_lock_irqsave(&tty->lock);
+
 	canonical = tty->termios.c_lflag & ICANON;
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	nonblocking = (file_status_flags_get(file) & O_NONBLOCK) != 0;
 	if (canonical)
 		result = tty_read_canonical(tty, buffer, size, nonblocking);
@@ -2717,10 +2836,12 @@ pty_slave_write(
 	/* The master must be open to receive. */
 	pair = handle->pair;
 	irq = spin_lock_irqsave(&pair->lock);
+
 	if (!pty_handle_valid_locked(handle) || !pair->master_open) {
 		spin_unlock_irqrestore(&pair->lock, irq);
 		return -EIO;
 	}
+
 	spin_unlock_irqrestore(&pair->lock, irq);
 
 	/* A background process is stopped or refused, then flow control applies. */
@@ -2734,8 +2855,11 @@ pty_slave_write(
 
 	/* Queues each byte, expanding newlines under ONLCR. */
 	irq = spin_lock_irqsave(&tty->lock);
+
 	oflag = tty->termios.c_oflag;
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	while (done < size) {
 		output = bytes + done;
 		output_length = 1;
@@ -2744,6 +2868,7 @@ pty_slave_write(
 			output = (const uint8_t *)"\r\n";
 			output_length = 2;
 		}
+
 		nonblocking = (file_status_flags_get(file) & O_NONBLOCK) != 0;
 		written = pty_output_bytes(pair, output, output_length, nonblocking);
 		if (written != (ssize_t)output_length) {
@@ -2759,12 +2884,14 @@ pty_slave_write(
 				if (!nonblocking)
 					continue;
 			}
+
 			if (done != 0)
 				return (ssize_t)done;
 			if (written < 0)
 				return written;
 			return -EAGAIN;
 		}
+
 		done++;
 	}
 
@@ -2785,9 +2912,9 @@ pty_slave_ioctl(
 	handle = file->f_data;
 	if (handle == NULL)
 		return EIO;
-	error = tty_ioctl_instance(&handle->pair->slave, file, request, argument);
 
 	/* Reports the failure. */
+	error = tty_ioctl_instance(&handle->pair->slave, file, request, argument);
 	if (error != 0)
 		return error;
 
@@ -2821,6 +2948,7 @@ pty_slave_poll(
 	pair = handle->pair;
 	tty = &pair->slave;
 	irq = spin_lock_irqsave(&tty->lock);
+
 	if ((tty->termios.c_lflag & ICANON) != 0)
 		readable = tty->record_used != 0;
 	else
@@ -2828,15 +2956,20 @@ pty_slave_poll(
 	if (readable)
 		result |= events & (POLLIN | POLLRDNORM);
 	output_stopped = tty->output_stopped;
+
 	spin_unlock_irqrestore(&tty->lock, irq);
+
 	irq = spin_lock_irqsave(&pair->lock);
+
 	if (pair->master_open) {
 		if (!output_stopped)
 			result |= events & (POLLOUT | POLLWRNORM);
 	} else {
 		result |= POLLHUP;
 	}
+
 	spin_unlock_irqrestore(&pair->lock, irq);
+
 	*revents = result;
 	return 0;
 }

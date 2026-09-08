@@ -168,7 +168,9 @@ file_format_reserve(
 	/* Serializes reservation publication with positional and ordinary I/O. */
 	mutex_lock(&file->f_lock);
 	mutex_lock(&file->f_inode->i_io_lock);
+
 	error = file_format_reserve_locked(file, size);
+
 	mutex_unlock(&file->f_inode->i_io_lock);
 	mutex_unlock(&file->f_lock);
 
@@ -193,9 +195,8 @@ file_openat(
 {
 	int error;
 
-	error = file_openat_cred(context, NULL, path, flags, mode, result);
-
 	/* Reports the failure. */
+	error = file_openat_cred(context, NULL, path, flags, mode, result);
 	if (error != 0)
 		return error;
 
@@ -252,9 +253,9 @@ file_openat_cred(
 		namei_flags = NAMEI_NOFOLLOW_FINAL;
 	else
 		namei_flags = 0;
-	error = namei_path_flags_at(context, path, namei_flags, &found);
 
 	/* A missing file is created under the parent's namespace transaction. */
+	error = namei_path_flags_at(context, path, namei_flags, &found);
 	if (error == ENOENT &&
 	    ((flags & O_ACCMODE) != O_RDONLY ||
 	     (flags & (O_CREAT | O_TRUNC | O_APPEND)) != 0)) {
@@ -271,6 +272,7 @@ file_openat_cred(
 				goto fail_file;
 			}
 		}
+
 		error = inode_lookup_casefold(parent.p_inode, &last, &collision);
 		if (error == 0) {
 			inode_release(collision);
@@ -279,17 +281,20 @@ file_openat_cred(
 			error = EEXIST;
 			goto fail_file;
 		}
+
 		if (error != ENOENT && error != EOPNOTSUPP) {
 			mount_vfs_transaction_leave(parent.p_mount);
 			path_release(&parent);
 			goto fail_file;
 		}
+
 		if ((flags & O_CREAT) == 0) {
 			mount_vfs_transaction_leave(parent.p_mount);
 			path_release(&parent);
 			error = ENOENT;
 			goto fail_file;
 		}
+
 		if (cred != NULL)
 			error = 0;
 		else
@@ -301,6 +306,7 @@ file_openat_cred(
 			path_set(&found, parent.p_mount, inode);
 			inode_release(inode);
 		}
+
 		mount_vfs_transaction_leave(parent.p_mount);
 		path_release(&parent);
 		if (error != 0)
@@ -320,6 +326,7 @@ file_openat_cred(
 		error = ELOOP;
 		goto fail_file;
 	}
+
 	if (cred != NULL) {
 		requested = 0;
 		if ((flags & O_ACCMODE) != O_WRONLY)
@@ -332,11 +339,13 @@ file_openat_cred(
 			goto fail_file;
 		}
 	}
+
 	if ((flags & O_DIRECTORY) && inode->i_type != INODE_DIR) {
 		path_release(&found);
 		error = ENOTDIR;
 		goto fail_file;
 	}
+
 	if (inode->i_type == INODE_DIR && (flags & O_ACCMODE) != O_RDONLY) {
 		path_release(&found);
 		error = EISDIR;
@@ -375,6 +384,7 @@ file_openat_cred(
 			return error;
 		}
 	}
+
 	*result = file;
 	return 0;
 
@@ -441,6 +451,7 @@ file_open_resolved(
 			return error;
 		}
 	}
+
 	*result = file;
 	return 0;
 }
@@ -500,9 +511,9 @@ file_ioctl(
 	 * ioctl backends synchronize their own state.  A blocking ioctl
 	 * must not exclude read/write on a full-duplex descriptor.
 	 */
-	error = file->f_ops->ioctl(file, request, argument);
 
 	/* Reports the failure. */
+	error = file->f_ops->ioctl(file, request, argument);
 	if (error != 0)
 		return error;
 
@@ -594,6 +605,7 @@ file_content_lease_begin(
 			if (error != 0)
 				goto fail_file;
 		}
+
 		error = file_regular_io_lock(file->f_inode, 0);
 		if (error != 0)
 			goto fail_file;
@@ -612,6 +624,7 @@ file_content_lease_begin(
 			mutex_unlock(&content_inode->i_io_lock);
 			continue;
 		}
+
 		error = vm_object_content_begin(file, 0, content_length, NULL,
 		    &lease->content);
 		if (error != EBUSY && error != EAGAIN)
@@ -623,12 +636,14 @@ file_content_lease_begin(
 		if (error != 0)
 			goto fail_file;
 	}
+
 	if (error != 0) {
 		if (content_inode != file->f_inode)
 			mutex_unlock(&content_inode->i_io_lock);
 		mutex_unlock(&file->f_inode->i_io_lock);
 		goto fail_file;
 	}
+
 	if (content_inode != file->f_inode) {
 		error = vm_object_content_read_begin(file->f_inode);
 		if (error != 0) {
@@ -637,6 +652,7 @@ file_content_lease_begin(
 			mutex_unlock(&file->f_inode->i_io_lock);
 			goto fail_file;
 		}
+
 		visible_gate = 1;
 	}
 
@@ -648,9 +664,12 @@ file_content_lease_begin(
 	 */
 	if (content_inode != file->f_inode)
 		mutex_unlock(&content_inode->i_io_lock);
+
 	mutex_unlock(&file->f_inode->i_io_lock);
+
 	error = vm_object_content_prepare(&lease->content);
 	mutex_lock(&file->f_inode->i_io_lock);
+
 	if (content_inode != file->f_inode)
 		mutex_lock(&content_inode->i_io_lock);
 	if (error != 0) {
@@ -662,6 +681,7 @@ file_content_lease_begin(
 		mutex_unlock(&file->f_inode->i_io_lock);
 		goto fail_file;
 	}
+
 	lease->file = file;
 	lease->io_inode = file->f_inode;
 	lease->content_inode = content_inode;
@@ -725,17 +745,21 @@ file_exec_snapshot_begin(struct file *file, struct file_content_lease *lease)
 		if (error != 0)
 			goto fail;
 	}
+
 	if (error == 0 && (inode->i_size < 0 || (uint64_t)inode->i_size > SIZE_MAX)) {
 		error = inode->i_size < 0 ? EIO : EFBIG;
 		vm_object_content_read_end(inode);
 	}
+
 	if (error == 0) {
 		lease->file = file;
 		lease->io_inode = lease->content_inode = inode;
 		lease->size = inode->i_size;
 		lease->active = lease->shared_read = 1;
 	}
+
 	mutex_unlock(&inode->i_io_lock);
+
 	if (error != 0)
 		goto fail;
 
@@ -794,6 +818,7 @@ file_exec_snapshot_create(
 		cache_memory_cancel(CACHE_MEMORY_FILE_META, bytes);
 		return ENOMEM;
 	}
+
 	cache_memory_commit(CACHE_MEMORY_FILE_META, bytes);
 	refcount_init(&snapshot->refs, 1);
 	snapshot->memory_bytes = bytes;
@@ -821,6 +846,7 @@ file_exec_snapshot_create(
 			goto fail;
 		snapshot->pages[snapshot->page_count++] = page;
 	}
+
 	*result = snapshot;
 	return 0;
 
@@ -892,6 +918,7 @@ file_content_lease_pread(
 		count = file_pread_internal(lease->file, buffer, length, offset,
 		    FILE_IO_VM_OBJECT | (lease->shared_read ? 0 : FILE_IO_INODE_IO_OWNED));
 	}
+
 	/* Refuses a backend that reported more than it was asked for. */
 	if (count > (ssize_t)length)
 		return -EIO;
@@ -940,7 +967,9 @@ file_content_lease_end(
 		inode_touch(file->f_inode, INODE_ATTR_ATIME);
 	if (lease->held_content_inode_io)
 		mutex_unlock(&lease->content_inode->i_io_lock);
+
 	mutex_unlock(&lease->io_inode->i_io_lock);
+
 	memset(lease, 0, sizeof(*lease));
 	(void)file_close(file);
 }
@@ -994,6 +1023,7 @@ file_io_begin_cred(
 		if ((flags & O_ACCMODE) == O_WRONLY)
 			return EBADF;
 	}
+
 	if (file->f_inode != NULL && file->f_inode->i_type == INODE_DIR)
 		return EISDIR;
 	if (writing && file->f_inode != NULL &&
@@ -1024,6 +1054,7 @@ file_io_begin_cred(
 		memset(io, 0, sizeof(*io));
 		return EIO;
 	}
+
 	/* Carries synchronous provenance independently of the current thread. */
 	io->context.flags = IO_CONTEXT_THROUGH;
 	io->context.origin_inode = io->content_inode;
@@ -1036,6 +1067,7 @@ file_io_begin_cred(
 		io->context.content_generation = io->content_inode->i_vm_content_generation;
 		spin_unlock_irqrestore(&io->content_inode->i_vm_lock, context_irq);
 	}
+
 	io->credential = credential;
 	io->kind = kind;
 	io->offset = offset;
@@ -1058,6 +1090,7 @@ file_io_begin_cred(
 			io->readahead_observer = 1;
 			mutex_unlock(&file->f_lock);
 		}
+
 		if (readahead_demand_begin() == 0)
 			io->readahead_demand = 1;
 	}
@@ -1097,6 +1130,7 @@ file_io_begin_cred(
 			memset(io, 0, sizeof(*io));
 			return error;
 		}
+
 		io->held_inode_io = 1;
 		if ((internal_flags & FILE_IO_VM_OBJECT) == 0 &&
 		    io->content_inode != file->f_inode &&
@@ -1111,8 +1145,10 @@ file_io_begin_cred(
 				memset(io, 0, sizeof(*io));
 				return error;
 			}
+
 			io->held_visible_gate = 1;
 		}
+
 		if (writing && io->content_inode != file->f_inode) {
 			io->require_content_inode_io = 1;
 			if (mutex_trylock(&io->content_inode->i_io_lock)) {
@@ -1171,6 +1207,7 @@ file_io_begin_cred(
 		if (io->append_requested && io->content_inode != NULL)
 			io->offset = io->content_inode->i_size;
 	}
+
 	io->readahead_start = io->offset;
 	return 0;
 }
@@ -1188,9 +1225,8 @@ file_io_begin(
 {
 	int error;
 
-	error = file_io_begin_cred(file, kind, offset, internal_flags, NULL, io);
-
 	/* Reports the failure. */
+	error = file_io_begin_cred(file, kind, offset, internal_flags, NULL, io);
 	if (error != 0)
 		return error;
 
@@ -1327,6 +1363,7 @@ read_cache_retry:
 					return -content_error;
 				goto read_cache_retry;
 			}
+
 			if (cache_published < 0)
 				return cache_published;
 			content_error = vm_object_content_read_begin(io->content_inode);
@@ -1340,6 +1377,7 @@ read_cache_retry:
 					return -content_error;
 				goto read_cache_retry;
 			}
+
 			if (content_error != 0)
 				return -content_error;
 			io->held_content_read = 1;
@@ -1351,12 +1389,14 @@ read_cache_retry:
 			 */
 			io->coherent_read = cache_published != 0;
 		}
+
 		if (!io->coherent_read)
 			goto backend_transfer;
 		if (io->held_inode_io) {
 			mutex_unlock(&file->f_inode->i_io_lock);
 			io->held_inode_io = 0;
 		}
+
 		useful = 0;
 		if (vm_object_read_coherent_useful != NULL) {
 			content_error = vm_object_read_coherent_useful(io->content_inode,
@@ -1365,6 +1405,7 @@ read_cache_retry:
 			content_error = vm_object_read_coherent(io->content_inode, io->offset,
 			    buffer, length, &cached);
 		}
+
 		io->readahead_useful += useful;
 		if (io->read_object == NULL) {
 			mutex_lock(&file->f_inode->i_io_lock);
@@ -1383,6 +1424,7 @@ read_cache_retry:
 			io->coherent_read = 0;
 			goto backend_transfer;
 		}
+
 		if (content_error != 0)
 			return -content_error;
 		io->offset += cached;
@@ -1424,6 +1466,7 @@ transaction_retry:
 			io->growth_limit_hit = 1;
 			return -EFBIG;
 		}
+
 		remaining = maximum_end - (uint64_t)io->offset;
 		if (remaining < length) {
 			if (remaining > SIZE_MAX)
@@ -1432,6 +1475,7 @@ transaction_retry:
 				length = (size_t)remaining;
 			io->growth_limit_hit = 1;
 		}
+
 		if (length == 0)
 			return -EFBIG;
 	} else if (io->content_inode != NULL) {
@@ -1464,6 +1508,7 @@ resize_retry:
 				goto transaction_retry;
 			goto resize_retry;
 		}
+
 		if (end > (uint64_t)io->content_inode->i_size) {
 			resize_error = vm_object_resize_begin(io->content_inode,
 			    (off_t)end, &resize);
@@ -1478,6 +1523,7 @@ resize_retry:
 					goto transaction_retry;
 				goto resize_retry;
 			}
+
 			if (resize_error != 0)
 				return -resize_error;
 			if (resize.active) {
@@ -1487,6 +1533,7 @@ resize_retry:
 					vm_object_resize_abort(&resize);
 					return -EINTR;
 				}
+
 				if (resize_error != 0) {
 					vm_object_resize_abort(&resize);
 					return -resize_error;
@@ -1522,6 +1569,7 @@ resize_retry:
 				return -content_error;
 			goto transaction_retry;
 		}
+
 		if (content_error != 0) {
 			if (resize.active)
 				vm_object_resize_abort(&resize);
@@ -1546,6 +1594,7 @@ resize_retry:
 				vm_object_resize_abort(&resize);
 			goto transaction_retry;
 		}
+
 		/* Proves allocation after publishing the final content gate. */
 		delayed_eligible = 0;
 		if (io->writeback_object != NULL && !resize.active &&
@@ -1557,12 +1606,14 @@ resize_retry:
 				return delayed_eligible;
 			}
 		}
+
 		file_io_regular_locks_drop(io);
 		content_error = EAGAIN;
 		if (delayed_eligible > 0) {
 			content_error = vm_object_content_prepare_delayed(&content,
 			    io->writeback_object, &io->writeback_ticket);
 		}
+
 		if (content_error == EAGAIN)
 			content_error = vm_object_content_prepare(&content);
 		if (file_io_regular_locks_reacquire(io) != 0) {
@@ -1571,15 +1622,18 @@ resize_retry:
 				vm_object_resize_abort(&resize);
 			return -EINTR;
 		}
+
 		if (content_error != 0) {
 			vm_object_content_abort(&content);
 			if (resize.active)
 				vm_object_resize_abort(&resize);
 			return -content_error;
 		}
+
 		if (io->append_requested)
 			io->append_positioned = 1;
 	}
+
 	if (io->append_requested && !io->append_positioned)
 		io->append_positioned = 1;
 
@@ -1609,6 +1663,7 @@ resize_retry:
 				vm_object_resize_abort(&resize);
 			return -content_error;
 		}
+
 		io->setid_prepared = 1;
 	}
 
@@ -1656,6 +1711,7 @@ resize_retry:
 				if (result > 0 && io->held_position)
 					io->offset = file->f_offset;
 			}
+
 			break;
 		case FILE_IO_PREAD:
 			if (io->internal_flags != 0 &&
@@ -1693,6 +1749,7 @@ resize_retry:
 		else
 			vm_object_content_abort(&content);
 	}
+
 	if (resize.active) {
 		if (result > 0) {
 			actual_end = write_start + result;
@@ -1704,6 +1761,7 @@ resize_retry:
 			vm_object_resize_abort(&resize);
 		}
 	}
+
 	if (length != 0 && file_io_is_write(io->kind) &&
 	    file->f_inode != NULL && file->f_inode->i_mount != NULL)
 		io_epoch_end(&file->f_inode->i_mount->m_write_epoch);
@@ -1774,9 +1832,9 @@ file_io_end(
 
 	if (io == NULL || io->file == NULL)
 		return;
-	file = io->file;
 
 	/* Publishes the new position and the access timestamps. */
+	file = io->file;
 	if (!file_io_is_positional(io->kind) && io->held_position &&
 	    (!io->append_requested || io->transferred))
 		file->f_offset = io->offset;
@@ -1795,16 +1853,19 @@ file_io_end(
 		vm_object_content_read_end(io->content_inode);
 		io->held_content_read = 0;
 	}
+
 	if (io->held_visible_gate) {
 		if (vm_object_content_read_end == NULL)
 			HAL_FATAL("lost visible VM content gate implementation");
 		vm_object_content_read_end(file->f_inode);
 		io->held_visible_gate = 0;
 	}
+
 	if (io->held_content_inode_io) {
 		mutex_unlock(&io->content_inode->i_io_lock);
 		io->held_content_inode_io = 0;
 	}
+
 	if (io->held_inode_io)
 		mutex_unlock(&file->f_inode->i_io_lock);
 	if (io->held_position)
@@ -1946,6 +2007,7 @@ file_pwrite_context(
 		inherited.flags |= io.context.flags;
 		io.context = inherited;
 	}
+
 	if ((internal_flags & FILE_IO_LOOP_BACKING) != 0)
 		io.context.claim = file->f_backing_claim;
 	result = file_io_transfer(&io, (void *)buffer, length);
@@ -1990,12 +2052,14 @@ file_readdir(
 
 	/* Mount points are listed first, from the mount cursor. */
 	mutex_lock(&file->f_lock);
+
 	error = mount_readdir_child(&file->f_path, &file->f_mount_cursor, entry);
 	if (error == 0) {
 		*eof = 0;
 		mutex_unlock(&file->f_lock);
 		return 0;
 	}
+
 	if (error != ENOENT) {
 		mutex_unlock(&file->f_lock);
 		return error;
@@ -2038,6 +2102,7 @@ file_seek(
 			mutex_unlock(&file->f_lock);
 			return -EINVAL;
 		}
+
 		if (offset < 0 || offset >= file->f_inode->i_size) {
 			mutex_unlock(&file->f_lock);
 			return -ENXIO;
@@ -2064,6 +2129,7 @@ file_seek(
 			mutex_unlock(&file->f_lock);
 			return -ESPIPE;
 		}
+
 		if (whence == 0)
 			base = 0;
 		else if (whence == 1)
@@ -2076,25 +2142,31 @@ file_seek(
 			mutex_unlock(&file->f_lock);
 			return -EINVAL;
 		}
+
 		if ((offset > 0 && base > OFF_T_MAX - offset) ||
 		    (offset < 0 && base < OFF_T_MIN - offset)) {
 			mutex_unlock(&file->f_lock);
 			return -EOVERFLOW;
 		}
+
 		target = base + offset;
 		if (target < 0) {
 			mutex_unlock(&file->f_lock);
 			return -EINVAL;
 		}
+
 		file->f_offset = target;
 		if (file->f_inode->i_type == INODE_DIR && whence == 0 &&
 		    target == 0)
 			file->f_mount_cursor = 0;
 		base = target;
 	}
+
 	if (base >= 0)
 		file_readahead_reset_owned(file);
+
 	mutex_unlock(&file->f_lock);
+
 	return base;
 }
 
@@ -2114,6 +2186,7 @@ file_fsync(
 	if (file == NULL)
 		return EINVAL;
 	mutex_lock(&file->f_lock);
+
 	inode = file_vm_inode(file);
 	error = 0;
 	if (inode != NULL && vm_object_sync_inode != NULL)
@@ -2140,6 +2213,7 @@ file_fsync(
 				error = observed;
 		}
 	}
+
 	/* A shared metadata checkpoint failure must reach every independent opener. */
 	if (inode != NULL && inode->i_mount != NULL &&
 	    io_error_snapshot != NULL && io_error_observe != NULL) {
@@ -2150,6 +2224,7 @@ file_fsync(
 				error = observed;
 		}
 	}
+
 	mutex_unlock(&file->f_lock);
 
 	/* Reports the failure. */
@@ -2176,7 +2251,9 @@ file_fsync_backend(
 	if (file == NULL)
 		return EINVAL;
 	mutex_lock(&file->f_lock);
+
 	error = file_fsync_backend_locked(file);
+
 	mutex_unlock(&file->f_lock);
 
 	/* Reports the failure. */
@@ -2198,7 +2275,9 @@ file_readahead_invalidate(
 	if (file == NULL)
 		return;
 	mutex_lock(&file->f_lock);
+
 	file_readahead_reset_owned(file);
+
 	mutex_unlock(&file->f_lock);
 }
 
@@ -2234,6 +2313,7 @@ file_close(
 		backing_claim_release(file->f_format_claim);
 		file->f_format_claim = NULL;
 	}
+
 	if (file->f_path.p_inode != NULL)
 		path_release(&file->f_path);
 	else if (file->f_inode != NULL)
@@ -2301,10 +2381,12 @@ file_count(
 	/* Counts the occupied slots of the file pool. */
 	count = 0;
 	irq = spin_lock_irqsave(&file_pool_lock);
+
 	for (i = 0; i < FILE_MAX; i++) {
 		if (file_used[i] != 0)
 			count++;
 	}
+
 	spin_unlock_irqrestore(&file_pool_lock, irq);
 
 	/* Reports the live file count. */
@@ -2321,6 +2403,7 @@ file_alloc(
 
 	/* Takes the first free slot and starts it with one reference. */
 	irq = spin_lock_irqsave(&file_pool_lock);
+
 	for (i = 0; i < FILE_MAX; i++) {
 		if (!file_used[i]) {
 			file_used[i] = 1;
@@ -2332,6 +2415,7 @@ file_alloc(
 			return &files[i];
 		}
 	}
+
 	spin_unlock_irqrestore(&file_pool_lock, irq);
 
 	/* Reports an exhausted pool. */
@@ -2348,6 +2432,7 @@ file_free(
 
 	/* Empties the slot and marks it free again. */
 	irq = spin_lock_irqsave(&file_pool_lock);
+
 	for (i = 0; i < FILE_MAX; i++) {
 		if (&files[i] == file) {
 			memset(file, 0, sizeof(*file));
@@ -2355,6 +2440,7 @@ file_free(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&file_pool_lock, irq);
 }
 
@@ -2442,6 +2528,7 @@ file_regular_io_lock(
 		mutex_lock(&inode->i_io_lock);
 		return 0;
 	}
+
 	for (;;) {
 		error = vm_object_inode_io_wait(inode);
 		if (error != 0)
@@ -2481,6 +2568,7 @@ file_io_regular_locks_reacquire(
 			io->held_content_inode_io = 1;
 			return 0;
 		}
+
 		mutex_unlock(&io->file->f_inode->i_io_lock);
 		io->held_inode_io = 0;
 
@@ -2504,6 +2592,7 @@ file_io_regular_locks_drop(
 		mutex_unlock(&io->content_inode->i_io_lock);
 		io->held_content_inode_io = 0;
 	}
+
 	if (io->held_inode_io) {
 		mutex_unlock(&io->file->f_inode->i_io_lock);
 		io->held_inode_io = 0;
@@ -2558,9 +2647,9 @@ file_format_ioctl(
 		return EINVAL;
 
 	/* Reserves the opened object using its expected byte count. */
-	error = file_format_reserve(file, request.size_bytes);
 
 	/* Reports the failure. */
+	error = file_format_reserve(file, request.size_bytes);
 	if (error != 0)
 		return error;
 
@@ -2832,6 +2921,7 @@ file_io_cache_read_prepare(
 			return;
 		io->held_visible_gate = 1;
 	}
+
 	error = vm_object_content_read_begin(io->content_inode);
 	if (error == 0) {
 		error = vm_object_cache_pin(io->content_inode, &io->read_object);
@@ -2840,6 +2930,7 @@ file_io_cache_read_prepare(
 			io->coherent_read = 1;
 			return;
 		}
+
 		vm_object_content_read_end(io->content_inode);
 	}
 
@@ -2866,6 +2957,7 @@ file_io_resources_release(
 		vm_object_writeback_release(io->writeback_object);
 		io->writeback_object = NULL;
 	}
+
 	if (io->writeback_ticket.budget != NULL) {
 		if (writeback_pressure != NULL)
 			writeback_pressure(io->writeback_ticket.budget);
@@ -2927,16 +3019,19 @@ file_readahead_completed(
 		mutex_unlock(&file->f_lock);
 		return;
 	}
+
 	if (result <= 0 || start < 0 || eof < 0) {
 		file_readahead_reset_owned(file);
 		mutex_unlock(&file->f_lock);
 		return;
 	}
+
 	previous = file->f_readahead.generation;
 	error = readahead_observe(&file->f_readahead, (uint64_t)start,
 	    (size_t)result, (uint64_t)eof, useful, pressure, &request);
 	if (file->f_readahead.generation != previous && readahead_cancel != NULL)
 		readahead_cancel(file);
+
 	mutex_unlock(&file->f_lock);
 
 	/* Queue refusal never changes the already completed demand result. */

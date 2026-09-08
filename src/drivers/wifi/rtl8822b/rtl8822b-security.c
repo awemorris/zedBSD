@@ -58,11 +58,10 @@ drv_rtl8822b_security_enable(
 {
 	int error;
 
+	/* Checks the operation status. */
 	error = reg_update(radio, RTL8822B_REG_CR, 2U,
 			   RTL8822B_CR_SECURITY_ENABLE,
 			   RTL8822B_CR_SECURITY_ENABLE, deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = reg_update(radio, RTL8822B_REG_SEC_CONFIG, 2U,
 				   RTL8822B_SECURITY_PROFILE,
@@ -101,16 +100,15 @@ drv_rtl8822b_tx_queues_empty(
 	for (index = 0U;
 	     index < sizeof(queue_registers) / sizeof(queue_registers[0]);
 	     index++) {
+		/* Checks the operation status. */
 		error = reg_read(radio, queue_registers[index], 2U, &reserved,
 				 deadline_ticks);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
-		error = reg_read(radio, queue_registers[index] + 2U, 2U,
-				 &available, deadline_ticks);
 
 		/* Checks the operation status. */
+		error = reg_read(radio, queue_registers[index] + 2U, 2U,
+				 &available, deadline_ticks);
 		if (error != 0)
 			return error;
 
@@ -138,17 +136,17 @@ drv_rtl8822b_security_set_association(
 
 	/* Handles the bssid availability. */
 	if (bssid == NULL || (bssid[0] & 1U) != 0U || aid == 0U ||
-	    aid > 0x07ffU)
-
+	    aid > 0x07ffU) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	low = (uint32_t)bssid[0] | ((uint32_t)bssid[1] << 8) |
 	      ((uint32_t)bssid[2] << 16) | ((uint32_t)bssid[3] << 24);
 	high = (uint32_t)bssid[4] | ((uint32_t)bssid[5] << 8);
-	error = reg_write(radio, RTL8822B_REG_PORT0_BSSID, 4U, low,
-			  deadline_ticks);
 
 	/* Checks the operation status. */
+	error = reg_write(radio, RTL8822B_REG_PORT0_BSSID, 4U, low,
+			  deadline_ticks);
 	if (error == 0) {
 		error = reg_write(radio, RTL8822B_REG_PORT0_BSSID + 4U, 2U,
 				  high, deadline_ticks);
@@ -200,34 +198,33 @@ drv_rtl8822b_security_clear_association(
 	int first = 0;
 	int error;
 
+	/* Checks the operation status. */
 	error = reg_update(radio, RTL8822B_REG_RCR, 4U,
 			   RTL8822B_RCR_CHECK_BSSID_DATA, 0U, deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		first = error;
+
+	/* Checks the operation status. */
 	error = reg_update(radio, RTL8822B_REG_CR, 4U,
 			   RTL8822B_CR_NET_TYPE_MASK, 0U, deadline_ticks);
-
-	/* Checks the operation status. */
 	if (first == 0 && error != 0)
 		first = error;
+
+	/* Checks the operation status. */
 	error = reg_update(radio, RTL8822B_REG_PORT0_AID, 2U, 0x07ffU, 0U,
 			   deadline_ticks);
-
-	/* Checks the operation status. */
 	if (first == 0 && error != 0)
 		first = error;
+
+	/* Checks the operation status. */
 	error = reg_write(radio, RTL8822B_REG_PORT0_BSSID, 4U, 0U,
 			  deadline_ticks);
-
-	/* Checks the operation status. */
 	if (first == 0 && error != 0)
 		first = error;
-	error = reg_write(radio, RTL8822B_REG_PORT0_BSSID + 4U, 2U, 0U,
-			  deadline_ticks);
 
 	/* Checks the operation status. */
+	error = reg_write(radio, RTL8822B_REG_PORT0_BSSID + 4U, 2U, 0U,
+			  deadline_ticks);
 	if (first == 0 && error != 0)
 		first = error;
 
@@ -254,10 +251,10 @@ drv_rtl8822b_cam_program_ccmp(
 
 	/* Checks the cam ccmp arguments valid result. */
 	if (!cam_ccmp_arguments_valid(radio, slot, key_index, group, address) ||
-	    key == NULL)
-
+	    key == NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(words, 0, sizeof(words));
 	words[0] = cam_ccmp_word0(key_index, group, address);
 	words[1] = (uint32_t)address[2] | ((uint32_t)address[3] << 8) |
@@ -271,16 +268,15 @@ drv_rtl8822b_cam_program_ccmp(
 	 */
 	/* Process each remaining element. */
 	for (index = 7; index >= 1; index--) {
+		/* Checks the operation status. */
 		error = cam_write_word(radio, slot, (uint8_t)index,
 				       words[index], deadline_ticks);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto rollback;
 	}
-	error = cam_write_word(radio, slot, 0U, words[0], deadline_ticks);
 
 	/* Checks the operation status. */
+	error = cam_write_word(radio, slot, 0U, words[0], deadline_ticks);
 	if (error == 0)
 		goto out;
 rollback:
@@ -315,10 +311,10 @@ drv_rtl8822b_cam_stage_ccmp(
 
 	/* Checks the cam ccmp arguments valid result. */
 	if (!cam_ccmp_arguments_valid(radio, slot, key_index, group, address) ||
-	    key == NULL)
-
+	    key == NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(words, 0, sizeof(words));
 	words[1] = (uint32_t)address[2] | ((uint32_t)address[3] << 8) |
 		   ((uint32_t)address[4] << 16) | ((uint32_t)address[5] << 24);
@@ -357,19 +353,19 @@ drv_rtl8822b_cam_activate_ccmp(
 	const uint8_t address[6],
 	uint64_t deadline_ticks)
 {
-	int function_result;
+	int error;
 
 	/* Checks the cam ccmp arguments valid result. */
 	if (!cam_ccmp_arguments_valid(radio, slot, key_index, group, address))
 		return EINVAL;
 
 	/* Obtains the cam write word result. */
-	function_result = cam_write_word(
+	error = cam_write_word(
 		radio, slot, 0U, cam_ccmp_word0(key_index, group, address),
 		deadline_ticks);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -381,17 +377,17 @@ drv_rtl8822b_cam_clear(
 	uint8_t slot,
 	uint64_t deadline_ticks)
 {
-	int function_result;
+	int error;
 
 	/* Handles the radio availability. */
 	if (radio == NULL || slot >= RTL8822B_CAM_ENTRY_COUNT)
 		return EINVAL;
 
 	/* Obtains the cam write word result. */
-	function_result = cam_write_word(radio, slot, 0U, 0U, deadline_ticks);
+	error = cam_write_word(radio, slot, 0U, 0U, deadline_ticks);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -423,17 +419,17 @@ drv_rtl8822b_data_frame_prepare(
 	    radio->power_limits_valid == 0U || wire == NULL || frame == NULL ||
 	    frame_length < 24U || frame_length > RTL8822B_DATA_MPDU_MAX ||
 	    mac_id > 127U || (encrypted != 0 && encrypted != 1) ||
-	    cookie > 0x0fffU)
-
+	    cookie > 0x0fffU) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the frame length condition. */
 	if (frame_length > SIZE_MAX - RTL8822B_DATA_TX_DESCRIPTOR_SIZE)
 		return EOVERFLOW;
-	total = RTL8822B_DATA_TX_DESCRIPTOR_SIZE + frame_length;
 
 	/* Avoid full packets on both 512-byte HS and 1024-byte SS pipes. */
+	total = RTL8822B_DATA_TX_DESCRIPTOR_SIZE + frame_length;
 	if (total % 512U == 0U) {
 		/* Handles the total condition. */
 		if (total == SIZE_MAX)
@@ -445,11 +441,11 @@ drv_rtl8822b_data_frame_prepare(
 	if (capacity < total)
 		return ENOSPC;
 	memset(wire, 0, total);
+
+	/* Handles the frame condition. */
 	word0 = (uint32_t)frame_length |
 		((uint32_t)RTL8822B_DATA_TX_DESCRIPTOR_SIZE << 16) |
 		(1U << 26) | (1U << 31);
-
-	/* Handles the frame condition. */
 	if ((frame[4U] & 1U) != 0U)
 		word0 |= 1U << 24;
 
@@ -493,9 +489,8 @@ reg_update(
 	uint32_t current;
 	int error;
 
-	error = reg_read(radio, address, width, &current, deadline);
-
 	/* Checks the operation status. */
+	error = reg_read(radio, address, width, &current, deadline);
 	if (error != 0)
 		return error;
 
@@ -517,7 +512,7 @@ reg_read(
 	uint32_t *value,
 	uint64_t deadline)
 {
-	int function_result;
+	int error;
 
 	/* Checks the deadline valid result. */
 	if (!deadline_valid(radio, deadline))
@@ -525,17 +520,17 @@ reg_read(
 
 	/* Handles the read availability. */
 	if (radio->state != RTL8822B_RADIO_STARTED ||
-	    radio->transport.read == NULL || value == NULL)
-
+	    radio->transport.read == NULL || value == NULL) {
 		/* Returns the computed result. */
 		return ENETDOWN;
+	}
 
 	/* Computes the function result. */
-	function_result = radio->transport.read(
+	error = radio->transport.read(
 		radio->transport.context, address, width, value, deadline);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the deadline valid operation. */
@@ -544,15 +539,15 @@ deadline_valid(
 	const struct rtl8822b_radio *radio,
 	uint64_t deadline)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		radio != NULL && radio->transport.now_ticks != NULL &&
 		radio->transport.now_ticks(radio->transport.context) < deadline;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the reg write operation. */
@@ -564,7 +559,7 @@ reg_write(
 	uint32_t value,
 	uint64_t deadline)
 {
-	int function_result;
+	int error;
 
 	/* Checks the deadline valid result. */
 	if (!deadline_valid(radio, deadline))
@@ -572,17 +567,17 @@ reg_write(
 
 	/* Handles the write availability. */
 	if (radio->state != RTL8822B_RADIO_STARTED ||
-	    radio->transport.write == NULL)
-
+	    radio->transport.write == NULL) {
 		/* Returns the computed result. */
 		return ENETDOWN;
+	}
 
 	/* Computes the function result. */
-	function_result = radio->transport.write(
+	error = radio->transport.write(
 		radio->transport.context, address, width, value, deadline);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the cam ccmp arguments valid operation. */
@@ -636,9 +631,8 @@ cam_write_word(
 	uint32_t address;
 	int error;
 
-	error = reg_write(radio, RTL8822B_REG_SEC_WRITE, 4U, value, deadline);
-
 	/* Checks the operation status. */
+	error = reg_write(radio, RTL8822B_REG_SEC_WRITE, 4U, value, deadline);
 	if (error != 0)
 		return error;
 	address = ((uint32_t)slot << RTL8822B_CAM_ENTRY_SHIFT) | word;
@@ -665,10 +659,9 @@ cam_wait(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
+		/* Checks the operation status. */
 		error = reg_read(radio, RTL8822B_REG_SEC_COMMAND, 4U, &command,
 				 deadline);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 

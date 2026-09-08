@@ -70,22 +70,6 @@ static struct drv_usb_driver checkpoint_driver = {
 	.attach = checkpoint_attach,
 	.detach = checkpoint_detach};
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv usb hid checkpoint driver register operation.
  */
@@ -93,13 +77,13 @@ int
 drv_usb_hid_checkpoint_driver_register(
 	void)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv usb driver register result. */
-	function_result = drv_usb_driver_register(&checkpoint_driver);
+	error = drv_usb_driver_register(&checkpoint_driver);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the checkpoint bus number operation. */
@@ -176,8 +160,10 @@ checkpoint_completion(
 	if (checkpoint == NULL || urb != checkpoint->urb)
 		return;
 	irq = spin_lock_irqsave(&checkpoint->lock);
+
 	checkpoint->work_pending |= CHECKPOINT_WORK_COMPLETE;
 	worker = checkpoint->worker;
+
 	spin_unlock_irqrestore(&checkpoint->lock, irq);
 
 	/* Handles the worker availability. */
@@ -196,6 +182,7 @@ checkpoint_begin_submit(
 	/* Handles the admitted condition. */
 	if (admitted)
 		checkpoint->submit_active = 1U;
+
 	spin_unlock_irqrestore(&checkpoint->lock, irq);
 
 	/* Returns the computed result. */
@@ -213,6 +200,7 @@ checkpoint_end_submit(
 	if (!checkpoint->submit_active)
 		__builtin_trap();
 	checkpoint->submit_active = 0;
+
 	spin_unlock_irqrestore(&checkpoint->lock, irq);
 }
 
@@ -223,17 +211,16 @@ checkpoint_arm(
 {
 	int error;
 
-	error = checkpoint_begin_submit(checkpoint);
-
 	/* Checks the operation status. */
+	error = checkpoint_begin_submit(checkpoint);
 	if (error != 0)
 		return error;
 	memset(checkpoint->buffer, 0, checkpoint->buffer_size);
+
+	/* Checks the operation status. */
 	error = drv_usb_urb_setup(checkpoint->urb, checkpoint->buffer,
 				  checkpoint->buffer_size, DRV_USB_URB_SHORT_OK,
 				  0, checkpoint_completion, checkpoint);
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = drv_usb_urb_submit(checkpoint->urb);
 	checkpoint_end_submit(checkpoint);
@@ -258,6 +245,7 @@ checkpoint_take_work(
 
 	checkpoint->work_pending = 0;
 	*stopping = checkpoint->stopping != 0;
+
 	spin_unlock_irqrestore(&checkpoint->lock, irq);
 
 	/* Returns the computed result. */
@@ -275,9 +263,8 @@ checkpoint_worker(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		work = checkpoint_take_work(checkpoint, &stopping);
-
 		/* Handles the stopping condition. */
+		work = checkpoint_take_work(checkpoint, &stopping);
 		if (stopping)
 			return;
 
@@ -319,26 +306,25 @@ checkpoint_buffer_size(
 	uint16_t maximum;
 	unsigned packets, payload;
 
-	descriptor = drv_usb_endpoint_descriptor(endpoint);
-
 	/* Handles the descriptor availability. */
+	descriptor = drv_usb_endpoint_descriptor(endpoint);
 	if (descriptor == NULL || descriptor->interval == 0)
 		return EINVAL;
 	maximum = drv_usb_endpoint_max_packet_size(endpoint);
 	payload = maximum & 0x07ffU;
 	packets = 1U + ((maximum >> 11) & 3U);
-	speed = drv_usb_device_speed(drv_usb_interface_device(interface));
 
 	/* Handles the payload condition. */
+	speed = drv_usb_device_speed(drv_usb_interface_device(interface));
 	if (payload == 0 || (maximum & 0xe000U) != 0 || packets == 4U ||
 	    (speed == DRV_USB_SPEED_LOW && (payload > 8U || packets != 1U)) ||
 	    (speed == DRV_USB_SPEED_FULL && (payload > 64U || packets != 1U)) ||
 	    (speed == DRV_USB_SPEED_HIGH && payload > 1024U) ||
 	    (speed != DRV_USB_SPEED_LOW && speed != DRV_USB_SPEED_FULL &&
-	     speed != DRV_USB_SPEED_HIGH))
-
+	     speed != DRV_USB_SPEED_HIGH)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	*result = (size_t)payload * packets;
 	/* Reports successful completion. */
 	return 0;
@@ -358,32 +344,32 @@ checkpoint_attach(
 	int error;
 
 	(void)id;
-	descriptor = drv_usb_interface_descriptor(interface);
 
 	/* Handles the descriptor availability. */
+	descriptor = drv_usb_interface_descriptor(interface);
 	if (descriptor == NULL || descriptor->interface_class != USB_HID_CLASS)
 		return ENODEV;
-	endpoint = drv_usb_interface_find_endpoint(
-		interface, DRV_USB_TRANSFER_INTERRUPT, DRV_USB_DIR_IN, NULL);
 
 	/* Handles the endpoint availability. */
+	endpoint = drv_usb_interface_find_endpoint(
+		interface, DRV_USB_TRANSFER_INTERRUPT, DRV_USB_DIR_IN, NULL);
 	if (endpoint == NULL)
 		return ENODEV;
+
+	/* Handles the extra availability. */
 	extra = drv_usb_interface_find_endpoint(interface,
 						DRV_USB_TRANSFER_INTERRUPT,
 						DRV_USB_DIR_IN, endpoint);
-
-	/* Handles the extra availability. */
 	if (extra != NULL)
 		return EOPNOTSUPP;
-	error = checkpoint_buffer_size(interface, endpoint, &buffer_size);
 
 	/* Checks the operation status. */
+	error = checkpoint_buffer_size(interface, endpoint, &buffer_size);
 	if (error != 0)
 		return error;
-	checkpoint = hal_malloc(sizeof(*checkpoint));
 
 	/* Handles the checkpoint availability. */
+	checkpoint = hal_malloc(sizeof(*checkpoint));
 	if (checkpoint == NULL)
 		return ENOMEM;
 	memset(checkpoint, 0, sizeof(*checkpoint));
@@ -396,6 +382,7 @@ checkpoint_attach(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	checkpoint->interface = interface;
 	checkpoint->device = drv_usb_interface_device(interface);
 	checkpoint->endpoint = endpoint;
@@ -414,9 +401,9 @@ checkpoint_attach(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
-	error = drv_usb_interface_set_driver_data(interface, checkpoint);
 
 	/* Checks the operation status. */
+	error = drv_usb_interface_set_driver_data(interface, checkpoint);
 	if (error != 0) {
 		drv_usb_urb_free(checkpoint->urb);
 		hal_free(checkpoint->buffer);
@@ -425,10 +412,10 @@ checkpoint_attach(
 		/* Returns the computed result. */
 		return error;
 	}
-	error = kthread_create(checkpoint_worker, checkpoint,
-			       SCHED_PRIORITY_DEFAULT, &worker);
 
 	/* Checks the operation status. */
+	error = kthread_create(checkpoint_worker, checkpoint,
+			       SCHED_PRIORITY_DEFAULT, &worker);
 	if (error != 0) {
 		(void)drv_usb_interface_set_driver_data(interface, NULL);
 		drv_usb_urb_free(checkpoint->urb);
@@ -438,6 +425,7 @@ checkpoint_attach(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	checkpoint->worker = worker;
 	hal_printf("usb-hid-checkpoint: attach generation=%u usb%u device=%u "
 		   "interface=%u endpoint=%02x length=%u\n",
@@ -461,8 +449,10 @@ checkpoint_close_admission(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&checkpoint->lock);
+
 	checkpoint->stopping = 1U;
 	worker = checkpoint->worker;
+
 	spin_unlock_irqrestore(&checkpoint->lock, irq);
 
 	/* Handles the worker availability. */
@@ -491,7 +481,9 @@ checkpoint_join_worker(
 	int error;
 
 	irq = spin_lock_irqsave(&checkpoint->lock);
+
 	worker = checkpoint->worker;
+
 	spin_unlock_irqrestore(&checkpoint->lock, irq);
 
 	/* Handles the worker availability. */
@@ -506,19 +498,21 @@ checkpoint_join_worker(
 	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) !=
 	       THREAD_ZOMBIE)
 		sched_yield();
-	error = thread_wait(worker, NULL);
 
 	/* Checks the operation status. */
+	error = thread_wait(worker, NULL);
 	if (error != 0)
 		return error;
-	irq = spin_lock_irqsave(&checkpoint->lock);
 
 	/* Handles the checkpoint condition. */
+	irq = spin_lock_irqsave(&checkpoint->lock);
 	if (checkpoint->worker != worker) {
 		spin_unlock_irqrestore(&checkpoint->lock, irq);
 		__builtin_trap();
 	}
+
 	checkpoint->worker = NULL;
+
 	spin_unlock_irqrestore(&checkpoint->lock, irq);
 
 	/* Reports successful completion. */
@@ -565,16 +559,16 @@ checkpoint_detach(
 	if (checkpoint == NULL)
 		return 0;
 	checkpoint_close_admission(checkpoint);
-	status = drv_usb_urb_status(checkpoint->urb);
 
 	/* Checks the operation status. */
+	status = drv_usb_urb_status(checkpoint->urb);
 	if (status == DRV_USB_URB_PENDING)
 		cancel_error = drv_usb_urb_cancel(checkpoint->urb);
 	drain_error =
 		drv_usb_urb_drain(checkpoint->urb, CHECKPOINT_DRAIN_TIMEOUT_MS);
-	join_error = checkpoint_join_worker(checkpoint);
 
 	/* Checks the operation status. */
+	join_error = checkpoint_join_worker(checkpoint);
 	if (drain_error != 0 || join_error != 0) {
 		error = drain_error != 0 ? drain_error : join_error;
 

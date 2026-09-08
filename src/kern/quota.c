@@ -66,7 +66,9 @@ quota_enable(
 
 	/* Records the setting. */
 	mutex_lock(&state->lock);
+
 	state->enabled[type] = enabled != 0;
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the changed setting. */
@@ -91,7 +93,9 @@ quota_enabled(
 
 	/* Reads the setting. */
 	mutex_lock(&state->lock);
+
 	*enabled = state->enabled[type] != 0;
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the read setting. */
@@ -112,7 +116,9 @@ quota_get_grace(
 
 	/* Reads the period. */
 	mutex_lock(&state->lock);
+
 	*seconds = state->grace_seconds;
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the read period. */
@@ -133,7 +139,9 @@ quota_set_grace(
 
 	/* Records the period. */
 	mutex_lock(&state->lock);
+
 	state->grace_seconds = seconds;
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the changed period. */
@@ -161,12 +169,14 @@ quota_get(
 
 	/* Copies the record, or reports an empty one under the identifier. */
 	mutex_lock(&state->lock);
+
 	record = quota_find(state, type, id, 0);
 	if (record != NULL)
 		*result = *record;
 	else
 		memset(result, 0, sizeof(*result));
 	result->id = id;
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the copied record. */
@@ -198,6 +208,7 @@ quota_set(
 
 	/* Finds or creates the record. */
 	mutex_lock(&state->lock);
+
 	record = quota_find(state, type, source->id, 1);
 	if (record == NULL) {
 		mutex_unlock(&state->lock);
@@ -213,6 +224,7 @@ quota_set(
 		record->block_deadline = 0;
 	if (record->inodes <= record->inode_soft || record->inode_soft == 0)
 		record->inode_deadline = 0;
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the changed limits. */
@@ -251,6 +263,7 @@ quota_reserve(
 
 	/* Finds or creates both records and checks the enforced limits. */
 	mutex_lock(&state->lock);
+
 	user = quota_find(state, QUOTA_USER, uid, 1);
 	group = quota_find(state, QUOTA_GROUP, gid, 1);
 	if (user == NULL || group == NULL)
@@ -271,6 +284,7 @@ quota_reserve(
 		charge->inodes = inodes;
 		charge->active = 1;
 	}
+
 	mutex_unlock(&state->lock);
 
 	/* Reports why the reservation failed. */
@@ -308,13 +322,16 @@ quota_rollback(
 
 	/* Subtracts the charge from whichever records still exist. */
 	mutex_lock(&charge->state->lock);
+
 	record = quota_find(charge->state, QUOTA_USER, charge->uid, 0);
 	if (record != NULL)
 		quota_subtract(record, charge->blocks, charge->inodes);
 	record = quota_find(charge->state, QUOTA_GROUP, charge->gid, 0);
 	if (record != NULL)
 		quota_subtract(record, charge->blocks, charge->inodes);
+
 	mutex_unlock(&charge->state->lock);
+
 	charge->active = 0;
 }
 
@@ -341,6 +358,7 @@ quota_release(
 
 	/* An enforced record must exist and hold at least the released amount. */
 	mutex_lock(&state->lock);
+
 	user = quota_find(state, QUOTA_USER, uid, 0);
 	group = quota_find(state, QUOTA_GROUP, gid, 0);
 	if ((state->enabled[QUOTA_USER] &&
@@ -356,6 +374,7 @@ quota_release(
 		quota_subtract(user, blocks, inodes);
 	if (group != NULL)
 		quota_subtract(group, blocks, inodes);
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the release. */
@@ -399,6 +418,7 @@ quota_transfer_begin(
 
 	/* The old records must hold the amount; the new ones are created. */
 	mutex_lock(&state->lock);
+
 	old_user = quota_find(state, QUOTA_USER, old_uid, 0);
 	old_group = quota_find(state, QUOTA_GROUP, old_gid, 0);
 	new_user = quota_find(state, QUOTA_USER, new_uid, 1);
@@ -425,10 +445,12 @@ quota_transfer_begin(
 			quota_subtract(old_user, blocks, inodes);
 			quota_add(state, new_user, blocks, inodes, now);
 		}
+
 		if (old_gid != new_gid) {
 			quota_subtract(old_group, blocks, inodes);
 			quota_add(state, new_group, blocks, inodes, now);
 		}
+
 		transfer->state = state;
 		transfer->old_uid = old_uid;
 		transfer->old_gid = old_gid;
@@ -439,6 +461,7 @@ quota_transfer_begin(
 		transfer->now = now;
 		transfer->active = 1;
 	}
+
 	mutex_unlock(&state->lock);
 
 	/* Reports why the transfer failed. */
@@ -479,6 +502,7 @@ quota_transfer_rollback(
 
 	/* Recreates the old records and finds the new ones. */
 	mutex_lock(&transfer->state->lock);
+
 	old_user = quota_find(transfer->state, QUOTA_USER, transfer->old_uid, 1);
 	old_group = quota_find(transfer->state, QUOTA_GROUP, transfer->old_gid, 1);
 	new_user = quota_find(transfer->state, QUOTA_USER, transfer->new_uid, 0);
@@ -494,6 +518,7 @@ quota_transfer_rollback(
 		quota_add(transfer->state, old_user, transfer->blocks,
 		    transfer->inodes, transfer->now);
 	}
+
 	if (transfer->old_gid != transfer->new_gid &&
 	    old_group != NULL &&
 	    new_group != NULL &&
@@ -503,7 +528,9 @@ quota_transfer_rollback(
 		quota_add(transfer->state, old_group, transfer->blocks,
 		    transfer->inodes, transfer->now);
 	}
+
 	mutex_unlock(&transfer->state->lock);
+
 	transfer->active = 0;
 }
 
@@ -560,6 +587,7 @@ quota_rebuild_add(
 
 	/* Creates both records and refuses a counter overflow. */
 	mutex_lock(&state->lock);
+
 	user = quota_find(state, QUOTA_USER, uid, 1);
 	group = quota_find(state, QUOTA_GROUP, gid, 1);
 	if (user == NULL ||
@@ -577,6 +605,7 @@ quota_rebuild_add(
 	user->inodes += inodes;
 	group->blocks += blocks;
 	group->inodes += inodes;
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the added usage. */
@@ -616,6 +645,7 @@ quota_export_config(
 
 	/* Sizes the configuration by counting the records worth storing. */
 	mutex_lock(&state->lock);
+
 	for (type = 0; type < QUOTA_TYPES; type++) {
 		for (index = 0; index < QUOTA_MAX_RECORDS; index++) {
 			record = &state->records[type][index];
@@ -631,6 +661,7 @@ quota_export_config(
 			}
 		}
 	}
+
 	*length = needed;
 
 	/* Without a buffer only the size is reported; a small one fails. */
@@ -683,6 +714,7 @@ quota_export_config(
 
 	/* Seals the configuration with its digest. */
 	quota_put32(bytes + 12, quota_digest(bytes, needed));
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the written configuration. */
@@ -720,9 +752,8 @@ quota_import_config(
 	unsigned missing;
 	unsigned n;
 
-	bytes = buffer;
-
 	/* Rejects anything but a complete, sealed configuration of this version. */
+	bytes = buffer;
 	if (state == NULL ||
 	    buffer == NULL ||
 	    length < QUOTA_DISK_HEADER_SIZE ||
@@ -774,6 +805,7 @@ quota_import_config(
 			if (!state->records[type][n].present)
 				free_count++;
 		}
+
 		for (index = 0, offset = QUOTA_DISK_HEADER_SIZE; index < count;
 		     index++, offset += QUOTA_DISK_RECORD_SIZE) {
 			if (quota_get32(bytes + offset) == type &&
@@ -782,6 +814,7 @@ quota_import_config(
 				       0) == NULL)
 				missing++;
 		}
+
 		if (missing > free_count) {
 			mutex_unlock(&state->lock);
 			return ENOSPC;
@@ -821,6 +854,7 @@ quota_import_config(
 	state->enabled[QUOTA_USER] = (enabled & 1U) != 0;
 	state->enabled[QUOTA_GROUP] = (enabled & 2U) != 0;
 	state->grace_seconds = grace;
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the imported configuration. */
@@ -943,9 +977,9 @@ quota_check(
 	if (blocks > UINT64_MAX - record->blocks || inodes > UINT64_MAX - record->inodes)
 		return EDQUOT;
 	new_blocks = record->blocks + blocks;
-	new_inodes = record->inodes + inodes;
 
 	/* A hard limit is never exceeded. */
+	new_inodes = record->inodes + inodes;
 	if ((record->block_hard != 0 && new_blocks > record->block_hard) ||
 	    (record->inode_hard != 0 && new_inodes > record->inode_hard))
 		return EDQUOT;

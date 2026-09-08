@@ -194,6 +194,7 @@ disk_reload_begin(
 		if (error == 0)
 			parent->d_reload_owner = owner;
 	}
+
 	disk_unlock(enabled);
 
 	/* Reports whether this caller acquired the admission gate. */
@@ -272,6 +273,7 @@ disk_alloc(
 		disk_unlock(enabled);
 		return &disks[i];
 	}
+
 	disk_unlock(enabled);
 
 	/* Reports a full registry. */
@@ -312,16 +314,19 @@ disk_alloc_sd_name(
 				break;
 			}
 		}
+
 		if (!used) {
 			for (i = 0; i < DISK_NAME_MAX; i++) {
 				disk->d_name[i] = candidate[i];
 				if (candidate[i] == '\0')
 					break;
 			}
+
 			disk_unlock(enabled);
 			return 0;
 		}
 	}
+
 	disk_unlock(enabled);
 
 	/* Reports that every name is taken. */
@@ -367,6 +372,7 @@ disk_alloc_nvme_name(
 		disk_unlock(enabled);
 		return EINVAL;
 	}
+
 	for (i = 0; i < DISK_MAX; i++) {
 		if (disk_used[i] && &disks[i] != disk &&
 		    name_equal(disks[i].d_name, candidate)) {
@@ -374,6 +380,7 @@ disk_alloc_nvme_name(
 			return EEXIST;
 		}
 	}
+
 	for (i = 0; i <= at; i++)
 		disk->d_name[i] = candidate[i];
 	disk_unlock(enabled);
@@ -421,20 +428,24 @@ disk_create(
 		disk_unlock(enabled);
 		return ENXIO;
 	}
+
 	if (disk->d_parent != NULL && disk_media_status(disk->d_parent) != 0) {
 		disk_unlock(enabled);
 		return ENXIO;
 	}
+
 	if (disk->d_parent != NULL && disk_leaf(disk)->d_reload_owner != NULL) {
 		disk_unlock(enabled);
 		return EBUSY;
 	}
+
 	for (found = disk_head; found != NULL; found = found->d_next) {
 		if (name_equal(found->d_name, disk->d_name)) {
 			disk_unlock(enabled);
 			return EEXIST;
 		}
 	}
+
 	if (next_dev == 0) {
 		disk_unlock(enabled);
 		return ENOSPC;
@@ -494,6 +505,7 @@ disk_gone(
 			break;
 		}
 	}
+
 	disk->d_next = NULL;
 	disk_persistence_invalidate(disk);
 	disk->d_state = DISK_GONE;
@@ -534,6 +546,7 @@ disk_gone_if_idle(
 		error = ENXIO;
 		goto out;
 	}
+
 	if (disk->d_open_count != 0 ||
 	    disk->d_inflight != 0 ||
 	    disk->d_opening != 0 ||
@@ -543,6 +556,7 @@ disk_gone_if_idle(
 		error = EBUSY;
 		goto out;
 	}
+
 	disk_unlock(enabled);
 
 	/*
@@ -560,6 +574,7 @@ disk_gone_if_idle(
 		error = ENXIO;
 		goto out;
 	}
+
 	if (disk->d_open_count != 0 ||
 	    disk->d_inflight != 0 ||
 	    disk->d_opening != 0 ||
@@ -570,6 +585,7 @@ disk_gone_if_idle(
 		error = EBUSY;
 		goto out;
 	}
+
 	for (link = &disk_head; *link != NULL; link = &(*link)->d_next) {
 		if (*link == disk) {
 			*link = disk->d_next;
@@ -577,6 +593,7 @@ disk_gone_if_idle(
 			break;
 		}
 	}
+
 	disk->d_next = NULL;
 	disk_persistence_invalidate(disk);
 	disk->d_state = DISK_GONE;
@@ -612,14 +629,17 @@ disk_destroy(
 		disk_unlock(enabled);
 		return EINVAL;
 	}
+
 	if (disk->d_state == DISK_LIVE) {
 		disk_unlock(enabled);
 		return EBUSY;
 	}
+
 	if (disk->d_state != DISK_ALLOCATED && disk->d_state != DISK_GONE) {
 		disk_unlock(enabled);
 		return EINVAL;
 	}
+
 	if (disk->d_open_count != 0 ||
 	    disk->d_inflight != 0 ||
 	    disk->d_opening != 0 ||
@@ -663,10 +683,12 @@ disk_find(
 		if (name_equal(disk->d_name, name))
 			break;
 	}
+
 	if (disk != NULL) {
 		KERN_TEST_CHECKPOINT(KERN_TEST_DISK_LOOKUP_BEFORE_REF, disk);
 		refcount_get(&disk->d_refs);
 	}
+
 	disk_unlock(enabled);
 
 	/* Reports the referenced disk, or NULL. */
@@ -690,6 +712,7 @@ disk_find_by_dev(
 		if (disk->d_dev == dev)
 			break;
 	}
+
 	if (disk != NULL)
 		refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
@@ -737,6 +760,7 @@ disk_inflight_count(
 		count += disk->d_inflight;
 		spin_unlock_irqrestore(&disk->d_lock, irq);
 	}
+
 	disk_unlock(enabled);
 
 	/* Reports the sampled total. */
@@ -761,6 +785,7 @@ disk_at(
 		disk = disk->d_next;
 		index--;
 	}
+
 	if (disk != NULL)
 		refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
@@ -778,9 +803,8 @@ disk_ref(
 {
 	bool enabled;
 
-	enabled = disk_lock();
-
 	/* Ignores a missing or unknown disk. */
+	enabled = disk_lock();
 	if (disk != NULL && disk_index(disk) >= 0)
 		refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
@@ -795,9 +819,8 @@ disk_release(
 {
 	bool enabled;
 
-	enabled = disk_lock();
-
 	/* Ignores a missing or unknown disk; the slot outlives the last reference. */
+	enabled = disk_lock();
 	if (disk != NULL && disk_index(disk) >= 0)
 		(void)refcount_put_not_last(&disk->d_refs);
 	disk_unlock(enabled);
@@ -825,6 +848,7 @@ disk_buffer_acquire(
 		disk->d_buffer_refs++;
 		refcount_get(&disk->d_refs);
 	}
+
 	disk_unlock(enabled);
 
 	/* Reports whether the reference was granted. */
@@ -950,6 +974,7 @@ disk_get_info(
 			return 0;
 		}
 	}
+
 	disk_unlock(enabled);
 
 	/* Reports an unknown name. */
@@ -987,6 +1012,7 @@ disk_registry_snapshot(
 		disk_unlock(enabled);
 		return ENOSPC;
 	}
+
 	count = 0;
 	for (disk = disk_head; disk != NULL; disk = disk->d_next)
 		disk_copy_info(disk, &entries[count++]);
@@ -1009,9 +1035,9 @@ disk_open(
 	bool enabled;
 
 	error = 0;
-	enabled = disk_lock();
 
 	/* Rejects a missing, unknown, or dead disk. */
+	enabled = disk_lock();
 	if (disk == NULL ||
 	    disk_index(disk) < 0 ||
 	    disk->d_state != DISK_LIVE || disk_media_status(disk) != 0) {
@@ -1024,6 +1050,7 @@ disk_open(
 		disk_unlock(enabled);
 		return EBUSY;
 	}
+
 	disk->d_opening++;
 	refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
@@ -1041,6 +1068,7 @@ disk_open(
 			refcount_get(&disk->d_refs);
 		}
 	}
+
 	(void)refcount_put_not_last(&disk->d_refs);
 	disk_unlock(enabled);
 
@@ -1079,10 +1107,12 @@ disk_open_by_dev(
 		if (disk->d_dev == dev)
 			break;
 	}
+
 	if (disk == NULL) {
 		disk_unlock(enabled);
 		return ENXIO;
 	}
+
 	refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
 
@@ -1109,13 +1139,13 @@ disk_close(
 {
 	bool enabled;
 
-	enabled = disk_lock();
-
 	/* Ignores a missing, unknown, or unopened disk. */
+	enabled = disk_lock();
 	if (disk == NULL || disk_index(disk) < 0 || disk->d_open_count == 0) {
 		disk_unlock(enabled);
 		return;
 	}
+
 	disk->d_open_count--;
 	disk->d_closing++;
 	disk_unlock(enabled);
@@ -1141,15 +1171,15 @@ disk_ioctl(
 	int error;
 	bool enabled;
 
-	enabled = disk_lock();
-
 	/* Rejects a missing, unknown, or dead disk. */
+	enabled = disk_lock();
 	if (disk == NULL ||
 	    disk_index(disk) < 0 ||
 	    disk->d_state != DISK_LIVE || disk_media_status(disk) != 0) {
 		disk_unlock(enabled);
 		return ENXIO;
 	}
+
 	refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
 
@@ -1158,6 +1188,7 @@ disk_ioctl(
 		disk_release(disk);
 		return EOPNOTSUPP;
 	}
+
 	error = disk->d_ops->ioctl(disk, request, argument);
 	disk_release(disk);
 
@@ -1184,9 +1215,11 @@ disk_persistence_invalidate(
 		return;
 	leaf = disk_leaf(disk);
 	irq = spin_lock_irqsave(&leaf->d_lock);
+
 	disk_persistence_invalidate_locked(leaf);
 	if (leaf->d_media_epoch != UINT64_MAX)
 		leaf->d_media_epoch++;
+
 	spin_unlock_irqrestore(&leaf->d_lock, irq);
 }
 
@@ -1205,7 +1238,9 @@ disk_persistence_forget(
 		return;
 	leaf = disk_leaf(disk);
 	irq = spin_lock_irqsave(&leaf->d_lock);
+
 	disk_persistence_invalidate_locked(leaf);
+
 	spin_unlock_irqrestore(&leaf->d_lock, irq);
 }
 
@@ -1228,6 +1263,7 @@ disk_media_revoke(
 		atomic_raw_store_release(&leaf->d_media_revoked, 1U);
 		disk_persistence_invalidate(leaf);
 	}
+
 	disk_unlock(enabled);
 }
 
@@ -1256,6 +1292,7 @@ disk_media_retire(
 		backing_mutation_end(&guard);
 		return error;
 	}
+
 	/* The extra pin also excludes a concurrent retirement attempt. */
 	refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
@@ -1273,6 +1310,7 @@ disk_media_retire(
 				link = &child->d_next;
 				continue;
 			}
+
 			*link = child->d_next;
 			live_count--;
 			if (child == disk) {
@@ -1286,6 +1324,7 @@ disk_media_retire(
 			}
 		}
 	}
+
 	(void)refcount_put_not_last(&disk->d_refs);
 	disk_unlock(enabled);
 	backing_mutation_end(&guard);
@@ -1315,6 +1354,7 @@ disk_media_status(
 		else
 			disk = disk->d_media_backing;
 	}
+
 	return 0;
 }
 
@@ -1377,15 +1417,18 @@ bio_complete(
 
 	/* Records the result once and wakes the waiters. */
 	bio_irq = spin_lock_irqsave(&bio->b_lock);
+
 	if (bio->b_state != BIO_SUBMITTED) {
 		spin_unlock_irqrestore(&bio->b_lock, bio_irq);
 		return;
 	}
+
 	leaf = bio->b_leaf_disk;
 	if (leaf != NULL && disk_media_status(leaf) != 0) {
 		error = ESTALE;
 		transferred = 0;
 	}
+
 	if (error == 0 && leaf != NULL && bio->b_op == BIO_WRITE &&
 	    transferred != (uint64_t)bio->b_block_count * leaf->d_block_size)
 		error = EIO;
@@ -1415,6 +1458,7 @@ bio_complete(
 	/* Publishes completion only after all leaf accounting is finished. */
 	bio->b_state = BIO_COMPLETED;
 	waitq_wake_all(&bio->b_waitq);
+
 	spin_unlock_irqrestore(&bio->b_lock, bio_irq);
 
 	/* Runs the completion callback unlocked. */
@@ -1462,6 +1506,7 @@ disk_resolve_range(
 		mapped += leaf->d_parent_offset;
 		leaf = parent;
 	}
+
 	if (mapped >= leaf->d_block_count ||
 	    count > leaf->d_block_count - mapped)
 		return EOVERFLOW;
@@ -1508,6 +1553,7 @@ bio_wait(
 				return error;
 			}
 		}
+
 		if (bio->b_state == BIO_COMPLETED)
 			error = bio->b_error;
 		else
@@ -1524,10 +1570,12 @@ bio_wait(
 		spin_unlock_irqrestore(&bio->b_lock, irq);
 		hal_compiler_barrier();
 	}
+
 	if (bio->b_state == BIO_COMPLETED)
 		error = bio->b_error;
 	else
 		error = EINVAL;
+
 	spin_unlock_irqrestore(&bio->b_lock, irq);
 
 	/* Reports why the completion failed. */
@@ -1558,6 +1606,7 @@ bio_flush(
 		return error;
 	thread = thread_current != NULL ? thread_current() : NULL;
 	irq = spin_lock_irqsave(&leaf->d_lock);
+
 	target = leaf->d_write_accepted;
 
 	/* Waits for earlier flush ownership and holes in this captured prefix. */
@@ -1588,7 +1637,9 @@ bio_flush(
 		disk_cache_leave(leaf);
 		return 0;
 	}
+
 	leaf->d_flush_busy = 1;
+
 	spin_unlock_irqrestore(&leaf->d_lock, irq);
 
 	/* Issues a real barrier after the complete captured prefix. */
@@ -1600,6 +1651,7 @@ bio_flush(
 
 	/* Publishes this target only; later accepted writes need another barrier. */
 	irq = spin_lock_irqsave(&leaf->d_lock);
+
 	if (error == 0 && (leaf->d_flags & DISK_FLUSH_PROOF) != 0 &&
 	    epoch == leaf->d_persist_epoch &&
 	    epoch != UINT64_MAX && target != UINT64_MAX) {
@@ -1609,9 +1661,12 @@ bio_flush(
 	} else {
 		disk_persistence_invalidate_locked(leaf);
 	}
+
 	leaf->d_flush_busy = 0;
 	waitq_wake_all(&leaf->d_waitq);
+
 	spin_unlock_irqrestore(&leaf->d_lock, irq);
+
 	disk_cache_leave(leaf);
 
 	/* Preserves the physical barrier result for upper dirty owners. */
@@ -1634,9 +1689,8 @@ disk_read_direct(
 {
 	int error;
 
-	error = disk_transfer_direct(disk, BIO_READ, block, count, data, NULL, NULL, NULL);
-
 	/* Reports why the transfer failed. */
+	error = disk_transfer_direct(disk, BIO_READ, block, count, data, NULL, NULL, NULL);
 	if (error != 0)
 		return error;
 
@@ -1657,9 +1711,9 @@ disk_write_direct(
 	int error;
 
 	/* Writes without an I/O context. */
-	error = disk_write_direct_context(disk, block, count, data, NULL);
 
 	/* Reports why the transfer failed. */
+	error = disk_write_direct_context(disk, block, count, data, NULL);
 	if (error != 0)
 		return error;
 
@@ -1684,10 +1738,9 @@ disk_write_direct_context(
 {
 	int error;
 
+	/* Reports why the transfer failed. */
 	error = disk_transfer_direct(disk, BIO_WRITE, block, count, (void *)data,
 				     NULL, NULL, context);
-
-	/* Reports why the transfer failed. */
 	if (error != 0)
 		return error;
 
@@ -1711,6 +1764,8 @@ disk_transfer_progress(
 	int error;
 
 	/* Transfers without an I/O context. */
+
+	/* Reports why the transfer failed. */
 	error = disk_transfer_progress_context(
 		disk,
 		op,
@@ -1719,8 +1774,6 @@ disk_transfer_progress(
 		data,
 		completed,
 		NULL);
-
-	/* Reports why the transfer failed. */
 	if (error != 0)
 		return error;
 
@@ -1752,9 +1805,9 @@ disk_transfer_progress_context(
 	*completed = 0;
 	if (op != BIO_READ && op != BIO_WRITE)
 		return EINVAL;
-	error = disk_transfer_direct(disk, op, block, count, data, NULL, completed, context);
 
 	/* Reports the transfer outcome independently of its confirmed prefix. */
+	error = disk_transfer_direct(disk, op, block, count, data, NULL, completed, context);
 	if (error != 0)
 		return error;
 
@@ -1778,10 +1831,10 @@ disk_write_direct_claimed(
 	/* Rejects a missing claim. */
 	if (claim == NULL)
 		return EINVAL;
-	error = disk_transfer_direct(disk, BIO_WRITE, block, count, (void *)data,
-				     claim, NULL, NULL);
 
 	/* Reports why the transfer failed. */
+	error = disk_transfer_direct(disk, BIO_WRITE, block, count, (void *)data,
+				     claim, NULL, NULL);
 	if (error != 0)
 		return error;
 
@@ -1802,9 +1855,9 @@ disk_sync(
 	error = buf_sync(disk);
 	if (error != 0)
 		return error;
-	error = bio_flush(disk);
 
 	/* Reports why the flush failed. */
+	error = bio_flush(disk);
 	if (error != 0)
 		return error;
 
@@ -1824,9 +1877,8 @@ disk_read(
 {
 	int error;
 
-	error = disk_cached_transfer(disk, block, count, data, 0, NULL, NULL);
-
 	/* Reports why the read failed. */
+	error = disk_cached_transfer(disk, block, count, data, 0, NULL, NULL);
 	if (error != 0)
 		return error;
 
@@ -1848,9 +1900,9 @@ disk_read_view(
 	int error;
 
 	/* Applies the same lifecycle admission as ordinary cached I/O. */
-	error = disk_cached_transfer(disk, block, count, data, 0, view, NULL);
 
 	/* Reports the failure. */
+	error = disk_cached_transfer(disk, block, count, data, 0, view, NULL);
 	if (error != 0)
 		return error;
 
@@ -1896,9 +1948,9 @@ disk_write(
 	int error;
 
 	/* Writes without an I/O context. */
-	error = disk_write_context(disk, block, count, data, NULL);
 
 	/* Reports why the write failed. */
+	error = disk_write_context(disk, block, count, data, NULL);
 	if (error != 0)
 		return error;
 
@@ -1956,9 +2008,9 @@ disk_write_filesystem(
 	int error;
 
 	/* Writes without an I/O context. */
-	error = disk_write_filesystem_context(disk, block, count, data, NULL);
 
 	/* Reports why the write failed. */
+	error = disk_write_filesystem_context(disk, block, count, data, NULL);
 	if (error != 0)
 		return error;
 
@@ -2018,9 +2070,9 @@ disk_cache_acquire(
 	if (leaf == NULL)
 		return EINVAL;
 	*leaf = NULL;
-	error = disk_cache_enter(disk, leaf);
 
 	/* Reports the acquired token or the lifecycle refusal. */
+	error = disk_cache_enter(disk, leaf);
 	if (error != 0)
 		return error;
 
@@ -2064,6 +2116,7 @@ bio_async_enable(struct disk *disk)
 		return error;
 	endpoint = NULL;
 	registry_irq = spin_lock_irqsave(&async_registry);
+
 	for (index = 0; index < ASYNC_ENDPOINTS; index++) {
 		candidate = &async_endpoints[index];
 		if (candidate->leaf == token && candidate->state != ASYNC_OFF) {
@@ -2072,17 +2125,22 @@ bio_async_enable(struct disk *disk)
 			disk_cache_release(token);
 			return error;
 		}
+
 		if (candidate->state == ASYNC_OFF && endpoint == NULL)
 			endpoint = candidate;
 	}
+
 	if (endpoint == NULL) {
 		spin_unlock_irqrestore(&async_registry, registry_irq);
 		disk_cache_release(token);
 		return EAGAIN;
 	}
+
 	irq = spin_lock_irqsave(&endpoint->lock);
+
 	endpoint->leaf = token;
 	endpoint->state = ASYNC_BUILDING;
+
 	spin_unlock_irqrestore(&endpoint->lock, irq);
 	spin_unlock_irqrestore(&async_registry, registry_irq);
 
@@ -2099,6 +2157,7 @@ bio_async_enable(struct disk *disk)
 		error = ENOMEM;
 		goto failed_memory;
 	}
+
 	error = cache_memory_reserve(CACHE_MEMORY_IO_POOL, memory.size, 0);
 	if (error != 0)
 		goto failed_memory;
@@ -2110,11 +2169,14 @@ bio_async_enable(struct disk *disk)
 			cache_memory_release(CACHE_MEMORY_IO_POOL, memory.size);
 			goto failed_memory;
 		}
+
 		endpoint->started = 1;
 		thread_start(thread);
 	}
+
 	registry_irq = spin_lock_irqsave(&async_registry);
 	irq = spin_lock_irqsave(&endpoint->lock);
+
 	endpoint->memory = memory;
 	endpoint->cache_token = token;
 	endpoint->requests = memory.vaddr;
@@ -2122,9 +2184,12 @@ bio_async_enable(struct disk *disk)
 		endpoint->requests[index].endpoint = endpoint;
 		endpoint->requests[index].payload = (char *)memory.vaddr + controls + index * KERN_IO_BATCH_MAX;
 	}
+
 	endpoint->state = ASYNC_LIVE;
+
 	spin_unlock_irqrestore(&endpoint->lock, irq);
 	spin_unlock_irqrestore(&async_registry, registry_irq);
+
 	return 0;
 
 failed_memory:
@@ -2132,10 +2197,13 @@ failed_memory:
 		HAL_FATAL("BIO endpoint rollback failed");
 	registry_irq = spin_lock_irqsave(&async_registry);
 	irq = spin_lock_irqsave(&endpoint->lock);
+
 	endpoint->leaf = NULL;
 	endpoint->state = ASYNC_OFF;
+
 	spin_unlock_irqrestore(&endpoint->lock, irq);
 	spin_unlock_irqrestore(&async_registry, registry_irq);
+
 	disk_cache_release(token);
 
 	/* Reports the failure. */
@@ -2162,6 +2230,7 @@ bio_async_disable(struct disk *disk)
 		return EINVAL;
 	leaf = disk_leaf(disk);
 	registry_irq = spin_lock_irqsave(&async_registry);
+
 	for (index = 0; index < ASYNC_ENDPOINTS; index++) {
 		endpoint = &async_endpoints[index];
 		if (endpoint->leaf != leaf)
@@ -2172,6 +2241,7 @@ bio_async_disable(struct disk *disk)
 			spin_unlock_irqrestore(&async_registry, registry_irq);
 			return EBUSY;
 		}
+
 		endpoint->state = ASYNC_STOPPING;
 		memory = endpoint->memory;
 		token = endpoint->cache_token;
@@ -2186,6 +2256,7 @@ bio_async_disable(struct disk *disk)
 			spin_unlock_irqrestore(&async_registry, registry_irq);
 			return EIO;
 		}
+
 		cache_memory_release(CACHE_MEMORY_IO_POOL, endpoint->memory.size);
 		memset(&endpoint->memory, 0, sizeof(endpoint->memory));
 		endpoint->requests = NULL;
@@ -2197,7 +2268,9 @@ bio_async_disable(struct disk *disk)
 		disk_cache_release(token);
 		return 0;
 	}
+
 	spin_unlock_irqrestore(&async_registry, registry_irq);
+
 	return ENOENT;
 }
 
@@ -2240,6 +2313,7 @@ bio_async_prepare(struct disk *disk, enum bio_op op, uint64_t block,
 		disk_cache_release(token);
 		return E2BIG;
 	}
+
 	request = NULL;
 	for (index = 0; index < ASYNC_ENDPOINTS && request == NULL; index++) {
 		endpoint = &async_endpoints[index];
@@ -2254,12 +2328,15 @@ bio_async_prepare(struct disk *disk, enum bio_op op, uint64_t block,
 				}
 			}
 		}
+
 		spin_unlock_irqrestore(&endpoint->lock, irq);
 	}
+
 	if (request == NULL) {
 		disk_cache_release(token);
 		return EAGAIN;
 	}
+
 	endpoint = request->endpoint;
 	refcount_init(&request->refs, 1);
 	memset(&request->bio, 0, sizeof(request->bio));
@@ -2280,12 +2357,16 @@ bio_async_prepare(struct disk *disk, enum bio_op op, uint64_t block,
 	request->transferred = 0;
 	request->callback_active = 0;
 	irq = spin_lock_irqsave(&token->d_lock);
+
 	request->epoch = token->d_media_epoch;
+
 	spin_unlock_irqrestore(&token->d_lock, irq);
+
 	if (request->epoch == UINT64_MAX) {
 		bio_async_release(request);
 		return EOVERFLOW;
 	}
+
 	if (op == BIO_WRITE) {
 		error = backing_mutation_begin_disk(disk, block, count, claim, &request->guard);
 		if (error != 0) {
@@ -2293,6 +2374,7 @@ bio_async_prepare(struct disk *disk, enum bio_op op, uint64_t block,
 			return error;
 		}
 	}
+
 	bytes = (size_t)count * disk->d_block_size;
 	if (op == BIO_WRITE)
 		memcpy(request->payload, write_data, bytes);
@@ -2303,8 +2385,11 @@ bio_async_prepare(struct disk *disk, enum bio_op op, uint64_t block,
 	request->bio.b_data = op == BIO_FLUSH ? NULL : request->payload;
 	request->bio.b_done = async_complete;
 	irq = spin_lock_irqsave(&endpoint->lock);
+
 	request->state = REQUEST_READY;
+
 	spin_unlock_irqrestore(&endpoint->lock, irq);
+
 	*result = request;
 	return 0;
 }
@@ -2320,19 +2405,23 @@ bio_async_submit(struct bio_async_request *request)
 		return EINVAL;
 	endpoint = request->endpoint;
 	irq = spin_lock_irqsave(&endpoint->lock);
+
 	if (request->state != REQUEST_READY || endpoint->state != ASYNC_LIVE) {
 		spin_unlock_irqrestore(&endpoint->lock, irq);
 		return EINVAL;
 	}
+
 	if (endpoint->queued == ASYNC_QUEUE_LIMIT) {
 		spin_unlock_irqrestore(&endpoint->lock, irq);
 		return EAGAIN;
 	}
+
 	error = bio_admit(request->disk, &request->bio);
 	if (error != 0) {
 		spin_unlock_irqrestore(&endpoint->lock, irq);
 		return error;
 	}
+
 	bio_async_ref(request);
 	request->state = REQUEST_QUEUED;
 	if (endpoint->tail != NULL)
@@ -2342,7 +2431,9 @@ bio_async_submit(struct bio_async_request *request)
 	endpoint->tail = request;
 	endpoint->queued++;
 	waitq_wake_all(&endpoint->wake);
+
 	spin_unlock_irqrestore(&endpoint->lock, irq);
+
 	return 0;
 }
 
@@ -2357,14 +2448,18 @@ bio_async_cancel(struct bio_async_request *request)
 		return EINVAL;
 	endpoint = request->endpoint;
 	irq = spin_lock_irqsave(&endpoint->lock);
+
 	if (request->state != REQUEST_QUEUED) {
 		error = request->state == REQUEST_DONE ? EALREADY : EBUSY;
 		spin_unlock_irqrestore(&endpoint->lock, irq);
 		return error;
 	}
+
 	async_unlink_locked(endpoint, request);
 	request->state = REQUEST_RUNNING;
+
 	spin_unlock_irqrestore(&endpoint->lock, irq);
+
 	bio_complete(&request->bio, ECANCELED, 0);
 	bio_async_release(request);
 	return 0;
@@ -2382,11 +2477,13 @@ bio_async_wait(struct bio_async_request *request)
 		return EINVAL;
 	endpoint = request->endpoint;
 	irq = spin_lock_irqsave(&endpoint->lock);
+
 	while (request->state != REQUEST_DONE) {
 		if (request->state != REQUEST_QUEUED && request->state != REQUEST_RUNNING) {
 			spin_unlock_irqrestore(&endpoint->lock, irq);
 			return EINVAL;
 		}
+
 		sequence = waitq_sequence(&endpoint->wake);
 		error = waitq_sleep(&endpoint->wake, &endpoint->lock, sequence, 0, 0);
 		if (error != 0 && error != EAGAIN) {
@@ -2394,7 +2491,9 @@ bio_async_wait(struct bio_async_request *request)
 			return error;
 		}
 	}
+
 	error = request->error;
+
 	spin_unlock_irqrestore(&endpoint->lock, irq);
 
 	/* Reports the failure. */
@@ -2416,14 +2515,17 @@ bio_async_result(struct bio_async_request *request, const void **data, size_t *t
 	*data = NULL;
 	*transferred = 0;
 	irq = spin_lock_irqsave(&request->endpoint->lock);
+
 	if (request->state != REQUEST_DONE) {
 		spin_unlock_irqrestore(&request->endpoint->lock, irq);
 		return EAGAIN;
 	}
+
 	error = request->error;
 	*transferred = request->transferred;
 	if (error == 0 && request->bio.b_op == BIO_READ)
 		*data = request->payload;
+
 	spin_unlock_irqrestore(&request->endpoint->lock, irq);
 
 	/* Reports the failure. */
@@ -2451,10 +2553,13 @@ bio_async_release(struct bio_async_request *request)
 		return;
 	endpoint = request->endpoint;
 	irq = spin_lock_irqsave(&endpoint->lock);
+
 	if (request->state == REQUEST_QUEUED || request->state == REQUEST_RUNNING)
 		HAL_FATAL("releasing active BIO ownership");
 	request->state = REQUEST_RELEASING;
+
 	spin_unlock_irqrestore(&endpoint->lock, irq);
+
 	backing_mutation_end(&request->guard);
 	backing_claim_release((struct backing_claim *)request->authorization);
 	backing_claim_release((struct backing_claim *)request->context.claim);
@@ -2463,8 +2568,10 @@ bio_async_release(struct bio_async_request *request)
 	disk_release(request->disk);
 	disk_cache_release(request->cache_token);
 	irq = spin_lock_irqsave(&endpoint->lock);
+
 	request->state = REQUEST_FREE;
 	endpoint->used--;
+
 	spin_unlock_irqrestore(&endpoint->lock, irq);
 }
 
@@ -2504,6 +2611,7 @@ disk_transfer_vector_context(
 			contiguous = 0;
 		total += length;
 	}
+
 	blocks = (uint32_t)(total / disk->d_block_size);
 	if (block >= disk->d_block_count || blocks > disk->d_block_count - block)
 		return EINVAL;
@@ -2522,6 +2630,7 @@ disk_transfer_vector_context(
 		io_pool_release(scratch);
 		scratch = NULL;
 	}
+
 	if (scratch != NULL) {
 		if (op == BIO_WRITE) {
 			offset = 0;
@@ -2530,6 +2639,7 @@ disk_transfer_vector_context(
 				offset += vectors[index].length;
 			}
 		}
+
 		io_stats_record(IO_DISK_VECTOR_BATCH, total);
 		error = disk_transfer_progress_context(disk, op, block, blocks,
 		    scratch, completed, context);
@@ -2546,6 +2656,7 @@ disk_transfer_vector_context(
 				offset += length;
 			}
 		}
+
 		io_pool_release(scratch);
 		return error;
 	}
@@ -2564,6 +2675,7 @@ disk_transfer_vector_context(
 		if (progress != blocks)
 			return EIO;
 	}
+
 	return 0;
 }
 
@@ -2599,6 +2711,7 @@ disk_media_idle_locked(
 			return EBUSY;
 		expected++;
 	}
+
 	return refcount_load(&parent->d_refs) == expected ? 0 : EBUSY;
 }
 
@@ -2624,6 +2737,7 @@ disk_write_accept(
 	if (bio->b_op != BIO_WRITE)
 		return;
 	irq = spin_lock_irqsave(&leaf->d_lock);
+
 	if (leaf->d_write_accepted != UINT64_MAX)
 		leaf->d_write_accepted++;
 	else
@@ -2636,6 +2750,7 @@ disk_write_accept(
 	else
 		leaf->d_write_head = bio;
 	leaf->d_write_tail = bio;
+
 	spin_unlock_irqrestore(&leaf->d_lock, irq);
 }
 
@@ -2652,6 +2767,7 @@ disk_write_retire(
 
 	/* Treats every transport error as an uncertain persistence boundary. */
 	irq = spin_lock_irqsave(&leaf->d_lock);
+
 	expected = (uint64_t)bio->b_block_count * leaf->d_block_size;
 	if (error != 0 || (bio->b_op == BIO_WRITE && transferred != expected))
 		disk_persistence_invalidate_locked(leaf);
@@ -2674,6 +2790,7 @@ disk_write_retire(
 			leaf->d_write_completed = leaf->d_write_accepted;
 		waitq_wake_all(&leaf->d_waitq);
 	}
+
 	spin_unlock_irqrestore(&leaf->d_lock, irq);
 }
 
@@ -2740,6 +2857,7 @@ bio_admit(
 		if (leaf->d_state != DISK_LIVE)
 			return ENXIO;
 	}
+
 	if (leaf->d_ops == NULL || leaf->d_ops->submit == NULL)
 		return EOPNOTSUPP;
 	if (bio->b_op != BIO_FLUSH &&
@@ -2762,6 +2880,7 @@ bio_admit(
 		disk_unlock(enabled);
 		return EBUSY;
 	}
+
 	bio->b_disk = disk;
 	bio->b_leaf_disk = leaf;
 	bio->b_mapped_block = mapped;
@@ -2773,9 +2892,12 @@ bio_admit(
 	disk_unlock(enabled);
 
 	context_irq = spin_lock_irqsave(&leaf->d_lock);
+
 	bio->b_context.media_disk = leaf;
 	bio->b_context.media_generation = leaf->d_media_epoch;
+
 	spin_unlock_irqrestore(&leaf->d_lock, context_irq);
+
 	disk_write_accept(leaf, bio);
 
 	return 0;
@@ -2895,6 +3017,7 @@ disk_reload_replace_locked(
 			if (name_equal(disk->d_name, new_disks[j]->d_name))
 				return EEXIST;
 		}
+
 		for (other = disk_head; other != NULL; other = other->d_next) {
 			if (other->d_parent != parent &&
 			    name_equal(disk->d_name, other->d_name))
@@ -2908,6 +3031,7 @@ disk_reload_replace_locked(
 			link = &disk->d_next;
 			continue;
 		}
+
 		*link = disk->d_next;
 		disk->d_next = NULL;
 		disk_persistence_invalidate(disk);
@@ -2927,6 +3051,7 @@ disk_reload_replace_locked(
 		tail = &disk->d_next;
 		live_count++;
 	}
+
 	parent->d_identity_valid = 0;
 
 	/* Reports the complete namespace replacement. */
@@ -3065,6 +3190,7 @@ disk_index(
 		if (&disks[i] == disk)
 			return (int)i;
 	}
+
 	return -1;
 }
 
@@ -3118,6 +3244,7 @@ name_valid(
 		if (name[i] == '\0')
 			return 1;
 	}
+
 	return 0;
 }
 
@@ -3270,6 +3397,7 @@ disk_transfer_direct(
 				backing_mutation_end(&guard);
 			return error;
 		}
+
 		error = bio_wait(&bio);
 		if (error != 0) {
 			if (guarded)
@@ -3284,12 +3412,14 @@ disk_transfer_direct(
 				backing_mutation_end(&guard);
 			return EIO;
 		}
+
 		if (completed != NULL)
 			*completed += chunk;
 		block += chunk;
 		count -= chunk;
 		bytes += expected;
 	}
+
 	if (guarded)
 		backing_mutation_end(&guard);
 
@@ -3314,6 +3444,7 @@ async_initialize(void)
 		spin_init(&async_endpoints[index].lock, LOCK_RANK_BIO_QUEUE, "BIO worker queue");
 		waitq_init(&async_endpoints[index].wake, "BIO worker");
 	}
+
 	atomic_store_release(&async_initialized, 2);
 	return 0;
 }
@@ -3332,6 +3463,7 @@ async_unlink_locked(struct bio_async_endpoint *endpoint, struct bio_async_reques
 		previous = *link;
 		link = &previous->next;
 	}
+
 	*link = request->next;
 	if (endpoint->tail == request)
 		endpoint->tail = previous;
@@ -3357,12 +3489,16 @@ async_complete(struct bio *bio)
 	    bio->b_transferred != (uint64_t)bio->b_block_count * request->disk->d_block_size)
 		error = EIO;
 	irq = spin_lock_irqsave(&request->cache_token->d_lock);
+
 	if (error == 0 && (request->cache_token->d_state != DISK_LIVE ||
 	    request->epoch != request->cache_token->d_media_epoch))
 		error = ESTALE;
+
 	spin_unlock_irqrestore(&request->cache_token->d_lock, irq);
+
 	backing_mutation_end(&request->guard);
 	irq = spin_lock_irqsave(&endpoint->lock);
+
 	request->error = error;
 	request->transferred = bio->b_transferred;
 	callback = request->callback;
@@ -3370,14 +3506,18 @@ async_complete(struct bio *bio)
 	request->callback_active = 1;
 	request->state = REQUEST_DONE;
 	waitq_wake_all(&endpoint->wake);
+
 	spin_unlock_irqrestore(&endpoint->lock, irq);
+
 	if (callback != NULL)
 		callback(request, argument);
 	/* The worker retains its reference until callback return and this handoff. */
 	bio_async_release(request);
 	irq = spin_lock_irqsave(&endpoint->lock);
+
 	request->callback_active = 0;
 	waitq_wake_all(&endpoint->wake);
+
 	spin_unlock_irqrestore(&endpoint->lock, irq);
 }
 
@@ -3398,6 +3538,7 @@ async_worker(void *argument)
 			sequence = waitq_sequence(&endpoint->wake);
 			(void)waitq_sleep(&endpoint->wake, &endpoint->lock, sequence, 0, 0);
 		}
+
 		request = endpoint->head;
 		async_unlink_locked(endpoint, request);
 		request->state = REQUEST_RUNNING;
@@ -3415,6 +3556,7 @@ async_worker(void *argument)
 			sequence = waitq_sequence(&endpoint->wake);
 			(void)waitq_sleep(&endpoint->wake, &endpoint->lock, sequence, 0, 0);
 		}
+
 		spin_unlock_irqrestore(&endpoint->lock, irq);
 		bio_async_release(request);
 	}

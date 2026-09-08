@@ -66,7 +66,9 @@ kern_log_write(
 
 	/* Appends the record to the ring buffer. */
 	irq = spin_lock_irqsave(&klog_lock);
+
 	append_locked(bytes, length);
+
 	spin_unlock_irqrestore(&klog_lock, irq);
 
 	/* Mirrors the record to the debug console in terminated chunks. */
@@ -122,6 +124,7 @@ kern_logf(
 			emit_char(text, sizeof(text) - 1U, &used, *format++);
 			continue;
 		}
+
 		format++;
 
 		/* Copies an escaped percent sign. */
@@ -184,6 +187,7 @@ kern_logf(
 				emit_char(text, sizeof(text) - 1U, &used, '-');
 				value = 0U - value;
 			}
+
 			emit_number(
 				text,
 				sizeof(text) - 1U,
@@ -211,6 +215,7 @@ kern_logf(
 				emit_char(text, sizeof(text) - 1U, &used, spec);
 		}
 	}
+
 	va_end(args);
 
 	/* Terminates the text inside the buffer. */

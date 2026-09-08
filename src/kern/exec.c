@@ -124,6 +124,7 @@ exec_shebang_parse(
 		     bytes[end] != '\r'))
 			return -ENOEXEC;
 	}
+
 	if (end == size && !at_eof)
 		return -E2BIG;
 	if (end > EXEC_SHEBANG_LINE_MAX)
@@ -143,6 +144,7 @@ exec_shebang_parse(
 		if (bytes[path_end] == '\r')
 			return -ENOEXEC;
 	}
+
 	if (path_end - begin >= sizeof(result->interpreter))
 		return -ENAMETOOLONG;
 	memcpy(result->interpreter, bytes + begin, path_end - begin);
@@ -166,6 +168,7 @@ exec_shebang_parse(
 		if (bytes[i] == '\r')
 			return -ENOEXEC;
 	}
+
 	if (argument_end != argument_begin) {
 		length = argument_end - argument_begin;
 		if (length >= sizeof(result->optional_argument))
@@ -243,6 +246,7 @@ exec_script_argv_build(
 		if (error != 0)
 			return error;
 	}
+
 	error = script_argv_count(script_path, table_bytes, &string_bytes);
 	if (error != 0)
 		return error;
@@ -307,6 +311,7 @@ exec_credential_prepare(
 		if ((status->st_mode & S_ISGID) != 0)
 			credential->egid = status->st_gid;
 	}
+
 	credential->suid = credential->euid;
 	credential->sgid = credential->egid;
 
@@ -390,6 +395,7 @@ exec_build_initial_stack(
 		total += length;
 		argc++;
 	}
+
 	if (envp != NULL) {
 		while (envp[envc] != NULL) {
 			if (envc >= EXEC_ENV_MAX)
@@ -401,6 +407,7 @@ exec_build_initial_stack(
 			envc++;
 		}
 	}
+
 	length = strlen(aux->exec_path) + 1U;
 	if (length > EXEC_STRING_MAX - total)
 		return E2BIG;
@@ -418,6 +425,7 @@ exec_build_initial_stack(
 		error = ENOMEM;
 		goto out;
 	}
+
 	argv_address = address;
 	env_address = address + argc;
 
@@ -444,6 +452,7 @@ exec_build_initial_stack(
 			goto out;
 		env_address[i - 1U] = (exec_user_word_t)sp;
 	}
+
 	for (i = argc; i != 0; i--) {
 		length = strlen(argv[i - 1U]) + 1U;
 		sp -= length;
@@ -458,6 +467,7 @@ exec_build_initial_stack(
 		error = EOVERFLOW;
 		goto out;
 	}
+
 	sp = (sp - table_size) & ~(uintptr_t)15U;
 	if (sp < vm->stack_bottom) {
 		error = EOVERFLOW;
@@ -581,6 +591,7 @@ process_spawn_from(
 		error = ENOMEM;
 		goto out;
 	}
+
 	exec_credential_prepare(prospective_cred, &target.status,
 				target.mount_flags, 0, &secure);
 
@@ -597,6 +608,7 @@ process_spawn_from(
 		error = ENOMEM;
 		goto out;
 	}
+
 	error = resource_limit_apply_vm(process, process->vmspace);
 	if (error != 0)
 		goto out;
@@ -703,9 +715,8 @@ process_execve(
 {
 	int error;
 
-	error = process_exec_file(process, path, NULL, 1, argv, envp);
-
 	/* Reports why the exec failed. */
+	error = process_exec_file(process, path, NULL, 1, argv, envp);
 	if (error != 0)
 		return error;
 
@@ -731,9 +742,9 @@ process_fexecve(
 		label = argv[0];
 	else
 		label = "fexecve";
-	error = process_exec_file(process, label, file, 0, argv, envp);
 
 	/* Reports why the exec failed. */
+	error = process_exec_file(process, label, file, 0, argv, envp);
 	if (error != 0)
 		return error;
 
@@ -753,9 +764,8 @@ process_spawn(
 {
 	int error;
 
-	error = process_spawn_from(&process0, path, argv, envp, result);
-
 	/* Reports why the spawn failed. */
+	error = process_spawn_from(&process0, path, argv, envp, result);
 	if (error != 0)
 		return error;
 
@@ -779,9 +789,9 @@ process_spawn_init(
 	/* Runs the path as its own argument. */
 	argv[0] = (char *)path;
 	argv[1] = NULL;
-	error = process_spawn(path, argv, envp, result);
 
 	/* Reports why the spawn failed. */
+	error = process_spawn(path, argv, envp, result);
 	if (error != 0)
 		return error;
 
@@ -931,6 +941,7 @@ load_executable(
 		*execution_entry = interpreter.entry;
 		*interpreter_base = interpreter.load_bias;
 	}
+
 	if (interpreter_file != NULL)
 		(void)file_close(interpreter_file);
 
@@ -1005,6 +1016,7 @@ exec_target_resolve(
 		if (error != 0)
 			return error;
 	}
+
 	error = file_content_lease_begin(target->file, &target->lease);
 	if (error != 0)
 		goto fail;
@@ -1013,6 +1025,7 @@ exec_target_resolve(
 			error = ENAMETOOLONG;
 			goto fail;
 		}
+
 		strcpy(paths[path_count++], path);
 	}
 
@@ -1028,6 +1041,7 @@ exec_target_resolve(
 			error = EACCES;
 			goto fail;
 		}
+
 		error = vfs_access(target->file->f_inode, cred, X_OK);
 		if (error != 0)
 			goto fail;
@@ -1046,6 +1060,7 @@ exec_target_resolve(
 			error = (int)-count;
 			goto fail;
 		}
+
 		at_eof = target->status.st_size >= 0 &&
 			 (uint64_t)target->status.st_size <= (uint64_t)count;
 		parsed =
@@ -1054,6 +1069,7 @@ exec_target_resolve(
 			error = -parsed;
 			goto fail;
 		}
+
 		if (parsed == 0)
 			return 0;
 
@@ -1071,6 +1087,7 @@ exec_target_resolve(
 			error = ELOOP;
 			goto fail;
 		}
+
 		for (i = 0; i < path_count; i++) {
 			if (!strcmp(paths[i], shebang.interpreter)) {
 				error = ELOOP;
@@ -1104,6 +1121,7 @@ exec_target_resolve(
 		strcpy(paths[path_count++], shebang.interpreter);
 		target->script_depth++;
 	}
+
 fail:
 	exec_target_release(target);
 
@@ -1211,6 +1229,7 @@ setup_standard_files(
 			(void)file_close(file);
 			continue;
 		}
+
 		error =
 		    file_openat_cred(process->cwdi, credential, "/dev/console",
 				     flags[descriptor], 0, &file);
@@ -1274,11 +1293,14 @@ process_exec_file(
 
 	/* One exec at a time per process. */
 	process_irq = spin_lock_irqsave(&process->lock);
+
 	if (process->execing) {
 		spin_unlock_irqrestore(&process->lock, process_irq);
 		return EBUSY;
 	}
+
 	process->execing = 1;
+
 	spin_unlock_irqrestore(&process->lock, process_irq);
 
 	/* Resolves the executable and prepares the prospective credential. */
@@ -1287,6 +1309,7 @@ process_exec_file(
 		error = EINVAL;
 		goto out;
 	}
+
 	error = exec_target_resolve(process->cwdi, access_cred, path, provided_file,
 				    reopenable_path, argv, &target);
 	if (error != 0)
@@ -1296,6 +1319,7 @@ process_exec_file(
 		error = ENOMEM;
 		goto out;
 	}
+
 	exec_credential_prepare(prospective_cred, &target.status,
 				target.mount_flags, 0, &secure);
 	error = process_cred_reserve(process, &cred_reservation);
@@ -1308,6 +1332,7 @@ process_exec_file(
 		error = ENOMEM;
 		goto out;
 	}
+
 	error = resource_limit_apply_vm(process, new_vm);
 	if (error != 0)
 		goto out;
@@ -1325,6 +1350,7 @@ process_exec_file(
 		error = exec_build_initial_stack(new_vm, image.stack_size,
 						 target.argv, envp, &aux, &sp);
 	}
+
 	if (error != 0)
 		goto out;
 	error = exec_target_revalidate(&target, access_cred);
@@ -1373,6 +1399,7 @@ process_exec_file(
 				other->terminate_requested = 1;
 			break;
 		}
+
 		spin_unlock_irqrestore(&process->lock, process_irq);
 		if (other == NULL)
 			break;
@@ -1381,6 +1408,7 @@ process_exec_file(
 			while (other->state != THREAD_ZOMBIE)
 				sched_sleep(sched_ticks() + 1U);
 		}
+
 		(void)thread_wait(other, NULL);
 		thread_release(other);
 	}
@@ -1399,9 +1427,12 @@ process_exec_file(
 	 * through an interrupt while the old pointer is visible.
 	 */
 	process_irq = spin_lock_irqsave(&process->lock);
+
 	old_vm = process->vmspace;
 	process->vmspace = new_vm;
+
 	spin_unlock_irqrestore(&process->lock, process_irq);
+
 	new_vm = NULL;
 
 	/*
@@ -1426,8 +1457,11 @@ process_exec_file(
 	vmspace_put(old_vm);
 out:
 	process_irq = spin_lock_irqsave(&process->lock);
+
 	process->execing = 0;
+
 	spin_unlock_irqrestore(&process->lock, process_irq);
+
 	exec_target_release(&target);
 	process_cred_reservation_abort(cred_reservation);
 	cred_release(prospective_cred);

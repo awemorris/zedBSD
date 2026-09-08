@@ -168,7 +168,6 @@ const struct filesystem_type tmpfs_type = {
 	.unmount = tmpfs_unmount,
 };
 
-
 /* Reports the tmpfs node of an inode, or NULL. */
 static struct tmpfs_node *
 tmpfs_node(
@@ -191,6 +190,7 @@ tmpfs_find_xattr(
 		if (strcmp((*link)->name, name) == 0)
 			break;
 	}
+
 	return link;
 }
 
@@ -206,26 +206,29 @@ tmpfs_getxattr(
 	struct tmpfs_xattr *attribute;
 	size_t length;
 
-	node = tmpfs_node(inode);
-
 	/* Rejects an inode without a node. */
+	node = tmpfs_node(inode);
 	if (node == NULL)
 		return -EIO;
 
 	/* Looks the attribute up under the inode lock. */
 	mutex_lock(&inode->i_lock);
+
 	attribute = *tmpfs_find_xattr(node, name);
 	if (attribute == NULL) {
 		mutex_unlock(&inode->i_lock);
 		return -ENODATA;
 	}
+
 	length = attribute->value_length;
 	if (value != NULL && size < length) {
 		mutex_unlock(&inode->i_lock);
 		return -ERANGE;
 	}
+
 	if (value != NULL && length != 0)
 		memcpy(value, attribute->value, length);
+
 	mutex_unlock(&inode->i_lock);
 
 	/* Reports the value length. */
@@ -279,6 +282,7 @@ tmpfs_setxattr(
 		tmpfs_free_xattr(replacement);
 		return ENOMEM;
 	}
+
 	memcpy(replacement->name, name, name_length + 1U);
 	if (size != 0)
 		memcpy(replacement->value, value, size);
@@ -287,6 +291,7 @@ tmpfs_setxattr(
 
 	/* Swaps it into the list under the inode lock. */
 	mutex_lock(&inode->i_lock);
+
 	link = tmpfs_find_xattr(node, name);
 	old = *link;
 	if ((flags & INODE_XATTR_CREATE) != 0 && old != NULL) {
@@ -294,17 +299,21 @@ tmpfs_setxattr(
 		tmpfs_free_xattr(replacement);
 		return EEXIST;
 	}
+
 	if ((flags & INODE_XATTR_REPLACE) != 0 && old == NULL) {
 		mutex_unlock(&inode->i_lock);
 		tmpfs_free_xattr(replacement);
 		return ENODATA;
 	}
+
 	if (old != NULL)
 		replacement->next = old->next;
 	else
 		replacement->next = NULL;
 	*link = replacement;
+
 	mutex_unlock(&inode->i_lock);
+
 	tmpfs_free_xattr(old);
 
 	/* Reports the stored attribute. */
@@ -331,6 +340,7 @@ tmpfs_listxattr(
 
 	/* Sizes the list, then copies the names when they fit. */
 	mutex_lock(&inode->i_lock);
+
 	for (attribute = node->xattrs; attribute != NULL;
 	     attribute = attribute->next)
 		needed += attribute->name_length + 1U;
@@ -338,6 +348,7 @@ tmpfs_listxattr(
 		mutex_unlock(&inode->i_lock);
 		return -ERANGE;
 	}
+
 	if (list != NULL) {
 		for (attribute = node->xattrs; attribute != NULL;
 		     attribute = attribute->next) {
@@ -345,6 +356,7 @@ tmpfs_listxattr(
 			list += attribute->name_length + 1U;
 		}
 	}
+
 	mutex_unlock(&inode->i_lock);
 
 	/* Reports the list length. */
@@ -361,19 +373,21 @@ tmpfs_removexattr(
 	struct tmpfs_xattr **link;
 	struct tmpfs_xattr *attribute;
 
-	node = tmpfs_node(inode);
-
 	/* Rejects an inode without a node. */
+	node = tmpfs_node(inode);
 	if (node == NULL)
 		return EIO;
 
 	/* Unlinks the attribute under the lock and frees it outside. */
 	mutex_lock(&inode->i_lock);
+
 	link = tmpfs_find_xattr(node, name);
 	attribute = *link;
 	if (attribute != NULL)
 		*link = attribute->next;
+
 	mutex_unlock(&inode->i_lock);
+
 	if (attribute == NULL)
 		return ENODATA;
 	tmpfs_free_xattr(attribute);
@@ -432,6 +446,7 @@ find_entry_link(
 		if (component_equal(component, *link))
 			break;
 	}
+
 	return link;
 }
 
@@ -445,10 +460,12 @@ charge_node(
 	/* Takes one node from the mount's quota. */
 	error = 0;
 	mutex_lock(&state->quota_lock);
+
 	if (state->used_nodes >= state->max_nodes)
 		error = ENOSPC;
 	else
 		state->used_nodes++;
+
 	mutex_unlock(&state->quota_lock);
 
 	/* Reports whether the quota allowed it. */
@@ -465,8 +482,10 @@ uncharge_node(
 	struct tmpfs_state *state)
 {
 	mutex_lock(&state->quota_lock);
+
 	if (state->used_nodes != 0)
 		state->used_nodes--;
+
 	mutex_unlock(&state->quota_lock);
 }
 
@@ -480,10 +499,12 @@ charge_page(
 	/* Charges the mount quota first. */
 	error = 0;
 	mutex_lock(&state->quota_lock);
+
 	if (state->used_bytes > state->max_bytes - ZEDBSD_PAGE_SIZE)
 		error = ENOSPC;
 	else
 		state->used_bytes += ZEDBSD_PAGE_SIZE;
+
 	mutex_unlock(&state->quota_lock);
 
 	/* Then the commit limit, undoing the quota charge on failure. */
@@ -511,8 +532,10 @@ uncharge_page(
 {
 	vm_commit_release(ZEDBSD_PAGE_SIZE);
 	mutex_lock(&state->quota_lock);
+
 	if (state->used_bytes >= ZEDBSD_PAGE_SIZE)
 		state->used_bytes -= ZEDBSD_PAGE_SIZE;
+
 	mutex_unlock(&state->quota_lock);
 }
 
@@ -573,6 +596,7 @@ allocate_node(
 		uncharge_node(state);
 		return ENOMEM;
 	}
+
 	inode = inode_alloc(directory->i_mount);
 	if (inode == NULL) {
 		kern_free(node);
@@ -638,20 +662,22 @@ publish_new(
 
 	parent = tmpfs_node(directory);
 	state = parent->state;
-	entry = allocate_entry(component, inode);
 
 	/* Rejects a failed entry allocation. */
+	entry = allocate_entry(component, inode);
 	if (entry == NULL)
 		return ENOMEM;
 
 	/* Links the entry unless the name is taken. */
 	mutex_lock(&state->namespace_lock);
+
 	link = find_entry_link(parent, component);
 	if (*link != NULL) {
 		mutex_unlock(&state->namespace_lock);
 		kern_free(entry);
 		return EEXIST;
 	}
+
 	entry->cookie = state->next_cookie++;
 
 	/* The namespace holds its own reference to the inode. */
@@ -659,6 +685,7 @@ publish_new(
 	*link = entry;
 	if (inode->i_type == INODE_DIR)
 		directory->i_linkcount++;
+
 	mutex_unlock(&state->namespace_lock);
 
 	/* Reports the published inode. */
@@ -708,6 +735,7 @@ tmpfs_make(
 			discard_unpublished(inode);
 			return ENOMEM;
 		}
+
 		memcpy(node->symlink, target, node->symlink_length + 1U);
 		inode->i_size = (off_t)node->symlink_length;
 	}
@@ -718,6 +746,7 @@ tmpfs_make(
 		discard_unpublished(inode);
 		return error;
 	}
+
 	*result = inode;
 
 	/* Reports the created inode. */
@@ -735,9 +764,8 @@ tmpfs_lookup(
 	struct tmpfs_dirent **link;
 	struct inode *parent;
 
-	node = tmpfs_node(directory);
-
 	/* Rejects a directory outside tmpfs or a missing result. */
+	node = tmpfs_node(directory);
 	if (node == NULL || result == NULL)
 		return EINVAL;
 
@@ -747,6 +775,7 @@ tmpfs_lookup(
 		*result = directory;
 		return 0;
 	}
+
 	if (component->cn_namelen == 2 &&
 	    component->cn_nameptr[0] == '.' &&
 	    component->cn_nameptr[1] == '.') {
@@ -761,13 +790,16 @@ tmpfs_lookup(
 
 	/* Searches the entries under the namespace lock. */
 	mutex_lock(&node->state->namespace_lock);
+
 	link = find_entry_link(node, component);
 	if (*link == NULL) {
 		mutex_unlock(&node->state->namespace_lock);
 		return ENOENT;
 	}
+
 	inode_ref((*link)->inode);
 	*result = (*link)->inode;
+
 	mutex_unlock(&node->state->namespace_lock);
 
 	/* Reports the referenced inode. */
@@ -786,9 +818,9 @@ tmpfs_create(
 
 	if (request == NULL || request->type != INODE_REG)
 		return EINVAL;
-	error = tmpfs_make(directory, component, request, NULL, result);
 
 	/* Reports the failure. */
+	error = tmpfs_make(directory, component, request, NULL, result);
 	if (error != 0)
 		return error;
 
@@ -808,9 +840,9 @@ tmpfs_mkdir(
 
 	if (request == NULL || request->type != INODE_DIR)
 		return EINVAL;
-	error = tmpfs_make(directory, component, request, NULL, result);
 
 	/* Reports the failure. */
+	error = tmpfs_make(directory, component, request, NULL, result);
 	if (error != 0)
 		return error;
 
@@ -836,9 +868,9 @@ tmpfs_mknod(
 	    request->type != INODE_CHAR &&
 	    request->type != INODE_BLOCK)
 		return EOPNOTSUPP;
-	error = tmpfs_make(directory, component, request, NULL, result);
 
 	/* Reports the failure. */
+	error = tmpfs_make(directory, component, request, NULL, result);
 	if (error != 0)
 		return error;
 
@@ -859,9 +891,9 @@ tmpfs_symlink(
 
 	if (request == NULL || request->type != INODE_SYMLINK)
 		return EINVAL;
-	error = tmpfs_make(directory, component, request, target, result);
 
 	/* Reports the failure. */
+	error = tmpfs_make(directory, component, request, target, result);
 	if (error != 0)
 		return error;
 
@@ -879,9 +911,8 @@ tmpfs_readlink(
 	struct tmpfs_node *node;
 	size_t length;
 
-	node = tmpfs_node(inode);
-
 	/* Rejects an inode that is not a tmpfs symlink. */
+	node = tmpfs_node(inode);
 	if (node == NULL || node->symlink == NULL)
 		return -EINVAL;
 
@@ -908,9 +939,8 @@ tmpfs_link(
 	struct tmpfs_dirent *entry;
 	struct tmpfs_dirent **link;
 
-	parent = tmpfs_node(directory);
-
 	/* Rejects a directory target with EPERM and anything else unusable with EINVAL. */
+	parent = tmpfs_node(directory);
 	if (parent == NULL ||
 	    target == NULL ||
 	    target->i_mount != directory->i_mount ||
@@ -926,17 +956,20 @@ tmpfs_link(
 	if (entry == NULL)
 		return ENOMEM;
 	mutex_lock(&parent->state->namespace_lock);
+
 	link = find_entry_link(parent, component);
 	if (*link != NULL) {
 		mutex_unlock(&parent->state->namespace_lock);
 		kern_free(entry);
 		return EEXIST;
 	}
+
 	entry->cookie = parent->state->next_cookie++;
 	inode_ref(target);
 	*link = entry;
 
 	/* inode_link() publishes the successful link-count increment. */
+
 	mutex_unlock(&parent->state->namespace_lock);
 
 	/* Reports the added link. */
@@ -955,29 +988,32 @@ detach_entry(
 	struct tmpfs_dirent *entry;
 	struct tmpfs_node *child;
 
-	parent = tmpfs_node(directory);
-
 	/* Rejects a directory outside tmpfs. */
+	parent = tmpfs_node(directory);
 	if (parent == NULL)
 		return EINVAL;
 
 	/* Finds the entry and checks its type against the operation. */
 	mutex_lock(&parent->state->namespace_lock);
+
 	link = find_entry_link(parent, component);
 	entry = *link;
 	if (entry == NULL) {
 		mutex_unlock(&parent->state->namespace_lock);
 		return ENOENT;
 	}
+
 	child = tmpfs_node(entry->inode);
 	if (directory_only && entry->inode->i_type != INODE_DIR) {
 		mutex_unlock(&parent->state->namespace_lock);
 		return ENOTDIR;
 	}
+
 	if (!directory_only && entry->inode->i_type == INODE_DIR) {
 		mutex_unlock(&parent->state->namespace_lock);
 		return EISDIR;
 	}
+
 	if (directory_only && child->children != NULL) {
 		mutex_unlock(&parent->state->namespace_lock);
 		return ENOTEMPTY;
@@ -993,8 +1029,10 @@ detach_entry(
 		if (entry->inode->i_linkcount != 0)
 			entry->inode->i_linkcount--;
 	}
+
 	if (entry->inode->i_linkcount == 0)
 		entry->inode->i_flags |= INODE_DEAD;
+
 	mutex_unlock(&parent->state->namespace_lock);
 
 	/* Drops the namespace reference and frees the entry. */
@@ -1013,9 +1051,8 @@ tmpfs_unlink(
 {
 	int error;
 
-	error = detach_entry(directory, component, 0);
-
 	/* Reports the failure. */
+	error = detach_entry(directory, component, 0);
 	if (error != 0)
 		return error;
 
@@ -1031,9 +1068,8 @@ tmpfs_rmdir(
 {
 	int error;
 
-	error = detach_entry(directory, component, 1);
-
 	/* Reports the failure. */
+	error = detach_entry(directory, component, 1);
 	if (error != 0)
 		return error;
 
@@ -1075,11 +1111,13 @@ tmpfs_rename(
 
 	/* Finds the source entry. */
 	mutex_lock(&old_parent->state->namespace_lock);
+
 	old_link = find_entry_link(old_parent, old_component);
 	if (*old_link == NULL) {
 		mutex_unlock(&old_parent->state->namespace_lock);
 		return ENOENT;
 	}
+
 	entry = *old_link;
 	moved = tmpfs_node(entry->inode);
 
@@ -1102,15 +1140,18 @@ tmpfs_rename(
 			mutex_unlock(&old_parent->state->namespace_lock);
 			return error;
 		}
+
 		if ((*new_link)->inode == entry->inode) {
 			mutex_unlock(&old_parent->state->namespace_lock);
 			return 0;
 		}
+
 		if ((*new_link)->inode->i_type == INODE_DIR &&
 		    target->children != NULL) {
 			mutex_unlock(&old_parent->state->namespace_lock);
 			return ENOTEMPTY;
 		}
+
 		replaced = *new_link;
 		*new_link = replaced->next;
 		if (replaced->inode->i_linkcount != 0)
@@ -1145,6 +1186,7 @@ tmpfs_rename(
 		new_directory->i_linkcount++;
 		moved->parent = new_directory;
 	}
+
 	mutex_unlock(&old_parent->state->namespace_lock);
 
 	/* Drops the replaced target outside the lock. */
@@ -1200,6 +1242,7 @@ tmpfs_pread(
 
 	/* Clamps the read to the file size. */
 	mutex_lock(&inode->i_lock);
+
 	if (offset >= inode->i_size)
 		length = 0;
 	else if ((uint64_t)length > (uint64_t)(inode->i_size - offset))
@@ -1220,6 +1263,7 @@ tmpfs_pread(
 			memset(out + done, 0, count);
 		done += count;
 	}
+
 	mutex_unlock(&inode->i_lock);
 
 	/* Reports the bytes read. */
@@ -1258,6 +1302,7 @@ tmpfs_write_at(
 
 	/* An append starts at the current size. */
 	mutex_lock(&inode->i_lock);
+
 	if (append) {
 		offset = inode->i_size;
 		if ((uint64_t)length >
@@ -1285,6 +1330,7 @@ tmpfs_write_at(
 					return (ssize_t)done;
 				return -(ssize_t)error;
 			}
+
 			page = kern_calloc(1, sizeof(*page));
 			if (page == NULL) {
 				uncharge_page(node->state);
@@ -1293,6 +1339,7 @@ tmpfs_write_at(
 					return (ssize_t)done;
 				return -ENOMEM;
 			}
+
 			page->index = index;
 			page->next = *link;
 			*link = page;
@@ -1300,6 +1347,7 @@ tmpfs_write_at(
 		} else {
 			page = *link;
 		}
+
 		memcpy(page->data + within, in + done, count);
 		done += count;
 		/*
@@ -1308,6 +1356,7 @@ tmpfs_write_at(
 		if ((off_t)((uint64_t)offset + done) > inode->i_size)
 			inode->i_size = (off_t)((uint64_t)offset + done);
 	}
+
 	mutex_unlock(&inode->i_lock);
 
 	/* Reports the bytes written. */
@@ -1354,16 +1403,17 @@ tmpfs_write(
 	ssize_t result;
 
 	offset = file->f_offset;
-	result = tmpfs_write_at(file->f_inode, buffer, length, offset,
-	    (file_status_flags_get(file) & O_APPEND) != 0);
 
 	/* An append leaves the position at the new end of the file. */
+	result = tmpfs_write_at(file->f_inode, buffer, length, offset,
+	    (file_status_flags_get(file) & O_APPEND) != 0);
 	if (result > 0) {
 		if ((file_status_flags_get(file) & O_APPEND) != 0)
 			file->f_offset = file->f_inode->i_size;
 		else
 			file->f_offset = offset + result;
 	}
+
 	return result;
 }
 
@@ -1390,6 +1440,7 @@ tmpfs_truncate(
 
 	/* Moves every page past the new size to the free list. */
 	mutex_lock(&inode->i_lock);
+
 	if (size == 0)
 		last_index = 0;
 	else
@@ -1413,7 +1464,9 @@ tmpfs_truncate(
 			memset((*tail)->data + ((size_t)size % ZEDBSD_PAGE_SIZE), 0,
 			    ZEDBSD_PAGE_SIZE - ((size_t)size % ZEDBSD_PAGE_SIZE));
 	}
+
 	inode->i_size = size;
+
 	mutex_unlock(&inode->i_lock);
 
 	/* Frees the pages outside the lock. */
@@ -1471,6 +1524,7 @@ tmpfs_setattr(
 		error = tmpfs_truncate(inode, status->st_size);
 		return error;
 	}
+
 	return 0;
 }
 
@@ -1504,6 +1558,7 @@ tmpfs_readdir(
 		*eof = 0;
 		return 0;
 	}
+
 	if (cookie == 1) {
 		if (node->parent != NULL)
 			entry->d_ino = node->parent->i_ino;
@@ -1518,21 +1573,26 @@ tmpfs_readdir(
 
 	/* Finds the entry with the smallest cookie above the position. */
 	mutex_lock(&node->state->namespace_lock);
+
 	for (current = node->children; current != NULL; current = current->next) {
 		if (current->cookie > cookie &&
 		    (best == NULL || current->cookie < best->cookie))
 			best = current;
 	}
+
 	if (best == NULL) {
 		mutex_unlock(&node->state->namespace_lock);
 		*eof = 1;
 		return 0;
 	}
+
 	entry->d_ino = best->inode->i_ino;
 	entry->d_type = best->inode->i_type;
 	strcpy(entry->d_name, best->name);
 	file->f_offset = (off_t)best->cookie;
+
 	mutex_unlock(&node->state->namespace_lock);
+
 	*eof = 0;
 
 	/* Reports the next entry. */
@@ -1550,9 +1610,8 @@ tmpfs_reclaim(
 	struct tmpfs_page *next_page;
 	struct tmpfs_xattr *next_attribute;
 
-	node = tmpfs_node(inode);
-
 	/* Ignores an inode without a node. */
+	node = tmpfs_node(inode);
 	if (node == NULL)
 		return;
 
@@ -1665,6 +1724,7 @@ tmpfs_statvfs(
 
 	/* Samples the quotas under their lock. */
 	mutex_lock(&state->quota_lock);
+
 	memset(result, 0, sizeof(*result));
 	result->f_bsize = ZEDBSD_PAGE_SIZE;
 	result->f_frsize = ZEDBSD_PAGE_SIZE;
@@ -1676,6 +1736,7 @@ tmpfs_statvfs(
 	result->f_ffree = state->max_nodes - state->used_nodes;
 	result->f_favail = result->f_ffree;
 	result->f_namemax = NAME_MAX;
+
 	mutex_unlock(&state->quota_lock);
 
 	/* Reports the filled statistics. */

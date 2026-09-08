@@ -156,7 +156,9 @@ resource_limit_get(
 
 	/* Copies the limit under the process lock. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	*result = process->limits.values[resource];
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Reports the copied limit. */
@@ -200,12 +202,14 @@ resource_limit_set(
 
 	/* Only the superuser may raise the hard limit or exceed it. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	old = process->limits.values[resource];
 	privileged = process->cred != NULL && cred_is_superuser(process->cred);
 	if (!privileged && requested->maximum > old.maximum)
 		error = EPERM;
 	else if (!privileged && requested->current > old.maximum)
 		error = EPERM;
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Pushes the new soft limit to the subsystem that enforces it. */
@@ -220,11 +224,13 @@ resource_limit_set(
 
 	/* Records the accepted limit and re-arms the CPU limit signal. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	if (error == 0) {
 		process->limits.values[resource] = *requested;
 		if (resource == RLIMIT_CPU)
 			process->cpu_limit_signal_second = 0;
 	}
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	mutex_unlock(&process->resource_lock);
@@ -277,9 +283,11 @@ resource_limit_apply_vm(
 
 	/* Snapshots the three limits under the process lock. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	address = process->limits.values[RLIMIT_AS];
 	data = process->limits.values[RLIMIT_DATA];
 	stack = process->limits.values[RLIMIT_STACK];
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Applies them in order, stopping at the first failure. */
@@ -322,6 +330,7 @@ resource_limit_cpu_tick(
 	/* Decides under the process lock which signal, if any, is due. */
 	elapsed_seconds = total_ticks / KERN_CLOCK_HZ;
 	irq = spin_lock_irqsave(&process->lock);
+
 	limit = process->limits.values[RLIMIT_CPU];
 	if (limit.maximum != RLIM_INFINITY &&
 	    (limit.maximum <= UINT64_MAX / KERN_CLOCK_HZ) &&
@@ -334,6 +343,7 @@ resource_limit_cpu_tick(
 		process->cpu_limit_signal_second = elapsed_seconds + 1U;
 		signo = SIGXCPU;
 	}
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Sends the signal outside the lock. */

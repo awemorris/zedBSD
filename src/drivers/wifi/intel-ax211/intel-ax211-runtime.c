@@ -79,16 +79,6 @@ static const struct ax211_runtime_version ax211_runtime_versions[] = {
 	{0x01U, 0xc8U, 1U, 6U},	 {0x01U, 0xd2U, 4U, 0U}, {0x01U, 0x0cU, 5U, 0U},
 	{0x01U, 0x0dU, 17U, 0U}, {0x01U, 0x0eU, 1U, 0U}};
 
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv intel ax211 runtime profile from manifest operation.
  */
@@ -104,10 +94,10 @@ drv_intel_ax211_runtime_profile_from_manifest(
 	/* Handles the manifest availability. */
 	if (manifest == NULL || nvm == NULL || profile == NULL ||
 	    (ltr_enabled != 0 && ltr_enabled != 1) ||
-	    nvm->tx_chain_mask == 0U || nvm->rx_chain_mask == 0U)
-
+	    nvm->tx_chain_mask == 0U || nvm->rx_chain_mask == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_INVALID;
+	}
 	memset(&parsed, 0, sizeof(parsed));
 	parsed.tx_chain_mask = nvm->tx_chain_mask;
 	parsed.rx_chain_mask = nvm->rx_chain_mask;
@@ -144,10 +134,10 @@ drv_intel_ax211_runtime_api89_validate(
 
 	/* Checks the drv intel ax211 protocol command table validate api89 result. */
 	if (drv_intel_ax211_protocol_command_table_validate_api89(table) !=
-	    INTEL_AX211_PROTOCOL_OK)
-
+	    INTEL_AX211_PROTOCOL_OK) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_UNSUPPORTED;
+	}
 	/* Process each remaining element. */
 	for (index = 0U; index < sizeof(ax211_runtime_versions) /
 					 sizeof(ax211_runtime_versions[0]);
@@ -160,19 +150,19 @@ drv_intel_ax211_runtime_api89_validate(
 		    ax211_runtime_bit(profile->capabilities, 5U,
 				      INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2))
 			continue;
-		result = ax211_runtime_version_validate(
-			table, &ax211_runtime_versions[index]);
 
 		/* Checks the operation result. */
+		result = ax211_runtime_version_validate(
+			table, &ax211_runtime_versions[index]);
 		if (result != INTEL_AX211_RUNTIME_OK)
 			return result;
 	}
 
 	/* The pinned image does not advertise DQA and has no g5/c00 row. */
-	result = drv_intel_ax211_protocol_command_version_lookup(table, 5U, 0U,
-								 &dqa);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_protocol_command_version_lookup(table, 5U, 0U,
+								 &dqa);
 	if (result != INTEL_AX211_PROTOCOL_MISSING)
 		return INTEL_AX211_RUNTIME_UNSUPPORTED;
 
@@ -194,10 +184,10 @@ drv_intel_ax211_runtime_command_encode(
 	/* Checks the ax211 runtime profile valid result. */
 	if (!ax211_runtime_profile_valid(profile) || command == NULL ||
 	    step >= INTEL_AX211_RUNTIME_STEP_DONE ||
-	    !ax211_runtime_step_enabled(step, profile))
-
+	    !ax211_runtime_step_enabled(step, profile)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_INVALID;
+	}
 	memset(&encoded, 0, sizeof(encoded));
 
 	/* OpenBSD sends zero in the wide-header version field. */
@@ -284,6 +274,7 @@ drv_intel_ax211_runtime_command_encode(
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_INVALID;
 	}
+
 	*command = encoded;
 	/* Returns the computed result. */
 	return INTEL_AX211_RUNTIME_OK;
@@ -314,10 +305,10 @@ drv_intel_ax211_runtime_mcc_decode(
 	/* Handles the message condition. */
 	if (message->group != INTEL_AX211_RUNTIME_GROUP_LONG ||
 	    message->opcode != INTEL_AX211_RUNTIME_MCC_UPDATE_OPCODE ||
-	    message->version != INTEL_AX211_RUNTIME_MCC_RESPONSE_VERSION)
-
+	    message->version != INTEL_AX211_RUNTIME_MCC_RESPONSE_VERSION) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_UNSUPPORTED;
+	}
 
 	/* Checks the operation status. */
 	if ((message->flags & INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK) != 0U)
@@ -353,9 +344,9 @@ drv_intel_ax211_runtime_mcc_decode(
 	/* Handles the parsed condition. */
 	if (parsed.channel_count > INTEL_AX211_RUNTIME_MCC_CHANNEL_LIMIT)
 		return INTEL_AX211_RUNTIME_OVERSIZED;
-	expected = 20U + (size_t)parsed.channel_count * 4U;
 
 	/* Handles the message condition. */
+	expected = 20U + (size_t)parsed.channel_count * 4U;
 	if (message->payload_length < expected)
 		return INTEL_AX211_RUNTIME_TRUNCATED;
 
@@ -367,6 +358,7 @@ drv_intel_ax211_runtime_mcc_decode(
 		parsed.channel[index] =
 			ax211_runtime_get_le32(bytes + 20U + index * 4U);
 	}
+
 	*mcc = parsed;
 	/* Returns the computed result. */
 	return INTEL_AX211_RUNTIME_OK;
@@ -388,13 +380,13 @@ drv_intel_ax211_runtime_begin(
 
 	/* Handles the state availability. */
 	if (state == NULL || generation == 0U ||
-	    now_us > UINT64_MAX - INTEL_AX211_RUNTIME_COMMAND_TIMEOUT_US)
-
+	    now_us > UINT64_MAX - INTEL_AX211_RUNTIME_COMMAND_TIMEOUT_US) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_INVALID;
-	result = drv_intel_ax211_runtime_api89_validate(table, profile);
+	}
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_runtime_api89_validate(table, profile);
 	if (result != INTEL_AX211_RUNTIME_OK)
 		return result;
 	memset(&started, 0, sizeof(started));
@@ -417,25 +409,25 @@ drv_intel_ax211_runtime_current(
 	uint64_t now_us,
 	struct intel_ax211_runtime_command *command)
 {
-	int function_result;
+	int error;
 
 	/* Handles the state availability. */
 	if (state == NULL || command == NULL || !state->active ||
-	    state->terminal || state->generation == 0U)
-
+	    state->terminal || state->generation == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_INVALID;
+	}
 
 	/* Handles the now us condition. */
 	if (now_us >= state->deadline)
 		return INTEL_AX211_RUNTIME_TIMEOUT;
 
 	/* Obtains the drv intel ax211 runtime command encode result. */
-	function_result = drv_intel_ax211_runtime_command_encode(
+	error = drv_intel_ax211_runtime_command_encode(
 		state->step, &state->profile, command);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -480,6 +472,7 @@ drv_intel_ax211_runtime_ack(
 		return step < state->step ? INTEL_AX211_RUNTIME_DUPLICATE
 					  : INTEL_AX211_RUNTIME_OUT_OF_ORDER;
 	}
+
 	next = ax211_runtime_next_step(step, &state->profile);
 	state->step = next;
 
@@ -500,6 +493,7 @@ drv_intel_ax211_runtime_ack(
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_TIMEOUT;
 	}
+
 	state->deadline = now_us + INTEL_AX211_RUNTIME_COMMAND_TIMEOUT_US;
 
 	/* Returns the computed result. */
@@ -541,10 +535,10 @@ ax211_runtime_profile_valid(
 	if (profile == NULL || profile->tx_chain_mask == 0U ||
 	    profile->rx_chain_mask == 0U || profile->tx_chain_mask > 0x07U ||
 	    profile->rx_chain_mask > 0x07U || profile->lar_enabled > 1U ||
-	    profile->ltr_enabled > 1U)
-
+	    profile->ltr_enabled > 1U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Checks the ax211 runtime bit result. */
 	if (!ax211_runtime_bit(profile->api_changes, 4U,
@@ -556,28 +550,28 @@ ax211_runtime_profile_valid(
 	    ax211_runtime_bit(profile->capabilities, 5U,
 			      INTEL_AX211_RUNTIME_CAP_DQA) ||
 	    !ax211_runtime_bit(profile->capabilities, 5U,
-			       INTEL_AX211_RUNTIME_CAP_CT_KILL_BY_FW))
-
+			       INTEL_AX211_RUNTIME_CAP_CT_KILL_BY_FW)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Checks the ax211 runtime bit result. */
 	if (profile->lar_enabled &&
 	    !ax211_runtime_bit(profile->api_changes, 4U,
 			       INTEL_AX211_RUNTIME_API_WIFI_MCC_UPDATE) &&
 	    !ax211_runtime_bit(profile->capabilities, 5U,
-			       INTEL_AX211_RUNTIME_CAP_LAR_MULTI_MCC))
-
+			       INTEL_AX211_RUNTIME_CAP_LAR_MULTI_MCC)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Checks the ax211 runtime bit result. */
 	if (profile->lar_enabled &&
 	    !ax211_runtime_bit(profile->capabilities, 5U,
-			       INTEL_AX211_RUNTIME_CAP_MCC_UPDATE_11AX))
-
+			       INTEL_AX211_RUNTIME_CAP_MCC_UPDATE_11AX)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -590,20 +584,19 @@ ax211_runtime_bit(
 	size_t count,
 	unsigned int bit)
 {
-	int function_result;
+	int error;
 	size_t word;
 
-	word = bit / 32U;
-
 	/* Handles the words availability. */
+	word = bit / 32U;
 	if (words == NULL || word >= count)
 		return 0;
 
 	/* Computes the function result. */
-	function_result = (words[word] & (UINT32_C(1) << (bit % 32U))) != 0U;
+	error = (words[word] & (UINT32_C(1) << (bit % 32U))) != 0U;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ax211 runtime version validate operation. */
@@ -615,19 +608,18 @@ ax211_runtime_version_validate(
 	struct intel_ax211_protocol_command_version version;
 	int result;
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_version_lookup(
 		table, required->group, required->opcode, &version);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return INTEL_AX211_RUNTIME_UNSUPPORTED;
 
 	/* Handles the version condition. */
 	if (version.command_version != required->command_version ||
-	    version.notification_version != required->notification_version)
-
+	    version.notification_version != required->notification_version) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_UNSUPPORTED;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_RUNTIME_OK;
@@ -639,18 +631,18 @@ ax211_runtime_step_enabled(
 	enum intel_ax211_runtime_step step,
 	const struct intel_ax211_runtime_profile *profile)
 {
-	int function_result;
+	int error;
 
 	/* Handles the step condition. */
 	if (step == INTEL_AX211_RUNTIME_STEP_LTR_CONFIG) {
 		/* Computes the function result. */
-		function_result = profile->ltr_enabled &&
+		error = profile->ltr_enabled &&
 				  !ax211_runtime_bit(
 					  profile->capabilities, 5U,
 					  INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Handles the step condition. */

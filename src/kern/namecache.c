@@ -94,6 +94,7 @@ namecache_lookup(
 			spin_unlock_irqrestore(&namecache_lock, irq);
 			return 0;
 		}
+
 		spin_unlock_irqrestore(&namecache_lock, irq);
 
 		/* Reports a miss when nothing stale was dropped. */
@@ -139,9 +140,8 @@ namecache_enter(
 	inode_ref(parent);
 	inode_ref(child);
 
-	irq = spin_lock_irqsave(&namecache_lock);
-
 	/* Rejects a lookup invalidated before cache publication. */
+	irq = spin_lock_irqsave(&namecache_lock);
 	if (atomic_u64_load_acquire(&parent->i_dirseq) != observed_sequence) {
 		spin_unlock_irqrestore(&namecache_lock, irq);
 		release_pair(parent, child);
@@ -164,6 +164,7 @@ namecache_enter(
 			slot = i;
 			break;
 		}
+
 		if (slot == NAMECACHE_MAX && entries[i].parent == NULL)
 			slot = i;
 	}
@@ -223,6 +224,7 @@ namecache_remove(
 				break;
 			}
 		}
+
 		spin_unlock_irqrestore(&namecache_lock, irq);
 
 		/* Stops when no entry matched. */
@@ -278,10 +280,12 @@ namecache_count(
 
 	/* Counts the occupied slots under the lock. */
 	irq = spin_lock_irqsave(&namecache_lock);
+
 	for (i = 0; i < NAMECACHE_MAX; i++) {
 		if (entries[i].parent != NULL)
 			count++;
 	}
+
 	spin_unlock_irqrestore(&namecache_lock, irq);
 
 	/* Reports the count. */

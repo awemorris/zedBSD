@@ -19,11 +19,6 @@ const struct partition_scheme drv_partition_scheme_x68k = {
 	.scan = x68k_scan,
 };
 
-
-
-
-
-
 /*
  * Implements the drv x68k partition decode operation.
  */
@@ -50,23 +45,23 @@ drv_x68k_partition_decode(
 	/* Checks the bytes equal result. */
 	if (boot_area == NULL || entries == NULL ||
 	    size < X68K_PARTITION_BOOT_BYTES || disk_sectors < 8U ||
-	    !bytes_equal(boot_area, "X68SCSI1", 8U))
-
+	    !bytes_equal(boot_area, "X68SCSI1", 8U)) {
 		/* Reports operation failure. */
 		return -1;
-	table = boot_area + X68K_TABLE_OFFSET;
+	}
 
 	/* Checks the bytes equal result. */
+	table = boot_area + X68K_TABLE_OFFSET;
 	if (!bytes_equal(table, "X68K", 4U))
 		return -1;
-	declared_blocks = be32(table + 8U);
 
 	/* Handles the declared blocks condition. */
+	declared_blocks = be32(table + 8U);
 	if (declared_blocks == 0 ||
-	    (uint64_t)declared_blocks * 2U > disk_sectors)
-
+	    (uint64_t)declared_blocks * 2U > disk_sectors) {
 		/* Reports operation failure. */
 		return -1;
+	}
 	count = capacity < X68K_PARTITION_COUNT ? capacity
 						: X68K_PARTITION_COUNT;
 	/* Process each remaining element. */
@@ -92,14 +87,14 @@ drv_x68k_partition_decode(
 		for (character = 0;
 		     character < 8U && at < PARTITION_LABEL_MAX - 1U;
 		     character++) {
-			c = raw[character];
-
 			/* Classifies the current input character. */
+			c = raw[character];
 			if (c == 0 || c == ' ')
 				break;
 			entry->p_label[at++] =
 				c >= 0x20U && c <= 0x7eU ? (char)c : '?';
 		}
+
 		entry->p_label[at] = '\0';
 
 		/* Handles the at condition. */
@@ -180,10 +175,10 @@ x68k_scan(
 	/* Checks the disk read result. */
 	if (disk == NULL || disk->d_block_size != 512U ||
 	    disk_read(disk, 0, X68K_PARTITION_BOOT_BYTES / 512U, boot_area) !=
-		    0)
-
+		    0) {
 		/* Reports operation failure. */
 		return -1;
+	}
 	count = drv_x68k_partition_decode(boot_area, sizeof(boot_area),
 					  disk->d_block_count, entries,
 					  capacity);

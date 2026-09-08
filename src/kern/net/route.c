@@ -114,6 +114,7 @@ route_add_flags(
 				free_index = index;
 			continue;
 		}
+
 		if (routes[index].network == network &&
 		    routes[index].netmask == netmask &&
 		    routes[index].device == device) {
@@ -128,6 +129,7 @@ route_add_flags(
 		result = ENOSPC;
 		goto out_release;
 	}
+
 	route_used[free_index] = 1;
 	routes[free_index].network = network;
 	routes[free_index].netmask = netmask;
@@ -165,9 +167,8 @@ route_add(
 	if (gateway != 0)
 		flags |= RTF_GATEWAY;
 
-	error = route_add_flags(network, netmask, gateway, device, flags);
-
 	/* Reports why the add failed. */
+	error = route_add_flags(network, netmask, gateway, device, flags);
 	if (error != 0)
 		return error;
 
@@ -202,6 +203,7 @@ route_delete(
 			return 0;
 		}
 	}
+
 	route_unlock(enabled);
 
 	/* Reports a missing route. */
@@ -231,6 +233,7 @@ route_purge_device(
 			memset(&routes[index], 0, sizeof(routes[index]));
 		}
 	}
+
 	route_unlock(enabled);
 }
 
@@ -264,8 +267,10 @@ route_get_ref(
 			route_unlock(enabled);
 			return 0;
 		}
+
 		net_device_release(routes[index].device);
 	}
+
 	route_unlock(enabled);
 
 	/* Reports an ordinal past the end. */
@@ -431,6 +436,7 @@ route_ioctl(
 		gateway_route.device = NULL;
 		route_release(&gateway_route);
 	}
+
 	if (device == NULL)
 		return ENODEV;
 
@@ -519,9 +525,8 @@ sockaddr_address(
 {
 	const struct sockaddr_in *inet;
 
-	inet = (const struct sockaddr_in *)address;
-
 	/* Only AF_INET addresses are understood. */
+	inet = (const struct sockaddr_in *)address;
 	if (address->sa_family != AF_INET)
 		return EAFNOSUPPORT;
 
@@ -577,6 +582,7 @@ route_delete_request(
 		route_unlock(enabled);
 		return ENOENT;
 	}
+
 	if (matches != 1) {
 		route_unlock(enabled);
 		return EBUSY;

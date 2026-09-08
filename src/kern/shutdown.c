@@ -65,12 +65,14 @@ system_shutdown_prepare(
 			atomic_store_release(&shutdown_preparation_state, 0);
 			return EOPNOTSUPP;
 		}
+
 		error = readahead_boundary_begin(&shutdown_readahead, NULL);
 		if (error != 0) {
 			atomic_store_release(&shutdown_preparation_state, 0);
 			return error;
 		}
 	}
+
 	if (readahead_trim != NULL) {
 		error = readahead_trim();
 		if (error != 0) {
@@ -85,12 +87,14 @@ system_shutdown_prepare(
 			shutdown_readers_restore();
 			return EOPNOTSUPP;
 		}
+
 		error = writeback_shutdown_begin();
 		if (error != 0) {
 			shutdown_readers_restore();
 			return error;
 		}
 	}
+
 	if (mount_sync_all != NULL) {
 		error = mount_sync_all();
 		if (error != 0) {
@@ -100,6 +104,7 @@ system_shutdown_prepare(
 			return error;
 		}
 	}
+
 	if (writeback_shutdown_finish != NULL)
 		writeback_shutdown_finish(1);
 

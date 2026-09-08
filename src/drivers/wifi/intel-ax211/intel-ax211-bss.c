@@ -127,53 +127,53 @@ drv_intel_ax211_bss_decode(
 
 	/* Handles the mpdu availability. */
 	if (mpdu == NULL || entry == NULL || mpdu->frame == NULL ||
-	    observation_generation == 0U || hardware_epoch == 0U)
-
+	    observation_generation == 0U || hardware_epoch == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BSS_INVALID;
+	}
 
 	/* Handles the mpdu condition. */
 	if (mpdu->channel == 0U ||
-	    mpdu->length < AX211_BSS_INFORMATION_ELEMENTS_OFFSET)
-
+	    mpdu->length < AX211_BSS_INFORMATION_ELEMENTS_OFFSET) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BSS_TRUNCATED;
+	}
 	frame = mpdu->frame;
-	frame_control = ax211_bss_get_le16(frame);
 
 	/* Handles the frame control condition. */
+	frame_control = ax211_bss_get_le16(frame);
 	if ((frame_control & AX211_BSS_FRAME_VERSION_MASK) != 0U ||
 	    (frame_control & AX211_BSS_FRAME_TYPE_MASK) !=
-		    AX211_BSS_FRAME_TYPE_MANAGEMENT)
-
+		    AX211_BSS_FRAME_TYPE_MANAGEMENT) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BSS_UNSUPPORTED;
+	}
 
 	/* Handles the frame control condition. */
 	if ((frame_control &
-	     (AX211_BSS_FRAME_TO_FROM_DS | AX211_BSS_FRAME_PROTECTED)) != 0U)
-
+	     (AX211_BSS_FRAME_TO_FROM_DS | AX211_BSS_FRAME_PROTECTED)) != 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BSS_MALFORMED;
-	subtype = frame_control & AX211_BSS_FRAME_SUBTYPE_MASK;
+	}
 
 	/* Handles the subtype condition. */
+	subtype = frame_control & AX211_BSS_FRAME_SUBTYPE_MASK;
 	if (subtype != AX211_BSS_FRAME_SUBTYPE_BEACON &&
-	    subtype != AX211_BSS_FRAME_SUBTYPE_PROBE_RESPONSE)
-
+	    subtype != AX211_BSS_FRAME_SUBTYPE_PROBE_RESPONSE) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BSS_UNSUPPORTED;
+	}
 
 	/* Checks the ax211 bss address valid result. */
 	if (!ax211_bss_address_valid(frame + AX211_BSS_BSSID_OFFSET))
 		return INTEL_AX211_BSS_MALFORMED;
 
 	memset(&ies, 0, sizeof(ies));
+
+	/* Checks the operation result. */
 	result = ax211_bss_ies_decode(
 		frame + AX211_BSS_INFORMATION_ELEMENTS_OFFSET,
 		mpdu->length - AX211_BSS_INFORMATION_ELEMENTS_OFFSET, &ies);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_BSS_OK)
 		return result;
 
@@ -263,10 +263,10 @@ drv_intel_ax211_bss_cache_observe(
 			   sizeof(entry->bssid)) == 0) {
 			/* Handles the entry condition. */
 			if (entry->observation_generation <
-			    cache->entry[index].observation_generation)
-
+			    cache->entry[index].observation_generation) {
 				/* Returns the computed result. */
 				return INTEL_AX211_BSS_STALE;
+			}
 
 			/* Handles the entry condition. */
 			if (entry->observation_generation ==
@@ -288,6 +288,7 @@ drv_intel_ax211_bss_cache_observe(
 				/* Returns the computed result. */
 				return INTEL_AX211_BSS_OK;
 			}
+
 			cache->entry[index] = *entry;
 
 			/* Returns the computed result. */
@@ -352,10 +353,10 @@ drv_intel_ax211_bss_cache_lookup(
 
 	/* Handles the cache availability. */
 	if (cache == NULL || bssid == NULL || entry == NULL ||
-	    cache->initialized == 0U || channel == 0U || hardware_epoch == 0U)
-
+	    cache->initialized == 0U || channel == 0U || hardware_epoch == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BSS_INVALID;
+	}
 
 	/* Checks the ax211 bss address valid result. */
 	if (!ax211_bss_address_valid(bssid))
@@ -373,10 +374,10 @@ drv_intel_ax211_bss_cache_lookup(
 			   INTEL_AX211_BSS_ADDRESS_SIZE) == 0) {
 			/* Handles the cache condition. */
 			if (cache->entry[index].hardware_epoch !=
-			    hardware_epoch)
-
+			    hardware_epoch) {
 				/* Returns the computed result. */
 				return INTEL_AX211_BSS_STALE;
+			}
 			*entry = cache->entry[index];
 			/* Returns the computed result. */
 			return INTEL_AX211_BSS_OK;
@@ -401,10 +402,10 @@ drv_intel_ax211_bss_assoc_metadata(
 
 	/* Handles the entry availability. */
 	if (entry == NULL || metadata == NULL || connection_generation == 0U ||
-	    hardware_epoch == 0U)
-
+	    hardware_epoch == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BSS_INVALID;
+	}
 
 	/* Checks the ax211 bss entry valid result. */
 	if (!ax211_bss_entry_valid(entry))
@@ -498,36 +499,36 @@ ax211_bss_ies_decode(
 		if (identifier == AX211_BSS_IE_SSID) {
 			/* Handles the element length condition. */
 			if (element_length > AX211_BSS_SSID_MAX ||
-			    state->ssid_seen != 0U)
-
+			    state->ssid_seen != 0U) {
 				/* Returns the computed result. */
 				return INTEL_AX211_BSS_MALFORMED;
+			}
 			state->ssid_seen = 1U;
 		} else if (identifier == AX211_BSS_IE_DS_PARAMETER) {
 			/* Handles the element length condition. */
 			if (element_length != 1U)
 				return INTEL_AX211_BSS_MALFORMED;
-			result = ax211_bss_channel_observe(state, data[0U], 0);
 
 			/* Checks the operation result. */
+			result = ax211_bss_channel_observe(state, data[0U], 0);
 			if (result != INTEL_AX211_BSS_OK)
 				return result;
 		} else if (identifier == AX211_BSS_IE_HT_OPERATION) {
 			/* Handles the element length condition. */
 			if (element_length != AX211_BSS_HT_OPERATION_SIZE)
 				return INTEL_AX211_BSS_MALFORMED;
-			result = ax211_bss_channel_observe(state, data[0U], 1);
 
 			/* Checks the operation result. */
+			result = ax211_bss_channel_observe(state, data[0U], 1);
 			if (result != INTEL_AX211_BSS_OK)
 				return result;
 		} else if (identifier == AX211_BSS_IE_TIM) {
 			/* Handles the element length condition. */
 			if (element_length < AX211_BSS_TIM_MIN_SIZE ||
-			    state->tim_seen != 0U)
-
+			    state->tim_seen != 0U) {
 				/* Returns the computed result. */
 				return INTEL_AX211_BSS_MALFORMED;
+			}
 
 			/* Handles the data condition. */
 			if (data[1U] == 0U || data[0U] >= data[1U])
@@ -536,13 +537,13 @@ ax211_bss_ies_decode(
 			state->dtim_period = data[1U];
 			state->tim_seen = 1U;
 		} else if (identifier == AX211_BSS_IE_VENDOR) {
+			/* Checks the operation result. */
 			result = ax211_bss_wmm_observe(state, data,
 						       element_length);
-
-			/* Checks the operation result. */
 			if (result != INTEL_AX211_BSS_OK)
 				return result;
 		}
+
 		offset += element_length;
 	}
 
@@ -592,10 +593,10 @@ ax211_bss_wmm_observe(
 {
 	/* Checks the current data length. */
 	if (length < 4U || data[0U] != 0x00U || data[1U] != 0x50U ||
-	    data[2U] != 0xf2U || data[3U] != AX211_BSS_WMM_TYPE)
-
+	    data[2U] != 0xf2U || data[3U] != AX211_BSS_WMM_TYPE) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BSS_OK;
+	}
 
 	/* Checks the current data length. */
 	if (length < AX211_BSS_WMM_INFO_SIZE)
@@ -604,19 +605,19 @@ ax211_bss_wmm_observe(
 	/* Handles the data condition. */
 	if ((data[4U] != AX211_BSS_WMM_INFO_SUBTYPE &&
 	     data[4U] != AX211_BSS_WMM_PARAMETER_SUBTYPE) ||
-	    data[5U] != AX211_BSS_WMM_VERSION)
-
+	    data[5U] != AX211_BSS_WMM_VERSION) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BSS_MALFORMED;
+	}
 
 	/* Handles the data condition. */
 	if ((data[4U] == AX211_BSS_WMM_INFO_SUBTYPE &&
 	     length != AX211_BSS_WMM_INFO_SIZE) ||
 	    (data[4U] == AX211_BSS_WMM_PARAMETER_SUBTYPE &&
-	     length != AX211_BSS_WMM_PARAMETER_SIZE))
-
+	     length != AX211_BSS_WMM_PARAMETER_SIZE)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BSS_MALFORMED;
+	}
 
 	/* Handles the state condition. */
 	if (state->wmm_present != 0U)
@@ -658,31 +659,31 @@ ax211_bss_entry_valid(
 	    entry->observation_generation == 0U ||
 	    entry->hardware_epoch == 0U || entry->channel == 0U ||
 	    entry->beacon_interval_tu == 0U ||
-	    !ax211_bss_address_valid(entry->bssid))
-
+	    !ax211_bss_address_valid(entry->bssid)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Handles the entry condition. */
 	if (entry->source != INTEL_AX211_BSS_SOURCE_BEACON &&
-	    entry->source != INTEL_AX211_BSS_SOURCE_PROBE_RESPONSE)
-
+	    entry->source != INTEL_AX211_BSS_SOURCE_PROBE_RESPONSE) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Handles the entry condition. */
 	if (entry->tim_valid > 1U || entry->wmm_present > 1U ||
-	    entry->receive_tsf_valid > 1U)
-
+	    entry->receive_tsf_valid > 1U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Handles the entry condition. */
 	if (entry->tim_valid != 0U && (entry->dtim_period == 0U ||
-				       entry->dtim_count >= entry->dtim_period))
-
+				       entry->dtim_count >= entry->dtim_period)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -694,7 +695,7 @@ ax211_bss_entry_worse(
 	const struct intel_ax211_bss_entry *left,
 	const struct intel_ax211_bss_entry *right)
 {
-	int function_result;
+	int error;
 
 	/* Handles the left condition. */
 	if (left->rssi_dbm != right->rssi_dbm)
@@ -705,9 +706,9 @@ ax211_bss_entry_worse(
 		return left->last_seen_ticks < right->last_seen_ticks;
 
 	/* Computes the function result. */
-	function_result = memcmp(left->bssid, right->bssid,
+	error = memcmp(left->bssid, right->bssid,
 				 INTEL_AX211_BSS_ADDRESS_SIZE) > 0;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }

@@ -212,17 +212,21 @@ filesystem_register(
 
 	/* The name must be new and the registry not full. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	for (i = 0; i < filesystem_count; i++) {
 		if (!strcmp(filesystems[i]->fs_name, type->fs_name)) {
 			spin_unlock_irqrestore(&namespace_lock, irq);
 			return EEXIST;
 		}
 	}
+
 	if (filesystem_count >= FILESYSTEM_MAX) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
 		return ENOSPC;
 	}
+
 	filesystems[filesystem_count++] = type;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports the registered type. */
@@ -264,6 +268,7 @@ filesystem_identify(
 
 	/* Identity callbacks perform I/O, so only snapshot the registry locked. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	for (index = 0; index < filesystem_count; index++) {
 		type = filesystems[index];
 		if ((type->fs_flags & FILESYSTEM_NODEV) != 0 ||
@@ -271,6 +276,7 @@ filesystem_identify(
 			continue;
 		snapshot[snapshot_count++] = type;
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Asks each type, keeping the first real error and refusing two claims. */
@@ -286,6 +292,7 @@ filesystem_identify(
 				saved_error = error;
 			continue;
 		}
+
 		if (match_count != 0)
 			return EEXIST;
 		match_count++;
@@ -354,6 +361,7 @@ mount_disk_writable_busy(
 
 	/* Compares against every writable live mount on the same leaf. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	for (index = 0; index < MOUNT_MAX; index++) {
 		if (!mount_used[index])
 			continue;
@@ -379,6 +387,7 @@ mount_disk_writable_busy(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports an overlap as busy. */
@@ -432,6 +441,7 @@ mount_root_create(
 		return ENOSPC;
 	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	if (root_mount != NULL)
 		error = EBUSY;
 	else
@@ -440,17 +450,21 @@ mount_root_create(
 	/* Reserves the root slot before filesystem I/O releases the gate. */
 	if (error == 0)
 		root_mount = mountp;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	if (entered)
 		mount_vfs_transaction_leave(mountp);
 	if (error != 0) {
 		mount_free(mountp);
 		return error;
 	}
+
 	strcpy(mountp->m_path, "/");
 	error = mount_filesystem(mountp, type_name, flags, data);
 	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	if (error != 0) {
 		root_mount = NULL;
 		spin_unlock_irqrestore(&namespace_lock, irq);
@@ -463,7 +477,9 @@ mount_root_create(
 	/* Publishes the prepared root while the reservation remains owned. */
 	mount_head = mountp;
 	mountp->m_state = MOUNT_STATE_LIVE;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	if (entered)
 		mount_vfs_transaction_leave(mountp);
 	backing_mutation_end(&mountp->m_backing_guard);
@@ -485,13 +501,14 @@ mount_root_get_ref(
 	struct mount *mountp;
 
 	irq = spin_lock_irqsave(&namespace_lock);
-	mountp = root_mount;
 
 	/* Only a live root can be referenced. */
+	mountp = root_mount;
 	if (mountp != NULL && mountp->m_state == MOUNT_STATE_LIVE)
 		mount_ref(mountp);
 	else
 		mountp = NULL;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports the referenced root, or NULL. */
@@ -542,9 +559,13 @@ mount_at(
 			mount_vfs_transaction_leave(mountp);
 		goto fail;
 	}
+
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	mountp->m_state = MOUNT_STATE_LIVE;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	inode_dir_changed(directory->p_inode);
 	if (entered)
 		mount_vfs_transaction_leave(mountp);
@@ -597,8 +618,11 @@ mount_bind_at(
 		return ENOSPC;
 	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	error = source->p_mount->m_state == MOUNT_STATE_LIVE ? 0 : EBUSY;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	if (error == 0 && (source->p_inode->i_flags & INODE_DEAD) != 0)
 		error = ENOENT;
 	if (error == 0)
@@ -615,8 +639,11 @@ mount_bind_at(
 
 	/* Publishes it in the tree. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	mountp->m_state = MOUNT_STATE_LIVE;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	inode_dir_changed(directory->p_inode);
 	if (entered)
 		mount_vfs_transaction_leave(mountp);
@@ -668,9 +695,13 @@ mount_private(
 		mount_free(mountp);
 		return error;
 	}
+
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	mountp->m_state = MOUNT_STATE_LIVE;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	backing_mutation_end(&mountp->m_backing_guard);
 	*result = mountp;
 
@@ -699,6 +730,7 @@ mount_private_promote_root(
 	/* Requires no existing root and a live, childless mount. */
 	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	if (root_mount != NULL)
 		error = EBUSY;
 	else if (mountp->m_state != MOUNT_STATE_LIVE ||
@@ -714,7 +746,9 @@ mount_private_promote_root(
 		mount_head = mountp;
 		root_mount = mountp;
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	if (entered)
 		mount_vfs_transaction_leave(mountp);
 	if (error == 0 && result != NULL)
@@ -751,12 +785,16 @@ mount_private_lookup(
 	/* Resolves from a temporary working directory at the mount's root. */
 	path_init(&root);
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	if (mountp->m_state != MOUNT_STATE_LIVE) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
 		return EBUSY;
 	}
+
 	path_set(&root, mountp, mountp->m_root);
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	error = cwdinfo_init(&context, &root);
 	path_release(&root);
 	if (error != 0)
@@ -828,9 +866,9 @@ mount_sync(
 	int error;
 
 	/* Uses optional shared scratch for ordinary callers. */
-	error = mount_sync_buffer(mountp, NULL, 0);
 
 	/* Reports the failure. */
+	error = mount_sync_buffer(mountp, NULL, 0);
 	if (error != 0)
 		return error;
 
@@ -919,6 +957,7 @@ mount_sync_all(
 		mount_ref(mountp);
 		snapshot[count++] = mountp;
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Syncs each mount and drops its reference. */
@@ -976,6 +1015,7 @@ mount_statvfs(
 			result->f_blocks = 0;
 		result->f_namemax = NAME_MAX;
 	}
+
 	if (error != 0)
 		return error;
 
@@ -1024,9 +1064,9 @@ mount_quotactl(
 	/* The filesystem must support quotas. */
 	if (mountp->m_type == NULL || mountp->m_type->quotactl == NULL)
 		return EOPNOTSUPP;
-	error = mountp->m_type->quotactl(mountp, request);
 
 	/* Reports the failure. */
+	error = mountp->m_type->quotactl(mountp, request);
 	if (error != 0)
 		return error;
 
@@ -1058,9 +1098,9 @@ mount_snapshotctl(
 	/* The filesystem must support snapshots. */
 	if (mountp->m_type == NULL || mountp->m_type->snapshotctl == NULL)
 		return EOPNOTSUPP;
-	error = mountp->m_type->snapshotctl(mountp, request);
 
 	/* Reports the failure. */
+	error = mountp->m_type->snapshotctl(mountp, request);
 	if (error != 0)
 		return error;
 
@@ -1082,9 +1122,8 @@ mount(
 	struct mount *rootp;
 	int error;
 
-	rootp = mount_root_get_ref();
-
 	/* Requires a live root and a single-component absolute directory. */
+	rootp = mount_root_get_ref();
 	if (rootp == NULL ||
 	    dir == NULL ||
 	    dir[0] != '/' ||
@@ -1124,6 +1163,7 @@ mount_find_ref(
 
 	/* Searches the global list for a live mount with the path. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
 		if (mountp->m_state == MOUNT_STATE_LIVE &&
 		    !strcmp(mountp->m_path, path)) {
@@ -1132,6 +1172,7 @@ mount_find_ref(
 			return mountp;
 		}
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports no match. */
@@ -1170,6 +1211,7 @@ mount_lookup_child(
 
 	/* Searches the children covering this directory inode by name. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	for (child = directory->p_mount->m_children; child != NULL;
 	     child = child->m_sibling) {
 		length = strlen(child->m_name);
@@ -1181,11 +1223,13 @@ mount_lookup_child(
 				spin_unlock_irqrestore(&namespace_lock, irq);
 				return EBUSY;
 			}
+
 			path_set(result, child, child->m_root);
 			spin_unlock_irqrestore(&namespace_lock, irq);
 			return 0;
 		}
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports no covering mount. */
@@ -1208,14 +1252,17 @@ mount_cross_path_parent(
 
 	/* Only a covered mount root has a parent to cross into. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	if (!same_inode(current->p_inode, current->p_mount->m_root) ||
 	    current->p_mount == root_mount ||
 	    current->p_mount->m_cover.p_inode == NULL) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
 		return ENOENT;
 	}
+
 	path_set(result, current->p_mount->m_cover.p_mount,
 		 current->p_mount->m_cover.p_inode);
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports the covered directory. */
@@ -1243,6 +1290,7 @@ mount_readdir_child(
 
 	/* Skips to the child at the cursor position. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	for (child = directory->p_mount->m_children; child != NULL;
 	     child = child->m_sibling) {
 		if (child->m_cover.p_mount != directory->p_mount ||
@@ -1252,10 +1300,12 @@ mount_readdir_child(
 			spin_unlock_irqrestore(&namespace_lock, irq);
 			return EBUSY;
 		}
+
 		if (index != *cursor) {
 			index++;
 			continue;
 		}
+
 		memset(entry, 0, sizeof(*entry));
 		entry->d_ino = child->m_root->i_ino;
 		entry->d_type = child->m_root->i_type;
@@ -1264,6 +1314,7 @@ mount_readdir_child(
 		spin_unlock_irqrestore(&namespace_lock, irq);
 		return 0;
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports the end of the children. */
@@ -1329,10 +1380,12 @@ unmount_private(
 			return error;
 		}
 	}
+
 	if (vm_object_cache_drain != NULL)
 		(void)vm_object_cache_drain(mountp);
 	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	if (!mount_is_private(mountp) || mountp->m_state != MOUNT_STATE_LIVE ||
 	    mountp->m_children != NULL || refcount_load(&mountp->m_refs) != expected_refs) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
@@ -1341,8 +1394,11 @@ unmount_private(
 		mount_io_finish(&boundary, 0);
 		return EBUSY;
 	}
+
 	mountp->m_state = MOUNT_STATE_DYING;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	if (entered)
 		mount_vfs_transaction_leave(mountp);
 	error = prepare_filesystem_destroy(mountp, expected_refs);
@@ -1353,6 +1409,7 @@ unmount_private(
 		mount_io_finish(&boundary, 0);
 		return error;
 	}
+
 	mount_io_finish(&boundary, 1);
 	finalize_filesystem_destroy(mountp);
 	mount_free(mountp);
@@ -1374,8 +1431,10 @@ mount_count(
 
 	count = 0;
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	for (i = 0; i < MOUNT_MAX; i++)
 		count += mount_used[i] != 0;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports the sampled count. */
@@ -1412,6 +1471,7 @@ unmount(
 		mount_release(mountp);
 		return error;
 	}
+
 	expected_refs = 2;
 	if (boundary.writeback.mount != NULL)
 		expected_refs++;
@@ -1433,6 +1493,7 @@ unmount(
 	/* The root, a dying mount, or a busy one cannot be unmounted. */
 	entered = mount_vfs_transaction_join(mountp);
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	if (mountp == root_mount || mountp->m_state != MOUNT_STATE_LIVE) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
 		if (entered)
@@ -1441,6 +1502,7 @@ unmount(
 		mount_release(mountp);
 		return EBUSY;
 	}
+
 	if (mountp->m_children != NULL ||
 	    refcount_load(&mountp->m_refs) != expected_refs) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
@@ -1453,7 +1515,9 @@ unmount(
 
 	/* Reserves the attachment while its filesystem completes teardown. */
 	mountp->m_state = MOUNT_STATE_DYING;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	if (entered)
 		mount_vfs_transaction_leave(mountp);
 	/*
@@ -1473,9 +1537,11 @@ unmount(
 			mount_release(mountp);
 			return error;
 		}
+
 		mount_io_finish(&boundary, 1);
 		finalize_filesystem_destroy(mountp);
 	}
+
 	mount_io_finish(&boundary, 1);
 	entered = mount_vfs_transaction_join(mountp);
 	inode_dir_changed(mountp->m_cover.p_inode);
@@ -1518,6 +1584,7 @@ mount_info_snapshot(
 
 	/* Counts the live mounts before deciding whether they fit. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next)
 		if (mountp->m_state == MOUNT_STATE_LIVE)
 			count++;
@@ -1526,6 +1593,7 @@ mount_info_snapshot(
 		spin_unlock_irqrestore(&namespace_lock, irq);
 		return ENOSPC;
 	}
+
 	count = 0;
 	memset(&context, 0, sizeof(context));
 	spin_init(&context.lock, LOCK_RANK_PROCESS_RESOURCE, "mount paths");
@@ -1553,6 +1621,7 @@ mount_info_snapshot(
 			if (source->m_disk != NULL)
 				strcpy(info->source, source->m_disk->d_name);
 		}
+
 		if (source->m_disk != NULL)
 			info->device = (uint32_t)source->m_disk->d_dev;
 		if (source->m_type != NULL) {
@@ -1560,7 +1629,9 @@ mount_info_snapshot(
 			    sizeof(info->type) - 1U);
 		}
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	/*
 	 * Mount references prevent teardown while pathname reconstruction performs
 	 * directory I/O. Membership is captured together; pathname resolution has
@@ -1577,11 +1648,13 @@ mount_info_snapshot(
 			path_release(&context.cwd);
 		}
 	}
+
 	for (i = 0; i < count; i++) {
 		path_release(&sources[i]);
 		path_release(&targets[i]);
 		mount_release(snapshot[i]);
 	}
+
 	path_release(&context.root);
 
 	/* Reports the failure. */
@@ -1614,6 +1687,7 @@ mount_namespace_check_inode(
 	 * Take references under spin, then perform ancestor lookups without it.
 	 * Covered-entry identity also handles alternate backend spellings. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
 		cover = mountp->m_cover.p_inode;
 		source = (mountp->m_internal_flags &
@@ -1622,16 +1696,20 @@ mount_namespace_check_inode(
 			error = EBUSY;
 			break;
 		}
+
 		if (cover != NULL && cover->i_mount == inode->i_mount) {
 			inode_ref(cover);
 			anchors[count++] = cover;
 		}
+
 		if (source != NULL && source->i_mount == inode->i_mount) {
 			inode_ref(source);
 			anchors[count++] = source;
 		}
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	for (index = 0; index < count && error == 0; index++) {
 		if (same_inode(inode, anchors[index]))
 			error = EBUSY;
@@ -1642,6 +1720,7 @@ mount_namespace_check_inode(
 				error = EBUSY;
 		}
 	}
+
 	for (index = 0; index < count; index++)
 		inode_release(anchors[index]);
 
@@ -1672,6 +1751,7 @@ mount_namespace_check_name(
 
 	/* Refuses a name an existing mount already covers in that directory. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
 		if (same_inode(mountp->m_cover.p_inode, directory) &&
 		    strlen(mountp->m_name) == name->cn_namelen &&
@@ -1680,6 +1760,7 @@ mount_namespace_check_name(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports whether the name is free. */
@@ -1732,6 +1813,7 @@ mount_alloc(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports the slot, or NULL when the table is full. */
@@ -1751,6 +1833,7 @@ mount_free(
 		return;
 	backing_mutation_end(&mountp->m_backing_guard);
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	if (refcount_load(&mountp->m_refs) != 1) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
 		return;
@@ -1765,10 +1848,12 @@ mount_free(
 			spin_unlock_irqrestore(&namespace_lock, irq);
 			return;
 		}
+
 		memset(mountp, 0, sizeof(*mountp));
 		mount_used[i] = 0;
 		break;
 	}
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 }
 
@@ -1784,6 +1869,7 @@ identity_text_zero(
 		if (text[index] != '\0')
 			return 0;
 	}
+
 	return 1;
 }
 
@@ -1900,6 +1986,7 @@ mount_filesystem_on_disk(
 			return ENXIO;
 		return error;
 	}
+
 	if (!(type->fs_flags & FILESYSTEM_NODEV) && disk == NULL)
 		return ENXIO;
 
@@ -1913,6 +2000,7 @@ mount_filesystem_on_disk(
 			if (error != 0)
 				return error;
 		}
+
 		check_flags = (unsigned)flags;
 		if ((disk->d_flags & DISK_READ_ONLY) != 0)
 			check_flags |= MOUNT_READ_ONLY;
@@ -1921,6 +2009,7 @@ mount_filesystem_on_disk(
 			backing_mutation_end(&mountp->m_backing_guard);
 			return error;
 		}
+
 		error = disk_open(disk);
 		if (error != 0) {
 			backing_mutation_end(&mountp->m_backing_guard);
@@ -2087,9 +2176,8 @@ valid_private_path(
 	const char *component;
 	const char *cursor;
 
-	component = path;
-
 	/* Rejects a missing, empty, or absolute path. */
+	component = path;
 	if (path == NULL || path[0] == '\0' || path[0] == '/')
 		return 0;
 
@@ -2176,6 +2264,7 @@ finalize_filesystem_destroy(
 		inode_release(mountp->m_root);
 		mountp->m_root = NULL;
 	}
+
 	inode_cache_purge_mount(mountp);
 	if (mountp->m_type != NULL && mountp->m_type->unmount != NULL)
 		mountp->m_type->unmount(mountp);
@@ -2196,6 +2285,7 @@ detach_mount(
 	unlink_child(mountp);
 	unlink_global(mountp);
 	mountp->m_state = MOUNT_STATE_DEAD;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Uncovers the directory the mount was over. */
@@ -2223,10 +2313,13 @@ reserve_mount(
 
 	/* Requires a live namespace and a live directory to mount over. */
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	error = directory->p_mount->m_state == MOUNT_STATE_LIVE &&
 	    root_mount != NULL && root_mount->m_state == MOUNT_STATE_LIVE ?
 	    0 : EBUSY;
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
 	if (error != 0)
 		return error;
 	if ((directory->p_inode->i_flags & INODE_DEAD) != 0)
@@ -2238,6 +2331,7 @@ reserve_mount(
 		path_release(&existing);
 		return EBUSY;
 	}
+
 	if (error != ENOENT)
 		return error;
 
@@ -2254,8 +2348,10 @@ reserve_mount(
 	path_set(&mountp->m_cover, directory->p_mount, directory->p_inode);
 	mountp->m_parent = directory->p_mount;
 	irq = spin_lock_irqsave(&namespace_lock);
+
 	link_child(directory->p_mount, mountp);
 	link_global(mountp);
+
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports the reserved mount point. */
@@ -2314,6 +2410,7 @@ mount_io_quiesce(
 			return error;
 		}
 	}
+
 	return 0;
 }
 

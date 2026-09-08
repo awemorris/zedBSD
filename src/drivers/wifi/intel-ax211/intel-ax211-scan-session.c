@@ -82,7 +82,7 @@ drv_intel_ax211_scan_session_init(
 	const uint8_t station_address[6],
 	uint32_t hardware_epoch)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_command_table copied;
 	int result;
 
@@ -94,20 +94,20 @@ drv_intel_ax211_scan_session_init(
 	    !commands->initialized ||
 	    commands->hardware_epoch != hardware_epoch ||
 	    drv_intel_ax211_command_pending_count(commands) != 0U ||
-	    drv_intel_ax211_command_is_poisoned(commands))
-
+	    drv_intel_ax211_command_is_poisoned(commands)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_INVALID;
+	}
 
 	/* Reads which command versions the firmware offers. */
 	memset(session, 0, sizeof(*session));
 	memcpy(session->command_version_bytes, command_table->bytes,
 	       sizeof(session->command_version_bytes));
+
+	/* Checks the drv intel ax211 scan api89 validate result. */
 	result = drv_intel_ax211_protocol_command_table_parse(
 		session->command_version_bytes,
 		sizeof(session->command_version_bytes), &copied);
-
-	/* Checks the drv intel ax211 scan api89 validate result. */
 	if (result != INTEL_AX211_PROTOCOL_OK ||
 	    drv_intel_ax211_scan_api89_validate(&copied) !=
 		    INTEL_AX211_SCAN_OK) {
@@ -116,19 +116,20 @@ drv_intel_ax211_scan_session_init(
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_UNSUPPORTED;
 	}
-	result = drv_intel_ax211_scan_profile_from_nvm(
-		nvm, mcc, station_address, &session->full_profile);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_scan_profile_from_nvm(
+		nvm, mcc, station_address, &session->full_profile);
 	if (result != INTEL_AX211_SCAN_OK) {
 		memset(session, 0, sizeof(*session));
 
 		/* Obtains the ax211 scan session scan result result. */
-		function_result = ax211_scan_session_scan_result(result);
+		error = ax211_scan_session_scan_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	session->commands = commands;
 	session->command_table.bytes = session->command_version_bytes;
 	session->command_table.count = copied.count;
@@ -150,7 +151,7 @@ drv_intel_ax211_scan_session_begin_channel(
 	uint8_t channel,
 	uint64_t now_us)
 {
-	int function_result;
+	int error;
 	int result;
 
 	/* Checks the ax211 scan session live result. */
@@ -159,64 +160,64 @@ drv_intel_ax211_scan_session_begin_channel(
 
 	/* Handles the session condition. */
 	if (session->phase != INTEL_AX211_SCAN_SESSION_IDLE &&
-	    session->phase != INTEL_AX211_SCAN_SESSION_TERMINAL)
-
+	    session->phase != INTEL_AX211_SCAN_SESSION_TERMINAL) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_BUSY;
+	}
 
 	/* Handles the session condition. */
 	if (session->phase == INTEL_AX211_SCAN_SESSION_TERMINAL &&
-	    session->terminal_result == INTEL_AX211_SCAN_SESSION_TIMEOUT)
-
+	    session->terminal_result == INTEL_AX211_SCAN_SESSION_TIMEOUT) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_BUSY;
+	}
 
 	/* Checks the drv intel ax211 command pending count result. */
 	if (drv_intel_ax211_command_pending_count(session->commands) != 0U ||
-	    drv_intel_ax211_command_is_poisoned(session->commands))
-
+	    drv_intel_ax211_command_is_poisoned(session->commands)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_COMMAND;
-	result = ax211_scan_session_channel_profile(session, channel);
+	}
 
 	/* Checks the operation result. */
+	result = ax211_scan_session_channel_profile(session, channel);
 	if (result != INTEL_AX211_SCAN_SESSION_OK)
 		return result;
-	result = drv_intel_ax211_scan_request_encode(&session->channel_profile,
-						     session->request);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_scan_request_encode(&session->channel_profile,
+						     session->request);
 	if (result != INTEL_AX211_SCAN_OK) {
 		/* Obtains the ax211 scan session scan result result. */
-		function_result = ax211_scan_session_scan_result(result);
+		error = ax211_scan_session_scan_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_scan_begin(
 		&session->scan, &session->command_table,
 		&session->channel_profile, session->hardware_epoch, now_us);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_SCAN_OK) {
 		/* Obtains the ax211 scan session scan result result. */
-		function_result = ax211_scan_session_scan_result(result);
+		error = ax211_scan_session_scan_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Starts one channel's scan and waits for the acknowledgement. */
 	session->common_generation = common_generation;
 	session->channel = channel;
 	session->terminal_result = INTEL_AX211_SCAN_SESSION_OK;
+
+	/* Checks the operation result. */
 	result = ax211_scan_session_submit(
 		session, INTEL_AX211_SCAN_REQUEST_OPCODE, session->request,
 		sizeof(session->request), now_us,
 		INTEL_AX211_SCAN_SESSION_COMMAND_TIMEOUT_US,
 		INTEL_AX211_SCAN_SESSION_WAIT_START_ACK);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_SCAN_SESSION_OK) {
 		memset(&session->scan, 0, sizeof(session->scan));
 		session->phase = INTEL_AX211_SCAN_SESSION_TERMINAL;
@@ -238,28 +239,28 @@ drv_intel_ax211_scan_session_start_ack(
 	uint32_t hardware_epoch,
 	uint64_t now_us)
 {
-	int function_result;
+	int error;
 	int result;
 
+	/* Checks the operation result. */
 	result = ax211_scan_session_ack(
 		session, INTEL_AX211_SCAN_SESSION_WAIT_START_ACK, event_bytes,
 		event_length, hardware_epoch, now_us, NULL);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_SCAN_SESSION_OK)
 		return result;
-	result = drv_intel_ax211_scan_request_ack(
-		&session->scan, session->hardware_epoch, now_us);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_scan_request_ack(
+		&session->scan, session->hardware_epoch, now_us);
 	if (result != INTEL_AX211_SCAN_OK) {
 		/* Obtains the ax211 scan session terminal result. */
-		function_result = ax211_scan_session_terminal(
+		error = ax211_scan_session_terminal(
 			session, ax211_scan_session_scan_result(result));
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	session->phase = INTEL_AX211_SCAN_SESSION_RUNNING;
 
 	/* Returns the computed result. */
@@ -276,16 +277,16 @@ drv_intel_ax211_scan_session_notification(
 	uint64_t now_us,
 	struct intel_ax211_scan_session_event *event)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_scan_event decoded;
 	int result;
 
 	/* Checks the ax211 scan session live result. */
 	if (!ax211_scan_session_live(session) || message == NULL ||
-	    event == NULL)
-
+	    event == NULL) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_INVALID;
+	}
 
 	/* Handles the session condition. */
 	if (session->phase == INTEL_AX211_SCAN_SESSION_TERMINAL)
@@ -293,27 +294,28 @@ drv_intel_ax211_scan_session_notification(
 
 	/* Handles the session condition. */
 	if (session->phase != INTEL_AX211_SCAN_SESSION_RUNNING &&
-	    session->phase != INTEL_AX211_SCAN_SESSION_WAIT_ABORT_COMPLETE)
-
+	    session->phase != INTEL_AX211_SCAN_SESSION_WAIT_ABORT_COMPLETE) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_OUT_OF_ORDER;
+	}
 
 	/* Handles the session condition. */
 	if (session->phase == INTEL_AX211_SCAN_SESSION_WAIT_ABORT_COMPLETE &&
 	    now_us >= session->command_deadline) {
 		/* Obtains the ax211 scan session terminal result. */
-		function_result = ax211_scan_session_terminal(
+		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_TIMEOUT);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	memset(&decoded, 0, sizeof(decoded));
 	result = drv_intel_ax211_scan_event_accept(&session->scan, message,
 						   now_us, &decoded);
-	result = ax211_scan_session_scan_result(result);
 
 	/* Checks the operation status. */
+	result = ax211_scan_session_scan_result(result);
 	if (result == INTEL_AX211_SCAN_SESSION_COMPLETE ||
 	    result == INTEL_AX211_SCAN_SESSION_ABORTED ||
 	    result == INTEL_AX211_SCAN_SESSION_FAILED ||
@@ -348,7 +350,7 @@ drv_intel_ax211_scan_session_abort(
 	uint64_t common_generation,
 	uint64_t now_us)
 {
-	int function_result;
+	int error;
 	uint8_t payload[INTEL_AX211_SCAN_ABORT_SIZE];
 	int result;
 
@@ -362,35 +364,35 @@ drv_intel_ax211_scan_session_abort(
 
 	/* Handles the session condition. */
 	if (session->phase == INTEL_AX211_SCAN_SESSION_TERMINAL &&
-	    !session->scan.abort_required)
-
+	    !session->scan.abort_required) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_DUPLICATE;
+	}
 
 	/* Handles the session condition. */
 	if (session->phase != INTEL_AX211_SCAN_SESSION_RUNNING &&
 	    !(session->phase == INTEL_AX211_SCAN_SESSION_TERMINAL &&
-	      session->scan.abort_required))
-
+	      session->scan.abort_required)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_OUT_OF_ORDER;
+	}
 
 	/* Checks the drv intel ax211 scan abort encode result. */
 	if (drv_intel_ax211_scan_abort_encode(payload) != INTEL_AX211_SCAN_OK)
 		return INTEL_AX211_SCAN_SESSION_FAILED;
+
+	/* Checks the operation result. */
 	result = ax211_scan_session_submit(
 		session, INTEL_AX211_SCAN_ABORT_OPCODE, payload,
 		sizeof(payload), now_us,
 		INTEL_AX211_SCAN_SESSION_ABORT_TIMEOUT_US,
 		INTEL_AX211_SCAN_SESSION_WAIT_ABORT_ACK);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_SCAN_SESSION_OK) {
 		/* Obtains the ax211 scan session terminal result. */
-		function_result = ax211_scan_session_terminal(session, result);
+		error = ax211_scan_session_terminal(session, result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Returns the computed result. */
@@ -408,15 +410,14 @@ drv_intel_ax211_scan_session_abort_ack(
 	uint32_t hardware_epoch,
 	uint64_t now_us)
 {
-	int function_result;
+	int error;
 	uint32_t abort_status;
 	int result;
 
+	/* Checks the operation result. */
 	result = ax211_scan_session_ack(
 		session, INTEL_AX211_SCAN_SESSION_WAIT_ABORT_ACK, event_bytes,
 		event_length, hardware_epoch, now_us, &abort_status);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_SCAN_SESSION_OK)
 		return result;
 
@@ -425,11 +426,11 @@ drv_intel_ax211_scan_session_abort_ack(
 	    abort_status != AX211_SCAN_ABORT_STATUS_IN_PROGRESS &&
 	    abort_status != AX211_SCAN_ABORT_STATUS_NOT_FOUND) {
 		/* Obtains the ax211 scan session terminal result. */
-		function_result = ax211_scan_session_terminal(
+		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_COMMAND);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Handles the abort status condition. */
@@ -438,11 +439,11 @@ drv_intel_ax211_scan_session_abort_ack(
 		session->scan.phase = INTEL_AX211_SCAN_PHASE_TERMINAL;
 
 		/* Obtains the ax211 scan session terminal result. */
-		function_result = ax211_scan_session_terminal(
+		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_ABORTED);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* SUCCESS and IN_PROGRESS both complete through SCAN_COMPLETE_UMAC. */
@@ -462,7 +463,7 @@ drv_intel_ax211_scan_session_expire(
 	struct intel_ax211_scan_session *session,
 	uint64_t now_us)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_command_handle expired;
 	int result;
 
@@ -481,22 +482,22 @@ drv_intel_ax211_scan_session_expire(
 		if (now_us < session->command_deadline)
 			return INTEL_AX211_SCAN_SESSION_OK;
 		memset(&expired, 0, sizeof(expired));
-		result = drv_intel_ax211_command_timeout_oldest(
-			session->commands, now_us, &expired);
 
 		/* Checks the operation result. */
+		result = drv_intel_ax211_command_timeout_oldest(
+			session->commands, now_us, &expired);
 		if (result == INTEL_AX211_COMMAND_PENDING)
 			return INTEL_AX211_SCAN_SESSION_OK;
 
 		/* Checks the operation result. */
 		if (result != INTEL_AX211_COMMAND_TIMEOUT) {
 			/* Obtains the ax211 scan session terminal result. */
-			function_result = ax211_scan_session_terminal(
+			error = ax211_scan_session_terminal(
 				session,
 				ax211_scan_session_command_result(result));
 
 			/* Returns the computed result. */
-			return function_result;
+			return error;
 		}
 
 		/* Handles the expired condition. */
@@ -506,19 +507,19 @@ drv_intel_ax211_scan_session_expire(
 			    session->command_handle.token.index ||
 		    expired.generation != session->command_handle.generation) {
 			/* Obtains the ax211 scan session terminal result. */
-			function_result = ax211_scan_session_terminal(
+			error = ax211_scan_session_terminal(
 				session, INTEL_AX211_SCAN_SESSION_OUT_OF_ORDER);
 
 			/* Returns the computed result. */
-			return function_result;
+			return error;
 		}
 
 		/* Obtains the ax211 scan session terminal result. */
-		function_result = ax211_scan_session_terminal(
+		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_TIMEOUT);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Handles the session condition. */
@@ -530,26 +531,26 @@ drv_intel_ax211_scan_session_expire(
 		session->scan.abort_required = 1U;
 
 		/* Obtains the ax211 scan session terminal result. */
-		function_result = ax211_scan_session_terminal(
+		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_TIMEOUT);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Handles the session condition. */
 	if (session->phase != INTEL_AX211_SCAN_SESSION_RUNNING)
 		return INTEL_AX211_SCAN_SESSION_OUT_OF_ORDER;
 	result = drv_intel_ax211_scan_expire(&session->scan, now_us);
-	result = ax211_scan_session_scan_result(result);
 
 	/* Checks the operation result. */
+	result = ax211_scan_session_scan_result(result);
 	if (result == INTEL_AX211_SCAN_SESSION_TIMEOUT) {
 		/* Obtains the ax211 scan session terminal result. */
-		function_result = ax211_scan_session_terminal(session, result);
+		error = ax211_scan_session_terminal(session, result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Returns the computed result. */
@@ -606,10 +607,10 @@ ax211_scan_session_live(
 {
 	/* Handles the session availability. */
 	if (session == NULL || !session->initialized ||
-	    session->commands == NULL || session->hardware_epoch == 0U)
-
+	    session->commands == NULL || session->hardware_epoch == 0U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Returns the computed result. */
 	return session->commands->initialized &&
@@ -683,12 +684,13 @@ ax211_scan_session_submit(
 		request.minimum_response_length = 0U;
 		request.maximum_response_length = 0U;
 	}
+
 	result = drv_intel_ax211_command_submit(session->commands, &request,
 						now_us, timeout_us,
 						&session->command_handle);
-	result = ax211_scan_session_command_result(result);
 
 	/* Checks the operation result. */
+	result = ax211_scan_session_command_result(result);
 	if (result != INTEL_AX211_SCAN_SESSION_OK)
 		return result;
 	session->command_deadline = now_us + timeout_us;
@@ -744,7 +746,7 @@ ax211_scan_session_ack(
 	uint64_t now_us,
 	uint32_t *abort_status)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_event event;
 	uint8_t response[AX211_SCAN_ABORT_RESPONSE_SIZE];
 	void *response_bytes;
@@ -754,10 +756,10 @@ ax211_scan_session_ack(
 
 	/* Checks the ax211 scan session live result. */
 	if (!ax211_scan_session_live(session) || event_bytes == NULL ||
-	    hardware_epoch == 0U)
-
+	    hardware_epoch == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_INVALID;
+	}
 
 	/* Handles the hardware epoch condition. */
 	if (hardware_epoch != session->hardware_epoch)
@@ -776,10 +778,10 @@ ax211_scan_session_ack(
 		    (required_phase ==
 			     INTEL_AX211_SCAN_SESSION_WAIT_ABORT_ACK &&
 		     session->phase ==
-			     INTEL_AX211_SCAN_SESSION_WAIT_ABORT_COMPLETE))
-
+			     INTEL_AX211_SCAN_SESSION_WAIT_ABORT_COMPLETE)) {
 			/* Returns the computed result. */
 			return INTEL_AX211_SCAN_SESSION_DUPLICATE;
+		}
 
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_OUT_OF_ORDER;
@@ -787,66 +789,67 @@ ax211_scan_session_ack(
 
 	/* Handles the abort status availability. */
 	if ((required_phase == INTEL_AX211_SCAN_SESSION_WAIT_ABORT_ACK) !=
-	    (abort_status != NULL))
-
+	    (abort_status != NULL)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_INVALID;
+	}
 
 	/* Handles the now us condition. */
 	if (now_us >= session->command_deadline) {
 		/* Obtains the drv intel ax211 scan session expire result. */
-		function_result =
+		error =
 			drv_intel_ax211_scan_session_expire(session, now_us);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Checks the drv intel ax211 event decode result. */
 	if (drv_intel_ax211_event_decode(event_bytes, event_length, &event) !=
-	    INTEL_AX211_OK)
-
+	    INTEL_AX211_OK) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_COMMAND;
+	}
 
 	/* Handles the event condition. */
 	if (event.queue != session->command_handle.token.queue ||
-	    event.index != session->command_handle.token.index)
-
+	    event.index != session->command_handle.token.index) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_SESSION_OUT_OF_ORDER;
+	}
 	response_bytes = NULL;
-	response_capacity = 0U;
 
 	/* Handles the abort status availability. */
+	response_capacity = 0U;
 	if (abort_status != NULL) {
 		memset(response, 0, sizeof(response));
 		response_bytes = response;
 		response_capacity = sizeof(response);
 	}
+
 	response_length = 0U;
 	result = drv_intel_ax211_command_complete(
 		session->commands, event_bytes, event_length, hardware_epoch,
 		response_bytes, response_capacity, &response_length);
-	result = ax211_scan_session_command_result(result);
 
 	/* Checks the operation result. */
+	result = ax211_scan_session_command_result(result);
 	if (result != INTEL_AX211_SCAN_SESSION_OK) {
 		/* Obtains the ax211 scan session terminal result. */
-		function_result = ax211_scan_session_terminal(session, result);
+		error = ax211_scan_session_terminal(session, result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Handles the abort status availability. */
 	if (abort_status == NULL && response_length != 0U) {
 		/* Obtains the ax211 scan session terminal result. */
-		function_result = ax211_scan_session_terminal(
+		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_COMMAND);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Handles the abort status availability. */
@@ -854,12 +857,13 @@ ax211_scan_session_ack(
 		/* Handles the response length condition. */
 		if (response_length != sizeof(response)) {
 			/* Obtains the ax211 scan session terminal result. */
-			function_result = ax211_scan_session_terminal(
+			error = ax211_scan_session_terminal(
 				session, INTEL_AX211_SCAN_SESSION_COMMAND);
 
 			/* Returns the computed result. */
-			return function_result;
+			return error;
 		}
+
 		*abort_status = (uint32_t)response[0U] |
 				((uint32_t)response[1U] << 8) |
 				((uint32_t)response[2U] << 16) |

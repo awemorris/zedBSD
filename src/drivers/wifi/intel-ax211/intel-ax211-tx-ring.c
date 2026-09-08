@@ -99,19 +99,19 @@ drv_intel_ax211_tx_ring_api89_validate(
 	/* Handles the table availability. */
 	if (table == NULL)
 		return INTEL_AX211_TX_RING_INVALID;
-	result = drv_intel_ax211_tx_api89_validate(table);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_tx_api89_validate(table);
 	if (result != INTEL_AX211_TX_OK) {
 		return result == INTEL_AX211_TX_INVALID
 			       ? INTEL_AX211_TX_RING_INVALID
 			       : INTEL_AX211_TX_RING_UNSUPPORTED;
 	}
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_version_lookup(
 		table, INTEL_AX211_TX_QUEUE_CONFIG_GROUP,
 		INTEL_AX211_TX_QUEUE_CONFIG_OPCODE, &version);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return INTEL_AX211_TX_RING_UNSUPPORTED;
 
@@ -119,10 +119,10 @@ drv_intel_ax211_tx_ring_api89_validate(
 	if (version.command_version !=
 		    INTEL_AX211_TX_QUEUE_CONFIG_COMMAND_VERSION ||
 	    version.notification_version !=
-		    INTEL_AX211_TX_QUEUE_CONFIG_RESPONSE_VERSION)
-
+		    INTEL_AX211_TX_QUEUE_CONFIG_RESPONSE_VERSION) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_UNSUPPORTED;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_TX_RING_OK;
@@ -143,10 +143,10 @@ drv_intel_ax211_tx_ring_allocate(
 
 	/* Handles the dma device availability. */
 	if (dma_device == NULL || ops == NULL || ops->sync_for_device == NULL ||
-	    ops->write32 == NULL || ring == NULL || ring->allocated)
-
+	    ops->write32 == NULL || ring == NULL || ring->allocated) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_INVALID;
+	}
 
 	/* Checks the drv dma device is coherent result. */
 	if (!drv_dma_device_is_coherent(dma_device))
@@ -155,29 +155,30 @@ drv_intel_ax211_tx_ring_allocate(
 	ring->dma_device = dma_device;
 	ring->ops = ops;
 	ring->ops_argument = ops_argument;
-	result = ax211_tx_ring_buffer_allocate(
-		ring, &ring->tfd, INTEL_AX211_TX_RING_TFD_RING_SIZE, 256U);
 
 	/* Checks the operation result. */
+	result = ax211_tx_ring_buffer_allocate(
+		ring, &ring->tfd, INTEL_AX211_TX_RING_TFD_RING_SIZE, 256U);
 	if (result == INTEL_AX211_TX_RING_OK) {
 		result = ax211_tx_ring_buffer_allocate(
 			ring, &ring->byte_count,
 			INTEL_AX211_TX_RING_BYTE_COUNT_SIZE, 128U);
 	}
+
 	index = 0U;
 	/* Process each remaining element. */
 	while (result == INTEL_AX211_TX_RING_OK &&
 	       index < INTEL_AX211_TX_RING_SLOT_COUNT) {
+		/* Checks the operation result. */
 		result = ax211_tx_ring_buffer_allocate(
 			ring, &ring->slot[index].command,
 			INTEL_AX211_TX_RING_COMMAND_DMA_SIZE, 64U);
-
-		/* Checks the operation result. */
 		if (result == INTEL_AX211_TX_RING_OK) {
 			result = ax211_tx_ring_buffer_allocate(
 				ring, &ring->slot[index].payload,
 				INTEL_AX211_TX_RING_PAYLOAD_DMA_SIZE, 4U);
 		}
+
 		index++;
 	}
 
@@ -189,6 +190,7 @@ drv_intel_ax211_tx_ring_allocate(
 		/* Returns the computed result. */
 		return result;
 	}
+
 	ring->allocated = 1U;
 
 	/* Returns the computed result. */
@@ -210,10 +212,10 @@ drv_intel_ax211_tx_ring_queue_add_build(
 	/* Checks the ax211 tx ring valid result. */
 	if (!ax211_tx_ring_valid(ring) || config == NULL || ring->enabled ||
 	    ring->pending_count != 0U || ring->poisoned || station_id >= 32U ||
-	    !ax211_tx_queue_tid_valid(tid))
-
+	    !ax211_tx_queue_tid_valid(tid)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_INVALID;
+	}
 	memset(&candidate, 0, sizeof(candidate));
 	candidate.tfd_address = ring->tfd.device_address;
 	candidate.byte_count_address = ring->byte_count.device_address;
@@ -239,7 +241,7 @@ drv_intel_ax211_tx_ring_queue_add_complete(
 	const struct intel_ax211_protocol_message *message,
 	const struct intel_ax211_protocol_pending_command *pending)
 {
-	int function_result;
+	int error;
 	const uint8_t *payload;
 	uint16_t queue;
 	uint16_t write_pointer;
@@ -250,10 +252,10 @@ drv_intel_ax211_tx_ring_queue_add_complete(
 	    !ax211_tx_queue_config_valid(ring, config) ||
 	    hardware_generation == 0U || connection_generation == 0U ||
 	    message == NULL || pending == NULL || ring->enabled ||
-	    ring->pending_count != 0U || ring->poisoned)
-
+	    ring->pending_count != 0U || ring->poisoned) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_INVALID;
+	}
 
 	/* Handles the pending condition. */
 	if (pending->group != INTEL_AX211_TX_QUEUE_CONFIG_GROUP ||
@@ -264,24 +266,24 @@ drv_intel_ax211_tx_ring_queue_add_complete(
 	    pending->minimum_response_length !=
 		    INTEL_AX211_TX_QUEUE_CONFIG_RESPONSE_SIZE ||
 	    pending->maximum_response_length !=
-		    INTEL_AX211_TX_QUEUE_CONFIG_RESPONSE_SIZE)
-
+		    INTEL_AX211_TX_QUEUE_CONFIG_RESPONSE_SIZE) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_INVALID;
-	result = drv_intel_ax211_protocol_command_response_validate(message,
-								    pending);
+	}
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_protocol_command_response_validate(message,
+								    pending);
 	if (result != INTEL_AX211_PROTOCOL_OK) {
 		/* Obtains the ax211 tx protocol result result. */
-		function_result = ax211_tx_protocol_result(result);
+		error = ax211_tx_protocol_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
-	payload = message->payload;
 
 	/* Handles the payload availability. */
+	payload = message->payload;
 	if (payload == NULL)
 		return INTEL_AX211_TX_RING_MALFORMED;
 	queue = ax211_tx_ring_get_le16(payload);
@@ -296,10 +298,10 @@ drv_intel_ax211_tx_ring_queue_add_complete(
 	 */
 	if (queue < INTEL_AX211_TX_QUEUE_MIN ||
 	    queue > INTEL_AX211_TX_QUEUE_MAX ||
-	    ax211_tx_ring_get_le16(payload + 6U) != 0U)
-
+	    ax211_tx_ring_get_le16(payload + 6U) != 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_MALFORMED;
+	}
 	ring->hardware_generation = hardware_generation;
 	ring->connection_generation = connection_generation;
 	ring->queue = queue;
@@ -326,7 +328,7 @@ drv_intel_ax211_tx_ring_submit(
 	uint64_t timeout,
 	struct intel_ax211_tx_ring_handle *handle)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_tx_prepared prepared;
 	struct intel_ax211_tx_ring_slot *slot;
 	uint64_t deadline;
@@ -337,10 +339,10 @@ drv_intel_ax211_tx_ring_submit(
 
 	/* Checks the ax211 tx ring valid result. */
 	if (!ax211_tx_ring_valid(ring) || request == NULL || handle == NULL ||
-	    timeout == 0U || now > UINT64_MAX - timeout)
-
+	    timeout == 0U || now > UINT64_MAX - timeout) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_INVALID;
+	}
 
 	/* Handles the ring condition. */
 	if (!ring->enabled)
@@ -361,52 +363,54 @@ drv_intel_ax211_tx_ring_submit(
 	/* Checks the ax211 tx ring cookie active result. */
 	if (ax211_tx_ring_cookie_active(ring, request->cookie))
 		return INTEL_AX211_TX_RING_DUPLICATE;
-	result = drv_intel_ax211_tx_prepare(request, &prepared);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_tx_prepare(request, &prepared);
 	if (result != INTEL_AX211_TX_OK) {
 		/* Obtains the ax211 tx codec result result. */
-		function_result = ax211_tx_codec_result(result);
+		error = ax211_tx_codec_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	deadline = now + timeout;
 	sequence = ring->write_sequence;
 	index = (uint8_t)sequence;
-	slot = &ring->slot[index];
 
 	/* Handles the slot condition. */
+	slot = &ring->slot[index];
 	if (slot->active)
 		return INTEL_AX211_TX_RING_MALFORMED;
-	result = ax211_tx_ring_slot_stage(ring, slot, index, request, &prepared,
-					  deadline);
 
 	/* Checks the operation result. */
+	result = ax211_tx_ring_slot_stage(ring, slot, index, request, &prepared,
+					  deadline);
 	if (result != INTEL_AX211_TX_RING_OK) {
 		ax211_tx_ring_slot_scrub(ring, index);
 
 		/* Returns the computed result. */
 		return result;
 	}
+
+	/* Checks the operation result. */
 	result = ax211_tx_ring_sync_submission(ring, index,
 					       AX211_TX_NARROW_HEADER_SIZE +
 						       prepared.command_length,
 					       prepared.payload_length);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_TX_RING_OK) {
 		ax211_tx_ring_slot_scrub(ring, index);
 
 		/* Returns the computed result. */
 		return result;
 	}
+
 	slot->active = 1U;
 	ring->pending_count++;
 	ring->write_sequence = (uint16_t)(sequence + 1U);
-	write_pointer = ((uint32_t)ring->queue << 16) | ring->write_sequence;
 
 	/* Checks the write32 result. */
+	write_pointer = ((uint32_t)ring->queue << 16) | ring->write_sequence;
 	if (ring->ops->write32(ring->ops_argument,
 			       INTEL_AX211_TX_RING_WRITE_POINTER_REGISTER,
 			       write_pointer) != 0) {
@@ -417,6 +421,7 @@ drv_intel_ax211_tx_ring_submit(
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_KICK_FAILED;
 	}
+
 	*handle = slot->handle;
 	/* Returns the computed result. */
 	return INTEL_AX211_TX_RING_OK;
@@ -431,7 +436,7 @@ drv_intel_ax211_tx_ring_complete(
 	const struct intel_ax211_protocol_message *message,
 	struct intel_ax211_tx_ring_retired *retired)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_tx_completion completion;
 	struct intel_ax211_tx_ring_retired candidate;
 	struct intel_ax211_tx_ring_slot *slot;
@@ -450,17 +455,17 @@ drv_intel_ax211_tx_ring_complete(
 	/* Handles the ring condition. */
 	if (ring->poisoned)
 		return INTEL_AX211_TX_RING_POISONED;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_tx_completion_decode(
 		message, ring->hardware_generation, ring->queue, message->index,
 		&completion);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_TX_OK) {
 		/* Obtains the ax211 tx codec result result. */
-		function_result = ax211_tx_codec_result(result);
+		error = ax211_tx_codec_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Handles the ring condition. */
@@ -470,17 +475,17 @@ drv_intel_ax211_tx_ring_complete(
 		    completion.scheduler_sequence ==
 			    ring->last_completion_sequence &&
 		    message->index ==
-			    (uint8_t)(ring->last_completion_sequence - 1U))
-
+			    (uint8_t)(ring->last_completion_sequence - 1U)) {
 			/* Returns the computed result. */
 			return INTEL_AX211_TX_RING_DUPLICATE;
+		}
 
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_STALE;
 	}
-	expected_index = (uint8_t)ring->read_sequence;
 
 	/* Handles the message condition. */
+	expected_index = (uint8_t)ring->read_sequence;
 	if (message->index != expected_index) {
 		/* Handles the ring condition. */
 		if (ring->slot[message->index].active)
@@ -491,41 +496,41 @@ drv_intel_ax211_tx_ring_complete(
 		    completion.scheduler_sequence ==
 			    ring->last_completion_sequence &&
 		    message->index ==
-			    (uint8_t)(ring->last_completion_sequence - 1U))
-
+			    (uint8_t)(ring->last_completion_sequence - 1U)) {
 			/* Returns the computed result. */
 			return INTEL_AX211_TX_RING_DUPLICATE;
+		}
 
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_STALE;
 	}
-	slot = &ring->slot[expected_index];
 
 	/* Handles the slot condition. */
+	slot = &ring->slot[expected_index];
 	if (!slot->active ||
 	    slot->handle.hardware_generation != ring->hardware_generation ||
-	    slot->handle.connection_generation != ring->connection_generation)
-
+	    slot->handle.connection_generation != ring->connection_generation) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_MALFORMED;
-	expected_sequence = (uint16_t)(slot->handle.scheduler_sequence + 1U);
+	}
 
 	/* Handles the completion condition. */
+	expected_sequence = (uint16_t)(slot->handle.scheduler_sequence + 1U);
 	if (completion.scheduler_sequence != expected_sequence) {
 		/* Handles the ax211 tx ring active sequence condition. */
 		if (ax211_tx_ring_active_sequence(
-			    ring, (uint16_t)completion.scheduler_sequence))
-
+			    ring, (uint16_t)completion.scheduler_sequence)) {
 			/* Returns the computed result. */
 			return INTEL_AX211_TX_RING_OUT_OF_ORDER;
+		}
 
 		/* Handles the ring condition. */
 		if (ring->has_last_completion &&
 		    completion.scheduler_sequence ==
-			    ring->last_completion_sequence)
-
+			    ring->last_completion_sequence) {
 			/* Returns the computed result. */
 			return INTEL_AX211_TX_RING_DUPLICATE;
+		}
 
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_STALE;
@@ -580,9 +585,9 @@ drv_intel_ax211_tx_ring_timeout_oldest(
 	if (ring->pending_count == 0U)
 		return INTEL_AX211_TX_RING_NOT_READY;
 	index = (uint8_t)ring->read_sequence;
-	slot = &ring->slot[index];
 
 	/* Handles the slot condition. */
+	slot = &ring->slot[index];
 	if (!slot->active)
 		return INTEL_AX211_TX_RING_MALFORMED;
 	*handle = slot->handle;
@@ -609,18 +614,18 @@ drv_intel_ax211_tx_ring_reset(
 
 	/* Checks the ax211 tx ring valid result. */
 	if (!ax211_tx_ring_valid(ring) ||
-	    (dma_quiesced != 0 && dma_quiesced != 1))
-
+	    (dma_quiesced != 0 && dma_quiesced != 1)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_INVALID;
+	}
 
 	/* Handles the ring condition. */
 	if ((ring->enabled || ring->pending_count != 0U ||
 	     ring->reset_barrier_required) &&
-	    !dma_quiesced)
-
+	    !dma_quiesced) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_BARRIER_REQUIRED;
+	}
 	/* Process each remaining element. */
 	for (index = 0U; index < INTEL_AX211_TX_RING_SLOT_COUNT; index++)
 		ax211_tx_ring_slot_scrub(ring, (uint8_t)index);
@@ -656,13 +661,13 @@ drv_intel_ax211_tx_ring_release(
 
 	/* Checks the ax211 tx ring valid result. */
 	if (!ax211_tx_ring_valid(ring) ||
-	    (dma_quiesced != 0 && dma_quiesced != 1))
-
+	    (dma_quiesced != 0 && dma_quiesced != 1)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_INVALID;
-	result = drv_intel_ax211_tx_ring_reset(ring, dma_quiesced);
+	}
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_tx_ring_reset(ring, dma_quiesced);
 	if (result != INTEL_AX211_TX_RING_OK)
 		return result;
 	ax211_tx_ring_allocations_release(ring);
@@ -682,10 +687,9 @@ ax211_tx_ring_buffer_allocate(
 {
 	int error;
 
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(ring->dma_device, size, alignment,
 				       buffer);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return INTEL_AX211_TX_RING_NO_MEMORY;
 
@@ -700,6 +704,7 @@ ax211_tx_ring_buffer_allocate(
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_IO_ERROR;
 	}
+
 	memset(buffer->address, 0, buffer->size);
 
 	/* Returns the computed result. */
@@ -717,10 +722,10 @@ ax211_tx_ring_buffer_valid(
 	if (buffer == NULL || buffer->address == NULL || buffer->size != size ||
 	    buffer->device_address == 0U || alignment == 0U ||
 	    (alignment & (alignment - 1U)) != 0U ||
-	    (buffer->device_address & (alignment - 1U)) != 0U)
-
+	    (buffer->device_address & (alignment - 1U)) != 0U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Handles the buffer condition. */
 	if (buffer->device_address > UINT64_MAX - (uint64_t)(size - 1U))
@@ -763,6 +768,7 @@ ax211_tx_ring_allocations_release(
 		ax211_tx_ring_buffer_release(ring, &ring->slot[index].payload);
 		ax211_tx_ring_buffer_release(ring, &ring->slot[index].command);
 	}
+
 	ax211_tx_ring_buffer_release(ring, &ring->byte_count);
 	ax211_tx_ring_buffer_release(ring, &ring->tfd);
 }
@@ -778,6 +784,7 @@ ax211_tx_ring_buffer_release(
 		ax211_tx_ring_scrub(buffer->address, buffer->size);
 		drv_dma_free_coherent(ring->dma_device, buffer);
 	}
+
 	memset(buffer, 0, sizeof(*buffer));
 }
 
@@ -797,10 +804,10 @@ ax211_tx_ring_valid(
 	    !ax211_tx_ring_buffer_valid(&ring->byte_count,
 					INTEL_AX211_TX_RING_BYTE_COUNT_SIZE,
 					128U) ||
-	    ring->pending_count > INTEL_AX211_TX_RING_INFLIGHT_LIMIT)
-
+	    ring->pending_count > INTEL_AX211_TX_RING_INFLIGHT_LIMIT) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	/* Process each remaining element. */
 	for (index = 0U; index < INTEL_AX211_TX_RING_SLOT_COUNT; index++) {
 		/* Checks the ax211 tx ring buffer valid result. */
@@ -809,10 +816,10 @@ ax211_tx_ring_valid(
 			    INTEL_AX211_TX_RING_COMMAND_DMA_SIZE, 64U) ||
 		    !ax211_tx_ring_buffer_valid(
 			    &ring->slot[index].payload,
-			    INTEL_AX211_TX_RING_PAYLOAD_DMA_SIZE, 4U))
-
+			    INTEL_AX211_TX_RING_PAYLOAD_DMA_SIZE, 4U)) {
 			/* Reports successful completion. */
 			return 0;
+		}
 	}
 
 	/* Reports operation failure. */
@@ -875,27 +882,27 @@ ax211_tx_queue_config_valid(
 	const struct intel_ax211_tx_ring *ring,
 	const struct intel_ax211_tx_queue_config *config)
 {
-	int function_result;
+	int error;
 	uint8_t expected[INTEL_AX211_TX_QUEUE_CONFIG_COMMAND_SIZE];
 
 	/* Checks the ax211 tx queue tid valid result. */
 	if (config == NULL || config->station_id >= 32U ||
 	    !ax211_tx_queue_tid_valid(config->tid) ||
 	    config->tfd_address != ring->tfd.device_address ||
-	    config->byte_count_address != ring->byte_count.device_address)
-
+	    config->byte_count_address != ring->byte_count.device_address) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	ax211_tx_queue_command_encode(expected, config->station_id, config->tid,
 				      config->byte_count_address,
 				      config->tfd_address);
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		memcmp(expected, config->command, sizeof(expected)) == 0;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ax211 tx protocol result operation. */
@@ -905,10 +912,10 @@ ax211_tx_protocol_result(
 {
 	/* Checks the operation result. */
 	if (result == INTEL_AX211_PROTOCOL_STALE ||
-	    result == INTEL_AX211_PROTOCOL_TOKEN_MISMATCH)
-
+	    result == INTEL_AX211_PROTOCOL_TOKEN_MISMATCH) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_STALE;
+	}
 
 	/* Checks the operation result. */
 	if (result == INTEL_AX211_PROTOCOL_UNSUPPORTED)
@@ -947,10 +954,10 @@ ax211_tx_ring_cookie_active(
 	for (index = 0U; index < INTEL_AX211_TX_RING_SLOT_COUNT; index++) {
 		/* Handles the ring condition. */
 		if (ring->slot[index].active &&
-		    ring->slot[index].handle.cookie == cookie)
-
+		    ring->slot[index].handle.cookie == cookie) {
 			/* Reports operation failure. */
 			return 1;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -999,9 +1006,8 @@ ax211_tx_ring_slot_stage(
 	size_t command_length;
 	unsigned num_tbs;
 
-	command_length = AX211_TX_NARROW_HEADER_SIZE + prepared->command_length;
-
 	/* Handles the command length condition. */
+	command_length = AX211_TX_NARROW_HEADER_SIZE + prepared->command_length;
 	if (command_length <= INTEL_AX211_TX_RING_FIRST_TB_SIZE ||
 	    command_length > slot->command.size ||
 	    command_length - INTEL_AX211_TX_RING_FIRST_TB_SIZE >
@@ -1010,10 +1016,10 @@ ax211_tx_ring_slot_stage(
 	    prepared->payload_length > INTEL_AX211_TX_RING_TB_SIZE_MAX ||
 	    prepared->payload_offset > request->length ||
 	    prepared->payload_length >
-		    request->length - prepared->payload_offset)
-
+		    request->length - prepared->payload_offset) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_MALFORMED;
+	}
 	command = slot->command.address;
 	payload = slot->payload.address;
 	tfd = (uint8_t *)ring->tfd.address +
@@ -1035,6 +1041,7 @@ ax211_tx_ring_slot_stage(
 		memcpy(payload, request->frame + prepared->payload_offset,
 		       prepared->payload_length);
 	}
+
 	num_tbs = prepared->payload_length == 0U ? 2U : 3U;
 	ax211_tx_ring_put_le16(tfd,
 			       (uint16_t)(num_tbs & AX211_TX_TFD_NUM_TBS_MASK));
@@ -1144,34 +1151,34 @@ ax211_tx_ring_sync_submission(
 
 	/* Checks the sync for device result. */
 	if (ring->ops->sync_for_device(ring->ops_argument, &slot->command, 0U,
-				       command_length) != 0)
-
+				       command_length) != 0) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_IO_ERROR;
+	}
 
 	/* Checks the sync for device result. */
 	if (payload_length != 0U &&
 	    ring->ops->sync_for_device(ring->ops_argument, &slot->payload, 0U,
-				       payload_length) != 0)
-
+				       payload_length) != 0) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_IO_ERROR;
+	}
 
 	/* Checks the sync for device result. */
 	if (ring->ops->sync_for_device(ring->ops_argument, &ring->tfd,
 				       tfd_offset,
-				       INTEL_AX211_TX_RING_TFD_SIZE) != 0)
-
+				       INTEL_AX211_TX_RING_TFD_SIZE) != 0) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_IO_ERROR;
+	}
 
 	/* Checks the sync for device result. */
 	if (ring->ops->sync_for_device(ring->ops_argument, &ring->byte_count,
 				       byte_count_offset,
-				       sizeof(uint16_t)) != 0)
-
+				       sizeof(uint16_t)) != 0) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_RING_IO_ERROR;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_TX_RING_OK;
@@ -1191,14 +1198,13 @@ ax211_tx_ring_active_sequence(
 	count = 0U;
 	/* Process each remaining element. */
 	while (count < ring->pending_count) {
-		slot = &ring->slot[(uint8_t)sequence];
-
 		/* Handles the slot condition. */
+		slot = &ring->slot[(uint8_t)sequence];
 		if (slot->active && (uint16_t)(slot->handle.scheduler_sequence +
-					       1U) == next_sequence)
-
+					       1U) == next_sequence) {
 			/* Reports operation failure. */
 			return 1;
+		}
 		sequence = (uint16_t)(sequence + 1U);
 		count++;
 	}

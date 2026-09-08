@@ -297,9 +297,9 @@ kern_platform_input_init(
 #endif
 
 	/* Attaches the PS/2 mouse. */
-	error = drv_pcat_ps2_mouse_init();
 
 	/* Reports why the mouse attachment failed. */
+	error = drv_pcat_ps2_mouse_init();
 	if (error != 0)
 		return error;
 

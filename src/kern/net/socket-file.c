@@ -84,9 +84,9 @@ socket_file_reserve(
 
 	/* Creates an empty read-write pseudo file. */
 	*result = NULL;
-	error = file_create_pseudo(&socket_file_ops, O_RDWR, NULL, result);
 
 	/* Reports why the creation failed. */
+	error = file_create_pseudo(&socket_file_ops, O_RDWR, NULL, result);
 	if (error != 0)
 		return error;
 
@@ -189,9 +189,8 @@ socket_file_effective_flags(
 {
 	unsigned flags;
 
-	flags = 0;
-
 	/* A non-blocking file makes every call non-blocking. */
+	flags = 0;
 	if (reference != NULL &&
 	    reference->file != NULL &&
 	    (file_status_flags_get(reference->file) & O_NONBLOCK) != 0)
@@ -228,9 +227,8 @@ socket_file_read(
 	ssize_t result;
 	int flags;
 
-	socket = socket_from_file(file);
-
 	/* Rejects a file without a socket or a socket that cannot receive. */
+	socket = socket_from_file(file);
 	if (socket == NULL)
 		return -EBADF;
 	if ((socket->type != SOCK_STREAM &&
@@ -264,9 +262,8 @@ socket_file_write(
 	ssize_t result;
 	int flags;
 
-	socket = socket_from_file(file);
-
 	/* Rejects a file without a socket or a socket that cannot send. */
+	socket = socket_from_file(file);
 	if (socket == NULL)
 		return -EBADF;
 	if ((socket->type != SOCK_STREAM && socket->type != SOCK_DGRAM) ||
@@ -297,9 +294,8 @@ socket_file_ioctl(
 	struct socket *socket;
 	int error;
 
-	socket = socket_from_file(file);
-
 	/* A reserved wrapper may be discarded before an endpoint is attached. */
+	socket = socket_from_file(file);
 	if (socket == NULL)
 		return 0;
 
@@ -308,9 +304,9 @@ socket_file_ioctl(
 		return EOPNOTSUPP;
 
 	/* Forwards the request. */
-	error = socket->ops->ioctl(socket, request, argument);
 
 	/* Reports why the socket's failed. */
+	error = socket->ops->ioctl(socket, request, argument);
 	if (error != 0)
 		return error;
 
@@ -325,9 +321,8 @@ socket_file_close(
 {
 	struct socket *socket;
 
-	socket = socket_from_file(file);
-
 	/* A file without a socket has nothing to close. */
+	socket = socket_from_file(file);
 	if (socket == NULL)
 		return EBADF;
 
@@ -350,9 +345,8 @@ socket_file_poll(
 	struct socket *socket;
 	int error;
 
-	socket = socket_from_file(file);
-
 	/* A file without a socket cannot be polled. */
+	socket = socket_from_file(file);
 	if (socket == NULL)
 		return EBADF;
 

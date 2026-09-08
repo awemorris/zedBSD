@@ -233,9 +233,8 @@ wlan_core_init(
 	unsigned expected;
 	unsigned index;
 
-	expected = 0U;
-
 	/* Only the first caller initializes; later callers wait for it. */
+	expected = 0U;
 	if (atomic_load_acquire(&wlan_initialized) == 2U)
 		return;
 	if (!atomic_compare_exchange(&wlan_initialized, &expected, 1U)) {
@@ -245,6 +244,7 @@ wlan_core_init(
 			else
 				__asm__ volatile("" ::: "memory");
 		}
+
 		return;
 	}
 
@@ -311,6 +311,7 @@ wlan_station_attach(
 				return EINVAL;
 		}
 	}
+
 	if (atomic_load_acquire(&wlan_initialized) != 2U)
 		wlan_core_init();
 
@@ -324,11 +325,14 @@ wlan_station_attach(
 
 	/* Finds a free slot while refusing a duplicate attachment. */
 	enabled = spin_lock_irqsave(&wlan_registry_lock);
+
 	if (wlan_stopping) {
 		spin_unlock_irqrestore(&wlan_registry_lock, enabled);
 		net_device_release(device);
 		return EBUSY;
 	}
+
+	/* Refuses a device that already has a station, and notes a free slot. */
 	for (index = 0; index < NET_DEVICE_MAX; index++) {
 		if (wlan_stations[index].used &&
 		    wlan_stations[index].device == device) {
@@ -336,9 +340,11 @@ wlan_station_attach(
 			net_device_release(device);
 			return EEXIST;
 		}
+
 		if (!wlan_stations[index].used && free_station == NULL)
 			free_station = &wlan_stations[index];
 	}
+
 	if (free_station == NULL) {
 		spin_unlock_irqrestore(&wlan_registry_lock, enabled);
 		net_device_release(device);
@@ -364,6 +370,8 @@ wlan_station_attach(
 	 * timer/admission lookups of this unused slot.
 	 */
 	station_enabled = spin_lock_irqsave(&free_station->lock);
+
+	/* Describes the new station and starts its WPA2 engine. */
 	memset(&free_station->used, 0,
 	    sizeof(*free_station) - offsetof(struct wlan_station, used));
 	free_station->device = device;
@@ -383,10 +391,15 @@ wlan_station_attach(
 		net_device_release(device);
 		return error;
 	}
+
 	free_station->used = 1;
+
 	spin_unlock_irqrestore(&free_station->lock, station_enabled);
+
 	*result = free_station;
+
 	spin_unlock_irqrestore(&wlan_registry_lock, enabled);
+
 	return 0;
 }
 
@@ -413,6 +426,8 @@ wlan_station_scan_profile_update(
 
 	/* Only a fully idle station accepts a new profile. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Refuses a profile change while anything is running against the station. */
 	if (!station->used || station->closing || station->lifecycle_inflight) {
 		error = ENODEV;
 	} else if (station->administrative_up ||
@@ -434,10 +449,13 @@ wlan_station_scan_profile_update(
 				}
 			}
 		}
+
 		if (error == 0)
 			station->scan_profile = *scan_profile;
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	station_control_leave(station);
 	station_leave(station);
 
@@ -465,13 +483,17 @@ wlan_station_open(
 
 	/* A down or failed station becomes idle. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Brings the station up, clearing any terminal error it held. */
 	station->administrative_up = 1U;
 	if (station->state == WLAN_STATE_DOWN ||
 	    station->state == WLAN_STATE_FAILED) {
 		station->state = WLAN_STATE_IDLE;
 		station->terminal_error = 0;
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	station_leave(station);
 	return 0;
 }
@@ -533,17 +555,22 @@ wlan_station_report_scan_bss(
 #ifdef WLAN_TESTING
 	/* Runs a one-shot test hook outside the lock. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	hook = station->test_report_hook;
 	hook_context = station->test_report_hook_context;
 	station->test_report_hook = NULL;
 	station->test_report_hook_context = NULL;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	if (hook != NULL)
 		hook(hook_context);
 #endif
 
 	/* Accepts the record only for the channel being scanned right now. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Ignores a report that does not belong to the channel being scanned. */
 	now = station_now_locked(station);
 	scan_channel_accepting =
 	    station->scan_step_state == WLAN_SCAN_STEP_DWELL ||
@@ -569,7 +596,9 @@ wlan_station_report_scan_bss(
 	} else {
 		error = cache_insert_locked(station, &normalized, now);
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	if (wake_worker)
 		wlan_worker_wakeup();
 	station_leave(station);
@@ -606,9 +635,9 @@ wlan_station_report_scan_frame(
 		return error;
 
 	/* Reports the record to the scan. */
-	error = wlan_station_report_scan_bss(station, generation, &bss);
 
 	/* Reports the failure. */
+	error = wlan_station_report_scan_bss(station, generation, &bss);
 	if (error != 0)
 		return error;
 
@@ -634,6 +663,8 @@ wlan_station_report_scan_channel_ready(
 
 	/* Only the step being tuned accepts the report. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Accepts the ready report only for the step that is tuning. */
 	if (station->scan_state != WLAN_SCAN_RUNNING ||
 	    station->scan_generation != generation ||
 	    station->scan_step_state != WLAN_SCAN_STEP_TUNING ||
@@ -643,7 +674,9 @@ wlan_station_report_scan_channel_ready(
 		station->scan_ready_pending = 1U;
 		result = 0;
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	wlan_worker_wakeup();
 	station_leave(station);
 	return result;
@@ -670,6 +703,8 @@ wlan_station_report_scan_error(
 
 	/* Keeps the first error of the running scan. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Keeps the first error this scan generation reported. */
 	if (station->scan_state != WLAN_SCAN_RUNNING ||
 	    station->scan_generation != generation) {
 		result = ESTALE;
@@ -678,7 +713,9 @@ wlan_station_report_scan_error(
 			station->scan_event_error = error;
 		result = 0;
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	wlan_worker_wakeup();
 	station_leave(station);
 	return result;
@@ -757,10 +794,10 @@ wlan_station_report_frame(
 	    report->packet_number > 0x0000ffffffffffffULL ||
 	    !bytes_zero(report->reserved, sizeof(report->reserved)))
 		return EINVAL;
-	frame_control = (uint16_t)((uint16_t)report->frame[0] |
-	    ((uint16_t)report->frame[1] << 8));
 
 	/* A beacon refreshes the beacon watch; otherwise it feeds the scan. */
+	frame_control = (uint16_t)((uint16_t)report->frame[0] |
+	    ((uint16_t)report->frame[1] << 8));
 	if ((frame_control & 0x000cU) == 0U &&
 	    ((frame_control & 0x00f0U) == 0x0080U ||
 	    (frame_control & 0x00f0U) == 0x0050U)) {
@@ -783,11 +820,13 @@ wlan_station_report_frame(
 			} else {
 				result = ESTALE;
 			}
+
 			spin_unlock_irqrestore(&station->lock, enabled);
 			station_leave(station);
 			if (result == 0)
 				return 0;
 		}
+
 		result = wlan_station_report_scan_bss(station,
 		    report->generation, &management_bss);
 		return result;
@@ -799,6 +838,8 @@ wlan_station_report_frame(
 		return result;
 	station_control_enter(station);
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Ignores a frame that belongs to an older connection or a down station. */
 	if (report->generation != station->connection_generation ||
 	    station->state == WLAN_STATE_DOWN ||
 	    station->state == WLAN_STATE_IDLE ||
@@ -808,8 +849,11 @@ wlan_station_report_frame(
 		result = ESTALE;
 		goto out;
 	}
+
 	now = station_now_locked(station);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	if (report->integrity_error) {
 		result = EACCES;
 		goto out;
@@ -831,6 +875,7 @@ wlan_station_report_frame(
 			result = EACCES;
 			goto out;
 		}
+
 		if ((frame_control & (uint16_t)~0x0800U) == 0x00a0U ||
 		    (frame_control & (uint16_t)~0x0800U) == 0x00c0U) {
 			/*
@@ -846,14 +891,17 @@ wlan_station_report_frame(
 				result = ESTALE;
 				goto out;
 			}
+
 			result = station_link_lost_controlled(station,
 			    report->generation, ECONNRESET);
 			goto out;
 		}
+
 		result = wlan_wpa2_engine_receive_management(&station->wpa2,
 		    report->generation, report->frame, report->length, now);
 		goto sync;
 	}
+
 	if ((frame_control & 0x000cU) != 0x0008U) {
 		result = EPROTONOSUPPORT;
 		goto out;
@@ -890,6 +938,8 @@ wlan_station_report_frame(
 			result = EACCES;
 			goto out;
 		}
+
+		/* Hands an EAPOL frame to the handshake engine. */
 		result = wlan_wpa2_engine_receive_eapol(&station->wpa2,
 		    report->generation, ethernet + 6U, ethernet,
 		    ethernet + WLAN_L2_ETHERNET_HEADER_SIZE,
@@ -903,15 +953,18 @@ wlan_station_report_frame(
 		result = EACCES;
 		goto out;
 	}
+
 	packet = packet_buf_alloc(0U);
 	if (packet == NULL) {
 		result = ENOBUFS;
 		goto out;
 	}
+
 	if (packet_buf_append(packet, ethernet_length) == NULL) {
 		result = EMSGSIZE;
 		goto out;
 	}
+
 	memcpy(packet->data, ethernet, ethernet_length);
 	net_device_receive(station->device, packet);
 	packet = NULL;
@@ -921,8 +974,12 @@ wlan_station_report_frame(
 sync:
 	/* Publishes the engine state the frame produced. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	station_sync_wpa_locked(station);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
+/* Releases the frame and everything the report held. */
 out:
 	if (packet != NULL)
 		packet_buf_free(packet);
@@ -962,12 +1019,15 @@ wlan_station_report_tx_complete(
 		return result;
 	station_control_enter(station);
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (generation != station->connection_generation) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		result = ESTALE;
 		goto out;
 	}
+
 	now = station_now_locked(station);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* An engine frame updates the handshake; a data frame counts errors. */
@@ -985,6 +1045,7 @@ wlan_station_report_tx_complete(
 	} else {
 		result = ESTALE;
 	}
+
 out:
 	station_control_leave(station);
 	station_leave(station);
@@ -1020,10 +1081,13 @@ wlan_station_transmit(
 		packet_buf_free(packet);
 		return result;
 	}
+
 	station_control_enter(station);
 	memset(&request, 0, sizeof(request));
 
 	/* Takes the next packet number and cookie of an authorized link. */
+
+	/* Refuses a transmit before the controlled port opens. */
 	enabled = spin_lock_irqsave(&station->lock);
 	if (!station->wpa2.authorized ||
 	    !station->controlled_port ||
@@ -1032,12 +1096,16 @@ wlan_station_transmit(
 		result = ENETDOWN;
 		goto out;
 	}
+
+	/* Refuses a transmit once the packet number or the cookie would wrap. */
 	if (station->transmit_packet_number >= 0x0000ffffffffffffULL ||
 	    station->transmit_cookie == UINT64_MAX) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		result = EOVERFLOW;
 		goto out;
 	}
+
+	/* Takes the next packet number and describes the frame to send. */
 	station->transmit_packet_number++;
 	station->transmit_cookie++;
 	request.generation = station->connection_generation;
@@ -1047,6 +1115,7 @@ wlan_station_transmit(
 	now = station_now_locked(station);
 	request.deadline_ticks = deadline_after(now,
 	    WLAN_CONNECT_TRANSITION_TICKS);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Builds the MPDU and hands it to the radio. */
@@ -1105,12 +1174,15 @@ wlan_station_ioctl(
 			connect->passphrase_length = 0U;
 			return error;
 		}
+
+		/* Runs the connect request with the saved passphrase restored. */
 		error = station_find_enter(device, &station);
 		if (error == 0) {
 			memcpy(connect->passphrase, saved, sizeof(saved));
 			error = ioctl_connect(station, connect);
 			station_leave(station);
 		}
+
 		secure_zero(saved, sizeof(saved));
 		secure_zero(connect->passphrase, sizeof(connect->passphrase));
 		connect->passphrase_length = 0U;
@@ -1182,28 +1254,35 @@ wlan_station_close(
 
 	/* Blocks new callers, then waits for none to be active. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (!station->used || station->blocked) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ENODEV;
 	}
+
 	if (station->lifecycle_inflight) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return EBUSY;
 	}
+
 	station->closing = 1;
 	if (station->active != 0U) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return EBUSY;
 	}
+
 	station->lifecycle_inflight = 1;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Retires everything; a failure leaves the station closing. */
 	error = station_retire(station, 0);
 	enabled = spin_lock_irqsave(&station->lock);
+
 	station->lifecycle_inflight = 0;
 	if (error == 0)
 		station->closing = 0;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports the failure. */
@@ -1223,10 +1302,12 @@ wlan_station_stop_request(struct wlan_station *station)
 	if (station == NULL)
 		return;
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (station->used) {
 		station->stop_pending = 1;
 		station->stop_retry_deadline = 0U;
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 }
 
@@ -1240,6 +1321,7 @@ wlan_station_stop_complete(struct wlan_station *station, int error)
 	if (station == NULL)
 		return;
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (station->used) {
 		station->stop_pending = error != 0;
 		station->stop_error = error;
@@ -1255,6 +1337,7 @@ wlan_station_stop_complete(struct wlan_station *station, int error)
 			    station_now_locked(station), delay);
 		}
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 }
 
@@ -1268,8 +1351,11 @@ wlan_station_stop_busy(struct wlan_station *station)
 	if (station == NULL)
 		return 0;
 	enabled = spin_lock_irqsave(&station->lock);
+
 	busy = station->used && (station->stop_pending || station->stop_work_active);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	return busy;
 }
 
@@ -1283,8 +1369,10 @@ wlan_station_stop_cancel(struct wlan_station *station)
 	if (station == NULL)
 		return 0;
 	enabled = spin_lock_irqsave(&station->lock);
+
 	station->stop_retry_disabled = 1;
 	error = station->stop_work_active ? EBUSY : 0;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports the failure. */
@@ -1351,19 +1439,25 @@ wlan_station_quiesce_begin(
 	if (station == NULL)
 		return ENODEV;
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (!station->used || station->blocked) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ENODEV;
 	}
+
+	/* Refuses to quiesce while anything still holds the station. */
 	station->closing = 1;
 	if (station->active != 0U || station->control_inflight ||
 	    station->lifecycle_inflight) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return EBUSY;
 	}
+
 	station->lifecycle_inflight = 1;
 	station->hardware_quiesce = 1;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	return 0;
 }
 
@@ -1379,10 +1473,12 @@ wlan_station_quiesce_end(
 
 	/* Requires the paired barrier owner and leaves admission closed for reconciliation. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (!station->hardware_quiesce || !station->lifecycle_inflight)
 		__builtin_trap();
 	station->hardware_quiesce = 0;
 	station->lifecycle_inflight = 0;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 }
 
@@ -1404,11 +1500,14 @@ wlan_station_detach(
 	/* Blocks new callers and claims the lifecycle. */
 	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (!station->used) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
 		return ENODEV;
 	}
+
+	/* Refuses a detach while a shutdown or a lifecycle step is running. */
 	if (station->shutdown_owned || station->stop_work_active ||
 	    station->lifecycle_inflight ||
 	    station->closing) {
@@ -1416,14 +1515,18 @@ wlan_station_detach(
 		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
 		return EBUSY;
 	}
+
+	/* Blocks new users and refuses the detach until the current ones leave. */
 	if (station->active != 0U) {
 		station->blocked = 1;
 		spin_unlock_irqrestore(&station->lock, enabled);
 		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
 		return EBUSY;
 	}
+
 	station->blocked = 1;
 	station->lifecycle_inflight = 1;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
 
@@ -1442,6 +1545,8 @@ wlan_station_detach(
 
 	/* Frees the slot unless a shutdown claimed it meanwhile. */
 	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
+
+	/* Gives up the lifecycle step if the station became busy again. */
 	enabled = spin_lock_irqsave(&station->lock);
 	if (station->active != 0U || station->shutdown_owned) {
 		station->lifecycle_inflight = 0;
@@ -1449,9 +1554,12 @@ wlan_station_detach(
 		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
 		return EBUSY;
 	}
+
 	release_device = station_finalize_locked(station);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+
 	net_device_release(release_device);
 	return 0;
 }
@@ -1488,10 +1596,13 @@ wlan_station_shutdown_all(
 	 * pass.
 	 */
 	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
+
 	if (wlan_shutdown_inflight) {
 		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
 		return EBUSY;
 	}
+
+	/* Claims every idle station, and notes the ones still in use. */
 	wlan_shutdown_inflight = 1;
 	wlan_stopping = 1;
 	for (index = 0; index < NET_DEVICE_MAX; index++) {
@@ -1509,10 +1620,18 @@ wlan_station_shutdown_all(
 			if (station->active != 0U)
 				busy = 1;
 		}
+
 		spin_unlock_irqrestore(&station->lock, enabled);
 	}
+
 	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+
+	/* Gives the claim back when any station was still in use. */
 	if (busy) {
+
+		/* Finalizes a station only while this shutdown still owns it. */
+
+		/* Finalizes a station only while this shutdown still owns it. */
 		registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
 		wlan_shutdown_inflight = 0;
 		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
@@ -1538,6 +1657,8 @@ wlan_station_shutdown_all(
 				first_error = error;
 			continue;
 		}
+
+		/* Finalizes the station only while this shutdown still owns it. */
 		registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
 		enabled = spin_lock_irqsave(&station->lock);
 		if (station->active != 0U || !station->shutdown_owned) {
@@ -1546,14 +1667,19 @@ wlan_station_shutdown_all(
 		} else {
 			release_device = station_finalize_locked(station);
 		}
+
 		spin_unlock_irqrestore(&station->lock, enabled);
 		spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
 		if (release_device != NULL)
 			net_device_release(release_device);
 	}
+
 	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
+
 	wlan_shutdown_inflight = 0;
+
 	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
+
 	return first_error;
 }
 
@@ -1615,6 +1741,8 @@ wlan_timer_next_deadline(
 			    station->scan_step_deadline < candidate)
 				candidate = station->scan_step_deadline;
 		}
+
+		/* Takes the earliest of the connect, retry and beacon deadlines. */
 		if ((station->state == WLAN_STATE_AUTHENTICATING ||
 		    station->state == WLAN_STATE_ASSOCIATING ||
 		    station->state == WLAN_STATE_FOUR_WAY) &&
@@ -1642,6 +1770,7 @@ wlan_timer_next_deadline(
 		if (candidate != 0U && (result == 0U || candidate < result))
 			result = candidate;
 	}
+
 	return result;
 }
 
@@ -1695,6 +1824,7 @@ wlan_work_pending(
 		if (pending)
 			return 1;
 	}
+
 	return 0;
 }
 
@@ -1723,11 +1853,13 @@ wlan_station_test_attach(
 
 	/* Substitutes the caller's clock for the default one. */
 	enabled = spin_lock_irqsave(&(*result)->lock);
+
 	if (clock != NULL)
 		(*result)->clock = clock;
 	else
 		(*result)->clock = default_clock;
 	(*result)->clock_context = clock_context;
+
 	spin_unlock_irqrestore(&(*result)->lock, enabled);
 
 	/* Reports the attached station to the caller. */
@@ -1753,8 +1885,10 @@ wlan_station_test_set_report_hook(
 
 	/* Installs the hook under the station lock. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	station->test_report_hook = hook;
 	station->test_report_hook_context = context;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Drops the reference and reports success. */
@@ -1778,8 +1912,11 @@ wlan_station_test_control_waiters(
 
 	/* Samples the waiter count under the station lock. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	waiters = station->test_control_waiters;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	return waiters;
 }
 
@@ -1799,6 +1936,8 @@ wlan_station_test_secrets_clear(
 
 	/* Tests every secret the station can hold. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Tests every secret the station can hold. */
 	clear = station->credential_length == 0U &&
 	    bytes_zero(station->credential, sizeof(station->credential)) &&
 	    bytes_zero(station->wpa2.pmk, sizeof(station->wpa2.pmk)) &&
@@ -1808,7 +1947,9 @@ wlan_station_test_secrets_clear(
 	    bytes_zero(station->wpa2.gtk, sizeof(station->wpa2.gtk)) &&
 	    bytes_zero(station->wpa2.tx_frame,
 	    sizeof(station->wpa2.tx_frame));
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	return clear;
 }
 
@@ -1844,6 +1985,7 @@ wlan_station_test_seed_authorized(
 		return EINVAL;
 	group_generation = key_generation + 1U;
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (!station->used || !station->administrative_up || station->closing) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ENETDOWN;
@@ -1916,6 +2058,7 @@ wlan_station_test_seed_authorized(
 	error = net_device_set_carrier(station->device, 1);
 	if (error != 0)
 		station->controlled_port = 0U;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports the failure. */
@@ -1942,6 +2085,8 @@ wlan_station_test_begin_pairwise_rekey(
 
 	/* Refuses a rekey unless the link is authorized and keyed. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Refuses a rekey unless the link is authorized and keyed. */
 	if (wlan_wpa2_engine_state(&station->wpa2) !=
 	    WLAN_WPA2_STATE_AUTHORIZED ||
 	    !station->wpa2.connected_lifetime ||
@@ -1958,6 +2103,7 @@ wlan_station_test_begin_pairwise_rekey(
 		station->wpa2.state = WLAN_WPA2_STATE_MESSAGE_3;
 		station_sync_wpa_locked(station);
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports the failure. */
@@ -1983,6 +2129,8 @@ wlan_station_test_begin_group_rekey(
 
 	/* Refuses a rekey unless both key types are installed. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Refuses a rekey unless both key types are installed. */
 	if (wlan_wpa2_engine_state(&station->wpa2) !=
 	    WLAN_WPA2_STATE_AUTHORIZED ||
 	    !station->wpa2.connected_lifetime ||
@@ -1999,6 +2147,7 @@ wlan_station_test_begin_group_rekey(
 	station->wpa2.step_deadline_ticks = deadline_after(
 	    station_now_locked(station), WLAN_CONNECT_TRANSITION_TICKS);
 	station_sync_wpa_locked(station);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports that the rekey is under way. */
@@ -2024,6 +2173,8 @@ wlan_station_test_set_initial_phase(
 
 	/* Refuses a phase change once the link is past authentication. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Refuses a phase change once the link is past authentication. */
 	if ((wlan_wpa2_engine_state(&station->wpa2) !=
 	    WLAN_WPA2_STATE_AUTH_TX &&
 	    wlan_wpa2_engine_state(&station->wpa2) !=
@@ -2042,6 +2193,7 @@ wlan_station_test_set_initial_phase(
 	station->wpa2.step_deadline_ticks = deadline_after(
 	    station_now_locked(station), WLAN_CONNECT_TRANSITION_TICKS);
 	station_sync_wpa_locked(station);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports that the phase is in place. */
@@ -2068,6 +2220,8 @@ wlan_station_test_complete_authorized(
 
 	/* Derives the group generation from the pairwise one. */
 	group_generation = key_generation + 1U;
+
+	/* Refuses to authorize a link no connect attempt is driving. */
 
 	/* Refuses to authorize a link no connect attempt is driving. */
 	enabled = spin_lock_irqsave(&station->lock);
@@ -2101,6 +2255,7 @@ wlan_station_test_complete_authorized(
 	error = net_device_set_carrier(station->device, 1);
 	if (error != 0)
 		station->controlled_port = 0U;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports the failure. */
@@ -2127,6 +2282,8 @@ wlan_station_test_snapshot(
 
 	/* Copies the whole station state out under one lock hold. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Copies the whole station state out under one lock hold. */
 	memset(snapshot, 0, sizeof(*snapshot));
 	snapshot->connection_generation = station->connection_generation;
 	snapshot->connection_deadline = station->connection_deadline;
@@ -2163,6 +2320,7 @@ wlan_station_test_snapshot(
 	snapshot->connect_stop_pending = station->connect_stop_pending != 0;
 	snapshot->connect_retire_explicit =
 	    station->connect_retire_explicit != 0;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports the filled snapshot to the caller. */
@@ -2197,9 +2355,11 @@ wlan_station_test_transmit_eapol(
 
 	/* Samples the generation and deadline the frame belongs to. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	generation = station->connection_generation;
 	deadline = deadline_local(station_now_locked(station),
 	    WLAN_CONNECT_TRANSITION_TICKS, station->connection_deadline);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Sends the frame and releases what the transmit held. */
@@ -2425,6 +2585,8 @@ scan_profile_validate(
 				return EINVAL;
 			continue;
 		}
+
+		/* Rejects an unknown, mislabelled, or repeated channel. */
 		if (channel_frequency(channel->channel) == 0U ||
 		    channel->center_frequency_mhz !=
 		    channel_frequency(channel->channel) ||
@@ -2436,6 +2598,7 @@ scan_profile_validate(
 				return EINVAL;
 		}
 	}
+
 	return 0;
 }
 
@@ -2612,10 +2775,13 @@ station_wpa_deadline(
 
 	/* Derives the step deadline from the connection deadline. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	now = station_now_locked(station);
 	deadline = deadline_local(now, WLAN_CONNECT_TRANSITION_TICKS,
 	    station->connection_deadline);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	return deadline;
 }
 
@@ -2634,9 +2800,12 @@ station_wpa_cleanup_deadline(
 	 * absent.
 	 */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	deadline = deadline_after(station_now_locked(station),
 	    WLAN_CONNECT_TRANSITION_TICKS);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	return deadline;
 }
 
@@ -2745,24 +2914,26 @@ station_wpa_radio_start(
 	unsigned long enabled;
 	int error;
 
-	station = context;
-
 	/* The request must still describe the selected BSS and generation. */
+	station = context;
 	if (station == NULL ||
 	    bssid == NULL ||
 	    completion_ticks == NULL ||
 	    station->ops->connect_start == NULL)
 		return EOPNOTSUPP;
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (station->selected.channel != channel ||
 	    memcmp(station->selected.bssid, bssid, 6U) != 0) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ESTALE;
 	}
+
 	if (station->connection_generation != generation) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ESTALE;
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Starts the driver and records that a stop is now owed. */
@@ -2846,6 +3017,8 @@ station_wpa_transmit(
 			spin_unlock_irqrestore(&station->lock, enabled);
 			return ESTALE;
 		}
+
+		/* Takes the next packet number for a frame that will be protected. */
 		protected_frame = station->wpa2.pairwise_installed &&
 		    (station->wpa2.authorized || station->wpa2.pairwise_rekey);
 		if (protected_frame) {
@@ -2854,10 +3027,12 @@ station_wpa_transmit(
 				spin_unlock_irqrestore(&station->lock, enabled);
 				return EOVERFLOW;
 			}
+
 			station->transmit_packet_number++;
 			packet_number = station->transmit_packet_number;
 			key_generation = station->wpa2.key_generation;
 		}
+
 		spin_unlock_irqrestore(&station->lock, enabled);
 
 		/* Wraps the EAPOL payload in an Ethernet header and a data MPDU. */
@@ -2917,10 +3092,10 @@ station_wpa_association_set(
 		return EOPNOTSUPP;
 
 	/* Asks the radio to record the association. */
-	error = station->ops->association_set(station->radio_context,
-	    generation, bssid, aid, station_wpa_deadline(station));
 
 	/* Reports the failure. */
+	error = station->ops->association_set(station->radio_context,
+	    generation, bssid, aid, station_wpa_deadline(station));
 	if (error != 0)
 		return error;
 
@@ -2943,10 +3118,10 @@ station_wpa_association_clear(
 		return EOPNOTSUPP;
 
 	/* Asks the radio to drop the association. */
-	error = station->ops->association_clear(station->radio_context,
-	    generation, station_wpa_cleanup_deadline(station));
 
 	/* Reports the failure. */
+	error = station->ops->association_clear(station->radio_context,
+	    generation, station_wpa_cleanup_deadline(station));
 	if (error != 0)
 		return error;
 
@@ -2973,9 +3148,8 @@ station_wpa_key_install(
 	unsigned long enabled;
 	int error;
 
-	station = context;
-
 	/* Rejects an unsupported key description. */
+	station = context;
 	if (station == NULL || key == NULL || station->ops->key_install == NULL)
 		return EOPNOTSUPP;
 	if (generation == 0U ||
@@ -3020,8 +3194,10 @@ station_wpa_key_install(
 			station->l2_rx.group_packet_number[key_index] =
 			    receive_packet_number;
 		}
+
 		spin_unlock_irqrestore(&station->lock, enabled);
 	}
+
 	wlan_crypto_erase(&request, sizeof(request));
 
 	/* Reports the failure. */
@@ -3044,9 +3220,8 @@ station_wpa_keys_activate(
 	unsigned long enabled;
 	int error;
 
-	station = context;
-
 	/* Refuses to activate keys the caller did not fully name. */
+	station = context;
 	if (station == NULL ||
 	    pairwise_key_generation == 0U ||
 	    group_key_generation == 0U ||
@@ -3062,6 +3237,8 @@ station_wpa_keys_activate(
 
 	/* Publishes the new generations and resets the counters they own. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Publishes the new key generations and resets the counters they own. */
 	if (station->connection_generation != generation) {
 		error = ESTALE;
 	} else {
@@ -3072,12 +3249,15 @@ station_wpa_keys_activate(
 			station->l2_rx.pairwise_packet_number = 0U;
 			station->transmit_packet_number = 0U;
 		}
+
+		/* Publishes the staged group key and the sequence it starts from. */
 		station->l2_rx.group_key_generation[
 		    station->wpa2.pending_gtk_index] = group_key_generation;
 		station->l2_rx.group_packet_number[
 		    station->wpa2.pending_gtk_index] =
 		    station->wpa2.pending_group_receive_packet_number;
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports the failure. */
@@ -3119,6 +3299,8 @@ station_wpa_key_receive_pn_advance(
 
 	/* Reads the generation the receive path currently holds. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Advances the receive counter, unless keys_activate() will publish it. */
 	if (kind == WLAN_WPA2_KEY_PAIRWISE)
 		current_generation = station->l2_rx.pairwise_key_generation;
 	else
@@ -3147,6 +3329,7 @@ station_wpa_key_receive_pn_advance(
 		if (receive_packet_number > *floor)
 			*floor = receive_packet_number;
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports the failure. */
@@ -3171,9 +3354,8 @@ station_wpa_key_delete(
 	enum wlan_radio_key_kind radio_kind;
 	int error;
 
-	station = context;
-
 	/* Refuses the call when the radio offers no delete hook. */
+	station = context;
 	if (station == NULL || station->ops->key_delete == NULL)
 		return EOPNOTSUPP;
 
@@ -3191,11 +3373,11 @@ station_wpa_key_delete(
 		radio_kind = WLAN_RADIO_KEY_PAIRWISE;
 	else
 		radio_kind = WLAN_RADIO_KEY_GROUP;
+
+	/* Forgets the generation on the receive path once the radio has. */
 	error = station->ops->key_delete(station->radio_context, generation,
 	    radio_kind, key_index, key_generation,
 	    station_wpa_cleanup_deadline(station));
-
-	/* Forgets the generation on the receive path once the radio has. */
 	if (error == 0) {
 		enabled = spin_lock_irqsave(&station->lock);
 		if (kind == WLAN_WPA2_KEY_PAIRWISE &&
@@ -3208,6 +3390,7 @@ station_wpa_key_delete(
 			station->l2_rx.group_key_generation[key_index] = 0U;
 			station->l2_rx.group_packet_number[key_index] = 0U;
 		}
+
 		spin_unlock_irqrestore(&station->lock, enabled);
 	}
 
@@ -3230,14 +3413,14 @@ station_wpa_authorized_set(
 	unsigned long enabled;
 	int error;
 
-	station = context;
-
 	/* Rejects a call that names no station or no valid state. */
+	station = context;
 	if (station == NULL || (authorized != 0 && authorized != 1))
 		return EINVAL;
 
 	/* Ignores a request that belongs to an older connection. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (station->connection_generation != generation) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ESTALE;
@@ -3250,6 +3433,8 @@ station_wpa_authorized_set(
 			spin_unlock_irqrestore(&station->lock, enabled);
 			return EACCES;
 		}
+
+		/* Opens the controlled port by raising the carrier. */
 		error = net_device_set_carrier(station->device, 1);
 		if (error == 0) {
 			station->controlled_port = 1U;
@@ -3258,6 +3443,7 @@ station_wpa_authorized_set(
 	} else {
 		error = station_carrier_down_locked(station);
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports the failure. */
@@ -3278,9 +3464,8 @@ station_wpa_radio_stop(
 	unsigned long enabled;
 	int error;
 
-	station = context;
-
 	/* Refuses the call when the radio offers no disconnect hook. */
+	station = context;
 	if (station == NULL || station->ops->disconnect == NULL)
 		return EOPNOTSUPP;
 
@@ -3319,15 +3504,18 @@ station_link_lost_controlled(
 	if (reason <= 0)
 		return EINVAL;
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (!station->administrative_up ||
 	    station->connection_generation != generation) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ESTALE;
 	}
+
 	if (station->connect_retire_explicit) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ESTALE;
 	}
+
 	if (wlan_wpa2_engine_state(&station->wpa2) == WLAN_WPA2_STATE_IDLE) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ENOTCONN;
@@ -3343,11 +3531,15 @@ station_link_lost_controlled(
 	station->beacon_watch_deadline = 0U;
 	station->connect_stop_pending = 1;
 	station->connect_retry_deadline = 0U;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	error = wlan_wpa2_engine_stop(&station->wpa2);
 
 	/* Retires now, or leaves a stop pending for the timer. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Retires the connection, or leaves the retirement to a later retry. */
 	if (error == 0 && !station->connect_driver_active) {
 		station_finish_connection_retire_locked(station);
 	} else {
@@ -3355,9 +3547,12 @@ station_link_lost_controlled(
 		station->connect_retry_deadline = deadline_after(
 		    station_now_locked(station), 1U);
 	}
+
 	station->state = WLAN_STATE_FAILED;
 	station->terminal_error = reason;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	if (error != 0)
 		return error;
 	return carrier_error;
@@ -3376,6 +3571,7 @@ station_enter(
 
 	/* Refuses a station that is closing or otherwise unusable. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (!station->used || station->blocked || station->closing || station->stop_pending) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ENODEV;
@@ -3389,7 +3585,9 @@ station_enter(
 
 	/* Takes the reference and reports success. */
 	station->active++;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	return 0;
 }
 
@@ -3401,9 +3599,11 @@ station_leave(
 	unsigned long enabled;
 
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (station->active == 0U)
 		__builtin_trap();
 	station->active--;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 }
 
@@ -3438,16 +3638,21 @@ station_control_enter(
 					__builtin_trap();
 				station->test_control_waiters--;
 			}
+
 #endif
 			spin_unlock_irqrestore(&station->lock, enabled);
 			return;
 		}
+
 #ifdef WLAN_TESTING
 		if (!waiting) {
 			station->test_control_waiters++;
 			waiting = 1;
 		}
+
 #endif
+
+		/* Yields between attempts so the current owner can make progress. */
 		spin_unlock_irqrestore(&station->lock, enabled);
 		if (sched_yield != NULL)
 			sched_yield();
@@ -3464,9 +3669,11 @@ station_control_leave(
 	unsigned long enabled;
 
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (!station->control_inflight)
 		__builtin_trap();
 	station->control_inflight = 0U;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 }
 
@@ -3489,6 +3696,8 @@ station_find_enter(
 
 	/* Rechecks the slot under its own lock before admitting the caller. */
 	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
+
+	/* Takes a reference on the usable station this device owns. */
 	for (index = 0; index < NET_DEVICE_MAX; index++) {
 		station = &wlan_stations[index];
 		if (!station->used || station->device != device)
@@ -3509,9 +3718,11 @@ station_find_enter(
 		} else {
 			error = ENODEV;
 		}
+
 		spin_unlock_irqrestore(&station->lock, enabled);
 		break;
 	}
+
 	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
 
 	/* Reports the failure. */
@@ -3542,6 +3753,8 @@ station_index_enter(
 
 	/* Takes a reference on the station the index names. */
 	registry_enabled = spin_lock_irqsave(&wlan_registry_lock);
+
+	/* Takes a reference on the station the index names, if it is usable. */
 	station = &wlan_stations[index];
 	if (station->used) {
 		enabled = spin_lock_irqsave(&station->lock);
@@ -3555,8 +3768,10 @@ station_index_enter(
 				error = EOVERFLOW;
 			}
 		}
+
 		spin_unlock_irqrestore(&station->lock, enabled);
 	}
+
 	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
 
 	/* Reports the failure. */
@@ -3689,6 +3904,8 @@ cache_insert_locked(
 		station->staging[index].last_seen = now;
 		return 0;
 	}
+
+	/* Appends the entry while the cache still has room. */
 	incoming.bss = *bss;
 	incoming.bss.age_ms = 0U;
 	incoming.last_seen = now;
@@ -3704,6 +3921,8 @@ cache_insert_locked(
 		    &station->staging[worst]))
 			worst = index;
 	}
+
+	/* Replaces the worst entry, recording that something was dropped. */
 	if (!station->staging_truncated ||
 	    cache_entry_worse(&station->staging[worst], &incoming))
 		station->staging_truncated = 1U;
@@ -3731,6 +3950,7 @@ cache_sort_by_bssid(
 			entries[position] = entries[position - 1U];
 			position--;
 		}
+
 		entries[position] = value;
 	}
 }
@@ -3781,6 +4001,7 @@ station_select_bss_locked(
 			found = 1;
 		}
 	}
+
 	if (!found)
 		return ENOENT;
 	return 0;
@@ -3831,24 +4052,31 @@ ioctl_scan(
 			error = ENETDOWN;
 			goto output;
 		}
+
 		if (station->scan_state == WLAN_SCAN_RUNNING) {
 			error = 0;
 			goto output;
 		}
+
+		/* Refuses a scan while a connection or another scan owns the station. */
 		if (station->connect_driver_active ||
 		    (station->state != WLAN_STATE_IDLE &&
 		    station->state != WLAN_STATE_FAILED)) {
 			error = EBUSY;
 			goto output;
 		}
+
 		if (station->scan_driver_active) {
 			error = EBUSY;
 			goto output;
 		}
+
 		if (station->ops->scan_channel_start == NULL) {
 			error = EOPNOTSUPP;
 			goto output;
 		}
+
+		/* Arms a new scan generation for the timer to run. */
 		now = station_now_locked(station);
 		error = deadline_checked(now, scan_deadline_ticks(
 		    station->scan_profile.channel_count),
@@ -3887,10 +4115,13 @@ ioctl_scan(
 		error = 0;
 		goto output;
 	}
+
 	if (station->scan_state == WLAN_SCAN_RUNNING) {
 		station->scan_state = WLAN_SCAN_CANCELLED;
 		station->scan_error = ECANCELED;
 	}
+
+	/* Cancels the scan, leaving the driver stop to the timer when one is needed. */
 	station->scan_step_state = WLAN_SCAN_STEP_NONE;
 	station->scan_ready_pending = 0U;
 	station->scan_publish_pending = 0U;
@@ -3904,12 +4135,15 @@ ioctl_scan(
 		error = 0;
 		goto output;
 	}
+
 	station->scan_retry_deadline = station_now_locked(station);
 	wake_start = 1;
 	error = 0;
 output:
 	scan_request_output_locked(station, request);
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	station_control_leave(station);
 	if (wake_start)
 		wlan_worker_wakeup();
@@ -3936,6 +4170,8 @@ ioctl_scan_status(
 
 	/* Copies the scan state out under one lock hold. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Copies the scan state out under one lock hold. */
 	request->generation = station->snapshot_generation;
 	request->scan_generation = station->scan_generation;
 	request->cache_sequence = station->cache_sequence;
@@ -3948,6 +4184,7 @@ ioctl_scan_status(
 	request->result_count = station->snapshot_count;
 	request->truncated = station->snapshot_truncated;
 	memset(request->reserved, 0, sizeof(request->reserved));
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Reports the filled request to the caller. */
@@ -3988,21 +4225,27 @@ ioctl_bss(
 
 	/* The request must name the published snapshot and a valid index. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (request->generation != station->snapshot_generation) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ESTALE;
 	}
+
 	if (request->index >= station->snapshot_count) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return ENOENT;
 	}
+
+	/* Copies the entry out, with its age measured from now. */
 	request->bss = station->snapshot[request->index].bss;
 	request->bss.age_ms = entry_age_ms(station_now_locked(station),
 	    station->snapshot[request->index].last_seen);
 	memset(request->bss.reserved, 0, sizeof(request->bss.reserved));
 	request->reserved0 = 0U;
 	memset(request->reserved, 0, sizeof(request->reserved));
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	return 0;
 }
 
@@ -4034,19 +4277,24 @@ ioctl_connect(
 		error = EINVAL;
 		goto done;
 	}
+
 	station_control_enter(station);
 	control_entered = 1;
 
 	/* An idle station with a snapshot match starts a new generation. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (!station->administrative_up) {
 		error = ENETDOWN;
 		goto output_locked;
 	}
+
 	if (station->ops->connect_start == NULL) {
 		error = EOPNOTSUPP;
 		goto output_locked;
 	}
+
+	/* Refuses a connect while a scan or another connection owns the station. */
 	if (station->scan_driver_active ||
 	    station->connect_driver_active ||
 	    station->connect_start_pending ||
@@ -4056,6 +4304,8 @@ ioctl_connect(
 		error = EBUSY;
 		goto output_locked;
 	}
+
+	/* Picks the network to join and the deadline to reach it by. */
 	error = station_select_bss_locked(station, request->ssid,
 	    request->ssid_length, &selected);
 	if (error != 0)
@@ -4099,7 +4349,10 @@ output_locked:
 	request->state = station->state;
 	request->terminal_error = station->terminal_error;
 	memset(request->reserved, 0, sizeof(request->reserved));
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
+/* Releases the control gate and erases the passphrase everywhere. */
 done:
 	if (control_entered)
 		station_control_leave(station);
@@ -4139,6 +4392,8 @@ station_retire_controlled(
 
 	/* Cancels everything under the lock and notes what to stop. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Lowers the carrier and samples what still has to be stopped. */
 	if (!keep_administrative_up)
 		station->administrative_up = 0U;
 	station->connect_start_pending = 0;
@@ -4158,6 +4413,8 @@ station_retire_controlled(
 		station->scan_state = WLAN_SCAN_CANCELLED;
 		station->scan_error = ECANCELED;
 	}
+
+	/* Leaves the station down, or waiting to come back up. */
 	station->scan_step_state = WLAN_SCAN_STEP_NONE;
 	station->scan_ready_pending = 0U;
 	station->scan_publish_pending = 0U;
@@ -4172,6 +4429,7 @@ station_retire_controlled(
 	station->test_report_hook = NULL;
 	station->test_report_hook_context = NULL;
 #endif
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Stops the scan and the engine outside the lock. */
@@ -4182,10 +4440,13 @@ station_retire_controlled(
 			scan_error = station->ops->scan_stop(
 			    station->radio_context, scan_generation);
 	}
+
 	if (engine_stop_needed)
 		connection_error = wlan_wpa2_engine_stop(&station->wpa2);
 	enabled = spin_lock_irqsave(&station->lock);
+
 	connection_still_active = station->connect_driver_active;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/*
@@ -4205,18 +4466,23 @@ station_retire_controlled(
 			station->connect_driver_active = 0;
 			spin_unlock_irqrestore(&station->lock, enabled);
 		}
+
 		if (connection_error == 0)
 			connection_error = error;
 	}
 
 	/* Settles the final state and schedules retries for what failed. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Records how the scan stop went. */
 	if (scan_error == 0) {
 		station->scan_driver_active = 0;
 	} else if (scan_error != EBUSY) {
 		station->scan_state = WLAN_SCAN_FAILED;
 		station->scan_error = scan_error;
 	}
+
+	/* Retires the connection, or leaves the retirement to a later retry. */
 	if (connection_error == 0 && !station->connect_driver_active) {
 		station_finish_connection_retire_locked(station);
 	} else {
@@ -4224,6 +4490,8 @@ station_retire_controlled(
 		station->connect_retry_deadline = deadline_after(
 		    station_now_locked(station), 1U);
 	}
+
+	/* Reports the first failure of the three as the terminal error. */
 	if (scan_error != 0)
 		station->terminal_error = scan_error;
 	else if (connection_error != 0)
@@ -4236,6 +4504,8 @@ station_retire_controlled(
 		else
 			station->state = WLAN_STATE_DOWN;
 	}
+
+	/* Arms a retry for whichever stop did not complete. */
 	if (station->scan_driver_active && scan_error != 0)
 		station->scan_retry_deadline = deadline_after(
 		    station_now_locked(station), 1U);
@@ -4243,7 +4513,9 @@ station_retire_controlled(
 		station->scan_retry_deadline = 0U;
 	if (connection_error == 0 && !station->connect_driver_active)
 		station->connect_retry_deadline = 0U;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	if (scan_error != 0 || connection_error != 0 || carrier_error != 0)
 		wlan_worker_wakeup();
 
@@ -4292,6 +4564,8 @@ ioctl_disconnect(
 
 	/* The disconnect takes its own operation generation. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Takes the generation this disconnect runs under. */
 	error = station_generation_locked(station, &generation);
 	if (error != 0) {
 		request->generation = station->operation_generation;
@@ -4302,24 +4576,31 @@ ioctl_disconnect(
 		station_control_leave(station);
 		return error;
 	}
+
 	station->operation_generation = generation;
 	station->state = WLAN_STATE_DISCONNECTING;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Retires while keeping the station administratively up. */
 	error = station_retire_controlled(station, 1);
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Leaves an administratively up station idle, or failed. */
 	if (station->administrative_up) {
 		if (error == 0)
 			station->state = WLAN_STATE_IDLE;
 		else
 			station->state = WLAN_STATE_FAILED;
 	}
+
 	request->generation = generation;
 	request->state = station->state;
 	request->terminal_error = error;
 	memset(request->reserved, 0, sizeof(request->reserved));
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	station_control_leave(station);
 
 	/* Reports the failure. */
@@ -4340,12 +4621,14 @@ station_status_device(struct net_device *device, struct wlan_status_request *req
 
 	error = EOPNOTSUPP;
 	enabled = spin_lock_irqsave(&wlan_registry_lock);
+
 	for (index = 0U; index < NET_DEVICE_MAX; index++) {
 		if (wlan_stations[index].used && wlan_stations[index].device == device) {
 			error = ioctl_status(&wlan_stations[index], request);
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&wlan_registry_lock, enabled);
 
 	/* Reports the failure. */
@@ -4371,6 +4654,7 @@ ioctl_status(
 
 	/* Reports the generations the station currently holds. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	request->operation_generation = station->operation_generation;
 	request->scan_generation = station->scan_generation;
 	request->snapshot_generation = station->snapshot_generation;
@@ -4414,8 +4698,11 @@ ioctl_status(
 		request->administrative_up = 0U;
 		request->controlled_port = 0U;
 	}
+
 	memset(request->reserved, 0, sizeof(request->reserved));
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	return 0;
 }
 
@@ -4478,6 +4765,8 @@ station_scan_publish_locked(
 		station_scan_failed_locked(station, EOVERFLOW);
 		return EOVERFLOW;
 	}
+
+	/* Publishes the staged results as the snapshot callers read. */
 	memcpy(station->snapshot, station->staging,
 	    sizeof(station->snapshot));
 	station->snapshot_count = station->staging_count;
@@ -4508,6 +4797,7 @@ station_scan_stop_result(
 	uint64_t now;
 
 	enabled = spin_lock_irqsave(&station->lock);
+
 	now = station_now_locked(station);
 
 	/* A successful stop publishes a finished scan; a failed one retries. */
@@ -4522,6 +4812,7 @@ station_scan_stop_result(
 					(void)station_scan_publish_locked(station,
 					    generation);
 			}
+
 			station->scan_retry_deadline = 0U;
 		} else {
 			/* An asynchronous abort still in flight is retryable, not scan failure. */
@@ -4530,7 +4821,9 @@ station_scan_stop_result(
 			station->scan_retry_deadline = deadline_after(now, 1U);
 		}
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	if (error != 0)
 		wlan_worker_wakeup();
 }
@@ -4560,10 +4853,13 @@ station_connection_start(
 
 	/* Takes the pending selection and credential out of the station. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (!station->connect_start_pending) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		return;
 	}
+
+	/* Takes the connection parameters and moves the passphrase out of the station. */
 	station->connect_start_pending = 0;
 	generation = station->connection_generation;
 	deadline = station->connection_deadline;
@@ -4572,6 +4868,7 @@ station_connection_start(
 	memcpy(credential, station->credential, sizeof(credential));
 	secure_zero(station->credential, sizeof(station->credential));
 	station->credential_length = 0U;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* Builds the engine profile for the selected band. */
@@ -4590,6 +4887,8 @@ station_connection_start(
 		    sizeof(supported_rates_5));
 		profile.rate_count = sizeof(supported_rates_5);
 	}
+
+	/* Describes the association and starts the handshake engine. */
 	profile.channel = selected.channel;
 	profile.capability = WLAN_LOCAL_ASSOC_CAPABILITY;
 	if (selected.channel > 14U)
@@ -4607,6 +4906,8 @@ station_connection_start(
 
 	/* Publishes the engine state; an idle engine after a failure fails. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Publishes the engine state, failing the station if it never started. */
 	if (station->connection_generation == generation) {
 		station_sync_wpa_locked(station);
 		if (error != 0 && wlan_wpa2_engine_state(&station->wpa2) ==
@@ -4615,7 +4916,9 @@ station_connection_start(
 			station->terminal_error = error;
 		}
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	if (error != 0)
 		wlan_worker_wakeup();
 }
@@ -4640,6 +4943,7 @@ station_connection_timer(
 
 	/* A pending start runs first. */
 	enabled = spin_lock_irqsave(&station->lock);
+
 	if (station->connect_start_pending) {
 		spin_unlock_irqrestore(&station->lock, enabled);
 		station_connection_start(station);
@@ -4660,6 +4964,7 @@ station_connection_timer(
 		(void)error;
 		return;
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
 
 	/* A live engine runs its own timer. */
@@ -4683,6 +4988,8 @@ station_connection_timer(
 		    deadline_expired(now, station->connect_retry_deadline));
 		spin_unlock_irqrestore(&station->lock, enabled);
 	}
+
+	/* Stops a failed engine, arming a retry when the stop itself fails. */
 	if (wpa_state == WLAN_WPA2_STATE_FAILED && cleanup_due) {
 		error = wlan_wpa2_engine_stop(&station->wpa2);
 		enabled = spin_lock_irqsave(&station->lock);
@@ -4698,6 +5005,7 @@ station_connection_timer(
 			station->connect_retry_deadline = deadline_after(
 			    station_now_locked(station), 1U);
 		}
+
 		spin_unlock_irqrestore(&station->lock, enabled);
 		if (error != 0)
 			wlan_worker_wakeup();
@@ -4706,6 +5014,8 @@ station_connection_timer(
 
 	/* An idle engine with a driver still active owes the radio a stop. */
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Decides whether the driver stop is due on this pass. */
 	now = station_now_locked(station);
 	if (station->connect_stop_pending &&
 	    (station->connect_retry_deadline == 0U ||
@@ -4714,11 +5024,15 @@ station_connection_timer(
 		generation = station->connection_generation;
 		stop = 1;
 	}
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	if (stop)
 		error = station->ops->disconnect(station->radio_context,
 		    generation);
 	enabled = spin_lock_irqsave(&station->lock);
+
+	/* Records how the driver stop went, arming a retry on failure. */
 	now = station_now_locked(station);
 	if (stop && station->connection_generation == generation) {
 		if (error == 0) {
@@ -4731,6 +5045,8 @@ station_connection_timer(
 			station->connect_retry_deadline = deadline_after(now, 1U);
 		}
 	}
+
+	/* Retires the connection once nothing is left to stop. */
 	if (!station->connect_driver_active &&
 	    wlan_wpa2_engine_state(&station->wpa2) == WLAN_WPA2_STATE_IDLE &&
 	    station->connect_stop_pending)
@@ -4738,7 +5054,9 @@ station_connection_timer(
 	else if (!station->connect_driver_active &&
 	    !station->connect_stop_pending)
 		station->connect_retry_deadline = 0U;
+
 	spin_unlock_irqrestore(&station->lock, enabled);
+
 	if (error != 0)
 		wlan_worker_wakeup();
 }
@@ -4876,6 +5194,7 @@ station_scan_timer(
 			generation = station->scan_generation;
 			action = 3;
 		}
+
 		spin_unlock_irqrestore(&station->lock, enabled);
 
 		/* Advancing a completed dwell to NEED_TUNE is immediate. */

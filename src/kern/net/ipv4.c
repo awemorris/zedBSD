@@ -86,9 +86,8 @@ ipv4_output(
 {
 	int error;
 
-	error = ipv4_output_common(device, destination, protocol, 0, 0, 0, packet);
-
 	/* Reports why the send failed. */
+	error = ipv4_output_common(device, destination, protocol, 0, 0, 0, packet);
 	if (error != 0)
 		return error;
 
@@ -108,9 +107,8 @@ ipv4_output_wait(
 {
 	int error;
 
-	error = ipv4_output_common(device, destination, protocol, 0, 0, 1, packet);
-
 	/* Reports why the send failed. */
+	error = ipv4_output_common(device, destination, protocol, 0, 0, 1, packet);
 	if (error != 0)
 		return error;
 
@@ -140,10 +138,9 @@ ipv4_output_source(
 		return EINVAL;
 	}
 
+	/* Reports why the send failed. */
 	error = ipv4_output_common(device, destination, protocol, source, 1, 0,
 	    packet);
-
-	/* Reports why the send failed. */
 	if (error != 0)
 		return error;
 
@@ -166,9 +163,9 @@ ipv4_init(
 	next_identification = 0;
 
 	/* Receives IPv4 frames from Ethernet. */
-	error = ethernet_protocol_register(ETHERNET_TYPE_IPV4, ipv4_input);
 
 	/* Reports why the registration failed. */
+	error = ethernet_protocol_register(ETHERNET_TYPE_IPV4, ipv4_input);
 	if (error != 0)
 		return error;
 
@@ -261,6 +258,7 @@ ipv4_output_common(
 			route_release(&route);
 		return ENOBUFS;
 	}
+
 	memset(header, 0, sizeof(*header));
 	header->version_ihl = 0x45U;
 	total = (uint16_t)packet->length;
@@ -358,6 +356,7 @@ ipv4_input(
 		packet_buf_free(packet);
 		return EINVAL;
 	}
+
 	packet->l4_offset = (uint16_t)(packet->data - packet->storage);
 
 	/* Hands the payload to its protocol. */

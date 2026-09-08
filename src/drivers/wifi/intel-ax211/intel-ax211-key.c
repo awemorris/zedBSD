@@ -79,19 +79,19 @@ drv_intel_ax211_key_api89_validate(
 	/* Handles the table availability. */
 	if (table == NULL)
 		return INTEL_AX211_KEY_INVALID;
-	result = drv_intel_ax211_protocol_command_version_lookup(
-		table, INTEL_AX211_KEY_GROUP, INTEL_AX211_KEY_OPCODE, &version);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_protocol_command_version_lookup(
+		table, INTEL_AX211_KEY_GROUP, INTEL_AX211_KEY_OPCODE, &version);
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return INTEL_AX211_KEY_UNSUPPORTED;
 
 	/* Handles the version condition. */
 	if (version.command_version != INTEL_AX211_KEY_COMMAND_VERSION ||
-	    version.notification_version != INTEL_AX211_KEY_RESPONSE_VERSION)
-
+	    version.notification_version != INTEL_AX211_KEY_RESPONSE_VERSION) {
 		/* Returns the computed result. */
 		return INTEL_AX211_KEY_UNSUPPORTED;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_KEY_OK;
@@ -111,9 +111,9 @@ drv_intel_ax211_key_add_encode(
 	if (!ax211_key_request_valid(request) || output == NULL)
 		return INTEL_AX211_KEY_INVALID;
 	memset(output, 0, INTEL_AX211_KEY_COMMAND_SIZE);
-	flags = AX211_KEY_FLAG_CCMP;
 
 	/* Handles the request condition. */
+	flags = AX211_KEY_FLAG_CCMP;
 	if (request->kind == INTEL_AX211_KEY_GROUP_KEY)
 		flags |= AX211_KEY_FLAG_MULTICAST;
 	ax211_key_put_le32(output, AX211_KEY_ACTION_ADD);
@@ -145,14 +145,14 @@ drv_intel_ax211_key_remove_encode(
 	    key_generation == 0U || key_index >= INTEL_AX211_KEY_INDEX_LIMIT ||
 	    (kind != INTEL_AX211_KEY_PAIRWISE &&
 	     kind != INTEL_AX211_KEY_GROUP_KEY) ||
-	    (kind == INTEL_AX211_KEY_PAIRWISE && key_index != 0U))
-
+	    (kind == INTEL_AX211_KEY_PAIRWISE && key_index != 0U)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_KEY_INVALID;
+	}
 	memset(output, 0, INTEL_AX211_KEY_COMMAND_SIZE);
-	flags = AX211_KEY_FLAG_CCMP;
 
 	/* Handles the kind condition. */
+	flags = AX211_KEY_FLAG_CCMP;
 	if (kind == INTEL_AX211_KEY_GROUP_KEY)
 		flags |= AX211_KEY_FLAG_MULTICAST;
 	ax211_key_put_le32(output, AX211_KEY_ACTION_REMOVE);
@@ -194,10 +194,10 @@ drv_intel_ax211_key_state_init(
 {
 	/* Handles the state availability. */
 	if (state == NULL || hardware_epoch == 0U ||
-	    connection_generation == 0U)
-
+	    connection_generation == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_KEY_INVALID;
+	}
 	memset(state, 0, sizeof(*state));
 	state->hardware_epoch = hardware_epoch;
 	state->connection_generation = connection_generation;
@@ -222,17 +222,17 @@ drv_intel_ax211_key_state_installed(
 	/* Checks the ax211 key request valid result. */
 	if (!ax211_key_request_valid(request))
 		return INTEL_AX211_KEY_INVALID;
-	result = ax211_key_state_live(state, request->connection_generation,
-				      hardware_epoch);
 
 	/* Checks the operation result. */
+	result = ax211_key_state_live(state, request->connection_generation,
+				      hardware_epoch);
 	if (result != INTEL_AX211_KEY_OK)
 		return result;
+
+	/* Handles the slot condition. */
 	slot = request->kind == INTEL_AX211_KEY_PAIRWISE
 		       ? &state->staged_pairwise
 		       : &state->staged_group[request->key_index];
-
-	/* Handles the slot condition. */
 	if (*slot == request->key_generation)
 		return INTEL_AX211_KEY_DUPLICATE;
 
@@ -263,10 +263,10 @@ drv_intel_ax211_key_state_activate(
 	/* Handles the pairwise generation condition. */
 	if (pairwise_generation == 0U || group_generation == 0U)
 		return INTEL_AX211_KEY_INVALID;
-	result = ax211_key_state_live(state, connection_generation,
-				      hardware_epoch);
 
 	/* Checks the operation result. */
+	result = ax211_key_state_live(state, connection_generation,
+				      hardware_epoch);
 	if (result != INTEL_AX211_KEY_OK)
 		return result;
 
@@ -277,16 +277,16 @@ drv_intel_ax211_key_state_activate(
 		     group_index < INTEL_AX211_KEY_INDEX_LIMIT; group_index++) {
 			/* Handles the state condition. */
 			if (state->active_group[group_index] ==
-			    group_generation)
-
+			    group_generation) {
 				/* Returns the computed result. */
 				return INTEL_AX211_KEY_DUPLICATE;
+			}
 		}
 	}
-	pairwise_found = state->staged_pairwise == pairwise_generation ||
-			 state->active_pairwise == pairwise_generation;
 
 	/* Handles the pairwise found condition. */
+	pairwise_found = state->staged_pairwise == pairwise_generation ||
+			 state->active_pairwise == pairwise_generation;
 	if (!pairwise_found)
 		return INTEL_AX211_KEY_MISSING;
 	found = 0;
@@ -348,24 +348,24 @@ drv_intel_ax211_key_state_removed(
 	if (key_generation == 0U || key_index >= INTEL_AX211_KEY_INDEX_LIMIT ||
 	    (kind != INTEL_AX211_KEY_PAIRWISE &&
 	     kind != INTEL_AX211_KEY_GROUP_KEY) ||
-	    (kind == INTEL_AX211_KEY_PAIRWISE && key_index != 0U))
-
+	    (kind == INTEL_AX211_KEY_PAIRWISE && key_index != 0U)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_KEY_INVALID;
-	result = ax211_key_state_live(state, connection_generation,
-				      hardware_epoch);
+	}
 
 	/* Checks the operation result. */
+	result = ax211_key_state_live(state, connection_generation,
+				      hardware_epoch);
 	if (result != INTEL_AX211_KEY_OK)
 		return result;
 	staged = kind == INTEL_AX211_KEY_PAIRWISE
 			 ? &state->staged_pairwise
 			 : &state->staged_group[key_index];
+
+	/* Handles the staged condition. */
 	active = kind == INTEL_AX211_KEY_PAIRWISE
 			 ? &state->active_pairwise
 			 : &state->active_group[key_index];
-
-	/* Handles the staged condition. */
 	if (*staged != key_generation && *active != key_generation)
 		return INTEL_AX211_KEY_MISSING;
 
@@ -399,21 +399,21 @@ drv_intel_ax211_key_state_rx_generation(
 	    key_index >= INTEL_AX211_KEY_INDEX_LIMIT ||
 	    (kind != INTEL_AX211_KEY_PAIRWISE &&
 	     kind != INTEL_AX211_KEY_GROUP_KEY) ||
-	    (kind == INTEL_AX211_KEY_PAIRWISE && key_index != 0U))
-
+	    (kind == INTEL_AX211_KEY_PAIRWISE && key_index != 0U)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_KEY_INVALID;
-	result = ax211_key_state_live(state, connection_generation,
-				      hardware_epoch);
+	}
 
 	/* Checks the operation result. */
+	result = ax211_key_state_live(state, connection_generation,
+				      hardware_epoch);
 	if (result != INTEL_AX211_KEY_OK)
 		return result;
+
+	/* Handles the generation condition. */
 	generation = kind == INTEL_AX211_KEY_PAIRWISE
 			     ? state->active_pairwise
 			     : state->active_group[key_index];
-
-	/* Handles the generation condition. */
 	if (generation == 0U)
 		return INTEL_AX211_KEY_MISSING;
 	*key_generation = generation;
@@ -437,14 +437,14 @@ drv_intel_ax211_key_state_tx_validate(
 
 	/* Handles the key generation condition. */
 	if (key_generation == 0U || key_index != 0U || packet_number == 0U ||
-	    packet_number > AX211_KEY_PACKET_NUMBER_MAX)
-
+	    packet_number > AX211_KEY_PACKET_NUMBER_MAX) {
 		/* Returns the computed result. */
 		return INTEL_AX211_KEY_INVALID;
-	result = ax211_key_state_live(state, connection_generation,
-				      hardware_epoch);
+	}
 
 	/* Checks the operation result. */
+	result = ax211_key_state_live(state, connection_generation,
+				      hardware_epoch);
 	if (result != INTEL_AX211_KEY_OK)
 		return result;
 
@@ -466,10 +466,10 @@ ax211_key_request_valid(
 	    (request->kind != INTEL_AX211_KEY_PAIRWISE &&
 	     request->kind != INTEL_AX211_KEY_GROUP_KEY) ||
 	    (request->kind == INTEL_AX211_KEY_PAIRWISE &&
-	     request->key_index != 0U))
-
+	     request->key_index != 0U)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -509,17 +509,17 @@ ax211_key_state_live(
 {
 	/* Handles the state availability. */
 	if (state == NULL || !state->initialized || hardware_epoch == 0U ||
-	    connection_generation == 0U)
-
+	    connection_generation == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_KEY_INVALID;
+	}
 
 	/* Handles the state condition. */
 	if (state->hardware_epoch != hardware_epoch ||
-	    state->connection_generation != connection_generation)
-
+	    state->connection_generation != connection_generation) {
 		/* Returns the computed result. */
 		return INTEL_AX211_KEY_STALE;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_KEY_OK;

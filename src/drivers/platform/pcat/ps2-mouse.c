@@ -62,6 +62,26 @@ void ws018_input_hid_test_outb(uint16_t, uint8_t);
 
 static uint8_t inb(uint16_t port);
 
+/*
+ * Forward declaration.
+ */
+static void outb(uint16_t port, uint8_t value);
+static int wait_input_empty(void);
+static int write_command(uint8_t command);
+static int write_data(uint8_t value);
+static int read_output(uint8_t *value, int auxiliary);
+static void flush_output(void);
+static int read_config(uint8_t *configuration);
+static int write_config(uint8_t configuration);
+static int mouse_command(uint8_t command);
+static int consume_byte(uint8_t value, int32_t *dx, int32_t *dy, uint32_t *buttons);
+static void publish_sample(int32_t dx, int32_t dy, uint32_t buttons, uint32_t changed_buttons);
+static void mouse_interrupt(int interrupt, hal_irq_ack_t acknowledge, void *argument);
+static int mouse_start(void);
+static void mouse_stop(void);
+static int mouse_input_open(void *context);
+static void mouse_input_close(void *context);
+
 /* Supports the inb operation. */
 static uint8_t
 inb(
@@ -75,8 +95,6 @@ inb(
 	/* Returns the computed result. */
 	return function_result;
 }
-
-static void outb(uint16_t port, uint8_t value);
 
 /* Supports the outb operation. */
 static void
@@ -110,8 +128,6 @@ outb(
 }
 #endif
 
-static int wait_input_empty(void);
-
 /* Supports the wait input empty operation. */
 static int
 wait_input_empty(
@@ -131,8 +147,6 @@ wait_input_empty(
 	return ETIMEDOUT;
 }
 
-static int write_command(uint8_t command);
-
 /* Supports the write command operation. */
 static int
 write_command(
@@ -148,8 +162,6 @@ write_command(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int write_data(uint8_t value);
 
 /* Supports the write data operation. */
 static int
@@ -167,8 +179,6 @@ write_data(
 	return 0;
 }
 
-static int read_output(uint8_t *value, int auxiliary);
-
 /* Supports the read output operation. */
 static int
 read_output(
@@ -181,13 +191,11 @@ read_output(
 
 	/* Process each element required by the operation. */
 	for (spin = 0; spin < PS2_WAIT_LOOPS; spin++) {
-		status = inb(I8042_STATUS);
-
 		/* Checks the operation status. */
+		status = inb(I8042_STATUS);
 		if ((status & I8042_STATUS_OUTPUT) != 0) {
-			data = inb(I8042_DATA);
-
 			/* Checks the operation status. */
+			data = inb(I8042_DATA);
 			if (((status & I8042_STATUS_AUX) != 0) == auxiliary) {
 				*value = data;
 				/* Reports successful completion. */
@@ -200,14 +208,13 @@ read_output(
 			 * transactions are short, so at most a concurrently
 			 * typed scan code is lost. */
 		}
+
 		__asm__ volatile("pause");
 	}
 
 	/* Returns the computed result. */
 	return ETIMEDOUT;
 }
-
-static void flush_output(void);
 
 /* Supports the flush output operation. */
 static void
@@ -224,8 +231,6 @@ flush_output(
 		(void)inb(I8042_DATA);
 	}
 }
-
-static int read_config(uint8_t *configuration);
 
 /* Supports the read config operation. */
 static int
@@ -246,8 +251,6 @@ read_config(
 	return function_result;
 }
 
-static int write_config(uint8_t configuration);
-
 /* Supports the write config operation. */
 static int
 write_config(
@@ -267,8 +270,6 @@ write_config(
 	return function_result;
 }
 
-static int mouse_command(uint8_t command);
-
 /* Supports the mouse command operation. */
 static int
 mouse_command(
@@ -280,9 +281,8 @@ mouse_command(
 
 	/* Process each element required by the operation. */
 	for (attempt = 0; attempt < 3U; attempt++) {
-		error = write_command(I8042_WRITE_AUX);
-
 		/* Checks the operation status. */
+		error = write_command(I8042_WRITE_AUX);
 		if (error == 0)
 			error = write_data(command);
 
@@ -307,8 +307,6 @@ mouse_command(
 	return EIO;
 }
 
-static int consume_byte(uint8_t value, int32_t *dx, int32_t *dy, uint32_t *buttons);
-
 /* Supports the consume byte operation. */
 static int
 consume_byte(
@@ -328,9 +326,9 @@ consume_byte(
 	if (packet_index != 3U)
 		return 0;
 	packet_index = 0;
-	first = packet[0];
 
 	/* Handles the first condition. */
+	first = packet[0];
 	if ((first & 0xc0U) != 0)
 		return 0;
 	*dx = (int8_t)packet[1];
@@ -351,8 +349,6 @@ consume_byte(
 	/* Reports operation failure. */
 	return 1;
 }
-
-static void publish_sample(int32_t dx, int32_t dy, uint32_t buttons, uint32_t changed_buttons);
 
 /* Supports the publish sample operation. */
 static void
@@ -387,10 +383,9 @@ publish_sample(
 		drv_input_device_emit(mouse_input, EV_KEY, BTN_MIDDLE,
 				      (buttons & MOUSE_BUTTON_MIDDLE) != 0);
 	}
+
 	drv_input_device_emit(mouse_input, EV_SYN, SYN_REPORT, 0);
 }
-
-static void mouse_interrupt(int interrupt, hal_irq_ack_t acknowledge, void *argument);
 
 /* Supports the mouse interrupt operation. */
 static void
@@ -410,21 +405,20 @@ mouse_interrupt(
 	(void)interrupt;
 	(void)argument;
 	irq = spin_lock_irqsave(&controller_lock);
-	status = inb(I8042_STATUS);
 
 	/* Checks the operation status. */
+	status = inb(I8042_STATUS);
 	if ((status & (I8042_STATUS_OUTPUT | I8042_STATUS_AUX)) ==
 	    (I8042_STATUS_OUTPUT | I8042_STATUS_AUX)) {
 		value = inb(I8042_DATA);
+
+		/* Handles the complete condition. */
 		complete = mouse_active
 				   ? consume_byte(value, &dx, &dy, &buttons)
 				   : 0;
-
-		/* Handles the complete condition. */
 		if (complete) {
-			changed_buttons = buttons ^ last_buttons;
-
 			/* Handles the dx condition. */
+			changed_buttons = buttons ^ last_buttons;
 			if (dx != 0 || dy != 0 || changed_buttons != 0) {
 				last_buttons = buttons;
 				report = 1;
@@ -441,10 +435,9 @@ mouse_interrupt(
 	/* Handles the report condition. */
 	if (report)
 		publish_sample(dx, dy, buttons, changed_buttons);
+
 	spin_unlock_irqrestore(&controller_lock, irq);
 }
-
-static int mouse_start(void);
 
 /* Supports the mouse start operation. */
 static int
@@ -458,12 +451,13 @@ mouse_start(
 	/* Enables the auxiliary port with the interrupt held off. */
 	hal_irq_mask(PS2_MOUSE_IRQ);
 	irq = spin_lock_irqsave(&controller_lock);
+
 	mouse_active = 0;
 	packet_index = 0;
 	flush_output();
-	error = write_command(I8042_ENABLE_AUX);
 
 	/* Checks the operation status. */
+	error = write_command(I8042_ENABLE_AUX);
 	if (error == 0)
 		error = read_config(&configuration);
 
@@ -498,6 +492,7 @@ mouse_start(
 		if (error == ETIMEDOUT)
 			error = ENODEV;
 	}
+
 	spin_unlock_irqrestore(&controller_lock, irq);
 
 	/* Checks the operation status. */
@@ -512,8 +507,6 @@ mouse_start(
 	return 0;
 }
 
-static void mouse_stop(void);
-
 /* Supports the mouse stop operation. */
 static void
 mouse_stop(
@@ -524,6 +517,7 @@ mouse_stop(
 
 	hal_irq_mask(PS2_MOUSE_IRQ);
 	irq = spin_lock_irqsave(&controller_lock);
+
 	mouse_active = 0;
 	packet_index = 0;
 	(void)mouse_command(PS2_DISABLE_STREAM);
@@ -533,6 +527,7 @@ mouse_stop(
 		configuration &= (uint8_t)~I8042_CONFIG_AUX_IRQ;
 		(void)write_config(configuration);
 	}
+
 	(void)write_command(I8042_DISABLE_AUX);
 	flush_output();
 
@@ -541,10 +536,9 @@ mouse_stop(
 		publish_sample(0, 0, 0, last_buttons);
 		last_buttons = 0;
 	}
+
 	spin_unlock_irqrestore(&controller_lock, irq);
 }
-
-static int mouse_input_open(void *context);
 
 /* Supports the mouse input open operation. */
 static int
@@ -562,12 +556,12 @@ mouse_input_open(
 	} else if (reader_count != 0) {
 		reader_count++;
 	} else {
-		error = mouse_start();
-
 		/* Checks the operation status. */
+		error = mouse_start();
 		if (error == 0)
 			reader_count = 1;
 	}
+
 	mutex_unlock(&lifecycle_lock);
 
 	/* Reports the failure. */
@@ -577,8 +571,6 @@ mouse_input_open(
 	/* Succeeded. */
 	return 0;
 }
-
-static void mouse_input_close(void *context);
 
 /* Supports the mouse input close operation. */
 static void
@@ -591,6 +583,7 @@ mouse_input_close(
 	/* Handles the reader count condition. */
 	if (reader_count != 0 && --reader_count == 0)
 		mouse_stop();
+
 	mutex_unlock(&lifecycle_lock);
 }
 
@@ -627,9 +620,9 @@ drv_pcat_ps2_mouse_init(
 	/* Checks the hal irq set handler result. */
 	if (hal_irq_set_handler(PS2_MOUSE_IRQ, mouse_interrupt, NULL) != HAL_OK)
 		return EBUSY;
-	error = drv_input_device_register(&mouse_info, &mouse_input);
 
 	/* Checks the operation status. */
+	error = drv_input_device_register(&mouse_info, &mouse_input);
 	if (error != 0)
 		(void)hal_irq_set_handler(PS2_MOUSE_IRQ, NULL, NULL);
 

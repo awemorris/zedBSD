@@ -143,16 +143,15 @@ drv_input_capability_state_init(
 	if (state == NULL || (capability_count != 0 && capabilities == NULL) ||
 	    (absolute_axis_count != 0 && absolute_axes == NULL) ||
 	    capability_count > INPUT_CAPABILITY_COUNT_MAX ||
-	    absolute_axis_count > ABS_MAX + 1U)
-
+	    absolute_axis_count > ABS_MAX + 1U) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(state, 0, sizeof(*state));
 	/* Process each remaining element. */
 	for (i = 0; i < capability_count; i++) {
-		capability = &capabilities[i];
-
 		/* Checks the capability code valid result. */
+		capability = &capabilities[i];
 		if (!capability_code_valid(capability->type, capability->code))
 			return EINVAL;
 
@@ -169,40 +168,42 @@ drv_input_capability_state_init(
 		if (capability_bits_mutable(state, capability->type, &bits,
 					    &size) != 0 ||
 		    capability->code >= size * 8U ||
-		    bit_test(bits, capability->code))
-
+		    bit_test(bits, capability->code)) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 		bit_set(state->event_bits, capability->type);
 		bit_set(bits, capability->code);
 	}
+
 	/* Process each remaining element. */
 	for (i = 0; i < absolute_axis_count; i++) {
 		axis = &absolute_axes[i];
-		info = &axis->info;
 
 		/* Checks the bit test result. */
+		info = &axis->info;
 		if (axis->code > ABS_MAX ||
 		    !bit_test(state->abs_bits, axis->code) ||
 		    bit_test(state->abs_configured, axis->code) ||
 		    info->minimum > info->maximum ||
 		    info->value < info->minimum ||
 		    info->value > info->maximum || info->fuzz < 0 ||
-		    info->flat < 0 || info->resolution < 0)
-
+		    info->flat < 0 || info->resolution < 0) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 		state->abs_info[axis->code] = *info;
 		bit_set(state->abs_configured, axis->code);
 	}
+
 	/* Process each element required by the operation. */
 	for (i = 0; i <= ABS_MAX; i++) {
 		/* Checks the bit test result. */
 		if (bit_test(state->abs_bits, (unsigned)i) &&
-		    !bit_test(state->abs_configured, (unsigned)i))
-
+		    !bit_test(state->abs_configured, (unsigned)i)) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 	}
 
 	/* Checks the bit test result. */
@@ -237,6 +238,7 @@ drv_input_capability_bits(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	/* Dispatch the selected syntax or record type. */
 	switch (type) {
 	case EV_KEY:
@@ -301,10 +303,10 @@ drv_input_capability_copy(
 	/* Handles the source availability. */
 	if ((source_size != 0 && source == NULL) ||
 	    (capacity != 0 && destination == NULL) ||
-	    capacity > SIZE_MAX - offset)
-
+	    capacity > SIZE_MAX - offset) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	/* Process each element required by the operation. */
 	for (i = 0; i < capacity; i++) {
 		index = offset + i;
@@ -352,7 +354,7 @@ drv_input_capability_event(
 	uint16_t code,
 	int32_t value)
 {
-	int function_result;
+	int error;
 
 	/* Handles the state availability. */
 	if (state == NULL)
@@ -361,11 +363,11 @@ drv_input_capability_event(
 	/* Handles the type condition. */
 	if (type == EV_SYN) {
 		/* Computes the function result. */
-		function_result = code == SYN_REPORT && value == 0 &&
+		error = code == SYN_REPORT && value == 0 &&
 				  bit_test(state->event_bits, EV_SYN);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Checks the bit test result. */
@@ -571,7 +573,9 @@ producer_callback_enter(
 		/* Returns the computed result. */
 		return ENODEV;
 	}
+
 	device->producer_callbacks++;
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Reports successful completion. */
@@ -591,6 +595,7 @@ producer_callback_leave(
 	if (device->producer_callbacks != 0)
 		device->producer_callbacks--;
 	waitq_wake_all(&device->waitq);
+
 	spin_unlock_irqrestore(&device->lock, irq);
 }
 
@@ -613,14 +618,14 @@ input_open(
 	/* Checks the file status flags get result. */
 	if ((file_status_flags_get(file) & O_ACCMODE) == O_WRONLY)
 		return EACCES;
-	reader = kern_calloc(1, sizeof(*reader));
 
 	/* Handles the reader availability. */
+	reader = kern_calloc(1, sizeof(*reader));
 	if (reader == NULL)
 		return ENOMEM;
-	error = producer_callback_enter(device);
 
 	/* Checks the operation status. */
+	error = producer_callback_enter(device);
 	if (error != 0) {
 		kern_free(reader);
 
@@ -630,9 +635,8 @@ input_open(
 
 	/* Handles the open availability. */
 	if (device->open != NULL) {
-		error = device->open(device->context);
-
 		/* Checks the operation status. */
+		error = device->open(device->context);
 		if (error != 0) {
 			producer_callback_leave(device);
 			kern_free(reader);
@@ -641,6 +645,7 @@ input_open(
 			return error;
 		}
 	}
+
 	irq = spin_lock_irqsave(&device->lock);
 
 	/* Handles the device condition. */
@@ -652,6 +657,7 @@ input_open(
 		file->f_data = reader;
 		attached = 1;
 	}
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Keep the admission held through the compensating close. */
@@ -687,6 +693,7 @@ input_close(
 	if (device == NULL || reader == NULL)
 		return 0;
 	irq = spin_lock_irqsave(&device->lock);
+
 	/* Process each linked entry. */
 	for (link = &device->readers; *link != NULL; link = &(*link)->next) {
 		/* Handles the link condition. */
@@ -706,7 +713,9 @@ input_close(
 		device->producer_callbacks++;
 		close_producer = 1;
 	}
+
 	file->f_data = NULL;
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Handles the close producer condition. */
@@ -748,15 +757,15 @@ input_read(
 		return -EINVAL;
 	capacity = size / sizeof(struct input_event);
 	irq = spin_lock_irqsave(&device->lock);
+
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		/* Handles the grabber availability. */
 		if (device->grabber == NULL || device->grabber == reader) {
+			/* Checks the remaining item count. */
 			count = drv_input_queue_read(&device->queue,
 						     &reader->cursor, buffer,
 						     capacity);
-
-			/* Checks the remaining item count. */
 			if (count != 0) {
 				spin_unlock_irqrestore(&device->lock, irq);
 
@@ -785,11 +794,12 @@ input_read(
 			/* Returns the computed result. */
 			return -EAGAIN;
 		}
+
 		sequence = waitq_sequence(&device->waitq);
-		error = waitq_sleep(&device->waitq, &device->lock, sequence, 0,
-				    WAITQ_INTERRUPTIBLE);
 
 		/* Checks the operation status. */
+		error = waitq_sleep(&device->waitq, &device->lock, sequence, 0,
+				    WAITQ_INTERRUPTIBLE);
 		if (error == EINTR) {
 			spin_unlock_irqrestore(&device->lock, irq);
 
@@ -823,6 +833,7 @@ input_poll(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	irq = spin_lock_irqsave(&device->lock);
 
 	/* Checks the drv input queue readable result. */
@@ -833,7 +844,9 @@ input_poll(
 	/* Handles the device condition. */
 	if (!device->registered)
 		result |= POLLHUP;
+
 	spin_unlock_irqrestore(&device->lock, irq);
+
 	*returned = result;
 	/* Reports successful completion. */
 	return 0;
@@ -848,7 +861,7 @@ copy_text(
 	unsigned long request,
 	uintptr_t argument)
 {
-	int function_result;
+	int error;
 	size_t capacity = (request >> 16) & 0x1fffU;
 	size_t length = strlen(text) + 1U;
 
@@ -861,10 +874,10 @@ copy_text(
 		length = capacity;
 
 	/* Obtains the copyout result. */
-	function_result = copyout(text, argument, length);
+	error = copyout(text, argument, length);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static size_t ioctl_size(unsigned long request);
@@ -895,15 +908,14 @@ copy_bits(
 
 	/* Continue while the operation condition remains true. */
 	while (copied < capacity) {
-		count = capacity - copied;
-
 		/* Checks the remaining item count. */
+		count = capacity - copied;
 		if (count > sizeof(output))
 			count = sizeof(output);
-		error = drv_input_capability_copy(bits, bit_size, copied,
-						  output, count);
 
 		/* Checks the operation status. */
+		error = drv_input_capability_copy(bits, bit_size, copied,
+						  output, count);
 		if (error == 0)
 			error = user_address_add(argument, copied, &address);
 
@@ -957,23 +969,25 @@ copy_key_state(
 	size_t capacity,
 	uintptr_t argument)
 {
-	int function_result;
+	int error;
 	uint8_t snapshot[INPUT_KEY_BITS_SIZE];
 	const uint8_t *bits;
 	size_t size;
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&device->lock);
+
 	(void)drv_input_capability_key_state(&device->capability_state, &bits,
 					     &size);
 	memcpy(snapshot, bits, sizeof(snapshot));
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Obtains the copy bits result. */
-	function_result = copy_bits(snapshot, size, capacity, argument);
+	error = copy_bits(snapshot, size, capacity, argument);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int copy_abs_info(struct input_device *device, unsigned axis, uintptr_t argument);
@@ -991,8 +1005,10 @@ copy_abs_info(
 	int error;
 
 	irq = spin_lock_irqsave(&device->lock);
+
 	error = drv_input_capability_abs_info(&device->capability_state, axis,
 					      &info);
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Checks the operation status. */
@@ -1156,8 +1172,10 @@ input_ioctl(
 					device->queue.next_sequence;
 			}
 		}
+
 		waitq_wake_all(&device->waitq);
 	}
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Checks the operation status. */
@@ -1242,13 +1260,13 @@ drv_input_device_register(
 	     ~(INPUT_DEVICE_KEY_MOMENTARY | INPUT_DEVICE_KEY_REPEAT)) != 0 ||
 	    (info->flags &
 	     (INPUT_DEVICE_KEY_MOMENTARY | INPUT_DEVICE_KEY_REPEAT)) ==
-		    (INPUT_DEVICE_KEY_MOMENTARY | INPUT_DEVICE_KEY_REPEAT))
-
+		    (INPUT_DEVICE_KEY_MOMENTARY | INPUT_DEVICE_KEY_REPEAT)) {
 		/* Returns the computed result. */
 		return EINVAL;
-	device = kern_calloc(1, sizeof(*device));
+	}
 
 	/* Handles the device availability. */
+	device = kern_calloc(1, sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
 	refcount_init(&device->refs, 1);
@@ -1263,19 +1281,21 @@ drv_input_device_register(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	device->id = info->id;
+
+	/* Checks the operation status. */
 	error = drv_input_capability_state_init(
 		&device->capability_state, info->capabilities,
 		info->capability_count, info->absolute_axes,
 		info->absolute_axis_count);
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		kern_free(device);
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	device->open = info->open;
 	device->close = info->close;
 	device->context = info->context;
@@ -1286,6 +1306,7 @@ drv_input_device_register(
 	waitq_init(&device->waitq, "input event");
 	drv_input_queue_init(&device->queue);
 	irq = spin_lock_irqsave(&registry_lock);
+
 	/* Process each element required by the operation. */
 	for (slot = 0; slot < INPUT_DEVICE_MAX; slot++) {
 		/* Handles the input device reserved condition. */
@@ -1301,9 +1322,12 @@ drv_input_device_register(
 		/* Returns the computed result. */
 		return ENOSPC;
 	}
+
 	input_device_reserved[slot] = device;
 	device->number = slot;
+
 	spin_unlock_irqrestore(&registry_lock, irq);
+
 	(void)snprintf(node, sizeof(node), "event%u", device->number);
 
 	/* Gives the future cdev finalizer its device-lifetime reference. */
@@ -1311,11 +1335,11 @@ drv_input_device_register(
 
 	/* Managed publication exposes only completely initialized state. */
 	device->registered = 1;
+
+	/* Checks the operation status. */
 	error = cdev_register_managed(
 		node, (dev_t)(0x00030000U + device->number), &input_ops, device,
 		input_cdev_finalize, &device->cdev);
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		device->registered = 0;
 		input_device_release(device);
@@ -1324,6 +1348,7 @@ drv_input_device_register(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	*result = device;
 	hal_printf("input: /dev/input/%s: %s\n", node, device->name);
 
@@ -1391,6 +1416,7 @@ drv_input_device_unregister(
 		/* Returns the computed result. */
 		return;
 	}
+
 	device->retiring = 1;
 	/* Continue while the operation condition remains true. */
 	while (device->producer_callbacks != 0) {
@@ -1399,6 +1425,7 @@ drv_input_device_unregister(
 		(void)waitq_sleep(&device->waitq, &device->lock,
 				  sequence_local1, 0, 0);
 	}
+
 	/* Process each linked entry. */
 	for (reader = device->readers; reader != NULL; reader = reader->next) {
 		/* Handles the reader condition. */
@@ -1407,7 +1434,9 @@ drv_input_device_unregister(
 			close_count++;
 		}
 	}
+
 	spin_unlock_irqrestore(&device->lock, irq);
+
 	/* Process each remaining element. */
 	while (close_count != 0) {
 		device->close(device->context);
@@ -1418,8 +1447,10 @@ drv_input_device_unregister(
  * Removes the pathname before publishing terminal events to stale fds.
 	 */
 	irq = spin_lock_irqsave(&device->lock);
+
 	publication = device->cdev;
 	device->cdev = NULL;
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Handles the publication availability. */
@@ -1430,6 +1461,7 @@ drv_input_device_unregister(
 	milliseconds = clock_milliseconds(NULL);
 	publication_irq = spin_lock_irqsave(&device->publication_lock);
 	irq = spin_lock_irqsave(&device->lock);
+
 	was_resyncing = device->resyncing;
 	device->resyncing = 0;
 	memcpy(held, device->capability_state.key_state, sizeof(held));
@@ -1441,6 +1473,7 @@ drv_input_device_unregister(
 		event_local.code = SYN_DROPPED;
 		drv_input_queue_push(&device->queue, &event_local);
 	}
+
 	/* Process each element required by the operation. */
 	for (code = 0; code <= KEY_MAX; code++) {
 		/* Handles the held condition. */
@@ -1464,9 +1497,11 @@ drv_input_device_unregister(
 		event_local3.code = SYN_REPORT;
 		drv_input_queue_push(&device->queue, &event_local3);
 	}
+
 	device->registered = 0;
 	drv_input_queue_detach(&device->queue);
 	waitq_wake_all(&device->waitq);
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Handles the was resyncing condition. */
@@ -1484,6 +1519,7 @@ drv_input_device_unregister(
 				drv_input_subscriber_publish(&report);
 				report_init(&report, device);
 			}
+
 			report_event(&report, milliseconds, EV_KEY,
 				     (uint16_t)code, 0, NULL);
 		}
@@ -1495,6 +1531,7 @@ drv_input_device_unregister(
 				drv_input_subscriber_publish(&report);
 				report_init(&report, device);
 			}
+
 			report_event(&report, milliseconds, EV_SYN, SYN_REPORT,
 				     0, NULL);
 		}
@@ -1503,14 +1540,18 @@ drv_input_device_unregister(
 		if (report.event_count != 0)
 			drv_input_subscriber_publish(&report);
 	}
+
 	report_init(&report, device);
 	report.flags = INPUT_REPORT_DETACH;
 	drv_input_subscriber_publish(&report);
+
 	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
+
 	poll_notify();
 
 	/* DETACH and every transferred producer close are now terminal. */
 	irq = spin_lock_irqsave(&device->lock);
+
 	device->retiring = 0;
 
 	/* Handles the device condition. */
@@ -1518,7 +1559,9 @@ drv_input_device_unregister(
 		device->owner_released = 1;
 		drop_owner = 1;
 	}
+
 	waitq_wake_all(&device->waitq);
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/*
@@ -1565,12 +1608,14 @@ drv_input_device_emit(
 		waitq_wake_all(&device->waitq);
 		published = 1;
 	}
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Handles the published condition. */
 	if (published) {
 		drv_input_subscriber_publish(&report);
 	}
+
 	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 
 	/* Handles the published condition. */
@@ -1600,6 +1645,7 @@ input_device_resync_begin(
 		device->resyncing = 1;
 		published = 1;
 	}
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Handles the published condition. */
@@ -1614,6 +1660,7 @@ input_device_resync_begin(
 					: 0U);
 		drv_input_subscriber_publish(&report);
 	}
+
 	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 }
 
@@ -1658,11 +1705,13 @@ input_device_resync_snapshot(
 			published = 1;
 		}
 	}
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Handles the published condition. */
 	if (published)
 		drv_input_subscriber_publish(&report);
+
 	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 }
 
@@ -1697,6 +1746,7 @@ input_device_resync_end(
 		waitq_wake_all(&device->waitq);
 		published = 1;
 	}
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Handles the published condition. */
@@ -1705,6 +1755,7 @@ input_device_resync_end(
 		report.flags = INPUT_REPORT_RESYNC_END;
 		drv_input_subscriber_publish(&report);
 	}
+
 	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 
 	/* Handles the published condition. */
@@ -1729,10 +1780,10 @@ drv_input_device_emit_key_event(
 
 	/* Handles the device availability. */
 	if (device == NULL || key_event == NULL ||
-	    key_event->symbol[HAL_KEY_SYMBOL_SIZE - 1U] != '\0')
-
+	    key_event->symbol[HAL_KEY_SYMBOL_SIZE - 1U] != '\0') {
 		/* Returns the computed result. */
 		return;
+	}
 
 	/* Handles the key event condition. */
 	if ((key_event->flags &
@@ -1775,19 +1826,19 @@ drv_input_device_emit_key_event(
 
 		/* Returns the computed result. */
 		return;
-	momentary = (device->flags & INPUT_DEVICE_KEY_MOMENTARY) != 0;
 
 	/* Handles the momentary condition. */
+	momentary = (device->flags & INPUT_DEVICE_KEY_MOMENTARY) != 0;
 	if ((momentary && value != 1) ||
-	    (value == 2 && (device->flags & INPUT_DEVICE_KEY_REPEAT) == 0))
-
+	    (value == 2 && (device->flags & INPUT_DEVICE_KEY_REPEAT) == 0)) {
 		/* Returns the computed result. */
 		return;
+	}
 	code = drv_input_key_from_symbol(key_event->symbol);
-	logical_only = code == KEY_RESERVED &&
-		       drv_input_key_symbol_supported(key_event->symbol);
 
 	/* Handles the code condition. */
+	logical_only = code == KEY_RESERVED &&
+		       drv_input_key_symbol_supported(key_event->symbol);
 	if (code == KEY_RESERVED && !logical_only)
 		return;
 	milliseconds = clock_milliseconds(NULL);
@@ -1800,6 +1851,7 @@ drv_input_device_emit_key_event(
 		release.flags = HAL_KEY_EVENT_RELEASE;
 		report_event(&report, milliseconds, EV_KEY, code, 0, &release);
 	}
+
 	report_event(&report, milliseconds, EV_SYN, SYN_REPORT, 0, NULL);
 
 	publication_irq = spin_lock_irqsave(&device->publication_lock);
@@ -1823,6 +1875,7 @@ drv_input_device_emit_key_event(
 				drv_input_queue_push(&device->queue,
 						     &report.events[1].event);
 			}
+
 			drv_input_queue_push(
 				&device->queue,
 				&report.events[report.event_count - 1U].event);
@@ -1830,12 +1883,14 @@ drv_input_device_emit_key_event(
 			published = 1;
 		}
 	}
+
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/* Handles the published condition. */
 	if (published) {
 		drv_input_subscriber_publish(&report);
 	}
+
 	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 
 	/* Handles the published condition. */
@@ -1848,13 +1903,13 @@ static int
 input_device_tryref(
 	struct input_device *device)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = device != NULL && refcount_tryget(&device->refs);
+	error = device != NULL && refcount_tryget(&device->refs);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Retains one input generation for an owned subsystem reference. */
@@ -1884,6 +1939,7 @@ input_device_release(
 	if (device->number < INPUT_DEVICE_MAX &&
 	    input_device_reserved[device->number] == device)
 		input_device_reserved[device->number] = NULL;
+
 	spin_unlock_irqrestore(&registry_lock, irq);
 
 	kern_free(device);
@@ -2123,6 +2179,7 @@ drv_input_key_from_symbol(
 			if (value == shifted_digits[index_for])
 				return digit_codes[index_for];
 		}
+
 		/* Dispatch the selected operation case. */
 		switch (value) {
 		case ' ':
@@ -2176,9 +2233,9 @@ drv_input_key_from_symbol(
 			break;
 		}
 	}
-	number = function_number(symbol);
 
 	/* Handles the number condition. */
+	number = function_number(symbol);
 	if (number != 0)
 		return (uint16_t)(KEY_F1 + number - 1);
 	entry = find_symbol(symbol);
@@ -2194,7 +2251,7 @@ int
 drv_input_key_symbol_supported(
 	const char *symbol)
 {
-	int function_result;
+	int error;
 
 	/* Handles the symbol availability. */
 	if (symbol == NULL || symbol[0] == '\0')
@@ -2205,11 +2262,11 @@ drv_input_key_symbol_supported(
 		return 1;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		function_number(symbol) != 0 || find_symbol(symbol) != NULL;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -2276,6 +2333,7 @@ drv_input_keymap_event_from_code(
 				break;
 			}
 		}
+
 		symbol = entry != NULL ? entry->name : NULL;
 	}
 
@@ -2339,20 +2397,20 @@ drv_input_keymap_translate(
 
 	/* Handles the state availability. */
 	if (state == NULL || event == NULL || result == NULL ||
-	    event->symbol[HAL_KEY_SYMBOL_SIZE - 1U] != '\0')
-
+	    event->symbol[HAL_KEY_SYMBOL_SIZE - 1U] != '\0') {
 		/* Reports successful completion. */
 		return 0;
+	}
 	release = (event->flags & HAL_KEY_EVENT_RELEASE) != 0;
 	press = (event->flags & HAL_KEY_EVENT_PRESS) != 0;
 
 	/* Handles the event condition. */
 	if (event->flags != HAL_KEY_EVENT_PRESS &&
 	    event->flags != HAL_KEY_EVENT_RELEASE &&
-	    event->flags != HAL_KEY_EVENT_REPEAT)
-
+	    event->flags != HAL_KEY_EVENT_REPEAT) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	update_modifier(state, event->symbol, !release, press);
 	shift = state->left_shift || state->right_shift;
 	control = state->left_control || state->right_control;
@@ -2360,9 +2418,8 @@ drv_input_keymap_translate(
 
 	/* Handles the event condition. */
 	if (event->symbol[0] != '\0' && event->symbol[1] == '\0') {
-		value = event->symbol[0];
-
 		/* Validates the current value. */
+		value = event->symbol[0];
 		if (value >= 'a' && value <= 'z' && (shift ^ state->caps_lock))
 			value = (char)(value - 'a' + 'A');
 		else if (value >= '0' && value <= '9' && shift)
@@ -2551,6 +2608,7 @@ drv_input_subscribe(
 	if (subscription == NULL || callback == NULL)
 		return EINVAL;
 	irq = spin_lock_irqsave(&subscriber_lock);
+
 	/* Process each remaining element. */
 	for (index = 0; index < INPUT_SUBSCRIBER_MAX; index++) {
 		/* Handles the subscribers condition. */
@@ -2561,6 +2619,7 @@ drv_input_subscribe(
 			return EBUSY;
 		}
 	}
+
 	/* Process each remaining element. */
 	for (index = 0; index < INPUT_SUBSCRIBER_MAX; index++) {
 		/* Handles the subscribers condition. */
@@ -2575,10 +2634,12 @@ drv_input_subscribe(
 		/* Returns the computed result. */
 		return ENOSPC;
 	}
+
 	subscription->callback = callback;
 	subscription->context = context;
 	subscription->registered = 1;
 	subscribers[index] = subscription;
+
 	spin_unlock_irqrestore(&subscriber_lock, irq);
 
 	/* Reports successful completion. */
@@ -2599,6 +2660,7 @@ drv_input_unsubscribe(
 	if (subscription == NULL)
 		return;
 	irq = spin_lock_irqsave(&subscriber_lock);
+
 	/* Process each remaining element. */
 	for (index = 0; index < INPUT_SUBSCRIBER_MAX; index++) {
 		/* Handles the subscribers condition. */
@@ -2607,9 +2669,11 @@ drv_input_unsubscribe(
 			break;
 		}
 	}
+
 	subscription->registered = 0;
 	subscription->callback = NULL;
 	subscription->context = NULL;
+
 	spin_unlock_irqrestore(&subscriber_lock, irq);
 }
 
@@ -2628,14 +2692,15 @@ drv_input_subscriber_publish(
 	if (report == NULL)
 		return;
 	irq = spin_lock_irqsave(&subscriber_lock);
+
 	/* Process each remaining element. */
 	for (index = 0; index < INPUT_SUBSCRIBER_MAX; index++) {
-		subscription = subscribers[index];
-
 		/* Handles the subscription availability. */
+		subscription = subscribers[index];
 		if (subscription != NULL && subscription->registered)
 			subscription->callback(subscription->context, report);
 	}
+
 	spin_unlock_irqrestore(&subscriber_lock, irq);
 }
 /* End consolidated input-subscriber.c. */

@@ -72,10 +72,12 @@ socket_family_register(
 
 	/* Installs the operations unless the family is taken. */
 	irq = spin_lock_irqsave(&socket_registry_lock);
+
 	if (families[family] != NULL)
 		error = EEXIST;
 	else
 		families[family] = ops;
+
 	spin_unlock_irqrestore(&socket_registry_lock, irq);
 
 	/* Reports why the registration failed. */
@@ -144,8 +146,11 @@ socket_create(
 
 	/* Looks the family up. */
 	irq = spin_lock_irqsave(&socket_registry_lock);
+
 	family_ops = families[family];
+
 	spin_unlock_irqrestore(&socket_registry_lock, irq);
+
 	if (family_ops == NULL)
 		return EAFNOSUPPORT;
 
@@ -252,10 +257,12 @@ socket_setsockopt_common(
 
 	/* Records the timeout. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (option == SO_RCVTIMEO)
 		socket->receive_timeout_ticks = ticks;
 	else
 		socket->send_timeout_ticks = ticks;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Reports the set timeout. */
@@ -354,11 +361,14 @@ socket_getsockopt_common(
 	if (value == NULL || length == NULL || *length < sizeof(timeout))
 		return EINVAL;
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (option == SO_RCVTIMEO)
 		ticks = socket->receive_timeout_ticks;
 	else
 		ticks = socket->send_timeout_ticks;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	timeout.tv_sec = (time_t)(ticks / KERN_CLOCK_HZ);
 	timeout.tv_usec = (long)((ticks % KERN_CLOCK_HZ) *
 	    (1000000U / KERN_CLOCK_HZ));
@@ -385,8 +395,10 @@ socket_take_error(
 
 	/* Takes the error under the lock. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	error = socket->error;
 	socket->error = 0;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Reports the taken error. */
@@ -415,6 +427,7 @@ socket_set_error(
 
 	/* Keeps the first error and wakes everyone. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (socket->error == 0)
 		socket->error = error;
 	waitq_wake_all(&socket->receive_waitq);
@@ -422,7 +435,9 @@ socket_set_error(
 	waitq_wake_all(&socket->send_waitq);
 	waitq_wake_all(&socket->connect_waitq);
 	waitq_wake_all(&socket->accept_waitq);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	poll_notify();
 }
 
@@ -481,6 +496,7 @@ socket_close_endpoint(
 
 	/* Only the first closer moves the socket out of the open state. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (socket->lifecycle == SOCKET_OPEN) {
 		socket->lifecycle = SOCKET_CLOSING;
 		socket->read_shutdown = 1;
@@ -492,18 +508,23 @@ socket_close_endpoint(
 		waitq_wake_all(&socket->accept_waitq);
 		close = 1;
 	}
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	if (!close)
 		return;
 
 	/* Closes the endpoint, then publishes the closed state. */
 	socket->ops->endpoint_close(socket);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	socket->lifecycle = SOCKET_CLOSED;
 	waitq_wake_all(&socket->receive_waitq);
 	waitq_wake_all(&socket->receive_space_waitq);
 	waitq_wake_all(&socket->send_waitq);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	poll_notify();
 }
 
@@ -527,6 +548,7 @@ socket_release(
 	/* Closes the endpoint and detaches the receive queue. */
 	socket_close_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (socket->lifecycle == SOCKET_OPEN)
 		socket->lifecycle = SOCKET_CLOSING;
 	packets = socket->receive_head;
@@ -539,7 +561,9 @@ socket_release(
 	waitq_wake_all(&socket->send_waitq);
 	waitq_wake_all(&socket->connect_waitq);
 	waitq_wake_all(&socket->accept_waitq);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	poll_notify();
 
 	/* Frees the queued packets. */
@@ -594,6 +618,7 @@ socket_enqueue_packet(
 
 	/* Drops the packet when the socket is closed or the queue is full. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (socket->lifecycle != SOCKET_OPEN ||
 	    (socket->receive_packet_limit != 0 &&
 	    socket->receive_packets >= socket->receive_packet_limit) ||
@@ -618,7 +643,9 @@ socket_enqueue_packet(
 	socket->receive_packets++;
 	socket->receive_bytes += packet->length;
 	waitq_wake_one(&socket->receive_waitq);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	poll_notify();
 
 	/* Reports the queued packet. */
@@ -662,6 +689,7 @@ socket_enqueue_packet_wait(
 
 	/* Queues the packet as soon as it fits. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	for (;;) {
 		full = 0;
 		if ((socket->receive_packet_limit != 0 &&
@@ -696,6 +724,7 @@ socket_enqueue_packet_wait(
 			error = EAGAIN;
 			break;
 		}
+
 		if (deadline != 0 && sched_ticks() >= deadline) {
 			error = EAGAIN;
 			break;
@@ -710,6 +739,7 @@ socket_enqueue_packet_wait(
 		if (error != 0)
 			break;
 	}
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Frees an unqueued packet, or announces the queued one. */
@@ -746,6 +776,7 @@ socket_requeue_packet_front(
 
 	/* A closed socket takes nothing back. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (socket->lifecycle != SOCKET_OPEN) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		packet_buf_free(packet);
@@ -760,7 +791,9 @@ socket_requeue_packet_front(
 	socket->receive_packets++;
 	socket->receive_bytes += packet->length;
 	waitq_wake_one(&socket->receive_waitq);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	poll_notify();
 
 	/* Reports the requeued packet. */
@@ -784,14 +817,14 @@ socket_dequeue_packet(
 	unsigned long irq;
 	int error;
 
-	deadline = 0;
-
 	/* Rejects a missing socket or result, or unknown flags. */
+	deadline = 0;
 	if (socket == NULL || result == NULL || (flags & ~MSG_DONTWAIT) != 0)
 		return EINVAL;
 
 	/* Converts the receive timeout to a deadline. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (socket->receive_timeout_ticks != 0 &&
 	    syscall_restart_deadline_after(socket->receive_timeout_ticks,
 	    &deadline) != 0) {
@@ -807,14 +840,17 @@ socket_dequeue_packet(
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return error;
 		}
+
 		if (socket->lifecycle != SOCKET_OPEN) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EPIPE;
 		}
+
 		if ((flags & MSG_DONTWAIT) != 0 || thread_current() == NULL) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EAGAIN;
 		}
+
 		if (deadline != 0 && sched_ticks() >= deadline) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EAGAIN;
@@ -828,6 +864,7 @@ socket_dequeue_packet(
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EINTR;
 		}
+
 		if (error == ETIMEDOUT) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EAGAIN;
@@ -845,6 +882,7 @@ socket_dequeue_packet(
 	if (socket->receive_bytes >= (*result)->length)
 		socket->receive_bytes -= (*result)->length;
 	waitq_wake_all(&socket->receive_space_waitq);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Reports the taken packet. */
@@ -919,6 +957,7 @@ socket_poll_common(
 
 	/* Derives readiness from the queue, the shutdowns, and the error. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (socket->receive_head != NULL ||
 	    socket->read_shutdown ||
 	    socket->lifecycle != SOCKET_OPEN)
@@ -931,6 +970,7 @@ socket_poll_common(
 		result |= events & (POLLOUT | POLLWRNORM);
 	else if (socket->write_shutdown)
 		result |= POLLERR;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	*revents = result;
@@ -953,7 +993,10 @@ socket_wake_queue(
 
 	/* Wakes under the lock so that a sleeper never misses the sequence. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	waitq_wake_all(queue);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	poll_notify();
 }

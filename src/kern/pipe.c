@@ -229,6 +229,7 @@ pipe_read_file(
 			pipe->used -= count;
 			done += count;
 		}
+
 		waitq_wake_all(&pipe->write_waitq);
 		poll_notify();
 
@@ -255,6 +256,7 @@ pipe_read_file(
 			return -EINTR;
 		}
 	}
+
 	spin_unlock_irqrestore(&pipe->lock, irq);
 
 	/* Reports the bytes read. */
@@ -320,6 +322,7 @@ pipe_write_file(
 			done += count;
 			free_space -= count;
 		}
+
 		waitq_wake_all(&pipe->read_waitq);
 		poll_notify();
 
@@ -348,6 +351,7 @@ pipe_write_file(
 			return -EINTR;
 		}
 	}
+
 	spin_unlock_irqrestore(&pipe->lock, irq);
 
 	/* Reports the bytes written. */
@@ -391,7 +395,9 @@ pipe_close_file(
 		pipe->write_pos = 0;
 		pipe->used = 0;
 	}
+
 	destroy = refcount_put(&pipe->endpoints);
+
 	spin_unlock_irqrestore(&pipe->lock, irq);
 
 	/* Frees the pipe with its last endpoint. */
@@ -441,6 +447,7 @@ pipe_poll_file(
 		else if (pipe->used < KERN_PIPE_CAPACITY)
 			result |= events & (POLLOUT | POLLWRNORM);
 	}
+
 	spin_unlock_irqrestore(&pipe->lock, irq);
 
 	*revents = result;
@@ -495,6 +502,7 @@ fifo_open_file(
 				pipe_release(candidate);
 			break;
 		}
+
 		mutex_unlock(&inode->i_lock);
 
 		/* Allocates a candidate outside the inode lock. */
@@ -515,8 +523,10 @@ fifo_open_file(
 			mutex_unlock(&inode->i_lock);
 			break;
 		}
+
 		mutex_unlock(&inode->i_lock);
 	}
+
 	file->f_data = pipe;
 
 	irq = spin_lock_irqsave(&pipe->lock);
@@ -556,7 +566,9 @@ fifo_open_file(
 		if (error == EINTR)
 			goto undo_locked;
 	}
+
 	spin_unlock_irqrestore(&pipe->lock, irq);
+
 	poll_notify();
 
 	/* Reports the opened FIFO. */
@@ -571,7 +583,9 @@ undo_locked:
 	waitq_wake_all(&pipe->read_waitq);
 	waitq_wake_all(&pipe->write_waitq);
 fail_locked:
+
 	spin_unlock_irqrestore(&pipe->lock, irq);
+
 	file->f_data = NULL;
 	pipe_release(pipe);
 	poll_notify();

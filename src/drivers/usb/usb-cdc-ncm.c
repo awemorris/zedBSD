@@ -74,17 +74,17 @@ drv_usb_cdc_ncm_negotiate_nth16(
 
 	/* Handles the bytes availability. */
 	if (bytes == NULL || limits == NULL || profile == NULL ||
-	    parameters_length < DRV_USB_CDC_NCM_NTB_PARAMETERS_SIZE)
-
+	    parameters_length < DRV_USB_CDC_NCM_NTB_PARAMETERS_SIZE) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Checks the load le16 result. */
 	if (load_le16(bytes) != DRV_USB_CDC_NCM_NTB_PARAMETERS_SIZE)
 		return EOPNOTSUPP;
-	formats = load_le16(bytes + 2U);
 
 	/* Handles the formats condition. */
+	formats = load_le16(bytes + 2U);
 	if ((formats & DRV_USB_CDC_NCM_NTB16_SUPPORTED) == 0)
 		return EOPNOTSUPP;
 
@@ -98,15 +98,15 @@ drv_usb_cdc_ncm_negotiate_nth16(
 	    limits->ndp_chain_max > DRV_USB_CDC_NCM_MAX_NDP_CHAIN ||
 	    limits->bulk_out_max_packet_size < 8U ||
 	    !is_power_of_two(limits->bulk_out_max_packet_size) ||
-	    limits->bulk_out_max_packet_size > limits->ntb_out_max_size)
-
+	    limits->bulk_out_max_packet_size > limits->ntb_out_max_size) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	device_in = load_le32(bytes + 4U);
-	device_out = load_le32(bytes + 16U);
 
 	/* Handles the device in condition. */
+	device_out = load_le32(bytes + 16U);
 	if (device_in < DRV_USB_CDC_NCM_NTB_MIN_SIZE || device_out == 0)
 		return EINVAL;
 
@@ -142,18 +142,19 @@ drv_usb_cdc_ncm_negotiate_nth16(
 	if (!profile_valid(&candidate))
 		return EINVAL;
 
+	/* Checks the operation status. */
 	error = make_layout(candidate.ndp_in_divisor,
 			    candidate.ndp_in_payload_remainder,
 			    candidate.ndp_in_alignment,
 			    candidate.max_datagram_size, 0, 0, &layout);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
 	/* Handles the layout condition. */
 	if (layout.block_length > candidate.ntb_in_max_size)
 		return EMSGSIZE;
+
+	/* Checks the operation status. */
 	error = make_layout(
 		candidate.ndp_out_divisor, candidate.ndp_out_payload_remainder,
 		candidate.ndp_out_alignment, candidate.max_datagram_size,
@@ -161,8 +162,6 @@ drv_usb_cdc_ncm_negotiate_nth16(
 		candidate.ntb_out_max_is_device_max ? candidate.ntb_out_max_size
 						    : 0,
 		&layout);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
@@ -251,9 +250,9 @@ drv_usb_cdc_ncm_parse_ntb16(
 	/* Handles the datagram count availability. */
 	if (datagram_count != NULL)
 		*datagram_count = 0;
-	error = validate_ntb16(profile, state, ntb, ntb_length, &result);
 
 	/* Checks the operation status. */
+	error = validate_ntb16(profile, state, ntb, ntb_length, &result);
 	if (error != 0)
 		return error;
 
@@ -268,11 +267,10 @@ drv_usb_cdc_ncm_parse_ntb16(
 	for (index = 0; index < result.datagram_count; index++) {
 		/* Handles the deliver availability. */
 		if (deliver != NULL) {
+			/* Checks the operation status. */
 			error = deliver(bytes + result.datagrams[index].offset,
 					result.datagrams[index].length,
 					argument);
-
-			/* Checks the operation status. */
 			if (error != 0) {
 				/* Handles the datagram count availability. */
 				if (datagram_count != NULL)
@@ -315,10 +313,12 @@ drv_usb_cdc_ncm_build_ntb16(
 	if (!profile_valid(profile) || frame_bytes == NULL || bytes == NULL ||
 	    ntb_length == NULL ||
 	    frame_length < DRV_USB_CDC_NCM_ETHERNET_HEADER_SIZE ||
-	    frame_length > profile->max_datagram_size)
-
+	    frame_length > profile->max_datagram_size) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
+
+	/* Checks the operation status. */
 	error = make_layout(
 		profile->ndp_out_divisor, profile->ndp_out_payload_remainder,
 		profile->ndp_out_alignment, frame_length,
@@ -326,8 +326,6 @@ drv_usb_cdc_ncm_build_ntb16(
 		profile->ntb_out_max_is_device_max ? profile->ntb_out_max_size
 						   : 0,
 		&layout);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
@@ -336,10 +334,10 @@ drv_usb_cdc_ncm_build_ntb16(
 	    layout.block_length > profile->ntb_out_max_size ||
 	    layout.block_length > UINT16_MAX ||
 	    layout.datagram_offset > UINT16_MAX ||
-	    layout.ndp_offset > UINT16_MAX)
-
+	    layout.ndp_offset > UINT16_MAX) {
 		/* Returns the computed result. */
 		return EMSGSIZE;
+	}
 
 	/*
  * memmove first permits a caller-owned frame inside the output buffer.
@@ -428,7 +426,7 @@ static int
 profile_valid(
 	const struct drv_usb_cdc_ncm_profile *profile)
 {
-	int function_result;
+	int error;
 
 	/* Checks the power of two result. */
 	if (profile == NULL ||
@@ -447,26 +445,26 @@ profile_valid(
 	    !is_power_of_two(profile->bulk_out_max_packet_size) ||
 	    profile->bulk_out_max_packet_size > profile->ntb_out_max_size ||
 	    profile->set_ntb_format_required > 1U ||
-	    profile->ntb_out_max_is_device_max > 1U)
-
+	    profile->ntb_out_max_is_device_max > 1U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Checks the alignment valid result. */
 	if (!alignment_valid(
 		    profile->ndp_in_divisor, profile->ndp_in_payload_remainder,
-		    profile->ndp_in_alignment, profile->ntb_in_max_size))
-
+		    profile->ndp_in_alignment, profile->ntb_in_max_size)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Obtains the alignment valid result. */
-	function_result = alignment_valid(
+	error = alignment_valid(
 		profile->ndp_out_divisor, profile->ndp_out_payload_remainder,
 		profile->ndp_out_alignment, profile->ntb_out_max_size);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the alignment valid operation. */
@@ -477,15 +475,15 @@ alignment_valid(
 	uint16_t alignment,
 	uint32_t ntb_size)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = divisor != 0 && remainder < divisor &&
+	error = divisor != 0 && remainder < divisor &&
 			  alignment >= 4U && is_power_of_two(alignment) &&
 			  alignment < ntb_size;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the make layout operation. */
@@ -504,68 +502,68 @@ make_layout(
 	int error;
 
 	/* Candidate 1: NTH, datagram, NDP. */
+
+	/* Checks the operation status. */
 	error = datagram_at_or_after(DRV_USB_CDC_NCM_NTH16_SIZE, divisor,
 				     payload_remainder,
 				     &after_datagram.datagram_offset);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = checked_add(after_datagram.datagram_offset, datagram_length,
 			    &end);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = congruent_at_or_after(end, ndp_alignment, 0,
 				      &after_datagram.ndp_offset);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = checked_add(after_datagram.ndp_offset,
 			    DRV_USB_CDC_NCM_NDP16_MIN_SIZE,
 			    &after_datagram.block_length);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = finish_block_length(&after_datagram.block_length,
-				    short_packet_size, no_zlp_exact_size);
 
 	/* Checks the operation status. */
+	error = finish_block_length(&after_datagram.block_length,
+				    short_packet_size, no_zlp_exact_size);
 	if (error != 0)
 		return error;
 
 	/* Candidate 2: NTH, NDP, datagram. */
+
+	/* Checks the operation status. */
 	error = congruent_at_or_after(DRV_USB_CDC_NCM_NTH16_SIZE, ndp_alignment,
 				      0, &before_datagram.ndp_offset);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = checked_add(before_datagram.ndp_offset,
 			    DRV_USB_CDC_NCM_NDP16_MIN_SIZE, &end);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = datagram_at_or_after(end, divisor, payload_remainder,
 				     &before_datagram.datagram_offset);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = checked_add(before_datagram.datagram_offset, datagram_length,
 			    &before_datagram.block_length);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = finish_block_length(&before_datagram.block_length,
-				    short_packet_size, no_zlp_exact_size);
 
 	/* Checks the operation status. */
+	error = finish_block_length(&before_datagram.block_length,
+				    short_packet_size, no_zlp_exact_size);
 	if (error != 0)
 		return error;
 
@@ -585,7 +583,7 @@ datagram_at_or_after(
 	uint16_t payload_remainder,
 	size_t *result)
 {
-	int function_result;
+	int error;
 	uint16_t frame_remainder;
 
 	frame_remainder =
@@ -594,11 +592,11 @@ datagram_at_or_after(
 			   divisor);
 
 	/* Obtains the congruent at or after result. */
-	function_result = congruent_at_or_after(minimum, divisor,
+	error = congruent_at_or_after(minimum, divisor,
 						frame_remainder, result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the congruent at or after operation. */
@@ -609,17 +607,17 @@ congruent_at_or_after(
 	uint16_t remainder,
 	size_t *result)
 {
-	int function_result;
+	int error;
 	size_t modulus, delta;
 
 	modulus = minimum % divisor;
 	delta = ((size_t)remainder + divisor - modulus) % divisor;
 
 	/* Obtains the checked add result. */
-	function_result = checked_add(minimum, delta, result);
+	error = checked_add(minimum, delta, result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the checked add operation. */
@@ -648,12 +646,13 @@ finish_block_length(
 
 	/* Handles the short packet size condition. */
 	if (short_packet_size == 0 || *block_length % short_packet_size != 0 ||
-	    *block_length == no_zlp_exact_size)
+	    *block_length == no_zlp_exact_size) {
 		/* Reports successful completion. */
 		return 0;
-	error = checked_add(*block_length, 1U, block_length);
+	}
 
 	/* Reports the failure. */
+	error = checked_add(*block_length, 1U, block_length);
 	if (error != 0)
 		return error;
 
@@ -701,10 +700,10 @@ validate_ntb16(
 	/* Checks the profile valid result. */
 	if (!profile_valid(profile) || state == NULL || bytes == NULL ||
 	    ntb_length < DRV_USB_CDC_NCM_NTH16_SIZE ||
-	    ntb_length > profile->ntb_in_max_size || ntb_length > UINT16_MAX)
-
+	    ntb_length > profile->ntb_in_max_size || ntb_length > UINT16_MAX) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Checks the load le32 result. */
 	if (load_le32(bytes) == DRV_USB_CDC_NCM_NTH32_SIGNATURE)
@@ -712,14 +711,14 @@ validate_ntb16(
 
 	/* Checks the load le32 result. */
 	if (load_le32(bytes) != DRV_USB_CDC_NCM_NTH16_SIGNATURE ||
-	    load_le16(bytes + 4U) != DRV_USB_CDC_NCM_NTH16_SIZE)
-
+	    load_le16(bytes + 4U) != DRV_USB_CDC_NCM_NTH16_SIZE) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	result->sequence = load_le16(bytes + 6U);
-	wire_block_length = load_le16(bytes + 8U);
 
 	/* Handles the wire block length condition. */
+	wire_block_length = load_le16(bytes + 8U);
 	if (wire_block_length == 0) {
 		/*
  * Zero is legal only when a short USB transfer delimits the
@@ -733,14 +732,14 @@ validate_ntb16(
 			return EINVAL;
 		result->block_length = wire_block_length;
 	}
-	first_ndp = load_le16(bytes + 10U);
 
 	/* Handles the first ndp condition. */
+	first_ndp = load_le16(bytes + 10U);
 	if (first_ndp == 0)
 		return EINVAL;
-	error = parse_ndp_chain(profile, bytes, result, first_ndp);
 
 	/* Reports the failure. */
+	error = parse_ndp_chain(profile, bytes, result, first_ndp);
 	if (error != 0)
 		return error;
 
@@ -779,13 +778,13 @@ parse_ndp_chain(
 		    (ndp_offset & 3U) != 0 ||
 		    ndp_offset % profile->ndp_in_alignment != 0 ||
 		    !range_valid(result->block_length, ndp_offset,
-				 DRV_USB_CDC_NCM_NDP16_HEADER_SIZE))
-
+				 DRV_USB_CDC_NCM_NDP16_HEADER_SIZE)) {
 			/* Returns the computed result. */
 			return EINVAL;
-		signature = load_le32(bytes + ndp_offset);
+		}
 
 		/* Handles the signature condition. */
+		signature = load_le32(bytes + ndp_offset);
 		if (signature == DRV_USB_CDC_NCM_NDP16_CRC_SIGNATURE)
 			return EOPNOTSUPP;
 
@@ -798,13 +797,13 @@ parse_ndp_chain(
 		/* Checks the range valid result. */
 		if (ndp_length < DRV_USB_CDC_NCM_NDP16_MIN_SIZE ||
 		    (ndp_length & 3U) != 0 ||
-		    !range_valid(result->block_length, ndp_offset, ndp_length))
-
+		    !range_valid(result->block_length, ndp_offset, ndp_length)) {
 			/* Returns the computed result. */
 			return EINVAL;
-		error = record_ndp(result, ndp_offset, ndp_length);
+		}
 
 		/* Checks the operation status. */
+		error = record_ndp(result, ndp_offset, ndp_length);
 		if (error != 0)
 			return error;
 
@@ -833,15 +832,15 @@ parse_ndp_chain(
 					    profile->ndp_in_divisor !=
 				    profile->ndp_in_payload_remainder ||
 			    !range_valid(result->block_length, datagram_offset,
-					 datagram_length))
-
+					 datagram_length)) {
 				/* Returns the computed result. */
 				return EINVAL;
+			}
+
+			/* Checks the operation status. */
 			error = record_datagram(profile, result,
 						datagram_offset,
 						datagram_length);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				return error;
 		}
@@ -907,10 +906,10 @@ record_datagram(
 {
 	/* Checks the operation result. */
 	if (result->datagram_count >= profile->rx_max_datagrams ||
-	    result->datagram_count >= DRV_USB_CDC_NCM_MAX_RX_DATAGRAMS)
-
+	    result->datagram_count >= DRV_USB_CDC_NCM_MAX_RX_DATAGRAMS) {
 		/* Returns the computed result. */
 		return EOVERFLOW;
+	}
 	result->datagrams[result->datagram_count].offset = offset;
 	result->datagrams[result->datagram_count].length = length;
 	result->datagram_count++;
@@ -936,12 +935,13 @@ validate_nonoverlap(
 		for (right = left + 1U; right < result->ndp_count; right++) {
 			/* Checks the ranges overlap result. */
 			if (ranges_overlap(&result->ndps[left],
-					   &result->ndps[right]))
-
+					   &result->ndps[right])) {
 				/* Returns the computed result. */
 				return EINVAL;
+			}
 		}
 	}
+
 	/* Process each remaining element. */
 	for (left = 0; left < result->datagram_count; left++) {
 		/* Checks the ranges overlap result. */
@@ -951,20 +951,21 @@ validate_nonoverlap(
 		for (right = 0; right < result->ndp_count; right++) {
 			/* Checks the ranges overlap result. */
 			if (ranges_overlap(&result->datagrams[left],
-					   &result->ndps[right]))
-
+					   &result->ndps[right])) {
 				/* Returns the computed result. */
 				return EINVAL;
+			}
 		}
+
 		/* Process each remaining element. */
 		for (right = left + 1U; right < result->datagram_count;
 		     right++) {
 			/* Checks the ranges overlap result. */
 			if (ranges_overlap(&result->datagrams[left],
-					   &result->datagrams[right]))
-
+					   &result->datagrams[right])) {
 				/* Returns the computed result. */
 				return EINVAL;
+			}
 		}
 	}
 

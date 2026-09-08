@@ -186,13 +186,13 @@ drv_pci_bus_create_root(
 
 	/* Handles the ops availability. */
 	if (!initialized || ops == NULL || ops->config_read == NULL ||
-	    ops->config_write == NULL || result == NULL)
-
+	    ops->config_write == NULL || result == NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
-	bus = hal_malloc(sizeof(*bus));
+	}
 
 	/* Handles the bus availability. */
+	bus = hal_malloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
 	memset(bus, 0, sizeof(*bus));
@@ -223,9 +223,9 @@ drv_pci_bus_create_child(
 	/* Handles the parent availability. */
 	if (parent == NULL || bridge == NULL || result == NULL)
 		return EINVAL;
-	bus = hal_malloc(sizeof(*bus));
 
 	/* Handles the bus availability. */
+	bus = hal_malloc(sizeof(*bus));
 	if (bus == NULL)
 		return ENOMEM;
 	memset(bus, 0, sizeof(*bus));
@@ -311,9 +311,9 @@ drv_pci_bus_scan(
 			if (cfg_read(bus, &address, 0, 4, &value) != 0 ||
 			    (value & 0xffffU) == 0xffffU)
 				continue;
-			device = find_device_on_bus(bus, &address);
 
 			/* Handles the device availability. */
+			device = find_device_on_bus(bus, &address);
 			if (device != NULL) {
 				/* Handles the function condition. */
 				if (function == 0 &&
@@ -321,9 +321,9 @@ drv_pci_bus_scan(
 					functions = 8;
 				continue;
 			}
-			device = hal_malloc(sizeof(*device));
 
 			/* Handles the device availability. */
+			device = hal_malloc(sizeof(*device));
 			if (device == NULL)
 				return ENOMEM;
 			memset(device, 0, sizeof(*device));
@@ -335,6 +335,7 @@ drv_pci_bus_scan(
 				hal_free(device);
 				continue;
 			}
+
 			device->next = bus->devices;
 			bus->devices = device;
 
@@ -344,9 +345,8 @@ drv_pci_bus_scan(
 
 			/* Handles the device condition. */
 			if ((device->header_type & 0x7fU) == 1U) {
-				secondary = 0;
-
 				/* Checks the drv pci device config read8 result. */
+				secondary = 0;
 				if (drv_pci_device_config_read8(
 					    device, 0x19U, &secondary) == 0 &&
 				    secondary != 0 &&
@@ -356,6 +356,7 @@ drv_pci_bus_scan(
 						&device->subordinate);
 				}
 			}
+
 			(void)drv_pci_device_probe(device);
 		}
 	}
@@ -371,13 +372,13 @@ int
 drv_pci_bus_rescan(
 	struct drv_pci_bus *bus)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv pci bus scan result. */
-	function_result = drv_pci_bus_scan(bus);
+	error = drv_pci_bus_scan(bus);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -397,10 +398,10 @@ drv_pci_bus_scan_tree(
 	for (d = bus->devices; d; d = d->next) {
 		/* Checks the drv pci bus scan tree result. */
 		if (d->subordinate &&
-		    (e = drv_pci_bus_scan_tree(d->subordinate)) != 0)
-
+		    (e = drv_pci_bus_scan_tree(d->subordinate)) != 0) {
 			/* Returns the computed result. */
 			return e;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -830,13 +831,13 @@ drv_pci_device_config_read32(
 	unsigned o,
 	uint32_t *v)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = d ? cfg_read(d->bus, &d->address, o, 4, v) : EINVAL;
+	error = d ? cfg_read(d->bus, &d->address, o, 4, v) : EINVAL;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -848,13 +849,13 @@ drv_pci_device_config_write8(
 	unsigned o,
 	uint8_t v)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = d ? cfg_write(d->bus, &d->address, o, 1, v) : EINVAL;
+	error = d ? cfg_write(d->bus, &d->address, o, 1, v) : EINVAL;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -866,13 +867,13 @@ drv_pci_device_config_write16(
 	unsigned o,
 	uint16_t v)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = d ? cfg_write(d->bus, &d->address, o, 2, v) : EINVAL;
+	error = d ? cfg_write(d->bus, &d->address, o, 2, v) : EINVAL;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -884,13 +885,13 @@ drv_pci_device_config_write32(
 	unsigned o,
 	uint32_t v)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = d ? cfg_write(d->bus, &d->address, o, 4, v) : EINVAL;
+	error = d ? cfg_write(d->bus, &d->address, o, 4, v) : EINVAL;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -912,10 +913,10 @@ drv_pci_device_find_capability(
 
 	/* Checks the drv pci device config read16 result. */
 	if (drv_pci_device_config_read16(d, PCI_STATUS, &status) ||
-	    !(status & 0x10U))
-
+	    !(status & 0x10U)) {
 		/* Returns the computed result. */
 		return ENOENT;
+	}
 
 	/* Handles the drv pci device config read8 condition. */
 	if (drv_pci_device_config_read8(d, PCI_CAPABILITIES, &p))
@@ -960,10 +961,10 @@ drv_pci_device_find_extended_capability(
 	/* Checks the current descriptor. */
 	if (!d || !result || p < 0x100U || (p & 3U))
 		return EINVAL;
-	limit = d->bus->ops->config_space_size ? d->bus->ops->config_space_size
-					       : 256U;
 
 	/* Handles the limit condition. */
+	limit = d->bus->ops->config_space_size ? d->bus->ops->config_space_size
+					       : 256U;
 	if (limit < 4096U)
 		return ENOTSUP;
 	/* Continue while the operation condition remains true. */
@@ -1013,9 +1014,9 @@ drv_pci_device_enable(
 	/* Checks the current descriptor. */
 	if (d->enable_count++ != 0)
 		return 0;
-	e = command_set(d, PCI_COMMAND_IO | PCI_COMMAND_MEMORY, 0);
 
 	/* Handles the e condition. */
+	e = command_set(d, PCI_COMMAND_IO | PCI_COMMAND_MEMORY, 0);
 	if (e)
 		d->enable_count--;
 
@@ -1045,13 +1046,13 @@ int
 drv_pci_device_enable_io(
 	struct drv_pci_device *d)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the command set result. */
-	function_result = command_set(d, PCI_COMMAND_IO, 0);
+	error = command_set(d, PCI_COMMAND_IO, 0);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -1061,13 +1062,13 @@ int
 drv_pci_device_enable_memory(
 	struct drv_pci_device *d)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the command set result. */
-	function_result = command_set(d, PCI_COMMAND_MEMORY, 0);
+	error = command_set(d, PCI_COMMAND_MEMORY, 0);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -1088,9 +1089,9 @@ drv_pci_device_save_enable_state(
 	/* Handles the state condition. */
 	if (state->private_data[1] != 0)
 		return EBUSY;
-	error = drv_pci_device_config_read16(d, PCI_COMMAND, &command);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_read16(d, PCI_COMMAND, &command);
 	if (error != 0)
 		return error;
 	state->private_data[0] = command & PCI_COMMAND_ENABLE_MASK;
@@ -1118,34 +1119,33 @@ drv_pci_device_restore_enable_state(
 	/* Handles the state condition. */
 	if (state->private_data[1] == 0)
 		return 0;
-	error = drv_pci_device_config_read16(d, PCI_COMMAND, &command);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_read16(d, PCI_COMMAND, &command);
 	if (error != 0)
 		return error;
-	restored = (uint16_t)((command & ~PCI_COMMAND_ENABLE_MASK) |
-			      (uint16_t)state->private_data[0]);
 
 	/* Handles the restored condition. */
+	restored = (uint16_t)((command & ~PCI_COMMAND_ENABLE_MASK) |
+			      (uint16_t)state->private_data[0]);
 	if (restored != command) {
-		error = drv_pci_device_config_write16(d, PCI_COMMAND, restored);
-
 		/* Checks the operation status. */
+		error = drv_pci_device_config_write16(d, PCI_COMMAND, restored);
 		if (error != 0)
 			return error;
 	}
-	error = drv_pci_device_config_read16(d, PCI_COMMAND, &readback);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_read16(d, PCI_COMMAND, &readback);
 	if (error != 0)
 		return error;
 
 	/* Handles the readback condition. */
 	if ((readback & PCI_COMMAND_ENABLE_MASK) !=
-	    (restored & PCI_COMMAND_ENABLE_MASK))
-
+	    (restored & PCI_COMMAND_ENABLE_MASK)) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	state->private_data[0] = 0;
 	state->private_data[1] = 0;
 
@@ -1161,14 +1161,14 @@ drv_pci_device_set_bus_master(
 	struct drv_pci_device *d,
 	bool on)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the command set result. */
-	function_result = command_set(d, on ? PCI_COMMAND_MASTER : 0,
+	error = command_set(d, on ? PCI_COMMAND_MASTER : 0,
 				      on ? 0 : PCI_COMMAND_MASTER);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -1216,9 +1216,9 @@ drv_pci_device_assign_bar(
 	/* Handles the device availability. */
 	if (device == NULL || index >= device->bar_count)
 		return EINVAL;
-	bar = &device->bars[index];
 
 	/* Handles the bar condition. */
+	bar = &device->bars[index];
 	if (bar->type == DRV_PCI_BAR_NONE || bar->size == 0 ||
 	    (bar->size & (bar->size - 1U)) != 0 ||
 	    (address & (bar->size - 1U)) != 0 ||
@@ -1226,25 +1226,25 @@ drv_pci_device_assign_bar(
 	    (bar->type != DRV_PCI_BAR_MEMORY64 &&
 	     (address > UINT32_MAX || bar->size - 1U > UINT32_MAX - address)) ||
 	    (bar->type == DRV_PCI_BAR_MEMORY64 &&
-	     index + 1U >= device->bar_count))
-
+	     index + 1U >= device->bar_count)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
+
+	/* Checks the operation status. */
 	error = drv_pci_device_config_read16(device, PCI_COMMAND,
 					     &original_command);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = pci_bar_read_raw(device, index, bar->type, &original_low,
 				 &original_high);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = pci_command_quiesce(device, original_command);
 
 	/* Checks the operation status. */
+	error = pci_command_quiesce(device, original_command);
 	if (error != 0)
 		return error;
 
@@ -1254,9 +1254,9 @@ drv_pci_device_assign_bar(
 					   : (bar->prefetchable ? 8U : 0U)) |
 	      (bar->type == DRV_PCI_BAR_MEMORY64 ? 4U : 0U);
 	high = (uint32_t)(address >> 32);
-	error = pci_bar_write_raw(device, index, bar->type, low, high);
 
 	/* Checks the operation status. */
+	error = pci_bar_write_raw(device, index, bar->type, low, high);
 	if (error == 0) {
 		error = pci_bar_read_raw(device, index, bar->type, &read_low,
 					 &read_high);
@@ -1272,10 +1272,9 @@ drv_pci_device_assign_bar(
 	if (error != 0)
 		goto rollback;
 
+	/* Checks the operation status. */
 	error = drv_pci_device_config_write16(device, PCI_COMMAND,
 					      original_command);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = drv_pci_device_config_read16(device, PCI_COMMAND,
 						     &read_command);
@@ -1290,17 +1289,19 @@ drv_pci_device_assign_bar(
 		/*
  * Never roll a BAR back while the failed restore may have
 		 * enabled decode or DMA. */
-		quiesce_error = pci_command_quiesce(device, original_command);
 
 		/* Checks the operation status. */
+		quiesce_error = pci_command_quiesce(device, original_command);
 		if (quiesce_error != 0) {
 			bar->bus_address = address;
 
 			/* Returns the computed result. */
 			return error;
 		}
+
 		goto rollback;
 	}
+
 	bar->bus_address = address;
 
 	/* Reports successful completion. */
@@ -1370,28 +1371,28 @@ drv_pci_device_map_bar_region(
 	unsigned f,
 	struct drv_pci_mapping *m)
 {
-	int function_result;
+	int error;
 	struct drv_pci_bar b;
 
 	/* Checks the current descriptor. */
 	if (!d || !m || i >= d->bar_count || !d->bar_claimed[i] ||
-	    !d->bus->ops->map_bar || s == 0)
-
+	    !d->bus->ops->map_bar || s == 0) {
 		/* Returns the computed result. */
 		return EINVAL;
-	b = d->bars[i];
+	}
 
 	/* Handles the o condition. */
+	b = d->bars[i];
 	if (o > b.size || s > b.size - o)
 		return EINVAL;
 	b.bus_address += o;
 	b.size = s;
 
 	/* Computes the function result. */
-	function_result = d->bus->ops->map_bar(d->bus->host, d, &b, f, m);
+	error = d->bus->ops->map_bar(d->bus->host, d, &b, f, m);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -1404,18 +1405,18 @@ drv_pci_device_map_bar(
 	unsigned f,
 	struct drv_pci_mapping *m)
 {
-	int function_result;
+	int error;
 
 	/* Checks the current descriptor. */
 	if (!d || i >= d->bar_count)
 		return EINVAL;
 
 	/* Obtains the drv pci device map bar region result. */
-	function_result = drv_pci_device_map_bar_region(
+	error = drv_pci_device_map_bar_region(
 		d, i, 0, (size_t)d->bars[i].size, f, m);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -1454,21 +1455,21 @@ drv_pci_device_allocate_irqs(
 
 	/* Handles the device availability. */
 	if (device == NULL || irqs == NULL || count == NULL || minimum == 0 ||
-	    maximum < minimum || device->bus->ops->allocate_irqs == NULL)
-
+	    maximum < minimum || device->bus->ops->allocate_irqs == NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	/* Process each remaining element. */
 	for (choice = 0; choice < sizeof(choices) / sizeof(choices[0]);
 	     choice++) {
 		/* Checks the active flags. */
 		if ((flags & choices[choice].flag) == 0)
 			continue;
+
+		/* Checks the operation status. */
 		error = device->bus->ops->allocate_irqs(
 			device->bus->host, device, choices[choice].type,
 			minimum, maximum, irqs, count);
-
-		/* Checks the operation status. */
 		if (error == 0)
 			return 0;
 
@@ -1521,9 +1522,9 @@ drv_pci_device_establish_irq(
 	/* Handles the device availability. */
 	if (device == NULL || irq == NULL || handler == NULL || result == NULL)
 		return EINVAL;
-	cookie = hal_malloc(sizeof(*cookie));
 
 	/* Handles the cookie availability. */
+	cookie = hal_malloc(sizeof(*cookie));
 	if (cookie == NULL)
 		return ENOMEM;
 	memset(cookie, 0, sizeof(*cookie));
@@ -1552,6 +1553,7 @@ drv_pci_device_establish_irq(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	*result = cookie;
 	/* Reports successful completion. */
 	return 0;
@@ -1565,7 +1567,7 @@ drv_pci_device_disestablish_irq_checked(
 	struct drv_pci_device *device,
 	void *value)
 {
-	int function_result;
+	int error;
 	volatile uint32_t *entry_local;
 	volatile uint32_t *entry_local1;
 	struct pci_irq_cookie *cookie = value;
@@ -1581,10 +1583,10 @@ drv_pci_device_disestablish_irq_checked(
 	/* Handles the cookie condition. */
 	if (cookie->type == DRV_PCI_IRQ_INTX) {
 		/* Obtains the disestablish intx result. */
-		function_result = disestablish_intx(cookie);
+		error = disestablish_intx(cookie);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	} else if (cookie->type == DRV_PCI_IRQ_MSI) {
 		/* Handles the cookie condition. */
 		if (cookie->message_registered) {
@@ -1596,13 +1598,13 @@ drv_pci_device_disestablish_irq_checked(
 			    drv_pci_device_config_write16(
 				    cookie->device,
 				    cookie->capability + PCI_MSI_CONTROL,
-				    control & (uint16_t)~PCI_MSI_ENABLE) != 0)
-
+				    control & (uint16_t)~PCI_MSI_ENABLE) != 0) {
 				/* Returns the computed result. */
 				return EIO;
-			hal_error = hal_irq_unregister_msi(cookie->irq);
+			}
 
 			/* Checks the operation status. */
+			hal_error = hal_irq_unregister_msi(cookie->irq);
 			if (hal_error != HAL_OK)
 				return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
 			cookie->message_registered = 0;
@@ -1628,10 +1630,10 @@ drv_pci_device_disestablish_irq_checked(
 		    drv_pci_device_config_write16(
 			    cookie->device,
 			    cookie->capability + PCI_MSI_CONTROL,
-			    cookie->msi_control_saved) != 0)
-
+			    cookie->msi_control_saved) != 0) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		cookie->msi_state_saved = 0;
 	} else if (cookie->type == DRV_PCI_IRQ_MSIX) {
 		/* Handles the cookie condition. */
@@ -1643,9 +1645,8 @@ drv_pci_device_disestablish_irq_checked(
 
 		/* Handles the cookie condition. */
 		if (cookie->message_registered) {
-			hal_error = hal_irq_unregister_msi(cookie->irq);
-
 			/* Checks the operation status. */
+			hal_error = hal_irq_unregister_msi(cookie->irq);
 			if (hal_error != HAL_OK)
 				return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
 			cookie->message_registered = 0;
@@ -1668,10 +1669,10 @@ drv_pci_device_disestablish_irq_checked(
 		if (drv_pci_device_config_write16(
 			    cookie->device,
 			    cookie->capability + PCI_MSIX_CONTROL,
-			    cookie->msix_control_saved) != 0)
-
+			    cookie->msix_control_saved) != 0) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		entry_local1[3] = cookie->msix_entry_saved[3];
 		hal_io_mb();
 		cookie->msix_state_saved = 0;
@@ -1685,6 +1686,7 @@ drv_pci_device_disestablish_irq_checked(
 		/* Returns the computed result. */
 		return EINVAL;
 	}
+
 	hal_free(cookie);
 
 	/* Reports successful completion. */
@@ -1819,9 +1821,9 @@ drv_pci_driver_match(
 	/* Checks the current index. */
 	if (!i)
 		return DRV_PCI_MATCH_NONE;
-	score = r->match ? r->match(d, i) : DRV_PCI_MATCH_GENERIC;
 
 	/* Handles the score condition. */
+	score = r->match ? r->match(d, i) : DRV_PCI_MATCH_GENERIC;
 	if (score > 0 && out)
 		*out = i;
 	/* Returns the computed result. */
@@ -1856,9 +1858,9 @@ drv_pci_device_probe(
 	/* Handles the best condition. */
 	if (!best)
 		return ENODEV;
-	error = best->driver->attach ? best->driver->attach(d, best_id) : 0;
 
 	/* Checks the operation status. */
+	error = best->driver->attach ? best->driver->attach(d, best_id) : 0;
 	if (error)
 		return error;
 	d->driver = best->driver;
@@ -1902,7 +1904,7 @@ int
 drv_pci_device_reprobe(
 	struct drv_pci_device *d)
 {
-	int function_result;
+	int error;
 	int e;
 
 	/* Checks the current descriptor. */
@@ -1911,18 +1913,17 @@ drv_pci_device_reprobe(
 
 	/* Checks the current descriptor. */
 	if (d->driver) {
-		e = drv_pci_device_detach(d, 0);
-
 		/* Handles the e condition. */
+		e = drv_pci_device_detach(d, 0);
 		if (e)
 			return e;
 	}
 
 	/* Obtains the drv pci device probe result. */
-	function_result = drv_pci_device_probe(d);
+	error = drv_pci_device_probe(d);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -1945,9 +1946,9 @@ drv_pci_driver_register(
 		if (entry->driver == driver)
 			return EEXIST;
 	}
-	entry = hal_malloc(sizeof(*entry));
 
 	/* Handles the entry availability. */
+	entry = hal_malloc(sizeof(*entry));
 	if (entry == NULL)
 		return ENOMEM;
 	entry->driver = driver;
@@ -1994,6 +1995,7 @@ drv_pci_driver_unregister(
 				return EBUSY;
 		}
 	}
+
 	/* Process each linked entry. */
 	for (p = &drivers; (e = *p) != NULL; p = &e->next) {
 		/* Handles the e condition. */
@@ -2110,7 +2112,7 @@ cfg_read(
 	unsigned width,
 	uint32_t *value)
 {
-	int function_result;
+	int error;
 	unsigned limit = bus != NULL && bus->ops != NULL &&
 					 bus->ops->config_space_size != 0
 				 ? bus->ops->config_space_size
@@ -2119,17 +2121,17 @@ cfg_read(
 	/* Handles the bus availability. */
 	if (bus == NULL || bus->ops == NULL || bus->ops->config_read == NULL ||
 	    value == NULL || offset > limit || width > limit - offset ||
-	    (width != 1 && width != 2 && width != 4))
-
+	    (width != 1 && width != 2 && width != 4)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		bus->ops->config_read(bus->host, a, offset, width, value);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the find device on bus operation. */
@@ -2146,10 +2148,10 @@ find_device_on_bus(
 		if (device->address.segment == address->segment &&
 		    device->address.bus == address->bus &&
 		    device->address.device == address->device &&
-		    device->address.function == address->function)
-
+		    device->address.function == address->function) {
 			/* Returns the computed result. */
 			return device;
+		}
 	}
 
 	/* Reports that no result is available. */
@@ -2170,9 +2172,8 @@ read_device(
 	unsigned index, limit;
 	int error;
 
-	error = cfg_read(device->bus, &device->address, 0, 4, &value);
-
 	/* Checks the operation status. */
+	error = cfg_read(device->bus, &device->address, 0, 4, &value);
 	if (error != 0)
 		return error;
 	device->vendor = (uint16_t)value;
@@ -2242,6 +2243,7 @@ read_device(
 			}
 		}
 	}
+
 	(void)cfg_write(device->bus, &device->address, PCI_COMMAND, 2, command);
 
 	/* Handles the device condition. */
@@ -2264,7 +2266,7 @@ cfg_write(
 	unsigned width,
 	uint32_t value)
 {
-	int function_result;
+	int error;
 	unsigned limit = bus != NULL && bus->ops != NULL &&
 					 bus->ops->config_space_size != 0
 				 ? bus->ops->config_space_size
@@ -2273,17 +2275,17 @@ cfg_write(
 	/* Handles the bus availability. */
 	if (bus == NULL || bus->ops == NULL || bus->ops->config_write == NULL ||
 	    offset > limit || width > limit - offset ||
-	    (width != 1 && width != 2 && width != 4))
-
+	    (width != 1 && width != 2 && width != 4)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		bus->ops->config_write(bus->host, a, offset, width, value);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the foreach device tree operation. */
@@ -2304,10 +2306,10 @@ foreach_device_tree(
 
 		/* Checks the foreach device tree result. */
 		if (d->subordinate &&
-		    (e = foreach_device_tree(d->subordinate, fn, arg)) != 0)
-
+		    (e = foreach_device_tree(d->subordinate, fn, arg)) != 0) {
 			/* Returns the computed result. */
 			return e;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -2321,25 +2323,25 @@ command_set(
 	uint16_t set,
 	uint16_t clear)
 {
-	int function_result;
+	int error;
 	uint16_t v;
 	int e;
 
 	/* Checks the current descriptor. */
 	if (!d)
 		return EINVAL;
-	e = drv_pci_device_config_read16(d, PCI_COMMAND, &v);
 
 	/* Handles the e condition. */
+	e = drv_pci_device_config_read16(d, PCI_COMMAND, &v);
 	if (e)
 		return e;
 
 	/* Obtains the drv pci device config write16 result. */
-	function_result = drv_pci_device_config_write16(
+	error = drv_pci_device_config_write16(
 		d, PCI_COMMAND, (uint16_t)((v | set) & ~clear));
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the pci bar read raw operation. */
@@ -2354,10 +2356,9 @@ pci_bar_read_raw(
 	int function_result;
 	int error;
 
+	/* Checks the operation status. */
 	error = drv_pci_device_config_read32(device, PCI_BAR0 + index * 4U,
 					     low);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 	*high = 0;
@@ -2385,14 +2386,14 @@ pci_command_quiesce(
 	int error;
 
 	command &= (uint16_t)~PCI_COMMAND_ENABLE_MASK;
-	error = drv_pci_device_config_write16(device, PCI_COMMAND, command);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_write16(device, PCI_COMMAND, command);
 	if (error != 0)
 		return error;
-	error = drv_pci_device_config_read16(device, PCI_COMMAND, &readback);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_read16(device, PCI_COMMAND, &readback);
 	if (error != 0)
 		return error;
 
@@ -2414,10 +2415,9 @@ pci_bar_write_raw(
 
 	/* Decode is disabled by the caller, so commit the low half last. */
 	if (type == DRV_PCI_BAR_MEMORY64) {
+		/* Checks the operation status. */
 		error = drv_pci_device_config_write32(
 			device, PCI_BAR0 + (index + 1U) * 4U, high);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 	}
@@ -2473,18 +2473,17 @@ establish_intx(
 	bool enabled;
 	int hal_error;
 
-	candidate = hal_malloc(sizeof(*candidate));
-
 	/* Handles the candidate availability. */
+	candidate = hal_malloc(sizeof(*candidate));
 	if (candidate == NULL)
 		return ENOMEM;
 	memset(candidate, 0, sizeof(*candidate));
 	candidate->irq = (int)irq->vector;
 
 	enabled = intx_lock_enter();
-	line = find_intx_line(candidate->irq);
 
 	/* Handles the line availability. */
+	line = find_intx_line(candidate->irq);
 	if (line != NULL) {
 		/* Handles the line condition. */
 		if (line->removing) {
@@ -2494,6 +2493,7 @@ establish_intx(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		/* Process each element required by the operation. */
 		for (link = &line->handlers; *link != NULL;
 		     link = &(*link)->intx_next)
@@ -2512,10 +2512,10 @@ establish_intx(
  * Publish a line only after the sole HAL handler has been installed.
 	 * The line remains masked until both the handler and cookie list exist.
 	 */
-	hal_error = hal_irq_set_handler(candidate->irq, pci_intx_dispatch,
-					candidate);
 
 	/* Checks the operation status. */
+	hal_error = hal_irq_set_handler(candidate->irq, pci_intx_dispatch,
+					candidate);
 	if (hal_error == HAL_OK) {
 		candidate->handlers = cookie;
 		candidate->next = intx_lines;
@@ -2524,6 +2524,7 @@ establish_intx(
 		cookie->intx_line = candidate;
 		hal_irq_unmask(candidate->irq);
 	}
+
 	intx_lock_leave(enabled);
 
 	/* Checks the operation status. */
@@ -2603,10 +2604,10 @@ establish_msi(
 					 &control) != 0 ||
 	    drv_pci_device_config_read32(device,
 					 cookie->capability + PCI_MSI_ADDRESS,
-					 &cookie->msi_address_low_saved) != 0)
-
+					 &cookie->msi_address_low_saved) != 0) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	cookie->msi_control_saved = control;
 
 	/* Handles the control condition. */
@@ -2614,10 +2615,10 @@ establish_msi(
 		/* Checks the drv pci device config read32 result. */
 		if (drv_pci_device_config_read32(
 			    device, cookie->capability + PCI_MSI_ADDRESS + 4U,
-			    &cookie->msi_address_high_saved) != 0)
-
+			    &cookie->msi_address_high_saved) != 0) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		data_offset = cookie->capability + 12U;
 	} else {
 		cookie->msi_address_high_saved = 0;
@@ -2626,17 +2627,17 @@ establish_msi(
 
 	/* Checks the drv pci device config read16 result. */
 	if (drv_pci_device_config_read16(device, data_offset,
-					 &cookie->msi_data_saved) != 0)
-
+					 &cookie->msi_data_saved) != 0) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	cookie->msi_state_saved = 1;
 
 	pci_source(&device->address, source);
-	error = hal_irq_register_msi(source, pci_irq_dispatch, cookie,
-				     &cookie->irq, &address, &event);
 
 	/* Checks the operation status. */
+	error = hal_irq_register_msi(source, pci_irq_dispatch, cookie,
+				     &cookie->irq, &address, &event);
 	if (error != HAL_OK)
 		return error == HAL_ERR_NOMEM ? ENOMEM : EIO;
 	cookie->message_registered = 1;
@@ -2646,6 +2647,7 @@ establish_msi(
 		error = EIO;
 		goto fail;
 	}
+
 	control &= (uint16_t)~(PCI_MSI_ENABLE | PCI_MSI_MME_MASK);
 
 	/* Checks the drv pci device config write16 result. */
@@ -2668,6 +2670,7 @@ establish_msi(
 			error = EIO;
 			goto fail;
 		}
+
 		data_offset = cookie->capability + 12U;
 	} else {
 		/* Handles the address condition. */
@@ -2675,6 +2678,7 @@ establish_msi(
 			error = ERANGE;
 			goto fail;
 		}
+
 		data_offset = cookie->capability + 8U;
 	}
 
@@ -2687,6 +2691,7 @@ establish_msi(
 		error = EIO;
 		goto fail;
 	}
+
 	(void)irq;
 
 	/* Reports successful completion. */
@@ -2707,6 +2712,7 @@ fail:
 			device, cookie->capability + PCI_MSI_ADDRESS + 4U,
 			cookie->msi_address_high_saved);
 	}
+
 	(void)drv_pci_device_config_write16(
 		device,
 		(cookie->msi_control_saved & PCI_MSI_64BIT) != 0
@@ -2766,9 +2772,8 @@ establish_msix(
 	uint16_t control;
 	int error;
 
-	error = map_msix_entry(cookie);
-
 	/* Checks the operation status. */
+	error = map_msix_entry(cookie);
 	if (error != 0)
 		return error;
 	cookie->table_mapped = 1;
@@ -2781,6 +2786,7 @@ establish_msix(
 		error = EIO;
 		goto fail;
 	}
+
 	hal_io_rmb();
 	/* Process each remaining element. */
 	for (index_for = 0; index_for < 4U; index_for++)
@@ -2788,14 +2794,15 @@ establish_msix(
 	cookie->msix_state_saved = 1;
 	entry[3] |= PCI_MSIX_ENTRY_MASK;
 	pci_source(&cookie->device->address, source);
-	error = hal_irq_register_msi(source, pci_irq_dispatch, cookie,
-				     &cookie->irq, &address, &event);
 
 	/* Checks the operation status. */
+	error = hal_irq_register_msi(source, pci_irq_dispatch, cookie,
+				     &cookie->irq, &address, &event);
 	if (error != HAL_OK) {
 		error = error == HAL_ERR_NOMEM ? ENOMEM : EIO;
 		goto fail;
 	}
+
 	cookie->message_registered = 1;
 	entry[0] = (uint32_t)address;
 	entry[1] = (uint32_t)((uint64_t)address >> 32);
@@ -2817,6 +2824,7 @@ establish_msix(
 			cookie->message_registered = 0;
 		goto fail;
 	}
+
 	entry[3] &= ~PCI_MSIX_ENTRY_MASK;
 	hal_io_mb();
 
@@ -2864,7 +2872,7 @@ static int
 map_msix_entry(
 	struct pci_irq_cookie *cookie)
 {
-	int function_result;
+	int error;
 	struct drv_pci_device *device = cookie->device;
 	struct drv_pci_bar bar;
 	uint32_t table;
@@ -2873,21 +2881,21 @@ map_msix_entry(
 
 	/* Checks the drv pci device config read32 result. */
 	if (drv_pci_device_config_read32(
-		    device, cookie->capability + PCI_MSIX_TABLE, &table) != 0)
-
+		    device, cookie->capability + PCI_MSIX_TABLE, &table) != 0) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	bir = table & 7U;
-	offset = (uint64_t)(table & ~7U) +
-		 (uint64_t)cookie->index * PCI_MSIX_ENTRY_SIZE;
 
 	/* Checks the drv pci device bar result. */
+	offset = (uint64_t)(table & ~7U) +
+		 (uint64_t)cookie->index * PCI_MSIX_ENTRY_SIZE;
 	if (bir >= device->bar_count ||
 	    drv_pci_device_bar(device, bir, &bar) != 0 || offset > bar.size ||
-	    PCI_MSIX_ENTRY_SIZE > bar.size - offset)
-
+	    PCI_MSIX_ENTRY_SIZE > bar.size - offset) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	bar.bus_address += offset;
 	bar.size = PCI_MSIX_ENTRY_SIZE;
 
@@ -2896,13 +2904,13 @@ map_msix_entry(
 		return ENOTSUP;
 
 	/* Computes the function result. */
-	function_result = device->bus->ops->map_bar(
+	error = device->bus->ops->map_bar(
 		device->bus->host, device, &bar,
 		DRV_PCI_MAP_READ | DRV_PCI_MAP_WRITE | DRV_PCI_MAP_NOCACHE,
 		&cookie->table);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the disestablish intx operation. */
@@ -2917,15 +2925,16 @@ disestablish_intx(
 	int hal_error;
 
 	enabled = intx_lock_enter();
-	line = cookie->intx_line;
 
 	/* Handles the line availability. */
+	line = cookie->intx_line;
 	if (line == NULL || line->removing) {
 		intx_lock_leave(enabled);
 
 		/* Returns the computed result. */
 		return line == NULL ? EINVAL : EBUSY;
 	}
+
 	/* Process each element required by the operation. */
 	for (cookie_link = &line->handlers; *cookie_link != NULL;
 	     cookie_link = &(*cookie_link)->intx_next) {
@@ -2969,9 +2978,9 @@ disestablish_intx(
 	line->removing = 1;
 	hal_irq_mask(line->irq);
 	intx_lock_leave(enabled);
-	hal_error = hal_irq_set_handler(line->irq, NULL, NULL);
 
 	/* Checks the operation status. */
+	hal_error = hal_irq_set_handler(line->irq, NULL, NULL);
 	if (hal_error != HAL_OK) {
 		enabled = intx_lock_enter();
 		line->removing = 0;
@@ -2995,6 +3004,7 @@ disestablish_intx(
 			break;
 		}
 	}
+
 	line->handlers = NULL;
 	cookie->intx_line = NULL;
 	intx_lock_leave(enabled);
@@ -3053,6 +3063,7 @@ pci_intx_dispatch(
 		(void)handler(handler_argument);
 		cookie = next;
 	}
+
 	enabled = intx_lock_enter();
 	line->dispatching--;
 	intx_lock_leave(enabled);

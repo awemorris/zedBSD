@@ -49,6 +49,11 @@ static const struct intel_ax211_mmio_ops ax211_pci_mmio_operations = {
 	.trace_deadline = NULL};
 
 /*
+ * Forward declaration.
+ */
+static int ax211_backend_range_valid(const struct intel_ax211_pci_mmio_backend *backend, uint32_t offset);
+
+/*
  * Implements the drv intel ax211 pci mmio backend init operation.
  */
 int
@@ -63,10 +68,10 @@ drv_intel_ax211_pci_mmio_backend_init(
 
 	/* Handles the backend availability. */
 	if (backend == NULL || registers == NULL ||
-	    mapping_size < AX211_PCI_MMIO_MINIMUM_SIZE)
-
+	    mapping_size < AX211_PCI_MMIO_MINIMUM_SIZE) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(&candidate, 0, sizeof(candidate));
 
 	/* Checks the hal rtc read counter result. */
@@ -78,6 +83,7 @@ drv_intel_ax211_pci_mmio_backend_init(
 		/* Returns the computed result. */
 		return ENOTSUP;
 	}
+
 	candidate.registers = registers;
 	candidate.mapping_size = mapping_size;
 	candidate.counter_frequency_hz = frequency_hz;
@@ -100,30 +106,28 @@ drv_intel_ax211_pci_mmio_ops(
 	return &ax211_pci_mmio_operations;
 }
 
-static int ax211_backend_range_valid(const struct intel_ax211_pci_mmio_backend *backend, uint32_t offset);
-
 /* Supports the ax211 backend range valid operation. */
 static int
 ax211_backend_range_valid(
 	const struct intel_ax211_pci_mmio_backend *backend,
 	uint32_t offset)
 {
-	int function_result;
+	int error;
 
 	/* Handles the backend availability. */
 	if (backend == NULL || backend->registers == NULL ||
-	    (offset & 3U) != 0U)
-
+	    (offset & 3U) != 0U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		(size_t)offset <= backend->mapping_size &&
 		sizeof(uint32_t) <= backend->mapping_size - (size_t)offset;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ax211 backend csr read32 operation. */
@@ -182,10 +186,10 @@ ax211_backend_prph_read32(
 	/* Handles the value availability. */
 	if (address > AX211_PRPH_ADDRESS_MASK || value == NULL)
 		return EINVAL;
-	error = ax211_backend_csr_write32(backend, AX211_HBUS_PRPH_READ_ADDRESS,
-					  address | AX211_PRPH_ACCESS_DWORD);
 
 	/* Checks the operation status. */
+	error = ax211_backend_csr_write32(backend, AX211_HBUS_PRPH_READ_ADDRESS,
+					  address | AX211_PRPH_ACCESS_DWORD);
 	if (error != 0)
 		return error;
 	hal_io_mb();
@@ -212,11 +216,11 @@ ax211_backend_prph_write32(
 	/* Handles the address condition. */
 	if (address > AX211_PRPH_ADDRESS_MASK)
 		return EINVAL;
+
+	/* Checks the operation status. */
 	error = ax211_backend_csr_write32(backend,
 					  AX211_HBUS_PRPH_WRITE_ADDRESS,
 					  address | AX211_PRPH_ACCESS_DWORD);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 	hal_io_wmb();
@@ -260,10 +264,10 @@ ax211_backend_mul_div_reduced(
 
 	/* Handles the quotient availability. */
 	if (divisor == 0U || numerator >= divisor || quotient == NULL ||
-	    remainder == NULL)
-
+	    remainder == NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	reduced = 0U;
 	result = 0U;
 	mask = UINT64_C(1) << 63;
@@ -273,9 +277,8 @@ ax211_backend_mul_div_reduced(
 	 * time. */
 	/* Continue while the operation condition remains true. */
 	while (mask != 0U) {
-		threshold = divisor - reduced;
-
 		/* Handles the reduced condition. */
+		threshold = divisor - reduced;
 		if (reduced >= threshold) {
 			reduced -= threshold;
 			carry = 1U;
@@ -291,9 +294,8 @@ ax211_backend_mul_div_reduced(
 
 		/* Handles the multiplier condition. */
 		if ((multiplier & mask) != 0U) {
-			threshold = divisor - numerator;
-
 			/* Handles the reduced condition. */
+			threshold = divisor - numerator;
 			if (reduced >= threshold) {
 				reduced -= threshold;
 
@@ -305,8 +307,10 @@ ax211_backend_mul_div_reduced(
 				reduced += numerator;
 			}
 		}
+
 		mask >>= 1;
 	}
+
 	*quotient = result;
 	*remainder = reduced;
 	/* Reports successful completion. */
@@ -329,18 +333,18 @@ ax211_backend_ticks_for_us(
 	/* Handles the ticks availability. */
 	if (frequency_hz == 0U || ticks == NULL)
 		return EINVAL;
-	whole = frequency_hz / AX211_MICROSECONDS_PER_SECOND;
 
 	/* Handles the whole condition. */
+	whole = frequency_hz / AX211_MICROSECONDS_PER_SECOND;
 	if (whole != 0U && microseconds > UINT64_MAX / whole)
 		return EOVERFLOW;
 	result = whole * microseconds;
+
+	/* Checks the operation status. */
 	error = ax211_backend_mul_div_reduced(
 		frequency_hz % AX211_MICROSECONDS_PER_SECOND, microseconds,
 		AX211_MICROSECONDS_PER_SECOND, &fractional,
 		&fractional_remainder);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
@@ -356,6 +360,7 @@ ax211_backend_ticks_for_us(
 			return EOVERFLOW;
 		result++;
 	}
+
 	*ticks = result;
 	/* Reports successful completion. */
 	return 0;
@@ -377,17 +382,17 @@ ax211_backend_ticks_to_us(
 	/* Handles the microseconds availability. */
 	if (frequency_hz == 0U || microseconds == NULL)
 		return EINVAL;
-	whole = ticks / frequency_hz;
 
 	/* Handles the whole condition. */
+	whole = ticks / frequency_hz;
 	if (whole > UINT64_MAX / AX211_MICROSECONDS_PER_SECOND)
 		return EOVERFLOW;
 	result = whole * AX211_MICROSECONDS_PER_SECOND;
+
+	/* Checks the operation status. */
 	error = ax211_backend_mul_div_reduced(
 		ticks % frequency_hz, AX211_MICROSECONDS_PER_SECOND,
 		frequency_hz, &fractional, &fractional_remainder);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 	(void)fractional_remainder;
@@ -416,10 +421,10 @@ ax211_backend_counter_read_checked(
 
 	/* Checks the hal rtc read counter result. */
 	if (!hal_rtc_read_counter(&current, &frequency_hz) ||
-	    frequency_hz != backend->counter_frequency_hz)
-
+	    frequency_hz != backend->counter_frequency_hz) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	observed = __atomic_load_n(&backend->last_counter, __ATOMIC_ACQUIRE);
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
@@ -437,6 +442,7 @@ ax211_backend_counter_read_checked(
 			    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 			break;
 	}
+
 	*ticks = current;
 	/* Reports successful completion. */
 	return 0;
@@ -466,10 +472,10 @@ ax211_backend_microseconds_publish(
 		if (__atomic_compare_exchange_n(&backend->last_microseconds,
 						&observed, microseconds, 0,
 						__ATOMIC_ACQ_REL,
-						__ATOMIC_ACQUIRE))
-
+						__ATOMIC_ACQUIRE)) {
 			/* Reports successful completion. */
 			return 0;
+		}
 	}
 }
 
@@ -488,30 +494,30 @@ ax211_backend_delay_us(
 
 	/* Handles the backend availability. */
 	if (backend == NULL || backend->registers == NULL ||
-	    !backend->counter_ready)
-
+	    !backend->counter_ready) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the duration us condition. */
 	if (duration_us == 0U)
 		return 0;
-	error = ax211_backend_ticks_for_us(backend->counter_frequency_hz,
-					   duration_us, &wait_ticks);
 
 	/* Checks the operation status. */
+	error = ax211_backend_ticks_for_us(backend->counter_frequency_hz,
+					   duration_us, &wait_ticks);
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = ax211_backend_ticks_for_us(backend->counter_frequency_hz,
 					   AX211_BUSY_WAIT_WINDOW_US,
 					   &yield_threshold_ticks);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = ax211_backend_counter_read_checked(backend, &now);
 
 	/* Checks the operation status. */
+	error = ax211_backend_counter_read_checked(backend, &now);
 	if (error != 0)
 		return error;
 
@@ -521,9 +527,8 @@ ax211_backend_delay_us(
 	deadline = now + wait_ticks;
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		error = ax211_backend_counter_read_checked(backend, &now);
-
 		/* Checks the operation status. */
+		error = ax211_backend_counter_read_checked(backend, &now);
 		if (error != 0)
 			return error;
 
@@ -553,13 +558,13 @@ ax211_backend_clock_us(
 
 	/* Handles the backend availability. */
 	if (backend == NULL || backend->registers == NULL || time_us == NULL ||
-	    !backend->counter_ready)
-
+	    !backend->counter_ready) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = ax211_backend_counter_read_checked(backend, &now);
+	}
 
 	/* Checks the operation status. */
+	error = ax211_backend_counter_read_checked(backend, &now);
 	if (error != 0)
 		return error;
 
@@ -567,15 +572,15 @@ ax211_backend_clock_us(
 	if (now < backend->counter_origin)
 		return EIO;
 	elapsed = now - backend->counter_origin;
+
+	/* Checks the operation status. */
 	error = ax211_backend_ticks_to_us(backend->counter_frequency_hz,
 					  elapsed, &converted);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = ax211_backend_microseconds_publish(backend, converted);
 
 	/* Checks the operation status. */
+	error = ax211_backend_microseconds_publish(backend, converted);
 	if (error != 0)
 		return error;
 	*time_us = converted;
@@ -593,14 +598,14 @@ drv_intel_ax211_pci_mmio_host_ticks_for_us(
 	uint64_t microseconds,
 	uint64_t *ticks)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the ax211 backend ticks for us result. */
-	function_result =
+	error =
 		ax211_backend_ticks_for_us(frequency_hz, microseconds, ticks);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -612,13 +617,13 @@ drv_intel_ax211_pci_mmio_host_ticks_to_us(
 	uint64_t ticks,
 	uint64_t *microseconds)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the ax211 backend ticks to us result. */
-	function_result =
+	error =
 		ax211_backend_ticks_to_us(frequency_hz, ticks, microseconds);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 #endif

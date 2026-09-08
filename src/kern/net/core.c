@@ -90,6 +90,7 @@ net_input_enqueue(
 
 	/* Drops the packet while stopping or when the queue is full. */
 	irq = spin_lock_irqsave(&input_lock);
+
 	if (network_stopping || input_count >= NET_INPUT_QUEUE_LIMIT) {
 		network_stats.input_dropped++;
 		spin_unlock_irqrestore(&input_lock, irq);
@@ -107,6 +108,7 @@ net_input_enqueue(
 	input_count++;
 	worker_generation_advance_locked();
 	worker = worker_thread;
+
 	spin_unlock_irqrestore(&input_lock, irq);
 
 	/* Wakes the worker outside the lock. */
@@ -129,9 +131,12 @@ net_worker_wakeup(
 
 	/* Publishes the work before waking the worker. */
 	irq = spin_lock_irqsave(&input_lock);
+
 	worker_generation_advance_locked();
 	worker = worker_thread;
+
 	spin_unlock_irqrestore(&input_lock, irq);
+
 	if (worker != NULL)
 		sched_wakeup(worker);
 }
@@ -169,10 +174,12 @@ net_init(
 	input_tail = NULL;
 	input_count = 0;
 	irq = spin_lock_irqsave(&input_lock);
+
 	worker_thread = NULL;
 	worker_generation = 1U;
 	network_stopping = 0;
 	memset(&network_stats, 0, sizeof(network_stats));
+
 	spin_unlock_irqrestore(&input_lock, irq);
 
 	/* Registers the socket families and the protocols. */
@@ -218,10 +225,14 @@ net_init(
 		(void)thread_abort_new(worker);
 		return error;
 	}
+
 	thread_start(worker);
 	irq = spin_lock_irqsave(&input_lock);
+
 	worker = worker_thread;
+
 	spin_unlock_irqrestore(&input_lock, irq);
+
 	thread_start(worker);
 
 	/* Reports the running network stack. */
@@ -245,7 +256,9 @@ net_shutdown_for_boot(
 
 	/* Refuses new input. */
 	irq = spin_lock_irqsave(&input_lock);
+
 	network_stopping = 1;
+
 	spin_unlock_irqrestore(&input_lock, irq);
 
 	/*
@@ -265,6 +278,7 @@ net_shutdown_for_boot(
 		last_error = error;
 		sched_yield();
 	}
+
 	last_error = 0;
 	for (;;) {
 		error = wlan_station_shutdown_all();
@@ -300,7 +314,9 @@ net_get_stats(
 
 	/* Samples the statistics under the input lock. */
 	irq = spin_lock_irqsave(&input_lock);
+
 	*stats = network_stats;
+
 	spin_unlock_irqrestore(&input_lock, irq);
 }
 
@@ -343,9 +359,8 @@ loopback_open(
 {
 	int error;
 
-	error = net_device_set_carrier(device, 1);
-
 	/* Reports the carrier change. */
+	error = net_device_set_carrier(device, 1);
 	if (error != 0)
 		return error;
 
@@ -416,6 +431,7 @@ input_dequeue(
 
 	/* Unlinks the head of the queue under the lock. */
 	irq = spin_lock_irqsave(&input_lock);
+
 	packet = input_head;
 	if (packet != NULL) {
 		input_head = packet->next;
@@ -425,6 +441,7 @@ input_dequeue(
 		if (input_count != 0)
 			input_count--;
 	}
+
 	spin_unlock_irqrestore(&input_lock, irq);
 
 	/* Reports the packet, or none. */
@@ -469,8 +486,11 @@ work_pending(
 
 	/* Queued input is work. */
 	irq = spin_lock_irqsave(&input_lock);
+
 	pending = input_head != NULL;
+
 	spin_unlock_irqrestore(&input_lock, irq);
+
 	if (pending)
 		return 1;
 
@@ -483,6 +503,7 @@ work_pending(
 			net_device_release(device);
 			return 1;
 		}
+
 		net_device_release(device);
 	}
 
@@ -535,6 +556,7 @@ network_worker(
 			sched_yield();
 			continue;
 		}
+
 		if (work_pending())
 			continue;
 

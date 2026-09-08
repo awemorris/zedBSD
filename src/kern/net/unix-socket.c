@@ -164,7 +164,9 @@ unix_socket_bound_path_matches(
 	/* Compares the published bound path under the socket lock. */
 	endpoint = unix_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	matches = endpoint->bound && path_equal(&endpoint->bound_path, path);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Reports the comparison. */
@@ -210,10 +212,12 @@ unix_socket_send_message(
 				(void)file_close(files[index]);
 			return -(ssize_t)ENOMEM;
 		}
+
 		rights->count = count;
 		for (index = 0; index < count; index++)
 			rights->files[index] = files[index];
 	}
+
 	result = unix_send_internal(socket, buffer, length, flags, address,
 				  address_length, rights, NULL);
 
@@ -264,6 +268,7 @@ unix_socket_send_message_at(
 				(void)file_close(files[index]);
 			return -(ssize_t)ENOMEM;
 		}
+
 		rights->count = count;
 		for (index = 0; index < count; index++)
 			rights->files[index] = files[index];
@@ -279,6 +284,7 @@ unix_socket_send_message_at(
 			return result;
 		}
 	}
+
 	result = unix_send_internal(socket, buffer, length, flags, address,
 				  address_length, rights, peer);
 
@@ -344,6 +350,7 @@ unix_socket_receive_begin(
 	/* Applies the receive timeout as a deadline. */
 	endpoint = unix_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (socket->receive_timeout_ticks != 0 &&
 	    syscall_restart_deadline_after(socket->receive_timeout_ticks,
 					   &deadline) != 0) {
@@ -360,6 +367,7 @@ unix_socket_receive_begin(
 			packet = NULL;
 			chunk = endpoint->stream_head;
 		}
+
 		if (datagram && packet != NULL &&
 		    endpoint->reserved_packet == NULL)
 			break;
@@ -371,28 +379,34 @@ unix_socket_receive_begin(
 			    socket->read_shutdown)
 				break;
 		}
+
 		if (!datagram && chunk == NULL && socket->read_shutdown) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return 0;
 		}
+
 		if (socket->error != 0) {
 			error = socket->error;
 			socket->error = 0;
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return -(ssize_t)error;
 		}
+
 		if (socket->lifecycle != SOCKET_OPEN) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return -EPIPE;
 		}
+
 		if ((flags & MSG_DONTWAIT) != 0 || thread_current() == NULL) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return -EAGAIN;
 		}
+
 		if (deadline != 0 && sched_ticks() >= deadline) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return -EAGAIN;
 		}
+
 		sequence = waitq_sequence(&socket->receive_waitq);
 		error = waitq_sleep(&socket->receive_waitq,
 				    &socket->lock, sequence, deadline,
@@ -432,6 +446,7 @@ unix_socket_receive_begin(
 	transaction->datagram = (unsigned)datagram;
 	transaction->active = 1;
 	socket_ref(socket);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Copies the datagram, or as many stream chunks as fit up to a rights boundary. */
@@ -487,6 +502,7 @@ unix_socket_receive_begin(
 		transaction->files[index] = rights->files[index];
 		file_ref(transaction->files[index]);
 	}
+
 	transaction->file_count = delivered;
 	transaction->control_truncated =
 	    rights != NULL && delivered < rights->count;
@@ -517,6 +533,7 @@ unix_socket_receive_abort(
 	socket = transaction->socket;
 	endpoint = unix_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (endpoint->reservation_token == transaction->token) {
 		if (transaction->datagram &&
 		    endpoint->reserved_packet == transaction->packet)
@@ -525,7 +542,9 @@ unix_socket_receive_abort(
 			 endpoint->reserved_stream == transaction->packet)
 			endpoint->reserved_stream = NULL;
 	}
+
 	waitq_wake_all(&socket->receive_waitq);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Drops the file references that were handed out. */
@@ -533,6 +552,7 @@ unix_socket_receive_abort(
 		if (transaction->files[index] != NULL)
 			(void)file_close(transaction->files[index]);
 	}
+
 	transaction->active = 0;
 	socket_release(socket);
 	poll_notify();
@@ -581,10 +601,12 @@ unix_socket_receive_commit(
 		packet = NULL;
 		chunk = transaction->packet;
 	}
+
 	free_tail = &free_chunks;
 
 	/* The reservation must still cover the head of the queue. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (endpoint->reservation_token != transaction->token ||
 	    (transaction->datagram && (endpoint->reserved_packet != packet ||
 				       socket->receive_head != packet)) ||
@@ -642,6 +664,7 @@ unix_socket_receive_commit(
 			*free_tail = chunk;
 			free_tail = &chunk->next;
 		}
+
 		if (endpoint->stream_head == NULL)
 			endpoint->stream_tail = NULL;
 		if (endpoint->stream_bytes >= transaction->copied)
@@ -657,7 +680,9 @@ unix_socket_receive_commit(
 		endpoint->reserved_stream = NULL;
 		waitq_wake_all(&socket->receive_space_waitq);
 	}
+
 	waitq_wake_all(&socket->receive_waitq);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Frees the consumed storage outside the lock. */
@@ -771,11 +796,14 @@ unix_socket_bind_path(
 	/* Only one bind may be in progress and none may have succeeded. */
 	endpoint = unix_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (endpoint->bound || endpoint->binding_in_progress) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return EINVAL;
 	}
+
 	endpoint->binding_in_progress = 1;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Creates the socket inode under the parent's VFS transaction. */
@@ -815,7 +843,9 @@ unix_socket_bind_path(
 	path_release(&parent);
 	path_release(&committed_path);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	endpoint->binding_in_progress = 0;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Reports why the bind failed. */
@@ -851,10 +881,12 @@ unix_socket_listen(
 	/* A listener must be bound and not connected. */
 	endpoint = unix_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (!endpoint->bound) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return EDESTADDRREQ;
 	}
+
 	if (endpoint->connection != NULL) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return EISCONN;
@@ -870,7 +902,9 @@ unix_socket_listen(
 		endpoint->listener_credential = *listener_credential;
 		endpoint->listener_credential_valid = 1;
 	}
+
 	endpoint->listening = 1;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Reports the listening socket. */
@@ -905,15 +939,19 @@ unix_socket_connect_path(
 	/* Only one connect may be in progress, and none once connected. */
 	endpoint = unix_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (endpoint->connecting) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return EALREADY;
 	}
+
 	if (endpoint->connection != NULL) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return EISCONN;
 	}
+
 	endpoint->connecting = 1;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Resolves the listener and completes the connection. */
@@ -923,10 +961,10 @@ unix_socket_connect_path(
 		unix_connect_cancel(socket);
 		return error;
 	}
-	error = unix_connect_resolved(socket, listener, connector_credential, path,
-				     io_flags);
 
 	/* Reports why the connect failed. */
+	error = unix_connect_resolved(socket, listener, connector_credential, path,
+				     io_flags);
 	if (error != 0)
 		return error;
 
@@ -965,12 +1003,14 @@ unix_socket_pair_create(
 		socket_release(left);
 		return error;
 	}
+
 	error = unix_connection_create(left, right, creator, creator);
 	if (error != 0) {
 		socket_release(left);
 		socket_release(right);
 		return error;
 	}
+
 	*left_result = left;
 	*right_result = right;
 
@@ -990,9 +1030,8 @@ unix_socket_init(
 	};
 	int error;
 
-	error = socket_family_register(AF_UNIX, &family_ops);
-
 	/* Reports why the registration failed. */
+	error = socket_family_register(AF_UNIX, &family_ops);
 	if (error != 0)
 		return error;
 
@@ -1008,9 +1047,8 @@ unix_rights_release(
 	struct unix_rights *rights;
 	unsigned index;
 
-	rights = pointer;
-
 	/* Ignores a missing record. */
+	rights = pointer;
 	if (rights == NULL)
 		return;
 
@@ -1019,6 +1057,7 @@ unix_rights_release(
 		if (rights->files[index] != NULL)
 			(void)file_close(rights->files[index]);
 	}
+
 	kern_free(rights);
 }
 
@@ -1051,9 +1090,8 @@ unix_copy_path(
 	size_t available;
 	size_t used;
 
-	local = (const struct sockaddr_un *)address;
-
 	/* Rejects a missing, short, long, or foreign address. */
+	local = (const struct sockaddr_un *)address;
 	if (address == NULL ||
 	    length <= offsetof(struct sockaddr_un, sun_path) ||
 	    length > sizeof(*local) ||
@@ -1180,9 +1218,11 @@ unix_resolve_endpoint(
 			socket_release(socket);
 			socket = NULL;
 		}
+
 		if (socket == NULL)
 			error = ECONNREFUSED;
 	}
+
 	path_release(&resolved);
 	if (error != 0)
 		return error;
@@ -1247,16 +1287,18 @@ unix_peer_ref(
 	struct socket *peer;
 	unsigned long irq;
 
-	connection = endpoint->connection;
-
 	/* An unconnected endpoint has no peer; a closed one reports EPIPE. */
+	connection = endpoint->connection;
 	if (connection == NULL)
 		return ENOTCONN;
 	irq = spin_lock_irqsave(&connection->lock);
+
 	peer = connection->ends[endpoint->side ^ 1U];
 	if (peer == NULL || !socket_tryref(peer))
 		peer = NULL;
+
 	spin_unlock_irqrestore(&connection->lock, irq);
+
 	if (peer == NULL)
 		return EPIPE;
 	*result = peer;
@@ -1328,6 +1370,7 @@ unix_stream_wait_space(
 			error = EPIPE;
 			break;
 		}
+
 		if (space != 0) {
 			*available = space;
 			break;
@@ -1338,14 +1381,17 @@ unix_stream_wait_space(
 			error = EAGAIN;
 			break;
 		}
+
 		if (deadline != 0 && sched_ticks() >= deadline) {
 			error = EAGAIN;
 			break;
 		}
+
 		if (signal_pending_unblocked(thread_current())) {
 			error = EINTR;
 			break;
 		}
+
 		sequence =
 		    waitq_sequence(&peer->receive_space_waitq);
 		error = waitq_sleep(&peer->receive_space_waitq,
@@ -1356,6 +1402,7 @@ unix_stream_wait_space(
 		if (error != 0)
 			break;
 	}
+
 	spin_unlock_irqrestore(&peer->lock, irq);
 
 	/* Reports the failure. */
@@ -1406,16 +1453,19 @@ unix_stream_send(
 			result = unix_send_failure(rights, EINVAL);
 			return result;
 		}
+
 		return 0;
 	}
 
 	/* A shut-down socket cannot send; the send timeout sets the deadline. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (socket->write_shutdown || socket->lifecycle != SOCKET_OPEN) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		result = unix_send_epipe(rights, flags);
 		return result;
 	}
+
 	send_hiwat = socket->send_hiwat_bytes;
 	if (socket->send_timeout_ticks != 0 &&
 	    syscall_restart_deadline_after(socket->send_timeout_ticks,
@@ -1424,6 +1474,7 @@ unix_stream_send(
 		result = unix_send_failure(rights, EOVERFLOW);
 		return result;
 	}
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Serializes senders on this end. */
@@ -1432,14 +1483,17 @@ unix_stream_send(
 			result = unix_send_failure(rights, EAGAIN);
 			return result;
 		}
+
 		error = 0;
 	} else {
 		error = mutex_lock_interruptible(&endpoint->stream_send_lock);
 	}
+
 	if (error != 0) {
 		result = unix_send_failure(rights, error);
 		return result;
 	}
+
 	error = unix_peer_ref(endpoint, &peer);
 	if (error != 0) {
 		mutex_unlock(&endpoint->stream_send_lock);
@@ -1449,6 +1503,7 @@ unix_stream_send(
 			result = unix_send_failure(rights, error);
 		return result;
 	}
+
 	peer_endpoint = unix_endpoint(peer);
 
 	/* Queues one chunk per pass while data and space remain. */
@@ -1471,11 +1526,13 @@ unix_stream_send(
 				error = ENOBUFS;
 			break;
 		}
+
 		chunk = kern_calloc(1, sizeof(*chunk));
 		if (chunk == NULL) {
 			error = ENOBUFS;
 			break;
 		}
+
 		memcpy(chunk->data, bytes + offset, amount);
 		chunk->end = amount;
 
@@ -1535,6 +1592,7 @@ unix_stream_send(
 				error = 0;
 			}
 		}
+
 		spin_unlock_irqrestore(&peer->lock, irq);
 		unix_stream_chunk_free(chunk);
 		if (error == EAGAIN && (flags & MSG_DONTWAIT) == 0)
@@ -1544,7 +1602,9 @@ unix_stream_send(
 		offset += amount;
 		poll_notify();
 	}
+
 	socket_release(peer);
+
 	mutex_unlock(&endpoint->stream_send_lock);
 
 	/* A partial write is a success; nothing sent reports the error. */
@@ -1552,10 +1612,12 @@ unix_stream_send(
 		unix_rights_release(rights);
 		return (ssize_t)offset;
 	}
+
 	if (error == EPIPE) {
 		result = unix_send_epipe(rights, flags);
 		return result;
 	}
+
 	result = unix_send_failure(rights, error);
 	return result;
 }
@@ -1589,6 +1651,7 @@ unix_datagram_send(
 		result = unix_send_epipe(rights, flags);
 		return result;
 	}
+
 	if (length > PACKET_BUF_STORAGE_SIZE) {
 		if (resolved_peer != NULL)
 			socket_release(resolved_peer);
@@ -1602,22 +1665,27 @@ unix_datagram_send(
 		resolved_peer = NULL;
 		goto have_peer;
 	}
+
 	if (address == NULL && endpoint->connection != NULL) {
 		error = unix_peer_ref(endpoint, &peer);
 		if (error != 0) {
 			result = unix_send_failure(rights, error);
 			return result;
 		}
+
 		goto have_peer;
 	}
+
 	if (address != NULL) {
 		result = unix_send_failure(rights, EOPNOTSUPP);
 		return result;
 	}
+
 	if (!endpoint->connected || endpoint->datagram_peer == NULL) {
 		result = unix_send_failure(rights, EDESTADDRREQ);
 		return result;
 	}
+
 	if (socket_tryref(endpoint->datagram_peer))
 		peer = endpoint->datagram_peer;
 	else
@@ -1626,17 +1694,22 @@ unix_datagram_send(
 		result = unix_send_failure(rights, ECONNREFUSED);
 		return result;
 	}
+
 have_peer:
 	/* Builds the packet with the sender's address and the rights. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	timeout_ticks = socket->send_timeout_ticks;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	packet = packet_buf_alloc(0);
 	if (packet == NULL) {
 		socket_release(peer);
 		result = unix_send_failure(rights, ENOBUFS);
 		return result;
 	}
+
 	data = packet_buf_append(packet, length);
 	if (data == NULL) {
 		packet_buf_free(packet);
@@ -1644,6 +1717,7 @@ have_peer:
 		result = unix_send_failure(rights, EMSGSIZE);
 		return result;
 	}
+
 	if (length != 0)
 		memcpy(data, buffer, length);
 	unix_store_packet_source(unix_endpoint(socket), packet);
@@ -1696,9 +1770,11 @@ unix_send_internal(
 			result = unix_send_failure(rights, EISCONN);
 			return result;
 		}
+
 		result = unix_stream_send(socket, buffer, length, flags, rights);
 		return result;
 	}
+
 	result = unix_datagram_send(socket, buffer, length, flags, address,
 				  rights, resolved_peer);
 	return result;
@@ -1764,12 +1840,14 @@ unix_shutdown(
 
 	/* Sets the flags and wakes everyone waiting on this end. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (how == SHUT_RD || how == SHUT_RDWR)
 		socket->read_shutdown = 1;
 	if (how == SHUT_WR || how == SHUT_RDWR)
 		socket->write_shutdown = 1;
 	waitq_wake_all(&socket->receive_waitq);
 	waitq_wake_all(&socket->receive_space_waitq);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* A write shutdown is an end of file for the peer. */
@@ -1783,6 +1861,7 @@ unix_shutdown(
 			socket_release(peer);
 		}
 	}
+
 	poll_notify();
 	return 0;
 }
@@ -1810,7 +1889,9 @@ unix_connect_cancel(
 
 	endpoint = unix_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	endpoint->connecting = 0;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 }
 
@@ -1867,6 +1948,7 @@ unix_connect_resolved(
 		socket_release(listener_socket);
 		return error;
 	}
+
 	pending = kern_calloc(1, sizeof(*pending));
 	connection = kern_calloc(1, sizeof(*connection));
 	if (pending == NULL || connection == NULL) {
@@ -1877,6 +1959,7 @@ unix_connect_resolved(
 		unix_connect_cancel(socket);
 		return ENOMEM;
 	}
+
 	refcount_init(&connection->refs, 2);
 	spin_init(&connection->lock, LOCK_RANK_UNIX_CONNECTION,
 		  "unix connection");
@@ -1884,6 +1967,7 @@ unix_connect_resolved(
 	/* Queues the accepted end at a listener with backlog room. */
 	error = 0;
 	irq = spin_lock_irqsave(&listener->socket.lock);
+
 	if (!listener->listening) {
 		error = ECONNREFUSED;
 	} else if (!listener->listener_credential_valid) {
@@ -1908,6 +1992,7 @@ unix_connect_resolved(
 		listener->pending_count++;
 		waitq_wake_one(&listener->socket.accept_waitq);
 	}
+
 	spin_unlock_irqrestore(&listener->socket.lock, irq);
 
 	/*
@@ -1928,6 +2013,7 @@ unix_connect_resolved(
 	} else {
 		unix_connect_cancel(socket);
 	}
+
 	socket_release(listener_socket);
 	if (error != 0) {
 		kern_free(pending);
@@ -1984,6 +2070,7 @@ unix_accept(
 	if (socket->type != SOCK_STREAM)
 		return EOPNOTSUPP;
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (!listener->listening) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return EINVAL;
@@ -1995,10 +2082,12 @@ unix_accept(
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EAGAIN;
 		}
+
 		if (signal_pending_unblocked(thread)) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EINTR;
 		}
+
 		sequence = waitq_sequence(&socket->accept_waitq);
 		error = waitq_sleep(&socket->accept_waitq, &socket->lock,
 				    sequence, 0, WAITQ_INTERRUPTIBLE);
@@ -2015,6 +2104,7 @@ unix_accept(
 		listener->pending_tail = NULL;
 	listener->pending_count--;
 	*result = pending->socket;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Reports the peer's address when asked. */
@@ -2028,6 +2118,7 @@ unix_accept(
 			unix_store_address(NULL, address, length);
 		}
 	}
+
 	kern_free(pending);
 	return 0;
 }
@@ -2074,6 +2165,7 @@ unix_getpeername(
 		unix_store_address(&temporary, address, length);
 		return 0;
 	}
+
 connected_pair:
 	/* A connection reports the peer end's bound path. */
 	error = unix_peer_ref(unix_endpoint(socket), &peer);
@@ -2108,12 +2200,16 @@ unix_getsockopt(
 	/* Copies the credential recorded at connection time. */
 	endpoint = unix_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (!endpoint->peer_credential_valid) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return ENOTCONN;
 	}
+
 	credential = endpoint->peer_credential;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	memcpy(value, &credential, sizeof(credential));
 	*length = sizeof(credential);
 	return 0;
@@ -2138,9 +2234,9 @@ unix_poll(
 
 	endpoint = unix_endpoint(socket);
 	peer = NULL;
-	result = 0;
 
 	/* A listener is readable when a connection awaits accept. */
+	result = 0;
 	if (endpoint->listening) {
 		error = socket_poll_common(socket, events, &result);
 		if (error != 0)
@@ -2174,6 +2270,7 @@ unix_poll(
 				else
 					error = ECONNREFUSED;
 			}
+
 			if (error == 0) {
 				irq = spin_lock_irqsave(&peer->lock);
 				if (peer->lifecycle != SOCKET_OPEN ||
@@ -2192,12 +2289,14 @@ unix_poll(
 				result |= POLLERR | POLLHUP;
 			}
 		}
+
 		*revents = result;
 		return 0;
 	}
 
 	/* A stream socket is readable with data, end of file, or an error. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (endpoint->stream_head != NULL ||
 	    socket->read_shutdown ||
 	    socket->lifecycle != SOCKET_OPEN)
@@ -2211,6 +2310,7 @@ unix_poll(
 	send_hiwat = socket->send_hiwat_bytes;
 	local_writable =
 	    !socket->write_shutdown && socket->lifecycle == SOCKET_OPEN;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* It is writable while the peer's queue is below the limit. */
@@ -2227,11 +2327,13 @@ unix_poll(
 		} else {
 			result |= POLLERR | POLLHUP;
 		}
+
 		spin_unlock_irqrestore(&peer->lock, irq);
 		socket_release(peer);
 	} else if (local_writable) {
 		result |= POLLERR | POLLHUP;
 	}
+
 	*revents = result;
 	return 0;
 }
@@ -2253,8 +2355,11 @@ unix_buffer_changed(
 
 	/* Wakes the senders blocked on space. */
 	irq = spin_lock_irqsave(&peer->lock);
+
 	waitq_wake_all(&peer->receive_space_waitq);
+
 	spin_unlock_irqrestore(&peer->lock, irq);
+
 	socket_release(peer);
 }
 
@@ -2280,10 +2385,12 @@ unix_endpoint_close(
 	/* Takes everything out of the endpoint under its lock, once. */
 	path_init(&bound_path);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (endpoint->endpoint_closed) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return;
 	}
+
 	endpoint->endpoint_closed = 1;
 	connection = endpoint->connection;
 	endpoint->connection = NULL;
@@ -2293,6 +2400,7 @@ unix_endpoint_close(
 		bound_path = endpoint->bound_path;
 		path_init(&endpoint->bound_path);
 	}
+
 	datagram_peer = endpoint->datagram_peer;
 	endpoint->datagram_peer = NULL;
 	pending_list = endpoint->pending_head;
@@ -2301,6 +2409,7 @@ unix_endpoint_close(
 	endpoint->pending_count = 0;
 	endpoint->listening = 0;
 	waitq_wake_all(&socket->receive_space_waitq);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Unhooks the socket from its inode and drops the path. */
@@ -2312,6 +2421,7 @@ unix_endpoint_close(
 				inode->i_special = NULL;
 			mutex_unlock(&inode->i_lock);
 		}
+
 		path_release(&bound_path);
 	}
 
@@ -2344,6 +2454,7 @@ unix_endpoint_close(
 			poll_notify();
 			socket_release(peer);
 		}
+
 		unix_connection_release(connection);
 	}
 }
@@ -2363,11 +2474,13 @@ unix_close(
 	/* Detaches the endpoint and takes its queue. */
 	unix_endpoint_close(socket);
 	irq = spin_lock_irqsave(&socket->lock);
+
 	chunks = endpoint->stream_head;
 	endpoint->stream_head = NULL;
 	endpoint->stream_tail = NULL;
 	endpoint->stream_bytes = 0;
 	endpoint->reserved_stream = NULL;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Frees the queue and the endpoint. */
@@ -2378,6 +2491,7 @@ unix_close(
 		unix_stream_chunk_free(chunk);
 		chunk = chunks;
 	}
+
 	kern_free(endpoint);
 }
 

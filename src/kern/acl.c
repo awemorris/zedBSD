@@ -67,9 +67,8 @@ posix_acl_validate(
 
 	/* Checks every entry against its predecessor and counts the kinds. */
 	for (index = 0; index < acl->count; index++) {
-		entry = &acl->entries[index];
-
 		/* Rejects bad permissions, an unknown tag, or a tag out of order. */
+		entry = &acl->entries[index];
 		if (entry->permissions > 7U ||
 		    entry->tag < POSIX_ACL_USER_OBJ ||
 		    entry->tag > POSIX_ACL_OTHER ||
@@ -104,6 +103,7 @@ posix_acl_validate(
 		default:
 			break;
 		}
+
 		prior_tag = entry->tag;
 	}
 
@@ -150,9 +150,8 @@ posix_acl_check_access(
 	if (inode == NULL || cred == NULL)
 		return EINVAL;
 
-	wanted = requested_permissions(requested);
-
 	/* The owner is judged by the owner entry alone. */
+	wanted = requested_permissions(requested);
 	if (cred->euid == inode->i_uid) {
 		entry = acl_entry(acl, POSIX_ACL_USER_OBJ);
 		if ((entry->permissions & wanted) != wanted)
@@ -180,6 +179,7 @@ posix_acl_check_access(
 		allowed |= entry->permissions;
 		group_match = 1;
 	}
+
 	for (index = 0; index < acl->count; index++) {
 		entry = &acl->entries[index];
 		if (entry->tag == POSIX_ACL_GROUP && cred_in_group(cred, entry->id)) {
@@ -267,9 +267,9 @@ posix_acl_store(
 
 	/* Writes exactly the used part of the layout. */
 	size = 8U + (size_t)acl->count * sizeof(acl->entries[0]);
-	error = inode_setxattr(inode, name, acl, size, 0);
 
 	/* Reports why the attribute write failed. */
+	error = inode_setxattr(inode, name, acl, size, 0);
 	if (error != 0)
 		return error;
 
@@ -324,9 +324,9 @@ posix_acl_chmod(
 	}
 
 	/* Stores the updated ACL. */
-	error = posix_acl_store(inode, POSIX_ACL_XATTR_ACCESS, &acl);
 
 	/* Reports why the store failed. */
+	error = posix_acl_store(inode, POSIX_ACL_XATTR_ACCESS, &acl);
 	if (error != 0)
 		return error;
 

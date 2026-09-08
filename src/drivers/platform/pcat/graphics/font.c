@@ -41,9 +41,9 @@ drv_pcat_font_init(
 	/* Handles the font valid condition. */
 	if (font_valid)
 		return;
-	boot_font = hal_get_arch_handoff("pcat.boot-font");
 
 	/* Handles the boot font availability. */
+	boot_font = hal_get_arch_handoff("pcat.boot-font");
 	if (boot_font != NULL) {
 		memcpy(ascii_font, boot_font, sizeof(ascii_font));
 		font_valid = 1;
@@ -80,10 +80,12 @@ drv_pcat_font_restore_ascii(
 			VGA_FONT_MEMORY[glyph * VGA_GLYPH_SLOT + row] =
 				ascii_font[glyph][row];
 		}
+
 		/* Process each element required by the operation. */
 		for (; row < VGA_GLYPH_SLOT; row++)
 			VGA_FONT_MEMORY[glyph * VGA_GLYPH_SLOT + row] = 0;
 	}
+
 	plane2_access_end(saved);
 }
 

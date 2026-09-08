@@ -176,15 +176,16 @@ wlan_wpa2_engine_start(
 		error = fail(engine, error);
 		return error;
 	}
+
 	if (!active_time_valid(engine, now_ticks)) {
 		error = fail(engine, ETIMEDOUT);
 		return error;
 	}
 
 	/* Sends the authentication request. */
-	error = build_authentication(engine, now_ticks);
 
 	/* Reports the failure. */
+	error = build_authentication(engine, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -238,10 +239,12 @@ wlan_wpa2_engine_receive_management(
 			error = fail(engine, error);
 			return error;
 		}
+
 		if (status != 0U) {
 			error = fail(engine, ECONNREFUSED);
 			return error;
 		}
+
 		retire_implicitly_completed_tx(engine);
 		error = build_association(engine, now_ticks);
 		return error;
@@ -259,10 +262,12 @@ wlan_wpa2_engine_receive_management(
 			error = fail(engine, error);
 			return error;
 		}
+
 		if (response.status != 0U) {
 			error = fail(engine, ECONNREFUSED);
 			return error;
 		}
+
 		retire_implicitly_completed_tx(engine);
 
 		/*
@@ -277,6 +282,7 @@ wlan_wpa2_engine_receive_management(
 			error = fail(engine, error);
 			return error;
 		}
+
 		engine->state = WLAN_WPA2_STATE_MESSAGE_1;
 		engine->retry_count = 0U;
 		engine->step_deadline_ticks = bounded_deadline(engine, now_ticks);
@@ -325,6 +331,7 @@ wlan_wpa2_engine_receive_eapol(
 		error = fail(engine, EACCES);
 		return error;
 	}
+
 	error = wlan_wpa2_eapol_key_parse(frame, length, &key);
 	if (error != 0) {
 		error = fail(engine, error);
@@ -337,15 +344,18 @@ wlan_wpa2_engine_receive_eapol(
 			error = message_1_first(engine, &key, now_ticks);
 			return error;
 		}
+
 		if (engine->state == WLAN_WPA2_STATE_MESSAGE_2_TX ||
 		    engine->state == WLAN_WPA2_STATE_MESSAGE_3) {
 			error = message_1_retransmit(engine, &key, now_ticks);
 			return error;
 		}
+
 		if (engine->state == WLAN_WPA2_STATE_AUTHORIZED) {
 			error = pairwise_rekey_begin(engine, &key, now_ticks);
 			return error;
 		}
+
 		return EBUSY;
 	}
 
@@ -357,6 +367,7 @@ wlan_wpa2_engine_receive_eapol(
 			    now_ticks);
 			return error;
 		}
+
 		if (engine->state == WLAN_WPA2_STATE_MESSAGE_4_TX ||
 		    engine->state == WLAN_WPA2_STATE_MESSAGE_4_RETRANSMIT_TX ||
 		    engine->state == WLAN_WPA2_STATE_PAIRWISE_STAGE ||
@@ -365,6 +376,7 @@ wlan_wpa2_engine_receive_eapol(
 			    now_ticks);
 			return error;
 		}
+
 		return EBUSY;
 	}
 
@@ -380,9 +392,9 @@ wlan_wpa2_engine_receive_eapol(
 	}
 
 	/* Anything else is a protocol violation. */
-	error = fail(engine, EACCES);
 
 	/* Reports the failure. */
+	error = fail(engine, EACCES);
 	if (error != 0)
 		return error;
 
@@ -446,6 +458,7 @@ wlan_wpa2_engine_report_tx(
 			engine->tx_cookie_active = 0U;
 			return 0;
 		}
+
 		result = retry_current(engine, pending, now_ticks);
 		return result;
 	}
@@ -474,6 +487,7 @@ wlan_wpa2_engine_report_tx(
 				    now_ticks);
 				return result;
 			}
+
 			if (callback_error != 0)
 				return callback_error;
 		}
@@ -489,6 +503,7 @@ wlan_wpa2_engine_report_tx(
 			engine->step_deadline_ticks = 0U;
 			return 0;
 		}
+
 		result = pairwise_rekey_authorize(engine);
 		return result;
 	case WLAN_WPA2_STATE_GROUP_MESSAGE_2_TX:
@@ -499,12 +514,14 @@ wlan_wpa2_engine_report_tx(
 			engine->step_deadline_ticks = 0U;
 			return 0;
 		}
+
 		callback_error = group_rekey_commit(engine);
 		if (callback_error == EBUSY) {
 			result = activation_retry(engine,
 			    WLAN_WPA2_STATE_GROUP_ACTIVATE, now_ticks);
 			return result;
 		}
+
 		return callback_error;
 	default:
 		return ESTALE;
@@ -536,6 +553,7 @@ wlan_wpa2_engine_timer(
 		error = fail(engine, ETIMEDOUT);
 		return error;
 	}
+
 	if (now_ticks < engine->step_deadline_ticks)
 		return 0;
 
@@ -547,10 +565,12 @@ wlan_wpa2_engine_timer(
 			    WLAN_WPA2_STATE_PAIRWISE_STAGE, now_ticks);
 			return error;
 		}
+
 		if (error != 0) {
 			error = fail(engine, error);
 			return error;
 		}
+
 		error = build_message_4(engine, WLAN_WPA2_STATE_MESSAGE_4_TX,
 		    now_ticks);
 		return error;
@@ -564,10 +584,12 @@ wlan_wpa2_engine_timer(
 			    now_ticks);
 			return error;
 		}
+
 		if (error != 0) {
 			error = fail(engine, error);
 			return error;
 		}
+
 		error = build_group_message_2(engine,
 		    WLAN_WPA2_STATE_GROUP_MESSAGE_2_TX, now_ticks);
 		return error;
@@ -581,11 +603,13 @@ wlan_wpa2_engine_timer(
 			    WLAN_WPA2_STATE_PAIRWISE_ACTIVATE, now_ticks);
 			return error;
 		}
+
 		if (error != 0)
 			return error;
 		error = pairwise_rekey_authorize(engine);
 		return error;
 	}
+
 	if (engine->state == WLAN_WPA2_STATE_GROUP_ACTIVATE) {
 		error = group_rekey_commit(engine);
 		if (error == EBUSY) {
@@ -593,6 +617,7 @@ wlan_wpa2_engine_timer(
 			    WLAN_WPA2_STATE_GROUP_ACTIVATE, now_ticks);
 			return error;
 		}
+
 		return error;
 	}
 
@@ -602,9 +627,9 @@ wlan_wpa2_engine_timer(
 		error = fail(engine, EINVAL);
 		return error;
 	}
-	error = retry_current(engine, pending, now_ticks);
 
 	/* Reports the failure. */
+	error = retry_current(engine, pending, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -963,6 +988,7 @@ cleanup(
 			return error;
 		engine->authorized = 0U;
 	}
+
 	if (engine->pending_group_installed) {
 		error = engine->ops->key_delete(engine->callback_context,
 		    engine->generation, WLAN_WPA2_KEY_GROUP,
@@ -972,6 +998,7 @@ cleanup(
 			return error;
 		engine->pending_group_installed = 0U;
 	}
+
 	if (engine->pending_pairwise_installed) {
 		error = engine->ops->key_delete(engine->callback_context,
 		    engine->generation, WLAN_WPA2_KEY_PAIRWISE, 0U,
@@ -980,6 +1007,7 @@ cleanup(
 			return error;
 		engine->pending_pairwise_installed = 0U;
 	}
+
 	if (engine->group_installed) {
 		if (!engine->old_group_retired) {
 			error = engine->ops->key_delete(engine->callback_context,
@@ -988,8 +1016,10 @@ cleanup(
 			if (error != 0)
 				return error;
 		}
+
 		engine->group_installed = 0U;
 	}
+
 	if (engine->pairwise_installed) {
 		if (!engine->old_pairwise_retired) {
 			error = engine->ops->key_delete(engine->callback_context,
@@ -998,6 +1028,7 @@ cleanup(
 			if (error != 0)
 				return error;
 		}
+
 		engine->pairwise_installed = 0U;
 	}
 
@@ -1021,6 +1052,7 @@ cleanup(
 		engine->associated = 0U;
 		engine->aid = 0U;
 	}
+
 	if (engine->configured) {
 		error = engine->ops->radio_stop(engine->callback_context,
 		    engine->generation);
@@ -1028,6 +1060,7 @@ cleanup(
 			return error;
 		engine->configured = 0U;
 	}
+
 	engine->aid = 0U;
 
 	/*
@@ -1154,6 +1187,7 @@ profile_valid(
 		if ((profile->rates[index] & 0x7fU) == 0U)
 			return 0;
 	}
+
 	return 1;
 }
 
@@ -1186,6 +1220,7 @@ submit_current(
 		error = fail(engine, error);
 		return error;
 	}
+
 	return 0;
 }
 
@@ -1213,9 +1248,9 @@ cache_and_submit(
 	    sizeof(engine->tx_destination));
 	engine->tx_length = length;
 	engine->retry_count = 0U;
-	error = submit_current(engine, pending_state, now_ticks);
 
 	/* Reports the failure. */
+	error = submit_current(engine, pending_state, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -1240,9 +1275,9 @@ retry_current(
 
 	/* Sends the cached frame again. */
 	engine->retry_count++;
-	error = submit_current(engine, pending_state, now_ticks);
 
 	/* Reports why the retry failed. */
+	error = submit_current(engine, pending_state, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -1271,10 +1306,10 @@ build_authentication(
 	/* Sends it, keeping a copy for the retries. */
 	engine->next_sequence = (uint16_t)((engine->next_sequence + 1U) &
 	    0x0fffU);
-	error = cache_and_submit(engine, WLAN_WPA2_STATE_AUTH_TX,
-	    WLAN_WPA2_TX_MANAGEMENT, engine->profile.bssid, length, now_ticks);
 
 	/* Reports why the transmit failed. */
+	error = cache_and_submit(engine, WLAN_WPA2_STATE_AUTH_TX,
+	    WLAN_WPA2_TX_MANAGEMENT, engine->profile.bssid, length, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -1306,10 +1341,10 @@ build_association(
 	/* Sends it, keeping a copy for the retries. */
 	engine->next_sequence = (uint16_t)((engine->next_sequence + 1U) &
 	    0x0fffU);
-	error = cache_and_submit(engine, WLAN_WPA2_STATE_ASSOC_TX,
-	    WLAN_WPA2_TX_MANAGEMENT, engine->profile.bssid, length, now_ticks);
 
 	/* Reports why the transmit failed. */
+	error = cache_and_submit(engine, WLAN_WPA2_STATE_ASSOC_TX,
+	    WLAN_WPA2_TX_MANAGEMENT, engine->profile.bssid, length, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -1446,6 +1481,7 @@ build_message_2(
 		error = fail(engine, error);
 		return error;
 	}
+
 	key.message = WLAN_WPA2_EAPOL_MESSAGE_2;
 	key.protocol_version = engine->protocol_version;
 	key.replay_counter = engine->message_1_replay_counter;
@@ -1469,10 +1505,10 @@ build_message_2(
 	}
 
 	/* Sends it. */
-	error = cache_and_submit(engine, WLAN_WPA2_STATE_MESSAGE_2_TX,
-	    WLAN_WPA2_TX_EAPOL, engine->profile.bssid, length, now_ticks);
 
 	/* Reports the failure. */
+	error = cache_and_submit(engine, WLAN_WPA2_STATE_MESSAGE_2_TX,
+	    WLAN_WPA2_TX_EAPOL, engine->profile.bssid, length, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -1513,10 +1549,10 @@ build_message_4(
 	}
 
 	/* Sends it. */
-	error = cache_and_submit(engine, pending_state, WLAN_WPA2_TX_EAPOL,
-	    engine->profile.bssid, length, now_ticks);
 
 	/* Reports the failure. */
+	error = cache_and_submit(engine, pending_state, WLAN_WPA2_TX_EAPOL,
+	    engine->profile.bssid, length, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -1557,10 +1593,10 @@ build_group_message_2(
 	}
 
 	/* Sends it. */
-	error = cache_and_submit(engine, pending_state, WLAN_WPA2_TX_EAPOL,
-	    engine->profile.bssid, length, now_ticks);
 
 	/* Reports the failure. */
+	error = cache_and_submit(engine, pending_state, WLAN_WPA2_TX_EAPOL,
+	    engine->profile.bssid, length, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -1607,6 +1643,7 @@ program_pending_pairwise_keys(
 			return error;
 		engine->pending_group_programmed = 1U;
 	}
+
 	return 0;
 }
 
@@ -1730,9 +1767,9 @@ message_1_first(
 		error = fail(engine, error);
 		return error;
 	}
-	error = build_message_2(engine, now_ticks);
 
 	/* Reports the failure. */
+	error = build_message_2(engine, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -1756,6 +1793,7 @@ message_1_retransmit(
 		error = fail(engine, EACCES);
 		return error;
 	}
+
 	if (key->replay_counter < engine->message_1_replay_counter) {
 		error = fail(engine, EACCES);
 		return error;
@@ -1776,9 +1814,9 @@ message_1_retransmit(
 	/* An identical repeat resends the cached message 2. */
 	if (engine->state == WLAN_WPA2_STATE_MESSAGE_2_TX)
 		return EALREADY;
-	error = retry_current(engine, WLAN_WPA2_STATE_MESSAGE_2_TX, now_ticks);
 
 	/* Reports the failure. */
+	error = retry_current(engine, WLAN_WPA2_STATE_MESSAGE_2_TX, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -1795,9 +1833,8 @@ message_3_digest(
 {
 	int error;
 
-	error = wlan_sha1(frame, length, digest);
-
 	/* Reports the failure. */
+	error = wlan_sha1(frame, length, digest);
 	if (error != 0)
 		return error;
 
@@ -1852,6 +1889,7 @@ pairwise_rekey_begin(
 		error = fail(engine, error);
 		return error;
 	}
+
 	engine->authorized = 0U;
 	erase_handshake_secrets(engine);
 	error = next_key_generation(engine, &key_generation);
@@ -1868,9 +1906,9 @@ pairwise_rekey_begin(
 	engine->activation_complete = 0U;
 	engine->old_group_retired = 0U;
 	engine->old_pairwise_retired = 0U;
-	error = message_1_first(engine, key, now_ticks);
 
 	/* Reports the failure. */
+	error = message_1_first(engine, key, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -1914,6 +1952,7 @@ group_message_1(
 		error = fail(engine, EACCES);
 		return error;
 	}
+
 	error = eapol_mic_valid(engine, frame, length, key->mic);
 	if (error == 0)
 		error = message_3_digest(frame, length, digest);
@@ -1931,6 +1970,7 @@ group_message_1(
 			error = fail(engine, error);
 			return error;
 		}
+
 		if (engine->state == WLAN_WPA2_STATE_GROUP_STAGE ||
 		    engine->state == WLAN_WPA2_STATE_GROUP_MESSAGE_2_TX ||
 		    engine->state ==
@@ -1941,6 +1981,7 @@ group_message_1(
 		    now_ticks);
 		return error;
 	}
+
 	if (error == 0 && engine->group_message_accepted &&
 	    key->replay_counter < engine->group_replay_counter)
 		error = EACCES;
@@ -1993,6 +2034,7 @@ group_message_1(
 				    WLAN_WPA2_KEY_GROUP, current_gtk_index,
 				    current_group_generation, receive_packet_number);
 			}
+
 			if (error == 0) {
 				if (engine->pending_group_installed)
 					engine->pending_group_receive_packet_number =
@@ -2002,11 +2044,13 @@ group_message_1(
 					    receive_packet_number;
 			}
 		}
+
 		if (error == 0) {
 			engine->group_replay_counter = key->replay_counter;
 			memcpy(engine->group_message_digest, digest,
 			    sizeof(engine->group_message_digest));
 		}
+
 		wlan_crypto_erase(plaintext, sizeof(plaintext));
 		wlan_crypto_erase(&gtk, sizeof(gtk));
 		wlan_crypto_erase(digest, sizeof(digest));
@@ -2014,6 +2058,7 @@ group_message_1(
 			error = fail(engine, error);
 			return error;
 		}
+
 		if (engine->state == WLAN_WPA2_STATE_GROUP_STAGE)
 			return EBUSY;
 		retire_implicitly_completed_tx(engine);
@@ -2054,12 +2099,14 @@ group_message_1(
 		staged_new = 1;
 		error = program_pending_group_key(engine);
 	}
+
 	if (error == 0 || (error == EBUSY && staged_new)) {
 		engine->group_replay_counter = key->replay_counter;
 		memcpy(engine->group_message_digest, digest,
 		    sizeof(engine->group_message_digest));
 		engine->group_message_accepted = 1U;
 	}
+
 	wlan_crypto_erase(plaintext, sizeof(plaintext));
 	wlan_crypto_erase(&gtk, sizeof(gtk));
 	wlan_crypto_erase(digest, sizeof(digest));
@@ -2071,6 +2118,7 @@ group_message_1(
 		    now_ticks);
 		return error;
 	}
+
 	if (error == EBUSY)
 		return error;
 	if (error != 0) {
@@ -2080,10 +2128,10 @@ group_message_1(
 
 	/* Answers with group message 2. */
 	retire_implicitly_completed_tx(engine);
-	error = build_group_message_2(engine,
-	    WLAN_WPA2_STATE_GROUP_MESSAGE_2_TX, now_ticks);
 
 	/* Reports the failure. */
+	error = build_group_message_2(engine,
+	    WLAN_WPA2_STATE_GROUP_MESSAGE_2_TX, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -2126,6 +2174,7 @@ message_3_retransmit(
 		error = fail(engine, EACCES);
 		return error;
 	}
+
 	replay_advanced = key->replay_counter >
 	    engine->message_3_replay_counter;
 
@@ -2143,6 +2192,7 @@ message_3_retransmit(
 		    engine->group_receive_packet_number;
 		current_group_generation = engine->group_key_generation;
 	}
+
 	error = eapol_mic_valid(engine, frame, length, key->mic);
 	if (error == 0)
 		error = message_3_digest(frame, length, digest);
@@ -2182,6 +2232,7 @@ message_3_retransmit(
 				    WLAN_WPA2_KEY_GROUP, current_gtk_index,
 				    current_group_generation, receive_packet_number);
 			}
+
 			if (error == 0) {
 				if (engine->pairwise_rekey)
 					engine->pending_group_receive_packet_number =
@@ -2191,12 +2242,14 @@ message_3_retransmit(
 					    receive_packet_number;
 			}
 		}
+
 		if (error == 0) {
 			engine->message_3_replay_counter = key->replay_counter;
 			memcpy(engine->message_3_digest, digest,
 			    sizeof(engine->message_3_digest));
 		}
 	}
+
 	wlan_crypto_erase(plaintext, sizeof(plaintext));
 	wlan_crypto_erase(&gtk, sizeof(gtk));
 	wlan_crypto_erase(digest, sizeof(digest));
@@ -2211,6 +2264,7 @@ message_3_retransmit(
 			return EBUSY;
 		return EALREADY;
 	}
+
 	if (!replay_advanced &&
 	    (engine->state == WLAN_WPA2_STATE_MESSAGE_4_TX ||
 	    engine->state == WLAN_WPA2_STATE_MESSAGE_4_RETRANSMIT_TX))
@@ -2219,9 +2273,9 @@ message_3_retransmit(
 		pending_state = WLAN_WPA2_STATE_MESSAGE_4_RETRANSMIT_TX;
 	else
 		pending_state = WLAN_WPA2_STATE_MESSAGE_4_TX;
-	error = build_message_4(engine, pending_state, now_ticks);
 
 	/* Reports the failure. */
+	error = build_message_4(engine, pending_state, now_ticks);
 	if (error != 0)
 		return error;
 
@@ -2273,6 +2327,7 @@ message_3_first(
 		engine->message_3_replay_counter = key->replay_counter;
 		engine->message_3_accepted = 1U;
 	}
+
 	wlan_crypto_erase(plaintext, sizeof(plaintext));
 	wlan_crypto_erase(&gtk, sizeof(gtk));
 
@@ -2283,6 +2338,7 @@ message_3_first(
 		    now_ticks);
 		return error;
 	}
+
 	if (error != 0) {
 		error = fail(engine, error);
 		return error;
@@ -2290,10 +2346,10 @@ message_3_first(
 
 	/* Answers with message 4. */
 	retire_implicitly_completed_tx(engine);
-	error = build_message_4(engine, WLAN_WPA2_STATE_MESSAGE_4_TX,
-	    now_ticks);
 
 	/* Reports the failure. */
+	error = build_message_4(engine, WLAN_WPA2_STATE_MESSAGE_4_TX,
+	    now_ticks);
 	if (error != 0)
 		return error;
 
@@ -2354,8 +2410,10 @@ group_rekey_commit(
 			error = fail(engine, error);
 			return error;
 		}
+
 		engine->activation_complete = 1U;
 	}
+
 	if (!engine->old_group_retired) {
 		error = engine->ops->key_delete(engine->callback_context,
 		    engine->generation, WLAN_WPA2_KEY_GROUP, engine->gtk_index,
@@ -2366,6 +2424,7 @@ group_rekey_commit(
 			error = fail(engine, error);
 			return error;
 		}
+
 		engine->old_group_retired = 1U;
 	}
 
@@ -2426,8 +2485,10 @@ pairwise_rekey_commit(
 			error = fail(engine, error);
 			return error;
 		}
+
 		engine->activation_complete = 1U;
 	}
+
 	if (!engine->old_group_retired) {
 		error = engine->ops->key_delete(engine->callback_context,
 		    engine->generation, WLAN_WPA2_KEY_GROUP, old_gtk_index,
@@ -2438,8 +2499,10 @@ pairwise_rekey_commit(
 			error = fail(engine, error);
 			return error;
 		}
+
 		engine->old_group_retired = 1U;
 	}
+
 	if (!engine->old_pairwise_retired) {
 		error = engine->ops->key_delete(engine->callback_context,
 		    engine->generation, WLAN_WPA2_KEY_PAIRWISE, 0U,
@@ -2450,6 +2513,7 @@ pairwise_rekey_commit(
 			error = fail(engine, error);
 			return error;
 		}
+
 		engine->old_pairwise_retired = 1U;
 	}
 

@@ -58,18 +58,6 @@ static const struct dp8390_bus_ops ne2000_bus_ops = {
 	.reset = ne2000_reset,
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv pcat ne2000 init operation.
  */
@@ -93,9 +81,8 @@ drv_pcat_ne2000_init(
 	ne2000.dp.stop_page = NE2000_STOP;
 	ne2000.dp.dcr = NE2000_DCR;
 
-	error = drv_dp8390_read_prom(&ne2000.dp, prom);
-
 	/* Checks the operation status. */
+	error = drv_dp8390_read_prom(&ne2000.dp, prom);
 	if (error != 0)
 		return error;
 	ne2000.device = net_device_alloc();
@@ -108,9 +95,9 @@ drv_pcat_ne2000_init(
 	ne2000.device->hwaddr_len = 6;
 	ne2000.device->flags = NET_DEVICE_BROADCAST;
 	memcpy(ne2000.device->hwaddr, prom, 6);
-	error = drv_dp8390_attach(&ne2000.dp, ne2000.device);
 
 	/* Checks the operation status. */
+	error = drv_dp8390_attach(&ne2000.dp, ne2000.device);
 	if (error == 0)
 		error = net_device_create(ne2000.device);
 
@@ -135,6 +122,7 @@ drv_pcat_ne2000_init(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	hal_irq_mask((int)ne2000.irq);
 
 	/* Handles the irq registered condition. */
@@ -144,9 +132,9 @@ drv_pcat_ne2000_init(
 	/* Handles the ne2000 condition. */
 	if (ne2000.device->open_count != 0)
 		net_device_close(ne2000.device);
-	registered = net_device_find_ref("ne0");
 
 	/* Handles the registered condition. */
+	registered = net_device_find_ref("ne0");
 	if (registered == ne2000.device)
 		gone_error = net_device_gone(ne2000.device);
 	net_device_release(registered);
@@ -291,17 +279,15 @@ ne2000_reset(
 	uint8_t value;
 	unsigned spin;
 
-	value = port_inb(reset_port);
-
 	/* Validates the current value. */
+	value = port_inb(reset_port);
 	if (value == 0xffU)
 		return ENODEV;
 	port_outb(reset_port, value);
 	/* Process each element required by the operation. */
 	for (spin = 0; spin < NE2000_RESET_SPINS; spin++) {
-		isr_port = (uint16_t)(state->io_base + NE2000_ISR);
-
 		/* Checks the port inb result. */
+		isr_port = (uint16_t)(state->io_base + NE2000_ISR);
 		if ((port_inb(isr_port) & NE2000_ISR_RST) != 0) {
 			port_outb(isr_port, NE2000_ISR_RST);
 

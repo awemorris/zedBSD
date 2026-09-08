@@ -99,23 +99,6 @@ static const struct net_device_ops dp_ops = {
 	.poll_receive = dp_poll_receive,
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv dp8390 read prom operation.
  */
@@ -186,10 +169,10 @@ drv_dp8390_attach(
 	    dp->bus->read_reg == NULL || dp->bus->write_reg == NULL ||
 	    dp->bus->read_data8 == NULL || dp->bus->read_data16 == NULL ||
 	    dp->bus->write_data16 == NULL || dp->rx_start_page == 0 ||
-	    dp->rx_start_page >= dp->stop_page)
-
+	    dp->rx_start_page >= dp->stop_page) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	dp->device = device;
 	spin_init(&dp->lock, LOCK_RANK_DEVICE, "dp8390");
 	device->driver_data = dp;
@@ -219,9 +202,9 @@ drv_dp8390_interrupt(
 	/* Handles the dp condition. */
 	if (!dp->opened)
 		goto out;
-	status = rd(dp, DP_ISR);
 
 	/* Checks the operation status. */
+	status = rd(dp, DP_ISR);
 	if (status == 0 || status == 0xffU)
 		goto out;
 	wr(dp, DP_ISR, status);
@@ -251,7 +234,9 @@ drv_dp8390_interrupt(
 		(void)rd(dp, 0x0eU);
 		(void)rd(dp, 0x0fU);
 	}
+
 out:
+
 	spin_unlock_irqrestore(&dp->lock, irq);
 
 	/* Handles the schedule poll condition. */
@@ -333,9 +318,8 @@ dp_start_transmit(
 	size_t length;
 	int error;
 
-	length = packet->length < DP_MIN_FRAME ? DP_MIN_FRAME : packet->length;
-
 	/* Checks the current data length. */
+	length = packet->length < DP_MIN_FRAME ? DP_MIN_FRAME : packet->length;
 	if (length > DP_MAX_FRAME) {
 		packet_buf_free(packet);
 
@@ -353,6 +337,7 @@ dp_start_transmit(
 		error = dma_write(dp, (uint16_t)dp->tx_start_page << 8,
 				  packet->data, length);
 	}
+
 	packet_buf_free(packet);
 
 	/* Checks the operation status. */
@@ -378,7 +363,7 @@ dma_write(
 	const uint8_t *buffer,
 	size_t length)
 {
-	int function_result;
+	int error;
 	uint16_t word;
 	size_t dma_length = (length + 1U) & ~1U;
 	size_t index;
@@ -386,19 +371,18 @@ dma_write(
 	dma_begin(dp, address, dma_length, DP_CR_RWRITE);
 	/* Process each remaining element. */
 	for (index = 0; index < dma_length; index += 2U) {
-		word = index < length ? buffer[index] : 0;
-
 		/* Checks the current index. */
+		word = index < length ? buffer[index] : 0;
 		if (index + 1U < length)
 			word |= (uint16_t)buffer[index + 1U] << 8;
 		dp->bus->write_data16(dp->bus_cookie, word);
 	}
 
 	/* Obtains the wait rdc result. */
-	function_result = wait_rdc(dp);
+	error = wait_rdc(dp);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the dma read operation. */
@@ -409,7 +393,7 @@ dma_read(
 	void *buffer,
 	size_t length)
 {
-	int function_result;
+	int error;
 	uint16_t word;
 	uint8_t *output = buffer;
 	size_t index;
@@ -427,10 +411,10 @@ dma_read(
 		output[index] = dp->bus->read_data8(dp->bus_cookie);
 
 	/* Obtains the wait rdc result. */
-	function_result = wait_rdc(dp);
+	error = wait_rdc(dp);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the chip stop operation. */
@@ -517,7 +501,9 @@ dp_close(
 	unsigned long irq = spin_lock_irqsave(&dp->lock);
 
 	chip_stop(dp);
+
 	spin_unlock_irqrestore(&dp->lock, irq);
+
 	(void)net_device_set_carrier(device, 0);
 }
 
@@ -570,8 +556,10 @@ dp_transmit(
 		error = ENOBUFS;
 		goto out;
 	}
+
 	dp->tx_pending = packet;
 out:
+
 	spin_unlock_irqrestore(&dp->lock, irq);
 
 	/* Reports the failure. */
@@ -627,41 +615,41 @@ read_frame(
 	void *data;
 	int error;
 
-	error = dma_read(dp, (uint16_t)page << 8, &header, sizeof(header));
-
 	/* Checks the operation status. */
+	error = dma_read(dp, (uint16_t)page << 8, &header, sizeof(header));
 	if (error != 0)
 		return error;
-	count = (uint16_t)header.count_low | ((uint16_t)header.count_high << 8);
 
 	/* Handles the header condition. */
+	count = (uint16_t)header.count_low | ((uint16_t)header.count_high << 8);
 	if (header.next < dp->rx_start_page || header.next >= dp->stop_page ||
 	    count < sizeof(header) + DP_MIN_FRAME ||
-	    count > sizeof(header) + DP_MAX_FRAME)
-
+	    count > sizeof(header) + DP_MAX_FRAME) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	length = count - sizeof(header);
-	packet = packet_buf_alloc(0);
 
 	/* Handles the packet availability. */
+	packet = packet_buf_alloc(0);
 	if (packet == NULL)
 		return ENOBUFS;
-	data = packet_buf_append(packet, length);
 
 	/* Handles the data availability. */
+	data = packet_buf_append(packet, length);
 	if (data == NULL) {
 		packet_buf_free(packet);
 
 		/* Returns the computed result. */
 		return EMSGSIZE;
 	}
+
 	address = ((uint32_t)page << 8) + sizeof(header);
 	ring_end = (uint32_t)dp->stop_page << 8;
 	first = length < ring_end - address ? length : ring_end - address;
-	error = dma_read(dp, (uint16_t)address, data, first);
 
 	/* Checks the operation status. */
+	error = dma_read(dp, (uint16_t)address, data, first);
 	if (error == 0 && first < length) {
 		error = dma_read(dp, (uint16_t)dp->rx_start_page << 8,
 				 (uint8_t *)data + first, length - first);
@@ -674,6 +662,7 @@ read_frame(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	*next_result = header.next;
 	*result = packet;
 	/* Reports successful completion. */
@@ -702,14 +691,15 @@ dp_poll_receive(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	current = current_page(dp);
 	/* Process each linked entry. */
 	while (received < budget && dp->next_packet != current) {
 		packet = NULL;
 		next = dp->next_packet;
-		error = read_frame(dp, dp->next_packet, &packet, &next);
 
 		/* Checks the operation status. */
+		error = read_frame(dp, dp->next_packet, &packet, &next);
 		if (error != 0) {
 			device->rx_errors++;
 
@@ -721,6 +711,7 @@ dp_poll_receive(
 		} else {
 			received++;
 		}
+
 		advance_ring(dp, next);
 		current = current_page(dp);
 
@@ -738,7 +729,9 @@ dp_poll_receive(
 		if (!dp->opened)
 			break;
 	}
+
 	reschedule = dp->opened && dp->next_packet != current;
+
 	spin_unlock_irqrestore(&dp->lock, irq);
 
 	/* Handles the reschedule condition. */

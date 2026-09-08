@@ -73,19 +73,19 @@ drv_intel_ax211_runtime_start_init(
 	    command_table == NULL || command_table->bytes == NULL ||
 	    nvm == NULL ||
 	    command_table->count != INTEL_AX211_PROTOCOL_API89_COMMAND_COUNT ||
-	    (ltr_enabled != 0 && ltr_enabled != 1) || generation_seed == 0U)
-
+	    (ltr_enabled != 0 && ltr_enabled != 1) || generation_seed == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_INVALID;
-	mac_type = (uint16_t)((hardware_revision & 0xfff0U) >> 4);
+	}
 
 	/* Checks the drv intel ax211 mac type supported result. */
+	mac_type = (uint16_t)((hardware_revision & 0xfff0U) >> 4);
 	if (!drv_intel_ax211_mac_type_supported(mac_type) ||
 	    mmio->profile.mac_type != mac_type ||
-	    mmio->profile.rf_type != rf_type)
-
+	    mmio->profile.rf_type != rf_type) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_INVALID;
+	}
 
 	/*
  * Owns the exact table instead of retaining the boot coordinator's
@@ -93,11 +93,11 @@ drv_intel_ax211_runtime_start_init(
 	memset(session, 0, sizeof(*session));
 	memcpy(session->command_version_bytes, command_table->bytes,
 	       sizeof(session->command_version_bytes));
+
+	/* Checks the drv intel ax211 init api89 validate result. */
 	result = drv_intel_ax211_protocol_command_table_parse(
 		session->command_version_bytes,
 		sizeof(session->command_version_bytes), &copied_table);
-
-	/* Checks the drv intel ax211 init api89 validate result. */
 	if (result != INTEL_AX211_PROTOCOL_OK ||
 	    drv_intel_ax211_init_api89_validate(&copied_table) !=
 		    INTEL_AX211_PROTOCOL_OK) {
@@ -131,122 +131,120 @@ int
 drv_intel_ax211_runtime_start_run(
 	struct intel_ax211_runtime_start *session)
 {
-	int function_result;
+	int error;
 	int result;
 
 	/* Handles the session availability. */
 	if (session == NULL ||
 	    session->state != INTEL_AX211_RUNTIME_START_STATE_IDLE ||
-	    session->dma.device != NULL || session->files_loaded)
-
+	    session->dma.device != NULL || session->files_loaded) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_INVALID;
+	}
 	ax211_runtime_start_run_state_clear(session);
 	session->state = INTEL_AX211_RUNTIME_START_STATE_STARTING;
 	session->generation =
 		ax211_runtime_start_next_generation(session->generation);
 
+	/* Checks the operation result. */
 	result = ax211_runtime_start_load_and_profile(session);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK) {
 		/* Obtains the ax211 runtime start fail result. */
-		function_result = ax211_runtime_start_fail(session, result);
+		error = ax211_runtime_start_fail(session, result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
+	/* Checks the operation result. */
 	result = ax211_runtime_start_prepare_dma(session);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK) {
 		/* Obtains the ax211 runtime start fail result. */
-		function_result = ax211_runtime_start_fail(session, result);
+		error = ax211_runtime_start_fail(session, result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
+	/* Checks the operation result. */
 	result = session->ops->boot.receive_epoch_begin(session->argument,
 							session->generation);
-
-	/* Checks the operation result. */
 	if (result != 0) {
 		/* Obtains the ax211 runtime start fail result. */
-		function_result = ax211_runtime_start_fail(
+		error = ax211_runtime_start_fail(
 			session, INTEL_AX211_RUNTIME_START_IO);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
-
-	result = ax211_runtime_start_device(session);
 
 	/* Checks the operation result. */
+	result = ax211_runtime_start_device(session);
 	if (result != INTEL_AX211_RUNTIME_START_OK) {
 		/* Obtains the ax211 runtime start fail result. */
-		function_result = ax211_runtime_start_fail(session, result);
+		error = ax211_runtime_start_fail(session, result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
+	/* Checks the operation result. */
 	result = ax211_runtime_start_wait_notification(
 		session, AX211_RUNTIME_START_NOTIFICATION_ALIVE,
 		INTEL_AX211_RUNTIME_START_ALIVE_TIMEOUT_US);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK) {
 		/* Obtains the ax211 runtime start fail result. */
-		function_result = ax211_runtime_start_fail(session, result);
+		error = ax211_runtime_start_fail(session, result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Firmware images are retired only after exact ALIVE acceptance. */
 	drv_intel_ax211_dma_release_boot_images(&session->dma);
+
+	/* Checks the operation result. */
 	result = ax211_runtime_start_select_and_publish_pnvm(session);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK) {
 		/* Obtains the ax211 runtime start fail result. */
-		function_result = ax211_runtime_start_fail(session, result);
+		error = ax211_runtime_start_fail(session, result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
+	/* Checks the operation result. */
 	result = ax211_runtime_start_init_firmware(session);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK) {
 		/* Obtains the ax211 runtime start fail result. */
-		function_result = ax211_runtime_start_fail(session, result);
+		error = ax211_runtime_start_fail(session, result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
+	/* Checks the operation result. */
 	result = ax211_runtime_start_commands(session);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK) {
 		/* Obtains the ax211 runtime start fail result. */
-		function_result = ax211_runtime_start_fail(session, result);
+		error = ax211_runtime_start_fail(session, result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_transport_enable_runtime_interrupts(
 		session->transport);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_TRANSPORT_OK) {
 		/* Obtains the ax211 runtime start fail result. */
-		function_result = ax211_runtime_start_fail(
+		error = ax211_runtime_start_fail(
 			session, INTEL_AX211_RUNTIME_START_TRANSPORT);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	ax211_runtime_start_release_files(session);
 	session->state = INTEL_AX211_RUNTIME_START_STATE_RUNNING;
 	session->last_error = INTEL_AX211_RUNTIME_START_OK;
@@ -267,13 +265,13 @@ drv_intel_ax211_runtime_start_stop(
 	/* Handles the session availability. */
 	if (session == NULL ||
 	    session->state != INTEL_AX211_RUNTIME_START_STATE_RUNNING ||
-	    !session->dma_prepared)
-
+	    !session->dma_prepared) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_INVALID;
-	result = ax211_runtime_start_stop_and_release(session);
+	}
 
 	/* Checks the operation result. */
+	result = ax211_runtime_start_stop_and_release(session);
 	if (result == INTEL_AX211_RUNTIME_START_STOP_REQUIRED)
 		return result;
 	session->state = INTEL_AX211_RUNTIME_START_STATE_IDLE;
@@ -297,13 +295,13 @@ drv_intel_ax211_runtime_start_cleanup(
 	    (session->state != INTEL_AX211_RUNTIME_START_STATE_STOP_REQUIRED &&
 	     session->state !=
 		     INTEL_AX211_RUNTIME_START_STATE_STOP_REQUIRED_NO_DMA) ||
-	    (!session->dma_prepared && !session->hardware_touched))
-
+	    (!session->dma_prepared && !session->hardware_touched)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_INVALID;
-	result = ax211_runtime_start_stop_and_release(session);
+	}
 
 	/* Checks the operation result. */
+	result = ax211_runtime_start_stop_and_release(session);
 	if (result == INTEL_AX211_RUNTIME_START_STOP_REQUIRED)
 		return result;
 	session->state = INTEL_AX211_RUNTIME_START_STATE_IDLE;
@@ -324,10 +322,10 @@ drv_intel_ax211_runtime_start_mcc(
 	/* Handles the session availability. */
 	if (session == NULL || mcc == NULL ||
 	    session->state != INTEL_AX211_RUNTIME_START_STATE_RUNNING ||
-	    !session->mcc_valid)
-
+	    !session->mcc_valid) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_INVALID;
+	}
 	*mcc = session->mcc;
 	/* Returns the computed result. */
 	return INTEL_AX211_RUNTIME_START_OK;
@@ -344,10 +342,10 @@ ax211_runtime_start_ops_valid(
 	    ops->boot.receive_event == NULL || ops->boot.publish_pnvm == NULL ||
 	    ops->boot.post_alive == NULL || ops->boot.interrupt_drain == NULL ||
 	    ops->boot.clock_us == NULL || ops->nic_lock == NULL ||
-	    ops->nic_unlock == NULL)
-
+	    ops->nic_unlock == NULL) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -402,15 +400,14 @@ static int
 ax211_runtime_start_load_and_profile(
 	struct intel_ax211_runtime_start *session)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_command_table table;
 	size_t length;
 	size_t offset;
 	int result;
 
-	result = drv_intel_ax211_firmware_files_load(&session->files);
-
 	/* Checks the operation result. */
+	result = drv_intel_ax211_firmware_files_load(&session->files);
 	if (result != 0)
 		return INTEL_AX211_RUNTIME_START_FIRMWARE;
 	session->files_loaded = 1U;
@@ -418,42 +415,43 @@ ax211_runtime_start_load_and_profile(
 	/* Handles the ucode bytes availability. */
 	if (session->files.ucode_bytes == NULL ||
 	    session->files.ucode_size == 0U ||
-	    session->files.pnvm_bytes == NULL || session->files.pnvm_size == 0U)
-
+	    session->files.pnvm_bytes == NULL || session->files.pnvm_size == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_FIRMWARE;
+	}
 
 	offset = session->files.ucode_manifest.command_versions_offset;
-	length = session->files.ucode_manifest.command_versions_length;
 
 	/* Checks the current data length. */
+	length = session->files.ucode_manifest.command_versions_length;
 	if (length != sizeof(session->command_version_bytes) ||
 	    offset > session->files.ucode_size ||
 	    length > session->files.ucode_size - offset ||
 	    memcmp(session->files.ucode_bytes + offset,
-		   session->command_version_bytes, length) != 0)
-
+		   session->command_version_bytes, length) != 0) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_FIRMWARE;
+	}
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_table_parse(
 		session->command_version_bytes,
 		sizeof(session->command_version_bytes), &table);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return INTEL_AX211_RUNTIME_START_PROTOCOL;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_runtime_profile_from_manifest(
 		&session->files.ucode_manifest, &session->nvm,
 		session->ltr_enabled, &session->profile);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_OK) {
 		/* Obtains the ax211 runtime start runtime result result. */
-		function_result = ax211_runtime_start_runtime_result(result);
+		error = ax211_runtime_start_runtime_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	session->profile_valid = 1U;
 
 	/* Returns the computed result. */
@@ -467,10 +465,10 @@ ax211_runtime_start_runtime_result(
 {
 	/* Checks the operation result. */
 	if (result == INTEL_AX211_RUNTIME_OK ||
-	    result == INTEL_AX211_RUNTIME_COMPLETE)
-
+	    result == INTEL_AX211_RUNTIME_COMPLETE) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_OK;
+	}
 
 	/* Checks the operation result. */
 	if (result == INTEL_AX211_RUNTIME_TIMEOUT)
@@ -483,10 +481,10 @@ ax211_runtime_start_runtime_result(
 	/* Checks the operation result. */
 	if (result == INTEL_AX211_RUNTIME_TRUNCATED ||
 	    result == INTEL_AX211_RUNTIME_OVERSIZED ||
-	    result == INTEL_AX211_RUNTIME_UNSUPPORTED)
-
+	    result == INTEL_AX211_RUNTIME_UNSUPPORTED) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_PROTOCOL;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_RUNTIME_START_RUNTIME;
@@ -502,9 +500,9 @@ ax211_runtime_start_fail(
 
 	ax211_runtime_start_release_files(session);
 	session->last_error = (uint8_t)result;
-	cleanup_result = ax211_runtime_start_stop_and_release(session);
 
 	/* Handles the cleanup result condition. */
+	cleanup_result = ax211_runtime_start_stop_and_release(session);
 	if (cleanup_result == INTEL_AX211_RUNTIME_START_STOP_REQUIRED)
 		return cleanup_result;
 	session->state = INTEL_AX211_RUNTIME_START_STATE_IDLE;
@@ -542,13 +540,11 @@ ax211_runtime_start_stop_and_release(
 	int quiesce_result;
 	int stop_result;
 
-	nic_unlock_result = 0;
-
 	/* Handles the session condition. */
+	nic_unlock_result = 0;
 	if (session->nic_locked) {
-		nic_unlock_result = session->ops->nic_unlock(session->argument);
-
 		/* Handles the nic unlock result condition. */
+		nic_unlock_result = session->ops->nic_unlock(session->argument);
 		if (nic_unlock_result == 0)
 			session->nic_locked = 0U;
 	}
@@ -561,9 +557,9 @@ ax211_runtime_start_stop_and_release(
 				       ? INTEL_AX211_RUNTIME_START_OK
 				       : INTEL_AX211_RUNTIME_START_IO;
 		}
-		stop_result = drv_intel_ax211_mmio_stop(session->mmio);
 
 		/* Handles the stop result condition. */
+		stop_result = drv_intel_ax211_mmio_stop(session->mmio);
 		if (stop_result != INTEL_AX211_MMIO_OK) {
 			session->state =
 				INTEL_AX211_RUNTIME_START_STATE_STOP_REQUIRED_NO_DMA;
@@ -571,6 +567,7 @@ ax211_runtime_start_stop_and_release(
 			/* Returns the computed result. */
 			return INTEL_AX211_RUNTIME_START_STOP_REQUIRED;
 		}
+
 		session->hardware_touched = 0U;
 		session->nic_locked = 0U;
 
@@ -583,9 +580,8 @@ ax211_runtime_start_stop_and_release(
  * Never-exposed DMA is safe to free, but reset failure remains sticky.
 	 */
 	if (!session->dma_exposed && !session->transport_bound) {
-		stop_result = INTEL_AX211_MMIO_OK;
-
 		/* Handles the session condition. */
+		stop_result = INTEL_AX211_MMIO_OK;
 		if (session->hardware_touched)
 			stop_result = drv_intel_ax211_mmio_stop(session->mmio);
 		drv_intel_ax211_dma_release(&session->dma);
@@ -599,6 +595,7 @@ ax211_runtime_start_stop_and_release(
 			/* Returns the computed result. */
 			return INTEL_AX211_RUNTIME_START_STOP_REQUIRED;
 		}
+
 		session->hardware_touched = 0U;
 		session->nic_locked = 0U;
 
@@ -609,15 +606,16 @@ ax211_runtime_start_stop_and_release(
 
 	drain_result = session->ops->boot.interrupt_drain(session->argument);
 	quiesce_result = drv_intel_ax211_transport_quiesce(session->transport);
-	stop_result = drv_intel_ax211_mmio_stop(session->mmio);
 
 	/* Handles the drain result condition. */
+	stop_result = drv_intel_ax211_mmio_stop(session->mmio);
 	if (drain_result != 0 || stop_result != INTEL_AX211_MMIO_OK) {
 		session->state = INTEL_AX211_RUNTIME_START_STATE_STOP_REQUIRED;
 
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_STOP_REQUIRED;
 	}
+
 	after_reset_result =
 		drv_intel_ax211_transport_command_after_device_reset(
 			session->transport);
@@ -631,6 +629,7 @@ ax211_runtime_start_stop_and_release(
 		command_result = drv_intel_ax211_command_after_device_reset(
 			&session->commands, retired_generation);
 	}
+
 	drv_intel_ax211_dma_release(&session->dma);
 	session->dma_prepared = 0U;
 	session->dma_exposed = 0U;
@@ -641,10 +640,10 @@ ax211_runtime_start_stop_and_release(
 
 	/* Handles the quiesce result condition. */
 	if (quiesce_result != INTEL_AX211_TRANSPORT_OK ||
-	    after_reset_result != INTEL_AX211_TRANSPORT_OK)
-
+	    after_reset_result != INTEL_AX211_TRANSPORT_OK) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_TRANSPORT;
+	}
 
 	/* Handles the command result condition. */
 	if (command_result != INTEL_AX211_COMMAND_OK)
@@ -665,12 +664,11 @@ ax211_runtime_start_prepare_dma(
 {
 	int result;
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_dma_prepare_boot(
 		session->dma_device, session->files.ucode_bytes,
 		session->files.ucode_size, &session->files.ucode_manifest,
 		session->hardware_revision, &session->dma);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return INTEL_AX211_RUNTIME_START_DMA;
 	session->dma_prepared = 1U;
@@ -689,39 +687,39 @@ ax211_runtime_start_device(
 	int result;
 
 	session->hardware_touched = 1U;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_mmio_prepare_card_hw(session->mmio);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK)
 		return INTEL_AX211_RUNTIME_START_MMIO;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_mmio_sw_reset(session->mmio);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK)
 		return INTEL_AX211_RUNTIME_START_MMIO;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_mmio_apm_init(session->mmio);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK)
 		return INTEL_AX211_RUNTIME_START_MMIO;
+
+	/* Checks the operation result. */
 	result = session->ops->boot.transport_bind(
 		session->argument, &session->dma, session->mmio,
 		session->transport, session->generation);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return INTEL_AX211_RUNTIME_START_TRANSPORT;
 	session->transport_bound = 1U;
-	result = drv_intel_ax211_transport_configure_msix(session->transport);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_transport_configure_msix(session->transport);
 	if (result != INTEL_AX211_TRANSPORT_OK)
 		return INTEL_AX211_RUNTIME_START_TRANSPORT;
 
 	session->dma_exposed = 1U;
-	result = drv_intel_ax211_transport_initialize_rings(session->transport);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_transport_initialize_rings(session->transport);
 	if (result != INTEL_AX211_TRANSPORT_OK)
 		return INTEL_AX211_RUNTIME_START_TRANSPORT;
 
@@ -732,41 +730,41 @@ ax211_runtime_start_device(
 	for (index = 0U; index < session->dma.rx_buffer_count; index++) {
 		/* Handles the address availability. */
 		if (session->dma.rx_buffer[index].address == NULL ||
-		    session->dma.rx_buffer[index].device_address == 0U)
-
+		    session->dma.rx_buffer[index].device_address == 0U) {
 			/* Returns the computed result. */
 			return INTEL_AX211_RUNTIME_START_DMA;
+		}
+
+		/* Checks the operation result. */
 		result = drv_intel_ax211_transport_publish_rx_descriptor(
 			session->transport, (uint16_t)index,
 			session->dma.rx_buffer[index].device_address);
-
-		/* Checks the operation result. */
 		if (result != INTEL_AX211_TRANSPORT_OK)
 			return INTEL_AX211_RUNTIME_START_TRANSPORT;
 	}
 
 	/* The first RX credit is deferred until the hardware-ALIVE cause. */
-	result = drv_intel_ax211_transport_enable_firmware_interrupts(
-		session->transport);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_transport_enable_firmware_interrupts(
+		session->transport);
 	if (result != INTEL_AX211_TRANSPORT_OK)
 		return INTEL_AX211_RUNTIME_START_TRANSPORT;
 
 	/* Handles the session condition. */
 	if (session->dma.context.device_address == 0U ||
 	    session->dma.iml.device_address == 0U ||
-	    session->dma.iml.size != INTEL_AX211_MMIO_IML_SIZE)
-
+	    session->dma.iml.size != INTEL_AX211_MMIO_IML_SIZE) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_DMA;
+	}
 	memset(&mmio_boot, 0, sizeof(mmio_boot));
 	mmio_boot.context_address = session->dma.context.device_address;
 	mmio_boot.iml_address = session->dma.iml.device_address;
 	mmio_boot.iml_size = (uint32_t)session->dma.iml.size;
-	result = drv_intel_ax211_mmio_publish_gen3(session->mmio, &mmio_boot);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_mmio_publish_gen3(session->mmio, &mmio_boot);
 	if (result != INTEL_AX211_MMIO_OK)
 		return INTEL_AX211_RUNTIME_START_MMIO;
 
@@ -781,7 +779,7 @@ ax211_runtime_start_wait_notification(
 	enum ax211_runtime_start_notification expected,
 	uint64_t timeout)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_message message;
 	struct intel_ax211_event event;
 	uint64_t deadline;
@@ -799,10 +797,9 @@ ax211_runtime_start_wait_notification(
 	/* Process each remaining element. */
 	for (index = 0U; index < INTEL_AX211_RUNTIME_START_EVENT_LIMIT;
 	     index++) {
+		/* Checks the operation result. */
 		result = ax211_runtime_start_receive(session, deadline, &event,
 						     &message);
-
-		/* Checks the operation result. */
 		if (result != INTEL_AX211_RUNTIME_START_OK)
 			return result;
 
@@ -813,9 +810,9 @@ ax211_runtime_start_wait_notification(
 		/* Handles the event condition. */
 		if ((event.queue & 0x80U) == 0U)
 			return INTEL_AX211_RUNTIME_START_PROTOCOL;
-		kind = ax211_runtime_start_notification_kind(&message);
 
 		/* Handles the ax211 runtime start notification duplicate condition. */
+		kind = ax211_runtime_start_notification_kind(&message);
 		if (ax211_runtime_start_notification_duplicate(session, kind))
 			return INTEL_AX211_RUNTIME_START_DUPLICATE;
 
@@ -828,11 +825,11 @@ ax211_runtime_start_wait_notification(
 			return INTEL_AX211_RUNTIME_START_PROTOCOL;
 
 		/* Obtains the ax211 runtime start notification accept result. */
-		function_result = ax211_runtime_start_notification_accept(
+		error = ax211_runtime_start_notification_accept(
 			session, kind, &message);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Returns the computed result. */
@@ -852,9 +849,9 @@ ax211_runtime_start_deadline(
 	/* Handles the now availability. */
 	if (timeout == 0U || now == NULL || deadline == NULL)
 		return INTEL_AX211_RUNTIME_START_INVALID;
-	result = session->ops->boot.clock_us(session->argument, now);
 
 	/* Checks the operation result. */
+	result = session->ops->boot.clock_us(session->argument, now);
 	if (result != 0)
 		return INTEL_AX211_RUNTIME_START_IO;
 
@@ -879,11 +876,11 @@ ax211_runtime_start_receive(
 	int result;
 
 	memset(&received, 0, sizeof(received));
+
+	/* Checks the operation result. */
 	result = session->ops->boot.receive_event(
 		session->argument, deadline, session->event_bytes,
 		sizeof(session->event_bytes), &received);
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_BOOT_RECEIVE_TIMEOUT)
 		return INTEL_AX211_RUNTIME_START_TIMEOUT;
 
@@ -894,29 +891,29 @@ ax211_runtime_start_receive(
 	/* Handles the received condition. */
 	if (received.length == 0U ||
 	    received.length > sizeof(session->event_bytes) ||
-	    received.generation == 0U)
-
+	    received.generation == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_PROTOCOL;
-	result = session->ops->boot.clock_us(session->argument, &now);
+	}
 
 	/* Checks the operation result. */
+	result = session->ops->boot.clock_us(session->argument, &now);
 	if (result != 0)
 		return INTEL_AX211_RUNTIME_START_IO;
 
 	/* Handles the now condition. */
 	if (now > deadline)
 		return INTEL_AX211_RUNTIME_START_TIMEOUT;
-	result = drv_intel_ax211_event_decode(session->event_bytes,
-					      received.length, event);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_event_decode(session->event_bytes,
+					      received.length, event);
 	if (result != INTEL_AX211_OK ||
 	    event->payload_offset > received.length ||
-	    event->payload_length != received.length - event->payload_offset)
-
+	    event->payload_length != received.length - event->payload_offset) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_PROTOCOL;
+	}
 	memset(message, 0, sizeof(*message));
 	message->opcode = event->command.opcode;
 	message->group = event->flags &
@@ -940,24 +937,24 @@ ax211_runtime_start_notification_kind(
 {
 	/* Handles the message condition. */
 	if (message->group == INTEL_AX211_PROTOCOL_GROUP_LEGACY &&
-	    message->opcode == INTEL_AX211_PROTOCOL_ALIVE_OPCODE)
-
+	    message->opcode == INTEL_AX211_PROTOCOL_ALIVE_OPCODE) {
 		/* Returns the computed result. */
 		return AX211_RUNTIME_START_NOTIFICATION_ALIVE;
+	}
 
 	/* Handles the message condition. */
 	if (message->group == INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM &&
-	    message->opcode == INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_OPCODE)
-
+	    message->opcode == INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_OPCODE) {
 		/* Returns the computed result. */
 		return AX211_RUNTIME_START_NOTIFICATION_PNVM;
+	}
 
 	/* Handles the message condition. */
 	if (message->group == INTEL_AX211_PROTOCOL_GROUP_LEGACY &&
-	    message->opcode == INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE)
-
+	    message->opcode == INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE) {
 		/* Returns the computed result. */
 		return AX211_RUNTIME_START_NOTIFICATION_INIT;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -971,24 +968,24 @@ ax211_runtime_start_notification_duplicate(
 {
 	/* Handles the kind condition. */
 	if (kind == AX211_RUNTIME_START_NOTIFICATION_ALIVE &&
-	    session->alive_accepted)
-
+	    session->alive_accepted) {
 		/* Reports operation failure. */
 		return 1;
+	}
 
 	/* Handles the kind condition. */
 	if (kind == AX211_RUNTIME_START_NOTIFICATION_PNVM &&
-	    session->pnvm_accepted)
-
+	    session->pnvm_accepted) {
 		/* Reports operation failure. */
 		return 1;
+	}
 
 	/* Handles the kind condition. */
 	if (kind == AX211_RUNTIME_START_NOTIFICATION_INIT &&
-	    session->init_accepted)
-
+	    session->init_accepted) {
 		/* Reports operation failure. */
 		return 1;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -1001,29 +998,26 @@ ax211_runtime_start_notification_accept(
 	int kind,
 	const struct intel_ax211_protocol_message *message)
 {
-	int function_result;
+	int error;
 	int result;
 
 	/* Handles the kind condition. */
 	if (kind == AX211_RUNTIME_START_NOTIFICATION_ALIVE) {
+		/* Checks the operation result. */
 		result = drv_intel_ax211_protocol_alive_decode(
 			message, session->generation, &session->alive);
-
-		/* Checks the operation result. */
 		if (result == INTEL_AX211_PROTOCOL_OK)
 			session->alive_accepted = 1U;
 	} else if (kind == AX211_RUNTIME_START_NOTIFICATION_PNVM) {
+		/* Checks the operation result. */
 		result = drv_intel_ax211_protocol_pnvm_init_complete(
 			message, session->generation);
-
-		/* Checks the operation result. */
 		if (result == INTEL_AX211_PROTOCOL_OK)
 			session->pnvm_accepted = 1U;
 	} else if (kind == AX211_RUNTIME_START_NOTIFICATION_INIT) {
+		/* Checks the operation result. */
 		result = drv_intel_ax211_init_complete_validate(
 			message, session->generation);
-
-		/* Checks the operation result. */
 		if (result == INTEL_AX211_PROTOCOL_OK)
 			session->init_accepted = 1U;
 	} else {
@@ -1032,10 +1026,10 @@ ax211_runtime_start_notification_accept(
 	}
 
 	/* Obtains the ax211 runtime start protocol result result. */
-	function_result = ax211_runtime_start_protocol_result(result);
+	error = ax211_runtime_start_protocol_result(result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ax211 runtime start protocol result operation. */
@@ -1069,39 +1063,38 @@ ax211_runtime_start_select_and_publish_pnvm(
 	sku.data[0] = session->alive.sku[0];
 	sku.data[1] = session->alive.sku[1];
 	sku.data[2] = session->alive.sku[2];
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_pnvm_parse(
 		session->files.pnvm_bytes, session->files.pnvm_size, &sku,
 		session->mmio->profile.mac_type, session->rf_type, &manifest);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_OK)
 		return INTEL_AX211_RUNTIME_START_FIRMWARE;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_dma_prepare_pnvm(session->files.pnvm_bytes,
 						  session->files.pnvm_size,
 						  &manifest, &session->dma);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return INTEL_AX211_RUNTIME_START_DMA;
 	ax211_runtime_start_release_files(session);
 
+	/* Checks the operation result. */
 	result = session->ops->boot.publish_pnvm(session->argument,
 						 &session->dma);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return INTEL_AX211_RUNTIME_START_IO;
+
+	/* Checks the operation result. */
 	result = ax211_runtime_start_wait_notification(
 		session, AX211_RUNTIME_START_NOTIFICATION_PNVM,
 		INTEL_AX211_RUNTIME_START_PNVM_TIMEOUT_US);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
-	result = session->ops->boot.post_alive(session->argument,
-					       &session->alive);
 
 	/* Checks the operation result. */
+	result = session->ops->boot.post_alive(session->argument,
+					       &session->alive);
 	if (result != 0)
 		return INTEL_AX211_RUNTIME_START_IO;
 
@@ -1114,54 +1107,53 @@ static int
 ax211_runtime_start_init_firmware(
 	struct intel_ax211_runtime_start *session)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_command_table table;
 	int result;
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_command_transaction_init(
 		&session->commands, session->transport, 1U,
 		session->generation);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_COMMAND_OK)
 		return INTEL_AX211_RUNTIME_START_COMMAND;
 	session->commands_initialized = 1U;
+
+	/* Checks the operation result. */
 	result = ax211_runtime_start_send_extended_cfg(session);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = ax211_runtime_start_send_nvm_access_complete(session);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = ax211_runtime_start_wait_notification(
 		session, AX211_RUNTIME_START_NOTIFICATION_INIT,
 		INTEL_AX211_RUNTIME_START_INIT_TIMEOUT_US);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
 
 	/* DQA absence and every runtime layout are revalidated after init. */
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_table_parse(
 		session->command_version_bytes,
 		sizeof(session->command_version_bytes), &table);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return INTEL_AX211_RUNTIME_START_PROTOCOL;
-	result = drv_intel_ax211_runtime_api89_validate(&table,
-							&session->profile);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_runtime_api89_validate(&table,
+							&session->profile);
 	if (result != INTEL_AX211_RUNTIME_OK) {
 		/* Obtains the ax211 runtime start runtime result result. */
-		function_result = ax211_runtime_start_runtime_result(result);
+		error = ax211_runtime_start_runtime_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Returns the computed result. */
@@ -1173,7 +1165,7 @@ static int
 ax211_runtime_start_send_extended_cfg(
 	struct intel_ax211_runtime_start *session)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_command_request request;
 	struct intel_ax211_command_handle handle;
 	uint8_t payload[INTEL_AX211_INIT_EXTENDED_CFG_SIZE];
@@ -1182,17 +1174,17 @@ ax211_runtime_start_send_extended_cfg(
 	size_t response_length;
 	int result;
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_init_extended_cfg_encode(
 		INTEL_AX211_INIT_PROFILE_READ_NVM, payload);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK) {
 		/* Obtains the ax211 runtime start protocol result result. */
-		function_result = ax211_runtime_start_protocol_result(result);
+		error = ax211_runtime_start_protocol_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	memset(&request, 0, sizeof(request));
 	request.command.opcode = INTEL_AX211_INIT_EXTENDED_CFG_OPCODE;
 	request.command.group = INTEL_AX211_INIT_SYSTEM_GROUP;
@@ -1202,19 +1194,19 @@ ax211_runtime_start_send_extended_cfg(
 	request.response_version = 0U;
 	request.minimum_response_length = sizeof(response);
 	request.maximum_response_length = sizeof(response);
-	result = ax211_runtime_start_submit(session, &request, &handle,
-					    &deadline);
 
 	/* Checks the operation result. */
+	result = ax211_runtime_start_submit(session, &request, &handle,
+					    &deadline);
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
 	response_length = 0U;
 	memset(response, 0, sizeof(response));
+
+	/* Checks the operation result. */
 	result = ax211_runtime_start_wait_command(session, deadline, response,
 						  sizeof(response),
 						  &response_length);
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_RUNTIME_START_OK &&
 	    response_length != sizeof(response))
 		result = INTEL_AX211_RUNTIME_START_PROTOCOL;
@@ -1237,28 +1229,27 @@ ax211_runtime_start_submit(
 	struct intel_ax211_command_handle *handle,
 	uint64_t *deadline)
 {
-	int function_result;
+	int error;
 	uint64_t now;
 	int result;
 
+	/* Checks the operation result. */
 	result = ax211_runtime_start_deadline(
 		session, INTEL_AX211_RUNTIME_START_COMMAND_TIMEOUT_US, &now,
 		deadline);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_command_submit(
 		&session->commands, request, now,
 		INTEL_AX211_RUNTIME_START_COMMAND_TIMEOUT_US, handle);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_COMMAND_OK) {
 		/* Obtains the ax211 runtime start command result result. */
-		function_result = ax211_runtime_start_command_result(result);
+		error = ax211_runtime_start_command_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Returns the computed result. */
@@ -1287,10 +1278,10 @@ ax211_runtime_start_command_result(
 	    result == INTEL_AX211_COMMAND_FIRMWARE_FAILED ||
 	    result == INTEL_AX211_COMMAND_VERSION_MISMATCH ||
 	    result == INTEL_AX211_COMMAND_OUT_OF_ORDER ||
-	    result == INTEL_AX211_COMMAND_BUFFER_TOO_SMALL)
-
+	    result == INTEL_AX211_COMMAND_BUFFER_TOO_SMALL) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_PROTOCOL;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_RUNTIME_START_COMMAND;
@@ -1305,7 +1296,7 @@ ax211_runtime_start_wait_command(
 	size_t response_capacity,
 	size_t *response_length)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_message message;
 	struct intel_ax211_command_handle timed_out;
 	struct intel_ax211_event event;
@@ -1317,10 +1308,9 @@ ax211_runtime_start_wait_command(
 	/* Process each remaining element. */
 	for (index = 0U; index < INTEL_AX211_RUNTIME_START_EVENT_LIMIT;
 	     index++) {
+		/* Checks the operation result. */
 		result = ax211_runtime_start_receive(session, deadline, &event,
 						     &message);
-
-		/* Checks the operation result. */
 		if (result != INTEL_AX211_RUNTIME_START_OK)
 			return result;
 
@@ -1330,20 +1320,20 @@ ax211_runtime_start_wait_command(
 
 		/* Handles the event condition. */
 		if ((event.queue & 0x80U) != 0U) {
-			kind = ax211_runtime_start_notification_kind(&message);
-
 			/* Handles the ax211 runtime start notification duplicate condition. */
+			kind = ax211_runtime_start_notification_kind(&message);
 			if (ax211_runtime_start_notification_duplicate(session,
-								       kind))
-
+								       kind)) {
 				/* Returns the computed result. */
 				return INTEL_AX211_RUNTIME_START_DUPLICATE;
+			}
 
 			/* Handles the kind condition. */
 			if (kind != 0)
 				return INTEL_AX211_RUNTIME_START_PROTOCOL;
 			continue;
 		}
+
 		result = drv_intel_ax211_command_complete(
 			&session->commands, session->event_bytes,
 			message.payload_length + INTEL_AX211_EVENT_HEADER_SIZE,
@@ -1351,26 +1341,25 @@ ax211_runtime_start_wait_command(
 			response_length);
 
 		/* Obtains the ax211 runtime start command result result. */
-		function_result = ax211_runtime_start_command_result(result);
+		error = ax211_runtime_start_command_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
-	result = session->ops->boot.clock_us(session->argument, &now);
-
 	/* Checks the operation result. */
+	result = session->ops->boot.clock_us(session->argument, &now);
 	if (result == 0 && now < deadline)
 		now = deadline;
-	result = drv_intel_ax211_command_timeout_oldest(&session->commands, now,
-							&timed_out);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_command_timeout_oldest(&session->commands, now,
+							&timed_out);
 	if (result != INTEL_AX211_COMMAND_TIMEOUT &&
-	    result != INTEL_AX211_COMMAND_POISONED)
-
+	    result != INTEL_AX211_COMMAND_POISONED) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_COMMAND;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_RUNTIME_START_TIMEOUT;
@@ -1391,37 +1380,37 @@ static int
 ax211_runtime_start_send_nvm_access_complete(
 	struct intel_ax211_runtime_start *session)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_command_handle handle;
 	uint64_t deadline;
 	uint64_t now;
 	size_t response_length;
 	int result;
 
+	/* Checks the operation result. */
 	result = ax211_runtime_start_deadline(
 		session, INTEL_AX211_RUNTIME_START_COMMAND_TIMEOUT_US, &now,
 		&deadline);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_command_submit_nvm_access_complete(
 		&session->commands, now,
 		INTEL_AX211_RUNTIME_START_COMMAND_TIMEOUT_US, &handle);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_COMMAND_OK) {
 		/* Obtains the ax211 runtime start command result result. */
-		function_result = ax211_runtime_start_command_result(result);
+		error = ax211_runtime_start_command_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	response_length = 0U;
-	result = ax211_runtime_start_wait_command(session, deadline, NULL, 0U,
-						  &response_length);
 
 	/* Checks the operation result. */
+	result = ax211_runtime_start_wait_command(session, deadline, NULL, 0U,
+						  &response_length);
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
 
@@ -1441,16 +1430,15 @@ ax211_runtime_start_commands(
 	int result;
 	int unlock_result;
 
-	result = session->ops->nic_lock(session->argument);
-
 	/* Checks the operation result. */
+	result = session->ops->nic_lock(session->argument);
 	if (result != 0)
 		return INTEL_AX211_RUNTIME_START_IO;
 	session->nic_locked = 1U;
 	result = ax211_runtime_start_commands_locked(session);
-	unlock_result = session->ops->nic_unlock(session->argument);
 
 	/* Handles the unlock result condition. */
+	unlock_result = session->ops->nic_unlock(session->argument);
 	if (unlock_result == 0)
 		session->nic_locked = 0U;
 
@@ -1471,91 +1459,89 @@ static int
 ax211_runtime_start_commands_locked(
 	struct intel_ax211_runtime_start *session)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_command_table table;
 	struct intel_ax211_runtime_command command;
 	uint64_t now;
 	int result;
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_table_parse(
 		session->command_version_bytes,
 		sizeof(session->command_version_bytes), &table);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return INTEL_AX211_RUNTIME_START_PROTOCOL;
-	result = session->ops->boot.clock_us(session->argument, &now);
 
 	/* Checks the operation result. */
+	result = session->ops->boot.clock_us(session->argument, &now);
 	if (result != 0)
 		return INTEL_AX211_RUNTIME_START_IO;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_runtime_begin(&session->runtime, &table,
 					       &session->profile,
 					       session->generation, now);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_OK) {
 		/* Obtains the ax211 runtime start runtime result result. */
-		function_result = ax211_runtime_start_runtime_result(result);
+		error = ax211_runtime_start_runtime_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	while (session->runtime.active && !session->runtime.terminal) {
-		result = session->ops->boot.clock_us(session->argument, &now);
-
 		/* Checks the operation result. */
+		result = session->ops->boot.clock_us(session->argument, &now);
 		if (result != 0)
 			return INTEL_AX211_RUNTIME_START_IO;
-		result = drv_intel_ax211_runtime_current(&session->runtime, now,
-							 &command);
 
 		/* Checks the operation result. */
+		result = drv_intel_ax211_runtime_current(&session->runtime, now,
+							 &command);
 		if (result != INTEL_AX211_RUNTIME_OK) {
 			/* Obtains the ax211 runtime start runtime result result. */
-			function_result =
+			error =
 				ax211_runtime_start_runtime_result(result);
 
 			/* Returns the computed result. */
-			return function_result;
+			return error;
 		}
+
+		/* Checks the operation result. */
 		result = ax211_runtime_start_send_step(
 			session, session->runtime.step, &command);
-
-		/* Checks the operation result. */
 		if (result != INTEL_AX211_RUNTIME_START_OK)
 			return result;
-		result = session->ops->boot.clock_us(session->argument, &now);
 
 		/* Checks the operation result. */
+		result = session->ops->boot.clock_us(session->argument, &now);
 		if (result != 0)
 			return INTEL_AX211_RUNTIME_START_IO;
+
+		/* Checks the operation result. */
 		result = drv_intel_ax211_runtime_ack(
 			&session->runtime, session->generation,
 			session->runtime.step, now);
-
-		/* Checks the operation result. */
 		if (result == INTEL_AX211_RUNTIME_COMPLETE)
 			break;
 
 		/* Checks the operation result. */
 		if (result != INTEL_AX211_RUNTIME_OK) {
 			/* Obtains the ax211 runtime start runtime result result. */
-			function_result =
+			error =
 				ax211_runtime_start_runtime_result(result);
 
 			/* Returns the computed result. */
-			return function_result;
+			return error;
 		}
 	}
 
 	/* Handles the session condition. */
 	if (!session->runtime.terminal || session->runtime.active ||
-	    session->runtime.step != INTEL_AX211_RUNTIME_STEP_DONE)
-
+	    session->runtime.step != INTEL_AX211_RUNTIME_STEP_DONE) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_RUNTIME;
+	}
 
 	/* Handles the session condition. */
 	if (session->profile.lar_enabled && !session->mcc_valid)
@@ -1572,7 +1558,7 @@ ax211_runtime_start_send_step(
 	enum intel_ax211_runtime_step step,
 	const struct intel_ax211_runtime_command *command)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_message message;
 	struct intel_ax211_command_request request;
 	struct intel_ax211_command_handle handle;
@@ -1583,10 +1569,10 @@ ax211_runtime_start_send_step(
 
 	/* Handles the command availability. */
 	if (command == NULL || command->wire_version != 0U ||
-	    command->payload_length > sizeof(command->payload))
-
+	    command->payload_length > sizeof(command->payload)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RUNTIME_START_RUNTIME;
+	}
 	memset(&request, 0, sizeof(request));
 	request.command.group = command->group;
 	request.command.opcode = command->opcode;
@@ -1607,19 +1593,19 @@ ax211_runtime_start_send_step(
 		request.maximum_response_length = 0U;
 		response_capacity = 0U;
 	}
-	result = ax211_runtime_start_submit(session, &request, &handle,
-					    &deadline);
 
 	/* Checks the operation result. */
+	result = ax211_runtime_start_submit(session, &request, &handle,
+					    &deadline);
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
 	response_length = 0U;
+
+	/* Checks the operation result. */
 	result = ax211_runtime_start_wait_command(
 		session, deadline,
 		response_capacity == 0U ? NULL : session->response_bytes,
 		response_capacity, &response_length);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		return result;
 
@@ -1650,11 +1636,12 @@ ax211_runtime_start_send_step(
 	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_OK) {
 		/* Obtains the ax211 runtime start runtime result result. */
-		function_result = ax211_runtime_start_runtime_result(result);
+		error = ax211_runtime_start_runtime_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	session->mcc_valid = 1U;
 
 	/* Returns the computed result. */

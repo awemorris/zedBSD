@@ -75,14 +75,17 @@ arp_purge_device(
 
 	/* Clears the device's entries, collecting their references. */
 	irq = spin_lock_irqsave(&cache_lock);
+
 	for (index = 0; index < ARP_CACHE_MAX; index++) {
 		if (!cache[index].valid || cache[index].device != device)
 			continue;
 		references[count++] = cache[index].device;
 		memset(&cache[index], 0, sizeof(cache[index]));
 	}
+
 	if (count != 0)
 		waitq_wake_all(&cache_waitq);
+
 	spin_unlock_irqrestore(&cache_lock, irq);
 
 	/* Releases the references. */
@@ -124,7 +127,9 @@ arp_resolve(
 
 	/* Looks the address up in the cache. */
 	irq = spin_lock_irqsave(&cache_lock);
+
 	error = arp_lookup_locked(device, address, hardware);
+
 	spin_unlock_irqrestore(&cache_lock, irq);
 
 	/* Reports why the lookup failed. */
@@ -172,6 +177,7 @@ arp_resolve_wait(
 			spin_unlock_irqrestore(&cache_lock, irq);
 			return 0;
 		}
+
 		sequence = waitq_sequence(&cache_waitq);
 		spin_unlock_irqrestore(&cache_lock, irq);
 
@@ -186,6 +192,7 @@ arp_resolve_wait(
 			spin_unlock_irqrestore(&cache_lock, irq);
 			return 0;
 		}
+
 		deadline = sched_ticks() + ARP_RETRY_TICKS;
 		error = waitq_sleep(&cache_waitq, &cache_lock, sequence,
 		    deadline, WAITQ_INTERRUPTIBLE);
@@ -193,6 +200,7 @@ arp_resolve_wait(
 			spin_unlock_irqrestore(&cache_lock, irq);
 			return 0;
 		}
+
 		spin_unlock_irqrestore(&cache_lock, irq);
 		if (error == EINTR)
 			return EINTR;
@@ -212,9 +220,8 @@ arp_request(
 {
 	int error;
 
-	error = arp_send(device, ARP_OPERATION_REQUEST, address, NULL);
-
 	/* Reports why the send failed. */
+	error = arp_send(device, ARP_OPERATION_REQUEST, address, NULL);
 	if (error != 0)
 		return error;
 
@@ -245,9 +252,9 @@ arp_init(
 	waitq_init(&cache_waitq, "ARP resolution");
 
 	/* Receives ARP frames from Ethernet. */
-	error = ethernet_protocol_register(ETHERNET_TYPE_ARP, arp_input);
 
 	/* Reports why the registration failed. */
+	error = ethernet_protocol_register(ETHERNET_TYPE_ARP, arp_input);
 	if (error != 0)
 		return error;
 
@@ -321,6 +328,7 @@ arp_learn(
 			insert_reference = 0;
 			break;
 		}
+
 		if (!cache[index].valid && slot == ARP_CACHE_MAX)
 			slot = index;
 	}
@@ -337,6 +345,7 @@ arp_learn(
 	memcpy(cache[slot].hardware, hardware, 6);
 	cache[slot].valid = 1;
 	waitq_wake_all(&cache_waitq);
+
 	spin_unlock_irqrestore(&cache_lock, irq);
 
 	/* Keeps one reference per entry: drops ours or the replaced one. */
@@ -393,9 +402,9 @@ arp_send(
 	destination = broadcast;
 	if (target_hardware != NULL)
 		destination = target_hardware;
-	error = ethernet_output(device, destination, ETHERNET_TYPE_ARP, packet);
 
 	/* Reports why the send failed. */
+	error = ethernet_output(device, destination, ETHERNET_TYPE_ARP, packet);
 	if (error != 0)
 		return error;
 

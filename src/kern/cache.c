@@ -141,6 +141,7 @@ cache_memory_reserve(
 		    bytes > memory.physical_free - floor - accounting.pending_bytes)
 			refused = 1;
 	}
+
 	if (refused) {
 		if (accounting.refusals != UINT64_MAX)
 			accounting.refusals++;
@@ -269,10 +270,12 @@ cache_memory_set_target(
 		cache_unlock(enabled);
 		return EINVAL;
 	}
+
 	cache_unlock(enabled);
 
 	/* Serializes policy changes while allocations inspect the pending gate. */
 	mutex_lock(&control_lock);
+
 	enabled = cache_lock();
 	if (!accounting.initialized ||
 	    (target & (ZEDBSD_PAGE_SIZE - 1U)) != 0 ||
@@ -281,6 +284,7 @@ cache_memory_set_target(
 		mutex_unlock(&control_lock);
 		return EINVAL;
 	}
+
 	accounting.pending_target_bytes = target;
 	accounting.resizing = 1;
 	current = accounting.resident_bytes + accounting.pending_bytes;
@@ -299,6 +303,7 @@ cache_memory_set_target(
 			cache_unlock(enabled);
 			break;
 		}
+
 		cache_unlock(enabled);
 		wanted = current - target > CACHE_RECLAIM_BATCH ?
 		    CACHE_RECLAIM_BATCH : (size_t)(current - target);
@@ -306,6 +311,7 @@ cache_memory_set_target(
 			error = EBUSY;
 			break;
 		}
+
 		attempts--;
 	}
 
@@ -316,6 +322,7 @@ cache_memory_set_target(
 		accounting.pending_target_bytes = 0;
 		cache_unlock(enabled);
 	}
+
 	mutex_unlock(&control_lock);
 
 	/* Reports whether the new target was actually published. */

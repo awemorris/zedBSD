@@ -108,10 +108,10 @@ drv_intel_ax211_scan_profile_from_nvm(
 	     (mcc == NULL || mcc->status > INTEL_AX211_RUNTIME_MCC_STATUS_MAX ||
 	      mcc->channel_count == 0U ||
 	      mcc->channel_count > INTEL_AX211_RUNTIME_MCC_CHANNEL_LIMIT)) ||
-	    !ax211_scan_station_valid(station_address))
-
+	    !ax211_scan_station_valid(station_address)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_INVALID;
+	}
 	memset(&parsed, 0, sizeof(parsed));
 	memcpy(parsed.station_address, station_address, 6U);
 	parsed.channel_width_mhz = INTEL_AX211_SCAN_CHANNEL_WIDTH_MHZ;
@@ -148,7 +148,7 @@ int
 drv_intel_ax211_scan_api89_validate(
 	const struct intel_ax211_protocol_command_table *table)
 {
-	int function_result;
+	int error;
 	int result;
 
 	/* Handles the table availability. */
@@ -157,32 +157,32 @@ drv_intel_ax211_scan_api89_validate(
 
 	/* Checks the drv intel ax211 protocol command table validate api89 result. */
 	if (drv_intel_ax211_protocol_command_table_validate_api89(table) !=
-	    INTEL_AX211_PROTOCOL_OK)
-
+	    INTEL_AX211_PROTOCOL_OK) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_UNSUPPORTED;
+	}
+
+	/* Checks the operation result. */
 	result = ax211_scan_required_version(
 		table, INTEL_AX211_PROTOCOL_SCAN_CFG_OPCODE,
 		INTEL_AX211_SCAN_CONFIG_VERSION);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_SCAN_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = ax211_scan_required_version(table,
 					     INTEL_AX211_SCAN_REQUEST_OPCODE,
 					     INTEL_AX211_SCAN_REQUEST_VERSION);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_SCAN_OK)
 		return result;
 
 	/* Obtains the ax211 scan required version result. */
-	function_result = ax211_scan_required_version(
+	error = ax211_scan_required_version(
 		table, INTEL_AX211_SCAN_ABORT_OPCODE,
 		INTEL_AX211_SCAN_ABORT_VERSION);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -237,6 +237,7 @@ drv_intel_ax211_scan_request_encode(
 		channel[5U] = 0x80U;
 		channel[6U] = 1U;
 	}
+
 	output[AX211_SCAN_PERIODIC_OFFSET + 2U] = 1U;
 	ax211_scan_probe_encode(profile, output + AX211_SCAN_PROBE_OFFSET);
 
@@ -278,13 +279,13 @@ drv_intel_ax211_scan_begin(
 	/* Checks the ax211 scan profile valid result. */
 	if (state == NULL || !ax211_scan_profile_valid(profile) ||
 	    generation == 0U ||
-	    now_us > UINT64_MAX - INTEL_AX211_SCAN_WATCHDOG_US)
-
+	    now_us > UINT64_MAX - INTEL_AX211_SCAN_WATCHDOG_US) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_INVALID;
-	result = drv_intel_ax211_scan_api89_validate(table);
+	}
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_scan_api89_validate(table);
 	if (result != INTEL_AX211_SCAN_OK)
 		return result;
 	memset(&started, 0, sizeof(started));
@@ -298,6 +299,7 @@ drv_intel_ax211_scan_begin(
 		started.requested_channels[profile->channel[index] / 8U] |=
 			(uint8_t)(UINT8_C(1) << (profile->channel[index] % 8U));
 	}
+
 	*state = started;
 	/* Returns the computed result. */
 	return INTEL_AX211_SCAN_OK;
@@ -322,10 +324,10 @@ drv_intel_ax211_scan_request_ack(
 
 	/* Handles the state condition. */
 	if (state->phase == INTEL_AX211_SCAN_PHASE_RUNNING ||
-	    state->phase == INTEL_AX211_SCAN_PHASE_TERMINAL)
-
+	    state->phase == INTEL_AX211_SCAN_PHASE_TERMINAL) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_DUPLICATE;
+	}
 
 	/* Handles the state condition. */
 	if (state->phase != INTEL_AX211_SCAN_PHASE_WAIT_ACK)
@@ -338,6 +340,7 @@ drv_intel_ax211_scan_request_ack(
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_TIMEOUT;
 	}
+
 	state->phase = INTEL_AX211_SCAN_PHASE_RUNNING;
 
 	/* Returns the computed result. */
@@ -359,9 +362,9 @@ drv_intel_ax211_scan_event_accept(
 	/* Handles the state availability. */
 	if (state == NULL || event == NULL)
 		return INTEL_AX211_SCAN_INVALID;
-	result = ax211_scan_event_header(state, message, now_us);
 
 	/* Checks the operation result. */
+	result = ax211_scan_event_header(state, message, now_us);
 	if (result == INTEL_AX211_SCAN_TIMEOUT) {
 		state->phase = INTEL_AX211_SCAN_PHASE_TERMINAL;
 		state->abort_required = 1U;
@@ -477,24 +480,25 @@ ax211_scan_profile_add(
 {
 	/* Handles the candidate condition. */
 	if (candidate->number == 0U ||
-	    profile->channel_count >= INTEL_AX211_SCAN_CHANNEL_LIMIT)
-
+	    profile->channel_count >= INTEL_AX211_SCAN_CHANNEL_LIMIT) {
 		/* Returns the computed result. */
 		return;
+	}
 
 	/* Handles the lar enabled condition. */
 	if (lar_enabled) {
 		/* Handles the mcc availability. */
 		if (mcc == NULL || regulatory_index >= mcc->channel_count ||
 		    (mcc->channel[regulatory_index] &
-		     INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID) == 0U)
-
+		     INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID) == 0U) {
 			/* Returns the computed result. */
 			return;
+		}
 	} else if (!candidate->valid) {
 		/* Returns the computed result. */
 		return;
 	}
+
 	profile->channel[profile->channel_count++] = candidate->number;
 }
 
@@ -511,23 +515,22 @@ ax211_scan_profile_valid(
 	    !ax211_scan_station_valid(profile->station_address) ||
 	    profile->channel_width_mhz != INTEL_AX211_SCAN_CHANNEL_WIDTH_MHZ ||
 	    profile->channel_count == 0U ||
-	    profile->channel_count > INTEL_AX211_SCAN_CHANNEL_LIMIT)
-
+	    profile->channel_count > INTEL_AX211_SCAN_CHANNEL_LIMIT) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	/* Process each remaining element. */
 	for (index = 0U; index < profile->channel_count; index++) {
-		channel = profile->channel[index];
-
 		/* Handles the channel condition. */
+		channel = profile->channel[index];
 		if (!((channel >= 1U && channel <= 14U) ||
 		      (channel >= 36U && channel <= 144U &&
 		       ((channel - 36U) % 4U) == 0U) ||
 		      (channel >= 149U && channel <= 181U &&
-		       ((channel - 149U) % 4U) == 0U)))
-
+		       ((channel - 149U) % 4U) == 0U))) {
 			/* Reports successful completion. */
 			return 0;
+		}
 		/* Process each remaining element. */
 		for (earlier = 0U; earlier < index; earlier++) {
 			/* Handles the profile condition. */
@@ -550,16 +553,15 @@ ax211_scan_required_version(
 	struct intel_ax211_protocol_command_version version;
 	int result;
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_version_lookup(
 		table, INTEL_AX211_SCAN_GROUP_LONG, opcode, &version);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK ||
 	    version.command_version != command_version ||
-	    version.notification_version != 0U)
-
+	    version.notification_version != 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_UNSUPPORTED;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_SCAN_OK;
@@ -662,10 +664,10 @@ ax211_scan_event_header(
 
 	/* Handles the message condition. */
 	if (message->group != INTEL_AX211_SCAN_GROUP_LEGACY ||
-	    message->version != INTEL_AX211_SCAN_NOTIFICATION_VERSION)
-
+	    message->version != INTEL_AX211_SCAN_NOTIFICATION_VERSION) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_UNSUPPORTED;
+	}
 
 	/* Checks the operation status. */
 	if ((message->flags & INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK) != 0U)
@@ -685,7 +687,7 @@ ax211_scan_complete_decode(
 	const struct intel_ax211_protocol_message *message,
 	struct intel_ax211_scan_event *event)
 {
-	int function_result;
+	int error;
 	const uint8_t *bytes;
 
 	/* Handles the message condition. */
@@ -695,9 +697,9 @@ ax211_scan_complete_decode(
 	/* Handles the message condition. */
 	if (message->payload_length > 16U)
 		return INTEL_AX211_SCAN_OVERSIZED;
-	bytes = message->payload;
 
 	/* Checks the ax211 scan get le32 result. */
+	bytes = message->payload;
 	if (ax211_scan_get_le32(bytes) != INTEL_AX211_SCAN_UID)
 		return INTEL_AX211_SCAN_OUT_OF_ORDER;
 	memset(event, 0, sizeof(*event));
@@ -711,10 +713,10 @@ ax211_scan_complete_decode(
  * Scheduling, iteration, EBS, elapsed-time, and reserved fields are
 	 * firmware reports.  They do not narrow the v1 completion contract. */
 	/* Obtains the ax211 scan status result result. */
-	function_result = ax211_scan_status_result(event->status);
+	error = ax211_scan_status_result(event->status);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ax211 scan get le32 operation. */
@@ -764,28 +766,28 @@ ax211_scan_iteration_decode(
 	/* Handles the message condition. */
 	if (message->payload_length >
 		    INTEL_AX211_SCAN_ITERATION_NOTIFICATION_SIZE ||
-	    (message->payload_length - 16U) % 8U != 0U)
-
+	    (message->payload_length - 16U) % 8U != 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_OVERSIZED;
-	bytes = message->payload;
+	}
 
 	/* Checks the ax211 scan get le32 result. */
+	bytes = message->payload;
 	if (ax211_scan_get_le32(bytes) != INTEL_AX211_SCAN_UID)
 		return INTEL_AX211_SCAN_OUT_OF_ORDER;
-	count = bytes[4U];
 
 	/* Checks the remaining item count. */
+	count = bytes[4U];
 	if (count > INTEL_AX211_SCAN_CHANNEL_LIMIT)
 		return INTEL_AX211_SCAN_OVERSIZED;
-	available = (message->payload_length - 16U) / 8U;
 
 	/* Checks the remaining item count. */
+	available = (message->payload_length - 16U) / 8U;
 	if (count > available)
 		return INTEL_AX211_SCAN_TRUNCATED;
-	expected = 16U + count * 8U;
 
 	/* Handles the message condition. */
+	expected = 16U + count * 8U;
 	if (message->payload_length < expected)
 		return INTEL_AX211_SCAN_TRUNCATED;
 	memset(event, 0, sizeof(*event));

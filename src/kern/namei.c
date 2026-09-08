@@ -99,17 +99,21 @@ namei_path_flags_at(
 
 	/* Starts at the root for an absolute path, else the working directory. */
 	irq = spin_lock_irqsave(&context->lock);
+
 	if (context->root.p_inode == NULL || context->cwd.p_inode == NULL) {
 		spin_unlock_irqrestore(&context->lock, irq);
 		release_cred(owned_cred);
 		return EINVAL;
 	}
+
 	path_set(&root, context->root.p_mount, context->root.p_inode);
 	if (path[0] == '/')
 		path_set(&current, root.p_mount, root.p_inode);
 	else
 		path_set(&current, context->cwd.p_mount, context->cwd.p_inode);
+
 	spin_unlock_irqrestore(&context->lock, irq);
+
 	error = search_access(current.p_inode, cred);
 	if (error != 0)
 		goto fail;
@@ -136,6 +140,7 @@ namei_path_flags_at(
 			error = ENAMETOOLONG;
 			goto fail;
 		}
+
 		if (position == length)
 			component.cn_flags |= COMPONENT_LAST;
 
@@ -156,6 +161,7 @@ namei_path_flags_at(
 				current = next_path;
 				continue;
 			}
+
 			error = inode_lookup(current.p_inode, &component, &next_inode);
 			if (error != 0)
 				goto fail;
@@ -173,6 +179,7 @@ namei_path_flags_at(
 			current = next_path;
 			continue;
 		}
+
 		if (error != ENOENT)
 			goto fail;
 
@@ -193,6 +200,7 @@ namei_path_flags_at(
 				error = ELOOP;
 				goto fail;
 			}
+
 			target_length = inode_readlink(next_inode, target,
 				sizeof(target) - 1U);
 			inode_release(next_inode);
@@ -200,14 +208,17 @@ namei_path_flags_at(
 				error = (int)-target_length;
 				goto fail;
 			}
+
 			if (target_length == 0) {
 				error = ENOENT;
 				goto fail;
 			}
+
 			if ((size_t)target_length + remainder >= sizeof(combined)) {
 				error = ENAMETOOLONG;
 				goto fail;
 			}
+
 			memcpy(combined, target, (size_t)target_length);
 			memcpy(combined + target_length, path + position,
 				remainder + 1U);
@@ -223,6 +234,7 @@ namei_path_flags_at(
 				path_release(&current);
 				path_set(&current, root.p_mount, root.p_inode);
 			}
+
 			continue;
 		}
 
@@ -230,9 +242,9 @@ namei_path_flags_at(
 		path_set(&next_path, current.p_mount, next_inode);
 		inode_release(next_inode);
 		path_release(&current);
-		current = next_path;
 
 		/* Anything followed by more path must be a searchable directory. */
+		current = next_path;
 		if (position < length || trailing) {
 			if (current.p_inode->i_type != INODE_DIR)
 				error = ENOTDIR;
@@ -248,6 +260,7 @@ namei_path_flags_at(
 		error = ENOTDIR;
 		goto fail;
 	}
+
 	if (trailing) {
 		error = search_access(current.p_inode, cred);
 		if (error != 0)
@@ -286,9 +299,8 @@ namei_path_at(
 {
 	int error;
 
-	error = namei_path_flags_at(context, path, 0, result);
-
 	/* Reports why the lookup failed. */
+	error = namei_path_flags_at(context, path, 0, result);
 	if (error != 0)
 		return error;
 
@@ -503,6 +515,7 @@ fs_chdir_path(
 		release_cred(cred);
 		return EINVAL;
 	}
+
 	if (directory->p_inode->i_type != INODE_DIR) {
 		release_cred(cred);
 		return ENOTDIR;
@@ -519,9 +532,12 @@ fs_chdir_path(
 	path_init(&replacement);
 	path_set(&replacement, directory->p_mount, directory->p_inode);
 	irq = spin_lock_irqsave(&context->lock);
+
 	old = context->cwd;
 	context->cwd = replacement;
+
 	spin_unlock_irqrestore(&context->lock, irq);
+
 	path_release(&old);
 	release_cred(cred);
 
@@ -578,12 +594,15 @@ fs_getcwd(
 
 	/* Takes references on the root and the working directory. */
 	irq = spin_lock_irqsave((struct spinlock *)&context->lock);
+
 	if (context->root.p_inode == NULL || context->cwd.p_inode == NULL) {
 		spin_unlock_irqrestore((struct spinlock *)&context->lock, irq);
 		return EINVAL;
 	}
+
 	path_set(&root, context->root.p_mount, context->root.p_inode);
 	path_set(&cwd, context->cwd.p_mount, context->cwd.p_inode);
+
 	spin_unlock_irqrestore((struct spinlock *)&context->lock, irq);
 
 	/* Walks up, retrying when a directory changed during the walk. */
@@ -592,6 +611,7 @@ fs_getcwd(
 		if (error != EAGAIN)
 			break;
 	}
+
 	path_release(&cwd);
 	path_release(&root);
 
@@ -678,9 +698,9 @@ search_access(
 		return 0;
 
 	/* Checks execute permission. */
-	error = vfs_access(directory, cred, X_OK);
 
 	/* Reports the access check. */
+	error = vfs_access(directory, cred, X_OK);
 	if (error != 0)
 		return error;
 
@@ -765,8 +785,10 @@ find_child_name(
 			error = 0;
 			goto out;
 		}
+
 		path_release(&candidate);
 	}
+
 	if (error == 0)
 		error = ENOENT;
 out:
@@ -827,6 +849,7 @@ getcwd_once(
 				error = ENOENT;
 				break;
 			}
+
 			memcpy(name, current.p_mount->m_name, length + 1U);
 		} else if (error == ENOENT) {
 			error = inode_lookup(current.p_inode, &dotdot,
@@ -840,11 +863,13 @@ getcwd_once(
 				error = ENOENT;
 				break;
 			}
+
 			error = find_child_name(&parent, &current, name);
 			if (error != 0) {
 				path_release(&parent);
 				break;
 			}
+
 			length = strlen(name);
 		} else {
 			break;
@@ -856,12 +881,14 @@ getcwd_once(
 			error = ERANGE;
 			break;
 		}
+
 		position -= length;
 		memcpy(reverse + position, name, length);
 		reverse[--position] = '/';
 		path_release(&current);
 		current = parent;
 	}
+
 	path_release(&current);
 	if (error != 0)
 		return error;

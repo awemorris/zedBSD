@@ -71,14 +71,6 @@ static const struct disk_ops loop_disk_ops = {
 	.ioctl = loop_ioctl,
 };
 
-
-
-
-
-
-
-
-
 /*
  * Implements the drv loop init operation.
  */
@@ -126,11 +118,11 @@ drv_loop_backing_disk_ref(
 	 * owner. */
 	backing = NULL;
 	irq = spin_lock_irqsave(&loop_lock);
+
 	/* Process each remaining element. */
 	for (index = 0; index < LOOP_MAX_DEVICES; index++) {
-		loop = &loops[index];
-
 		/* Handles the loop condition. */
+		loop = &loops[index];
 		if (loop->disk != disk || !loop->attached || loop->detaching)
 			continue;
 
@@ -144,6 +136,7 @@ drv_loop_backing_disk_ref(
 			disk_ref(backing);
 		break;
 	}
+
 	spin_unlock_irqrestore(&loop_lock, irq);
 
 	/* Handles the backing availability. */
@@ -171,6 +164,7 @@ drv_loop_get_index(
 	if (disk == NULL || index_out == NULL)
 		return EINVAL;
 	irq = spin_lock_irqsave(&loop_lock);
+
 	/* Process each element required by the operation. */
 	for (i = 0; i < LOOP_MAX_DEVICES; i++) {
 		/* Handles the loops condition. */
@@ -182,6 +176,7 @@ drv_loop_get_index(
 			return 0;
 		}
 	}
+
 	spin_unlock_irqrestore(&loop_lock, irq);
 
 	/* Returns the computed result. */
@@ -212,9 +207,9 @@ drv_loop_attach_file(
 	if (disk_out == NULL)
 		return EINVAL;
 	*disk_out = NULL;
-	error = loop_backing_valid(backing, flags);
 
 	/* Checks the operation status. */
+	error = loop_backing_valid(backing, flags);
 	if (error != 0)
 		return error;
 
@@ -224,10 +219,10 @@ drv_loop_attach_file(
 	if (vm_object_cache_drain != NULL)
 		(void)vm_object_cache_drain(NULL);
 	backing_inode = backing->f_inode;
-	error = backing_claim_prepare_inode(backing_inode, BACKING_CLAIM_LOOP,
-					    &claim);
 
 	/* Checks the operation status. */
+	error = backing_claim_prepare_inode(backing_inode, BACKING_CLAIM_LOOP,
+					    &claim);
 	if (error == 0)
 		error = loop_finalize_claim(backing, claim, &map, &map_count);
 	else if (error == EOPNOTSUPP)
@@ -241,9 +236,9 @@ drv_loop_attach_file(
 		/* Returns the computed result. */
 		return error;
 	}
-	irq = spin_lock_irqsave(&loop_lock);
 
 	/* Handles the backing condition. */
+	irq = spin_lock_irqsave(&loop_lock);
 	if ((backing->f_inode->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) !=
 	    0) {
 		spin_unlock_irqrestore(&loop_lock, irq);
@@ -253,6 +248,7 @@ drv_loop_attach_file(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	/* Process each element required by the operation. */
 	for (i = 0; i < LOOP_MAX_DEVICES; i++) {
 		/* Handles the loops condition. */
@@ -272,18 +268,21 @@ drv_loop_attach_file(
 		/* Returns the computed result. */
 		return ENOSPC;
 	}
+
 	backing->f_inode->i_flags |= INODE_LOOPFILE;
+
 	spin_unlock_irqrestore(&loop_lock, irq);
 
 	file_ref(backing);
 	inode_ref(backing->f_inode);
-	disk = disk_alloc();
 
 	/* Handles the disk availability. */
+	disk = disk_alloc();
 	if (disk == NULL) {
 		error = ENOSPC;
 		goto fail_refs;
 	}
+
 	disk->d_name[0] = 'l';
 	disk->d_name[1] = 'o';
 	disk->d_name[2] = 'o';
@@ -313,25 +312,28 @@ drv_loop_attach_file(
 
 	/* Handles the map availability. */
 	if (map != NULL) {
-		error = drv_fat_file_set_loop_map(backing, map, map_count);
-
 		/* Checks the operation status. */
+		error = drv_fat_file_set_loop_map(backing, map, map_count);
 		if (error != 0) {
 			(void)disk_destroy(disk);
 			goto fail_refs;
 		}
 	}
+
 	loop->size_bytes = (uint64_t)(uint32_t)backing->f_inode->i_size;
-	error = disk_create(disk);
 
 	/* Checks the operation status. */
+	error = disk_create(disk);
 	if (error != 0) {
 		(void)disk_destroy(disk);
 		goto fail_refs;
 	}
+
 	irq = spin_lock_irqsave(&loop_lock);
+
 	loop->attached = true;
 	loop->reserved = false;
+
 	spin_unlock_irqrestore(&loop_lock, irq);
 
 	/*
@@ -351,15 +353,20 @@ fail_refs:
 		(void)drv_fat_file_set_loop_map(backing, NULL, 0);
 	kern_free(map);
 	irq = spin_lock_irqsave(&loop_lock);
+
 	backing_inode->i_flags &= ~INODE_LOOPFILE;
+
 	spin_unlock_irqrestore(&loop_lock, irq);
+
 	inode_release(backing_inode);
 	backing->f_backing_claim = NULL;
 	(void)file_close(backing);
 	backing_claim_release(claim);
 	irq = spin_lock_irqsave(&loop_lock);
+
 	memset(loop, 0, sizeof(*loop));
 	loop->index = i;
+
 	spin_unlock_irqrestore(&loop_lock, irq);
 
 	/* Reports the failure. */
@@ -387,19 +394,18 @@ drv_loop_attach_path(
 	/* Handles the root availability. */
 	if (root == NULL || path == NULL)
 		return EINVAL;
-	error = cwdinfo_init(&context, root);
 
 	/* Checks the operation status. */
+	error = cwdinfo_init(&context, root);
 	if (error != 0)
 		return error;
 	open_flags = flags == LOOP_READ_WRITE ? O_RDWR : O_RDONLY;
-	error = file_openat(&context, path, open_flags, 0, &file);
 
 	/* Checks the operation status. */
+	error = file_openat(&context, path, open_flags, 0, &file);
 	if (error == 0) {
-		error = drv_loop_attach_file(file, flags, disk_out);
-
 		/* Checks the operation status. */
+		error = drv_loop_attach_file(file, flags, disk_out);
 		if (error != 0) {
 			hal_printf("loop: attach %s mode=%s file-flags=%x "
 				   "size=%u failed (%d)\n",
@@ -410,11 +416,13 @@ drv_loop_attach_path(
 					   : 0U,
 				   error);
 		}
+
 		(void)file_close(file);
 	} else {
 		hal_printf("loop: open %s flags=%x failed (%d)\n", path,
 			   (unsigned)open_flags, error);
 	}
+
 	cwdinfo_destroy(&context);
 
 	/* Reports the failure. */
@@ -441,41 +449,45 @@ drv_loop_detach(
 	if (drv_loop_get_index(disk, &index) != 0)
 		return ENODEV;
 	loop = &loops[index];
-	irq = spin_lock_irqsave(&loop_lock);
 
 	/* Handles the loop condition. */
+	irq = spin_lock_irqsave(&loop_lock);
 	if (loop->detaching) {
 		spin_unlock_irqrestore(&loop_lock, irq);
 
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	loop->detaching = true;
+
 	spin_unlock_irqrestore(&loop_lock, irq);
 
 	/* Handles the loop condition. */
 	if ((loop->flags & LOOP_READ_WRITE) != 0) {
-		error = file_fsync_backend(loop->backing);
-
 		/* Checks the operation status. */
+		error = file_fsync_backend(loop->backing);
 		if (error != 0)
 			goto retryable;
 	}
-	error = disk_gone_if_idle(disk);
 
 	/* Checks the operation status. */
+	error = disk_gone_if_idle(disk);
 	if (error != 0)
 		goto retryable;
-	error = disk_destroy(disk);
 
 	/* Checks the operation status. */
+	error = disk_destroy(disk);
 	if (error != 0)
 		return error; /*
  * Invariant failure: keep the slot pinned for
 				 diagnosis. */
 	irq = spin_lock_irqsave(&loop_lock);
+
 	loop->backing_inode->i_flags &= ~INODE_LOOPFILE;
+
 	spin_unlock_irqrestore(&loop_lock, irq);
+
 	inode_release(loop->backing_inode);
 
 	/* Handles the map availability. */
@@ -493,7 +505,9 @@ drv_loop_detach(
 
 retryable:
 	irq = spin_lock_irqsave(&loop_lock);
+
 	loop->detaching = false;
+
 	spin_unlock_irqrestore(&loop_lock, irq);
 
 	/* Reports the failure. */
@@ -516,18 +530,18 @@ loop_backing_valid(
 	/* Handles the backing availability. */
 	if (backing == NULL || backing->f_inode == NULL)
 		return EINVAL;
-	inode = backing->f_inode;
 
 	/* Checks the active flags. */
+	inode = backing->f_inode;
 	if (flags != LOOP_READ_ONLY && flags != LOOP_READ_WRITE)
 		return EINVAL;
 
 	/* Handles the inode condition. */
 	if (inode->i_type != INODE_REG || inode->i_size <= 0 ||
-	    ((uint32_t)inode->i_size & (LOOP_SECTOR_SIZE - 1U)) != 0)
-
+	    ((uint32_t)inode->i_size & (LOOP_SECTOR_SIZE - 1U)) != 0) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the uint64 t condition. */
 	if ((uint64_t)inode->i_size > (uint64_t)INT32_MAX)
@@ -535,17 +549,17 @@ loop_backing_valid(
 
 	/* Checks the file status flags get result. */
 	if (flags == LOOP_READ_WRITE &&
-	    (file_status_flags_get(backing) & O_ACCMODE) == O_RDONLY)
-
+	    (file_status_flags_get(backing) & O_ACCMODE) == O_RDONLY) {
 		/* Returns the computed result. */
 		return EBADF;
+	}
 
 	/* Handles the i mount availability. */
 	if (flags == LOOP_READ_WRITE && inode->i_mount != NULL &&
-	    (inode->i_mount->m_flags & MOUNT_READ_ONLY) != 0)
-
+	    (inode->i_mount->m_flags & MOUNT_READ_ONLY) != 0) {
 		/* Returns the computed result. */
 		return EROFS;
+	}
 
 	/* Handles the inode condition. */
 	if ((inode->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0)
@@ -554,17 +568,17 @@ loop_backing_valid(
 	/* Handles the i mount availability. */
 	if (inode->i_mount != NULL && inode->i_mount->m_type != NULL &&
 	    inode->i_mount->m_type->fs_name != NULL &&
-	    !strcmp(inode->i_mount->m_type->fs_name, "overlay"))
-
+	    !strcmp(inode->i_mount->m_type->fs_name, "overlay")) {
 		/* Returns the computed result. */
 		return ELOOP;
+	}
 
 	/* Checks the drv loop get index result. */
 	if (inode->i_mount != NULL && inode->i_mount->m_disk != NULL &&
-	    drv_loop_get_index(inode->i_mount->m_disk, &loop_index) == 0)
-
+	    drv_loop_get_index(inode->i_mount->m_disk, &loop_index) == 0) {
 		/* Returns the computed result. */
 		return ELOOP;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -587,9 +601,9 @@ loop_finalize_claim(
 	if (claim == NULL)
 		return 0;
 	memset(&collection, 0, sizeof(collection));
-	error = drv_fat_file_extents(backing, loop_collect_extent, &collection);
 
 	/* Checks the operation status. */
+	error = drv_fat_file_extents(backing, loop_collect_extent, &collection);
 	if (error != 0)
 		return error;
 
@@ -611,12 +625,13 @@ loop_finalize_claim(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	collection.capacity = collection.count;
 	collection.next_block = 0;
 	collection.count = 0;
-	error = drv_fat_file_extents(backing, loop_collect_extent, &collection);
 
 	/* Checks the operation status. */
+	error = drv_fat_file_extents(backing, loop_collect_extent, &collection);
 	if (error != 0)
 		goto out;
 
@@ -626,6 +641,7 @@ loop_finalize_claim(
 		error = EIO;
 		goto out;
 	}
+
 	disk = backing->f_inode->i_mount->m_disk;
 	/* Process each remaining element. */
 	for (i = 0; i < collection.count; i++)
@@ -641,6 +657,7 @@ out:
 	} else {
 		kern_free(collection.map);
 	}
+
 	kern_free(collection.extents);
 
 	/* Reports the failure. */
@@ -663,10 +680,10 @@ loop_collect_extent(
 
 	/* Handles the file block condition. */
 	if (file_block != collection->next_block || count == 0 ||
-	    file_block > UINT64_MAX - count)
-
+	    file_block > UINT64_MAX - count) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	collection->next_block += count;
 
 	/* Handles the collection condition. */
@@ -683,6 +700,7 @@ loop_collect_extent(
 		collection->extents[collection->count].block = disk_block;
 		collection->extents[collection->count].block_count = count;
 	}
+
 	collection->count++;
 
 	/* Reports successful completion. */
@@ -738,9 +756,9 @@ loop_submit(
 	/* Handles the loop availability. */
 	if (loop == NULL || !loop->attached || loop->detaching)
 		return ENXIO;
-	error = io_context_child(&context, &bio->b_context, IO_CONTEXT_DRAIN);
 
 	/* Checks the operation status. */
+	error = io_context_child(&context, &bio->b_context, IO_CONTEXT_DRAIN);
 	if (error != 0)
 		return error;
 
@@ -760,24 +778,24 @@ loop_submit(
 
 	/* Handles the bio condition. */
 	if (bio->b_block_count == 0 ||
-	    bio->b_block_count > LOOP_MAX_TRANSFER_BLOCKS)
-
+	    bio->b_block_count > LOOP_MAX_TRANSFER_BLOCKS) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	bytes64 = (uint64_t)bio->b_block_count * LOOP_SECTOR_SIZE;
 
 	/* Handles the bio condition. */
 	if (bio->b_mapped_block > UINT64_MAX / LOOP_SECTOR_SIZE)
 		return EOVERFLOW;
-	offset64 = bio->b_mapped_block * LOOP_SECTOR_SIZE;
 
 	/* Handles the offset64 condition. */
+	offset64 = bio->b_mapped_block * LOOP_SECTOR_SIZE;
 	if (offset64 > loop->size_bytes ||
 	    bytes64 > loop->size_bytes - offset64 || offset64 > INT32_MAX ||
-	    bytes64 > (uint64_t)INT32_MAX - offset64)
-
+	    bytes64 > (uint64_t)INT32_MAX - offset64) {
 		/* Returns the computed result. */
 		return EOVERFLOW;
+	}
 	io_stats_record(bio->b_op == BIO_READ ? IO_LOOP_READ : IO_LOOP_WRITE,
 			bytes64);
 
@@ -807,6 +825,7 @@ loop_submit(
 			(uint32_t)bio->b_mapped_block, bio->b_block_count,
 			(unsigned)file_status_flags_get(loop->backing), error);
 	}
+
 	bio_complete(bio, error, done > 0 ? (size_t)done : 0);
 
 	/* Reports successful completion. */

@@ -9,6 +9,13 @@
 /* Supports the pc98 auto scan operation. */
 static int pc98_auto_scan(const struct partition_scheme *scheme, struct disk *disk, struct partition *entries, unsigned capacity);
 
+/*
+ * Forward declaration.
+ */
+static uint16_t get16(const uint8_t *p);
+static int chs_to_lba(const struct disk_geometry *geometry, const uint8_t *p, uint64_t *result);
+static int pc98_scan(const struct partition_scheme *scheme, struct disk *dev, struct partition *entries, unsigned max_entries);
+
 /* Supports the pc98 auto scan operation. */
 static int
 pc98_auto_scan(
@@ -17,17 +24,17 @@ pc98_auto_scan(
 	struct partition *entries,
 	unsigned capacity)
 {
-	int function_result;
+	int error;
 	uint8_t sector[512];
 
 	(void)scheme;
 
 	/* Checks the disk read result. */
 	if (disk == NULL || disk->d_block_size != 512U ||
-	    disk_read(disk, 0, 1, sector) != 0)
-
+	    disk_read(disk, 0, 1, sector) != 0) {
 		/* Reports operation failure. */
 		return -1;
+	}
 
 	/*
 	 * A PC-98 IPL may intentionally carry the PC/AT 55 aa marker as part
@@ -37,29 +44,29 @@ pc98_auto_scan(
 	if (sector[4] == 'I' && sector[5] == 'P' && sector[6] == 'L' &&
 	    sector[7] == '1') {
 		/* Computes the function result. */
-		function_result = drv_partition_scheme_pc98.scan(
+		error = drv_partition_scheme_pc98.scan(
 			&drv_partition_scheme_pc98, disk, entries, capacity);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Handles the sector condition. */
 	if (sector[510] == 0x55U && sector[511] == 0xaaU) {
 		/* Computes the function result. */
-		function_result = drv_partition_scheme_mbr.scan(
+		error = drv_partition_scheme_mbr.scan(
 			&drv_partition_scheme_mbr, disk, entries, capacity);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Computes the function result. */
-	function_result = drv_partition_scheme_pc98.scan(
+	error = drv_partition_scheme_pc98.scan(
 		&drv_partition_scheme_pc98, disk, entries, capacity);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 const struct partition_scheme drv_partition_scheme_pc98_auto = {
@@ -87,8 +94,6 @@ const struct partition_scheme drv_partition_scheme_pc98_auto = {
 #define PC98_TABLE_LBA 1U
 #define PC98_ENTRY_SIZE 32U
 
-static uint16_t get16(const uint8_t *p);
-
 /* Supports the get16 operation. */
 static uint16_t
 get16(
@@ -97,8 +102,6 @@ get16(
 	/* Returns the computed result. */
 	return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
 }
-
-static int chs_to_lba(const struct disk_geometry *geometry, const uint8_t *p, uint64_t *result);
 
 /* sect, head, cyl(16bit) -> LBA in the firmware geometry. */
 static int
@@ -119,8 +122,6 @@ chs_to_lba(
 	/* Reports operation failure. */
 	return 1;
 }
-
-static int pc98_scan(const struct partition_scheme *scheme, struct disk *dev, struct partition *entries, unsigned max_entries);
 
 /* Supports the pc98 scan operation. */
 static int
@@ -145,17 +146,17 @@ pc98_scan(
 	/* Checks the disk ioctl result. */
 	if (dev->d_block_size != 512 ||
 	    disk_ioctl(dev, DISK_IOCTL_GET_GEOMETRY, &geometry) != 0 ||
-	    geometry.heads == 0 || geometry.sectors_per_track == 0)
-
+	    geometry.heads == 0 || geometry.sectors_per_track == 0) {
 		/* Reports operation failure. */
 		return -1;
+	}
 
 	/* Checks the disk read result. */
 	if (disk_read(dev, PC98_TABLE_LBA, 1, sector) != 0)
 		return -1;
-	count = 512U / PC98_ENTRY_SIZE;
 
 	/* Checks the remaining item count. */
+	count = 512U / PC98_ENTRY_SIZE;
 	if (count > max_entries)
 		count = max_entries;
 	/* Process each remaining element. */
@@ -193,13 +194,13 @@ pc98_scan(
 			entry->p_flags |= PARTITION_BOOTABLE;
 		/* Process each element required by the operation. */
 		for (j = 0; j < 16; j++) {
-			c = (char)p[16 + j];
-
 			/* Classifies the current input character. */
+			c = (char)p[16 + j];
 			if (c == '\0' || c == ' ')
 				break;
 			entry->p_label[j] = c;
 		}
+
 		entry->p_label[j] = '\0';
 
 		/* Handles the j condition. */

@@ -141,6 +141,7 @@ partition_retire_media(
 			}
 		}
 	}
+
 	atomic_store_release(&partition_reloading, 0);
 
 	/* Preserves all pool records when retirement was refused. */
@@ -176,6 +177,7 @@ partition_create_owned(
 			break;
 		}
 	}
+
 	if (partition == NULL)
 		return ENOSPC;
 
@@ -237,6 +239,7 @@ partition_reset(
 		partitions[i].p_disk = NULL;
 		partitions[i].p_parent = NULL;
 	}
+
 	atomic_raw_store_release(&partitions_count, 0);
 }
 
@@ -302,6 +305,7 @@ partition_reload(
 		atomic_store_release(&partition_reloading, 0);
 		return error;
 	}
+
 	error = disk_reload_begin(parent);
 	if (error != 0) {
 		backing_mutation_end(&guard);
@@ -317,6 +321,7 @@ partition_reload(
 		atomic_store_release(&partition_reloading, 0);
 		return ENOMEM;
 	}
+
 	error = partition_reload_owned(parent, work);
 
 	/* Releases every reservation after either rollback or complete publication. */
@@ -371,6 +376,7 @@ reload_check_mbr(
 		if (sector[446 + 16 * i + 4] == 0xee)
 			return 0;
 	}
+
 	if (disk->d_block_size != 512)
 		return EOPNOTSUPP;
 
@@ -384,6 +390,7 @@ reload_check_mbr(
 				return EINVAL;
 			continue;
 		}
+
 		if (entry[4] == 5 || entry[4] == 15 || entry[4] == 0x85)
 			return EOPNOTSUPP;
 		if ((entry[0] != 0 && entry[0] != 0x80) ||
@@ -560,6 +567,7 @@ partition_name(
 		name[at] = parent[at];
 		at++;
 	}
+
 	if (at == 0)
 		return EINVAL;
 

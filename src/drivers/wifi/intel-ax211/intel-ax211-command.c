@@ -77,18 +77,18 @@ drv_intel_ax211_command_transaction_init(
 {
 	/* Handles the transaction availability. */
 	if (transaction == NULL || transport == NULL || hardware_epoch == 0U ||
-	    max_pending == 0U || max_pending > INTEL_AX211_COMMAND_MAX_PENDING)
-
+	    max_pending == 0U || max_pending > INTEL_AX211_COMMAND_MAX_PENDING) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_INVALID;
+	}
 
 	/* Checks the drv intel ax211 transport command pending count result. */
 	if (!transport->rings_initialized || transport->command_prepared ||
 	    transport->command_reset_required ||
-	    drv_intel_ax211_transport_command_pending_count(transport) != 0U)
-
+	    drv_intel_ax211_transport_command_pending_count(transport) != 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_INVALID;
+	}
 	memset(transaction, 0, sizeof(*transaction));
 	transaction->transport = transport;
 	transaction->max_pending = max_pending;
@@ -143,7 +143,7 @@ drv_intel_ax211_command_submit(
 	uint64_t timeout,
 	struct intel_ax211_command_handle *handle)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_command_handle submitted;
 	struct intel_ax211_command_entry *entry;
 	int abort_result;
@@ -152,10 +152,10 @@ drv_intel_ax211_command_submit(
 	/* Checks the ax211 command transaction valid result. */
 	if (!ax211_command_transaction_valid(transaction) ||
 	    !ax211_command_request_valid(request) || handle == NULL ||
-	    timeout == 0U || now > UINT64_MAX - timeout)
-
+	    timeout == 0U || now > UINT64_MAX - timeout) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_INVALID;
+	}
 
 	/* Handles the transaction condition. */
 	if (transaction->poisoned)
@@ -182,19 +182,18 @@ drv_intel_ax211_command_submit(
 	/* Checks the operation result. */
 	if (result != INTEL_AX211_TRANSPORT_OK) {
 		/* Obtains the ax211 command prepare result result. */
-		function_result = ax211_command_prepare_result(result);
+		error = ax211_command_prepare_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
-	entry = &transaction->entry[submitted.token.index];
 
 	/* Handles the entry condition. */
+	entry = &transaction->entry[submitted.token.index];
 	if (entry->active) {
+		/* Handles the abort result condition. */
 		abort_result = drv_intel_ax211_transport_command_abort_prepared(
 			transaction->transport, &submitted.token);
-
-		/* Handles the abort result condition. */
 		if (abort_result != INTEL_AX211_TRANSPORT_OK)
 			transaction->poisoned = 1U;
 
@@ -224,10 +223,9 @@ drv_intel_ax211_command_submit(
 	transaction->pending_count++;
 	*handle = submitted;
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_transport_command_publish(
 		transaction->transport, &submitted.token);
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_TRANSPORT_OK)
 		return INTEL_AX211_COMMAND_OK;
 
@@ -241,10 +239,10 @@ drv_intel_ax211_command_submit(
 	}
 
 	/* A definite pre-doorbell failure may safely undo the prepared slot. */
-	abort_result = drv_intel_ax211_transport_command_abort_prepared(
-		transaction->transport, &submitted.token);
 
 	/* Handles the abort result condition. */
+	abort_result = drv_intel_ax211_transport_command_abort_prepared(
+		transaction->transport, &submitted.token);
 	if (abort_result == INTEL_AX211_TRANSPORT_OK) {
 		drv_intel_ax211_scrub(entry, sizeof(*entry));
 		transaction->pending_count--;
@@ -252,6 +250,7 @@ drv_intel_ax211_command_submit(
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_TRANSPORT_FAILED;
 	}
+
 	entry->abandoned = 1U;
 	transaction->poisoned = 1U;
 
@@ -269,16 +268,16 @@ drv_intel_ax211_command_submit_nvm_access_complete(
 	uint64_t timeout,
 	struct intel_ax211_command_handle *handle)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_command_request request;
 	uint8_t payload[4];
 
 	/* Checks the drv intel ax211 command nvm access complete encode result. */
 	if (drv_intel_ax211_command_nvm_access_complete_encode(payload) !=
-	    INTEL_AX211_COMMAND_OK)
-
+	    INTEL_AX211_COMMAND_OK) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_INVALID;
+	}
 	memset(&request, 0, sizeof(request));
 	request.command.group = INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM;
 	request.command.opcode =
@@ -291,11 +290,11 @@ drv_intel_ax211_command_submit_nvm_access_complete(
 	request.maximum_response_length = 0U;
 
 	/* Obtains the drv intel ax211 command submit result. */
-	function_result = drv_intel_ax211_command_submit(transaction, &request,
+	error = drv_intel_ax211_command_submit(transaction, &request,
 							 now, timeout, handle);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -308,16 +307,16 @@ drv_intel_ax211_command_submit_nvm_get_info(
 	uint64_t timeout,
 	struct intel_ax211_command_handle *handle)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_command_request request;
 	uint8_t payload[4];
 
 	/* Checks the drv intel ax211 command nvm get info encode result. */
 	if (drv_intel_ax211_command_nvm_get_info_encode(payload) !=
-	    INTEL_AX211_COMMAND_OK)
-
+	    INTEL_AX211_COMMAND_OK) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_INVALID;
+	}
 	memset(&request, 0, sizeof(request));
 	request.command.group = INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM;
 	request.command.opcode = INTEL_AX211_PROTOCOL_NVM_GET_INFO_OPCODE;
@@ -331,11 +330,11 @@ drv_intel_ax211_command_submit_nvm_get_info(
 		INTEL_AX211_PROTOCOL_NVM_GET_INFO_SIZE;
 
 	/* Obtains the drv intel ax211 command submit result. */
-	function_result = drv_intel_ax211_command_submit(transaction, &request,
+	error = drv_intel_ax211_command_submit(transaction, &request,
 							 now, timeout, handle);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -351,7 +350,7 @@ drv_intel_ax211_command_complete(
 	size_t response_capacity,
 	size_t *response_length)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_message message;
 	struct intel_ax211_command_entry *entry;
 	struct intel_ax211_ring_token oldest;
@@ -364,10 +363,10 @@ drv_intel_ax211_command_complete(
 	/* Checks the ax211 command transaction valid result. */
 	if (!ax211_command_transaction_valid(transaction) ||
 	    event_bytes == NULL || response_length == NULL ||
-	    hardware_epoch == 0U)
-
+	    hardware_epoch == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_INVALID;
+	}
 
 	/* Handles the hardware epoch condition. */
 	if (hardware_epoch != transaction->hardware_epoch)
@@ -382,30 +381,30 @@ drv_intel_ax211_command_complete(
 	/* Handles the event condition. */
 	if ((event.queue & 0x80U) != 0U)
 		return INTEL_AX211_COMMAND_OUT_OF_ORDER;
-	entry = &transaction->entry[event.index];
 
 	/* Handles the entry condition. */
+	entry = &transaction->entry[event.index];
 	if (!entry->active) {
 		/* Obtains the ax211 command inactive event result result. */
-		function_result = ax211_command_inactive_event_result(
+		error = ax211_command_inactive_event_result(
 			transaction, event.index, hardware_epoch);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Handles the event condition. */
 	if (event.queue != entry->pending.queue)
 		return INTEL_AX211_COMMAND_OUT_OF_ORDER;
-	transport_result = drv_intel_ax211_transport_command_oldest(
-		transaction->transport, &oldest);
 
 	/* Handles the transport result condition. */
+	transport_result = drv_intel_ax211_transport_command_oldest(
+		transaction->transport, &oldest);
 	if (transport_result != INTEL_AX211_TRANSPORT_OK ||
-	    oldest.queue != event.queue || oldest.index != event.index)
-
+	    oldest.queue != event.queue || oldest.index != event.index) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_OUT_OF_ORDER;
+	}
 	memset(&message, 0, sizeof(message));
 	message.opcode = event.command.opcode;
 	wire_group = event.flags &
@@ -438,15 +437,14 @@ drv_intel_ax211_command_complete(
 	/* Handles the response availability. */
 	if (result == INTEL_AX211_COMMAND_OK &&
 	    (message.payload_length > response_capacity ||
-	     (message.payload_length != 0U && response == NULL)))
-
+	     (message.payload_length != 0U && response == NULL))) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_BUFFER_TOO_SMALL;
-
-	transport_result = drv_intel_ax211_transport_command_complete(
-		transaction->transport, &oldest);
+	}
 
 	/* Handles the transport result condition. */
+	transport_result = drv_intel_ax211_transport_command_complete(
+		transaction->transport, &oldest);
 	if (transport_result != INTEL_AX211_TRANSPORT_OK) {
 		entry->abandoned = 1U;
 		transaction->poisoned = 1U;
@@ -476,33 +474,33 @@ drv_intel_ax211_command_cancel(
 	struct intel_ax211_command_transaction *transaction,
 	const struct intel_ax211_command_handle *handle)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_command_entry *entry;
 
 	/* Checks the ax211 command transaction valid result. */
 	if (!ax211_command_transaction_valid(transaction) || handle == NULL ||
-	    handle->hardware_epoch != transaction->hardware_epoch)
-
+	    handle->hardware_epoch != transaction->hardware_epoch) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_INVALID;
-	entry = &transaction->entry[handle->token.index];
+	}
 
 	/* Handles the entry condition. */
+	entry = &transaction->entry[handle->token.index];
 	if (!entry->active) {
 		/* Obtains the ax211 command inactive handle result result. */
-		function_result = ax211_command_inactive_handle_result(
+		error = ax211_command_inactive_handle_result(
 			transaction, handle);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Handles the entry condition. */
 	if (entry->logical_generation != handle->generation ||
-	    entry->pending.queue != handle->token.queue)
-
+	    entry->pending.queue != handle->token.queue) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_STALE;
+	}
 
 	/* Handles the entry condition. */
 	if (entry->abandoned)
@@ -534,15 +532,15 @@ drv_intel_ax211_command_timeout_oldest(
 	/* Handles the transaction condition. */
 	if (transaction->pending_count == 0U)
 		return INTEL_AX211_COMMAND_EMPTY;
-	result = drv_intel_ax211_transport_command_oldest(
-		transaction->transport, &oldest);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_transport_command_oldest(
+		transaction->transport, &oldest);
 	if (result != INTEL_AX211_TRANSPORT_OK)
 		return INTEL_AX211_COMMAND_MALFORMED;
-	entry = &transaction->entry[oldest.index];
 
 	/* Handles the entry condition. */
+	entry = &transaction->entry[oldest.index];
 	if (!entry->active)
 		return INTEL_AX211_COMMAND_MALFORMED;
 	handle->token = oldest;
@@ -602,20 +600,20 @@ drv_intel_ax211_command_after_device_reset(
 	/* Checks the ax211 command transaction valid result. */
 	if (!ax211_command_transaction_valid(transaction) ||
 	    hardware_epoch == 0U ||
-	    hardware_epoch == transaction->hardware_epoch)
-
+	    hardware_epoch == transaction->hardware_epoch) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_INVALID;
+	}
 
 	/* Checks the drv intel ax211 transport command pending count result. */
 	if (drv_intel_ax211_transport_command_pending_count(
 		    transaction->transport) != 0U ||
 	    transaction->transport->command_prepared ||
 	    transaction->transport->command_reset_required ||
-	    !transaction->transport->command_reset_completed)
-
+	    !transaction->transport->command_reset_completed) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_TRANSPORT_FAILED;
+	}
 	drv_intel_ax211_scrub(transaction->entry, sizeof(transaction->entry));
 	drv_intel_ax211_scrub(transaction->last_generation,
 			      sizeof(transaction->last_generation));
@@ -671,18 +669,18 @@ ax211_command_transaction_valid(
 {
 	/* Handles the transaction availability. */
 	if (transaction == NULL || !transaction->initialized ||
-	    transaction->transport == NULL || transaction->hardware_epoch == 0U)
-
+	    transaction->transport == NULL || transaction->hardware_epoch == 0U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Handles the transaction condition. */
 	if (transaction->max_pending == 0U ||
 	    transaction->max_pending > INTEL_AX211_COMMAND_MAX_PENDING ||
-	    transaction->pending_count > transaction->max_pending)
-
+	    transaction->pending_count > transaction->max_pending) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -702,10 +700,10 @@ ax211_command_request_valid(
 	    request->response_version == INTEL_AX211_PROTOCOL_UNKNOWN_VERSION ||
 	    request->minimum_response_length >
 		    request->maximum_response_length ||
-	    request->maximum_response_length > INTEL_AX211_MAX_COMMAND_PAYLOAD)
-
+	    request->maximum_response_length > INTEL_AX211_MAX_COMMAND_PAYLOAD) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -759,10 +757,10 @@ ax211_command_inactive_event_result(
 {
 	/* Handles the transaction condition. */
 	if (transaction->last_completion_epoch[index] == hardware_epoch &&
-	    hardware_epoch != 0U)
-
+	    hardware_epoch != 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_DUPLICATE;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_COMMAND_STALE;
@@ -827,10 +825,10 @@ ax211_command_inactive_handle_result(
 	/* Handles the transaction condition. */
 	if (transaction->last_generation[handle->token.index] ==
 		    handle->generation &&
-	    handle->generation != 0U)
-
+	    handle->generation != 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_COMMAND_DUPLICATE;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_COMMAND_STALE;

@@ -58,20 +58,6 @@ static const struct drv_pci_bus_ops pcat_bus_ops = {
 	.allocate_irqs = pcat_allocate_irqs,
 	.free_irqs = pcat_free_irqs};
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv pci pcat init operation.
  */
@@ -103,6 +89,7 @@ drv_pci_pcat_init(
 		hal_printf("pci: ECAM segment 0000 bus 00 at %08x:%08x\n",
 			   (uint32_t)((uint64_t)ecam >> 32), (uint32_t)ecam);
 	}
+
 #ifdef ZEDBSD_TEST_CHECKPOINTS
 	value0 = 0;
 	value4 = 0;
@@ -110,15 +97,15 @@ drv_pci_pcat_init(
 	(void)pcat_config_read(NULL, &address4, 0, 4, &value4);
 	hal_printf("WS004 PCI CONFIG %08x %08x\n", value0, value4);
 #endif
-	error = drv_dma_device_create(&constraints, &pcat_dma);
 
 	/* Checks the operation status. */
+	error = drv_dma_device_create(&constraints, &pcat_dma);
 	if (error != 0)
 		return error;
-	error = drv_pci_bus_create_root(0, 0, &pcat_bus_ops, NULL, pcat_dma,
-					&root);
 
 	/* Checks the operation status. */
+	error = drv_pci_bus_create_root(0, 0, &pcat_bus_ops, NULL, pcat_dma,
+					&root);
 	if (error != 0) {
 		(void)drv_dma_device_destroy(pcat_dma);
 
@@ -140,15 +127,15 @@ ecam_function_address(
 	paddr_t *result)
 {
 #if defined(__x86_64__)
-	int function_result;
+	int error;
 
 	/* Obtains the amd64 acpi ecam address result. */
-	function_result = amd64_acpi_ecam_address(address->segment,
+	error = amd64_acpi_ecam_address(address->segment,
 						  address->bus, address->device,
 						  address->function, result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 
 #else
 	(void)address;
@@ -180,16 +167,15 @@ pcat_config_read(
 	if (address == NULL || result == NULL || address->device >= 32U ||
 	    address->function >= 8U || offset + width > 4096U ||
 	    (width != 1 && width != 2 && width != 4) ||
-	    (width == 2 && (offset & 1U)) || (width == 4 && (offset & 3U)))
-
+	    (width == 2 && (offset & 1U)) || (width == 4 && (offset & 3U))) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Checks the current offset. */
 	if (offset >= 256U || address->segment != 0) {
-		error = ecam_map(address, &base_local);
-
 		/* Checks the operation status. */
+		error = ecam_map(address, &base_local);
 		if (error != 0)
 			return error;
 
@@ -218,6 +204,7 @@ pcat_config_read(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	enabled = lock_enter();
 	port_write32(PCI_CONFIG_ADDRESS, address_value(address, offset));
 	value = port_read32(PCI_CONFIG_DATA);
@@ -241,10 +228,10 @@ ecam_map(
 	volatile uint8_t **result)
 {
 #if defined(__x86_64__)
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		amd64_acpi_ecam_pointer(address->segment, address->bus,
 					address->device, address->function,
 					result) == HAL_OK
@@ -252,7 +239,7 @@ ecam_map(
 			: ENOTSUP;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 
 #else
 	(void)address;
@@ -343,10 +330,10 @@ pcat_config_write(
 	if (address == NULL || address->device >= 32U ||
 	    address->function >= 8U || offset + width > 4096U ||
 	    (width != 1 && width != 2 && width != 4) ||
-	    (width == 2 && (offset & 1U)) || (width == 4 && (offset & 3U)))
-
+	    (width == 2 && (offset & 1U)) || (width == 4 && (offset & 3U))) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Checks the ecam map result. */
 	if (ecam_map(address, &base) == 0) {
@@ -358,6 +345,7 @@ pcat_config_write(
 		} else {
 			*(volatile uint32_t *)(base + offset) = value;
 		}
+
 		hal_io_mb();
 
 		/* Reports successful completion. */
@@ -381,6 +369,7 @@ pcat_config_write(
 		port_write32(PCI_CONFIG_ADDRESS,
 			     address_value(address, offset));
 	}
+
 	port_write32(PCI_CONFIG_DATA, current);
 	lock_leave(enabled);
 
@@ -407,10 +396,10 @@ pcat_map_bar(
 
 	/* Handles the bar availability. */
 	if (bar == NULL || mapping == NULL || bar->type == DRV_PCI_BAR_IO ||
-	    bar->bus_address == 0 || bar->size == 0)
-
+	    bar->bus_address == 0 || bar->size == 0) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/*
  * MSI-X tables commonly occupy a small region of a BAR which the device
@@ -438,9 +427,9 @@ pcat_map_bar(
 			return 0;
 		}
 	}
-	memory = hal_malloc(sizeof(*memory));
 
 	/* Handles the memory availability. */
+	memory = hal_malloc(sizeof(*memory));
 	if (memory == NULL)
 		return ENOMEM;
 	request.paddr = bar->bus_address;
@@ -469,16 +458,17 @@ pcat_map_bar(
 			assigned = 0xf0000000U;
 		} else {
 			alignment = (uint32_t)bar->size;
-			assigned = (pci_small_mmio_next + alignment - 1U) &
-				   ~(alignment - 1U);
 
 			/* Handles the assigned condition. */
+			assigned = (pci_small_mmio_next + alignment - 1U) &
+				   ~(alignment - 1U);
 			if (assigned > 0xf1000000U - bar->size) {
 				hal_free(memory);
 
 				/* Returns the computed result. */
 				return ENOMEM;
 			}
+
 			pci_small_mmio_next = assigned + (uint32_t)bar->size;
 		}
 
@@ -490,6 +480,7 @@ pcat_map_bar(
 			/* Returns the computed result. */
 			return ENOMEM;
 		}
+
 		request.paddr = assigned;
 
 		/* Checks the hal pmem alloc result. */
@@ -499,16 +490,18 @@ pcat_map_bar(
 			/* Returns the computed result. */
 			return ENOMEM;
 		}
+
 		hal_printf("pci: BAR%u assigned to %08x (%u KiB)\n", bar->index,
 			   assigned, (unsigned)(bar->size / 1024U));
 	}
+
 	mapping->address = memory->vaddr;
 	mapping->size = memory->size;
 	mapping->type = bar->type;
 	mapping->private_data[0] = (uintptr_t)memory;
-	record = hal_malloc(sizeof(*record));
 
 	/* Handles the record availability. */
+	record = hal_malloc(sizeof(*record));
 	if (record == NULL) {
 		(void)hal_pmem_free(memory);
 		hal_free(memory);
@@ -517,6 +510,7 @@ pcat_map_bar(
 		/* Returns the computed result. */
 		return ENOMEM;
 	}
+
 	record->device = device;
 	record->bar_index = bar->index;
 	record->bus_address = request.paddr;
@@ -545,9 +539,9 @@ pcat_unmap_bar(
 	/* Handles the mapping availability. */
 	if (mapping == NULL)
 		return;
-	record = (struct pcat_bar_mapping *)mapping->private_data[1];
 
 	/* Handles the mapping condition. */
+	record = (struct pcat_bar_mapping *)mapping->private_data[1];
 	if (mapping->private_data[0] == 0) {
 		/* Handles the record availability. */
 		if (record != NULL && record->references != 0)
@@ -557,6 +551,7 @@ pcat_unmap_bar(
 		/* Returns the computed result. */
 		return;
 	}
+
 	memory = (struct hal_pmem *)mapping->private_data[0];
 
 	/* Handles the record availability. */
@@ -570,6 +565,7 @@ pcat_unmap_bar(
 			/* Returns the computed result. */
 			return;
 		}
+
 		/* Process each linked entry. */
 		for (link = &bar_mappings; *link != NULL;
 		     link = &(*link)->next) {
@@ -579,8 +575,10 @@ pcat_unmap_bar(
 				break;
 			}
 		}
+
 		hal_free(record);
 	}
+
 	(void)hal_pmem_free(memory);
 	hal_free(memory);
 	memset(mapping, 0, sizeof(*mapping));
@@ -613,14 +611,13 @@ pcat_allocate_irqs(
 
 	/* Handles the type condition. */
 	if (type == DRV_PCI_IRQ_MSI || type == DRV_PCI_IRQ_MSIX) {
-		id = type == DRV_PCI_IRQ_MSI ? 0x05U : 0x11U;
-
 		/* Checks the drv pci device find capability result. */
+		id = type == DRV_PCI_IRQ_MSI ? 0x05U : 0x11U;
 		if (drv_pci_device_find_capability(device, id, &capability) !=
-		    0)
-
+		    0) {
 			/* Returns the computed result. */
 			return ENOTSUP;
+		}
 		irqs[0].type = type;
 		irqs[0].index = 0;
 		irqs[0].vector = 0;
@@ -637,10 +634,10 @@ pcat_allocate_irqs(
 
 	/* Checks the drv pci device config read8 result. */
 	if (drv_pci_device_config_read8(device, 0x3cU, &line) != 0 ||
-	    line == 0xffU || line >= 16U)
-
+	    line == 0xffU || line >= 16U) {
 		/* Returns the computed result. */
 		return ENODEV;
+	}
 	irqs[0].type = type;
 	irqs[0].index = 0;
 	irqs[0].vector = line;

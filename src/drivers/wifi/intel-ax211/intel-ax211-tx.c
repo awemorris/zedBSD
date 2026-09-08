@@ -110,19 +110,19 @@ drv_intel_ax211_tx_api89_validate(
 	/* Handles the table availability. */
 	if (table == NULL)
 		return INTEL_AX211_TX_INVALID;
-	result = drv_intel_ax211_protocol_command_version_lookup(
-		table, INTEL_AX211_TX_GROUP, INTEL_AX211_TX_OPCODE, &version);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_protocol_command_version_lookup(
+		table, INTEL_AX211_TX_GROUP, INTEL_AX211_TX_OPCODE, &version);
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return INTEL_AX211_TX_UNSUPPORTED;
 
 	/* Handles the version condition. */
 	if (version.command_version != INTEL_AX211_TX_COMMAND_VERSION ||
-	    version.notification_version != INTEL_AX211_TX_NOTIFICATION_VERSION)
-
+	    version.notification_version != INTEL_AX211_TX_NOTIFICATION_VERSION) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_UNSUPPORTED;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_TX_OK;
@@ -148,20 +148,20 @@ drv_intel_ax211_tx_prepare(
 	/* Handles the request availability. */
 	if (request == NULL || prepared == NULL || request->frame == NULL)
 		return INTEL_AX211_TX_INVALID;
+
+	/* Checks the operation result. */
 	result = ax211_tx_header_length(request->frame, request->length,
 					&header_length);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_TX_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = ax211_tx_request_validate(request, header_length);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_TX_OK)
 		return result;
-	firmware_length = request->length;
 
 	/* Handles the request condition. */
+	firmware_length = request->length;
 	if (request->encrypted)
 		firmware_length -= AX211_TX_CCMP_HEADER_SIZE;
 
@@ -187,25 +187,25 @@ drv_intel_ax211_tx_prepare(
 	 * this fixed-rate policy without changing the TX ABI.
 	 */
 	flags |= AX211_TX_FLAG_COMMAND_RATE | AX211_TX_FLAG_HIGH_PRIORITY;
-	padding = header_length & 3U;
 
 	/* Handles the padding condition. */
+	padding = header_length & 3U;
 	if (padding != 0U)
 		padding = 4U - padding;
+
+	/* Handles the padding condition. */
 	offload = (uint32_t)((header_length / 2U) &
 			     AX211_TX_OFFLOAD_MAC_HEADER_MASK)
 		  << AX211_TX_OFFLOAD_MAC_HEADER_SHIFT;
-
-	/* Handles the padding condition. */
 	if (padding != 0U)
 		offload |= AX211_TX_OFFLOAD_PADDING;
 
 	/* Handles the header length condition. */
 	if (INTEL_AX211_TX_COMMAND_FIXED_SIZE + header_length + padding >
-	    sizeof(encoded.command))
-
+	    sizeof(encoded.command)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_BUFFER_TOO_SMALL;
+	}
 
 	/* Builds the command that precedes the frame on the wire. */
 	ax211_tx_put_le16(encoded.command, (uint16_t)firmware_length);
@@ -254,10 +254,10 @@ drv_intel_ax211_tx_completion_decode(
 	if (message == NULL || completion == NULL ||
 	    hardware_generation == 0U || message->generation == 0U ||
 	    expected_queue < INTEL_AX211_TX_QUEUE_MIN ||
-	    expected_queue > INTEL_AX211_TX_QUEUE_MAX)
-
+	    expected_queue > INTEL_AX211_TX_QUEUE_MAX) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_INVALID;
+	}
 
 	/* Handles the message condition. */
 	if (message->generation != hardware_generation)
@@ -266,10 +266,10 @@ drv_intel_ax211_tx_completion_decode(
 	/* Handles the message condition. */
 	if (message->group != INTEL_AX211_TX_GROUP ||
 	    message->opcode != INTEL_AX211_TX_OPCODE ||
-	    message->version != INTEL_AX211_TX_NOTIFICATION_VERSION)
-
+	    message->version != INTEL_AX211_TX_NOTIFICATION_VERSION) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_UNSUPPORTED;
+	}
 
 	/* Checks the operation status. */
 	if ((message->flags & INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK) != 0U)
@@ -277,10 +277,10 @@ drv_intel_ax211_tx_completion_decode(
 
 	/* Handles the message condition. */
 	if (message->queue != (uint8_t)(expected_queue & 0x1fU) ||
-	    message->index != expected_index)
-
+	    message->index != expected_index) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_STALE;
+	}
 
 	/* Handles the payload availability. */
 	if (message->payload == NULL)
@@ -297,15 +297,15 @@ drv_intel_ax211_tx_completion_decode(
 	/* Handles the message condition. */
 	if (message->payload[0U] != 1U)
 		return INTEL_AX211_TX_UNSUPPORTED;
-	response_queue = ax211_tx_get_le16(message->payload + 36U);
 
 	/* Handles the response queue condition. */
+	response_queue = ax211_tx_get_le16(message->payload + 36U);
 	if (response_queue != expected_queue)
 		return INTEL_AX211_TX_STALE;
-	scheduler_sequence = ax211_tx_get_le32(message->payload +
-					       AX211_TX_RESPONSE_SSN_OFFSET);
 
 	/* Handles the scheduler sequence condition. */
+	scheduler_sequence = ax211_tx_get_le32(message->payload +
+					       AX211_TX_RESPONSE_SSN_OFFSET);
 	if (scheduler_sequence >= INTEL_AX211_TX_SCHEDULER_SEQUENCE_LIMIT)
 		return INTEL_AX211_TX_FAILED;
 	status = ax211_tx_get_le32(message->payload +
@@ -350,15 +350,13 @@ ax211_tx_header_length(
 
 	/* Handles the type condition. */
 	if (type == AX211_TX_FRAME_TYPE_MANAGEMENT) {
-		required = 24U;
-
 		/* Handles the frame control condition. */
+		required = 24U;
 		if ((frame_control & AX211_TX_ORDER) != 0U)
 			required += 4U;
 	} else if (type == AX211_TX_FRAME_TYPE_DATA) {
-		required = 24U;
-
 		/* Handles the frame control condition. */
+		required = 24U;
 		if ((frame_control & (AX211_TX_TO_DS | AX211_TX_FROM_DS)) ==
 		    (AX211_TX_TO_DS | AX211_TX_FROM_DS))
 			required += 6U;
@@ -419,43 +417,43 @@ ax211_tx_request_validate(
 	    request->key_index > 3U ||
 	    (request->frame_class != INTEL_AX211_TX_FRAME_MANAGEMENT &&
 	     request->frame_class != INTEL_AX211_TX_FRAME_EAPOL &&
-	     request->frame_class != INTEL_AX211_TX_FRAME_DATA))
-
+	     request->frame_class != INTEL_AX211_TX_FRAME_DATA)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_INVALID;
+	}
 	frame_control = ax211_tx_get_le16(request->frame);
+
+	/* Handles the frame control condition. */
 	expected_type = request->frame_class == INTEL_AX211_TX_FRAME_MANAGEMENT
 				? AX211_TX_FRAME_TYPE_MANAGEMENT
 				: AX211_TX_FRAME_TYPE_DATA;
-
-	/* Handles the frame control condition. */
 	if ((frame_control & AX211_TX_FRAME_TYPE_MASK) != expected_type)
 		return INTEL_AX211_TX_INVALID;
 
 	/* Handles the request condition. */
 	if (request->frame_class == INTEL_AX211_TX_FRAME_MANAGEMENT &&
-	    request->encrypted)
-
+	    request->encrypted) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_UNSUPPORTED;
+	}
 
 	/* Handles the request condition. */
 	if (!request->encrypted &&
 	    (request->key_generation != 0U || request->packet_number != 0U ||
 	     request->key_index != 0U ||
-	     (frame_control & AX211_TX_PROTECTED) != 0U))
-
+	     (frame_control & AX211_TX_PROTECTED) != 0U)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_INVALID;
+	}
 
 	/* Handles the request condition. */
 	if (request->encrypted &&
 	    (request->key_generation == 0U || request->packet_number == 0U ||
 	     request->packet_number > 0x0000ffffffffffffULL ||
-	     (frame_control & AX211_TX_PROTECTED) == 0U))
-
+	     (frame_control & AX211_TX_PROTECTED) == 0U)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_INVALID;
+	}
 
 	/* Handles the request condition. */
 	if (!request->encrypted)
@@ -477,24 +475,24 @@ ax211_tx_ccmp_validate(
 
 	/* Handles the header length condition. */
 	if (header_length > request->length ||
-	    request->length - header_length < AX211_TX_CCMP_HEADER_SIZE)
-
+	    request->length - header_length < AX211_TX_CCMP_HEADER_SIZE) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_TRUNCATED;
-	ccmp = request->frame + header_length;
+	}
 
 	/* Handles the ccmp condition. */
+	ccmp = request->frame + header_length;
 	if (ccmp[2U] != 0U || (ccmp[3U] & 0x3fU) != AX211_TX_CCMP_EXTENDED_IV ||
-	    (ccmp[3U] >> 6) != request->key_index)
-
+	    (ccmp[3U] >> 6) != request->key_index) {
 		/* Returns the computed result. */
 		return INTEL_AX211_TX_INVALID;
+	}
+
+	/* Handles the packet number condition. */
 	packet_number = (uint64_t)ccmp[0U] | ((uint64_t)ccmp[1U] << 8) |
 			((uint64_t)ccmp[4U] << 16) |
 			((uint64_t)ccmp[5U] << 24) |
 			((uint64_t)ccmp[6U] << 32) | ((uint64_t)ccmp[7U] << 40);
-
-	/* Handles the packet number condition. */
 	if (packet_number != request->packet_number)
 		return INTEL_AX211_TX_STALE;
 

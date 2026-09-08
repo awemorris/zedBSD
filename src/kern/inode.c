@@ -146,8 +146,10 @@ inode_alloc(
 				break;
 			}
 		}
+
 		spin_unlock_irqrestore(&inode_cache_lock, irq);
 	}
+
 	if (inode == NULL) {
 		irq = spin_lock_irqsave(&inode_cache_lock);
 		inode_cache[slot] = NULL;
@@ -165,8 +167,11 @@ inode_alloc(
 	waitq_init(&inode->i_vm_waitq, "inode VM resize");
 	(void)mutex_init(&inode->i_lock, LOCK_RANK_INODE, "inode");
 	irq = spin_lock_irqsave(&inode_cache_lock);
+
 	inode_cache[slot] = inode;
+
 	spin_unlock_irqrestore(&inode_cache_lock, irq);
+
 	return inode;
 }
 
@@ -187,14 +192,18 @@ inode_free(
 
 	/* Rechecks the reference count under the cache lock. */
 	irq = spin_lock_irqsave(&inode_cache_lock);
+
 	cindex = cache_index(inode);
 	if (cindex < 0 || refcount_load(&inode->i_refs) != 1) {
 		spin_unlock_irqrestore(&inode_cache_lock, irq);
 		return;
 	}
+
 	inode_cache[cindex] = NULL;
 	(void)refcount_put(&inode->i_refs);
+
 	spin_unlock_irqrestore(&inode_cache_lock, irq);
+
 	destroy_inode(inode);
 }
 
@@ -217,6 +226,7 @@ inode_get(
 
 	/* Reports a live cached inode of that mount and number. */
 	irq = spin_lock_irqsave(&inode_cache_lock);
+
 	for (i = 0; i < INODE_CACHE_MAX; i++) {
 		inode = inode_cache[i];
 		if (inode != NULL &&
@@ -230,7 +240,9 @@ inode_get(
 			return 0;
 		}
 	}
+
 	spin_unlock_irqrestore(&inode_cache_lock, irq);
+
 	return ENOENT;
 }
 
@@ -294,6 +306,7 @@ inode_cache_purge_mount(
 				break;
 			}
 		}
+
 		spin_unlock_irqrestore(&inode_cache_lock, irq);
 		if (victim == NULL)
 			break;
@@ -318,6 +331,7 @@ inode_cache_mount_busy(
 
 	/* The root inode also carries the mount's own reference. */
 	irq = spin_lock_irqsave(&inode_cache_lock);
+
 	for (i = 0; i < INODE_CACHE_MAX; i++) {
 		inode = inode_cache[i];
 		if (inode == NULL ||
@@ -333,7 +347,9 @@ inode_cache_mount_busy(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&inode_cache_lock, irq);
+
 	if (busy)
 		return EBUSY;
 	return 0;
@@ -353,12 +369,14 @@ inode_cache_mount_count(
 	/* Counts the cached inodes that belong to the mount. */
 	count = 0;
 	irq = spin_lock_irqsave(&inode_cache_lock);
+
 	for (i = 0; i < INODE_CACHE_MAX; i++) {
 		if (inode_cache[i] != NULL &&
 		    inode_cache[i] != INODE_CACHE_RESERVED &&
 		    inode_cache[i]->i_mount == mountp)
 			count++;
 	}
+
 	spin_unlock_irqrestore(&inode_cache_lock, irq);
 
 	/* Reports the count. */
@@ -395,6 +413,7 @@ inode_cache_reset(
 				break;
 			}
 		}
+
 		spin_unlock_irqrestore(&inode_cache_lock, irq);
 		if (victim == NULL)
 			break;
@@ -443,6 +462,7 @@ inode_lookup(
 			inode_release(child);
 		return EIO;
 	}
+
 	if ((directory->i_flags & INODE_NOCACHE_CHILDREN) == 0)
 		(void)namecache_enter(directory, name, child, sequence);
 	*result = child;
@@ -474,9 +494,9 @@ inode_lookup_casefold(
 	/* Only a filesystem that folds case can answer this. */
 	if (directory->i_op == NULL || directory->i_op->lookup_casefold == NULL)
 		return EOPNOTSUPP;
-	error = directory->i_op->lookup_casefold(directory, name, result);
 
 	/* Reports why the lookup failed. */
+	error = directory->i_op->lookup_casefold(directory, name, result);
 	if (error != 0)
 		return error;
 
@@ -613,6 +633,7 @@ inode_setattr(
 #endif
 			mask |= INODE_ATTR_ATIME;
 		}
+
 		if (mask & INODE_ATTR_MTIME_NOW) {
 			requested.st_mtime = now.tv_sec;
 #ifdef ZEDBSD_SYS_STAT_H
@@ -620,8 +641,10 @@ inode_setattr(
 #endif
 			mask |= INODE_ATTR_MTIME;
 		}
+
 		mask &= ~(INODE_ATTR_ATIME_NOW | INODE_ATTR_MTIME_NOW);
 	}
+
 	if ((mask & INODE_ATTR_MODE) != 0 &&
 	    (requested.st_mode & S_IFMT) != 0 &&
 	    (requested.st_mode & S_IFMT) != (i->i_mode & S_IFMT))
@@ -641,6 +664,7 @@ inode_setattr(
 		if (mask == 0)
 			return 0;
 	}
+
 	/*
 	 * Copy-up can create/rename upper entries. Complete it before i_io_lock,
 	 * because namespace creation takes the transaction gate before this lock
@@ -666,10 +690,12 @@ inode_setattr(
 			return error;
 		held_io = 1;
 	}
+
 	if (i->i_op == NULL || i->i_op->setattr == NULL) {
 		error = EOPNOTSUPP;
 		goto out;
 	}
+
 	error = i->i_op->setattr(i, &requested, mask);
 	if (error != 0)
 		goto out;
@@ -695,6 +721,7 @@ inode_setattr(
 		i->i_atime.tv_nsec = 0;
 #endif
 	}
+
 	if (mask & INODE_ATTR_MTIME) {
 		i->i_mtime.tv_sec = requested.st_mtime;
 #ifdef ZEDBSD_SYS_STAT_H
@@ -703,6 +730,7 @@ inode_setattr(
 		i->i_mtime.tv_nsec = 0;
 #endif
 	}
+
 	if (mask & INODE_ATTR_CTIME) {
 		i->i_ctime.tv_sec = requested.st_ctime;
 #ifdef ZEDBSD_SYS_STAT_H
@@ -713,6 +741,7 @@ inode_setattr(
 	} else if (mask != 0) {
 		inode_touch(i, INODE_ATTR_CTIME);
 	}
+
 out:
 	if (held_io)
 		mutex_unlock(&i->i_io_lock);
@@ -766,6 +795,7 @@ inode_creation_request_user(
 		mutex_unlock(&parent->i_io_lock);
 		return error;
 	}
+
 	request->origin = INODE_CREATION_USER;
 	request->type = type;
 	request->mode = mode & 07777U;
@@ -778,7 +808,9 @@ inode_creation_request_user(
 		request->mode |= S_ISGID;
 	request->rdev = rdev;
 	request->special = special;
+
 	mutex_unlock(&parent->i_io_lock);
+
 	if (!creation_request_valid(request))
 		return EINVAL;
 	return 0;
@@ -903,10 +935,12 @@ inode_creation_prepare(
 			child->i_special = request->special;
 			error = 0;
 		}
+
 		mutex_unlock(&child->i_lock);
 		if (error != 0)
 			return error;
 	}
+
 	if (request->origin == INODE_CREATION_PRESERVE) {
 		child->i_atime = request->source->i_atime;
 		child->i_mtime = request->source->i_mtime;
@@ -915,6 +949,7 @@ inode_creation_prepare(
 		inode_touch(child, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
 		    INODE_ATTR_CTIME);
 	}
+
 	return 0;
 }
 
@@ -991,10 +1026,9 @@ inode_truncate_limited_cred(
 {
 	int error;
 
+	/* Reports the failure. */
 	error = inode_truncate_limited_impl(i, size, growth_limit, cred, 0,
 	    limit_exceeded);
-
-	/* Reports the failure. */
 	if (error != 0)
 		return error;
 
@@ -1014,10 +1048,9 @@ inode_truncate_limited(
 {
 	int error;
 
+	/* Reports the failure. */
 	error = inode_truncate_limited_impl(i, size, growth_limit, NULL, 0,
 	    limit_exceeded);
-
-	/* Reports the failure. */
 	if (error != 0)
 		return error;
 
@@ -1035,9 +1068,8 @@ inode_truncate(
 {
 	int error;
 
-	error = inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 0, NULL);
-
 	/* Reports the failure. */
+	error = inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 0, NULL);
 	if (error != 0)
 		return error;
 
@@ -1055,9 +1087,8 @@ inode_truncate_content_change(
 {
 	int error;
 
-	error = inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 1, NULL);
-
 	/* Reports the failure. */
+	error = inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 1, NULL);
 	if (error != 0)
 		return error;
 
@@ -1239,11 +1270,13 @@ inode_cache_count(
 	/* Counts the occupied slots of the inode cache. */
 	count = 0;
 	irq = spin_lock_irqsave(&inode_cache_lock);
+
 	for (i = 0; i < INODE_CACHE_MAX; i++) {
 		if (inode_cache[i] != NULL &&
 		    inode_cache[i] != INODE_CACHE_RESERVED)
 			count++;
 	}
+
 	spin_unlock_irqrestore(&inode_cache_lock, irq);
 
 	/* Reports the count. */
@@ -1528,6 +1561,7 @@ inode_is_ancestor(
 			*result = 1;
 			break;
 		}
+
 		error = inode_parent_step(&current, &at_root);
 		if (error != 0 || at_root)
 			break;
@@ -1543,11 +1577,13 @@ inode_is_ancestor(
 				break;
 			}
 		}
+
 		if (fast != NULL && inode_same(current, fast)) {
 			error = EIO;
 			break;
 		}
 	}
+
 out:
 	inode_release(current);
 	if (fast != NULL)
@@ -1725,22 +1761,26 @@ inode_unlink_locked(
 		inode_release(target);
 		return error;
 	}
+
 	error = backing_mutation_begin_inode(target, &guard);
 	if (error != 0) {
 		inode_release(target);
 		return error;
 	}
+
 	if (target->i_type == INODE_DIR) {
 		backing_mutation_end(&guard);
 		inode_release(target);
 		return EPERM;
 	}
+
 	if ((target->i_flags & (INODE_ROOT |
 	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 		backing_mutation_end(&guard);
 		inode_release(target);
 		return EBUSY;
 	}
+
 	inode_release(target);
 	if (i->i_op != NULL && i->i_op->unlink != NULL)
 		error = i->i_op->unlink(i, n);
@@ -1790,15 +1830,18 @@ inode_rmdir_locked(
 		inode_release(target);
 		return error;
 	}
+
 	if (target->i_type != INODE_DIR) {
 		inode_release(target);
 		return ENOTDIR;
 	}
+
 	if ((target->i_flags & (INODE_ROOT |
 	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 		inode_release(target);
 		return EBUSY;
 	}
+
 	inode_release(target);
 	if (i->i_op != NULL && i->i_op->rmdir != NULL)
 		error = i->i_op->rmdir(i, n);
@@ -1860,17 +1903,20 @@ inode_rename_locked(
 		inode_release(source);
 		return error;
 	}
+
 	error = backing_mutation_begin_inode(source, &source_guard);
 	if (error != 0) {
 		inode_release(source);
 		return error;
 	}
+
 	if ((source->i_flags & (INODE_ROOT |
 	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 		backing_mutation_end(&source_guard);
 		inode_release(source);
 		return EBUSY;
 	}
+
 	if (source->i_type == INODE_DIR && !inode_same(od, nd)) {
 		error = inode_is_ancestor(source, nd, &ancestor);
 		if (error == 0 && ancestor)
@@ -1892,6 +1938,7 @@ inode_rename_locked(
 			inode_release(source);
 			return error;
 		}
+
 		if (target == source || (target->i_mount == source->i_mount &&
 		    target->i_ino == source->i_ino)) {
 			inode_release(target);
@@ -1899,6 +1946,7 @@ inode_rename_locked(
 			inode_release(source);
 			return 0;
 		}
+
 		error = backing_mutation_begin_inode(target, &target_guard);
 		if (error != 0) {
 			inode_release(target);
@@ -1906,6 +1954,7 @@ inode_rename_locked(
 			inode_release(source);
 			return error;
 		}
+
 		target_guarded = 1;
 		if ((target->i_flags & (INODE_ROOT |
 		    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
@@ -1915,6 +1964,7 @@ inode_rename_locked(
 			inode_release(source);
 			return EBUSY;
 		}
+
 		if (source->i_type == INODE_DIR && target->i_type != INODE_DIR) {
 			inode_release(target);
 			backing_mutation_end(&target_guard);
@@ -1922,6 +1972,7 @@ inode_rename_locked(
 			inode_release(source);
 			return ENOTDIR;
 		}
+
 		if (source->i_type != INODE_DIR && target->i_type == INODE_DIR) {
 			inode_release(target);
 			backing_mutation_end(&target_guard);
@@ -1929,6 +1980,7 @@ inode_rename_locked(
 			inode_release(source);
 			return EISDIR;
 		}
+
 		inode_release(target);
 	} else if (error != ENOENT) {
 		backing_mutation_end(&source_guard);
@@ -1954,6 +2006,7 @@ inode_rename_locked(
 		if (!inode_same(nd, od))
 			inode_touch(nd, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
+
 	if (target_guarded)
 		backing_mutation_end(&target_guard);
 	backing_mutation_end(&source_guard);
@@ -2079,6 +2132,7 @@ common_index(
 		if (&common_pool[i] == inode)
 			return (int)i;
 	}
+
 	return -1;
 }
 
@@ -2093,6 +2147,7 @@ cache_index(
 		if (inode_cache[i] == inode)
 			return (int)i;
 	}
+
 	return -1;
 }
 
@@ -2111,11 +2166,14 @@ destroy_inode(
 	/* Destroys the special endpoint, then lets the filesystem reclaim. */
 	record_lock_inode_destroy(inode);
 	mutex_lock(&inode->i_lock);
+
 	special = inode->i_special;
 	special_destroy = inode->i_special_destroy;
 	inode->i_special = NULL;
 	inode->i_special_destroy = NULL;
+
 	mutex_unlock(&inode->i_lock);
+
 	if (special != NULL && special_destroy != NULL)
 		special_destroy(special);
 	if (inode->i_op != NULL && inode->i_op->reclaim != NULL)
@@ -2145,6 +2203,7 @@ reserve_cache_slot(
 	struct inode *inode;
 
 	irq = spin_lock_irqsave(&inode_cache_lock);
+
 	*victim = NULL;
 
 	/* A free slot is reserved directly. */
@@ -2168,7 +2227,9 @@ reserve_cache_slot(
 			return (int)i;
 		}
 	}
+
 	spin_unlock_irqrestore(&inode_cache_lock, irq);
+
 	return -1;
 }
 
@@ -2206,6 +2267,7 @@ inode_content_io_lock(
 		mutex_lock(&inode->i_io_lock);
 		return 0;
 	}
+
 	for (;;) {
 		error = vm_object_inode_io_wait(inode);
 		if (error != 0)
@@ -2243,6 +2305,7 @@ creation_request_valid(
 			return 0;
 		return 1;
 	}
+
 	if (request->source != NULL)
 		return 0;
 	return 1;
@@ -2266,9 +2329,9 @@ inode_creation_preserve_acl(
 		return error;
 
 	/* Copies the ACL onto the child. */
-	error = posix_acl_store(child, name, &acl);
 
 	/* Reports the failure. */
+	error = posix_acl_store(child, name, &acl);
 	if (error != 0)
 		return error;
 
@@ -2332,10 +2395,12 @@ inode_parent_step(
 		inode_release(parent);
 		return EIO;
 	}
+
 	if (inode_same(parent, current)) {
 		inode_release(parent);
 		return EIO;
 	}
+
 	inode_release(current);
 	*cursor = parent;
 	return 0;
@@ -2397,6 +2462,7 @@ inode_truncate_transaction_impl(
 		if (error != 0)
 			return error;
 	}
+
 	delegated = i->i_op != NULL && i->i_op->truncate_limited != NULL;
 retry:
 	/* Takes the I/O lock outside any published resize. */
@@ -2406,6 +2472,7 @@ retry:
 		if (error != 0)
 			return error;
 	}
+
 	mutex_lock(&i->i_io_lock);
 
 	/* Close the publication-to-i_io acquisition window. */
@@ -2437,11 +2504,13 @@ retry:
 			mutex_unlock(&i->i_io_lock);
 			goto retry;
 		}
+
 		if (error != 0) {
 			mutex_unlock(&i->i_io_lock);
 			return error;
 		}
 	}
+
 	if (resize.active) {
 		/*
 		 * Fault I/O which predates begin may already be committed to
@@ -2495,6 +2564,7 @@ retry:
 				error = EIO;
 			inner.actual_size = i->i_size;
 		}
+
 		i->i_size = inner.actual_size;
 		result->actual_size = inner.actual_size;
 		result->limit_exceeded = inner.limit_exceeded;
@@ -2524,9 +2594,11 @@ retry:
 				i->i_size = resize.old_size;
 				vm_object_resize_abort(&resize);
 			}
+
 			result->actual_size = i->i_size;
 		}
 	}
+
 	mutex_unlock(&i->i_io_lock);
 
 	/* Reports the failure. */

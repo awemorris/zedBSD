@@ -122,7 +122,9 @@ signal_pending_unblocked(
 
 	/* Checks under the process lock. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	pending = signal_pending_unblocked_locked(thread);
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Reports the check result. */
@@ -161,6 +163,7 @@ signal_stop_before_return(
 
 	/* Gathers the unblocked pending signals, always including the unmaskable. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	pending = (thread->signal_pending |
 	    (process->signal_pending & ~signal_wait_claims_locked(process))) &
 	    ~thread->signal_mask;
@@ -205,8 +208,10 @@ signal_stop_before_return(
 		} else {
 			signal_take_process_locked(process, signo, &ignored_info);
 		}
+
 		break;
 	}
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Without a stop signal the syscall returns normally. */
@@ -248,8 +253,10 @@ signal_job_control_decision(
 
 	/* Samples the disposition and the mask under the process lock. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	action = process->signal_actions[signo];
 	blocked = (thread->signal_mask & SIGNAL_BIT(signo)) != 0;
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Reports the decision. */
@@ -295,6 +302,7 @@ signal_action_set(
 
 	/* Reads the old action and installs the new one under the lock. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	if (previous != NULL)
 		*previous = process->signal_actions[signo];
 	if (requested != NULL) {
@@ -303,7 +311,9 @@ signal_action_set(
 			signal_discard_locked(process, SIGNAL_BIT(signo), completions,
 			    &completion_count);
 	}
+
 	spin_unlock_irqrestore(&process->lock, irq);
+
 	signal_timer_completions_run(process, completions, completion_count);
 
 	/* Reports the changed action. */
@@ -364,9 +374,9 @@ signal_send_process(
 	/* Describes the signal as coming from the kernel. */
 	memset(&info, 0, sizeof(info));
 	info.code = SI_KERNEL;
-	error = signal_send_process_info(process, signo, &info);
 
 	/* Reports why the send failed. */
+	error = signal_send_process_info(process, signo, &info);
 	if (error != 0)
 		return error;
 
@@ -404,6 +414,7 @@ signal_send_process_info(
 
 	/* Applies the mutual discard of SIGCONT and the stop signals. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	if (signo == SIGCONT)
 		signal_discard_locked(process, SIGNAL_BIT(SIGSTOP) |
 		    SIGNAL_BIT(SIGTSTP) | SIGNAL_BIT(SIGTTIN) |
@@ -436,6 +447,7 @@ signal_send_process_info(
 			    completion_count);
 			return EAGAIN;
 		}
+
 		queued = &process->signal_queue[process->signal_queue_count++];
 		queued->signo = signo;
 		queued->info = *info;
@@ -452,6 +464,7 @@ signal_send_process_info(
 			process->signal_info[signo] = *info;
 		process->signal_unqueued_pending |= SIGNAL_BIT(signo);
 	}
+
 	process->signal_pending |= SIGNAL_BIT(signo);
 
 	/* Interrupts every thread that can take or is waiting for the signal. */
@@ -462,7 +475,9 @@ signal_send_process_info(
 		    (thread->signal_wait_set & SIGNAL_BIT(signo)) != 0))
 			sched_interrupt(thread);
 	}
+
 	spin_unlock_irqrestore(&process->lock, irq);
+
 	signal_timer_completions_run(process, completions, completion_count);
 
 	/* Continues a stopped process for SIGCONT and SIGKILL. */
@@ -538,11 +553,13 @@ signal_kill(
 			process_release(p);
 			continue;
 		}
+
 		found = 1;
 		if (!signal_permitted(sender, p, signo)) {
 			process_release(p);
 			continue;
 		}
+
 		permitted = 1;
 		if (signo != 0)
 			(void)signal_send_process_info(p, signo, &info);
@@ -660,7 +677,9 @@ signal_exec(
 		curthread->syscall_restart_valid = 0;
 		curthread->syscall_redispatch_valid = 0;
 	}
+
 	spin_unlock_irqrestore(&process->lock, irq);
+
 	signal_timer_completions_run(process, completions, completion_count);
 }
 
@@ -698,9 +717,8 @@ signal_deliver_on_user_return(
 	int signo;
 	unsigned used_altstack;
 
-	thread = curthread;
-
 	/* Kernel threads and threads without a process deliver nothing. */
+	thread = curthread;
 	if (thread == NULL)
 		return;
 	process = thread->proc;
@@ -723,6 +741,7 @@ signal_deliver_on_user_return(
 retry:
 	/* Gathers the unblocked pending signals, always including the unmaskable. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	pending = (thread->signal_pending |
 	    (process->signal_pending & ~signal_wait_claims_locked(process))) &
 	    ~thread->signal_mask;
@@ -735,6 +754,7 @@ retry:
 			thread->signal_mask = thread->signal_suspend_mask;
 			thread->signal_suspended = 0;
 		}
+
 		spin_unlock_irqrestore(&process->lock, irq);
 		return;
 	}
@@ -752,7 +772,9 @@ retry:
 	} else {
 		signal_take_process_locked(process, signo, &selected_info);
 	}
+
 	spin_unlock_irqrestore(&process->lock, irq);
+
 	signal_timer_complete_one(process, &selected_info);
 
 	/* An ignored signal is dropped and the next one considered. */
@@ -771,12 +793,14 @@ retry:
 				thread->signal_mask = thread->signal_suspend_mask;
 				thread->signal_suspended = 0;
 			}
+
 			spin_unlock_irqrestore(&process->lock, irq);
 			process_stop_current(signo);
 
 			/* SIGCONT may have made SIGHUP or another signal deliverable. */
 			goto retry;
 		}
+
 		exit1_signal(signo);
 	}
 
@@ -805,6 +829,7 @@ retry:
 		thread->signal_token_counter++;
 		token = thread->signal_token_counter;
 	}
+
 	level = &thread->signal_levels[thread->signal_depth];
 	used_altstack = level->used_altstack;
 	memset(level, 0, sizeof(*level));
@@ -865,10 +890,12 @@ retry:
 
 	/* Installs the handler's mask, and resets a one-shot handler. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	if (thread->signal_suspended) {
 		thread->signal_mask = thread->signal_suspend_mask;
 		thread->signal_suspended = 0;
 	}
+
 	thread->signal_mask |= action.mask;
 	if ((action.flags & SA_NODEFER) == 0)
 		thread->signal_mask |= SIGNAL_BIT(signo);
@@ -881,6 +908,7 @@ retry:
 			process->signal_actions[signo].restorer = 0;
 		}
 	}
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Redirects the thread into the handler. */
@@ -903,9 +931,9 @@ signal_send_thread(
 	/* Describes the signal as coming from the kernel. */
 	memset(&info, 0, sizeof(info));
 	info.code = SI_KERNEL;
-	error = signal_send_thread_info(thread, signo, &info);
 
 	/* Reports why the send failed. */
+	error = signal_send_thread_info(thread, signo, &info);
 	if (error != 0)
 		return error;
 
@@ -941,6 +969,7 @@ signal_send_thread_info(
 
 	/* Applies the mutual discard of SIGCONT and the stop signals. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	if (signo == SIGCONT)
 		signal_discard_locked(process, SIGNAL_BIT(SIGSTOP) |
 		    SIGNAL_BIT(SIGTSTP) | SIGNAL_BIT(SIGTTIN) |
@@ -966,6 +995,7 @@ signal_send_thread_info(
 		if (info != NULL)
 			thread->signal_info[signo] = *info;
 	}
+
 	thread->signal_pending |= SIGNAL_BIT(signo);
 
 	/* Interrupts the thread when it can take or is waiting for the signal. */
@@ -973,7 +1003,9 @@ signal_send_thread_info(
 	    (thread->signal_waiting &&
 	    (thread->signal_wait_set & SIGNAL_BIT(signo)) != 0))
 		sched_interrupt(thread);
+
 	spin_unlock_irqrestore(&process->lock, irq);
+
 	signal_timer_completions_run(process, completions, completion_count);
 
 	/* Continues a stopped process for SIGCONT and SIGKILL. */
@@ -1020,6 +1052,7 @@ signal_timedwait(
 
 	/* Waits, claiming the set so that nobody else takes its signals. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	for (;;) {
 		pending = (thread->signal_pending |
 		    process->signal_pending) & set;
@@ -1055,6 +1088,7 @@ signal_timedwait(
 			} else {
 				signal_take_process_locked(process, signo, info);
 			}
+
 			thread->signal_waiting = 0;
 			thread->signal_wait_set = 0;
 			spin_unlock_irqrestore(&process->lock, irq);
@@ -1070,6 +1104,7 @@ signal_timedwait(
 			spin_unlock_irqrestore(&process->lock, irq);
 			return EAGAIN;
 		}
+
 		if (signal_pending_unblocked_locked(thread)) {
 			thread->signal_waiting = 0;
 			thread->signal_wait_set = 0;
@@ -1174,6 +1209,7 @@ signal_timer_completion_add(
 		    completions[index].generation == info->timer_generation)
 			return;
 	}
+
 	if (*count >= SIGNAL_TIMER_COMPLETION_MAX)
 		HAL_FATAL("signal timer completion overflow");
 	completions[*count].slot = info->timer_slot;
@@ -1253,6 +1289,7 @@ signal_take_process_locked(
 			break;
 		}
 	}
+
 	if (selected != SIGNAL_QUEUE_MAX) {
 		*info = process->signal_queue[selected].info;
 		for (i = selected + 1U; i < process->signal_queue_count; i++)
@@ -1264,6 +1301,7 @@ signal_take_process_locked(
 			if (process->signal_queue[i].signo == signo)
 				return;
 		}
+
 		if ((process->signal_unqueued_pending & SIGNAL_BIT(signo)) != 0)
 			return;
 	} else {
@@ -1317,11 +1355,13 @@ signal_discard_locked(
 			    &process->signal_queue[read_index].info);
 			continue;
 		}
+
 		if (write_index != read_index)
 			process->signal_queue[write_index] =
 			    process->signal_queue[read_index];
 		write_index++;
 	}
+
 	process->signal_queue_count = write_index;
 
 	/* Clears the thread-directed instances too. */

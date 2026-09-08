@@ -157,7 +157,6 @@ typedef char overlay_record_path_must_fit[
 	(ZEDBSD_PATH_MAX - 1U <= OVERLAY_PATH_RECORD_MAX) ? 1 : -1];
 #endif
 
-
 static int overlay_layers_supported(const struct overlay_mount_args *args);
 static OVERLAY_HIGH uint16_t overlay_get16(const uint8_t *p);
 static OVERLAY_HIGH uint32_t overlay_get32(const uint8_t *p);
@@ -317,7 +316,6 @@ static const struct filesystem_type overlay_filesystem_type = {
 	.free_inode = overlay_free_inode,
 };
 
-
 /*
  * Registers the overlay filesystem type.
  */
@@ -327,9 +325,8 @@ drv_overlayfs_init(
 {
 	int error;
 
-	error = filesystem_register(&overlay_filesystem_type);
-
 	/* Reports why the registration failed. */
+	error = filesystem_register(&overlay_filesystem_type);
 	if (error != 0)
 		return error;
 
@@ -352,9 +349,8 @@ drv_overlay_mount_at(
 	int mount_flags;
 	int error;
 
-	name = target;
-
 	/* Rejects a missing operand or a target that is not one component. */
+	name = target;
 	if (namespace_root == NULL || target == NULL || args == NULL)
 		return EINVAL;
 	if (name[0] == '/')
@@ -637,6 +633,7 @@ overlay_all_zero(
 		data++;
 		length--;
 	}
+
 	return 1;
 }
 
@@ -663,6 +660,7 @@ overlay_metadata_find(
 		if (entries[i].used && !strcmp(entries[i].path, path))
 			return (int)i;
 	}
+
 	return -1;
 }
 
@@ -704,6 +702,7 @@ overlay_metadata_apply(
 				break;
 			}
 		}
+
 		if (index < 0)
 			return ENOSPC;
 	}
@@ -759,6 +758,7 @@ overlay_metadata_digest(
 			    entries[best].path) < 0)
 				best = (int)i;
 		}
+
 		if (best < 0)
 			break;
 		crc = overlay_crc_update(crc, (const uint8_t *)entries[best].path,
@@ -767,6 +767,7 @@ overlay_metadata_digest(
 		strcpy(previous, entries[best].path);
 		emitted++;
 	}
+
 	return crc ^ 0xffffffffU;
 }
 
@@ -851,6 +852,7 @@ overlay_snapshot_apply(
 			return 0;
 		}
 	}
+
 	return ENOSPC;
 }
 
@@ -978,6 +980,7 @@ overlay_validate_slot(
 			break;
 		sector++;
 	}
+
 	view->next_sector = sector;
 	view->digest = overlay_metadata_digest(view->metadata);
 	view->valid = 1;
@@ -1048,6 +1051,7 @@ overlay_journal_load(
 		error = ENOMEM;
 		goto out;
 	}
+
 	error = overlay_open_journal(state, 0);
 	if (error != 0)
 		goto out;
@@ -1060,6 +1064,7 @@ overlay_journal_load(
 		error = first_error;
 		goto out;
 	}
+
 	if (!views[0]->valid && !views[1]->valid) {
 		error = EINVAL;
 		goto out;
@@ -1086,6 +1091,7 @@ overlay_journal_load(
 	} else {
 		chosen = 0;
 	}
+
 	memcpy(state->metadata, views[chosen]->metadata,
 	       sizeof(state->metadata));
 	state->active_slot = chosen;
@@ -1144,6 +1150,7 @@ overlay_metadata_count(
 		if (entries[i].used)
 			count++;
 	}
+
 	return count;
 }
 
@@ -1247,7 +1254,6 @@ overlay_journal_compact_impl(
 		strcpy(previous, state->metadata[index].path);
 	}
 
-
 	/* Writes the commit record and makes the slot durable. */
 	memset(record, 0, sizeof(record));
 	memcpy(record, "ZOVLCMT\0", 8);
@@ -1294,7 +1300,6 @@ overlay_journal_compact(struct overlay_mount_state *state)
 	return 0;
 }
 
-
 /* Appends an operation to the journal and applies it to the table. */
 static OVERLAY_HIGH int
 overlay_journal_append_impl(
@@ -1326,9 +1331,11 @@ overlay_journal_append_impl(
 			if (!state->metadata[i].used)
 				break;
 		}
+
 		if (i == OVERLAY_METADATA_MAX)
 			return ENOSPC;
 	}
+
 	if (state->sequence == UINT64_MAX)
 		return ENOSPC;
 
@@ -1338,7 +1345,6 @@ overlay_journal_append_impl(
 		if (error != 0)
 			return error;
 	}
-
 
 	/* Writes the record durably, then applies it. */
 	sequence = state->sequence + 1U;
@@ -1387,7 +1393,6 @@ overlay_journal_append(struct overlay_mount_state *state, unsigned opcode, const
 	return 0;
 }
 
-
 /* Reports the overlay information of an inode, or NULL. */
 static OVERLAY_HIGH struct overlay_inode_info *
 overlay_info(
@@ -1409,6 +1414,7 @@ overlay_slot_index(
 		if (&overlay_inodes[i].inode == inode)
 			return (int)i;
 	}
+
 	return -1;
 }
 
@@ -1487,10 +1493,13 @@ overlay_path_snapshot(
 
 	/* Copies the selected path under the inode lock. */
 	mutex_lock(&inode->i_lock);
+
 	selected = overlay_select_path_locked(info, selection);
 	if (selected->p_inode != NULL)
 		path_set(result, selected->p_mount, selected->p_inode);
+
 	mutex_unlock(&inode->i_lock);
+
 	if (result->p_inode == NULL)
 		return ENOENT;
 	return 0;
@@ -1518,13 +1527,16 @@ overlay_info_snapshot(
 
 	/* Copies everything asked for under the inode lock. */
 	mutex_lock(&inode->i_lock);
+
 	if (upper != NULL && info->upper.p_inode != NULL)
 		path_set(upper, info->upper.p_mount, info->upper.p_inode);
 	if (lower != NULL && info->lower.p_inode != NULL)
 		path_set(lower, info->lower.p_mount, info->lower.p_inode);
 	if (relative != NULL)
 		strcpy(relative, info->path);
+
 	mutex_unlock(&inode->i_lock);
+
 	return 0;
 }
 
@@ -1613,6 +1625,7 @@ overlay_join(
 		result[parent_length] = '/';
 		parent_length++;
 	}
+
 	memcpy(result + parent_length, name, name_length + 1U);
 	return 0;
 }
@@ -1641,6 +1654,7 @@ overlay_identity_get(
 			*ino_out = state->identities[i].ino;
 			return 0;
 		}
+
 		if (free_index == OVERLAY_IDENTITY_MAX &&
 		    state->identities[i].state == OVERLAY_ID_FREE)
 			free_index = i;
@@ -1695,9 +1709,9 @@ overlay_refresh_locked(
 	const struct inode *visible;
 
 	info = overlay_info(inode);
-	visible = overlay_select_path_locked(info, OVERLAY_PATH_VISIBLE)->p_inode;
 
 	/* An inode without a visible layer keeps its old attributes. */
+	visible = overlay_select_path_locked(info, OVERLAY_PATH_VISIBLE)->p_inode;
 	if (visible == NULL)
 		return;
 	inode->i_type = visible->i_type;
@@ -1731,7 +1745,9 @@ overlay_refresh(
 	if (inode == NULL || overlay_info(inode) == NULL)
 		return;
 	mutex_lock(&inode->i_lock);
+
 	overlay_refresh_locked(inode);
+
 	mutex_unlock(&inode->i_lock);
 }
 
@@ -1787,6 +1803,7 @@ overlay_make_inode(
 			    sizeof(state->identities[identity]));
 		return ENOSPC;
 	}
+
 	slot = overlay_slot_index(inode);
 	if (slot < 0) {
 		inode_release(inode);
@@ -1844,6 +1861,7 @@ overlay_lookup(
 		*result = directory;
 		return 0;
 	}
+
 	error = overlay_info_snapshot(directory, &upper_directory,
 	    &lower_directory, parent_path);
 	if (error != 0)
@@ -1859,6 +1877,7 @@ overlay_lookup(
 			error = 0;
 			goto out_directories;
 		}
+
 		slash = strrchr(parent_path, '/');
 		if (slash == NULL)
 			parent_path[0] = '\0';
@@ -1877,6 +1896,7 @@ overlay_lookup(
 		error = ENOENT;
 		goto out_directories;
 	}
+
 	error = overlay_join(parent_path, name, relative);
 	if (error != 0)
 		goto out_directories;
@@ -1927,6 +1947,7 @@ overlay_lookup(
 		error = overlay_make_inode(directory->i_mount, relative,
 			upper_argument, lower_argument, result);
 	}
+
 	path_release(&upper);
 	path_release(&lower);
 out_directories:
@@ -2026,6 +2047,7 @@ overlay_find_relative(
 			break;
 		at = end + 1;
 	}
+
 	*result = current;
 	return 0;
 }
@@ -2055,6 +2077,7 @@ overlay_split_path(
 		parent[length] = '\0';
 		name->cn_nameptr = slash + 1;
 	}
+
 	name->cn_namelen = strlen(name->cn_nameptr);
 	name->cn_flags = COMPONENT_LAST;
 	if (name->cn_namelen == 0)
@@ -2091,6 +2114,7 @@ overlay_publish_upper(
 	 */
 	path_set(&replacement, upper->p_mount, upper->p_inode);
 	mutex_lock(&inode->i_lock);
+
 	old_upper = info->upper;
 	info->upper = replacement;
 	path_init(&replacement);
@@ -2098,10 +2122,13 @@ overlay_publish_upper(
 		old_lower = info->lower;
 		path_init(&info->lower);
 	}
+
 	if (relative != NULL)
 		strcpy(info->path, relative);
 	overlay_refresh_locked(inode);
+
 	mutex_unlock(&inode->i_lock);
+
 	path_release(&old_upper);
 	path_release(&old_lower);
 	path_release(&replacement);
@@ -2134,13 +2161,16 @@ overlay_clear_upper_if(
 
 	/* Clears under the lock and releases outside it. */
 	mutex_lock(&inode->i_lock);
+
 	if (info->upper.p_mount == expected->p_mount &&
 	    info->upper.p_inode == expected->p_inode) {
 		removed = info->upper;
 		path_init(&info->upper);
 		overlay_refresh_locked(inode);
 	}
+
 	mutex_unlock(&inode->i_lock);
+
 	path_release(&removed);
 }
 
@@ -2192,11 +2222,13 @@ overlay_materialization_complete(
 			if (cleanup_error == 0)
 				cleanup_error = one_error;
 		}
+
 		path_release(&entry->parent_upper);
 		path_release(&entry->created_upper);
 		inode_release(entry->directory);
 		kern_free(entry);
 	}
+
 	transaction->created = NULL;
 	transaction->count = 0;
 
@@ -2257,6 +2289,7 @@ overlay_ensure_upper_dir_tracked(
 			error = ENOTDIR;
 		goto out_paths;
 	}
+
 	if (directory == directory->i_mount->m_root) {
 		error = EIO;
 		goto out_paths;
@@ -2277,6 +2310,7 @@ overlay_ensure_upper_dir_tracked(
 			source = directory;
 		error = inode_creation_request_preserve(source, &request);
 	}
+
 	path_init(&parent_upper);
 	if (error == 0)
 		error = overlay_path_snapshot(parent, OVERLAY_PATH_UPPER,
@@ -2290,6 +2324,7 @@ overlay_ensure_upper_dir_tracked(
 				error = ENOMEM;
 		}
 	}
+
 	if (error == 0)
 		error = inode_mkdir(parent_upper.p_inode, &name,
 			&request, &created);
@@ -2300,9 +2335,11 @@ overlay_ensure_upper_dir_tracked(
 			kern_free(pending);
 			pending = NULL;
 		}
+
 		error = inode_lookup(parent_upper.p_inode, &name,
 			&created);
 	}
+
 	if (error == 0) {
 		/*
 		 * A newly materialized directory is not published to the
@@ -2354,9 +2391,11 @@ overlay_ensure_upper_dir_tracked(
 				error = cleanup_error;
 			}
 		}
+
 		path_release(&created_path);
 		inode_release(created);
 	}
+
 	path_release(&parent_upper);
 	inode_release(parent);
 out_paths:
@@ -2387,9 +2426,9 @@ overlay_ensure_upper_dir(
 	transaction.count = 0U;
 	state = directory->i_mount->m_data;
 	error = overlay_ensure_upper_dir_tracked(directory, &transaction);
-	error = overlay_materialization_complete(state, &transaction, error);
 
 	/* Reports the failure. */
+	error = overlay_materialization_complete(state, &transaction, error);
 	if (error != 0)
 		return error;
 
@@ -2488,6 +2527,7 @@ overlay_copy_up_regular(
 			path_release(&upper);
 		return error == ENOENT ? EDEADLK : error;
 	}
+
 	path_init(&upper);
 	path_init(&lower);
 	path_init(&parent_upper);
@@ -2503,6 +2543,7 @@ overlay_copy_up_regular(
 		mount_vfs_transaction_enter(inode->i_mount);
 		entered_transaction = 1;
 	}
+
 	mutex_lock(&state->copy_up_lock);
 
 	/*
@@ -2524,6 +2565,7 @@ overlay_copy_up_regular(
 		error = 0;
 		goto out;
 	}
+
 	if (lower.p_inode == NULL || lower.p_inode->i_type != INODE_REG) {
 		error = EINVAL;
 		goto out;
@@ -2559,6 +2601,7 @@ overlay_copy_up_regular(
 		if (error != EEXIST)
 			goto out;
 	}
+
 	if (temp_inode == NULL) {
 		error = ENOSPC;
 		goto out;
@@ -2584,6 +2627,7 @@ overlay_copy_up_regular(
 				error = EIO;
 			break;
 		}
+
 		written = file_pwrite(destination, buffer, wanted, offset);
 		if (written != (ssize_t)wanted) {
 			if (written < 0)
@@ -2592,6 +2636,7 @@ overlay_copy_up_regular(
 				error = ENOSPC;
 			break;
 		}
+
 		offset += (off_t)wanted;
 	}
 
@@ -2610,6 +2655,7 @@ overlay_copy_up_regular(
 		if (error == 0)
 			error = close_error;
 	}
+
 	if (source != NULL) {
 		(void)file_close(source);
 		source = NULL;
@@ -2623,6 +2669,7 @@ overlay_copy_up_regular(
 		if (error == 0)
 			renamed = 1;
 	}
+
 	if (renamed) {
 		error = mount_sync_backend(parent_upper.p_mount);
 		if (error == 0) {
@@ -2653,11 +2700,13 @@ overlay_copy_up_regular(
 					overlay_install_upper(inode, &final_path);
 					retain_materialization = 1;
 				}
+
 				state->flags = OVERLAY_READ_ONLY;
 				error = cleanup_error;
 			}
 		}
 	}
+
 out:
 	/* Removes a temporary that was never renamed. */
 	if (buffer != NULL)
@@ -2693,7 +2742,9 @@ out:
 	path_release(&parent_upper);
 	path_release(&temp_path);
 	path_release(&final_path);
+
 	mutex_unlock(&state->copy_up_lock);
+
 	if (entered_transaction)
 		mount_vfs_transaction_leave(inode->i_mount);
 
@@ -2746,6 +2797,7 @@ overlay_new_preflight(
 		error = EINVAL;
 		goto out;
 	}
+
 	error = overlay_join(parent_path, text, relative);
 	if (error != 0)
 		goto out;
@@ -2757,6 +2809,7 @@ overlay_new_preflight(
 			error = EEXIST;
 			goto out;
 		}
+
 		if (error != ENOENT)
 			goto out;
 	}
@@ -2768,21 +2821,25 @@ overlay_new_preflight(
 		error = 0;
 		goto out;
 	}
+
 	error = inode_lookup(lower.p_inode, name, &found);
 	if (error == ENOENT) {
 		error = 0;
 		goto out;
 	}
+
 	if (error != 0)
 		goto out;
 	if ((flags & OVERLAY_META_WHITEOUT) == 0) {
 		error = EEXIST;
 		goto out;
 	}
+
 	if (hidden_lower != NULL) {
 		*hidden_lower = found;
 		found = NULL;
 	}
+
 	error = 0;
 out:
 	if (found != NULL)
@@ -2826,6 +2883,7 @@ overlay_finish_new(
 			return EIO;
 		return error;
 	}
+
 	error = mount_sync_backend(upper.p_mount);
 	if (error == 0 && (overlay_metadata_flags(state, relative) &
 	    OVERLAY_META_WHITEOUT) != 0) {
@@ -2840,6 +2898,7 @@ overlay_finish_new(
 		namecache_remove(directory, name);
 		error = overlay_lookup(directory, name, result);
 	}
+
 	if (error == 0) {
 		path_release(&upper);
 		return 0;
@@ -2855,6 +2914,7 @@ overlay_finish_new(
 		if (cleanup_error == 0)
 			cleanup_error = one_error;
 	}
+
 	if (directory_object)
 		one_error = inode_rmdir(upper.p_inode, name);
 	else
@@ -2867,6 +2927,7 @@ overlay_finish_new(
 		if (cleanup_error == 0)
 			cleanup_error = one_error;
 	}
+
 	one_error = mount_sync_backend(upper.p_mount);
 	if (cleanup_error == 0)
 		cleanup_error = one_error;
@@ -2931,9 +2992,9 @@ overlay_create(
 	if (error == 0)
 		error = overlay_finish_new(directory, name, relative, 0, 0,
 		    result);
-	error = overlay_materialization_complete(state, &materialization, error);
 
 	/* Reports the failure. */
+	error = overlay_materialization_complete(state, &materialization, error);
 	if (error != 0)
 		return error;
 
@@ -3019,14 +3080,15 @@ out:
 			error = rollback_error;
 		}
 	}
+
 	if (created != NULL)
 		inode_release(created);
 	if (lower != NULL)
 		inode_release(lower);
 	path_release(&upper);
-	error = overlay_materialization_complete(state, &materialization, error);
 
 	/* Reports the failure. */
+	error = overlay_materialization_complete(state, &materialization, error);
 	if (error != 0)
 		return error;
 
@@ -3043,8 +3105,10 @@ overlay_special_clear(
 	if (inode == NULL)
 		return;
 	mutex_lock(&inode->i_lock);
+
 	if (inode->i_special == expected)
 		inode->i_special = NULL;
+
 	mutex_unlock(&inode->i_lock);
 }
 
@@ -3061,21 +3125,27 @@ overlay_special_transfer(
 
 	/* Detaches the endpoint from the source. */
 	mutex_lock(&source->i_lock);
+
 	if (source->i_special != expected)
 		error = EIO;
 	else
 		source->i_special = NULL;
+
 	mutex_unlock(&source->i_lock);
+
 	if (error != 0)
 		return error;
 
 	/* Attaches it to the destination, or puts it back. */
 	mutex_lock(&destination->i_lock);
+
 	if (destination->i_special != NULL)
 		error = EADDRINUSE;
 	else
 		destination->i_special = expected;
+
 	mutex_unlock(&destination->i_lock);
+
 	if (error != 0) {
 		mutex_lock(&source->i_lock);
 		if (source->i_special == NULL)
@@ -3148,6 +3218,7 @@ overlay_mknod_socket(
 		if (error != EEXIST)
 			goto out;
 	}
+
 	if (created == NULL) {
 		error = ENOSPC;
 		goto out;
@@ -3192,14 +3263,18 @@ out:
 			error = cleanup_error;
 		}
 	}
+
 	if (prepared != NULL)
 		inode_release(prepared);
 	if (created != NULL) {
 		overlay_special_clear(created, request->special);
 		inode_release(created);
 	}
+
 	path_release(&temporary_path);
+
 	mutex_unlock(&state->copy_up_lock);
+
 out_unlocked:
 	path_release(&parent_upper);
 
@@ -3265,9 +3340,9 @@ overlay_mknod(
 		error = overlay_finish_new(directory, name, relative, 0, 0,
 		    result);
 	}
-	error = overlay_materialization_complete(state, &materialization, error);
 
 	/* Reports the failure. */
+	error = overlay_materialization_complete(state, &materialization, error);
 	if (error != 0)
 		return error;
 
@@ -3324,9 +3399,9 @@ overlay_symlink(
 		error = overlay_finish_new(directory, name, relative, 0, 0,
 		    result);
 	}
-	error = overlay_materialization_complete(state, &materialization, error);
 
 	/* Reports the failure. */
+	error = overlay_materialization_complete(state, &materialization, error);
 	if (error != 0)
 		return error;
 
@@ -3417,6 +3492,7 @@ overlay_repath_preflight(
 				return EEXIST;
 		}
 	}
+
 	return 0;
 }
 
@@ -3459,6 +3535,7 @@ overlay_repath_commit(
 			strcat(updated, info->path + old_length);
 			strcpy(info->path, updated);
 		}
+
 		mutex_unlock(&inode->i_lock);
 	}
 }
@@ -3539,6 +3616,7 @@ overlay_rename(
 		if (error != 0 && error != ENOENT)
 			goto out;
 	}
+
 	error = overlay_lookup(new_directory, new_name, &target);
 	if (error == ENOENT)
 		error = 0;
@@ -3551,15 +3629,18 @@ overlay_rename(
 			error = EXDEV;
 			goto out;
 		}
+
 		if (target != NULL && target->i_type != INODE_DIR) {
 			error = ENOTDIR;
 			goto out;
 		}
+
 		if (target != NULL) {
 			error = overlay_directory_empty(target);
 			if (error != 0)
 				goto out;
 		}
+
 		error = overlay_repath_preflight(state, old_relative,
 			new_relative, target);
 		if (error != 0)
@@ -3596,6 +3677,7 @@ overlay_rename(
 		if (error != 0)
 			goto out;
 	}
+
 	error = inode_rename(old_parent_upper.p_inode, old_name,
 		new_parent_upper.p_inode, new_name, 0);
 	if (error != 0)
@@ -3637,6 +3719,7 @@ overlay_rename(
 		if (error != 0)
 			goto out;
 	}
+
 	error = 0;
 out:
 	if (target != NULL)
@@ -3748,6 +3831,7 @@ overlay_remove(
 		path_release(&parent_lower);
 		return error;
 	}
+
 	error = overlay_info_snapshot(target, &target_upper, &target_lower, NULL);
 	if (error != 0)
 		goto out;
@@ -3760,6 +3844,7 @@ overlay_remove(
 			error = EISDIR;
 		goto out;
 	}
+
 	if (removing_directory) {
 		error = overlay_directory_empty(target);
 		if (error != 0)
@@ -3774,12 +3859,14 @@ overlay_remove(
 		if (error != 0 && error != ENOENT)
 			goto out;
 	}
+
 	if (target_lower.p_inode != NULL) {
 		error = overlay_journal_append(state,
 			OVERLAY_OP_ADD_WHITEOUT, relative);
 		if (error != 0)
 			goto out;
 	}
+
 	if (target_upper.p_inode != NULL) {
 		if (removing_directory)
 			error = inode_rmdir(parent_upper.p_inode, name);
@@ -3788,6 +3875,7 @@ overlay_remove(
 		if (error != 0)
 			goto out;
 	}
+
 	/*
 	 * Removal is committed in the live namespace even if durability fails.
 	 * Publish invalidation before sync; generic callers only do it on success. */
@@ -3818,9 +3906,8 @@ overlay_unlink(
 {
 	int error;
 
-	error = overlay_remove(directory, name, 0);
-
 	/* Reports the failure. */
+	error = overlay_remove(directory, name, 0);
 	if (error != 0)
 		return error;
 
@@ -3836,9 +3923,8 @@ overlay_rmdir(
 {
 	int error;
 
-	error = overlay_remove(directory, name, 1);
-
 	/* Reports the failure. */
+	error = overlay_remove(directory, name, 1);
 	if (error != 0)
 		return error;
 
@@ -3924,9 +4010,9 @@ overlay_truncate_limited(
 		result->actual_size = inode->i_size;
 		return error;
 	}
-	error = overlay_truncate_upper(inode, request, result);
 
 	/* Reports the failure. */
+	error = overlay_truncate_upper(inode, request, result);
 	if (error != 0)
 		return error;
 
@@ -3949,9 +4035,8 @@ overlay_truncate(
 	struct inode_truncate_result result;
 	int error;
 
-	error = overlay_truncate_limited(inode, &request, &result);
-
 	/* Reports the failure. */
+	error = overlay_truncate_limited(inode, &request, &result);
 	if (error != 0)
 		return error;
 
@@ -3994,6 +4079,7 @@ overlay_setattr(
 		overlay_refresh(inode);
 		error = mount_sync_backend(upper.p_mount);
 	}
+
 	path_release(&upper);
 
 	/* Reports the failure. */
@@ -4058,11 +4144,13 @@ overlay_regular_open(
 			return EIO;
 		return error;
 	}
+
 	info = kern_malloc(sizeof(*info));
 	if (info == NULL) {
 		path_release(&visible);
 		return ENOMEM;
 	}
+
 	real_flags = file_status_flags_get(file) & ~(O_CREAT | O_EXCL | O_TRUNC);
 	error = file_open_resolved(&visible, real_flags, &info->real);
 	path_release(&visible);
@@ -4070,6 +4158,7 @@ overlay_regular_open(
 		kern_free(info);
 		return error;
 	}
+
 	file->f_data = info;
 	file->f_vm_inode = file_vm_inode(info->real);
 	return 0;
@@ -4177,9 +4266,8 @@ overlay_pwrite_internal(
 	struct overlay_file_info *info;
 	ssize_t count;
 
-	info = file->f_data;
-
 	/* Rejects a file that carries no overlay state. */
+	info = file->f_data;
 	if (info == NULL)
 		return -EIO;
 
@@ -4200,9 +4288,8 @@ overlay_host_truncate_limited(
 {
 	int error;
 
-	error = overlay_truncate_upper(inode, request, result);
-
 	/* Reports the failure. */
+	error = overlay_truncate_upper(inode, request, result);
 	if (error != 0)
 		return error;
 
@@ -4266,13 +4353,14 @@ overlay_regular_close(
 	int error;
 
 	info = file->f_data;
-	error = 0;
 
 	/* Closes the real file and releases the overlay state. */
+	error = 0;
 	if (info != NULL) {
 		error = file_close(info->real);
 		kern_free(info);
 	}
+
 	file->f_data = NULL;
 
 	/* Reports the failure. */
@@ -4464,9 +4552,11 @@ overlay_readdir(
 				cursor->phase++;
 				continue;
 			}
+
 			if (error != 0)
 				return error;
 		}
+
 		error = file_readdir(cursor->active, &real_entry, &real_eof);
 		if (error != 0)
 			return error;
@@ -4493,6 +4583,7 @@ overlay_readdir(
 		*eof = 0;
 		return 0;
 	}
+
 	*eof = 1;
 	return 0;
 }
@@ -4506,9 +4597,8 @@ overlay_dir_seek(
 {
 	struct overlay_dir_cursor *cursor;
 
-	cursor = file->f_data;
-
 	/* Accepts only a rewind to the start of the directory. */
+	cursor = file->f_data;
 	if (cursor == NULL || whence != 0 || offset != 0)
 		return -EINVAL;
 
@@ -4526,13 +4616,13 @@ overlay_dir_close(
 {
 	struct overlay_dir_cursor *cursor;
 
-	cursor = file->f_data;
-
 	/* Releases the walk state the cursor holds. */
+	cursor = file->f_data;
 	if (cursor != NULL) {
 		overlay_dir_drop_active(cursor);
 		kern_free(cursor);
 	}
+
 	file->f_data = NULL;
 	return 0;
 }
@@ -4584,9 +4674,9 @@ overlay_directory_fsync(
 	error = file_fsync(state->journal[state->active_slot]);
 	if (error != 0)
 		return error;
-	error = mount_sync_backend(state->upper_root.p_mount);
 
 	/* Reports the failure. */
+	error = mount_sync_backend(state->upper_root.p_mount);
 	if (error != 0)
 		return error;
 
@@ -4636,15 +4726,18 @@ overlay_cleanup_temps(
 				error = EINVAL;
 				break;
 			}
+
 			inode_release(child);
 			(*deleted)++;
 			if (*deleted > 256U) {
 				error = EOVERFLOW;
 				break;
 			}
+
 			error = inode_unlink(directory->p_inode, &component);
 			break;
 		}
+
 		(void)file_close(file);
 		if (error != 0)
 			return error;
@@ -4668,6 +4761,7 @@ overlay_cleanup_temps(
 			error = EOVERFLOW;
 			break;
 		}
+
 		component.cn_nameptr = entry.d_name;
 		component.cn_namelen = strlen(entry.d_name);
 		component.cn_flags = 0;
@@ -4685,9 +4779,11 @@ overlay_cleanup_temps(
 			inode_release(child);
 			error = 0;
 		}
+
 		if (error != 0)
 			break;
 	}
+
 	(void)file_close(file);
 
 	/* Reports the failure. */
@@ -4795,9 +4891,8 @@ overlay_sync_mount(
 	struct overlay_mount_state *state;
 	int error;
 
-	state = mountp->m_data;
-
 	/* Writes nothing back for a read-only overlay. */
+	state = mountp->m_data;
 	if (state == NULL || state->flags == OVERLAY_READ_ONLY)
 		return 0;
 
@@ -4830,9 +4925,9 @@ overlay_statvfs(
 
 	if (state == NULL || result == NULL || state->upper_root.p_mount == NULL)
 		return EINVAL;
-	error = mount_statvfs(state->upper_root.p_mount, result);
 
 	/* Reports the failure. */
+	error = mount_statvfs(state->upper_root.p_mount, result);
 	if (error != 0)
 		return error;
 
@@ -4847,9 +4942,8 @@ overlay_unmount_impl(
 {
 	struct overlay_mount_state *state;
 
-	state = mountp->m_data;
-
 	/* Does nothing for a mount that was never set up. */
+	state = mountp->m_data;
 	if (state == NULL)
 		return;
 
@@ -4865,7 +4959,6 @@ overlay_unmount_impl(
 	kern_free(state);
 	mountp->m_data = NULL;
 }
-
 
 /*
  * Prepare lower-only metadata/content before generic code takes i_io_lock.
@@ -4891,11 +4984,13 @@ overlay_prepare_mutation(
 			path_release(&upper);
 		return error == ENOENT ? EDEADLK : error;
 	}
+
 	entered = mount_vfs_transaction_join(inode->i_mount);
 	if (state->flags != OVERLAY_READ_WRITE) {
 		error = EROFS;
 		goto out;
 	}
+
 	error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER, &upper);
 	if (error == 0) {
 		path_release(&upper);
@@ -4907,6 +5002,7 @@ overlay_prepare_mutation(
 		else
 			error = EOPNOTSUPP;
 	}
+
 out:
 	if (entered)
 		mount_vfs_transaction_leave(inode->i_mount);

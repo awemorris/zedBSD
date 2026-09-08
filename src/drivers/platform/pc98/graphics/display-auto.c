@@ -54,15 +54,15 @@ drv_pc98_auto_make_hal(
 	struct pc98_display_backend *hal,
 	struct pc98_auto *backend)
 {
-	int function_result;
+	int error;
 
 	/* Checks the drv pc98 cirrus make hal result. */
 	if (hal == NULL || backend == NULL ||
 	    !drv_pc98_cirrus_make_hal(&backend->cirrus_hal, &backend->cirrus) ||
-	    !drv_pc98_gdc_make_hal(&backend->gdc_hal, &backend->gdc))
-
+	    !drv_pc98_gdc_make_hal(&backend->gdc_hal, &backend->gdc)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	memset(hal, 0, sizeof(*hal));
 	hal->display.context = backend;
 	hal->display.enter = auto_enter;
@@ -76,10 +76,10 @@ drv_pc98_auto_make_hal(
 	backend->glyph.display = &hal->display;
 
 	/* Obtains the drv pc98 glyph make hal result. */
-	function_result = drv_pc98_glyph_make_hal(&hal->glyph, &backend->glyph);
+	error = drv_pc98_glyph_make_hal(&hal->glyph, &backend->glyph);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the auto enter operation. */
@@ -136,16 +136,16 @@ auto_fill(
 	const struct pc98_display_rect *rect,
 	uint32_t color)
 {
-	int function_result;
+	int error;
 	struct pc98_auto *backend = context;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		backend->active != NULL && backend->active->fill != NULL &&
 		backend->active->fill(backend->active->context, rect, color);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the auto line operation. */
@@ -158,17 +158,17 @@ auto_line(
 	unsigned y1,
 	uint32_t color)
 {
-	int function_result;
+	int error;
 	struct pc98_auto *backend = context;
 
 	/* Computes the function result. */
-	function_result = backend->active != NULL &&
+	error = backend->active != NULL &&
 			  backend->active->line != NULL &&
 			  backend->active->line(backend->active->context, x0,
 						y0, x1, y1, color);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the auto pattern fill operation. */
@@ -179,18 +179,18 @@ auto_pattern_fill(
 	uint32_t color,
 	uint64_t pattern)
 {
-	int function_result;
+	int error;
 	struct pc98_auto *backend = context;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		backend->active != NULL &&
 		backend->active->pattern_fill != NULL &&
 		backend->active->pattern_fill(backend->active->context, rect,
 					      color, pattern);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the auto draw image operation. */
@@ -201,17 +201,17 @@ auto_draw_image(
 	unsigned y,
 	const struct pc98_display_image *image)
 {
-	int function_result;
+	int error;
 	struct pc98_auto *backend = context;
 
 	/* Computes the function result. */
-	function_result = backend->active != NULL &&
+	error = backend->active != NULL &&
 			  backend->active->draw_image != NULL &&
 			  backend->active->draw_image(backend->active->context,
 						      x, y, image);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the auto draw image pattern operation. */
@@ -223,18 +223,18 @@ auto_draw_image_pattern(
 	const struct pc98_display_image *image,
 	uint64_t pattern)
 {
-	int function_result;
+	int error;
 	struct pc98_auto *backend = context;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		backend->active != NULL &&
 		backend->active->draw_image_pattern != NULL &&
 		backend->active->draw_image_pattern(backend->active->context, x,
 						    y, image, pattern);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the auto flush operation. */
@@ -244,15 +244,15 @@ auto_flush(
 	const struct pc98_display_rect *rectangles,
 	size_t rectangle_count)
 {
-	int function_result;
+	int error;
 	struct pc98_auto *backend = context;
 
 	/* Computes the function result. */
-	function_result = backend->active != NULL &&
+	error = backend->active != NULL &&
 			  (backend->active->flush == NULL ||
 			   backend->active->flush(backend->active->context,
 						  rectangles, rectangle_count));
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }

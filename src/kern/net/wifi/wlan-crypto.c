@@ -150,6 +150,7 @@ wlan_sha1_update(
 		context->failed = 1;
 		return EINVAL;
 	}
+
 	if (context->total_bytes > SHA1_LENGTH_MAX_BYTES ||
 	    (uint64_t)length > SHA1_LENGTH_MAX_BYTES - context->total_bytes) {
 		context->failed = 1;
@@ -196,6 +197,7 @@ wlan_sha1_final(
 		context->failed = 1;
 		return EINVAL;
 	}
+
 	if (context->failed) {
 		wlan_crypto_erase(context, sizeof(*context));
 		return EINVAL;
@@ -210,6 +212,7 @@ wlan_sha1_final(
 		sha1_transform(context, context->block);
 		context->block_length = 0U;
 	}
+
 	memset(context->block + context->block_length, 0,
 	    56U - context->block_length);
 	for (index = 0U; index < 8U; index++)
@@ -312,6 +315,7 @@ wlan_hmac_sha1_init(
 		key_bytes = key_digest;
 		normalized_length = sizeof(key_digest);
 	}
+
 	if (normalized_length != 0U)
 		memcpy(key_block, key_bytes, normalized_length);
 
@@ -320,6 +324,7 @@ wlan_hmac_sha1_init(
 		inner_pad[index] = (uint8_t)(key_block[index] ^ 0x36U);
 		outer_pad[index] = (uint8_t)(key_block[index] ^ 0x5cU);
 	}
+
 	context->initialized = 0;
 	context->failed = 0;
 	error = wlan_sha1_init(&context->inner);
@@ -412,6 +417,7 @@ wlan_hmac_sha1_final(
 		context->failed = 1;
 		return EINVAL;
 	}
+
 	if (!context->initialized || context->failed) {
 		wlan_crypto_erase(context, sizeof(*context));
 		return EINVAL;
@@ -563,6 +569,7 @@ wlan_pbkdf2_hmac_sha1(
 			for (index = 0U; index < WLAN_SHA1_DIGEST_SIZE; index++)
 				accumulated[index] ^= current[index];
 		}
+
 		if (error != 0)
 			break;
 		amount = output_length - offset;
@@ -788,6 +795,7 @@ wlan_rfc3394_unwrap(
 			memcpy(output + (index - 1U) * 8U, decrypted + 8U, 8U);
 		}
 	}
+
 	wlan_crypto_erase(expanded, sizeof(expanded));
 	wlan_crypto_erase(block, sizeof(block));
 	wlan_crypto_erase(decrypted, sizeof(decrypted));
@@ -799,6 +807,7 @@ wlan_rfc3394_unwrap(
 		wlan_crypto_erase(output, needed);
 		return EACCES;
 	}
+
 	wlan_crypto_erase(accumulator, sizeof(accumulator));
 	*output_length = needed;
 
@@ -919,6 +928,7 @@ sha1_transform(
 			f = b ^ c ^ d;
 			constant = 0xca62c1d6U;
 		}
+
 		temporary = rotate_left32(a, 5U) + f + e + constant +
 		    words[index];
 		e = d;
@@ -1059,12 +1069,14 @@ aes128_expand_key(
 			temporary[3] = aes_sbox(first);
 			temporary[0] ^= round_constants[rcon_index++];
 		}
+
 		for (index = 0U; index < 4U; index++) {
 			expanded[generated] = (uint8_t)(expanded[generated - 16U] ^
 			    temporary[index]);
 			generated++;
 		}
 	}
+
 	wlan_crypto_erase(temporary, sizeof(temporary));
 }
 
@@ -1237,6 +1249,7 @@ aes128_encrypt_expanded(
 		aes_mix_columns(state);
 		aes_add_round_key(state, expanded + round * 16U);
 	}
+
 	aes_sub_bytes(state);
 	aes_shift_rows(state);
 	aes_add_round_key(state, expanded + 160U);
@@ -1263,6 +1276,7 @@ aes128_decrypt_expanded(
 		aes_add_round_key(state, expanded + round * 16U);
 		aes_inverse_mix_columns(state);
 	}
+
 	aes_inverse_shift_rows(state);
 	aes_inverse_sub_bytes(state);
 	aes_add_round_key(state, expanded);

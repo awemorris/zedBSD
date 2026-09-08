@@ -91,12 +91,15 @@ filedesc_destroy(
 
 	/* Detaches every live file under the lock. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	for (descriptor = 0; descriptor < KERN_OPEN_MAX; descriptor++) {
 		if (fd->entries[descriptor].state == FILEDESC_SLOT_LIVE)
 			detached[count++] = fd->entries[descriptor].file;
 		slot_make_free(&fd->entries[descriptor]);
 	}
+
 	spin_unlock_irqrestore(&fd->lock, irq);
+
 	poll_notify();
 
 	/* Releases the record locks, then closes the files. */
@@ -105,6 +108,7 @@ filedesc_destroy(
 			record_lock_release_process_inode(fd->owner,
 			    detached[descriptor]->f_inode);
 	}
+
 	for (descriptor = 0; descriptor < count; descriptor++) {
 		if (file_readahead_invalidate != NULL)
 			file_readahead_invalidate(detached[descriptor]);
@@ -147,6 +151,7 @@ filedesc_get_ref(
 
 	/* References the file of a live slot under the lock. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	if (fd->entries[descriptor].state == FILEDESC_SLOT_LIVE)
 		file = fd->entries[descriptor].file;
 	else
@@ -155,6 +160,7 @@ filedesc_get_ref(
 		KERN_TEST_CHECKPOINT(KERN_TEST_FD_LOOKUP_BEFORE_REF, file);
 		file_ref(file);
 	}
+
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Reports the referenced file, or none. */
@@ -172,9 +178,8 @@ filedesc_install(
 {
 	int error;
 
-	error = filedesc_install_from(fd, file, 0, 0, descriptor);
-
 	/* Reports why the installation failed. */
+	error = filedesc_install_from(fd, file, 0, 0, descriptor);
 	if (error != 0)
 		return error;
 
@@ -207,6 +212,7 @@ filedesc_install_from(
 
 	/* Takes the first free slot under the soft limit. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	for (i = minimum; i < (int)fd->soft_limit; i++) {
 		if (fd->entries[i].state == FILEDESC_SLOT_FREE) {
 			slot_make_live(&fd->entries[i], file, flags);
@@ -216,6 +222,7 @@ filedesc_install_from(
 			return 0;
 		}
 	}
+
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Reports a full table. */
@@ -242,10 +249,12 @@ filedesc_install_at(
 
 	/* The slot must be under the limit and free. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	if ((unsigned)descriptor >= fd->soft_limit) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EMFILE;
 	}
+
 	if (fd->entries[descriptor].state != FILEDESC_SLOT_FREE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBUSY;
@@ -253,7 +262,9 @@ filedesc_install_at(
 
 	/* Fills the slot. */
 	slot_make_live(&fd->entries[descriptor], file, 0);
+
 	spin_unlock_irqrestore(&fd->lock, irq);
+
 	poll_notify();
 
 	/* Reports the installed file. */
@@ -280,13 +291,17 @@ filedesc_take(
 
 	/* Frees a live slot, keeping its file. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
+
 	*result = fd->entries[descriptor].file;
 	slot_make_free(&fd->entries[descriptor]);
+
 	spin_unlock_irqrestore(&fd->lock, irq);
+
 	poll_notify();
 
 	/* Releases the process's record locks on the file. */
@@ -316,9 +331,9 @@ filedesc_close(
 	error = filedesc_take(fd, descriptor, &file);
 	if (error != 0)
 		return error;
-	error = file_close(file);
 
 	/* Reports why the close failed. */
+	error = file_close(file);
 	if (error != 0)
 		return error;
 
@@ -385,6 +400,7 @@ filedesc_clone(
 
 	/* References every inherited file into the same slot. */
 	irq = spin_lock_irqsave(&source->lock);
+
 	copy->soft_limit = source->soft_limit;
 	for (descriptor = 0; descriptor < KERN_OPEN_MAX; descriptor++) {
 		if (source->entries[descriptor].state != FILEDESC_SLOT_LIVE ||
@@ -395,6 +411,7 @@ filedesc_clone(
 		slot_make_live(&copy->entries[descriptor], file,
 		    source->entries[descriptor].flags);
 	}
+
 	spin_unlock_irqrestore(&source->lock, irq);
 
 	*result = copy;
@@ -423,11 +440,14 @@ filedesc_get_flags(
 
 	/* Reads the flags of a live slot. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
+
 	*flags = fd->entries[descriptor].flags;
+
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Reports the read flags. */
@@ -453,11 +473,14 @@ filedesc_set_flags(
 
 	/* Sets the flags of a live slot. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
+
 	fd->entries[descriptor].flags = flags;
+
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Reports the set flags. */
@@ -491,6 +514,7 @@ filedesc_dup(
 
 	/* The source must be live. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	if (fd->entries[oldfd].state == FILEDESC_SLOT_LIVE)
 		file = fd->entries[oldfd].file;
 	else
@@ -505,6 +529,7 @@ filedesc_dup(
 		if (fd->entries[descriptor].state == FILEDESC_SLOT_FREE)
 			break;
 	}
+
 	if (descriptor == (int)fd->soft_limit) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EMFILE;
@@ -514,7 +539,9 @@ filedesc_dup(
 	file_ref(file);
 	slot_make_live(&fd->entries[descriptor], file, flags);
 	*result = descriptor;
+
 	spin_unlock_irqrestore(&fd->lock, irq);
+
 	poll_notify();
 
 	/* Reports the duplicated descriptor. */
@@ -552,6 +579,7 @@ filedesc_dup2(
 
 	/* Re-checks the source and waits while the target is reserved. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	for (;;) {
 		if (fd->entries[oldfd].state == FILEDESC_SLOT_LIVE)
 			file = fd->entries[oldfd].file;
@@ -561,16 +589,19 @@ filedesc_dup2(
 			spin_unlock_irqrestore(&fd->lock, irq);
 			return EBADF;
 		}
+
 		if (oldfd == newfd) {
 			spin_unlock_irqrestore(&fd->lock, irq);
 			if (reject_equal)
 				return EINVAL;
 			return 0;
 		}
+
 		if ((unsigned)newfd >= fd->soft_limit) {
 			spin_unlock_irqrestore(&fd->lock, irq);
 			return EBADF;
 		}
+
 		if (fd->entries[newfd].state != FILEDESC_SLOT_RESERVED)
 			break;
 		observed = waitq_sequence(&fd->reservation_waitq);
@@ -591,7 +622,9 @@ filedesc_dup2(
 	else
 		displaced = NULL;
 	slot_make_live(&fd->entries[newfd], file, flags);
+
 	spin_unlock_irqrestore(&fd->lock, irq);
+
 	poll_notify();
 
 	/* Closes the displaced file after releasing its record locks. */
@@ -637,6 +670,7 @@ filedesc_install_pair(
 
 	/* Finds the two lowest free slots under the limit. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	for (i = 0; i < (int)fd->soft_limit; i++) {
 		if (fd->entries[i].state != FILEDESC_SLOT_FREE)
 			continue;
@@ -647,6 +681,7 @@ filedesc_install_pair(
 			break;
 		}
 	}
+
 	if (second_slot < 0) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EMFILE;
@@ -657,7 +692,9 @@ filedesc_install_pair(
 	slot_make_live(&fd->entries[second_slot], second, second_flags);
 	result[0] = first_slot;
 	result[1] = second_slot;
+
 	spin_unlock_irqrestore(&fd->lock, irq);
+
 	poll_notify();
 
 	/* Reports the installed pair. */
@@ -723,10 +760,12 @@ filedesc_reserve_many(
 
 	/* Collects the lowest free slots under the limit. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	for (index = 0; index < fd->soft_limit && found < count; index++) {
 		if (fd->entries[index].state == FILEDESC_SLOT_FREE)
 			reservation->slots[found++] = (int)index;
 	}
+
 	if (found != count) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EMFILE;
@@ -739,6 +778,7 @@ filedesc_reserve_many(
 		fd->reservation_generation++;
 		reservation->generation = fd->reservation_generation;
 	}
+
 	for (index = 0; index < count; index++)
 		slot_make_reserved(&fd->entries[reservation->slots[index]],
 		    reservation->generation);
@@ -749,6 +789,7 @@ filedesc_reserve_many(
 	reservation->flags = flags;
 	reservation->active = 1;
 	filedesc_ref(fd);
+
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Reports the reservation. */
@@ -778,6 +819,7 @@ filedesc_commit_reserved(
 
 	/* Every slot must still be reserved under this generation. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	for (index = 0; index < reservation->count; index++) {
 		slot = reservation->slots[index];
 		if (slot < 0 ||
@@ -796,8 +838,10 @@ filedesc_commit_reserved(
 		    reservation->flags);
 		descriptors[index] = slot;
 	}
+
 	reservation->active = 0;
 	waitq_wake_all(&fd->reservation_waitq);
+
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Drops the reservation's table reference. */
@@ -827,6 +871,7 @@ filedesc_abort_reserved(
 
 	/* Frees the slots still reserved under this generation. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	for (index = 0; index < reservation->count; index++) {
 		slot = reservation->slots[index];
 		if (slot >= 0 &&
@@ -835,8 +880,10 @@ filedesc_abort_reserved(
 		    fd->entries[slot].reservation_id == reservation->generation)
 			slot_make_free(&fd->entries[slot]);
 	}
+
 	reservation->active = 0;
 	waitq_wake_all(&fd->reservation_waitq);
+
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Drops the reservation's table reference. */
@@ -860,7 +907,9 @@ filedesc_set_limit(
 
 	/* Records the limit. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	fd->soft_limit = limit;
+
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Reports the changed limit. */
@@ -883,7 +932,9 @@ filedesc_get_limit(
 
 	/* Samples the limit under the lock. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	limit = fd->soft_limit;
+
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Reports the sampled limit. */
@@ -910,6 +961,7 @@ filedesc_close_on_exec(
 
 	/* Detaches the marked files under the lock. */
 	irq = spin_lock_irqsave(&fd->lock);
+
 	for (descriptor = 0; descriptor < KERN_OPEN_MAX; descriptor++) {
 		if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE ||
 		    (fd->entries[descriptor].flags & FILEDESC_CLOEXEC) == 0)
@@ -917,7 +969,9 @@ filedesc_close_on_exec(
 		detached[count++] = fd->entries[descriptor].file;
 		slot_make_free(&fd->entries[descriptor]);
 	}
+
 	spin_unlock_irqrestore(&fd->lock, irq);
+
 	poll_notify();
 
 	/* Releases the record locks, then closes the files. */
@@ -926,6 +980,7 @@ filedesc_close_on_exec(
 			record_lock_release_process_inode(fd->owner,
 			    detached[descriptor]->f_inode);
 	}
+
 	for (descriptor = 0; descriptor < count; descriptor++) {
 		if (file_readahead_invalidate != NULL)
 			file_readahead_invalidate(detached[descriptor]);

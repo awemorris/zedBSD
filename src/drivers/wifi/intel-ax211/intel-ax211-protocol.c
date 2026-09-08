@@ -76,14 +76,6 @@ static const struct ax211_required_version ax211_api89_required[] = {
 	{0x01U, 0x0dU, 17U, 0U}, {0x0cU, 0x00U, 1U, 0U},
 	{0x0cU, 0x02U, 1U, 4U},	 {0x0cU, 0xfeU, 99U, 1U}};
 
-
-
-
-
-
-
-
-
 /*
  * Implements the drv intel ax211 protocol command table parse operation.
  */
@@ -101,10 +93,10 @@ drv_intel_ax211_protocol_command_table_parse(
 
 	/* Checks the current data length. */
 	if (length == 0U ||
-	    length % INTEL_AX211_PROTOCOL_COMMAND_VERSION_ENTRY_SIZE != 0U)
-
+	    length % INTEL_AX211_PROTOCOL_COMMAND_VERSION_ENTRY_SIZE != 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_TRUNCATED;
+	}
 	parsed.count = length / INTEL_AX211_PROTOCOL_COMMAND_VERSION_ENTRY_SIZE;
 
 	/* Handles the parsed condition. */
@@ -134,10 +126,10 @@ drv_intel_ax211_protocol_command_version_lookup(
 	/* Handles the table availability. */
 	if (table == NULL || version == NULL || table->bytes == NULL ||
 	    table->count == 0U ||
-	    table->count > INTEL_AX211_PROTOCOL_API89_COMMAND_COUNT)
-
+	    table->count > INTEL_AX211_PROTOCOL_API89_COMMAND_COUNT) {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_INVALID;
+	}
 	memset(&candidate, 0, sizeof(candidate));
 	/* Process each remaining element. */
 	for (index = 0; index < table->count; index++) {
@@ -184,18 +176,17 @@ drv_intel_ax211_protocol_command_table_validate_api89(
 	/* Handles the sentinel condition. */
 	if (sentinel.opcode != 0U || sentinel.group != 0U ||
 	    sentinel.command_version != 0U ||
-	    sentinel.notification_version != 0U)
-
+	    sentinel.notification_version != 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_UNSUPPORTED;
+	}
 	/* Process each remaining element. */
 	for (index = 0; index < sizeof(ax211_api89_required) /
 					sizeof(ax211_api89_required[0]);
 	     index++) {
+		/* Checks the operation result. */
 		result = ax211_protocol_required_version(
 			table, &ax211_api89_required[index]);
-
-		/* Checks the operation result. */
 		if (result != INTEL_AX211_PROTOCOL_OK)
 			return result;
 	}
@@ -226,26 +217,26 @@ drv_intel_ax211_protocol_command_response_validate(
 	if (pending->minimum_response_length >
 		    pending->maximum_response_length ||
 	    pending->maximum_response_length >
-		    INTEL_AX211_PROTOCOL_COMMAND_RESPONSE_MAX)
-
+		    INTEL_AX211_PROTOCOL_COMMAND_RESPONSE_MAX) {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_INVALID;
+	}
+
+	/* Checks the operation result. */
 	result = ax211_protocol_message_validate(
 		message, pending->group, pending->opcode,
 		pending->response_version, pending->generation,
 		pending->minimum_response_length,
 		pending->maximum_response_length);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return result;
 
 	/* Handles the message condition. */
 	if (message->queue != pending->queue ||
-	    message->index != pending->index)
-
+	    message->index != pending->index) {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_TOKEN_MISMATCH;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_PROTOCOL_OK;
@@ -267,14 +258,14 @@ drv_intel_ax211_protocol_alive_decode(
 	/* Handles the alive availability. */
 	if (alive == NULL)
 		return INTEL_AX211_PROTOCOL_INVALID;
+
+	/* Checks the operation result. */
 	result = ax211_protocol_message_validate(
 		message, INTEL_AX211_PROTOCOL_GROUP_LEGACY,
 		INTEL_AX211_PROTOCOL_ALIVE_OPCODE,
 		INTEL_AX211_PROTOCOL_ALIVE_VERSION, generation,
 		INTEL_AX211_PROTOCOL_ALIVE_SIZE,
 		INTEL_AX211_PROTOCOL_ALIVE_SIZE);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return result;
 	bytes = message->payload;
@@ -306,10 +297,10 @@ drv_intel_ax211_protocol_alive_decode(
 	if (decoded.imr_enabled != 0U) {
 		/* Handles the decoded condition. */
 		if (decoded.imr_base == 0U || decoded.imr_size == 0U ||
-		    UINT64_MAX - decoded.imr_base < decoded.imr_size)
-
+		    UINT64_MAX - decoded.imr_base < decoded.imr_size) {
 			/* Returns the computed result. */
 			return INTEL_AX211_PROTOCOL_INVALID;
+		}
 
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_UNSUPPORTED;
@@ -331,10 +322,10 @@ drv_intel_ax211_protocol_pnvm_init_complete(
 	const struct intel_ax211_protocol_message *message,
 	uint32_t generation)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the ax211 protocol message validate result. */
-	function_result = ax211_protocol_message_validate(
+	error = ax211_protocol_message_validate(
 		message, INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 		INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_OPCODE,
 		INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_VERSION, generation,
@@ -342,7 +333,7 @@ drv_intel_ax211_protocol_pnvm_init_complete(
 		INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_SIZE);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -353,10 +344,10 @@ drv_intel_ax211_protocol_init_complete(
 	const struct intel_ax211_protocol_message *message,
 	uint32_t generation)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the ax211 protocol message validate result. */
-	function_result = ax211_protocol_message_validate(
+	error = ax211_protocol_message_validate(
 		message, INTEL_AX211_PROTOCOL_GROUP_LEGACY,
 		INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE,
 		INTEL_AX211_PROTOCOL_UNKNOWN_VERSION, generation,
@@ -364,7 +355,7 @@ drv_intel_ax211_protocol_init_complete(
 		INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -403,14 +394,14 @@ drv_intel_ax211_protocol_nvm_get_info_decode(
 	    pending->minimum_response_length !=
 		    INTEL_AX211_PROTOCOL_NVM_GET_INFO_SIZE ||
 	    pending->maximum_response_length !=
-		    INTEL_AX211_PROTOCOL_NVM_GET_INFO_SIZE)
-
+		    INTEL_AX211_PROTOCOL_NVM_GET_INFO_SIZE) {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_UNSUPPORTED;
-	result = drv_intel_ax211_protocol_command_response_validate(message,
-								    pending);
+	}
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_protocol_command_response_validate(message,
+								    pending);
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return result;
 	bytes = message->payload;
@@ -427,10 +418,10 @@ drv_intel_ax211_protocol_nvm_get_info_decode(
 
 	/* Handles the decoded condition. */
 	if ((decoded.general_flags &
-	     INTEL_AX211_PROTOCOL_NVM_GENERAL_EMPTY_OTP) != 0U)
-
+	     INTEL_AX211_PROTOCOL_NVM_GENERAL_EMPTY_OTP) != 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_FAILED;
+	}
 	decoded.band_24_enabled =
 		(decoded.mac_sku_flags &
 		 INTEL_AX211_PROTOCOL_NVM_BAND_24_ENABLED) != 0U;
@@ -459,9 +450,9 @@ drv_intel_ax211_protocol_nvm_get_info_decode(
 		return INTEL_AX211_PROTOCOL_OVERSIZED;
 	decoded.tx_chain_mask = (uint8_t)tx_chains;
 	decoded.rx_chain_mask = (uint8_t)rx_chains;
-	channel_count = decoded.n_channels;
 
 	/* Handles the channel count condition. */
+	channel_count = decoded.n_channels;
 	if (channel_count > INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT)
 		channel_count = INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT;
 	decoded.channel_24ghz_count = channel_count;
@@ -485,12 +476,13 @@ drv_intel_ax211_protocol_nvm_get_info_decode(
 		if (channel_local->valid)
 			decoded.valid_24ghz_count++;
 	}
+
 	channel_offset = INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT;
+
+	/* Handles the channel count condition. */
 	channel_count = decoded.n_channels > channel_offset
 				? decoded.n_channels - channel_offset
 				: 0U;
-
-	/* Handles the channel count condition. */
 	if (channel_count > INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT)
 		channel_count = INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT;
 	decoded.channel_5ghz_count = channel_count;
@@ -555,19 +547,18 @@ ax211_protocol_required_version(
 	struct intel_ax211_protocol_command_version version;
 	int result;
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_version_lookup(
 		table, required->group, required->opcode, &version);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return result;
 
 	/* Handles the version condition. */
 	if (version.command_version != required->command_version ||
-	    version.notification_version != required->notification_version)
-
+	    version.notification_version != required->notification_version) {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_UNSUPPORTED;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_PROTOCOL_OK;
@@ -602,10 +593,10 @@ ax211_protocol_message_validate(
 
 	/* Handles the message condition. */
 	if (message->group != group || message->opcode != opcode ||
-	    message->version != version)
-
+	    message->version != version) {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_UNSUPPORTED;
+	}
 
 	/* Checks the operation status. */
 	if ((message->flags & INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK) != 0U)

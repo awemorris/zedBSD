@@ -62,22 +62,22 @@ drv_intel_ax211_boot_init(
  * Rejects an incomplete or internally inconsistent controller binding.
 	 */
 	if (boot == NULL || !ax211_boot_ops_valid(ops) || dma_device == NULL ||
-	    mmio == NULL || transport == NULL || generation_seed == 0U)
-
+	    mmio == NULL || transport == NULL || generation_seed == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_INVALID;
-	mac_type = (uint16_t)((hardware_revision & 0xfff0U) >> 4);
+	}
 
 	/* Checks the drv intel ax211 mac type supported result. */
+	mac_type = (uint16_t)((hardware_revision & 0xfff0U) >> 4);
 	if (!drv_intel_ax211_mac_type_supported(mac_type))
 		return INTEL_AX211_BOOT_INVALID;
 
 	/* Handles the mmio condition. */
 	if (mmio->profile.mac_type != mac_type ||
-	    mmio->profile.rf_type != rf_type)
-
+	    mmio->profile.rf_type != rf_type) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_INVALID;
+	}
 
 	/* Publishes a fully initialized, otherwise empty coordinator. */
 	memset(boot, 0, sizeof(*boot));
@@ -103,7 +103,7 @@ drv_intel_ax211_boot_run(
 	struct intel_ax211_boot *boot,
 	struct intel_ax211_protocol_nvm *nvm)
 {
-	int function_result;
+	int error;
 	int result;
 
 	/*
@@ -112,99 +112,99 @@ drv_intel_ax211_boot_run(
 	if (boot == NULL || nvm == NULL ||
 	    (boot->state != INTEL_AX211_BOOT_STATE_IDLE &&
 	     boot->state != INTEL_AX211_BOOT_STATE_COMPLETE) ||
-	    boot->dma.device != NULL || boot->files_loaded)
-
+	    boot->dma.device != NULL || boot->files_loaded) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_INVALID;
+	}
 	ax211_boot_run_state_clear(boot);
 	boot->state = INTEL_AX211_BOOT_STATE_RUNNING;
 	ax211_boot_generation_advance(boot);
 
 	/* Loads exact files and pins the borrowed command-version table. */
-	result = ax211_boot_load_and_pin(boot);
 
 	/* Checks the operation result. */
+	result = ax211_boot_load_and_pin(boot);
 	if (result != INTEL_AX211_BOOT_OK) {
 		/* Obtains the ax211 boot finish result. */
-		function_result = ax211_boot_finish(boot, result, nvm);
+		error = ax211_boot_finish(boot, result, nvm);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/*
  * Copies all first-pass DMA objects before hardware can observe them.
 	 */
-	result = ax211_boot_prepare_dma(boot);
 
 	/* Checks the operation result. */
+	result = ax211_boot_prepare_dma(boot);
 	if (result != INTEL_AX211_BOOT_OK) {
 		/* Obtains the ax211 boot finish result. */
-		function_result = ax211_boot_finish(boot, result, nvm);
+		error = ax211_boot_finish(boot, result, nvm);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
-	result = boot->ops->receive_epoch_begin(boot->argument,
-						boot->generation);
 
 	/* Checks the operation result. */
+	result = boot->ops->receive_epoch_begin(boot->argument,
+						boot->generation);
 	if (result != 0) {
 		/* Obtains the ax211 boot finish result. */
-		function_result =
+		error =
 			ax211_boot_finish(boot, INTEL_AX211_BOOT_IO, nvm);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Starts the exact Gen3 transport and accepts one ALIVE generation. */
-	result = ax211_boot_start_device(boot);
 
 	/* Checks the operation result. */
+	result = ax211_boot_start_device(boot);
 	if (result != INTEL_AX211_BOOT_OK) {
 		/* Obtains the ax211 boot finish result. */
-		function_result = ax211_boot_finish(boot, result, nvm);
+		error = ax211_boot_finish(boot, result, nvm);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
+	/* Checks the operation result. */
 	result = ax211_boot_wait_notification(
 		boot, AX211_BOOT_NOTIFICATION_ALIVE,
 		INTEL_AX211_BOOT_ALIVE_TIMEOUT_US);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_BOOT_OK) {
 		/* Obtains the ax211 boot finish result. */
-		function_result = ax211_boot_finish(boot, result, nvm);
+		error = ax211_boot_finish(boot, result, nvm);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/*
  * Retires one-shot firmware images only after exact ALIVE acceptance.
 	 */
 	drv_intel_ax211_dma_release_boot_images(&boot->dma);
-	result = ax211_boot_select_and_publish_pnvm(boot);
 
 	/* Checks the operation result. */
+	result = ax211_boot_select_and_publish_pnvm(boot);
 	if (result != INTEL_AX211_BOOT_OK) {
 		/* Obtains the ax211 boot finish result. */
-		function_result = ax211_boot_finish(boot, result, nvm);
+		error = ax211_boot_finish(boot, result, nvm);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Runs the exact API89 read-NVM command sequence. */
 	result = ax211_boot_run_nvm_commands(boot);
 
 	/* Obtains the ax211 boot finish result. */
-	function_result = ax211_boot_finish(boot, result, nvm);
+	error = ax211_boot_finish(boot, result, nvm);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -220,15 +220,15 @@ drv_intel_ax211_boot_cleanup(
 	if (boot == NULL ||
 	    (boot->state != INTEL_AX211_BOOT_STATE_STOP_REQUIRED &&
 	     boot->state != INTEL_AX211_BOOT_STATE_STOP_REQUIRED_NO_DMA) ||
-	    (!boot->dma_prepared && !boot->hardware_touched))
-
+	    (!boot->dma_prepared && !boot->hardware_touched)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_INVALID;
+	}
 
 	/* Repeats the complete checked stop boundary before releasing DMA. */
-	result = ax211_boot_stop_and_release(boot);
 
 	/* Checks the operation result. */
+	result = ax211_boot_stop_and_release(boot);
 	if (result != INTEL_AX211_BOOT_OK) {
 		/* Handles the boot condition. */
 		if (boot->dma_prepared)
@@ -243,6 +243,7 @@ drv_intel_ax211_boot_cleanup(
 		/* Returns the computed result. */
 		return result;
 	}
+
 	boot->state = INTEL_AX211_BOOT_STATE_IDLE;
 
 	/* Returns the computed result. */
@@ -262,15 +263,15 @@ drv_intel_ax211_boot_command_table(
 	/* Exposes the pinned table only after a complete stopped first pass. */
 	if (boot == NULL || table == NULL ||
 	    boot->state != INTEL_AX211_BOOT_STATE_COMPLETE ||
-	    !boot->command_table_valid)
-
+	    !boot->command_table_valid) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_INVALID;
+	}
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_table_parse(
 		boot->command_version_bytes,
 		sizeof(boot->command_version_bytes), table);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return INTEL_AX211_BOOT_PROTOCOL;
 
@@ -289,10 +290,10 @@ ax211_boot_ops_valid(
 
 	/* Handles the receive epoch begin availability. */
 	if (ops->receive_epoch_begin == NULL || ops->transport_bind == NULL ||
-	    ops->receive_event == NULL)
-
+	    ops->receive_event == NULL) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Handles the publish pnvm availability. */
 	if (ops->publish_pnvm == NULL || ops->post_alive == NULL)
@@ -349,64 +350,65 @@ static int
 ax211_boot_load_and_pin(
 	struct intel_ax211_boot *boot)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_command_table table;
 	size_t offset;
 	size_t length;
 	int result;
 
 	/* Loads and marks ownership before inspecting any borrowed member. */
-	result = drv_intel_ax211_firmware_files_load(&boot->files);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_firmware_files_load(&boot->files);
 	if (result != 0)
 		return INTEL_AX211_BOOT_FIRMWARE;
 	boot->files_loaded = 1U;
 
 	/* Requires both exact file buffers and the full API89 version table. */
 	if (boot->files.ucode_bytes == NULL || boot->files.ucode_size == 0U ||
-	    boot->files.pnvm_bytes == NULL || boot->files.pnvm_size == 0U)
-
+	    boot->files.pnvm_bytes == NULL || boot->files.pnvm_size == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_FIRMWARE;
+	}
 	offset = boot->files.ucode_manifest.command_versions_offset;
-	length = boot->files.ucode_manifest.command_versions_length;
 
 	/* Checks the current data length. */
+	length = boot->files.ucode_manifest.command_versions_length;
 	if (length != sizeof(boot->command_version_bytes))
 		return INTEL_AX211_BOOT_FIRMWARE;
 
 	/* Checks the current offset. */
 	if (offset > boot->files.ucode_size ||
-	    length > boot->files.ucode_size - offset)
-
+	    length > boot->files.ucode_size - offset) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_FIRMWARE;
+	}
 
 	/* Pins the table before any path may release firmware-file storage. */
 	memcpy(boot->command_version_bytes, boot->files.ucode_bytes + offset,
 	       length);
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_table_parse(
 		boot->command_version_bytes, length, &table);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK) {
 		/* Obtains the ax211 boot protocol result result. */
-		function_result = ax211_boot_protocol_result(result);
+		error = ax211_boot_protocol_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_init_api89_validate(&table);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK) {
 		/* Obtains the ax211 boot protocol result result. */
-		function_result = ax211_boot_protocol_result(result);
+		error = ax211_boot_protocol_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	boot->command_table_valid = 1U;
 
 	/* Returns the computed result. */
@@ -444,9 +446,9 @@ ax211_boot_finish(
 	 */
 	ax211_boot_release_files(boot);
 	boot->last_error = (uint8_t)result;
-	cleanup_result = ax211_boot_stop_and_release(boot);
 
 	/* Handles the cleanup result condition. */
+	cleanup_result = ax211_boot_stop_and_release(boot);
 	if (cleanup_result == INTEL_AX211_BOOT_STOP_REQUIRED)
 		return cleanup_result;
 
@@ -512,9 +514,9 @@ ax211_boot_stop_and_release(
 		/* Handles the boot condition. */
 		if (!boot->hardware_touched)
 			return INTEL_AX211_BOOT_OK;
-		stop_result = drv_intel_ax211_mmio_stop(boot->mmio);
 
 		/* Handles the stop result condition. */
+		stop_result = drv_intel_ax211_mmio_stop(boot->mmio);
 		if (stop_result != INTEL_AX211_MMIO_OK) {
 			boot->state =
 				INTEL_AX211_BOOT_STATE_STOP_REQUIRED_NO_DMA;
@@ -522,6 +524,7 @@ ax211_boot_stop_and_release(
 			/* Returns the computed result. */
 			return INTEL_AX211_BOOT_STOP_REQUIRED;
 		}
+
 		boot->hardware_touched = 0U;
 
 		/* Returns the computed result. */
@@ -532,9 +535,8 @@ ax211_boot_stop_and_release(
  * Never-exposed DMA is safe to free, but reset failure remains sticky.
 	 */
 	if (!boot->dma_exposed && !boot->transport_bound) {
-		stop_result = INTEL_AX211_MMIO_OK;
-
 		/* Handles the boot condition. */
+		stop_result = INTEL_AX211_MMIO_OK;
 		if (boot->hardware_touched)
 			stop_result = drv_intel_ax211_mmio_stop(boot->mmio);
 		drv_intel_ax211_dma_release(&boot->dma);
@@ -548,6 +550,7 @@ ax211_boot_stop_and_release(
 			/* Returns the computed result. */
 			return INTEL_AX211_BOOT_STOP_REQUIRED;
 		}
+
 		boot->hardware_touched = 0U;
 
 		/* Returns the computed result. */
@@ -559,9 +562,9 @@ ax211_boot_stop_and_release(
 	 */
 	quiesce_result = drv_intel_ax211_transport_quiesce(boot->transport);
 	drain_result = boot->ops->interrupt_drain(boot->argument);
-	stop_result = drv_intel_ax211_mmio_stop(boot->mmio);
 
 	/* Handles the drain result condition. */
+	stop_result = drv_intel_ax211_mmio_stop(boot->mmio);
 	if (drain_result != 0 || stop_result != INTEL_AX211_MMIO_OK) {
 		boot->state = INTEL_AX211_BOOT_STATE_STOP_REQUIRED;
 
@@ -583,10 +586,10 @@ ax211_boot_stop_and_release(
 
 	/* Handles the quiesce result condition. */
 	if (quiesce_result != INTEL_AX211_TRANSPORT_OK ||
-	    after_reset_result != INTEL_AX211_TRANSPORT_OK)
-
+	    after_reset_result != INTEL_AX211_TRANSPORT_OK) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_TRANSPORT;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_BOOT_OK;
@@ -599,12 +602,11 @@ ax211_boot_prepare_dma(
 {
 	int result;
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_dma_prepare_boot(
 		boot->dma_device, boot->files.ucode_bytes,
 		boot->files.ucode_size, &boot->files.ucode_manifest,
 		boot->hardware_revision, &boot->dma);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return INTEL_AX211_BOOT_DMA;
 	boot->dma_prepared = 1U;
@@ -624,42 +626,42 @@ ax211_boot_start_device(
 
 	/* Executes the checked card-ready, reset, and APM sequence. */
 	boot->hardware_touched = 1U;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_mmio_prepare_card_hw(boot->mmio);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK)
 		return INTEL_AX211_BOOT_MMIO;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_mmio_sw_reset(boot->mmio);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_MMIO_OK)
 		return INTEL_AX211_BOOT_MMIO;
-	result = drv_intel_ax211_mmio_apm_init(boot->mmio);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_mmio_apm_init(boot->mmio);
 	if (result != INTEL_AX211_MMIO_OK)
 		return INTEL_AX211_BOOT_MMIO;
 
 	/* Binds the sole controller transport before exposing ring storage. */
+
+	/* Checks the operation result. */
 	result = boot->ops->transport_bind(boot->argument, &boot->dma,
 					   boot->mmio, boot->transport,
 					   boot->generation);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return INTEL_AX211_BOOT_TRANSPORT;
 	boot->transport_bound = 1U;
-	result = drv_intel_ax211_transport_configure_msix(boot->transport);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_transport_configure_msix(boot->transport);
 	if (result != INTEL_AX211_TRANSPORT_OK)
 		return INTEL_AX211_BOOT_TRANSPORT;
 
 	/* Treats partial ring publication as device DMA ownership. */
 	boot->dma_exposed = 1U;
-	result = drv_intel_ax211_transport_initialize_rings(boot->transport);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_transport_initialize_rings(boot->transport);
 	if (result != INTEL_AX211_TRANSPORT_OK)
 		return INTEL_AX211_BOOT_TRANSPORT;
 
@@ -671,24 +673,24 @@ ax211_boot_start_device(
 	for (index = 0U; index < boot->dma.rx_buffer_count; index++) {
 		/* Handles the address availability. */
 		if (boot->dma.rx_buffer[index].address == NULL ||
-		    boot->dma.rx_buffer[index].device_address == 0U)
-
+		    boot->dma.rx_buffer[index].device_address == 0U) {
 			/* Returns the computed result. */
 			return INTEL_AX211_BOOT_DMA;
+		}
+
+		/* Checks the operation result. */
 		result = drv_intel_ax211_transport_publish_rx_descriptor(
 			boot->transport, (uint16_t)index,
 			boot->dma.rx_buffer[index].device_address);
-
-		/* Checks the operation result. */
 		if (result != INTEL_AX211_TRANSPORT_OK)
 			return INTEL_AX211_BOOT_TRANSPORT;
 	}
 
 	/* The first RX credit is deferred until the hardware-ALIVE cause. */
-	result = drv_intel_ax211_transport_enable_firmware_interrupts(
-		boot->transport);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_transport_enable_firmware_interrupts(
+		boot->transport);
 	if (result != INTEL_AX211_TRANSPORT_OK)
 		return INTEL_AX211_BOOT_TRANSPORT;
 
@@ -697,17 +699,17 @@ ax211_boot_start_device(
 	 */
 	if (boot->dma.context.device_address == 0U ||
 	    boot->dma.iml.device_address == 0U ||
-	    boot->dma.iml.size != INTEL_AX211_MMIO_IML_SIZE)
-
+	    boot->dma.iml.size != INTEL_AX211_MMIO_IML_SIZE) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_DMA;
+	}
 	memset(&mmio_boot, 0, sizeof(mmio_boot));
 	mmio_boot.context_address = boot->dma.context.device_address;
 	mmio_boot.iml_address = boot->dma.iml.device_address;
 	mmio_boot.iml_size = (uint32_t)boot->dma.iml.size;
-	result = drv_intel_ax211_mmio_publish_gen3(boot->mmio, &mmio_boot);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_mmio_publish_gen3(boot->mmio, &mmio_boot);
 	if (result != INTEL_AX211_MMIO_OK)
 		return INTEL_AX211_BOOT_MMIO;
 
@@ -722,7 +724,7 @@ ax211_boot_wait_notification(
 	enum ax211_boot_notification expected,
 	uint64_t timeout)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_message message;
 	struct intel_ax211_event event;
 	uint64_t deadline;
@@ -732,9 +734,9 @@ ax211_boot_wait_notification(
 	int result;
 
 	/* Fixes one monotonic absolute deadline for the entire wait. */
-	result = ax211_boot_deadline(boot, timeout, &now, &deadline);
 
 	/* Checks the operation result. */
+	result = ax211_boot_deadline(boot, timeout, &now, &deadline);
 	if (result != INTEL_AX211_BOOT_OK)
 		return result;
 
@@ -743,9 +745,8 @@ ax211_boot_wait_notification(
 	 */
 	/* Process each remaining element. */
 	for (index = 0U; index < INTEL_AX211_BOOT_EVENT_LIMIT; index++) {
-		result = ax211_boot_receive(boot, deadline, &event, &message);
-
 		/* Checks the operation result. */
+		result = ax211_boot_receive(boot, deadline, &event, &message);
 		if (result != INTEL_AX211_BOOT_OK)
 			return result;
 
@@ -756,9 +757,9 @@ ax211_boot_wait_notification(
 		/* Handles the event condition. */
 		if ((event.queue & 0x80U) == 0U)
 			return INTEL_AX211_BOOT_PROTOCOL;
-		kind = ax211_boot_notification_kind(&message);
 
 		/* Handles the ax211 boot notification duplicate condition. */
+		kind = ax211_boot_notification_kind(&message);
 		if (ax211_boot_notification_duplicate(boot, kind))
 			return INTEL_AX211_BOOT_DUPLICATE;
 
@@ -771,11 +772,11 @@ ax211_boot_wait_notification(
 			return INTEL_AX211_BOOT_PROTOCOL;
 
 		/* Obtains the ax211 boot notification accept result. */
-		function_result =
+		error =
 			ax211_boot_notification_accept(boot, kind, &message);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Returns the computed result. */
@@ -795,9 +796,9 @@ ax211_boot_deadline(
 	/* Handles the now availability. */
 	if (timeout == 0U || now == NULL || deadline == NULL)
 		return INTEL_AX211_BOOT_INVALID;
-	result = boot->ops->clock_us(boot->argument, now);
 
 	/* Checks the operation result. */
+	result = boot->ops->clock_us(boot->argument, now);
 	if (result != 0)
 		return INTEL_AX211_BOOT_IO;
 
@@ -823,11 +824,11 @@ ax211_boot_receive(
 
 	/* Lets the controller fill only the coordinator-owned fixed buffer. */
 	memset(&received, 0, sizeof(received));
+
+	/* Checks the operation result. */
 	result = boot->ops->receive_event(boot->argument, deadline,
 					  boot->event_bytes,
 					  sizeof(boot->event_bytes), &received);
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_BOOT_RECEIVE_TIMEOUT)
 		return INTEL_AX211_BOOT_TIMEOUT;
 
@@ -838,17 +839,17 @@ ax211_boot_receive(
 	/* Handles the received condition. */
 	if (received.length == 0U ||
 	    received.length > sizeof(boot->event_bytes) ||
-	    received.generation == 0U)
-
+	    received.generation == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_PROTOCOL;
+	}
 
 	/*
  * Rejects a receiver which returned after the caller's fixed deadline.
 	 */
-	result = boot->ops->clock_us(boot->argument, &now);
 
 	/* Checks the operation result. */
+	result = boot->ops->clock_us(boot->argument, &now);
 	if (result != 0)
 		return INTEL_AX211_BOOT_IO;
 
@@ -857,19 +858,19 @@ ax211_boot_receive(
 		return INTEL_AX211_BOOT_TIMEOUT;
 
 	/* Decodes the common RX envelope before attaching private metadata. */
-	result = drv_intel_ax211_event_decode(boot->event_bytes,
-					      received.length, event);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_event_decode(boot->event_bytes,
+					      received.length, event);
 	if (result != INTEL_AX211_OK)
 		return INTEL_AX211_BOOT_PROTOCOL;
 
 	/* Handles the event condition. */
 	if (event->payload_offset > received.length ||
-	    event->payload_length != received.length - event->payload_offset)
-
+	    event->payload_length != received.length - event->payload_offset) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_PROTOCOL;
+	}
 	memset(message, 0, sizeof(*message));
 	message->opcode = event->command.opcode;
 	message->group = event->flags &
@@ -893,24 +894,24 @@ ax211_boot_notification_kind(
 {
 	/* Handles the message condition. */
 	if (message->group == INTEL_AX211_PROTOCOL_GROUP_LEGACY &&
-	    message->opcode == INTEL_AX211_PROTOCOL_ALIVE_OPCODE)
-
+	    message->opcode == INTEL_AX211_PROTOCOL_ALIVE_OPCODE) {
 		/* Returns the computed result. */
 		return AX211_BOOT_NOTIFICATION_ALIVE;
+	}
 
 	/* Handles the message condition. */
 	if (message->group == INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM &&
-	    message->opcode == INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_OPCODE)
-
+	    message->opcode == INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_OPCODE) {
 		/* Returns the computed result. */
 		return AX211_BOOT_NOTIFICATION_PNVM;
+	}
 
 	/* Handles the message condition. */
 	if (message->group == INTEL_AX211_PROTOCOL_GROUP_LEGACY &&
-	    message->opcode == INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE)
-
+	    message->opcode == INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE) {
 		/* Returns the computed result. */
 		return AX211_BOOT_NOTIFICATION_INIT;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -945,29 +946,26 @@ ax211_boot_notification_accept(
 	int kind,
 	const struct intel_ax211_protocol_message *message)
 {
-	int function_result;
+	int error;
 	int result;
 
 	/* Handles the kind condition. */
 	if (kind == AX211_BOOT_NOTIFICATION_ALIVE) {
+		/* Checks the operation result. */
 		result = drv_intel_ax211_protocol_alive_decode(
 			message, boot->generation, &boot->alive);
-
-		/* Checks the operation result. */
 		if (result == INTEL_AX211_PROTOCOL_OK)
 			boot->alive_accepted = 1U;
 	} else if (kind == AX211_BOOT_NOTIFICATION_PNVM) {
+		/* Checks the operation result. */
 		result = drv_intel_ax211_protocol_pnvm_init_complete(
 			message, boot->generation);
-
-		/* Checks the operation result. */
 		if (result == INTEL_AX211_PROTOCOL_OK)
 			boot->pnvm_accepted = 1U;
 	} else if (kind == AX211_BOOT_NOTIFICATION_INIT) {
+		/* Checks the operation result. */
 		result = drv_intel_ax211_init_complete_validate(
 			message, boot->generation);
-
-		/* Checks the operation result. */
 		if (result == INTEL_AX211_PROTOCOL_OK)
 			boot->init_accepted = 1U;
 	} else {
@@ -976,10 +974,10 @@ ax211_boot_notification_accept(
 	}
 
 	/* Obtains the ax211 boot protocol result result. */
-	function_result = ax211_boot_protocol_result(result);
+	error = ax211_boot_protocol_result(result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Selects the ALIVE SKU and publishes an exact copied PNVM image. */
@@ -996,28 +994,28 @@ ax211_boot_select_and_publish_pnvm(
 	sku.data[0] = boot->alive.sku[0];
 	sku.data[1] = boot->alive.sku[1];
 	sku.data[2] = boot->alive.sku[2];
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_pnvm_parse(
 		boot->files.pnvm_bytes, boot->files.pnvm_size, &sku,
 		boot->mmio->profile.mac_type, boot->rf_type, &manifest);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_OK)
 		return INTEL_AX211_BOOT_FIRMWARE;
 
 	/* Copies every selected segment before releasing both source files. */
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_dma_prepare_pnvm(boot->files.pnvm_bytes,
 						  boot->files.pnvm_size,
 						  &manifest, &boot->dma);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return INTEL_AX211_BOOT_DMA;
 	ax211_boot_release_files(boot);
 
 	/* Synchronizes and rings the controller-owned PNVM doorbell. */
-	result = boot->ops->publish_pnvm(boot->argument, &boot->dma);
 
 	/* Checks the operation result. */
+	result = boot->ops->publish_pnvm(boot->argument, &boot->dma);
 	if (result != 0)
 		return INTEL_AX211_BOOT_IO;
 	result =
@@ -1029,9 +1027,9 @@ ax211_boot_select_and_publish_pnvm(
 		return result;
 
 	/* Applies the transport's exact post-ALIVE hardware transition. */
-	result = boot->ops->post_alive(boot->argument, &boot->alive);
 
 	/* Checks the operation result. */
+	result = boot->ops->post_alive(boot->argument, &boot->alive);
 	if (result != 0)
 		return INTEL_AX211_BOOT_IO;
 
@@ -1047,22 +1045,22 @@ ax211_boot_run_nvm_commands(
 	int result;
 
 	/* Binds one-command-at-a-time transactions to this hardware epoch. */
-	result = drv_intel_ax211_command_transaction_init(
-		&boot->commands, boot->transport, 1U, boot->generation);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_command_transaction_init(
+		&boot->commands, boot->transport, 1U, boot->generation);
 	if (result != INTEL_AX211_COMMAND_OK)
 		return INTEL_AX211_BOOT_COMMAND;
 
 	/* Marks the firmware session as an exact read-NVM pass. */
-	result = ax211_boot_send_extended_cfg(boot);
 
 	/* Checks the operation result. */
+	result = ax211_boot_send_extended_cfg(boot);
 	if (result != INTEL_AX211_BOOT_OK)
 		return result;
-	result = ax211_boot_send_nvm_access_complete(boot);
 
 	/* Checks the operation result. */
+	result = ax211_boot_send_nvm_access_complete(boot);
 	if (result != INTEL_AX211_BOOT_OK)
 		return result;
 	result =
@@ -1085,7 +1083,7 @@ static int
 ax211_boot_send_extended_cfg(
 	struct intel_ax211_boot *boot)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_command_request request;
 	struct intel_ax211_command_handle handle;
 	uint8_t payload[INTEL_AX211_INIT_EXTENDED_CFG_SIZE];
@@ -1096,17 +1094,18 @@ ax211_boot_send_extended_cfg(
 	int result;
 
 	/* Encodes the exact read-NVM profile. */
-	result = drv_intel_ax211_init_extended_cfg_encode(
-		INTEL_AX211_INIT_PROFILE_READ_NVM, payload);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_init_extended_cfg_encode(
+		INTEL_AX211_INIT_PROFILE_READ_NVM, payload);
 	if (result != INTEL_AX211_PROTOCOL_OK) {
 		/* Obtains the ax211 boot protocol result result. */
-		function_result = ax211_boot_protocol_result(result);
+		error = ax211_boot_protocol_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	memset(&request, 0, sizeof(request));
 	request.command.opcode = INTEL_AX211_INIT_EXTENDED_CFG_OPCODE;
 	request.command.group = INTEL_AX211_INIT_SYSTEM_GROUP;
@@ -1120,30 +1119,31 @@ ax211_boot_send_extended_cfg(
 	request.maximum_response_length = sizeof(response);
 
 	/* Submits the command with one finite acknowledgement deadline. */
-	result = ax211_boot_deadline(boot, INTEL_AX211_BOOT_COMMAND_TIMEOUT_US,
-				     &now, &deadline);
 
 	/* Checks the operation result. */
+	result = ax211_boot_deadline(boot, INTEL_AX211_BOOT_COMMAND_TIMEOUT_US,
+				     &now, &deadline);
 	if (result != INTEL_AX211_BOOT_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_command_submit(
 		&boot->commands, &request, now,
 		INTEL_AX211_BOOT_COMMAND_TIMEOUT_US, &handle);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_COMMAND_OK) {
 		/* Obtains the ax211 boot command result result. */
-		function_result = ax211_boot_command_result(result);
+		error = ax211_boot_command_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	response_length = 0U;
 	memset(response, 0, sizeof(response));
-	result = ax211_boot_wait_command(boot, deadline, response,
-					 sizeof(response), &response_length);
 
 	/* Checks the operation result. */
+	result = ax211_boot_wait_command(boot, deadline, response,
+					 sizeof(response), &response_length);
 	if (result == INTEL_AX211_BOOT_OK &&
 	    response_length != sizeof(response))
 		result = INTEL_AX211_BOOT_PROTOCOL;
@@ -1180,10 +1180,10 @@ ax211_boot_command_result(
 	    result == INTEL_AX211_COMMAND_FIRMWARE_FAILED ||
 	    result == INTEL_AX211_COMMAND_VERSION_MISMATCH ||
 	    result == INTEL_AX211_COMMAND_OUT_OF_ORDER ||
-	    result == INTEL_AX211_COMMAND_BUFFER_TOO_SMALL)
-
+	    result == INTEL_AX211_COMMAND_BUFFER_TOO_SMALL) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_PROTOCOL;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_BOOT_COMMAND;
@@ -1198,7 +1198,7 @@ ax211_boot_wait_command(
 	size_t response_capacity,
 	size_t *response_length)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_message message;
 	struct intel_ax211_command_handle timed_out;
 	struct intel_ax211_event event;
@@ -1212,9 +1212,8 @@ ax211_boot_wait_command(
 	 */
 	/* Process each remaining element. */
 	for (index = 0U; index < INTEL_AX211_BOOT_EVENT_LIMIT; index++) {
-		result = ax211_boot_receive(boot, deadline, &event, &message);
-
 		/* Checks the operation result. */
+		result = ax211_boot_receive(boot, deadline, &event, &message);
 		if (result != INTEL_AX211_BOOT_OK)
 			return result;
 
@@ -1226,9 +1225,8 @@ ax211_boot_wait_command(
  * Rejects repeated accepted notifications in this generation.
 		 */
 		if ((event.queue & 0x80U) != 0U) {
-			kind = ax211_boot_notification_kind(&message);
-
 			/* Handles the ax211 boot notification duplicate condition. */
+			kind = ax211_boot_notification_kind(&message);
 			if (ax211_boot_notification_duplicate(boot, kind))
 				return INTEL_AX211_BOOT_DUPLICATE;
 
@@ -1248,27 +1246,27 @@ ax211_boot_wait_command(
 			response_length);
 
 		/* Obtains the ax211 boot command result result. */
-		function_result = ax211_boot_command_result(result);
+		error = ax211_boot_command_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Poisons the outstanding token once the local event budget expires. */
-	result = boot->ops->clock_us(boot->argument, &now);
 
 	/* Checks the operation result. */
+	result = boot->ops->clock_us(boot->argument, &now);
 	if (result == 0 && now < deadline)
 		now = deadline;
-	result = drv_intel_ax211_command_timeout_oldest(&boot->commands, now,
-							&timed_out);
 
 	/* Checks the operation result. */
+	result = drv_intel_ax211_command_timeout_oldest(&boot->commands, now,
+							&timed_out);
 	if (result != INTEL_AX211_COMMAND_TIMEOUT &&
-	    result != INTEL_AX211_COMMAND_POISONED)
-
+	    result != INTEL_AX211_COMMAND_POISONED) {
 		/* Returns the computed result. */
 		return INTEL_AX211_BOOT_COMMAND;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_BOOT_TIMEOUT;
@@ -1289,7 +1287,7 @@ static int
 ax211_boot_send_nvm_access_complete(
 	struct intel_ax211_boot *boot)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_command_handle handle;
 	uint64_t deadline;
 	uint64_t now;
@@ -1299,29 +1297,30 @@ ax211_boot_send_nvm_access_complete(
 	/*
  * Submits the 4-byte reserved request for a zero-payload
 	 * acknowledgement. */
-	result = ax211_boot_deadline(boot, INTEL_AX211_BOOT_COMMAND_TIMEOUT_US,
-				     &now, &deadline);
 
 	/* Checks the operation result. */
+	result = ax211_boot_deadline(boot, INTEL_AX211_BOOT_COMMAND_TIMEOUT_US,
+				     &now, &deadline);
 	if (result != INTEL_AX211_BOOT_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_command_submit_nvm_access_complete(
 		&boot->commands, now, INTEL_AX211_BOOT_COMMAND_TIMEOUT_US,
 		&handle);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_COMMAND_OK) {
 		/* Obtains the ax211 boot command result result. */
-		function_result = ax211_boot_command_result(result);
+		error = ax211_boot_command_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	response_length = 0U;
-	result = ax211_boot_wait_command(boot, deadline, NULL, 0U,
-					 &response_length);
 
 	/* Checks the operation result. */
+	result = ax211_boot_wait_command(boot, deadline, NULL, 0U,
+					 &response_length);
 	if (result != INTEL_AX211_BOOT_OK)
 		return result;
 
@@ -1338,7 +1337,7 @@ static int
 ax211_boot_send_nvm_get_info(
 	struct intel_ax211_boot *boot)
 {
-	int function_result;
+	int error;
 	struct intel_ax211_protocol_pending_command pending;
 	struct intel_ax211_protocol_message message;
 	struct intel_ax211_command_handle handle;
@@ -1351,29 +1350,30 @@ ax211_boot_send_nvm_get_info(
 	/*
  * Submits the exact four-byte request with a finite response deadline.
 	 */
-	result = ax211_boot_deadline(boot, INTEL_AX211_BOOT_COMMAND_TIMEOUT_US,
-				     &now, &deadline);
 
 	/* Checks the operation result. */
+	result = ax211_boot_deadline(boot, INTEL_AX211_BOOT_COMMAND_TIMEOUT_US,
+				     &now, &deadline);
 	if (result != INTEL_AX211_BOOT_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_command_submit_nvm_get_info(
 		&boot->commands, now, INTEL_AX211_BOOT_COMMAND_TIMEOUT_US,
 		&handle);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_COMMAND_OK) {
 		/* Obtains the ax211 boot command result result. */
-		function_result = ax211_boot_command_result(result);
+		error = ax211_boot_command_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	response_length = 0U;
-	result = ax211_boot_wait_command(boot, deadline, response,
-					 sizeof(response), &response_length);
 
 	/* Checks the operation result. */
+	result = ax211_boot_wait_command(boot, deadline, response,
+					 sizeof(response), &response_length);
 	if (result != INTEL_AX211_BOOT_OK)
 		return result;
 
@@ -1407,11 +1407,12 @@ ax211_boot_send_nvm_get_info(
 	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK) {
 		/* Obtains the ax211 boot protocol result result. */
-		function_result = ax211_boot_protocol_result(result);
+		error = ax211_boot_protocol_result(result);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
+
 	boot->nvm_valid = 1U;
 
 	/* Returns the computed result. */

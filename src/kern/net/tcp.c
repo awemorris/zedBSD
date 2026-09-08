@@ -122,9 +122,12 @@ tcp_socket_create(
 	    &tcp_ops);
 	endpoint->tcp.state = TCP_CLOSED;
 	irq = spin_lock_irqsave(&tcp_registry_lock);
+
 	endpoint->next = tcp_sockets;
 	tcp_sockets = endpoint;
+
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
+
 	*result = &endpoint->tcp.inet.socket;
 
 	/* Reports the created socket. */
@@ -144,9 +147,9 @@ tcp_init(
 	next_ephemeral = TCP_EPHEMERAL_FIRST;
 	spin_init(&tcp_registry_lock, LOCK_RANK_SOCKET_REGISTRY,
 	    "TCP socket registry");
-	error = ipv4_protocol_register(IPPROTO_TCP, tcp_input);
 
 	/* Reports why the registration failed. */
+	error = ipv4_protocol_register(IPPROTO_TCP, tcp_input);
 	if (error != 0)
 		return error;
 
@@ -183,10 +186,12 @@ tcp_timer_run(
 
 	/* Snapshots the referenced sockets so no registry lock is held during I/O. */
 	irq = spin_lock_irqsave(&tcp_registry_lock);
+
 	for (endpoint = tcp_sockets; endpoint != NULL; endpoint = endpoint->next) {
 		if (count < SOCKET_MAX && socket_tryref(&endpoint->tcp.inet.socket))
 			snapshot[count++] = endpoint;
 	}
+
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
 
 	/* Handles each socket whose retransmission deadline passed. */
@@ -220,6 +225,7 @@ tcp_timer_run(
 				socket_release(socket);
 				continue;
 			}
+
 			socket_wake_connect(socket);
 			socket_wake_receive(socket);
 			socket_release(socket);
@@ -242,6 +248,7 @@ tcp_timer_run(
 			socket_release(socket);
 			continue;
 		}
+
 		if (length != 0)
 			memcpy(payload, endpoint->tcp.retransmit->data, length);
 
@@ -253,9 +260,9 @@ tcp_timer_run(
 		delay = TCP_INITIAL_RTO << shift;
 		endpoint->tcp.retransmit_deadline = now + delay;
 		spin_unlock_irqrestore(&socket->lock, irq);
-		error = tcp_send_segment_at(endpoint, sequence, flags, payload, length);
 
 		/* A hard send error abandons the attempt the segment belonged to. */
+		error = tcp_send_segment_at(endpoint, sequence, flags, payload, length);
 		if (error != 0 && error != EAGAIN && error != ENOBUFS) {
 			failed = 0;
 			irq = spin_lock_irqsave(&socket->lock);
@@ -268,12 +275,14 @@ tcp_timer_run(
 				tcp_forget_peer(endpoint);
 				failed = 1;
 			}
+
 			spin_unlock_irqrestore(&socket->lock, irq);
 			packet_buf_free(discard);
 			if (!failed) {
 				socket_release(socket);
 				continue;
 			}
+
 			socket_set_error(socket, error);
 			if (endpoint->tcp.listener != NULL) {
 				tcp_listener_remove(endpoint);
@@ -283,10 +292,12 @@ tcp_timer_run(
 				socket_release(socket);
 				continue;
 			}
+
 			socket_wake_connect(socket);
 			socket_release(socket);
 			continue;
 		}
+
 		socket_release(socket);
 	}
 }
@@ -319,6 +330,7 @@ tcp_timer_next_deadline(
 		if (candidate != 0 && (deadline == 0 || candidate < deadline))
 			deadline = candidate;
 	}
+
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
 
 	/* Reports the earliest deadline. */
@@ -389,8 +401,10 @@ tcp_listener_remove(
 			spin_unlock_irqrestore(&listener->tcp.inet.socket.lock, irq);
 			return;
 		}
+
 		previous = *link;
 	}
+
 	spin_unlock_irqrestore(&listener->tcp.inet.socket.lock, irq);
 }
 
@@ -430,6 +444,7 @@ tcp_listener_established(
 	listener->tcp.accept_count++;
 	waitq_wake_all(&listener->tcp.inet.socket.accept_waitq);
 	poll_notify();
+
 	spin_unlock_irqrestore(&listener->tcp.inet.socket.lock, irq);
 }
 
@@ -457,6 +472,7 @@ tcp_port_in_use(
 		if (conflict)
 			return 1;
 	}
+
 	return 0;
 }
 
@@ -479,8 +495,10 @@ tcp_allocate_port_locked(
 			endpoint->tcp.inet.inet_flags |= INET_SOCKET_BOUND;
 			return 0;
 		}
+
 		endpoint->tcp.inet.local_port = 0;
 	}
+
 	return EADDRINUSE;
 }
 
@@ -519,6 +537,7 @@ tcp_route(
 		net_device_release(output);
 		return error;
 	}
+
 	endpoint->tcp.inet.ifindex = output->ifindex;
 	if (endpoint->tcp.inet.local_address == 0)
 		endpoint->tcp.inet.local_address = *source;
@@ -552,6 +571,7 @@ tcp_send_segment_at(
 		net_device_release(device);
 		return ENOBUFS;
 	}
+
 	tcp = packet_buf_append(packet, sizeof(*tcp));
 	payload = packet_buf_append(packet, length);
 	if (tcp == NULL || payload == NULL) {
@@ -597,7 +617,9 @@ tcp_allocate_port(
 	int error;
 
 	irq = spin_lock_irqsave(&tcp_registry_lock);
+
 	error = tcp_allocate_port_locked(endpoint);
+
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
 
 	/* Reports the failure. */
@@ -618,10 +640,9 @@ tcp_send_segment(
 {
 	int error;
 
+	/* Reports the failure. */
 	error = tcp_send_segment_at(endpoint, endpoint->tcp.send_next, flags,
 	    data, length);
-
-	/* Reports the failure. */
 	if (error != 0)
 		return error;
 
@@ -653,7 +674,9 @@ tcp_retransmit_clear(
 	/* Takes the queued segment out under the socket lock. */
 	socket = &endpoint->tcp.inet.socket;
 	irq = spin_lock_irqsave(&socket->lock);
+
 	tcp_retransmit_reset(endpoint, &packet);
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Frees it and lets a blocked sender continue. */
@@ -719,6 +742,7 @@ tcp_send_reliable(
 		packet_buf_free(copy);
 		return ENOBUFS;
 	}
+
 	if (length != 0)
 		memcpy(payload, data, length);
 
@@ -729,11 +753,13 @@ tcp_send_reliable(
 
 	/* Only one reliable segment may be outstanding. */
 	irq = spin_lock_irqsave(&endpoint->tcp.inet.socket.lock);
+
 	if (endpoint->tcp.retransmit != NULL) {
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, irq);
 		packet_buf_free(copy);
 		return EAGAIN;
 	}
+
 	sequence = endpoint->tcp.send_next;
 	endpoint->tcp.retransmit = copy;
 	endpoint->tcp.retransmit_sequence = sequence;
@@ -741,6 +767,7 @@ tcp_send_reliable(
 	endpoint->tcp.retransmit_count = 0;
 	endpoint->tcp.retransmit_deadline = sched_ticks() + TCP_INITIAL_RTO;
 	endpoint->tcp.send_next += advance;
+
 	spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, irq);
 
 	/*
@@ -756,10 +783,12 @@ tcp_send_reliable(
 			tcp_retransmit_reset(endpoint, &discard);
 			endpoint->tcp.send_next = sequence;
 		}
+
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, irq);
 		packet_buf_free(discard);
 		return error;
 	}
+
 	net_worker_wakeup();
 
 	/* Reports the sent segment. */
@@ -778,22 +807,25 @@ tcp_bind(
 	unsigned long irq;
 	unsigned long socket_irq;
 
-	endpoint = tcp_endpoint(socket);
-
 	/* A socket binds only once. */
+	endpoint = tcp_endpoint(socket);
 	if ((endpoint->tcp.inet.inet_flags & INET_SOCKET_BOUND) != 0)
 		return EINVAL;
 
 	/* Records the reuse option in force at bind time. */
 	socket_irq = spin_lock_irqsave(&socket->lock);
+
 	endpoint->tcp.inet.bind_reuse_address = socket->reuse_address;
+
 	spin_unlock_irqrestore(&socket->lock, socket_irq);
+
 	error = inet_socket_bind(&endpoint->tcp.inet, address, length);
 	if (error != 0)
 		return error;
 
 	/* Allocates a port for zero, or checks the requested one. */
 	irq = spin_lock_irqsave(&tcp_registry_lock);
+
 	if (endpoint->tcp.inet.local_port == 0)
 		error = tcp_allocate_port_locked(endpoint);
 	else if (tcp_port_in_use(endpoint, 0))
@@ -805,6 +837,7 @@ tcp_bind(
 		endpoint->tcp.inet.bind_reuse_address = 0;
 		endpoint->tcp.inet.inet_flags &= ~INET_SOCKET_BOUND;
 	}
+
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
 
 	/* Reports why the bind failed. */
@@ -835,6 +868,7 @@ tcp_listen(
 			return 0;
 		return EISCONN;
 	}
+
 	if ((endpoint->tcp.inet.inet_flags & INET_SOCKET_BOUND) == 0 ||
 	    endpoint->tcp.inet.local_port == 0)
 		return EDESTADDRREQ;
@@ -847,6 +881,7 @@ tcp_listen(
 
 	/* No other listener may cover the same local address. */
 	irq = spin_lock_irqsave(&tcp_registry_lock);
+
 	for (other = tcp_sockets; other != NULL; other = other->next) {
 		if (other != endpoint &&
 		    other->tcp.state == TCP_LISTEN &&
@@ -856,6 +891,7 @@ tcp_listen(
 			break;
 		}
 	}
+
 	if (!conflict) {
 		if (backlog == 0)
 			endpoint->tcp.listen_backlog = 1U;
@@ -863,6 +899,7 @@ tcp_listen(
 			endpoint->tcp.listen_backlog = (unsigned)backlog;
 		endpoint->tcp.state = TCP_LISTEN;
 	}
+
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
 
 	/* Reports the listen result. */
@@ -894,6 +931,7 @@ tcp_accept(
 	if (result == NULL)
 		return EINVAL;
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (listener->tcp.state != TCP_LISTEN) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return EINVAL;
@@ -905,10 +943,12 @@ tcp_accept(
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EAGAIN;
 		}
+
 		if (signal_pending_unblocked(thread)) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EINTR;
 		}
+
 		sequence = waitq_sequence(&socket->accept_waitq);
 		error = waitq_sleep(&socket->accept_waitq, &socket->lock, sequence,
 		    0, WAITQ_INTERRUPTIBLE);
@@ -916,6 +956,7 @@ tcp_accept(
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EINTR;
 		}
+
 		if (socket->error != 0) {
 			error = socket->error;
 			socket->error = 0;
@@ -933,6 +974,7 @@ tcp_accept(
 			return error;
 		}
 	}
+
 	listener->tcp.accept_head = accepted->queue_next;
 	if (listener->tcp.accept_head == NULL)
 		listener->tcp.accept_tail = NULL;
@@ -941,6 +983,7 @@ tcp_accept(
 	accepted->queue_next = NULL;
 	accepted->listener = NULL;
 	*result = &accepted->inet.socket;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Reports the accepted socket. */
@@ -983,6 +1026,7 @@ tcp_connect(
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return 0;
 		}
+
 		if (socket->error != 0) {
 			error = socket->error;
 			socket->error = 0;
@@ -990,12 +1034,14 @@ tcp_connect(
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return error;
 		}
+
 		if (endpoint->tcp.state != TCP_SYN_SENT ||
 		    endpoint->tcp.active_connect_generation == 0) {
 			endpoint->tcp.connect_wait_deadline = 0;
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return ECONNABORTED;
 		}
+
 		generation = endpoint->tcp.active_connect_generation;
 		deadline = endpoint->tcp.connect_wait_deadline;
 		goto wait_for_connect;
@@ -1003,13 +1049,16 @@ tcp_connect(
 
 	/* Only a closed socket can start connecting. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (endpoint->tcp.state == TCP_SYN_SENT)
 		error = EALREADY;
 	else if (endpoint->tcp.state != TCP_CLOSED)
 		error = EISCONN;
 	else
 		error = 0;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	if (error != 0)
 		return error;
 
@@ -1021,6 +1070,7 @@ tcp_connect(
 		tcp_forget_peer(endpoint);
 		return EADDRNOTAVAIL;
 	}
+
 	if (endpoint->tcp.inet.local_port == 0) {
 		error = tcp_allocate_port(endpoint);
 		if (error != 0) {
@@ -1033,6 +1083,7 @@ tcp_connect(
 	endpoint->tcp.send_next = (uint32_t)sched_ticks() * 1103515245U +
 	    endpoint->tcp.inet.local_port;
 	irq = spin_lock_irqsave(&socket->lock);
+
 	endpoint->tcp.connect_generation++;
 	if (endpoint->tcp.connect_generation == 0)
 		endpoint->tcp.connect_generation++;
@@ -1047,6 +1098,7 @@ tcp_connect(
 	endpoint->tcp.send_next ^= generation * 2654435761U;
 	endpoint->tcp.send_unacknowledged = endpoint->tcp.send_next;
 	endpoint->tcp.state = TCP_SYN_SENT;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Sends the SYN, retrying a few times when buffers are short. */
@@ -1061,9 +1113,11 @@ tcp_connect(
 			packet_buf_free(cancelled);
 			return error;
 		}
+
 		if (thread != NULL)
 			sched_sleep(sched_ticks() + 25U);
 	}
+
 	if (error != 0) {
 		irq = spin_lock_irqsave(&socket->lock);
 		cancelled = tcp_connect_cancel_locked(endpoint, generation);
@@ -1080,6 +1134,7 @@ tcp_connect(
 
 	/* Applies the send timeout as the wait deadline. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	timeout = socket->send_timeout_ticks;
 	if (timeout != 0) {
 		error = kern_deadline_after(sched_ticks(), timeout, &deadline);
@@ -1090,6 +1145,7 @@ tcp_connect(
 			return error;
 		}
 	}
+
 	endpoint->tcp.connect_wait_deadline = deadline;
 wait_for_connect:
 	/* Waits for the handshake, a failure, or the deadline. */
@@ -1109,6 +1165,7 @@ wait_for_connect:
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EINTR;
 		}
+
 		if (error == ETIMEDOUT) {
 			cancelled = tcp_connect_cancel_locked(endpoint, generation);
 			spin_unlock_irqrestore(&socket->lock, irq);
@@ -1125,11 +1182,13 @@ wait_for_connect:
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return error;
 	}
+
 	if (endpoint->tcp.state == TCP_ESTABLISHED)
 		error = 0;
 	else
 		error = ETIMEDOUT;
 	endpoint->tcp.connect_wait_deadline = 0;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Reports the failure. */
@@ -1170,6 +1229,7 @@ tcp_sendto(
 
 	/* A shut-down or unconnected socket cannot send. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (socket->write_shutdown) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		if ((flags & MSG_NOSIGNAL) == 0 && thread != NULL &&
@@ -1177,11 +1237,14 @@ tcp_sendto(
 			(void)signal_send_thread(thread, SIGPIPE);
 		return -EPIPE;
 	}
+
 	if (endpoint->tcp.state != TCP_ESTABLISHED) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return -ENOTCONN;
 	}
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	if (length == 0)
 		return 0;
 	if (length > TCP_MSS)
@@ -1194,10 +1257,12 @@ tcp_sendto(
 			spin_unlock_irqrestore(&socket->lock, irq);
 			break;
 		}
+
 		if ((flags & MSG_DONTWAIT) != 0 || thread == NULL) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return -EAGAIN;
 		}
+
 		sequence = waitq_sequence(&socket->send_waitq);
 		error = waitq_sleep(&socket->send_waitq, &socket->lock, sequence,
 		    0, WAITQ_INTERRUPTIBLE);
@@ -1207,6 +1272,7 @@ tcp_sendto(
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return -error;
 		}
+
 		spin_unlock_irqrestore(&socket->lock, irq);
 		if (error == EINTR)
 			return -EINTR;
@@ -1222,6 +1288,7 @@ tcp_sendto(
 			return -EAGAIN;
 		sched_sleep(sched_ticks() + 1U);
 	}
+
 	if (error != 0)
 		return -error;
 
@@ -1298,12 +1365,14 @@ tcp_shutdown(
 
 	/* The read side is shut down by flag alone. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (how == SHUT_RD || how == SHUT_RDWR)
 		socket->read_shutdown = 1;
 	if (how == SHUT_RD) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return 0;
 	}
+
 	if (socket->write_shutdown) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return 0;
@@ -1315,6 +1384,7 @@ tcp_shutdown(
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return ENOTCONN;
 	}
+
 	old_state = endpoint->tcp.state;
 	if (old_state == TCP_CLOSE_WAIT)
 		closing_state = TCP_LAST_ACK;
@@ -1322,16 +1392,18 @@ tcp_shutdown(
 		closing_state = TCP_FIN_WAIT_1;
 	socket->write_shutdown = 1;
 	endpoint->tcp.state = closing_state;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
-	error = tcp_send_reliable(endpoint, TCP_FIN | TCP_ACK, NULL, 0);
 
 	/* A FIN that could not be sent restores the state. */
+	error = tcp_send_reliable(endpoint, TCP_FIN | TCP_ACK, NULL, 0);
 	if (error != 0) {
 		irq = spin_lock_irqsave(&socket->lock);
 		if (endpoint->tcp.state == closing_state) {
 			endpoint->tcp.state = old_state;
 			socket->write_shutdown = 0;
 		}
+
 		spin_unlock_irqrestore(&socket->lock, irq);
 	}
 
@@ -1354,9 +1426,9 @@ tcp_getsockname(
 	int error;
 
 	endpoint = tcp_endpoint(socket);
-	error = inet_socket_getsockname(&endpoint->tcp.inet, address, length);
 
 	/* Reports the failure. */
+	error = inet_socket_getsockname(&endpoint->tcp.inet, address, length);
 	if (error != 0)
 		return error;
 
@@ -1375,9 +1447,9 @@ tcp_getpeername(
 	int error;
 
 	endpoint = tcp_endpoint(socket);
-	error = inet_socket_getpeername(&endpoint->tcp.inet, address, length);
 
 	/* Reports the failure. */
+	error = inet_socket_getpeername(&endpoint->tcp.inet, address, length);
 	if (error != 0)
 		return error;
 
@@ -1395,9 +1467,8 @@ tcp_close(
 	struct tcp_socket *queued;
 	unsigned long irq;
 
-	endpoint = tcp_endpoint(socket);
-
 	/* A connection sends its FIN; a child leaves its listener. */
+	endpoint = tcp_endpoint(socket);
 	if (endpoint->tcp.state == TCP_ESTABLISHED ||
 	    endpoint->tcp.state == TCP_CLOSE_WAIT)
 		(void)tcp_shutdown(socket, SHUT_RDWR);
@@ -1414,6 +1485,7 @@ tcp_close(
 		socket_release(&queued->inet.socket);
 		queued = endpoint->tcp.half_open_head;
 	}
+
 	queued = endpoint->tcp.accept_head;
 	while (queued != NULL) {
 		endpoint->tcp.accept_head = queued->queue_next;
@@ -1426,13 +1498,16 @@ tcp_close(
 
 	/* Unregisters the endpoint and frees it. */
 	irq = spin_lock_irqsave(&tcp_registry_lock);
+
 	for (link = &tcp_sockets; *link != NULL; link = &(*link)->next) {
 		if (*link == endpoint) {
 			*link = endpoint->next;
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
+
 	tcp_retransmit_clear(endpoint);
 	kern_free(endpoint);
 }
@@ -1457,6 +1532,7 @@ tcp_poll(
 
 	/* Derives readiness from the state under the socket lock. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	if (socket->error != 0)
 		result |= POLLERR;
 	if (endpoint->tcp.state == TCP_LISTEN) {
@@ -1487,9 +1563,12 @@ tcp_poll(
 		    socket->lifecycle != SOCKET_OPEN)
 			result |= POLLHUP;
 	}
+
 	if (socket->lifecycle != SOCKET_OPEN)
 		result |= POLLHUP;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
 	*revents = result;
 
 	/* Reports the derived readiness. */
@@ -1549,11 +1628,13 @@ tcp_lookup(
 		if (local == 0)
 			wildcard = endpoint;
 	}
+
 	endpoint = wildcard;
 found:
 	/* References the match unless it is being closed. */
 	if (endpoint != NULL && !socket_tryref(&endpoint->tcp.inet.socket))
 		endpoint = NULL;
+
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
 
 	/* Reports the referenced endpoint, or NULL. */
@@ -1582,6 +1663,7 @@ tcp_passive_syn(
 
 	/* The listener must still listen and have backlog room. */
 	irq = spin_lock_irqsave(&listener->tcp.inet.socket.lock);
+
 	if (listener->tcp.state != TCP_LISTEN ||
 	    listener->tcp.half_open_count + listener->tcp.accept_count >=
 	    listener->tcp.listen_backlog) {
@@ -1616,12 +1698,16 @@ tcp_passive_syn(
 	child->tcp.queue_next = listener->tcp.half_open_head;
 	listener->tcp.half_open_head = &child->tcp;
 	listener->tcp.half_open_count++;
+
 	spin_unlock_irqrestore(&listener->tcp.inet.socket.lock, irq);
 
 	/* Answers with a SYN-ACK, dropping the child when that fails. */
 	irq = spin_lock_irqsave(&child->tcp.inet.socket.lock);
+
 	child->tcp.state = TCP_SYN_RECEIVED;
+
 	spin_unlock_irqrestore(&child->tcp.inet.socket.lock, irq);
+
 	error = tcp_send_reliable(child, TCP_SYN | TCP_ACK, NULL, 0);
 	if (error != 0) {
 		tcp_listener_remove(child);
@@ -1669,6 +1755,7 @@ tcp_input(
 		packet_buf_free(packet);
 		return EINVAL;
 	}
+
 	tcp = (const struct tcp_wire *)packet->data;
 	header_length = (size_t)(tcp->data_offset >> 4) * 4U;
 	if (header_length < sizeof(*tcp) || header_length > packet->length) {
@@ -1684,13 +1771,16 @@ tcp_input(
 		packet_buf_free(packet);
 		return 0;
 	}
+
 	sequence = wire_get32(tcp->sequence);
 	acknowledgement = wire_get32(tcp->acknowledgement);
 	flags = tcp->flags;
 	payload_length = packet->length - header_length;
 	socket_irq = spin_lock_irqsave(
+
 	    &endpoint->tcp.inet.socket.lock);
 	state = endpoint->tcp.state;
+
 	spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 
 	/* A listener answers a bare SYN with a half-open child. */
@@ -1724,6 +1814,7 @@ tcp_input(
 			socket_release(&endpoint->tcp.inet.socket);
 			return 0;
 		}
+
 		socket_wake_connect(&endpoint->tcp.inet.socket);
 		packet_buf_free(packet);
 		socket_release(&endpoint->tcp.inet.socket);
@@ -1742,6 +1833,7 @@ tcp_input(
 			resend = 1;
 			resend_sequence = endpoint->tcp.retransmit_sequence;
 		}
+
 		if ((flags & TCP_ACK) != 0 &&
 		    acknowledgement == endpoint->tcp.send_next) {
 			endpoint->tcp.send_unacknowledged = acknowledgement;
@@ -1749,6 +1841,7 @@ tcp_input(
 			endpoint->tcp.state = TCP_ESTABLISHED;
 			established = 1;
 		}
+
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 		packet_buf_free(retransmit);
 		if (resend)
@@ -1758,6 +1851,7 @@ tcp_input(
 			socket_wake_send(&endpoint->tcp.inet.socket);
 			tcp_listener_established(endpoint);
 		}
+
 		packet_buf_free(packet);
 		socket_release(&endpoint->tcp.inet.socket);
 		return 0;
@@ -1783,6 +1877,7 @@ tcp_input(
 			poll_notify();
 			established = 1;
 		}
+
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 		packet_buf_free(retransmit);
 		if (established)
@@ -1803,6 +1898,7 @@ tcp_input(
 			if (acknowledgement == endpoint->tcp.send_next)
 				tcp_retransmit_reset(endpoint, &retransmit);
 		}
+
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 		packet_buf_free(retransmit);
 		if (retransmit != NULL)
@@ -1820,6 +1916,7 @@ tcp_input(
 			endpoint->tcp.receive_next += (uint32_t)payload_length;
 			ack_sequence = endpoint->tcp.send_next;
 		}
+
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 		if (!accept_payload)
 			goto payload_done;
@@ -1828,12 +1925,15 @@ tcp_input(
 			socket_release(&endpoint->tcp.inet.socket);
 			return EINVAL;
 		}
+
 		if (!discard_payload) {
 			(void)socket_enqueue_packet(&endpoint->tcp.inet.socket, packet);
 			packet = NULL;
 		}
+
 		(void)tcp_send_segment_at(endpoint, ack_sequence, TCP_ACK, NULL, 0);
 	}
+
 payload_done:
 	/* An in-order FIN advances the state and queues an end-of-file marker. */
 	if ((flags & TCP_FIN) != 0) {
@@ -1851,6 +1951,7 @@ payload_done:
 				endpoint->tcp.state = TCP_TIME_WAIT;
 			ack_sequence = endpoint->tcp.send_next;
 		}
+
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 		if (!accept_fin)
 			goto fin_done;
@@ -1862,9 +1963,11 @@ payload_done:
 		else
 			socket_wake_receive(&endpoint->tcp.inet.socket);
 	}
+
 fin_done:
 	/* A fully acknowledged FIN of ours advances the closing states. */
 	socket_irq = spin_lock_irqsave(
+
 	    &endpoint->tcp.inet.socket.lock);
 	if (endpoint->tcp.state == TCP_FIN_WAIT_1 &&
 	    endpoint->tcp.send_unacknowledged == endpoint->tcp.send_next)
@@ -1872,6 +1975,7 @@ fin_done:
 	if (endpoint->tcp.state == TCP_LAST_ACK &&
 	    endpoint->tcp.send_unacknowledged == endpoint->tcp.send_next)
 		endpoint->tcp.state = TCP_CLOSED;
+
 	spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 
 	/* Frees a packet that was not queued and drops the lookup reference. */

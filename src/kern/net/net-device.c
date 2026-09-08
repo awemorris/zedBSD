@@ -118,6 +118,7 @@ net_device_alloc(
 		device = &devices[index];
 		break;
 	}
+
 	device_unlock(enabled);
 
 	/* Reports the device, or none. */
@@ -161,6 +162,7 @@ net_device_create(
 			return EEXIST;
 		}
 	}
+
 	if (next_ifindex == 0 || next_device_generation == 0U) {
 		device_unlock(enabled);
 		return ENOSPC;
@@ -227,6 +229,7 @@ net_device_gone(
 			device_unlock(enabled);
 			return EWOULDBLOCK;
 		}
+
 		refcount_get(&device->refs);
 		device_unlock(enabled);
 		device_wait_removed(device);
@@ -260,6 +263,7 @@ net_device_gone(
 			live_count--;
 		break;
 	}
+
 	device->next = NULL;
 	device->state = NET_DEVICE_REMOVING;
 	if (removals_active == UINT_MAX)
@@ -280,6 +284,7 @@ net_device_gone(
 		device->closing = 1;
 		call_close = device->ops != NULL && device->ops->close != NULL;
 	}
+
 	device_unlock(enabled);
 
 	/* Announces the removal. */
@@ -373,6 +378,7 @@ net_device_shutdown_all(
 		device_unlock(enabled);
 		return EWOULDBLOCK;
 	}
+
 	registry_stopping = 1U;
 	device_unlock(enabled);
 
@@ -391,6 +397,7 @@ net_device_shutdown_all(
 				__asm__ volatile("" ::: "memory");
 			continue;
 		}
+
 		error = net_device_gone(device);
 		net_device_release(device);
 		if (error != 0)
@@ -464,6 +471,7 @@ net_device_find_ref(
 			break;
 		}
 	}
+
 	device_unlock(enabled);
 
 	/* Reports the referenced device, or none. */
@@ -492,6 +500,7 @@ net_device_find_by_index_ref(
 			break;
 		}
 	}
+
 	device_unlock(enabled);
 
 	/* Reports the referenced device, or none. */
@@ -515,6 +524,7 @@ net_device_at_ref(
 		device = device->next;
 		index--;
 	}
+
 	if (device != NULL)
 		refcount_get(&device->refs);
 	device_unlock(enabled);
@@ -646,9 +656,8 @@ net_device_flags_get(
 	bool enabled;
 	unsigned flags;
 
-	flags = 0;
-
 	/* A missing device has no flags. */
+	flags = 0;
 	if (device == NULL)
 		return 0;
 
@@ -708,6 +717,7 @@ net_device_set_carrier(
 				transition = RTM_IFINFO_CARRIER_DOWN;
 		}
 	}
+
 	device_unlock(enabled);
 
 	/* Announces a change. */
@@ -772,9 +782,8 @@ net_device_capabilities_get(
 	bool enabled;
 	unsigned capabilities;
 
-	capabilities = 0;
-
 	/* A missing device has no capabilities. */
+	capabilities = 0;
 	if (device == NULL)
 		return 0;
 
@@ -819,6 +828,7 @@ net_device_open(
 			return EBUSY;
 		return ENODEV;
 	}
+
 	if (device->opening || device->closing) {
 		device_unlock(enabled);
 		return EBUSY;
@@ -855,6 +865,7 @@ net_device_open(
 		close_after_open = 1;
 		error = ENODEV;
 	}
+
 	device_unlock(enabled);
 	if (close_after_open && device->ops->close != NULL)
 		device->ops->close(device);
@@ -926,6 +937,7 @@ net_device_close(
 		device->flags &= ~(NET_DEVICE_UP | NET_DEVICE_RUNNING);
 		call_close = device->ops->close != NULL;
 	}
+
 	device_unlock(enabled);
 
 	/* Joins the callbacks, then runs the driver's close hook. */
@@ -938,6 +950,7 @@ net_device_close(
 		device->closing = 0;
 		device_unlock(enabled);
 	}
+
 	net_device_release(device);
 }
 
@@ -994,6 +1007,7 @@ net_device_transmit(
 		device->tx_errors++;
 		device->tx_dropped++;
 	}
+
 	device_unlock(enabled);
 	net_device_release(device);
 
@@ -1042,14 +1056,17 @@ net_device_ioctl(
 		device_unlock(enabled);
 		return ENODEV;
 	}
+
 	if (device->opening || device->closing || registry_stopping) {
 		device_unlock(enabled);
 		return EBUSY;
 	}
+
 	if (device->ops == NULL || device->ops->ioctl == NULL) {
 		device_unlock(enabled);
 		return EOPNOTSUPP;
 	}
+
 	device->ioctl_active++;
 	refcount_get(&device->refs);
 	device_unlock(enabled);
@@ -1129,6 +1146,7 @@ net_device_receive(
 		packet_buf_free(packet);
 		return;
 	}
+
 	length = packet->length;
 
 	/*
@@ -1149,6 +1167,7 @@ net_device_receive(
 		net_device_release(device);
 		return;
 	}
+
 	enabled = device_lock();
 	device->rx_packets++;
 	device->rx_bytes += length;
@@ -1182,6 +1201,7 @@ net_device_schedule_poll(
 		device->poll_scheduled = 1;
 		wake = 1;
 	}
+
 	device_unlock(enabled);
 	if (wake)
 		net_worker_wakeup();
@@ -1215,6 +1235,7 @@ net_device_poll(
 		device_unlock(enabled);
 		return 0;
 	}
+
 	device->poll_scheduled = 0;
 	device->poll_active++;
 	refcount_get(&device->refs);
@@ -1311,9 +1332,8 @@ device_finalize(
 	bool enabled;
 	unsigned index;
 
-	device = finalizer->device;
-
 	/* Nothing was claimed. */
+	device = finalizer->device;
 	if (device == NULL)
 		return;
 
@@ -1332,6 +1352,7 @@ device_finalize(
 		device_used[index] = 0;
 		break;
 	}
+
 	device_unlock(enabled);
 }
 

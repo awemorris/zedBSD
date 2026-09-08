@@ -7605,6 +7605,7 @@ sha256_transform(
 			       ((uint32_t)word[1] << 16) |
 			       ((uint32_t)word[2] << 8) | (uint32_t)word[3];
 	}
+
 	/* Process each remaining element. */
 	for (; index < 64U; index++) {
 		small0 = rotate_right(words[index - 15U], 7U) ^
@@ -7646,6 +7647,7 @@ sha256_transform(
 		b = a;
 		a = temporary1 + temporary2;
 	}
+
 	context->state[0] += a;
 	context->state[1] += b;
 	context->state[2] += c;
@@ -7723,6 +7725,7 @@ sha256_final(
 		sha256_transform(context, context->block);
 		context->block_length = 0;
 	}
+
 	memset(context->block + context->block_length, 0,
 	       56U - context->block_length);
 	/* Process each remaining element. */
@@ -7730,6 +7733,7 @@ sha256_final(
 		context->block[63U - index] =
 			(uint8_t)(bit_count >> (index * 8U));
 	}
+
 	sha256_transform(context, context->block);
 	/* Process each remaining element. */
 	for (index = 0; index < 8U; index++) {
@@ -7739,6 +7743,7 @@ sha256_final(
 		digest[index * 4U + 2U] = (uint8_t)(context->state[index] >> 8);
 		digest[index * 4U + 3U] = (uint8_t)context->state[index];
 	}
+
 	memset(context, 0, sizeof(*context));
 }
 
@@ -7807,13 +7812,13 @@ firmware_validate_expected(
 	    load_le32(data + 36U) != RTL8822B_FIRMWARE_DMEM_SIZE ||
 	    load_le32(data + 48U) != RTL8822B_FIRMWARE_IMEM_SIZE ||
 	    load_le32(data + 52U) != 0U ||
-	    load_le32(data + 60U) != RTL8822B_FW_IMEM_HEADER_ADDRESS)
-
+	    load_le32(data + 60U) != RTL8822B_FW_IMEM_HEADER_ADDRESS) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = drv_rtl8822b_sha256(data, length, actual_digest);
+	}
 
 	/* Checks the operation status. */
+	error = drv_rtl8822b_sha256(data, length, actual_digest);
 	if (error != 0)
 		return error;
 
@@ -7825,6 +7830,7 @@ firmware_validate_expected(
 		/* Returns the computed result. */
 		return EILSEQ;
 	}
+
 	memset(actual_digest, 0, sizeof(actual_digest));
 
 	/* Describes the image the fixed layout says this is. */
@@ -7845,10 +7851,10 @@ firmware_validate_expected(
 	/* Checks the operation result. */
 	if (result.imem_offset > length ||
 	    result.imem_length > length - result.imem_offset ||
-	    result.imem_offset + result.imem_length != length)
-
+	    result.imem_offset + result.imem_length != length) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	*view = result;
 	/* Reports successful completion. */
 	return 0;
@@ -7863,14 +7869,14 @@ drv_rtl8822b_firmware_validate(
 	size_t length,
 	struct rtl8822b_firmware_view *view)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the firmware validate expected result. */
-	function_result = firmware_validate_expected(
+	error = firmware_validate_expected(
 		data, length, rtl8822b_firmware_digest, view);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int firmware_blob_state(const struct rtl8822b_firmware_blob *firmware, int *owned);
@@ -7892,10 +7898,10 @@ firmware_blob_state(
 	/* Handles the firmware condition. */
 	if (firmware->size != RTL8822B_FIRMWARE_SIZE ||
 	    firmware->view.bytes != firmware->bytes ||
-	    firmware->view.size != firmware->size)
-
+	    firmware->view.size != firmware->size) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	*owned = 1;
 	/* Reports successful completion. */
 	return 0;
@@ -7933,6 +7939,7 @@ drv_rtl8822b_firmware_release(
 		firmware_scrub(firmware->bytes, RTL8822B_FIRMWARE_SIZE);
 		kern_free(firmware->bytes);
 	}
+
 	memset(firmware, 0, sizeof(*firmware));
 }
 
@@ -7952,22 +7959,21 @@ drv_rtl8822b_firmware_load(
 	int close_error;
 	int error;
 
-	error = firmware_blob_state(firmware, &replace_owned);
-
 	/* Checks the operation status. */
+	error = firmware_blob_state(firmware, &replace_owned);
 	if (error != 0)
 		return error;
 	memset(&lease, 0, sizeof(lease));
 	memset(&result, 0, sizeof(result));
+
+	/* Checks the operation status. */
 	error = file_openat(&kern_cwdinfo, RTL8822B_FIRMWARE_PATH,
 			    O_RDONLY | O_NOFOLLOW, 0, &file);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = file_content_lease_begin(file, &lease);
 
 	/* Checks the operation status. */
+	error = file_content_lease_begin(file, &lease);
 	if (error != 0)
 		goto close_file;
 
@@ -7976,6 +7982,7 @@ drv_rtl8822b_firmware_load(
 		error = EINVAL;
 		goto end_lease;
 	}
+
 	result.bytes = kern_malloc(RTL8822B_FIRMWARE_SIZE);
 
 	/* Handles the bytes availability. */
@@ -7983,14 +7990,14 @@ drv_rtl8822b_firmware_load(
 		error = ENOMEM;
 		goto end_lease;
 	}
+
 	result.size = RTL8822B_FIRMWARE_SIZE;
 	/* Process each remaining element. */
 	while (offset < result.size) {
+		/* Checks the remaining item count. */
 		count = file_content_lease_pread(&lease, result.bytes + offset,
 						 result.size - offset,
 						 (off_t)offset);
-
-		/* Checks the remaining item count. */
 		if (count < 0) {
 			error = (int)-count;
 			goto end_lease;
@@ -8001,6 +8008,7 @@ drv_rtl8822b_firmware_load(
 			error = EIO;
 			goto end_lease;
 		}
+
 		offset += (size_t)count;
 	}
 
@@ -8048,14 +8056,14 @@ drv_rtl8822b_test_firmware_validate(
 	const uint8_t expected_digest[32],
 	struct rtl8822b_firmware_view *view)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the firmware validate expected result. */
-	function_result =
+	error =
 		firmware_validate_expected(data, length, expected_digest, view);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -8066,13 +8074,13 @@ drv_rtl8822b_test_firmware_blob_state(
 	const struct rtl8822b_firmware_blob *firmware,
 	int *owned)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the firmware blob state result. */
-	function_result = firmware_blob_state(firmware, owned);
+	error = firmware_blob_state(firmware, owned);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 #endif
 
@@ -8098,18 +8106,18 @@ firmware_walk_segment(
 	/* Process each remaining element. */
 	while (offset < segment_length) {
 		remaining = segment_length - offset;
+
+		/* Handles the file offset condition. */
 		length = remaining < RTL8822B_FIRMWARE_CHUNK_MAX
 				 ? remaining
 				 : RTL8822B_FIRMWARE_CHUNK_MAX;
-
-		/* Handles the file offset condition. */
 		if (file_offset > view->size ||
 		    offset > view->size - file_offset ||
 		    length > view->size - file_offset - offset ||
-		    offset > UINT32_MAX - destination)
-
+		    offset > UINT32_MAX - destination) {
 			/* Returns the computed result. */
 			return EOVERFLOW;
+		}
 		memset(&chunk, 0, sizeof(chunk));
 		chunk.segment = segment;
 		chunk.file_offset = file_offset + offset;
@@ -8126,9 +8134,9 @@ firmware_walk_segment(
 		chunk.first = offset == 0U;
 		chunk.last = length == remaining;
 		chunk.checksum_continue = offset != 0U;
-		error = callback(context, &chunk);
 
 		/* Checks the operation status. */
+		error = callback(context, &chunk);
 		if (error != 0)
 			return error;
 		offset += length;
@@ -8175,26 +8183,26 @@ firmware_walk_expected(
 
 	/* Handles the view availability. */
 	if (view == NULL || expected_digest == NULL || callback == NULL ||
-	    view->bytes == NULL)
-
+	    view->bytes == NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = firmware_validate_expected(view->bytes, view->size,
-					   expected_digest, &validated);
+	}
 
 	/* Checks the operation status. */
+	error = firmware_validate_expected(view->bytes, view->size,
+					   expected_digest, &validated);
 	if (error != 0)
 		return error;
 
 	/* Checks the firmware view equal result. */
 	if (!firmware_view_equal(view, &validated))
 		return EINVAL;
+
+	/* Checks the operation status. */
 	error = firmware_walk_segment(
 		&validated, RTL8822B_FIRMWARE_SEGMENT_DMEM,
 		validated.dmem_offset, validated.dmem_length,
 		validated.dmem_address, callback, context);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
@@ -8217,14 +8225,14 @@ drv_rtl8822b_firmware_walk(
 	rtl8822b_firmware_chunk_fn callback,
 	void *context)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the firmware walk expected result. */
-	function_result = firmware_walk_expected(view, rtl8822b_firmware_digest,
+	error = firmware_walk_expected(view, rtl8822b_firmware_digest,
 						 callback, context);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 #ifdef RTL8822B_TESTING
@@ -8245,10 +8253,10 @@ drv_rtl8822b_test_firmware_segment(
 		return EINVAL;
 
 	/* Walk a single DMEM segment through the real chunk planner. */
-	error = firmware_walk_segment(view, RTL8822B_FIRMWARE_SEGMENT_DMEM, 0U,
-				      length, 0x10000U, callback, context);
 
 	/* Checks the operation status. */
+	error = firmware_walk_segment(view, RTL8822B_FIRMWARE_SEGMENT_DMEM, 0U,
+				      length, 0x10000U, callback, context);
 	if (error != 0)
 		return error;
 
@@ -8266,14 +8274,14 @@ drv_rtl8822b_test_firmware_walk(
 	rtl8822b_firmware_chunk_fn callback,
 	void *context)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the firmware walk expected result. */
-	function_result = firmware_walk_expected(view, expected_digest,
+	error = firmware_walk_expected(view, expected_digest,
 						 callback, context);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 #endif
 
@@ -8290,10 +8298,10 @@ drv_rtl8822b_firmware_tx_descriptor(
 
 	/* Handles the descriptor availability. */
 	if (descriptor == NULL || payload_length == 0U ||
-	    payload_length > UINT16_MAX)
-
+	    payload_length > UINT16_MAX) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(descriptor, 0, RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE);
 	store_le32(
 		descriptor,
@@ -8333,16 +8341,15 @@ drv_rtl8822b_efuse_decode(
 	/* Handles the physical availability. */
 	if (physical == NULL || logical == NULL ||
 	    physical_length != RTL8822B_EFUSE_PHYSICAL_SIZE ||
-	    logical_length != RTL8822B_EFUSE_LOGICAL_SIZE)
-
+	    logical_length != RTL8822B_EFUSE_LOGICAL_SIZE) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(logical, 0xff, logical_length);
 	/* Process each remaining element. */
 	while (physical_index < usable) {
-		header1 = physical[physical_index++];
-
 		/* Handles the header1 condition. */
+		header1 = physical[physical_index++];
 		if (header1 == 0xffU)
 			return 0;
 
@@ -8351,9 +8358,9 @@ drv_rtl8822b_efuse_decode(
 			/* Handles the physical index condition. */
 			if (physical_index >= usable)
 				return EINVAL;
-			header2 = physical[physical_index++];
 
 			/* Handles the header2 condition. */
+			header2 = physical[physical_index++];
 			if (header2 == 0xffU)
 				return 0;
 			block = ((unsigned)(header2 & 0xf0U) >> 1) |
@@ -8363,21 +8370,22 @@ drv_rtl8822b_efuse_decode(
 			block = (unsigned)(header1 & 0xf0U) >> 4;
 			word_enable = header1 & 0x0fU;
 		}
+
 		/* Process each element required by the operation. */
 		for (word = 0; word < 4U; word++) {
 			/* Handles the word enable condition. */
 			if ((word_enable & (1U << word)) != 0U)
 				continue;
-			logical_index = (size_t)block * 8U + word * 2U;
 
 			/* Handles the physical index condition. */
+			logical_index = (size_t)block * 8U + word * 2U;
 			if (physical_index > usable ||
 			    usable - physical_index < 2U ||
 			    logical_index > logical_length ||
-			    logical_length - logical_index < 2U)
-
+			    logical_length - logical_index < 2U) {
 				/* Returns the computed result. */
 				return EINVAL;
+			}
 			logical[logical_index] = physical[physical_index++];
 			logical[logical_index + 1U] =
 				physical[physical_index++];
@@ -8403,10 +8411,10 @@ drv_rtl8822b_chip_identity_parse(
 	if (identity == NULL)
 		return EINVAL;
 	memset(identity, 0, sizeof(*identity));
-	cut = (sys_cfg1 >> RTL8822B_SYS_CFG1_CUT_SHIFT) &
-	      RTL8822B_SYS_CFG1_CUT_MASK;
 
 	/* Handles the cut condition. */
+	cut = (sys_cfg1 >> RTL8822B_SYS_CFG1_CUT_SHIFT) &
+	      RTL8822B_SYS_CFG1_CUT_MASK;
 	if (cut > RTL8822B_CUT_G)
 		return EOPNOTSUPP;
 	memset(&result, 0, sizeof(result));
@@ -8463,10 +8471,10 @@ board_tx_power_2g_valid(
 	/* Handles the board availability. */
 	if (board == NULL ||
 	    (board->chip.rf_path_count != 1U &&
-	     board->chip.rf_path_count != RTL8822B_RF_PATH_COUNT))
-
+	     board->chip.rf_path_count != RTL8822B_RF_PATH_COUNT)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	/* Process each remaining element. */
 	for (path = 0U; path < board->chip.rf_path_count; path++) {
 		power = &board->tx_power_2g[path];
@@ -8475,10 +8483,10 @@ board_tx_power_2g_valid(
 		for (group = 0U; group < 4U; group++) {
 			/* Handles the power condition. */
 			if (power->cck_base[group] > 0x3fU ||
-			    power->bw40_base[group] > 0x3fU)
-
+			    power->bw40_base[group] > 0x3fU) {
 				/* Reports successful completion. */
 				return 0;
+			}
 		}
 
 		/* Handles the power condition. */
@@ -8504,10 +8512,10 @@ board_tx_power_5g_w52_valid(
 	/* Handles the board availability. */
 	if (board == NULL ||
 	    (board->chip.rf_path_count != 1U &&
-	     board->chip.rf_path_count != RTL8822B_RF_PATH_COUNT))
-
+	     board->chip.rf_path_count != RTL8822B_RF_PATH_COUNT)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	/* Process each remaining element. */
 	for (path = 0U; path < board->chip.rf_path_count; path++) {
 		power = &board->tx_power_5g[path];
@@ -8551,7 +8559,7 @@ drv_rtl8822b_board_active_channel_allowed(
 	const struct rtl8822bu_board_info *board,
 	uint8_t channel)
 {
-	int function_result;
+	int error;
 
 	/* Reject absent board facts before evaluating channel policy. */
 	if (board == NULL)
@@ -8560,10 +8568,10 @@ drv_rtl8822b_board_active_channel_allowed(
 	/* Preserve the existing calibrated 2.4-GHz subset. */
 	if (channel >= 1U && channel <= 11U) {
 		/* Obtains the board tx power 2g valid result. */
-		function_result = board_tx_power_2g_valid(board);
+		error = board_tx_power_2g_valid(board);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Require both the non-DFS subset and its factory power calibration. */
@@ -8579,10 +8587,10 @@ drv_rtl8822b_board_active_channel_allowed(
 	if (board->country_code[0] == 0xffU &&
 	    board->country_code[1] == 0xffU &&
 	    board->channel_plan == (RTL8822B_CHANNEL_PLAN_HARDWARE_ONLY |
-				    RTL8822B_CHANNEL_PLAN_WORLD_ETSI1))
-
+				    RTL8822B_CHANNEL_PLAN_WORLD_ETSI1)) {
 		/* Reports operation failure. */
 		return 1;
+	}
 
 	/* Preserve the original Japan policy for all other admitted boards. */
 	if (board->country_code[0] != 'J' || board->country_code[1] != 'P')
@@ -8611,15 +8619,15 @@ drv_rtl8822bu_board_parse(
 
 	/* Handles the logical availability. */
 	if (logical == NULL || board == NULL ||
-	    logical_length != RTL8822B_EFUSE_LOGICAL_SIZE)
-
+	    logical_length != RTL8822B_EFUSE_LOGICAL_SIZE) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(board, 0, sizeof(*board));
 	memset(&result, 0, sizeof(result));
-	error = drv_rtl8822b_chip_identity_parse(sys_cfg1, &result.chip);
 
 	/* Checks the operation status. */
+	error = drv_rtl8822b_chip_identity_parse(sys_cfg1, &result.chip);
 	if (error != 0)
 		return error;
 	memcpy(result.mac_address, logical + RTL8822BU_EFUSE_MAC_OFFSET,
@@ -8638,10 +8646,10 @@ drv_rtl8822bu_board_parse(
 
 	/* Checks the operation result. */
 	if (result.rfe_option != 2U && result.rfe_option != 3U &&
-	    result.rfe_option != 5U)
-
+	    result.rfe_option != 5U) {
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
+	}
 	/* Process each remaining element. */
 	for (path = 0U; path < result.chip.rf_path_count; path++) {
 		power = logical + RTL8822B_EFUSE_TX_POWER_OFFSET +
@@ -8741,32 +8749,32 @@ drv_rtl8822b_rx_packet_parse(
 		     driver_info_length != RTL8822B_RX_PHY_INFO_SIZE) ||
 		    ((word0 & RTL8822B_RX_PHY_STATUS) != 0U &&
 		     driver_info_length == 0U) ||
-		    (word3 & RTL8822B_RX_RATE_MASK) >= RTL8822B_RX_RATE_MAX)
-
+		    (word3 & RTL8822B_RX_RATE_MASK) >= RTL8822B_RX_RATE_MAX) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 	}
 
 	/* Bounds descriptor-provided offsets even for firmware messages. */
 	if (shift > SIZE_MAX - RTL8822B_RX_DESCRIPTOR_SIZE ||
-	    driver_info_length > SIZE_MAX - RTL8822B_RX_DESCRIPTOR_SIZE - shift)
-
+	    driver_info_length > SIZE_MAX - RTL8822B_RX_DESCRIPTOR_SIZE - shift) {
 		/* Returns the computed result. */
 		return EOVERFLOW;
+	}
 	payload_offset =
 		RTL8822B_RX_DESCRIPTOR_SIZE + shift + driver_info_length;
 
 	/* Keeps the entire payload inside the received transfer. */
 	if (payload_offset > length || packet_length > length - payload_offset)
 		return EINVAL;
-	occupied = payload_offset + packet_length;
 
 	/* Checks the aggregate alignment before rounding the record length. */
+	occupied = payload_offset + packet_length;
 	if (occupied > SIZE_MAX - 7U)
 		return EOVERFLOW;
-	aligned = (occupied + 7U) & ~(size_t)7U;
 
 	/* Allows an unpadded final record only at the exact transfer end. */
+	aligned = (occupied + 7U) & ~(size_t)7U;
 	if (aligned > length) {
 		/* Rejects a partial trailing alignment region. */
 		if (occupied != length)
@@ -8875,48 +8883,46 @@ drv_rtl8822b_rx_aggregate_walk(
 
 	/* Handles the bytes availability. */
 	if (bytes == NULL || callback == NULL || packet_count == NULL ||
-	    length == 0U || length > RTL8822B_RX_AGGREGATE_MAX)
-
+	    length == 0U || length > RTL8822B_RX_AGGREGATE_MAX) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	*packet_count = 0;
 	/* Process each remaining element. */
 	while (offset < length) {
+		/* Checks the operation status. */
 		error_local = drv_rtl8822b_rx_packet_parse(
 			bytes + offset, length - offset, &packet_local);
-
-		/* Checks the operation status. */
 		if (error_local != 0)
 			return error_local;
 
 		/* Handles the packet local condition. */
 		if (packet_local.aggregate_length == 0U ||
-		    packet_local.aggregate_length > length - offset)
-
+		    packet_local.aggregate_length > length - offset) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 		offset += packet_local.aggregate_length;
 	}
 
 	offset = 0;
 	/* Process each remaining element. */
 	while (offset < length) {
+		/* Checks the operation status. */
 		error_local2 = drv_rtl8822b_rx_packet_parse(
 			bytes + offset, length - offset, &packet_local1);
-
-		/* Checks the operation status. */
 		if (error_local2 != 0)
 			return error_local2;
 
 		/* Handles the packet local1 condition. */
 		if (packet_local1.aggregate_length == 0U ||
-		    packet_local1.aggregate_length > length - offset)
-
+		    packet_local1.aggregate_length > length - offset) {
 			/* Returns the computed result. */
 			return EINVAL;
-		error_local2 = callback(context, &packet_local1);
+		}
 
 		/* Checks the operation status. */
+		error_local2 = callback(context, &packet_local1);
 		if (error_local2 != 0)
 			return error_local2;
 		offset += packet_local1.aggregate_length;
@@ -9018,20 +9024,20 @@ radio_deadline_check(
 	const struct rtl8822b_radio *radio,
 	uint64_t deadline_ticks)
 {
-	int function_result;
+	int error;
 
 	/* Handles the radio availability. */
 	if (radio == NULL || radio->transport.now_ticks == NULL)
 		return EINVAL;
 
 	/* Computes the function result. */
-	function_result = radio->transport.now_ticks(
+	error = radio->transport.now_ticks(
 				  radio->transport.context) >= deadline_ticks
 				  ? ETIMEDOUT
 				  : 0;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int radio_read(struct rtl8822b_radio *radio, uint16_t address, unsigned width, uint32_t *value, uint64_t deadline_ticks);
@@ -9050,20 +9056,20 @@ radio_read(
 
 	/* Handles the radio availability. */
 	if (radio == NULL || value == NULL || radio->transport.read == NULL ||
-	    (width != 1U && width != 2U && width != 4U))
-
+	    (width != 1U && width != 2U && width != 4U)) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = radio_deadline_check(radio, deadline_ticks);
+	}
 
 	/* Checks the operation status. */
+	error = radio_deadline_check(radio, deadline_ticks);
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = radio_error(radio->transport.read(radio->transport.context,
 						  address, width, value,
 						  deadline_ticks));
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
@@ -9095,13 +9101,13 @@ radio_write(
 
 	/* Handles the radio availability. */
 	if (radio == NULL || radio->transport.write == NULL ||
-	    (width != 1U && width != 2U && width != 4U))
-
+	    (width != 1U && width != 2U && width != 4U)) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = radio_deadline_check(radio, deadline_ticks);
+	}
 
 	/* Checks the operation status. */
+	error = radio_deadline_check(radio, deadline_ticks);
 	if (error != 0)
 		return error;
 
@@ -9110,11 +9116,11 @@ radio_write(
 		value &= 0xffU;
 	else if (width == 2U)
 		value &= 0xffffU;
+
+	/* Checks the operation status. */
 	error = radio_error(radio->transport.write(radio->transport.context,
 						   address, width, value,
 						   deadline_ticks));
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
@@ -9140,15 +9146,15 @@ radio_delay(
 	/* Handles the radio availability. */
 	if (radio == NULL || radio->transport.delay_us == NULL)
 		return EINVAL;
-	error = radio_deadline_check(radio, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_deadline_check(radio, deadline_ticks);
 	if (error != 0)
 		return error;
-	error = radio_error(radio->transport.delay_us(
-		radio->transport.context, microseconds, deadline_ticks));
 
 	/* Checks the operation status. */
+	error = radio_error(radio->transport.delay_us(
+		radio->transport.context, microseconds, deadline_ticks));
 	if (error != 0)
 		return error;
 
@@ -9175,9 +9181,8 @@ radio_update(
 	uint32_t old;
 	int error;
 
-	error = radio_read(radio, address, width, &old, deadline_ticks);
-
 	/* Checks the operation status. */
+	error = radio_read(radio, address, width, &old, deadline_ticks);
 	if (error != 0)
 		return error;
 
@@ -9213,14 +9218,13 @@ radio_power_commands(
 	cut_mask = (uint8_t)(1U << (radio->board.chip.cut + 1U));
 	/* Process each remaining element. */
 	for (index = 0; index < count; index++) {
-		command = &commands[index];
-
 		/* Handles the command condition. */
+		command = &commands[index];
 		if ((command->cut_mask & cut_mask) == 0U)
 			continue;
-		error = radio_deadline_check(radio, deadline_ticks);
 
 		/* Checks the operation status. */
+		error = radio_deadline_check(radio, deadline_ticks);
 		if (error != 0)
 			return error;
 		/* Dispatch the selected operation case. */
@@ -9239,10 +9243,9 @@ radio_power_commands(
 			/* Process each element required by the operation. */
 			for (attempt = 0; attempt < RTL8822B_POWER_POLL_MAX;
 			     attempt++) {
+				/* Checks the operation status. */
 				error = radio_read(radio, command->address, 1U,
 						   &value, deadline_ticks);
-
-				/* Checks the operation status. */
 				if (error != 0)
 					break;
 
@@ -9252,11 +9255,11 @@ radio_power_commands(
 					error = 0;
 					break;
 				}
+
+				/* Checks the operation status. */
 				error = radio_delay(
 					radio, RTL8822B_POWER_POLL_DELAY_US,
 					deadline_ticks);
-
-				/* Checks the operation status. */
 				if (error != 0)
 					break;
 
@@ -9266,6 +9269,7 @@ radio_power_commands(
 						radio->transport.context);
 				}
 			}
+
 			break;
 		default:
 			/* Returns the computed result. */
@@ -9298,10 +9302,10 @@ radio_power_state_is_on(
 	if (powered == NULL)
 		return EINVAL;
 	*powered = 0;
-	error = radio_read(radio, RTL8822B_REG_CR, 1U, &control,
-			   deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_read(radio, RTL8822B_REG_CR, 1U, &control,
+			   deadline_ticks);
 	if (error == 0) {
 		error = radio_read(radio, RTL8822B_REG_SYS_STATUS1 + 1U, 1U,
 				   &status, deadline_ticks);
@@ -9334,16 +9338,15 @@ radio_warm_firmware_ack(
 	unsigned attempt;
 	int error;
 
+	/* Checks the operation status. */
 	error = radio_read(radio, RTL8822B_REG_MCUFW_CTRL, 2U, &firmware,
 			   deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error != 0 || (firmware & RTL8822B_MCUFW_INIT_READY) == 0U)
 		return error;
-	error = radio_read(radio, RTL8822B_REG_USB_RPWM, 1U, &request,
-			   deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_read(radio, RTL8822B_REG_USB_RPWM, 1U, &request,
+			   deadline_ticks);
 	if (error == 0) {
 		error = radio_read(radio, RTL8822B_REG_USB_CPWM, 1U, &confirm,
 				   deadline_ticks);
@@ -9356,10 +9359,10 @@ radio_warm_firmware_ack(
 	/* Clear every mode bit, invert only the toggle, and request an ACK. */
 	request = ((request & RTL8822B_RPWM_TOGGLE) ^ RTL8822B_RPWM_TOGGLE) |
 		  RTL8822B_RPWM_ACK;
-	error = radio_write(radio, RTL8822B_REG_USB_RPWM, 1U, request,
-			    deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_write(radio, RTL8822B_REG_USB_RPWM, 1U, request,
+			    deadline_ticks);
 	if (error != 0)
 		return error;
 
@@ -9369,20 +9372,19 @@ radio_warm_firmware_ack(
 	 * microseconds to an opaque tick value. */
 	/* Process each element required by the operation. */
 	for (attempt = 0U; attempt < RTL8822B_RPWM_ACK_POLL_MAX; attempt++) {
+		/* Checks the operation status. */
 		error = radio_read(radio, RTL8822B_REG_USB_CPWM, 1U, &polling,
 				   deadline_ticks);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 
 		/* Handles the polling condition. */
 		if (((polling ^ confirm) & RTL8822B_RPWM_TOGGLE) != 0U)
 			return 0;
-		error = radio_delay(radio, RTL8822B_RPWM_ACK_POLL_US,
-				    deadline_ticks);
 
 		/* Checks the operation status. */
+		error = radio_delay(radio, RTL8822B_RPWM_ACK_POLL_US,
+				    deadline_ticks);
 		if (error != 0)
 			return error;
 
@@ -9448,17 +9450,17 @@ radio_rf_write(
 
 	/* Handles the path condition. */
 	if (path >= radio->board.chip.rf_path_count || path > 1U ||
-	    rf_address > 0xffU)
-
+	    rf_address > 0xffU) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	sipi = path == 0U ? RTL8822B_RF_SIPI_A : RTL8822B_RF_SIPI_B;
+
+	/* Checks the operation status. */
 	error = radio_write(radio, sipi, 4U,
 			    ((uint32_t)rf_address << 20) |
 				    (value & RTL8822B_RF_VALUE_MASK),
 			    deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
@@ -9545,10 +9547,10 @@ radio_table_write(
 		/* Handles the width condition. */
 		if (width != RTL8822B_TABLE_WIDTH_RF20)
 			return EINVAL;
-		error = radio_rf_write(radio, rf_path, (uint16_t)address, value,
-				       deadline_ticks);
 
 		/* Checks the operation status. */
+		error = radio_rf_write(radio, rf_path, (uint16_t)address, value,
+				       deadline_ticks);
 		if (error != 0)
 			return error;
 
@@ -9616,25 +9618,24 @@ radio_table_apply(
 
 	/* Handles the radio availability. */
 	if (radio == NULL || words == NULL || word_count == 0U ||
-	    (word_count & 1U) != 0U)
-
+	    (word_count & 1U) != 0U) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the domain condition. */
 	if (domain == RTL8822B_TABLE_DOMAIN_RF &&
-	    rf_path >= radio->board.chip.rf_path_count)
-
+	    rf_path >= radio->board.chip.rf_path_count) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	/* Process each remaining element. */
 	for (index = 0; index < word_count; index += 2U) {
 		address = words[index];
 		value = words[index + 1U];
 
-		error = radio_deadline_check(radio, deadline_ticks);
-
 		/* Checks the operation status. */
+		error = radio_deadline_check(radio, deadline_ticks);
 		if (error != 0)
 			return error;
 
@@ -9643,9 +9644,9 @@ radio_table_apply(
 			/* Handles the address condition. */
 			if ((address & 0x40000000U) != 0U)
 				return EINVAL;
-			branch = (uint8_t)((address >> 28) & 3U);
 
 			/* Handles the branch condition. */
+			branch = (uint8_t)((address >> 28) & 3U);
 			if (branch == 3U) {
 				/* Handles the in branch condition. */
 				if (!in_branch || awaiting_condition)
@@ -9662,20 +9663,22 @@ radio_table_apply(
 				/* Handles the branch condition. */
 				if ((branch == 0U && in_branch) ||
 				    (branch == 1U &&
-				     (!in_branch || awaiting_condition)))
-
+				     (!in_branch || awaiting_condition))) {
 					/* Returns the computed result. */
 					return EINVAL;
+				}
 
 				/* Handles the branch condition. */
 				if (branch == 0U) {
 					in_branch = 1;
 					skipped = 0;
 				}
+
 				condition = address;
 				(void)value; /* cond2 is unused by RTL8822B. */
 				awaiting_condition = 1;
 			}
+
 			continue;
 		}
 
@@ -9693,6 +9696,7 @@ radio_table_apply(
 			} else {
 				matched = 0;
 			}
+
 			awaiting_condition = 0;
 			continue;
 		}
@@ -9704,10 +9708,10 @@ radio_table_apply(
 		/* Handles the matched condition. */
 		if (!matched)
 			continue;
-		error = radio_table_write(radio, domain, width, rf_path,
-					  address, value, deadline_ticks);
 
 		/* Checks the operation status. */
+		error = radio_table_write(radio, domain, width, rf_path,
+					  address, value, deadline_ticks);
 		if (error != 0)
 			return error;
 	}
@@ -9730,14 +9734,14 @@ drv_rtl8822b_test_radio_table_apply(
 	size_t word_count,
 	uint64_t deadline_ticks)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the radio table apply result. */
-	function_result = radio_table_apply(radio, domain, width, rf_path,
+	error = radio_table_apply(radio, domain, width, rf_path,
 					    words, word_count, deadline_ticks);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 #endif
 
@@ -9845,15 +9849,15 @@ journal_update(
 	/* Handles the mask condition. */
 	if (mask == 0U)
 		return EINVAL;
-	error = radio_read(radio, address, width, &old, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_read(radio, address, width, &old, deadline_ticks);
 	if (error != 0)
 		return error;
-	error = journal_add(journal, RTL8822B_JOURNAL_REGISTER, address, width,
-			    0U, old);
 
 	/* Checks the operation status. */
+	error = journal_add(journal, RTL8822B_JOURNAL_REGISTER, address, width,
+			    0U, old);
 	if (error != 0)
 		return error;
 
@@ -9883,10 +9887,10 @@ journal_update_phy_paths(
 	/* Handles the address condition. */
 	if (address < 0x0c00U || address > 0x0cffU)
 		return EINVAL;
-	error = journal_update(radio, journal, address, 4U, mask, value,
-			       deadline_ticks);
 
 	/* The second RF path mirrors the A-path BB window at +0x200. */
+	error = journal_update(radio, journal, address, 4U, mask, value,
+			       deadline_ticks);
 	if (error == 0 && radio->board.chip.rf_path_count > 1U) {
 		error = journal_update(radio, journal,
 				       (uint16_t)(address + 0x0200U), 4U, mask,
@@ -9912,28 +9916,28 @@ radio_rf_read(
 	uint32_t *value,
 	uint64_t deadline_ticks)
 {
-	int function_result;
+	int error;
 	uint32_t direct;
 
 	/* Handles the value availability. */
 	if (path >= radio->board.chip.rf_path_count || path > 1U ||
-	    rf_address > 0xffU || value == NULL)
-
+	    rf_address > 0xffU || value == NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
-	direct = (path == 0U ? RTL8822B_RF_DIRECT_A : RTL8822B_RF_DIRECT_B) +
-		 (uint32_t)rf_address * 4U;
+	}
 
 	/* Handles the direct condition. */
+	direct = (path == 0U ? RTL8822B_RF_DIRECT_A : RTL8822B_RF_DIRECT_B) +
+		 (uint32_t)rf_address * 4U;
 	if (direct > UINT16_MAX)
 		return EOVERFLOW;
 
 	/* Obtains the radio read result. */
-	function_result =
+	error =
 		radio_read(radio, (uint16_t)direct, 4U, value, deadline_ticks);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int journal_rf_update(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t path, uint16_t address, uint32_t mask, uint32_t value, uint64_t deadline_ticks);
@@ -9956,16 +9960,16 @@ journal_rf_update(
 	/* Handles the mask condition. */
 	if (mask == 0U || (mask & ~RTL8822B_RF_VALUE_MASK) != 0U)
 		return EINVAL;
-	error = radio_rf_read(radio, path, address, &old, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_rf_read(radio, path, address, &old, deadline_ticks);
 	if (error != 0)
 		return error;
 	old &= RTL8822B_RF_VALUE_MASK;
-	error = journal_add(journal, RTL8822B_JOURNAL_RF, address, 4U, path,
-			    old);
 
 	/* Checks the operation status. */
+	error = journal_add(journal, RTL8822B_JOURNAL_RF, address, 4U, path,
+			    old);
 	if (error != 0)
 		return error;
 
@@ -9996,9 +10000,8 @@ journal_rollback(
 	 */
 	/* Process each remaining element. */
 	while (journal->count != 0U) {
-		entry = &journal->entries[--journal->count];
-
 		/* Handles the entry condition. */
+		entry = &journal->entries[--journal->count];
 		if (entry->kind == RTL8822B_JOURNAL_RF) {
 			sipi = entry->rf_path == 0U ? RTL8822B_RF_SIPI_A
 						    : RTL8822B_RF_SIPI_B;
@@ -10035,10 +10038,10 @@ radio_emergency_off(
 
 	/* Handles the radio availability. */
 	if (radio == NULL || radio->transport.read == NULL ||
-	    radio->transport.write == NULL)
-
+	    radio->transport.write == NULL) {
 		/* Returns the computed result. */
 		return;
+	}
 
 	/*
  * Stop RF even after the failed operation's absolute deadline has
@@ -10086,10 +10089,9 @@ radio_pre_power(
 {
 	int error;
 
+	/* Checks the operation status. */
 	error = radio_write(radio, RTL8822B_REG_RSV_CTRL, 1U, 0U,
 			    deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = radio_update(radio, 0x0064U, 4U, 0x30000000U,
 				     0x30000000U, deadline_ticks);
@@ -10147,10 +10149,9 @@ radio_post_power(
 	uint32_t value;
 	int error;
 
+	/* Checks the operation status. */
 	error = radio_update(radio, RTL8822B_REG_SYS_STATUS1 + 1U, 1U, 0x01U,
 			     0U, deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = radio_update(radio, RTL8822B_REG_CPU_DMEM_CON, 4U,
 				     0x00010100U, 0x00010100U, deadline_ticks);
@@ -10164,10 +10165,9 @@ radio_post_power(
 
 	/* Checks the operation status. */
 	if (error == 0) {
+		/* Checks the operation status. */
 		error = radio_read(radio, RTL8822B_REG_CR_EXT + 3U, 1U, &value,
 				   deadline_ticks);
-
-		/* Checks the operation status. */
 		if (error == 0) {
 			error = radio_write(radio, RTL8822B_REG_CR_EXT + 3U, 1U,
 					    (value & 0xf0U) | 0x0cU,
@@ -10177,16 +10177,14 @@ radio_post_power(
 
 	/* Checks the operation status. */
 	if (error == 0) {
+		/* Checks the operation status. */
 		error = radio_read(radio, RTL8822B_REG_MCUFW_CTRL, 4U, &value,
 				   deadline_ticks);
-
-		/* Checks the operation status. */
 		if (error == 0 && (value & 0x00100000U) != 0U) {
+			/* Checks the operation status. */
 			error = radio_write(radio, RTL8822B_REG_MCUFW_CTRL, 4U,
 					    value & ~0x00100000U,
 					    deadline_ticks);
-
-			/* Checks the operation status. */
 			if (error == 0) {
 				error = radio_update(
 					radio, RTL8822B_REG_GPIO_MUX, 4U,
@@ -10215,10 +10213,9 @@ radio_mac_channel_20(
 {
 	int error;
 
+	/* Checks the operation status. */
 	error = journal_update(radio, journal, RTL8822B_REG_DATA_SC, 1U, 0xffU,
 			       0U, deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = journal_update(radio, journal,
 				       RTL8822B_REG_WMAC_TRX_PROTOCOL, 4U,
@@ -10272,10 +10269,9 @@ radio_bb_channel_20(
 	int w52 = channel_is_w52(channel);
 	int error;
 
+	/* Checks the operation status. */
 	error = journal_update(radio, journal, RTL8822B_REG_RX_PATH_SELECT, 4U,
 			       0x10000000U, w52 ? 0U : 1U, deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = journal_update(
 			radio, journal, RTL8822B_REG_ENABLE_TX_CCK, 4U,
@@ -10327,17 +10323,17 @@ radio_bb_channel_20(
 	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = radio_read(radio, RTL8822B_REG_ADC_CLOCK, 4U, &value,
-			   deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_read(radio, RTL8822B_REG_ADC_CLOCK, 4U, &value,
+			   deadline_ticks);
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = journal_update(radio, journal, RTL8822B_REG_ADC_CLOCK, 4U,
 			       0xffffffffU, (value & 0xffcffc00U),
 			       deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = journal_update(radio, journal, RTL8822B_REG_ADC_160, 4U,
 				       0x40000000U, 1U, deadline_ticks);
@@ -10365,9 +10361,8 @@ radio_rf_channel_20(
 	unsigned path;
 	int error;
 
-	error = radio_rf_read(radio, 0U, 0x18U, &rf18, deadline_ticks);
-
 	/* Checks the operation status. */
+	error = radio_rf_read(radio, 0U, 0x18U, &rf18, deadline_ticks);
 	if (error != 0)
 		return error;
 	rf18 &= ~(0x00010000U | 0x00000300U | 0x00060000U | 0x00000c00U |
@@ -10377,18 +10372,19 @@ radio_rf_channel_20(
 	/* Handles the channel is w52 condition. */
 	if (channel_is_w52(channel))
 		rf18 |= 0x00010100U;
+
+	/* Checks the operation status. */
 	error = journal_rf_update(
 		radio, journal, 0U, 0xbeU, 0x00038000U,
 		channel_is_w52(channel)
 			? rtw8822b_w52_rf_be[(channel - 36U) / 4U]
 			: 0U,
 		deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = journal_rf_update(radio, journal, 0U, 0xdfU,
 					  0x00040000U, 0U, deadline_ticks);
 	}
+
 	/* Process each remaining element. */
 	for (path = 0U; error == 0 && path < radio->board.chip.rf_path_count;
 	     path++) {
@@ -10428,10 +10424,9 @@ radio_rxdfir_20(
 {
 	int error;
 
+	/* Checks the operation status. */
 	error = journal_update(radio, journal, RTL8822B_REG_ACBB0, 4U,
 			       0x30000000U, 2U, deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = journal_update(radio, journal, RTL8822B_REG_ACBB_RX_FIR,
 				       4U, 0x30000000U, 2U, deadline_ticks);
@@ -10465,17 +10460,16 @@ radio_toggle_igi(
 	uint32_t antenna = radio->board.chip.rf_path_count > 1U ? 3U : 1U;
 	int error;
 
+	/* Checks the operation status. */
 	error = radio_read(radio, RTL8822B_REG_RX_IGI_A, 4U, &igi,
 			   deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 	igi &= 0x7fU;
-	error = journal_update(radio, journal, RTL8822B_REG_RX_IGI_A, 4U, 0x7fU,
-			       igi > 1U ? igi - 2U : 0U, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = journal_update(radio, journal, RTL8822B_REG_RX_IGI_A, 4U, 0x7fU,
+			       igi > 1U ? igi - 2U : 0U, deadline_ticks);
 	if (error == 0) {
 		error = journal_update(radio, journal, RTL8822B_REG_RX_IGI_A,
 				       4U, 0x7fU, igi, deadline_ticks);
@@ -10564,10 +10558,10 @@ radio_cca_20(
 					? 0x86666341U
 					: 0x87765541U;
 	}
-	error = journal_update(radio, journal, RTL8822B_REG_CCA_SELECT, 4U,
-			       0xffffffffU, cca_select, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = journal_update(radio, journal, RTL8822B_REG_CCA_SELECT, 4U,
+			       0xffffffffU, cca_select, deadline_ticks);
 	if (error == 0) {
 		error = journal_update(
 			radio, journal, RTL8822B_REG_PD_MATCH_THRESHOLD, 4U,
@@ -10625,11 +10619,11 @@ radio_rfe_channel(
 
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
+
+	/* Checks the operation status. */
 	error = journal_update_phy_paths(radio, journal,
 					 RTL8822B_REG_RFE_SELECT0, 0x00ffffffU,
 					 select0, deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = journal_update_phy_paths(
 			radio, journal, RTL8822B_REG_RFE_SELECT8, 0x0000ff00U,
@@ -10685,10 +10679,10 @@ radio_channel_apply(
 		return EOPNOTSUPP;
 	radio->power_limits_valid = 0U;
 	memset(&journal, 0, sizeof(journal));
-	error = journal_update(radio, &journal, RTL8822B_REG_TX_PAUSE, 1U,
-			       0xffU, 0xffU, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = journal_update(radio, &journal, RTL8822B_REG_TX_PAUSE, 1U,
+			       0xffU, 0xffU, deadline_ticks);
 	if (error == 0) {
 		error = radio_bb_channel_20(radio, &journal, channel,
 					    deadline_ticks);
@@ -10749,6 +10743,7 @@ radio_channel_apply(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	radio->channel = channel;
 
 	/* Reports successful completion. */
@@ -10765,7 +10760,7 @@ radio_table_section_apply(
 	uint8_t rf_path,
 	uint64_t deadline_ticks)
 {
-	int function_result;
+	int error;
 	const struct rtl8822b_phy_table_section *section;
 	const struct rtl8822b_phy_table_section *selected = NULL;
 	size_t index;
@@ -10774,9 +10769,8 @@ radio_table_section_apply(
 	for (index = 0; index < sizeof(rtw8822b_phy_sections) /
 					sizeof(rtw8822b_phy_sections[0]);
 	     index++) {
-		section = &rtw8822b_phy_sections[index];
-
 		/* Handles the section condition. */
+		section = &rtw8822b_phy_sections[index];
 		if (section->domain != domain ||
 		    (domain == RTL8822B_TABLE_DOMAIN_RF &&
 		     section->rf_path != rf_path))
@@ -10791,18 +10785,18 @@ radio_table_section_apply(
 	/* Handles the selected availability. */
 	if (selected == NULL || selected->reserved != 0U ||
 	    selected->words == NULL || selected->word_count == 0U ||
-	    (selected->word_count & 1U) != 0U)
-
+	    (selected->word_count & 1U) != 0U) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Obtains the radio table apply result. */
-	function_result = radio_table_apply(
+	error = radio_table_apply(
 		radio, selected->domain, selected->width, selected->rf_path,
 		selected->words, selected->word_count, deadline_ticks);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int radio_tables_apply(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
@@ -10816,10 +10810,9 @@ radio_tables_apply(
 	unsigned path;
 	int error;
 
+	/* Checks the operation status. */
 	error = radio_table_section_apply(radio, RTL8822B_TABLE_DOMAIN_MAC, 0U,
 					  deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = radio_table_section_apply(
 			radio, RTL8822B_TABLE_DOMAIN_BB, 0U, deadline_ticks);
@@ -10830,6 +10823,7 @@ radio_tables_apply(
 		error = radio_table_section_apply(
 			radio, RTL8822B_TABLE_DOMAIN_AGC, 0U, deadline_ticks);
 	}
+
 	/* Process each remaining element. */
 	for (path = 0U; error == 0 && path < radio->board.chip.rf_path_count;
 	     path++) {
@@ -10945,9 +10939,9 @@ radio_txagc_5g_legacy_index(
 	/* Handles the rate offset condition. */
 	if (rate_offset > limit_offset)
 		rate_offset = limit_offset;
-	index = power->bw40_base[group] + power->ofdm_diff + rate_offset;
 
 	/* Checks the current index. */
+	index = power->bw40_base[group] + power->ofdm_diff + rate_offset;
 	if (index < 0)
 		return 0U;
 
@@ -10985,9 +10979,8 @@ radio_txagc_legacy_profile(
 
 			/* Process each element required by the operation. */
 			for (lane = 0U; lane < 4U; lane++) {
-				current = rate + lane;
-
 				/* Handles the current condition. */
+				current = rate + lane;
 				if (current < RTL8822B_LEGACY_RATE_COUNT) {
 					index = channel_is_w52(channel)
 							? (current < 4U
@@ -11008,14 +11001,15 @@ radio_txagc_legacy_profile(
 			}
 
 			/* Writes the packed lane indices for this rate. */
-			error = radio_write(radio, (uint16_t)(base + rate), 4U,
-					    packed, deadline_ticks);
 
 			/* Checks the operation status. */
+			error = radio_write(radio, (uint16_t)(base + rate), 4U,
+					    packed, deadline_ticks);
 			if (error != 0)
 				return error;
 		}
 	}
+
 	radio->power_limits_valid = 1U;
 
 	/* Reports successful completion. */
@@ -11045,15 +11039,14 @@ radio_fifo_3bulkout_profile(
 	if (RTL8822B_TX_FIFO_PAGES - RTL8822B_RESERVED_PAGES !=
 		    RTL8822B_RESERVED_BOUNDARY ||
 	    RTL8822B_RESERVED_BOUNDARY - 64U - 64U - 64U - 1U !=
-		    RTL8822B_PUBLIC_QUEUE_PAGES)
-
+		    RTL8822B_PUBLIC_QUEUE_PAGES) {
 		/* Returns the computed result. */
 		return EINVAL;
-
-	error = radio_write(radio, RTL8822B_REG_TXDMA_PQ_MAP, 2U,
-			    RTL8822B_USB3_TXDMA_MAP, deadline_ticks);
+	}
 
 	/* Checks the operation status. */
+	error = radio_write(radio, RTL8822B_REG_TXDMA_PQ_MAP, 2U,
+			    RTL8822B_USB3_TXDMA_MAP, deadline_ticks);
 	if (error == 0) {
 		error = radio_write(radio, RTL8822B_REG_CR, 1U, 0U,
 				    deadline_ticks);
@@ -11175,19 +11168,19 @@ radio_fifo_3bulkout_profile(
 		error = radio_update(radio, RTL8822B_REG_AUTO_LLT, 1U, 0x01U,
 				     0x01U, deadline_ticks);
 	}
+
 	/* Process each element required by the operation. */
 	for (attempt = 0U; error == 0 && attempt < RTL8822B_LLT_POLL_MAX;
 	     attempt++) {
+		/* Checks the operation status. */
 		error = radio_read(radio, RTL8822B_REG_AUTO_LLT, 1U, &value,
 				   deadline_ticks);
-
-		/* Checks the operation status. */
 		if (error != 0 || (value & 0x01U) == 0U)
 			break;
-		error = radio_delay(radio, RTL8822B_LLT_POLL_DELAY_US,
-				    deadline_ticks);
 
 		/* Checks the operation status. */
+		error = radio_delay(radio, RTL8822B_LLT_POLL_DELAY_US,
+				    deadline_ticks);
 		if (error == 0 && radio->transport.yield != NULL)
 			radio->transport.yield(radio->transport.context);
 	}
@@ -11258,12 +11251,12 @@ radio_fifo_3bulkout_profile(
 	if (error == 0) {
 		write_pointer &= 0x0003ffffU;
 		read_pointer &= 0x0003ffffU;
+
+		/* Handles the free bytes condition. */
 		free_bytes = write_pointer >= read_pointer
 				     ? RTL8822B_H2C_QUEUE_SIZE -
 					       (write_pointer - read_pointer)
 				     : read_pointer - write_pointer;
-
-		/* Handles the free bytes condition. */
 		if (free_bytes != RTL8822B_H2C_QUEUE_SIZE)
 			error = EIO;
 	}
@@ -11289,26 +11282,26 @@ radio_usb_phy_profile(
 		return 0;
 
 	/* Apply upstream's USB3 PHY table at either enumerated USB speed. */
-	error = radio_write(radio, RTL8822B_REG_USB3_PHY_DATA_LOW, 1U, 0x41U,
-			    deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_write(radio, RTL8822B_REG_USB3_PHY_DATA_LOW, 1U, 0x41U,
+			    deadline_ticks);
 	if (error != 0)
 		return error;
 
 	/* Stage the high byte before triggering the PHY register write. */
-	error = radio_write(radio, RTL8822B_REG_USB3_PHY_DATA_HIGH, 1U, 0xa8U,
-			    deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_write(radio, RTL8822B_REG_USB3_PHY_DATA_HIGH, 1U, 0xa8U,
+			    deadline_ticks);
 	if (error != 0)
 		return error;
 
 	/* Write PHY address one without requesting a USB mode switch. */
-	error = radio_write(radio, RTL8822B_REG_USB3_PHY_ADDRESS, 1U, 0x81U,
-			    deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_write(radio, RTL8822B_REG_USB3_PHY_ADDRESS, 1U, 0x81U,
+			    deadline_ticks);
 	if (error != 0)
 		return error;
 
@@ -11334,10 +11327,10 @@ radio_usb_profile(
 		rxdma_mode = 0x1eU;
 
 	/* Program burst size before enabling the existing aggregate format. */
-	error = radio_write(radio, RTL8822B_REG_RXDMA_MODE, 1U, rxdma_mode,
-			    deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_write(radio, RTL8822B_REG_RXDMA_MODE, 1U, rxdma_mode,
+			    deadline_ticks);
 	if (error == 0) {
 		error = radio_update(radio, RTL8822B_REG_TXDMA_OFFSET_CHECK, 2U,
 				     0x0200U, 0x0200U, deadline_ticks);
@@ -11386,10 +11379,10 @@ radio_phy_trx_mode(
  * The bounded USB profile uses path A or paths A+B, never path B alone.
 	 */
 	path_bits = radio->board.chip.rf_path_count == 2U ? 3U : 1U;
-	error = radio_update(radio, RTL8822B_REG_AGC_TRX_A, 4U, 0x0000ffffU,
-			     0x00003231U, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_update(radio, RTL8822B_REG_AGC_TRX_A, 4U, 0x0000ffffU,
+			     0x00003231U, deadline_ticks);
 	if (error == 0) {
 		error = radio_update(
 			radio, RTL8822B_REG_AGC_TRX_B, 4U, 0x0000ffffU,
@@ -11484,10 +11477,9 @@ radio_phy_trx_mode(
 
 	/* Program and verify the path-A RF mode LUT with a finite poll. */
 	for (attempt = 0U; error == 0 && attempt < 100U; attempt++) {
+		/* Checks the operation status. */
 		error = radio_rf_write(radio, 0U, 0xefU, 0x80000U,
 				       deadline_ticks);
-
-		/* Checks the operation status. */
 		if (error == 0) {
 			error = radio_rf_write(radio, 0U, 0x33U, 0x00001U,
 					       deadline_ticks);
@@ -11566,10 +11558,9 @@ radio_phy_rfe_post_table(
 {
 	int error;
 
+	/* Checks the operation status. */
 	error = radio_update(radio, 0x0064U, 4U, 0x30000000U, 0x30000000U,
 			     deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = radio_update(radio, RTL8822B_REG_LED_CFG, 4U,
 				     0x06000000U, 0U, deadline_ticks);
@@ -11608,10 +11599,10 @@ radio_board_wlan_only(
 {
 	/* Preserve unprogrammed and Bluetooth-combination board behavior. */
 	if (radio->board.rf_board_option == 0xffU ||
-	    (radio->board.rf_board_option & 0xe0U) == 0x20U)
-
+	    (radio->board.rf_board_option & 0xe0U) == 0x20U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Report the vendor efuse definition of a known WLAN-only board. */
 	return 1;
@@ -11635,10 +11626,10 @@ radio_coex_ready(
 		/*
  * Propagate transport and deadline failures before examining
 		 * readiness. */
-		error = radio_read(radio, RTL8822B_REG_COEX_ACCESS, 4U, &value,
-				   deadline_ticks);
 
 		/* Checks the operation status. */
+		error = radio_read(radio, RTL8822B_REG_COEX_ACCESS, 4U, &value,
+				   deadline_ticks);
 		if (error != 0)
 			return error;
 
@@ -11651,10 +11642,10 @@ radio_coex_ready(
 		/*
  * Bound each retry by both elapsed time and the fixed poll
 		 * count. */
-		error = radio_delay(radio, RTL8822B_COEX_POLL_DELAY_US,
-				    deadline_ticks);
 
 		/* Checks the operation status. */
+		error = radio_delay(radio, RTL8822B_COEX_POLL_DELAY_US,
+				    deadline_ticks);
 		if (error != 0)
 			return error;
 	}
@@ -11677,34 +11668,34 @@ radio_coex_grant_read(
 	/*
  * Join any preceding indirect command before selecting register 0x38.
 	 */
-	error = radio_coex_ready(radio, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_coex_ready(radio, deadline_ticks);
 	if (error != 0)
 		return error;
 
 	/* Select the four-byte grant register for reading. */
-	error = radio_write(radio, RTL8822B_REG_COEX_ACCESS, 4U, 0x800f0038U,
-			    deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_write(radio, RTL8822B_REG_COEX_ACCESS, 4U, 0x800f0038U,
+			    deadline_ticks);
 	if (error != 0)
 		return error;
 
 	/*
  * Wait for completion before accepting the returned register contents.
 	 */
-	error = radio_coex_ready(radio, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_coex_ready(radio, deadline_ticks);
 	if (error != 0)
 		return error;
 
 	/* Return the checked data transfer to the startup owner. */
-	error = radio_read(radio, RTL8822B_REG_COEX_READ, 4U, value,
-			   deadline_ticks);
 
 	/* Reports the failure. */
+	error = radio_read(radio, RTL8822B_REG_COEX_READ, 4U, value,
+			   deadline_ticks);
 	if (error != 0)
 		return error;
 
@@ -11730,42 +11721,42 @@ radio_wlan_only_profile(
 	/*
  * Preserve unrelated grant-register state while disabling LTE
 	 * arbitration. */
-	error = radio_coex_grant_read(radio, &value, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_coex_grant_read(radio, &value, deadline_ticks);
 	if (error != 0)
 		return error;
 	value = (value & ~RTL8822B_COEX_GRANT_MASK) | RTL8822B_COEX_WLAN_GRANT;
 
 	/* Reserve the indirect port before publishing its write data. */
-	error = radio_coex_ready(radio, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_coex_ready(radio, deadline_ticks);
 	if (error != 0)
 		return error;
 
 	/* Set both GNT_WL controls high and both GNT_BT controls low. */
-	error = radio_write(radio, RTL8822B_REG_COEX_WRITE, 4U, value,
-			    deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_write(radio, RTL8822B_REG_COEX_WRITE, 4U, value,
+			    deadline_ticks);
 	if (error != 0)
 		return error;
 
 	/* Commit the four grant fields through the chip's indirect command. */
-	error = radio_write(radio, RTL8822B_REG_COEX_ACCESS, 4U, 0xc00f0038U,
-			    deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_write(radio, RTL8822B_REG_COEX_ACCESS, 4U, 0xc00f0038U,
+			    deadline_ticks);
 	if (error != 0)
 		return error;
 
 	/*
  * Require the requested grant state before transferring path ownership.
 	 */
-	error = radio_coex_grant_read(radio, &value, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_coex_grant_read(radio, &value, deadline_ticks);
 	if (error != 0)
 		return error;
 
@@ -11778,18 +11769,18 @@ radio_wlan_only_profile(
 	/*
  * Select WLAN ownership while preserving debug and other system mux
 	 * bits. */
-	error = radio_update(radio, RTL8822B_REG_COEX_OWNER, 1U, 0x04U, 0x04U,
-			     deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_update(radio, RTL8822B_REG_COEX_OWNER, 1U, 0x04U, 0x04U,
+			     deadline_ticks);
 	if (error != 0)
 		return error;
 
 	/* Verify ownership before enabling the external WLAN antenna switch. */
-	error = radio_read(radio, RTL8822B_REG_COEX_OWNER, 1U, &value,
-			   deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_read(radio, RTL8822B_REG_COEX_OWNER, 1U, &value,
+			   deadline_ticks);
 	if (error != 0)
 		return error;
 
@@ -11798,20 +11789,20 @@ radio_wlan_only_profile(
 		return EIO;
 
 	/* Route the external DPDT switch to BB software control. */
-	error = radio_update(radio, RTL8822B_REG_LED_CFG, 4U, 0x01800000U,
-			     0x01000000U, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_update(radio, RTL8822B_REG_LED_CFG, 4U, 0x01800000U,
+			     0x01000000U, deadline_ticks);
 	if (error != 0)
 		return error;
 
 	/*
  * Verify only the selected mux bits without interpreting unrelated
 	 * state. */
-	error = radio_read(radio, RTL8822B_REG_LED_CFG, 4U, &value,
-			   deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_read(radio, RTL8822B_REG_LED_CFG, 4U, &value,
+			   deadline_ticks);
 	if (error != 0)
 		return error;
 
@@ -11837,10 +11828,9 @@ radio_driver_info_profile(
 {
 	int error;
 
+	/* Checks the operation status. */
 	error = radio_write(radio, RTL8822B_REG_RX_DRIVER_INFO, 1U, 4U,
 			    deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = radio_update(radio, RTL8822B_REG_TRXFF_BOUNDARY + 1U,
 				     1U, 0x0fU, 0x0fU, deadline_ticks);
@@ -11887,10 +11877,10 @@ radio_minimum_mac_profile(
 		   ((uint32_t)radio->board.mac_address[5] << 8);
 
 	/* Pauses transmission while the profile is installed. */
-	error = radio_write(radio, RTL8822B_REG_TX_PAUSE, 1U, 0xffU,
-			    deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_write(radio, RTL8822B_REG_TX_PAUSE, 1U, 0xffU,
+			    deadline_ticks);
 	if (error == 0) {
 		error = radio_update(radio, RTL8822B_REG_SW_AMPDU_BURST, 1U,
 				     0x40U, 0U, deadline_ticks);
@@ -12133,16 +12123,16 @@ drv_rtl8822b_radio_power_on(
 	     board->chip.rf_path_count != 2U) ||
 	    !board_tx_power_2g_valid(board) ||
 	    (board->rfe_option != 2U && board->rfe_option != 3U &&
-	     board->rfe_option != 5U))
-
+	     board->rfe_option != 5U)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(radio, 0, sizeof(*radio));
 	radio->transport = *transport;
 	radio->board = *board;
-	error = radio_deadline_check(radio, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_deadline_check(radio, deadline_ticks);
 	if (error == 0)
 		error = radio_pre_power(radio, deadline_ticks);
 
@@ -12153,12 +12143,12 @@ drv_rtl8822b_radio_power_on(
 	}
 
 	/* Checks the operation status. */
-	if (error == 0 && already_powered)
-
+	if (error == 0 && already_powered) {
 		/*
  * A failed/missing firmware acknowledgement forces the same
 		 * full power-cycle below; no warm state is ever reused. */
 		(void)radio_warm_firmware_ack(radio, deadline_ticks);
+	}
 
 	/* Checks the operation status. */
 	if (error == 0 && already_powered) {
@@ -12198,6 +12188,7 @@ drv_rtl8822b_radio_power_on(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	radio->state = RTL8822B_RADIO_POWERED;
 
 	/* Reports successful completion. */
@@ -12220,9 +12211,9 @@ drv_rtl8822b_radio_start(
 		return EINVAL;
 
 	/* Firmware has already been checked and started by the caller. */
-	error = radio_fifo_3bulkout_profile(radio, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_fifo_3bulkout_profile(radio, deadline_ticks);
 	if (error == 0)
 		error = radio_usb_profile(radio, deadline_ticks);
 
@@ -12265,9 +12256,9 @@ drv_rtl8822b_radio_start(
 	/* Checks the operation status. */
 	if (error == 0)
 		error = radio_tables_apply(radio, deadline_ticks);
-	crystal = radio->board.crystal_cap & 0x3fU;
 
 	/* Checks the operation status. */
+	crystal = radio->board.crystal_cap & 0x3fU;
 	if (error == 0) {
 		error = radio_update(radio, 0x0024U, 4U, 0x7e000000U,
 				     crystal << 25, deadline_ticks);
@@ -12325,6 +12316,7 @@ drv_rtl8822b_radio_start(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	radio->state = RTL8822B_RADIO_STARTED;
 
 	/* Reports successful completion. */
@@ -12340,18 +12332,18 @@ drv_rtl8822b_radio_set_channel(
 	uint8_t channel,
 	uint64_t deadline_ticks)
 {
-	int function_result;
+	int error;
 
 	/* Handles the radio availability. */
 	if (radio == NULL || radio->state != RTL8822B_RADIO_STARTED)
 		return EINVAL;
 
 	/* Obtains the radio channel apply result. */
-	function_result =
+	error =
 		radio_channel_apply(radio, channel, 1, deadline_ticks);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -12374,10 +12366,10 @@ drv_rtl8822b_radio_rx_generation_pause(
 	/* Handles the radio condition. */
 	if (radio->rx_generation_paused)
 		return 0;
-	error = radio_read(radio, RTL8822B_REG_CR, 1U, &control,
-			   deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_read(radio, RTL8822B_REG_CR, 1U, &control,
+			   deadline_ticks);
 	if (error == 0) {
 		error = radio_write(radio, RTL8822B_REG_CR, 1U,
 				    control & ~RTL8822B_CR_RX_ENABLE_MASK,
@@ -12393,10 +12385,10 @@ drv_rtl8822b_radio_rx_generation_pause(
 	 * checked radio-stop transaction is required before RX can run again.
 	 */
 	radio->rx_generation_paused = 1U;
-	error = radio_read(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U, &receive,
-			   deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_read(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U, &receive,
+			   deadline_ticks);
 	if (error == 0) {
 		error = radio_write(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U,
 				    receive | RTL8822B_RX_RELEASE_ENABLE,
@@ -12409,16 +12401,15 @@ drv_rtl8822b_radio_rx_generation_pause(
 	/* Process each element required by the operation. */
 	for (attempt = 0U; attempt < RTL8822B_RX_GENERATION_POLL_MAX;
 	     attempt++) {
+		/* Checks the operation status. */
 		error = radio_read(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U,
 				   &receive, deadline_ticks);
-
-		/* Checks the operation status. */
 		if (error != 0 || (receive & RTL8822B_RXDMA_IDLE) != 0U)
 			return error;
-		error = radio_delay(radio, RTL8822B_RX_GENERATION_POLL_US,
-				    deadline_ticks);
 
 		/* Checks the operation status. */
+		error = radio_delay(radio, RTL8822B_RX_GENERATION_POLL_US,
+				    deadline_ticks);
 		if (error != 0)
 			return error;
 	}
@@ -12446,10 +12437,10 @@ drv_rtl8822b_radio_rx_generation_resume(
 	/* Handles the radio condition. */
 	if (!radio->rx_generation_paused)
 		return 0;
-	error = radio_read(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U, &receive,
-			   deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_read(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U, &receive,
+			   deadline_ticks);
 	if (error == 0) {
 		error = radio_write(radio, RTL8822B_REG_RX_PACKET_NUMBER, 4U,
 				    receive & ~RTL8822B_RX_RELEASE_ENABLE,
@@ -12501,41 +12492,41 @@ drv_rtl8822b_radio_stop(
 		return 0;
 	radio->state = RTL8822B_RADIO_STOPPING;
 	radio->power_limits_valid = 0U;
+
+	/* Checks the operation status. */
 	error = radio_write(radio, RTL8822B_REG_TX_PAUSE, 1U, 0xffU,
 			    deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		first_error = error;
-	error = radio_write(radio, RTL8822B_REG_CR, 1U, 0U, deadline_ticks);
 
 	/* Checks the operation status. */
+	error = radio_write(radio, RTL8822B_REG_CR, 1U, 0U, deadline_ticks);
 	if (error != 0 && first_error == 0)
 		first_error = error;
+
+	/* Checks the operation status. */
 	error = radio_update(radio, RTL8822B_REG_SYS_FUNC_EN, 1U,
 			     RTL8822B_BB_RESET_BITS, 0U, deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error != 0 && first_error == 0)
 		first_error = error;
+
+	/* Checks the operation status. */
 	error = radio_update(radio, RTL8822B_REG_RF_CTRL, 1U,
 			     RTL8822B_RF_ENABLE_BITS, 0U, deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error != 0 && first_error == 0)
 		first_error = error;
+
+	/* Checks the operation status. */
 	error = radio_update(radio, RTL8822B_REG_WLRF1, 4U,
 			     RTL8822B_WLRF_ENABLE_BITS, 0U, deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error != 0 && first_error == 0)
 		first_error = error;
+
+	/* Checks the operation status. */
 	error = radio_power_commands(radio, rtl8822b_power_disable,
 				     sizeof(rtl8822b_power_disable) /
 					     sizeof(rtl8822b_power_disable[0]),
 				     deadline_ticks);
-
-	/* Checks the operation status. */
 	if (error != 0 && first_error == 0)
 		first_error = error;
 
@@ -12562,10 +12553,10 @@ drv_rtl8822b_radio_active_scan_allowed(
 	const struct rtl8822b_radio *radio,
 	uint8_t channel)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		radio != NULL && radio->state == RTL8822B_RADIO_STARTED &&
 		radio->power_limits_valid != 0U &&
 		drv_rtl8822b_board_active_channel_allowed(&radio->board,
@@ -12575,7 +12566,7 @@ drv_rtl8822b_radio_active_scan_allowed(
 		 radio->board.rfe_option == 5U);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int probe_request_valid(const struct rtl8822b_radio *radio, const uint8_t *frame, size_t length);
@@ -12597,16 +12588,17 @@ probe_request_valid(
 	if (radio == NULL || frame == NULL || length < 26U ||
 	    length > RTL8822B_MANAGEMENT_MPDU_MAX ||
 	    load_le16(frame) != 0x0040U ||
-	    memcmp(frame + 10U, radio->board.mac_address, 6U) != 0)
-
+	    memcmp(frame + 10U, radio->board.mac_address, 6U) != 0) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	/* Process each remaining element. */
 	for (index = 0U; index < 6U; index++) {
 		/* Handles the frame condition. */
 		if (frame[4U + index] != 0xffU || frame[16U + index] != 0xffU)
 			return 0;
 	}
+
 	offset = 24U;
 	/* Process each remaining element. */
 	while (offset < length) {
@@ -12631,6 +12623,7 @@ probe_request_valid(
 				return 0;
 			ssid_count++;
 		}
+
 		offset += ie_length;
 	}
 
@@ -12660,17 +12653,17 @@ radio_management_frame_prepare(
 	*wire_length = 0U;
 	/* Checks the drv rtl8822b radio active scan allowed result. */
 	if (radio == NULL || wire == NULL || frame == NULL ||
-	    !drv_rtl8822b_radio_active_scan_allowed(radio, radio->channel))
-
+	    !drv_rtl8822b_radio_active_scan_allowed(radio, radio->channel)) {
 		/* Returns the computed result. */
 		return EPERM;
+	}
 
 	/* Handles the frame length condition. */
 	if (frame_length > SIZE_MAX - RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE)
 		return EOVERFLOW;
-	total = RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + frame_length;
 
 	/* Avoid full packets on both supported USB bulk packet sizes. */
+	total = RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + frame_length;
 	if (total % 512U == 0U) {
 		/* Handles the total condition. */
 		if (total == SIZE_MAX)
@@ -12719,7 +12712,7 @@ drv_rtl8822b_radio_management_frame_prepare(
 	size_t frame_length,
 	size_t *wire_length)
 {
-	int function_result;
+	int error;
 
 	/* Checks the probe request valid result. */
 	if (!probe_request_valid(radio, frame, frame_length)) {
@@ -12731,11 +12724,11 @@ drv_rtl8822b_radio_management_frame_prepare(
 	}
 
 	/* Obtains the radio management frame prepare result. */
-	function_result = radio_management_frame_prepare(
+	error = radio_management_frame_prepare(
 		radio, wire, capacity, frame, frame_length, wire_length);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -12760,10 +12753,10 @@ drv_rtl8822b_radio_deauthentication_prepare(
 	*wire_length = 0U;
 	/* Handles the bssid availability. */
 	if (bssid == NULL || station == NULL || reason == 0U ||
-	    (bssid[0] & 1U) != 0U || (station[0] & 1U) != 0U)
-
+	    (bssid[0] & 1U) != 0U || (station[0] & 1U) != 0U) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(frame, 0, sizeof(frame));
 	frame[0] = 0xc0U;
 	memcpy(frame + 4U, bssid, 6U);

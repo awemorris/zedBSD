@@ -45,10 +45,10 @@ drv_pc98_gdc_clear_graphics(
 	/* Handles the backend availability. */
 	if (backend == NULL || backend->port_out8 == NULL ||
 	    backend->planes[0] == NULL || backend->planes[1] == NULL ||
-	    backend->planes[2] == NULL || backend->planes[3] == NULL)
-
+	    backend->planes[2] == NULL || backend->planes[3] == NULL) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/*
  * Match the real-mode loader's transition sequence.  In particular,
@@ -231,19 +231,19 @@ gdc_enter(
 	if (backend == NULL || info == NULL || backend->display_reset == NULL ||
 	    backend->port_in8 == NULL || backend->port_out8 == NULL ||
 	    backend->planes[0] == NULL || backend->planes[1] == NULL ||
-	    backend->planes[2] == NULL || backend->planes[3] == NULL)
-
+	    backend->planes[2] == NULL || backend->planes[3] == NULL) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/*
  * Clear every graphics plane before starting the slave GDC.  Otherwise
 	 * firmware VRAM is briefly visible between GDC_START and this clear. */
 	if (!drv_pc98_gdc_clear_graphics(backend) ||
-	    !backend->display_reset(backend->bios_context))
-
+	    !backend->display_reset(backend->bios_context)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Hide text only after the clean graphics display is running. */
 	if (!gdc_command(backend, 0x0c)) {
@@ -252,6 +252,7 @@ gdc_enter(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	info->width = GDC_WIDTH;
 	info->height = GDC_HEIGHT;
 	info->bits_per_pixel = 4;
@@ -310,6 +311,7 @@ gdc_fill(
 				mask &= (uint8_t)(0xffU
 						  << (7U - (last_pixel & 7U)));
 			}
+
 			/* Process each element required by the operation. */
 			for (plane = 0; plane < 4; plane++) {
 				old = backend->planes[plane][offset];
@@ -358,9 +360,9 @@ gdc_line(
 		/* Checks the current horizontal value. */
 		if (x == target_x && y == target_y)
 			break;
-		twice_error = error * 2;
 
 		/* Checks the operation status. */
+		twice_error = error * 2;
 		if (twice_error >= delta_y) {
 			error += delta_y;
 			x += step_x;
@@ -445,6 +447,7 @@ gdc_draw_image_common(
 				rgb = ((uint32_t)pixel[0] << 16) |
 				      ((uint32_t)pixel[1] << 8) | pixel[2];
 			}
+
 			gdc_write_pixel(backend, destination_x + x,
 					destination_y + y, rgb_to_gdc(rgb));
 		}
@@ -462,14 +465,14 @@ gdc_draw_image(
 	unsigned destination_y,
 	const struct pc98_display_image *image)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the gdc draw image common result. */
-	function_result = gdc_draw_image_common(
+	error = gdc_draw_image_common(
 		context, destination_x, destination_y, image, UINT64_MAX);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the gdc draw image pattern operation. */
@@ -481,14 +484,14 @@ gdc_draw_image_pattern(
 	const struct pc98_display_image *image,
 	uint64_t pattern)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the gdc draw image common result. */
-	function_result = gdc_draw_image_common(context, destination_x,
+	error = gdc_draw_image_common(context, destination_x,
 						destination_y, image, pattern);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the gdc flush operation. */

@@ -103,9 +103,9 @@ wlan_l2_build_data(
 	memcpy(mpdu + 4U, bssid, 6U);
 	memcpy(mpdu + 10U, station, 6U);
 	memcpy(mpdu + 16U, ethernet, 6U);
-	offset = WLAN_L2_DATA_HEADER_SIZE;
 
 	/* Adds the CCMP header of a protected frame. */
+	offset = WLAN_L2_DATA_HEADER_SIZE;
 	if (protected_frame) {
 		ccmp_header_store(mpdu + offset, key_index, packet_number);
 		offset += WLAN_L2_CCMP_HEADER_SIZE;

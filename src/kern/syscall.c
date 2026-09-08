@@ -377,9 +377,9 @@ syscall_restart_deadline_after(
 		*deadline = thread->syscall_wait_deadline;
 		return 0;
 	}
-	error = syscall_restart_deadline_rearm(ticks, deadline);
 
 	/* Reports the failure. */
+	error = syscall_restart_deadline_rearm(ticks, deadline);
 	if (error != 0)
 		return error;
 
@@ -413,8 +413,10 @@ syscall_restart_prepare_stop(
 			thread->signal_mask = thread->signal_suspend_mask;
 			thread->signal_suspended = 0;
 		}
+
 		spin_unlock_irqrestore(&process->lock, irq);
 	}
+
 	thread->syscall_stop_redispatch = 1;
 }
 
@@ -473,9 +475,9 @@ syscall_test_thread_join_claim(
 
 	if (target == NULL)
 		return EINVAL;
-	error = thread_join_claim_locked(target, owner, stop_redispatch);
 
 	/* Reports the failure. */
+	error = thread_join_claim_locked(target, owner, stop_redispatch);
 	if (error != 0)
 		return error;
 
@@ -571,10 +573,13 @@ poll_mask_enter(
 	requested &= SIGNAL_VALID_MASK &
 	    ~(POLL_SIGNAL_BIT(SIGKILL) | POLL_SIGNAL_BIT(SIGSTOP));
 	irq = spin_lock_irqsave(&process->lock);
+
 	guard->saved = guard->thread->signal_mask;
 	guard->thread->signal_mask = requested;
 	guard->active = 1;
+
 	spin_unlock_irqrestore(&process->lock, irq);
+
 	return 0;
 }
 
@@ -598,6 +603,7 @@ poll_mask_leave(
 
 	/* Restores the saved mask under the process lock. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	if (defer_restore) {
 		/*
 		 * Keep the temporary mask installed until the selected
@@ -609,7 +615,9 @@ poll_mask_leave(
 	} else {
 		guard->thread->signal_mask = guard->saved;
 	}
+
 	guard->active = 0;
+
 	spin_unlock_irqrestore(&process->lock, irq);
 }
 
@@ -663,6 +671,8 @@ poll_timeout(
 		*deadline = curthread->syscall_wait_deadline;
 		return 0;
 	}
+
+	/* Reads the timeout and turns it into whole ticks. */
 	error = copyin(address, &timeout, sizeof(timeout));
 	if (error != 0)
 		return error;
@@ -673,9 +683,9 @@ poll_timeout(
 		*immediate = 1;
 		return 0;
 	}
-	error = syscall_restart_deadline_after(ticks, deadline);
 
 	/* Reports the failure. */
+	error = syscall_restart_deadline_after(ticks, deadline);
 	if (error != 0)
 		return error;
 
@@ -762,9 +772,9 @@ pselect_pin(
 		return error;
 
 	/* Reads the initial value through the pin. */
-	error = copyin_pinned(pin, 0, value, sizeof(*value));
 
 	/* Reports the failure. */
+	error = copyin_pinned(pin, 0, value, sizeof(*value));
 	if (error != 0)
 		return error;
 
@@ -874,22 +884,28 @@ sys_pselect_call(
 			error = EBADF;
 			goto out;
 		}
+
 		if ((input_read.bits[0] & bit) != 0 &&
 		    (revents & (POLLIN | POLLRDNORM | POLLERR | POLLHUP)) != 0) {
 			output_read.bits[0] |= bit;
 			result++;
 		}
+
 		if ((input_write.bits[0] & bit) != 0 &&
 		    (revents & (POLLOUT | POLLWRNORM | POLLERR)) != 0) {
 			output_write.bits[0] |= bit;
 			result++;
 		}
+
+		/* Reports an exceptional condition the caller asked about. */
 		if ((input_except.bits[0] & bit) != 0 &&
 		    (revents & POLLPRI) != 0) {
 			output_except.bits[0] |= bit;
 			result++;
 		}
 	}
+
+	/* Copies each requested set back through its pin. */
 	if (read_pin.active)
 		error = copyout_pinned(&read_pin, 0, &output_read,
 		    sizeof(output_read));
@@ -955,6 +971,8 @@ sys_sysctl_call(
 				return -ENOMEM;
 		}
 	}
+
+	/* Reads the new value, refusing a length with no buffer. */
 	if (args[4] != 0) {
 		error = copyin(args[4], new_value, (size_t)args[5]);
 		if (error != 0)
@@ -987,6 +1005,7 @@ sys_sysctl_call(
 			goto out;
 		}
 	}
+
 	if (error == 0 && args[2] != 0 && old_length != 0)
 		error = copyout(old_output, args[2], old_length);
 out:
@@ -1044,9 +1063,9 @@ descriptor_socket(
 
 	if (process == NULL || process->fd == NULL)
 		return EBADF;
-	error = socket_file_ref_get(process->fd, descriptor, reference);
 
 	/* Reports the failure. */
+	error = socket_file_ref_get(process->fd, descriptor, reference);
 	if (error != 0)
 		return error;
 
@@ -1082,9 +1101,9 @@ copy_sockaddr_in(
 
 	/* Reads the address into cleared storage. */
 	memset(storage, 0, sizeof(*storage));
-	error = copyin(address, storage, length);
 
 	/* Reports the failure. */
+	error = copyin(address, storage, length);
 	if (error != 0)
 		return error;
 
@@ -1125,9 +1144,9 @@ copy_sockaddr_out(
 		if (error != 0)
 			return error;
 	}
-	error = copyout(&actual, length_address, sizeof(actual));
 
 	/* Reports the failure. */
+	error = copyout(&actual, length_address, sizeof(actual));
 	if (error != 0)
 		return error;
 
@@ -1292,6 +1311,8 @@ sys_socket_call(
 		socket_release(socket);
 		return -error;
 	}
+
+	/* Installs the socket on a descriptor and reports it. */
 	file_status_flags_update(file, O_NONBLOCK, file_flags);
 	error = filedesc_install_from(process->fd, file, descriptor_flags, 0,
 	    &descriptor);
@@ -1299,6 +1320,7 @@ sys_socket_call(
 		(void)file_close(file);
 		return -error;
 	}
+
 	return descriptor;
 }
 
@@ -1393,8 +1415,10 @@ sys_socketpair_call(
 			(void)file_close(left_file);
 			(void)file_close(right_file);
 		}
+
 		return -error;
 	}
+
 	return 0;
 }
 
@@ -1440,6 +1464,8 @@ sys_bind_call(
 		error = socket->ops->bind(socket, (struct sockaddr *)&address,
 		    (socklen_t)args[2]);
 	}
+
+	/* Reports the outcome and releases the socket reference. */
 	if (error != 0)
 		result = -error;
 	else
@@ -1500,6 +1526,8 @@ sys_connect_call(
 		error = socket->ops->connect(socket, (struct sockaddr *)&address,
 		    (socklen_t)args[2], io_flags);
 	}
+
+	/* Releases the credential, then reports the outcome. */
 	cred_release(credential);
 	if (error != 0)
 		result = -error;
@@ -1527,9 +1555,9 @@ sys_listen_call(
 
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
-	socket = reference.socket;
 
 	/* A listening AF_UNIX socket records the listener's identity. */
+	socket = reference.socket;
 	if (socket->family == AF_UNIX) {
 		credential = peercred_snapshot_ref(process, &listener);
 		if (credential == NULL)
@@ -1544,10 +1572,13 @@ sys_listen_call(
 		result = socket_result(&reference, result);
 		return result;
 	}
+
 	if (socket->ops == NULL || socket->ops->listen == NULL) {
 		result = socket_result(&reference, -EOPNOTSUPP);
 		return result;
 	}
+
+	/* Marks the socket as listening and reports the outcome. */
 	error = socket->ops->listen(socket, (int)args[1]);
 	if (error != 0)
 		result = -error;
@@ -1607,6 +1638,7 @@ sys_accept_call(
 		result = socket_result(&reference, -EINVAL);
 		return result;
 	}
+
 	if (socket->ops == NULL || socket->ops->accept == NULL) {
 		result = socket_result(&reference, -EOPNOTSUPP);
 		return result;
@@ -1618,6 +1650,8 @@ sys_accept_call(
 		result = socket_result(&reference, -error);
 		return result;
 	}
+
+	/* Reserves a descriptor and a file before the connection is taken. */
 	memset(&reservation, 0, sizeof(reservation));
 	error = filedesc_reserve_many(process->fd, 1, descriptor_flags,
 	    &reservation);
@@ -1639,6 +1673,8 @@ sys_accept_call(
 		address_argument = NULL;
 		length_argument = NULL;
 	}
+
+	/* Takes a connection, blocking unless the listener is non-blocking. */
 	if ((file_status_flags_get(reference.file) & O_NONBLOCK) != 0)
 		io_flags = SOCKET_IO_NONBLOCK;
 	else
@@ -1652,6 +1688,8 @@ sys_accept_call(
 		result = socket_result(&reference, -error);
 		return result;
 	}
+
+	/* Refuses an accept that reported success but produced no socket. */
 	if (accepted == NULL) {
 		(void)file_close(file);
 		filedesc_abort_reserved(&reservation);
@@ -1676,12 +1714,15 @@ sys_accept_call(
 		sockaddr_output_unpin(&output);
 		return -error;
 	}
+
+	/* Reports the peer address, closing the descriptor if that fails. */
 	error = copy_sockaddr_out_pinned(&output, &address, length);
 	sockaddr_output_unpin(&output);
 	if (error != 0) {
 		(void)filedesc_close(process->fd, descriptor);
 		return -error;
 	}
+
 	return descriptor;
 }
 
@@ -1712,25 +1753,31 @@ sys_sendto_call(
 		result = socket_result(&reference, -EOPNOTSUPP);
 		return result;
 	}
+
 	if (((int)args[3] & ~SOCKET_SEND_FLAGS) != 0) {
 		result = socket_result(&reference, -EOPNOTSUPP);
 		return result;
 	}
+
 	if ((args[4] == 0) != (args[5] == 0)) {
 		result = socket_result(&reference, -EINVAL);
 		return result;
 	}
+
 	if (socket->type != SOCK_STREAM &&
 	    args[2] > PACKET_BUF_STORAGE_SIZE) {
 		result = socket_result(&reference, -EMSGSIZE);
 		return result;
 	}
+
+	/* Reads the destination address when the caller named one. */
 	if (args[4] != 0) {
 		error = copy_sockaddr_in(args[4], (socklen_t)args[5], &address);
 		if (error != 0) {
 			result = socket_result(&reference, -error);
 			return result;
 		}
+
 		destination = (const struct sockaddr *)&address;
 	}
 
@@ -1758,6 +1805,8 @@ sys_sendto_call(
 		result = socket_result(&reference, -ENOMEM);
 		return result;
 	}
+
+	/* Reads the data and hands it to the protocol. */
 	error = copyin(args[1], buffer, amount);
 	if (error != 0) {
 		result = -error;
@@ -1771,6 +1820,7 @@ sys_sendto_call(
 			result = socket->ops->sendto(socket, buffer, amount,
 			    io_flags, destination, (socklen_t)args[5]);
 	}
+
 	kern_free(buffer);
 	result = socket_result(&reference, result);
 	return result;
@@ -1807,10 +1857,12 @@ sys_recvfrom_call(
 		result = socket_result(&reference, -EOPNOTSUPP);
 		return result;
 	}
+
 	if (((int)args[3] & ~SOCKET_RECV_FLAGS) != 0) {
 		result = socket_result(&reference, -EOPNOTSUPP);
 		return result;
 	}
+
 	if ((args[4] == 0) != (args[5] == 0)) {
 		result = socket_result(&reference, -EINVAL);
 		return result;
@@ -1834,17 +1886,22 @@ sys_recvfrom_call(
 		else
 			capacity = (size_t)args[2];
 	}
+
 	error = uaccess_pin(args[1], capacity, PROT_WRITE, &data_pin);
 	if (error != 0) {
 		result = socket_result(&reference, -error);
 		return result;
 	}
+
+	/* Pins where the source address will be reported. */
 	error = sockaddr_output_pin(args[4], args[5], &output);
 	if (error != 0) {
 		uaccess_unpin(&data_pin);
 		result = socket_result(&reference, -error);
 		return result;
 	}
+
+	/* Allocates the staging the data is received into. */
 	if (capacity != 0)
 		buffer = kern_malloc(capacity);
 	else
@@ -1865,6 +1922,8 @@ sys_recvfrom_call(
 		address_argument = NULL;
 		length_argument = NULL;
 	}
+
+	/* Receives, then copies the data and the address out. */
 	result = socket->ops->recvfrom(socket, buffer, capacity,
 	    (int)socket_file_effective_flags(&reference, (int)args[3]),
 	    address_argument, length_argument);
@@ -1879,6 +1938,8 @@ sys_recvfrom_call(
 		if (error != 0)
 			result = -error;
 	}
+
+	/* Releases everything the receive held and reports the outcome. */
 	if (capacity != 0)
 		kern_free(buffer);
 	sockaddr_output_unpin(&output);
@@ -1938,6 +1999,7 @@ sys_sendmsg_call(
 		result = socket_result(&reference, -EMSGSIZE);
 		return result;
 	}
+
 	if (reference.socket->type == SOCK_STREAM &&
 	    request.data_length > SYSCALL_SOCKET_BUFFER_MAX)
 		request.data_length = SYSCALL_SOCKET_BUFFER_MAX;
@@ -1950,14 +2012,19 @@ sys_sendmsg_call(
 			result = socket_result(&reference, -error);
 			return result;
 		}
+
 		destination = (struct sockaddr *)&address;
 	}
+
+	/* Allocates the staging the message body is read into. */
 	if (request.data_length != 0) {
 		buffer = kern_malloc((size_t)request.data_length);
 		if (buffer == NULL) {
 			result = socket_result(&reference, -ENOMEM);
 			return result;
 		}
+
+		/* Reads the message body. */
 		error = copyin((uintptr_t)request.data, buffer,
 		    (size_t)request.data_length);
 		if (error != 0) {
@@ -1966,6 +2033,8 @@ sys_sendmsg_call(
 			return result;
 		}
 	}
+
+	/* Resolves every descriptor the message carries. */
 	if (request.descriptor_count != 0) {
 		error = copyin((uintptr_t)request.descriptors, descriptors,
 		    request.descriptor_count * sizeof(descriptors[0]));
@@ -2005,9 +2074,13 @@ sys_sendmsg_call(
 		    (int)socket_file_effective_flags(&reference,
 		    (int)request.flags), destination, request.name_length);
 	}
+
+	/* Releases the staging and reports the outcome. */
 	kern_free(buffer);
 	result = socket_result(&reference, result);
 	return result;
+
+/* Closes every descriptor the message had resolved. */
 fail:
 	for (index = 0; index < count; index++)
 		(void)file_close(files[index]);
@@ -2100,6 +2173,8 @@ sys_recvmsg_call(
 		result = socket_result(&reference, result);
 		return result;
 	}
+
+	/* Allocates the staging the message body is received into. */
 	if (buffer_capacity != 0) {
 		buffer = kern_malloc(buffer_capacity);
 		if (buffer == NULL) {
@@ -2107,6 +2182,8 @@ sys_recvmsg_call(
 			return result;
 		}
 	}
+
+	/* Asks for the source address only when the caller wants it. */
 	name_length = request.name_capacity;
 	if (request.name_capacity != 0) {
 		address_argument = (struct sockaddr *)&address;
@@ -2125,6 +2202,7 @@ sys_recvmsg_call(
 			result = socket_result(&reference, -EOPNOTSUPP);
 			return result;
 		}
+
 		receive_flags = (int)socket_file_effective_flags(&reference,
 		    (int)request.flags);
 
@@ -2153,6 +2231,8 @@ sys_recvmsg_call(
 					wire_result = part;
 				break;
 			}
+
+			/* Stops at end of stream, or once the whole buffer is filled. */
 			if (part == 0)
 				break;
 			wire_result += part;
@@ -2181,6 +2261,8 @@ sys_recvmsg_call(
 				error = copyout(&address, (uintptr_t)request.name,
 				    amount);
 		}
+
+		/* Reports what was received, and whether it had to be truncated. */
 		if ((request.flags & MSG_TRUNC) != 0)
 			request.data_length = (uint64_t)wire_result;
 		else
@@ -2220,6 +2302,8 @@ sys_recvmsg_call(
 		result = socket_result(&reference, result);
 		return result;
 	}
+
+	/* Reserves a descriptor for every file the message carries. */
 	file_count = transaction.file_count;
 	truncated = transaction.control_truncated;
 	if (transaction.active) {
@@ -2236,6 +2320,7 @@ sys_recvmsg_call(
 			result = socket_result(&reference, -error);
 			return result;
 		}
+
 		for (index = 0; index < file_count; index++)
 			descriptors[index] = reservation.slots[index];
 	}
@@ -2254,6 +2339,8 @@ sys_recvmsg_call(
 		if (name_copied != 0)
 			error = copyout(&address, (uintptr_t)request.name, name_copied);
 	}
+
+	/* Reports the descriptors, the address, and the truncation flags. */
 	if (error == 0 && file_count != 0)
 		error = copyout(descriptors, (uintptr_t)request.descriptors,
 		    file_count * sizeof(descriptors[0]));
@@ -2296,6 +2383,7 @@ sys_recvmsg_call(
 		else
 			unix_socket_receive_commit(&transaction);
 	}
+
 	kern_free(buffer);
 	result = socket_result(&reference, result);
 	return result;
@@ -2319,6 +2407,8 @@ sys_shutdown_call(
 		result = socket_result(&reference, -EOPNOTSUPP);
 		return result;
 	}
+
+	/* Shuts the named directions down and reports the outcome. */
 	error = socket->ops->shutdown(socket, (int)args[1]);
 	if (error != 0)
 		result = -error;
@@ -2361,6 +2451,8 @@ sys_socket_name_call(
 			result = socket_result(&reference, -EOPNOTSUPP);
 			return result;
 		}
+
+		/* Asks the protocol for the requested end of the connection. */
 		error = socket->ops->getpeername(socket,
 		    (struct sockaddr *)&address, &length);
 	} else {
@@ -2368,9 +2460,12 @@ sys_socket_name_call(
 			result = socket_result(&reference, -EOPNOTSUPP);
 			return result;
 		}
+
 		error = socket->ops->getsockname(socket,
 		    (struct sockaddr *)&address, &length);
 	}
+
+	/* Copies the address out and reports the outcome. */
 	if (error == 0)
 		error = copy_sockaddr_out(args[1], args[2], &address, length);
 	if (error != 0)
@@ -2452,6 +2547,7 @@ sys_getsockopt_call(
 		result = socket_result(&reference, -error);
 		return result;
 	}
+
 	if (length > sizeof(value))
 		length = sizeof(value);
 
@@ -2500,6 +2596,7 @@ syscall_context_at(
 		*held = NULL;
 		return ENOTDIR;
 	}
+
 	*temporary = *process->cwdi;
 	temporary->cwd = (*held)->f_path;
 	*context = temporary;
@@ -2567,6 +2664,8 @@ sys_open_call(
 		error = filedesc_reserve_many(process->fd, 1, descriptor_flags,
 		    &reservation);
 	}
+
+	/* Opens the file with the caller's credentials and mask applied. */
 	if (error == 0)
 		error = file_openat_cred(context, credential, path,
 		    flags & ~(O_CLOEXEC | O_CLOFORK),
@@ -2579,6 +2678,8 @@ sys_open_call(
 		filedesc_abort_reserved(&reservation);
 		return -error;
 	}
+
+	/* Commits the open file to the reserved descriptor. */
 	files[0] = file;
 	error = filedesc_commit_reserved(&reservation, files, &descriptor);
 	if (error != 0) {
@@ -2586,6 +2687,7 @@ sys_open_call(
 		(void)file_close(file);
 		return -error;
 	}
+
 	return descriptor;
 }
 
@@ -2661,6 +2763,8 @@ sys_read_call(
 		(void)file_close(file);
 		return -error;
 	}
+
+	/* Takes a staging buffer and opens the transfer. */
 	buffer = syscall_regular_buffer(file, length, small_buffer, &capacity);
 	error = file_io_begin(file, FILE_IO_READ, 0, 0, &io);
 	if (error != 0) {
@@ -2686,6 +2790,8 @@ sys_read_call(
 				result = count;
 			goto out;
 		}
+
+		/* Stops at end of file, and copies each chunk out through the pin. */
 		if (count == 0)
 			break;
 		error = copyout_pinned(&pin, done, buffer, (size_t)count);
@@ -2696,6 +2802,7 @@ sys_read_call(
 				result = -error;
 			goto out;
 		}
+
 		done += (size_t)count;
 		if ((size_t)count < chunk)
 			break;
@@ -2711,6 +2818,8 @@ sys_read_call(
 		     file->f_inode->i_type != INODE_BLOCK))
 			break;
 	}
+
+	/* Closes the transfer and releases everything it held. */
 	result = (intptr_t)done;
 out:
 	result = file_io_complete(&io, result);
@@ -2756,6 +2865,8 @@ sys_write_call(
 		(void)file_close(file);
 		return -error;
 	}
+
+	/* Takes a staging buffer and opens the transfer. */
 	buffer = syscall_regular_buffer(file, length, small_buffer, &capacity);
 	error = file_io_begin_cred(file, FILE_IO_WRITE, 0, 0, process->cred,
 	    &io);
@@ -2766,6 +2877,7 @@ sys_write_call(
 		(void)file_close(file);
 		return -error;
 	}
+
 	file_io_set_growth_limit(&io,
 	    resource_limit_current(process, RLIMIT_FSIZE));
 
@@ -2783,6 +2895,8 @@ sys_write_call(
 				result = -error;
 			goto out;
 		}
+
+		/* Writes one chunk, signalling the caller if a limit stopped it. */
 		io_stats_record(IO_SYSCALL_WRITE, chunk);
 		count = file_io_transfer(&io, buffer, chunk);
 		limited = file_io_take_growth_limit_hit(&io);
@@ -2795,12 +2909,16 @@ sys_write_call(
 				result = count;
 			goto out;
 		}
+
+		/* Stops on a limit or a short write. */
 		done += (size_t)count;
 		if (limited)
 			break;
 		if ((size_t)count < chunk)
 			break;
 	}
+
+	/* Closes the transfer and releases everything it held. */
 	result = (intptr_t)done;
 out:
 	result = file_io_complete(&io, result);
@@ -2922,6 +3040,7 @@ sys_getdents_call(
 		(void)file_close(file);
 		return -EINVAL;
 	}
+
 	error = uaccess_pin(args[1], sizeof(output), HAL_SPACE_WRITE, &pin);
 	if (error != 0) {
 		(void)file_close(file);
@@ -2935,11 +3054,14 @@ sys_getdents_call(
 		(void)file_close(file);
 		return -error;
 	}
+
 	if (eof) {
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return 0;
 	}
+
+	/* Renders the entry in the layout the caller expects and copies it out. */
 	memset(&output, 0, sizeof(output));
 	output.d_ino = entry.d_ino;
 	output.d_type = dirent_type(entry.d_type);
@@ -3092,12 +3214,16 @@ sys_mmap_call(
 			(void)file_close(file);
 			return -EACCES;
 		}
+
+		/* Refuses a shared writable mapping of a handle that cannot write back. */
 		if (shared && (args[2] & PROT_WRITE) != 0 &&
 		    ((file_status_flags_get(file) & O_ACCMODE) == O_RDONLY ||
 		     file->f_ops == NULL || file->f_ops->pwrite == NULL)) {
 			(void)file_close(file);
 			return -EACCES;
 		}
+
+		/* Clamps the mapped data to what the file actually holds. */
 		if (file->f_inode->i_size > (off_t)args[5])
 			data_size = (size_t)(file->f_inode->i_size -
 			    (off_t)args[5]);
@@ -3150,6 +3276,7 @@ sys_mmap_call(
 		error = vmspace_map_file_find(process->vmspace, args[0], args[1],
 		    prot, file, (off_t)args[5], data_size, &mapped);
 	}
+
 	if (file != NULL)
 		(void)file_close(file);
 	if (error != 0)
@@ -3307,9 +3434,9 @@ sys_clock_gettime_call(
 	error = kern_clock_gettime((clockid_t)args[0], &time);
 	if (error != 0)
 		return -error;
-	error = copyout(&time, args[1], sizeof(time));
 
 	/* Reports the outcome of the call. */
+	error = copyout(&time, args[1], sizeof(time));
 	if (error != 0)
 		return -error;
 	return 0;
@@ -3402,6 +3529,7 @@ sys_timer_create_call(
 		(void)process_timer_delete(process, id);
 		return -error;
 	}
+
 	return 0;
 }
 
@@ -3547,6 +3675,8 @@ sys_mount_call(
 		if (error == 0 && requested.fspec[0] != '\0')
 			internal.fspec = requested.fspec;
 	}
+
+	/* Translates the flags and performs the mount. */
 	if (error == 0) {
 		mount_flags = 0;
 		if ((flags & MNT_RDONLY) != 0)
@@ -3633,6 +3763,7 @@ sys_statvfs_call(
 			path_release(&path);
 		}
 	}
+
 	if (file != NULL)
 		(void)file_close(file);
 	if (error == 0)
@@ -3691,6 +3822,7 @@ sys_quotactl_call(
 				    (gid_t)request.id);
 			}
 		}
+
 		if (!allowed)
 			error = EPERM;
 	}
@@ -3702,6 +3834,7 @@ sys_quotactl_call(
 		error = mount_quotactl(path.p_mount, &request);
 		path_release(&path);
 	}
+
 	if (error == 0)
 		error = copyout(&request, args[1], sizeof(request));
 
@@ -3722,9 +3855,8 @@ sys_snapshotctl_call(
 	char pathname[PATH_MAX];
 	int error;
 
-	process = current_process();
-
 	/* Only the superuser controls snapshots. */
+	process = current_process();
 	if (process == NULL ||
 	    process->cred == NULL ||
 	    process->cwdi == NULL ||
@@ -3749,6 +3881,7 @@ sys_snapshotctl_call(
 		error = mount_snapshotctl(path.p_mount, &request);
 		path_release(&path);
 	}
+
 	if (error == 0)
 		error = copyout(&request, args[1], sizeof(request));
 
@@ -3774,9 +3907,9 @@ sys_nanosleep_call(
 	uint64_t now;
 
 	process = current_process();
-	error = copyin(args[0], &request, sizeof(request));
 
 	/* Converts the request into a deadline. */
+	error = copyin(args[0], &request, sizeof(request));
 	if (process == NULL || curthread == NULL)
 		return -EINVAL;
 	if (error != 0)
@@ -3792,26 +3925,34 @@ sys_nanosleep_call(
 
 	/* Sleeps until the deadline, a signal, a stop, or termination. */
 	irq = spin_lock_irqsave(&process->lock);
+
+	/* Sleeps until the deadline, a stop, or a signal ends the wait. */
 	for (;;) {
 		now = sched_ticks();
 		if (now >= deadline) {
 			spin_unlock_irqrestore(&process->lock, irq);
 			return 0;
 		}
+
 		if (curthread->terminate_requested) {
 			spin_unlock_irqrestore(&process->lock, irq);
 			return -EINTR;
 		}
+
+		/* Runs a requested stop and then resumes waiting. */
 		if (process->stop_requested) {
 			spin_unlock_irqrestore(&process->lock, irq);
 			process_stop_current(0);
 			irq = spin_lock_irqsave(&process->lock);
 			continue;
 		}
+
 		if (!signal_pending_unblocked_locked(curthread)) {
 			sched_sleep_locked(deadline, &process->lock);
 			continue;
 		}
+
+		/* Redispatches when a transparent stop interrupted the wait. */
 		spin_unlock_irqrestore(&process->lock, irq);
 		if (signal_stop_before_return(curthread) ==
 		    SIGNAL_STOP_RETURN_REDISPATCH) {
@@ -3829,6 +3970,7 @@ sys_nanosleep_call(
 			if (error != 0)
 				return -error;
 		}
+
 		return -EINTR;
 	}
 }
@@ -3871,6 +4013,8 @@ copy_exec_vector(
 				return EINVAL;
 			return 0;
 		}
+
+		/* Copies one argument into the block, refusing one that does not fit. */
 		if (copy->used >= sizeof(copy->strings))
 			return E2BIG;
 		vector[index] = copy->strings + copy->used;
@@ -3881,8 +4025,10 @@ copy_exec_vector(
 				return E2BIG;
 			return error;
 		}
+
 		copy->used += length;
 	}
+
 	return E2BIG;
 }
 
@@ -3926,6 +4072,8 @@ sys_positional_call(
 		(void)file_close(file);
 		return -EINVAL;
 	}
+
+	/* Pins the caller's buffer for the direction of this transfer. */
 	if (writing)
 		access = HAL_SPACE_READ;
 	else
@@ -3935,6 +4083,8 @@ sys_positional_call(
 		(void)file_close(file);
 		return -error;
 	}
+
+	/* Selects the operation and the credentials it runs under. */
 	if (writing) {
 		operation = FILE_IO_PWRITE;
 		credential = process->cred;
@@ -3942,6 +4092,8 @@ sys_positional_call(
 		operation = FILE_IO_PREAD;
 		credential = NULL;
 	}
+
+	/* Takes a staging buffer and opens the transfer. */
 	buffer = syscall_regular_buffer(file, length, small_buffer, &capacity);
 	error = file_io_begin_cred(file, operation, offset, 0, credential, &io);
 	if (error != 0) {
@@ -3951,6 +4103,7 @@ sys_positional_call(
 		(void)file_close(file);
 		return -error;
 	}
+
 	if (writing)
 		file_io_set_growth_limit(&io,
 		    resource_limit_current(process, RLIMIT_FSIZE));
@@ -3975,6 +4128,8 @@ sys_positional_call(
 			io_stats_record(IO_SYSCALL_READ, chunk);
 			count = file_io_transfer(&io, buffer, chunk);
 		}
+
+		/* Reports a failure only when nothing was transferred yet. */
 		if (count < 0) {
 			if (done != 0)
 				result = (intptr_t)done;
@@ -3982,6 +4137,8 @@ sys_positional_call(
 				result = count;
 			goto out;
 		}
+
+		/* Stops at end of file, and copies a read chunk out through the pin. */
 		if (count == 0)
 			break;
 		if (!writing) {
@@ -3989,12 +4146,16 @@ sys_positional_call(
 			if (error != 0)
 				goto copy_error;
 		}
+
+		/* Stops on a limit or a short transfer. */
 		done += (size_t)count;
 		if (limited)
 			break;
 		if ((size_t)count < chunk)
 			break;
 	}
+
+	/* Closes the transfer and releases everything it held. */
 	result = (intptr_t)done;
 	goto out;
 copy_error:
@@ -4070,6 +4231,8 @@ sys_vector_call(
 			error = EINVAL;
 			goto fail;
 		}
+
+		/* Pins one element and counts the bytes it adds. */
 		error = uaccess_pin((uintptr_t)vectors[i].base,
 		    (size_t)vectors[i].length, access, &pins[i]);
 		if (error != 0)
@@ -4084,6 +4247,8 @@ sys_vector_call(
 		error = EBADF;
 		goto fail;
 	}
+
+	/* Selects the operation and the credentials it runs under. */
 	if (writing) {
 		operation = FILE_IO_WRITE;
 		credential = process->cred;
@@ -4091,6 +4256,8 @@ sys_vector_call(
 		operation = FILE_IO_READ;
 		credential = NULL;
 	}
+
+	/* Takes a staging buffer and opens the transfer under the size limit. */
 	buffer = syscall_regular_buffer(file, (size_t)total, small_buffer,
 	    &capacity);
 	error = file_io_begin_cred(file, operation, 0, 0, credential, &io);
@@ -4116,8 +4283,10 @@ sys_vector_call(
 				total = -error;
 				goto out;
 			}
+
 			amount += length;
 		}
+
 		io_stats_record(IO_SYSCALL_WRITE, amount);
 		total = file_io_transfer(&io, buffer, amount);
 		goto out;
@@ -4142,6 +4311,8 @@ sys_vector_call(
 					goto out;
 				}
 			}
+
+			/* Transfers one chunk, signalling the caller if a limit stopped it. */
 			io_stats_record(writing ? IO_SYSCALL_WRITE : IO_SYSCALL_READ, chunk);
 			result = file_io_transfer(&io, buffer, chunk);
 			if (writing) {
@@ -4149,11 +4320,14 @@ sys_vector_call(
 				if (limited)
 					(void)signal_send_thread(curthread, SIGXFSZ);
 			}
+
 			if (result < 0) {
 				if (total == 0)
 					total = result;
 				goto out;
 			}
+
+			/* Stops at end of file, and copies a read chunk out through the pin. */
 			if (result == 0)
 				goto out;
 			if (!writing) {
@@ -4165,6 +4339,8 @@ sys_vector_call(
 					goto out;
 				}
 			}
+
+			/* Stops on a limit, a short transfer, or a non-seekable file. */
 			done += (size_t)result;
 			total += result;
 			if (limited)
@@ -4177,7 +4353,10 @@ sys_vector_call(
 				goto out;
 		}
 	}
+
 	goto out;
+
+/* Closes the transfer and releases every pin and buffer it held. */
 fail:
 	total = -error;
 out:
@@ -4191,6 +4370,7 @@ out:
 		pinned--;
 		uaccess_unpin(&pins[pinned]);
 	}
+
 	return total;
 }
 
@@ -4272,6 +4452,8 @@ sys_stat_path_call(
 		error = syscall_context_at(process, dirfd, &temporary, &context,
 		    &held);
 	}
+
+	/* Walks to the path, following the final link unless told not to. */
 	if (error == 0) {
 		namei_flags = 0;
 		if (nofollow ||
@@ -4279,10 +4461,12 @@ sys_stat_path_call(
 			namei_flags = NAMEI_NOFOLLOW_FINAL;
 		error = namei_path_flags_at(context, pathname, namei_flags, &path);
 	}
+
 	if (error == 0) {
 		error = inode_getattr(path.p_inode, &status);
 		path_release(&path);
 	}
+
 	if (error == 0)
 		error = copyout(&status, status_address, sizeof(status));
 	if (held != NULL)
@@ -4327,6 +4511,8 @@ sys_truncate_call(
 			(void)file_close(file);
 			return -EINVAL;
 		}
+
+		/* Resolves the file from the path when no descriptor was given. */
 		inode = file->f_inode;
 	} else {
 		error = copyinstr(args[0], pathname, sizeof(pathname), NULL);
@@ -4353,6 +4539,8 @@ sys_truncate_call(
 			    resource_limit_current(process, RLIMIT_FSIZE),
 			    process->cred, &limit_exceeded);
 	}
+
+	/* Signals a caller that hit the size limit, and releases the file. */
 	if (limit_exceeded)
 		(void)signal_send_thread(curthread, SIGXFSZ);
 	if (!by_fd)
@@ -4434,6 +4622,7 @@ sys_mutation_common(
 		if (error != 0)
 			goto out_held;
 	}
+
 	error = namei_parent_path_at(context, pathname, &parent, &name,
 	    storage);
 	if (error != 0)
@@ -4460,12 +4649,15 @@ sys_mutation_common(
 			error = vfs_may_remove(parent.p_inode, victim, credential);
 			inode_release(victim);
 		}
+
+		/* Removes the name, as a file or as a directory. */
 		if (error == 0) {
 			if (number == ZEDBSD_SYS_unlink)
 				error = inode_unlink(parent.p_inode, &name);
 			else
 				error = inode_rmdir(parent.p_inode, &name);
 		}
+
 		mount_vfs_transaction_leave(parent.p_mount);
 	} else {
 		/* A rename resolves the second parent on the same mount. */
@@ -4482,6 +4674,8 @@ sys_mutation_common(
 			if (error == 0)
 				other_valid = 1;
 		}
+
+		/* Resolves both ends of a rename inside one file system. */
 		if (error == 0 && parent.p_mount != other_parent.p_mount)
 			error = EXDEV;
 		if (error == 0)
@@ -4499,6 +4693,8 @@ sys_mutation_common(
 			if (target_error != 0 && target_error != ENOENT)
 				error = target_error;
 		}
+
+		/* Checks the rename against the caller's credentials and performs it. */
 		if (error == 0)
 			error = vfs_may_rename(parent.p_inode, source,
 			    other_parent.p_inode, target, credential);
@@ -4508,6 +4704,8 @@ sys_mutation_common(
 			if (error == 0)
 				namecache_remove(other_parent.p_inode, &other_name);
 		}
+
+		/* Releases everything the rename resolved. */
 		if (target != NULL)
 			inode_release(target);
 		if (source != NULL)
@@ -4519,6 +4717,8 @@ sys_mutation_common(
 		if (other_held != NULL)
 			(void)file_close(other_held);
 	}
+
+	/* Releases what the mutation created or held and invalidates the name. */
 	if (created != NULL)
 		inode_release(created);
 	if (error == 0)
@@ -4611,9 +4811,8 @@ replace_cred(
 {
 	int error;
 
-	error = process_cred_replace(process, replacement);
-
 	/* Reports the failure. */
+	error = process_cred_replace(process, replacement);
 	if (error != 0)
 		return error;
 
@@ -4666,6 +4865,8 @@ sys_cred_get_call(
 			error = EINVAL;
 			break;
 		}
+
+		/* Copies the groups out when the caller supplied room, and reports the count. */
 		if (args[0] != 0)
 			error = copyout(cred->groups, args[1],
 			    cred->ngroups * sizeof(cred->groups[0]));
@@ -4676,6 +4877,7 @@ sys_cred_get_call(
 		result = 0;
 		break;
 	}
+
 	cred_release(cred);
 	if (error != 0)
 		return -error;
@@ -4738,6 +4940,8 @@ sys_cred_getres_call(
 		if (error != 0)
 			break;
 	}
+
+	/* Takes the three identities the call number names. */
 	if (error == 0)
 		cred = cred_current_ref();
 	else
@@ -4755,6 +4959,7 @@ sys_cred_getres_call(
 	} else if (error == 0) {
 		error = EINVAL;
 	}
+
 	for (i = 0; error == 0 && i < 3; i++)
 		error = copyout_pinned(&pins[i], 0, &values[i], sizeof(values[i]));
 	cred_release(cred);
@@ -4866,8 +5071,10 @@ user_atomic_equal(
 			*equal = 0;
 			return 0;
 		}
+
 		offset += amount;
 	}
+
 	return 0;
 }
 
@@ -4933,6 +5140,8 @@ sys_atomic_call(
 	 * transaction starts.
 	 */
 	mutex_lock(&user_atomic_lock);
+
+	/* Runs the requested operation with the objects pinned and the lock held. */
 	switch (operation) {
 	case ZEDBSD_ATOMIC_LOAD:
 		error = user_atomic_copy(&object, &first, size);
@@ -4956,7 +5165,10 @@ sys_atomic_call(
 		error = EINVAL;
 		break;
 	}
+
 	mutex_unlock(&user_atomic_lock);
+
+/* Releases the pins and reports the outcome, or the comparison result. */
 out:
 	uaccess_unpin(&second);
 	uaccess_unpin(&first);
@@ -4997,17 +5209,22 @@ sys_cred_set_call(
 		cred_release(old);
 		return -EPERM;
 	}
+
 	cred = cred_copy(old);
 	if (cred == NULL) {
 		cred_release(old);
 		return -ENOMEM;
 	}
+
+	/* Applies the change the call number names. */
 	switch (number) {
 	case ZEDBSD_SYS_setuid:
 		if (!uid_permitted(old, (uid_t)args[0])) {
 			error = EPERM;
 			break;
 		}
+
+		/* The superuser sets all three user identities; anyone else only the effective one. */
 		if (cred_is_superuser(old)) {
 			cred->ruid = (uid_t)args[0];
 			cred->euid = (uid_t)args[0];
@@ -5015,6 +5232,8 @@ sys_cred_set_call(
 		} else {
 			cred->euid = (uid_t)args[0];
 		}
+
+		/* Sets only the effective user identity. */
 		error = 0;
 		break;
 	case ZEDBSD_SYS_seteuid:
@@ -5022,6 +5241,8 @@ sys_cred_set_call(
 			error = EPERM;
 			break;
 		}
+
+		/* Sets the effective user identity. */
 		cred->euid = (uid_t)args[0];
 		error = 0;
 		break;
@@ -5030,6 +5251,8 @@ sys_cred_set_call(
 			error = EPERM;
 			break;
 		}
+
+		/* The superuser sets all three group identities; anyone else only the effective one. */
 		if (cred_is_superuser(old)) {
 			cred->rgid = (gid_t)args[0];
 			cred->egid = (gid_t)args[0];
@@ -5037,6 +5260,8 @@ sys_cred_set_call(
 		} else {
 			cred->egid = (gid_t)args[0];
 		}
+
+		/* Sets only the effective group identity. */
 		error = 0;
 		break;
 	case ZEDBSD_SYS_setegid:
@@ -5044,6 +5269,8 @@ sys_cred_set_call(
 			error = EPERM;
 			break;
 		}
+
+		/* Sets the effective group identity. */
 		cred->egid = (gid_t)args[0];
 		error = 0;
 		break;
@@ -5055,6 +5282,8 @@ sys_cred_set_call(
 			error = EPERM;
 			break;
 		}
+
+		/* Sets whichever of the two user identities the caller named. */
 		if (ruid != (uid_t)-1)
 			cred->ruid = ruid;
 		if (euid != (uid_t)-1)
@@ -5069,6 +5298,8 @@ sys_cred_set_call(
 			error = EPERM;
 			break;
 		}
+
+		/* Sets whichever of the two group identities the caller named. */
 		if (rgid != (gid_t)-1)
 			cred->rgid = rgid;
 		if (egid != (gid_t)-1)
@@ -5085,6 +5316,8 @@ sys_cred_set_call(
 				break;
 			}
 		}
+
+		/* Sets whichever of the three user identities the caller named. */
 		if (i != 3)
 			break;
 		if (uids[0] != (uid_t)-1)
@@ -5105,6 +5338,8 @@ sys_cred_set_call(
 				break;
 			}
 		}
+
+		/* Sets whichever of the three group identities the caller named. */
 		if (i != 3)
 			break;
 		if (gids[0] != (gid_t)-1)
@@ -5120,10 +5355,13 @@ sys_cred_set_call(
 			error = EPERM;
 			break;
 		}
+
 		if (args[0] > KERN_NGROUPS_MAX) {
 			error = EINVAL;
 			break;
 		}
+
+		/* Reads the new group list, or empties it. */
 		if (args[0] == 0)
 			error = 0;
 		else
@@ -5145,6 +5383,7 @@ sys_cred_set_call(
 	} else {
 		cred_release(cred);
 	}
+
 	cred_release(old);
 
 	/* Reports the outcome of the call. */
@@ -5219,6 +5458,7 @@ sys_resolve_path_at(
 		if (error != 0)
 			return error;
 	}
+
 	error = namei_path_flags_at(context, pathname, namei_flags, path);
 	if (error != 0 && *held != NULL) {
 		(void)file_close(*held);
@@ -5259,6 +5499,7 @@ sys_inode_ref_acquire(
 			memset(reference, 0, sizeof(*reference));
 			return EBADF;
 		}
+
 		reference->inode = reference->file->f_inode;
 		return 0;
 	}
@@ -5313,9 +5554,9 @@ sys_getxattr_call(
 
 	process = current_process();
 	value = NULL;
-	size = (size_t)args[3];
 
 	/* Rejects a request larger than one attribute may be. */
+	size = (size_t)args[3];
 	if (process == NULL ||
 	    process->cred == NULL ||
 	    size > INODE_XATTR_SIZE_MAX ||
@@ -5351,6 +5592,7 @@ sys_getxattr_call(
 		else
 			error = 0;
 	}
+
 	kern_free(value);
 	sys_inode_ref_release(&reference);
 	if (error != 0)
@@ -5374,9 +5616,9 @@ sys_setxattr_call(
 
 	process = current_process();
 	value = NULL;
-	size = (size_t)args[3];
 
 	/* Rejects a value larger than one attribute may be. */
+	size = (size_t)args[3];
 	if (process == NULL ||
 	    process->cred == NULL ||
 	    size > INODE_XATTR_SIZE_MAX ||
@@ -5404,6 +5646,7 @@ sys_setxattr_call(
 			size, (unsigned)args[4]);
 		sys_inode_ref_release(&reference);
 	}
+
 	kern_free(value);
 
 	/* Reports the outcome of the call. */
@@ -5428,9 +5671,9 @@ sys_listxattr_call(
 
 	process = current_process();
 	list = NULL;
-	size = (size_t)args[2];
 
 	/* Rejects a request larger than one list may be. */
+	size = (size_t)args[2];
 	if (process == NULL ||
 	    process->cred == NULL ||
 	    size > INODE_XATTR_SIZE_MAX ||
@@ -5464,6 +5707,7 @@ sys_listxattr_call(
 		else
 			error = 0;
 	}
+
 	kern_free(list);
 	sys_inode_ref_release(&reference);
 	if (error != 0)
@@ -5553,6 +5797,8 @@ sys_chmod_common(
 		return -EINVAL;
 
 	/* Finds the inode by descriptor or by path. */
+
+	/* Releases whichever handle resolved the file. */
 	if (by_fd) {
 		file = filedesc_get_ref(process->fd, fd);
 		if (file == NULL || file->f_inode == NULL) {
@@ -5560,6 +5806,8 @@ sys_chmod_common(
 				(void)file_close(file);
 			return -EBADF;
 		}
+
+		/* Resolves the file from the path when no descriptor was given. */
 		inode = file->f_inode;
 	} else {
 		if ((flags & AT_SYMLINK_NOFOLLOW) != 0)
@@ -5586,6 +5834,8 @@ sys_chmod_common(
 			error = inode_setattr(inode, &status, INODE_ATTR_MODE);
 		}
 	}
+
+	/* Releases whichever handle resolved the file. */
 	if (by_fd) {
 		(void)file_close(file);
 	} else {
@@ -5633,6 +5883,8 @@ sys_chown_common(
 		return -EINVAL;
 
 	/* Finds the inode by descriptor or by path. */
+
+	/* Releases whichever handle resolved the file. */
 	if (by_fd) {
 		file = filedesc_get_ref(process->fd, fd);
 		if (file == NULL || file->f_inode == NULL) {
@@ -5640,6 +5892,8 @@ sys_chown_common(
 				(void)file_close(file);
 			return -EBADF;
 		}
+
+		/* Resolves the file from the path when no descriptor was given. */
 		inode = file->f_inode;
 	} else {
 		if ((flags & AT_SYMLINK_NOFOLLOW) != 0)
@@ -5661,6 +5915,7 @@ sys_chown_common(
 			status.st_uid = uid;
 			mask |= INODE_ATTR_UID;
 		}
+
 		if (error == 0 && gid != (gid_t)-1) {
 			status.st_gid = gid;
 			mask |= INODE_ATTR_GID;
@@ -5678,9 +5933,12 @@ sys_chown_common(
 			status.st_mode &= ~(mode_t)(S_ISUID | S_ISGID);
 			mask |= INODE_ATTR_MODE;
 		}
+
 		if (error == 0 && mask != 0)
 			error = inode_setattr(inode, &status, mask);
 	}
+
+	/* Releases whichever handle resolved the file. */
 	if (by_fd) {
 		(void)file_close(file);
 	} else {
@@ -5766,6 +6024,8 @@ sys_utimens_common(
 				(void)file_close(file);
 			return -EBADF;
 		}
+
+		/* Resolves the file from the path when no descriptor was given. */
 		inode = file->f_inode;
 	} else {
 		if ((flags & AT_SYMLINK_NOFOLLOW) != 0)
@@ -5790,6 +6050,8 @@ sys_utimens_common(
 			explicit_time = 1;
 		}
 	}
+
+	/* Adds the modification time to the mask, as an explicit time or as now. */
 	if (error == 0 && times[1].tv_nsec != UTIME_OMIT) {
 		if (times[1].tv_nsec == UTIME_NOW) {
 			mask |= INODE_ATTR_MTIME_NOW;
@@ -5808,6 +6070,8 @@ sys_utimens_common(
 		else if (vfs_access(inode, process->cred, W_OK) != 0)
 			error = EACCES;
 	}
+
+	/* Applies the timestamps and releases whichever handle resolved the file. */
 	if (error == 0 && mask != 0)
 		error = inode_setattr(inode, &status, mask);
 	if (by_fd) {
@@ -5862,9 +6126,11 @@ sys_faccessat_call(
 			check.euid = check.ruid;
 			check.egid = check.rgid;
 		}
+
 		error = vfs_access(path.p_inode, &check, mode);
 		path_release(&path);
 	}
+
 	if (held != NULL)
 		(void)file_close(held);
 
@@ -5897,6 +6163,7 @@ sys_parent_path_at(
 		if (error != 0)
 			return error;
 	}
+
 	error = namei_parent_path_at(*context, pathname, parent, name, storage);
 	if (error != 0 && *held != NULL) {
 		(void)file_close(*held);
@@ -6120,6 +6387,8 @@ sys_sigaction_call(
 		return -EINVAL;
 
 	/* Validates a new action before touching the process. */
+
+	/* Renders the caller's action in the form the kernel keeps. */
 	if (install) {
 		error = copyin(args[1], &action, sizeof(action));
 		if (error != 0)
@@ -6139,6 +6408,8 @@ sys_sigaction_call(
 		     !vmspace_user_range_valid((uintptr_t)action.sa_restorer, 1))))
 			return -EINVAL;
 	}
+
+	/* Renders the caller's action in the form the kernel keeps. */
 	if (install) {
 		replacement.handler = (uintptr_t)action.sa_handler;
 		replacement.mask = action.sa_mask;
@@ -6165,6 +6436,7 @@ sys_sigaction_call(
 		if (error != 0)
 			return -error;
 	}
+
 	return 0;
 }
 
@@ -6199,6 +6471,8 @@ sys_sigprocmask_call(
 
 	/* Applies the operation under the process lock. */
 	irq = spin_lock_irqsave(&curthread->proc->lock);
+
+	/* Keeps the old mask and applies the requested change to it. */
 	old = curthread->signal_mask;
 	if (args[1] != 0) {
 		if (operation == SIG_BLOCK)
@@ -6208,12 +6482,15 @@ sys_sigprocmask_call(
 		else
 			curthread->signal_mask = set;
 	}
+
 	spin_unlock_irqrestore(&curthread->proc->lock, irq);
+
 	if (args[2] != 0) {
 		error = copyout(&old, args[2], sizeof(old));
 		if (error != 0)
 			return -error;
 	}
+
 	return 0;
 }
 
@@ -6232,12 +6509,14 @@ sys_sigpending_call(
 
 	/* Samples the signals pending against the current mask. */
 	irq = spin_lock_irqsave(&curthread->proc->lock);
+
 	pending = (curthread->signal_pending |
 	    curthread->proc->signal_pending) & curthread->signal_mask;
+
 	spin_unlock_irqrestore(&curthread->proc->lock, irq);
-	error = copyout(&pending, args[0], sizeof(pending));
 
 	/* Reports the outcome of the call. */
+	error = copyout(&pending, args[0], sizeof(pending));
 	if (error != 0)
 		return -error;
 	return 0;
@@ -6291,10 +6570,12 @@ sys_mknodat_call(
 		error = EOPNOTSUPP;
 		goto out_credential;
 	}
+
 	if (type == INODE_FIFO && args[3] != 0) {
 		error = EINVAL;
 		goto out_credential;
 	}
+
 	if ((type == INODE_CHAR || type == INODE_BLOCK) &&
 	    !cred_is_superuser(credential)) {
 		error = EPERM;
@@ -6314,6 +6595,8 @@ sys_mknodat_call(
 		if (error != 0)
 			goto out_credential;
 	}
+
+	/* Creates the node in its parent and releases everything the walk held. */
 	error = namei_parent_path_at(context, pathname, &parent, &name, storage);
 	if (error == 0)
 		mount_vfs_transaction_enter(parent.p_mount);
@@ -6410,11 +6693,13 @@ sys_sigaltstack_call(
 			curthread->signal_altstack_flags = 0;
 		}
 	}
+
 	if (args[1] != 0) {
 		error = copyout(&old, args[1], sizeof(old));
 		if (error != 0)
 			return -error;
 	}
+
 	return 0;
 }
 
@@ -6467,6 +6752,7 @@ sys_sigtimedwait_call(
 		if (error != 0)
 			return -error;
 	}
+
 	return signo;
 }
 
@@ -6484,9 +6770,9 @@ sys_sigqueue_call(
 
 	sender = current_process();
 	pid = (pid_t)args[0];
-	signo = (int)args[1];
 
 	/* A null signal only checks permission. */
+	signo = (int)args[1];
 	if (sender == NULL || pid <= 0 || signo < 0 || signo >= NSIG)
 		return -EINVAL;
 	error = signal_kill(sender, pid, 0);
@@ -6552,6 +6838,7 @@ sys_thread_create_call(
 		else
 			(void)thread_abort_new(thread);
 	}
+
 	uaccess_unpin(&pin);
 
 	/* Reports the outcome of the call. */
@@ -6647,10 +6934,14 @@ sys_thread_join_call(
 			thread_release(target);
 		return -ESRCH;
 	}
+
 	irq = spin_lock_irqsave(&process->lock);
+
 	error = thread_join_claim_locked(target, owner,
 	    curthread->syscall_stop_redispatch);
+
 	spin_unlock_irqrestore(&process->lock, irq);
+
 	if (error != 0)
 		goto out;
 
@@ -6668,6 +6959,8 @@ sys_thread_join_call(
 
 	/* Waits for the target to become a zombie. */
 	irq = spin_lock_irqsave(&process->lock);
+
+	/* Sleeps until the target ends, or until a cancel or a signal arrives. */
 	if (cancelable &&
 	    atomic_raw_load_acquire(&curthread->cancel_pending) != 0)
 		error = EINTR;
@@ -6684,8 +6977,10 @@ sys_thread_join_call(
 		    atomic_raw_load_acquire(&curthread->cancel_pending) != 0)
 			error = EINTR;
 	}
+
 	if (error == 0)
 		value = target->user_exit_value;
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/*
@@ -6704,6 +6999,7 @@ release:
 		thread_join_release_locked(target, owner);
 		spin_unlock_irqrestore(&process->lock, irq);
 	}
+
 out:
 	if (pin_active)
 		uaccess_unpin(&pin);
@@ -6739,13 +7035,17 @@ sys_thread_detach_call(
 
 	/* A detached zombie is reaped right away. */
 	irq = spin_lock_irqsave(&process->lock);
+
+	/* Detaches a thread nothing has already claimed. */
 	if (target->detached || target->join_claimed) {
 		error = EINVAL;
 	} else {
 		target->detached = 1;
 		reap = target->state == THREAD_ZOMBIE;
 	}
+
 	spin_unlock_irqrestore(&process->lock, irq);
+
 	if (error == 0 && reap)
 		error = thread_wait(target, NULL);
 	thread_release(target);
@@ -6775,6 +7075,7 @@ sys_thread_self_call(
 		hal_task_set_tls(curthread->task, args[1]);
 		return 0;
 	}
+
 	return -EINVAL;
 }
 
@@ -6788,9 +7089,9 @@ sys_thread_kill_call(
 	int error;
 
 	target = thread_find_ref((tid_t)args[0]);
-	process = current_process();
 
 	/* Refuses a thread that belongs to another process. */
+	process = current_process();
 	if (target == NULL || process == NULL || target->proc != process) {
 		if (target != NULL)
 			thread_release(target);
@@ -6842,6 +7143,7 @@ sys_thread_cancel_call(
 				thread_release(target);
 			return -ESRCH;
 		}
+
 		irq = spin_lock_irqsave(&target->proc->lock);
 		atomic_raw_store_release(&target->cancel_pending, 1U);
 		spin_unlock_irqrestore(&target->proc->lock, irq);
@@ -6860,10 +7162,13 @@ sys_thread_cancel_call(
 	if (args[0] != 0 && (tid_t)args[0] != current->tid)
 		return -EINVAL;
 	irq = spin_lock_irqsave(&current->proc->lock);
+
 	pending = atomic_raw_load_acquire(&current->cancel_pending) != 0;
 	if (operation == ZEDBSD_THREAD_CANCEL_CLEAR)
 		atomic_raw_store_release(&current->cancel_pending, 0U);
+
 	spin_unlock_irqrestore(&current->proc->lock, irq);
+
 	return pending;
 }
 
@@ -6891,9 +7196,9 @@ sys_usync_call(
 	process = current_process();
 	shared_object = NULL;
 	deadline = 0;
-	flags = (unsigned)args[5];
 
 	/* Rejects a flag word this call does not define. */
+	flags = (unsigned)args[5];
 	if (process == NULL ||
 	    (flags & ~(ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE |
 	    ZEDBSD_USYNC_ABSTIME | ZEDBSD_USYNC_CLOCK_REALTIME)) != 0 ||
@@ -6919,6 +7224,8 @@ sys_usync_call(
 			error = EINVAL;
 			goto out;
 		}
+
+		/* Turns an absolute timeout into the deadline this wait runs to. */
 		if (args[3] != 0) {
 			if ((flags & ZEDBSD_USYNC_ABSTIME) != 0) {
 				error = copyin(args[3], &timeout, sizeof(timeout));
@@ -6939,6 +7246,8 @@ sys_usync_call(
 					    &current_time) <= 0)
 						error = ETIMEDOUT;
 				}
+
+				/* Converts the remaining time into ticks. */
 				if (error == 0)
 					error = kern_timespec_sub(&absolute_time,
 					    &current_time, &duration);
@@ -6948,6 +7257,8 @@ sys_usync_call(
 					error = kern_duration_to_ticks_ceil(&relative,
 					    &ticks);
 				}
+
+				/* Takes the deadline, reusing the one a stop interrupted. */
 				if (error == 0)
 					error = kern_deadline_after(clock_ticks(), ticks,
 					    &deadline);
@@ -6965,9 +7276,11 @@ sys_usync_call(
 					error = syscall_restart_deadline_after(ticks,
 					    &deadline);
 			}
+
 			if (error != 0)
 				goto out;
 		}
+
 		error = usync_wait(args[0], (uint32_t)args[2],
 		    key_object, key_offset, deadline,
 		    (flags & ZEDBSD_USYNC_CANCELABLE) != 0);
@@ -6986,6 +7299,7 @@ sys_usync_call(
 			    (unsigned)args[4]);
 		goto out;
 	}
+
 	error = EINVAL;
 out:
 	if (shared_object != NULL)
@@ -7025,6 +7339,8 @@ sys_sigsuspend_call(
 
 	/* Installs the temporary mask and sleeps until a signal is selected. */
 	irq = spin_lock_irqsave(&process->lock);
+
+	/* Substitutes the caller's mask and waits under it. */
 	curthread->signal_suspend_mask = curthread->signal_mask;
 	curthread->signal_mask = mask;
 	curthread->signal_suspended = 1;
@@ -7033,12 +7349,16 @@ sys_sigsuspend_call(
 			spin_unlock_irqrestore(&process->lock, irq);
 			return -EINTR;
 		}
+
+		/* Runs a requested stop and then resumes waiting. */
 		if (process->stop_requested) {
 			spin_unlock_irqrestore(&process->lock, irq);
 			process_stop_current(0);
 			irq = spin_lock_irqsave(&process->lock);
 			continue;
 		}
+
+		/* Ends the wait on a deliverable signal, redispatching after a stop. */
 		if (signal_pending_unblocked_locked(curthread)) {
 			spin_unlock_irqrestore(&process->lock, irq);
 			if (signal_stop_before_return(curthread) ==
@@ -7046,8 +7366,10 @@ sys_sigsuspend_call(
 				irq = spin_lock_irqsave(&process->lock);
 				continue;
 			}
+
 			break;
 		}
+
 		sched_sleep_locked(0, &process->lock);
 	}
 
@@ -7109,8 +7431,12 @@ sys_sigreturn_call(
 	if (level->used_altstack && curthread->signal_on_altstack_depth != 0)
 		curthread->signal_on_altstack_depth--;
 	irq = spin_lock_irqsave(&curthread->proc->lock);
+
 	curthread->signal_mask = restored_mask;
+
 	spin_unlock_irqrestore(&curthread->proc->lock, irq);
+
+	/* Retires this handler level and restores the token of the one below. */
 	memset(level, 0, sizeof(*level));
 	curthread->signal_depth--;
 	if (curthread->signal_depth == 0)
@@ -7127,6 +7453,7 @@ sys_sigreturn_call(
 		    sizeof(curthread->syscall_restart_args));
 		curthread->syscall_redispatch_valid = 1;
 	}
+
 	return restored;
 }
 
@@ -7162,9 +7489,9 @@ sys_dup2_call(
 	int error;
 
 	process = current_process();
-	flags = 0;
 
 	/* Refuses the call without a descriptor table. */
+	flags = 0;
 	if (process == NULL || process->fd == NULL)
 		return -EBADF;
 
@@ -7204,9 +7531,9 @@ sys_fcntl_call(
 	int command;
 
 	process = current_process();
-	command = (int)args[1];
 
 	/* Refuses the call without a descriptor table. */
+	command = (int)args[1];
 	if (process == NULL || process->fd == NULL)
 		return -EBADF;
 
@@ -7256,6 +7583,8 @@ sys_fcntl_call(
 
 	/* Reports the status flags of the open file. */
 	case F_GETFL:
+
+		/* Records the process that receives this file's signals. */
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
 			return -EBADF;
@@ -7265,6 +7594,8 @@ sys_fcntl_call(
 
 	/* Installs the status flags the file allows. */
 	case F_SETFL:
+
+		/* Records the process that receives this file's signals. */
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
 			return -EBADF;
@@ -7310,6 +7641,8 @@ sys_fcntl_call(
 		    (pid_t)-owner)) {
 			return -ESRCH;
 		}
+
+		/* Records the process that receives this file's signals. */
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
 			return -EBADF;
@@ -7322,6 +7655,7 @@ sys_fcntl_call(
 	case F_OFD_GETLK:
 	case F_OFD_SETLK:
 	case F_OFD_SETLKW:
+		/* Runs one record-lock operation and reports a query's result. */
 		error = copyin(args[2], &request, sizeof(request));
 		if (error != 0)
 			return -error;
@@ -7388,8 +7722,10 @@ sys_pipe2_call(
 			(void)file_close(read_file);
 			(void)file_close(write_file);
 		}
+
 		return -error;
 	}
+
 	return 0;
 }
 
@@ -7441,9 +7777,8 @@ sys_times_call(
 	uint64_t child_system_ticks;
 	int error;
 
-	process = current_process();
-
 	/* The record size selects the ABI version. */
+	process = current_process();
 	if (process == NULL ||
 	    args[0] == 0 ||
 	    args[2] != 0 ||
@@ -7470,9 +7805,9 @@ sys_times_call(
 	result.elapsed_ticks = sched_ticks();
 	result.system_ticks = system_ticks;
 	result.child_system_ticks = child_system_ticks;
-	error = copyout(&result, args[0], record_size);
 
 	/* Reports the outcome of the call. */
+	error = copyout(&result, args[0], record_size);
 	if (error != 0)
 		return -error;
 	return 0;
@@ -7500,26 +7835,32 @@ priority_matches(
 		else if (which == PRIO_USER)
 			who = (id_t)caller->cred->euid;
 	}
+
 	if (which == PRIO_PROCESS) {
 		if (target->pid == (pid_t)who)
 			return 1;
 		return 0;
 	}
+
 	if (which == PRIO_PGRP) {
 		if (target->pgrp == (pid_t)who)
 			return 1;
 		return 0;
 	}
+
+	/* Matches a target by the effective user identity it runs under. */
 	if (which == PRIO_USER) {
 		target_cred = cred_process_ref(target);
 		if (target_cred != NULL) {
 			target_euid = target_cred->euid;
 			cred_release(target_cred);
 		}
+
 		if (target_euid == (uid_t)who)
 			return 1;
 		return 0;
 	}
+
 	return 0;
 }
 
@@ -7564,13 +7905,15 @@ sys_getpriority_call(
 				best = value;
 			found = 1;
 		}
+
 		process_release(target);
 	}
+
 	if (!found)
 		return -ESRCH;
-	error = copyout(&best, args[2], sizeof(best));
 
 	/* Reports the outcome of the call. */
+	error = copyout(&best, args[2], sizeof(best));
 	if (error != 0)
 		return -error;
 	return 0;
@@ -7631,16 +7974,21 @@ sys_setpriority_call(
 				denied = 1;
 				continue;
 			}
+
+			/* Only the superuser may lower a nice value. */
 			cred_release(target_cred);
 			if (value < old && !cred_is_superuser(caller->cred)) {
 				denied = 1;
 				process_release(target);
 				continue;
 			}
+
 			atomic_int_store_relaxed(&target->nice_value, value);
 		}
+
 		process_release(target);
 	}
+
 	if (!found)
 		return -ESRCH;
 	if (denied)
@@ -7692,11 +8040,12 @@ sys_getrusage_call(
 	} else {
 		return -EINVAL;
 	}
+
 	ticks_to_timeval(user_ticks, &usage.ru_utime);
 	ticks_to_timeval(system_ticks, &usage.ru_stime);
-	error = copyout(&usage, args[1], sizeof(usage));
 
 	/* Reports the outcome of the call. */
+	error = copyout(&usage, args[1], sizeof(usage));
 	if (error != 0)
 		return -error;
 	return 0;
@@ -7755,9 +8104,9 @@ sys_getitimer_call(
 	int error;
 
 	process = current_process();
-	which = (int)args[0];
 
 	/* Rejects a call that names no known timer or no output. */
+	which = (int)args[0];
 	if (process == NULL ||
 	    which < 0 ||
 	    which > 2 ||
@@ -7770,9 +8119,9 @@ sys_getitimer_call(
 
 	/* Samples the timer and copies it out. */
 	timer_snapshot(process, which, &value);
-	error = copyout(&value, args[1], sizeof(value));
 
 	/* Reports the outcome of the call. */
+	error = copyout(&value, args[1], sizeof(value));
 	if (error != 0)
 		return -error;
 	return 0;
@@ -7794,9 +8143,9 @@ sys_setitimer_call(
 	uint64_t old_interval;
 
 	process = current_process();
-	which = (int)args[0];
 
 	/* Rejects a call that names no known timer. */
+	which = (int)args[0];
 	if (process == NULL ||
 	    which < 0 ||
 	    which > 2 ||
@@ -7828,6 +8177,7 @@ sys_setitimer_call(
 		if (error != 0)
 			return -error;
 	}
+
 	return 0;
 }
 
@@ -7900,6 +8250,8 @@ sys_fexecve_call(
 		(void)file_close(file);
 		return -ENOMEM;
 	}
+
+	/* Copies both vectors in and runs the image. */
 	error = copy_exec_vector(args[1], copy->argv, ZEDBSD_SPAWN_ARG_MAX,
 	    copy, 0);
 	if (error == 0)
@@ -7946,6 +8298,8 @@ sys_waitpid_call(
 	} else {
 		memset(&pin, 0, sizeof(pin));
 	}
+
+	/* Commits the event straight away when no status is wanted. */
 	result = process_wait_select(process, (pid_t)args[0], (int)args[2],
 	    &event);
 	if (result <= 0 || args[1] == 0) {
@@ -7956,6 +8310,7 @@ sys_waitpid_call(
 				result = -error;
 			}
 		}
+
 		uaccess_unpin(&pin);
 		return result;
 	}
@@ -8023,6 +8378,7 @@ sys_waitid_call(
 	} else {
 		return -EINVAL;
 	}
+
 	result = process_wait_select_mask(process, selector,
 	    options & WNOHANG, mask, &event);
 	if (result < 0)
@@ -8036,6 +8392,8 @@ sys_waitid_call(
 			return -EFAULT;
 		return 0;
 	}
+
+	/* Renders the event as the signal information a caller sees. */
 	information.si_signo = SIGCHLD;
 	information.si_pid = event.pid;
 	information.si_uid = event.uid;
@@ -8144,6 +8502,7 @@ sys_process_identity_call(
 			process_release(target);
 			return value;
 		}
+
 		return -ESRCH;
 
 	/* Moves a process into a group. */
@@ -8168,6 +8527,7 @@ sys_process_identity_call(
 			process_release(target);
 			return value;
 		}
+
 		return -ESRCH;
 	default:
 		return -ENOSYS;
@@ -8703,6 +9063,7 @@ syscall_dispatch_body(
 		result = -ENOSYS;
 		break;
 	}
+
 	return result;
 }
 
@@ -8792,6 +9153,8 @@ syscall_dispatch(
 			thread->syscall_redispatch_valid = 0;
 			thread->stop_interrupted = 0;
 		}
+
+		/* Runs the handler, and leaves for good if the thread was told to end. */
 		result = syscall_dispatch_body(dispatch_number, dispatch_args);
 		if (thread != NULL)
 			thread->syscall_stop_redispatch = 0;
@@ -8803,6 +9166,8 @@ syscall_dispatch(
 				process_cred_read_leave(process);
 			thread_exit(0);
 		}
+
+		/* Redispatches the call a signal handler returned into. */
 		if (thread != NULL && dispatch_number == ZEDBSD_SYS_sigreturn &&
 		    thread->syscall_redispatch_valid) {
 			dispatch_number = thread->syscall_restart_number;
@@ -8812,6 +9177,8 @@ syscall_dispatch(
 			syscall_restart_state_begin(thread);
 			continue;
 		}
+
+		/* Runs a pending stop, and restarts the call the stop interrupted. */
 		if (thread != NULL && thread->stop_interrupted) {
 			thread->stop_interrupted = 0;
 			if (process_stop_requested(thread))
@@ -8830,8 +9197,11 @@ syscall_dispatch(
 				continue;
 			}
 		}
+
 		break;
 	}
+
+	/* Retires the restart state and the accounting this call opened. */
 	syscall_restart_state_finish(thread);
 	if (cred_guard)
 		process_cred_read_leave(process);

@@ -24,9 +24,9 @@ kern_init_start(
 	int error;
 
 	/* Spawns init without an inherited argument vector. */
-	error = process_spawn_init(path, NULL);
 
 	/* Reports why the spawn failed. */
+	error = process_spawn_init(path, NULL);
 	if (error != 0)
 		return error;
 

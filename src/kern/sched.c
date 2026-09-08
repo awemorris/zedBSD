@@ -71,9 +71,8 @@ sched_accounting_kernel_enter(
 {
 	struct thread *thread;
 
-	thread = curthread;
-
 	/* Only user threads are accounted. */
+	thread = curthread;
 	if (thread == NULL ||
 	    (thread->flags & THREAD_FLAG_IDLE) != 0 ||
 	    thread->proc == NULL ||
@@ -95,9 +94,8 @@ sched_accounting_kernel_leave(
 {
 	struct thread *thread;
 
-	thread = curthread;
-
 	/* Only user threads are accounted. */
+	thread = curthread;
 	if (thread == NULL ||
 	    (thread->flags & THREAD_FLAG_IDLE) != 0 ||
 	    thread->proc == NULL ||
@@ -173,6 +171,7 @@ sched_prepare_thread(
 			return ENOMEM;
 		return EBUSY;
 	}
+
 	thread->sched.cpu = cpu;
 	thread->sched.last_cpu = cpu;
 
@@ -202,12 +201,15 @@ sched_add(
 	/* Queues the thread with a fresh quantum and pokes its CPU. */
 	cpu = sched_cpu_state(thread->sched.cpu);
 	irq = spin_lock_irqsave(&cpu->lock);
+
 	thread->state = THREAD_RUNNABLE;
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 	queue_append(&cpu->run[thread->sched.priority], thread,
 	    SCHED_QUEUE_RUN);
 	cpu->need_resched = 1;
+
 	spin_unlock_irqrestore(&cpu->lock, irq);
+
 	notify_cpu(thread->sched.cpu);
 }
 
@@ -238,7 +240,9 @@ sched_unlink(
 			break;
 		spin_unlock_irqrestore(&cpu->lock, irq);
 	}
+
 	queue_remove_thread(cpu, thread);
+
 	spin_unlock_irqrestore(&cpu->lock, irq);
 }
 
@@ -294,7 +298,9 @@ sched_wakeup(
 	queue_append(&cpu->run[thread->sched.priority], thread,
 	    SCHED_QUEUE_RUN);
 	cpu->need_resched = 1;
+
 	spin_unlock_irqrestore(&cpu->lock, irq);
+
 	notify_cpu(id);
 }
 
@@ -376,6 +382,7 @@ sched_yield(
 	id = hal_cpu_current();
 	cpu = sched_cpu_state(id);
 	ignored = spin_lock_irqsave(&cpu->lock);
+
 	(void)ignored;
 
 	/* Requeues a running non-idle thread behind its peers. */
@@ -398,6 +405,7 @@ sched_yield(
 		else
 			next = cpu->idle;
 	}
+
 	if (next == NULL)
 		HAL_FATAL("yield without idle thread");
 	next->state = THREAD_RUNNING;
@@ -451,6 +459,7 @@ sched_exit_current(
 
 	/* Marks the thread exiting and picks its successor. */
 	ignored = spin_lock_irqsave(&cpu->lock);
+
 	(void)ignored;
 	if (current->state != THREAD_RUNNING || cpu->retired != NULL)
 		HAL_FATAL("invalid scheduler retirement");
@@ -514,6 +523,7 @@ sched_clock_cpu(
 	/* Wakes the timed sleepers whose deadline passed. */
 	cpu = sched_cpu_state(id);
 	irq = spin_lock_irqsave(&cpu->lock);
+
 	thread = cpu->sleep.head;
 	while (thread != NULL) {
 		next = thread->sched.next;
@@ -526,6 +536,7 @@ sched_clock_cpu(
 			    SCHED_QUEUE_RUN);
 			cpu->need_resched = 1;
 		}
+
 		thread = next;
 	}
 
@@ -568,6 +579,7 @@ sched_clock_cpu(
 				preempt = 1;
 		}
 	}
+
 	spin_unlock_irqrestore(&cpu->lock, irq);
 
 	/* Applies the CPU limit and sends the expired interval timer signals. */
@@ -615,9 +627,9 @@ sched_wait_task(
 	bool enabled;
 
 	enabled = hal_irq_disable();
-	thread = curthread;
 
 	/* Only a non-idle thread on its own CPU can wait. */
+	thread = curthread;
 	if (thread == NULL ||
 	    (thread->flags & THREAD_FLAG_IDLE) != 0 ||
 	    thread->sched.cpu != hal_cpu_current())
@@ -626,6 +638,7 @@ sched_wait_task(
 	/* Consumes an earlier notification without sleeping. */
 	cpu = sched_cpu_state(thread->sched.cpu);
 	ignored = spin_lock_irqsave(&cpu->lock);
+
 	(void)ignored;
 	if (thread->notify_pending != 0) {
 		thread->notify_pending = 0;
@@ -699,7 +712,9 @@ sched_notify_task(
 		/* Preserves a notification delivered before kernel_wait_task(). */
 		thread->notify_pending = 1;
 	}
+
 	spin_unlock_irqrestore(&cpu->lock, irq);
+
 	if (runnable)
 		notify_cpu(id);
 }
@@ -739,15 +754,16 @@ sched_sleep(
 	bool enabled;
 
 	enabled = hal_irq_disable();
-	thread = curthread;
 
 	/* Only a thread on its own CPU can sleep. */
+	thread = curthread;
 	if (thread == NULL || thread->sched.cpu != hal_cpu_current())
 		HAL_FATAL("invalid scheduler sleep");
 
 	/* Publishes the sleep, with the deadline on the sleep queue. */
 	cpu = sched_cpu_state(thread->sched.cpu);
 	ignored = spin_lock_irqsave(&cpu->lock);
+
 	(void)ignored;
 	thread->state = THREAD_SLEEPING;
 	thread->sched.wakeup_tick = timeout_tick;
@@ -926,6 +942,7 @@ sched_has_runnable(
 	/* Checks every priority level under the CPU lock. */
 	cpu = sched_cpu_state(hal_cpu_current());
 	irq = spin_lock_irqsave(&cpu->lock);
+
 	for (priority = SCHED_PRIOR_HIGH; priority <= SCHED_PRIOR_LOW;
 	     priority++) {
 		if (cpu->run[priority].head != NULL) {
@@ -933,6 +950,7 @@ sched_has_runnable(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&cpu->lock, irq);
 
 	/* Reports whether a thread is queued. */
@@ -950,9 +968,9 @@ sched_idle(
 	hal_cpu_id_t cpu;
 
 	idle = curthread;
-	cpu = hal_cpu_current();
 
 	/* Only the CPU's idle thread idles. */
+	cpu = hal_cpu_current();
 	if (idle == NULL ||
 	    (idle->flags & THREAD_FLAG_IDLE) == 0 ||
 	    idle->sched.cpu != cpu)
@@ -980,9 +998,8 @@ sched_secondary_init(
 	struct sched_cpu *cpu;
 	struct thread *idle;
 
-	idle = curthread;
-
 	/* Only a secondary CPU's own idle thread may enter. */
+	idle = curthread;
 	if (id == 0 ||
 	    id != hal_cpu_current() ||
 	    id >= scheduler_cpu_count ||
@@ -1027,6 +1044,7 @@ sched_wait_others_online(
 			    !hal_cpu_mask_test(&scheduler_online_mask, cpu))
 				break;
 		}
+
 		if (cpu == scheduler_cpu_count)
 			return 0;
 		hal_compiler_barrier();
@@ -1072,13 +1090,16 @@ sched_set_cpu(
 	/* Takes the thread off its old CPU's queues and marks it migrating. */
 	old_cpu = sched_cpu_state(old);
 	irq = spin_lock_irqsave(&old_cpu->lock);
+
 	if (thread->sched.cpu != old || thread->sched.need_migrate != 0) {
 		spin_unlock_irqrestore(&old_cpu->lock, irq);
 		return EBUSY;
 	}
+
 	old_kind = thread->sched.queue_kind;
 	queue_remove_thread(old_cpu, thread);
 	thread->sched.need_migrate = SCHED_MIGRATING;
+
 	spin_unlock_irqrestore(&old_cpu->lock, irq);
 
 	/* Moves the task; a failure puts the thread back on the old CPU. */
@@ -1096,6 +1117,7 @@ sched_set_cpu(
 		} else if (old_kind == SCHED_QUEUE_SLEEP) {
 			queue_append(&old_cpu->sleep, thread, SCHED_QUEUE_SLEEP);
 		}
+
 		spin_unlock_irqrestore(&old_cpu->lock, irq);
 		if (error == HAL_ERR_BUSY)
 			return EBUSY;
@@ -1105,6 +1127,7 @@ sched_set_cpu(
 	/* Queues the thread on the new CPU, applying a pending wakeup. */
 	new_cpu = sched_cpu_state(target);
 	irq = spin_lock_irqsave(&new_cpu->lock);
+
 	pending = thread->sched.need_migrate & SCHED_WAKE_PENDING;
 	thread->sched.cpu = target;
 	thread->sched.last_cpu = old;
@@ -1119,7 +1142,9 @@ sched_set_cpu(
 	} else if (old_kind == SCHED_QUEUE_SLEEP) {
 		queue_append(&new_cpu->sleep, thread, SCHED_QUEUE_SLEEP);
 	}
+
 	spin_unlock_irqrestore(&new_cpu->lock, irq);
+
 	if (old_kind == SCHED_QUEUE_RUN)
 		notify_cpu(target);
 
@@ -1145,8 +1170,11 @@ sched_cpu_notify(
 	/* Yields when a reschedule was requested. */
 	cpu = sched_cpu_state(id);
 	irq = spin_lock_irqsave(&cpu->lock);
+
 	runnable = cpu->need_resched != 0;
+
 	spin_unlock_irqrestore(&cpu->lock, irq);
+
 	if (runnable)
 		sched_yield();
 }
@@ -1292,9 +1320,8 @@ complete_retired(
 {
 	struct thread *thread;
 
-	thread = cpu->retired;
-
 	/* Nothing retired since the last switch. */
+	thread = cpu->retired;
 	if (thread == NULL)
 		return;
 
@@ -1379,14 +1406,17 @@ switch_without_enqueue(
 			spin_unlock_irqrestore(&cpu->lock, irq);
 			return;
 		}
+
 		next = cpu->idle;
 		if (next == NULL)
 			HAL_FATAL("scheduler CPU has no idle thread");
 	}
+
 	next->state = THREAD_RUNNING;
 	next->sched.last_cpu = id;
 	next->sched.quantum = SCHED_QUANTUM_TICKS;
 	cpu->need_resched = 0;
+
 	spin_unlock_irqrestore(&cpu->lock, irq);
 
 	/* Switches, then retires the thread that exited before us. */

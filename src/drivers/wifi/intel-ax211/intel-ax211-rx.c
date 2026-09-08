@@ -108,21 +108,21 @@ drv_intel_ax211_rx_api89_validate(
 	/* Handles the table availability. */
 	if (table == NULL)
 		return INTEL_AX211_RX_INVALID;
+
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_version_lookup(
 		table, INTEL_AX211_RX_MPDU_GROUP, INTEL_AX211_RX_MPDU_OPCODE,
 		&version);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return INTEL_AX211_RX_UNSUPPORTED;
 
 	/* Handles the version condition. */
 	if (version.command_version != INTEL_AX211_PROTOCOL_UNKNOWN_VERSION ||
 	    version.notification_version !=
-		    INTEL_AX211_RX_MPDU_NOTIFICATION_VERSION)
-
+		    INTEL_AX211_RX_MPDU_NOTIFICATION_VERSION) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RX_UNSUPPORTED;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_RX_OK;
@@ -156,10 +156,10 @@ drv_intel_ax211_rx_mpdu_decode(
 
 	/* Handles the message availability. */
 	if (message == NULL || output == NULL || mpdu == NULL ||
-	    generation == 0U || message->generation == 0U)
-
+	    generation == 0U || message->generation == 0U) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RX_INVALID;
+	}
 
 	/* Handles the message condition. */
 	if (message->generation != generation)
@@ -168,10 +168,10 @@ drv_intel_ax211_rx_mpdu_decode(
 	/* Handles the message condition. */
 	if (message->group != INTEL_AX211_RX_MPDU_GROUP ||
 	    message->opcode != INTEL_AX211_RX_MPDU_OPCODE ||
-	    message->version != INTEL_AX211_RX_MPDU_NOTIFICATION_VERSION)
-
+	    message->version != INTEL_AX211_RX_MPDU_NOTIFICATION_VERSION) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RX_UNSUPPORTED;
+	}
 
 	/* Checks the operation status. */
 	if ((message->flags & INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK) != 0U)
@@ -186,18 +186,18 @@ drv_intel_ax211_rx_mpdu_decode(
 		return INTEL_AX211_RX_TRUNCATED;
 
 	descriptor = message->payload;
-	frame_length = ax211_rx_get_le16(descriptor);
 
 	/* Handles the frame length condition. */
+	frame_length = ax211_rx_get_le16(descriptor);
 	if (frame_length > INTEL_AX211_RX_MPDU_FRAME_MAX)
 		return INTEL_AX211_RX_OVERSIZED;
 
 	/* Handles the message condition. */
 	if (message->payload_length - INTEL_AX211_RX_MPDU_DESCRIPTOR_SIZE <
-	    frame_length)
-
+	    frame_length) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RX_TRUNCATED;
+	}
 
 	/*
  * The transport may round an RX packet up and leave bytes after the
@@ -211,17 +211,17 @@ drv_intel_ax211_rx_mpdu_decode(
 	/* Handles the decoded condition. */
 	if ((decoded.status &
 	     (AX211_RX_STATUS_CRC_OK | AX211_RX_STATUS_OVERRUN_OK)) !=
-	    (AX211_RX_STATUS_CRC_OK | AX211_RX_STATUS_OVERRUN_OK))
-
+	    (AX211_RX_STATUS_CRC_OK | AX211_RX_STATUS_OVERRUN_OK)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RX_FAILED;
+	}
 
 	/* Handles the decoded condition. */
 	if ((decoded.status & AX211_RX_STATUS_DUPLICATE) != 0U)
 		return INTEL_AX211_RX_DUPLICATE;
-	mac_flags = descriptor[3U];
 
 	/* Handles the mac flags condition. */
+	mac_flags = descriptor[3U];
 	if ((mac_flags & AX211_RX_MAC_FLAG_AMSDU) != 0U)
 		return INTEL_AX211_RX_UNSUPPORTED;
 	decoded.rssi_dbm = ax211_rx_rssi(descriptor[40U], descriptor[41U]);
@@ -231,18 +231,18 @@ drv_intel_ax211_rx_mpdu_decode(
 	if (decoded.channel == 0U)
 		return INTEL_AX211_RX_FAILED;
 	decoded.gp2_on_air_rise = ax211_rx_get_le32(descriptor + 44U);
-	phy_info = ax211_rx_get_le16(descriptor + 5U);
 
 	/* Handles the phy info condition. */
+	phy_info = ax211_rx_get_le16(descriptor + 5U);
 	if ((phy_info & AX211_RX_PHY_INFO_TSF_OVERLOAD) == 0U) {
 		decoded.tsf = ax211_rx_get_le64(descriptor + 48U);
 		decoded.tsf_valid = 1U;
 	}
 
 	frame = descriptor + INTEL_AX211_RX_MPDU_DESCRIPTOR_SIZE;
-	result = ax211_rx_header_length(frame, frame_length, &header_length);
 
 	/* Checks the operation result. */
+	result = ax211_rx_header_length(frame, frame_length, &header_length);
 	if (result != INTEL_AX211_RX_OK)
 		return result;
 	hardware_trailer_length =
@@ -258,17 +258,17 @@ drv_intel_ax211_rx_mpdu_decode(
 			? AX211_CCMP_MIC_SIZE
 			: 0U;
 	copied_length = frame_length - hardware_trailer_length;
-	padding_offset = header_length;
 
 	/* Handles the decoded condition. */
+	padding_offset = header_length;
 	if ((decoded.status & AX211_RX_STATUS_SECURITY_MASK) ==
 	    AX211_RX_STATUS_SECURITY_CCMP) {
 		/* Handles the padding offset condition. */
 		if (padding_offset > copied_length ||
-		    copied_length - padding_offset < AX211_CCMP_HEADER_SIZE)
-
+		    copied_length - padding_offset < AX211_CCMP_HEADER_SIZE) {
 			/* Returns the computed result. */
 			return INTEL_AX211_RX_TRUNCATED;
+		}
 		padding_offset += AX211_CCMP_HEADER_SIZE;
 	}
 
@@ -276,19 +276,19 @@ drv_intel_ax211_rx_mpdu_decode(
 	if ((mac_flags & AX211_RX_MAC_FLAG_PADDING) != 0U) {
 		/* Handles the padding offset condition. */
 		if (padding_offset > copied_length ||
-		    copied_length - padding_offset < 2U)
-
+		    copied_length - padding_offset < 2U) {
 			/* Returns the computed result. */
 			return INTEL_AX211_RX_TRUNCATED;
+		}
 		copied_length -= 2U;
 	}
 
 	/* Handles the copied length condition. */
 	if (copied_length > SIZE_MAX - common_trailer_length)
 		return INTEL_AX211_RX_OVERSIZED;
-	normalized_length = copied_length + common_trailer_length;
 
 	/* Handles the normalized length condition. */
+	normalized_length = copied_length + common_trailer_length;
 	if (normalized_length > output_capacity)
 		return INTEL_AX211_RX_BUFFER_TOO_SMALL;
 
@@ -305,27 +305,27 @@ drv_intel_ax211_rx_mpdu_decode(
 	if (common_trailer_length != 0U)
 		memset(output + copied_length, 0, common_trailer_length);
 	frame_control = ax211_rx_get_le16(output);
-	result = ax211_rx_header_length(output, normalized_length,
-					&header_length);
 
 	/* Checks the operation result. */
+	result = ax211_rx_header_length(output, normalized_length,
+					&header_length);
 	if (result != INTEL_AX211_RX_OK)
 		return result;
 	decoded.frame = output;
 	decoded.length = normalized_length;
-	result = ax211_rx_security(&decoded, output, normalized_length,
-				   header_length);
 
 	/* Checks the operation result. */
+	result = ax211_rx_security(&decoded, output, normalized_length,
+				   header_length);
 	if (result != INTEL_AX211_RX_OK)
 		return result;
 
 	/* Handles the frame control condition. */
 	if ((frame_control & AX211_FRAME_PROTECTED) == 0U &&
-	    decoded.cipher != INTEL_AX211_RX_CIPHER_NONE)
-
+	    decoded.cipher != INTEL_AX211_RX_CIPHER_NONE) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RX_FAILED;
+	}
 	*mpdu = decoded;
 	/* Returns the computed result. */
 	return INTEL_AX211_RX_OK;
@@ -398,9 +398,9 @@ ax211_rx_header_length(
 		return INTEL_AX211_RX_INVALID;
 	frame_control = ax211_rx_get_le16(frame);
 	type = frame_control & AX211_FRAME_TYPE_MASK;
-	subtype = frame_control & AX211_FRAME_SUBTYPE_MASK;
 
 	/* Handles the type condition. */
+	subtype = frame_control & AX211_FRAME_SUBTYPE_MASK;
 	if (type == AX211_FRAME_TYPE_MANAGEMENT) {
 		required = 24U;
 	} else if (type == AX211_FRAME_TYPE_CONTROL) {
@@ -409,9 +409,8 @@ ax211_rx_header_length(
 				   ? 10U
 				   : 16U;
 	} else if (type == AX211_FRAME_TYPE_DATA) {
-		required = 24U;
-
 		/* Handles the frame control condition. */
+		required = 24U;
 		if ((frame_control &
 		     (AX211_FRAME_TO_DS | AX211_FRAME_FROM_DS)) ==
 		    (AX211_FRAME_TO_DS | AX211_FRAME_FROM_DS))
@@ -451,9 +450,9 @@ ax211_rx_security(
 	uint32_t security;
 
 	frame_control = ax211_rx_get_le16(frame);
-	security = mpdu->status & AX211_RX_STATUS_SECURITY_MASK;
 
 	/* Handles the security condition. */
+	security = mpdu->status & AX211_RX_STATUS_SECURITY_MASK;
 	if (security == AX211_RX_STATUS_SECURITY_NONE) {
 		/* Handles the frame control condition. */
 		if ((frame_control & AX211_FRAME_PROTECTED) != 0U)
@@ -471,17 +470,17 @@ ax211_rx_security(
 	if ((frame_control & AX211_FRAME_PROTECTED) == 0U ||
 	    (mpdu->status &
 	     (AX211_RX_STATUS_DECRYPTED | AX211_RX_STATUS_MIC_OK)) !=
-		    (AX211_RX_STATUS_DECRYPTED | AX211_RX_STATUS_MIC_OK))
-
+		    (AX211_RX_STATUS_DECRYPTED | AX211_RX_STATUS_MIC_OK)) {
 		/* Returns the computed result. */
 		return INTEL_AX211_RX_FAILED;
+	}
 
 	/* Checks the current data length. */
 	if (length < header_length + AX211_CCMP_HEADER_SIZE)
 		return INTEL_AX211_RX_TRUNCATED;
-	ccmp = frame + header_length;
 
 	/* Handles the ccmp condition. */
+	ccmp = frame + header_length;
 	if (ccmp[2U] != 0U || (ccmp[3U] & AX211_CCMP_EXTENDED_IV) == 0U)
 		return INTEL_AX211_RX_FAILED;
 	mpdu->packet_number =

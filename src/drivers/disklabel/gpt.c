@@ -73,34 +73,6 @@ const struct partition_scheme drv_partition_scheme_gpt = {
 	.scan = gpt_scan,
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* Supports the get32 operation. */
 static uint32_t
 get32(
@@ -229,19 +201,18 @@ canonical_protective_mbr(
 	 * ff/ff/ff. */
 	/* Process each element required by the operation. */
 	for (slot = 0U; slot < 4U; slot++) {
-		entry = block + GPT_MBR_TABLE + slot * GPT_MBR_ENTRY_SIZE;
-
 		/* Handles the entry condition. */
+		entry = block + GPT_MBR_TABLE + slot * GPT_MBR_ENTRY_SIZE;
 		if (entry[4U] != 0xeeU)
 			continue;
 		protective_count++;
 
 		/* Checks the get32 result. */
 		if (entry[0U] != 0U || get32(entry + 8U) != 1U ||
-		    get32(entry + 12U) == 0U)
-
+		    get32(entry + 12U) == 0U) {
 			/* Returns the computed result. */
 			return -EINVAL;
+		}
 		*advertised_blocks = get32(entry + 12U);
 	}
 
@@ -277,19 +248,19 @@ pure_protective_mbr(
 	/* Checks the disk read result. */
 	if (disk_read(disk, 0U, 1U, block) != 0)
 		return -EIO;
-	entry = block + GPT_MBR_TABLE;
 
 	/* Checks the all zero result. */
+	entry = block + GPT_MBR_TABLE;
 	if (!all_zero(block, GPT_MBR_TABLE) || entry[0U] != 0U ||
 	    entry[1U] != 0U || entry[2U] != 2U || entry[3U] != 0U ||
 	    entry[4U] != 0xeeU || entry[5U] != 0xffU || entry[6U] != 0xffU ||
 	    entry[7U] != 0xffU || get32(entry + 8U) != 1U ||
 	    get32(entry + 12U) == 0U ||
 	    !all_zero(entry + GPT_MBR_ENTRY_SIZE, 3U * GPT_MBR_ENTRY_SIZE) ||
-	    block[510U] != 0x55U || block[511U] != 0xaaU)
-
+	    block[510U] != 0x55U || block[511U] != 0xaaU) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -358,9 +329,9 @@ read_table_bytes(
 	while (size != 0U) {
 		lba = table_lba + offset / block_size;
 		within = (size_t)(offset % block_size);
-		amount = block_size - within;
 
 		/* Handles the amount condition. */
+		amount = block_size - within;
 		if (amount > size)
 			amount = size;
 
@@ -392,9 +363,8 @@ table_crc(
 
 	/* Continue while the operation condition remains true. */
 	while (remaining != 0U) {
-		amount = disk->d_block_size;
-
 		/* Handles the uint64 t condition. */
+		amount = disk->d_block_size;
 		if ((uint64_t)amount > remaining)
 			amount = (size_t)remaining;
 
@@ -404,6 +374,7 @@ table_crc(
 		crc = crc32_update(crc, block, amount);
 		remaining -= amount;
 	}
+
 	*result = ~crc;
 	/* Reports successful completion. */
 	return 0;
@@ -437,6 +408,7 @@ guid_text(
 		output[at++] = hex(guid[order[i]] >> 4);
 		output[at++] = hex(guid[order[i]] & 15U);
 	}
+
 	output[at] = '\0';
 }
 
@@ -493,10 +465,10 @@ gpt_name(
 			/* Handles the unit condition. */
 			if (unit == 36U)
 				return -EINVAL;
-			second = (uint16_t)raw[unit * 2U] |
-				 (uint16_t)((uint16_t)raw[unit * 2U + 1U] << 8);
 
 			/* Handles the second condition. */
+			second = (uint16_t)raw[unit * 2U] |
+				 (uint16_t)((uint16_t)raw[unit * 2U + 1U] << 8);
 			if (second < 0xdc00U || second > 0xdfffU)
 				return -EINVAL;
 			unit++;
@@ -512,6 +484,7 @@ gpt_name(
 		/* 36 code units occupy at most 108 UTF-8 bytes. */
 		utf8_emit(output, &at, value);
 	}
+
 	output[at] = '\0';
 
 	/* Reports successful completion. */
@@ -537,52 +510,52 @@ header_layout(
 	    copy->entry_size > GPT_ENTRY_MAX_SIZE ||
 	    copy->entry_size % GPT_ENTRY_MIN_SIZE != 0U ||
 	    ((copy->entry_size / GPT_ENTRY_MIN_SIZE) &
-	     (copy->entry_size / GPT_ENTRY_MIN_SIZE - 1U)) != 0U)
-
+	     (copy->entry_size / GPT_ENTRY_MIN_SIZE - 1U)) != 0U) {
 		/* Returns the computed result. */
 		return -EINVAL;
+	}
 
 	/* Handles the uint64 t condition. */
 	if ((uint64_t)copy->entry_count >
-	    UINT64_MAX / (uint64_t)copy->entry_size)
-
+	    UINT64_MAX / (uint64_t)copy->entry_size) {
 		/* Returns the computed result. */
 		return -EOVERFLOW;
+	}
 	copy->table_bytes = (uint64_t)copy->entry_count * copy->entry_size;
-	table_blocks = copy->table_bytes / disk->d_block_size;
 
 	/* Handles the copy condition. */
+	table_blocks = copy->table_bytes / disk->d_block_size;
 	if (copy->table_bytes % disk->d_block_size != 0U)
 		table_blocks++;
-	reserve_blocks = GPT_ENTRY_ARRAY_RESERVE / disk->d_block_size;
 
 	/* Handles the disk condition. */
+	reserve_blocks = GPT_ENTRY_ARRAY_RESERVE / disk->d_block_size;
 	if (GPT_ENTRY_ARRAY_RESERVE % disk->d_block_size != 0U)
 		reserve_blocks++;
 
 	/* Handles the copy condition. */
 	if (copy->table_lba > logical_last ||
-	    table_blocks > logical_last - copy->table_lba + 1U)
-
+	    table_blocks > logical_last - copy->table_lba + 1U) {
 		/* Returns the computed result. */
 		return -EINVAL;
+	}
 	table_end = copy->table_lba + table_blocks;
 
 	/* Handles the copy condition. */
 	if (copy->first_usable < 2U || copy->first_usable > copy->last_usable ||
-	    copy->last_usable >= logical_last)
-
+	    copy->last_usable >= logical_last) {
 		/* Returns the computed result. */
 		return -EINVAL;
+	}
 
 	/* Handles the primary condition. */
 	if (primary) {
 		/* Handles the copy condition. */
 		if (copy->table_lba < 2U || table_end > copy->first_usable ||
-		    copy->first_usable - copy->table_lba < reserve_blocks)
-
+		    copy->first_usable - copy->table_lba < reserve_blocks) {
 			/* Returns the computed result. */
 			return -EINVAL;
+		}
 	} else if (copy->table_lba <= copy->last_usable ||
 		   table_end > copy->header_lba ||
 		   copy->header_lba - copy->table_lba < reserve_blocks) {
@@ -615,9 +588,9 @@ validate_entries(
 	int error = 0;
 
 	records = kern_calloc(copy->entry_count, sizeof(*records));
-	raw = kern_malloc(copy->entry_size);
 
 	/* Handles the records availability. */
+	raw = kern_malloc(copy->entry_size);
 	if (records == NULL || raw == NULL) {
 		kern_free(records);
 		kern_free(raw);
@@ -625,14 +598,14 @@ validate_entries(
 		/* Returns the computed result. */
 		return -ENOMEM;
 	}
+
 	/* Process each remaining element. */
 	for (index = 0U; index < copy->entry_count; index++) {
 		offset = (uint64_t)index * copy->entry_size;
 
+		/* Checks the operation status. */
 		error = read_table_bytes(disk, copy->table_lba, offset, raw,
 					 copy->entry_size, block);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			break;
 
@@ -652,16 +625,18 @@ validate_entries(
 			error = -EINVAL;
 			break;
 		}
+
 		first = get64(raw + 32U);
-		last = get64(raw + 40U);
 
 		/* Checks the get64 result. */
+		last = get64(raw + 40U);
 		if ((get64(raw + 48U) & UINT64_C(0x0000fffffffffff8)) != 0U ||
 		    first < copy->first_usable || last > copy->last_usable ||
 		    first > last || gpt_name(label, raw + 56U) != 0) {
 			error = -EINVAL;
 			break;
 		}
+
 		/* Process each element required by the operation. */
 		for (prior = 0U; prior < active; prior++) {
 			/* Handles the memcmp condition. */
@@ -703,8 +678,10 @@ validate_entries(
 				entry->p_flags |= PARTITION_HAS_LABEL;
 			}
 		}
+
 		active++;
 	}
+
 	copy->active_count = active;
 	kern_free(records);
 	kern_free(raw);
@@ -737,20 +714,20 @@ read_header(
 
 	/* Checks the get32 result. */
 	if (memcmp(block, "EFI PART", 8U) != 0 ||
-	    get32(block + 8U) != 0x00010000U)
-
+	    get32(block + 8U) != 0x00010000U) {
 		/* Returns the computed result. */
 		return -EINVAL;
-	header_size = get32(block + 12U);
+	}
 
 	/* Checks the get32 result. */
+	header_size = get32(block + 12U);
 	if (header_size < GPT_HEADER_MIN_SIZE ||
 	    header_size > disk->d_block_size || get32(block + 20U) != 0U ||
 	    !all_zero(block + GPT_HEADER_MIN_SIZE,
-		      disk->d_block_size - GPT_HEADER_MIN_SIZE))
-
+		      disk->d_block_size - GPT_HEADER_MIN_SIZE)) {
 		/* Returns the computed result. */
 		return -EINVAL;
+	}
 	expected_header_crc = get32(block + 16U);
 	memset(block + 16U, 0, 4U);
 
@@ -769,10 +746,10 @@ read_header(
 	*expected_table_crc = get32(block + 88U);
 	/* Checks the all zero result. */
 	if (copy->header_lba != header_lba ||
-	    all_zero(copy->disk_guid, sizeof(copy->disk_guid)))
-
+	    all_zero(copy->disk_guid, sizeof(copy->disk_guid))) {
 		/* Returns the computed result. */
 		return -EINVAL;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -789,14 +766,13 @@ primary_header_extent(
 	uint32_t ignored_table_crc;
 	int error;
 
-	block = kern_malloc(disk->d_block_size);
-
 	/* Handles the block availability. */
+	block = kern_malloc(disk->d_block_size);
 	if (block == NULL)
 		return -ENOMEM;
-	error = read_header(disk, 1U, &primary, &ignored_table_crc, block);
 
 	/* Checks the operation status. */
+	error = read_header(disk, 1U, &primary, &ignored_table_crc, block);
 	if (error == 0 && (primary.alternate_lba <= 1U ||
 			   primary.alternate_lba >= disk->d_block_count))
 		error = -EINVAL;
@@ -838,14 +814,13 @@ validate_copy(
 	uint32_t expected_table_crc, actual_table_crc;
 	int error;
 
-	block = kern_malloc(disk->d_block_size);
-
 	/* Handles the block availability. */
+	block = kern_malloc(disk->d_block_size);
 	if (block == NULL)
 		return -ENOMEM;
-	error = read_header(disk, header_lba, copy, &expected_table_crc, block);
 
 	/* Checks the operation status. */
+	error = read_header(disk, header_lba, copy, &expected_table_crc, block);
 	if (error != 0)
 		goto out;
 
@@ -854,14 +829,14 @@ validate_copy(
 		error = -EINVAL;
 		goto out;
 	}
-	error = header_layout(disk, copy, primary, logical_last);
 
 	/* Checks the operation status. */
+	error = header_layout(disk, copy, primary, logical_last);
 	if (error != 0)
 		goto out;
-	error = table_crc(disk, copy, block, &actual_table_crc);
 
 	/* Checks the operation status. */
+	error = table_crc(disk, copy, block, &actual_table_crc);
 	if (error != 0)
 		goto out;
 
@@ -870,6 +845,7 @@ validate_copy(
 		error = -EINVAL;
 		goto out;
 	}
+
 	error = validate_entries(disk, copy, entries, capacity, block);
 out:
 	kern_free(block);
@@ -888,10 +864,10 @@ copy_headers_equal(
 	const struct gpt_copy *left,
 	const struct gpt_copy *right)
 {
-	int function_result;
+	int error;
 
 	/* Computes the function result. */
-	function_result = left->first_usable == right->first_usable &&
+	error = left->first_usable == right->first_usable &&
 			  left->last_usable == right->last_usable &&
 			  left->header_size == right->header_size &&
 			  left->entry_count == right->entry_count &&
@@ -902,7 +878,7 @@ copy_headers_equal(
 				 sizeof(left->disk_guid)) == 0;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the copy tables equal operation. */
@@ -920,17 +896,16 @@ copy_tables_equal(
 	int equal = 0;
 
 	left_block = kern_malloc(disk->d_block_size);
-	right_block = kern_malloc(disk->d_block_size);
 
 	/* Handles the left block availability. */
+	right_block = kern_malloc(disk->d_block_size);
 	if (left_block == NULL || right_block == NULL) {
 		equal = -ENOMEM;
 		goto out;
 	}
 	while (remaining != 0U) {
-		amount = disk->d_block_size;
-
 		/* Handles the uint64 t condition. */
+		amount = disk->d_block_size;
 		if ((uint64_t)amount > remaining)
 			amount = (size_t)remaining;
 
@@ -946,8 +921,10 @@ copy_tables_equal(
 			equal = 0;
 			goto out;
 		}
+
 		remaining -= amount;
 	}
+
 	equal = 1;
 out:
 	kern_free(left_block);
@@ -1002,6 +979,7 @@ recover_backup_candidates(
 		if (candidate_entries[1U] == NULL)
 			return -ENOMEM;
 	}
+
 	/* Process each remaining element. */
 	for (index = 0U; index < candidate_count; index++) {
 		candidate_errors[index] = validate_copy(
@@ -1028,9 +1006,9 @@ recover_backup_candidates(
 				   physical_text_local);
 			goto out;
 		}
-		equal = copy_tables_equal(disk, &copies[0U], &copies[1U]);
 
 		/* Handles the equal condition. */
+		equal = copy_tables_equal(disk, &copies[0U], &copies[1U]);
 		if (equal < 0) {
 			error = equal;
 			goto out;
@@ -1068,14 +1046,17 @@ recover_backup_candidates(
 				   disk->d_name, -primary_error,
 				   -candidate_errors[0U]);
 		}
+
 		goto out;
 	}
+
 	*output_copy = copies[chosen];
 	/* Handles the chosen condition. */
 	if (chosen != 0U) {
 		memcpy(output_entries, candidate_entries[chosen],
 		       capacity * sizeof(*output_entries));
 	}
+
 	*output_logical_last = candidate_lbas[chosen];
 
 	/* Reports that the table came from the backup copy. */
@@ -1103,35 +1084,34 @@ intentional_primary_only(
 	uint64_t logical_last,
 	uint8_t *block)
 {
-	int function_result;
+	int error;
 	uint64_t reserve_blocks;
 	int result;
 
-	reserve_blocks = conventional_reserve_blocks(disk);
-
 	/* Handles the logical last condition. */
+	reserve_blocks = conventional_reserve_blocks(disk);
 	if (logical_last <= reserve_blocks + 1U || primary->header_lba != 1U ||
 	    primary->alternate_lba != logical_last ||
 	    primary->table_lba != 2U || primary->entry_count != 128U ||
 	    primary->entry_size != 128U ||
 	    primary->table_bytes != GPT_ENTRY_ARRAY_RESERVE ||
 	    primary->first_usable != 2U + reserve_blocks ||
-	    primary->last_usable != logical_last - reserve_blocks - 1U)
-
+	    primary->last_usable != logical_last - reserve_blocks - 1U) {
 		/* Reports successful completion. */
 		return 0;
-	result = pure_protective_mbr(disk, block);
+	}
 
 	/* Checks the operation result. */
+	result = pure_protective_mbr(disk, block);
 	if (result != 1)
 		return result;
 
 	/* Obtains the zero declared backup reservation result. */
-	function_result =
+	error =
 		zero_declared_backup_reservation(disk, logical_last, block);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the gpt scan operation. */
@@ -1165,61 +1145,62 @@ gpt_scan(
 	if (disk == NULL || entries == NULL || capacity == 0U ||
 	    capacity > PARTITION_POOL_MAX ||
 	    (disk->d_block_size != 512U && disk->d_block_size != 4096U) ||
-	    disk->d_block_count < 4U)
-
+	    disk->d_block_count < 4U) {
 		/* Returns the computed result. */
 		return -EINVAL;
+	}
 	block = kern_malloc(disk->d_block_size);
 	primary_entries = kern_calloc(capacity, sizeof(*primary_entries));
-	backup_entries = kern_calloc(capacity, sizeof(*backup_entries));
 
 	/* Handles the block availability. */
+	backup_entries = kern_calloc(capacity, sizeof(*backup_entries));
 	if (block == NULL || primary_entries == NULL ||
 	    backup_entries == NULL) {
 		error = -ENOMEM;
 		goto out;
 	}
-	error = canonical_protective_mbr(disk, block, &protective_blocks);
 
 	/* Checks the operation status. */
+	error = canonical_protective_mbr(disk, block, &protective_blocks);
 	if (error != 0) {
 		hal_printf("gpt: %s rejected: invalid protective MBR (%d)\n",
 			   disk->d_name, -error);
 		goto out;
 	}
+
 	physical_last = disk->d_block_count - 1U;
-	error = primary_header_extent(disk, &logical_last);
 
 	/* Checks the operation status. */
+	error = primary_header_extent(disk, &logical_last);
 	if (error == -ENOMEM)
 		goto out;
 
 	/* Checks the operation status. */
 	if (error != 0) {
 		primary_error = error;
+
+		/* Checks the operation status. */
 		error = recover_backup_candidates(
 			disk, protective_blocks, physical_last, primary_error,
 			&backup, backup_entries, capacity, &logical_last);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto out;
 		selected = &backup;
 		selected_entries = backup_entries;
 		goto selected_copy;
 	}
-	primary_error = validate_copy(disk, 1U, 1, logical_last, &primary,
-				      primary_entries, capacity);
 
 	/* Checks the operation status. */
+	primary_error = validate_copy(disk, 1U, 1, logical_last, &primary,
+				      primary_entries, capacity);
 	if (primary_error == -ENOMEM) {
 		error = -ENOMEM;
 		goto out;
 	}
-	backup_error = validate_copy(disk, logical_last, 0, logical_last,
-				     &backup, backup_entries, capacity);
 
 	/* Checks the operation status. */
+	backup_error = validate_copy(disk, logical_last, 0, logical_last,
+				     &backup, backup_entries, capacity);
 	if (backup_error == -ENOMEM) {
 		error = -ENOMEM;
 		goto out;
@@ -1227,10 +1208,9 @@ gpt_scan(
 
 	/* Checks the operation status. */
 	if (primary_error == 0 && backup_error != 0 && backup_error != -EIO) {
+		/* Handles the primary only condition. */
 		primary_only = intentional_primary_only(disk, &primary,
 							logical_last, block);
-
-		/* Handles the primary only condition. */
 		if (primary_only < 0)
 			primary_only = 0;
 	}
@@ -1242,11 +1222,11 @@ gpt_scan(
 		 * extent, but neither named copy survived full table/entry
 		 * validation.  Fall back only to the two independently bounded
 		 * conventional locations; never search for a third header. */
+
+		/* Checks the operation status. */
 		error = recover_backup_candidates(
 			disk, protective_blocks, physical_last, primary_error,
 			&backup, backup_entries, capacity, &logical_last);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto out;
 		selected = &backup;
@@ -1263,9 +1243,9 @@ gpt_scan(
 			error = -EINVAL;
 			goto out;
 		}
-		equal = copy_tables_equal(disk, &primary, &backup);
 
 		/* Handles the equal condition. */
+		equal = copy_tables_equal(disk, &primary, &backup);
 		if (equal < 0) {
 			error = equal;
 			goto out;
@@ -1279,6 +1259,7 @@ gpt_scan(
 			error = -EINVAL;
 			goto out;
 		}
+
 		selected = &primary;
 		selected_entries = primary_entries;
 	} else if (primary_error == 0) {
@@ -1293,6 +1274,7 @@ gpt_scan(
 				   "read-only\n",
 				   disk->d_name, -backup_error);
 		}
+
 		selected = &primary;
 		selected_entries = primary_entries;
 	} else {
@@ -1302,6 +1284,7 @@ gpt_scan(
 		selected = &backup;
 		selected_entries = backup_entries;
 	}
+
 selected_copy:
 	bounded = logical_last < physical_last;
 
@@ -1323,6 +1306,7 @@ selected_copy:
 			   "advertised-last=%s gpt-last=%s; using GPT\n",
 			   disk->d_name, advertised_last_text, gpt_last_text);
 	}
+
 	memcpy(entries, selected_entries,
 	       selected->active_count * sizeof(*entries));
 
@@ -1341,6 +1325,7 @@ selected_copy:
 			   declared_sectors_text, physical_sectors_text,
 			   ignored_tail_text);
 	}
+
 	error = (int)selected->active_count;
 out:
 	kern_free(block);

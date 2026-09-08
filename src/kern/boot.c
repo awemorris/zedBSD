@@ -103,6 +103,7 @@ kern_boot_parameters_parse(
 			return 0;
 		return EINVAL;
 	}
+
 	if (input_capacity == 0U)
 		return EINVAL;
 
@@ -116,11 +117,13 @@ kern_boot_parameters_parse(
 			terminated = 1;
 			break;
 		}
+
 		if (byte > 0x7fU) {
 			error = parse_error(parameters, EILSEQ);
 			return error;
 		}
 	}
+
 	if (!terminated) {
 		if (input_capacity >= KERN_BOOT_PARAMETERS_STORAGE_SIZE)
 			error = parse_error(parameters, E2BIG);
@@ -153,8 +156,10 @@ kern_boot_parameters_parse(
 				error = parse_error(parameters, EINVAL);
 				return error;
 			}
+
 			position++;
 		}
+
 		token_end = position;
 		next = token_end;
 		while (next < length && parameters->storage[next] == ' ')
@@ -170,6 +175,7 @@ kern_boot_parameters_parse(
 			error = parse_error(parameters, EINVAL);
 			return error;
 		}
+
 		known = parameter_key(parameters->storage + token_start,
 				      equal - token_start,
 				      &key);
@@ -189,6 +195,7 @@ kern_boot_parameters_parse(
 				error = parse_error(parameters, EINVAL);
 				return error;
 			}
+
 			if (value_length > KERN_BOOT_PARAMETERS_INIT_PATH_MAX) {
 				error = parse_error(parameters, ENAMETOOLONG);
 				return error;
@@ -208,6 +215,7 @@ kern_boot_parameters_parse(
 				       parameters->storage + token_start,
 				       equal - token_start);
 		}
+
 		position = next;
 	}
 
@@ -493,9 +501,9 @@ kern_boot_source_selector_validate(
 		return EINVAL;
 
 	/* A bare name is a device name. */
-	error = selector_text(selector, DISK_NAME_MAX, 1);
 
 	/* Reports why the validation failed. */
+	error = selector_text(selector, DISK_NAME_MAX, 1);
 	if (error != 0)
 		return error;
 
@@ -554,6 +562,7 @@ kern_boot_source_reference_parse(
 		} else if (byte < 0x20U || byte > 0x7eU || byte == '\\') {
 			return EINVAL;
 		}
+
 		length++;
 		if (length >= sizeof(reference->relative))
 			return ENAMETOOLONG;
@@ -692,6 +701,7 @@ kern_boot_source_context_destroy(
 				first_error = error;
 			continue;
 		}
+
 		memset(source, 0, sizeof(*source));
 	}
 
@@ -730,6 +740,7 @@ kern_boot_source_context_mount(
 		if (context->slot[slot].mount != NULL)
 			return EBUSY;
 	}
+
 	context->failure_stage = KERN_BOOT_SOURCE_FAILURE_NONE;
 	context->cleanup_error = 0;
 
@@ -748,6 +759,7 @@ kern_boot_source_context_mount(
 				    KERN_BOOT_SOURCE_FAILURE_SELECTOR, error);
 				return error;
 			}
+
 			error = block_identity_resolve(selector, &disk);
 			if (error != 0) {
 				error = context_fail(context, slot,
@@ -762,6 +774,7 @@ kern_boot_source_context_mount(
 				    KERN_BOOT_SOURCE_FAILURE_SELECTOR, error);
 				return error;
 			}
+
 			error = block_identity_resolve(loader_origin_selector, &disk);
 			if (error != 0) {
 				error = context_fail(context, slot,
@@ -784,11 +797,13 @@ kern_boot_source_context_mount(
 			    KERN_BOOT_SOURCE_FAILURE_PARTITION, EINVAL);
 			return error;
 		}
+
 		for (previous = 0; previous < slot; previous++) {
 			if (context->slot[previous].configured &&
 			    context->slot[previous].disk->d_dev == disk->d_dev)
 				break;
 		}
+
 		if (previous != slot) {
 			disk_release(disk);
 			error = context_fail(context, slot,
@@ -815,6 +830,7 @@ kern_boot_source_context_mount(
 			    KERN_BOOT_SOURCE_FAILURE_MOUNT, error);
 			return error;
 		}
+
 		context->slot[slot].disk = context->slot[slot].mount->m_disk;
 		context->slot[slot].runtime_mount = context->slot[slot].mount;
 		context->slot[slot].configured = 1U;
@@ -985,9 +1001,9 @@ kern_boot_source_runtime_lookup(
 		return ENOENT;
 
 	/* Looks the path up in the slot's runtime mount. */
-	error = runtime_mount_lookup(source, reference.relative, path_out);
 
 	/* Reports why the lookup failed. */
+	error = runtime_mount_lookup(source, reference.relative, path_out);
 	if (error != 0)
 		return error;
 
@@ -1088,6 +1104,7 @@ kern_boot_source_release_unused(
 				first_error = error;
 			continue;
 		}
+
 		memset(source, 0, sizeof(*source));
 	}
 
@@ -1191,6 +1208,7 @@ record_unknown(
 		copy_length = KERN_BOOT_PARAMETERS_UNKNOWN_NAME_MAX;
 		parameters->unknown_name_truncated = 1;
 	}
+
 	for (index = 0; index < copy_length; index++)
 		parameters->unknown_name[index] = name[index];
 	parameters->unknown_name[copy_length] = '\0';
@@ -1206,9 +1224,8 @@ selector_text(
 	size_t length;
 	unsigned char byte;
 
-	length = 0;
-
 	/* Rejects missing or empty text. */
+	length = 0;
 	if (text == NULL || text[0] == '\0')
 		return EINVAL;
 

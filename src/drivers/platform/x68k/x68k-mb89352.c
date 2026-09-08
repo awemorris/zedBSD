@@ -7,6 +7,23 @@
 
 static void zero_bytes(uint8_t *bytes, size_t length);
 
+/*
+ * Forward declaration.
+ */
+static uint32_t be32(const uint8_t *p);
+static uint32_t poll_limit(const struct x68k_spc_bus *bus);
+static void poll_relax(const struct x68k_spc_bus *bus);
+static uint8_t spc_read(const struct x68k_spc_bus *bus, unsigned reg);
+static void spc_write(const struct x68k_spc_bus *bus, unsigned reg, uint8_t value);
+static int valid_bus(const struct x68k_spc_bus *bus);
+static int controller_error(const struct x68k_spc_bus *bus, uint8_t interrupts);
+static int wait_bus_free(const struct x68k_spc_bus *bus);
+static int wait_phase(const struct x68k_spc_bus *bus, uint8_t *phase, uint8_t *interrupts);
+static void set_transfer_count(const struct x68k_spc_bus *bus, size_t length);
+static int pio_out(const struct x68k_spc_bus *bus, uint8_t phase, const uint8_t *data, size_t length, size_t *transferred);
+static int pio_in(const struct x68k_spc_bus *bus, uint8_t phase, uint8_t *data, size_t length, size_t *transferred);
+static int select_target(const struct x68k_spc_bus *bus, unsigned initiator_id, unsigned target_id);
+
 /* Supports the zero bytes operation. */
 static void
 zero_bytes(
@@ -17,8 +34,6 @@ zero_bytes(
 	while (length-- != 0)
 		*bytes++ = 0;
 }
-
-static uint32_t be32(const uint8_t *p);
 
 /* Supports the be32 operation. */
 static uint32_t
@@ -43,10 +58,10 @@ drv_x68k_scsi_cdb10(
 	/* Handles the cdb availability. */
 	if (cdb == NULL ||
 	    (opcode != X68K_SCSI_READ_10 && opcode != X68K_SCSI_WRITE_10) ||
-	    blocks == 0 || blocks > X68K_SCSI_CDB10_MAX_BLOCKS)
-
+	    blocks == 0 || blocks > X68K_SCSI_CDB10_MAX_BLOCKS) {
 		/* Reports operation failure. */
 		return -1;
+	}
 	zero_bytes(cdb, 10);
 	cdb[0] = opcode;
 	cdb[2] = (uint8_t)(lba >> 24);
@@ -113,9 +128,9 @@ drv_x68k_scsi_parse_capacity10(
 	if (response == NULL || blocks == NULL || block_size == NULL)
 		return -1;
 	last = be32(response);
-	size = be32(response + 4);
 
 	/* 0xffffffff requests READ CAPACITY(16), deliberately outside v1. */
+	size = be32(response + 4);
 	if (last == UINT32_MAX || size != X68K_SCSI_BLOCK_SIZE)
 		return -1;
 	*blocks = (uint64_t)last + 1U;
@@ -137,13 +152,13 @@ drv_x68k_scsi_parse_sense(
 
 	/* Handles the response availability. */
 	if (response == NULL || sense == NULL || length < 8U ||
-	    (response[0] & 0x7eU) != 0x70U)
-
+	    (response[0] & 0x7eU) != 0x70U) {
 		/* Reports operation failure. */
 		return -1;
-	declared = 8U + response[7];
+	}
 
 	/* Handles the declared condition. */
+	declared = 8U + response[7];
 	if (declared > length || declared < 14U)
 		return -1;
 	sense->key = response[2] & 0x0fU;
@@ -171,9 +186,9 @@ drv_x68k_scsi_transfer_chunk(
 	if (blocks == 0 || driver_limit == 0 || lba >= capacity)
 		return 0;
 	available = capacity - lba;
-	chunk = blocks;
 
 	/* Handles the chunk condition. */
+	chunk = blocks;
 	if (chunk > X68K_SCSI_CDB10_MAX_BLOCKS)
 		chunk = X68K_SCSI_CDB10_MAX_BLOCKS;
 
@@ -197,8 +212,6 @@ drv_x68k_scsi_transfer_chunk(
 #define SPC_MAX_TRANSFER 0x00ffffffU
 #define SPC_IDENTIFY(lun) (0x80U | (lun))
 
-static uint32_t poll_limit(const struct x68k_spc_bus *bus);
-
 /* disconnect not permitted */
 static uint32_t
 poll_limit(
@@ -207,8 +220,6 @@ poll_limit(
 	/* Returns the computed result. */
 	return bus->poll_limit != 0 ? bus->poll_limit : SPC_DEFAULT_POLL_LIMIT;
 }
-
-static void poll_relax(const struct x68k_spc_bus *bus);
 
 /* Supports the poll relax operation. */
 static void
@@ -219,8 +230,6 @@ poll_relax(
 	if (bus->relax != NULL)
 		bus->relax(bus->cookie);
 }
-
-static uint8_t spc_read(const struct x68k_spc_bus *bus, unsigned reg);
 
 /* Supports the spc read operation. */
 static uint8_t
@@ -237,8 +246,6 @@ spc_read(
 	return function_result;
 }
 
-static void spc_write(const struct x68k_spc_bus *bus, unsigned reg, uint8_t value);
-
 /* Supports the spc write operation. */
 static void
 spc_write(
@@ -249,8 +256,6 @@ spc_write(
 	bus->write(bus->cookie, reg, value);
 }
 
-static int valid_bus(const struct x68k_spc_bus *bus);
-
 /* Supports the valid bus operation. */
 static int
 valid_bus(
@@ -260,8 +265,6 @@ valid_bus(
 	return bus != NULL && bus->read != NULL && bus->write != NULL;
 }
 
-static int controller_error(const struct x68k_spc_bus *bus, uint8_t interrupts);
-
 /* Supports the controller error operation. */
 static int
 controller_error(
@@ -270,16 +273,14 @@ controller_error(
 {
 	/* Checks the operation status. */
 	if ((interrupts & X68K_SPC_INTS_HARD_ERROR) != 0 ||
-	    spc_read(bus, X68K_SPC_SERR) != 0)
-
+	    spc_read(bus, X68K_SPC_SERR) != 0) {
 		/* Returns the computed result. */
 		return X68K_SPC_ERR_CONTROLLER;
+	}
 
 	/* Returns the computed result. */
 	return X68K_SPC_OK;
 }
-
-static int wait_bus_free(const struct x68k_spc_bus *bus);
 
 /* Supports the wait bus free operation. */
 static int
@@ -293,9 +294,9 @@ wait_bus_free(
 	/* Process each remaining element. */
 	while (count-- != 0) {
 		ints = spc_read(bus, X68K_SPC_INTS);
-		error = controller_error(bus, ints);
 
 		/* Checks the operation status. */
+		error = controller_error(bus, ints);
 		if (error != X68K_SPC_OK)
 			return error;
 
@@ -318,8 +319,6 @@ wait_bus_free(
 	return X68K_SPC_ERR_TIMEOUT;
 }
 
-static int wait_phase(const struct x68k_spc_bus *bus, uint8_t *phase, uint8_t *interrupts);
-
 /* Supports the wait phase operation. */
 static int
 wait_phase(
@@ -335,9 +334,9 @@ wait_phase(
 	/* Process each remaining element. */
 	while (count-- != 0) {
 		ints = spc_read(bus, X68K_SPC_INTS);
-		error = controller_error(bus, ints);
 
 		/* Checks the operation status. */
+		error = controller_error(bus, ints);
 		if (error != X68K_SPC_OK)
 			return error;
 
@@ -351,9 +350,9 @@ wait_phase(
 			/* Returns the computed result. */
 			return X68K_SPC_ERR_DISCONNECT;
 		}
-		sense = spc_read(bus, X68K_SPC_PSNS);
 
 		/* Handles the sense condition. */
+		sense = spc_read(bus, X68K_SPC_PSNS);
 		if ((sense & X68K_SPC_PSNS_REQUEST) != 0) {
 			*phase = sense & X68K_SPC_PHASE_MASK;
 			*interrupts = ints;
@@ -371,8 +370,6 @@ wait_phase(
 	return X68K_SPC_ERR_TIMEOUT;
 }
 
-static void set_transfer_count(const struct x68k_spc_bus *bus, size_t length);
-
 /* Supports the set transfer count operation. */
 static void
 set_transfer_count(
@@ -383,8 +380,6 @@ set_transfer_count(
 	spc_write(bus, X68K_SPC_TCM, (uint8_t)(length >> 8));
 	spc_write(bus, X68K_SPC_TCL, (uint8_t)length);
 }
-
-static int pio_out(const struct x68k_spc_bus *bus, uint8_t phase, const uint8_t *data, size_t length, size_t *transferred);
 
 /* Supports the pio out operation. */
 static int
@@ -413,18 +408,18 @@ pio_out(
 		/* Process each remaining element. */
 		while (count-- != 0) {
 			ints = spc_read(bus, X68K_SPC_INTS);
-			error = controller_error(bus, ints);
 
 			/* Checks the operation status. */
+			error = controller_error(bus, ints);
 			if (error != X68K_SPC_OK)
 				return error;
 
 			/* Handles the ints condition. */
 			if ((ints & (X68K_SPC_INTS_TIMEOUT |
-				     X68K_SPC_INTS_DISCONNECT)) != 0)
-
+				     X68K_SPC_INTS_DISCONNECT)) != 0) {
 				/* Returns the computed result. */
 				return X68K_SPC_ERR_DISCONNECT;
+			}
 
 			/* Checks the spc read result. */
 			if ((spc_read(bus, X68K_SPC_SSTS) &
@@ -438,12 +433,11 @@ pio_out(
 			return X68K_SPC_ERR_TIMEOUT;
 		spc_write(bus, X68K_SPC_DREG, data[done++]);
 	}
+
 	*transferred += done;
 	/* Returns the computed result. */
 	return X68K_SPC_OK;
 }
-
-static int pio_in(const struct x68k_spc_bus *bus, uint8_t phase, uint8_t *data, size_t length, size_t *transferred);
 
 /* Supports the pio in operation. */
 static int
@@ -472,9 +466,9 @@ pio_in(
 		/* Process each remaining element. */
 		while (count-- != 0) {
 			ints = spc_read(bus, X68K_SPC_INTS);
-			error = controller_error(bus, ints);
 
 			/* Checks the operation status. */
+			error = controller_error(bus, ints);
 			if (error != X68K_SPC_OK)
 				return error;
 
@@ -485,10 +479,10 @@ pio_in(
 
 			/* Handles the ints condition. */
 			if ((ints & (X68K_SPC_INTS_TIMEOUT |
-				     X68K_SPC_INTS_DISCONNECT)) != 0)
-
+				     X68K_SPC_INTS_DISCONNECT)) != 0) {
 				/* Returns the computed result. */
 				return X68K_SPC_ERR_DISCONNECT;
+			}
 			poll_relax(bus);
 		}
 
@@ -497,6 +491,7 @@ pio_in(
 			return X68K_SPC_ERR_TIMEOUT;
 		data[done++] = spc_read(bus, X68K_SPC_DREG);
 	}
+
 	*transferred += done;
 	/* Returns the computed result. */
 	return X68K_SPC_OK;
@@ -510,7 +505,7 @@ drv_x68k_spc_pio_init(
 	const struct x68k_spc_bus *bus,
 	unsigned initiator_id)
 {
-	int function_result;
+	int error;
 	uint32_t delay;
 
 	/* Checks the valid bus result. */
@@ -537,13 +532,11 @@ drv_x68k_spc_pio_init(
 		  X68K_SPC_SCTL_ABORT_ENABLE | X68K_SPC_SCTL_PARITY_ENABLE);
 
 	/* Obtains the wait bus free result. */
-	function_result = wait_bus_free(bus);
+	error = wait_bus_free(bus);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static int select_target(const struct x68k_spc_bus *bus, unsigned initiator_id, unsigned target_id);
 
 /* Supports the select target operation. */
 static int
@@ -571,9 +564,9 @@ select_target(
 	/* Process each remaining element. */
 	while (count-- != 0) {
 		ints = spc_read(bus, X68K_SPC_INTS);
-		error = controller_error(bus, ints);
 
 		/* Checks the operation status. */
+		error = controller_error(bus, ints);
 		if (error != X68K_SPC_OK)
 			return error;
 
@@ -588,6 +581,7 @@ select_target(
 			/* Returns the computed result. */
 			return X68K_SPC_OK;
 		}
+
 		poll_relax(bus);
 	}
 
@@ -626,10 +620,10 @@ drv_x68k_spc_pio_command(
 	    direction > X68K_SPC_DATA_OUT ||
 	    ((direction == X68K_SPC_DATA_NONE) != (data_length == 0)) ||
 	    (data_length != 0 && data == NULL) ||
-	    data_length > SPC_MAX_TRANSFER)
-
+	    data_length > SPC_MAX_TRANSFER) {
 		/* Returns the computed result. */
 		return X68K_SPC_ERR_ARGUMENT;
+	}
 
 	/* Handles the result availability. */
 	if (result != NULL) {
@@ -637,18 +631,18 @@ drv_x68k_spc_pio_command(
 		result->message = 0xffU;
 		result->transferred = 0;
 	}
-	error = select_target(bus, initiator_id, target_id);
 
 	/* Checks the operation status. */
+	error = select_target(bus, initiator_id, target_id);
 	if (error != X68K_SPC_OK)
 		return error;
 	identify = (uint8_t)SPC_IDENTIFY(lun);
 	/* Process each element required by the operation. */
 	for (steps = 0; steps < 32U; steps++) {
 		ints = 0;
-		error = wait_phase(bus, &phase, &ints);
 
 		/* Checks the operation status. */
+		error = wait_phase(bus, &phase, &ints);
 		if (error == X68K_SPC_ERR_DISCONNECT)
 			return command_done ? X68K_SPC_OK : error;
 
@@ -670,20 +664,20 @@ drv_x68k_spc_pio_command(
 		case X68K_SPC_PHASE_DATA_IN:
 			/* Handles the direction condition. */
 			if (direction != X68K_SPC_DATA_IN ||
-			    data_done >= data_length)
-
+			    data_done >= data_length) {
 				/* Returns the computed result. */
 				return X68K_SPC_ERR_PHASE;
+			}
 			error = pio_in(bus, phase, bytes + data_done,
 				       data_length - data_done, &data_done);
 			break;
 		case X68K_SPC_PHASE_DATA_OUT:
 			/* Handles the direction condition. */
 			if (direction != X68K_SPC_DATA_OUT ||
-			    data_done >= data_length)
-
+			    data_done >= data_length) {
 				/* Returns the computed result. */
 				return X68K_SPC_ERR_PHASE;
+			}
 			error = pio_out(bus, phase, bytes + data_done,
 					data_length - data_done, &data_done);
 			break;
@@ -691,9 +685,9 @@ drv_x68k_spc_pio_command(
 			error = pio_in(bus, phase, &status, 1U, &ignored);
 			break;
 		case X68K_SPC_PHASE_MESSAGE_IN:
-			error = pio_in(bus, phase, &message, 1U, &ignored);
 
 			/* Checks the operation status. */
+			error = pio_in(bus, phase, &message, 1U, &ignored);
 			if (error == X68K_SPC_OK) {
 				/*
  * Programmed transfer deliberately leaves ACK
@@ -708,6 +702,7 @@ drv_x68k_spc_pio_command(
 				    X68K_SCSI_MESSAGE_COMMAND_COMPLETE)
 					command_done = 1;
 			}
+
 			break;
 		default:
 			/* Returns the computed result. */
@@ -766,25 +761,25 @@ drv_x68k_spc_pio_read10(
 	void *buffer,
 	struct x68k_spc_result *result)
 {
-	int function_result;
+	int error;
 	uint8_t cdb[10];
 	size_t length;
 
 	/* Checks the drv x68k scsi cdb10 result. */
 	if (blocks == 0 || blocks > SPC_MAX_TRANSFER / X68K_SCSI_BLOCK_SIZE ||
-	    drv_x68k_scsi_cdb10(cdb, X68K_SCSI_READ_10, lba, blocks) != 0)
-
+	    drv_x68k_scsi_cdb10(cdb, X68K_SCSI_READ_10, lba, blocks) != 0) {
 		/* Returns the computed result. */
 		return X68K_SPC_ERR_ARGUMENT;
+	}
 	length = (size_t)blocks * X68K_SCSI_BLOCK_SIZE;
 
 	/* Obtains the drv x68k spc pio command result. */
-	function_result = drv_x68k_spc_pio_command(
+	error = drv_x68k_spc_pio_command(
 		bus, initiator_id, target_id, lun, cdb, sizeof(cdb), buffer,
 		length, X68K_SPC_DATA_IN, result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -801,25 +796,25 @@ drv_x68k_spc_pio_write10(
 	const void *buffer,
 	struct x68k_spc_result *result)
 {
-	int function_result;
+	int error;
 	uint8_t cdb[10];
 	size_t length;
 
 	/* Checks the drv x68k scsi cdb10 result. */
 	if (blocks == 0 || blocks > SPC_MAX_TRANSFER / X68K_SCSI_BLOCK_SIZE ||
-	    drv_x68k_scsi_cdb10(cdb, X68K_SCSI_WRITE_10, lba, blocks) != 0)
-
+	    drv_x68k_scsi_cdb10(cdb, X68K_SCSI_WRITE_10, lba, blocks) != 0) {
 		/* Returns the computed result. */
 		return X68K_SPC_ERR_ARGUMENT;
+	}
 	length = (size_t)blocks * X68K_SCSI_BLOCK_SIZE;
 
 	/* Obtains the drv x68k spc pio command result. */
-	function_result = drv_x68k_spc_pio_command(
+	error = drv_x68k_spc_pio_command(
 		bus, initiator_id, target_id, lun, cdb, sizeof(cdb),
 		(void *)buffer, length, X68K_SPC_DATA_OUT, result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -834,18 +829,18 @@ drv_x68k_spc_pio_request_sense(
 	uint8_t response[18],
 	struct x68k_spc_result *result)
 {
-	int function_result;
+	int error;
 	uint8_t cdb[6];
 
 	drv_x68k_scsi_request_sense_cdb(cdb, 18U);
 
 	/* Obtains the drv x68k spc pio command result. */
-	function_result = drv_x68k_spc_pio_command(
+	error = drv_x68k_spc_pio_command(
 		bus, initiator_id, target_id, lun, cdb, sizeof(cdb), response,
 		18U, X68K_SPC_DATA_IN, result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -860,18 +855,18 @@ drv_x68k_spc_pio_inquiry(
 	uint8_t response[36],
 	struct x68k_spc_result *result)
 {
-	int function_result;
+	int error;
 	uint8_t cdb[6];
 
 	drv_x68k_scsi_inquiry_cdb(cdb, 36U);
 
 	/* Obtains the drv x68k spc pio command result. */
-	function_result = drv_x68k_spc_pio_command(
+	error = drv_x68k_spc_pio_command(
 		bus, initiator_id, target_id, lun, cdb, sizeof(cdb), response,
 		36U, X68K_SPC_DATA_IN, result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -886,18 +881,18 @@ drv_x68k_spc_pio_read_capacity10(
 	uint8_t response[8],
 	struct x68k_spc_result *result)
 {
-	int function_result;
+	int error;
 	uint8_t cdb[10];
 
 	drv_x68k_scsi_simple_cdb10(cdb, X68K_SCSI_READ_CAPACITY_10);
 
 	/* Obtains the drv x68k spc pio command result. */
-	function_result = drv_x68k_spc_pio_command(
+	error = drv_x68k_spc_pio_command(
 		bus, initiator_id, target_id, lun, cdb, sizeof(cdb), response,
 		8U, X68K_SPC_DATA_IN, result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -911,19 +906,19 @@ drv_x68k_spc_pio_test_unit_ready(
 	unsigned lun,
 	struct x68k_spc_result *result)
 {
-	int function_result;
+	int error;
 	uint8_t cdb[6];
 
 	zero_bytes(cdb, sizeof(cdb));
 	cdb[0] = X68K_SCSI_TEST_UNIT_READY;
 
 	/* Obtains the drv x68k spc pio command result. */
-	function_result = drv_x68k_spc_pio_command(
+	error = drv_x68k_spc_pio_command(
 		bus, initiator_id, target_id, lun, cdb, sizeof(cdb), NULL, 0,
 		X68K_SPC_DATA_NONE, result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -937,16 +932,16 @@ drv_x68k_spc_pio_synchronize10(
 	unsigned lun,
 	struct x68k_spc_result *result)
 {
-	int function_result;
+	int error;
 	uint8_t cdb[10];
 
 	drv_x68k_scsi_simple_cdb10(cdb, X68K_SCSI_SYNCHRONIZE_10);
 
 	/* Obtains the drv x68k spc pio command result. */
-	function_result = drv_x68k_spc_pio_command(
+	error = drv_x68k_spc_pio_command(
 		bus, initiator_id, target_id, lun, cdb, sizeof(cdb), NULL, 0,
 		X68K_SPC_DATA_NONE, result);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }

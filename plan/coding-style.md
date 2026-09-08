@@ -151,6 +151,19 @@ int count;
 count = 0;
 ```
 
+An initializer must not call a function.  A call is a runtime operation that
+belongs to a semantic paragraph with a comment of its own, and burying it in
+the declaration group hides both the operation and the failure it may report:
+
+```c
+struct fat_inode_info *info;
+struct fat_mount_state *state;
+
+/* Resolves the mount and the inode the reclaim works on. */
+info = fat_inode(inode);
+state = fat_mount_state(inode->i_mount);
+```
+
 Move variables needed only by a nested control-flow path to the function
 declaration group as well.  Choose a name that remains unambiguous at function
 scope.  Do not declare a variable in a `for` initializer:
@@ -169,6 +182,13 @@ variable's scope.  Braced bodies owned by a function, `if`, `else`, `for`,
 scope blocks.  If moving declarations to function scope makes a function hard
 to understand or creates excessive nesting, split the function along a
 semantic boundary instead of adding a scope-only block.
+
+Name a variable for what it holds, not for the role it plays in the grammar of
+the function.  `function_result`, `retval` and a bare `value` say nothing that
+the declaration does not already say.  A value that is an error code is
+`error`; a count is `count` or `days_in_month`; a resolved object is named
+after the object.  `result` is acceptable only where the function genuinely has
+no better word for what it produces.
 
 Put exactly one blank line between the function declaration group and the first
 executable statement.  Then write
@@ -336,6 +356,33 @@ if (!check_expr(ctx, right))
 return true;
 ```
 
+Do not call a function inside a condition at all.  Call it on its own line,
+store what it reports, and test the stored value, so that a debugger can stop
+between the call and the decision and see what was returned:
+
+```c
+/* Reads the sector the entry lives in. */
+error = fat_engine_read_sector_result(state, lba, &sector);
+if (error != 0)
+	return;
+```
+
+Produce a Boolean with an `if`, not with an expression.  An expression made of
+`&&`, `||` and comparisons has no stop point and no place to say why each
+clause matters:
+
+```c
+/* A path is a descendant when the parent name is a whole prefix of it. */
+descendant = 0;
+if (length != 0 && !memcmp(parent, path, length) && path[length] == '/')
+	descendant = 1;
+```
+
+Avoid the conditional operator.  Use it only for a short, obviously symmetric
+choice between two values of the same kind, never for one that spans lines and
+never nested inside another one.  A choice that needs explaining is an `if`
+with a comment on each arm.
+
 When a condition contains three or more clauses, or mixes nested `&&` and
 `||`, put the clauses on separate lines and use parentheses and indentation to
 expose its structure:
@@ -414,6 +461,30 @@ result = build_binary(
 	HIR_EXPR_PLUS,
 	left,
 	right);
+```
+
+A call whose arguments are aligned under the opening parenthesis instead is
+equally acceptable, and is the established form in several files.  What the
+rule requires is one argument per line once a call is split at all; a split
+that leaves two arguments sharing a line is not:
+
+```c
+result = fat_raw_insert_entry(filesystem,
+			      &parent,
+			      &component,
+			      cluster);
+```
+
+If a comment stands between a control statement and the statement it controls,
+brace that statement.  The comment separates them visually, and an unbraced
+body that no longer looks attached to its condition is how a later edit ends up
+outside the decision:
+
+```c
+if (file->f_backing_claim == NULL) {
+	/* A file with no claim cannot be reached on disk. */
+	return -EINVAL;
+}
 ```
 
 If the only statement controlled by `if`, `else`, `for`, or `while` spans
@@ -501,6 +572,28 @@ Use this form for a comment that spans multiple lines:
 ```
 
 Do not start a multi-line comment with prose on the opening `/*` line.
+
+A comment must add something the statement does not already say.  Restating
+the code in English is worse than no comment, because it looks as though the
+paragraph has been documented when nothing has been explained.  These forms
+are banned outright:
+
+```c
+/* Handles the state condition. */          /* above if (state->read_only) */
+/* Handles the device availability. */      /* above if (device == NULL)   */
+/* Checks the operation status. */          /* above if (error != 0)       */
+/* Checks the operation result. */
+/* Returns the computed result. */          /* above return result;        */
+/* Computes the function result. */
+/* Reports successful completion. */
+/* Process each remaining element. */       /* above a for loop            */
+```
+
+Say instead what the condition means, why the paragraph exists, or what the
+returned value is to the caller: `Refuses a write to a read-only mount.`,
+`Reports why the entry could not be inserted.`, `Reports the number of days in
+the month.`  If no such sentence can be written, the paragraph boundary is
+probably in the wrong place.
 
 A statement that sets or clears a flag, or that moves a counter, is an
 exception to "do not comment the obvious individual statement" whenever the
@@ -657,6 +750,15 @@ Before finishing a C-source change, verify that:
   means to its observers
 - no function ends with a bare `return error;`: the failure and the success
   return separately, and the success return says so
+- no comment restates its statement: `Handles the ... condition.`,
+  `Checks the operation status.`, `Returns the computed result.` and their
+  kind are absent
+- no variable is named `function_result`, and every name says what it holds
+- no function is called inside a condition, no Boolean is built from an
+  expression, and no initializer calls a function
+- the conditional operator is used only for a short symmetric choice, and
+  never nested
+- a statement separated from its controlling condition by a comment is braced
 - a decomposed condition still short-circuits in its original order
 - every loop-preparation assignment is covered by the loop paragraph comment,
   every comment starts a new paragraph where required, and meaningful function

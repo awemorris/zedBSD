@@ -109,7 +109,9 @@ usync_wait(
 	 * a lost waiter.  No user backing pin is held while sleeping.
 	 */
 	irq = spin_lock_irqsave(&bucket->lock);
+
 	sequence = waitq_sequence(&bucket->waiters);
+
 	spin_unlock_irqrestore(&bucket->lock, irq);
 
 	/* Reads the user word through a bounded pin. */
@@ -130,9 +132,11 @@ usync_wait(
 	if (cancelable)
 		flags |= WAITQ_CANCELABLE;
 	irq = spin_lock_irqsave(&bucket->lock);
+
 	error = waitq_sleep(&bucket->waiters, &bucket->lock, sequence, deadline, flags);
 	if (error == EAGAIN)
 		error = 0;
+
 	spin_unlock_irqrestore(&bucket->lock, irq);
 
 	/* Reports why the sleep failed. */
@@ -173,7 +177,9 @@ usync_wake(
 	 * and let every waiter revalidate its own value instead.
 	 */
 	irq = spin_lock_irqsave(&bucket->lock);
+
 	waitq_wake_all(&bucket->waiters);
+
 	spin_unlock_irqrestore(&bucket->lock, irq);
 
 	/* Reports the wake. */

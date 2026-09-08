@@ -140,6 +140,7 @@ wlan_wpa2_rsn_select_ccmp_psk(
 			have_ccmp = 1;
 		offset += 4U;
 	}
+
 	if (!have_ccmp || length - offset < 2U)
 		return EINVAL;
 
@@ -153,6 +154,7 @@ wlan_wpa2_rsn_select_ccmp_psk(
 			have_psk = 1;
 		offset += 4U;
 	}
+
 	if (!have_psk)
 		return EINVAL;
 
@@ -449,11 +451,13 @@ wlan_wpa2_assoc_response_parse(
 				if ((frame[offset + index] & 0x7fU) == 0U)
 					return EINVAL;
 			}
+
 			if (identifier == IEEE80211_IE_SUPPORTED_RATES)
 				have_rates = 1;
 			else
 				have_extended = 1;
 		}
+
 		offset += ie_length;
 	}
 
@@ -586,9 +590,8 @@ wlan_wpa2_m3_plaintext_parse(
 {
 	int error;
 
-	error = key_plaintext_parse(plaintext, length, result, 1);
-
 	/* Reports why the parse failed. */
+	error = key_plaintext_parse(plaintext, length, result, 1);
 	if (error != 0)
 		return error;
 
@@ -607,9 +610,8 @@ wlan_wpa2_group_plaintext_parse(
 {
 	int error;
 
-	error = key_plaintext_parse(plaintext, length, result, 0);
-
 	/* Reports why the parse failed. */
+	error = key_plaintext_parse(plaintext, length, result, 0);
 	if (error != 0)
 		return error;
 
@@ -1136,6 +1138,7 @@ key_plaintext_parse(
 			offset = length;
 			break;
 		}
+
 		if (length - offset < 2U)
 			return EINVAL;
 		identifier = plaintext[offset];
@@ -1191,6 +1194,7 @@ key_plaintext_parse(
 		} else {
 			return EINVAL;
 		}
+
 		offset += (size_t)ie_length + 2U;
 	}
 

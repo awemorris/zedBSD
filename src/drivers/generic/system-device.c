@@ -83,9 +83,8 @@ drv_system_device_register(
 {
 	int error;
 
-	error = cdev_register("system", 0x00010002U, &system_ops, NULL);
-
 	/* Reports why the registration failed. */
+	error = cdev_register("system", 0x00010002U, &system_ops, NULL);
 	if (error != 0)
 		return error;
 
@@ -226,6 +225,7 @@ system_get_mounts(
 		if (header.reserved[i] != 0)
 			return EINVAL;
 	}
+
 	bytes = sizeof(header) + header.capacity * sizeof(output->entries[0]);
 	output = kern_malloc(bytes);
 	if (output == NULL)
@@ -276,9 +276,9 @@ system_get_info(
 	info.partition_count = partition_count();
 
 	/* Copies it to the caller. */
-	error = copyout(&info, argument, sizeof(info));
 
 	/* Reports why the copy failed. */
+	error = copyout(&info, argument, sizeof(info));
 	if (error != 0)
 		return error;
 
@@ -318,9 +318,9 @@ system_get_device(
 	output.sectors = device->sectors;
 
 	/* Copies the description to the caller. */
-	error = copyout(&output, argument, sizeof(output));
 
 	/* Reports why the copy failed. */
+	error = copyout(&output, argument, sizeof(output));
 	if (error != 0)
 		return error;
 
@@ -393,9 +393,9 @@ system_get_vmstat(
 	    (cs.limit_pages - cs.used_pages) * VM_COMMIT_PAGE_SIZE;
 
 	/* Copies the report to the caller. */
-	error = copyout(&output, argument, sizeof(output));
 
 	/* Reports why the copy failed. */
+	error = copyout(&output, argument, sizeof(output));
 	if (error != 0)
 		return error;
 
@@ -413,9 +413,9 @@ system_get_resources(
 
 	/* Takes the snapshot and copies it to the caller. */
 	kern_resource_snapshot(&output);
-	error = copyout(&output, argument, sizeof(output));
 
 	/* Reports why the copy failed. */
+	error = copyout(&output, argument, sizeof(output));
 	if (error != 0)
 		return error;
 
@@ -451,11 +451,13 @@ system_get_process(
 	target_credential = cred_process_ref(process);
 	memset(&output, 0, sizeof(output));
 	irq = spin_lock_irqsave(&process->lock);
+
 	output.pid = process->pid;
 	if (target_credential != NULL) {
 		output.uid = target_credential->euid;
 		output.gid = target_credential->egid;
 	}
+
 	output.state = process->state;
 	output.threads = process->thread_count;
 	output.process_group = process->pgrp;
@@ -469,6 +471,7 @@ system_get_process(
 	memcpy(output.command, process->command,
 	       sizeof(output.command));
 	output.command[sizeof(output.command) - 1U] = '\0';
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Hides the command and terminal from a caller with another identity. */
@@ -479,6 +482,7 @@ system_get_process(
 		output.command[0] = '\0';
 		output.has_controlling_terminal = 0;
 	}
+
 	cred_release(target_credential);
 	cred_release(caller_credential);
 
@@ -493,12 +497,13 @@ system_get_process(
 		mutex_unlock(&vmspace->lock);
 		vmspace_put(vmspace);
 	}
+
 	process_release(process);
 
 	/* Copies the description to the caller. */
-	error = copyout(&output, argument, sizeof(output));
 
 	/* Reports why the copy failed. */
+	error = copyout(&output, argument, sizeof(output));
 	if (error != 0)
 		return error;
 
@@ -582,9 +587,9 @@ system_get_file_usage(
 	path_release(&target);
 
 	/* Copies the description to the caller. */
-	error = copyout(&output, argument, sizeof(output));
 
 	/* Reports why the copy failed. */
+	error = copyout(&output, argument, sizeof(output));
 	if (error != 0)
 		return error;
 
@@ -608,9 +613,9 @@ system_swap_ioctl(
 	cred_release(credential);
 
 	/* Forwards the request to the swap device. */
-	error = drv_system_swap_device_ioctl(request, argument, superuser);
 
 	/* Reports why the swap device failed. */
+	error = drv_system_swap_device_ioctl(request, argument, superuser);
 	if (error != 0)
 		return error;
 
@@ -642,14 +647,17 @@ system_process_file_usage(
 
 	/* Retains the directory and descriptor tables under the process lock. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	if (process->cwdi != NULL) {
 		cwdi = process->cwdi;
 		cwdinfo_retain(cwdi);
 	}
+
 	if (process->fd != NULL) {
 		files = process->fd;
 		filedesc_ref(files);
 	}
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Checks the working and root directories. */
@@ -675,9 +683,11 @@ system_process_file_usage(
 				else
 					flags |= ZEDBSD_SYSTEM_FILE_USAGE_OPEN;
 			}
+
 			if (candidate != NULL)
 				(void)file_close(candidate);
 		}
+
 		filedesc_destroy(files);
 	}
 
@@ -696,6 +706,7 @@ system_process_file_usage(
 			else
 				flags |= ZEDBSD_SYSTEM_FILE_USAGE_MAPPED;
 		}
+
 		mutex_unlock(&vmspace->lock);
 		vmspace_put(vmspace);
 	}
@@ -971,9 +982,9 @@ get_source_ioctl(
 	output.source[sizeof(output.source) - 1U] = '\0';
 
 	/* Copies the answer out. */
-	error = copyout(&output, argument, sizeof(output));
 
 	/* Reports why the copy failed. */
+	error = copyout(&output, argument, sizeof(output));
 	if (error != 0)
 		return error;
 

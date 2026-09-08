@@ -82,9 +82,9 @@ __libc_heap_lock(
 	bool enabled;
 
 	enabled = hal_irq_disable();
-	cpu = hal_cpu_current();
 
 	/* Traps on a recursive lock, which would deadlock below. */
+	cpu = hal_cpu_current();
 	if (cpu >= HAL_CPU_MAX || kernel_heap_libc_lock_active[cpu] != 0)
 		HAL_FATAL("recursive libc kernel heap lock");
 
@@ -105,9 +105,8 @@ __libc_heap_unlock(
 	hal_cpu_id_t cpu;
 	bool enabled;
 
-	cpu = hal_cpu_current();
-
 	/* Traps on an unlock without a matching lock. */
+	cpu = hal_cpu_current();
 	if (cpu >= HAL_CPU_MAX || kernel_heap_libc_lock_active[cpu] == 0)
 		HAL_FATAL("unbalanced libc kernel heap unlock");
 
@@ -232,9 +231,8 @@ kern_free(
 	if (pointer == NULL)
 		return;
 
-	enabled = kernel_heap_lock_enter();
-
 	/* Returns a fixed heap block to the heap. */
+	enabled = kernel_heap_lock_enter();
 	if (address >= (uintptr_t)kernel_heap.begin &&
 	    address < (uintptr_t)kernel_heap.end) {
 		heap_allocator_free(&kernel_heap, pointer);
@@ -251,6 +249,7 @@ kern_free(
 			break;
 		}
 	}
+
 	if (large != NULL)
 		memory = large->memory;
 
@@ -303,9 +302,8 @@ kernel_entry(
 	const struct boot_handoff *h;
 	size_t device_count;
 
-	h = handoff;
-
 	/* Refuses a handoff that is missing, foreign, or truncated. */
+	h = handoff;
 	if (h == NULL ||
 	    h->magic != ZEDBSD_HANDOFF_MAGIC ||
 	    (h->version != ZEDBSD_HANDOFF_VERSION_PC98 &&

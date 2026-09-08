@@ -104,6 +104,7 @@ packet_buf_alloc(
 		packet = &slot->packet;
 		break;
 	}
+
 	packet_unlock(enabled);
 
 	/* Reports the packet, or none when the pool is exhausted. */
@@ -178,6 +179,7 @@ packet_buf_free(
 			packet_used--;
 		break;
 	}
+
 	packet_unlock(enabled);
 
 	/* Releases what the packet held. */
@@ -331,6 +333,7 @@ packet_buf_copy(
 		packet_buf_free(copy);
 		return NULL;
 	}
+
 	memcpy(data, source->data, source->length);
 
 	/* Copies the layer offsets, protocol, flags, device, and source. */
@@ -378,6 +381,7 @@ packet_buf_copy_region(
 		packet_buf_free(copy);
 		return NULL;
 	}
+
 	memcpy(data, source->storage + offset, length);
 
 	/* Copies the protocol, flags, device, and source. */

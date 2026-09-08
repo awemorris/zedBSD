@@ -253,9 +253,9 @@ buf_init(
 		value = BUF_MIN_BYTES;
 	value &= ~(uint64_t)(ZEDBSD_PAGE_SIZE - 1U);
 	cache_max_bytes = value;
-	cache_initialized = 1;
 
 	/* Allocates the first header slab. */
+	cache_initialized = 1;
 	if (slab_grow() != 0) {
 		cache_initialized = 0;
 		return ENOMEM;
@@ -285,9 +285,9 @@ buf_get(
 	error = disk_resolve_range(disk, block, 1, &leaf, &mapped);
 	if (error != 0)
 		return error;
-	error = acquire_line(leaf, mapped, 1, result);
 
 	/* Reports why the acquisition failed. */
+	error = acquire_line(leaf, mapped, 1, result);
 	if (error != 0)
 		return error;
 
@@ -312,14 +312,18 @@ buf_release(
 
 	/* Clears the busy flag and wakes any waiter. */
 	irq = spin_lock_irqsave(&buffer->b_lock);
+
 	buffer->b_busy = 0;
 	waitq_wake_all(&buffer->b_waitq);
+
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
 
 	/* Drops the reference, making the buffer evictable when it was the last. */
 	irq = spin_lock_irqsave(&cache_lock);
+
 	if (refcount_put_not_last(&buffer->b_refs) == 1)
 		lru_add_locked(buffer);
+
 	spin_unlock_irqrestore(&cache_lock, irq);
 }
 
@@ -374,9 +378,8 @@ buf_writeback(
 {
 	int error;
 
-	error = buf_writeback_context(buffer, NULL);
-
 	/* Reports the failure. */
+	error = buf_writeback_context(buffer, NULL);
 	if (error != 0)
 		return error;
 
@@ -406,10 +409,12 @@ buf_writeback_context(
 
 	/* A clean buffer needs nothing; an invalid dirty one cannot be written. */
 	irq = spin_lock_irqsave(&buffer->b_lock);
+
 	if (!(buffer->b_flags & BUF_DIRTY)) {
 		spin_unlock_irqrestore(&buffer->b_lock, irq);
 		return 0;
 	}
+
 	if (!(buffer->b_flags & BUF_VALID)) {
 		spin_unlock_irqrestore(&buffer->b_lock, irq);
 		return EIO;
@@ -419,7 +424,9 @@ buf_writeback_context(
 	generation = buffer->b_dirty_generation;
 	buffer->b_io_state = BUF_IO_WRITING;
 	buffer->b_io_inflight = 1;
+
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
+
 	stat_add(&stat_write_bios, 1);
 	error = disk_write_direct_context(buffer->b_disk,
 					  buffer->b_block,
@@ -445,6 +452,7 @@ buf_writeback_context(
 	}
 
 	waitq_wake_all(&buffer->b_waitq);
+
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
 
 	/* Reports why the write failed. */
@@ -542,6 +550,7 @@ buf_read_view(
 		error = buf_read(disk, block, count, data);
 		return error;
 	}
+
 	view->disk = disk;
 	disk_ref(disk);
 	end = mapped + count;
@@ -554,6 +563,7 @@ buf_read_view(
 		view->lines[view->count++] = buffer;
 		mapped = buffer->b_block + buffer->b_block_count;
 	}
+
 	if (mapped < end) {
 		buf_view_release(view);
 		error = buf_read(disk, block, count, data);
@@ -570,6 +580,7 @@ buf_read_view(
 			eligible = 0;
 		spin_unlock_irqrestore(&buffer->b_lock, irq);
 	}
+
 	error = buf_read(disk, block, count, data);
 	if (error != 0) {
 		buf_view_release(view);
@@ -579,6 +590,7 @@ buf_read_view(
 			error = buf_read(disk, block, count, data);
 		return error;
 	}
+
 	view->valid = eligible;
 	if (!buf_view_matches(view))
 		buf_view_release(view);
@@ -631,6 +643,7 @@ buf_read(
 			out += (size_t)run_blocks * leaf->d_block_size;
 			continue;
 		}
+
 		error = acquire_line(leaf, mapped, 1, &buffer);
 		if (error != 0)
 			return error;
@@ -664,9 +677,8 @@ buf_write(
 {
 	int error;
 
-	error = buf_write_context(disk, block, count, data, NULL);
-
 	/* Reports the failure. */
+	error = buf_write_context(disk, block, count, data, NULL);
 	if (error != 0)
 		return error;
 
@@ -727,6 +739,7 @@ buf_write_context(
 			in += (size_t)run_blocks * leaf->d_block_size;
 			continue;
 		}
+
 		if (leaf->d_block_size > ZEDBSD_PAGE_SIZE)
 			line_bytes = leaf->d_block_size;
 		else
@@ -825,6 +838,7 @@ buf_reclaim(
 				break;
 			continue;
 		}
+
 		total += freed;
 	}
 
@@ -959,11 +973,14 @@ buf_get_stats(
 	/* Samples the accounting under the lock and the counters atomically. */
 	memset(stats, 0, sizeof(*stats));
 	irq = spin_lock_irqsave(&cache_lock);
+
 	stats->max_bytes = cache_max_bytes;
 	stats->current_bytes = cache_current_bytes;
 	stats->data_bytes = cache_data_bytes;
 	stats->metadata_bytes = cache_metadata_bytes;
+
 	spin_unlock_irqrestore(&cache_lock, irq);
+
 	stats->dirty_bytes = atomic_u64_load_acquire(&cache_dirty_bytes);
 	stats->buffers = atomic_u64_load_acquire(&stat_buffers);
 	stats->hits = atomic_u64_load_acquire(&stat_hits);
@@ -1005,8 +1022,10 @@ buf_set_max_bytes(
 	/* Installs the new cap under the control mutex. */
 	mutex_lock(&cache_control);
 	irq = spin_lock_irqsave(&cache_lock);
+
 	old = cache_max_bytes;
 	cache_max_bytes = value;
+
 	spin_unlock_irqrestore(&cache_lock, irq);
 
 	/* Reclaims until the usage fits, restoring the old cap on failure. */
@@ -1024,6 +1043,7 @@ buf_set_max_bytes(
 			break;
 		}
 	}
+
 	mutex_unlock(&cache_control);
 
 	/* Reports the resize result. */
@@ -1164,6 +1184,7 @@ hash_find_locked(
 		    !(buffer->b_flags & BUF_INVALID))
 			return buffer;
 	}
+
 	return NULL;
 }
 
@@ -1209,6 +1230,7 @@ reserve_bytes(
 			spin_unlock_irqrestore(&cache_lock, irq);
 			return 0;
 		}
+
 		spin_unlock_irqrestore(&cache_lock, irq);
 		if (buf_reclaim(size, 0) == 0)
 			break;
@@ -1232,8 +1254,10 @@ cancel_reservation(
 
 	/* Takes the bytes off the cache's own reservation. */
 	irq = spin_lock_irqsave(&cache_lock);
+
 	if (cache_reserved_bytes >= size)
 		cache_reserved_bytes -= size;
+
 	spin_unlock_irqrestore(&cache_lock, irq);
 
 	/* Tells the shared budget that the reservation is gone. */
@@ -1252,12 +1276,14 @@ commit_reservation(
 
 	/* Moves the bytes from reserved to resident in the cache. */
 	irq = spin_lock_irqsave(&cache_lock);
+
 	cache_reserved_bytes -= size;
 	cache_current_bytes += size;
 	if (metadata)
 		cache_metadata_bytes += size;
 	else
 		cache_data_bytes += size;
+
 	spin_unlock_irqrestore(&cache_lock, irq);
 
 	/* Tells the shared budget that the reservation became memory. */
@@ -1329,9 +1355,9 @@ slab_grow(
 	unsigned long irq;
 
 	header = slab_header_size();
-	error = alloc_pmem(BUF_SLAB_BYTES, &memory, 1);
 
 	/* Rejects a failed allocation or a slab the free mask cannot cover. */
+	error = alloc_pmem(BUF_SLAB_BYTES, &memory, 1);
 	if (error != 0)
 		return error;
 	charged = memory.size;
@@ -1356,8 +1382,10 @@ slab_grow(
 
 	/* Publishes the slab. */
 	irq = spin_lock_irqsave(&cache_lock);
+
 	slab->next = slabs;
 	slabs = slab;
+
 	spin_unlock_irqrestore(&cache_lock, irq);
 
 	/* Reports the added slab. */
@@ -1382,6 +1410,7 @@ alloc_metadata(
 					if (slab->free_mask & ((uint64_t)1 << slot))
 						break;
 				}
+
 				slab->free_mask &= ~((uint64_t)1 << slot);
 				slab->used++;
 				spin_unlock_irqrestore(&cache_lock, irq);
@@ -1391,6 +1420,7 @@ alloc_metadata(
 				return slab_slot(slab, slot);
 			}
 		}
+
 		spin_unlock_irqrestore(&cache_lock, irq);
 		if (slab_grow() != 0)
 			return NULL;
@@ -1420,6 +1450,7 @@ free_metadata(
 
 	/* Frees the slot, and the slab when it emptied and is not the first. */
 	irq = spin_lock_irqsave(&cache_lock);
+
 	slab->free_mask |= (uint64_t)1 << slot;
 	if (slab->used != 0)
 		slab->used--;
@@ -1430,11 +1461,13 @@ free_metadata(
 				break;
 			}
 		}
+
 		release = slab->memory;
 		cache_current_bytes -= release.size;
 		cache_metadata_bytes -= release.size;
 		free_slab = 1;
 	}
+
 	spin_unlock_irqrestore(&cache_lock, irq);
 
 	/* Releases the slab memory unlocked. */
@@ -1496,6 +1529,7 @@ busy_acquire(
 			spin_unlock_irqrestore(&buffer->b_lock, irq);
 			return 0;
 		}
+
 		stat_add(&stat_waits, 1);
 
 		/* A thread sleeps for the release; early boot spins. */
@@ -1521,8 +1555,10 @@ drop_caller_reference(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&cache_lock);
+
 	if (refcount_put_not_last(&buffer->b_refs) == 1)
 		lru_add_locked(buffer);
+
 	spin_unlock_irqrestore(&cache_lock, irq);
 }
 
@@ -1536,6 +1572,7 @@ read_buffer(
 
 	/* A valid buffer needs no read. */
 	irq = spin_lock_irqsave(&buffer->b_lock);
+
 	if (buffer->b_flags & BUF_VALID) {
 		spin_unlock_irqrestore(&buffer->b_lock, irq);
 		return 0;
@@ -1544,13 +1581,16 @@ read_buffer(
 	/* Reads unlocked with the I/O state published. */
 	buffer->b_io_state = BUF_IO_READING;
 	buffer->b_io_inflight = 1;
+
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
+
 	stat_add(&stat_read_bios, 1);
 	error = disk_read_direct(buffer->b_disk, buffer->b_block,
 	    buffer->b_block_count, buffer->b_data);
 
 	/* Records the outcome and wakes the waiters. */
 	irq = spin_lock_irqsave(&buffer->b_lock);
+
 	buffer->b_io_state = BUF_IO_IDLE;
 	buffer->b_io_inflight = 0;
 	buffer->b_error = error;
@@ -1561,7 +1601,9 @@ read_buffer(
 		buffer->b_flags &= ~BUF_VALID;
 		buffer->b_flags |= BUF_ERROR;
 	}
+
 	waitq_wake_all(&buffer->b_waitq);
+
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
 
 	/* Reports why the read failed. */
@@ -1601,6 +1643,7 @@ acquire_line(
 			return error;
 		}
 	}
+
 	*result = buffer;
 
 	/* Returns the single busy line. */
@@ -1660,6 +1703,7 @@ reference_line(
 			*result = buffer;
 			return 0;
 		}
+
 		spin_unlock_irqrestore(&cache_lock, irq);
 
 		/* A miss: prepares a candidate line unlocked. */
@@ -1673,6 +1717,7 @@ reference_line(
 				free_metadata(candidate);
 				return error;
 			}
+
 			commit_reservation(memory.size, 0);
 			candidate->b_block = line_block;
 			candidate->b_block_count = (uint32_t)line_blocks;
@@ -1684,6 +1729,7 @@ reference_line(
 				free_buffer(candidate);
 				return error;
 			}
+
 			candidate->b_disk = disk;
 			refcount_init(&candidate->b_refs, 2);
 			spin_init(&candidate->b_lock, LOCK_RANK_BUF, "buffer");
@@ -1697,6 +1743,7 @@ reference_line(
 			spin_unlock_irqrestore(&cache_lock, irq);
 			continue;
 		}
+
 		bucket = buf_hash_key(disk, line_block);
 		candidate->b_hash_next = cache_hash[bucket];
 		cache_hash[bucket] = candidate;
@@ -1738,6 +1785,7 @@ finish_run_line(
 
 	/* Changes completion state while preserving a newer dirty generation. */
 	irq = spin_lock_irqsave(&buffer->b_lock);
+
 	buffer->b_io_state = BUF_IO_IDLE;
 	buffer->b_io_inflight = 0;
 	buffer->b_error = error;
@@ -1757,7 +1805,9 @@ finish_run_line(
 		buffer->b_flags &= ~BUF_VALID;
 		buffer->b_flags |= BUF_ERROR;
 	}
+
 	waitq_wake_all(&buffer->b_waitq);
+
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
 }
 
@@ -1795,11 +1845,13 @@ transfer_run(
 		io_stats_record(IO_BUF_SINGLE_GEOMETRY, 0);
 		return 0;
 	}
+
 	line_blocks = (uint32_t)(line_bytes / disk->d_block_size);
 	if (block % line_blocks != 0 || remaining / line_blocks < 2U) {
 		io_stats_record(IO_BUF_SINGLE_GEOMETRY, 0);
 		return 0;
 	}
+
 	count = (unsigned)(remaining / line_blocks > KERN_IO_BATCH_MAX / line_bytes ?
 	    KERN_IO_BATCH_MAX / line_bytes : remaining / line_blocks);
 
@@ -1812,6 +1864,7 @@ transfer_run(
 			io_stats_record(IO_BUF_SINGLE_MEMORY, 0);
 			return 0;
 		}
+
 		/* Avoids preparing cold successors when this read already reaches a hit. */
 		if (!write) {
 			irq = spin_lock_irqsave(&lines[index]->b_lock);
@@ -1835,6 +1888,7 @@ transfer_run(
 			io_stats_record(IO_BUF_SINGLE_BUSY, 0);
 			return 0;
 		}
+
 		lines[index]->b_busy = 1;
 		acquired++;
 
@@ -1846,8 +1900,10 @@ transfer_run(
 			acquired = index;
 			break;
 		}
+
 		spin_unlock_irqrestore(&lines[index]->b_lock, irq);
 	}
+
 	if (count < 2U) {
 		release_run(lines, count, acquired);
 		io_stats_record(IO_BUF_SINGLE_HIT, 0);
@@ -1861,6 +1917,7 @@ transfer_run(
 			memcpy(lines[index]->b_data, bytes + index * line_bytes, (size_t)line_bytes);
 			buf_mark_dirty(lines[index]);
 		}
+
 		irq = spin_lock_irqsave(&lines[index]->b_lock);
 		generations[index] = lines[index]->b_dirty_generation;
 		lines[index]->b_io_state = write ? BUF_IO_WRITING : BUF_IO_READING;
@@ -1886,8 +1943,10 @@ transfer_run(
 		} else if (line_error == 0) {
 			line_error = EIO;
 		}
+
 		finish_run_line(lines[index], generations[index], write, line_error);
 	}
+
 	release_run(lines, count, count);
 	if (error != 0)
 		return error;
@@ -1966,6 +2025,7 @@ evict_one(
 			spin_unlock_irqrestore(&buffer->b_lock, birq);
 			continue;
 		}
+
 		dirty_unlink_locked(buffer);
 		buffer->b_flags |= BUF_INVALID;
 		spin_unlock_irqrestore(&dirty_index_lock, dirty_irq);
@@ -1991,7 +2051,9 @@ evict_one(
 			}
 		}
 	}
+
 	spin_unlock_irqrestore(&cache_lock, irq);
+
 	if (candidate == NULL)
 		return ENOENT;
 
@@ -2044,6 +2106,7 @@ dirty_link(
 
 	/* Inserts into the global age list and the owning device's list in O(1). */
 	irq = spin_lock_irqsave(&dirty_index_lock);
+
 	if (buffer->b_dirty_linked)
 		HAL_FATAL("dirty buffer linked twice");
 	buffer->b_dirty_previous = dirty_tail;
@@ -2059,6 +2122,7 @@ dirty_link(
 		buffer->b_device_dirty_next->b_device_dirty_previous = buffer;
 	buffer->b_disk->d_dirty_buffers = buffer;
 	buffer->b_dirty_linked = 1;
+
 	spin_unlock_irqrestore(&dirty_index_lock, irq);
 }
 
@@ -2071,7 +2135,9 @@ dirty_clear(
 
 	/* Serializes clean publication against dirty-candidate reference acquisition. */
 	irq = spin_lock_irqsave(&dirty_index_lock);
+
 	dirty_unlink_locked(buffer);
+
 	spin_unlock_irqrestore(&dirty_index_lock, irq);
 }
 
@@ -2121,6 +2187,7 @@ dirty_reference(
 
 	/* Scans only dirty membership, never unrelated clean cache hash buckets. */
 	irq = spin_lock_irqsave(&dirty_index_lock);
+
 	buffer = disk != NULL ? disk->d_dirty_buffers : dirty_head;
 	while (buffer != NULL) {
 		if ((!reclaim || refcount_load(&buffer->b_refs) == 1) &&
@@ -2129,8 +2196,10 @@ dirty_reference(
 			refcount_get(&buffer->b_refs);
 			break;
 		}
+
 		buffer = disk != NULL ? buffer->b_device_dirty_next : buffer->b_dirty_next;
 	}
+
 	spin_unlock_irqrestore(&dirty_index_lock, irq);
 
 	/* Takes the lower-ranked cache lock only after releasing the index guard. */
@@ -2139,5 +2208,6 @@ dirty_reference(
 		lru_remove_locked(buffer);
 		spin_unlock_irqrestore(&cache_lock, irq);
 	}
+
 	return buffer;
 }

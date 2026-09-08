@@ -149,6 +149,7 @@ wlan_frame_parse_bss(
 			if (error != 0)
 				return error;
 		}
+
 		offset += ie_length;
 	}
 
@@ -212,6 +213,7 @@ parse_cipher(
 		oui_b = 0x50U;
 		oui_c = 0xf2U;
 	}
+
 	if (!suite_oui_is(suite, 0x00U, oui_b, oui_c))
 		return CIPHER_UNSUPPORTED;
 
@@ -243,6 +245,7 @@ parse_akm(
 		oui_b = 0x50U;
 		oui_c = 0xf2U;
 	}
+
 	if (!suite_oui_is(suite, 0x00U, oui_b, oui_c))
 		return;
 
@@ -277,9 +280,9 @@ parse_security_body(
 	/* Accepts only version 1. */
 	if (length < 2U || read_le16(body) != 1U)
 		return EINVAL;
-	offset = 2U;
 
 	/* Classifies the group cipher. */
+	offset = 2U;
 	if (length - offset < 4U)
 		return EINVAL;
 	cipher = parse_cipher(body + offset, rsn);
@@ -309,6 +312,7 @@ parse_security_body(
 			*security |= WLAN_SECURITY_CCMP;
 			pairwise_supported = 1;
 		}
+
 		offset += 4U;
 	}
 

@@ -45,9 +45,8 @@ kernel_user_int_handler(
 {
 	struct thread *thread;
 
-	thread = curthread;
-
 	/* Ignores an interrupt outside any process. */
+	thread = curthread;
 	if (thread == NULL || thread->proc == NULL)
 		return;
 

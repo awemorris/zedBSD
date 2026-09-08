@@ -224,9 +224,8 @@ swap_manager_enable(
 {
 	int error;
 
-	error = swap_manager_enable_transition(backend, NULL);
-
 	/* Reports why the enable failed. */
+	error = swap_manager_enable_transition(backend, NULL);
 	if (error != 0)
 		return error;
 
@@ -289,6 +288,7 @@ swap_source_prepare(
 
 	/* Installs them in an inactive source of an enabled backend. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	source = &backend->source[source_id];
 	if (!backend->enabled ||
 	    backend->shutting_down ||
@@ -299,6 +299,7 @@ swap_source_prepare(
 		kern_free(bitmap);
 		return EBUSY;
 	}
+
 	source->bitmap = bitmap;
 	source->slot_inflight = slot_inflight;
 	source->slot_pending_free = slot_pending_free;
@@ -308,6 +309,7 @@ swap_source_prepare(
 	source->slot_count = slot_count;
 	source->free_slots = slot_count;
 	source->state = SWAP_SOURCE_STATE_PREPARED;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the prepared source. */
@@ -331,15 +333,18 @@ swap_source_publish(
 
 	/* Only a prepared source of an enabled backend can be published. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	source = &backend->source[source_id];
 	if (!backend->enabled || backend->shutting_down) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return ENXIO;
 	}
+
 	if (source->state != SWAP_SOURCE_STATE_PREPARED) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return EBUSY;
 	}
+
 	if (backend->slot_count > UINT32_MAX - source->slot_count ||
 	    backend->free_slots > UINT32_MAX - source->slot_count) {
 		spin_unlock_irqrestore(&swap_lock, irq);
@@ -351,6 +356,7 @@ swap_source_publish(
 	backend->free_slots += source->slot_count;
 	backend->source_count++;
 	source->state = SWAP_SOURCE_STATE_ACTIVE;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the published source. */
@@ -377,11 +383,13 @@ swap_source_cancel_prepare(
 
 	/* Only a prepared source of an enabled backend can be cancelled. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	source = &backend->source[source_id];
 	if (!backend->enabled || backend->shutting_down) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return ENXIO;
 	}
+
 	if (source->state != SWAP_SOURCE_STATE_PREPARED) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return EBUSY;
@@ -397,14 +405,18 @@ swap_source_cancel_prepare(
 	source->bitmap = NULL;
 	source->slot_inflight = NULL;
 	source->slot_pending_free = NULL;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
+
 	kern_free(slot_pending_free);
 	kern_free(slot_inflight);
 	kern_free(bitmap);
 
 	/* Clears the tombstone. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	memset(source, 0, sizeof(*source));
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the cancelled source. */
@@ -473,9 +485,8 @@ swap_activate(
 {
 	int error;
 
-	error = swap_source_add(backend, 0, ops, data, page_size, slot_count);
-
 	/* Reports why the add failed. */
+	error = swap_source_add(backend, 0, ops, data, page_size, slot_count);
 	if (error != 0)
 		return error;
 
@@ -503,6 +514,7 @@ swap_alloc_slot(
 
 	/* Only an enabled backend allocates. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	if (!backend->enabled || backend->shutting_down) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return ENXIO;
@@ -528,6 +540,7 @@ swap_alloc_slot(
 			}
 		}
 	}
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports exhausted swap. */
@@ -555,6 +568,7 @@ swap_free_slot(
 
 	/* Only a slot of an active or draining source can be freed. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	source = &backend->source[source_id];
 	if (!backend->enabled ||
 	    (source->state != SWAP_SOURCE_STATE_ACTIVE &&
@@ -575,6 +589,7 @@ swap_free_slot(
 			backend->free_slots++;
 		}
 	}
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 }
 
@@ -589,9 +604,8 @@ swap_read_page(
 {
 	int error;
 
-	error = swap_io(backend, slot, page, 0);
-
 	/* Reports why the read failed. */
+	error = swap_io(backend, slot, page, 0);
 	if (error != 0)
 		return error;
 
@@ -610,9 +624,8 @@ swap_write_page(
 {
 	int error;
 
-	error = swap_io(backend, slot, (void *)page, 1);
-
 	/* Reports why the write failed. */
+	error = swap_io(backend, slot, (void *)page, 1);
 	if (error != 0)
 		return error;
 
@@ -648,10 +661,12 @@ swap_flush(
 
 	/* Only an enabled backend with no removal in progress flushes. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	if (!backend->enabled || backend->shutting_down) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return ENXIO;
 	}
+
 	for (source_id = 0; source_id < SWAP_SOURCE_COUNT; source_id++) {
 		source = &backend->source[source_id];
 		if (source->state == SWAP_SOURCE_STATE_REMOVING) {
@@ -672,6 +687,7 @@ swap_flush(
 		source->inflight++;
 		backend->inflight++;
 	}
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Flushes outside the lock, keeping the first error. */
@@ -688,12 +704,14 @@ swap_flush(
 
 	/* Releases the in-flight holds. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	for (source_id = 0; source_id < SWAP_SOURCE_COUNT; source_id++) {
 		if (reserved[source_id]) {
 			backend->source[source_id].inflight--;
 			backend->inflight--;
 		}
 	}
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the first flush failure. */
@@ -717,18 +735,22 @@ swap_source_begin_drain(
 
 	/* Only an active or already draining source of a live backend drains. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	source = &backend->source[source_id];
 	if (!backend->enabled || source->state == SWAP_SOURCE_STATE_INACTIVE) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return ENXIO;
 	}
+
 	if (backend->shutting_down ||
 	    (source->state != SWAP_SOURCE_STATE_ACTIVE &&
 	     source->state != SWAP_SOURCE_STATE_DRAINING)) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return EBUSY;
 	}
+
 	source->state = SWAP_SOURCE_STATE_DRAINING;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the draining source. */
@@ -752,17 +774,21 @@ swap_source_abort_drain(
 
 	/* Only a draining source of a live backend can be reactivated. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	source = &backend->source[source_id];
 	if (!backend->enabled || source->state == SWAP_SOURCE_STATE_INACTIVE) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return ENXIO;
 	}
+
 	if (backend->shutting_down ||
 	    source->state != SWAP_SOURCE_STATE_DRAINING) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return EBUSY;
 	}
+
 	source->state = SWAP_SOURCE_STATE_ACTIVE;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the reactivated source. */
@@ -787,6 +813,7 @@ swap_source_get_stats(
 
 	/* Samples the source under the lock. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	source = &backend->source[source_id];
 	stats->source_id = source_id;
 	stats->state = source->state;
@@ -794,6 +821,7 @@ swap_source_get_stats(
 	stats->free_slots = source->free_slots;
 	stats->allocated_slots = source->slot_count - source->free_slots;
 	stats->inflight = source->inflight;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the sampled statistics. */
@@ -827,11 +855,13 @@ swap_source_remove(
 
 	/* Only an idle, empty, draining source of a live backend is removed. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	source = &backend->source[source_id];
 	if (!backend->enabled || source->state == SWAP_SOURCE_STATE_INACTIVE) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return ENXIO;
 	}
+
 	if (backend->shutting_down ||
 	    source->state != SWAP_SOURCE_STATE_DRAINING ||
 	    source->inflight != 0 ||
@@ -846,7 +876,9 @@ swap_source_remove(
 	backend->inflight++;
 	ops = source->ops;
 	data = source->data;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
+
 	if (ops->flush != NULL)
 		flush_error = ops->flush(data);
 	else
@@ -854,6 +886,7 @@ swap_source_remove(
 
 	/* A failed flush puts the source back to draining. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	backend->inflight--;
 	source->inflight--;
 	if (flush_error != 0) {
@@ -880,6 +913,7 @@ swap_source_remove(
 	backend->slot_count -= slot_count;
 	backend->free_slots -= slot_count;
 	backend->source_count--;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Destroys the driver state and the metadata. */
@@ -891,7 +925,9 @@ swap_source_remove(
 
 	/* Clears the tombstone. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	memset(source, 0, sizeof(*source));
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the removed source. */
@@ -924,6 +960,7 @@ swap_shutdown(
 		return 0;
 	memset(detached, 0, sizeof(detached));
 	irq = spin_lock_irqsave(&swap_lock);
+
 	if (!backend->enabled) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return 0;
@@ -934,6 +971,7 @@ swap_shutdown(
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return EBUSY;
 	}
+
 	for (source_id = 0; source_id < SWAP_SOURCE_COUNT; source_id++) {
 		source = &backend->source[source_id];
 		if (source->state == SWAP_SOURCE_STATE_PREPARED ||
@@ -958,9 +996,11 @@ swap_shutdown(
 		memset(source, 0, sizeof(*source));
 		source->state = SWAP_SOURCE_STATE_REMOVING;
 	}
+
 	backend->slot_count = 0;
 	backend->free_slots = 0;
 	backend->source_count = 0;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Preserves numeric flush-before-destroy ordering from the boot backend. */
@@ -975,6 +1015,7 @@ swap_shutdown(
 		if (flush_error == 0 && error != 0)
 			flush_error = error;
 	}
+
 	for (source_id = 0; source_id < SWAP_SOURCE_COUNT; source_id++) {
 		detached_source = &detached[source_id];
 		if (detached_source->state == SWAP_SOURCE_STATE_INACTIVE)
@@ -988,7 +1029,9 @@ swap_shutdown(
 
 	/* Clears the backend. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	memset(backend, 0, sizeof(*backend));
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the first flush failure. */
@@ -1025,6 +1068,7 @@ swap_set_system_backend(
 		error = EBUSY;
 	else
 		system_backend = backend;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports why the publication failed. */
@@ -1047,7 +1091,9 @@ swap_system_backend(
 
 	/* Samples the pointer under the lock. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	backend = system_backend;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the backend, or none. */
@@ -1071,12 +1117,15 @@ swap_get_stats(
 
 	/* Only an enabled backend has statistics. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	if (!backend->enabled || backend->shutting_down) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return ENXIO;
 	}
+
 	*total = backend->slot_count;
 	*free_slots = backend->free_slots;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the sampled counts. */
@@ -1198,12 +1247,14 @@ kern_swap_control_register(
 
 	/* Installs the registration unless one exists or is in use. */
 	irq = spin_lock_irqsave(&control_lock);
+
 	if (control_registered || control_busy) {
 		error = EBUSY;
 	} else {
 		control_registration = *registration;
 		control_registered = 1;
 	}
+
 	spin_unlock_irqrestore(&control_lock, irq);
 
 	/* Reports why the registration failed. */
@@ -1258,6 +1309,7 @@ kern_swap_control_add(
 		error = EEXIST;
 		goto out_release;
 	}
+
 	if (error != ENOENT)
 		goto out_release;
 
@@ -1270,6 +1322,7 @@ kern_swap_control_add(
 		if (error == 0)
 			error = kern_swap_source_prepare_raw(disk, 0, &source);
 	}
+
 	if (error != 0)
 		goto out_release;
 
@@ -1503,9 +1556,9 @@ swap_header_parse(
 		/* Requires a printable label with a zero-padded terminator. */
 		for (i = 0; i < ZEDBSD_SWAP_V2_LABEL_SIZE; i++) {
 			/* Reads one label byte before checking termination. */
-			byte = header[40U + i];
 
 			/* Rejects nonzero padding after the terminator. */
+			byte = header[40U + i];
 			if (terminated && byte != 0U)
 				return EINVAL;
 
@@ -1550,9 +1603,9 @@ swap_header_validate(
 	int error;
 
 	/* Uses the same parser for validation-only callers. */
-	error = swap_header_parse(header, backing_bytes, NULL);
 
 	/* Returns the parser's exact error. */
+	error = swap_header_parse(header, backing_bytes, NULL);
 	if (error != 0)
 		return error;
 
@@ -1656,12 +1709,14 @@ kern_swap_source_prepare_file(
 		error = EINVAL;
 		goto out;
 	}
+
 	if (file->f_inode->i_mount == NULL ||
 	    file->f_inode->i_mount->m_disk == NULL ||
 	    file->f_inode->i_mount->m_type != &drv_fat_filesystem_type) {
 		error = EOPNOTSUPP;
 		goto out;
 	}
+
 	if ((file->f_inode->i_mount->m_flags & MOUNT_READ_ONLY) != 0 ||
 	    (file->f_inode->i_mount->m_disk->d_flags & DISK_READ_ONLY) != 0 ||
 	    (file->f_inode->i_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) == 0) {
@@ -1675,6 +1730,7 @@ kern_swap_source_prepare_file(
 		error = ENOMEM;
 		goto out;
 	}
+
 	data->disk = file->f_inode->i_mount->m_disk;
 	data->inode = file->f_inode;
 	inode_ref(data->inode);
@@ -1706,12 +1762,14 @@ kern_swap_source_prepare_file(
 			error = EIO;
 		goto out;
 	}
+
 	if (swap_header_parse(header, bytes, &header_info) != 0 ||
 	    header_info.slot_count == 0 ||
 	    header_info.slot_count > UINT32_MAX) {
 		error = EINVAL;
 		goto out;
 	}
+
 	if (data->disk->d_block_size != 512U) {
 		error = EIO;
 		goto out;
@@ -1726,6 +1784,7 @@ kern_swap_source_prepare_file(
 			error = EIO;
 		goto out;
 	}
+
 	error = validate_extents(data, bytes);
 	if (error != 0)
 		goto out;
@@ -1734,12 +1793,14 @@ kern_swap_source_prepare_file(
 		error = ENOMEM;
 		goto out;
 	}
+
 	for (index = 0; index < data->extent_count; index++) {
 		claim_extents[index].disk = data->disk;
 		claim_extents[index].block = data->extents[index].disk_block;
 		claim_extents[index].block_count =
 		    data->extents[index].block_count;
 	}
+
 	error = backing_claim_finalize(data->claim, claim_extents,
 	    data->extent_count);
 	kern_free(claim_extents);
@@ -1762,12 +1823,15 @@ kern_swap_source_prepare_file(
 
 	/* Marks the inode as a swap file unless it is already special. */
 	mutex_lock(&data->inode->i_lock);
+
 	if ((data->inode->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 		mutex_unlock(&data->inode->i_lock);
 		error = EBUSY;
 		goto out;
 	}
+
 	data->inode->i_flags |= INODE_SWAPFILE;
+
 	mutex_unlock(&data->inode->i_lock);
 
 	/* Fills the source description. */
@@ -1862,12 +1926,14 @@ kern_swap_source_prepare_raw(
 		disk_close(disk);
 		return error;
 	}
+
 	data = kern_calloc(1, sizeof(*data));
 	if (data == NULL) {
 		backing_claim_release(claim);
 		disk_close(disk);
 		return ENOMEM;
 	}
+
 	data->claim = claim;
 
 	/* Reads and checks the swap header. */
@@ -1878,6 +1944,7 @@ kern_swap_source_prepare_raw(
 		disk_close(disk);
 		return ENOMEM;
 	}
+
 	error = disk_read_direct(disk, 0, blocks_per_page, header_page);
 	if (error != 0) {
 		kern_free(header_page);
@@ -1886,6 +1953,7 @@ kern_swap_source_prepare_raw(
 		disk_close(disk);
 		return error;
 	}
+
 	if (swap_header_parse(header_page, bytes, &header_info) != 0 ||
 	    header_info.slot_count == 0 ||
 	    header_info.slot_count > UINT32_MAX) {
@@ -1895,6 +1963,7 @@ kern_swap_source_prepare_raw(
 		disk_close(disk);
 		return EINVAL;
 	}
+
 	kern_free(header_page);
 
 	/* Fills the source description. */
@@ -1952,6 +2021,7 @@ kern_swap_source_set_diagnostic(
 		if (diagnostic[length] == '\0')
 			break;
 	}
+
 	if (length == 0 || length > KERN_SWAP_SOURCE_TEXT_MAX)
 		return EINVAL;
 	memcpy(source->diagnostic, diagnostic, length + 1U);
@@ -2014,6 +2084,7 @@ kern_swap_source_set_add(
 		error = EINVAL;
 		goto out;
 	}
+
 	source_id = source->parameter_index;
 	if (set->range[source_id].source.ops != NULL) {
 		error = EEXIST;
@@ -2031,6 +2102,7 @@ kern_swap_source_set_add(
 			goto out;
 		}
 	}
+
 	if (total > UINT32_MAX - source->slot_count) {
 		error = EOVERFLOW;
 		goto out;
@@ -2038,10 +2110,13 @@ kern_swap_source_set_add(
 
 	/* Takes over the description. */
 	irq = spin_lock_irqsave(&swap_source_lock);
+
 	set->range[source_id].source = *source;
 	set->count++;
 	source_metadata_changed_locked(set);
+
 	spin_unlock_irqrestore(&swap_source_lock, irq);
+
 	kern_swap_source_init(source);
 	error = 0;
 out:
@@ -2182,6 +2257,7 @@ kern_swap_source_set_activate(
 			goto fail;
 		}
 	}
+
 	error = swap_manager_enable(&set->backend);
 	if (error != 0)
 		goto fail;
@@ -2206,6 +2282,7 @@ kern_swap_source_set_activate(
 			goto fail;
 		prepared |= 1U << index;
 	}
+
 	error = vm_commit_resize_swap(0, total);
 	if (error != 0)
 		goto fail;
@@ -2219,6 +2296,7 @@ kern_swap_source_set_activate(
 		prepared &= ~(1U << index);
 		published |= 1U << index;
 	}
+
 	set->active = 1;
 	error = 0;
 	goto out;
@@ -2232,6 +2310,7 @@ fail:
 		    swap_source_cancel_prepare(&set->backend, index) != 0)
 			HAL_FATAL("boot swap prepare rollback failed");
 	}
+
 	if (manager_enabled && swap_shutdown(&set->backend) != 0)
 		HAL_FATAL("boot swap manager rollback failed");
 
@@ -2242,6 +2321,7 @@ fail:
 		else
 			kern_swap_source_destroy(&set->range[index].source);
 	}
+
 	set->count = 0;
 out:
 	source_set_control_leave(set);
@@ -2302,10 +2382,12 @@ kern_swap_source_set_runtime_add(
 			error = ENOSPC;
 		goto out;
 	}
+
 	for (id = 0; id < KERN_SWAP_SOURCE_COUNT; id++) {
 		if (set->range[id].source.ops == NULL)
 			break;
 	}
+
 	if (id == KERN_SWAP_SOURCE_COUNT) {
 		error = ENOSPC;
 		goto out;
@@ -2328,6 +2410,7 @@ kern_swap_source_set_runtime_add(
 		error = EOVERFLOW;
 		goto out;
 	}
+
 	new_total = old_total + source->slot_count;
 
 	/* Prepares the source and grows the commit limit. */
@@ -2346,9 +2429,12 @@ kern_swap_source_set_runtime_add(
 	 * or a complete ACTIVE source, never ACTIVE with an empty identity.
 	 */
 	irq = spin_lock_irqsave(&swap_source_lock);
+
 	set->range[id].source = *source;
 	source_metadata_changed_locked(set);
+
 	spin_unlock_irqrestore(&swap_source_lock, irq);
+
 	error = swap_source_publish(&set->backend, id);
 	if (error != 0)
 		goto rollback_metadata;
@@ -2356,10 +2442,13 @@ kern_swap_source_set_runtime_add(
 	/* Records the assigned id and takes over the description. */
 	source->parameter_index = id;
 	irq = spin_lock_irqsave(&swap_source_lock);
+
 	set->range[id].source.parameter_index = id;
 	set->count++;
 	source_metadata_changed_locked(set);
+
 	spin_unlock_irqrestore(&swap_source_lock, irq);
+
 	kern_swap_source_init(source);
 	if (source_id != NULL)
 		*source_id = id;
@@ -2369,9 +2458,12 @@ kern_swap_source_set_runtime_add(
 rollback_metadata:
 	/* Forgets the half-added source. */
 	irq = spin_lock_irqsave(&swap_source_lock);
+
 	kern_swap_source_init(&set->range[id].source);
 	source_metadata_changed_locked(set);
+
 	spin_unlock_irqrestore(&swap_source_lock, irq);
+
 rollback_prepared:
 	/* Gives back the commitment and the prepared backend slot. */
 	if (commit_grown && vm_commit_resize_swap(new_total, old_total) != 0)
@@ -2399,10 +2491,9 @@ kern_swap_source_set_runtime_remove(
 {
 	int error;
 
+	/* Reports why the removal failed. */
 	error = kern_swap_source_set_runtime_remove_cancelable(set, source_id,
 	    NULL, NULL);
-
-	/* Reports why the removal failed. */
 	if (error != 0)
 		return error;
 
@@ -2441,6 +2532,7 @@ kern_swap_source_set_runtime_remove_cancelable(
 		error = ENOENT;
 		goto out;
 	}
+
 	error = source_set_current_total(set, &old_total);
 	if (error != 0)
 		goto out;
@@ -2481,10 +2573,13 @@ kern_swap_source_set_runtime_remove_cancelable(
 
 	/* Clears the description. */
 	irq = spin_lock_irqsave(&swap_source_lock);
+
 	kern_swap_source_init(&set->range[source_id].source);
 	set->count--;
 	source_metadata_changed_locked(set);
+
 	spin_unlock_irqrestore(&swap_source_lock, irq);
+
 out:
 	source_set_control_leave(set);
 
@@ -2519,6 +2614,7 @@ kern_swap_source_set_find_identity(
 
 	/* Compares each present source's identity. */
 	irq = spin_lock_irqsave(&swap_source_lock);
+
 	for (index = 0; index < KERN_SWAP_SOURCE_COUNT; index++) {
 		source = &set->range[index].source;
 		if (source->ops != NULL && source_identity_matches(source,
@@ -2528,6 +2624,7 @@ kern_swap_source_set_find_identity(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&swap_source_lock, irq);
 
 	/* Reports why the lookup failed. */
@@ -2575,8 +2672,10 @@ kern_swap_source_set_snapshot(
 			spin_unlock_irqrestore(&swap_source_lock, irq);
 			break;
 		}
+
 		spin_unlock_irqrestore(&swap_source_lock, irq);
 	}
+
 	if (attempt == 8U)
 		return EBUSY;
 
@@ -2588,6 +2687,7 @@ kern_swap_source_set_snapshot(
 		snapshot->state = SWAP_SOURCE_STATE_INACTIVE;
 		return 0;
 	}
+
 	if (metadata.ops == NULL)
 		return EBUSY;
 
@@ -2644,6 +2744,7 @@ kern_swap_source_set_abort(
 				HAL_FATAL("swap abort commitment restore failed");
 			goto out;
 		}
+
 		irq = spin_lock_irqsave(&swap_source_lock);
 		for (index = 0; index < KERN_SWAP_SOURCE_COUNT; index++)
 			kern_swap_source_init(&set->range[index].source);
@@ -2681,7 +2782,9 @@ kern_swap_source_file_extent_count(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&swap_source_lock);
+
 	count = active_extent_count;
+
 	spin_unlock_irqrestore(&swap_source_lock, irq);
 
 	/* Reports the sampled count. */
@@ -2721,10 +2824,12 @@ swap_manager_enable_transition(
 
 	/* An enabled backend stays enabled; a stopping one refuses. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	if (backend->shutting_down) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return EBUSY;
 	}
+
 	if (backend->enabled) {
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return 0;
@@ -2738,6 +2843,7 @@ swap_manager_enable_transition(
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return EBUSY;
 	}
+
 	for (source_id = 0; source_id < SWAP_SOURCE_COUNT; source_id++) {
 		if (backend->source[source_id].state !=
 		    SWAP_SOURCE_STATE_INACTIVE) {
@@ -2750,6 +2856,7 @@ swap_manager_enable_transition(
 	backend->enabled = 1;
 	if (enabled_here != NULL)
 		*enabled_here = 1;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports the enabled backend. */
@@ -2769,6 +2876,7 @@ swap_manager_disable_empty(
 	 * the meantime: the system backend, any source, or in-flight I/O.
 	 */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	if (!backend->enabled ||
 	    backend->shutting_down ||
 	    system_backend == backend ||
@@ -2779,6 +2887,7 @@ swap_manager_disable_empty(
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return;
 	}
+
 	for (source_id = 0; source_id < SWAP_SOURCE_COUNT; source_id++) {
 		if (backend->source[source_id].state !=
 		    SWAP_SOURCE_STATE_INACTIVE) {
@@ -2786,7 +2895,9 @@ swap_manager_disable_empty(
 			return;
 		}
 	}
+
 	backend->enabled = 0;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 }
 
@@ -2815,6 +2926,7 @@ swap_io(
 
 	/* The slot must be allocated in a live source and not being freed. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	source = &backend->source[source_id];
 	if (!backend->enabled ||
 	    backend->shutting_down ||
@@ -2824,6 +2936,7 @@ swap_io(
 		spin_unlock_irqrestore(&swap_lock, irq);
 		return ENXIO;
 	}
+
 	mask = (uint8_t)(1U << (local_slot & 7U));
 	if (!(source->bitmap[local_slot >> 3] & mask) ||
 	    source->slot_pending_free[local_slot]) {
@@ -2837,7 +2950,9 @@ swap_io(
 	source->slot_inflight[local_slot]++;
 	ops = source->ops;
 	data = source->data;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
+
 	if (write)
 		error = ops->write_page(data, local_slot, page);
 	else
@@ -2845,6 +2960,7 @@ swap_io(
 
 	/* Releases the holds, completing a free deferred behind the I/O. */
 	irq = spin_lock_irqsave(&swap_lock);
+
 	source->slot_inflight[local_slot]--;
 	if (source->slot_inflight[local_slot] == 0 &&
 	    source->slot_pending_free[local_slot]) {
@@ -2853,8 +2969,10 @@ swap_io(
 		source->free_slots++;
 		backend->free_slots++;
 	}
+
 	source->inflight--;
 	backend->inflight--;
+
 	spin_unlock_irqrestore(&swap_lock, irq);
 
 	/* Reports why the driver's failed. */
@@ -2936,6 +3054,7 @@ control_enter(
 
 	/* Refuses without a registration or while another operation runs. */
 	irq = spin_lock_irqsave(&control_lock);
+
 	if (!control_registered) {
 		error = ENXIO;
 	} else if (control_busy) {
@@ -2944,6 +3063,7 @@ control_enter(
 		control_busy = 1;
 		*registration = control_registration;
 	}
+
 	spin_unlock_irqrestore(&control_lock, irq);
 
 	/* Reports whether the operation was taken. */
@@ -2962,7 +3082,9 @@ control_leave(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&control_lock);
+
 	control_busy = 0;
+
 	spin_unlock_irqrestore(&control_lock, irq);
 }
 
@@ -2978,10 +3100,12 @@ control_snapshot_registration(
 
 	/* Copies the registration when there is one. */
 	irq = spin_lock_irqsave(&control_lock);
+
 	if (!control_registered)
 		error = ENXIO;
 	else
 		*registration = control_registration;
+
 	spin_unlock_irqrestore(&control_lock, irq);
 
 	/* Reports whether a registration was copied. */
@@ -3138,9 +3262,8 @@ control_cancelled(
 {
 	struct thread *thread;
 
-	thread = argument;
-
 	/* Only a thread with a pending unblocked signal cancels. */
+	thread = argument;
 	if (thread == NULL)
 		return 0;
 	if (!signal_pending_unblocked(thread))
@@ -3203,7 +3326,9 @@ active_extents_add(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&swap_source_lock);
+
 	active_extent_count += count;
+
 	spin_unlock_irqrestore(&swap_source_lock, irq);
 }
 
@@ -3216,10 +3341,12 @@ active_extents_remove(
 
 	/* Discharges the extents, saturating at zero. */
 	irq = spin_lock_irqsave(&swap_source_lock);
+
 	if (active_extent_count >= count)
 		active_extent_count -= count;
 	else
 		active_extent_count = 0U;
+
 	spin_unlock_irqrestore(&swap_source_lock, irq);
 }
 
@@ -3234,9 +3361,8 @@ collect_extent(
 	struct file_swap_data *data;
 	struct fat_swap_extent *extent;
 
-	data = argument;
-
 	/* Rejects an empty extent or one past the table capacity. */
+	data = argument;
 	if (count == 0)
 		return EINVAL;
 	if (data->extent_count >= FAT_SWAP_EXTENT_MAX) {
@@ -3346,6 +3472,7 @@ file_swap_io(
 				break;
 			}
 		}
+
 		if (extent == NULL)
 			return EIO;
 		offset = (uint32_t)(file_block - extent->file_block);
@@ -3381,9 +3508,8 @@ file_swap_read(
 {
 	int error;
 
-	error = file_swap_io(argument, slot, page, 0);
-
 	/* Reports the failure. */
+	error = file_swap_io(argument, slot, page, 0);
 	if (error != 0)
 		return error;
 
@@ -3400,9 +3526,8 @@ file_swap_write(
 {
 	int error;
 
-	error = file_swap_io(argument, slot, (void *)page, 1);
-
 	/* Reports the failure. */
+	error = file_swap_io(argument, slot, (void *)page, 1);
 	if (error != 0)
 		return error;
 
@@ -3419,9 +3544,9 @@ file_swap_flush(
 	int error;
 
 	data = argument;
-	error = bio_flush(data->disk);
 
 	/* Reports the failure. */
+	error = bio_flush(data->disk);
 	if (error != 0)
 		return error;
 
@@ -3440,7 +3565,9 @@ file_swap_destroy(
 
 	/* The inode is a plain file again. */
 	mutex_lock(&data->inode->i_lock);
+
 	data->inode->i_flags &= ~INODE_SWAPFILE;
+
 	mutex_unlock(&data->inode->i_lock);
 
 	/* Drops everything the source held. */
@@ -3484,9 +3611,8 @@ raw_swap_read(
 {
 	int error;
 
-	error = raw_swap_io(argument, slot, page, 0);
-
 	/* Reports the failure. */
+	error = raw_swap_io(argument, slot, page, 0);
 	if (error != 0)
 		return error;
 
@@ -3503,9 +3629,8 @@ raw_swap_write(
 {
 	int error;
 
-	error = raw_swap_io(argument, slot, (void *)page, 1);
-
 	/* Reports the failure. */
+	error = raw_swap_io(argument, slot, (void *)page, 1);
 	if (error != 0)
 		return error;
 
@@ -3522,9 +3647,9 @@ raw_swap_flush(
 	int error;
 
 	data = argument;
-	error = bio_flush(data->disk);
 
 	/* Reports the failure. */
+	error = bio_flush(data->disk);
 	if (error != 0)
 		return error;
 
@@ -3635,10 +3760,12 @@ source_set_control_enter(
 	/* Takes the control gate, refusing a second owner. */
 	error = 0;
 	irq = spin_lock_irqsave(&swap_source_lock);
+
 	if (set->control_busy)
 		error = EBUSY;
 	else
 		set->control_busy = 1;
+
 	spin_unlock_irqrestore(&swap_source_lock, irq);
 
 	/* Reports whether the gate was taken. */
@@ -3657,7 +3784,9 @@ source_set_control_leave(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&swap_source_lock);
+
 	set->control_busy = 0;
+
 	spin_unlock_irqrestore(&swap_source_lock, irq);
 }
 
@@ -3670,9 +3799,8 @@ source_set_current_total(
 	uint32_t free_slots;
 	int error;
 
-	error = swap_get_stats(&set->backend, total, &free_slots);
-
 	/* Reports the failure. */
+	error = swap_get_stats(&set->backend, total, &free_slots);
 	if (error != 0)
 		return error;
 

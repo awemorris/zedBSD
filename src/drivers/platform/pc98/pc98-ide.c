@@ -110,30 +110,6 @@ static const struct disk_ops pc98_ide_disk_ops = {
 	.ioctl = pc98_ide_ioctl,
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv pc98 ide init operation.
  */
@@ -171,10 +147,9 @@ drv_pc98_ide_init(
 			bank = (uint8_t)(slot / 2U);
 			drive = (uint8_t)(slot & 1U);
 
+			/* Handles the bios dev availability. */
 			bios_dev = bios_device_for_slot(
 				bios_devices, bios_device_count, slot);
-
-			/* Handles the bios dev availability. */
 			if (bios_dev == NULL ||
 			    (((bios_dev->flags & ZEDBSD_DEV_BOOT_ORIGIN) !=
 			      0) != (pass == 0)))
@@ -190,6 +165,7 @@ drv_pc98_ide_init(
 					continue;
 				}
 			}
+
 			unit = &units[slot];
 
 			/* Checks the identify result. */
@@ -197,6 +173,7 @@ drv_pc98_ide_init(
 				report_probe_failure(slot);
 				continue;
 			}
+
 			unit->bank = bank;
 			unit->drive = drive;
 			unit->native_cylinders = data[1];
@@ -237,6 +214,7 @@ drv_pc98_ide_init(
 				unit->disk = NULL;
 				continue;
 			}
+
 			unit->disk->d_block_count = sector_count;
 			unit->disk->d_block_size = 512;
 			unit->disk->d_max_transfer_blocks = 255;
@@ -313,10 +291,10 @@ bios_device_for_slot(
 	for (i = 0; devices != NULL && i < count; i++) {
 		/* Handles the devices condition. */
 		if (devices[i].device_class == ZEDBSD_DEV_IDE &&
-		    devices[i].bios_id == 0x80U + slot)
-
+		    devices[i].bios_id == 0x80U + slot) {
 			/* Returns the computed result. */
 			return &devices[i];
+		}
 	}
 
 	/* Reports that no result is available. */
@@ -328,7 +306,7 @@ static int
 reset_bank(
 	uint8_t bank)
 {
-	int function_result;
+	int error;
 
 	/* Pulses the software reset with interrupts held off. */
 	select_bank(bank);
@@ -339,10 +317,10 @@ reset_bank(
 	failure_stage = "wait after software reset";
 
 	/* Obtains the wait clear result. */
-	function_result = wait_clear(IDE_STATUS_BSY);
+	error = wait_clear(IDE_STATUS_BSY);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the select bank operation. */
@@ -472,9 +450,9 @@ identify(
 	probe.drive = drive;
 	select_bank(bank);
 	failure_stage = "read initial status";
-	status = inb(IDE_ALT_STATUS);
 
 	/* A floating bus reads 0xff on both units: nothing on this bank. */
+	status = inb(IDE_ALT_STATUS);
 	if (status == 0xffU)
 		return 0;
 
@@ -488,14 +466,14 @@ identify(
 	outb(IDE_ALT_STATUS, IDE_DEVCTL_NIEN);
 	failure_stage = "issue IDENTIFY";
 	outb(IDE_STATUS, IDE_CMD_IDENTIFY);
-	status = inb(IDE_STATUS);
 
 	/* Checks the operation status. */
+	status = inb(IDE_STATUS);
 	if (status == 0 || status == 0xffU)
 		return 0;
-	failure_stage = "wait IDENTIFY DRQ";
 
 	/* Checks the wait drq result. */
+	failure_stage = "wait IDENTIFY DRQ";
 	if (!wait_drq())
 		return 0;
 	failure_stage = "read IDENTIFY data";
@@ -523,7 +501,7 @@ select_unit(
 	uint8_t head_bits,
 	int lba)
 {
-	int function_result;
+	int error;
 
 	select_bank(unit->bank);
 	failure_stage = "wait before select";
@@ -538,10 +516,10 @@ select_unit(
 	failure_stage = "wait after select";
 
 	/* Obtains the wait clear result. */
-	function_result = wait_clear(IDE_STATUS_BSY);
+	error = wait_clear(IDE_STATUS_BSY);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* An absent device can leave the shared task-file bus floating at 0xff. That is not a busy device: it must be possible to write DRIVE/HEAD and select a known-present sibling.  Linux libata's ata_sff_busy_wait() uses the same rule. */
@@ -554,9 +532,8 @@ wait_selectable(
 
 	/* Process each element required by the operation. */
 	for (spins = 0; spins < IDE_TIMEOUT_POLLS; spins++) {
-		status = inb(IDE_ALT_STATUS);
-
 		/* Checks the operation status. */
+		status = inb(IDE_ALT_STATUS);
 		if (status == 0xffU || !(status & IDE_STATUS_BSY))
 			return 1;
 		delay_10us();
@@ -576,9 +553,8 @@ wait_drq(
 
 	/* Process each element required by the operation. */
 	for (spins = 0; spins < IDE_TIMEOUT_POLLS; spins++) {
-		status = inb(IDE_ALT_STATUS);
-
 		/* Checks the operation status. */
+		status = inb(IDE_ALT_STATUS);
 		if (status & IDE_STATUS_BSY) {
 			delay_10us();
 			continue;
@@ -690,9 +666,9 @@ pio_read(
 	/* Process each remaining element. */
 	while (count > 0) {
 		/* nsect is 8-bit; 0 would mean 256, keep chunks explicit. */
-		chunk = count > 255U ? 255U : count;
 
 		/* Checks the setup transfer result. */
+		chunk = count > 255U ? 255U : count;
 		if (!setup_transfer(unit, lba, chunk))
 			return EIO;
 		outb(IDE_STATUS, IDE_CMD_READ);
@@ -707,6 +683,7 @@ pio_read(
 			for (word = 0; word < 256; word++)
 				*out++ = inw(IDE_DATA);
 		}
+
 		lba += chunk;
 		count -= chunk;
 	}
@@ -731,9 +708,8 @@ pio_write(
 
 	/* Process each remaining element. */
 	while (count > 0) {
-		chunk = count > 255U ? 255U : count;
-
 		/* Checks the setup transfer result. */
+		chunk = count > 255U ? 255U : count;
 		if (!setup_transfer(unit, lba, chunk))
 			return EIO;
 		outb(IDE_STATUS, IDE_CMD_WRITE);
@@ -748,14 +724,15 @@ pio_write(
 			for (word = 0; word < 256; word++)
 				outw(IDE_DATA, *in++);
 		}
+
 		failure_stage = "wait write completion";
 
 		/* Checks the wait clear result. */
 		if (!wait_clear(IDE_STATUS_BSY) ||
-		    (inb(IDE_ALT_STATUS) & (IDE_STATUS_DF | IDE_STATUS_ERR)))
-
+		    (inb(IDE_ALT_STATUS) & (IDE_STATUS_DF | IDE_STATUS_ERR))) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 		lba += chunk;
 		count -= chunk;
 	}

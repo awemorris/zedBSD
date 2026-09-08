@@ -1,14 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
-/* Begin consolidated fat.c. */
 /*
- * zedBSD FAT12/FAT16/FAT32 filesystem driver
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * FAT filesystem
  *
- * FAT is implemented directly behind the ordinary VFS objects.  Its mount,
- * inode and file state are private to this translation unit.
+ * Supports FAT12,FAT16, and FAT32.
  */
 
 #include "kern/fat.h"
@@ -23,29 +23,60 @@
 #include <string.h>
 #include <sys/statvfs.h>
 
-/* Sector, BPB, cache, and shared FAT primitives. */
+/*
+ * Sector, BPB, cache, and shared FAT primitives.
+ */
+#define FAT_PROGRESS_INTERVAL		(64U * 1024U)
+#define FAT_MOUNT_MAX			MOUNT_MAX
+#define FAT_INODE_MAX			256U
+#define FAT_FILE_MAX			96U
+#define FAT_ATTRIBUTE_READ_ONLY		0x01U
+#define FAT_ATTRIBUTE_DIRECTORY		0x10U
+#define FAT_INODE_ORPHANED		0x01U
+#define FAT_EPOCH_1980			315532800L
+#define FAT_METADATA_MAX		32U
+#define FAT_CLEAN_SLOTS			4U
+#define FAT_LFN_MAX_UNITS		255U
+#define FAT_LFN_MAX_ENTRIES		((FAT_LFN_MAX_UNITS + 12U) / 13U)
+#define FAT_BATCH_SECTORS		8U
+#define FAT_BATCH_ENTRIES		32U
+#define FAT16_RESERVED_CLUSTER		0xfff0U
+#define FAT16_END_OF_CHAIN		0xffffU
+#define FAT12_RESERVED_CLUSTER		0xff0U
+#define FAT12_END_OF_CHAIN		0xfffU
+#define FAT32_RESERVED_CLUSTER		0x0ffffff0U
+#define FAT32_END_OF_CHAIN		0x0fffffffU
+#define FAT16_DIRECTORY_ENTRY_SIZE	32U
+#define FAT16_ENTRIES_PER_SECTOR	(512U / FAT16_DIRECTORY_ENTRY_SIZE)
+#define FAT_MUTATION			__attribute__((section(".hightext")))
 
-#define FAT_PROGRESS_INTERVAL (64U * 1024U)
-#define FAT_MOUNT_MAX MOUNT_MAX
-#define FAT_INODE_MAX 256U
-#define FAT_FILE_MAX 96U
-#define FAT_ATTRIBUTE_READ_ONLY 0x01U
-#define FAT_ATTRIBUTE_DIRECTORY 0x10U
-#define FAT_INODE_ORPHANED 0x01U
-#define FAT_EPOCH_1980 315532800L
-#define FAT_METADATA_MAX 32U
-#define FAT_CLEAN_SLOTS 4U
-#define FAT_LFN_MAX_UNITS 255U
-#define FAT_LFN_MAX_ENTRIES ((FAT_LFN_MAX_UNITS + 12U) / 13U)
-
-typedef void (*fat_read_progress_fn)(void *, uint32_t);
-
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
 struct fat_dir_entry {
 	char name[ZEDBSD_PATH_MAX];
 	uint64_t size;
 	uint8_t attributes;
 };
 
+struct fat_directory {
+	/* Cluster zero denotes FAT16's fixed root-directory table. */
+	uint32_t first_cluster;
+};
+
+enum fat_name_match {
+	FAT_NAME_EXACT,
+	FAT_NAME_CASEFOLD,
+};
+
+struct fat_component {
+	char text[ZEDBSD_PATH_MAX];
+	char sfn[11];
+};
+
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
 struct fat_metadata {
 	char path[ZEDBSD_PATH_MAX];
 	mode_t mode;
@@ -53,25 +84,35 @@ struct fat_metadata {
 	gid_t gid;
 };
 
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
 struct fat_metadata_table {
 	struct fat_metadata entries[FAT_METADATA_MAX];
 	unsigned count;
 };
 
-/* Retains only clean copies; the original active buffer owns all mutation. */
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
 struct fat_clean_sector {
 	uint8_t bytes[512];
 	uint32_t lba;
 	unsigned valid;
 };
 
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
 struct fat_chain_cursor {
 	uint32_t index;
 	uint32_t cluster;
 };
 
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
 struct fat_mount_state {
-	/* Borrowed only while lock serializes the synchronous operation. */
 	const struct io_context *write_context;
 	struct mount *owner;
 	struct disk *disk;
@@ -108,6 +149,9 @@ struct fat_mount_state {
 	uint8_t used;
 };
 
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
 struct fat_file_state {
 	const struct fat_loop_extent *loop_map;
 	unsigned loop_map_count;
@@ -128,6 +172,9 @@ struct fat_file_state {
 	uint8_t used;
 };
 
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
 struct fat_inode_info {
 	struct inode fi_inode;
 	uint32_t fi_first_cluster;
@@ -137,38 +184,9 @@ struct fat_inode_info {
 	uint8_t fi_flags;
 };
 
-static void fat_chain_invalidate(struct fat_mount_state *state);
-static int fat_raw_get_cluster_copy(struct fat_mount_state *filesystem, uint32_t cluster, unsigned copy, uint32_t *value);
-static int fat_raw_extend_cluster(struct fat_mount_state *filesystem, uint32_t tail, uint32_t *added);
-static int fat_raw_allocate_run(struct fat_mount_state *filesystem, uint32_t tail, uint32_t wanted, uint32_t *first);
-static int fat_writeback_range(struct file *file, off_t offset, size_t length);
-static int fat_file_validate_at(struct fat_file_state *file, uint64_t offset, struct fat_chain_cursor *cursor, uint32_t *last);
-static void fat_file_save_cursor(struct fat_file_state *file, const struct fat_chain_cursor *cursor, uint64_t end, uint64_t generation, uint32_t last);
-
-/* Retires all shared chain proofs before a mutation or external invalidation. */
-/* Supports the fat chain invalidate operation. */
-static void
-fat_chain_invalidate(
-	struct fat_mount_state *state)
-{
-	/* Handles the state condition. */
-	if (state->chain_generation != UINT64_MAX)
-		state->chain_generation++;
-	io_stats_record(IO_FAT_CHAIN_INVALIDATE, 0);
-}
-
-/* Supports the fat inode operation. */
-static struct fat_inode_info *fat_inode(struct inode *inode);
-
-/* Supports the fat inode operation. */
-static struct fat_inode_info *
-fat_inode(
-	struct inode *inode)
-{
-	/* Returns the computed result. */
-	return (struct fat_inode_info *)inode;
-}
-
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
 struct fat_lfn_state {
 	uint16_t units[FAT_LFN_MAX_UNITS + 1U];
 	uint16_t unit_limit;
@@ -177,1079 +195,253 @@ struct fat_lfn_state {
 	uint8_t active;
 };
 
-typedef int (*fat_next_cluster_fn)(struct fat_mount_state *, uint32_t,
-				   uint32_t *);
-
-/* Supports the fat engine copy bytes operation. */
-static void fat_engine_copy_bytes(void *destination, const void *source, uint32_t length);
-
-/* Supports the fat engine copy bytes operation. */
-static void
-fat_engine_copy_bytes(
-	void *destination,
-	const void *source,
-	uint32_t length)
-{
-	uint8_t *output = destination;
-	const uint8_t *input = source;
-
-	/* Process each remaining element. */
-	while (length--)
-		*output++ = *input++;
-}
-
-/* Supports the fat engine get16 operation. */
-static uint16_t fat_engine_get16(const uint8_t *bytes);
-
-/* Supports the fat engine get16 operation. */
-static uint16_t
-fat_engine_get16(
-	const uint8_t *bytes)
-{
-	/* Returns the computed result. */
-	return bytes[0] | ((uint16_t)bytes[1] << 8);
-}
-
-/* Supports the fat engine get32 operation. */
-static uint32_t fat_engine_get32(const uint8_t *bytes);
-
-/* Supports the fat engine get32 operation. */
-static uint32_t
-fat_engine_get32(
-	const uint8_t *bytes)
-{
-	uint32_t function_result;
-
-	/* Computes the function result. */
-	function_result = fat_engine_get16(bytes) |
-			  ((uint32_t)fat_engine_get16(bytes + 2) << 16);
-
-	/* Returns the computed result. */
-	return function_result;
-}
-
-/* Supports the fat sector read operation. */
-static int fat_sector_read(struct fat_mount_state *state, uint32_t lba, void *buffer);
-
-/* Supports the fat sector read operation. */
-static int
-fat_sector_read(
-	struct fat_mount_state *state,
-	uint32_t lba,
-	void *buffer)
-{
-	int function_result;
-
-	/* Handles the state availability. */
-	if (state == NULL || state->disk == NULL || buffer == NULL)
-		return EINVAL;
-
-	/* Computes the function result. */
-	function_result =
-		state->direct_io ? disk_read_direct(state->disk, lba, 1, buffer)
-				 : disk_read(state->disk, lba, 1, buffer);
-
-	/* Returns the computed result. */
-	return function_result;
-}
-
-/* Supports the fat sector write operation. */
-static int fat_sector_write(struct fat_mount_state *state, uint32_t lba, const void *buffer);
-
-/* Supports the fat sector write operation. */
-static int
-fat_sector_write(
-	struct fat_mount_state *state,
-	uint32_t lba,
-	const void *buffer)
-{
-	int function_result;
-	struct io_context context;
-	int error;
-
-	/* Handles the state availability. */
-	if (state == NULL || state->disk == NULL || buffer == NULL)
-		return EINVAL;
-
-	/* Handles the state condition. */
-	if (state->read_only)
-		return EROFS;
-	error = io_context_child(&context, state->write_context,
-				 IO_CONTEXT_ORDERED);
-
-	/* Checks the operation status. */
-	if (error != 0)
-		return error;
-
-	/* Obtains the disk write filesystem context result. */
-	function_result = disk_write_filesystem_context(state->disk, lba, 1,
-							buffer, &context);
-
-	/* Returns the computed result. */
-	return function_result;
-}
-
-/* Supports the fat engine flush operation. */
-static int fat_engine_flush(struct fat_mount_state *filesystem);
-
-/* Supports the fat engine flush operation. */
-static int
-fat_engine_flush(
-	struct fat_mount_state *filesystem)
-{
-	int result;
-
-	/* Handles the filesystem condition. */
-	if (!filesystem)
-		return EINVAL;
-
-	/* Handles the filesystem condition. */
-	if (!filesystem->sector_cache_dirty)
-		return 0;
-	result = fat_sector_write(filesystem, filesystem->sector_cache_lba,
-				  filesystem->sector_cache);
-
-	/* Checks the operation result. */
-	if (result == 0) {
-		filesystem->sector_cache_dirty = 0;
-
-		/* Handles the owner availability. */
-		if (filesystem->owner != NULL)
-			io_epoch_end(&filesystem->owner->m_write_epoch);
-	}
-
-	/* Returns the computed result. */
-	return result;
-}
-
-/* Supports the fat engine invalidate operation. */
-static void fat_engine_invalidate(struct fat_mount_state *filesystem);
-
-/* Supports the fat engine invalidate operation. */
-static void
-fat_engine_invalidate(
-	struct fat_mount_state *filesystem)
-{
-	/* Handles the filesystem condition. */
-	if (!filesystem)
-		return;
-
-	/* Handles the owner availability. */
-	if (filesystem->sector_cache_dirty && filesystem->owner != NULL)
-		io_epoch_end(&filesystem->owner->m_write_epoch);
-	filesystem->sector_cache_valid = 0;
-	filesystem->sector_cache_dirty = 0;
-	memset(filesystem->clean_sectors, 0, sizeof(filesystem->clean_sectors));
-	fat_chain_invalidate(filesystem);
-}
-
-/* Switches the mutable window without retaining additional dirty owners. */
-static int fat_engine_read_sector_result(struct fat_mount_state *filesystem, uint32_t lba, const uint8_t **sector);
-
-/* Supports the fat engine read sector result operation. */
-static int
-fat_engine_read_sector_result(
-	struct fat_mount_state *filesystem,
-	uint32_t lba,
-	const uint8_t **sector)
-{
-	struct fat_clean_sector *slot;
-	uint8_t saved[512];
-	unsigned index, found;
-	int result;
-
-	/* Validates the request and preserves the active mutable identity. */
-	if (filesystem == NULL || sector == NULL)
-		return EINVAL;
-
-	/* Handles the lba condition. */
-	if (lba >= filesystem->total_sectors)
-		return EIO;
-
-	/* Handles the filesystem condition. */
-	if (filesystem->sector_cache_valid &&
-	    filesystem->sector_cache_lba == lba) {
-		io_stats_record(IO_FAT_SECTOR_HIT, 512);
-		*sector = filesystem->sector_cache;
-		/* Reports successful completion. */
-		return 0;
-	}
-
-	/* Completes the old mutable sector before retaining any clean copy. */
-	result = fat_engine_flush(filesystem);
-
-	/* Checks the operation result. */
-	if (result != 0)
-		return result;
-	found = 0;
-	/* Process each remaining element. */
-	for (index = 0; index < FAT_CLEAN_SLOTS; index++) {
-		slot = &filesystem->clean_sectors[index];
-
-		/* Handles the slot condition. */
-		if (slot->valid && slot->lba == lba) {
-			memcpy(saved, slot->bytes, sizeof(saved));
-			slot->valid = 0;
-			found = 1;
-			break;
-		}
-	}
-
-	/*
- * Retains the previous clean window within the fixed mount-owned
-	 * budget. */
-	if (filesystem->sector_cache_valid) {
-		slot = &filesystem->clean_sectors[filesystem->clean_rotor];
-		filesystem->clean_rotor =
-			(filesystem->clean_rotor + 1U) % FAT_CLEAN_SLOTS;
-		memcpy(slot->bytes, filesystem->sector_cache,
-		       sizeof(slot->bytes));
-		slot->lba = filesystem->sector_cache_lba;
-		slot->valid = 1;
-	}
-	filesystem->sector_cache_valid = 0;
-	filesystem->sector_cache_dirty = 0;
-
-	/*
- * Copies a retained clean sector or performs the existing read on a
-	 * miss. */
-	if (found) {
-		memcpy(filesystem->sector_cache, saved, sizeof(saved));
-		io_stats_record(IO_FAT_SECTOR_HIT, 512);
-	} else {
-		io_stats_record(IO_FAT_SECTOR_MISS, 512);
-		result = fat_sector_read(filesystem, lba,
-					 filesystem->sector_cache);
-
-		/* Checks the operation result. */
-		if (result != 0)
-			return result;
-	}
-	filesystem->sector_cache_lba = lba;
-	filesystem->sector_cache_valid = 1;
-	*sector = filesystem->sector_cache;
-
-	/* Publishes the sole mutable window. */
-	return 0;
-}
-
-/* Supports the fat engine write sector result operation. */
-static int fat_engine_write_sector_result(struct fat_mount_state *filesystem, uint32_t lba, uint8_t **sector);
-
-/* Supports the fat engine write sector result operation. */
-static int
-fat_engine_write_sector_result(
-	struct fat_mount_state *filesystem,
-	uint32_t lba,
-	uint8_t **sector)
-{
-	const uint8_t *read_sector;
-	int result;
-
-	/* Handles the filesystem condition. */
-	if (!filesystem || !sector)
-		return EINVAL;
-
-	/* Handles the filesystem condition. */
-	if (filesystem->read_only)
-		return EROFS;
-	result = fat_engine_read_sector_result(filesystem, lba, &read_sector);
-
-	/* Checks the operation result. */
-	if (result != 0)
-		return result;
-	*sector = (uint8_t *)read_sector;
-	/* Reports successful completion. */
-	return 0;
-}
-
-/* Supports the fat engine mark sector dirty operation. */
-static int fat_engine_mark_sector_dirty(struct fat_mount_state *filesystem);
-
-/* Supports the fat engine mark sector dirty operation. */
-static int
-fat_engine_mark_sector_dirty(
-	struct fat_mount_state *filesystem)
-{
-	/* Handles the filesystem condition. */
-	if (!filesystem || filesystem->read_only)
-		return EROFS;
-
-	/* Handles the filesystem condition. */
-	if (!filesystem->sector_cache_valid)
-		return EIO;
-
-	/* Handles the owner availability. */
-	if (filesystem->owner != NULL && !filesystem->sector_cache_dirty)
-		io_epoch_begin(&filesystem->owner->m_write_epoch);
-	filesystem->sector_cache_dirty = 1;
-
-	/* Reports successful completion. */
-	return 0;
-}
-
-/* Supports the fat engine cluster lba operation. */
-static int fat_engine_cluster_lba(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t sector_in_cluster, uint32_t *lba);
-
-/* Supports the fat engine cluster lba operation. */
-static int
-fat_engine_cluster_lba(
-	struct fat_mount_state *filesystem,
-	uint32_t cluster,
-	uint32_t sector_in_cluster,
-	uint32_t *lba)
-{
-	struct fat_mount_state *fat;
-	uint32_t cluster_offset;
-
-	/* Handles the filesystem condition. */
-	if (!filesystem || !lba)
-		return EINVAL;
-	fat = filesystem;
-
-	/* Handles the cluster condition. */
-	if (cluster < 2 || cluster >= fat->cluster_count + 2 ||
-	    sector_in_cluster >= fat->sectors_per_cluster)
-
-		/* Returns the computed result. */
-		return EIO;
-
-	/* Handles the cluster condition. */
-	if (cluster - 2 >
-	    (0xffffffffU - fat->data_start) / fat->sectors_per_cluster)
-
-		/* Returns the computed result. */
-		return EIO;
-	cluster_offset =
-		fat->data_start + (cluster - 2) * fat->sectors_per_cluster;
-
-	/* Handles the sector in cluster condition. */
-	if (sector_in_cluster > 0xffffffffU - cluster_offset)
-		return EIO;
-	*lba = cluster_offset + sector_in_cluster;
-	/* Handles the lba condition. */
-	if (*lba >= fat->total_sectors)
-		return EIO;
-
-	/* Reports successful completion. */
-	return 0;
-}
-
-/* Supports the parse bpb operation. */
-static int parse_bpb(struct fat_mount_state *fat);
-
-/* Supports the parse bpb operation. */
-static int
-parse_bpb(
-	struct fat_mount_state *fat)
-{
-	uint8_t bpb[512];
-	uint32_t reserved, fat_sectors, fat32_sectors, root_sectors, metadata;
-	uint32_t total, total_physical, data_sectors;
-	uint16_t bytes, fat16_sectors;
-	uint8_t sectors_per_cluster;
-
-	/* Checks the fat sector read result. */
-	if (fat_sector_read(fat, 0, bpb) != 0)
-		return EIO;
-	bytes = fat_engine_get16(bpb + 11);
-	fat->sector_scale = bytes == 512 ? 1 : bytes == 1024 ? 2 : 0;
-	sectors_per_cluster = bpb[13];
-	reserved = fat_engine_get16(bpb + 14);
-	fat->number_of_fats = bpb[16];
-	fat->root_entries = fat_engine_get16(bpb + 17);
-	total = fat_engine_get16(bpb + 19);
-
-	/* Handles the total condition. */
-	if (!total)
-		total = fat_engine_get32(bpb + 32);
-	fat16_sectors = fat_engine_get16(bpb + 22);
-	fat32_sectors = fat_engine_get32(bpb + 36);
-	fat_sectors = fat16_sectors;
-
-	/* Handles the fat sectors condition. */
-	if (!fat_sectors)
-		fat_sectors = fat32_sectors;
-
-	/* Handles the fat condition. */
-	if (!fat->sector_scale || !sectors_per_cluster || !reserved ||
-	    !fat->number_of_fats || !fat_sectors || !total)
-
-		/* Returns the computed result. */
-		return EIO;
-
-	/* Handles the total condition. */
-	if (total > 0xffffffffU / fat->sector_scale ||
-	    reserved > 0xffffffffU / fat->sector_scale ||
-	    fat_sectors > 0xffffffffU / fat->sector_scale)
-
-		/* Returns the computed result. */
-		return EIO;
-	total_physical = total * fat->sector_scale;
-
-	/* Handles the disk availability. */
-	if (fat->disk == NULL || total_physical > fat->disk->d_block_count)
-		return EIO;
-	reserved *= fat->sector_scale;
-	fat_sectors *= fat->sector_scale;
-	fat->sectors_per_cluster = sectors_per_cluster * fat->sector_scale;
-	root_sectors = ((uint32_t)fat->root_entries * 32 + 511) >> 9;
-
-	/* Handles the fat sectors condition. */
-	if (fat_sectors > (0xffffffffU - reserved) / fat->number_of_fats)
-		return EIO;
-	metadata = reserved + fat_sectors * fat->number_of_fats;
-
-	/* Handles the root sectors condition. */
-	if (root_sectors > 0xffffffffU - metadata)
-		return EIO;
-	metadata += root_sectors;
-
-	/* Handles the metadata condition. */
-	if (metadata >= total_physical)
-		return EIO;
-	data_sectors = total_physical - metadata;
-	fat->cluster_count = data_sectors / fat->sectors_per_cluster;
-	fat->type = fat->cluster_count < 4085	 ? ZEDBSD_FAT12
-		    : fat->cluster_count < 65525 ? ZEDBSD_FAT16
-						 : ZEDBSD_FAT32;
-	fat->fat_start = reserved;
-	fat->fat_sectors = fat_sectors;
-	fat->root_start = reserved + fat_sectors * fat->number_of_fats;
-	fat->data_start = fat->root_start + root_sectors;
-	fat->total_sectors = total_physical;
-	fat->bytes_per_sector = bytes;
-	fat->fat16_layout = fat16_sectors != 0 && fat->root_entries != 0;
-	fat->fat32_layout = fat16_sectors == 0 && fat32_sectors != 0 &&
-			    fat->root_entries == 0;
-	fat->root_cluster = fat_engine_get32(bpb + 44) & 0x0fffffffU;
-	fat->fsinfo_sector = fat_engine_get16(bpb + 48);
-
-	/* Handles the fat condition. */
-	if (fat->type == ZEDBSD_FAT32 &&
-	    (!fat->fat32_layout || fat->root_cluster < 2U ||
-	     fat->root_cluster >= fat->cluster_count + 2U))
-
-		/* Returns the computed result. */
-		return EIO;
-
-	/* Reports successful completion. */
-	return 0;
-}
-
-/* Supports the fat engine mount operation. */
-static int fat_engine_mount(struct fat_mount_state *filesystem, enum bootfat_type required_type);
-
-/* Supports the fat engine mount operation. */
-static int
-fat_engine_mount(
-	struct fat_mount_state *filesystem,
-	enum bootfat_type required_type)
-{
-	struct fat_mount_state *fat = filesystem;
-	int result = parse_bpb(fat);
-
-	/* Checks the operation result. */
-	if (result != 0)
-		return result;
-
-	/* Handles the fat condition. */
-	if (fat->type != required_type ||
-	    (required_type == ZEDBSD_FAT16 && !fat->fat16_layout) ||
-	    (required_type == ZEDBSD_FAT32 && !fat->fat32_layout))
-
-		/* Returns the computed result. */
-		return EOPNOTSUPP;
-	fat->allocation_hint = 2;
-	fat_engine_invalidate(filesystem);
-
-	/* Reports successful completion. */
-	return 0;
-}
-
-/* Supports the fat sfn encode operation. */
-static int fat_sfn_encode(const char *path, char output[11]);
-
-/* Supports the fat sfn encode operation. */
-static int
-fat_sfn_encode(
-	const char *path,
-	char output[11])
-{
-	char character_local;
-	char character_local1;
-	unsigned i_index_for;
-	unsigned base = 0, extension = 0;
-
-	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < 11; i_index_for++)
-		output[i_index_for] = ' ';
-
-	/* Handles the path condition. */
-	if (*path == '/')
-		path++;
-
-	/* Handles the path condition. */
-	if (!*path)
-		return 0;
-	/* Continue while the operation condition remains true. */
-	while (*path && *path != '.') {
-		character_local = *path++;
-
-		/* Handles the character local condition. */
-		if (character_local == '/' || base == 8)
-			return 0;
-		output[base++] =
-			character_local >= 'a' && character_local <= 'z'
-				? character_local - 32
-				: character_local;
-	}
-
-	/* Handles the base condition. */
-	if (!base)
-		return 0;
-
-	/* Handles the path condition. */
-	if (*path == '.')
-		path++;
-	/* Continue while the operation condition remains true. */
-	while (*path) {
-		character_local1 = *path++;
-
-		/* Handles the character local1 condition. */
-		if (character_local1 == '/' || character_local1 == '.' ||
-		    extension == 3)
-			return 0;
-		output[8 + extension++] =
-			character_local1 >= 'a' && character_local1 <= 'z'
-				? character_local1 - 32
-				: character_local1;
-	}
-
-	/* Reports operation failure. */
-	return 1;
-}
-
-/* Supports the fat sfn equal operation. */
-static int fat_sfn_equal(const uint8_t entry[32], const char name[11]);
-
-/* Supports the fat sfn equal operation. */
-static int
-fat_sfn_equal(
-	const uint8_t entry[32],
-	const char name[11])
-{
-	uint8_t left;
-	uint8_t right;
-	unsigned i_index_for;
-
-	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < 11; i_index_for++) {
-		left = entry[i_index_for];
-		right = (uint8_t)name[i_index_for];
-
-		/* Handles the left condition. */
-		if (left >= 'a' && left <= 'z')
-			left -= 'a' - 'A';
-
-		/* Handles the right condition. */
-		if (right >= 'a' && right <= 'z')
-			right -= 'a' - 'A';
-
-		/* Handles the left condition. */
-		if (left != right)
-			return 0;
-	}
-
-	/* Reports operation failure. */
-	return 1;
-}
-
-/* Supports the fat sfn decode lower operation. */
-static void fat_sfn_decode_lower(const uint8_t raw[32], struct fat_dir_entry *entry);
-
-/* Supports the fat sfn decode lower operation. */
-static void
-fat_sfn_decode_lower(
-	const uint8_t raw[32],
-	struct fat_dir_entry *entry)
-{
-	uint8_t character_local;
-	uint8_t character_local1;
-	unsigned i_index_for;
-	unsigned i_index_for1;
-	unsigned output = 0;
-
-	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < 8 && raw[i_index_for] != ' ';
-	     i_index_for++) {
-		character_local = raw[i_index_for];
-
-		/* Handles the character local condition. */
-		if (character_local >= 'A' && character_local <= 'Z')
-			character_local += 'a' - 'A';
-		entry->name[output++] = (char)character_local;
-	}
-
-	/* Handles the raw condition. */
-	if (raw[8] != ' ') {
-		entry->name[output++] = '.';
-		/* Process each remaining element. */
-		for (i_index_for1 = 8;
-		     i_index_for1 < 11 && raw[i_index_for1] != ' ';
-		     i_index_for1++) {
-			character_local1 = raw[i_index_for1];
-
-			/* Handles the character local1 condition. */
-			if (character_local1 >= 'A' && character_local1 <= 'Z')
-				character_local1 += 'a' - 'A';
-			entry->name[output++] = (char)character_local1;
-		}
-	}
-	entry->name[output] = 0;
-	entry->size = fat_engine_get32(raw + 28);
-	entry->attributes = raw[11];
-}
-
-/* Supports the valid cluster operation. */
-static int valid_cluster(uint32_t cluster, uint32_t end_of_chain);
-
-/* Supports the valid cluster operation. */
-static int
-valid_cluster(
-	uint32_t cluster,
-	uint32_t end_of_chain)
-{
-	/* Returns the computed result. */
-	return cluster >= 2 && cluster < end_of_chain;
-}
-
-/* Supports the fat engine read chain operation. */
-static int fat_engine_read_chain(struct fat_file_state *file, uint64_t offset, void *buffer, uint32_t length, fat_read_progress_fn progress, void *progress_context, fat_next_cluster_fn next_cluster, uint32_t end_of_chain);
-
-/* Supports the fat engine read chain operation. */
-static int
-fat_engine_read_chain(
-	struct fat_file_state *file,
-	uint64_t offset,
-	void *buffer,
-	uint32_t length,
-	fat_read_progress_fn progress,
-	void *progress_context,
-	fat_next_cluster_fn next_cluster,
-	uint32_t end_of_chain)
-{
-	int result_local;
-	int result_local1;
-	uint32_t lba;
-	uint32_t chunk;
-	const uint8_t *input;
-	struct fat_mount_state *filesystem = file->mount;
-	struct fat_mount_state *fat = filesystem;
-	struct fat_file_state *fat_file = file;
-	uint32_t cluster = fat_file->first_cluster;
-	uint32_t position, skip, within, since_update = 0;
-	uint8_t *output = buffer;
-	struct fat_chain_cursor cursor = {0, 0};
-	uint32_t last;
-	uint64_t generation, end;
-	int validation;
-
-	/* Checks the current offset. */
-	if (offset > 0xffffffffU || !next_cluster)
-		return EINVAL;
-
-	/* Checks the valid cluster result. */
-	if (!valid_cluster(cluster, end_of_chain))
-		return EIO;
-	generation = fat->chain_generation;
-	end = offset + length;
-	validation = fat_file_validate_at(file, offset, &cursor, &last);
-
-	/* Handles the validation condition. */
-	if (validation != 0)
-		return validation;
-	cluster = cursor.cluster;
-	position = (uint32_t)offset;
-	skip = position / 512 - cursor.index * fat->sectors_per_cluster;
-	within = position & 511;
-	/* Continue while the operation condition remains true. */
-	while (skip >= fat->sectors_per_cluster) {
-		result_local = next_cluster(filesystem, cluster, &cluster);
-
-		/* Handles the result local condition. */
-		if (result_local != 0)
-			return result_local;
-
-		/* Checks the valid cluster result. */
-		if (!valid_cluster(cluster, end_of_chain))
-			return EIO;
-		skip -= fat->sectors_per_cluster;
-		cursor.index++;
-	}
-	while (length) {
-		chunk = 512 - within;
-
-		int result;
-
-		result =
-			fat_engine_cluster_lba(filesystem, cluster, skip, &lba);
-
-		/* Checks the operation result. */
-		if (result != 0)
-			return result;
-		result = fat_engine_read_sector_result(filesystem, lba, &input);
-
-		/* Checks the operation result. */
-		if (result != 0)
-			return result;
-
-		/* Handles the chunk condition. */
-		if (chunk > length)
-			chunk = length;
-		fat_engine_copy_bytes(output, input + within, chunk);
-		output += chunk;
-		length -= chunk;
-
-		/* Handles the progress condition. */
-		if (progress) {
-			since_update += chunk;
-
-			/* Handles the since update condition. */
-			if (since_update >= FAT_PROGRESS_INTERVAL || !length) {
-				progress(progress_context, since_update);
-				since_update = 0;
-			}
-		}
-		within = 0;
-
-		/* Handles the skip condition. */
-		if (++skip >= fat->sectors_per_cluster && length) {
-			skip = 0;
-			cursor.index++;
-			result_local1 =
-				next_cluster(filesystem, cluster, &cluster);
-
-			/* Handles the result local1 condition. */
-			if (result_local1 != 0)
-				return result_local1;
-
-			/* Checks the valid cluster result. */
-			if (!valid_cluster(cluster, end_of_chain))
-				return EIO;
-		}
-	}
-	cursor.cluster = cluster;
-	fat_file_save_cursor(file, &cursor, end, generation, last);
-
-	/* Reports successful completion. */
-	return 0;
-}
-
-/* VFAT long-file-name and Unicode case-fold helpers. */
-
-static const uint8_t lfn_offsets[13] = {
-	1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30,
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
+struct contiguous_context {
+	uint64_t block;
+	uint64_t expected;
+	int seen;
 };
 
-/* Supports the get16 operation. */
-static uint16_t get16(const uint8_t *p);
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
+struct fat_inode_slot {
+	struct fat_inode_info info;
+	char path[ZEDBSD_PATH_MAX];
+	uint8_t used;
+};
 
-/* Supports the get16 operation. */
-static uint16_t
-get16(
-	const uint8_t *p)
-{
-	/* Returns the computed result. */
-	return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
-}
+/*
+ * XXX: 目的、ライフサイクルなどを説明する。
+ */
+struct fat_rename_result {
+	uint32_t lba;
+	uint16_t offset;
+	uint8_t attributes;
+};
 
-/* Supports the fat lfn reset operation. */
-static void fat_lfn_reset(struct fat_lfn_state *state);
+struct fat_entry_change {
+	uint32_t cluster;
+	uint32_t value;
+};
 
-/* Supports the fat lfn reset operation. */
-static void
-fat_lfn_reset(
-	struct fat_lfn_state *state)
-{
-	unsigned i;
-
-	state->unit_limit = 0;
-	state->expected = 0;
-	state->checksum = 0;
-	state->active = 0;
-	/* Process each element required by the operation. */
-	for (i = 0; i <= FAT_LFN_MAX_UNITS; i++)
-		state->units[i] = 0xffffU;
-}
-
-/* Supports the fat lfn checksum operation. */
-static uint8_t fat_lfn_checksum(const uint8_t sfn[11]);
-
-/* Supports the fat lfn checksum operation. */
-static uint8_t
-fat_lfn_checksum(
-	const uint8_t sfn[11])
-{
-	uint8_t sum = 0;
-	unsigned i;
-
-	/* Process each element required by the operation. */
-	for (i = 0; i < 11; i++)
-		sum = (uint8_t)(((sum & 1U) << 7) | (sum >> 1)) + sfn[i];
-
-	/* Returns the computed result. */
-	return sum;
-}
-
-/* Supports the fat lfn feed operation. */
-static int fat_lfn_feed(struct fat_lfn_state *state, const uint8_t raw[32]);
-
-/* Supports the fat lfn feed operation. */
-static int
-fat_lfn_feed(
-	struct fat_lfn_state *state,
-	const uint8_t raw[32])
-{
-	unsigned index;
-	unsigned ordinal = raw[0] & 0x1fU;
-	unsigned i;
-
-	/* Checks the get16 result. */
-	if (raw[11] != 0x0fU || raw[12] != 0 || get16(raw + 26) != 0 ||
-	    ordinal == 0 || ordinal > 20U) {
-		fat_lfn_reset(state);
-
-		/* Reports successful completion. */
-		return 0;
-	}
-
-	/* Handles the raw condition. */
-	if (raw[0] & 0x40U) {
-		fat_lfn_reset(state);
-		state->active = 1;
-		state->expected = (uint8_t)ordinal;
-		state->checksum = raw[13];
-		state->unit_limit = (uint16_t)(ordinal * 13U);
-
-		/* Handles the state condition. */
-		if (state->unit_limit > FAT_LFN_MAX_UNITS + 1U)
-			state->unit_limit = FAT_LFN_MAX_UNITS + 1U;
-	}
-
-	/* Handles the state condition. */
-	if (!state->active || ordinal != state->expected ||
-	    raw[13] != state->checksum || (raw[0] & 0x80U)) {
-		fat_lfn_reset(state);
-
-		/* Reports successful completion. */
-		return 0;
-	}
-	/* Process each element required by the operation. */
-	for (i = 0; i < 13; i++) {
-		index = (ordinal - 1U) * 13U + i;
-
-		/* Checks the current index. */
-		if (index <= FAT_LFN_MAX_UNITS)
-			state->units[index] = get16(raw + lfn_offsets[i]);
-	}
-	state->expected--;
-
-	/* Reports operation failure. */
-	return 1;
-}
-
-/* Supports the append utf8 operation. */
-static int append_utf8(char *output, size_t capacity, size_t *used, uint32_t scalar);
-
-/* Supports the append utf8 operation. */
-static int
-append_utf8(
-	char *output,
-	size_t capacity,
-	size_t *used,
-	uint32_t scalar)
-{
-	uint8_t bytes[4];
-	unsigned count, i;
-
-	/* Handles the scalar condition. */
-	if (scalar <= 0x7fU) {
-		bytes[0] = (uint8_t)scalar;
-		count = 1;
-	} else if (scalar <= 0x7ffU) {
-		bytes[0] = (uint8_t)(0xc0U | (scalar >> 6));
-		bytes[1] = (uint8_t)(0x80U | (scalar & 0x3fU));
-		count = 2;
-	} else if (scalar <= 0xffffU) {
-		bytes[0] = (uint8_t)(0xe0U | (scalar >> 12));
-		bytes[1] = (uint8_t)(0x80U | ((scalar >> 6) & 0x3fU));
-		bytes[2] = (uint8_t)(0x80U | (scalar & 0x3fU));
-		count = 3;
-	} else {
-		bytes[0] = (uint8_t)(0xf0U | (scalar >> 18));
-		bytes[1] = (uint8_t)(0x80U | ((scalar >> 12) & 0x3fU));
-		bytes[2] = (uint8_t)(0x80U | ((scalar >> 6) & 0x3fU));
-		bytes[3] = (uint8_t)(0x80U | (scalar & 0x3fU));
-		count = 4;
-	}
-
-	/* Checks the current capacity usage. */
-	if (*used + count >= capacity)
-		return 0;
-	/* Process each remaining element. */
-	for (i = 0; i < count; i++)
-		output[(*used)++] = (char)bytes[i];
-
-	/* Reports operation failure. */
-	return 1;
-}
-
-/* Supports the fat lfn finish operation. */
-static int fat_lfn_finish(struct fat_lfn_state *state, const uint8_t sfn[32], char *output, size_t capacity);
-
-/* Supports the fat lfn finish operation. */
-static int
-fat_lfn_finish(
-	struct fat_lfn_state *state,
-	const uint8_t sfn[32],
-	char *output,
-	size_t capacity)
-{
-	uint32_t low;
-	uint32_t scalar;
-	size_t used = 0;
-	unsigned i;
-	int terminated = 0;
-
-	/* Checks the fat lfn checksum result. */
-	if (!state->active || state->expected != 0 ||
-	    state->checksum != fat_lfn_checksum(sfn) || capacity == 0)
-		goto invalid;
-	/* Process each element required by the operation. */
-	for (i = 0; i < state->unit_limit; i++) {
-		scalar = state->units[i];
-
-		/* Handles the scalar condition. */
-		if (scalar == 0) {
-			terminated = 1;
-			break;
-		}
-
-		/* Handles the scalar condition. */
-		if (scalar == 0xffffU)
-			goto invalid;
-
-		/* Handles the scalar condition. */
-		if (scalar >= 0xd800U && scalar <= 0xdbffU) {
-			/* Checks the current index. */
-			if (++i >= state->unit_limit)
-				goto invalid;
-			low = state->units[i];
-
-			/* Handles the low condition. */
-			if (low < 0xdc00U || low > 0xdfffU)
-				goto invalid;
-			scalar = 0x10000U + ((scalar - 0xd800U) << 10) +
-				 (low - 0xdc00U);
-		} else if (scalar >= 0xdc00U && scalar <= 0xdfffU) {
-			goto invalid;
-		}
-
-		/* Checks the append utf8 result. */
-		if (scalar == '/' || scalar == 0 ||
-		    !append_utf8(output, capacity, &used, scalar))
-			goto invalid;
-	}
-
-	/* Checks the current capacity usage. */
-	if (used == 0 || (!terminated && state->unit_limit > FAT_LFN_MAX_UNITS))
-		goto invalid;
-
-	/* Handles the terminated condition. */
-	if (terminated) {
-		/* Process each element required by the operation. */
-		for (; i < state->unit_limit; i++) {
-			/* Handles the state condition. */
-			if (state->units[i] != 0 && state->units[i] != 0xffffU)
-				goto invalid;
-		}
-	}
-	output[used] = '\0';
-	fat_lfn_reset(state);
-
-	/* Reports operation failure. */
-	return 1;
-invalid:
-	fat_lfn_reset(state);
-
-	/* Handles the capacity condition. */
-	if (capacity)
-		output[0] = '\0';
-
-	/* Reports successful completion. */
-	return 0;
-}
-
-/* Supports the fat sfn decode preserve operation. */
-static void fat_sfn_decode_preserve(const uint8_t raw[32], char *output, size_t capacity);
-
-/* Supports the fat sfn decode preserve operation. */
-static void
-fat_sfn_decode_preserve(
-	const uint8_t raw[32],
-	char *output,
-	size_t capacity)
-{
-	uint8_t c_local;
-	uint8_t c_local1;
-	size_t used = 0;
-	unsigned i;
-	int lower_base = (raw[12] & 0x08U) != 0;
-	int lower_ext = (raw[12] & 0x10U) != 0;
-
-	/* Handles the capacity condition. */
-	if (capacity == 0)
-		return;
-	/* Process each element required by the operation. */
-	for (i = 0; i < 8 && raw[i] != ' ' && used + 1U < capacity; i++) {
-		c_local = raw[i];
-
-		/* Handles the lower base condition. */
-		if (lower_base && c_local >= 'A' && c_local <= 'Z')
-			c_local += 'a' - 'A';
-		output[used++] = (char)c_local;
-	}
-
-	/* Handles the raw condition. */
-	if (raw[8] != ' ' && used + 1U < capacity) {
-		output[used++] = '.';
-		/* Process each element required by the operation. */
-		for (i = 8; i < 11 && raw[i] != ' ' && used + 1U < capacity;
-		     i++) {
-			c_local1 = raw[i];
-
-			/* Handles the lower ext condition. */
-			if (lower_ext && c_local1 >= 'A' && c_local1 <= 'Z')
-				c_local1 += 'a' - 'A';
-			output[used++] = (char)c_local1;
-		}
-	}
-	output[used] = '\0';
-}
+struct fat_sector_change {
+	uint32_t lba;
+	uint8_t old_bytes[512];
+	uint8_t new_bytes[512];
+};
 
 struct fat_casefold_range {
 	uint32_t start;
 	/*
- * Bit 31 marks a stride-two range; Unicode scalar values never use it.
+	 * Bit 31 marks a stride-two range; Unicode scalar values never use it.
 	 */
 	uint32_t encoded_end;
+
 	int32_t delta;
 };
 
 /*
+ * XXX: 説明を入れる。
+ */
+typedef int (*fat_next_cluster_fn)(struct fat_mount_state *, uint32_t, uint32_t *);
+typedef void (*fat_read_progress_fn)(void *, uint32_t);
+
+/*
+ * VFAT long-file-name and Unicode case-fold helpers.
+ * XXX: 説明が足りない。
+ */
+static const uint8_t lfn_offsets[13] = {
+	1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30,
+};
+
+/*
+ * XXX: 説明を入れる。
+ */
+static struct spinlock fat_pool_lock = {
+	{0}, LOCK_RANK_INODE, "FAT object pools", 0, 0
+};
+
+/*
+ * XXX: なぜセクションを変えるのか、どういうセクションなのか、説明する。
+ */
+static struct fat_mount_state fat_mounts[FAT_MOUNT_MAX] __attribute__((section(".vfs_bss")));
+static struct fat_metadata_table fat_metadata_tables[FAT_MOUNT_MAX] __attribute__((section(".vfs_bss")));
+static struct fat_inode_slot fat_inodes[FAT_INODE_MAX] __attribute__((section(".vfs_bss")));
+static struct fat_file_state fat_files[FAT_FILE_MAX] __attribute__((section(".vfs_bss")));
+
+/*
+ * Forward declaration.
+ */
+static uint16_t fat_engine_get16(const uint8_t *bytes);
+static uint32_t fat_engine_get32(const uint8_t *bytes);
+static int fat_sector_read(struct fat_mount_state *state, uint32_t lba, void *buffer);
+static int fat_sector_write(struct fat_mount_state *state, uint32_t lba, const void *buffer);
+static int fat_engine_flush(struct fat_mount_state *filesystem);
+static void fat_engine_invalidate(struct fat_mount_state *filesystem);
+static int fat_engine_read_sector_result(struct fat_mount_state *filesystem, uint32_t lba, const uint8_t **sector);
+static int fat_engine_mark_sector_dirty(struct fat_mount_state *filesystem);
+static int fat_engine_cluster_lba(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t sector_in_cluster, uint32_t *lba);
+static int fat_engine_mount(struct fat_mount_state *filesystem, enum bootfat_type required_type);
+static int fat_sfn_encode(const char *path, char output[11]);
+static void fat_sfn_decode_lower(const uint8_t raw[32], struct fat_dir_entry *entry);
+static void fat_lfn_reset(struct fat_lfn_state *state);
+static uint8_t fat_lfn_checksum(const uint8_t sfn[11]);
+static int fat_lfn_feed(struct fat_lfn_state *state, const uint8_t raw[32]);
+static int append_utf8(char *output, size_t capacity, size_t *used, uint32_t scalar);
+static int fat_lfn_finish(struct fat_lfn_state *state, const uint8_t sfn[32], char *output, size_t capacity);
+static void fat_sfn_decode_preserve(const uint8_t raw[32], char *output, size_t capacity);
+static uint32_t fold_scalar(uint32_t scalar);
+static int decode_utf8(const uint8_t **cursor, uint32_t *scalar);
+static int fat_utf8_to_utf16(const char *name, uint16_t units[FAT_LFN_MAX_UNITS], unsigned *unit_count);
+static void fat_lfn_build_entry(uint8_t raw[32], const uint16_t *units, unsigned unit_count, unsigned ordinal, uint8_t checksum);
+static int sfn_character(uint8_t c);
+static int fat_sfn_make_alias(const char *name, unsigned serial, uint8_t sfn[11]);
+static int fat_utf8_casefold_equal(const char *left, const char *right);
+static void text_copy(char *destination, const char *source, size_t capacity);
+static void copy_bytes(void *destination, const void *source, uint32_t length);
+static void clear_bytes(void *destination, uint32_t length);
+static void put16(uint8_t *bytes, uint16_t value);
+static void put32(uint8_t *bytes, uint32_t value);
+static int fat16_mount(struct fat_mount_state *filesystem);
+static int fat_raw_valid_cluster(const struct fat_mount_state *fat, uint32_t cluster);
+static int fat_raw_is_end(const struct fat_mount_state *fat, uint32_t cluster);
+static uint32_t fat_raw_reserved_limit(const struct fat_mount_state *fat);
+static uint32_t fat_raw_end_of_chain(const struct fat_mount_state *fat);
+static uint32_t fat_raw_entry_offset(const struct fat_mount_state *fat, uint32_t cluster);
+static int fat_raw_next_cluster(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t *next_cluster);
+static int fat_engine_count_free_clusters(struct fat_mount_state *filesystem, uint32_t *free_clusters);
+static int fat_raw_set_entry_byte(struct fat_mount_state *filesystem, uint32_t copy_start, uint32_t offset, uint8_t keep_mask, uint8_t merge_value);
+static int fat_raw_set_cluster_copy(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t value, unsigned copy);
+static int fat_raw_set_cluster_immediate(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t value);
+static uint32_t fat_raw_dir_cluster(const struct fat_mount_state *fat, const uint8_t raw[32]);
+static void fat_raw_put_dir_cluster(const struct fat_mount_state *fat, uint8_t raw[32], uint32_t cluster);
+static uint32_t fat_raw_root_cluster(const struct fat_mount_state *fat);
+static int fat_raw_validate_chain_at(struct fat_mount_state *filesystem, uint32_t first_cluster, uint32_t wanted_index, struct fat_chain_cursor *cursor, uint32_t *last_cluster);
+static int fat_raw_validate_chain(struct fat_mount_state *filesystem, uint32_t first_cluster);
+static int fat_raw_free_chain(struct fat_mount_state *filesystem, uint32_t first_cluster);
+static int fat_drain_pending_orphans(struct fat_mount_state *filesystem);
+static int fat_defer_orphan(struct fat_mount_state *filesystem, uint32_t first_cluster);
+static int fat_raw_find_free_cluster(struct fat_mount_state *filesystem, uint32_t *free_cluster);
+static int fat_raw_zero_cluster(struct fat_mount_state *filesystem, uint32_t cluster);
+static int fat_raw_allocate_cluster(struct fat_mount_state *filesystem, uint32_t *cluster);
+static int fat_raw_directory_entry(struct fat_mount_state *filesystem, const struct fat_directory *directory, uint32_t index, uint32_t *entry_lba, uint16_t *entry_offset, const uint8_t **raw);
+static int fat_raw_find_entry(struct fat_mount_state *filesystem, const struct fat_directory *directory, const struct fat_component *component, enum fat_name_match match, uint32_t *entry_lba, uint16_t *entry_offset, uint32_t *free_lba, uint16_t *free_offset, char found_name[ZEDBSD_PATH_MAX]);
+static int fat_raw_resolve_parent(struct fat_mount_state *filesystem, const char *path, struct fat_directory *parent, struct fat_component *component);
+static int fat_raw_resolve_entry(struct fat_mount_state *filesystem, const char *path, uint32_t *lba, uint16_t *offset, const uint8_t **raw, enum fat_name_match match, char found_name[ZEDBSD_PATH_MAX]);
+static int fat_raw_populate_file(struct fat_file_state *file, uint32_t lba, uint16_t offset, const uint8_t raw[32]);
+static void fat_file_bind(struct fat_file_state *file, struct fat_mount_state *mount);
+static int fat_raw_open(struct fat_mount_state *filesystem, const char *path, struct fat_file_state *file);
+static int fat_raw_flush_file(struct fat_file_state *file);
+static int fat_raw_advance_cluster(struct fat_file_state *file, uint32_t cluster, int allocate, uint32_t *next);
+static int fat_raw_cluster_at(struct fat_file_state *file, uint32_t cluster_index, int allocate, uint32_t *found_cluster, struct fat_chain_cursor *cursor);
+static int fat_raw_write_bytes(struct fat_file_state *file, uint32_t offset, const uint8_t *input, uint32_t length, int zero, struct fat_chain_cursor *cursor);
+static int fat_raw_rollback_growth(struct fat_file_state *file, uint32_t old_first, uint32_t old_last, uint64_t old_size, uint8_t old_directory_dirty);
+static int fat_raw_restore_directory(struct fat_file_state *file, uint32_t first_cluster, uint64_t size, uint8_t directory_dirty);
+static int fat_raw_write(struct fat_file_state *file, uint64_t offset, const void *buffer, uint32_t length);
+static int fat_raw_truncate(struct fat_file_state *file, uint64_t size);
+static int fat_raw_sfn_in_use(struct fat_mount_state *filesystem, const struct fat_directory *directory, const uint8_t sfn[11]);
+static int fat_raw_extend_directory(struct fat_mount_state *filesystem, const struct fat_directory *directory);
+static int fat_raw_find_free_run(struct fat_mount_state *filesystem, const struct fat_directory *directory, unsigned needed, uint32_t *first_index);
+static FAT_MUTATION int fat_raw_restore_directory_entry(struct fat_mount_state *filesystem, uint32_t lba, uint16_t offset, const uint8_t entry[32]);
+static FAT_MUTATION int fat32_create_entry(struct fat_mount_state *filesystem, const struct fat_directory *parent, const struct fat_component *component, uint8_t attributes, uint32_t first_cluster, uint32_t size, uint32_t *entry_lba, uint16_t *entry_offset);
+static FAT_MUTATION int fat_raw_insert_entry(struct fat_mount_state *filesystem, const struct fat_directory *parent, const struct fat_component *component, uint8_t attributes, uint32_t first_cluster, uint32_t size, uint32_t *entry_lba, uint16_t *entry_offset);
+static FAT_MUTATION int fat_raw_delete_location(struct fat_mount_state *, const struct fat_directory *, uint32_t, uint16_t);
+static FAT_MUTATION int fat_raw_create(struct fat_mount_state *filesystem, const char *path, struct fat_file_state *file);
+static FAT_MUTATION int fat_raw_directory_empty(struct fat_mount_state *filesystem, uint32_t first_cluster);
+static FAT_MUTATION int fat_raw_initialize_directory(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t parent_cluster);
+static FAT_MUTATION int fat_raw_rename(struct fat_mount_state *filesystem, const char *old_path, const char *new_path, uint32_t authoritative_cluster, uint32_t authoritative_size, struct fat_rename_result *renamed);
+static int fat_engine_stat_location(struct fat_mount_state *filesystem, const char *path, struct fat_dir_entry *entry, uint32_t *lba, uint16_t *offset, uint32_t *first_cluster, uint8_t *attributes);
+static int fat_engine_stat_location_casefold(struct fat_mount_state *filesystem, const char *path, struct fat_dir_entry *entry, uint32_t *lba, uint16_t *offset, uint32_t *first_cluster, uint8_t *attributes);
+static const char *fat_path(struct inode *inode);
+static struct inode *fat_alloc_inode(struct mount *mountp);
+static int join_path(const char *parent, const struct componentname *name, char output[ZEDBSD_PATH_MAX]);
+static int fat_creation_collision(struct fat_mount_state *state, const char *path);
+static int fat_created_inode_matches(const struct fat_mount_state *state, const char *path, const struct inode *inode);
+static time_t fat_decode_time(uint16_t date, uint16_t time);
+static FAT_MUTATION int fat_encode_time(time_t seconds, uint16_t *date, uint16_t *time);
+static void fat_load_inode_times(struct mount *mountp, struct inode *inode, uint32_t lba, uint16_t offset);
+static int fat_make_inode(struct mount *mountp, const char *path, const struct fat_dir_entry *entry, uint32_t lba, uint16_t offset, uint32_t first_cluster, uint8_t attributes, struct inode **result);
+static int fat_lookup_unlocked(struct inode *directory, const struct componentname *name, struct inode **result);
+static FAT_MUTATION void fat_put16(uint8_t *bytes, uint16_t value);
+static FAT_MUTATION int fat_setattr_unlocked(struct inode *inode, const struct stat *status, unsigned mask);
+static void fat_sync_inode_state(struct inode *inode, const struct fat_file_state *file);
+static ssize_t fat_pwrite_file_unlocked(struct file *file, const void *buffer, size_t length, off_t offset);
+static int fat_readdir_unlocked(struct file *file, struct dirent *entry, int *eof);
+static void fat_copy_label(char *output, size_t capacity, const uint8_t *input, size_t length);
+static int fat_identify(struct disk *disk, struct block_identity *identity);
+static int fat_mount_impl(struct mount *mountp);
+static int fat_sync_mount(struct mount *mountp);
+static void fat_unmount_impl(struct mount *mountp);
+static int fat_statvfs(struct mount *mountp, struct statvfs *result);
+static int fat_sfn_equal(const uint8_t entry[32], const char name[11]);
+static int valid_cluster(uint32_t cluster, uint32_t end_of_chain);
+static int fat_engine_read_chain(struct fat_file_state *file, uint64_t offset, void *buffer, uint32_t length, fat_read_progress_fn progress, void *progress_context, fat_next_cluster_fn next_cluster, uint32_t end_of_chain);
+static int text_equal(const char *left, const char *right);
+static FAT_MUTATION int fat_raw_update_dotdot(struct fat_mount_state *filesystem, uint32_t directory_cluster, uint32_t parent_cluster);
+static FAT_MUTATION int fat_raw_restore_entry_payload(struct fat_mount_state *filesystem, uint32_t lba, uint16_t offset, const uint8_t raw[32]);
+static FAT_MUTATION void fat_raw_rename_rollback_destination(struct fat_mount_state *filesystem, const struct fat_directory *parent, uint32_t lba, uint16_t offset, int replacing, const uint8_t target[32]);
+static int fat_raw_canonical_basename(struct fat_mount_state *filesystem, const char *path, char basename[ZEDBSD_PATH_MAX]);
+static int fat_raw_readdir(struct fat_mount_state *filesystem, const char *path, unsigned wanted, struct fat_dir_entry *entry);
+static int fat_stat_location_mode(struct fat_mount_state *filesystem, const char *path, struct fat_dir_entry *entry, uint32_t *lba, uint16_t *offset, uint32_t *first_cluster, uint8_t *attributes, enum fat_name_match match);
+static int fat_metadata_number(const char *text, unsigned base, uint32_t *value);
+static void fat_free_inode(struct inode *inode);
+static int fat_leap_year(int year);
+static ssize_t fat_loop_transfer(struct file *file, struct fat_file_state *state, void *buffer, size_t length, off_t offset, int writing);
+static FAT_MUTATION int fat_path_descendant(const char *parent, const char *path);
+static FAT_MUTATION void fat_repath_descendants(struct mount *mountp, const char *old_path, const char *new_path);
+static FAT_MUTATION int fat_repath_descendants_possible(struct mount *mountp, const char *old_path, const char *new_path);
+static FAT_MUTATION int fat_rename_unlocked(struct inode *old_directory, const struct componentname *old_name, struct inode *new_directory, const struct componentname *new_name, unsigned flags, struct inode **orphaned);
+static int fat_probe(struct disk *disk);
+/* XXX: 宣言が足りない？static関数は必ず前方参照して、extern関数が先、static関数が後で定義する。 */
+static void fat_chain_invalidate(struct fat_mount_state *state);
+static int fat_raw_get_cluster_copy(struct fat_mount_state *filesystem, uint32_t cluster, unsigned copy, uint32_t *value);
+static int fat_raw_extend_cluster(struct fat_mount_state *filesystem, uint32_t tail, uint32_t *added);
+static int fat_raw_allocate_run(struct fat_mount_state *filesystem, uint32_t tail, uint32_t wanted, uint32_t *first);
+static int fat_writeback_range(struct file *file, off_t offset, size_t length);
+static int fat_file_validate_at(struct fat_file_state *file, uint64_t offset, struct fat_chain_cursor *cursor, uint32_t *last);
+static void fat_file_save_cursor(struct fat_file_state *file, const struct fat_chain_cursor *cursor, uint64_t end, uint64_t generation, uint32_t last);
+static void fat_engine_copy_bytes(void *destination, const void *source, uint32_t length);
+static uint16_t get16(const uint8_t *p);
+static int contiguous_extent(uint64_t file_block, uint64_t disk_block, uint32_t count, void *argument);
+static int fat_lookup(struct inode *, const struct componentname *, struct inode **);
+static int fat_lookup_casefold(struct inode *, const struct componentname *, struct inode **);
+static int fat_create(struct inode *, const struct componentname *, const struct inode_creation_request *, struct inode **);
+static int fat_mkdir(struct inode *, const struct componentname *, const struct inode_creation_request *, struct inode **);
+static int fat_unlink(struct inode *, const struct componentname *);
+static int fat_rmdir(struct inode *, const struct componentname *);
+static int fat_rename(struct inode *, const struct componentname *, struct inode *, const struct componentname *, unsigned);
+static int fat_truncate(struct inode *, off_t);
+static int fat_getattr(struct inode *, struct stat *);
+static int fat_setattr(struct inode *, const struct stat *, unsigned);
+static void fat_reclaim(struct inode *);
+static void fat_orphan(struct inode *);
+static ssize_t fat_read_file(struct file *, void *, size_t);
+static ssize_t fat_write_file(struct file *, const void *, size_t);
+static ssize_t fat_pread_file(struct file *, void *, size_t, off_t);
+static ssize_t fat_pwrite_file(struct file *, const void *, size_t, off_t);
+static ssize_t fat_pwrite_context(struct file *file, const void *buffer, size_t length, off_t offset, unsigned flags, const struct ucred *credential, const struct io_context *context);
+static int fat_readdir(struct file *, struct dirent *, int *);
+static int fat_open_file(struct file *);
+static int fat_fsync(struct file *);
+static int fat_close_file(struct file *);
+static int fat_flush_pending_closes(struct fat_mount_state *);
+static void set_inode_ops(struct inode *inode);
+static int fat_sector_images_commit(struct fat_mount_state *filesystem, struct fat_sector_change *slots, unsigned used, uint32_t publish_lba);
+static int fat_directory_transaction(struct fat_mount_state *filesystem, const uint32_t *lbas, const uint16_t *offsets, const uint8_t entries[][32], unsigned count, int publish_last);
+static int fat_batch_add_lba(uint32_t *lbas, unsigned *used, uint32_t lba);
+static uint8_t *fat_batch_bytes(struct fat_sector_change *slots, unsigned used, uint32_t lba);
+static int fat_table_transaction(struct fat_mount_state *filesystem, const struct fat_entry_change *changes, unsigned count, int *admitted);
+static int fat_raw_set_cluster(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t value);
+static int fat_link_initialized_cluster(struct fat_mount_state *filesystem, uint32_t tail, uint32_t added);
+
+/*
  * Generated by scripts/generate-unicode-casefold.py from
- * Unicode CaseFolding-17.0.0.txt; statuses C and S only.  Do not edit. */
+ * Unicode CaseFolding-17.0.0.txt; statuses C and S only.
+ * Do not edit.
+ */
 static const struct fat_casefold_range fat_casefold_ranges[] = {
 	{0x000041U, 0x0000005aU, 32},	  {0x0000b5U, 0x000000b5U, 775},
 	{0x0000c0U, 0x000000d6U, 32},	  {0x0000d8U, 0x000000deU, 32},
@@ -1358,8 +550,1075 @@ static const struct fat_casefold_range fat_casefold_ranges[] = {
 	{0x01e900U, 0x0001e921U, 34},
 };
 
-/* Supports the fold scalar operation. */
-static uint32_t fold_scalar(uint32_t scalar);
+/*
+ * FAT filesystem
+ */
+
+static const struct inode_ops fat_inode_ops = {
+	.lookup = fat_lookup,
+	.lookup_casefold = fat_lookup_casefold,
+	.create = fat_create,
+	.mkdir = fat_mkdir,
+	.unlink = fat_unlink,
+	.rmdir = fat_rmdir,
+	.rename = fat_rename,
+	.getattr = fat_getattr,
+	.setattr = fat_setattr,
+	.truncate = fat_truncate,
+	.sync = NULL,
+	.reclaim = fat_reclaim,
+};
+
+static const struct file_ops fat_regular_ops = {
+	.open = fat_open_file,
+	.read = fat_read_file,
+	.write = fat_write_file,
+	.pread = fat_pread_file,
+	.pwrite = fat_pwrite_file,
+	.pwrite_internal = fat_pwrite_context,
+	.fsync = fat_fsync,
+	.close = fat_close_file,
+};
+
+static const struct file_ops fat_directory_ops = {
+	.readdir = fat_readdir,
+	.close = fat_close_file,
+};
+
+const struct filesystem_type drv_fat_filesystem_type = {
+	.writeback_range = fat_writeback_range,
+	.fs_name = "fat",
+	.probe = fat_probe,
+	.identify = fat_identify,
+	.mount = fat_mount_impl,
+	.sync = fat_sync_mount,
+	.statvfs = fat_statvfs,
+	.unmount = fat_unmount_impl,
+	.alloc_inode = fat_alloc_inode,
+	.free_inode = fat_free_inode,
+};
+
+/*
+ * XXX: extern関数が先に来るのがルールだけど、守られていないので、関数のファイル内での移動が必要。
+ */
+
+/* Retires all shared chain proofs before a mutation or external invalidation. */
+static void
+fat_chain_invalidate(
+	struct fat_mount_state *state)
+{
+	/* Handles the state condition. */
+	if (state->chain_generation != UINT64_MAX)
+		state->chain_generation++;
+	io_stats_record(IO_FAT_CHAIN_INVALIDATE, 0);
+}
+
+/* Supports the fat inode operation. */
+static struct fat_inode_info *
+fat_inode(
+	struct inode *inode)
+{
+	/* Returns the computed result. */
+	return (struct fat_inode_info *)inode;
+}
+
+/* Supports the fat engine copy bytes operation. */
+static void
+fat_engine_copy_bytes(
+	void *destination,
+	const void *source,
+	uint32_t length)
+{
+	uint8_t *output = destination;
+	const uint8_t *input = source;
+
+	/* Process each remaining element. */
+	while (length--)
+		*output++ = *input++;
+}
+
+/* Supports the fat engine get16 operation. */
+static uint16_t
+fat_engine_get16(
+	const uint8_t *bytes)
+{
+	/* Returns the computed result. */
+	return bytes[0] | ((uint16_t)bytes[1] << 8);
+}
+
+/* Supports the fat engine get32 operation. */
+static uint32_t
+fat_engine_get32(
+	const uint8_t *bytes)
+{
+	uint32_t function_result;
+
+	/* Computes the function result. */
+	function_result = fat_engine_get16(bytes) |
+			  ((uint32_t)fat_engine_get16(bytes + 2) << 16);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/* Supports the fat sector read operation. */
+static int
+fat_sector_read(
+	struct fat_mount_state *state,
+	uint32_t lba,
+	void *buffer)
+{
+	int error;
+
+	/* Handles the state availability. */
+	if (state == NULL || state->disk == NULL || buffer == NULL)
+		return EINVAL;
+
+	/* Computes the function result. */
+	error =
+		state->direct_io ? disk_read_direct(state->disk, lba, 1, buffer)
+				 : disk_read(state->disk, lba, 1, buffer);
+
+	/* Returns the computed result. */
+	return error;
+}
+
+/* Supports the fat sector write operation. */
+static int
+fat_sector_write(
+	struct fat_mount_state *state,
+	uint32_t lba,
+	const void *buffer)
+{
+	int function_result;
+	struct io_context context;
+	int error;
+
+	/* Handles the state availability. */
+	if (state == NULL || state->disk == NULL || buffer == NULL)
+		return EINVAL;
+
+	/* Handles the state condition. */
+	if (state->read_only)
+		return EROFS;
+
+	/* Checks the operation status. */
+	error = io_context_child(&context, state->write_context,
+				 IO_CONTEXT_ORDERED);
+	if (error != 0)
+		return error;
+
+	/* Obtains the disk write filesystem context result. */
+	function_result = disk_write_filesystem_context(state->disk, lba, 1,
+							buffer, &context);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/* Supports the fat engine flush operation. */
+static int
+fat_engine_flush(
+	struct fat_mount_state *filesystem)
+{
+	int result;
+
+	/* Handles the filesystem condition. */
+	if (!filesystem)
+		return EINVAL;
+
+	/* Handles the filesystem condition. */
+	if (!filesystem->sector_cache_dirty)
+		return 0;
+
+	/* Checks the operation result. */
+	result = fat_sector_write(filesystem, filesystem->sector_cache_lba,
+				  filesystem->sector_cache);
+	if (result == 0) {
+		filesystem->sector_cache_dirty = 0;
+
+		/* Handles the owner availability. */
+		if (filesystem->owner != NULL)
+			io_epoch_end(&filesystem->owner->m_write_epoch);
+	}
+
+	/* Returns the computed result. */
+	return result;
+}
+
+/* Supports the fat engine invalidate operation. */
+static void
+fat_engine_invalidate(
+	struct fat_mount_state *filesystem)
+{
+	/* Handles the filesystem condition. */
+	if (!filesystem)
+		return;
+
+	/* Handles the owner availability. */
+	if (filesystem->sector_cache_dirty && filesystem->owner != NULL)
+		io_epoch_end(&filesystem->owner->m_write_epoch);
+
+	filesystem->sector_cache_valid = 0;
+	filesystem->sector_cache_dirty = 0;
+	memset(filesystem->clean_sectors, 0, sizeof(filesystem->clean_sectors));
+	fat_chain_invalidate(filesystem);
+}
+
+/* Supports the fat engine read sector result operation. */
+static int
+fat_engine_read_sector_result(
+	struct fat_mount_state *filesystem,
+	uint32_t lba,
+	const uint8_t **sector)
+{
+	struct fat_clean_sector *slot;
+	uint8_t saved[512];
+	unsigned index, found;
+	int result;
+
+	/* Validates the request and preserves the active mutable identity. */
+	if (filesystem == NULL || sector == NULL)
+		return EINVAL;
+
+	/* Handles the lba condition. */
+	if (lba >= filesystem->total_sectors)
+		return EIO;
+
+	/* Handles the filesystem condition. */
+	if (filesystem->sector_cache_valid &&
+	    filesystem->sector_cache_lba == lba) {
+		io_stats_record(IO_FAT_SECTOR_HIT, 512);
+		*sector = filesystem->sector_cache;
+		/* Reports successful completion. */
+		return 0;
+	}
+
+	/* Completes the old mutable sector before retaining any clean copy. */
+
+	/* Checks the operation result. */
+	result = fat_engine_flush(filesystem);
+	if (result != 0)
+		return result;
+
+	/* Process each remaining element. */
+	found = 0;
+	for (index = 0; index < FAT_CLEAN_SLOTS; index++) {
+		/* Handles the slot condition. */
+		slot = &filesystem->clean_sectors[index];
+		if (slot->valid && slot->lba == lba) {
+			memcpy(saved, slot->bytes, sizeof(saved));
+			slot->valid = 0;
+			found = 1;
+			break;
+		}
+	}
+
+	/*
+	 * Retains the previous clean window within the fixed mount-owned
+	 * budget.
+	 */
+	if (filesystem->sector_cache_valid) {
+		slot = &filesystem->clean_sectors[filesystem->clean_rotor];
+		filesystem->clean_rotor = (filesystem->clean_rotor + 1U) % FAT_CLEAN_SLOTS;
+		memcpy(slot->bytes, filesystem->sector_cache, sizeof(slot->bytes));
+		slot->lba = filesystem->sector_cache_lba;
+		slot->valid = 1;
+	}
+
+	filesystem->sector_cache_valid = 0;
+	filesystem->sector_cache_dirty = 0;
+
+	/*
+	 * Copies a retained clean sector or performs the existing read on a
+	 * miss.
+	 */
+	if (found) {
+		memcpy(filesystem->sector_cache, saved, sizeof(saved));
+		io_stats_record(IO_FAT_SECTOR_HIT, 512);
+	} else {
+		io_stats_record(IO_FAT_SECTOR_MISS, 512);
+
+		/* Checks the operation result. */
+		result = fat_sector_read(filesystem, lba,
+					 filesystem->sector_cache);
+		if (result != 0)
+			return result;
+	}
+
+	filesystem->sector_cache_lba = lba;
+	filesystem->sector_cache_valid = 1;
+	*sector = filesystem->sector_cache;
+
+	/* Publishes the sole mutable window. */
+	return 0;
+}
+
+/* Supports the fat engine write sector result operation. */
+static int
+fat_engine_write_sector_result(
+	struct fat_mount_state *filesystem,
+	uint32_t lba,
+	uint8_t **sector)
+{
+	const uint8_t *read_sector;
+	int result;
+
+	/* Handles the filesystem condition. */
+	if (!filesystem || !sector)
+		return EINVAL;
+
+	/* Handles the filesystem condition. */
+	if (filesystem->read_only)
+		return EROFS;
+
+	/* Checks the operation result. */
+	result = fat_engine_read_sector_result(filesystem, lba, &read_sector);
+	if (result != 0)
+		return result;
+
+	*sector = (uint8_t *)read_sector;
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the fat engine mark sector dirty operation. */
+static int
+fat_engine_mark_sector_dirty(
+	struct fat_mount_state *filesystem)
+{
+	/* Handles the filesystem condition. */
+	if (!filesystem || filesystem->read_only)
+		return EROFS;
+
+	/* Handles the filesystem condition. */
+	if (!filesystem->sector_cache_valid)
+		return EIO;
+
+	/* Handles the owner availability. */
+	if (filesystem->owner != NULL && !filesystem->sector_cache_dirty)
+		io_epoch_begin(&filesystem->owner->m_write_epoch);
+
+	filesystem->sector_cache_dirty = 1;
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the fat engine cluster lba operation. */
+static int
+fat_engine_cluster_lba(
+	struct fat_mount_state *filesystem,
+	uint32_t cluster,
+	uint32_t sector_in_cluster,
+	uint32_t *lba)
+{
+	struct fat_mount_state *fat;
+	uint32_t cluster_offset;
+
+	/* Handles the filesystem condition. */
+	if (!filesystem || !lba)
+		return EINVAL;
+
+	/* Handles the cluster condition. */
+	fat = filesystem;
+	if (cluster < 2 || cluster >= fat->cluster_count + 2 ||
+	    sector_in_cluster >= fat->sectors_per_cluster) {
+		/* Returns the computed result. */
+		return EIO;
+	}
+
+	/* Handles the cluster condition. */
+	if (cluster - 2 > (0xffffffffU - fat->data_start) / fat->sectors_per_cluster) {
+		/* Returns the computed result. */
+		return EIO;
+	}
+
+	cluster_offset = fat->data_start + (cluster - 2) * fat->sectors_per_cluster;
+
+	/* Handles the sector in cluster condition. */
+	if (sector_in_cluster > 0xffffffffU - cluster_offset)
+		return EIO;
+
+	/* Handles the lba condition. */
+	*lba = cluster_offset + sector_in_cluster;
+	if (*lba >= fat->total_sectors)
+		return EIO;
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the parse bpb operation. */
+static int
+parse_bpb(
+	struct fat_mount_state *fat)
+{
+	uint8_t bpb[512];
+	uint32_t reserved, fat_sectors, fat32_sectors, root_sectors, metadata;
+	uint32_t total, total_physical, data_sectors;
+	uint16_t bytes, fat16_sectors;
+	uint8_t sectors_per_cluster;
+
+	/* Checks the fat sector read result. */
+	if (fat_sector_read(fat, 0, bpb) != 0)
+		return EIO;
+
+	bytes = fat_engine_get16(bpb + 11);
+	fat->sector_scale = bytes == 512 ? 1 : bytes == 1024 ? 2 : 0;
+	sectors_per_cluster = bpb[13];
+	reserved = fat_engine_get16(bpb + 14);
+	fat->number_of_fats = bpb[16];
+	fat->root_entries = fat_engine_get16(bpb + 17);
+
+	/* Handles the total condition. */
+	total = fat_engine_get16(bpb + 19);
+	if (!total)
+		total = fat_engine_get32(bpb + 32);
+
+	fat16_sectors = fat_engine_get16(bpb + 22);
+	fat32_sectors = fat_engine_get32(bpb + 36);
+
+	/* Handles the fat sectors condition. */
+	fat_sectors = fat16_sectors;
+	if (!fat_sectors)
+		fat_sectors = fat32_sectors;
+
+	/* Handles the fat condition. */
+	if (!fat->sector_scale || !sectors_per_cluster || !reserved ||
+	    !fat->number_of_fats || !fat_sectors || !total) {
+		/* Returns the computed result. */
+		return EIO;
+	}
+
+	/* Handles the total condition. */
+	if (total > 0xffffffffU / fat->sector_scale ||
+	    reserved > 0xffffffffU / fat->sector_scale ||
+	    fat_sectors > 0xffffffffU / fat->sector_scale) {
+		/* Returns the computed result. */
+		return EIO;
+	}
+
+	/* Handles the disk availability. */
+	total_physical = total * fat->sector_scale;
+	if (fat->disk == NULL || total_physical > fat->disk->d_block_count)
+		return EIO;
+
+	/* Handles the fat sectors condition. */
+	reserved *= fat->sector_scale;
+	fat_sectors *= fat->sector_scale;
+	fat->sectors_per_cluster = sectors_per_cluster * fat->sector_scale;
+	root_sectors = ((uint32_t)fat->root_entries * 32 + 511) >> 9;
+	if (fat_sectors > (0xffffffffU - reserved) / fat->number_of_fats)
+		return EIO;
+
+	/* Handles the root sectors condition. */
+	metadata = reserved + fat_sectors * fat->number_of_fats;
+	if (root_sectors > 0xffffffffU - metadata)
+		return EIO;
+
+	metadata += root_sectors;
+
+	/* Handles the metadata condition. */
+	if (metadata >= total_physical)
+		return EIO;
+
+	data_sectors = total_physical - metadata;
+	fat->cluster_count = data_sectors / fat->sectors_per_cluster;
+	fat->type = fat->cluster_count < 4085	 ? ZEDBSD_FAT12
+		    : fat->cluster_count < 65525 ? ZEDBSD_FAT16
+						 : ZEDBSD_FAT32;
+	fat->fat_start = reserved;
+	fat->fat_sectors = fat_sectors;
+	fat->root_start = reserved + fat_sectors * fat->number_of_fats;
+	fat->data_start = fat->root_start + root_sectors;
+	fat->total_sectors = total_physical;
+	fat->bytes_per_sector = bytes;
+	fat->fat16_layout = fat16_sectors != 0 && fat->root_entries != 0;
+	fat->fat32_layout = fat16_sectors == 0 && fat32_sectors != 0 &&
+			    fat->root_entries == 0;
+	fat->root_cluster = fat_engine_get32(bpb + 44) & 0x0fffffffU;
+	fat->fsinfo_sector = fat_engine_get16(bpb + 48);
+
+	/* Handles the fat condition. */
+	if (fat->type == ZEDBSD_FAT32 &&
+	    (!fat->fat32_layout || fat->root_cluster < 2U ||
+	     fat->root_cluster >= fat->cluster_count + 2U)) {
+		/* Returns the computed result. */
+		return EIO;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the fat engine mount operation. */
+static int
+fat_engine_mount(
+	struct fat_mount_state *filesystem,
+	enum bootfat_type required_type)
+{
+	struct fat_mount_state *fat = filesystem;
+	int result = parse_bpb(fat);
+
+	/* Checks the operation result. */
+	if (result != 0)
+		return result;
+
+	/* Handles the fat condition. */
+	if (fat->type != required_type ||
+	    (required_type == ZEDBSD_FAT16 && !fat->fat16_layout) ||
+	    (required_type == ZEDBSD_FAT32 && !fat->fat32_layout)) {
+		/* Returns the computed result. */
+		return EOPNOTSUPP;
+	}
+
+	fat->allocation_hint = 2;
+	fat_engine_invalidate(filesystem);
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the fat sfn encode operation. */
+static int
+fat_sfn_encode(
+	const char *path,
+	char output[11])
+{
+	char character_local;
+	char character_local1;
+	unsigned i_index_for;
+	unsigned base = 0, extension = 0;
+
+	/* Process each remaining element. */
+	for (i_index_for = 0; i_index_for < 11; i_index_for++)
+		output[i_index_for] = ' ';
+
+	/* Handles the path condition. */
+	if (*path == '/')
+		path++;
+
+	/* Handles the path condition. */
+	if (!*path)
+		return 0;
+
+	/* Continue while the operation condition remains true. */
+	while (*path && *path != '.') {
+		/* Handles the character local condition. */
+		character_local = *path++;
+		if (character_local == '/' || base == 8)
+			return 0;
+
+		output[base++] =
+			character_local >= 'a' && character_local <= 'z'
+				? character_local - 32
+				: character_local;
+	}
+
+	/* Handles the base condition. */
+	if (!base)
+		return 0;
+
+	/* Handles the path condition. */
+	if (*path == '.')
+		path++;
+
+	/* Continue while the operation condition remains true. */
+	while (*path) {
+		/* Handles the character local1 condition. */
+		character_local1 = *path++;
+		if (character_local1 == '/' ||
+		    character_local1 == '.' ||
+		    extension == 3)
+			return 0;
+
+		output[8 + extension++] = character_local1 >= 'a' && character_local1 <= 'z' ?
+			character_local1 - 32 :
+			character_local1;
+	}
+
+	/* Reports operation failure. */
+	return 1;
+}
+
+/* Supports the fat sfn equal operation. */
+static int
+fat_sfn_equal(
+	const uint8_t entry[32],
+	const char name[11])
+{
+	uint8_t left;
+	uint8_t right;
+	unsigned i_index_for;
+
+	/* Process each remaining element. */
+	for (i_index_for = 0; i_index_for < 11; i_index_for++) {
+		left = entry[i_index_for];
+
+		/* Handles the left condition. */
+		right = (uint8_t)name[i_index_for];
+		if (left >= 'a' && left <= 'z')
+			left -= 'a' - 'A';
+
+		/* Handles the right condition. */
+		if (right >= 'a' && right <= 'z')
+			right -= 'a' - 'A';
+
+		/* Handles the left condition. */
+		if (left != right)
+			return 0;
+	}
+
+	/* Reports operation failure. */
+	return 1;
+}
+
+/* Supports the fat sfn decode lower operation. */
+static void
+fat_sfn_decode_lower(
+	const uint8_t raw[32],
+	struct fat_dir_entry *entry)
+{
+	uint8_t character_local;
+	uint8_t character_local1;
+	unsigned i_index_for;
+	unsigned i_index_for1;
+	unsigned output = 0;
+
+	/* Process each remaining element. */
+	for (i_index_for = 0;
+	     i_index_for < 8 && raw[i_index_for] != ' ';
+	     i_index_for++) {
+		/* Handles the character local condition. */
+		character_local = raw[i_index_for];
+		if (character_local >= 'A' && character_local <= 'Z')
+			character_local += 'a' - 'A';
+
+		entry->name[output++] = (char)character_local;
+	}
+
+	/* Handles the raw condition. */
+	if (raw[8] != ' ') {
+		entry->name[output++] = '.';
+
+		/* Process each remaining element. */
+		for (i_index_for1 = 8;
+		     i_index_for1 < 11 && raw[i_index_for1] != ' ';
+		     i_index_for1++) {
+			/* Handles the character local1 condition. */
+			character_local1 = raw[i_index_for1];
+			if (character_local1 >= 'A' && character_local1 <= 'Z')
+				character_local1 += 'a' - 'A';
+
+			entry->name[output++] = (char)character_local1;
+		}
+	}
+
+	entry->name[output] = 0;
+	entry->size = fat_engine_get32(raw + 28);
+	entry->attributes = raw[11];
+}
+
+/* Supports the valid cluster operation. */
+static int
+valid_cluster(
+	uint32_t cluster,
+	uint32_t end_of_chain)
+{
+	/* Returns the computed result. */
+	return cluster >= 2 && cluster < end_of_chain;
+}
+
+/* Supports the fat engine read chain operation. */
+static int
+fat_engine_read_chain(
+	struct fat_file_state *file,
+	uint64_t offset,
+	void *buffer,
+	uint32_t length,
+	fat_read_progress_fn progress,
+	void *progress_context,
+	fat_next_cluster_fn next_cluster,
+	uint32_t end_of_chain)
+{
+	int result_local;
+	int result_local1;
+	uint32_t lba;
+	uint32_t chunk;
+	const uint8_t *input;
+	struct fat_mount_state *filesystem = file->mount;
+	struct fat_mount_state *fat = filesystem;
+	struct fat_file_state *fat_file = file;
+	uint32_t cluster = fat_file->first_cluster;
+	uint32_t position, skip, within, since_update = 0;
+	uint8_t *output = buffer;
+	struct fat_chain_cursor cursor = {0, 0};
+	uint32_t last;
+	uint64_t generation, end;
+	int validation;
+
+	/* Checks the current offset. */
+	if (offset > 0xffffffffU || !next_cluster)
+		return EINVAL;
+
+	/* Checks the valid cluster result. */
+	if (!valid_cluster(cluster, end_of_chain))
+		return EIO;
+
+	generation = fat->chain_generation;
+	end = offset + length;
+
+	/* Handles the validation condition. */
+	validation = fat_file_validate_at(file, offset, &cursor, &last);
+	if (validation != 0)
+		return validation;
+
+	cluster = cursor.cluster;
+	position = (uint32_t)offset;
+	skip = position / 512 - cursor.index * fat->sectors_per_cluster;
+	within = position & 511;
+
+	/* Continue while the operation condition remains true. */
+	while (skip >= fat->sectors_per_cluster) {
+		/* Handles the result local condition. */
+		result_local = next_cluster(filesystem, cluster, &cluster);
+		if (result_local != 0)
+			return result_local;
+
+		/* Checks the valid cluster result. */
+		if (!valid_cluster(cluster, end_of_chain))
+			return EIO;
+		skip -= fat->sectors_per_cluster;
+		cursor.index++;
+	}
+
+	while (length) {
+		int result;
+
+		chunk = 512 - within;
+
+		/* Checks the operation result. */
+		result = fat_engine_cluster_lba(filesystem, cluster, skip, &lba);
+		if (result != 0)
+			return result;
+
+		/* Checks the operation result. */
+		result = fat_engine_read_sector_result(filesystem, lba, &input);
+		if (result != 0)
+			return result;
+
+		/* Handles the chunk condition. */
+		if (chunk > length)
+			chunk = length;
+
+		fat_engine_copy_bytes(output, input + within, chunk);
+
+		output += chunk;
+		length -= chunk;
+
+		/* Handles the progress condition. */
+		if (progress) {
+			since_update += chunk;
+
+			/* Handles the since update condition. */
+			if (since_update >= FAT_PROGRESS_INTERVAL || !length) {
+				progress(progress_context, since_update);
+				since_update = 0;
+			}
+		}
+
+		within = 0;
+
+		/* Handles the skip condition. */
+		if (++skip >= fat->sectors_per_cluster && length) {
+			skip = 0;
+			cursor.index++;
+
+			/* Handles the result local1 condition. */
+			result_local1 = next_cluster(filesystem, cluster, &cluster);
+			if (result_local1 != 0)
+				return result_local1;
+
+			/* Checks the valid cluster result. */
+			if (!valid_cluster(cluster, end_of_chain))
+				return EIO;
+		}
+	}
+
+	cursor.cluster = cluster;
+	fat_file_save_cursor(file, &cursor, end, generation, last);
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the get16 operation. */
+static uint16_t
+get16(
+	const uint8_t *p)
+{
+	/* Returns the computed result. */
+	return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+}
+
+/* Supports the fat lfn reset operation. */
+static void
+fat_lfn_reset(
+	struct fat_lfn_state *state)
+{
+	unsigned i;
+
+	state->unit_limit = 0;
+	state->expected = 0;
+	state->checksum = 0;
+	state->active = 0;
+	/* Process each element required by the operation. */
+	for (i = 0; i <= FAT_LFN_MAX_UNITS; i++)
+		state->units[i] = 0xffffU;
+}
+
+/* Supports the fat lfn checksum operation. */
+static uint8_t
+fat_lfn_checksum(
+	const uint8_t sfn[11])
+{
+	uint8_t sum = 0;
+	unsigned i;
+
+	/* Process each element required by the operation. */
+	for (i = 0; i < 11; i++)
+		sum = (uint8_t)(((sum & 1U) << 7) | (sum >> 1)) + sfn[i];
+
+	/* Returns the computed result. */
+	return sum;
+}
+
+/* Supports the fat lfn feed operation. */
+static int
+fat_lfn_feed(
+	struct fat_lfn_state *state,
+	const uint8_t raw[32])
+{
+	unsigned index;
+	unsigned ordinal = raw[0] & 0x1fU;
+	unsigned i;
+
+	/* Checks the get16 result. */
+	if (raw[11] != 0x0fU || raw[12] != 0 || get16(raw + 26) != 0 ||
+	    ordinal == 0 || ordinal > 20U) {
+		fat_lfn_reset(state);
+
+		/* Reports successful completion. */
+		return 0;
+	}
+
+	/* Handles the raw condition. */
+	if (raw[0] & 0x40U) {
+		fat_lfn_reset(state);
+		state->active = 1;
+		state->expected = (uint8_t)ordinal;
+		state->checksum = raw[13];
+		state->unit_limit = (uint16_t)(ordinal * 13U);
+
+		/* Handles the state condition. */
+		if (state->unit_limit > FAT_LFN_MAX_UNITS + 1U)
+			state->unit_limit = FAT_LFN_MAX_UNITS + 1U;
+	}
+
+	/* Handles the state condition. */
+	if (!state->active || ordinal != state->expected ||
+	    raw[13] != state->checksum || (raw[0] & 0x80U)) {
+		fat_lfn_reset(state);
+
+		/* Reports successful completion. */
+		return 0;
+	}
+
+	/* Process each element required by the operation. */
+	for (i = 0; i < 13; i++) {
+		/* Checks the current index. */
+		index = (ordinal - 1U) * 13U + i;
+		if (index <= FAT_LFN_MAX_UNITS)
+			state->units[index] = get16(raw + lfn_offsets[i]);
+	}
+
+	state->expected--;
+
+	/* Reports operation failure. */
+	return 1;
+}
+
+/* Supports the append utf8 operation. */
+static int
+append_utf8(
+	char *output,
+	size_t capacity,
+	size_t *used,
+	uint32_t scalar)
+{
+	uint8_t bytes[4];
+	unsigned count, i;
+
+	/* Handles the scalar condition. */
+	if (scalar <= 0x7fU) {
+		bytes[0] = (uint8_t)scalar;
+		count = 1;
+	} else if (scalar <= 0x7ffU) {
+		bytes[0] = (uint8_t)(0xc0U | (scalar >> 6));
+		bytes[1] = (uint8_t)(0x80U | (scalar & 0x3fU));
+		count = 2;
+	} else if (scalar <= 0xffffU) {
+		bytes[0] = (uint8_t)(0xe0U | (scalar >> 12));
+		bytes[1] = (uint8_t)(0x80U | ((scalar >> 6) & 0x3fU));
+		bytes[2] = (uint8_t)(0x80U | (scalar & 0x3fU));
+		count = 3;
+	} else {
+		bytes[0] = (uint8_t)(0xf0U | (scalar >> 18));
+		bytes[1] = (uint8_t)(0x80U | ((scalar >> 12) & 0x3fU));
+		bytes[2] = (uint8_t)(0x80U | ((scalar >> 6) & 0x3fU));
+		bytes[3] = (uint8_t)(0x80U | (scalar & 0x3fU));
+		count = 4;
+	}
+
+	/* Checks the current capacity usage. */
+	if (*used + count >= capacity)
+		return 0;
+	/* Process each remaining element. */
+	for (i = 0; i < count; i++)
+		output[(*used)++] = (char)bytes[i];
+
+	/* Reports operation failure. */
+	return 1;
+}
+
+/* Supports the fat lfn finish operation. */
+static int
+fat_lfn_finish(
+	struct fat_lfn_state *state,
+	const uint8_t sfn[32],
+	char *output,
+	size_t capacity)
+{
+	uint32_t low;
+	uint32_t scalar;
+	size_t used = 0;
+	unsigned i;
+	int terminated = 0;
+
+	/* Checks the fat lfn checksum result. */
+	if (!state->active || state->expected != 0 ||
+	    state->checksum != fat_lfn_checksum(sfn) || capacity == 0)
+		goto invalid;
+
+	/* Process each element required by the operation. */
+	for (i = 0; i < state->unit_limit; i++) {
+		/* Handles the scalar condition. */
+		scalar = state->units[i];
+		if (scalar == 0) {
+			terminated = 1;
+			break;
+		}
+
+		/* Handles the scalar condition. */
+		if (scalar == 0xffffU)
+			goto invalid;
+
+		/* Handles the scalar condition. */
+		if (scalar >= 0xd800U && scalar <= 0xdbffU) {
+			/* Checks the current index. */
+			if (++i >= state->unit_limit)
+				goto invalid;
+
+			/* Handles the low condition. */
+			low = state->units[i];
+			if (low < 0xdc00U || low > 0xdfffU)
+				goto invalid;
+			scalar = 0x10000U + ((scalar - 0xd800U) << 10) +
+				 (low - 0xdc00U);
+		} else if (scalar >= 0xdc00U && scalar <= 0xdfffU) {
+			goto invalid;
+		}
+
+		/* Checks the append utf8 result. */
+		if (scalar == '/' || scalar == 0 ||
+		    !append_utf8(output, capacity, &used, scalar))
+			goto invalid;
+	}
+
+	/* Checks the current capacity usage. */
+	if (used == 0 || (!terminated && state->unit_limit > FAT_LFN_MAX_UNITS))
+		goto invalid;
+
+	/* Handles the terminated condition. */
+	if (terminated) {
+		/* Process each element required by the operation. */
+		for (; i < state->unit_limit; i++) {
+			/* Handles the state condition. */
+			if (state->units[i] != 0 && state->units[i] != 0xffffU)
+				goto invalid;
+		}
+	}
+
+	output[used] = '\0';
+	fat_lfn_reset(state);
+
+	/* Reports operation failure. */
+	return 1;
+invalid:
+	fat_lfn_reset(state);
+
+	/* Handles the capacity condition. */
+	if (capacity)
+		output[0] = '\0';
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the fat sfn decode preserve operation. */
+static void
+fat_sfn_decode_preserve(
+	const uint8_t raw[32],
+	char *output,
+	size_t capacity)
+{
+	uint8_t c_local;
+	uint8_t c_local1;
+	size_t used = 0;
+	unsigned i;
+	int lower_base = (raw[12] & 0x08U) != 0;
+	int lower_ext = (raw[12] & 0x10U) != 0;
+
+	/* Handles the capacity condition. */
+	if (capacity == 0)
+		return;
+	/* Process each element required by the operation. */
+	for (i = 0; i < 8 && raw[i] != ' ' && used + 1U < capacity; i++) {
+		/* Handles the lower base condition. */
+		c_local = raw[i];
+		if (lower_base && c_local >= 'A' && c_local <= 'Z')
+			c_local += 'a' - 'A';
+		output[used++] = (char)c_local;
+	}
+
+	/* Handles the raw condition. */
+	if (raw[8] != ' ' && used + 1U < capacity) {
+		output[used++] = '.';
+		/* Process each element required by the operation. */
+		for (i = 8; i < 11 && raw[i] != ' ' && used + 1U < capacity;
+		     i++) {
+			/* Handles the lower ext condition. */
+			c_local1 = raw[i];
+			if (lower_ext && c_local1 >= 'A' && c_local1 <= 'Z')
+				c_local1 += 'a' - 'A';
+			output[used++] = (char)c_local1;
+		}
+	}
+
+	output[used] = '\0';
+}
 
 /* Supports the fold scalar operation. */
 static uint32_t
@@ -1375,9 +1634,8 @@ fold_scalar(
 
 	/* Continue while the operation condition remains true. */
 	while (low < high) {
-		middle = low + (high - low) / 2U;
-
 		/* Handles the fat casefold ranges condition. */
+		middle = low + (high - low) / 2U;
 		if (fat_casefold_ranges[middle].start <= scalar)
 			low = middle + 1U;
 		else
@@ -1387,22 +1645,19 @@ fold_scalar(
 	/* Handles the low condition. */
 	if (low != 0) {
 		range = &fat_casefold_ranges[low - 1U];
-		end = range->encoded_end & 0x7fffffffU;
 
 		/* Handles the scalar condition. */
+		end = range->encoded_end & 0x7fffffffU;
 		if (scalar <= end && (!(range->encoded_end & 0x80000000U) ||
-				      ((scalar - range->start) & 1U) == 0))
-
+				      ((scalar - range->start) & 1U) == 0)) {
 			/* Returns the computed result. */
 			return (uint32_t)((int32_t)scalar + range->delta);
+		}
 	}
 
 	/* Returns the computed result. */
 	return scalar;
 }
-
-/* Supports the decode utf8 operation. */
-static int decode_utf8(const uint8_t **cursor, uint32_t *scalar);
 
 /* Supports the decode utf8 operation. */
 static int
@@ -1437,11 +1692,11 @@ decode_utf8(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	/* Process each remaining element. */
 	for (i = 0; i < count; i++) {
-		next = p[i + 1U];
-
 		/* Handles the next condition. */
+		next = p[i + 1U];
 		if ((next & 0xc0U) != 0x80U)
 			return 0;
 		value = (value << 6) | (next & 0x3fU);
@@ -1450,18 +1705,17 @@ decode_utf8(
 	/* Checks the remaining item count. */
 	if ((count == 2 && value < 0x800U) ||
 	    (count == 3 && value < 0x10000U) || value > 0x10ffffU ||
-	    (value >= 0xd800U && value <= 0xdfffU))
-
+	    (value >= 0xd800U && value <= 0xdfffU)) {
 		/* Reports successful completion. */
 		return 0;
+	}
+
 	*scalar = value;
 	*cursor = p + count + 1U;
+
 	/* Reports operation failure. */
 	return 1;
 }
-
-/* Supports the fat utf8 to utf16 operation. */
-static int fat_utf8_to_utf16(const char *name, uint16_t units[FAT_LFN_MAX_UNITS], unsigned *unit_count);
 
 /* Supports the fat utf8 to utf16 operation. */
 static int
@@ -1477,14 +1731,15 @@ fat_utf8_to_utf16(
 	/* Validates the current name. */
 	if (name == 0 || unit_count == 0 || !*cursor)
 		return 0;
+
 	/* Continue while the operation condition remains true. */
 	while (*cursor) {
 		/* Checks the decode utf8 result. */
 		if (!decode_utf8(&cursor, &scalar) || scalar == '/' ||
-		    scalar < 0x20U || scalar == 0x7fU)
-
+		    scalar < 0x20U || scalar == 0x7fU) {
 			/* Reports successful completion. */
 			return 0;
+		}
 
 		/* Handles the scalar condition. */
 		if (scalar <= 0xffffU) {
@@ -1506,13 +1761,12 @@ fat_utf8_to_utf16(
 	/* VFAT forbids trailing dot/space and these punctuation characters. */
 	if (count == 0 || units[count - 1U] == '.' || units[count - 1U] == ' ')
 		return 0;
+
 	*unit_count = count;
+
 	/* Reports operation failure. */
 	return 1;
 }
-
-/* Supports the fat lfn build entry operation. */
-static void fat_lfn_build_entry(uint8_t raw[32], const uint16_t *units, unsigned unit_count, unsigned ordinal, uint8_t checksum);
 
 /* Supports the fat lfn build entry operation. */
 static void
@@ -1536,10 +1790,12 @@ fat_lfn_build_entry(
 	/* Handles the ordinal condition. */
 	if (ordinal == total)
 		raw[0] |= 0x40U;
+
 	raw[11] = 0x0fU;
 	raw[12] = 0;
 	raw[13] = checksum;
 	raw[26] = raw[27] = 0;
+
 	/* Process each element required by the operation. */
 	for (i = 0; i < 13; i++) {
 		index = (ordinal - 1U) * 13U + i;
@@ -1552,9 +1808,6 @@ fat_lfn_build_entry(
 }
 
 /* Supports the sfn character operation. */
-static int sfn_character(uint8_t c);
-
-/* Supports the sfn character operation. */
 static int
 sfn_character(
 	uint8_t c)
@@ -1563,15 +1816,26 @@ sfn_character(
 	if (c >= 'a' && c <= 'z')
 		c -= 'a' - 'A';
 
-	/* Returns the computed result. */
-	return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '$' ||
-	       c == '%' || c == '\'' || c == '-' || c == '_' || c == '@' ||
-	       c == '~' || c == '`' || c == '!' || c == '(' || c == ')' ||
-	       c == '{' || c == '}' || c == '^' || c == '#' || c == '&';
+	/* XXX: if文に分解する。 */
+	return (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') ||
+		c == '$' ||
+		c == '%' ||
+		c == '\'' ||
+		c == '-' ||
+		c == '_' ||
+		c == '@' ||
+		c == '~' ||
+		c == '`' ||
+		c == '!' ||
+		c == '(' ||
+		c == ')' ||
+		c == '{' ||
+		c == '}' ||
+		c == '^' ||
+		c == '#' ||
+		c == '&';
 }
-
-/* Supports the fat sfn make alias operation. */
-static int fat_sfn_make_alias(const char *name, unsigned serial, uint8_t sfn[11]);
 
 /* Supports the fat sfn make alias operation. */
 static int
@@ -1590,17 +1854,18 @@ fat_sfn_make_alias(
 	/* Validates the current name. */
 	if (name == 0 || sfn == 0 || serial == 0 || serial > 999999U)
 		return 0;
+
 	/* Process each element required by the operation. */
 	for (q = p; *q; q++) {
 		/* Handles the q condition. */
 		if (*q == '.')
 			dot = q;
 	}
+
 	/* Process each element required by the operation. */
 	for (q = p; *q && q != dot; q++) {
-		c_local = *q;
-
 		/* Handles the c local condition. */
+		c_local = *q;
 		if (c_local >= 'a' && c_local <= 'z')
 			c_local -= 'a' - 'A';
 
@@ -1614,9 +1879,8 @@ fat_sfn_make_alias(
 		/* Process each remaining element. */
 		for (q = dot + 1; *q && extension_count < sizeof(extension);
 		     q++) {
-			c_local1 = *q;
-
 			/* Handles the c local1 condition. */
+			c_local1 = *q;
 			if (c_local1 >= 'a' && c_local1 <= 'z')
 				c_local1 -= 'a' - 'A';
 
@@ -1634,10 +1898,12 @@ fat_sfn_make_alias(
 		base[3] = 'E';
 		base_count = 4;
 	}
+
 	while (serial) {
 		digits[digit_count++] = (uint8_t)('0' + serial % 10U);
 		serial /= 10U;
 	}
+
 	/* Process each element required by the operation. */
 	for (i = 0; i < 11; i++)
 		sfn[i] = ' ';
@@ -1645,13 +1911,16 @@ fat_sfn_make_alias(
 	/* Handles the base count condition. */
 	if (base_count > 7U - digit_count)
 		base_count = 7U - digit_count;
+
 	/* Process each remaining element. */
 	for (i = 0; i < base_count; i++)
 		sfn[i] = base[i];
 	sfn[base_count++] = '~';
+
 	/* Process each remaining element. */
 	while (digit_count)
 		sfn[base_count++] = digits[--digit_count];
+
 	/* Process each remaining element. */
 	for (i = 0; i < extension_count; i++)
 		sfn[8U + i] = extension[i];
@@ -1659,9 +1928,6 @@ fat_sfn_make_alias(
 	/* Reports operation failure. */
 	return 1;
 }
-
-/* Supports the fat utf8 casefold equal operation. */
-static int fat_utf8_casefold_equal(const char *left, const char *right);
 
 /* Supports the fat utf8 casefold equal operation. */
 static int
@@ -1681,48 +1947,15 @@ fat_utf8_casefold_equal(
 		/* Checks the decode utf8 result. */
 		if (!decode_utf8(&a, &left_scalar) ||
 		    !decode_utf8(&b, &right_scalar) ||
-		    fold_scalar(left_scalar) != fold_scalar(right_scalar))
-
+		    fold_scalar(left_scalar) != fold_scalar(right_scalar)) {
 			/* Reports successful completion. */
 			return 0;
+		}
 	}
 
 	/* Returns the computed result. */
 	return *a == 0 && *b == 0;
 }
-
-/*
- * FAT12/FAT16/FAT32 cluster and directory engine.  The directory, chain,
- * and write logic is shared; the mounted type selects the FAT entry width.
- */
-
-#define FAT16_RESERVED_CLUSTER 0xfff0U
-#define FAT16_END_OF_CHAIN 0xffffU
-#define FAT12_RESERVED_CLUSTER 0xff0U
-#define FAT12_END_OF_CHAIN 0xfffU
-#define FAT32_RESERVED_CLUSTER 0x0ffffff0U
-#define FAT32_END_OF_CHAIN 0x0fffffffU
-#define FAT16_DIRECTORY_ENTRY_SIZE 32U
-#define FAT16_ENTRIES_PER_SECTOR (512U / FAT16_DIRECTORY_ENTRY_SIZE)
-#define FAT_MUTATION __attribute__((section(".hightext")))
-
-struct fat_directory {
-	/* Cluster zero denotes FAT16's fixed root-directory table. */
-	uint32_t first_cluster;
-};
-
-enum fat_name_match {
-	FAT_NAME_EXACT,
-	FAT_NAME_CASEFOLD,
-};
-
-struct fat_component {
-	char text[ZEDBSD_PATH_MAX];
-	char sfn[11];
-};
-
-/* Supports the text equal operation. */
-static int text_equal(const char *left, const char *right);
 
 /* Supports the text equal operation. */
 static int
@@ -1741,9 +1974,6 @@ text_equal(
 }
 
 /* Supports the text copy operation. */
-static void text_copy(char *destination, const char *source, size_t capacity);
-
-/* Supports the text copy operation. */
 static void
 text_copy(
 	char *destination,
@@ -1753,14 +1983,13 @@ text_copy(
 	/* Handles the capacity condition. */
 	if (capacity == 0)
 		return;
+
 	/* Continue while the operation condition remains true. */
 	while (--capacity && *source)
 		*destination++ = *source++;
+
 	*destination = '\0';
 }
-
-/* Supports the copy bytes operation. */
-static void copy_bytes(void *destination, const void *source, uint32_t length);
 
 /* Supports the copy bytes operation. */
 static void
@@ -1778,9 +2007,6 @@ copy_bytes(
 }
 
 /* Supports the clear bytes operation. */
-static void clear_bytes(void *destination, uint32_t length);
-
-/* Supports the clear bytes operation. */
 static void
 clear_bytes(
 	void *destination,
@@ -1794,9 +2020,6 @@ clear_bytes(
 }
 
 /* Supports the put16 operation. */
-static void put16(uint8_t *bytes, uint16_t value);
-
-/* Supports the put16 operation. */
 static void
 put16(
 	uint8_t *bytes,
@@ -1805,9 +2028,6 @@ put16(
 	bytes[0] = (uint8_t)value;
 	bytes[1] = (uint8_t)(value >> 8);
 }
-
-/* Supports the put32 operation. */
-static void put32(uint8_t *bytes, uint32_t value);
 
 /* Supports the put32 operation. */
 static void
@@ -1820,9 +2040,6 @@ put32(
 }
 
 /* Supports the fat16 mount operation. */
-static int fat16_mount(struct fat_mount_state *filesystem);
-
-/* Supports the fat16 mount operation. */
 static int
 fat16_mount(
 	struct fat_mount_state *filesystem)
@@ -1831,34 +2048,30 @@ fat16_mount(
 	int result;
 	uint32_t fat_entries;
 
-	result = fat_engine_mount(filesystem, ZEDBSD_FAT16);
-
 	/* Checks the operation result. */
+	result = fat_engine_mount(filesystem, ZEDBSD_FAT16);
 	if (result != 0)
 		return result;
-	fat = filesystem;
 
 	/* Handles the fat condition. */
+	fat = filesystem;
 	if (!fat->root_entries || !fat->fat_sectors ||
-	    fat->fat_sectors > 0xffffffffU / 512U)
-
+	    fat->fat_sectors > 0xffffffffU / 512U) {
 		/* Returns the computed result. */
 		return EIO;
-	fat_entries = fat->fat_sectors * 512U / 2U;
+	}
 
 	/* Handles the fat entries condition. */
+	fat_entries = fat->fat_sectors * 512U / 2U;
 	if (fat_entries < fat->cluster_count + 2U ||
-	    fat->cluster_count + 2U >= FAT16_RESERVED_CLUSTER)
-
+	    fat->cluster_count + 2U >= FAT16_RESERVED_CLUSTER) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Reports successful completion. */
 	return 0;
 }
-
-/* Supports the fat raw valid cluster operation. */
-static int fat_raw_valid_cluster(const struct fat_mount_state *fat, uint32_t cluster);
 
 /* Supports the fat raw valid cluster operation. */
 static int
@@ -1871,14 +2084,12 @@ fat_raw_valid_cluster(
 }
 
 /* Supports the fat raw is end operation. */
-static int fat_raw_is_end(const struct fat_mount_state *fat, uint32_t cluster);
-
-/* Supports the fat raw is end operation. */
 static int
 fat_raw_is_end(
 	const struct fat_mount_state *fat,
 	uint32_t cluster)
 {
+	/* XXX: if文にする */
 	/* Returns the computed result. */
 	return cluster >= (fat->type == ZEDBSD_FAT12   ? 0xff8U
 			   : fat->type == ZEDBSD_FAT16 ? 0xfff8U
@@ -1886,13 +2097,11 @@ fat_raw_is_end(
 }
 
 /* Supports the fat raw reserved limit operation. */
-static uint32_t fat_raw_reserved_limit(const struct fat_mount_state *fat);
-
-/* Supports the fat raw reserved limit operation. */
 static uint32_t
 fat_raw_reserved_limit(
 	const struct fat_mount_state *fat)
 {
+	/* XXX: if文にする */
 	/* Returns the computed result. */
 	return fat->type == ZEDBSD_FAT12   ? FAT12_RESERVED_CLUSTER
 	       : fat->type == ZEDBSD_FAT16 ? FAT16_RESERVED_CLUSTER
@@ -1900,13 +2109,11 @@ fat_raw_reserved_limit(
 }
 
 /* Supports the fat raw end of chain operation. */
-static uint32_t fat_raw_end_of_chain(const struct fat_mount_state *fat);
-
-/* Supports the fat raw end of chain operation. */
 static uint32_t
 fat_raw_end_of_chain(
 	const struct fat_mount_state *fat)
 {
+	/* XXX: if文にする */
 	/* Returns the computed result. */
 	return fat->type == ZEDBSD_FAT12   ? FAT12_END_OF_CHAIN
 	       : fat->type == ZEDBSD_FAT16 ? FAT16_END_OF_CHAIN
@@ -1914,22 +2121,17 @@ fat_raw_end_of_chain(
 }
 
 /* Supports the fat raw entry offset operation. */
-static uint32_t fat_raw_entry_offset(const struct fat_mount_state *fat, uint32_t cluster);
-
-/* Supports the fat raw entry offset operation. */
 static uint32_t
 fat_raw_entry_offset(
 	const struct fat_mount_state *fat,
 	uint32_t cluster)
 {
+	/* XXX: if文にする */
 	/* Returns the computed result. */
 	return fat->type == ZEDBSD_FAT12   ? cluster + cluster / 2U
 	       : fat->type == ZEDBSD_FAT16 ? cluster * 2U
 					   : cluster * 4U;
 }
-
-/* Supports the fat raw next cluster operation. */
-static int fat_raw_next_cluster(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t *next_cluster);
 
 /* Supports the fat raw next cluster operation. */
 static int
@@ -1951,18 +2153,18 @@ fat_raw_next_cluster(
 	/* Checks the fat raw valid cluster result. */
 	if (!next_cluster || !fat_raw_valid_cluster(fat, cluster))
 		return EIO;
+
 	offset = fat_raw_entry_offset(fat, cluster);
-	result = fat_engine_read_sector_result(
-		filesystem, fat->fat_start + (offset >> 9), &sector);
 
 	/* Checks the operation result. */
+	result = fat_engine_read_sector_result(
+		filesystem, fat->fat_start + (offset >> 9), &sector);
 	if (result != 0)
 		return result;
 
 	/* Handles the fat condition. */
 	if (fat->type == ZEDBSD_FAT32) {
-		*next_cluster = fat_engine_get32(sector + (offset & 511U)) &
-				0x0fffffffU;
+		*next_cluster = fat_engine_get32(sector + (offset & 511U)) & 0x0fffffffU;
 
 		/* Reports successful completion. */
 		return 0;
@@ -1972,36 +2174,36 @@ fat_raw_next_cluster(
 	if (fat->type == ZEDBSD_FAT16) {
 		*next_cluster = fat_engine_get16(sector + (offset & 511U));
 		/* Reports successful completion. */
+
 		return 0;
 	}
 
 	/*
- * A 12-bit entry may straddle a sector boundary, and the
+	 * A 12-bit entry may straddle a sector boundary, and the
 	 * sector cache holds one sector, so latch the first byte
-	 * before a second read can evict it. */
+	 * before a second read can evict it.
+	 */
 	low = sector[offset & 511U];
 
 	/* Checks the current offset. */
 	if ((offset & 511U) == 511U) {
+		/* Checks the operation result. */
 		result = fat_engine_read_sector_result(
 			filesystem, fat->fat_start + (offset >> 9) + 1U,
 			&sector);
-
-		/* Checks the operation result. */
 		if (result != 0)
 			return result;
 		high = sector[0];
 	} else {
 		high = sector[(offset & 511U) + 1U];
 	}
+
 	value = (uint32_t)low | ((uint32_t)high << 8);
 	*next_cluster = (cluster & 1U) ? value >> 4 : value & 0xfffU;
+
 	/* Reports successful completion. */
 	return 0;
 }
-
-/* Supports the fat engine count free clusters operation. */
-static int fat_engine_count_free_clusters(struct fat_mount_state *filesystem, uint32_t *free_clusters);
 
 /* Supports the fat engine count free clusters operation. */
 static int
@@ -2017,16 +2219,16 @@ fat_engine_count_free_clusters(
 	/* Handles the filesystem availability. */
 	if (filesystem == NULL || free_clusters == NULL)
 		return EINVAL;
-	fat = filesystem;
 
 	/* Handles the fat availability. */
+	fat = filesystem;
 	if (fat == NULL || fat->cluster_count == 0)
 		return EIO;
+
 	/* Process each remaining element. */
 	for (cluster = 2U; cluster < fat->cluster_count + 2U; cluster++) {
-		result = fat_raw_next_cluster(filesystem, cluster, &value);
-
 		/* Checks the operation result. */
+		result = fat_raw_next_cluster(filesystem, cluster, &value);
 		if (result != 0)
 			return result;
 
@@ -2034,13 +2236,12 @@ fat_engine_count_free_clusters(
 		if (value == 0)
 			count++;
 	}
+
 	*free_clusters = count;
+
 	/* Reports successful completion. */
 	return 0;
 }
-
-/* Supports the fat raw set entry byte operation. */
-static int fat_raw_set_entry_byte(struct fat_mount_state *filesystem, uint32_t copy_start, uint32_t offset, uint8_t keep_mask, uint8_t merge_value);
 
 /* Supports the fat raw set entry byte operation. */
 static int
@@ -2057,26 +2258,24 @@ fat_raw_set_entry_byte(
 	/* Checks the current offset. */
 	if ((offset >> 9) > 0xffffffffU - copy_start)
 		return EIO;
-	result = fat_engine_write_sector_result(
-		filesystem, copy_start + (offset >> 9), &sector);
 
 	/* Checks the operation result. */
+	result = fat_engine_write_sector_result(filesystem,
+						copy_start + (offset >> 9),
+						&sector);
 	if (result != 0)
 		return result;
-	sector[offset & 511U] =
-		(uint8_t)((sector[offset & 511U] & keep_mask) | merge_value);
-	result = fat_engine_mark_sector_dirty(filesystem);
+
+	sector[offset & 511U] = (uint8_t)((sector[offset & 511U] & keep_mask) | merge_value);
 
 	/* Checks the operation result. */
+	result = fat_engine_mark_sector_dirty(filesystem);
 	if (result == 0)
 		result = fat_engine_flush(filesystem);
 
 	/* Returns the computed result. */
 	return result;
 }
-
-/* Supports the fat raw set cluster copy operation. */
-static int fat_raw_set_cluster_copy(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t value, unsigned copy);
 
 /* Supports the fat raw set cluster copy operation. */
 static int
@@ -2097,22 +2296,23 @@ fat_raw_set_cluster_copy(
 	/* Checks the fat raw valid cluster result. */
 	if (!fat_raw_valid_cluster(fat, cluster) || copy >= fat->number_of_fats)
 		return EIO;
+
 	offset = fat_raw_entry_offset(fat, cluster);
 
 	/* Handles the copy condition. */
 	if (copy > (0xffffffffU - fat->fat_start) / fat->fat_sectors)
 		return EIO;
-	copy_start = fat->fat_start + copy * fat->fat_sectors;
 
 	/* Handles the fat condition. */
+	copy_start = fat->fat_start + copy * fat->fat_sectors;
 	if (fat->type != ZEDBSD_FAT12) {
 		/* Checks the current offset. */
 		if ((offset >> 9) > 0xffffffffU - copy_start)
 			return EIO;
-		result = fat_engine_write_sector_result(
-			filesystem, copy_start + (offset >> 9), &sector);
 
 		/* Checks the operation result. */
+		result = fat_engine_write_sector_result(
+			filesystem, copy_start + (offset >> 9), &sector);
 		if (result != 0)
 			return result;
 
@@ -2125,9 +2325,9 @@ fat_raw_set_cluster_copy(
 		} else {
 			put16(sector + (offset & 511U), (uint16_t)value);
 		}
-		result = fat_engine_mark_sector_dirty(filesystem);
 
 		/* Checks the operation result. */
+		result = fat_engine_mark_sector_dirty(filesystem);
 		if (result == 0)
 			result = fat_engine_flush(filesystem);
 
@@ -2136,24 +2336,23 @@ fat_raw_set_cluster_copy(
 	}
 
 	/*
- * Read-modify-write both bytes of the packed 12-bit entry; they may
-	 * live in different sectors. */
+	 * Read-modify-write both bytes of the packed 12-bit entry; they may
+	 * live in different sectors.
+	 */
 	if (cluster & 1U) {
+		/* Checks the operation result. */
 		result = fat_raw_set_entry_byte(filesystem, copy_start, offset,
 						0x0f,
 						(uint8_t)((value << 4) & 0xf0));
-
-		/* Checks the operation result. */
 		if (result == 0) {
 			result = fat_raw_set_entry_byte(filesystem, copy_start,
 							offset + 1U, 0x00,
 							(uint8_t)(value >> 4));
 		}
 	} else {
+		/* Checks the operation result. */
 		result = fat_raw_set_entry_byte(filesystem, copy_start, offset,
 						0x00, (uint8_t)value);
-
-		/* Checks the operation result. */
 		if (result == 0) {
 			result = fat_raw_set_entry_byte(
 				filesystem, copy_start, offset + 1U, 0xf0,
@@ -2166,7 +2365,6 @@ fat_raw_set_cluster_copy(
 }
 
 /* Capture a mirror's entry without assuming that every copy already agrees. */
-/* Supports the fat raw get cluster copy operation. */
 static int
 fat_raw_get_cluster_copy(
 	struct fat_mount_state *filesystem,
@@ -2182,31 +2380,31 @@ fat_raw_get_cluster_copy(
 	int error;
 
 	/*
- * Read the selected copy through the ordinary coherent sector window.
+	 * Read the selected copy through the ordinary coherent sector window.
 	 */
 	offset = fat_raw_entry_offset(filesystem, cluster);
 
 	/* Handles the copy condition. */
-	if (copy >
-	    (UINT32_MAX - filesystem->fat_start) / filesystem->fat_sectors)
-
+	if (copy > (UINT32_MAX - filesystem->fat_start) / filesystem->fat_sectors) {
 		/* Returns the computed result. */
 		return EIO;
-	lba = filesystem->fat_start + copy * filesystem->fat_sectors;
+	}
 
 	/* Checks the current offset. */
+	lba = filesystem->fat_start + copy * filesystem->fat_sectors;
 	if ((offset >> 9) > UINT32_MAX - lba)
 		return EIO;
 	lba += offset >> 9;
-	error = fat_engine_read_sector_result(filesystem, lba, &sector);
 
 	/* Checks the operation status. */
+	error = fat_engine_read_sector_result(filesystem, lba, &sector);
 	if (error != 0)
 		return error;
 
 	/*
- * Decode aligned entries and retain each copy's reserved high bits on
-	 * rewrite. */
+	 * Decode aligned entries and retain each copy's reserved high bits on
+	 * rewrite.
+	 */
 	if (filesystem->type == ZEDBSD_FAT32) {
 		*value = fat_engine_get32(sector + (offset & 511U)) &
 			 0x0fffffffU;
@@ -2218,13 +2416,15 @@ fat_raw_get_cluster_copy(
 	/* Handles the filesystem condition. */
 	if (filesystem->type == ZEDBSD_FAT16) {
 		*value = fat_engine_get16(sector + (offset & 511U));
+
 		/* Reports successful completion. */
 		return 0;
 	}
 
 	/*
- * Preserve the first packed byte before switching a sector-boundary
-	 * window. */
+	 * Preserve the first packed byte before switching a sector-boundary
+	 * window.
+	 */
 	low = sector[offset & 511U];
 
 	/* Checks the current offset. */
@@ -2232,24 +2432,25 @@ fat_raw_get_cluster_copy(
 		/* Handles the lba condition. */
 		if (lba == UINT32_MAX)
 			return EIO;
-		error = fat_engine_read_sector_result(filesystem, lba + 1U,
-						      &sector);
 
 		/* Checks the operation status. */
+		error = fat_engine_read_sector_result(filesystem,
+						      lba + 1U,
+						      &sector);
 		if (error != 0)
 			return error;
+
 		high = sector[0];
 	} else {
 		high = sector[(offset & 511U) + 1U];
 	}
+
 	*value = (uint32_t)low | ((uint32_t)high << 8);
 	*value = (cluster & 1U) ? *value >> 4 : *value & 0xfffU;
+
 	/* Reports successful completion. */
 	return 0;
 }
-
-/* Retain a bounded stack fallback with independent old values for every mirror. */
-static int fat_raw_set_cluster_immediate(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t value);
 
 /* Supports the fat raw set cluster immediate operation. */
 static int
@@ -2267,35 +2468,38 @@ fat_raw_set_cluster_immediate(
 	/* Capture every old entry before changing any copy. */
 	if (!fat_raw_valid_cluster(filesystem, cluster))
 		return EIO;
+
 	/* Process each element required by the operation. */
 	for (copy = 0; copy < filesystem->number_of_fats; copy++) {
-		result = fat_raw_get_cluster_copy(filesystem, cluster, copy,
-						  &old_values[copy]);
-
 		/* Checks the operation result. */
+		result = fat_raw_get_cluster_copy(filesystem,
+						  cluster,
+						  copy,
+						  &old_values[copy]);
 		if (result != 0)
 			return result;
 	}
-	result = fat_engine_flush(filesystem);
 
 	/* Checks the operation result. */
+	result = fat_engine_flush(filesystem);
 	if (result == 0)
 		result = disk_sync(filesystem->disk);
 
 	/* Checks the operation result. */
 	if (result != 0)
 		return result;
+
 	fat_chain_invalidate(filesystem);
 
 	/*
- * Preserve initialization-before-link and confirm all mirror updates.
+	 * Preserve initialization-before-link and confirm all mirror updates.
 	 */
-	/* Process each element required by the operation. */
 	for (copy = 0; copy < filesystem->number_of_fats; copy++) {
-		result = fat_raw_set_cluster_copy(filesystem, cluster, value,
-						  copy);
-
 		/* Checks the operation result. */
+		result = fat_raw_set_cluster_copy(filesystem,
+						  cluster,
+						  value,
+						  copy);
 		if (result != 0)
 			break;
 	}
@@ -2310,61 +2514,32 @@ fat_raw_set_cluster_immediate(
 
 	/* Restore even the copy whose write or final flush reported failure. */
 	rollback = 0;
+
 	/* Process each element required by the operation. */
 	for (copy = 0; copy < filesystem->number_of_fats; copy++) {
-		error = fat_raw_set_cluster_copy(filesystem, cluster,
-						 old_values[copy], copy);
-
 		/* Checks the operation status. */
+		error = fat_raw_set_cluster_copy(filesystem,
+						 cluster,
+						 old_values[copy],
+						 copy);
 		if (rollback == 0 && error != 0)
 			rollback = error;
 	}
-	error = disk_sync(filesystem->disk);
 
 	/* Handles the rollback condition. */
+	error = disk_sync(filesystem->disk);
 	if (rollback == 0)
 		rollback = error;
 
 	/* Handles the rollback condition. */
 	if (rollback != 0)
 		filesystem->read_only = 1;
+
 	fat_engine_invalidate(filesystem);
 
-	/* Keep an uncertain mirror set unavailable for further writes. */
+	/* XXX: if文にする */
 	return rollback != 0 ? rollback : result;
 }
-
-/* Begin consolidated fat-batch.inc. */
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; -*- */
-
-/*
- * zedBSD
- * Copyright (C) 2026 Awe Morris
- *
- * SPDX-License-Identifier: Zlib
- */
-
-#define FAT_BATCH_SECTORS 8U
-#define FAT_BATCH_ENTRIES 32U
-
-struct fat_entry_change {
-	uint32_t cluster;
-	uint32_t value;
-};
-
-struct fat_sector_change {
-	uint32_t lba;
-	uint8_t old_bytes[512];
-	uint8_t new_bytes[512];
-};
-
-static int fat_sector_images_commit(struct fat_mount_state *filesystem, struct fat_sector_change *slots, unsigned used, uint32_t publish_lba);
-static int fat_directory_transaction(struct fat_mount_state *filesystem, const uint32_t *lbas, const uint16_t *offsets, const uint8_t entries[][32], unsigned count, int publish_last);
-static int fat_batch_add_lba(uint32_t *lbas, unsigned *used, uint32_t lba);
-static uint8_t *fat_batch_bytes(struct fat_sector_change *slots, unsigned used, uint32_t lba);
-static int fat_table_transaction(struct fat_mount_state *filesystem, const struct fat_entry_change *changes, unsigned count, int *admitted);
-static int fat_raw_set_cluster(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t value);
-static int fat_link_initialized_cluster(struct fat_mount_state *filesystem, uint32_t tail, uint32_t added);
 
 /* Admit every affected physical sector before making any table changes. */
 static int
@@ -2383,10 +2558,12 @@ fat_batch_add_lba(
 	}
 
 	/*
- * Ask the caller to split before exhausting bounded transaction
-	 * storage. */
+	 * Ask the caller to split before exhausting bounded transaction
+	 * storage.
+	 */
 	if (*used == FAT_BATCH_SECTORS)
 		return E2BIG;
+
 	lbas[(*used)++] = lba;
 
 	/* Reports successful completion. */
@@ -2403,9 +2580,8 @@ fat_batch_bytes(
 	unsigned n;
 
 	/*
- * Locate the exact physical identity without aliasing the mutable
+	 * Locate the exact physical identity without aliasing the mutable
 	 * window. */
-	/* Process each element required by the operation. */
 	for (n = 0; n < used; n++) {
 		/* Handles the slots condition. */
 		if (slots[n].lba == lba)
@@ -2413,8 +2589,9 @@ fat_batch_bytes(
 	}
 
 	/*
- * Report an inconsistent preflight rather than dereference a missing
-	 * image. */
+	 * Report an inconsistent preflight rather than dereference a missing
+	 * image.
+	 */
 	return NULL;
 }
 
@@ -2432,14 +2609,14 @@ fat_sector_images_commit(
 	int restored;
 
 	/*
- * Make initialization or directory detachment durable before changing
-	 * reachability. */
+	 * Make initialization or directory detachment durable before changing
+	 * reachability.
+	 */
 	error = disk_sync(filesystem->disk);
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		return error;
 	}
+
 	fat_engine_invalidate(filesystem);
 
 	/* Handles the owner availability. */
@@ -2451,16 +2628,16 @@ fat_sector_images_commit(
 		/* Handles the slots condition. */
 		if (slots[n].lba == publish_lba)
 			continue;
-		error = fat_sector_write(filesystem, slots[n].lba,
-					 slots[n].new_bytes);
 
 		/* Checks the operation status. */
+		error = fat_sector_write(filesystem, slots[n].lba,
+					 slots[n].new_bytes);
 		if (error != 0)
 			break;
 	}
 
 	/*
- * Persist preceding LFN sectors before their final short-name
+	 * Persist preceding LFN sectors before their final short-name
 	 * publication. */
 	if (error == 0 && publish_lba != UINT32_MAX) {
 		/* Checks the current capacity usage. */
@@ -2480,24 +2657,24 @@ fat_sector_images_commit(
 		error = disk_sync(filesystem->disk);
 
 	/*
- * Restore all captured sectors, including writes that may have
-	 * completed with error. */
+	 * Restore all captured sectors, including writes that may have
+	 * completed with error.
+	 */
 	rollback = 0;
 
 	/* Checks the operation status. */
 	if (error != 0) {
 		/* Process each element required by the operation. */
 		for (n = 0; n < used; n++) {
+			/* Handles the rollback condition. */
 			restored = fat_sector_write(filesystem, slots[n].lba,
 						    slots[n].old_bytes);
-
-			/* Handles the rollback condition. */
 			if (rollback == 0 && restored != 0)
 				rollback = restored;
 		}
-		restored = disk_sync(filesystem->disk);
 
 		/* Handles the rollback condition. */
+		restored = disk_sync(filesystem->disk);
 		if (rollback == 0)
 			rollback = restored;
 
@@ -2505,6 +2682,7 @@ fat_sector_images_commit(
 		if (rollback != 0)
 			filesystem->read_only = 1;
 	}
+
 	fat_engine_invalidate(filesystem);
 
 	/* Handles the owner availability. */
@@ -2512,7 +2690,7 @@ fat_sector_images_commit(
 		io_epoch_end(&filesystem->owner->m_write_epoch);
 
 	/*
- * Preserve failure and freeze the mount when restoration is uncertain.
+	 * Preserve failure and freeze the mount when restoration is uncertain.
 	 */
 	if (rollback != 0)
 		return rollback;
@@ -2548,9 +2726,11 @@ fat_table_transaction(
 	int error;
 
 	/*
- * Validate the complete bounded operation before any write or
-	 * allocation. */
+	 * Validate the complete bounded operation before any write or
+	 * allocation.
+	 */
 	*admitted = 0;
+
 	/* Handles the filesystem condition. */
 	if (filesystem->read_only)
 		return EROFS;
@@ -2562,60 +2742,61 @@ fat_table_transaction(
 	/* Checks the remaining item count. */
 	if (count > FAT_BATCH_ENTRIES)
 		return E2BIG;
+
 	used = 0;
 	bytes = filesystem->type == ZEDBSD_FAT32 ? 4U : 2U;
+
 	/* Process each remaining element. */
 	for (entry = 0; entry < count; entry++) {
 		/* Checks the fat raw valid cluster result. */
 		if (!fat_raw_valid_cluster(filesystem, changes[entry].cluster))
 			return EIO;
-		offset = fat_raw_entry_offset(filesystem,
-					      changes[entry].cluster);
+
+		offset = fat_raw_entry_offset(filesystem, changes[entry].cluster);
+
 		/* Process each element required by the operation. */
 		for (copy = 0; copy < filesystem->number_of_fats; copy++) {
 			/* Handles the copy condition. */
-			if (copy > (UINT32_MAX - filesystem->fat_start) /
-					   filesystem->fat_sectors)
-
+			if (copy > (UINT32_MAX - filesystem->fat_start) / filesystem->fat_sectors) {
 				/* Returns the computed result. */
 				return EIO;
-			copy_start = filesystem->fat_start +
-				     copy * filesystem->fat_sectors;
+			}
 
 			/* Handles the uint64 t condition. */
-			if (((uint64_t)offset + bytes - 1U) / 512U >
-			    UINT32_MAX - copy_start)
-
+			copy_start = filesystem->fat_start + copy * filesystem->fat_sectors;
+			if (((uint64_t)offset + bytes - 1U) / 512U > UINT32_MAX - copy_start) {
 				/* Returns the computed result. */
 				return EIO;
-			error = fat_batch_add_lba(lbas, &used,
-						  copy_start + offset / 512U);
+			}
 
 			/* Checks the operation status. */
+			error = fat_batch_add_lba(lbas, &used, copy_start + offset / 512U);
 			if (error != 0)
 				return error;
-			error = fat_batch_add_lba(
-				lbas, &used,
-				copy_start + (offset + bytes - 1U) / 512U);
 
 			/* Checks the operation status. */
+			error = fat_batch_add_lba(lbas,
+						  &used,
+						  copy_start + (offset + bytes - 1U) / 512U);
 			if (error != 0)
 				return error;
 		}
 	}
 
 	/*
- * Decline admission without side effects when working memory is
-	 * unavailable. */
-	slots = kern_malloc(used * sizeof(*slots));
+	 * Decline admission without side effects when working memory is
+	 * unavailable.
+	 */
 
 	/* Handles the slots availability. */
+	slots = kern_malloc(used * sizeof(*slots));
 	if (slots == NULL)
 		return ENOMEM;
+
 	*admitted = 1;
-	error = fat_engine_flush(filesystem);
 
 	/* Checks the operation status. */
+	error = fat_engine_flush(filesystem);
 	if (error != 0) {
 		kern_free(slots);
 
@@ -2624,73 +2805,69 @@ fat_table_transaction(
 	}
 
 	/*
- * Preserve each mirror's actual old bytes, including unrelated packed
-	 * entries. */
-	/* Process each element required by the operation. */
+	 * Preserve each mirror's actual old bytes, including unrelated packed
+	 * entries.
+	 */
 	for (n = 0; n < used; n++) {
 		slots[n].lba = lbas[n];
-		error = fat_sector_read(filesystem, lbas[n],
-					slots[n].old_bytes);
 
 		/* Checks the operation status. */
+		error = fat_sector_read(filesystem, lbas[n],
+					slots[n].old_bytes);
 		if (error != 0) {
 			kern_free(slots);
 
 			/* Returns the computed result. */
 			return error;
 		}
+
 		memcpy(slots[n].new_bytes, slots[n].old_bytes, 512);
 	}
 
 	/*
- * Merge replacements into the private sector images without changing
-	 * neighbors. */
-	/* Process each remaining element. */
+	 * Merge replacements into the private sector images without changing
+	 * neighbors.
+	 */
 	for (entry = 0; entry < count; entry++) {
-		offset = fat_raw_entry_offset(filesystem,
-					      changes[entry].cluster);
+		offset = fat_raw_entry_offset(filesystem, changes[entry].cluster);
 		value = changes[entry].value;
+
 		/* Process each element required by the operation. */
 		for (copy = 0; copy < filesystem->number_of_fats; copy++) {
-			copy_start = filesystem->fat_start +
-				     copy * filesystem->fat_sectors;
-			first = fat_batch_bytes(slots, used,
-						copy_start + offset / 512U);
-			second = fat_batch_bytes(
-				slots, used, copy_start + (offset + 1U) / 512U);
+			copy_start = filesystem->fat_start + copy * filesystem->fat_sectors;
+			first = fat_batch_bytes(slots, used, copy_start + offset / 512U);
 
 			/* Handles the first availability. */
+			second = fat_batch_bytes(slots, used, copy_start + (offset + 1U) / 512U);
 			if (first == NULL || second == NULL) {
 				kern_free(slots);
 
 				/* Returns the computed result. */
 				return EIO;
 			}
+
 			first += offset & 511U;
 			second += (offset + 1U) & 511U;
 
 			/* Handles the filesystem condition. */
 			if (filesystem->type == ZEDBSD_FAT32) {
-				put32(first,
-				      (fat_engine_get32(first) & 0xf0000000U) |
-					      (value & 0x0fffffffU));
+				put32(first, (fat_engine_get32(first) & 0xf0000000U) | (value & 0x0fffffffU));
 			} else if (filesystem->type == ZEDBSD_FAT16) {
 				put16(first, (uint16_t)value);
 			} else if (changes[entry].cluster & 1U) {
-				*first = (uint8_t)((*first & 0x0fU) |
-						   ((value << 4) & 0xf0U));
+				*first = (uint8_t)((*first & 0x0fU) | ((value << 4) & 0xf0U));
 				*second = (uint8_t)(value >> 4);
 			} else {
 				*first = (uint8_t)value;
-				*second = (uint8_t)((*second & 0xf0U) |
-						    ((value >> 8) & 0x0fU));
+				*second = (uint8_t)((*second & 0xf0U) | ((value >> 8) & 0x0fU));
 			}
 		}
 	}
 
 	/*
- * Publish the fully staged table and release its private working
-	 * images. */
+	 * Publish the fully staged table and release its private working
+	 * images.
+	 */
 	error = fat_sector_images_commit(filesystem, slots, used, UINT32_MAX);
 	kern_free(slots);
 
@@ -2714,22 +2891,24 @@ fat_raw_set_cluster(
 	int admitted;
 
 	/*
- * Prefer one bounded transaction, including both bytes of packed FAT12
-	 * entries. */
+	 * Prefer one bounded transaction, including both bytes of packed FAT12
+	 * entries.
+	 */
 	change.cluster = cluster;
 	change.value = value;
-	error = fat_table_transaction(filesystem, &change, 1, &admitted);
 
 	/* Checks the operation status. */
+	error = fat_table_transaction(filesystem, &change, 1, &admitted);
 	if (admitted || (error != ENOMEM && error != E2BIG))
 		return error;
 
 	/*
- * Retain all supported mirror counts and allocation-free failure
-	 * recovery. */
-	error = fat_raw_set_cluster_immediate(filesystem, cluster, value);
+	 * Retain all supported mirror counts and allocation-free failure
+	 * recovery.
+	 */
 
 	/* Report the original update result without leaving deferred state. */
+	error = fat_raw_set_cluster_immediate(filesystem, cluster, value);
 	if (error != 0)
 		return error;
 
@@ -2753,13 +2932,14 @@ fat_link_initialized_cluster(
 	int rollback;
 
 	/*
- * Combine only changes that cannot expose a link to a separate pending
-	 * sector. */
+	 * Combine only changes that cannot expose a link to a separate pending
+	 * sector.
+	 */
 	first_offset = fat_raw_entry_offset(filesystem, tail);
 	second_offset = fat_raw_entry_offset(filesystem, added);
-	bytes = filesystem->type == ZEDBSD_FAT32 ? 4U : 2U;
 
 	/* Handles the first offset condition. */
+	bytes = filesystem->type == ZEDBSD_FAT32 ? 4U : 2U;
 	if (first_offset / 512U == second_offset / 512U &&
 	    first_offset / 512U == (first_offset + bytes - 1U) / 512U &&
 	    second_offset / 512U == (second_offset + bytes - 1U) / 512U) {
@@ -2767,35 +2947,34 @@ fat_link_initialized_cluster(
 		changes[0].value = fat_raw_end_of_chain(filesystem);
 		changes[1].cluster = tail;
 		changes[1].value = added;
-		error = fat_table_transaction(filesystem, changes, 2,
-					      &admitted);
 
 		/* Checks the operation status. */
+		error = fat_table_transaction(filesystem, changes, 2,
+					      &admitted);
 		if (admitted || (error != ENOMEM && error != E2BIG))
 			return error;
 	}
 
 	/*
- * Make a cross-sector new endpoint durable before publishing its tail
-	 * link. */
-	error = fat_raw_set_cluster(filesystem, added,
+	 * Make a cross-sector new endpoint durable before publishing its tail
+	 * link.
+	 */
+	error = fat_raw_set_cluster(filesystem,
+				    added,
 				    fat_raw_end_of_chain(filesystem));
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = fat_raw_set_cluster(filesystem, tail, added);
 
 	/* Checks the operation status. */
+	error = fat_raw_set_cluster(filesystem, tail, added);
 	if (error == 0)
 		return 0;
 
 	/*
- * Recycle the new endpoint only after the failed link has been
-	 * restored. */
+	 * Recycle the new endpoint only after the failed link has been
+	 * restored.
+	 */
 	rollback = fat_raw_set_cluster(filesystem, added, 0);
-
-	/* Handles the rollback condition. */
 	if (rollback != 0) {
 		filesystem->read_only = 1;
 
@@ -2829,34 +3008,37 @@ fat_directory_transaction(
 	int error;
 
 	/*
- * Validate and admit the complete directory run before touching its
-	 * contents. */
+	 * Validate and admit the complete directory run before touching its
+	 * contents.
+	 */
 	if (filesystem->read_only)
 		return EROFS;
 
 	/* Checks the remaining item count. */
 	if (count == 0 || count > FAT_LFN_MAX_ENTRIES + 1U)
 		return EINVAL;
+
 	used = 0;
+
 	/* Process each remaining element. */
 	for (n = 0; n < count; n++) {
 		/* Handles the offsets condition. */
 		if (offsets[n] > 512U - 32U || (offsets[n] & 31U) != 0)
 			return EINVAL;
-		error = fat_batch_add_lba(identities, &used, lbas[n]);
 
 		/* Checks the operation status. */
+		error = fat_batch_add_lba(identities, &used, lbas[n]);
 		if (error != 0)
 			return error;
 	}
-	slots = kern_malloc(used * sizeof(*slots));
 
 	/* Handles the slots availability. */
+	slots = kern_malloc(used * sizeof(*slots));
 	if (slots == NULL)
 		return ENOMEM;
-	error = fat_engine_flush(filesystem);
 
 	/* Checks the operation status. */
+	error = fat_engine_flush(filesystem);
 	if (error != 0) {
 		kern_free(slots);
 
@@ -2865,43 +3047,47 @@ fat_directory_transaction(
 	}
 
 	/*
- * Capture full old sectors, including data behind the original end
-	 * marker. */
-	/* Process each element required by the operation. */
+	 * Capture full old sectors, including data behind the original end
+	 * marker.
+	 */
 	for (n = 0; n < used; n++) {
 		slots[n].lba = identities[n];
-		error = fat_sector_read(filesystem, identities[n],
-					slots[n].old_bytes);
 
 		/* Checks the operation status. */
+		error = fat_sector_read(filesystem, identities[n],
+					slots[n].old_bytes);
 		if (error != 0) {
 			kern_free(slots);
 
 			/* Returns the computed result. */
 			return error;
 		}
+
 		memcpy(slots[n].new_bytes, slots[n].old_bytes, 512U);
 	}
+
 	/* Process each remaining element. */
 	for (n = 0; n < count; n++) {
-		bytes = fat_batch_bytes(slots, used, lbas[n]);
-
 		/* Handles the bytes availability. */
+		bytes = fat_batch_bytes(slots, used, lbas[n]);
 		if (bytes == NULL) {
 			kern_free(slots);
 
 			/* Returns the computed result. */
 			return EIO;
 		}
+
 		memcpy(bytes + offsets[n], entries[n], 32U);
 	}
 
 	/*
- * Publish the short-name sector last when creating a multi-sector LFN
-	 * run. */
-	error = fat_sector_images_commit(filesystem, slots, used,
-					 publish_last ? lbas[count - 1U]
-						      : UINT32_MAX);
+	 * Publish the short-name sector last when creating a multi-sector LFN
+	 * run.
+	 */
+	error = fat_sector_images_commit(filesystem,
+					 slots,
+					 used,
+					 publish_last ? lbas[count - 1U] : UINT32_MAX);
 	kern_free(slots);
 
 	/* Reports the failure. */
@@ -2911,7 +3097,6 @@ fat_directory_transaction(
 	/* Succeeded. */
 	return 0;
 }
-static uint32_t fat_raw_dir_cluster(const struct fat_mount_state *fat, const uint8_t raw[32]);
 
 /* End consolidated fat-batch.inc. */
 static uint32_t
@@ -2929,8 +3114,6 @@ fat_raw_dir_cluster(
 	return cluster & 0x0fffffffU;
 }
 
-static void fat_raw_put_dir_cluster(const struct fat_mount_state *fat, uint8_t raw[32], uint32_t cluster);
-
 /* Supports the fat raw put dir cluster operation. */
 static void
 fat_raw_put_dir_cluster(
@@ -2945,8 +3128,6 @@ fat_raw_put_dir_cluster(
 		put16(raw + 20, (uint16_t)(cluster >> 16));
 }
 
-static uint32_t fat_raw_root_cluster(const struct fat_mount_state *fat);
-
 /* Supports the fat raw root cluster operation. */
 static uint32_t
 fat_raw_root_cluster(
@@ -2955,8 +3136,6 @@ fat_raw_root_cluster(
 	/* Returns the computed result. */
 	return fat->type == ZEDBSD_FAT32 ? fat->root_cluster : 0;
 }
-
-static int fat_raw_validate_chain_at(struct fat_mount_state *filesystem, uint32_t first_cluster, uint32_t wanted_index, struct fat_chain_cursor *cursor, uint32_t *last_cluster);
 
 /* Validates the whole chain before publishing a reusable position. */
 static int
@@ -2980,6 +3159,7 @@ fat_raw_validate_chain_at(
 	/* Handles the cursor availability. */
 	if (cursor != NULL)
 		cursor->cluster = 0U;
+
 	/* Process each remaining element. */
 	for (steps = 0; steps <= fat->cluster_count; steps++) {
 		/* Handles the cursor availability. */
@@ -2989,14 +3169,15 @@ fat_raw_validate_chain_at(
 		}
 
 		/*
- * Brent's single forward cursor retains bounded cycle detection
+		 * Brent's single forward cursor retains bounded cycle detection
 		 * without alternating distant FAT sectors on every link.  That
 		 * alternation defeats this mount's one-sector cache for large
 		 * loop backing files, even when the block cache already holds
-		 * the FAT. */
-		result = fat_raw_next_cluster(filesystem, cluster, &next);
+		 * the FAT.
+		 */
 
 		/* Checks the operation result. */
+		result = fat_raw_next_cluster(filesystem, cluster, &next);
 		if (result != 0)
 			return result;
 
@@ -3005,10 +3186,12 @@ fat_raw_validate_chain_at(
 			/* Handles the last cluster availability. */
 			if (last_cluster != NULL)
 				*last_cluster = cluster;
+
 			/*
- * A growing write may begin beyond the old EOF.  Its
+			 * A growing write may begin beyond the old EOF.  Its
 			 * seek can continue from this validated tail instead of
-			 * the first link. */
+			 * the first link.
+			 */
 			if (cursor != NULL && cursor->cluster == 0U) {
 				cursor->index = steps;
 				cursor->cluster = cluster;
@@ -3054,9 +3237,7 @@ fat_file_validate_at(
 	uint32_t wanted;
 	int error;
 
-	wanted =
-		(uint32_t)(offset /
-			   ((uint64_t)file->mount->sectors_per_cluster * 512U));
+	wanted = (uint32_t)(offset / ((uint64_t)file->mount->sectors_per_cluster * 512U));
 
 	/* Checks the fat raw valid cluster result. */
 	if (file->cursor_valid && file->cursor_offset == offset &&
@@ -3074,14 +3255,15 @@ fat_file_validate_at(
 		return 0;
 	}
 
-	/*
- * Consumes the old proof before fallible validation or subsequent I/O.
-	 */
+	/* Consumes the old proof before fallible validation or subsequent I/O. */
 	file->cursor_valid = 0;
-	error = fat_raw_validate_chain_at(file->mount, file->first_cluster,
-					  wanted, cursor, last);
 
 	/* Reports the failure. */
+	error = fat_raw_validate_chain_at(file->mount,
+					  file->first_cluster,
+					  wanted,
+					  cursor,
+					  last);
 	if (error != 0)
 		return error;
 
@@ -3102,10 +3284,12 @@ fat_file_save_cursor(
 
 	/* Handles the generation condition. */
 	if (generation == UINT64_MAX ||
-	    generation != file->mount->chain_generation || cursor->cluster == 0)
-
+	    generation != file->mount->chain_generation ||
+	    cursor->cluster == 0) {
 		/* Returns the computed result. */
 		return;
+	}
+
 	file->chain_cursor = *cursor;
 	file->cursor_generation = generation;
 	file->cursor_offset = end;
@@ -3114,25 +3298,24 @@ fat_file_save_cursor(
 	file->cursor_valid = 1;
 }
 
-static int fat_raw_validate_chain(struct fat_mount_state *filesystem, uint32_t first_cluster);
-
 /* Supports the fat raw validate chain operation. */
 static int
 fat_raw_validate_chain(
 	struct fat_mount_state *filesystem,
 	uint32_t first_cluster)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the fat raw validate chain at result. */
-	function_result = fat_raw_validate_chain_at(filesystem, first_cluster,
-						    0U, NULL, NULL);
+	error = fat_raw_validate_chain_at(filesystem,
+					  first_cluster,
+					  0U,
+					  NULL,
+					  NULL);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static int fat_raw_free_chain(struct fat_mount_state *filesystem, uint32_t first_cluster);
 
 /* Supports the fat raw free chain operation. */
 static int
@@ -3156,17 +3339,16 @@ fat_raw_free_chain(
 	/* Handles the first cluster condition. */
 	if (!first_cluster)
 		return 0;
-	result = fat_raw_validate_chain(filesystem, first_cluster);
 
 	/* Checks the operation result. */
+	result = fat_raw_validate_chain(filesystem, first_cluster);
 	if (result != 0)
 		return result;
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		result = fat_raw_next_cluster(filesystem, cluster, &next_local);
-
 		/* Checks the operation result. */
+		result = fat_raw_next_cluster(filesystem, cluster, &next_local);
 		if (result != 0)
 			return result;
 
@@ -3179,49 +3361,57 @@ fat_raw_free_chain(
 			break;
 		cluster = next_local;
 	}
+
 #if SIZE_MAX <= UINT32_MAX
 
 	/* Checks the remaining item count. */
 	if (count > (uint32_t)(SIZE_MAX / sizeof(*clusters)))
 		return ENOMEM;
 #endif
-	clusters = kern_malloc((size_t)count * sizeof(*clusters));
 
 	/* Handles the clusters availability. */
+	clusters = kern_malloc((size_t)count * sizeof(*clusters));
 	if (clusters == NULL)
 		return ENOMEM;
-	cluster = first_cluster;
+
 	/* Process each remaining element. */
+	cluster = first_cluster;
 	for (index = 0; index < count; index++) {
 		clusters[index] = cluster;
-		result =
-			fat_raw_next_cluster(filesystem, cluster, &next_local1);
+		result = fat_raw_next_cluster(filesystem, cluster, &next_local1);
 
 		/* Checks the operation result. */
 		if (result != 0)
 			goto out;
 		cluster = next_local1;
 	}
-	index = 0;
+
 	/* Process each remaining element. */
+	index = 0;
 	while (index < count) {
 		/*
- * Stage a bounded free prefix while retaining the complete
-		 * recovery chain. */
-		batch = count - index > FAT_BATCH_ENTRIES ? FAT_BATCH_ENTRIES
-							  : count - index;
+		 * Stage a bounded free prefix while retaining the complete
+		 * recovery chain.
+		 */
+		batch = count - index > FAT_BATCH_ENTRIES ?
+			FAT_BATCH_ENTRIES :
+			count - index;
+
 		/* Process each element required by the operation. */
 		for (item = 0; item < batch; item++) {
 			changes[item].cluster = clusters[index + item];
 			changes[item].value = 0;
 		}
-		result = fat_table_transaction(filesystem, changes, batch,
+
+		result = fat_table_transaction(filesystem,
+					       changes,
+					       batch,
 					       &admitted);
 
 		/*
- * Split before admission when scattered sectors exceed the
-		 * image budget. */
-		/* Continue while the operation condition remains true. */
+		 * Split before admission when scattered sectors exceed the
+		 * image budget.
+		 */
 		while (!admitted && result == E2BIG && batch > 1) {
 			batch /= 2;
 			result = fat_table_transaction(filesystem, changes,
@@ -3240,19 +3430,17 @@ fat_raw_free_chain(
 			rollback = 0;
 
 			/*
- * The failing entry restores itself.  Recreate every
+			 * The failing entry restores itself.  Recreate every
 			 * link cleared earlier so callers can also restore the
 			 * directory entry and expose the complete old file
 			 * after an error. */
-			/* Process each remaining element. */
 			for (restore = 0; restore < index; restore++) {
-				restore_error = fat_raw_set_cluster(
-					filesystem, clusters[restore],
-					restore + 1U < count
-						? clusters[restore + 1U]
-						: fat_raw_end_of_chain(fat));
-
 				/* Checks the operation status. */
+				restore_error = fat_raw_set_cluster(filesystem,
+								    clusters[restore],
+								    restore + 1U < count ?
+								    clusters[restore + 1U] :
+								    fat_raw_end_of_chain(fat));
 				if (rollback == 0 && restore_error != 0)
 					rollback = restore_error;
 			}
@@ -3262,10 +3450,13 @@ fat_raw_free_chain(
 				filesystem->read_only = 1;
 				result = rollback;
 			}
+
 			goto out;
 		}
+
 		index += batch;
 	}
+
 	result = 0;
 out:
 	kern_free(clusters);
@@ -3273,8 +3464,6 @@ out:
 	/* Returns the computed result. */
 	return result;
 }
-
-static int fat_drain_pending_orphans(struct fat_mount_state *filesystem);
 
 /* Supports the fat drain pending orphans operation. */
 static int
@@ -3287,10 +3476,10 @@ fat_drain_pending_orphans(
 	/* Process each remaining element. */
 	while (filesystem->pending_orphan_count != 0U) {
 		index = filesystem->pending_orphan_count - 1U;
-		result = fat_raw_free_chain(filesystem,
-					    filesystem->pending_orphans[index]);
 
 		/* Checks the operation result. */
+		result = fat_raw_free_chain(filesystem,
+					    filesystem->pending_orphans[index]);
 		if (result != 0)
 			return result;
 		filesystem->pending_orphans[index] = 0;
@@ -3300,8 +3489,6 @@ fat_drain_pending_orphans(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_defer_orphan(struct fat_mount_state *filesystem, uint32_t first_cluster);
 
 /* Supports the fat defer orphan operation. */
 static int
@@ -3314,6 +3501,7 @@ fat_defer_orphan(
 	/* Handles the filesystem availability. */
 	if (filesystem == NULL || first_cluster == 0)
 		return EINVAL;
+
 	/* Process each remaining element. */
 	for (index = 0; index < filesystem->pending_orphan_count; index++) {
 		/* Handles the filesystem condition. */
@@ -3324,14 +3512,12 @@ fat_defer_orphan(
 	/* Handles the filesystem condition. */
 	if (filesystem->pending_orphan_count >= FAT_INODE_MAX)
 		return ENOSPC;
-	filesystem->pending_orphans[filesystem->pending_orphan_count++] =
-		first_cluster;
+
+	filesystem->pending_orphans[filesystem->pending_orphan_count++] = first_cluster;
 
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_raw_find_free_cluster(struct fat_mount_state *filesystem, uint32_t *free_cluster);
 
 /* Supports the fat raw find free cluster operation. */
 static int
@@ -3353,13 +3539,13 @@ fat_raw_find_free_cluster(
 	/* Checks the fat raw valid cluster result. */
 	if (!fat_raw_valid_cluster(fat, start))
 		start = 2;
+
 	/* Process each remaining element. */
 	for (index = 0; index < fat->cluster_count; index++) {
 		cluster = 2U + ((start - 2U + index) % fat->cluster_count);
 
-		result = fat_raw_next_cluster(filesystem, cluster, &value);
-
 		/* Checks the operation result. */
+		result = fat_raw_next_cluster(filesystem, cluster, &value);
 		if (result != 0)
 			return result;
 
@@ -3381,8 +3567,6 @@ fat_raw_find_free_cluster(
 	return ENOSPC;
 }
 
-static int fat_raw_zero_cluster(struct fat_mount_state *filesystem, uint32_t cluster);
-
 /* Supports the fat raw zero cluster operation. */
 static int
 fat_raw_zero_cluster(
@@ -3397,22 +3581,21 @@ fat_raw_zero_cluster(
 
 	/* Process each remaining element. */
 	for (index = 0; index < fat->sectors_per_cluster; index++) {
-		result = fat_engine_cluster_lba(filesystem, cluster, index,
-						&lba);
-
 		/* Checks the operation result. */
+		result = fat_engine_cluster_lba(filesystem, cluster, index, &lba);
 		if (result != 0)
 			return result;
+
+		/* Checks the operation result. */
 		result = fat_engine_write_sector_result(filesystem, lba,
 							&sector);
-
-		/* Checks the operation result. */
 		if (result != 0)
 			return result;
+
 		clear_bytes(sector, 512);
-		result = fat_engine_mark_sector_dirty(filesystem);
 
 		/* Checks the operation result. */
+		result = fat_engine_mark_sector_dirty(filesystem);
 		if (result == 0)
 			result = fat_engine_flush(filesystem);
 
@@ -3425,34 +3608,32 @@ fat_raw_zero_cluster(
 	return 0;
 }
 
-static int fat_raw_allocate_cluster(struct fat_mount_state *filesystem, uint32_t *cluster);
-
 /* Supports the fat raw allocate cluster operation. */
 static int
 fat_raw_allocate_cluster(
 	struct fat_mount_state *filesystem,
 	uint32_t *cluster)
 {
-	int function_result;
+	int error;
 	int result;
 
-	result = fat_raw_find_free_cluster(filesystem, cluster);
-
 	/* Checks the operation result. */
+	result = fat_raw_find_free_cluster(filesystem, cluster);
 	if (result != 0)
 		return result;
-	result = fat_raw_zero_cluster(filesystem, *cluster);
 
 	/* Checks the operation result. */
+	result = fat_raw_zero_cluster(filesystem, *cluster);
 	if (result != 0)
 		return result;
 
 	/* Obtains the fat raw set cluster result. */
-	function_result = fat_raw_set_cluster(filesystem, *cluster,
-					      fat_raw_end_of_chain(filesystem));
+	error = fat_raw_set_cluster(filesystem,
+				    *cluster,
+				    fat_raw_end_of_chain(filesystem));
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Initialize a free cluster before staging its same-sector tail link. */
@@ -3465,21 +3646,21 @@ fat_raw_extend_cluster(
 	int error;
 
 	/*
- * Keep the unallocated cluster private under the mount mutation lock.
+	 * Keep the unallocated cluster private under the mount mutation lock.
 	 */
+
+	/* Checks the operation status. */
 	error = fat_raw_find_free_cluster(filesystem, added);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = fat_raw_zero_cluster(filesystem, *added);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = fat_link_initialized_cluster(filesystem, tail, *added);
 
 	/* Report the fully published link or its completed rollback. */
+	error = fat_link_initialized_cluster(filesystem, tail, *added);
 	if (error != 0)
 		return error;
 
@@ -3512,13 +3693,14 @@ fat_raw_allocate_run(
 	int rollback;
 
 	/*
- * Bound initialization work and leave room for a same-sector old-tail
-	 * link. */
+	 * Bound initialization work and leave room for a same-sector old-tail
+	 * link.
+	 */
 	*first = 0;
 	cluster_bytes = (uint32_t)filesystem->sectors_per_cluster * 512U;
-	limit = 65536U / cluster_bytes;
 
 	/* Handles the limit condition. */
+	limit = 65536U / cluster_bytes;
 	if (limit == 0)
 		limit = 1;
 
@@ -3538,13 +3720,12 @@ fat_raw_allocate_run(
 	sector = 0;
 
 	/*
- * Reserve identities under the mount lock without publishing FAT
-	 * entries. */
-	/* Process each remaining element. */
+	 * Reserve identities under the mount lock without publishing FAT
+	 * entries.
+	 */
 	while (count < limit) {
-		error = fat_raw_find_free_cluster(filesystem, &cluster);
-
 		/* Checks the operation status. */
+		error = fat_raw_find_free_cluster(filesystem, &cluster);
 		if (error == ENOSPC && count != 0)
 			break;
 
@@ -3561,18 +3742,19 @@ fat_raw_allocate_run(
 		/* Checks the current item count. */
 		if (n != count)
 			break;
-		offset = fat_raw_entry_offset(filesystem, cluster);
 
 		/* Checks the remaining item count. */
+		offset = fat_raw_entry_offset(filesystem, cluster);
 		if (count != 0 && (offset / 512U != sector ||
 				   (offset + bytes - 1U) / 512U != sector)) {
 			filesystem->allocation_hint = cluster;
 			break;
 		}
+
 		sector = offset / 512U;
-		error = fat_raw_zero_cluster(filesystem, cluster);
 
 		/* Checks the operation status. */
+		error = fat_raw_zero_cluster(filesystem, cluster);
 		if (error != 0)
 			return error;
 		clusters[count++] = cluster;
@@ -3583,23 +3765,23 @@ fat_raw_allocate_run(
 	}
 
 	/*
- * Encode a complete private chain, with its final endpoint already
-	 * initialized. */
-	/* Process each remaining element. */
+	 * Encode a complete private chain, with its final endpoint already
+	 * initialized.
+	 */
 	for (n = 0; n < count; n++) {
 		changes[n].cluster = clusters[n];
 		changes[n].value = n + 1U < count
 					   ? clusters[n + 1U]
 					   : fat_raw_end_of_chain(filesystem);
 	}
+
 	entries = count;
 	combined = 0;
 
 	/* Handles the tail condition. */
 	if (tail != 0) {
-		offset = fat_raw_entry_offset(filesystem, tail);
-
 		/* Checks the fat raw entry offset result. */
+		offset = fat_raw_entry_offset(filesystem, tail);
 		if (offset / 512U == sector &&
 		    (offset + bytes - 1U) / 512U == sector &&
 		    (fat_raw_entry_offset(filesystem, clusters[0]) + bytes -
@@ -3610,11 +3792,13 @@ fat_raw_allocate_run(
 			combined = 1;
 		}
 	}
+
 	error = fat_table_transaction(filesystem, changes, entries, &admitted);
 
 	/*
- * Preserve progress under workspace pressure without publishing unused
-	 * candidates. */
+	 * Preserve progress under workspace pressure without publishing unused
+	 * candidates.
+	 */
 	if (!admitted && (error == ENOMEM || error == E2BIG)) {
 		/* Handles the tail condition. */
 		if (tail != 0) {
@@ -3638,19 +3822,19 @@ fat_raw_allocate_run(
 		return error;
 
 	/*
- * Link across sectors only after the entire new chain is durably
-	 * readable. */
+	 * Link across sectors only after the entire new chain is durably
+	 * readable.
+	 */
 	if (tail != 0 && !combined) {
-		error = fat_raw_set_cluster(filesystem, tail, clusters[0]);
-
 		/* Checks the operation status. */
+		error = fat_raw_set_cluster(filesystem, tail, clusters[0]);
 		if (error != 0) {
 			/* Handles the filesystem condition. */
 			if (filesystem->read_only)
 				return error;
-			rollback = fat_raw_free_chain(filesystem, clusters[0]);
 
 			/* Handles the rollback condition. */
+			rollback = fat_raw_free_chain(filesystem, clusters[0]);
 			if (rollback != 0) {
 				filesystem->read_only = 1;
 
@@ -3665,11 +3849,10 @@ fat_raw_allocate_run(
 
 	/* Return only the published initialized chain head. */
 	*first = clusters[0];
+
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_raw_directory_entry(struct fat_mount_state *filesystem, const struct fat_directory *directory, uint32_t index, uint32_t *entry_lba, uint16_t *entry_offset, const uint8_t **raw);
 
 /* Supports the fat raw directory entry operation. */
 static int
@@ -3703,22 +3886,21 @@ fat_raw_directory_entry(
 	} else {
 		entries_per_cluster = (uint32_t)fat->sectors_per_cluster *
 				      FAT16_ENTRIES_PER_SECTOR;
-		cluster = directory->first_cluster;
 
 		/* Checks the fat raw valid cluster result. */
+		cluster = directory->first_cluster;
 		if (!fat_raw_valid_cluster(fat, cluster) ||
-		    !entries_per_cluster)
-
+		    !entries_per_cluster) {
 			/* Returns the computed result. */
 			return EIO;
+		}
+
+		/* Process each remaining element. */
 		cluster_index = index / entries_per_cluster;
 		index %= entries_per_cluster;
-		/* Process each remaining element. */
 		while (cluster_index--) {
-			result = fat_raw_next_cluster(filesystem, cluster,
-						      &next);
-
 			/* Checks the operation result. */
+			result = fat_raw_next_cluster(filesystem, cluster, &next);
 			if (result != 0)
 				return result;
 
@@ -3731,29 +3913,30 @@ fat_raw_directory_entry(
 				return EIO;
 			cluster = next;
 		}
+
 		sector_index = index / FAT16_ENTRIES_PER_SECTOR;
-		result = fat_engine_cluster_lba(filesystem, cluster,
-						sector_index, &lba);
 
 		/* Checks the operation result. */
+		result = fat_engine_cluster_lba(filesystem, cluster, sector_index, &lba);
 		if (result != 0)
 			return result;
+
 		offset = (uint16_t)((index % FAT16_ENTRIES_PER_SECTOR) *
 				    FAT16_DIRECTORY_ENTRY_SIZE);
 	}
-	result = fat_engine_read_sector_result(filesystem, lba, &sector);
 
 	/* Checks the operation result. */
+	result = fat_engine_read_sector_result(filesystem, lba, &sector);
 	if (result != 0)
 		return result;
+
 	*entry_lba = lba;
 	*entry_offset = offset;
 	*raw = sector + offset;
+
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_raw_find_entry(struct fat_mount_state *filesystem, const struct fat_directory *directory, const struct fat_component *component, enum fat_name_match match, uint32_t *entry_lba, uint16_t *entry_offset, uint32_t *free_lba, uint16_t *free_offset, char found_name[ZEDBSD_PATH_MAX]);
 
 /* Supports the fat raw find entry operation. */
 static int
@@ -3777,22 +3960,22 @@ fat_raw_find_entry(
 	int result;
 	struct fat_mount_state *fat = filesystem;
 	struct fat_lfn_state lfn;
-	uint32_t limit = directory->first_cluster == 0
-				 ? fat->root_entries
-				 : fat->cluster_count *
-					   (uint32_t)fat->sectors_per_cluster *
-					   FAT16_ENTRIES_PER_SECTOR;
+	uint32_t limit;
 	uint32_t index;
 	int have_free = 0;
+
+	/* XXX: if文にする */
+	limit = directory->first_cluster == 0 ?
+		fat->root_entries :
+		fat->cluster_count * (uint32_t)fat->sectors_per_cluster * FAT16_ENTRIES_PER_SECTOR;
 
 	fat_lfn_reset(&lfn);
 
 	/* Process each remaining element. */
 	for (index = 0; index < limit; index++) {
+		/* Checks the operation result. */
 		result = fat_raw_directory_entry(filesystem, directory, index,
 						 &lba, &offset, &raw);
-
-		/* Checks the operation result. */
 		if (result == ENOENT)
 			break;
 
@@ -3837,26 +4020,28 @@ fat_raw_find_entry(
 		/* Handles the fat condition. */
 		if (fat->type == ZEDBSD_FAT32) {
 			/* Checks the fat lfn finish result. */
-			if (!fat_lfn_finish(&lfn, raw, decoded_local,
+			if (!fat_lfn_finish(&lfn,
+					    raw,
+					    decoded_local,
 					    sizeof(decoded_local))) {
-				fat_sfn_decode_preserve(raw, decoded_local,
+				fat_sfn_decode_preserve(raw,
+							decoded_local,
 							sizeof(decoded_local));
 			}
+
+			/* XXX: if文にする三項演算子に関数呼び出しを入れない。 */
 			matches = match == FAT_NAME_EXACT
 					  ? text_equal(decoded_local,
 						       component->text)
 					  : fat_utf8_casefold_equal(
 						    decoded_local,
 						    component->text);
-
-			/* Handles the matches condition. */
 			if (!matches)
 				continue;
 
 			/* Handles the found name condition. */
 			if (found_name != 0)
-				text_copy(found_name, decoded_local,
-					  ZEDBSD_PATH_MAX);
+				text_copy(found_name, decoded_local, ZEDBSD_PATH_MAX);
 		} else {
 			/* Checks the fat sfn equal result. */
 			if (!fat_sfn_equal(raw, component->sfn))
@@ -3865,12 +4050,13 @@ fat_raw_find_entry(
 			/* Handles the found name condition. */
 			if (found_name != 0) {
 				fat_sfn_decode_lower(raw, &decoded_local1);
-				text_copy(found_name, decoded_local1.name,
-					  ZEDBSD_PATH_MAX);
+				text_copy(found_name, decoded_local1.name, ZEDBSD_PATH_MAX);
 			}
 		}
+
 		*entry_lba = lba;
 		*entry_offset = offset;
+
 		/* Reports successful completion. */
 		return 0;
 	}
@@ -3878,8 +4064,6 @@ fat_raw_find_entry(
 	/* Returns the computed result. */
 	return have_free ? ENOENT : ENOSPC;
 }
-
-static int fat_raw_resolve_parent(struct fat_mount_state *filesystem, const char *path, struct fat_directory *parent, struct fat_component *component);
 
 /* Supports the fat raw resolve parent operation. */
 static int
@@ -3906,51 +4090,59 @@ fat_raw_resolve_parent(
 	/* Checks the current cursor position. */
 	if (!*cursor)
 		return EINVAL;
+
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		length = 0;
-
 		lba = 0;
 		free_lba = 0;
 		offset = 0;
 		free_offset = 0;
 
-		separator = cursor;
 		/* Continue while the operation condition remains true. */
+		separator = cursor;
 		while (*separator && *separator != '/')
 			separator++;
-		length = (unsigned)(separator - cursor);
 
 		/* Checks the current data length. */
+		length = (unsigned)(separator - cursor);
 		if (!length || length >= sizeof(component->text))
 			return EINVAL;
+
 		copy_bytes(component->text, cursor, length);
 		component->text[length] = '\0';
 
 		/* Checks the fat sfn encode result. */
-		if (filesystem->type != ZEDBSD_FAT32 &&
-		    !fat_sfn_encode(component->text, component->sfn))
-
-			/* Returns the computed result. */
-			return EINVAL;
+		if (filesystem->type != ZEDBSD_FAT32) {
+			if (!fat_sfn_encode(component->text, component->sfn)) {
+				/* Returns the computed result. */
+				return EINVAL;
+			}
+		}
 
 		/* Handles the separator condition. */
 		if (!*separator)
 			return 0;
-		cursor = separator + 1;
 
 		/* Checks the current cursor position. */
+		cursor = separator + 1;
 		if (!*cursor)
 			return EINVAL;
-		result = fat_raw_find_entry(filesystem, parent, component,
-					    FAT_NAME_EXACT, &lba, &offset,
-					    &free_lba, &free_offset, 0);
 
 		/* Checks the operation result. */
+		result = fat_raw_find_entry(filesystem,
+					    parent,
+					    component,
+					    FAT_NAME_EXACT,
+					    &lba,
+					    &offset,
+					    &free_lba,
+					    &free_offset,
+					    0);
 		if (result != 0)
 			return result == ENOSPC ? ENOENT : result;
-		result =
-			fat_engine_read_sector_result(filesystem, lba, &sector);
+
+		result = fat_engine_read_sector_result(filesystem, lba, &sector);
 
 		/* Checks the operation result. */
 		if (result != 0)
@@ -3959,16 +4151,14 @@ fat_raw_resolve_parent(
 		/* Handles the sector condition. */
 		if (!(sector[offset + 11] & 0x10U))
 			return ENOENT;
-		parent->first_cluster =
-			fat_raw_dir_cluster(filesystem, sector + offset);
+
+		parent->first_cluster = fat_raw_dir_cluster(filesystem, sector + offset);
 
 		/* Checks the fat raw valid cluster result. */
 		if (!fat_raw_valid_cluster(filesystem, parent->first_cluster))
 			return EIO;
 	}
 }
-
-static int fat_raw_resolve_entry(struct fat_mount_state *filesystem, const char *path, uint32_t *lba, uint16_t *offset, const uint8_t **raw, enum fat_name_match match, char found_name[ZEDBSD_PATH_MAX]);
 
 /* Supports the fat raw resolve entry operation. */
 static int
@@ -3988,29 +4178,36 @@ fat_raw_resolve_entry(
 	const uint8_t *sector;
 	int result;
 
-	result = fat_raw_resolve_parent(filesystem, path, &parent, &component);
-
 	/* Checks the operation result. */
+	result = fat_raw_resolve_parent(filesystem, path, &parent, &component);
 	if (result != 0)
 		return result;
-	result =
-		fat_raw_find_entry(filesystem, &parent, &component, match, lba,
-				   offset, &free_lba, &free_offset, found_name);
+
+	/* XXX: 関数呼び出しには何をするのか概要をコメントする。 */
+	result = fat_raw_find_entry(filesystem,
+				    &parent,
+				    &component,
+				    match,
+				    lba,
+				    offset,
+				    &free_lba,
+				    &free_offset,
+				    found_name);
 
 	/* Checks the operation result. */
 	if (result != 0)
 		return result == ENOSPC ? ENOENT : result;
-	result = fat_engine_read_sector_result(filesystem, *lba, &sector);
 
 	/* Checks the operation result. */
+	result = fat_engine_read_sector_result(filesystem, *lba, &sector);
 	if (result != 0)
 		return result;
+
 	*raw = sector + *offset;
+
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_raw_populate_file(struct fat_file_state *file, uint32_t lba, uint16_t offset, const uint8_t raw[32]);
 
 /* Supports the fat raw populate file operation. */
 static int
@@ -4020,7 +4217,7 @@ fat_raw_populate_file(
 	uint16_t offset,
 	const uint8_t raw[32])
 {
-	int function_result;
+	int error;
 	struct fat_mount_state *fat = file->mount;
 	struct fat_file_state *state = file;
 
@@ -4028,6 +4225,7 @@ fat_raw_populate_file(
 	state->directory_lba = lba;
 	state->directory_offset = offset;
 	state->directory_dirty = 0;
+
 	file->size = fat_engine_get32(raw + 28);
 
 	/* Handles the file condition. */
@@ -4035,14 +4233,12 @@ fat_raw_populate_file(
 		return 0;
 
 	/* Computes the function result. */
-	function_result =
-		fat_raw_valid_cluster(fat, state->first_cluster) ? 0 : EIO;
+	error = fat_raw_valid_cluster(fat, state->first_cluster) ? 0 : EIO;
+	/* XXX: ここに失敗時のif returnを入れる */
 
-	/* Returns the computed result. */
-	return function_result;
+	/* XXX: 末尾はなるべく成功returnに揃える。 */
+	return error;
 }
-
-static void fat_file_bind(struct fat_file_state *file, struct fat_mount_state *mount);
 
 /* Supports the fat file bind operation. */
 static void
@@ -4059,8 +4255,6 @@ fat_file_bind(
 	file->directory_dirty = 0;
 }
 
-static int fat_raw_open(struct fat_mount_state *filesystem, const char *path, struct fat_file_state *file);
-
 /* Supports the fat raw open operation. */
 static int
 fat_raw_open(
@@ -4068,7 +4262,7 @@ fat_raw_open(
 	const char *path,
 	struct fat_file_state *file)
 {
-	int function_result;
+	int error;
 	uint32_t lba = 0;
 	uint16_t offset = 0;
 	const uint8_t *raw;
@@ -4077,11 +4271,17 @@ fat_raw_open(
 	/* Handles the filesystem availability. */
 	if (filesystem == NULL || path == NULL || file == NULL)
 		return EINVAL;
+
 	fat_file_bind(file, filesystem);
-	result = fat_raw_resolve_entry(filesystem, path, &lba, &offset, &raw,
-				       FAT_NAME_EXACT, 0);
 
 	/* Checks the operation result. */
+	result = fat_raw_resolve_entry(filesystem,
+				       path,
+				       &lba,
+				       &offset,
+				       &raw,
+				       FAT_NAME_EXACT,
+				       0);
 	if (result != 0)
 		return result;
 
@@ -4090,13 +4290,11 @@ fat_raw_open(
 		return EINVAL;
 
 	/* Obtains the fat raw populate file result. */
-	function_result = fat_raw_populate_file(file, lba, offset, raw);
+	error = fat_raw_populate_file(file, lba, offset, raw);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static int fat_raw_flush_file(struct fat_file_state *file);
 
 /* Supports the fat raw flush file operation. */
 static int
@@ -4110,16 +4308,17 @@ fat_raw_flush_file(
 	/* Handles the file condition. */
 	if (file->mount->read_only)
 		return EROFS;
-	result = fat_engine_flush(file->mount);
 
 	/* Checks the operation result. */
+	result = fat_engine_flush(file->mount);
 	if (result != 0 || !state->directory_dirty)
 		return result;
 
 	/*
- * An unlinked-but-open inode has no directory entry to update.  Its
+	 * An unlinked-but-open inode has no directory entry to update.  Its
 	 * cluster state remains live until the final reference triggers
-	 * reclaim. */
+	 * reclaim.
+	 */
 	if (state->owner != NULL && (state->owner->i_flags & INODE_DEAD) != 0) {
 		state->directory_dirty = 0;
 
@@ -4130,18 +4329,21 @@ fat_raw_flush_file(
 	/* Handles the file condition. */
 	if (file->size > 0xffffffffU)
 		return EINVAL;
+
+	/* Checks the operation result. */
 	result = fat_engine_write_sector_result(file->mount,
 						state->directory_lba, &sector);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return result;
-	fat_raw_put_dir_cluster(file->mount, sector + state->directory_offset,
+
+	fat_raw_put_dir_cluster(file->mount,
+				sector + state->directory_offset,
 				state->first_cluster);
+
 	put32(sector + state->directory_offset + 28, (uint32_t)file->size);
-	result = fat_engine_mark_sector_dirty(file->mount);
 
 	/* Checks the operation result. */
+	result = fat_engine_mark_sector_dirty(file->mount);
 	if (result == 0)
 		result = fat_engine_flush(file->mount);
 
@@ -4149,11 +4351,9 @@ fat_raw_flush_file(
 	if (result == 0)
 		state->directory_dirty = 0;
 
-	/* Returns the computed result. */
+	/* XXX: 成功のreturnには Succeeded. とコメントする。 */
 	return result;
 }
-
-static int fat_raw_advance_cluster(struct fat_file_state *file, uint32_t cluster, int allocate, uint32_t *next);
 
 /* Supports the fat raw advance cluster operation. */
 static int
@@ -4174,9 +4374,9 @@ fat_raw_advance_cluster(
 		/* Handles the allocate condition. */
 		if (!allocate)
 			return EIO;
-		result = fat_raw_extend_cluster(file->mount, cluster, next);
 
 		/* Checks the operation result. */
+		result = fat_raw_extend_cluster(file->mount, cluster, next);
 		if (result != 0)
 			return result;
 	} else if (!fat_raw_valid_cluster(file->mount, *next)) {
@@ -4187,8 +4387,6 @@ fat_raw_advance_cluster(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_raw_cluster_at(struct fat_file_state *file, uint32_t cluster_index, int allocate, uint32_t *found_cluster, struct fat_chain_cursor *cursor);
 
 /* Supports the fat raw cluster at operation. */
 static int
@@ -4218,11 +4416,12 @@ fat_raw_cluster_at(
 		/* Handles the allocate condition. */
 		if (!allocate)
 			return EIO;
-		result = fat_raw_allocate_cluster(file->mount, &cluster);
 
 		/* Checks the operation result. */
+		result = fat_raw_allocate_cluster(file->mount, &cluster);
 		if (result != 0)
 			return result;
+
 		state->first_cluster = cluster;
 		state->directory_dirty = 1;
 	}
@@ -4230,20 +4429,22 @@ fat_raw_cluster_at(
 	/* Checks the fat raw valid cluster result. */
 	if (!fat_raw_valid_cluster(fat, cluster))
 		return EIO;
+
 	/* Process each remaining element. */
 	for (; index < cluster_index; index++) {
 		/* Checks the current index. */
 		if (index >= fat->cluster_count)
 			return EIO;
-		result =
-			fat_raw_advance_cluster(file, cluster, allocate, &next);
 
 		/* Checks the operation result. */
+		result = fat_raw_advance_cluster(file, cluster, allocate, &next);
 		if (result != 0)
 			return result;
+
 		cluster = next;
 	}
 	*found_cluster = cluster;
+
 	/* Handles the cursor availability. */
 	if (cursor != NULL) {
 		cursor->index = cluster_index;
@@ -4253,8 +4454,6 @@ fat_raw_cluster_at(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_raw_write_bytes(struct fat_file_state *file, uint32_t offset, const uint8_t *input, uint32_t length, int zero, struct fat_chain_cursor *cursor);
 
 /* Supports the fat raw write bytes operation. */
 static int
@@ -4286,20 +4485,19 @@ fat_raw_write_bytes(
 
 	/* Populate an empty file with one bounded initialized chain. */
 	if (file->first_cluster == 0 && position == 0) {
-		wanted = (uint32_t)(((uint64_t)length + cluster_bytes - 1U) /
-				    cluster_bytes);
-		result = fat_raw_allocate_run(fat, 0, wanted, &cluster);
+		wanted = (uint32_t)(((uint64_t)length + cluster_bytes - 1U) / cluster_bytes);
 
 		/* Checks the operation result. */
+		result = fat_raw_allocate_run(fat, 0, wanted, &cluster);
 		if (result != 0)
 			return result;
+
 		file->first_cluster = cluster;
 		file->directory_dirty = 1;
 	}
-	result = fat_raw_cluster_at(file, position / cluster_bytes, 1, &cluster,
-				    cursor);
 
 	/* Checks the operation result. */
+	result = fat_raw_cluster_at(file, position / cluster_bytes, 1, &cluster, cursor);
 	if (result != 0)
 		return result;
 
@@ -4308,21 +4506,24 @@ fat_raw_write_bytes(
 		in_cluster = position % cluster_bytes;
 		sector_index = in_cluster / 512U;
 		within = in_cluster & 511U;
-		chunk = 512U - within;
 
 		/* Handles the chunk condition. */
+		chunk = 512U - within;
 		if (chunk > length)
 			chunk = length;
-		result = fat_engine_cluster_lba(file->mount, cluster,
-						sector_index, &lba);
 
 		/* Checks the operation result. */
+		result = fat_engine_cluster_lba(file->mount,
+						cluster,
+						sector_index,
+						&lba);
 		if (result != 0)
 			return result;
-		result = fat_engine_write_sector_result(file->mount, lba,
-							&sector);
 
 		/* Checks the operation result. */
+		result = fat_engine_write_sector_result(file->mount,
+							lba,
+							&sector);
 		if (result != 0)
 			return result;
 
@@ -4331,9 +4532,9 @@ fat_raw_write_bytes(
 			clear_bytes(sector + within, chunk);
 		else
 			copy_bytes(sector + within, input, chunk);
-		result = fat_engine_mark_sector_dirty(file->mount);
 
 		/* Checks the operation result. */
+		result = fat_engine_mark_sector_dirty(file->mount);
 		if (result == 0)
 			result = fat_engine_flush(file->mount);
 
@@ -4348,23 +4549,23 @@ fat_raw_write_bytes(
 		length -= chunk;
 
 		/*
- * The mount lock keeps this operation's chain stable.  Reuse
+		 * The mount lock keeps this operation's chain stable.  Reuse
 		 * the current cluster within it and advance once at each
 		 * boundary, instead of seeking again from the first cluster for
-		 * every sector. */
+		 * every sector.
+		 */
 		if (length != 0U && position % cluster_bytes == 0U) {
 			/* Checks the current cursor position. */
 			if (cursor->index >= fat->cluster_count)
 				return EIO;
-			result = fat_raw_next_cluster(fat, cluster, &next);
 
 			/* Checks the fat raw is end result. */
-			if (result == 0 && fat_raw_is_end(fat, next)) {
-				wanted = (uint32_t)(((uint64_t)length +
-						     cluster_bytes - 1U) /
-						    cluster_bytes);
-				result = fat_raw_allocate_run(fat, cluster,
-							      wanted, &next);
+			result = fat_raw_next_cluster(fat, cluster, &next);
+			if (result == 0) {
+				if (fat_raw_is_end(fat, next)) {
+					wanted = (uint32_t)(((uint64_t)length + cluster_bytes - 1U) / cluster_bytes);
+					result = fat_raw_allocate_run(fat, cluster, wanted, &next);
+				}
 			}
 
 			/* Checks the fat raw valid cluster result. */
@@ -4374,6 +4575,7 @@ fat_raw_write_bytes(
 			/* Checks the operation result. */
 			if (result != 0)
 				return result;
+
 			cluster = next;
 			cursor->index++;
 			cursor->cluster = cluster;
@@ -4383,8 +4585,6 @@ fat_raw_write_bytes(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_raw_rollback_growth(struct fat_file_state *file, uint32_t old_first, uint32_t old_last, uint64_t old_size, uint8_t old_directory_dirty);
 
 /* Supports the fat raw rollback growth operation. */
 static int
@@ -4404,9 +4604,8 @@ fat_raw_rollback_growth(
 	if (old_first == 0) {
 		added = state->first_cluster;
 	} else if (old_last != 0) {
-		result = fat_raw_next_cluster(fat, old_last, &added);
-
 		/* Checks the fat raw is end result. */
+		result = fat_raw_next_cluster(fat, old_last, &added);
 		if (result == 0 && fat_raw_is_end(fat, added))
 			added = 0;
 		else if (result == 0 && !fat_raw_valid_cluster(fat, added))
@@ -4414,7 +4613,8 @@ fat_raw_rollback_growth(
 
 		/* Checks the operation result. */
 		if (result == 0 && added != 0) {
-			result = fat_raw_set_cluster(fat, old_last,
+			result = fat_raw_set_cluster(fat,
+						     old_last,
 						     fat_raw_end_of_chain(fat));
 		}
 	}
@@ -4422,6 +4622,7 @@ fat_raw_rollback_growth(
 	/* Checks the operation result. */
 	if (result == 0 && added != 0)
 		result = fat_raw_free_chain(fat, added);
+
 	state->first_cluster = old_first;
 	file->size = old_size;
 	state->directory_dirty = old_directory_dirty;
@@ -4433,8 +4634,6 @@ fat_raw_rollback_growth(
 	/* Returns the computed result. */
 	return result;
 }
-
-static int fat_raw_restore_directory(struct fat_file_state *file, uint32_t first_cluster, uint64_t size, uint8_t directory_dirty);
 
 /* Supports the fat raw restore directory operation. */
 static int
@@ -4450,17 +4649,15 @@ fat_raw_restore_directory(
 	state->first_cluster = first_cluster;
 	file->size = size;
 	state->directory_dirty = 1;
-	result = fat_raw_flush_file(file);
 
 	/* Checks the operation result. */
+	result = fat_raw_flush_file(file);
 	if (result == 0)
 		state->directory_dirty = directory_dirty;
 
 	/* Returns the computed result. */
 	return result;
 }
-
-static int fat_raw_write(struct fat_file_state *file, uint64_t offset, const void *buffer, uint32_t length);
 
 /* Supports the fat raw write operation. */
 static int
@@ -4488,14 +4685,15 @@ fat_raw_write(
 
 	/* Handles the buffer condition. */
 	if ((!buffer && length) || offset > 0xffffffffU ||
-	    (uint64_t)length > 0xffffffffU - offset)
-
+	    (uint64_t)length > 0xffffffffU - offset) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Checks the current data length. */
 	if (!length)
 		return 0;
+
 	generation = file->mount->chain_generation;
 	end = offset + length;
 	old_first = state->first_cluster;
@@ -4507,31 +4705,34 @@ fat_raw_write(
 		first_offset = offset < old_size ? offset : old_size;
 
 		/*
- * Full validation precedes all writes, including corruption
+		 * Full validation precedes all writes, including corruption
 		 * beyond the requested range.  Retain only this call's start
 		 * and old tail so data/zero-fill/growth do not repeat the same
-		 * validated walk. */
-		result = fat_file_validate_at(file, first_offset, &cursor,
+		 * validated walk.
+		 */
+		result = fat_file_validate_at(file,
+					      first_offset,
+					      &cursor,
 					      &old_last);
-
-		/* Checks the operation result. */
 		if (result != 0)
 			return result;
 	}
 
 	/* Checks the current offset. */
 	if (offset > file->size) {
-		result = fat_raw_write_bytes(file, (uint32_t)file->size, 0,
-					     (uint32_t)(offset - file->size), 1,
-					     &cursor);
-
 		/* Checks the operation result. */
+		result = fat_raw_write_bytes(file,
+					     (uint32_t)file->size, 0,
+					     (uint32_t)(offset - file->size),
+					     1,
+					     &cursor);
 		if (result != 0) {
-			rollback_local = fat_raw_rollback_growth(
-				file, old_first, old_last, old_size,
-				old_directory_dirty);
-
 			/* Handles the rollback local condition. */
+			rollback_local = fat_raw_rollback_growth(file,
+								 old_first,
+								 old_last,
+								 old_size,
+								 old_directory_dirty);
 			if (rollback_local != 0)
 				return rollback_local;
 
@@ -4539,14 +4740,21 @@ fat_raw_write(
 			return result;
 		}
 	}
-	result = fat_raw_write_bytes(file, (uint32_t)offset, buffer, length, 0,
-				     &cursor);
 
 	/* Checks the operation result. */
+	result = fat_raw_write_bytes(file,
+				     (uint32_t)offset,
+				     buffer,
+				     length,
+				     0,
+				     &cursor);
 	if (result != 0) {
-		rollback_local1 =
-			fat_raw_rollback_growth(file, old_first, old_last,
-						old_size, old_directory_dirty);
+		/* XXX: 変数名rollback_local1はおかしい。 */
+		rollback_local1 = fat_raw_rollback_growth(file,
+							  old_first,
+							  old_last,
+							  old_size,
+							  old_directory_dirty);
 
 		/* Handles the rollback local1 condition. */
 		if (rollback_local1 != 0)
@@ -4561,13 +4769,12 @@ fat_raw_write(
 		file->size = end;
 		file->directory_dirty = 1;
 	}
+
 	fat_file_save_cursor(file, &cursor, end, generation, old_last);
 
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_raw_truncate(struct fat_file_state *file, uint64_t size);
 
 /* Supports the fat raw truncate operation. */
 static int
@@ -4594,6 +4801,8 @@ fat_raw_truncate(
 	uint8_t old_directory_dirty = state->directory_dirty;
 	int result;
 
+	/* XXX: 変数名 _local? はおかしい。 */
+
 	/* Handles the file condition. */
 	if (file->mount->read_only)
 		return EROFS;
@@ -4609,39 +4818,45 @@ fat_raw_truncate(
 	/* Handles the state condition. */
 	if (state->first_cluster) {
 		cluster_bytes_local = (uint32_t)fat->sectors_per_cluster * 512U;
+
+		/* XXX: 三項演算子の入れ子は禁止。if文にする。 */
 		first_offset = size > old_size ? old_size
 			       : size != 0U    ? size - 1U
 					       : 0U;
 
-		result = fat_raw_validate_chain_at(
-			file->mount, state->first_cluster,
-			(uint32_t)first_offset / cluster_bytes_local, &cursor,
-			&old_last);
-
 		/* Checks the operation result. */
+		result = fat_raw_validate_chain_at(file->mount,
+						   state->first_cluster,
+						   (uint32_t)first_offset / cluster_bytes_local,
+						   &cursor,
+						   &old_last);
 		if (result != 0)
 			return result;
 	}
 
 	/* Checks the current data size. */
 	if (size > file->size) {
-		result = fat_raw_write_bytes(file, (uint32_t)file->size, 0,
-					     (uint32_t)(size - file->size), 1,
-					     &cursor);
-
 		/* Checks the operation result. */
+		result = fat_raw_write_bytes(file,
+					     (uint32_t)file->size,
+					     0,
+					     (uint32_t)(size - file->size),
+					     1,
+					     &cursor);
 		if (result != 0) {
-			rollback_local = fat_raw_rollback_growth(
-				file, old_first, old_last, old_size,
-				old_directory_dirty);
-
 			/* Handles the rollback local condition. */
+			rollback_local = fat_raw_rollback_growth(file,
+								 old_first,
+								 old_last,
+								 old_size,
+								 old_directory_dirty);
 			if (rollback_local != 0)
 				return rollback_local;
 
 			/* Returns the computed result. */
 			return result;
 		}
+
 		file->size = size;
 		state->directory_dirty = 1;
 
@@ -4654,14 +4869,15 @@ fat_raw_truncate(
 		state->first_cluster = 0;
 		file->size = 0;
 		state->directory_dirty = 1;
-		result = fat_raw_flush_file(file);
 
 		/* Checks the operation result. */
+		result = fat_raw_flush_file(file);
 		if (result != 0) {
-			rollback_local1 = fat_raw_restore_directory(
-				file, old_first, old_size, old_directory_dirty);
-
-			/* Handles the rollback local1 condition. */
+			/* XXX: 変数名がおかしい。 */
+			rollback_local1 = fat_raw_restore_directory(file,
+								    old_first,
+								    old_size,
+								    old_directory_dirty);
 			if (rollback_local1 != 0) {
 				file->mount->read_only = 1;
 
@@ -4672,14 +4888,15 @@ fat_raw_truncate(
 			/* Returns the computed result. */
 			return result;
 		}
-		result = fat_raw_free_chain(file->mount, old_first);
 
 		/* Checks the operation result. */
+		result = fat_raw_free_chain(file->mount, old_first);
 		if (result != 0) {
-			rollback_local2 = fat_raw_restore_directory(
-				file, old_first, old_size, old_directory_dirty);
-
 			/* Handles the rollback local2 condition. */
+			rollback_local2 = fat_raw_restore_directory(file,
+								    old_first,
+								    old_size,
+								    old_directory_dirty);
 			if (rollback_local2 != 0) {
 				file->mount->read_only = 1;
 
@@ -4694,56 +4911,54 @@ fat_raw_truncate(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	cluster_bytes_local6 = (uint32_t)fat->sectors_per_cluster * 512U;
 	keep_index = ((uint32_t)size - 1U) / cluster_bytes_local6;
 
-	result = fat_raw_cluster_at(file, keep_index, 0, &keep, &cursor);
-
 	/* Checks the operation result. */
+	result = fat_raw_cluster_at(file, keep_index, 0, &keep, &cursor);
 	if (result != 0)
 		return result;
-	result = fat_raw_next_cluster(file->mount, keep, &tail);
 
 	/* Checks the operation result. */
+	result = fat_raw_next_cluster(file->mount, keep, &tail);
 	if (result != 0)
 		return result;
 
 	/* Checks the fat raw is end result. */
-	if (!fat_raw_is_end(fat, tail) && !fat_raw_valid_cluster(fat, tail))
-
+	if (!fat_raw_is_end(fat, tail) && !fat_raw_valid_cluster(fat, tail)) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Checks the fat raw is end result. */
 	if (!fat_raw_is_end(fat, tail)) {
+		/* Checks the operation result. */
 		result = fat_raw_set_cluster(file->mount, keep,
 					     fat_raw_end_of_chain(fat));
-
-		/* Checks the operation result. */
 		if (result != 0)
 			return result;
 	}
+
 	file->size = size;
 	state->directory_dirty = 1;
-	result = fat_raw_flush_file(file);
 
 	/* Checks the operation result. */
+	result = fat_raw_flush_file(file);
 	if (result != 0) {
 		rollback_local3 = 0;
 
 		/* Checks the fat raw is end result. */
 		if (!fat_raw_is_end(fat, tail)) {
-			cleanup_local =
-				fat_raw_set_cluster(file->mount, keep, tail);
+			cleanup_local = fat_raw_set_cluster(file->mount, keep, tail);
 
 			/* Handles the rollback local3 condition. */
 			if (rollback_local3 == 0 && cleanup_local != 0)
 				rollback_local3 = cleanup_local;
 		}
-		cleanup_local = fat_raw_restore_directory(
-			file, old_first, old_size, old_directory_dirty);
 
 		/* Handles the rollback local3 condition. */
+		cleanup_local = fat_raw_restore_directory(file, old_first, old_size, old_directory_dirty);
 		if (rollback_local3 == 0 && cleanup_local != 0)
 			rollback_local3 = cleanup_local;
 
@@ -4762,21 +4977,19 @@ fat_raw_truncate(
 	/* Handles the fat raw is end condition. */
 	if (fat_raw_is_end(fat, tail))
 		return 0;
-	result = fat_raw_free_chain(file->mount, tail);
 
 	/* Checks the operation result. */
+	result = fat_raw_free_chain(file->mount, tail);
 	if (result != 0) {
 		rollback_local4 = 0;
 
-		cleanup_local5 = fat_raw_set_cluster(file->mount, keep, tail);
-
 		/* Handles the cleanup local5 condition. */
+		cleanup_local5 = fat_raw_set_cluster(file->mount, keep, tail);
 		if (cleanup_local5 != 0)
 			rollback_local4 = cleanup_local5;
-		cleanup_local5 = fat_raw_restore_directory(
-			file, old_first, old_size, old_directory_dirty);
 
 		/* Handles the rollback local4 condition. */
+		cleanup_local5 = fat_raw_restore_directory(file, old_first, old_size, old_directory_dirty);
 		if (rollback_local4 == 0 && cleanup_local5 != 0)
 			rollback_local4 = cleanup_local5;
 
@@ -4796,8 +5009,6 @@ fat_raw_truncate(
 	return 0;
 }
 
-static int fat_raw_sfn_in_use(struct fat_mount_state *filesystem, const struct fat_directory *directory, const uint8_t sfn[11]);
-
 /* Supports the fat raw sfn in use operation. */
 static int
 fat_raw_sfn_in_use(
@@ -4810,15 +5021,17 @@ fat_raw_sfn_in_use(
 	const uint8_t *raw;
 	int result;
 	struct fat_mount_state *fat = filesystem;
-	uint32_t limit = fat->cluster_count *
-			 (uint32_t)fat->sectors_per_cluster *
-			 FAT16_ENTRIES_PER_SECTOR;
+	uint32_t limit = fat->cluster_count * (uint32_t)fat->sectors_per_cluster * FAT16_ENTRIES_PER_SECTOR;
 	uint32_t index;
 
 	/* Process each remaining element. */
 	for (index = 0; index < limit; index++) {
-		result = fat_raw_directory_entry(filesystem, directory, index,
-						 &lba, &offset, &raw);
+		result = fat_raw_directory_entry(filesystem,
+						 directory,
+						 index,
+						 &lba,
+						 &offset,
+						 &raw);
 		(void)lba;
 		(void)offset;
 
@@ -4835,18 +5048,17 @@ fat_raw_sfn_in_use(
 			return ENOENT;
 
 		/* Checks the fat sfn equal result. */
-		if (raw[0] != 0xe5 && raw[11] != 0x0f &&
-		    fat_sfn_equal(raw, (const char *)sfn))
-
+		if (raw[0] != 0xe5 &&
+		    raw[11] != 0x0f &&
+		    fat_sfn_equal(raw, (const char *)sfn)) {
 			/* Reports successful completion. */
 			return 0;
+		}
 	}
 
 	/* Returns the computed result. */
 	return EIO;
 }
-
-static int fat_raw_extend_directory(struct fat_mount_state *filesystem, const struct fat_directory *directory);
 
 /* Supports the fat raw extend directory operation. */
 static int
@@ -4862,11 +5074,11 @@ fat_raw_extend_directory(
 	/* Checks the fat raw valid cluster result. */
 	if (fat->type != ZEDBSD_FAT32 || !fat_raw_valid_cluster(fat, last))
 		return ENOSPC;
+
 	/* Process each remaining element. */
 	for (steps = 0; steps < fat->cluster_count; steps++) {
-		result = fat_raw_next_cluster(filesystem, last, &next);
-
 		/* Checks the operation result. */
+		result = fat_raw_next_cluster(filesystem, last, &next);
 		if (result != 0)
 			return result;
 
@@ -4877,23 +5089,22 @@ fat_raw_extend_directory(
 		/* Checks the fat raw valid cluster result. */
 		if (!fat_raw_valid_cluster(fat, next))
 			return EIO;
+
 		last = next;
 	}
 
 	/* Handles the steps condition. */
 	if (steps == fat->cluster_count)
 		return EIO;
-	result = fat_raw_extend_cluster(filesystem, last, &added);
 
 	/* Checks the operation result. */
+	result = fat_raw_extend_cluster(filesystem, last, &added);
 	if (result != 0)
 		return result;
 
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_raw_find_free_run(struct fat_mount_state *filesystem, const struct fat_directory *directory, unsigned needed, uint32_t *first_index);
 
 /* Supports the fat raw find free run operation. */
 static int
@@ -4908,26 +5119,26 @@ fat_raw_find_free_run(
 	const uint8_t *raw;
 	int result;
 	struct fat_mount_state *fat = filesystem;
-	uint32_t maximum = fat->cluster_count *
-			   (uint32_t)fat->sectors_per_cluster *
-			   FAT16_ENTRIES_PER_SECTOR;
+	uint32_t maximum = fat->cluster_count * (uint32_t)fat->sectors_per_cluster * FAT16_ENTRIES_PER_SECTOR;
 	uint32_t index = 0, run_start = 0;
 	unsigned run = 0;
 	int after_end = 0;
 
 	/* Process each remaining element. */
 	while (index < maximum) {
-		result = fat_raw_directory_entry(filesystem, directory, index,
-						 &lba, &offset, &raw);
+		result = fat_raw_directory_entry(filesystem,
+						 directory,
+						 index,
+						 &lba,
+						 &offset,
+						 &raw);
 		(void)lba;
 		(void)offset;
 
 		/* Checks the operation result. */
 		if (result == ENOENT) {
-			result =
-				fat_raw_extend_directory(filesystem, directory);
-
 			/* Checks the operation result. */
+			result = fat_raw_extend_directory(filesystem, directory);
 			if (result != 0)
 				return result;
 			continue;
@@ -4956,14 +5167,13 @@ fat_raw_find_free_run(
 		} else {
 			run = 0;
 		}
+
 		index++;
 	}
 
 	/* Returns the computed result. */
 	return ENOSPC;
 }
-
-static FAT_MUTATION int fat_raw_restore_directory_entry(struct fat_mount_state *filesystem, uint32_t lba, uint16_t offset, const uint8_t entry[32]);
 
 /* Supports the fat raw restore directory entry operation. */
 static FAT_MUTATION int
@@ -4973,26 +5183,22 @@ fat_raw_restore_directory_entry(
 	uint16_t offset,
 	const uint8_t entry[32])
 {
-	int function_result;
+	int error;
 	uint8_t *sector;
 	int result;
 
-	result = fat_engine_write_sector_result(filesystem, lba, &sector);
-
 	/* Checks the operation result. */
+	result = fat_engine_write_sector_result(filesystem, lba, &sector);
 	if (result != 0)
 		return result;
+
 	copy_bytes(sector + offset, entry, 32U);
+
+	/* XXX: if文でエラーreturn、最後に成功return、のパターンにする。 */
 	result = fat_engine_mark_sector_dirty(filesystem);
-
-	/* Computes the function result. */
-	function_result = result == 0 ? fat_engine_flush(filesystem) : result;
-
-	/* Returns the computed result. */
-	return function_result;
+	error = result == 0 ? fat_engine_flush(filesystem) : result;
+	return error;
 }
-
-static FAT_MUTATION int fat32_create_entry(struct fat_mount_state *filesystem, const struct fat_directory *parent, const struct fat_component *component, uint8_t attributes, uint32_t first_cluster, uint32_t size, uint32_t *entry_lba, uint16_t *entry_offset);
 
 /* Stage an entire long-name run and publish its short-name sector last. */
 static FAT_MUTATION int
@@ -5022,14 +5228,15 @@ fat32_create_entry(
 	/* Select an unused short alias before reserving directory positions. */
 	if (!fat_utf8_to_utf16(component->text, units, &unit_count))
 		return EINVAL;
+
 	/* Process each element required by the operation. */
 	for (serial = 1; serial <= 999999U; serial++) {
 		/* Checks the fat sfn make alias result. */
 		if (!fat_sfn_make_alias(component->text, serial, sfn))
 			return EINVAL;
-		result = fat_raw_sfn_in_use(filesystem, parent, sfn);
 
 		/* Checks the operation result. */
+		result = fat_raw_sfn_in_use(filesystem, parent, sfn);
 		if (result == ENOENT)
 			break;
 
@@ -5041,60 +5248,75 @@ fat32_create_entry(
 	/* Handles the serial condition. */
 	if (serial > 999999U)
 		return ENOSPC;
+
 	lfn_count = (unit_count + 12U) / 13U;
 	first_index = 0;
-	result = fat_raw_find_free_run(filesystem, parent, lfn_count + 1U,
-				       &first_index);
 
 	/* Checks the operation result. */
+	result = fat_raw_find_free_run(filesystem,
+				       parent,
+				       lfn_count + 1U,
+				       &first_index);
 	if (result != 0)
 		return result;
 
 	/*
- * Resolve the full run while all original end-marker semantics remain
-	 * intact. */
-	/* Process each remaining element. */
+	 * Resolve the full run while all original end-marker semantics remain
+	 * intact.
+	 */
 	for (n = 0; n <= lfn_count; n++) {
-		result = fat_raw_directory_entry(filesystem, parent,
-						 first_index + n, &lbas[n],
-						 &offsets[n], &existing);
-
 		/* Checks the operation result. */
+		result = fat_raw_directory_entry(filesystem,
+						 parent,
+						 first_index + n,
+						 &lbas[n],
+						 &offsets[n],
+						 &existing);
 		if (result != 0)
 			return result;
 	}
 
 	/*
- * Build private LFN and SFN entries before capturing shared sector
-	 * images. */
-	/* Process each remaining element. */
+	 * Build private LFN and SFN entries before capturing shared sector
+	 * images.
+	 */
 	for (n = 0; n < lfn_count; n++) {
-		fat_lfn_build_entry(entries[n], units, unit_count,
-				    lfn_count - n, fat_lfn_checksum(sfn));
+		fat_lfn_build_entry(entries[n],
+				    units,
+				    unit_count,
+				    lfn_count - n,
+				    fat_lfn_checksum(sfn));
 	}
+
 	memset(entries[lfn_count], 0, 32U);
 	memcpy(entries[lfn_count], sfn, 11U);
 	entries[lfn_count][11] = attributes;
+
 	fat_raw_put_dir_cluster(filesystem, entries[lfn_count], first_cluster);
+
 	put32(entries[lfn_count] + 28, size);
-	result = fat_directory_transaction(filesystem, lbas, offsets, entries,
-					   lfn_count + 1U, 1);
 
 	/* Checks the operation result. */
+	result = fat_directory_transaction(filesystem,
+					   lbas,
+					   offsets,
+					   entries,
+					   lfn_count + 1U,
+					   1);
 	if (result != 0)
 		return result;
 
 	/* Return the committed public entry identity. */
 	if (entry_lba != NULL)
 		*entry_lba = lbas[lfn_count];
+
 	/* Handles the entry offset availability. */
 	if (entry_offset != NULL)
 		*entry_offset = offsets[lfn_count];
+
 	/* Reports successful completion. */
 	return 0;
 }
-
-static FAT_MUTATION int fat_raw_insert_entry(struct fat_mount_state *filesystem, const struct fat_directory *parent, const struct fat_component *component, uint8_t attributes, uint32_t first_cluster, uint32_t size, uint32_t *entry_lba, uint16_t *entry_offset);
 
 /* Supports the fat raw insert entry operation. */
 static FAT_MUTATION int
@@ -5108,18 +5330,23 @@ fat_raw_insert_entry(
 	uint32_t *entry_lba,
 	uint16_t *entry_offset)
 {
-	int function_result;
+	int error;
 	uint32_t lba = 0, free_lba = 0;
 	uint16_t offset = 0, free_offset = 0;
 	uint8_t saved[32];
 	uint8_t *sector;
 	int result, rollback;
 
-	result = fat_raw_find_entry(filesystem, parent, component,
-				    FAT_NAME_EXACT, &lba, &offset, &free_lba,
-				    &free_offset, 0);
-
 	/* Checks the operation result. */
+	result = fat_raw_find_entry(filesystem,
+				    parent,
+				    component,
+				    FAT_NAME_EXACT,
+				    &lba,
+				    &offset,
+				    &free_lba,
+				    &free_offset,
+				    0);
 	if (result == 0)
 		return EEXIST;
 
@@ -5129,11 +5356,16 @@ fat_raw_insert_entry(
 
 	/* Handles the filesystem condition. */
 	if (filesystem->type == ZEDBSD_FAT32) {
-		result = fat_raw_find_entry(filesystem, parent, component,
-					    FAT_NAME_CASEFOLD, &lba, &offset,
-					    &free_lba, &free_offset, 0);
-
 		/* Checks the operation result. */
+		result = fat_raw_find_entry(filesystem,
+					    parent,
+					    component,
+					    FAT_NAME_CASEFOLD,
+					    &lba,
+					    &offset,
+					    &free_lba,
+					    &free_offset,
+					    0);
 		if (result == 0)
 			return EEXIST;
 
@@ -5142,41 +5374,49 @@ fat_raw_insert_entry(
 			return result;
 
 		/* Obtains the fat32 create entry result. */
-		function_result = fat32_create_entry(
-			filesystem, parent, component, attributes,
-			first_cluster, size, entry_lba, entry_offset);
+		error = fat32_create_entry(filesystem,
+					   parent,
+					   component,
+					   attributes,
+					   first_cluster,
+					   size,
+					   entry_lba,
+					   entry_offset);
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 
 	/* Checks the operation result. */
 	if (result == ENOSPC)
 		return result;
-	result = fat_engine_write_sector_result(filesystem, free_lba, &sector);
 
 	/* Checks the operation result. */
+	result = fat_engine_write_sector_result(filesystem, free_lba, &sector);
 	if (result != 0)
 		return result;
+
 	copy_bytes(saved, sector + free_offset, sizeof(saved));
 	clear_bytes(sector + free_offset, 32);
 	copy_bytes(sector + free_offset, component->sfn, 11);
 	sector[free_offset + 11] = attributes;
-	fat_raw_put_dir_cluster(filesystem, sector + free_offset,
-				first_cluster);
+
+	fat_raw_put_dir_cluster(filesystem, sector + free_offset, first_cluster);
+
 	put32(sector + free_offset + 28, size);
-	result = fat_engine_mark_sector_dirty(filesystem);
 
 	/* Checks the operation result. */
+	result = fat_engine_mark_sector_dirty(filesystem);
 	if (result == 0)
 		result = fat_engine_flush(filesystem);
 
 	/* Checks the operation result. */
 	if (result != 0) {
-		rollback = fat_raw_restore_directory_entry(filesystem, free_lba,
-							   free_offset, saved);
-
 		/* Handles the rollback condition. */
+		rollback = fat_raw_restore_directory_entry(filesystem,
+							   free_lba,
+							   free_offset,
+							   saved);
 		if (rollback != 0)
 			filesystem->read_only = 1;
 
@@ -5189,6 +5429,7 @@ fat_raw_insert_entry(
 		/* Handles the entry lba condition. */
 		if (entry_lba != 0)
 			*entry_lba = free_lba;
+
 		/* Handles the entry offset condition. */
 		if (entry_offset != 0)
 			*entry_offset = free_offset;
@@ -5198,9 +5439,7 @@ fat_raw_insert_entry(
 	return result;
 }
 
-static FAT_MUTATION int fat_raw_delete_location(struct fat_mount_state *, const struct fat_directory *, uint32_t, uint16_t);
 
-static FAT_MUTATION int fat_raw_create(struct fat_mount_state *filesystem, const char *path, struct fat_file_state *file);
 
 /* Supports the fat raw create operation. */
 static FAT_MUTATION int
@@ -5219,50 +5458,60 @@ fat_raw_create(
 	/* Handles the filesystem availability. */
 	if (filesystem == NULL || path == NULL || file == NULL)
 		return EINVAL;
+
 	fat_file_bind(file, filesystem);
 
 	/* Handles the filesystem condition. */
 	if (filesystem->read_only)
 		return EROFS;
-	result = fat_raw_resolve_parent(filesystem, path, &parent, &component);
 
 	/* Checks the operation result. */
+	result = fat_raw_resolve_parent(filesystem, path, &parent, &component);
 	if (result != 0)
 		return result;
-	result = fat_raw_find_entry(filesystem, &parent, &component,
-				    FAT_NAME_EXACT, &lba, &offset, &free_lba,
-				    &free_offset, 0);
 
 	/* Checks the operation result. */
+	result = fat_raw_find_entry(filesystem,
+				    &parent,
+				    &component,
+				    FAT_NAME_EXACT,
+				    &lba,
+				    &offset,
+				    &free_lba,
+				    &free_offset,
+				    0);
 	if (result == 0)
 		return EEXIST;
 
 	/* Checks the operation result. */
-	if (result != ENOENT &&
-	    !(filesystem->type == ZEDBSD_FAT32 && result == ENOSPC))
-
+	if (result != ENOENT && !(filesystem->type == ZEDBSD_FAT32 && result == ENOSPC)) {
 		/* Returns the computed result. */
 		return result;
-	result = fat_raw_insert_entry(filesystem, &parent, &component, 0x20U, 0,
-				      0, &lba, &offset);
+	}
 
 	/* Checks the operation result. */
+	result = fat_raw_insert_entry(filesystem,
+				      &parent,
+				      &component,
+				      0x20U,
+				      0,
+				      0,
+				      &lba,
+				      &offset);
 	if (result != 0)
 		return result;
-	result = fat_engine_read_sector_result(filesystem, lba, &sector);
 
 	/* Checks the operation result. */
-	if (result == 0) {
-		result = fat_raw_populate_file(file, lba, offset,
-					       sector + offset);
-	}
+	result = fat_engine_read_sector_result(filesystem, lba, &sector);
+	if (result == 0)
+		result = fat_raw_populate_file(file, lba, offset, sector + offset);
 
 	/* Checks the operation result. */
 	if (result == 0)
 		return 0;
-	rollback = fat_raw_delete_location(filesystem, &parent, lba, offset);
 
 	/* Handles the rollback condition. */
+	rollback = fat_raw_delete_location(filesystem, &parent, lba, offset);
 	if (rollback != 0) {
 		filesystem->read_only = 1;
 
@@ -5296,19 +5545,20 @@ fat_raw_delete_location(
 	int result;
 
 	/*
- * Find the public short-name entry before walking its bounded LFN
-	 * prefix. */
+	 * Find the public short-name entry before walking its bounded LFN
+	 * prefix.
+	 */
+	/* XXX: if文にする。 */
 	limit = parent->first_cluster == 0
 			? filesystem->root_entries
 			: filesystem->cluster_count *
 				  (uint32_t)filesystem->sectors_per_cluster *
 				  FAT16_ENTRIES_PER_SECTOR;
+
 	/* Process each remaining element. */
 	for (index = 0; index < limit; index++) {
-		result = fat_raw_directory_entry(filesystem, parent, index,
-						 &lba, &offset, &raw);
-
 		/* Checks the operation result. */
+		result = fat_raw_directory_entry(filesystem, parent, index, &lba, &offset, &raw);
 		if (result != 0)
 			return result;
 
@@ -5320,18 +5570,17 @@ fat_raw_delete_location(
 	/* Checks the current index. */
 	if (index == limit)
 		return ENOENT;
+
 	memcpy(target, raw, sizeof(target));
-	count = 0;
 
 	/*
- * Collect all associated records before changing directory
-	 * interpretation. */
-	/* Process each remaining element. */
+	 * Collect all associated records before changing directory
+	 * interpretation.
+	 */
+	count = 0;
 	while (index != 0) {
-		result = fat_raw_directory_entry(filesystem, parent, index - 1U,
-						 &lba, &offset, &raw);
-
 		/* Checks the operation result. */
+		result = fat_raw_directory_entry(filesystem, parent, index - 1U, &lba, &offset, &raw);
 		if (result != 0)
 			return result;
 
@@ -5342,27 +5591,30 @@ fat_raw_delete_location(
 		/* Checks the remaining item count. */
 		if (count >= FAT_LFN_MAX_ENTRIES)
 			return EIO;
+
 		lbas[count] = lba;
 		offsets[count] = offset;
 		memcpy(entries[count++], raw, 32U);
+
 		index--;
 	}
+
 	lbas[count] = target_lba;
 	offsets[count] = target_offset;
 	memcpy(entries[count++], target, 32U);
+
 	/* Process each remaining element. */
 	for (n = 0; n < count; n++)
 		entries[n][0] = 0xe5;
-	result = fat_directory_transaction(filesystem, lbas, offsets, entries,
-					   count, 0);
 
 	/*
- * Return with either complete deletion or restored original sector
-	 * contents. */
+	 * Return with either complete deletion or restored original sector
+	 * contents.
+	 */
+	/* XXX: エラーと正常のreturnを分ける */
+	result = fat_directory_transaction(filesystem, lbas, offsets, entries, count, 0);
 	return result;
 }
-
-static FAT_MUTATION int fat_raw_directory_empty(struct fat_mount_state *filesystem, uint32_t first_cluster);
 
 /* Supports the fat raw directory empty operation. */
 static FAT_MUTATION int
@@ -5376,15 +5628,12 @@ fat_raw_directory_empty(
 	int result;
 	struct fat_mount_state *fat = filesystem;
 	struct fat_directory directory = {.first_cluster = first_cluster};
-	uint32_t limit = fat->cluster_count *
-			 (uint32_t)fat->sectors_per_cluster *
-			 FAT16_ENTRIES_PER_SECTOR;
+	uint32_t limit = fat->cluster_count * (uint32_t)fat->sectors_per_cluster * FAT16_ENTRIES_PER_SECTOR;
 	uint32_t index;
 
 	/* Process each remaining element. */
 	for (index = 0; index < limit; index++) {
-		result = fat_raw_directory_entry(filesystem, &directory, index,
-						 &lba, &offset, &raw);
+		result = fat_raw_directory_entry(filesystem, &directory, index, &lba, &offset, &raw);
 		(void)lba;
 		(void)offset;
 
@@ -5401,8 +5650,10 @@ fat_raw_directory_empty(
 			return 0;
 
 		/* Handles the raw condition. */
-		if (raw[0] == 0xe5 || raw[11] == 0x0fU ||
-		    (raw[11] & 0x08U) != 0 || raw[0] == '.')
+		if (raw[0] == 0xe5 ||
+		    raw[11] == 0x0fU ||
+		    (raw[11] & 0x08U) != 0 ||
+		    raw[0] == '.')
 			continue;
 
 		/* Returns the computed result. */
@@ -5413,8 +5664,6 @@ fat_raw_directory_empty(
 	return EIO;
 }
 
-static FAT_MUTATION int fat_raw_initialize_directory(struct fat_mount_state *filesystem, uint32_t cluster, uint32_t parent_cluster);
-
 /* Supports the fat raw initialize directory operation. */
 static FAT_MUTATION int
 fat_raw_initialize_directory(
@@ -5422,7 +5671,7 @@ fat_raw_initialize_directory(
 	uint32_t cluster,
 	uint32_t parent_cluster)
 {
-	int function_result;
+	int error;
 	unsigned i_index_for;
 	unsigned i_index_for1;
 	uint32_t lba;
@@ -5430,25 +5679,26 @@ fat_raw_initialize_directory(
 	uint8_t *raw;
 	int result;
 
+	/* Checks the operation result. */
 	result = fat_engine_cluster_lba(filesystem, cluster, 0, &lba);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return result;
+
+	/* Checks the operation result. */
 	result = fat_engine_write_sector_result(filesystem, lba, &sector);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return result;
+
+	/* Process each remaining element. */
 	clear_bytes(sector, 512);
 	raw = sector;
-	/* Process each remaining element. */
 	for (i_index_for = 0; i_index_for < 11; i_index_for++)
 		raw[i_index_for] = ' ';
 	raw[0] = '.';
 	raw[11] = 0x10U;
 	fat_raw_put_dir_cluster(filesystem, raw, cluster);
 	raw += 32;
+
 	/* Process each remaining element. */
 	for (i_index_for1 = 0; i_index_for1 < 11; i_index_for1++)
 		raw[i_index_for1] = ' ';
@@ -5457,14 +5707,10 @@ fat_raw_initialize_directory(
 	fat_raw_put_dir_cluster(filesystem, raw, parent_cluster);
 	result = fat_engine_mark_sector_dirty(filesystem);
 
-	/* Computes the function result. */
-	function_result = result == 0 ? fat_engine_flush(filesystem) : result;
-
-	/* Returns the computed result. */
-	return function_result;
+	/* XXX: 成功と失敗のreturnを分ける。 */
+	error = result == 0 ? fat_engine_flush(filesystem) : result;
+	return error;
 }
-
-static FAT_MUTATION int fat_raw_mkdir(struct fat_mount_state *filesystem, const char *path, uint32_t *created_cluster);
 
 /* Supports the fat raw mkdir operation. */
 static FAT_MUTATION int
@@ -5482,46 +5728,60 @@ fat_raw_mkdir(
 	/* Handles the created cluster availability. */
 	if (created_cluster == NULL)
 		return EINVAL;
+
 	*created_cluster = 0;
+
 	/* Handles the filesystem condition. */
 	if (filesystem->read_only)
 		return EROFS;
+
+	/* Checks the operation result. */
 	result = fat_raw_resolve_parent(filesystem, path, &parent, &component);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return result;
+
+	/* Checks the operation result. */
 	result = fat_raw_allocate_cluster(filesystem, &cluster);
-
-	/* Checks the operation result. */
 	if (result != 0)
 		return result;
-	result = fat_raw_initialize_directory(filesystem, cluster,
-					      parent.first_cluster);
 
 	/*
- * Make the child's dot entries durable before publishing its parent
-	 * name. */
+	 * Make the child's dot entries durable before publishing its parent
+	 * name.
+	 */
+	result = fat_raw_initialize_directory(filesystem,
+					      cluster,
+					      parent.first_cluster);
 	if (result == 0)
 		result = disk_sync(filesystem->disk);
 
 	/* Checks the operation result. */
 	if (result == 0) {
-		result = fat_raw_insert_entry(filesystem, &parent, &component,
-					      0x10U, cluster, 0, &lba, &offset);
+		/* XXX: 長い引数は下記のフォーマットにする。 */
+		result = fat_raw_insert_entry(filesystem,
+					      &parent,
+					      &component,
+					      0x10U,
+					      cluster,
+					      0,
+					      &lba,
+					      &offset);
 	}
 
 	/* Checks the operation result. */
 	if (result != 0) {
+		int rollback;
+
 		/*
- * A failed entry rollback may have left a reachable reference
+		 * A failed entry rollback may have left a reachable reference
 		 * to this cluster.  In that state leaking it is safer than
-		 * freeing storage which an on-disk directory may still name. */
+		 * freeing storage which an on-disk directory may still name.
+		 */
 		if (filesystem->read_only)
 			return result;
-		int rollback = fat_raw_free_chain(filesystem, cluster);
 
 		/* Handles the rollback condition. */
+		rollback = fat_raw_free_chain(filesystem, cluster);
 		if (rollback != 0) {
 			filesystem->read_only = 1;
 
@@ -5532,11 +5792,9 @@ fat_raw_mkdir(
 		*created_cluster = cluster;
 	}
 
-	/* Returns the computed result. */
+	/* XXX: 成功と失敗の分離 */
 	return result;
 }
-
-static FAT_MUTATION int fat_raw_remove(struct fat_mount_state *filesystem, const char *path, int directory);
 
 /* Supports the fat raw remove operation. */
 static FAT_MUTATION int
@@ -5545,7 +5803,7 @@ fat_raw_remove(
 	const char *path,
 	int directory)
 {
-	int function_result;
+	int error;
 	struct fat_directory parent;
 	struct fat_component component;
 	uint32_t lba = 0, free_lba = 0, cluster;
@@ -5557,51 +5815,59 @@ fat_raw_remove(
 	/* Handles the filesystem condition. */
 	if (filesystem->read_only)
 		return EROFS;
-	result = fat_raw_resolve_parent(filesystem, path, &parent, &component);
 
 	/* Checks the operation result. */
+	/* XXX: 長い引数は下記の折り返しフォーマットにする。 */
+	result = fat_raw_resolve_parent(filesystem,
+					path,
+					&parent,
+					&component);
 	if (result != 0)
 		return result;
-	result = fat_raw_find_entry(filesystem, &parent, &component,
-				    FAT_NAME_EXACT, &lba, &offset, &free_lba,
-				    &free_offset, 0);
 
 	/* Checks the operation result. */
+	result = fat_raw_find_entry(filesystem,
+				    &parent,
+				    &component,
+				    FAT_NAME_EXACT,
+				    &lba,
+				    &offset,
+				    &free_lba,
+				    &free_offset,
+				    0);
 	if (result != 0)
 		return result == ENOSPC ? ENOENT : result;
-	result = fat_engine_read_sector_result(filesystem, lba, &sector);
 
 	/* Checks the operation result. */
+	result = fat_engine_read_sector_result(filesystem, lba, &sector);
 	if (result != 0)
 		return result;
+
 	copy_bytes(raw, sector + offset, sizeof(raw));
 
 	/* Handles the directory condition. */
 	if (directory != ((raw[11] & 0x10U) != 0))
 		return directory ? EINVAL : EISDIR;
-	cluster = fat_raw_dir_cluster(filesystem, raw);
 
 	/* Handles the directory condition. */
+	cluster = fat_raw_dir_cluster(filesystem, raw);
 	if (directory) {
 		/* Checks the fat raw valid cluster result. */
 		if (!fat_raw_valid_cluster(filesystem, cluster))
 			return EIO;
-		result = fat_raw_directory_empty(filesystem, cluster);
 
 		/* Checks the operation result. */
+		result = fat_raw_directory_empty(filesystem, cluster);
 		if (result != 0)
 			return result;
 	}
 
 	/* Obtains the fat raw delete location result. */
-	function_result =
-		fat_raw_delete_location(filesystem, &parent, lba, offset);
+	error = fat_raw_delete_location(filesystem, &parent, lba, offset);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static FAT_MUTATION int fat_raw_unlink(struct fat_mount_state *filesystem, const char *path);
 
 /* Supports the fat raw unlink operation. */
 static FAT_MUTATION int
@@ -5609,16 +5875,15 @@ fat_raw_unlink(
 	struct fat_mount_state *filesystem,
 	const char *path)
 {
-	int function_result;
+	int error;
 
+	/* XXX: コメントの質がひどい。 */
 	/* Obtains the fat raw remove result. */
-	function_result = fat_raw_remove(filesystem, path, 0);
+	error = fat_raw_remove(filesystem, path, 0);
 
-	/* Returns the computed result. */
-	return function_result;
+	/* XXX: 成功と失敗のreturnは分離 */
+	return error;
 }
-
-static FAT_MUTATION int fat_raw_rmdir(struct fat_mount_state *filesystem, const char *path);
 
 /* Supports the fat raw rmdir operation. */
 static FAT_MUTATION int
@@ -5626,16 +5891,14 @@ fat_raw_rmdir(
 	struct fat_mount_state *filesystem,
 	const char *path)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the fat raw remove result. */
-	function_result = fat_raw_remove(filesystem, path, 1);
+	error = fat_raw_remove(filesystem, path, 1);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static FAT_MUTATION int fat_raw_update_dotdot(struct fat_mount_state *filesystem, uint32_t directory_cluster, uint32_t parent_cluster);
 
 /* Supports the fat raw update dotdot operation. */
 static FAT_MUTATION int
@@ -5652,40 +5915,42 @@ fat_raw_update_dotdot(
 	uint8_t *sector;
 	int result, rollback;
 
-	result = fat_raw_directory_entry(filesystem, &directory, 1, &lba,
-					 &offset, &raw);
-
 	/* Checks the operation result. */
+	result = fat_raw_directory_entry(filesystem,
+					 &directory,
+					 1,
+					 &lba,
+					 &offset,
+					 &raw);
 	if (result != 0)
 		return result;
+
 	copy_bytes(saved, raw, sizeof(saved));
-	result = fat_engine_write_sector_result(filesystem, lba, &sector);
 
 	/* Checks the operation result. */
+	result = fat_engine_write_sector_result(filesystem, lba, &sector);
 	if (result != 0)
 		return result;
+
 	fat_raw_put_dir_cluster(filesystem, sector + offset, parent_cluster);
-	result = fat_engine_mark_sector_dirty(filesystem);
 
 	/* Checks the operation result. */
+	result = fat_engine_mark_sector_dirty(filesystem);
 	if (result == 0)
 		result = fat_engine_flush(filesystem);
 
 	/* Checks the operation result. */
 	if (result == 0)
 		return 0;
-	rollback =
-		fat_raw_restore_directory_entry(filesystem, lba, offset, saved);
 
 	/* Handles the rollback condition. */
+	rollback = fat_raw_restore_directory_entry(filesystem, lba, offset, saved);
 	if (rollback != 0)
 		filesystem->read_only = 1;
 
-	/* Returns the computed result. */
+	/* XXX: 成功と失敗のreturnは分離 */
 	return rollback != 0 ? rollback : result;
 }
-
-static FAT_MUTATION int fat_raw_restore_entry_payload(struct fat_mount_state *filesystem, uint32_t lba, uint16_t offset, const uint8_t raw[32]);
 
 /* Supports the fat raw restore entry payload operation. */
 static FAT_MUTATION int
@@ -5695,31 +5960,33 @@ fat_raw_restore_entry_payload(
 	uint16_t offset,
 	const uint8_t raw[32])
 {
-	int function_result;
+	int error;
 	uint8_t restored[32];
 	const uint8_t *current;
 	int result;
 
-	result = fat_engine_read_sector_result(filesystem, lba, &current);
-
 	/* Checks the operation result. */
+	result = fat_engine_read_sector_result(filesystem, lba, &current);
 	if (result != 0)
 		return result;
+
+	/* XXX: add explanation */
 	copy_bytes(restored, current + offset, sizeof(restored));
 	restored[11] = raw[11];
-	fat_raw_put_dir_cluster(filesystem, restored,
+
+	/* XXX: add explanation */
+	fat_raw_put_dir_cluster(filesystem,
+				restored,
 				fat_raw_dir_cluster(filesystem, raw));
+
+	/* XXX: add explanation */
 	put32(restored + 28, fat_engine_get32(raw + 28));
 
-	/* Obtains the fat raw restore directory entry result. */
-	function_result = fat_raw_restore_directory_entry(filesystem, lba,
+	/* XXX: 成功と失敗のreturnは分離 */
+	error = fat_raw_restore_directory_entry(filesystem, lba,
 							  offset, restored);
-
-	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static FAT_MUTATION void fat_raw_rename_rollback_destination( struct fat_mount_state *filesystem, const struct fat_directory *parent, uint32_t lba, uint16_t offset, int replacing, const uint8_t target[32]);
 
 /* Supports the fat raw rename rollback destination operation. */
 static FAT_MUTATION void
@@ -5733,20 +6000,17 @@ fat_raw_rename_rollback_destination(
 {
 	/* Handles the replacing condition. */
 	if (replacing) {
-		(void)fat_raw_restore_entry_payload(filesystem, lba, offset,
+		(void)fat_raw_restore_entry_payload(filesystem,
+						    lba,
+						    offset,
 						    target);
 	} else {
-		(void)fat_raw_delete_location(filesystem, parent, lba, offset);
+		(void)fat_raw_delete_location(filesystem,
+					      parent,
+					      lba,
+					      offset);
 	}
 }
-
-struct fat_rename_result {
-	uint32_t lba;
-	uint16_t offset;
-	uint8_t attributes;
-};
-
-static int fat_raw_canonical_basename(struct fat_mount_state *filesystem, const char *path, char basename[ZEDBSD_PATH_MAX]);
 
 /* Supports the fat raw canonical basename operation. */
 static int
@@ -5764,9 +6028,9 @@ fat_raw_canonical_basename(
 	/* Handles the filesystem availability. */
 	if (filesystem == NULL || path == NULL || basename == NULL)
 		return EINVAL;
-	result = fat_raw_resolve_parent(filesystem, path, &parent, &component);
 
 	/* Checks the operation result. */
+	result = fat_raw_resolve_parent(filesystem, path, &parent, &component);
 	if (result != 0)
 		return result;
 
@@ -5778,6 +6042,7 @@ fat_raw_canonical_basename(
 		return 0;
 	}
 
+	/* XXX: add explanation */
 	clear_bytes(raw, sizeof(raw));
 	copy_bytes(raw, component.sfn, sizeof(component.sfn));
 	fat_sfn_decode_lower(raw, &decoded);
@@ -5786,8 +6051,6 @@ fat_raw_canonical_basename(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static FAT_MUTATION int fat_raw_rename(struct fat_mount_state *filesystem, const char *old_path, const char *new_path, uint32_t authoritative_cluster, uint32_t authoritative_size, struct fat_rename_result *renamed);
 
 /* Supports the fat raw rename operation. */
 static FAT_MUTATION int
@@ -5815,44 +6078,63 @@ fat_raw_rename(
 	/* Handles the filesystem condition. */
 	if (filesystem->read_only)
 		return EROFS;
-	result = fat_raw_resolve_parent(filesystem, old_path, &old_parent,
-					&old_component);
 
 	/* Checks the operation result. */
+	result = fat_raw_resolve_parent(filesystem,
+					old_path,
+					&old_parent,
+					&old_component);
 	if (result != 0)
 		return result;
-	result = fat_raw_find_entry(filesystem, &old_parent, &old_component,
-				    FAT_NAME_EXACT, &old_lba, &old_offset,
-				    &old_free_lba, &old_free_offset, 0);
 
 	/* Checks the operation result. */
+	result = fat_raw_find_entry(filesystem,
+				    &old_parent,
+				    &old_component,
+				    FAT_NAME_EXACT,
+				    &old_lba,
+				    &old_offset,
+				    &old_free_lba,
+				    &old_free_offset,
+				    0);
 	if (result != 0)
 		return result == ENOSPC ? ENOENT : result;
-	result = fat_engine_read_sector_result(filesystem, old_lba, &sector);
 
 	/* Checks the operation result. */
+	result = fat_engine_read_sector_result(filesystem, old_lba, &sector);
 	if (result != 0)
 		return result;
+
 	copy_bytes(source, sector + old_offset, sizeof(source));
 
 	/*
- * The inode/open-file state is authoritative while a writer is open.
+	 * The inode/open-file state is authoritative while a writer is open.
 	 * Publish that state at the destination as part of the rename commit so
 	 * no fallible repair read/write remains after the old name is removed.
 	 */
 	fat_raw_put_dir_cluster(filesystem, source, authoritative_cluster);
+
+	/* XXX: add explanation */
 	put32(source + 28, authoritative_size);
-	result = fat_raw_resolve_parent(filesystem, new_path, &new_parent,
-					&new_component);
 
 	/* Checks the operation result. */
+	result = fat_raw_resolve_parent(filesystem,
+					new_path,
+					&new_parent,
+					&new_component);
 	if (result != 0)
 		return result;
-	target_result = fat_raw_find_entry(
-		filesystem, &new_parent, &new_component, FAT_NAME_EXACT,
-		&new_lba, &new_offset, &new_free_lba, &new_free_offset, 0);
 
 	/* Handles the target result condition. */
+	target_result = fat_raw_find_entry(filesystem,
+					   &new_parent,
+					   &new_component,
+					   FAT_NAME_EXACT,
+					   &new_lba,
+					   &new_offset,
+					   &new_free_lba,
+					   &new_free_offset,
+					   0);
 	if (target_result == 0) {
 		/* Handles the old lba condition. */
 		if (old_lba == new_lba && old_offset == new_offset) {
@@ -5866,75 +6148,84 @@ fat_raw_rename(
 			/* Reports successful completion. */
 			return 0;
 		}
-		result = fat_engine_read_sector_result(filesystem, new_lba,
-						       &sector);
 
 		/* Checks the operation result. */
+		result = fat_engine_read_sector_result(filesystem, new_lba, &sector);
 		if (result != 0)
 			return result;
+
 		copy_bytes(target, sector + new_offset, sizeof(target));
 
+		/* XXX: コメントが悪い。handles, checks, returns the function result.はやめよう。 */
 		/* Handles the source condition. */
 		if (((source[11] ^ target[11]) & 0x10U) != 0)
 			return EINVAL;
 
 		/* Handles the target condition. */
 		if ((target[11] & 0x10U) != 0) {
+			/* Checks the operation result. */
 			result = fat_raw_directory_empty(
 				filesystem,
 				fat_raw_dir_cluster(filesystem, target));
-
-			/* Checks the operation result. */
 			if (result != 0)
 				return result;
 		}
 
 		/*
- * Preserve the destination's spelling/LFN run and replace only
+		 * Preserve the destination's spelling/LFN run and replace only
 		 * its payload.  Open references to the old target keep their
 		 * own cluster state and the VFS marks that inode orphaned after
-		 * this succeeds. */
-		result = fat_engine_write_sector_result(filesystem, new_lba,
+		 * this succeeds.
+		 */
+		result = fat_engine_write_sector_result(filesystem,
+							new_lba,
 							&write_sector);
-
-		/* Checks the operation result. */
 		if (result != 0)
 			return result;
+
 		write_sector[new_offset + 11] = source[11];
-		fat_raw_put_dir_cluster(
-			filesystem, write_sector + new_offset,
-			fat_raw_dir_cluster(filesystem, source));
-		put32(write_sector + new_offset + 28,
-		      fat_engine_get32(source + 28));
-		result = fat_engine_mark_sector_dirty(filesystem);
+
+		fat_raw_put_dir_cluster(filesystem,
+					write_sector + new_offset,
+					fat_raw_dir_cluster(filesystem, source));
+
+		put32(write_sector + new_offset + 28, fat_engine_get32(source + 28));
 
 		/* Checks the operation result. */
+		result = fat_engine_mark_sector_dirty(filesystem);
 		if (result == 0)
 			result = fat_engine_flush(filesystem);
 
 		/* Checks the operation result. */
 		if (result != 0) {
-			rollback = fat_raw_restore_entry_payload(
-				filesystem, new_lba, new_offset, target);
+			rollback = fat_raw_restore_entry_payload(filesystem,
+								 new_lba,
+								 new_offset,
+								 target);
 
-			/* Returns the computed result. */
+			/* XXX: 成功と失敗でreturnを分ける */
 			return rollback != 0 ? rollback : result;
 		}
+
 		replacing = 1;
 	} else if (target_result != ENOENT && target_result != ENOSPC) {
 		/* Returns the computed result. */
 		return target_result;
 	}
-	source_cluster = fat_raw_dir_cluster(filesystem, source);
 
 	/* Handles the replacing condition. */
-	if (!replacing) {
-		result = fat_raw_insert_entry(
-			filesystem, &new_parent, &new_component, source[11],
-			source_cluster, fat_engine_get32(source + 28), &new_lba,
-			&new_offset);
+	source_cluster = fat_raw_dir_cluster(filesystem, source);
 
+	if (!replacing) {
 		/* Checks the operation result. */
+		result = fat_raw_insert_entry(filesystem,
+					      &new_parent,
+					      &new_component,
+					      source[11],
+					      source_cluster,
+					      fat_engine_get32(source + 28),
+					      &new_lba,
+					      &new_offset);
 		if (result != 0)
 			return result;
 	}
@@ -5942,33 +6233,43 @@ fat_raw_rename(
 	/* Handles the source condition. */
 	if ((source[11] & 0x10U) != 0 &&
 	    old_parent.first_cluster != new_parent.first_cluster) {
-		result = fat_raw_update_dotdot(filesystem, source_cluster,
-					       new_parent.first_cluster);
-
 		/* Checks the operation result. */
+		result = fat_raw_update_dotdot(filesystem,
+					       source_cluster,
+					       new_parent.first_cluster);
 		if (result != 0) {
-			fat_raw_rename_rollback_destination(
-				filesystem, &new_parent, new_lba, new_offset,
-				replacing, target);
+			fat_raw_rename_rollback_destination(filesystem,
+							    &new_parent,
+							    new_lba,
+							    new_offset,
+							    replacing,
+							    target);
 
 			/* Returns the computed result. */
 			return result;
 		}
 	}
-	result = fat_raw_delete_location(filesystem, &old_parent, old_lba,
-					 old_offset);
 
 	/* Checks the operation result. */
+	result = fat_raw_delete_location(filesystem,
+					 &old_parent,
+					 old_lba,
+					 old_offset);
 	if (result != 0) {
 		/* Handles the source condition. */
 		if ((source[11] & 0x10U) != 0 &&
 		    old_parent.first_cluster != new_parent.first_cluster) {
-			(void)fat_raw_update_dotdot(filesystem, source_cluster,
+			(void)fat_raw_update_dotdot(filesystem,
+						    source_cluster,
 						    old_parent.first_cluster);
 		}
-		fat_raw_rename_rollback_destination(filesystem, &new_parent,
-						    new_lba, new_offset,
-						    replacing, target);
+
+		fat_raw_rename_rollback_destination(filesystem,
+						    &new_parent,
+						    new_lba,
+						    new_offset,
+						    replacing,
+						    target);
 	} else if (renamed != NULL) {
 		renamed->lba = new_lba;
 		renamed->offset = new_offset;
@@ -5978,8 +6279,6 @@ fat_raw_rename(
 	/* Returns the computed result. */
 	return result;
 }
-
-static int fat_raw_read(struct fat_file_state *file, uint64_t offset, void *buffer, uint32_t length, fat_read_progress_fn progress, void *progress_context);
 
 /* Supports the fat raw read operation. */
 static int
@@ -5991,18 +6290,16 @@ fat_raw_read(
 	fat_read_progress_fn progress,
 	void *progress_context)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the fat engine read chain result. */
-	function_result = fat_engine_read_chain(
+	error = fat_engine_read_chain(
 		file, offset, buffer, length, progress, progress_context,
 		fat_raw_next_cluster, fat_raw_reserved_limit(file->mount));
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static int fat_raw_readdir(struct fat_mount_state *filesystem, const char *path, unsigned wanted, struct fat_dir_entry *entry);
 
 /* Supports the fat raw readdir operation. */
 static int
@@ -6012,6 +6309,7 @@ fat_raw_readdir(
 	unsigned wanted,
 	struct fat_dir_entry *entry)
 {
+	struct fat_directory directory;
 	uint32_t lba_local;
 	uint16_t offset_local;
 	const uint8_t *raw_local;
@@ -6021,46 +6319,54 @@ fat_raw_readdir(
 	const uint8_t *raw_local3;
 	int result_local4;
 	struct fat_mount_state *fat = filesystem;
-	struct fat_directory directory = {
-		.first_cluster = fat_raw_root_cluster(fat),
-	};
 	struct fat_lfn_state lfn;
 	uint32_t limit;
 	unsigned visible = 0;
 	uint32_t index;
 
+	/* The search starts at the root of the volume. */
+	directory.first_cluster = fat_raw_root_cluster(filesystem);
+
 	/* Handles the path condition. */
 	if (*path && !(path[0] == '/' && !path[1])) {
-		result_local = fat_raw_resolve_entry(
-			filesystem, path, &lba_local, &offset_local, &raw_local,
-			FAT_NAME_EXACT, 0);
-
 		/* Handles the result local condition. */
+		result_local = fat_raw_resolve_entry(filesystem,
+						     path,
+						     &lba_local,
+						     &offset_local,
+						     &raw_local,
+						     FAT_NAME_EXACT,
+						     0);
 		if (result_local != 0)
 			return result_local;
 
 		/* Handles the raw local condition. */
 		if (!(raw_local[11] & 0x10U))
 			return EINVAL;
+
 		directory.first_cluster = fat_raw_dir_cluster(fat, raw_local);
 
 		/* Checks the fat raw valid cluster result. */
 		if (!fat_raw_valid_cluster(fat, directory.first_cluster))
 			return EIO;
 	}
+
 	limit = directory.first_cluster == 0
 			? fat->root_entries
 			: fat->cluster_count *
 				  (uint32_t)fat->sectors_per_cluster *
 				  FAT16_ENTRIES_PER_SECTOR;
 	fat_lfn_reset(&lfn);
+
 	/* Process each remaining element. */
 	for (index = 0; index < limit; index++) {
-		result_local4 = fat_raw_directory_entry(
-			filesystem, &directory, index, &lba_local1,
-			&offset_local2, &raw_local3);
-
 		/* Handles the result local4 condition. */
+		result_local4 = fat_raw_directory_entry(filesystem,
+							&directory,
+							index,
+							&lba_local1,
+							&offset_local2,
+							&raw_local3);
 		if (result_local4 == ENOENT)
 			return result_local4;
 
@@ -6102,10 +6408,9 @@ fat_raw_readdir(
 			continue;
 		}
 
-		/* Checks the fat lfn finish result. */
+		/* XXX: 条件式に関数呼びだしを入れない。 */
 		if (fat->type != ZEDBSD_FAT32 ||
-		    !fat_lfn_finish(&lfn, raw_local3, entry->name,
-				    sizeof(entry->name))) {
+		    !fat_lfn_finish(&lfn, raw_local3, entry->name, sizeof(entry->name))) {
 			/* Handles the fat condition. */
 			if (fat->type == ZEDBSD_FAT32) {
 				fat_sfn_decode_preserve(raw_local3, entry->name,
@@ -6114,6 +6419,7 @@ fat_raw_readdir(
 				fat_sfn_decode_lower(raw_local3, entry);
 			}
 		}
+
 		entry->size = fat_engine_get32(raw_local3 + 28);
 		entry->attributes = raw_local3[11];
 
@@ -6124,8 +6430,6 @@ fat_raw_readdir(
 	/* Returns the computed result. */
 	return ENOENT;
 }
-
-static int fat_stat_location_mode(struct fat_mount_state *filesystem, const char *path, struct fat_dir_entry *entry, uint32_t *lba, uint16_t *offset, uint32_t *first_cluster, uint8_t *attributes, enum fat_name_match match);
 
 /* Supports the fat stat location mode operation. */
 static int
@@ -6145,14 +6449,19 @@ fat_stat_location_mode(
 
 	/* Handles the filesystem condition. */
 	if (!filesystem || !path || !entry || !lba || !offset ||
-	    !first_cluster || !attributes)
-
+	    !first_cluster || !attributes) {
 		/* Returns the computed result. */
 		return EINVAL;
-	result = fat_raw_resolve_entry(filesystem, path, lba, offset, &raw,
-				       match, found_name);
+	}
 
 	/* Checks the operation result. */
+	result = fat_raw_resolve_entry(filesystem,
+				       path,
+				       lba,
+				       offset,
+				       &raw,
+				       match,
+				       found_name);
 	if (result != 0)
 		return result;
 
@@ -6164,13 +6473,13 @@ fat_stat_location_mode(
 	} else {
 		fat_sfn_decode_lower(raw, entry);
 	}
+
 	*first_cluster = fat_raw_dir_cluster(filesystem, raw);
 	*attributes = raw[11];
+
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_engine_stat_location(struct fat_mount_state *filesystem, const char *path, struct fat_dir_entry *entry, uint32_t *lba, uint16_t *offset, uint32_t *first_cluster, uint8_t *attributes);
 
 /* Supports the fat engine stat location operation. */
 static int
@@ -6183,18 +6492,21 @@ fat_engine_stat_location(
 	uint32_t *first_cluster,
 	uint8_t *attributes)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the fat stat location mode result. */
-	function_result = fat_stat_location_mode(filesystem, path, entry, lba,
-						 offset, first_cluster,
-						 attributes, FAT_NAME_EXACT);
+	error = fat_stat_location_mode(filesystem,
+						 path,
+						 entry,
+						 lba,
+						 offset,
+						 first_cluster,
+						 attributes,
+						 FAT_NAME_EXACT);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static int fat_engine_stat_location_casefold(struct fat_mount_state *filesystem, const char *path, struct fat_dir_entry *entry, uint32_t *lba, uint16_t *offset, uint32_t *first_cluster, uint8_t *attributes);
 
 /* Supports the fat engine stat location casefold operation. */
 static int
@@ -6207,22 +6519,20 @@ fat_engine_stat_location_casefold(
 	uint32_t *first_cluster,
 	uint8_t *attributes)
 {
-	int function_result;
+	int error;
 
 	/* Handles the filesystem condition. */
 	if (filesystem == 0 || filesystem->type != ZEDBSD_FAT32)
 		return EOPNOTSUPP;
 
-	/* Obtains the fat stat location mode result. */
-	function_result = fat_stat_location_mode(filesystem, path, entry, lba,
+	/* XXX: 変数名errorはあまりにもひどい。 */
+	error = fat_stat_location_mode(filesystem, path, entry, lba,
 						 offset, first_cluster,
 						 attributes, FAT_NAME_CASEFOLD);
 
-	/* Returns the computed result. */
-	return function_result;
+	/* XXX: 成功と失敗でreturnを分ける */
+	return error;
 }
-
-static int fat_engine_file_extents(struct fat_file_state *file, fat_extent_cb callback, void *context);
 
 /* Supports the fat engine file extents operation. */
 static int
@@ -6231,7 +6541,7 @@ fat_engine_file_extents(
 	fat_extent_cb callback,
 	void *context)
 {
-	int function_result;
+	int error;
 	uint32_t disk_block, blocks;
 	uint32_t next;
 	int result;
@@ -6249,32 +6559,32 @@ fat_engine_file_extents(
 	state = file;
 
 	/* Handles the fat condition. */
-	if (fat->type != ZEDBSD_FAT12 && fat->type != ZEDBSD_FAT16 &&
-	    fat->type != ZEDBSD_FAT32)
-
+	if (fat->type != ZEDBSD_FAT12 &&
+	    fat->type != ZEDBSD_FAT16 &&
+	    fat->type != ZEDBSD_FAT32) {
 		/* Returns the computed result. */
 		return EIO;
-	remaining = file->size;
+	}
 
 	/* Handles the remaining condition. */
+	remaining = file->size;
 	if (remaining == 0)
 		return state->first_cluster == 0 ? 0 : EIO;
-	cluster = state->first_cluster;
 
 	/* Checks the fat raw valid cluster result. */
+	cluster = state->first_cluster;
 	if (!fat_raw_valid_cluster(fat, cluster))
 		return EIO;
+
 	/* Process each remaining element. */
 	for (steps = 0; steps < fat->cluster_count && remaining != 0; steps++) {
-		blocks = fat->sectors_per_cluster;
-
 		/* Handles the uint64 t condition. */
+		blocks = fat->sectors_per_cluster;
 		if ((uint64_t)blocks * 512U > remaining)
 			blocks = (uint32_t)((remaining + 511U) / 512U);
-		result = fat_engine_cluster_lba(filesystem, cluster, 0,
-						&disk_block);
 
 		/* Checks the operation result. */
+		result = fat_engine_cluster_lba(filesystem, cluster, 0, &disk_block);
 		if (result != 0)
 			return result;
 
@@ -6285,24 +6595,25 @@ fat_engine_file_extents(
 		} else {
 			/* Handles the run count condition. */
 			if (run_count != 0) {
+				/* Checks the operation result. */
 				result = callback(run_file, run_disk, run_count,
 						  context);
-
-				/* Checks the operation result. */
 				if (result != 0)
 					return result;
 			}
+
 			run_file = file_block;
 			run_disk = disk_block;
 			run_count = blocks;
 		}
+
 		file_block += blocks;
 		remaining -= remaining > (uint64_t)blocks * 512U
 				     ? (uint64_t)blocks * 512U
 				     : remaining;
-		result = fat_raw_next_cluster(filesystem, cluster, &next);
 
 		/* Checks the operation result. */
+		result = fat_raw_next_cluster(filesystem, cluster, &next);
 		if (result != 0)
 			return result;
 
@@ -6317,6 +6628,7 @@ fat_engine_file_extents(
 		/* Checks the fat raw valid cluster result. */
 		if (!fat_raw_valid_cluster(fat, next))
 			return EIO;
+
 		cluster = next;
 	}
 
@@ -6325,13 +6637,11 @@ fat_engine_file_extents(
 		return EIO;
 
 	/* Obtains the callback result. */
-	function_result = callback(run_file, run_disk, run_count, context);
+	error = callback(run_file, run_disk, run_count, context);
 
-	/* Returns the computed result. */
-	return function_result;
+	/* XXX: 成功と失敗でreturnを分ける */
+	return error;
 }
-
-static int fat_engine_discard_chain_result(struct fat_mount_state *filesystem, uint32_t first_cluster);
 
 /* Supports the fat engine discard chain result operation. */
 static int
@@ -6339,20 +6649,18 @@ fat_engine_discard_chain_result(
 	struct fat_mount_state *filesystem,
 	uint32_t first_cluster)
 {
-	int function_result;
+	int error;
 
 	/* Handles the filesystem availability. */
 	if (filesystem == NULL)
 		return EINVAL;
 
 	/* Obtains the fat raw free chain result. */
-	function_result = fat_raw_free_chain(filesystem, first_cluster);
+	error = fat_raw_free_chain(filesystem, first_cluster);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static int fat12_mount(struct fat_mount_state *filesystem);
 
 /* Supports the fat12 mount operation. */
 static int
@@ -6363,96 +6671,68 @@ fat12_mount(
 	int result;
 	uint32_t fat_entries;
 
-	result = fat_engine_mount(filesystem, ZEDBSD_FAT12);
-
 	/* Checks the operation result. */
+	result = fat_engine_mount(filesystem, ZEDBSD_FAT12);
 	if (result != 0)
 		return result;
-	fat = filesystem;
 
 	/* Handles the fat condition. */
+	fat = filesystem;
 	if (!fat->root_entries || !fat->fat_sectors ||
-	    fat->fat_sectors > 0xffffffffU / 512U)
-
+	    fat->fat_sectors > 0xffffffffU / 512U) {
 		/* Returns the computed result. */
 		return EIO;
-
-	/* Three bytes hold two packed 12-bit entries. */
-	fat_entries = fat->fat_sectors * 512U / 3U * 2U;
+	}
 
 	/* Handles the fat entries condition. */
+	fat_entries = fat->fat_sectors * 512U / 3U * 2U;
 	if (fat_entries < fat->cluster_count + 2U ||
-	    fat->cluster_count + 2U >= FAT12_RESERVED_CLUSTER)
-
+	    fat->cluster_count + 2U >= FAT12_RESERVED_CLUSTER) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat32_mount(struct fat_mount_state *filesystem);
 
 /* Supports the fat32 mount operation. */
 static int
 fat32_mount(
 	struct fat_mount_state *filesystem)
 {
-	int function_result;
+	int error;
 	struct fat_mount_state *fat;
 	int result;
 	uint32_t fat_entries;
 
-	result = fat_engine_mount(filesystem, ZEDBSD_FAT32);
-
 	/* Checks the operation result. */
+	result = fat_engine_mount(filesystem, ZEDBSD_FAT32);
 	if (result != 0)
 		return result;
-	fat = filesystem;
 
 	/* Handles the fat condition. */
+	fat = filesystem;
 	if (!fat->fat32_layout || !fat->fat_sectors ||
-	    fat->fat_sectors > 0xffffffffU / 512U)
-
+	    fat->fat_sectors > 0xffffffffU / 512U) {
 		/* Returns the computed result. */
 		return EIO;
-	fat_entries = fat->fat_sectors * 512U / 4U;
+	}
 
 	/* Handles the fat entries condition. */
+	fat_entries = fat->fat_sectors * 512U / 4U;
 	if (fat_entries < fat->cluster_count + 2U ||
-	    fat->cluster_count + 2U >= FAT32_RESERVED_CLUSTER)
-
+	    fat->cluster_count + 2U >= FAT32_RESERVED_CLUSTER) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Computes the function result. */
-	function_result =
-		fat_raw_valid_cluster(fat, fat->root_cluster) ? 0 : EIO;
+	error = fat_raw_valid_cluster(fat, fat->root_cluster) ? 0 : EIO;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-/* Native VFS operations over the private FAT engine. */
-
-struct fat_inode_slot {
-	struct fat_inode_info info;
-	char path[ZEDBSD_PATH_MAX];
-	uint8_t used;
-};
-
-static struct fat_mount_state fat_mounts[FAT_MOUNT_MAX]
-	__attribute__((section(".vfs_bss")));
-static struct fat_metadata_table fat_metadata_tables[FAT_MOUNT_MAX]
-	__attribute__((section(".vfs_bss")));
-static struct fat_inode_slot fat_inodes[FAT_INODE_MAX]
-	__attribute__((section(".vfs_bss")));
-static struct fat_file_state fat_files[FAT_FILE_MAX]
-	__attribute__((section(".vfs_bss")));
-static struct spinlock fat_pool_lock = {
-	{0}, LOCK_RANK_INODE, "FAT object pools", 0, 0};
-
-static struct fat_mount_state *fat_mount_state(struct mount *mountp);
 
 /* Supports the fat mount state operation. */
 static struct fat_mount_state *
@@ -6462,8 +6742,6 @@ fat_mount_state(
 	/* Returns the computed result. */
 	return mountp != NULL ? mountp->m_data : NULL;
 }
-
-static int fat_metadata_number(const char *text, unsigned base, uint32_t *value);
 
 /* Supports the fat metadata number operation. */
 static int
@@ -6478,21 +6756,22 @@ fat_metadata_number(
 	/* Validates the current text. */
 	if (*text == '\0')
 		return EINVAL;
+
 	/* Continue while the operation condition remains true. */
 	while (*text != '\0') {
-		digit = (unsigned)(*text++ - '0');
-
 		/* Handles the digit condition. */
+		digit = (unsigned)(*text++ - '0');
 		if (digit >= base || result > (UINT32_MAX - digit) / base)
 			return EINVAL;
+
 		result = result * base + digit;
 	}
+
 	*value = result;
+
 	/* Reports successful completion. */
 	return 0;
 }
-
-static void fat_metadata_load(struct fat_mount_state *state);
 
 /* Supports the fat metadata load operation. */
 static void
@@ -6509,52 +6788,59 @@ fat_metadata_load(
 	/* Checks the fat raw open result. */
 	if (fat_raw_open(state, "etc/unixmode", &file) != 0)
 		return;
+
+	/* XXX: if文にする。 */
 	length = file.size < sizeof(buffer) - 1U
 			 ? (uint32_t)file.size
 			 : (uint32_t)sizeof(buffer) - 1U;
 
-	/* Checks the fat raw read result. */
 	if (fat_raw_read(&file, 0, buffer, length, NULL, NULL) != 0)
 		return;
+
 	buffer[length] = '\0';
+
 	/* Process each remaining element. */
 	while (offset < length && state->metadata != NULL &&
 	       state->metadata->count < FAT_METADATA_MAX) {
 		metadata = &state->metadata->entries[state->metadata->count];
 		line = buffer + offset;
 
-		end = strchr(line, '\n');
-
 		/* Handles the end availability. */
+		end = strchr(line, '\n');
 		if (end != NULL)
 			*end = '\0';
+
 		offset += (uint32_t)strlen(line) + (end != NULL ? 1U : 0U);
-		mode = strchr(line, ':');
 
 		/* Handles the mode availability. */
+		mode = strchr(line, ':');
 		if (mode == NULL)
 			continue;
 		*mode++ = '\0';
-		uid = strchr(mode, ':');
 
 		/* Handles the uid availability. */
+		uid = strchr(mode, ':');
 		if (uid == NULL)
 			continue;
 		*uid++ = '\0';
-		gid = strchr(uid, ':');
 
 		/* Handles the gid availability. */
+		gid = strchr(uid, ':');
 		if (gid == NULL)
 			continue;
 		*gid++ = '\0';
-		/* Checks the strchr result. */
-		if (strchr(gid, ':') != NULL || line[0] == '/' ||
-		    line[0] == '\0' || strlen(line) >= sizeof(metadata->path) ||
+
+		/* XXX: if文を分解する。なんでcontinueなのかちゃんと説明する。 */
+		if (strchr(gid, ':') != NULL ||
+		    line[0] == '/' ||
+		    line[0] == '\0' ||
+		    strlen(line) >= sizeof(metadata->path) ||
 		    fat_metadata_number(mode, 8, &mode_value) != 0 ||
 		    fat_metadata_number(uid, 10, &uid_value) != 0 ||
 		    fat_metadata_number(gid, 10, &gid_value) != 0 ||
 		    mode_value > 07777U)
 			continue;
+
 		strcpy(metadata->path, line);
 		metadata->mode = (mode_t)mode_value;
 		metadata->uid = (uid_t)uid_value;
@@ -6562,8 +6848,6 @@ fat_metadata_load(
 		state->metadata->count++;
 	}
 }
-
-static const struct fat_metadata * fat_metadata_find(const struct fat_mount_state *state, const char *path);
 
 /* Supports the fat metadata find operation. */
 static const struct fat_metadata *
@@ -6574,8 +6858,8 @@ fat_metadata_find(
 	unsigned i;
 
 	/* Process each remaining element. */
-	for (i = 0; state != NULL && state->metadata != NULL &&
-		    i < state->metadata->count;
+	for (i = 0;
+	     state != NULL && state->metadata != NULL && i < state->metadata->count;
 	     i++) {
 		/* Selects the matching value. */
 		if (!strcmp(state->metadata->entries[i].path, path))
@@ -6586,8 +6870,6 @@ fat_metadata_find(
 	return NULL;
 }
 
-static void fat_metadata_apply(struct mount *mountp, const char *path, struct inode *inode);
-
 /* Supports the fat metadata apply operation. */
 static void
 fat_metadata_apply(
@@ -6595,18 +6877,16 @@ fat_metadata_apply(
 	const char *path,
 	struct inode *inode)
 {
-	const struct fat_metadata *metadata =
-		fat_metadata_find(fat_mount_state(mountp), path);
+	const struct fat_metadata *metadata = fat_metadata_find(fat_mount_state(mountp), path);
 
 	/* Handles the metadata availability. */
 	if (metadata == NULL)
 		return;
+
 	inode->i_mode = (inode->i_mode & S_IFMT) | metadata->mode;
 	inode->i_uid = metadata->uid;
 	inode->i_gid = metadata->gid;
 }
-
-static struct fat_inode_slot *fat_slot(struct inode *inode);
 
 /* Supports the fat slot operation. */
 static struct fat_inode_slot *
@@ -6626,8 +6906,6 @@ fat_slot(
 	return NULL;
 }
 
-static const char *fat_path(struct inode *inode);
-
 /* Supports the fat path operation. */
 static const char *
 fat_path(
@@ -6639,8 +6917,6 @@ fat_path(
 	return slot != NULL ? slot->path : NULL;
 }
 
-static struct inode *fat_alloc_inode(struct mount *mountp);
-
 /* Supports the fat alloc inode operation. */
 static struct inode *
 fat_alloc_inode(
@@ -6650,28 +6926,29 @@ fat_alloc_inode(
 	unsigned long irq;
 
 	(void)mountp;
+
 	irq = spin_lock_irqsave(&fat_pool_lock);
+
 	/* Process each element required by the operation. */
 	for (i = 0; i < FAT_INODE_MAX; i++) {
 		/* Handles the fat inodes condition. */
 		if (!fat_inodes[i].used) {
 			fat_inodes[i].used = 1;
-			memset(&fat_inodes[i].info, 0,
-			       sizeof(fat_inodes[i].info));
+			memset(&fat_inodes[i].info, 0, sizeof(fat_inodes[i].info));
 			fat_inodes[i].path[0] = '\0';
+
 			spin_unlock_irqrestore(&fat_pool_lock, irq);
 
 			/* Returns the computed result. */
 			return &fat_inodes[i].info.fi_inode;
 		}
 	}
+
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
 
 	/* Reports that no result is available. */
 	return NULL;
 }
-
-static void fat_free_inode(struct inode *inode);
 
 /* Supports the fat free inode operation. */
 static void
@@ -6689,8 +6966,6 @@ fat_free_inode(
 	}
 }
 
-static int join_path(const char *parent, const struct componentname *name, char output[ZEDBSD_PATH_MAX]);
-
 /* Supports the join path operation. */
 static int
 join_path(
@@ -6700,26 +6975,26 @@ join_path(
 {
 	size_t parent_length = strlen(parent);
 
-	/* Validates the current name. */
-	if (name->cn_namelen == 0 || name->cn_namelen > NAME_MAX ||
-	    parent_length + (parent_length != 0) + name->cn_namelen >=
-		    ZEDBSD_PATH_MAX)
-
+	/* XXX: ifを分解。バリデーションの中身をきちんと説明。 */
+	if (name->cn_namelen == 0 ||
+	    name->cn_namelen > NAME_MAX ||
+	    parent_length + (parent_length != 0) + name->cn_namelen >= ZEDBSD_PATH_MAX) {
 		/* Returns the computed result. */
 		return ENAMETOOLONG;
+	}
+
 	memcpy(output, parent, parent_length);
 
 	/* Handles the parent length condition. */
 	if (parent_length != 0)
 		output[parent_length++] = '/';
+
 	memcpy(output + parent_length, name->cn_nameptr, name->cn_namelen);
 	output[parent_length + name->cn_namelen] = '\0';
 
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_creation_collision(struct fat_mount_state *state, const char *path);
 
 /* Supports the fat creation collision operation. */
 static int
@@ -6736,15 +7011,22 @@ fat_creation_collision(
 	/* Handles the state availability. */
 	if (state == NULL || path == NULL)
 		return EINVAL;
-	error = fat_raw_resolve_parent(state, path, &parent, &component);
 
 	/* Checks the operation status. */
+	error = fat_raw_resolve_parent(state, path, &parent, &component);
 	if (error != 0)
 		return error;
-	error = fat_raw_find_entry(state, &parent, &component, FAT_NAME_EXACT,
-				   &lba, &offset, &free_lba, &free_offset, 0);
 
 	/* Checks the operation status. */
+	error = fat_raw_find_entry(state,
+				   &parent,
+				   &component,
+				   FAT_NAME_EXACT,
+				   &lba,
+				   &offset,
+				   &free_lba,
+				   &free_offset,
+				   0);
 	if (error == 0)
 		return EEXIST;
 
@@ -6755,19 +7037,23 @@ fat_creation_collision(
 	/* Handles the state condition. */
 	if (state->type != ZEDBSD_FAT32)
 		return 0;
-	error = fat_raw_find_entry(state, &parent, &component,
-				   FAT_NAME_CASEFOLD, &lba, &offset, &free_lba,
-				   &free_offset, 0);
 
 	/* Checks the operation status. */
+	error = fat_raw_find_entry(state,
+				   &parent,
+				   &component,
+				   FAT_NAME_CASEFOLD,
+				   &lba,
+				   &offset,
+				   &free_lba,
+				   &free_offset,
+				   0);
 	if (error == 0)
 		return EEXIST;
 
 	/* Returns the computed result. */
 	return error == ENOENT || error == ENOSPC ? 0 : error;
 }
-
-static int fat_creation_representation(const struct fat_mount_state *state, const char *path, mode_t *mode, uid_t *uid, gid_t *gid);
 
 /* Supports the fat creation representation operation. */
 static int
@@ -6782,13 +7068,13 @@ fat_creation_representation(
 
 	/* Handles the state availability. */
 	if (state == NULL || path == NULL || mode == NULL || uid == NULL ||
-	    gid == NULL)
-
+	    gid == NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
-	metadata = fat_metadata_find(state, path);
+	}
 
 	/* Handles the metadata availability. */
+	metadata = fat_metadata_find(state, path);
 	if (metadata != NULL) {
 		*mode = metadata->mode;
 		*uid = metadata->uid;
@@ -6802,8 +7088,6 @@ fat_creation_representation(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_creation_representable( const struct fat_mount_state *state, const char *path, const struct inode_creation_request *request, enum inode_type type);
 
 /* Supports the fat creation representable operation. */
 static int
@@ -6822,24 +7106,22 @@ fat_creation_representable(
 	if (request == NULL || request->origin < INODE_CREATION_USER ||
 	    request->origin > INODE_CREATION_PRESERVE ||
 	    request->type != type || (request->mode & S_IFMT) != 0 ||
-	    request->special != NULL || request->rdev != 0)
-
+	    request->special != NULL || request->rdev != 0) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = fat_creation_representation(state, path, &mode, &uid, &gid);
+	}
 
 	/* Checks the operation status. */
+	error = fat_creation_representation(state, path, &mode, &uid, &gid);
 	if (error != 0)
 		return error;
 
-	/* Returns the computed result. */
+	/* XXX: 条件式をreturnしないルールを適用。 */
 	return mode == (request->mode & 07777U) && uid == request->uid &&
 			       gid == request->gid
 		       ? 0
 		       : EOPNOTSUPP;
 }
-
-static int fat_created_inode_matches(const struct fat_mount_state *state, const char *path, const struct inode *inode);
 
 /* Supports the fat created inode matches operation. */
 static int
@@ -6857,14 +7139,12 @@ fat_created_inode_matches(
 	if (error != 0)
 		return error;
 
-	/* Returns the computed result. */
+	/* XXX: 条件式をreturnしないルールを適用。 */
 	return (inode->i_mode & 07777U) == mode && inode->i_uid == uid &&
 			       inode->i_gid == gid
 		       ? 0
 		       : EOPNOTSUPP;
 }
-
-static ino_t fat_ino(uint32_t lba, uint16_t offset);
 
 /* Supports the fat ino operation. */
 static ino_t
@@ -6876,8 +7156,6 @@ fat_ino(
 	return 2U + (ino_t)lba * 16U + offset / 32U;
 }
 
-static int fat_leap_year(int year);
-
 /* Supports the fat leap year operation. */
 static int
 fat_leap_year(
@@ -6887,28 +7165,23 @@ fat_leap_year(
 	return (year % 4) == 0 && ((year % 100) != 0 || (year % 400) == 0);
 }
 
-static int fat_month_days(int year, int month);
-
 /* Supports the fat month days operation. */
 static int
 fat_month_days(
 	int year,
 	int month)
 {
-	int function_result;
+	int error;
 	static const uint8_t days[] = {
 		31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
 	};
 
-	/* Computes the function result. */
-	function_result =
-		month == 2 && fat_leap_year(year) ? 29 : days[month - 1];
+	/* XXX: 真偽値はif文で代入すること。 */
+	error = month == 2 && fat_leap_year(year) ? 29 : days[month - 1];
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static time_t fat_decode_time(uint16_t date, uint16_t time);
 
 /* Supports the fat decode time operation. */
 static time_t
@@ -6924,37 +7197,41 @@ fat_decode_time(
 	/* Handles the date condition. */
 	if (date == 0)
 		return 0;
+
 	year = 1980 + ((date >> 9) & 0x7f);
 	month = (date >> 5) & 0x0f;
-	day = date & 0x1f;
 
 	/* Checks the fat month days result. */
-	if (month < 1 || month > 12 || day < 1 ||
-	    day > fat_month_days(year, month))
-
+	day = date & 0x1f;
+	if (month < 1 ||
+	    month > 12 ||
+	    day < 1 ||
+	    day > fat_month_days(year, month)) {
 		/* Reports successful completion. */
 		return 0;
+	}
+
 	/* Process each element required by the operation. */
 	for (y_for = 1970; y_for < year; y_for++)
 		days += fat_leap_year(y_for) ? 366 : 365;
+
 	/* Process each element required by the operation. */
 	for (m_for = 1; m_for < month; m_for++)
 		days += fat_month_days(year, m_for);
+
 	days += day - 1;
+
 	seconds = (int64_t)days * 86400 + ((time >> 11) & 0x1f) * 3600 +
 		  ((time >> 5) & 0x3f) * 60 + (time & 0x1f) * 2;
-#ifdef ZEDBSD_USER_ABI_LP64
 
+#ifdef ZEDBSD_USER_ABI_LP64
 	/* Returns the computed result. */
 	return (time_t)seconds;
 #else
-
 	/* Returns the computed result. */
 	return seconds > INT32_MAX ? (time_t)INT32_MAX : (time_t)seconds;
 #endif
 }
-
-static FAT_MUTATION int fat_encode_time(time_t seconds, uint16_t *date, uint16_t *time);
 
 /* Supports the fat encode time operation. */
 static FAT_MUTATION int
@@ -6969,8 +7246,10 @@ fat_encode_time(
 	/* Handles the seconds condition. */
 	if (seconds < FAT_EPOCH_1980)
 		return EOVERFLOW;
+
 	days = seconds / 86400;
 	remainder = seconds % 86400;
+
 	/* Continue while the operation condition remains true. */
 	while (days >= (fat_leap_year(year) ? 366 : 365)) {
 		days -= fat_leap_year(year) ? 366 : 365;
@@ -6980,11 +7259,13 @@ fat_encode_time(
 	/* Handles the year condition. */
 	if (year > 2107)
 		return EOVERFLOW;
+
 	/* Continue while the operation condition remains true. */
 	while (days >= fat_month_days(year, month)) {
 		days -= fat_month_days(year, month);
 		month++;
 	}
+
 	*date = (uint16_t)(((year - 1980) << 9) | (month << 5) | (days + 1));
 	*time = (uint16_t)(((remainder / 3600) << 11) |
 			   (((remainder / 60) % 60) << 5) |
@@ -6993,8 +7274,6 @@ fat_encode_time(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static void fat_load_inode_times(struct mount *mountp, struct inode *inode, uint32_t lba, uint16_t offset);
 
 /* Supports the fat load inode times operation. */
 static void
@@ -7008,21 +7287,19 @@ fat_load_inode_times(
 	const uint8_t *sector;
 	const uint8_t *raw;
 
-	/* Checks the fat engine read sector result result. */
+	/* XXX: 条件式の中で関数を呼ばない。 */
 	if (state == NULL ||
-	    fat_engine_read_sector_result(state, lba, &sector) != 0)
-
+	    fat_engine_read_sector_result(state, lba, &sector) != 0) {
 		/* Returns the computed result. */
 		return;
-	raw = sector + offset;
-	inode->i_atime.tv_sec = fat_decode_time(fat_engine_get16(raw + 18), 0);
-	inode->i_mtime.tv_sec = fat_decode_time(fat_engine_get16(raw + 24),
-						fat_engine_get16(raw + 22));
-	inode->i_ctime.tv_sec = fat_decode_time(fat_engine_get16(raw + 16),
-						fat_engine_get16(raw + 14));
-}
+	}
 
-static int fat_make_inode(struct mount *mountp, const char *path, const struct fat_dir_entry *entry, uint32_t lba, uint16_t offset, uint32_t first_cluster, uint8_t attributes, struct inode **result);
+	raw = sector + offset;
+
+	inode->i_atime.tv_sec = fat_decode_time(fat_engine_get16(raw + 18), 0);
+	inode->i_mtime.tv_sec = fat_decode_time(fat_engine_get16(raw + 24), fat_engine_get16(raw + 22));
+	inode->i_ctime.tv_sec = fat_decode_time(fat_engine_get16(raw + 16), fat_engine_get16(raw + 14));
+}
 
 /* Supports the fat make inode operation. */
 static int
@@ -7045,21 +7322,23 @@ fat_make_inode(
 	/* Checks the operation status. */
 	if (error == 0)
 		return 0;
-	inode = inode_alloc(mountp);
 
 	/* Handles the inode availability. */
+	inode = inode_alloc(mountp);
 	if (inode == NULL)
 		return ENOSPC;
+
 	info = fat_inode(inode);
-	slot = fat_slot(inode);
 
 	/* Checks the strlen result. */
+	slot = fat_slot(inode);
 	if (slot == NULL || strlen(path) >= ZEDBSD_PATH_MAX) {
 		inode_release(inode);
 
 		/* Returns the computed result. */
 		return EINVAL;
 	}
+
 	strcpy(slot->path, path);
 	info->fi_first_cluster = first_cluster;
 	info->fi_dirent_lba = lba;
@@ -7080,74 +7359,24 @@ fat_make_inode(
 		inode->i_type = INODE_REG;
 
 		/*
- * FAT has no execute bit.  Mount regular files with the
-		 * executable default expected by this boot/userland volume. */
+		 * FAT has no execute bit.  Mount regular files with the
+		 * executable default expected by this boot/userland volume.
+		 */
 		inode->i_mode = S_IFREG | 0755U;
 	}
 
 	/* Handles the attributes condition. */
 	if (attributes & FAT_ATTRIBUTE_READ_ONLY)
 		inode->i_mode &= ~(mode_t)0222U;
+
 	fat_metadata_apply(mountp, path, inode);
 	fat_load_inode_times(mountp, inode, lba, offset);
+
 	*result = inode;
+
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_lookup(struct inode *, const struct componentname *, struct inode **);
-static int fat_lookup_casefold(struct inode *, const struct componentname *, struct inode **);
-static int fat_create(struct inode *, const struct componentname *, const struct inode_creation_request *, struct inode **);
-static int fat_mkdir(struct inode *, const struct componentname *, const struct inode_creation_request *, struct inode **);
-static int fat_unlink(struct inode *, const struct componentname *);
-static int fat_rmdir(struct inode *, const struct componentname *);
-static int fat_rename(struct inode *, const struct componentname *, struct inode *, const struct componentname *, unsigned);
-static int fat_truncate(struct inode *, off_t);
-static int fat_getattr(struct inode *, struct stat *);
-static int fat_setattr(struct inode *, const struct stat *, unsigned);
-static void fat_reclaim(struct inode *);
-static void fat_orphan(struct inode *);
-static ssize_t fat_read_file(struct file *, void *, size_t);
-static ssize_t fat_write_file(struct file *, const void *, size_t);
-static ssize_t fat_pread_file(struct file *, void *, size_t, off_t);
-static ssize_t fat_pwrite_file(struct file *, const void *, size_t, off_t);
-static ssize_t fat_pwrite_context(struct file *file, const void *buffer, size_t length, off_t offset, unsigned flags, const struct ucred *credential, const struct io_context *context);
-static int fat_readdir(struct file *, struct dirent *, int *);
-static int fat_open_file(struct file *);
-static int fat_fsync(struct file *);
-static int fat_close_file(struct file *);
-static int fat_flush_pending_closes(struct fat_mount_state *);
-
-static const struct inode_ops fat_inode_ops = {
-	.lookup = fat_lookup,
-	.lookup_casefold = fat_lookup_casefold,
-	.create = fat_create,
-	.mkdir = fat_mkdir,
-	.unlink = fat_unlink,
-	.rmdir = fat_rmdir,
-	.rename = fat_rename,
-	.getattr = fat_getattr,
-	.setattr = fat_setattr,
-	.truncate = fat_truncate,
-	.sync = NULL,
-	.reclaim = fat_reclaim,
-};
-static const struct file_ops fat_regular_ops = {
-	.open = fat_open_file,
-	.read = fat_read_file,
-	.write = fat_write_file,
-	.pread = fat_pread_file,
-	.pwrite = fat_pwrite_file,
-	.pwrite_internal = fat_pwrite_context,
-	.fsync = fat_fsync,
-	.close = fat_close_file,
-};
-static const struct file_ops fat_directory_ops = {
-	.readdir = fat_readdir,
-	.close = fat_close_file,
-};
-
-static void set_inode_ops(struct inode *inode);
 
 /* Supports the set inode ops operation. */
 static void
@@ -7155,8 +7384,7 @@ set_inode_ops(
 	struct inode *inode)
 {
 	inode->i_op = &fat_inode_ops;
-	inode->i_fop = inode->i_type == INODE_DIR ? &fat_directory_ops
-						  : &fat_regular_ops;
+	inode->i_fop = inode->i_type == INODE_DIR ? &fat_directory_ops : &fat_regular_ops;
 }
 
 /*
@@ -7178,32 +7406,34 @@ drv_fat_file_backing_identity(
 	/* Handles the i mount availability. */
 	if (inode->i_type != INODE_REG || inode->i_mount == NULL ||
 	    inode->i_mount->m_type != &drv_fat_filesystem_type ||
-	    inode->i_mount->m_disk == NULL)
-
+	    inode->i_mount->m_disk == NULL) {
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
-	state = fat_mount_state(inode->i_mount);
+	}
 
 	/* Handles the state availability. */
+	state = fat_mount_state(inode->i_mount);
 	if (state == NULL)
 		return EIO;
+
 	mutex_lock(&state->lock);
+
 	info = fat_inode(inode);
 	*disk = inode->i_mount->m_disk;
+
 	/*
- * The directory-entry location is identical across separate mounts of
+	 * The directory-entry location is identical across separate mounts of
 	 * the same FAT volume. Claimed rename is rejected before it can change
 	 * these fields.
 	 */
 	*object = ((uint64_t)info->fi_dirent_lba << 16) |
 		  (uint64_t)info->fi_dirent_offset;
+
 	mutex_unlock(&state->lock);
 
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_stat_path(struct mount *mountp, const char *path, struct inode **result);
 
 /* Supports the fat stat path operation. */
 static int
@@ -7221,25 +7451,39 @@ fat_stat_path(
 	uint16_t offset;
 	uint8_t attributes;
 	int error;
-	int fsresult =
-		fat_engine_stat_location(state, path, &entry, &lba, &offset,
-					 &first_cluster, &attributes);
+	int fsresult;
+
+	fsresult = fat_engine_stat_location(state,
+					    path,
+					    &entry,
+					    &lba,
+					    &offset,
+					    &first_cluster,
+					    &attributes);
 
 	/* Handles the fsresult condition. */
 	if (fsresult != 0)
 		return fsresult;
+
 	slash = strrchr(path, '/');
-	prefix_length = slash != NULL ? (size_t)(slash - path + 1) : 0;
 
 	/* Checks the strlen result. */
+	prefix_length = slash != NULL ? (size_t)(slash - path + 1) : 0;
 	if (prefix_length + strlen(entry.name) >= sizeof(canonical))
 		return ENAMETOOLONG;
+
 	memcpy(canonical, path, prefix_length);
 	strcpy(canonical + prefix_length, entry.name);
-	error = fat_make_inode(mountp, canonical, &entry, lba, offset,
-			       first_cluster, attributes, result);
 
 	/* Checks the operation status. */
+	error = fat_make_inode(mountp,
+			       canonical,
+			       &entry,
+			       lba,
+			       offset,
+			       first_cluster,
+			       attributes,
+			       result);
 	if (error == 0)
 		set_inode_ops(*result);
 
@@ -7250,8 +7494,6 @@ fat_stat_path(
 	/* Succeeded. */
 	return 0;
 }
-
-static int fat_stat_path_casefold(struct mount *mountp, const char *path, struct inode **result);
 
 /* Supports the fat stat path casefold operation. */
 static int
@@ -7269,25 +7511,38 @@ fat_stat_path_casefold(
 	uint16_t offset;
 	uint8_t attributes;
 	int error;
-	int fsresult = fat_engine_stat_location_casefold(
-		state, path, &entry, &lba, &offset, &first_cluster,
-		&attributes);
+	int fsresult;
+
+	fsresult = fat_engine_stat_location_casefold(state,
+						     path,
+						     &entry,
+						     &lba,
+						     &offset,
+						     &first_cluster,
+						     &attributes);
 
 	/* Handles the fsresult condition. */
 	if (fsresult != 0)
 		return fsresult;
 	slash = strrchr(path, '/');
-	prefix_length = slash != NULL ? (size_t)(slash - path + 1) : 0;
 
 	/* Checks the strlen result. */
+	prefix_length = slash != NULL ? (size_t)(slash - path + 1) : 0;
 	if (prefix_length + strlen(entry.name) >= sizeof(canonical))
 		return ENAMETOOLONG;
+
 	memcpy(canonical, path, prefix_length);
 	strcpy(canonical + prefix_length, entry.name);
-	error = fat_make_inode(mountp, canonical, &entry, lba, offset,
-			       first_cluster, attributes, result);
 
 	/* Checks the operation status. */
+	error = fat_make_inode(mountp,
+			       canonical,
+			       &entry,
+			       lba,
+			       offset,
+			       first_cluster,
+			       attributes,
+			       result);
 	if (error == 0)
 		set_inode_ops(*result);
 
@@ -7298,8 +7553,6 @@ fat_stat_path_casefold(
 	/* Succeeded. */
 	return 0;
 }
-
-static int fat_lookup_unlocked(struct inode *directory, const struct componentname *name, struct inode **result);
 
 /* Supports the fat lookup unlocked operation. */
 static int
@@ -7322,6 +7575,7 @@ fat_lookup_unlocked(
 	if (name->cn_namelen == 1 && name->cn_nameptr[0] == '.') {
 		inode_ref(directory);
 		*result = directory;
+
 		/* Reports successful completion. */
 		return 0;
 	}
@@ -7333,33 +7587,38 @@ fat_lookup_unlocked(
 		if (parent[0] == '\0') {
 			inode_ref(directory);
 			*result = directory;
+
 			/* Reports successful completion. */
 			return 0;
 		}
+
 		strcpy(path, parent);
-		slash = strrchr(path, '/');
 
 		/* Handles the slash availability. */
+		slash = strrchr(path, '/');
 		if (slash == NULL) {
 			inode_ref(directory->i_mount->m_root);
 			*result = directory->i_mount->m_root;
+
 			/* Reports successful completion. */
 			return 0;
 		}
+
 		*slash = '\0';
+
 		/* Obtains the fat stat path result. */
-		function_result =
-			fat_stat_path(directory->i_mount, path, result);
+		function_result = fat_stat_path(directory->i_mount, path, result);
 
 		/* Returns the computed result. */
 		return function_result;
 	}
+
 	error = join_path(parent, name, path);
 
 	/* Computes the function result. */
-	function_result =
-		error != 0 ? error
-			   : fat_stat_path(directory->i_mount, path, result);
+	function_result = error != 0 ?
+		error :
+		fat_stat_path(directory->i_mount, path, result);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -7376,7 +7635,9 @@ fat_lookup(
 	int error;
 
 	mutex_lock(&state->lock);
+
 	error = fat_lookup_unlocked(directory, name, result);
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the failure. */
@@ -7386,8 +7647,6 @@ fat_lookup(
 	/* Succeeded. */
 	return 0;
 }
-
-static int fat_lookup_casefold_unlocked(struct inode *directory, const struct componentname *name, struct inode **result);
 
 /* Supports the fat lookup casefold unlocked operation. */
 static int
@@ -7404,13 +7663,13 @@ fat_lookup_casefold_unlocked(
 	/* Handles the parent availability. */
 	if (parent == NULL)
 		return EIO;
+
 	error = join_path(parent, name, path);
 
 	/* Computes the function result. */
-	function_result = error != 0
-				  ? error
-				  : fat_stat_path_casefold(directory->i_mount,
-							   path, result);
+	function_result = error != 0 ?
+		error :
+		fat_stat_path_casefold(directory->i_mount, path, result);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -7434,16 +7693,13 @@ fat_getattr(
 	status->st_mtime = inode->i_mtime.tv_sec;
 	status->st_ctime = inode->i_ctime.tv_sec;
 	status->st_blksize = 512;
-	status->st_blocks =
-		inode->i_size > 0
-			? (blkcnt_t)(((uint64_t)inode->i_size + 511U) / 512U)
-			: 0;
+	status->st_blocks = inode->i_size > 0 ?
+		(blkcnt_t)(((uint64_t)inode->i_size + 511U) / 512U) :
+		0;
 
 	/* Reports successful completion. */
 	return 0;
 }
-
-static FAT_MUTATION void fat_put16(uint8_t *bytes, uint16_t value);
 
 /* Supports the fat put16 operation. */
 static FAT_MUTATION void
@@ -7454,8 +7710,6 @@ fat_put16(
 	bytes[0] = (uint8_t)value;
 	bytes[1] = (uint8_t)(value >> 8);
 }
-
-static FAT_MUTATION int fat_setattr_unlocked(struct inode *inode, const struct stat *status, unsigned mask);
 
 /* Supports the fat setattr unlocked operation. */
 static FAT_MUTATION int
@@ -7492,9 +7746,8 @@ fat_setattr_unlocked(
 
 	/* Handles the mask condition. */
 	if (mask & INODE_ATTR_MODE) {
-		permissions = status->st_mode & 07777U;
-
 		/* Handles the permissions condition. */
+		permissions = status->st_mode & 07777U;
 		if (permissions != 0755U && permissions != 0555U)
 			return EOPNOTSUPP;
 	}
@@ -7503,14 +7756,14 @@ fat_setattr_unlocked(
 	if (mask & INODE_ATTR_ATIME) {
 		/* Checks the operation status. */
 		if (status->st_atim.tv_nsec < 0 ||
-		    status->st_atim.tv_nsec >= 1000000000L)
-
+		    status->st_atim.tv_nsec >= 1000000000L) {
 			/* Returns the computed result. */
 			return EINVAL;
-		error = fat_encode_time(status->st_atim.tv_sec, &atime_date,
-					&atime_time);
+		}
 
 		/* Checks the operation status. */
+		error = fat_encode_time(status->st_atim.tv_sec, &atime_date,
+					&atime_time);
 		if (error != 0)
 			return error;
 	}
@@ -7519,29 +7772,30 @@ fat_setattr_unlocked(
 	if (mask & INODE_ATTR_MTIME) {
 		/* Checks the operation status. */
 		if (status->st_mtim.tv_nsec < 0 ||
-		    status->st_mtim.tv_nsec >= 1000000000L)
-
+		    status->st_mtim.tv_nsec >= 1000000000L) {
 			/* Returns the computed result. */
 			return EINVAL;
-		error = fat_encode_time(status->st_mtim.tv_sec, &mtime_date,
-					&mtime_time);
+		}
 
 		/* Checks the operation status. */
+		error = fat_encode_time(status->st_mtim.tv_sec, &mtime_date,
+					&mtime_time);
 		if (error != 0)
 			return error;
 	}
 
 	/*
- * The generic inode layer still applies attributes to an unlinked open
-	 * inode, but its former FAT slot may already belong to another file. */
+	 * The generic inode layer still applies attributes to an unlinked open
+	 * inode, but its former FAT slot may already belong to another file.
+	 */
 	if ((inode->i_flags & INODE_DEAD) != 0)
 		return 0;
-	result = fat_engine_write_sector_result(state, info->fi_dirent_lba,
-						&sector);
 
 	/* Checks the operation result. */
+	result = fat_engine_write_sector_result(state, info->fi_dirent_lba, &sector);
 	if (result != 0)
 		return result;
+
 	memcpy(saved, sector + info->fi_dirent_offset, sizeof(saved));
 	sector += info->fi_dirent_offset;
 
@@ -7563,9 +7817,9 @@ fat_setattr_unlocked(
 		fat_put16(sector + 22, mtime_time);
 		fat_put16(sector + 24, mtime_date);
 	}
-	result = fat_engine_mark_sector_dirty(state);
 
 	/* Checks the operation result. */
+	result = fat_engine_mark_sector_dirty(state);
 	if (result == 0)
 		result = fat_engine_flush(state);
 
@@ -7582,6 +7836,7 @@ fat_setattr_unlocked(
 		/* Returns the computed result. */
 		return result;
 	}
+
 	info->fi_attributes = sector[11];
 	(void)atime_time;
 
@@ -7600,11 +7855,12 @@ fat_setattr(
 	int error;
 
 	mutex_lock(&state->lock);
-	error = fat_flush_pending_closes(state);
 
 	/* Checks the operation status. */
+	error = fat_flush_pending_closes(state);
 	if (error == 0)
 		error = fat_setattr_unlocked(inode, status, mask);
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the failure. */
@@ -7614,8 +7870,6 @@ fat_setattr(
 	/* Succeeded. */
 	return 0;
 }
-
-static struct fat_file_state *fat_file_get(struct file *file);
 
 /* Supports the fat file get operation. */
 static struct fat_file_state *
@@ -7631,6 +7885,7 @@ fat_file_get(
 	if (file->f_data != NULL)
 		return file->f_data;
 	irq = spin_lock_irqsave(&fat_pool_lock);
+
 	/* Process each element required by the operation. */
 	for (i = 0; i < FAT_FILE_MAX; i++) {
 		/* Handles the fat files condition. */
@@ -7642,14 +7897,15 @@ fat_file_get(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
 
 	/* Handles the slot availability. */
 	if (slot == NULL)
 		return NULL;
-	mount_state = fat_mount_state(file->f_inode->i_mount);
 
 	/* Checks the fat raw open result. */
+	mount_state = fat_mount_state(file->f_inode->i_mount);
 	if (fat_raw_open(mount_state, fat_path(file->f_inode), slot) != 0) {
 		irq = spin_lock_irqsave(&fat_pool_lock);
 		memset(slot, 0, sizeof(*slot));
@@ -7681,7 +7937,9 @@ fat_open_file(
 	int error;
 
 	mutex_lock(&state->lock);
+
 	error = fat_file_get(file) != NULL ? 0 : EIO;
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the failure. */
@@ -7691,8 +7949,6 @@ fat_open_file(
 	/* Succeeded. */
 	return 0;
 }
-
-static ssize_t fat_loop_transfer(struct file *file, struct fat_file_state *state, void *buffer, size_t length, off_t offset, int writing);
 
 /* Called under the FAT mount lock and the ordinary file/VM I/O lease. Mapped operations never resize or publish allocation metadata. */
 static ssize_t
@@ -7712,26 +7968,29 @@ fat_loop_transfer(
 	unsigned i;
 	int error;
 
+	/* XXX: if コメント returnのときブロックにできていないので全般的に修正。 */
+
 	/* Handles the f backing claim availability. */
 	if (file->f_backing_claim == NULL || offset < 0 ||
 	    ((uint64_t)offset & 511U) != 0 || (length & 511U) != 0 ||
 	    (uint64_t)offset > state->size ||
-	    length > state->size - (uint64_t)offset)
-
+	    length > state->size - (uint64_t)offset) {
 		/* Returns the computed result. */
 		return -EINVAL;
+	}
 
 	/* Handles the writing condition. */
 	if (writing && mount->read_only)
 		return -EROFS;
 
 	/*
- * Drain before invalidating; never discard an earlier failed dirty
+	 * Drain before invalidating; never discard an earlier failed dirty
 	 * write. The lock excludes all other readers of the single FAT sector
-	 * slot. */
-	error = fat_engine_flush(mount);
+	 * slot.
+	 */
 
 	/* Checks the operation status. */
+	error = fat_engine_flush(mount);
 	if (error != 0)
 		return -error;
 	fat_engine_invalidate(mount);
@@ -7739,19 +7998,18 @@ fat_loop_transfer(
 	remaining = length / 512U;
 	/* Process each remaining element. */
 	for (i = 0; i < state->loop_map_count && remaining != 0; i++) {
-		extent = &state->loop_map[i];
-
 		/* Handles the block condition. */
+		extent = &state->loop_map[i];
 		if (block < extent->file_block)
 			return -EIO;
-		within = block - extent->file_block;
 
 		/* Handles the within condition. */
+		within = block - extent->file_block;
 		if (within >= extent->count)
 			continue;
-		amount = extent->count - within;
 
 		/* Handles the amount condition. */
+		amount = extent->count - within;
 		if (amount > remaining)
 			amount = remaining;
 
@@ -7770,6 +8028,7 @@ fat_loop_transfer(
 		/* Checks the operation status. */
 		if (error != 0)
 			return done != 0 ? (ssize_t)done : -error;
+
 		done += (size_t)amount * 512U;
 		block += amount;
 		remaining -= amount;
@@ -7798,15 +8057,16 @@ drv_fat_file_set_loop_map(
 	if (file == NULL || file->f_inode == NULL ||
 	    file->f_inode->i_mount == NULL ||
 	    file->f_inode->i_mount->m_type != &drv_fat_filesystem_type ||
-	    ((map == NULL) != (count == 0)))
-
+	    ((map == NULL) != (count == 0))) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
+
 	mount = fat_mount_state(file->f_inode->i_mount);
 	mutex_lock(&mount->lock);
-	state = fat_file_get(file);
 
 	/* Handles the state availability. */
+	state = fat_file_get(file);
 	if (state == NULL) {
 		error = EIO;
 		goto out;
@@ -7820,17 +8080,19 @@ drv_fat_file_set_loop_map(
 			error = EINVAL;
 			goto out;
 		}
+
 		/* Process each remaining element. */
 		for (i = 0; i < count; i++) {
 			/* Handles the map condition. */
-			if (map[i].file_block != next || map[i].count == 0 ||
+			if (map[i].file_block != next ||
+			    map[i].count == 0 ||
 			    map[i].disk_block > mount->disk->d_block_count ||
-			    map[i].count > mount->disk->d_block_count -
-						   map[i].disk_block ||
+			    map[i].count > mount->disk->d_block_count - map[i].disk_block ||
 			    next > UINT64_MAX - map[i].count) {
 				error = EIO;
 				goto out;
 			}
+
 			next += map[i].count;
 		}
 
@@ -7839,16 +8101,19 @@ drv_fat_file_set_loop_map(
 			error = EIO;
 			goto out;
 		}
-		error = fat_engine_flush(mount);
 
 		/* Checks the operation status. */
+		error = fat_engine_flush(mount);
 		if (error != 0)
 			goto out;
+
 		fat_engine_invalidate(mount);
 	}
+
 	state->loop_map = map;
 	state->loop_map_count = count;
 out:
+
 	mutex_unlock(&mount->lock);
 
 	/* Reports the failure. */
@@ -7858,8 +8123,6 @@ out:
 	/* Succeeded. */
 	return 0;
 }
-
-static ssize_t fat_pread_file_unlocked(struct file *file, void *buffer, size_t length, off_t offset);
 
 /* Supports the fat pread file unlocked operation. */
 static ssize_t
@@ -7885,11 +8148,13 @@ fat_pread_file_unlocked(
 	/* Checks the current data length. */
 	if (length > (size_t)(file->f_inode->i_size - offset))
 		length = (size_t)(file->f_inode->i_size - offset);
-	count = length > UINT32_MAX ? UINT32_MAX : (uint32_t)length;
 
-	/* Handles the loop map availability. */
-	if (state->loop_map != NULL && file->f_backing_claim != NULL &&
-	    offset >= 0 && ((uint64_t)offset & 511U) == 0 &&
+	/* XXX: 複雑な条件なので、複数行のコメントで箇条書きで条件の意味を説明する。 */
+	count = length > UINT32_MAX ? UINT32_MAX : (uint32_t)length;
+	if (state->loop_map != NULL &&
+	    file->f_backing_claim != NULL &&
+	    offset >= 0 &&
+	    ((uint64_t)offset & 511U) == 0 &&
 	    (count & 511U) == 0) {
 		/* Obtains the fat loop transfer result. */
 		function_result = fat_loop_transfer(file, state, buffer, count,
@@ -7898,18 +8163,15 @@ fat_pread_file_unlocked(
 		/* Returns the computed result. */
 		return function_result;
 	}
-	result = fat_raw_read(state, (uint64_t)offset, buffer, count, NULL,
-			      NULL);
 
 	/* Checks the operation result. */
+	result = fat_raw_read(state, (uint64_t)offset, buffer, count, NULL, NULL);
 	if (result != 0)
 		return -result;
 
 	/* Returns the computed result. */
 	return count;
 }
-
-static void fat_sync_inode_state(struct inode *inode, const struct fat_file_state *file);
 
 /* Supports the fat sync inode state operation. */
 static void
@@ -7926,11 +8188,15 @@ fat_sync_inode_state(
 	/* Handles the inode availability. */
 	if (inode == NULL || file == NULL)
 		return;
+
 	info = fat_inode(inode);
+
 	state = file;
 	info->fi_first_cluster = state->first_cluster;
 	inode->i_size = (off_t)file->size;
+
 	irq = spin_lock_irqsave(&fat_pool_lock);
+
 	/* Process each element required by the operation. */
 	for (i = 0; i < FAT_FILE_MAX; i++) {
 		/* Handles the fat files condition. */
@@ -7940,6 +8206,7 @@ fat_sync_inode_state(
 		open_state = &fat_files[i];
 		open_state->first_cluster = state->first_cluster;
 	}
+
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
 }
 
@@ -7958,25 +8225,26 @@ fat_flush_pending_closes(
 	for (i = 0; i < FAT_FILE_MAX; i++) {
 		state = &fat_files[i];
 
-		irq = spin_lock_irqsave(&fat_pool_lock);
-
 		/* Handles the state condition. */
+		irq = spin_lock_irqsave(&fat_pool_lock);
 		if (!state->used || state->mount != mount_state ||
 		    !state->pending_close) {
 			spin_unlock_irqrestore(&fat_pool_lock, irq);
 			continue;
 		}
+
 		owner = state->owner;
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
-		error = fat_raw_flush_file(state);
 
 		/* Checks the operation status. */
+		error = fat_raw_flush_file(state);
 		if (error != 0)
 			return error;
 
 		/* Handles the owner availability. */
 		if (owner != NULL)
 			fat_sync_inode_state(owner, state);
+
 		irq = spin_lock_irqsave(&fat_pool_lock);
 		memset(state, 0, sizeof(*state));
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
@@ -7998,7 +8266,9 @@ fat_pread_file(
 	ssize_t count;
 
 	mutex_lock(&state->lock);
+
 	count = fat_pread_file_unlocked(file, buffer, length, offset);
+
 	mutex_unlock(&state->lock);
 
 	/* Returns the computed result. */
@@ -8016,18 +8286,17 @@ fat_read_file(
 	ssize_t count;
 
 	mutex_lock(&state->lock);
-	count = fat_pread_file_unlocked(file, buffer, length, file->f_offset);
 
 	/* Checks the remaining item count. */
+	count = fat_pread_file_unlocked(file, buffer, length, file->f_offset);
 	if (count > 0)
 		file->f_offset += count;
+
 	mutex_unlock(&state->lock);
 
 	/* Returns the computed result. */
 	return count;
 }
-
-static ssize_t fat_pwrite_file_unlocked(struct file *file, const void *buffer, size_t length, off_t offset);
 
 /* Supports the fat pwrite file unlocked operation. */
 static ssize_t
@@ -8052,10 +8321,10 @@ fat_pwrite_file_unlocked(
 
 	/* Handles the uint64 t condition. */
 	if ((uint64_t)offset > UINT32_MAX ||
-	    (uint64_t)count > UINT32_MAX - (uint64_t)offset)
-
+	    (uint64_t)count > UINT32_MAX - (uint64_t)offset) {
 		/* Returns the computed result. */
 		return -EFBIG;
+	}
 
 	/* Handles the loop map availability. */
 	if (state->loop_map != NULL && file->f_backing_claim != NULL) {
@@ -8066,11 +8335,12 @@ fat_pwrite_file_unlocked(
 		/* Returns the computed result. */
 		return function_result;
 	}
-	result = fat_raw_write(state, (uint64_t)offset, buffer, count);
 
 	/* Checks the operation result. */
+	result = fat_raw_write(state, (uint64_t)offset, buffer, count);
 	if (result != 0)
 		return -result;
+
 	fat_sync_inode_state(file->f_inode, state);
 
 	/* Returns the computed result. */
@@ -8089,7 +8359,9 @@ fat_pwrite_file(
 	ssize_t count;
 
 	mutex_lock(&state->lock);
+
 	count = fat_pwrite_file_unlocked(file, buffer, length, offset);
+
 	mutex_unlock(&state->lock);
 
 	/* Returns the computed result. */
@@ -8116,17 +8388,20 @@ fat_pwrite_context(
 	/* The generic file layer already authorized flags and credentials. */
 	(void)flags;
 	(void)credential;
-	error = io_context_child(&child, context, IO_CONTEXT_DRAIN);
 
 	/* Checks the operation status. */
+	error = io_context_child(&child, context, IO_CONTEXT_DRAIN);
 	if (error != 0)
 		return -error;
+
 	state = fat_mount_state(file->f_inode->i_mount);
 	mutex_lock(&state->lock);
+
 	previous = state->write_context;
 	state->write_context = &child;
 	count = fat_pwrite_file_unlocked(file, buffer, length, offset);
 	state->write_context = previous;
+
 	mutex_unlock(&state->lock);
 
 	/* Returns the computed result. */
@@ -8145,21 +8420,21 @@ fat_write_file(
 	ssize_t count;
 
 	mutex_lock(&state->lock);
+
 	offset = (file_status_flags_get(file) & O_APPEND) != 0
 			 ? file->f_inode->i_size
 			 : file->f_offset;
-	count = fat_pwrite_file_unlocked(file, buffer, length, offset);
 
 	/* Checks the remaining item count. */
+	count = fat_pwrite_file_unlocked(file, buffer, length, offset);
 	if (count > 0)
 		file->f_offset = offset + count;
+
 	mutex_unlock(&state->lock);
 
 	/* Returns the computed result. */
 	return count;
 }
-
-static int fat_readdir_unlocked(struct file *file, struct dirent *entry, int *eof);
 
 /* Supports the fat readdir unlocked operation. */
 static int
@@ -8173,12 +8448,17 @@ fat_readdir_unlocked(
 	char child_path[ZEDBSD_PATH_MAX];
 	struct componentname component;
 	struct inode *child;
-	int result = fat_raw_readdir(state, fat_path(file->f_inode),
-				     (unsigned)file->f_offset, &decoded);
+	int result;
+
+	result = fat_raw_readdir(state,
+				 fat_path(file->f_inode),
+				 (unsigned)file->f_offset,
+				 &decoded);
 
 	/* Checks the operation result. */
 	if (result == ENOENT) {
 		*eof = 1;
+
 		/* Reports successful completion. */
 		return 0;
 	}
@@ -8186,6 +8466,7 @@ fat_readdir_unlocked(
 	/* Checks the operation result. */
 	if (result != 0)
 		return result;
+
 	component.cn_nameptr = decoded.name;
 	component.cn_namelen = strlen(decoded.name);
 	component.cn_flags = COMPONENT_LAST;
@@ -8197,14 +8478,18 @@ fat_readdir_unlocked(
 	/* Checks the fat stat path result. */
 	if (fat_stat_path(file->f_inode->i_mount, child_path, &child) != 0)
 		return EIO;
+
 	memset(entry, 0, sizeof(*entry));
 	entry->d_ino = child->i_ino;
 	entry->d_type = child->i_type;
 	strncpy(entry->d_name, decoded.name, NAME_MAX);
 	entry->d_name[NAME_MAX] = '\0';
+
 	inode_release(child);
+
 	file->f_offset++;
 	*eof = 0;
+
 	/* Reports successful completion. */
 	return 0;
 }
@@ -8220,7 +8505,9 @@ fat_readdir(
 	int error;
 
 	mutex_lock(&state->lock);
+
 	error = fat_readdir_unlocked(file, entry, eof);
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the failure. */
@@ -8237,6 +8524,8 @@ fat_close_file(
 	struct file *file)
 {
 	struct fat_file_state *state = file->f_data;
+
+	/* XXX: 三項演算子はなるべく使わない。宣言と代入は分離する。 */
 	struct fat_mount_state *mount_state =
 		file->f_inode != NULL ? fat_mount_state(file->f_inode->i_mount)
 				      : NULL;
@@ -8253,16 +8542,15 @@ fat_close_file(
 		if ((file_status_flags_get(file) & O_ACCMODE) != O_RDONLY &&
 		    file->f_inode != NULL &&
 		    (file->f_inode->i_flags & INODE_DEAD) == 0) {
-			error = fat_raw_flush_file(state);
-
 			/* Checks the operation status. */
+			error = fat_raw_flush_file(state);
 			if (error == 0)
 				fat_sync_inode_state(file->f_inode, state);
 		} else if (file->f_inode != NULL &&
 			   (file->f_inode->i_flags & INODE_DEAD) != 0) {
-			error = fat_engine_flush(
-				fat_mount_state(file->f_inode->i_mount));
+			error = fat_engine_flush(fat_mount_state(file->f_inode->i_mount));
 		}
+
 		irq = spin_lock_irqsave(&fat_pool_lock);
 
 		/* Checks the operation status. */
@@ -8270,7 +8558,7 @@ fat_close_file(
 		    file->f_inode != NULL &&
 		    (file->f_inode->i_flags & INODE_DEAD) == 0) {
 			/*
- * The struct file is closing, but mount sync still
+			 * The struct file is closing, but mount sync still
 			 * needs the authoritative directory-entry retry record.
 			 */
 			state->pending_close = 1;
@@ -8278,6 +8566,7 @@ fat_close_file(
 		} else {
 			memset(state, 0, sizeof(*state));
 		}
+
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
 		file->f_data = NULL;
 	}
@@ -8305,9 +8594,9 @@ fat_fsync(
 	int error;
 
 	mutex_lock(&mount_state->lock);
-	state = fat_file_get(file);
 
 	/* Handles the state availability. */
+	state = fat_file_get(file);
 	if (state == NULL)
 		error = EIO;
 	else if (file->f_inode != NULL &&
@@ -8319,6 +8608,7 @@ fat_fsync(
 	/* Checks the operation status. */
 	if (error == 0)
 		error = disk_sync(file->f_inode->i_mount->m_disk);
+
 	mutex_unlock(&mount_state->lock);
 
 	/* Reports the failure. */
@@ -8340,7 +8630,9 @@ fat_lookup_casefold(
 	int error;
 
 	mutex_lock(&state->lock);
+
 	error = fat_lookup_casefold_unlocked(directory, name, result);
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the failure. */
@@ -8369,9 +8661,9 @@ fat_truncate(
 	if ((uint64_t)size > UINT32_MAX)
 		return EFBIG;
 	mutex_lock(&state->lock);
-	result = fat_flush_pending_closes(state);
 
 	/* Checks the operation result. */
+	result = fat_flush_pending_closes(state);
 	if (result != 0) {
 		mutex_unlock(&state->lock);
 
@@ -8393,10 +8685,11 @@ fat_truncate(
 	/* Checks the operation result. */
 	if (result == 0) {
 		/*
- * An open writer may own a newer size/chain than the directory
-		 * entry.  Preserve its directory location but truncate the
-		 * coherent inode state, then propagate the result to every open
-		 * handle. */
+		 * An open writer may own a newer size/chain than the
+		 * directory entry.  Preserve its directory location
+		 * but truncate the coherent inode state, then
+		 * propagate the result to every open handle.
+		 */
 		file.size = (uint64_t)inode->i_size;
 		file.first_cluster = fat_inode(inode)->fi_first_cluster;
 		result = fat_raw_truncate(&file, (uint64_t)size);
@@ -8409,13 +8702,12 @@ fat_truncate(
 	/* Checks the operation result. */
 	if (result == 0)
 		fat_sync_inode_state(inode, &file);
+
 	mutex_unlock(&state->lock);
 
 	/* Returns the computed result. */
 	return result;
 }
-
-static int fat_create_unlocked(struct inode *directory, const struct componentname *name, const struct inode_creation_request *request, struct inode **result);
 
 /* Supports the fat create unlocked operation. */
 static int
@@ -8435,91 +8727,101 @@ fat_create_unlocked(
 	int error, rollback;
 
 	*result = NULL;
+
+	/* Checks the operation status. */
 	error = fat_flush_pending_closes(state);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = join_path(fat_path(directory), name, path);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = fat_creation_collision(state, path);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = fat_creation_representable(state, path, request, INODE_REG);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = fat_raw_create(state, path, &file);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = fat_raw_flush_file(&file);
 
 	/* Checks the operation status. */
+	error = fat_raw_flush_file(&file);
 	if (error != 0)
 		goto rollback_raw;
 	namecache_remove(directory, name);
-	error = fat_stat_path(directory->i_mount, path, &created);
 
 	/* Checks the operation status. */
+	error = fat_stat_path(directory->i_mount, path, &created);
 	if (error != 0)
 		goto rollback_raw;
 	fat_sync_inode_state(created, &file);
-	error = inode_creation_prepare(directory, created, request);
 
 	/* Checks the operation status. */
+	error = inode_creation_prepare(directory, created, request);
 	if (error == 0) {
-		error = fat_created_inode_matches(state, fat_path(created),
+		error = fat_created_inode_matches(state,
+						  fat_path(created),
 						  created);
 	}
 
 	/* Checks the operation status. */
 	if (error != 0)
 		goto rollback_inode;
+
 	*result = created;
+
 	/* Reports successful completion. */
 	return 0;
 
 rollback_inode:
-	rollback = fat_raw_unlink(state, path);
 
 	/* Handles the rollback condition. */
+	rollback = fat_raw_unlink(state, path);
 	if (rollback == 0) {
 		fat_orphan(created);
 		namecache_remove(directory, name);
 	} else {
 		/* Checks the fat creation representation result. */
-		if (fat_creation_representation(state, fat_path(created), &mode,
-						&uid, &gid) == 0) {
+		if (fat_creation_representation(state,
+						fat_path(created),
+						&mode,
+						&uid,
+						&gid) == 0) {
 			created->i_mode = S_IFREG | mode;
 			created->i_uid = uid;
 			created->i_gid = gid;
 			created->i_rdev = 0;
 		}
+
 		state->read_only = 1;
 		error = rollback;
 	}
+
 	*result = created;
+
 	/* Returns the computed result. */
 	return error;
 
 rollback_raw:
-	rollback = fat_raw_unlink(state, path);
 
 	/* Handles the rollback condition. */
+	rollback = fat_raw_unlink(state, path);
 	if (rollback != 0) {
 		state->read_only = 1;
 
 		/* Returns the computed result. */
 		return rollback;
 	}
+
 	namecache_remove(directory, name);
 
 	/* Reports the failure. */
@@ -8547,7 +8849,9 @@ fat_create(
 		return EINVAL;
 	*result = NULL;
 	mutex_lock(&state->lock);
+
 	error = fat_create_unlocked(directory, name, request, &created);
+
 	mutex_unlock(&state->lock);
 
 	/* Checks the operation status. */
@@ -8559,6 +8863,7 @@ fat_create(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	*result = created;
 
 	/* Reports the failure. */
@@ -8585,8 +8890,6 @@ fat_orphan(
 	namecache_purge_inode(inode);
 }
 
-static FAT_MUTATION void fat_release_orphan(struct inode *inode);
-
 /* Supports the fat release orphan operation. */
 static FAT_MUTATION void
 fat_release_orphan(
@@ -8597,12 +8900,12 @@ fat_release_orphan(
 		return;
 
 	/*
- * inode_release() owns the transition from the final external reference
-	 * to cache-only DEAD state and performs reclaim/free synchronously. */
+	 * inode_release() owns the transition from the final external
+	 * reference to cache-only DEAD state and performs
+	 * reclaim/free synchronously.
+	 */
 	inode_release(inode);
 }
-
-static FAT_MUTATION int fat_mkdir_unlocked(struct inode *directory, const struct componentname *name, const struct inode_creation_request *request, struct inode **result);
 
 /* Supports the fat mkdir unlocked operation. */
 static FAT_MUTATION int
@@ -8623,51 +8926,55 @@ fat_mkdir_unlocked(
 	int error, rollback;
 
 	*result = NULL;
+
+	/* Checks the operation status. */
 	error = join_path(fat_path(directory), name, path);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = fat_creation_collision(state, path);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = fat_creation_representable(state, path, request, INODE_DIR);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = fat_raw_mkdir(state, path, &cluster);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
 	namecache_remove(directory, name);
-	error = fat_stat_path(directory->i_mount, path, &created);
 
 	/* Checks the operation status. */
+	error = fat_stat_path(directory->i_mount, path, &created);
 	if (error != 0)
 		goto rollback_raw;
-	error = inode_creation_prepare(directory, created, request);
 
 	/* Checks the operation status. */
+	error = inode_creation_prepare(directory, created, request);
 	if (error == 0) {
-		error = fat_created_inode_matches(state, fat_path(created),
+		error = fat_created_inode_matches(state,
+						  fat_path(created),
 						  created);
 	}
 
 	/* Checks the operation status. */
 	if (error != 0)
 		goto rollback_inode;
+
 	*result = created;
+
 	/* Reports successful completion. */
 	return 0;
 
 rollback_inode:
-	rollback = fat_raw_rmdir(state, path);
 
 	/* Handles the rollback condition. */
+	rollback = fat_raw_rmdir(state, path);
 	if (rollback != 0) {
 		/* Checks the fat creation representation result. */
 		if (fat_creation_representation(state, fat_path(created), &mode,
@@ -8677,6 +8984,7 @@ rollback_inode:
 			created->i_gid = gid;
 			created->i_rdev = 0;
 		}
+
 		state->read_only = 1;
 		error = rollback;
 		*result = created;
@@ -8685,43 +8993,45 @@ rollback_inode:
 	}
 
 	/*
- * The directory entry is gone, so no live inode may retain the cluster
-	 * once reclamation starts.  A recoverable free failure is represented
-	 * by pending_orphans instead of the now-dead inode. */
+	 * The directory entry is gone, so no live inode may retain
+	 * the cluster once reclamation starts.  A recoverable free
+	 * failure is represented by pending_orphans instead of the
+	 * now-dead inode.
+	 */
 	fat_inode(created)->fi_first_cluster = 0;
 	fat_orphan(created);
 	namecache_remove(directory, name);
-	rollback = fat_raw_free_chain(state, cluster);
 
 	/* Handles the rollback condition. */
+	rollback = fat_raw_free_chain(state, cluster);
 	if (rollback != 0) {
+		/* Handles the deferred condition. */
 		deferred = state->read_only ? rollback
 					    : fat_defer_orphan(state, cluster);
-
-		/* Handles the deferred condition. */
 		if (deferred != 0)
 			state->read_only = 1;
 		*result = created;
 		/* Returns the computed result. */
 		return deferred != 0 ? deferred : rollback;
 	}
+
 	*result = created;
 	/* Returns the computed result. */
 	return error;
 
 rollback_raw:
-	rollback = fat_raw_rmdir(state, path);
 
 	/* Handles the rollback condition. */
+	rollback = fat_raw_rmdir(state, path);
 	if (rollback != 0) {
 		state->read_only = 1;
 
 		/* Returns the computed result. */
 		return rollback;
 	}
-	rollback = fat_raw_free_chain(state, cluster);
 
 	/* Handles the rollback condition. */
+	rollback = fat_raw_free_chain(state, cluster);
 	if (rollback != 0) {
 		/* Checks the fat defer orphan result. */
 		if (state->read_only || fat_defer_orphan(state, cluster) != 0)
@@ -8730,6 +9040,7 @@ rollback_raw:
 		/* Returns the computed result. */
 		return rollback;
 	}
+
 	namecache_remove(directory, name);
 
 	/* Reports the failure. */
@@ -8757,7 +9068,9 @@ fat_mkdir(
 		return EINVAL;
 	*result = NULL;
 	mutex_lock(&state->lock);
+
 	error = fat_mkdir_unlocked(directory, name, request, &created);
+
 	mutex_unlock(&state->lock);
 
 	/* Checks the operation status. */
@@ -8769,6 +9082,7 @@ fat_mkdir(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	*result = created;
 
 	/* Reports the failure. */
@@ -8778,8 +9092,6 @@ fat_mkdir(
 	/* Succeeded. */
 	return 0;
 }
-
-static FAT_MUTATION int fat_remove_inode_unlocked(struct inode *directory, const struct componentname *name, int remove_directory, struct inode **orphaned);
 
 /* Supports the fat remove inode unlocked operation. */
 static FAT_MUTATION int
@@ -8795,29 +9107,29 @@ fat_remove_inode_unlocked(
 	int error;
 
 	*orphaned = NULL;
-	error = fat_flush_pending_closes(state);
 
 	/* Checks the operation status. */
+	error = fat_flush_pending_closes(state);
 	if (error == 0)
 		error = fat_drain_pending_orphans(state);
 
 	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = join_path(fat_path(directory), name, path);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = fat_lookup_unlocked(directory, name, &victim);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = remove_directory ? fat_raw_rmdir(state, path)
 				 : fat_raw_unlink(state, path);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		namecache_remove(directory, name);
 		fat_orphan(victim);
@@ -8847,7 +9159,9 @@ fat_unlink(
 	int error;
 
 	mutex_lock(&state->lock);
+
 	error = fat_remove_inode_unlocked(directory, name, 0, &orphaned);
+
 	mutex_unlock(&state->lock);
 
 	/* Handles the orphaned availability. */
@@ -8873,7 +9187,9 @@ fat_rmdir(
 	int error;
 
 	mutex_lock(&state->lock);
+
 	error = fat_remove_inode_unlocked(directory, name, 1, &orphaned);
+
 	mutex_unlock(&state->lock);
 
 	/* Handles the orphaned availability. */
@@ -8888,26 +9204,23 @@ fat_rmdir(
 	return 0;
 }
 
-static FAT_MUTATION int fat_path_descendant(const char *parent, const char *path);
-
 /* Supports the fat path descendant operation. */
 static FAT_MUTATION int
 fat_path_descendant(
 	const char *parent,
 	const char *path)
 {
-	int function_result;
+	int error;
 	size_t length = strlen(parent);
 
-	/* Computes the function result. */
-	function_result = length != 0 && !memcmp(parent, path, length) &&
-			  path[length] == '/';
+	/* XXX: 真偽値はif文で作る。式で作らない。 */
+	error = length != 0 &&
+		!memcmp(parent, path, length) &&
+		path[length] == '/';
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static FAT_MUTATION void fat_repath_descendants(struct mount *mountp, const char *old_path, const char *new_path);
 
 /* Supports the fat repath descendants operation. */
 static FAT_MUTATION void
@@ -8924,21 +9237,20 @@ fat_repath_descendants(
 
 	/* Process each element required by the operation. */
 	for (i = 0; i < FAT_INODE_MAX; i++) {
-		/* Checks the fat path descendant result. */
+		/* XXX: ifを分解して、それぞれにcontinueの理由を書く。 */
 		if (!fat_inodes[i].used ||
 		    fat_inodes[i].info.fi_inode.i_mount != mountp ||
 		    !fat_path_descendant(old_path, fat_inodes[i].path))
 			continue;
+
 		suffix = strlen(fat_inodes[i].path + old_length);
 		memcpy(replacement, new_path, new_length);
-		memcpy(replacement + new_length,
-		       fat_inodes[i].path + old_length, suffix + 1U);
+		memcpy(replacement + new_length, fat_inodes[i].path + old_length, suffix + 1U);
 		strcpy(fat_inodes[i].path, replacement);
 	}
+
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
 }
-
-static FAT_MUTATION int fat_repath_descendants_possible(struct mount *mountp, const char *old_path, const char *new_path);
 
 /* Supports the fat repath descendants possible operation. */
 static FAT_MUTATION int
@@ -8955,26 +9267,25 @@ fat_repath_descendants_possible(
 
 	/* Process each element required by the operation. */
 	for (i = 0; i < FAT_INODE_MAX; i++) {
-		/* Checks the fat path descendant result. */
+		/* XXX: ifを分解して、それぞれにcontinueの理由を書く。 */
 		if (!fat_inodes[i].used ||
 		    fat_inodes[i].info.fi_inode.i_mount != mountp ||
 		    !fat_path_descendant(old_path, fat_inodes[i].path))
 			continue;
-		suffix = strlen(fat_inodes[i].path + old_length);
 
 		/* Handles the new length condition. */
+		suffix = strlen(fat_inodes[i].path + old_length);
 		if (new_length + suffix >= ZEDBSD_PATH_MAX) {
 			result = ENAMETOOLONG;
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
 
 	/* Returns the computed result. */
 	return result;
 }
-
-static FAT_MUTATION int fat_rename_unlocked( struct inode *old_directory, const struct componentname *old_name, struct inode *new_directory, const struct componentname *new_name, unsigned flags, struct inode **orphaned);
 
 /* Supports the fat rename unlocked operation. */
 static FAT_MUTATION int
@@ -9003,23 +9314,23 @@ fat_rename_unlocked(
 	/* Checks the active flags. */
 	if (flags != 0)
 		return EINVAL;
-	error = fat_flush_pending_closes(state);
 
 	/* Checks the operation status. */
+	error = fat_flush_pending_closes(state);
 	if (error != 0)
 		return error;
-	error = join_path(fat_path(old_directory), old_name, old_path);
 
 	/* Checks the operation status. */
+	error = join_path(fat_path(old_directory), old_name, old_path);
 	if (error == 0)
 		error = join_path(fat_path(new_directory), new_name, new_path);
 
 	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = fat_lookup_unlocked(old_directory, old_name, &source);
 
 	/* Checks the operation status. */
+	error = fat_lookup_unlocked(old_directory, old_name, &source);
 	if (error != 0)
 		return error;
 
@@ -9030,10 +9341,11 @@ fat_rename_unlocked(
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	strcpy(old_canonical, fat_path(source));
-	target_error = fat_lookup_unlocked(new_directory, new_name, &target);
 
 	/* Checks the operation status. */
+	target_error = fat_lookup_unlocked(new_directory, new_name, &target);
 	if (target_error == 0 && target == source) {
 		inode_release(target);
 		inode_release(source);
@@ -9052,9 +9364,8 @@ fat_rename_unlocked(
 
 	/* Handles the target availability. */
 	if (target != NULL) {
-		error = fat_drain_pending_orphans(state);
-
 		/* Checks the operation status. */
+		error = fat_drain_pending_orphans(state);
 		if (error != 0) {
 			inode_release(target);
 			inode_release(source);
@@ -9074,25 +9385,28 @@ fat_rename_unlocked(
 			/* Returns the computed result. */
 			return EIO;
 		}
+
 		strcpy(new_canonical, fat_path(target));
 	} else {
-		error = fat_raw_canonical_basename(state, new_path,
-						   canonical_basename);
-
 		/* Checks the operation status. */
+		error = fat_raw_canonical_basename(state,
+						   new_path,
+						   canonical_basename);
 		if (error != 0) {
 			inode_release(source);
 
 			/* Returns the computed result. */
 			return error;
 		}
+
 		canonical_name.cn_nameptr = canonical_basename;
 		canonical_name.cn_namelen = strlen(canonical_basename);
 		canonical_name.cn_flags = COMPONENT_LAST;
-		error = join_path(fat_path(new_directory), &canonical_name,
-				  new_canonical);
 
 		/* Checks the operation status. */
+		error = join_path(fat_path(new_directory),
+				  &canonical_name,
+				  new_canonical);
 		if (error != 0) {
 			inode_release(source);
 
@@ -9103,41 +9417,49 @@ fat_rename_unlocked(
 
 	/* Handles the source condition. */
 	if (source->i_type == INODE_DIR) {
-		error = fat_repath_descendants_possible(
-			old_directory->i_mount, old_canonical, new_canonical);
-
 		/* Checks the operation status. */
+		error = fat_repath_descendants_possible(old_directory->i_mount,
+							old_canonical,
+							new_canonical);
 		if (error != 0) {
 			/* Handles the target availability. */
 			if (target != NULL)
 				inode_release(target);
+
 			inode_release(source);
 
 			/* Returns the computed result. */
 			return error;
 		}
 	}
+
 	info = fat_inode(source);
 
 	/* Handles the source condition. */
-	if (source->i_size < 0 || (uint64_t)source->i_size > UINT32_MAX) {
+	if (source->i_size < 0 ||
+	    (uint64_t)source->i_size > UINT32_MAX) {
 		/* Handles the target availability. */
 		if (target != NULL)
 			inode_release(target);
+
 		inode_release(source);
 
 		/* Returns the computed result. */
 		return EFBIG;
 	}
-	error = fat_raw_rename(state, old_path, new_path,
-			       info->fi_first_cluster, (uint32_t)source->i_size,
-			       &renamed);
 
 	/* Checks the operation status. */
+	error = fat_raw_rename(state,
+			       old_path,
+			       new_path,
+			       info->fi_first_cluster,
+			       (uint32_t)source->i_size,
+			       &renamed);
 	if (error != 0) {
 		/* Handles the target availability. */
 		if (target != NULL)
 			inode_release(target);
+
 		inode_release(source);
 
 		/* Returns the computed result. */
@@ -9147,31 +9469,41 @@ fat_rename_unlocked(
 	/* Handles the target availability. */
 	if (target != NULL)
 		fat_orphan(target);
+
 	info->fi_dirent_lba = renamed.lba;
 	info->fi_dirent_offset = renamed.offset;
 	info->fi_attributes = renamed.attributes;
 	source->i_ino = fat_ino(renamed.lba, renamed.offset);
+
 	irq = spin_lock_irqsave(&fat_pool_lock);
+
 	/* Process each element required by the operation. */
 	for (i = 0; i < FAT_FILE_MAX; i++) {
 		/* Handles the fat files condition. */
 		if (!fat_files[i].used || fat_files[i].owner != source)
 			continue;
+
 		open_state = &fat_files[i];
 		open_state->directory_lba = renamed.lba;
 		open_state->directory_offset = renamed.offset;
 		open_state->directory_dirty = 0;
 	}
+
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
 
 	/* Handles the source condition. */
 	if (source->i_type == INODE_DIR) {
-		fat_repath_descendants(old_directory->i_mount, old_canonical,
+		fat_repath_descendants(old_directory->i_mount,
+				       old_canonical,
 				       new_canonical);
 	}
+
 	irq = spin_lock_irqsave(&fat_pool_lock);
+
 	strcpy(fat_slot(source)->path, new_canonical);
+
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
+
 	namecache_remove(old_directory, old_name);
 	namecache_remove(new_directory, new_name);
 
@@ -9198,8 +9530,14 @@ fat_rename(
 	int error;
 
 	mutex_lock(&state->lock);
-	error = fat_rename_unlocked(old_directory, old_name, new_directory,
-				    new_name, flags, &orphaned);
+
+	error = fat_rename_unlocked(old_directory,
+				    old_name,
+				    new_directory,
+				    new_name,
+				    flags,
+				    &orphaned);
+
 	mutex_unlock(&state->lock);
 
 	/* Handles the orphaned availability. */
@@ -9214,8 +9552,6 @@ fat_rename(
 	return 0;
 }
 
-static void fat_reclaim_unlocked(struct inode *inode);
-
 /* Supports the fat reclaim unlocked operation. */
 static void
 fat_reclaim_unlocked(
@@ -9228,10 +9564,8 @@ fat_reclaim_unlocked(
 	/* Handles the state availability. */
 	if ((info->fi_flags & FAT_INODE_ORPHANED) != 0 &&
 	    info->fi_first_cluster != 0 && state != NULL) {
-		result = fat_engine_discard_chain_result(
-			state, info->fi_first_cluster);
-
 		/* Checks the fat defer orphan result. */
+		result = fat_engine_discard_chain_result(state, info->fi_first_cluster);
 		if (result == 0 ||
 		    fat_defer_orphan(state, info->fi_first_cluster) == 0)
 			info->fi_first_cluster = 0;
@@ -9243,22 +9577,23 @@ static void
 fat_reclaim(
 	struct inode *inode)
 {
+	/* XXX: 宣言と代入を分けること。 */
 	struct fat_inode_info *info = fat_inode(inode);
 	struct fat_mount_state *state = fat_mount_state(inode->i_mount);
 
 	/* Handles the state availability. */
 	if (state == NULL || info == NULL ||
 	    (info->fi_flags & FAT_INODE_ORPHANED) == 0 ||
-	    info->fi_first_cluster == 0)
-
+	    info->fi_first_cluster == 0) {
 		/* Returns the computed result. */
 		return;
+	}
 	mutex_lock(&state->lock);
+
 	fat_reclaim_unlocked(inode);
+
 	mutex_unlock(&state->lock);
 }
-
-static int fat_probe_volume(struct disk *disk, int direct_io, enum bootfat_type *type);
 
 /* Supports the fat probe volume operation. */
 static int
@@ -9277,9 +9612,9 @@ fat_probe_volume(
 	/* Handles the disk availability. */
 	if (disk == NULL || type == NULL)
 		return EOPNOTSUPP;
-	result = parse_bpb(&candidate);
 
 	/* Checks the operation result. */
+	result = parse_bpb(&candidate);
 	if (result != 0)
 		return result;
 	*type = (enum bootfat_type)candidate.type;
@@ -9295,20 +9630,18 @@ drv_fat_probe_type(
 	struct disk *disk,
 	enum bootfat_type *type)
 {
-	int function_result;
+	int error;
 
 	/* Handles the disk availability. */
 	if (disk == NULL || type == NULL || disk->d_block_size != 512)
 		return EOPNOTSUPP;
 
 	/* Obtains the fat probe volume result. */
-	function_result = fat_probe_volume(disk, 0, type);
+	error = fat_probe_volume(disk, 0, type);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static char fat_hex_digit(unsigned value);
 
 /* Supports the fat hex digit operation. */
 static char
@@ -9318,8 +9651,6 @@ fat_hex_digit(
 	/* Returns the computed result. */
 	return (char)(value < 10U ? '0' + value : 'A' + value - 10U);
 }
-
-static void fat_hex32(char output[9], uint32_t value);
 
 /* Supports the fat hex32 operation. */
 static void
@@ -9332,10 +9663,9 @@ fat_hex32(
 	/* Process each element required by the operation. */
 	for (i = 0; i < 8U; i++)
 		output[i] = fat_hex_digit((value >> (28U - i * 4U)) & 15U);
+
 	output[8] = '\0';
 }
-
-static void fat_copy_label(char *output, size_t capacity, const uint8_t *input, size_t length);
 
 /* Supports the fat copy label operation. */
 static void
@@ -9355,16 +9685,17 @@ fat_copy_label(
 	/* Checks the current endpoint. */
 	if (end >= capacity)
 		end = capacity - 1U;
+
 	/* Process each element required by the operation. */
 	for (i = 0; i < end; i++) {
-		output[i] = input[i] >= 0x20U && input[i] <= 0x7eU
-				    ? (char)input[i]
-				    : '_';
+		/* 三項演算子よりif文を使うこと。 */
+		output[i] = (input[i] >= 0x20U && input[i] <= 0x7eU) ?
+			(char)input[i] :
+			'_';
 	}
+
 	output[end] = '\0';
 }
-
-static int fat_identify(struct disk *disk, struct block_identity *identity);
 
 /* Supports the fat identify operation. */
 static int
@@ -9398,40 +9729,43 @@ fat_identify(
 	/* Handles the boot condition. */
 	if (boot[510] != 0x55U || boot[511] != 0xaaU)
 		return EOPNOTSUPP;
+
 	sector_bytes = fat_engine_get16(boot + 11U);
-	sector_scale = sector_bytes == 512U    ? 1U
-		       : sector_bytes == 1024U ? 2U
-					       : 0U;
-	declared_sectors = fat_engine_get16(boot + 19U);
+
+	/* XXX: 三項演算子の入れ子は禁止。 */
+	sector_scale = sector_bytes == 512U ? 1U :
+		sector_bytes == 1024U ? 2U : 0U;
 
 	/* Handles the declared sectors condition. */
+	declared_sectors = fat_engine_get16(boot + 19U);
 	if (declared_sectors == 0U)
 		declared_sectors = fat_engine_get32(boot + 32U);
-	fat_sectors = fat_engine_get16(boot + 22U);
 
 	/* Handles the fat sectors condition. */
+	fat_sectors = fat_engine_get16(boot + 22U);
 	if (fat_sectors == 0U)
 		fat_sectors = fat_engine_get32(boot + 36U);
 
 	/*
- * An MBR has the same trailing signature.  Require a credible FAT BPB
-	 * before treating decoder failures as filesystem corruption. */
+	 * An MBR has the same trailing signature.  Require a credible FAT BPB
+	 * before treating decoder failures as filesystem corruption.
+	 */
 	if ((sector_scale != 1U && sector_scale != 2U) || boot[13U] == 0U ||
 	    fat_engine_get16(boot + 14U) == 0U || boot[16U] == 0U ||
-	    declared_sectors == 0U || fat_sectors == 0U)
-
+	    declared_sectors == 0U || fat_sectors == 0U) {
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
+	}
 
 	/* Handles the declared sectors condition. */
 	if (declared_sectors > UINT32_MAX / sector_scale ||
-	    (uint64_t)declared_sectors * sector_scale > disk->d_block_count)
-
+	    (uint64_t)declared_sectors * sector_scale > disk->d_block_count) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = fat_probe_volume(disk, 1, &type);
+	}
 
 	/* Checks the operation status. */
+	error = fat_probe_volume(disk, 1, &type);
 	if (error != 0)
 		return error;
 
@@ -9445,13 +9779,19 @@ fat_identify(
 	if (boot[serial_offset - 1U] != 0x29U)
 		return 0;
 	serial = fat_engine_get32(boot + serial_offset);
+
 	fat_hex32(identity->uuid, serial);
+
 	memmove(identity->uuid + 5, identity->uuid + 4, 4U);
+
 	identity->uuid[4] = '-';
 	identity->uuid[9] = '\0';
 	identity->flags |= ZEDBSD_BLKID_UUID;
-	fat_copy_label(identity->label, sizeof(identity->label),
-		       boot + label_offset, 11U);
+
+	fat_copy_label(identity->label,
+		       sizeof(identity->label),
+		       boot + label_offset,
+		       11U);
 
 	/* Handles the identity condition. */
 	if (identity->label[0] != '\0' &&
@@ -9462,24 +9802,20 @@ fat_identify(
 	return 0;
 }
 
-static int fat_probe(struct disk *disk);
-
 /* Supports the fat probe operation. */
 static int
 fat_probe(
 	struct disk *disk)
 {
-	int function_result;
+	int error;
 	enum bootfat_type type;
 
 	/* Obtains the drv fat probe type result. */
-	function_result = drv_fat_probe_type(disk, &type);
+	error = drv_fat_probe_type(disk, &type);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
-
-static int fat_mount_impl(struct mount *mountp);
 
 /* Supports the fat mount impl operation. */
 static int
@@ -9495,6 +9831,7 @@ fat_mount_impl(
 	int result;
 
 	irq = spin_lock_irqsave(&fat_pool_lock);
+
 	/* Process each element required by the operation. */
 	for (i = 0; i < FAT_MOUNT_MAX; i++) {
 		/* Handles the fat mounts condition. */
@@ -9505,6 +9842,7 @@ fat_mount_impl(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
 
 	/* Handles the state availability. */
@@ -9517,9 +9855,9 @@ fat_mount_impl(
 	state->owner = mountp;
 	state->read_only = (mountp->m_flags & MOUNT_READ_ONLY) != 0 ||
 			   (mountp->m_disk->d_flags & DISK_READ_ONLY) != 0;
-	result = fat_probe_volume(mountp->m_disk, 0, &type);
 
 	/* Checks the operation result. */
+	result = fat_probe_volume(mountp->m_disk, 0, &type);
 	if (result == 0) {
 		/* Dispatch the selected syntax or record type. */
 		switch (type) {
@@ -9541,30 +9879,35 @@ fat_mount_impl(
 	/* Checks the operation result. */
 	if (result != 0) {
 		irq = spin_lock_irqsave(&fat_pool_lock);
-		memset(&fat_metadata_tables[i], 0,
-		       sizeof(fat_metadata_tables[i]));
+
+		memset(&fat_metadata_tables[i], 0, sizeof(fat_metadata_tables[i]));
 		memset(state, 0, sizeof(*state));
+
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
 
 		/* Returns the computed result. */
 		return result;
 	}
+
 	fat_metadata_load(state);
 	mountp->m_data = state;
-	root = inode_alloc(mountp);
 
 	/* Handles the root availability. */
+	root = inode_alloc(mountp);
 	if (root == NULL) {
 		irq = spin_lock_irqsave(&fat_pool_lock);
-		memset(&fat_metadata_tables[i], 0,
-		       sizeof(fat_metadata_tables[i]));
+
+		memset(&fat_metadata_tables[i], 0, sizeof(fat_metadata_tables[i]));
 		memset(state, 0, sizeof(*state));
+
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
+
 		mountp->m_data = NULL;
 
 		/* Returns the computed result. */
 		return ENOSPC;
 	}
+
 	info = fat_inode(root);
 	root->i_type = INODE_DIR;
 	root->i_ino = 1;
@@ -9578,8 +9921,6 @@ fat_mount_impl(
 	/* Reports successful completion. */
 	return 0;
 }
-
-static int fat_sync_mount(struct mount *mountp);
 
 /* Supports the fat sync mount operation. */
 static int
@@ -9596,38 +9937,39 @@ fat_sync_mount(
 	/* Handles the state availability. */
 	if (state == NULL)
 		return EINVAL;
+
 	mutex_lock(&state->lock);
-	error = fat_drain_pending_orphans(state);
 
 	/* Checks the operation status. */
+	error = fat_drain_pending_orphans(state);
 	if (error == 0)
 		error = fat_flush_pending_closes(state);
 
 	/*
- * A successful filesystem sync includes directory-entry size/cluster
+	 * A successful filesystem sync includes directory-entry size/cluster
 	 * state held by live open descriptions, not only the sector currently
-	 * resident in the mount cache. */
-	/* Process each element required by the operation. */
+	 * resident in the mount cache.
+	 */
 	for (i = 0; i < FAT_FILE_MAX && error == 0; i++) {
 		file = &fat_files[i];
 
-		irq = spin_lock_irqsave(&fat_pool_lock);
-
 		/* Handles the file condition. */
+		irq = spin_lock_irqsave(&fat_pool_lock);
 		if (!file->used || file->mount != state ||
 		    !file->directory_dirty) {
 			spin_unlock_irqrestore(&fat_pool_lock, irq);
 			continue;
 		}
+
 		owner = file->owner;
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
 
 		/* Handles the owner availability. */
 		if (owner == NULL || (owner->i_flags & INODE_DEAD) != 0)
 			continue;
-		error = fat_raw_flush_file(file);
 
 		/* Checks the operation status. */
+		error = fat_raw_flush_file(file);
 		if (error == 0)
 			fat_sync_inode_state(owner, file);
 	}
@@ -9639,6 +9981,7 @@ fat_sync_mount(
 	/* Checks the operation status. */
 	if (error == 0)
 		error = disk_sync(mountp->m_disk);
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the failure. */
@@ -9648,8 +9991,6 @@ fat_sync_mount(
 	/* Succeeded. */
 	return 0;
 }
-
-static void fat_unmount_impl(struct mount *mountp);
 
 /* Supports the fat unmount impl operation. */
 static void
@@ -9664,20 +10005,24 @@ fat_unmount_impl(
 	if (state == NULL)
 		return;
 	mutex_lock(&state->lock);
+
 	fat_engine_invalidate(state);
+
 	mutex_unlock(&state->lock);
+
 	metadata = state->metadata;
 	irq = spin_lock_irqsave(&fat_pool_lock);
+
 	memset(state, 0, sizeof(*state));
 
 	/* Handles the metadata availability. */
 	if (metadata != NULL)
 		memset(metadata, 0, sizeof(*metadata));
+
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
+
 	mountp->m_data = NULL;
 }
-
-static int fat_statvfs(struct mount *mountp, struct statvfs *result);
 
 /* Supports the fat statvfs operation. */
 static int
@@ -9694,10 +10039,11 @@ fat_statvfs(
 	if (state == NULL || result == NULL)
 		return EINVAL;
 	mutex_lock(&state->lock);
+
 	fat = state;
-	error = fat_engine_count_free_clusters(state, &free_clusters);
 
 	/* Checks the operation status. */
+	error = fat_engine_count_free_clusters(state, &free_clusters);
 	if (error == 0) {
 		memset(result, 0, sizeof(*result));
 		result->f_bsize = (uint64_t)fat->sectors_per_cluster * 512U;
@@ -9707,13 +10053,15 @@ fat_statvfs(
 		result->f_bavail = free_clusters;
 
 		/*
- * FAT has no fixed inode table.  Use clusters as the capacity
-		 * unit for the advisory file counts as well. */
+		 * FAT has no fixed inode table.  Use clusters as the capacity
+		 * unit for the advisory file counts as well.
+		 */
 		result->f_files = fat->cluster_count;
 		result->f_ffree = free_clusters;
 		result->f_favail = free_clusters;
 		result->f_namemax = NAME_MAX;
 	}
+
 	mutex_unlock(&state->lock);
 
 	/* Reports the failure. */
@@ -9742,13 +10090,13 @@ fat_writeback_range(
 		return 0;
 
 	/*
- * Uses the already opened private writer without creating open state.
+	 * Uses the already opened private writer without creating open state.
 	 */
 	mount = fat_mount_state(file->f_inode->i_mount);
 	mutex_lock(&mount->lock);
-	state = file->f_data;
 
 	/* Handles the state availability. */
+	state = file->f_data;
 	if (mount->read_only || state == NULL || state->loop_map != NULL ||
 	    offset > file->f_inode->i_size ||
 	    (uint64_t)length > (uint64_t)(file->f_inode->i_size - offset)) {
@@ -9759,13 +10107,15 @@ fat_writeback_range(
 	}
 
 	/*
- * Validates the full chain and rejects a tail before the requested
-	 * byte. */
+	 * Validates the full chain and rejects a tail before the requested
+	 * byte.
+	 */
 	wanted = (uint32_t)(((uint64_t)offset + length - 1U) /
 			    ((uint64_t)mount->sectors_per_cluster * 512U));
 	error = fat_raw_validate_chain_at(
 		mount, fat_inode(file->f_inode)->fi_first_cluster, wanted,
 		&cursor, NULL);
+
 	mutex_unlock(&mount->lock);
 
 	/* Checks the operation status. */
@@ -9774,30 +10124,19 @@ fat_writeback_range(
 
 	/* Reports only the requested, valid cluster position as eligible. */
 	if (cursor.index != wanted ||
-	    !fat_raw_valid_cluster(mount, cursor.cluster))
-
+	    !fat_raw_valid_cluster(mount, cursor.cluster)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
 }
 
-const struct filesystem_type drv_fat_filesystem_type = {
-	.writeback_range = fat_writeback_range,
-	.fs_name = "fat",
-	.probe = fat_probe,
-	.identify = fat_identify,
-	.mount = fat_mount_impl,
-	.sync = fat_sync_mount,
-	.statvfs = fat_statvfs,
-	.unmount = fat_unmount_impl,
-	.alloc_inode = fat_alloc_inode,
-	.free_inode = fat_free_inode,
-};
-
 /*
  * Implements the drv fat file extents operation.
+ *
+ * XXX: この関数をexternにしてる理由は何？あまりにもad-hocだけど。
  */
 int
 drv_fat_file_extents(
@@ -9813,23 +10152,24 @@ drv_fat_file_extents(
 	if (file == NULL || callback == NULL || file->f_inode == NULL ||
 	    file->f_inode->i_type != INODE_REG ||
 	    file->f_inode->i_mount == NULL ||
-	    file->f_inode->i_mount->m_type != &drv_fat_filesystem_type)
-
+	    file->f_inode->i_mount->m_type != &drv_fat_filesystem_type) {
 		/* Returns the computed result. */
 		return EINVAL;
-	mount_state = fat_mount_state(file->f_inode->i_mount);
+	}
 
 	/* Handles the mount state availability. */
+	mount_state = fat_mount_state(file->f_inode->i_mount);
 	if (mount_state == NULL)
 		return EIO;
 	mutex_lock(&mount_state->lock);
-	state = fat_file_get(file);
 
 	/* Handles the state availability. */
+	state = fat_file_get(file);
 	if (state == NULL)
 		error = EIO;
 	else
 		error = fat_engine_file_extents(state, callback, context);
+
 	mutex_unlock(&mount_state->lock);
 
 	/* Reports the failure. */
@@ -9839,14 +10179,6 @@ drv_fat_file_extents(
 	/* Succeeded. */
 	return 0;
 }
-
-struct contiguous_context {
-	uint64_t block;
-	uint64_t expected;
-	int seen;
-};
-
-static int contiguous_extent(uint64_t file_block, uint64_t disk_block, uint32_t count, void *argument);
 
 /* Supports the contiguous extent operation. */
 static int
@@ -9867,10 +10199,10 @@ contiguous_extent(
 
 	/* Handles the file block condition. */
 	if (file_block + context->block != disk_block ||
-	    disk_block != context->expected)
-
+	    disk_block != context->expected) {
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
+	}
 	context->expected += count;
 
 	/* Reports successful completion. */
@@ -9879,6 +10211,8 @@ contiguous_extent(
 
 /*
  * Implements the drv fat file contiguous block operation.
+ *
+ * XXX: これは本当にまだ使われている？あまりにもad-hocだけど。
  */
 int
 drv_fat_file_contiguous_block(
@@ -9892,13 +10226,13 @@ drv_fat_file_contiguous_block(
 	/* Handles the file availability. */
 	if (file == NULL || disk == NULL || block == NULL ||
 	    file->f_inode == NULL || file->f_inode->i_mount == NULL ||
-	    file->f_inode->i_mount->m_type != &drv_fat_filesystem_type)
-
+	    file->f_inode->i_mount->m_type != &drv_fat_filesystem_type) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = drv_fat_file_extents(file, contiguous_extent, &context);
+	}
 
 	/* Checks the operation status. */
+	error = drv_fat_file_extents(file, contiguous_extent, &context);
 	if (error != 0 || !context.seen)
 		return error != 0 ? error : EIO;
 	*disk = file->f_inode->i_mount->m_disk;
@@ -9906,4 +10240,3 @@ drv_fat_file_contiguous_block(
 	/* Reports successful completion. */
 	return 0;
 }
-/* End consolidated fat.c. */

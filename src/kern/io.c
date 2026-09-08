@@ -182,9 +182,9 @@ io_pool_init(void)
 	if (wanted < 16U)
 		wanted = 16U;
 	wanted_large = wanted > IO_POOL_MAX_LARGE ? IO_POOL_MAX_LARGE : wanted;
-	wanted_small = wanted;
 
 	/* Charges the complete, page-rounded descriptor table to the same budget. */
+	wanted_small = wanted;
 	if (!allocate_backing((wanted_large + wanted_small) * sizeof(*large_slots),
 	    budget_bytes, 0, &metadata)) {
 		atomic_raw_store_release(&initialized, 2U);
@@ -192,6 +192,7 @@ io_pool_init(void)
 		    (unsigned long long)budget_bytes);
 		return;
 	}
+
 	resident_bytes = metadata.size;
 	hal_memset(metadata.vaddr, 0, metadata.size);
 	large_slots = metadata.vaddr;
@@ -219,6 +220,7 @@ io_pool_init(void)
 		resident_bytes += large_slots[large_count].backing.size;
 		large_count++;
 	}
+
 	atomic_raw_store_release(&initialized, 2U);
 	hal_printf("I/O pool large=%u small=%u resident=%llu budget=%llu\n",
 	    large_count, small_count, (unsigned long long)resident_bytes,
@@ -253,12 +255,14 @@ io_pool_borrow(
 			return buffer;
 		}
 	}
+
 	buffer = borrow_slots(large_slots, large_count, &large_rotor);
 	if (buffer != NULL) {
 		*capacity = KERN_IO_BATCH_MAX;
 		io_stats_record(IO_POOL_LARGE_BORROW, *capacity);
 		return buffer;
 	}
+
 	if (wanted > KERN_IO_SMALL_SIZE) {
 		buffer = borrow_slots(small_slots, small_count, &small_rotor);
 		if (buffer != NULL) {
@@ -267,6 +271,7 @@ io_pool_borrow(
 			return buffer;
 		}
 	}
+
 	io_stats_record(IO_POOL_FALLBACK, wanted);
 	return NULL;
 }
@@ -284,10 +289,12 @@ io_pool_release(
 		io_stats_record(IO_POOL_RETURN, KERN_IO_BATCH_MAX);
 		return;
 	}
+
 	if (release_slots(small_slots, small_count, buffer)) {
 		io_stats_record(IO_POOL_RETURN, KERN_IO_SMALL_SIZE);
 		return;
 	}
+
 	HAL_FATAL("I/O pool return without ownership");
 }
 
@@ -549,6 +556,7 @@ allocate_backing(size_t bytes, size_t limit, int allow_vmap, struct io_scratch *
 			HAL_FATAL("I/O pool allocation rollback failed");
 		return 0;
 	}
+
 	/* Accounts persistent scratch independently of borrowers and virtual reservations. */
 	if (cache_memory_reserve != NULL) {
 		if (cache_memory_reserve(CACHE_MEMORY_IO_POOL, memory->size, 0) != 0) {
@@ -556,8 +564,10 @@ allocate_backing(size_t bytes, size_t limit, int allow_vmap, struct io_scratch *
 				HAL_FATAL("I/O pool accounting rollback failed");
 			return 0;
 		}
+
 		cache_memory_commit(CACHE_MEMORY_IO_POOL, memory->size);
 	}
+
 	io_stats_record(IO_POOL_BACKING_ALLOC, memory->size);
 	return 1;
 }
@@ -580,6 +590,7 @@ borrow_slots(struct io_pool_slot *slots, unsigned count, unsigned *rotor)
 		if (atomic_raw_compare_exchange(&slots[index].borrowed, &expected, 1U))
 			return slots[index].backing.vaddr;
 	}
+
 	return NULL;
 }
 
@@ -598,5 +609,6 @@ release_slots(struct io_pool_slot *slots, unsigned count, void *buffer)
 			HAL_FATAL("I/O pool slot returned twice");
 		return 1;
 	}
+
 	return 0;
 }

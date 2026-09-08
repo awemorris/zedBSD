@@ -356,9 +356,8 @@ elf_u16(
 {
 	const uint8_t *p;
 
-	p = field;
-
 	/* Assembles the bytes big-endian or little-endian. */
+	p = field;
 	if (data == ELFDATA2MSB)
 		return (uint16_t)((uint16_t)p[0] << 8 | p[1]);
 	return (uint16_t)((uint16_t)p[1] << 8 | p[0]);
@@ -372,9 +371,8 @@ elf_u32(
 {
 	const uint8_t *p;
 
-	p = field;
-
 	/* Assembles the bytes big-endian or little-endian. */
+	p = field;
 	if (data == ELFDATA2MSB)
 		return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 |
 		    (uint32_t)p[2] << 8 | p[3];
@@ -392,9 +390,8 @@ elf_u64(
 	uint64_t high;
 	uint64_t low;
 
-	p = field;
-
 	/* Reads the two halves in the order the byte order puts them. */
+	p = field;
 	if (data == ELFDATA2MSB) {
 		high = elf_u32(p, data);
 		low = elf_u32(p + 4, data);
@@ -608,6 +605,7 @@ read_headers(
 			kern_free(raw_programs32);
 			return ENOEXEC;
 		}
+
 		for (i = 0; i < raw32.e_phnum; i++)
 			decode_elf32_program(&raw_programs32[i], ELF_EXPECTED_DATA);
 
@@ -617,6 +615,7 @@ read_headers(
 			kern_free(raw_programs32);
 			return ENOMEM;
 		}
+
 		for (i = 0; i < raw32.e_phnum; i++) {
 			programs[i].type = raw_programs32[i].p_type;
 			programs[i].flags = raw_programs32[i].p_flags;
@@ -626,6 +625,7 @@ read_headers(
 			programs[i].memsz = raw_programs32[i].p_memsz;
 			programs[i].align = raw_programs32[i].p_align;
 		}
+
 		kern_free(raw_programs32);
 
 		/* Normalizes the header. */
@@ -668,6 +668,7 @@ read_headers(
 			kern_free(raw_programs64);
 			return ENOEXEC;
 		}
+
 		for (i = 0; i < raw64.e_phnum; i++)
 			decode_elf64_program(&raw_programs64[i], ELF_EXPECTED_DATA);
 
@@ -677,6 +678,7 @@ read_headers(
 			kern_free(raw_programs64);
 			return ENOMEM;
 		}
+
 		for (i = 0; i < raw64.e_phnum; i++) {
 			programs[i].type = raw_programs64[i].p_type;
 			programs[i].flags = raw_programs64[i].p_flags;
@@ -686,6 +688,7 @@ read_headers(
 			programs[i].memsz = raw_programs64[i].p_memsz;
 			programs[i].align = raw_programs64[i].p_align;
 		}
+
 		kern_free(raw_programs64);
 
 		/* Normalizes the header. */
@@ -696,6 +699,7 @@ read_headers(
 		header->phentsize = raw64.e_phentsize;
 		header->phnum = raw64.e_phnum;
 	}
+
 	header->elf_class = elf_class;
 	*programs_out = programs;
 	*file_size_out = file_size;
@@ -742,6 +746,7 @@ copy_segment_snapshot(
 			error = EOVERFLOW;
 			break;
 		}
+
 		count = file_content_lease_pread(lease, buffer, chunk,
 		    source + (off_t)done);
 		if (count != (ssize_t)chunk) {
@@ -751,11 +756,13 @@ copy_segment_snapshot(
 				error = EIO;
 			break;
 		}
+
 		error = vmspace_copy_to(vm, destination + done, buffer, chunk);
 		if (error != 0)
 			break;
 		done += chunk;
 	}
+
 	if (buffer != fallback)
 		io_pool_release(buffer);
 
@@ -930,9 +937,8 @@ validate_and_load(
 
 	/* Validates every program header and gathers the layout. */
 	for (i = 0; i < header.phnum; i++) {
-		program = &programs[i];
-
 		/* PT_PHDR must describe the table itself, read-only, once. */
+		program = &programs[i];
 		if (program->type == PT_PHDR) {
 			expected_size =
 			    (uint64_t)header.phnum * header.phentsize;
@@ -993,8 +999,10 @@ validate_and_load(
 					goto invalid;
 				image->stack_size = (size_t)requested;
 			}
+
 			continue;
 		}
+
 		if (program->type != PT_LOAD)
 			continue;
 
@@ -1171,6 +1179,7 @@ validate_and_load(
 			goto rollback;
 		image->static_data_size = (size_t)(data_maximum - data_minimum);
 	}
+
 	image->entry = load_bias + (uintptr_t)header.entry;
 	image->program_headers += load_bias;
 	image->program_header_size = header.phentsize;
@@ -1187,6 +1196,7 @@ rollback:
 		(void)vmspace_unmap(vm, mapped_start[mapped_count],
 		    mapped_size[mapped_count]);
 	}
+
 	goto out;
 invalid:
 	error = ENOEXEC;

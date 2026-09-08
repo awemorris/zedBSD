@@ -63,21 +63,6 @@ static int ata_ioctl(struct disk *disk, unsigned long request, void *argument);
 static const struct disk_ops ata_ops = {.submit = ata_submit,
 					.ioctl = ata_ioctl};
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv pcat ide init operation.
  */
@@ -109,9 +94,9 @@ drv_pcat_ide_init(
 		/* Checks the identify result. */
 		if (!identify(unit, data))
 			continue;
-		sectors = (uint32_t)data[60] | ((uint32_t)data[61] << 16);
 
 		/* Handles the sectors condition. */
+		sectors = (uint32_t)data[60] | ((uint32_t)data[61] << 16);
 		if (sectors == 0)
 			continue;
 		unit->disk = disk_alloc();
@@ -126,6 +111,7 @@ drv_pcat_ide_init(
 			unit->disk = 0;
 			continue;
 		}
+
 		unit->cylinders = data[1];
 		unit->heads = data[3];
 		unit->sectors = data[6];
@@ -196,9 +182,9 @@ identify(
 	outb(unit->io + ATA_LBA1, 0);
 	outb(unit->io + ATA_LBA2, 0);
 	outb(unit->io + ATA_COMMAND, ATA_IDENTIFY);
-	status = inb(unit->io + ATA_STATUS);
 
 	/* Checks the wait not busy result. */
+	status = inb(unit->io + ATA_STATUS);
 	if (status == 0 || status == 0xffU || !wait_not_busy(unit))
 		return 0;
 
@@ -260,9 +246,8 @@ wait_not_busy(
 
 	/* Process each element required by the operation. */
 	for (spin_for = 0; spin_for < ATA_TIMEOUT; spin_for++) {
-		status = inb(unit->control);
-
 		/* Checks the operation status. */
+		status = inb(unit->control);
 		if (status == 0xffU)
 			return 0;
 
@@ -285,9 +270,8 @@ wait_drq(
 
 	/* Process each element required by the operation. */
 	for (spin_for = 0; spin_for < ATA_TIMEOUT; spin_for++) {
-		status = inb(unit->control);
-
 		/* Checks the operation status. */
+		status = inb(unit->control);
 		if (status == 0xffU || (status & (ATA_DF | ATA_ERR)))
 			return 0;
 
@@ -328,7 +312,7 @@ select_unit(
 	const struct ata_unit *unit,
 	uint32_t lba)
 {
-	int function_result;
+	int error;
 
 	/* Checks the wait not busy result. */
 	if (!wait_not_busy(unit))
@@ -338,10 +322,10 @@ select_unit(
 	delay400(unit);
 
 	/* Obtains the wait not busy result. */
-	function_result = wait_not_busy(unit);
+	error = wait_not_busy(unit);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the setup operation. */
@@ -382,9 +366,8 @@ transfer(
 		return EINVAL;
 	/* Process each remaining element. */
 	while (count != 0) {
-		chunk = count > 255U ? 255U : count;
-
 		/* Checks the setup result. */
+		chunk = count > 255U ? 255U : count;
 		if (!setup(unit, (uint32_t)block, (uint8_t)chunk))
 			return EIO;
 		outb(unit->io + ATA_COMMAND, write ? ATA_WRITE : ATA_READ);
@@ -419,7 +402,7 @@ static int
 flush(
 	struct ata_unit *unit)
 {
-	int function_result;
+	int error;
 
 	/* Checks the select unit result. */
 	if (!select_unit(unit, 0))
@@ -431,11 +414,11 @@ flush(
 		return EIO;
 
 	/* Computes the function result. */
-	function_result =
+	error =
 		(inb(unit->io + ATA_STATUS) & (ATA_DF | ATA_ERR)) ? EIO : 0;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ata submit operation. */
@@ -470,7 +453,9 @@ ata_submit(
 			(uint32_t)bio->b_mapped_block, bio->b_block_count,
 			error, inb(unit->io + ATA_STATUS));
 	}
+
 	mutex_unlock(channel_lock);
+
 	bio_complete(bio, error,
 		     error == 0
 			     ? (size_t)bio->b_block_count * disk->d_block_size

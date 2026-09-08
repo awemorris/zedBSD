@@ -53,22 +53,6 @@ static const struct cdev_ops graphics_ops = {
 	.ioctl = graphics_ioctl,
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv graphics device register operation.
  */
@@ -76,20 +60,22 @@ int
 drv_graphics_device_register(
 	void)
 {
-	int function_result;
+	int error;
 
 	graphics_lock_init_once();
 	mutex_lock(&graphics_lock);
+
 	graphics_owner = NULL;
 	graphics_entered = 0;
+
 	mutex_unlock(&graphics_lock);
 
 	/* Obtains the cdev register result. */
-	function_result =
+	error =
 		cdev_register("graphics", 0x00010001U, &graphics_ops, NULL);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -106,6 +92,7 @@ drv_graphics_device_restore_text(
 		/* Returns the computed result. */
 		return;
 	}
+
 	mutex_lock(&graphics_lock);
 
 	/* Handles the graphics entered condition. */
@@ -113,7 +100,9 @@ drv_graphics_device_restore_text(
 		drv_pcat_graphics_backend_leave();
 		graphics_entered = 0;
 	}
+
 	hal_cons_resume();
+
 	mutex_unlock(&graphics_lock);
 }
 
@@ -149,6 +138,7 @@ graphics_open(
 		graphics_entered = 0;
 		memset(&graphics_mode, 0, sizeof(graphics_mode));
 	}
+
 	mutex_unlock(&graphics_lock);
 
 	/* Reports the failure. */
@@ -174,8 +164,10 @@ graphics_close(
 			hal_cons_resume();
 			graphics_entered = 0;
 		}
+
 		graphics_owner = NULL;
 	}
+
 	mutex_unlock(&graphics_lock);
 
 	/* Reports successful completion. */
@@ -226,10 +218,10 @@ graphics_enter(
 	     request.preferred_bits_per_pixel != 4 &&
 	     request.preferred_bits_per_pixel != 8 &&
 	     request.preferred_bits_per_pixel != 24 &&
-	     request.preferred_bits_per_pixel != 32))
-
+	     request.preferred_bits_per_pixel != 32)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	memset(&graphics_mode, 0, sizeof(graphics_mode));
 	graphics_mode.preferred_width = request.preferred_width;
 	graphics_mode.preferred_height = request.preferred_height;
@@ -245,15 +237,16 @@ graphics_enter(
 		/* Returns the computed result. */
 		return ENODEV;
 	}
+
 	graphics_entered = 1;
 	request.width = graphics_mode.width;
 	request.height = graphics_mode.height;
 	request.bits_per_pixel = graphics_mode.bits_per_pixel;
 	request.stride = graphics_mode.stride;
 	request.capabilities = GRAPHICS_CAPABILITIES;
-	error = copyout(&request, argument, sizeof(request));
 
 	/* Checks the operation status. */
+	error = copyout(&request, argument, sizeof(request));
 	if (error != 0) {
 		drv_pcat_graphics_backend_leave();
 		hal_cons_resume();
@@ -280,18 +273,17 @@ graphics_get_modes(
 	size_t total, returned, i;
 	int error;
 
-	error = copyin(argument, &request, sizeof(request));
-
 	/* Checks the operation status. */
+	error = copyin(argument, &request, sizeof(request));
 	if (error != 0)
 		return error;
 
 	/* Handles the request condition. */
 	if (request.reserved != 0 || request.capacity > GRAPHICS_MAX_MODES ||
-	    (request.capacity != 0 && request.modes == 0))
-
+	    (request.capacity != 0 && request.modes == 0)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	total = drv_pcat_graphics_backend_get_modes(native, request.capacity);
 	returned = total < request.capacity ? total : request.capacity;
 	/* Process each element required by the operation. */
@@ -300,13 +292,14 @@ graphics_get_modes(
 		result.height = native[i].height;
 		result.bits_per_pixel = native[i].bits_per_pixel;
 		result.stride = native[i].stride;
-		error = copyout(&result, request.modes + i * sizeof(result),
-				sizeof(result));
 
 		/* Checks the operation status. */
+		error = copyout(&result, request.modes + i * sizeof(result),
+				sizeof(result));
 		if (error != 0)
 			return error;
 	}
+
 	request.count = (uint32_t)total;
 
 	/* Obtains the copyout result. */
@@ -322,7 +315,7 @@ graphics_fill(
 	uintptr_t argument,
 	int patterned)
 {
-	int function_result;
+	int error;
 	struct graphics_pattern_fill request_local;
 	int error_local;
 	struct graphics_fill request_local1;
@@ -343,7 +336,7 @@ graphics_fill(
 			return EINVAL;
 
 		/* Computes the function result. */
-		function_result =
+		error =
 			drv_pcat_graphics_backend_pattern_fill(
 				&request_local.rect, request_local.color,
 				request_local.pattern)
@@ -351,12 +344,11 @@ graphics_fill(
 				: EIO;
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	} else {
+		/* Checks the operation status. */
 		error_local2 = copyin(argument, &request_local1,
 				      sizeof(request_local1));
-
-		/* Checks the operation status. */
 		if (error_local2 != 0)
 			return error_local2;
 
@@ -366,14 +358,14 @@ graphics_fill(
 			return EINVAL;
 
 		/* Computes the function result. */
-		function_result =
+		error =
 			drv_pcat_graphics_backend_fill(&request_local1.rect,
 						       request_local1.color)
 				? 0
 				: EIO;
 
 		/* Returns the computed result. */
-		return function_result;
+		return error;
 	}
 }
 
@@ -394,10 +386,10 @@ graphics_line(
 	if (request.reserved != 0 || request.x0 >= graphics_mode.width ||
 	    request.x1 >= graphics_mode.width ||
 	    request.y0 >= graphics_mode.height ||
-	    request.y1 >= graphics_mode.height)
-
+	    request.y1 >= graphics_mode.height) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Computes the function result. */
 	function_result = drv_pcat_graphics_backend_line(request.x0, request.y0,
@@ -415,7 +407,7 @@ static int
 load_palette(
 	const struct graphics_blit *request)
 {
-	int function_result;
+	int error;
 
 	/* Handles the request condition. */
 	if (request->format == ZEDBSD_GRAPHICS_FORMAT_MONO1) {
@@ -436,18 +428,18 @@ load_palette(
 	/* Handles the request condition. */
 	if (request->format != ZEDBSD_GRAPHICS_FORMAT_INDEX8 ||
 	    request->palette == 0 || request->palette_count == 0 ||
-	    request->palette_count > 256U)
-
+	    request->palette_count > 256U) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Obtains the copyin result. */
-	function_result =
+	error =
 		copyin(request->palette, palette_buffer,
 		       request->palette_count * sizeof(palette_buffer[0]));
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the graphics blit operation. */
@@ -474,10 +466,10 @@ graphics_blit(
 	    request.y > graphics_mode.height ||
 	    request.width > graphics_mode.width - request.x ||
 	    request.height > graphics_mode.height - request.y ||
-	    request.pixels == 0)
-
+	    request.pixels == 0) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the request condition. */
 	if (request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24)
@@ -493,13 +485,13 @@ graphics_blit(
 
 	/* Handles the minimum stride condition. */
 	if (minimum_stride > request.stride ||
-	    minimum_stride > GRAPHICS_ROW_MAX)
-
+	    minimum_stride > GRAPHICS_ROW_MAX) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = load_palette(&request);
+	}
 
 	/* Checks the operation status. */
+	error = load_palette(&request);
 	if (error != 0)
 		return error;
 	memset(&image, 0, sizeof(image));
@@ -517,9 +509,8 @@ graphics_blit(
 				     : request.palette_count;
 	/* Process each element required by the operation. */
 	for (row = 0; row < request.height; row++) {
-		source_offset = (uint64_t)request.stride * row;
-
 		/* Handles the source offset condition. */
+		source_offset = (uint64_t)request.stride * row;
 		if (source_offset > UINTPTR_MAX - (uintptr_t)request.pixels)
 			return EFAULT;
 
@@ -528,11 +519,11 @@ graphics_blit(
 			/* Handles the minimum stride condition. */
 			if (minimum_stride > sizeof(packed))
 				return EINVAL;
+
+			/* Checks the operation status. */
 			error = copyin(request.pixels +
 					       (uintptr_t)source_offset,
 				       packed, (size_t)minimum_stride);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				return error;
 			/* Process each element required by the operation. */
@@ -542,11 +533,10 @@ graphics_blit(
 						     1U;
 			}
 		} else {
+			/* Checks the operation status. */
 			error = copyin(request.pixels +
 					       (uintptr_t)source_offset,
 				       row_buffer, (size_t)minimum_stride);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				return error;
 		}
@@ -554,10 +544,10 @@ graphics_blit(
 		/* Checks the drv pcat graphics backend blit result. */
 		if (!drv_pcat_graphics_backend_blit(request.x, request.y + row,
 						    &image, request.pattern,
-						    patterned))
-
+						    patterned)) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -581,20 +571,20 @@ graphics_flush(
 
 	/* Handles the request condition. */
 	if (request.rectangle_count > GRAPHICS_MAX_RECTS ||
-	    (request.rectangle_count != 0 && request.rectangles == 0))
-
+	    (request.rectangle_count != 0 && request.rectangles == 0)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the request condition. */
 	if (request.rectangle_count != 0) {
+		/* Checks the operation status. */
 		error = copyin(request.rectangles, input,
 			       request.rectangle_count * sizeof(input[0]));
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 	}
+
 	/* Process each remaining element. */
 	for (i = 0; i < request.rectangle_count; i++) {
 		/* Checks the valid rect result. */
@@ -628,17 +618,17 @@ graphics_glyph(
 
 	/* Handles the request condition. */
 	if (request.reserved != 0 || request.bitmap == 0 ||
-	    request.bitmap_capacity < sizeof(bitmap))
-
+	    request.bitmap_capacity < sizeof(bitmap)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Checks the drv pcat graphics backend get glyph result. */
 	if (!drv_pcat_graphics_backend_get_glyph(request.codepoint, bitmap,
-						 &width, &height))
-
+						 &width, &height)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	request.width = width;
 	request.height = height;
 	request.stride = width / 8U;
@@ -647,9 +637,9 @@ graphics_glyph(
 	request.advance = width;
 	request.format = ZEDBSD_GRAPHICS_GLYPH_MSB1;
 	request.bitmap_size = request.stride * height;
-	error = copyout(bitmap, request.bitmap, request.bitmap_size);
 
 	/* Checks the operation status. */
+	error = copyout(bitmap, request.bitmap, request.bitmap_size);
 	if (error == 0)
 		error = copyout(&request, argument, sizeof(request));
 
@@ -682,10 +672,9 @@ graphics_ioctl_locked(
 	if (request == ZEDBSD_GRAPHICS_GET_CAPS) {
 		struct graphics_caps caps = {GRAPHICS_CAPABILITIES, 0, 0, 0};
 
+		/* Checks the remaining item count. */
 		count = drv_pcat_graphics_backend_get_modes(modes,
 							    GRAPHICS_MAX_MODES);
-
-		/* Checks the remaining item count. */
 		if (count > GRAPHICS_MAX_MODES)
 			count = GRAPHICS_MAX_MODES;
 		/* Process each remaining element. */
@@ -723,9 +712,9 @@ graphics_ioctl_locked(
 		/* Returns the computed result. */
 		return function_result;
 	}
-	error = require_entered(file);
 
 	/* Checks the operation status. */
+	error = require_entered(file);
 	if (error != 0)
 		return error;
 	/* Dispatch the selected operation case. */
@@ -804,7 +793,9 @@ graphics_ioctl(
 	int error;
 
 	mutex_lock(&graphics_lock);
+
 	error = graphics_ioctl_locked(file, request, argument);
+
 	mutex_unlock(&graphics_lock);
 
 	/* Reports the failure. */

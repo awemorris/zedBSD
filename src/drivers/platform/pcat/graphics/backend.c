@@ -81,32 +81,6 @@ static struct drv_pci_driver cirrus_driver = {.name = "cirrus-gd54xx",
 					      .attach = cirrus_attach,
 					      .detach = cirrus_detach};
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv pcat graphics backend enter operation.
  */
@@ -135,9 +109,9 @@ drv_pcat_graphics_backend_enter(
 		/* Reports operation failure. */
 		return 1;
 	}
-	requested = mode->preferred_bits_per_pixel == 24U ? 24U : 8U;
 
 	/* Handles the cirrus present condition. */
+	requested = mode->preferred_bits_per_pixel == 24U ? 24U : 8U;
 	if (cirrus_present && cirrus_enter(requested)) {
 		mode->width = WIDTH;
 		mode->height = HEIGHT;
@@ -150,6 +124,7 @@ drv_pcat_graphics_backend_enter(
 		/* Reports operation failure. */
 		return 1;
 	}
+
 	vga_graphics_mode();
 	active_backend = DISPLAY_VGA;
 	active_bpp = 4;
@@ -239,6 +214,7 @@ drv_pcat_graphics_backend_leave(
 		hidden_dac_write(0x00U);
 		gfx_write(0x0bU, 0x00U);
 	}
+
 	vga_text_mode();
 	active_backend = DISPLAY_NONE;
 	active_bpp = 0;
@@ -315,6 +291,7 @@ drv_pcat_graphics_backend_fill(
 		/* Reports operation failure. */
 		return 1;
 	}
+
 	/* Process each element required by the operation. */
 	for (y = rect->y; y < rect->y + rect->height; y++) {
 		/* Process each element required by the operation. */
@@ -356,9 +333,9 @@ drv_pcat_graphics_backend_line(
 		/* Checks the current horizontal value. */
 		if (x == target_x && y == target_y)
 			break;
-		twice = error * 2;
 
 		/* Handles the twice condition. */
+		twice = error * 2;
 		if (twice >= dy) {
 			error += dy;
 			x += sx;
@@ -443,6 +420,7 @@ drv_pcat_graphics_backend_blit(
 				rgb = ((uint32_t)source[0] << 16) |
 				      ((uint32_t)source[1] << 8) | source[2];
 			}
+
 			write_pixel(destination_x + x, destination_y + y, rgb);
 		}
 	}
@@ -476,14 +454,14 @@ drv_pcat_graphics_backend_get_glyph(
 	unsigned *width,
 	unsigned *height)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv pcat font get glyph result. */
-	function_result =
+	error =
 		drv_pcat_font_get_glyph(codepoint, bitmap, width, height);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -493,13 +471,13 @@ int
 drv_pcat_graphics_pci_register(
 	void)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv pci driver register result. */
-	function_result = drv_pci_driver_register(&cirrus_driver);
+	error = drv_pci_driver_register(&cirrus_driver);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -509,9 +487,8 @@ int
 drv_pcat_graphics_prepare(
 	void)
 {
-	backend_prepared = 0;
-
 	/* Checks the pcat graphics prepare hardware result. */
+	backend_prepared = 0;
 	if (!pcat_graphics_prepare_hardware())
 		return 0;
 	backend_prepared = 1;
@@ -536,7 +513,7 @@ static int
 pcat_graphics_clear(
 	void)
 {
-	int function_result;
+	int error;
 	struct graphics_rect screen = {0, 0, WIDTH, HEIGHT};
 
 	/* Handles the active backend condition. */
@@ -550,10 +527,10 @@ pcat_graphics_clear(
 	}
 
 	/* Obtains the drv pcat graphics backend fill result. */
-	function_result = drv_pcat_graphics_backend_fill(&screen, 0);
+	error = drv_pcat_graphics_backend_fill(&screen, 0);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the cirrus enter operation. */
@@ -568,9 +545,9 @@ cirrus_enter(
 	if (drv_pci_device_enable(cirrus_device) != 0)
 		return 0;
 	seq_write(0x06U, 0x12U);
-	chip = crtc_read(0x27U);
 
 	/* Handles the chip condition. */
+	chip = crtc_read(0x27U);
 	if (chip == 0 || chip == 0xffU)
 		return 0;
 	cirrus_mode_640x480(bits_per_pixel);
@@ -667,13 +644,13 @@ cirrus_mode_640x480(
 	seq_write(0x12U, 0);
 	/* Process each remaining element. */
 	for (i = 0; i < sizeof(seq_index); i++) {
-		value_local = seq_value[i];
-
 		/* Handles the seq index condition. */
+		value_local = seq_value[i];
 		if (seq_index[i] == 0x07U && bits_per_pixel == 24U)
 			value_local = 0x15U;
 		seq_write(seq_index[i], value_local);
 	}
+
 	seq_write(0x0fU, (uint8_t)((seq_read(0x0fU) & 0xdfU) | 0x20U));
 	out8(0x3c2U, 0xe3U);
 	gfx_write(0x06U, 0x05U);
@@ -681,13 +658,13 @@ cirrus_mode_640x480(
 	crtc_write(0x11U, 0x20U);
 	/* Process each remaining element. */
 	for (i = 0; i < sizeof(crtc); i++) {
-		value_local1 = crtc[i];
-
 		/* Checks the current index. */
+		value_local1 = crtc[i];
 		if (i == 0x13U && bits_per_pixel == 24U)
 			value_local1 = 0xf0U;
 		crtc_write((uint8_t)i, value_local1);
 	}
+
 	/* Process each remaining element. */
 	for (i = 0; i < sizeof(graphics); i++)
 		gfx_write((uint8_t)i, graphics[i]);
@@ -697,6 +674,7 @@ cirrus_mode_640x480(
 		out8(0x3c0U, (uint8_t)i);
 		out8(0x3c0U, attribute[i]);
 	}
+
 	(void)in8(0x3daU);
 	out8(0x3c0U, 0x20U);
 	hidden_dac_write(bits_per_pixel == 24U ? 0xc5U : 0x20U);
@@ -835,6 +813,7 @@ vga_write_registers(
 		out8(0x3c0U, (uint8_t)i);
 		out8(0x3c0U, *value++);
 	}
+
 	(void)in8(0x3daU);
 	out8(0x3c0U, 0x20U);
 }
@@ -943,6 +922,7 @@ vga_write_pixel(
 		gfx_write(0x05U, 0x00U);
 		vga_color_cache = color;
 	}
+
 	gfx_write(0x08U, mask);
 	latch = VGA_APERTURE[offset];
 	(void)latch;
@@ -968,9 +948,9 @@ rgb_to_vga(
 		dr = red - (int)((vga_palette[i] >> 16) & 0xffU);
 		dg = green - (int)((vga_palette[i] >> 8) & 0xffU);
 		db = blue - (int)(vga_palette[i] & 0xffU);
-		distance = (unsigned)(dr * dr + dg * dg + db * db);
 
 		/* Handles the distance condition. */
+		distance = (unsigned)(dr * dr + dg * dg + db * db);
 		if (distance < best_distance) {
 			best = i;
 			best_distance = distance;
@@ -1007,9 +987,9 @@ pcat_graphics_prepare_hardware(
 
 	drv_pcat_font_init();
 	linear_framebuffer = hal_get_arch_handoff("pcat.framebuffer");
-	linear_pixels = NULL;
 
 	/* Handles the linear framebuffer availability. */
+	linear_pixels = NULL;
 	if (linear_framebuffer != NULL) {
 		aligned = linear_framebuffer->physical_base & ~0x1fffffULL;
 		offset = linear_framebuffer->physical_base - aligned;

@@ -32,13 +32,6 @@ static int ioctl(struct disk *d, unsigned long r, void *a);
 
 static const struct disk_ops ops = {.submit = submit, .ioctl = ioctl};
 
-
-
-
-
-
-
-
 /*
  * Implements the drv sun4u cmd646 init operation.
  */
@@ -59,9 +52,9 @@ drv_sun4u_cmd646_init(
 		;
 	hal_io_outp8(ctl + 2U, 0x02);
 	hal_io_outp8(cmd + ATA_DRIVE, 0xa0);
-	error = wait_status(ATA_DRDY, ATA_BSY);
 
 	/* Checks the operation status. */
+	error = wait_status(ATA_DRDY, ATA_BSY);
 	if (error) {
 		hal_printf("cmd646: reset error=%d status=%x ata=%x\n", error,
 			   hal_io_inp8(cmd + ATA_STATUS),
@@ -70,9 +63,9 @@ drv_sun4u_cmd646_init(
 		/* Returns the computed result. */
 		return error;
 	}
-	error = identify();
 
 	/* Checks the operation status. */
+	error = identify();
 	if (error) {
 		hal_printf("cmd646: identify error=%d status=%x ata=%x\n",
 			   error, hal_io_inp8(cmd + ATA_STATUS),
@@ -81,14 +74,14 @@ drv_sun4u_cmd646_init(
 		/* Returns the computed result. */
 		return error;
 	}
-	ata_disk = disk_alloc();
 
 	/* Handles the ata disk condition. */
+	ata_disk = disk_alloc();
 	if (!ata_disk)
 		return ENOMEM;
-	error = disk_alloc_sd_name(ata_disk);
 
 	/* Checks the operation status. */
+	error = disk_alloc_sd_name(ata_disk);
 	if (error) {
 		(void)disk_destroy(ata_disk);
 		ata_disk = NULL;
@@ -96,19 +89,21 @@ drv_sun4u_cmd646_init(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	ata_disk->d_block_size = 512;
 	ata_disk->d_block_count = sectors;
 	ata_disk->d_max_transfer_blocks = 1;
 	ata_disk->d_ops = &ops;
-	error = disk_create(ata_disk);
 
 	/* Checks the operation status. */
+	error = disk_create(ata_disk);
 	if (error) {
 		ata_disk = NULL;
 
 		/* Returns the computed result. */
 		return error;
 	}
+
 	hal_printf("SPARCV9 IDE PASS sectors=%llu\n", sectors);
 
 	/* Reports successful completion. */
@@ -137,9 +132,8 @@ wait_status(
 
 	/* Continue while the operation condition remains true. */
 	while (n--) {
-		s = hal_io_inp8(cmd + ATA_STATUS);
-
 		/* Checks the current string state. */
+		s = hal_io_inp8(cmd + ATA_STATUS);
 		if (s & ATA_ERR)
 			return EIO;
 
@@ -172,9 +166,9 @@ identify(
 	/* Checks the hal io inp8 result. */
 	if (hal_io_inp8(cmd + ATA_STATUS) == 0)
 		return ENODEV;
-	error = wait_status(ATA_DRQ, ATA_BSY);
 
 	/* Checks the operation status. */
+	error = wait_status(ATA_DRQ, ATA_BSY);
 	if (error)
 		return error;
 	/* Process each remaining element. */
@@ -213,9 +207,9 @@ block(
 
 	select_lba(lba);
 	hal_io_outp8(cmd + ATA_COMMAND, write ? 0x30U : 0x20U);
-	error = wait_status(ATA_DRQ, ATA_BSY);
 
 	/* Checks the operation status. */
+	error = wait_status(ATA_DRQ, ATA_BSY);
 	if (error)
 		return error;
 	/* Process each remaining element. */
@@ -287,6 +281,7 @@ submit(
 			   hal_io_inp8(cmd + ATA_STATUS),
 			   hal_io_inp8(cmd + ATA_ERROR));
 	}
+
 	bio_complete(b, error, error ? 0 : (size_t)b->b_block_count * 512U);
 
 	/* Reports successful completion. */

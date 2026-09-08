@@ -66,47 +66,46 @@ int
 drv_intel_ax211_init_api89_validate(
 	const struct intel_ax211_protocol_command_table *table)
 {
-	int function_result;
+	int error;
 	int result;
 
-	result = drv_intel_ax211_protocol_command_table_validate_api89(table);
-
 	/* Checks the operation result. */
+	result = drv_intel_ax211_protocol_command_table_validate_api89(table);
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = ax211_init_version_require_absent(
 		table, INTEL_AX211_INIT_SYSTEM_GROUP,
 		INTEL_AX211_INIT_EXTENDED_CFG_OPCODE);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = ax211_init_version_require_absent(
 		table, INTEL_AX211_PROTOCOL_GROUP_LEGACY,
 		INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return result;
+
+	/* Checks the operation result. */
 	result = ax211_init_version_require(
 		table, INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 		INTEL_AX211_PROTOCOL_NVM_ACCESS_COMPLETE_OPCODE,
 		INTEL_AX211_INIT_NVM_ACCESS_COMMAND_VERSION,
 		INTEL_AX211_INIT_NVM_ACCESS_NOTIFICATION_VERSION);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return result;
 
 	/* Obtains the ax211 init version require result. */
-	function_result = ax211_init_version_require(
+	error = ax211_init_version_require(
 		table, INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 		INTEL_AX211_PROTOCOL_NVM_GET_INFO_OPCODE,
 		INTEL_AX211_INIT_NVM_GET_INFO_COMMAND_VERSION,
 		INTEL_AX211_PROTOCOL_NVM_GET_INFO_VERSION);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -161,9 +160,9 @@ drv_intel_ax211_init_extended_cfg_decode(
 	/* Checks the current data length. */
 	if (length > INTEL_AX211_INIT_EXTENDED_CFG_SIZE)
 		return INTEL_AX211_PROTOCOL_OVERSIZED;
-	flags = ax211_init_get_le32(bytes);
 
 	/* Checks the active flags. */
+	flags = ax211_init_get_le32(bytes);
 	if (flags == 0U)
 		decoded = INTEL_AX211_INIT_PROFILE_RUNTIME;
 	else if (flags == INTEL_AX211_INIT_EXTENDED_CFG_NVM_FLAG)
@@ -185,18 +184,18 @@ drv_intel_ax211_init_complete_validate(
 	const struct intel_ax211_protocol_message *message,
 	uint32_t generation)
 {
-	int function_result;
+	int error;
 
 	/* Handles the generation condition. */
 	if (generation == 0U)
 		return INTEL_AX211_PROTOCOL_INVALID;
 
 	/* Obtains the drv intel ax211 protocol init complete result. */
-	function_result =
+	error =
 		drv_intel_ax211_protocol_init_complete(message, generation);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ax211 init version require absent operation. */
@@ -209,10 +208,9 @@ ax211_init_version_require_absent(
 	struct intel_ax211_protocol_command_version version;
 	int result;
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_version_lookup(
 		table, group, opcode, &version);
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_PROTOCOL_MISSING)
 		return INTEL_AX211_PROTOCOL_OK;
 
@@ -236,19 +234,18 @@ ax211_init_version_require(
 	struct intel_ax211_protocol_command_version version;
 	int result;
 
+	/* Checks the operation result. */
 	result = drv_intel_ax211_protocol_command_version_lookup(
 		table, group, opcode, &version);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK)
 		return result;
 
 	/* Handles the version condition. */
 	if (version.command_version != command_version ||
-	    version.notification_version != notification_version)
-
+	    version.notification_version != notification_version) {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_UNSUPPORTED;
+	}
 
 	/* Returns the computed result. */
 	return INTEL_AX211_PROTOCOL_OK;

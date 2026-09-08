@@ -49,9 +49,8 @@ thread_current(
 {
 	hal_task_t task;
 
-	task = hal_task_get_current();
-
 	/* There is no thread before the HAL task exists. */
+	task = hal_task_get_current();
 	if (task == NULL)
 		return NULL;
 
@@ -110,6 +109,7 @@ thread_create(
 		kern_free(thread);
 		return ENOMEM;
 	}
+
 	hal_task_set_private(thread->task, thread);
 
 	/* Prepares the scheduler state and joins the process. */
@@ -119,6 +119,7 @@ thread_create(
 		kern_free(thread);
 		return error;
 	}
+
 	error = attach_thread(process, thread);
 	if (error != 0) {
 		hal_task_set_private(thread->task, NULL);
@@ -182,6 +183,7 @@ thread_fork(
 		kern_free(thread);
 		return error;
 	}
+
 	error = attach_thread(process, thread);
 	if (error != 0) {
 		hal_task_set_private(thread->task, NULL);
@@ -249,6 +251,7 @@ kthread_create(
 		kern_free(thread);
 		return ENOMEM;
 	}
+
 	hal_task_set_private(thread->task, thread);
 
 	/* Prepares the scheduler state and joins the kernel process. */
@@ -258,6 +261,7 @@ kthread_create(
 		kern_free(thread);
 		return error;
 	}
+
 	(void)attach_thread(&process0, thread);
 
 	*result = thread;
@@ -315,6 +319,7 @@ thread_abort_new(
 
 	/* Only a thread that never ran can be aborted. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	if (thread->state != THREAD_NEW) {
 		spin_unlock_irqrestore(&process->lock, irq);
 		return EBUSY;
@@ -328,6 +333,7 @@ thread_abort_new(
 		spin_unlock_irqrestore(&process->lock, irq);
 		return ESRCH;
 	}
+
 	*link = thread->proc_next;
 	thread->proc_next = NULL;
 	if (process->thread_count == 0)
@@ -340,7 +346,9 @@ thread_abort_new(
 			HAL_FATAL("new thread stop target underflow");
 		process->stop_target_count--;
 	}
+
 	thread->state = THREAD_DEAD;
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Destroys the task and the thread. */
@@ -439,9 +447,8 @@ thread_exit(
 {
 	struct thread *thread;
 
-	thread = curthread;
-
 	/* Exiting needs a current thread. */
+	thread = curthread;
 	if (thread == NULL)
 		HAL_FATAL("thread_exit without current thread");
 
@@ -473,6 +480,7 @@ thread_sched_retired(
 		HAL_FATAL("invalid retired thread");
 		return;
 	}
+
 	process = thread->proc;
 	if (process == NULL) {
 		HAL_FATAL("retired thread without process");
@@ -492,6 +500,7 @@ thread_sched_retired(
 
 	/* Publishes the zombie state. */
 	irq = spin_lock_irqsave(&process->lock);
+
 	atomic_raw_store_release((volatile unsigned *)&thread->state,
 	    THREAD_ZOMBIE);
 	thread->state_generation++;
@@ -517,7 +526,9 @@ thread_sched_retired(
 				sched_wakeup(member);
 		}
 	}
+
 	waitq_wake_all(&thread->join_waitq);
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	KERN_TEST_CHECKPOINT(KERN_TEST_THREAD_RETIRED_AFTER_PUBLISH, thread);
@@ -562,6 +573,7 @@ thread_wait(
 	hal_task_set_private(thread->task, NULL);
 	hal_task_destroy(thread->task);
 	irq = spin_lock_irqsave(&thread->proc->lock);
+
 	link = &thread->proc->threads;
 	while (*link != NULL && *link != thread)
 		link = &(*link)->proc_next;
@@ -572,6 +584,7 @@ thread_wait(
 	thread->proc->thread_count--;
 	atomic_raw_store_release((volatile unsigned *)&thread->state,
 	    THREAD_DEAD);
+
 	spin_unlock_irqrestore(&thread->proc->lock, irq);
 
 	/* Frees the identifier and the creator's reference. */
@@ -630,6 +643,7 @@ attach_thread(
 		spin_unlock_irqrestore(&process->lock, irq);
 		return ESRCH;
 	}
+
 	if (process->execing) {
 		spin_unlock_irqrestore(&process->lock, irq);
 		return EBUSY;
@@ -641,6 +655,7 @@ attach_thread(
 	process->thread_count++;
 	if (process->stop_requested)
 		process->stop_target_count++;
+
 	spin_unlock_irqrestore(&process->lock, irq);
 
 	/* Reports the attached thread. */
@@ -663,6 +678,7 @@ reserve_tid(
 
 	/* Searches from the next identifier, wrapping within the positives. */
 	irq = spin_lock_irqsave(&tid_registry_lock);
+
 	assigned = next_tid;
 	for (;;) {
 		collision = assigned <= 0;
@@ -670,6 +686,7 @@ reserve_tid(
 		    candidate = candidate->tid_next) {
 			collision = candidate->tid == assigned;
 		}
+
 		if (!collision)
 			break;
 		if (assigned == INT32_MAX)
@@ -692,6 +709,7 @@ reserve_tid(
 		next_tid = assigned + 1;
 	thread->tid_next = reserved_tids;
 	reserved_tids = thread;
+
 	spin_unlock_irqrestore(&tid_registry_lock, irq);
 
 	/* Reports the reserved identifier. */
@@ -712,12 +730,14 @@ release_tid(
 
 	/* Unlinks the thread from the registry. */
 	irq = spin_lock_irqsave(&tid_registry_lock);
+
 	link = &reserved_tids;
 	while (*link != NULL && *link != thread)
 		link = &(*link)->tid_next;
 	if (*link == thread)
 		*link = thread->tid_next;
 	thread->tid_next = NULL;
+
 	spin_unlock_irqrestore(&tid_registry_lock, irq);
 }
 

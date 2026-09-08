@@ -146,6 +146,7 @@ block_identity_resolve(
 	} else {
 		return EINVAL;
 	}
+
 	if (*value == '\0')
 		return EINVAL;
 
@@ -186,6 +187,7 @@ block_identity_resolve(
 				disk_release(match);
 				return EEXIST;
 			}
+
 			match = candidate;
 		} else {
 			disk_release(candidate);
@@ -260,6 +262,7 @@ read_bytes(
 		offset += amount;
 		length -= amount;
 	}
+
 	kern_free(block);
 
 	/* Reports why the read failed. */
@@ -360,10 +363,12 @@ identity_merge_filesystem(
 		memcpy(identity->type, filesystem->type, sizeof(identity->type));
 		identity->flags |= ZEDBSD_BLKID_TYPE;
 	}
+
 	if ((filesystem->flags & ZEDBSD_BLKID_UUID) != 0U) {
 		memcpy(identity->uuid, filesystem->uuid, sizeof(identity->uuid));
 		identity->flags |= ZEDBSD_BLKID_UUID;
 	}
+
 	if ((filesystem->flags & ZEDBSD_BLKID_LABEL) != 0U) {
 		memcpy(identity->label, filesystem->label, sizeof(identity->label));
 		identity->flags |= ZEDBSD_BLKID_LABEL;

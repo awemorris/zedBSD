@@ -263,6 +263,7 @@ backing_claim_prepare_inode(
 	error = claim_insert(claim);
 
 out_locked:
+
 	spin_unlock_irqrestore(&claim_lock, irq);
 
 	/* Releases a claim that could not be registered. */
@@ -388,6 +389,7 @@ backing_claim_finalize(
 	ranges = NULL;
 
 out_locked:
+
 	spin_unlock_irqrestore(&claim_lock, irq);
 
 	/* Frees the extents only when they were not published. */
@@ -501,6 +503,7 @@ backing_claim_prepare_disk(
 	error = claim_insert(claim);
 
 out_locked:
+
 	spin_unlock_irqrestore(&claim_lock, irq);
 
 	/* Releases a claim that could not be registered. */
@@ -561,6 +564,7 @@ backing_claim_release(
 
 	/* Unregisters the claim from the registry slot that holds it. */
 	irq = spin_lock_irqsave(&claim_lock);
+
 	for (i = 0; i < BACKING_CLAIM_MAX; i++) {
 		if (claims[i] == claim) {
 			claims[i] = NULL;
@@ -568,6 +572,7 @@ backing_claim_release(
 			break;
 		}
 	}
+
 	spin_unlock_irqrestore(&claim_lock, irq);
 
 	/* The claim keeps its canonical device identity alive through final release. */
@@ -588,9 +593,9 @@ backing_mutation_begin_inode(
 	int error;
 
 	/* Delegates to the owner-aware form without an owner. */
-	error = backing_mutation_begin_inode_claimed(inode, NULL, guard);
 
 	/* Reports why the reservation failed. */
+	error = backing_mutation_begin_inode_claimed(inode, NULL, guard);
 	if (error != 0)
 		return error;
 
@@ -636,9 +641,9 @@ backing_mutation_begin_inode_claimed(
 		return error;
 
 	/* Reserves the keyed mutation. */
-	error = mutation_reserve(&key, NULL, NULL, owner, 0, guard);
 
 	/* Reports why the reservation failed. */
+	error = mutation_reserve(&key, NULL, NULL, owner, 0, guard);
 	if (error != 0)
 		return error;
 
@@ -667,9 +672,9 @@ backing_mutation_begin_disk(
 		return error;
 
 	/* Reserves the raw mutation. */
-	error = mutation_reserve(NULL, &range, NULL, owner, 0, guard);
 
 	/* Reports why the reservation failed. */
+	error = mutation_reserve(NULL, &range, NULL, owner, 0, guard);
 	if (error != 0)
 		return error;
 
@@ -729,9 +734,9 @@ backing_mutation_begin_disk_filesystem(
 		return error;
 
 	/* Reserves the filesystem mutation. */
-	error = mutation_reserve(NULL, &range, &volume, NULL, 1, guard);
 
 	/* Reports why the reservation failed. */
+	error = mutation_reserve(NULL, &range, &volume, NULL, 1, guard);
 	if (error != 0)
 		return error;
 
@@ -759,10 +764,12 @@ backing_mutation_end(
 
 	/* Clears the slot that still belongs to this guard. */
 	irq = spin_lock_irqsave(&claim_lock);
+
 	if (mutations[guard->slot].used &&
 	    mutations[guard->slot].generation == guard->generation) {
 		memset(&mutations[guard->slot], 0, sizeof(mutations[guard->slot]));
 	}
+
 	spin_unlock_irqrestore(&claim_lock, irq);
 
 	/* Deactivates the guard. */
@@ -827,6 +834,7 @@ backing_claim_check_mount(
 
 	/* Rejects the mount while any claim lives on the volume. */
 	irq = spin_lock_irqsave(&claim_lock);
+
 	for (i = 0; i < BACKING_CLAIM_MAX; i++) {
 		claim = claims[i];
 		if (claim == NULL)
@@ -853,6 +861,7 @@ backing_claim_check_mount(
 	error = 0;
 
 out:
+
 	spin_unlock_irqrestore(&claim_lock, irq);
 
 	/* Reports the mount verdict. */
@@ -875,9 +884,9 @@ backing_claim_check_teardown(
 	int error;
 
 	/* Reuses the writable-mount verdict. */
-	error = backing_claim_check_mount(disk, 0);
 
 	/* Reports the teardown verdict. */
+	error = backing_claim_check_mount(disk, 0);
 	if (error != 0)
 		return error;
 
@@ -1266,6 +1275,7 @@ mutation_reserve(
 				break;
 			}
 		}
+
 		if (!owner_registered) {
 			error = EINVAL;
 			goto out;
@@ -1379,6 +1389,7 @@ mutation_reserve(
 			break;
 		}
 	}
+
 	if (free_slot == BACKING_MUTATION_MAX) {
 		error = EAGAIN;
 		goto out;
@@ -1416,6 +1427,7 @@ mutation_reserve(
 	guard->active = 1;
 
 out:
+
 	spin_unlock_irqrestore(&claim_lock, irq);
 
 	/* Reports why the reservation failed. */

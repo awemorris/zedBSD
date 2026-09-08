@@ -169,52 +169,6 @@ static struct drv_usb_driver ecm_driver = {.name = "usb-cdc-ecm",
 					   .detach = ecm_detach,
 					   .shutdown = ecm_shutdown};
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
  * Implements the drv usb cdc ecm driver register operation.
  */
@@ -222,13 +176,13 @@ int
 drv_usb_cdc_ecm_driver_register(
 	void)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv usb driver register result. */
-	function_result = drv_usb_driver_register(&ecm_driver);
+	error = drv_usb_driver_register(&ecm_driver);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ecm le16 operation. */
@@ -275,10 +229,10 @@ ecm_interface_configuration(
 			/* Checks the drv usb configuration interface result. */
 			if (drv_usb_configuration_interface(configuration,
 							    interface_index) ==
-			    interface)
-
+			    interface) {
 				/* Returns the computed result. */
 				return configuration;
+			}
 		}
 	}
 
@@ -312,9 +266,8 @@ ecm_iad_consistent(
 	/* Process each remaining element. */
 	for (index = 0; index < drv_usb_configuration_iad_count(configuration);
 	     index++) {
-		iad = drv_usb_configuration_iad(configuration, index);
-
 		/* Handles the iad availability. */
+		iad = drv_usb_configuration_iad(configuration, index);
 		if (iad == NULL)
 			return 0;
 
@@ -331,10 +284,10 @@ ecm_iad_consistent(
 		    iad->function_class != ECM_COMMUNICATION_CLASS ||
 		    iad->function_subclass != ECM_COMMUNICATION_SUBCLASS ||
 		    iad->function_protocol != ECM_COMMUNICATION_PROTOCOL ||
-		    data_number != control_number + 1U)
-
+		    data_number != control_number + 1U) {
 			/* Reports successful completion. */
 			return 0;
+		}
 		association = 1;
 	}
 
@@ -362,10 +315,10 @@ ecm_control_descriptors(
 		if (drv_usb_host_interface_extra(alternate, index,
 						 (const void **)&descriptor,
 						 &length) != 0 ||
-		    descriptor == NULL || length < 2U)
-
+		    descriptor == NULL || length < 2U) {
 			/* Reports successful completion. */
 			return 0;
+		}
 
 		/* Checks the file descriptor. */
 		if (descriptor[1] != ECM_CS_INTERFACE)
@@ -379,30 +332,30 @@ ecm_control_descriptors(
 		case ECM_HEADER_DESCRIPTOR:
 			/* Checks the ecm le16 result. */
 			if (length != 5U || ++header != 1U ||
-			    ecm_le16(descriptor + 3U) == 0)
-
+			    ecm_le16(descriptor + 3U) == 0) {
 				/* Reports successful completion. */
 				return 0;
+			}
 			break;
 		case ECM_UNION_DESCRIPTOR:
 			/* Handles the header condition. */
 			if (header != 1U || length != 5U ||
 			    ++union_descriptor != 1U ||
 			    descriptor[3] != control_number ||
-			    descriptor[4] == control_number)
-
+			    descriptor[4] == control_number) {
 				/* Reports successful completion. */
 				return 0;
+			}
 			*data_number = descriptor[4];
 			break;
 		case ECM_ETHERNET_DESCRIPTOR:
 			/* Checks the ecm le16 result. */
 			if (header != 1U || length != 13U || ++ethernet != 1U ||
 			    descriptor[3] == 0 ||
-			    ecm_le16(descriptor + 8U) < ECM_FRAME_SIZE)
-
+			    ecm_le16(descriptor + 8U) < ECM_FRAME_SIZE) {
 				/* Reports successful completion. */
 				return 0;
+			}
 			*mac_string = descriptor[3];
 			*max_segment_size = ecm_le16(descriptor + 8U);
 			break;
@@ -429,16 +382,15 @@ ecm_find_notification(
 	for (index = 0;
 	     index < drv_usb_host_interface_endpoint_count(alternate);
 	     index++) {
-		endpoint = drv_usb_host_interface_endpoint(alternate, index);
-
 		/* Checks the drv usb endpoint type result. */
+		endpoint = drv_usb_host_interface_endpoint(alternate, index);
 		if (drv_usb_endpoint_type(endpoint) !=
 			    DRV_USB_TRANSFER_INTERRUPT ||
 		    !drv_usb_endpoint_is_input(endpoint) ||
-		    notification != NULL)
-
+		    notification != NULL) {
 			/* Reports successful completion. */
 			return 0;
+		}
 		notification = endpoint;
 	}
 
@@ -478,10 +430,10 @@ ecm_find_data_alternate(
 		if (descriptor == NULL ||
 		    descriptor->interface_class != ECM_DATA_CLASS ||
 		    descriptor->interface_subclass != ECM_DATA_SUBCLASS ||
-		    descriptor->interface_protocol != ECM_DATA_PROTOCOL)
-
+		    descriptor->interface_protocol != ECM_DATA_PROTOCOL) {
 			/* Reports successful completion. */
 			return 0;
+		}
 
 		/* Checks the file descriptor. */
 		if (descriptor->alternate_setting == 0U) {
@@ -498,15 +450,14 @@ ecm_find_data_alternate(
 		/* Process each remaining element. */
 		for (endpoint_index = 0; endpoint_index < 2U;
 		     endpoint_index++) {
+			/* Checks the drv usb endpoint type result. */
 			endpoint = drv_usb_host_interface_endpoint(
 				alternate, endpoint_index);
-
-			/* Checks the drv usb endpoint type result. */
 			if (drv_usb_endpoint_type(endpoint) !=
-			    DRV_USB_TRANSFER_BULK)
-
+			    DRV_USB_TRANSFER_BULK) {
 				/* Reports successful completion. */
 				return 0;
+			}
 
 			/* Handles the drv usb endpoint is input condition. */
 			if (drv_usb_endpoint_is_input(endpoint)) {
@@ -549,44 +500,44 @@ ecm_binding_parse(
 	uint16_t max_segment_size = 0;
 
 	memset(binding, 0, sizeof(*binding));
-	control_descriptor = drv_usb_interface_descriptor(control);
 
 	/* Checks the drv usb interface alternate count result. */
+	control_descriptor = drv_usb_interface_descriptor(control);
 	if (control_descriptor == NULL ||
 	    control_descriptor->interface_class != ECM_COMMUNICATION_CLASS ||
 	    control_descriptor->interface_subclass !=
 		    ECM_COMMUNICATION_SUBCLASS ||
 	    control_descriptor->interface_protocol !=
 		    ECM_COMMUNICATION_PROTOCOL ||
-	    drv_usb_interface_alternate_count(control) != 1U)
-
+	    drv_usb_interface_alternate_count(control) != 1U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Checks the drv usb device hcd capabilities result. */
 	if ((drv_usb_device_hcd_capabilities(
 		     drv_usb_interface_device(control)) &
-	     DRV_USB_HCD_CAP_CONCURRENT_URBS) == 0)
-
+	     DRV_USB_HCD_CAP_CONCURRENT_URBS) == 0) {
 		/* Reports successful completion. */
 		return 0;
-	configuration = ecm_interface_configuration(control);
+	}
 
 	/* Handles the configuration availability. */
+	configuration = ecm_interface_configuration(control);
 	if (configuration == NULL)
 		return 0;
 	control_alternate = drv_usb_interface_alternate(control, 0);
-	control_number = control_descriptor->interface_number;
 
 	/* Checks the ecm control descriptors result. */
+	control_number = control_descriptor->interface_number;
 	if (control_alternate == NULL ||
 	    !ecm_control_descriptors(control_alternate, control_number,
 				     &data_number, &mac_string,
 				     &max_segment_size) ||
-	    !ecm_find_notification(control_alternate, &binding->notification))
-
+	    !ecm_find_notification(control_alternate, &binding->notification)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	binding->data = drv_usb_configuration_find_interface(configuration,
 							     data_number);
 
@@ -595,10 +546,10 @@ ecm_binding_parse(
 	    !ecm_iad_consistent(configuration, control_number, data_number) ||
 	    !ecm_find_data_alternate(binding->data, &binding->bulk_in,
 				     &binding->bulk_out,
-				     &binding->data_alternate))
-
+				     &binding->data_alternate)) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/*
  * Descriptor decoding has already applied the speed-specific
@@ -607,10 +558,10 @@ ecm_binding_parse(
 	 * header. */
 	if (drv_usb_endpoint_max_packet_size(binding->notification) < 8U ||
 	    drv_usb_endpoint_max_packet_size(binding->bulk_in) == 0U ||
-	    drv_usb_endpoint_max_packet_size(binding->bulk_out) == 0U)
-
+	    drv_usb_endpoint_max_packet_size(binding->bulk_out) == 0U) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	binding->device = drv_usb_interface_device(control);
 	binding->control = control;
 	binding->mac_string = mac_string;
@@ -656,16 +607,16 @@ ecm_get_mac(
 	/* Checks the drv usb device get string result. */
 	if (drv_usb_device_get_string(binding->device, binding->mac_string, 0,
 				      string, sizeof(string)) != 0 ||
-	    strlen(string) != 12U)
-
+	    strlen(string) != 12U) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	/* Process each remaining element. */
 	for (index = 0; index < 6U; index++) {
 		high = ecm_hex((unsigned char)string[index * 2U]);
-		low = ecm_hex((unsigned char)string[index * 2U + 1U]);
 
 		/* Handles the high condition. */
+		low = ecm_hex((unsigned char)string[index * 2U + 1U]);
 		if (high < 0 || low < 0)
 			return EINVAL;
 		mac[index] = (uint8_t)((high << 4) | low);
@@ -694,16 +645,16 @@ ecm_control(
 	size_t length,
 	size_t *actual)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the drv usb control result. */
-	function_result = drv_usb_control(
+	error = drv_usb_control(
 		adapter->usb_device, request_type, request, value,
 		(uint16_t)drv_usb_interface_number(adapter->control), buffer,
 		length, ECM_CONTROL_TIMEOUT_MS, actual);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ecm program packet filter operation. */
@@ -715,9 +666,8 @@ ecm_program_packet_filter(
 	unsigned long irq;
 	int error;
 
-	irq = spin_lock_irqsave(&adapter->lock);
-
 	/* Handles the adapter condition. */
+	irq = spin_lock_irqsave(&adapter->lock);
 	if (!adapter->ready || !adapter->opened || adapter->closing ||
 	    adapter->quarantined) {
 		spin_unlock_irqrestore(&adapter->lock, irq);
@@ -725,8 +675,12 @@ ecm_program_packet_filter(
 		/* Returns the computed result. */
 		return ENETDOWN;
 	}
+
 	adapter->starts_active++;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
+
+	/* Checks the operation status. */
 	error = ecm_control(adapter,
 			    DRV_USB_DIR_OUT | DRV_USB_REQUEST_CLASS |
 				    DRV_USB_RECIP_INTERFACE,
@@ -734,8 +688,6 @@ ecm_program_packet_filter(
 			    ECM_FILTER_DIRECTED | ECM_FILTER_ALL_MULTICAST |
 				    ECM_FILTER_BROADCAST,
 			    NULL, 0, &actual);
-
-	/* Checks the operation status. */
 	if (error != 0 || actual != 0)
 		error = error != 0 ? error : EIO;
 	irq = spin_lock_irqsave(&adapter->lock);
@@ -748,6 +700,7 @@ ecm_program_packet_filter(
 	if (error == 0 && (adapter->closing || !adapter->opened))
 		error = ENETDOWN;
 	adapter->starts_active--;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/* Reports the failure. */
@@ -799,7 +752,9 @@ ecm_completion(
 		adapter->rx_ready = 1;
 	else if (urb == adapter->tx_urb)
 		adapter->tx_ready = 1;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
+
 	net_device_schedule_poll(adapter->net_device);
 }
 
@@ -815,9 +770,8 @@ ecm_start_urb(
 	unsigned long irq;
 	int error;
 
-	irq = spin_lock_irqsave(&adapter->lock);
-
 	/* Handles the adapter condition. */
+	irq = spin_lock_irqsave(&adapter->lock);
 	if (!adapter->ready || !adapter->opened || adapter->closing ||
 	    adapter->quarantined) {
 		spin_unlock_irqrestore(&adapter->lock, irq);
@@ -825,12 +779,14 @@ ecm_start_urb(
 		/* Returns the computed result. */
 		return ENETDOWN;
 	}
+
 	adapter->starts_active++;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
-	error = drv_usb_urb_setup(urb, buffer, length, flags, 0, ecm_completion,
-				  adapter);
 
 	/* Checks the operation status. */
+	error = drv_usb_urb_setup(urb, buffer, length, flags, 0, ecm_completion,
+				  adapter);
 	if (error == 0)
 		error = drv_usb_urb_submit(urb);
 	irq = spin_lock_irqsave(&adapter->lock);
@@ -839,6 +795,7 @@ ecm_start_urb(
 	if (adapter->starts_active == 0)
 		__builtin_trap();
 	adapter->starts_active--;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/* Reports the failure. */
@@ -854,23 +811,23 @@ static int
 ecm_cancel_and_drain(
 	struct drv_usb_urb *urb)
 {
-	int function_result;
+	int error;
 	enum drv_usb_urb_status status;
 
 	/* Handles the urb availability. */
 	if (urb == NULL)
 		return 0;
-	status = drv_usb_urb_status(urb);
 
 	/* Checks the operation status. */
+	status = drv_usb_urb_status(urb);
 	if (status == DRV_USB_URB_PENDING)
 		(void)drv_usb_urb_cancel(urb);
 
 	/* Obtains the drv usb urb drain result. */
-	function_result = drv_usb_urb_drain(urb, ECM_TRANSFER_TIMEOUT_MS);
+	error = drv_usb_urb_drain(urb, ECM_TRANSFER_TIMEOUT_MS);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /* Supports the ecm wait activity operation. */
@@ -905,32 +862,34 @@ ecm_stop(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		irq = spin_lock_irqsave(&adapter->lock);
-
 		/* Handles the adapter condition. */
+		irq = spin_lock_irqsave(&adapter->lock);
 		if (!adapter->stopping)
 			break;
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		sched_yield();
 	}
+
 	adapter->stopping = 1;
 	adapter->closing = 1;
 	adapter->opened = 0;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
+
 	ecm_wait_activity(adapter);
+
+	/* Checks the operation status. */
 	candidate = ecm_cancel_and_drain(adapter->notification_urb);
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = candidate;
+
+	/* Checks the operation status. */
 	candidate = ecm_cancel_and_drain(adapter->rx_urb);
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = candidate;
-	candidate = ecm_cancel_and_drain(adapter->tx_urb);
 
 	/* Checks the operation status. */
+	candidate = ecm_cancel_and_drain(adapter->tx_urb);
 	if (error == 0)
 		error = candidate;
 	irq = spin_lock_irqsave(&adapter->lock);
@@ -950,9 +909,11 @@ ecm_stop(
 	} else {
 		adapter->quarantined = 1;
 	}
+
 	adapter->stop_error = error;
 	adapter->closing = 0;
 	adapter->stopping = 0;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/* Handles the net device availability. */
@@ -988,12 +949,14 @@ ecm_open(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	adapter->opened = 1;
 	adapter->stop_error = 0;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
-	error = ecm_program_packet_filter(adapter);
 
 	/* Checks the operation status. */
+	error = ecm_program_packet_filter(adapter);
 	if (error == 0) {
 		error = ecm_start_urb(adapter, adapter->notification_urb,
 				      adapter->notification_buffer,
@@ -1044,9 +1007,9 @@ ecm_transmit(
 	if (packet == NULL)
 		return EINVAL;
 	length = packet->length;
-	irq = spin_lock_irqsave(&adapter->lock);
 
 	/* Handles the adapter condition. */
+	irq = spin_lock_irqsave(&adapter->lock);
 	if (!adapter->ready || !adapter->opened || adapter->closing ||
 	    adapter->quarantined) {
 		spin_unlock_irqrestore(&adapter->lock, irq);
@@ -1073,16 +1036,20 @@ ecm_transmit(
 		/* Returns the computed result. */
 		return EMSGSIZE;
 	}
+
 	adapter->tx_busy = 1;
 	adapter->starts_active++;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
+
 	memcpy(adapter->tx_buffer, packet->data, length);
 	packet_buf_free(packet);
-	irq = spin_lock_irqsave(&adapter->lock);
 
 	/* Handles the adapter condition. */
+	irq = spin_lock_irqsave(&adapter->lock);
 	if (adapter->closing || !adapter->opened)
 		error = ENETDOWN;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/* Checks the operation status. */
@@ -1110,6 +1077,7 @@ ecm_transmit(
 	/* Checks the operation status. */
 	if (error != 0)
 		adapter->tx_busy = 0;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/* Reports the failure. */
@@ -1135,18 +1103,18 @@ ecm_notification_process(
 		    DRV_USB_URB_COMPLETE ||
 	    length < 8U ||
 	    notification[0] != (DRV_USB_DIR_IN | DRV_USB_REQUEST_CLASS |
-				DRV_USB_RECIP_INTERFACE))
-
+				DRV_USB_RECIP_INTERFACE)) {
 		/* Returns the computed result. */
 		return;
-	interface_number = ecm_le16(notification + 4U);
+	}
 
 	/* Checks the drv usb interface number result. */
+	interface_number = ecm_le16(notification + 4U);
 	if (interface_number != drv_usb_interface_number(adapter->control) &&
-	    interface_number != drv_usb_interface_number(adapter->data))
-
+	    interface_number != drv_usb_interface_number(adapter->data)) {
 		/* Returns the computed result. */
 		return;
+	}
 
 	/* Checks the ecm le16 result. */
 	if (notification[1] == ECM_NOTIFICATION_NETWORK_CONNECTION &&
@@ -1210,7 +1178,9 @@ ecm_rearm(
 		adapter->opened = 0;
 		quarantine = 1;
 	}
+
 	*active = 0;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/* Handles the net device availability. */
@@ -1245,6 +1215,7 @@ ecm_poll_enter(
 	/* Handles the admitted condition. */
 	if (admitted)
 		adapter->polls_active++;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/* Returns the computed result. */
@@ -1262,6 +1233,7 @@ ecm_poll_exit(
 	if (adapter->polls_active == 0)
 		__builtin_trap();
 	adapter->polls_active--;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 }
 
@@ -1277,6 +1249,7 @@ ecm_take_pending(
 	/* Handles the taken condition. */
 	if (taken)
 		*pending = 0;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/* Returns the computed result. */
@@ -1292,6 +1265,7 @@ ecm_restore_pending(
 	unsigned long irq = spin_lock_irqsave(&adapter->lock);
 
 	*pending = 1;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 }
 
@@ -1313,6 +1287,7 @@ ecm_take_rearm(
 		*pending = 0;
 		*active = 1;
 	}
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/* Returns the computed result. */
@@ -1329,9 +1304,9 @@ ecm_poll_tx_completion(
 	/* Checks the ecm take pending result. */
 	if (!ecm_take_pending(adapter, &adapter->tx_ready))
 		return 0;
-	irq = spin_lock_irqsave(&adapter->lock);
 
 	/* Handles the adapter condition. */
+	irq = spin_lock_irqsave(&adapter->lock);
 	if (adapter->starts_active != 0) {
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		ecm_restore_pending(adapter, &adapter->tx_ready);
@@ -1339,6 +1314,7 @@ ecm_poll_tx_completion(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/* Checks the drv usb urb drain result. */
@@ -1348,8 +1324,11 @@ ecm_poll_tx_completion(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	irq = spin_lock_irqsave(&adapter->lock);
+
 	adapter->tx_busy = 0;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/* Reports operation failure. */
@@ -1373,6 +1352,7 @@ ecm_poll_notification_completion(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	ecm_notification_process(adapter);
 	ecm_restore_pending(adapter, &adapter->notification_rearm);
 
@@ -1402,28 +1382,27 @@ ecm_poll_rx_completion(
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	error = ecm_urb_status_error(drv_usb_urb_status(adapter->rx_urb));
-	length = drv_usb_urb_actual_length(adapter->rx_urb);
 
 	/* Checks the operation status. */
+	length = drv_usb_urb_actual_length(adapter->rx_urb);
 	if (error == 0 &&
 	    (length < ECM_ETHERNET_HEADER_SIZE || length > ECM_FRAME_SIZE))
 		error = EMSGSIZE;
 
 	/* Checks the operation status. */
 	if (error == 0) {
-		packet = packet_buf_alloc(0);
-
 		/* Handles the packet availability. */
+		packet = packet_buf_alloc(0);
 		if (packet == NULL)
 			error = ENOBUFS;
 	}
 
 	/* Checks the operation status. */
 	if (error == 0) {
-		destination = packet_buf_append(packet, length);
-
 		/* Handles the destination availability. */
+		destination = packet_buf_append(packet, length);
 		if (destination == NULL)
 			error = EMSGSIZE;
 		else
@@ -1439,6 +1418,7 @@ ecm_poll_rx_completion(
 			packet_buf_free(packet);
 		device->rx_errors++;
 	}
+
 	ecm_restore_pending(adapter, &adapter->rx_rearm);
 
 	/* Reports operation failure. */
@@ -1482,14 +1462,16 @@ ecm_poll_receive(
 	if (!ecm_poll_enter(adapter))
 		return 0;
 	irq = spin_lock_irqsave(&adapter->lock);
+
 	cursor = adapter->poll_cursor % ECM_COMPLETION_KINDS;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
+
 	/* Process each remaining element. */
 	for (index = 0; index < ECM_COMPLETION_KINDS && work < budget;
 	     index++) {
-		kind = (cursor + index) % ECM_COMPLETION_KINDS;
-
 		/* Handles the kind condition. */
+		kind = (cursor + index) % ECM_COMPLETION_KINDS;
 		if (kind == ECM_COMPLETION_TX)
 			completed = ecm_poll_tx_completion(adapter);
 		else if (kind == ECM_COMPLETION_NOTIFICATION)
@@ -1558,6 +1540,7 @@ ecm_set_ready(
 	unsigned long irq = spin_lock_irqsave(&adapter->lock);
 
 	adapter->ready = ready != 0;
+
 	spin_unlock_irqrestore(&adapter->lock, irq);
 }
 
@@ -1588,10 +1571,10 @@ ecm_urbs_alloc(
 
 	/* Handles the notification urb availability. */
 	if (adapter->notification_urb != NULL && adapter->rx_urb != NULL &&
-	    adapter->tx_urb != NULL)
-
+	    adapter->tx_urb != NULL) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	ecm_urbs_free(adapter);
 
 	/* Returns the computed result. */
@@ -1622,10 +1605,10 @@ ecm_buffers_alloc(
 
 	/* Handles the notification buffer availability. */
 	if (adapter->notification_buffer != NULL &&
-	    adapter->rx_buffer != NULL && adapter->tx_buffer != NULL)
-
+	    adapter->rx_buffer != NULL && adapter->tx_buffer != NULL) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	ecm_buffers_free(adapter);
 
 	/* Returns the computed result. */
@@ -1657,9 +1640,9 @@ ecm_net_device_create(
 		device->name[1] = 'e';
 		device->name[2] = (char)('0' + index);
 		device->name[3] = '\0';
-		error = net_device_create(device);
 
 		/* Checks the operation status. */
+		error = net_device_create(device);
 		if (error != EEXIST)
 			break;
 	}
@@ -1672,6 +1655,7 @@ ecm_net_device_create(
 		/* Returns the computed result. */
 		return error;
 	}
+
 	adapter->net_device = device;
 
 	/* Reports successful completion. */
@@ -1694,9 +1678,9 @@ ecm_attach(
 	/* Checks the ecm binding parse result. */
 	if (!ecm_binding_parse(interface, &binding))
 		return ENODEV;
-	adapter = hal_malloc(sizeof(*adapter));
 
 	/* Handles the adapter availability. */
+	adapter = hal_malloc(sizeof(*adapter));
 	if (adapter == NULL)
 		return ENOMEM;
 	memset(adapter, 0, sizeof(*adapter));
@@ -1710,44 +1694,44 @@ ecm_attach(
 	adapter->bulk_out_max_packet_size =
 		drv_usb_endpoint_max_packet_size(binding.bulk_out);
 	spin_init(&adapter->lock, LOCK_RANK_DEVICE, "usb-cdc-ecm");
-	error = drv_usb_interface_set_driver_data(interface, adapter);
 
 	/* Checks the operation status. */
+	error = drv_usb_interface_set_driver_data(interface, adapter);
 	if (error != 0) {
 		hal_free(adapter);
 
 		/* Returns the computed result. */
 		return error;
 	}
+
+	/* Checks the operation status. */
 	error = drv_usb_interface_claim(interface, binding.data);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = ecm_get_mac(&binding, mac);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = ecm_buffers_alloc(adapter);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = ecm_urbs_alloc(adapter);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = ecm_net_device_create(adapter, mac);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = drv_usb_interface_set_alternate(binding.data,
 						binding.data_alternate);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 	ecm_set_ready(adapter, 1);
@@ -1773,26 +1757,25 @@ ecm_detach(
 	if (adapter == NULL)
 		return 0;
 	ecm_set_ready(adapter, 0);
-	error = ecm_stop(adapter);
 
 	/* Checks the operation status. */
+	error = ecm_stop(adapter);
 	if (error != 0)
 		return error;
 
 	/* Checks the operation status. */
 	if ((flags & (DRV_USB_DETACH_FORCE | DRV_USB_DETACH_ATTACH_FAILED)) ==
 	    0) {
-		error = drv_usb_interface_set_alternate(adapter->data, 0);
-
 		/* Checks the operation status. */
+		error = drv_usb_interface_set_alternate(adapter->data, 0);
 		if (error != 0)
 			return error;
 	}
+
+	/* Checks the operation status. */
 	error = adapter->net_device != NULL
 			? net_device_gone(adapter->net_device)
 			: 0;
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 	ecm_urbs_free(adapter);
@@ -1828,7 +1811,7 @@ ecm_match(
 	struct drv_usb_interface *interface,
 	const struct drv_usb_id *id)
 {
-	int function_result;
+	int error;
 	struct ecm_binding binding;
 
 	(void)id;
@@ -1838,8 +1821,8 @@ ecm_match(
 	 * retains the richer NCM choice while an ECM-only configuration remains
 	 * eligible. */
 	/* Computes the function result. */
-	function_result = ecm_binding_parse(interface, &binding) ? 80 : 0;
+	error = ecm_binding_parse(interface, &binding) ? 80 : 0;
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }

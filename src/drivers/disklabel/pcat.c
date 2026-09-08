@@ -20,8 +20,6 @@ const struct partition_scheme drv_partition_scheme_pcat_auto = {
 	.scan = pcat_auto_scan,
 };
 
-
-
 /* Supports the pcat auto scan operation. */
 static int
 pcat_auto_scan(
@@ -41,13 +39,13 @@ pcat_auto_scan(
 
 	/* Handles the disk availability. */
 	if (disk == NULL || entries == NULL || capacity == 0U ||
-	    (disk->d_block_size != 512U && disk->d_block_size != 4096U))
-
+	    (disk->d_block_size != 512U && disk->d_block_size != 4096U)) {
 		/* Returns the computed result. */
 		return -EINVAL;
-	block = kern_malloc(disk->d_block_size);
+	}
 
 	/* Handles the block availability. */
+	block = kern_malloc(disk->d_block_size);
 	if (block == NULL)
 		return -ENOMEM;
 
@@ -62,6 +60,7 @@ pcat_auto_scan(
 		error = -EINVAL;
 		goto out;
 	}
+
 	/* Process each element required by the operation. */
 	for (slot = 0U; slot < 4U; slot++) {
 		/* Handles the block condition. */
@@ -108,6 +107,7 @@ pcat_auto_scan(
 		if (memcmp(block, "EFI PART", 8U) == 0)
 			has_gpt_signature = 1;
 	}
+
 	kern_free(block);
 
 	/*

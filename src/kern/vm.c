@@ -315,9 +315,9 @@ vm_object_get_shared(
 	/* Validates the final content inode before reserving admission. */
 	if (file == NULL || result == NULL)
 		return EINVAL;
-	inode = file_vm_inode(file);
 
 	/* Rejects files without an authoritative content inode. */
+	inode = file_vm_inode(file);
 	if (inode == NULL)
 		return EINVAL;
 
@@ -374,17 +374,18 @@ vm_object_backing_busy(
 			error = EBUSY;
 			break;
 		}
+
 		inodes[count] = object->inode;
 		inode_ref(inodes[count]);
 		count++;
 	}
+
 	registry_unlock(enabled);
 
 	/* Resolves sleeping FAT identities after dropping the registry spinlock. */
 	for (index = 0; index < count && error == 0; index++) {
-		error = backing_claim_inode_matches(claim, inodes[index], &matched);
-
 		/* Includes retained caches so stale writeback cannot cross formatting. */
+		error = backing_claim_inode_matches(claim, inodes[index], &matched);
 		if (error == 0 && matched)
 			error = EBUSY;
 	}
@@ -530,6 +531,7 @@ retry_mapping:
 			HAL_FATAL("mapped VM object lost registry reference");
 		return;
 	}
+
 	if ((object->flags & VM_OBJECT_DETACHING) != 0)
 		HAL_FATAL("VM object entered final teardown twice");
 
@@ -573,6 +575,7 @@ retry_mapping:
 		retain_object(object, error);
 		object->flags &= ~VM_OBJECT_DETACHING;
 	}
+
 	registry_unlock(enabled);
 
 	/* Releases the waiters, and drains them before the object disappears. */
@@ -623,6 +626,7 @@ vm_object_inode_io_wait(
 				return error;
 			continue;
 		}
+
 		spin_unlock_irqrestore(&inode->i_vm_lock, irq);
 
 		/*
@@ -700,9 +704,9 @@ vm_object_content_read_begin(
 		return EINVAL;
 
 	/* Counts the reader unless a transaction is in progress. */
-	irq = spin_lock_irqsave(&inode->i_vm_lock);
 
 	/* Refuses a reader while a resize or a write owns the inode. */
+	irq = spin_lock_irqsave(&inode->i_vm_lock);
 	if (inode->i_vm_resize_active || inode->i_vm_content_active) {
 		spin_unlock_irqrestore(&inode->i_vm_lock, irq);
 		return EBUSY;
@@ -713,6 +717,7 @@ vm_object_content_read_begin(
 		spin_unlock_irqrestore(&inode->i_vm_lock, irq);
 		return EOVERFLOW;
 	}
+
 	inode->i_vm_content_readers++;
 
 	spin_unlock_irqrestore(&inode->i_vm_lock, irq);
@@ -850,6 +855,7 @@ vm_object_content_begin(
 		registry_unlock(enabled);
 		return EBUSY;
 	}
+
 	/* Refuses an object that is already tearing down. */
 	object = find_object_by_inode_locked(inode);
 	if (object != NULL && (object->flags & VM_OBJECT_DETACHING) != 0) {
@@ -943,6 +949,7 @@ vm_object_content_prepare(
 		spin_unlock_irqrestore(&object->lock, irq);
 		refcount_get(&object->refs);
 	}
+
 	registry_unlock(enabled);
 
 	/* An uncached inode has no page to prepare. */
@@ -972,6 +979,7 @@ vm_object_content_prepare(
 					wait = 1;
 					break;
 				}
+
 				page = scan;
 				break;
 			}
@@ -1019,6 +1027,7 @@ vm_object_content_prepare(
 		if ((observed & HAL_PAGE_DIRTY) != 0) {
 			object_page_dirty_mark(page);
 		}
+
 		dirty = (page->flags & VM_OBJECT_PAGE_DIRTY) != 0;
 		page->write_dirty_generation = page->dirty_generation;
 		spin_unlock_irqrestore(&object->lock, irq);
@@ -1037,6 +1046,7 @@ vm_object_content_prepare(
 			object_record_writeback_error_locked(object, error);
 			first_error = error;
 		}
+
 		spin_unlock_irqrestore(&object->lock, irq);
 		if (first_error != 0)
 			break;
@@ -1099,9 +1109,9 @@ vm_object_read_coherent(
 	int error;
 
 	/* Preserves the existing coherent-read contract for callers without feedback. */
-	error = vm_object_read_coherent_useful(inode, offset, buffer, length, result, NULL);
 
 	/* Reports the failure. */
+	error = vm_object_read_coherent_useful(inode, offset, buffer, length, result, NULL);
 	if (error != 0)
 		return error;
 
@@ -1298,9 +1308,9 @@ vm_object_resize_begin(
 
 	/* Only one transaction runs, and never under a read lease. */
 	enabled = registry_lock();
-	inode_irq = spin_lock_irqsave(&inode->i_vm_lock);
 
 	/* Refuses a resize while another transaction or a reader owns the inode. */
+	inode_irq = spin_lock_irqsave(&inode->i_vm_lock);
 	if (inode->i_vm_resize_active ||
 	    inode->i_vm_content_active ||
 	    inode->i_vm_content_readers != 0) {
@@ -1308,6 +1318,7 @@ vm_object_resize_begin(
 		registry_unlock(enabled);
 		return EBUSY;
 	}
+
 	/* Refuses an object that is already tearing down. */
 	object = find_object_by_inode_locked(inode);
 	if (object != NULL && (object->flags & VM_OBJECT_DETACHING) != 0) {
@@ -1394,6 +1405,7 @@ vm_object_resize_prepare(
 			HAL_FATAL("VM object lost resize transaction");
 		refcount_get(&object->refs);
 	}
+
 	registry_unlock(enabled);
 	if (object == NULL) {
 		resize->prepared = 1;
@@ -1418,6 +1430,7 @@ vm_object_resize_prepare(
 		start = 0;
 		length = 0;
 	}
+
 	if (length != 0)
 		error = vm_object_sync_range_internal(object, (off_t)start,
 		    (size_t)length, MS_SYNC | MS_INVALIDATE, 0, 1,
@@ -1510,6 +1523,7 @@ retry:
 			return error;
 		}
 	}
+
 	fault_generation = object->size_generation;
 	fault_content_generation = object->content_generation;
 	fault_size = object->logical_size;
@@ -1526,6 +1540,7 @@ retry:
 				return error;
 			}
 		}
+
 		if ((object->flags & (VM_OBJECT_RESIZING |
 		    VM_OBJECT_CONTENT)) != 0 ||
 		    object->size_generation != fault_generation ||
@@ -1544,12 +1559,14 @@ retry:
 				spin_unlock_irqrestore(&object->lock, irq);
 				return error;
 			}
+
 			page->flags &= ~VM_OBJECT_PAGE_ERROR;
 			page->flags |= VM_OBJECT_PAGE_BUSY;
 			page->error = 0;
 			spin_unlock_irqrestore(&object->lock, irq);
 			goto read_page;
 		}
+
 		page->hold_count++;
 		*result = page;
 		spin_unlock_irqrestore(&object->lock, irq);
@@ -1587,6 +1604,7 @@ retry:
 		release_object_page_storage(page);
 		goto retry;
 	}
+
 	page->next = object->pages;
 	object->pages = page;
 	object_page_index_insert(object, page);
@@ -1760,9 +1778,8 @@ vm_object_page_pin_read(
 {
 	int error;
 
-	error = vm_object_page_pin_copy(page, offset, buffer, length, 0);
-
 	/* Reports why the copy failed. */
+	error = vm_object_page_pin_copy(page, offset, buffer, length, 0);
 	if (error != 0)
 		return error;
 
@@ -1782,9 +1799,8 @@ vm_object_page_pin_write(
 {
 	int error;
 
-	error = vm_object_page_pin_copy(page, offset, (void *)buffer, length, 1);
-
 	/* Reports why the copy failed. */
+	error = vm_object_page_pin_copy(page, offset, (void *)buffer, length, 1);
 	if (error != 0)
 		return error;
 
@@ -1831,6 +1847,7 @@ vm_object_page_unpin(
 		page->flags &= ~VM_OBJECT_PAGE_ORPHANED;
 		free_page = page;
 	}
+
 	waitq_wake_all(&object->page_waitq);
 
 	spin_unlock_irqrestore(&object->lock, irq);
@@ -2023,9 +2040,9 @@ vm_object_sync_inode(
 	int error;
 
 	/* Uses optional shared scratch for an ordinary caller. */
-	error = vm_object_sync_inode_buffer(inode, NULL, 0);
 
 	/* Reports the failure. */
+	error = vm_object_sync_inode_buffer(inode, NULL, 0);
 	if (error != 0)
 		return error;
 
@@ -2100,6 +2117,7 @@ retry_lookup:
 		refcount_get(&object->refs);
 		break;
 	}
+
 	registry_unlock(enabled);
 
 	/* An uncached inode has nothing to write back. */
@@ -2133,6 +2151,7 @@ retry_lookup:
 			retain_object(object, error);
 		}
 	}
+
 	registry_unlock(enabled);
 
 	/* Ends the operation and drops the reference this sync took. */
@@ -2196,6 +2215,7 @@ retry_lookup:
 			HAL_FATAL("VM object operation counter overflow");
 		refcount_get(&object->refs);
 	}
+
 	registry_unlock(enabled);
 
 	/* An uncached inode has no object to truncate. */
@@ -2208,11 +2228,11 @@ retry_lookup:
 	 * complete, after which the normal revoke transaction removes its
 	 * PTE/cache identity.
 	 */
+
+	/* Publishes the new end of file once the pages are gone. */
 	error = vm_object_sync_range_internal(object,
 					      size & ~(off_t)(PAGE_SIZE - 1U), SIZE_MAX,
 					      MS_SYNC | MS_INVALIDATE, 0, 0, 0);
-
-	/* Publishes the new end of file once the pages are gone. */
 	if (error == 0) {
 		irq = spin_lock_irqsave(&object->lock);
 		object->logical_size = size;
@@ -2280,6 +2300,7 @@ vm_object_retained_count(
 		if (object->flags & VM_OBJECT_RETAINED_WRITEBACK)
 			count++;
 	}
+
 	registry_unlock(enabled);
 
 	/* Reports the sampled count. */
@@ -2461,6 +2482,7 @@ vm_object_writeback_prepare(
 		*result = object;
 		return 0;
 	}
+
 	registry_unlock(enabled);
 
 	/*
@@ -2476,6 +2498,7 @@ vm_object_writeback_prepare(
 			object->write_file = writer;
 			writer = NULL;
 		}
+
 		registry_unlock(enabled);
 	}
 
@@ -2606,9 +2629,8 @@ vm_object_content_prepare_delayed(
 	spin_unlock_irqrestore(&object->lock, irq);
 
 	for (index = 0; index < count; index++) {
-		current = base + (uint64_t)index * PAGE_SIZE;
-
 		/* Allocates a page for a hole this transaction covers. */
+		current = base + (uint64_t)index * PAGE_SIZE;
 		if (pages[index] == NULL) {
 			pages[index] = alloc_object_page(object, (off_t)current, 1);
 			if (pages[index] == NULL) {
@@ -2940,6 +2962,7 @@ vm_object_prefetch_prepare(
 			vm_object_prefetch_abort(fill);
 			return EAGAIN;
 		}
+
 		fill->pages[fill->count++] = page;
 	}
 
@@ -3124,9 +3147,8 @@ vm_commit_init(
 	swap_pages = 0;
 	swap_free = 0;
 
-	irq = spin_lock_irqsave(&commit_lock);
-
 	/* Rejects a second initialization. */
+	irq = spin_lock_irqsave(&commit_lock);
 	if (commit_initialized) {
 		spin_unlock_irqrestore(&commit_lock, irq);
 		return EBUSY;
@@ -3164,6 +3186,7 @@ vm_commit_init(
 		spin_unlock_irqrestore(&commit_lock, irq);
 		return ENOMEM;
 	}
+
 	commit_initialized = 1;
 
 	spin_unlock_irqrestore(&commit_lock, irq);
@@ -3187,9 +3210,8 @@ vm_commit_resize_swap(
 	uint64_t limit;
 	unsigned long irq;
 
-	irq = spin_lock_irqsave(&commit_lock);
-
 	/* Rejects a resize based on a stale capacity. */
+	irq = spin_lock_irqsave(&commit_lock);
 	if (commit_stats.swap_pages != expected_pages) {
 		spin_unlock_irqrestore(&commit_lock, irq);
 		return EAGAIN;
@@ -3235,9 +3257,8 @@ vm_commit_reserve(
 		return EINVAL;
 	pages = bytes / VM_COMMIT_PAGE_SIZE;
 
-	irq = spin_lock_irqsave(&commit_lock);
-
 	/* A reservation before initialization is a programming error. */
+	irq = spin_lock_irqsave(&commit_lock);
 	if (!commit_initialized) {
 		spin_unlock_irqrestore(&commit_lock, irq);
 		HAL_FATAL("VM commit before initialization");
@@ -3248,6 +3269,7 @@ vm_commit_reserve(
 		spin_unlock_irqrestore(&commit_lock, irq);
 		return ENOMEM;
 	}
+
 	commit_stats.used_pages += pages;
 
 	spin_unlock_irqrestore(&commit_lock, irq);
@@ -3271,9 +3293,8 @@ vm_commit_release(
 		HAL_FATAL("invalid VM commit release");
 	pages = bytes / VM_COMMIT_PAGE_SIZE;
 
-	irq = spin_lock_irqsave(&commit_lock);
-
 	/* A release before initialization is a programming error. */
+	irq = spin_lock_irqsave(&commit_lock);
 	if (!commit_initialized) {
 		spin_unlock_irqrestore(&commit_lock, irq);
 		HAL_FATAL("VM commit release before initialization");
@@ -3284,6 +3305,7 @@ vm_commit_release(
 		spin_unlock_irqrestore(&commit_lock, irq);
 		HAL_FATAL("VM commit accounting underflow");
 	}
+
 	commit_stats.used_pages -= pages;
 
 	spin_unlock_irqrestore(&commit_lock, irq);
@@ -3591,9 +3613,9 @@ vm_private_page_io_try_acquire(
 		return EINVAL;
 
 	/* Fails while an owner, operation, or pin is present. */
-	irq = spin_lock_irqsave(&backing->state_lock);
 
 	/* Refuses a page that is not idle, rather than waiting for it. */
+	irq = spin_lock_irqsave(&backing->state_lock);
 	if ((backing->flags & VM_PAGE_BUSY) != 0 ||
 	    backing->active_operations != 0 ||
 	    backing->pin_count != 0) {
@@ -3784,9 +3806,9 @@ vm_private_page_pin(
 		return EINVAL;
 
 	/* Fails while an owner or operation is present, or the page is absent. */
-	irq = spin_lock_irqsave(&backing->state_lock);
 
 	/* Refuses a page that is busy, in use, or not in memory. */
+	irq = spin_lock_irqsave(&backing->state_lock);
 	if ((backing->flags & VM_PAGE_BUSY) != 0 ||
 	    backing->active_operations != 0 ||
 	    (backing->flags & VM_PAGE_RESIDENT) == 0) {
@@ -3858,9 +3880,8 @@ vm_private_page_in_owned(
 	int error;
 	struct hal_pmem memory;
 
-	backend = swap_system_backend();
-
 	/* Rejects a missing operand or a backing that is not owned and swapped. */
+	backend = swap_system_backend();
 	if (backing == NULL || accounting_page == NULL || backend == NULL)
 		return EIO;
 
@@ -3876,6 +3897,7 @@ vm_private_page_in_owned(
 		spin_unlock_irqrestore(&backing->state_lock, irq);
 		return EIO;
 	}
+
 	slot = backing->swap_slot;
 
 	spin_unlock_irqrestore(&backing->state_lock, irq);
@@ -3893,6 +3915,7 @@ vm_private_page_in_owned(
 		else
 			error = ENOMEM;
 	}
+
 	if (error == 0)
 		error = swap_read_page(backend, slot,
 		    (void *)backing->pmem.vaddr);
@@ -3904,6 +3927,7 @@ vm_private_page_in_owned(
 			memset(&backing->pmem, 0, sizeof(backing->pmem));
 			(void)hal_pmem_free(&memory);
 		}
+
 		return error;
 	}
 
@@ -4329,14 +4353,17 @@ vm_object_reclaim_clean(
 				link = &page->next;
 				continue;
 			}
+
 			*link = page->next;
 			object_page_index_remove(object, page);
 			page->next = retired;
 			retired = page;
 			freed += page->pmem.size;
 		}
+
 		spin_unlock_irqrestore(&object->lock, irq);
 	}
+
 	registry_unlock(enabled);
 
 	/* Frees detached storage without closing any inode or mount reference. */
@@ -4399,6 +4426,7 @@ vm_object_reclaim_one(
 					break;
 				}
 			}
+
 			if (wired)
 				continue;
 
@@ -4411,12 +4439,14 @@ vm_object_reclaim_one(
 			refcount_get(&object->refs);
 			break;
 		}
+
 		spin_unlock_irqrestore(&object->lock, irq);
 
 		/* Stops at the first object that offered a page. */
 		if (found)
 			break;
 	}
+
 	registry_unlock(enabled);
 
 	vm_metadata_leave();
@@ -4440,6 +4470,7 @@ vm_object_reclaim_one(
 			removed = unlink_object_locked(object);
 		registry_unlock(enabled);
 	}
+
 	if (removed && refcount_put(&object->refs))
 		HAL_FATAL("VM object registry reference was last unexpectedly");
 
@@ -4647,6 +4678,7 @@ vm_reclaim_drain_swap_source_cancelable(
 				scan_error = EIO;
 				break;
 			}
+
 			if (backing_has_busy_mapping(backing) ||
 			    vm_private_page_io_try_acquire(backing) != 0) {
 				vm_private_page_ref(backing);
@@ -4663,6 +4695,7 @@ vm_reclaim_drain_swap_source_cancelable(
 				vm_private_page_put(backing);
 				continue;
 			}
+
 			if (backing->mappings == NULL)
 				HAL_FATAL("tracked swapped backing has no mapping");
 			pin_backing_mappings(backing);
@@ -4670,6 +4703,7 @@ vm_reclaim_drain_swap_source_cancelable(
 			selected = backing;
 			break;
 		}
+
 		mutex_unlock(&reclaim_lock);
 		vm_metadata_leave();
 		if (scan_error != 0)
@@ -4688,6 +4722,7 @@ vm_reclaim_drain_swap_source_cancelable(
 				if (error != 0)
 					return error;
 			}
+
 			continue;
 		}
 
@@ -4732,9 +4767,8 @@ vm_reclaim_drain_swap_source(
 {
 	int error;
 
-	error = vm_reclaim_drain_swap_source_cancelable(source_id, NULL, NULL);
-
 	/* Reports why the drain failed. */
+	error = vm_reclaim_drain_swap_source_cancelable(source_id, NULL, NULL);
 	if (error != 0)
 		return error;
 
@@ -4795,6 +4829,7 @@ vm_reclaim_private_one(
 			goto out;
 		}
 	}
+
 out:
 
 	mutex_unlock(&reclaim_lock);
@@ -4883,6 +4918,7 @@ retry_lookup:
 
 		return error;
 	}
+
 	registry_unlock(enabled);
 
 	/* Builds a new object holding the registry and the caller's references. */
@@ -4975,6 +5011,7 @@ retry_lookup:
 		destroy_object(object);
 		return EOVERFLOW;
 	}
+
 	object->registry_generation = ++object_registry_generation;
 
 	/* Publishes the new object with the inode's current end of file. */
@@ -5205,9 +5242,9 @@ alloc_vm_page(
 
 	/* Asks the HAL for one page of ordinary memory. */
 	memset(memory, 0, sizeof(*memory));
-	error = hal_pmem_alloc(&request, memory);
 
 	/* Returns a short allocation rather than leaving it behind. */
+	error = hal_pmem_alloc(&request, memory);
 	if (error != HAL_OK && memory->size != 0) {
 		if (hal_pmem_free(memory) != HAL_OK)
 			HAL_FATAL("VM page allocation rollback failed");
@@ -5606,6 +5643,7 @@ unlink_object_locked(
 				cache_objects--;
 				object->flags &= ~VM_OBJECT_CACHE_REFERENCE;
 			}
+
 			return 1;
 		}
 	}
@@ -5971,6 +6009,7 @@ vm_object_resize_finish(
 					link = &page->next;
 					continue;
 				}
+
 				if (page->pin_count != 0 || page->mapping_count != 0)
 					HAL_FATAL("invalid VM resize orphan state");
 				*link = page->next;
@@ -6067,9 +6106,8 @@ vm_object_page_pin_copy(
 	if (buffer == NULL)
 		return EINVAL;
 
-	object = page->owner;
-
 	/* Rejects a page that no object owns, because it has no lock to take. */
+	object = page->owner;
 	if (object == NULL)
 		return EINVAL;
 
@@ -6160,10 +6198,10 @@ vm_object_sync_range_internal(
 	int error;
 
 	/* Preserves the ordinary entry point without reserving a second payload. */
-	error = vm_object_sync_range_buffer(object, offset, size, flags, detaching,
-	    resize_owner, resize_target, NULL, 0);
 
 	/* Reports the failure. */
+	error = vm_object_sync_range_buffer(object, offset, size, flags, detaching,
+	    resize_owner, resize_target, NULL, 0);
 	if (error != 0)
 		return error;
 
@@ -6243,6 +6281,7 @@ vm_object_sync_range_buffer(
 		if (end < start)
 			end = UINT64_MAX;
 	}
+
 	(void)resize_target;
 
 	/* An ordinary sync holds the inode's I/O lock outside any transaction. */
@@ -6264,6 +6303,7 @@ vm_object_sync_range_buffer(
 			if (error != 0)
 				return error;
 		}
+
 		held_inode_io = 1;
 	}
 
@@ -6282,6 +6322,7 @@ vm_object_sync_range_buffer(
 				mutex_unlock(&object->inode->i_io_lock);
 			return EBUSY;
 		}
+
 		spin_unlock_irqrestore(&object->lock, irq);
 		vm_metadata_leave();
 	}
@@ -6351,6 +6392,7 @@ vm_object_sync_range_buffer(
 				wait_for_page = 1;
 				break;
 			}
+
 			candidate = page;
 			break;
 		}
@@ -6364,6 +6406,7 @@ vm_object_sync_range_buffer(
 				spin_unlock_irqrestore(&object->lock, irq);
 				break;
 			}
+
 			spin_unlock_irqrestore(&object->lock, irq);
 			continue;
 		}
@@ -6396,6 +6439,7 @@ vm_object_sync_range_buffer(
 		if ((observed & HAL_PAGE_DIRTY) != 0) {
 			object_page_dirty_mark(candidate);
 		}
+
 		dirty = (candidate->flags & VM_OBJECT_PAGE_DIRTY) != 0;
 		candidate->write_dirty_generation = candidate->dirty_generation;
 
@@ -6539,6 +6583,7 @@ vm_object_sync_range_buffer(
 
 			continue;
 		}
+
 		link = &page->next;
 	}
 
@@ -6681,9 +6726,8 @@ object_memory_reserve(
 	if (cache_memory_reclaim(PAGE_SIZE) == 0)
 		return error;
 
-	error = cache_memory_reserve(kind, PAGE_SIZE, optional);
-
 	/* Reports the failure. */
+	error = cache_memory_reserve(kind, PAGE_SIZE, optional);
 	if (error != 0)
 		return error;
 
@@ -6887,6 +6931,7 @@ object_descriptor_free(
 			slab->next->previous = slab->previous;
 		memory = slab->memory;
 	}
+
 	object_slab_unlock(enabled);
 
 	/* Releases physical metadata and its credits only outside the guard. */
@@ -7038,9 +7083,9 @@ page_index_balance(
 	/* Measures the changed children before choosing a rotation. */
 	page_index_update(page);
 	left = page_index_height(page->index_left);
-	right = page_index_height(page->index_right);
 
 	/* Corrects a left-heavy subtree, including its inner-heavy case. */
+	right = page_index_height(page->index_right);
 	if (left > right + 1U) {
 		/*
 		 * The left subtree is at least two levels taller than the
@@ -7454,6 +7499,7 @@ object_cache_read_missing(
 			publish = 0;
 			break;
 		}
+
 		pages[prepared++] = page;
 	}
 
@@ -7505,11 +7551,13 @@ object_cache_read_missing(
 					spin_unlock_irqrestore(&object->lock, irq);
 					return 0;
 				}
+
 				if (wanted > (size_t)index * PAGE_SIZE - in_page)
 					wanted = (size_t)index * PAGE_SIZE - in_page;
 				break;
 			}
 		}
+
 		spin_unlock_irqrestore(&object->lock, irq);
 
 		/* Serves the read through the ordinary leased backend path. */
@@ -7667,9 +7715,9 @@ write_dirty_pages(
 	 * Borrows optional scratch without waiting on a nested drain's owner.
 	 */
 	capacity = 0;
-	scratch = NULL;
 
 	/* Uses the caller's staging, or borrows one from the pool. */
+	scratch = NULL;
 	if (reserved_scratch != NULL && reserved_capacity >= PAGE_SIZE) {
 		scratch = reserved_scratch;
 		capacity = reserved_capacity;
@@ -7939,6 +7987,7 @@ backing_has_wired_mapping(
 		if (page->wire_count != 0)
 			return 1;
 	}
+
 	return 0;
 }
 
@@ -7953,6 +8002,7 @@ backing_has_busy_mapping(
 		if ((page->flags & VM_MAPPING_BUSY) != 0)
 			return 1;
 	}
+
 	return 0;
 }
 
@@ -8123,6 +8173,7 @@ unmap_backing_ptes(
 				error = EIO;
 				break;
 			}
+
 			page->flags |= VM_MAPPING_RECLAIM_UNMAPPED;
 			*pte_flags |= HAL_PAGE_DIRTY;
 			continue;
@@ -8138,6 +8189,7 @@ unmap_backing_ptes(
 
 		*pte_flags |= flags;
 	}
+
 	if (error != 0)
 		goto rollback;
 
@@ -8154,6 +8206,7 @@ unmap_backing_ptes(
 
 		page->flags |= VM_MAPPING_RECLAIM_UNMAPPED;
 	}
+
 	if (error == 0)
 		return 0;
 
@@ -8535,6 +8588,7 @@ vm_private_page_wait_idle_cancelable(
 		error = vm_private_page_wait_idle(backing);
 		return error;
 	}
+
 	if (backing == NULL)
 		return EINVAL;
 
@@ -8544,15 +8598,15 @@ vm_private_page_wait_idle_cancelable(
 		if (error != 0)
 			return error;
 
-		irq = spin_lock_irqsave(&backing->state_lock);
-
 		/* Reports the page idle when nobody owns, runs against, or pins it. */
+		irq = spin_lock_irqsave(&backing->state_lock);
 		if ((backing->flags & VM_PAGE_BUSY) == 0 &&
 		    backing->active_operations == 0 &&
 		    backing->pin_count == 0) {
 			spin_unlock_irqrestore(&backing->state_lock, irq);
 			return 0;
 		}
+
 		sequence = waitq_sequence(&backing->state_waitq);
 
 		spin_unlock_irqrestore(&backing->state_lock, irq);
@@ -8648,9 +8702,8 @@ reclaim_backing_owned(
 	if (file_candidate &&
 	    (state_flags & VM_PAGE_DIRTY) == 0 &&
 	    (pte_flags & HAL_PAGE_DIRTY) == 0) {
-		error = discard_file_backing_owned(backing);
-
 		/* Reports why the page could not be discarded. */
+		error = discard_file_backing_owned(backing);
 		if (error != 0)
 			return error;
 
@@ -8659,9 +8712,9 @@ reclaim_backing_owned(
 	}
 
 	/* Anything else keeps its only copy on swap. */
-	error = swap_out_backing_owned(backing);
 
 	/* Reports why the page could not be written out. */
+	error = swap_out_backing_owned(backing);
 	if (error != 0)
 		return error;
 

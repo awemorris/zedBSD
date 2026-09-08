@@ -96,10 +96,10 @@ drv_nvme_lifecycle_record(
 {
 	/* Handles the lifecycle availability. */
 	if (lifecycle == NULL || lifecycle->cleanup_started ||
-	    lifecycle->completed)
-
+	    lifecycle->completed) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	/* Dispatch the selected operation case. */
 	switch (event) {
 	case DRV_NVME_LIFECYCLE_BAR_CLAIMED:
@@ -137,10 +137,10 @@ drv_nvme_lifecycle_record(
 	case DRV_NVME_LIFECYCLE_PCI_COMMAND_CHANGED:
 		/* Handles the lifecycle condition. */
 		if (!lifecycle->pci_state_saved || lifecycle->bar_mapped ||
-		    lifecycle->pci_command_changed)
-
+		    lifecycle->pci_command_changed) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 		lifecycle->pci_command_changed = 1;
 
 		/* Reports successful completion. */
@@ -148,10 +148,10 @@ drv_nvme_lifecycle_record(
 	case DRV_NVME_LIFECYCLE_CONTROLLER_CLAIMED:
 		/* Handles the lifecycle condition. */
 		if (!lifecycle->pci_command_changed ||
-		    lifecycle->controller_claimed)
-
+		    lifecycle->controller_claimed) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 		lifecycle->controller_claimed = 1;
 		lifecycle->master_disable_required = 1;
 
@@ -185,10 +185,10 @@ drv_nvme_lifecycle_record(
 	case DRV_NVME_LIFECYCLE_CONTROLLER_ENABLED:
 		/* Handles the lifecycle condition. */
 		if (!lifecycle->irq_established ||
-		    lifecycle->controller_enabled)
-
+		    lifecycle->controller_enabled) {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 		lifecycle->controller_enabled = 1;
 
 		/* Reports successful completion. */
@@ -252,9 +252,9 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
-		error = ops->controller_disable(context);
 
 		/* Checks the operation status. */
+		error = ops->controller_disable(context);
 		if (error != 0) {
 			/* Obtains the drv nvme lifecycle fail result. */
 			function_result =
@@ -263,6 +263,7 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
+
 		lifecycle->controller_disabled = 1;
 		lifecycle->controller_enabled = 0;
 	}
@@ -278,9 +279,9 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
-		error = ops->bus_master_disable(context);
 
 		/* Checks the operation status. */
+		error = ops->bus_master_disable(context);
 		if (error != 0) {
 			/* Obtains the drv nvme lifecycle fail result. */
 			function_result =
@@ -289,6 +290,7 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
+
 		lifecycle->master_disabled = 1;
 	}
 
@@ -303,9 +305,9 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
-		error = ops->irq_disestablish(context);
 
 		/* Checks the operation status. */
+		error = ops->irq_disestablish(context);
 		if (error != 0) {
 			/* Obtains the drv nvme lifecycle fail result. */
 			function_result =
@@ -314,6 +316,7 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
+
 		lifecycle->irq_established = 0;
 	}
 
@@ -328,9 +331,9 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
-		error = ops->irq_drain(context);
 
 		/* Checks the operation status. */
+		error = ops->irq_drain(context);
 		if (error != 0) {
 			/* Obtains the drv nvme lifecycle fail result. */
 			function_result =
@@ -339,6 +342,7 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
+
 		lifecycle->irq_may_be_busy = 0;
 	}
 
@@ -353,6 +357,7 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
+
 		ops->irq_free(context);
 		lifecycle->irq_allocated = 0;
 	}
@@ -368,9 +373,11 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
+
 		ops->dma_free(context);
 		lifecycle->dma_allocated = 0;
 	}
+
 	lifecycle->controller_claimed = 0;
 
 	/* Handles the lifecycle condition. */
@@ -384,6 +391,7 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
+
 		ops->bar_unmap(context);
 		lifecycle->bar_mapped = 0;
 	}
@@ -399,9 +407,9 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
-		error = ops->bar_restore(context);
 
 		/* Checks the operation status. */
+		error = ops->bar_restore(context);
 		if (error != 0) {
 			/* Obtains the drv nvme lifecycle fail result. */
 			function_result =
@@ -410,6 +418,7 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
+
 		lifecycle->bar_snapshotted = 0;
 	}
 
@@ -424,9 +433,9 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
-		error = ops->pci_state_restore(context);
 
 		/* Checks the operation status. */
+		error = ops->pci_state_restore(context);
 		if (error != 0) {
 			/* Obtains the drv nvme lifecycle fail result. */
 			function_result =
@@ -435,8 +444,10 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
+
 		lifecycle->pci_command_changed = 0;
 	}
+
 	lifecycle->pci_state_saved = 0;
 
 	/* Handles the lifecycle condition. */
@@ -450,9 +461,11 @@ drv_nvme_lifecycle_cleanup(
 			/* Returns the computed result. */
 			return function_result;
 		}
+
 		ops->bar_release(context);
 		lifecycle->bar_claimed = 0;
 	}
+
 	lifecycle->last_error = 0;
 	lifecycle->quarantined = 0;
 	lifecycle->completed = 1;
@@ -569,6 +582,7 @@ drv_nvme_detach_flush_begin(
 		/* Returns the computed result. */
 		return ENXIO;
 	}
+
 	lifecycle->attempt_active = 1;
 	lifecycle->attempts++;
 	lifecycle->unavailable = 0;
@@ -621,10 +635,10 @@ drv_nvme_io_lifecycle_online(
 	if (lifecycle == NULL || lifecycle->released ||
 	    lifecycle->quarantined || lifecycle->queues_online ||
 	    lifecycle->bio_owned || lifecycle->command_owned ||
-	    lifecycle->payload_dma_active)
-
+	    lifecycle->payload_dma_active) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	lifecycle->queues_online = 1;
 	lifecycle->accepting = 1;
 	lifecycle->faulted = 0;
@@ -642,10 +656,10 @@ drv_nvme_io_lifecycle_begin_bio(
 {
 	/* Handles the lifecycle availability. */
 	if (lifecycle == NULL || !lifecycle->queues_online ||
-	    !lifecycle->accepting)
-
+	    !lifecycle->accepting) {
 		/* Returns the computed result. */
 		return ENXIO;
+	}
 
 	/* Handles the lifecycle condition. */
 	if (lifecycle->bio_owned || lifecycle->command_owned)
@@ -666,10 +680,10 @@ drv_nvme_io_lifecycle_submit(
 {
 	/* Handles the lifecycle availability. */
 	if (lifecycle == NULL ||
-	    (uses_payload_dma != 0 && uses_payload_dma != 1))
-
+	    (uses_payload_dma != 0 && uses_payload_dma != 1)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the lifecycle condition. */
 	if (!lifecycle->queues_online || !lifecycle->accepting)
@@ -713,6 +727,7 @@ drv_nvme_io_lifecycle_complete_command(
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	lifecycle->command_owned = 0;
 	lifecycle->payload_dma_active = 0;
 	lifecycle->command_completion_count++;
@@ -824,10 +839,10 @@ drv_nvme_io_lifecycle_resolve_quarantine(
 	/* Handles the lifecycle availability. */
 	if (lifecycle == NULL ||
 	    (hardware_quiesced != 0 && hardware_quiesced != 1) ||
-	    (irq_quiesced != 0 && irq_quiesced != 1))
-
+	    (irq_quiesced != 0 && irq_quiesced != 1)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the lifecycle condition. */
 	if (lifecycle->released)
@@ -839,10 +854,10 @@ drv_nvme_io_lifecycle_resolve_quarantine(
 
 	/* Handles the hardware quiesced condition. */
 	if (!hardware_quiesced || !irq_quiesced || lifecycle->accepting ||
-	    lifecycle->bio_owned)
-
+	    lifecycle->bio_owned) {
 		/* Returns the computed result. */
 		return EBUSY;
+	}
 	lifecycle->queues_online = 0;
 	lifecycle->command_owned = 0;
 	lifecycle->payload_dma_active = 0;
@@ -871,10 +886,10 @@ drv_nvme_io_lifecycle_release(
 	if (!lifecycle->controller_quiesced || lifecycle->queues_online ||
 	    lifecycle->accepting || lifecycle->bio_owned ||
 	    lifecycle->command_owned || lifecycle->payload_dma_active ||
-	    lifecycle->quarantined)
-
+	    lifecycle->quarantined) {
 		/* Returns the computed result. */
 		return EBUSY;
+	}
 	lifecycle->released = 1;
 
 	/* Reports successful completion. */
@@ -965,10 +980,10 @@ drv_nvme_shutdown_lifecycle_run(
 	/* Handles the lifecycle availability. */
 	if (lifecycle == NULL || ops == NULL || ops->stop_admission == NULL ||
 	    ops->shutdown_normal == NULL || ops->controller_disable == NULL ||
-	    ops->bus_master_disable == NULL)
-
+	    ops->bus_master_disable == NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 
 	/* Handles the lifecycle condition. */
 	if (lifecycle->completed)
@@ -1305,23 +1320,23 @@ nvme_wait_ready(
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		status = nvme_read32(controller, DRV_NVME_REG_CSTS);
+
+		/* Handles the state condition. */
 		state = expected_ready
 				? drv_nvme_controller_ready_state(status, 1)
 				: drv_nvme_controller_disable_state(status);
-
-		/* Handles the state condition. */
 		if (state == DRV_NVME_READY_MATCH)
 			return 0;
 
 		/* Handles the state condition. */
 		if (state == DRV_NVME_READY_FATAL ||
-		    state == DRV_NVME_READY_UNREACHABLE)
-
+		    state == DRV_NVME_READY_UNREACHABLE) {
 			/* Returns the computed result. */
 			return EIO;
-		now = clock_ticks();
+		}
 
 		/* Handles the now condition. */
+		now = clock_ticks();
 		if (now != started)
 			clock_running = 1;
 
@@ -1334,6 +1349,7 @@ nvme_wait_ready(
 			/* Early attach can precede the first timer tick. */
 			return ETIMEDOUT;
 		}
+
 		hal_compiler_barrier();
 	}
 }
@@ -1365,21 +1381,20 @@ nvme_wait_shutdown_complete(
 		spin_budget = 1U;
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		status = nvme_read32(controller, DRV_NVME_REG_CSTS);
-
 		/* Checks the operation status. */
+		status = nvme_read32(controller, DRV_NVME_REG_CSTS);
 		if (status == UINT32_MAX ||
-		    (status & DRV_NVME_CSTS_FATAL) != 0U)
-
+		    (status & DRV_NVME_CSTS_FATAL) != 0U) {
 			/* Returns the computed result. */
 			return EIO;
+		}
 
 		/* Checks the operation status. */
 		if ((status & NVME_CSTS_SHST_MASK) == NVME_CSTS_SHST_COMPLETE)
 			return 0;
-		now = clock_ticks();
 
 		/* Handles the now condition. */
+		now = clock_ticks();
 		if (now != started)
 			clock_running = 1;
 
@@ -1392,6 +1407,7 @@ nvme_wait_shutdown_complete(
 			/* Returns the computed result. */
 			return ETIMEDOUT;
 		}
+
 		hal_compiler_barrier();
 	}
 }
@@ -1406,15 +1422,14 @@ nvme_bus_master_disable(
 	uint16_t command;
 	int error;
 
-	error = drv_pci_device_set_bus_master(controller->pci, false);
-
 	/* Checks the operation status. */
+	error = drv_pci_device_set_bus_master(controller->pci, false);
 	if (error != 0)
 		return error;
-	error = drv_pci_device_config_read16(controller->pci, NVME_PCI_COMMAND,
-					     &command);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_read16(controller->pci, NVME_PCI_COMMAND,
+					     &command);
 	if (error != 0)
 		return error;
 
@@ -1432,23 +1447,22 @@ nvme_pci_quiesce(
 	uint16_t command;
 	int error;
 
+	/* Checks the operation status. */
 	error = drv_pci_device_config_read16(controller->pci, NVME_PCI_COMMAND,
 					     &command);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = drv_pci_device_config_write16(
 		controller->pci, NVME_PCI_COMMAND,
 		(uint16_t)(command & (uint16_t)~NVME_PCI_COMMAND_ENABLE));
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	error = drv_pci_device_config_read16(controller->pci, NVME_PCI_COMMAND,
-					     &command);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_read16(controller->pci, NVME_PCI_COMMAND,
+					     &command);
 	if (error != 0)
 		return error;
 
@@ -1467,57 +1481,54 @@ nvme_message_irq_mask(
 	uint16_t control, readback;
 	int error;
 
+	/* Checks the operation status. */
 	error = drv_pci_device_find_capability(
 		controller->pci, NVME_PCI_MSI_CAPABILITY, &capability);
-
-	/* Checks the operation status. */
 	if (error == 0) {
+		/* Checks the operation status. */
 		error = drv_pci_device_config_read16(
 			controller->pci, capability + NVME_PCI_MESSAGE_CONTROL,
 			&control);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 		control &= (uint16_t)~NVME_PCI_MSI_ENABLE;
+
+		/* Checks the operation status. */
 		error = drv_pci_device_config_write16(
 			controller->pci, capability + NVME_PCI_MESSAGE_CONTROL,
 			control);
-
-		/* Checks the operation status. */
 		if (error != 0 ||
 		    drv_pci_device_config_read16(
 			    controller->pci,
 			    capability + NVME_PCI_MESSAGE_CONTROL,
 			    &readback) != 0 ||
-		    (readback & NVME_PCI_MSI_ENABLE) != 0U)
-
+		    (readback & NVME_PCI_MSI_ENABLE) != 0U) {
 			/* Returns the computed result. */
 			return error != 0 ? error : EIO;
+		}
 	} else if (error != ENOENT) {
 		/* Returns the computed result. */
 		return error;
 	}
-	error = drv_pci_device_find_capability(
-		controller->pci, NVME_PCI_MSIX_CAPABILITY, &capability);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_find_capability(
+		controller->pci, NVME_PCI_MSIX_CAPABILITY, &capability);
 	if (error == 0) {
+		/* Checks the operation status. */
 		error = drv_pci_device_config_read16(
 			controller->pci, capability + NVME_PCI_MESSAGE_CONTROL,
 			&control);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 		control =
 			(uint16_t)((control & (uint16_t)~NVME_PCI_MSIX_ENABLE) |
 				   NVME_PCI_MSIX_FUNCTION_MASK);
+
+		/* Checks the operation status. */
 		error = drv_pci_device_config_write16(
 			controller->pci, capability + NVME_PCI_MESSAGE_CONTROL,
 			control);
-
-		/* Checks the operation status. */
 		if (error != 0 ||
 		    drv_pci_device_config_read16(
 			    controller->pci,
@@ -1525,10 +1536,10 @@ nvme_message_irq_mask(
 			    &readback) != 0 ||
 		    (readback &
 		     (NVME_PCI_MSIX_ENABLE | NVME_PCI_MSIX_FUNCTION_MASK)) !=
-			    NVME_PCI_MSIX_FUNCTION_MASK)
-
+			    NVME_PCI_MSIX_FUNCTION_MASK) {
 			/* Returns the computed result. */
 			return error != 0 ? error : EIO;
+		}
 	} else if (error != ENOENT) {
 		/* Returns the computed result. */
 		return error;
@@ -1549,16 +1560,14 @@ nvme_message_irq_save_and_mask(
 	unsigned capability;
 	int error;
 
+	/* Checks the operation status. */
 	error = drv_pci_device_find_capability(
 		controller->pci, NVME_PCI_MSI_CAPABILITY, &capability);
-
-	/* Checks the operation status. */
 	if (error == 0) {
+		/* Checks the operation status. */
 		error = drv_pci_device_config_read16(
 			controller->pci, capability + NVME_PCI_MESSAGE_CONTROL,
 			&controller->inherited_msi_control);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 		controller->inherited_msi_capability = capability;
@@ -1567,16 +1576,15 @@ nvme_message_irq_save_and_mask(
 		/* Returns the computed result. */
 		return error;
 	}
-	error = drv_pci_device_find_capability(
-		controller->pci, NVME_PCI_MSIX_CAPABILITY, &capability);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_find_capability(
+		controller->pci, NVME_PCI_MSIX_CAPABILITY, &capability);
 	if (error == 0) {
+		/* Checks the operation status. */
 		error = drv_pci_device_config_read16(
 			controller->pci, capability + NVME_PCI_MESSAGE_CONTROL,
 			&controller->inherited_msix_control);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 		controller->inherited_msix_capability = capability;
@@ -1605,13 +1613,12 @@ nvme_message_irq_restore(
 
 	/* Handles the controller condition. */
 	if (controller->inherited_msi_saved) {
+		/* Checks the operation status. */
 		error = drv_pci_device_config_write16(
 			controller->pci,
 			controller->inherited_msi_capability +
 				NVME_PCI_MESSAGE_CONTROL,
 			controller->inherited_msi_control);
-
-		/* Checks the operation status. */
 		if (error != 0 ||
 		    drv_pci_device_config_read16(
 			    controller->pci,
@@ -1620,21 +1627,20 @@ nvme_message_irq_restore(
 			    &readback) != 0 ||
 		    (readback & NVME_PCI_MSI_ENABLE) !=
 			    (controller->inherited_msi_control &
-			     NVME_PCI_MSI_ENABLE))
-
+			     NVME_PCI_MSI_ENABLE)) {
 			/* Returns the computed result. */
 			return error != 0 ? error : EIO;
+		}
 	}
 
 	/* Handles the controller condition. */
 	if (controller->inherited_msix_saved) {
+		/* Checks the operation status. */
 		error = drv_pci_device_config_write16(
 			controller->pci,
 			controller->inherited_msix_capability +
 				NVME_PCI_MESSAGE_CONTROL,
 			controller->inherited_msix_control);
-
-		/* Checks the operation status. */
 		if (error != 0 ||
 		    drv_pci_device_config_read16(
 			    controller->pci,
@@ -1645,10 +1651,10 @@ nvme_message_irq_restore(
 		     (NVME_PCI_MSIX_ENABLE | NVME_PCI_MSIX_FUNCTION_MASK)) !=
 			    (controller->inherited_msix_control &
 			     (NVME_PCI_MSIX_ENABLE |
-			      NVME_PCI_MSIX_FUNCTION_MASK)))
-
+			      NVME_PCI_MSIX_FUNCTION_MASK))) {
 			/* Returns the computed result. */
 			return error != 0 ? error : EIO;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -1675,17 +1681,17 @@ nvme_runtime_irq_mask(
 	capability_id = controller->irq.type == DRV_PCI_IRQ_MSIX
 				? NVME_PCI_MSIX_CAPABILITY
 				: NVME_PCI_MSI_CAPABILITY;
-	error = drv_pci_device_find_capability(controller->pci, capability_id,
-					       &capability);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_find_capability(controller->pci, capability_id,
+					       &capability);
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = drv_pci_device_config_read16(
 		controller->pci, capability + NVME_PCI_MESSAGE_CONTROL,
 		&control);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
 
@@ -1698,17 +1704,17 @@ nvme_runtime_irq_mask(
 
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
-	error = drv_pci_device_config_write16(
-		controller->pci, capability + NVME_PCI_MESSAGE_CONTROL, masked);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_write16(
+		controller->pci, capability + NVME_PCI_MESSAGE_CONTROL, masked);
 	if (error != 0 ||
 	    drv_pci_device_config_read16(controller->pci,
 					 capability + NVME_PCI_MESSAGE_CONTROL,
-					 &readback) != 0)
-
+					 &readback) != 0) {
 		/* Returns the computed result. */
 		return error != 0 ? error : EIO;
+	}
 
 	/* Handles the controller condition. */
 	if (controller->irq.type == DRV_PCI_IRQ_MSIX) {
@@ -1719,6 +1725,7 @@ nvme_runtime_irq_mask(
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	*capability_out = capability;
 	*control_out = control;
 	/* Reports successful completion. */
@@ -1737,18 +1744,17 @@ nvme_runtime_irq_restore(
 	uint16_t readback;
 	int error;
 
+	/* Checks the operation status. */
 	error = drv_pci_device_config_write16(
 		controller->pci, capability + NVME_PCI_MESSAGE_CONTROL,
 		control);
-
-	/* Checks the operation status. */
 	if (error != 0 ||
 	    drv_pci_device_config_read16(controller->pci,
 					 capability + NVME_PCI_MESSAGE_CONTROL,
-					 &readback) != 0)
-
+					 &readback) != 0) {
 		/* Returns the computed result. */
 		return error != 0 ? error : EIO;
+	}
 
 	/* Handles the controller condition. */
 	if (controller->irq.type == DRV_PCI_IRQ_MSIX) {
@@ -1785,9 +1791,9 @@ nvme_controller_disable(
 	if (!controller->irq_allocated ||
 	    controller->irq.type != DRV_PCI_IRQ_MSIX)
 		nvme_write32(controller, DRV_NVME_REG_INTMS, UINT32_MAX);
-	configuration = nvme_read32(controller, DRV_NVME_REG_CC);
 
 	/* Handles the configuration condition. */
+	configuration = nvme_read32(controller, DRV_NVME_REG_CC);
 	if (configuration == UINT32_MAX)
 		return EIO;
 
@@ -1795,18 +1801,18 @@ nvme_controller_disable(
 	if ((configuration & DRV_NVME_CC_ENABLE) != 0U) {
 		configuration &= ~(DRV_NVME_CC_ENABLE | DRV_NVME_CC_SHN_MASK);
 		nvme_write32(controller, DRV_NVME_REG_CC, configuration);
-		error = nvme_wait_ready(controller, 0);
 
 		/* Checks the operation status. */
+		error = nvme_wait_ready(controller, 0);
 		if (error != 0)
 			return error;
 	} else {
-		error = nvme_wait_ready(controller, 0);
-
 		/* Checks the operation status. */
+		error = nvme_wait_ready(controller, 0);
 		if (error != 0)
 			return error;
 	}
+
 	controller->controller_enabled = 0;
 
 	/* Reports successful completion. */
@@ -1820,29 +1826,29 @@ static int
 nvme_controller_shutdown_normal(
 	struct nvme_controller *controller)
 {
-	int function_result;
+	int error;
 	uint32_t configuration;
 
 	/* Handles the controller condition. */
 	if (!controller->controller_enabled)
 		return 0;
-	configuration = nvme_read32(controller, DRV_NVME_REG_CC);
 
 	/* Handles the configuration condition. */
+	configuration = nvme_read32(controller, DRV_NVME_REG_CC);
 	if (configuration == UINT32_MAX ||
-	    (configuration & DRV_NVME_CC_ENABLE) == 0U)
-
+	    (configuration & DRV_NVME_CC_ENABLE) == 0U) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 	configuration &= ~DRV_NVME_CC_SHN_MASK;
 	configuration |= NVME_CC_SHN_NORMAL;
 	nvme_write32(controller, DRV_NVME_REG_CC, configuration);
 
 	/* Obtains the nvme wait shutdown complete result. */
-	function_result = nvme_wait_shutdown_complete(controller);
+	error = nvme_wait_shutdown_complete(controller);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int nvme_stop_admission(struct nvme_controller *controller);
@@ -1879,6 +1885,7 @@ nvme_stop_admission(
 			/* Reports successful completion. */
 			return 0;
 		}
+
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 
 		/* Checks the clock ticks result. */
@@ -1905,6 +1912,7 @@ nvme_detach_release(
 	    controller->controller_enabled)
 		controller->stopping = 0;
 	waitq_wake_all(&controller->io_state_waitq);
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 }
 
@@ -1924,18 +1932,18 @@ nvme_detach_claim(
 	if (device == NULL || result == NULL)
 		return EINVAL;
 	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
-	controller = nvme_primary;
 
 	/* Handles the controller availability. */
+	controller = nvme_primary;
 	if (controller == NULL || controller->pci != device) {
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
 
 		/* Returns the computed result. */
 		return EBUSY;
 	}
-	irq = spin_lock_irqsave(&controller->command_lock);
 
 	/* Handles the controller condition. */
+	irq = spin_lock_irqsave(&controller->command_lock);
 	if (controller->detach_busy) {
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
@@ -1943,24 +1951,27 @@ nvme_detach_claim(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	controller->detach_busy = 1;
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 	spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
+
 	deadline = clock_ticks() + (controller->timeout_ticks != 0U
 					    ? controller->timeout_ticks
 					    : 1U);
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		irq = spin_lock_irqsave(&controller->command_lock);
-
 		/* Handles the controller condition. */
+		irq = spin_lock_irqsave(&controller->command_lock);
 		if (!controller->command_pending && !controller->probe_busy) {
 			spin_unlock_irqrestore(&controller->command_lock, irq);
 			*result = controller;
 			/* Reports successful completion. */
 			return 0;
 		}
+
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 
 		/* Checks the clock ticks result. */
@@ -1970,6 +1981,7 @@ nvme_detach_claim(
 			/* Returns the computed result. */
 			return EBUSY;
 		}
+
 		sched_yield();
 	}
 }
@@ -1989,18 +2001,18 @@ nvme_shutdown_claim(
 	if (device == NULL || result == NULL)
 		return EINVAL;
 	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
-	controller = nvme_primary;
 
 	/* Handles the controller availability. */
+	controller = nvme_primary;
 	if (controller == NULL || controller->pci != device) {
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
 
 		/* Returns the computed result. */
 		return EBUSY;
 	}
-	irq = spin_lock_irqsave(&controller->command_lock);
 
 	/* Handles the controller condition. */
+	irq = spin_lock_irqsave(&controller->command_lock);
 	if (controller->detach_busy) {
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
@@ -2008,11 +2020,14 @@ nvme_shutdown_claim(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	controller->detach_busy = 1;
 	controller->stopping = 1;
 	waitq_wake_all(&controller->io_state_waitq);
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 	spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
+
 	*result = controller;
 	/* Reports successful completion. */
 	return 0;
@@ -2056,28 +2071,28 @@ static int
 nvme_shutdown_normal(
 	void *context)
 {
-	int function_result;
+	int error;
 	struct nvme_controller *controller = context;
 
 	/* Handles the controller condition. */
 	if (!controller->lifecycle.controller_claimed ||
-	    controller->lifecycle.controller_disabled)
-
+	    controller->lifecycle.controller_disabled) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Handles the registers availability. */
 	if (!controller->lifecycle.bar_mapped || !controller->bar_mapped ||
-	    controller->registers == NULL)
-
+	    controller->registers == NULL) {
 		/* Returns the computed result. */
 		return EIO;
+	}
 
 	/* Obtains the nvme controller shutdown normal result. */
-	function_result = nvme_controller_shutdown_normal(controller);
+	error = nvme_controller_shutdown_normal(controller);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int nvme_shutdown_controller_disable(void *context);
@@ -2092,20 +2107,20 @@ nvme_shutdown_controller_disable(
 
 	/* Handles the controller condition. */
 	if (!controller->lifecycle.controller_claimed ||
-	    controller->lifecycle.controller_disabled)
-
+	    controller->lifecycle.controller_disabled) {
 		/* Reports successful completion. */
 		return 0;
+	}
 
 	/* Handles the registers availability. */
 	if (!controller->lifecycle.bar_mapped || !controller->bar_mapped ||
-	    controller->registers == NULL)
-
+	    controller->registers == NULL) {
 		/* Returns the computed result. */
 		return EIO;
-	error = nvme_controller_disable(controller);
+	}
 
 	/* Checks the operation status. */
+	error = nvme_controller_disable(controller);
 	if (error == 0) {
 		controller->lifecycle.controller_disabled = 1;
 		controller->lifecycle.controller_enabled = 0;
@@ -2131,13 +2146,13 @@ nvme_shutdown_bus_master_disable(
 
 	/* Handles the controller condition. */
 	if (!controller->lifecycle.master_disable_required ||
-	    controller->lifecycle.master_disabled)
-
+	    controller->lifecycle.master_disabled) {
 		/* Reports successful completion. */
 		return 0;
-	error = nvme_bus_master_disable(controller);
+	}
 
 	/* Checks the operation status. */
+	error = nvme_bus_master_disable(controller);
 	if (error == 0)
 		controller->lifecycle.master_disabled = 1;
 
@@ -2170,10 +2185,9 @@ nvme_irq_remove(
 	if (controller->irq_cookie != NULL) {
 		/* Process each element required by the operation. */
 		for (attempt = 0; attempt < NVME_IRQ_DRAIN_SPINS; attempt++) {
+			/* Checks the operation status. */
 			error = drv_pci_device_disestablish_irq_checked(
 				controller->pci, controller->irq_cookie);
-
-			/* Checks the operation status. */
 			if (error != EBUSY)
 				break;
 			hal_compiler_barrier();
@@ -2188,6 +2202,7 @@ nvme_irq_remove(
 			/* Returns the computed result. */
 			return error;
 		}
+
 		controller->irq_cookie = NULL;
 	}
 
@@ -2211,6 +2226,7 @@ nvme_irq_drain(
 			return 0;
 		hal_compiler_barrier();
 	}
+
 	hal_printf(
 		"nvme: IRQ drain timed out; retaining controller resources\n");
 
@@ -2290,9 +2306,9 @@ nvme_restore_bar(
 	/* Handles the controller condition. */
 	if (!controller->original_bar_valid)
 		return 0;
-	error = drv_pci_device_bar(controller->pci, 0, &current);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_bar(controller->pci, 0, &current);
 	if (error != 0)
 		return error;
 
@@ -2315,13 +2331,13 @@ static int
 nvme_lifecycle_controller_disable(
 	void *context)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the nvme controller disable result. */
-	function_result = nvme_controller_disable(context);
+	error = nvme_controller_disable(context);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int nvme_lifecycle_master_disable(void *context);
@@ -2331,13 +2347,13 @@ static int
 nvme_lifecycle_master_disable(
 	void *context)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the nvme bus master disable result. */
-	function_result = nvme_bus_master_disable(context);
+	error = nvme_bus_master_disable(context);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int nvme_lifecycle_irq_remove(void *context);
@@ -2347,13 +2363,13 @@ static int
 nvme_lifecycle_irq_remove(
 	void *context)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the nvme irq remove result. */
-	function_result = nvme_irq_remove(context);
+	error = nvme_irq_remove(context);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int nvme_lifecycle_irq_drain(void *context);
@@ -2433,9 +2449,9 @@ nvme_lifecycle_bar_restore(
 		/* Reports successful completion. */
 		return 0;
 	}
-	quiesce_error = nvme_pci_quiesce(controller);
 
 	/* Checks the operation status. */
+	quiesce_error = nvme_pci_quiesce(controller);
 	if (quiesce_error != 0) {
 		hal_printf("nvme: PCI quiesce after BAR restore failure failed "
 			   "(%d)\n",
@@ -2460,15 +2476,14 @@ nvme_lifecycle_pci_restore(
 	struct nvme_controller *controller = context;
 	int error, message_error, quiesce_error;
 
-	error = nvme_message_irq_restore(controller);
-
 	/* Checks the operation status. */
+	error = nvme_message_irq_restore(controller);
 	if (error != 0)
 		goto fail;
-	error = drv_pci_device_restore_enable_state(
-		controller->pci, &controller->pci_enable_state);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_restore_enable_state(
+		controller->pci, &controller->pci_enable_state);
 	if (error == 0) {
 		controller->inherited_msi_saved = 0;
 		controller->inherited_msix_saved = 0;
@@ -2479,17 +2494,17 @@ nvme_lifecycle_pci_restore(
 	}
 
 fail:
-	message_error = nvme_message_irq_mask(controller);
 
 	/* Checks the operation status. */
+	message_error = nvme_message_irq_mask(controller);
 	if (message_error != 0) {
 		hal_printf("nvme: message interrupt mask after PCI restore "
 			   "failure failed (%d)\n",
 			   message_error);
 	}
-	quiesce_error = nvme_pci_quiesce(controller);
 
 	/* Checks the operation status. */
+	quiesce_error = nvme_pci_quiesce(controller);
 	if (quiesce_error != 0) {
 		hal_printf("nvme: PCI quiesce after command restore failure "
 			   "failed (%d)\n",
@@ -2539,15 +2554,14 @@ nvme_cleanup(
 {
 	int error;
 
-	error = nvme_stop_admission(controller);
-
 	/* Checks the operation status. */
+	error = nvme_stop_admission(controller);
 	if (error != 0)
 		return error;
-	error = drv_nvme_lifecycle_cleanup(
-		&controller->lifecycle, &nvme_lifecycle_operations, controller);
 
 	/* Checks the operation status. */
+	error = drv_nvme_lifecycle_cleanup(
+		&controller->lifecycle, &nvme_lifecycle_operations, controller);
 	if (error != 0)
 		return error;
 	controller->controller_owned = 0;
@@ -2570,7 +2584,9 @@ nvme_publish_controller(
 
 	(void)drv_pci_device_set_driver_data(controller->pci, controller);
 	irq = spin_lock_irqsave(&nvme_registry_lock);
+
 	nvme_primary = controller;
+
 	spin_unlock_irqrestore(&nvme_registry_lock, irq);
 }
 
@@ -2586,6 +2602,7 @@ nvme_unpublish_controller(
 	/* Handles the nvme primary condition. */
 	if (nvme_primary == controller)
 		nvme_primary = NULL;
+
 	spin_unlock_irqrestore(&nvme_registry_lock, irq);
 }
 
@@ -2607,9 +2624,8 @@ nvme_io_fail_all_locked(
 	/* Process each remaining element. */
 	for (slot_index = 0; slot_index < controller->io_slot_count;
 	     slot_index++) {
-		slot = &controller->io_slots[slot_index];
-
 		/* Handles the slot condition. */
+		slot = &controller->io_slots[slot_index];
 		if (slot->state != NVME_IO_SLOT_ACTIVE)
 			continue;
 		(void)drv_nvme_io_lifecycle_fault(&slot->lifecycle);
@@ -2625,8 +2641,10 @@ nvme_io_fail_all_locked(
 				controller->io_fault = EIO;
 			slot->posted = 0;
 		}
+
 		waitq_wake_all(&slot->waitq);
 	}
+
 	waitq_wake_all(&controller->io_state_waitq);
 }
 
@@ -2643,10 +2661,9 @@ nvme_irq_admin_locked(
 
 	/* Continue while the operation condition remains true. */
 	while (consumed < controller->queue_depth) {
+		/* Handles the entry condition. */
 		entry = &controller->admin_completion
 				 [controller->completion_cursor.head];
-
-		/* Handles the entry condition. */
 		if ((entry->status & 1U) !=
 		    (controller->completion_cursor.phase & 1U))
 			break;
@@ -2671,6 +2688,7 @@ nvme_irq_admin_locked(
 			controller->command_error =
 				drv_nvme_completion_error(&completion);
 		}
+
 		controller->command_pending = 0;
 		controller->command_completed = 1;
 		drv_nvme_completion_cursor_advance(
@@ -2701,15 +2719,14 @@ nvme_io_completion_owner_locked(
 
 	/* Process each remaining element. */
 	for (index = 0; index < controller->io_slot_count; index++) {
-		slot = &controller->io_slots[index];
-
 		/* Handles the slot condition. */
+		slot = &controller->io_slots[index];
 		if (slot->state == NVME_IO_SLOT_ACTIVE && slot->posted &&
 		    slot->epoch == controller->io_epoch &&
-		    slot->command_id == command_id)
-
+		    slot->command_id == command_id) {
 			/* Returns the computed result. */
 			return slot;
+		}
 	}
 
 	/* Reports that no result is available. */
@@ -2733,10 +2750,9 @@ nvme_irq_io_locked(
 		return 0;
 	/* Continue while the operation condition remains true. */
 	while (consumed < controller->io_queue_depth) {
+		/* Handles the entry condition. */
 		entry = &controller->io_completion
 				 [controller->io_completion_cursor.head];
-
-		/* Handles the entry condition. */
 		if ((entry->status & 1U) !=
 		    (controller->io_completion_cursor.phase & 1U))
 			break;
@@ -2747,10 +2763,10 @@ nvme_irq_io_locked(
 		completion.submission_id = entry->submission_id;
 		completion.command_id = entry->command_id;
 		completion.status = entry->status;
-		slot = nvme_io_completion_owner_locked(controller,
-						       completion.command_id);
 
 		/* Handles the slot availability. */
+		slot = nvme_io_completion_owner_locked(controller,
+						       completion.command_id);
 		if (completion.submission_id != NVME_IO_QUEUE_ID ||
 		    completion.submission_head >= controller->io_queue_depth ||
 		    slot == NULL) {
@@ -2783,6 +2799,7 @@ nvme_irq_io_locked(
 			waitq_wake_all(&slot->waitq);
 			waitq_wake_all(&controller->io_state_waitq);
 		}
+
 		drv_nvme_completion_cursor_advance(
 			&controller->io_completion_cursor);
 		consumed++;
@@ -2813,13 +2830,14 @@ nvme_irq(
 	/* Drains both completion queues and samples the status. */
 	(void)atomic_raw_fetch_add_relaxed(&controller->irq_busy, 1U);
 	irq = spin_lock_irqsave(&controller->command_lock);
+
 	consumed = nvme_irq_admin_locked(controller);
 	consumed += nvme_irq_io_locked(controller);
+
+	/* Checks the operation status. */
 	status = controller->controller_enabled
 			 ? nvme_read32(controller, DRV_NVME_REG_CSTS)
 			 : 0U;
-
-	/* Checks the operation status. */
 	if (status == UINT32_MAX || (status & DRV_NVME_CSTS_FATAL) != 0U) {
 		/* Handles the controller condition. */
 		if (controller->command_pending) {
@@ -2834,6 +2852,7 @@ nvme_irq(
 			nvme_io_fail_all_locked(controller, EIO);
 		consumed++;
 	}
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Checks the atomic raw fetch add release result. */
@@ -2886,6 +2905,7 @@ nvme_admin_execute_mode(
 		error = EBUSY;
 		goto out;
 	}
+
 	controller->next_command_id++;
 
 	/* Handles the controller condition. */
@@ -2900,15 +2920,16 @@ nvme_admin_execute_mode(
 	controller->command_pending = 1;
 	slot = &controller->admin_submission[controller->submission_tail];
 	*slot = *command;
-	next = drv_nvme_queue_index_advance(controller->submission_tail,
-					    controller->queue_depth);
 
 	/* Handles the next condition. */
+	next = drv_nvme_queue_index_advance(controller->submission_tail,
+					    controller->queue_depth);
 	if (next == UINT32_MAX) {
 		controller->command_pending = 0;
 		error = EIO;
 		goto out;
 	}
+
 	controller->submission_tail = next;
 	hal_io_wmb();
 	nvme_write32(controller, controller->submission_doorbell,
@@ -2944,7 +2965,9 @@ nvme_admin_execute_mode(
 		if (result != NULL)
 			*result = controller->command_result;
 	}
+
 out:
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Reports the failure. */
@@ -2964,14 +2987,14 @@ nvme_admin_execute(
 	struct drv_nvme_command *command,
 	uint32_t *result)
 {
-	int function_result;
+	int error;
 
 	/* Obtains the nvme admin execute mode result. */
-	function_result =
+	error =
 		nvme_admin_execute_mode(controller, command, result, 0);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int nvme_identify(struct nvme_controller *controller, uint32_t namespace_id, uint8_t selector);
@@ -2983,7 +3006,7 @@ nvme_identify(
 	uint32_t namespace_id,
 	uint8_t selector)
 {
-	int function_result;
+	int error;
 	struct drv_nvme_command command;
 
 	memset(controller->identify_dma.address, 0,
@@ -2991,17 +3014,17 @@ nvme_identify(
 
 	/* Checks the drv nvme identify command result. */
 	if (!drv_nvme_identify_command(&command, 0, namespace_id, selector,
-				       controller->identify_dma.device_address))
-
+				       controller->identify_dma.device_address)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	hal_io_wmb();
 
 	/* Obtains the nvme admin execute result. */
-	function_result = nvme_admin_execute(controller, &command, NULL);
+	error = nvme_admin_execute(controller, &command, NULL);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 static int nvme_io_wait_locked(struct nvme_controller *controller, struct wait_queue *waitq, uint64_t deadline, unsigned long *irq);
@@ -3038,7 +3061,9 @@ nvme_io_wait_locked(
 		/* Returns the computed result. */
 		return error == EAGAIN ? 0 : error;
 	}
+
 	spin_unlock_irqrestore(&controller->command_lock, *irq);
+
 	sched_yield();
 	*irq = spin_lock_irqsave(&controller->command_lock);
 	/* Computes the function result. */
@@ -3062,9 +3087,8 @@ nvme_io_ensure_online(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-		irq = spin_lock_irqsave(&controller->command_lock);
-
 		/* Handles the controller condition. */
+		irq = spin_lock_irqsave(&controller->command_lock);
 		if (controller->io_queue_ready && !controller->stopping &&
 		    !controller->quarantined &&
 		    !controller->io_recovery_needed) {
@@ -3095,6 +3119,7 @@ nvme_io_ensure_online(
 			/* Returns the computed result. */
 			return ENXIO;
 		}
+
 		error = nvme_io_wait_locked(controller,
 					    &controller->io_state_waitq,
 					    deadline, &irq);
@@ -3120,9 +3145,9 @@ nvme_io_begin_bio(
 	int error = 0;
 
 	*owned = 0;
-	error = nvme_io_ensure_online(controller);
 
 	/* Checks the operation status. */
+	error = nvme_io_ensure_online(controller);
 	if (error != 0)
 		return error;
 	irq = spin_lock_irqsave(&controller->command_lock);
@@ -3133,6 +3158,7 @@ nvme_io_begin_bio(
 		error = ENXIO;
 		goto out;
 	}
+
 	controller->io_calls++;
 	*owned = 1;
 	/* Validates the selected operation. */
@@ -3146,14 +3172,15 @@ nvme_io_begin_bio(
 				error = ENXIO;
 				break;
 			}
+
+			/* Checks the operation status. */
 			error = nvme_io_wait_locked(controller,
 						    &controller->io_state_waitq,
 						    deadline, &irq);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				break;
 		}
+
 		controller->io_flush_waiting--;
 
 		/* Checks the operation status. */
@@ -3168,11 +3195,11 @@ nvme_io_begin_bio(
 				error = ENXIO;
 				break;
 			}
+
+			/* Checks the operation status. */
 			error = nvme_io_wait_locked(controller,
 						    &controller->io_state_waitq,
 						    deadline, &irq);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				break;
 		}
@@ -3188,7 +3215,9 @@ nvme_io_begin_bio(
 		*owned = 0;
 		waitq_wake_all(&controller->io_state_waitq);
 	}
+
 out:
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Reports the failure. */
@@ -3227,6 +3256,7 @@ nvme_io_end_bio(
 		__builtin_trap();
 	controller->io_calls--;
 	waitq_wake_all(&controller->io_state_waitq);
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 }
 
@@ -3244,10 +3274,10 @@ nvme_io_command_id_in_use_locked(
 	for (index = 0; index < controller->io_slot_count; index++) {
 		/* Handles the controller condition. */
 		if (controller->io_slots[index].state != NVME_IO_SLOT_FREE &&
-		    controller->io_slots[index].command_id == command_id)
-
+		    controller->io_slots[index].command_id == command_id) {
 			/* Reports operation failure. */
 			return 1;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -3273,10 +3303,10 @@ nvme_io_next_command_id_locked(
 
 		/* Checks the nvme io command id in use locked result. */
 		if (!nvme_io_command_id_in_use_locked(
-			    controller, controller->next_io_command_id))
-
+			    controller, controller->next_io_command_id)) {
 			/* Returns the computed result. */
 			return controller->next_io_command_id;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -3299,6 +3329,7 @@ nvme_io_slot_acquire(
 	int error = 0;
 
 	irq = spin_lock_irqsave(&controller->command_lock);
+
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		/* Handles the controller condition. */
@@ -3307,16 +3338,16 @@ nvme_io_slot_acquire(
 			error = ENXIO;
 			break;
 		}
+
 		/* Process each remaining element. */
 		for (index = 0; index < controller->io_slot_count; index++) {
-			slot = &controller->io_slots[index];
-
 			/* Handles the slot condition. */
+			slot = &controller->io_slots[index];
 			if (slot->state != NVME_IO_SLOT_FREE)
 				continue;
-			command_id = nvme_io_next_command_id_locked(controller);
 
 			/* Handles the command id condition. */
+			command_id = nvme_io_next_command_id_locked(controller);
 			if (command_id == 0U) {
 				error = EBUSY;
 				break;
@@ -3328,6 +3359,7 @@ nvme_io_slot_acquire(
 				error = EIO;
 				break;
 			}
+
 			slot->command_id = command_id;
 			slot->error = 0;
 			slot->state = NVME_IO_SLOT_ACTIVE;
@@ -3344,14 +3376,15 @@ nvme_io_slot_acquire(
 		/* Checks the operation status. */
 		if (error != 0)
 			break;
+
+		/* Checks the operation status. */
 		error = nvme_io_wait_locked(controller,
 					    &controller->io_state_waitq,
 					    deadline, &irq);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			break;
 	}
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Reports the failure. */
@@ -3392,29 +3425,31 @@ nvme_io_post(
 		error = EBUSY;
 		goto fail;
 	}
-	error = drv_nvme_io_lifecycle_submit(&slot->lifecycle, slot->command_id,
-					     uses_payload);
 
 	/* Checks the operation status. */
+	error = drv_nvme_io_lifecycle_submit(&slot->lifecycle, slot->command_id,
+					     uses_payload);
 	if (error != 0)
 		goto fail;
 	submission = &controller->io_submission[controller->io_submission_tail];
 	*submission = *command;
-	next = drv_nvme_queue_index_advance(controller->io_submission_tail,
-					    controller->io_queue_depth);
 
 	/* Handles the next condition. */
+	next = drv_nvme_queue_index_advance(controller->io_submission_tail,
+					    controller->io_queue_depth);
 	if (next == UINT32_MAX) {
 		(void)drv_nvme_io_lifecycle_fault(&slot->lifecycle);
 		error = EIO;
 		goto fail;
 	}
+
 	controller->io_submission_tail = next;
 	slot->posted = 1;
 	controller->io_pending++;
 	hal_io_wmb();
 	nvme_write32(controller, controller->io_submission_doorbell,
 		     controller->io_submission_tail);
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Reports successful completion. */
@@ -3422,6 +3457,7 @@ nvme_io_post(
 
 fail:
 	nvme_io_fail_all_locked(controller, error);
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Reports the failure. */
@@ -3447,12 +3483,12 @@ nvme_io_wait_completion(
 
 	*recovery_owner = 0;
 	irq = spin_lock_irqsave(&controller->command_lock);
+
 	/* Continue while the operation condition remains true. */
 	while (slot->state == NVME_IO_SLOT_ACTIVE) {
+		/* Checks the operation status. */
 		error = nvme_io_wait_locked(controller, &slot->waitq, deadline,
 					    &irq);
-
-		/* Checks the operation status. */
 		if (error != 0 && slot->state == NVME_IO_SLOT_ACTIVE) {
 			nvme_io_fail_all_locked(controller, error == ETIMEDOUT
 								    ? ETIMEDOUT
@@ -3476,6 +3512,7 @@ nvme_io_wait_completion(
 		controller->io_recovery_busy = 1;
 		*recovery_owner = 1;
 	}
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Reports the failure. */
@@ -3495,10 +3532,10 @@ nvme_io_claim_recovery_locked(
 {
 	/* Handles the controller condition. */
 	if (!controller->io_recovery_needed || controller->io_recovery_busy ||
-	    controller->detach_busy)
-
+	    controller->detach_busy) {
 		/* Reports successful completion. */
 		return 0;
+	}
 	controller->io_recovery_busy = 1;
 
 	/* Reports operation failure. */
@@ -3533,6 +3570,7 @@ nvme_io_slot_release(
 		__builtin_trap();
 	controller->io_owned--;
 	waitq_wake_all(&controller->io_state_waitq);
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 }
 
@@ -3554,9 +3592,8 @@ nvme_io_execute(
 	int recovery_owner;
 	int error;
 
-	error = nvme_io_slot_acquire(controller, &slot);
-
 	/* Checks the operation status. */
+	error = nvme_io_slot_acquire(controller, &slot);
 	if (error != 0)
 		return error;
 
@@ -3592,10 +3629,10 @@ nvme_io_execute(
 		/* Returns the computed result. */
 		return EINVAL;
 	}
-	error = nvme_io_post(controller, slot, &command,
-			     opcode != DRV_NVME_NVM_FLUSH);
 
 	/* Checks the operation status. */
+	error = nvme_io_post(controller, slot, &command,
+			     opcode != DRV_NVME_NVM_FLUSH);
 	if (error == 0) {
 		error = nvme_io_wait_completion(controller, slot,
 						&recovery_owner);
@@ -3612,6 +3649,7 @@ nvme_io_execute(
 		memcpy(bytes, slot->bounce_dma.address,
 		       (size_t)block_count * controller->namespace_block_size);
 	}
+
 	nvme_io_slot_release(controller, slot);
 
 	/* Handles the recovery owner condition. */
@@ -3650,25 +3688,25 @@ nvme_disk_submit(
 
 	/* Handles the bio condition. */
 	if (bio->b_op != BIO_READ && bio->b_op != BIO_WRITE &&
-	    bio->b_op != BIO_FLUSH)
-
+	    bio->b_op != BIO_FLUSH) {
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
-	controller = disk->d_data;
+	}
 
 	/* Checks the drv nvme io range valid result. */
+	controller = disk->d_data;
 	if (bio->b_op != BIO_FLUSH &&
 	    (!drv_nvme_io_range_valid(bio->b_mapped_block, bio->b_block_count,
 				      controller->namespace_blocks) ||
 	     controller->namespace_block_size == 0U ||
 	     (size_t)bio->b_block_count >
-		     SIZE_MAX / controller->namespace_block_size))
-
+		     SIZE_MAX / controller->namespace_block_size)) {
 		/* Returns the computed result. */
 		return EOVERFLOW;
-	error = nvme_io_begin_bio(controller, bio->b_op, &owned);
+	}
 
 	/* Checks the operation status. */
+	error = nvme_io_begin_bio(controller, bio->b_op, &owned);
 	if (error != 0)
 		return error;
 
@@ -3686,25 +3724,25 @@ nvme_disk_submit(
 		bytes = bio->b_data;
 		/* Continue while the operation condition remains true. */
 		while (remaining != 0U) {
+			/* Handles the chunk condition. */
 			chunk = drv_nvme_io_chunk_blocks(
 				remaining, controller->namespace_block_size,
 				NVME_IO_BOUNCE_SIZE,
 				controller->maximum_transfer_bytes);
-
-			/* Handles the chunk condition. */
 			if (chunk == 0U) {
 				error = EINVAL;
 				break;
 			}
+
 			chunk_bytes = (size_t)chunk *
 				      controller->namespace_block_size;
+
+			/* Checks the operation status. */
 			error = nvme_io_execute(controller,
 						bio->b_op == BIO_READ
 							? DRV_NVME_NVM_READ
 							: DRV_NVME_NVM_WRITE,
 						block, chunk, bytes);
-
-			/* Checks the operation status. */
 			if (error != 0)
 				break;
 			block += chunk;
@@ -3713,6 +3751,7 @@ nvme_disk_submit(
 			transferred += chunk_bytes;
 		}
 	}
+
 	nvme_io_end_bio(controller, bio->b_op);
 	bio_complete(bio, error, transferred);
 
@@ -3734,9 +3773,8 @@ nvme_io_flush_internal(
 	int owned;
 	int error;
 
-	error = nvme_io_begin_bio(controller, BIO_FLUSH, &owned);
-
 	/* Checks the operation status. */
+	error = nvme_io_begin_bio(controller, BIO_FLUSH, &owned);
 	if (error != 0)
 		return error;
 
@@ -3785,16 +3823,15 @@ nvme_probe_namespace(
 	uint32_t reasons;
 	int error;
 
-	error = nvme_identify(controller, 0, DRV_NVME_IDENTIFY_CONTROLLER);
-
 	/* Checks the operation status. */
+	error = nvme_identify(controller, 0, DRV_NVME_IDENTIFY_CONTROLLER);
 	if (error != 0)
 		return error;
+
+	/* Handles the reasons condition. */
 	reasons = drv_nvme_identify_controller_validate(
 		controller->identify_dma.address, controller->identify_dma.size,
 		&controller_profile);
-
-	/* Handles the reasons condition. */
 	if (reasons != 0U) {
 		hal_printf("nvme: unsupported Identify Controller (%08x)\n",
 			   reasons);
@@ -3802,16 +3839,16 @@ nvme_probe_namespace(
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
 	}
-	error = nvme_identify(controller, 0, DRV_NVME_IDENTIFY_ACTIVE_LIST);
 
 	/* Checks the operation status. */
+	error = nvme_identify(controller, 0, DRV_NVME_IDENTIFY_ACTIVE_LIST);
 	if (error != 0)
 		return error;
+
+	/* Handles the reasons condition. */
 	reasons = drv_nvme_active_namespace_validate(
 		controller->identify_dma.address, controller->identify_dma.size,
 		controller_profile.namespace_count, &namespace_id);
-
-	/* Handles the reasons condition. */
 	if (reasons != 0U) {
 		hal_printf("nvme: unsupported active namespace set (%08x)\n",
 			   reasons);
@@ -3819,17 +3856,17 @@ nvme_probe_namespace(
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
 	}
-	error = nvme_identify(controller, namespace_id,
-			      DRV_NVME_IDENTIFY_NAMESPACE);
 
 	/* Checks the operation status. */
+	error = nvme_identify(controller, namespace_id,
+			      DRV_NVME_IDENTIFY_NAMESPACE);
 	if (error != 0)
 		return error;
+
+	/* Handles the reasons condition. */
 	reasons = drv_nvme_identify_namespace_validate(
 		controller->identify_dma.address, controller->identify_dma.size,
 		&namespace_profile);
-
-	/* Handles the reasons condition. */
 	if (reasons != 0U) {
 		hal_printf("nvme: unsupported namespace %u (%08x)\n",
 			   namespace_id, reasons);
@@ -3837,6 +3874,7 @@ nvme_probe_namespace(
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
 	}
+
 	controller->namespace_id = namespace_id;
 	controller->namespace_blocks = namespace_profile.block_count;
 	controller->namespace_block_size =
@@ -3847,28 +3885,28 @@ nvme_probe_namespace(
 
 	/* Handles the controller condition. */
 	if (controller->maximum_transfer_bytes <
-	    controller->namespace_block_size)
-
+	    controller->namespace_block_size) {
 		/* Returns the computed result. */
 		return EOPNOTSUPP;
+	}
+
+	/* Checks the operation status. */
 	error = nvme_io_dma_allocate(controller);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = nvme_io_queue_create(controller, 0);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
-	disk = disk_alloc();
 
 	/* Handles the disk availability. */
+	disk = disk_alloc();
 	if (disk == NULL)
 		return ENOMEM;
-	error = disk_alloc_nvme_name(disk, 0, namespace_id);
 
 	/* Checks the operation status. */
+	error = disk_alloc_nvme_name(disk, 0, namespace_id);
 	if (error != 0)
 		goto fail_disk;
 	disk->d_flags = 0;
@@ -3885,9 +3923,9 @@ nvme_probe_namespace(
 		error = ENXIO;
 		goto fail_disk;
 	}
-	error = disk_create(disk);
 
 	/* Checks the operation status. */
+	error = disk_create(disk);
 	if (error != 0)
 		goto fail_disk;
 	controller->namespace_disk = disk;
@@ -3930,29 +3968,29 @@ nvme_dma_allocate(
 				  &submission_bytes) ||
 	    !drv_nvme_queue_bytes(controller->queue_depth,
 				  sizeof(struct drv_nvme_completion),
-				  &completion_bytes))
-
+				  &completion_bytes)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
+
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(dma, submission_bytes,
 				       controller->page_size,
 				       &controller->admin_submission_dma);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		return error;
+
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(dma, completion_bytes,
 				       controller->page_size,
 				       &controller->admin_completion_dma);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
+
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(dma, DRV_NVME_IDENTIFY_SIZE,
 				       controller->page_size,
 				       &controller->identify_dma);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 
@@ -3966,6 +4004,7 @@ nvme_dma_allocate(
 		error = EIO;
 		goto fail;
 	}
+
 	memset(controller->admin_submission_dma.address, 0,
 	       controller->admin_submission_dma.size);
 	memset(controller->admin_completion_dma.address, 0,
@@ -4044,32 +4083,31 @@ nvme_io_dma_allocate(
 				  &submission_bytes) ||
 	    !drv_nvme_queue_bytes(controller->io_queue_depth,
 				  sizeof(struct drv_nvme_completion),
-				  &completion_bytes))
-
+				  &completion_bytes)) {
 		/* Returns the computed result. */
 		return EINVAL;
+	}
 	controller->io_slot_count = controller->io_queue_depth - 1U;
+
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(dma, submission_bytes,
 				       controller->page_size,
 				       &controller->io_submission_dma);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
+
+	/* Checks the operation status. */
 	error = drv_dma_alloc_coherent(dma, completion_bytes,
 				       controller->page_size,
 				       &controller->io_completion_dma);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 	/* Process each remaining element. */
 	for (index = 0; index < controller->io_slot_count; index++) {
+		/* Checks the operation status. */
 		error = drv_dma_alloc_coherent(
 			dma, NVME_IO_BOUNCE_SIZE, controller->page_size,
 			&controller->io_slots[index].bounce_dma);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			goto fail;
 
@@ -4091,6 +4129,7 @@ nvme_io_dma_allocate(
 		error = EIO;
 		goto fail;
 	}
+
 	memset(controller->io_submission_dma.address, 0,
 	       controller->io_submission_dma.size);
 	memset(controller->io_completion_dma.address, 0,
@@ -4106,6 +4145,7 @@ nvme_io_dma_allocate(
 		error = EIO;
 		goto fail;
 	}
+
 	/* Process each remaining element. */
 	for (index = 0; index < controller->io_slot_count; index++) {
 		slot = &controller->io_slots[index];
@@ -4145,26 +4185,30 @@ nvme_io_queue_memory_reset(
 
 	/* Handles the io submission availability. */
 	if (controller->io_submission == NULL ||
-	    controller->io_completion == NULL)
-
+	    controller->io_completion == NULL) {
 		/* Returns the computed result. */
 		return EINVAL;
-	irq = spin_lock_irqsave(&controller->command_lock);
+	}
 
 	/* Handles the controller condition. */
+	irq = spin_lock_irqsave(&controller->command_lock);
 	if (controller->io_owned != 0U || controller->io_pending != 0U) {
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	controller->io_queue_ready = 0;
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
+
 	memset(controller->io_submission_dma.address, 0,
 	       controller->io_submission_dma.size);
 	memset(controller->io_completion_dma.address, 0,
 	       controller->io_completion_dma.size);
 	irq = spin_lock_irqsave(&controller->command_lock);
+
 	controller->io_submission_tail = 0;
 	controller->io_epoch++;
 
@@ -4180,6 +4224,7 @@ nvme_io_queue_memory_reset(
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	/* Process each remaining element. */
 	for (index = 0; index < controller->io_slot_count; index++) {
 		slot = &controller->io_slots[index];
@@ -4191,6 +4236,7 @@ nvme_io_queue_memory_reset(
 		slot->error = 0;
 		slot->epoch = controller->io_epoch;
 	}
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Reports successful completion. */
@@ -4213,15 +4259,15 @@ nvme_io_queue_create(
 	/* Checks the drv nvme set queue count command result. */
 	if (!drv_nvme_set_queue_count_command(&command, 0, 1U, 1U))
 		return EINVAL;
-	error = nvme_admin_execute_mode(controller, &command, &result,
-					recovery_command);
 
 	/* Checks the operation status. */
+	error = nvme_admin_execute_mode(controller, &command, &result,
+					recovery_command);
 	if (error != 0 || !drv_nvme_queue_count_result(
-				  result, &submission_count, &completion_count))
-
+				  result, &submission_count, &completion_count)) {
 		/* Returns the computed result. */
 		return error != 0 ? error : EIO;
+	}
 
 	/* Handles the submission count condition. */
 	if (submission_count < 1U || completion_count < 1U)
@@ -4230,14 +4276,14 @@ nvme_io_queue_create(
 	/* Checks the drv nvme create io cq command result. */
 	if (!drv_nvme_create_io_cq_command(
 		    &command, 0, NVME_IO_QUEUE_ID, controller->io_queue_depth,
-		    controller->io_completion_dma.device_address, 0U, 1))
-
+		    controller->io_completion_dma.device_address, 0U, 1)) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = nvme_admin_execute_mode(controller, &command, NULL,
-					recovery_command);
+	}
 
 	/* Checks the operation status. */
+	error = nvme_admin_execute_mode(controller, &command, NULL,
+					recovery_command);
 	if (error != 0)
 		return error;
 
@@ -4245,23 +4291,23 @@ nvme_io_queue_create(
 	if (!drv_nvme_create_io_sq_command(
 		    &command, 0, NVME_IO_QUEUE_ID, NVME_IO_QUEUE_ID,
 		    controller->io_queue_depth,
-		    controller->io_submission_dma.device_address))
-
+		    controller->io_submission_dma.device_address)) {
 		/* Returns the computed result. */
 		return EINVAL;
-	error = nvme_admin_execute_mode(controller, &command, NULL,
-					recovery_command);
+	}
 
 	/* Checks the operation status. */
+	error = nvme_admin_execute_mode(controller, &command, NULL,
+					recovery_command);
 	if (error != 0)
 		return error;
 	irq = spin_lock_irqsave(&controller->command_lock);
+
 	/* Process each remaining element. */
 	for (index = 0; index < controller->io_slot_count; index++) {
+		/* Checks the operation status. */
 		error = drv_nvme_io_lifecycle_online(
 			&controller->io_slots[index].lifecycle);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			break;
 	}
@@ -4272,7 +4318,9 @@ nvme_io_queue_create(
 		controller->io_fault = 0;
 		controller->io_recovery_needed = 0;
 	}
+
 	waitq_wake_all(&controller->io_state_waitq);
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Reports the failure. */
@@ -4304,17 +4352,17 @@ nvme_controller_enable(
 	/* Handles the configuration condition. */
 	if (configuration == 0U)
 		return EINVAL;
-	error = drv_pci_device_set_bus_master(controller->pci, true);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_set_bus_master(controller->pci, true);
 	if (error != 0)
 		return error;
 	controller->controller_owned = 1;
 	nvme_write32(controller, DRV_NVME_REG_CC, configuration);
 	controller->controller_enabled = 1;
-	error = nvme_wait_ready(controller, 1);
 
 	/* Checks the operation status. */
+	error = nvme_wait_ready(controller, 1);
 	if (error != 0)
 		return error;
 
@@ -4335,21 +4383,23 @@ nvme_admin_queue_memory_reset(
 {
 	unsigned long irq;
 
-	irq = spin_lock_irqsave(&controller->command_lock);
-
 	/* Handles the controller condition. */
+	irq = spin_lock_irqsave(&controller->command_lock);
 	if (controller->command_pending) {
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
+
 	memset(controller->admin_submission_dma.address, 0,
 	       controller->admin_submission_dma.size);
 	memset(controller->admin_completion_dma.address, 0,
 	       controller->admin_completion_dma.size);
 	irq = spin_lock_irqsave(&controller->command_lock);
+
 	controller->submission_tail = 0;
 	controller->command_pending = 0;
 	controller->command_completed = 0;
@@ -4365,6 +4415,7 @@ nvme_admin_queue_memory_reset(
 		/* Returns the computed result. */
 		return EIO;
 	}
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Reports successful completion. */
@@ -4409,6 +4460,7 @@ nvme_io_lifecycles_quiesce(
 			error = EIO;
 		slot->posted = 0;
 	}
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Reports the failure. */
@@ -4447,7 +4499,9 @@ nvme_io_quarantine(
 				&controller->io_slots[index].lifecycle);
 		}
 	}
+
 	waitq_wake_all(&controller->io_state_waitq);
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 }
 
@@ -4468,9 +4522,8 @@ nvme_io_recover(
 	int quiesced = 0;
 	int error;
 
-	irq = spin_lock_irqsave(&controller->command_lock);
-
 	/* Handles the controller condition. */
+	irq = spin_lock_irqsave(&controller->command_lock);
 	if (!controller->io_recovery_busy || !controller->io_recovery_needed ||
 	    controller->detach_busy) {
 		controller->io_recovery_busy = 0;
@@ -4479,6 +4532,7 @@ nvme_io_recover(
 		/* Returns the computed result. */
 		return controller->detach_busy ? ENXIO : EINVAL;
 	}
+
 	controller->stopping = 1;
 	/* Process each remaining element. */
 	for (index_for = 0; index_for < controller->io_slot_count;
@@ -4486,13 +4540,13 @@ nvme_io_recover(
 		(void)drv_nvme_io_lifecycle_stop(
 			&controller->io_slots[index_for].lifecycle);
 	}
+
 	/* Continue while the operation condition remains true. */
 	while (controller->io_owned != 0U) {
+		/* Checks the operation status. */
 		error = nvme_io_wait_locked(controller,
 					    &controller->io_state_waitq,
 					    deadline, &irq);
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			spin_unlock_irqrestore(&controller->command_lock, irq);
 			nvme_io_quarantine(controller, error, 1);
@@ -4501,67 +4555,68 @@ nvme_io_recover(
 			return error;
 		}
 	}
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
+	/* Checks the operation status. */
 	error = nvme_runtime_irq_mask(controller, &irq_capability,
 				      &irq_control);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 	irq_masked = 1;
+
+	/* Checks the operation status. */
 	error = nvme_controller_disable(controller);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
+
+	/* Checks the operation status. */
 	error = nvme_bus_master_disable(controller);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
-	error = nvme_irq_drain(controller);
 
 	/* Checks the operation status. */
+	error = nvme_irq_drain(controller);
 	if (error != 0)
 		goto fail;
 	quiesced = 1;
+
+	/* Checks the operation status. */
 	error = nvme_io_lifecycles_quiesce(controller);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
+
+	/* Checks the operation status. */
 	error = nvme_admin_queue_memory_reset(controller);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
-	error = nvme_io_queue_memory_reset(controller);
 
 	/* Checks the operation status. */
+	error = nvme_io_queue_memory_reset(controller);
 	if (error != 0)
 		goto fail;
 
 	/* Bus mastering below invalidates the earlier quiescence proof. */
 	quiesced = 0;
-	error = nvme_controller_enable(controller);
 
 	/* Checks the operation status. */
+	error = nvme_controller_enable(controller);
 	if (error != 0)
 		goto fail;
-	error = nvme_runtime_irq_restore(controller, irq_capability,
-					 irq_control);
 
 	/* Checks the operation status. */
+	error = nvme_runtime_irq_restore(controller, irq_capability,
+					 irq_control);
 	if (error != 0)
 		goto fail;
 	irq_masked = 0;
-	error = nvme_io_queue_create(controller, 1);
 
 	/* Checks the operation status. */
+	error = nvme_io_queue_create(controller, 1);
 	if (error != 0)
 		goto fail;
 	irq = spin_lock_irqsave(&controller->command_lock);
+
 	controller->io_recovery_busy = 0;
 	controller->io_recovery_needed = 0;
 	controller->io_fault = 0;
@@ -4570,7 +4625,9 @@ nvme_io_recover(
 	if (!controller->detach_busy)
 		controller->stopping = 0;
 	waitq_wake_all(&controller->io_state_waitq);
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
+
 	hal_printf("nvme: I/O queue recovered epoch=%u\n",
 		   controller->io_epoch);
 
@@ -4589,9 +4646,9 @@ fail:
 	if (controller->controller_owned) {
 		disable_error = nvme_controller_disable(controller);
 		master_error = nvme_bus_master_disable(controller);
-		drain_error = nvme_irq_drain(controller);
 
 		/* Checks the operation status. */
+		drain_error = nvme_irq_drain(controller);
 		if (disable_error == 0 && master_error == 0 && drain_error == 0)
 			quiesced = 1;
 		else
@@ -4636,9 +4693,9 @@ nvme_attach(
 	int error;
 
 	(void)id;
-	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
 
 	/* Handles the nvme primary availability. */
+	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
 	if (nvme_primary != NULL) {
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
 		hal_printf("nvme: additional controller rejected by initial "
@@ -4647,10 +4704,11 @@ nvme_attach(
 		/* Returns the computed result. */
 		return EBUSY;
 	}
+
 	spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
-	controller = hal_malloc(sizeof(*controller));
 
 	/* Handles the controller availability. */
+	controller = hal_malloc(sizeof(*controller));
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
@@ -4665,9 +4723,9 @@ nvme_attach(
 	drv_pci_device_address(device, &address);
 
 	stage = "BAR0 claim";
-	error = drv_pci_device_claim_bar(device, 0);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_claim_bar(device, 0);
 	if (error != 0)
 		goto fail;
 	controller->bar_claimed = 1;
@@ -4678,10 +4736,11 @@ nvme_attach(
 		error = EIO;
 		goto fail;
 	}
+
 	stage = "BAR0 inspection";
-	error = drv_pci_device_bar(device, 0, &controller->original_bar);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_bar(device, 0, &controller->original_bar);
 	if (error != 0)
 		goto fail;
 	controller->original_bar_valid = 1;
@@ -4700,11 +4759,12 @@ nvme_attach(
 		error = ENODEV;
 		goto fail;
 	}
+
 	stage = "PCI command save";
-	error = drv_pci_device_save_enable_state(device,
-						 &controller->pci_enable_state);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_save_enable_state(device,
+						 &controller->pci_enable_state);
 	if (error != 0)
 		goto fail;
 	controller->pci_state_saved = 1;
@@ -4717,6 +4777,7 @@ nvme_attach(
 		error = EIO;
 		goto fail;
 	}
+
 	stage = "PCI quiesce";
 
 	/* Checks the drv nvme lifecycle record result. */
@@ -4726,25 +4787,26 @@ nvme_attach(
 		error = EIO;
 		goto fail;
 	}
+
 	stage = "message interrupt quiesce";
-	error = nvme_message_irq_save_and_mask(controller);
 
 	/* Checks the operation status. */
+	error = nvme_message_irq_save_and_mask(controller);
 	if (error != 0)
 		goto fail;
 	stage = "PCI quiesce";
-	error = nvme_pci_quiesce(controller);
 
 	/* Checks the operation status. */
+	error = nvme_pci_quiesce(controller);
 	if (error != 0)
 		goto fail;
 	stage = "BAR0 map";
+
+	/* Checks the operation status. */
 	error = drv_pci_device_map_bar(device, 0,
 				       DRV_PCI_MAP_READ | DRV_PCI_MAP_WRITE |
 					       DRV_PCI_MAP_NOCACHE,
 				       &controller->mapping);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 	controller->bar_mapped = 1;
@@ -4755,10 +4817,11 @@ nvme_attach(
 		error = EIO;
 		goto fail;
 	}
+
 	stage = "BAR0 readback";
-	error = drv_pci_device_bar(device, 0, &mapped_bar);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_bar(device, 0, &mapped_bar);
 	if (error != 0 ||
 	    (mapped_bar.type != DRV_PCI_BAR_MEMORY32 &&
 	     mapped_bar.type != DRV_PCI_BAR_MEMORY64) ||
@@ -4773,21 +4836,23 @@ nvme_attach(
 		error = ENODEV;
 		goto fail;
 	}
+
 	stage = "PCI memory enable";
-	error = drv_pci_device_enable_memory(device);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_enable_memory(device);
 	if (error != 0)
 		goto fail;
-	error = drv_pci_device_config_read16(device, NVME_PCI_COMMAND,
-					     &command);
 
 	/* Checks the operation status. */
+	error = drv_pci_device_config_read16(device, NVME_PCI_COMMAND,
+					     &command);
 	if (error != 0 || (command & NVME_PCI_COMMAND_MEMORY) == 0U ||
 	    (command & NVME_PCI_COMMAND_MASTER) != 0U) {
 		error = EIO;
 		goto fail;
 	}
+
 	controller->registers = controller->mapping.address;
 	stage = "capabilities";
 	controller->capability = nvme_read64(controller, DRV_NVME_REG_CAP);
@@ -4799,9 +4864,9 @@ nvme_attach(
 	snapshot.page_size = controller->page_size;
 	snapshot.requested_queue_entries = NVME_ADMIN_QUEUE_REQUESTED_DEPTH;
 	snapshot.maximum_queue_id = NVME_IO_QUEUE_ID;
-	reasons = drv_nvme_capability_validate(&snapshot);
 
 	/* Handles the reasons condition. */
+	reasons = drv_nvme_capability_validate(&snapshot);
 	if (reasons != 0U) {
 		hal_printf("nvme: pci %04x:%02x:%02x.%u capability rejected "
 			   "%08x:%s\n",
@@ -4811,6 +4876,7 @@ nvme_attach(
 		error = ENODEV;
 		goto fail;
 	}
+
 	controller->queue_depth = drv_nvme_selected_queue_depth(
 		controller->capability, NVME_ADMIN_QUEUE_REQUESTED_DEPTH);
 	controller->timeout_ms =
@@ -4839,6 +4905,7 @@ nvme_attach(
 		error = EIO;
 		goto fail;
 	}
+
 	stage = "controller reset";
 
 	/*
@@ -4854,16 +4921,17 @@ nvme_attach(
 		error = EIO;
 		goto fail;
 	}
+
 	nvme_write32(controller, DRV_NVME_REG_INTMS, UINT32_MAX);
-	error = nvme_controller_disable(controller);
 
 	/* Checks the operation status. */
+	error = nvme_controller_disable(controller);
 	if (error != 0)
 		goto fail;
 	stage = "admin DMA";
-	error = nvme_dma_allocate(controller);
 
 	/* Checks the operation status. */
+	error = nvme_dma_allocate(controller);
 	if (error != 0)
 		goto fail;
 
@@ -4873,12 +4941,13 @@ nvme_attach(
 		error = EIO;
 		goto fail;
 	}
+
 	stage = "IRQ allocation";
+
+	/* Checks the operation status. */
 	error = drv_pci_device_allocate_irqs(
 		device, DRV_PCI_IRQ_ALLOW_MSIX | DRV_PCI_IRQ_ALLOW_MSI, 1, 1,
 		&controller->irq, &irq_count);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 
@@ -4891,9 +4960,11 @@ nvme_attach(
 				&controller->lifecycle,
 				DRV_NVME_LIFECYCLE_IRQ_ALLOCATED);
 		}
+
 		error = EIO;
 		goto fail;
 	}
+
 	controller->irq_allocated = 1;
 
 	/* Checks the drv nvme lifecycle record result. */
@@ -4909,11 +4980,11 @@ nvme_attach(
 	if (controller->irq.type == DRV_PCI_IRQ_MSIX)
 		nvme_write32(controller, DRV_NVME_REG_INTMC, UINT32_MAX);
 	stage = "IRQ establishment";
+
+	/* Checks the operation status. */
 	error = drv_pci_device_establish_irq(device, &controller->irq, nvme_irq,
 					     controller, "nvme",
 					     &controller->irq_cookie);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 
@@ -4924,10 +4995,11 @@ nvme_attach(
 		error = EIO;
 		goto fail;
 	}
+
 	stage = "controller enable";
-	error = nvme_controller_enable(controller);
 
 	/* Checks the operation status. */
+	error = nvme_controller_enable(controller);
 	if (error != 0)
 		goto fail;
 
@@ -4938,6 +5010,7 @@ nvme_attach(
 		error = EIO;
 		goto fail;
 	}
+
 	controller->stopping = 0;
 	nvme_publish_controller(controller);
 	irq_name = controller->irq.type == DRV_PCI_IRQ_MSIX ? "MSI-X" : "MSI";
@@ -4951,9 +5024,9 @@ nvme_attach(
 	return 0;
 
 fail:
-	cleanup_error = nvme_cleanup(controller);
 
 	/* Checks the operation status. */
+	cleanup_error = nvme_cleanup(controller);
 	if (cleanup_error != 0) {
 		controller->quarantined = 1;
 		nvme_publish_controller(controller);
@@ -4964,6 +5037,7 @@ fail:
 		/* Reports successful completion. */
 		return 0;
 	}
+
 	hal_printf("nvme: attach failed at %s (%d)\n", stage, error);
 	hal_free(controller);
 
@@ -5017,18 +5091,18 @@ nvme_detach_owned(
 		 * obligation survives a failed detach and an already-gone
 		 * result on retry. */
 		irq = spin_lock_irqsave(&controller->command_lock);
+
+		/* Handles the controller condition. */
 		can_flush = controller->io_queue_ready &&
 			    !controller->quarantined &&
 			    !controller->io_recovery_needed;
-
-		/* Handles the controller condition. */
-		if (controller->detach_flush.required && can_flush)
-
+		if (controller->detach_flush.required && can_flush) {
 			/*
  * The namespace is GONE and detach owns the
 			 * transaction, so this admits only the driver's
 			 * internal retry. */
 			controller->stopping = 0;
+		}
 		flush_error = drv_nvme_detach_flush_begin(
 			&controller->detach_flush, can_flush);
 		spin_unlock_irqrestore(&controller->command_lock, irq);
@@ -5037,10 +5111,10 @@ nvme_detach_owned(
 		if (flush_error == 0) {
 			error = nvme_io_flush_internal(controller);
 			irq = spin_lock_irqsave(&controller->command_lock);
-			flush_error = drv_nvme_detach_flush_finish(
-				&controller->detach_flush, error);
 
 			/* Checks the operation status. */
+			flush_error = drv_nvme_detach_flush_finish(
+				&controller->detach_flush, error);
 			if (flush_error != 0)
 				controller->stopping = 1;
 			waitq_wake_all(&controller->io_state_waitq);
@@ -5066,9 +5140,9 @@ nvme_detach_owned(
 			return flush_error;
 		}
 	}
-	error = nvme_cleanup(controller);
 
 	/* Checks the operation status. */
+	error = nvme_cleanup(controller);
 	if (error != 0) {
 		controller->quarantined = 1;
 		nvme_detach_release(controller, 0);
@@ -5079,9 +5153,8 @@ nvme_detach_owned(
 
 	/* Handles the namespace disk availability. */
 	if (controller->namespace_disk != NULL) {
-		error = disk_destroy(controller->namespace_disk);
-
 		/* Checks the operation status. */
+		error = disk_destroy(controller->namespace_disk);
 		if (error != 0) {
 			controller->quarantined = 1;
 			nvme_detach_release(controller, 0);
@@ -5089,8 +5162,10 @@ nvme_detach_owned(
 			/* Returns the computed result. */
 			return error;
 		}
+
 		controller->namespace_disk = NULL;
 	}
+
 	nvme_unpublish_controller(controller);
 	(void)drv_pci_device_set_driver_data(device, NULL);
 	hal_free(controller);
@@ -5112,9 +5187,9 @@ nvme_detach(
 	int error;
 
 	(void)flags;
-	error = nvme_detach_claim(device, &controller);
 
 	/* Checks the operation status. */
+	error = nvme_detach_claim(device, &controller);
 	if (error != 0)
 		return error;
 
@@ -5141,9 +5216,8 @@ nvme_shutdown(
 	int quiesce_error = 0;
 	int error;
 
-	error = nvme_shutdown_claim(device, &controller);
-
 	/* Checks the operation status. */
+	error = nvme_shutdown_claim(device, &controller);
 	if (error != 0)
 		return;
 
@@ -5155,6 +5229,7 @@ nvme_shutdown(
 		mask_error = nvme_runtime_irq_mask(controller, &irq_capability,
 						   &irq_control);
 	}
+
 	lifecycle_error = drv_nvme_shutdown_lifecycle_run(
 		&controller->shutdown_lifecycle, &nvme_shutdown_operations,
 		controller);
@@ -5179,6 +5254,7 @@ nvme_shutdown(
 			   quiesce_error,
 			   controller->shutdown_lifecycle.hardware_dma_safe);
 	}
+
 	nvme_detach_release(controller, 0);
 }
 
@@ -5209,16 +5285,16 @@ int
 drv_pci_nvme_driver_register(
 	void)
 {
-	int function_result;
+	int error;
 
 	spin_init(&nvme_registry_lock, LOCK_RANK_DEVICE,
 		  "NVMe controller registry");
 
 	/* Obtains the drv pci driver register result. */
-	function_result = drv_pci_driver_register(&nvme_driver);
+	error = drv_pci_driver_register(&nvme_driver);
 
 	/* Returns the computed result. */
-	return function_result;
+	return error;
 }
 
 /*
@@ -5234,18 +5310,18 @@ drv_pci_nvme_probe_namespaces(
 	int error;
 
 	registry_irq = spin_lock_irqsave(&nvme_registry_lock);
-	controller = nvme_primary;
 
 	/* Handles the controller availability. */
+	controller = nvme_primary;
 	if (controller == NULL) {
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
 
 		/* Returns the computed result. */
 		return;
 	}
-	irq = spin_lock_irqsave(&controller->command_lock);
 
 	/* Handles the controller condition. */
+	irq = spin_lock_irqsave(&controller->command_lock);
 	if (controller->probe_started || controller->detach_busy ||
 	    controller->stopping || controller->quarantined) {
 		spin_unlock_irqrestore(&controller->command_lock, irq);
@@ -5254,13 +5330,15 @@ drv_pci_nvme_probe_namespaces(
 		/* Returns the computed result. */
 		return;
 	}
+
 	controller->probe_started = 1;
 	controller->probe_busy = 1;
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 	spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
-	error = nvme_probe_namespace(controller);
 
 	/* Checks the operation status. */
+	error = nvme_probe_namespace(controller);
 	if (error != 0)
 		hal_printf("nvme: namespace probe failed (%d)\n", error);
 	irq = spin_lock_irqsave(&controller->command_lock);
@@ -5271,7 +5349,9 @@ drv_pci_nvme_probe_namespaces(
 		controller->stopping = 1;
 		owns_detach = 1;
 	}
+
 	controller->probe_busy = 0;
+
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
 	/* Checks the operation status. */
