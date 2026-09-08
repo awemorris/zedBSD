@@ -22,11 +22,10 @@
 #include <string.h>
 #include <unistd.h>
 
-_Static_assert(sizeof(struct posix_acl_entry) == 8,
-    "POSIX ACL entry must have a fixed wire layout");
-
 static const struct posix_acl_entry *acl_entry(const struct posix_acl *acl, uint16_t tag);
 static unsigned requested_permissions(int requested);
+
+_Static_assert(sizeof(struct posix_acl_entry) == 8, "POSIX ACL entry must have a fixed wire layout");
 
 /*
  * Validates the structure of an ACL.

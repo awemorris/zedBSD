@@ -24,19 +24,13 @@
 #include <kern/io-pool.h>
 
 #define CACHE_RECLAIM_BATCH (64U * 1024U)
-
 #define CACHE_RESERVE_MIN (64U * 1024U)
-
 #define CACHE_RESERVE_MAX (8U * 1024U * 1024U)
-
 #define WORKER_BYTES (KERN_IO_BATCH_MAX + ZEDBSD_PAGE_SIZE)
 
 static struct cache_memory_stats accounting;
-
 static atomic_uint_t accounting_lock;
-
 static struct mutex control_lock;
-
 static struct io_scratch worker_memory;
 
 /* 0 absent, 1 idle, 2 borrowed, 3 constructing. */
@@ -44,6 +38,7 @@ static atomic_uint_t worker_state;
 
 extern size_t vm_object_reclaim_clean(size_t) __attribute__((weak));
 extern size_t buf_reclaim(size_t, unsigned) __attribute__((weak));
+
 static bool cache_lock(void);
 static void cache_unlock(bool enabled);
 static void cache_validate(enum cache_memory_kind kind);
@@ -87,20 +82,23 @@ cache_memory_init(
 	/* Samples real managed memory outside the accounting lock. */
 	hal_memory_get_stats(&memory);
 	cache_memory_policy(memory.physical_total, &target, &reserve);
-	if (mutex_init(&control_lock, LOCK_RANK_VM_RESIZE,
-	    "cache memory control") != 0)
+
+	if (mutex_init(&control_lock, LOCK_RANK_VM_RESIZE, "cache memory control") != 0)
 		HAL_FATAL("cache memory control initialization failed");
 
 	/* Preserves any early mandatory accounting while enabling admission. */
 	enabled = cache_lock();
+
 	if (accounting.initialized)
 		HAL_FATAL("cache memory policy initialized twice");
+
 	accounting.version = CACHE_MEMORY_VERSION;
 	accounting.count = CACHE_MEMORY_KINDS;
 	accounting.managed_bytes = memory.physical_total;
 	accounting.reserve_bytes = reserve;
 	accounting.target_bytes = target;
 	accounting.initialized = 1;
+
 	cache_unlock(enabled);
 }
 
@@ -123,8 +121,10 @@ cache_memory_reserve(
 	/* Validates category and samples physical availability without global locks. */
 	cache_validate(kind);
 	memset(&memory, 0, sizeof(memory));
+
 	if (optional)
 		hal_memory_get_stats(&memory);
+
 	enabled = cache_lock();
 	current = accounting.resident_bytes + accounting.pending_bytes;
 	refused = bytes > UINT64_MAX - current;
@@ -170,13 +170,17 @@ cache_memory_commit(
 
 	/* Moves the same bytes between states without changing total ownership. */
 	cache_validate(kind);
+
 	enabled = cache_lock();
+
 	if (accounting.usage[kind].pending_bytes < bytes)
 		HAL_FATAL("cache memory commit without reservation");
+
 	accounting.usage[kind].pending_bytes -= bytes;
 	accounting.pending_bytes -= bytes;
 	accounting.usage[kind].resident_bytes += bytes;
 	accounting.resident_bytes += bytes;
+
 	cache_unlock(enabled);
 }
 
@@ -192,11 +196,15 @@ cache_memory_cancel(
 
 	/* Returns only pending ownership for the selected category. */
 	cache_validate(kind);
+
 	enabled = cache_lock();
+
 	if (accounting.usage[kind].pending_bytes < bytes)
 		HAL_FATAL("cache memory cancellation without reservation");
+
 	accounting.usage[kind].pending_bytes -= bytes;
 	accounting.pending_bytes -= bytes;
+
 	cache_unlock(enabled);
 }
 
@@ -233,18 +241,23 @@ cache_memory_reclaim(
 	/* Bounds each pass before entering the independent clean-cache owners. */
 	if (target > CACHE_RECLAIM_BATCH)
 		target = CACHE_RECLAIM_BATCH;
+
 	freed = 0;
+
 	if (vm_object_reclaim_clean != NULL && target != 0)
 		freed = vm_object_reclaim_clean(target);
+
 	if (buf_reclaim != NULL && freed < target)
 		freed += buf_reclaim(target - freed, 0);
 
 	/* Records completed reclaim after every owner has dropped its locks. */
 	enabled = cache_lock();
+
 	if (freed > UINT64_MAX - accounting.reclaimed_bytes)
 		accounting.reclaimed_bytes = UINT64_MAX;
 	else
 		accounting.reclaimed_bytes += freed;
+
 	cache_unlock(enabled);
 
 	/* Reports actual retired bytes, never a prediction about dirty memory. */
@@ -346,6 +359,7 @@ cache_memory_get_stats(
 	/* Copies the ownership transaction under its private lock. */
 	if (stats == NULL)
 		return;
+
 	enabled = cache_lock();
 	memcpy(stats, &accounting, sizeof(*stats));
 	cache_unlock(enabled);

@@ -64,7 +64,8 @@
 #define UHCI_ADVANCE_POLL_TICKS 1U
 /*
  * Match the established UHCI stuck-QH threshold: a normal TD-status/QH-element
- * writeback window must not be mistaken for the early-Intel element bug. */
+ * writeback window must not be mistaken for the early-Intel element bug.
+ */
 #define UHCI_QH_STALL_TICKS 20U
 /* The kernel clock is 100 Hz, so ten ticks are a bounded 100-ms poll. */
 #define UHCI_ROOT_POLL_TICKS 10U
@@ -522,7 +523,7 @@ uhci_schedule_initialize(
 	if (error != 0) {
 		uhci_schedule_release(controller);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -532,7 +533,7 @@ uhci_schedule_initialize(
 	if (error != 0) {
 		uhci_schedule_release(controller);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -556,7 +557,7 @@ uhci_schedule_initialize(
 			error = EOVERFLOW;
 		uhci_schedule_release(controller);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -585,7 +586,7 @@ uhci_schedule_initialize(
 
 	hal_io_wmb();
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -604,7 +605,7 @@ uhci_request_sets_empty_locked(
 	    controller->retirement_head != NULL ||
 	    controller->retirement_tail != NULL ||
 	    controller->periodic_bit_times != 0) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	/* Process each element required by the operation. */
@@ -637,7 +638,7 @@ uhci_wait_running(
 		if (status == UINT16_MAX ||
 		    (status & (UHCI_STS_HOST_SYSTEM_ERROR |
 			       UHCI_STS_PROCESS_ERROR)) != 0) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 
@@ -682,7 +683,7 @@ uhci_start(
 	if (timeout == 100000U) {
 		uhci_schedule_release(controller);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ETIMEDOUT;
 	}
 
@@ -694,10 +695,11 @@ uhci_start(
 	out8(controller->io_base + UHCI_SOFMOD, 64U);
 
 	/*
- * From this point the frame list may be controller-visible.  Publish
+	 * From this point the frame list may be controller-visible.  Publish
 	 * the non-quiesced state before RUN so every failure path retains that
 	 * graph until halt, bus-master disable, and IRQ drain have all been
-	 * proved. */
+	 * proved.
+	 */
 	irq = spin_lock_irqsave(&controller->active_lock);
 
 	controller->dma_quiesced = 0;
@@ -737,7 +739,7 @@ uhci_start(
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -746,7 +748,7 @@ fail:
 	if (!run_started) {
 		uhci_schedule_release(controller);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -799,8 +801,6 @@ uhci_hardware_stop(
 		for (;;) {
 			status = in16(controller->io_base + UHCI_USBSTS);
 			hal_io_mb();
-
-			/* Checks the operation status. */
 			if (status == UINT16_MAX) {
 				halt_error = EIO;
 				break;
@@ -821,9 +821,10 @@ uhci_hardware_stop(
 	}
 
 	/*
- * Even when the I/O register halt proof fails, cut off PCI DMA and
+	 * Even when the I/O register halt proof fails, cut off PCI DMA and
 	 * drain the handler.  The ownership graph is still retained because all
-	 * three proofs must succeed before dma_quiesced can be published. */
+	 * three proofs must succeed before dma_quiesced can be published.
+	 */
 	bus_master_error = uhci_bus_master_disable(controller);
 
 	/* Checks the operation status. */
@@ -851,7 +852,7 @@ uhci_hardware_stop(
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -903,7 +904,7 @@ uhci_irq_disestablish(
 			hal_printf("uhci: IRQ removal timed out; retaining "
 				   "controller resources\n");
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -916,13 +917,13 @@ uhci_irq_disestablish(
 			   "controller resources\n",
 			   error);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	controller->irq_cookie = NULL;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1005,7 +1006,7 @@ uhci_report_shutdown_evidence(
 		hal_printf("uhci: checked shutdown workers joined\n");
 #endif
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1024,7 +1025,7 @@ uhci_wait_submissions(
 		if (controller->submitting == 0) {
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -1052,9 +1053,10 @@ uhci_quiesce(
 	irq = spin_lock_irqsave(&controller->active_lock);
 
 	/*
- * Close admission before joining builders.  A builder which entered
+	 * Close admission before joining builders.  A builder which entered
 	 * earlier may finish allocating, but it cannot publish after this
-	 * point. */
+	 * point.
+	 */
 	controller->quiescing = 1;
 	already_quiesced = controller->dma_quiesced != 0;
 
@@ -1072,19 +1074,21 @@ uhci_quiesce(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
 	/*
- * Root topology work is now joined.  The clean request path has no
+	 * Root topology work is now joined.  The clean request path has no
 	 * remaining terminal owner, so join its worker before entering the
 	 * controller-global DMA barrier.  A failed or incomplete local proof
 	 * instead retains the request graph and retirement worker for
-	 * diagnosis. */
+	 * diagnosis.
+	 */
 	if (requests_error == 0 && requests_empty)
 		worker_error = uhci_retirement_worker_stop(controller);
 
 	/*
- * A request-local retirement or worker-join failure must never bypass
+	 * A request-local retirement or worker-join failure must never bypass
 	 * the global DMA cutoff.  Preserve that original error, but still mask
 	 * IRQs, clear RUN, disable PCI bus mastering, and drain the checked IRQ
-	 * owner. */
+	 * owner.
+	 */
 	hardware_error = already_quiesced
 				 ? 0
 				 : uhci_hardware_stop(controller, "quiesce");
@@ -1178,7 +1182,7 @@ uhci_quiesce_requests(
 		if (uhci_request_sets_empty_locked(controller)) {
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -1206,9 +1210,10 @@ uhci_quiesce_requests(
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
 		/*
- * Once every queued request has recorded its failed local
+		 * Once every queued request has recorded its failed local
 		 * proof, retain the full graph and let quiesce perform the
-		 * independent global stop. */
+		 * independent global stop.
+		 */
 		if (failure_error != 0 && !pending)
 			return failure_error;
 
@@ -1242,15 +1247,17 @@ uhci_retirement_begin_locked(
 	uhci_retirement_enqueue_locked(controller, request);
 
 	/*
- * The FRNUM snapshot follows publication of this request's schedule
+	 * The FRNUM snapshot follows publication of this request's schedule
 	 * unlink. A later, different FRNUM is the only successful
-	 * DMA-retirement proof. */
+	 * DMA-retirement proof.
+	 */
 	hal_io_wmb();
 
 	/*
- * Preserve the raw register value.  Masking an absent-device 0xffff
+	 * Preserve the raw register value.  Masking an absent-device 0xffff
 	 * read here could turn it into a plausible frame number and later false
-	 * proof. */
+	 * proof.
+	 */
 	request->unlink_frame = in16(controller->io_base + UHCI_FRNUM);
 }
 
@@ -1304,9 +1311,10 @@ uhci_schedule_unlink_locked(
 	request->scheduled = false;
 
 	/*
- * Keep the removed QH's horizontal link intact until the checked frame
+	 * Keep the removed QH's horizontal link intact until the checked frame
 	 * boundary.  Hardware may already be traversing that QH and must still
-	 * be able to reach every unrelated successor. */
+	 * be able to reach every unrelated successor.
+	 */
 	hal_io_wmb();
 }
 
@@ -1460,7 +1468,7 @@ uhci_request_active_locked(
 			return 1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1493,13 +1501,14 @@ uhci_wait_frame_advance(
 		    (command & UHCI_CMD_RUN) == 0 ||
 		    (status & (UHCI_STS_HOST_SYSTEM_ERROR |
 			       UHCI_STS_PROCESS_ERROR | UHCI_STS_HALTED)) != 0) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 
 		/*
- * Health must be established before a changed frame can prove
-		 * that hardware crossed the frame-list unlink boundary. */
+		 * Health must be established before a changed frame can prove
+		 * that hardware crossed the frame-list unlink boundary.
+		 */
 		if (frame != unlink_frame)
 			return 0;
 
@@ -1624,8 +1633,9 @@ uhci_finish_completion(
 		 drv_usb_endpoint_type(endpoint) == DRV_USB_TRANSFER_INTERRUPT);
 
 	/*
- * FRNUM has advanced since the unlink snapshot, so neither descriptors
-	 * nor the bounce buffer can still be reached by this controller. */
+	 * FRNUM has advanced since the unlink snapshot, so neither descriptors
+	 * nor the bounce buffer can still be reached by this controller.
+	 */
 	hal_io_rmb();
 	actual = uhci_request_actual(request);
 	uhci_request_commit_toggle(request);
@@ -1666,11 +1676,12 @@ uhci_finish_completion(
 	}
 
 	/*
- * Keep controller quiesce closed across callback publication.  The
+	 * Keep controller quiesce closed across callback publication.  The
 	 * endpoint marker is deliberately not touched after the core completion
 	 * call: runtime device teardown may release the endpoint as soon as
 	 * core HCD ownership is dropped.  A successful endpoint_reset clears
-	 * the retained marker. */
+	 * the retained marker.
+	 */
 	controller->completion_inflight++;
 	uhci_active_remove_locked(controller, request);
 	(void)drv_usb_urb_set_hcd_data(urb, NULL);
@@ -1912,7 +1923,7 @@ uhci_root_worker_stop(
 	if (worker == NULL) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1920,16 +1931,17 @@ uhci_root_worker_stop(
 	if (controller->root_joining || worker == curthread) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
 	controller->root_joining = 1;
 
 	/*
- * Keep the published pointer alive until it is cleared under
+	 * Keep the published pointer alive until it is cleared under
 	 * active_lock; joining suppresses all task notifications during the
-	 * reap window. */
+	 * reap window.
+	 */
 	thread_ref(worker);
 	kernel_notify_task(worker->task);
 
@@ -1954,7 +1966,7 @@ uhci_root_worker_stop(
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 			thread_release(worker);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -2004,28 +2016,30 @@ uhci_retirement_worker_stop(
 	if (worker == NULL) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/*
- * A completion callback runs on this worker and may re-enter checked
+	 * A completion callback runs on this worker and may re-enter checked
 	 * teardown.  It cannot synchronously join itself; retain the stopped
-	 * HCD and let a later external teardown retry perform the join. */
+	 * HCD and let a later external teardown retry perform the join.
+	 */
 	if (controller->retirement_joining || worker == curthread ||
 	    controller->retirement_head != NULL) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
 	controller->retirement_joining = 1;
 
 	/*
- * Joining blocks every notifier, while this reference keeps the
+	 * Joining blocks every notifier, while this reference keeps the
 	 * published worker pointer valid across a successful thread_wait()
-	 * reap. */
+	 * reap.
+	 */
 	thread_ref(worker);
 	__atomic_store_n(&controller->retirement_stopping, 1U,
 			 __ATOMIC_RELEASE);
@@ -2053,7 +2067,7 @@ uhci_retirement_worker_stop(
 			spin_unlock_irqrestore(&controller->active_lock, irq);
 			thread_release(worker);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -2145,7 +2159,7 @@ uhci_reclaim_request_acquire(
 	request->bounce = bounce;
 	request->reclaim_reserved = true;
 	*result = request;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2173,10 +2187,11 @@ uhci_builder_discard(
 	struct uhci_request *request)
 {
 	/*
- * Keep the builder counted until its private request no longer borrows
+	 * Keep the builder counted until its private request no longer borrows
 	 * the controller DMA domain.  Quiesce may free the controller after
 	 * observing submitting == 0, so no controller access may follow
-	 * builder_leave(). */
+	 * builder_leave().
+	 */
 	uhci_request_free(controller, request);
 	uhci_builder_leave(controller);
 }
@@ -2212,7 +2227,7 @@ uhci_add_td(
 	td->buffer = buffer;
 	r->td_count++;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2259,12 +2274,13 @@ uhci_endpoint_parameters(
 	number = address & 0x0fU;
 
 	/*
- * Bits 6:4 of bEndpointAddress and bits 15:11 of wMaxPacketSize are
+	 * Bits 6:4 of bEndpointAddress and bits 15:11 of wMaxPacketSize are
 	 * reserved for USB 1.1 endpoints.  In particular, the high-bandwidth
-	 * transaction multiplier is not meaningful on UHCI. */
+	 * transaction multiplier is not meaningful on UHCI.
+	 */
 	if ((address & 0x70U) != 0 ||
 	    (descriptor->maximum_packet_size & 0xf800U) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -2284,7 +2300,7 @@ uhci_endpoint_parameters(
 		if ((speed == DRV_USB_SPEED_LOW && packet != 8U) ||
 		    (speed == DRV_USB_SPEED_FULL && packet != 8U &&
 		     packet != 16U && packet != 32U && packet != 64U)) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 		break;
@@ -2293,7 +2309,7 @@ uhci_endpoint_parameters(
 		if (speed != DRV_USB_SPEED_FULL || number == 0 ||
 		    (packet != 8U && packet != 16U && packet != 32U &&
 		     packet != 64U)) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 		break;
@@ -2304,18 +2320,18 @@ uhci_endpoint_parameters(
 		     descriptor->interval < 10U) ||
 		    (speed == DRV_USB_SPEED_LOW && packet > 8U) ||
 		    (speed == DRV_USB_SPEED_FULL && packet > 64U)) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 		break;
 	default:
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOTSUP;
 	}
 
 	*packet_result = packet;
 	*number_result = number;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2345,7 +2361,7 @@ uhci_required_td_count(
 	}
 
 	*result = (unsigned)total;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2380,7 +2396,7 @@ uhci_periodic_cost(
 		offset += chunk;
 	} while (offset < length);
 	*result = total;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2421,7 +2437,7 @@ uhci_build_request(
 	length = drv_usb_urb_length(urb);
 	if (length > SIZE_MAX - 8U ||
 	    (length != 0 && drv_usb_urb_buffer(urb) == NULL)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	type = drv_usb_endpoint_type(ep);
@@ -2434,7 +2450,7 @@ uhci_build_request(
 	/* Handles the type condition. */
 	if (type == DRV_USB_TRANSFER_ISOCHRONOUS ||
 	    (type == DRV_USB_TRANSFER_BULK && speed == DRV_USB_SPEED_LOW)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOTSUP;
 	}
 
@@ -2446,7 +2462,7 @@ uhci_build_request(
 	descriptor = drv_usb_endpoint_descriptor(ep);
 	if (type == DRV_USB_TRANSFER_INTERRUPT &&
 	    (descriptor == NULL || descriptor->interval == 0)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -2499,7 +2515,7 @@ uhci_build_request(
 		if (error != 0) {
 			uhci_request_free(c, r);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	}
@@ -2512,7 +2528,7 @@ uhci_build_request(
 		if (error != 0) {
 			hal_free(r);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -2522,7 +2538,7 @@ uhci_build_request(
 		if (error != 0) {
 			uhci_request_free(c, r);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	}
@@ -2640,7 +2656,7 @@ uhci_build_request(
 	r->qh->head = UHCI_LINK_TERM;
 	r->qh->element = (uint32_t)r->schedule.device_address + 16U;
 	*result = r;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -2674,11 +2690,11 @@ uhci_progress_frame_sample(
 	    (command & UHCI_CMD_RUN) == 0 ||
 	    (status & (UHCI_STS_HOST_SYSTEM_ERROR | UHCI_STS_PROCESS_ERROR |
 		       UHCI_STS_HALTED)) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	*frame_result = frame;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2737,16 +2753,17 @@ uhci_request_advance_snapshot(
 	    (link & UHCI_LINK_ADDRESS) !=
 		    (uint32_t)(request->schedule.device_address + 16U +
 			       (index + 1U) * sizeof(*request->tds))) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
 	/*
- * The PIIX erratum leaves the QH exactly at the boundary between the
+	 * The PIIX erratum leaves the QH exactly at the boundary between the
 	 * completed TD and the first unexecuted TD.  A later TD status can
 	 * become terminal before its QH writeback or IRQ is visible to this
 	 * CPU.  That is forward progress, not corrupt linkage; leave it to the
-	 * IRQ terminal path and never replay it from this workaround. */
+	 * IRQ terminal path and never replay it from this workaround.
+	 */
 
 	/* Handles the next status condition. */
 	next_status = request->tds[index + 1U].status;
@@ -2754,7 +2771,7 @@ uhci_request_advance_snapshot(
 		return 0;
 
 	/*
- * SPD deliberately leaves the QH element unchanged after a short IN.
+	 * SPD deliberately leaves the QH element unchanged after a short IN.
 	 * The current builder never sets SPD, but keeping that distinction here
 	 * prevents the PIIX repair from defeating the later short-IN contract.
 	 */
@@ -2798,7 +2815,7 @@ uhci_request_qh_progress_locked(
 	if (request->state != UHCI_REQUEST_ACTIVE || !request->scheduled) {
 		uhci_request_advance_clear(request);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -2821,12 +2838,13 @@ uhci_request_qh_progress_locked(
 		    request->advance_element == element &&
 		    request->advance_status == status) {
 			/*
- * Early Intel controllers need a software element
+			 * Early Intel controllers need a software element
 			 * advance only after the same stopped boundary has
 			 * remained stable for the established 200-ms QH
 			 * timeout.  A single fresh frame merely closes
 			 * retirement; it does not close the normal TD-status
-			 * before QH-element writeback race. */
+			 * before QH-element writeback race.
+			 */
 			if (frame != request->advance_frame &&
 			    sched_ticks() - request->advance_started_tick >=
 				    UHCI_QH_STALL_TICKS) {
@@ -2834,18 +2852,18 @@ uhci_request_qh_progress_locked(
 				hal_io_wmb();
 				uhci_request_advance_clear(request);
 
-				/* Reports successful completion. */
+				/* Succeeded. */
 				return 0;
 			}
 
 			/* Checks the sched ticks result. */
 			if (sched_ticks() - request->advance_started_tick >=
 			    UHCI_RETIRE_TICKS) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return ETIMEDOUT;
 			}
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -2867,9 +2885,10 @@ uhci_request_qh_progress_locked(
 		return 0;
 
 	/*
- * This frame is intentionally sampled after the coherent-memory
+	 * This frame is intentionally sampled after the coherent-memory
 	 * snapshot; otherwise a boundary between the two observations could be
-	 * mistaken for evidence that the QH writeback window has closed. */
+	 * mistaken for evidence that the QH writeback window has closed.
+	 */
 
 	/* Checks the operation status. */
 	error = uhci_progress_frame_sample(controller, &frame);
@@ -2881,7 +2900,7 @@ uhci_request_qh_progress_locked(
 	request->advance_frame = frame;
 	request->advance_started_tick = sched_ticks();
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2901,9 +2920,10 @@ uhci_request_terminal(
 		status = request->tds[index].status;
 
 		/*
- * A retryable error, including NAK, can coexist with ACTIVE.
+		 * A retryable error, including NAK, can coexist with ACTIVE.
 		 * Only an inactive TD with terminal error bits stops the
-		 * remaining chain. */
+		 * remaining chain.
+		 */
 		if ((status & UHCI_TD_ACTIVE) != 0)
 			return 0;
 
@@ -3007,7 +3027,7 @@ uhci_endpoint_owned_locked(
 			return 1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3026,19 +3046,20 @@ uhci_periodic_admit_locked(
 		__builtin_trap();
 
 	/*
- * Do not phase-balance endpoints: charge every periodic request against
+	 * Do not phase-balance endpoints: charge every periodic request against
 	 * the same worst-case frame.  The remaining ten percent of a USB 1.1
-	 * frame is therefore always available to the asynchronous skeleton. */
+	 * frame is therefore always available to the asynchronous skeleton.
+	 */
 	if (request->periodic_cost > UHCI_PERIODIC_BUDGET_BIT_TIMES ||
 	    controller->periodic_bit_times >
 		    UHCI_PERIODIC_BUDGET_BIT_TIMES - request->periodic_cost) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOSPC;
 	}
 	controller->periodic_bit_times += request->periodic_cost;
 	request->periodic_reserved = true;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3100,7 +3121,7 @@ uhci_qh_progress_watchdog(
 	if (controller->quarantined || controller->retirement_stopping) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -3221,7 +3242,7 @@ uhci_retirement_worker_start(
 	    controller->retirement_joining) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EALREADY;
 	}
 
@@ -3252,7 +3273,7 @@ uhci_retirement_worker_start(
 
 	thread_start(worker);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3301,7 +3322,7 @@ uhci_urb_enqueue(
 				: EBUSY;
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -3310,7 +3331,7 @@ uhci_urb_enqueue(
 		    endpoint, UHCI_ENDPOINT_STALL_PUBLISHING_SLOT) != 0) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -3332,7 +3353,7 @@ uhci_urb_enqueue(
 		c->submitting--;
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -3348,7 +3369,7 @@ uhci_urb_enqueue(
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		uhci_builder_discard(c, r);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -3358,7 +3379,7 @@ uhci_urb_enqueue(
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		uhci_builder_discard(c, r);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -3369,15 +3390,16 @@ uhci_urb_enqueue(
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		uhci_builder_discard(c, r);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	/*
- * Builders run concurrently outside the controller lock.  Rebase the
+	 * Builders run concurrently outside the controller lock.  Rebase the
 	 * request's data toggles at the publication point so a same-endpoint
 	 * predecessor which retired during construction cannot leave stale
-	 * tokens. */
+	 * tokens.
+	 */
 	uhci_request_prepare_toggle(r);
 	uhci_active_insert_locked(c, r);
 	uhci_schedule_insert_locked(c, r);
@@ -3387,7 +3409,7 @@ uhci_urb_enqueue(
 	uhci_retirement_watchdog_arm(c);
 	uhci_builder_leave(c);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3410,7 +3432,7 @@ uhci_urb_dequeue(
 	    r->state != UHCI_REQUEST_ACTIVE) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -3420,7 +3442,7 @@ uhci_urb_dequeue(
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
 	/*
- * Completion callbacks run on this worker.  A callback may enqueue and
+	 * Completion callbacks run on this worker.  A callback may enqueue and
 	 * synchronously cancel another URB; waking and waiting on ourselves
 	 * would deadlock, so execute the same bounded retirement path inline.
 	 */
@@ -3437,7 +3459,7 @@ uhci_urb_dequeue(
 		    drv_usb_urb_hcd_data(urb) != r) {
 			spin_unlock_irqrestore(&c->active_lock, irq);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -3458,7 +3480,7 @@ uhci_urb_dequeue(
 			spin_unlock_irqrestore(&c->active_lock, irq);
 			uhci_request_free(c, r);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -3468,7 +3490,7 @@ uhci_urb_dequeue(
 							 : EIO;
 			spin_unlock_irqrestore(&c->active_lock, irq);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -3476,7 +3498,7 @@ uhci_urb_dequeue(
 		if (r->state != UHCI_REQUEST_WAIT_FRAME_CANCEL) {
 			spin_unlock_irqrestore(&c->active_lock, irq);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -3517,8 +3539,6 @@ uhci_irq(
 		out16(c->io_base + UHCI_USBINTR, 0);
 		out16(c->io_base + UHCI_USBCMD,
 		      in16(c->io_base + UHCI_USBCMD) & (uint16_t)~UHCI_CMD_RUN);
-
-		/* Checks the operation status. */
 		if (report_failure) {
 			hal_printf("uhci: fatal IRQ status %04x; controller "
 				   "quarantined\n",
@@ -3563,7 +3583,7 @@ uhci_endpoint_enable(
 	(void)hcd;
 	(void)endpoint;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3576,7 +3596,7 @@ uhci_endpoint_disable(
 	(void)hcd;
 	(void)endpoint;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3669,7 +3689,7 @@ uhci_root_hub_status(
 	/* Handles the actual condition. */
 	if (actual)
 		*actual = 1;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3689,7 +3709,7 @@ uhci_root_port_update(
 	    ((set | clear) & (uint16_t)~UHCI_PORT_RW_BITS) != 0 ||
 	    (acknowledge & (uint16_t)~UHCI_PORT_CHANGE_BITS) != 0 ||
 	    (set & clear) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	port = controller->io_base +
@@ -3701,17 +3721,18 @@ uhci_root_port_update(
 		return EIO;
 
 	/*
- * PORTSC contains RO, reserved, and write-one-to-clear fields.  Rebuild
+	 * PORTSC contains RO, reserved, and write-one-to-clear fields.  Rebuild
 	 * writes from only the four R/W state bits and the specifically
 	 * requested change acknowledgement; never echo a sampled CSC/PEC or RO
-	 * bit. */
+	 * bit.
+	 */
 	value = current & UHCI_PORT_RW_BITS;
 	value &= (uint16_t)~clear;
 	value |= set;
 	value |= acknowledge;
 	out16(port, value);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3771,7 +3792,7 @@ uhci_root_hub_control(
 		/* Handles the actual availability. */
 		if (actual != NULL)
 			*actual = sizeof(status);
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -3782,10 +3803,10 @@ uhci_root_hub_control(
 			set = UHCI_PORT_RESET;
 		else if (request->value == 1)
 			set = UHCI_PORT_PE;
-		else
-
-			/* Returns the computed result. */
+		else {
+			/* Failed. */
 			return ENOTSUP;
+		}
 	} else if (request->request == 1) {
 		/* Handles the request condition. */
 		if (request->value == 16)
@@ -3796,12 +3817,12 @@ uhci_root_hub_control(
 			clear = UHCI_PORT_RESET;
 		else if (request->value == 1)
 			clear = UHCI_PORT_PE;
-		else
-
-			/* Returns the computed result. */
+		else {
+			/* Failed. */
 			return ENOTSUP;
+		}
 	} else {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOTSUP;
 	}
 
@@ -3814,7 +3835,7 @@ uhci_root_hub_control(
 	/* Handles the actual availability. */
 	if (actual != NULL)
 		*actual = 0;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3839,14 +3860,12 @@ uhci_root_ports_changed(
 		controller->root_ready = 0;
 		controller->root_stopping = 1;
 		spin_unlock_irqrestore(&controller->active_lock, irq);
-
-		/* Checks the operation status. */
 		if (report_failure) {
 			hal_printf("uhci: root-port register unavailable; "
 				   "controller quarantined\n");
 		}
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -3899,10 +3918,11 @@ uhci_root_worker(
 		/* Handles the ready condition. */
 		if (ready) {
 			/*
- * A changed sample is useful diagnostic state, but it
+			 * A changed sample is useful diagnostic state, but it
 			 * is not a dispatch gate.  Retained disconnect teardown
 			 * may need another common-core pass after CSC/PEC has
-			 * already been acknowledged. */
+			 * already been acknowledged.
+			 */
 			(void)uhci_root_ports_changed(controller);
 			irq = spin_lock_irqsave(&controller->active_lock);
 			ready = controller->root_ready &&
@@ -3916,10 +3936,11 @@ uhci_root_worker(
 		}
 
 		/*
- * A generation change closes the check-to-sleep window.  The
+		 * A generation change closes the check-to-sleep window.  The
 		 * locked scheduler handoff publishes THREAD_SLEEPING before a
 		 * notifier can acquire active_lock, so arm and stop cannot be
-		 * delayed by a lost wake. */
+		 * delayed by a lost wake.
+		 */
 
 		/* Handles the controller condition. */
 		irq = spin_lock_irqsave(&controller->active_lock);
@@ -3956,7 +3977,7 @@ uhci_root_worker_start(
 	if (controller->root_worker != NULL || controller->root_joining) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EALREADY;
 	}
 
@@ -3981,7 +4002,7 @@ uhci_root_worker_start(
 
 	thread_start(worker);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4030,15 +4051,16 @@ uhci_pci_release(
 	int error;
 
 	/*
- * A RUN write makes both schedule allocations part of the controller's
+	 * A RUN write makes both schedule allocations part of the controller's
 	 * ownership graph.  Never restore a saved BME bit or release the I/O
-	 * lease while that graph lacks the checked halt/master/IRQ barrier. */
+	 * lease while that graph lacks the checked halt/master/IRQ barrier.
+	 */
 	if (controller->frame_list.address != NULL ||
 	    controller->skeleton_memory.address != NULL ||
 	    controller->reclaim_request.schedule.address != NULL ||
 	    controller->reclaim_request.bounce.address != NULL ||
 	    controller->reclaim_request_busy != 0 || !controller->dma_quiesced) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -4064,7 +4086,7 @@ uhci_pci_release(
 		controller->bar_claimed = 0;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4080,9 +4102,10 @@ uhci_cleanup(
 	int error, restart_error;
 
 	/*
- * Root scans and completion callbacks can re-enter PCI teardown.
+	 * Root scans and completion callbacks can re-enter PCI teardown.
 	 * Joining the current worker is impossible, so reject before stopping
-	 * either worker or closing HCD admission. */
+	 * either worker or closing HCD admission.
+	 */
 
 	/* Handles the controller condition. */
 	irq = spin_lock_irqsave(&controller->active_lock);
@@ -4091,7 +4114,7 @@ uhci_cleanup(
 	    controller->retirement_worker == curthread) {
 		spin_unlock_irqrestore(&controller->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -4114,9 +4137,10 @@ uhci_cleanup(
 		error = drv_usb_hcd_unregister(&controller->hcd);
 		if (error != 0) {
 			/*
- * EBUSY before HCD quiesce leaves the controller
+			 * EBUSY before HCD quiesce leaves the controller
 			 * operational.  Restore runtime root observation rather
-			 * than silently losing hotplug. */
+			 * than silently losing hotplug.
+			 */
 			if (error == EBUSY && had_root &&
 			    !controller->quiescing) {
 				restart_error =
@@ -4131,7 +4155,7 @@ uhci_cleanup(
 					return restart_error;
 			}
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -4139,10 +4163,11 @@ uhci_cleanup(
 	}
 
 	/*
- * drv_usb_hcd_register() does not invoke stop() after a failing
+	 * drv_usb_hcd_register() does not invoke stop() after a failing
 	 * start(). A RUN-visible frame graph therefore remains owned here until
 	 * the same checked halt/BME/IRQ barrier succeeds on this or a later
-	 * detach retry. */
+	 * detach retry.
+	 */
 	if (controller->frame_list.address != NULL ||
 	    controller->skeleton_memory.address != NULL ||
 	    controller->reclaim_request.schedule.address != NULL ||
@@ -4166,9 +4191,10 @@ uhci_cleanup(
 	/* Handles the controller condition. */
 	if (controller->irq_allocated) {
 		/*
- * A registered HCD removes the checked IRQ from its quiesce
+		 * A registered HCD removes the checked IRQ from its quiesce
 		 * callback. An attach failure before registration has no
-		 * cookie. */
+		 * cookie.
+		 */
 		if (controller->irq_cookie != NULL)
 			return EBUSY;
 		drv_pci_device_free_irqs(controller->pci, &controller->irq, 1);
@@ -4317,7 +4343,7 @@ uhci_attach(
 	hal_printf("uhci: PCI controller at I/O %04x, ports=%u\n",
 		   controller->io_base, controller->hcd.root_port_count);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -4331,7 +4357,7 @@ fail:
 			   "(%d); controller quarantined\n",
 			   stage, error, cleanup_error);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -4364,14 +4390,15 @@ uhci_detach(
 	error = uhci_cleanup(controller);
 	if (error != 0) {
 		/*
- * EBUSY is a normal retry boundary when teardown was re-entered
+		 * EBUSY is a normal retry boundary when teardown was re-entered
 		 * by one of our workers or the USB core still owns devices.  If
 		 * cleanup left the runtime fully operational, do not poison
-		 * that controller. */
+		 * that controller.
+		 */
 		if (error != EBUSY || !uhci_runtime_operational(controller))
 			controller->quarantined = 1;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -4379,6 +4406,6 @@ uhci_detach(
 	drv_pci_device_set_driver_data(device, NULL);
 	hal_free(controller);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }

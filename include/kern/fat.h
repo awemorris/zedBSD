@@ -36,9 +36,6 @@ struct fat_loop_extent {
 int drv_fat_file_set_loop_map(struct file *file,
 	const struct fat_loop_extent *map, unsigned count);
 
-int drv_fat_file_contiguous_block(struct file *file, struct disk **disk,
-			      uint64_t *block);
-
 int drv_fat_file_backing_identity(struct inode *inode, struct disk **disk,
 			      uint64_t *object);
 

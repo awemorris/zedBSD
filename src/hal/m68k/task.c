@@ -1,5 +1,5 @@
 /* MC68030 soft-float task creation, fork/exec, signal, and switching. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include <hal/hal.h>
 #include "exception.h"

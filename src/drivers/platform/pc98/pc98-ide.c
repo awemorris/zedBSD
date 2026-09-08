@@ -137,10 +137,10 @@ drv_pc98_ide_init(
 	}
 
 	/*
- * Probe only BIOS-advertised units, with the boot-origin unit first.
+	 * Probe only BIOS-advertised units, with the boot-origin unit first.
 	 * Besides avoiding hangs on floating secondary channels, this preserves
-	 * the BIOS-to-native mapping used by VFS. */
-	/* Process each element required by the operation. */
+	 * the BIOS-to-native mapping used by VFS.
+	 */
 	for (pass = 0; pass < 2; pass++) {
 		/* Process each element required by the operation. */
 		for (slot = 0; slot < IDE_UNIT_MAX; slot++) {
@@ -413,7 +413,7 @@ wait_clear(
 		delay_10us();
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -461,8 +461,9 @@ identify(
 		return 0;
 
 	/*
- * Selecting an absent device makes its sibling answer (or the bus
-	 * float); the signature check below rejects both cases. */
+	 * Selecting an absent device makes its sibling answer (or the bus
+	 * float); the signature check below rejects both cases.
+	 */
 	outb(IDE_ALT_STATUS, IDE_DEVCTL_NIEN);
 	failure_stage = "issue IDENTIFY";
 	outb(IDE_STATUS, IDE_CMD_IDENTIFY);
@@ -482,8 +483,9 @@ identify(
 		data[word] = inw(IDE_DATA);
 
 	/*
- * ATA disks clear word 0 bit 15.  CFA devices are the intentional
-	 * exception; IDENTIFY PACKET devices are not block disks here. */
+	 * ATA disks clear word 0 bit 15.  CFA devices are the intentional
+	 * exception; IDENTIFY PACKET devices are not block disks here.
+	 */
 	failure_stage = "validate IDENTIFY device type";
 
 	/* Checks the identify is cfa result. */
@@ -539,7 +541,7 @@ wait_selectable(
 		delay_10us();
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -570,7 +572,7 @@ wait_drq(
 		delay_10us();
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -688,7 +690,7 @@ pio_read(
 		count -= chunk;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -730,14 +732,14 @@ pio_write(
 		/* Checks the wait clear result. */
 		if (!wait_clear(IDE_STATUS_BSY) ||
 		    (inb(IDE_ALT_STATUS) & (IDE_STATUS_DF | IDE_STATUS_ERR))) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 		lba += chunk;
 		count -= chunk;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -752,7 +754,7 @@ pio_flush(
 	/* Handles the unit condition. */
 	if (!unit->flush_supported) {
 		/*
- * A valid disabled-cache report needs no media flush command.
+		 * A valid disabled-cache report needs no media flush command.
 		 */
 		return unit->write_cache_known && !unit->write_cache_enabled
 			       ? 0
@@ -798,10 +800,10 @@ pc98_ide_submit(
 				  bio->b_data);
 	} else if (bio->b_op == BIO_FLUSH)
 		error = pio_flush(dev);
-	else
-
-		/* Returns the computed result. */
+	else {
+		/* Failed. */
 		return EOPNOTSUPP;
+	}
 
 	/* Checks the operation status. */
 	if (error != 0) {
@@ -824,7 +826,7 @@ pc98_ide_submit(
 		transferred = (size_t)bio->b_block_count * dev->d_block_size;
 	bio_complete(bio, error, transferred);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -855,6 +857,6 @@ pc98_ide_ioctl(
 		geometry->sectors_per_track = unit->firmware_sectors;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }

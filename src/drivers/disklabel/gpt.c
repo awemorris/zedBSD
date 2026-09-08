@@ -194,12 +194,12 @@ canonical_protective_mbr(
 		return -EINVAL;
 
 	/*
- * The shared BIOS/UEFI system image also has a BIOS boot entry.  GPT is
+	 * The shared BIOS/UEFI system image also has a BIOS boot entry.  GPT is
 	 * authoritative: require exactly one canonical EE entry and ignore
 	 * every non-EE compatibility entry rather than reconciling or
 	 * publishing it. CHS is ignored because creators use both geometry and
-	 * ff/ff/ff. */
-	/* Process each element required by the operation. */
+	 * ff/ff/ff.
+	 */
 	for (slot = 0U; slot < 4U; slot++) {
 		/* Handles the entry condition. */
 		entry = block + GPT_MBR_TABLE + slot * GPT_MBR_ENTRY_SIZE;
@@ -210,7 +210,7 @@ canonical_protective_mbr(
 		/* Checks the get32 result. */
 		if (entry[0U] != 0U || get32(entry + 8U) != 1U ||
 		    get32(entry + 12U) == 0U) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return -EINVAL;
 		}
 		*advertised_blocks = get32(entry + 12U);
@@ -220,7 +220,7 @@ canonical_protective_mbr(
 	if (protective_count != 1U)
 		return -EINVAL;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -258,7 +258,7 @@ pure_protective_mbr(
 	    get32(entry + 12U) == 0U ||
 	    !all_zero(entry + GPT_MBR_ENTRY_SIZE, 3U * GPT_MBR_ENTRY_SIZE) ||
 	    block[510U] != 0x55U || block[511U] != 0xaaU) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -344,7 +344,7 @@ read_table_bytes(
 		size -= amount;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -376,7 +376,7 @@ table_crc(
 	}
 
 	*result = ~crc;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -487,7 +487,7 @@ gpt_name(
 
 	output[at] = '\0';
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -511,14 +511,14 @@ header_layout(
 	    copy->entry_size % GPT_ENTRY_MIN_SIZE != 0U ||
 	    ((copy->entry_size / GPT_ENTRY_MIN_SIZE) &
 	     (copy->entry_size / GPT_ENTRY_MIN_SIZE - 1U)) != 0U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return -EINVAL;
 	}
 
 	/* Handles the uint64 t condition. */
 	if ((uint64_t)copy->entry_count >
 	    UINT64_MAX / (uint64_t)copy->entry_size) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return -EOVERFLOW;
 	}
 	copy->table_bytes = (uint64_t)copy->entry_count * copy->entry_size;
@@ -536,7 +536,7 @@ header_layout(
 	/* Handles the copy condition. */
 	if (copy->table_lba > logical_last ||
 	    table_blocks > logical_last - copy->table_lba + 1U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return -EINVAL;
 	}
 	table_end = copy->table_lba + table_blocks;
@@ -544,7 +544,7 @@ header_layout(
 	/* Handles the copy condition. */
 	if (copy->first_usable < 2U || copy->first_usable > copy->last_usable ||
 	    copy->last_usable >= logical_last) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return -EINVAL;
 	}
 
@@ -553,17 +553,17 @@ header_layout(
 		/* Handles the copy condition. */
 		if (copy->table_lba < 2U || table_end > copy->first_usable ||
 		    copy->first_usable - copy->table_lba < reserve_blocks) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return -EINVAL;
 		}
 	} else if (copy->table_lba <= copy->last_usable ||
 		   table_end > copy->header_lba ||
 		   copy->header_lba - copy->table_lba < reserve_blocks) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return -EINVAL;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -595,7 +595,7 @@ validate_entries(
 		kern_free(records);
 		kern_free(raw);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return -ENOMEM;
 	}
 
@@ -715,7 +715,7 @@ read_header(
 	/* Checks the get32 result. */
 	if (memcmp(block, "EFI PART", 8U) != 0 ||
 	    get32(block + 8U) != 0x00010000U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return -EINVAL;
 	}
 
@@ -725,7 +725,7 @@ read_header(
 	    header_size > disk->d_block_size || get32(block + 20U) != 0U ||
 	    !all_zero(block + GPT_HEADER_MIN_SIZE,
 		      disk->d_block_size - GPT_HEADER_MIN_SIZE)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return -EINVAL;
 	}
 	expected_header_crc = get32(block + 16U);
@@ -747,11 +747,11 @@ read_header(
 	/* Checks the all zero result. */
 	if (copy->header_lba != header_lba ||
 	    all_zero(copy->disk_guid, sizeof(copy->disk_guid))) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return -EINVAL;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -778,15 +778,14 @@ primary_header_extent(
 		error = -EINVAL;
 
 	/*
- * A CRC-valid header is not yet a usable authority for an extent.  Its
+	 * A CRC-valid header is not yet a usable authority for an extent.  Its
 	 * declared geometry must also be internally valid before its alternate
 	 * LBA can suppress the two conventional backup candidates.  Table and
 	 * entry validation remains in validate_copy(): damage there does not
-	 * invalidate a structurally sound header's named-backup location. */
+	 * invalidate a structurally sound header's named-backup location.
+	 */
 	if (error == 0)
 		error = header_layout(disk, &primary, 1, primary.alternate_lba);
-
-	/* Checks the operation status. */
 	if (error == 0)
 		*logical_last = primary.alternate_lba;
 	kern_free(block);
@@ -1026,7 +1025,7 @@ recover_backup_candidates(
 		}
 
 		/*
- * Prefer the PMBR-bounded copy when both copies are identical.
+		 * Prefer the PMBR-bounded copy when both copies are identical.
 		 */
 		chosen = 0U;
 	} else if (candidate_errors[0U] == 0) {
@@ -1097,7 +1096,7 @@ intentional_primary_only(
 	    primary->table_bytes != GPT_ENTRY_ARRAY_RESERVE ||
 	    primary->first_usable != 2U + reserve_blocks ||
 	    primary->last_usable != logical_last - reserve_blocks - 1U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1146,7 +1145,7 @@ gpt_scan(
 	    capacity > PARTITION_POOL_MAX ||
 	    (disk->d_block_size != 512U && disk->d_block_size != 4096U) ||
 	    disk->d_block_count < 4U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return -EINVAL;
 	}
 	block = kern_malloc(disk->d_block_size);
@@ -1174,8 +1173,6 @@ gpt_scan(
 	error = primary_header_extent(disk, &logical_last);
 	if (error == -ENOMEM)
 		goto out;
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		primary_error = error;
 
@@ -1218,10 +1215,11 @@ gpt_scan(
 	/* Checks the operation status. */
 	if (primary_error != 0 && backup_error != 0) {
 		/*
- * The primary header supplied a structurally valid named
+		 * The primary header supplied a structurally valid named
 		 * extent, but neither named copy survived full table/entry
 		 * validation.  Fall back only to the two independently bounded
-		 * conventional locations; never search for a third header. */
+		 * conventional locations; never search for a third header.
+		 */
 
 		/* Checks the operation status. */
 		error = recover_backup_candidates(

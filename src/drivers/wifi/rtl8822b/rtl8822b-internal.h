@@ -1,9 +1,12 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
- * zedBSD RTL8822B private chip contract
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
+ * RTL8822B private chip contract
  */
 
 #ifndef ZEDBSD_DRIVERS_RTL8822B_INTERNAL_H
@@ -242,7 +245,8 @@ int drv_rtl8822b_radio_set_channel(struct rtl8822b_radio *radio,
 				   uint8_t channel, uint64_t deadline_ticks);
 /* Stop MAC/HCI RX and release the complete device-side RXDMA/FIFO generation
  * before a CAM generation switch.  resume re-enables RX only after the USB
- * owner has cancelled/drained the old URB and armed a fresh one. */
+ * owner has cancelled/drained the old URB and armed a fresh one.
+ */
 int drv_rtl8822b_radio_rx_generation_pause(struct rtl8822b_radio *radio,
 					   uint64_t deadline_ticks);
 int drv_rtl8822b_radio_rx_generation_resume(struct rtl8822b_radio *radio,
@@ -260,6 +264,7 @@ int drv_rtl8822b_radio_deauthentication_prepare(
 	size_t *wire_length);
 int drv_rtl8822b_security_enable(struct rtl8822b_radio *radio,
 				 uint64_t deadline_ticks);
+
 /*
  * Snapshot the four MAC priority-queue page counters.  A queue is empty only
  * when its reserved and available page counts are equal.  This helper never

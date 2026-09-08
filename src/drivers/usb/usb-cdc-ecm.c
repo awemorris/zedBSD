@@ -285,7 +285,7 @@ ecm_iad_consistent(
 		    iad->function_subclass != ECM_COMMUNICATION_SUBCLASS ||
 		    iad->function_protocol != ECM_COMMUNICATION_PROTOCOL ||
 		    data_number != control_number + 1U) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 		association = 1;
@@ -316,7 +316,7 @@ ecm_control_descriptors(
 						 (const void **)&descriptor,
 						 &length) != 0 ||
 		    descriptor == NULL || length < 2U) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -333,7 +333,7 @@ ecm_control_descriptors(
 			/* Checks the ecm le16 result. */
 			if (length != 5U || ++header != 1U ||
 			    ecm_le16(descriptor + 3U) == 0) {
-				/* Reports successful completion. */
+				/* Succeeded. */
 				return 0;
 			}
 			break;
@@ -343,7 +343,7 @@ ecm_control_descriptors(
 			    ++union_descriptor != 1U ||
 			    descriptor[3] != control_number ||
 			    descriptor[4] == control_number) {
-				/* Reports successful completion. */
+				/* Succeeded. */
 				return 0;
 			}
 			*data_number = descriptor[4];
@@ -353,7 +353,7 @@ ecm_control_descriptors(
 			if (header != 1U || length != 13U || ++ethernet != 1U ||
 			    descriptor[3] == 0 ||
 			    ecm_le16(descriptor + 8U) < ECM_FRAME_SIZE) {
-				/* Reports successful completion. */
+				/* Succeeded. */
 				return 0;
 			}
 			*mac_string = descriptor[3];
@@ -388,7 +388,7 @@ ecm_find_notification(
 			    DRV_USB_TRANSFER_INTERRUPT ||
 		    !drv_usb_endpoint_is_input(endpoint) ||
 		    notification != NULL) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 		notification = endpoint;
@@ -431,7 +431,7 @@ ecm_find_data_alternate(
 		    descriptor->interface_class != ECM_DATA_CLASS ||
 		    descriptor->interface_subclass != ECM_DATA_SUBCLASS ||
 		    descriptor->interface_protocol != ECM_DATA_PROTOCOL) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -455,7 +455,7 @@ ecm_find_data_alternate(
 				alternate, endpoint_index);
 			if (drv_usb_endpoint_type(endpoint) !=
 			    DRV_USB_TRANSFER_BULK) {
-				/* Reports successful completion. */
+				/* Succeeded. */
 				return 0;
 			}
 
@@ -510,7 +510,7 @@ ecm_binding_parse(
 	    control_descriptor->interface_protocol !=
 		    ECM_COMMUNICATION_PROTOCOL ||
 	    drv_usb_interface_alternate_count(control) != 1U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -518,7 +518,7 @@ ecm_binding_parse(
 	if ((drv_usb_device_hcd_capabilities(
 		     drv_usb_interface_device(control)) &
 	     DRV_USB_HCD_CAP_CONCURRENT_URBS) == 0) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -535,7 +535,7 @@ ecm_binding_parse(
 				     &data_number, &mac_string,
 				     &max_segment_size) ||
 	    !ecm_find_notification(control_alternate, &binding->notification)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	binding->data = drv_usb_configuration_find_interface(configuration,
@@ -547,19 +547,20 @@ ecm_binding_parse(
 	    !ecm_find_data_alternate(binding->data, &binding->bulk_in,
 				     &binding->bulk_out,
 				     &binding->data_alternate)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/*
- * Descriptor decoding has already applied the speed-specific
+	 * Descriptor decoding has already applied the speed-specific
 	 * packet-size rules.  Keep these local checks because ECM later divides
 	 * by bulk-OUT MPS and requires a complete eight-byte notification
-	 * header. */
+	 * header.
+	 */
 	if (drv_usb_endpoint_max_packet_size(binding->notification) < 8U ||
 	    drv_usb_endpoint_max_packet_size(binding->bulk_in) == 0U ||
 	    drv_usb_endpoint_max_packet_size(binding->bulk_out) == 0U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	binding->device = drv_usb_interface_device(control);
@@ -608,7 +609,7 @@ ecm_get_mac(
 	if (drv_usb_device_get_string(binding->device, binding->mac_string, 0,
 				      string, sizeof(string)) != 0 ||
 	    strlen(string) != 12U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	/* Process each remaining element. */
@@ -630,7 +631,7 @@ ecm_get_mac(
 	if (all_zero || (mac[0] & 1U) != 0)
 		return EINVAL;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -672,7 +673,7 @@ ecm_program_packet_filter(
 	    adapter->quarantined) {
 		spin_unlock_irqrestore(&adapter->lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENETDOWN;
 	}
 
@@ -732,7 +733,7 @@ ecm_urb_status_error(
 	if (status == DRV_USB_URB_DISCONNECTED)
 		return ENODEV;
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return EIO;
 }
 
@@ -776,7 +777,7 @@ ecm_start_urb(
 	    adapter->quarantined) {
 		spin_unlock_irqrestore(&adapter->lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENETDOWN;
 	}
 
@@ -946,7 +947,7 @@ ecm_open(
 					: (adapter->quarantined ? EIO : EBUSY);
 		spin_unlock_irqrestore(&adapter->lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -962,22 +963,18 @@ ecm_open(
 				      adapter->notification_buffer,
 				      ECM_NOTIFICATION_SIZE, 0);
 	}
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = ecm_start_urb(adapter, adapter->rx_urb,
 				      adapter->rx_buffer, ECM_FRAME_SIZE, 0);
 	}
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		(void)ecm_stop(adapter);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1015,7 +1012,7 @@ ecm_transmit(
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		packet_buf_free(packet);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENETDOWN;
 	}
 
@@ -1024,7 +1021,7 @@ ecm_transmit(
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		packet_buf_free(packet);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOBUFS;
 	}
 
@@ -1033,7 +1030,7 @@ ecm_transmit(
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		packet_buf_free(packet);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EMSGSIZE;
 	}
 
@@ -1063,8 +1060,6 @@ ecm_transmit(
 			adapter->tx_urb, adapter->tx_buffer, length, flags,
 			ECM_TRANSFER_TIMEOUT_MS, ecm_completion, adapter);
 	}
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = drv_usb_urb_submit(adapter->tx_urb);
 	irq = spin_lock_irqsave(&adapter->lock);
@@ -1311,7 +1306,7 @@ ecm_poll_tx_completion(
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		ecm_restore_pending(adapter, &adapter->tx_ready);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1321,7 +1316,7 @@ ecm_poll_tx_completion(
 	if (drv_usb_urb_drain(adapter->tx_urb, ECM_TRANSFER_TIMEOUT_MS) != 0) {
 		ecm_restore_pending(adapter, &adapter->tx_ready);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1349,7 +1344,7 @@ ecm_poll_notification_completion(
 			      ECM_TRANSFER_TIMEOUT_MS) != 0) {
 		ecm_restore_pending(adapter, &adapter->notification_ready);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1379,7 +1374,7 @@ ecm_poll_rx_completion(
 	if (drv_usb_urb_drain(adapter->rx_urb, ECM_TRANSFER_TIMEOUT_MS) != 0) {
 		ecm_restore_pending(adapter, &adapter->rx_ready);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1390,16 +1385,12 @@ ecm_poll_rx_completion(
 	if (error == 0 &&
 	    (length < ECM_ETHERNET_HEADER_SIZE || length > ECM_FRAME_SIZE))
 		error = EMSGSIZE;
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		/* Handles the packet availability. */
 		packet = packet_buf_alloc(0);
 		if (packet == NULL)
 			error = ENOBUFS;
 	}
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		/* Handles the destination availability. */
 		destination = packet_buf_append(packet, length);
@@ -1408,8 +1399,6 @@ ecm_poll_rx_completion(
 		else
 			memcpy(destination, adapter->rx_buffer, length);
 	}
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		net_device_receive(device, packet);
 	} else {
@@ -1572,12 +1561,12 @@ ecm_urbs_alloc(
 	/* Handles the notification urb availability. */
 	if (adapter->notification_urb != NULL && adapter->rx_urb != NULL &&
 	    adapter->tx_urb != NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	ecm_urbs_free(adapter);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOMEM;
 }
 
@@ -1606,12 +1595,12 @@ ecm_buffers_alloc(
 	/* Handles the notification buffer availability. */
 	if (adapter->notification_buffer != NULL &&
 	    adapter->rx_buffer != NULL && adapter->tx_buffer != NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	ecm_buffers_free(adapter);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOMEM;
 }
 
@@ -1646,19 +1635,17 @@ ecm_net_device_create(
 		if (error != EEXIST)
 			break;
 	}
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		device->driver_data = NULL;
 		net_device_destroy(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	adapter->net_device = device;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1700,7 +1687,7 @@ ecm_attach(
 	if (error != 0) {
 		hal_free(adapter);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1740,7 +1727,7 @@ ecm_attach(
 		   adapter->net_device->name, mac[0], mac[1], mac[2], mac[3],
 		   mac[4], mac[5], binding.max_segment_size);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1787,7 +1774,7 @@ ecm_detach(
 	else
 		hal_free(adapter);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1817,10 +1804,10 @@ ecm_match(
 	(void)id;
 
 	/*
- * NCM returns 100.  A function offering both standards configurations
+	 * NCM returns 100.  A function offering both standards configurations
 	 * retains the richer NCM choice while an ECM-only configuration remains
-	 * eligible. */
-	/* Computes the function result. */
+	 * eligible.
+	 */
 	error = ecm_binding_parse(interface, &binding) ? 80 : 0;
 
 	/* Returns the computed result. */

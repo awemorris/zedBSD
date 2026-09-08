@@ -1,6 +1,6 @@
 /* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 #include "kern/graphics-device.h"
 #include "kern/cdev.h"
 #include "kern/file.h"
@@ -170,7 +170,7 @@ graphics_close(
 
 	mutex_unlock(&graphics_lock);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -219,7 +219,7 @@ graphics_enter(
 	     request.preferred_bits_per_pixel != 8 &&
 	     request.preferred_bits_per_pixel != 24 &&
 	     request.preferred_bits_per_pixel != 32)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	memset(&graphics_mode, 0, sizeof(graphics_mode));
@@ -234,7 +234,7 @@ graphics_enter(
 		drv_pcat_graphics_backend_leave();
 		hal_cons_resume();
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
@@ -281,7 +281,7 @@ graphics_get_modes(
 	/* Handles the request condition. */
 	if (request.reserved != 0 || request.capacity > GRAPHICS_MAX_MODES ||
 	    (request.capacity != 0 && request.modes == 0)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	total = drv_pcat_graphics_backend_get_modes(native, request.capacity);
@@ -343,7 +343,7 @@ graphics_fill(
 				? 0
 				: EIO;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	} else {
 		/* Checks the operation status. */
@@ -364,7 +364,7 @@ graphics_fill(
 				? 0
 				: EIO;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 }
@@ -387,7 +387,7 @@ graphics_line(
 	    request.x1 >= graphics_mode.width ||
 	    request.y0 >= graphics_mode.height ||
 	    request.y1 >= graphics_mode.height) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -414,7 +414,7 @@ load_palette(
 		palette_buffer[0] = request->background;
 		palette_buffer[1] = request->foreground;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -429,7 +429,7 @@ load_palette(
 	if (request->format != ZEDBSD_GRAPHICS_FORMAT_INDEX8 ||
 	    request->palette == 0 || request->palette_count == 0 ||
 	    request->palette_count > 256U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -467,7 +467,7 @@ graphics_blit(
 	    request.width > graphics_mode.width - request.x ||
 	    request.height > graphics_mode.height - request.y ||
 	    request.pixels == 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -478,15 +478,15 @@ graphics_blit(
 		minimum_stride = request.width;
 	else if (request.format == ZEDBSD_GRAPHICS_FORMAT_MONO1)
 		minimum_stride = ((uint64_t)request.width + 7U) / 8U;
-	else
-
-		/* Returns the computed result. */
+	else {
+		/* Failed. */
 		return EINVAL;
+	}
 
 	/* Handles the minimum stride condition. */
 	if (minimum_stride > request.stride ||
 	    minimum_stride > GRAPHICS_ROW_MAX) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -545,12 +545,12 @@ graphics_blit(
 		if (!drv_pcat_graphics_backend_blit(request.x, request.y + row,
 						    &image, request.pattern,
 						    patterned)) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -572,7 +572,7 @@ graphics_flush(
 	/* Handles the request condition. */
 	if (request.rectangle_count > GRAPHICS_MAX_RECTS ||
 	    (request.rectangle_count != 0 && request.rectangles == 0)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -619,14 +619,14 @@ graphics_glyph(
 	/* Handles the request condition. */
 	if (request.reserved != 0 || request.bitmap == 0 ||
 	    request.bitmap_capacity < sizeof(bitmap)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
 	/* Checks the drv pcat graphics backend get glyph result. */
 	if (!drv_pcat_graphics_backend_get_glyph(request.codepoint, bitmap,
 						 &width, &height)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	request.width = width;
@@ -778,7 +778,7 @@ graphics_ioctl_locked(
 		/* Returns the computed result. */
 		return function_result;
 	default:
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 }

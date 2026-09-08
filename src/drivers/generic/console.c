@@ -1,6 +1,3 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/console-device.h"
 #include "kern/cdev.h"
 #include "kern/clock.h"
@@ -10,15 +7,8 @@
 #include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/poll.h"
-#ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
 #include "kern/sched.h"
 #include "kern/thread.h"
-#else
-#define SCHED_PRIORITY_DEFAULT 8
-int kthread_create(void (*)(void *), void *, int, struct thread **);
-int thread_abort_new(struct thread *);
-void thread_start(struct thread *);
-#endif
 #include "kern/tty.h"
 #include "kern/uaccess.h"
 #include "kern/waitq.h"
@@ -35,21 +25,6 @@ void thread_start(struct thread *);
 #define CONSOLE_INPUT_SOURCES 8U
 #define CONSOLE_KEY_CAPABILITIES 128U
 #define CONSOLE_LOGICAL_KEYS 128U
-
-#ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
-static uint32_t input_events[CONSOLE_INPUT_EVENTS];
-#endif
-static unsigned input_head, input_tail, input_used;
-static unsigned input_started;
-static struct spinlock input_lock;
-static struct wait_queue input_waitq;
-static struct wait_queue dispatch_waitq;
-#ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
-static struct input_device *keyboard_input;
-static struct input_keymap_state early_keymap;
-static int early_resyncing;
-static struct input_subscription console_subscription;
-#endif
 
 struct console_dispatch_event {
 	uint32_t translated;
@@ -74,6 +49,16 @@ struct console_source_state {
 static struct console_dispatch_event dispatch_events[CONSOLE_DISPATCH_EVENTS];
 static unsigned dispatch_head, dispatch_tail, dispatch_used;
 static struct console_source_state console_sources[CONSOLE_INPUT_SOURCES];
+static uint32_t input_events[CONSOLE_INPUT_EVENTS];
+static unsigned input_head, input_tail, input_used;
+static unsigned input_started;
+static struct spinlock input_lock;
+static struct wait_queue input_waitq;
+static struct wait_queue dispatch_waitq;
+static struct input_device *keyboard_input;
+static struct input_keymap_state early_keymap;
+static int early_resyncing;
+static struct input_subscription console_subscription;
 
 #define CONSOLE_EVENT_RECORDS 64U
 
@@ -169,7 +154,7 @@ console_open_file(
 	state->input_mode = ZEDBSD_CONSOLE_INPUT_TEXT;
 	file->f_data = state;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -199,7 +184,7 @@ console_close_file(
 	file->f_data = NULL;
 	poll_notify();
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -220,7 +205,7 @@ console_capability_add(
 		/* Handles the capabilities condition. */
 		if (capabilities[index].type == EV_KEY &&
 		    capabilities[index].code == code) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
@@ -232,7 +217,7 @@ console_capability_add(
 	capabilities[*count].code = code;
 	(*count)++;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -277,7 +262,7 @@ console_capabilities(
 			return error_local1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -393,7 +378,7 @@ console_input_take(
 		if (error == EINTR) {
 			spin_unlock_irqrestore(&input_lock, irq);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return -EINTR;
 		}
 	}
@@ -800,7 +785,7 @@ drv_console_input_ownership_test_pop(
 	if (dispatch_used == 0) {
 		spin_unlock_irqrestore(&input_lock, irq);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -844,7 +829,7 @@ drv_console_input_ownership_test_state(
 	if (source == NULL || code > KEY_MAX) {
 		spin_unlock_irqrestore(&input_lock, irq);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1020,7 +1005,7 @@ console_event_read(
 		if ((file_status_flags_get(file) & O_NONBLOCK) != 0) {
 			spin_unlock_irqrestore(&input_lock, irq);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return -EAGAIN;
 		}
 
@@ -1032,7 +1017,7 @@ console_event_read(
 		if (error == EINTR) {
 			spin_unlock_irqrestore(&input_lock, irq);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return -EINTR;
 		}
 	}
@@ -1116,7 +1101,7 @@ console_write_at(
 	if (request.row >= HAL_CONS_ROWS ||
 	    request.column >= HAL_CONS_COLUMNS ||
 	    request.length > CONSOLE_WRITE_MAX) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -1175,7 +1160,7 @@ console_ioctl(
 	case ZEDBSD_CONSOLE_CLEAR:
 		hal_cons_clear();
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case ZEDBSD_CONSOLE_CLEAR_ROW:
 
@@ -1189,7 +1174,7 @@ console_ioctl(
 			return EINVAL;
 		hal_cons_clear_row(row.row);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case ZEDBSD_CONSOLE_CLEAR_TO_EOL:
 
@@ -1242,7 +1227,7 @@ console_ioctl(
 			return error;
 		hal_cons_show_cursor(cursor_local2.visible != 0);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case ZEDBSD_CONSOLE_WRITE_AT:
 		/* Obtains the console write at result. */
@@ -1301,7 +1286,7 @@ console_ioctl(
 		if ((mode_local4.mode != ZEDBSD_CONSOLE_INPUT_TEXT &&
 		     mode_local4.mode != ZEDBSD_CONSOLE_INPUT_EVENT) ||
 		    mode_local4.flags != 0) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 
@@ -1311,7 +1296,7 @@ console_ioctl(
 		    event_owner != NULL && event_owner != open_local3) {
 			spin_unlock_irqrestore(&input_lock, irq_local);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -1326,7 +1311,7 @@ console_ioctl(
 		spin_unlock_irqrestore(&input_lock, irq_local);
 		poll_notify();
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case ZEDBSD_CONSOLE_KEY_STATE:
 
@@ -1347,10 +1332,10 @@ console_ioctl(
 		spin_unlock_irqrestore(&input_lock, irq_local5);
 		poll_notify();
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case ZEDBSD_CONSOLE_ISATTY:
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	default:
 		/* Obtains the tty vt ioctl result. */
@@ -1384,7 +1369,7 @@ console_poll(
 			result |= events & (POLLIN | POLLRDNORM);
 		spin_unlock_irqrestore(&input_lock, irq);
 		*revents = result;
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1505,7 +1490,7 @@ drv_console_device_register(
 	    ((hal_info.flags & HAL_CONS_INPUT_REPEAT) != 0 &&
 	     (hal_info.flags & HAL_CONS_INPUT_RELEASE) == 0) ||
 	    (hal_info.symbol_count != 0 && hal_info.symbols == NULL)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -1599,7 +1584,7 @@ drv_console_device_register(
 	thread_start(producer);
 	hal_cons_set_mode(HAL_CONS_TERMINAL);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:

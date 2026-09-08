@@ -1,4 +1,4 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 #include "rtc.h"
 
 #define CMOS_SECOND   0x00U

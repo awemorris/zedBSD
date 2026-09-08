@@ -1,5 +1,5 @@
 /* X68000 internal MB89352 MMIO binding. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include "scsi.h"
 #include "mmio.h"

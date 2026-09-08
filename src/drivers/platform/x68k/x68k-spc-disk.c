@@ -1,7 +1,7 @@
 /* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 
 /* X68000 MB89352 synchronous polled-PIO block driver. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include "drivers/platform/x68k/x68k-spc-disk.h"
 
@@ -60,7 +60,7 @@ drv_x68k_spc_disk_init(
 	if (bus == NULL || bus->read == NULL || bus->write == NULL ||
 	    initiator_id > 7U || boot_target_id >= SPC_TARGET_COUNT ||
 	    initiator_id == boot_target_id) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	controller_bus = *bus;
@@ -131,7 +131,7 @@ probe_target(
 					 target_id, SPC_LUN, inquiry, &result);
 	if (error != X68K_SPC_OK || (inquiry[0] & 0xe0U) != 0 ||
 	    (inquiry[0] & 0x1fU) != 0) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -141,7 +141,7 @@ probe_target(
 		capacity, &result);
 	if (error != X68K_SPC_OK ||
 	    drv_x68k_scsi_parse_capacity10(capacity, &blocks, &block_size) != 0) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	unit->disk = disk_alloc();
@@ -155,7 +155,7 @@ probe_target(
 		(void)disk_destroy(unit->disk);
 		unit->disk = NULL;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -171,7 +171,7 @@ probe_target(
 	if (disk_create(unit->disk) != 0) {
 		unit->disk = NULL;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -204,8 +204,6 @@ unit_ready(
 			SPC_LUN, &result);
 		if (error == X68K_SPC_OK)
 			return 1;
-
-		/* Checks the operation status. */
 		if (error != X68K_SPC_ERR_STATUS || request_sense(unit) != 0)
 			return 0;
 
@@ -213,12 +211,12 @@ unit_ready(
 		if (unit->sense.key != SCSI_SENSE_UNIT_ATTENTION &&
 		    !(unit->sense.key == SCSI_SENSE_NOT_READY &&
 		      unit->sense.asc == SCSI_ASC_BECOMING_READY)) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -240,12 +238,12 @@ request_sense(
 	if (error != X68K_SPC_OK ||
 	    drv_x68k_scsi_parse_sense(response, sizeof(response),
 				      &unit->sense) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	unit->sense_valid = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -278,19 +276,19 @@ spc_errno(
 	/* Dispatch the selected operation case. */
 	switch (error) {
 	case X68K_SPC_OK:
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case X68K_SPC_ERR_ARGUMENT:
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	case X68K_SPC_ERR_TIMEOUT:
-		/* Returns the computed result. */
+		/* Failed. */
 		return ETIMEDOUT;
 	case X68K_SPC_ERR_SELECTION:
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	default:
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 }
@@ -375,9 +373,10 @@ read_write(
 				break;
 
 			/*
- * CHECK CONDITION with UNIT ATTENTION means the command
+			 * CHECK CONDITION with UNIT ATTENTION means the command
 			 * was not executed.  A transport timeout is never
-			 * retried for writes. */
+			 * retried for writes.
+			 */
 			retry = 1;
 		} while (1);
 
@@ -398,7 +397,7 @@ read_write(
 		bytes += (size_t)chunk * X68K_SCSI_BLOCK_SIZE;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -438,7 +437,7 @@ spc_submit(
 			     ? (size_t)bio->b_block_count * disk->d_block_size
 			     : 0);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -453,6 +452,6 @@ spc_ioctl(
 	(void)request;
 	(void)argument;
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return EOPNOTSUPP;
 }

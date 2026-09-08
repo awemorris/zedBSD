@@ -99,7 +99,7 @@ drv_rpi4_sdhci_init(
 			   (unsigned)error, r32(REG_INT_STATUS),
 			   r32(REG_PRESENT));
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -128,14 +128,14 @@ drv_rpi4_sdhci_init(
 	if (error) {
 		unit.disk = 0;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	hal_printf("sdhci: mmcblk0 ready (%s addressing)\n",
 		   unit.high_capacity ? "block" : "byte");
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -205,7 +205,7 @@ controller_init(
 	if ((error = set_clock(400000U)) != 0) {
 		hal_printf("sdhci: clock identification %u\n", (unsigned)error);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -213,7 +213,7 @@ controller_init(
 	if ((error = command(0, 0, 0, 0)) != 0) {
 		hal_printf("sdhci: CMD0 %u\n", (unsigned)error);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -241,7 +241,7 @@ controller_init(
 		hal_printf("sdhci: ACMD41 error=%u irq=%x ocr=%x\n",
 			   (unsigned)error, last_error_status, response);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ETIMEDOUT;
 	}
 
@@ -251,7 +251,7 @@ controller_init(
 	if ((error = command(2, 0, CMD_RESP_LONG | CMD_CRC, 0)) != 0) {
 		hal_printf("sdhci: CMD2 %u\n", (unsigned)error);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -260,7 +260,7 @@ controller_init(
 			     &response)) != 0) {
 		hal_printf("sdhci: CMD3 %u\n", (unsigned)error);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -275,7 +275,7 @@ controller_init(
 	    0) {
 		hal_printf("sdhci: CMD9 %u\n", (unsigned)error);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -284,7 +284,7 @@ controller_init(
 			     CMD_RESP_BUSY | CMD_CRC | CMD_INDEX, 0)) != 0) {
 		hal_printf("sdhci: CMD7 %u\n", (unsigned)error);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -292,7 +292,7 @@ controller_init(
 	if (!unit.high_capacity &&
 	    (error = command(16, 512, CMD_RESP_SHORT | CMD_CRC | CMD_INDEX,
 			     0)) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -300,17 +300,17 @@ controller_init(
 	if ((error = set_clock(25000000U)) != 0) {
 		hal_printf("sdhci: clock transfer %u\n", (unsigned)error);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	/*
- * ACMD6 selects the four-bit bus; keep one-bit mode if it is rejected.
+	 * ACMD6 selects the four-bit bus; keep one-bit mode if it is rejected.
 	 */
 	if (app_command(6, 2, CMD_RESP_SHORT | CMD_CRC | CMD_INDEX, 0) == 0)
 		w8(REG_HOST_CONTROL, (uint8_t)(r8(REG_HOST_CONTROL) | 2U));
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -405,7 +405,7 @@ set_clock(
 		return ETIMEDOUT;
 	w16(REG_CLOCK_CONTROL, (uint16_t)(clock | 4U));
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -449,7 +449,7 @@ command(
 	/* Handles the response condition. */
 	if (response)
 		*response = r32(REG_RESPONSE0);
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -469,7 +469,7 @@ wait_bits(
 			return ETIMEDOUT;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -489,7 +489,7 @@ wait_interrupt(
 			last_error_status = status;
 			w32(REG_INT_STATUS, status);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 
@@ -497,7 +497,7 @@ wait_interrupt(
 		if (status & wanted) {
 			w32(REG_INT_STATUS, wanted);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -555,8 +555,6 @@ transfer_block(
 			CMD_RESP_SHORT | CMD_CRC | CMD_INDEX | CMD_DATA, 0);
 	if (error)
 		return error;
-
-	/* Checks the operation status. */
 	if ((error = wait_interrupt(ready)) != 0)
 		return error;
 	/* Process each remaining element. */
@@ -590,9 +588,10 @@ sd_submit(
 		error = 0;
 	else if (bio->b_op != BIO_READ && bio->b_op != BIO_WRITE)
 		error = EOPNOTSUPP;
-	else
+	else {
 		/* Process each remaining element. */
 		for (i_index_for = 0;
+	}
 		     i_index_for < bio->b_block_count && error == 0;
 		     i_index_for++) {
 			error = transfer_block(
@@ -612,7 +611,7 @@ sd_submit(
 	bio_complete(bio, error, error ? 0 : (size_t)bio->b_block_count * 512U);
 	(void)disk;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -627,6 +626,6 @@ sd_ioctl(
 	(void)request;
 	(void)argument;
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return EOPNOTSUPP;
 }

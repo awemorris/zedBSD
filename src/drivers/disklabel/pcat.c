@@ -40,7 +40,7 @@ pcat_auto_scan(
 	/* Handles the disk availability. */
 	if (disk == NULL || entries == NULL || capacity == 0U ||
 	    (disk->d_block_size != 512U && disk->d_block_size != 4096U)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return -EINVAL;
 	}
 
@@ -71,9 +71,10 @@ pcat_auto_scan(
 	}
 
 	/*
- * The protective entry is already sufficient GPT evidence.  Enter the
+	 * The protective entry is already sufficient GPT evidence.  Enter the
 	 * strict parser immediately so that it can recover from an unreadable
-	 * primary header by validating the backup copy. */
+	 * primary header by validating the backup copy.
+	 */
 	if (has_protective) {
 		kern_free(block);
 
@@ -111,7 +112,7 @@ pcat_auto_scan(
 	kern_free(block);
 
 	/*
- * Any EE entry or GPT header signature is GPT evidence.  Once selected,
+	 * Any EE entry or GPT header signature is GPT evidence.  Once selected,
 	 * strict GPT rejection is final and must never fall back to legacy MBR.
 	 */
 	if (has_gpt_signature) {

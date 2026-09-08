@@ -1,6 +1,6 @@
 /* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 #include "drivers/platform/pc98/graphics/backend.h"
 #include "drivers/graphics/pc98.h"
 #include "hal/i386/bsp-pc98/display.h"
@@ -79,7 +79,7 @@ drv_pc98_graphics_backend_enter(
 	if (!native_display.enter(native_display.context, &info)) {
 		hal_printf("graphics: Cirrus and GDC mode entry failed\n");
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -223,7 +223,7 @@ drv_pc98_graphics_backend_blit(
 			native_display.draw_image_pattern(
 				native_display.context, x, y, &native, pattern);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -375,7 +375,7 @@ fail:
 			(void)hal_pmem_free(&gdc_memory[i]);
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 

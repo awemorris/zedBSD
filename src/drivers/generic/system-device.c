@@ -56,14 +56,6 @@ static int system_swap_ioctl(unsigned long request, uintptr_t argument);
 static unsigned system_process_file_usage(struct process *process, const struct path *target, unsigned query_flags);
 static int system_file_matches(struct file *candidate, const struct path *target, unsigned query_flags, unsigned *socket_match);
 static int system_path_matches(const struct path *candidate, const struct path *target, unsigned query_flags);
-_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->uuid) ==
-    ZEDBSD_SYSTEM_SWAP_UUID_SIZE, "kernel and UAPI swap UUID sizes differ");
-_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->label) ==
-    ZEDBSD_SYSTEM_SWAP_LABEL_SIZE,
-    "kernel and UAPI swap label sizes differ");
-_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->source) ==
-    ZEDBSD_SYSTEM_SWAP_SOURCE_MAX,
-    "kernel and UAPI swap source-string sizes differ");
 static int words_are_zero(const uint32_t *words, size_t count);
 static int bounded_string_valid(const char *text, size_t capacity);
 static int control_valid(const struct system_swap_control *control);
@@ -73,6 +65,10 @@ static int control_ioctl(unsigned long request, uintptr_t argument, int superuse
 static int get_source_ioctl(uintptr_t argument);
 
 static const struct cdev_ops system_ops = {.ioctl = system_ioctl};
+
+_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->uuid) == ZEDBSD_SYSTEM_SWAP_UUID_SIZE, "kernel and UAPI swap UUID sizes differ");
+_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->label) == ZEDBSD_SYSTEM_SWAP_LABEL_SIZE, "kernel and UAPI swap label sizes differ");
+_Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->source) == ZEDBSD_SYSTEM_SWAP_SOURCE_MAX, "kernel and UAPI swap source-string sizes differ");
 
 /*
  * Registers the system control device.
@@ -528,11 +524,13 @@ system_get_file_usage(
 	error = copyin(argument, &output, sizeof(output));
 	if (error != 0)
 		return error;
+
 	if (output.version != ZEDBSD_SYSTEM_FILE_USAGE_VERSION ||
 	    output.struct_size != sizeof(output) ||
 	    (output.query_flags &
 	     ~ZEDBSD_SYSTEM_FILE_USAGE_QUERY_MOUNT) != 0)
 		return EINVAL;
+
 	output.path[sizeof(output.path) - 1U] = '\0';
 	if (output.path[0] == '\0')
 		return EINVAL;
@@ -576,19 +574,19 @@ system_get_file_usage(
 	output.pid = process->pid;
 	output.cursor_pid = process->pid;
 	output.usage_flags = flags;
+
 	credential = cred_process_ref(process);
 	if (credential != NULL)
 		output.uid = credential->euid;
 	else
 		output.uid = 0;
+
 	cred_release(credential);
 	process_release(process);
 	cred_release(caller_credential);
 	path_release(&target);
 
 	/* Copies the description to the caller. */
-
-	/* Reports why the copy failed. */
 	error = copyout(&output, argument, sizeof(output));
 	if (error != 0)
 		return error;
@@ -613,8 +611,6 @@ system_swap_ioctl(
 	cred_release(credential);
 
 	/* Forwards the request to the swap device. */
-
-	/* Reports why the swap device failed. */
 	error = drv_system_swap_device_ioctl(request, argument, superuser);
 	if (error != 0)
 		return error;

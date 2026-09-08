@@ -1352,7 +1352,8 @@ tmpfs_write_at(
 		done += count;
 		/*
 		 * Publish every completed prefix before a later allocation can fail.
-		 * A zero-length write must leave EOF unchanged. */
+		 * A zero-length write must leave EOF unchanged.
+		 */
 		if ((off_t)((uint64_t)offset + done) > inode->i_size)
 			inode->i_size = (off_t)((uint64_t)offset + done);
 	}

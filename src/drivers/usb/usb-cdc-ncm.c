@@ -75,7 +75,7 @@ drv_usb_cdc_ncm_negotiate_nth16(
 	/* Handles the bytes availability. */
 	if (bytes == NULL || limits == NULL || profile == NULL ||
 	    parameters_length < DRV_USB_CDC_NCM_NTB_PARAMETERS_SIZE) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -99,7 +99,7 @@ drv_usb_cdc_ncm_negotiate_nth16(
 	    limits->bulk_out_max_packet_size < 8U ||
 	    !is_power_of_two(limits->bulk_out_max_packet_size) ||
 	    limits->bulk_out_max_packet_size > limits->ntb_out_max_size) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -170,7 +170,7 @@ drv_usb_cdc_ncm_negotiate_nth16(
 		return EMSGSIZE;
 
 	*profile = candidate;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -209,11 +209,11 @@ drv_usb_cdc_ncm_make_control_request(
 		request->request = DRV_USB_CDC_NCM_SET_CRC_MODE;
 		break;
 	default:
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -275,7 +275,7 @@ drv_usb_cdc_ncm_parse_ntb16(
 				/* Handles the datagram count availability. */
 				if (datagram_count != NULL)
 					*datagram_count = index;
-				/* Returns the computed result. */
+				/* Failed. */
 				return error;
 			}
 		}
@@ -284,7 +284,7 @@ drv_usb_cdc_ncm_parse_ntb16(
 	/* Handles the datagram count availability. */
 	if (datagram_count != NULL)
 		*datagram_count = result.datagram_count;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -314,7 +314,7 @@ drv_usb_cdc_ncm_build_ntb16(
 	    ntb_length == NULL ||
 	    frame_length < DRV_USB_CDC_NCM_ETHERNET_HEADER_SIZE ||
 	    frame_length > profile->max_datagram_size) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -335,12 +335,12 @@ drv_usb_cdc_ncm_build_ntb16(
 	    layout.block_length > UINT16_MAX ||
 	    layout.datagram_offset > UINT16_MAX ||
 	    layout.ndp_offset > UINT16_MAX) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EMSGSIZE;
 	}
 
 	/*
- * memmove first permits a caller-owned frame inside the output buffer.
+	 * memmove first permits a caller-owned frame inside the output buffer.
 	 */
 	memmove(bytes + layout.datagram_offset, frame_bytes, frame_length);
 	memset(bytes, 0, layout.datagram_offset);
@@ -369,7 +369,7 @@ drv_usb_cdc_ncm_build_ntb16(
 	store_le16(bytes + layout.ndp_offset + 12U, 0);
 	store_le16(bytes + layout.ndp_offset + 14U, 0);
 	*ntb_length = layout.block_length;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -412,8 +412,6 @@ clamp_nth16_size(
 	/* Checks the operation result. */
 	if (result > resource_limit)
 		result = resource_limit;
-
-	/* Checks the operation result. */
 	if (result > UINT16_MAX)
 		result = UINT16_MAX;
 
@@ -446,7 +444,7 @@ profile_valid(
 	    profile->bulk_out_max_packet_size > profile->ntb_out_max_size ||
 	    profile->set_ntb_format_required > 1U ||
 	    profile->ntb_out_max_is_device_max > 1U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -454,7 +452,7 @@ profile_valid(
 	if (!alignment_valid(
 		    profile->ndp_in_divisor, profile->ndp_in_payload_remainder,
 		    profile->ndp_in_alignment, profile->ntb_in_max_size)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -571,7 +569,7 @@ make_layout(
 			  ? after_datagram
 			  : before_datagram;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -631,7 +629,7 @@ checked_add(
 	if (left > SIZE_MAX - right)
 		return EOVERFLOW;
 	*result = left + right;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -647,7 +645,7 @@ finish_block_length(
 	/* Handles the short packet size condition. */
 	if (short_packet_size == 0 || *block_length % short_packet_size != 0 ||
 	    *block_length == no_zlp_exact_size) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -701,7 +699,7 @@ validate_ntb16(
 	if (!profile_valid(profile) || state == NULL || bytes == NULL ||
 	    ntb_length < DRV_USB_CDC_NCM_NTH16_SIZE ||
 	    ntb_length > profile->ntb_in_max_size || ntb_length > UINT16_MAX) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -712,7 +710,7 @@ validate_ntb16(
 	/* Checks the load le32 result. */
 	if (load_le32(bytes) != DRV_USB_CDC_NCM_NTH16_SIGNATURE ||
 	    load_le16(bytes + 4U) != DRV_USB_CDC_NCM_NTH16_SIZE) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	result->sequence = load_le16(bytes + 6U);
@@ -721,8 +719,9 @@ validate_ntb16(
 	wire_block_length = load_le16(bytes + 8U);
 	if (wire_block_length == 0) {
 		/*
- * Zero is legal only when a short USB transfer delimits the
-		 * NTB. */
+		 * Zero is legal only when a short USB transfer delimits the
+		 * NTB.
+		 */
 		if (ntb_length >= profile->ntb_in_max_size)
 			return EINVAL;
 		result->block_length = (uint16_t)ntb_length;
@@ -779,7 +778,7 @@ parse_ndp_chain(
 		    ndp_offset % profile->ndp_in_alignment != 0 ||
 		    !range_valid(result->block_length, ndp_offset,
 				 DRV_USB_CDC_NCM_NDP16_HEADER_SIZE)) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 
@@ -798,7 +797,7 @@ parse_ndp_chain(
 		if (ndp_length < DRV_USB_CDC_NCM_NDP16_MIN_SIZE ||
 		    (ndp_length & 3U) != 0 ||
 		    !range_valid(result->block_length, ndp_offset, ndp_length)) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 
@@ -833,7 +832,7 @@ parse_ndp_chain(
 				    profile->ndp_in_payload_remainder ||
 			    !range_valid(result->block_length, datagram_offset,
 					 datagram_length)) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 
@@ -892,7 +891,7 @@ record_ndp(
 	result->ndps[result->ndp_count].length = length;
 	result->ndp_count++;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -907,14 +906,14 @@ record_datagram(
 	/* Checks the operation result. */
 	if (result->datagram_count >= profile->rx_max_datagrams ||
 	    result->datagram_count >= DRV_USB_CDC_NCM_MAX_RX_DATAGRAMS) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOVERFLOW;
 	}
 	result->datagrams[result->datagram_count].offset = offset;
 	result->datagrams[result->datagram_count].length = length;
 	result->datagram_count++;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -936,7 +935,7 @@ validate_nonoverlap(
 			/* Checks the ranges overlap result. */
 			if (ranges_overlap(&result->ndps[left],
 					   &result->ndps[right])) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 		}
@@ -952,7 +951,7 @@ validate_nonoverlap(
 			/* Checks the ranges overlap result. */
 			if (ranges_overlap(&result->datagrams[left],
 					   &result->ndps[right])) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 		}
@@ -963,13 +962,13 @@ validate_nonoverlap(
 			/* Checks the ranges overlap result. */
 			if (ranges_overlap(&result->datagrams[left],
 					   &result->datagrams[right])) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 

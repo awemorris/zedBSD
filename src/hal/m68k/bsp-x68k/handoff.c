@@ -1,5 +1,5 @@
 /* Pure validation for the X68000 loader-to-kernel handoff. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include "bsp.h"
 #include <stddef.h>

@@ -1,5 +1,5 @@
 /* Pure MC68030 exception decoding shared by target code and host tests. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include "exception.h"
 

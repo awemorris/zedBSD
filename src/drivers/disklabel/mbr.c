@@ -2,7 +2,8 @@
 
 /*
  * PC/AT MBR primary partition scheme.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+ * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ */
 #include <drivers/disklabel.h>
 
 #define MBR_TABLE 0x1beU

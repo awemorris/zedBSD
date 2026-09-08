@@ -60,7 +60,7 @@ drv_sun4u_cmd646_init(
 			   hal_io_inp8(cmd + ATA_STATUS),
 			   hal_io_inp8(cmd + ATA_ERROR));
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -71,7 +71,7 @@ drv_sun4u_cmd646_init(
 			   error, hal_io_inp8(cmd + ATA_STATUS),
 			   hal_io_inp8(cmd + ATA_ERROR));
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -86,7 +86,7 @@ drv_sun4u_cmd646_init(
 		(void)disk_destroy(ata_disk);
 		ata_disk = NULL;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -100,13 +100,13 @@ drv_sun4u_cmd646_init(
 	if (error) {
 		ata_disk = NULL;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	hal_printf("SPARCV9 IDE PASS sectors=%llu\n", sectors);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -142,7 +142,7 @@ wait_status(
 			return 0;
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ETIMEDOUT;
 }
 
@@ -238,7 +238,7 @@ block(
 		return function_result;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -263,9 +263,10 @@ submit(
 	else if (b->b_mapped_block > 0x0fffffffULL ||
 		 b->b_block_count > 0x10000000ULL - b->b_mapped_block)
 		error = EINVAL;
-	else
+	else {
 		/* Process each remaining element. */
 		for (i_index_for = 0; i_index_for < b->b_block_count && !error;
+	}
 		     i_index_for++) {
 			error = block(b->b_op == BIO_WRITE,
 				      (uint32_t)b->b_mapped_block + i_index_for,
@@ -284,7 +285,7 @@ submit(
 
 	bio_complete(b, error, error ? 0 : (size_t)b->b_block_count * 512U);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -299,6 +300,6 @@ ioctl(
 	(void)r;
 	(void)a;
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return EOPNOTSUPP;
 }

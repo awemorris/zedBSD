@@ -1,5 +1,5 @@
 /* sun4u 16550 polling UART over PCI I/O physical bypass. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include "../asi.h"
 #include "uart.h"

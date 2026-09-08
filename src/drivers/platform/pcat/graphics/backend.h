@@ -1,7 +1,8 @@
 /* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 
 /* PC/AT graphics-private frontend/backend boundary.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+ * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ */
 #ifndef ZEDBSD_DRIVERS_GRAPHICS_PCAT_BACKEND_H
 #define ZEDBSD_DRIVERS_GRAPHICS_PCAT_BACKEND_H
 

@@ -3,7 +3,8 @@
 /* Begin consolidated pci-xhci.c. */
 /*
  * Native PCI xHCI host controller. Copyright (C) 2026 Awe Morris;
- * SPDX-License-Identifier: Zlib */
+ * SPDX-License-Identifier: Zlib
+ */
 #include <drivers/pci-xhci.h>
 #include <drivers/pci.h>
 #include <drivers/pci-xhci-capability.h>
@@ -157,8 +158,9 @@ struct xhci_controller {
 	volatile unsigned event_busy;
 	volatile unsigned command_event_ready;
 	/*
- * Protected by active_lock.  Each endpoint remains queue-depth one,
-	 * while these counts provide bounded controller teardown barriers. */
+	 * Protected by active_lock.  Each endpoint remains queue-depth one,
+	 * while these counts provide bounded controller teardown barriers.
+	 */
 	unsigned active_count;
 	unsigned endpoint_recoveries_busy;
 	unsigned transfer_reserve_busy;
@@ -380,7 +382,7 @@ wait_bits(
 			return 0;
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ETIMEDOUT;
 }
 
@@ -575,8 +577,6 @@ xhci_pci_release(
 	/* Handles the controller condition. */
 	if (controller->pci_state_saved || controller->bar_mapped)
 		master_error = xhci_bus_master_disable(controller);
-
-	/* Checks the operation status. */
 	if (master_error != 0) {
 		hal_printf("xhci: PCI bus-master disable failed (%d)\n",
 			   master_error);
@@ -627,7 +627,7 @@ xhci_pci_release(
 					   quiesce_error);
 			}
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -640,7 +640,7 @@ xhci_pci_release(
 		controller->bar_claimed = 0;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -696,7 +696,7 @@ ring_alloc(
 	r->enqueue = 0;
 	r->cycle = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 /* Supports the ring free operation. */
@@ -876,7 +876,7 @@ command_ex(
 		if (enabled)
 			hal_irq_enable();
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
@@ -971,9 +971,10 @@ command_ex(
 		hal_irq_enable();
 
 	/*
- * Transfer Events consumed while polling are claimed before event_lock
+	 * Transfer Events consumed while polling are claimed before event_lock
 	 * is released, but callbacks are deferred until the command gate is
-	 * open. */
+	 * open.
+	 */
 	xhci_completion_drain(c);
 
 	/* Checks the operation result. */
@@ -1026,7 +1027,7 @@ ownership(
 	/* Checks the drv xhci region fits result. */
 	if (offset != 0 && (offset < 0x20U ||
 			    !drv_xhci_region_fits(c->mapping.size, offset, 4U))) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	/* Continue while the operation condition remains true. */
@@ -1065,7 +1066,7 @@ ownership(
 			if (count == XHCI_TIMEOUT) {
 				xhci_legacy_release(c);
 
-				/* Returns the computed result. */
+				/* Failed. */
 				return ETIMEDOUT;
 			}
 
@@ -1078,7 +1079,7 @@ ownership(
 			     DRV_XHCI_LEGACY_SMI_ENABLE) != 0) {
 				xhci_legacy_release(c);
 
-				/* Returns the computed result. */
+				/* Failed. */
 				return EIO;
 			}
 		}
@@ -1095,7 +1096,7 @@ ownership(
 		offset = next;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1235,7 +1236,7 @@ xhci_request_publish_locked(
 	request->endpoint->active = request;
 	c->active_count++;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1293,7 +1294,7 @@ xhci_device_recovery_busy_locked(
 			return 1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1313,7 +1314,7 @@ xhci_device_request_busy_locked(
 			return 1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1444,7 +1445,7 @@ xhci_device_enable(
 	if (drv_usb_device_port(u) == 0 || drv_usb_device_port(u) > c->ports) {
 		hal_free(d);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -1455,7 +1456,7 @@ xhci_device_enable(
 	if (portsc == UINT32_MAX || d->speed_id == 0) {
 		hal_free(d);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
@@ -1470,9 +1471,10 @@ xhci_device_enable(
 	d->slot = slot;
 
 	/*
- * Publish partial ownership immediately.  Every later failure must pass
+	 * Publish partial ownership immediately.  Every later failure must pass
 	 * through checked Disable Slot before any controller-visible DMA is
-	 * freed. */
+	 * freed.
+	 */
 	irq = spin_lock_irqsave(&c->active_lock);
 
 	d->next = c->devices;
@@ -1535,7 +1537,7 @@ xhci_device_enable(
 		goto fail;
 	d->context_entries = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 fail:
 	completion = 0;
@@ -1604,7 +1606,7 @@ xhci_set_address(
 	    !drv_xhci_ep0_max_packet_size(drv_usb_device_speed(u),
 					  descriptor->endpoint0_max_packet_size,
 					  &packet)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	dequeue = d->endpoints[1].ring.dma.device_address +
@@ -1722,7 +1724,7 @@ xhci_endpoint_enable(
 					      type, desc->maximum_packet_size,
 					      desc->interval, companion,
 					      &endpoint_context)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -1733,7 +1735,7 @@ xhci_endpoint_enable(
 			return e;
 		ring_allocated = 1;
 	} else if (ep->dci != dci) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
@@ -1764,7 +1766,7 @@ xhci_endpoint_enable(
 	d->context_entries = entries;
 	ep->enabled = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 /* Supports the xhci endpoint disable operation. */
@@ -1805,7 +1807,7 @@ xhci_endpoint_disable(
 		error = d->quiescing ? ENODEV : EBUSY;
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1846,7 +1848,7 @@ xhci_endpoint_disable(
 		return error;
 	d->context_entries = entries;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1873,7 +1875,7 @@ transfer_claim(
 	if (request == NULL) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1938,11 +1940,12 @@ transfer_claim(
 	     drv_usb_endpoint_type(drv_usb_urb_endpoint(request->urb)) ==
 		     DRV_USB_TRANSFER_INTERRUPT)) {
 		/*
- * Keep HCD admission closed until drv_usb_hcd_complete() has
+		 * Keep HCD admission closed until drv_usb_hcd_complete() has
 		 * latched the STALL in the USB core.  Once the active request
 		 * is unlinked, this marker is the only HCD-side barrier against
 		 * a same-endpoint TD slipping into the completion-publication
-		 * window. */
+		 * window.
+		 */
 		if (request->endpoint->recovering ||
 		    request->endpoint->stall_publishing ||
 		    c->endpoint_recoveries_busy == UINT_MAX)
@@ -2040,18 +2043,20 @@ xhci_completion_finish(
 	drv_usb_urb_set_hcd_data(urb, NULL);
 
 	/*
- * Return request/DMA ownership before terminal publication, allowing a
+	 * Return request/DMA ownership before terminal publication, allowing a
 	 * callback to submit a different URB immediately.  The completed URB
-	 * stays HCD-owned until its own callback returns. */
+	 * stays HCD-owned until its own callback returns.
+	 */
 	xhci_request_release(c, request);
 	drv_usb_hcd_complete(&c->hcd, urb, terminal_status, completion_actual);
 
 	irq = spin_lock_irqsave(&c->active_lock);
 
 	/*
- * transfer_claim incremented this device's completions_busy before
+	 * transfer_claim incremented this device's completions_busy before
 	 * unlink; xhci_device_quiesce cannot release the endpoint graph until
-	 * the marker is cleared and that checked owner is dropped below. */
+	 * the marker is cleared and that checked owner is dropped below.
+	 */
 	if (stall_endpoint != NULL) {
 		/* Handles the stall endpoint condition. */
 		if (!stall_endpoint->stall_publishing)
@@ -2184,9 +2189,10 @@ xhci_irq(
 	}
 
 	/*
- * A polling command owns command_busy and will drain every claim after
+	 * A polling command owns command_busy and will drain every claim after
 	 * it releases that gate.  Never run a command-recursive callback from
-	 * the competing IRQ path while the command is still in flight. */
+	 * the competing IRQ path while the command is still in flight.
+	 */
 	if (__atomic_load_n(&c->command_busy, __ATOMIC_ACQUIRE) == 0)
 		xhci_completion_drain(c);
 out:
@@ -2246,7 +2252,7 @@ xhci_worker_start(
 	c->port_worker = worker;
 	thread_start(worker);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2355,9 +2361,10 @@ enqueue_normal(
 						  maximum_packet_size, final);
 
 		/*
- * A requested terminating zero packet is one more packet in
+		 * A requested terminating zero packet is one more packet in
 		 * this TD. The final payload TRB therefore reports one packet
-		 * remaining instead of looking terminal to the controller. */
+		 * remaining instead of looking terminal to the controller.
+		 */
 		if (zero_packet && td_size < 31U)
 			td_size++;
 		final_trb =
@@ -2395,10 +2402,11 @@ xhci_endpoint_restart_empty(
 		return EIO;
 
 	/*
- * Set TR Dequeue points at the software producer, whose cycle bit
+	 * Set TR Dequeue points at the software producer, whose cycle bit
 	 * denotes an empty ring.  Ring the endpoint and require hardware to
 	 * publish Running before either recovery succeeds or cancelled DMA
-	 * ownership is released. */
+	 * ownership is released.
+	 */
 	wr32(c->doorbells, d->slot * 4U, dci);
 	deadline = sched_ticks() + 100U;
 	/* Continue until the operation reaches a terminal state. */
@@ -2407,12 +2415,10 @@ xhci_endpoint_restart_empty(
 		state = xhci_endpoint_state(c, d, dci);
 		if (state == DRV_XHCI_ENDPOINT_RUNNING)
 			return 0;
-
-		/* Checks the operation status. */
 		if (state == DRV_XHCI_ENDPOINT_DISABLED ||
 		    state == DRV_XHCI_ENDPOINT_HALTED ||
 		    state == DRV_XHCI_ENDPOINT_ERROR) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 
@@ -2464,7 +2470,7 @@ xhci_endpoint_recover(
 		/* Dispatch the selected operation case. */
 		switch (action) {
 		case DRV_XHCI_CANCEL_COMPLETE:
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		case DRV_XHCI_CANCEL_RESET_ENDPOINT:
 			error = command_ex(c, 0, 0,
@@ -2503,9 +2509,10 @@ xhci_endpoint_recover(
 		}
 
 		/*
- * Completion 19 can be a state-transition race.  Re-read the
+		 * Completion 19 can be a state-transition race.  Re-read the
 		 * output context, but never repeat a command against an
-		 * unchanged state/action pair. */
+		 * unchanged state/action pair.
+		 */
 		if (error != 0 && completion != 19U)
 			break;
 	}
@@ -2566,7 +2573,7 @@ xhci_endpoint_reset(
 					: EIO;
 			spin_unlock_irqrestore(&c->active_lock, irq);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -2591,10 +2598,11 @@ xhci_endpoint_reset(
 			return EBUSY;
 
 		/*
- * drv_usb_urb_drain() may observe the core HCD reference drop
+		 * drv_usb_urb_drain() may observe the core HCD reference drop
 		 * just before this completion thread releases its STALL
 		 * publication owner. Join only that bounded handoff; every
-		 * other recovery remains EBUSY. */
+		 * other recovery remains EBUSY.
+		 */
 		if (sched_ticks() - wait_started >= 100U)
 			return EBUSY;
 		sched_yield();
@@ -2639,8 +2647,9 @@ xhci_request_alloc(
 	struct xhci_urb_reservation *reservation;
 
 	/*
- * Borrows this URB's normal reserve without consuming the reclaim
-	 * reserve. */
+	 * Borrows this URB's normal reserve without consuming the reclaim
+	 * reserve.
+	 */
 
 	/* Handles the reservation availability. */
 	reservation = drv_usb_urb_transfer_reservation(urb);
@@ -2754,8 +2763,9 @@ xhci_request_release(
 	struct xhci_urb_reservation *reservation;
 
 	/*
- * Retires a normal reserved request while preserving its permanent
-	 * backing. */
+	 * Retires a normal reserved request while preserving its permanent
+	 * backing.
+	 */
 
 	/* Handles the reservation availability. */
 	reservation = request->reservation;
@@ -2822,7 +2832,7 @@ xhci_submission_enter(
 	if (c->controller_stopping || c->dma_quiesced) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
@@ -2836,7 +2846,7 @@ xhci_submission_enter(
 
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2854,7 +2864,7 @@ xhci_operation_enter(
 	if (c->controller_stopping || c->dma_quiesced) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
@@ -2868,7 +2878,7 @@ xhci_operation_enter(
 
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2910,7 +2920,7 @@ xhci_urb_reserve(
 	/* Holds the controller operation barrier while allocating backing. */
 	if (result == NULL || capacity == 0 ||
 	    capacity > DRV_USB_TRANSFER_RESERVE_MAX_SIZE) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	*result = NULL;
@@ -2926,7 +2936,7 @@ xhci_urb_reserve(
 	if (reservation == NULL) {
 		xhci_operation_leave(controller);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -2944,7 +2954,7 @@ xhci_urb_reserve(
 			*result = reservation;
 			xhci_operation_leave(controller);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -2953,14 +2963,15 @@ xhci_urb_reserve(
 			hal_free(reservation);
 			xhci_operation_leave(controller);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	}
 
 	/*
- * Aligns each power-of-two bounded payload inside one transfer
-	 * boundary. */
+	 * Aligns each power-of-two bounded payload inside one transfer
+	 * boundary.
+	 */
 	alignment = 64U;
 	/* Continue while the operation condition remains true. */
 	while (alignment < capacity)
@@ -2973,7 +2984,7 @@ xhci_urb_reserve(
 		hal_free(reservation);
 		xhci_operation_leave(controller);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -3096,7 +3107,7 @@ xhci_urb_enqueue(
 	if (!d) {
 		xhci_submission_leave(c);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
@@ -3109,7 +3120,7 @@ xhci_urb_enqueue(
 	if (dci == 0 || dci >= 32U) {
 		xhci_submission_leave(c);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -3124,7 +3135,7 @@ xhci_urb_enqueue(
 		if (maximum_packet_size == 0) {
 			xhci_submission_leave(c);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 	}
@@ -3224,7 +3235,7 @@ xhci_urb_enqueue(
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		xhci_submission_leave(c);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOVERFLOW;
 	}
 
@@ -3251,7 +3262,7 @@ xhci_urb_enqueue(
 			spin_unlock_irqrestore(&c->active_lock, irq);
 			xhci_submission_leave(c);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 	}
@@ -3261,7 +3272,7 @@ xhci_urb_enqueue(
 	r->port = drv_usb_device_port(drv_usb_urb_device(u));
 
 	/*
- * EP0 retains implicit checked recovery because a control STALL is not
+	 * EP0 retains implicit checked recovery because a control STALL is not
 	 * core-latched.  Every nonzero endpoint must already be Running; only
 	 * the explicit endpoint_reset callback may issue its recovery commands.
 	 */
@@ -3297,9 +3308,10 @@ xhci_urb_enqueue(
 		__builtin_trap();
 
 	/*
- * Publish the request, its URB association, the complete TD, and its
+	 * Publish the request, its URB association, the complete TD, and its
 	 * doorbell under one barrier.  Teardown takes this same lock and must
-	 * never observe a half-built request which it could cancel and free. */
+	 * never observe a half-built request which it could cancel and free.
+	 */
 	drv_usb_urb_set_hcd_data(u, r);
 
 	/* Handles the q condition. */
@@ -3345,7 +3357,7 @@ xhci_urb_enqueue(
 
 	xhci_submission_leave(c);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3430,11 +3442,12 @@ xhci_cancel_request(
 			break;
 		case DRV_XHCI_CANCEL_SET_TR_DEQUEUE:
 			/*
- * Queue depth is one per endpoint.  The producer is the
+			 * Queue depth is one per endpoint.  The producer is the
 			 * first safe dequeue position after this endpoint's
 			 * cancelled TD.  Keep the owner published until this
 			 * command completes so the same ring slots cannot be
-			 * reused after a software-only unlink. */
+			 * reused after a software-only unlink.
+			 */
 			dequeue = ep->ring.dma.device_address +
 				  (uint64_t)ep->ring.enqueue *
 					  sizeof(struct xhci_trb);
@@ -3447,13 +3460,14 @@ xhci_cancel_request(
 					   NULL, &completion);
 			if (error == 0) {
 				/*
- * Set TR Dequeue is the DMA-ownership boundary.
+				 * Set TR Dequeue is the DMA-ownership boundary.
 				 * A normal cancellation must restart the
 				 * emptied endpoint before it can accept another
 				 * TD.  Disconnect has permanently closed core
 				 * admission, so demanding Running from an
 				 * absent endpoint would retain an already
-				 * retired request forever. */
+				 * retired request forever.
+				 */
 				if (drv_xhci_cancel_post_dequeue_action(
 					    drv_usb_device_is_tearing_down(
 						    drv_usb_urb_device(
@@ -3484,9 +3498,10 @@ xhci_cancel_request(
 		}
 
 		/*
- * Context State Error means software raced a hardware state
+		 * Context State Error means software raced a hardware state
 		 * transition.  Re-read the output context; never blindly accept
-		 * it. */
+		 * it.
+		 */
 		if (error != 0 && completion != 19U)
 			goto retain;
 	}
@@ -3507,7 +3522,7 @@ retain:
 		   r->slot, r->dci, r->port, error, completion,
 		   (unsigned)state);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return error;
 
 release:
@@ -3521,7 +3536,7 @@ release:
 	if (!xhci_request_unlink_locked(c, r)) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -3530,7 +3545,7 @@ release:
 	drv_usb_urb_set_hcd_data(r->urb, NULL);
 	xhci_request_release(c, r);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3576,7 +3591,7 @@ xhci_urb_dequeue(
 	if (r == NULL || r->urb != u || r->device != d || r->dci != dci) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -3584,7 +3599,7 @@ xhci_urb_dequeue(
 	if (r->cancelling == 1U) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EALREADY;
 	}
 
@@ -3708,9 +3723,10 @@ xhci_device_quiesce(
 		return 0;
 
 	/*
- * Close admission before inspecting endpoint ownership.  A submit which
+	 * Close admission before inspecting endpoint ownership.  A submit which
 	 * entered first either publishes a complete TD or leaves its endpoint's
-	 * recovery barrier before this loop proceeds. */
+	 * recovery barrier before this loop proceeds.
+	 */
 	wait_started = sched_ticks();
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
@@ -3732,7 +3748,7 @@ xhci_device_quiesce(
 				   "timed out; ownership retained\n",
 				   d->slot);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -3740,9 +3756,10 @@ xhci_device_quiesce(
 	}
 
 	/*
- * Drain every endpoint owned by this device.  A failed endpoint remains
+	 * Drain every endpoint owned by this device.  A failed endpoint remains
 	 * published and therefore quarantined, but cannot prevent a different
-	 * endpoint from reaching its own checked cancellation boundary. */
+	 * endpoint from reaching its own checked cancellation boundary.
+	 */
 	wait_started = sched_ticks();
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
@@ -3782,9 +3799,10 @@ xhci_device_quiesce(
 					first_error = error;
 			} else {
 				/*
- * The owner and DMA were detached by Stop
+				 * The owner and DMA were detached by Stop
 				 * Endpoint plus Set TR Dequeue (or by a fully
-				 * quiesced controller). */
+				 * quiesced controller).
+				 */
 				drv_usb_hcd_complete(
 					h, urb, DRV_USB_URB_DISCONNECTED, 0);
 			}
@@ -3812,9 +3830,10 @@ xhci_device_quiesce(
 		return first_error;
 
 	/*
- * A user cancellation can detach the hardware owner just before its USB
+	 * A user cancellation can detach the hardware owner just before its USB
 	 * terminal publication.  Do not Disable Slot inside that publication
-	 * window. */
+	 * window.
+	 */
 	wait_started = sched_ticks();
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
@@ -3836,7 +3855,7 @@ xhci_device_quiesce(
 				   "retained\n",
 				   d->slot, owned, completion, wait_for_cancel);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -3872,7 +3891,7 @@ xhci_device_quiesce(
 			   "completion=%u); rings and contexts retained\n",
 			   d->slot, error, completion);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -3882,7 +3901,7 @@ xhci_device_quiesce(
 	d->slot_disabled = 1U;
 	xhci_default_owner_release(c, d);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3930,7 +3949,7 @@ xhci_root_status(
 	/* Handles the a condition. */
 	if (a)
 		*a = bytes;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 /* Supports the xhci root control operation. */
@@ -4016,7 +4035,7 @@ xhci_root_control(
 		/* Handles the a condition. */
 		if (a)
 			*a = 4;
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -4028,7 +4047,7 @@ xhci_root_control(
 		/* Handles the a condition. */
 		if (a)
 			*a = 0;
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -4052,7 +4071,7 @@ xhci_root_control(
 			change = 1U << 23;
 		else if (r->value != 4)
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return ENOTSUP;
 		wr32(c->operational, XHCI_PORTSC(p),
 		     (s & XHCI_PORT_PP) | change);
@@ -4060,7 +4079,7 @@ xhci_root_control(
 		/* Handles the a condition. */
 		if (a)
 			*a = 0;
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -4071,11 +4090,11 @@ xhci_root_control(
 		/* Handles the a condition. */
 		if (a)
 			*a = 0;
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOTSUP;
 }
 
@@ -4150,14 +4169,15 @@ xhci_root_port_reset(
 			/* Handles the portsc condition. */
 			if ((portsc & XHCI_PORT_CSC) != 0 ||
 			    (portsc & XHCI_PORT_CCS) == 0) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return ENODEV;
 			}
 
 			/*
- * Two 10-ms ticks guarantee at least one full
+			 * Two 10-ms ticks guarantee at least one full
 			 * recovery interval even when reset completes
-			 * on a tick boundary. */
+			 * on a tick boundary.
+			 */
 			recovery = sched_ticks() + 2U;
 
 			/* Continue while the operation condition remains true. */
@@ -4165,9 +4185,10 @@ xhci_root_port_reset(
 				sched_yield();
 
 			/*
- * The mandatory recovery delay is part of reset.
+			 * The mandatory recovery delay is part of reset.
 			 * Preserve a detach/reinsert edge which arrives during
-			 * that interval too. */
+			 * that interval too.
+			 */
 
 			/* Handles the portsc condition. */
 			portsc = rd32(c->operational, XHCI_PORTSC(index));
@@ -4177,13 +4198,13 @@ xhci_root_port_reset(
 			/* Handles the portsc condition. */
 			if ((portsc & XHCI_PORT_CSC) != 0 ||
 			    (portsc & XHCI_PORT_CCS) == 0) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return ENODEV;
 			}
 			hal_printf("xhci: port %u reset complete portsc=%08x\n",
 				   port, portsc);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -4203,7 +4224,7 @@ xhci_root_port_reset(
 
 	hal_printf("xhci: port %u reset timed out portsc=%08x\n", port, portsc);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ETIMEDOUT;
 }
 
@@ -4279,7 +4300,7 @@ xhci_scratchpads_alloc(
 
 	((uint64_t *)c->dcbaa.address)[0] = c->scratchpad_array.device_address;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 fail:
 	xhci_scratchpads_free(c);
@@ -4351,8 +4372,9 @@ xhci_controller_drain_requests(
 		xhci_request_release(c, request);
 
 		/*
- * Terminal publication and callbacks must not run under
-		 * active_lock. */
+		 * Terminal publication and callbacks must not run under
+		 * active_lock.
+		 */
 		drv_usb_hcd_complete(&c->hcd, urb, DRV_USB_URB_DISCONNECTED, 0);
 
 		/* Handles the device condition. */
@@ -4401,7 +4423,7 @@ xhci_submission_quiesce(
 		command = atomic_raw_load_acquire(&c->command_busy);
 		if (!recovery && !operations && !submissions && !completion &&
 		    !command) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -4414,7 +4436,7 @@ xhci_submission_quiesce(
 				   operations, submissions, recovery,
 				   completion, command, active);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -4438,14 +4460,14 @@ xhci_irq_quiesce(
 			hal_printf("xhci: IRQ completion barrier timed out; "
 				   "retaining all DMA\n");
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 
 		sched_yield();
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4470,9 +4492,10 @@ xhci_irq_disestablish(
 	}
 
 	/*
- * The checked PCI path masks the source before reporting EBUSY.  That
+	 * The checked PCI path masks the source before reporting EBUSY.  That
 	 * closes the i386 INTx arrival window while the already-entered handler
-	 * drains; only a successful retry owns and frees the cookie. */
+	 * drains; only a successful retry owns and frees the cookie.
+	 */
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		/* Checks the operation status. */
@@ -4486,7 +4509,7 @@ xhci_irq_disestablish(
 			hal_printf("xhci: IRQ removal barrier timed out; "
 				   "retaining all DMA\n");
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -4499,7 +4522,7 @@ xhci_irq_disestablish(
 			   "retaining all DMA\n",
 			   error);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -4565,13 +4588,14 @@ xhci_quiesce(
 		return barrier_error;
 
 	/*
- * Only this point proves that no controller actor can reach a request.
+	 * Only this point proves that no controller actor can reach a request.
 	 * Retained endpoint owners may now be detached and terminally
-	 * published. */
+	 * published.
+	 */
 	c->dma_quiesced = 1U;
 	xhci_controller_drain_requests(c);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4591,7 +4615,7 @@ xhci_release_resources(
 	if (!c->dma_quiesced) {
 		hal_printf("xhci: refusing to release DMA before HCHalted\n");
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -4620,7 +4644,7 @@ xhci_release_resources(
 		hal_printf("xhci: controller resources are still owned; "
 			   "retaining all DMA\n");
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -4647,7 +4671,7 @@ xhci_release_resources(
 	memset(&c->command_memory, 0, sizeof(c->command_memory));
 	c->events = NULL;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4741,7 +4765,7 @@ xhci_start(
 	    atomic_raw_load_acquire(&c->irq_busy) != 0) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -5247,7 +5271,7 @@ xhci_attach(
 	}
 
 	/*
- * Mapping a BAR does not require device decode.  Capability MMIO does.
+	 * Mapping a BAR does not require device decode.  Capability MMIO does.
 	 */
 	stage = "PCI memory enable";
 
@@ -5338,7 +5362,7 @@ xhci_attach(
 	stage = "IRQ allocation";
 
 	/*
- * One vector is sufficient; use MSI-X when present, then MSI or INTx.
+	 * One vector is sufficient; use MSI-X when present, then MSI or INTx.
 	 */
 	if ((e = drv_pci_device_allocate_irqs(d,
 					      DRV_PCI_IRQ_ALLOW_MSIX |
@@ -5385,7 +5409,7 @@ xhci_attach(
 		   snapshot.version, c->ports, c->max_slots, c->irq.vector,
 		   irq_type);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 fail:
 
@@ -5393,7 +5417,7 @@ fail:
 	if (c->hcd_registered || !c->dma_quiesced) {
 		xhci_quarantine(c, stage, e);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -5404,7 +5428,7 @@ fail:
 		if (cleanup_error != 0) {
 			xhci_quarantine(c, "IRQ disestablish", cleanup_error);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
@@ -5421,7 +5445,7 @@ fail:
 		hal_printf("xhci: attach failed at %s (%d)\n", stage, e);
 		xhci_quarantine(c, "PCI release", cleanup_error);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -5465,7 +5489,7 @@ xhci_detach(
 			else
 				xhci_mark_quarantined(c);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -5483,7 +5507,7 @@ xhci_detach(
 		if (error != 0) {
 			xhci_mark_quarantined(c);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	}
@@ -5495,7 +5519,7 @@ xhci_detach(
 		if (error != 0) {
 			xhci_mark_quarantined(c);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	}
@@ -5511,7 +5535,7 @@ xhci_detach(
 	if (error != 0) {
 		xhci_mark_quarantined(c);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -5527,7 +5551,7 @@ xhci_detach(
 
 	hal_free(c);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 static const struct drv_pci_id ids[] = {{DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
@@ -5582,7 +5606,7 @@ drv_pci_xhci_probe_roots(
 /* Begin consolidated pci-xhci-sg.inc. */
 /* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
 
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 /* The same immutable plan drives publication and short-event accounting. */
 static int
@@ -5600,7 +5624,7 @@ xhci_sg_plan(
 	count = drv_dma_vector_count(request->vector);
 	if (count == 0 || count > DRV_DMA_VECTOR_MAX_SEGMENTS ||
 	    length > DRV_DMA_VECTOR_MAX_SIZE) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -5610,7 +5634,7 @@ xhci_sg_plan(
 		request->normal[0].address = 0;
 		request->normal[0].length = 0;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -5622,7 +5646,7 @@ xhci_sg_plan(
 			    0 ||
 		    segment.length == 0 ||
 		    segment.length - 1U > UINT64_MAX - segment.address) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 
@@ -5670,7 +5694,7 @@ xhci_sg_short(
 	if (actual == NULL || offset >= request->normal_count ||
 	    request->normal[offset].length == 0 ||
 	    residual > request->normal[offset].length) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	prefix = 0;

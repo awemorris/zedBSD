@@ -302,7 +302,7 @@ ncm_iad_consistent(
 		    iad->function_subclass != NCM_COMMUNICATION_SUBCLASS ||
 		    iad->function_protocol != NCM_COMMUNICATION_PROTOCOL ||
 		    data_number != control_number + 1U) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 		association = 1;
@@ -333,7 +333,7 @@ ncm_control_descriptors(
 						 (const void **)&descriptor,
 						 &length) != 0 ||
 		    descriptor == NULL || length < 2U) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -350,7 +350,7 @@ ncm_control_descriptors(
 			/* Checks the ncm le16 result. */
 			if (length != 5U || ++header != 1U ||
 			    ncm_le16(descriptor + 3U) == 0) {
-				/* Reports successful completion. */
+				/* Succeeded. */
 				return 0;
 			}
 			break;
@@ -360,7 +360,7 @@ ncm_control_descriptors(
 			    ++union_descriptor != 1U ||
 			    descriptor[3] != control_number ||
 			    descriptor[4] == control_number) {
-				/* Reports successful completion. */
+				/* Succeeded. */
 				return 0;
 			}
 			*data_number = descriptor[4];
@@ -371,7 +371,7 @@ ncm_control_descriptors(
 			    descriptor[3] == 0 ||
 			    ncm_le16(descriptor + 8U) <
 				    DRV_USB_CDC_NCM_MAX_DATAGRAM_SIZE) {
-				/* Reports successful completion. */
+				/* Succeeded. */
 				return 0;
 			}
 			*mac_string = descriptor[3];
@@ -381,7 +381,7 @@ ncm_control_descriptors(
 			if (header != 1U || length != 6U || ++ncm != 1U ||
 			    ncm_le16(descriptor + 3U) != 0x0100U ||
 			    (descriptor[5] & 0xc0U) != 0) {
-				/* Reports successful completion. */
+				/* Succeeded. */
 				return 0;
 			}
 			*capabilities = descriptor[5];
@@ -416,7 +416,7 @@ ncm_find_notification(
 			    DRV_USB_TRANSFER_INTERRUPT ||
 		    !drv_usb_endpoint_is_input(endpoint) ||
 		    notification != NULL) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 		notification = endpoint;
@@ -459,7 +459,7 @@ ncm_find_data_alternate(
 		    descriptor->interface_class != NCM_DATA_CLASS ||
 		    descriptor->interface_subclass != NCM_DATA_SUBCLASS ||
 		    descriptor->interface_protocol != NCM_DATA_PROTOCOL) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -539,7 +539,7 @@ ncm_binding_parse(
 	    control_descriptor->interface_protocol !=
 		    NCM_COMMUNICATION_PROTOCOL ||
 	    drv_usb_interface_alternate_count(control) != 1U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -547,7 +547,7 @@ ncm_binding_parse(
 	if ((drv_usb_device_hcd_capabilities(
 		     drv_usb_interface_device(control)) &
 	     DRV_USB_HCD_CAP_CONCURRENT_URBS) == 0) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -564,7 +564,7 @@ ncm_binding_parse(
 				     &data_number, &mac_string,
 				     &binding->capabilities) ||
 	    !ncm_find_notification(control_alternate, &binding->notification)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	binding->data = drv_usb_configuration_find_interface(configuration,
@@ -576,7 +576,7 @@ ncm_binding_parse(
 	    !ncm_find_data_alternate(binding->data, &binding->bulk_in,
 				     &binding->bulk_out,
 				     &binding->data_alternate)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	binding->device = drv_usb_interface_device(control);
@@ -624,7 +624,7 @@ ncm_get_mac(
 	if (drv_usb_device_get_string(binding->device, binding->mac_string, 0,
 				      string, sizeof(string)) != 0 ||
 	    strlen(string) != 12U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	/* Process each remaining element. */
@@ -646,7 +646,7 @@ ncm_get_mac(
 	if (all_zero || (mac[0] & 1U) != 0)
 		return EINVAL;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -709,8 +709,6 @@ ncm_program_profile(
 		if (error == EOPNOTSUPP &&
 		    steps[index] == DRV_USB_CDC_NCM_CONTROL_SELECT_NTH16)
 			continue;
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 
@@ -724,7 +722,7 @@ ncm_program_profile(
 			return error != 0 ? error : EIO;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -747,7 +745,7 @@ ncm_program_packet_filter(
 	    adapter->quarantined) {
 		spin_unlock_irqrestore(&adapter->lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENETDOWN;
 	}
 
@@ -807,7 +805,7 @@ ncm_urb_status_error(
 	if (status == DRV_USB_URB_DISCONNECTED)
 		return ENODEV;
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return EIO;
 }
 
@@ -867,7 +865,7 @@ ncm_start_urb(
 	    adapter->quarantined) {
 		spin_unlock_irqrestore(&adapter->lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENETDOWN;
 	}
 
@@ -997,9 +995,10 @@ ncm_stop(
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/*
- * A poll admitted before closing was published may still parse an RX
+	 * A poll admitted before closing was published may still parse an RX
 	 * buffer or attempt a rearm.  Join that complete worker section before
-	 * cancelling URBs or changing the data-interface alternate. */
+	 * cancelling URBs or changing the data-interface alternate.
+	 */
 	ncm_wait_activity(adapter);
 
 	/* Checks the operation status. */
@@ -1016,8 +1015,6 @@ ncm_stop(
 	candidate = ncm_cancel_and_drain(adapter->tx_urb);
 	if (error == 0)
 		error = candidate;
-
-	/* Checks the operation status. */
 	if (error == 0)
 		ncm_free_rx_queue(adapter);
 	irq = spin_lock_irqsave(&adapter->lock);
@@ -1074,7 +1071,7 @@ ncm_open(
 					: (adapter->quarantined ? EIO : EBUSY);
 		spin_unlock_irqrestore(&adapter->lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1084,10 +1081,11 @@ ncm_open(
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
 	/*
- * The data alternate is active by the time the net device becomes
+	 * The data alternate is active by the time the net device becomes
 	 * ready. Some functions discard their filter across an administrative
 	 * close, so program it on every open and before publishing any
-	 * persistent URB. */
+	 * persistent URB.
+	 */
 
 	/* Checks the operation status. */
 	error = ncm_program_packet_filter(adapter);
@@ -1096,23 +1094,19 @@ ncm_open(
 				      adapter->notification_buffer,
 				      NCM_NOTIFICATION_SIZE);
 	}
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = ncm_start_urb(adapter, adapter->rx_urb,
 				      adapter->rx_buffer,
 				      adapter->profile.ntb_in_max_size);
 	}
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		(void)ncm_stop(adapter);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1149,7 +1143,7 @@ ncm_transmit(
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		packet_buf_free(packet);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENETDOWN;
 	}
 
@@ -1158,7 +1152,7 @@ ncm_transmit(
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		packet_buf_free(packet);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOBUFS;
 	}
 
@@ -1187,8 +1181,6 @@ ncm_transmit(
 			adapter->tx_urb, adapter->tx_buffer, ntb_length, 0,
 			NCM_TRANSFER_TIMEOUT_MS, ncm_completion, adapter);
 	}
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = drv_usb_urb_submit(adapter->tx_urb);
 	irq = spin_lock_irqsave(&adapter->lock);
@@ -1231,7 +1223,7 @@ ncm_queue_datagram(
 	/* Checks the current data length. */
 	if (length < DRV_USB_CDC_NCM_ETHERNET_HEADER_SIZE ||
 	    length > DRV_USB_CDC_NCM_MAX_DATAGRAM_SIZE) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -1245,7 +1237,7 @@ ncm_queue_datagram(
 	if (destination == NULL) {
 		packet_buf_free(packet);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EMSGSIZE;
 	}
 
@@ -1257,7 +1249,7 @@ ncm_queue_datagram(
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		packet_buf_free(packet);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOBUFS;
 	}
 
@@ -1267,7 +1259,7 @@ ncm_queue_datagram(
 
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1292,9 +1284,10 @@ ncm_notification_process(
 	}
 
 	/*
- * Some NCM functions, including RTL8156 configuration 2, name the
+	 * Some NCM functions, including RTL8156 configuration 2, name the
 	 * associated data interface rather than the communication interface.
-	 * The binding has already validated this exact control/data pair. */
+	 * The binding has already validated this exact control/data pair.
+	 */
 
 	/* Checks the drv usb interface number result. */
 	interface_number = ncm_le16(notification + 4U);
@@ -1354,16 +1347,18 @@ ncm_rearm(
 	/* Checks the operation status. */
 	if (error == 0) {
 		/*
- * The caller atomically claimed the old rearm request. Preserve
+		 * The caller atomically claimed the old rearm request. Preserve
 		 * a new one that an immediately completed submission may
-		 * already have published through another poll. */
+		 * already have published through another poll.
+		 */
 		*retry = 0;
 	} else if (stopping) {
 		/*
- * A poll admitted immediately before close may reach rearm
+		 * A poll admitted immediately before close may reach rearm
 		 * after close has withdrawn admission.  This is orderly
 		 * retirement, not a transfer failure and must not quarantine
-		 * the adapter. */
+		 * the adapter.
+		 */
 		*retry = 0;
 		error = 0;
 	} else if (retryable && *retry < NCM_REARM_RETRY_MAX) {
@@ -1390,9 +1385,10 @@ ncm_rearm(
 		return EAGAIN;
 
 	/*
- * EAGAIN is the internal retry signal.  Once its bounded budget has
+	 * EAGAIN is the internal retry signal.  Once its bounded budget has
 	 * been exhausted, return a terminal error so the caller cannot
-	 * reschedule the quarantined adapter forever. */
+	 * reschedule the quarantined adapter forever.
+	 */
 	if (quarantine && error == EAGAIN)
 		return EIO;
 
@@ -1562,7 +1558,7 @@ ncm_poll_tx_completion(
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		ncm_restore_pending(adapter, &adapter->tx_ready);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1572,7 +1568,7 @@ ncm_poll_tx_completion(
 	if (drv_usb_urb_drain(adapter->tx_urb, NCM_TRANSFER_TIMEOUT_MS) != 0) {
 		ncm_restore_pending(adapter, &adapter->tx_ready);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1600,7 +1596,7 @@ ncm_poll_notification_completion(
 			      NCM_TRANSFER_TIMEOUT_MS) != 0) {
 		ncm_restore_pending(adapter, &adapter->notification_ready);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1628,7 +1624,7 @@ ncm_poll_rx_completion(
 	if (drv_usb_urb_drain(adapter->rx_urb, NCM_TRANSFER_TIMEOUT_MS) != 0) {
 		ncm_restore_pending(adapter, &adapter->rx_ready);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1641,8 +1637,6 @@ ncm_poll_rx_completion(
 			drv_usb_urb_actual_length(adapter->rx_urb),
 			ncm_queue_datagram, adapter, &count);
 	}
-
-	/* Checks the operation status. */
 	if (error != 0)
 		device->rx_errors++;
 	ncm_restore_pending(adapter, &adapter->rx_rearm);
@@ -1736,10 +1730,11 @@ ncm_poll_receive(
 	}
 
 	/*
- * A rearm caused by a completion (or by draining the last queued frame)
+	 * A rearm caused by a completion (or by draining the last queued frame)
 	 * is part of that already-budgeted work item.  A standalone retry
 	 * consumes one unit so persistent HCD backpressure cannot escape the
-	 * poll budget. */
+	 * poll budget.
+	 */
 	if (notification_completed) {
 		/* Handles the ncm take notification rearm condition. */
 		if (ncm_take_notification_rearm(adapter))
@@ -1817,12 +1812,12 @@ ncm_urbs_alloc(
 	/* Handles the notification urb availability. */
 	if (adapter->notification_urb != NULL && adapter->rx_urb != NULL &&
 	    adapter->tx_urb != NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	ncm_urbs_free(adapter);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOMEM;
 }
 
@@ -1851,12 +1846,12 @@ ncm_buffers_alloc(
 	/* Handles the notification buffer availability. */
 	if (adapter->notification_buffer != NULL &&
 	    adapter->rx_buffer != NULL && adapter->tx_buffer != NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	ncm_buffers_free(adapter);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOMEM;
 }
 
@@ -1891,22 +1886,21 @@ ncm_net_device_create(
 		if (error != EEXIST)
 			break;
 	}
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		/*
- * The allocation owner, not the unpublished device, still owns
-		 * the adapter on an attach error. */
+		 * The allocation owner, not the unpublished device, still owns
+		 * the adapter on an attach error.
+		 */
 		device->driver_data = NULL;
 		net_device_destroy(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	adapter->net_device = device;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1946,16 +1940,17 @@ ncm_attach(
 	spin_init(&adapter->lock, LOCK_RANK_DEVICE, "usb-cdc-ncm");
 
 	/*
- * The USB core owns failed-attach cleanup through the provisional
+	 * The USB core owns failed-attach cleanup through the provisional
 	 * binding. Publish partial driver state before acquiring any sibling or
-	 * resource. */
+	 * resource.
+	 */
 
 	/* Checks the operation status. */
 	error = drv_usb_interface_set_driver_data(interface, adapter);
 	if (error != 0) {
 		hal_free(adapter);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1986,7 +1981,7 @@ ncm_attach(
 	if (error != 0 || actual != sizeof(parameters)) {
 		error = error != 0 ? error : EIO;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -2018,7 +2013,7 @@ ncm_attach(
 		return error;
 
 	/*
- * Idle URBs deliberately retain the inactive data endpoints.  The p015
+	 * Idle URBs deliberately retain the inactive data endpoints.  The p015
 	 * interface transaction makes this the final fallible attach operation.
 	 */
 
@@ -2032,7 +2027,7 @@ ncm_attach(
 		   adapter->net_device->name, mac[0], mac[1], mac[2], mac[3],
 		   mac[4], mac[5]);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2056,9 +2051,10 @@ ncm_detach(
 		return error;
 
 	/*
- * p015 permits allocated, completely drained URBs to retain inactive
+	 * p015 permits allocated, completely drained URBs to retain inactive
 	 * endpoint objects across SET_INTERFACE.  Keep the complete graph until
-	 * this final normal-detach hardware transaction has succeeded. */
+	 * this final normal-detach hardware transaction has succeeded.
+	 */
 	if ((flags & (DRV_USB_DETACH_FORCE | DRV_USB_DETACH_ATTACH_FAILED)) ==
 	    0) {
 		/* Checks the operation status. */
@@ -2082,7 +2078,7 @@ ncm_detach(
 	else
 		hal_free(adapter);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 

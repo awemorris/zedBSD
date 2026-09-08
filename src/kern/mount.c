@@ -1523,7 +1523,8 @@ unmount(
 	/*
 	 * Keep the DYING attachment reserved through every failure-capable step.
 	 * Readers cannot acquire new references or fall through to covered data.
-	 * Sync and teardown may call back through an overlay into the VFS. */
+	 * Sync and teardown may call back through an overlay into the VFS.
+	 */
 	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) == 0) {
 		error = prepare_filesystem_destroy(mountp, expected_refs);
 		if (error != 0) {
@@ -1635,7 +1636,8 @@ mount_info_snapshot(
 	/*
 	 * Mount references prevent teardown while pathname reconstruction performs
 	 * directory I/O. Membership is captured together; pathname resolution has
-	 * getcwd's bounded concurrent-rename semantics, not a rename transaction. */
+	 * getcwd's bounded concurrent-rename semantics, not a rename transaction.
+	 */
 	for (i = 0; i < count && error == 0; i++) {
 		path_set(&context.cwd, targets[i].p_mount, targets[i].p_inode);
 		error = fs_getcwd(&context, entries[i].target,
@@ -1685,7 +1687,8 @@ mount_namespace_check_inode(
 	/*
 	 * Covers and bind roots are stable until the owning transaction ends.
 	 * Take references under spin, then perform ancestor lookups without it.
-	 * Covered-entry identity also handles alternate backend spellings. */
+	 * Covered-entry identity also handles alternate backend spellings.
+	 */
 	irq = spin_lock_irqsave(&namespace_lock);
 
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
@@ -2299,7 +2302,8 @@ detach_mount(
 /*
  * The transaction gate covers both admission and every filesystem mutation.
  * A PREPARING child reserves its name and anchors while mount I/O runs with
- * the gate released. Readers see EBUSY, never an uninitialized root inode. */
+ * the gate released. Readers see EBUSY, never an uninitialized root inode.
+ */
 static int
 reserve_mount(
 	struct mount *mountp,

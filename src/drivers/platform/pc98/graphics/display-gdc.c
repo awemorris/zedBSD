@@ -46,12 +46,12 @@ drv_pc98_gdc_clear_graphics(
 	if (backend == NULL || backend->port_out8 == NULL ||
 	    backend->planes[0] == NULL || backend->planes[1] == NULL ||
 	    backend->planes[2] == NULL || backend->planes[3] == NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/*
- * Match the real-mode loader's transition sequence.  In particular,
+	 * Match the real-mode loader's transition sequence.  In particular,
 	 * disable GRCG/EGC interception before touching all four planar VRAM
 	 * apertures; firmware and Cirrus may leave those controls non-default.
 	 */
@@ -232,16 +232,17 @@ gdc_enter(
 	    backend->port_in8 == NULL || backend->port_out8 == NULL ||
 	    backend->planes[0] == NULL || backend->planes[1] == NULL ||
 	    backend->planes[2] == NULL || backend->planes[3] == NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/*
- * Clear every graphics plane before starting the slave GDC.  Otherwise
-	 * firmware VRAM is briefly visible between GDC_START and this clear. */
+	 * Clear every graphics plane before starting the slave GDC.  Otherwise
+	 * firmware VRAM is briefly visible between GDC_START and this clear.
+	 */
 	if (!drv_pc98_gdc_clear_graphics(backend) ||
 	    !backend->display_reset(backend->bios_context)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -249,7 +250,7 @@ gdc_enter(
 	if (!gdc_command(backend, 0x0c)) {
 		(void)gdc_command(backend, 0x0d);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 

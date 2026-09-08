@@ -153,7 +153,7 @@ drv_dma_device_create(
 	    (constraints->segment_boundary != 0 &&
 	     (!is_power_of_two(constraints->segment_boundary) ||
 	      constraints->max_segment_size > constraints->segment_boundary))) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -165,7 +165,7 @@ drv_dma_device_create(
 	device->constraints = *constraints;
 	spin_init(&device->lock, LOCK_RANK_DEVICE, "DMA allocation list");
 	*result = device;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -190,7 +190,7 @@ drv_dma_device_destroy(
 	    device->vector_count != 0) {
 		spin_unlock_irqrestore(&device->lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -198,7 +198,7 @@ drv_dma_device_destroy(
 
 	hal_free(device);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -214,7 +214,7 @@ drv_dma_device_address_bits(
 	/* Checks the device operation begin result. */
 	if (device == NULL ||
 	    device_operation_begin((struct drv_dma_device *)device, 0) != 0) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	result = device->constraints.address_bits;
@@ -235,7 +235,7 @@ drv_dma_device_max_segment_size(
 	/* Checks the device operation begin result. */
 	if (device == NULL ||
 	    device_operation_begin((struct drv_dma_device *)device, 0) != 0) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	result = device->constraints.max_segment_size;
@@ -256,7 +256,7 @@ drv_dma_device_is_coherent(
 	/* Checks the device operation begin result. */
 	if (device == NULL ||
 	    device_operation_begin((struct drv_dma_device *)device, 0) != 0) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	result = device->constraints.coherent;
@@ -298,7 +298,7 @@ drv_dma_alloc_coherent(
 	if (size > device->constraints.max_segment_size) {
 		device_operation_end(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -307,7 +307,7 @@ drv_dma_alloc_coherent(
 	if (allocation == NULL) {
 		device_operation_end(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -328,8 +328,9 @@ drv_dma_alloc_coherent(
 	boundary = device->constraints.segment_boundary;
 
 	/*
- * A sub-page segment constrains the exposed payload, not unused
-	 * backing. */
+	 * A sub-page segment constrains the exposed payload, not unused
+	 * backing.
+	 */
 	if (boundary < hal_page_get_page_size(1))
 		boundary = 0;
 
@@ -350,7 +351,7 @@ drv_dma_alloc_coherent(
 		hal_free(allocation);
 		device_operation_end(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -367,7 +368,7 @@ drv_dma_alloc_coherent(
 			hal_free(allocation);
 			device_operation_end(device);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return ENOMEM;
 		}
 	}
@@ -387,7 +388,7 @@ drv_dma_alloc_coherent(
 		hal_free(allocation);
 		device_operation_end(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -409,7 +410,7 @@ drv_dma_alloc_coherent(
 	io_stats_record(IO_DMA_ALLOC, allocation->memory.size);
 	device_operation_end(device);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -464,8 +465,9 @@ drv_dma_free_coherent(
 			io_stats_record(IO_DMA_FREE, released_size);
 		} else {
 			/*
- * Keeps failed retirement owned and retryable by the
-			 * caller. */
+			 * Keeps failed retirement owned and retryable by the
+			 * caller.
+			 */
 			irq = spin_lock_irqsave(&device->lock);
 			allocation->next = device->allocations;
 			device->allocations = allocation;
@@ -504,7 +506,7 @@ drv_dma_map(
 	/* Handles the device availability. */
 	if (device == NULL || address == NULL || size == 0 || result == NULL ||
 	    direction < DRV_DMA_TO_DEVICE || direction > DRV_DMA_BIDIRECTIONAL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -517,7 +519,7 @@ drv_dma_map(
 	if (size > device->constraints.max_segment_size) {
 		device_operation_end(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -526,7 +528,7 @@ drv_dma_map(
 	if (mapping == NULL) {
 		device_operation_end(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -537,7 +539,7 @@ drv_dma_map(
 		hal_free(mapping);
 		device_operation_end(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -557,7 +559,7 @@ drv_dma_map(
 		*result = mapping;
 		device_operation_end(device);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -566,7 +568,7 @@ drv_dma_map(
 	hal_free(mapping);
 	device_operation_end(device);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOTSUP;
 }
 
@@ -607,7 +609,7 @@ drv_dma_mapping_segment(
 	if (mapping == NULL || segment == NULL || index != 0)
 		return EINVAL;
 	*segment = mapping->segment;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 /*
@@ -636,7 +638,7 @@ drv_dma_sync_for_device(
 /* Begin consolidated dma-vector.inc. */
 /* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
 
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 extern unsigned hal_vmap_capabilities(void) __attribute__((weak));
 extern int hal_vmap_reserve(size_t, struct hal_vmap **) __attribute__((weak));
@@ -693,7 +695,7 @@ drv_dma_vector_create(
 	if (!device->constraints.coherent) {
 		device_operation_end(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 
@@ -702,7 +704,7 @@ drv_dma_vector_create(
 	if (vector == NULL) {
 		device_operation_end(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -718,8 +720,9 @@ drv_dma_vector_create(
 	error = EOPNOTSUPP;
 
 	/*
- * The optional HAL owns page lifetime and supplies checked per-page
-	 * PAs. */
+	 * The optional HAL owns page lifetime and supplies checked per-page
+	 * PAs.
+	 */
 	if (hal_vmap_capabilities != NULL && hal_vmap_reserve != NULL &&
 	    hal_vmap_populate != NULL && hal_vmap_pin != NULL &&
 	    hal_vmap_unpin != NULL && hal_vmap_release != NULL &&
@@ -729,12 +732,8 @@ drv_dma_vector_create(
 		error = hal_vmap_populate(vector->mapping, 0, maximum);
 		if (error == HAL_OK)
 			error = hal_vmap_pin(vector->mapping, &vector->address);
-
-		/* Checks the operation status. */
 		if (error == HAL_OK)
 			error = dma_vector_segments(vector);
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			/* Checks the dma vector backing free result. */
 			if (dma_vector_backing_free(vector) != 0) {
@@ -793,7 +792,7 @@ drv_dma_vector_create(
 	*result = vector;
 	device_operation_end(device);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -838,7 +837,7 @@ drv_dma_vector_free(
 	if (error != 0) {
 		device_operation_end(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -858,7 +857,7 @@ drv_dma_vector_free(
 	hal_free(vector);
 	device_operation_end(device);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -897,7 +896,7 @@ drv_dma_vector_segment(
 	if (vector == NULL || segment == NULL || index >= vector->count)
 		return EINVAL;
 	*segment = vector->segments[index];
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -924,7 +923,7 @@ dma_vector_segments(
 			if (hal_kernel_page_lookup((char *)vector->address +
 							   offset,
 						   &physical) != HAL_OK) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EIO;
 			}
 			length = 4096U - offset % 4096U;
@@ -973,7 +972,7 @@ dma_vector_segments(
 		offset += length;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -996,7 +995,7 @@ dma_vector_backing_free(
 				    HAL_OK)
 				HAL_FATAL("DMA vector release lost its pin");
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -1011,7 +1010,7 @@ dma_vector_backing_free(
 
 	vector->address = NULL;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 /* End consolidated dma-vector.inc. */

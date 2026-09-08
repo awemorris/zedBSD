@@ -3,7 +3,8 @@
 /* Begin consolidated pc98-auto.c. */
 /*
  * Per-disk PC-98 partition format selection.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+ * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ */
 #include <drivers/disklabel.h>
 
 /* Supports the pc98 auto scan operation. */
@@ -47,7 +48,7 @@ pc98_auto_scan(
 		error = drv_partition_scheme_pc98.scan(
 			&drv_partition_scheme_pc98, disk, entries, capacity);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -57,7 +58,7 @@ pc98_auto_scan(
 		error = drv_partition_scheme_mbr.scan(
 			&drv_partition_scheme_mbr, disk, entries, capacity);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 

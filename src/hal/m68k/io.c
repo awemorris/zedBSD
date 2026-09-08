@@ -1,5 +1,5 @@
 /* m68k memory-mapped I/O accessors.  X68k has no separate port space. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include <hal/hal.h>
 

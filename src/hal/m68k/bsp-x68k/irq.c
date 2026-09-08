@@ -1,5 +1,5 @@
 /* X68000 MFP-vectored interrupt dispatch and UP interrupt services. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include <hal/hal.h>
 #include "mmio.h"

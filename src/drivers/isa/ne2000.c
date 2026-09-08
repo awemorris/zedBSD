@@ -100,8 +100,6 @@ drv_pcat_ne2000_init(
 	error = drv_dp8390_attach(&ne2000.dp, ne2000.device);
 	if (error == 0)
 		error = net_device_create(ne2000.device);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		/* Checks the hal irq set handler result. */
 		if (hal_irq_set_handler((int)ne2000.irq, ne2000_irq_handler,
@@ -114,12 +112,10 @@ drv_pcat_ne2000_init(
 	/* Checks the operation status. */
 	if (error == 0)
 		error = net_device_open(ne2000.device);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		hal_irq_unmask((int)ne2000.irq);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -138,8 +134,6 @@ drv_pcat_ne2000_init(
 	if (registered == ne2000.device)
 		gone_error = net_device_gone(ne2000.device);
 	net_device_release(registered);
-
-	/* Checks the operation status. */
 	if (gone_error != 0)
 		return gone_error;
 	net_device_destroy(ne2000.device);
@@ -291,12 +285,12 @@ ne2000_reset(
 		if ((port_inb(isr_port) & NE2000_ISR_RST) != 0) {
 			port_outb(isr_port, NE2000_ISR_RST);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ETIMEDOUT;
 }
 

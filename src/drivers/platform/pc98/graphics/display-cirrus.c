@@ -468,7 +468,7 @@ cirrus_enter(
 	if (backend == NULL || info == NULL || backend->port_in8 == NULL ||
 	    backend->port_out8 == NULL || backend->framebuffer == NULL ||
 	    !coregraph_id_present(backend)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	bits_per_pixel = info->preferred_bits_per_pixel == 24U ? 24U : 8U;
@@ -485,8 +485,9 @@ cirrus_enter(
 	wab_write(backend, WAB_REG_RELAY, relay_setup);
 
 	/*
- * The motherboard ID is only a hint; validate the temporarily woken
-	 * VGA. */
+	 * The motherboard ID is only a hint; validate the temporarily woken
+	 * VGA.
+	 */
 	seq_write(backend, 0x06U, 0x12U);
 
 	/* Handles the chip condition. */
@@ -501,10 +502,10 @@ cirrus_enter(
 	coregraph_mode_640x480(backend, bits_per_pixel);
 
 	/*
- * Keep the motherboard GDC on the monitor while Cirrus is configured
+	 * Keep the motherboard GDC on the monitor while Cirrus is configured
 	 * and its visible framebuffer is erased.  WAB_REG_RELAY bit 1 in
-	 * coregraph_gate_enter() is the actual GDC-to-Cirrus scanout switch. */
-	/* Process each element required by the operation. */
+	 * coregraph_gate_enter() is the actual GDC-to-Cirrus scanout switch.
+	 */
 	for (i = 0; i < visible_bytes; i++)
 		backend->framebuffer[i] = 0;
 	coregraph_gate_enter(backend);
@@ -525,7 +526,7 @@ fail:
 	wab_write(backend, WAB_REG_RELAY, backend->saved_relay);
 	out8(backend, CIRRUS_SLEEP, backend->saved_sleep);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -545,11 +546,12 @@ cirrus_leave(
 	wab_write(backend, WAB_REG_WINDOW, backend->saved_window);
 
 	/*
- * coregraph_gate_leave() deliberately selects the motherboard GDC and
+	 * coregraph_gate_leave() deliberately selects the motherboard GDC and
 	 * puts Cirrus to sleep.  Restoring the saved relay/sleep registers here
 	 * would immediately select and wake Cirrus again, leaving later
 	 * text-VRAM output invisible.  Saved values are only for the
-	 * failed-enter rollback. */
+	 * failed-enter rollback.
+	 */
 	backend->active = 0;
 	backend->bits_per_pixel = 0;
 }

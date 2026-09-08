@@ -270,8 +270,9 @@ drv_intel_ax211_assoc_mac_power_response_validate(
 		return INTEL_AX211_ASSOC_INVALID;
 
 	/*
- * API 89 may acknowledge MAC_PM_POWER_TABLE with no payload.  The
-	 * command-response header remains the authoritative success result. */
+	 * API 89 may acknowledge MAC_PM_POWER_TABLE with no payload.  The
+	 * command-response header remains the authoritative success result.
+	 */
 	if (response_length == 0U)
 		return INTEL_AX211_ASSOC_OK;
 
@@ -616,7 +617,7 @@ drv_intel_ax211_assoc_accept(
 		/* Obtains the drv intel ax211 assoc expire result. */
 		error = drv_intel_ax211_assoc_expire(state, now_us);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -653,7 +654,7 @@ drv_intel_ax211_assoc_accept(
 		ax211_assoc_mark_uncertain(state, state->step);
 		(void)ax211_assoc_rollback_begin(state, result, now_us);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -902,7 +903,7 @@ drv_intel_ax211_assoc_drive(
 						      now_us);
 		if (result == INTEL_AX211_ASSOC_AUTH_READY ||
 		    result == INTEL_AX211_ASSOC_COMPLETE) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return result;
 		}
 
@@ -925,7 +926,7 @@ drv_intel_ax211_assoc_drive(
 			continue;
 		}
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -1034,8 +1035,6 @@ ax211_assoc_optional_version(
 		table, group, opcode, &version);
 	if (result == INTEL_AX211_PROTOCOL_MISSING)
 		return INTEL_AX211_ASSOC_OK;
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_PROTOCOL_OK ||
 	    version.command_version != command_version ||
 	    version.notification_version != notification_version) {
@@ -1080,7 +1079,7 @@ ax211_assoc_profile_valid(
 	    profile->queue_descriptor_address == 0U ||
 	    (profile->queue_byte_count_address & UINT64_C(3)) != 0U ||
 	    (profile->queue_descriptor_address & UINT64_C(255)) != 0U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	/* Process each remaining element. */
@@ -1090,7 +1089,7 @@ ax211_assoc_profile_valid(
 		if (edca->ecw_min > 15U || edca->ecw_max > 15U ||
 		    edca->ecw_min > edca->ecw_max || edca->aifsn > 15U ||
 		    edca->txop_32us > 2047U) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
@@ -1148,12 +1147,12 @@ ax211_assoc_update_valid(
 	/* Handles the profile availability. */
 	if (profile == NULL || update == NULL || update->association_id == 0U ||
 	    update->association_id > 2007U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/*
- * A probe response need not carry TIM.  OpenBSD deliberately permits
+	 * A probe response need not carry TIM.  OpenBSD deliberately permits
 	 * association without DTIM knowledge and keeps beacon delivery enabled.
 	 */
 	if (update->dtim_period == 0U)
@@ -1436,10 +1435,11 @@ ax211_assoc_phy_encode(
 	ax211_assoc_put_le32(command->payload + 4U, action);
 
 	/*
- * ULTRA_HB_CHANNELS selects the 32-byte PHY_CONTEXT v4 variant.  Its
+	 * ULTRA_HB_CHANNELS selects the 32-byte PHY_CONTEXT v4 variant.  Its
 	 * CHANNEL_CONFIG v2 stores channel as LE32, followed by
 	 * band/width/control; lmac_id at offset 16 remains zero because this
-	 * AX211 is not CDB. */
+	 * AX211 is not CDB.
+	 */
 	ax211_assoc_put_le32(command->payload + 8U, state->profile.channel);
 	command->payload[12U] = state->profile.channel <= 14U
 					? AX211_ASSOC_PHY_BAND_24
@@ -1459,8 +1459,9 @@ ax211_assoc_rlc_encode(
 	command->opcode = INTEL_AX211_ASSOC_RLC_CONFIG_OPCODE;
 
 	/*
- * RLC_CONFIG is the API89 exception which selects v2 in the wide
-	 * header. */
+	 * RLC_CONFIG is the API89 exception which selects v2 in the wide
+	 * header.
+	 */
 	command->wire_version = INTEL_AX211_ASSOC_RLC_CONFIG_VERSION;
 	command->layout_version = INTEL_AX211_ASSOC_RLC_CONFIG_VERSION;
 	command->response_kind = INTEL_AX211_ASSOC_RESPONSE_EMPTY;
@@ -1596,7 +1597,7 @@ ax211_assoc_command_matches(
 	if (state == NULL || command == NULL ||
 	    ax211_assoc_command_encode(state, &expected) !=
 		    INTEL_AX211_ASSOC_OK) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1745,8 +1746,9 @@ ax211_assoc_response_validate(
 		}
 
 		/*
- * Linux iwlwifi and OpenBSD iwx both ignore response flags
-		 * here. */
+		 * Linux iwlwifi and OpenBSD iwx both ignore response flags
+		 * here.
+		 */
 		return INTEL_AX211_ASSOC_OK;
 	case INTEL_AX211_ASSOC_RESPONSE_IGNORED:
 		/* Returns the computed result. */

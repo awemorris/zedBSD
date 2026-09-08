@@ -258,7 +258,7 @@ mouse_start(
 	mouse_active = 1;
 	outb(MOUSE_PORT_C, 0x00U);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -292,7 +292,7 @@ mouse_input_open(
 		error = EMFILE;
 	} else if (reader_count == 0 && (error = mouse_start()) != 0) {
 		/*
- * A failed first start leaves an inactive, retryable backend.
+		 * A failed first start leaves an inactive, retryable backend.
 		 */
 		mouse_active = 0;
 	} else {
@@ -344,7 +344,7 @@ drv_pc98_busmouse_init(
 	};
 
 	/*
- * Leave the periodic mouse IRQ masked until its evdev node is opened.
+	 * Leave the periodic mouse IRQ masked until its evdev node is opened.
 	 */
 	outb(MOUSE_CONTROL, PPI_MODE);
 	outb(MOUSE_PORT_C, 0x10U);

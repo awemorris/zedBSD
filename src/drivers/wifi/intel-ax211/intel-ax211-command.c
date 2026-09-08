@@ -184,7 +184,7 @@ drv_intel_ax211_command_submit(
 		/* Obtains the ax211 command prepare result result. */
 		error = ax211_command_prepare_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -228,8 +228,6 @@ drv_intel_ax211_command_submit(
 		transaction->transport, &submitted.token);
 	if (result == INTEL_AX211_TRANSPORT_OK)
 		return INTEL_AX211_COMMAND_OK;
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_TRANSPORT_AMBIGUOUS) {
 		entry->abandoned = 1U;
 		transaction->poisoned = 1U;
@@ -389,7 +387,7 @@ drv_intel_ax211_command_complete(
 		error = ax211_command_inactive_event_result(
 			transaction, event.index, hardware_epoch);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -411,9 +409,10 @@ drv_intel_ax211_command_complete(
 		     (uint8_t)~INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK;
 
 	/*
- * Firmware reports the LONG_GROUP carrier used for an API-89 legacy
+	 * Firmware reports the LONG_GROUP carrier used for an API-89 legacy
 	 * command.  Restore its logical group only for the matching pending
-	 * token; genuine long-group commands retain their wire identity. */
+	 * token; genuine long-group commands retain their wire identity.
+	 */
 	if (entry->pending.group == INTEL_AX211_PROTOCOL_GROUP_LEGACY &&
 	    wire_group == INTEL_AX211_PROTOCOL_GROUP_LONG)
 		message.group = INTEL_AX211_PROTOCOL_GROUP_LEGACY;
@@ -421,8 +420,9 @@ drv_intel_ax211_command_complete(
 		message.group = wire_group;
 
 	/*
- * Response layout comes from the pinned command-version table, not
-	 * wire. */
+	 * Response layout comes from the pinned command-version table, not
+	 * wire.
+	 */
 	message.version = entry->pending.response_version;
 	message.flags = event.flags;
 	message.queue = event.queue;
@@ -491,7 +491,7 @@ drv_intel_ax211_command_cancel(
 		error = ax211_command_inactive_handle_result(
 			transaction, handle);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -670,7 +670,7 @@ ax211_command_transaction_valid(
 	/* Handles the transaction availability. */
 	if (transaction == NULL || !transaction->initialized ||
 	    transaction->transport == NULL || transaction->hardware_epoch == 0U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -678,7 +678,7 @@ ax211_command_transaction_valid(
 	if (transaction->max_pending == 0U ||
 	    transaction->max_pending > INTEL_AX211_COMMAND_MAX_PENDING ||
 	    transaction->pending_count > transaction->max_pending) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -701,7 +701,7 @@ ax211_command_request_valid(
 	    request->minimum_response_length >
 		    request->maximum_response_length ||
 	    request->maximum_response_length > INTEL_AX211_MAX_COMMAND_PAYLOAD) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 

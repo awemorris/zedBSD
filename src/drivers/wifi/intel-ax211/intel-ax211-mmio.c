@@ -402,10 +402,11 @@ drv_intel_ax211_mmio_stop(
 		AX211_GENERAL_POLL_US, INTEL_AX211_MMIO_WAIT_MASTER_DISABLED);
 
 	/*
- * Linux and OpenBSD both treat this 100-us indication deadline as a
+	 * Linux and OpenBSD both treat this 100-us indication deadline as a
 	 * warning and continue the mandatory software reset.  The PCI owner has
 	 * already disabled bus mastering before a DMA-owning stop reaches here;
-	 * keep all actual MMIO, clock, and reset failures fatal. */
+	 * keep all actual MMIO, clock, and reset failures fatal.
+	 */
 	if (result == INTEL_AX211_MMIO_TIMEOUT)
 		mmio->master_disable_timed_out = 1;
 	else
@@ -417,7 +418,7 @@ drv_intel_ax211_mmio_stop(
 	ax211_remember_error(&first_error, result);
 
 	/*
- * Invalidates the stopped firmware generation with the required reset.
+	 * Invalidates the stopped firmware generation with the required reset.
 	 */
 	result = ax211_csr_set_bits(mmio, AX211_CSR_RESET, AX211_RESET_SW);
 	ax211_remember_error(&first_error, result);
@@ -478,7 +479,7 @@ drv_intel_ax211_mmio_nic_lock(
 			return clear_result;
 		}
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -501,7 +502,7 @@ drv_intel_ax211_mmio_nic_lock(
 			return clear_result;
 		}
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -543,7 +544,7 @@ drv_intel_ax211_mmio_nic_unlock(
 	if (result != INTEL_AX211_MMIO_OK) {
 		mmio->apm_ready = 0;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -574,7 +575,7 @@ drv_intel_ax211_mmio_read_mac(
 	if (result != INTEL_AX211_MMIO_OK) {
 		ax211_scrub(candidate, sizeof(candidate));
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -595,15 +596,13 @@ drv_intel_ax211_mmio_read_mac(
 		result = INTEL_AX211_MMIO_INVALID;
 
 	/*
- * Never publishes an address until its ownership reference is released.
+	 * Never publishes an address until its ownership reference is released.
 	 */
 
 	/* Handles the unlock result condition. */
 	unlock_result = drv_intel_ax211_mmio_nic_unlock(mmio);
 	if (unlock_result != INTEL_AX211_MMIO_OK)
 		result = unlock_result;
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_MMIO_OK)
 		memcpy(mac_address, candidate, sizeof(candidate));
 	ax211_scrub(candidate, sizeof(candidate));
@@ -699,7 +698,7 @@ drv_intel_ax211_mmio_publish_gen3(
 		return INTEL_AX211_MMIO_INVALID;
 
 	/*
- * Publishes the context physical address low word before its high word.
+	 * Publishes the context physical address low word before its high word.
 	 */
 
 	/* Checks the operation result. */
@@ -722,8 +721,9 @@ drv_intel_ax211_mmio_publish_gen3(
 		return result;
 
 	/*
- * Enables automatic function boot only after every boot input is
-	 * visible. */
+	 * Enables automatic function boot only after every boot input is
+	 * visible.
+	 */
 	result =
 		ax211_csr_read(mmio, AX211_CSR_HW_IF_CONFIG_REG, &boot_control);
 
@@ -753,7 +753,7 @@ drv_intel_ax211_mmio_publish_gen3(
 	if (result != INTEL_AX211_MMIO_OK) {
 		(void)drv_intel_ax211_mmio_nic_unlock(mmio);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -787,7 +787,7 @@ ax211_profile_valid(
 	/* Handles the profile condition. */
 	if (profile->mac_type != INTEL_AX211_MMIO_MAC_SO &&
 	    profile->mac_type != INTEL_AX211_MMIO_MAC_SOF) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1075,8 +1075,6 @@ ax211_prepare_fallback(
 			result = ax211_set_hw_ready(mmio);
 			if (result == INTEL_AX211_MMIO_OK)
 				return INTEL_AX211_MMIO_OK;
-
-			/* Checks the operation result. */
 			if (result != INTEL_AX211_MMIO_TIMEOUT)
 				return result;
 
@@ -1170,8 +1168,6 @@ ax211_read_mac_words(
 	result = ax211_csr_read(mmio, first_offset, &first);
 	if (result == INTEL_AX211_MMIO_OK)
 		result = ax211_csr_read(mmio, second_offset, &second);
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_MMIO_OK)
 		ax211_decode_mac_words(first, second, address);
 	ax211_scrub(&first, sizeof(first));

@@ -279,8 +279,6 @@ checkpoint_worker(
 			drain_error = drv_usb_urb_drain(
 				checkpoint->urb, CHECKPOINT_DRAIN_TIMEOUT_MS);
 			checkpoint_report_completion(checkpoint, drain_error);
-
-			/* Checks the operation status. */
 			if (drain_error != 0 ||
 			    drv_usb_urb_status(checkpoint->urb) !=
 				    DRV_USB_URB_COMPLETE)
@@ -322,11 +320,11 @@ checkpoint_buffer_size(
 	    (speed == DRV_USB_SPEED_HIGH && payload > 1024U) ||
 	    (speed != DRV_USB_SPEED_LOW && speed != DRV_USB_SPEED_FULL &&
 	     speed != DRV_USB_SPEED_HIGH)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	*result = (size_t)payload * packets;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -379,7 +377,7 @@ checkpoint_attach(
 	if (checkpoint->buffer == NULL) {
 		hal_free(checkpoint);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -398,7 +396,7 @@ checkpoint_attach(
 		hal_free(checkpoint->buffer);
 		hal_free(checkpoint);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -409,7 +407,7 @@ checkpoint_attach(
 		hal_free(checkpoint->buffer);
 		hal_free(checkpoint);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -422,7 +420,7 @@ checkpoint_attach(
 		hal_free(checkpoint->buffer);
 		hal_free(checkpoint);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -435,7 +433,7 @@ checkpoint_attach(
 		   drv_usb_endpoint_address(endpoint), (unsigned)buffer_size);
 	thread_start(worker);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -515,7 +513,7 @@ checkpoint_join_worker(
 
 	spin_unlock_irqrestore(&checkpoint->lock, irq);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -575,20 +573,21 @@ checkpoint_detach(
 		checkpoint_report_detach(checkpoint, cancel_error, drain_error,
 					 join_error);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	/*
- * A failed dequeue which races a natural terminal completion is
+	 * A failed dequeue which races a natural terminal completion is
 	 * harmless only after drain proves both terminal publication and HCD
-	 * release. */
+	 * release.
+	 */
 	checkpoint_report_detach(checkpoint, cancel_error, 0, 0);
 	(void)drv_usb_interface_set_driver_data(interface, NULL);
 	drv_usb_urb_free(checkpoint->urb);
 	hal_free(checkpoint->buffer);
 	hal_free(checkpoint);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }

@@ -143,7 +143,7 @@ wait_input_empty(
 		__asm__ volatile("pause");
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ETIMEDOUT;
 }
 
@@ -159,7 +159,7 @@ write_command(
 		return error;
 	outb(I8042_COMMAND, command);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -175,7 +175,7 @@ write_data(
 		return error;
 	outb(I8042_DATA, value);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -198,21 +198,22 @@ read_output(
 			data = inb(I8042_DATA);
 			if (((status & I8042_STATUS_AUX) != 0) == auxiliary) {
 				*value = data;
-				/* Reports successful completion. */
+				/* Succeeded. */
 				return 0;
 			}
 
 			/*
- * A byte from the other 8042 port cannot be left in
+			 * A byte from the other 8042 port cannot be left in
 			 * front of the response being polled.  Controller
 			 * transactions are short, so at most a concurrently
-			 * typed scan code is lost. */
+			 * typed scan code is lost.
+			 */
 		}
 
 		__asm__ volatile("pause");
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ETIMEDOUT;
 }
 
@@ -285,12 +286,8 @@ mouse_command(
 		error = write_command(I8042_WRITE_AUX);
 		if (error == 0)
 			error = write_data(command);
-
-		/* Checks the operation status. */
 		if (error == 0)
 			error = read_output(&response, 1);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 
@@ -303,7 +300,7 @@ mouse_command(
 			return EIO;
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return EIO;
 }
 
@@ -333,7 +330,7 @@ consume_byte(
 		return 0;
 	*dx = (int8_t)packet[1];
 	/*
- * PS/2 positive Y is upwards; evdev REL_Y remains positive downwards.
+	 * PS/2 positive Y is upwards; evdev REL_Y remains positive downwards.
 	 */
 	*dy = -(int32_t)(int8_t)packet[2];
 	*buttons = 0;
@@ -427,9 +424,10 @@ mouse_interrupt(
 	}
 
 	/*
- * Read one byte per edge.  The 8042 lowers IRQ12 when its output
+	 * Read one byte per edge.  The 8042 lowers IRQ12 when its output
 	 * buffer is read, allowing the next packet byte to create a fresh edge
-	 * after EOI instead of being stranded while a task IRQ is masked. */
+	 * after EOI instead of being stranded while a task IRQ is masked.
+	 */
 	hal_irq_send_eoi(acknowledge);
 
 	/* Handles the report condition. */
@@ -460,8 +458,6 @@ mouse_start(
 	error = write_command(I8042_ENABLE_AUX);
 	if (error == 0)
 		error = read_config(&configuration);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		configuration &=
 			(uint8_t)~(I8042_CONFIG_AUX_IRQ | I8042_CONFIG_AUX_OFF);
@@ -471,12 +467,8 @@ mouse_start(
 	/* Checks the operation status. */
 	if (error == 0)
 		error = mouse_command(PS2_SET_DEFAULTS);
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = mouse_command(PS2_ENABLE_STREAM);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		configuration |= I8042_CONFIG_AUX_IRQ;
 		error = write_config(configuration);

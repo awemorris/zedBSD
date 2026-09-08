@@ -134,10 +134,11 @@ struct drv_usb_bus {
 	unsigned number;
 	unsigned stopping;
 	/*
- * Protected by usb_topology_gate.  HCD quiesce may join a root worker
+	 * Protected by usb_topology_gate.  HCD quiesce may join a root worker
 	 * which is itself waiting for that gate, so shutdown/unregister claim
 	 * the bus here and invoke the blocking HCD barrier with the gate
-	 * released. */
+	 * released.
+	 */
 	unsigned lifecycle_claimed;
 	unsigned shutdown_processed;
 	uint64_t shutdown_attempt_generation;
@@ -310,7 +311,7 @@ drv_usb_init(
 	usb_initialized = true;
 	hal_printf("usb: URB completion contract q009-release-acquire-v1\n");
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -359,18 +360,19 @@ drv_usb_shutdown(
 		bus->shutdown_attempt_generation = generation;
 
 		/*
- * stopping closes admission, but is not evidence that the HCD
+		 * stopping closes admission, but is not evidence that the HCD
 		 * has crossed its checked DMA-stop boundary.  In particular,
 		 * unregister leaves it set when a worker join or quiesce
 		 * attempt fails.  A terminal shutdown must retry that same
-		 * checked sequence. */
+		 * checked sequence.
+		 */
 		hal_atomic_store_release(&bus->stopping, 1U);
 
 		/*
- * Stop admission first, then let every class driver disconnect
+		 * Stop admission first, then let every class driver disconnect
 		 * and cancel/drain its own work while the HCD is still
-		 * operational. */
-		/* Process each linked entry. */
+		 * operational.
+		 */
 		for (device = bus->devices; device != NULL;
 		     device = device->next)
 			device_begin_disconnect(device);
@@ -389,10 +391,9 @@ drv_usb_shutdown(
 		}
 
 		/*
- * Driver teardown is the first ownership boundary.  Device/HCD
+		 * Driver teardown is the first ownership boundary.  Device/HCD
 		 * quiesce follows only after no interface can submit more work.
 		 */
-		/* Process each linked entry. */
 		for (device = bus->devices; device != NULL;
 		     device = device->next) {
 			/* Checks the operation status. */
@@ -402,10 +403,11 @@ drv_usb_shutdown(
 		}
 
 		/*
- * A runtime root worker can be blocked trying to enter the
+		 * A runtime root worker can be blocked trying to enter the
 		 * topology gate.  Release it before the HCD joins that worker.
 		 * The bus claim prevents concurrent unregister/free while the
-		 * pointer is borrowed. */
+		 * pointer is borrowed.
+		 */
 		usb_topology_unlock();
 
 		/* Checks the operation status. */
@@ -424,17 +426,19 @@ drv_usb_shutdown(
 			usb_topology_unlock();
 
 			/*
- * Leave shutdown_processed clear so a later shutdown
+			 * Leave shutdown_processed clear so a later shutdown
 			 * request can retry.  This invocation marks it
 			 * attempted and continues through every other
-			 * controller without spinning on this one. */
+			 * controller without spinning on this one.
+			 */
 			continue;
 		}
 
 		/*
- * A failed class/device teardown keeps callback-visible HCD
+		 * A failed class/device teardown keeps callback-visible HCD
 		 * memory, but the checked HCD quiesce above still stops DMA
-		 * before reboot. */
+		 * before reboot.
+		 */
 		if (retain && bus->hcd->ops->quiesce != NULL) {
 			hal_printf("usb%u: host controller quiesced; resources "
 				   "retained\n",
@@ -485,7 +489,7 @@ drv_usb_hcd_register(
 	     (hcd->capabilities & DRV_USB_HCD_CAP_TRANSFER_RESERVE) == 0) ||
 	    (((hcd->capabilities & DRV_USB_HCD_CAP_TRANSFER_RESERVE) != 0) !=
 	     (hcd->ops->urb_reserve != NULL))) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -502,7 +506,7 @@ drv_usb_hcd_register(
 	if (hcd->root_port_count == UINT_MAX) {
 		hal_free(bus);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOVERFLOW;
 	}
 
@@ -513,7 +517,7 @@ drv_usb_hcd_register(
 	if (bus->ports == NULL) {
 		hal_free(bus);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -526,7 +530,7 @@ drv_usb_hcd_register(
 		hal_free(bus->ports);
 		hal_free(bus);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -537,7 +541,7 @@ drv_usb_hcd_register(
 		hal_free(bus->ports);
 		hal_free(bus);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -549,7 +553,7 @@ drv_usb_hcd_register(
 	hal_printf("usb%u: %s, %u root ports\n", bus->number, hcd->name,
 		   hcd->root_port_count);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -578,7 +582,7 @@ drv_usb_hcd_unregister(
 		if (bus->devices != NULL || bus->lifecycle_claimed) {
 			usb_topology_unlock();
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -587,9 +591,10 @@ drv_usb_hcd_unregister(
 		device_begin_disconnect(bus->root_hub);
 
 		/*
- * Root workers enter the topology path in process context.
+		 * Root workers enter the topology path in process context.
 		 * Never join one while retaining the gate it may be waiting to
-		 * acquire. */
+		 * acquire.
+		 */
 		usb_topology_unlock();
 
 		/* Handles the quiesce availability. */
@@ -605,7 +610,7 @@ drv_usb_hcd_unregister(
 				bus->lifecycle_claimed = 0U;
 				usb_topology_unlock();
 
-				/* Returns the computed result. */
+				/* Failed. */
 				return error;
 			}
 		}
@@ -619,7 +624,7 @@ drv_usb_hcd_unregister(
 				bus->lifecycle_claimed = 0U;
 				usb_topology_unlock();
 
-				/* Returns the computed result. */
+				/* Failed. */
 				return EBUSY;
 			}
 
@@ -628,7 +633,7 @@ drv_usb_hcd_unregister(
 				bus->lifecycle_claimed = 0U;
 				usb_topology_unlock();
 
-				/* Returns the computed result. */
+				/* Failed. */
 				return EALREADY;
 			}
 
@@ -657,13 +662,13 @@ drv_usb_hcd_unregister(
 		hal_free(bus->ports);
 		hal_free(bus);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	usb_topology_unlock();
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOENT;
 }
 
@@ -686,7 +691,7 @@ drv_usb_decode_superspeed_endpoint_companion(
 	/* Handles the bytes condition. */
 	if (bytes[0] != sizeof(descriptor) ||
 	    bytes[1] != DRV_USB_DESCRIPTOR_SUPERSPEED_ENDPOINT_COMPANION) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	descriptor.length = bytes[0];
@@ -696,7 +701,7 @@ drv_usb_decode_superspeed_endpoint_companion(
 	descriptor.bytes_per_interval =
 		(uint16_t)bytes[4] | ((uint16_t)bytes[5] << 8);
 	*result = descriptor;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -771,12 +776,13 @@ drv_usb_hcd_root_hub_changed(
 		present = find_port_device(bus, port);
 
 		/*
- * A connection edge identifies a new physical generation even
+		 * A connection edge identifies a new physical generation even
 		 * when the port is connected again by the time it is sampled.
 		 * Never let the retained device, bindings, or URBs cross that
 		 * edge.  A failed destroy leaves DISCONNECTING set; periodic
 		 * root scans then retry the same teardown without relying on
-		 * another hardware change bit. */
+		 * another hardware change bit.
+		 */
 		if (present != NULL && connected &&
 		    (connection_changed || state_changed || port_disabled ||
 		     device_is_disconnecting(present)))
@@ -805,12 +811,8 @@ drv_usb_hcd_root_hub_changed(
 			error = hcd->ops->root_port_reset(hcd, port);
 		else
 			error = legacy_root_port_reset(hcd, port);
-
-		/* Checks the operation status. */
 		if (error == 0)
 			error = root_port_status(hcd, port, &status);
-
-		/* Checks the operation status. */
 		if (error == 0) {
 			bus->ports[port].connected = (status & 1U) != 0;
 			bus->ports[port].enabled = (status & 2U) != 0;
@@ -821,8 +823,6 @@ drv_usb_hcd_root_hub_changed(
 			else
 				error = ENODEV;
 		}
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			hal_printf("usb%u: port %u enumeration failed (%d)\n",
 				   bus->number, port, error);
@@ -868,7 +868,7 @@ drv_usb_foreach_bus(
 			return e;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -898,7 +898,7 @@ drv_usb_bus_foreach_device(
 			return e;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -923,7 +923,7 @@ drv_usb_foreach_device(
 			return e;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -949,7 +949,7 @@ drv_usb_device_foreach_interface(
 			return e;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1173,7 +1173,7 @@ drv_usb_device_set_hcd_data(
 		return EINVAL;
 	__atomic_store_n(&d->hcd_private[n], value, __ATOMIC_RELEASE);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1213,10 +1213,11 @@ drv_usb_device_reset(
 		return EINVAL;
 
 	/*
- * A reset caller may be running immediately after an URB callback.
+	 * A reset caller may be running immediately after an URB callback.
 	 * Never wait behind root-worker teardown while that path is joining the
 	 * callback or its submission admission; topology ownership is an
-	 * all-or-nothing preflight condition for this synchronous API. */
+	 * all-or-nothing preflight condition for this synchronous API.
+	 */
 	if (!atomic_try_acquire_zero(&usb_topology_gate))
 		return EBUSY;
 
@@ -1312,10 +1313,11 @@ drv_usb_device_reset(
 		goto out;
 
 	/*
- * Endpoint scheduling is disabled, but the HCD device and physical port
+	 * Endpoint scheduling is disabled, but the HCD device and physical port
 	 * are still intact.  Recheck the captured physical generation
 	 * immediately before the destructive boundary and compensate this
-	 * invocation on failure. */
+	 * invocation on failure.
+	 */
 
 	/* Checks the operation status. */
 	error = device_reset_connection_check(bus, device, device_generation,
@@ -1329,11 +1331,12 @@ drv_usb_device_reset(
 						port_generation);
 
 		/*
- * Never restore the old endpoint schedule onto a detached or
+		 * Never restore the old endpoint schedule onto a detached or
 		 * replaced physical device.  A transient status-read failure
 		 * may be compensated only after a second positive identity
 		 * proof; otherwise the retained core object is quarantined for
-		 * terminal topology teardown. */
+		 * terminal topology teardown.
+		 */
 		if (proof_error == 0) {
 			rollback_error =
 				configuration == NULL
@@ -1359,9 +1362,10 @@ drv_usb_device_reset(
 	}
 
 	/*
- * Calling the HCD's checked per-device DMA barrier is the destructive
+	 * Calling the HCD's checked per-device DMA barrier is the destructive
 	 * boundary.  Do not use device_quiesce(): that helper is for terminal
-	 * teardown and may relink the object or change its quarantine state. */
+	 * teardown and may relink the object or change its quarantine state.
+	 */
 	if (bus->hcd->ops->device_quiesce != NULL) {
 		/* Checks the operation status. */
 		error = bus->hcd->ops->device_quiesce(bus->hcd, device);
@@ -1380,9 +1384,10 @@ drv_usb_device_reset(
 		bus->hcd->ops->device_disable(bus->hcd, device);
 
 	/*
- * A controller with a per-device quiesce/release operation has crossed
+	 * A controller with a per-device quiesce/release operation has crossed
 	 * its boundary already.  Sample again before touching the physical
-	 * port. */
+	 * port.
+	 */
 	if (bus->hcd->ops->device_quiesce != NULL ||
 	    bus->hcd->ops->device_disable != NULL) {
 		/* Checks the operation status. */
@@ -1397,8 +1402,6 @@ drv_usb_device_reset(
 		error = bus->hcd->ops->root_port_reset(bus->hcd, device->port);
 	else
 		error = legacy_root_port_reset(bus->hcd, device->port);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail_destructive;
 
@@ -1446,8 +1449,6 @@ drv_usb_device_reset(
 			USB_CONTROL_TIMEOUT_MS, &actual);
 		device->address = old_address;
 	}
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail_destructive;
 	device->state = DRV_USB_STATE_ADDRESS;
@@ -1465,8 +1466,9 @@ drv_usb_device_reset(
 		goto fail_destructive;
 
 	/*
- * This final non-acknowledging sample is both the post-configuration
-	 * seam and the publication barrier for all retained binding objects. */
+	 * This final non-acknowledging sample is both the post-configuration
+	 * seam and the publication barrier for all retained binding objects.
+	 */
 
 	/* Checks the operation status. */
 	error = device_reset_connection_check(bus, device, device_generation,
@@ -1535,7 +1537,7 @@ drv_usb_device_set_configuration(
 	if (device == NULL || device->parent == NULL ||
 	    (device->state != DRV_USB_STATE_ADDRESS &&
 	     device->state != DRV_USB_STATE_CONFIGURED)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -1614,9 +1616,10 @@ drv_usb_device_set_configuration(
 				   USB_CONTROL_TIMEOUT_MS, &actual);
 	if (error != 0) {
 		/*
- * STALL rejects the request without changing the selected
+		 * STALL rejects the request without changing the selected
 		 * configuration. Other transport failures leave device state
-		 * unknowable and must not republish endpoints. */
+		 * unknowable and must not republish endpoints.
+		 */
 		if (error != EPIPE) {
 			device_quarantine_selection(device, "set-configuration",
 						    error);
@@ -1648,8 +1651,6 @@ drv_usb_device_set_configuration(
 				rollback_error =
 					configuration_restore(device, old);
 			}
-
-			/* Checks the operation status. */
 			if (rollback_error != 0) {
 				device_quarantine_selection(
 					device, "configuration-enable",
@@ -1663,9 +1664,10 @@ drv_usb_device_set_configuration(
 		error = configuration_reset_endpoints(target);
 		if (error != 0) {
 			/*
- * SET_CONFIGURATION has succeeded; schedule
+			 * SET_CONFIGURATION has succeeded; schedule
 			 * compensation cannot reconstruct the old device-side
-			 * endpoint state. */
+			 * endpoint state.
+			 */
 			device_quarantine_selection(
 				device, "configuration-reset", error);
 			goto out;
@@ -1719,7 +1721,7 @@ drv_usb_device_get_string(
 	/* Handles the device availability. */
 	if (device == NULL || index == 0 || index > UINT8_MAX ||
 	    language > UINT16_MAX || buffer == NULL || capacity == 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	buffer[0] = '\0';
@@ -1759,7 +1761,7 @@ drv_usb_device_get_string(
 			if (offset + 3U >= descriptor_length) {
 				buffer[0] = '\0';
 
-				/* Returns the computed result. */
+				/* Failed. */
 				return EILSEQ;
 			}
 
@@ -1769,7 +1771,7 @@ drv_usb_device_get_string(
 			if (low < 0xdc00U || low > 0xdfffU) {
 				buffer[0] = '\0';
 
-				/* Returns the computed result. */
+				/* Failed. */
 				return EILSEQ;
 			}
 
@@ -1779,7 +1781,7 @@ drv_usb_device_get_string(
 		} else if (codepoint >= 0xdc00U && codepoint <= 0xdfffU) {
 			buffer[0] = '\0';
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EILSEQ;
 		}
 
@@ -1788,14 +1790,14 @@ drv_usb_device_get_string(
 		if (error != 0) {
 			buffer[0] = '\0';
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	}
 
 	buffer[used] = '\0';
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1912,7 +1914,7 @@ drv_usb_urb_reserve_sync(
 	/* Checks the hal atomic load acquire result. */
 	if (hal_atomic_load_acquire(&u->hcd_owned) != 0 ||
 	    hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -1925,7 +1927,7 @@ drv_usb_urb_reserve_sync(
 		/* Obtains the drv usb urb reserve transfer result. */
 		error = drv_usb_urb_reserve_transfer(u, capacity);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1942,7 +1944,7 @@ drv_usb_urb_reserve_sync(
 	u->sync_buffer = buffer;
 	u->sync_capacity = capacity;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1969,7 +1971,7 @@ drv_usb_urb_reserve_transfer(
 	/* Checks the hal atomic load acquire result. */
 	if (hal_atomic_load_acquire(&urb->hcd_owned) != 0 ||
 	    hal_atomic_load_acquire(&urb->status) == DRV_USB_URB_PENDING) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -1977,7 +1979,7 @@ drv_usb_urb_reserve_transfer(
 	hcd = urb->device->bus->hcd;
 	if (!(hcd->capabilities & DRV_USB_HCD_CAP_TRANSFER_RESERVE) ||
 	    hcd->ops->urb_reserve == NULL || hcd->ops->urb_unreserve == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 
@@ -1995,8 +1997,9 @@ drv_usb_urb_reserve_transfer(
 		return EOPNOTSUPP;
 
 	/*
- * Keeps the old core staging intact until both replacement allocations
-	 * succeed. */
+	 * Keeps the old core staging intact until both replacement allocations
+	 * succeed.
+	 */
 
 	/* Handles the shared condition. */
 	buffer = NULL;
@@ -2014,7 +2017,7 @@ drv_usb_urb_reserve_transfer(
 	if (error != 0) {
 		hal_free(buffer);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -2032,14 +2035,15 @@ drv_usb_urb_reserve_transfer(
 		if (shared_buffer == NULL || shared_capacity < capacity) {
 			hcd->ops->urb_unreserve(hcd, reservation);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 	}
 
 	/*
- * Replaces idle resources only after the complete new reservation is
-	 * available. */
+	 * Replaces idle resources only after the complete new reservation is
+	 * available.
+	 */
 	if (urb->transfer_reservation != NULL) {
 		hcd->ops->urb_unreserve(hcd, urb->transfer_reservation);
 		io_stats_record(IO_USB_TRANSFER_RESERVE_FREE,
@@ -2069,8 +2073,9 @@ drv_usb_urb_reserve_transfer(
 	}
 
 	/*
- * Publishes an allocation-free capacity for subsequent synchronous
-	 * submissions. */
+	 * Publishes an allocation-free capacity for subsequent synchronous
+	 * submissions.
+	 */
 	return 0;
 }
 
@@ -2109,7 +2114,7 @@ drv_usb_urb_setup(
 	/* Checks the hal atomic load acquire result. */
 	if (hal_atomic_load_acquire(&u->status) == DRV_USB_URB_PENDING ||
 	    hal_atomic_load_acquire(&u->hcd_owned) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -2140,7 +2145,7 @@ drv_usb_urb_setup(
 	hal_atomic_store_relaxed(&u->terminal_claimed, 0U);
 	hal_atomic_store_release(&u->status, DRV_USB_URB_IDLE);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2163,7 +2168,7 @@ drv_usb_urb_setup_control_flags(
 	/* Handles the u availability. */
 	if (u == NULL || r == NULL ||
 	    u->endpoint->type != DRV_USB_TRANSFER_CONTROL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -2215,12 +2220,12 @@ drv_usb_urb_setup_isochronous(
 	/* Handles the u condition. */
 	if (!u || !p || n != u->iso_packet_count ||
 	    u->endpoint->type != DRV_USB_TRANSFER_ISOCHRONOUS) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	memcpy(u->iso_packets, p, n * sizeof(*p));
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2295,9 +2300,10 @@ drv_usb_urb_submit(
 	}
 
 	/*
- * Recheck after interface and binding admission.  The completion-side
+	 * Recheck after interface and binding admission.  The completion-side
 	 * HCD publication barrier cannot be released until the STALL latch is
-	 * visible, so no TD can enter between this check and enqueue. */
+	 * visible, so no TD can enter between this check and enqueue.
+	 */
 	if (endpoint_is_halted(device, urb->endpoint)) {
 		error = EPIPE;
 		goto out_hcd;
@@ -2313,20 +2319,22 @@ drv_usb_urb_submit(
 	__atomic_store_n(&urb->submit_commit, &commit, __ATOMIC_RELEASE);
 
 	/*
- * Publish PENDING only after the terminal path can observe the complete
+	 * Publish PENDING only after the terminal path can observe the complete
 	 * commit handoff.  A concurrent cancel which sees PENDING can therefore
-	 * never enter its callback ahead of the short-gate release. */
+	 * never enter its callback ahead of the short-gate release.
+	 */
 	hal_atomic_store_release(&urb->status, DRV_USB_URB_PENDING);
 	error = device->bus->hcd->ops->urb_enqueue(device->bus->hcd, urb);
 
 	/*
- * If synchronous completion already claimed the stack record, it
+	 * If synchronous completion already claimed the stack record, it
 	 * publishes finished before entering the callback.  Claiming it here
 	 * and releasing the short submit gates must be indivisible with respect
 	 * to a local HCD interrupt: otherwise that interrupt can observe a NULL
 	 * record, wait for submit_commit_pending, and deadlock on the submitter
 	 * it preempted.  A remote completion which wins the claim can still
-	 * finish while local IRQs are masked. */
+	 * finish while local IRQs are masked.
+	 */
 	irq_enabled = hal_irq_disable();
 
 	/* Checks the atomic load acquire result. */
@@ -2355,7 +2363,7 @@ drv_usb_urb_submit(
 		urb_hcd_put(urb);
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return error;
 
 out_hcd:
@@ -2408,31 +2416,32 @@ drv_usb_urb_wait(
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		/*
- * Keep the atomic observation inside the switch expression.
+		 * Keep the atomic observation inside the switch expression.
 		 * Besides making the single-load terminal mapping explicit,
 		 * this avoids GCC's analyzer losing the initialized state of an
-		 * automatic enum across the cancel/retry back edge. */
+		 * automatic enum across the cancel/retry back edge.
+		 */
 		/* Dispatch the current operation state. */
 		switch (hal_atomic_load_acquire(&urb->status)) {
 		case DRV_USB_URB_PENDING:
 			break;
 		case DRV_USB_URB_COMPLETE:
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		case DRV_USB_URB_TIMEOUT:
-			/* Returns the computed result. */
+			/* Failed. */
 			return ETIMEDOUT;
 		case DRV_USB_URB_STALL:
-			/* Returns the computed result. */
+			/* Failed. */
 			return EPIPE;
 		case DRV_USB_URB_DISCONNECTED:
-			/* Returns the computed result. */
+			/* Failed. */
 			return ENODEV;
 		case DRV_USB_URB_IDLE:
 		case DRV_USB_URB_IO_ERROR:
 		case DRV_USB_URB_CANCELLED:
 		default:
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 
@@ -2442,11 +2451,9 @@ drv_usb_urb_wait(
 			error = urb_cancel_to(urb, DRV_USB_URB_TIMEOUT);
 			if (error == 0)
 				continue;
-
-			/* Checks the operation status. */
 			if (error != EBUSY && error != EINVAL &&
 			    error != EALREADY) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return error;
 			}
 
@@ -2523,11 +2530,10 @@ drv_usb_urb_wait_reusable(
 	error = drv_usb_urb_wait(u);
 
 	/*
- * A hard cancel failure used to leave this caller waiting forever.
+	 * A hard cancel failure used to leave this caller waiting forever.
 	 * Retry checked retirement, then detach only the caller's view of an
 	 * isolated buffer. Never forge completion or release the HCD reference.
 	 */
-	/* Process each element required by the operation. */
 	for (attempt = 0; attempt < 2U && hal_atomic_load_acquire(&u->status) ==
 						  DRV_USB_URB_PENDING;
 	     attempt++) {
@@ -2543,9 +2549,10 @@ drv_usb_urb_wait_reusable(
 	/* Handles the sync buffer availability. */
 	if (drained != 0 && u->sync_buffer == NULL && u->length != 0) {
 		/*
- * Legacy unbuffered users still own their buffer until
+		 * Legacy unbuffered users still own their buffer until
 		 * retirement. All core synchronous helpers and storage reserve
-		 * staging. */
+		 * staging.
+		 */
 		(void)drv_usb_urb_drain(u, 0);
 		drained = 0;
 	}
@@ -2671,7 +2678,7 @@ drv_usb_urb_set_hcd_data(
 		return EINVAL;
 	u->hcd_private[0] = (uintptr_t)d;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3122,9 +3129,10 @@ drv_usb_interface_set_alternate(
 				   USB_CONTROL_TIMEOUT_MS, &actual);
 	if (error != 0) {
 		/*
- * A STALL leaves the old alternate selected. A timeout or I/O
+		 * A STALL leaves the old alternate selected. A timeout or I/O
 		 * failure is ambiguous, so retain no published HCD endpoint
-		 * set. */
+		 * set.
+		 */
 		if (error != EPIPE) {
 			device_quarantine_selection(device, "set-interface",
 						    error);
@@ -3156,8 +3164,6 @@ drv_usb_interface_set_alternate(
 				old->descriptor.interface_number, NULL, 0,
 				USB_CONTROL_TIMEOUT_MS, &actual);
 		}
-
-		/* Checks the operation status. */
 		if (rollback_error == 0 && !device_is_quarantined(device)) {
 			/* Checks the operation status. */
 			rollback_error = host_interface_enable(old);
@@ -3166,8 +3172,6 @@ drv_usb_interface_set_alternate(
 					host_interface_reset_endpoints(old);
 			}
 		}
-
-		/* Checks the operation status. */
 		if (rollback_error != 0) {
 			device_quarantine_selection(device, "alternate-enable",
 						    rollback_error);
@@ -3180,9 +3184,10 @@ drv_usb_interface_set_alternate(
 	error = host_interface_reset_endpoints(target);
 	if (error != 0) {
 		/*
- * SET_INTERFACE has succeeded.  A host reset failure leaves the
+		 * SET_INTERFACE has succeeded.  A host reset failure leaves the
 		 * selected endpoint state uncertain and cannot be rolled back
-		 * by a schedule-only enable. */
+		 * by a schedule-only enable.
+		 */
 		device_quarantine_selection(device, "alternate-reset", error);
 		goto out;
 	}
@@ -3228,7 +3233,7 @@ drv_usb_interface_claim(
 	if (owner == NULL || target == NULL || owner == target ||
 	    owner->device != target->device ||
 	    owner->configuration != target->configuration) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	device = owner->device;
@@ -3433,7 +3438,7 @@ drv_usb_interface_set_driver_data(
 		return EINVAL;
 	i->driver_data = d;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3522,7 +3527,7 @@ drv_usb_host_interface_extra(
 			if (index-- == 0) {
 				*descriptor = raw + offset;
 				*length = descriptor_length;
-				/* Reports successful completion. */
+				/* Succeeded. */
 				return 0;
 			}
 		}
@@ -3530,7 +3535,7 @@ drv_usb_host_interface_extra(
 		offset += descriptor_length;
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOENT;
 }
 
@@ -3735,7 +3740,7 @@ drv_usb_endpoint_set_hcd_data(
 		return EINVAL;
 	e->hcd_private[n] = value;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3759,7 +3764,7 @@ drv_usb_endpoint_clear_halt(
 	    (endpoint->type != DRV_USB_TRANSFER_BULK &&
 	     endpoint->type != DRV_USB_TRANSFER_INTERRUPT) ||
 	    (endpoint->descriptor.address & 0x0fU) == 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	interface = endpoint->interface;
@@ -3772,7 +3777,7 @@ drv_usb_endpoint_clear_halt(
 	/* Checks the device is disconnecting result. */
 	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
 	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
@@ -4055,7 +4060,7 @@ drv_usb_driver_register(
 	e->next = usb_drivers;
 	usb_drivers = e;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4078,12 +4083,12 @@ drv_usb_driver_unregister(
 			*p = e->next;
 			hal_free(e);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOENT;
 }
 
@@ -4144,9 +4149,10 @@ device_begin_disconnect(
 					  USB_DEVICE_LIFECYCLE_DISCONNECTING);
 
 	/*
- * Attach/detach may legitimately select an alternate.  First stop and
+	 * Attach/detach may legitimately select an alternate.  First stop and
 	 * join every binding transaction, then take the selection gate
-	 * permanently. */
+	 * permanently.
+	 */
 	io_gate_close(&device->binding_transactions);
 	/* Process each remaining element. */
 	while ((atomic_load_acquire(&device->binding_transactions) &
@@ -4154,11 +4160,11 @@ device_begin_disconnect(
 		sched_yield();
 
 	/*
- * A selection operation which entered before the lifecycle publication
+	 * A selection operation which entered before the lifecycle publication
 	 * is allowed to finish.  Keeping its exclusive gate permanently owned
 	 * joins that transaction and prevents any later endpoint/control
-	 * selection from racing detach or HCD quiesce. */
-	/* Continue while the operation condition remains true. */
+	 * selection from racing detach or HCD quiesce.
+	 */
 	while (!atomic_try_acquire_zero(&device->selection_gate))
 		sched_yield();
 	io_gate_close(&device->submit_gate);
@@ -4218,7 +4224,7 @@ detach_interfaces(
 		}
 
 		/*
- * A failed function must not prevent the remaining functions on
+		 * A failed function must not prevent the remaining functions on
 		 * a composite device from closing and draining their own work.
 		 */
 		if (error != 0 && first_error == 0)
@@ -4254,24 +4260,20 @@ interface_binding_detach(
 	/* Handles the detach availability. */
 	if (interface->driver->detach != NULL)
 		error = interface->driver->detach(interface, flags);
-
-	/* Checks the operation status. */
 	if (error == 0 && (atomic_load_acquire(&interface->binding_gate) &
 			   USB_IO_GATE_COUNT_MASK) != 0)
 		error = EBUSY;
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		atomic_store_release(&interface->binding_state,
 				     USB_BINDING_DETACH_PENDING);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	interface_binding_clear(interface);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4288,10 +4290,11 @@ interface_binding_clear(
 		/* Checks the interface claim owner result. */
 		if (interface_claim_owner(sibling) == interface) {
 			/*
- * Never reopen a gate owned by an
+			 * Never reopen a gate owned by an
 			 * alternate/configuration transaction.  Wait until that
 			 * owner publishes and reopens, then acquire a distinct
-			 * closed interval for claim removal. */
+			 * closed interval for claim removal.
+			 */
 			io_gate_close_wait(&sibling->io_gate);
 			interface_publish_claim(sibling, NULL);
 			io_gate_open(&sibling->io_gate);
@@ -4386,7 +4389,7 @@ device_quiesce(
 			return 0;
 		device_link(bus, device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -4394,12 +4397,10 @@ device_quiesce(
 	error = bus->hcd->ops->device_quiesce(bus->hcd, device);
 	if (error == 0 && drv_usb_device_hcd_urb_count(device) != 0)
 		error = EBUSY;
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		hal_atomic_store_release(&device->quarantined, 0U);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -4463,7 +4464,7 @@ device_linked(
 			return 1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4576,7 +4577,7 @@ root_port_acknowledge_changes(
 			return error;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4644,16 +4645,15 @@ destroy_device(
 	detach_error = detach_interfaces(device);
 
 	/*
- * Admission is closed before detach.  Even a class-driver failure must
+	 * Admission is closed before detach.  Even a class-driver failure must
 	 * reach the checked DMA barrier before the bus owner may release
-	 * memory. */
+	 * memory.
+	 */
 
 	/* Checks the operation status. */
 	quiesce_error = device_quiesce(bus, device);
 	if (quiesce_error == 0 && bus->hcd->ops->device_quiesce == NULL)
 		quiesce_error = device_disable_active_endpoints(device);
-
-	/* Checks the operation status. */
 	if (detach_error != 0 || quiesce_error != 0) {
 		/* Checks the operation status. */
 		if (detach_error != 0 && !device_is_quarantined(device)) {
@@ -4741,8 +4741,6 @@ configuration_disable_endpoints(
 				if (rollback_error == 0 && rollback != 0)
 					rollback_error = rollback;
 			}
-
-			/* Checks the operation status. */
 			if (rollback_error != 0) {
 				device_quarantine_selection(
 					configuration->device,
@@ -4750,14 +4748,14 @@ configuration_disable_endpoints(
 					rollback_error);
 			}
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
 		disabled[disabled_count++] = interface;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4783,9 +4781,9 @@ host_interface_disable(
 			continue;
 
 		/*
- * SET_INTERFACE has not yet been issued.  Re-enable only the
-		 * endpoints disabled by this invocation, in reverse order. */
-		/* Process each remaining element. */
+		 * SET_INTERFACE has not yet been issued.  Re-enable only the
+		 * endpoints disabled by this invocation, in reverse order.
+		 */
 		for (rollback_index = index; rollback_index != 0;) {
 			rollback_index--;
 
@@ -4795,19 +4793,17 @@ host_interface_disable(
 			if (rollback_error == 0 && rollback != 0)
 				rollback_error = rollback;
 		}
-
-		/* Checks the operation status. */
 		if (rollback_error != 0) {
 			device_quarantine_selection(
 				alternate->interface->device,
 				"endpoint-disable", rollback_error);
 		}
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4864,10 +4860,10 @@ host_interface_enable(
 						  &alternate->endpoints[index]);
 		if (error != 0) {
 			/*
- * Only endpoints enabled by this invocation are
+			 * Only endpoints enabled by this invocation are
 			 * eligible for compensation.  Reverse order preserves
-			 * HCD dependencies. */
-			/* Process each remaining element. */
+			 * HCD dependencies.
+			 */
 			for (rollback_index = index; rollback_index != 0;) {
 				rollback_index--;
 
@@ -4878,20 +4874,18 @@ host_interface_enable(
 				if (rollback_error == 0 && rollback != 0)
 					rollback_error = rollback;
 			}
-
-			/* Checks the operation status. */
 			if (rollback_error != 0) {
 				device_quarantine_selection(
 					alternate->interface->device,
 					"endpoint-enable", rollback_error);
 			}
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4907,10 +4901,11 @@ device_release(
 	device_begin_disconnect(device);
 
 	/*
- * The retained recovery URB owns one device lifecycle reference.
+	 * The retained recovery URB owns one device lifecycle reference.
 	 * Binding transactions are joined above, so no clear-halt operation can
 	 * still use it.  Drop it before testing the final lifecycle-reference
-	 * count. */
+	 * count.
+	 */
 	recovery_urb = device->recovery_urb;
 	device->recovery_urb = NULL;
 
@@ -4936,7 +4931,7 @@ device_release(
 			hal_atomic_store_release(&device->quarantined, 1U);
 			device_link(bus, device);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -4953,7 +4948,7 @@ device_release(
 
 	device_finalize(bus, device);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4978,8 +4973,9 @@ device_finalize(
 	}
 
 	/*
- * A checked device/endpoint quiesce and successful driver detach have
-	 * already stopped every path which can reach these descriptors. */
+	 * A checked device/endpoint quiesce and successful driver detach have
+	 * already stopped every path which can reach these descriptors.
+	 */
 	free_configurations(device);
 
 	/* Handles the device disable availability. */
@@ -5100,7 +5096,7 @@ legacy_root_port_reset(
 		return error;
 	usb_delay_ticks(USB_RESET_RECOVERY_TICKS);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -5199,9 +5195,10 @@ enumerate_port(
 	}
 
 	/*
- * Reserve the address in the device before the HCD transition so failed
+	 * Reserve the address in the device before the HCD transition so failed
 	 * checked teardown retains, and successful teardown releases, one
-	 * owner. */
+	 * owner.
+	 */
 	device->address = (unsigned)address;
 
 	/* Handles the device set address availability. */
@@ -5210,11 +5207,12 @@ enumerate_port(
 							  (unsigned)address);
 	} else {
 		/*
- * A wire SET_ADDRESS request is addressed to endpoint zero at
+		 * A wire SET_ADDRESS request is addressed to endpoint zero at
 		 * the default address.  Keep the allocated value in the device
 		 * for failure cleanup, but expose address zero while the
 		 * synchronous request is built and completed.
-		 * Controller-command HCDs use the callback above. */
+		 * Controller-command HCDs use the callback above.
+		 */
 		device->address = 0;
 		error = drv_usb_control(
 			device,
@@ -5224,8 +5222,6 @@ enumerate_port(
 			USB_CONTROL_TIMEOUT_MS, &actual);
 		device->address = (unsigned)address;
 	}
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto fail;
 	device->state = DRV_USB_STATE_ADDRESS;
@@ -5290,9 +5286,10 @@ enumerate_port(
 	}
 
 	/*
- * Endpoint recovery must remain usable while reclaim itself is waiting
+	 * Endpoint recovery must remain usable while reclaim itself is waiting
 	 * on USB-backed storage.  Reserve its endpoint-zero URB before any
-	 * class driver can enter an error path. */
+	 * class driver can enter an error path.
+	 */
 	device->recovery_urb = drv_usb_urb_alloc(device, NULL, 0);
 
 	/* Handles the recovery urb availability. */
@@ -5327,7 +5324,7 @@ enumerate_port(
 		interface_report_probe(interface, error, matched_driver);
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -5445,7 +5442,7 @@ enumerate_configuration(
 	    descriptor.length < sizeof(descriptor) ||
 	    descriptor.descriptor_type != DRV_USB_DESCRIPTOR_CONFIGURATION ||
 	    descriptor.total_length < descriptor.length) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
@@ -5796,7 +5793,7 @@ parse_configuration(
 	if (error != 0)
 		goto fail;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -5832,7 +5829,7 @@ configuration_iads_prepare(
 		/* Handles the descriptor length condition. */
 		if (descriptor_length < 2U ||
 		    descriptor_length > length - offset) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 
@@ -5844,7 +5841,7 @@ configuration_iads_prepare(
 				    sizeof(struct
 					   drv_usb_interface_association_descriptor) ||
 			    count == DRV_USB_MAX_IADS) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 			count++;
@@ -5867,7 +5864,7 @@ configuration_iads_prepare(
 
 	configuration->iad_count = count;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -5963,15 +5960,16 @@ configuration_endpoint_addresses_validate(
 		}
 
 		/*
- * Alternate settings of one logical interface may reuse an
+		 * Alternate settings of one logical interface may reuse an
 		 * endpoint address, but independently selectable interfaces may
-		 * not alias an HCD endpoint context. */
+		 * not alias an HCD endpoint context.
+		 */
 		if ((configuration_addresses & interface_addresses) != 0)
 			return EINVAL;
 		configuration_addresses |= interface_addresses;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -6001,7 +5999,7 @@ configuration_iads_validate(
 			/* Checks the configuration find interface result. */
 			if (configuration_find_interface(configuration,
 							 first) == NULL) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 		}
@@ -6015,13 +6013,13 @@ configuration_iads_validate(
 			/* Handles the iad condition. */
 			if (iad->first_interface < other_end &&
 			    other->first_interface < end) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -6059,9 +6057,10 @@ device_preferred_configuration(
 		}
 
 		/*
- * Strictly greater preserves descriptor order for ties and for
+		 * Strictly greater preserves descriptor order for ties and for
 		 * the all-unsupported case.  Matching is observational:
-		 * inactive configurations are never attached or published. */
+		 * inactive configurations are never attached or published.
+		 */
 		if (configuration_index == 0 || score > best_score) {
 			best = configuration;
 			best_score = score;
@@ -6255,11 +6254,11 @@ device_binding_enter(
 	if (device_is_disconnecting(device)) {
 		io_gate_exit(&device->binding_transactions);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -6276,7 +6275,7 @@ io_gate_enter(
 		/* Handles the state condition. */
 		if ((state & USB_IO_GATE_CLOSED) != 0 ||
 		    (state & USB_IO_GATE_COUNT_MASK) == USB_IO_GATE_COUNT_MASK) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -6395,7 +6394,7 @@ urb_publish_terminal(
 	/* Handles the urb availability. */
 	if (urb == NULL || status == DRV_USB_URB_IDLE ||
 	    status == DRV_USB_URB_PENDING) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -6404,9 +6403,10 @@ urb_publish_terminal(
 		return 0;
 
 	/*
- * Completion and successful cancellation can both publish the terminal
+	 * Completion and successful cancellation can both publish the terminal
 	 * state.  Whichever path arrives first must release the short submit
-	 * gates before a callback can re-enter detach or disconnect. */
+	 * gates before a callback can re-enter detach or disconnect.
+	 */
 
 	/* Handles the commit availability. */
 	commit = __atomic_exchange_n(&urb->submit_commit, NULL,
@@ -6422,15 +6422,16 @@ urb_publish_terminal(
 	/* Checks the hal atomic compare exchange acq rel result. */
 	if (!hal_atomic_compare_exchange_acq_rel(&urb->terminal_claimed,
 						 &expected, 1U)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/*
- * Publish the protocol halt before the terminal status and callback.
+	 * Publish the protocol halt before the terminal status and callback.
 	 * HCDs keep their endpoint publication barrier until this function
 	 * returns, so a rearm cannot cross the hardware-STALL/core-latch
-	 * handoff. */
+	 * handoff.
+	 */
 	if (status == DRV_USB_URB_STALL)
 		endpoint_publish_halted(urb->device, urb->endpoint, 1U);
 	urb->actual_length = actual > urb->length ? urb->length : actual;
@@ -6456,10 +6457,11 @@ submit_commit_finish(
 	io_gate_exit(&commit->device->submit_gate);
 
 	/*
- * A terminal publisher may have observed that the stack record was
+	 * A terminal publisher may have observed that the stack record was
 	 * already claimed by the submitting CPU.  Make this the last URB access
 	 * before allowing that publisher to enter a callback which can free the
-	 * URB. */
+	 * URB.
+	 */
 	hal_atomic_store_release(&urb->submit_commit_pending, 0U);
 	atomic_store_release(&commit->finished, 1U);
 }
@@ -6644,11 +6646,11 @@ configuration_effective_owner(
 			*effective_owner = owner;
 		else if (*effective_owner != owner)
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return ENOTSUP;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -6694,14 +6696,14 @@ configuration_close_io(
 			while (*closed_count != 0)
 				io_gate_open(&closed[--*closed_count]->io_gate);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
 		closed[(*closed_count)++] = interface;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -6715,17 +6717,18 @@ device_control_try_lock(
 		return EBUSY;
 
 	/*
- * A timed-out synchronous caller may release its transaction while its
+	 * A timed-out synchronous caller may release its transaction while its
 	 * isolated URB is still retained. EP0 remains unavailable until the HCD
-	 * drops that request, independently of the caller's bounded wait. */
+	 * drops that request, independently of the caller's bounded wait.
+	 */
 	if (atomic_load_acquire(&device->control_inflight) != 0) {
 		atomic_store_release(&device->control_gate, 0U);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -6746,17 +6749,18 @@ device_reset_connection_check(
 		return error;
 
 	/*
- * GET_STATUS does not acknowledge CSC.  With the topology worker
+	 * GET_STATUS does not acknowledge CSC.  With the topology worker
 	 * excluded, the hardware edge bit is the only witness for a
-	 * detach/reinsert which happens between two restore operations. */
+	 * detach/reinsert which happens between two restore operations.
+	 */
 	if ((status & 3U) != 3U || (status & (1U << 16)) != 0 ||
 	    device->generation != device_generation ||
 	    bus->ports[device->port].connection_generation != port_generation) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -6788,22 +6792,20 @@ configuration_enable_endpoints(
 				if (rollback_error == 0 && rollback != 0)
 					rollback_error = rollback;
 			}
-
-			/* Checks the operation status. */
 			if (rollback_error != 0) {
 				device_quarantine_selection(
 					configuration->device,
 					"configuration-enable", rollback_error);
 			}
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
 		enabled[enabled_count++] = interface;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -6870,14 +6872,10 @@ usb_control_locked(
 		error = drv_usb_urb_setup_control(urb, &control, buffer, length,
 						  timeout_ms, NULL, NULL);
 	}
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		urb->control_admitted = USB_CONTROL_ADMISSION_EXTERNAL;
 		error = drv_usb_urb_submit(urb);
 	}
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = drv_usb_urb_wait_reusable(urb);
 
@@ -7005,7 +7003,7 @@ configuration_reset_endpoints(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -7039,7 +7037,7 @@ configuration_has_owners(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -7087,7 +7085,7 @@ usb_string_descriptor(
 	/* Handles the actual condition. */
 	if (actual != sizeof(header) || header[0] < 2U ||
 	    (header[0] & 1U) != 0 || header[1] != DRV_USB_DESCRIPTOR_STRING) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EILSEQ;
 	}
 
@@ -7105,11 +7103,11 @@ usb_string_descriptor(
 	/* Handles the actual condition. */
 	if (actual != header[0] || descriptor[0] != header[0] ||
 	    descriptor[1] != DRV_USB_DESCRIPTOR_STRING) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EILSEQ;
 	}
 	*descriptor_length = actual;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -7127,7 +7125,7 @@ utf8_append(
 	/* Handles the codepoint condition. */
 	if (codepoint == 0 || codepoint > 0x10ffffU ||
 	    (codepoint >= 0xd800U && codepoint <= 0xdfffU)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EILSEQ;
 	}
 
@@ -7159,7 +7157,7 @@ utf8_append(
 	for (index = 0; index < count; index++)
 		buffer[(*used)++] = (char)encoded[index];
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -7178,7 +7176,7 @@ device_urb_get(
 			      USB_DEVICE_LIFECYCLE_FINALIZING)) != 0 ||
 		    (state & USB_DEVICE_LIFECYCLE_URB_MASK) ==
 			    USB_DEVICE_LIFECYCLE_URB_MASK) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -7204,7 +7202,7 @@ endpoint_retained_by_device(
 	/* Handles the device availability. */
 	if (device == NULL || endpoint == NULL || endpoint->interface == NULL ||
 	    endpoint->alternate == NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -7213,7 +7211,7 @@ endpoint_retained_by_device(
 	if (interface->device != device || interface->configuration == NULL ||
 	    interface->configuration->device != device ||
 	    endpoint->alternate->interface != interface) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	/* Process each linked entry. */
@@ -7234,7 +7232,7 @@ endpoint_retained_by_device(
 			return 1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -7264,14 +7262,15 @@ urb_hcd_get(
 	/* Checks the hal atomic compare exchange acq rel result. */
 	if (!hal_atomic_compare_exchange_acq_rel(&urb->hcd_owned, &expected,
 						 1U)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
 	/*
- * The submitting caller owns a reference until this function returns,
+	 * The submitting caller owns a reference until this function returns,
 	 * so publishing HCD ownership before taking its reference is safe.  No
-	 * HCD can complete the URB until the later enqueue callback. */
+	 * HCD can complete the URB until the later enqueue callback.
+	 */
 	refcount_get(&urb->references);
 
 	/* Checks the hal atomic fetch add relaxed result. */
@@ -7279,7 +7278,7 @@ urb_hcd_get(
 	    UINT_MAX)
 		__builtin_trap();
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -7311,7 +7310,7 @@ urb_admission_get(
 			return EBUSY;
 		urb->control_counted = 1U;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -7331,7 +7330,7 @@ urb_admission_get(
 	if (error != 0) {
 		urb_admission_put(urb);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -7341,11 +7340,11 @@ urb_admission_get(
 	    interface_active_alternate(interface) != endpoint->alternate) {
 		urb_admission_put(urb);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -7391,7 +7390,7 @@ binding_admission_enter(
 	if (state != USB_BINDING_PROBING && state != USB_BINDING_BOUND) {
 		binding_submitter_put(owner);
 		*submitting_owner = NULL;
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
@@ -7416,13 +7415,13 @@ binding_admission_enter(
 		io_gate_exit(&owner->binding_gate);
 		binding_submitter_put(owner);
 		*submitting_owner = NULL;
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
 	urb->binding_owner = owner;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -7476,7 +7475,7 @@ device_control_lock(
 		/* Handles the device is disconnecting condition. */
 		if (device_is_disconnecting(device) ||
 		    device_is_quarantined(device)) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return ENODEV;
 		}
 
@@ -7519,12 +7518,8 @@ sync_data(
 		error = drv_usb_urb_setup(urb, buffer, length, 0, timeout_ms,
 					  NULL, NULL);
 	}
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = drv_usb_urb_submit(urb);
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = drv_usb_urb_wait_reusable(urb);
 
@@ -7552,10 +7547,10 @@ host_interface_reset_endpoints(
 	int error;
 
 	/*
- * Keep every core latch closed until all host-side endpoint state
+	 * Keep every core latch closed until all host-side endpoint state
 	 * agrees with the confirmed device-side reset.  A partial HCD reset is
-	 * visible only inside a subsequently quarantined device. */
-	/* Process each remaining element. */
+	 * visible only inside a subsequently quarantined device.
+	 */
 	for (index = 0; index < alternate->endpoint_count; index++) {
 		/* Checks the operation status. */
 		error = hcd->ops->endpoint_reset(hcd,
@@ -7570,7 +7565,7 @@ host_interface_reset_endpoints(
 					0U);
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -7614,7 +7609,7 @@ endpoint_binding_pin(
 	if (atomic_load_acquire(&owner->binding_state) != state) {
 		binding_submitter_put(owner);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
@@ -7639,12 +7634,12 @@ endpoint_binding_pin(
 		io_gate_exit(&owner->binding_gate);
 		binding_submitter_put(owner);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
 	*pinned_owner = owner;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 

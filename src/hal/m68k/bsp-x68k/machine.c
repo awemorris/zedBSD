@@ -1,5 +1,5 @@
 /* X68000 reset and power-control termination paths. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include <hal/hal.h>
 #include "mmio.h"

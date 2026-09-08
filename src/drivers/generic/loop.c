@@ -86,7 +86,7 @@ drv_loop_init(
 	for (i = 0; i < LOOP_MAX_DEVICES; i++)
 		loops[i].index = i;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -104,7 +104,7 @@ drv_loop_backing_disk_ref(
 	unsigned index;
 
 	/*
- * Distinguishes unsupported drivers from a recognized loop in teardown.
+	 * Distinguishes unsupported drivers from a recognized loop in teardown.
 	 */
 	if (disk == NULL || result == NULL)
 		return EINVAL;
@@ -114,8 +114,9 @@ drv_loop_backing_disk_ref(
 		return EOPNOTSUPP;
 
 	/*
- * Pins the backing while detach cannot withdraw its retained file
-	 * owner. */
+	 * Pins the backing while detach cannot withdraw its retained file
+	 * owner.
+	 */
 	backing = NULL;
 	irq = spin_lock_irqsave(&loop_lock);
 
@@ -145,7 +146,7 @@ drv_loop_backing_disk_ref(
 
 	/* Transfers one ordinary disk reference to the caller. */
 	*result = backing;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -172,14 +173,14 @@ drv_loop_get_index(
 			*index_out = i;
 			spin_unlock_irqrestore(&loop_lock, irq);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
 
 	spin_unlock_irqrestore(&loop_lock, irq);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENODEV;
 }
 
@@ -214,8 +215,9 @@ drv_loop_attach_file(
 		return error;
 
 	/*
- * Retires optional caches before reserving independent backing
-	 * ownership. */
+	 * Retires optional caches before reserving independent backing
+	 * ownership.
+	 */
 	if (vm_object_cache_drain != NULL)
 		(void)vm_object_cache_drain(NULL);
 	backing_inode = backing->f_inode;
@@ -227,13 +229,11 @@ drv_loop_attach_file(
 		error = loop_finalize_claim(backing, claim, &map, &map_count);
 	else if (error == EOPNOTSUPP)
 		error = 0;
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		kern_free(map);
 		backing_claim_release(claim);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -245,7 +245,7 @@ drv_loop_attach_file(
 		kern_free(map);
 		backing_claim_release(claim);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -265,7 +265,7 @@ drv_loop_attach_file(
 		kern_free(map);
 		backing_claim_release(claim);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOSPC;
 	}
 
@@ -298,8 +298,9 @@ drv_loop_attach_file(
 	disk->d_data = loop;
 
 	/*
- * Keeps media admission tied to the backing without remapping loop
-	 * blocks. */
+	 * Keeps media admission tied to the backing without remapping loop
+	 * blocks.
+	 */
 	if (backing_inode->i_mount != NULL)
 		disk->d_media_backing = backing_inode->i_mount->m_disk;
 	loop->flags = flags;
@@ -337,13 +338,14 @@ drv_loop_attach_file(
 	spin_unlock_irqrestore(&loop_lock, irq);
 
 	/*
- * Probe before the backing filesystem is hidden below a mounted loop.
+	 * Probe before the backing filesystem is hidden below a mounted loop.
 	 * Runtime BLKGETIDENTITY then reads the immutable cached identity and
-	 * never re-enters the mounted backing file. */
+	 * never re-enters the mounted backing file.
+	 */
 
 	(void)block_identity_get(disk, &identity);
 	*disk_out = disk;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail_refs:
@@ -455,7 +457,7 @@ drv_loop_detach(
 	if (loop->detaching) {
 		spin_unlock_irqrestore(&loop_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -500,7 +502,7 @@ drv_loop_detach(
 	memset(loop, 0, sizeof(*loop));
 	loop->index = index;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 retryable:
@@ -539,7 +541,7 @@ loop_backing_valid(
 	/* Handles the inode condition. */
 	if (inode->i_type != INODE_REG || inode->i_size <= 0 ||
 	    ((uint32_t)inode->i_size & (LOOP_SECTOR_SIZE - 1U)) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -550,14 +552,14 @@ loop_backing_valid(
 	/* Checks the file status flags get result. */
 	if (flags == LOOP_READ_WRITE &&
 	    (file_status_flags_get(backing) & O_ACCMODE) == O_RDONLY) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBADF;
 	}
 
 	/* Handles the i mount availability. */
 	if (flags == LOOP_READ_WRITE && inode->i_mount != NULL &&
 	    (inode->i_mount->m_flags & MOUNT_READ_ONLY) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EROFS;
 	}
 
@@ -569,18 +571,18 @@ loop_backing_valid(
 	if (inode->i_mount != NULL && inode->i_mount->m_type != NULL &&
 	    inode->i_mount->m_type->fs_name != NULL &&
 	    !strcmp(inode->i_mount->m_type->fs_name, "overlay")) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ELOOP;
 	}
 
 	/* Checks the drv loop get index result. */
 	if (inode->i_mount != NULL && inode->i_mount->m_disk != NULL &&
 	    drv_loop_get_index(inode->i_mount->m_disk, &loop_index) == 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ELOOP;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -622,7 +624,7 @@ loop_finalize_claim(
 	if (collection.map == NULL) {
 		kern_free(collection.extents);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -649,8 +651,6 @@ loop_finalize_claim(
 	error = backing_claim_finalize(claim, collection.extents,
 				       collection.count);
 out:
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		*map = collection.map;
 		*map_count = collection.count;
@@ -681,7 +681,7 @@ loop_collect_extent(
 	/* Handles the file block condition. */
 	if (file_block != collection->next_block || count == 0 ||
 	    file_block > UINT64_MAX - count) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	collection->next_block += count;
@@ -703,7 +703,7 @@ loop_collect_extent(
 
 	collection->count++;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -737,7 +737,7 @@ loop_ioctl(
 	(void)request;
 	(void)argument;
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOTTY;
 }
 
@@ -768,7 +768,7 @@ loop_submit(
 		error = file_fsync_backend(loop->backing);
 		bio_complete(bio, error, 0);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -779,7 +779,7 @@ loop_submit(
 	/* Handles the bio condition. */
 	if (bio->b_block_count == 0 ||
 	    bio->b_block_count > LOOP_MAX_TRANSFER_BLOCKS) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	bytes64 = (uint64_t)bio->b_block_count * LOOP_SECTOR_SIZE;
@@ -793,7 +793,7 @@ loop_submit(
 	if (offset64 > loop->size_bytes ||
 	    bytes64 > loop->size_bytes - offset64 || offset64 > INT32_MAX ||
 	    bytes64 > (uint64_t)INT32_MAX - offset64) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOVERFLOW;
 	}
 	io_stats_record(bio->b_op == BIO_READ ? IO_LOOP_READ : IO_LOOP_WRITE,
@@ -816,8 +816,6 @@ loop_submit(
 		error = (int)-done;
 	else if ((uint64_t)done != bytes64)
 		error = bio->b_op == BIO_WRITE ? ENOSPC : EIO;
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		hal_printf(
 			"loop%u: %s block=%u count=%u flags=%x error=%d\n",
@@ -828,6 +826,6 @@ loop_submit(
 
 	bio_complete(bio, error, done > 0 ? (size_t)done : 0);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }

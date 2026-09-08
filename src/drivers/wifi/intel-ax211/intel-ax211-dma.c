@@ -102,7 +102,7 @@ drv_intel_ax211_dma_prepare_boot(
 	/* Handles the device availability. */
 	if (device == NULL || resources == NULL || firmware_length == 0U ||
 	    resources->device != NULL || resources->boot_prepared) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -127,26 +127,20 @@ drv_intel_ax211_dma_prepare_boot(
 	/* Checks the operation status. */
 	if (error == 0)
 		error = ax211_rx_buffers_allocate(resources);
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = ax211_scratch_build(resources, hardware_revision);
-
-	/* Checks the operation status. */
 	if (error == 0)
 		error = ax211_context_build(resources);
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		drv_intel_ax211_dma_release(resources);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	resources->boot_prepared = 1U;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -172,7 +166,7 @@ drv_intel_ax211_dma_prepare_pnvm(
 	    manifest->section_count == 0U ||
 	    manifest->section_count > INTEL_AX211_MAX_PNVM_SECTIONS ||
 	    manifest->total_length == 0U || manifest->total_length > UINT32_MAX) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	error = ax211_buffer_allocate(resources, &resources->pnvm_table,
@@ -207,8 +201,6 @@ drv_intel_ax211_dma_prepare_pnvm(
 	if (error == 0 &&
 	    resources->pnvm_total_length != manifest->total_length)
 		error = EINVAL;
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		/* Process each remaining element. */
 		while (resources->pnvm_count != 0U) {
@@ -221,7 +213,7 @@ drv_intel_ax211_dma_prepare_pnvm(
 		resources->pnvm_total_length = 0U;
 		ax211_buffer_release(resources, &resources->pnvm_table);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -240,7 +232,7 @@ drv_intel_ax211_dma_prepare_pnvm(
 		       (uint32_t)resources->pnvm_total_length);
 	resources->pnvm_prepared = 1U;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -360,7 +352,7 @@ ax211_boot_manifest_validate(
 	    manifest->iml_length != INTEL_AX211_IML_SIZE ||
 	    !ax211_range_valid(manifest->iml_offset, manifest->iml_length,
 			       firmware_length)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	cpu_separator = manifest->lmac_count;
@@ -374,7 +366,7 @@ ax211_boot_manifest_validate(
 			if (section->destination !=
 				    INTEL_AX211_CPU1_CPU2_SEPARATOR ||
 			    section->length != 0U) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 		} else if (index == paging_separator) {
@@ -382,7 +374,7 @@ ax211_boot_manifest_validate(
 			if (section->destination !=
 				    INTEL_AX211_PAGING_SEPARATOR ||
 			    section->length != 0U) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 		} else if (section->destination ==
@@ -395,12 +387,12 @@ ax211_boot_manifest_validate(
 			   !ax211_range_valid(section->file_offset,
 					      section->length,
 					      firmware_length)) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -526,13 +518,13 @@ ax211_buffer_allocate(
 			AX211_DMA_SCRUB(buffer->address, buffer->size);
 		drv_dma_free_coherent(resources->device, buffer);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
 	memset(buffer->address, 0, buffer->size);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -554,7 +546,7 @@ ax211_firmware_buffers_allocate(
 	if (!ax211_range_valid(manifest->iml_offset, manifest->iml_length,
 			       length) ||
 	    manifest->iml_length != INTEL_AX211_IML_SIZE) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -697,7 +689,7 @@ ax211_scratch_build(
 				return EOVERFLOW;
 			offset = AX211_SCRATCH_PAGING_OFFSET + paging++ * 8U;
 		} else {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 

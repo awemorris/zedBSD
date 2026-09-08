@@ -369,7 +369,7 @@ drv_intel_ax211_scan_event_accept(
 		state->phase = INTEL_AX211_SCAN_PHASE_TERMINAL;
 		state->abort_required = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -382,10 +382,10 @@ drv_intel_ax211_scan_event_accept(
 		result = ax211_scan_complete_decode(message, event);
 	else if (message->opcode == INTEL_AX211_SCAN_ITERATION_COMPLETE_OPCODE)
 		result = ax211_scan_iteration_decode(message, event);
-	else
-
+	else {
 		/* Returns the computed result. */
 		return INTEL_AX211_SCAN_UNSUPPORTED;
+	}
 
 	/* Checks the operation status. */
 	if (result == INTEL_AX211_SCAN_COMPLETE ||
@@ -516,7 +516,7 @@ ax211_scan_profile_valid(
 	    profile->channel_width_mhz != INTEL_AX211_SCAN_CHANNEL_WIDTH_MHZ ||
 	    profile->channel_count == 0U ||
 	    profile->channel_count > INTEL_AX211_SCAN_CHANNEL_LIMIT) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	/* Process each remaining element. */
@@ -528,7 +528,7 @@ ax211_scan_profile_valid(
 		       ((channel - 36U) % 4U) == 0U) ||
 		      (channel >= 149U && channel <= 181U &&
 		       ((channel - 149U) % 4U) == 0U))) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 		/* Process each remaining element. */
@@ -710,9 +710,9 @@ ax211_scan_complete_decode(
 	event->ebs_status = bytes[7U];
 
 	/*
- * Scheduling, iteration, EBS, elapsed-time, and reserved fields are
-	 * firmware reports.  They do not narrow the v1 completion contract. */
-	/* Obtains the ax211 scan status result result. */
+	 * Scheduling, iteration, EBS, elapsed-time, and reserved fields are
+	 * firmware reports.  They do not narrow the v1 completion contract.
+	 */
 	error = ax211_scan_status_result(event->status);
 
 	/* Returns the computed result. */
@@ -803,9 +803,10 @@ ax211_scan_iteration_decode(
 		result = bytes + 16U + index * 8U;
 
 		/*
- * Channel, band, and per-probe fields are informational
+		 * Channel, band, and per-probe fields are informational
 		 * reports. The UID and bounded result count fence this
-		 * notification. */
+		 * notification.
+		 */
 		event->channel[index].channel = result[0U];
 		event->channel[index].probe_status = result[2U];
 		event->channel[index].probe_not_sent = result[3U];
@@ -814,10 +815,11 @@ ax211_scan_iteration_decode(
 	}
 
 	/*
- * API89 firmware may publish the complete 112-entry result storage even
+	 * API89 firmware may publish the complete 112-entry result storage even
 	 * when scanned_channels says only one entry is live.  Decode exactly
 	 * that bounded prefix and ignore the remaining fixed-array storage.
 	 * This is an iteration report, not the terminal UMAC completion;
-	 * SCAN_COMPLETE_UMAC owns lifetime. */
+	 * SCAN_COMPLETE_UMAC owns lifetime.
+	 */
 	return INTEL_AX211_SCAN_OK;
 }

@@ -250,7 +250,7 @@ drv_intel_ax211_transport_configure_msix(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -263,7 +263,7 @@ drv_intel_ax211_transport_configure_msix(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -311,7 +311,7 @@ drv_intel_ax211_transport_initialize_rings(
 	memset(transport->rx_published, 0, sizeof(transport->rx_published));
 
 	/*
- * Publishes the cleared command objects before any doorbell can ring.
+	 * Publishes the cleared command objects before any doorbell can ring.
 	 */
 	result =
 		ax211_dma_sync(transport, INTEL_AX211_TRANSPORT_DMA_COMMAND_TFD,
@@ -347,7 +347,7 @@ drv_intel_ax211_transport_initialize_rings(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -370,7 +370,7 @@ drv_intel_ax211_transport_initialize_rings(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -403,7 +403,7 @@ drv_intel_ax211_transport_initialize_rings(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -414,7 +414,7 @@ drv_intel_ax211_transport_initialize_rings(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -427,7 +427,7 @@ drv_intel_ax211_transport_initialize_rings(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -466,18 +466,14 @@ drv_intel_ax211_transport_enable_firmware_interrupts(
 	result = ax211_csr_write(transport, AX211_CSR_INT, UINT32_MAX);
 	if (result == INTEL_AX211_TRANSPORT_OK)
 		result = ax211_mask_all(transport);
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_TRANSPORT_OK)
 		result = ax211_ack_raw(transport, &flow_handler, &hardware);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_TRANSPORT_OK) {
 		ax211_mask_all_best_effort(transport);
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -494,14 +490,12 @@ drv_intel_ax211_transport_enable_firmware_interrupts(
 	/* Checks the operation result. */
 	if (result == INTEL_AX211_TRANSPORT_OK)
 		result = ax211_csr_write(transport, AX211_CSR_INT, UINT32_MAX);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_TRANSPORT_OK) {
 		ax211_mask_all_best_effort(transport);
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -514,7 +508,7 @@ drv_intel_ax211_transport_enable_firmware_interrupts(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -533,7 +527,7 @@ drv_intel_ax211_transport_enable_firmware_interrupts(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -583,7 +577,7 @@ drv_intel_ax211_transport_enable_runtime_interrupts(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -619,12 +613,10 @@ drv_intel_ax211_transport_disable_interrupts(
 	transport->enabled_hw_causes = 0U;
 	transport->interrupts_enabled = 0U;
 	transport->firmware_load_mode = 0U;
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_TRANSPORT_OK) {
 		transport->failed = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -662,7 +654,7 @@ drv_intel_ax211_transport_interrupt_claim(
 	if (result != INTEL_AX211_TRANSPORT_OK) {
 		transport->failed = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -782,7 +774,7 @@ drv_intel_ax211_transport_activate_rx(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -821,7 +813,7 @@ drv_intel_ax211_transport_rx_refresh(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -835,7 +827,7 @@ drv_intel_ax211_transport_rx_refresh(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -961,7 +953,7 @@ drv_intel_ax211_transport_rx_replenish(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -977,7 +969,7 @@ drv_intel_ax211_transport_rx_replenish(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -1007,7 +999,7 @@ drv_intel_ax211_transport_rx_replenish(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -1082,10 +1074,11 @@ drv_intel_ax211_transport_command_prepare_inline(
 	tfd = transport->memory.command_tfd + tfd_offset;
 
 	/*
- * API 89 rejects the original four-byte group-zero command form. Legacy
+	 * API 89 rejects the original four-byte group-zero command form. Legacy
 	 * logical commands are therefore carried by LONG_GROUP on the wire,
 	 * just as the pinned OpenBSD implementation does for firmware API
-	 * >= 50. */
+	 * >= 50.
+	 */
 	memset(slot, 0, INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
 	header_size = INTEL_AX211_WIDE_COMMAND_HEADER_SIZE;
 
@@ -1172,7 +1165,7 @@ drv_intel_ax211_transport_command_prepare_inline(
 		memset(tfd, 0, INTEL_AX211_TFD_SIZE);
 		ax211_command_rollback(transport);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -1328,7 +1321,7 @@ drv_intel_ax211_transport_command_prepare_external(
 			return scrub_result;
 		}
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -1371,14 +1364,12 @@ drv_intel_ax211_transport_command_publish(
 	}
 
 	/*
- * A write error is ambiguous: hardware may have consumed the doorbell.
+	 * A write error is ambiguous: hardware may have consumed the doorbell.
 	 */
 	result = ax211_csr_write(transport, AX211_HBUS_TARG_WRPTR,
 				 ((uint32_t)token->queue << 16) |
 					 transport->command_ring.head);
 	transport->command_prepared = 0U;
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_TRANSPORT_OK) {
 		transport->command_reset_required = 1U;
 
@@ -1439,8 +1430,6 @@ drv_intel_ax211_transport_command_abort_prepared(
 	result = INTEL_AX211_TRANSPORT_OK;
 	if (external)
 		result = ax211_command_external_scrub(transport);
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_TRANSPORT_OK) {
 		result = ax211_dma_sync(
 			transport, INTEL_AX211_TRANSPORT_DMA_COMMAND_SLOTS,
@@ -1461,7 +1450,7 @@ drv_intel_ax211_transport_command_abort_prepared(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -1563,8 +1552,6 @@ drv_intel_ax211_transport_command_complete(
 	result = INTEL_AX211_TRANSPORT_OK;
 	if (external)
 		result = ax211_command_external_scrub(transport);
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_TRANSPORT_OK) {
 		result = ax211_dma_sync(
 			transport, INTEL_AX211_TRANSPORT_DMA_COMMAND_SLOTS,
@@ -1585,7 +1572,7 @@ drv_intel_ax211_transport_command_complete(
 		transport->failed = 1U;
 		transport->quiesced = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -1669,7 +1656,7 @@ drv_intel_ax211_transport_command_after_device_reset(
 		return INTEL_AX211_TRANSPORT_ORDER;
 
 	/*
- * The caller's reset guarantee makes every prior doorbell unobservable.
+	 * The caller's reset guarantee makes every prior doorbell unobservable.
 	 */
 	memset(transport->memory.command_slots, 0,
 	       transport->memory.command_slots_size);
@@ -1703,12 +1690,10 @@ drv_intel_ax211_transport_command_after_device_reset(
 	/* Checks the operation result. */
 	if (result == INTEL_AX211_TRANSPORT_OK)
 		result = ax211_command_external_scrub(transport);
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_TRANSPORT_OK) {
 		transport->failed = 1U;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -1767,12 +1752,10 @@ drv_intel_ax211_transport_quiesce(
 		transport->interrupts_enabled = 0U;
 		transport->enabled_fh_causes = 0U;
 		transport->enabled_hw_causes = 0U;
-
-		/* Checks the operation result. */
 		if (result != INTEL_AX211_TRANSPORT_OK) {
 			transport->failed = 1U;
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return result;
 		}
 
@@ -1781,7 +1764,7 @@ drv_intel_ax211_transport_quiesce(
 		if (result != INTEL_AX211_TRANSPORT_OK) {
 			transport->failed = 1U;
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return result;
 		}
 	}
@@ -1856,21 +1839,21 @@ ax211_ops_valid(
 	/* Handles the csr read32 availability. */
 	if (ops->csr_read32 == NULL || ops->csr_write32 == NULL ||
 	    ops->csr_write8 == NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the nic lock availability. */
 	if (ops->nic_lock == NULL || ops->nic_unlock == NULL ||
 	    ops->prph_read32 == NULL || ops->prph_write32 == NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the dma sync availability. */
 	if (ops->dma_sync == NULL || ops->delay_us == NULL ||
 	    ops->clock_us == NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1890,7 +1873,7 @@ ax211_profile_valid(
 	/* Handles the profile condition. */
 	if (profile->mac_type != INTEL_AX211_MMIO_MAC_SO &&
 	    profile->mac_type != INTEL_AX211_MMIO_MAC_SOF) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1901,7 +1884,7 @@ ax211_profile_valid(
 	/* Handles the profile condition. */
 	if (profile->integrated != 0U ||
 	    profile->umac_prph_offset != INTEL_AX211_MMIO_UMAC_PRPH_OFFSET) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1921,14 +1904,14 @@ ax211_memory_valid(
 	/* Handles the command tfd availability. */
 	if (memory->command_tfd == NULL ||
 	    memory->command_tfd_size != AX211_COMMAND_TFD_SIZE) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the command byte count availability. */
 	if (memory->command_byte_count == NULL ||
 	    memory->command_byte_count_size != AX211_COMMAND_BYTE_COUNT_SIZE) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1939,7 +1922,7 @@ ax211_memory_valid(
 	    (memory->command_slots_device_address & 63U) != 0U ||
 	    memory->command_slots_device_address >
 		    UINT64_MAX - AX211_COMMAND_SLOTS_SIZE) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -1950,28 +1933,28 @@ ax211_memory_valid(
 	    (memory->command_external_device_address & 63U) != 0U ||
 	    memory->command_external_device_address >
 		    UINT64_MAX - AX211_COMMAND_EXTERNAL_SIZE) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the rx transfer availability. */
 	if (memory->rx_transfer == NULL ||
 	    memory->rx_transfer_size != AX211_RX_TRANSFER_SIZE) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the rx completion availability. */
 	if (memory->rx_completion == NULL ||
 	    memory->rx_completion_size != AX211_RX_COMPLETION_SIZE) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the rx status availability. */
 	if (memory->rx_status == NULL ||
 	    memory->rx_status_size != AX211_RX_STATUS_SIZE) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -2195,7 +2178,7 @@ ax211_rx_descriptor_valid(
 	if (index >= INTEL_AX211_TRANSPORT_RX_DESCRIPTOR_COUNT ||
 	    device_address == 0U || (device_address & 0xfffU) != 0U ||
 	    device_address > UINT64_MAX - 4095U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -2216,7 +2199,7 @@ ax211_publish_rx_descriptor(
 	int result;
 
 	/*
- * Keeps the private boundary safe if an internal caller is added later.
+	 * Keeps the private boundary safe if an internal caller is added later.
 	 */
 	if (!ax211_rx_descriptor_valid(index, device_address))
 		return INTEL_AX211_TRANSPORT_INVALID;
@@ -2242,7 +2225,7 @@ ax211_publish_rx_descriptor(
 		memset(descriptor, 0, INTEL_AX211_TRANSPORT_RX_DESCRIPTOR_SIZE);
 		ax211_set_published(transport, index, 0);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 

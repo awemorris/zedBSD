@@ -1,5 +1,5 @@
 /* Early x86 boot-parameter record validation and kernel-owned storage. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 #include "boot-parameters.h"
 #include <boot/pc98-handoff.h>
 

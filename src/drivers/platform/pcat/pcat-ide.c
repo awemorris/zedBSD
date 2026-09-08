@@ -250,13 +250,11 @@ wait_not_busy(
 		status = inb(unit->control);
 		if (status == 0xffU)
 			return 0;
-
-		/* Checks the operation status. */
 		if (!(status & ATA_BSY))
 			return 1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -274,13 +272,11 @@ wait_drq(
 		status = inb(unit->control);
 		if (status == 0xffU || (status & (ATA_DF | ATA_ERR)))
 			return 0;
-
-		/* Checks the operation status. */
 		if (!(status & ATA_BSY) && (status & ATA_DRQ))
 			return 1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -393,7 +389,7 @@ transfer(
 		count -= chunk;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -444,8 +440,6 @@ ata_submit(
 		error = flush(unit);
 	else
 		error = EOPNOTSUPP;
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		hal_printf(
 			"ata: %s op=%u lba=%u count=%u error=%d status=%02X\n",
@@ -461,7 +455,7 @@ ata_submit(
 			     ? (size_t)bio->b_block_count * disk->d_block_size
 			     : 0);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -486,6 +480,6 @@ ata_ioctl(
 	geometry->heads = unit->heads;
 	geometry->sectors_per_track = unit->sectors;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }

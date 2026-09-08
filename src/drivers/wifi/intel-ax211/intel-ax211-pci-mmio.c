@@ -69,7 +69,7 @@ drv_intel_ax211_pci_mmio_backend_init(
 	/* Handles the backend availability. */
 	if (backend == NULL || registers == NULL ||
 	    mapping_size < AX211_PCI_MMIO_MINIMUM_SIZE) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	memset(&candidate, 0, sizeof(candidate));
@@ -80,7 +80,7 @@ drv_intel_ax211_pci_mmio_backend_init(
 	    frequency_hz > AX211_COUNTER_FREQUENCY_MAX_HZ) {
 		memset(backend, 0, sizeof(*backend));
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOTSUP;
 	}
 
@@ -91,7 +91,7 @@ drv_intel_ax211_pci_mmio_backend_init(
 	candidate.last_counter = origin_counter;
 	candidate.counter_ready = 1U;
 	*backend = candidate;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -117,7 +117,7 @@ ax211_backend_range_valid(
 	/* Handles the backend availability. */
 	if (backend == NULL || backend->registers == NULL ||
 	    (offset & 3U) != 0U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -149,7 +149,7 @@ ax211_backend_csr_read32(
 	if (*value == UINT32_MAX)
 		return EIO;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -168,7 +168,7 @@ ax211_backend_csr_write32(
 	*(volatile uint32_t *)(backend->registers + offset) = value;
 	hal_io_wmb();
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -265,7 +265,7 @@ ax211_backend_mul_div_reduced(
 	/* Handles the quotient availability. */
 	if (divisor == 0U || numerator >= divisor || quotient == NULL ||
 	    remainder == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	reduced = 0U;
@@ -273,9 +273,9 @@ ax211_backend_mul_div_reduced(
 	mask = UINT64_C(1) << 63;
 
 	/*
- * Accumulate the exact quotient and remainder one multiplier bit at a
-	 * time. */
-	/* Continue while the operation condition remains true. */
+	 * Accumulate the exact quotient and remainder one multiplier bit at a
+	 * time.
+	 */
 	while (mask != 0U) {
 		/* Handles the reduced condition. */
 		threshold = divisor - reduced;
@@ -313,7 +313,7 @@ ax211_backend_mul_div_reduced(
 
 	*quotient = result;
 	*remainder = reduced;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -362,7 +362,7 @@ ax211_backend_ticks_for_us(
 	}
 
 	*ticks = result;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -401,7 +401,7 @@ ax211_backend_ticks_to_us(
 	if (fractional > UINT64_MAX - result)
 		return EOVERFLOW;
 	*microseconds = result + fractional;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -422,7 +422,7 @@ ax211_backend_counter_read_checked(
 	/* Checks the hal rtc read counter result. */
 	if (!hal_rtc_read_counter(&current, &frequency_hz) ||
 	    frequency_hz != backend->counter_frequency_hz) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	observed = __atomic_load_n(&backend->last_counter, __ATOMIC_ACQUIRE);
@@ -444,7 +444,7 @@ ax211_backend_counter_read_checked(
 	}
 
 	*ticks = current;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -473,7 +473,7 @@ ax211_backend_microseconds_publish(
 						&observed, microseconds, 0,
 						__ATOMIC_ACQ_REL,
 						__ATOMIC_ACQUIRE)) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
@@ -495,7 +495,7 @@ ax211_backend_delay_us(
 	/* Handles the backend availability. */
 	if (backend == NULL || backend->registers == NULL ||
 	    !backend->counter_ready) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -559,7 +559,7 @@ ax211_backend_clock_us(
 	/* Handles the backend availability. */
 	if (backend == NULL || backend->registers == NULL || time_us == NULL ||
 	    !backend->counter_ready) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -584,7 +584,7 @@ ax211_backend_clock_us(
 	if (error != 0)
 		return error;
 	*time_us = converted;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 

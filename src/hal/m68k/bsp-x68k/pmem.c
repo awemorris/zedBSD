@@ -1,5 +1,5 @@
 /* MC68030/X68000 physical page allocator. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include <hal/hal.h>
 #include "bsp.h"

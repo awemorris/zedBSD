@@ -17,6 +17,29 @@ below are the canonical form for new and refactored code.
 Style-only changes must preserve evaluation order, ownership,
 lifetime, error reporting, and observable behavior.
 
+### 1.1. Why this style is verbose
+
+Compressed code, and the shortened or patterned idioms that the wider C
+world uses to raise visual legibility, read well for a visually dominant
+reader: the shape of the code carries the meaning, and the eye takes in a
+whole block at once.  A language-dominant reader does not read that way.
+For such a reader the shape carries nothing, the meaning has to be
+recovered word by word from the text itself, and a dense block of
+`GET32(...)` lines or a chain of `&&` clauses is harder to read than the
+same program written out at length.
+
+This tree is written for the language-dominant reader.  Frequent comments
+that state the linguistic meaning of a step are preferred over compact
+notation that states it visually.  One idea per line, one condition per
+`if`, one field per assignment, and a comment naming what the step means
+in the terms of the problem rather than of the language.  A macro that
+exists only to make repeated lines look alike is removed and its uses
+written out.
+
+This is not a novel invention.  NetBSD's KNF leans in the same direction:
+explicit statements over clever expressions, and prose comments over
+pattern recognition.
+
 The language baseline is ANSI C (C89/C90).  Do not use ordinary C99-or-later
 syntax where ANSI C expresses the same program.  Implementation-reserved
 extensions that are reliably supported by every configured compiler may be
@@ -40,6 +63,36 @@ An implementation-local macro may remain next to the `static inline` functions
 that use it when moving it to the top would make the implementation harder to
 read.  This is a narrow exception for macros that are inseparable from the
 local implementation.
+
+A function-like macro must earn its name.  A macro whose only job is to make a
+run of similar statements look alike hides exactly the part a reader needs:
+which field, which offset, which byte order.  Write the statements out, one per
+line, each with a comment naming what that line decodes or stores.
+
+Do not write:
+
+```c
+GET32(bsize, UFS_FS_BSIZE);
+GET32(fsize, UFS_FS_FSIZE);
+GET32(frag, UFS_FS_FRAG);
+```
+
+Write:
+
+```c
+/* The block size, which is the unit a whole file body is written in. */
+super->bsize = drv_ufs_get32(buffer, UFS_FS_BSIZE, swapped);
+
+/* The fragment size, which is the unit a file's tail is written in. */
+super->fsize = drv_ufs_get32(buffer, UFS_FS_FSIZE, swapped);
+
+/* How many fragments make up one block. */
+super->frag = drv_ufs_get32(buffer, UFS_FS_FRAG, swapped);
+```
+
+A macro that names a real operation of the problem domain -- appending an
+auxiliary vector entry, writing one step of a hardware power sequence, building
+one row of a name table -- is not a storm of this kind and stays.
 
 Every type definition carries a comment above it that says what role the type
 plays, not what its fields are.  Say what one instance stands for and what
@@ -78,6 +131,20 @@ collaborators are part of the file's structure, not commentary.  A weak
 declaration is what makes `if (optional_function != NULL)` a real test; without
 it the compiler treats the test as always true and `-Werror` rejects the file.
 Never drop either block while moving code between files.
+
+A variable placed in a named section says why it is there and what that
+section is for.  The attribute is a placement decision, and the reason for it
+lives nowhere else:
+
+```c
+/*
+ * The mount table.
+ *
+ * It lives in .vfs_bss because the file systems are brought up before the
+ * general allocator, and that section is mapped by the early boot path.
+ */
+static struct fat_mount_state fat_mounts[FAT_MOUNT_MAX] __attribute__((section(".vfs_bss")));
+```
 
 A group of weak declarations carries a comment that says why those symbols are
 optional -- which build leaves them out, and what a null test means at every
@@ -189,6 +256,18 @@ the declaration does not already say.  A value that is an error code is
 `error`; a count is `count` or `days_in_month`; a resolved object is named
 after the object.  `result` is acceptable only where the function genuinely has
 no better word for what it produces.
+
+A mechanical suffix is not a name.  `rollback_local1`, `offset_local2` and
+`raw_local3` are what a merge leaves behind when two functions each had a
+variable of the same name; keeping them documents the merge rather than the
+code.  Give each one the name its value deserves, and if two values in one
+function really are the same kind of thing, say which is which
+(`old_offset` and `new_offset`, not `offset` and `offset_local1`).
+
+Renaming a badly named variable to `error` is a fix only when the value is an
+error this function acts on.  In a wrapper that passes a callee's report
+straight back, the value is that callee's answer, and the name should say what
+was asked: `removed`, `attributes_error`, `lookup`.
 
 Put exactly one blank line between the function declaration group and the first
 executable statement.  Then write
@@ -571,7 +650,19 @@ Use this form for a comment that spans multiple lines:
  */
 ```
 
-Do not start a multi-line comment with prose on the opening `/*` line.
+Do not start a multi-line comment with prose on the opening `/*` line, and do
+not close one on the last line of prose.  Both delimiters stand alone:
+
+```c
+/*
+ * The scalar cache cannot keep four division lanes live cheaply.
+ * Keep this guard until the allocator exposes enough parallelism.
+ */
+```
+
+When a comment is replaced, the old one goes.  A vacuous template left above
+or below its replacement is worse than either comment alone, because a reader
+cannot tell which one the paragraph is documented by.
 
 A comment must add something the statement does not already say.  Restating
 the code in English is worse than no comment, because it looks as though the
@@ -589,7 +680,11 @@ are banned outright:
 /* Process each remaining element. */       /* above a for loop            */
 ```
 
-Say instead what the condition means, why the paragraph exists, or what the
+A function call is introduced by a comment saying what the call does, in the
+caller's terms.  A reader who does not know the callee should not have to open
+it to find out what this paragraph is for.
+
+Say what the condition means, why the paragraph exists, or what the
 returned value is to the caller: `Refuses a write to a read-only mount.`,
 `Reports why the entry could not be inserted.`, `Reports the number of days in
 the month.`  If no such sentence can be written, the paragraph boundary is
@@ -660,7 +755,11 @@ return 0;
 ```
 
 Say `Succeeded` on the success path, and add what succeeded when the caller
-gains something by it.  A function that classifies rather than reports an error
+gains something by it.  Put that success return last: every failure leaves the
+function early from its own `if`, so the final statement of the function is the
+one that reports that everything worked.  A function that ends on a failure
+path, or that computes a value into a variable only to return it, hides which
+outcome the reader is looking at.  A function that classifies rather than reports an error
 still separates the refusal from the answer:
 
 ```c
@@ -731,6 +830,7 @@ Before finishing a C-source change, verify that:
   order and spacing
 - compound decisions and fallible calls are individually debuggable
 - `goto` is used only for a single forward jump to a shared cleanup label
+- no function-like macro exists only to make repeated statements look alike
 - every loop and `switch` has an immediately preceding intent comment
 - split calls use one argument per line and split controlled statements use
   braces
@@ -752,8 +852,14 @@ Before finishing a C-source change, verify that:
   return separately, and the success return says so
 - no comment restates its statement: `Handles the ... condition.`,
   `Checks the operation status.`, `Returns the computed result.` and their
-  kind are absent
-- no variable is named `function_result`, and every name says what it holds
+  kind are absent, and no replaced comment is left standing beside its
+  replacement
+- every multi-line comment opens and closes on lines of its own
+- no variable is named `function_result` or carries a `_local` suffix, and
+  every name says what it holds
+- every function call has a comment saying what it does
+- the last statement of a function is its success return
+- a variable in a named section says why it is in that section
 - no function is called inside a condition, no Boolean is built from an
   expression, and no initializer calls a function
 - the conditional operator is used only for a short symmetric choice, and

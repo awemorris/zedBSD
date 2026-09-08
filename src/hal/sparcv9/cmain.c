@@ -1,5 +1,5 @@
 /* zedBSD SPARC V9/sun4u early C entry. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include <kern/sun4u/boot.h>
 #include <hal/hal.h>

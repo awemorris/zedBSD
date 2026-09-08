@@ -1,5 +1,5 @@
 /* SPARC V9 trap policy and initial trap self-tests. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include <hal/hal.h>
 #include "asi.h"

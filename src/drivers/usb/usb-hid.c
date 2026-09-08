@@ -1,7 +1,7 @@
 /* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 
 /* Begin consolidated hid-report.c. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 #include "drivers/hid/hid-report.h"
 
 #include "kern/kmem.h"
@@ -180,7 +180,7 @@ item_signed(
 	if (size != 1U && size != 2U && size != 4U)
 		return EINVAL;
 	*result = sign_extend(item_unsigned(data, size), (unsigned)size * 8U);
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -216,7 +216,7 @@ usage_value(
 	raw = item_unsigned(data, size);
 	if (size == 4U) {
 		*result = raw;
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -224,7 +224,7 @@ usage_value(
 	if (global->usage_page > UINT16_MAX)
 		return EOPNOTSUPP;
 	*result = (global->usage_page << 16U) | raw;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -344,7 +344,7 @@ add_report(
 	memset(report, 0, sizeof(*report));
 	report->id = id;
 	*result = report;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -365,7 +365,7 @@ add_capability(
 		/* Handles the layout condition. */
 		if (layout->capabilities[index].type == type &&
 		    layout->capabilities[index].code == code) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
@@ -377,7 +377,7 @@ add_capability(
 	layout->capabilities[layout->capability_count].code = code;
 	layout->capability_count++;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -419,7 +419,7 @@ add_absolute_axis(
 	axis->info.maximum = maximum;
 	axis->info.value = minimum;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -626,7 +626,7 @@ usage_to_event(
 			/* Reports operation failure. */
 			return 1;
 		default:
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
@@ -644,7 +644,7 @@ usage_to_event(
 		/* Reports operation failure. */
 		return 1;
 	default:
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 }
@@ -751,7 +751,7 @@ add_field(
 			if (field->report_id == report->id &&
 			    field->kind != HID_FIELD_KEYBOARD_ARRAY &&
 			    field->type == type && field->code == code) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 		}
@@ -760,7 +760,7 @@ add_field(
 	/* Checks the operation status. */
 	if (kind != HID_FIELD_KEYBOARD_ARRAY &&
 	    (error = add_capability(layout, type, code)) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -768,7 +768,7 @@ add_field(
 	if (type == EV_ABS &&
 	    (error = add_absolute_axis(layout, code, logical_minimum,
 				       logical_maximum)) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 	field = &layout->fields[layout->field_count++];
@@ -786,7 +786,7 @@ add_field(
 	report->field_count++;
 	parser->supported_field_seen = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -810,7 +810,7 @@ add_keyboard_array_capabilities(
 	/* Handles the page condition. */
 	if (page != HID_USAGE_PAGE_KEYBOARD ||
 	    page != (uint16_t)(maximum >> 16U)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 	/* Process each element required by the operation. */
@@ -830,7 +830,7 @@ add_keyboard_array_capabilities(
 			return error;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -866,7 +866,7 @@ parse_input(
 	/* Checks the parser state. */
 	if (parser->global.report_size == 0U ||
 	    parser->global.report_count == 0U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -888,7 +888,7 @@ parse_input(
 		report = find_report(layout, 0);
 		if (report == NULL &&
 		    (error = add_report(layout, 0, &report)) != 0) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	} else {
@@ -916,7 +916,7 @@ parse_input(
 	if ((flags & HID_INPUT_CONSTANT) != 0) {
 		report->bit_count += bits;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -932,7 +932,7 @@ parse_input(
 	/* Checks the logical range fits field result. */
 	if (!logical_range_fits_field(parser->global.logical_minimum,
 				      logical_max, parser->global.report_size)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -941,7 +941,7 @@ parse_input(
 		/* Checks the parser state. */
 		if (parser->local.usage_count != 1U ||
 		    !parser->local.usages[0].is_range) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EOPNOTSUPP;
 		}
 
@@ -954,7 +954,7 @@ parse_input(
 		/* Checks the parser state. */
 		if (parser->global.logical_minimum < 0 ||
 		    logical_max > (int32_t)UINT16_MAX) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 
@@ -1030,7 +1030,7 @@ parse_input(
 advance:
 	report->bit_count += bits;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1052,7 +1052,7 @@ parse_main(
 	if (error != 0) {
 		local_clear(&parser->local);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1140,7 +1140,7 @@ parse_global(
 			return EOPNOTSUPP;
 		parser->global.usage_page = value;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case HID_GLOBAL_LOGICAL_MINIMUM:
 
@@ -1150,7 +1150,7 @@ parse_global(
 		if (error == 0)
 			parser->global.logical_minimum_set = 1;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	case HID_GLOBAL_LOGICAL_MAXIMUM:
 		/* Checks the current data size. */
@@ -1160,7 +1160,7 @@ parse_global(
 		parser->global.logical_maximum_size = (uint8_t)size;
 		parser->global.logical_maximum_set = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case HID_GLOBAL_REPORT_SIZE:
 		/* Checks the current data size. */
@@ -1168,7 +1168,7 @@ parse_global(
 			return EINVAL;
 		parser->global.report_size = item_unsigned(data, size);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case HID_GLOBAL_REPORT_COUNT:
 		/* Checks the current data size. */
@@ -1176,7 +1176,7 @@ parse_global(
 			return EINVAL;
 		parser->global.report_count = item_unsigned(data, size);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case HID_GLOBAL_REPORT_ID:
 		/* Checks the current data size. */
@@ -1204,7 +1204,7 @@ parse_global(
 			return E2BIG;
 		parser->global_stack[parser->global_depth++] = parser->global;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case HID_GLOBAL_POP:
 		/* Checks the current data size. */
@@ -1212,7 +1212,7 @@ parse_global(
 			return EINVAL;
 		parser->global = parser->global_stack[--parser->global_depth];
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case 3U: /* Physical Minimum */
 	case 4U: /* Physical Maximum */
@@ -1222,7 +1222,7 @@ parse_global(
 		/* These globals cannot change supported input decoding. */
 		return size == 1U || size == 2U || size == 4U ? 0 : EINVAL;
 	default:
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 }
@@ -1255,7 +1255,7 @@ parse_local(
 	/* Handles the tag condition. */
 	if (tag != HID_LOCAL_USAGE && tag != HID_LOCAL_USAGE_MINIMUM &&
 	    tag != HID_LOCAL_USAGE_MAXIMUM) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 
@@ -1274,7 +1274,7 @@ parse_local(
 		span->maximum = usage;
 		span->is_range = 0;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case HID_LOCAL_USAGE_MINIMUM:
 		/* Checks the parser state. */
@@ -1291,7 +1291,7 @@ parse_local(
 		span->is_range = 1;
 		parser->local.range_open = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case HID_LOCAL_USAGE_MAXIMUM:
 		/* Checks the parser state. */
@@ -1302,16 +1302,16 @@ parse_local(
 		span = &parser->local.usages[parser->local.open_range];
 		if ((span->minimum >> 16U) != (usage >> 16U) ||
 		    span->minimum > usage) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 		span->maximum = usage;
 		parser->local.range_open = 0;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	default:
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 }
@@ -1374,8 +1374,6 @@ parse_descriptor(
 		} else {
 			error = EOPNOTSUPP;
 		}
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 		offset += size;
@@ -1393,7 +1391,7 @@ parse_descriptor(
 	if (!parser->supported_field_seen)
 		return EOPNOTSUPP;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1456,24 +1454,22 @@ drv_hid_report_layout_parse(
 	if (parser == NULL) {
 		kern_free(layout);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
 	parser->layout = layout;
 	error = parse_descriptor(parser);
 	kern_free(parser);
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		kern_free(layout);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	*result = layout;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1504,12 +1500,12 @@ boot_layout_begin(
 	if (error != 0) {
 		kern_free(layout);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	*layout_result = layout;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1545,7 +1541,7 @@ drv_hid_report_layout_boot_keyboard(
 	if (parser == NULL) {
 		kern_free(layout);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -1587,7 +1583,7 @@ drv_hid_report_layout_boot_keyboard(
 	report->bit_count = 64U;
 	kern_free(parser);
 	*result = layout;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 fail:
 	kern_free(parser);
@@ -1628,7 +1624,7 @@ drv_hid_report_layout_boot_mouse(
 	if (parser == NULL) {
 		kern_free(layout);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -1663,7 +1659,7 @@ drv_hid_report_layout_boot_mouse(
 	report->bit_count = 24U;
 	kern_free(parser);
 	*result = layout;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 fail:
 	kern_free(parser);
@@ -1711,7 +1707,7 @@ drv_hid_report_layout_get_info(
 	result->absolute_axis_count = layout->absolute_axis_count;
 	result->uses_report_ids = layout->uses_report_ids;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1742,7 +1738,7 @@ drv_hid_report_layout_get_report(
 			       (layout->uses_report_ids ? 1U : 0U);
 	result->field_count = report->field_count;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1766,7 +1762,7 @@ drv_hid_report_layout_get_capability(
 	if (index >= layout->capability_count)
 		return ENOENT;
 	*result = layout->capabilities[index];
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1790,7 +1786,7 @@ drv_hid_report_layout_get_absolute_axis(
 	if (index >= layout->absolute_axis_count)
 		return ENOENT;
 	*result = layout->absolute_axes[index];
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1815,7 +1811,7 @@ extract_value(
 	available_bits = length > SIZE_MAX / 8U ? SIZE_MAX : length * 8U;
 	if (bit_size == 0U || bit_size > 32U || bit_offset > available_bits ||
 	    bit_size > available_bits - bit_offset) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	/* Process each remaining element. */
@@ -1828,7 +1824,7 @@ extract_value(
 	}
 
 	*result = value;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1869,7 +1865,7 @@ decode_field_value(
 		return EINVAL;
 	*raw_result = raw;
 	*value_result = value;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1894,7 +1890,7 @@ key_already_present(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1923,7 +1919,7 @@ append_value(
 	entry->code = code;
 	entry->value = value;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1991,7 +1987,7 @@ drv_hid_report_decode(
 	/* Handles the layout condition. */
 	if (layout->profile == HID_LAYOUT_PROFILE_BOOT_KEYBOARD &&
 	    data[1] != 0U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -2020,7 +2016,7 @@ drv_hid_report_decode(
 			if (raw_local > UINT16_MAX ||
 			    usage < field_local->usage_minimum ||
 			    usage > field_local->usage_maximum) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 
@@ -2077,17 +2073,15 @@ drv_hid_report_decode(
 			error = append_value(result, field_local1->type,
 					     field_local1->code, value_local3);
 		}
-
-		/* Checks the operation status. */
 		if (error != 0) {
 			memset(result, 0, sizeof(*result));
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 /* End consolidated hid-report.c. */
@@ -2221,7 +2215,7 @@ usb_hid_report_descriptor_length(
 		entries = descriptor[5];
 		if (entries == 0U || entries > (length - 6U) / 3U ||
 		    6U + entries * 3U != length) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 		/* Process each element required by the operation. */
@@ -2236,7 +2230,7 @@ usb_hid_report_descriptor_length(
 			if (report_length == 0U ||
 			    report_length > HID_REPORT_DESCRIPTOR_SIZE_MAX ||
 			    found != 0U) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EINVAL;
 			}
 			found = report_length;
@@ -2247,7 +2241,7 @@ usb_hid_report_descriptor_length(
 	if (found == 0U)
 		return ENOENT;
 	*result = found;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2313,15 +2307,15 @@ usb_hid_endpoint_capacity(
 		}
 
 		*result = capacity;
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	} else {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
 	*result = (size_t)payload * packets;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2348,7 +2342,7 @@ usb_hid_find_endpoint(
 	if (extra != NULL)
 		return EOPNOTSUPP;
 	*result = endpoint;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2388,8 +2382,6 @@ usb_hid_fetch_layout(
 		descriptor_length, USB_HID_CONTROL_TIMEOUT_MS, &actual);
 	if (error == 0 && actual != descriptor_length)
 		error = EIO;
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		error = drv_hid_report_layout_parse(
 			descriptor, descriptor_length, &hid->layout);
@@ -2459,7 +2451,7 @@ usb_hid_fetch_layout(
 		return EOVERFLOW;
 	hid->buffer_size = maximum_report;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2517,7 +2509,7 @@ usb_hid_has_capability(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2859,9 +2851,10 @@ usb_hid_runtime_stop(
 	spin_unlock_irqrestore(&hid->lock, irq);
 
 	/*
- * Remove a device which cannot be rearmed instead of leaving a visible
+	 * Remove a device which cannot be rearmed instead of leaving a visible
 	 * event node that can never produce another report.  Detach joins this
-	 * worker before attempting the same idempotent unpublication. */
+	 * worker before attempting the same idempotent unpublication.
+	 */
 	usb_hid_unpublish(hid);
 
 	/* Handles the report condition. */
@@ -2959,10 +2952,11 @@ usb_hid_worker(
 			error = usb_hid_arm(hid);
 			if (error != 0) {
 				/*
- * EBUSY is expected only after detach closes
+				 * EBUSY is expected only after detach closes
 				 * admission.  In that case detach owns
 				 * publication; any other EBUSY is still a
-				 * terminal always-on-URB contract failure. */
+				 * terminal always-on-URB contract failure.
+				 */
 				irq = spin_lock_irqsave(&hid->lock);
 				stopping_now = hid->stopping != 0U;
 
@@ -3110,10 +3104,11 @@ usb_hid_activate(
 	}
 
 	/*
- * The first accepted request is part of the attach transaction.  A
+	 * The first accepted request is part of the attach transaction.  A
 	 * publication which can never receive a report is not a successful HID
 	 * attachment.  Synchronous completion is safe: its callback only
-	 * records work for the worker which is started below. */
+	 * records work for the worker which is started below.
+	 */
 
 	/* Checks the operation status. */
 	error = usb_hid_arm(hid);
@@ -3205,7 +3200,7 @@ usb_hid_attach(
 	interface_descriptor = drv_usb_interface_descriptor(interface);
 	if (interface_descriptor == NULL ||
 	    interface_descriptor->interface_class != USB_HID_CLASS) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
@@ -3229,8 +3224,9 @@ usb_hid_attach(
 		goto fail;
 
 	/*
- * Report Protocol is a checked publication prerequisite.  There is no
-	 * Boot-Protocol fallback for malformed or unsupported devices. */
+	 * Report Protocol is a checked publication prerequisite.  There is no
+	 * Boot-Protocol fallback for malformed or unsupported devices.
+	 */
 
 	/* Checks the operation status. */
 	error = usb_hid_set_report_protocol(hid);
@@ -3280,7 +3276,7 @@ usb_hid_attach(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -3342,8 +3338,9 @@ usb_hid_detach(
 		return drain_error != 0 ? drain_error : join_error;
 
 	/*
- * drv_input_device_unregister performs the one terminal held-key/button
-	 * release before it detaches the old event generation. */
+	 * drv_input_device_unregister performs the one terminal held-key/button
+	 * release before it detaches the old event generation.
+	 */
 	usb_hid_unpublish(hid);
 	(void)drv_usb_interface_set_driver_data(interface, NULL);
 
@@ -3360,7 +3357,7 @@ usb_hid_detach(
 		drv_hid_report_layout_destroy(hid->layout);
 	hal_free(hid);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3382,7 +3379,7 @@ usb_hid_match(
 		    0 ||
 	    usb_hid_find_endpoint(interface, &endpoint) != 0 ||
 	    usb_hid_endpoint_capacity(interface, endpoint, &capacity) != 0) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -3462,9 +3459,10 @@ drv_usb_hid_input_ready(
 			hid->pending = 0U;
 
 			/*
- * Pin the state against detach before dropping the list
+			 * Pin the state against detach before dropping the list
 			 * lock. Detach closes admission and joins this
-			 * activation flag. */
+			 * activation flag.
+			 */
 			hid_irq = spin_lock_irqsave(&hid->lock);
 
 			/* Handles the hid condition. */
@@ -3486,9 +3484,10 @@ drv_usb_hid_input_ready(
 			return;
 
 		/*
- * A stopped generation was removed by detach and owns its own
+		 * A stopped generation was removed by detach and owns its own
 		 * free. Continue draining later pending interfaces instead of
-		 * treating it as the end of the list. */
+		 * treating it as the end of the list.
+		 */
 		if (claimed == NULL)
 			continue;
 

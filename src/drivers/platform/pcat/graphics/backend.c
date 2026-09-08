@@ -2,7 +2,8 @@
 
 /*
  * PC/AT boot framebuffer, Cirrus GD5446, and standard VGA backends.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+ * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ */
 #include "drivers/platform/pcat/graphics/backend.h"
 #include "drivers/platform/pcat/graphics/font.h"
 #include "drivers/graphics/pcat.h"
@@ -1058,7 +1059,7 @@ cirrus_attach(
 			   (unsigned)(bar.size / 1024U));
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1081,6 +1082,6 @@ cirrus_detach(
 	cirrus_device = NULL;
 	cirrus_present = 0;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }

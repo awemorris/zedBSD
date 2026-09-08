@@ -1002,8 +1002,6 @@ block_fsync(
 		return ENXIO;
 
 	/* Flushes the disk. */
-
-	/* Reports why the flush failed. */
 	error = disk_sync(file->f_data);
 	if (error != 0)
 		return error;
@@ -1065,8 +1063,6 @@ block_ioctl(
 	}
 
 	/* Forwards everything else to the disk. */
-
-	/* Reports why the disk's failed. */
 	error = disk_ioctl(file->f_data, request, (void *)argument);
 	if (error != 0)
 		return error;
@@ -1094,6 +1090,7 @@ devfs_mount_impl(
 	root = inode_alloc(mountp);
 	if (root == NULL)
 		goto no_space;
+
 	root->i_type = INODE_DIR;
 	root->i_ino = 1;
 	root->i_op = &devfs_inode_ops;
@@ -1101,10 +1098,13 @@ devfs_mount_impl(
 	root->i_linkcount = 1;
 	root->i_mode = S_IFDIR | 0555U;
 	root->i_flags = INODE_NOCACHE_CHILDREN;
+
 	if (devfs_fixed_inode(root, DEVFS_SHM_INO, &shm) != 0)
 		goto no_space;
+
 	if (devfs_fixed_inode(root, DEVFS_PTS_INO, &pts) != 0)
 		goto no_space;
+
 	if (devfs_fixed_inode(root, DEVFS_INPUT_INO, &input) != 0)
 		goto no_space;
 
@@ -1144,14 +1144,17 @@ devfs_statvfs(
 
 	/* Reports the entries left after the character devices. */
 	character_count = cdev_count();
+
 	memset(result, 0, sizeof(*result));
 	result->f_bsize = 1U;
 	result->f_frsize = 1U;
 	result->f_files = DEVFS_ENTRY_MAX;
+
 	if (character_count < DEVFS_ENTRY_MAX)
 		result->f_ffree = DEVFS_ENTRY_MAX - character_count;
 	else
 		result->f_ffree = 0;
+
 	result->f_favail = result->f_ffree;
 	result->f_namemax = DEVFS_NAME_MAX - 1U;
 

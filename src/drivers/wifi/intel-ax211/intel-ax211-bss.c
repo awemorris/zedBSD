@@ -278,9 +278,10 @@ drv_intel_ax211_bss_cache_observe(
 			    entry->source ==
 				    INTEL_AX211_BSS_SOURCE_PROBE_RESPONSE) {
 				/*
- * Common scan admission refreshes these
+				 * Common scan admission refreshes these
 				 * selection fields even when private beacon
-				 * timing remains authoritative. */
+				 * timing remains authoritative.
+				 */
 				cache->entry[index].rssi_dbm = entry->rssi_dbm;
 				cache->entry[index].last_seen_ticks =
 					entry->last_seen_ticks;
@@ -318,8 +319,9 @@ drv_intel_ax211_bss_cache_observe(
 	}
 
 	/*
- * Mirror the common 64-entry scan cache's deterministic admission rule
-	 * so every BSS it can publish remains representable here. */
+	 * Mirror the common 64-entry scan cache's deterministic admission rule
+	 * so every BSS it can publish remains representable here.
+	 */
 	index = 0U;
 	/* Process each element required by the operation. */
 	for (available = 1U; available < INTEL_AX211_BSS_CACHE_LIMIT;
@@ -660,28 +662,28 @@ ax211_bss_entry_valid(
 	    entry->hardware_epoch == 0U || entry->channel == 0U ||
 	    entry->beacon_interval_tu == 0U ||
 	    !ax211_bss_address_valid(entry->bssid)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the entry condition. */
 	if (entry->source != INTEL_AX211_BSS_SOURCE_BEACON &&
 	    entry->source != INTEL_AX211_BSS_SOURCE_PROBE_RESPONSE) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the entry condition. */
 	if (entry->tim_valid > 1U || entry->wmm_present > 1U ||
 	    entry->receive_tsf_valid > 1U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the entry condition. */
 	if (entry->tim_valid != 0U && (entry->dtim_period == 0U ||
 				       entry->dtim_count >= entry->dtim_period)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 

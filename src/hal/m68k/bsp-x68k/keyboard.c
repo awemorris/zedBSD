@@ -1,5 +1,5 @@
 /* X68000 keyboard receiver using the MC68901 USART and IRQ 0x4c. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include <hal/hal.h>
 #include "keyboard.h"

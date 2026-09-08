@@ -180,7 +180,8 @@ namecache_enter(
 	entries[slot].child = child;
 	/*
 	 * A concurrent mutation after admission leaves an old sequence, which
-	 * lookup rejects.  Never promote an older lookup to the current sequence. */
+	 * lookup rejects.  Never promote an older lookup to the current sequence.
+	 */
 	entries[slot].parent_dirseq = observed_sequence;
 	entries[slot].length = name->cn_namelen;
 	memcpy(entries[slot].name, name->cn_nameptr, name->cn_namelen);

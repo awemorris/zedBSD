@@ -1,10 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
 /*
- * zedBSD RTL8822B security and station data path
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * RTL8822B security and station data path
+ */
+
 #include "rtl8822b-internal.h"
 
 #include <errno.h>
@@ -93,10 +97,10 @@ drv_rtl8822b_tx_queues_empty(
 	int error;
 
 	/*
- * rtw8822b uses the 16-bit reserved/available counter pair for every
+	 * rtw8822b uses the 16-bit reserved/available counter pair for every
 	 * priority queue.  Read the complete snapshot even after finding a busy
-	 * queue so a deadline or transport failure is never hidden as EBUSY. */
-	/* Process each remaining element. */
+	 * queue so a deadline or transport failure is never hidden as EBUSY.
+	 */
 	for (index = 0U;
 	     index < sizeof(queue_registers) / sizeof(queue_registers[0]);
 	     index++) {
@@ -137,7 +141,7 @@ drv_rtl8822b_security_set_association(
 	/* Handles the bssid availability. */
 	if (bssid == NULL || (bssid[0] & 1U) != 0U || aid == 0U ||
 	    aid > 0x07ffU) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	low = (uint32_t)bssid[0] | ((uint32_t)bssid[1] << 8) |
@@ -252,7 +256,7 @@ drv_rtl8822b_cam_program_ccmp(
 	/* Checks the cam ccmp arguments valid result. */
 	if (!cam_ccmp_arguments_valid(radio, slot, key_index, group, address) ||
 	    key == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	memset(words, 0, sizeof(words));
@@ -264,9 +268,8 @@ drv_rtl8822b_cam_program_ccmp(
 		words[2 + index] = load_le32(key + (size_t)index * 4U);
 
 	/*
- * Program the valid word last.  A partial entry therefore cannot match.
+	 * Program the valid word last.  A partial entry therefore cannot match.
 	 */
-	/* Process each remaining element. */
 	for (index = 7; index >= 1; index--) {
 		/* Checks the operation status. */
 		error = cam_write_word(radio, slot, (uint8_t)index,
@@ -312,7 +315,7 @@ drv_rtl8822b_cam_stage_ccmp(
 	/* Checks the cam ccmp arguments valid result. */
 	if (!cam_ccmp_arguments_valid(radio, slot, key_index, group, address) ||
 	    key == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	memset(words, 0, sizeof(words));
@@ -420,7 +423,7 @@ drv_rtl8822b_data_frame_prepare(
 	    frame_length < 24U || frame_length > RTL8822B_DATA_MPDU_MAX ||
 	    mac_id > 127U || (encrypted != 0 && encrypted != 1) ||
 	    cookie > 0x0fffU) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -450,8 +453,9 @@ drv_rtl8822b_data_frame_prepare(
 		word0 |= 1U << 24;
 
 	/*
- * QSEL 0 (implicit) is the non-QoS best-effort queue.  RATE_ID 6 is the
-	 * rtw88 default for non-HT data; CCMP is hardware security type 3. */
+	 * QSEL 0 (implicit) is the non-QoS best-effort queue.  RATE_ID 6 is the
+	 * rtw88 default for non-HT data; CCMP is hardware security type 3.
+	 */
 	word1 = mac_id | (6U << 16) | ((encrypted ? 3U : 0U) << 22);
 	word2 = 1U << 19;
 	word3 = (1U << 8) | (1U << 10);
@@ -471,7 +475,7 @@ drv_rtl8822b_data_frame_prepare(
 	store_le16(wire + 28U, checksum);
 	memcpy(wire + RTL8822B_DATA_TX_DESCRIPTOR_SIZE, frame, frame_length);
 	*wire_length = total;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -521,7 +525,7 @@ reg_read(
 	/* Handles the read availability. */
 	if (radio->state != RTL8822B_RADIO_STARTED ||
 	    radio->transport.read == NULL || value == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENETDOWN;
 	}
 
@@ -568,7 +572,7 @@ reg_write(
 	/* Handles the write availability. */
 	if (radio->state != RTL8822B_RADIO_STARTED ||
 	    radio->transport.write == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENETDOWN;
 	}
 

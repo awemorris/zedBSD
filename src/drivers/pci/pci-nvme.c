@@ -97,7 +97,7 @@ drv_nvme_lifecycle_record(
 	/* Handles the lifecycle availability. */
 	if (lifecycle == NULL || lifecycle->cleanup_started ||
 	    lifecycle->completed) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	/* Dispatch the selected operation case. */
@@ -108,7 +108,7 @@ drv_nvme_lifecycle_record(
 			return EALREADY;
 		lifecycle->bar_claimed = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case DRV_NVME_LIFECYCLE_BAR_SNAPSHOTTED:
 		/* Handles the lifecycle condition. */
@@ -116,7 +116,7 @@ drv_nvme_lifecycle_record(
 			return EINVAL;
 		lifecycle->bar_snapshotted = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case DRV_NVME_LIFECYCLE_PCI_STATE_SAVED:
 		/* Handles the lifecycle condition. */
@@ -124,7 +124,7 @@ drv_nvme_lifecycle_record(
 			return EINVAL;
 		lifecycle->pci_state_saved = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case DRV_NVME_LIFECYCLE_BAR_MAPPED:
 		/* Handles the lifecycle condition. */
@@ -132,30 +132,30 @@ drv_nvme_lifecycle_record(
 			return EINVAL;
 		lifecycle->bar_mapped = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case DRV_NVME_LIFECYCLE_PCI_COMMAND_CHANGED:
 		/* Handles the lifecycle condition. */
 		if (!lifecycle->pci_state_saved || lifecycle->bar_mapped ||
 		    lifecycle->pci_command_changed) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 		lifecycle->pci_command_changed = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case DRV_NVME_LIFECYCLE_CONTROLLER_CLAIMED:
 		/* Handles the lifecycle condition. */
 		if (!lifecycle->pci_command_changed ||
 		    lifecycle->controller_claimed) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 		lifecycle->controller_claimed = 1;
 		lifecycle->master_disable_required = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case DRV_NVME_LIFECYCLE_DMA_ALLOCATED:
 		/* Handles the lifecycle condition. */
@@ -163,7 +163,7 @@ drv_nvme_lifecycle_record(
 			return EINVAL;
 		lifecycle->dma_allocated = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case DRV_NVME_LIFECYCLE_IRQ_ALLOCATED:
 		/* Handles the lifecycle condition. */
@@ -171,7 +171,7 @@ drv_nvme_lifecycle_record(
 			return EINVAL;
 		lifecycle->irq_allocated = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case DRV_NVME_LIFECYCLE_IRQ_ESTABLISHED:
 		/* Handles the lifecycle condition. */
@@ -180,22 +180,22 @@ drv_nvme_lifecycle_record(
 		lifecycle->irq_established = 1;
 		lifecycle->irq_may_be_busy = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case DRV_NVME_LIFECYCLE_CONTROLLER_ENABLED:
 		/* Handles the lifecycle condition. */
 		if (!lifecycle->irq_established ||
 		    lifecycle->controller_enabled) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 		lifecycle->controller_enabled = 1;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return EINVAL;
 }
 
@@ -470,7 +470,7 @@ drv_nvme_lifecycle_cleanup(
 	lifecycle->quarantined = 0;
 	lifecycle->completed = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -552,7 +552,7 @@ drv_nvme_detach_flush_require(
 	lifecycle->completed = 0;
 	lifecycle->unavailable = 0;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -579,7 +579,7 @@ drv_nvme_detach_flush_begin(
 	if (!queue_available) {
 		lifecycle->unavailable = 1;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENXIO;
 	}
 
@@ -587,7 +587,7 @@ drv_nvme_detach_flush_begin(
 	lifecycle->attempts++;
 	lifecycle->unavailable = 0;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -610,7 +610,7 @@ drv_nvme_detach_flush_finish(
 	lifecycle->completed = 1;
 	lifecycle->unavailable = 0;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -636,7 +636,7 @@ drv_nvme_io_lifecycle_online(
 	    lifecycle->quarantined || lifecycle->queues_online ||
 	    lifecycle->bio_owned || lifecycle->command_owned ||
 	    lifecycle->payload_dma_active) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	lifecycle->queues_online = 1;
@@ -644,7 +644,7 @@ drv_nvme_io_lifecycle_online(
 	lifecycle->faulted = 0;
 	lifecycle->controller_quiesced = 0;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -657,7 +657,7 @@ drv_nvme_io_lifecycle_begin_bio(
 	/* Handles the lifecycle availability. */
 	if (lifecycle == NULL || !lifecycle->queues_online ||
 	    !lifecycle->accepting) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENXIO;
 	}
 
@@ -666,7 +666,7 @@ drv_nvme_io_lifecycle_begin_bio(
 		return EBUSY;
 	lifecycle->bio_owned = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -681,7 +681,7 @@ drv_nvme_io_lifecycle_submit(
 	/* Handles the lifecycle availability. */
 	if (lifecycle == NULL ||
 	    (uses_payload_dma != 0 && uses_payload_dma != 1)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -700,7 +700,7 @@ drv_nvme_io_lifecycle_submit(
 	lifecycle->command_owned = 1;
 	lifecycle->payload_dma_active = (unsigned)uses_payload_dma;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -724,7 +724,7 @@ drv_nvme_io_lifecycle_complete_command(
 		lifecycle->accepting = 0;
 		lifecycle->faulted = 1;
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
@@ -732,7 +732,7 @@ drv_nvme_io_lifecycle_complete_command(
 	lifecycle->payload_dma_active = 0;
 	lifecycle->command_completion_count++;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -751,14 +751,15 @@ drv_nvme_io_lifecycle_complete_bio(
 		return EALREADY;
 
 	/*
- * Normal completion waits for the command.  A fault may publish a BIO
-	 * error early because hardware DMA is isolated to the bounce buffer. */
+	 * Normal completion waits for the command.  A fault may publish a BIO
+	 * error early because hardware DMA is isolated to the bounce buffer.
+	 */
 	if (lifecycle->command_owned && !lifecycle->faulted)
 		return EBUSY;
 	lifecycle->bio_owned = 0;
 	lifecycle->bio_completion_count++;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -789,7 +790,7 @@ drv_nvme_io_lifecycle_fault(
 	lifecycle->accepting = 0;
 	lifecycle->faulted = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -807,7 +808,7 @@ drv_nvme_io_lifecycle_quiesced(
 	lifecycle->payload_dma_active = 0;
 	lifecycle->controller_quiesced = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -824,7 +825,7 @@ drv_nvme_io_lifecycle_quarantine(
 	lifecycle->faulted = 1;
 	lifecycle->quarantined = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -840,7 +841,7 @@ drv_nvme_io_lifecycle_resolve_quarantine(
 	if (lifecycle == NULL ||
 	    (hardware_quiesced != 0 && hardware_quiesced != 1) ||
 	    (irq_quiesced != 0 && irq_quiesced != 1)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -855,7 +856,7 @@ drv_nvme_io_lifecycle_resolve_quarantine(
 	/* Handles the hardware quiesced condition. */
 	if (!hardware_quiesced || !irq_quiesced || lifecycle->accepting ||
 	    lifecycle->bio_owned) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 	lifecycle->queues_online = 0;
@@ -864,7 +865,7 @@ drv_nvme_io_lifecycle_resolve_quarantine(
 	lifecycle->controller_quiesced = 1;
 	lifecycle->quarantined = 0;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -887,12 +888,12 @@ drv_nvme_io_lifecycle_release(
 	    lifecycle->accepting || lifecycle->bio_owned ||
 	    lifecycle->command_owned || lifecycle->payload_dma_active ||
 	    lifecycle->quarantined) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 	lifecycle->released = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -981,7 +982,7 @@ drv_nvme_shutdown_lifecycle_run(
 	if (lifecycle == NULL || ops == NULL || ops->stop_admission == NULL ||
 	    ops->shutdown_normal == NULL || ops->controller_disable == NULL ||
 	    ops->bus_master_disable == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -997,21 +998,18 @@ drv_nvme_shutdown_lifecycle_run(
 	lifecycle->admission_attempted = 1;
 	error = ops->stop_admission(context);
 	lifecycle->admission_error = error;
-
-	/* Checks the operation status. */
 	if (error == 0)
 		lifecycle->admission_stopped = 1;
 	drv_nvme_shutdown_lifecycle_record_error(lifecycle, error);
 
 	/*
- * SHN/SHST remains worth attempting after an admission timeout, and the
+	 * SHN/SHST remains worth attempting after an admission timeout, and the
 	 * two hard quiescence boundaries remain mandatory after any SHN
-	 * failure. */
+	 * failure.
+	 */
 	lifecycle->shutdown_attempted = 1;
 	error = ops->shutdown_normal(context);
 	lifecycle->shutdown_error = error;
-
-	/* Checks the operation status. */
 	if (error == 0)
 		lifecycle->shutdown_completed = 1;
 	drv_nvme_shutdown_lifecycle_record_error(lifecycle, error);
@@ -1019,27 +1017,25 @@ drv_nvme_shutdown_lifecycle_run(
 	lifecycle->disable_attempted = 1;
 	error = ops->controller_disable(context);
 	lifecycle->disable_error = error;
-
-	/* Checks the operation status. */
 	if (error == 0)
 		lifecycle->controller_disabled = 1;
 	drv_nvme_shutdown_lifecycle_record_error(lifecycle, error);
 
 	/*
- * Bus-master disable is independent of CC.EN/CSTS.RDY and must always
-	 * run. */
+	 * Bus-master disable is independent of CC.EN/CSTS.RDY and must always
+	 * run.
+	 */
 	lifecycle->master_attempted = 1;
 	error = ops->bus_master_disable(context);
 	lifecycle->master_error = error;
-
-	/* Checks the operation status. */
 	if (error == 0)
 		lifecycle->master_disabled = 1;
 	drv_nvme_shutdown_lifecycle_record_error(lifecycle, error);
 
 	/*
- * Either independently verified boundary prevents further controller
-	 * DMA. */
+	 * Either independently verified boundary prevents further controller
+	 * DMA.
+	 */
 	lifecycle->hardware_dma_safe =
 		lifecycle->controller_disabled || lifecycle->master_disabled;
 	lifecycle->running = 0;
@@ -1331,7 +1327,7 @@ nvme_wait_ready(
 		/* Handles the state condition. */
 		if (state == DRV_NVME_READY_FATAL ||
 		    state == DRV_NVME_READY_UNREACHABLE) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 
@@ -1385,7 +1381,7 @@ nvme_wait_shutdown_complete(
 		status = nvme_read32(controller, DRV_NVME_REG_CSTS);
 		if (status == UINT32_MAX ||
 		    (status & DRV_NVME_CSTS_FATAL) != 0U) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 
@@ -1404,7 +1400,7 @@ nvme_wait_shutdown_complete(
 			if (now - started >= controller->timeout_ticks)
 				return ETIMEDOUT;
 		} else if (++spin >= spin_budget) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return ETIMEDOUT;
 		}
 
@@ -1507,7 +1503,7 @@ nvme_message_irq_mask(
 			return error != 0 ? error : EIO;
 		}
 	} else if (error != ENOENT) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1541,11 +1537,11 @@ nvme_message_irq_mask(
 			return error != 0 ? error : EIO;
 		}
 	} else if (error != ENOENT) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1573,7 +1569,7 @@ nvme_message_irq_save_and_mask(
 		controller->inherited_msi_capability = capability;
 		controller->inherited_msi_saved = 1;
 	} else if (error != ENOENT) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1590,7 +1586,7 @@ nvme_message_irq_save_and_mask(
 		controller->inherited_msix_capability = capability;
 		controller->inherited_msix_saved = 1;
 	} else if (error != ENOENT) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1657,7 +1653,7 @@ nvme_message_irq_restore(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1700,10 +1696,10 @@ nvme_runtime_irq_mask(
 		masked = control | NVME_PCI_MSIX_FUNCTION_MASK;
 	else if (controller->irq.type == DRV_PCI_IRQ_MSI)
 		masked = control & (uint16_t)~NVME_PCI_MSI_ENABLE;
-	else
-
-		/* Returns the computed result. */
+	else {
+		/* Failed. */
 		return EOPNOTSUPP;
+	}
 
 	/* Checks the operation status. */
 	error = drv_pci_device_config_write16(
@@ -1722,13 +1718,13 @@ nvme_runtime_irq_mask(
 		if ((readback & NVME_PCI_MSIX_FUNCTION_MASK) == 0U)
 			return EIO;
 	} else if ((readback & NVME_PCI_MSI_ENABLE) != 0U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
 	*capability_out = capability;
 	*control_out = control;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1815,7 +1811,7 @@ nvme_controller_disable(
 
 	controller->controller_enabled = 0;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1837,7 +1833,7 @@ nvme_controller_shutdown_normal(
 	configuration = nvme_read32(controller, DRV_NVME_REG_CC);
 	if (configuration == UINT32_MAX ||
 	    (configuration & DRV_NVME_CC_ENABLE) == 0U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	configuration &= ~DRV_NVME_CC_SHN_MASK;
@@ -1882,7 +1878,7 @@ nvme_stop_admission(
 		    !controller->io_owned && !controller->io_recovery_busy) {
 			spin_unlock_irqrestore(&controller->command_lock, irq);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -1938,7 +1934,7 @@ nvme_detach_claim(
 	if (controller == NULL || controller->pci != device) {
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -1948,7 +1944,7 @@ nvme_detach_claim(
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -1968,7 +1964,7 @@ nvme_detach_claim(
 		if (!controller->command_pending && !controller->probe_busy) {
 			spin_unlock_irqrestore(&controller->command_lock, irq);
 			*result = controller;
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -1978,7 +1974,7 @@ nvme_detach_claim(
 		if (clock_ticks() >= deadline) {
 			nvme_detach_release(controller, 1);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -2007,7 +2003,7 @@ nvme_shutdown_claim(
 	if (controller == NULL || controller->pci != device) {
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -2017,7 +2013,7 @@ nvme_shutdown_claim(
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 		spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -2029,7 +2025,7 @@ nvme_shutdown_claim(
 	spin_unlock_irqrestore(&nvme_registry_lock, registry_irq);
 
 	*result = controller;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2049,9 +2045,10 @@ nvme_shutdown_stop_admission(
 		irq = spin_lock_irqsave(&controller->command_lock);
 
 		/*
- * Terminal shutdown cannot wait forever for a lost completion.
+		 * Terminal shutdown cannot wait forever for a lost completion.
 		 * Fail the software owners, then continue to the two
-		 * independent hardware DMA-stop boundaries below. */
+		 * independent hardware DMA-stop boundaries below.
+		 */
 		nvme_io_fail_all_locked(controller, error);
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 	}
@@ -2077,14 +2074,14 @@ nvme_shutdown_normal(
 	/* Handles the controller condition. */
 	if (!controller->lifecycle.controller_claimed ||
 	    controller->lifecycle.controller_disabled) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the registers availability. */
 	if (!controller->lifecycle.bar_mapped || !controller->bar_mapped ||
 	    controller->registers == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
@@ -2108,14 +2105,14 @@ nvme_shutdown_controller_disable(
 	/* Handles the controller condition. */
 	if (!controller->lifecycle.controller_claimed ||
 	    controller->lifecycle.controller_disabled) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the registers availability. */
 	if (!controller->lifecycle.bar_mapped || !controller->bar_mapped ||
 	    controller->registers == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
@@ -2147,7 +2144,7 @@ nvme_shutdown_bus_master_disable(
 	/* Handles the controller condition. */
 	if (!controller->lifecycle.master_disable_required ||
 	    controller->lifecycle.master_disabled) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -2199,14 +2196,14 @@ nvme_irq_remove(
 				   "controller resources\n",
 				   error);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
 		controller->irq_cookie = NULL;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2230,7 +2227,7 @@ nvme_irq_drain(
 	hal_printf(
 		"nvme: IRQ drain timed out; retaining controller resources\n");
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return EBUSY;
 }
 
@@ -2446,7 +2443,7 @@ nvme_lifecycle_bar_restore(
 	if (error == 0) {
 		controller->original_bar_valid = 0;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -2489,7 +2486,7 @@ nvme_lifecycle_pci_restore(
 		controller->inherited_msix_saved = 0;
 		controller->pci_state_saved = 0;
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -2569,7 +2566,7 @@ nvme_cleanup(
 	controller->dma_allocated = 0;
 	controller->irq_allocated = 0;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3015,7 +3012,7 @@ nvme_identify(
 	/* Checks the drv nvme identify command result. */
 	if (!drv_nvme_identify_command(&command, 0, namespace_id, selector,
 				       controller->identify_dma.device_address)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	hal_io_wmb();
@@ -3094,7 +3091,7 @@ nvme_io_ensure_online(
 		    !controller->io_recovery_needed) {
 			spin_unlock_irqrestore(&controller->command_lock, irq);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -3116,7 +3113,7 @@ nvme_io_ensure_online(
 		if (!controller->io_recovery_busy) {
 			spin_unlock_irqrestore(&controller->command_lock, irq);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return ENXIO;
 		}
 
@@ -3124,8 +3121,6 @@ nvme_io_ensure_online(
 					    &controller->io_state_waitq,
 					    deadline, &irq);
 		spin_unlock_irqrestore(&controller->command_lock, irq);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 	}
@@ -3280,7 +3275,7 @@ nvme_io_command_id_in_use_locked(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3309,7 +3304,7 @@ nvme_io_next_command_id_locked(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3369,7 +3364,7 @@ nvme_io_slot_acquire(
 			*result = slot;
 			spin_unlock_irqrestore(&controller->command_lock, irq);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -3452,7 +3447,7 @@ nvme_io_post(
 
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -3533,7 +3528,7 @@ nvme_io_claim_recovery_locked(
 	/* Handles the controller condition. */
 	if (!controller->io_recovery_needed || controller->io_recovery_busy ||
 	    controller->detach_busy) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	controller->io_recovery_busy = 1;
@@ -3626,7 +3621,7 @@ nvme_io_execute(
 		if (recovery_owner)
 			(void)nvme_io_recover(controller);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -3689,7 +3684,7 @@ nvme_disk_submit(
 	/* Handles the bio condition. */
 	if (bio->b_op != BIO_READ && bio->b_op != BIO_WRITE &&
 	    bio->b_op != BIO_FLUSH) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 
@@ -3701,7 +3696,7 @@ nvme_disk_submit(
 	     controller->namespace_block_size == 0U ||
 	     (size_t)bio->b_block_count >
 		     SIZE_MAX / controller->namespace_block_size)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOVERFLOW;
 	}
 
@@ -3755,7 +3750,7 @@ nvme_disk_submit(
 	nvme_io_end_bio(controller, bio->b_op);
 	bio_complete(bio, error, transferred);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3836,7 +3831,7 @@ nvme_probe_namespace(
 		hal_printf("nvme: unsupported Identify Controller (%08x)\n",
 			   reasons);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 
@@ -3853,7 +3848,7 @@ nvme_probe_namespace(
 		hal_printf("nvme: unsupported active namespace set (%08x)\n",
 			   reasons);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 
@@ -3871,7 +3866,7 @@ nvme_probe_namespace(
 		hal_printf("nvme: unsupported namespace %u (%08x)\n",
 			   namespace_id, reasons);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 
@@ -3886,7 +3881,7 @@ nvme_probe_namespace(
 	/* Handles the controller condition. */
 	if (controller->maximum_transfer_bytes <
 	    controller->namespace_block_size) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EOPNOTSUPP;
 	}
 
@@ -3936,7 +3931,7 @@ nvme_probe_namespace(
 		   (uint32_t)namespace_profile.block_count, disk->d_block_size,
 		   disk->d_max_transfer_blocks);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail_disk:
@@ -3969,7 +3964,7 @@ nvme_dma_allocate(
 	    !drv_nvme_queue_bytes(controller->queue_depth,
 				  sizeof(struct drv_nvme_completion),
 				  &completion_bytes)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -4015,7 +4010,7 @@ nvme_dma_allocate(
 	controller->admin_completion = controller->admin_completion_dma.address;
 	controller->dma_allocated = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -4084,7 +4079,7 @@ nvme_io_dma_allocate(
 	    !drv_nvme_queue_bytes(controller->io_queue_depth,
 				  sizeof(struct drv_nvme_completion),
 				  &completion_bytes)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	controller->io_slot_count = controller->io_queue_depth - 1U;
@@ -4158,7 +4153,7 @@ nvme_io_dma_allocate(
 		slot->epoch = controller->io_epoch;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -4186,7 +4181,7 @@ nvme_io_queue_memory_reset(
 	/* Handles the io submission availability. */
 	if (controller->io_submission == NULL ||
 	    controller->io_completion == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -4195,7 +4190,7 @@ nvme_io_queue_memory_reset(
 	if (controller->io_owned != 0U || controller->io_pending != 0U) {
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -4221,7 +4216,7 @@ nvme_io_queue_memory_reset(
 					     controller->io_queue_depth)) {
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
@@ -4239,7 +4234,7 @@ nvme_io_queue_memory_reset(
 
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4277,7 +4272,7 @@ nvme_io_queue_create(
 	if (!drv_nvme_create_io_cq_command(
 		    &command, 0, NVME_IO_QUEUE_ID, controller->io_queue_depth,
 		    controller->io_completion_dma.device_address, 0U, 1)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -4292,7 +4287,7 @@ nvme_io_queue_create(
 		    &command, 0, NVME_IO_QUEUE_ID, NVME_IO_QUEUE_ID,
 		    controller->io_queue_depth,
 		    controller->io_submission_dma.device_address)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -4370,7 +4365,7 @@ nvme_controller_enable(
 	if (controller->irq.type != DRV_PCI_IRQ_MSIX)
 		nvme_write32(controller, DRV_NVME_REG_INTMC, 1U);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4388,7 +4383,7 @@ nvme_admin_queue_memory_reset(
 	if (controller->command_pending) {
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -4412,13 +4407,13 @@ nvme_admin_queue_memory_reset(
 					     controller->queue_depth)) {
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -4441,11 +4436,12 @@ nvme_io_lifecycles_quiesce(
 		(void)drv_nvme_io_lifecycle_stop(&slot->lifecycle);
 
 		/*
- * Every caller reaches this point only after a fresh controller
+		 * Every caller reaches this point only after a fresh controller
 		 * or bus-master stop and an IRQ drain.  That fresh proof may
 		 * resolve an older DMA-unsafe quarantine; the historical flag
 		 * itself must not make safely owned DMA impossible to release
-		 * forever. */
+		 * forever.
+		 */
 		if (slot->lifecycle.quarantined) {
 			lifecycle_error =
 				drv_nvme_io_lifecycle_resolve_quarantine(
@@ -4551,7 +4547,7 @@ nvme_io_recover(
 			spin_unlock_irqrestore(&controller->command_lock, irq);
 			nvme_io_quarantine(controller, error, 1);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	}
@@ -4631,7 +4627,7 @@ nvme_io_recover(
 	hal_printf("nvme: I/O queue recovered epoch=%u\n",
 		   controller->io_epoch);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -4701,7 +4697,7 @@ nvme_attach(
 		hal_printf("nvme: additional controller rejected by initial "
 			   "profile\n");
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -4909,9 +4905,10 @@ nvme_attach(
 	stage = "controller reset";
 
 	/*
- * From this point cleanup must prove CSTS.RDY clear before releasing
+	 * From this point cleanup must prove CSTS.RDY clear before releasing
 	 * BAR or DMA ownership.  A failed reset is quarantined, not
-	 * half-detached. */
+	 * half-detached.
+	 */
 	controller->controller_owned = 1;
 
 	/* Checks the drv nvme lifecycle record result. */
@@ -4975,8 +4972,9 @@ nvme_attach(
 	}
 
 	/*
- * The initial reset masked all legacy/MSI sources.  Clear that mask
-	 * before enabling MSI-X; INTMC must not be touched afterwards. */
+	 * The initial reset masked all legacy/MSI sources.  Clear that mask
+	 * before enabling MSI-X; INTMC must not be touched afterwards.
+	 */
 	if (controller->irq.type == DRV_PCI_IRQ_MSIX)
 		nvme_write32(controller, DRV_NVME_REG_INTMC, UINT32_MAX);
 	stage = "IRQ establishment";
@@ -5020,7 +5018,7 @@ nvme_attach(
 		   address.function, controller->version,
 		   controller->queue_depth, controller->timeout_ms, irq_name);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 fail:
@@ -5034,7 +5032,7 @@ fail:
 			   "(%d); quarantined\n",
 			   stage, error, cleanup_error);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -5072,7 +5070,7 @@ nvme_detach_owned(
 		if (error != 0 && error != ENXIO) {
 			nvme_detach_release(controller, 1);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -5081,15 +5079,16 @@ nvme_detach_owned(
 					  &controller->detach_flush) != 0) {
 			nvme_detach_release(controller, 0);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 
 		/*
- * disk_gone_if_idle writes dirty buffers but does not issue the
+		 * disk_gone_if_idle writes dirty buffers but does not issue the
 		 * device-cache FLUSH.  Once required, that durability
 		 * obligation survives a failed detach and an already-gone
-		 * result on retry. */
+		 * result on retry.
+		 */
 		irq = spin_lock_irqsave(&controller->command_lock);
 
 		/* Handles the controller condition. */
@@ -5098,16 +5097,15 @@ nvme_detach_owned(
 			    !controller->io_recovery_needed;
 		if (controller->detach_flush.required && can_flush) {
 			/*
- * The namespace is GONE and detach owns the
+			 * The namespace is GONE and detach owns the
 			 * transaction, so this admits only the driver's
-			 * internal retry. */
+			 * internal retry.
+			 */
 			controller->stopping = 0;
 		}
 		flush_error = drv_nvme_detach_flush_begin(
 			&controller->detach_flush, can_flush);
 		spin_unlock_irqrestore(&controller->command_lock, irq);
-
-		/* Checks the operation status. */
 		if (flush_error == 0) {
 			error = nvme_io_flush_internal(controller);
 			irq = spin_lock_irqsave(&controller->command_lock);
@@ -5147,7 +5145,7 @@ nvme_detach_owned(
 		controller->quarantined = 1;
 		nvme_detach_release(controller, 0);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -5159,7 +5157,7 @@ nvme_detach_owned(
 			controller->quarantined = 1;
 			nvme_detach_release(controller, 0);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -5170,7 +5168,7 @@ nvme_detach_owned(
 	(void)drv_pci_device_set_driver_data(device, NULL);
 	hal_free(controller);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -5222,9 +5220,10 @@ nvme_shutdown(
 		return;
 
 	/*
- * A historical quarantine is not a reason to skip terminal DMA safety.
+	 * A historical quarantine is not a reason to skip terminal DMA safety.
 	 * Mask delivery when the allocation still exists, but continue even if
-	 * PCI capability access itself is damaged. */
+	 * PCI capability access itself is damaged.
+	 */
 	if (controller->irq_allocated) {
 		mask_error = nvme_runtime_irq_mask(controller, &irq_capability,
 						   &irq_control);
@@ -5359,21 +5358,21 @@ drv_pci_nvme_probe_namespaces(
 		return;
 
 	/*
- * A concurrent PCI detach already owns teardown and may free controller
-	 * as soon as probe_busy clears.  Do not dereference it in that case. */
+	 * A concurrent PCI detach already owns teardown and may free controller
+	 * as soon as probe_busy clears.  Do not dereference it in that case.
+	 */
 	if (!owns_detach)
 		return;
 
 	/*
- * A failed Identify probe releases every safely quiesced resource but
+	 * A failed Identify probe releases every safely quiesced resource but
 	 * retains the bound controller object as a terminal quarantine.  This
 	 * keeps the PCI core's driver binding coherent; a later ordinary PCI
-	 * detach can retry any retained release and free the object. */
+	 * detach can retry any retained release and free the object.
+	 */
 	error = nvme_cleanup(controller);
 	controller->quarantined = 1;
 	nvme_detach_release(controller, 0);
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		hal_printf(
 			"nvme: failed probe teardown retained resources (%d)\n",

@@ -2,7 +2,8 @@
 
 /*
  * Generic PCI bus core. Copyright (C) 2026 Awe Morris; SPDX-License-Identifier:
- * Zlib */
+ * Zlib
+ */
 #include <drivers/pci.h>
 #include <errno.h>
 #include <hal/hal.h>
@@ -143,7 +144,7 @@ drv_pci_init(
 	intx_lock = 0;
 	initialized = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -187,7 +188,7 @@ drv_pci_bus_create_root(
 	/* Handles the ops availability. */
 	if (!initialized || ops == NULL || ops->config_read == NULL ||
 	    ops->config_write == NULL || result == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -204,7 +205,7 @@ drv_pci_bus_create_root(
 	bus->next = root_buses;
 	root_buses = bus;
 	*result = bus;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -238,7 +239,7 @@ drv_pci_bus_create_child(
 	bus->bridge = bridge;
 	bridge->subordinate = bus;
 	*result = bus;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -278,7 +279,7 @@ drv_pci_bus_destroy(
 		bus->bridge->subordinate = NULL;
 	hal_free(bus);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -361,7 +362,7 @@ drv_pci_bus_scan(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -404,7 +405,7 @@ drv_pci_bus_scan_tree(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -425,7 +426,7 @@ drv_pci_scan_all(
 			return e;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -450,7 +451,7 @@ drv_pci_foreach_bus(
 			return e;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -475,7 +476,7 @@ drv_pci_foreach_device(
 			return e;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -545,7 +546,7 @@ drv_pci_bus_foreach_device(
 			return e;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -914,7 +915,7 @@ drv_pci_device_find_capability(
 	/* Checks the drv pci device config read16 result. */
 	if (drv_pci_device_config_read16(d, PCI_STATUS, &status) ||
 	    !(status & 0x10U)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOENT;
 	}
 
@@ -931,7 +932,7 @@ drv_pci_device_find_capability(
 		/* Checks the current item count. */
 		if (n == id) {
 			*result = p;
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -941,7 +942,7 @@ drv_pci_device_find_capability(
 		p &= ~3U;
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOENT;
 }
 
@@ -980,7 +981,7 @@ drv_pci_device_find_extended_capability(
 		/* Handles the h condition. */
 		if ((h & 0xffffU) == id) {
 			*result = p;
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -994,7 +995,7 @@ drv_pci_device_find_extended_capability(
 		p = (h >> 20) & 0xfffU;
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return EIO;
 }
 
@@ -1097,7 +1098,7 @@ drv_pci_device_save_enable_state(
 	state->private_data[0] = command & PCI_COMMAND_ENABLE_MASK;
 	state->private_data[1] = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1143,13 +1144,13 @@ drv_pci_device_restore_enable_state(
 	/* Handles the readback condition. */
 	if ((readback & PCI_COMMAND_ENABLE_MASK) !=
 	    (restored & PCI_COMMAND_ENABLE_MASK)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	state->private_data[0] = 0;
 	state->private_data[1] = 0;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1227,7 +1228,7 @@ drv_pci_device_assign_bar(
 	     (address > UINT32_MAX || bar->size - 1U > UINT32_MAX - address)) ||
 	    (bar->type == DRV_PCI_BAR_MEMORY64 &&
 	     index + 1U >= device->bar_count)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -1267,8 +1268,6 @@ drv_pci_device_assign_bar(
 	    (read_low != low ||
 	     (bar->type == DRV_PCI_BAR_MEMORY64 && read_high != high)))
 		error = EIO;
-
-	/* Checks the operation status. */
 	if (error != 0)
 		goto rollback;
 
@@ -1283,19 +1282,18 @@ drv_pci_device_assign_bar(
 	/* Checks the operation status. */
 	if (error == 0 && read_command != original_command)
 		error = EIO;
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		/*
- * Never roll a BAR back while the failed restore may have
-		 * enabled decode or DMA. */
+		 * Never roll a BAR back while the failed restore may have
+		 * enabled decode or DMA.
+		 */
 
 		/* Checks the operation status. */
 		quiesce_error = pci_command_quiesce(device, original_command);
 		if (quiesce_error != 0) {
 			bar->bus_address = address;
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -1304,13 +1302,13 @@ drv_pci_device_assign_bar(
 
 	bar->bus_address = address;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 
 rollback:
 
 	/*
- * A failed transaction deliberately leaves decode and bus mastering
+	 * A failed transaction deliberately leaves decode and bus mastering
 	 * off. The caller may retry or detach without exposing a partial BAR.
 	 */
 	(void)pci_bar_write_raw(device, index, bar->type, original_low,
@@ -1342,7 +1340,7 @@ drv_pci_device_claim_bar(
 		return EBUSY;
 	d->bar_claimed[i] = 1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1377,7 +1375,7 @@ drv_pci_device_map_bar_region(
 	/* Checks the current descriptor. */
 	if (!d || !m || i >= d->bar_count || !d->bar_claimed[i] ||
 	    !d->bus->ops->map_bar || s == 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -1456,7 +1454,7 @@ drv_pci_device_allocate_irqs(
 	/* Handles the device availability. */
 	if (device == NULL || irqs == NULL || count == NULL || minimum == 0 ||
 	    maximum < minimum || device->bus->ops->allocate_irqs == NULL) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	/* Process each remaining element. */
@@ -1472,8 +1470,6 @@ drv_pci_device_allocate_irqs(
 			minimum, maximum, irqs, count);
 		if (error == 0)
 			return 0;
-
-		/* Checks the operation status. */
 		if (error != ENOTSUP && error != ENODEV)
 			return error;
 	}
@@ -1550,12 +1546,12 @@ drv_pci_device_establish_irq(
 	if (error != 0) {
 		hal_free(cookie);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	*result = cookie;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1585,7 +1581,7 @@ drv_pci_device_disestablish_irq_checked(
 		/* Obtains the disestablish intx result. */
 		error = disestablish_intx(cookie);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	} else if (cookie->type == DRV_PCI_IRQ_MSI) {
 		/* Handles the cookie condition. */
@@ -1599,7 +1595,7 @@ drv_pci_device_disestablish_irq_checked(
 				    cookie->device,
 				    cookie->capability + PCI_MSI_CONTROL,
 				    control & (uint16_t)~PCI_MSI_ENABLE) != 0) {
-				/* Returns the computed result. */
+				/* Failed. */
 				return EIO;
 			}
 
@@ -1631,7 +1627,7 @@ drv_pci_device_disestablish_irq_checked(
 			    cookie->device,
 			    cookie->capability + PCI_MSI_CONTROL,
 			    cookie->msi_control_saved) != 0) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 		cookie->msi_state_saved = 0;
@@ -1670,7 +1666,7 @@ drv_pci_device_disestablish_irq_checked(
 			    cookie->device,
 			    cookie->capability + PCI_MSIX_CONTROL,
 			    cookie->msix_control_saved) != 0) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 		entry_local1[3] = cookie->msix_entry_saved[3];
@@ -1683,13 +1679,13 @@ drv_pci_device_disestablish_irq_checked(
 				cookie->device->bus->host, &cookie->table);
 		}
 	} else {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
 	hal_free(cookie);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1702,7 +1698,7 @@ drv_pci_device_disestablish_irq(
 	void *value)
 {
 	/*
- * Legacy callers cannot report a busy interrupt teardown.  Drivers
+	 * Legacy callers cannot report a busy interrupt teardown.  Drivers
 	 * which must free their handler argument immediately use the checked
 	 * API and retain their complete device state until a successful retry.
 	 */
@@ -1755,7 +1751,7 @@ drv_pci_device_set_driver_data(
 		return EINVAL;
 	d->driver_data = p;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1865,7 +1861,7 @@ drv_pci_device_probe(
 		return error;
 	d->driver = best->driver;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1968,7 +1964,7 @@ drv_pci_driver_register(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2003,12 +1999,12 @@ drv_pci_driver_unregister(
 			*p = e->next;
 			hal_free(e);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOENT;
 }
 
@@ -2074,7 +2070,7 @@ drv_pci_driver_foreach_device(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2122,7 +2118,7 @@ cfg_read(
 	if (bus == NULL || bus->ops == NULL || bus->ops->config_read == NULL ||
 	    value == NULL || offset > limit || width > limit - offset ||
 	    (width != 1 && width != 2 && width != 4)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -2253,7 +2249,7 @@ read_device(
 		device->subproduct = (uint16_t)(value >> 16);
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2276,7 +2272,7 @@ cfg_write(
 	if (bus == NULL || bus->ops == NULL || bus->ops->config_write == NULL ||
 	    offset > limit || width > limit - offset ||
 	    (width != 1 && width != 2 && width != 4)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -2312,7 +2308,7 @@ foreach_device_tree(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2372,7 +2368,7 @@ pci_bar_read_raw(
 		return function_result;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2490,7 +2486,7 @@ establish_intx(
 			intx_lock_leave(enabled);
 			hal_free(candidate);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 
@@ -2504,12 +2500,12 @@ establish_intx(
 		intx_lock_leave(enabled);
 		hal_free(candidate);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/*
- * Publish a line only after the sole HAL handler has been installed.
+	 * Publish a line only after the sole HAL handler has been installed.
 	 * The line remains masked until both the handler and cookie list exist.
 	 */
 
@@ -2535,7 +2531,7 @@ establish_intx(
 		return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2605,7 +2601,7 @@ establish_msi(
 	    drv_pci_device_config_read32(device,
 					 cookie->capability + PCI_MSI_ADDRESS,
 					 &cookie->msi_address_low_saved) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	cookie->msi_control_saved = control;
@@ -2616,7 +2612,7 @@ establish_msi(
 		if (drv_pci_device_config_read32(
 			    device, cookie->capability + PCI_MSI_ADDRESS + 4U,
 			    &cookie->msi_address_high_saved) != 0) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EIO;
 		}
 		data_offset = cookie->capability + 12U;
@@ -2628,7 +2624,7 @@ establish_msi(
 	/* Checks the drv pci device config read16 result. */
 	if (drv_pci_device_config_read16(device, data_offset,
 					 &cookie->msi_data_saved) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	cookie->msi_state_saved = 1;
@@ -2694,7 +2690,7 @@ establish_msi(
 
 	(void)irq;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 fail:
 
@@ -2828,7 +2824,7 @@ establish_msix(
 	entry[3] &= ~PCI_MSIX_ENTRY_MASK;
 	hal_io_mb();
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 fail:
 
@@ -2882,7 +2878,7 @@ map_msix_entry(
 	/* Checks the drv pci device config read32 result. */
 	if (drv_pci_device_config_read32(
 		    device, cookie->capability + PCI_MSIX_TABLE, &table) != 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	bir = table & 7U;
@@ -2893,7 +2889,7 @@ map_msix_entry(
 	if (bir >= device->bar_count ||
 	    drv_pci_device_bar(device, bir, &bar) != 0 || offset > bar.size ||
 	    PCI_MSIX_ENTRY_SIZE > bar.size - offset) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	bar.bus_address += offset;
@@ -2947,18 +2943,19 @@ disestablish_intx(
 	if (*cookie_link == NULL) {
 		intx_lock_leave(enabled);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
 	/*
- * Preserve the exact registered state on EBUSY. In particular, a driver
+	 * Preserve the exact registered state on EBUSY. In particular, a driver
 	 * which retains its argument after an in-flight callback must remain
-	 * able to retry without repairing a half-unlinked shared handler. */
+	 * able to retry without repairing a half-unlinked shared handler.
+	 */
 	if (line->dispatching != 0) {
 		intx_lock_leave(enabled);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EBUSY;
 	}
 
@@ -2970,7 +2967,7 @@ disestablish_intx(
 		intx_lock_leave(enabled);
 		hal_free(cookie);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -2992,8 +2989,9 @@ disestablish_intx(
 	}
 
 	/*
- * HAL removal is a checked drain barrier, so no dispatcher can still
-	 * hold the line or its final cookie once it succeeds. */
+	 * HAL removal is a checked drain barrier, so no dispatcher can still
+	 * hold the line or its final cookie once it succeeds.
+	 */
 	enabled = intx_lock_enter();
 	/* Process each linked entry. */
 	for (line_link = &intx_lines; *line_link != NULL;
@@ -3011,7 +3009,7 @@ disestablish_intx(
 	hal_free(line);
 	hal_free(cookie);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -3053,9 +3051,10 @@ pci_intx_dispatch(
 		enabled = intx_lock_enter();
 
 		/*
- * Checked removal cannot unlink a cookie while any dispatcher
+		 * Checked removal cannot unlink a cookie while any dispatcher
 		 * is walking this line. Establishment may append a new cookie,
-		 * which may be observed on this interrupt or the next one. */
+		 * which may be observed on this interrupt or the next one.
+		 */
 		handler = cookie->handler;
 		handler_argument = cookie->argument;
 		next = cookie->intx_next;

@@ -327,12 +327,12 @@ drv_intel_ax211_runtime_mcc_decode(
 	parsed.source = bytes[12U];
 
 	/*
- * v4/v5/v6 share this layout; reserved padding is not semantic input.
+	 * v4/v5/v6 share this layout; reserved padding is not semantic input.
 	 */
 	parsed.channel_count = ax211_runtime_get_le32(bytes + 16U);
 
 	/*
- * Every documented MCC status still carries a usable channel profile.
+	 * Every documented MCC status still carries a usable channel profile.
 	 */
 	if (parsed.status > INTEL_AX211_RUNTIME_MCC_STATUS_MAX)
 		return INTEL_AX211_RUNTIME_FAILED;
@@ -536,7 +536,7 @@ ax211_runtime_profile_valid(
 	    profile->rx_chain_mask == 0U || profile->tx_chain_mask > 0x07U ||
 	    profile->rx_chain_mask > 0x07U || profile->lar_enabled > 1U ||
 	    profile->ltr_enabled > 1U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -551,7 +551,7 @@ ax211_runtime_profile_valid(
 			      INTEL_AX211_RUNTIME_CAP_DQA) ||
 	    !ax211_runtime_bit(profile->capabilities, 5U,
 			       INTEL_AX211_RUNTIME_CAP_CT_KILL_BY_FW)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -561,7 +561,7 @@ ax211_runtime_profile_valid(
 			       INTEL_AX211_RUNTIME_API_WIFI_MCC_UPDATE) &&
 	    !ax211_runtime_bit(profile->capabilities, 5U,
 			       INTEL_AX211_RUNTIME_CAP_LAR_MULTI_MCC)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -569,7 +569,7 @@ ax211_runtime_profile_valid(
 	if (profile->lar_enabled &&
 	    !ax211_runtime_bit(profile->capabilities, 5U,
 			       INTEL_AX211_RUNTIME_CAP_MCC_UPDATE_11AX)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -641,7 +641,7 @@ ax211_runtime_step_enabled(
 					  profile->capabilities, 5U,
 					  INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 

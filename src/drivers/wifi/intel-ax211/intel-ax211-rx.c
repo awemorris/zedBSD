@@ -200,8 +200,9 @@ drv_intel_ax211_rx_mpdu_decode(
 	}
 
 	/*
- * The transport may round an RX packet up and leave bytes after the
-	 * descriptor-declared MPDU.  They are not part of the 802.11 frame. */
+	 * The transport may round an RX packet up and leave bytes after the
+	 * descriptor-declared MPDU.  They are not part of the 802.11 frame.
+	 */
 	if (frame_length < 2U)
 		return INTEL_AX211_RX_TRUNCATED;
 

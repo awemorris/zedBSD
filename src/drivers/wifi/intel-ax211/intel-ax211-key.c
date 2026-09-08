@@ -467,7 +467,7 @@ ax211_key_request_valid(
 	     request->kind != INTEL_AX211_KEY_GROUP_KEY) ||
 	    (request->kind == INTEL_AX211_KEY_PAIRWISE &&
 	     request->key_index != 0U)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 

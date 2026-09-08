@@ -1,5 +1,5 @@
 /* X68000 MMIO/VRAM/ROM map, kept outside the reusable m68k backend. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include "memory-map.h"
 

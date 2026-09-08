@@ -73,7 +73,7 @@ drv_pc98_lgy98_init(
 	int irq_registered = 0;
 
 	/*
- * An unused C-bus port reads as 0xff.  Avoid modifying unrelated ports.
+	 * An unused C-bus port reads as 0xff.  Avoid modifying unrelated ports.
 	 */
 	if (asm_inb(LGY_IO_BASE) == 0xffU)
 		return ENODEV;
@@ -109,8 +109,6 @@ drv_pc98_lgy98_init(
 	/* Checks the operation status. */
 	if (error == 0)
 		error = net_device_create(lgy_device);
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		hal_irq_mask(LGY_IRQ);
 
@@ -140,8 +138,6 @@ drv_pc98_lgy98_init(
 	if (registered == lgy_device)
 		gone_error = net_device_gone(lgy_device);
 	net_device_release(registered);
-
-	/* Checks the operation status. */
 	if (gone_error != 0)
 		return gone_error;
 	net_device_destroy(lgy_device);
@@ -242,12 +238,12 @@ lgy_reset(
 		if ((asm_inb(LGY_IO_BASE + 7U) & 0x80U) != 0) {
 			asm_outb(LGY_IO_BASE + 7U, 0x80U);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ETIMEDOUT;
 }
 

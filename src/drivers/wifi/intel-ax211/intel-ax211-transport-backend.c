@@ -149,7 +149,7 @@ ax211_backend_valid(
 	/* Handles the backend availability. */
 	if (backend == NULL || !backend->initialized || backend->mmio == NULL ||
 	    backend->pci_mmio == NULL || backend->dma == NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -162,14 +162,14 @@ ax211_backend_valid(
 	if (ops->csr_read32 == NULL || ops->csr_write32 == NULL ||
 	    ops->prph_read32 == NULL || ops->prph_write32 == NULL ||
 	    ops->delay_us == NULL || ops->clock_us == NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Handles the registers availability. */
 	if (backend->pci_mmio->registers == NULL ||
 	    backend->pci_mmio->mapping_size == 0U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -197,7 +197,7 @@ ax211_backend_ready(
 	/* Checks the ax211 backend buffer valid result. */
 	if (!ax211_backend_buffer_valid(
 		    &dma->command_tfd, INTEL_AX211_COMMAND_TFD_RING_SIZE, 256U)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -205,28 +205,28 @@ ax211_backend_ready(
 	if (!ax211_backend_buffer_valid(&dma->command_byte_count,
 					INTEL_AX211_COMMAND_BC_TABLE_SIZE,
 					128U)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Checks the ax211 backend buffer valid result. */
 	if (!ax211_backend_buffer_valid(&dma->command_slots,
 					INTEL_AX211_COMMAND_SLOTS_SIZE, 64U)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Checks the ax211 backend buffer valid result. */
 	if (!ax211_backend_buffer_valid(&dma->command_external,
 					INTEL_AX211_COMMAND_EXTERNAL_SIZE, 64U)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
 	/* Checks the ax211 backend buffer valid result. */
 	if (!ax211_backend_buffer_valid(
 		    &dma->rx_transfer, INTEL_AX211_RX_TRANSFER_RING_SIZE, 256U)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -234,7 +234,7 @@ ax211_backend_ready(
 	if (!ax211_backend_buffer_valid(&dma->rx_completion,
 					INTEL_AX211_RX_COMPLETION_RING_SIZE,
 					256U)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -258,7 +258,7 @@ ax211_backend_buffer_valid(
 	    buffer->size != exact_size || buffer->device_address == 0U ||
 	    alignment == 0U ||
 	    (buffer->device_address & (alignment - 1U)) != 0U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -297,7 +297,7 @@ ax211_backend_csr_read32(
 	}
 
 	*value = candidate;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -334,7 +334,7 @@ ax211_backend_csr_write32(
 		return -1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -362,7 +362,7 @@ ax211_backend_csr_write8(
 	*(volatile uint8_t *)(backend->pci_mmio->registers + offset) = value;
 	hal_io_wmb();
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -396,7 +396,7 @@ ax211_backend_nic_lock(
 	if (drv_intel_ax211_mmio_nic_lock(backend->mmio) != INTEL_AX211_MMIO_OK)
 		return -1;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -419,7 +419,7 @@ ax211_backend_nic_unlock(
 		return -1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -446,7 +446,7 @@ ax211_backend_prph_read32(
 		return -1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -473,7 +473,7 @@ ax211_backend_prph_write32(
 		return -1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -516,12 +516,12 @@ ax211_backend_dma_sync(
 		hal_io_wmb();
 	else if (direction == INTEL_AX211_TRANSPORT_DMA_POSTREAD)
 		hal_io_rmb();
-	else
-
+	else {
 		/* Reports operation failure. */
 		return -1;
+	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -618,7 +618,7 @@ ax211_backend_direction_valid(
 		       direction == INTEL_AX211_TRANSPORT_DMA_POSTREAD;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -655,7 +655,7 @@ ax211_backend_delay_us(
 		return -1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -687,7 +687,7 @@ ax211_backend_clock_us(
 	backend->last_clock_us = candidate;
 	backend->clock_observed = 1U;
 	*time_us = candidate;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 

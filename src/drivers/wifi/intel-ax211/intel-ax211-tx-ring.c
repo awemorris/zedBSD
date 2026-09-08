@@ -187,7 +187,7 @@ drv_intel_ax211_tx_ring_allocate(
 		ax211_tx_ring_allocations_release(ring);
 		memset(ring, 0, sizeof(*ring));
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -278,7 +278,7 @@ drv_intel_ax211_tx_ring_queue_add_complete(
 		/* Obtains the ax211 tx protocol result result. */
 		error = ax211_tx_protocol_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -370,7 +370,7 @@ drv_intel_ax211_tx_ring_submit(
 		/* Obtains the ax211 tx codec result result. */
 		error = ax211_tx_codec_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -389,7 +389,7 @@ drv_intel_ax211_tx_ring_submit(
 	if (result != INTEL_AX211_TX_RING_OK) {
 		ax211_tx_ring_slot_scrub(ring, index);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -401,7 +401,7 @@ drv_intel_ax211_tx_ring_submit(
 	if (result != INTEL_AX211_TX_RING_OK) {
 		ax211_tx_ring_slot_scrub(ring, index);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return result;
 	}
 
@@ -464,7 +464,7 @@ drv_intel_ax211_tx_ring_complete(
 		/* Obtains the ax211 tx codec result result. */
 		error = ax211_tx_codec_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -723,7 +723,7 @@ ax211_tx_ring_buffer_valid(
 	    buffer->device_address == 0U || alignment == 0U ||
 	    (alignment & (alignment - 1U)) != 0U ||
 	    (buffer->device_address & (alignment - 1U)) != 0U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -805,7 +805,7 @@ ax211_tx_ring_valid(
 					INTEL_AX211_TX_RING_BYTE_COUNT_SIZE,
 					128U) ||
 	    ring->pending_count > INTEL_AX211_TX_RING_INFLIGHT_LIMIT) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	/* Process each remaining element. */
@@ -817,7 +817,7 @@ ax211_tx_ring_valid(
 		    !ax211_tx_ring_buffer_valid(
 			    &ring->slot[index].payload,
 			    INTEL_AX211_TX_RING_PAYLOAD_DMA_SIZE, 4U)) {
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
@@ -890,7 +890,7 @@ ax211_tx_queue_config_valid(
 	    !ax211_tx_queue_tid_valid(config->tid) ||
 	    config->tfd_address != ring->tfd.device_address ||
 	    config->byte_count_address != ring->byte_count.device_address) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	ax211_tx_queue_command_encode(expected, config->station_id, config->tid,
@@ -960,7 +960,7 @@ ax211_tx_ring_cookie_active(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1209,6 +1209,6 @@ ax211_tx_ring_active_sequence(
 		count++;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }

@@ -221,7 +221,7 @@ ax211_sha256_update(
 		}
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -370,11 +370,11 @@ ax211_files_state(
 	if (!ucode_present || !pnvm_present ||
 	    files->ucode_size != INTEL_AX211_FIRMWARE_SIZE ||
 	    files->pnvm_size != INTEL_AX211_PNVM_SIZE) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	*owned = 1;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -414,8 +414,6 @@ ax211_read_exact_file(
 	if (error == 0 &&
 	    (lease.size < 0 || (uint64_t)lease.size != (uint64_t)exact_size))
 		error = EINVAL;
-
-	/* Checks the operation status. */
 	if (error == 0) {
 		/* Handles the result availability. */
 		result = kern_malloc(exact_size);
@@ -450,8 +448,6 @@ ax211_read_exact_file(
 	/* Checks the operation status. */
 	if (error == 0)
 		error = ax211_digest_matches(result, exact_size, digest);
-
-	/* Checks the operation status. */
 	if (error != 0)
 		ax211_release_bytes(&result, exact_size);
 	else
@@ -480,7 +476,7 @@ ax211_parse_ucode(
 	error =
 		intel_ax211_firmware_loader_host_parse(bytes, length, manifest);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return error;
 
 #else
@@ -489,7 +485,7 @@ ax211_parse_ucode(
 	error =
 		drv_intel_ax211_firmware_parse(bytes, length, manifest);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return error;
 
 #endif
@@ -510,7 +506,7 @@ ax211_inspect_pnvm(
 	error = intel_ax211_firmware_loader_host_inspect_pnvm(
 		bytes, length, inventory);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return error;
 
 #else
@@ -519,7 +515,7 @@ ax211_inspect_pnvm(
 	error =
 		drv_intel_ax211_pnvm_inspect(bytes, length, inventory);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return error;
 
 #endif
@@ -571,12 +567,10 @@ drv_intel_ax211_firmware_files_load(
 	    ax211_inspect_pnvm(candidate.pnvm_bytes, candidate.pnvm_size,
 			       &candidate.pnvm_inventory) != INTEL_AX211_OK)
 		error = EILSEQ;
-
-	/* Checks the operation status. */
 	if (error != 0) {
 		drv_intel_ax211_firmware_files_release(&candidate);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -584,7 +578,7 @@ drv_intel_ax211_firmware_files_load(
 	if (owned)
 		drv_intel_ax211_firmware_files_release(files);
 	*files = candidate;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 

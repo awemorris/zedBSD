@@ -1,7 +1,7 @@
 /* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 
 /* Pure SCSI-2 CDB, response, and transfer-boundary helpers. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 #include "x68k-mb89352.h"
 
@@ -71,7 +71,7 @@ drv_x68k_scsi_cdb10(
 	cdb[7] = (uint8_t)(blocks >> 8);
 	cdb[8] = (uint8_t)blocks;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -135,7 +135,7 @@ drv_x68k_scsi_parse_capacity10(
 		return -1;
 	*blocks = (uint64_t)last + 1U;
 	*block_size = size;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -165,7 +165,7 @@ drv_x68k_scsi_parse_sense(
 	sense->asc = response[12];
 	sense->ascq = response[13];
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -301,11 +301,12 @@ wait_bus_free(
 			return error;
 
 		/*
- * COMMAND DONE is latched after the command-complete message.
+		 * COMMAND DONE is latched after the command-complete message.
 		 * The X68030 SPC does not expose the following BUS FREE state
 		 * until this completion is acknowledged.  Polling mode must
 		 * perform that acknowledgement itself because no IRQ handler
-		 * will do it. */
+		 * will do it.
+		 */
 		if (ints != 0)
 			spc_write(bus, X68K_SPC_INTS, ints);
 
@@ -645,8 +646,6 @@ drv_x68k_spc_pio_command(
 		error = wait_phase(bus, &phase, &ints);
 		if (error == X68K_SPC_ERR_DISCONNECT)
 			return command_done ? X68K_SPC_OK : error;
-
-		/* Checks the operation status. */
 		if (error != X68K_SPC_OK)
 			return error;
 
@@ -690,10 +689,11 @@ drv_x68k_spc_pio_command(
 			error = pio_in(bus, phase, &message, 1U, &ignored);
 			if (error == X68K_SPC_OK) {
 				/*
- * Programmed transfer deliberately leaves ACK
+				 * Programmed transfer deliberately leaves ACK
 				 * asserted after the last MESSAGE IN byte.
 				 * Release it so the target can deassert REQ/BSY
-				 * and enter BUS FREE. */
+				 * and enter BUS FREE.
+				 */
 				spc_write(bus, X68K_SPC_SCMD,
 					  X68K_SPC_SCMD_RESET_ACK);
 
@@ -738,9 +738,9 @@ drv_x68k_spc_pio_command(
 		return X68K_SPC_ERR_RESIDUAL;
 
 	/*
- * Do not let the next command inherit the preceding target's BUSY
-	 * state or completion interrupt. */
-	/* Obtains the wait bus free result. */
+	 * Do not let the next command inherit the preceding target's BUSY
+	 * state or completion interrupt.
+	 */
 	function_result = wait_bus_free(bus);
 
 	/* Returns the computed result. */

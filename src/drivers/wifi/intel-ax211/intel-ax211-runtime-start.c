@@ -88,8 +88,9 @@ drv_intel_ax211_runtime_start_init(
 	}
 
 	/*
- * Owns the exact table instead of retaining the boot coordinator's
-	 * view. */
+	 * Owns the exact table instead of retaining the boot coordinator's
+	 * view.
+	 */
 	memset(session, 0, sizeof(*session));
 	memcpy(session->command_version_bytes, command_table->bytes,
 	       sizeof(session->command_version_bytes));
@@ -152,7 +153,7 @@ drv_intel_ax211_runtime_start_run(
 		/* Obtains the ax211 runtime start fail result. */
 		error = ax211_runtime_start_fail(session, result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -162,7 +163,7 @@ drv_intel_ax211_runtime_start_run(
 		/* Obtains the ax211 runtime start fail result. */
 		error = ax211_runtime_start_fail(session, result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -174,7 +175,7 @@ drv_intel_ax211_runtime_start_run(
 		error = ax211_runtime_start_fail(
 			session, INTEL_AX211_RUNTIME_START_IO);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -184,7 +185,7 @@ drv_intel_ax211_runtime_start_run(
 		/* Obtains the ax211 runtime start fail result. */
 		error = ax211_runtime_start_fail(session, result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -196,7 +197,7 @@ drv_intel_ax211_runtime_start_run(
 		/* Obtains the ax211 runtime start fail result. */
 		error = ax211_runtime_start_fail(session, result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -209,7 +210,7 @@ drv_intel_ax211_runtime_start_run(
 		/* Obtains the ax211 runtime start fail result. */
 		error = ax211_runtime_start_fail(session, result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -219,7 +220,7 @@ drv_intel_ax211_runtime_start_run(
 		/* Obtains the ax211 runtime start fail result. */
 		error = ax211_runtime_start_fail(session, result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -229,7 +230,7 @@ drv_intel_ax211_runtime_start_run(
 		/* Obtains the ax211 runtime start fail result. */
 		error = ax211_runtime_start_fail(session, result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -241,7 +242,7 @@ drv_intel_ax211_runtime_start_run(
 		error = ax211_runtime_start_fail(
 			session, INTEL_AX211_RUNTIME_START_TRANSPORT);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -343,7 +344,7 @@ ax211_runtime_start_ops_valid(
 	    ops->boot.post_alive == NULL || ops->boot.interrupt_drain == NULL ||
 	    ops->boot.clock_us == NULL || ops->nic_lock == NULL ||
 	    ops->nic_unlock == NULL) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -448,7 +449,7 @@ ax211_runtime_start_load_and_profile(
 		/* Obtains the ax211 runtime start runtime result result. */
 		error = ax211_runtime_start_runtime_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -577,7 +578,7 @@ ax211_runtime_start_stop_and_release(
 	}
 
 	/*
- * Never-exposed DMA is safe to free, but reset failure remains sticky.
+	 * Never-exposed DMA is safe to free, but reset failure remains sticky.
 	 */
 	if (!session->dma_exposed && !session->transport_bound) {
 		/* Handles the session condition. */
@@ -828,7 +829,7 @@ ax211_runtime_start_wait_notification(
 		error = ax211_runtime_start_notification_accept(
 			session, kind, &message);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -883,8 +884,6 @@ ax211_runtime_start_receive(
 		sizeof(session->event_bytes), &received);
 	if (result == INTEL_AX211_BOOT_RECEIVE_TIMEOUT)
 		return INTEL_AX211_RUNTIME_START_TIMEOUT;
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_BOOT_RECEIVE_OK)
 		return INTEL_AX211_RUNTIME_START_IO;
 
@@ -956,7 +955,7 @@ ax211_runtime_start_notification_kind(
 		return AX211_RUNTIME_START_NOTIFICATION_INIT;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -987,7 +986,7 @@ ax211_runtime_start_notification_duplicate(
 		return 1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1152,7 +1151,7 @@ ax211_runtime_start_init_firmware(
 		/* Obtains the ax211 runtime start runtime result result. */
 		error = ax211_runtime_start_runtime_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1181,7 +1180,7 @@ ax211_runtime_start_send_extended_cfg(
 		/* Obtains the ax211 runtime start protocol result result. */
 		error = ax211_runtime_start_protocol_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1248,7 +1247,7 @@ ax211_runtime_start_submit(
 		/* Obtains the ax211 runtime start command result result. */
 		error = ax211_runtime_start_command_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1343,7 +1342,7 @@ ax211_runtime_start_wait_command(
 		/* Obtains the ax211 runtime start command result result. */
 		error = ax211_runtime_start_command_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1402,7 +1401,7 @@ ax211_runtime_start_send_nvm_access_complete(
 		/* Obtains the ax211 runtime start command result result. */
 		error = ax211_runtime_start_command_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1485,7 +1484,7 @@ ax211_runtime_start_commands_locked(
 		/* Obtains the ax211 runtime start runtime result result. */
 		error = ax211_runtime_start_runtime_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1503,7 +1502,7 @@ ax211_runtime_start_commands_locked(
 			error =
 				ax211_runtime_start_runtime_result(result);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -1524,14 +1523,12 @@ ax211_runtime_start_commands_locked(
 			session->runtime.step, now);
 		if (result == INTEL_AX211_RUNTIME_COMPLETE)
 			break;
-
-		/* Checks the operation result. */
 		if (result != INTEL_AX211_RUNTIME_OK) {
 			/* Obtains the ax211 runtime start runtime result result. */
 			error =
 				ax211_runtime_start_runtime_result(result);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	}
@@ -1632,13 +1629,11 @@ ax211_runtime_start_send_step(
 	result = drv_intel_ax211_runtime_mcc_decode(
 		&message, session->generation, &session->mcc);
 	memset(session->response_bytes, 0, sizeof(session->response_bytes));
-
-	/* Checks the operation result. */
 	if (result != INTEL_AX211_RUNTIME_OK) {
 		/* Obtains the ax211 runtime start runtime result result. */
 		error = ax211_runtime_start_runtime_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 

@@ -299,8 +299,6 @@ vfs_may_create(
 		return ENOTDIR;
 
 	/* Creation needs write and search permission on the directory. */
-
-	/* Reports the access check. */
 	error = vfs_access(parent, cred, W_OK | X_OK);
 	if (error != 0)
 		return error;
@@ -464,8 +462,6 @@ vfs_clear_setid_on_write(
 		return 0;
 
 	/* Clears the bits as for any content change. */
-
-	/* Reports why the clearing failed. */
 	error = vfs_clear_setid_on_content_change(inode);
 	if (error != 0)
 		return error;
@@ -629,8 +625,6 @@ vfs_removexattr(
 		return error;
 
 	/* Removes the attribute. */
-
-	/* Reports why the removal failed. */
 	error = inode_removexattr(inode, name);
 	if (error != 0)
 		return error;

@@ -812,35 +812,86 @@ overlay_snapshot_apply(
 	const uint8_t id[4])
 {
 	uint32_t length;
+	uint32_t reserved;
 	unsigned flags;
 	uint64_t sequence;
+	uint64_t epoch;
+	uint16_t version;
 	char path[ZEDBSD_PATH_MAX];
+	char *root;
 	unsigned i;
+	int signature;
+	int identity;
+	int tail_blank;
+	int existing;
 
-	length = overlay_get32(record + 0x0c);
+	/* Compares the record against the snapshot-record signature. */
+	signature = memcmp(record, "ZOVLSNP\0", 8);
+	if (signature != 0)
+		return EINVAL;	/* Failed. */
+
+	/* A record of another format version is not one this driver reads. */
+	version = overlay_get16(record + 8);
+	if (version != 1)
+		return EINVAL;	/* Failed. */
+
+	/* The flags that say why this path is in the table at all. */
 	flags = overlay_get16(record + 0x0a);
-	sequence = overlay_get64(record + 0x18);
+	if ((flags & ~(OVERLAY_META_WHITEOUT | OVERLAY_META_OPAQUE)) != 0)
+		return EINVAL;	/* Failed. */
 
-	/* Checks every field against the view's epoch and sequence. */
-	if (memcmp(record, "ZOVLSNP\0", 8) ||
-	    overlay_get16(record + 8) != 1 ||
-	    (flags & ~(OVERLAY_META_WHITEOUT | OVERLAY_META_OPAQUE)) != 0 ||
-	    flags == 0 ||
-	    length == 0 ||
-	    length >= ZEDBSD_PATH_MAX ||
-	    length > OVERLAY_PATH_RECORD_MAX ||
-	    overlay_get64(record + 0x10) != view->epoch ||
-	    sequence == 0 ||
-	    sequence > view->sequence ||
-	    memcmp(record + 0x20, id, 4) ||
-	    overlay_get32(record + 0x24) != 0 ||
-	    !overlay_all_zero(record + 0x28 + length,
-		508U - (0x28U + length)))
-		return EINVAL;
+	/* An entry carrying no flag records nothing about its path. */
+	if (flags == 0)
+		return EINVAL;	/* Failed. */
+
+	/* How many bytes of path follow the header. */
+	length = overlay_get32(record + 0x0c);
+	if (length == 0)
+		return EINVAL;	/* Failed. */
+
+	/* A path longer than the kernel or the record itself can hold. */
+	if (length >= ZEDBSD_PATH_MAX || length > OVERLAY_PATH_RECORD_MAX)
+		return EINVAL;	/* Failed. */
+
+	/* A record of another epoch belongs to a slot that was replaced. */
+	epoch = overlay_get64(record + 0x10);
+	if (epoch != view->epoch)
+		return EINVAL;	/* Failed. */
+
+	/* The sequence number the entry was last changed at. */
+	sequence = overlay_get64(record + 0x18);
+	if (sequence == 0 || sequence > view->sequence)
+		return EINVAL;	/* Failed. */
+
+	/* A record written for a different mount is not this one's. */
+	identity = memcmp(record + 0x20, id, 4);
+	if (identity != 0)
+		return EINVAL;	/* Failed. */
+
+	/* The reserved word is written as zero and has to read back so. */
+	reserved = overlay_get32(record + 0x24);
+	if (reserved != 0)
+		return EINVAL;	/* Failed. */
+
+	/* And nothing at all may follow the path inside the record. */
+	tail_blank = overlay_all_zero(record + 0x28 + length,
+				      508U - (0x28U + length));
+	if (!tail_blank)
+		return EINVAL;	/* Failed. */
+
+	/* Takes the path the record names as a string of its own. */
 	memcpy(path, record + 0x28, length);
 	path[length] = '\0';
-	if (strchr(path, '/') == path || overlay_metadata_find(view->metadata, path) >= 0)
-		return EINVAL;
+
+	/* A path is stored relative to the root, so it cannot start at one. */
+	root = strchr(path, '/');
+	if (root == path)
+		return EINVAL;	/* Failed. */
+
+	/* Nor may two records claim the same path. */
+	existing = overlay_metadata_find(view->metadata, path);
+	if (existing >= 0)
+		return EINVAL;	/* Failed. */
 
 	/* Stores the entry in a free slot. */
 	for (i = 0; i < OVERLAY_METADATA_MAX; i++) {
@@ -864,33 +915,77 @@ overlay_operation_apply(
 	const uint8_t id[4])
 {
 	uint32_t length;
+	uint32_t reserved;
 	unsigned opcode;
 	uint64_t sequence;
+	uint64_t epoch;
+	uint16_t version;
 	char path[ZEDBSD_PATH_MAX];
+	int signature;
+	int identity;
+	int tail_blank;
+	int applied;
 
-	length = overlay_get32(record + 0x0c);
+	/* Compares the record against the operation-record signature. */
+	signature = memcmp(record, "ZOVLOP\0\0", 8);
+	if (signature != 0)
+		return EINVAL;	/* Failed. */
+
+	/* A record of another format version is not one this driver reads. */
+	version = overlay_get16(record + 8);
+	if (version != 1)
+		return EINVAL;	/* Failed. */
+
+	/* Which change to the table the record stands for. */
 	opcode = overlay_get16(record + 0x0a);
-	sequence = overlay_get64(record + 0x18);
+	if (opcode < OVERLAY_OP_ADD_WHITEOUT ||
+	    opcode > OVERLAY_OP_CLEAR_OPAQUE)
+		return EINVAL;	/* Failed. */
 
-	/* The record must continue the sequence exactly. */
-	if (memcmp(record, "ZOVLOP\0\0", 8) ||
-	    overlay_get16(record + 8) != 1 ||
-	    opcode < OVERLAY_OP_ADD_WHITEOUT ||
-	    opcode > OVERLAY_OP_CLEAR_OPAQUE ||
-	    length == 0 ||
-	    length >= ZEDBSD_PATH_MAX ||
-	    length > OVERLAY_PATH_RECORD_MAX ||
-	    overlay_get64(record + 0x10) != view->epoch ||
-	    sequence != view->sequence + 1U ||
-	    memcmp(record + 0x20, id, 4) ||
-	    overlay_get32(record + 0x24) != 0 ||
-	    !overlay_all_zero(record + 0x28 + length,
-		508U - (0x28U + length)))
-		return EINVAL;
+	/* How many bytes of path follow the header. */
+	length = overlay_get32(record + 0x0c);
+	if (length == 0)
+		return EINVAL;	/* Failed. */
+
+	/* A path longer than the kernel or the record itself can hold. */
+	if (length >= ZEDBSD_PATH_MAX || length > OVERLAY_PATH_RECORD_MAX)
+		return EINVAL;	/* Failed. */
+
+	/* A record of another epoch belongs to a slot that was replaced. */
+	epoch = overlay_get64(record + 0x10);
+	if (epoch != view->epoch)
+		return EINVAL;	/* Failed. */
+
+	/* An operation record has to continue the sequence exactly. */
+	sequence = overlay_get64(record + 0x18);
+	if (sequence != view->sequence + 1U)
+		return EINVAL;	/* Failed. */
+
+	/* A record written for a different mount is not this one's. */
+	identity = memcmp(record + 0x20, id, 4);
+	if (identity != 0)
+		return EINVAL;	/* Failed. */
+
+	/* The reserved word is written as zero and has to read back so. */
+	reserved = overlay_get32(record + 0x24);
+	if (reserved != 0)
+		return EINVAL;	/* Failed. */
+
+	/* And nothing at all may follow the path inside the record. */
+	tail_blank = overlay_all_zero(record + 0x28 + length,
+				      508U - (0x28U + length));
+	if (!tail_blank)
+		return EINVAL;	/* Failed. */
+
+	/* Takes the path the record names as a string of its own. */
 	memcpy(path, record + 0x28, length);
 	path[length] = '\0';
-	if (overlay_metadata_apply(view->metadata, path, opcode, sequence) != 0)
-		return ENOSPC;
+
+	/* Applies the change the record recorded to the table being rebuilt. */
+	applied = overlay_metadata_apply(view->metadata, path, opcode,
+					 sequence);
+	if (applied != 0)
+		return ENOSPC;	/* Failed. */
 	view->sequence = sequence;
 	return 0;
 }
@@ -908,8 +1003,18 @@ overlay_validate_slot(
 	uint32_t snapshot_count;
 	uint32_t commit_sector;
 	uint32_t digest;
+	uint32_t record_bytes;
+	uint32_t reserved;
+	uint32_t stored_digest;
 	uint64_t last_sequence;
+	uint64_t epoch;
+	uint16_t version;
+	uint16_t header_bytes;
 	unsigned sector;
+	int signature;
+	int identity;
+	int tail_blank;
+	int valid;
 	int error;
 
 	id = overlay_id(state);
@@ -919,24 +1024,73 @@ overlay_validate_slot(
 	error = overlay_read_record(state->journal[slot], 0, record);
 	if (error != 0)
 		return error;
-	if (!overlay_record_valid(record) ||
-	    memcmp(record, "ZOVLSLT\0", 8) ||
-	    overlay_get16(record + 8) != 1 ||
-	    overlay_get16(record + 0x0a) != 48 ||
-	    overlay_get32(record + 0x0c) != OVERLAY_RECORD_BYTES ||
-	    memcmp(record + 0x10, id, 4) ||
-	    overlay_get32(record + 0x14) != 0 ||
-	    overlay_get64(record + 0x18) == 0 ||
-	    !overlay_all_zero(record + 0x30, 508U - 0x30U))
+	/* A header whose checksum does not hold was never fully written. */
+	valid = overlay_record_valid(record);
+	if (!valid)
 		return 0;
-	view->epoch = overlay_get64(record + 0x18);
+
+	/* Compares the sector against the slot-header signature. */
+	signature = memcmp(record, "ZOVLSLT\0", 8);
+	if (signature != 0)
+		return 0;
+
+	/* A header of another format version is not one this driver reads. */
+	version = overlay_get16(record + 8);
+	if (version != 1)
+		return 0;
+
+	/* The header and the record are both of a fixed size. */
+	header_bytes = overlay_get16(record + 0x0a);
+	if (header_bytes != 48)
+		return 0;
+
+	record_bytes = overlay_get32(record + 0x0c);
+	if (record_bytes != OVERLAY_RECORD_BYTES)
+		return 0;
+
+	/* A slot written for a different mount is not this one's. */
+	identity = memcmp(record + 0x10, id, 4);
+	if (identity != 0)
+		return 0;
+
+	/* The reserved word is written as zero and has to read back so. */
+	reserved = overlay_get32(record + 0x14);
+	if (reserved != 0)
+		return 0;
+
+	/* Epoch zero stands for a slot that was never published. */
+	epoch = overlay_get64(record + 0x18);
+	if (epoch == 0)
+		return 0;
+
+	/* And nothing at all may follow the header inside the record. */
+	tail_blank = overlay_all_zero(record + 0x30, 508U - 0x30U);
+	if (!tail_blank)
+		return 0;
+
+	view->epoch = epoch;
+
+	/* How many snapshot records the slot says follow the header. */
 	snapshot_count = overlay_get32(record + 0x20);
+
+	/* Which sector the commit record was written in. */
 	commit_sector = overlay_get32(record + 0x24);
+
+	/* And the sequence number the table stood at when it was written. */
 	last_sequence = overlay_get64(record + 0x28);
-	if (snapshot_count > OVERLAY_METADATA_MAX ||
-	    commit_sector != 1U + snapshot_count ||
-	    commit_sector >= OVERLAY_SLOT_SECTORS)
+
+	/* A table larger than this driver keeps room for is not readable. */
+	if (snapshot_count > OVERLAY_METADATA_MAX)
 		return 0;
+
+	/* The commit record sits directly after the snapshot records. */
+	if (commit_sector != 1U + snapshot_count)
+		return 0;
+
+	/* And has to fall inside the slot. */
+	if (commit_sector >= OVERLAY_SLOT_SECTORS)
+		return 0;
+
 	view->sequence = last_sequence;
 
 	/* The snapshot records rebuild the table and feed the digest. */
@@ -955,17 +1109,56 @@ overlay_validate_slot(
 	error = overlay_read_record(state->journal[slot], commit_sector, commit);
 	if (error != 0)
 		return error;
-	if (!overlay_record_valid(commit) ||
-	    memcmp(commit, "ZOVLCMT\0", 8) ||
-	    overlay_get16(commit + 8) != 1 ||
-	    overlay_get16(commit + 0x0a) != 0 ||
-	    memcmp(commit + 0x0c, id, 4) ||
-	    overlay_get64(commit + 0x10) != view->epoch ||
-	    overlay_get32(commit + 0x18) != snapshot_count ||
-	    overlay_get32(commit + 0x1c) != commit_sector ||
-	    overlay_get64(commit + 0x20) != last_sequence ||
-	    overlay_get32(commit + 0x28) != (digest ^ 0xffffffffU) ||
-	    !overlay_all_zero(commit + 0x2c, 508U - 0x2cU))
+	/* A commit whose checksum does not hold was never fully written. */
+	valid = overlay_record_valid(commit);
+	if (!valid)
+		return 0;
+
+	/* Compares the sector against the commit-record signature. */
+	signature = memcmp(commit, "ZOVLCMT\0", 8);
+	if (signature != 0)
+		return 0;
+
+	/* A commit of another format version is not one this driver reads. */
+	version = overlay_get16(commit + 8);
+	if (version != 1)
+		return 0;
+
+	/* The word a snapshot record uses for flags is unused here. */
+	header_bytes = overlay_get16(commit + 0x0a);
+	if (header_bytes != 0)
+		return 0;
+
+	/* A commit written for a different mount is not this one's. */
+	identity = memcmp(commit + 0x0c, id, 4);
+	if (identity != 0)
+		return 0;
+
+	/* Every field the header already gave has to be repeated exactly. */
+	epoch = overlay_get64(commit + 0x10);
+	if (epoch != view->epoch)
+		return 0;
+
+	record_bytes = overlay_get32(commit + 0x18);
+	if (record_bytes != snapshot_count)
+		return 0;
+
+	record_bytes = overlay_get32(commit + 0x1c);
+	if (record_bytes != commit_sector)
+		return 0;
+
+	epoch = overlay_get64(commit + 0x20);
+	if (epoch != last_sequence)
+		return 0;
+
+	/* The digest ties the commit to the exact records that were written. */
+	stored_digest = overlay_get32(commit + 0x28);
+	if (stored_digest != (digest ^ 0xffffffffU))
+		return 0;
+
+	/* And nothing at all may follow the commit inside the record. */
+	tail_blank = overlay_all_zero(commit + 0x2c, 508U - 0x2cU);
+	if (!tail_blank)
 		return 0;
 
 	/* Operation records follow until the first blank or broken one. */
@@ -1210,15 +1403,29 @@ overlay_journal_compact_impl(
 
 	/* Writes the slot header. */
 	memset(record, 0, sizeof(record));
+
+	/* The signature and version a reader identifies the slot by. */
 	memcpy(record, "ZOVLSLT\0", 8);
 	overlay_put16(record + 8, 1);
+
+	/* How long the header is, and how long each record of the slot is. */
 	overlay_put16(record + 0x0a, 48);
 	overlay_put32(record + 0x0c, OVERLAY_RECORD_BYTES);
+
+	/* Which mount the slot belongs to. */
 	memcpy(record + 0x10, id, 4);
+
+	/* The epoch this slot is being published under. */
 	overlay_put64(record + 0x18, epoch);
+
+	/* How many snapshot records follow, and where the commit sits. */
 	overlay_put32(record + 0x20, count);
 	overlay_put32(record + 0x24, commit_sector);
+
+	/* The sequence number the table stands at. */
 	overlay_put64(record + 0x28, state->sequence);
+
+	/* And a checksum over the whole record. */
 	overlay_put32(record + 508, overlay_record_crc(record));
 	error = overlay_write_record(state->journal[target], 0, record);
 	if (error != 0)
@@ -1237,15 +1444,27 @@ overlay_journal_compact_impl(
 			return EIO;
 		length = strlen(state->metadata[index].path);
 		memset(record, 0, sizeof(record));
+
+		/* The signature and version a reader identifies the entry by. */
 		memcpy(record, "ZOVLSNP\0", 8);
 		overlay_put16(record + 8, 1);
+
+		/* Why the path is in the table, and how long the path is. */
 		overlay_put16(record + 0x0a, state->metadata[index].flags);
 		overlay_put32(record + 0x0c, (uint32_t)length);
+
+		/* The epoch of the slot, and when the entry last changed. */
 		overlay_put64(record + 0x10, epoch);
 		overlay_put64(record + 0x18,
 			state->metadata[index].sequence);
+
+		/* Which mount the entry belongs to. */
 		memcpy(record + 0x20, id, 4);
+
+		/* The path itself, which the header gave the length of. */
 		memcpy(record + 0x28, state->metadata[index].path, length);
+
+		/* And a checksum over the whole record. */
 		overlay_put32(record + 508, overlay_record_crc(record));
 		error = overlay_write_record(state->journal[target], sector, record);
 		if (error != 0)
@@ -1256,14 +1475,24 @@ overlay_journal_compact_impl(
 
 	/* Writes the commit record and makes the slot durable. */
 	memset(record, 0, sizeof(record));
+
+	/* The signature and version a reader identifies the commit by. */
 	memcpy(record, "ZOVLCMT\0", 8);
 	overlay_put16(record + 8, 1);
+
+	/* Which mount the slot belongs to. */
 	memcpy(record + 0x0c, id, 4);
+
+	/* Every field of the header, repeated so the two can be compared. */
 	overlay_put64(record + 0x10, epoch);
 	overlay_put32(record + 0x18, count);
 	overlay_put32(record + 0x1c, commit_sector);
 	overlay_put64(record + 0x20, state->sequence);
+
+	/* The digest that ties the commit to the records just written. */
 	overlay_put32(record + 0x28, digest ^ 0xffffffffU);
+
+	/* And a checksum over the whole record. */
 	overlay_put32(record + 508, overlay_record_crc(record));
 	error = overlay_write_record(state->journal[target], commit_sector, record);
 	if (error == 0)
@@ -1349,14 +1578,26 @@ overlay_journal_append_impl(
 	/* Writes the record durably, then applies it. */
 	sequence = state->sequence + 1U;
 	memset(record, 0, sizeof(record));
+
+	/* The signature and version a reader identifies the record by. */
 	memcpy(record, "ZOVLOP\0\0", 8);
 	overlay_put16(record + 8, 1);
+
+	/* Which change to the table it stands for, and the path it names. */
 	overlay_put16(record + 0x0a, (uint16_t)opcode);
 	overlay_put32(record + 0x0c, (uint32_t)length);
+
+	/* The epoch of the slot, and the sequence this record continues. */
 	overlay_put64(record + 0x10, state->epoch);
 	overlay_put64(record + 0x18, sequence);
+
+	/* Which mount the record belongs to. */
 	memcpy(record + 0x20, overlay_id(state), 4);
+
+	/* The path itself, which the header gave the length of. */
 	memcpy(record + 0x28, path, length);
+
+	/* And a checksum over the whole record. */
 	overlay_put32(record + 508, overlay_record_crc(record));
 	error = overlay_write_record(state->journal[state->active_slot],
 		state->next_sector, record);
@@ -1546,13 +1787,25 @@ overlay_temporary_name(
 	const char *name)
 {
 	unsigned i;
+	size_t length;
+	int suffix;
 
-	/* Rejects a name whose fixed parts do not match. */
-	if (name == NULL ||
-	    strlen(name) != 10U ||
-	    name[0] != 'o' ||
-	    name[1] != 'v' ||
-	    strcmp(name + 6, ".tmp"))
+	/* A call that names nothing has no name to test. */
+	if (name == NULL)
+		return 0;
+
+	/* Every temporary name is exactly ten characters long. */
+	length = strlen(name);
+	if (length != 10U)
+		return 0;
+
+	/* It begins with the two letters that mark it as the overlay's. */
+	if (name[0] != 'o' || name[1] != 'v')
+		return 0;
+
+	/* And it ends with the suffix that marks it as temporary. */
+	suffix = strcmp(name + 6, ".tmp");
+	if (suffix != 0)
 		return 0;
 
 	/* Requires the four middle characters to be hexadecimal. */
@@ -2520,7 +2773,8 @@ overlay_copy_up_regular(
 	 * Generic preparation has already committed the upper before taking
 	 * i_io_lock. Inner metadata/truncate calls must not reacquire namespace.
 	 * Callers without i_io still join the gate below: another namespace
-	 * operation may have published provisional ancestors pending rollback. */
+	 * operation may have published provisional ancestors pending rollback.
+	 */
 	if (mutex_owned(&inode->i_io_lock)) {
 		error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER, &upper);
 		if (error == 0)
@@ -3610,7 +3864,8 @@ overlay_rename(
 		goto out;
 	/*
 	 * The visible upper may omit its hidden lower. Renaming that upper must
-	 * still whiteout the old backing name, just like unlink. */
+	 * still whiteout the old backing name, just like unlink.
+	 */
 	if (source_lower.p_inode == NULL && old_parent_lower.p_inode != NULL) {
 		error = overlay_lookup_real(&old_parent_lower, old_name, &source_lower);
 		if (error != 0 && error != ENOENT)
@@ -3853,7 +4108,8 @@ overlay_remove(
 
 	/*
 	 * A regular upper hides its lower path in the visible inode. Check the
-	 * backing directory too, or unlink would resurrect the hidden entry. */
+	 * backing directory too, or unlink would resurrect the hidden entry.
+	 */
 	if (target_lower.p_inode == NULL && parent_lower.p_inode != NULL) {
 		error = overlay_lookup_real(&parent_lower, name, &target_lower);
 		if (error != 0 && error != ENOENT)
@@ -3878,7 +4134,8 @@ overlay_remove(
 
 	/*
 	 * Removal is committed in the live namespace even if durability fails.
-	 * Publish invalidation before sync; generic callers only do it on success. */
+	 * Publish invalidation before sync; generic callers only do it on success.
+	 */
 	inode_dir_changed(directory);
 	namecache_remove(directory, name);
 	overlay_retire_inode(target);
@@ -4810,15 +5067,23 @@ overlay_mount_impl(
 	visited = 0;
 	deleted = 0;
 
-	/* Rejects malformed arguments. */
-	if (args == NULL ||
-	    args->upper.p_inode == NULL ||
-	    args->lower.p_inode == NULL ||
-	    args->upper.p_inode->i_type != INODE_DIR ||
-	    args->lower.p_inode->i_type != INODE_DIR ||
-	    (args->flags != OVERLAY_READ_ONLY &&
-	     args->flags != OVERLAY_READ_WRITE))
-		return EINVAL;
+	/* A mount that names no arguments has no layers to stack. */
+	if (args == NULL)
+		return EINVAL;	/* Failed. */
+
+	/* An overlay is made of two layers, and needs both of them. */
+	if (args->upper.p_inode == NULL || args->lower.p_inode == NULL)
+		return EINVAL;	/* Failed. */
+
+	/* Each layer is a tree, so each has to be named by a directory. */
+	if (args->upper.p_inode->i_type != INODE_DIR ||
+	    args->lower.p_inode->i_type != INODE_DIR)
+		return EINVAL;	/* Failed. */
+
+	/* And the mount is one of the two kinds this driver serves. */
+	if (args->flags != OVERLAY_READ_ONLY &&
+	    args->flags != OVERLAY_READ_WRITE)
+		return EINVAL;	/* Failed. */
 
 	/*
 	 * The content-transaction lock chain currently has one visible
@@ -4963,7 +5228,8 @@ overlay_unmount_impl(
 /*
  * Prepare lower-only metadata/content before generic code takes i_io_lock.
  * Namespace mutations may hold that lock while reading parent attributes,
- * so materialization cannot acquire their gate from inside an I/O callback. */
+ * so materialization cannot acquire their gate from inside an I/O callback.
+ */
 static OVERLAY_HIGH int
 overlay_prepare_mutation(
 	struct inode *inode)
@@ -4977,7 +5243,8 @@ overlay_prepare_mutation(
 	/*
 	 * An already-owned I/O domain implies an outer preparation. Otherwise
 	 * join even for an existing upper: it may belong to an in-flight ancestor
-	 * materialization which can still roll back while holding namespace. */
+	 * materialization which can still roll back while holding namespace.
+	 */
 	if (mutex_owned(&inode->i_io_lock)) {
 		error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER, &upper);
 		if (error == 0)

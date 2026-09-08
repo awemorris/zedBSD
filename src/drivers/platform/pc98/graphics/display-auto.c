@@ -60,7 +60,7 @@ drv_pc98_auto_make_hal(
 	if (hal == NULL || backend == NULL ||
 	    !drv_pc98_cirrus_make_hal(&backend->cirrus_hal, &backend->cirrus) ||
 	    !drv_pc98_gdc_make_hal(&backend->gdc_hal, &backend->gdc)) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	memset(hal, 0, sizeof(*hal));
@@ -112,7 +112,7 @@ auto_enter(
 		return 1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 

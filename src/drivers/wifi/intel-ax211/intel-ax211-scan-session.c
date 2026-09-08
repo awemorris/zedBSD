@@ -126,7 +126,7 @@ drv_intel_ax211_scan_session_init(
 		/* Obtains the ax211 scan session scan result result. */
 		error = ax211_scan_session_scan_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -191,7 +191,7 @@ drv_intel_ax211_scan_session_begin_channel(
 		/* Obtains the ax211 scan session scan result result. */
 		error = ax211_scan_session_scan_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -203,7 +203,7 @@ drv_intel_ax211_scan_session_begin_channel(
 		/* Obtains the ax211 scan session scan result result. */
 		error = ax211_scan_session_scan_result(result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -257,7 +257,7 @@ drv_intel_ax211_scan_session_start_ack(
 		error = ax211_scan_session_terminal(
 			session, ax211_scan_session_scan_result(result));
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -306,7 +306,7 @@ drv_intel_ax211_scan_session_notification(
 		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_TIMEOUT);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -391,7 +391,7 @@ drv_intel_ax211_scan_session_abort(
 		/* Obtains the ax211 scan session terminal result. */
 		error = ax211_scan_session_terminal(session, result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -429,7 +429,7 @@ drv_intel_ax211_scan_session_abort_ack(
 		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_COMMAND);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -442,7 +442,7 @@ drv_intel_ax211_scan_session_abort_ack(
 		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_ABORTED);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -488,15 +488,13 @@ drv_intel_ax211_scan_session_expire(
 			session->commands, now_us, &expired);
 		if (result == INTEL_AX211_COMMAND_PENDING)
 			return INTEL_AX211_SCAN_SESSION_OK;
-
-		/* Checks the operation result. */
 		if (result != INTEL_AX211_COMMAND_TIMEOUT) {
 			/* Obtains the ax211 scan session terminal result. */
 			error = ax211_scan_session_terminal(
 				session,
 				ax211_scan_session_command_result(result));
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -510,7 +508,7 @@ drv_intel_ax211_scan_session_expire(
 			error = ax211_scan_session_terminal(
 				session, INTEL_AX211_SCAN_SESSION_OUT_OF_ORDER);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 
@@ -518,7 +516,7 @@ drv_intel_ax211_scan_session_expire(
 		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_TIMEOUT);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -534,7 +532,7 @@ drv_intel_ax211_scan_session_expire(
 		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_TIMEOUT);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -549,7 +547,7 @@ drv_intel_ax211_scan_session_expire(
 		/* Obtains the ax211 scan session terminal result. */
 		error = ax211_scan_session_terminal(session, result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -608,7 +606,7 @@ ax211_scan_session_live(
 	/* Handles the session availability. */
 	if (session == NULL || !session->initialized ||
 	    session->commands == NULL || session->hardware_epoch == 0U) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -800,7 +798,7 @@ ax211_scan_session_ack(
 		error =
 			drv_intel_ax211_scan_session_expire(session, now_us);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -838,7 +836,7 @@ ax211_scan_session_ack(
 		/* Obtains the ax211 scan session terminal result. */
 		error = ax211_scan_session_terminal(session, result);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -848,7 +846,7 @@ ax211_scan_session_ack(
 		error = ax211_scan_session_terminal(
 			session, INTEL_AX211_SCAN_SESSION_COMMAND);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -860,7 +858,7 @@ ax211_scan_session_ack(
 			error = ax211_scan_session_terminal(
 				session, INTEL_AX211_SCAN_SESSION_COMMAND);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 

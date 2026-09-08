@@ -668,7 +668,8 @@ inode_setattr(
 	/*
 	 * Copy-up can create/rename upper entries. Complete it before i_io_lock,
 	 * because namespace creation takes the transaction gate before this lock
-	 * when observing a parent's ownership and set-GID attributes. */
+	 * when observing a parent's ownership and set-GID attributes.
+	 */
 	if (i->i_op != NULL && i->i_op->prepare_mutation != NULL) {
 		error = i->i_op->prepare_mutation(i);
 		if (error != 0)
@@ -2666,7 +2667,8 @@ xattr_name_valid(
 
 /*
  * Join before checking attachments and retain the sleeping gate through the
- * backend commit. The outer syscall/copy-up owner keeps its own acquisition. */
+ * backend commit. The outer syscall/copy-up owner keeps its own acquisition.
+ */
 static int
 inode_namespace_enter(
 	struct inode *directory,

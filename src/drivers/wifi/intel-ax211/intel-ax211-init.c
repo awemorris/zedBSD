@@ -127,10 +127,10 @@ drv_intel_ax211_init_extended_cfg_encode(
 		flags = 0U;
 	else if (profile == INTEL_AX211_INIT_PROFILE_READ_NVM)
 		flags = INTEL_AX211_INIT_EXTENDED_CFG_NVM_FLAG;
-	else
-
+	else {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_UNSUPPORTED;
+	}
 	ax211_init_put_le32(output, flags);
 
 	/* Returns the computed result. */
@@ -167,10 +167,10 @@ drv_intel_ax211_init_extended_cfg_decode(
 		decoded = INTEL_AX211_INIT_PROFILE_RUNTIME;
 	else if (flags == INTEL_AX211_INIT_EXTENDED_CFG_NVM_FLAG)
 		decoded = INTEL_AX211_INIT_PROFILE_READ_NVM;
-	else
-
+	else {
 		/* Returns the computed result. */
 		return INTEL_AX211_PROTOCOL_UNSUPPORTED;
+	}
 	*profile = decoded;
 	/* Returns the computed result. */
 	return INTEL_AX211_PROTOCOL_OK;
@@ -213,8 +213,6 @@ ax211_init_version_require_absent(
 		table, group, opcode, &version);
 	if (result == INTEL_AX211_PROTOCOL_MISSING)
 		return INTEL_AX211_PROTOCOL_OK;
-
-	/* Checks the operation result. */
 	if (result == INTEL_AX211_PROTOCOL_OK)
 		return INTEL_AX211_PROTOCOL_UNSUPPORTED;
 

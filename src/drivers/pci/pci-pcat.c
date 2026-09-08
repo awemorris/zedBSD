@@ -2,7 +2,8 @@
 
 /*
  * PC/AT PCI Configuration Mechanism #1 host. Copyright (C) 2026 Awe Morris;
- * SPDX-License-Identifier: Zlib */
+ * SPDX-License-Identifier: Zlib
+ */
 #include <drivers/pci-pcat.h>
 #include <drivers/pci.h>
 #include <errno.h>
@@ -109,7 +110,7 @@ drv_pci_pcat_init(
 	if (error != 0) {
 		(void)drv_dma_device_destroy(pcat_dma);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -134,7 +135,7 @@ ecam_function_address(
 						  address->bus, address->device,
 						  address->function, result);
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return error;
 
 #else
@@ -168,7 +169,7 @@ pcat_config_read(
 	    address->function >= 8U || offset + width > 4096U ||
 	    (width != 1 && width != 2 && width != 4) ||
 	    (width == 2 && (offset & 1U)) || (width == 4 && (offset & 3U))) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -187,7 +188,7 @@ pcat_config_read(
 		else
 			value = *(volatile uint32_t *)(base_local + offset);
 		*result = value;
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -201,7 +202,7 @@ pcat_config_read(
 		else
 			value = *(volatile uint32_t *)(base_local1 + offset);
 		*result = value;
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -217,7 +218,7 @@ pcat_config_read(
 	else if (width == 2)
 		value &= 0xffffU;
 	*result = value;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -238,14 +239,14 @@ ecam_map(
 			? 0
 			: ENOTSUP;
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return error;
 
 #else
 	(void)address;
 	(void)result;
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ENOTSUP;
 #endif
 }
@@ -331,7 +332,7 @@ pcat_config_write(
 	    address->function >= 8U || offset + width > 4096U ||
 	    (width != 1 && width != 2 && width != 4) ||
 	    (width == 2 && (offset & 1U)) || (width == 4 && (offset & 3U))) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -348,7 +349,7 @@ pcat_config_write(
 
 		hal_io_mb();
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -373,7 +374,7 @@ pcat_config_write(
 	port_write32(PCI_CONFIG_DATA, current);
 	lock_leave(enabled);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -397,15 +398,15 @@ pcat_map_bar(
 	/* Handles the bar availability. */
 	if (bar == NULL || mapping == NULL || bar->type == DRV_PCI_BAR_IO ||
 	    bar->bus_address == 0 || bar->size == 0) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
 	/*
- * MSI-X tables commonly occupy a small region of a BAR which the device
+	 * MSI-X tables commonly occupy a small region of a BAR which the device
 	 * driver has already mapped.  Reuse that mapping rather than asking the
-	 * HAL to claim overlapping physical memory a second time. */
-	/* Process each linked entry. */
+	 * HAL to claim overlapping physical memory a second time.
+	 */
 	for (record = bar_mappings; record != NULL; record = record->next) {
 		/* Handles the record condition. */
 		if (record->device == device &&
@@ -423,7 +424,7 @@ pcat_map_bar(
 			mapping->private_data[1] = (uintptr_t)record;
 			record->references++;
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
@@ -449,7 +450,7 @@ pcat_map_bar(
 		    bar->size > 0x01000000U) {
 			hal_free(memory);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return ENOMEM;
 		}
 
@@ -465,7 +466,7 @@ pcat_map_bar(
 			if (assigned > 0xf1000000U - bar->size) {
 				hal_free(memory);
 
-				/* Returns the computed result. */
+				/* Failed. */
 				return ENOMEM;
 			}
 
@@ -477,7 +478,7 @@ pcat_map_bar(
 		    0) {
 			hal_free(memory);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return ENOMEM;
 		}
 
@@ -487,7 +488,7 @@ pcat_map_bar(
 		if (hal_pmem_alloc(&request, memory) != HAL_OK) {
 			hal_free(memory);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return ENOMEM;
 		}
 
@@ -507,7 +508,7 @@ pcat_map_bar(
 		hal_free(memory);
 		memset(mapping, 0, sizeof(*mapping));
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOMEM;
 	}
 
@@ -521,7 +522,7 @@ pcat_map_bar(
 	bar_mappings = record;
 	mapping->private_data[1] = (uintptr_t)record;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -615,7 +616,7 @@ pcat_allocate_irqs(
 		id = type == DRV_PCI_IRQ_MSI ? 0x05U : 0x11U;
 		if (drv_pci_device_find_capability(device, id, &capability) !=
 		    0) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return ENOTSUP;
 		}
 		irqs[0].type = type;
@@ -624,7 +625,7 @@ pcat_allocate_irqs(
 		irqs[0].private_data[0] = capability;
 		irqs[0].private_data[1] = 0;
 		*count = 1;
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -635,7 +636,7 @@ pcat_allocate_irqs(
 	/* Checks the drv pci device config read8 result. */
 	if (drv_pci_device_config_read8(device, 0x3cU, &line) != 0 ||
 	    line == 0xffU || line >= 16U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 	irqs[0].type = type;
@@ -643,7 +644,7 @@ pcat_allocate_irqs(
 	irqs[0].vector = line;
 	irqs[0].private_data[0] = irqs[0].private_data[1] = 0;
 	*count = 1;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 

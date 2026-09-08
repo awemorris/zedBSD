@@ -34,46 +34,24 @@
 #include <string.h>
 #include <zedbsd/block.h>
 
-#define DISK_ALLOCATED 1U
-
-#define DISK_LIVE 2U
-
-#define DISK_GONE 3U
-
-#define DISK_HIGH __attribute__((section(".hightext")))
-
-#ifdef ZEDBSD_STORAGE_HOST_TEST
-#undef DISK_HIGH
-#define DISK_HIGH
-#endif
-
-#define ASYNC_ENDPOINTS 4U
-
-#define ASYNC_SLOTS 4U
-
-#define ASYNC_QUEUE_LIMIT 2U
-
-#define ASYNC_OFF 0U
-
-#define ASYNC_BUILDING 1U
-
-#define ASYNC_LIVE 2U
-
-#define ASYNC_STOPPING 3U
-
-#define REQUEST_FREE 0U
-
-#define REQUEST_PREPARING 1U
-
-#define REQUEST_READY 2U
-
-#define REQUEST_QUEUED 3U
-
-#define REQUEST_RUNNING 4U
-
-#define REQUEST_DONE 5U
-
-#define REQUEST_RELEASING 6U
+#define DISK_ALLOCATED		1U
+#define DISK_LIVE		2U
+#define DISK_GONE		3U
+#define DISK_HIGH		__attribute__((section(".hightext")))
+#define ASYNC_ENDPOINTS		4U
+#define ASYNC_SLOTS		4U
+#define ASYNC_QUEUE_LIMIT	2U
+#define ASYNC_OFF		0U
+#define ASYNC_BUILDING		1U
+#define ASYNC_LIVE		2U
+#define ASYNC_STOPPING		3U
+#define REQUEST_FREE		0U
+#define REQUEST_PREPARING	1U
+#define REQUEST_READY		2U
+#define REQUEST_QUEUED		3U
+#define REQUEST_RUNNING		4U
+#define REQUEST_DONE		5U
+#define REQUEST_RELEASING	6U
 
 struct bio_async_request {
 	struct bio bio;
@@ -110,32 +88,25 @@ struct bio_async_endpoint {
 	unsigned started;
 };
 
-static struct disk disks[DISK_MAX];
-
-static uint8_t disk_used[DISK_MAX];
-
-static struct disk *disk_head;
-
-static unsigned live_count;
-
-static dev_t next_dev = 1;
-
-static atomic_uint_t disk_registry_lock;
-
-struct bio_async_endpoint;
-
-static atomic_uint_t async_initialized;
-
-static struct spinlock async_registry;
-
-static struct bio_async_endpoint async_endpoints[ASYNC_ENDPOINTS];
-
-_Static_assert(DISK_NAME_MAX >= sizeof("nvme0n4294967295"),
-    "DISK_NAME_MAX must represent every 32-bit NVMe namespace ID");
 extern struct thread *thread_current(void) __attribute__((weak));
 extern bool hal_irq_disable(void) __attribute__((weak));
 extern void hal_irq_enable(void) __attribute__((weak));
 extern void io_error_record(struct io_error_state *, int) __attribute__((weak));
+extern void *io_pool_borrow(size_t, size_t *) __attribute__((weak));
+extern void io_pool_release(void *) __attribute__((weak));
+
+static struct disk disks[DISK_MAX];
+static uint8_t disk_used[DISK_MAX];
+static struct disk *disk_head;
+static unsigned live_count;
+static dev_t next_dev = 1;
+static atomic_uint_t disk_registry_lock;
+struct bio_async_endpoint;
+static atomic_uint_t async_initialized;
+static struct spinlock async_registry;
+static struct bio_async_endpoint async_endpoints[ASYNC_ENDPOINTS];
+
+
 static void disk_write_accept(struct disk *leaf, struct bio *bio);
 static void disk_write_retire(struct disk *leaf, struct bio *bio, int error, size_t transferred);
 static void disk_persistence_invalidate_locked(struct disk *leaf);
@@ -162,8 +133,8 @@ static int async_initialize(void);
 static void async_worker(void *argument);
 static void async_complete(struct bio *bio);
 static void async_unlink_locked(struct bio_async_endpoint *endpoint, struct bio_async_request *request);
-extern void *io_pool_borrow(size_t, size_t *) __attribute__((weak));
-extern void io_pool_release(void *) __attribute__((weak));
+
+_Static_assert(DISK_NAME_MAX >= sizeof("nvme0n4294967295"), "DISK_NAME_MAX must represent every 32-bit NVMe namespace ID");
 
 /*
  * Reserves one otherwise idle physical disk for partition-table reload.
@@ -220,6 +191,7 @@ disk_reload_end(
 	    thread_current != NULL &&
 	    parent->d_reload_owner == thread_current())
 		parent->d_reload_owner = NULL;
+
 	disk_unlock(enabled);
 }
 
@@ -486,7 +458,10 @@ disk_gone(
 
 	/* Ignores a missing disk or one whose backing cannot be quiesced. */
 	if (disk == NULL ||
-	    backing_mutation_begin_disk(disk, 0, disk->d_block_count, NULL,
+	    backing_mutation_begin_disk(disk,
+					0,
+					disk->d_block_count,
+					NULL,
 					&guard) != 0)
 		return;
 
@@ -509,6 +484,7 @@ disk_gone(
 	disk->d_next = NULL;
 	disk_persistence_invalidate(disk);
 	disk->d_state = DISK_GONE;
+
 out:
 	disk_unlock(enabled);
 	backing_mutation_end(&guard);
@@ -518,7 +494,7 @@ out:
  * Removes a live disk from the registry when nothing uses it.
  *
  * Open handles, in-flight I/O, or outside references keep the disk with
- * EBUSY; resident buffers are flushed and invalidated first.
+ * EBUSY, resident buffers are flushed and invalidated first.
  */
 DISK_HIGH int
 disk_gone_if_idle(
@@ -599,6 +575,7 @@ disk_gone_if_idle(
 	disk->d_state = DISK_GONE;
 	disk_unlock(enabled);
 	error = 0;
+
 out:
 	backing_mutation_end(&guard);
 
@@ -715,6 +692,7 @@ disk_find_by_dev(
 
 	if (disk != NULL)
 		refcount_get(&disk->d_refs);
+
 	disk_unlock(enabled);
 
 	/* Reports the referenced disk, or NULL. */
@@ -788,6 +766,7 @@ disk_at(
 
 	if (disk != NULL)
 		refcount_get(&disk->d_refs);
+
 	disk_unlock(enabled);
 
 	/* Reports the referenced disk, or NULL past the end. */
@@ -870,10 +849,14 @@ disk_buffer_release(
 
 	/* Gives one cache reference back. */
 	enabled = disk_lock();
+
 	if (disk == NULL || disk_index(disk) < 0 || disk->d_buffer_refs == 0)
 		HAL_FATAL("disk buffer reference underflow");
+
 	disk->d_buffer_refs--;
+
 	(void)refcount_put_not_last(&disk->d_refs);
+
 	disk_unlock(enabled);
 }
 
@@ -890,14 +873,19 @@ disk_registry_reset(
 	/* Drops every buffer before the disks they reference vanish. */
 	buf_reset();
 
-	/* Clears every slot and restarts device numbering. */
+	/*
+	 * Clears every slot and restarts device numbering.
+	 */
+
 	enabled = disk_lock();
+
 	zero_bytes(disks, sizeof(disks));
 	for (i = 0; i < DISK_MAX; i++)
 		disk_used[i] = 0;
 	disk_head = NULL;
 	live_count = 0;
 	next_dev = 1;
+
 	disk_unlock(enabled);
 }
 
@@ -917,13 +905,15 @@ disk_block_info(
 	    info->version != ZEDBSD_BLOCK_VERSION ||
 	    info->struct_size != sizeof(*info))
 		return EINVAL;
+
 	for (i = 0; i < 4; i++) {
 		if (info->reserved[i] != 0)
 			return EINVAL;
 	}
 
-	/* Rejects an absent disk while its publication state is locked. */
 	enabled = disk_lock();
+
+	/* Rejects an absent disk while its publication state is locked. */
 	if (disk == NULL ||
 	    disk_index(disk) < 0 ||
 	    disk->d_state != DISK_LIVE || disk_media_status(disk) != 0) {
@@ -936,14 +926,13 @@ disk_block_info(
 	info->version = ZEDBSD_BLOCK_VERSION;
 	info->struct_size = sizeof(*info);
 	info->device = (uint32_t)disk->d_dev;
-	info->parent_device = disk->d_parent != NULL ?
-	    (uint32_t)disk->d_parent->d_dev : 0;
-	info->flags = disk->d_flags &
-	    (DISK_READ_ONLY | DISK_REMOVABLE | DISK_PARTITION);
+	info->parent_device = disk->d_parent != NULL ? (uint32_t)disk->d_parent->d_dev : 0;
+	info->flags = disk->d_flags & (DISK_READ_ONLY | DISK_REMOVABLE | DISK_PARTITION);
 	info->sector_size = disk->d_block_size;
 	info->sector_count = disk->d_block_count;
 	info->parent_offset = disk->d_parent_offset;
 	memcpy(info->name, disk->d_name, sizeof(info->name));
+
 	disk_unlock(enabled);
 
 	/* Reports the completed snapshot. */
@@ -965,8 +954,9 @@ disk_get_info(
 	if (name == NULL || result == NULL)
 		return EINVAL;
 
-	/* Copies the description of the first name match. */
 	enabled = disk_lock();
+
+	/* Copies the description of the first name match. */
 	for (disk = disk_head; disk != NULL; disk = disk->d_next) {
 		if (name_equal(name, disk->d_name)) {
 			disk_copy_info(disk, result);
@@ -1003,8 +993,9 @@ disk_registry_snapshot(
 	if (count_out == NULL || (capacity != 0 && entries == NULL))
 		return EINVAL;
 
-	/* Counts the live disks, then copies them when they fit. */
 	enabled = disk_lock();
+
+	/* Counts the live disks, then copies them when they fit. */
 	for (disk = disk_head; disk != NULL; disk = disk->d_next)
 		count++;
 	*count_out = count;
@@ -1012,10 +1003,10 @@ disk_registry_snapshot(
 		disk_unlock(enabled);
 		return ENOSPC;
 	}
-
 	count = 0;
 	for (disk = disk_head; disk != NULL; disk = disk->d_next)
 		disk_copy_info(disk, &entries[count++]);
+
 	disk_unlock(enabled);
 
 	/* Reports the copied snapshot. */
@@ -1036,8 +1027,9 @@ disk_open(
 
 	error = 0;
 
-	/* Rejects a missing, unknown, or dead disk. */
 	enabled = disk_lock();
+
+	/* Rejects a missing, unknown, or dead disk. */
 	if (disk == NULL ||
 	    disk_index(disk) < 0 ||
 	    disk->d_state != DISK_LIVE || disk_media_status(disk) != 0) {
@@ -1053,12 +1045,15 @@ disk_open(
 
 	disk->d_opening++;
 	refcount_get(&disk->d_refs);
+
 	disk_unlock(enabled);
+
 	if (disk->d_ops != NULL && disk->d_ops->open != NULL)
 		error = disk->d_ops->open(disk);
 
-	/* Counts the open only while the disk is still live. */
 	enabled = disk_lock();
+
+	/* Counts the open only while the disk is still live. */
 	disk->d_opening--;
 	if (error == 0) {
 		if (disk->d_state != DISK_LIVE || disk_media_status(disk) != 0) {
@@ -1068,8 +1063,8 @@ disk_open(
 			refcount_get(&disk->d_refs);
 		}
 	}
-
 	(void)refcount_put_not_last(&disk->d_refs);
+
 	disk_unlock(enabled);
 
 	/* Undoes the driver open of a disk that died meanwhile. */
@@ -1153,9 +1148,11 @@ disk_close(
 	/* Tells the driver, then drops the open's reference. */
 	if (disk->d_ops != NULL && disk->d_ops->close != NULL)
 		disk->d_ops->close(disk);
+
 	enabled = disk_lock();
 	disk->d_closing--;
 	disk_unlock(enabled);
+
 	disk_release(disk);
 }
 
@@ -1171,16 +1168,17 @@ disk_ioctl(
 	int error;
 	bool enabled;
 
-	/* Rejects a missing, unknown, or dead disk. */
 	enabled = disk_lock();
+
+	/* Rejects a missing, unknown, or dead disk. */
 	if (disk == NULL ||
 	    disk_index(disk) < 0 ||
 	    disk->d_state != DISK_LIVE || disk_media_status(disk) != 0) {
 		disk_unlock(enabled);
 		return ENXIO;
 	}
-
 	refcount_get(&disk->d_refs);
+
 	disk_unlock(enabled);
 
 	/* Forwards the request when the driver handles controls. */
@@ -1190,6 +1188,7 @@ disk_ioctl(
 	}
 
 	error = disk->d_ops->ioctl(disk, request, argument);
+
 	disk_release(disk);
 
 	/* Reports why the driver's failed. */
@@ -1213,7 +1212,9 @@ disk_persistence_invalidate(
 	/* Invalidates the live object's physical ancestry under its state lock. */
 	if (disk == NULL)
 		return;
+
 	leaf = disk_leaf(disk);
+
 	irq = spin_lock_irqsave(&leaf->d_lock);
 
 	disk_persistence_invalidate_locked(leaf);
@@ -1236,7 +1237,9 @@ disk_persistence_forget(
 	/* Forgets the persistence record of the physical device. */
 	if (disk == NULL)
 		return;
+
 	leaf = disk_leaf(disk);
+
 	irq = spin_lock_irqsave(&leaf->d_lock);
 
 	disk_persistence_invalidate_locked(leaf);
@@ -1257,13 +1260,14 @@ disk_media_revoke(
 	/* Marks the media of the physical device gone, once. */
 	if (disk == NULL)
 		return;
+
 	leaf = disk_leaf(disk);
+
 	enabled = disk_lock();
 	if (!atomic_raw_load_acquire(&leaf->d_media_revoked)) {
 		atomic_raw_store_release(&leaf->d_media_revoked, 1U);
 		disk_persistence_invalidate(leaf);
 	}
-
 	disk_unlock(enabled);
 }
 
@@ -1284,8 +1288,9 @@ disk_media_retire(
 	if (error != 0)
 		return error;
 
-	/* Requires the device to be completely idle. */
 	enabled = disk_lock();
+
+	/* Requires the device to be completely idle. */
 	error = disk_media_idle_locked(disk, 0);
 	if (error != 0) {
 		disk_unlock(enabled);
@@ -1295,13 +1300,18 @@ disk_media_retire(
 
 	/* The extra pin also excludes a concurrent retirement attempt. */
 	refcount_get(&disk->d_refs);
+
 	disk_unlock(enabled);
+
 	error = buf_discard_media(disk);
 	enabled = disk_lock();
+
 	if (error == 0)
 		error = disk_media_idle_locked(disk, 1);
+
 	if (error == 0 && disk->d_buffer_refs != 0)
 		error = EBUSY;
+
 	if (error == 0) {
 		/* All fallible checks precede removal of any published child. */
 		for (link = &disk_head; *link != NULL;) {
@@ -1326,6 +1336,7 @@ disk_media_retire(
 	}
 
 	(void)refcount_put_not_last(&disk->d_refs);
+
 	disk_unlock(enabled);
 	backing_mutation_end(&guard);
 
@@ -1432,14 +1443,23 @@ bio_complete(
 	if (error == 0 && leaf != NULL && bio->b_op == BIO_WRITE &&
 	    transferred != (uint64_t)bio->b_block_count * leaf->d_block_size)
 		error = EIO;
-	io_stats_record(bio->b_op == BIO_FLUSH ? IO_COMPLETE_FLUSH :
-	    (bio->b_op == BIO_READ ? IO_COMPLETE_READ : IO_COMPLETE_WRITE),
-	    transferred);
+
+	io_stats_record(bio->b_op == BIO_FLUSH ?
+			IO_COMPLETE_FLUSH :
+			(bio->b_op == BIO_READ ?
+			 IO_COMPLETE_READ :
+			 IO_COMPLETE_WRITE),
+			transferred);
+
 	if (error != 0)
 		io_stats_record(IO_COMPLETE_ERROR, transferred);
-	if (error != 0 && leaf != NULL && bio->b_op != BIO_READ &&
+
+	if (error != 0 &&
+	    leaf != NULL &&
+	    bio->b_op != BIO_READ &&
 	    io_error_record != NULL)
 		io_error_record(&leaf->d_write_error, error);
+
 	bio->b_error = error;
 	bio->b_transferred = transferred;
 
@@ -1510,6 +1530,7 @@ disk_resolve_range(
 	if (mapped >= leaf->d_block_count ||
 	    count > leaf->d_block_count - mapped)
 		return EOVERFLOW;
+
 	*leaf_out = leaf;
 	*mapped_out = mapped;
 
@@ -1546,8 +1567,11 @@ bio_wait(
 		irq = spin_lock_irqsave(&bio->b_lock);
 		while (bio->b_state == BIO_SUBMITTED) {
 			sequence = waitq_sequence(&bio->b_waitq);
-			error = waitq_sleep(&bio->b_waitq, &bio->b_lock,
-					    sequence, 0, 0);
+			error = waitq_sleep(&bio->b_waitq,
+					    &bio->b_lock,
+					    sequence,
+					    0,
+					    0);
 			if (error != 0 && error != EAGAIN) {
 				spin_unlock_irqrestore(&bio->b_lock, irq);
 				return error;
@@ -1558,6 +1582,7 @@ bio_wait(
 			error = bio->b_error;
 		else
 			error = EINVAL;
+
 		spin_unlock_irqrestore(&bio->b_lock, irq);
 		return error;
 	}
@@ -1604,7 +1629,9 @@ bio_flush(
 	error = disk_cache_enter(disk, &leaf);
 	if (error != 0)
 		return error;
+
 	thread = thread_current != NULL ? thread_current() : NULL;
+
 	irq = spin_lock_irqsave(&leaf->d_lock);
 
 	target = leaf->d_write_accepted;
@@ -1629,9 +1656,9 @@ bio_flush(
 	/* Uses only an explicit driver guarantee in the same unexpired epoch. */
 	epoch = leaf->d_persist_epoch;
 	reusable = (leaf->d_flags & DISK_FLUSH_PROOF) != 0 &&
-	    target != UINT64_MAX && epoch != UINT64_MAX &&
-	    leaf->d_stable_valid && leaf->d_stable_epoch == epoch &&
-	    leaf->d_write_stable >= target;
+		target != UINT64_MAX && epoch != UINT64_MAX &&
+		leaf->d_stable_valid && leaf->d_stable_epoch == epoch &&
+		leaf->d_write_stable >= target;
 	if (reusable) {
 		spin_unlock_irqrestore(&leaf->d_lock, irq);
 		disk_cache_leave(leaf);
@@ -1711,8 +1738,6 @@ disk_write_direct(
 	int error;
 
 	/* Writes without an I/O context. */
-
-	/* Reports why the transfer failed. */
 	error = disk_write_direct_context(disk, block, count, data, NULL);
 	if (error != 0)
 		return error;
@@ -1764,8 +1789,6 @@ disk_transfer_progress(
 	int error;
 
 	/* Transfers without an I/O context. */
-
-	/* Reports why the transfer failed. */
 	error = disk_transfer_progress_context(
 		disk,
 		op,
@@ -1925,9 +1948,11 @@ disk_view_matches(
 	/* Rejects a different mount/device lifetime or an inadmissible disk. */
 	if (view == NULL || view->disk != disk)
 		return 0;
+
 	error = disk_cache_enter(disk, &leaf);
 	if (error != 0)
 		return 0;
+
 	matches = buf_view_matches(view);
 	disk_cache_leave(leaf);
 
@@ -1948,8 +1973,6 @@ disk_write(
 	int error;
 
 	/* Writes without an I/O context. */
-
-	/* Reports why the write failed. */
 	error = disk_write_context(disk, block, count, data, NULL);
 	if (error != 0)
 		return error;
@@ -1987,7 +2010,6 @@ disk_write_context(
 	error = disk_cached_transfer(disk, block, count, (void *)data, 1, NULL, context);
 	backing_mutation_end(&guard);
 
-	/* Reports why the write failed. */
 	if (error != 0)
 		return error;
 
@@ -2008,8 +2030,6 @@ disk_write_filesystem(
 	int error;
 
 	/* Writes without an I/O context. */
-
-	/* Reports why the write failed. */
 	error = disk_write_filesystem_context(disk, block, count, data, NULL);
 	if (error != 0)
 		return error;

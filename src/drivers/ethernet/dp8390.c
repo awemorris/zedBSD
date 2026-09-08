@@ -152,7 +152,7 @@ drv_dp8390_read_prom(
 		return ENODEV;
 	wr(dp, DP_DCR, dp->dcr);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -170,7 +170,7 @@ drv_dp8390_attach(
 	    dp->bus->read_data8 == NULL || dp->bus->read_data16 == NULL ||
 	    dp->bus->write_data16 == NULL || dp->rx_start_page == 0 ||
 	    dp->rx_start_page >= dp->stop_page) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	dp->device = device;
@@ -178,7 +178,7 @@ drv_dp8390_attach(
 	device->driver_data = dp;
 	device->ops = &dp_ops;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -208,8 +208,6 @@ drv_dp8390_interrupt(
 	if (status == 0 || status == 0xffU)
 		goto out;
 	wr(dp, DP_ISR, status);
-
-	/* Checks the operation status. */
 	if ((status & (DP_ISR_PTX | DP_ISR_TXE)) != 0)
 		dp->tx_busy = 0;
 
@@ -284,12 +282,12 @@ wait_rdc(
 		if ((rd(dp, DP_ISR) & DP_ISR_RDC) != 0) {
 			wr(dp, DP_ISR, DP_ISR_RDC);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 	}
 
-	/* Returns the computed result. */
+	/* Failed. */
 	return ETIMEDOUT;
 }
 
@@ -323,7 +321,7 @@ dp_start_transmit(
 	if (length > DP_MAX_FRAME) {
 		packet_buf_free(packet);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EMSGSIZE;
 	}
 
@@ -351,7 +349,7 @@ dp_start_transmit(
 	dp->tx_busy = 1;
 	wr(dp, DP_CR, DP_CR_START | DP_CR_NODMA | DP_CR_TXP | DP_CR_PAGE0);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -469,7 +467,7 @@ chip_start(
 	(void)net_device_set_carrier(dp->device, 1);
 	wr(dp, DP_IMR, DP_IMR_RUN);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -625,7 +623,7 @@ read_frame(
 	if (header.next < dp->rx_start_page || header.next >= dp->stop_page ||
 	    count < sizeof(header) + DP_MIN_FRAME ||
 	    count > sizeof(header) + DP_MAX_FRAME) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EIO;
 	}
 	length = count - sizeof(header);
@@ -640,7 +638,7 @@ read_frame(
 	if (data == NULL) {
 		packet_buf_free(packet);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return EMSGSIZE;
 	}
 
@@ -659,13 +657,13 @@ read_frame(
 	if (error != 0) {
 		packet_buf_free(packet);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	*next_result = header.next;
 	*result = packet;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -688,7 +686,7 @@ dp_poll_receive(
 	if (!dp->opened) {
 		spin_unlock_irqrestore(&dp->lock, irq);
 
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -716,7 +714,7 @@ dp_poll_receive(
 		current = current_page(dp);
 
 		/*
- * Protocol input can eventually transmit through this device.
+		 * Protocol input can eventually transmit through this device.
 		 */
 		spin_unlock_irqrestore(&dp->lock, irq);
 

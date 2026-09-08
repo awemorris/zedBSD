@@ -45,7 +45,7 @@ struct buf_slab {
 	unsigned used;
 };
 
-/* XXX: これはincludeに置き換えできるかも？ */
+/* XXX: これはincludeに置き換えできるかも？. */
 struct thread;
 
 /*
@@ -168,7 +168,7 @@ static volatile uint64_t stat_writeback_errors;
  */
 static unsigned cache_initialized;
 
-/* XXX: これはincludeで解決するかも？ */
+/* XXX: これはincludeで解決するかも？. */
 struct thread *thread_current(void);
 
 /*

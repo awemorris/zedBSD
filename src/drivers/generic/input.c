@@ -71,20 +71,20 @@ capability_bits_mutable(
 	case EV_KEY:
 		*bits = state->key_bits;
 		*size = sizeof(state->key_bits);
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case EV_REL:
 		*bits = state->rel_bits;
 		*size = sizeof(state->rel_bits);
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case EV_ABS:
 		*bits = state->abs_bits;
 		*size = sizeof(state->abs_bits);
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	default:
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 }
@@ -113,7 +113,7 @@ capability_code_valid(
 		/* Returns the computed result. */
 		return code <= ABS_MAX;
 	default:
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 }
@@ -144,7 +144,7 @@ drv_input_capability_state_init(
 	    (absolute_axis_count != 0 && absolute_axes == NULL) ||
 	    capability_count > INPUT_CAPABILITY_COUNT_MAX ||
 	    absolute_axis_count > ABS_MAX + 1U) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	memset(state, 0, sizeof(*state));
@@ -169,7 +169,7 @@ drv_input_capability_state_init(
 					    &size) != 0 ||
 		    capability->code >= size * 8U ||
 		    bit_test(bits, capability->code)) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 		bit_set(state->event_bits, capability->type);
@@ -189,7 +189,7 @@ drv_input_capability_state_init(
 		    info->value < info->minimum ||
 		    info->value > info->maximum || info->fuzz < 0 ||
 		    info->flat < 0 || info->resolution < 0) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 		state->abs_info[axis->code] = *info;
@@ -201,7 +201,7 @@ drv_input_capability_state_init(
 		/* Checks the bit test result. */
 		if (bit_test(state->abs_bits, (unsigned)i) &&
 		    !bit_test(state->abs_configured, (unsigned)i)) {
-			/* Returns the computed result. */
+			/* Failed. */
 			return EINVAL;
 		}
 	}
@@ -210,7 +210,7 @@ drv_input_capability_state_init(
 	if (!bit_test(state->event_bits, EV_SYN))
 		return EINVAL;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -235,7 +235,7 @@ drv_input_capability_bits(
 	if (type == EV_SYN) {
 		*bits = (const uint8_t *)state->event_bits;
 		*size = sizeof(state->event_bits);
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -244,20 +244,20 @@ drv_input_capability_bits(
 	case EV_KEY:
 		*bits = (const uint8_t *)state->key_bits;
 		*size = sizeof(state->key_bits);
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case EV_REL:
 		*bits = (const uint8_t *)state->rel_bits;
 		*size = sizeof(state->rel_bits);
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	case EV_ABS:
 		*bits = (const uint8_t *)state->abs_bits;
 		*size = sizeof(state->abs_bits);
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	default:
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 }
@@ -279,7 +279,7 @@ drv_input_capability_key_state(
 		return EINVAL;
 	*bits = (const uint8_t *)state->key_state;
 	*size = sizeof(state->key_state);
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -304,7 +304,7 @@ drv_input_capability_copy(
 	if ((source_size != 0 && source == NULL) ||
 	    (capacity != 0 && destination == NULL) ||
 	    capacity > SIZE_MAX - offset) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 	/* Process each element required by the operation. */
@@ -313,7 +313,7 @@ drv_input_capability_copy(
 		destination[i] = index < source_size ? source[index] : 0;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -337,7 +337,7 @@ drv_input_capability_abs_info(
 	if (!bit_test(state->abs_bits, axis))
 		return ENOENT;
 	*info = state->abs_info[axis];
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -366,7 +366,7 @@ drv_input_capability_event(
 		error = code == SYN_REPORT && value == 0 &&
 				  bit_test(state->event_bits, EV_SYN);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -378,10 +378,10 @@ drv_input_capability_event(
 			bit_clear(state->key_state, code);
 		else if (value == 1 || value == 2)
 			bit_set(state->key_state, code);
-		else
-
-			/* Reports successful completion. */
+		else {
+			/* Succeeded. */
 			return 0;
+		}
 
 		/* Reports operation failure. */
 		return 1;
@@ -397,7 +397,7 @@ drv_input_capability_event(
 		return 1;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 /* End consolidated input-capability.c. */
@@ -570,7 +570,7 @@ producer_callback_enter(
 	if (!device->registered || device->retiring) {
 		spin_unlock_irqrestore(&device->lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
@@ -578,7 +578,7 @@ producer_callback_enter(
 
 	spin_unlock_irqrestore(&device->lock, irq);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -629,7 +629,7 @@ input_open(
 	if (error != 0) {
 		kern_free(reader);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -641,7 +641,7 @@ input_open(
 			producer_callback_leave(device);
 			kern_free(reader);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return error;
 		}
 	}
@@ -669,11 +669,11 @@ input_open(
 	if (!attached) {
 		kern_free(reader);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENODEV;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -727,7 +727,7 @@ input_close(
 		producer_callback_leave(device);
 	kern_free(reader);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -783,7 +783,7 @@ input_read(
 		if (!device->registered) {
 			spin_unlock_irqrestore(&device->lock, irq);
 
-			/* Reports successful completion. */
+			/* Succeeded. */
 			return 0;
 		}
 
@@ -791,7 +791,7 @@ input_read(
 		if ((file_status_flags_get(file) & O_NONBLOCK) != 0) {
 			spin_unlock_irqrestore(&device->lock, irq);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return -EAGAIN;
 		}
 
@@ -803,7 +803,7 @@ input_read(
 		if (error == EINTR) {
 			spin_unlock_irqrestore(&device->lock, irq);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return -EINTR;
 		}
 	}
@@ -830,7 +830,7 @@ input_poll(
 	/* Handles the device availability. */
 	if (device == NULL || reader == NULL) {
 		*returned = POLLERR | POLLHUP;
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 
@@ -848,7 +848,7 @@ input_poll(
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	*returned = result;
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -918,18 +918,14 @@ copy_bits(
 						  output, count);
 		if (error == 0)
 			error = user_address_add(argument, copied, &address);
-
-		/* Checks the operation status. */
 		if (error == 0)
 			error = copyout(output, address, count);
-
-		/* Checks the operation status. */
 		if (error != 0)
 			return error;
 		copied += count;
 	}
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1226,7 +1222,7 @@ copy_info_text(
 		return ENAMETOOLONG;
 	strcpy(destination, source);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1261,7 +1257,7 @@ drv_input_device_register(
 	    (info->flags &
 	     (INPUT_DEVICE_KEY_MOMENTARY | INPUT_DEVICE_KEY_REPEAT)) ==
 		    (INPUT_DEVICE_KEY_MOMENTARY | INPUT_DEVICE_KEY_REPEAT)) {
-		/* Returns the computed result. */
+		/* Failed. */
 		return EINVAL;
 	}
 
@@ -1270,15 +1266,13 @@ drv_input_device_register(
 	if (device == NULL)
 		return ENOMEM;
 	refcount_init(&device->refs, 1);
-
-	/* Checks the operation status. */
 	if ((error = copy_info_text(device->name, info->name)) != 0 ||
 	    (error = copy_info_text(device->physical_path,
 				    info->physical_path)) != 0 ||
 	    (error = copy_info_text(device->unique_id, info->unique_id)) != 0) {
 		kern_free(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1292,7 +1286,7 @@ drv_input_device_register(
 	if (error != 0) {
 		kern_free(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
@@ -1319,7 +1313,7 @@ drv_input_device_register(
 		spin_unlock_irqrestore(&registry_lock, irq);
 		input_device_release(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOSPC;
 	}
 
@@ -1345,14 +1339,14 @@ drv_input_device_register(
 		input_device_release(device);
 		input_device_release(device);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return error;
 	}
 
 	*result = device;
 	hal_printf("input: /dev/input/%s: %s\n", node, device->name);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -1400,7 +1394,6 @@ drv_input_device_unregister(
 	 * so observing that bit alone is not a sufficient unregister completion
 	 * condition.
 	 */
-	/* Continue while the operation condition remains true. */
 	while (device->retiring) {
 		sequence_local = waitq_sequence(&device->waitq);
 
@@ -1444,7 +1437,7 @@ drv_input_device_unregister(
 	}
 
 	/*
- * Removes the pathname before publishing terminal events to stale fds.
+	 * Removes the pathname before publishing terminal events to stale fds.
 	 */
 	irq = spin_lock_irqsave(&device->lock);
 
@@ -1565,7 +1558,7 @@ drv_input_device_unregister(
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	/*
- * Releases publication, returned-owner, and this call's temporary refs.
+	 * Releases publication, returned-owner, and this call's temporary refs.
 	 */
 	if (publication != NULL)
 		cdev_release(publication);
@@ -1822,10 +1815,10 @@ drv_input_device_emit_key_event(
 		value = 0;
 	else if (key_event->flags == HAL_KEY_EVENT_REPEAT)
 		value = 2;
-	else
-
+	else {
 		/* Returns the computed result. */
 		return;
+	}
 
 	/* Handles the momentary condition. */
 	momentary = (device->flags & INPUT_DEVICE_KEY_MOMENTARY) != 0;
@@ -2105,7 +2098,7 @@ function_number(
 	if (strcmp(symbol, "f10") == 0)
 		return 10;
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 
@@ -2398,7 +2391,7 @@ drv_input_keymap_translate(
 	/* Handles the state availability. */
 	if (state == NULL || event == NULL || result == NULL ||
 	    event->symbol[HAL_KEY_SYMBOL_SIZE - 1U] != '\0') {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	release = (event->flags & HAL_KEY_EVENT_RELEASE) != 0;
@@ -2408,7 +2401,7 @@ drv_input_keymap_translate(
 	if (event->flags != HAL_KEY_EVENT_PRESS &&
 	    event->flags != HAL_KEY_EVENT_RELEASE &&
 	    event->flags != HAL_KEY_EVENT_REPEAT) {
-		/* Reports successful completion. */
+		/* Succeeded. */
 		return 0;
 	}
 	update_modifier(state, event->symbol, !release, press);
@@ -2615,7 +2608,7 @@ drv_input_subscribe(
 		if (subscribers[index] == subscription) {
 			spin_unlock_irqrestore(&subscriber_lock, irq);
 
-			/* Returns the computed result. */
+			/* Failed. */
 			return EBUSY;
 		}
 	}
@@ -2631,7 +2624,7 @@ drv_input_subscribe(
 	if (index == INPUT_SUBSCRIBER_MAX) {
 		spin_unlock_irqrestore(&subscriber_lock, irq);
 
-		/* Returns the computed result. */
+		/* Failed. */
 		return ENOSPC;
 	}
 
@@ -2642,7 +2635,7 @@ drv_input_subscribe(
 
 	spin_unlock_irqrestore(&subscriber_lock, irq);
 
-	/* Reports successful completion. */
+	/* Succeeded. */
 	return 0;
 }
 

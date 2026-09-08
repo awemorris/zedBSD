@@ -135,6 +135,7 @@ cdev_register_managed(
 	device = kern_calloc(1, sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
+
 	strcpy(device->name, name);
 	device->rdev = rdev;
 	device->ops = ops;
@@ -451,8 +452,6 @@ cdev_close_file(
 		return 0;
 
 	/* Closes through the device. */
-
-	/* Reports why the device's failed. */
 	error = device->ops->close(file);
 	if (error != 0)
 		return error;
@@ -527,8 +526,6 @@ cdev_ioctl_file(
 		return EOPNOTSUPP;
 
 	/* Forwards the request. */
-
-	/* Reports why the device's failed. */
 	error = device->ops->ioctl(file, request, argument);
 	if (error != 0)
 		return error;
@@ -565,8 +562,6 @@ cdev_poll_file(
 	}
 
 	/* Polls through the device. */
-
-	/* Reports why the device's failed. */
 	error = device->ops->poll(file, events, revents);
 	if (error != 0)
 		return error;
