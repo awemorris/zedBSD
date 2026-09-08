@@ -6,8 +6,7 @@ Phase ID: `p008`
 
 Combined ID: `ws011-p008`
 
-Status: planned; not Queue-ready pending the remote-administration transport,
-target link, and safe recovery topology
+Status: completed (user-accepted, 2026-09-09)
 
 Parent: [WS011](../ws.md)
 
@@ -16,6 +15,11 @@ Automatic prerequisite: [p007](../phase007-confirmed-commit-acceptance/phase.md)
 Corrective prerequisite: [p009](../phase009-confirmed-commit-overlay-publication/phase.md)
 
 Tests: [WS011 test index](../tests/README.md)
+
+## 完了判定（2026-09-09）
+
+ユーザーがcommit confirmedは完了と明示したため、実機受け入れ待ちを終了する。
+以下は当初の試験計画として保持する。今回新たに各試験を実行したという意味ではない。
 
 ## Objective
 

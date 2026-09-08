@@ -1,17 +1,20 @@
 # WS015: μITRON asymmetric real-time domain
 
-Last updated: 2026-08-27
+Last updated: 2026-09-09
 
 WSID: `ws015`
 
-Status: Blocked by manual hold `MB-007`; architecture/API discussion required
+Status: future — master Future List F-003へ移管（2026-09-09）
+
+現在の管理先: [master Future List](../master.md#future-listやりたいことリスト)。
+現行Priority・Queueから外す。以下の設計・旧保留IDは再開時の参考として保持する。
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: none
 
-Resume point: after explicit release of `MB-007`, continue discussion and
-freeze `ws015-p001`; no implementation Phase or Queue item exists.
+Resume point: Future List F-003をユーザーが着手対象として選び直した時点で設計を更新する。
+完了済みのPhaseは維持し、将来項目への移動によって取り消さない。
 
 Shared reviews: [WS015 review index](tests/README.md)
 
@@ -126,7 +129,7 @@ specification as the selected API and behavior reference.
 
 | Combined ID | Phase | Status | Required result |
 | --- | --- | --- | --- |
-| `ws015-p001` | [Architecture and compatibility discussion](phase001-architecture-discussion/phase.md) | Blocked by manual hold `MB-007` | Freeze the μITRON profile, RT/POSIX partition, resident-execution contract, failure boundary, timing target, and later Phase map |
+| `ws015-p001` | [Architecture and compatibility discussion](phase001-architecture-discussion/phase.md) | Future List F-003 | Freeze the μITRON profile, RT/POSIX partition, resident-execution contract, failure boundary, timing target, and later Phase map |
 
 No implementation Phase is defined until `ws015-p001` is complete.
 

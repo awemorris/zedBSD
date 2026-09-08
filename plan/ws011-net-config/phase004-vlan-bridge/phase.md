@@ -3,10 +3,15 @@
 WSID: `ws011`  
 Phase ID: `p004`  
 Combined ID: `ws011-p004`  
-Status: Blocked by manual hold `MB-010`
+Status: cancelled for VLAN; bridge transferred to Future List F-001 (2026-09-09)
 Parent WS: [WS011](../ws.md)
 
-## Objective
+## 現在の扱い
+
+VLANはユーザー指示でキャンセル。bridgeのみ [master Future List](../../master.md#future-listやりたいことリスト)へ移管。
+以下は旧一括設計の履歴であり、そのまま実行しない。MB-010による旧一括保留は終了。
+
+## Historical objective
 
 Implement kernel, networkd, persistence, and console support for independent
 802.1Q VLAN interfaces and bridge interfaces.

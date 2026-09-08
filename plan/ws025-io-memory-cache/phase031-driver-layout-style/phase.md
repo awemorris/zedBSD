@@ -4,7 +4,7 @@
 
 Phase ID: `ws025-p031`
 
-Status: in-progress; q123。ユーザーの実行指示により開始。
+Status: uncleared; q123 finished。リファクタリング後の最終確認が残る。p032〜p035の回帰修正は完了。
 
 Parent: [WS025](../ws.md)
 

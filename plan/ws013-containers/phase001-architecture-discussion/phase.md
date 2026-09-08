@@ -1,6 +1,6 @@
 # WS013 Phase 001: CPAR architecture discussion
 
-Last updated: 2026-08-30
+Last updated: 2026-09-09
 
 WSID: `ws013`
 
@@ -8,7 +8,10 @@ Phase ID: `p001`
 
 Combined ID: `ws013-p001`
 
-Status: Proposed; Boot configuration notes superseded, Runtime discussion retained
+Status: future — master Future List F-002へ移管（2026-09-09）
+
+現在の管理先: [master Future List](../../master.md#future-listやりたいことリスト)。
+現行Priority・Queueから外す。以下の設計・旧保留IDは再開時の参考として保持する。
 
 Parent: [WS013](../ws.md)
 

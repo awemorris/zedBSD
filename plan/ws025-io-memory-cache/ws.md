@@ -4,13 +4,13 @@ Last updated: 2026-09-09
 
 WSID: `ws025`
 
-Status: mandatory p001–p026 completed; p031 uncleared; p032–p035 completed; q124 finished; 必須 p001–p026 と依存 WS024 完了。q122 の統合受け入れ・既定設定・性能観測まで完了。条件付き p027–p030 は採用条件未成立のため今回は見送り、再開条件を記録した planned とする。実機 gate はユーザー判断によるクリア扱い。
+Status: mandatory p001–p026 completed; p031 uncleared; p032–p035 completed; q124 finished。p027–p030は2026-09-09ユーザー指定のPriority 1へ再選択（planned、実装未開始）。q122の見送りは履歴。
 
 Parent: [master plan](../master.md)
 
 追加計画: [p031 ドライバ配置・命名・規約統一](phase031-driver-layout-style/phase.md) は構成合意済み・q123 は uncleared で終了。p027–p030 に先行する。q122 の完了記録は維持し、追加 Phase は未完了として扱う。
 
-追加実行 (2026-09-09): p032 は通常 PC98 overlay/native の永続化・正常停止、loader 16/16、PCAT/amd64 build/login を確認し completed。q124 は p033 AX211 の自動接続・DHCP・復旧を実行中。
+追加実行 (2026-09-09): p032 は通常 PC98 overlay/native の永続化・正常停止、loader 16/16、PCAT/amd64 build/login を確認し completed。q124 は p033〜p035のAX211自動接続・DHCP・反復復旧・二台同時接続も完了しfinished。
 
 ## 目的と承認済みの判断
 

@@ -1,6 +1,6 @@
 # WS015 Phase 001: μITRON RT architecture and compatibility discussion
 
-Last updated: 2026-08-27
+Last updated: 2026-09-09
 
 WSID: `ws015`
 
@@ -8,7 +8,10 @@ Phase ID: `p001`
 
 Combined ID: `ws015-p001`
 
-Status: Blocked by manual hold `MB-007`; discussion required
+Status: future — master Future List F-003へ移管（2026-09-09）
+
+現在の管理先: [master Future List](../../master.md#future-listやりたいことリスト)。
+現行Priority・Queueから外す。以下の設計・旧保留IDは再開時の参考として保持する。
 
 Parent: [WS015](../ws.md)
 

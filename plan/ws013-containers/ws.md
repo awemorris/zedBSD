@@ -1,21 +1,21 @@
 # WS013: CPAR container partitioning
 
-Last updated: 2026-08-30
+Last updated: 2026-09-09
 
 WSID: `ws013`
 
-Status: Active; q032 completed the configured x86 BIOS paths, Runtime topics
-remain manually blocked
+Status: future — master Future List F-002へ移管（2026-09-09）
+
+現在の管理先: [master Future List](../master.md#future-listやりたいことリスト)。
+現行Priority・Queueから外す。以下の設計・旧保留IDは再開時の参考として保持する。
 
 Parent: [master plan](../master.md)
 
 Last verified Phases: `ws013-p005` and `ws013-p006`; p001 remains the
 architecture discussion ledger
 
-Resume point: no Boot configuration Phase remains. The common four-x86
-boot-parameter foundation was implemented by q015, q031 completed p002-p004,
-and q032 completed p005-p006. Runtime CPAR namespace, CLI/build, and
-service-package topics remain on the manual blocking register.
+Resume point: Future List F-002をユーザーが着手対象として選び直した時点で設計を更新する。
+完了済みのPhaseは維持し、将来項目への移動によって取り消さない。
 
 Shared reviews: [WS013 review index](tests/README.md)
 
@@ -132,7 +132,7 @@ PC-98 `BOOTZBSD.EXE` without expanding q031.
 
 | Combined ID | Phase | Status | Required result |
 | --- | --- | --- | --- |
-| `ws013-p001` | [CPAR architecture discussion](phase001-architecture-discussion/phase.md) | Proposed; Boot notes superseded, Runtime holds remain | Retain the architecture ledger and the manually blocked Runtime questions |
+| `ws013-p001` | [CPAR architecture discussion](phase001-architecture-discussion/phase.md) | Future List F-002; Boot foundation complete | Retain the architecture ledger and the manually blocked Runtime questions |
 | `ws013-p002` | [UEFI `zedbsd.cfg` volume discovery](phase002-uefi-payload-discovery/phase.md) | Completed (`q031`) | Select the first same-disk FAT16/FAT32 containing `/zedbsd.cfg`, error on zero, and warn on later matches |
 | `ws013-p003` | [UEFI `zedbsd.cfg` parsing and parameter assembly](phase003-uefi-boot-config-menu/phase.md) | Completed (`q031`) | Load the required configured kernel and emit one bounded common parameter string without a menu or `LoadOptions` |
 | `ws013-p004` | [boot-path dead-source audit](phase004-boot-path-dead-source-audit/phase.md) | Completed (`q031`) | Remove `startup.c`, clean its remnants, and evidence-audit other boot-path sources before any further deletion |

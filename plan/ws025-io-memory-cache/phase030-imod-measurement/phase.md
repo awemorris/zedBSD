@@ -4,7 +4,7 @@
 
 Phase ID: `ws025-p030`
 
-Status: planned; explicitly not adopted in WS025 integration (q122); implementation not started.
+Status: planned; Priority 1に再選択（2026-09-09）、実装未開始。q122での見送りは履歴として保持。
 
 Parent: [WS025](../ws.md)
 
@@ -13,6 +13,12 @@ Parent: [WS025](../ws.md)
 追加の先行条件: [ws025-p031](../phase031-driver-layout-style/phase.md) のドライバ整理を完了してから実装する。下記の旧ソースパスは p031 の移行表で解決する。既存の採用条件は維持する。
 
 追加の回帰 gate: [ws025-p032](../phase032-pc98-boot-regression/phase.md) の PC-98 QEMU 起動回復を完了してから実装へ進む。
+
+## 現在の選択
+
+ユーザーがp027〜p030を次に実施する最優先項目として選択した。
+旧見送りを継続する扱いではなく、p031残件・現ソース・下記の測定/実機条件を確認してQueue化する。
+今回の計画整理で実装や測定を実施済みとは扱わない。
 
 ## 目的と境界
 
