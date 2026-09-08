@@ -13,7 +13,7 @@ static void creation_write_check(uint64_t first,uint32_t count,const void *buffe
  (void)count;(void)buffer;
  if(first==176 || first==8 || first==16) {
   REQUIRE(namespace_journal->pending_ready && namespace_journal->image_valid);
-  REQUIRE(ufs_get32(namespace_journal->image,16,0)==(creation_shared?2U:3U));
+  REQUIRE(drv_ufs_get32(namespace_journal->image,16,0)==(creation_shared?2U:3U));
   if(creation_snapshot)REQUIRE((snapshot_mask&expected)==expected);
  }
 }
@@ -28,9 +28,9 @@ static unsigned added_names(unsigned size)
 {
  unsigned pos=0,found=0;uint8_t *p=storage+176*512;
  while(pos<size) {
-  unsigned length=ufs_get16(p,pos+4,0);
+  unsigned length=drv_ufs_get16(p,pos+4,0);
   REQUIRE(length>=8 && !(length&3) && length<=size-pos && pos%512+length<=512);
-  if(ufs_get32(p,pos,0)==3 && p[pos+7]==3 && !memcmp(p+pos+8,"new",3))found++;
+  if(drv_ufs_get32(p,pos,0)==3 && p[pos+7]==3 && !memcmp(p+pos+8,"new",3))found++;
   pos+=length;
  }
  return found;
@@ -61,8 +61,8 @@ static void creation_scenario(unsigned shared,unsigned layout,unsigned write_fai
   REQUIRE(namecache_lookup(&directory.inode,&cached_name,&cached)==0);
  }
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
  fs.journal_enabled=1;fs.snapshot_available=creation_snapshot;
  namespace_journal=&fs.journal;creation_shared=shared;creation_target=&node.inode;group_write_check=creation_write_check;
  storage_writes=storage_syncs=0;snapshot_calls=snapshot_mask=dir_changes=0;
@@ -83,19 +83,19 @@ static void creation_scenario(unsigned shared,unsigned layout,unsigned write_fai
  namecache_purge_mount(&mountp);
  failure_write=failure_write_again=failure_sync=commit_error=0;crash_cut=0;
  memcpy(storage,durable,sizeof(storage));
- REQUIRE(ufs_journal_init(&recovered,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
- namespace_journal=&recovered;REQUIRE(ufs_journal_replay(&recovered)==0);
+ REQUIRE(drv_ufs_journal_init(&recovered,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
+ namespace_journal=&recovered;REQUIRE(drv_ufs_journal_replay(&recovered)==0);
  raw_target=storage+8*512+3*UFS_DINODE_SIZE;
  raw_directory=storage+(shared?8:16)*512+(shared?4:2)*UFS_DINODE_SIZE;
- links=ufs_get16(raw_target,UFS_DI_NLINK,0);size=ufs_get64(raw_directory,UFS_DI_SIZE,0);
+ links=drv_ufs_get16(raw_target,UFS_DI_NLINK,0);size=drv_ufs_get64(raw_directory,UFS_DI_SIZE,0);
  REQUIRE(links==0 || links==(creation_directory?2U:1U));
  REQUIRE(size==(layout==3?(links!=0?512U:0U):(layout==2 && links!=0?1024U:512U)));
  found=added_names((unsigned)size);REQUIRE(found==(links!=0));
- REQUIRE(ufs_get16(raw_directory,UFS_DI_NLINK,0)==2+(creation_directory && links!=0));
- REQUIRE(ufs_get64(raw_directory,UFS_DI_DB,0)==176);
- REQUIRE(ufs_get64(raw_target,UFS_DI_DB,0)==160);
- REQUIRE(ufs_get64(raw_target,UFS_DI_SIZE,0)==13*4096);
+ REQUIRE(drv_ufs_get16(raw_directory,UFS_DI_NLINK,0)==2+(creation_directory && links!=0));
+ REQUIRE(drv_ufs_get64(raw_directory,UFS_DI_DB,0)==176);
+ REQUIRE(drv_ufs_get64(raw_target,UFS_DI_DB,0)==160);
+ REQUIRE(drv_ufs_get64(raw_target,UFS_DI_SIZE,0)==13*4096);
  if(creation_result==0)REQUIRE(links!=0);
  group_write_check=NULL;free(fs.cg);
 }

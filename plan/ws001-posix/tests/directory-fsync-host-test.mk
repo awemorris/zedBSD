@@ -53,7 +53,7 @@ $(OUT)/vfs-test: $(TEST) $(OUT)/file.o
 
 
 
-$(OUT)/ufs.o: $(REPO)/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
+$(OUT)/ufs.o: $(REPO)/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
 	$(OBJCOPY) --globalize-symbol=ufs_file_sync $@
 
@@ -66,12 +66,12 @@ $(OUT)/ufs-test: $(TEST)  $(OUT)/ufs.o
 
 
 
-$(OUT)/ufs-mutation.o: $(REPO)/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
+$(OUT)/ufs-mutation.o: $(REPO)/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
 	$(OBJCOPY) --redefine-sym=dir_replace=ufs_dir_replace $@
 	$(OBJCOPY) --globalize-symbol=ufs_dir_replace $@
 
-$(OUT)/ufs-endian.o: $(REPO)/src/drivers/fs/ufs/ufs-endian.c $(SELF) | $(OUT)
+$(OUT)/ufs-endian.o: $(REPO)/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) -c $< -o $@
 
 $(OUT)/ufs-mutation-test: $(TEST) $(OUT)/ufs-mutation.o \
@@ -79,7 +79,7 @@ $(OUT)/ufs-mutation-test: $(TEST) $(OUT)/ufs-mutation.o \
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DWS001_P023_UFS_MUTATION $^ \
 		$(LDFLAGS) -o $@
 
-$(OUT)/overlay.o: $(REPO)/src/kern/overlayfs.c $(SELF) | $(OUT)
+$(OUT)/overlay.o: $(REPO)/src/drivers/fs/overlayfs.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(PRODUCTION_CFLAGS) \
 		-Wno-unused-const-variable \
 		-DZEDBSD_OVERLAY_CONTENT_HOST_TEST -c $< -o $@

@@ -232,7 +232,7 @@ func runParserPreflight(qemu, evidence, topology) {
 
 func productionSourceReady(repo) {
     var command = "test -f " +
-        zbShellQuote(repo + "/src/drivers/usb-cdc-ecm.c") +
+        zbShellQuote(repo + "/src/drivers/usb/usb-cdc-ecm.c") +
         " && test -f " +
         zbShellQuote(repo + "/include/drivers/usb-cdc-ecm.h") +
         " && rg -q 'CONFIG_DRIVER_USB_CDC_ECM' " +

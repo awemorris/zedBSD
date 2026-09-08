@@ -24,30 +24,30 @@ enum loop_flags {
 };
 
 /* Returns a referenced backing disk; EOPNOTSUPP identifies a non-loop disk. */
-int loop_backing_disk_ref(struct disk *disk, struct disk **result);
+int drv_loop_backing_disk_ref(struct disk *disk, struct disk **result);
 
 int
-loop_init(void);
+drv_loop_init(void);
 
 int
-loop_attach_file(
+drv_loop_attach_file(
 	struct file *backing,
 	unsigned flags,
 	struct disk **disk_out);
 
 int
-loop_attach_path(
+drv_loop_attach_path(
 	const struct path *root,
 	const char *path,
 	unsigned flags,
 	struct disk **disk_out);
 
 int
-loop_detach(
+drv_loop_detach(
 	struct disk *disk);
 
 int
-loop_get_index(
+drv_loop_get_index(
 	const struct disk *disk,
 	unsigned *index_out);
 

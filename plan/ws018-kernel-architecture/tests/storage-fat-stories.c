@@ -13,14 +13,14 @@
 static int extent_fault;
 static unsigned live_claims;
 static int loop_test_file_extents(struct file *, fat_extent_cb, void *);
-#define fat_file_extents loop_test_file_extents
-#include "../../../src/drivers/loop.c"
-#undef fat_file_extents
+#define drv_fat_file_extents loop_test_file_extents
+#include "../../../src/drivers/generic/loop.c"
+#undef drv_fat_file_extents
 
 static int loop_test_file_extents(struct file *f, fat_extent_cb cb, void *context)
 {
 	if (extent_fault) return cb(1, 100, 16, context);
-	return fat_file_extents(f, cb, context);
+	return drv_fat_file_extents(f, cb, context);
 }
 void *kern_calloc(size_t n, size_t size) { return calloc(n, size); }
 struct backing_claim { unsigned token; };
@@ -114,7 +114,7 @@ int main(void)
 	neighbor = create_payload(mountp.m_root, "neighbor", adjacent, 512);
 	CHECK(host_file_open(inode, O_RDWR, &file) == 0);
 	CHECK(file.f_ops->pwrite(&file, data + 512, sizeof(data) - 512, 512) == sizeof(data) - 512);
-	CHECK(fat_file_extents(&file, capture_extent, &ext) == 0 && ext.used >= 2);
+	CHECK(drv_fat_file_extents(&file, capture_extent, &ext) == 0 && ext.used >= 2);
 	for (unsigned i = 0; i < ext.used; i++)
 		map[i] = (struct fat_loop_extent){ext.file_block[i], ext.disk_block[i], ext.count[i]};
 	unsigned baseline_writes = image.writes;
@@ -123,7 +123,7 @@ int main(void)
 	/* The real claim authorization is covered by backing-claim fixtures and
 	 * native boot. This fixture isolates physical cache/slot/map behavior. */
 	file.f_backing_claim = (struct backing_claim *)&loop;
-	CHECK(fat_file_set_loop_map(&file, map, ext.used) == 0);
+	CHECK(drv_fat_file_set_loop_map(&file, map, ext.used) == 0);
 	loop.attached = true; loop.flags = LOOP_READ_WRITE; loop.backing = &file;
 	loop.disk = &disk; loop.size_bytes = sizeof(data); disk.d_data = &loop;
 	memset(data, 0x84, sizeof(data));
@@ -144,11 +144,11 @@ int main(void)
 	operation(&loop, BIO_READ, UINT64_MAX, 1, actual, EOVERFLOW);
 	puts("S21 PASS exact end, overrun and multiplication overflow");
 	memcpy(bad, map, sizeof(map)); bad[0].file_block = 1;
-	CHECK(fat_file_set_loop_map(&file, bad, ext.used) == EIO);
+	CHECK(drv_fat_file_set_loop_map(&file, bad, ext.used) == EIO);
 	operation(&loop, BIO_READ, 0, 1, actual, 0);
 	puts("S22 PASS attach map rejects logical hole and preserves previous map");
 	memcpy(bad, map, sizeof(map)); bad[0].disk_block = image.disk.d_block_count;
-	CHECK(fat_file_set_loop_map(&file, bad, ext.used) == EIO);
+	CHECK(drv_fat_file_set_loop_map(&file, bad, ext.used) == EIO);
 	puts("S23 PASS attach map rejects parent disk overrun");
 	read_inode(neighbor, actual, 512); CHECK(memcmp(actual, adjacent, 512) == 0);
 	/* Explicitly share one physical 4KiB cache line. */
@@ -164,34 +164,34 @@ int main(void)
 	operation(&loop, BIO_WRITE, 0, 1, sector, 0);
 	read_inode(inode, actual, 512); CHECK(memcmp(actual, sector, 512) == 0);
 	puts("S25 PASS warmed FAT sector slot invalidated across mapped write");
-	CHECK(fat_file_set_loop_map(&file, NULL, 0) == 0); file.f_backing_claim = NULL;
+	CHECK(drv_fat_file_set_loop_map(&file, NULL, 0) == 0); file.f_backing_claim = NULL;
 	CHECK(file.f_ops->pwrite(&file, data, 512, 0) == 512);
 	file.f_backing_claim = (struct backing_claim *)&loop;
-	CHECK(fat_file_set_loop_map(&file, map, ext.used) == 0);
+	CHECK(drv_fat_file_set_loop_map(&file, map, ext.used) == 0);
 	operation(&loop, BIO_READ, 0, 1, actual, 0); CHECK(memcmp(actual, data, 512) == 0);
 	puts("S27 PASS map unbind modify bind and fresh content");
 	image.fail_syncs = 1; operation(&loop, BIO_FLUSH, 0, 0, NULL, EIO);
 	operation(&loop, BIO_READ, 0, 1, actual, 0); operation(&loop, BIO_FLUSH, 0, 0, NULL, 0);
 	puts("S28 PASS loop flush error followed by readable and syncable backing");
-	CHECK(fat_file_set_loop_map(&file, NULL, 0) == 0); file.f_backing_claim = NULL;
-	CHECK(loop_init() == 0);
+	CHECK(drv_fat_file_set_loop_map(&file, NULL, 0) == 0); file.f_backing_claim = NULL;
+	CHECK(drv_loop_init() == 0);
 	struct disk *attached = NULL;
 	off_t saved_size = inode->i_size;
 	inode->i_size = (off_t)((UINT64_C(1) << 32) + 512U);
-	CHECK(loop_attach_file(&file, LOOP_READ_WRITE, &attached) == EFBIG);
+	CHECK(drv_loop_attach_file(&file, LOOP_READ_WRITE, &attached) == EFBIG);
 	CHECK(attached == NULL && live_claims == 0);
 	inode->i_size = saved_size;
 	extent_fault = 1;
-	CHECK(loop_attach_file(&file, LOOP_READ_WRITE, &attached) == EIO);
+	CHECK(drv_loop_attach_file(&file, LOOP_READ_WRITE, &attached) == EIO);
 	CHECK(attached == NULL && live_claims == 0);
 	extent_fault = 0;
 	for (unsigned i = 0; i < LOOP_MAX_DEVICES; i++) loops[i].reserved = true;
-	CHECK(loop_attach_file(&file, LOOP_READ_WRITE, &attached) == ENOSPC);
+	CHECK(drv_loop_attach_file(&file, LOOP_READ_WRITE, &attached) == ENOSPC);
 	CHECK(attached == NULL && live_claims == 0);
 	for (unsigned i = 0; i < LOOP_MAX_DEVICES; i++) loops[i].reserved = false;
-	CHECK(loop_attach_file(&file, LOOP_READ_WRITE, &attached) == 0);
+	CHECK(drv_loop_attach_file(&file, LOOP_READ_WRITE, &attached) == 0);
 	CHECK(live_claims == 1 && attached != NULL);
-	CHECK(loop_detach(attached) == 0 && live_claims == 0);
+	CHECK(drv_loop_detach(attached) == 0 && live_claims == 0);
 	CHECK(file.f_backing_claim == NULL && !(inode->i_flags & INODE_LOOPFILE));
 	puts("S22 PASS actual attach rejects hole and full registry without leaked map/claim");
 	puts("S27 PASS actual attach/detach clears borrowed map before release");

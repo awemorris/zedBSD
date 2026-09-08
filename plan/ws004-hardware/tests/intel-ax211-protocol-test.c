@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-protocol.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-protocol.h"
 
 static void
 put_le16(uint8_t *bytes, uint16_t value)
@@ -86,56 +86,56 @@ test_command_versions(void)
 	struct intel_ax211_protocol_command_version version;
 
 	make_api89_command_table(bytes);
-	assert(intel_ax211_protocol_command_table_parse(bytes,
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes,
 	    INTEL_AX211_PROTOCOL_API89_COMMAND_BYTES, &table) ==
 	    INTEL_AX211_PROTOCOL_OK);
 	assert(table.count == INTEL_AX211_PROTOCOL_API89_COMMAND_COUNT);
-	assert(intel_ax211_protocol_command_table_validate_api89(&table) ==
+	assert(drv_intel_ax211_protocol_command_table_validate_api89(&table) ==
 	    INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_protocol_command_version_lookup(&table, 0x0cU,
+	assert(drv_intel_ax211_protocol_command_version_lookup(&table, 0x0cU,
 	    0x02U, &version) == INTEL_AX211_PROTOCOL_OK);
 	assert(version.command_version == 1U);
 	assert(version.notification_version == 4U);
-	assert(intel_ax211_protocol_command_version_lookup(&table, 0x0bU,
+	assert(drv_intel_ax211_protocol_command_version_lookup(&table, 0x0bU,
 	    0xaaU, &version) == INTEL_AX211_PROTOCOL_MISSING);
 
-	assert(intel_ax211_protocol_command_table_parse(NULL, 4U, &table) ==
+	assert(drv_intel_ax211_protocol_command_table_parse(NULL, 4U, &table) ==
 	    INTEL_AX211_PROTOCOL_INVALID);
-	assert(intel_ax211_protocol_command_table_parse(bytes, 0U, &table) ==
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes, 0U, &table) ==
 	    INTEL_AX211_PROTOCOL_TRUNCATED);
-	assert(intel_ax211_protocol_command_table_parse(bytes, 3U, &table) ==
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes, 3U, &table) ==
 	    INTEL_AX211_PROTOCOL_TRUNCATED);
-	assert(intel_ax211_protocol_command_table_parse(bytes,
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes,
 	    sizeof(bytes), &table) == INTEL_AX211_PROTOCOL_OVERSIZED);
 
 	memcpy(malformed, bytes, sizeof(malformed));
 	put_command_version(malformed, 5U, 0x0cU, 0xfeU, 99U, 2U);
-	assert(intel_ax211_protocol_command_table_parse(malformed,
+	assert(drv_intel_ax211_protocol_command_table_parse(malformed,
 	    sizeof(malformed), &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_protocol_command_table_validate_api89(&table) ==
+	assert(drv_intel_ax211_protocol_command_table_validate_api89(&table) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 
 	memcpy(malformed, bytes, sizeof(malformed));
 	put_command_version(malformed, 6U, 0x0cU, 0x02U, 1U, 4U);
-	assert(intel_ax211_protocol_command_table_parse(malformed,
+	assert(drv_intel_ax211_protocol_command_table_parse(malformed,
 	    sizeof(malformed), &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_protocol_command_version_lookup(&table, 0x0cU,
+	assert(drv_intel_ax211_protocol_command_version_lookup(&table, 0x0cU,
 	    0x02U, &version) == INTEL_AX211_PROTOCOL_DUPLICATE);
-	assert(intel_ax211_protocol_command_table_validate_api89(&table) ==
+	assert(drv_intel_ax211_protocol_command_table_validate_api89(&table) ==
 	    INTEL_AX211_PROTOCOL_DUPLICATE);
 
 	memcpy(malformed, bytes, sizeof(malformed));
 	put_command_version(malformed,
 	    INTEL_AX211_PROTOCOL_API89_COMMAND_COUNT - 1U, 0U, 1U, 0U, 0U);
-	assert(intel_ax211_protocol_command_table_parse(malformed,
+	assert(drv_intel_ax211_protocol_command_table_parse(malformed,
 	    sizeof(malformed), &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_protocol_command_table_validate_api89(&table) ==
+	assert(drv_intel_ax211_protocol_command_table_validate_api89(&table) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 
-	assert(intel_ax211_protocol_command_table_parse(bytes,
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes,
 	    INTEL_AX211_PROTOCOL_API89_COMMAND_BYTES - 4U, &table) ==
 	    INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_protocol_command_table_validate_api89(&table) ==
+	assert(drv_intel_ax211_protocol_command_table_validate_api89(&table) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 }
 
@@ -203,7 +203,7 @@ test_alive(void)
 	    INTEL_AX211_PROTOCOL_GROUP_LEGACY,
 	    INTEL_AX211_PROTOCOL_ALIVE_OPCODE,
 	    INTEL_AX211_PROTOCOL_ALIVE_VERSION, 9U);
-	assert(intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
 	    INTEL_AX211_PROTOCOL_OK);
 	assert(alive.status == INTEL_AX211_PROTOCOL_ALIVE_STATUS_OK);
 	assert(alive.flags == 0x1234U);
@@ -218,43 +218,43 @@ test_alive(void)
 	assert(alive.imr_enabled == 0U);
 
 	message.payload_length--;
-	assert(intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
 	    INTEL_AX211_PROTOCOL_TRUNCATED);
 	message.payload_length += 2U;
-	assert(intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
 	    INTEL_AX211_PROTOCOL_OVERSIZED);
 	message.payload_length--;
 	message.version--;
-	assert(intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 	message.version++;
-	assert(intel_ax211_protocol_alive_decode(&message, 8U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 8U, &alive) ==
 	    INTEL_AX211_PROTOCOL_STALE);
 	message.flags = INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK;
-	assert(intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
 	    INTEL_AX211_PROTOCOL_FAILED);
 	message.flags = 0U;
 
 	put_le16(payload, INTEL_AX211_PROTOCOL_ALIVE_STATUS_ERROR);
-	assert(intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
 	    INTEL_AX211_PROTOCOL_FAILED);
 	memcpy(payload, original, sizeof(original));
 	memset(payload + 116U, 0, 12U);
-	assert(intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
 	    INTEL_AX211_PROTOCOL_MISSING);
 	memcpy(payload, original, sizeof(original));
 	put_le32(payload + 140U, 1U);
-	assert(intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
 	    INTEL_AX211_PROTOCOL_INVALID);
 	put_le64(payload + 128U, 0x100000U);
 	put_le32(payload + 136U, 0x2000U);
-	assert(intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 	put_le32(payload + 140U, 0U);
-	assert(intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
 	    INTEL_AX211_PROTOCOL_INVALID);
 	message.payload = NULL;
-	assert(intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
+	assert(drv_intel_ax211_protocol_alive_decode(&message, 9U, &alive) ==
 	    INTEL_AX211_PROTOCOL_INVALID);
 }
 
@@ -270,38 +270,38 @@ test_completions_and_response(void)
 	    INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 	    INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_OPCODE,
 	    INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_VERSION, 42U);
-	assert(intel_ax211_protocol_pnvm_init_complete(&message, 42U) ==
+	assert(drv_intel_ax211_protocol_pnvm_init_complete(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_OK);
 	message.version = 2U;
-	assert(intel_ax211_protocol_pnvm_init_complete(&message, 42U) ==
+	assert(drv_intel_ax211_protocol_pnvm_init_complete(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 	message.version = INTEL_AX211_PROTOCOL_PNVM_INIT_COMPLETE_VERSION;
 	message.payload = payload;
 	message.payload_length = 1U;
-	assert(intel_ax211_protocol_pnvm_init_complete(&message, 42U) ==
+	assert(drv_intel_ax211_protocol_pnvm_init_complete(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_TRUNCATED);
 	message.payload_length = sizeof(payload) + 1U;
-	assert(intel_ax211_protocol_pnvm_init_complete(&message, 42U) ==
+	assert(drv_intel_ax211_protocol_pnvm_init_complete(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_OVERSIZED);
 
 	message = make_message(payload, INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE,
 	    INTEL_AX211_PROTOCOL_GROUP_LEGACY,
 	    INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE,
 	    INTEL_AX211_PROTOCOL_UNKNOWN_VERSION, 43U);
-	assert(intel_ax211_protocol_init_complete(&message, 43U) ==
+	assert(drv_intel_ax211_protocol_init_complete(&message, 43U) ==
 	    INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_protocol_init_complete(&message, 42U) ==
+	assert(drv_intel_ax211_protocol_init_complete(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_STALE);
 	message.generation = 43U;
 	message.payload_length--;
-	assert(intel_ax211_protocol_init_complete(&message, 43U) ==
+	assert(drv_intel_ax211_protocol_init_complete(&message, 43U) ==
 	    INTEL_AX211_PROTOCOL_TRUNCATED);
 	message.payload_length = INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE + 1U;
-	assert(intel_ax211_protocol_init_complete(&message, 43U) ==
+	assert(drv_intel_ax211_protocol_init_complete(&message, 43U) ==
 	    INTEL_AX211_PROTOCOL_OVERSIZED);
 	message.payload_length = INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE;
 	message.opcode++;
-	assert(intel_ax211_protocol_init_complete(&message, 43U) ==
+	assert(drv_intel_ax211_protocol_init_complete(&message, 43U) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 
 	memset(&pending, 0, sizeof(pending));
@@ -314,32 +314,32 @@ test_completions_and_response(void)
 	pending.minimum_response_length = 1U;
 	pending.maximum_response_length = 1U;
 	message = make_message(&byte, 1U, 0x0cU, 0x02U, 4U, 51U);
-	assert(intel_ax211_protocol_command_response_validate(&message,
+	assert(drv_intel_ax211_protocol_command_response_validate(&message,
 	    &pending) == INTEL_AX211_PROTOCOL_OK);
 	message.index++;
-	assert(intel_ax211_protocol_command_response_validate(&message,
+	assert(drv_intel_ax211_protocol_command_response_validate(&message,
 	    &pending) == INTEL_AX211_PROTOCOL_TOKEN_MISMATCH);
 	message.index--;
 	message.flags = INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK;
-	assert(intel_ax211_protocol_command_response_validate(&message,
+	assert(drv_intel_ax211_protocol_command_response_validate(&message,
 	    &pending) == INTEL_AX211_PROTOCOL_FAILED);
 	message.flags = 0U;
 	message.generation++;
-	assert(intel_ax211_protocol_command_response_validate(&message,
+	assert(drv_intel_ax211_protocol_command_response_validate(&message,
 	    &pending) == INTEL_AX211_PROTOCOL_STALE);
 	message.generation--;
 	message.version++;
-	assert(intel_ax211_protocol_command_response_validate(&message,
+	assert(drv_intel_ax211_protocol_command_response_validate(&message,
 	    &pending) == INTEL_AX211_PROTOCOL_UNSUPPORTED);
 	message.version--;
 	message.payload_length = 0U;
-	assert(intel_ax211_protocol_command_response_validate(&message,
+	assert(drv_intel_ax211_protocol_command_response_validate(&message,
 	    &pending) == INTEL_AX211_PROTOCOL_TRUNCATED);
 	message.payload_length = 2U;
-	assert(intel_ax211_protocol_command_response_validate(&message,
+	assert(drv_intel_ax211_protocol_command_response_validate(&message,
 	    &pending) == INTEL_AX211_PROTOCOL_OVERSIZED);
 	pending.response_version = INTEL_AX211_PROTOCOL_UNKNOWN_VERSION;
-	assert(intel_ax211_protocol_command_response_validate(&message,
+	assert(drv_intel_ax211_protocol_command_response_validate(&message,
 	    &pending) == INTEL_AX211_PROTOCOL_UNSUPPORTED);
 }
 
@@ -402,7 +402,7 @@ test_nvm(void)
 	    INTEL_AX211_PROTOCOL_NVM_GET_INFO_SIZE;
 	pending.maximum_response_length =
 	    INTEL_AX211_PROTOCOL_NVM_GET_INFO_SIZE;
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_OK);
 	assert(nvm.nvm_version == 0x1234U);
 	assert(nvm.board_type == 3U);
@@ -436,63 +436,63 @@ test_nvm(void)
 	assert(nvm.channel_5ghz[36].number == 181U);
 
 	message.payload_length--;
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_TRUNCATED);
 	message.payload_length += 2U;
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_OVERSIZED);
 	message.payload_length--;
 	message.generation++;
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_STALE);
 	message.generation--;
 	message.flags = INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK;
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_FAILED);
 	message.flags = 0U;
 
 	memcpy(payload, original, sizeof(original));
 	put_le32(payload, INTEL_AX211_PROTOCOL_NVM_GENERAL_EMPTY_OTP);
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_FAILED);
 	memcpy(payload, original, sizeof(original));
 	put_le32(payload + 8U, 0U);
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_MISSING);
 	memcpy(payload, original, sizeof(original));
 	put_le32(payload + 8U,
 	    INTEL_AX211_PROTOCOL_NVM_BAND_24_ENABLED |
 	    INTEL_AX211_PROTOCOL_NVM_11N_ENABLED);
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_OK);
 	assert(nvm.channel_5ghz_count ==
 	    INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT);
 	assert(nvm.valid_5ghz_count == 0U);
 	memcpy(payload, original, sizeof(original));
 	put_le32(payload + 12U, 0U);
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_MISSING);
 	memcpy(payload, original, sizeof(original));
 	put_le32(payload + 16U, 0x100U);
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_UNSUPPORTED);
 	memcpy(payload, original, sizeof(original));
 	put_le32(payload + 24U,
 	    INTEL_AX211_PROTOCOL_NVM_CHANNEL_LIMIT + 1U);
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_OVERSIZED);
 	memcpy(payload, original, sizeof(original));
 	memset(payload + 28U, 0, 14U * sizeof(uint32_t));
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_OK);
 	assert(nvm.lar_enabled && nvm.valid_24ghz_count == 0U);
 	put_le32(payload + 20U, 0U);
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_MISSING);
 
 	memcpy(payload, original, sizeof(original));
 	pending.response_version = 3U;
-	assert(intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
+	assert(drv_intel_ax211_protocol_nvm_get_info_decode(&message, &pending,
 	    &nvm) == INTEL_AX211_PROTOCOL_UNSUPPORTED);
 }
 
@@ -547,10 +547,10 @@ test_real_firmware_command_table(const char *path)
 		assert(padded <= length - offset);
 		if (type == 48U) {
 			assert(!found);
-			assert(intel_ax211_protocol_command_table_parse(
+			assert(drv_intel_ax211_protocol_command_table_parse(
 			    firmware + offset, tlv_length, &table) ==
 			    INTEL_AX211_PROTOCOL_OK);
-			assert(intel_ax211_protocol_command_table_validate_api89(
+			assert(drv_intel_ax211_protocol_command_table_validate_api89(
 			    &table) == INTEL_AX211_PROTOCOL_OK);
 			found = 1;
 		}

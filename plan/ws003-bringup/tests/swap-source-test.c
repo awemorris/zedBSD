@@ -22,7 +22,7 @@
 #define TEST_IO_RECORDS 128U
 #define TEST_FILE_EXTENTS 1025U
 
-const struct filesystem_type fat_filesystem_type;
+const struct filesystem_type drv_fat_filesystem_type;
 
 struct test_io_record {
 	int write;
@@ -389,7 +389,7 @@ file_close(struct file *file)
 }
 
 int
-fat_file_extents(struct file *file, fat_extent_cb callback, void *context)
+drv_fat_file_extents(struct file *file, fat_extent_cb callback, void *context)
 {
 	struct test_file_state *state;
 	unsigned index;
@@ -1073,7 +1073,7 @@ test_file_source(void)
 	test_disk_init(&disk, &disk_state_value, 90U, 512U, 512U, 0U);
 	memset(&mount, 0, sizeof(mount));
 	mount.m_disk = &disk;
-	mount.m_type = &fat_filesystem_type;
+	mount.m_type = &drv_fat_filesystem_type;
 	memset(&inode, 0, sizeof(inode));
 	memset(&file_state, 0, sizeof(file_state));
 	inode.i_type = INODE_REG;
@@ -1151,7 +1151,7 @@ test_file_source(void)
 	inode.i_flags = 0U;
 	mount.m_type = NULL;
 	assert(kern_swap_source_prepare_file(&path, 0U, &source) == EOPNOTSUPP);
-	mount.m_type = &fat_filesystem_type;
+	mount.m_type = &drv_fat_filesystem_type;
 	inode.i_size = 129U * SWAP_PAGE_SIZE;
 	make_v2(file_state.header, (uint64_t)inode.i_size);
 	file_state.extent_count = TEST_FILE_EXTENTS;

@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-dma.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-dma.h"
 
 #define TEST_CHECK(condition) do { \
 	if (!(condition)) { \
@@ -262,7 +262,7 @@ intel_ax211_dma_host_scrub(void *memory, size_t length)
 		record->scrubbed = 1U;
 		scrub_count++;
 	}
-	intel_ax211_scrub(memory, length);
+	drv_intel_ax211_scrub(memory, length);
 }
 
 void
@@ -493,7 +493,7 @@ fixture_boot_failure_matrix(uint8_t *firmware,
 		memset(&resources, 0, sizeof(resources));
 		failure_attempt = failure;
 		reverse_required = 1U;
-		error = intel_ax211_dma_prepare_boot(&fixture_device, firmware,
+		error = drv_intel_ax211_dma_prepare_boot(&fixture_device, firmware,
 		    INTEL_AX211_FIRMWARE_SIZE, manifest, 0x0370U, &resources);
 		TEST_CHECK(error == ENOMEM);
 		TEST_CHECK(allocation_attempts == failure);
@@ -521,7 +521,7 @@ fixture_invalid_allocation_matrix(uint8_t *firmware,
 		    4U : 1U;
 		invalid_allocation = invalid;
 		reverse_required = 1U;
-		TEST_CHECK(intel_ax211_dma_prepare_boot(&fixture_device, firmware,
+		TEST_CHECK(drv_intel_ax211_dma_prepare_boot(&fixture_device, firmware,
 		    INTEL_AX211_FIRMWARE_SIZE, manifest, 0x0370U,
 		    &resources) == EIO);
 		TEST_CHECK(fixture_active_count() == 0U);
@@ -541,28 +541,28 @@ fixture_bounds(uint8_t *firmware,
 
 	TEST_CHECK(fixture_allocator_reset() == 0);
 	memset(&resources, 0, sizeof(resources));
-	TEST_CHECK(intel_ax211_dma_prepare_boot(&fixture_device, firmware,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_boot(&fixture_device, firmware,
 	    INTEL_AX211_FIRMWARE_SIZE - 1U, manifest, 0x0370U,
 	    &resources) == EINVAL);
 	TEST_CHECK(allocation_attempts == 0U);
-	TEST_CHECK(intel_ax211_dma_prepare_boot(&fixture_device, firmware,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_boot(&fixture_device, firmware,
 	    INTEL_AX211_FIRMWARE_SIZE, manifest, 0x0420U,
 	    &resources) == EINVAL);
 	TEST_CHECK(allocation_attempts == 0U);
 	bad = *manifest;
 	bad.iml_length--;
-	TEST_CHECK(intel_ax211_dma_prepare_boot(&fixture_device, firmware,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_boot(&fixture_device, firmware,
 	    INTEL_AX211_FIRMWARE_SIZE, &bad, 0x0370U, &resources) == EINVAL);
 	TEST_CHECK(fixture_active_count() == 0U && !scrub_failure);
 	bad = *manifest;
 	bad.runtime[1].destination = 0U;
-	TEST_CHECK(intel_ax211_dma_prepare_boot(&fixture_device, firmware,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_boot(&fixture_device, firmware,
 	    INTEL_AX211_FIRMWARE_SIZE, &bad, 0x0370U, &resources) == EINVAL);
 	TEST_CHECK(allocation_attempts == 0U);
 	bad = *manifest;
 	bad.runtime[0].length = INTEL_AX211_FIRMWARE_SECTION_SIZE_MAX + 1U;
 	reverse_required = 1U;
-	TEST_CHECK(intel_ax211_dma_prepare_boot(&fixture_device, firmware,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_boot(&fixture_device, firmware,
 	    INTEL_AX211_FIRMWARE_SIZE, &bad, 0x0370U, &resources) == EINVAL);
 	TEST_CHECK(fixture_active_count() == 0U);
 	TEST_CHECK(!reverse_failure && !scrub_failure);
@@ -584,7 +584,7 @@ fixture_success_and_pnvm(uint8_t *firmware,
 
 	TEST_CHECK(fixture_allocator_reset() == 0);
 	memset(&resources, 0, sizeof(resources));
-	TEST_CHECK(intel_ax211_dma_prepare_boot(&fixture_device, firmware,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_boot(&fixture_device, firmware,
 	    INTEL_AX211_FIRMWARE_SIZE, manifest, 0x0370U, &resources) == 0);
 	error = fixture_check_history();
 	if (error != 0)
@@ -594,13 +594,13 @@ fixture_success_and_pnvm(uint8_t *firmware,
 		return error;
 	active_after_boot = fixture_active_count();
 	TEST_CHECK(active_after_boot == FIXTURE_BOOT_ALLOCATION_COUNT);
-	TEST_CHECK(intel_ax211_dma_prepare_pnvm(pnvm, INTEL_AX211_PNVM_SIZE,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_pnvm(pnvm, INTEL_AX211_PNVM_SIZE,
 	    pnvm_manifest, &resources) == EINVAL);
 	TEST_CHECK(fixture_active_count() == active_after_boot);
 
 	/* Accepted ALIVE retires IML and LMAC/UMAC, never paging or rings. */
 	free_before = free_count;
-	intel_ax211_dma_release_boot_images(&resources);
+	drv_intel_ax211_dma_release_boot_images(&resources);
 	TEST_CHECK(resources.boot_images_released);
 	TEST_CHECK(resources.iml.address == NULL);
 	TEST_CHECK(resources.firmware[0].buffer.address == NULL);
@@ -608,13 +608,13 @@ fixture_success_and_pnvm(uint8_t *firmware,
 	TEST_CHECK(resources.firmware[2].buffer.address != NULL);
 	TEST_CHECK(free_count == free_before + 3U);
 	TEST_CHECK(fixture_active_count() == active_after_boot - 3U);
-	intel_ax211_dma_release_boot_images(&resources);
+	drv_intel_ax211_dma_release_boot_images(&resources);
 	TEST_CHECK(free_count == free_before + 3U);
 
 	/* Malformed fragmented manifests do not mutate scratch or ownership. */
 	bad = *pnvm_manifest;
 	bad.section[1].file_offset = INTEL_AX211_PNVM_SIZE;
-	TEST_CHECK(intel_ax211_dma_prepare_pnvm(pnvm, INTEL_AX211_PNVM_SIZE,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_pnvm(pnvm, INTEL_AX211_PNVM_SIZE,
 	    &bad, &resources) == EINVAL);
 	TEST_CHECK(!resources.pnvm_prepared && resources.pnvm_count == 0U);
 	scratch = resources.scratch.address;
@@ -622,13 +622,13 @@ fixture_success_and_pnvm(uint8_t *firmware,
 	TEST_CHECK(fixture_get_le32(scratch + 24U) == 0U);
 	bad = *pnvm_manifest;
 	bad.total_length++;
-	TEST_CHECK(intel_ax211_dma_prepare_pnvm(pnvm, INTEL_AX211_PNVM_SIZE,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_pnvm(pnvm, INTEL_AX211_PNVM_SIZE,
 	    &bad, &resources) == EINVAL);
 	bad = *pnvm_manifest;
 	bad.total_length = (size_t)UINT32_MAX + 1U;
-	TEST_CHECK(intel_ax211_dma_prepare_pnvm(pnvm, INTEL_AX211_PNVM_SIZE,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_pnvm(pnvm, INTEL_AX211_PNVM_SIZE,
 	    &bad, &resources) == EINVAL);
-	TEST_CHECK(intel_ax211_dma_prepare_pnvm(pnvm,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_pnvm(pnvm,
 	    INTEL_AX211_PNVM_SIZE - 1U, pnvm_manifest, &resources) == EINVAL);
 
 	/* Every pointer-table/segment allocation failure unwinds in reverse. */
@@ -637,7 +637,7 @@ fixture_success_and_pnvm(uint8_t *firmware,
 
 		failure_attempt = allocation_attempts + index;
 		reverse_required = 1U;
-		TEST_CHECK(intel_ax211_dma_prepare_pnvm(pnvm,
+		TEST_CHECK(drv_intel_ax211_dma_prepare_pnvm(pnvm,
 		    INTEL_AX211_PNVM_SIZE, pnvm_manifest, &resources) == ENOMEM);
 		reverse_required = 0U;
 		TEST_CHECK(fixture_active_count() == active_before);
@@ -649,7 +649,7 @@ fixture_success_and_pnvm(uint8_t *firmware,
 		failure_attempt = 0U;
 	}
 
-	TEST_CHECK(intel_ax211_dma_prepare_pnvm(pnvm, INTEL_AX211_PNVM_SIZE,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_pnvm(pnvm, INTEL_AX211_PNVM_SIZE,
 	    pnvm_manifest, &resources) == 0);
 	TEST_CHECK(resources.pnvm_prepared);
 	TEST_CHECK(resources.pnvm_count == FIXTURE_PNVM_SEGMENT_COUNT);
@@ -670,13 +670,13 @@ fixture_success_and_pnvm(uint8_t *firmware,
 	    FIXTURE_PNVM_SEGMENT_COUNT * 8U, 0U));
 
 	reverse_required = 1U;
-	intel_ax211_dma_release(&resources);
+	drv_intel_ax211_dma_release(&resources);
 	reverse_required = 0U;
 	TEST_CHECK(resources.device == NULL && !resources.boot_prepared);
 	TEST_CHECK(fixture_active_count() == 0U);
 	TEST_CHECK(!reverse_failure && !scrub_failure);
 	TEST_CHECK(scrub_count == free_count && free_count == allocation_successes);
-	intel_ax211_dma_release(&resources);
+	drv_intel_ax211_dma_release(&resources);
 	return 0;
 }
 
@@ -727,28 +727,28 @@ fixture_exact_blobs(void)
 
 	TEST_CHECK(ucode_size == INTEL_AX211_FIRMWARE_SIZE);
 	TEST_CHECK(pnvm_size == INTEL_AX211_PNVM_SIZE);
-	TEST_CHECK(intel_ax211_firmware_parse(ucode, ucode_size,
+	TEST_CHECK(drv_intel_ax211_firmware_parse(ucode, ucode_size,
 	    &firmware_manifest) == INTEL_AX211_OK);
 	TEST_CHECK(firmware_manifest.iml_length == INTEL_AX211_IML_SIZE);
 	TEST_CHECK(firmware_manifest.lmac_count == 15U);
 	TEST_CHECK(firmware_manifest.umac_count == 17U);
 	TEST_CHECK(firmware_manifest.paging_count == 26U);
 	TEST_CHECK(fixture_first_sku(pnvm, pnvm_size, &sku) == 0);
-	TEST_CHECK(intel_ax211_pnvm_parse(pnvm, pnvm_size, &sku,
+	TEST_CHECK(drv_intel_ax211_pnvm_parse(pnvm, pnvm_size, &sku,
 	    INTEL_AX211_MAC_TYPE_SO, INTEL_AX211_RF_TYPE,
 	    &pnvm_manifest) == INTEL_AX211_OK);
 	TEST_CHECK(pnvm_manifest.section_count == 2U);
 
 	TEST_CHECK(fixture_allocator_reset() == 0);
 	memset(&resources, 0, sizeof(resources));
-	TEST_CHECK(intel_ax211_dma_prepare_boot(&fixture_device, ucode,
+	TEST_CHECK(drv_intel_ax211_dma_prepare_boot(&fixture_device, ucode,
 	    ucode_size, &firmware_manifest, 0x0370U, &resources) == 0);
 	TEST_CHECK(allocation_attempts == FIXTURE_EXACT_BOOT_ALLOCATION_COUNT);
-	intel_ax211_dma_release_boot_images(&resources);
-	TEST_CHECK(intel_ax211_dma_prepare_pnvm(pnvm, pnvm_size,
+	drv_intel_ax211_dma_release_boot_images(&resources);
+	TEST_CHECK(drv_intel_ax211_dma_prepare_pnvm(pnvm, pnvm_size,
 	    &pnvm_manifest, &resources) == 0);
 	reverse_required = 1U;
-	intel_ax211_dma_release(&resources);
+	drv_intel_ax211_dma_release(&resources);
 	reverse_required = 0U;
 	TEST_CHECK(fixture_active_count() == 0U);
 	TEST_CHECK(!reverse_failure && !scrub_failure);
@@ -761,7 +761,7 @@ fixture_exact_blobs(void)
 		memset(&resources, 0, sizeof(resources));
 		failure_attempt = failure;
 		reverse_required = 1U;
-		TEST_CHECK(intel_ax211_dma_prepare_boot(&fixture_device, ucode,
+		TEST_CHECK(drv_intel_ax211_dma_prepare_boot(&fixture_device, ucode,
 		    ucode_size, &firmware_manifest, 0x0370U,
 		    &resources) == ENOMEM);
 		TEST_CHECK(allocation_attempts == failure);

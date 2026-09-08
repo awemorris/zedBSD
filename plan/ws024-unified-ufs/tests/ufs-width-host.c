@@ -1,6 +1,6 @@
 /* Actual LP64/ILP32 production UFS mapping and ABI conversion, no host libc.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "src/drivers/fs/ufs/ufs-vfs.c"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-vfs.c"
 static unsigned checks;
 static uint64_t seen_lba;
 static unsigned seen_count;
@@ -25,7 +25,7 @@ unsigned long long __umoddi3(unsigned long long n,unsigned long long d){unsigned
 int disk_read(struct disk *disk,uint64_t lba,uint32_t count,void *bytes)
 {
  (void)disk;seen_lba=lba;seen_count=count;memset(bytes,0,count*512U);
- ufs_put64(bytes,0,(UINT64_C(1)<<32)+168,0);return 0;
+ drv_ufs_put64(bytes,0,(UINT64_C(1)<<32)+168,0);return 0;
 }
 static void test(void)
 {
@@ -40,14 +40,14 @@ static void test(void)
  REQUIRE(bmap(&node.inode,12,&fragment)==0&&fragment==(UINT64_C(1)<<32)+168);
  REQUIRE(seen_lba==node.indirect[0]&&seen_count==1);
  for(swapped=0;swapped<2;swapped++){
-  fs.super.swapped=swapped;ufs_put64(raw,UFS_DI_SIZE,INT32_MAX,swapped);ufs_put64(raw,UFS_DI_BLOCKS,1,swapped);
+  fs.super.swapped=swapped;drv_ufs_put64(raw,UFS_DI_SIZE,INT32_MAX,swapped);drv_ufs_put64(raw,UFS_DI_BLOCKS,1,swapped);
   REQUIRE(inode_size_values(raw,&fs.super,&size,&blocks)==0&&size==INT32_MAX&&blocks==1);
-  ufs_put64(raw,UFS_DI_SIZE,(uint64_t)INT32_MAX+1,swapped);
+  drv_ufs_put64(raw,UFS_DI_SIZE,(uint64_t)INT32_MAX+1,swapped);
   REQUIRE(inode_size_values(raw,&fs.super,&size,&blocks)==(sizeof(off_t)==8?0:EFBIG));
-  ufs_put64(raw,UFS_DI_SIZE,UINT64_MAX,swapped);REQUIRE(inode_size_values(raw,&fs.super,&size,&blocks)==EFBIG);
-  ufs_put64(raw,UFS_DI_SIZE,0,swapped);ufs_put64(raw,UFS_DI_BLOCKS,(uint64_t)INT32_MAX+1,swapped);
+  drv_ufs_put64(raw,UFS_DI_SIZE,UINT64_MAX,swapped);REQUIRE(inode_size_values(raw,&fs.super,&size,&blocks)==EFBIG);
+  drv_ufs_put64(raw,UFS_DI_SIZE,0,swapped);drv_ufs_put64(raw,UFS_DI_BLOCKS,(uint64_t)INT32_MAX+1,swapped);
   REQUIRE(inode_size_values(raw,&fs.super,&size,&blocks)==(sizeof(blkcnt_t)==8?0:EOVERFLOW));
-  ufs_put64(raw,UFS_DI_BLOCKS,UINT64_MAX,swapped);REQUIRE(inode_size_values(raw,&fs.super,&size,&blocks)==EOVERFLOW);
+  drv_ufs_put64(raw,UFS_DI_BLOCKS,UINT64_MAX,swapped);REQUIRE(inode_size_values(raw,&fs.super,&size,&blocks)==EOVERFLOW);
  }
  finish(0);
 }

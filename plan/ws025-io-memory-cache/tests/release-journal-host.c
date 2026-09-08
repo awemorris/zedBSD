@@ -25,7 +25,7 @@ static unsigned reachable(uint64_t fragment,unsigned depth,unsigned *mask)
  *mask|=1U<<((fragment-160)/8);
  REQUIRE(!bit_test(storage+32*512+264,fragment));
  count++;
- if(depth)for(n=0;n<512;n++)count+=reachable(ufs_get64(storage+fragment*512,n*8,0),depth-1,mask);
+ if(depth)for(n=0;n<512;n++)count+=reachable(drv_ufs_get64(storage+fragment*512,n*8,0),depth-1,mask);
  return count;
 }
 static void release_scenario(unsigned depth,unsigned write_fail,unsigned flush_fail,unsigned landed,unsigned stop)
@@ -37,8 +37,8 @@ static void release_scenario(unsigned depth,unsigned write_fail,unsigned flush_f
  disk.d_block_size=512;disk.d_block_count=512;
  REQUIRE(write_super_summaries(&mountp)==0);REQUIRE(disk_sync(&disk)==0);
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
  fs.journal_enabled=1;fs.snapshot_available=release_snapshot;
  release_journal=&fs.journal;group_write_check=release_write_check;
  storage_writes=storage_syncs=0;snapshot_calls=snapshot_mask=0;
@@ -50,19 +50,19 @@ static void release_scenario(unsigned depth,unsigned write_fail,unsigned flush_f
  if(!crashed)REQUIRE(fs.journal_io.context==NULL && fs.snapshot_io.context==NULL);
  failure_write=failure_write_again=failure_sync=commit_error=0;crash_cut=0;
  memcpy(storage,durable,sizeof(storage));
- REQUIRE(ufs_journal_init(&recovered,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&recovered,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
  release_journal=&recovered;
- REQUIRE(ufs_journal_replay(&recovered)==0);
+ REQUIRE(drv_ufs_journal_replay(&recovered)==0);
  raw=storage+8*512+2*UFS_DINODE_SIZE;
- for(n=0;n<12;n++)live+=reachable(ufs_get64(raw,UFS_DI_DB+n*8,0),0,&mask);
- for(n=0;n<3;n++)live+=reachable(ufs_get64(raw,UFS_DI_IB+n*8,0),n+1,&mask);
+ for(n=0;n<12;n++)live+=reachable(drv_ufs_get64(raw,UFS_DI_DB+n*8,0),0,&mask);
+ for(n=0;n<3;n++)live+=reachable(drv_ufs_get64(raw,UFS_DI_IB+n*8,0),n+1,&mask);
  for(n=0;n<=depth;n++)if(bit_test(storage+32*512+264,160+n*8))free_count++;
  REQUIRE(live+free_count==depth+1);
- REQUIRE(ufs_get64(raw,UFS_DI_BLOCKS,0)==live*8);
- REQUIRE(ufs_get32(storage+32*512,UFS_CG_NBFREE,0)==free_count);
- REQUIRE(ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NBFREE,0)==free_count);
- size=ufs_get64(raw,UFS_DI_SIZE,0);REQUIRE(size==0 || size==13*4096);
+ REQUIRE(drv_ufs_get64(raw,UFS_DI_BLOCKS,0)==live*8);
+ REQUIRE(drv_ufs_get32(storage+32*512,UFS_CG_NBFREE,0)==free_count);
+ REQUIRE(drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NBFREE,0)==free_count);
+ size=drv_ufs_get64(raw,UFS_DI_SIZE,0);REQUIRE(size==0 || size==13*4096);
  if(truncate_result==0)REQUIRE(live==0 && size==0);
  if(media_override_error && flush_fail==1) {
   REQUIRE(truncate_result==media_override_error);

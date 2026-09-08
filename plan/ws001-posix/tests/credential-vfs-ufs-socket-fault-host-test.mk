@@ -41,7 +41,7 @@ $(OUT):
 
 
 
-$(OUT)/ufs.o: $(REPO)/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
+$(OUT)/ufs.o: $(REPO)/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 	$(OBJCOPY) \
 		--redefine-sym restore_directory_block=ws001_ufs_restore_directory_block \
@@ -53,7 +53,7 @@ $(OUT)/ufs.o: $(REPO)/src/drivers/fs/ufs/ufs-vfs.c $(SELF) | $(OUT)
 		--globalize-symbol=ws001_ufs_discard_new_inode_after_error \
 		--globalize-symbol=ws001_ufs_mknod $@
 
-$(OUT)/ufs-endian.o: $(REPO)/src/drivers/fs/ufs/ufs-endian.c $(SELF) | $(OUT)
+$(OUT)/ufs-endian.o: $(REPO)/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 

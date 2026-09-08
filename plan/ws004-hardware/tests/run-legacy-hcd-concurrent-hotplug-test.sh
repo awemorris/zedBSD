@@ -13,11 +13,11 @@ cc=${CC:-cc}
 make_command=${MAKE:-make}
 common="-std=c11 -Wall -Wextra -Werror"
 fixture="$root/plan/ws004-hardware/tests/legacy-hcd-concurrent-hotplug-test.c"
-uhci="$root/src/drivers/pci-uhci.c"
-ehci="$root/src/drivers/pci-ehci.c"
-usb="$root/src/drivers/usb.c"
-usb_storage="$root/src/drivers/usb-storage.c"
-usb_hid_checkpoint="$root/src/drivers/usb-hid-checkpoint.c"
+uhci="$root/src/drivers/pci/pci-uhci.c"
+ehci="$root/src/drivers/pci/pci-ehci.c"
+usb="$root/src/drivers/usb/usb.c"
+usb_storage="$root/src/drivers/usb/usb-storage.c"
+usb_hid_checkpoint="$root/src/drivers/usb/usb-hid-checkpoint.c"
 qemu_runner="$root/plan/ws004-hardware/tests/run-legacy-hcd-concurrent-hotplug-qemu.sh"
 qemu_config="$root/plan/ws004-hardware/tests/config-amd64-legacy-hcd.mk"
 

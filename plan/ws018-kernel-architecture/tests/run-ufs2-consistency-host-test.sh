@@ -1,6 +1,7 @@
 #!/bin/sh
 # Historical entry point; compile only the unified production owner.
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 case "${1:-strict}" in
 strict|--strict) ;;
@@ -8,7 +9,7 @@ strict|--strict) ;;
 esac
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-unified-ufs.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
-"${CC:-cc}" -std=c11 -Wall -Wextra -Werror -I"$repo" -I"$repo/include" -I"$repo/src" -I"$repo/src/drivers/fs/ufs" "$repo/plan/ws018-kernel-architecture/tests/ufs2-consistency-host-test.c" "$repo/src/drivers/fs/ufs/ufs-journal.c" "$repo/src/drivers/fs/ufs/ufs-snapshot.c" -o "$temporary/test"
+"${CC:-cc}" -std=c11 -Wall -Wextra -Werror -I"$repo" -I"$repo/include" -I"$repo/src" -I"$repo/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs" "$repo/plan/ws018-kernel-architecture/tests/ufs2-consistency-host-test.c" "$repo/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-journal.c" "$repo/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-snapshot.c" -o "$temporary/test"
 "$temporary/test"
 if nm "$temporary/test" | rg "[[:space:]]ufs[12]_"; then
     echo "Retired implementation symbol remains" >&2

@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -1463,9 +1461,12 @@ mount_info_snapshot(
 	unsigned long irq;
 	struct zedbsd_mount_info *info;
 
+	/* Rejects a malformed request. */
 	if (count_out == NULL || (capacity != 0 && entries == NULL) ||
 	    capacity > ZEDBSD_MOUNT_INFO_MAX)
 		return EINVAL;
+
+	/* Counts the live mounts before deciding whether they fit. */
 	irq = spin_lock_irqsave(&namespace_lock);
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next)
 		if (mountp->m_state == MOUNT_STATE_LIVE)
@@ -1602,9 +1603,12 @@ mount_namespace_check_name(
 	unsigned long irq;
 	int error = 0;
 
+	/* Rejects a malformed name. */
 	if (directory == NULL || name == NULL || name->cn_nameptr == NULL ||
 	    name->cn_namelen == 0 || name->cn_namelen > NAME_MAX)
 		return EINVAL;
+
+	/* Refuses a name an existing mount already covers in that directory. */
 	irq = spin_lock_irqsave(&namespace_lock);
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
 		if (same_inode(mountp->m_cover.p_inode, directory) &&
@@ -1615,6 +1619,8 @@ mount_namespace_check_name(
 		}
 	}
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
+	/* Reports whether the name is free. */
 	return error;
 }
 
@@ -1747,6 +1753,7 @@ filesystem_identity_valid(
 	const uint32_t allowed = ZEDBSD_BLKID_TYPE | ZEDBSD_BLKID_UUID |
 	    ZEDBSD_BLKID_LABEL;
 
+	/* Requires known flags, zero reserved fields and well-formed text. */
 	if ((identity->flags & ~allowed) != 0 ||
 	    identity->reserved != 0 ||
 	    !identity_text_zero(identity->partuuid,
@@ -1918,12 +1925,15 @@ valid_component(
 {
 	size_t length;
 
+	/* Rejects an empty name, a dot name, or one containing a separator. */
 	if (name == NULL ||
 	    name[0] == '\0' ||
 	    !strcmp(name, ".") ||
 	    !strcmp(name, "..") ||
 	    strchr(name, '/') != NULL)
 		return 0;
+
+	/* Rejects a name longer than one path component may be. */
 	length = strlen(name);
 	if (length > NAME_MAX)
 		return 0;
@@ -1969,6 +1979,7 @@ set_mount_path(
 	size_t base_length, name_length = strlen(name);
 	int error;
 
+	/* Resolves the covered directory to an absolute path. */
 	memset(&context, 0, sizeof(context));
 	spin_init(&context.lock, LOCK_RANK_PROCESS_RESOURCE, "mount path");
 	path_set(&context.root, root_mount, root_mount->m_root);
@@ -1978,15 +1989,21 @@ set_mount_path(
 	path_release(&context.root);
 	if (error != 0)
 		return error;
+
+	/* Refuses a mount point whose path would not fit. */
 	base_length = strlen(base);
 	if (base_length + (base_length > 1U ? 1U : 0U) + name_length >=
 	    sizeof(mountp->m_path))
 		return ENAMETOOLONG;
+
+	/* Joins the directory and the name into the mount's path. */
 	strcpy(mountp->m_path, base);
 	if (base_length > 1U)
 		strcat(mountp->m_path, "/");
 	strcat(mountp->m_path, name);
 	strcpy(mountp->m_name, name);
+
+	/* Reports the recorded path. */
 	return 0;
 }
 
@@ -2097,10 +2114,13 @@ detach_mount(
 {
 	unsigned long irq = spin_lock_irqsave(&namespace_lock);
 
+	/* Takes the mount out of the namespace. */
 	unlink_child(mountp);
 	unlink_global(mountp);
 	mountp->m_state = MOUNT_STATE_DEAD;
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
+	/* Uncovers the directory the mount was over. */
 	path_release(&mountp->m_cover);
 	if (mountp->m_covered_inode != NULL) {
 		inode_release(mountp->m_covered_inode);
@@ -2123,6 +2143,7 @@ reserve_mount(
 	unsigned long irq;
 	int error;
 
+	/* Requires a live namespace and a live directory to mount over. */
 	irq = spin_lock_irqsave(&namespace_lock);
 	error = directory->p_mount->m_state == MOUNT_STATE_LIVE &&
 	    root_mount != NULL && root_mount->m_state == MOUNT_STATE_LIVE ?
@@ -2132,6 +2153,8 @@ reserve_mount(
 		return error;
 	if ((directory->p_inode->i_flags & INODE_DEAD) != 0)
 		return ENOENT;
+
+	/* Refuses a name another mount already occupies. */
 	error = mount_lookup_child(directory, &component, &existing);
 	if (error == 0) {
 		path_release(&existing);
@@ -2139,6 +2162,8 @@ reserve_mount(
 	}
 	if (error != ENOENT)
 		return error;
+
+	/* Records the mount's path and the inode it covers. */
 	error = set_mount_path(mountp, directory, name);
 	if (error != 0)
 		return error;
@@ -2146,12 +2171,16 @@ reserve_mount(
 	    &mountp->m_covered_inode);
 	if (error != 0 && error != ENOENT)
 		return error;
+
+	/* Publishes the mount in the namespace. */
 	path_set(&mountp->m_cover, directory->p_mount, directory->p_inode);
 	mountp->m_parent = directory->p_mount;
 	irq = spin_lock_irqsave(&namespace_lock);
 	link_child(directory->p_mount, mountp);
 	link_global(mountp);
 	spin_unlock_irqrestore(&namespace_lock, irq);
+
+	/* Reports the reserved mount point. */
 	return 0;
 }
 

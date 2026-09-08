@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "src/drivers/hid/ps2-mouse.c"
+#include "src/drivers/platform/pcat/ps2-mouse.c"
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
 #define CHECK(condition) do { \
@@ -200,7 +200,7 @@ mutex_unlock(struct mutex *mutex)
 }
 
 int
-input_device_register(const struct input_device_info *info,
+drv_input_device_register(const struct input_device_info *info,
 	struct input_device **result)
 {
 	CHECK(info != NULL);
@@ -212,7 +212,7 @@ input_device_register(const struct input_device_info *info,
 }
 
 void
-input_device_emit(struct input_device *device, uint16_t type, uint16_t code,
+drv_input_device_emit(struct input_device *device, uint16_t type, uint16_t code,
 	int32_t value)
 {
 	CHECK(device == fake_input);
@@ -285,7 +285,7 @@ main(void)
 	unsigned mask_before, unmask_before;
 
 	reset_fixture();
-	CHECK(pcat_ps2_mouse_init() == 0);
+	CHECK(drv_pcat_ps2_mouse_init() == 0);
 	check_capabilities();
 	CHECK(set_handler_count == 1 && registered_handler == mouse_interrupt);
 	CHECK(mask_count == 1);

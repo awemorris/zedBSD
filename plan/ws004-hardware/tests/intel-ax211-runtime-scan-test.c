@@ -10,8 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-runtime.h"
-#include "../../../src/drivers/intel-ax211-scan.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-runtime.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-scan.h"
 
 static uint16_t
 get_le16(const uint8_t *bytes)
@@ -134,7 +134,7 @@ parse_table(uint8_t bytes[INTEL_AX211_PROTOCOL_API89_COMMAND_BYTES])
 {
 	struct intel_ax211_protocol_command_table table;
 
-	assert(intel_ax211_protocol_command_table_parse(bytes,
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes,
 	    INTEL_AX211_PROTOCOL_API89_COMMAND_BYTES, &table) ==
 	    INTEL_AX211_PROTOCOL_OK);
 	return table;
@@ -154,40 +154,40 @@ test_runtime_profile_and_versions(void)
 	table = parse_table(bytes);
 	make_manifest(&manifest);
 	make_nvm(&nvm);
-	assert(intel_ax211_runtime_profile_from_manifest(&manifest, &nvm, 1,
+	assert(drv_intel_ax211_runtime_profile_from_manifest(&manifest, &nvm, 1,
 	    &profile) == INTEL_AX211_RUNTIME_OK);
 	assert(profile.tx_chain_mask == 3U && profile.rx_chain_mask == 3U);
 	assert(profile.lar_enabled == 1U && profile.ltr_enabled == 1U);
-	assert(intel_ax211_runtime_api89_validate(&table, &profile) ==
+	assert(drv_intel_ax211_runtime_api89_validate(&table, &profile) ==
 	    INTEL_AX211_RUNTIME_OK);
 
 	memcpy(malformed, bytes, sizeof(malformed));
 	put_version(malformed, 6U, 0x01U, 0x98U, 2U, 0U);
 	table = parse_table(malformed);
-	assert(intel_ax211_runtime_api89_validate(&table, &profile) ==
+	assert(drv_intel_ax211_runtime_api89_validate(&table, &profile) ==
 	    INTEL_AX211_RUNTIME_UNSUPPORTED);
 
 	memcpy(malformed, bytes, sizeof(malformed));
 	put_version(malformed, 15U, 0x05U, 0x00U, 1U, 0U);
 	table = parse_table(malformed);
-	assert(intel_ax211_runtime_api89_validate(&table, &profile) ==
+	assert(drv_intel_ax211_runtime_api89_validate(&table, &profile) ==
 	    INTEL_AX211_RUNTIME_UNSUPPORTED);
 
 	memcpy(malformed, bytes, sizeof(malformed));
 	put_version(malformed, 9U, 0x01U, 0xeeU, 2U, 0U);
 	table = parse_table(malformed);
-	assert(intel_ax211_runtime_api89_validate(&table, &profile) ==
+	assert(drv_intel_ax211_runtime_api89_validate(&table, &profile) ==
 	    INTEL_AX211_RUNTIME_UNSUPPORTED);
 	set_bit(profile.capabilities,
 	    INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2);
-	assert(intel_ax211_runtime_api89_validate(&table, &profile) ==
+	assert(drv_intel_ax211_runtime_api89_validate(&table, &profile) ==
 	    INTEL_AX211_RUNTIME_OK);
 
 	make_manifest(&manifest);
 	set_bit(manifest.capabilities, INTEL_AX211_RUNTIME_CAP_DQA);
-	assert(intel_ax211_runtime_profile_from_manifest(&manifest, &nvm, 1,
+	assert(drv_intel_ax211_runtime_profile_from_manifest(&manifest, &nvm, 1,
 	    &profile) == INTEL_AX211_RUNTIME_UNSUPPORTED);
-	assert(intel_ax211_runtime_profile_from_manifest(NULL, &nvm, 1,
+	assert(drv_intel_ax211_runtime_profile_from_manifest(NULL, &nvm, 1,
 	    &profile) == INTEL_AX211_RUNTIME_INVALID);
 }
 
@@ -210,7 +210,7 @@ make_runtime_profile(int ltr, int lar)
 	make_manifest(&manifest);
 	make_nvm(&nvm);
 	nvm.lar_enabled = lar ? 1U : 0U;
-	assert(intel_ax211_runtime_profile_from_manifest(&manifest, &nvm, ltr,
+	assert(drv_intel_ax211_runtime_profile_from_manifest(&manifest, &nvm, ltr,
 	    &profile) == INTEL_AX211_RUNTIME_OK);
 	return profile;
 }
@@ -223,60 +223,60 @@ test_runtime_codecs(void)
 
 	profile = make_runtime_profile(1, 1);
 	memset(&command, 0xa5, sizeof(command));
-	assert(intel_ax211_runtime_command_encode(
+	assert(drv_intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_TX_ANT, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(command.group == 1U && command.opcode == 0x98U);
 	assert(command.wire_version == 0U && command.layout_version == 1U);
 	assert(command.payload_length == 4U && get_le32(command.payload) == 3U);
 
-	assert(intel_ax211_runtime_command_encode(
+	assert(drv_intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_BT_CONFIG, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(command.payload_length == 8U && get_le32(command.payload) == 3U);
 	assert_zero(command.payload + 4U, 4U);
-	assert(intel_ax211_runtime_command_encode(
+	assert(drv_intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_SOC_CONFIG, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(command.group == 2U && get_le32(command.payload) == 0x0aU);
 	assert(get_le32(command.payload + 4U) == 12000U);
-	assert(intel_ax211_runtime_command_encode(
+	assert(drv_intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_LTR_CONFIG, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(command.payload_length == 32U && get_le32(command.payload) == 1U);
 	assert_zero(command.payload + 4U, 28U);
-	assert(intel_ax211_runtime_command_encode(
+	assert(drv_intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_TEMP_REPORT, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(command.group == 4U && command.payload_length == 20U);
 	assert_zero(command.payload, 20U);
-	assert(intel_ax211_runtime_command_encode(
+	assert(drv_intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_POWER_TABLE, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(command.payload_length == 4U);
 	assert_zero(command.payload, 4U);
-	assert(intel_ax211_runtime_command_encode(
+	assert(drv_intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_MCC_UPDATE, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(command.response_version == 6U && command.payload_length == 28U);
 	assert(command.payload[0] == 'Z' && command.payload[1] == 'Z');
 	assert(command.payload[2] == 0x10U);
 	assert_zero(command.payload + 3U, 25U);
-	assert(intel_ax211_runtime_command_encode(
+	assert(drv_intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_SCAN_CONFIG, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(command.opcode == 0x0cU && command.layout_version == 5U);
 	assert(command.payload_length == 12U);
 	assert(get_le32(command.payload + 4U) == 3U);
 	assert(get_le32(command.payload + 8U) == 3U);
-	assert(intel_ax211_runtime_command_encode(
+	assert(drv_intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_BEACON_FILTER, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(command.payload_length == 60U);
 	assert_zero(command.payload, 60U);
 	set_bit(profile.capabilities,
 	    INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2);
-	assert(intel_ax211_runtime_command_encode(
+	assert(drv_intel_ax211_runtime_command_encode(
 	    INTEL_AX211_RUNTIME_STEP_LTR_CONFIG, &profile, &command) ==
 	    INTEL_AX211_RUNTIME_INVALID);
 }
@@ -296,55 +296,55 @@ test_runtime_state(void)
 	profile = make_runtime_profile(1, 0);
 	set_bit(profile.capabilities,
 	    INTEL_AX211_RUNTIME_CAP_SET_LTR_GEN2);
-	assert(intel_ax211_runtime_begin(&state, &table, &profile, 7U, 100U) ==
+	assert(drv_intel_ax211_runtime_begin(&state, &table, &profile, 7U, 100U) ==
 	    INTEL_AX211_RUNTIME_OK);
-	assert(intel_ax211_runtime_current(&state, 100U, &command) ==
+	assert(drv_intel_ax211_runtime_current(&state, 100U, &command) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(command.opcode == 0x98U);
-	assert(intel_ax211_runtime_ack(&state, 6U,
+	assert(drv_intel_ax211_runtime_ack(&state, 6U,
 	    INTEL_AX211_RUNTIME_STEP_TX_ANT, 101U) ==
 	    INTEL_AX211_RUNTIME_STALE);
-	assert(intel_ax211_runtime_ack(&state, 7U,
+	assert(drv_intel_ax211_runtime_ack(&state, 7U,
 	    INTEL_AX211_RUNTIME_STEP_SOC_CONFIG, 101U) ==
 	    INTEL_AX211_RUNTIME_OUT_OF_ORDER);
-	assert(intel_ax211_runtime_ack(&state, 7U,
+	assert(drv_intel_ax211_runtime_ack(&state, 7U,
 	    INTEL_AX211_RUNTIME_STEP_TX_ANT, 101U) ==
 	    INTEL_AX211_RUNTIME_OK);
-	assert(intel_ax211_runtime_ack(&state, 7U,
+	assert(drv_intel_ax211_runtime_ack(&state, 7U,
 	    INTEL_AX211_RUNTIME_STEP_TX_ANT, 102U) ==
 	    INTEL_AX211_RUNTIME_DUPLICATE);
-	assert(intel_ax211_runtime_ack(&state, 7U,
+	assert(drv_intel_ax211_runtime_ack(&state, 7U,
 	    INTEL_AX211_RUNTIME_STEP_BT_CONFIG, 102U) ==
 	    INTEL_AX211_RUNTIME_OK);
-	assert(intel_ax211_runtime_ack(&state, 7U,
+	assert(drv_intel_ax211_runtime_ack(&state, 7U,
 	    INTEL_AX211_RUNTIME_STEP_SOC_CONFIG, 103U) ==
 	    INTEL_AX211_RUNTIME_OK);
 	/* LTR and MCC are skipped by this profile. */
 	assert(state.step == INTEL_AX211_RUNTIME_STEP_TEMP_REPORT);
-	assert(intel_ax211_runtime_ack(&state, 7U,
+	assert(drv_intel_ax211_runtime_ack(&state, 7U,
 	    INTEL_AX211_RUNTIME_STEP_TEMP_REPORT, 104U) ==
 	    INTEL_AX211_RUNTIME_OK);
-	assert(intel_ax211_runtime_ack(&state, 7U,
+	assert(drv_intel_ax211_runtime_ack(&state, 7U,
 	    INTEL_AX211_RUNTIME_STEP_POWER_TABLE, 105U) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(state.step == INTEL_AX211_RUNTIME_STEP_SCAN_CONFIG);
-	assert(intel_ax211_runtime_ack(&state, 7U,
+	assert(drv_intel_ax211_runtime_ack(&state, 7U,
 	    INTEL_AX211_RUNTIME_STEP_SCAN_CONFIG, 106U) ==
 	    INTEL_AX211_RUNTIME_OK);
-	result = intel_ax211_runtime_ack(&state, 7U,
+	result = drv_intel_ax211_runtime_ack(&state, 7U,
 	    INTEL_AX211_RUNTIME_STEP_BEACON_FILTER, 107U);
 	assert(result == INTEL_AX211_RUNTIME_COMPLETE);
-	assert(intel_ax211_runtime_ack(&state, 7U,
+	assert(drv_intel_ax211_runtime_ack(&state, 7U,
 	    INTEL_AX211_RUNTIME_STEP_BEACON_FILTER, 108U) ==
 	    INTEL_AX211_RUNTIME_DUPLICATE);
 
-	assert(intel_ax211_runtime_begin(&state, &table, &profile, 8U, 100U) ==
+	assert(drv_intel_ax211_runtime_begin(&state, &table, &profile, 8U, 100U) ==
 	    INTEL_AX211_RUNTIME_OK);
-	assert(intel_ax211_runtime_expire(&state, 1000099U) ==
+	assert(drv_intel_ax211_runtime_expire(&state, 1000099U) ==
 	    INTEL_AX211_RUNTIME_OK);
-	assert(intel_ax211_runtime_expire(&state, 1000100U) ==
+	assert(drv_intel_ax211_runtime_expire(&state, 1000100U) ==
 	    INTEL_AX211_RUNTIME_TIMEOUT);
-	assert(intel_ax211_runtime_current(&state, 1000100U, &command) ==
+	assert(drv_intel_ax211_runtime_current(&state, 1000100U, &command) ==
 	    INTEL_AX211_RUNTIME_INVALID);
 }
 
@@ -370,34 +370,34 @@ test_mcc_decode(void)
 	message.generation = 33U;
 	message.payload = payload;
 	message.payload_length = sizeof(payload);
-	assert(intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
+	assert(drv_intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(mcc.status == 1U && mcc.mcc == 0x5a5aU);
 	assert(mcc.channel_count == 2U && mcc.channel[1] == 0x22U);
-	assert(intel_ax211_runtime_mcc_decode(&message, 32U, &mcc) ==
+	assert(drv_intel_ax211_runtime_mcc_decode(&message, 32U, &mcc) ==
 	    INTEL_AX211_RUNTIME_STALE);
 	message.payload_length--;
-	assert(intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
+	assert(drv_intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
 	    INTEL_AX211_RUNTIME_TRUNCATED);
 	message.payload_length += 2U;
-	assert(intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
+	assert(drv_intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
 	    INTEL_AX211_RUNTIME_OVERSIZED);
 	message.payload_length = sizeof(payload);
 	payload[13U] = 1U;
-	assert(intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
+	assert(drv_intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(mcc.channel_count == 2U);
 	payload[13U] = 0U;
 	put_le32(payload, 2U);
-	assert(intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
+	assert(drv_intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
 	    INTEL_AX211_RUNTIME_OK);
 	assert(mcc.status == 2U);
 	put_le32(payload, INTEL_AX211_RUNTIME_MCC_STATUS_MAX + 1U);
-	assert(intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
+	assert(drv_intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
 	    INTEL_AX211_RUNTIME_FAILED);
 	put_le32(payload, 1U);
 	put_le32(payload + 16U, 0U);
-	assert(intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
+	assert(drv_intel_ax211_runtime_mcc_decode(&message, 33U, &mcc) ==
 	    INTEL_AX211_RUNTIME_UNSUPPORTED);
 }
 
@@ -416,7 +416,7 @@ make_scan_profile(void)
 	mcc.channel_count = 16U;
 	for (index = 0U; index < mcc.channel_count; index++)
 		mcc.channel[index] = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) ==
 	    INTEL_AX211_SCAN_OK);
 	assert(profile.channel_count == 16U);
@@ -450,43 +450,43 @@ test_scan_profile_bounds(void)
 	for (index = 0U; index < mcc.channel_count; index++)
 		mcc.channel[index] = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
 	mcc.status = INTEL_AX211_RUNTIME_MCC_STATUS_MAX;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) == INTEL_AX211_SCAN_OK);
 	mcc.status = INTEL_AX211_RUNTIME_MCC_STATUS_MAX + 1U;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) == INTEL_AX211_SCAN_INVALID);
 	mcc.status = 0U;
 	nvm.channel_24ghz_count =
 	    INTEL_AX211_PROTOCOL_24GHZ_CHANNEL_LIMIT + 1U;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) ==
 	    INTEL_AX211_SCAN_INVALID);
 	make_nvm(&nvm);
 	nvm.channel_5ghz_count =
 	    INTEL_AX211_PROTOCOL_5GHZ_CHANNEL_LIMIT + 1U;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) == INTEL_AX211_SCAN_INVALID);
 	make_nvm(&nvm);
 	nvm.band_24_enabled = 0U;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) ==
 	    INTEL_AX211_SCAN_INVALID);
 	make_nvm(&nvm);
 	nvm.channel_24ghz[0].valid = 0U;
 	nvm.channel_24ghz_count = 1U;
 	nvm.channel_5ghz_count = 0U;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) == INTEL_AX211_SCAN_OK);
 	assert(profile.channel_count == 1U && profile.channel[0] == 1U);
 	make_nvm(&nvm);
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, NULL, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, NULL, station,
 	    &profile) == INTEL_AX211_SCAN_INVALID);
 	nvm.lar_enabled = 0U;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, NULL, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, NULL, station,
 	    &profile) == INTEL_AX211_SCAN_OK);
 	make_nvm(&nvm);
 	mcc.channel[4U] = 0U;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) == INTEL_AX211_SCAN_OK);
 	assert(profile.channel_count == 15U && profile.channel[4U] == 6U);
 
@@ -494,14 +494,14 @@ test_scan_profile_bounds(void)
 	make_nvm(&nvm);
 	mcc.channel[4U] = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
 	nvm.channel_5ghz[0].valid = 0U;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) == INTEL_AX211_SCAN_OK);
 	assert(profile.channel_count == 16U && profile.channel[14U] == 36U);
 
 	/* An MCC-invalid 5 GHz channel is excluded even if NVM marks it valid. */
 	make_nvm(&nvm);
 	mcc.channel[14U] = 0U;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) == INTEL_AX211_SCAN_OK);
 	assert(profile.channel_count == 15U && profile.channel[14U] == 40U);
 
@@ -512,10 +512,10 @@ test_scan_profile_bounds(void)
 	nvm.channel_5ghz[0].valid = 0U;
 	mcc.status = INTEL_AX211_RUNTIME_MCC_STATUS_MAX + 1U;
 	mcc.channel_count = 0U;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, NULL, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, NULL, station,
 	    &profile) == INTEL_AX211_SCAN_OK);
 	assert(profile.channel_count == 15U && profile.channel[14U] == 40U);
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) == INTEL_AX211_SCAN_OK);
 
 	make_nvm(&nvm);
@@ -524,7 +524,7 @@ test_scan_profile_bounds(void)
 	for (index = 0U; index < mcc.channel_count; index++)
 		mcc.channel[index] = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
 	nvm.band_52_enabled = 0U;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) == INTEL_AX211_SCAN_OK);
 	assert(profile.channel_count == 14U);
 
@@ -539,12 +539,12 @@ test_scan_profile_bounds(void)
 	mcc.channel_count = INTEL_AX211_SCAN_CHANNEL_LIMIT;
 	for (index = 0U; index < mcc.channel_count; index++)
 		mcc.channel[index] = INTEL_AX211_PROTOCOL_NVM_CHANNEL_VALID;
-	assert(intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
+	assert(drv_intel_ax211_scan_profile_from_nvm(&nvm, &mcc, station,
 	    &profile) == INTEL_AX211_SCAN_OK);
 	assert(profile.channel_count == INTEL_AX211_SCAN_CHANNEL_LIMIT);
 	assert(profile.channel[0U] == 1U && profile.channel[14U] == 36U &&
 	    profile.channel[INTEL_AX211_SCAN_CHANNEL_LIMIT - 1U] == 181U);
-	assert(intel_ax211_scan_request_encode(&profile, request) ==
+	assert(drv_intel_ax211_scan_request_encode(&profile, request) ==
 	    INTEL_AX211_SCAN_OK);
 	assert(request[45U] == INTEL_AX211_SCAN_CHANNEL_LIMIT);
 	assert(get_le32(request + 48U +
@@ -564,7 +564,7 @@ test_scan_codec(void)
 
 	profile = make_scan_profile();
 	memset(request, 0xa5, sizeof(request));
-	assert(intel_ax211_scan_request_encode(&profile, request) ==
+	assert(drv_intel_ax211_scan_request_encode(&profile, request) ==
 	    INTEL_AX211_SCAN_OK);
 	assert(request[INTEL_AX211_SCAN_REQUEST_SIZE] == 0xa5U);
 	assert(get_le32(request) == 0U && get_le32(request + 4U) == 6U);
@@ -602,12 +602,12 @@ test_scan_codec(void)
 	assert(probe[44U] == 0U && probe[45U] == 0U);
 	assert(probe[46U] == 1U && probe[47U] == 8U);
 	assert(probe[62U] == 3U && probe[63U] == 1U && probe[64U] == 0U);
-	assert(intel_ax211_scan_abort_encode(abort) == INTEL_AX211_SCAN_OK);
+	assert(drv_intel_ax211_scan_abort_encode(abort) == INTEL_AX211_SCAN_OK);
 	assert_zero(abort, sizeof(abort));
-	assert(intel_ax211_scan_request_encode(NULL, request) ==
+	assert(drv_intel_ax211_scan_request_encode(NULL, request) ==
 	    INTEL_AX211_SCAN_INVALID);
 	profile.channel_width_mhz = 40U;
-	assert(intel_ax211_scan_request_encode(&profile, request) ==
+	assert(drv_intel_ax211_scan_request_encode(&profile, request) ==
 	    INTEL_AX211_SCAN_INVALID);
 }
 
@@ -643,15 +643,15 @@ test_scan_state_and_events(void)
 	make_api89_table(table_bytes);
 	table = parse_table(table_bytes);
 	profile = make_scan_profile();
-	assert(intel_ax211_scan_api89_validate(&table) == INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_begin(&state, &table, &profile, 91U, 100U) ==
+	assert(drv_intel_ax211_scan_api89_validate(&table) == INTEL_AX211_SCAN_OK);
+	assert(drv_intel_ax211_scan_begin(&state, &table, &profile, 91U, 100U) ==
 	    INTEL_AX211_SCAN_OK);
 	assert(state.phase == INTEL_AX211_SCAN_PHASE_WAIT_ACK);
-	assert(intel_ax211_scan_request_ack(&state, 90U, 101U) ==
+	assert(drv_intel_ax211_scan_request_ack(&state, 90U, 101U) ==
 	    INTEL_AX211_SCAN_STALE);
-	assert(intel_ax211_scan_request_ack(&state, 91U, 101U) ==
+	assert(drv_intel_ax211_scan_request_ack(&state, 91U, 101U) ==
 	    INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_request_ack(&state, 91U, 102U) ==
+	assert(drv_intel_ax211_scan_request_ack(&state, 91U, 102U) ==
 	    INTEL_AX211_SCAN_DUPLICATE);
 
 	memset(iteration, 0, sizeof(iteration));
@@ -672,28 +672,28 @@ test_scan_state_and_events(void)
 	message = make_scan_message(
 	    INTEL_AX211_SCAN_ITERATION_COMPLETE_OPCODE, 90U,
 	    iteration, sizeof(iteration));
-	assert(intel_ax211_scan_event_accept(&state, &message, 200U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 200U, &event) ==
 	    INTEL_AX211_SCAN_STALE);
 	message.generation = 91U;
-	result = intel_ax211_scan_event_accept(&state, &message, 200U, &event);
+	result = drv_intel_ax211_scan_event_accept(&state, &message, 200U, &event);
 	assert(result == INTEL_AX211_SCAN_OK);
 	assert(event.kind == INTEL_AX211_SCAN_EVENT_ITERATION_COMPLETE);
 	assert(event.channel_count == 3U && event.channel[2].channel == 3U);
 	assert(event.tsf == UINT64_C(0x1122334455667788));
 	assert(state.phase == INTEL_AX211_SCAN_PHASE_RUNNING);
-	assert(intel_ax211_scan_event_accept(&state, &message, 201U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 201U, &event) ==
 	    INTEL_AX211_SCAN_OK);
 	memset(complete, 0, sizeof(complete));
 	complete[6U] = 1U;
 	message = make_scan_message(INTEL_AX211_SCAN_COMPLETE_OPCODE, 91U,
 	    complete, sizeof(complete));
-	assert(intel_ax211_scan_event_accept(&state, &message, 202U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 202U, &event) ==
 	    INTEL_AX211_SCAN_COMPLETE);
 	assert(state.phase == INTEL_AX211_SCAN_PHASE_TERMINAL);
 
-	assert(intel_ax211_scan_begin(&state, &table, &profile, 92U, 0U) ==
+	assert(drv_intel_ax211_scan_begin(&state, &table, &profile, 92U, 0U) ==
 	    INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_request_ack(&state, 92U, 1U) ==
+	assert(drv_intel_ax211_scan_request_ack(&state, 92U, 1U) ==
 	    INTEL_AX211_SCAN_OK);
 	memset(complete, 0, sizeof(complete));
 	complete[4U] = 7U;
@@ -704,26 +704,26 @@ test_scan_state_and_events(void)
 	put_le32(complete + 12U, 0xa5a5a5a5U);
 	message = make_scan_message(INTEL_AX211_SCAN_COMPLETE_OPCODE, 92U,
 	    complete, sizeof(complete));
-	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_ABORTED);
 	assert(event.kind == INTEL_AX211_SCAN_EVENT_COMPLETE);
 	assert(event.last_schedule == 7U && event.last_iteration == 0xffU);
 	assert(event.ebs_status == 3U);
 
-	assert(intel_ax211_scan_begin(&state, &table, &profile, 93U, 0U) ==
+	assert(drv_intel_ax211_scan_begin(&state, &table, &profile, 93U, 0U) ==
 	    INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_expire(&state, 999999U) ==
+	assert(drv_intel_ax211_scan_expire(&state, 999999U) ==
 	    INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_expire(&state, 1000000U) ==
+	assert(drv_intel_ax211_scan_expire(&state, 1000000U) ==
 	    INTEL_AX211_SCAN_TIMEOUT);
 	assert(state.abort_required == 0U);
-	assert(intel_ax211_scan_begin(&state, &table, &profile, 94U, 0U) ==
+	assert(drv_intel_ax211_scan_begin(&state, &table, &profile, 94U, 0U) ==
 	    INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_request_ack(&state, 94U, 1U) ==
+	assert(drv_intel_ax211_scan_request_ack(&state, 94U, 1U) ==
 	    INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_expire(&state, 4999999U) ==
+	assert(drv_intel_ax211_scan_expire(&state, 4999999U) ==
 	    INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_expire(&state, 5000000U) ==
+	assert(drv_intel_ax211_scan_expire(&state, 5000000U) ==
 	    INTEL_AX211_SCAN_TIMEOUT);
 	assert(state.abort_required == 1U);
 }
@@ -752,42 +752,43 @@ test_scan_malformed_events(void)
 	message = make_scan_message(
 	    INTEL_AX211_SCAN_ITERATION_COMPLETE_OPCODE, 1U,
 	    iteration, sizeof(iteration));
-	assert(intel_ax211_scan_begin(&state, &table, &profile, 1U, 0U) ==
+	assert(drv_intel_ax211_scan_begin(&state, &table, &profile, 1U, 0U) ==
 	    INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_event_accept(&state, &message, 1U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 1U, &event) ==
 	    INTEL_AX211_SCAN_OUT_OF_ORDER);
-	assert(intel_ax211_scan_request_ack(&state, 1U, 1U) ==
+	assert(drv_intel_ax211_scan_request_ack(&state, 1U, 1U) ==
 	    INTEL_AX211_SCAN_OK);
 	message.payload_length--;
-	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
-	    INTEL_AX211_SCAN_TRUNCATED);
+	/* A partial eight-byte result record violates the notification layout. */
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	    INTEL_AX211_SCAN_OVERSIZED);
 	message.payload_length += 2U;
-	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_OVERSIZED);
 	message.payload_length = sizeof(iteration);
 	put_le32(iteration, 1U);
-	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_OUT_OF_ORDER);
 	put_le32(iteration, INTEL_AX211_SCAN_UID);
 	iteration[7U] = 0xffU;
 	iteration[16U] = 12U;
 	iteration[17U] = 0U;
-	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_OK);
 	assert(event.last_channel == 0xffU && event.channel[0].channel == 12U);
 
-	assert(intel_ax211_scan_begin(&state, &table, &profile, 2U, 0U) ==
+	assert(drv_intel_ax211_scan_begin(&state, &table, &profile, 2U, 0U) ==
 	    INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_request_ack(&state, 2U, 1U) ==
+	assert(drv_intel_ax211_scan_request_ack(&state, 2U, 1U) ==
 	    INTEL_AX211_SCAN_OK);
 	message.generation = 2U;
 	message.version = 2U;
-	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_UNSUPPORTED);
 
-	assert(intel_ax211_scan_begin(&state, &table, &profile, 3U, 0U) ==
+	assert(drv_intel_ax211_scan_begin(&state, &table, &profile, 3U, 0U) ==
 	    INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_request_ack(&state, 3U, 1U) ==
+	assert(drv_intel_ax211_scan_request_ack(&state, 3U, 1U) ==
 	    INTEL_AX211_SCAN_OK);
 	memset(complete, 0, sizeof(complete));
 	complete[4U] = 9U;
@@ -797,17 +798,17 @@ test_scan_malformed_events(void)
 	put_le32(complete + 12U, 1U);
 	message = make_scan_message(INTEL_AX211_SCAN_COMPLETE_OPCODE, 3U,
 	    complete, 15U);
-	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_TRUNCATED);
 	message.payload_length = sizeof(complete);
-	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_OVERSIZED);
 	message.payload_length = 16U;
 	put_le32(complete, 1U);
-	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_OUT_OF_ORDER);
 	put_le32(complete, INTEL_AX211_SCAN_UID);
-	assert(intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
+	assert(drv_intel_ax211_scan_event_accept(&state, &message, 2U, &event) ==
 	    INTEL_AX211_SCAN_FAILED);
 }
 
@@ -880,12 +881,12 @@ test_real_api89_table(const char *path)
 	assert(find_command_table(firmware, firmware_length, &table_bytes,
 	    &table_length));
 	assert(table_length == INTEL_AX211_PROTOCOL_API89_COMMAND_BYTES);
-	assert(intel_ax211_protocol_command_table_parse(table_bytes,
+	assert(drv_intel_ax211_protocol_command_table_parse(table_bytes,
 	    table_length, &table) == INTEL_AX211_PROTOCOL_OK);
 	profile = make_runtime_profile(1, 1);
-	assert(intel_ax211_runtime_api89_validate(&table, &profile) ==
+	assert(drv_intel_ax211_runtime_api89_validate(&table, &profile) ==
 	    INTEL_AX211_RUNTIME_OK);
-	assert(intel_ax211_scan_api89_validate(&table) == INTEL_AX211_SCAN_OK);
+	assert(drv_intel_ax211_scan_api89_validate(&table) == INTEL_AX211_SCAN_OK);
 	free(firmware);
 }
 

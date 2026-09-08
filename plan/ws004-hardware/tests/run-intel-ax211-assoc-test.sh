@@ -9,8 +9,8 @@ trap 'rm -rf "$build_dir"' EXIT HUP INT TERM
 
 cc=${CC:-cc}
 warnings="-std=c11 -Wall -Wextra -Werror"
-sources="$repo_root/src/drivers/intel-ax211-protocol.c"
-sources="$sources $repo_root/src/drivers/intel-ax211-assoc.c"
+sources="$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-protocol.c"
+sources="$sources $repo_root/src/drivers/wifi/intel-ax211/intel-ax211-assoc.c"
 fixture="$test_dir/intel-ax211-assoc-test.c"
 abi_includes="-I$repo_root/libc/include -I$repo_root/include/uapi"
 abi_includes="$abi_includes -I$repo_root/include -I$repo_root/src"

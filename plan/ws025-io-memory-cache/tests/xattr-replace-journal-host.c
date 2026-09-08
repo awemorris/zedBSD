@@ -7,12 +7,12 @@ static void replacement_boundaries(void)
  uint8_t replacement[4096],observed[4096];int handled;
  storage_fixture(&fs,&node,&mountp,&disk,0,0);disk.d_block_size=512;disk.d_block_count=512;
  node.direct[0]=176;node.extattr[0]=160;node.extattr_size=8;node.blocks=16;
- memset(storage+160*512,0,4096);ufs_put32(storage+160*512,0,8,0);
+ memset(storage+160*512,0,4096);drv_ufs_put32(storage+160*512,0,8,0);
  storage[160*512+4]=UFS_EXTATTR_NAMESPACE_USER;storage[160*512+6]=1;storage[160*512+7]='x';
  REQUIRE(persist_inode(&node.inode)==0);REQUIRE(disk_sync(&disk)==0);
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,18,379)==0);REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);fs.journal_enabled=1;
- memset(replacement,0x62,sizeof(replacement));ufs_put32(replacement,0,sizeof(replacement),0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,18,379)==0);REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);fs.journal_enabled=1;
+ memset(replacement,0x62,sizeof(replacement));drv_ufs_put32(replacement,0,sizeof(replacement),0);
  replacement[4]=UFS_EXTATTR_NAMESPACE_USER;replacement[5]=0;replacement[6]=1;replacement[7]='x';
  storage_writes=storage_syncs=0;
  mutex_lock(&node.inode.i_lock);
@@ -38,7 +38,7 @@ int main(void)
  replacement_boundaries();
  xattr_keep=1;
  memset(xattr_update_area,0,sizeof(xattr_update_area));
- ufs_put32(xattr_update_area,0,sizeof(xattr_update_area),0);
+ drv_ufs_put32(xattr_update_area,0,sizeof(xattr_update_area),0);
  xattr_update_area[4]=UFS_EXTATTR_NAMESPACE_USER;xattr_update_area[6]=1;xattr_update_area[7]='x';
  memcpy(xattr_update_area+8,"updated!",8);
  for(layout=0;layout<3;layout++) {

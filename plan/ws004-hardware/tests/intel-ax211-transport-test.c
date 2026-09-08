@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-transport.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-transport.h"
 
 #define TEST_CSR_WORDS                                      3000U
 #define TEST_EVENT_CAPACITY                                12000U
@@ -458,7 +458,7 @@ test_transport_init(
 
 	profile = test_profile();
 	memory = test_ring_memory(fixture);
-	assert(intel_ax211_transport_init(&fixture->transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture->transport, &test_ops,
 	    &fixture->backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_OK);
 }
@@ -469,9 +469,9 @@ test_transport_ready(
 	struct test_fixture *fixture)
 {
 	test_transport_init(fixture);
-	assert(intel_ax211_transport_configure_msix(&fixture->transport) ==
+	assert(drv_intel_ax211_transport_configure_msix(&fixture->transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_initialize_rings(&fixture->transport) ==
+	assert(drv_intel_ax211_transport_initialize_rings(&fixture->transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
 }
 
@@ -560,62 +560,62 @@ test_exact_initialization(void)
 	test_fixture_init(&fixture);
 	profile = test_profile();
 	memory = test_ring_memory(&fixture);
-	assert(intel_ax211_transport_init(&fixture.transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &test_ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	profile.mac_type = INTEL_AX211_MMIO_MAC_SOF;
-	assert(intel_ax211_transport_init(&fixture.transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &test_ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	profile = test_profile();
 	profile.rf_type++;
-	assert(intel_ax211_transport_init(&fixture.transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &test_ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_INVALID);
 	profile = test_profile();
 	profile.cdb = 1U;
-	assert(intel_ax211_transport_init(&fixture.transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &test_ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_INVALID);
 	profile = test_profile();
 	profile.integrated = 1U;
-	assert(intel_ax211_transport_init(&fixture.transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &test_ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_INVALID);
 	profile = test_profile();
 	memory.rx_status_size++;
-	assert(intel_ax211_transport_init(&fixture.transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &test_ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_INVALID);
 	memory = test_ring_memory(&fixture);
 	memory.command_slots_device_address++;
-	assert(intel_ax211_transport_init(&fixture.transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &test_ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_INVALID);
 	memory = test_ring_memory(&fixture);
 	memory.command_slots_device_address = UINT64_MAX - 63U;
-	assert(intel_ax211_transport_init(&fixture.transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &test_ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_INVALID);
 	memory = test_ring_memory(&fixture);
 	memory.command_external_size--;
-	assert(intel_ax211_transport_init(&fixture.transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &test_ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_INVALID);
 	memory = test_ring_memory(&fixture);
 	memory.command_external_device_address++;
-	assert(intel_ax211_transport_init(&fixture.transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &test_ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_INVALID);
 	memory = test_ring_memory(&fixture);
 	memory.command_external_device_address = UINT64_MAX - 63U;
-	assert(intel_ax211_transport_init(&fixture.transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &test_ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_INVALID);
 	memory = test_ring_memory(&fixture);
 	ops = test_ops;
 	ops.nic_lock = NULL;
-	assert(intel_ax211_transport_init(&fixture.transport, &ops,
+	assert(drv_intel_ax211_transport_init(&fixture.transport, &ops,
 	    &fixture.backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_INVALID);
 	assert(fixture.backend.event_count == 0U);
@@ -651,7 +651,7 @@ test_msix_configuration(void)
 
 	test_fixture_init(&fixture);
 	test_transport_init(&fixture);
-	assert(intel_ax211_transport_configure_msix(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_configure_msix(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	position = test_find_event(&fixture.backend, 0U, TEST_EVENT_LOCK,
 	    0U, 0U) + 1U;
@@ -685,7 +685,7 @@ test_msix_configuration(void)
 	test_transport_init(&fixture);
 	fixture.backend.fail_write8 = 1;
 	fixture.backend.fail_write8_offset = TEST_MSIX_RX_IVAR;
-	assert(intel_ax211_transport_configure_msix(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_configure_msix(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_IO);
 	assert(fixture.transport.failed && fixture.transport.quiesced);
 	assert(fixture.backend.csr[TEST_MSIX_FH_MASK / 4U] == UINT32_MAX);
@@ -694,7 +694,7 @@ test_msix_configuration(void)
 	test_fixture_init(&fixture);
 	test_transport_init(&fixture);
 	fixture.backend.fail_lock = 1;
-	assert(intel_ax211_transport_configure_msix(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_configure_msix(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_IO);
 	assert(fixture.backend.event_count == 1U);
 	assert(fixture.backend.event[0].type == TEST_EVENT_LOCK);
@@ -710,7 +710,7 @@ test_ring_initialization(void)
 	test_fixture_init(&fixture);
 	memset(&fixture.storage, 0xa5, sizeof(fixture.storage));
 	test_transport_init(&fixture);
-	assert(intel_ax211_transport_initialize_rings(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_initialize_rings(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	assert(fixture.storage.command_tfd[0] == 0U);
 	assert(fixture.storage.command_slots[TEST_COMMAND_SLOTS_SIZE - 1U] == 0U);
@@ -737,7 +737,7 @@ test_ring_initialization(void)
 	fixture.backend.fail_dma = 1;
 	fixture.backend.fail_dma_region =
 	    INTEL_AX211_TRANSPORT_DMA_RX_STATUS;
-	assert(intel_ax211_transport_initialize_rings(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_initialize_rings(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_IO);
 	assert(fixture.transport.failed && fixture.transport.quiesced);
 }
@@ -755,7 +755,7 @@ test_interrupt_modes(void)
 	test_transport_ready(&fixture);
 	fixture.backend.csr[TEST_MSIX_FH_CAUSES / 4U] = TEST_FH_D2S0;
 	fixture.backend.csr[TEST_MSIX_HW_CAUSES / 4U] = TEST_HW_ALIVE;
-	assert(intel_ax211_transport_enable_firmware_interrupts(
+	assert(drv_intel_ax211_transport_enable_firmware_interrupts(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
 	assert(fixture.transport.enabled_fh_causes == TEST_FH_SUPPORTED);
 	assert(fixture.transport.enabled_hw_causes == TEST_HW_ALIVE);
@@ -774,13 +774,13 @@ test_interrupt_modes(void)
 	    TEST_EVENT_CSR_WRITE, TEST_CSR_INT, UINT32_MAX) <
 	    fixture.backend.event_count);
 
-	assert(intel_ax211_transport_enable_runtime_interrupts(
+	assert(drv_intel_ax211_transport_enable_runtime_interrupts(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
 	fixture.backend.csr[TEST_MSIX_FH_CAUSES / 4U] =
 	    TEST_FH_Q0 | 0x80000000U;
 	fixture.backend.csr[TEST_MSIX_HW_CAUSES / 4U] =
 	    TEST_HW_RF_KILL | TEST_HW_TOP_FATAL;
-	assert(intel_ax211_transport_interrupt_claim(&fixture.transport,
+	assert(drv_intel_ax211_transport_interrupt_claim(&fixture.transport,
 	    &causes) == INTEL_AX211_TRANSPORT_OK);
 	assert(causes.flow_handler == TEST_FH_Q0);
 	assert(causes.hardware == TEST_HW_RF_KILL);
@@ -789,10 +789,10 @@ test_interrupt_modes(void)
 	    (TEST_HW_RF_KILL | TEST_HW_TOP_FATAL));
 	assert(fixture.backend.csr[TEST_MSIX_FH_CAUSES / 4U] == 0U);
 	assert(fixture.backend.csr[TEST_MSIX_HW_CAUSES / 4U] == 0U);
-	assert(intel_ax211_transport_interrupt_rearm(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_interrupt_rearm(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	assert(fixture.backend.csr[TEST_MSIX_AUTOMASK / 4U] == 1U);
-	assert(intel_ax211_transport_disable_interrupts(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_disable_interrupts(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	assert(!fixture.transport.interrupts_enabled);
 	assert(fixture.backend.csr[TEST_MSIX_FH_MASK / 4U] == UINT32_MAX);
@@ -819,17 +819,17 @@ test_rx_transport(void)
 	     index < INTEL_AX211_TRANSPORT_RX_DESCRIPTOR_COUNT - 1U;
 	     index++) {
 		address = UINT64_C(0x20000000) + (uint64_t)index * 4096U;
-		assert(intel_ax211_transport_publish_rx_descriptor(
+		assert(drv_intel_ax211_transport_publish_rx_descriptor(
 		    &fixture.transport, index, address) ==
 		    INTEL_AX211_TRANSPORT_OK);
 	}
-	assert(intel_ax211_transport_activate_rx(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_activate_rx(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_ORDER);
 	index = INTEL_AX211_TRANSPORT_RX_DESCRIPTOR_COUNT - 1U;
 	address = UINT64_C(0x20000000) + (uint64_t)index * 4096U;
-	assert(intel_ax211_transport_publish_rx_descriptor(&fixture.transport,
+	assert(drv_intel_ax211_transport_publish_rx_descriptor(&fixture.transport,
 	    index, address) == INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_activate_rx(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_activate_rx(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	assert(fixture.backend.event[fixture.backend.event_count - 2U].type ==
 	    TEST_EVENT_DMA);
@@ -848,7 +848,7 @@ test_rx_transport(void)
 	test_put_le16(descriptor + 4U, 7U);
 	descriptor[6] = 0xa5U;
 	fixture.backend.event_count = 0U;
-	assert(intel_ax211_transport_rx_next(&fixture.transport, &completion) ==
+	assert(drv_intel_ax211_transport_rx_next(&fixture.transport, &completion) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	status_postread = test_find_event(&fixture.backend, 0U, TEST_EVENT_DMA,
 	    INTEL_AX211_TRANSPORT_DMA_RX_STATUS,
@@ -864,13 +864,13 @@ test_rx_transport(void)
 	    status_preread < completion_postread);
 	assert(completion.completion_index == 0U);
 	assert(completion.buffer_id == 7U && completion.flags == 0xa5U);
-	assert(intel_ax211_transport_rx_next(&fixture.transport, &completion) ==
+	assert(drv_intel_ax211_transport_rx_next(&fixture.transport, &completion) ==
 	    INTEL_AX211_TRANSPORT_ORDER);
-	assert(intel_ax211_transport_rx_replenish(&fixture.transport,
+	assert(drv_intel_ax211_transport_rx_replenish(&fixture.transport,
 	    UINT64_C(0x30007001)) == INTEL_AX211_TRANSPORT_INVALID);
 	assert(fixture.transport.rx_pending && !fixture.transport.failed);
 	address = UINT64_C(0x30007000);
-	assert(intel_ax211_transport_rx_replenish(&fixture.transport, address) ==
+	assert(drv_intel_ax211_transport_rx_replenish(&fixture.transport, address) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	completion_preread = test_find_event(&fixture.backend,
 	    completion_postread + 1U, TEST_EVENT_DMA,
@@ -903,7 +903,7 @@ test_command_transport(void)
 
 	test_fixture_init(&fixture);
 	test_transport_ready(&fixture);
-	assert(intel_ax211_transport_enable_runtime_interrupts(
+	assert(drv_intel_ax211_transport_enable_runtime_interrupts(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
 	command.opcode = 0x0dU;
 	command.group = TEST_COMMAND_GROUP_LONG;
@@ -912,7 +912,7 @@ test_command_transport(void)
 	payload[1] = 2U;
 	payload[2] = 3U;
 	fixture.backend.event_count = 0U;
-	assert(intel_ax211_transport_command_submit_inline(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_submit_inline(&fixture.transport,
 	    &command, payload, sizeof(payload), &first) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	assert(first.queue == 0U && first.index == 0U);
@@ -939,7 +939,7 @@ test_command_transport(void)
 	memset(split_payload, 0x5a, sizeof(split_payload));
 	command.group = TEST_COMMAND_GROUP_LEGACY;
 	command.version = 3U;
-	assert(intel_ax211_transport_command_submit_inline(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_submit_inline(&fixture.transport,
 	    &command, split_payload, sizeof(split_payload), &second) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	assert(second.index == 1U);
@@ -957,15 +957,15 @@ test_command_transport(void)
 	assert(test_get_le64(tfd + 4U) == UINT64_C(0x10000144));
 	assert(test_get_le16(tfd + 12U) == 8U);
 	assert(test_get_le64(tfd + 14U) == UINT64_C(0x10000158));
-	assert(intel_ax211_transport_command_complete(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_complete(&fixture.transport,
 	    &second) == INTEL_AX211_TRANSPORT_STALE);
-	assert(intel_ax211_transport_command_complete(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_complete(&fixture.transport,
 	    &first) == INTEL_AX211_TRANSPORT_OK);
 	assert(fixture.storage.command_slots[0] == 0U);
-	assert(intel_ax211_transport_command_complete(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_complete(&fixture.transport,
 	    &second) == INTEL_AX211_TRANSPORT_OK);
 	assert(fixture.transport.command_ring.used == 0U);
-	assert(intel_ax211_transport_command_submit_inline(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_submit_inline(&fixture.transport,
 	    &command, payload,
 	    INTEL_AX211_TRANSPORT_COMMAND_INLINE_PAYLOAD_MAX + 1U,
 	    &first) == INTEL_AX211_TRANSPORT_INVALID);
@@ -993,10 +993,10 @@ test_external_command_transport(void)
 	command.version = 3U;
 	test_fixture_init(&fixture);
 	test_transport_ready(&fixture);
-	assert(intel_ax211_transport_enable_runtime_interrupts(
+	assert(drv_intel_ax211_transport_enable_runtime_interrupts(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
 	fixture.backend.event_count = 0U;
-	assert(intel_ax211_transport_command_prepare_external(
+	assert(drv_intel_ax211_transport_command_prepare_external(
 	    &fixture.transport, &command, payload, sizeof(payload),
 	    &external) == INTEL_AX211_TRANSPORT_OK);
 	assert(external.index == 0U && fixture.transport.command_prepared);
@@ -1028,67 +1028,67 @@ test_external_command_transport(void)
 	assert(external_sync < tfd_sync);
 	assert(fixture.backend.event[external_sync].length ==
 	    sizeof(payload) + INTEL_AX211_WIDE_COMMAND_HEADER_SIZE);
-	assert(intel_ax211_transport_command_prepare_external(
+	assert(drv_intel_ax211_transport_command_prepare_external(
 	    &fixture.transport, &command, payload, sizeof(payload),
 	    &inline_token) == INTEL_AX211_TRANSPORT_ORDER);
-	assert(intel_ax211_transport_command_publish(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_publish(&fixture.transport,
 	    &external) == INTEL_AX211_TRANSPORT_OK);
 	doorbell = test_find_event(&fixture.backend, tfd_sync + 1U,
 	    TEST_EVENT_CSR_WRITE, TEST_HBUS_TARG_WRPTR, 1U);
 	assert(tfd_sync < doorbell);
-	assert(intel_ax211_transport_command_prepare_external(
+	assert(drv_intel_ax211_transport_command_prepare_external(
 	    &fixture.transport, &command, payload, sizeof(payload),
 	    &inline_token) == INTEL_AX211_TRANSPORT_FULL);
-	assert(intel_ax211_transport_command_submit_inline(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_submit_inline(&fixture.transport,
 	    &command, payload, 1U, &inline_token) ==
 	    INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_command_complete(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_complete(&fixture.transport,
 	    &inline_token) == INTEL_AX211_TRANSPORT_STALE);
-	assert(intel_ax211_transport_command_complete(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_complete(&fixture.transport,
 	    &external) == INTEL_AX211_TRANSPORT_OK);
 	assert(!fixture.transport.command_external_active);
 	for (index = 0U; index < sizeof(fixture.storage.command_external);
 	     index++)
 		assert(fixture.storage.command_external[index] == 0U);
-	assert(intel_ax211_transport_command_complete(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_complete(&fixture.transport,
 	    &inline_token) == INTEL_AX211_TRANSPORT_OK);
 
 	/* External preparation rejects malformed and oversized payloads. */
-	assert(intel_ax211_transport_command_prepare_external(
+	assert(drv_intel_ax211_transport_command_prepare_external(
 	    &fixture.transport, &command, NULL, sizeof(payload),
 	    &external) == INTEL_AX211_TRANSPORT_INVALID);
-	assert(intel_ax211_transport_command_prepare_external(
+	assert(drv_intel_ax211_transport_command_prepare_external(
 	    &fixture.transport, &command, payload,
 	    INTEL_AX211_TRANSPORT_COMMAND_INLINE_PAYLOAD_MAX,
 	    &external) == INTEL_AX211_TRANSPORT_INVALID);
-	assert(intel_ax211_transport_command_prepare_external(
+	assert(drv_intel_ax211_transport_command_prepare_external(
 	    &fixture.transport, &command, payload,
 	    INTEL_AX211_TRANSPORT_COMMAND_EXTERNAL_PAYLOAD_MAX + 1U,
 	    &external) == INTEL_AX211_TRANSPORT_INVALID);
 
 	/* An un-rung command is scrubbed, synchronized, and reusable. */
-	assert(intel_ax211_transport_command_prepare_external(
+	assert(drv_intel_ax211_transport_command_prepare_external(
 	    &fixture.transport, &command, payload, sizeof(payload),
 	    &external) == INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_command_abort_prepared(
+	assert(drv_intel_ax211_transport_command_abort_prepared(
 	    &fixture.transport, &external) == INTEL_AX211_TRANSPORT_OK);
 	assert(!fixture.transport.command_external_active);
 	assert(fixture.transport.command_ring.used == 0U);
 
 	/* A failed stop retains bytes and ownership until the reset boundary. */
-	assert(intel_ax211_transport_command_prepare_external(
+	assert(drv_intel_ax211_transport_command_prepare_external(
 	    &fixture.transport, &command, payload, sizeof(payload),
 	    &external) == INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_command_publish(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_publish(&fixture.transport,
 	    &external) == INTEL_AX211_TRANSPORT_OK);
 	fixture.backend.rx_idle_at = fixture.backend.now;
-	assert(intel_ax211_transport_quiesce(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_quiesce(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_FAILED);
 	assert(fixture.transport.command_external_active);
 	assert(memcmp(fixture.storage.command_external +
 	    INTEL_AX211_WIDE_COMMAND_HEADER_SIZE, payload,
 	    sizeof(payload)) == 0);
-	assert(intel_ax211_transport_command_after_device_reset(
+	assert(drv_intel_ax211_transport_command_after_device_reset(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
 	assert(!fixture.transport.command_external_active);
 	for (index = 0U; index < sizeof(fixture.storage.command_external);
@@ -1098,34 +1098,34 @@ test_external_command_transport(void)
 	/* A hardware-stop failure cannot release or overwrite external DMA. */
 	test_fixture_init(&fixture);
 	test_transport_ready(&fixture);
-	assert(intel_ax211_transport_enable_runtime_interrupts(
+	assert(drv_intel_ax211_transport_enable_runtime_interrupts(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_command_prepare_external(
+	assert(drv_intel_ax211_transport_command_prepare_external(
 	    &fixture.transport, &command, payload, sizeof(payload),
 	    &external) == INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_command_publish(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_publish(&fixture.transport,
 	    &external) == INTEL_AX211_TRANSPORT_OK);
 	fixture.backend.fail_lock = 1;
-	assert(intel_ax211_transport_quiesce(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_quiesce(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_IO);
 	assert(fixture.transport.command_external_active);
 	assert(memcmp(fixture.storage.command_external +
 	    INTEL_AX211_WIDE_COMMAND_HEADER_SIZE, payload,
 	    sizeof(payload)) == 0);
 	fixture.backend.fail_lock = 0;
-	assert(intel_ax211_transport_command_after_device_reset(
+	assert(drv_intel_ax211_transport_command_after_device_reset(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
 	assert(!fixture.transport.command_external_active);
 
 	/* A preparation fence failure rolls back the token and fails closed. */
 	test_fixture_init(&fixture);
 	test_transport_ready(&fixture);
-	assert(intel_ax211_transport_enable_runtime_interrupts(
+	assert(drv_intel_ax211_transport_enable_runtime_interrupts(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
 	fixture.backend.fail_dma = 1;
 	fixture.backend.fail_dma_region =
 	    INTEL_AX211_TRANSPORT_DMA_COMMAND_EXTERNAL;
-	assert(intel_ax211_transport_command_prepare_external(
+	assert(drv_intel_ax211_transport_command_prepare_external(
 	    &fixture.transport, &command, payload, sizeof(payload),
 	    &external) == INTEL_AX211_TRANSPORT_IO);
 	assert(fixture.transport.failed && fixture.transport.quiesced);
@@ -1135,25 +1135,25 @@ test_external_command_transport(void)
 	/* A completion-fence failure retains ownership for reset cleanup. */
 	test_fixture_init(&fixture);
 	test_transport_ready(&fixture);
-	assert(intel_ax211_transport_enable_runtime_interrupts(
+	assert(drv_intel_ax211_transport_enable_runtime_interrupts(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_command_prepare_external(
+	assert(drv_intel_ax211_transport_command_prepare_external(
 	    &fixture.transport, &command, payload, sizeof(payload),
 	    &external) == INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_command_publish(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_publish(&fixture.transport,
 	    &external) == INTEL_AX211_TRANSPORT_OK);
 	fixture.backend.fail_dma = 1;
 	fixture.backend.fail_dma_region =
 	    INTEL_AX211_TRANSPORT_DMA_COMMAND_EXTERNAL;
-	assert(intel_ax211_transport_command_complete(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_complete(&fixture.transport,
 	    &external) == INTEL_AX211_TRANSPORT_IO);
 	assert(fixture.transport.command_external_active);
 	assert(fixture.transport.command_ring.used == 1U);
-	assert(intel_ax211_transport_command_after_device_reset(
+	assert(drv_intel_ax211_transport_command_after_device_reset(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_IO);
 	assert(fixture.transport.command_external_active);
 	fixture.backend.fail_dma = 0;
-	assert(intel_ax211_transport_command_after_device_reset(
+	assert(drv_intel_ax211_transport_command_after_device_reset(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
 	assert(!fixture.transport.command_external_active);
 }
@@ -1174,11 +1174,11 @@ test_quiesce(void)
 
 	test_fixture_init(&fixture);
 	test_transport_ready(&fixture);
-	assert(intel_ax211_transport_enable_runtime_interrupts(
+	assert(drv_intel_ax211_transport_enable_runtime_interrupts(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
 	fixture.backend.rx_idle_at = fixture.backend.now + 30U;
 	fixture.backend.event_count = 0U;
-	assert(intel_ax211_transport_quiesce(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_quiesce(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
 	mask = test_find_event(&fixture.backend, 0U, TEST_EVENT_CSR_WRITE,
 	    TEST_MSIX_FH_MASK, UINT32_MAX);
@@ -1202,29 +1202,29 @@ test_quiesce(void)
 
 	test_fixture_init(&fixture);
 	test_transport_ready(&fixture);
-	assert(intel_ax211_transport_quiesce(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_quiesce(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_TIMEOUT);
 	assert(fixture.transport.failed && !fixture.transport.rx_dma_idle);
 	assert(fixture.backend.lock_depth == 0U);
 
 	test_fixture_init(&fixture);
 	test_transport_ready(&fixture);
-	assert(intel_ax211_transport_enable_runtime_interrupts(
+	assert(drv_intel_ax211_transport_enable_runtime_interrupts(
 	    &fixture.transport) == INTEL_AX211_TRANSPORT_OK);
 	command.opcode = 1U;
 	command.group = 1U;
 	command.version = 1U;
-	assert(intel_ax211_transport_command_submit_inline(&fixture.transport,
+	assert(drv_intel_ax211_transport_command_submit_inline(&fixture.transport,
 	    &command, NULL, 0U, &token) == INTEL_AX211_TRANSPORT_OK);
 	fixture.backend.rx_idle_at = fixture.backend.now;
-	assert(intel_ax211_transport_quiesce(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_quiesce(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_FAILED);
 	assert(fixture.transport.rx_dma_idle && fixture.transport.failed);
 
 	test_fixture_init(&fixture);
 	test_transport_ready(&fixture);
 	fixture.backend.clock_stuck = 1;
-	assert(intel_ax211_transport_quiesce(&fixture.transport) ==
+	assert(drv_intel_ax211_transport_quiesce(&fixture.transport) ==
 	    INTEL_AX211_TRANSPORT_CLOCK);
 	assert(fixture.backend.lock_depth == 0U);
 }

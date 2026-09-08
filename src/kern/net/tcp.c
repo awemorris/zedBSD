@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -630,10 +628,13 @@ tcp_retransmit_clear(
 	struct packet_buf *packet;
 	unsigned long irq;
 
+	/* Takes the queued segment out under the socket lock. */
 	socket = &endpoint->tcp.inet.socket;
 	irq = spin_lock_irqsave(&socket->lock);
 	tcp_retransmit_reset(endpoint, &packet);
 	spin_unlock_irqrestore(&socket->lock, irq);
+
+	/* Frees it and lets a blocked sender continue. */
 	packet_buf_free(packet);
 	socket_wake_send(socket);
 }

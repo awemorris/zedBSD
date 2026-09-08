@@ -14,17 +14,17 @@
 #include "ufs-consistency.h"
 #define JOURNAL_IO ufs_journal_io
 #define JOURNAL ufs_journal
-#define JOURNAL_INIT ufs_journal_init
-#define JOURNAL_COMMIT ufs_journal_commit
-#define JOURNAL_REPLAY ufs_journal_replay
+#define JOURNAL_INIT drv_ufs_journal_init
+#define JOURNAL_COMMIT drv_ufs_journal_commit
+#define JOURNAL_REPLAY drv_ufs_journal_replay
 #define SNAPSHOT_ENTRY ufs_snapshot_entry
 #define SNAPSHOT ufs_snapshot
-#define SNAPSHOT_INIT ufs_snapshot_init
-#define SNAPSHOT_OPEN ufs_snapshot_open
-#define SNAPSHOT_CREATE ufs_snapshot_create
-#define SNAPSHOT_PRESERVE ufs_snapshot_preserve
-#define SNAPSHOT_READ ufs_snapshot_read
-#define SNAPSHOT_DELETE ufs_snapshot_delete
+#define SNAPSHOT_INIT drv_ufs_snapshot_init
+#define SNAPSHOT_OPEN drv_ufs_snapshot_open
+#define SNAPSHOT_CREATE drv_ufs_snapshot_create
+#define SNAPSHOT_PRESERVE drv_ufs_snapshot_preserve
+#define SNAPSHOT_READ drv_ufs_snapshot_read
+#define SNAPSHOT_DELETE drv_ufs_snapshot_delete
 
 
 #define SECTOR_SIZE 512U

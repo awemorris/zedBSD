@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -444,6 +442,7 @@ charge_node(
 {
 	int error;
 
+	/* Takes one node from the mount's quota. */
 	error = 0;
 	mutex_lock(&state->quota_lock);
 	if (state->used_nodes >= state->max_nodes)
@@ -451,6 +450,8 @@ charge_node(
 	else
 		state->used_nodes++;
 	mutex_unlock(&state->quota_lock);
+
+	/* Reports whether the quota allowed it. */
 	return error;
 }
 
@@ -515,13 +516,18 @@ allocate_entry(
 {
 	struct tmpfs_dirent *entry;
 
+	/* Allocates the directory entry. */
 	entry = kern_calloc(1, sizeof(*entry));
 	if (entry == NULL)
 		return NULL;
+
+	/* Stores the name as a terminated copy beside the inode. */
 	entry->inode = inode;
 	entry->length = component->cn_namelen;
 	memcpy(entry->name, component->cn_nameptr, component->cn_namelen);
 	entry->name[component->cn_namelen] = '\0';
+
+	/* Reports the new entry. */
 	return entry;
 }
 
@@ -1386,6 +1392,7 @@ tmpfs_getattr(
 {
 	struct tmpfs_node *node;
 
+	/* Copies the inode's attributes into the caller's record. */
 	node = tmpfs_node(inode);
 	memset(status, 0, sizeof(*status));
 	status->st_ino = inode->i_ino;

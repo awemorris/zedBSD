@@ -26,7 +26,7 @@ $(AMD64_UEFI_CONFIGURED_IMAGES): $(AMD64_ZEDBSD_CONFIG) \
 .DELETE_ON_ERROR: $(BUILD)/ufs-root-hdd-image.img \
 	$(BUILD)/hdd-image.img
 
-# Variant is an image-composition input only.  This content-stable stamp
+# Variant is an image-composition input only. This content-stable stamp
 # invalidates a previously published hdd-image.img without leaking the
 # selection into kernel, userland, or loader compilation.
 AMD64_IMAGE_CONTRACT_STAMP := $(BUILD)/.disk-image-contract
@@ -38,23 +38,23 @@ FORCE_AMD64_IMAGE_CONTRACT:
 $(AMD64_IMAGE_CONTRACT_STAMP): FORCE_AMD64_IMAGE_CONTRACT
 	@mkdir -p $(dir $@)
 	@value='layout=$(ZEDBSD_VARIANT)'; \
-		if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
-			printf '%s\n' "$$value" > $@.tmp; \
-			mv $@.tmp $@; \
-		fi
+ if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
+ printf '%s\n' "$$value" > $@.tmp; \
+ mv $@.tmp $@; \
+ fi
 
 define AMD64_VALIDATE_GPT_IMAGE
 	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-gpt-image.noct \
-		--layout $(ZEDBSD_VARIANT) \
-		--machine pcat --stage1 $(AMD64_IMAGE_STAGE1) \
-		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
-		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $(1)
+ --layout $(ZEDBSD_VARIANT) \
+ --machine pcat --stage1 $(AMD64_IMAGE_STAGE1) \
+ --stage2 $(BUILD)/bootloader/stage2-chain.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+ --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $(1)
 endef
 EFI_CC := $(ZEDBSD_TARGET_LLVM_BIN)/clang \
 	--target=x86_64-unknown-windows
@@ -103,112 +103,106 @@ AMD64_HAL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AMD64_HAL_SOURCES)) \
 
 AMD64_USB_HCD_SOURCES :=
 ifeq ($(CONFIG_DRIVER_PCI_UHCI),y)
-AMD64_USB_HCD_SOURCES += src/drivers/pci-uhci.c
+AMD64_USB_HCD_SOURCES += src/drivers/pci/pci-uhci.c
 endif
 ifeq ($(CONFIG_DRIVER_PCI_EHCI),y)
-AMD64_USB_HCD_SOURCES += src/drivers/pci-ehci.c
+AMD64_USB_HCD_SOURCES += src/drivers/pci/pci-ehci.c
 endif
 ifeq ($(CONFIG_DRIVER_PCI_XHCI),y)
-AMD64_USB_HCD_SOURCES += src/drivers/pci-xhci.c
+AMD64_USB_HCD_SOURCES += src/drivers/pci/pci-xhci.c
 endif
 AMD64_USB_CLASS_SOURCES :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb-storage.c
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-storage.c
 endif
 AMD64_NVME_SOURCES :=
 ifeq ($(CONFIG_DRIVER_PCI_NVME),y)
-AMD64_NVME_SOURCES += src/drivers/pci-nvme.c
+AMD64_NVME_SOURCES += src/drivers/pci/pci-nvme.c
 endif
 AMD64_INTEL_WLAN_SOURCES :=
 ifeq ($(CONFIG_DRIVER_PCI_INTEL_AX211),y)
-AMD64_INTEL_WLAN_SOURCES += src/drivers/intel-ax211.c \
-	src/drivers/intel-ax211-assoc.c \
-	src/drivers/intel-ax211-boot.c \
-	src/drivers/intel-ax211-bss.c \
-	src/drivers/intel-ax211-command.c \
-	src/drivers/intel-ax211-dma.c \
-	src/drivers/intel-ax211-firmware.c \
-	src/drivers/intel-ax211-init.c \
-	src/drivers/intel-ax211-mmio.c \
-	src/drivers/intel-ax211-pci-mmio.c \
-	src/drivers/intel-ax211-protocol.c \
-	src/drivers/intel-ax211-runtime.c \
-	src/drivers/intel-ax211-runtime-start.c \
-	src/drivers/intel-ax211-scan.c \
-	src/drivers/intel-ax211-scan-session.c \
-	src/drivers/intel-ax211-rx.c \
-	src/drivers/intel-ax211-key.c \
-	src/drivers/intel-ax211-tx.c \
-	src/drivers/intel-ax211-tx-ring.c \
-	src/drivers/intel-ax211-transport-backend.c \
-	src/drivers/intel-ax211-transport.c \
-	src/drivers/pci-intel-ax211.c
+AMD64_INTEL_WLAN_SOURCES += src/drivers/wifi/intel-ax211/intel-ax211.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-assoc.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-boot.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-bss.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-command.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-dma.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-firmware.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-init.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-mmio.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-pci-mmio.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-protocol.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-runtime.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-runtime-start.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-scan.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-scan-session.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-rx.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-key.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-tx.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-transport-backend.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-transport.c \
+
 endif
 ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb-cdc-ncm.c \
-	src/drivers/usb-cdc-ncm-net.c
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-cdc-ncm.c \
+	src/drivers/usb/usb-cdc-ncm-net.c
 endif
 ifeq ($(CONFIG_DRIVER_USB_CDC_ECM),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb-cdc-ecm.c
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-cdc-ecm.c
 endif
 ifeq ($(CONFIG_DRIVER_USB_HID),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb-hid.c
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hid.c
 endif
 ifeq ($(CONFIG_DRIVER_USB_RTL8822BU),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/rtl8822b.c \
-	src/drivers/rtl8822b-security.c \
-	src/drivers/usb-rtl8822bu.c
+AMD64_USB_CLASS_SOURCES += src/drivers/wifi/rtl8822b/rtl8822b.c \
+	src/drivers/wifi/rtl8822b/rtl8822b-security.c \
+	src/drivers/usb/usb-rtl8822bu.c
 endif
 ifeq ($(CONFIG_KERNEL_USB_HID_CHECKPOINT),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb-hid-checkpoint.c
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hid-checkpoint.c
 endif
 
 AMD64_KERNEL_SOURCES := \
 	src/kern/main.c \
 	$(KERN_FAT_SOURCES) src/kern/inode.c src/kern/file.c \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
-	src/kern/tmpfs.c src/kern/overlayfs.c src/kern/vfs.c \
-	src/kern/swap.c src/kern/swap-format.c src/kern/backing-claim.c src/kern/swap-source.c \
-	src/kern/swap-control.c src/kern/swap-boot.c \
-	src/kern/swap-fat.c \
-	src/kern/vm-reclaim.c src/kern/buf.c src/kern/io-stats.c src/kern/io-pool.c src/kern/io-scratch.c src/kern/cache-memory.c src/kern/readahead.c src/kern/readahead-worker.c src/kern/writeback.c src/kern/writeback-domain.c src/kern/writeback-policy.c src/kern/io-error.c src/kern/cache-worker.c src/kern/sysctl.c \
+	src/kern/tmpfs.c src/drivers/fs/overlayfs.c src/kern/vfs.c \
+	src/kern/swap.c src/kern/backing-claim.c \
+ src/kern/buf.c src/kern/cache.c src/kern/readahead.c src/kern/writeback.c src/kern/io.c src/kern/sysctl.c \
 	src/kern/resource.c src/kern/poll.c src/kern/usync.c \
-	src/kern/resource-limit.c \
 	src/kern/disk.c src/kern/partition.c \
-	src/drivers/loop.c src/drivers/dma.c src/drivers/pci.c \
-	src/drivers/pci-pcat.c src/drivers/usb.c $(AMD64_USB_HCD_SOURCES) \
+	src/drivers/generic/loop.c src/drivers/generic/dma.c src/drivers/pci/pci.c \
+	src/drivers/pci/pci-pcat.c src/drivers/usb/usb.c $(AMD64_USB_HCD_SOURCES) \
 	$(AMD64_USB_CLASS_SOURCES) \
 	$(AMD64_NVME_SOURCES) \
 	$(AMD64_INTEL_WLAN_SOURCES) \
-	src/drivers/pcat-ide.c src/drivers/dp8390.c \
-	src/drivers/pcat-ne2000.c src/drivers/hid/ps2-mouse.c \
+	src/drivers/platform/pcat/pcat-ide.c src/drivers/ethernet/dp8390.c \
+	src/drivers/isa/ne2000.c src/drivers/platform/pcat/ps2-mouse.c \
 	src/drivers/disklabel/mbr.c src/drivers/disklabel/gpt.c \
-	src/drivers/disklabel/pcat-auto.c src/kern/platform/pcat.c \
+	src/drivers/disklabel/pcat.c src/kern/platform/pcat.c \
 	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
-	src/kern/process-timer.c src/kern/klog.c \
+	src/kern/timer.c src/kern/klog.c \
 	src/kern/test-checkpoint.c \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c \
-	src/kern/vm-lock.c src/kern/vmspace.c src/kern/vm-object.c src/kern/vm-commit.c \
+ src/kern/vmspace.c src/kern/vm.c \
 	src/kern/filedesc.c \
 	src/kern/record-lock.c \
 	src/kern/pipe.c src/kern/cred.c src/kern/signal.c \
 	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
-	src/kern/cdev.c src/kern/devfs.c src/drivers/fs/console.c \
-	src/drivers/input-queue.c src/drivers/input-capability.c \
-	src/drivers/input-device.c src/drivers/input-subscriber.c \
-	src/drivers/input-keymap.c src/drivers/hid/hid-report.c \
+	src/kern/cdev.c src/kern/devfs.c src/drivers/generic/console.c \
+	src/drivers/generic/input.c \
 	src/kern/locale-record.c \
 	src/kern/tty.c \
-	src/kern/system-swap-device.c \
-	src/kern/system-device.c src/kern/shutdown.c \
-	src/drivers/graphics/pcat/vgafont.c src/kern/init.c
+	src/drivers/generic/system-device.c src/kern/shutdown.c \
+	src/drivers/platform/pcat/graphics/vgafont.c src/kern/init.c
 ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
 AMD64_KERNEL_SOURCES += \
-	src/drivers/graphics/pcat/device.c \
-	src/drivers/graphics/pcat/backend.c \
-	src/drivers/graphics/pcat/font.c
+	src/drivers/platform/pcat/graphics/pcat-graphics.c \
+	src/drivers/platform/pcat/graphics/backend.c \
+	src/drivers/platform/pcat/graphics/font.c
 endif
 AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
 	$(KERN_UFS_SOURCES)
@@ -245,7 +239,7 @@ $(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
 
-# Shared x86 HAL sources must use the amd64 flags as well.  Without this
+# Shared x86 HAL sources must use the amd64 flags as well. Without this
 # rule the generic i386 pattern can leave a 32-bit object in build/amd64.
 $(BUILD)/src/hal/pmem-constraints.o: src/hal/pmem-constraints.c
 	@mkdir -p $(dir $@)
@@ -266,20 +260,20 @@ $(BUILD)/kern64/src/drivers/%.o: src/drivers/%.c
 $(BUILD)/kern64/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_KERNEL_LIBC_CFLAGS) -fno-builtin \
-		-fno-strict-aliasing -MMD -MP -c $< -o $@
+ -fno-strict-aliasing -MMD -MP -c $< -o $@
 
 $(BUILD)/vmunix: $(AMD64_VMUNIX_OBJS) $(ZEDBSD_GRAPHICS_CONFIG_STAMP) \
 	$(AMD64_PLATFORM)/vmunix.ld \
 	platform/amd64/tools/check-amd64-vmunix.noct
 	$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 \
-		-T $(AMD64_PLATFORM)/vmunix.ld -nostdlib $(AMD64_VMUNIX_OBJS) -o $@
+ -T $(AMD64_PLATFORM)/vmunix.ld -nostdlib $(AMD64_VMUNIX_OBJS) -o $@
 	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-vmunix.noct $@
 
 $(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -I. -DZBL_STAGE2_LBA_OVERRIDE=34 \
-		-x assembler-with-cpp -c $< -o $@
+ -x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/stage1.elf: $(BUILD)/bootloader/stage1.o \
 	$(BIOS_LOADER)/stage1.ld
@@ -289,7 +283,7 @@ $(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 	@test $$(stat -c%s $@) -eq 512
 
-# The GPT hybrid reserves LBA 34 for its chain sector.  The separate native
+# The GPT hybrid reserves LBA 34 for its chain sector. The separate native
 # BIOS image retains the legacy LBA-1 chain sector and therefore needs a
 # stage-1 artifact built without the GPT override.
 $(BUILD)/bootloader/stage1-native.o: $(BIOS_LOADER)/stage1.S \
@@ -358,18 +352,18 @@ $(BUILD)/bootloader/bios-zedbsd-config.i386.o: \
 	bootloader/include/boot-parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
 	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
-		-fno-stack-protector -fno-asynchronous-unwind-tables \
-		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
-		-c $< -o $@
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@
 
 
 $(BUILD)/bootloader/bios-fat-directory.i386.o: \
 	bootloader/bios/fat-directory.c bootloader/bios/fat-directory.h
 	@mkdir -p $(dir $@)
 	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
-		-fno-stack-protector -fno-asynchronous-unwind-tables \
-		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
-		-c $< -o $@
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@
 
 AMD64_BOOTZBSD_HELPERS := $(BUILD)/bootloader/bios-zedbsd-config.i386.o \
 	$(BUILD)/bootloader/bios-fat-directory.i386.o \
@@ -378,7 +372,7 @@ AMD64_BOOTZBSD_HELPERS := $(BUILD)/bootloader/bios-zedbsd-config.i386.o \
 $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
 	$(AMD64_BOOTZBSD_HELPERS) $(BIOS_LOADER)/bootzbsd.ld
 	$(LD) -m elf_i386 -T $(BIOS_LOADER)/bootzbsd.ld \
-		$(filter %.o,$^) -o $@
+ $(filter %.o,$^) -o $@
 
 $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
 	$(OBJCOPY) -O binary -j .text $< $@
@@ -444,11 +438,11 @@ $(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
 	$(BUILD)/uefi/transition.o \
 	platform/amd64/tools/check-bootx64.noct
 	$(EFI_LD) /subsystem:efi_application /entry:efi_main /base:0 \
-		/fixed:no /timestamp:0 /nodefaultlib \
-		/out:$@ $(filter %.o,$^)
+ /fixed:no /timestamp:0 /nodefaultlib \
+ /out:$@ $(filter %.o,$^)
 	@test -z "$$($(EFI_NM) -u $@ | grep -Ev \
-		' (__bss_start__|__bss_end__|__end__|___tls_start__|___tls_end__)$$')" \
-		|| { $(EFI_NM) -u $@; exit 1; }
+ ' (__bss_start__|__bss_end__|__end__|___tls_start__|___tls_end__)$$')" \
+ || { $(EFI_NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build platform/amd64/tools/check-bootx64.noct $@
 
 AMD64_USER_CPPFLAGS := -nostdinc \
@@ -474,14 +468,13 @@ AMD64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfc
 	$(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
 AMD64_USER_LIBC_OBJS := $(BUILD)/user64/src/crt/crt0-amd64.o \
 	$(patsubst %.c,$(BUILD)/user64/%.o,$(AMD64_USER_RUNTIME_SOURCES))
-# User programs consume the canonical target sysroot.  The relocatable libc
+# User programs consume the canonical target sysroot. The relocatable libc
 # bundle preserves the established whole-runtime static link semantics while
 # eliminating per-command recompilation of the same sources.
 AMD64_USER_LIBC_OBJS := \
 	$(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt0.o \
 	$(ZEDBSD_SYSROOT_AMD64)/usr/lib/libc.o
 AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS)
-AMD64_USER_NETTEST_OBJS := $(BUILD)/user64/userland/base/nettest/main.o
 AMD64_USER_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,sh)
 AMD64_USER_READLINE_OBJ := $(BUILD)/user64/userland/base/libedit/readline.o
 AMD64_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
@@ -490,7 +483,7 @@ AMD64_USER_ELF_CHECK := tools/build/check-user-elf.noct
 $(BUILD)/user64/%.o: %.c $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) \
-		-fno-strict-aliasing -MMD -MP -c $< -o $@
+ -fno-strict-aliasing -MMD -MP -c $< -o $@
 
 $(BUILD)/user64/src/crt/crt0-amd64.o: src/crt/crt0-amd64.S \
 	include/hal/arch.h include/hal/arch/amd64.h
@@ -513,31 +506,31 @@ $(BUILD)/POSIX-R1.ELF: $(AMD64_USER_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/syscall-smoke.o $(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld \
-		$(AMD64_USER_LIBC_OBJS) \
-		$(BUILD)/user64/userland/base/tests/syscall-smoke.o -o $@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld \
+ $(AMD64_USER_LIBC_OBJS) \
+ $(BUILD)/user64/userland/base/tests/syscall-smoke.o -o $@
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/POSIX-R2.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/posix-r2.o $(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(BUILD)/user64/userland/base/tests/posix-r2.o -o $@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ $(BUILD)/user64/userland/base/tests/posix-r2.o -o $@
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/POSIX-R2-REMAINING.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/posix-r2-remaining.o \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(BUILD)/user64/userland/base/tests/posix-r2-remaining.o -o $@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ $(BUILD)/user64/userland/base/tests/posix-r2-remaining.o -o $@
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
-# WS008 NOCT-T020 test-only executable.  It is not part of the base-system
+# WS008 NOCT-T020 test-only executable. It is not part of the base-system
 # program registry; the owning QEMU runner explicitly builds and injects it
 # into a disposable image.
 AMD64_NOCT_JIT_VM_PROBE_OBJ := \
@@ -546,9 +539,9 @@ $(BUILD)/NOCT-JIT-VM-PROBE.ELF: $(AMD64_USER_LIBC_OBJS) \
 	$(AMD64_NOCT_JIT_VM_PROBE_OBJ) $(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
-		$(AMD64_NOCT_JIT_VM_PROBE_OBJ) -o $@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+ $(AMD64_NOCT_JIT_VM_PROBE_OBJ) -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
@@ -556,9 +549,9 @@ $(BUILD)/SUSV4-XSI.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/susv4-xsi.o \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(BUILD)/user64/userland/base/tests/susv4-xsi.o -o $@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ $(BUILD)/user64/userland/base/tests/susv4-xsi.o -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
@@ -570,9 +563,9 @@ $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
 	$(AMD64_USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
-		$(AMD64_USER_SH_OBJS) $(AMD64_USER_READLINE_LIB) -o $@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+ $(AMD64_USER_SH_OBJS) $(AMD64_USER_READLINE_LIB) -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
@@ -580,9 +573,9 @@ $(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/smp-resource-stress.o \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(BUILD)/user64/userland/base/tests/smp-resource-stress.o -o $@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ $(BUILD)/user64/userland/base/tests/smp-resource-stress.o -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
@@ -591,9 +584,9 @@ $(BUILD)/bin/sysctl: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SYSCTL_OBJ) \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
-		$(AMD64_USER_SYSCTL_OBJ) -o $@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+ $(AMD64_USER_SYSCTL_OBJ) -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
@@ -602,25 +595,16 @@ $(BUILD)/bin/mount: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_MOUNT_OBJ) \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
-		$(AMD64_USER_MOUNT_OBJ) -o $@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+ $(AMD64_USER_MOUNT_OBJ) -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
 
-$(BUILD)/bin/nettest: $(AMD64_USER_NET_LIBC_OBJS) \
-	$(AMD64_USER_NETTEST_OBJS) $(AMD64_PLATFORM)/user.ld \
-	$(AMD64_USER_ELF_CHECK)
-	@mkdir -p $(dir $@)
-	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(AMD64_USER_NETTEST_OBJS) -o $@
-	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
-	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
 
 USER_NET_COMMANDS := $(USERLAND_SELECTED_NETWORK_PROGRAMS)
 USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
@@ -635,10 +619,10 @@ $(BUILD)/bin/$(1): $(AMD64_USER_NET_LIBC_OBJS) \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	@mkdir -p $$(dir $$@)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(AMD64_USER_NET_COMMON_OBJS) \
-		$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) -o $$@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ $(AMD64_USER_NET_COMMON_OBJS) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) -o $$@
 	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
 endef
@@ -654,10 +638,10 @@ $(BUILD)/bin/$(1): $(AMD64_USER_LIBC_OBJS) \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	@mkdir -p $$(dir $$@)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
-		$(AMD64_USER_BASIC_COMMON_OBJ) \
-		$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) -o $$@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+ $(AMD64_USER_BASIC_COMMON_OBJ) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) -o $$@
 	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
 endef
@@ -716,19 +700,19 @@ $(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialec
 $(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
 	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
-		-mlong-double-64 -c $< -o $@
+ -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_FLOAT_DIR)/zed-softfloat.o: src/softfloat/zed-softfloat.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
 	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
-		-mlong-double-64 -c $< -o $@
+ -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_FLOAT_DIR)/float-parse.o: libc/float-parse.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
 	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
-		-mlong-double-64 -c $< -o $@
+ -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-amd64.S
 	@mkdir -p $(dir $@)
@@ -736,61 +720,61 @@ $(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-amd64.S
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
 	$(LD) -m elf_x86_64 -shared -Bsymbolic -e _rtld_start \
-		--hash-style=sysv -z now -z relro -z separate-code $^ -o $@
+ --hash-style=sysv -z now -z relro -z separate-code $^ -o $@
 
 $(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
 	$(LD) -m elf_x86_64 -shared -soname libc.so --hash-style=both \
-		-z now -z relro -z separate-code -z stack-size=0x100000 $^ -o $@
+ -z now -z relro -z separate-code -z stack-size=0x100000 $^ -o $@
 
 $(DYNAMIC_DIR)/alt/rpathdep.so: \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_x86_64 -shared -soname rpathdep.so --hash-style=gnu \
-		-z now -z relro -z separate-code $< -o $@
+ -z now -z relro -z separate-code $< -o $@
 
 $(DYNAMIC_DIR)/tlstest.so: \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_x86_64 -shared -soname tlstest.so --hash-style=gnu \
-		-z now -z relro -z separate-code --enable-new-dtags \
-		-rpath '$$ORIGIN/alt' \
-		$(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
-		-L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
+ -z now -z relro -z separate-code --enable-new-dtags \
+ -rpath '$$ORIGIN/alt' \
+ $(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
+ -L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
 
 $(DYNAMIC_DIR)/rpathtest.so: \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/rpathtest.o \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_x86_64 -shared -soname rpthtest.so --hash-style=gnu \
-		-z now -z relro -z separate-code --disable-new-dtags \
-		-rpath '$$ORIGIN/alt' $< -L$(DYNAMIC_DIR)/alt \
-		-l:rpathdep.so -o $@
+ -z now -z relro -z separate-code --disable-new-dtags \
+ -rpath '$$ORIGIN/alt' $< -L$(DYNAMIC_DIR)/alt \
+ -l:rpathdep.so -o $@
 
 $(DYNAMIC_DIR)/verstest.so: \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/versiontest.o \
 	userland/base/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_x86_64 -shared -soname verstest.so --hash-style=gnu \
-		-z now -z relro -z separate-code \
-		--version-script=userland/base/tests/versiontest.map $< -o $@
+ -z now -z relro -z separate-code \
+ --version-script=userland/base/tests/versiontest.map $< -o $@
 
 $(DYNAMIC_DIR)/versuse.so: \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/versionuse.o \
 	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_x86_64 -shared -soname versuse.so --hash-style=gnu \
-		-z now -z relro -z separate-code $< -L$(DYNAMIC_DIR) \
-		-l:verstest.so -o $@
+ -z now -z relro -z separate-code $< -L$(DYNAMIC_DIR) \
+ -l:verstest.so -o $@
 
 $(DYNAMIC_DIR)/dyntest: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
 	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so \
 	$(DYNAMIC_DIR)/versuse.so
 	$(CC) -m64 -nostdlib -pie -Wl,--no-relax \
-		-Wl,--hash-style=sysv,-z,now,-z,relro,-z,separate-code \
-		-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
-		-Wl,--dynamic-linker=/lib/ld.so \
-		$(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
-		$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o \
-		-L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
-		-l:libc.so -o $@
+ -Wl,--hash-style=sysv,-z,now,-z,relro,-z,separate-code \
+ -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+ -Wl,--dynamic-linker=/lib/ld.so \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
+ $(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o \
+ -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
+ -l:libc.so -o $@
 
 dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
 	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so \
@@ -807,7 +791,7 @@ dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
 .PHONY: dynamic-userland-check
 
 AMD64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/amd64.img
-AMD64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/nettest \
+AMD64_ARCH_INPUTS := $(BUILD)/bin/sh \
 	$(BUILD)/bin/sysctl \
 	$(BUILD)/bin/mount $(BUILD)/bin/umount \
 	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
@@ -815,7 +799,6 @@ AMD64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/rpathtest.so \
 	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/versuse.so
 AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
-	--file /bin/nettest=$(BUILD)/bin/nettest \
 	--file /sbin/sysctl=$(BUILD)/bin/sysctl \
 	--file /sbin/mount=$(BUILD)/bin/mount \
 	--file /sbin/umount=$(BUILD)/bin/umount \
@@ -849,22 +832,22 @@ $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
-		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2-chain.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+ --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 $(BUILD)/ufs-root.img: $(AMD64_ARCH_UFS_IMAGE) \
 	$(BUILD_TOOLS_DIR)/make-ufs-root-image.py tools/build/ufs_format.py
 	$(PYTHON) $(BUILD_TOOLS_DIR)/make-ufs-root-image.py --force \
-		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) $@
+ --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) $@
 
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1-native.bin \
 	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
@@ -874,14 +857,14 @@ $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1-native.bin \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct \
 	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
-		--checker $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
-		--checker-runner $(NOCT) \
-		--machine pcat --stage1 $(BUILD)/bootloader/stage1-native.bin \
-		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
-		--zedbsd-config $(AMD64_NATIVE_ZEDBSD_CONFIG) \
-		--ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
+ --checker $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
+ --checker-runner $(NOCT) \
+ --machine pcat --stage1 $(BUILD)/bootloader/stage1-native.bin \
+ --stage2 $(BUILD)/bootloader/stage2-chain.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+ --zedbsd-config $(AMD64_NATIVE_ZEDBSD_CONFIG) \
+ --ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
 
 $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
@@ -890,18 +873,18 @@ $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
-		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) \
-		--fragment-kernel $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+ --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) \
+ --fragment-kernel $@
 
 $(BUILD)/hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage1-native.bin \
@@ -913,19 +896,19 @@ $(BUILD)/hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	tools/build/zedbuild.noct tools/build/overlay_journal_format.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct \
-		--backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat \
-		--layout $(ZEDBSD_VARIANT) \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(AMD64_IMAGE_STAGE1) \
-		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat \
+ --layout $(ZEDBSD_VARIANT) \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(AMD64_IMAGE_STAGE1) \
+ --stage2 $(BUILD)/bootloader/stage2-chain.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 AMD64_DEFERRED_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-deferred-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_DEFERRED_TEST_UFS),amd64,\
@@ -939,22 +922,22 @@ $(BUILD)/deferred-stub-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_DEFERRED_TEST_UFS) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_DEFERRED_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 deferred-stub-qemu-test: $(BUILD)/deferred-stub-qemu.img \
 	tests/deferred-stub-qemu-test.py
 	$(PYTHON) tests/deferred-stub-qemu-test.py \
-		--qemu $(QEMU) --image $(BUILD)/deferred-stub-qemu.img
+ --qemu $(QEMU) --image $(BUILD)/deferred-stub-qemu.img
 
 AMD64_POSIX_PHASE2_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase2-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE2_TEST_UFS),amd64,\
@@ -973,22 +956,22 @@ $(BUILD)/posix-phase2-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE2_TEST_UFS) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE2_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 posix-phase2-qemu-test: $(BUILD)/posix-phase2-qemu.img \
 	tests/posix-phase2-qemu-test.py
 	$(PYTHON) tests/posix-phase2-qemu-test.py \
-		--qemu $(QEMU) --image $(BUILD)/posix-phase2-qemu.img
+ --qemu $(QEMU) --image $(BUILD)/posix-phase2-qemu.img
 
 AMD64_POSIX_PHASE3_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase3-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE3_TEST_UFS),amd64,\
@@ -1007,22 +990,22 @@ $(BUILD)/posix-phase3-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE3_TEST_UFS) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE3_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 posix-phase3-qemu-test: $(BUILD)/posix-phase3-qemu.img \
 	tests/posix-phase3-qemu-test.py
 	$(PYTHON) tests/posix-phase3-qemu-test.py \
-		--qemu $(QEMU) --image $(BUILD)/posix-phase3-qemu.img
+ --qemu $(QEMU) --image $(BUILD)/posix-phase3-qemu.img
 
 AMD64_POSIX_PHASE4_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase4-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE4_TEST_UFS),amd64,\
@@ -1041,30 +1024,30 @@ $(BUILD)/posix-phase4-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE4_TEST_UFS) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE4_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 posix-phase4-qemu-test: $(BUILD)/posix-phase4-qemu.img \
 	tests/posix-phase4-qemu-test.py
 	$(PYTHON) tests/posix-phase4-qemu-test.py \
-		--qemu $(QEMU) --image $(BUILD)/posix-phase4-qemu.img
+ --qemu $(QEMU) --image $(BUILD)/posix-phase4-qemu.img
 
 $(BUILD)/bin/posix-phase5-helper: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/posix-phase5-helper.o \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(BUILD)/user64/userland/base/tests/posix-phase5-helper.o -o $@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ $(BUILD)/user64/userland/base/tests/posix-phase5-helper.o -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
@@ -1083,22 +1066,22 @@ $(BUILD)/posix-phase5-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE5_TEST_UFS) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE5_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 posix-phase5-qemu-test: $(BUILD)/posix-phase5-qemu.img \
 	tests/posix-phase5-qemu-test.py
 	$(PYTHON) tests/posix-phase5-qemu-test.py \
-		--qemu $(QEMU) --image $(BUILD)/posix-phase5-qemu.img
+ --qemu $(QEMU) --image $(BUILD)/posix-phase5-qemu.img
 
 AMD64_POSIX_PHASE6_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase6-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE6_TEST_UFS),amd64,\
@@ -1116,22 +1099,22 @@ $(BUILD)/posix-phase6-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE6_TEST_UFS) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE6_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 posix-phase6-qemu-test: $(BUILD)/posix-phase6-qemu.img \
 	tests/posix-phase6-qemu-test.py
 	$(PYTHON) tests/posix-phase6-qemu-test.py \
-		--qemu $(QEMU) --image $(BUILD)/posix-phase6-qemu.img
+ --qemu $(QEMU) --image $(BUILD)/posix-phase6-qemu.img
 
 AMD64_POSIX_PHASE7_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase7-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE7_TEST_UFS),amd64,\
@@ -1147,22 +1130,22 @@ $(BUILD)/posix-phase7-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE7_TEST_UFS) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE7_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 posix-phase7-qemu-test: $(BUILD)/posix-phase7-qemu.img \
 	tests/posix-phase7-qemu-test.py
 	$(PYTHON) tests/posix-phase7-qemu-test.py \
-		--qemu $(QEMU) --image $(BUILD)/posix-phase7-qemu.img
+ --qemu $(QEMU) --image $(BUILD)/posix-phase7-qemu.img
 
 AMD64_POSIX_PHASE8_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase8-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE8_TEST_UFS),amd64,\
@@ -1179,22 +1162,22 @@ $(BUILD)/posix-phase8-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE8_TEST_UFS) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE8_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 posix-phase8-qemu-test: $(BUILD)/posix-phase8-qemu.img \
 	tests/posix-phase8-qemu-test.py
 	$(PYTHON) tests/posix-phase8-qemu-test.py \
-		--qemu $(QEMU) --image $(BUILD)/posix-phase8-qemu.img
+ --qemu $(QEMU) --image $(BUILD)/posix-phase8-qemu.img
 
 AMD64_PHASE19_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-phase19-test.ufs
 AMD64_PHASE19_TEST_FILES := $(subst \
@@ -1214,21 +1197,21 @@ $(BUILD)/phase19-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_PHASE19_TEST_UFS) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_PHASE19_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 phase19-qemu-test: $(BUILD)/phase19-qemu.img tests/phase19-qemu-test.py
 	$(PYTHON) tests/phase19-qemu-test.py \
-		--qemu qemu-system-x86_64 --image $(BUILD)/phase19-qemu.img
+ --qemu qemu-system-x86_64 --image $(BUILD)/phase19-qemu.img
 
 AMD64_PHASE20_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-phase20-test.ufs
 AMD64_PHASE20_TEST_FILES := $(subst \
@@ -1248,33 +1231,33 @@ $(BUILD)/phase20-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_PHASE20_TEST_UFS) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_PHASE20_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 .PHONY: phase20-qemu-test phase20-qemu-test-inner \
 	phase20-interactive-shell-qemu-test
 phase20-qemu-test:
 	$(MAKE) BUILD=build/amd64-phase20 CONFIG_DRIVER_NE2000=y \
-		phase20-qemu-test-inner
+ phase20-qemu-test-inner
 
 phase20-qemu-test-inner: $(BUILD)/phase20-qemu.img \
 	tests/phase20-qemu-test.py
 	$(PYTHON) tests/phase20-qemu-test.py \
-		--qemu qemu-system-x86_64 --image $(BUILD)/phase20-qemu.img
+ --qemu qemu-system-x86_64 --image $(BUILD)/phase20-qemu.img
 
 phase20-interactive-shell-qemu-test: $(BUILD)/hdd-image.img \
 	tests/phase20-interactive-shell-qemu-test.py
 	$(PYTHON) tests/phase20-interactive-shell-qemu-test.py \
-		--qemu qemu-system-x86_64 --image $(BUILD)/hdd-image.img
+ --qemu qemu-system-x86_64 --image $(BUILD)/hdd-image.img
 
 AMD64_POSIX_PHASE85_CURSES_SOURCES := tests/posix-phase85-curses.c \
 	userland/base/curses/curses.c userland/base/common/terminfo.c
@@ -1285,9 +1268,9 @@ $(BUILD)/bin/phase85-curses-test: $(AMD64_USER_LIBC_OBJS) \
 	$(AMD64_USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
-		$(AMD64_POSIX_PHASE85_CURSES_OBJS) -o $@
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+ $(AMD64_POSIX_PHASE85_CURSES_OBJS) -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
@@ -1307,22 +1290,22 @@ $(BUILD)/posix-phase85-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
-		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE85_TEST_UFS) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE85_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
 
 posix-phase85-qemu-test: $(BUILD)/posix-phase85-qemu.img \
 	tests/posix-phase85-qemu-test.py
 	$(PYTHON) tests/posix-phase85-qemu-test.py \
-		--qemu $(QEMU) --image $(BUILD)/posix-phase85-qemu.img
+ --qemu $(QEMU) --image $(BUILD)/posix-phase85-qemu.img
 
 posix-phase10-qemu-test: phase10-local-source-check posix-phase4-qemu-test
 	@echo "zedBSD POSIX Phase 10 local replacements amd64 QEMU test: PASS"
@@ -1347,13 +1330,13 @@ $(BUILD)/uefi/common-memory-map.o: bootloader/common/memory-map.c bootloader/com
 $(BUILD)/bootloader/bios-memory-map.i386.o: bootloader/bios/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/amd64-handoff.h
 	@mkdir -p $(dir $@)
 	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
-		-fno-stack-protector -fno-asynchronous-unwind-tables \
-		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
-		-c $< -o $@
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@
 
 $(BUILD)/bootloader/common-memory-map.i386.o: bootloader/common/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/amd64-handoff.h
 	@mkdir -p $(dir $@)
 	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
-		-fno-stack-protector -fno-asynchronous-unwind-tables \
-		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
-		-c $< -o $@
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@

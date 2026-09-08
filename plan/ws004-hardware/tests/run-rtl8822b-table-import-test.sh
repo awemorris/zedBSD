@@ -1,10 +1,11 @@
 #!/bin/sh
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 noct=${NOCT:-$repo_dir/build/NoctLang/build-static/noct}
 checker=$repo_dir/tools/build/check-rtl8822b-tables.noct
-imported=$repo_dir/src/drivers/rtl8822b-tables.inc
+imported=$repo_dir/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/rtl8822b-tables.inc
 binary_license=$repo_dir/userland/base/licenses/rtl8822b-tables/LICENSE
 commit=0b8db87da54178717d302ca5dc09285ad4922abc
 base=https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain

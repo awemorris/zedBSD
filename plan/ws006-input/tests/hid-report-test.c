@@ -70,9 +70,9 @@ has_capability(const struct hid_report_layout *layout, uint16_t type,
 	struct input_capability capability;
 	size_t index;
 
-	CHECK(hid_report_layout_get_info(layout, &info) == 0);
+	CHECK(drv_hid_report_layout_get_info(layout, &info) == 0);
 	for (index = 0; index < info.capability_count; index++) {
-		CHECK(hid_report_layout_get_capability(layout, index,
+		CHECK(drv_hid_report_layout_get_capability(layout, index,
 		    &capability) == 0);
 		if (capability.type == type && capability.code == code)
 			return 1;
@@ -104,7 +104,7 @@ expect_parse_error(const void *descriptor, size_t length, int expected)
 	    (struct hid_report_layout *)(uintptr_t)1U;
 	size_t before = live_allocations;
 
-	CHECK(hid_report_layout_parse(descriptor, length, &sentinel) == expected);
+	CHECK(drv_hid_report_layout_parse(descriptor, length, &sentinel) == expected);
 	CHECK(sentinel == (struct hid_report_layout *)(uintptr_t)1U);
 	CHECK(live_allocations == before);
 }
@@ -118,7 +118,7 @@ expect_decode_error(const struct hid_report_layout *layout,
 
 	memset(&output, 0xa5, sizeof(output));
 	original = output;
-	CHECK(hid_report_decode(layout, report, length, &output) == expected);
+	CHECK(drv_hid_report_decode(layout, report, length, &output) == expected);
 	CHECK(memcmp(&output, &original, sizeof(output)) == 0);
 }
 
@@ -315,15 +315,15 @@ test_keyboard(void)
 	uint8_t report[8] = {0x02, 0, 0x04, 0x04, 0x05, 0, 0, 0};
 	int32_t value;
 
-	CHECK(hid_report_layout_parse(keyboard_descriptor,
+	CHECK(drv_hid_report_layout_parse(keyboard_descriptor,
 	    sizeof(keyboard_descriptor), &layout) == 0);
 	CHECK(layout != NULL);
-	CHECK(hid_report_layout_get_info(layout, &info) == 0);
+	CHECK(drv_hid_report_layout_get_info(layout, &info) == 0);
 	CHECK(info.descriptor_size == sizeof(keyboard_descriptor));
 	CHECK(info.report_count == 1U);
 	CHECK(info.field_count == 12U);
 	CHECK(info.uses_report_ids == 0);
-	CHECK(hid_report_layout_get_report(layout, 0, &report_info) == 0);
+	CHECK(drv_hid_report_layout_get_report(layout, 0, &report_info) == 0);
 	CHECK(report_info.report_id == 0U);
 	CHECK(report_info.minimum_size == 8U);
 	CHECK(report_info.field_count == 12U);
@@ -333,7 +333,7 @@ test_keyboard(void)
 	CHECK(has_capability(layout, EV_KEY, KEY_LEFTSHIFT));
 	CHECK(!has_capability(layout, EV_KEY, KEY_RESERVED));
 
-	CHECK(hid_report_decode(layout, report, sizeof(report), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, report, sizeof(report), &input) == 0);
 	CHECK(input.report_id == 0U);
 	CHECK(input.keyboard_error == 0U);
 	CHECK(input.value_count == 3U);
@@ -349,7 +349,7 @@ test_keyboard(void)
 	report[2] = 0x04;
 	report[3] = 0x04;
 	report[4] = 0x04;
-	CHECK(hid_report_decode(layout, report, sizeof(report), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, report, sizeof(report), &input) == 0);
 	CHECK(input.value_count == 1U);
 	CHECK(find_value(&input, EV_KEY, KEY_A, NULL));
 
@@ -357,7 +357,7 @@ test_keyboard(void)
 	report[2] = 0x65;
 	report[3] = 0;
 	report[4] = 0;
-	CHECK(hid_report_decode(layout, report, sizeof(report), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, report, sizeof(report), &input) == 0);
 	CHECK(input.value_count == 0U);
 
 	/*
@@ -369,14 +369,14 @@ test_keyboard(void)
 	for (report[2] = 0x01; report[2] <= 0x03; report[2]++) {
 		report[0] = 0x02;
 		report[3] = 0x04;
-		CHECK(hid_report_decode(layout, report, sizeof(report), &input) ==
+		CHECK(drv_hid_report_decode(layout, report, sizeof(report), &input) ==
 		    0);
 		CHECK(input.keyboard_error == 1U);
 		CHECK(input.value_count == 0U);
 	}
 
 	expect_decode_error(layout, report, sizeof(report) - 1U, EINVAL);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 }
 
@@ -389,17 +389,17 @@ test_keyboard_array_range_intersection(void)
 	uint8_t report = 0x04;
 	int32_t value;
 
-	CHECK(hid_report_layout_parse(narrow_keyboard_array_descriptor,
+	CHECK(drv_hid_report_layout_parse(narrow_keyboard_array_descriptor,
 	    sizeof(narrow_keyboard_array_descriptor), &layout) == 0);
 	CHECK(layout != NULL);
-	CHECK(hid_report_layout_get_info(layout, &info) == 0);
+	CHECK(drv_hid_report_layout_get_info(layout, &info) == 0);
 	CHECK(info.field_count == 1U);
 	CHECK(info.capability_count == 2U); /* SYN_REPORT and KEY_A only. */
 	CHECK(has_capability(layout, EV_KEY, KEY_A));
 	CHECK(!has_capability(layout, EV_KEY, KEY_B));
 	CHECK(!has_capability(layout, EV_KEY, KEY_Z));
 
-	CHECK(hid_report_decode(layout, &report, sizeof(report), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, &report, sizeof(report), &input) == 0);
 	CHECK(input.keyboard_error == 0U);
 	CHECK(input.value_count == 1U);
 	CHECK(find_value(&input, EV_KEY, KEY_A, &value));
@@ -411,7 +411,7 @@ test_keyboard_array_range_intersection(void)
 	report = 0x01;
 	expect_decode_error(layout, &report, sizeof(report), EINVAL);
 
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 }
 
@@ -423,28 +423,28 @@ test_mixed_local_usage_order(void)
 	uint8_t report[] = {1, 2, 3};
 	int32_t value;
 
-	CHECK(hid_report_layout_parse(usage_range_then_explicit_descriptor,
+	CHECK(drv_hid_report_layout_parse(usage_range_then_explicit_descriptor,
 	    sizeof(usage_range_then_explicit_descriptor), &layout) == 0);
-	CHECK(hid_report_decode(layout, report, sizeof(report), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, report, sizeof(report), &input) == 0);
 	CHECK(find_value(&input, EV_REL, REL_X, &value));
 	CHECK(value == 1);
 	CHECK(find_value(&input, EV_REL, REL_Y, &value));
 	CHECK(value == 2);
 	CHECK(find_value(&input, EV_REL, REL_WHEEL, &value));
 	CHECK(value == 3);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 
-	CHECK(hid_report_layout_parse(usage_explicit_then_range_descriptor,
+	CHECK(drv_hid_report_layout_parse(usage_explicit_then_range_descriptor,
 	    sizeof(usage_explicit_then_range_descriptor), &layout) == 0);
-	CHECK(hid_report_decode(layout, report, sizeof(report), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, report, sizeof(report), &input) == 0);
 	CHECK(find_value(&input, EV_REL, REL_WHEEL, &value));
 	CHECK(value == 1);
 	CHECK(find_value(&input, EV_REL, REL_X, &value));
 	CHECK(value == 2);
 	CHECK(find_value(&input, EV_REL, REL_Y, &value));
 	CHECK(value == 3);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 }
 
@@ -457,16 +457,16 @@ test_mouse(void)
 	uint8_t report[] = {0x05, 0x7f, 0x81, 0xff};
 	int32_t value;
 
-	CHECK(hid_report_layout_parse(mouse_descriptor, sizeof(mouse_descriptor),
+	CHECK(drv_hid_report_layout_parse(mouse_descriptor, sizeof(mouse_descriptor),
 	    &layout) == 0);
-	CHECK(hid_report_layout_get_report(layout, 0, &info) == 0);
+	CHECK(drv_hid_report_layout_get_report(layout, 0, &info) == 0);
 	CHECK(info.minimum_size == sizeof(report));
 	CHECK(has_capability(layout, EV_KEY, BTN_LEFT));
 	CHECK(has_capability(layout, EV_KEY, BTN_MIDDLE));
 	CHECK(has_capability(layout, EV_REL, REL_X));
 	CHECK(has_capability(layout, EV_REL, REL_Y));
 	CHECK(has_capability(layout, EV_REL, REL_WHEEL));
-	CHECK(hid_report_decode(layout, report, sizeof(report), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, report, sizeof(report), &input) == 0);
 	CHECK(input.value_count == 5U);
 	CHECK(find_value(&input, EV_KEY, BTN_LEFT, &value) && value == 1);
 	CHECK(find_value(&input, EV_KEY, BTN_MIDDLE, &value) && value == 1);
@@ -477,7 +477,7 @@ test_mouse(void)
 	/* -128 is outside this descriptor's declared -127..127 range. */
 	report[1] = 0x80;
 	expect_decode_error(layout, report, sizeof(report), EINVAL);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 }
 
@@ -491,21 +491,21 @@ test_tablet(void)
 	uint8_t report[] = {0x01, 0x34, 0x12, 0xff, 0x7f};
 	int32_t value;
 
-	CHECK(hid_report_layout_parse(tablet_descriptor,
+	CHECK(drv_hid_report_layout_parse(tablet_descriptor,
 	    sizeof(tablet_descriptor), &layout) == 0);
-	CHECK(hid_report_layout_get_info(layout, &info) == 0);
+	CHECK(drv_hid_report_layout_get_info(layout, &info) == 0);
 	CHECK(info.absolute_axis_count == 2U);
-	CHECK(hid_report_layout_get_absolute_axis(layout, 0, &axis) == 0);
+	CHECK(drv_hid_report_layout_get_absolute_axis(layout, 0, &axis) == 0);
 	CHECK(axis.code == ABS_X);
 	CHECK(axis.info.minimum == 0 && axis.info.maximum == 32767);
-	CHECK(hid_report_layout_get_absolute_axis(layout, 1, &axis) == 0);
+	CHECK(drv_hid_report_layout_get_absolute_axis(layout, 1, &axis) == 0);
 	CHECK(axis.code == ABS_Y);
 	CHECK(axis.info.minimum == 0 && axis.info.maximum == 32767);
-	CHECK(hid_report_decode(layout, report, sizeof(report), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, report, sizeof(report), &input) == 0);
 	CHECK(find_value(&input, EV_KEY, BTN_LEFT, &value) && value == 1);
 	CHECK(find_value(&input, EV_ABS, ABS_X, &value) && value == 0x1234);
 	CHECK(find_value(&input, EV_ABS, ABS_Y, &value) && value == 32767);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 }
 
@@ -523,34 +523,34 @@ test_sparse_and_reselected_ids(void)
 	uint8_t prefix_only[] = {0x01};
 	int32_t value;
 
-	CHECK(hid_report_layout_parse(sparse_id_descriptor,
+	CHECK(drv_hid_report_layout_parse(sparse_id_descriptor,
 	    sizeof(sparse_id_descriptor), &layout) == 0);
-	CHECK(hid_report_layout_get_info(layout, &info) == 0);
+	CHECK(drv_hid_report_layout_get_info(layout, &info) == 0);
 	CHECK(info.uses_report_ids != 0);
 	CHECK(info.report_count == 3U);
-	CHECK(hid_report_layout_get_report(layout, 0, &report_info) == 0);
+	CHECK(drv_hid_report_layout_get_report(layout, 0, &report_info) == 0);
 	CHECK(report_info.report_id == 1U);
 	CHECK(report_info.minimum_size == 3U);
 	CHECK(report_info.field_count == 2U);
-	CHECK(hid_report_layout_get_report(layout, 1, &report_info) == 0);
+	CHECK(drv_hid_report_layout_get_report(layout, 1, &report_info) == 0);
 	CHECK(report_info.report_id == 7U);
 	CHECK(report_info.minimum_size == 2U);
-	CHECK(hid_report_layout_get_report(layout, 2, &report_info) == 0);
+	CHECK(drv_hid_report_layout_get_report(layout, 2, &report_info) == 0);
 	CHECK(report_info.report_id == 255U);
 
-	CHECK(hid_report_decode(layout, first, sizeof(first), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, first, sizeof(first), &input) == 0);
 	CHECK(input.report_id == 1U);
 	CHECK(find_value(&input, EV_REL, REL_X, &value) && value == 5);
 	CHECK(find_value(&input, EV_REL, REL_WHEEL, &value) && value == -1);
-	CHECK(hid_report_decode(layout, seventh, sizeof(seventh), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, seventh, sizeof(seventh), &input) == 0);
 	CHECK(input.report_id == 7U);
 	CHECK(find_value(&input, EV_REL, REL_Y, &value) && value == -2);
-	CHECK(hid_report_decode(layout, last, sizeof(last), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, last, sizeof(last), &input) == 0);
 	CHECK(input.report_id == 255U);
 	CHECK(find_value(&input, EV_KEY, BTN_LEFT, &value) && value == 1);
 	expect_decode_error(layout, unknown, sizeof(unknown), EINVAL);
 	expect_decode_error(layout, prefix_only, sizeof(prefix_only), EINVAL);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 }
 
@@ -570,24 +570,24 @@ test_cross_byte_signed_field(void)
 	uint8_t negative_one_32[] = {0xff, 0xff, 0xff, 0xff};
 	int32_t value;
 
-	CHECK(hid_report_layout_parse(cross_byte_descriptor,
+	CHECK(drv_hid_report_layout_parse(cross_byte_descriptor,
 	    sizeof(cross_byte_descriptor), &layout) == 0);
-	CHECK(hid_report_decode(layout, negative_two, sizeof(negative_two),
+	CHECK(drv_hid_report_decode(layout, negative_two, sizeof(negative_two),
 	    &input) == 0);
 	CHECK(find_value(&input, EV_REL, REL_X, &value) && value == -2);
-	CHECK(hid_report_decode(layout, positive_291, sizeof(positive_291),
+	CHECK(drv_hid_report_decode(layout, positive_291, sizeof(positive_291),
 	    &input) == 0);
 	CHECK(find_value(&input, EV_REL, REL_X, &value) && value == 291);
 	expect_decode_error(layout, negative_two, 1U, EINVAL);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 
-	CHECK(hid_report_layout_parse(signed_32_descriptor,
+	CHECK(drv_hid_report_layout_parse(signed_32_descriptor,
 	    sizeof(signed_32_descriptor), &layout) == 0);
-	CHECK(hid_report_decode(layout, negative_one_32,
+	CHECK(drv_hid_report_decode(layout, negative_one_32,
 	    sizeof(negative_one_32), &input) == 0);
 	CHECK(find_value(&input, EV_REL, REL_X, &value) && value == -1);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 }
 
@@ -613,13 +613,13 @@ test_global_stack_and_long_item(void)
 	uint8_t report[] = {0xfe};
 	int32_t value;
 
-	CHECK(hid_report_layout_parse(descriptor, sizeof(descriptor), &layout) ==
+	CHECK(drv_hid_report_layout_parse(descriptor, sizeof(descriptor), &layout) ==
 	    0);
-	CHECK(hid_report_layout_get_report(layout, 0, &info) == 0);
+	CHECK(drv_hid_report_layout_get_report(layout, 0, &info) == 0);
 	CHECK(info.minimum_size == 1U);
-	CHECK(hid_report_decode(layout, report, sizeof(report), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, report, sizeof(report), &input) == 0);
 	CHECK(find_value(&input, EV_REL, REL_X, &value) && value == -2);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 	expect_parse_error(unclosed_push, sizeof(unclosed_push), EINVAL);
 }
@@ -637,13 +637,13 @@ test_boot_profiles(void)
 	uint8_t mouse_report[] = {0x05, 0x7f, 0x81};
 	int32_t value;
 
-	CHECK(hid_report_layout_boot_keyboard(&keyboard) == 0);
-	CHECK(hid_report_layout_get_info(keyboard, &info) == 0);
+	CHECK(drv_hid_report_layout_boot_keyboard(&keyboard) == 0);
+	CHECK(drv_hid_report_layout_get_info(keyboard, &info) == 0);
 	CHECK(info.descriptor_size == 0U && info.report_count == 1U);
 	CHECK(info.uses_report_ids == 0);
-	CHECK(hid_report_layout_get_report(keyboard, 0, &report_info) == 0);
+	CHECK(drv_hid_report_layout_get_report(keyboard, 0, &report_info) == 0);
 	CHECK(report_info.minimum_size == 8U);
-	CHECK(hid_report_decode(keyboard, keyboard_report,
+	CHECK(drv_hid_report_decode(keyboard, keyboard_report,
 	    sizeof(keyboard_report), &input) == 0);
 	CHECK(input.value_count == 4U);
 	CHECK(find_value(&input, EV_KEY, KEY_LEFTSHIFT, NULL));
@@ -654,10 +654,10 @@ test_boot_profiles(void)
 	expect_decode_error(keyboard, keyboard_report,
 	    sizeof(keyboard_report) - 1U, EINVAL);
 
-	CHECK(hid_report_layout_boot_mouse(&mouse) == 0);
-	CHECK(hid_report_layout_get_report(mouse, 0, &report_info) == 0);
+	CHECK(drv_hid_report_layout_boot_mouse(&mouse) == 0);
+	CHECK(drv_hid_report_layout_get_report(mouse, 0, &report_info) == 0);
 	CHECK(report_info.minimum_size == 3U);
-	CHECK(hid_report_decode(mouse, mouse_report, sizeof(mouse_report),
+	CHECK(drv_hid_report_decode(mouse, mouse_report, sizeof(mouse_report),
 	    &input) == 0);
 	CHECK(find_value(&input, EV_KEY, BTN_LEFT, &value) && value == 1);
 	CHECK(find_value(&input, EV_KEY, BTN_MIDDLE, &value) && value == 1);
@@ -666,8 +666,8 @@ test_boot_profiles(void)
 	expect_decode_error(mouse, mouse_report, sizeof(mouse_report) - 1U,
 	    EINVAL);
 
-	hid_report_layout_destroy(keyboard);
-	hid_report_layout_destroy(mouse);
+	drv_hid_report_layout_destroy(keyboard);
+	drv_hid_report_layout_destroy(mouse);
 	CHECK(live_allocations == 0U);
 }
 
@@ -681,14 +681,14 @@ test_descriptor_ownership(void)
 	int32_t value;
 
 	memcpy(descriptor, mouse_descriptor, sizeof(descriptor));
-	CHECK(hid_report_layout_parse(descriptor, sizeof(descriptor), &layout) ==
+	CHECK(drv_hid_report_layout_parse(descriptor, sizeof(descriptor), &layout) ==
 	    0);
 	memset(descriptor, 0, sizeof(descriptor));
-	CHECK(hid_report_decode(layout, report, sizeof(report), &input) == 0);
+	CHECK(drv_hid_report_decode(layout, report, sizeof(report), &input) == 0);
 	CHECK(find_value(&input, EV_REL, REL_X, &value) && value == 1);
 	CHECK(find_value(&input, EV_REL, REL_Y, &value) && value == 2);
 	CHECK(find_value(&input, EV_REL, REL_WHEEL, &value) && value == 3);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 }
 
@@ -720,11 +720,11 @@ test_unknown_usage_policy(void)
 	uint8_t report[] = {0xee, 0xfb};
 	int32_t value;
 
-	CHECK(hid_report_layout_parse(mixed, sizeof(mixed), &layout) == 0);
-	CHECK(hid_report_decode(layout, report, sizeof(report), &input) == 0);
+	CHECK(drv_hid_report_layout_parse(mixed, sizeof(mixed), &layout) == 0);
+	CHECK(drv_hid_report_decode(layout, report, sizeof(report), &input) == 0);
 	CHECK(input.value_count == 1U);
 	CHECK(find_value(&input, EV_REL, REL_X, &value) && value == -5);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 	expect_parse_error(unknown_only, sizeof(unknown_only), EOPNOTSUPP);
 }
@@ -873,10 +873,10 @@ test_report_id_limit(void)
 		used = append_byte(descriptor, sizeof(descriptor), used, 0x81);
 		used = append_byte(descriptor, sizeof(descriptor), used, 0x02);
 	}
-	CHECK(hid_report_layout_parse(descriptor, used, &layout) == 0);
-	CHECK(hid_report_layout_get_info(layout, &info) == 0);
+	CHECK(drv_hid_report_layout_parse(descriptor, used, &layout) == 0);
+	CHECK(drv_hid_report_layout_get_info(layout, &info) == 0);
 	CHECK(info.report_count == HID_REPORT_ID_COUNT_MAX);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 
 	used = append_byte(descriptor, sizeof(descriptor), used, 0x85);
@@ -915,34 +915,34 @@ test_field_and_bit_limits(void)
 	uint8_t bit_report[1024];
 	int error;
 
-	error = hid_report_layout_parse(fields_256, sizeof(fields_256), &layout);
+	error = drv_hid_report_layout_parse(fields_256, sizeof(fields_256), &layout);
 	if (error != 0)
 		fprintf(stderr, "256-field boundary parse returned %d\n", error);
 	CHECK(error == 0);
-	CHECK(hid_report_layout_get_info(layout, &info) == 0);
+	CHECK(drv_hid_report_layout_get_info(layout, &info) == 0);
 	CHECK(info.field_count == HID_REPORT_FIELD_COUNT_MAX);
 	memset(field_report, 0, sizeof(field_report));
 	field_report[0] = 0x04;
 	field_report[sizeof(field_report) - 1U] = 0x04;
-	CHECK(hid_report_decode(layout, field_report, sizeof(field_report),
+	CHECK(drv_hid_report_decode(layout, field_report, sizeof(field_report),
 	    &input) == 0);
 	CHECK(input.value_count == 1U);
 	CHECK(find_value(&input, EV_KEY, KEY_A, NULL));
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 	expect_parse_error(fields_257, sizeof(fields_257), E2BIG);
 
-	CHECK(hid_report_layout_parse(bits_8192, sizeof(bits_8192), &layout) ==
+	CHECK(drv_hid_report_layout_parse(bits_8192, sizeof(bits_8192), &layout) ==
 	    0);
-	CHECK(hid_report_layout_get_report(layout, 0, &report_info) == 0);
+	CHECK(drv_hid_report_layout_get_report(layout, 0, &report_info) == 0);
 	CHECK(report_info.minimum_size == sizeof(bit_report));
 	memset(bit_report, 0, sizeof(bit_report));
 	bit_report[sizeof(bit_report) - 1U] = 0x80;
-	CHECK(hid_report_decode(layout, bit_report, sizeof(bit_report), &input) ==
+	CHECK(drv_hid_report_decode(layout, bit_report, sizeof(bit_report), &input) ==
 	    0);
 	CHECK(input.value_count == 1U);
 	CHECK(find_value(&input, EV_KEY, KEY_A, NULL));
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 	expect_parse_error(bits_8193, sizeof(bits_8193), E2BIG);
 }
@@ -975,10 +975,10 @@ test_descriptor_size_limit(void)
 	for (index = 0; index < 209U; index++)
 		descriptor[used++] = (uint8_t)index;
 	CHECK(used == HID_REPORT_DESCRIPTOR_SIZE_MAX);
-	CHECK(hid_report_layout_parse(descriptor, used, &layout) == 0);
-	CHECK(hid_report_layout_get_info(layout, &info) == 0);
+	CHECK(drv_hid_report_layout_parse(descriptor, used, &layout) == 0);
+	CHECK(drv_hid_report_layout_get_info(layout, &info) == 0);
 	CHECK(info.descriptor_size == HID_REPORT_DESCRIPTOR_SIZE_MAX);
-	hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(layout);
 	CHECK(live_allocations == 0U);
 	descriptor[used++] = 0;
 	expect_parse_error(descriptor, used, E2BIG);
@@ -997,32 +997,32 @@ test_getter_and_argument_errors(void)
 	struct hid_report_input input;
 	uint8_t report[8] = {0};
 
-	CHECK(hid_report_layout_parse(NULL, 1U, &sentinel) == EINVAL);
+	CHECK(drv_hid_report_layout_parse(NULL, 1U, &sentinel) == EINVAL);
 	CHECK(sentinel == (struct hid_report_layout *)(uintptr_t)1U);
-	CHECK(hid_report_layout_parse(keyboard_descriptor, 0U, &sentinel) ==
+	CHECK(drv_hid_report_layout_parse(keyboard_descriptor, 0U, &sentinel) ==
 	    EINVAL);
-	CHECK(hid_report_layout_parse(keyboard_descriptor,
+	CHECK(drv_hid_report_layout_parse(keyboard_descriptor,
 	    sizeof(keyboard_descriptor), NULL) == EINVAL);
-	CHECK(hid_report_layout_boot_keyboard(NULL) == EINVAL);
-	CHECK(hid_report_layout_boot_mouse(NULL) == EINVAL);
-	CHECK(hid_report_layout_get_info(NULL, &info) == EINVAL);
-	CHECK(hid_report_layout_get_info(NULL, NULL) == EINVAL);
-	CHECK(hid_report_decode(NULL, report, sizeof(report), &input) == EINVAL);
+	CHECK(drv_hid_report_layout_boot_keyboard(NULL) == EINVAL);
+	CHECK(drv_hid_report_layout_boot_mouse(NULL) == EINVAL);
+	CHECK(drv_hid_report_layout_get_info(NULL, &info) == EINVAL);
+	CHECK(drv_hid_report_layout_get_info(NULL, NULL) == EINVAL);
+	CHECK(drv_hid_report_decode(NULL, report, sizeof(report), &input) == EINVAL);
 
-	CHECK(hid_report_layout_parse(keyboard_descriptor,
+	CHECK(drv_hid_report_layout_parse(keyboard_descriptor,
 	    sizeof(keyboard_descriptor), &layout) == 0);
-	CHECK(hid_report_layout_get_info(layout, NULL) == EINVAL);
-	CHECK(hid_report_layout_get_report(layout, 1U, &report_info) == ENOENT);
-	CHECK(hid_report_layout_get_report(layout, 0U, NULL) == EINVAL);
-	CHECK(hid_report_layout_get_capability(layout,
+	CHECK(drv_hid_report_layout_get_info(layout, NULL) == EINVAL);
+	CHECK(drv_hid_report_layout_get_report(layout, 1U, &report_info) == ENOENT);
+	CHECK(drv_hid_report_layout_get_report(layout, 0U, NULL) == EINVAL);
+	CHECK(drv_hid_report_layout_get_capability(layout,
 	    HID_REPORT_FIELD_COUNT_MAX, &capability) == ENOENT);
-	CHECK(hid_report_layout_get_capability(layout, 0U, NULL) == EINVAL);
-	CHECK(hid_report_layout_get_absolute_axis(layout, 0U, &axis) == ENOENT);
-	CHECK(hid_report_layout_get_absolute_axis(layout, 0U, NULL) == EINVAL);
-	CHECK(hid_report_decode(layout, NULL, sizeof(report), &input) == EINVAL);
-	CHECK(hid_report_decode(layout, report, sizeof(report), NULL) == EINVAL);
-	hid_report_layout_destroy(layout);
-	hid_report_layout_destroy(NULL);
+	CHECK(drv_hid_report_layout_get_capability(layout, 0U, NULL) == EINVAL);
+	CHECK(drv_hid_report_layout_get_absolute_axis(layout, 0U, &axis) == ENOENT);
+	CHECK(drv_hid_report_layout_get_absolute_axis(layout, 0U, NULL) == EINVAL);
+	CHECK(drv_hid_report_decode(layout, NULL, sizeof(report), &input) == EINVAL);
+	CHECK(drv_hid_report_decode(layout, report, sizeof(report), NULL) == EINVAL);
+	drv_hid_report_layout_destroy(layout);
+	drv_hid_report_layout_destroy(NULL);
 	CHECK(live_allocations == 0U);
 }
 
@@ -1033,27 +1033,27 @@ test_allocation_failures(void)
 
 	allocator_reset(1U);
 	layout = (struct hid_report_layout *)(uintptr_t)1U;
-	CHECK(hid_report_layout_parse(keyboard_descriptor,
+	CHECK(drv_hid_report_layout_parse(keyboard_descriptor,
 	    sizeof(keyboard_descriptor), &layout) == ENOMEM);
 	CHECK(layout == (struct hid_report_layout *)(uintptr_t)1U);
 	CHECK(live_allocations == 0U);
 
 	allocator_reset(2U);
 	layout = (struct hid_report_layout *)(uintptr_t)1U;
-	CHECK(hid_report_layout_parse(keyboard_descriptor,
+	CHECK(drv_hid_report_layout_parse(keyboard_descriptor,
 	    sizeof(keyboard_descriptor), &layout) == ENOMEM);
 	CHECK(layout == (struct hid_report_layout *)(uintptr_t)1U);
 	CHECK(live_allocations == 0U);
 
 	allocator_reset(1U);
 	layout = (struct hid_report_layout *)(uintptr_t)1U;
-	CHECK(hid_report_layout_boot_keyboard(&layout) == ENOMEM);
+	CHECK(drv_hid_report_layout_boot_keyboard(&layout) == ENOMEM);
 	CHECK(layout == (struct hid_report_layout *)(uintptr_t)1U);
 	CHECK(live_allocations == 0U);
 
 	allocator_reset(2U);
 	layout = (struct hid_report_layout *)(uintptr_t)1U;
-	CHECK(hid_report_layout_boot_mouse(&layout) == ENOMEM);
+	CHECK(drv_hid_report_layout_boot_mouse(&layout) == ENOMEM);
 	CHECK(layout == (struct hid_report_layout *)(uintptr_t)1U);
 	CHECK(live_allocations == 0U);
 	allocator_reset(0U);

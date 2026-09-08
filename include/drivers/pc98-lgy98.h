@@ -12,6 +12,6 @@
 #define ZEDBSD_DRIVERS_PC98_LGY98_H
 
 int
-pc98_lgy98_init(void);
+drv_pc98_lgy98_init(void);
 
 #endif

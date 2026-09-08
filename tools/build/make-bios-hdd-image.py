@@ -83,7 +83,7 @@ def create(args: argparse.Namespace) -> None:
         raise SystemExit("BIOS images require --partition-pbr and --bootzbsd")
     if not args.partition_pbr.is_file() or not args.bootzbsd.is_file():
         raise SystemExit("missing partition or system loader input")
-    for path in (args.shell, args.noct, args.nettest, args.holoris):
+    for path in (args.shell, args.noct, args.holoris):
         if path is not None and not path.is_file():
             raise SystemExit(f"missing input: {path}")
     if (args.arch_profile is None) != (args.arch_image is None):
@@ -102,7 +102,7 @@ def create(args: argparse.Namespace) -> None:
                                      args.ufs_root.stat().st_size % SECTOR_SIZE):
         raise SystemExit("--ufs-root must be a sector-aligned image")
     if args.arch_image is not None and (args.shell or args.noct or
-                                        args.nettest or bin_files):
+                                        bin_files):
         raise SystemExit("architecture image cannot be mixed with direct /bin files")
     if args.output.exists() and not args.force:
         raise SystemExit(f"output exists (use --force): {args.output}")
@@ -297,7 +297,7 @@ def create(args: argparse.Namespace) -> None:
         if args.swapfile is not None:
             run("mcopy", "-i", f"{temporary}@@{offset}",
                 str(args.swapfile), "::/SWAPFILE")
-        elif args.shell or args.noct or args.nettest or bin_files:
+        elif args.shell or args.noct or bin_files:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/bin")
         run("mmd", "-i", f"{temporary}@@{offset}", "::/etc")
         if args.noct or (args.holoris and args.arch_image is None):
@@ -309,9 +309,6 @@ def create(args: argparse.Namespace) -> None:
         if args.noct:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.noct),
                 "::/usr/bin/noct")
-        if args.nettest:
-            run("mcopy", "-i", f"{temporary}@@{offset}", str(args.nettest),
-                "::/bin/nettest")
         for name, source in bin_files.items():
             run("mcopy", "-i", f"{temporary}@@{offset}", str(source),
                 f"::/bin/{name}")
@@ -357,7 +354,6 @@ def main() -> None:
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
     parser.add_argument("--noct", type=Path)
-    parser.add_argument("--nettest", type=Path)
     parser.add_argument("--holoris", type=Path)
     parser.add_argument("--arch-profile", choices=("i386", "amd64", "aarch64"))
     parser.add_argument("--arch-image", type=Path)

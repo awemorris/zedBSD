@@ -9,15 +9,15 @@
 #define CONTENT_WRITE IO_UFS_CONTENT_WRITE
 static unsigned journal_calls, snapshot_calls;
 static unsigned hook_failure;
-int ufs_snapshot_preserve(struct ufs_snapshot *snapshot,uint64_t first,uint32_t count)
+int drv_ufs_snapshot_preserve(struct ufs_snapshot *snapshot,uint64_t first,uint32_t count)
 { (void)snapshot;(void)first;(void)count;snapshot_calls++;return hook_failure?EIO:0; }
-int ufs_journal_read(struct ufs_journal *journal, uint64_t first,
+int drv_ufs_journal_read(struct ufs_journal *journal, uint64_t first,
     uint32_t count, void *buffer)
 { (void)journal; (void)first; (void)count; (void)buffer; abort(); }
-int ufs_journal_commitv(struct ufs_journal *journal,
+int drv_ufs_journal_commitv(struct ufs_journal *journal,
     const struct ufs_journal_extent *extents, unsigned count)
 { (void)journal; (void)extents; (void)count; abort(); }
-int ufs_journal_commit(struct ufs_journal *j,uint64_t target,const void *payload,uint32_t sectors)
+int drv_ufs_journal_commit(struct ufs_journal *j,uint64_t target,const void *payload,uint32_t sectors)
 {
  REQUIRE(snapshot_calls==journal_calls+1);REQUIRE(sectors<=j->sector_count-2);
  journal_calls++;return disk_write(NULL,target,sectors,payload);

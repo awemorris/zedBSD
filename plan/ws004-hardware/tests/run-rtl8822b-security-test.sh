@@ -9,7 +9,7 @@ trap 'rm -rf "$build_dir"' EXIT HUP INT TERM
 
 cc=${CC:-cc}
 warnings='-std=c11 -Wall -Wextra -Werror'
-source="$repo_root/src/drivers/rtl8822b-security.c"
+source="$repo_root/src/drivers/wifi/rtl8822b/rtl8822b-security.c"
 fixture="$test_dir/rtl8822b-security-test.c"
 
 $cc $warnings -O2 "$source" "$fixture" -o "$build_dir/ordinary"

@@ -5,6 +5,14 @@
  * SPDX-License-Identifier: Zlib
  */
 
+/*
+ * On-the-wire packet layouts.
+ *
+ * Every structure here mirrors the byte order and packing of a protocol as it
+ * appears on the network, so multi-byte fields are kept as byte arrays and
+ * converted explicitly by the code that reads or writes them.
+ */
+
 #ifndef ZEDBSD_KERN_NET_WIRE_H
 #define ZEDBSD_KERN_NET_WIRE_H
 

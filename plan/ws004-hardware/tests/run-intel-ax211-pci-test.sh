@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 repository=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-ax211-pci.XXXXXX")
@@ -9,11 +10,11 @@ compiler=${CC:-cc}
 warnings="-std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror"
 includes="-I$repository/plan/ws004-hardware/tests/host-include -I$repository/include -I$repository/include/uapi"
 fixture="$repository/plan/ws004-hardware/tests/intel-ax211-pci-test.c"
-private_sources="$repository/src/drivers/intel-ax211-assoc.c \
-$repository/src/drivers/intel-ax211-bss.c \
-$repository/src/drivers/intel-ax211-key.c \
-$repository/src/drivers/intel-ax211-tx.c \
-$repository/src/drivers/intel-ax211-tx-ring.c"
+private_sources="$repository/src/drivers/wifi/intel-ax211/intel-ax211-assoc.c \
+$repository/src/drivers/wifi/intel-ax211/intel-ax211-bss.c \
+$repository/src/drivers/wifi/intel-ax211/intel-ax211-key.c \
+$repository/src/drivers/wifi/intel-ax211/intel-ax211-tx.c \
+$repository/src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c"
 
 # Exercises persistent attach, post-refresh publication, and checked teardown.
 # shellcheck disable=SC2086
@@ -39,9 +40,9 @@ $compiler $warnings -O0 -fanalyzer $includes "$fixture" $private_sources \
 target_includes="-nostdinc -I$repository/libc/include -I$repository/include/uapi -I$repository/include -I$repository/src"
 # shellcheck disable=SC2086
 $compiler $warnings $target_includes -m64 -fsyntax-only \
-	"$repository/src/drivers/pci-intel-ax211.c"
+	"$repository/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/pci-intel-ax211.c"
 # shellcheck disable=SC2086
 $compiler $warnings $target_includes -m32 -fsyntax-only \
-	"$repository/src/drivers/pci-intel-ax211.c"
+	"$repository/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/pci-intel-ax211.c"
 
 echo 'intel ax211 pci: ordinary, sanitizer, analyzer, amd64/i386 syntax PASS'

@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -24,26 +22,20 @@
 #include "kern/disk.h"
 #include "kern/page.h"
 #include "kern/cache-memory.h"
-
 #include <errno.h>
 #include <string.h>
 
-extern int cache_memory_reserve(enum cache_memory_kind, size_t, int) __attribute__((weak));
-extern void cache_memory_commit(enum cache_memory_kind, size_t) __attribute__((weak));
-extern void cache_memory_cancel(enum cache_memory_kind, size_t) __attribute__((weak));
-extern void cache_memory_release(enum cache_memory_kind, size_t) __attribute__((weak));
-extern size_t cache_memory_reclaim(size_t) __attribute__((weak));
-
 #define BUF_HASH_BUCKETS 64U
+
 #define BUF_MIN_BYTES (64U * 1024U)
+
 #ifndef CONFIG_BUF_CACHE_KIB
 #define CONFIG_BUF_CACHE_KIB 0
 #endif
-#define BUF_SLAB_BYTES ZEDBSD_PAGE_SIZE
-#define BUF_RUN_LINES (KERN_IO_BATCH_MAX / ZEDBSD_PAGE_SIZE)
 
-struct thread;
-struct thread *thread_current(void);
+#define BUF_SLAB_BYTES ZEDBSD_PAGE_SIZE
+
+#define BUF_RUN_LINES (KERN_IO_BATCH_MAX / ZEDBSD_PAGE_SIZE)
 
 struct buf_slab {
 	struct hal_pmem memory;
@@ -53,31 +45,62 @@ struct buf_slab {
 	unsigned used;
 };
 
+struct thread;
+
 static struct spinlock cache_lock;
+
 static struct spinlock dirty_index_lock;
+
 static struct buf *dirty_head;
+
 static struct buf *dirty_tail;
+
 static struct mutex cache_control;
+
 static struct buf *cache_hash[BUF_HASH_BUCKETS];
+
 static struct buf *lru_head;
+
 static struct buf *lru_tail;
+
 static struct buf_slab *slabs;
+
 static uint64_t cache_max_bytes;
+
 static uint64_t cache_current_bytes;
+
 static uint64_t cache_reserved_bytes;
+
 static uint64_t cache_data_bytes;
+
 static uint64_t cache_metadata_bytes;
+
 static volatile uint64_t cache_dirty_bytes;
+
 static volatile uint64_t stat_buffers;
+
 static volatile uint64_t stat_hits;
+
 static volatile uint64_t stat_misses;
+
 static volatile uint64_t stat_read_bios;
+
 static volatile uint64_t stat_write_bios;
+
 static volatile uint64_t stat_evictions;
+
 static volatile uint64_t stat_waits;
+
 static volatile uint64_t stat_writeback_errors;
+
 static unsigned cache_initialized;
 
+extern int cache_memory_reserve(enum cache_memory_kind, size_t, int) __attribute__((weak));
+extern void cache_memory_commit(enum cache_memory_kind, size_t) __attribute__((weak));
+extern void cache_memory_cancel(enum cache_memory_kind, size_t) __attribute__((weak));
+extern void cache_memory_release(enum cache_memory_kind, size_t) __attribute__((weak));
+extern size_t cache_memory_reclaim(size_t) __attribute__((weak));
+struct thread *thread_current(void);
 static unsigned buf_hash_key(const struct disk *disk, uint64_t block);
 static size_t slab_header_size(void);
 static struct buf * slab_slot(struct buf_slab *slab, unsigned slot);
@@ -749,9 +772,12 @@ buf_discard_media(
 	size_t freed;
 	int error;
 
+	/* Only a whole device whose media is gone may be discarded. */
 	if (disk == NULL || disk->d_parent != NULL ||
 	    !atomic_raw_load_acquire(&disk->d_media_revoked))
 		return EINVAL;
+
+	/* Discards one buffer at a time until the cache holds none. */
 	for (;;) {
 		error = evict_one(disk, 0, disk->d_block_count, 1,
 		    BUF_INVALIDATE_DISCARD, &freed);
@@ -1085,10 +1111,13 @@ cancel_reservation(
 {
 	unsigned long irq;
 
+	/* Takes the bytes off the cache's own reservation. */
 	irq = spin_lock_irqsave(&cache_lock);
 	if (cache_reserved_bytes >= size)
 		cache_reserved_bytes -= size;
 	spin_unlock_irqrestore(&cache_lock, irq);
+
+	/* Tells the shared budget that the reservation is gone. */
 	if (cache_memory_cancel != NULL)
 		cache_memory_cancel(metadata ? CACHE_MEMORY_BUF_META :
 		    CACHE_MEMORY_BUF_DATA, size);
@@ -1102,6 +1131,7 @@ commit_reservation(
 {
 	unsigned long irq;
 
+	/* Moves the bytes from reserved to resident in the cache. */
 	irq = spin_lock_irqsave(&cache_lock);
 	cache_reserved_bytes -= size;
 	cache_current_bytes += size;
@@ -1110,6 +1140,8 @@ commit_reservation(
 	else
 		cache_data_bytes += size;
 	spin_unlock_irqrestore(&cache_lock, irq);
+
+	/* Tells the shared budget that the reservation became memory. */
 	if (cache_memory_commit != NULL)
 		cache_memory_commit(metadata ? CACHE_MEMORY_BUF_META :
 		    CACHE_MEMORY_BUF_DATA, size);
@@ -1876,4 +1908,109 @@ writeback_one_reclaimable(
 	return error;
 }
 
-#include "buf-dirty.inc"
+/* Publishes a first dirty transition while the caller holds the buffer lock. */
+static void
+dirty_link(
+	struct buf *buffer)
+{
+	unsigned long irq;
+
+	/* Inserts into the global age list and the owning device's list in O(1). */
+	irq = spin_lock_irqsave(&dirty_index_lock);
+	if (buffer->b_dirty_linked)
+		HAL_FATAL("dirty buffer linked twice");
+	buffer->b_dirty_previous = dirty_tail;
+	buffer->b_dirty_next = NULL;
+	if (dirty_tail != NULL)
+		dirty_tail->b_dirty_next = buffer;
+	else
+		dirty_head = buffer;
+	dirty_tail = buffer;
+	buffer->b_device_dirty_previous = NULL;
+	buffer->b_device_dirty_next = buffer->b_disk->d_dirty_buffers;
+	if (buffer->b_device_dirty_next != NULL)
+		buffer->b_device_dirty_next->b_device_dirty_previous = buffer;
+	buffer->b_disk->d_dirty_buffers = buffer;
+	buffer->b_dirty_linked = 1;
+	spin_unlock_irqrestore(&dirty_index_lock, irq);
+}
+
+/* Removes a resolved dirty transition while the caller holds the buffer lock. */
+static void
+dirty_clear(
+	struct buf *buffer)
+{
+	unsigned long irq;
+
+	/* Serializes clean publication against dirty-candidate reference acquisition. */
+	irq = spin_lock_irqsave(&dirty_index_lock);
+	dirty_unlink_locked(buffer);
+	spin_unlock_irqrestore(&dirty_index_lock, irq);
+}
+
+/* Detaches both memberships with the index guard already held. */
+static void
+dirty_unlink_locked(
+	struct buf *buffer)
+{
+	/* Clean or never-published buffers have no membership to remove. */
+	if (!buffer->b_dirty_linked)
+		return;
+
+	/* Repairs the global age list before clearing the descriptor links. */
+	if (buffer->b_dirty_previous != NULL)
+		buffer->b_dirty_previous->b_dirty_next = buffer->b_dirty_next;
+	else
+		dirty_head = buffer->b_dirty_next;
+	if (buffer->b_dirty_next != NULL)
+		buffer->b_dirty_next->b_dirty_previous = buffer->b_dirty_previous;
+	else
+		dirty_tail = buffer->b_dirty_previous;
+
+	/* Repairs the device index without scanning its other dirty buffers. */
+	if (buffer->b_device_dirty_previous != NULL)
+		buffer->b_device_dirty_previous->b_device_dirty_next = buffer->b_device_dirty_next;
+	else
+		buffer->b_disk->d_dirty_buffers = buffer->b_device_dirty_next;
+	if (buffer->b_device_dirty_next != NULL)
+		buffer->b_device_dirty_next->b_device_dirty_previous = buffer->b_device_dirty_previous;
+	buffer->b_dirty_previous = NULL;
+	buffer->b_dirty_next = NULL;
+	buffer->b_device_dirty_previous = NULL;
+	buffer->b_device_dirty_next = NULL;
+	buffer->b_dirty_linked = 0;
+}
+
+/* Pins one dirty member before exposing it outside the index guard. */
+static struct buf *
+dirty_reference(
+	struct disk *disk,
+	uint64_t start,
+	uint64_t end,
+	int reclaim)
+{
+	struct buf *buffer;
+	unsigned long irq;
+
+	/* Scans only dirty membership, never unrelated clean cache hash buckets. */
+	irq = spin_lock_irqsave(&dirty_index_lock);
+	buffer = disk != NULL ? disk->d_dirty_buffers : dirty_head;
+	while (buffer != NULL) {
+		if ((!reclaim || refcount_load(&buffer->b_refs) == 1) &&
+		    (disk == NULL || (buffer->b_block < end &&
+		    buffer->b_block + buffer->b_block_count > start))) {
+			refcount_get(&buffer->b_refs);
+			break;
+		}
+		buffer = disk != NULL ? buffer->b_device_dirty_next : buffer->b_dirty_next;
+	}
+	spin_unlock_irqrestore(&dirty_index_lock, irq);
+
+	/* Takes the lower-ranked cache lock only after releasing the index guard. */
+	if (buffer != NULL) {
+		irq = spin_lock_irqsave(&cache_lock);
+		lru_remove_locked(buffer);
+		spin_unlock_irqrestore(&cache_lock, irq);
+	}
+	return buffer;
+}

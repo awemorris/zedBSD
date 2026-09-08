@@ -222,7 +222,7 @@ static void test_reload(void)
 	unsigned char byte[512];
 	struct buf_view view = {0};
 	disk_registry_reset(); partition_reset();
-	partition_set_scheme(&partition_scheme_mbr);
+	partition_set_scheme(&drv_partition_scheme_mbr);
 	d = disk_alloc(); CHECK(d != NULL);
 	strcpy(d->d_name, "nvme0n1"); d->d_block_size = 512;
 	d->d_block_count = 4096; d->d_ops = &ops;

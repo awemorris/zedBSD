@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -1103,11 +1101,14 @@ unix_store_packet_source(
 	struct sockaddr_un source;
 	size_t length;
 
+	/* Names the sender, leaving an unbound endpoint anonymous. */
 	memset(&source, 0, sizeof(source));
 	source.sun_family = AF_UNIX;
 	if (endpoint->bound)
 		strncpy(source.sun_path, endpoint->path,
 			sizeof(source.sun_path) - 1U);
+
+	/* Stores the address with exactly the bytes its path needs. */
 	length = offsetof(struct sockaddr_un, sun_path) +
 		 strlen(source.sun_path) + 1U;
 	memcpy(packet->source_address, &source, length);
@@ -1258,11 +1259,16 @@ unix_send_epipe(
 {
 	struct thread *thread;
 
+	/* Discards the rights the refused message carried. */
 	thread = thread_current();
 	unix_rights_release(rights);
+
+	/* Signals the sender unless it asked not to be. */
 	if ((flags & MSG_NOSIGNAL) == 0 && thread != NULL &&
 	    thread->proc != NULL)
 		(void)signal_send_thread(thread, SIGPIPE);
+
+	/* Reports the broken pipe. */
 	return -(ssize_t)EPIPE;
 }
 

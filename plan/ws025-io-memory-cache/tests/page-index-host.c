@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "src/kern/vm-object-index.inc"
+#include "src/kern/vm.c"
 
 #define COUNT 8192U
 static struct vm_object_page pages[COUNT];

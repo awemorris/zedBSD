@@ -1,6 +1,7 @@
 #!/bin/sh
 # WS018 KA-T100/KA-T101 native FAT VFS host runner.
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$test_dir/../../.." && pwd)
@@ -20,7 +21,7 @@ build_and_run()
 
 	# shellcheck disable=SC2086
 	"${CC:-cc}" $common_flags $extra_flags -c \
-		"$repo_dir/src/drivers/fs/fat.c" -o "$temporary/fat-$name.o"
+		"$repo_dir/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/fat.c" -o "$temporary/fat-$name.o"
 	# shellcheck disable=SC2086
 	"${CC:-cc}" $common_flags $extra_flags "$test_source" \
 		"$temporary/fat-$name.o" "$repo_dir/src/kern/io-stats.c" -Wl,--gc-sections \

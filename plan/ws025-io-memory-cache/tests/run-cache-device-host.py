@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Verify mandatory pool/DMA backing against the real shared accounting owner."""
+__import__('runpy').run_path(str(__import__('pathlib').Path(__file__).resolve().parents[3] / 'plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py'), run_name='__main__')
 import json
 import os
 from pathlib import Path
@@ -13,7 +14,7 @@ commands = []
 for variant in ('ordinary', 'sanitize'):
     flags = [] if variant == 'ordinary' else ['-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-no-pie']
     for name, sources in {
-        'dma': ['src/drivers/dma.c', 'src/hal/amd64/pmem-range.c'],
+        'dma': ['plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/dma.c', 'src/hal/amd64/pmem-range.c'],
         'pool': ['src/kern/io-pool.c','src/kern/io-scratch.c'],
         'worker': ['src/kern/cache-worker.c','src/kern/io-scratch.c'],
     }.items():

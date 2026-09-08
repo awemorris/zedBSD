@@ -81,7 +81,7 @@ block_identity_resolve(const char *selector, struct disk **result)
 }
 
 int
-fat_probe_type(struct disk *disk, enum bootfat_type *type)
+drv_fat_probe_type(struct disk *disk, enum bootfat_type *type)
 {
 	unsigned index = disk_index(disk);
 

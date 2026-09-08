@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -365,6 +363,7 @@ exec_build_initial_stack(
 	unsigned word_count;
 	int error;
 
+	/* Starts with no stack, no words, and empty vectors. */
 	address = NULL;
 	words = NULL;
 	total = 0;
@@ -541,6 +540,7 @@ process_spawn_from(
 	unsigned secure;
 	int error;
 
+	/* Starts before the first stage, holding nothing. */
 	process = NULL;
 	cred_reservation = NULL;
 	access_cred = NULL;

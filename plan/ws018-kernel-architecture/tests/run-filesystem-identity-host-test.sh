@@ -1,6 +1,7 @@
 #!/bin/sh
 # KA-T030/KA-T031 filesystem-owned identity runner and source audit.
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$test_dir/../../.." && pwd)
@@ -21,12 +22,12 @@ compile()
 compile src/kern/io-stats.c io-stats.o
 compile src/kern/mount.c mount.o
 compile src/kern/block-identity.c block-identity.o
-compile src/drivers/fs/fat.c fat.o
+compile plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/fat.c fat.o
 compile src/kern/swap.c swap.o
 compile src/kern/swap-format.c swap-format.o
-compile src/drivers/fs/ufs/ufs-endian.c ufs-endian.o
-compile src/drivers/fs/ufs/ufs-super.c ufs-super.o
-compile src/drivers/fs/ufs/ufs-vfs.c ufs-vfs.o
+compile plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.c ufs-endian.o
+compile plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-super.c ufs-super.o
+compile plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-vfs.c ufs-vfs.o
 
 # shellcheck disable=SC2086
 "${CC:-cc}" $common_flags \

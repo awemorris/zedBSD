@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess,sys,json,hashlib,os
 repo=Path(__file__).resolve().parents[3]
 out=Path(sys.argv[1]).resolve();out.relative_to(repo/'plan/ws025-io-memory-cache/temp');out.mkdir(parents=True,exist_ok=False)
-loop=(repo/'src/drivers/loop.c').read_text()
+loop=(repo/'src/drivers/generic/loop.c').read_text()
 a=loop.index('struct loop_device {');b=loop.index('\n};',a)+3
 c=loop.index('static int\nloop_submit(');d=loop.index('\nstatic const struct disk_ops loop_disk_ops',c)
 (out/'loop-submit.inc').write_text('#define LOOP_SECTOR_SIZE 512U\n#define LOOP_MAX_TRANSFER_BLOCKS 128U\n'+loop[a:b]+'\n'+loop[c:d])

@@ -10,6 +10,6 @@
 
 struct filesystem_type;
 
-extern const struct filesystem_type ufs_filesystem_type;
+extern const struct filesystem_type drv_ufs_filesystem_type;
 
 #endif

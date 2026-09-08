@@ -20,12 +20,23 @@ func rejectText(text, needle, what) {
     }
 }
 
+func withoutWhitespace(text) {
+    var result = "";
+    for (i in 0..String.charCount(text)) {
+        var code = String.charCodeAt(text, i);
+        if (code != 32 && code != 9 && code != 10 && code != 13) {
+            result = result + String.charAt(text, i);
+        }
+    }
+    return result;
+}
+
 func arrayBody(text, name, what) {
     var anchor = name + "[] = {";
     var start = String.indexOf(text, anchor);
     if (start < 0) { zbFail(what + ": missing array " + name); }
     var rest = String.substring(text, start + String.charCount(anchor), -1);
-    var finish = String.indexOf(rest, "\n};");
+    var finish = String.indexOf(rest, "};");
     if (finish < 0) { zbFail(what + ": unterminated array " + name); }
     return String.substring(rest, 0, finish);
 }
@@ -38,7 +49,7 @@ func sizedArrayBody(text, name, what) {
     var initializer = String.indexOf(rest, "= {");
     if (initializer < 0) { zbFail(what + ": missing initializer for " + name); }
     rest = String.substring(rest, initializer + 3, -1);
-    var finish = String.indexOf(rest, "\n};");
+    var finish = String.indexOf(rest, "};");
     if (finish < 0) { zbFail(what + ": unterminated array " + name); }
     return String.substring(rest, 0, finish);
 }
@@ -216,7 +227,7 @@ func main(args) {
     var sourceTable = "";
     var sourceChip = "";
     var sourceLicense = "";
-    var imported = "src/drivers/rtl8822b-tables.inc";
+    var imported = "src/drivers/wifi/rtl8822b/rtl8822b.c";
     var binaryLicense =
         "userland/base/licenses/rtl8822b-tables/LICENSE";
     var i = 0;
@@ -292,9 +303,9 @@ func main(args) {
         var sourceBody = arrayBody(tableText, name, "upstream table source");
         var importedBody = arrayBody(importedText, name,
             "imported table data");
-        if (sourceBody != importedBody) {
-            zbFail(name + ": data stream is not an exact mechanical copy");
-        }
+        // Formatting may change whitespace, but every ordered value must match.
+        requireNumbersEqual(numberTokens(importedBody, "imported " + name),
+            numberTokens(sourceBody, "upstream " + name), name + " data stream");
         if (countHexWords(sourceBody) != expectedWords[j] ||
             countHexWords(importedBody) != expectedWords[j] ||
             (expectedWords[j] & 1) != 0) {
@@ -353,8 +364,9 @@ func main(args) {
     var counts = ["rtw8822b_mac, 250", "rtw8822b_agc, 20302",
         "rtw8822b_bb, 2984", "rtw8822b_rf_a, 10178",
         "rtw8822b_rf_b, 8904"];
+    var compactImported = withoutWhitespace(importedText);
     for (j in 0..Array.size(counts)) {
-        requireText(importedText, counts[j], "section metadata");
+        requireText(compactImported, withoutWhitespace(counts[j]), "section metadata");
     }
 
     rejectText(importedText, "#include", "imported table data");

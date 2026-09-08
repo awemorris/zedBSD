@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-boot.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-boot.h"
 
 #define TEST_PNVM_CAPACITY                         256U
 #define TEST_EVENT_COUNT                            32U
@@ -141,7 +141,7 @@ static void test_bind_stop_failure_requires_cleanup(void);
 
 /* Supplies one exact synthetic firmware/PNVM pair to the coordinator. */
 int
-intel_ax211_firmware_files_load(
+drv_intel_ax211_firmware_files_load(
 	struct intel_ax211_firmware_files *files)
 {
 	struct test_fixture *fixture;
@@ -167,7 +167,7 @@ intel_ax211_firmware_files_load(
 
 /* Scribbles source storage to prove the command table is coordinator-owned. */
 void
-intel_ax211_firmware_files_release(
+drv_intel_ax211_firmware_files_release(
 	struct intel_ax211_firmware_files *files)
 {
 	struct test_fixture *fixture;
@@ -184,7 +184,7 @@ intel_ax211_firmware_files_release(
 
 /* Creates stable fake DMA ownership for all coordinator checks. */
 int
-intel_ax211_dma_prepare_boot(
+drv_intel_ax211_dma_prepare_boot(
 	struct drv_dma_device *device,
 	const uint8_t *firmware_bytes,
 	size_t firmware_length,
@@ -230,7 +230,7 @@ intel_ax211_dma_prepare_boot(
 
 /* Records the accepted-ALIVE ownership transition. */
 void
-intel_ax211_dma_release_boot_images(
+drv_intel_ax211_dma_release_boot_images(
 	struct intel_ax211_dma_resources *resources)
 {
 	struct test_fixture *fixture;
@@ -247,7 +247,7 @@ intel_ax211_dma_release_boot_images(
 
 /* Accepts only a copied PNVM after accepted-ALIVE image retirement. */
 int
-intel_ax211_dma_prepare_pnvm(
+drv_intel_ax211_dma_prepare_pnvm(
 	const uint8_t *pnvm_bytes,
 	size_t pnvm_length,
 	const struct intel_ax211_pnvm_manifest *manifest,
@@ -269,7 +269,7 @@ intel_ax211_dma_prepare_pnvm(
 
 /* Releases fake DMA only after the test stop boundary. */
 void
-intel_ax211_dma_release(
+drv_intel_ax211_dma_release(
 	struct intel_ax211_dma_resources *resources)
 {
 	struct test_fixture *fixture;
@@ -284,7 +284,7 @@ intel_ax211_dma_release(
 
 /* Records the first card-ready transition. */
 int
-intel_ax211_mmio_prepare_card_hw(
+drv_intel_ax211_mmio_prepare_card_hw(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == &active_fixture->mmio);
@@ -294,7 +294,7 @@ intel_ax211_mmio_prepare_card_hw(
 
 /* Records or rejects the software-reset transition. */
 int
-intel_ax211_mmio_sw_reset(
+drv_intel_ax211_mmio_sw_reset(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == &active_fixture->mmio);
@@ -306,7 +306,7 @@ intel_ax211_mmio_sw_reset(
 
 /* Records the APM transition. */
 int
-intel_ax211_mmio_apm_init(
+drv_intel_ax211_mmio_apm_init(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == &active_fixture->mmio);
@@ -316,7 +316,7 @@ intel_ax211_mmio_apm_init(
 
 /* Records or rejects Gen3 context publication. */
 int
-intel_ax211_mmio_publish_gen3(
+drv_intel_ax211_mmio_publish_gen3(
 	struct intel_ax211_mmio *mmio,
 	const struct intel_ax211_mmio_boot *boot)
 {
@@ -332,7 +332,7 @@ intel_ax211_mmio_publish_gen3(
 
 /* Records or rejects the bus-master stop boundary. */
 int
-intel_ax211_mmio_stop(
+drv_intel_ax211_mmio_stop(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == &active_fixture->mmio);
@@ -345,7 +345,7 @@ intel_ax211_mmio_stop(
 
 /* Initializes the minimum command-ring state used by the real command layer. */
 int
-intel_ax211_transport_configure_msix(
+drv_intel_ax211_transport_configure_msix(
 	struct intel_ax211_transport *transport)
 {
 	test_trace(active_fixture, 'X');
@@ -355,7 +355,7 @@ intel_ax211_transport_configure_msix(
 
 /* Initializes or rejects the fake transport rings. */
 int
-intel_ax211_transport_initialize_rings(
+drv_intel_ax211_transport_initialize_rings(
 	struct intel_ax211_transport *transport)
 {
 	int result;
@@ -363,7 +363,7 @@ intel_ax211_transport_initialize_rings(
 	test_trace(active_fixture, 'R');
 	if (active_fixture->fail_stage == TEST_FAIL_RINGS)
 		return INTEL_AX211_TRANSPORT_IO;
-	result = intel_ax211_ring_init(&transport->command_ring,
+	result = drv_intel_ax211_ring_init(&transport->command_ring,
 	    TEST_COMMAND_QUEUE, INTEL_AX211_COMMAND_RING_SIZE);
 	assert(result == INTEL_AX211_OK);
 	transport->rings_initialized = 1U;
@@ -373,7 +373,7 @@ intel_ax211_transport_initialize_rings(
 
 /* Counts every exact RX descriptor publication. */
 int
-intel_ax211_transport_publish_rx_descriptor(
+drv_intel_ax211_transport_publish_rx_descriptor(
 	struct intel_ax211_transport *transport,
 	uint16_t index,
 	uint64_t device_address)
@@ -391,7 +391,7 @@ intel_ax211_transport_publish_rx_descriptor(
 
 /* Records RX activation. */
 int
-intel_ax211_transport_activate_rx(
+drv_intel_ax211_transport_activate_rx(
 	struct intel_ax211_transport *transport)
 {
 	test_trace(active_fixture, 'A');
@@ -401,7 +401,7 @@ intel_ax211_transport_activate_rx(
 
 /* Admits command submission after firmware interrupts are enabled. */
 int
-intel_ax211_transport_enable_firmware_interrupts(
+drv_intel_ax211_transport_enable_firmware_interrupts(
 	struct intel_ax211_transport *transport)
 {
 	test_trace(active_fixture, 'I');
@@ -411,7 +411,7 @@ intel_ax211_transport_enable_firmware_interrupts(
 
 /* Reserves one in-order fake hardware command slot. */
 int
-intel_ax211_transport_command_prepare_inline(
+drv_intel_ax211_transport_command_prepare_inline(
 	struct intel_ax211_transport *transport,
 	const struct intel_ax211_command_id *command,
 	const void *payload,
@@ -424,7 +424,7 @@ intel_ax211_transport_command_prepare_inline(
 	assert(payload_length <= INTEL_AX211_COMMAND_INLINE_PAYLOAD_SIZE);
 	assert(!transport->command_prepared);
 	assert(command->version == 0U);
-	result = intel_ax211_ring_reserve(&transport->command_ring, token);
+	result = drv_intel_ax211_ring_reserve(&transport->command_ring, token);
 	if (result == INTEL_AX211_FULL)
 		return INTEL_AX211_TRANSPORT_FULL;
 	assert(result == INTEL_AX211_OK);
@@ -442,7 +442,7 @@ intel_ax211_transport_command_prepare_inline(
 
 /* The bounded NVM pass never needs the shared external command buffer. */
 int
-intel_ax211_transport_command_prepare_external(
+drv_intel_ax211_transport_command_prepare_external(
 	struct intel_ax211_transport *transport,
 	const struct intel_ax211_command_id *command,
 	const void *payload,
@@ -460,7 +460,7 @@ intel_ax211_transport_command_prepare_external(
 
 /* Rings one prepared fake command. */
 int
-intel_ax211_transport_command_publish(
+drv_intel_ax211_transport_command_publish(
 	struct intel_ax211_transport *transport,
 	const struct intel_ax211_ring_token *token)
 {
@@ -473,7 +473,7 @@ intel_ax211_transport_command_publish(
 
 /* Rolls back only the newest unrung fake command. */
 int
-intel_ax211_transport_command_abort_prepared(
+drv_intel_ax211_transport_command_abort_prepared(
 	struct intel_ax211_transport *transport,
 	const struct intel_ax211_ring_token *token)
 {
@@ -486,13 +486,13 @@ intel_ax211_transport_command_abort_prepared(
 
 /* Retires one in-order fake command slot. */
 int
-intel_ax211_transport_command_complete(
+drv_intel_ax211_transport_command_complete(
 	struct intel_ax211_transport *transport,
 	const struct intel_ax211_ring_token *token)
 {
 	int result;
 
-	result = intel_ax211_ring_complete(&transport->command_ring, token);
+	result = drv_intel_ax211_ring_complete(&transport->command_ring, token);
 	if (result != INTEL_AX211_OK)
 		return INTEL_AX211_TRANSPORT_STALE;
 	return INTEL_AX211_TRANSPORT_OK;
@@ -500,7 +500,7 @@ intel_ax211_transport_command_complete(
 
 /* Reports exact fake hardware command ownership. */
 size_t
-intel_ax211_transport_command_pending_count(
+drv_intel_ax211_transport_command_pending_count(
 	const struct intel_ax211_transport *transport)
 {
 	return transport->command_ring.used;
@@ -508,7 +508,7 @@ intel_ax211_transport_command_pending_count(
 
 /* Returns the oldest fake hardware token. */
 int
-intel_ax211_transport_command_oldest(
+drv_intel_ax211_transport_command_oldest(
 	const struct intel_ax211_transport *transport,
 	struct intel_ax211_ring_token *token)
 {
@@ -521,7 +521,7 @@ intel_ax211_transport_command_oldest(
 
 /* Stops submissions while preserving whether reset cleanup is required. */
 int
-intel_ax211_transport_quiesce(
+drv_intel_ax211_transport_quiesce(
 	struct intel_ax211_transport *transport)
 {
 	test_trace(active_fixture, 'q');
@@ -536,13 +536,13 @@ intel_ax211_transport_quiesce(
 
 /* Clears fake command ownership only after the stop callback succeeded. */
 int
-intel_ax211_transport_command_after_device_reset(
+drv_intel_ax211_transport_command_after_device_reset(
 	struct intel_ax211_transport *transport)
 {
 	int result;
 
 	test_trace(active_fixture, 'z');
-	result = intel_ax211_ring_init(&transport->command_ring,
+	result = drv_intel_ax211_ring_init(&transport->command_ring,
 	    TEST_COMMAND_QUEUE, INTEL_AX211_COMMAND_RING_SIZE);
 	assert(result == INTEL_AX211_OK);
 	transport->command_prepared = 0U;
@@ -744,7 +744,7 @@ test_fixture_init(
 	fixture->ops.post_alive = test_post_alive;
 	fixture->ops.interrupt_drain = test_interrupt_drain;
 	fixture->ops.clock_us = test_clock_us;
-	result = intel_ax211_boot_init(&fixture->boot, &fixture->ops, fixture,
+	result = drv_intel_ax211_boot_init(&fixture->boot, &fixture->ops, fixture,
 	    fixture->dma_device, &fixture->mmio, &fixture->transport, 0x0370U,
 	    INTEL_AX211_RF_TYPE, 7U);
 	assert(result == INTEL_AX211_BOOT_OK);
@@ -1116,7 +1116,7 @@ test_success(void)
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
 	memset(&nvm, 0, sizeof(nvm));
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	if (result != INTEL_AX211_BOOT_OK)
 		fprintf(stderr, "boot result=%d last=%u events=%lu trace=%s\n",
 		    result, fixture.boot.last_error,
@@ -1133,7 +1133,7 @@ test_success(void)
 	assert(fixture.dma_released);
 	assert(nvm.nvm_version == 0x1234U);
 	assert(nvm.valid_24ghz_count == 1U);
-	assert(intel_ax211_boot_command_table(&fixture.boot, &table) ==
+	assert(drv_intel_ax211_boot_command_table(&fixture.boot, &table) ==
 	    INTEL_AX211_BOOT_OK);
 	assert(table.bytes == fixture.boot.command_version_bytes);
 	assert(table.bytes[0] == INTEL_AX211_PROTOCOL_ALIVE_OPCODE);
@@ -1162,14 +1162,14 @@ test_malformed_and_timeout(void)
 	test_fixture_init(&fixture);
 	test_event_add(&fixture, TEST_EVENT_MALFORMED, 0U);
 	memset(&nvm, 0x5a, sizeof(nvm));
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_PROTOCOL);
 	assert(fixture.dma_released);
 	assert(fixture.boot.state == INTEL_AX211_BOOT_STATE_IDLE);
 
 	test_fixture_init(&fixture);
 	test_event_add(&fixture, TEST_EVENT_TIMEOUT, 0U);
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_TIMEOUT);
 	assert(fixture.dma_released);
 }
@@ -1184,14 +1184,14 @@ test_stale_and_duplicate(void)
 	test_fixture_init(&fixture);
 	test_event_add(&fixture, TEST_EVENT_ALIVE, 1U);
 	test_success_events(&fixture);
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_OK);
 	assert(fixture.event_index == fixture.event_count);
 
 	test_fixture_init(&fixture);
 	test_event_add(&fixture, TEST_EVENT_ALIVE, 0U);
 	test_event_add(&fixture, TEST_EVENT_ALIVE, 0U);
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_DUPLICATE);
 	assert(fixture.dma_released);
 }
@@ -1225,7 +1225,7 @@ test_partial_failure_unwind(void)
 		test_fixture_init(&fixture);
 		fixture.fail_stage = failures[failure_index];
 		test_success_events(&fixture);
-		result = intel_ax211_boot_run(&fixture.boot, &nvm);
+		result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 		assert(result != INTEL_AX211_BOOT_OK);
 		assert(result != INTEL_AX211_BOOT_STOP_REQUIRED);
 		assert(fixture.boot.generation == 8U);
@@ -1254,13 +1254,13 @@ test_stop_retry_retains_dma(void)
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
 	fixture.fail_stage = TEST_FAIL_DRAIN;
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_STOP_REQUIRED);
 	assert(fixture.boot.state == INTEL_AX211_BOOT_STATE_STOP_REQUIRED);
 	assert(fixture.boot.dma_prepared);
 	assert(!fixture.dma_released);
 	fixture.fail_stage = TEST_FAIL_NONE;
-	result = intel_ax211_boot_cleanup(&fixture.boot);
+	result = drv_intel_ax211_boot_cleanup(&fixture.boot);
 	assert(result == INTEL_AX211_BOOT_OK);
 	assert(fixture.dma_released);
 	assert(fixture.boot.state == INTEL_AX211_BOOT_STATE_IDLE);
@@ -1269,12 +1269,12 @@ test_stop_retry_retains_dma(void)
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
 	fixture.fail_stage = TEST_FAIL_STOP;
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_STOP_REQUIRED);
 	assert(fixture.boot.dma_prepared);
 	assert(!fixture.dma_released);
 	fixture.fail_stage = TEST_FAIL_NONE;
-	result = intel_ax211_boot_cleanup(&fixture.boot);
+	result = drv_intel_ax211_boot_cleanup(&fixture.boot);
 	assert(result == INTEL_AX211_BOOT_OK);
 	assert(fixture.dma_released);
 }
@@ -1291,7 +1291,7 @@ test_command_duplicate(void)
 	test_event_add(&fixture, TEST_EVENT_PNVM, 0U);
 	test_event_add(&fixture, TEST_EVENT_ACK_EXTENDED, 0U);
 	test_event_add_index(&fixture, TEST_EVENT_ACK_EXTENDED, 0U);
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_DUPLICATE);
 	assert(fixture.dma_released);
 }
@@ -1307,7 +1307,7 @@ test_command_timeout(void)
 	test_event_add(&fixture, TEST_EVENT_ALIVE, 0U);
 	test_event_add(&fixture, TEST_EVENT_PNVM, 0U);
 	test_event_add(&fixture, TEST_EVENT_TIMEOUT, 0U);
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_TIMEOUT);
 	assert(fixture.dma_released);
 	assert(fixture.transport.command_ring.used == 0U);
@@ -1326,7 +1326,7 @@ test_repeat_generation_isolation(void)
 
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_OK);
 	old_generation = fixture.boot.generation;
 
@@ -1353,7 +1353,7 @@ test_repeat_generation_isolation(void)
 	    old_generation, 0U);
 	test_event_add(&fixture, TEST_EVENT_ACK_NVM, 0U);
 
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_OK);
 	assert(fixture.boot.generation == old_generation + 1U);
 	assert(fixture.epoch_begin_count == 2U);
@@ -1377,7 +1377,7 @@ test_generation_wrap(void)
 	/* A queued ancient epoch-1 packet must not alias the wrapped epoch. */
 	test_event_add_generation(&fixture, TEST_EVENT_ALIVE, 1U, 1U);
 	test_success_events(&fixture);
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_OK);
 	assert(fixture.boot.generation == 1U);
 	assert(fixture.receive_generation == 1U);
@@ -1396,7 +1396,7 @@ test_epoch_begin_failure(void)
 
 	test_fixture_init(&fixture);
 	fixture.fail_stage = TEST_FAIL_EPOCH_BEGIN;
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_IO);
 	assert(fixture.boot.generation == 8U);
 	assert(fixture.epoch_begin_count == 1U);
@@ -1408,7 +1408,7 @@ test_epoch_begin_failure(void)
 	/* The failed epoch is consumed; retry binds a new epoch instead. */
 	fixture.fail_stage = TEST_FAIL_NONE;
 	test_success_events(&fixture);
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_OK);
 	assert(fixture.boot.generation == 9U);
 	assert(fixture.receive_generation == 9U);
@@ -1426,19 +1426,19 @@ test_bind_stop_failure_requires_cleanup(void)
 	test_fixture_init(&fixture);
 	fixture.fail_stage = TEST_FAIL_BIND;
 	fixture.stop_fails = 1U;
-	result = intel_ax211_boot_run(&fixture.boot, &nvm);
+	result = drv_intel_ax211_boot_run(&fixture.boot, &nvm);
 	assert(result == INTEL_AX211_BOOT_STOP_REQUIRED);
 	assert(fixture.boot.state ==
 	    INTEL_AX211_BOOT_STATE_STOP_REQUIRED_NO_DMA);
 	assert(!fixture.boot.dma_prepared);
 	assert(fixture.boot.hardware_touched);
 	assert(fixture.dma_released);
-	assert(intel_ax211_boot_run(&fixture.boot, &nvm) ==
+	assert(drv_intel_ax211_boot_run(&fixture.boot, &nvm) ==
 	    INTEL_AX211_BOOT_INVALID);
 
 	fixture.stop_fails = 0U;
 	fixture.fail_stage = TEST_FAIL_NONE;
-	result = intel_ax211_boot_cleanup(&fixture.boot);
+	result = drv_intel_ax211_boot_cleanup(&fixture.boot);
 	assert(result == INTEL_AX211_BOOT_OK);
 	assert(fixture.boot.state == INTEL_AX211_BOOT_STATE_IDLE);
 	assert(!fixture.boot.hardware_touched);

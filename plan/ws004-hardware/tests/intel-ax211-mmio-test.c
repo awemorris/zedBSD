@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-mmio.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-mmio.h"
 
 #define TEST_EVENT_CAPACITY                              30000U
 #define TEST_CSR_CAPACITY                                  256U
@@ -360,7 +360,7 @@ test_state_init(
 	struct intel_ax211_mmio_profile profile;
 
 	profile = test_profile(mac_type);
-	return intel_ax211_mmio_init(mmio, &test_ops, backend, &profile);
+	return drv_intel_ax211_mmio_init(mmio, &test_ops, backend, &profile);
 }
 
 /* Advances one exact state through prepare, reset, and APM. */
@@ -372,11 +372,11 @@ test_reach_apm(
 	backend->nic_ready_at = backend->now;
 	assert(test_state_init(mmio, backend, INTEL_AX211_MMIO_MAC_SO) ==
 	    INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_prepare_card_hw(mmio) ==
+	assert(drv_intel_ax211_mmio_prepare_card_hw(mmio) ==
 	    INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_sw_reset(mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_sw_reset(mmio) == INTEL_AX211_MMIO_OK);
 	backend->clock_ready_at = backend->now + 30U;
-	assert(intel_ax211_mmio_apm_init(mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_apm_init(mmio) == INTEL_AX211_MMIO_OK);
 }
 
 /* Finds one exact event at or after the supplied trace position. */
@@ -436,23 +436,23 @@ test_exact_profiles(void)
 	    INTEL_AX211_MMIO_OK);
 
 	profile = test_profile(0x42U);
-	assert(intel_ax211_mmio_init(&mmio, &test_ops, &backend, &profile) ==
+	assert(drv_intel_ax211_mmio_init(&mmio, &test_ops, &backend, &profile) ==
 	    INTEL_AX211_MMIO_INVALID);
 	profile = test_profile(INTEL_AX211_MMIO_MAC_SO);
 	profile.rf_type++;
-	assert(intel_ax211_mmio_init(&mmio, &test_ops, &backend, &profile) ==
+	assert(drv_intel_ax211_mmio_init(&mmio, &test_ops, &backend, &profile) ==
 	    INTEL_AX211_MMIO_INVALID);
 	profile = test_profile(INTEL_AX211_MMIO_MAC_SO);
 	profile.cdb = 1U;
-	assert(intel_ax211_mmio_init(&mmio, &test_ops, &backend, &profile) ==
+	assert(drv_intel_ax211_mmio_init(&mmio, &test_ops, &backend, &profile) ==
 	    INTEL_AX211_MMIO_INVALID);
 	profile = test_profile(INTEL_AX211_MMIO_MAC_SO);
 	profile.integrated = 1U;
-	assert(intel_ax211_mmio_init(&mmio, &test_ops, &backend, &profile) ==
+	assert(drv_intel_ax211_mmio_init(&mmio, &test_ops, &backend, &profile) ==
 	    INTEL_AX211_MMIO_INVALID);
 	profile = test_profile(INTEL_AX211_MMIO_MAC_SO);
 	profile.umac_prph_offset += 4U;
-	assert(intel_ax211_mmio_init(&mmio, &test_ops, &backend, &profile) ==
+	assert(drv_intel_ax211_mmio_init(&mmio, &test_ops, &backend, &profile) ==
 	    INTEL_AX211_MMIO_INVALID);
 	assert(backend.event_count == 0U);
 }
@@ -472,7 +472,7 @@ test_prepare_immediate_and_fallback(void)
 	backend.nic_ready_at = 0U;
 	assert(test_state_init(&mmio, &backend, INTEL_AX211_MMIO_MAC_SO) ==
 	    INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_prepare_card_hw(&mmio) ==
+	assert(drv_intel_ax211_mmio_prepare_card_hw(&mmio) ==
 	    INTEL_AX211_MMIO_OK);
 	ready_write = test_find_event(&backend, 0U, TEST_EVENT_CSR_WRITE,
 	    TEST_CSR_HW_IF_CONFIG_REG, TEST_HW_IF_NIC_READY);
@@ -486,7 +486,7 @@ test_prepare_immediate_and_fallback(void)
 	backend.nic_ready_at = 1000U;
 	assert(test_state_init(&mmio, &backend, INTEL_AX211_MMIO_MAC_SOF) ==
 	    INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_prepare_card_hw(&mmio) ==
+	assert(drv_intel_ax211_mmio_prepare_card_hw(&mmio) ==
 	    INTEL_AX211_MMIO_OK);
 	link_write = test_find_event(&backend, 0U, TEST_EVENT_CSR_WRITE,
 	    TEST_CSR_DBG_LINK_PWR_MGMT_REG,
@@ -512,7 +512,7 @@ test_prepare_timeout_and_clock_failure(void)
 	test_backend_init(&backend);
 	assert(test_state_init(&mmio, &backend, INTEL_AX211_MMIO_MAC_SO) ==
 	    INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_prepare_card_hw(&mmio) ==
+	assert(drv_intel_ax211_mmio_prepare_card_hw(&mmio) ==
 	    INTEL_AX211_MMIO_TIMEOUT);
 	assert(!mmio.prepared);
 	assert(test_find_event(&backend, 0U, TEST_EVENT_CSR_WRITE,
@@ -524,7 +524,7 @@ test_prepare_timeout_and_clock_failure(void)
 	backend.clock_stuck = 1;
 	assert(test_state_init(&mmio, &backend, INTEL_AX211_MMIO_MAC_SO) ==
 	    INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_prepare_card_hw(&mmio) ==
+	assert(drv_intel_ax211_mmio_prepare_card_hw(&mmio) ==
 	    INTEL_AX211_MMIO_CLOCK);
 	assert(!mmio.prepared);
 }
@@ -542,18 +542,18 @@ test_reset_and_apm_order(void)
 	backend.nic_ready_at = 0U;
 	assert(test_state_init(&mmio, &backend, INTEL_AX211_MMIO_MAC_SO) ==
 	    INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_sw_reset(&mmio) == INTEL_AX211_MMIO_ORDER);
-	assert(intel_ax211_mmio_apm_init(&mmio) == INTEL_AX211_MMIO_ORDER);
-	assert(intel_ax211_mmio_prepare_card_hw(&mmio) ==
+	assert(drv_intel_ax211_mmio_sw_reset(&mmio) == INTEL_AX211_MMIO_ORDER);
+	assert(drv_intel_ax211_mmio_apm_init(&mmio) == INTEL_AX211_MMIO_ORDER);
+	assert(drv_intel_ax211_mmio_prepare_card_hw(&mmio) ==
 	    INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_apm_init(&mmio) == INTEL_AX211_MMIO_ORDER);
-	assert(intel_ax211_mmio_sw_reset(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_apm_init(&mmio) == INTEL_AX211_MMIO_ORDER);
+	assert(drv_intel_ax211_mmio_sw_reset(&mmio) == INTEL_AX211_MMIO_OK);
 	assert((backend.csr[TEST_CSR_RESET / 4U] & TEST_RESET_SW) != 0U);
 	assert(backend.now == 5000U);
 
 	backend.clock_ready_at = backend.now + 30U;
 	position = backend.event_count;
-	assert(intel_ax211_mmio_apm_init(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_apm_init(&mmio) == INTEL_AX211_MMIO_OK);
 	position = test_find_event(&backend, position, TEST_EVENT_CSR_WRITE,
 	    TEST_CSR_GIO_CHICKEN_BITS, TEST_GIO_L1A_NO_L0S_RX) + 1U;
 	position = test_find_event(&backend, position, TEST_EVENT_CSR_WRITE,
@@ -588,12 +588,12 @@ test_nic_ownership(void)
 	test_reach_apm(&mmio, &backend);
 	backend.going_to_sleep = 1;
 	prph_before = test_count_event(&backend, TEST_EVENT_PRPH_WRITE);
-	assert(intel_ax211_mmio_nic_lock(&mmio) ==
+	assert(drv_intel_ax211_mmio_nic_lock(&mmio) ==
 	    INTEL_AX211_MMIO_TIMEOUT);
 	assert(mmio.nic_lock_depth == 0U);
 	assert((backend.csr[TEST_CSR_GP_CNTRL / 4U] &
 	    TEST_GP_MAC_ACCESS_REQ) == 0U);
-	assert(intel_ax211_mmio_prph_write32(&mmio, 0x1234U, 7U) ==
+	assert(drv_intel_ax211_mmio_prph_write32(&mmio, 0x1234U, 7U) ==
 	    INTEL_AX211_MMIO_NOT_OWNER);
 	assert(test_count_event(&backend, TEST_EVENT_PRPH_WRITE) == prph_before);
 	deadline = test_find_event(&backend, 0U, TEST_EVENT_DEADLINE,
@@ -603,19 +603,19 @@ test_nic_ownership(void)
 	    150000U);
 
 	backend.going_to_sleep = 0;
-	assert(intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
 	assert(mmio.nic_lock_depth == 2U);
-	assert(intel_ax211_mmio_prph_write32(&mmio, 0x1234U, 7U) ==
+	assert(drv_intel_ax211_mmio_prph_write32(&mmio, 0x1234U, 7U) ==
 	    INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_prph_read32(&mmio, 0x1234U, &value) ==
+	assert(drv_intel_ax211_mmio_prph_read32(&mmio, 0x1234U, &value) ==
 	    INTEL_AX211_MMIO_OK);
 	assert(value == 7U);
-	assert(intel_ax211_mmio_nic_unlock(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_nic_unlock(&mmio) == INTEL_AX211_MMIO_OK);
 	assert(mmio.nic_lock_depth == 1U);
-	assert(intel_ax211_mmio_nic_unlock(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_nic_unlock(&mmio) == INTEL_AX211_MMIO_OK);
 	assert(mmio.nic_lock_depth == 0U);
-	assert(intel_ax211_mmio_nic_unlock(&mmio) ==
+	assert(drv_intel_ax211_mmio_nic_unlock(&mmio) ==
 	    INTEL_AX211_MMIO_NOT_OWNER);
 }
 
@@ -630,11 +630,11 @@ test_stop_sequence(void)
 
 	test_backend_init(&backend);
 	test_reach_apm(&mmio, &backend);
-	assert(intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
 	backend.master_disabled_at = backend.now + 6030U;
 	backend.event_count = 0U;
-	assert(intel_ax211_mmio_stop(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_stop(&mmio) == INTEL_AX211_MMIO_OK);
 
 	position = test_find_event(&backend, 0U, TEST_EVENT_CSR_WRITE,
 	    TEST_CSR_GP_CNTRL, TEST_GP_INIT_DONE |
@@ -671,13 +671,13 @@ test_stop_sequence(void)
 	assert(!mmio.prepared);
 	assert(!mmio.reset_done);
 	assert(!mmio.apm_ready);
-	assert(intel_ax211_mmio_sw_reset(&mmio) == INTEL_AX211_MMIO_ORDER);
+	assert(drv_intel_ax211_mmio_sw_reset(&mmio) == INTEL_AX211_MMIO_ORDER);
 
 	/* A stopped object becomes usable only through a fresh full sequence. */
-	assert(intel_ax211_mmio_prepare_card_hw(&mmio) ==
+	assert(drv_intel_ax211_mmio_prepare_card_hw(&mmio) ==
 	    INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_sw_reset(&mmio) == INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_apm_init(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_sw_reset(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_apm_init(&mmio) == INTEL_AX211_MMIO_OK);
 }
 
 /* Proves timeout/failure bounds and fail-closed state publication. */
@@ -692,7 +692,7 @@ test_stop_timeout_and_failure(void)
 	test_reach_apm(&mmio, &backend);
 	start = backend.now;
 	backend.event_count = 0U;
-	assert(intel_ax211_mmio_stop(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_stop(&mmio) == INTEL_AX211_MMIO_OK);
 	assert(mmio.master_disable_timed_out);
 	assert(backend.now == start + 11100U);
 	assert(test_find_event(&backend, 0U, TEST_EVENT_CSR_WRITE,
@@ -705,18 +705,18 @@ test_stop_timeout_and_failure(void)
 
 	test_backend_init(&backend);
 	test_reach_apm(&mmio, &backend);
-	assert(intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
 	backend.fail_access_clear = 1;
 	backend.master_disabled_at = backend.now + 6000U;
 	backend.event_count = 0U;
-	assert(intel_ax211_mmio_stop(&mmio) == INTEL_AX211_MMIO_IO);
+	assert(drv_intel_ax211_mmio_stop(&mmio) == INTEL_AX211_MMIO_IO);
 	assert(!mmio.master_disable_timed_out);
 	assert(test_find_event(&backend, 0U, TEST_EVENT_CSR_WRITE,
 	    TEST_CSR_RESET, TEST_RESET_SW | TEST_RESET_STOP_MASTER) <
 	    backend.event_count);
 	assert(!mmio.prepared && !mmio.reset_done && !mmio.apm_ready);
 	assert(mmio.nic_lock_depth == 0U);
-	assert(intel_ax211_mmio_stop(NULL) == INTEL_AX211_MMIO_INVALID);
+	assert(drv_intel_ax211_mmio_stop(NULL) == INTEL_AX211_MMIO_INVALID);
 }
 
 /* Proves strap preference, OTP fallback, byte order, and nested ownership. */
@@ -741,7 +741,7 @@ test_mac_strap_and_otp(void)
 	backend.csr[TEST_CSR_MAC_ADDRESS1_OTP / 4U] = 0x0000789aU;
 	memset(address, 0xa5, sizeof(address));
 	backend.event_count = 0U;
-	assert(intel_ax211_mmio_read_mac(&mmio, address) ==
+	assert(drv_intel_ax211_mmio_read_mac(&mmio, address) ==
 	    INTEL_AX211_MMIO_OK);
 	assert(memcmp(address, first_expected, sizeof(address)) == 0);
 	assert(test_find_event(&backend, 0U, TEST_EVENT_CSR_READ,
@@ -757,7 +757,7 @@ test_mac_strap_and_otp(void)
 	backend.csr[TEST_CSR_MAC_ADDRESS1_STRAP / 4U] = 0x0000ee00U;
 	memset(address, 0xa5, sizeof(address));
 	backend.event_count = 0U;
-	assert(intel_ax211_mmio_read_mac(&mmio, address) ==
+	assert(drv_intel_ax211_mmio_read_mac(&mmio, address) ==
 	    INTEL_AX211_MMIO_OK);
 	assert(memcmp(address, second_expected, sizeof(address)) == 0);
 	assert(test_find_event(&backend, 0U, TEST_EVENT_CSR_READ,
@@ -765,11 +765,11 @@ test_mac_strap_and_otp(void)
 	    backend.event_count);
 
 	/* One nested reference owned by the caller remains owned afterwards. */
-	assert(intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
-	assert(intel_ax211_mmio_read_mac(&mmio, address) ==
+	assert(drv_intel_ax211_mmio_nic_lock(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_read_mac(&mmio, address) ==
 	    INTEL_AX211_MMIO_OK);
 	assert(mmio.nic_lock_depth == 1U);
-	assert(intel_ax211_mmio_nic_unlock(&mmio) == INTEL_AX211_MMIO_OK);
+	assert(drv_intel_ax211_mmio_nic_unlock(&mmio) == INTEL_AX211_MMIO_OK);
 }
 
 /* Proves invalid/read/unlock failures never replace caller identity bytes. */
@@ -787,7 +787,7 @@ test_mac_transaction_failures(void)
 	assert(test_state_init(&mmio, &backend, INTEL_AX211_MMIO_MAC_SO) ==
 	    INTEL_AX211_MMIO_OK);
 	memcpy(address, unchanged, sizeof(address));
-	assert(intel_ax211_mmio_read_mac(&mmio, address) ==
+	assert(drv_intel_ax211_mmio_read_mac(&mmio, address) ==
 	    INTEL_AX211_MMIO_ORDER);
 	assert(memcmp(address, unchanged, sizeof(address)) == 0);
 
@@ -797,7 +797,7 @@ test_mac_transaction_failures(void)
 	backend.csr[TEST_CSR_MAC_ADDRESS0_OTP / 4U] = 0xffffffffU;
 	backend.csr[TEST_CSR_MAC_ADDRESS1_OTP / 4U] = 0x0000ffffU;
 	memcpy(address, unchanged, sizeof(address));
-	assert(intel_ax211_mmio_read_mac(&mmio, address) ==
+	assert(drv_intel_ax211_mmio_read_mac(&mmio, address) ==
 	    INTEL_AX211_MMIO_INVALID);
 	assert(memcmp(address, unchanged, sizeof(address)) == 0);
 	assert(mmio.nic_lock_depth == 0U);
@@ -806,7 +806,7 @@ test_mac_transaction_failures(void)
 	backend.fail_csr_read = 1;
 	backend.fail_csr_read_offset = TEST_CSR_MAC_ADDRESS0_STRAP;
 	memcpy(address, unchanged, sizeof(address));
-	assert(intel_ax211_mmio_read_mac(&mmio, address) ==
+	assert(drv_intel_ax211_mmio_read_mac(&mmio, address) ==
 	    INTEL_AX211_MMIO_IO);
 	assert(memcmp(address, unchanged, sizeof(address)) == 0);
 	assert(mmio.nic_lock_depth == 0U);
@@ -817,7 +817,7 @@ test_mac_transaction_failures(void)
 	backend.csr[TEST_CSR_MAC_ADDRESS1_STRAP / 4U] = 0x00004455U;
 	backend.fail_access_clear = 1;
 	memcpy(address, unchanged, sizeof(address));
-	assert(intel_ax211_mmio_read_mac(&mmio, address) ==
+	assert(drv_intel_ax211_mmio_read_mac(&mmio, address) ==
 	    INTEL_AX211_MMIO_IO);
 	assert(memcmp(address, unchanged, sizeof(address)) == 0);
 	assert(mmio.nic_lock_depth == 0U);
@@ -839,7 +839,7 @@ test_gen3_publication(void)
 	boot.context_address = UINT64_C(0x1122334455667788);
 	boot.iml_address = UINT64_C(0x8877665544332211);
 	boot.iml_size = INTEL_AX211_MMIO_IML_SIZE;
-	assert(intel_ax211_mmio_publish_gen3(&mmio, &boot) ==
+	assert(drv_intel_ax211_mmio_publish_gen3(&mmio, &boot) ==
 	    INTEL_AX211_MMIO_OK);
 
 	position = test_find_event(&backend, 0U, TEST_EVENT_CSR_WRITE,
@@ -868,7 +868,7 @@ test_gen3_publication(void)
 
 	backend.event_count = 0U;
 	boot.iml_size--;
-	assert(intel_ax211_mmio_publish_gen3(&mmio, &boot) ==
+	assert(drv_intel_ax211_mmio_publish_gen3(&mmio, &boot) ==
 	    INTEL_AX211_MMIO_INVALID);
 	assert(backend.event_count == 0U);
 }
@@ -888,7 +888,7 @@ test_gen3_failed_ownership(void)
 	boot.context_address = 0x1000U;
 	boot.iml_address = 0x2000U;
 	boot.iml_size = INTEL_AX211_MMIO_IML_SIZE;
-	assert(intel_ax211_mmio_publish_gen3(&mmio, &boot) ==
+	assert(drv_intel_ax211_mmio_publish_gen3(&mmio, &boot) ==
 	    INTEL_AX211_MMIO_TIMEOUT);
 	assert(test_find_event(&backend, 0U, TEST_EVENT_CSR_WRITE,
 	    TEST_CSR_LTR_LONG_VAL_AD, TEST_LTR_BOOTSTRAP) ==
@@ -900,7 +900,7 @@ test_gen3_failed_ownership(void)
 	backend.fail_csr_write = 1;
 	backend.fail_csr_write_offset = TEST_CSR_CTXT_INFO_ADDR;
 	backend.event_count = 0U;
-	assert(intel_ax211_mmio_publish_gen3(&mmio, &boot) ==
+	assert(drv_intel_ax211_mmio_publish_gen3(&mmio, &boot) ==
 	    INTEL_AX211_MMIO_IO);
 	assert(backend.event_count == 1U);
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Compile the actual journal against volatile/torn-write crash media."""
+__import__('runpy').run_path(str(__import__('pathlib').Path(__file__).resolve().parents[3] / 'plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py'), run_name='__main__')
 from pathlib import Path
 import os
 import subprocess
@@ -13,7 +14,7 @@ for variant in ('ordinary', 'sanitize'):
     extra = [] if variant == 'ordinary' else ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
     command = ['cc', '-std=c11', '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-I.', '-Isrc',
                *extra, 'plan/ws025-io-memory-cache/tests/journal-crash-host.c',
-               'src/drivers/fs/ufs/ufs-journal.c', '-o', str(binary)]
+               'plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-journal.c', '-o', str(binary)]
     subprocess.run(command, cwd=repo, check=True)
     subprocess.run(['timeout', '60', str(binary)], cwd=repo, check=True,
                    env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=1', 'UBSAN_OPTIONS': 'halt_on_error=1'})
@@ -35,7 +36,7 @@ for variant in ('ordinary', 'sanitize'):
                     '-Iinclude/uapi', '-Isrc', '-DZEDBSD_USER_ABI_LP64', '-Ilibc/include',
                     *extra, *snapshot_extra,
                     'plan/ws025-io-memory-cache/tests/journal-image-owner-host.c',
-                    'src/drivers/fs/ufs/ufs-journal.c',
+                    'plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-journal.c',
                     '-Wl,--gc-sections', '-o', str(owner)], cwd=repo, check=True)
     subprocess.run(['timeout', '60', str(owner)], cwd=repo, check=True,
                    env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=1', 'UBSAN_OPTIONS': 'halt_on_error=1'})

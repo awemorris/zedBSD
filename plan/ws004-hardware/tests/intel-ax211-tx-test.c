@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-tx.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-tx.h"
 
 static uint16_t
 get_le16(const uint8_t *bytes)
@@ -48,15 +48,15 @@ test_api89_version(void)
 	};
 	struct intel_ax211_protocol_command_table table;
 
-	assert(intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
 	    &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_tx_api89_validate(&table) == INTEL_AX211_TX_OK);
+	assert(drv_intel_ax211_tx_api89_validate(&table) == INTEL_AX211_TX_OK);
 	bytes[2U]--;
-	assert(intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
 	    &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_tx_api89_validate(&table) ==
+	assert(drv_intel_ax211_tx_api89_validate(&table) ==
 	    INTEL_AX211_TX_UNSUPPORTED);
-	assert(intel_ax211_tx_api89_validate(NULL) == INTEL_AX211_TX_INVALID);
+	assert(drv_intel_ax211_tx_api89_validate(NULL) == INTEL_AX211_TX_INVALID);
 }
 
 static void
@@ -75,7 +75,7 @@ test_clear_management(void)
 	request.frame = frame;
 	request.length = sizeof(frame);
 	request.frame_class = INTEL_AX211_TX_FRAME_MANAGEMENT;
-	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_OK);
 	assert(prepared.command_length == 52U);
 	assert(prepared.payload_offset == 24U && prepared.payload_length == 8U);
@@ -88,7 +88,7 @@ test_clear_management(void)
 	    frame, 24U) == 0);
 	assert(prepared.connection_generation == 7U && prepared.cookie == 9U);
 	request.band_5ghz = 1U;
-	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_OK);
 	assert(get_le32(prepared.command + 16U) == 0x00004100U);
 }
@@ -119,7 +119,7 @@ test_encrypted_data(void)
 	request.frame_class = INTEL_AX211_TX_FRAME_DATA;
 	request.encrypted = 1U;
 	request.key_index = 2U;
-	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_OK);
 	assert(get_le16(prepared.command + 2U) == 5U);
 	assert(get_le16(prepared.command) == sizeof(frame) - 8U);
@@ -135,11 +135,11 @@ test_encrypted_data(void)
 	assert(prepared.packet_number == request.packet_number);
 
 	frame[31U]++;
-	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_STALE);
 	frame[31U]--;
 	frame[27U] = 0x60U;
-	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_INVALID);
 }
 
@@ -158,7 +158,7 @@ test_qos_padding(void)
 	request.frame = frame;
 	request.length = sizeof(frame);
 	request.frame_class = INTEL_AX211_TX_FRAME_DATA;
-	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_OK);
 	assert(prepared.command_length == 56U);
 	assert(prepared.payload_offset == 26U && prepared.payload_length == 14U);
@@ -202,7 +202,7 @@ test_completion(void)
 	struct intel_ax211_tx_completion completion;
 
 	message = make_completion(payload);
-	assert(intel_ax211_tx_completion_decode(&message, 19U, 1U, 7U,
+	assert(drv_intel_ax211_tx_completion_decode(&message, 19U, 1U, 7U,
 	    &completion) == INTEL_AX211_TX_OK);
 	assert(completion.hardware_generation == 19U);
 	assert(completion.scheduler_sequence == 8U);
@@ -212,22 +212,22 @@ test_completion(void)
 	assert(completion.failure_rts == 2U && completion.failure_frame == 3U);
 
 	put_le32(payload + 40U, 0x83U);
-	assert(intel_ax211_tx_completion_decode(&message, 19U, 1U, 7U,
+	assert(drv_intel_ax211_tx_completion_decode(&message, 19U, 1U, 7U,
 	    &completion) == INTEL_AX211_TX_OK);
 	assert(completion.acknowledged == 0U);
-	assert(intel_ax211_tx_completion_decode(&message, 18U, 1U, 7U,
+	assert(drv_intel_ax211_tx_completion_decode(&message, 18U, 1U, 7U,
 	    &completion) == INTEL_AX211_TX_STALE);
-	assert(intel_ax211_tx_completion_decode(&message, 19U, 1U, 6U,
+	assert(drv_intel_ax211_tx_completion_decode(&message, 19U, 1U, 6U,
 	    &completion) == INTEL_AX211_TX_STALE);
 	message.payload_length = 47U;
-	assert(intel_ax211_tx_completion_decode(&message, 19U, 1U, 7U,
+	assert(drv_intel_ax211_tx_completion_decode(&message, 19U, 1U, 7U,
 	    &completion) == INTEL_AX211_TX_TRUNCATED);
 	message.payload_length = 49U;
-	assert(intel_ax211_tx_completion_decode(&message, 19U, 1U, 7U,
+	assert(drv_intel_ax211_tx_completion_decode(&message, 19U, 1U, 7U,
 	    &completion) == INTEL_AX211_TX_OVERSIZED);
 	message.payload_length = 48U;
 	put_le32(payload + 44U, 65536U);
-	assert(intel_ax211_tx_completion_decode(&message, 19U, 1U, 7U,
+	assert(drv_intel_ax211_tx_completion_decode(&message, 19U, 1U, 7U,
 	    &completion) == INTEL_AX211_TX_FAILED);
 }
 
@@ -245,24 +245,24 @@ test_rejections(void)
 	request.frame = frame;
 	request.length = sizeof(frame);
 	request.frame_class = INTEL_AX211_TX_FRAME_MANAGEMENT;
-	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_OK);
 	request.band_5ghz = 2U;
-	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_INVALID);
 	request.band_5ghz = 0U;
 	request.connection_generation = 0U;
-	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_INVALID);
 	request.connection_generation = 1U;
 	request.length = 23U;
-	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_TRUNCATED);
 	request.length = sizeof(frame);
 	request.encrypted = 1U;
 	request.key_generation = 1U;
 	request.packet_number = 1U;
-	assert(intel_ax211_tx_prepare(&request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) ==
 	    INTEL_AX211_TX_UNSUPPORTED);
 }
 

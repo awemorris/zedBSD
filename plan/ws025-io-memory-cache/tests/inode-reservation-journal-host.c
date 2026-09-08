@@ -10,7 +10,7 @@ static void reservation_write_check(uint64_t first,uint32_t count,const void *bu
  (void)count;(void)buffer;
  if(first==32 || first==8 || first==UFS_SBLOCK_OFFSET/512) {
   REQUIRE(reservation_journal->pending_ready && reservation_journal->image_valid);
-  REQUIRE(ufs_get32(reservation_journal->image,16,0)==3);
+  REQUIRE(drv_ufs_get32(reservation_journal->image,16,0)==3);
   if(reservation_snapshot)REQUIRE(snapshot_calls==3);
  }
 }
@@ -25,16 +25,16 @@ static void reservation_scenario(unsigned directory,unsigned write_fail,unsigned
  disk.d_block_size=512;disk.d_block_count=512;
  memset(&node,0,sizeof(node));node.inode.i_mount=&mountp;
  cg=storage+32*512;for(n=0;n<3;n++)bit_set(cg+256,n);
- ufs_put32(cg,UFS_CG_NIFREE,29,0);ufs_put32(cg,UFS_CG_NDIR,1,0);
+ drv_ufs_put32(cg,UFS_CG_NIFREE,29,0);drv_ufs_put32(cg,UFS_CG_NDIR,1,0);
  fs.super.cstotal_nifree=29;fs.super.cstotal_ndir=1;
  memset(storage+8*512,0xa7,4096);raw=storage+8*512+3*UFS_DINODE_SIZE;
- ufs_put32(raw,UFS_DI_GEN,41,0);memcpy(before,storage+8*512,4096);
+ drv_ufs_put32(raw,UFS_DI_GEN,41,0);memcpy(before,storage+8*512,4096);
  REQUIRE(write_super_summaries(&mountp)==0);REQUIRE(disk_sync(&disk)==0);
  memset(&reservation_request,0,sizeof(reservation_request));reservation_request.type=directory?INODE_DIR:INODE_REG;
  reservation_request.mode=0751;reservation_request.uid=123;reservation_request.gid=456;
  REQUIRE(quota_enable(&fs.quota,QUOTA_USER,1)==0);
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
  fs.journal_enabled=1;fs.snapshot_available=reservation_snapshot;
  reservation_journal=&fs.journal;group_write_check=reservation_write_check;
  storage_writes=storage_syncs=0;snapshot_calls=snapshot_mask=0;
@@ -52,22 +52,22 @@ static void reservation_scenario(unsigned directory,unsigned write_fail,unsigned
  }
  failure_write=failure_write_again=failure_sync=commit_error=0;crash_cut=0;
  memcpy(storage,durable,sizeof(storage));
- REQUIRE(ufs_journal_init(&recovered,&io,380,130,379)==0);REQUIRE(ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
- reservation_journal=&recovered;REQUIRE(ufs_journal_replay(&recovered)==0);
+ REQUIRE(drv_ufs_journal_init(&recovered,&io,380,130,379)==0);REQUIRE(drv_ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
+ reservation_journal=&recovered;REQUIRE(drv_ufs_journal_replay(&recovered)==0);
  committed=bit_test(cg+256,3)!=0;
- REQUIRE(ufs_get32(cg,UFS_CG_NIFREE,0)==29-committed);
- REQUIRE(ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NIFREE,0)==29-committed);
- REQUIRE(ufs_get32(cg,UFS_CG_NDIR,0)==1U+(committed && directory));
- REQUIRE(ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NDIR,0)==1U+(committed && directory));
+ REQUIRE(drv_ufs_get32(cg,UFS_CG_NIFREE,0)==29-committed);
+ REQUIRE(drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NIFREE,0)==29-committed);
+ REQUIRE(drv_ufs_get32(cg,UFS_CG_NDIR,0)==1U+(committed && directory));
+ REQUIRE(drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NDIR,0)==1U+(committed && directory));
  if(committed) {
-  REQUIRE(ufs_get16(raw,UFS_DI_MODE,0)==(inode_type_mode(reservation_request.type)|0751));
-  REQUIRE(ufs_get16(raw,UFS_DI_NLINK,0)==0 && ufs_get64(raw,UFS_DI_SIZE,0)==0);
-  REQUIRE(ufs_get32(raw,UFS_DI_UID,0)==123 && ufs_get32(raw,UFS_DI_GID,0)==456);
-  REQUIRE(ufs_get64(raw,UFS_DI_BLOCKS,0)==0 && ufs_get32(raw,UFS_DI_EXTSIZE,0)==0);
-  REQUIRE(ufs_get32(raw,UFS_DI_GEN,0)==42);
-  for(n=0;n<UFS_NDADDR;n++)REQUIRE(ufs_get64(raw,UFS_DI_DB+n*8,0)==0);
-  for(n=0;n<UFS_NIADDR;n++)REQUIRE(ufs_get64(raw,UFS_DI_IB+n*8,0)==0);
-  for(n=0;n<UFS_NXADDR;n++)REQUIRE(ufs_get64(raw,UFS_DI_EXTB+n*8,0)==0);
+  REQUIRE(drv_ufs_get16(raw,UFS_DI_MODE,0)==(inode_type_mode(reservation_request.type)|0751));
+  REQUIRE(drv_ufs_get16(raw,UFS_DI_NLINK,0)==0 && drv_ufs_get64(raw,UFS_DI_SIZE,0)==0);
+  REQUIRE(drv_ufs_get32(raw,UFS_DI_UID,0)==123 && drv_ufs_get32(raw,UFS_DI_GID,0)==456);
+  REQUIRE(drv_ufs_get64(raw,UFS_DI_BLOCKS,0)==0 && drv_ufs_get32(raw,UFS_DI_EXTSIZE,0)==0);
+  REQUIRE(drv_ufs_get32(raw,UFS_DI_GEN,0)==42);
+  for(n=0;n<UFS_NDADDR;n++)REQUIRE(drv_ufs_get64(raw,UFS_DI_DB+n*8,0)==0);
+  for(n=0;n<UFS_NIADDR;n++)REQUIRE(drv_ufs_get64(raw,UFS_DI_IB+n*8,0)==0);
+  for(n=0;n<UFS_NXADDR;n++)REQUIRE(drv_ufs_get64(raw,UFS_DI_EXTB+n*8,0)==0);
  } else REQUIRE(memcmp(raw,before+3*UFS_DINODE_SIZE,UFS_DINODE_SIZE)==0);
  REQUIRE(memcmp(storage+8*512,before,3*UFS_DINODE_SIZE)==0);
  REQUIRE(memcmp(raw+UFS_DINODE_SIZE,before+4*UFS_DINODE_SIZE,4096-4*UFS_DINODE_SIZE)==0);
@@ -81,9 +81,9 @@ static void reservation_refusals(void)
  storage_fixture(&fs,&node,&mountp,&disk,0,0);disk.d_block_size=512;disk.d_block_count=512;
  memset(&node,0,sizeof(node));node.inode.i_mount=&mountp;
  for(n=0;n<3;n++)bit_set(storage+32*512+256,n);
- ufs_put32(storage+32*512,UFS_CG_NIFREE,29,0);fs.super.cstotal_nifree=29;
+ drv_ufs_put32(storage+32*512,UFS_CG_NIFREE,29,0);fs.super.cstotal_nifree=29;
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);fs.journal_enabled=1;
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);fs.journal_enabled=1;
  memset(&reservation_request,0,sizeof(reservation_request));reservation_request.type=INODE_NONE;
  REQUIRE(quota_enable(&fs.quota,QUOTA_USER,1)==0);
  storage_writes=storage_syncs=0;

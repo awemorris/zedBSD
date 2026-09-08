@@ -14,9 +14,9 @@
 #include <kern/pipe.h>
 #include <kern/quota.h>
 
-#include "src/drivers/fs/ufs/ufs-consistency.h"
-#include "src/drivers/fs/ufs/ufs-disk.h"
-#include "src/drivers/fs/ufs/ufs-endian.h"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-consistency.h"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-disk.h"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -61,7 +61,7 @@ static int actual_create_mode;
 	} while (0)
 
 /* Share the actual production layouts for fault injection. */
-#include "src/drivers/fs/ufs/ufs-private.h"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-private.h"
 #define fixture_ufs_mount_state ufs_mount_state
 #define fixture_ufs_inode_info ufs_inode_info
 
@@ -236,7 +236,7 @@ inode_sync(struct inode *inode)
 const struct file_ops fifo_file_ops = { 0 };
 
 int
-ufs_snapshot_preserve(struct ufs_snapshot *snapshot, uint64_t first,
+drv_ufs_snapshot_preserve(struct ufs_snapshot *snapshot, uint64_t first,
     uint32_t count)
 {
 	(void)snapshot;
@@ -249,15 +249,15 @@ void namecache_remove(struct inode *directory, const struct componentname *name)
 { (void)directory; (void)name; abort(); }
 void inode_dir_changed(struct inode *directory)
 { (void)directory; abort(); }
-int ufs_journal_read(struct ufs_journal *journal, uint64_t first,
+int drv_ufs_journal_read(struct ufs_journal *journal, uint64_t first,
     uint32_t count, void *buffer)
 { (void)journal; (void)first; (void)count; (void)buffer; abort(); }
 #include "../../ws025-io-memory-cache/tests/journal-view-stubs-host.inc"
-int ufs_journal_commitv(struct ufs_journal *journal,
+int drv_ufs_journal_commitv(struct ufs_journal *journal,
     const struct ufs_journal_extent *extents, unsigned count)
 { (void)journal; (void)extents; (void)count; abort(); }
 int
-ufs_journal_commit(struct ufs_journal *journal, uint64_t target,
+drv_ufs_journal_commit(struct ufs_journal *journal, uint64_t target,
     const void *payload, uint32_t sectors)
 {
 	(void)journal;
@@ -268,7 +268,7 @@ ufs_journal_commit(struct ufs_journal *journal, uint64_t target,
 }
 
 int
-ufs_journal_init(struct ufs_journal *journal,
+drv_ufs_journal_init(struct ufs_journal *journal,
     const struct ufs_journal_io *io, uint64_t first, uint32_t count, uint64_t home_sectors)
 {
 	(void)journal;
@@ -280,14 +280,14 @@ ufs_journal_init(struct ufs_journal *journal,
 }
 
 int
-ufs_journal_replay(struct ufs_journal *journal)
+drv_ufs_journal_replay(struct ufs_journal *journal)
 {
 	(void)journal;
 	return EINVAL;
 }
 
 int
-ufs_snapshot_init(struct ufs_snapshot *snapshot,
+drv_ufs_snapshot_init(struct ufs_snapshot *snapshot,
     const struct ufs_journal_io *io, uint64_t volume, uint64_t first,
     uint32_t sectors, struct ufs_snapshot_entry *map, size_t map_count)
 {
@@ -302,21 +302,21 @@ ufs_snapshot_init(struct ufs_snapshot *snapshot,
 }
 
 int
-ufs_snapshot_open(struct ufs_snapshot *snapshot)
+drv_ufs_snapshot_open(struct ufs_snapshot *snapshot)
 {
 	(void)snapshot;
 	return EINVAL;
 }
 
 int
-ufs_snapshot_create(struct ufs_snapshot *snapshot)
+drv_ufs_snapshot_create(struct ufs_snapshot *snapshot)
 {
 	(void)snapshot;
 	return EINVAL;
 }
 
 int
-ufs_snapshot_read(struct ufs_snapshot *snapshot, uint64_t first,
+drv_ufs_snapshot_read(struct ufs_snapshot *snapshot, uint64_t first,
     uint32_t count, void *buffer)
 {
 	(void)snapshot;
@@ -327,7 +327,7 @@ ufs_snapshot_read(struct ufs_snapshot *snapshot, uint64_t first,
 }
 
 int
-ufs_snapshot_delete(struct ufs_snapshot *snapshot)
+drv_ufs_snapshot_delete(struct ufs_snapshot *snapshot)
 {
 	(void)snapshot;
 	return EINVAL;
@@ -538,7 +538,7 @@ clock_realtime(time_t *seconds, long *nanoseconds)
 }
 
 int
-ufs_super_decode(const void *buffer, size_t length, uint64_t sectors,
+drv_ufs_super_decode(const void *buffer, size_t length, uint64_t sectors,
     struct ufs_super *super)
 {
 	(void)buffer;
@@ -574,8 +574,8 @@ initialize_directory_block(void)
 	fake_directory[6] = 4U;
 	fake_directory[7] = 1U;
 	fake_directory[8] = '.';
-	ufs_put32(fake_directory, 0, UFS_ROOT_INO, 0);
-	ufs_put16(fake_directory, 4, UFS_DIRBLKSIZ, 0);
+	drv_ufs_put32(fake_directory, 0, UFS_ROOT_INO, 0);
+	drv_ufs_put16(fake_directory, 4, UFS_DIRBLKSIZ, 0);
 }
 
 static int
@@ -588,8 +588,8 @@ directory_entry_maps(const char *wanted, uint32_t wanted_ino)
 		uint32_t ino;
 		uint8_t name_length;
 
-		ino = ufs_get32(fake_directory, offset, 0);
-		record_length = ufs_get16(fake_directory, offset + 4U, 0);
+		ino = drv_ufs_get32(fake_directory, offset, 0);
+		record_length = drv_ufs_get16(fake_directory, offset + 4U, 0);
 		name_length = fake_directory[offset + 7U];
 		if (record_length < 8U || offset + record_length >
 		    sizeof(fake_directory) || name_length > record_length - 8U)
@@ -607,16 +607,16 @@ static void
 initialize_ufs_cg(void)
 {
 	memset(fake_cg, 0, sizeof(fake_cg));
-	ufs_put32(fake_cg, UFS_CG_MAGIC, UFS_CG_MAGIC_VALUE, 0);
-	ufs_put32(fake_cg, UFS_CG_CGX, 0, 0);
-	ufs_put32(fake_cg, UFS_CG_NDBLK, 64U, 0);
-	ufs_put32(fake_cg, UFS_CG_NDIR, 1U, 0);
-	ufs_put32(fake_cg, UFS_CG_NBFREE, 40U, 0);
-	ufs_put32(fake_cg, UFS_CG_NIFREE, 13U, 0);
-	ufs_put32(fake_cg, UFS_CG_NFFREE, 0, 0);
-	ufs_put32(fake_cg, UFS_CG_IUSEDOFF, 128U, 0);
-	ufs_put32(fake_cg, UFS_CG_FREEOFF, 160U, 0);
-	ufs_put32(fake_cg, UFS_CG_NEXTFREEOFF, 192U, 0);
+	drv_ufs_put32(fake_cg, UFS_CG_MAGIC, UFS_CG_MAGIC_VALUE, 0);
+	drv_ufs_put32(fake_cg, UFS_CG_CGX, 0, 0);
+	drv_ufs_put32(fake_cg, UFS_CG_NDBLK, 64U, 0);
+	drv_ufs_put32(fake_cg, UFS_CG_NDIR, 1U, 0);
+	drv_ufs_put32(fake_cg, UFS_CG_NBFREE, 40U, 0);
+	drv_ufs_put32(fake_cg, UFS_CG_NIFREE, 13U, 0);
+	drv_ufs_put32(fake_cg, UFS_CG_NFFREE, 0, 0);
+	drv_ufs_put32(fake_cg, UFS_CG_IUSEDOFF, 128U, 0);
+	drv_ufs_put32(fake_cg, UFS_CG_FREEOFF, 160U, 0);
+	drv_ufs_put32(fake_cg, UFS_CG_NEXTFREEOFF, 192U, 0);
 	fake_cg[128] = 0x07U;
 }
 

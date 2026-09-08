@@ -35,13 +35,13 @@ main(void)
 	assert(key((unsigned)event) == X68K_KEY_JIS_2);
 	assert(((unsigned)event & X68K_KEY_EVENT_REPEAT) == 0);
 	assert(x68k_keyboard_key_state(&first, '2') == 1);
-	input_keymap_init(&keymap);
+	drv_input_keymap_init(&keymap);
 	memset(&translated_event, 0, sizeof(translated_event));
 	strcpy(translated_event.symbol, "leftshift");
 	translated_event.flags = HAL_KEY_EVENT_PRESS;
-	assert(input_keymap_translate(&keymap, &translated_event, &translated));
+	assert(drv_input_keymap_translate(&keymap, &translated_event, &translated));
 	strcpy(translated_event.symbol, "jis-2");
-	assert(input_keymap_translate(&keymap, &translated_event, &translated));
+	assert(drv_input_keymap_translate(&keymap, &translated_event, &translated));
 	assert((translated & INPUT_KEY_MASK) == '"');
 	event = x68k_keyboard_feed(&first, 0x03U);
 	assert(key((unsigned)event) == X68K_KEY_JIS_2);
@@ -64,10 +64,10 @@ main(void)
 	assert(((unsigned)event & X68K_KEY_EVENT_RELEASE) != 0);
 	assert(x68k_keyboard_key_state(&first, X68K_KEY_SHIFT) == 0);
 	assert(x68k_keyboard_key_state(&second, 'a') == 1);
-	assert(input_key_from_symbol("jis-rbrace") == KEY_BACKSLASH);
-	assert(input_key_from_symbol("jis-yen") == KEY_RESERVED);
-	assert(input_key_from_symbol("jis-kp-2") == KEY_RESERVED);
-	assert(input_key_symbol_supported("jis-kp-2"));
+	assert(drv_input_key_from_symbol("jis-rbrace") == KEY_BACKSLASH);
+	assert(drv_input_key_from_symbol("jis-yen") == KEY_RESERVED);
+	assert(drv_input_key_from_symbol("jis-kp-2") == KEY_RESERVED);
+	assert(drv_input_key_symbol_supported("jis-kp-2"));
 	puts("WS006 X68000 physical keyboard ownership: PASS");
 	return 0;
 }

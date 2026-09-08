@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -206,8 +204,10 @@ net_init(
 	if (error != 0)
 		return error;
 
-	/* Retirement may wait in a driver while the packet worker progresses.
-	 * Create both threads before starting either. */
+	/*
+	 * Retirement may wait in a driver while the packet worker progresses.
+	 * Create both threads before starting either.
+	 */
 	error = kthread_create(wlan_retirement_worker, NULL, SCHED_PRIORITY_DEFAULT,
 	    &worker);
 	if (error != 0)
@@ -304,10 +304,14 @@ net_get_stats(
 	spin_unlock_irqrestore(&input_lock, irq);
 }
 
-/* Advances the producer generation, skipping zero; the caller holds the lock. */
-/* A persistent bounded poll avoids lost wakeups and works while interfaces are
- * down. Per-station backoff controls actual stop attempts; no packet admission
- * or network-worker callback is needed to make retirement progress. */
+/*
+ * Runs the WLAN station retirement poll.
+ *
+ * A persistent bounded poll avoids lost wakeups and works while interfaces
+ * are down.  Per-station backoff controls actual stop attempts; no packet
+ * admission or network-worker callback is needed to make retirement
+ * progress.
+ */
 static void
 wlan_retirement_worker(void *argument)
 {
@@ -322,6 +326,7 @@ wlan_retirement_worker(void *argument)
 	}
 }
 
+/* Advances the producer generation, skipping zero; the caller holds the lock. */
 static void
 worker_generation_advance_locked(
 	void)

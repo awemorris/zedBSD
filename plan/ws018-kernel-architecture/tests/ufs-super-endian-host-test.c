@@ -14,12 +14,12 @@
 #include "ufs-disk.h"
 #include "ufs-super.h"
 #include "ufs-endian.h"
-#define GET16 ufs_get16
-#define GET32 ufs_get32
-#define GET64 ufs_get64
-#define PUT16 ufs_put16
-#define PUT32 ufs_put32
-#define PUT64 ufs_put64
+#define GET16 drv_ufs_get16
+#define GET32 drv_ufs_get32
+#define GET64 drv_ufs_get64
+#define PUT16 drv_ufs_put16
+#define PUT32 drv_ufs_put32
+#define PUT64 drv_ufs_put64
 #define FS_NAME "UFS"
 #define FS_STRUCT_SIZE UFS_FS_STRUCT_SIZE
 #define FS_MAGIC_OFFSET UFS_FS_MAGIC
@@ -100,7 +100,7 @@ decode_superblock(const uint8_t *buffer, size_t length, uint64_t sectors,
 	int *swapped)
 {
 	struct ufs_super super;
-	int error = ufs_super_decode(buffer, length, sectors, &super);
+	int error = drv_ufs_super_decode(buffer, length, sectors, &super);
 
 	if (error == 0) {
 		CHECK(super.size == 8192);

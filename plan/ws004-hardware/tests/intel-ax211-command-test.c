@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-command.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-command.h"
 
 #define TEST_CSR_WORDS                                      3000U
 #define TEST_HBUS_TARG_WRPTR                               0x460U
@@ -312,16 +312,16 @@ test_fixture_init(
 	profile.mac_type = INTEL_AX211_MMIO_MAC_SO;
 	profile.rf_type = INTEL_AX211_MMIO_RF_GF;
 	profile.umac_prph_offset = INTEL_AX211_MMIO_UMAC_PRPH_OFFSET;
-	assert(intel_ax211_transport_init(&fixture->transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture->transport, &test_ops,
 	    &fixture->backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_configure_msix(&fixture->transport) ==
+	assert(drv_intel_ax211_transport_configure_msix(&fixture->transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_initialize_rings(&fixture->transport) ==
+	assert(drv_intel_ax211_transport_initialize_rings(&fixture->transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_enable_runtime_interrupts(
+	assert(drv_intel_ax211_transport_enable_runtime_interrupts(
 	    &fixture->transport) == INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_command_transaction_init(&fixture->command,
+	assert(drv_intel_ax211_command_transaction_init(&fixture->command,
 	    &fixture->transport, max_pending, hardware_epoch) ==
 	    INTEL_AX211_COMMAND_OK);
 	fixture->backend.transaction = &fixture->command;
@@ -407,11 +407,11 @@ test_reset_boundary(
 	uint32_t hardware_epoch,
 	int quiesce_result)
 {
-	assert(intel_ax211_command_after_device_reset(&fixture->command,
+	assert(drv_intel_ax211_command_after_device_reset(&fixture->command,
 	    hardware_epoch) == INTEL_AX211_COMMAND_TRANSPORT_FAILED);
-	assert(intel_ax211_transport_quiesce(&fixture->transport) ==
+	assert(drv_intel_ax211_transport_quiesce(&fixture->transport) ==
 	    quiesce_result);
-	assert(intel_ax211_transport_command_after_device_reset(
+	assert(drv_intel_ax211_transport_command_after_device_reset(
 	    &fixture->transport) == INTEL_AX211_TRANSPORT_OK);
 	assert_zero(fixture->memory.command_slots,
 	    sizeof(fixture->memory.command_slots));
@@ -419,10 +419,10 @@ test_reset_boundary(
 	    sizeof(fixture->memory.command_tfd));
 	assert_zero(fixture->memory.command_external,
 	    sizeof(fixture->memory.command_external));
-	assert(intel_ax211_command_after_device_reset(&fixture->command,
+	assert(drv_intel_ax211_command_after_device_reset(&fixture->command,
 	    hardware_epoch) == INTEL_AX211_COMMAND_OK);
-	assert(!intel_ax211_command_is_poisoned(&fixture->command));
-	assert(intel_ax211_command_pending_count(&fixture->command) == 0U);
+	assert(!drv_intel_ax211_command_is_poisoned(&fixture->command));
+	assert(drv_intel_ax211_command_pending_count(&fixture->command) == 0U);
 }
 
 static void
@@ -431,14 +431,14 @@ test_request_encoders(void)
 	uint8_t payload[4];
 
 	memset(payload, 0xa5, sizeof(payload));
-	assert(intel_ax211_command_nvm_access_complete_encode(payload) ==
+	assert(drv_intel_ax211_command_nvm_access_complete_encode(payload) ==
 	    INTEL_AX211_COMMAND_OK);
 	assert_zero(payload, sizeof(payload));
 	memset(payload, 0xa5, sizeof(payload));
-	assert(intel_ax211_command_nvm_get_info_encode(payload) ==
+	assert(drv_intel_ax211_command_nvm_get_info_encode(payload) ==
 	    INTEL_AX211_COMMAND_OK);
 	assert_zero(payload, sizeof(payload));
-	assert(intel_ax211_command_nvm_access_complete_encode(NULL) ==
+	assert(drv_intel_ax211_command_nvm_access_complete_encode(NULL) ==
 	    INTEL_AX211_COMMAND_INVALID);
 }
 
@@ -452,14 +452,14 @@ test_normal_submit_and_completion(void)
 	size_t response_length;
 
 	test_fixture_init(&fixture, 2U, TEST_EPOCH);
-	assert(intel_ax211_command_submit_nvm_access_complete(&fixture.command,
+	assert(drv_intel_ax211_command_submit_nvm_access_complete(&fixture.command,
 	    100U, 10U, &handle) == INTEL_AX211_COMMAND_OK);
 	assert(handle.token.queue == 0U && handle.token.index == 0U);
 	assert(handle.generation == 1U && handle.hardware_epoch == TEST_EPOCH);
 	assert(fixture.backend.metadata_seen_before_doorbell);
 	assert(fixture.backend.doorbell_count == 1U);
-	assert(intel_ax211_command_pending_count(&fixture.command) == 1U);
-	assert(intel_ax211_transport_command_pending_count(
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 1U);
+	assert(drv_intel_ax211_transport_command_pending_count(
 	    &fixture.transport) == 1U);
 	assert(fixture.memory.command_slots[0] ==
 	    INTEL_AX211_PROTOCOL_NVM_ACCESS_COMPLETE_OPCODE);
@@ -475,17 +475,17 @@ test_normal_submit_and_completion(void)
 	    INTEL_AX211_PROTOCOL_NVM_ACCESS_COMPLETE_OPCODE, 0U,
 	    handle.token.index, 0, NULL, 0U);
 	response_length = 99U;
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, NULL, 0U, &response_length) ==
 	    INTEL_AX211_COMMAND_OK);
 	assert(response_length == 0U);
-	assert(intel_ax211_command_pending_count(&fixture.command) == 0U);
-	assert(intel_ax211_transport_command_pending_count(
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 0U);
+	assert(drv_intel_ax211_transport_command_pending_count(
 	    &fixture.transport) == 0U);
 	assert_zero(fixture.memory.command_slots,
 	    INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE);
 	assert_zero(fixture.memory.command_tfd, INTEL_AX211_TFD_SIZE);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, NULL, 0U, &response_length) ==
 	    INTEL_AX211_COMMAND_DUPLICATE);
 }
@@ -505,18 +505,18 @@ test_response_and_ordering(void)
 
 	test_fixture_init(&fixture, 2U, TEST_EPOCH);
 	memset(payload, 0x3c, sizeof(payload));
-	assert(intel_ax211_command_submit_nvm_get_info(&fixture.command,
+	assert(drv_intel_ax211_command_submit_nvm_get_info(&fixture.command,
 	    10U, 20U, &first) == INTEL_AX211_COMMAND_OK);
 	assert(fixture.memory.command_slots[7] == 0U);
-	assert(intel_ax211_command_submit_nvm_access_complete(&fixture.command,
+	assert(drv_intel_ax211_command_submit_nvm_access_complete(&fixture.command,
 	    11U, 20U, &second) == INTEL_AX211_COMMAND_OK);
-	assert(intel_ax211_command_submit_nvm_access_complete(&fixture.command,
+	assert(drv_intel_ax211_command_submit_nvm_access_complete(&fixture.command,
 	    12U, 20U, &third) == INTEL_AX211_COMMAND_FULL);
 	event_length = make_event(event, sizeof(event),
 	    INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 	    INTEL_AX211_PROTOCOL_NVM_ACCESS_COMPLETE_OPCODE, 0U,
 	    second.token.index, 0, NULL, 0U);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, NULL, 0U, &response_length) ==
 	    INTEL_AX211_COMMAND_OUT_OF_ORDER);
 
@@ -524,13 +524,13 @@ test_response_and_ordering(void)
 	    INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 	    INTEL_AX211_PROTOCOL_NVM_GET_INFO_OPCODE, 0U,
 	    first.token.index, 0, payload, sizeof(payload));
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH - 1U, response, sizeof(response),
 	    &response_length) == INTEL_AX211_COMMAND_STALE);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, response, sizeof(response) - 1U,
 	    &response_length) == INTEL_AX211_COMMAND_BUFFER_TOO_SMALL);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, response, sizeof(response),
 	    &response_length) == INTEL_AX211_COMMAND_OK);
 	assert(response_length == sizeof(response));
@@ -540,10 +540,10 @@ test_response_and_ordering(void)
 	    INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 	    INTEL_AX211_PROTOCOL_NVM_ACCESS_COMPLETE_OPCODE, 0U,
 	    second.token.index, 0, NULL, 0U);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, NULL, 0U, &response_length) ==
 	    INTEL_AX211_COMMAND_OK);
-	assert(intel_ax211_command_pending_count(&fixture.command) == 0U);
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 0U);
 }
 
 static void
@@ -559,20 +559,20 @@ test_timeout_poison_no_reuse_and_late_completion(void)
 	uint16_t head;
 
 	test_fixture_init(&fixture, 2U, TEST_EPOCH);
-	assert(intel_ax211_command_submit_nvm_access_complete(&fixture.command,
+	assert(drv_intel_ax211_command_submit_nvm_access_complete(&fixture.command,
 	    100U, 10U, &handle) == INTEL_AX211_COMMAND_OK);
 	memcpy(slot_copy, fixture.memory.command_slots, sizeof(slot_copy));
 	head = fixture.transport.command_ring.head;
-	assert(intel_ax211_command_timeout_oldest(&fixture.command, 109U,
+	assert(drv_intel_ax211_command_timeout_oldest(&fixture.command, 109U,
 	    &observed) == INTEL_AX211_COMMAND_PENDING);
 	assert(observed.generation == handle.generation);
-	assert(intel_ax211_command_timeout_oldest(&fixture.command, 110U,
+	assert(drv_intel_ax211_command_timeout_oldest(&fixture.command, 110U,
 	    &observed) == INTEL_AX211_COMMAND_TIMEOUT);
-	assert(intel_ax211_command_is_poisoned(&fixture.command));
-	assert(intel_ax211_command_pending_count(&fixture.command) == 1U);
-	assert(intel_ax211_transport_command_pending_count(
+	assert(drv_intel_ax211_command_is_poisoned(&fixture.command));
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 1U);
+	assert(drv_intel_ax211_transport_command_pending_count(
 	    &fixture.transport) == 1U);
-	assert(intel_ax211_command_submit_nvm_access_complete(&fixture.command,
+	assert(drv_intel_ax211_command_submit_nvm_access_complete(&fixture.command,
 	    120U, 10U, &observed) == INTEL_AX211_COMMAND_POISONED);
 	assert(fixture.transport.command_ring.head == head);
 	assert(memcmp(slot_copy, fixture.memory.command_slots,
@@ -582,16 +582,16 @@ test_timeout_poison_no_reuse_and_late_completion(void)
 	    INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 	    INTEL_AX211_PROTOCOL_NVM_ACCESS_COMPLETE_OPCODE, 0U,
 	    handle.token.index, 0, NULL, 0U);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, NULL, 0U, &response_length) ==
 	    INTEL_AX211_COMMAND_OK);
-	assert(intel_ax211_command_pending_count(&fixture.command) == 0U);
-	assert(intel_ax211_command_is_poisoned(&fixture.command));
-	assert(intel_ax211_command_submit_nvm_access_complete(&fixture.command,
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 0U);
+	assert(drv_intel_ax211_command_is_poisoned(&fixture.command));
+	assert(drv_intel_ax211_command_submit_nvm_access_complete(&fixture.command,
 	    130U, 10U, &observed) == INTEL_AX211_COMMAND_POISONED);
 	test_reset_boundary(&fixture, TEST_EPOCH + 1U,
 	    INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, NULL, 0U, &response_length) ==
 	    INTEL_AX211_COMMAND_STALE);
 }
@@ -605,31 +605,31 @@ test_cancel_and_cancel_all_no_reuse(void)
 	uint8_t slot_copy[INTEL_AX211_TRANSPORT_COMMAND_SLOT_SIZE];
 
 	test_fixture_init(&fixture, 2U, TEST_EPOCH);
-	assert(intel_ax211_command_submit_nvm_access_complete(&fixture.command,
+	assert(drv_intel_ax211_command_submit_nvm_access_complete(&fixture.command,
 	    1U, 10U, &first) == INTEL_AX211_COMMAND_OK);
 	memcpy(slot_copy, fixture.memory.command_slots, sizeof(slot_copy));
-	assert(intel_ax211_command_cancel(&fixture.command, &first) ==
+	assert(drv_intel_ax211_command_cancel(&fixture.command, &first) ==
 	    INTEL_AX211_COMMAND_OK);
-	assert(intel_ax211_command_cancel(&fixture.command, &first) ==
+	assert(drv_intel_ax211_command_cancel(&fixture.command, &first) ==
 	    INTEL_AX211_COMMAND_DUPLICATE);
-	assert(intel_ax211_command_is_poisoned(&fixture.command));
-	assert(intel_ax211_command_pending_count(&fixture.command) == 1U);
+	assert(drv_intel_ax211_command_is_poisoned(&fixture.command));
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 1U);
 	assert(memcmp(slot_copy, fixture.memory.command_slots,
 	    sizeof(slot_copy)) == 0);
 	test_reset_boundary(&fixture, TEST_EPOCH + 1U,
 	    INTEL_AX211_TRANSPORT_FAILED);
 
 	test_fixture_init(&fixture, 2U, TEST_EPOCH);
-	assert(intel_ax211_command_submit_nvm_access_complete(&fixture.command,
+	assert(drv_intel_ax211_command_submit_nvm_access_complete(&fixture.command,
 	    1U, 10U, &first) == INTEL_AX211_COMMAND_OK);
-	assert(intel_ax211_command_submit_nvm_access_complete(&fixture.command,
+	assert(drv_intel_ax211_command_submit_nvm_access_complete(&fixture.command,
 	    2U, 10U, &second) == INTEL_AX211_COMMAND_OK);
-	intel_ax211_command_cancel_all(&fixture.command);
-	assert(intel_ax211_command_is_poisoned(&fixture.command));
-	assert(intel_ax211_command_pending_count(&fixture.command) == 2U);
+	drv_intel_ax211_command_cancel_all(&fixture.command);
+	assert(drv_intel_ax211_command_is_poisoned(&fixture.command));
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 2U);
 	assert(fixture.command.entry[first.token.index].abandoned);
 	assert(fixture.command.entry[second.token.index].abandoned);
-	assert(intel_ax211_transport_command_pending_count(
+	assert(drv_intel_ax211_transport_command_pending_count(
 	    &fixture.transport) == 2U);
 	test_reset_boundary(&fixture, TEST_EPOCH + 1U,
 	    INTEL_AX211_TRANSPORT_FAILED);
@@ -649,17 +649,17 @@ test_ambiguous_doorbell_and_late_completion(void)
 
 	test_fixture_init(&fixture, 2U, TEST_EPOCH);
 	fixture.backend.fail_doorbell = 1;
-	assert(intel_ax211_command_submit_nvm_access_complete(&fixture.command,
+	assert(drv_intel_ax211_command_submit_nvm_access_complete(&fixture.command,
 	    10U, 10U, &handle) == INTEL_AX211_COMMAND_DOORBELL_FAILED);
 	assert(fixture.backend.metadata_seen_before_doorbell);
 	assert(fixture.transport.command_reset_required);
-	assert(intel_ax211_command_is_poisoned(&fixture.command));
-	assert(intel_ax211_command_pending_count(&fixture.command) == 1U);
-	assert(intel_ax211_transport_command_pending_count(
+	assert(drv_intel_ax211_command_is_poisoned(&fixture.command));
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 1U);
+	assert(drv_intel_ax211_transport_command_pending_count(
 	    &fixture.transport) == 1U);
 	memcpy(slot_copy, fixture.memory.command_slots, sizeof(slot_copy));
 	head = fixture.transport.command_ring.head;
-	assert(intel_ax211_command_submit_nvm_access_complete(&fixture.command,
+	assert(drv_intel_ax211_command_submit_nvm_access_complete(&fixture.command,
 	    20U, 10U, &rejected) == INTEL_AX211_COMMAND_POISONED);
 	assert(fixture.transport.command_ring.head == head);
 	assert(memcmp(slot_copy, fixture.memory.command_slots,
@@ -670,11 +670,11 @@ test_ambiguous_doorbell_and_late_completion(void)
 	    INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 	    INTEL_AX211_PROTOCOL_NVM_ACCESS_COMPLETE_OPCODE, 0U,
 	    handle.token.index, 0, NULL, 0U);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, NULL, 0U, &response_length) ==
 	    INTEL_AX211_COMMAND_OK);
-	assert(intel_ax211_command_pending_count(&fixture.command) == 0U);
-	assert(intel_ax211_command_is_poisoned(&fixture.command));
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 0U);
+	assert(drv_intel_ax211_command_is_poisoned(&fixture.command));
 	assert(fixture.transport.command_reset_required);
 	test_reset_boundary(&fixture, TEST_EPOCH + 1U,
 	    INTEL_AX211_TRANSPORT_OK);
@@ -707,17 +707,17 @@ test_external_submit_timeout_and_reset(void)
 
 	/* The 1940-byte scan-sized payload automatically selects external DMA. */
 	test_fixture_init(&fixture, 2U, TEST_EPOCH);
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    100U, 10U, &handle) == INTEL_AX211_COMMAND_OK);
 	assert(fixture.transport.command_external_active);
 	assert(memcmp(fixture.memory.command_external +
 	    INTEL_AX211_WIDE_COMMAND_HEADER_SIZE, payload,
 	    sizeof(payload)) == 0);
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    101U, 10U, &observed) == INTEL_AX211_COMMAND_FULL);
 	event_length = make_event(event, sizeof(event), 1U, 0x0dU, 0U,
 	    handle.token.index, 0, NULL, 0U);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, NULL, 0U, &response_length) ==
 	    INTEL_AX211_COMMAND_OK);
 	assert(!fixture.transport.command_external_active);
@@ -726,22 +726,22 @@ test_external_submit_timeout_and_reset(void)
 
 	/* Oversized requests fail before reserving a token or copying bytes. */
 	request.payload_length = INTEL_AX211_COMMAND_EXTERNAL_PAYLOAD_SIZE + 1U;
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    120U, 10U, &observed) == INTEL_AX211_COMMAND_INVALID);
-	assert(intel_ax211_command_pending_count(&fixture.command) == 0U);
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 0U);
 	request.payload_length = sizeof(payload);
 
 	/* Timeout poisons admission while retaining the exact DMA contents. */
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    200U, 10U, &handle) == INTEL_AX211_COMMAND_OK);
 	memcpy(snapshot, fixture.memory.command_external +
 	    INTEL_AX211_WIDE_COMMAND_HEADER_SIZE, sizeof(snapshot));
-	assert(intel_ax211_command_timeout_oldest(&fixture.command, 210U,
+	assert(drv_intel_ax211_command_timeout_oldest(&fixture.command, 210U,
 	    &observed) == INTEL_AX211_COMMAND_TIMEOUT);
 	assert(fixture.transport.command_external_active);
 	assert(memcmp(snapshot, fixture.memory.command_external +
 	    INTEL_AX211_WIDE_COMMAND_HEADER_SIZE, sizeof(snapshot)) == 0);
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    211U, 10U, &observed) == INTEL_AX211_COMMAND_POISONED);
 	test_reset_boundary(&fixture, TEST_EPOCH + 1U,
 	    INTEL_AX211_TRANSPORT_FAILED);
@@ -749,7 +749,7 @@ test_external_submit_timeout_and_reset(void)
 	/* An ambiguous doorbell retains ownership until the same reset proof. */
 	test_fixture_init(&fixture, 2U, TEST_EPOCH);
 	fixture.backend.fail_doorbell = 1;
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    300U, 10U, &handle) ==
 	    INTEL_AX211_COMMAND_DOORBELL_FAILED);
 	assert(fixture.transport.command_external_active);
@@ -789,12 +789,12 @@ test_variable_response_lengths(void)
 	for (index = 0U; index < 3U; index++) {
 		length = accepted_length[index];
 		test_fixture_init(&fixture, 1U, TEST_EPOCH);
-		assert(intel_ax211_command_submit(&fixture.command, &request,
+		assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 		    10U, 20U, &handle) == INTEL_AX211_COMMAND_OK);
 		event_length = make_event(event, sizeof(event), 1U, 0x08U, 0U,
 		    handle.token.index, 0, payload, length);
 		response_length = 0U;
-		assert(intel_ax211_command_complete(&fixture.command, event,
+		assert(drv_intel_ax211_command_complete(&fixture.command, event,
 		    event_length, TEST_EPOCH, response, sizeof(response),
 		    &response_length) == INTEL_AX211_COMMAND_OK);
 		assert(response_length == length);
@@ -803,42 +803,42 @@ test_variable_response_lengths(void)
 
 	/* Both ends of the range are fail-closed and retire the bad command. */
 	test_fixture_init(&fixture, 1U, TEST_EPOCH);
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    10U, 20U, &handle) == INTEL_AX211_COMMAND_OK);
 	event_length = make_event(event, sizeof(event), 1U, 0x08U, 0U,
 	    handle.token.index, 0, payload, 19U);
 	response_length = 99U;
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, response, sizeof(response),
 	    &response_length) == INTEL_AX211_COMMAND_MALFORMED);
 	assert(response_length == 0U);
-	assert(intel_ax211_command_pending_count(&fixture.command) == 0U);
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 0U);
 
 	test_fixture_init(&fixture, 1U, TEST_EPOCH);
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    10U, 20U, &handle) == INTEL_AX211_COMMAND_OK);
 	event_length = make_event(event, sizeof(event), 1U, 0x08U, 0U,
 	    handle.token.index, 0, payload, 461U);
 	response_length = 99U;
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, response, sizeof(response),
 	    &response_length) == INTEL_AX211_COMMAND_MALFORMED);
 	assert(response_length == 0U);
-	assert(intel_ax211_command_pending_count(&fixture.command) == 0U);
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 0U);
 
 	/* Capacity is checked against the accepted actual response length. */
 	test_fixture_init(&fixture, 1U, TEST_EPOCH);
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    10U, 20U, &handle) == INTEL_AX211_COMMAND_OK);
 	event_length = make_event(event, sizeof(event), 1U, 0x08U, 0U,
 	    handle.token.index, 0, payload, 24U);
 	response_length = 99U;
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, response, 23U, &response_length) ==
 	    INTEL_AX211_COMMAND_BUFFER_TOO_SMALL);
 	assert(response_length == 0U);
-	assert(intel_ax211_command_pending_count(&fixture.command) == 1U);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 1U);
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, response, 24U, &response_length) ==
 	    INTEL_AX211_COMMAND_OK);
 	assert(response_length == 24U);
@@ -861,26 +861,26 @@ test_generation_and_validation(void)
 	request.command.version = 3U;
 	request.response_version = 4U;
 	fixture.command.next_generation = UINT32_MAX;
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    1U, 2U, &handle) == INTEL_AX211_COMMAND_OK);
 	assert(handle.generation == UINT32_MAX);
 	event_length = make_event(event, sizeof(event), 1U, 2U, 0U,
 	    handle.token.index, 0, NULL, 0U);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, NULL, 0U, &response_length) ==
 	    INTEL_AX211_COMMAND_OK);
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    3U, 2U, &handle) == INTEL_AX211_COMMAND_OK);
 	assert(handle.generation == 1U);
 	event_length = make_event(event, sizeof(event), 1U, 2U, 0U,
 	    handle.token.index, 0, NULL, 0U);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, NULL, 0U, &response_length) ==
 	    INTEL_AX211_COMMAND_OK);
 
 	/* API89 carries a logical legacy command as a wide LONG_GROUP command. */
 	request.command.group = INTEL_AX211_PROTOCOL_GROUP_LEGACY;
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    4U, 2U, &handle) == INTEL_AX211_COMMAND_OK);
 	assert(fixture.memory.command_slots[
 	    (size_t)handle.token.index *
@@ -898,23 +898,23 @@ test_generation_and_validation(void)
 	event_length = make_event(event, sizeof(event),
 	    INTEL_AX211_PROTOCOL_GROUP_LONG, 2U, 0U,
 	    handle.token.index, 0, NULL, 0U);
-	assert(intel_ax211_command_complete(&fixture.command, event,
+	assert(drv_intel_ax211_command_complete(&fixture.command, event,
 	    event_length, TEST_EPOCH, NULL, 0U, &response_length) ==
 	    INTEL_AX211_COMMAND_OK);
 	request.command.group = 1U;
 	request.command.version = INTEL_AX211_PROTOCOL_UNKNOWN_VERSION;
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    4U, 2U, &handle) == INTEL_AX211_COMMAND_INVALID);
 	request.command.version = 3U;
 	request.minimum_response_length = 2U;
 	request.maximum_response_length = 1U;
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    4U, 2U, &handle) == INTEL_AX211_COMMAND_INVALID);
 	request.minimum_response_length = 0U;
 	request.maximum_response_length =
 	    INTEL_AX211_COMMAND_EXTERNAL_PAYLOAD_SIZE + 1U;
-	assert(intel_ax211_command_submit(&fixture.command, &request,
+	assert(drv_intel_ax211_command_submit(&fixture.command, &request,
 	    4U, 2U, &handle) == INTEL_AX211_COMMAND_INVALID);
-	assert(intel_ax211_command_transaction_init(NULL, &fixture.transport,
+	assert(drv_intel_ax211_command_transaction_init(NULL, &fixture.transport,
 	    1U, TEST_EPOCH) == INTEL_AX211_COMMAND_INVALID);
 }

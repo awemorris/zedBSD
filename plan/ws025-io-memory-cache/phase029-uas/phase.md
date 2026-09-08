@@ -10,6 +10,8 @@ Parent: [WS025](../ws.md)
 
 依存: ws025-p019、ws025-p024、UAS 対応実機と descriptor
 
+追加の先行条件: [ws025-p031](../phase031-driver-layout-style/phase.md) のドライバ整理を完了してから実装する。下記の旧ソースパスは p031 の移行表で解決する。既存の採用条件は維持する。
+
 ## 目的と境界
 
 BOT と別 owner の UAS driver を実装する。

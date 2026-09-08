@@ -27,7 +27,7 @@
 #define TEST_DISK_MAX 8U
 #define TEST_PARTITION_MAX 4U
 
-int ufs_identify(struct disk *, struct block_identity *);
+int drv_ufs_identify(struct disk *, struct block_identity *);
 
 struct test_disk_state {
 	uint8_t metadata[TEST_METADATA_BYTES];
@@ -437,7 +437,7 @@ static const struct filesystem_type callback_b_type = {
 
 static const struct filesystem_type ufs_type = {
 	.fs_name = "ufs-identity-test",
-	.identify = ufs_identify,
+	.identify = drv_ufs_identify,
 	.mount = dummy_mount,
 };
 
@@ -527,34 +527,34 @@ build_ufs(struct disk *disk, struct test_disk_state *state, int swapped)
 	uint8_t *super = state->metadata + UFS_SBLOCK_OFFSET;
 
 	disk->d_block_count = 16384U;
-	ufs_put32(super, UFS_FS_SBLKNO, 64U, swapped);
-	ufs_put32(super, UFS_FS_CBLKNO, 72U, swapped);
-	ufs_put32(super, UFS_FS_IBLKNO, 80U, swapped);
-	ufs_put32(super, UFS_FS_DBLKNO, 96U, swapped);
-	ufs_put32(super, UFS_FS_NCG, 1U, swapped);
-	ufs_put32(super, UFS_FS_BSIZE, 8192U, swapped);
-	ufs_put32(super, UFS_FS_FSIZE, 1024U, swapped);
-	ufs_put32(super, UFS_FS_FRAG, 8U, swapped);
-	ufs_put32(super, UFS_FS_BSHIFT, 13U, swapped);
-	ufs_put32(super, UFS_FS_FSHIFT, 10U, swapped);
-	ufs_put32(super, UFS_FS_FRAGSHIFT, 3U, swapped);
-	ufs_put32(super, UFS_FS_FSBTODB, 1U, swapped);
-	ufs_put32(super, UFS_FS_SBSIZE, UFS_FS_STRUCT_SIZE, swapped);
-	ufs_put32(super, UFS_FS_NINDIR, 1024U, swapped);
-	ufs_put32(super, UFS_FS_INOPB, 32U, swapped);
-	ufs_put32(super, UFS_FS_CGSIZE, 512U, swapped);
-	ufs_put32(super, UFS_FS_IPG, 32U, swapped);
-	ufs_put32(super, UFS_FS_FPG, 8192U, swapped);
-	ufs_put64(super, UFS_FS_SBLOCKLOC, UFS_SBLOCK_OFFSET, swapped);
-	ufs_put64(super, UFS_FS_SIZE, 8192U, swapped);
-	ufs_put64(super, UFS_FS_DSIZE, 7000U, swapped);
-	ufs_put32(super, UFS_FS_MAXSYMLINKLEN, 120U, swapped);
-	ufs_put64(super, UFS_FS_MAXFILESIZE,
+	drv_ufs_put32(super, UFS_FS_SBLKNO, 64U, swapped);
+	drv_ufs_put32(super, UFS_FS_CBLKNO, 72U, swapped);
+	drv_ufs_put32(super, UFS_FS_IBLKNO, 80U, swapped);
+	drv_ufs_put32(super, UFS_FS_DBLKNO, 96U, swapped);
+	drv_ufs_put32(super, UFS_FS_NCG, 1U, swapped);
+	drv_ufs_put32(super, UFS_FS_BSIZE, 8192U, swapped);
+	drv_ufs_put32(super, UFS_FS_FSIZE, 1024U, swapped);
+	drv_ufs_put32(super, UFS_FS_FRAG, 8U, swapped);
+	drv_ufs_put32(super, UFS_FS_BSHIFT, 13U, swapped);
+	drv_ufs_put32(super, UFS_FS_FSHIFT, 10U, swapped);
+	drv_ufs_put32(super, UFS_FS_FRAGSHIFT, 3U, swapped);
+	drv_ufs_put32(super, UFS_FS_FSBTODB, 1U, swapped);
+	drv_ufs_put32(super, UFS_FS_SBSIZE, UFS_FS_STRUCT_SIZE, swapped);
+	drv_ufs_put32(super, UFS_FS_NINDIR, 1024U, swapped);
+	drv_ufs_put32(super, UFS_FS_INOPB, 32U, swapped);
+	drv_ufs_put32(super, UFS_FS_CGSIZE, 512U, swapped);
+	drv_ufs_put32(super, UFS_FS_IPG, 32U, swapped);
+	drv_ufs_put32(super, UFS_FS_FPG, 8192U, swapped);
+	drv_ufs_put64(super, UFS_FS_SBLOCKLOC, UFS_SBLOCK_OFFSET, swapped);
+	drv_ufs_put64(super, UFS_FS_SIZE, 8192U, swapped);
+	drv_ufs_put64(super, UFS_FS_DSIZE, 7000U, swapped);
+	drv_ufs_put32(super, UFS_FS_MAXSYMLINKLEN, 120U, swapped);
+	drv_ufs_put64(super, UFS_FS_MAXFILESIZE,
 	    UINT64_C(0x7fffffffffff), swapped);
-	ufs_put32(super, UFS_FS_ID, UINT32_C(0x55667788), swapped);
-	ufs_put32(super, UFS_FS_ID + 4U, UINT32_C(0x99aabbcc), swapped);
+	drv_ufs_put32(super, UFS_FS_ID, UINT32_C(0x55667788), swapped);
+	drv_ufs_put32(super, UFS_FS_ID + 4U, UINT32_C(0x99aabbcc), swapped);
 	memcpy(super + UFS_FS_VOLNAME, "UFS TWO", 7U);
-	ufs_put32(super, UFS_FS_MAGIC, UFS_MAGIC, swapped);
+	drv_ufs_put32(super, UFS_FS_MAGIC, UFS_MAGIC, swapped);
 }
 
 static void
@@ -684,7 +684,7 @@ test_filesystem_formats(void)
 
 	/* Keep the crash-safety regression after other bounded-error coverage. */
 	disk_initialize(&disk, &state, "bad-ufs", 16384U);
-	ufs_put32(state.metadata + UFS_SBLOCK_OFFSET, UFS_FS_MAGIC,
+	drv_ufs_put32(state.metadata + UFS_SBLOCK_OFFSET, UFS_FS_MAGIC,
 	    UFS_MAGIC, 0);
 	CHECK(block_identity_get(&disk, &identity) == EINVAL);
 }
@@ -858,7 +858,7 @@ main(void)
 	CHECK(filesystem_register(&null_type) == 0);
 	CHECK(filesystem_register(&callback_a_type) == 0);
 	CHECK(filesystem_register(&callback_b_type) == 0);
-	CHECK(filesystem_register(&fat_filesystem_type) == 0);
+	CHECK(filesystem_register(&drv_fat_filesystem_type) == 0);
 	CHECK(filesystem_register(&ufs_type) == 0);
 
 	test_dispatcher();

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Production FAT plus maintained deterministic disk/VFS fixture."""
+__import__('runpy').run_path(str(__import__('pathlib').Path(__file__).resolve().parents[3] / 'plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py'), run_name='__main__')
 from pathlib import Path
 import subprocess,sys,json,hashlib,os
 repo=Path(__file__).resolve().parents[3]
 out=Path(sys.argv[1]).resolve();out.relative_to(repo/'plan/ws025-io-memory-cache/temp');out.mkdir(parents=True,exist_ok=False)
-sources=['src/drivers/fs/fat.c','src/kern/io-stats.c','plan/ws025-io-memory-cache/tests/fat-cache-host.c']
+sources=['plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/fat.c','src/kern/io-stats.c','plan/ws025-io-memory-cache/tests/fat-cache-host.c']
 (out/'source.json').write_text(json.dumps({s:hashlib.sha256((repo/s).read_bytes()).hexdigest() for s in sources},indent=2)+'\n')
 commands=[]
 for variant in ('ordinary','sanitize'):

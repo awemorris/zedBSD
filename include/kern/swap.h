@@ -275,4 +275,7 @@ swap_header_uuid_format(
 	char *output,
 	size_t capacity);
 
+unsigned
+swap_fat_extent_count(void);
+
 #endif

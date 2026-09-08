@@ -1,6 +1,7 @@
 #!/bin/sh
 # WS018 KA-T070/KA-T071 independent input/HID ownership host runner.
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/ws018-input-hid.XXXXXX")
@@ -29,13 +30,13 @@ test ! -e "$repo/include/kern/mouse-device.h"
 test ! -e "$repo/include/uapi/zedbsd/mouse.h"
 test ! -e "$repo/src/drivers/pcat-ps2-mouse.c"
 test ! -e "$repo/src/drivers/pc98-busmouse.c"
-test -e "$repo/src/drivers/input-device.c"
-test -e "$repo/src/drivers/input-queue.c"
-test -e "$repo/src/drivers/input-capability.c"
-test -e "$repo/src/drivers/input-keymap.c"
-test -e "$repo/src/drivers/fs/console.c"
-test -e "$repo/src/drivers/hid/ps2-mouse.c"
-test -e "$repo/src/drivers/hid/pc98-busmouse.c"
+test -e "$repo/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/input-device.c"
+test -e "$repo/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/input-queue.c"
+test -e "$repo/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/input-capability.c"
+test -e "$repo/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/input-keymap.c"
+test -e "$repo/src/drivers/generic/console.c"
+test -e "$repo/src/drivers/platform/pcat/ps2-mouse.c"
+test -e "$repo/src/drivers/platform/pc98/pc98-busmouse.c"
 test -e "$repo/include/drivers/hid/ps2-mouse.h"
 test -e "$repo/include/drivers/hid/pc98-busmouse.h"
 
@@ -52,12 +53,12 @@ if rg -n 'src/kern/(console-device|input-(device|queue|capability|keymap)|mouse-
 	exit 1
 fi
 
-test "$(rg -l 'input_device_register\(' "$repo/src/drivers/hid"/*.c | wc -l)" -eq 2
+test "$(rg -l 'drv_input_device_register\(' "$repo/src/drivers/hid"/*.c | wc -l)" -eq 2
 test "$(rg -l '\.open = mouse_input_open' "$repo/src/drivers/hid"/*.c | wc -l)" -eq 2
 
 awk '
-	/input_core_init\(\)/ { core = NR }
-	/console_device_register\(\)/ { console = NR }
+	/drv_input_core_init\(\)/ { core = NR }
+	/drv_console_device_register\(\)/ { console = NR }
 	/kern_platform_input_init\(\)/ { platform = NR }
 	END { exit !(core && console && platform && core < console && console < platform) }
 ' "$repo/src/kern/vfs.c"

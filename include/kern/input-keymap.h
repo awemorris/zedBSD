@@ -46,12 +46,12 @@ struct input_keymap_state {
 	uint8_t kana_lock;
 };
 
-void input_keymap_init(struct input_keymap_state *);
-uint16_t input_key_from_symbol(const char *);
-int input_key_symbol_supported(const char *);
-int input_keymap_event_from_code(uint16_t, int32_t,
+void drv_input_keymap_init(struct input_keymap_state *);
+uint16_t drv_input_key_from_symbol(const char *);
+int drv_input_key_symbol_supported(const char *);
+int drv_input_keymap_event_from_code(uint16_t, int32_t,
 	struct hal_key_event *);
-int input_keymap_translate(struct input_keymap_state *,
+int drv_input_keymap_translate(struct input_keymap_state *,
 	const struct hal_key_event *, uint32_t *);
 
 #endif

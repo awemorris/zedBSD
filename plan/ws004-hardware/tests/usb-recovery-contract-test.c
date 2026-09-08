@@ -7,7 +7,7 @@
  *
  * SPDX-License-Identifier: Zlib
  */
-#include "../../../src/drivers/usb.c"
+#include "../../../src/drivers/usb/usb.c"
 
 #include <errno.h>
 #include <stdarg.h>

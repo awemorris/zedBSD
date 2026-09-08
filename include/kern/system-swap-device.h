@@ -16,7 +16,7 @@
  * copied out only after the facade has returned a complete kernel snapshot.
  */
 int
-system_swap_device_ioctl(
+drv_system_swap_device_ioctl(
 	unsigned long request,
 	uintptr_t argument,
 	int superuser);

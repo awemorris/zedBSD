@@ -19,12 +19,12 @@ for mode in normal sanitize; do
 		"$repo/src/kern/filedesc.c" \
 		"$repo/src/kern/readahead.c" \
 		"$repo/src/kern/backing-claim.c" \
-		"$repo/src/kern/vm-object.c" \
-		"$repo/src/kern/cache-memory.c" \
-		"$repo/src/kern/io-error.c" \
+		"$repo/src/kern/vm.c" \
+		"$repo/src/kern/cache.c" \
+		"$repo/src/kern/io.c" \
 		"$repo/src/kern/writeback.c" \
 		"$repo/src/kern/vmspace.c" \
 		"$repo/plan/ws025-io-memory-cache/tests/file-cache-host.c" \
-		-Wl,--gc-sections -pthread "$repo/src/kern/io-stats.c" -o "$out/$mode"
+		-Wl,--gc-sections -pthread  -o "$out/$mode"
 	timeout 60 "$out/$mode"
 done

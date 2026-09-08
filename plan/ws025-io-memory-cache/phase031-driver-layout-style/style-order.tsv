@@ -1,0 +1,71 @@
+source	ordering
+src/drivers/disklabel/gpt.c	refactored
+src/drivers/disklabel/mbr.c	refactored
+src/drivers/disklabel/pc98.c	consolidated subsystem regions: preserve dependency order
+src/drivers/disklabel/pcat.c	refactored
+src/drivers/disklabel/sun.c	refactored
+src/drivers/disklabel/x68k.c	refactored
+src/drivers/ethernet/dp8390.c	refactored
+src/drivers/fs/fat.c	consolidated subsystem regions: preserve dependency order
+src/drivers/fs/ufs.c	consolidated subsystem regions: preserve dependency order
+src/drivers/generic/console.c	conditional
+src/drivers/generic/dma.c	consolidated subsystem regions: preserve dependency order
+src/drivers/generic/input.c	consolidated subsystem regions: preserve dependency order
+src/drivers/generic/loop.c	refactored
+src/drivers/isa/ne2000.c	refactored
+src/drivers/pci/pci-ehci.c	refactored
+src/drivers/pci/pci-nvme.c	consolidated subsystem regions: preserve dependency order
+src/drivers/pci/pci-pcat.c	refactored
+src/drivers/pci/pci-uhci.c	refactored
+src/drivers/pci/pci-xhci.c	consolidated subsystem regions: preserve dependency order
+src/drivers/pci/pci.c	refactored
+src/drivers/platform/pc98/graphics/backend.c	refactored
+src/drivers/platform/pc98/graphics/display-auto.c	refactored
+src/drivers/platform/pc98/graphics/display-cirrus.c	refactored
+src/drivers/platform/pc98/graphics/display-gdc.c	refactored
+src/drivers/platform/pc98/graphics/display-glyph.c	refactored
+src/drivers/platform/pc98/graphics/pc98-graphics.c	refactored
+src/drivers/platform/pc98/pc98-busmouse.c	conditional
+src/drivers/platform/pc98/pc98-ide.c	refactored
+src/drivers/platform/pc98/pc98-lgy98.c	refactored
+src/drivers/platform/pcat/graphics/backend.c	refactored
+src/drivers/platform/pcat/graphics/font.c	refactored
+src/drivers/platform/pcat/graphics/pcat-graphics.c	refactored
+src/drivers/platform/pcat/graphics/vgafont.c	no-functions
+src/drivers/platform/pcat/pcat-ide.c	refactored
+src/drivers/platform/pcat/ps2-mouse.c	conditional
+src/drivers/platform/rpi4/rpi4-sdhci.c	refactored
+src/drivers/platform/sun4u/sun4u-cmd646.c	refactored
+src/drivers/platform/x68k/x68k-mb89352.c	macro-lifetime: preserve definition order
+src/drivers/platform/x68k/x68k-spc-disk.c	refactored
+src/drivers/usb/usb-cdc-ecm.c	refactored
+src/drivers/usb/usb-cdc-ncm-net.c	refactored
+src/drivers/usb/usb-cdc-ncm.c	refactored
+src/drivers/usb/usb-hid-checkpoint.c	refactored
+src/drivers/usb/usb-hid.c	consolidated subsystem regions: preserve dependency order
+src/drivers/usb/usb-rtl8822bu.c	callback dependencies: preserve original definition order
+src/drivers/usb/usb-storage.c	refactored
+src/drivers/usb/usb.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-assoc.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-boot.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-bss.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-command.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-dma.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-firmware.c	conditional
+src/drivers/wifi/intel-ax211/intel-ax211-init.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-key.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-mmio.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-pci-mmio.c	conditional
+src/drivers/wifi/intel-ax211/intel-ax211-protocol.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-runtime-start.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-runtime.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-rx.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-scan-session.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-scan.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-transport-backend.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-transport.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211-tx.c	refactored
+src/drivers/wifi/intel-ax211/intel-ax211.c	consolidated subsystem regions: preserve dependency order
+src/drivers/wifi/rtl8822b/rtl8822b-security.c	refactored
+src/drivers/wifi/rtl8822b/rtl8822b.c	consolidated subsystem regions: preserve dependency order

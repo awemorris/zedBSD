@@ -13,7 +13,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "../../../src/drivers/usb-cdc-ncm-net.c"
+#include "../../../src/drivers/usb/usb-cdc-ncm-net.c"
 
 static unsigned checks;
 #define CHECK(expression) do { \

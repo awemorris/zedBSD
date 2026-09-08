@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -21,7 +19,7 @@
 #include <kern/disk.h>
 #include <kern/platform.h>
 #include <kern/partition.h>
-#include "drivers/x68k-spc-disk.h"
+#include "drivers/platform/x68k/x68k-spc-disk.h"
 #include "hal/m68k/bsp-x68k/bsp.h"
 #include "hal/m68k/bsp-x68k/scsi.h"
 
@@ -54,18 +52,19 @@ kern_platform_init(
 		return 0;
 
 	/* Selects the X68000 partition scheme and probes the SCSI bus. */
-	partition_set_scheme(&partition_scheme_x68k);
+	partition_set_scheme(&drv_partition_scheme_x68k);
 	disk_registry_reset();
 	x68k_bsp_spc_bus(&bus);
 	initiator = x68k_bsp_scsi_initiator_id();
-	if (x68k_spc_disk_init(&bus, initiator, handoff->common.boot_bios_id) == 0)
+	if (drv_x68k_spc_disk_init(&bus, initiator, handoff->common.boot_bios_id) == 0)
 		return 0;
 
 	/* Publishes every attached target that fits the table. */
 	for (target = 0; target < 7U && count < capacity; target++) {
-		if (x68k_spc_disk_target(target) == NULL)
+		if (drv_x68k_spc_disk_target(target) == NULL)
 			continue;
 
+		/* Describes one present SCSI target for the boot record. */
 		device = &devices[count];
 		hal_memset(device, 0, sizeof(*device));
 		device->device_class = ZEDBSD_DEV_SCSI;
@@ -120,7 +119,7 @@ kern_platform_block_device(
 		return NULL;
 
 	/* Resolves the SPC target that the device names. */
-	disk = x68k_spc_disk_target(device->bios_id);
+	disk = drv_x68k_spc_disk_target(device->bios_id);
 
 	/* Reports the disk. */
 	return disk;

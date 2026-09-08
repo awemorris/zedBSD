@@ -8,6 +8,6 @@
 #define ZEDBSD_DRIVERS_GRAPHICS_PC98_H
 
 int
-pc98_graphics_prepare(void);
+drv_pc98_graphics_prepare(void);
 
 #endif

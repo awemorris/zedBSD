@@ -1,0 +1,34 @@
+{
+  "src/drivers/fs/ufs/ufs-endian.c": [
+    "src/drivers/fs/ufs/ufs-endian.h"
+  ],
+  "src/drivers/fs/ufs/ufs-journal.c": [
+    "src/drivers/fs/ufs/ufs-consistency.h"
+  ],
+  "src/drivers/fs/ufs/ufs-private.h": [
+    "src/drivers/fs/ufs/ufs-disk.h",
+    "src/drivers/fs/ufs/ufs-consistency.h"
+  ],
+  "src/drivers/fs/ufs/ufs-snapshot.c": [
+    "src/drivers/fs/ufs/ufs-consistency.h"
+  ],
+  "src/drivers/fs/ufs/ufs-super.c": [
+    "src/drivers/fs/ufs/ufs-super.h",
+    "src/drivers/fs/ufs/ufs-endian.h"
+  ],
+  "src/drivers/fs/ufs/ufs-super.h": [
+    "src/drivers/fs/ufs/ufs-disk.h"
+  ],
+  "src/drivers/fs/ufs/ufs-vfs.c": [
+    "src/drivers/fs/ufs/ufs-disk.h",
+    "src/drivers/fs/ufs/ufs-endian.h",
+    "src/drivers/fs/ufs/ufs-super.h",
+    "src/drivers/fs/ufs/ufs-consistency.h",
+    "src/drivers/fs/ufs/ufs-private.h"
+  ],
+  "src/drivers/pci-nvme.c": [
+    "src/drivers/pci-nvme-lifecycle.h",
+    "src/drivers/pci-nvme-io-lifecycle.h",
+    "src/drivers/pci-nvme-shutdown-lifecycle.h"
+  ]
+}

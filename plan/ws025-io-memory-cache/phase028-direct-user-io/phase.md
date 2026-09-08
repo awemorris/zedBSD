@@ -10,6 +10,8 @@ Parent: [WS025](../ws.md)
 
 依存: ws025-p022–p024 とコピー律速の測定
 
+追加の先行条件: [ws025-p031](../phase031-driver-layout-style/phase.md) のドライバ整理を完了してから実装する。下記の旧ソースパスは p031 の移行表で解決する。既存の採用条件は維持する。
+
 ## 目的と境界
 
 必要な workload で page-vector I/O を user buffer へ接続する。

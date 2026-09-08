@@ -4,7 +4,8 @@ Last updated: 2026-09-08
 
 Status: active
 
-Current queue: [q122](queue.md), finished. WS025 mandatory p001–p026 and required WS024 are complete, with integration acceptance, final policy and performance evidence. Conditional p027–p030 are explicitly not adopted and retain planned resume criteria.
+Current queue: [q123](queue.md), in-progress for p031; [q122](queue-q122.md) finished. WS025 mandatory p001–p026 and required WS024 are complete, with integration acceptance, final policy and performance evidence. Conditional p027–p030 are explicitly not adopted and retain planned resume criteria.
+Additional planning: [ws025-p031](ws025-io-memory-cache/phase031-driver-layout-style/phase.md) records the agreed driver layout, naming/style consolidation and userland separation. In progress under q123; precedes any p027–p030 implementation. q122 remains finished.
 [q089](queue-q089.md) completed typed BIOS/UEFI memory handoff; [q090](queue-q090.md)
 completed sparse RAM mapping and early table ownership, including 16 GiB boots.
 [q088](queue-q088.md) completed p001: counters, FS50/Wi-Fi30, three x86 builds and
@@ -503,7 +504,7 @@ allowed to block first communication unless the normal path depends on them.
 | `ws022` | ELF `PT_TLS` and static thread-local storage | Queue-ready; WS021 dependency satisfied | No Phase started | Queue p001 to freeze the x86 TLS/TCB ABI and fixtures, then implement p002/p003 | [WS022](ws022-elf-tls/ws.md) |
 | `ws023` | i386/amd64 HAL coding-style conformance | Complete (`q067`) | All 88 C/header files, focused/strict gates, four configured builds, and four x86 runtime cells pass; API/ABI review found no delta | No current Phase; retain the q067 evidence and extract pre-existing risks separately if prioritized | [WS023](ws023-x86-hal-style/ws.md) |
 | `ws024` | Single 64-bit UFS | Complete (q102) | p001–p004 complete; U01–U24 selected acceptance, storage 50/50, WiFi 30, three builds and source retirement pass | WS025 batching consumes the single unified owner | [WS024](ws024-unified-ufs/ws.md) |
-| `ws025` | I/O, cache and physical-memory redesign | Completed; mandatory p001–p026 and required WS024 | Host/sanitizer, 14 RAM cells, USB/NVMe, media recovery/shutdown, FS50 50/50, Wi-Fi30 30/30 and 404 performance samples pass; ordinary artifacts restored; physical gate user-accepted | Conditional p027–p030 explicitly not adopted; resume only on their recorded measurement/hardware criteria | [WS025](ws025-io-memory-cache/ws.md) |
+| `ws025` | I/O, cache and physical-memory redesign | Mandatory p001–p026 and required WS024 completed; additional p031 planned | Host/sanitizer, 14 RAM cells, USB/NVMe, media recovery/shutdown, FS50 50/50, Wi-Fi30 30/30 and 404 performance samples pass; ordinary artifacts restored; physical gate user-accepted | p031 driver refactoring planned before p027–p030; conditional extensions retain their measurement/hardware criteria | [WS025](ws025-io-memory-cache/ws.md) |
 
 ## 4. Milestones
 

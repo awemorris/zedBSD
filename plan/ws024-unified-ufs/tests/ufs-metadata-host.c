@@ -5,17 +5,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "../../ws018-kernel-architecture/tests/mount-thread-host.h"
-#include "drivers/fs/ufs/ufs-vfs.c"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-vfs.c"
 #define AUDIT_STATE struct ufs_mount_state
 #define AUDIT_INODE struct ufs_inode_info
 #define AUDIT_DINODE_SIZE UFS_DINODE_SIZE
 #define AUDIT_SIZE UFS_DI_SIZE
-#define AUDIT_GET64 ufs_get64
-#define AUDIT_PUT32 ufs_put32
-#define AUDIT_PUT16 ufs_put16
+#define AUDIT_GET64 drv_ufs_get64
+#define AUDIT_PUT32 drv_ufs_put32
+#define AUDIT_PUT16 drv_ufs_put16
 #define AUDIT_TRUNCATE ufs_truncate
-#define AUDIT_GETPTR ufs_get64
-#define AUDIT_PUTPTR ufs_put64
+#define AUDIT_GETPTR drv_ufs_get64
+#define AUDIT_PUTPTR drv_ufs_put64
 #define AUDIT_STRIDE 8
 #define AUDIT_DB UFS_DI_DB
 #define AUDIT_IB UFS_DI_IB
@@ -43,7 +43,7 @@ static int references(const unsigned char *bytes, uint64_t fragment)
 {
 	const unsigned char *raw = bytes + 8 * 512 + 2 * AUDIT_DINODE_SIZE;
 	for (unsigned n = 0; n < 2; n++)
-		if (ufs_get64(raw, UFS_DI_EXTB + n * 8, 0) == fragment) return 1;
+		if (drv_ufs_get64(raw, UFS_DI_EXTB + n * 8, 0) == fragment) return 1;
 	for (unsigned n = 0; n < 12; n++)
 		if (AUDIT_GETPTR(raw, AUDIT_DB + n * AUDIT_STRIDE, 0) == fragment) return 1;
 	for (unsigned n = 0; n < 3; n++)
@@ -183,15 +183,15 @@ void inode_dir_changed(struct inode *directory)
 
 #ifndef UFS_AUDIT_CUSTOM_IO
 #include "../../ws025-io-memory-cache/tests/journal-view-stubs-host.inc"
-int ufs_snapshot_preserve(struct ufs_snapshot *snapshot, uint64_t first, uint32_t count)
+int drv_ufs_snapshot_preserve(struct ufs_snapshot *snapshot, uint64_t first, uint32_t count)
 { (void)snapshot; (void)first; (void)count; abort(); }
-int ufs_journal_read(struct ufs_journal *journal, uint64_t first,
+int drv_ufs_journal_read(struct ufs_journal *journal, uint64_t first,
     uint32_t count, void *buffer)
 { (void)journal; (void)first; (void)count; (void)buffer; abort(); }
-int ufs_journal_commitv(struct ufs_journal *journal,
+int drv_ufs_journal_commitv(struct ufs_journal *journal,
     const struct ufs_journal_extent *extents, unsigned count)
 { (void)journal; (void)extents; (void)count; abort(); }
-int ufs_journal_commit(struct ufs_journal *journal, uint64_t target,
+int drv_ufs_journal_commit(struct ufs_journal *journal, uint64_t target,
     const void *payload, uint32_t sectors)
 { (void)journal; (void)target; (void)payload; (void)sectors; abort(); }
 #endif

@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -21,7 +19,7 @@
 #include <kern/partition.h>
 #include <kern/platform.h>
 #include <kern/rpi4/boot.h>
-#include "drivers/rpi4-sdhci.h"
+#include "drivers/platform/rpi4/rpi4-sdhci.h"
 
 /*
  * Publishes the boot devices described by the Raspberry Pi 4 boot handoff.
@@ -55,16 +53,16 @@ kern_platform_init(
 		return 0;
 
 	/* Selects the MBR partition scheme and starts the SD controller. */
-	partition_set_scheme(&partition_scheme_mbr);
+	partition_set_scheme(&drv_partition_scheme_mbr);
 	disk_registry_reset();
-	if (rpi4_sdhci_init((uintptr_t)rpi4->sdhci_phys) != 0) {
+	if (drv_rpi4_sdhci_init((uintptr_t)rpi4->sdhci_phys) != 0) {
 		/*
 		 * QEMU raspi4b currently attaches -drive if=sd to the legacy
 		 * Arasan controller, while real Pi 4 firmware boots from eMMC2.
 		 */
 		if (rpi4->sdhci_phys != 0xfe340000ULL)
 			return 0;
-		if (rpi4_sdhci_init(0xfe300000ULL) != 0)
+		if (drv_rpi4_sdhci_init(0xfe300000ULL) != 0)
 			return 0;
 		hal_puts("sdhci: using QEMU legacy-controller fallback\n");
 	}
@@ -126,7 +124,7 @@ kern_platform_block_device(
 		return NULL;
 
 	/* Resolves the SDHCI disk. */
-	disk = rpi4_sdhci_disk();
+	disk = drv_rpi4_sdhci_disk();
 
 	/* Reports the disk. */
 	return disk;

@@ -1,6 +1,7 @@
 #!/bin/sh
 # WS006 dynamic cdev/devfs generation-lifetime runner.
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/ws006-dynamic-cdev.XXXXXX")
@@ -25,7 +26,7 @@ cc $common -fanalyzer -c \
 	"$repo/plan/ws006-input/tests/dynamic-cdev-devfs-test.c" \
 	-o "$temporary/dynamic-cdev-devfs-analyzer.o"
 input_analyzer="$common -include $repo/libc/include/sys/ioctl.h"
-cc $input_analyzer -fanalyzer -c "$repo/src/drivers/input-device.c" \
+cc $input_analyzer -fanalyzer -c "$repo/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/input-device.c" \
 	-o "$temporary/input-device-analyzer.o"
 cc $input_analyzer -fanalyzer -c \
 	"$repo/plan/ws006-input/tests/input-device-ownership-test.c" \

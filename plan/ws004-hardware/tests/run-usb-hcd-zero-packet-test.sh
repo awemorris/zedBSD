@@ -1,6 +1,7 @@
 #!/bin/sh
 # ws004-p019 terminating-zero-packet transfer gate.
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary_root=${TMPDIR:-"$root/build/q049-tmp"}
@@ -11,9 +12,9 @@ trap 'rm -rf "$work"' EXIT HUP INT TERM
 cc=${CC:-cc}
 common="-std=c11 -Wall -Wextra -Werror -I$root/include -I$root/include/uapi"
 fixture="$root/plan/ws004-hardware/tests/usb-hcd-zero-packet-test.c"
-xhci="$root/src/drivers/pci-xhci.c"
-ehci="$root/src/drivers/pci-ehci.c"
-uhci="$root/src/drivers/pci-uhci.c"
+xhci="$root/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/pci-xhci.c"
+ehci="$root/src/drivers/pci/pci-ehci.c"
+uhci="$root/src/drivers/pci/pci-uhci.c"
 
 # shellcheck disable=SC2086
 $cc $common "$fixture" "$root/src/kern/io-stats.c" -o "$work/usb-hcd-zero-packet"

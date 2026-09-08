@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -213,8 +211,11 @@ inode_get(
 	unsigned long irq;
 	struct inode *inode;
 
+	/* Rejects a query without a mount or a result. */
 	if (mountp == NULL || result == NULL)
 		return EINVAL;
+
+	/* Reports a live cached inode of that mount and number. */
 	irq = spin_lock_irqsave(&inode_cache_lock);
 	for (i = 0; i < INODE_CACHE_MAX; i++) {
 		inode = inode_cache[i];
@@ -254,6 +255,7 @@ inode_release(
 {
 	unsigned remaining;
 
+	/* Frees a dead, clean inode once only the cache still holds it. */
 	if (inode != NULL) {
 		remaining = refcount_put_not_last(&inode->i_refs);
 		if (remaining == 1 &&
@@ -348,6 +350,7 @@ inode_cache_mount_count(
 	unsigned count;
 	unsigned long irq;
 
+	/* Counts the cached inodes that belong to the mount. */
 	count = 0;
 	irq = spin_lock_irqsave(&inode_cache_lock);
 	for (i = 0; i < INODE_CACHE_MAX; i++) {
@@ -357,6 +360,8 @@ inode_cache_mount_count(
 			count++;
 	}
 	spin_unlock_irqrestore(&inode_cache_lock, irq);
+
+	/* Reports the count. */
 	return count;
 }
 
@@ -411,6 +416,7 @@ inode_lookup(
 	uint64_t sequence;
 	int error;
 
+	/* Rejects a malformed name or a non-directory. */
 	if (directory == NULL ||
 	    name == NULL ||
 	    result == NULL ||
@@ -419,6 +425,8 @@ inode_lookup(
 		return EINVAL;
 	if (directory->i_type != INODE_DIR)
 		return ENOTDIR;
+
+	/* Answers from the name cache where the directory allows it. */
 	if ((directory->i_flags & INODE_NOCACHE_CHILDREN) == 0 &&
 	    namecache_lookup(directory, name, result) == 0)
 		return 0;
@@ -453,6 +461,7 @@ inode_lookup_casefold(
 {
 	int error;
 
+	/* Rejects a malformed name or a non-directory. */
 	if (directory == NULL ||
 	    name == NULL ||
 	    result == NULL ||
@@ -461,9 +470,13 @@ inode_lookup_casefold(
 		return EINVAL;
 	if (directory->i_type != INODE_DIR)
 		return ENOTDIR;
+
+	/* Only a filesystem that folds case can answer this. */
 	if (directory->i_op == NULL || directory->i_op->lookup_casefold == NULL)
 		return EOPNOTSUPP;
 	error = directory->i_op->lookup_casefold(directory, name, result);
+
+	/* Reports the lookup result. */
 	return error;
 }
 
@@ -477,6 +490,7 @@ inode_getattr(
 {
 	int error;
 
+	/* A filesystem that keeps its own attributes answers for itself. */
 	if (inode == NULL || status == NULL)
 		return EINVAL;
 	if (inode->i_op != NULL && inode->i_op->getattr != NULL) {
@@ -519,6 +533,7 @@ inode_touch(
 {
 	struct inode_time now;
 
+	/* Stamps the requested timestamps with one reading of the clock. */
 	if (inode == NULL)
 		return;
 	clock_realtime(&now.tv_sec, &now.tv_nsec);
@@ -540,6 +555,7 @@ inode_dir_changed(
 {
 	uint64_t sequence;
 
+	/* Advances the directory sequence, purging rather than reusing it. */
 	if (inode == NULL || inode->i_type != INODE_DIR)
 		return;
 	sequence = atomic_u64_load_acquire(&inode->i_dirseq);
@@ -577,6 +593,8 @@ inode_setattr(
 
 	if (i == NULL || s == NULL || (mask & ~valid) != 0)
 		return EINVAL;
+
+	/* Refuses a change on a read-only filesystem. */
 	if (readonly(i))
 		return EROFS;
 
@@ -714,6 +732,7 @@ inode_creation_request_user(
 {
 	int error;
 
+	/* Rejects an unknown type or a mode carrying type bits. */
 	if (parent == NULL ||
 	    credential == NULL ||
 	    request == NULL ||
@@ -829,12 +848,15 @@ inode_creation_prepare(
 	mode_t inherited;
 	int error;
 
+	/* Rejects a request the child does not match. */
 	if (parent == NULL ||
 	    child == NULL ||
 	    !creation_request_valid(request) ||
 	    child->i_type != request->type ||
 	    (request->special != NULL && request->type != INODE_SOCKET))
 		return EINVAL;
+
+	/* Gives the child the requested identity and permissions. */
 	child->i_mode = inode_type_mode(request->type) |
 	    (request->mode & 07777U);
 	child->i_uid = request->uid;
@@ -897,14 +919,19 @@ inode_readlink(
 {
 	ssize_t count;
 
+	/* Only a symbolic link has a target to read. */
 	if (inode == NULL || buffer == NULL)
 		return -EINVAL;
 	if (inode->i_type != INODE_SYMLINK)
 		return -EINVAL;
+
+	/* Asks the filesystem for the target. */
 	if (inode->i_op != NULL && inode->i_op->readlink != NULL)
 		count = inode->i_op->readlink(inode, buffer, capacity);
 	else
 		count = -EOPNOTSUPP;
+
+	/* Reports the target length, or the negated error. */
 	return count;
 }
 
@@ -920,15 +947,20 @@ inode_truncate_transaction(
 	struct backing_mutation_guard guard;
 	int error;
 
+	/* A malformed request is refused by the implementation itself. */
 	if (i == NULL || request == NULL) {
 		error = inode_truncate_transaction_impl(i, request, result);
 		return error;
 	}
+
+	/* Excludes conflicting claims on the file for the whole truncate. */
 	error = backing_mutation_begin_inode(i, &guard);
 	if (error != 0)
 		return error;
 	error = inode_truncate_transaction_impl(i, request, result);
 	backing_mutation_end(&guard);
+
+	/* Reports the truncate result. */
 	return error;
 }
 
@@ -1007,15 +1039,20 @@ inode_getxattr(
 {
 	ssize_t count;
 
+	/* Rejects a malformed name or an oversized buffer. */
 	if (inode == NULL ||
 	    !xattr_name_valid(name) ||
 	    (value == NULL && size != 0) ||
 	    size > INODE_XATTR_SIZE_MAX)
 		return -EINVAL;
+
+	/* Only a filesystem that stores attributes can answer. */
 	if (inode->i_op != NULL && inode->i_op->getxattr != NULL)
 		count = inode->i_op->getxattr(inode, name, value, size);
 	else
 		count = -EOPNOTSUPP;
+
+	/* Reports the attribute length, or the negated error. */
 	return count;
 }
 
@@ -1032,6 +1069,7 @@ inode_setxattr(
 {
 	int error;
 
+	/* Rejects a malformed name, an oversized value, or contradictory flags. */
 	if (inode == NULL ||
 	    !xattr_name_valid(name) ||
 	    (value == NULL && size != 0) ||
@@ -1039,14 +1077,22 @@ inode_setxattr(
 	    (flags & ~(INODE_XATTR_CREATE | INODE_XATTR_REPLACE)) != 0 ||
 	    flags == (INODE_XATTR_CREATE | INODE_XATTR_REPLACE))
 		return EINVAL;
+
+	/* Refuses a change on a read-only filesystem. */
 	if (readonly(inode))
 		return EROFS;
+
+	/* Only a filesystem that stores attributes can accept one. */
 	if (inode->i_op != NULL && inode->i_op->setxattr != NULL)
 		error = inode->i_op->setxattr(inode, name, value, size, flags);
 	else
 		error = EOPNOTSUPP;
+
+	/* A stored attribute changes the inode's status time. */
 	if (error == 0)
 		inode_touch(inode, INODE_ATTR_CTIME);
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -1061,14 +1107,19 @@ inode_listxattr(
 {
 	ssize_t count;
 
+	/* Rejects a missing or oversized buffer. */
 	if (inode == NULL ||
 	    (list == NULL && size != 0) ||
 	    size > INODE_XATTR_SIZE_MAX)
 		return -EINVAL;
+
+	/* Only a filesystem that stores attributes can list them. */
 	if (inode->i_op != NULL && inode->i_op->listxattr != NULL)
 		count = inode->i_op->listxattr(inode, list, size);
 	else
 		count = -EOPNOTSUPP;
+
+	/* Reports the list length, or the negated error. */
 	return count;
 }
 
@@ -1084,14 +1135,22 @@ inode_removexattr(
 
 	if (inode == NULL || !xattr_name_valid(name))
 		return EINVAL;
+
+	/* Refuses a change on a read-only filesystem. */
 	if (readonly(inode))
 		return EROFS;
+
+	/* Delegates to the filesystem. */
 	if (inode->i_op != NULL && inode->i_op->removexattr != NULL)
 		error = inode->i_op->removexattr(inode, name);
 	else
 		error = EOPNOTSUPP;
+
+	/* A stored change updates the inode status time. */
 	if (error == 0)
 		inode_touch(inode, INODE_ATTR_CTIME);
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -1104,12 +1163,15 @@ inode_sync(
 {
 	int error;
 
+	/* A filesystem without a sync operation has nothing to do. */
 	if (i == NULL)
 		return EINVAL;
 	if (i->i_op != NULL && i->i_op->sync != NULL)
 		error = i->i_op->sync(i);
 	else
 		error = 0;
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -1124,6 +1186,7 @@ inode_cache_count(
 	unsigned count;
 	unsigned long irq;
 
+	/* Counts the occupied slots of the inode cache. */
 	count = 0;
 	irq = spin_lock_irqsave(&inode_cache_lock);
 	for (i = 0; i < INODE_CACHE_MAX; i++) {
@@ -1132,6 +1195,8 @@ inode_cache_count(
 			count++;
 	}
 	spin_unlock_irqrestore(&inode_cache_lock, irq);
+
+	/* Reports the count. */
 	return count;
 }
 
@@ -1239,10 +1304,13 @@ inode_rename(
 {
 	int entered, error;
 
+	/* A rename never crosses a mount. */
 	if (od == NULL || nd == NULL || nn == NULL || flags != 0)
 		return EINVAL;
 	if (od->i_mount != nd->i_mount)
 		return EXDEV;
+
+	/* Enters the namespace transaction and validates the destination. */
 	error = inode_namespace_enter(od, on, 0, &entered);
 	if (error == 0 && readonly(nd))
 		error = EROFS;
@@ -1250,10 +1318,14 @@ inode_rename(
 		error = ENOENT;
 	if (error == 0)
 		error = mount_namespace_check_name(nd, nn);
+
+	/* Performs the rename and leaves the transaction. */
 	if (error == 0)
 		error = inode_rename_locked(od, on, nd, nn, flags);
 	if (entered)
 		mount_vfs_transaction_leave(od->i_mount);
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -1399,22 +1471,31 @@ inode_create_locked(
 {
 	int error;
 
+	/* Rejects a malformed request. */
 	if (i == NULL ||
 	    n == NULL ||
 	    r == NULL ||
 	    !creation_request_valid(request) ||
 	    request->type != INODE_REG)
 		return EINVAL;
+
+	/* Refuses a change on a read-only filesystem. */
 	if (readonly(i))
 		return EROFS;
+
+	/* Delegates to the filesystem. */
 	if (i->i_op != NULL && i->i_op->create != NULL)
 		error = i->i_op->create(i, n, request, r);
 	else
 		error = EOPNOTSUPP;
+
+	/* A successful change updates the directory. */
 	if (error == 0) {
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -1430,22 +1511,31 @@ inode_mkdir_locked(
 {
 	int error;
 
+	/* Rejects a malformed request. */
 	if (i == NULL ||
 	    n == NULL ||
 	    r == NULL ||
 	    !creation_request_valid(request) ||
 	    request->type != INODE_DIR)
 		return EINVAL;
+
+	/* Refuses a change on a read-only filesystem. */
 	if (readonly(i))
 		return EROFS;
+
+	/* Delegates to the filesystem. */
 	if (i->i_op != NULL && i->i_op->mkdir != NULL)
 		error = i->i_op->mkdir(i, n, request, r);
 	else
 		error = EOPNOTSUPP;
+
+	/* A successful change updates the directory. */
 	if (error == 0) {
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -1461,6 +1551,7 @@ inode_mknod_locked(
 {
 	int error;
 
+	/* Rejects a malformed request. */
 	if (i == NULL ||
 	    n == NULL ||
 	    r == NULL ||
@@ -1473,14 +1564,20 @@ inode_mknod_locked(
 		return EOPNOTSUPP;
 	if (readonly(i))
 		return EROFS;
+
+	/* Delegates to the filesystem. */
 	if (i->i_op != NULL && i->i_op->mknod != NULL)
 		error = i->i_op->mknod(i, n, request, r);
 	else
 		error = EOPNOTSUPP;
+
+	/* A successful change updates the directory. */
 	if (error == 0) {
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -1498,6 +1595,8 @@ inode_unlink_locked(
 
 	if (i == NULL || n == NULL)
 		return EINVAL;
+
+	/* Refuses a change on a read-only filesystem. */
 	if (readonly(i))
 		return EROFS;
 
@@ -1539,6 +1638,8 @@ inode_unlink_locked(
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -1555,6 +1656,8 @@ inode_rmdir_locked(
 
 	if (i == NULL || n == NULL)
 		return EINVAL;
+
+	/* Refuses a change on a read-only filesystem. */
 	if (readonly(i))
 		return EROFS;
 
@@ -1588,6 +1691,8 @@ inode_rmdir_locked(
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -1616,6 +1721,7 @@ inode_rename_locked(
 
 	target_guarded = 0;
 
+	/* A rename never crosses a mount or touches a read-only one. */
 	if (od == NULL || on == NULL || nd == NULL || nn == NULL || flags != 0)
 		return EINVAL;
 	if (od->i_mount != nd->i_mount)
@@ -1745,6 +1851,7 @@ inode_link_locked(
 	struct backing_mutation_guard guard;
 	int error;
 
+	/* A link stays inside one mount and never names a directory. */
 	if (directory == NULL || name == NULL || target == NULL)
 		return EINVAL;
 	if (directory->i_type != INODE_DIR)
@@ -1755,20 +1862,28 @@ inode_link_locked(
 		return EXDEV;
 	if (readonly(directory))
 		return EROFS;
+
+	/* Excludes conflicting claims on the target for the link. */
 	error = backing_mutation_begin_inode(target, &guard);
 	if (error != 0)
 		return error;
+
+	/* Delegates to the filesystem. */
 	if (directory->i_op != NULL && directory->i_op->link != NULL)
 		error = directory->i_op->link(directory, name, target);
 	else
 		error = EOPNOTSUPP;
 	backing_mutation_end(&guard);
+
+	/* A successful link updates the directory and the target. */
 	if (error == 0) {
 		inode_dir_changed(directory);
 		target->i_linkcount++;
 		inode_touch(target, INODE_ATTR_CTIME);
 		inode_touch(directory, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -1785,6 +1900,7 @@ inode_symlink_locked(
 {
 	int error;
 
+	/* Requires a directory and a non-empty link target. */
 	if (directory == NULL ||
 	    name == NULL ||
 	    target == NULL ||
@@ -1798,15 +1914,21 @@ inode_symlink_locked(
 		return ENOENT;
 	if (readonly(directory))
 		return EROFS;
+
+	/* Delegates to the filesystem. */
 	if (directory->i_op != NULL && directory->i_op->symlink != NULL)
 		error = directory->i_op->symlink(directory, name, target, request,
 		    result);
 	else
 		error = EOPNOTSUPP;
+
+	/* A successful change updates the directory. */
 	if (error == 0) {
 		inode_dir_changed(directory);
 		inode_touch(directory, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -2000,12 +2122,17 @@ inode_creation_preserve_acl(
 	struct posix_acl acl;
 	int error;
 
+	/* A source without this ACL leaves the child without one. */
 	error = posix_acl_load(source, name, &acl);
 	if (error == ENODATA || error == EOPNOTSUPP)
 		return 0;
 	if (error != 0)
 		return error;
+
+	/* Copies the ACL onto the child. */
 	error = posix_acl_store(child, name, &acl);
+
+	/* Reports the result. */
 	return error;
 }
 
@@ -2296,15 +2423,20 @@ xattr_name_valid(
 {
 	size_t length;
 
+	/* Measures the name without reading past the permitted length. */
 	if (name == NULL)
 		return 0;
 	length = 0;
 	while (length <= INODE_XATTR_NAME_MAX && name[length] != '\0')
 		length++;
+
+	/* An empty or overlong name is not a valid attribute name. */
 	if (length == 0)
 		return 0;
 	if (length > INODE_XATTR_NAME_MAX)
 		return 0;
+
+	/* Reports a usable name. */
 	return 1;
 }
 

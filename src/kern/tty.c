@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -1127,11 +1125,14 @@ tty_echo_erase(
 {
 	unsigned width;
 
+	/* A control byte was echoed as two characters. */
 	if ((tty->termios.c_lflag & ECHOCTL) != 0 &&
 	    ((byte < 0x20U && byte != '\n' && byte != '\t') || byte == 0x7fU))
 		width = 2U;
 	else
 		width = 1U;
+
+	/* Rubs out each echoed column. */
 	while (width != 0) {
 		tty_echo_append(result, '\b');
 		tty_echo_append(result, ' ');
@@ -1586,6 +1587,7 @@ tty_read_noncanonical(
 	uint64_t sequence;
 	size_t i;
 
+	/* Reads the VMIN and VTIME settings this read has to honour. */
 	output = buffer;
 	irq = spin_lock_irqsave(&tty->lock);
 	minimum = tty->termios.c_cc[VMIN];
@@ -1719,6 +1721,7 @@ tty_ioctl_instance(
 	uint8_t character;
 	int duration;
 
+	/* Names the calling process, if the request came from one. */
 	if (curthread != NULL)
 		process = curthread->proc;
 	else
@@ -2670,6 +2673,7 @@ pty_slave_write(
 	size_t output_length;
 	ssize_t written;
 
+	/* Names the calling process, if the write came from one. */
 	handle = file->f_data;
 	if (curthread != NULL)
 		process = curthread->proc;

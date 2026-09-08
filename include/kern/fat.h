@@ -19,13 +19,13 @@ enum bootfat_type {
 	ZEDBSD_FAT32 = 32,
 };
 
-extern const struct filesystem_type fat_filesystem_type;
+extern const struct filesystem_type drv_fat_filesystem_type;
 
-int fat_probe_type(struct disk *disk, enum bootfat_type *type);
+int drv_fat_probe_type(struct disk *disk, enum bootfat_type *type);
 
 typedef int (*fat_extent_cb)(uint64_t, uint64_t, uint32_t, void *);
 
-int fat_file_extents(struct file *file, fat_extent_cb callback, void *context);
+int drv_fat_file_extents(struct file *file, fat_extent_cb callback, void *context);
 
 struct fat_loop_extent {
 	uint64_t file_block, disk_block;
@@ -33,13 +33,13 @@ struct fat_loop_extent {
 };
 /* Borrowed immutable map; caller owns it through unbind. Ordinary file I/O
  * still owns the VM/content lease, FAT owns slot coherence and parent I/O. */
-int fat_file_set_loop_map(struct file *file,
+int drv_fat_file_set_loop_map(struct file *file,
 	const struct fat_loop_extent *map, unsigned count);
 
-int fat_file_contiguous_block(struct file *file, struct disk **disk,
+int drv_fat_file_contiguous_block(struct file *file, struct disk **disk,
 			      uint64_t *block);
 
-int fat_file_backing_identity(struct inode *inode, struct disk **disk,
+int drv_fat_file_backing_identity(struct inode *inode, struct disk **disk,
 			      uint64_t *object);
 
 #endif

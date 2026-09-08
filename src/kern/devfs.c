@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -139,6 +137,7 @@ const struct filesystem_type devfs_type = {
 	.statvfs = devfs_statvfs,
 };
 
+/* Clamps one byte range to the device and reports the transfer it permits. */
 static inline int
 devfs_block_io_range_prepare(
 	uint64_t block_count,
@@ -150,34 +149,46 @@ devfs_block_io_range_prepare(
 {
 	uint64_t device_bytes, position, available;
 
+	/* Rejects a malformed request or an unknown direction. */
 	if (range == NULL || block_count == 0U || block_size == 0U ||
 	    offset < 0 || (direction != DEVFS_BLOCK_IO_READ &&
 	    direction != DEVFS_BLOCK_IO_WRITE))
 		return EINVAL;
+
+	/* Measures the device and the request without overflowing. */
 	if (block_count > UINT64_MAX / block_size)
 		return EOVERFLOW;
 	device_bytes = block_count * block_size;
 	position = (uint64_t)offset;
 	if (requested != 0U && (uint64_t)requested > UINT64_MAX - position)
 		return EOVERFLOW;
+
+	/* Describes the whole request before any clamping. */
 	range->device_bytes = device_bytes;
 	range->position = position;
 	range->length = requested;
 	if (requested == 0U)
 		return 0;
+
+	/* A read past the end is empty; a write past the end has no room. */
 	if (position >= device_bytes) {
 		range->length = 0U;
 		return direction == DEVFS_BLOCK_IO_READ ? 0 : ENOSPC;
 	}
+
+	/* Shortens a read that runs off the end, and refuses such a write. */
 	available = device_bytes - position;
 	if ((uint64_t)requested > available) {
 		if (direction == DEVFS_BLOCK_IO_WRITE)
 			return ENOSPC;
 		range->length = (size_t)available;
 	}
+
+	/* Reports the permitted transfer. */
 	return 0;
 }
 
+/* Splits the next block-aligned piece out of a remaining byte range. */
 static inline int
 devfs_block_io_piece(
 	uint64_t position,
@@ -189,9 +200,12 @@ devfs_block_io_piece(
 {
 	size_t offset, amount;
 
+	/* Rejects a malformed request. */
 	if (remaining == 0U || block_size == 0U || block == NULL ||
 	    within == NULL || count == NULL)
 		return EINVAL;
+
+	/* Takes the part of the containing block that the range still needs. */
 	offset = (size_t)(position % block_size);
 	amount = (size_t)block_size - offset;
 	if (amount > remaining)

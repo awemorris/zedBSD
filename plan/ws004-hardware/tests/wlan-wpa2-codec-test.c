@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/net/wlan.h"
-#include "kern/net/wlan-wpa2-codec.h"
+#include "kern/net/wifi/wlan-wpa2-codec.h"
 
 #include <assert.h>
 #include <errno.h>

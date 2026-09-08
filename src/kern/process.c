@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -2065,6 +2063,7 @@ process_thread_retired(
 	int final_cleanup;
 	int last;
 
+	/* Starts assuming this is the last thread and nothing to notify. */
 	parent = NULL;
 	dead_vmspace = NULL;
 	notify = 0;
@@ -2423,6 +2422,7 @@ process_autoreap_claim(
 	unsigned long irq;
 	int claimed;
 
+	/* Reserves an unclaimed autoreaping zombie for this caller. */
 	irq = spin_lock_irqsave(&process_tree_lock);
 	claimed = 0;
 	if (process != NULL &&
@@ -2434,6 +2434,8 @@ process_autoreap_claim(
 	if (claimed)
 		process->wait_reserved = PROCESS_WAIT_EXITED;
 	spin_unlock_irqrestore(&process_tree_lock, irq);
+
+	/* Reports whether this caller owns the reap. */
 	return claimed;
 }
 
@@ -2511,6 +2513,7 @@ detach_tty_from_list_locked(
 {
 	struct process *member;
 
+	/* Clears the terminal from every process of the session that held it. */
 	for (member = list; member != NULL; member = member->all_next) {
 		if (member->session == session &&
 		    member->controlling_tty == tty &&
@@ -2528,6 +2531,7 @@ release_retired_creds(
 {
 	struct process_retired_cred *next;
 
+	/* Releases every credential the exit deferred. */
 	while (retired != NULL) {
 		next = retired->next;
 		cred_release(retired->cred);

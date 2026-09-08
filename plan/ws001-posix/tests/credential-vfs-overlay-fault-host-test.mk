@@ -35,7 +35,7 @@ analyze: $(OUT)/analyzer-test
 $(OUT):
 	mkdir -p $@
 
-$(OUT)/overlay.o: $(REPO)/src/kern/overlayfs.c $(SELF) | $(OUT)
+$(OUT)/overlay.o: $(REPO)/src/drivers/fs/overlayfs.c $(SELF) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DZEDBSD_OVERLAY_CONTENT_HOST_TEST \
 		-Wno-unused-const-variable \
 		-c $< -o $@

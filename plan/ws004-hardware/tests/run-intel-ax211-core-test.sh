@@ -1,6 +1,7 @@
 #!/bin/sh
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$test_dir/../../.." && pwd)
@@ -9,7 +10,7 @@ trap 'rm -rf "$build_dir"' EXIT HUP INT TERM
 
 cc=${CC:-cc}
 warnings="-std=c11 -Wall -Wextra -Werror"
-source="$repo_root/src/drivers/intel-ax211.c"
+source="$repo_root/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/intel-ax211.c"
 fixture="$test_dir/intel-ax211-core-test.c"
 abi_includes="-I$repo_root/libc/include -I$repo_root/include/uapi"
 abi_includes="$abi_includes -I$repo_root/include -I$repo_root/src"

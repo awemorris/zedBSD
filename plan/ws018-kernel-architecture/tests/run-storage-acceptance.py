@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run and account for all 50 q086 stories, retaining every command and log."""
+__import__('runpy').run_path(str(__import__('pathlib').Path(__file__).resolve().parents[3] / 'plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py'), run_name='__main__')
 import argparse
 import hashlib
 import json
@@ -45,9 +46,9 @@ for variant in ["ordinary", "sanitize"]:
         ("owned", ["plan/ws004-hardware/tests/storage-owned-buffer-stories.c"], ["-pthread"]),
         ("bot", ["plan/ws004-hardware/tests/storage-bot-stories.c"], []),
         ("fat", ["plan/ws018-kernel-architecture/tests/storage-fat-stories.c",
-                 "src/drivers/fs/fat.c"], ["-DZEDBSD_USER_ABI_LP64", "-Ilibc/include"]),
+                 "plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/fat.c"], ["-DZEDBSD_USER_ABI_LP64", "-Ilibc/include"]),
         ("ufs", ["plan/ws018-kernel-architecture/tests/storage-ufs-stories.c",
-                 "src/drivers/fs/ufs/ufs-endian.c", "src/kern/quota.c"],
+                 "plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.c", "src/kern/quota.c"],
                  ["-DZEDBSD_USER_ABI_LP64", "-Ilibc/include", "-pthread"])]:
         binary = output / f"{label}-{variant}"
         objects = []

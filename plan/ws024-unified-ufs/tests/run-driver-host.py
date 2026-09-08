@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Unified production driver audit, run/view ownership and consistency gates."""
+__import__('runpy').run_path(str(__import__('pathlib').Path(__file__).resolve().parents[3] / 'plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py'), run_name='__main__')
 from pathlib import Path
 import json,os,subprocess,sys
 repo=Path(__file__).resolve().parents[3]
@@ -17,11 +18,11 @@ for arch in ('amd64',):
   san=[] if variant=='ordinary' else ['-fsanitize=address,undefined','-fno-omit-frame-pointer','--param','asan-globals=0']
   bridge=str(out/(prefix+'-thread.o'))
   run(prefix+'-thread',['cc',*abi,*san,'-O1','-g','-pthread','-c','plan/ws018-kernel-architecture/tests/mount-thread-host.c','-o',bridge])
-  flags=['cc',*abi,*san,'-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections','-I.','-Iinclude','-Iinclude/uapi','-Isrc','-Ilibc/include','-Iplan/ws018-kernel-architecture/tests','-Isrc/drivers/fs/ufs']
+  flags=['cc',*abi,*san,'-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections','-I.','-Iinclude','-Iinclude/uapi','-Isrc','-Ilibc/include','-Iplan/ws018-kernel-architecture/tests','-Iplan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs']
   for kind in ('metadata','run','view','consistency'):
    source='plan/ws024-unified-ufs/tests/ufs-'+kind+'-host.c'
-   extra=['src/drivers/fs/ufs/ufs-endian.c','src/kern/quota.c','src/kern/io-stats.c',bridge,'-pthread']
-   if kind=='consistency':extra=['src/drivers/fs/ufs/ufs-journal.c','src/drivers/fs/ufs/ufs-snapshot.c']
+   extra=['plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.c','src/kern/quota.c','src/kern/io-stats.c',bridge,'-pthread']
+   if kind=='consistency':extra=['plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-journal.c','plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-snapshot.c']
    binary=str(out/(prefix+'-'+kind))
    run(prefix+'-'+kind+'-build',[*flags,source,*extra,'-Wl,--gc-sections','-o',binary])
    run(prefix+'-'+kind,['timeout','90s',binary])

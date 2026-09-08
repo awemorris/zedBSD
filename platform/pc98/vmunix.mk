@@ -11,7 +11,7 @@ BIOS_LOADER := bootloader/pc98
 PC98_CIRRUS_CFLAGS = $(filter-out -Os,$(ZEDBSD_CFLAGS)) -O2
 
 # These object lists must be defined before the Stage 2 prerequisite list is
-# expanded below.  The compiler rules themselves may remain with the related
+# expanded below. The compiler rules themselves may remain with the related
 # verification targets later in this file.
 HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
@@ -42,26 +42,25 @@ PC98_GRAPHICS_OBJS :=
 PC98_DISPLAY_OBJS :=
 ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
 PC98_GRAPHICS_OBJS := \
-	$(BUILD)/src/drivers/graphics/pc98/device.o \
-	$(BUILD)/src/drivers/graphics/pc98/backend.o
+	$(BUILD)/src/drivers/platform/pc98/graphics/pc98-graphics.o \
+	$(BUILD)/src/drivers/platform/pc98/graphics/backend.o
 PC98_DISPLAY_OBJS := \
-	$(BUILD)/src/drivers/graphics/pc98/display-gdc.o \
-	$(BUILD)/src/drivers/graphics/pc98/display-glyph.o \
-	$(BUILD)/src/drivers/graphics/pc98/display-cirrus.o \
-	$(BUILD)/src/drivers/graphics/pc98/display-auto.o
+	$(BUILD)/src/drivers/platform/pc98/graphics/display-gdc.o \
+	$(BUILD)/src/drivers/platform/pc98/graphics/display-glyph.o \
+	$(BUILD)/src/drivers/platform/pc98/graphics/display-cirrus.o \
+	$(BUILD)/src/drivers/platform/pc98/graphics/display-auto.o
 endif
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
-	$(BUILD)/src/kern/process-timer.o \
+	$(BUILD)/src/kern/timer.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/klog.o $(BUILD)/src/kern/waitq.o \
-	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/io-stats.o $(BUILD)/src/kern/io-pool.o $(BUILD)/src/kern/io-scratch.o $(BUILD)/src/kern/cache-memory.o $(BUILD)/src/kern/readahead.o $(BUILD)/src/kern/readahead-worker.o $(BUILD)/src/kern/writeback.o $(BUILD)/src/kern/writeback-domain.o $(BUILD)/src/kern/writeback-policy.o $(BUILD)/src/kern/io-error.o $(BUILD)/src/kern/cache-worker.o $(BUILD)/src/kern/sysctl.o \
+	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/cache.o $(BUILD)/src/kern/readahead.o $(BUILD)/src/kern/writeback.o $(BUILD)/src/kern/io.o $(BUILD)/src/kern/sysctl.o \
 	$(BUILD)/src/kern/resource.o \
-	$(BUILD)/src/kern/resource-limit.o \
 	$(BUILD)/src/kern/poll.o \
 	$(BUILD)/src/kern/usync.o \
 	$(BUILD)/src/kern/process.o $(BUILD)/src/kern/thread.o \
-	$(BUILD)/src/kern/sched.o $(BUILD)/src/kern/vm-lock.o \
+	$(BUILD)/src/kern/sched.o \
 	$(BUILD)/src/kern/vmspace.o \
-	$(BUILD)/src/kern/vm-object.o $(BUILD)/src/kern/vm-commit.o \
+	$(BUILD)/src/kern/vm.o \
 	$(BUILD)/src/kern/filedesc.o $(BUILD)/src/kern/pipe.o \
 	$(BUILD)/src/kern/record-lock.o \
 	$(BUILD)/src/kern/cred.o $(BUILD)/src/kern/signal.o \
@@ -71,17 +70,11 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec.o \
 	$(BUILD)/src/kern/user-probe.o $(BUILD)/src/kern/syscall.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
-	$(BUILD)/src/kern/devfs.o $(BUILD)/src/drivers/fs/console.o \
-	$(BUILD)/src/drivers/input-queue.o \
-	$(BUILD)/src/drivers/input-capability.o \
-	$(BUILD)/src/drivers/input-device.o \
-	$(BUILD)/src/drivers/input-subscriber.o \
-	$(BUILD)/src/drivers/input-keymap.o \
-	$(BUILD)/src/drivers/hid/hid-report.o \
+	$(BUILD)/src/kern/devfs.o $(BUILD)/src/drivers/generic/console.o \
+	$(BUILD)/src/drivers/generic/input.o \
 	$(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
-	$(BUILD)/src/kern/system-swap-device.o \
-	$(BUILD)/src/kern/system-device.o $(BUILD)/src/kern/shutdown.o \
+	$(BUILD)/src/drivers/generic/system-device.o $(BUILD)/src/kern/shutdown.o \
 	$(KERN_BOOT_OBJS) \
 	$(BUILD)/src/kern/init.o \
 	$(PC98_GRAPHICS_OBJS) \
@@ -91,7 +84,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 $(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/platform/pc98.o: \
 	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
 
-# Native PC-98 display backends used by /dev/graphics.  The Core-Graph
+# Native PC-98 display backends used by /dev/graphics. The Core-Graph
 # blitter is the one hot loop in the graphical path, so it trades size for
 # speed while the rest of the image stays at -Os.
 STAGE2_OBJS = \
@@ -105,25 +98,19 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/namei.o \
 	$(BUILD)/src/kern/mount.o \
 	$(BUILD)/src/kern/tmpfs.o \
-	$(BUILD)/src/kern/overlayfs.o \
+	$(BUILD)/src/drivers/fs/overlayfs.o \
 	$(BUILD)/src/kern/vfs.o \
-	$(BUILD)/src/kern/swap.o $(BUILD)/src/kern/swap-format.o \
+	$(BUILD)/src/kern/swap.o \
 	$(BUILD)/src/kern/backing-claim.o \
-	$(BUILD)/src/kern/swap-source.o \
-	$(BUILD)/src/kern/swap-control.o \
-	$(BUILD)/src/kern/swap-boot.o \
-	$(BUILD)/src/kern/swap-fat.o \
-	$(BUILD)/src/kern/vm-reclaim.o \
 	$(BUILD)/src/kern/disk.o \
 	$(BUILD)/src/kern/partition.o \
-	$(BUILD)/drivers/loop.o \
-	$(BUILD)/drivers/pc98-ide.o \
-	$(BUILD)/drivers/hid/pc98-busmouse.o \
-	$(BUILD)/drivers/dp8390.o \
-	$(BUILD)/drivers/pc98-lgy98.o \
+	$(BUILD)/drivers/generic/loop.o \
+	$(BUILD)/drivers/platform/pc98/pc98-ide.o \
+	$(BUILD)/drivers/platform/pc98/pc98-busmouse.o \
+	$(BUILD)/drivers/ethernet/dp8390.o \
+	$(BUILD)/drivers/platform/pc98/pc98-lgy98.o \
 	$(BUILD)/drivers/disklabel/mbr.o \
 	$(BUILD)/drivers/disklabel/pc98.o \
-	$(BUILD)/drivers/disklabel/pc98-auto.o \
 	$(BUILD)/src/kern/platform/pc98.o \
 	$(BUILD)/src/kern/panic.o \
 	$(ZEDBSD_LIBC_OBJECTS) \
@@ -136,7 +123,7 @@ vmunix: $(BUILD)/vmunix
 # ----------------------------------------------------------------------
 # Per-object flag overrides.
 
-$(BUILD)/src/drivers/graphics/pc98/display-cirrus.o: OBJ_CFLAGS = $(PC98_CIRRUS_CFLAGS)
+$(BUILD)/src/drivers/platform/pc98/graphics/display-cirrus.o: OBJ_CFLAGS = $(PC98_CIRRUS_CFLAGS)
 
 $(PC98_GRAPHICS_OBJS) $(PC98_DISPLAY_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(PC98_GRAPHICS_OBJS): OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
@@ -171,17 +158,17 @@ $(BUILD)/bootloader/bios-zedbsd-config.o: \
 	bootloader/include/boot-parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
 	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
-		-fno-stack-protector -fno-asynchronous-unwind-tables \
-		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
-		-c $< -o $@
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@
 
 $(BUILD)/bootloader/bios-fat-directory.o: \
 	bootloader/bios/fat-directory.c bootloader/bios/fat-directory.h
 	@mkdir -p $(dir $@)
 	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
-		-fno-stack-protector -fno-asynchronous-unwind-tables \
-		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
-		-c $< -o $@
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@
 
 PC98_BOOTZBSD_HELPERS := $(BUILD)/bootloader/bios-zedbsd-config.o \
 	$(BUILD)/bootloader/bios-fat-directory.o
@@ -189,7 +176,7 @@ PC98_BOOTZBSD_HELPERS := $(BUILD)/bootloader/bios-zedbsd-config.o \
 $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
 	$(PC98_BOOTZBSD_HELPERS) $(BIOS_LOADER)/stage2.ld
 	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage2.ld \
-		$(filter %.o,$^) -o $@
+ $(filter %.o,$^) -o $@
 
 $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
 	$(OBJCOPY) -O binary -j .text $< $@
@@ -235,14 +222,12 @@ USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
 
 I386_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/i386.img
 I386_ARCH_INPUTS := $(BUILD)/bin/sh \
-	$(BUILD)/bin/nettest \
 	$(BUILD)/bin/sysctl $(BUILD)/bin/mount $(BUILD)/bin/umount \
 	$(BUILD)/dynamic/ld.so $(BUILD)/dynamic/libc.so \
 	$(BUILD)/dynamic/tlstest.so $(BUILD)/dynamic/dyntest \
 	$(BUILD)/dynamic/alt/rpathdep.so $(BUILD)/dynamic/rpathtest.so \
 	$(BUILD)/dynamic/verstest.so $(BUILD)/dynamic/versuse.so
 I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
-	--file /bin/nettest=$(BUILD)/bin/nettest \
 	--file /sbin/sysctl=$(BUILD)/bin/sysctl \
 	--file /sbin/mount=$(BUILD)/bin/mount \
 	--file /sbin/umount=$(BUILD)/bin/umount \
@@ -283,15 +268,15 @@ $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct \
 	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
-		--checker $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
-		--checker-runner $(NOCT) \
-		--machine pc98 --stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
-		--zedbsd-config $(PC98_ZEDBSD_CONFIG) \
-		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) \
-		--arch-format ufs --data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) \
-		--size-mib 177 --fat-size-mib 176 $@
+ --checker $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
+ --checker-runner $(NOCT) \
+ --machine pc98 --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+ --zedbsd-config $(PC98_ZEDBSD_CONFIG) \
+ --arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) \
+ --arch-format ufs --data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) \
+ --size-mib 177 --fat-size-mib 176 $@
 
 $(BUILD)/ufs-root.img: $(I386_ARCH_UFS_IMAGE)
 	cp -f $< $@.tmp
@@ -305,13 +290,13 @@ $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct \
 	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
-		--checker $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
-		--checker-runner $(NOCT) \
-		--machine pc98 --stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
-		--zedbsd-config $(PC98_NATIVE_ZEDBSD_CONFIG) \
-		--ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
+ --checker $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
+ --checker-runner $(NOCT) \
+ --machine pc98 --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+ --zedbsd-config $(PC98_NATIVE_ZEDBSD_CONFIG) \
+ --ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
 
 $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
 	cp -f $< $@.tmp
@@ -367,10 +352,10 @@ $(BUILD)/userland/base/libc/posix.o $(BUILD)/userland/base/libc/poll.o \
 $(BUILD)/INIT.ELF: $(USER_LIBC_OBJS) $(BUILD)/userland/base/tests/syscall-smoke.o \
 	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) \
-		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) \
-		$(BUILD)/userland/base/tests/syscall-smoke.o \
-		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+ $(USER_STACK_LDFLAGS) \
+ -T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) \
+ $(BUILD)/userland/base/tests/syscall-smoke.o \
+ $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 USER_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),sh)
@@ -393,9 +378,9 @@ $(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) $(USER_READLINE_LIB) \
 	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) \
-		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
-		$(USER_READLINE_LIB) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+ $(USER_STACK_LDFLAGS) \
+ -T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
+ $(USER_READLINE_LIB) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
@@ -403,18 +388,18 @@ $(BUILD)/POSIX-R2.ELF: $(USER_LIBC_OBJS) \
 	$(BUILD)/userland/base/tests/posix-r2.o $(PC98)/noct-user.ld \
 	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
-		$(USER_LIBC_OBJS) $(BUILD)/userland/base/tests/posix-r2.o \
-		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+ $(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
+ $(USER_LIBC_OBJS) $(BUILD)/userland/base/tests/posix-r2.o \
+ $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 $(BUILD)/POSIX-R2-REMAINING.ELF: $(USER_LIBC_OBJS) \
 	$(BUILD)/userland/base/tests/posix-r2-remaining.o $(PC98)/noct-user.ld \
 	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
-		$(USER_LIBC_OBJS) $(BUILD)/userland/base/tests/posix-r2-remaining.o \
-		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+ $(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
+ $(USER_LIBC_OBJS) $(BUILD)/userland/base/tests/posix-r2-remaining.o \
+ $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 USER_SYSCTL_OBJ := $(BUILD)/userland/base/sysctl/main.o
@@ -424,9 +409,9 @@ $(BUILD)/bin/sysctl: $(USER_LIBC_OBJS) $(USER_SYSCTL_OBJ) \
 	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
-		$(USER_LIBC_OBJS) $(USER_SYSCTL_OBJ) \
-		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+ $(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
+ $(USER_LIBC_OBJS) $(USER_SYSCTL_OBJ) \
+ $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
@@ -437,28 +422,17 @@ $(BUILD)/bin/mount: $(USER_LIBC_OBJS) $(USER_MOUNT_OBJ) \
 	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
-		$(USER_LIBC_OBJS) $(USER_MOUNT_OBJ) \
-		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+ $(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
+ $(USER_LIBC_OBJS) $(USER_MOUNT_OBJ) \
+ $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
 
-USER_NETTEST_OBJS := $(BUILD)/userland/base/nettest/main.o
-$(USER_NETTEST_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(USER_NETTEST_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 
-$(BUILD)/bin/nettest: $(USER_LIBC_OBJS) $(USER_NETTEST_OBJS) \
-	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
-	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
-		$(USER_LIBC_OBJS) $(USER_NETTEST_OBJS) \
-		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
-	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
+
 
 USER_NET_COMMANDS := $(USERLAND_SELECTED_NETWORK_PROGRAMS)
 USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
@@ -479,9 +453,9 @@ $(BUILD)/bin/$(1): $(USER_LIBC_OBJS) $(USER_NET_COMMON_OBJS) \
 	$(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	@mkdir -p $$(dir $$@)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
-		$(USER_LIBC_OBJS) $(USER_NET_COMMON_OBJS) \
-		$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),$(1)) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
+ $(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
+ $(USER_LIBC_OBJS) $(USER_NET_COMMON_OBJS) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),$(1)) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
 	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $$@
 endef
@@ -499,15 +473,15 @@ $(BUILD)/bin/$(1): $(USER_LIBC_OBJS) $(USER_BASIC_COMMON_OBJ) \
 	$(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	@mkdir -p $$(dir $$@)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
-		$(USER_LIBC_OBJS) $(USER_BASIC_COMMON_OBJ) \
-		$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),$(1)) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
+ $(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
+ $(USER_LIBC_OBJS) $(USER_BASIC_COMMON_OBJ) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),$(1)) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
 	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $$@
 endef
 $(foreach command,$(USER_BASIC_COMMANDS),\
 	$(eval $(call PC98_USER_BASIC_COMMAND,$(command))))
-# ELF32 runtime linker and shared libc.  PC-98 and PC/AT intentionally use
+# ELF32 runtime linker and shared libc. PC-98 and PC/AT intentionally use
 # the same i386 user ABI; only their HAL and boot paths differ.
 DYNAMIC_DIR := $(BUILD)/dynamic
 DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude \
@@ -557,26 +531,26 @@ $(DYNAMIC_SOFTFLOAT_DIR)/%.o: src/softfloat/%.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
 	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
-		-mlong-double-64 -c $< -o $@
+ -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_FLOAT_PARSE_OBJ): libc/float-parse.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
 	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
-		-mlong-double-64 -c $< -o $@
+ -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
 	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
-		-mlong-double-64 -c $< -o $@
+ -mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
 	$(LD) -m elf_i386 -shared -Bsymbolic -e _rtld_start --hash-style=sysv \
-		-z now -z relro -z separate-code $^ -o $@
+ -z now -z relro -z separate-code $^ -o $@
 
 $(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
 	$(LD) -m elf_i386 -shared -soname libc.so --hash-style=both -z now \
-		-z relro -z separate-code $(USER_STACK_LDFLAGS) $^ -o $@
+ -z relro -z separate-code $(USER_STACK_LDFLAGS) $^ -o $@
 
 $(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-i386.S
 	@mkdir -p $(dir $@)
@@ -586,49 +560,49 @@ $(DYNAMIC_DIR)/alt/rpathdep.so: \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_i386 -shared -soname rpathdep.so --hash-style=gnu \
-		-z now -z relro -z separate-code $< -o $@
+ -z now -z relro -z separate-code $< -o $@
 
 $(DYNAMIC_DIR)/tlstest.so: \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_i386 -shared -soname tlstest.so --hash-style=gnu \
-		-z now -z relro -z separate-code --enable-new-dtags \
-		-rpath '$$ORIGIN/alt' \
-		$(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
-		-L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
+ -z now -z relro -z separate-code --enable-new-dtags \
+ -rpath '$$ORIGIN/alt' \
+ $(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
+ -L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
 
 $(DYNAMIC_DIR)/rpathtest.so: \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/rpathtest.o \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_i386 -shared -soname rpthtest.so --hash-style=gnu \
-		-z now -z relro -z separate-code --disable-new-dtags \
-		-rpath '$$ORIGIN/alt' $< -L$(DYNAMIC_DIR)/alt \
-		-l:rpathdep.so -o $@
+ -z now -z relro -z separate-code --disable-new-dtags \
+ -rpath '$$ORIGIN/alt' $< -L$(DYNAMIC_DIR)/alt \
+ -l:rpathdep.so -o $@
 
 $(DYNAMIC_DIR)/verstest.so: \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/versiontest.o \
 	userland/base/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_i386 -shared -soname verstest.so --hash-style=gnu \
-		-z now -z relro -z separate-code \
-		--version-script=userland/base/tests/versiontest.map $< -o $@
+ -z now -z relro -z separate-code \
+ --version-script=userland/base/tests/versiontest.map $< -o $@
 
 $(DYNAMIC_DIR)/versuse.so: \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/versionuse.o \
 	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_i386 -shared -soname versuse.so --hash-style=gnu \
-		-z now -z relro -z separate-code $< -L$(DYNAMIC_DIR) \
-		-l:verstest.so -o $@
+ -z now -z relro -z separate-code $< -L$(DYNAMIC_DIR) \
+ -l:verstest.so -o $@
 
 $(DYNAMIC_DIR)/dyntest: $(ZEDBSD_SYSROOT_I386)/usr/lib/crt1.o \
 	$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
 	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so \
 	$(DYNAMIC_DIR)/versuse.so
 	$(CC) -m32 -nostdlib -pie -Wl,--no-relax,--hash-style=sysv,-z,now,-z,relro \
-		-Wl,-z,separate-code,-z,stack-size=0x100000,--allow-shlib-undefined \
-		-Wl,--dynamic-linker=/lib/ld.so \
-		$(ZEDBSD_SYSROOT_I386)/usr/lib/crt1.o \
-		$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o \
-		-L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) -l:libc.so -o $@
+ -Wl,-z,separate-code,-z,stack-size=0x100000,--allow-shlib-undefined \
+ -Wl,--dynamic-linker=/lib/ld.so \
+ $(ZEDBSD_SYSROOT_I386)/usr/lib/crt1.o \
+ $(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o \
+ -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) -l:libc.so -o $@
 
 dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
 	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so \
@@ -659,36 +633,36 @@ $(BUILD)/tests/user-stack-guard.o: tests/user-stack-guard.S
 $(BUILD)/USER-FAULT.ELF: $(BUILD)/tests/user-fault.o $(PC98)/user-init.ld \
 	$(USER_ELF_CHECK)
 	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) \
-		-T $(PC98)/user-init.ld $< -o $@
+ $(USER_STACK_LDFLAGS) \
+ -T $(PC98)/user-init.ld $< -o $@
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 $(BUILD)/USER-SWAP.ELF: $(BUILD)/tests/user-swap.o $(PC98)/user-init.ld \
 	$(USER_ELF_CHECK)
 	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) \
-		-T $(PC98)/user-init.ld $< -o $@
+ $(USER_STACK_LDFLAGS) \
+ -T $(PC98)/user-init.ld $< -o $@
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 $(BUILD)/USER-STACK.ELF: $(BUILD)/tests/user-stack.o \
 	$(PC98)/user-init.ld $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) \
-		-T $(PC98)/user-init.ld $< -o $@
+ $(USER_STACK_LDFLAGS) \
+ -T $(PC98)/user-init.ld $< -o $@
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 $(BUILD)/USER-STACK-GUARD.ELF: $(BUILD)/tests/user-stack-guard.o \
 	$(PC98)/user-init.ld $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) \
-		-T $(PC98)/user-init.ld $< -o $@
+ $(USER_STACK_LDFLAGS) \
+ -T $(PC98)/user-init.ld $< -o $@
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 $(BUILD)/stage2.elf: $(STAGE2_OBJS) $(ZEDBSD_GRAPHICS_CONFIG_STAMP) \
 	$(PC98)/stage2.ld
 	$(LD) -m elf_i386 --gc-sections -z max-page-size=512 \
-		-T $(PC98)/stage2.ld -nostdlib \
-		$(STAGE2_OBJS) -o $@
+ -T $(PC98)/stage2.ld -nostdlib \
+ $(STAGE2_OBJS) -o $@
 
 # vmunix is the two-segment ELF itself; patch-stage2.py enforces the
 # subset contract Stage 1 relies on and patches the B98S v2 header.

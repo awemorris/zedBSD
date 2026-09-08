@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -182,6 +180,7 @@ kern_vfs_init(
 	struct mount *shm_mount;
 	struct kern_swap_control_registration registration;
 
+	/* Starts before the first stage with nothing mounted. */
 	boot_physical = NULL;
 	loader_boot_partition = NULL;
 	root_partition = NULL;
@@ -229,16 +228,16 @@ kern_vfs_init(
 
 	/* Resets the namespaces and registers the filesystems and devices. */
 	mount_reset();
-	(void)loop_init();
+	(void)drv_loop_init();
 	kern_boot_source_context_init(&boot_sources);
 	cdev_reset();
 	partition_reset();
-	error = filesystem_register(&fat_filesystem_type);
+	error = filesystem_register(&drv_fat_filesystem_type);
 	if (error != 0) {
 		error = vfs_fail("register FAT", error);
 		return error;
 	}
-	error = filesystem_register(&ufs_filesystem_type);
+	error = filesystem_register(&drv_ufs_filesystem_type);
 	if (error != 0) {
 		error = vfs_fail("register UFS", error);
 		return error;
@@ -253,13 +252,13 @@ kern_vfs_init(
 		error = vfs_fail("register tmpfs", error);
 		return error;
 	}
-	error = overlayfs_init();
+	error = drv_overlayfs_init();
 	if (error != 0) {
 		error = vfs_fail("register overlayfs", error);
 		return error;
 	}
-	input_core_init();
-	error = console_device_register();
+	drv_input_core_init();
+	error = drv_console_device_register();
 	if (error != 0) {
 		error = vfs_fail("register console", error);
 		return error;
@@ -270,13 +269,13 @@ kern_vfs_init(
 		return error;
 	}
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
-	error = graphics_device_register();
+	error = drv_graphics_device_register();
 	if (error != 0) {
 		error = vfs_fail("register graphics", error);
 		return error;
 	}
 #endif
-	error = system_device_register();
+	error = drv_system_device_register();
 	if (error != 0) {
 		error = vfs_fail("register system", error);
 		return error;
@@ -991,14 +990,14 @@ vfs_legacy_overlay_setup_cleanup(
 			setup->lower_mount = NULL;
 	}
 	if (setup->upper_loop != NULL) {
-		error = loop_detach(setup->upper_loop);
+		error = drv_loop_detach(setup->upper_loop);
 		if (first_error == 0 && error != 0)
 			first_error = error;
 		if (error == 0)
 			setup->upper_loop = NULL;
 	}
 	if (setup->lower_loop != NULL) {
-		error = loop_detach(setup->lower_loop);
+		error = drv_loop_detach(setup->lower_loop);
 		if (first_error == 0 && error != 0)
 			first_error = error;
 		if (error == 0)
@@ -1040,10 +1039,10 @@ vfs_mount_legacy_arm_overlay(
 
 	/* Attaches the root image under either of its names; none means no overlay. */
 	stage = "attach legacy rootfs image";
-	error = loop_attach_path(&boot_root, LEGACY_ROOTFS_IMAGE_PRIMARY,
+	error = drv_loop_attach_path(&boot_root, LEGACY_ROOTFS_IMAGE_PRIMARY,
 	    LOOP_READ_ONLY, &setup.lower_loop);
 	if (error == ENOENT)
-		error = loop_attach_path(&boot_root, LEGACY_ROOTFS_IMAGE_UNIFIED,
+		error = drv_loop_attach_path(&boot_root, LEGACY_ROOTFS_IMAGE_UNIFIED,
 		    LOOP_READ_ONLY, &setup.lower_loop);
 	if (error == ENOENT && setup.lower_loop == NULL) {
 		path_release(&boot_root);
@@ -1059,7 +1058,7 @@ vfs_mount_legacy_arm_overlay(
 
 	/* Attaches the data image read-write. */
 	stage = "attach legacy data image";
-	error = loop_attach_path(&boot_root, LEGACY_DATA_IMAGE, LOOP_READ_WRITE,
+	error = drv_loop_attach_path(&boot_root, LEGACY_DATA_IMAGE, LOOP_READ_WRITE,
 	    &setup.upper_loop);
 	path_release(&boot_root);
 	if (error != 0)
@@ -1099,11 +1098,14 @@ vfs_mount_legacy_arm_overlay(
 	return 0;
 
 fail:
+	/* Undoes the partial setup, reporting a cleanup that also failed. */
 	path_release(&boot_root);
 	cleanup_error = vfs_legacy_overlay_setup_cleanup(&setup);
 	if (cleanup_error != 0)
 		VFS_LOG("vfs: %s cleanup failed (error %d)\n", stage,
 		    cleanup_error);
+
+	/* Reports the stage that failed. */
 	error = vfs_fail(stage, error);
 	return error;
 }
@@ -1236,14 +1238,14 @@ vfs_overlay_setup_cleanup(
 			setup->lower_mount = NULL;
 	}
 	if (setup->upper_loop != NULL) {
-		error = loop_detach(setup->upper_loop);
+		error = drv_loop_detach(setup->upper_loop);
 		if (first_error == 0 && error != 0)
 			first_error = error;
 		if (error == 0)
 			setup->upper_loop = NULL;
 	}
 	if (setup->lower_loop != NULL) {
-		error = loop_detach(setup->lower_loop);
+		error = drv_loop_detach(setup->lower_loop);
 		if (first_error == 0 && error != 0)
 			first_error = error;
 		if (error == 0)
@@ -1357,12 +1359,12 @@ vfs_mount_overlay_root(
 	if (error != 0)
 		goto fail;
 	stage = "attach overlay-root loop";
-	error = loop_attach_file(setup.lower_file, LOOP_READ_ONLY,
+	error = drv_loop_attach_file(setup.lower_file, LOOP_READ_ONLY,
 	    &setup.lower_loop);
 	if (error != 0)
 		goto fail;
 	stage = "attach overlay-data loop";
-	error = loop_attach_file(setup.upper_file, LOOP_READ_WRITE,
+	error = drv_loop_attach_file(setup.upper_file, LOOP_READ_WRITE,
 	    &setup.upper_loop);
 	if (error != 0)
 		goto fail;
@@ -1418,10 +1420,13 @@ vfs_mount_overlay_root(
 	return 0;
 
 fail:
+	/* Undoes the partial setup, reporting a cleanup that also failed. */
 	cleanup_error = vfs_overlay_setup_cleanup(&setup);
 	if (cleanup_error != 0)
 		VFS_LOG("vfs: %s cleanup failed (error %d)\n", stage,
 		    cleanup_error);
+
+	/* Reports the stage that failed. */
 	error = vfs_fail(stage, error);
 	return error;
 }

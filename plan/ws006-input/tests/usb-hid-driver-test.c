@@ -90,7 +90,7 @@ int kthread_create(void (*)(void *), void *, int, struct thread **);
 void thread_start(struct thread *);
 int thread_wait(struct thread *, void **);
 
-#include "../../../src/drivers/usb-hid.c"
+#include "../../../plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/usb-hid.c"
 
 static size_t checks;
 static struct input_event emitted[64];
@@ -406,7 +406,7 @@ drv_usb_driver_register(struct drv_usb_driver *driver)
 }
 
 int
-input_device_register(const struct input_device_info *info,
+drv_input_device_register(const struct input_device_info *info,
 	struct input_device **result)
 {
 	static struct input_device input;
@@ -420,7 +420,7 @@ input_device_register(const struct input_device_info *info,
 }
 
 void
-input_device_unregister(struct input_device *device)
+drv_input_device_unregister(struct input_device *device)
 {
 	(void)device;
 	input_unregister_count++;
@@ -470,7 +470,7 @@ thread_wait(struct thread *thread, void **status)
 }
 
 void
-input_device_emit(struct input_device *device, uint16_t type, uint16_t code,
+drv_input_device_emit(struct input_device *device, uint16_t type, uint16_t code,
 	int32_t value)
 {
 	(void)device;
@@ -560,10 +560,10 @@ prepare_reports(struct usb_hid *hid, const uint8_t *descriptor, size_t length,
 	struct hid_report_report_info report;
 
 	memset(hid, 0, sizeof(*hid));
-	CHECK(hid_report_layout_parse(descriptor, length, &hid->layout) == 0);
-	CHECK(hid_report_layout_get_info(hid->layout, &info) == 0);
+	CHECK(drv_hid_report_layout_parse(descriptor, length, &hid->layout) == 0);
+	CHECK(drv_hid_report_layout_get_info(hid->layout, &info) == 0);
 	CHECK(info.report_count == 1U);
-	CHECK(hid_report_layout_get_report(hid->layout, 0, &report) == 0);
+	CHECK(drv_hid_report_layout_get_report(hid->layout, 0, &report) == 0);
 	hid->report_count = 1;
 	hid->reports[0].id = report.report_id;
 	hid->input = input;
@@ -598,7 +598,7 @@ test_keyboard_diff(void)
 	CHECK(emitted[0].code == KEY_A && emitted[0].value == 0);
 	CHECK(emitted[1].code == KEY_LEFTSHIFT && emitted[1].value == 0);
 	CHECK(emitted[2].type == EV_SYN);
-	hid_report_layout_destroy(hid.layout);
+	drv_hid_report_layout_destroy(hid.layout);
 }
 
 static void
@@ -628,7 +628,7 @@ test_mouse_report(void)
 	CHECK(emitted[0].type == EV_KEY && emitted[0].code == BTN_LEFT &&
 	    emitted[0].value == 0);
 	CHECK(emitted[1].type == EV_SYN);
-	hid_report_layout_destroy(hid.layout);
+	drv_hid_report_layout_destroy(hid.layout);
 }
 
 static void

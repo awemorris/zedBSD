@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-init.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-init.h"
 
 static uint32_t
 get_le32(const uint8_t *bytes)
@@ -70,51 +70,51 @@ test_extended_cfg(void)
 	enum intel_ax211_init_profile profile;
 
 	memset(bytes, 0xa5, sizeof(bytes));
-	assert(intel_ax211_init_extended_cfg_encode(
+	assert(drv_intel_ax211_init_extended_cfg_encode(
 	    INTEL_AX211_INIT_PROFILE_RUNTIME, bytes) ==
 	    INTEL_AX211_PROTOCOL_OK);
 	assert(get_le32(bytes) == 0U);
 	assert(bytes[4] == 0xa5U);
 	profile = INTEL_AX211_INIT_PROFILE_READ_NVM;
-	assert(intel_ax211_init_extended_cfg_decode(bytes, 4U, &profile) ==
+	assert(drv_intel_ax211_init_extended_cfg_decode(bytes, 4U, &profile) ==
 	    INTEL_AX211_PROTOCOL_OK);
 	assert(profile == INTEL_AX211_INIT_PROFILE_RUNTIME);
 
-	assert(intel_ax211_init_extended_cfg_encode(
+	assert(drv_intel_ax211_init_extended_cfg_encode(
 	    INTEL_AX211_INIT_PROFILE_READ_NVM, bytes) ==
 	    INTEL_AX211_PROTOCOL_OK);
 	assert(bytes[0] == 0x02U && bytes[1] == 0U && bytes[2] == 0U &&
 	    bytes[3] == 0U && bytes[4] == 0xa5U);
 	profile = INTEL_AX211_INIT_PROFILE_RUNTIME;
-	assert(intel_ax211_init_extended_cfg_decode(bytes, 4U, &profile) ==
+	assert(drv_intel_ax211_init_extended_cfg_decode(bytes, 4U, &profile) ==
 	    INTEL_AX211_PROTOCOL_OK);
 	assert(profile == INTEL_AX211_INIT_PROFILE_READ_NVM);
 
-	assert(intel_ax211_init_extended_cfg_encode(
+	assert(drv_intel_ax211_init_extended_cfg_encode(
 	    (enum intel_ax211_init_profile)2, bytes) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
-	assert(intel_ax211_init_extended_cfg_encode(
+	assert(drv_intel_ax211_init_extended_cfg_encode(
 	    INTEL_AX211_INIT_PROFILE_RUNTIME, NULL) ==
 	    INTEL_AX211_PROTOCOL_INVALID);
-	assert(intel_ax211_init_extended_cfg_decode(NULL, 4U, &profile) ==
+	assert(drv_intel_ax211_init_extended_cfg_decode(NULL, 4U, &profile) ==
 	    INTEL_AX211_PROTOCOL_INVALID);
-	assert(intel_ax211_init_extended_cfg_decode(bytes, 4U, NULL) ==
+	assert(drv_intel_ax211_init_extended_cfg_decode(bytes, 4U, NULL) ==
 	    INTEL_AX211_PROTOCOL_INVALID);
-	assert(intel_ax211_init_extended_cfg_decode(bytes, 3U, &profile) ==
+	assert(drv_intel_ax211_init_extended_cfg_decode(bytes, 3U, &profile) ==
 	    INTEL_AX211_PROTOCOL_TRUNCATED);
-	assert(intel_ax211_init_extended_cfg_decode(bytes, 5U, &profile) ==
+	assert(drv_intel_ax211_init_extended_cfg_decode(bytes, 5U, &profile) ==
 	    INTEL_AX211_PROTOCOL_OVERSIZED);
 
 	profile = INTEL_AX211_INIT_PROFILE_RUNTIME;
 	put_le32(bytes, 1U);
-	assert(intel_ax211_init_extended_cfg_decode(bytes, 4U, &profile) ==
+	assert(drv_intel_ax211_init_extended_cfg_decode(bytes, 4U, &profile) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 	assert(profile == INTEL_AX211_INIT_PROFILE_RUNTIME);
 	put_le32(bytes, 4U);
-	assert(intel_ax211_init_extended_cfg_decode(bytes, 4U, &profile) ==
+	assert(drv_intel_ax211_init_extended_cfg_decode(bytes, 4U, &profile) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 	put_le32(bytes, 0x02000000U);
-	assert(intel_ax211_init_extended_cfg_decode(bytes, 4U, &profile) ==
+	assert(drv_intel_ax211_init_extended_cfg_decode(bytes, 4U, &profile) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 }
 
@@ -126,47 +126,47 @@ test_command_table(void)
 	struct intel_ax211_protocol_command_table table;
 
 	make_api89_command_table(bytes);
-	assert(intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
 	    &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_init_api89_validate(&table) ==
+	assert(drv_intel_ax211_init_api89_validate(&table) ==
 	    INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_init_api89_validate(NULL) ==
+	assert(drv_intel_ax211_init_api89_validate(NULL) ==
 	    INTEL_AX211_PROTOCOL_INVALID);
 
 	memcpy(malformed, bytes, sizeof(malformed));
 	put_command_version(malformed, 6U, INTEL_AX211_INIT_SYSTEM_GROUP,
 	    INTEL_AX211_INIT_EXTENDED_CFG_OPCODE,
 	    INTEL_AX211_INIT_EXTENDED_CFG_VERSION, 0U);
-	assert(intel_ax211_protocol_command_table_parse(malformed,
+	assert(drv_intel_ax211_protocol_command_table_parse(malformed,
 	    sizeof(malformed), &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_init_api89_validate(&table) ==
+	assert(drv_intel_ax211_init_api89_validate(&table) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 
 	memcpy(malformed, bytes, sizeof(malformed));
 	put_command_version(malformed, 6U,
 	    INTEL_AX211_PROTOCOL_GROUP_LEGACY,
 	    INTEL_AX211_PROTOCOL_INIT_COMPLETE_OPCODE, 99U, 0U);
-	assert(intel_ax211_protocol_command_table_parse(malformed,
+	assert(drv_intel_ax211_protocol_command_table_parse(malformed,
 	    sizeof(malformed), &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_init_api89_validate(&table) ==
+	assert(drv_intel_ax211_init_api89_validate(&table) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 
 	memcpy(malformed, bytes, sizeof(malformed));
 	put_command_version(malformed, 3U,
 	    INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 	    INTEL_AX211_PROTOCOL_NVM_ACCESS_COMPLETE_OPCODE, 2U, 0U);
-	assert(intel_ax211_protocol_command_table_parse(malformed,
+	assert(drv_intel_ax211_protocol_command_table_parse(malformed,
 	    sizeof(malformed), &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_init_api89_validate(&table) ==
+	assert(drv_intel_ax211_init_api89_validate(&table) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 
 	memcpy(malformed, bytes, sizeof(malformed));
 	put_command_version(malformed, 4U,
 	    INTEL_AX211_PROTOCOL_GROUP_REGULATORY_NVM,
 	    INTEL_AX211_PROTOCOL_NVM_GET_INFO_OPCODE, 1U, 3U);
-	assert(intel_ax211_protocol_command_table_parse(malformed,
+	assert(drv_intel_ax211_protocol_command_table_parse(malformed,
 	    sizeof(malformed), &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_init_api89_validate(&table) ==
+	assert(drv_intel_ax211_init_api89_validate(&table) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 }
 
@@ -193,39 +193,39 @@ test_init_complete(void)
 	uint8_t payload[INTEL_AX211_PROTOCOL_INIT_COMPLETE_SIZE + 1U] = { 0U };
 
 	message = make_init_complete(42U);
-	assert(intel_ax211_init_complete_validate(&message, 42U) ==
+	assert(drv_intel_ax211_init_complete_validate(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_init_complete_validate(NULL, 42U) ==
+	assert(drv_intel_ax211_init_complete_validate(NULL, 42U) ==
 	    INTEL_AX211_PROTOCOL_INVALID);
-	assert(intel_ax211_init_complete_validate(&message, 0U) ==
+	assert(drv_intel_ax211_init_complete_validate(&message, 0U) ==
 	    INTEL_AX211_PROTOCOL_INVALID);
 
 	message.version = 0U;
-	assert(intel_ax211_init_complete_validate(&message, 42U) ==
+	assert(drv_intel_ax211_init_complete_validate(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 	message = make_init_complete(42U);
 	message.group = INTEL_AX211_INIT_SYSTEM_GROUP;
-	assert(intel_ax211_init_complete_validate(&message, 42U) ==
+	assert(drv_intel_ax211_init_complete_validate(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_UNSUPPORTED);
 	message = make_init_complete(42U);
 	message.flags = INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK;
-	assert(intel_ax211_init_complete_validate(&message, 42U) ==
+	assert(drv_intel_ax211_init_complete_validate(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_FAILED);
 	message = make_init_complete(41U);
-	assert(intel_ax211_init_complete_validate(&message, 42U) ==
+	assert(drv_intel_ax211_init_complete_validate(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_STALE);
 	message = make_init_complete(42U);
 	message.payload = payload;
 	message.payload_length = sizeof(payload);
-	assert(intel_ax211_init_complete_validate(&message, 42U) ==
+	assert(drv_intel_ax211_init_complete_validate(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_OVERSIZED);
 	message = make_init_complete(42U);
 	message.payload_length--;
-	assert(intel_ax211_init_complete_validate(&message, 42U) ==
+	assert(drv_intel_ax211_init_complete_validate(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_TRUNCATED);
 	message = make_init_complete(42U);
 	message.payload = NULL;
-	assert(intel_ax211_init_complete_validate(&message, 42U) ==
+	assert(drv_intel_ax211_init_complete_validate(&message, 42U) ==
 	    INTEL_AX211_PROTOCOL_INVALID);
 }
 
@@ -283,10 +283,10 @@ test_real_api89_table(const char *path)
 		assert(padded <= length - offset);
 		if (type == 48U) {
 			assert(!found);
-			assert(intel_ax211_protocol_command_table_parse(
+			assert(drv_intel_ax211_protocol_command_table_parse(
 			    firmware + offset, tlv_length, &table) ==
 			    INTEL_AX211_PROTOCOL_OK);
-			assert(intel_ax211_init_api89_validate(&table) ==
+			assert(drv_intel_ax211_init_api89_validate(&table) ==
 			    INTEL_AX211_PROTOCOL_OK);
 			found = 1;
 		}

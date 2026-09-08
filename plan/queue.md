@@ -1,19 +1,16 @@
-# Queue q122: WS025 integration acceptance and defaults
+# Queue q123: WS025 driver layout and coding style
 
 Date: 2026-09-08 JST
-Status: finished
-Authorization: standing user instruction to run autonomously through WS025 completion.
-Timebox: review progress and evidence every 90 active minutes.
-Previous: [q121](queue-q121.md), p025 completed with ordinary artifact restored.
+Status: in-progress
+Authorization: user explicitly instructed execution of the agreed p031 plan.
+Timebox: review progress and evidence every 90 active minutes, as in q122.
+Previous: [q122](queue-q122.md), finished.
 
 | Order | Phase | Status | Purpose / dependency |
 | --- | --- | --- | --- |
-| 1 | [ws025-p026](ws025-io-memory-cache/phase026-integration-defaults/phase.md) | completed | Freeze and verify cross-feature acceptance, select effective defaults, remove obsolete paths if any, and record conditional adoption decisions. Depends on completed mandatory p005–p025 and WS024. |
+| 1 | [ws025-p031](ws025-io-memory-cache/phase031-driver-layout-style/phase.md) | in-progress | Apply agreed driver layout, symbol naming/style, independent mkfs and command packaging; depends on completed p026. |
 
-Execute [integration design](ws025-io-memory-cache/phase026-integration-defaults/integration-design.md).
-Conditional p027–p030 implementation is not automatically included: their explicit
-adoption decisions belong to this queue; absent evidence keeps them planned.
-Physical acceptance is user-accepted, not agent-measured. No commits, aggregate
-make check or .internal access. Serialize all builds/tests and use make -j16.
-
-Result: p026 and mandatory WS025 p001–p026 completed. [Final acceptance](ws025-io-memory-cache/phase026-integration-defaults/results.md). Conditional p027–p030 explicitly not adopted; planned resume criteria recorded. All runs terminal; ordinary artifacts restored.
+p027–p030 remain outside this Queue. Consolidation can expose private-name collisions
+and test source-extraction dependencies; preserve production behavior and test coverage.
+No commits, aggregate make check or .internal access. Serialize builds/tests/runtime;
+use make -j16. Current user execution authorization applies to this finite scope.

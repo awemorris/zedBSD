@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-key.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-key.h"
 
 static uint32_t
 get_le32(const uint8_t *bytes)
@@ -58,15 +58,15 @@ test_version(void)
 
 	/* SEC_KEY_CMD uses table layout v1 but API89's wide header version 0. */
 	assert(INTEL_AX211_KEY_WIRE_VERSION == 0U);
-	assert(intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
 	    &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_key_api89_validate(&table) == INTEL_AX211_KEY_OK);
+	assert(drv_intel_ax211_key_api89_validate(&table) == INTEL_AX211_KEY_OK);
 	bytes[2U]++;
-	assert(intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
 	    &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_key_api89_validate(&table) ==
+	assert(drv_intel_ax211_key_api89_validate(&table) ==
 	    INTEL_AX211_KEY_UNSUPPORTED);
-	assert(intel_ax211_key_api89_validate(NULL) == INTEL_AX211_KEY_INVALID);
+	assert(drv_intel_ax211_key_api89_validate(NULL) == INTEL_AX211_KEY_INVALID);
 }
 
 static void
@@ -78,7 +78,7 @@ test_codec_and_scrub(void)
 	uint8_t zeros[INTEL_AX211_KEY_COMMAND_SIZE];
 
 	pairwise = make_request(INTEL_AX211_KEY_PAIRWISE, 0U, 11U, 0U);
-	assert(intel_ax211_key_add_encode(&pairwise, command) ==
+	assert(drv_intel_ax211_key_add_encode(&pairwise, command) ==
 	    INTEL_AX211_KEY_OK);
 	assert(get_le32(command) == 1U && get_le32(command + 4U) == 1U);
 	assert(get_le32(command + 8U) == 0U);
@@ -89,18 +89,18 @@ test_codec_and_scrub(void)
 
 	group = make_request(INTEL_AX211_KEY_GROUP_KEY, 2U, 12U,
 	    UINT64_C(0x0000060504030201));
-	assert(intel_ax211_key_add_encode(&group, command) ==
+	assert(drv_intel_ax211_key_add_encode(&group, command) ==
 	    INTEL_AX211_KEY_OK);
 	assert(get_le32(command + 8U) == 2U);
 	assert(get_le32(command + 12U) == 0x42U);
 	assert(get_le64(command + 64U) == group.receive_packet_number);
-	assert(intel_ax211_key_remove_encode(7U, 12U,
+	assert(drv_intel_ax211_key_remove_encode(7U, 12U,
 	    INTEL_AX211_KEY_GROUP_KEY, 2U, command) == INTEL_AX211_KEY_OK);
 	assert(get_le32(command) == 3U && get_le32(command + 4U) == 1U);
 	assert(get_le32(command + 8U) == 2U);
 	assert(get_le32(command + 12U) == 0x42U);
 	memset(zeros, 0, sizeof(zeros));
-	intel_ax211_key_command_scrub(command);
+	drv_intel_ax211_key_command_scrub(command);
 	assert(memcmp(command, zeros, sizeof(command)) == 0);
 }
 
@@ -114,56 +114,56 @@ test_state(void)
 
 	pairwise = make_request(INTEL_AX211_KEY_PAIRWISE, 0U, 11U, 0U);
 	group = make_request(INTEL_AX211_KEY_GROUP_KEY, 2U, 12U, 9U);
-	assert(intel_ax211_key_state_init(&state, 3U, 7U) ==
+	assert(drv_intel_ax211_key_state_init(&state, 3U, 7U) ==
 	    INTEL_AX211_KEY_OK);
-	assert(intel_ax211_key_state_installed(&state, &pairwise, 3U) ==
+	assert(drv_intel_ax211_key_state_installed(&state, &pairwise, 3U) ==
 	    INTEL_AX211_KEY_OK);
-	assert(intel_ax211_key_state_installed(&state, &pairwise, 3U) ==
+	assert(drv_intel_ax211_key_state_installed(&state, &pairwise, 3U) ==
 	    INTEL_AX211_KEY_DUPLICATE);
-	assert(intel_ax211_key_state_installed(&state, &group, 4U) ==
+	assert(drv_intel_ax211_key_state_installed(&state, &group, 4U) ==
 	    INTEL_AX211_KEY_STALE);
-	assert(intel_ax211_key_state_activate(&state, 7U, 11U, 12U, 3U) ==
+	assert(drv_intel_ax211_key_state_activate(&state, 7U, 11U, 12U, 3U) ==
 	    INTEL_AX211_KEY_MISSING);
-	assert(intel_ax211_key_state_installed(&state, &group, 3U) ==
+	assert(drv_intel_ax211_key_state_installed(&state, &group, 3U) ==
 	    INTEL_AX211_KEY_OK);
-	assert(intel_ax211_key_state_activate(&state, 7U, 11U, 12U, 3U) ==
+	assert(drv_intel_ax211_key_state_activate(&state, 7U, 11U, 12U, 3U) ==
 	    INTEL_AX211_KEY_OK);
-	assert(intel_ax211_key_state_activate(&state, 7U, 11U, 12U, 3U) ==
+	assert(drv_intel_ax211_key_state_activate(&state, 7U, 11U, 12U, 3U) ==
 	    INTEL_AX211_KEY_DUPLICATE);
 	/* Group-only and pairwise-only rekeys preserve the already active peer. */
 	group = make_request(INTEL_AX211_KEY_GROUP_KEY, 1U, 13U, 10U);
-	assert(intel_ax211_key_state_installed(&state, &group, 3U) ==
+	assert(drv_intel_ax211_key_state_installed(&state, &group, 3U) ==
 	    INTEL_AX211_KEY_OK);
-	assert(intel_ax211_key_state_activate(&state, 7U, 11U, 13U, 3U) ==
+	assert(drv_intel_ax211_key_state_activate(&state, 7U, 11U, 13U, 3U) ==
 	    INTEL_AX211_KEY_OK);
 	pairwise = make_request(INTEL_AX211_KEY_PAIRWISE, 0U, 14U, 0U);
-	assert(intel_ax211_key_state_installed(&state, &pairwise, 3U) ==
+	assert(drv_intel_ax211_key_state_installed(&state, &pairwise, 3U) ==
 	    INTEL_AX211_KEY_OK);
-	assert(intel_ax211_key_state_activate(&state, 7U, 14U, 13U, 3U) ==
+	assert(drv_intel_ax211_key_state_activate(&state, 7U, 14U, 13U, 3U) ==
 	    INTEL_AX211_KEY_OK);
-	assert(intel_ax211_key_state_tx_validate(&state, 7U, 11U, 0U, 1U,
+	assert(drv_intel_ax211_key_state_tx_validate(&state, 7U, 11U, 0U, 1U,
 	    3U) == INTEL_AX211_KEY_STALE);
-	assert(intel_ax211_key_state_tx_validate(&state, 7U, 14U, 0U, 1U,
+	assert(drv_intel_ax211_key_state_tx_validate(&state, 7U, 14U, 0U, 1U,
 	    3U) == INTEL_AX211_KEY_OK);
-	assert(intel_ax211_key_state_tx_validate(&state, 7U, 10U, 0U, 1U,
+	assert(drv_intel_ax211_key_state_tx_validate(&state, 7U, 10U, 0U, 1U,
 	    3U) == INTEL_AX211_KEY_STALE);
-	assert(intel_ax211_key_state_rx_generation(&state, 7U,
+	assert(drv_intel_ax211_key_state_rx_generation(&state, 7U,
 	    INTEL_AX211_KEY_GROUP_KEY, 1U, 3U, &generation) ==
 	    INTEL_AX211_KEY_OK);
 	assert(generation == 13U);
-	assert(intel_ax211_key_state_rx_generation(&state, 7U,
+	assert(drv_intel_ax211_key_state_rx_generation(&state, 7U,
 	    INTEL_AX211_KEY_GROUP_KEY, 2U, 3U, &generation) ==
 	    INTEL_AX211_KEY_MISSING);
-	assert(intel_ax211_key_state_removed(&state, 7U,
+	assert(drv_intel_ax211_key_state_removed(&state, 7U,
 	    INTEL_AX211_KEY_GROUP_KEY, 1U, 13U, 3U) ==
 	    INTEL_AX211_KEY_OK);
-	assert(intel_ax211_key_state_rx_generation(&state, 7U,
+	assert(drv_intel_ax211_key_state_rx_generation(&state, 7U,
 	    INTEL_AX211_KEY_GROUP_KEY, 1U, 3U, &generation) ==
 	    INTEL_AX211_KEY_MISSING);
-	assert(intel_ax211_key_state_removed(&state, 7U,
+	assert(drv_intel_ax211_key_state_removed(&state, 7U,
 	    INTEL_AX211_KEY_PAIRWISE, 0U, 14U, 3U) ==
 	    INTEL_AX211_KEY_OK);
-	assert(intel_ax211_key_state_tx_validate(&state, 7U, 11U, 0U, 2U,
+	assert(drv_intel_ax211_key_state_tx_validate(&state, 7U, 11U, 0U, 2U,
 	    3U) == INTEL_AX211_KEY_STALE);
 }
 
@@ -175,16 +175,16 @@ test_invalid(void)
 	uint8_t command[INTEL_AX211_KEY_COMMAND_SIZE];
 
 	request = make_request(INTEL_AX211_KEY_PAIRWISE, 1U, 3U, 0U);
-	assert(intel_ax211_key_add_encode(&request, command) ==
+	assert(drv_intel_ax211_key_add_encode(&request, command) ==
 	    INTEL_AX211_KEY_INVALID);
 	request = make_request(INTEL_AX211_KEY_GROUP_KEY, 1U, 3U,
 	    UINT64_C(0x0001000000000000));
-	assert(intel_ax211_key_add_encode(&request, command) ==
+	assert(drv_intel_ax211_key_add_encode(&request, command) ==
 	    INTEL_AX211_KEY_INVALID);
-	assert(intel_ax211_key_remove_encode(0U, 1U,
+	assert(drv_intel_ax211_key_remove_encode(0U, 1U,
 	    INTEL_AX211_KEY_PAIRWISE, 0U, command) ==
 	    INTEL_AX211_KEY_INVALID);
-	assert(intel_ax211_key_state_init(&state, 0U, 1U) ==
+	assert(drv_intel_ax211_key_state_init(&state, 0U, 1U) ==
 	    INTEL_AX211_KEY_INVALID);
 }
 

@@ -1,0 +1,389 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * WLAN data frame conversion.
+ *
+ * A station sends Ethernet payloads as 802.11 data frames to its access
+ * point and receives them back.  Building adds the data header, an
+ * optional CCMP header, and the LLC/SNAP encapsulation; parsing checks
+ * the addressing, the protection state the driver reported, and the CCMP
+ * replay counter before recovering the Ethernet frame.
+ */
+
+#include "wlan-l2.h"
+
+#include <errno.h>
+#include <string.h>
+
+#define WLAN_FC_TYPE_MASK       0x000cU
+#define WLAN_FC_DATA            0x0008U
+#define WLAN_FC_SUBTYPE_MASK    0x00f0U
+#define WLAN_FC_QOS_DATA        0x0080U
+#define WLAN_FC_TO_DS           0x0100U
+#define WLAN_FC_FROM_DS         0x0200U
+#define WLAN_FC_MORE_FRAGMENTS  0x0400U
+#define WLAN_FC_PROTECTED       0x4000U
+#define WLAN_FC_ORDER           0x8000U
+#define WLAN_QOS_TID_MASK       0x000fU
+#define WLAN_QOS_AMSDU_PRESENT  0x0080U
+#define WLAN_QOS_CONTROL_SIZE        2U
+#define WLAN_HT_CONTROL_SIZE         4U
+
+static uint16_t load_le16(const uint8_t *bytes);
+static void store_le16(uint8_t *bytes, uint16_t value);
+static int mac_equal(const uint8_t left[6], const uint8_t right[6]);
+static int mac_group(const uint8_t address[6]);
+static void ccmp_header_store(uint8_t header[WLAN_L2_CCMP_HEADER_SIZE], uint8_t key_index, uint64_t packet_number);
+static int ccmp_header_parse(const uint8_t header[WLAN_L2_CCMP_HEADER_SIZE], uint8_t *key_index, uint64_t *packet_number);
+
+/*
+ * Builds a station-to-AP data frame from an Ethernet frame.
+ *
+ * A protected frame carries a CCMP header with the key index and packet
+ * number; an unprotected one must not carry a packet number.  The frame
+ * is written to mpdu and its length reported through mpdu_length.
+ */
+int
+wlan_l2_build_data(
+	const uint8_t station[6],
+	const uint8_t bssid[6],
+	const uint8_t *ethernet,
+	size_t ethernet_length,
+	int protected_frame,
+	uint8_t key_index,
+	uint64_t packet_number,
+	uint8_t *mpdu,
+	size_t capacity,
+	size_t *mpdu_length)
+{
+	size_t offset;
+	size_t payload_length;
+	size_t required;
+	uint16_t frame_control;
+
+	frame_control = WLAN_FC_DATA | WLAN_FC_TO_DS;
+
+	/* Rejects a missing result. */
+	if (mpdu_length == NULL)
+		return EINVAL;
+	*mpdu_length = 0U;
+
+	/* Rejects a missing operand, a bad length, or an impossible CCMP state. */
+	if (station == NULL ||
+	    bssid == NULL ||
+	    ethernet == NULL ||
+	    mpdu == NULL ||
+	    ethernet_length < WLAN_L2_ETHERNET_HEADER_SIZE ||
+	    ethernet_length > WLAN_L2_ETHERNET_MAX ||
+	    key_index > 3U ||
+	    (protected_frame &&
+	     (packet_number == 0U || packet_number > 0x0000ffffffffffffULL)) ||
+	    (!protected_frame && packet_number != 0U))
+		return EINVAL;
+
+	/* Sizes the frame and checks that it fits. */
+	payload_length = ethernet_length - WLAN_L2_ETHERNET_HEADER_SIZE;
+	required = WLAN_L2_DATA_HEADER_SIZE + WLAN_L2_LLC_SNAP_SIZE +
+	    payload_length;
+	if (protected_frame)
+		required += WLAN_L2_CCMP_HEADER_SIZE;
+	if (required > capacity)
+		return ENOSPC;
+
+	/* Writes the data header: frame control, BSSID, station, destination. */
+	memset(mpdu, 0, required);
+	if (protected_frame)
+		frame_control |= WLAN_FC_PROTECTED;
+	store_le16(mpdu, frame_control);
+	memcpy(mpdu + 4U, bssid, 6U);
+	memcpy(mpdu + 10U, station, 6U);
+	memcpy(mpdu + 16U, ethernet, 6U);
+	offset = WLAN_L2_DATA_HEADER_SIZE;
+
+	/* Adds the CCMP header of a protected frame. */
+	if (protected_frame) {
+		ccmp_header_store(mpdu + offset, key_index, packet_number);
+		offset += WLAN_L2_CCMP_HEADER_SIZE;
+	}
+
+	/* Encapsulates the Ethernet type and payload in LLC/SNAP. */
+	mpdu[offset++] = 0xaaU;
+	mpdu[offset++] = 0xaaU;
+	mpdu[offset++] = 0x03U;
+	mpdu[offset++] = 0x00U;
+	mpdu[offset++] = 0x00U;
+	mpdu[offset++] = 0x00U;
+	mpdu[offset++] = ethernet[12U];
+	mpdu[offset++] = ethernet[13U];
+	memcpy(mpdu + offset, ethernet + WLAN_L2_ETHERNET_HEADER_SIZE,
+	    payload_length);
+	*mpdu_length = required;
+
+	/* Reports the built frame. */
+	return 0;
+}
+
+/*
+ * Recovers an Ethernet frame from an AP-to-station data frame.
+ *
+ * The driver's security report must agree with the frame: a protected
+ * frame needs a decrypted CCMP report with the current key generation and
+ * a packet number above the last one seen, and an unprotected frame needs
+ * an empty report.  EALREADY reports a replayed frame.
+ */
+int
+wlan_l2_parse_data(
+	const uint8_t station[6],
+	const uint8_t bssid[6],
+	const uint8_t *mpdu,
+	size_t mpdu_length,
+	const struct wlan_l2_rx_security *security,
+	struct wlan_l2_rx_state *state,
+	uint8_t *ethernet,
+	size_t capacity,
+	size_t *ethernet_length)
+{
+	static const uint8_t llc_prefix[6] = { 0xaaU, 0xaaU, 0x03U, 0U, 0U, 0U };
+	uint16_t frame_control;
+	uint16_t qos_control;
+	uint16_t subtype;
+	size_t offset;
+	size_t payload_length;
+	uint64_t packet_number;
+	uint64_t expected_key_generation;
+	uint64_t *last_packet_number;
+	uint8_t key_index;
+	int protected_frame;
+	int group;
+	int error;
+
+	offset = WLAN_L2_DATA_HEADER_SIZE;
+	packet_number = 0U;
+	last_packet_number = NULL;
+	key_index = 0U;
+
+	/* Rejects a missing result. */
+	if (ethernet_length == NULL)
+		return EINVAL;
+	*ethernet_length = 0U;
+
+	/* Rejects a missing operand or a frame too short to carry data. */
+	if (station == NULL ||
+	    bssid == NULL ||
+	    mpdu == NULL ||
+	    security == NULL ||
+	    state == NULL ||
+	    ethernet == NULL ||
+	    mpdu_length < WLAN_L2_DATA_HEADER_SIZE + WLAN_L2_LLC_SNAP_SIZE)
+		return EINVAL;
+
+	/* Accepts only unfragmented data from the BSSID to us or a group. */
+	frame_control = load_le16(mpdu);
+	subtype = frame_control & WLAN_FC_SUBTYPE_MASK;
+	if ((frame_control & WLAN_FC_TYPE_MASK) != WLAN_FC_DATA ||
+	    (subtype != 0U && subtype != WLAN_FC_QOS_DATA) ||
+	    (frame_control & (WLAN_FC_TO_DS | WLAN_FC_FROM_DS)) != WLAN_FC_FROM_DS ||
+	    (frame_control & WLAN_FC_MORE_FRAGMENTS) != 0U ||
+	    (load_le16(mpdu + 22U) & 0x000fU) != 0U ||
+	    !mac_equal(mpdu + 10U, bssid) ||
+	    (!mac_equal(mpdu + 4U, station) && !mac_group(mpdu + 4U)))
+		return EINVAL;
+
+	/* Skips the QoS and HT control fields, refusing TIDs and A-MSDUs. */
+	if (subtype == WLAN_FC_QOS_DATA) {
+		if (mpdu_length < offset + WLAN_QOS_CONTROL_SIZE)
+			return EINVAL;
+		qos_control = load_le16(mpdu + offset);
+		if ((qos_control & (WLAN_QOS_TID_MASK |
+		    WLAN_QOS_AMSDU_PRESENT)) != 0U)
+			return EPROTONOSUPPORT;
+		offset += WLAN_QOS_CONTROL_SIZE;
+		if ((frame_control & WLAN_FC_ORDER) != 0U) {
+			if (mpdu_length < offset + WLAN_HT_CONTROL_SIZE)
+				return EINVAL;
+			offset += WLAN_HT_CONTROL_SIZE;
+		}
+	}
+
+	/* Checks the protection state against the driver's report. */
+	protected_frame = (frame_control & WLAN_FC_PROTECTED) != 0U;
+	if (protected_frame) {
+		/* A protected frame needs a decrypted CCMP report and a MIC. */
+		if (mpdu_length < offset +
+		    WLAN_L2_CCMP_HEADER_SIZE + WLAN_L2_LLC_SNAP_SIZE +
+		    WLAN_L2_CCMP_MIC_SIZE ||
+		    !security->decrypted ||
+		    !security->cipher_ccmp ||
+		    security->key_generation == 0U)
+			return EACCES;
+
+		/* The CCMP header must match what the driver decrypted with. */
+		error = ccmp_header_parse(mpdu + offset, &key_index,
+		    &packet_number);
+		if (error != 0 ||
+		    key_index != security->key_index ||
+		    packet_number != security->packet_number)
+			return EACCES;
+
+		/* A pairwise frame uses key 0 of the pairwise generation. */
+		group = mac_group(mpdu + 4U);
+		if (!group && key_index != 0U)
+			return EACCES;
+		if (group)
+			expected_key_generation = state->group_key_generation[key_index];
+		else
+			expected_key_generation = state->pairwise_key_generation;
+		if (security->key_generation != expected_key_generation)
+			return EACCES;
+
+		/* The packet number must advance past the last one seen. */
+		if (group)
+			last_packet_number = &state->group_packet_number[key_index];
+		else
+			last_packet_number = &state->pairwise_packet_number;
+		if (packet_number <= *last_packet_number)
+			return EALREADY;
+		offset += WLAN_L2_CCMP_HEADER_SIZE;
+
+		/*
+		 * RTL8822B reports a decrypted payload with the verified CCMP
+		 * MIC still appended.  Integrity is a driver-reported hardware
+		 * result; the trailer is not part of the Ethernet payload.
+		 */
+		mpdu_length -= WLAN_L2_CCMP_MIC_SIZE;
+	} else if (security->key_generation != 0U ||
+	    security->decrypted ||
+	    security->cipher_ccmp ||
+	    security->key_index != 0U ||
+	    security->packet_number != 0U) {
+		/* An unprotected frame must come with an empty report. */
+		return EINVAL;
+	}
+
+	/* Requires LLC/SNAP and a payload that fits an Ethernet frame. */
+	if (mpdu_length < offset + WLAN_L2_LLC_SNAP_SIZE)
+		return EINVAL;
+	if (memcmp(mpdu + offset, llc_prefix, sizeof(llc_prefix)) != 0)
+		return EPROTONOSUPPORT;
+	payload_length = mpdu_length - offset - WLAN_L2_LLC_SNAP_SIZE;
+	if (payload_length > WLAN_L2_ETHERNET_MAX -
+	    WLAN_L2_ETHERNET_HEADER_SIZE)
+		return EMSGSIZE;
+	if (WLAN_L2_ETHERNET_HEADER_SIZE + payload_length > capacity)
+		return ENOSPC;
+
+	/* Writes the Ethernet frame: destination, source, type, payload. */
+	memcpy(ethernet, mpdu + 4U, 6U);
+	memcpy(ethernet + 6U, mpdu + 16U, 6U);
+	ethernet[12U] = mpdu[offset + 6U];
+	ethernet[13U] = mpdu[offset + 7U];
+	memcpy(ethernet + WLAN_L2_ETHERNET_HEADER_SIZE,
+	    mpdu + offset + WLAN_L2_LLC_SNAP_SIZE, payload_length);
+
+	/* Advances the replay counter only for an accepted frame. */
+	if (protected_frame)
+		*last_packet_number = packet_number;
+	*ethernet_length = WLAN_L2_ETHERNET_HEADER_SIZE + payload_length;
+
+	/* Reports the recovered frame. */
+	return 0;
+}
+
+/* Loads a little-endian 16-bit field. */
+static uint16_t
+load_le16(
+	const uint8_t *bytes)
+{
+	return (uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8);
+}
+
+/* Stores a little-endian 16-bit field. */
+static void
+store_le16(
+	uint8_t *bytes,
+	uint16_t value)
+{
+	bytes[0] = (uint8_t)value;
+	bytes[1] = (uint8_t)(value >> 8);
+}
+
+/* Compares two MAC addresses. */
+static int
+mac_equal(
+	const uint8_t left[6],
+	const uint8_t right[6])
+{
+	uint8_t difference;
+	unsigned index;
+
+	/* Accumulates every differing bit. */
+	difference = 0U;
+	for (index = 0U; index < 6U; index++)
+		difference |= left[index] ^ right[index];
+
+	/* Reports equality when no bit differed. */
+	if (difference == 0U)
+		return 1;
+	return 0;
+}
+
+/* Tests whether a MAC address is a group address. */
+static int
+mac_group(
+	const uint8_t address[6])
+{
+	/* The low bit of the first byte marks a group address. */
+	if ((address[0] & 1U) != 0U)
+		return 1;
+	return 0;
+}
+
+/* Writes a CCMP header with the extended IV bit, key index, and number. */
+static void
+ccmp_header_store(
+	uint8_t header[WLAN_L2_CCMP_HEADER_SIZE],
+	uint8_t key_index,
+	uint64_t packet_number)
+{
+	header[0] = (uint8_t)packet_number;
+	header[1] = (uint8_t)(packet_number >> 8);
+	header[2] = 0U;
+	header[3] = (uint8_t)(0x20U | ((key_index & 3U) << 6));
+	header[4] = (uint8_t)(packet_number >> 16);
+	header[5] = (uint8_t)(packet_number >> 24);
+	header[6] = (uint8_t)(packet_number >> 32);
+	header[7] = (uint8_t)(packet_number >> 40);
+}
+
+/* Reads a CCMP header, refusing a malformed one or a zero packet number. */
+static int
+ccmp_header_parse(
+	const uint8_t header[WLAN_L2_CCMP_HEADER_SIZE],
+	uint8_t *key_index,
+	uint64_t *packet_number)
+{
+	/* The reserved byte and bits must be zero and the extended IV bit set. */
+	if (header[2] != 0U ||
+	    (header[3] & 0x20U) == 0U ||
+	    (header[3] & 0x1fU) != 0U)
+		return EINVAL;
+
+	/* Extracts the key index and the 48-bit packet number. */
+	*key_index = (uint8_t)(header[3] >> 6);
+	*packet_number = (uint64_t)header[0] |
+	    ((uint64_t)header[1] << 8) | ((uint64_t)header[4] << 16) |
+	    ((uint64_t)header[5] << 24) | ((uint64_t)header[6] << 32) |
+	    ((uint64_t)header[7] << 40);
+
+	/* A packet number of zero never appears in a valid frame. */
+	if (*packet_number == 0U)
+		return EINVAL;
+
+	/* Reports the parsed header. */
+	return 0;
+}

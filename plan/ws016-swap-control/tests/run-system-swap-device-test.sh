@@ -18,7 +18,7 @@ cd "$repo_dir"
 	plan/ws016-swap-control/tests/swap-uapi-layout.c -o "$object64"
 "${CC:-cc}" -std=c11 -Iinclude -Iinclude/uapi -I. \
 	-Wall -Wextra -Werror -ffunction-sections -fdata-sections \
-	src/kern/system-swap-device.c \
+	src/drivers/generic/system-device.c \
 	plan/ws016-swap-control/tests/system-swap-device-test.c \
 	-Wl,--gc-sections -o "$binary"
 "$binary"

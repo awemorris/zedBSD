@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary_root=${TMPDIR:-"$root/build/q047-tmp"}
@@ -16,11 +17,11 @@ fixture="$root/plan/ws004-hardware/tests/usb-recovery-contract-test.c"
 function_fixture="$root/plan/ws004-hardware/tests/usb-function-model-test.c"
 unregister_fixture="$root/plan/ws003-bringup/tests/usb-hcd-unregister-test.c"
 binding_runner="$root/plan/ws004-hardware/tests/run-usb-binding-transactions-test.sh"
-usb="$root/src/drivers/usb.c"
-xhci="$root/src/drivers/pci-xhci.c"
-uhci="$root/src/drivers/pci-uhci.c"
-ehci="$root/src/drivers/pci-ehci.c"
-storage="$root/src/drivers/usb-storage.c"
+usb="$root/src/drivers/usb/usb.c"
+xhci="$root/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/pci-xhci.c"
+uhci="$root/src/drivers/pci/pci-uhci.c"
+ehci="$root/src/drivers/pci/pci-ehci.c"
+storage="$root/src/drivers/usb/usb-storage.c"
 header="$root/include/drivers/usb.h"
 
 # The focused fixture includes the production USB core.  Its private-state

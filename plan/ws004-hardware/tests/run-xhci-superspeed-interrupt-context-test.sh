@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary_root=${TMPDIR:-"$root/build/q045-tmp"}
@@ -13,8 +14,8 @@ common="-std=c11 -I$root/include -I$root/include/uapi -Wall -Wextra -Werror"
 fixture="$root/plan/ws004-hardware/tests/xhci-superspeed-interrupt-context-test.c"
 xhci_model="$root/plan/ws004-hardware/tests/xhci-model-test.c"
 function_fixture="$root/plan/ws004-hardware/tests/usb-function-model-test.c"
-usb="$root/src/drivers/usb.c"
-xhci="$root/src/drivers/pci-xhci.c"
+usb="$root/src/drivers/usb/usb.c"
+xhci="$root/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/pci-xhci.c"
 
 # Exact endpoint-context and compatibility corpus.
 # shellcheck disable=SC2086

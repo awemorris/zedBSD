@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-runtime-start.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-runtime-start.h"
 
 #define TEST_EVENT_CAPACITY                            64U
 #define TEST_TRACE_CAPACITY                          8192U
@@ -157,7 +157,7 @@ static void test_nic_ownership_failures(void);
 
 /* Returns one fresh exact synthetic firmware/PNVM pair. */
 int
-intel_ax211_firmware_files_load(
+drv_intel_ax211_firmware_files_load(
 	struct intel_ax211_firmware_files *files)
 {
 	struct test_fixture *fixture;
@@ -188,7 +188,7 @@ intel_ax211_firmware_files_load(
 }
 
 void
-intel_ax211_firmware_files_release(
+drv_intel_ax211_firmware_files_release(
 	struct intel_ax211_firmware_files *files)
 {
 	struct test_fixture *fixture;
@@ -204,7 +204,7 @@ intel_ax211_firmware_files_release(
 }
 
 int
-intel_ax211_dma_prepare_boot(
+drv_intel_ax211_dma_prepare_boot(
 	struct drv_dma_device *device,
 	const uint8_t *firmware_bytes,
 	size_t firmware_length,
@@ -243,7 +243,7 @@ intel_ax211_dma_prepare_boot(
 }
 
 void
-intel_ax211_dma_release_boot_images(
+drv_intel_ax211_dma_release_boot_images(
 	struct intel_ax211_dma_resources *resources)
 {
 	assert(resources->boot_prepared);
@@ -254,7 +254,7 @@ intel_ax211_dma_release_boot_images(
 }
 
 int
-intel_ax211_dma_prepare_pnvm(
+drv_intel_ax211_dma_prepare_pnvm(
 	const uint8_t *pnvm_bytes,
 	size_t pnvm_length,
 	const struct intel_ax211_pnvm_manifest *manifest,
@@ -270,7 +270,7 @@ intel_ax211_dma_prepare_pnvm(
 }
 
 void
-intel_ax211_dma_release(
+drv_intel_ax211_dma_release(
 	struct intel_ax211_dma_resources *resources)
 {
 	assert(!active_fixture->dma_released);
@@ -280,7 +280,7 @@ intel_ax211_dma_release(
 }
 
 int
-intel_ax211_mmio_prepare_card_hw(
+drv_intel_ax211_mmio_prepare_card_hw(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == &active_fixture->mmio);
@@ -289,7 +289,7 @@ intel_ax211_mmio_prepare_card_hw(
 }
 
 int
-intel_ax211_mmio_sw_reset(
+drv_intel_ax211_mmio_sw_reset(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == &active_fixture->mmio);
@@ -298,7 +298,7 @@ intel_ax211_mmio_sw_reset(
 }
 
 int
-intel_ax211_mmio_apm_init(
+drv_intel_ax211_mmio_apm_init(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == &active_fixture->mmio);
@@ -307,7 +307,7 @@ intel_ax211_mmio_apm_init(
 }
 
 int
-intel_ax211_mmio_publish_gen3(
+drv_intel_ax211_mmio_publish_gen3(
 	struct intel_ax211_mmio *mmio,
 	const struct intel_ax211_mmio_boot *boot)
 {
@@ -320,7 +320,7 @@ intel_ax211_mmio_publish_gen3(
 }
 
 int
-intel_ax211_mmio_stop(
+drv_intel_ax211_mmio_stop(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == &active_fixture->mmio);
@@ -333,7 +333,7 @@ intel_ax211_mmio_stop(
 }
 
 int
-intel_ax211_transport_configure_msix(
+drv_intel_ax211_transport_configure_msix(
 	struct intel_ax211_transport *transport)
 {
 	test_trace(active_fixture, 'X');
@@ -342,13 +342,13 @@ intel_ax211_transport_configure_msix(
 }
 
 int
-intel_ax211_transport_initialize_rings(
+drv_intel_ax211_transport_initialize_rings(
 	struct intel_ax211_transport *transport)
 {
 	int result;
 
 	test_trace(active_fixture, 'R');
-	result = intel_ax211_ring_init(&transport->command_ring,
+	result = drv_intel_ax211_ring_init(&transport->command_ring,
 	    TEST_COMMAND_QUEUE, INTEL_AX211_COMMAND_RING_SIZE);
 	assert(result == INTEL_AX211_OK);
 	transport->rings_initialized = 1U;
@@ -357,7 +357,7 @@ intel_ax211_transport_initialize_rings(
 }
 
 int
-intel_ax211_transport_publish_rx_descriptor(
+drv_intel_ax211_transport_publish_rx_descriptor(
 	struct intel_ax211_transport *transport,
 	uint16_t index,
 	uint64_t device_address)
@@ -371,7 +371,7 @@ intel_ax211_transport_publish_rx_descriptor(
 }
 
 int
-intel_ax211_transport_activate_rx(
+drv_intel_ax211_transport_activate_rx(
 	struct intel_ax211_transport *transport)
 {
 	test_trace(active_fixture, 'A');
@@ -380,7 +380,7 @@ intel_ax211_transport_activate_rx(
 }
 
 int
-intel_ax211_transport_enable_firmware_interrupts(
+drv_intel_ax211_transport_enable_firmware_interrupts(
 	struct intel_ax211_transport *transport)
 {
 	test_trace(active_fixture, 'I');
@@ -389,7 +389,7 @@ intel_ax211_transport_enable_firmware_interrupts(
 }
 
 int
-intel_ax211_transport_enable_runtime_interrupts(
+drv_intel_ax211_transport_enable_runtime_interrupts(
 	struct intel_ax211_transport *transport)
 {
 	test_trace(active_fixture, 'J');
@@ -401,7 +401,7 @@ intel_ax211_transport_enable_runtime_interrupts(
 }
 
 int
-intel_ax211_transport_command_prepare_inline(
+drv_intel_ax211_transport_command_prepare_inline(
 	struct intel_ax211_transport *transport,
 	const struct intel_ax211_command_id *command,
 	const void *payload,
@@ -417,7 +417,7 @@ intel_ax211_transport_command_prepare_inline(
 	assert(command->version == 0U);
 	assert(payload_length <= INTEL_AX211_COMMAND_INLINE_PAYLOAD_SIZE);
 	assert(fixture->command_count < TEST_COMMAND_CAPACITY);
-	result = intel_ax211_ring_reserve(&transport->command_ring, token);
+	result = drv_intel_ax211_ring_reserve(&transport->command_ring, token);
 	assert(result == INTEL_AX211_OK);
 	transport->command_prepared_token = *token;
 	transport->command_prepared = 1U;
@@ -434,7 +434,7 @@ intel_ax211_transport_command_prepare_inline(
 }
 
 int
-intel_ax211_transport_command_prepare_external(
+drv_intel_ax211_transport_command_prepare_external(
 	struct intel_ax211_transport *transport,
 	const struct intel_ax211_command_id *command,
 	const void *payload,
@@ -451,7 +451,7 @@ intel_ax211_transport_command_prepare_external(
 }
 
 int
-intel_ax211_transport_command_publish(
+drv_intel_ax211_transport_command_publish(
 	struct intel_ax211_transport *transport,
 	const struct intel_ax211_ring_token *token)
 {
@@ -463,7 +463,7 @@ intel_ax211_transport_command_publish(
 }
 
 int
-intel_ax211_transport_command_abort_prepared(
+drv_intel_ax211_transport_command_abort_prepared(
 	struct intel_ax211_transport *transport,
 	const struct intel_ax211_ring_token *token)
 {
@@ -475,26 +475,26 @@ intel_ax211_transport_command_abort_prepared(
 }
 
 int
-intel_ax211_transport_command_complete(
+drv_intel_ax211_transport_command_complete(
 	struct intel_ax211_transport *transport,
 	const struct intel_ax211_ring_token *token)
 {
 	int result;
 
-	result = intel_ax211_ring_complete(&transport->command_ring, token);
+	result = drv_intel_ax211_ring_complete(&transport->command_ring, token);
 	return result == INTEL_AX211_OK ? INTEL_AX211_TRANSPORT_OK :
 	    INTEL_AX211_TRANSPORT_STALE;
 }
 
 size_t
-intel_ax211_transport_command_pending_count(
+drv_intel_ax211_transport_command_pending_count(
 	const struct intel_ax211_transport *transport)
 {
 	return transport->command_ring.used;
 }
 
 int
-intel_ax211_transport_command_oldest(
+drv_intel_ax211_transport_command_oldest(
 	const struct intel_ax211_transport *transport,
 	struct intel_ax211_ring_token *token)
 {
@@ -506,7 +506,7 @@ intel_ax211_transport_command_oldest(
 }
 
 int
-intel_ax211_transport_quiesce(
+drv_intel_ax211_transport_quiesce(
 	struct intel_ax211_transport *transport)
 {
 	test_trace(active_fixture, 'q');
@@ -520,13 +520,13 @@ intel_ax211_transport_quiesce(
 }
 
 int
-intel_ax211_transport_command_after_device_reset(
+drv_intel_ax211_transport_command_after_device_reset(
 	struct intel_ax211_transport *transport)
 {
 	int result;
 
 	test_trace(active_fixture, 'z');
-	result = intel_ax211_ring_init(&transport->command_ring,
+	result = drv_intel_ax211_ring_init(&transport->command_ring,
 	    TEST_COMMAND_QUEUE, INTEL_AX211_COMMAND_RING_SIZE);
 	assert(result == INTEL_AX211_OK);
 	transport->command_prepared = 0U;
@@ -684,7 +684,7 @@ test_fixture_init(
 	    (struct drv_dma_device *)(void *)&fixture->rx_byte;
 	fixture->mmio.profile.mac_type = INTEL_AX211_MAC_TYPE_SO;
 	fixture->mmio.profile.rf_type = INTEL_AX211_RF_TYPE;
-	result = intel_ax211_protocol_command_table_parse(fixture->firmware,
+	result = drv_intel_ax211_protocol_command_table_parse(fixture->firmware,
 	    sizeof(fixture->firmware), &fixture->table);
 	assert(result == INTEL_AX211_PROTOCOL_OK);
 	fixture->nvm.nvm_version = 0x1234U;
@@ -700,7 +700,7 @@ test_fixture_init(
 	fixture->ops.boot.clock_us = test_clock_us;
 	fixture->ops.nic_lock = test_nic_lock;
 	fixture->ops.nic_unlock = test_nic_unlock;
-	result = intel_ax211_runtime_start_init(&fixture->session,
+	result = drv_intel_ax211_runtime_start_init(&fixture->session,
 	    &fixture->ops, fixture, fixture->dma_device, &fixture->mmio,
 	    &fixture->transport, 0x0370U, INTEL_AX211_RF_TYPE,
 	    &fixture->table, &fixture->nvm, 1, 7U);
@@ -1099,7 +1099,7 @@ test_success_retains_then_stops(void)
 
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	if (result != INTEL_AX211_RUNTIME_START_OK)
 		fprintf(stderr, "runtime result=%d events=%lu trace=%s\n",
 		    result, (unsigned long)fixture.event_index, fixture.trace);
@@ -1141,7 +1141,7 @@ test_success_retains_then_stops(void)
 	    fixture.command[1].payload[1] == 0U &&
 	    fixture.command[1].payload[2] == 0U &&
 	    fixture.command[1].payload[3] == 0U);
-	assert(intel_ax211_runtime_start_mcc(&fixture.session, &mcc) ==
+	assert(drv_intel_ax211_runtime_start_mcc(&fixture.session, &mcc) ==
 	    INTEL_AX211_RUNTIME_START_OK);
 	assert(mcc.channel_count == 1U);
 	assert(mcc.channel[0] == 0x12345678U);
@@ -1157,7 +1157,7 @@ test_success_retains_then_stops(void)
 	assert(lock < unlock);
 	assert(runtime_commands == 9U);
 	assert(unlock < runtime_irq);
-	result = intel_ax211_runtime_start_stop(&fixture.session);
+	result = drv_intel_ax211_runtime_start_stop(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_OK);
 	assert(fixture.session.state == INTEL_AX211_RUNTIME_START_STATE_IDLE);
 	assert(fixture.dma_released);
@@ -1178,36 +1178,36 @@ test_malformed_timeout_and_stale(void)
 
 	test_fixture_init(&fixture);
 	test_event_add(&fixture, TEST_EVENT_MALFORMED, 0U, 0U);
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_PROTOCOL);
 	assert(fixture.dma_released);
 	assert(fixture.session.state == INTEL_AX211_RUNTIME_START_STATE_IDLE);
 
 	test_fixture_init(&fixture);
 	test_event_add(&fixture, TEST_EVENT_TIMEOUT, 0U, 0U);
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_TIMEOUT);
 	assert(fixture.dma_released);
 
 	test_fixture_init(&fixture);
 	test_event_add(&fixture, TEST_EVENT_ALIVE, 1U, 0U);
 	test_success_events(&fixture);
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_OK);
-	assert(intel_ax211_runtime_start_stop(&fixture.session) ==
+	assert(drv_intel_ax211_runtime_start_stop(&fixture.session) ==
 	    INTEL_AX211_RUNTIME_START_OK);
 
 	test_fixture_init(&fixture);
 	test_event_add(&fixture, TEST_EVENT_ALIVE, 0U, 0U);
 	test_event_add(&fixture, TEST_EVENT_ALIVE, 0U, 0U);
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_DUPLICATE);
 	assert(fixture.dma_released);
 
 	test_fixture_init(&fixture);
 	test_event_add(&fixture, TEST_EVENT_ALIVE, 0U, 0U);
 	test_event_add(&fixture, TEST_EVENT_PNVM, 0U, 1U);
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_PROTOCOL);
 	assert(fixture.dma_released);
 }
@@ -1229,7 +1229,7 @@ test_runtime_failure_unwind(void)
 		}
 	}
 	assert(index < fixture.event_count);
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_PROTOCOL);
 	assert(fixture.dma_released);
 	assert(!fixture.nic_owned);
@@ -1248,7 +1248,7 @@ test_runtime_failure_unwind(void)
 	test_event_add(&fixture, TEST_EVENT_ACK_TEMP, 0U, 0U);
 	test_event_add(&fixture, TEST_EVENT_ACK_POWER, 0U, 0U);
 	test_event_add(&fixture, TEST_EVENT_MALFORMED_MCC, 0U, 0U);
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_PROTOCOL);
 	assert(fixture.dma_released);
 	assert(!fixture.nic_owned);
@@ -1261,7 +1261,7 @@ test_runtime_failure_unwind(void)
 	test_event_add(&fixture, TEST_EVENT_ACK_ACCESS, 0U, 0U);
 	test_event_add(&fixture, TEST_EVENT_INIT, 0U, 0U);
 	test_event_add(&fixture, TEST_EVENT_TIMEOUT, 0U, 0U);
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_TIMEOUT);
 	assert(fixture.dma_released);
 	assert(!fixture.nic_owned);
@@ -1270,7 +1270,7 @@ test_runtime_failure_unwind(void)
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
 	fixture.fail_stage = TEST_FAIL_RUNTIME_INTERRUPTS;
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_TRANSPORT);
 	assert(fixture.dma_released);
 	assert(fixture.session.state == INTEL_AX211_RUNTIME_START_STATE_IDLE);
@@ -1278,7 +1278,7 @@ test_runtime_failure_unwind(void)
 	/* DQA is denied before DMA or hardware ownership is acquired. */
 	test_fixture_init(&fixture);
 	fixture.fail_stage = TEST_FAIL_DQA_PROFILE;
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_PROTOCOL);
 	assert(fixture.source_released);
 	assert(!fixture.dma_released);
@@ -1293,17 +1293,17 @@ test_stop_retry(void)
 
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
-	assert(intel_ax211_runtime_start_run(&fixture.session) ==
+	assert(drv_intel_ax211_runtime_start_run(&fixture.session) ==
 	    INTEL_AX211_RUNTIME_START_OK);
 	fixture.fail_stage = TEST_FAIL_DRAIN;
-	result = intel_ax211_runtime_start_stop(&fixture.session);
+	result = drv_intel_ax211_runtime_start_stop(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_STOP_REQUIRED);
 	assert(fixture.session.state ==
 	    INTEL_AX211_RUNTIME_START_STATE_STOP_REQUIRED);
 	assert(fixture.session.dma_prepared);
 	assert(!fixture.dma_released);
 	fixture.fail_stage = TEST_FAIL_NONE;
-	result = intel_ax211_runtime_start_cleanup(&fixture.session);
+	result = drv_intel_ax211_runtime_start_cleanup(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_OK);
 	assert(fixture.dma_released);
 	assert(fixture.session.state == INTEL_AX211_RUNTIME_START_STATE_IDLE);
@@ -1327,10 +1327,10 @@ test_generation_isolation_and_wrap(void)
 
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
-	assert(intel_ax211_runtime_start_run(&fixture.session) ==
+	assert(drv_intel_ax211_runtime_start_run(&fixture.session) ==
 	    INTEL_AX211_RUNTIME_START_OK);
 	old_generation = fixture.session.generation;
-	assert(intel_ax211_runtime_start_stop(&fixture.session) ==
+	assert(drv_intel_ax211_runtime_start_stop(&fixture.session) ==
 	    INTEL_AX211_RUNTIME_START_OK);
 
 	/* Queued old work is flushed; later old notifications and replies drop. */
@@ -1341,7 +1341,7 @@ test_generation_isolation_and_wrap(void)
 		    old_generation, 0U);
 		test_event_add(&fixture, events[index], 0U, 0U);
 	}
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_OK);
 	assert(fixture.session.generation == old_generation + 1U);
 	assert(fixture.epoch_begin_count == 2U);
@@ -1351,7 +1351,7 @@ test_generation_isolation_and_wrap(void)
 	assert(fixture.session.commands.hardware_epoch ==
 	    fixture.session.generation);
 	assert(fixture.event_index == fixture.event_count);
-	assert(intel_ax211_runtime_start_stop(&fixture.session) ==
+	assert(drv_intel_ax211_runtime_start_stop(&fixture.session) ==
 	    INTEL_AX211_RUNTIME_START_OK);
 
 	/* Wrap consumes epoch one only after flushing any pre-existing alias. */
@@ -1359,13 +1359,13 @@ test_generation_isolation_and_wrap(void)
 	fixture.session.generation = UINT32_MAX;
 	test_event_add_generation(&fixture, TEST_EVENT_ALIVE, 1U, 1U);
 	test_success_events(&fixture);
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_OK);
 	assert(fixture.session.generation == 1U);
 	assert(fixture.receive_generation == 1U);
 	assert(fixture.bound_generation == 1U);
 	assert(fixture.queued_dropped == 1U);
-	assert(intel_ax211_runtime_start_stop(&fixture.session) ==
+	assert(drv_intel_ax211_runtime_start_stop(&fixture.session) ==
 	    INTEL_AX211_RUNTIME_START_OK);
 }
 
@@ -1378,7 +1378,7 @@ test_epoch_and_bind_failures(void)
 	/* A failed flush consumes its epoch and never touches the controller. */
 	test_fixture_init(&fixture);
 	fixture.fail_stage = TEST_FAIL_EPOCH;
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_IO);
 	assert(fixture.session.generation == 8U);
 	assert(fixture.dma_released);
@@ -1386,29 +1386,29 @@ test_epoch_and_bind_failures(void)
 	assert(memchr(fixture.trace, 'h', fixture.trace_length) == NULL);
 	fixture.fail_stage = TEST_FAIL_NONE;
 	test_success_events(&fixture);
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_OK);
 	assert(fixture.session.generation == 9U);
 	assert(fixture.receive_generation == 9U);
-	assert(intel_ax211_runtime_start_stop(&fixture.session) ==
+	assert(drv_intel_ax211_runtime_start_stop(&fixture.session) ==
 	    INTEL_AX211_RUNTIME_START_OK);
 
 	/* Bind failure frees unexposed DMA but a failed reset stays sticky. */
 	test_fixture_init(&fixture);
 	fixture.fail_stage = TEST_FAIL_BIND;
 	fixture.stop_fails = 1U;
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_STOP_REQUIRED);
 	assert(fixture.session.state ==
 	    INTEL_AX211_RUNTIME_START_STATE_STOP_REQUIRED_NO_DMA);
 	assert(!fixture.session.dma_prepared);
 	assert(fixture.session.hardware_touched);
 	assert(fixture.dma_released);
-	assert(intel_ax211_runtime_start_run(&fixture.session) ==
+	assert(drv_intel_ax211_runtime_start_run(&fixture.session) ==
 	    INTEL_AX211_RUNTIME_START_INVALID);
 	fixture.stop_fails = 0U;
 	fixture.fail_stage = TEST_FAIL_NONE;
-	result = intel_ax211_runtime_start_cleanup(&fixture.session);
+	result = drv_intel_ax211_runtime_start_cleanup(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_OK);
 	assert(fixture.session.state == INTEL_AX211_RUNTIME_START_STATE_IDLE);
 	assert(!fixture.session.hardware_touched);
@@ -1427,7 +1427,7 @@ test_nic_ownership_failures(void)
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
 	fixture.fail_stage = TEST_FAIL_NIC_LOCK;
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_IO);
 	assert(fixture.command_count == 2U);
 	assert(!fixture.nic_owned);
@@ -1440,7 +1440,7 @@ test_nic_ownership_failures(void)
 	test_fixture_init(&fixture);
 	test_success_events(&fixture);
 	fixture.fail_stage = TEST_FAIL_NIC_UNLOCK;
-	result = intel_ax211_runtime_start_run(&fixture.session);
+	result = drv_intel_ax211_runtime_start_run(&fixture.session);
 	assert(result == INTEL_AX211_RUNTIME_START_IO);
 	assert(!fixture.runtime_interrupts);
 	assert(!fixture.nic_owned);

@@ -5,8 +5,8 @@
  * code with the production WLAN path: it checks the bytes produced there
  * against RFC 3610 CCM and the IEEE 802.11 CCMP nonce/AAD construction.
  */
-#include "../../../src/kern/net/wlan-crypto.h"
-#include "../../../src/kern/net/wlan-l2.h"
+#include "../../../src/kern/net/wifi/wlan-crypto.h"
+#include "../../../src/kern/net/wifi/wlan-l2.h"
 
 #include <assert.h>
 #include <errno.h>

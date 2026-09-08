@@ -165,7 +165,7 @@ test_mbr(void)
 	mbr_entry(2, 0x00U, 0x0fU, 300U, 40U);
 	mbr_entry(3, 0x00U, 0xa5U, 1000U, 40U);
 	memset(entries, 0xa5, sizeof(entries));
-	count = partition_scheme_mbr.scan(&partition_scheme_mbr, &disk, entries,
+	count = drv_partition_scheme_mbr.scan(&drv_partition_scheme_mbr, &disk, entries,
 	    ENTRY_CAPACITY);
 	CHECK(count == 4);
 	check_partition("mbr-active", &entries[0], 0U, 63U, 63U, 100U,
@@ -176,7 +176,7 @@ test_mbr(void)
 	CHECK(entries[2].p_block_count == 0U);
 	CHECK(entries[3].p_block_count == 0U);
 	CHECK((entries[0].p_flags & PARTITION_HAS_LABEL) == 0U);
-	count = partition_scheme_mbr.scan(&partition_scheme_mbr, &disk, entries,
+	count = drv_partition_scheme_mbr.scan(&drv_partition_scheme_mbr, &disk, entries,
 	    2U);
 	CHECK(count == 2);
 }
@@ -194,7 +194,7 @@ test_mbr_does_not_decode_gpt_identity(void)
 	mbr_entry(0, 0x80U, 0xefU, 128U, 64U);
 	mbr_entry(1, 0x00U, 0xeeU, 1U, DISK_SECTORS - 1U);
 	memset(entries, 0xa5, sizeof(entries));
-	count = partition_scheme_mbr.scan(&partition_scheme_mbr, &disk, entries,
+	count = drv_partition_scheme_mbr.scan(&drv_partition_scheme_mbr, &disk, entries,
 	    ENTRY_CAPACITY);
 	CHECK(count == 4);
 	check_partition("mbr-no-gpt-identity", &entries[0], 0U, 128U, 128U,
@@ -248,13 +248,13 @@ test_pc98_native_priority(void)
 	mbr_entry(0, 0x80U, 0x0eU, 128U, 32U);
 	pc98_entry(0, 0xa1U, 0x91U, 34U, 51U, 100U, "BOOT ROOT");
 	memset(entries, 0xa5, sizeof(entries));
-	count = partition_scheme_pc98.scan(&partition_scheme_pc98, &disk,
+	count = drv_partition_scheme_pc98.scan(&drv_partition_scheme_pc98, &disk,
 	    entries, ENTRY_CAPACITY);
 	CHECK(count == 16);
 	check_partition("pc98-native", &entries[0], 0U, 34U, 51U, 50U,
 	    PARTITION_BOOTABLE | PARTITION_HAS_LABEL, "BOOT", "");
 	memset(entries, 0xa5, sizeof(entries));
-	count = partition_scheme_pc98_auto.scan(&partition_scheme_pc98_auto,
+	count = drv_partition_scheme_pc98_auto.scan(&drv_partition_scheme_pc98_auto,
 	    &disk, entries, ENTRY_CAPACITY);
 	CHECK(count == 16);
 	check_partition("pc98-ipl1-priority", &entries[0], 0U, 34U, 51U,
@@ -274,7 +274,7 @@ test_pc98_mbr_fallback(void)
 	put_le32(medium.bytes + 0x1b8U, 0xa0b0c0d0U);
 	mbr_entry(0, 0x80U, 0x0eU, 160U, 80U);
 	memset(entries, 0xa5, sizeof(entries));
-	count = partition_scheme_pc98_auto.scan(&partition_scheme_pc98_auto,
+	count = drv_partition_scheme_pc98_auto.scan(&drv_partition_scheme_pc98_auto,
 	    &disk, entries, ENTRY_CAPACITY);
 	CHECK(count == 4);
 	check_partition("pc98-auto-mbr", &entries[0], 0U, 160U, 160U, 80U,
@@ -291,7 +291,7 @@ test_pc98_default_native_fallback(void)
 	reset_medium();
 	pc98_entry(0, 0xa1U, 0x91U, 68U, 68U, 135U, "NATIVE");
 	memset(entries, 0xa5, sizeof(entries));
-	count = partition_scheme_pc98_auto.scan(&partition_scheme_pc98_auto,
+	count = drv_partition_scheme_pc98_auto.scan(&drv_partition_scheme_pc98_auto,
 	    &disk, entries, ENTRY_CAPACITY);
 	CHECK(count == 16);
 	check_partition("pc98-auto-native-default", &entries[0], 0U, 68U,
@@ -334,7 +334,7 @@ test_sun(void)
 	put_be16(medium.bytes + 508U, 0xdabeU);
 	sun_checksum();
 	memset(entries, 0xa5, sizeof(entries));
-	count = partition_scheme_sun.scan(&partition_scheme_sun, &disk, entries,
+	count = drv_partition_scheme_sun.scan(&drv_partition_scheme_sun, &disk, entries,
 	    ENTRY_CAPACITY);
 	CHECK(count == 8);
 	check_partition("sun-slice-a", &entries[0], 0U, 128U, 128U, 50U, 0U,
@@ -375,7 +375,7 @@ test_x68k(void)
 	x68k_entry(1, "DATA", 2U, 80U, 20U);
 	x68k_entry(2, "OLD", 1U, 120U, 10U);
 	memset(entries, 0xa5, sizeof(entries));
-	count = partition_scheme_x68k.scan(&partition_scheme_x68k, &disk,
+	count = drv_partition_scheme_x68k.scan(&drv_partition_scheme_x68k, &disk,
 	    entries, ENTRY_CAPACITY);
 	CHECK(count == 8);
 	check_partition("x68k-root", &entries[0], 0U, 32U, 32U, 100U,
@@ -385,7 +385,7 @@ test_x68k(void)
 	check_partition("x68k-disabled", &entries[2], 2U, 240U, 240U, 0U,
 	    PARTITION_HAS_LABEL, "OLD", "");
 	medium.bytes[0] = 'x';
-	CHECK(partition_scheme_x68k.scan(&partition_scheme_x68k, &disk, entries,
+	CHECK(drv_partition_scheme_x68k.scan(&drv_partition_scheme_x68k, &disk, entries,
 	    ENTRY_CAPACITY) == -1);
 }
 

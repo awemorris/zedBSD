@@ -67,11 +67,11 @@ struct mapping_thread {
 
 #ifdef ZEDBSD_FILE_CACHE_HOST
 int ws025_writeback_eligible(struct file *, off_t, size_t);
-const struct filesystem_type fat_filesystem_type = {
+const struct filesystem_type drv_fat_filesystem_type = {
 	.fs_name = "fat", .writeback_range = ws025_writeback_eligible
 };
 #else
-const struct filesystem_type fat_filesystem_type = { .fs_name = "fat" };
+const struct filesystem_type drv_fat_filesystem_type = { .fs_name = "fat" };
 #endif
 
 static unsigned checks;
@@ -420,7 +420,7 @@ disk_resolve_range(
  * Supplies stable FAT directory-entry identities for separately mounted aliases.
  */
 int
-fat_file_backing_identity(
+drv_fat_file_backing_identity(
 	struct inode *inode,
 	struct disk **disk,
 	uint64_t *object)
@@ -441,7 +441,7 @@ fat_file_backing_identity(
  * Enumerates two noncontiguous extents of the fixed-size fixture file.
  */
 int
-fat_file_extents(
+drv_fat_file_extents(
 	struct file *file,
 	fat_extent_cb callback,
 	void *argument)
@@ -960,9 +960,9 @@ make_fixture(
 	fixture->partition.d_parent_offset = 100;
 	fixture->partition_alias = fixture->partition;
 	fixture->mount.m_disk = &fixture->partition;
-	fixture->mount.m_type = &fat_filesystem_type;
+	fixture->mount.m_type = &drv_fat_filesystem_type;
 	fixture->mount_alias.m_disk = &fixture->partition_alias;
-	fixture->mount_alias.m_type = &fat_filesystem_type;
+	fixture->mount_alias.m_type = &drv_fat_filesystem_type;
 
 	/* Initialize separate inodes with one canonical FAT directory-entry key. */
 	fixture->inode.i_type = INODE_REG;
@@ -1057,7 +1057,7 @@ test_validation(void)
 	fixture.partition.d_flags = 0;
 	fixture.mount.m_type = NULL;
 	CHECK(file_format_reserve(fixture.owner, FILE_BYTES) == EOPNOTSUPP);
-	fixture.mount.m_type = &fat_filesystem_type;
+	fixture.mount.m_type = &drv_fat_filesystem_type;
 	fixture.inode.i_flags = INODE_ROOT;
 	CHECK(file_format_reserve(fixture.owner, FILE_BYTES) == EBUSY);
 	fixture.inode.i_flags = INODE_SWAPFILE;

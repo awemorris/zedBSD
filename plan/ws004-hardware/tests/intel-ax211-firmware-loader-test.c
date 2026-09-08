@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-firmware.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-firmware.h"
 #include "kern/file.h"
 #include "kern/vfs.h"
 
@@ -307,7 +307,7 @@ intel_ax211_firmware_loader_host_parse(const uint8_t *bytes, size_t length,
 	if (fixture_fault == FIXTURE_FAULT_PARSE &&
 	    fault_file == FIXTURE_FILE_UCODE)
 		return INTEL_AX211_INVALID;
-	return intel_ax211_firmware_parse(bytes, length, manifest);
+	return drv_intel_ax211_firmware_parse(bytes, length, manifest);
 }
 
 int
@@ -317,7 +317,7 @@ intel_ax211_firmware_loader_host_inspect_pnvm(const uint8_t *bytes,
 	if (fixture_fault == FIXTURE_FAULT_PARSE &&
 	    fault_file == FIXTURE_FILE_PNVM)
 		return INTEL_AX211_INVALID;
-	return intel_ax211_pnvm_inspect(bytes, length, inventory);
+	return drv_intel_ax211_pnvm_inspect(bytes, length, inventory);
 }
 
 static void
@@ -336,7 +336,7 @@ fixture_expect_failure(struct intel_ax211_firmware_files *files,
 	int error;
 
 	fixture_set_fault(fault, kind);
-	error = intel_ax211_firmware_files_load(files);
+	error = drv_intel_ax211_firmware_files_load(files);
 	fixture_set_fault(FIXTURE_FAULT_NONE, FIXTURE_FILE_NONE);
 	TEST_CHECK(error == expected);
 	TEST_CHECK(memcmp(files, &before, sizeof(before)) == 0);
@@ -357,7 +357,7 @@ fixture_sha256_test(void)
 	};
 	uint8_t actual[32];
 
-	TEST_CHECK(intel_ax211_firmware_loader_test_sha256("abc", 3U,
+	TEST_CHECK(drv_intel_ax211_firmware_loader_test_sha256("abc", 3U,
 	    actual) == 0);
 	TEST_CHECK(memcmp(actual, expected, sizeof(actual)) == 0);
 	return 0;
@@ -387,7 +387,7 @@ main(void)
 		return error;
 
 	memset(&files, 0, sizeof(files));
-	TEST_CHECK(intel_ax211_firmware_files_load(&files) == 0);
+	TEST_CHECK(drv_intel_ax211_firmware_files_load(&files) == 0);
 	TEST_CHECK(files.ucode_size == INTEL_AX211_FIRMWARE_SIZE);
 	TEST_CHECK(files.pnvm_size == INTEL_AX211_PNVM_SIZE);
 	TEST_CHECK(files.ucode_manifest.api_major == INTEL_AX211_FIRMWARE_API);
@@ -402,7 +402,7 @@ main(void)
 	first_pnvm = files.pnvm_bytes;
 	TEST_CHECK(fixture_active_allocations() == 2U);
 
-	TEST_CHECK(intel_ax211_firmware_files_load(&files) == 0);
+	TEST_CHECK(drv_intel_ax211_firmware_files_load(&files) == 0);
 	second_ucode = files.ucode_bytes;
 	second_pnvm = files.pnvm_bytes;
 	TEST_CHECK(second_ucode != first_ucode && second_pnvm != first_pnvm);
@@ -470,7 +470,7 @@ main(void)
 	if (error != 0)
 		return error;
 
-	intel_ax211_firmware_files_release(&files);
+	drv_intel_ax211_firmware_files_release(&files);
 	TEST_CHECK(files.ucode_bytes == NULL && files.ucode_size == 0U);
 	TEST_CHECK(files.pnvm_bytes == NULL && files.pnvm_size == 0U);
 	TEST_CHECK(fixture_active_allocations() == 0U);
@@ -481,7 +481,7 @@ main(void)
 
 	opens = open_count;
 	files.ucode_size = 1U;
-	TEST_CHECK(intel_ax211_firmware_files_load(&files) == EINVAL);
+	TEST_CHECK(drv_intel_ax211_firmware_files_load(&files) == EINVAL);
 	TEST_CHECK(open_count == opens && files.ucode_size == 1U);
 	memset(&files, 0, sizeof(files));
 	return 0;

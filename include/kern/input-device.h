@@ -60,17 +60,17 @@ struct input_device_info {
 	void *context;
 };
 
-void input_core_init(void);
-int input_device_register(const struct input_device_info *,
+void drv_input_core_init(void);
+int drv_input_device_register(const struct input_device_info *,
 			  struct input_device **);
-void input_device_unregister(struct input_device *);
-void input_device_emit(struct input_device *, uint16_t, uint16_t, int32_t);
-void input_device_emit_key_event(struct input_device *,
+void drv_input_device_unregister(struct input_device *);
+void drv_input_device_emit(struct input_device *, uint16_t, uint16_t, int32_t);
+void drv_input_device_emit_key_event(struct input_device *,
 	const struct hal_key_event *);
-int input_subscribe(struct input_subscription *, input_subscriber_callback_t,
+int drv_input_subscribe(struct input_subscription *, input_subscriber_callback_t,
 	void *);
-void input_unsubscribe(struct input_subscription *);
-void input_subscriber_init(void);
-void input_subscriber_publish(const struct input_report *);
+void drv_input_unsubscribe(struct input_subscription *);
+void drv_input_subscriber_init(void);
+void drv_input_subscriber_publish(const struct input_report *);
 
 #endif

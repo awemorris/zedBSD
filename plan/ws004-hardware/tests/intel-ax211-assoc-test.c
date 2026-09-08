@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-assoc.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-assoc.h"
 
 #define TEST_ACTION_ADD                                      1U
 #define TEST_ACTION_MODIFY                                   2U
@@ -107,7 +107,7 @@ parse_table(uint8_t bytes[INTEL_AX211_PROTOCOL_API89_COMMAND_BYTES])
 {
 	struct intel_ax211_protocol_command_table table;
 
-	assert(intel_ax211_protocol_command_table_parse(bytes,
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes,
 	    INTEL_AX211_PROTOCOL_API89_COMMAND_BYTES, &table) ==
 	    INTEL_AX211_PROTOCOL_OK);
 	return table;
@@ -207,12 +207,12 @@ accept_current(struct intel_ax211_assoc_state *state, uint64_t now,
 	struct intel_ax211_assoc_command command;
 	struct intel_ax211_assoc_reply reply;
 
-	assert(intel_ax211_assoc_current(state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	if (saved != NULL)
 		*saved = command;
 	reply = make_reply(&command);
-	return intel_ax211_assoc_accept(state, &command, &reply, now + 1U);
+	return drv_intel_ax211_assoc_accept(state, &command, &reply, now + 1U);
 }
 
 static void
@@ -346,47 +346,47 @@ test_api89_versions(void)
 	make_api89_table(bytes);
 	table = parse_table(bytes);
 	/* STA_CONFIG/STA_REMOVE are implicit API89 v1 commands. */
-	assert(intel_ax211_assoc_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_OK);
 
 	memcpy(changed, bytes, sizeof(changed));
 	put_version(changed, 13U, 0x03U, 0x08U, 1U, 0U);
 	table = parse_table(changed);
-	assert(intel_ax211_assoc_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_UNSUPPORTED);
 	memcpy(changed, bytes, sizeof(changed));
 	put_version(changed, 14U, 0x03U, 0x09U, 3U, 0U);
 	table = parse_table(changed);
-	assert(intel_ax211_assoc_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_UNSUPPORTED);
 
 	/* If firmware explicitly advertises either implicit command, it must be v1. */
 	memcpy(changed, bytes, sizeof(changed));
 	put_version(changed, 15U, 0x03U, 0x0aU, 2U, 0U);
 	table = parse_table(changed);
-	assert(intel_ax211_assoc_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_UNSUPPORTED);
 	memcpy(changed, bytes, sizeof(changed));
 	put_version(changed, 15U, 0x03U, 0x0aU, 1U, 0U);
 	put_version(changed, 16U, 0x03U, 0x0cU, 1U, 0U);
 	table = parse_table(changed);
-	assert(intel_ax211_assoc_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_OK);
 
 	memcpy(changed, bytes, sizeof(changed));
 	put_version(changed, 7U, 0x05U, 0x08U, 2U, 2U);
 	table = parse_table(changed);
-	assert(intel_ax211_assoc_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_UNSUPPORTED);
 	memcpy(changed, bytes, sizeof(changed));
 	put_version(changed, 8U, 0x05U, 0x17U, 3U, 1U);
 	table = parse_table(changed);
-	assert(intel_ax211_assoc_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_UNSUPPORTED);
 	memcpy(changed, bytes, sizeof(changed));
 	put_version(changed, 10U, 0x03U, 0xfbU, 99U, 2U);
 	table = parse_table(changed);
-	assert(intel_ax211_assoc_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_UNSUPPORTED);
 }
 
@@ -403,47 +403,47 @@ test_auxiliary_codecs(void)
 	make_api89_table(bytes);
 	table = parse_table(bytes);
 	profile = make_profile();
-	assert(intel_ax211_assoc_mcast_filter_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_mcast_filter_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_OK);
 	memset(output, 0xa5, sizeof(output));
 	memset(expected, 0, sizeof(expected));
 	expected[0U] = 1U;
 	expected[3U] = 1U;
 	memcpy(expected + 4U, profile.bssid, 6U);
-	assert(intel_ax211_assoc_mcast_filter_encode(profile.bssid, output,
+	assert(drv_intel_ax211_assoc_mcast_filter_encode(profile.bssid, output,
 	    sizeof(output)) == INTEL_AX211_ASSOC_OK);
 	assert(memcmp(output, expected,
 	    INTEL_AX211_ASSOC_MCAST_FILTER_SIZE) == 0);
 	assert(output[INTEL_AX211_ASSOC_MCAST_FILTER_SIZE] == 0xa5U);
-	assert(intel_ax211_assoc_mcast_filter_encode(profile.bssid, output,
+	assert(drv_intel_ax211_assoc_mcast_filter_encode(profile.bssid, output,
 	    INTEL_AX211_ASSOC_MCAST_FILTER_SIZE - 1U) ==
 	    INTEL_AX211_ASSOC_BUFFER_TOO_SMALL);
 
-	assert(intel_ax211_assoc_mac_power_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_mac_power_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_OK);
 	memset(output, 0xa5, sizeof(output));
 	memset(expected, 0, sizeof(expected));
 	put_le16(expected + 6U, 25U);
-	assert(intel_ax211_assoc_mac_power_encode(3U, 100U, output,
+	assert(drv_intel_ax211_assoc_mac_power_encode(3U, 100U, output,
 	    sizeof(output)) == INTEL_AX211_ASSOC_OK);
 	assert(memcmp(output, expected, sizeof(expected)) == 0);
 	assert(output[40U] == 0xa5U);
-	assert(intel_ax211_assoc_mac_power_encode(1U, 21845001U, output,
+	assert(drv_intel_ax211_assoc_mac_power_encode(1U, 21845001U, output,
 	    sizeof(output)) == INTEL_AX211_ASSOC_OVERSIZED);
-	assert(intel_ax211_assoc_mac_power_encode(1U, 0U, output,
+	assert(drv_intel_ax211_assoc_mac_power_encode(1U, 0U, output,
 	    sizeof(output)) == INTEL_AX211_ASSOC_INVALID);
 
 	memset(response, 0, sizeof(response));
-	assert(intel_ax211_assoc_mac_power_response_validate(response, 0U) ==
+	assert(drv_intel_ax211_assoc_mac_power_response_validate(response, 0U) ==
 	    INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_mac_power_response_validate(response, 4U) ==
+	assert(drv_intel_ax211_assoc_mac_power_response_validate(response, 4U) ==
 	    INTEL_AX211_ASSOC_OK);
 	put_le32(response, 1U);
-	assert(intel_ax211_assoc_mac_power_response_validate(response, 4U) ==
+	assert(drv_intel_ax211_assoc_mac_power_response_validate(response, 4U) ==
 	    INTEL_AX211_ASSOC_FIRMWARE);
-	assert(intel_ax211_assoc_mac_power_response_validate(response, 3U) ==
+	assert(drv_intel_ax211_assoc_mac_power_response_validate(response, 3U) ==
 	    INTEL_AX211_ASSOC_TRUNCATED);
-	assert(intel_ax211_assoc_mac_power_response_validate(response, 5U) ==
+	assert(drv_intel_ax211_assoc_mac_power_response_validate(response, 5U) ==
 	    INTEL_AX211_ASSOC_OVERSIZED);
 }
 
@@ -463,13 +463,13 @@ test_profile_band_and_bounds(void)
 	profile.cck_ack_rates = 0U;
 	profile.short_preamble = 0U;
 	memset(&state, 0, sizeof(state));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 40U, 7U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 40U, 7U,
 	    100U) == INTEL_AX211_ASSOC_OK);
 	assert(accept_current(&state, 100U, NULL) ==
 	    INTEL_AX211_ASSOC_PENDING);
 	assert(accept_current(&state, 101U, NULL) ==
 	    INTEL_AX211_ASSOC_PENDING);
-	assert(intel_ax211_assoc_current(&state, 102U, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, 102U, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	assert(command.step == INTEL_AX211_ASSOC_STEP_PHY_ADD);
 	assert(get_le32(command.payload + 8U) == 36U);
@@ -477,14 +477,14 @@ test_profile_band_and_bounds(void)
 
 	memset(&state, 0, sizeof(state));
 	profile.channel = 35U;
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 41U, 7U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 41U, 7U,
 	    100U) == INTEL_AX211_ASSOC_INVALID);
 	profile.channel = 182U;
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 41U, 7U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 41U, 7U,
 	    100U) == INTEL_AX211_ASSOC_INVALID);
 	profile = make_profile();
 	profile.channel_width_mhz = 40U;
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 41U, 7U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 41U, 7U,
 	    100U) == INTEL_AX211_ASSOC_INVALID);
 }
 
@@ -505,11 +505,11 @@ test_exact_mld_sequence(void)
 	table = parse_table(bytes);
 	profile = make_profile();
 	memset(&state, 0, sizeof(state));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 41U, 7U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 41U, 7U,
 	    100U) == INTEL_AX211_ASSOC_OK);
 	now = 100U;
 
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	expected_mac(&profile, TEST_ACTION_ADD, 0U, expected);
 	expect_command(&command, INTEL_AX211_ASSOC_STEP_MAC_ADD,
@@ -518,7 +518,7 @@ test_exact_mld_sequence(void)
 	assert(command.response_kind == INTEL_AX211_ASSOC_RESPONSE_EMPTY);
 	assert(accept_current(&state, now++, NULL) == INTEL_AX211_ASSOC_PENDING);
 
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	expected_link(&profile, TEST_ACTION_ADD, 0U, 0U,
 	    TEST_INVALID_CONTEXT, profile.dtim_period, expected);
@@ -527,7 +527,7 @@ test_exact_mld_sequence(void)
 	    expected);
 	assert(accept_current(&state, now++, NULL) == INTEL_AX211_ASSOC_PENDING);
 
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	memset(expected, 0, sizeof(expected));
 	put_le32(expected + 4U, TEST_ACTION_ADD);
@@ -538,7 +538,7 @@ test_exact_mld_sequence(void)
 	    expected);
 	assert(accept_current(&state, now++, NULL) == INTEL_AX211_ASSOC_PENDING);
 
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	memset(expected, 0, sizeof(expected));
 	put_le32(expected + 4U, 0x1406U);
@@ -547,7 +547,7 @@ test_exact_mld_sequence(void)
 	    expected);
 	assert(accept_current(&state, now++, NULL) == INTEL_AX211_ASSOC_PENDING);
 
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	expected_link(&profile, TEST_ACTION_MODIFY, 0U, 0U, 0U,
 	    profile.dtim_period, expected);
@@ -558,7 +558,7 @@ test_exact_mld_sequence(void)
 	assert(get_le32(command.payload + 28U) == 0U);
 	assert(accept_current(&state, now++, NULL) == INTEL_AX211_ASSOC_PENDING);
 
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	expected_link(&profile, TEST_ACTION_MODIFY,
 	    TEST_LINK_MODIFY_ACTIVE | TEST_LINK_MODIFY_RATES, 1U, 0U,
@@ -577,7 +577,7 @@ test_exact_mld_sequence(void)
 	assert(get_le32(command.payload + 140U) == 300U);
 	assert(accept_current(&state, now++, NULL) == INTEL_AX211_ASSOC_PENDING);
 
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	expected_station(&profile, 0U, expected);
 	expect_command(&command, INTEL_AX211_ASSOC_STEP_STATION_ADD,
@@ -585,7 +585,7 @@ test_exact_mld_sequence(void)
 	    expected);
 	assert(accept_current(&state, now++, NULL) == INTEL_AX211_ASSOC_PENDING);
 
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	memset(expected, 0, sizeof(expected));
 	put_le32(expected + 4U, 1U);
@@ -600,7 +600,7 @@ test_exact_mld_sequence(void)
 	assert(command.response_version == 2U);
 	assert(accept_current(&state, now++, NULL) == INTEL_AX211_ASSOC_PENDING);
 
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	memset(expected, 0, sizeof(expected));
 	put_le32(expected + 4U, TEST_ACTION_ADD);
@@ -613,9 +613,9 @@ test_exact_mld_sequence(void)
 	assert(state.phase == INTEL_AX211_ASSOC_PHASE_AUTH_READY);
 
 	update = make_update();
-	assert(intel_ax211_assoc_begin_update(&state, &update, 41U, 7U,
+	assert(drv_intel_ax211_assoc_begin_update(&state, &update, 41U, 7U,
 	    now) == INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	expected_mac(&profile, TEST_ACTION_MODIFY, update.association_id,
 	    expected);
@@ -626,7 +626,7 @@ test_exact_mld_sequence(void)
 	assert(get_le16(command.payload + 40U) == update.association_id);
 	assert(accept_current(&state, now++, NULL) == INTEL_AX211_ASSOC_PENDING);
 
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	expected_link(&profile, TEST_ACTION_MODIFY,
 	    TEST_LINK_MODIFY_RATES | TEST_LINK_MODIFY_QOS |
@@ -639,7 +639,7 @@ test_exact_mld_sequence(void)
 	assert(get_le32(command.payload + 28U) == 1U);
 	assert(accept_current(&state, now++, NULL) == INTEL_AX211_ASSOC_PENDING);
 
-	assert(intel_ax211_assoc_current(&state, now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	expected_station(&profile, update.association_id, expected);
 	expect_command(&command, INTEL_AX211_ASSOC_STEP_STATION_UPDATE,
@@ -665,45 +665,45 @@ test_response_matching_and_queue_pointer(void)
 	table = parse_table(bytes);
 	profile = make_profile();
 	memset(&state, 0, sizeof(state));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 51U, 8U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 51U, 8U,
 	    0U) == INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_current(&state, 0U, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, 0U, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	reply = make_reply(&command);
 	reply.common_generation += UINT64_C(1) << 32;
-	assert(intel_ax211_assoc_accept(&state, &command, &reply, 1U) ==
+	assert(drv_intel_ax211_assoc_accept(&state, &command, &reply, 1U) ==
 	    INTEL_AX211_ASSOC_STALE);
 	reply = make_reply(&command);
 	reply.hardware_epoch++;
-	assert(intel_ax211_assoc_accept(&state, &command, &reply, 1U) ==
+	assert(drv_intel_ax211_assoc_accept(&state, &command, &reply, 1U) ==
 	    INTEL_AX211_ASSOC_STALE);
 	reply = make_reply(&command);
 	reply.step = INTEL_AX211_ASSOC_STEP_LINK_ADD;
-	assert(intel_ax211_assoc_accept(&state, &command, &reply, 1U) ==
+	assert(drv_intel_ax211_assoc_accept(&state, &command, &reply, 1U) ==
 	    INTEL_AX211_ASSOC_OUT_OF_ORDER);
 	reply = make_reply(&command);
 	command.payload[20U]++;
-	assert(intel_ax211_assoc_accept(&state, &command, &reply, 1U) ==
+	assert(drv_intel_ax211_assoc_accept(&state, &command, &reply, 1U) ==
 	    INTEL_AX211_ASSOC_OUT_OF_ORDER);
 	command.payload[20U]--;
 	reply = make_reply(&command);
-	assert(intel_ax211_assoc_accept(&state, &command, &reply, 1U) ==
+	assert(drv_intel_ax211_assoc_accept(&state, &command, &reply, 1U) ==
 	    INTEL_AX211_ASSOC_PENDING);
-	assert(intel_ax211_assoc_accept(&state, &command, &reply, 2U) ==
+	assert(drv_intel_ax211_assoc_accept(&state, &command, &reply, 2U) ==
 	    INTEL_AX211_ASSOC_DUPLICATE);
 
 	memset(&state, 0, sizeof(state));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 52U, 8U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 52U, 8U,
 	    0U) == INTEL_AX211_ASSOC_OK);
 	for (index = 0U; index < 7U; index++)
 		assert(accept_current(&state, index, NULL) ==
 		    INTEL_AX211_ASSOC_PENDING);
-	assert(intel_ax211_assoc_current(&state, 7U, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, 7U, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	assert(command.step == INTEL_AX211_ASSOC_STEP_QUEUE_ENABLE);
 	reply = make_reply(&command);
 	put_le16(reply.payload + 2U, 1U);
-	assert(intel_ax211_assoc_accept(&state, &command, &reply, 8U) ==
+	assert(drv_intel_ax211_assoc_accept(&state, &command, &reply, 8U) ==
 	    INTEL_AX211_ASSOC_PENDING);
 	assert(state.phase == INTEL_AX211_ASSOC_PHASE_AUTH);
 	assert(state.step == INTEL_AX211_ASSOC_STEP_SESSION_PROTECT);
@@ -733,7 +733,7 @@ test_exact_reverse_rollback(void)
 	table = parse_table(bytes);
 	profile = make_profile();
 	memset(&state, 0, sizeof(state));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 66U, 12U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 66U, 12U,
 	    0U) == INTEL_AX211_ASSOC_OK);
 	for (index = 0U; index < 9U; index++) {
 		int result;
@@ -742,14 +742,14 @@ test_exact_reverse_rollback(void)
 		assert(result == (index == 8U ?
 		    INTEL_AX211_ASSOC_AUTH_READY : INTEL_AX211_ASSOC_PENDING));
 	}
-	assert(intel_ax211_assoc_cancel(&state, 66U, 12U, 10U) ==
+	assert(drv_intel_ax211_assoc_cancel(&state, 66U, 12U, 10U) ==
 	    INTEL_AX211_ASSOC_PENDING);
 
 	for (index = 0U;
 	    index < sizeof(expected_steps) / sizeof(expected_steps[0]); index++) {
 		int result;
 
-		assert(intel_ax211_assoc_current(&state, 10U + index, &command) ==
+		assert(drv_intel_ax211_assoc_current(&state, 10U + index, &command) ==
 		    INTEL_AX211_ASSOC_OK);
 		assert(command.step == expected_steps[index]);
 		switch (command.step) {
@@ -832,11 +832,11 @@ test_uncertain_and_timeout_cleanup(void)
 
 	/* An unacknowledged first MAC ADD is cleaned up as possibly applied. */
 	memset(&state, 0, sizeof(state));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile,
 	    UINT64_C(0x10000004d), 14U, 0U) == INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_current(&state, 0U, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, 0U, &command) ==
 	    INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_cancel(&state, UINT64_C(0x10000004d), 14U,
+	assert(drv_intel_ax211_assoc_cancel(&state, UINT64_C(0x10000004d), 14U,
 	    1U) == INTEL_AX211_ASSOC_PENDING);
 	assert(state.step == INTEL_AX211_ASSOC_STEP_MAC_REMOVE);
 	assert(accept_current(&state, 1U, NULL) ==
@@ -844,14 +844,14 @@ test_uncertain_and_timeout_cleanup(void)
 
 	/* A malformed empty response makes LINK ADD uncertain. */
 	memset(&state, 0, sizeof(state));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 78U, 14U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 78U, 14U,
 	    0U) == INTEL_AX211_ASSOC_OK);
 	assert(accept_current(&state, 0U, NULL) == INTEL_AX211_ASSOC_PENDING);
-	assert(intel_ax211_assoc_current(&state, 1U, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, 1U, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	reply = make_reply(&command);
 	reply.payload_length = 1U;
-	assert(intel_ax211_assoc_accept(&state, &command, &reply, 2U) ==
+	assert(drv_intel_ax211_assoc_accept(&state, &command, &reply, 2U) ==
 	    INTEL_AX211_ASSOC_FIRMWARE);
 	assert(state.step == INTEL_AX211_ASSOC_STEP_LINK_REMOVE);
 	assert(accept_current(&state, 2U, NULL) == INTEL_AX211_ASSOC_PENDING);
@@ -861,7 +861,7 @@ test_uncertain_and_timeout_cleanup(void)
 
 	/* Timeout after activation assumes the MODIFY may have activated. */
 	memset(&state, 0, sizeof(state));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 79U, 14U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 79U, 14U,
 	    0U) == INTEL_AX211_ASSOC_OK);
 	assert(accept_current(&state, 0U, NULL) == INTEL_AX211_ASSOC_PENDING);
 	assert(accept_current(&state, 1U, NULL) == INTEL_AX211_ASSOC_PENDING);
@@ -869,7 +869,7 @@ test_uncertain_and_timeout_cleanup(void)
 	assert(accept_current(&state, 3U, NULL) == INTEL_AX211_ASSOC_PENDING);
 	assert(accept_current(&state, 4U, NULL) == INTEL_AX211_ASSOC_PENDING);
 	assert(state.step == INTEL_AX211_ASSOC_STEP_LINK_ACTIVATE);
-	assert(intel_ax211_assoc_expire(&state, state.deadline) ==
+	assert(drv_intel_ax211_assoc_expire(&state, state.deadline) ==
 	    INTEL_AX211_ASSOC_TIMEOUT);
 	assert(state.step == INTEL_AX211_ASSOC_STEP_LINK_DEACTIVATE);
 }
@@ -952,17 +952,17 @@ test_callback_drive_and_failure(void)
 	update = make_update();
 	memset(&state, 0, sizeof(state));
 	memset(&script, 0, sizeof(script));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 71U, 10U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 71U, 10U,
 	    0U) == INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_drive(&state, &script_ops, &script) ==
+	assert(drv_intel_ax211_assoc_drive(&state, &script_ops, &script) ==
 	    INTEL_AX211_ASSOC_AUTH_READY);
 	assert(script.count == sizeof(auth_steps) / sizeof(auth_steps[0]));
 	for (index = 0U; index < script.count; index++)
 		assert(script.step[index] == auth_steps[index]);
-	assert(intel_ax211_assoc_begin_update(&state, &update, 71U, 10U,
+	assert(drv_intel_ax211_assoc_begin_update(&state, &update, 71U, 10U,
 	    script.now) == INTEL_AX211_ASSOC_OK);
 	script.count = 0U;
-	assert(intel_ax211_assoc_drive(&state, &script_ops, &script) ==
+	assert(drv_intel_ax211_assoc_drive(&state, &script_ops, &script) ==
 	    INTEL_AX211_ASSOC_COMPLETE);
 	assert(script.count == sizeof(update_steps) / sizeof(update_steps[0]));
 	for (index = 0U; index < script.count; index++)
@@ -972,9 +972,9 @@ test_callback_drive_and_failure(void)
 	memset(&script, 0, sizeof(script));
 	script.fail_step = INTEL_AX211_ASSOC_STEP_QUEUE_ENABLE;
 	script.fail_result = INTEL_AX211_ASSOC_TIMEOUT;
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 72U, 10U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 72U, 10U,
 	    0U) == INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_drive(&state, &script_ops, &script) ==
+	assert(drv_intel_ax211_assoc_drive(&state, &script_ops, &script) ==
 	    INTEL_AX211_ASSOC_TIMEOUT);
 	assert(state.phase == INTEL_AX211_ASSOC_PHASE_IDLE);
 	assert(script.count == 14U);
@@ -990,9 +990,9 @@ test_callback_drive_and_failure(void)
 	memset(&script, 0, sizeof(script));
 	script.fail_step = INTEL_AX211_ASSOC_STEP_STATION_ADD;
 	script.fail_result = INTEL_AX211_ASSOC_FIRMWARE;
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 73U, 10U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 73U, 10U,
 	    0U) == INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_drive(&state, &script_ops, &script) ==
+	assert(drv_intel_ax211_assoc_drive(&state, &script_ops, &script) ==
 	    INTEL_AX211_ASSOC_FIRMWARE);
 	assert(state.phase == INTEL_AX211_ASSOC_PHASE_IDLE);
 	assert(script.count == 11U);
@@ -1028,21 +1028,21 @@ test_session_notifications(void)
 	profile = make_profile();
 	memset(&state, 0, sizeof(state));
 	memset(&script, 0, sizeof(script));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 81U, 12U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 81U, 12U,
 	    0U) == INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_drive(&state, &script_ops, &script) ==
+	assert(drv_intel_ax211_assoc_drive(&state, &script_ops, &script) ==
 	    INTEL_AX211_ASSOC_AUTH_READY);
 	message = make_session_event(payload, 12U,
 	    INTEL_AX211_ASSOC_MAC_ID, 1U, 0U, 0U);
-	assert(intel_ax211_assoc_session_event_accept(&state, &message, 81U,
+	assert(drv_intel_ax211_assoc_session_event_accept(&state, &message, 81U,
 	    12U) == INTEL_AX211_ASSOC_SESSION_EXPIRED);
-	assert(intel_ax211_assoc_session_event_accept(&state, &message, 81U,
+	assert(drv_intel_ax211_assoc_session_event_accept(&state, &message, 81U,
 	    12U) == INTEL_AX211_ASSOC_DUPLICATE);
-	assert(intel_ax211_assoc_cancel(&state, 81U, 12U, script.now) ==
+	assert(drv_intel_ax211_assoc_cancel(&state, 81U, 12U, script.now) ==
 	    INTEL_AX211_ASSOC_PENDING);
 	assert(state.step == INTEL_AX211_ASSOC_STEP_QUEUE_REMOVE);
 	script.count = 0U;
-	assert(intel_ax211_assoc_drive(&state, &script_ops, &script) ==
+	assert(drv_intel_ax211_assoc_drive(&state, &script_ops, &script) ==
 	    INTEL_AX211_ASSOC_ROLLED_BACK);
 	assert(script.count == sizeof(cleanup_steps) / sizeof(cleanup_steps[0]));
 	for (index = 0U; index < script.count; index++)
@@ -1051,25 +1051,25 @@ test_session_notifications(void)
 	/* Bound the unsolicited-notification identity and payload. */
 	memset(&state, 0, sizeof(state));
 	memset(&script, 0, sizeof(script));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 82U, 13U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 82U, 13U,
 	    0U) == INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_drive(&state, &script_ops, &script) ==
+	assert(drv_intel_ax211_assoc_drive(&state, &script_ops, &script) ==
 	    INTEL_AX211_ASSOC_AUTH_READY);
 	message = make_session_event(payload, 13U, 0U, 1U, 0U, 0U);
-	assert(intel_ax211_assoc_session_event_accept(&state, &message, 83U,
+	assert(drv_intel_ax211_assoc_session_event_accept(&state, &message, 83U,
 	    13U) == INTEL_AX211_ASSOC_STALE);
 	message.group = 4U;
-	assert(intel_ax211_assoc_session_event_accept(&state, &message, 82U,
+	assert(drv_intel_ax211_assoc_session_event_accept(&state, &message, 82U,
 	    13U) == INTEL_AX211_ASSOC_UNSUPPORTED);
 	message = make_session_event(payload, 13U, 0U, 1U, 0U, 0U);
 	message.payload_length--;
-	assert(intel_ax211_assoc_session_event_accept(&state, &message, 82U,
+	assert(drv_intel_ax211_assoc_session_event_accept(&state, &message, 82U,
 	    13U) == INTEL_AX211_ASSOC_TRUNCATED);
 	message = make_session_event(payload, 13U, 1U, 1U, 0U, 0U);
-	assert(intel_ax211_assoc_session_event_accept(&state, &message, 82U,
+	assert(drv_intel_ax211_assoc_session_event_accept(&state, &message, 82U,
 	    13U) == INTEL_AX211_ASSOC_EVENT_IGNORED);
 	message = make_session_event(payload, 13U, 0U, 2U, 0U, 0U);
-	assert(intel_ax211_assoc_session_event_accept(&state, &message, 82U,
+	assert(drv_intel_ax211_assoc_session_event_accept(&state, &message, 82U,
 	    13U) == INTEL_AX211_ASSOC_FIRMWARE);
 }
 
@@ -1093,18 +1093,18 @@ test_session_expiry_before_ack_and_probe_dtim(void)
 	memset(&state, 0, sizeof(state));
 	for (index = 0U; index < 8U; index++) {
 		if (index == 0U)
-			assert(intel_ax211_assoc_begin(&state, &table, &profile,
+			assert(drv_intel_ax211_assoc_begin(&state, &table, &profile,
 			    84U, 14U, 0U) == INTEL_AX211_ASSOC_OK);
 		assert(accept_current(&state, index, NULL) ==
 		    INTEL_AX211_ASSOC_PENDING);
 	}
 	assert(state.step == INTEL_AX211_ASSOC_STEP_SESSION_PROTECT);
 	message = make_session_event(payload, 14U, 0U, 1U, 0U, 0U);
-	assert(intel_ax211_assoc_session_event_accept(&state, &message, 84U,
+	assert(drv_intel_ax211_assoc_session_event_accept(&state, &message, 84U,
 	    14U) == INTEL_AX211_ASSOC_SESSION_EXPIRED);
 	assert(accept_current(&state, 8U, NULL) ==
 	    INTEL_AX211_ASSOC_AUTH_READY);
-	assert(intel_ax211_assoc_cancel(&state, 84U, 14U, 9U) ==
+	assert(drv_intel_ax211_assoc_cancel(&state, 84U, 14U, 9U) ==
 	    INTEL_AX211_ASSOC_PENDING);
 	assert(state.step == INTEL_AX211_ASSOC_STEP_QUEUE_REMOVE);
 
@@ -1115,18 +1115,18 @@ test_session_expiry_before_ack_and_probe_dtim(void)
 	update.dtim_count = 1U;
 	memset(&state, 0, sizeof(state));
 	memset(&script, 0, sizeof(script));
-	assert(intel_ax211_assoc_begin(&state, &table, &profile, 74U, 11U,
+	assert(drv_intel_ax211_assoc_begin(&state, &table, &profile, 74U, 11U,
 	    0U) == INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_drive(&state, &script_ops, &script) ==
+	assert(drv_intel_ax211_assoc_drive(&state, &script_ops, &script) ==
 	    INTEL_AX211_ASSOC_AUTH_READY);
-	assert(intel_ax211_assoc_begin_update(&state, &update, 74U, 11U,
+	assert(drv_intel_ax211_assoc_begin_update(&state, &update, 74U, 11U,
 	    script.now) == INTEL_AX211_ASSOC_INVALID);
 	update.dtim_count = 0U;
-	assert(intel_ax211_assoc_begin_update(&state, &update, 74U, 11U,
+	assert(drv_intel_ax211_assoc_begin_update(&state, &update, 74U, 11U,
 	    script.now) == INTEL_AX211_ASSOC_OK);
 	assert(accept_current(&state, script.now, NULL) ==
 	    INTEL_AX211_ASSOC_PENDING);
-	assert(intel_ax211_assoc_current(&state, script.now, &command) ==
+	assert(drv_intel_ax211_assoc_current(&state, script.now, &command) ==
 	    INTEL_AX211_ASSOC_OK);
 	assert(command.step == INTEL_AX211_ASSOC_STEP_LINK_ASSOCIATE);
 	assert(get_le32(command.payload + 24U) == 0x1aU);
@@ -1201,13 +1201,13 @@ test_real_api89_table(const char *path)
 	assert(find_command_table(firmware, firmware_length, &table_bytes,
 	    &table_length));
 	assert(table_length == INTEL_AX211_PROTOCOL_API89_COMMAND_BYTES);
-	assert(intel_ax211_protocol_command_table_parse(table_bytes,
+	assert(drv_intel_ax211_protocol_command_table_parse(table_bytes,
 	    table_length, &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_assoc_mcast_filter_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_mcast_filter_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_mac_power_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_mac_power_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_OK);
-	assert(intel_ax211_assoc_api89_validate(&table) ==
+	assert(drv_intel_ax211_assoc_api89_validate(&table) ==
 	    INTEL_AX211_ASSOC_OK);
 	free(firmware);
 }

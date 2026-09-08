@@ -11,7 +11,7 @@ static void backing_write_check(uint64_t first,uint32_t count,const void *buffer
  (void)count;(void)buffer;
  if(first==32 || first==224 || first==160 || first==352 || first==8 || first==UFS_SBLOCK_OFFSET/512) {
   REQUIRE(backing_journal->pending_ready && backing_journal->image_valid);
-  REQUIRE(ufs_get32(backing_journal->image,16,0)==4 || (backing_add && ufs_get32(backing_journal->image,16,0)==1));
+  REQUIRE(drv_ufs_get32(backing_journal->image,16,0)==4 || (backing_add && drv_ufs_get32(backing_journal->image,16,0)==1));
   if(backing_snapshot)REQUIRE(snapshot_calls==4);
  }
 }
@@ -33,10 +33,10 @@ static void backing_scenario(unsigned second,unsigned write_fail,unsigned flush_
  node.inode.i_type=INODE_DIR;node.inode.i_mode=S_IFDIR|0700;node.inode.i_size=0;node.inode.i_linkcount=0;
  cg=storage+32*512;
  if(second) {
-  fs.super.ncg=2;fs.super.fpg=192;fs.super.size=384;ufs_put32(cg,UFS_CG_NDBLK,192,0);
-  memcpy(storage+224*512,cg,4096);ufs_put32(storage+224*512,UFS_CG_CGX,1,0);
+  fs.super.ncg=2;fs.super.fpg=192;fs.super.size=384;drv_ufs_put32(cg,UFS_CG_NDBLK,192,0);
+  memcpy(storage+224*512,cg,4096);drv_ufs_put32(storage+224*512,UFS_CG_CGX,1,0);
   for(n=160;n<168;n++)bit_clear(cg+264,n);
-  ufs_put32(cg,UFS_CG_NBFREE,0,0);cg=storage+224*512;
+  drv_ufs_put32(cg,UFS_CG_NBFREE,0,0);cg=storage+224*512;
  }
  memset(storage+fragment*512,0xd7,4096);
  memset(storage+176*512,0xa6,4096);
@@ -45,8 +45,8 @@ static void backing_scenario(unsigned second,unsigned write_fail,unsigned flush_
  REQUIRE(quota_enable(&fs.quota,QUOTA_USER,1)==0);
  REQUIRE(quota_reserve(&fs.quota,0,0,1,1,0,&charge)==0);quota_commit(&charge);
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
  fs.journal_enabled=1;fs.snapshot_available=backing_snapshot;
  backing_journal=&fs.journal;backing_second=second;group_write_check=backing_write_check;
  storage_reads=0;failure_read=backing_read_failure;
@@ -67,20 +67,20 @@ static void backing_scenario(unsigned second,unsigned write_fail,unsigned flush_
  }
  failure_read=0;failure_write=failure_write_again=failure_sync=commit_error=0;crash_cut=0;
  memcpy(storage,durable,sizeof(storage));
- REQUIRE(ufs_journal_init(&recovered,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);backing_journal=&recovered;
- REQUIRE(ufs_journal_replay(&recovered)==0);
- raw=storage+8*512+2*UFS_DINODE_SIZE;committed=ufs_get64(raw,UFS_DI_DB,0)==fragment;
- REQUIRE(ufs_get32(raw,UFS_DI_EXTSIZE,0)==16);
- REQUIRE(ufs_get64(raw,UFS_DI_EXTB,0)==176);
- REQUIRE(ufs_get64(raw,UFS_DI_EXTB+8,0)==0);
- REQUIRE(ufs_get64(raw,UFS_DI_BLOCKS,0)==(committed?16:8));
- REQUIRE(ufs_get64(raw,UFS_DI_DB,0)==(committed?fragment:0));
- REQUIRE(ufs_get64(raw,UFS_DI_SIZE,0)==0 || (backing_add && committed && ufs_get64(raw,UFS_DI_SIZE,0)==512));
- if(ufs_get64(raw,UFS_DI_SIZE,0)==512){REQUIRE(ufs_get32(storage+fragment*512,0,0)==3);REQUIRE(memcmp(storage+fragment*512+8,"child",5)==0);}REQUIRE(ufs_get16(raw,UFS_DI_NLINK,0)==0);
+ REQUIRE(drv_ufs_journal_init(&recovered,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);backing_journal=&recovered;
+ REQUIRE(drv_ufs_journal_replay(&recovered)==0);
+ raw=storage+8*512+2*UFS_DINODE_SIZE;committed=drv_ufs_get64(raw,UFS_DI_DB,0)==fragment;
+ REQUIRE(drv_ufs_get32(raw,UFS_DI_EXTSIZE,0)==16);
+ REQUIRE(drv_ufs_get64(raw,UFS_DI_EXTB,0)==176);
+ REQUIRE(drv_ufs_get64(raw,UFS_DI_EXTB+8,0)==0);
+ REQUIRE(drv_ufs_get64(raw,UFS_DI_BLOCKS,0)==(committed?16:8));
+ REQUIRE(drv_ufs_get64(raw,UFS_DI_DB,0)==(committed?fragment:0));
+ REQUIRE(drv_ufs_get64(raw,UFS_DI_SIZE,0)==0 || (backing_add && committed && drv_ufs_get64(raw,UFS_DI_SIZE,0)==512));
+ if(drv_ufs_get64(raw,UFS_DI_SIZE,0)==512){REQUIRE(drv_ufs_get32(storage+fragment*512,0,0)==3);REQUIRE(memcmp(storage+fragment*512+8,"child",5)==0);}REQUIRE(drv_ufs_get16(raw,UFS_DI_NLINK,0)==0);
  for(n=160;n<168;n++)REQUIRE((unsigned)bit_test(cg+264,n)==1-committed);
- REQUIRE(ufs_get32(cg,UFS_CG_NBFREE,0)==1-committed);
- REQUIRE(ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NBFREE,0)==1-committed);
+ REQUIRE(drv_ufs_get32(cg,UFS_CG_NBFREE,0)==1-committed);
+ REQUIRE(drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NBFREE,0)==1-committed);
  if(committed){for(n=backing_add?512:0;n<4096;n++)REQUIRE(storage[fragment*512+n]==0);}
  else REQUIRE(storage[fragment*512]==0xd7);
  for(n=0;n<4096;n++)REQUIRE(storage[176*512+n]==0xa6);
@@ -96,8 +96,8 @@ static void backing_refusals(void)
  disk.d_block_size=512;disk.d_block_count=512;
  node.inode.i_type=INODE_DIR;node.inode.i_mode=S_IFDIR|0700;node.inode.i_size=0;
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,42,379)==0);
- REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);fs.journal_enabled=1;
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,42,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);fs.journal_enabled=1;
  REQUIRE(quota_enable(&fs.quota,QUOTA_USER,1)==0);
  storage_writes=storage_syncs=0;
  mutex_lock(&node.inode.i_lock);

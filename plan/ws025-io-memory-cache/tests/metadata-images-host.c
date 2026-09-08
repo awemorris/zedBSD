@@ -33,7 +33,7 @@ int main(void)
  storage_fixture(&fs,&node,&mountp,&disk,0,0);
  disk.d_block_size=512;disk.d_block_count=512;
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);
  fs.journal_enabled=1;
  memset(storage+8*512,0xa5,8192);
  memcpy(expected,storage+8*512,sizeof(expected));

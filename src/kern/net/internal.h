@@ -5,6 +5,15 @@
  * SPDX-License-Identifier: Zlib
  */
 
+/*
+ * Declarations private to the network implementation.
+ *
+ * These interfaces connect the protocol files to each other and are not part
+ * of the kernel's public network API.  A protocol registers its input
+ * handler, hands finished datagrams to the layer below, and wakes the shared
+ * network worker through this header.
+ */
+
 #ifndef ZEDBSD_KERN_NET_INTERNAL_H
 #define ZEDBSD_KERN_NET_INTERNAL_H
 

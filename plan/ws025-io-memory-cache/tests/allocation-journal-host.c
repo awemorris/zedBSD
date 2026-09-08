@@ -30,7 +30,7 @@ void *kern_calloc(size_t n,size_t bytes)
 static void cut_power(void)
 { crash_ops++;if(crash_cut && crash_ops==crash_cut){crashed=1;host_crash_now();} }
 static unsigned char redo[UFS_JOURNAL_IMAGE_BYTES], input[4096];
-int ufs_snapshot_preserve(struct ufs_snapshot *snapshot,uint64_t first,uint32_t count)
+int drv_ufs_snapshot_preserve(struct ufs_snapshot *snapshot,uint64_t first,uint32_t count)
 {
  (void)snapshot;(void)count;snapshot_calls++;
  if(snapshot_calls==snapshot_fail)return EIO;
@@ -87,13 +87,13 @@ static void scenario(unsigned fail_write,unsigned fail_flush,unsigned landed,uns
  if(indirect>=4 && indirect!=5){level=2;logical=12+512+512*512+512*512+2*512+7;needed=indirect==4?4:(indirect==6?3:2);}
  if(indirect>=5) {
   node.indirect[level]=304;existing=1;
-  ufs_put64(storage+304*512,(level==1?3:2)*8,320,0);
-  if(indirect==7){ufs_put64(storage+304*512,8,312,0);existing=2;}
+  drv_ufs_put64(storage+304*512,(level==1?3:2)*8,320,0);
+  if(indirect==7){drv_ufs_put64(storage+304*512,8,312,0);existing=2;}
   node.blocks=existing*8;
  }
  if(space_limit)needed=space_limit;
  for(n=160;n<160+needed*8;n++)bit_set(storage+32*512+264,n);
- ufs_put32(storage+32*512,UFS_CG_NBFREE,needed,0);fs.super.cstotal_nbfree=needed;
+ drv_ufs_put32(storage+32*512,UFS_CG_NBFREE,needed,0);fs.super.cstotal_nbfree=needed;
  if(quota_limit) {
   node.inode.i_uid=1234;quota.id=1234;quota.block_hard=quota_limit;
   REQUIRE(quota_set(&fs.quota,QUOTA_USER,&quota)==0);
@@ -103,8 +103,8 @@ static void scenario(unsigned fail_write,unsigned fail_flush,unsigned landed,uns
  REQUIRE(write_super_summaries(&mountp)==0);
  REQUIRE(disk_sync(&disk)==0);
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
  fs.journal_enabled=1;fs.snapshot_available=snapshot_active;
  snapshot_calls=snapshot_mask=0;
  { const unsigned masks[]={7,15,23,31,63,87,95,151};snapshot_expected=masks[indirect]; }
@@ -136,33 +136,33 @@ static void scenario(unsigned fail_write,unsigned fail_flush,unsigned landed,uns
  if(!crashed)REQUIRE(fs.journal_io.context==NULL && fs.snapshot_io.context==NULL);
  /* Power loss discards volatile homes, then mount replay reconstructs one group. */
  failure_write=failure_write_again=failure_sync=commit_error=0;crash_cut=0;memcpy(storage,durable,sizeof(storage));
- REQUIRE(ufs_journal_init(&recovered,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
- REQUIRE(ufs_journal_replay(&recovered)==0);
- pointer=ufs_get64(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_DB,0);
+ REQUIRE(drv_ufs_journal_init(&recovered,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_replay(&recovered)==0);
+ pointer=drv_ufs_get64(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_DB,0);
  if(indirect) {
-  raw_pointer=ufs_get64(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_IB+level*8,0);
+  raw_pointer=drv_ufs_get64(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_IB+level*8,0);
   remaining=logical-12;
   if(level>=1)remaining-=512;
   if(level>=2)remaining-=512*512;
   for(depth=level+1;depth && raw_pointer;depth--) {
    REQUIRE(raw_pointer<379);
    divisor=1;for(n=1;n<depth;n++)divisor*=512;
-   raw_pointer=ufs_get64(storage+raw_pointer*512,(remaining/divisor)*8,0);
+   raw_pointer=drv_ufs_get64(storage+raw_pointer*512,(remaining/divisor)*8,0);
    remaining%=divisor;
   }
   pointer=raw_pointer;
  }
- if(indirect>=5)REQUIRE(ufs_get64(storage+304*512,(level==1?3:2)*8,0)==320);
+ if(indirect>=5)REQUIRE(drv_ufs_get64(storage+304*512,(level==1?3:2)*8,0)==320);
  allocated=!bit_test(storage+32*512+264,160);
- free_total=ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NBFREE,0);
+ free_total=drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NBFREE,0);
  REQUIRE(pointer==0 || pointer==160);
  REQUIRE(allocated==(pointer!=0));
  REQUIRE(free_total==(allocated?0U:needed));
- REQUIRE(ufs_get32(storage+32*512,UFS_CG_NBFREE,0)==free_total);
+ REQUIRE(drv_ufs_get32(storage+32*512,UFS_CG_NBFREE,0)==free_total);
  for(n=0;n<needed;n++)REQUIRE((!bit_test(storage+32*512+264,160+n*8))==allocated);
- REQUIRE(ufs_get64(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_BLOCKS,0)==(existing+(allocated?needed:0))*8);
- REQUIRE(ufs_get64(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_SIZE,0)==(pointer?(logical+1)*4096:0));
+ REQUIRE(drv_ufs_get64(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_BLOCKS,0)==(existing+(allocated?needed:0))*8);
+ REQUIRE(drv_ufs_get64(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_SIZE,0)==(pointer?(logical+1)*4096:0));
  if(pointer)REQUIRE(memcmp(storage+160*512,input,sizeof(input))==0);
  if(result==sizeof(input))REQUIRE(pointer==160);
  free(fs.cg);

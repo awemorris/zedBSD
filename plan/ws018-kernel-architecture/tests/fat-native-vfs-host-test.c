@@ -974,7 +974,7 @@ host_mount(struct memory_image *image, unsigned flags, struct mount *mountp)
 {
 	memset(mountp, 0, sizeof(*mountp));
 	mountp->m_disk = &image->disk;
-	mountp->m_type = &fat_filesystem_type;
+	mountp->m_type = &drv_fat_filesystem_type;
 	mountp->m_flags = flags;
 	refcount_init(&mountp->m_refs, 1U);
 	return mountp->m_type->mount(mountp);
@@ -1106,10 +1106,10 @@ check_probe_and_initial_contents(struct memory_image *image,
 	enum bootfat_type detected = 0;
 	unsigned i;
 
-	CHECK(strcmp(fat_filesystem_type.fs_name, "fat") == 0);
-	CHECK_ERROR(fat_probe_type(&image->disk, &detected), 0);
+	CHECK(strcmp(drv_fat_filesystem_type.fs_name, "fat") == 0);
+	CHECK_ERROR(drv_fat_probe_type(&image->disk, &detected), 0);
 	CHECK(detected == image->type);
-	CHECK_ERROR(fat_filesystem_type.probe(&image->disk), 0);
+	CHECK_ERROR(drv_fat_filesystem_type.probe(&image->disk), 0);
 	CHECK(mountp->m_root != NULL);
 	CHECK(mountp->m_root->i_type == INODE_DIR);
 	CHECK(mountp->m_root->i_ino == 1U);
@@ -1124,10 +1124,10 @@ check_probe_and_initial_contents(struct memory_image *image,
 	CHECK_ERROR(hello->i_op->getattr(hello, &status), 0);
 	CHECK(status.st_size == (off_t)sizeof(actual));
 	CHECK(status.st_blocks == 2);
-	CHECK_ERROR(fat_file_backing_identity(hello, &backing_disk,
+	CHECK_ERROR(drv_fat_file_backing_identity(hello, &backing_disk,
 	    hello_identity), 0);
 	CHECK(backing_disk == &image->disk);
-	CHECK_ERROR(fat_file_backing_identity(mountp->m_root, &backing_disk,
+	CHECK_ERROR(drv_fat_file_backing_identity(mountp->m_root, &backing_disk,
 	    &block), EOPNOTSUPP);
 
 	for (i = 0; i < ARRAY_COUNT(expected); i++)
@@ -1143,16 +1143,16 @@ check_probe_and_initial_contents(struct memory_image *image,
 	CHECK(memcmp(boundary, expected + 510U, sizeof(boundary)) == 0);
 	CHECK(memcmp(actual, expected, sizeof(actual)) == 0);
 
-	CHECK_ERROR(fat_file_extents(&file, capture_extent, &capture), 0);
+	CHECK_ERROR(drv_fat_file_extents(&file, capture_extent, &capture), 0);
 	CHECK(capture.used == 1U);
 	CHECK(capture.file_block[0] == 0U);
 	CHECK(capture.disk_block[0] == cluster_lba(image, 3U));
 	CHECK(capture.count[0] == 2U);
-	CHECK_ERROR(fat_file_contiguous_block(&file, &backing_disk, &block), 0);
+	CHECK_ERROR(drv_fat_file_contiguous_block(&file, &backing_disk, &block), 0);
 	CHECK(backing_disk == &image->disk);
 	CHECK(block == cluster_lba(image, 3U));
 	capture.reject = 1;
-	CHECK_ERROR(fat_file_extents(&file, capture_extent, &capture), EBUSY);
+	CHECK_ERROR(drv_fat_file_extents(&file, capture_extent, &capture), EBUSY);
 	CHECK_ERROR(host_file_close(&file), 0);
 	inode_release(hello);
 
@@ -1263,12 +1263,12 @@ check_file_mutations(struct memory_image *image, struct mount *mountp)
 	CHECK(again == inode);
 	CHECK(again->i_size == 0);
 	CHECK_ERROR(host_file_open(again, O_RDONLY, &empty), 0);
-	CHECK_ERROR(fat_file_extents(&empty, capture_extent, &capture), 0);
+	CHECK_ERROR(drv_fat_file_extents(&empty, capture_extent, &capture), 0);
 	CHECK(capture.used == 0U);
 	{
 		struct disk *disk;
 		uint64_t block;
-		CHECK_ERROR(fat_file_contiguous_block(&empty, &disk, &block), EIO);
+		CHECK_ERROR(drv_fat_file_contiguous_block(&empty, &disk, &block), EIO);
 	}
 	CHECK_ERROR(host_file_close(&empty), 0);
 	inode_release(again);
@@ -1601,7 +1601,7 @@ check_open_writer_path_truncate(struct memory_image *image,
 	CHECK(memcmp(actual, payload, 100U) == 0);
 	CHECK(reader.f_ops->pread(&reader, actual, 1U, 100) == 0);
 	CHECK(mount_free_blocks(mountp) == free_before - 1U);
-	CHECK_ERROR(fat_file_extents(&writer, capture_extent, &capture), 0);
+	CHECK_ERROR(drv_fat_file_extents(&writer, capture_extent, &capture), 0);
 	for (i = 0; i < capture.used; i++) {
 		CHECK(capture.file_block[i] == covered);
 		covered += capture.count[i];
@@ -1666,7 +1666,7 @@ check_orphan_fd_mutation(struct memory_image *image, struct mount *mountp)
 	for (i = 100U + sizeof(marker); i < 600U; i++)
 		CHECK(actual[i] == 0);
 	CHECK(mount_free_blocks(mountp) == free_before - 2U);
-	CHECK_ERROR(fat_file_extents(&file, capture_extent, &capture), 0);
+	CHECK_ERROR(drv_fat_file_extents(&file, capture_extent, &capture), 0);
 	for (i = 0; i < capture.used; i++) {
 		CHECK(capture.file_block[i] == covered);
 		covered += capture.count[i];
@@ -1821,7 +1821,7 @@ check_close_metadata_retry(struct memory_image *image, struct mount *mountp)
 	CHECK(snapshot_file.f_ops->pread(&snapshot_file, actual,
 	    sizeof(actual), 0) == (ssize_t)sizeof(actual));
 	CHECK(memcmp(actual, payload, sizeof(actual)) == 0);
-	CHECK_ERROR(fat_file_extents(&snapshot_file, capture_extent, &capture), 0);
+	CHECK_ERROR(drv_fat_file_extents(&snapshot_file, capture_extent, &capture), 0);
 	for (i = 0; i < capture.used; i++) {
 		CHECK(capture.file_block[i] == covered);
 		covered += capture.count[i];
@@ -1877,7 +1877,7 @@ check_orphan_setattr_slot_reuse(void)
 		old_inode = create_payload(mountp.m_root, old_name, old_payload,
 		    sizeof(old_payload) - 1U);
 		CHECK_ERROR(host_file_open(old_inode, O_RDWR, &old_file), 0);
-		CHECK_ERROR(fat_file_backing_identity(old_inode, &old_disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(old_inode, &old_disk,
 		    &old_identity), 0);
 		CHECK(old_disk == &image.disk);
 		CHECK_ERROR(unlink_child(mountp.m_root, old_name), 0);
@@ -1885,7 +1885,7 @@ check_orphan_setattr_slot_reuse(void)
 
 		new_inode = create_payload(mountp.m_root, new_name, new_payload,
 		    sizeof(new_payload) - 1U);
-		CHECK_ERROR(fat_file_backing_identity(new_inode, &new_disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(new_inode, &new_disk,
 		    &new_identity), 0);
 		CHECK(new_disk == &image.disk);
 		CHECK(new_identity == old_identity);
@@ -1920,7 +1920,7 @@ check_orphan_setattr_slot_reuse(void)
 		CHECK(after.st_atime == baseline.st_atime);
 		CHECK(after.st_mtime == baseline.st_mtime);
 		CHECK(after.st_ctime == baseline.st_ctime);
-		CHECK_ERROR(fat_file_backing_identity(new_inode, &new_disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(new_inode, &new_disk,
 		    &new_identity), 0);
 		CHECK(new_disk == &image.disk);
 		CHECK(new_identity == old_identity);
@@ -1978,10 +1978,10 @@ check_replacement_payload_write_failure(void)
 		    source_payload, sizeof(source_payload) - 1U);
 		target = create_payload(mountp.m_root, target_name,
 		    target_payload, sizeof(target_payload) - 1U);
-		CHECK_ERROR(fat_file_backing_identity(source, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(source, &disk,
 		    &source_identity), 0);
 		CHECK(disk == &image.disk);
-		CHECK_ERROR(fat_file_backing_identity(target, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(target, &disk,
 		    &target_identity), 0);
 		CHECK(disk == &image.disk);
 		CHECK(source_identity != target_identity);
@@ -1997,7 +1997,7 @@ check_replacement_payload_write_failure(void)
 		CHECK((target->i_flags & INODE_DEAD) == 0);
 		CHECK_ERROR(lookup_child(mountp.m_root, source_name, &again), 0);
 		CHECK(again == source);
-		CHECK_ERROR(fat_file_backing_identity(again, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(again, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &image.disk);
 		CHECK(found_identity == source_identity);
@@ -2007,7 +2007,7 @@ check_replacement_payload_write_failure(void)
 		inode_release(again);
 		CHECK_ERROR(lookup_child(mountp.m_root, target_name, &again), 0);
 		CHECK(again == target);
-		CHECK_ERROR(fat_file_backing_identity(again, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(again, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &image.disk);
 		CHECK(found_identity == target_identity);
@@ -2028,7 +2028,7 @@ check_replacement_payload_write_failure(void)
 		    &snapshot_mount), 0);
 		CHECK_ERROR(lookup_child(snapshot_mount.m_root, source_name,
 		    &again), 0);
-		CHECK_ERROR(fat_file_backing_identity(again, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(again, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &snapshot.disk);
 		CHECK(found_identity == source_identity);
@@ -2037,7 +2037,7 @@ check_replacement_payload_write_failure(void)
 		    sizeof(source_payload) - 1U);
 		CHECK_ERROR(lookup_child(snapshot_mount.m_root, target_name,
 		    &again), 0);
-		CHECK_ERROR(fat_file_backing_identity(again, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(again, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &snapshot.disk);
 		CHECK(found_identity == target_identity);
@@ -2056,7 +2056,7 @@ check_replacement_payload_write_failure(void)
 		    ENOENT);
 		CHECK_ERROR(lookup_child(mountp.m_root, target_name, &again), 0);
 		CHECK(again == source);
-		CHECK_ERROR(fat_file_backing_identity(again, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(again, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &image.disk);
 		CHECK(found_identity == target_identity);
@@ -2143,7 +2143,7 @@ check_fat12_16_insert_slot_failures(void)
 		current_stage = "FAT12/16 rename insert-slot write failure";
 		inode = create_payload(mountp.m_root, source_name, payload,
 		    sizeof(payload) - 1U);
-		CHECK_ERROR(fat_file_backing_identity(inode, &disk, &identity), 0);
+		CHECK_ERROR(drv_fat_file_backing_identity(inode, &disk, &identity), 0);
 		CHECK(disk == &image.disk);
 		free_before = mount_free_blocks(&mountp);
 		CHECK(free_before == free_initial - 1U);
@@ -2153,7 +2153,7 @@ check_fat12_16_insert_slot_failures(void)
 		CHECK(image.fail_writes == 0U);
 		CHECK_ERROR(lookup_child(mountp.m_root, source_name, &again), 0);
 		CHECK(again == inode);
-		CHECK_ERROR(fat_file_backing_identity(again, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(again, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &image.disk);
 		CHECK(found_identity == identity);
@@ -2171,7 +2171,7 @@ check_fat12_16_insert_slot_failures(void)
 		    &snapshot_mount), 0);
 		CHECK_ERROR(lookup_child(snapshot_mount.m_root, source_name,
 		    &again), 0);
-		CHECK_ERROR(fat_file_backing_identity(again, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(again, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &snapshot.disk);
 		CHECK(found_identity == identity);
@@ -2495,7 +2495,7 @@ prepare_sector_boundary_lfn(struct memory_image *image, const char *name,
 		inode_release(inode);
 	}
 	inode = create_payload(mountp.m_root, name, payload, payload_size);
-	CHECK_ERROR(fat_file_backing_identity(inode, &disk, identity), 0);
+	CHECK_ERROR(drv_fat_file_backing_identity(inode, &disk, identity), 0);
 	CHECK(disk == &image->disk);
 	inode_release(inode);
 	*free_before = mount_free_blocks(&mountp);
@@ -2563,7 +2563,7 @@ check_sector_boundary_lfn_unlink_faults(void)
 		CHECK_ERROR(host_mount(&image, 0U, &mountp), 0);
 		CHECK(mount_free_blocks(&mountp) == free_before);
 		CHECK_ERROR(lookup_child(mountp.m_root, name, &inode), 0);
-		CHECK_ERROR(fat_file_backing_identity(inode, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(inode, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &image.disk);
 		CHECK(found_identity == identity);
@@ -2598,7 +2598,7 @@ check_sector_boundary_lfn_unlink_faults(void)
 		CHECK_ERROR(host_mount(&snapshot, MOUNT_READ_ONLY,
 		    &snapshot_mount), 0);
 		CHECK_ERROR(lookup_child(snapshot_mount.m_root, name, &again), 0);
-		CHECK_ERROR(fat_file_backing_identity(again, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(again, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &snapshot.disk);
 		CHECK(found_identity == identity);
@@ -2668,7 +2668,7 @@ check_sector_boundary_lfn_rename_faults(void)
 		CHECK_ERROR(host_mount(&image, 0U, &mountp), 0);
 		CHECK(mount_free_blocks(&mountp) == free_before);
 		CHECK_ERROR(lookup_child(mountp.m_root, old_name, &inode), 0);
-		CHECK_ERROR(fat_file_backing_identity(inode, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(inode, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &image.disk);
 		CHECK(found_identity == identity);
@@ -2697,7 +2697,7 @@ check_sector_boundary_lfn_rename_faults(void)
 		consumed++;
 		CHECK_ERROR(lookup_child(mountp.m_root, old_name, &again), 0);
 		CHECK(again == inode);
-		CHECK_ERROR(fat_file_backing_identity(again, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(again, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &image.disk);
 		CHECK(found_identity == identity);
@@ -2713,7 +2713,7 @@ check_sector_boundary_lfn_rename_faults(void)
 		CHECK_ERROR(host_mount(&snapshot, MOUNT_READ_ONLY,
 		    &snapshot_mount), 0);
 		CHECK_ERROR(lookup_child(snapshot_mount.m_root, old_name, &again), 0);
-		CHECK_ERROR(fat_file_backing_identity(again, &disk,
+		CHECK_ERROR(drv_fat_file_backing_identity(again, &disk,
 		    &found_identity), 0);
 		CHECK(disk == &snapshot.disk);
 		CHECK(found_identity == identity);
@@ -3086,7 +3086,7 @@ verify_grown_file(struct memory_image *image, struct mount *mountp,
 	CHECK(file.f_ops->pread(&file, boundary, sizeof(boundary), 511) == 2);
 	CHECK(boundary[0] == 'G');
 	CHECK(boundary[1] == 'X');
-	CHECK_ERROR(fat_file_extents(&file, capture_extent, &capture), 0);
+	CHECK_ERROR(drv_fat_file_extents(&file, capture_extent, &capture), 0);
 	CHECK(capture.used == 2U);
 	CHECK(capture.file_block[0] == 0U);
 	CHECK(capture.file_block[1] == 1U);
@@ -3094,7 +3094,7 @@ verify_grown_file(struct memory_image *image, struct mount *mountp,
 	CHECK(capture.count[1] == 1U);
 	CHECK(capture.disk_block[0] == cluster_lba(image, 2U));
 	CHECK(capture.disk_block[1] != capture.disk_block[0] + 1U);
-	CHECK_ERROR(fat_file_contiguous_block(&file, &disk, &block),
+	CHECK_ERROR(drv_fat_file_contiguous_block(&file, &disk, &block),
 	    EOPNOTSUPP);
 	CHECK_ERROR(host_file_close(&file), 0);
 	inode_release(inode);
@@ -3202,7 +3202,7 @@ verify_shrunk_file(struct mount *mountp, off_t wanted_size,
 	CHECK_ERROR(lookup_child(mountp->m_root, "SHRINK.TXT", &inode), 0);
 	CHECK(inode->i_size == wanted_size);
 	CHECK_ERROR(host_file_open(inode, O_RDONLY, &file), 0);
-	CHECK_ERROR(fat_file_extents(&file, capture_extent, &capture), 0);
+	CHECK_ERROR(drv_fat_file_extents(&file, capture_extent, &capture), 0);
 	if (wanted_size == 0) {
 		CHECK(capture.used == 0U);
 		CHECK(file.f_ops->pread(&file, buffer, 1U, 0) == 0);
@@ -3237,7 +3237,7 @@ verify_failed_truncate_state(struct memory_image *image, struct mount *mountp,
 	CHECK(file->f_ops->pread(file, buffer, sizeof(buffer), 0) ==
 	    (ssize_t)sizeof(buffer));
 	CHECK(memcmp(buffer, expected, sizeof(buffer)) == 0);
-	CHECK_ERROR(fat_file_extents(file, capture_extent, &capture), 0);
+	CHECK_ERROR(drv_fat_file_extents(file, capture_extent, &capture), 0);
 	for (i = 0; i < capture.used; i++) {
 		CHECK(capture.file_block[i] == covered);
 		covered += capture.count[i];
@@ -3259,7 +3259,7 @@ verify_failed_truncate_state(struct memory_image *image, struct mount *mountp,
 	CHECK(memcmp(buffer, expected, sizeof(buffer)) == 0);
 	memset(&capture, 0, sizeof(capture));
 	covered = 0;
-	CHECK_ERROR(fat_file_extents(&snapshot_file, capture_extent, &capture), 0);
+	CHECK_ERROR(drv_fat_file_extents(&snapshot_file, capture_extent, &capture), 0);
 	for (i = 0; i < capture.used; i++) {
 		CHECK(capture.file_block[i] == covered);
 		covered += capture.count[i];
@@ -3518,11 +3518,11 @@ check_mount_faults_and_validation(void)
 	current_type = ZEDBSD_FAT12;
 	format_image(&image, ZEDBSD_FAT12, 1U, 2U);
 	image.disk.d_block_size = 1024U;
-	CHECK_ERROR(fat_probe_type(&image.disk, &type), EOPNOTSUPP);
+	CHECK_ERROR(drv_fat_probe_type(&image.disk, &type), EOPNOTSUPP);
 	image.disk.d_block_size = SECTOR_SIZE;
 	image.fail_reads = 1U;
-	CHECK_ERROR(fat_filesystem_type.probe(&image.disk), EIO);
-	CHECK_ERROR(fat_filesystem_type.probe(&image.disk), 0);
+	CHECK_ERROR(drv_fat_filesystem_type.probe(&image.disk), EIO);
+	CHECK_ERROR(drv_fat_filesystem_type.probe(&image.disk), 0);
 
 	image.fail_reads = 1U;
 	CHECK_ERROR(host_mount(&image, 0U, &mountp), EIO);
@@ -3532,7 +3532,7 @@ check_mount_faults_and_validation(void)
 
 	saved = image.bytes[13];
 	image.bytes[13] = 0;
-	CHECK_ERROR(fat_filesystem_type.probe(&image.disk), EIO);
+	CHECK_ERROR(drv_fat_filesystem_type.probe(&image.disk), EIO);
 	CHECK_ERROR(host_mount(&image, 0U, &mountp), EIO);
 	CHECK(mountp.m_data == NULL);
 	image.bytes[13] = saved;
@@ -3619,7 +3619,7 @@ run_variant(enum bootfat_type type)
 	CHECK_ERROR(host_mount(&image, 0U, &mountp), 0);
 	read_path(&mountp, persisted_name, "persisted", 9U);
 	CHECK_ERROR(lookup_child(mountp.m_root, "HELLO.TXT", &persisted), 0);
-	CHECK_ERROR(fat_file_backing_identity(persisted, &identity_disk,
+	CHECK_ERROR(drv_fat_file_backing_identity(persisted, &identity_disk,
 	    &remount_identity), 0);
 	CHECK(identity_disk == &image.disk);
 	CHECK(remount_identity == hello_identity);

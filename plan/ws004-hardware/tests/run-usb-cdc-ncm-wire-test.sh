@@ -6,7 +6,7 @@ temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-ncm-wire.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
 compiler=${HOSTCC:-cc}
-production=$repo/src/drivers/usb-cdc-ncm.c
+production=$repo/src/drivers/usb/usb-cdc-ncm.c
 fixture=$repo/plan/ws004-hardware/tests/usb-cdc-ncm-wire-test.c
 ordinary=$temporary/usb-cdc-ncm-wire-test
 sanitized=$temporary/usb-cdc-ncm-wire-test-sanitized

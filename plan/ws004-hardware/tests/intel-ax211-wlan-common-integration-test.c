@@ -8,17 +8,17 @@
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
 #include "kern/net/wlan.h"
-#include "kern/net/wlan-crypto.h"
-#include "kern/net/wlan-l2.h"
-#include "kern/net/wlan-wpa2.h"
-#include "kern/net/wlan-wpa2-codec.h"
+#include "kern/net/wifi/wlan-crypto.h"
+#include "kern/net/wifi/wlan-l2.h"
+#include "kern/net/wifi/wlan-wpa2.h"
+#include "kern/net/wifi/wlan-wpa2-codec.h"
 
-#include "../../../src/drivers/intel-ax211-assoc.h"
-#include "../../../src/drivers/intel-ax211-bss.h"
-#include "../../../src/drivers/intel-ax211-key.h"
-#include "../../../src/drivers/intel-ax211-rx.h"
-#include "../../../src/drivers/intel-ax211-scan.h"
-#include "../../../src/drivers/intel-ax211-tx.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-assoc.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-bss.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-key.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-rx.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-scan.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-tx.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -454,7 +454,7 @@ make_api89_table(struct ax211_radio_fixture *fixture)
 	    INTEL_AX211_ASSOC_LINK_CONFIG_VERSION, 0U);
 	table_version(fixture->table_bytes,
 	    INTEL_AX211_PROTOCOL_API89_COMMAND_COUNT - 1U, 0U, 0U, 0U, 0U);
-	assert(intel_ax211_protocol_command_table_parse(fixture->table_bytes,
+	assert(drv_intel_ax211_protocol_command_table_parse(fixture->table_bytes,
 	    sizeof(fixture->table_bytes), &fixture->table) ==
 	    INTEL_AX211_PROTOCOL_OK);
 }
@@ -539,12 +539,12 @@ radio_scan_channel_start(void *context, uint64_t generation,
 	profile.channel_width_mhz = INTEL_AX211_SCAN_CHANNEL_WIDTH_MHZ;
 	profile.channel[0] = FIXTURE_CHANNEL;
 	profile.channel_count = 1U;
-	assert(intel_ax211_scan_request_encode(&profile, request) ==
+	assert(drv_intel_ax211_scan_request_encode(&profile, request) ==
 	    INTEL_AX211_SCAN_OK);
-	result = intel_ax211_scan_begin(&fixture->scan, &fixture->table, &profile,
+	result = drv_intel_ax211_scan_begin(&fixture->scan, &fixture->table, &profile,
 	    (uint32_t)generation, fixture->now);
 	assert(result == INTEL_AX211_SCAN_OK);
-	assert(intel_ax211_scan_request_ack(&fixture->scan,
+	assert(drv_intel_ax211_scan_request_ack(&fixture->scan,
 	    (uint32_t)generation, fixture->now + 1U) == INTEL_AX211_SCAN_OK);
 	fixture->scan_generation = generation;
 	return 0;
@@ -568,7 +568,7 @@ radio_scan_stop(void *context, uint64_t generation)
 	message.generation = (uint32_t)generation;
 	message.payload = payload;
 	message.payload_length = sizeof(payload);
-	assert(intel_ax211_scan_event_accept(&fixture->scan, &message,
+	assert(drv_intel_ax211_scan_event_accept(&fixture->scan, &message,
 	    fixture->now, &event) == INTEL_AX211_SCAN_COMPLETE);
 	return 0;
 }
@@ -591,7 +591,7 @@ radio_management_transmit(void *context, uint64_t generation,
 	request.length = length;
 	request.frame_class = INTEL_AX211_TX_FRAME_MANAGEMENT;
 	request.band_5ghz = 1U;
-	assert(intel_ax211_tx_prepare(&request, &prepared) == INTEL_AX211_TX_OK);
+	assert(drv_intel_ax211_tx_prepare(&request, &prepared) == INTEL_AX211_TX_OK);
 	assert(get_le32(prepared.command + 16U) == 0x4100U);
 	return 0;
 }
@@ -625,12 +625,12 @@ radio_connect_start(void *context, uint64_t generation,
 	profile.edca[0].aifsn = 3U;
 	fixture->connection_generation = generation;
 	memcpy(fixture->selected_bssid, bss->bssid, 6U);
-	assert(intel_ax211_key_state_init(&fixture->keys,
+	assert(drv_intel_ax211_key_state_init(&fixture->keys,
 	    FIXTURE_HARDWARE_EPOCH, generation) == INTEL_AX211_KEY_OK);
-	result = intel_ax211_assoc_begin(&fixture->association, &fixture->table,
+	result = drv_intel_ax211_assoc_begin(&fixture->association, &fixture->table,
 	    &profile, generation, FIXTURE_HARDWARE_EPOCH, fixture->now);
 	assert(result == INTEL_AX211_ASSOC_OK);
-	result = intel_ax211_assoc_drive(&fixture->association, &assoc_ops,
+	result = drv_intel_ax211_assoc_drive(&fixture->association, &assoc_ops,
 	    fixture);
 	assert(result == INTEL_AX211_ASSOC_AUTH_READY);
 	return 0;
@@ -646,11 +646,11 @@ radio_disconnect(void *context, uint64_t generation)
 		return ESTALE;
 	if (fixture->association.phase == INTEL_AX211_ASSOC_PHASE_IDLE)
 		return 0;
-	result = intel_ax211_assoc_cancel(&fixture->association, generation,
+	result = drv_intel_ax211_assoc_cancel(&fixture->association, generation,
 	    FIXTURE_HARDWARE_EPOCH, fixture->now);
 	if (result == INTEL_AX211_ASSOC_OK ||
 	    result == INTEL_AX211_ASSOC_PENDING)
-		result = intel_ax211_assoc_drive(&fixture->association, &assoc_ops,
+		result = drv_intel_ax211_assoc_drive(&fixture->association, &assoc_ops,
 		    fixture);
 	return result == INTEL_AX211_ASSOC_ROLLED_BACK ? 0 : EIO;
 }
@@ -669,10 +669,10 @@ radio_association_set(void *context, uint64_t generation,
 	memset(&update, 0, sizeof(update));
 	update.association_id = aid;
 	update.dtim_period = 2U;
-	result = intel_ax211_assoc_begin_update(&fixture->association, &update,
+	result = drv_intel_ax211_assoc_begin_update(&fixture->association, &update,
 	    generation, FIXTURE_HARDWARE_EPOCH, fixture->now);
 	assert(result == INTEL_AX211_ASSOC_OK);
-	result = intel_ax211_assoc_drive(&fixture->association, &assoc_ops,
+	result = drv_intel_ax211_assoc_drive(&fixture->association, &assoc_ops,
 	    fixture);
 	assert(result == INTEL_AX211_ASSOC_COMPLETE);
 	return 0;
@@ -714,11 +714,11 @@ radio_frame_transmit(void *context,
 	else
 		private_request.frame_class = INTEL_AX211_TX_FRAME_DATA;
 	if (request->encrypted)
-		assert(intel_ax211_key_state_tx_validate(&fixture->keys,
+		assert(drv_intel_ax211_key_state_tx_validate(&fixture->keys,
 		    request->generation, request->key_generation,
 		    request->key_index, request->packet_number,
 		    FIXTURE_HARDWARE_EPOCH) == INTEL_AX211_KEY_OK);
-	assert(intel_ax211_tx_prepare(&private_request, &prepared) ==
+	assert(drv_intel_ax211_tx_prepare(&private_request, &prepared) ==
 	    INTEL_AX211_TX_OK);
 	assert(get_le32(prepared.command + 16U) == 0x4100U);
 	assert(request->length <= sizeof(fixture->pending_frame));
@@ -752,9 +752,9 @@ radio_key_install(void *context,
 	private_request.kind = request->kind == WLAN_RADIO_KEY_PAIRWISE ?
 	    INTEL_AX211_KEY_PAIRWISE : INTEL_AX211_KEY_GROUP_KEY;
 	memcpy(private_request.key, request->key, sizeof(private_request.key));
-	assert(intel_ax211_key_add_encode(&private_request, command) ==
+	assert(drv_intel_ax211_key_add_encode(&private_request, command) ==
 	    INTEL_AX211_KEY_OK);
-	assert(intel_ax211_key_state_installed(&fixture->keys, &private_request,
+	assert(drv_intel_ax211_key_state_installed(&fixture->keys, &private_request,
 	    FIXTURE_HARDWARE_EPOCH) == INTEL_AX211_KEY_OK);
 	if (private_request.kind == INTEL_AX211_KEY_PAIRWISE) {
 		fixture->pairwise_generation = request->key_generation;
@@ -765,11 +765,11 @@ radio_key_install(void *context,
 	}
 	if (fixture->pairwise_generation != 0U &&
 	    fixture->group_generation != 0U)
-		assert(intel_ax211_key_state_activate(&fixture->keys,
+		assert(drv_intel_ax211_key_state_activate(&fixture->keys,
 		    request->generation, fixture->pairwise_generation,
 		    fixture->group_generation, FIXTURE_HARDWARE_EPOCH) ==
 		    INTEL_AX211_KEY_OK);
-	intel_ax211_key_command_scrub(command);
+	drv_intel_ax211_key_command_scrub(command);
 	memset(&private_request, 0, sizeof(private_request));
 	return 0;
 }
@@ -789,12 +789,12 @@ radio_key_delete(void *context, uint64_t generation,
 		return EIO;
 	private_kind = kind == WLAN_RADIO_KEY_PAIRWISE ?
 	    INTEL_AX211_KEY_PAIRWISE : INTEL_AX211_KEY_GROUP_KEY;
-	assert(intel_ax211_key_remove_encode(generation, key_generation,
+	assert(drv_intel_ax211_key_remove_encode(generation, key_generation,
 	    private_kind, key_index, command) == INTEL_AX211_KEY_OK);
-	result = intel_ax211_key_state_removed(&fixture->keys, generation,
+	result = drv_intel_ax211_key_state_removed(&fixture->keys, generation,
 	    private_kind, key_index, key_generation, FIXTURE_HARDWARE_EPOCH);
 	assert(result == INTEL_AX211_KEY_OK || result == INTEL_AX211_KEY_MISSING);
-	intel_ax211_key_command_scrub(command);
+	drv_intel_ax211_key_command_scrub(command);
 	return 0;
 }
 
@@ -807,7 +807,7 @@ radio_keys_activate(void *context, uint64_t generation,
 	int result;
 
 	(void)deadline;
-	result = intel_ax211_key_state_activate(&fixture->keys, generation,
+	result = drv_intel_ax211_key_state_activate(&fixture->keys, generation,
 	    pairwise_generation, group_generation, FIXTURE_HARDWARE_EPOCH);
 	return result == INTEL_AX211_KEY_OK ||
 	    result == INTEL_AX211_KEY_DUPLICATE ? 0 : EIO;
@@ -984,16 +984,16 @@ deliver_rx(struct ax211_radio_fixture *fixture, uint64_t common_generation,
 	message.payload = payload;
 	message.payload_length = INTEL_AX211_RX_MPDU_DESCRIPTOR_SIZE +
 	    frame_length;
-	assert(intel_ax211_rx_mpdu_decode(&message, FIXTURE_HARDWARE_EPOCH,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, FIXTURE_HARDWARE_EPOCH,
 	    output, sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	if ((frame[0] & 0xfcU) == 0x80U) {
-		assert(intel_ax211_bss_decode(&decoded, common_generation,
+		assert(drv_intel_ax211_bss_decode(&decoded, common_generation,
 		    FIXTURE_HARDWARE_EPOCH, &bss) == INTEL_AX211_BSS_OK);
 		assert(memcmp(bss.bssid, fixture_bssid, 6U) == 0);
 		fixture->scan_publications++;
 	}
 	if (protected_frame) {
-		assert(intel_ax211_key_state_rx_generation(&fixture->keys,
+		assert(drv_intel_ax211_key_state_rx_generation(&fixture->keys,
 		    common_generation, INTEL_AX211_KEY_PAIRWISE, 0U,
 		    FIXTURE_HARDWARE_EPOCH, &key_generation) ==
 		    INTEL_AX211_KEY_OK);

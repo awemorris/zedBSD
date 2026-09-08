@@ -35,14 +35,14 @@ main(void)
 	assert(pc98_keyboard_feed(&first, 0x02U, &event));
 	assert(key(event) == HAL_KEY_JIS_2);
 	assert((event & HAL_KEY_EVENT_REPEAT_PRIVATE) == 0);
-	assert(input_key_from_symbol("jis-2") == KEY_2);
-	input_keymap_init(&keymap);
+	assert(drv_input_key_from_symbol("jis-2") == KEY_2);
+	drv_input_keymap_init(&keymap);
 	memset(&translated_event, 0, sizeof(translated_event));
 	strcpy(translated_event.symbol, "leftshift");
 	translated_event.flags = HAL_KEY_EVENT_PRESS;
-	assert(input_keymap_translate(&keymap, &translated_event, &translated));
+	assert(drv_input_keymap_translate(&keymap, &translated_event, &translated));
 	strcpy(translated_event.symbol, "jis-2");
-	assert(input_keymap_translate(&keymap, &translated_event, &translated));
+	assert(drv_input_keymap_translate(&keymap, &translated_event, &translated));
 	assert((translated & INPUT_KEY_MASK) == '"');
 	assert(pc98_keyboard_feed(&first, 0x02U, &event));
 	assert(key(event) == HAL_KEY_JIS_2);
@@ -70,9 +70,9 @@ main(void)
 	assert(key(event) == HAL_KEY_CAPS_LOCK);
 	assert((event & HAL_KEY_EVENT_RELEASE_PRIVATE) != 0);
 	assert(pc98_keyboard_is_down(&first, HAL_KEY_CAPS_LOCK) == 0);
-	assert(input_key_from_symbol("jis-rbrace") == KEY_BACKSLASH);
-	assert(input_key_from_symbol("jis-yen") == KEY_RESERVED);
-	assert(input_key_symbol_supported("kana"));
+	assert(drv_input_key_from_symbol("jis-rbrace") == KEY_BACKSLASH);
+	assert(drv_input_key_from_symbol("jis-yen") == KEY_RESERVED);
+	assert(drv_input_key_symbol_supported("kana"));
 	puts("WS006 PC-98 physical keyboard ownership: PASS");
 	return 0;
 }

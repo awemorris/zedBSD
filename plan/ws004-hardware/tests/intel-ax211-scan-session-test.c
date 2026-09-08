@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-scan-session.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-scan-session.h"
 
 #define TEST_CSR_WORDS                                      3000U
 #define TEST_HBUS_TARG_WRPTR                               0x460U
@@ -370,24 +370,24 @@ test_fixture_init(struct test_fixture *fixture)
 	profile.mac_type = INTEL_AX211_MMIO_MAC_SO;
 	profile.rf_type = INTEL_AX211_MMIO_RF_GF;
 	profile.umac_prph_offset = INTEL_AX211_MMIO_UMAC_PRPH_OFFSET;
-	assert(intel_ax211_transport_init(&fixture->transport, &test_ops,
+	assert(drv_intel_ax211_transport_init(&fixture->transport, &test_ops,
 	    &fixture->backend, &profile, &memory) ==
 	    INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_configure_msix(&fixture->transport) ==
+	assert(drv_intel_ax211_transport_configure_msix(&fixture->transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_initialize_rings(&fixture->transport) ==
+	assert(drv_intel_ax211_transport_initialize_rings(&fixture->transport) ==
 	    INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_transport_enable_runtime_interrupts(
+	assert(drv_intel_ax211_transport_enable_runtime_interrupts(
 	    &fixture->transport) == INTEL_AX211_TRANSPORT_OK);
-	assert(intel_ax211_command_transaction_init(&fixture->command,
+	assert(drv_intel_ax211_command_transaction_init(&fixture->command,
 	    &fixture->transport, 1U, TEST_EPOCH) == INTEL_AX211_COMMAND_OK);
 	test_make_api89_table(fixture->versions);
-	assert(intel_ax211_protocol_command_table_parse(fixture->versions,
+	assert(drv_intel_ax211_protocol_command_table_parse(fixture->versions,
 	    sizeof(fixture->versions), &fixture->table) ==
 	    INTEL_AX211_PROTOCOL_OK);
 	test_make_nvm(&fixture->nvm);
 	test_make_mcc(&fixture->mcc);
-	assert(intel_ax211_scan_session_init(&fixture->session,
+	assert(drv_intel_ax211_scan_session_init(&fixture->session,
 	    &fixture->command, &fixture->table, &fixture->nvm,
 	    &fixture->mcc, address, TEST_EPOCH) ==
 	    INTEL_AX211_SCAN_SESSION_OK);
@@ -471,12 +471,12 @@ test_start(struct test_fixture *fixture, uint64_t generation,
 	uint8_t ack[8];
 	size_t ack_length;
 
-	assert(intel_ax211_scan_session_begin_channel(&fixture->session,
+	assert(drv_intel_ax211_scan_session_begin_channel(&fixture->session,
 	    generation, channel, now) == INTEL_AX211_SCAN_SESSION_OK);
 	ack_length = test_make_ack(ack, sizeof(ack),
 	    INTEL_AX211_SCAN_REQUEST_OPCODE,
 	    &fixture->session.command_handle, NULL, 0U);
-	assert(intel_ax211_scan_session_start_ack(&fixture->session, ack,
+	assert(drv_intel_ax211_scan_session_start_ack(&fixture->session, ack,
 	    ack_length, TEST_EPOCH, now + 1U) ==
 	    INTEL_AX211_SCAN_SESSION_OK);
 }
@@ -495,7 +495,7 @@ test_success_and_generation_fence(void)
 	test_fixture_init(&fixture);
 	memset(fixture.versions, 0xa5, sizeof(fixture.versions));
 	generation = UINT64_C(0x100000005);
-	assert(intel_ax211_scan_session_begin_channel(&fixture.session,
+	assert(drv_intel_ax211_scan_session_begin_channel(&fixture.session,
 	    generation, 6U, 100U) == INTEL_AX211_SCAN_SESSION_OK);
 	assert(fixture.session.phase ==
 	    INTEL_AX211_SCAN_SESSION_WAIT_START_ACK);
@@ -515,34 +515,34 @@ test_success_and_generation_fence(void)
 	    INTEL_AX211_SCAN_REQUEST_OPCODE,
 	    &fixture.session.command_handle, NULL, 0U);
 	ack[6]++;
-	assert(intel_ax211_scan_session_start_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_start_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 101U) ==
 	    INTEL_AX211_SCAN_SESSION_OUT_OF_ORDER);
 	ack[6]--;
-	assert(intel_ax211_scan_session_start_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_start_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH + 1U, 101U) ==
 	    INTEL_AX211_SCAN_SESSION_STALE);
-	assert(intel_ax211_scan_session_start_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_start_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 101U) == INTEL_AX211_SCAN_SESSION_OK);
 	assert(fixture.session.phase == INTEL_AX211_SCAN_SESSION_RUNNING);
-	assert(intel_ax211_scan_session_start_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_start_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 102U) ==
 	    INTEL_AX211_SCAN_SESSION_DUPLICATE);
-	assert(intel_ax211_command_pending_count(&fixture.command) == 0U);
+	assert(drv_intel_ax211_command_pending_count(&fixture.command) == 0U);
 
 	/* API89 publishes fixed 112-entry storage while only the count prefix is
 	 * live.  Exercise the observed 912-byte notification shape directly. */
 	test_make_iteration(&message, payload, sizeof(payload), TEST_EPOCH + 1U,
 	    6U, 1U);
-	assert(intel_ax211_scan_session_notification(&fixture.session,
+	assert(drv_intel_ax211_scan_session_notification(&fixture.session,
 	    &message, 200U, &reported) == INTEL_AX211_SCAN_SESSION_STALE);
 	message.generation = TEST_EPOCH;
 	message.version = 2U;
-	assert(intel_ax211_scan_session_notification(&fixture.session,
+	assert(drv_intel_ax211_scan_session_notification(&fixture.session,
 	    &message, 200U, &reported) ==
 	    INTEL_AX211_SCAN_SESSION_UNSUPPORTED);
 	message.version = INTEL_AX211_SCAN_NOTIFICATION_VERSION;
-	assert(intel_ax211_scan_session_notification(&fixture.session,
+	assert(drv_intel_ax211_scan_session_notification(&fixture.session,
 	    &message, 200U, &reported) ==
 	    INTEL_AX211_SCAN_SESSION_OK);
 	assert(reported.common_generation == generation);
@@ -550,17 +550,17 @@ test_success_and_generation_fence(void)
 	assert(reported.firmware.kind ==
 	    INTEL_AX211_SCAN_EVENT_ITERATION_COMPLETE);
 	assert(fixture.session.phase == INTEL_AX211_SCAN_SESSION_RUNNING);
-	assert(intel_ax211_scan_session_notification(&fixture.session,
+	assert(drv_intel_ax211_scan_session_notification(&fixture.session,
 	    &message, 201U, &reported) ==
 	    INTEL_AX211_SCAN_SESSION_OK);
 	test_make_complete(&message, payload, TEST_EPOCH, 1U);
-	assert(intel_ax211_scan_session_notification(&fixture.session,
+	assert(drv_intel_ax211_scan_session_notification(&fixture.session,
 	    &message, 202U, &reported) ==
 	    INTEL_AX211_SCAN_SESSION_COMPLETE);
 	assert(fixture.session.phase == INTEL_AX211_SCAN_SESSION_TERMINAL);
 
 	/* The next common step may reuse its 64-bit generation on a new channel. */
-	assert(intel_ax211_scan_session_begin_channel(&fixture.session,
+	assert(drv_intel_ax211_scan_session_begin_channel(&fixture.session,
 	    generation, 36U, 300U) == INTEL_AX211_SCAN_SESSION_OK);
 	assert(fixture.session.channel == 36U);
 	assert(fixture.memory.command_external[
@@ -576,7 +576,7 @@ test_success_and_generation_fence(void)
 	ack_length = test_make_ack(ack, sizeof(ack),
 	    INTEL_AX211_SCAN_REQUEST_OPCODE,
 	    &fixture.session.command_handle, NULL, 0U);
-	assert(intel_ax211_scan_session_start_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_start_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 301U) == INTEL_AX211_SCAN_SESSION_OK);
 }
 
@@ -593,9 +593,9 @@ test_abort_and_finite_completion(void)
 
 	test_fixture_init(&fixture);
 	test_start(&fixture, UINT64_C(77), 1U, 1000U);
-	assert(intel_ax211_scan_session_abort(&fixture.session, 78U,
+	assert(drv_intel_ax211_scan_session_abort(&fixture.session, 78U,
 	    1100U) == INTEL_AX211_SCAN_SESSION_STALE);
-	assert(intel_ax211_scan_session_abort(&fixture.session, 77U,
+	assert(drv_intel_ax211_scan_session_abort(&fixture.session, 77U,
 	    1100U) == INTEL_AX211_SCAN_SESSION_OK);
 	assert(fixture.session.phase ==
 	    INTEL_AX211_SCAN_SESSION_WAIT_ABORT_ACK);
@@ -608,19 +608,19 @@ test_abort_and_finite_completion(void)
 	assert(test_get_le16(slot + 4U) == INTEL_AX211_SCAN_ABORT_SIZE);
 
 	test_make_complete(&message, payload, TEST_EPOCH, 2U);
-	assert(intel_ax211_scan_session_notification(&fixture.session,
+	assert(drv_intel_ax211_scan_session_notification(&fixture.session,
 	    &message, 1101U, &reported) ==
 	    INTEL_AX211_SCAN_SESSION_OUT_OF_ORDER);
 	ack_length = test_make_abort_ack(ack, sizeof(ack),
 	    &fixture.session.command_handle, 1U);
-	assert(intel_ax211_scan_session_abort_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_abort_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 1102U) == INTEL_AX211_SCAN_SESSION_OK);
 	assert(fixture.session.phase ==
 	    INTEL_AX211_SCAN_SESSION_WAIT_ABORT_COMPLETE);
-	assert(intel_ax211_scan_session_abort_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_abort_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 1102U) ==
 	    INTEL_AX211_SCAN_SESSION_DUPLICATE);
-	assert(intel_ax211_scan_session_notification(&fixture.session,
+	assert(drv_intel_ax211_scan_session_notification(&fixture.session,
 	    &message, 1103U, &reported) ==
 	    INTEL_AX211_SCAN_SESSION_ABORTED);
 	assert(reported.common_generation == 77U && reported.channel == 1U);
@@ -628,29 +628,29 @@ test_abort_and_finite_completion(void)
 	/* An acknowledged abort which never terminates is bounded. */
 	test_fixture_init(&fixture);
 	test_start(&fixture, UINT64_C(88), 6U, 2000U);
-	assert(intel_ax211_scan_session_abort(&fixture.session, 88U,
+	assert(drv_intel_ax211_scan_session_abort(&fixture.session, 88U,
 	    2100U) == INTEL_AX211_SCAN_SESSION_OK);
 	ack_length = test_make_abort_ack(ack, sizeof(ack),
 	    &fixture.session.command_handle, 0U);
-	assert(intel_ax211_scan_session_abort_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_abort_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 2101U) == INTEL_AX211_SCAN_SESSION_OK);
-	assert(intel_ax211_scan_session_expire(&fixture.session,
+	assert(drv_intel_ax211_scan_session_expire(&fixture.session,
 	    2100U + INTEL_AX211_SCAN_SESSION_ABORT_TIMEOUT_US) ==
 	    INTEL_AX211_SCAN_SESSION_TIMEOUT);
 
 	/* A scan watchdog timeout admits one checked abort before reuse. */
 	test_fixture_init(&fixture);
 	test_start(&fixture, UINT64_C(99), 11U, 3000U);
-	assert(intel_ax211_scan_session_expire(&fixture.session,
+	assert(drv_intel_ax211_scan_session_expire(&fixture.session,
 	    3000U + INTEL_AX211_SCAN_WATCHDOG_US) ==
 	    INTEL_AX211_SCAN_SESSION_TIMEOUT);
-	assert(intel_ax211_scan_session_begin_channel(&fixture.session, 100U,
+	assert(drv_intel_ax211_scan_session_begin_channel(&fixture.session, 100U,
 	    1U, 9000000U) == INTEL_AX211_SCAN_SESSION_BUSY);
-	assert(intel_ax211_scan_session_abort(&fixture.session, 99U,
+	assert(drv_intel_ax211_scan_session_abort(&fixture.session, 99U,
 	    9000001U) == INTEL_AX211_SCAN_SESSION_OK);
 	ack_length = test_make_abort_ack(ack, sizeof(ack),
 	    &fixture.session.command_handle, 0U);
-	assert(intel_ax211_scan_session_abort_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_abort_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 9000002U) == INTEL_AX211_SCAN_SESSION_OK);
 	assert(fixture.session.phase ==
 	    INTEL_AX211_SCAN_SESSION_WAIT_ABORT_COMPLETE);
@@ -658,10 +658,10 @@ test_abort_and_finite_completion(void)
 	assert(fixture.session.scan.abort_required == 1U);
 	assert(fixture.session.scan.scan_deadline ==
 	    fixture.session.command_deadline);
-	assert(intel_ax211_scan_session_begin_channel(&fixture.session, 100U,
+	assert(drv_intel_ax211_scan_session_begin_channel(&fixture.session, 100U,
 	    1U, 9000003U) == INTEL_AX211_SCAN_SESSION_BUSY);
 	test_make_complete(&message, payload, TEST_EPOCH, 2U);
-	assert(intel_ax211_scan_session_notification(&fixture.session,
+	assert(drv_intel_ax211_scan_session_notification(&fixture.session,
 	    &message, 9000003U, &reported) ==
 	    INTEL_AX211_SCAN_SESSION_ABORTED);
 	assert(fixture.session.scan.abort_required == 0U);
@@ -670,11 +670,11 @@ test_abort_and_finite_completion(void)
 	/* NOT_FOUND is a successful finite stop with no completion to await. */
 	test_fixture_init(&fixture);
 	test_start(&fixture, UINT64_C(101), 6U, 9200000U);
-	assert(intel_ax211_scan_session_abort(&fixture.session, 101U,
+	assert(drv_intel_ax211_scan_session_abort(&fixture.session, 101U,
 	    9200100U) == INTEL_AX211_SCAN_SESSION_OK);
 	ack_length = test_make_abort_ack(ack, sizeof(ack),
 	    &fixture.session.command_handle, 2U);
-	assert(intel_ax211_scan_session_abort_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_abort_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 9200101U) ==
 	    INTEL_AX211_SCAN_SESSION_ABORTED);
 	assert(fixture.session.phase == INTEL_AX211_SCAN_SESSION_TERMINAL);
@@ -682,22 +682,22 @@ test_abort_and_finite_completion(void)
 	/* Missing or unknown status payloads cannot silently stop a scan. */
 	test_fixture_init(&fixture);
 	test_start(&fixture, UINT64_C(102), 6U, 9300000U);
-	assert(intel_ax211_scan_session_abort(&fixture.session, 102U,
+	assert(drv_intel_ax211_scan_session_abort(&fixture.session, 102U,
 	    9300100U) == INTEL_AX211_SCAN_SESSION_OK);
 	ack_length = test_make_ack(ack, sizeof(ack),
 	    INTEL_AX211_SCAN_ABORT_OPCODE, &fixture.session.command_handle,
 	    NULL, 0U);
-	assert(intel_ax211_scan_session_abort_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_abort_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 9300101U) ==
 	    INTEL_AX211_SCAN_SESSION_COMMAND);
 
 	test_fixture_init(&fixture);
 	test_start(&fixture, UINT64_C(103), 6U, 9400000U);
-	assert(intel_ax211_scan_session_abort(&fixture.session, 103U,
+	assert(drv_intel_ax211_scan_session_abort(&fixture.session, 103U,
 	    9400100U) == INTEL_AX211_SCAN_SESSION_OK);
 	ack_length = test_make_abort_ack(ack, sizeof(ack),
 	    &fixture.session.command_handle, 3U);
-	assert(intel_ax211_scan_session_abort_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_abort_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 9400101U) ==
 	    INTEL_AX211_SCAN_SESSION_COMMAND);
 }
@@ -708,16 +708,16 @@ test_command_ack_timeout(void)
 	struct test_fixture fixture;
 
 	test_fixture_init(&fixture);
-	assert(intel_ax211_scan_session_begin_channel(&fixture.session,
+	assert(drv_intel_ax211_scan_session_begin_channel(&fixture.session,
 	    UINT64_C(91), 6U, 5000U) == INTEL_AX211_SCAN_SESSION_OK);
-	assert(intel_ax211_scan_session_expire(&fixture.session,
+	assert(drv_intel_ax211_scan_session_expire(&fixture.session,
 	    5000U + INTEL_AX211_SCAN_SESSION_COMMAND_TIMEOUT_US - 1U) ==
 	    INTEL_AX211_SCAN_SESSION_OK);
-	assert(intel_ax211_scan_session_expire(&fixture.session,
+	assert(drv_intel_ax211_scan_session_expire(&fixture.session,
 	    5000U + INTEL_AX211_SCAN_SESSION_COMMAND_TIMEOUT_US) ==
 	    INTEL_AX211_SCAN_SESSION_TIMEOUT);
-	assert(intel_ax211_command_is_poisoned(&fixture.command));
-	assert(intel_ax211_scan_session_begin_channel(&fixture.session,
+	assert(drv_intel_ax211_command_is_poisoned(&fixture.command));
+	assert(drv_intel_ax211_scan_session_begin_channel(&fixture.session,
 	    UINT64_C(92), 11U, 7000U) == INTEL_AX211_SCAN_SESSION_BUSY);
 }
 
@@ -733,26 +733,26 @@ test_exact_ack_and_validation(void)
 	size_t ack_length;
 
 	test_fixture_init(&fixture);
-	assert(intel_ax211_scan_session_begin_channel(&fixture.session,
+	assert(drv_intel_ax211_scan_session_begin_channel(&fixture.session,
 	    UINT64_C(101), 2U, 100U) ==
 	    INTEL_AX211_SCAN_SESSION_UNSUPPORTED);
-	assert(intel_ax211_scan_session_begin_channel(&fixture.session,
+	assert(drv_intel_ax211_scan_session_begin_channel(&fixture.session,
 	    UINT64_C(101), 1U, 100U) == INTEL_AX211_SCAN_SESSION_OK);
 	extra = 0U;
 	ack_length = test_make_ack(ack, sizeof(ack),
 	    INTEL_AX211_SCAN_REQUEST_OPCODE, &fixture.session.command_handle,
 	    &extra, 1U);
-	assert(intel_ax211_scan_session_start_ack(&fixture.session, ack,
+	assert(drv_intel_ax211_scan_session_start_ack(&fixture.session, ack,
 	    ack_length, TEST_EPOCH, 101U) == INTEL_AX211_SCAN_SESSION_COMMAND);
 	assert(fixture.session.phase == INTEL_AX211_SCAN_SESSION_TERMINAL);
 
 	test_fixture_init(&fixture);
 	fixture.versions[2U * 4U + 2U] = 18U;
-	assert(intel_ax211_protocol_command_table_parse(fixture.versions,
+	assert(drv_intel_ax211_protocol_command_table_parse(fixture.versions,
 	    sizeof(fixture.versions), &fixture.table) ==
 	    INTEL_AX211_PROTOCOL_OK);
 	memset(&fixture.session, 0, sizeof(fixture.session));
-	assert(intel_ax211_scan_session_init(&fixture.session,
+	assert(drv_intel_ax211_scan_session_init(&fixture.session,
 	    &fixture.command, &fixture.table, &fixture.nvm, &fixture.mcc,
 	    address, TEST_EPOCH) == INTEL_AX211_SCAN_SESSION_UNSUPPORTED);
 }

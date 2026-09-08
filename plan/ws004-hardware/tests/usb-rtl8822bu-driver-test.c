@@ -73,7 +73,7 @@ struct wlan_station {
 
 #define RTL8822B_HOST_TEST 1
 #define RTL8822B_TESTING 1
-#include "../../../src/drivers/rtl8822b.c"
+#include "../../../plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/rtl8822b.c"
 
 struct rtl8822bu_adapter;
 
@@ -103,7 +103,7 @@ static int test_firmware_walk(const struct rtl8822b_firmware_view *view,
 #define RTL8822BU_FIRMWARE_LOAD fixture_firmware_load
 #define RTL8822BU_FIRMWARE_RELEASE fixture_firmware_release
 #define RTL8822BU_FIRMWARE_WALK test_firmware_walk
-#include "../../../src/drivers/usb-rtl8822bu.c"
+#include "../../../src/drivers/usb/usb-rtl8822bu.c"
 
 #define FIXTURE_SEC_COMMAND       0x0670U
 #define FIXTURE_SEC_WRITE         0x0674U
@@ -2122,7 +2122,7 @@ static int
 test_firmware_walk(const struct rtl8822b_firmware_view *view,
 	rtl8822b_firmware_chunk_fn callback, void *context)
 {
-	return rtl8822b_test_firmware_walk(view, test_firmware_digest,
+	return drv_rtl8822b_test_firmware_walk(view, test_firmware_digest,
 	    callback, context);
 }
 
@@ -2143,10 +2143,10 @@ fixture_firmware_load(struct rtl8822b_firmware_blob *firmware)
 	if (bytes == NULL)
 		return ENOMEM;
 	make_test_firmware(bytes);
-	error = rtl8822b_sha256(bytes, RTL8822B_FIRMWARE_SIZE,
+	error = drv_rtl8822b_sha256(bytes, RTL8822B_FIRMWARE_SIZE,
 	    test_firmware_digest);
 	if (error == 0)
-		error = rtl8822b_test_firmware_validate(bytes,
+		error = drv_rtl8822b_test_firmware_validate(bytes,
 		    RTL8822B_FIRMWARE_SIZE, test_firmware_digest, &firmware->view);
 	if (error != 0) {
 		memset(bytes, 0, RTL8822B_FIRMWARE_SIZE);
@@ -2261,9 +2261,9 @@ test_firmware_transport(void)
 
 	assert(firmware != NULL);
 	make_test_firmware(firmware);
-	assert(rtl8822b_sha256(firmware, RTL8822B_FIRMWARE_SIZE,
+	assert(drv_rtl8822b_sha256(firmware, RTL8822B_FIRMWARE_SIZE,
 	    test_firmware_digest) == 0);
-	assert(rtl8822b_test_firmware_validate(firmware,
+	assert(drv_rtl8822b_test_firmware_validate(firmware,
 	    RTL8822B_FIRMWARE_SIZE, test_firmware_digest, &view) == 0);
 	make_exact_interface(&device, &interface, endpoints);
 	memset(&adapter, 0, sizeof(adapter));
@@ -2603,7 +2603,7 @@ test_plus_wire_boundaries(
 			assert(actual == length);
 			assert(length % adapter->bulk_max_packet_size != 0U);
 			frame[0] = 0x08U;
-			assert(rtl8822b_data_frame_prepare(&adapter->radio, wire,
+			assert(drv_rtl8822b_data_frame_prepare(&adapter->radio, wire,
 			    sizeof(wire), frame, frame_length, 0, 0U, 4U, &length) == 0);
 			assert(rtl8822bu_bulk_transfer(adapter, adapter->bulk_out_low,
 			    wire, length, 20U, &actual) == 0);
@@ -5496,7 +5496,7 @@ test_sync_endpoint_fault_recovery(void)
 	make_connection_bss(&bss);
 	frame_length = make_station_frame(frame, WLAN_RADIO_FRAME_DATA, &bss,
 	    0, 0U, 0U);
-	assert(rtl8822b_data_frame_prepare(&adapter->radio, normal_wire,
+	assert(drv_rtl8822b_data_frame_prepare(&adapter->radio, normal_wire,
 	    sizeof(normal_wire), frame, frame_length, 0, 0U, 0U,
 	    &normal_wire_length) == 0);
 	route_data_to_normal_endpoint = 1U;

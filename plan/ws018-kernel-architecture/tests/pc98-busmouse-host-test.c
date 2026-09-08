@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "src/drivers/hid/pc98-busmouse.c"
+#include "src/drivers/platform/pc98/pc98-busmouse.c"
 
 #undef inb
 #undef outb
@@ -135,7 +135,7 @@ mutex_unlock(struct mutex *mutex)
 }
 
 int
-input_device_register(const struct input_device_info *info,
+drv_input_device_register(const struct input_device_info *info,
 	struct input_device **result)
 {
 	CHECK(info != NULL);
@@ -147,7 +147,7 @@ input_device_register(const struct input_device_info *info,
 }
 
 void
-input_device_emit(struct input_device *device, uint16_t type, uint16_t code,
+drv_input_device_emit(struct input_device *device, uint16_t type, uint16_t code,
 	int32_t value)
 {
 	CHECK(device == fake_input);
@@ -236,7 +236,7 @@ main(void)
 	unsigned enable_before, mask_before;
 
 	reset_fixture();
-	CHECK(pc98_busmouse_init() == 0);
+	CHECK(drv_pc98_busmouse_init() == 0);
 	check_capabilities();
 	CHECK(port_c_mask_count == 1);
 	CHECK(reader_count == 0 && !mouse_active && !worker_started);

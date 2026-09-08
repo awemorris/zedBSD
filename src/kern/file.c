@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -30,7 +28,6 @@
 #include "kern/fat.h"
 #include "kern/kmem.h"
 #include "kern/uaccess.h"
-
 #include <errno.h>
 #include <fcntl.h>
 #include <hal/hal.h>
@@ -39,37 +36,12 @@
 #include <unistd.h>
 #include <zedbsd/fcntl.h>
 
-extern void readahead_reset(struct readahead_state *) __attribute__((weak));
-extern void readahead_cancel(struct file *) __attribute__((weak));
-extern int readahead_demand_begin(void) __attribute__((weak));
-extern void readahead_demand_end(void) __attribute__((weak));
-extern int readahead_observe(struct readahead_state *, uint64_t, size_t, uint64_t, uint64_t, int, struct readahead_request *) __attribute__((weak));
-extern int readahead_submit(struct file *, struct inode *, const struct readahead_request *) __attribute__((weak));
-extern void cache_memory_get_stats(struct cache_memory_stats *) __attribute__((weak));
-static void file_readahead_reset_owned(struct file *file);
-static void file_readahead_completed(struct file *file, struct inode *inode, off_t start, ssize_t result, off_t eof, uint64_t generation, uint64_t useful);
-extern int vm_object_read_coherent_useful(struct inode *, off_t, void *, size_t, ssize_t *, size_t *) __attribute__((weak));
-extern int disk_cache_acquire(struct disk *, struct disk **) __attribute__((weak));
-extern void disk_cache_release(struct disk *) __attribute__((weak));
-
-extern void io_error_record(struct io_error_state *, int) __attribute__((weak));
-extern void io_error_snapshot(struct io_error_state *, struct io_error_snapshot *) __attribute__((weak));
-extern int io_error_observe(const struct io_error_snapshot *, volatile uint64_t *) __attribute__((weak));
-
-extern int writeback_mount_admit(struct mount *, struct writeback_ticket *) __attribute__((weak));
-extern void writeback_pressure(struct writeback_budget *) __attribute__((weak));
-extern void writeback_ticket_release(struct writeback_ticket *) __attribute__((weak));
-extern int vm_object_writeback_prepare(struct file *, struct vm_object **) __attribute__((weak));
-extern void vm_object_writeback_release(struct vm_object *) __attribute__((weak));
-extern int vm_object_content_prepare_delayed(struct vm_object_content *, struct vm_object *, struct writeback_ticket *) __attribute__((weak));
-static void file_io_writeback_prepare(struct file_io *io, int flags);
-static void file_io_resources_release(struct file_io *io);
-
-extern int vm_object_sync_inode(struct inode *) __attribute__((weak));
-
 #define FILE_MAX 192U
+
 #define VFS_BSS __attribute__((section(".vfs_bss")))
+
 #define FILE_HIGH __attribute__((section(".hightext")))
+
 #ifdef ZEDBSD_USER_ABI_LP64
 #define OFF_T_MAX ((off_t)INT64_MAX)
 #define OFF_T_MIN ((off_t)INT64_MIN)
@@ -88,11 +60,37 @@ struct file_format_extents {
 };
 
 static struct file files[FILE_MAX] VFS_BSS;
+
 static uint8_t file_used[FILE_MAX] VFS_BSS;
+
 static struct spinlock file_pool_lock = {
 	{ 0 }, LOCK_RANK_FILE, "file pool", 0, 0
 };
 
+extern void readahead_reset(struct readahead_state *) __attribute__((weak));
+extern void readahead_cancel(struct file *) __attribute__((weak));
+extern int readahead_demand_begin(void) __attribute__((weak));
+extern void readahead_demand_end(void) __attribute__((weak));
+extern int readahead_observe(struct readahead_state *, uint64_t, size_t, uint64_t, uint64_t, int, struct readahead_request *) __attribute__((weak));
+extern int readahead_submit(struct file *, struct inode *, const struct readahead_request *) __attribute__((weak));
+extern void cache_memory_get_stats(struct cache_memory_stats *) __attribute__((weak));
+static void file_readahead_reset_owned(struct file *file);
+static void file_readahead_completed(struct file *file, struct inode *inode, off_t start, ssize_t result, off_t eof, uint64_t generation, uint64_t useful);
+extern int vm_object_read_coherent_useful(struct inode *, off_t, void *, size_t, ssize_t *, size_t *) __attribute__((weak));
+extern int disk_cache_acquire(struct disk *, struct disk **) __attribute__((weak));
+extern void disk_cache_release(struct disk *) __attribute__((weak));
+extern void io_error_record(struct io_error_state *, int) __attribute__((weak));
+extern void io_error_snapshot(struct io_error_state *, struct io_error_snapshot *) __attribute__((weak));
+extern int io_error_observe(const struct io_error_snapshot *, volatile uint64_t *) __attribute__((weak));
+extern int writeback_mount_admit(struct mount *, struct writeback_ticket *) __attribute__((weak));
+extern void writeback_pressure(struct writeback_budget *) __attribute__((weak));
+extern void writeback_ticket_release(struct writeback_ticket *) __attribute__((weak));
+extern int vm_object_writeback_prepare(struct file *, struct vm_object **) __attribute__((weak));
+extern void vm_object_writeback_release(struct vm_object *) __attribute__((weak));
+extern int vm_object_content_prepare_delayed(struct vm_object_content *, struct vm_object *, struct writeback_ticket *) __attribute__((weak));
+static void file_io_writeback_prepare(struct file_io *io, int flags);
+static void file_io_resources_release(struct file_io *io);
+extern int vm_object_sync_inode(struct inode *) __attribute__((weak));
 extern int vm_object_inode_io_wait(struct inode *inode) __attribute__((weak));
 extern int vm_object_inode_resize_active(struct inode *inode)
     __attribute__((weak));
@@ -120,7 +118,6 @@ extern void vm_object_content_read_end(struct inode *inode) __attribute__((weak)
 extern int vm_object_cache_published(struct inode *inode) __attribute__((weak));
 extern void file_regular_io_lock_checkpoint(struct inode *inode)
 	__attribute__((weak));
-
 extern void vm_object_cache_prepare(struct file *) __attribute__((weak));
 extern int vm_object_cache_pin(struct inode *, struct vm_object **) __attribute__((weak));
 extern void vm_object_cache_unpin(struct vm_object *) __attribute__((weak));
@@ -128,7 +125,6 @@ static void file_io_cache_read_prepare(struct file_io *io);
 extern unsigned vm_object_cache_drain(struct mount *) __attribute__((weak));
 extern int vm_object_backing_busy(const struct backing_claim *)
 	__attribute__((weak));
-
 static int file_fsync_backend_locked(struct file *file);
 static int file_format_reserve_locked(struct file *file, uint64_t size);
 static int file_format_collect_extent(uint64_t file_block, uint64_t disk_block, uint32_t count, void *argument);
@@ -445,15 +441,22 @@ file_create_pseudo(
 {
 	struct file *file;
 
+	/* Requires an operation table and a result. */
 	if (ops == NULL || result == NULL)
 		return EINVAL;
+
+	/* Takes one file from the pool. */
 	file = file_alloc();
 	if (file == NULL)
 		return ENFILE;
+
+	/* Describes the file entirely by its operations and private data. */
 	file->f_ops = ops;
 	atomic_store_release(&file->f_flags, (unsigned)flags);
 	file->f_data = data;
 	*result = file;
+
+	/* Reports the new file. */
 	return 0;
 }
 
@@ -497,6 +500,7 @@ file_status_flags_update(
 	unsigned old;
 	unsigned updated;
 
+	/* Replaces the masked bits, retrying against a concurrent update. */
 	if (file == NULL)
 		return;
 	old = atomic_load_acquire(&file->f_flags);
@@ -721,7 +725,98 @@ fail:
 	return error;
 }
 
-#include "file-exec-snapshot.inc"
+/* Captures full canonical pages before an executable mapping becomes visible. */
+int
+file_exec_snapshot_create(
+	struct file_content_lease *input,
+	off_t offset,
+	size_t length,
+	struct file_exec_snapshot **result)
+{
+	struct file_exec_snapshot *snapshot;
+	struct vm_object_page *page;
+	size_t count, bytes, index;
+	int error;
+
+	if (result == NULL)
+		return EINVAL;
+	*result = NULL;
+	if (input == NULL || !input->active || offset < 0 || length == 0 ||
+	    ((uint64_t)offset & (ZEDBSD_PAGE_SIZE - 1U)) != 0 ||
+	    (length & (ZEDBSD_PAGE_SIZE - 1U)) != 0 || offset > input->size ||
+	    (uint64_t)length > (uint64_t)(input->size - offset))
+		return EINVAL;
+	if (!input->shared_read || input->read_object == NULL)
+		return EOPNOTSUPP;
+	count = length / ZEDBSD_PAGE_SIZE;
+	if (count > (SIZE_MAX - sizeof(*snapshot)) / sizeof(snapshot->pages[0]))
+		return EOVERFLOW;
+	bytes = sizeof(*snapshot) + count * sizeof(snapshot->pages[0]);
+	error = cache_memory_reserve(CACHE_MEMORY_FILE_META, bytes, 1);
+	if (error != 0)
+		return error;
+	snapshot = kern_calloc(1, bytes);
+	if (snapshot == NULL) {
+		cache_memory_cancel(CACHE_MEMORY_FILE_META, bytes);
+		return ENOMEM;
+	}
+	cache_memory_commit(CACHE_MEMORY_FILE_META, bytes);
+	refcount_init(&snapshot->refs, 1);
+	snapshot->memory_bytes = bytes;
+	snapshot->offset = offset;
+	snapshot->length = length;
+	error = file_exec_snapshot_begin(input->file, &snapshot->input);
+	if (error != 0)
+		goto fail;
+	if (!snapshot->input.shared_read ||
+	    snapshot->input.read_object != input->read_object ||
+	    snapshot->input.size != input->size) {
+		error = EIO;
+		goto fail;
+	}
+
+	/* Persistent page pins prevent reclaim from replacing captured source bytes. */
+	for (index = 0; index < count; index++) {
+		error = vm_object_fault(snapshot->input.read_object,
+		    offset + (off_t)(index * ZEDBSD_PAGE_SIZE), &page);
+		if (error != 0)
+			goto fail;
+		error = vm_object_page_pin(page);
+		vm_object_fault_release(page);
+		if (error != 0)
+			goto fail;
+		snapshot->pages[snapshot->page_count++] = page;
+	}
+	*result = snapshot;
+	return 0;
+
+fail:
+	file_exec_snapshot_put(snapshot);
+	return error;
+}
+
+/* Shares immutable ownership across VM regions, splits and fork. */
+void
+file_exec_snapshot_ref(struct file_exec_snapshot *snapshot)
+{
+	if (snapshot != NULL)
+		refcount_get(&snapshot->refs);
+}
+
+/* No object mapping put may wait on the loader's still-active cache pin. */
+void
+file_exec_snapshot_put(struct file_exec_snapshot *snapshot)
+{
+	size_t index;
+
+	if (snapshot == NULL || !refcount_put(&snapshot->refs))
+		return;
+	for (index = 0; index < snapshot->page_count; index++)
+		vm_object_page_unpin(snapshot->pages[index]);
+	file_content_lease_end(&snapshot->input);
+	cache_memory_release(CACHE_MEMORY_FILE_META, snapshot->memory_bytes);
+	kern_free(snapshot);
+}
 
 /* Reads from a leased file within the size the lease captured. */
 ssize_t
@@ -734,16 +829,21 @@ file_content_lease_pread(
 	ssize_t count;
 	int error;
 
+	/* Rejects a lease that was never taken, or a malformed request. */
 	if (lease == NULL ||
 	    !lease->active ||
 	    lease->file == NULL ||
 	    offset < 0 ||
 	    (buffer == NULL && length != 0))
 		return -EINVAL;
+
+	/* A read at or past the leased end of file returns nothing. */
 	if (offset >= lease->size || length == 0)
 		return 0;
 	if ((uint64_t)length > (uint64_t)(lease->size - offset))
 		length = (size_t)(lease->size - offset);
+
+	/* A shared lease reads through the cache; an exclusive one reads the file. */
 	if (lease->shared_read && lease->read_object != NULL) {
 		error = vm_object_read_coherent(lease->content_inode, offset, buffer, length, &count);
 		if (error != 0)
@@ -752,10 +852,15 @@ file_content_lease_pread(
 		count = file_pread_internal(lease->file, buffer, length, offset,
 		    FILE_IO_VM_OBJECT | (lease->shared_read ? 0 : FILE_IO_INODE_IO_OWNED));
 	}
+	/* Refuses a backend that reported more than it was asked for. */
 	if (count > (ssize_t)length)
 		return -EIO;
+
+	/* Notes that this lease has produced data. */
 	if (count > 0)
 		lease->transferred = 1;
+
+	/* Reports the transferred count. */
 	return count;
 }
 
@@ -768,9 +873,12 @@ file_content_lease_end(
 {
 	struct file *file;
 
+	/* Ignores a lease that was never taken. */
 	if (lease == NULL || !lease->active || lease->file == NULL)
 		return;
 	file = lease->file;
+
+	/* A shared lease only has to release what it pinned in the cache. */
 	if (lease->shared_read) {
 		vm_object_content_read_end(lease->content_inode);
 		if (lease->read_object != NULL)
@@ -783,6 +891,8 @@ file_content_lease_end(
 		(void)file_close(file);
 		return;
 	}
+
+	/* An exclusive lease also gives the content gate and I/O locks back. */
 	vm_object_content_abort(&lease->content);
 	if (lease->held_visible_gate)
 		vm_object_content_read_end(lease->io_inode);
@@ -1112,8 +1222,11 @@ file_io_transfer(
 	limit_existing = 0;
 	requested_length = length;
 
+	/* Rejects a transfer without an operation or a buffer. */
 	if (io == NULL || io->file == NULL || (buffer == NULL && length != 0))
 		return -EINVAL;
+
+	/* Counts the request and starts with no transaction of its own. */
 	file = io->file;
 	io_stats_record(file_io_is_write(io->kind) ? IO_FILE_WRITE : IO_FILE_READ,
 	    length);
@@ -1821,6 +1934,7 @@ file_readdir(
 {
 	int error;
 
+	/* Requires a directory whose filesystem can list it. */
 	if (file == NULL || entry == NULL || eof == NULL)
 		return EINVAL;
 	if (file->f_inode == NULL || file->f_inode->i_type != INODE_DIR)
@@ -1867,9 +1981,12 @@ file_seek(
 	off_t base;
 	off_t target;
 
+	/* Seeks under the file's own lock. */
 	if (file == NULL)
 		return -EINVAL;
 	mutex_lock(&file->f_lock);
+
+	/* SEEK_DATA and SEEK_HOLE only apply inside a regular file. */
 	if (whence == SEEK_DATA || whence == SEEK_HOLE) {
 		if (file->f_inode == NULL || file->f_inode->i_type != INODE_REG) {
 			mutex_unlock(&file->f_lock);
@@ -2038,6 +2155,7 @@ file_close(
 
 	error = 0;
 
+	/* Drops one reference; only the last one closes the description. */
 	if (file == NULL)
 		return EBADF;
 	if (refcount_load(&file->f_refs) == 0)
@@ -2116,6 +2234,7 @@ file_count(
 	unsigned count;
 	unsigned long irq;
 
+	/* Counts the occupied slots of the file pool. */
 	count = 0;
 	irq = spin_lock_irqsave(&file_pool_lock);
 	for (i = 0; i < FILE_MAX; i++) {
@@ -2123,6 +2242,8 @@ file_count(
 			count++;
 	}
 	spin_unlock_irqrestore(&file_pool_lock, irq);
+
+	/* Reports the live file count. */
 	return count;
 }
 
@@ -2134,6 +2255,7 @@ file_alloc(
 	unsigned i;
 	unsigned long irq;
 
+	/* Takes the first free slot and starts it with one reference. */
 	irq = spin_lock_irqsave(&file_pool_lock);
 	for (i = 0; i < FILE_MAX; i++) {
 		if (!file_used[i]) {
@@ -2147,6 +2269,8 @@ file_alloc(
 		}
 	}
 	spin_unlock_irqrestore(&file_pool_lock, irq);
+
+	/* Reports an exhausted pool. */
 	return NULL;
 }
 
@@ -2158,6 +2282,7 @@ file_free(
 	unsigned i;
 	unsigned long irq;
 
+	/* Empties the slot and marks it free again. */
 	irq = spin_lock_irqsave(&file_pool_lock);
 	for (i = 0; i < FILE_MAX; i++) {
 		if (&files[i] == file) {
@@ -2335,11 +2460,16 @@ file_io_once(
 	ssize_t result;
 	int error;
 
+	/* Opens the transfer. */
 	error = file_io_begin(file, kind, offset, internal_flags, &io);
 	if (error != 0)
 		return -error;
+
+	/* Runs it and closes it, whatever it reported. */
 	result = file_io_transfer(&io, buffer, length);
 	result = file_io_complete(&io, result);
+
+	/* Reports the transferred count, or the negated error. */
 	return result;
 }
 
@@ -2420,7 +2550,7 @@ file_format_finalize(
 	memset(&collection, 0, sizeof(collection));
 	collection.disk = file->f_inode->i_mount->m_disk;
 	collection.blocks = size / 512U;
-	error = fat_file_extents(file, file_format_collect_extent, &collection);
+	error = drv_fat_file_extents(file, file_format_collect_extent, &collection);
 	if (error != 0)
 		return error;
 
@@ -2439,7 +2569,7 @@ file_format_finalize(
 	collection.capacity = collection.count;
 	collection.count = 0;
 	collection.next_block = 0;
-	error = fat_file_extents(file, file_format_collect_extent, &collection);
+	error = drv_fat_file_extents(file, file_format_collect_extent, &collection);
 	if (error == 0 && collection.next_block != collection.blocks)
 		error = EIO;
 
@@ -2481,7 +2611,7 @@ file_format_reserve_locked(
 	/* Limits the first implementation to canonical FAT-backed files. */
 	inode = file->f_inode;
 	mountp = inode->i_mount;
-	if (mountp == NULL || mountp->m_type != &fat_filesystem_type ||
+	if (mountp == NULL || mountp->m_type != &drv_fat_filesystem_type ||
 	    mountp->m_disk == NULL || file_vm_inode(file) != inode)
 		return EOPNOTSUPP;
 

@@ -8,7 +8,7 @@ cc=${CC:-cc}
 flags="-std=c11 -D_POSIX_C_SOURCE=200809L -DINTEL_AX211_PCI_MMIO_HOST_TEST -Wall -Wextra -Werror"
 production_flags="-std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror"
 includes="-I$repository/include -I$repository/src/drivers"
-source="$repository/src/drivers/intel-ax211-pci-mmio.c"
+source="$repository/src/drivers/wifi/intel-ax211/intel-ax211-pci-mmio.c"
 fixture="$repository/plan/ws004-hardware/tests/intel-ax211-pci-mmio-test.c"
 
 $cc $flags -O2 $includes "$source" "$fixture" -o "$build_dir/ordinary"

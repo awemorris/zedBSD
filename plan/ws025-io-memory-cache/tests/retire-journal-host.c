@@ -24,14 +24,14 @@ static void retire_scenario(unsigned directory,unsigned write_fail,unsigned flus
  node.inode.i_ino=3;node.inode.i_linkcount=0;node.inode.i_size=0;node.direct[0]=0;node.blocks=0;
  node.inode.i_type=directory?INODE_DIR:INODE_REG;node.inode.i_mode=(directory?S_IFDIR:S_IFREG)|0600;
  cg=storage+32*512;for(n=0;n<4;n++)bit_set(cg+256,n);
- ufs_put32(cg,UFS_CG_NIFREE,28,0);ufs_put32(cg,UFS_CG_NDIR,1+directory,0);
+ drv_ufs_put32(cg,UFS_CG_NIFREE,28,0);drv_ufs_put32(cg,UFS_CG_NDIR,1+directory,0);
  fs.super.cstotal_nifree=28;fs.super.cstotal_ndir=1+directory;
  REQUIRE(persist_inode(&node.inode)==0);REQUIRE(write_super_summaries(&mountp)==0);REQUIRE(disk_sync(&disk)==0);
  REQUIRE(quota_enable(&fs.quota,QUOTA_USER,1)==0);
  REQUIRE(quota_reserve(&fs.quota,0,0,0,1,0,&charge)==0);quota_commit(&charge);
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
  fs.journal_enabled=1;fs.snapshot_available=retire_snapshot;
  retire_journal=&fs.journal;group_write_check=retire_write_check;
  storage_writes=storage_syncs=0;snapshot_calls=snapshot_mask=0;
@@ -51,17 +51,17 @@ static void retire_scenario(unsigned directory,unsigned write_fail,unsigned flus
  }
  failure_write=failure_write_again=failure_sync=commit_error=0;crash_cut=0;
  memcpy(storage,durable,sizeof(storage));
- REQUIRE(ufs_journal_init(&recovered,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);retire_journal=&recovered;
- REQUIRE(ufs_journal_replay(&recovered)==0);
+ REQUIRE(drv_ufs_journal_init(&recovered,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);retire_journal=&recovered;
+ REQUIRE(drv_ufs_journal_replay(&recovered)==0);
  raw=storage+8*512+3*UFS_DINODE_SIZE;cg=storage+32*512;
  allocated=bit_test(cg+256,3)!=0;committed=!allocated;
- REQUIRE((ufs_get16(raw,UFS_DI_MODE,0)!=0)==allocated);
- REQUIRE(ufs_get32(cg,UFS_CG_NIFREE,0)==28+committed);
- REQUIRE(ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NIFREE,0)==28+committed);
- REQUIRE(ufs_get32(cg,UFS_CG_NDIR,0)==1+directory-(committed && directory));
- REQUIRE(ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NDIR,0)==1+directory-(committed && directory));
- REQUIRE(ufs_get16(raw,UFS_DI_NLINK,0)==0 && ufs_get64(raw,UFS_DI_BLOCKS,0)==0);
+ REQUIRE((drv_ufs_get16(raw,UFS_DI_MODE,0)!=0)==allocated);
+ REQUIRE(drv_ufs_get32(cg,UFS_CG_NIFREE,0)==28+committed);
+ REQUIRE(drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NIFREE,0)==28+committed);
+ REQUIRE(drv_ufs_get32(cg,UFS_CG_NDIR,0)==1+directory-(committed && directory));
+ REQUIRE(drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NDIR,0)==1+directory-(committed && directory));
+ REQUIRE(drv_ufs_get16(raw,UFS_DI_NLINK,0)==0 && drv_ufs_get64(raw,UFS_DI_BLOCKS,0)==0);
  REQUIRE(bit_test(cg+256,2) && !bit_test(cg+256,4));
  if(retire_result==0)REQUIRE(committed);
  group_write_check=NULL;free(fs.cg);
@@ -73,7 +73,7 @@ static void retire_refusals(void)
  storage_fixture(&fs,&node,&mountp,&disk,0,0);
  disk.d_block_size=512;disk.d_block_count=512;
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);fs.journal_enabled=1;
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);fs.journal_enabled=1;
  node.inode.i_ino=3;node.inode.i_linkcount=0;node.inode.i_size=0;node.blocks=0;node.direct[0]=0;
  storage_writes=storage_syncs=0;
  for(n=0;n<7;n++) {

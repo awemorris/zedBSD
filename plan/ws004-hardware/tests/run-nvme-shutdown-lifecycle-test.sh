@@ -1,6 +1,7 @@
 #!/bin/sh
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-nvme-shutdown-life.XXXXXX")

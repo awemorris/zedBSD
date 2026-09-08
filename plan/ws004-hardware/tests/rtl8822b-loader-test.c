@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../src/drivers/rtl8822b-internal.h"
+#include "../../../src/drivers/wifi/rtl8822b/rtl8822b-internal.h"
 #include "kern/file.h"
 #include "kern/vfs.h"
 
@@ -163,27 +163,27 @@ main(void)
 	unsigned opens;
 
 	memset(&firmware, 0, sizeof(firmware));
-	TEST_CHECK(rtl8822b_firmware_load(&firmware) == 0);
+	TEST_CHECK(drv_rtl8822b_firmware_load(&firmware) == 0);
 	TEST_CHECK(firmware.bytes != NULL);
 	TEST_CHECK(firmware.size == RTL8822B_FIRMWARE_SIZE);
 	TEST_CHECK(memcmp(firmware.bytes, _binary_firmware_bin_start,
 	    firmware.size) == 0);
 	first = firmware.bytes;
 
-	TEST_CHECK(rtl8822b_firmware_load(&firmware) == 0);
+	TEST_CHECK(drv_rtl8822b_firmware_load(&firmware) == 0);
 	second = firmware.bytes;
 	TEST_CHECK(second != NULL && second != first);
 	TEST_CHECK(free_count == 1U && !scrub_failure);
 	TEST_CHECK(!heap_used[0] && heap_used[1]);
 
 	corrupt_read = 1U;
-	TEST_CHECK(rtl8822b_firmware_load(&firmware) == EILSEQ);
+	TEST_CHECK(drv_rtl8822b_firmware_load(&firmware) == EILSEQ);
 	corrupt_read = 0U;
 	TEST_CHECK(firmware.bytes == second);
 	TEST_CHECK(free_count == 2U && !scrub_failure);
 	TEST_CHECK(!heap_used[0] && heap_used[1]);
 
-	rtl8822b_firmware_release(&firmware);
+	drv_rtl8822b_firmware_release(&firmware);
 	TEST_CHECK(firmware.bytes == NULL && firmware.size == 0U);
 	TEST_CHECK(free_count == 3U && !scrub_failure);
 	TEST_CHECK(!heap_used[0] && !heap_used[1]);
@@ -193,7 +193,7 @@ main(void)
 
 	opens = open_count;
 	firmware.size = 1U;
-	TEST_CHECK(rtl8822b_firmware_load(&firmware) == EINVAL);
+	TEST_CHECK(drv_rtl8822b_firmware_load(&firmware) == EINVAL);
 	TEST_CHECK(open_count == opens && firmware.size == 1U);
 	return 0;
 }

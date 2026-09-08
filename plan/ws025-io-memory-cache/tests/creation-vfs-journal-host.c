@@ -24,7 +24,7 @@ int inode_creation_prepare(struct inode *parent,struct inode *child,
  child->i_uid=request->uid;child->i_gid=request->gid;child->i_rdev=request->rdev;
  child->i_special=request->special;
  if(request->type==INODE_REG || request->type==INODE_DIR) {
-  ufs_put32(area,0,16,0);area[4]=UFS_EXTATTR_NAMESPACE_USER;area[6]=1;area[7]='x';
+  drv_ufs_put32(area,0,16,0);area[4]=UFS_EXTATTR_NAMESPACE_USER;area[6]=1;area[7]='x';
   memcpy(area+8,"prepared",8);
   mutex_lock(&child->i_lock);error=extattr_publish(child,area,sizeof(area));mutex_unlock(&child->i_lock);
   if(error)return error;
@@ -50,9 +50,9 @@ static unsigned create_names(uint8_t *block,unsigned size)
 {
  unsigned at=0,found=0,length;
  while(at<size) {
-  length=ufs_get16(block,at+4,0);
+  length=drv_ufs_get16(block,at+4,0);
   REQUIRE(length>=8 && !(length&3) && length<=size-at && at%512+length<=512);
-  if(ufs_get32(block,at,0)==3 && block[at+7]==3 && !memcmp(block+at+8,"new",3))found++;
+  if(drv_ufs_get32(block,at,0)==3 && block[at+7]==3 && !memcmp(block+at+8,"new",3))found++;
   at+=length;
  }
  return found;
@@ -74,8 +74,8 @@ static void create_scenario(enum inode_type type,unsigned empty,unsigned write_f
  for(n=0;n<3;n++)bit_set(cg+256,n);
  for(n=160;n<192;n++)bit_set(cg+264,n);
  if(!empty)for(n=176;n<184;n++)bit_clear(cg+264,n);
- ufs_put32(cg,UFS_CG_NIFREE,29,0);ufs_put32(cg,UFS_CG_NDIR,1,0);
- ufs_put32(cg,UFS_CG_NBFREE,empty?4:3,0);
+ drv_ufs_put32(cg,UFS_CG_NIFREE,29,0);drv_ufs_put32(cg,UFS_CG_NDIR,1,0);
+ drv_ufs_put32(cg,UFS_CG_NBFREE,empty?4:3,0);
  fs.super.cstotal_nifree=29;fs.super.cstotal_ndir=1;fs.super.cstotal_nbfree=empty?4:3;
  memset(storage+160*512,0,32*512);
  if(!empty)record(0,512,2,"old");
@@ -85,8 +85,8 @@ static void create_scenario(enum inode_type type,unsigned empty,unsigned write_f
  memset(&create_request,0,sizeof(create_request));create_request.type=type;create_request.mode=0700;
  if(type==INODE_SOCKET)create_request.special=&disk;
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
  fs.journal_enabled=1;fs.snapshot_available=create_snapshot;
  storage_reads=storage_writes=storage_syncs=0;snapshot_calls=snapshot_mask=dir_changes=0;
  failure_read=create_read_failure;failure_write=write_fail;failure_write_again=second_failure;
@@ -108,30 +108,30 @@ static void create_scenario(enum inode_type type,unsigned empty,unsigned write_f
  namecache_purge_mount(&mountp);
  failure_read=failure_write=failure_write_again=failure_sync=commit_error=0;crash_cut=0;
  memcpy(storage,durable,sizeof(storage));
- REQUIRE(ufs_journal_init(&recovered,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);REQUIRE(ufs_journal_replay(&recovered)==0);
+ REQUIRE(drv_ufs_journal_init(&recovered,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);REQUIRE(drv_ufs_journal_replay(&recovered)==0);
  parent=storage+8*512+2*UFS_DINODE_SIZE;child=parent+UFS_DINODE_SIZE;
- parent_backing=ufs_get64(parent,UFS_DI_DB,0);backing=ufs_get64(child,UFS_DI_DB,0);
- attribute=ufs_get64(child,UFS_DI_EXTB,0);blocks=ufs_get64(child,UFS_DI_BLOCKS,0);
- allocated=bit_test(cg+256,3);links=ufs_get16(child,UFS_DI_NLINK,0);
- REQUIRE(allocated==(ufs_get16(child,UFS_DI_MODE,0)!=0));
- REQUIRE(ufs_get32(cg,UFS_CG_NIFREE,0)==29-allocated);
- REQUIRE(ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NIFREE,0)==29-allocated);
- REQUIRE(ufs_get32(cg,UFS_CG_NDIR,0)==1U+(allocated && type==INODE_DIR));
- REQUIRE(ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NDIR,0)==1U+(allocated && type==INODE_DIR));
- REQUIRE(ufs_get64(parent,UFS_DI_SIZE,0)==0 || ufs_get64(parent,UFS_DI_SIZE,0)==512);
- found=parent_backing?create_names(storage+parent_backing*512,(unsigned)ufs_get64(parent,UFS_DI_SIZE,0)):0;
+ parent_backing=drv_ufs_get64(parent,UFS_DI_DB,0);backing=drv_ufs_get64(child,UFS_DI_DB,0);
+ attribute=drv_ufs_get64(child,UFS_DI_EXTB,0);blocks=drv_ufs_get64(child,UFS_DI_BLOCKS,0);
+ allocated=bit_test(cg+256,3);links=drv_ufs_get16(child,UFS_DI_NLINK,0);
+ REQUIRE(allocated==(drv_ufs_get16(child,UFS_DI_MODE,0)!=0));
+ REQUIRE(drv_ufs_get32(cg,UFS_CG_NIFREE,0)==29-allocated);
+ REQUIRE(drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NIFREE,0)==29-allocated);
+ REQUIRE(drv_ufs_get32(cg,UFS_CG_NDIR,0)==1U+(allocated && type==INODE_DIR));
+ REQUIRE(drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NDIR,0)==1U+(allocated && type==INODE_DIR));
+ REQUIRE(drv_ufs_get64(parent,UFS_DI_SIZE,0)==0 || drv_ufs_get64(parent,UFS_DI_SIZE,0)==512);
+ found=parent_backing?create_names(storage+parent_backing*512,(unsigned)drv_ufs_get64(parent,UFS_DI_SIZE,0)):0;
  REQUIRE(found<=1 && links==found*(type==INODE_DIR?2U:1U));
- REQUIRE(ufs_get16(parent,UFS_DI_NLINK,0)==2+(found && type==INODE_DIR));
+ REQUIRE(drv_ufs_get16(parent,UFS_DI_NLINK,0)==2+(found && type==INODE_DIR));
  REQUIRE(!found || allocated);
  if(create_result==0)REQUIRE(found==1);
  if(found && type==INODE_DIR) {
-  REQUIRE(ufs_get64(child,UFS_DI_SIZE,0)==512);
-  REQUIRE(ufs_get32(storage+backing*512,0,0)==3 && storage[backing*512+7]==1 && storage[backing*512+8]=='.');
-  REQUIRE(ufs_get32(storage+backing*512,12,0)==2 && storage[backing*512+19]==2 && !memcmp(storage+backing*512+20,"..",2));
+  REQUIRE(drv_ufs_get64(child,UFS_DI_SIZE,0)==512);
+  REQUIRE(drv_ufs_get32(storage+backing*512,0,0)==3 && storage[backing*512+7]==1 && storage[backing*512+8]=='.');
+  REQUIRE(drv_ufs_get32(storage+backing*512,12,0)==2 && storage[backing*512+19]==2 && !memcmp(storage+backing*512+20,"..",2));
  }
  if(found && (type==INODE_REG || type==INODE_DIR)) {
-  REQUIRE(ufs_get32(child,UFS_DI_EXTSIZE,0)==16 && attribute!=0);
+  REQUIRE(drv_ufs_get32(child,UFS_DI_EXTSIZE,0)==16 && attribute!=0);
   REQUIRE(memcmp(storage+attribute*512+8,"prepared",8)==0);
  }
  if(type==INODE_SYMLINK && found)REQUIRE(memcmp(child+UFS_DI_DB,"destination",11)==0);
@@ -145,12 +145,12 @@ static void create_scenario(enum inode_type type,unsigned empty,unsigned write_f
   free_blocks+=!used;
  }
  REQUIRE(free_blocks+owned_blocks==4);
- REQUIRE(ufs_get32(cg,UFS_CG_NBFREE,0)==free_blocks);
- REQUIRE(ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NBFREE,0)==free_blocks);
+ REQUIRE(drv_ufs_get32(cg,UFS_CG_NBFREE,0)==free_blocks);
+ REQUIRE(drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NBFREE,0)==free_blocks);
  /* Reboots into the actual private orphan owner after validating the crash state. */
- fs.super.cstotal_nbfree=ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NBFREE,0);
- fs.super.cstotal_nifree=ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NIFREE,0);
- fs.super.cstotal_ndir=ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NDIR,0);
+ fs.super.cstotal_nbfree=drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NBFREE,0);
+ fs.super.cstotal_nifree=drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NIFREE,0);
+ fs.super.cstotal_ndir=drv_ufs_get64(storage+UFS_SBLOCK_OFFSET,UFS_FS_CSTOTAL_NDIR,0);
  fs.cg_valid=0;fs.writable=1;snapshot_fail=0;
  mutex_init(&fs.namespace_lock,LOCK_RANK_NAMESPACE,"reboot namespace");
  mutex_init(&fs.lock,LOCK_RANK_INODE,"reboot mount");
@@ -158,11 +158,11 @@ static void create_scenario(enum inode_type type,unsigned empty,unsigned write_f
  mutex_init(&fs.snapshot_lock,LOCK_RANK_DEVICE,"reboot snapshot");
  fs.journal_io.context=fs.snapshot_io.context=NULL;
  memset(&cached_node,0,sizeof(cached_node));allocations=0;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
  quota_state_init(&fs.quota);REQUIRE(ufs_quota_rebuild(&mountp)==0);
  REQUIRE(quota_enable(&fs.quota,QUOTA_USER,1)==0);REQUIRE(orphan_recover(&mountp)==0);
  REQUIRE((unsigned)bit_test(cg+256,3)==found);
- REQUIRE(ufs_get16(child,UFS_DI_NLINK,0)==links);
+ REQUIRE(drv_ufs_get16(child,UFS_DI_NLINK,0)==links);
  owned_blocks=(parent_backing!=0)+(found?((backing!=0)+(attribute!=0)):0);
  REQUIRE(fs.super.cstotal_nbfree==4-owned_blocks && fs.super.cstotal_nifree==29-found);
  REQUIRE(quota_get(&fs.quota,QUOTA_USER,0,&quota)==0 && quota.blocks==owned_blocks && quota.inodes==1+found);

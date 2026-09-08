@@ -41,10 +41,6 @@ that use it when moving it to the top would make the implementation harder to
 read.  This is a narrow exception for macros that are inseparable from the
 local implementation.
 
-Put the Emacs modeline on the first physical line of the file.  Follow it with
-one blank line and then the copyright header.  Indentation uses tabs with a tab
-width of eight.
-
 ## 3. Forward declarations and function definitions
 
 Every non-`static inline` static function has a forward declaration.  A forward
@@ -250,12 +246,6 @@ significant calls still applies.
 
 Preserve the original short-circuit evaluation order when decomposing a
 condition.
-
-Do not use `goto`, including for error cleanup.  Keep ownership local, return
-immediately after a failed operation, and release already acquired resources
-in reverse order on that path.  When this would duplicate a large cleanup
-sequence or obscure the main operation, extract a small cleanup helper or
-split the function at an ownership boundary.
 
 ## 7. Loops and switches
 

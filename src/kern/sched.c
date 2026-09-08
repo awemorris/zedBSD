@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -372,6 +370,7 @@ sched_yield(
 	unsigned long ignored;
 	bool enabled;
 
+	/* Enters this CPU's run queue with interrupts disabled. */
 	enabled = hal_irq_disable();
 	current = curthread;
 	id = hal_cpu_current();

@@ -7,8 +7,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include "src/drivers/fs/ufs/ufs-super.h"
-#include "src/drivers/fs/ufs/ufs-endian.h"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-super.h"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -52,28 +52,28 @@ main(void)
 	for (swapped = 0; swapped < 2; swapped++) {
 		memset(raw, 0, sizeof(raw));
 		for (i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
-			ufs_put32(raw, fields[i].offset, fields[i].value, swapped);
-		ufs_put64(raw, UFS_FS_SBLOCKLOC, 65536, swapped);
-		ufs_put64(raw, UFS_FS_SIZE, 8192, swapped);
-		ufs_put64(raw, UFS_FS_DSIZE, 7904, swapped);
-		CHECK(ufs_super_decode(raw, sizeof(raw), 16384, &super) == 0);
+			drv_ufs_put32(raw, fields[i].offset, fields[i].value, swapped);
+		drv_ufs_put64(raw, UFS_FS_SBLOCKLOC, 65536, swapped);
+		drv_ufs_put64(raw, UFS_FS_SIZE, 8192, swapped);
+		drv_ufs_put64(raw, UFS_FS_DSIZE, 7904, swapped);
+		CHECK(drv_ufs_super_decode(raw, sizeof(raw), 16384, &super) == 0);
 		CHECK(super.swapped == swapped && super.size == 8192);
-		CHECK(ufs_super_decode(raw, 1375, 16384, &super) == EINVAL);
-		CHECK(ufs_super_decode(raw, sizeof(raw), 16383, &super) == EINVAL);
+		CHECK(drv_ufs_super_decode(raw, 1375, 16384, &super) == EINVAL);
+		CHECK(drv_ufs_super_decode(raw, sizeof(raw), 16383, &super) == EINVAL);
 
 		/* Reject every mutation independently of previous failures. */
 		for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
 			memcpy(changed, raw, sizeof(raw));
-			ufs_put32(changed, bad[i].offset, bad[i].value, swapped);
-			CHECK(ufs_super_decode(changed, sizeof(changed), UINT64_MAX, &super) == EINVAL);
+			drv_ufs_put32(changed, bad[i].offset, bad[i].value, swapped);
+			CHECK(drv_ufs_super_decode(changed, sizeof(changed), UINT64_MAX, &super) == EINVAL);
 		}
 
 		/* Reject legacy magic and a wrapped final cylinder-group extent. */
 		memcpy(changed, raw, sizeof(raw));
-		ufs_put32(changed, UFS_FS_MAGIC, 0x11954, swapped);
-		CHECK(ufs_super_decode(changed, sizeof(changed), 16384, &super) == EOPNOTSUPP);
-		ufs_put64(raw, UFS_FS_SIZE, UINT64_MAX, swapped);
-		CHECK(ufs_super_decode(raw, sizeof(raw), UINT64_MAX, &super) == EINVAL);
+		drv_ufs_put32(changed, UFS_FS_MAGIC, 0x11954, swapped);
+		CHECK(drv_ufs_super_decode(changed, sizeof(changed), 16384, &super) == EOPNOTSUPP);
+		drv_ufs_put64(raw, UFS_FS_SIZE, UINT64_MAX, swapped);
+		CHECK(drv_ufs_super_decode(raw, sizeof(raw), UINT64_MAX, &super) == EINVAL);
 	}
 
 	/* Report the completed geometry matrix. */

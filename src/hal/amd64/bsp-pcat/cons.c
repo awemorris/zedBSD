@@ -20,7 +20,7 @@
 #include "../defs.h"
 #include "../irq.h"
 #include "bootloader/include/amd64-handoff.h"
-#include "drivers/graphics/pcat/vgafont.h"
+#include "drivers/platform/pcat/graphics/vgafont.h"
 
 #define VGA_MEMORY vga_memory
 #define VGA_INDEX	0x3d4U
@@ -1556,7 +1556,7 @@ framebuffer_draw_cell_locked(
 	for (glyph_row = 0;
 	     glyph_row < PCAT_VGAFONT_HEIGHT;
 	     glyph_row++) {
-		bits = pcat_vgafont16[(unsigned)character *
+		bits = drv_pcat_vgafont16[(unsigned)character *
 		    PCAT_VGAFONT_HEIGHT + glyph_row];
 		out = framebuffer_pixels +
 		    (framebuffer_y + row * PCAT_VGAFONT_HEIGHT + glyph_row) *

@@ -11,7 +11,7 @@ compiler=${HOSTCC:-cc}
 fixture=$repo/plan/ws004-hardware/tests/gpt-host-test.c
 sources="$repo/src/drivers/disklabel/mbr.c
 	$repo/src/drivers/disklabel/gpt.c
-	$repo/src/drivers/disklabel/pcat-auto.c"
+	$repo/src/drivers/disklabel/pcat.c"
 common="-std=c11 -O2 -Wall -Wextra -Werror -I$repo/include -I$repo/include/uapi -I$repo/src -I$repo/libc/include"
 
 # shellcheck disable=SC2086
@@ -36,7 +36,7 @@ analyzer_pass=yes
 for source in "$fixture" \
 	"$repo/src/drivers/disklabel/mbr.c" \
 	"$repo/src/drivers/disklabel/gpt.c" \
-	"$repo/src/drivers/disklabel/pcat-auto.c"; do
+	"$repo/src/drivers/disklabel/pcat.c"; do
 	object=$temporary/$(basename "$source" .c)-analyzer.o
 	if ! $compiler -std=c11 -O0 -Wall -Wextra -Werror -fanalyzer \
 		-I"$repo/include" -I"$repo/include/uapi" -I"$repo/src" \

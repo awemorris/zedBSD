@@ -107,62 +107,62 @@ test_control_validation(void)
 	struct system_swap_control control;
 	unsigned calls;
 
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD, BAD_ADDRESS,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD, BAD_ADDRESS,
 	    1) == EFAULT);
 	control_init(&control, "boot0:swapfile");
 	control.version++;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
 	    (uintptr_t)&control, 1) == EINVAL);
 	control_init(&control, "boot0:swapfile");
 	control.struct_size--;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
 	    (uintptr_t)&control, 1) == EINVAL);
 	control_init(&control, "boot0:swapfile");
 	control.flags = 1;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
 	    (uintptr_t)&control, 1) == EINVAL);
 	control_init(&control, "boot0:swapfile");
 	control.reserved0 = 1;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
 	    (uintptr_t)&control, 1) == EINVAL);
 	control_init(&control, "boot0:swapfile");
 	control.reserved[7] = 1;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
 	    (uintptr_t)&control, 1) == EINVAL);
 	control_init(&control, "");
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
 	    (uintptr_t)&control, 1) == EINVAL);
 	control_init(&control, "x");
 	memset(control.source, 'x', sizeof(control.source));
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
 	    (uintptr_t)&control, 1) == EINVAL);
 	assert(add_calls == 0);
 
 	control_init(&control, "boot0:swapfile");
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
 	    (uintptr_t)&control, 0) == EPERM);
 	assert(add_calls == 0);
 	add_result = EEXIST;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
 	    (uintptr_t)&control, 1) == EEXIST);
 	assert(add_calls == 1);
 	assert(strcmp(last_selector, "boot0:swapfile") == 0);
 	add_result = 0;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_ADD,
 	    (uintptr_t)&control, 1) == 0);
 	assert(add_calls == 2);
 
 	control_init(&control, "/dev/sda2");
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_REMOVE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_REMOVE,
 	    (uintptr_t)&control, 0) == EPERM);
 	assert(remove_calls == 0);
 	remove_result = EINTR;
 	calls = remove_calls;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_REMOVE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_SWAP_REMOVE,
 	    (uintptr_t)&control, 1) == EINTR);
 	assert(remove_calls == calls + 1U);
 	assert(strcmp(last_selector, "/dev/sda2") == 0);
-	assert(system_swap_device_ioctl(0, (uintptr_t)&control, 1) ==
+	assert(drv_system_swap_device_ioctl(0, (uintptr_t)&control, 1) ==
 	    EOPNOTSUPP);
 }
 
@@ -173,26 +173,26 @@ test_query_validation(void)
 	struct system_swap_source_info before;
 	unsigned index;
 
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    BAD_ADDRESS, 0) == EFAULT);
 	query_init(&query, 0);
 	query.version++;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == EINVAL);
 	query_init(&query, 0);
 	query.struct_size--;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == EINVAL);
 	query_init(&query, 0);
 	query.flags = 1;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == EINVAL);
 	query_init(&query, ZEDBSD_SYSTEM_SWAP_SOURCE_COUNT);
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == EINVAL);
 	query_init(&query, 0);
 	query.reserved[0] = 1;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == EINVAL);
 	assert(get_calls == 0);
 
@@ -201,11 +201,11 @@ test_query_validation(void)
 	memset(query.source, 0x5a, sizeof(query.source));
 	get_result = EINTR;
 	before = query;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == EINTR);
 	assert(memcmp(&query, &before, sizeof(query)) == 0);
 	get_result = 0;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == 0);
 	assert(query.version == ZEDBSD_SYSTEM_SWAP_VERSION);
 	assert(query.struct_size == sizeof(query));
@@ -223,30 +223,30 @@ test_query_validation(void)
 
 	get_state = SWAP_SOURCE_STATE_PREPARED;
 	query_init(&query, 0);
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == 0);
 	assert(query.state == ZEDBSD_SYSTEM_SWAP_STATE_INACTIVE);
 	get_state = SWAP_SOURCE_STATE_DRAINING;
 	query_init(&query, 0);
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == 0);
 	assert(query.state == ZEDBSD_SYSTEM_SWAP_STATE_DRAINING);
 	get_state = SWAP_SOURCE_STATE_REMOVING;
 	query_init(&query, 0);
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == 0);
 	assert(query.state == ZEDBSD_SYSTEM_SWAP_STATE_DRAINING);
 	get_state = UINT32_MAX;
 	query_init(&query, 0);
 	before = query;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == EIO);
 	assert(memcmp(&query, &before, sizeof(query)) == 0);
 
 	get_state = SWAP_SOURCE_STATE_ACTIVE;
 	query_init(&query, 0);
 	fail_copyout = 1;
-	assert(system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
+	assert(drv_system_swap_device_ioctl(ZEDBSD_SYSTEM_GET_SWAP_SOURCE,
 	    (uintptr_t)&query, 0) == EFAULT);
 	fail_copyout = 0;
 }

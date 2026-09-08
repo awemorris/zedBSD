@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-transport-backend.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-transport-backend.h"
 
 #define TEST_BAR_SIZE                                      0x4000U
 #define TEST_GP_CNTRL                                      0x0024U
@@ -256,7 +256,7 @@ test_fixture_init(
 	profile.mac_type = INTEL_AX211_MMIO_MAC_SO;
 	profile.rf_type = INTEL_AX211_MMIO_RF_GF;
 	profile.umac_prph_offset = INTEL_AX211_MMIO_UMAC_PRPH_OFFSET;
-	assert(intel_ax211_mmio_init(&fixture->mmio, &test_mmio_ops,
+	assert(drv_intel_ax211_mmio_init(&fixture->mmio, &test_mmio_ops,
 	    &fixture->lower.pci, &profile) == INTEL_AX211_MMIO_OK);
 	fixture->dma.device = &fixture->device;
 	fixture->dma.boot_prepared = 1U;
@@ -280,7 +280,7 @@ test_fixture_init(
 	    sizeof(fixture->memory.rx_completion), 0x500000U);
 	test_buffer_init(&fixture->dma.rx_status, fixture->memory.rx_status,
 	    sizeof(fixture->memory.rx_status), 0x600000U);
-	assert(intel_ax211_transport_backend_init(&fixture->backend,
+	assert(drv_intel_ax211_transport_backend_init(&fixture->backend,
 	    &fixture->mmio, &fixture->lower.pci, &fixture->dma) ==
 	    INTEL_AX211_TRANSPORT_BACKEND_OK);
 }
@@ -320,7 +320,7 @@ test_init_and_ring_view(void)
 
 	test_fixture_init(&fixture);
 	memset(&memory, 0, sizeof(memory));
-	assert(intel_ax211_transport_backend_ring_memory(&fixture.backend,
+	assert(drv_intel_ax211_transport_backend_ring_memory(&fixture.backend,
 	    &memory) == INTEL_AX211_TRANSPORT_BACKEND_OK);
 	assert(memory.command_tfd == fixture.memory.command_tfd);
 	assert(memory.command_byte_count == fixture.memory.command_byte_count);
@@ -333,14 +333,14 @@ test_init_and_ring_view(void)
 	assert(memory.rx_transfer == fixture.memory.rx_transfer);
 	assert(memory.rx_completion == fixture.memory.rx_completion);
 	assert(memory.rx_status == fixture.memory.rx_status);
-	assert(intel_ax211_transport_init(&transport,
-	    intel_ax211_transport_backend_ops(), &fixture.backend,
+	assert(drv_intel_ax211_transport_init(&transport,
+	    drv_intel_ax211_transport_backend_ops(), &fixture.backend,
 	    &fixture.mmio.profile, &memory) == INTEL_AX211_TRANSPORT_OK);
 
 	memset(&memory, 0xa5, sizeof(memory));
 	snapshot = memory;
 	fixture.dma.rx_status.size--;
-	assert(intel_ax211_transport_backend_ring_memory(&fixture.backend,
+	assert(drv_intel_ax211_transport_backend_ring_memory(&fixture.backend,
 	    &memory) == INTEL_AX211_TRANSPORT_BACKEND_NOT_READY);
 	assert(memcmp(&memory, &snapshot, sizeof(memory)) == 0);
 	fixture.dma.rx_status.size++;
@@ -348,28 +348,28 @@ test_init_and_ring_view(void)
 	memset(&output, 0x5a, sizeof(output));
 	output_snapshot = output;
 	fixture.mmio.argument = NULL;
-	assert(intel_ax211_transport_backend_init(&output, &fixture.mmio,
+	assert(drv_intel_ax211_transport_backend_init(&output, &fixture.mmio,
 	    &fixture.lower.pci, &fixture.dma) ==
 	    INTEL_AX211_TRANSPORT_BACKEND_INVALID);
 	assert(memcmp(&output, &output_snapshot, sizeof(output)) == 0);
 	fixture.mmio.argument = &fixture.lower.pci;
 	fixture.device.coherent = 0;
-	assert(intel_ax211_transport_backend_init(&output, &fixture.mmio,
+	assert(drv_intel_ax211_transport_backend_init(&output, &fixture.mmio,
 	    &fixture.lower.pci, &fixture.dma) ==
 	    INTEL_AX211_TRANSPORT_BACKEND_NOT_COHERENT);
 	fixture.device.coherent = 1;
 	fixture.dma.command_slots.device_address++;
-	assert(intel_ax211_transport_backend_init(&output, &fixture.mmio,
+	assert(drv_intel_ax211_transport_backend_init(&output, &fixture.mmio,
 	    &fixture.lower.pci, &fixture.dma) ==
 	    INTEL_AX211_TRANSPORT_BACKEND_NOT_READY);
 	fixture.dma.command_slots.device_address--;
 	fixture.dma.command_external.device_address++;
-	assert(intel_ax211_transport_backend_init(&output, &fixture.mmio,
+	assert(drv_intel_ax211_transport_backend_init(&output, &fixture.mmio,
 	    &fixture.lower.pci, &fixture.dma) ==
 	    INTEL_AX211_TRANSPORT_BACKEND_NOT_READY);
 	fixture.dma.command_external.device_address--;
 	fixture.dma.boot_prepared = 0U;
-	assert(intel_ax211_transport_backend_init(&output, &fixture.mmio,
+	assert(drv_intel_ax211_transport_backend_init(&output, &fixture.mmio,
 	    &fixture.lower.pci, &fixture.dma) ==
 	    INTEL_AX211_TRANSPORT_BACKEND_NOT_READY);
 }
@@ -383,7 +383,7 @@ test_csr_and_byte_write(void)
 	unsigned int reads;
 
 	test_fixture_init(&fixture);
-	ops = intel_ax211_transport_backend_ops();
+	ops = drv_intel_ax211_transport_backend_ops();
 	assert(ops != NULL);
 	assert(ops->csr_write32(&fixture.backend, 0x20U, 0x11223344U) == 0);
 	assert(test_register_read(&fixture, 0x20U) == 0x11223344U);
@@ -422,7 +422,7 @@ test_clock_delay_and_trace(void)
 	uint64_t now;
 
 	test_fixture_init(&fixture);
-	ops = intel_ax211_transport_backend_ops();
+	ops = drv_intel_ax211_transport_backend_ops();
 	fixture.lower.clock_value = 10U;
 	assert(ops->clock_us(&fixture.backend, &now) == 0 && now == 10U);
 	fixture.lower.clock_value = 20U;
@@ -458,7 +458,7 @@ test_nic_and_prph_delegation(void)
 	uint32_t value;
 
 	test_fixture_init(&fixture);
-	ops = intel_ax211_transport_backend_ops();
+	ops = drv_intel_ax211_transport_backend_ops();
 	fixture.mmio.apm_ready = 1;
 	ready = TEST_GP_MAC_CLOCK_READY;
 	*(uint32_t *)((uint8_t *)fixture.registers + TEST_GP_CNTRL) = ready;
@@ -491,7 +491,7 @@ test_dma_region_fences(void)
 	struct test_fixture fixture;
 
 	test_fixture_init(&fixture);
-	ops = intel_ax211_transport_backend_ops();
+	ops = drv_intel_ax211_transport_backend_ops();
 	io_rmb_count = 0U;
 	io_wmb_count = 0U;
 	assert(ops->dma_sync(&fixture.backend,

@@ -67,14 +67,14 @@ blocking_callback(void *context, const struct input_report *report)
 static void *
 publisher(void *argument)
 {
-	input_subscriber_publish(argument);
+	drv_input_subscriber_publish(argument);
 	return NULL;
 }
 
 static void *
 remover(void *argument)
 {
-	input_unsubscribe(argument);
+	drv_input_unsubscribe(argument);
 	atomic_store_explicit(&removal_returned, 1, memory_order_release);
 	return NULL;
 }
@@ -87,21 +87,21 @@ test_subscriber_join(void)
 	pthread_t publish_thread, remove_thread;
 	unsigned ordinary_count = 0;
 
-	input_subscriber_init();
-	assert(input_subscribe(NULL, count_callback, &ordinary_count) == EINVAL);
-	assert(input_subscribe(&subscription, NULL, &ordinary_count) == EINVAL);
-	assert(input_subscribe(&subscription, count_callback,
+	drv_input_subscriber_init();
+	assert(drv_input_subscribe(NULL, count_callback, &ordinary_count) == EINVAL);
+	assert(drv_input_subscribe(&subscription, NULL, &ordinary_count) == EINVAL);
+	assert(drv_input_subscribe(&subscription, count_callback,
 	    &ordinary_count) == 0);
-	assert(input_subscribe(&subscription, count_callback,
+	assert(drv_input_subscribe(&subscription, count_callback,
 	    &ordinary_count) == EBUSY);
-	input_subscriber_publish(&report);
+	drv_input_subscriber_publish(&report);
 	assert(ordinary_count == 1);
-	input_unsubscribe(&subscription);
-	input_subscriber_publish(&report);
+	drv_input_unsubscribe(&subscription);
+	drv_input_subscriber_publish(&report);
 	assert(ordinary_count == 1);
 
 	memset(&subscription, 0, sizeof(subscription));
-	assert(input_subscribe(&subscription, blocking_callback, NULL) == 0);
+	assert(drv_input_subscribe(&subscription, blocking_callback, NULL) == 0);
 	atomic_store(&callback_entered, 0);
 	atomic_store(&callback_release, 0);
 	atomic_store(&removal_returned, 0);
@@ -117,7 +117,7 @@ test_subscriber_join(void)
 	assert(pthread_join(publish_thread, NULL) == 0);
 	assert(pthread_join(remove_thread, NULL) == 0);
 	assert(atomic_load(&removal_returned) == 1 && callback_count == 1);
-	input_subscriber_publish(&report);
+	drv_input_subscriber_publish(&report);
 	assert(callback_count == 1);
 }
 
@@ -144,23 +144,23 @@ test_two_keyboards(void)
 
 	for (index = 0; index < sizeof(shifted) - 1U; index++) {
 		char symbol[2] = {shifted[index], '\0'};
-		assert(input_key_from_symbol(symbol) == digits[index]);
+		assert(drv_input_key_from_symbol(symbol) == digits[index]);
 	}
 
-	input_keymap_init(&first);
-	input_keymap_init(&second);
+	drv_input_keymap_init(&first);
+	drv_input_keymap_init(&second);
 	key_event(&event, "leftshift", HAL_KEY_EVENT_PRESS);
-	assert(input_keymap_translate(&first, &event, &translated));
+	assert(drv_input_keymap_translate(&first, &event, &translated));
 	key_event(&event, "a", HAL_KEY_EVENT_PRESS);
-	assert(input_keymap_translate(&second, &event, &translated));
+	assert(drv_input_keymap_translate(&second, &event, &translated));
 	assert((translated & INPUT_KEY_MASK) == 'a');
 	assert((translated & INPUT_KEY_SHIFT) == 0);
 	key_event(&event, "a", HAL_KEY_EVENT_PRESS);
-	assert(input_keymap_translate(&first, &event, &translated));
+	assert(drv_input_keymap_translate(&first, &event, &translated));
 	assert((translated & INPUT_KEY_MASK) == 'A');
 	memset(&first, 0, sizeof(first)); /* Detach clears only this source. */
 	key_event(&event, "b", HAL_KEY_EVENT_PRESS);
-	assert(input_keymap_translate(&second, &event, &translated));
+	assert(drv_input_keymap_translate(&second, &event, &translated));
 	assert((translated & INPUT_KEY_MASK) == 'b');
 }
 
@@ -170,7 +170,7 @@ key_down(const struct input_capability_state *state, unsigned code)
 	const uint8_t *bits;
 	size_t size;
 	unsigned long word;
-	assert(input_capability_key_state(state, &bits, &size) == 0);
+	assert(drv_input_capability_key_state(state, &bits, &size) == 0);
 	assert((code / INPUT_BITS_PER_WORD + 1U) * sizeof(word) <= size);
 	memcpy(&word, bits + code / INPUT_BITS_PER_WORD * sizeof(word),
 	    sizeof(word));
@@ -186,15 +186,15 @@ test_two_pointers_and_momentary(void)
 	struct input_capability_state first, second;
 	struct input_report report = {0};
 
-	assert(input_capability_state_init(&first, capabilities,
+	assert(drv_input_capability_state_init(&first, capabilities,
 	    sizeof(capabilities) / sizeof(capabilities[0]), NULL, 0) == 0);
-	assert(input_capability_state_init(&second, capabilities,
+	assert(drv_input_capability_state_init(&second, capabilities,
 	    sizeof(capabilities) / sizeof(capabilities[0]), NULL, 0) == 0);
-	assert(input_capability_event(&first, EV_KEY, BTN_LEFT, 1));
-	assert(input_capability_event(&second, EV_KEY, BTN_RIGHT, 1));
+	assert(drv_input_capability_event(&first, EV_KEY, BTN_LEFT, 1));
+	assert(drv_input_capability_event(&second, EV_KEY, BTN_RIGHT, 1));
 	assert(key_down(&first, BTN_LEFT) && !key_down(&first, BTN_RIGHT));
 	assert(!key_down(&second, BTN_LEFT) && key_down(&second, BTN_RIGHT));
-	assert(input_capability_event(&first, EV_KEY, BTN_LEFT, 0));
+	assert(drv_input_capability_event(&first, EV_KEY, BTN_LEFT, 0));
 	assert(!key_down(&first, BTN_LEFT) && key_down(&second, BTN_RIGHT));
 
 	/* A character-only adapter publishes one indivisible report. */
@@ -220,11 +220,11 @@ test_reader_overflow(void)
 	struct input_event output[4];
 	size_t count;
 
-	input_queue_init(&queue);
-	input_queue_reader_init(&queue, &reader);
+	drv_input_queue_init(&queue);
+	drv_input_queue_reader_init(&queue, &reader);
 	for (unsigned index = 0; index < INPUT_QUEUE_CAPACITY + 9U; index++)
-		input_queue_push(&queue, &event);
-	count = input_queue_read(&queue, &reader, output,
+		drv_input_queue_push(&queue, &event);
+	count = drv_input_queue_read(&queue, &reader, output,
 	    sizeof(output) / sizeof(output[0]));
 	assert(count == 4);
 	assert(output[0].type == EV_SYN && output[0].code == SYN_DROPPED);

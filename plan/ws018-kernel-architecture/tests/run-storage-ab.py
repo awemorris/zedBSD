@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Four real kernel builds + xHCI USB-root guests; restore defaults afterwards."""
+__import__('runpy').run_path(str(__import__('pathlib').Path(__file__).resolve().parents[3] / 'plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py'), run_name='__main__')
 from pathlib import Path
 import json
 import re
@@ -31,6 +32,6 @@ try:
         (out / "results.json").write_text(json.dumps(results,indent=2) + "\n")
 finally:
     with (out / "restore-build.log").open("w") as log:
-        subprocess.run([*base,"-W","src/kern/syscall.c","-W","src/drivers/pci-xhci.c",
+        subprocess.run([*base,"-W","src/kern/syscall.c","-W","plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/pci-xhci.c",
                         "disk-image","q086-native-fixture"],cwd=REPO,stdout=log,stderr=subprocess.STDOUT,check=True)
 print("S44 PASS four real kernel/USB-root cells; production defaults restored", flush=True)

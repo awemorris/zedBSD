@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-rtl8822bu.XXXXXX")
@@ -8,7 +9,7 @@ trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 cc=${CC:-cc}
 common="-std=c11 -Wall -Wextra -Werror -pthread -I$repo/plan/ws004-hardware/tests/host-include -I$repo/include -I$repo/include/uapi"
 source=$repo/plan/ws004-hardware/tests/usb-rtl8822bu-driver-test.c
-security=$repo/src/drivers/rtl8822b-security.c
+security=$repo/src/drivers/wifi/rtl8822b/rtl8822b-security.c
 
 # shellcheck disable=SC2086
 $cc $common "$source" "$security" -o "$temporary/driver-test"

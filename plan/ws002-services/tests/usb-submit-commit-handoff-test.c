@@ -122,7 +122,7 @@ main(int argc, char **argv)
 	const char *cursor, *end;
 
 	if (argc != 2) {
-		fprintf(stderr, "usage: %s src/drivers/usb.c\n", argv[0]);
+		fprintf(stderr, "usage: %s src/drivers/usb/usb.c\n", argv[0]);
 		return 2;
 	}
 	if (!old.deadlocked || old.finished || !old.submit_pending) {

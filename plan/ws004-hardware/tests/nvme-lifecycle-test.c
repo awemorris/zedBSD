@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
-#include "drivers/pci-nvme-lifecycle.h"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/pci-nvme-lifecycle.h"
 
 #include <assert.h>
 #include <errno.h>

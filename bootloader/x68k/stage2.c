@@ -2,7 +2,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
 #include "bootloader/x68k/boot-layout.h"
-#include "drivers/x68k-mb89352.h"
+#include "drivers/platform/x68k/x68k-mb89352.h"
 #include "kern/boot.h"
 #include "kern/elf.h"
 
@@ -96,7 +96,7 @@ read_sectors(uint32_t lba, uint32_t blocks, uint32_t scsi_id, void *buffer)
 	struct x68k_spc_result result;
 	if (blocks == 0 || blocks > 127U || lba > 0x7fffffffU)
 		return -1;
-	return x68k_spc_pio_read10(&stage2_spc_bus, spc_initiator_id,
+	return drv_x68k_spc_pio_read10(&stage2_spc_bus, spc_initiator_id,
 	    scsi_id, 0U, lba, blocks, buffer, &result);
 }
 
@@ -323,7 +323,7 @@ x68k_stage2_main(uint32_t scsi_id, const struct x68k_boot_manifest *manifest)
 	x68k_iocs_print("Z68:BOOT2\r\n");
 	spc_initiator_id = *(const volatile uint8_t *)X68K_SRAM_SCSI_ID & 7U;
 	if (spc_initiator_id == scsi_id ||
-	    x68k_spc_pio_init(&stage2_spc_bus, spc_initiator_id) != X68K_SPC_OK)
+	    drv_x68k_spc_pio_init(&stage2_spc_bus, spc_initiator_id) != X68K_SPC_OK)
 		x68k_iocs_fatal("zedBSD S2 SPC PIO\r\n");
 	if (check_kernel_crc(manifest, scsi_id) != 0)
 		x68k_iocs_fatal("zedBSD S2 KERNEL CRC\r\n");

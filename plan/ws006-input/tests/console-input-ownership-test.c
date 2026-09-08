@@ -11,12 +11,12 @@
 #include <stdio.h>
 #include <string.h>
 
-void console_input_ownership_test_reset(void);
-void console_input_ownership_test_publish(const struct input_report *);
-int console_input_ownership_test_pop(uint32_t *, unsigned *, unsigned *);
-int console_input_ownership_test_state(struct input_device *, unsigned,
+void drv_console_input_ownership_test_reset(void);
+void drv_console_input_ownership_test_publish(const struct input_report *);
+int drv_console_input_ownership_test_pop(uint32_t *, unsigned *, unsigned *);
+int drv_console_input_ownership_test_state(struct input_device *, unsigned,
     unsigned *, unsigned *, unsigned *, uint16_t *, int *);
-void console_input_ownership_test_drain(int);
+void drv_console_input_ownership_test_drain(int);
 
 static unsigned hal_drain_calls;
 
@@ -98,7 +98,7 @@ expect_dispatch(uint32_t expected_key, unsigned expected_id,
 	uint32_t translated;
 	unsigned id, repeat;
 
-	assert(console_input_ownership_test_pop(&translated, &id, &repeat));
+	assert(drv_console_input_ownership_test_pop(&translated, &id, &repeat));
 	assert((translated & INPUT_KEY_MASK) == expected_key);
 	assert(id == expected_id && repeat == expected_repeat);
 }
@@ -112,49 +112,49 @@ test_state_only_resync(void)
 	uint16_t active;
 	int resyncing;
 
-	console_input_ownership_test_reset();
+	drv_console_input_ownership_test_reset();
 	report = marker(device, 11, INPUT_REPORT_RESYNC_BEGIN |
 	    INPUT_REPORT_LOCK_CAPS | INPUT_REPORT_LOCK_KANA);
-	console_input_ownership_test_publish(&report);
+	drv_console_input_ownership_test_publish(&report);
 	report = key_report(device, 11, "leftshift", KEY_LEFTSHIFT, 1,
 	    HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_SNAPSHOT,
 	    INPUT_REPORT_SNAPSHOT);
-	console_input_ownership_test_publish(&report);
+	drv_console_input_ownership_test_publish(&report);
 	report = key_report(device, 11, "capslock", KEY_CAPSLOCK, 1,
 	    HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_SNAPSHOT,
 	    INPUT_REPORT_SNAPSHOT);
-	console_input_ownership_test_publish(&report);
+	drv_console_input_ownership_test_publish(&report);
 	report = key_report(device, 11, "kana", KEY_RESERVED, 1,
 	    HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_SNAPSHOT,
 	    INPUT_REPORT_SNAPSHOT);
-	console_input_ownership_test_publish(&report);
+	drv_console_input_ownership_test_publish(&report);
 	report = key_report(device, 11, "jis-2", KEY_2, 1,
 	    HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_SNAPSHOT,
 	    INPUT_REPORT_SNAPSHOT);
-	console_input_ownership_test_publish(&report);
-	assert(!console_input_ownership_test_pop(NULL, NULL, NULL));
-	assert(console_input_ownership_test_state(device, KEY_2, &caps, &kana,
+	drv_console_input_ownership_test_publish(&report);
+	assert(!drv_console_input_ownership_test_pop(NULL, NULL, NULL));
+	assert(drv_console_input_ownership_test_state(device, KEY_2, &caps, &kana,
 	    &shift, &active, &resyncing));
 	assert(caps == 1 && kana == 1 && shift == 1 && active == '"' &&
 	    resyncing == 1);
 	report = marker(device, 11, INPUT_REPORT_RESYNC_END);
-	console_input_ownership_test_publish(&report);
-	assert(!console_input_ownership_test_pop(NULL, NULL, NULL));
+	drv_console_input_ownership_test_publish(&report);
+	assert(!drv_console_input_ownership_test_pop(NULL, NULL, NULL));
 
 	/* A modifier change makes repeat use and remember current translation. */
 	report = key_report(device, 11, "leftshift", KEY_LEFTSHIFT, 0,
 	    HAL_KEY_EVENT_RELEASE, 0);
-	console_input_ownership_test_publish(&report);
+	drv_console_input_ownership_test_publish(&report);
 	expect_dispatch(INPUT_KEY_SHIFT_SYMBOL, 11, 0);
 	report = key_report(device, 11, "jis-2", KEY_2, 2,
 	    HAL_KEY_EVENT_REPEAT, 0);
-	console_input_ownership_test_publish(&report);
+	drv_console_input_ownership_test_publish(&report);
 	expect_dispatch('2', 11, 1);
 	report = key_report(device, 11, "jis-2", KEY_2, 0,
 	    HAL_KEY_EVENT_RELEASE, 0);
-	console_input_ownership_test_publish(&report);
+	drv_console_input_ownership_test_publish(&report);
 	expect_dispatch('2', 11, 0);
-	assert(console_input_ownership_test_state(device, KEY_2, &caps, &kana,
+	assert(drv_console_input_ownership_test_state(device, KEY_2, &caps, &kana,
 	    &shift, &active, &resyncing));
 	assert(caps == 1 && kana == 1 && shift == 0 && active == 0 &&
 	    resyncing == 0);
@@ -168,22 +168,22 @@ test_console_only_detach_and_drain(void)
 	uint32_t translated;
 	unsigned id, repeat;
 
-	console_input_ownership_test_reset();
+	drv_console_input_ownership_test_reset();
 	report = key_report(device, 22, "jis-yen", KEY_RESERVED, 1,
 	    HAL_KEY_EVENT_PRESS, 0);
-	console_input_ownership_test_publish(&report);
+	drv_console_input_ownership_test_publish(&report);
 	expect_dispatch('\\', 22, 0);
 	report = marker(device, 22, INPUT_REPORT_DETACH);
-	console_input_ownership_test_publish(&report);
-	assert(console_input_ownership_test_pop(&translated, &id, &repeat));
+	drv_console_input_ownership_test_publish(&report);
+	assert(drv_console_input_ownership_test_pop(&translated, &id, &repeat));
 	assert((translated & INPUT_KEY_MASK) == '\\');
 	assert((translated & INPUT_KEY_RELEASE) != 0);
 	assert(id == 22 && repeat == 0);
 
 	hal_drain_calls = 0;
-	console_input_ownership_test_drain(1);
+	drv_console_input_ownership_test_drain(1);
 	assert(hal_drain_calls == 0);
-	console_input_ownership_test_drain(0);
+	drv_console_input_ownership_test_drain(0);
 	assert(hal_drain_calls == 1);
 }
 

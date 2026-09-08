@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -90,7 +88,7 @@ static struct spinlock claim_lock = {
  */
 struct thread;
 extern struct thread *thread_current(void) __attribute__((weak));
-extern int fat_file_backing_identity(struct inode *, struct disk **, uint64_t *) __attribute__((weak));
+extern int drv_fat_file_backing_identity(struct inode *, struct disk **, uint64_t *) __attribute__((weak));
 
 /*
  * Before the scheduler publishes a current thread, the kernel
@@ -326,6 +324,7 @@ backing_claim_finalize(
 		if (ranges == NULL)
 			return ENOMEM;
 
+		/* Resolves every extent to a range of the canonical device. */
 		for (i = 0; i < count; i++) {
 			error = canonical_range(
 				extents[i].disk,
@@ -355,6 +354,7 @@ backing_claim_finalize(
 		if (existing == NULL || existing == claim)
 			continue;
 
+		/* Refuses an extent that another claim already covers. */
 		for (j = 0; j < count; j++) {
 			for (k = 0; k < existing->range_count; k++) {
 				if (range_overlap(&ranges[j], &existing->ranges[k])) {
@@ -372,6 +372,7 @@ backing_claim_finalize(
 		    !mutations[i].range_valid)
 			continue;
 
+		/* Refuses an extent a reserved raw mutation already covers. */
 		for (j = 0; j < count; j++) {
 			if (range_overlap(&ranges[j], &mutations[i].range)) {
 				error = EBUSY;
@@ -524,19 +525,25 @@ out_locked:
 }
 
 /*
- * Withdraws a claim and frees its record.
+ * Retains a claim already owned by the caller across deferred I/O.
  *
- * A NULL claim is ignored so that error paths can release unconditionally.
+ * A NULL claim is ignored so that a caller may retain unconditionally.
  */
-/* Retains a claim already owned by the caller across deferred I/O. */
 void
 backing_claim_ref(
 	const struct backing_claim *claim)
 {
+	/* Counts one more owner of an existing claim. */
 	if (claim != NULL)
 		refcount_get(&((struct backing_claim *)claim)->refs);
 }
 
+/*
+ * Withdraws a claim and frees its record.
+ *
+ * A NULL claim is ignored so that error paths can release unconditionally.
+ * The record is unregistered and freed only when the last owner leaves.
+ */
 void
 backing_claim_release(
 	struct backing_claim *claim)
@@ -666,9 +673,12 @@ backing_mutation_begin_retired_disk(
 {
 	struct backing_range range;
 
+	/* Only a whole device whose media is gone may be reserved this way. */
 	if (disk == NULL || disk->d_parent != NULL || disk->d_block_count == 0 ||
 	    !atomic_raw_load_acquire(&disk->d_media_revoked))
 		return EINVAL;
+
+	/* Reserves the whole device. */
 	range.leaf = disk;
 	range.first = 0;
 	range.last = disk->d_block_count;
@@ -928,12 +938,12 @@ inode_key(
 		return EOPNOTSUPP;
 
 	/* Rejects a file outside FAT. */
-	if (inode->i_mount->m_type != &fat_filesystem_type)
+	if (inode->i_mount->m_type != &drv_fat_filesystem_type)
 		return EOPNOTSUPP;
 
 	/* Resolves the file identity through the FAT helper when present. */
-	if (fat_file_backing_identity != NULL) {
-		error = fat_file_backing_identity(inode, &disk, &object);
+	if (drv_fat_file_backing_identity != NULL) {
+		error = drv_fat_file_backing_identity(inode, &disk, &object);
 	} else {
 		/*
 		 * Compatibility for focused host fixtures that predate the FAT
@@ -1201,6 +1211,7 @@ mutation_reserve(
 			    mutations[i].owner == NULL)
 				continue;
 
+			/* Keeps the newest mutation of the same volume. */
 			br.leaf = mutations[i].key.leaf;
 			br.first = mutations[i].key.volume_first;
 			br.last = mutations[i].key.volume_last;
@@ -1300,6 +1311,7 @@ mutation_reserve(
 				goto out;
 			}
 
+			/* Refuses a range this claim already covers. */
 			for (j = 0; j < claim->range_count; j++) {
 				if (range_overlap(range, &claim->ranges[j])) {
 					error = EBUSY;
@@ -1307,6 +1319,7 @@ mutation_reserve(
 				}
 			}
 		} else if (range != NULL) {
+			/* Refuses a raw range any foreign claim covers. */
 			for (j = 0; j < claim->range_count; j++) {
 				if (range_overlap(range, &claim->ranges[j])) {
 					error = EBUSY;

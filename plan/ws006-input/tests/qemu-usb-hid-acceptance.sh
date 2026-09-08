@@ -213,7 +213,7 @@ for cell in $cells; do
 done
 
 source_ready=yes
-[[ -f $repo/src/drivers/usb-hid.c ]] || source_ready=no
+[[ -f $repo/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/usb-hid.c ]] || source_ready=no
 [[ -f $repo/include/drivers/usb-hid.h ]] || source_ready=no
 rg -q 'CONFIG_DRIVER_USB_HID' "$repo/Makefile" || source_ready=no
 rg -q 'src/drivers/usb-hid[.]c' "$repo/platform/amd64/vmunix.mk" || source_ready=no

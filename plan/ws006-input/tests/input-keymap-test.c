@@ -25,7 +25,7 @@ key_event(const char *symbol, uint32_t flags)
 static void
 expect_evdev(const char *symbol, uint16_t expected)
 {
-	uint16_t actual = input_key_from_symbol(symbol);
+	uint16_t actual = drv_input_key_from_symbol(symbol);
 
 	if (actual != expected) {
 		fprintf(stderr, "IN-T20: %s: got %u, expected %u\n", symbol,
@@ -41,7 +41,7 @@ expect_tty(struct input_keymap_state *state, const char *symbol,
 	struct hal_key_event event = key_event(symbol, flags);
 	uint32_t actual = 0;
 
-	if (!input_keymap_translate(state, &event, &actual) ||
+	if (!drv_input_keymap_translate(state, &event, &actual) ||
 	    actual != expected) {
 		fprintf(stderr, "IN-T20: tty %s: got %#x, expected %#x\n",
 		    symbol, actual, expected);
@@ -71,7 +71,7 @@ main(void)
 	expect_evdev("f10", KEY_F10);
 	expect_evdev("unknown", KEY_RESERVED);
 
-	input_keymap_init(&state);
+	drv_input_keymap_init(&state);
 	expect_tty(&state, "leftshift", HAL_KEY_EVENT_PRESS,
 	    INPUT_KEY_SHIFT_SYMBOL | INPUT_KEY_SHIFT);
 	expect_tty(&state, "a", HAL_KEY_EVENT_PRESS, 'A' | INPUT_KEY_SHIFT);
@@ -95,7 +95,7 @@ main(void)
 
 	memset(&invalid, 'x', sizeof(invalid));
 	invalid.flags = HAL_KEY_EVENT_PRESS;
-	if (input_keymap_translate(&state, &invalid, &ignored)) {
+	if (drv_input_keymap_translate(&state, &invalid, &ignored)) {
 		fprintf(stderr, "IN-T20: unterminated symbol accepted\n");
 		return 1;
 	}

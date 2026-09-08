@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "src/drivers/fs/ufs/ufs-consistency.h"
+#include "../temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-consistency.h"
 #define SECTOR 512U
 #define SECTORS 64U
 #define FIRST 40U
@@ -62,8 +62,8 @@ static struct ufs_journal_io io={NULL,read_media,write_media,flush_media};
 static int test_init(struct ufs_journal *j,const struct ufs_journal_io *callbacks,
  uint64_t first,uint32_t count,uint64_t homes)
 {
- int error=ufs_journal_init(j,callbacks,first,count,homes);
- if(!error && use_image)error=ufs_journal_bind_image(j,redo_image,sizeof(redo_image));
+ int error=drv_ufs_journal_init(j,callbacks,first,count,homes);
+ if(!error && use_image)error=drv_ufs_journal_bind_image(j,redo_image,sizeof(redo_image));
  return error;
 }
 static void remount(void)
@@ -78,19 +78,19 @@ static void run_cut(unsigned old_count,unsigned new_count,unsigned stop,unsigned
  cut=0;mode=0;operations=0;commit_written=0;commit_durable=0;
  memset(stable,0,sizeof(stable));memset(cache,0,sizeof(cache));
  CHECK(test_init(&journal,&io,FIRST,COUNT,FIRST-1)==0);
- CHECK(ufs_journal_commit(&journal,4,payload,old_count)==0);
+ CHECK(drv_ufs_journal_commit(&journal,4,payload,old_count)==0);
  memcpy(saved,stable,sizeof(saved));
- remount();CHECK(ufs_journal_replay(&journal)==0);
+ remount();CHECK(drv_ufs_journal_replay(&journal)==0);
  cut=stop;mode=persistence;operations=0;commit_written=0;commit_durable=0;
- if(setjmp(power_loss)==0)CHECK(ufs_journal_commit(&journal,12,payload,new_count)==0);
+ if(setjmp(power_loss)==0)CHECK(drv_ufs_journal_commit(&journal,12,payload,new_count)==0);
  committed=commit_durable;written=commit_written;
  /* Recovery has reliable I/O, and a second remount must be idempotent. */
- cut=0;mode=0;remount();error=ufs_journal_replay(&journal);
+ cut=0;mode=0;remount();error=drv_ufs_journal_replay(&journal);
  CHECK(error==0 || error==EIO);
  if(error==0) {
   if(!written)CHECK(memcmp(stable[12],saved[12],new_count*SECTOR)==0);
   if(committed)CHECK(memcmp(stable[12],payload,new_count*SECTOR)==0);
-  memcpy(saved,stable,sizeof(saved));remount();CHECK(ufs_journal_replay(&journal)==0);
+  memcpy(saved,stable,sizeof(saved));remount();CHECK(drv_ufs_journal_replay(&journal)==0);
   CHECK(memcmp(stable,saved,sizeof(stable))==0);
  }
  /* A committed home target from the previous mount is never rolled back. */
@@ -103,7 +103,7 @@ static void prepare_replay(void)
  memset(stable,0,sizeof(stable));memset(cache,0,sizeof(cache));
  CHECK(test_init(&journal,&io,FIRST,COUNT,FIRST-1)==0);
  if(setjmp(power_loss)==0) {
-  (void)ufs_journal_commit(&journal,12,payload,3);
+  (void)drv_ufs_journal_commit(&journal,12,payload,3);
   CHECK(0);
  }
  stop_commit=0;CHECK(commit_durable);memcpy(replay_base,stable,sizeof(stable));
@@ -112,10 +112,10 @@ static void replay_cut(unsigned stop,unsigned persistence)
 {
  memcpy(stable,replay_base,sizeof(stable));remount();
  cut=stop;mode=persistence;operations=0;commit_written=0;commit_durable=0;
- if(setjmp(power_loss)==0)CHECK(ufs_journal_replay(&journal)==0);
- cut=0;mode=0;remount();CHECK(ufs_journal_replay(&journal)==0);
+ if(setjmp(power_loss)==0)CHECK(drv_ufs_journal_replay(&journal)==0);
+ cut=0;mode=0;remount();CHECK(drv_ufs_journal_replay(&journal)==0);
  CHECK(memcmp(stable[12],payload,3*SECTOR)==0);
- memcpy(saved,stable,sizeof(saved));remount();CHECK(ufs_journal_replay(&journal)==0);
+ memcpy(saved,stable,sizeof(saved));remount();CHECK(drv_ufs_journal_replay(&journal)==0);
  CHECK(memcmp(stable,saved,sizeof(stable))==0);
 }
 static struct ufs_journal_extent group[3];
@@ -125,9 +125,9 @@ static void group_cut(unsigned stop,unsigned persistence)
  cut=0;mode=0;operations=0;commit_written=0;commit_durable=0;stop_commit=0;
  memset(stable,0,sizeof(stable));remount();
  cut=stop;mode=persistence;
- if(setjmp(power_loss)==0)CHECK(ufs_journal_commitv(&journal,group,3)==0);
+ if(setjmp(power_loss)==0)CHECK(drv_ufs_journal_commitv(&journal,group,3)==0);
  committed=commit_durable;written=commit_written;
- cut=0;mode=0;remount();error=ufs_journal_replay(&journal);
+ cut=0;mode=0;remount();error=drv_ufs_journal_replay(&journal);
  CHECK(error==0 || error==EIO);
  if(error==0) {
   installed=memcmp(stable[group[0].target],group[0].payload,SECTOR)==0;
@@ -136,7 +136,7 @@ static void group_cut(unsigned stop,unsigned persistence)
    if(committed)CHECK(memcmp(stable[group[index].target],group[index].payload,SECTOR)==0);
    CHECK(memcmp(stable[group[index].target],installed?group[index].payload:empty,SECTOR)==0);
   }
-  memcpy(saved,stable,sizeof(saved));remount();CHECK(ufs_journal_replay(&journal)==0);
+  memcpy(saved,stable,sizeof(saved));remount();CHECK(drv_ufs_journal_replay(&journal)==0);
   CHECK(memcmp(stable,saved,sizeof(stable))==0);
  }
 }
@@ -145,35 +145,35 @@ static void group_validation(void)
  unsigned before,index;int error;
  cut=0;mode=0;operations=0;commit_written=0;commit_durable=0;
  memset(stable,0,sizeof(stable));remount();before=operations;
- CHECK(ufs_journal_commitv(&journal,group,0)==EINVAL && operations==before);
- CHECK(ufs_journal_commitv(&journal,group,UFS_JOURNAL_EXTENTS+1)==EINVAL && operations==before);
+ CHECK(drv_ufs_journal_commitv(&journal,group,0)==EINVAL && operations==before);
+ CHECK(drv_ufs_journal_commitv(&journal,group,UFS_JOURNAL_EXTENTS+1)==EINVAL && operations==before);
  journal.next_sequence=UINT64_MAX;
- CHECK(ufs_journal_commitv(&journal,group,3)==EOVERFLOW && operations==before);
+ CHECK(drv_ufs_journal_commitv(&journal,group,3)==EOVERFLOW && operations==before);
  journal.next_sequence=1;group[0].sectors=10;
- CHECK(ufs_journal_commitv(&journal,group,3)==EINVAL && operations==before);
+ CHECK(drv_ufs_journal_commitv(&journal,group,3)==EINVAL && operations==before);
  group[0].sectors=1;
  group[1].target=group[0].target;
- CHECK(ufs_journal_commitv(&journal,group,3)==EINVAL && operations==before);
+ CHECK(drv_ufs_journal_commitv(&journal,group,3)==EINVAL && operations==before);
  group[1].target=12;group[2].target=UINT64_MAX;
- CHECK(ufs_journal_commitv(&journal,group,3)==EINVAL && operations==before);
+ CHECK(drv_ufs_journal_commitv(&journal,group,3)==EINVAL && operations==before);
  group[2].target=20;group[1].sectors=UFS_JOURNAL_GROUP_SECTORS+1;
- CHECK(ufs_journal_commitv(&journal,group,3)==EINVAL && operations==before);
+ CHECK(drv_ufs_journal_commitv(&journal,group,3)==EINVAL && operations==before);
  group[1].sectors=1;group[1].payload=NULL;
- CHECK(ufs_journal_commitv(&journal,group,3)==EINVAL && operations==before);
+ CHECK(drv_ufs_journal_commitv(&journal,group,3)==EINVAL && operations==before);
  group[1].payload=payload+SECTOR;
  /* Keep a valid committed group pending without installing any home sector. */
  stop_commit=1;
- if(setjmp(power_loss)==0){(void)ufs_journal_commitv(&journal,group,3);CHECK(0);}
+ if(setjmp(power_loss)==0){(void)drv_ufs_journal_commitv(&journal,group,3);CHECK(0);}
  stop_commit=0;memcpy(replay_base,stable,sizeof(stable));remount();before=operations;
- CHECK(ufs_journal_commitv(&journal,group,3)==EBUSY && operations==before);
+ CHECK(drv_ufs_journal_commitv(&journal,group,3)==EBUSY && operations==before);
  /* Corruption in even the last payload prevents all home installation. */
- stable[FIRST+3][73]^=1;remount();error=ufs_journal_replay(&journal);CHECK(error==EIO);
+ stable[FIRST+3][73]^=1;remount();error=drv_ufs_journal_replay(&journal);CHECK(error==EIO);
  for(index=0;index<3;index++)CHECK(get32(stable[group[index].target])==0);
  memcpy(stable,replay_base,sizeof(stable));
  /* A corrupt home target is covered by the descriptor checksum. */
- stable[FIRST][32]^=1;remount();CHECK(ufs_journal_replay(&journal)==EIO);
+ stable[FIRST][32]^=1;remount();CHECK(drv_ufs_journal_replay(&journal)==EIO);
  for(index=0;index<3;index++)CHECK(get32(stable[group[index].target])==0);
- memcpy(stable,replay_base,sizeof(stable));remount();CHECK(ufs_journal_replay(&journal)==0);
+ memcpy(stable,replay_base,sizeof(stable));remount();CHECK(drv_ufs_journal_replay(&journal)==0);
  for(index=0;index<3;index++)CHECK(memcmp(stable[group[index].target],group[index].payload,SECTOR)==0);
 }
 static void group_replay_cut(unsigned stop,unsigned persistence)
@@ -181,10 +181,10 @@ static void group_replay_cut(unsigned stop,unsigned persistence)
  unsigned index;
  memcpy(stable,replay_base,sizeof(stable));remount();
  cut=stop;mode=persistence;operations=0;commit_written=0;commit_durable=0;
- if(setjmp(power_loss)==0)CHECK(ufs_journal_replay(&journal)==0);
- cut=0;mode=0;remount();CHECK(ufs_journal_replay(&journal)==0);
+ if(setjmp(power_loss)==0)CHECK(drv_ufs_journal_replay(&journal)==0);
+ cut=0;mode=0;remount();CHECK(drv_ufs_journal_replay(&journal)==0);
  for(index=0;index<3;index++)CHECK(memcmp(stable[group[index].target],group[index].payload,SECTOR)==0);
- memcpy(saved,stable,sizeof(saved));remount();CHECK(ufs_journal_replay(&journal)==0);
+ memcpy(saved,stable,sizeof(saved));remount();CHECK(drv_ufs_journal_replay(&journal)==0);
  CHECK(memcmp(stable,saved,sizeof(stable))==0);
 }
 static void pending_reads(void)
@@ -196,16 +196,16 @@ static void pending_reads(void)
  /* The directory order need not match physical redo order. */
  group[0].target=20;group[1].target=4;group[2].target=12;
  memcpy(original,payload,sizeof(payload));
- CHECK(ufs_journal_publishv(&journal,group,3)==0);
+ CHECK(drv_ufs_journal_publishv(&journal,group,3)==0);
  CHECK(journal.pending_sequence!=0 && journal.pending_ready && !journal.pending_clearing);
  witness=journal.pending_sequence;before=operations;
- CHECK(ufs_journal_publishv(&journal,group,3)==EBUSY && operations==before);
- CHECK(ufs_journal_commitv(&journal,group,3)==EBUSY && operations==before);
+ CHECK(drv_ufs_journal_publishv(&journal,group,3)==EBUSY && operations==before);
+ CHECK(drv_ufs_journal_commitv(&journal,group,3)==EBUSY && operations==before);
  /* No caller buffer reference or home installation survives publication. */
  memset(payload,0xcd,sizeof(payload));
  for(index=0;index<3;index++)CHECK(memcmp(stable[group[index].target],empty,SECTOR)==0);
  home_before=home_reads;
- CHECK(ufs_journal_read(&journal,0,24,output)==0 && operations==before);
+ CHECK(drv_ufs_journal_read(&journal,0,24,output)==0 && operations==before);
  CHECK(home_reads-home_before==4);
  for(index=0;index<24;index++) {
   part=3;
@@ -214,71 +214,71 @@ static void pending_reads(void)
  }
  /* A failed home write retains verified redo for reads and a later retry. */
  fail_write_at=operations+1;
- CHECK(ufs_journal_checkpoint(&journal)==EIO);
+ CHECK(drv_ufs_journal_checkpoint(&journal)==EIO);
  fail_write_at=0;CHECK(journal.pending_sequence==witness && journal.pending_ready);
- CHECK(ufs_journal_read(&journal,20,1,output)==0 && memcmp(output,original,SECTOR)==0);
+ CHECK(drv_ufs_journal_read(&journal,20,1,output)==0 && memcmp(output,original,SECTOR)==0);
  /* Three home writes + home flush + descriptor clear + clear flush. */
  fail_flush_at=operations+6;
- CHECK(ufs_journal_checkpoint(&journal)==EIO);
+ CHECK(drv_ufs_journal_checkpoint(&journal)==EIO);
  fail_flush_at=0;CHECK(journal.pending_clearing && journal.pending_sequence==witness);
- CHECK(ufs_journal_read(&journal,20,1,output)==0 && memcmp(output,original,SECTOR)==0);
- before=operations;CHECK(ufs_journal_checkpoint(&journal)==0 && operations==before+2);
+ CHECK(drv_ufs_journal_read(&journal,20,1,output)==0 && memcmp(output,original,SECTOR)==0);
+ before=operations;CHECK(drv_ufs_journal_checkpoint(&journal)==0 && operations==before+2);
  CHECK(journal.pending_sequence==0 && !journal.pending_ready && !journal.pending_clearing);
  for(index=0;index<3;index++)CHECK(memcmp(stable[group[index].target],original+index*SECTOR,SECTOR)==0);
  memcpy(payload,original,sizeof(payload));
  /* An uncertain failed publication blocks visibility until explicit recovery. */
  lose_commit=1;
- CHECK(ufs_journal_publishv(&journal,group,3)==EIO);
+ CHECK(drv_ufs_journal_publishv(&journal,group,3)==EIO);
  CHECK(journal.pending_sequence!=0 && !journal.pending_ready);
- CHECK(ufs_journal_read(&journal,20,1,output)==EBUSY);
- CHECK(ufs_journal_checkpoint(&journal)==EBUSY);
- CHECK(ufs_journal_replay(&journal)==0 && journal.pending_sequence==0);
- CHECK(ufs_journal_publishv(&journal,group,3)==0);
+ CHECK(drv_ufs_journal_read(&journal,20,1,output)==EBUSY);
+ CHECK(drv_ufs_journal_checkpoint(&journal)==EBUSY);
+ CHECK(drv_ufs_journal_replay(&journal)==0 && journal.pending_sequence==0);
+ CHECK(drv_ufs_journal_publishv(&journal,group,3)==0);
  /* Losing proof of a known committed group cannot become successful boot replay. */
  memset(cache[FIRST+COUNT-1],0,SECTOR);
- CHECK(ufs_journal_replay(&journal)==EIO && journal.pending_ready);
+ CHECK(drv_ufs_journal_replay(&journal)==EIO && journal.pending_ready);
  memcpy(cache[FIRST+COUNT-1],stable[FIRST+COUNT-1],SECTOR);
- CHECK(ufs_journal_checkpoint(&journal)==0);
+ CHECK(drv_ufs_journal_checkpoint(&journal)==0);
  /* One contiguous redo range is returned with one multi-sector data read. */
  group[0].sectors=3;
- CHECK(ufs_journal_publishv(&journal,group,1)==0);max_read=0;
- CHECK(ufs_journal_read(&journal,20,3,output)==0 && max_read==3);
+ CHECK(drv_ufs_journal_publishv(&journal,group,1)==0);max_read=0;
+ CHECK(drv_ufs_journal_read(&journal,20,3,output)==0 && max_read==3);
  CHECK(memcmp(output,payload,sizeof(payload))==0);
- CHECK(ufs_journal_checkpoint(&journal)==0);group[0].sectors=1;
+ CHECK(drv_ufs_journal_checkpoint(&journal)==0);group[0].sectors=1;
 }
 static void recovery_outcome(void)
 {
  uint64_t sequence,previous;uint32_t digest,previous_digest;unsigned index;
  cut=0;mode=0;operations=0;commit_written=0;commit_durable=0;
  memset(stable,0,sizeof(stable));remount();
- CHECK(!ufs_journal_committed(&journal,0,0));
+ CHECK(!drv_ufs_journal_committed(&journal,0,0));
  /* A commit flush can report an error after the record has reached stable media. */
  fail_flush_at=9;
- CHECK(ufs_journal_publishv(&journal,group,3)==EIO);
+ CHECK(drv_ufs_journal_publishv(&journal,group,3)==EIO);
  fail_flush_at=0;sequence=journal.pending_sequence;digest=journal.pending_digest;
  CHECK(sequence!=0 && !journal.pending_ready);
- CHECK(!ufs_journal_committed(&journal,sequence,digest));
- CHECK(ufs_journal_replay(&journal)==0 && journal.pending_sequence==0);
- CHECK(ufs_journal_committed(&journal,sequence,digest));
- CHECK(!ufs_journal_committed(&journal,sequence,digest^1U));
+ CHECK(!drv_ufs_journal_committed(&journal,sequence,digest));
+ CHECK(drv_ufs_journal_replay(&journal)==0 && journal.pending_sequence==0);
+ CHECK(drv_ufs_journal_committed(&journal,sequence,digest));
+ CHECK(!drv_ufs_journal_committed(&journal,sequence,digest^1U));
  for(index=0;index<3;index++)CHECK(memcmp(stable[group[index].target],group[index].payload,SECTOR)==0);
  previous=sequence;previous_digest=digest;
  /* A later missing commit cannot inherit the preceding transaction's proof. */
  lose_commit=1;
- CHECK(ufs_journal_publishv(&journal,group,3)==EIO);
+ CHECK(drv_ufs_journal_publishv(&journal,group,3)==EIO);
  sequence=journal.pending_sequence;digest=journal.pending_digest;
- CHECK(sequence!=previous && !ufs_journal_committed(&journal,sequence,digest));
- CHECK(ufs_journal_replay(&journal)==0 && journal.pending_sequence==0);
- CHECK(!ufs_journal_committed(&journal,sequence,digest));
- CHECK(ufs_journal_committed(&journal,previous,previous_digest));
+ CHECK(sequence!=previous && !drv_ufs_journal_committed(&journal,sequence,digest));
+ CHECK(drv_ufs_journal_replay(&journal)==0 && journal.pending_sequence==0);
+ CHECK(!drv_ufs_journal_committed(&journal,sequence,digest));
+ CHECK(drv_ufs_journal_committed(&journal,previous,previous_digest));
  /* A newly verified group replaces the bounded proof; init ends its lifetime. */
- CHECK(ufs_journal_publishv(&journal,group,3)==0);
+ CHECK(drv_ufs_journal_publishv(&journal,group,3)==0);
  sequence=journal.pending_sequence;digest=journal.pending_digest;
- CHECK(ufs_journal_committed(&journal,sequence,digest));
- CHECK(!ufs_journal_committed(&journal,previous,previous_digest));
- CHECK(ufs_journal_checkpoint(&journal)==0);
- CHECK(ufs_journal_committed(&journal,sequence,digest));
- remount();CHECK(!ufs_journal_committed(&journal,sequence,digest));
+ CHECK(drv_ufs_journal_committed(&journal,sequence,digest));
+ CHECK(!drv_ufs_journal_committed(&journal,previous,previous_digest));
+ CHECK(drv_ufs_journal_checkpoint(&journal)==0);
+ CHECK(drv_ufs_journal_committed(&journal,sequence,digest));
+ remount();CHECK(!drv_ufs_journal_committed(&journal,sequence,digest));
 }
 static void image_reads(void)
 {
@@ -287,29 +287,29 @@ static void image_reads(void)
  struct ufs_journal_extent run={12,3,payload};
  cut=0;mode=0;operations=0;commit_written=0;commit_durable=0;
  memset(stable,0,sizeof(stable));remount();
- CHECK(ufs_journal_bind_image(&journal,redo_image,1)==EINVAL);
- CHECK(ufs_journal_publishv(&journal,group,3)==0);
+ CHECK(drv_ufs_journal_bind_image(&journal,redo_image,1)==EINVAL);
+ CHECK(drv_ufs_journal_publishv(&journal,group,3)==0);
  CHECK(journal.image_valid);
- CHECK(ufs_journal_bind_image(&journal,NULL,0)==EBUSY);
+ CHECK(drv_ufs_journal_bind_image(&journal,NULL,0)==EBUSY);
  memcpy(expected,payload,sizeof(expected));memset(payload,0,sizeof(payload));
  before=read_calls;
- CHECK(ufs_journal_read(&journal,group[0].target,1,result)==0);
+ CHECK(drv_ufs_journal_read(&journal,group[0].target,1,result)==0);
  CHECK(read_calls==before && memcmp(result,expected,SECTOR)==0);
  /* Checkpoint consumes exactly three extent writes and two flush boundaries. */
  before=operations;
- CHECK(ufs_journal_checkpoint(&journal)==0);
+ CHECK(drv_ufs_journal_checkpoint(&journal)==0);
  CHECK(operations-before==6 && read_calls>0 && !journal.image_valid);
  CHECK(memcmp(stable[group[0].target],expected,SECTOR)==0);
  memcpy(payload,expected,sizeof(payload));
- CHECK(ufs_journal_publishv(&journal,&run,1)==0);
+ CHECK(drv_ufs_journal_publishv(&journal,&run,1)==0);
  before=read_calls;
- CHECK(ufs_journal_read(&journal,12,3,result)==0);
+ CHECK(drv_ufs_journal_read(&journal,12,3,result)==0);
  CHECK(read_calls==before && memcmp(result,payload,sizeof(result))==0);
  before=operations;
- CHECK(ufs_journal_checkpoint(&journal)==0);
+ CHECK(drv_ufs_journal_checkpoint(&journal)==0);
  CHECK(operations-before==4); /* One three-sector home write, flush, clear, flush. */
  CHECK(memcmp(stable[12],payload,sizeof(payload))==0);
- CHECK(ufs_journal_bind_image(&journal,NULL,0)==0 && journal.image==NULL);
+ CHECK(drv_ufs_journal_bind_image(&journal,NULL,0)==0 && journal.image==NULL);
 }
 int main(void)
 {
@@ -330,7 +330,7 @@ int main(void)
   for(stop=1;stop<=8;stop++)group_replay_cut(stop,persistence);
  cut=0;mode=0;operations=0;commit_written=0;commit_durable=0;
  memset(stable,0,sizeof(stable));remount();lose_commit=1;
- CHECK(ufs_journal_commitv(&journal,group,3)==EIO);
+ CHECK(drv_ufs_journal_commitv(&journal,group,3)==EIO);
  for(index=0;index<3;index++)CHECK(memcmp(stable[group[index].target],empty,SECTOR)==0);
  pending_reads();
  recovery_outcome();

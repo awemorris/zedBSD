@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-rx.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-rx.h"
 
 #define STATUS_CRC_OK		0x00000001U
 #define STATUS_OVERRUN_OK	0x00000002U
@@ -28,15 +28,15 @@ test_api89_version(void)
 	};
 	struct intel_ax211_protocol_command_table table;
 
-	assert(intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
 	    &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_rx_api89_validate(&table) == INTEL_AX211_RX_OK);
+	assert(drv_intel_ax211_rx_api89_validate(&table) == INTEL_AX211_RX_OK);
 	bytes[3U]--;
-	assert(intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
+	assert(drv_intel_ax211_protocol_command_table_parse(bytes, sizeof(bytes),
 	    &table) == INTEL_AX211_PROTOCOL_OK);
-	assert(intel_ax211_rx_api89_validate(&table) ==
+	assert(drv_intel_ax211_rx_api89_validate(&table) ==
 	    INTEL_AX211_RX_UNSUPPORTED);
-	assert(intel_ax211_rx_api89_validate(NULL) == INTEL_AX211_RX_INVALID);
+	assert(drv_intel_ax211_rx_api89_validate(NULL) == INTEL_AX211_RX_INVALID);
 }
 
 static void
@@ -101,7 +101,7 @@ test_clear_management(void)
 	frame[0U] = 0x80U;
 	frame[24U] = 0x5aU;
 	message = make_message(payload, frame, sizeof(frame), 0U, STATUS_CLEAR);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	assert(decoded.frame == output && decoded.length == sizeof(frame));
 	assert(memcmp(output, frame, sizeof(frame)) == 0);
@@ -130,7 +130,7 @@ test_transport_alignment_padding(void)
 	message = make_message(payload, frame, sizeof(frame), 0U, STATUS_CLEAR);
 	memset(payload + message.payload_length, 0xa5U, 4U);
 	message.payload_length += 4U;
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	assert(decoded.length == sizeof(frame));
 	assert(memcmp(output, frame, sizeof(frame)) == 0);
@@ -151,7 +151,7 @@ test_tsf_overload(void)
 	put_le16(payload + 5U, PHY_INFO_TSF_OVERLOAD);
 	put_le32(payload + 44U, UINT32_C(0x76543210));
 	put_le64(payload + 48U, UINT64_C(0xfedcba9876543210));
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	assert(decoded.gp2_on_air_rise == UINT32_C(0x76543210));
 	assert(decoded.tsf == 0U);
@@ -180,7 +180,7 @@ test_padding(void)
 	memcpy(expected + 24U, padded + 26U, 4U);
 	message = make_message(payload, padded, sizeof(padded), 0x20U,
 	    STATUS_CLEAR);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	assert(decoded.length == sizeof(expected));
 	assert(memcmp(output, expected, sizeof(expected)) == 0);
@@ -207,7 +207,7 @@ test_ccmp(void)
 	message = make_message(payload, frame, sizeof(frame), 0U,
 	    STATUS_CLEAR | STATUS_MIC_OK | STATUS_CCMP | STATUS_DECRYPTED);
 	payload[2U] = 0x40U; /* Eight bytes of hardware MIC/CRC trailer. */
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	assert(decoded.length == sizeof(frame));
 	assert(decoded.cipher == INTEL_AX211_RX_CIPHER_CCMP);
@@ -242,7 +242,7 @@ test_ccmp_padding(void)
 	message = make_message(payload, padded, sizeof(padded), 0x20U,
 	    STATUS_CLEAR | STATUS_MIC_OK | STATUS_CCMP | STATUS_DECRYPTED);
 	payload[2U] = 0x40U; /* Eight bytes of hardware MIC/CRC trailer. */
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	assert(decoded.length == sizeof(expected));
 	assert(memcmp(output, expected, sizeof(expected)) == 0);
@@ -263,7 +263,7 @@ test_hardware_trailer_normalization(void)
 	frame[0U] = 0x80U;
 	message = make_message(payload, frame, 32U, 0U, STATUS_CLEAR);
 	payload[2U] = 0x20U; /* Four-byte FCS, absent from common output. */
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	assert(decoded.length == 28U);
 
@@ -281,7 +281,7 @@ test_hardware_trailer_normalization(void)
 	    STATUS_CLEAR | STATUS_MIC_OK | STATUS_CCMP | STATUS_DECRYPTED);
 	/* Firmware stripped the hardware trailer; restore the common 8-byte
 	 * verified-MIC shape without manufacturing payload bytes. */
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	assert(decoded.length == sizeof(frame) + 8U);
 	assert(memcmp(output, frame, sizeof(frame)) == 0);
@@ -300,11 +300,11 @@ test_header_shapes(void)
 	memset(frame, 0, sizeof(frame));
 	put_le16(frame, 0x8388U);
 	message = make_message(payload, frame, sizeof(frame), 0U, STATUS_CLEAR);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	put_le16(frame, 0x00d4U);
 	message = make_message(payload, frame, 10U, 0U, STATUS_CLEAR);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 }
 
@@ -320,35 +320,35 @@ test_envelope_rejections(void)
 	memset(frame, 0, sizeof(frame));
 	frame[0U] = 0x80U;
 	message = make_message(payload, frame, sizeof(frame), 0U, STATUS_CLEAR);
-	assert(intel_ax211_rx_mpdu_decode(&message, 16U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 16U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_STALE);
 	message.group = 1U;
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_UNSUPPORTED);
 	message.group = 0U;
 	message.version = 4U;
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_UNSUPPORTED);
 	message.version = INTEL_AX211_RX_MPDU_NOTIFICATION_VERSION;
 	message.flags = INTEL_AX211_PROTOCOL_COMMAND_FAILED_MASK;
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_FAILED);
 	message.flags = 0U;
 	message.payload_length = INTEL_AX211_RX_MPDU_DESCRIPTOR_SIZE - 1U;
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_TRUNCATED);
 	message.payload_length = INTEL_AX211_RX_MPDU_DESCRIPTOR_SIZE +
 	    sizeof(frame) - 1U;
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_TRUNCATED);
 	message.payload_length += 2U;
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OK);
 	message.payload_length--;
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output, 31U,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output, 31U,
 	    &decoded) == INTEL_AX211_RX_BUFFER_TOO_SMALL);
 	put_le16(payload, INTEL_AX211_RX_MPDU_FRAME_MAX + 1U);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_OVERSIZED);
 }
 
@@ -364,21 +364,21 @@ test_frame_rejections(void)
 	memset(frame, 0, sizeof(frame));
 	frame[0U] = 0x80U;
 	message = make_message(payload, frame, 32U, 0U, STATUS_OVERRUN_OK);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_FAILED);
 	message = make_message(payload, frame, 32U, 0U,
 	    STATUS_CLEAR | STATUS_DUPLICATE);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_DUPLICATE);
 	message = make_message(payload, frame, 32U, 0x40U, STATUS_CLEAR);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_UNSUPPORTED);
 	message = make_message(payload, frame, 32U, 0U, STATUS_CLEAR | 0x300U);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_UNSUPPORTED);
 	message = make_message(payload, frame, 32U, 0U, STATUS_CLEAR);
 	payload[42U] = 0U;
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_FAILED);
 
 	memset(frame, 0, sizeof(frame));
@@ -386,21 +386,21 @@ test_frame_rejections(void)
 	frame[27U] = 0x20U;
 	message = make_message(payload, frame, sizeof(frame), 0U,
 	    STATUS_CLEAR | STATUS_MIC_OK | STATUS_CCMP | STATUS_DECRYPTED);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_FAILED);
 	frame[24U] = 1U;
 	message = make_message(payload, frame, sizeof(frame), 0U,
 	    STATUS_CLEAR | STATUS_CCMP | STATUS_DECRYPTED);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_FAILED);
 	put_le16(frame, 0x000cU);
 	message = make_message(payload, frame, sizeof(frame), 0U, STATUS_CLEAR);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_UNSUPPORTED);
 	memset(frame, 0, sizeof(frame));
 	frame[0U] = 0x80U;
 	message = make_message(payload, frame, 25U, 0x20U, STATUS_CLEAR);
-	assert(intel_ax211_rx_mpdu_decode(&message, 17U, output,
+	assert(drv_intel_ax211_rx_mpdu_decode(&message, 17U, output,
 	    sizeof(output), &decoded) == INTEL_AX211_RX_TRUNCATED);
 }
 

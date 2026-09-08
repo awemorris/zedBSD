@@ -6,32 +6,32 @@
 #include "kern/uaccess.h"
 
 #if defined(GRAPHICS_TEST_PCAT)
-#include "drivers/graphics/pcat/backend.h"
+#include "src/drivers/platform/pcat/graphics/backend.h"
 #define TEST_NAME "PC/AT"
-#define backend_ready_fn pcat_graphics_backend_ready
-#define backend_get_modes_fn pcat_graphics_backend_get_modes
-#define backend_enter_fn pcat_graphics_backend_enter
-#define backend_leave_fn pcat_graphics_backend_leave
-#define backend_fill_fn pcat_graphics_backend_fill
-#define backend_line_fn pcat_graphics_backend_line
-#define backend_pattern_fill_fn pcat_graphics_backend_pattern_fill
-#define backend_blit_fn pcat_graphics_backend_blit
-#define backend_flush_fn pcat_graphics_backend_flush
-#define backend_get_glyph_fn pcat_graphics_backend_get_glyph
+#define backend_ready_fn drv_pcat_graphics_backend_ready
+#define backend_get_modes_fn drv_pcat_graphics_backend_get_modes
+#define backend_enter_fn drv_pcat_graphics_backend_enter
+#define backend_leave_fn drv_pcat_graphics_backend_leave
+#define backend_fill_fn drv_pcat_graphics_backend_fill
+#define backend_line_fn drv_pcat_graphics_backend_line
+#define backend_pattern_fill_fn drv_pcat_graphics_backend_pattern_fill
+#define backend_blit_fn drv_pcat_graphics_backend_blit
+#define backend_flush_fn drv_pcat_graphics_backend_flush
+#define backend_get_glyph_fn drv_pcat_graphics_backend_get_glyph
 #define backend_image pcat_graphics_image
 #elif defined(GRAPHICS_TEST_PC98)
-#include "drivers/graphics/pc98/backend.h"
+#include "src/drivers/platform/pc98/graphics/backend.h"
 #define TEST_NAME "PC-98"
-#define backend_ready_fn pc98_graphics_backend_ready
-#define backend_get_modes_fn pc98_graphics_backend_get_modes
-#define backend_enter_fn pc98_graphics_backend_enter
-#define backend_leave_fn pc98_graphics_backend_leave
-#define backend_fill_fn pc98_graphics_backend_fill
-#define backend_line_fn pc98_graphics_backend_line
-#define backend_pattern_fill_fn pc98_graphics_backend_pattern_fill
-#define backend_blit_fn pc98_graphics_backend_blit
-#define backend_flush_fn pc98_graphics_backend_flush
-#define backend_get_glyph_fn pc98_graphics_backend_get_glyph
+#define backend_ready_fn drv_pc98_graphics_backend_ready
+#define backend_get_modes_fn drv_pc98_graphics_backend_get_modes
+#define backend_enter_fn drv_pc98_graphics_backend_enter
+#define backend_leave_fn drv_pc98_graphics_backend_leave
+#define backend_fill_fn drv_pc98_graphics_backend_fill
+#define backend_line_fn drv_pc98_graphics_backend_line
+#define backend_pattern_fill_fn drv_pc98_graphics_backend_pattern_fill
+#define backend_blit_fn drv_pc98_graphics_backend_blit
+#define backend_flush_fn drv_pc98_graphics_backend_flush
+#define backend_get_glyph_fn drv_pc98_graphics_backend_get_glyph
 #define backend_image pc98_graphics_image
 #else
 #error select one graphics frontend
@@ -360,7 +360,7 @@ test_open_caps_modes(struct file *owner, struct file *other)
 	uintptr_t modes_address;
 
 	backend_ready = 0;
-	CHECK(graphics_device_register() == 0 && device_ops != NULL);
+	CHECK(drv_graphics_device_register() == 0 && device_ops != NULL);
 	CHECK(device_ops->open(owner) == ENODEV);
 	backend_ready = 1;
 	CHECK(device_ops->open(owner) == 0);
@@ -609,7 +609,7 @@ test_cleanup(struct file *owner, struct file *other)
 	uintptr_t address;
 	unsigned leaves_before = leave_count;
 
-	graphics_device_restore_text();
+	drv_graphics_device_restore_text();
 	CHECK(leave_count == leaves_before + 1U);
 	user_reset();
 	memset(&mode, 0, sizeof(mode));
@@ -643,7 +643,7 @@ main(void)
 	struct file *owner = (struct file *)(void *)&owner_storage;
 	struct file *other = (struct file *)(void *)&other_storage;
 
-	graphics_device_restore_text();
+	drv_graphics_device_restore_text();
 	CHECK(resume_count == 1U);
 	test_open_caps_modes(owner, other);
 	test_enter_and_render(owner);

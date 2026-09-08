@@ -11,9 +11,9 @@ cc=${CC:-cc}
 make_command=${MAKE:-make}
 common="-std=c11 -Wall -Wextra -Werror -pthread"
 fixture="$root/plan/ws004-hardware/tests/legacy-hcd-retirement-test.c"
-uhci="$root/src/drivers/pci-uhci.c"
-ehci="$root/src/drivers/pci-ehci.c"
-usb="$root/src/drivers/usb.c"
+uhci="$root/src/drivers/pci/pci-uhci.c"
+ehci="$root/src/drivers/pci/pci-ehci.c"
+usb="$root/src/drivers/usb/usb.c"
 
 # shellcheck disable=SC2086
 $cc $common "$fixture" -o "$work/legacy-hcd-retirement"

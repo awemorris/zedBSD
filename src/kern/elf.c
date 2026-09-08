@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -756,13 +754,18 @@ load_segment_snapshot(
 	size_t leading, shared;
 	int error;
 
+	/* A writable or unshareable segment is copied rather than mapped. */
 	if (!lease->shared_read || lease->read_object == NULL ||
 	    (prot & HAL_SPACE_WRITE) != 0 || size < PAGE_SIZE)
 		return copy_segment_snapshot(lease, vm, destination, source, size);
+
+	/* Finds the whole pages inside the segment, if there are any. */
 	first = (destination + PAGE_SIZE - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
 	end = (destination + size) & ~(uintptr_t)(PAGE_SIZE - 1U);
 	if (first >= end)
 		return copy_segment_snapshot(lease, vm, destination, source, size);
+
+	/* Only a file offset that stays page aligned can be mapped. */
 	leading = first - destination;
 	shared = end - first;
 	if (((uint64_t)source + leading) % PAGE_SIZE != 0)
@@ -840,6 +843,7 @@ validate_and_load(
 	int phdr_ok;
 	int error;
 
+	/* Starts with an empty image and an inverted address range. */
 	programs = NULL;
 	minimum = UINT64_MAX;
 	maximum = 0;

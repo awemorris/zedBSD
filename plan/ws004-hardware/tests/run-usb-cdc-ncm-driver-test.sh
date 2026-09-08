@@ -11,7 +11,7 @@ mkdir -p "$temporary"
 cc -std=c11 -O2 -Wall -Wextra -Werror -pthread -I"$repo/include" \
 	-I"$repo/include/uapi" -I"$repo/src" -I"$repo" \
 	"$repo/plan/ws004-hardware/tests/usb-cdc-ncm-driver-test.c" \
-	"$repo/src/drivers/usb-cdc-ncm.c" -o "$ordinary"
+	"$repo/src/drivers/usb/usb-cdc-ncm.c" -o "$ordinary"
 "$ordinary"
 
 cc -std=c11 -O1 -g -Wall -Wextra -Werror -pthread \
@@ -19,10 +19,10 @@ cc -std=c11 -O1 -g -Wall -Wextra -Werror -pthread \
 	-fno-omit-frame-pointer -I"$repo/include" -I"$repo/include/uapi" \
 	-I"$repo/src" -I"$repo" \
 	"$repo/plan/ws004-hardware/tests/usb-cdc-ncm-driver-test.c" \
-	"$repo/src/drivers/usb-cdc-ncm.c" -o "$sanitized"
+	"$repo/src/drivers/usb/usb-cdc-ncm.c" -o "$sanitized"
 ASAN_OPTIONS=detect_leaks=0 "$sanitized"
 
 cc -std=c11 -O0 -Wall -Wextra -Werror -fanalyzer -I"$repo/include" \
 	-I"$repo/include/uapi" -I"$repo/src" -I"$repo" \
 	-c \
-	"$repo/src/drivers/usb-cdc-ncm-net.c" -o "$temporary/analyzer.o"
+	"$repo/src/drivers/usb/usb-cdc-ncm-net.c" -o "$temporary/analyzer.o"

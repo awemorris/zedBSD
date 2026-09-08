@@ -1,6 +1,7 @@
 #!/bin/sh
 # KA-T010 production disk-label parser regression runner.
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$test_dir/../../.." && pwd)
@@ -9,8 +10,8 @@ trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
 parser_sources="
 	$repo_dir/src/drivers/disklabel/mbr.c
-	$repo_dir/src/drivers/disklabel/pc98.c
-	$repo_dir/src/drivers/disklabel/pc98-auto.c
+	$repo_dir/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/disklabel/pc98.c
+	$repo_dir/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/disklabel/pc98-auto.c
 	$repo_dir/src/drivers/disklabel/sun.c
 	$repo_dir/src/drivers/disklabel/x68k.c"
 

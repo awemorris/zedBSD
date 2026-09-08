@@ -28,16 +28,16 @@ static void perform_unlink(void *argument)
 static void record(unsigned offset,unsigned length,unsigned number,const char *name)
 {
  uint8_t *p=storage+176*512+offset;
- ufs_put32(p,0,number,0);ufs_put16(p,4,length,0);p[6]=8;p[7]=strlen(name);
+ drv_ufs_put32(p,0,number,0);drv_ufs_put16(p,4,length,0);p[6]=8;p[7]=strlen(name);
  memcpy(p+8,name,strlen(name));
 }
 static unsigned names(unsigned number)
 {
  unsigned pos=0,found=0;uint8_t *p=storage+176*512;
  while(pos<512) {
-  unsigned length=ufs_get16(p,pos+4,0);
+  unsigned length=drv_ufs_get16(p,pos+4,0);
   REQUIRE(length>=8 && !(length&3) && length<=512-pos);
-  if(ufs_get32(p,pos,0)==number)found++;
+  if(drv_ufs_get32(p,pos,0)==number)found++;
   pos+=length;
  }
  return found;
@@ -65,8 +65,8 @@ static void namespace_scenario(unsigned links,unsigned previous,unsigned write_f
  REQUIRE(namecache_enter(&directory.inode,&victim,&cached_node.inode,1)==0);
  REQUIRE(namecache_lookup(&directory.inode,&victim,&cached)==0 && cached==&cached_node.inode);
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
  fs.journal_enabled=1;fs.snapshot_available=namespace_snapshot;
  namespace_journal=&fs.journal;group_write_check=namespace_write_check;unlink_directory=&directory.inode;
  storage_writes=storage_syncs=0;snapshot_calls=snapshot_mask=dir_changes=0;
@@ -91,10 +91,10 @@ static void namespace_scenario(unsigned links,unsigned previous,unsigned write_f
  namecache_purge_mount(&mountp);
  failure_write=failure_write_again=failure_sync=commit_error=0;crash_cut=0;
  memcpy(storage,durable,sizeof(storage));
- REQUIRE(ufs_journal_init(&recovered,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
- namespace_journal=&recovered;REQUIRE(ufs_journal_replay(&recovered)==0);
- remaining=ufs_get16(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_NLINK,0);
+ REQUIRE(drv_ufs_journal_init(&recovered,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
+ namespace_journal=&recovered;REQUIRE(drv_ufs_journal_replay(&recovered)==0);
+ remaining=drv_ufs_get16(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_NLINK,0);
  REQUIRE(remaining==links || remaining==links-1);
  REQUIRE(names(2)==remaining);
  REQUIRE(memcmp(before_directory,storage+8*512+3*UFS_DINODE_SIZE,UFS_DINODE_SIZE)==0);

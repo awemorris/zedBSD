@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-pci-mmio.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-pci-mmio.h"
 
 static uint64_t test_tsc;
 static uint64_t test_counter_frequency;
@@ -68,28 +68,28 @@ test_conversion(void)
 {
 	uint64_t value;
 
-	assert(intel_ax211_pci_mmio_host_ticks_for_us(2400000000ULL, 1U,
+	assert(drv_intel_ax211_pci_mmio_host_ticks_for_us(2400000000ULL, 1U,
 	    &value) == 0);
 	assert(value == 2400U);
-	assert(intel_ax211_pci_mmio_host_ticks_for_us(3333334ULL, 1U,
+	assert(drv_intel_ax211_pci_mmio_host_ticks_for_us(3333334ULL, 1U,
 	    &value) == 0);
 	assert(value == 4U);
-	assert(intel_ax211_pci_mmio_host_ticks_for_us(1U, UINT64_MAX,
+	assert(drv_intel_ax211_pci_mmio_host_ticks_for_us(1U, UINT64_MAX,
 	    &value) == 0);
 	assert(value == 18446744073710ULL);
-	assert(intel_ax211_pci_mmio_host_ticks_to_us(2400000000ULL, 2400U,
+	assert(drv_intel_ax211_pci_mmio_host_ticks_to_us(2400000000ULL, 2400U,
 	    &value) == 0);
 	assert(value == 1U);
-	assert(intel_ax211_pci_mmio_host_ticks_to_us(UINT64_MAX,
+	assert(drv_intel_ax211_pci_mmio_host_ticks_to_us(UINT64_MAX,
 	    UINT64_MAX - 1U, &value) == 0);
 	assert(value == 999999U);
-	assert(intel_ax211_pci_mmio_host_ticks_for_us(0U, 1U, &value) ==
+	assert(drv_intel_ax211_pci_mmio_host_ticks_for_us(0U, 1U, &value) ==
 	    EINVAL);
-	assert(intel_ax211_pci_mmio_host_ticks_to_us(0U, 1U, &value) ==
+	assert(drv_intel_ax211_pci_mmio_host_ticks_to_us(0U, 1U, &value) ==
 	    EINVAL);
-	assert(intel_ax211_pci_mmio_host_ticks_for_us(UINT64_MAX, UINT64_MAX,
+	assert(drv_intel_ax211_pci_mmio_host_ticks_for_us(UINT64_MAX, UINT64_MAX,
 	    &value) == EOVERFLOW);
-	assert(intel_ax211_pci_mmio_host_ticks_to_us(1U, UINT64_MAX, &value) ==
+	assert(drv_intel_ax211_pci_mmio_host_ticks_to_us(1U, UINT64_MAX, &value) ==
 	    EOVERFLOW);
 }
 
@@ -102,20 +102,20 @@ test_calibration_rejection(void)
 	memset(registers, 0, sizeof(registers));
 	memset(&backend, 0xa5, sizeof(backend));
 	test_counter_available = false;
-	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
+	assert(drv_intel_ax211_pci_mmio_backend_init(&backend, registers,
 	    sizeof(registers)) == ENOTSUP);
 	assert(backend.registers == NULL);
 	assert(backend.counter_ready == 0U);
 	test_counter_available = true;
 	test_counter_frequency = 999999U;
-	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
+	assert(drv_intel_ax211_pci_mmio_backend_init(&backend, registers,
 	    sizeof(registers)) == ENOTSUP);
 	test_counter_frequency = 10000000001ULL;
-	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
+	assert(drv_intel_ax211_pci_mmio_backend_init(&backend, registers,
 	    sizeof(registers)) == ENOTSUP);
 	test_counter_frequency = 3333334ULL;
 	test_tsc = 9000U;
-	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
+	assert(drv_intel_ax211_pci_mmio_backend_init(&backend, registers,
 	    sizeof(registers)) == 0);
 	assert(backend.counter_frequency_hz == 3333334ULL);
 }
@@ -134,18 +134,18 @@ test_backend_io_and_clock(void)
 	test_counter_available = true;
 	test_counter_frequency = 2400000000ULL;
 	test_tsc = 100000U;
-	assert(intel_ax211_pci_mmio_backend_init(NULL, registers,
+	assert(drv_intel_ax211_pci_mmio_backend_init(NULL, registers,
 	    sizeof(registers)) != 0);
-	assert(intel_ax211_pci_mmio_backend_init(&backend, NULL,
+	assert(drv_intel_ax211_pci_mmio_backend_init(&backend, NULL,
 	    sizeof(registers)) != 0);
-	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
+	assert(drv_intel_ax211_pci_mmio_backend_init(&backend, registers,
 	    sizeof(registers) - 1U) != 0);
-	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
+	assert(drv_intel_ax211_pci_mmio_backend_init(&backend, registers,
 	    sizeof(registers)) == 0);
 	assert(backend.counter_ready == 1U);
 	assert(backend.counter_frequency_hz == 2400000000ULL);
 	assert(backend.counter_origin == 100000U);
-	ops = intel_ax211_pci_mmio_ops();
+	ops = drv_intel_ax211_pci_mmio_ops();
 	assert(ops != NULL);
 
 	assert(ops->csr_write32(&backend, 0x20U, 0x11223344U) == 0);
@@ -204,9 +204,9 @@ test_delay_overflow(void)
 	test_counter_available = true;
 	test_counter_frequency = 2400000000ULL;
 	test_tsc = UINT64_MAX - 1000U;
-	assert(intel_ax211_pci_mmio_backend_init(&backend, registers,
+	assert(drv_intel_ax211_pci_mmio_backend_init(&backend, registers,
 	    sizeof(registers)) == 0);
-	ops = intel_ax211_pci_mmio_ops();
+	ops = drv_intel_ax211_pci_mmio_ops();
 	assert(ops->delay_us(&backend, 1U) == EOVERFLOW);
 }
 

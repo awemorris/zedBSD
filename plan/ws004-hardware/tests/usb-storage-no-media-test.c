@@ -6,7 +6,7 @@
 #include <string.h>
 
 typedef int tid_t; /* Host libc has no zedBSD kernel thread identifier. */
-#include "../../../src/drivers/usb-storage.c"
+#include "../../../src/drivers/usb/usb-storage.c"
 
 static unsigned checks;
 

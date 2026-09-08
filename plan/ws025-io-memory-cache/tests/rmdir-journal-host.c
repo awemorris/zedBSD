@@ -10,7 +10,7 @@ static void rmdir_write_check(uint64_t first,uint32_t count,const void *buffer)
  (void)count;(void)buffer;
  if(first==176 || first==8 || first==16) {
   REQUIRE(namespace_journal->pending_ready && namespace_journal->image_valid);
-  REQUIRE(ufs_get32(namespace_journal->image,16,0)==(rmdir_shared?2U:3U));
+  REQUIRE(drv_ufs_get32(namespace_journal->image,16,0)==(rmdir_shared?2U:3U));
   if(rmdir_snapshot)REQUIRE((snapshot_mask&expected)==expected);
  }
 }
@@ -19,7 +19,7 @@ static void perform_rmdir(void *argument)
 static void child_record(unsigned offset,unsigned length,unsigned number,const char *name)
 {
  uint8_t *p=storage+160*512+offset;
- ufs_put32(p,0,number,0);ufs_put16(p,4,length,0);p[6]=4;p[7]=strlen(name);memcpy(p+8,name,strlen(name));
+ drv_ufs_put32(p,0,number,0);drv_ufs_put16(p,4,length,0);p[6]=4;p[7]=strlen(name);memcpy(p+8,name,strlen(name));
 }
 static void rmdir_scenario(unsigned shared,unsigned previous,unsigned write_fail,unsigned flush_fail,unsigned landed,unsigned stop)
 {
@@ -46,8 +46,8 @@ static void rmdir_scenario(unsigned shared,unsigned previous,unsigned write_fail
  REQUIRE(namecache_enter(&parent.inode,&victim,&cached_node.inode,1)==0);
  REQUIRE(namecache_enter(&parent.inode,&dot,&parent.inode,1)==0);
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
  fs.journal_enabled=1;fs.snapshot_available=rmdir_snapshot;
  namespace_journal=&fs.journal;rmdir_shared=shared;group_write_check=rmdir_write_check;
  storage_writes=storage_syncs=0;snapshot_calls=snapshot_mask=dir_changes=0;
@@ -72,15 +72,15 @@ static void rmdir_scenario(unsigned shared,unsigned previous,unsigned write_fail
  namecache_purge_mount(&mountp);
  failure_write=failure_write_again=failure_sync=commit_error=0;crash_cut=0;
  memcpy(storage,durable,sizeof(storage));
- REQUIRE(ufs_journal_init(&recovered,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
- namespace_journal=&recovered;REQUIRE(ufs_journal_replay(&recovered)==0);
+ REQUIRE(drv_ufs_journal_init(&recovered,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
+ namespace_journal=&recovered;REQUIRE(drv_ufs_journal_replay(&recovered)==0);
  child_raw=storage+8*512+2*UFS_DINODE_SIZE;
  parent_raw=storage+(shared?8:16)*512+(shared?3:2)*UFS_DINODE_SIZE;
- remaining=names(2);child_links=ufs_get16(child_raw,UFS_DI_NLINK,0);parent_links=ufs_get16(parent_raw,UFS_DI_NLINK,0);
+ remaining=names(2);child_links=drv_ufs_get16(child_raw,UFS_DI_NLINK,0);parent_links=drv_ufs_get16(parent_raw,UFS_DI_NLINK,0);
  REQUIRE(remaining<=1 && child_links==remaining*2 && parent_links==2+remaining);
- REQUIRE(ufs_get64(child_raw,UFS_DI_DB,0)==160 && ufs_get64(child_raw,UFS_DI_BLOCKS,0)==8);
- REQUIRE(ufs_get64(parent_raw,UFS_DI_DB,0)==176 && ufs_get64(parent_raw,UFS_DI_SIZE,0)==512);
+ REQUIRE(drv_ufs_get64(child_raw,UFS_DI_DB,0)==160 && drv_ufs_get64(child_raw,UFS_DI_BLOCKS,0)==8);
+ REQUIRE(drv_ufs_get64(parent_raw,UFS_DI_DB,0)==176 && drv_ufs_get64(parent_raw,UFS_DI_SIZE,0)==512);
  REQUIRE(memcmp(child_before,storage+160*512,sizeof(child_before))==0);
  if(rmdir_result==0)REQUIRE(remaining==0);
  if(refusal)REQUIRE(remaining==1);

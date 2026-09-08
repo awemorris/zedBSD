@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary_root=${TMPDIR:-"$root/build/q027-tmp"}
@@ -30,11 +31,11 @@ ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 # shellcheck disable=SC2086
 $cc $common -fanalyzer -c "$fixture" -o "$work/xhci-concurrent-analyzer.o"
 
-xhci="$root/src/drivers/pci-xhci.c"
-ehci="$root/src/drivers/pci-ehci.c"
-uhci="$root/src/drivers/pci-uhci.c"
-storage="$root/src/drivers/usb-storage.c"
-usb="$root/src/drivers/usb.c"
+xhci="$root/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/pci-xhci.c"
+ehci="$root/src/drivers/pci/pci-ehci.c"
+uhci="$root/src/drivers/pci/pci-uhci.c"
+storage="$root/src/drivers/usb/usb-storage.c"
+usb="$root/src/drivers/usb/usb.c"
 
 # The production USB-core fixture supplies a real callback/HCD ownership graph.
 # A callback deliberately blocks after terminal publication so drain cannot

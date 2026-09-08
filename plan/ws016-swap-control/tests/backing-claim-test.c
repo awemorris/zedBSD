@@ -14,7 +14,7 @@
 
 struct thread;
 
-const struct filesystem_type fat_filesystem_type = {
+const struct filesystem_type drv_fat_filesystem_type = {
     .fs_name = "fat",
 };
 
@@ -36,7 +36,7 @@ mount_disk_writable_busy(struct disk *disk)
 }
 
 int
-fat_file_backing_identity(struct inode *inode, struct disk **disk,
+drv_fat_file_backing_identity(struct inode *inode, struct disk **disk,
 			  uint64_t *object)
 {
 	if (inode == NULL || inode->i_mount == NULL ||
@@ -173,7 +173,7 @@ main(void)
 	make_disk(&partition, 1000, &leaf, 100);
 	memset(&mount_a, 0, sizeof(mount_a));
 	mount_a.m_disk = &partition;
-	mount_a.m_type = &fat_filesystem_type;
+	mount_a.m_type = &drv_fat_filesystem_type;
 	make_inode(&inode_a, &mount_a, 77);
 	make_inode(&inode_other, &mount_a, 78);
 	assert(backing_claim_prepare_inode(&inode_a, BACKING_CLAIM_SWAP,
@@ -194,7 +194,7 @@ main(void)
 	memset(&mount_a, 0, sizeof(mount_a));
 	memset(&mount_b, 0, sizeof(mount_b));
 	mount_a.m_disk = mount_b.m_disk = &partition;
-	mount_a.m_type = mount_b.m_type = &fat_filesystem_type;
+	mount_a.m_type = mount_b.m_type = &drv_fat_filesystem_type;
 	make_inode(&inode_a, &mount_a, 77);
 	make_inode(&inode_alias, &mount_b, 77);
 	make_inode(&inode_other, &mount_b, 78);
@@ -367,7 +367,7 @@ main(void)
 	 */
 	memset(&mount_parent, 0, sizeof(mount_parent));
 	mount_parent.m_disk = &leaf;
-	mount_parent.m_type = &fat_filesystem_type;
+	mount_parent.m_type = &drv_fat_filesystem_type;
 	make_inode(&inode_parent, &mount_parent, 99);
 	assert(backing_claim_prepare_inode(&inode_parent, BACKING_CLAIM_LOOP,
 					   &parent_claim) == 0);

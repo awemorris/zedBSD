@@ -45,8 +45,8 @@ for variant in ['ordinary', 'sanitize']:
     run(variant + '-build', ['cc', '-std=c89', '-D_POSIX_C_SOURCE=200809L', '-O1', '-g',
         '-Wall', '-Wextra', '-Werror', '-I.', *extra,
         'plan/ws024-unified-ufs/tests/formatter-image-host.c',
-        'userland/base/mkfs/ufs-format.c', 'src/drivers/fs/ufs/ufs-super.c',
-        'src/drivers/fs/ufs/ufs-endian.c', '-o', binary])
+        'userland/base/mkfs/ufs-format.c', 'userland/base/mkfs/ufs-super.c',
+        'userland/base/mkfs/ufs-endian.c', '-o', binary])
     for size in [4 * 1024**2, 32 * 1024**2, 192 * 1024**2]:
         for feature in [0, 1]:
             label = f'{variant}-{size}-{feature}'

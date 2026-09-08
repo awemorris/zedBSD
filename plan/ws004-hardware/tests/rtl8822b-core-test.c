@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../../src/drivers/rtl8822b-internal.h"
+#include "../../../src/drivers/wifi/rtl8822b/rtl8822b-internal.h"
 
 #define FIXTURE_REG_MCUFW_CTRL       0x0080U
 #define FIXTURE_REG_SYS_STATUS1      0x00f4U
@@ -92,14 +92,14 @@ test_sha256(void)
 	    "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
 	uint8_t digest[32];
 
-	assert(rtl8822b_sha256(NULL, 0, digest) == 0);
+	assert(drv_rtl8822b_sha256(NULL, 0, digest) == 0);
 	assert(memcmp(digest, empty_digest, sizeof(digest)) == 0);
-	assert(rtl8822b_sha256("abc", 3, digest) == 0);
+	assert(drv_rtl8822b_sha256("abc", 3, digest) == 0);
 	assert(memcmp(digest, abc_digest, sizeof(digest)) == 0);
-	assert(rtl8822b_sha256(block, sizeof(block) - 1U, digest) == 0);
+	assert(drv_rtl8822b_sha256(block, sizeof(block) - 1U, digest) == 0);
 	assert(memcmp(digest, block_digest, sizeof(digest)) == 0);
-	assert(rtl8822b_sha256(NULL, 1, digest) == EINVAL);
-	assert(rtl8822b_sha256("x", 1, NULL) == EINVAL);
+	assert(drv_rtl8822b_sha256(NULL, 1, digest) == EINVAL);
+	assert(drv_rtl8822b_sha256("x", 1, NULL) == EINVAL);
 }
 
 static void
@@ -146,7 +146,7 @@ check_chunk(void *opaque, const struct rtl8822b_firmware_chunk *chunk)
 	assert(chunk->wire_payload_length == chunk->length +
 	    (((chunk->length + RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE) %
 	    512U) == 0U));
-	assert(rtl8822b_firmware_tx_descriptor(descriptor,
+	assert(drv_rtl8822b_firmware_tx_descriptor(descriptor,
 	    chunk->wire_payload_length) == 0);
 	assert((get_le32(descriptor) & 0xffffU) ==
 	    chunk->wire_payload_length);
@@ -203,37 +203,37 @@ test_firmware(void)
 
 	assert(firmware != NULL);
 	make_firmware(firmware);
-	assert(rtl8822b_sha256(firmware, RTL8822B_FIRMWARE_SIZE,
+	assert(drv_rtl8822b_sha256(firmware, RTL8822B_FIRMWARE_SIZE,
 	    digest) == 0);
-	assert(rtl8822b_test_firmware_validate(firmware,
+	assert(drv_rtl8822b_test_firmware_validate(firmware,
 	    RTL8822B_FIRMWARE_SIZE, digest, &view) == 0);
 	assert(view.dmem_offset == RTL8822B_FIRMWARE_HEADER_SIZE);
 	assert(view.dmem_length == RTL8822B_FIRMWARE_DMEM_SIZE + 8U);
 	assert(view.imem_offset == view.dmem_offset + view.dmem_length);
 	assert(view.imem_length == RTL8822B_FIRMWARE_IMEM_SIZE + 8U);
 	assert(view.imem_offset + view.imem_length == view.size);
-	assert(rtl8822b_firmware_validate(firmware,
+	assert(drv_rtl8822b_firmware_validate(firmware,
 	    RTL8822B_FIRMWARE_SIZE, &view) == EILSEQ);
-	assert(rtl8822b_test_firmware_validate(firmware,
+	assert(drv_rtl8822b_test_firmware_validate(firmware,
 	    RTL8822B_FIRMWARE_SIZE - 1U, digest, &view) == EINVAL);
 
 	firmware[6] = 19U;
-	assert(rtl8822b_test_firmware_validate(firmware,
+	assert(drv_rtl8822b_test_firmware_validate(firmware,
 	    RTL8822B_FIRMWARE_SIZE, digest, &view) == EINVAL);
 	firmware[6] = 20U;
 	put_le32(firmware + 36U, RTL8822B_FIRMWARE_DMEM_SIZE - 1U);
-	assert(rtl8822b_test_firmware_validate(firmware,
+	assert(drv_rtl8822b_test_firmware_validate(firmware,
 	    RTL8822B_FIRMWARE_SIZE, digest, &view) == EINVAL);
 	put_le32(firmware + 36U, RTL8822B_FIRMWARE_DMEM_SIZE);
 	put_le32(firmware + 52U, 1U);
-	assert(rtl8822b_test_firmware_validate(firmware,
+	assert(drv_rtl8822b_test_firmware_validate(firmware,
 	    RTL8822B_FIRMWARE_SIZE, digest, &view) == EINVAL);
 	put_le32(firmware + 52U, 0U);
 	firmware[RTL8822B_FIRMWARE_HEADER_SIZE] ^= 1U;
-	assert(rtl8822b_test_firmware_validate(firmware,
+	assert(drv_rtl8822b_test_firmware_validate(firmware,
 	    RTL8822B_FIRMWARE_SIZE, digest, &view) == EILSEQ);
 	firmware[RTL8822B_FIRMWARE_HEADER_SIZE] ^= 1U;
-	assert(rtl8822b_test_firmware_validate(firmware,
+	assert(drv_rtl8822b_test_firmware_validate(firmware,
 	    RTL8822B_FIRMWARE_SIZE, digest, &view) == 0);
 
 	memset(&state, 0, sizeof(state));
@@ -242,41 +242,41 @@ test_firmware(void)
 	state.next_imem_file = view.imem_offset;
 	state.next_imem_destination = view.imem_address;
 	state.fail_at = SIZE_MAX;
-	assert(rtl8822b_test_firmware_walk(&view, digest, check_chunk,
+	assert(drv_rtl8822b_test_firmware_walk(&view, digest, check_chunk,
 	    &state) == 0);
 	assert(state.count == 40U);
 	assert(state.dmem_bytes == RTL8822B_FIRMWARE_DMEM_SIZE + 8U);
 	assert(state.imem_bytes == RTL8822B_FIRMWARE_IMEM_SIZE + 8U);
 	view.version--;
-	assert(rtl8822b_test_firmware_walk(&view, digest, check_chunk,
+	assert(drv_rtl8822b_test_firmware_walk(&view, digest, check_chunk,
 	    &state) == EINVAL);
 	view.version++;
 	firmware[RTL8822B_FIRMWARE_HEADER_SIZE] ^= 1U;
-	assert(rtl8822b_test_firmware_walk(&view, digest, check_chunk,
+	assert(drv_rtl8822b_test_firmware_walk(&view, digest, check_chunk,
 	    &state) == EILSEQ);
 	firmware[RTL8822B_FIRMWARE_HEADER_SIZE] ^= 1U;
-	assert(rtl8822b_firmware_walk(&view, check_chunk, &state) == EILSEQ);
+	assert(drv_rtl8822b_firmware_walk(&view, check_chunk, &state) == EILSEQ);
 	memset(&state, 0, sizeof(state));
 	state.next_dmem_file = view.dmem_offset;
 	state.next_dmem_destination = view.dmem_address;
 	state.next_imem_file = view.imem_offset;
 	state.next_imem_destination = view.imem_address;
 	state.fail_at = 3U;
-	assert(rtl8822b_test_firmware_walk(&view, digest, check_chunk,
+	assert(drv_rtl8822b_test_firmware_walk(&view, digest, check_chunk,
 	    &state) == EIO);
 
-	assert(rtl8822b_firmware_tx_descriptor(descriptor, 0) == EINVAL);
-	assert(rtl8822b_firmware_tx_descriptor(NULL, 1) == EINVAL);
+	assert(drv_rtl8822b_firmware_tx_descriptor(descriptor, 0) == EINVAL);
+	assert(drv_rtl8822b_firmware_tx_descriptor(NULL, 1) == EINVAL);
 	memset(&blob, 0, sizeof(blob));
-	assert(rtl8822b_test_firmware_blob_state(&blob, &owned) == 0);
+	assert(drv_rtl8822b_test_firmware_blob_state(&blob, &owned) == 0);
 	assert(owned == 0);
 	blob.bytes = firmware;
 	blob.size = RTL8822B_FIRMWARE_SIZE;
 	blob.view = view;
-	assert(rtl8822b_test_firmware_blob_state(&blob, &owned) == 0);
+	assert(drv_rtl8822b_test_firmware_blob_state(&blob, &owned) == 0);
 	assert(owned == 1 && blob.bytes == firmware);
 	blob.view.bytes = NULL;
-	assert(rtl8822b_test_firmware_blob_state(&blob, &owned) == EINVAL);
+	assert(drv_rtl8822b_test_firmware_blob_state(&blob, &owned) == EINVAL);
 	assert(blob.bytes == firmware && blob.size == RTL8822B_FIRMWARE_SIZE);
 	free(firmware);
 }
@@ -379,10 +379,10 @@ test_efuse(void)
 	size_t index;
 
 	make_efuse(physical, wanted);
-	assert(rtl8822b_efuse_decode(physical, sizeof(physical), logical,
+	assert(drv_rtl8822b_efuse_decode(physical, sizeof(physical), logical,
 	    sizeof(logical)) == 0);
 	assert(memcmp(logical, wanted, sizeof(logical)) == 0);
-	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
 	    &board) == 0);
 	assert(board.chip.cut == 1U);
 	assert(board.chip.rf_path_count == 2U);
@@ -406,65 +406,65 @@ test_efuse(void)
 	assert(memcmp(board.tx_power_5g[1].bw40_base, wanted + 0x4cU,
 	    RTL8822B_5G_OFDM_GROUP_COUNT) == 0);
 	assert(board.tx_power_5g[1].ofdm_diff == 2);
-	assert(rtl8822b_board_active_channel_allowed(&board, 36U));
-	assert(rtl8822b_board_active_channel_allowed(&board, 48U));
-	assert(!rtl8822b_board_active_channel_allowed(&board, 52U));
+	assert(drv_rtl8822b_board_active_channel_allowed(&board, 36U));
+	assert(drv_rtl8822b_board_active_channel_allowed(&board, 48U));
+	assert(!drv_rtl8822b_board_active_channel_allowed(&board, 52U));
 	logical[0x22U] = 0x40U;
-	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
 	    &board) == 0);
-	assert(rtl8822b_board_active_channel_allowed(&board, 1U));
-	assert(!rtl8822b_board_active_channel_allowed(&board, 36U));
+	assert(drv_rtl8822b_board_active_channel_allowed(&board, 1U));
+	assert(!drv_rtl8822b_board_active_channel_allowed(&board, 36U));
 	logical[0x22U] = wanted[0x22U];
 	logical[0xcbU] = 'U';
 	logical[0xccU] = 'S';
-	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
 	    &board) == 0);
-	assert(!rtl8822b_board_active_channel_allowed(&board, 36U));
+	assert(!drv_rtl8822b_board_active_channel_allowed(&board, 36U));
 	logical[0xcbU] = wanted[0xcbU];
 	logical[0xccU] = wanted[0xccU];
 	logical[0xb8U] = 0x30U;
-	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
 	    &board) == 0);
-	assert(!rtl8822b_board_active_channel_allowed(&board, 36U));
+	assert(!drv_rtl8822b_board_active_channel_allowed(&board, 36U));
 	logical[0xb8U] = wanted[0xb8U];
 	logical[0x1bU] = 0x08U;
 	logical[0x45U] = 0x07U;
-	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
 	    &board) == 0);
 	assert(board.tx_power_2g[0].ofdm_diff == -8);
 	assert(board.tx_power_2g[1].ofdm_diff == 7);
 	logical[0x1bU] = wanted[0x1bU];
 	logical[0x45U] = wanted[0x45U];
 	logical[0x10U] = 0x40U;
-	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
 	    &board) == EINVAL);
 	logical[0x10U] = wanted[0x10U];
 	logical[0x3aU] = 0x40U;
-	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
 	    &board) == EINVAL);
 	/* A single-path part need not accept or consume path-B calibration. */
-	assert(rtl8822bu_board_parse(logical, sizeof(logical), 1U << 12,
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical), 1U << 12,
 	    &board) == 0);
 	assert(board.chip.rf_path_count == 1U);
 	assert(board.tx_power_2g[1].cck_base[0] == 0U);
 	logical[0x3aU] = wanted[0x3aU];
-	assert(rtl8822b_efuse_decode(physical, sizeof(physical) - 1U,
+	assert(drv_rtl8822b_efuse_decode(physical, sizeof(physical) - 1U,
 	    logical, sizeof(logical)) == EINVAL);
-	assert(rtl8822b_efuse_decode(physical, sizeof(physical), logical,
+	assert(drv_rtl8822b_efuse_decode(physical, sizeof(physical), logical,
 	    sizeof(logical) - 1U) == EINVAL);
 
 	logical[0xcaU] = 4U;
-	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
 	    &board) == EOPNOTSUPP);
 	logical[0xcaU] = 2U;
 	logical[RTL8822BU_EFUSE_MAC_OFFSET] |= 1U;
-	assert(rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical), sys_cfg,
 	    &board) == EINVAL);
 	logical[RTL8822BU_EFUSE_MAC_OFFSET] &= (uint8_t)~1U;
-	assert(rtl8822bu_board_parse(logical, sizeof(logical), 7U << 12,
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical), 7U << 12,
 	    &board) == EOPNOTSUPP);
-	assert(rtl8822b_chip_identity_parse(sys_cfg, &identity) == 0);
-	assert(rtl8822b_chip_identity_parse(7U << 12, &identity) ==
+	assert(drv_rtl8822b_chip_identity_parse(sys_cfg, &identity) == 0);
+	assert(drv_rtl8822b_chip_identity_parse(7U << 12, &identity) ==
 	    EOPNOTSUPP);
 
 	memset(physical, 0xff, sizeof(physical));
@@ -472,18 +472,18 @@ test_efuse(void)
 	physical[1] = 0xfeU;
 	physical[2] = 0x11U;
 	physical[3] = 0x22U;
-	assert(rtl8822b_efuse_decode(physical, sizeof(physical), logical,
+	assert(drv_rtl8822b_efuse_decode(physical, sizeof(physical), logical,
 	    sizeof(logical)) == EINVAL);
 	memset(physical, 0x1f, sizeof(physical));
 	physical[RTL8822B_EFUSE_PHYSICAL_SIZE -
 	    RTL8822B_EFUSE_PROTECTED_SIZE - 1U] = 0x0fU;
-	assert(rtl8822b_efuse_decode(physical, sizeof(physical), logical,
+	assert(drv_rtl8822b_efuse_decode(physical, sizeof(physical), logical,
 	    sizeof(logical)) == EINVAL);
 	memset(physical, 0xff, sizeof(physical));
 	for (index = RTL8822B_EFUSE_PHYSICAL_SIZE -
 	    RTL8822B_EFUSE_PROTECTED_SIZE; index < sizeof(physical); index++)
 		physical[index] = 0U;
-	assert(rtl8822b_efuse_decode(physical, sizeof(physical), logical,
+	assert(drv_rtl8822b_efuse_decode(physical, sizeof(physical), logical,
 	    sizeof(logical)) == 0);
 }
 
@@ -562,29 +562,29 @@ test_rx(void)
 	make_rx_aggregate(aggregate);
 	memset(&state, 0, sizeof(state));
 	state.fail_at = UINT_MAX;
-	assert(rtl8822b_rx_aggregate_walk(aggregate, sizeof(aggregate),
+	assert(drv_rtl8822b_rx_aggregate_walk(aggregate, sizeof(aggregate),
 	    check_rx_packet, &state, &count) == 0);
 	assert(count == 2U && state.index == 2U);
-	assert(rtl8822b_rx_packet_parse(aggregate, 87U, &packet) == EINVAL);
-	assert(rtl8822b_rx_packet_parse(aggregate, 23U, &packet) == EINVAL);
-	assert(rtl8822b_rx_aggregate_walk(aggregate,
+	assert(drv_rtl8822b_rx_packet_parse(aggregate, 87U, &packet) == EINVAL);
+	assert(drv_rtl8822b_rx_packet_parse(aggregate, 23U, &packet) == EINVAL);
+	assert(drv_rtl8822b_rx_aggregate_walk(aggregate,
 	    RTL8822B_RX_AGGREGATE_MAX + 1U, check_rx_packet, &state,
 	    &count) == EINVAL);
 	memset(&state, 0, sizeof(state));
 	state.fail_at = 0U;
-	assert(rtl8822b_rx_aggregate_walk(aggregate, sizeof(aggregate),
+	assert(drv_rtl8822b_rx_aggregate_walk(aggregate, sizeof(aggregate),
 	    check_rx_packet, &state, &count) == EIO);
 	assert(count == 0U);
 	memset(&state, 0, sizeof(state));
 	state.fail_at = 1U;
-	assert(rtl8822b_rx_aggregate_walk(aggregate, sizeof(aggregate),
+	assert(drv_rtl8822b_rx_aggregate_walk(aggregate, sizeof(aggregate),
 	    check_rx_packet, &state, &count) == EIO);
 	assert(count == 1U && state.index == 1U);
 	original = get_le32(aggregate + 88U);
 	put_le32(aggregate + 88U, 0U);
 	memset(&state, 0, sizeof(state));
 	state.fail_at = UINT_MAX;
-	assert(rtl8822b_rx_aggregate_walk(aggregate, sizeof(aggregate),
+	assert(drv_rtl8822b_rx_aggregate_walk(aggregate, sizeof(aggregate),
 	    check_rx_packet, &state, &count) == EINVAL);
 	assert(count == 0U && state.index == 0U);
 	put_le32(aggregate + 88U, original);
@@ -592,35 +592,35 @@ test_rx(void)
 	memcpy(packet_bytes, aggregate, 88U);
 	original = get_le32(packet_bytes);
 	put_le32(packet_bytes, original | 0x4000U);
-	assert(rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == EINVAL);
+	assert(drv_rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == EINVAL);
 	put_le32(packet_bytes, (original & ~(0x0fU << 16)) | (3U << 16));
-	assert(rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == EINVAL);
+	assert(drv_rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == EINVAL);
 	put_le32(packet_bytes, original & ~0x04000000U);
 	packet_bytes[24U + 2U] = 2U;
-	assert(rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == 0);
+	assert(drv_rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == 0);
 	assert(packet.phy_info == NULL && packet.phy_info_length == 0U);
 	assert(packet.encryption_type == 0U && !packet.software_decrypted &&
 	    packet.mac_id == 0U && !packet.icv_error);
 	put_le32(packet_bytes, (original & ~0x04000000U) |
 	    (3U << 20) | 0x08000000U | 0x8000U);
 	put_le32(packet_bytes + 4U, 4U);
-	assert(rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == 0);
+	assert(drv_rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == 0);
 	assert(packet.encryption_type == 3U && packet.software_decrypted &&
 	    packet.mac_id == 4U && packet.icv_error);
 	put_le32(packet_bytes + 4U, 0U);
 	put_le32(packet_bytes, original);
-	assert(rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == EINVAL);
+	assert(drv_rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == EINVAL);
 	packet_bytes[24U + 2U] = 0U;
 	put_le32(packet_bytes + 12U, 0x54U);
-	assert(rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == EINVAL);
+	assert(drv_rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == EINVAL);
 	put_le32(packet_bytes + 12U, 4U);
 	put_le32(packet_bytes, (original & ~0x3fffU) | 4U);
-	assert(rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == EINVAL);
+	assert(drv_rtl8822b_rx_packet_parse(packet_bytes, 88U, &packet) == EINVAL);
 
 	memset(packet_bytes, 0, sizeof(packet_bytes));
 	put_le32(packet_bytes, 1U);
 	put_le32(packet_bytes + 8U, 0x10000000U);
-	assert(rtl8822b_rx_packet_parse(packet_bytes, 32U, &packet) == EINVAL);
+	assert(drv_rtl8822b_rx_packet_parse(packet_bytes, 32U, &packet) == EINVAL);
 
 	{
 		size_t large_length = RTL8822B_RX_DESCRIPTOR_SIZE +
@@ -629,10 +629,10 @@ test_rx(void)
 
 		assert(large != NULL);
 		put_le32(large, RTL8822B_RX_MPDU_MAX + 1U);
-		assert(rtl8822b_rx_packet_parse(large, large_length, &packet) ==
+		assert(drv_rtl8822b_rx_packet_parse(large, large_length, &packet) ==
 		    EINVAL);
 		put_le32(large, RTL8822B_RX_MPDU_MAX);
-		assert(rtl8822b_rx_packet_parse(large, large_length - 1U,
+		assert(drv_rtl8822b_rx_packet_parse(large, large_length - 1U,
 		    &packet) == 0);
 		free(large);
 	}
@@ -666,7 +666,7 @@ test_c2h_rx_metadata(void)
 	put_le32(bytes + 20U, UINT32_MAX);
 	bytes[24U] = 0x03U;
 	bytes[25U] = 0x9aU;
-	error = rtl8822b_rx_packet_parse(bytes, 32U, &packet);
+	error = drv_rtl8822b_rx_packet_parse(bytes, 32U, &packet);
 	assert(error == 0);
 	assert(packet.kind == RTL8822B_RX_C2H);
 	assert(packet.payload == bytes + 24U);
@@ -681,7 +681,7 @@ test_c2h_rx_metadata(void)
 
 	/* Rejects the same frame-status violations without the C2H discriminator. */
 	put_le32(bytes + 8U, 0U);
-	error = rtl8822b_rx_packet_parse(bytes, 32U, &packet);
+	error = drv_rtl8822b_rx_packet_parse(bytes, 32U, &packet);
 	assert(error == EINVAL);
 	assert(packet.payload == NULL && packet.payload_length == 0U);
 
@@ -700,7 +700,7 @@ test_c2h_rx_metadata(void)
 			bytes[offset + 1U] = 0x9aU;
 			occupied = offset + 5U;
 			aligned = (occupied + 7U) & ~(size_t)7U;
-			error = rtl8822b_rx_packet_parse(bytes, aligned, &packet);
+			error = drv_rtl8822b_rx_packet_parse(bytes, aligned, &packet);
 			assert(error == 0);
 			assert(packet.kind == RTL8822B_RX_C2H);
 			assert(packet.payload == bytes + offset);
@@ -712,18 +712,18 @@ test_c2h_rx_metadata(void)
 			assert(packet.rate == 0U && packet.rssi_dbm == -128);
 
 			/* Accepts a complete unpadded final record. */
-			error = rtl8822b_rx_packet_parse(bytes, occupied, &packet);
+			error = drv_rtl8822b_rx_packet_parse(bytes, occupied, &packet);
 			assert(error == 0);
 			assert(packet.aggregate_length == occupied);
 
 			/* Rejects a truncated command without publishing partial metadata. */
-			error = rtl8822b_rx_packet_parse(bytes, occupied - 1U, &packet);
+			error = drv_rtl8822b_rx_packet_parse(bytes, occupied - 1U, &packet);
 			assert(error == EINVAL);
 			assert(packet.payload == NULL && packet.payload_length == 0U);
 
 			/* Retains the rule against a partially present alignment suffix. */
 			if (aligned > occupied + 1U) {
-				error = rtl8822b_rx_packet_parse(bytes, occupied + 1U, &packet);
+				error = drv_rtl8822b_rx_packet_parse(bytes, occupied + 1U, &packet);
 				assert(error == EINVAL);
 			}
 		}
@@ -735,7 +735,7 @@ test_c2h_rx_metadata(void)
 	put_le32(aggregate + 88U + 12U, 0x7fU);
 	memset(&state, 0, sizeof(state));
 	state.fail_at = UINT_MAX;
-	error = rtl8822b_rx_aggregate_walk(
+	error = drv_rtl8822b_rx_aggregate_walk(
 		aggregate,
 		sizeof(aggregate),
 		check_rx_packet,
@@ -769,7 +769,7 @@ test_bounded_random_inputs(void)
 
 		for (index = 0; index < sizeof(rx); index++)
 			rx[index] = (uint8_t)fixture_random(&state);
-		error = rtl8822b_rx_packet_parse(rx, length, &packet);
+		error = drv_rtl8822b_rx_packet_parse(rx, length, &packet);
 		if (error == 0) {
 			assert(packet.payload >= rx);
 			assert((size_t)(packet.payload - rx) <= length);
@@ -783,7 +783,7 @@ test_bounded_random_inputs(void)
 
 		for (index = 0; index < sizeof(physical); index++)
 			physical[index] = (uint8_t)fixture_random(&state);
-		(void)rtl8822b_efuse_decode(physical, sizeof(physical), logical,
+		(void)drv_rtl8822b_efuse_decode(physical, sizeof(physical), logical,
 		    sizeof(logical));
 	}
 }
@@ -1163,7 +1163,7 @@ assert_radio_unavailable(const struct fake_radio *fake,
 	}
 	assert(radio->state == RTL8822B_RADIO_STOPPING);
 	assert(radio->transport.read != NULL);
-	assert(!rtl8822b_radio_active_scan_allowed(radio, 1U));
+	assert(!drv_rtl8822b_radio_active_scan_allowed(radio, 1U));
 	assert((fake->registers[0x0100U] & 0xffU) == 0U);
 	assert((fake->registers[0x001fU] & 0x07U) == 0U);
 	assert((fake->registers[0x00ecU] & 0x07000000U) == 0U);
@@ -1188,16 +1188,16 @@ test_radio_transport_deadline(
 	transport.usb_bulk_max_packet_size = 1024U;
 	memset(&radio, 0, sizeof(radio));
 	fake->expected_deadline = 1000000U;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    fake->expected_deadline) == 0);
-	assert(rtl8822b_radio_start(&radio, fake->expected_deadline) == 0);
+	assert(drv_rtl8822b_radio_start(&radio, fake->expected_deadline) == 0);
 	assert(fake->finite_deadline_calls != 0U);
 	assert(fake->cleanup_deadline_calls == 0U);
 
 	/* Carry a different channel deadline through every register and RF operation. */
 	calls = fake->finite_deadline_calls;
 	fake->expected_deadline = fake->now + 100000U;
-	assert(rtl8822b_radio_set_channel(&radio, 44U,
+	assert(drv_rtl8822b_radio_set_channel(&radio, 44U,
 	    fake->expected_deadline) == 0);
 	assert(fake->finite_deadline_calls > calls);
 	assert(fake->cleanup_deadline_calls == 0U);
@@ -1205,7 +1205,7 @@ test_radio_transport_deadline(
 	/* Reject an expired operation while still allowing the bounded emergency stop. */
 	calls = fake->finite_deadline_calls;
 	fake->expected_deadline = fake->now;
-	assert(rtl8822b_radio_set_channel(&radio, 6U,
+	assert(drv_rtl8822b_radio_set_channel(&radio, 6U,
 	    fake->expected_deadline) == ETIMEDOUT);
 	assert(fake->finite_deadline_calls == calls);
 	assert(fake->cleanup_deadline_calls != 0U);
@@ -1228,13 +1228,13 @@ test_radio_txagc_clamps(void)
 	    sizeof(board.tx_power_2g[0].bw40_base));
 	board.tx_power_2g[0].ofdm_diff = 7;
 	memset(&radio, 0, sizeof(radio));
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == 0);
-	assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
 	assert(radio.power_limits_valid != 0U);
 	assert_legacy_txagc(fake, 0x1d00U, 0U, 0x3f3f3f3fU,
 	    0x3f3f3f3fU);
-	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 	assert_radio_off(fake, &radio);
 	fake_radio_destroy(fake);
 }
@@ -1262,23 +1262,23 @@ test_radio_table_interpreter(void)
 	memset(&radio, 0, sizeof(radio));
 	radio.transport = fake_radio_transport(fake);
 	radio.board = fake_board(2U);
-	assert(rtl8822b_test_radio_table_apply(&radio,
+	assert(drv_rtl8822b_test_radio_table_apply(&radio,
 	    RTL8822B_TABLE_DOMAIN_BB, RTL8822B_TABLE_WIDTH_32, 0U,
 	    conditional, sizeof(conditional) / sizeof(conditional[0]),
 	    UINT64_MAX) == 0);
 	assert(fake->registers[0x0120U] == 0x11111111U);
-	assert(rtl8822b_test_radio_table_apply(&radio,
+	assert(drv_rtl8822b_test_radio_table_apply(&radio,
 	    RTL8822B_TABLE_DOMAIN_BB, RTL8822B_TABLE_WIDTH_32, 0U,
 	    malformed, sizeof(malformed) / sizeof(malformed[0]),
 	    UINT64_MAX) == EINVAL);
-	assert(rtl8822b_test_radio_table_apply(&radio,
+	assert(drv_rtl8822b_test_radio_table_apply(&radio,
 	    RTL8822B_TABLE_DOMAIN_BB, RTL8822B_TABLE_WIDTH_32, 0U,
 	    bb_delays, sizeof(bb_delays) / sizeof(bb_delays[0]),
 	    UINT64_MAX) == 0);
 	assert(fake->one_us_delays == 1U);
 	assert(fake->five_us_delays == 1U);
 	assert(fake->delay_count == 6U);
-	assert(rtl8822b_test_radio_table_apply(&radio,
+	assert(drv_rtl8822b_test_radio_table_apply(&radio,
 	    RTL8822B_TABLE_DOMAIN_BB, RTL8822B_TABLE_WIDTH_32, 0U,
 	    conditional, 1U, UINT64_MAX) == EINVAL);
 	fake_radio_destroy(fake);
@@ -1317,19 +1317,19 @@ test_radio_lifecycle(void)
 
 	memset(&radio, 0, sizeof(radio));
 	transport = fake_radio_transport(baseline);
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == 0);
 	assert(radio.state == RTL8822B_RADIO_POWERED);
-	assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
 	assert(radio.state == RTL8822B_RADIO_STARTED && radio.channel == 1U);
-	assert(rtl8822b_radio_rx_generation_pause(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_rx_generation_pause(&radio, UINT64_MAX) == 0);
 	assert(radio.rx_generation_paused &&
 	    (baseline->registers[0x0100U] & 0x8aU) == 0U &&
 	    (baseline->registers[FIXTURE_REG_RX_PACKET_NUMBER] &
 	    (FIXTURE_RX_RELEASE_ENABLE | FIXTURE_RXDMA_IDLE)) ==
 	    (FIXTURE_RX_RELEASE_ENABLE | FIXTURE_RXDMA_IDLE));
-	assert(rtl8822b_radio_rx_generation_pause(&radio, UINT64_MAX) == 0);
-	assert(rtl8822b_radio_rx_generation_resume(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_rx_generation_pause(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_rx_generation_resume(&radio, UINT64_MAX) == 0);
 	assert(!radio.rx_generation_paused &&
 	    (baseline->registers[0x0100U] & 0x8aU) == 0x8aU &&
 	    (baseline->registers[FIXTURE_REG_RX_PACKET_NUMBER] &
@@ -1395,16 +1395,16 @@ test_radio_lifecycle(void)
 	    0x1a1a1a1aU, 0x1a1a1a1aU);
 	assert_legacy_txagc(baseline, 0x1d80U, 0x18181818U,
 	    0x1b1b1b1bU, 0x1b1b1b1bU);
-	assert(rtl8822b_radio_active_scan_allowed(&radio, 1U));
-	assert(rtl8822b_radio_active_scan_allowed(&radio, 11U));
-	assert(rtl8822b_radio_active_scan_allowed(&radio, 36U));
-	assert(rtl8822b_radio_active_scan_allowed(&radio, 44U));
-	assert(rtl8822b_radio_active_scan_allowed(&radio, 48U));
-	assert(!rtl8822b_radio_active_scan_allowed(&radio, 12U));
-	assert(!rtl8822b_radio_active_scan_allowed(&radio, 52U));
+	assert(drv_rtl8822b_radio_active_scan_allowed(&radio, 1U));
+	assert(drv_rtl8822b_radio_active_scan_allowed(&radio, 11U));
+	assert(drv_rtl8822b_radio_active_scan_allowed(&radio, 36U));
+	assert(drv_rtl8822b_radio_active_scan_allowed(&radio, 44U));
+	assert(drv_rtl8822b_radio_active_scan_allowed(&radio, 48U));
+	assert(!drv_rtl8822b_radio_active_scan_allowed(&radio, 12U));
+	assert(!drv_rtl8822b_radio_active_scan_allowed(&radio, 52U));
 
 	make_probe_request(frame, &board);
-	assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+	assert(drv_rtl8822b_radio_management_frame_prepare(&radio, wire,
 	    sizeof(wire), frame, sizeof(frame), &wire_length) == 0);
 	assert(wire_length == 48U + sizeof(frame));
 	assert((get_le32(wire) & 0xffffU) == sizeof(frame));
@@ -1431,32 +1431,32 @@ test_radio_lifecycle(void)
 	directed_frame[33U] = 4U;
 	memcpy(directed_frame + 34U,
 	    (const uint8_t[]){ 0x82U, 0x84U, 0x8bU, 0x96U }, 4U);
-	assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+	assert(drv_rtl8822b_radio_management_frame_prepare(&radio, wire,
 	    sizeof(wire), directed_frame, 38U, &wire_length) == 0);
 	assert(wire_length == 48U + 38U &&
 	    memcmp(wire + 48U, directed_frame, 38U) == 0);
 	/* More than 32 bytes and duplicate SSID IEs are not valid directed
 	 * requests, even if one of the duplicates is a wildcard. */
 	directed_frame[25U] = 33U;
-	assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+	assert(drv_rtl8822b_radio_management_frame_prepare(&radio, wire,
 	    sizeof(wire), directed_frame, 38U, &wire_length) == EINVAL);
 	directed_frame[25U] = 6U;
 	directed_frame[38U] = 0U;
 	directed_frame[39U] = 0U;
-	assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+	assert(drv_rtl8822b_radio_management_frame_prepare(&radio, wire,
 	    sizeof(wire), directed_frame, 40U, &wire_length) == EINVAL);
-	assert(rtl8822b_radio_management_frame_prepare(&radio, wire, 60U,
+	assert(drv_rtl8822b_radio_management_frame_prepare(&radio, wire, 60U,
 	    frame, sizeof(frame), &wire_length) == ENOSPC);
 	frame[4U] = 0U;
-	assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+	assert(drv_rtl8822b_radio_management_frame_prepare(&radio, wire,
 	    sizeof(wire), frame, sizeof(frame), &wire_length) == EINVAL);
 	make_probe_request(frame, &board);
 	frame[10U] ^= 1U;
-	assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+	assert(drv_rtl8822b_radio_management_frame_prepare(&radio, wire,
 	    sizeof(wire), frame, sizeof(frame), &wire_length) == EINVAL);
 	make_probe_request(frame, &board);
 	frame[1U] = 1U;
-	assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+	assert(drv_rtl8822b_radio_management_frame_prepare(&radio, wire,
 	    sizeof(wire), frame, sizeof(frame), &wire_length) == EINVAL);
 	memset(padded_frame, 0, sizeof(padded_frame));
 	padded_frame[0] = 0x40U;
@@ -1471,7 +1471,7 @@ test_radio_lifecycle(void)
 	padded_frame[27U] = 255U;
 	padded_frame[283U] = 221U;
 	padded_frame[284U] = 179U;
-	assert(rtl8822b_radio_management_frame_prepare(&radio, padded_wire,
+	assert(drv_rtl8822b_radio_management_frame_prepare(&radio, padded_wire,
 	    sizeof(padded_wire), padded_frame, sizeof(padded_frame),
 	    &wire_length) == 0);
 	assert(wire_length == sizeof(padded_wire));
@@ -1479,16 +1479,16 @@ test_radio_lifecycle(void)
 	make_probe_request(frame, &board);
 
 	/* The four channel-power groups change exactly at 2/3, 5/6, and 8/9. */
-	assert(rtl8822b_radio_set_channel(&radio, 2U, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_set_channel(&radio, 2U, UINT64_MAX) == 0);
 	assert_legacy_txagc(baseline, 0x1d00U, 0x1c1c1c1cU,
 	    0x1e1e1e1eU, 0x1c1e1e1eU);
-	assert(rtl8822b_radio_set_channel(&radio, 3U, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_set_channel(&radio, 3U, UINT64_MAX) == 0);
 	assert_legacy_txagc(baseline, 0x1d00U, 0x1d1d1d1dU,
 	    0x1f1f1f1fU, 0x1d1f1f1fU);
-	assert(rtl8822b_radio_set_channel(&radio, 5U, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_set_channel(&radio, 5U, UINT64_MAX) == 0);
 	assert_legacy_txagc(baseline, 0x1d00U, 0x1d1d1d1dU,
 	    0x1f1f1f1fU, 0x1d1f1f1fU);
-	assert(rtl8822b_radio_set_channel(&radio, 6U, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_set_channel(&radio, 6U, UINT64_MAX) == 0);
 	assert(radio.channel == 6U);
 	assert((baseline->registers[0x2860U] & 0xffU) == 6U);
 	assert((baseline->registers[0x2c60U] & 0xffU) == 6U);
@@ -1496,19 +1496,19 @@ test_radio_lifecycle(void)
 	    0x20202020U, 0x1e202020U);
 	assert_legacy_txagc(baseline, 0x1d80U, 0x1a1a1a1aU,
 	    0x21212121U, 0x1f212121U);
-	assert(rtl8822b_radio_set_channel(&radio, 8U, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_set_channel(&radio, 8U, UINT64_MAX) == 0);
 	assert_legacy_txagc(baseline, 0x1d00U, 0x1e1e1e1eU,
 	    0x20202020U, 0x1e202020U);
-	assert(rtl8822b_radio_set_channel(&radio, 9U, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_set_channel(&radio, 9U, UINT64_MAX) == 0);
 	assert_legacy_txagc(baseline, 0x1d00U, 0x1f1f1f1fU,
 	    0x21212121U, 0x1f212121U);
-	assert(rtl8822b_radio_set_channel(&radio, 11U, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_set_channel(&radio, 11U, UINT64_MAX) == 0);
 	assert(radio.channel == 11U);
 	assert_legacy_txagc(baseline, 0x1d00U, 0x1f1f1f1fU,
 	    0x1f1f1f1fU, 0x1f1f1f1fU);
 	assert_legacy_txagc(baseline, 0x1d80U, 0x1b1b1b1bU,
 	    0x20202020U, 0x20202020U);
-	assert(rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
 	assert(radio.channel == 44U);
 	assert((baseline->registers[0x0454U] & 0x80U) != 0U);
 	assert((baseline->registers[0x0808U] & 0x10000000U) == 0U);
@@ -1530,18 +1530,18 @@ test_radio_lifecycle(void)
 	    0x16161616U);
 	assert_legacy_txagc(baseline, 0x1d80U, 0U, 0x15151515U,
 	    0x15151515U);
-	assert(rtl8822b_radio_set_channel(&radio, 1U, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_set_channel(&radio, 1U, UINT64_MAX) == 0);
 	assert(radio.channel == 1U);
 	assert((baseline->registers[0x0454U] & 0x80U) == 0U);
 	assert((baseline->registers[0x0808U] & 0x10000000U) != 0U);
 	assert((baseline->registers[0x0a80U] & 0x00040000U) == 0U);
 	assert_legacy_txagc(baseline, 0x1d00U, 0x1c1c1c1cU,
 	    0x1a1a1a1aU, 0x1a1a1a1aU);
-	assert(rtl8822b_radio_set_channel(&radio, 0U, UINT64_MAX) ==
+	assert(drv_rtl8822b_radio_set_channel(&radio, 0U, UINT64_MAX) ==
 	    EOPNOTSUPP);
-	assert(rtl8822b_radio_set_channel(&radio, 12U, UINT64_MAX) ==
+	assert(drv_rtl8822b_radio_set_channel(&radio, 12U, UINT64_MAX) ==
 	    EOPNOTSUPP);
-	assert(rtl8822b_radio_set_channel(&radio, 52U, UINT64_MAX) ==
+	assert(drv_rtl8822b_radio_set_channel(&radio, 52U, UINT64_MAX) ==
 	    EOPNOTSUPP);
 	assert(radio.channel == 1U);
 
@@ -1587,10 +1587,10 @@ test_radio_lifecycle(void)
 
 		memset(&failed_radio, 0, sizeof(failed_radio));
 		failed->fail_write_at = stages[index];
-		error = rtl8822b_radio_power_on(&failed_radio, &failed_transport,
+		error = drv_rtl8822b_radio_power_on(&failed_radio, &failed_transport,
 		    &board, UINT64_MAX);
 		if (error == 0)
-			error = rtl8822b_radio_start(&failed_radio, UINT64_MAX);
+			error = drv_rtl8822b_radio_start(&failed_radio, UINT64_MAX);
 		assert(error == EIO);
 		assert_radio_unavailable(failed, &failed_radio);
 		fake_radio_destroy(failed);
@@ -1601,15 +1601,15 @@ test_radio_lifecycle(void)
 		size_t fail_at = baseline->write_count + 8U;
 
 		baseline->fail_write_at = fail_at;
-		assert(rtl8822b_radio_set_channel(&radio, 6U,
+		assert(drv_rtl8822b_radio_set_channel(&radio, 6U,
 		    UINT64_MAX) == EIO);
 		assert_radio_unavailable(baseline, &radio);
 		baseline->fail_write_at = SIZE_MAX;
 	}
 
-	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 	assert_radio_off(baseline, &radio);
-	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 	fake_radio_destroy(baseline);
 }
 
@@ -1624,7 +1624,7 @@ test_radio_deadline_and_stop_retry(void)
 
 	memset(&radio, 0, sizeof(radio));
 	fake->automatic_power_ack = 0;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board, 200U) ==
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board, 200U) ==
 	    ETIMEDOUT);
 	assert_radio_unavailable(fake, &radio);
 	assert(fake->read_count < RTL8822B_EFUSE_PHYSICAL_SIZE);
@@ -1633,10 +1633,10 @@ test_radio_deadline_and_stop_retry(void)
 	fake = fake_radio_create();
 	transport = fake_radio_transport(fake);
 	memset(&radio, 0, sizeof(radio));
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == 0);
 	fake->automatic_llt_ack = 0;
-	assert(rtl8822b_radio_start(&radio, fake->now + 200U) ==
+	assert(drv_rtl8822b_radio_start(&radio, fake->now + 200U) ==
 	    ETIMEDOUT);
 	assert_radio_unavailable(fake, &radio);
 	assert(fake->read_count < RTL8822B_EFUSE_PHYSICAL_SIZE);
@@ -1645,10 +1645,10 @@ test_radio_deadline_and_stop_retry(void)
 	fake = fake_radio_create();
 	transport = fake_radio_transport(fake);
 	memset(&radio, 0, sizeof(radio));
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == 0);
 	fake->automatic_rf_lut_ack = 0;
-	assert(rtl8822b_radio_start(&radio, UINT64_MAX) == ETIMEDOUT);
+	assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == ETIMEDOUT);
 	assert_radio_unavailable(fake, &radio);
 	assert(fake->write_count < RADIO_TRACE_MAX);
 
@@ -1656,27 +1656,27 @@ test_radio_deadline_and_stop_retry(void)
 	fake = fake_radio_create();
 	transport = fake_radio_transport(fake);
 	memset(&radio, 0, sizeof(radio));
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == 0);
 	fake->fail_write_at = fake->write_count;
-	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == EIO);
+	assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == EIO);
 	assert(radio.state == RTL8822B_RADIO_STOPPING);
 	stop_writes = fake->write_count;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == EINVAL);
-	assert(rtl8822b_radio_start(&radio, UINT64_MAX) == EINVAL);
-	assert(rtl8822b_radio_set_channel(&radio, 1U, UINT64_MAX) == EINVAL);
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == EINVAL);
+	assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == EINVAL);
+	assert(drv_rtl8822b_radio_set_channel(&radio, 1U, UINT64_MAX) == EINVAL);
 	assert(fake->write_count == stop_writes);
 	/* A failed stop retains the transport; retry must issue the inverse again
 	 * without a new power-on that could hide incomplete teardown. */
 	stop_writes = fake->write_count;
 	fake->fail_write_at = SIZE_MAX;
-	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 	assert(fake->write_count > stop_writes);
 	assert_radio_off(fake, &radio);
 	transport = fake_radio_transport(fake);
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == 0);
-	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 	fake_radio_destroy(fake);
 }
 
@@ -1696,29 +1696,29 @@ test_radio_already_powered_rebind(void)
 
 	memset(&radio, 0, sizeof(radio));
 	invalid_board.mac_address[0] |= 1U;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &invalid_board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &invalid_board,
 	    UINT64_MAX) == EINVAL);
 	invalid_board = board;
 	invalid_board.tx_power_2g[0].cck_base[0] = 0x40U;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &invalid_board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &invalid_board,
 	    UINT64_MAX) == EINVAL);
 	invalid_board = board;
 	invalid_board.tx_power_2g[1].bw40_base[3] = 0x40U;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &invalid_board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &invalid_board,
 	    UINT64_MAX) == EINVAL);
 	invalid_board = board;
 	invalid_board.tx_power_2g[0].ofdm_diff = -9;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &invalid_board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &invalid_board,
 	    UINT64_MAX) == EINVAL);
 	invalid_board = board;
 	invalid_board.tx_power_2g[1].ofdm_diff = 8;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &invalid_board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &invalid_board,
 	    UINT64_MAX) == EINVAL);
 	/* Validation rejects direct-board callers before any device access. */
 	assert(fake->write_count == 0U && fake->read_count == 0U);
 	fake->registers[0x0100U] = 0xffU;
 	fake->registers[0x00f5U] = 0U;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == 0);
 	assert(radio.state == RTL8822B_RADIO_POWERED);
 	disable_start = trace_find(fake, 0U, 0x0093U, 1U, 0U);
@@ -1732,7 +1732,7 @@ test_radio_already_powered_rebind(void)
 	    0xf9U);
 	assert(disable_start < disable_32k && disable_32k < disable_usb &&
 	    disable_usb < disable_gpio && disable_gpio < enable_tail);
-	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 	assert_radio_off(fake, &radio);
 	fake_radio_destroy(fake);
 
@@ -1746,14 +1746,14 @@ test_radio_already_powered_rebind(void)
 	fake->registers[FIXTURE_REG_MCUFW_CTRL] = FIXTURE_MCUFW_INIT_READY;
 	fake->registers[FIXTURE_REG_USB_RPWM] = 0x35U;
 	fake->registers[FIXTURE_REG_USB_CPWM] = FIXTURE_RPWM_TOGGLE;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == 0);
 	disable_start = trace_find(fake, 0U, FIXTURE_REG_USB_RPWM, 1U,
 	    FIXTURE_RPWM_ACK | FIXTURE_RPWM_TOGGLE);
 	enable_tail = trace_find(fake, disable_start + 1U, 0x0029U, 1U,
 	    0xf9U);
 	assert(disable_start < enable_tail);
-	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 	fake_radio_destroy(fake);
 
 	/* A stalled warm firmware is never reused.  The finite handshake expires,
@@ -1766,11 +1766,11 @@ test_radio_already_powered_rebind(void)
 	fake->registers[FIXTURE_REG_SYS_STATUS1 + 1U] = 0U;
 	fake->registers[FIXTURE_REG_MCUFW_CTRL] = FIXTURE_MCUFW_INIT_READY;
 	fake->automatic_rpwm_ack = 0;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == 0);
 	assert(fake->delay_microseconds >= FIXTURE_RPWM_ACK_TIMEOUT_US);
 	assert(radio.state == RTL8822B_RADIO_POWERED);
-	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 	fake_radio_destroy(fake);
 }
 
@@ -1796,9 +1796,9 @@ test_radio_profile_costs(void)
 
 			board.chip.cut = cuts[cut_index];
 			memset(&radio, 0, sizeof(radio));
-			assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+			assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 			    UINT64_MAX) == 0);
-			assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+			assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
 			if (fake->write_count > maximum_writes)
 				maximum_writes = fake->write_count;
 			if (fake->read_count > maximum_reads)
@@ -1807,7 +1807,7 @@ test_radio_profile_costs(void)
 				maximum_delay = fake->delay_microseconds;
 			assert(fake->write_count < 5000U);
 			assert(fake->delay_microseconds < 1000000U);
-			assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+			assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 			fake_radio_destroy(fake);
 		}
 	}
@@ -1822,11 +1822,11 @@ test_radio_profile_costs(void)
 
 		board.chip.rf_path_count = 1U;
 		memset(&radio, 0, sizeof(radio));
-		assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+		assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 		    UINT64_MAX) == 0);
-		assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
 		start = fake->trace_count;
-		assert(rtl8822b_radio_set_channel(&radio, 6U, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_set_channel(&radio, 6U, UINT64_MAX) == 0);
 		for (index = start; index < fake->trace_count; index++) {
 			uint16_t address = fake->trace[index].address;
 
@@ -1835,7 +1835,7 @@ test_radio_profile_costs(void)
 			    address != 0x0eb8U && address != 0x0ebcU);
 			assert(address < 0x1d80U || address > 0x1dbcU);
 		}
-		assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 		fake_radio_destroy(fake);
 	}
 	printf("rtl8822b radio profiles: max-writes=%zu max-reads=%zu "
@@ -1878,9 +1878,9 @@ test_radio_trx_path_a(
 				board.chip.cut = cuts[profile];
 				board.chip.rf_path_count = (uint8_t)paths;
 				memset(&radio, 0, sizeof(radio));
-				assert(rtl8822b_radio_power_on(&radio, &transport,
+				assert(drv_rtl8822b_radio_power_on(&radio, &transport,
 				    &board, UINT64_MAX) == 0);
-				assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+				assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
 
 				/* Require path A for one stream and CCK, preserving other bits. */
 				assert(fake->registers[0x093cU] == 0x001c0642U);
@@ -1896,15 +1896,15 @@ test_radio_trx_path_a(
 				assert(selection < transmit);
 
 				/* Preserve the selection across either band's channel setup. */
-				assert(rtl8822b_radio_set_channel(&radio, 44U,
+				assert(drv_rtl8822b_radio_set_channel(&radio, 44U,
 				    UINT64_MAX) == 0);
-				assert(rtl8822b_radio_set_channel(&radio, 6U,
+				assert(drv_rtl8822b_radio_set_channel(&radio, 6U,
 				    UINT64_MAX) == 0);
 				assert(fake->registers[0x093cU] == 0x001c0642U);
 				assert(fake->registers[0x0a04U] == 0x80ff800cU);
 
 				/* Release each full startup before exercising another profile. */
-				assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+				assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 				assert_radio_off(fake, &radio);
 				fake_radio_destroy(fake);
 			}
@@ -1951,7 +1951,7 @@ test_radio_wlan_only(
 	for (index = 0U; index < sizeof(options); index++) {
 		/* Enter the production path through efuse parsing at SuperSpeed. */
 		logical[0xc1U] = options[index];
-		assert(rtl8822bu_board_parse(logical, sizeof(logical),
+		assert(drv_rtl8822bu_board_parse(logical, sizeof(logical),
 		    (3U << 12) | (1U << 27), &board) == 0);
 		assert(board.rf_board_option == options[index]);
 		fake = fake_radio_create();
@@ -1961,8 +1961,8 @@ test_radio_wlan_only(
 		transport = fake_radio_transport(fake);
 		transport.usb_bulk_max_packet_size = 1024U;
 		memset(&radio, 0, sizeof(radio));
-		assert(rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
-		assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
 		eligible = index < 2U;
 
 		/* Preserve all unrelated grant and ownership bits on eligible boards. */
@@ -2002,20 +2002,20 @@ test_radio_wlan_only(
 
 		/* Preserve unrelated switch bits through W52 and 2.4-GHz round trips. */
 		fake->registers[0x0cbcU] |= 0x80000000U;
-		assert(rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
 		assert((fake->registers[0x0cbcU] & 0x300U) == 0x100U);
 		assert((fake->registers[0x0cbcU] & 0x80000000U) != 0U);
-		assert(rtl8822b_radio_set_channel(&radio, 6U, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_set_channel(&radio, 6U, UINT64_MAX) == 0);
 		assert((fake->registers[0x0cbcU] & 0x300U) == 0x200U);
 		assert((fake->registers[0x0cbcU] & 0x80000000U) != 0U);
-		assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 		assert_radio_off(fake, &radio);
 		fake_radio_destroy(fake);
 	}
 
 	/* Parse one explicit WLAN-only board for all transport-failure cases. */
 	logical[0xc1U] = 0x01U;
-	assert(rtl8822bu_board_parse(logical, sizeof(logical),
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical),
 	    (3U << 12) | (1U << 27), &board) == 0);
 
 	/* Fail every new startup write and require the existing checked radio reset. */
@@ -2028,8 +2028,8 @@ test_radio_wlan_only(
 		transport = fake_radio_transport(fake);
 		transport.usb_bulk_max_packet_size = 1024U;
 		memset(&radio, 0, sizeof(radio));
-		assert(rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
-		assert(rtl8822b_radio_start(&radio, UINT64_MAX) == EIO);
+		assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == EIO);
 		assert_radio_unavailable(fake, &radio);
 		fake_radio_destroy(fake);
 	}
@@ -2041,7 +2041,7 @@ test_radio_wlan_only(
 		transport = fake_radio_transport(fake);
 		transport.usb_bulk_max_packet_size = 1024U;
 		memset(&radio, 0, sizeof(radio));
-		assert(rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
 		deadline = UINT64_MAX;
 		error = EIO;
 
@@ -2062,7 +2062,7 @@ test_radio_wlan_only(
 			if (failure == 11U)
 				deadline = grant_tick + 50U;
 		}
-		assert(rtl8822b_radio_start(&radio, deadline) == error);
+		assert(drv_rtl8822b_radio_start(&radio, deadline) == error);
 		assert_radio_unavailable(fake, &radio);
 
 		/* A permanently busy port admits no command and stops at either bound. */
@@ -2095,10 +2095,10 @@ assert_management_rate(
 	for (kind = 0U; kind < 2U; kind++) {
 		/* Construct each frame through its ordinary public entry point. */
 		if (kind == 0U) {
-			assert(rtl8822b_radio_management_frame_prepare(radio, wire,
+			assert(drv_rtl8822b_radio_management_frame_prepare(radio, wire,
 			    sizeof(wire), frame, sizeof(frame), &length) == 0);
 		} else {
-			assert(rtl8822b_radio_deauthentication_prepare(radio, wire,
+			assert(drv_rtl8822b_radio_deauthentication_prepare(radio, wire,
 			    sizeof(wire), bssid, radio->board.mac_address,
 			    3U, &length) == 0);
 			assert(wire[48U] == 0xc0U);
@@ -2155,7 +2155,7 @@ test_hardware_etsi_plan(
 	logical[0xcaU] = 3U;
 	logical[0xcbU] = 0xffU;
 	logical[0xccU] = 0xffU;
-	assert(rtl8822bu_board_parse(logical, sizeof(logical),
+	assert(drv_rtl8822bu_board_parse(logical, sizeof(logical),
 	    (3U << 12) | (1U << 27), &board) == 0);
 	assert(board.channel_plan == 0xa6U);
 	assert(board.country_code[0] == 0xffU && board.country_code[1] == 0xffU);
@@ -2163,12 +2163,12 @@ test_hardware_etsi_plan(
 
 	/* Admit only the existing non-DFS 5-GHz subset. */
 	for (index = 0U; index < sizeof(channels); index++)
-		assert(rtl8822b_board_active_channel_allowed(&board, channels[index]));
+		assert(drv_rtl8822b_board_active_channel_allowed(&board, channels[index]));
 	for (index = 0U; index < sizeof(rejected_channels); index++)
-		assert(!rtl8822b_board_active_channel_allowed(&board,
+		assert(!drv_rtl8822b_board_active_channel_allowed(&board,
 		    rejected_channels[index]));
-	assert(rtl8822b_board_active_channel_allowed(&board, 1U));
-	assert(rtl8822b_board_active_channel_allowed(&board, 11U));
+	assert(drv_rtl8822b_board_active_channel_allowed(&board, 1U));
+	assert(drv_rtl8822b_board_active_channel_allowed(&board, 11U));
 
 	/* Reject unforced, unknown, missing and contradictory policy profiles. */
 	for (index = 0U; index < sizeof(rejected_profiles) /
@@ -2177,8 +2177,8 @@ test_hardware_etsi_plan(
 		changed.channel_plan = rejected_profiles[index][0];
 		changed.country_code[0] = rejected_profiles[index][1];
 		changed.country_code[1] = rejected_profiles[index][2];
-		assert(!rtl8822b_board_active_channel_allowed(&changed, 44U));
-		assert(rtl8822b_board_active_channel_allowed(&changed, 1U));
+		assert(!drv_rtl8822b_board_active_channel_allowed(&changed, 44U));
+		assert(drv_rtl8822b_board_active_channel_allowed(&changed, 1U));
 	}
 
 	/* Keep both original Japan plan cases admitted. */
@@ -2186,9 +2186,9 @@ test_hardware_etsi_plan(
 	changed.country_code[0] = 'J';
 	changed.country_code[1] = 'P';
 	changed.channel_plan = 0x27U;
-	assert(rtl8822b_board_active_channel_allowed(&changed, 44U));
+	assert(drv_rtl8822b_board_active_channel_allowed(&changed, 44U));
 	changed.channel_plan = 0x7fU;
-	assert(rtl8822b_board_active_channel_allowed(&changed, 44U));
+	assert(drv_rtl8822b_board_active_channel_allowed(&changed, 44U));
 
 	/* Check every consumed calibration group and path before policy admission. */
 	for (path = 0U; path < 2U; path++) {
@@ -2196,17 +2196,17 @@ test_hardware_etsi_plan(
 		for (group = 0U; group < 2U; group++) {
 			changed = board;
 			changed.tx_power_5g[path].bw40_base[group] = 0x40U;
-			assert(!rtl8822b_board_active_channel_allowed(&changed, 44U));
+			assert(!drv_rtl8822b_board_active_channel_allowed(&changed, 44U));
 			changed.tx_power_5g[path].bw40_base[group] = 0xffU;
-			assert(!rtl8822b_board_active_channel_allowed(&changed, 44U));
+			assert(!drv_rtl8822b_board_active_channel_allowed(&changed, 44U));
 		}
 
 		/* Reject invalid signed OFDM differences from direct board callers. */
 		changed = board;
 		changed.tx_power_5g[path].ofdm_diff = -9;
-		assert(!rtl8822b_board_active_channel_allowed(&changed, 44U));
+		assert(!drv_rtl8822b_board_active_channel_allowed(&changed, 44U));
 		changed.tx_power_5g[path].ofdm_diff = 8;
-		assert(!rtl8822b_board_active_channel_allowed(&changed, 44U));
+		assert(!drv_rtl8822b_board_active_channel_allowed(&changed, 44U));
 	}
 
 	/* Exercise the new board through ordinary SuperSpeed radio startup. */
@@ -2214,14 +2214,14 @@ test_hardware_etsi_plan(
 	transport = fake_radio_transport(fake);
 	transport.usb_bulk_max_packet_size = 1024U;
 	memset(&radio, 0, sizeof(radio));
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
-	assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
-	assert(rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
 	assert_management_rate(&radio, 4U);
 	assert(radio.board.channel_plan == 0xa6U);
 	assert(radio.board.country_code[0] == 0xffU &&
 	    radio.board.country_code[1] == 0xffU);
-	assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+	assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 	assert_radio_off(fake, &radio);
 	fake_radio_destroy(fake);
 }
@@ -2251,13 +2251,13 @@ test_management_band_rates(
 		transport = fake_radio_transport(fake);
 		transport.usb_bulk_max_packet_size = speed == 0U ? 512U : 1024U;
 		memset(&radio, 0, sizeof(radio));
-		assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+		assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 		    UINT64_MAX) == 0);
-		assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
 
 		/* Visit every W52 channel and return to the accepted CCK profile. */
 		for (index = 0U; index < sizeof(channels); index++) {
-			assert(rtl8822b_radio_set_channel(&radio, channels[index],
+			assert(drv_rtl8822b_radio_set_channel(&radio, channels[index],
 			    UINT64_MAX) == 0);
 			assert(radio.channel == channels[index]);
 			assert_management_rate(&radio, index >= 1U && index <= 4U ?
@@ -2265,26 +2265,26 @@ test_management_band_rates(
 		}
 
 		/* A rejected unsupported channel must not change the selected rate. */
-		assert(rtl8822b_radio_set_channel(&radio, 52U,
+		assert(drv_rtl8822b_radio_set_channel(&radio, 52U,
 		    UINT64_MAX) == EOPNOTSUPP);
 		assert(radio.channel == 1U);
 		assert_management_rate(&radio, 0U);
-		assert(rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
+		assert(drv_rtl8822b_radio_set_channel(&radio, 44U, UINT64_MAX) == 0);
 		assert_management_rate(&radio, 4U);
 
 		/* Fail an actual W52-to-2.4-GHz register transaction. */
 		make_probe_request(frame, &board);
 		fake->fail_write_at = fake->write_count + 8U;
-		assert(rtl8822b_radio_set_channel(&radio, 1U, UINT64_MAX) == EIO);
+		assert(drv_rtl8822b_radio_set_channel(&radio, 1U, UINT64_MAX) == EIO);
 		assert_radio_unavailable(fake, &radio);
 
 		/* Refuse both encoders after rollback leaves the radio unavailable. */
 		length = sizeof(wire);
-		assert(rtl8822b_radio_management_frame_prepare(&radio, wire,
+		assert(drv_rtl8822b_radio_management_frame_prepare(&radio, wire,
 		    sizeof(wire), frame, sizeof(frame), &length) != 0);
 		assert(length == 0U);
 		length = sizeof(wire);
-		assert(rtl8822b_radio_deauthentication_prepare(&radio, wire,
+		assert(drv_rtl8822b_radio_deauthentication_prepare(&radio, wire,
 		    sizeof(wire), bssid, board.mac_address, 3U, &length) == EPERM);
 		assert(length == 0U);
 		fake_radio_destroy(fake);
@@ -2313,10 +2313,10 @@ test_radio_usb_profiles(
 	transport = fake_radio_transport(fake);
 	memset(&radio, 0, sizeof(radio));
 	transport.usb_bulk_max_packet_size = 0U;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == EINVAL);
 	transport.usb_bulk_max_packet_size = 64U;
-	assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+	assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 	    UINT64_MAX) == EINVAL);
 	assert(fake->write_count == 0U && fake->read_count == 0U);
 	fake_radio_destroy(fake);
@@ -2334,7 +2334,7 @@ test_radio_usb_profiles(
 			transport.usb_bulk_max_packet_size = speed == 0U ?
 			    512U : 1024U;
 			memset(&radio, 0, sizeof(radio));
-			assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+			assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 			    UINT64_MAX) == 0);
 
 			/* Count only USB PHY register writes in the complete trace. */
@@ -2362,14 +2362,14 @@ test_radio_usb_profiles(
 			}
 
 			/* Check speed-specific DMA and speed-independent v1 aggregate. */
-			assert(rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
+			assert(drv_rtl8822b_radio_start(&radio, UINT64_MAX) == 0);
 			assert((fake->registers[0x0290U] & 0xffU) ==
 			    (speed == 0U ? 0x1eU : 0x0eU));
 			assert((fake->registers[0x0280U] & 0xffffU) == 0x2005U);
-			assert(rtl8822b_radio_set_channel(&radio, 44U,
+			assert(drv_rtl8822b_radio_set_channel(&radio, 44U,
 			    UINT64_MAX) == 0);
-			assert(rtl8822b_radio_active_scan_allowed(&radio, 44U));
-			assert(rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
+			assert(drv_rtl8822b_radio_active_scan_allowed(&radio, 44U));
+			assert(drv_rtl8822b_radio_stop(&radio, UINT64_MAX) == 0);
 			assert_radio_off(fake, &radio);
 			fake_radio_destroy(fake);
 		}
@@ -2386,7 +2386,7 @@ test_radio_usb_profiles(
 		transport.usb_bulk_max_packet_size = 1024U;
 		fake->fail_write_at = phy_start + stage;
 		memset(&radio, 0, sizeof(radio));
-		assert(rtl8822b_radio_power_on(&radio, &transport, &board,
+		assert(drv_rtl8822b_radio_power_on(&radio, &transport, &board,
 		    UINT64_MAX) == EIO);
 		assert_radio_unavailable(fake, &radio);
 		assert(fake->registers[0xff0cU] == 0U);
@@ -2414,7 +2414,7 @@ check_firmware_boundary(
 	assert(chunk->first && chunk->last && !chunk->checksum_continue);
 	total = chunk->wire_payload_length + sizeof(descriptor);
 	assert(total % 512U != 0U && total % 1024U != 0U);
-	assert(rtl8822b_firmware_tx_descriptor(descriptor,
+	assert(drv_rtl8822b_firmware_tx_descriptor(descriptor,
 	    chunk->wire_payload_length) == 0);
 	assert(get_le16(descriptor) == expected[1]);
 
@@ -2470,7 +2470,7 @@ test_usb_tx_boundaries(
 			expected[0] = frame_length;
 			expected[1] = expected_wire - 48U;
 			expected[2] = 0U;
-			assert(rtl8822b_test_firmware_segment(&view, frame_length,
+			assert(drv_rtl8822b_test_firmware_segment(&view, frame_length,
 			    check_firmware_boundary, expected) == 0);
 			assert(expected[2] == 1U);
 
@@ -2497,7 +2497,7 @@ test_usb_tx_boundaries(
 				radio.transport.usb_bulk_max_packet_size =
 				    speed == 0U ? 512U : 1024U;
 				memset(wire, 0xa5, sizeof(wire));
-				assert(rtl8822b_radio_management_frame_prepare(&radio,
+				assert(drv_rtl8822b_radio_management_frame_prepare(&radio,
 				    wire, sizeof(wire), frame, frame_length,
 				    &wire_length) == 0);
 				assert(wire_length == expected_wire);
@@ -2516,7 +2516,7 @@ test_usb_tx_boundaries(
 				for (index = 0U; index < 16U; index++)
 					checksum ^= get_le16(wire + index * 2U);
 				assert(checksum == 0U);
-				assert(rtl8822b_radio_management_frame_prepare(&radio,
+				assert(drv_rtl8822b_radio_management_frame_prepare(&radio,
 				    wire, expected_wire - 1U, frame, frame_length,
 				    &wire_length) == ENOSPC);
 				assert(wire_length == 0U);
@@ -2543,7 +2543,7 @@ test_pinned_blob(const char *path)
 	trailing = fgetc(file);
 	assert(trailing == EOF);
 	assert(fclose(file) == 0);
-	assert(rtl8822b_firmware_validate(firmware,
+	assert(drv_rtl8822b_firmware_validate(firmware,
 	    RTL8822B_FIRMWARE_SIZE, &view) == 0);
 	memset(&state, 0, sizeof(state));
 	state.next_dmem_file = view.dmem_offset;
@@ -2551,7 +2551,7 @@ test_pinned_blob(const char *path)
 	state.next_imem_file = view.imem_offset;
 	state.next_imem_destination = view.imem_address;
 	state.fail_at = SIZE_MAX;
-	assert(rtl8822b_firmware_walk(&view, check_chunk, &state) == 0);
+	assert(drv_rtl8822b_firmware_walk(&view, check_chunk, &state) == 0);
 	assert(state.count == 40U);
 	free(firmware);
 }

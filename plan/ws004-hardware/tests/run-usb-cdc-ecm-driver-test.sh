@@ -24,6 +24,6 @@ ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 "$sanitized"
 
 cc -std=c11 -O0 -Wall -Wextra -Werror -fanalyzer -I"$repo/include" \
 	-I"$repo/include/uapi" -I"$repo/src" -I"$repo" -c \
-	"$repo/src/drivers/usb-cdc-ecm.c" -o "$temporary/analyzer.o"
+	"$repo/src/drivers/usb/usb-cdc-ecm.c" -o "$temporary/analyzer.o"
 
 echo 'USB CDC ECM production driver gate: PASS'

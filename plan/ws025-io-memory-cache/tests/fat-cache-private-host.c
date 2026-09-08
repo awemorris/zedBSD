@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <stdio.h>
 #include <stdlib.h>
-#include "src/drivers/fs/fat.c"
+#include "../temp/p031-driver-fragments/src/drivers/fs/fat.c"
 #define REQUIRE(x) do {if(!(x)){fprintf(stderr,"line %u: %s\n",__LINE__,#x);abort();}}while(0)
 static uint8_t media[8192];
 static unsigned reads,writes,read_error,write_error;

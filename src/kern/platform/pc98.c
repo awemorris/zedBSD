@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -20,7 +18,7 @@
 #include "kern/disk.h"
 #include "kern/partition.h"
 #include <drivers/disklabel.h>
-#include "drivers/pc98-ide.h"
+#include "drivers/platform/pc98/pc98-ide.h"
 #include "drivers/hid/pc98-busmouse.h"
 #if CONFIG_DRIVER_LGY98
 #include "drivers/pc98-lgy98.h"
@@ -88,13 +86,13 @@ kern_platform_init(
 		return 0;
 
 	/* Selects the PC-98 partition scheme and starts the IDE driver. */
-	partition_set_scheme(&partition_scheme_pc98_auto);
+	partition_set_scheme(&drv_partition_scheme_pc98_auto);
 	disk_registry_reset();
-	(void)pc98_ide_init(devices, (unsigned)count);
+	(void)drv_pc98_ide_init(devices, (unsigned)count);
 
 #if CONFIG_DRIVER_LGY98
 	/* Starts the LGY-98 network interface when one is present. */
-	network_error = pc98_lgy98_init();
+	network_error = drv_pc98_lgy98_init();
 	if (network_error == 0) {
 		hal_printf("net: LGY-98 registered as ne0\n");
 		kern_platform_debug_write("net: LGY-98 registered as ne0\n");
@@ -104,7 +102,7 @@ kern_platform_init(
 #endif
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
 	/* Prepares the graphics driver, reporting its absence. */
-	if (!pc98_graphics_prepare())
+	if (!drv_pc98_graphics_prepare())
 		hal_printf("graphics: PC-98 driver unavailable\n");
 #endif
 
@@ -138,7 +136,7 @@ kern_platform_input_init(
 	int error;
 
 	/* Starts the bus mouse driver. */
-	error = pc98_busmouse_init();
+	error = drv_pc98_busmouse_init();
 
 	/* Reports the driver result. */
 	return error;
@@ -158,7 +156,7 @@ kern_platform_block_device(
 		return NULL;
 
 	/* Resolves the IDE unit by its BIOS identifier. */
-	disk = pc98_ide_bios_unit(device->bios_id);
+	disk = drv_pc98_ide_bios_unit(device->bios_id);
 
 	/* Reports the disk. */
 	return disk;

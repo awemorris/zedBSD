@@ -11,7 +11,8 @@ cd "$repo_dir"
 "${CC:-cc}" -std=c11 -D_POSIX_C_SOURCE=200809L \
 	-Iinclude -Iinclude/uapi -Isrc \
 	-Wall -Wextra -Werror -ffunction-sections -fdata-sections -pthread \
-	src/kern/swap.c src/kern/swap-format.c src/kern/vm-reclaim.c \
+	src/kern/swap.c src/kern/vm.c \
+	plan/ws016-swap-control/tests/vm-object-stubs.c \
 	plan/ws016-swap-control/tests/swap-drain-test.c \
 	-Wl,--gc-sections -o "$binary"
 "$binary"

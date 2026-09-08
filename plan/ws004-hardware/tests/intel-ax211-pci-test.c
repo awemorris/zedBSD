@@ -70,7 +70,7 @@ struct drv_pci_device {
 	size_t event_count;
 };
 
-#include "../../../src/drivers/pci-intel-ax211.c"
+#include "../../../plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/pci-intel-ax211.c"
 
 #define FIXTURE_TX_QUEUE 0x0107U
 #define FIXTURE_TX_EVENT_QUEUE \
@@ -763,7 +763,7 @@ drv_pci_device_set_driver_data(
 }
 
 int
-intel_ax211_pci_mmio_backend_init(
+drv_intel_ax211_pci_mmio_backend_init(
 	struct intel_ax211_pci_mmio_backend *backend,
 	void *registers,
 	size_t mapping_size)
@@ -843,13 +843,13 @@ static const struct intel_ax211_mmio_ops fixture_mmio_ops = {
 };
 
 const struct intel_ax211_mmio_ops *
-intel_ax211_pci_mmio_ops(void)
+drv_intel_ax211_pci_mmio_ops(void)
 {
 	return &fixture_mmio_ops;
 }
 
 int
-intel_ax211_mmio_init(
+drv_intel_ax211_mmio_init(
 	struct intel_ax211_mmio *mmio,
 	const struct intel_ax211_mmio_ops *ops,
 	void *argument,
@@ -873,7 +873,7 @@ intel_ax211_mmio_init(
 }
 
 int
-intel_ax211_mmio_prepare_card_hw(
+drv_intel_ax211_mmio_prepare_card_hw(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == initialized_mmio);
@@ -883,7 +883,7 @@ intel_ax211_mmio_prepare_card_hw(
 }
 
 int
-intel_ax211_mmio_sw_reset(
+drv_intel_ax211_mmio_sw_reset(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == initialized_mmio);
@@ -894,7 +894,7 @@ intel_ax211_mmio_sw_reset(
 }
 
 int
-intel_ax211_mmio_apm_init(
+drv_intel_ax211_mmio_apm_init(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == initialized_mmio);
@@ -905,7 +905,7 @@ intel_ax211_mmio_apm_init(
 }
 
 int
-intel_ax211_mmio_read_mac(
+drv_intel_ax211_mmio_read_mac(
 	struct intel_ax211_mmio *mmio,
 	uint8_t mac_address[6])
 {
@@ -922,7 +922,7 @@ intel_ax211_mmio_read_mac(
 }
 
 int
-intel_ax211_mmio_stop(
+drv_intel_ax211_mmio_stop(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == initialized_mmio);
@@ -1362,7 +1362,7 @@ hal_io_wmb(void)
 static const struct intel_ax211_transport_ops fixture_transport_ops;
 
 int
-intel_ax211_transport_backend_init(
+drv_intel_ax211_transport_backend_init(
 	struct intel_ax211_transport_backend *backend,
 	struct intel_ax211_mmio *mmio,
 	struct intel_ax211_pci_mmio_backend *pci_mmio,
@@ -1380,7 +1380,7 @@ intel_ax211_transport_backend_init(
 }
 
 int
-intel_ax211_transport_backend_ring_memory(
+drv_intel_ax211_transport_backend_ring_memory(
 	const struct intel_ax211_transport_backend *backend,
 	struct intel_ax211_transport_ring_memory *memory)
 {
@@ -1391,13 +1391,13 @@ intel_ax211_transport_backend_ring_memory(
 }
 
 const struct intel_ax211_transport_ops *
-intel_ax211_transport_backend_ops(void)
+drv_intel_ax211_transport_backend_ops(void)
 {
 	return &fixture_transport_ops;
 }
 
 int
-intel_ax211_transport_init(
+drv_intel_ax211_transport_init(
 	struct intel_ax211_transport *transport,
 	const struct intel_ax211_transport_ops *ops,
 	void *argument,
@@ -1418,7 +1418,7 @@ intel_ax211_transport_init(
 }
 
 int
-intel_ax211_transport_interrupt_claim(
+drv_intel_ax211_transport_interrupt_claim(
 	struct intel_ax211_transport *transport,
 	struct intel_ax211_transport_causes *causes)
 {
@@ -1432,7 +1432,7 @@ intel_ax211_transport_interrupt_claim(
 }
 
 int
-intel_ax211_transport_activate_rx(
+drv_intel_ax211_transport_activate_rx(
 	struct intel_ax211_transport *transport)
 {
 	assert(transport == &allocated_controller->transport);
@@ -1443,7 +1443,7 @@ intel_ax211_transport_activate_rx(
 }
 
 int
-intel_ax211_transport_rx_next(
+drv_intel_ax211_transport_rx_next(
 	struct intel_ax211_transport *transport,
 	struct intel_ax211_transport_rx_completion *completion)
 {
@@ -1458,7 +1458,7 @@ intel_ax211_transport_rx_next(
 }
 
 int
-intel_ax211_transport_rx_replenish(
+drv_intel_ax211_transport_rx_replenish(
 	struct intel_ax211_transport *transport,
 	uint64_t device_address)
 {
@@ -1483,7 +1483,7 @@ intel_ax211_transport_rx_replenish(
 }
 
 int
-intel_ax211_transport_interrupt_rearm(
+drv_intel_ax211_transport_interrupt_rearm(
 	struct intel_ax211_transport *transport)
 {
 	assert(transport == &allocated_controller->transport);
@@ -1492,7 +1492,7 @@ intel_ax211_transport_interrupt_rearm(
 }
 
 int
-intel_ax211_transport_disable_interrupts(
+drv_intel_ax211_transport_disable_interrupts(
 	struct intel_ax211_transport *transport)
 {
 	assert(transport == &allocated_controller->transport);
@@ -1502,7 +1502,7 @@ intel_ax211_transport_disable_interrupts(
 }
 
 int
-intel_ax211_mmio_nic_lock(
+drv_intel_ax211_mmio_nic_lock(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == initialized_mmio);
@@ -1511,7 +1511,7 @@ intel_ax211_mmio_nic_lock(
 }
 
 int
-intel_ax211_mmio_nic_unlock(
+drv_intel_ax211_mmio_nic_unlock(
 	struct intel_ax211_mmio *mmio)
 {
 	assert(mmio == initialized_mmio && mmio->nic_lock_depth != 0U);
@@ -1520,7 +1520,7 @@ intel_ax211_mmio_nic_unlock(
 }
 
 int
-intel_ax211_mmio_prph_write32(
+drv_intel_ax211_mmio_prph_write32(
 	struct intel_ax211_mmio *mmio,
 	uint32_t address,
 	uint32_t value)
@@ -1532,7 +1532,7 @@ intel_ax211_mmio_prph_write32(
 }
 
 int
-intel_ax211_event_decode(
+drv_intel_ax211_event_decode(
 	const uint8_t *bytes,
 	size_t length,
 	struct intel_ax211_event *event)
@@ -1555,7 +1555,7 @@ intel_ax211_event_decode(
 }
 
 int
-intel_ax211_protocol_command_table_validate_api89(
+drv_intel_ax211_protocol_command_table_validate_api89(
 	const struct intel_ax211_protocol_command_table *table)
 {
 	return table != NULL && table->bytes != NULL && table->count ==
@@ -1564,7 +1564,7 @@ intel_ax211_protocol_command_table_validate_api89(
 }
 
 int
-intel_ax211_protocol_command_version_lookup(
+drv_intel_ax211_protocol_command_version_lookup(
 	const struct intel_ax211_protocol_command_table *table,
 	uint8_t group,
 	uint8_t opcode,
@@ -1573,7 +1573,7 @@ intel_ax211_protocol_command_version_lookup(
 	uint8_t command_version;
 	uint8_t notification_version;
 
-	if (intel_ax211_protocol_command_table_validate_api89(table) !=
+	if (drv_intel_ax211_protocol_command_table_validate_api89(table) !=
 	    INTEL_AX211_PROTOCOL_OK || version == NULL)
 		return INTEL_AX211_PROTOCOL_INVALID;
 	command_version = 0U;
@@ -1626,7 +1626,7 @@ intel_ax211_protocol_command_version_lookup(
 }
 
 int
-intel_ax211_protocol_command_response_validate(
+drv_intel_ax211_protocol_command_response_validate(
 	const struct intel_ax211_protocol_message *message,
 	const struct intel_ax211_protocol_pending_command *pending)
 {
@@ -1645,14 +1645,14 @@ intel_ax211_protocol_command_response_validate(
 }
 
 size_t
-intel_ax211_command_pending_count(
+drv_intel_ax211_command_pending_count(
 	const struct intel_ax211_command_transaction *transaction)
 {
 	return transaction == NULL ? 0U : transaction->pending_count;
 }
 
 int
-intel_ax211_command_submit(
+drv_intel_ax211_command_submit(
 	struct intel_ax211_command_transaction *transaction,
 	const struct intel_ax211_command_request *request,
 	uint64_t now,
@@ -1844,7 +1844,7 @@ intel_ax211_command_submit(
 }
 
 int
-intel_ax211_command_complete(
+drv_intel_ax211_command_complete(
 	struct intel_ax211_command_transaction *transaction,
 	const uint8_t *event_bytes,
 	size_t event_length,
@@ -1859,7 +1859,7 @@ intel_ax211_command_complete(
 	assert(transaction == &allocated_controller->runtime_start.commands);
 	assert(event_bytes != NULL && response_length != NULL);
 	if (hardware_epoch != transaction->hardware_epoch ||
-	    intel_ax211_event_decode(event_bytes, event_length, &event) !=
+	    drv_intel_ax211_event_decode(event_bytes, event_length, &event) !=
 	    INTEL_AX211_OK)
 		return INTEL_AX211_COMMAND_STALE;
 	entry = &transaction->entry[event.index];
@@ -1881,7 +1881,7 @@ intel_ax211_command_complete(
 }
 
 int
-intel_ax211_command_cancel(
+drv_intel_ax211_command_cancel(
 	struct intel_ax211_command_transaction *transaction,
 	const struct intel_ax211_command_handle *handle)
 {
@@ -1893,7 +1893,7 @@ intel_ax211_command_cancel(
 }
 
 int
-intel_ax211_boot_init(
+drv_intel_ax211_boot_init(
 	struct intel_ax211_boot *boot,
 	const struct intel_ax211_boot_ops *ops,
 	void *argument,
@@ -1924,7 +1924,7 @@ intel_ax211_boot_init(
 }
 
 int
-intel_ax211_boot_run(
+drv_intel_ax211_boot_run(
 	struct intel_ax211_boot *boot,
 	struct intel_ax211_protocol_nvm *nvm)
 {
@@ -1962,7 +1962,7 @@ intel_ax211_boot_run(
 }
 
 int
-intel_ax211_boot_cleanup(
+drv_intel_ax211_boot_cleanup(
 	struct intel_ax211_boot *boot)
 {
 	assert(boot != NULL);
@@ -1971,7 +1971,7 @@ intel_ax211_boot_cleanup(
 }
 
 int
-intel_ax211_boot_command_table(
+drv_intel_ax211_boot_command_table(
 	const struct intel_ax211_boot *boot,
 	struct intel_ax211_protocol_command_table *table)
 {
@@ -1984,7 +1984,7 @@ intel_ax211_boot_command_table(
 }
 
 int
-intel_ax211_runtime_start_init(
+drv_intel_ax211_runtime_start_init(
 	struct intel_ax211_runtime_start *session,
 	const struct intel_ax211_runtime_start_ops *ops,
 	void *argument,
@@ -2019,7 +2019,7 @@ intel_ax211_runtime_start_init(
 }
 
 int
-intel_ax211_runtime_start_run(
+drv_intel_ax211_runtime_start_run(
 	struct intel_ax211_runtime_start *session)
 {
 	int result;
@@ -2071,7 +2071,7 @@ intel_ax211_runtime_start_run(
 }
 
 int
-intel_ax211_runtime_start_stop(
+drv_intel_ax211_runtime_start_stop(
 	struct intel_ax211_runtime_start *session)
 {
 	int result;
@@ -2088,15 +2088,15 @@ intel_ax211_runtime_start_stop(
 }
 
 int
-intel_ax211_runtime_start_cleanup(
+drv_intel_ax211_runtime_start_cleanup(
 	struct intel_ax211_runtime_start *session)
 {
 	assert(session != NULL);
-	return intel_ax211_runtime_start_stop(session);
+	return drv_intel_ax211_runtime_start_stop(session);
 }
 
 int
-intel_ax211_runtime_start_mcc(
+drv_intel_ax211_runtime_start_mcc(
 	const struct intel_ax211_runtime_start *session,
 	struct intel_ax211_runtime_mcc *mcc)
 {
@@ -2109,7 +2109,7 @@ intel_ax211_runtime_start_mcc(
 }
 
 int
-intel_ax211_rx_api89_validate(
+drv_intel_ax211_rx_api89_validate(
 	const struct intel_ax211_protocol_command_table *table)
 {
 	assert(table != NULL);
@@ -2120,7 +2120,7 @@ intel_ax211_rx_api89_validate(
 }
 
 int
-intel_ax211_scan_session_init(
+drv_intel_ax211_scan_session_init(
 	struct intel_ax211_scan_session *session,
 	struct intel_ax211_command_transaction *commands,
 	const struct intel_ax211_protocol_command_table *command_table,
@@ -2154,7 +2154,7 @@ intel_ax211_scan_session_init(
 }
 
 int
-intel_ax211_scan_session_begin_channel(
+drv_intel_ax211_scan_session_begin_channel(
 	struct intel_ax211_scan_session *session,
 	uint64_t common_generation,
 	uint8_t channel,
@@ -2176,7 +2176,7 @@ intel_ax211_scan_session_begin_channel(
 }
 
 int
-intel_ax211_scan_session_start_ack(
+drv_intel_ax211_scan_session_start_ack(
 	struct intel_ax211_scan_session *session,
 	const uint8_t *event_bytes,
 	size_t event_length,
@@ -2194,7 +2194,7 @@ intel_ax211_scan_session_start_ack(
 }
 
 int
-intel_ax211_scan_session_notification(
+drv_intel_ax211_scan_session_notification(
 	struct intel_ax211_scan_session *session,
 	const struct intel_ax211_protocol_message *message,
 	uint64_t now_us,
@@ -2218,7 +2218,7 @@ intel_ax211_scan_session_notification(
 }
 
 int
-intel_ax211_scan_session_abort(
+drv_intel_ax211_scan_session_abort(
 	struct intel_ax211_scan_session *session,
 	uint64_t common_generation,
 	uint64_t now_us)
@@ -2236,7 +2236,7 @@ intel_ax211_scan_session_abort(
 }
 
 int
-intel_ax211_scan_session_abort_ack(
+drv_intel_ax211_scan_session_abort_ack(
 	struct intel_ax211_scan_session *session,
 	const uint8_t *event_bytes,
 	size_t event_length,
@@ -2255,7 +2255,7 @@ intel_ax211_scan_session_abort_ack(
 }
 
 int
-intel_ax211_scan_session_expire(
+drv_intel_ax211_scan_session_expire(
 	struct intel_ax211_scan_session *session,
 	uint64_t now_us)
 {
@@ -2268,7 +2268,7 @@ intel_ax211_scan_session_expire(
 }
 
 int
-intel_ax211_rx_mpdu_decode(
+drv_intel_ax211_rx_mpdu_decode(
 	const struct intel_ax211_protocol_message *message,
 	uint32_t generation,
 	uint8_t *output,
@@ -2842,7 +2842,7 @@ fixture_seed_bss(
 	struct intel_ax211_bss_entry entry;
 
 	assert(controller != NULL && bssid != NULL);
-	assert(intel_ax211_bss_cache_init(&controller->bss_published_cache,
+	assert(drv_intel_ax211_bss_cache_init(&controller->bss_published_cache,
 	    controller->hardware_epoch) == INTEL_AX211_BSS_OK);
 	controller->bss_published_initialized = 1U;
 	controller->bss_published_generation = 1U;
@@ -2863,7 +2863,7 @@ fixture_seed_bss(
 	entry.receive_tsf_valid = 1U;
 	entry.source = INTEL_AX211_BSS_SOURCE_BEACON;
 	entry.valid = 1U;
-	assert(intel_ax211_bss_cache_observe(&controller->bss_published_cache,
+	assert(drv_intel_ax211_bss_cache_observe(&controller->bss_published_cache,
 	    &entry) ==
 	    INTEL_AX211_BSS_OK);
 }
@@ -4006,7 +4006,7 @@ test_scan_generation_resets_full_bss_cache(void)
 		entry.receive_tsf_valid = 1U;
 		entry.source = INTEL_AX211_BSS_SOURCE_BEACON;
 		entry.valid = 1U;
-		assert(intel_ax211_bss_cache_observe(
+		assert(drv_intel_ax211_bss_cache_observe(
 		    &controller->bss_staging_cache,
 		    &entry) == INTEL_AX211_BSS_OK);
 	}
@@ -4046,7 +4046,7 @@ test_scan_generation_resets_full_bss_cache(void)
 	entry.receive_tsf_valid = 1U;
 	entry.source = INTEL_AX211_BSS_SOURCE_BEACON;
 	entry.valid = 1U;
-	assert(intel_ax211_bss_cache_observe(&controller->bss_staging_cache,
+	assert(drv_intel_ax211_bss_cache_observe(&controller->bss_staging_cache,
 	    &entry) ==
 	    INTEL_AX211_BSS_OK);
 	assert(controller->bss_staging_cache.count == 1U);
@@ -4087,7 +4087,7 @@ test_scan_generation_resets_full_bss_cache(void)
 	entry.gp2_on_air_rise = 2000U;
 	entry.last_seen_ticks = 2000U;
 	entry.beacon_interval_tu = 200U;
-	assert(intel_ax211_bss_cache_observe(&controller->bss_staging_cache,
+	assert(drv_intel_ax211_bss_cache_observe(&controller->bss_staging_cache,
 	    &entry) == INTEL_AX211_BSS_OK);
 	assert(published_station->ops->scan_stop(controller,
 	    aborted_generation) == EBUSY);
@@ -4099,7 +4099,7 @@ test_scan_generation_resets_full_bss_cache(void)
 	assert(controller->bss_staging_initialized == 0U);
 	assert(controller->bss_published_generation == second_generation);
 	memset(&entry, 0, sizeof(entry));
-	assert(intel_ax211_bss_cache_lookup(&controller->bss_published_cache,
+	assert(drv_intel_ax211_bss_cache_lookup(&controller->bss_published_cache,
 	    selected_bssid, 1U, controller->hardware_epoch, &entry) ==
 	    INTEL_AX211_BSS_OK);
 	assert(entry.observation_generation == second_generation);

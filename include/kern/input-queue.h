@@ -19,14 +19,14 @@ struct input_queue_reader {
 	uint64_t sequence;
 };
 
-void input_queue_init(struct input_queue *);
-void input_queue_reader_init(const struct input_queue *,
+void drv_input_queue_init(struct input_queue *);
+void drv_input_queue_reader_init(const struct input_queue *,
 			     struct input_queue_reader *);
-void input_queue_push(struct input_queue *, const struct input_event *);
-size_t input_queue_read(const struct input_queue *, struct input_queue_reader *,
+void drv_input_queue_push(struct input_queue *, const struct input_event *);
+size_t drv_input_queue_read(const struct input_queue *, struct input_queue_reader *,
 			struct input_event *, size_t);
-int input_queue_readable(const struct input_queue *,
+int drv_input_queue_readable(const struct input_queue *,
 			 const struct input_queue_reader *);
-void input_queue_detach(struct input_queue *);
+void drv_input_queue_detach(struct input_queue *);
 
 #endif

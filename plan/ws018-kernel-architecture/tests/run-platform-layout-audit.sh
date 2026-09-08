@@ -76,22 +76,22 @@ for platform in pcat pc98 rpi4 sun4u x68k; do
 	done
 done
 
-grep -q 'partition_set_scheme(&partition_scheme_pcat_auto)' \
+grep -q 'partition_set_scheme(&drv_partition_scheme_pcat_auto)' \
 	"$platform_dir/pcat.c" || fail "PC/AT no longer selects strict GPT/MBR auto"
-grep -q 'partition_set_scheme(&partition_scheme_pc98_auto)' \
+grep -q 'partition_set_scheme(&drv_partition_scheme_pc98_auto)' \
 	"$platform_dir/pc98.c" || fail "PC-98 no longer selects auto disk label"
-grep -q 'partition_set_scheme(&partition_scheme_mbr)' \
+grep -q 'partition_set_scheme(&drv_partition_scheme_mbr)' \
 	"$platform_dir/rpi4.c" || fail "RPi4 no longer selects MBR"
-grep -q 'partition_set_scheme(&partition_scheme_sun)' \
+grep -q 'partition_set_scheme(&drv_partition_scheme_sun)' \
 	"$platform_dir/sun4u.c" || fail "sun4u no longer selects Sun disk label"
-grep -q 'partition_set_scheme(&partition_scheme_x68k)' \
+grep -q 'partition_set_scheme(&drv_partition_scheme_x68k)' \
 	"$platform_dir/x68k.c" || fail "X68k no longer selects its native label"
 
-test -f "$repo_dir/src/drivers/graphics/pcat/font.c" ||
+test -f "$repo_dir/src/drivers/platform/pcat/graphics/font.c" ||
 	fail "PC/AT font is not graphics-owned"
-test -f "$repo_dir/src/drivers/graphics/pcat/vgafont.c" ||
+test -f "$repo_dir/src/drivers/platform/pcat/graphics/vgafont.c" ||
 	fail "PC/AT VGA font is not graphics-owned"
-test -f "$repo_dir/src/drivers/graphics/pc98/display-glyph.c" ||
+test -f "$repo_dir/src/drivers/platform/pc98/graphics/display-glyph.c" ||
 	fail "PC-98 glyph implementation is not graphics-owned"
 
 old_paths='src/kern/(mbr-partition\.c|sun-disklabel\.c|(pcat|pc98|rpi4|sun4u|x68k)/)'

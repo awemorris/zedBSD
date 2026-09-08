@@ -1,7 +1,7 @@
 /* Actual mount redo-image allocation, accounting and failed-admission cleanup. */
 #include <stdio.h>
 #include <stdlib.h>
-#include "src/drivers/fs/ufs/ufs-vfs.c"
+#include "../temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-vfs.c"
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"journal-image-owner:%d: %s\n",__LINE__,#x);abort(); } } while(0)
 static unsigned allocations,frees,fail_alloc,fail_reserve;
 static size_t charged,pending;

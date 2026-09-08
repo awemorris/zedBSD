@@ -55,22 +55,22 @@ struct hid_report_report_info {
 	size_t field_count;
 };
 
-int hid_report_layout_parse(const void *, size_t,
+int drv_hid_report_layout_parse(const void *, size_t,
 	struct hid_report_layout **);
-int hid_report_layout_boot_keyboard(struct hid_report_layout **);
-int hid_report_layout_boot_mouse(struct hid_report_layout **);
-void hid_report_layout_destroy(struct hid_report_layout *);
+int drv_hid_report_layout_boot_keyboard(struct hid_report_layout **);
+int drv_hid_report_layout_boot_mouse(struct hid_report_layout **);
+void drv_hid_report_layout_destroy(struct hid_report_layout *);
 
-int hid_report_layout_get_info(const struct hid_report_layout *,
+int drv_hid_report_layout_get_info(const struct hid_report_layout *,
 	struct hid_report_layout_info *);
-int hid_report_layout_get_report(const struct hid_report_layout *, size_t,
+int drv_hid_report_layout_get_report(const struct hid_report_layout *, size_t,
 	struct hid_report_report_info *);
-int hid_report_layout_get_capability(const struct hid_report_layout *, size_t,
+int drv_hid_report_layout_get_capability(const struct hid_report_layout *, size_t,
 	struct input_capability *);
-int hid_report_layout_get_absolute_axis(const struct hid_report_layout *,
+int drv_hid_report_layout_get_absolute_axis(const struct hid_report_layout *,
 	size_t, struct input_abs_axis *);
 
-int hid_report_decode(const struct hid_report_layout *, const void *, size_t,
+int drv_hid_report_decode(const struct hid_report_layout *, const void *, size_t,
 	struct hid_report_input *);
 
 #endif

@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-bss.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-bss.h"
 
 #define FRAME_CAPACITY 256U
 #define SCAN_GENERATION UINT64_C(41)
@@ -155,7 +155,7 @@ decode_beacon(void)
 	add_tim(&frame, 1U, 3U);
 	add_wmm(&frame, 1U);
 	mpdu = make_mpdu(&frame, 6U);
-	assert(intel_ax211_bss_decode(&mpdu, SCAN_GENERATION,
+	assert(drv_intel_ax211_bss_decode(&mpdu, SCAN_GENERATION,
 	    HARDWARE_EPOCH, &entry) == INTEL_AX211_BSS_OK);
 	return entry;
 }
@@ -172,7 +172,7 @@ decode_probe(void)
 	add_ds(&frame, 6U);
 	add_wmm(&frame, 0U);
 	mpdu = make_mpdu(&frame, 6U);
-	assert(intel_ax211_bss_decode(&mpdu, SCAN_GENERATION,
+	assert(drv_intel_ax211_bss_decode(&mpdu, SCAN_GENERATION,
 	    HARDWARE_EPOCH, &entry) == INTEL_AX211_BSS_OK);
 	return entry;
 }
@@ -215,7 +215,7 @@ test_probe_decode(void)
 static void
 test_cache_and_metadata(void)
 {
-	struct intel_ax211_bss_assoc_metadata metadata;
+	struct drv_intel_ax211_bss_assoc_metadata metadata;
 	struct intel_ax211_bss_cache cache;
 	struct intel_ax211_bss_entry probe;
 	struct intel_ax211_bss_entry beacon;
@@ -223,33 +223,33 @@ test_cache_and_metadata(void)
 
 	probe = decode_probe();
 	beacon = decode_beacon();
-	assert(intel_ax211_bss_cache_init(&cache, HARDWARE_EPOCH) ==
+	assert(drv_intel_ax211_bss_cache_init(&cache, HARDWARE_EPOCH) ==
 	    INTEL_AX211_BSS_OK);
-	assert(intel_ax211_bss_cache_observe(&cache, &probe) ==
+	assert(drv_intel_ax211_bss_cache_observe(&cache, &probe) ==
 	    INTEL_AX211_BSS_OK);
 	assert(cache.count == 1U);
-	assert(intel_ax211_bss_cache_lookup(&cache, test_bssid, 6U,
+	assert(drv_intel_ax211_bss_cache_lookup(&cache, test_bssid, 6U,
 	    HARDWARE_EPOCH, &found) == INTEL_AX211_BSS_OK);
 	assert(found.source == INTEL_AX211_BSS_SOURCE_PROBE_RESPONSE);
 
 	/* A beacon upgrades the probe entry and contributes DTIM state. */
-	assert(intel_ax211_bss_cache_observe(&cache, &beacon) ==
+	assert(drv_intel_ax211_bss_cache_observe(&cache, &beacon) ==
 	    INTEL_AX211_BSS_OK);
 	assert(cache.count == 1U);
-	assert(intel_ax211_bss_cache_lookup(&cache, test_bssid, 6U,
+	assert(drv_intel_ax211_bss_cache_lookup(&cache, test_bssid, 6U,
 	    HARDWARE_EPOCH, &found) == INTEL_AX211_BSS_OK);
 	assert(found.source == INTEL_AX211_BSS_SOURCE_BEACON);
 	assert(found.tim_valid == 1U);
 
 	/* A later probe must not erase authoritative beacon-only DTIM data. */
 	probe.capability = 0U;
-	assert(intel_ax211_bss_cache_observe(&cache, &probe) ==
+	assert(drv_intel_ax211_bss_cache_observe(&cache, &probe) ==
 	    INTEL_AX211_BSS_OK);
-	assert(intel_ax211_bss_cache_lookup(&cache, test_bssid, 6U,
+	assert(drv_intel_ax211_bss_cache_lookup(&cache, test_bssid, 6U,
 	    HARDWARE_EPOCH, &found) == INTEL_AX211_BSS_OK);
 	assert(found.capability == 0x0431U && found.tim_valid == 1U);
 
-	assert(intel_ax211_bss_assoc_metadata(&found, CONNECTION_GENERATION,
+	assert(drv_intel_ax211_bss_assoc_metadata(&found, CONNECTION_GENERATION,
 	    HARDWARE_EPOCH, &metadata) == INTEL_AX211_BSS_OK);
 	assert(memcmp(metadata.bssid, test_bssid, sizeof(test_bssid)) == 0);
 	assert(metadata.common_generation == CONNECTION_GENERATION);
@@ -264,7 +264,7 @@ test_cache_and_metadata(void)
 	    metadata.dtim_period == 3U && metadata.wmm_present == 1U);
 
 	/* Scan generation 41 may be selected by connection generation 42. */
-	assert(intel_ax211_bss_assoc_metadata(&beacon,
+	assert(drv_intel_ax211_bss_assoc_metadata(&beacon,
 	    HIGH_CONNECTION_GENERATION, HARDWARE_EPOCH, &metadata) ==
 	    INTEL_AX211_BSS_OK);
 	assert(metadata.common_generation == HIGH_CONNECTION_GENERATION);
@@ -275,20 +275,20 @@ test_cache_and_metadata(void)
 	 * stale TIM/GP2 state into that scan's connection. */
 	probe.observation_generation = SCAN_GENERATION + 1U;
 	probe.gp2_on_air_rise++;
-	assert(intel_ax211_bss_cache_observe(&cache, &probe) ==
+	assert(drv_intel_ax211_bss_cache_observe(&cache, &probe) ==
 	    INTEL_AX211_BSS_OK);
-	assert(intel_ax211_bss_cache_lookup(&cache, test_bssid, 6U,
+	assert(drv_intel_ax211_bss_cache_lookup(&cache, test_bssid, 6U,
 	    HARDWARE_EPOCH, &found) == INTEL_AX211_BSS_OK);
 	assert(found.source == INTEL_AX211_BSS_SOURCE_PROBE_RESPONSE);
 	assert(found.observation_generation == SCAN_GENERATION + 1U);
 	assert(found.tim_valid == 0U);
-	assert(intel_ax211_bss_cache_observe(&cache, &beacon) ==
+	assert(drv_intel_ax211_bss_cache_observe(&cache, &beacon) ==
 	    INTEL_AX211_BSS_STALE);
-	assert(intel_ax211_bss_cache_lookup(&cache, test_bssid, 6U,
+	assert(drv_intel_ax211_bss_cache_lookup(&cache, test_bssid, 6U,
 	    HARDWARE_EPOCH + 1U, &found) ==
 	    INTEL_AX211_BSS_STALE);
 	beacon.hardware_epoch++;
-	assert(intel_ax211_bss_cache_observe(&cache, &beacon) ==
+	assert(drv_intel_ax211_bss_cache_observe(&cache, &beacon) ==
 	    INTEL_AX211_BSS_STALE);
 }
 
@@ -306,20 +306,20 @@ test_cache_capacity(void)
 	entry = decode_beacon();
 	/* Must retain every BSS exposed by the common 64-entry snapshot. */
 	assert(INTEL_AX211_BSS_CACHE_LIMIT == 64U);
-	assert(intel_ax211_bss_cache_init(&cache, HARDWARE_EPOCH) ==
+	assert(drv_intel_ax211_bss_cache_init(&cache, HARDWARE_EPOCH) ==
 	    INTEL_AX211_BSS_OK);
 	for (index = 0U; index < INTEL_AX211_BSS_CACHE_LIMIT; index++) {
 		entry.bssid[5U] = (uint8_t)(index + 1U);
 		entry.channel = (uint8_t)(index % 11U + 1U);
 		entry.rssi_dbm = -30;
 		entry.last_seen_ticks = index + 1U;
-		assert(intel_ax211_bss_cache_observe(&cache, &entry) ==
+		assert(drv_intel_ax211_bss_cache_observe(&cache, &entry) ==
 		    INTEL_AX211_BSS_OK);
 	}
 	assert(cache.count == INTEL_AX211_BSS_CACHE_LIMIT);
 	memcpy(first_bssid, test_bssid, sizeof(first_bssid));
 	first_bssid[5U] = 1U;
-	assert(intel_ax211_bss_cache_lookup(&cache, first_bssid, 1U,
+	assert(drv_intel_ax211_bss_cache_lookup(&cache, first_bssid, 1U,
 	    HARDWARE_EPOCH, &found) == INTEL_AX211_BSS_OK);
 
 	memcpy(replacement_bssid, test_bssid, sizeof(replacement_bssid));
@@ -329,13 +329,13 @@ test_cache_capacity(void)
 	entry.channel = 11U;
 	entry.rssi_dbm = -10;
 	entry.last_seen_ticks = 100U;
-	assert(intel_ax211_bss_cache_observe(&cache, &entry) ==
+	assert(drv_intel_ax211_bss_cache_observe(&cache, &entry) ==
 	    INTEL_AX211_BSS_OK);
 	assert(cache.count == INTEL_AX211_BSS_CACHE_LIMIT);
-	assert(intel_ax211_bss_cache_lookup(&cache, first_bssid, 1U,
+	assert(drv_intel_ax211_bss_cache_lookup(&cache, first_bssid, 1U,
 	    HARDWARE_EPOCH, &found) ==
 	    INTEL_AX211_BSS_NOT_FOUND);
-	assert(intel_ax211_bss_cache_lookup(&cache, replacement_bssid, 11U,
+	assert(drv_intel_ax211_bss_cache_lookup(&cache, replacement_bssid, 11U,
 	    HARDWARE_EPOCH, &found) == INTEL_AX211_BSS_OK);
 
 	memcpy(rejected_bssid, test_bssid, sizeof(rejected_bssid));
@@ -344,9 +344,9 @@ test_cache_capacity(void)
 	memcpy(entry.bssid, rejected_bssid, sizeof(entry.bssid));
 	entry.rssi_dbm = -100;
 	entry.last_seen_ticks = 101U;
-	assert(intel_ax211_bss_cache_observe(&cache, &entry) ==
+	assert(drv_intel_ax211_bss_cache_observe(&cache, &entry) ==
 	    INTEL_AX211_BSS_OK);
-	assert(intel_ax211_bss_cache_lookup(&cache, rejected_bssid, 11U,
+	assert(drv_intel_ax211_bss_cache_lookup(&cache, rejected_bssid, 11U,
 	    HARDWARE_EPOCH, &found) == INTEL_AX211_BSS_NOT_FOUND);
 }
 
@@ -357,7 +357,7 @@ decode_custom(struct frame_builder *frame, uint8_t channel)
 	struct intel_ax211_bss_entry entry;
 
 	mpdu = make_mpdu(frame, channel);
-	return intel_ax211_bss_decode(&mpdu, SCAN_GENERATION,
+	return drv_intel_ax211_bss_decode(&mpdu, SCAN_GENERATION,
 	    HARDWARE_EPOCH, &entry);
 }
 
@@ -372,7 +372,7 @@ test_frame_rejections(void)
 	frame_begin(&frame, 0x0080U);
 	mpdu = make_mpdu(&frame, 6U);
 	mpdu.length = 35U;
-	assert(intel_ax211_bss_decode(&mpdu, SCAN_GENERATION,
+	assert(drv_intel_ax211_bss_decode(&mpdu, SCAN_GENERATION,
 	    HARDWARE_EPOCH, &entry) == INTEL_AX211_BSS_TRUNCATED);
 	frame_begin(&frame, 0x0008U);
 	assert(decode_custom(&frame, 6U) == INTEL_AX211_BSS_UNSUPPORTED);
@@ -467,25 +467,25 @@ test_frame_rejections(void)
 static void
 test_api_rejections(void)
 {
-	struct intel_ax211_bss_assoc_metadata metadata;
+	struct drv_intel_ax211_bss_assoc_metadata metadata;
 	struct intel_ax211_bss_cache cache;
 	struct intel_ax211_bss_entry entry;
 
 	entry = decode_beacon();
-	assert(intel_ax211_bss_cache_init(NULL, HARDWARE_EPOCH) ==
+	assert(drv_intel_ax211_bss_cache_init(NULL, HARDWARE_EPOCH) ==
 	    INTEL_AX211_BSS_INVALID);
-	assert(intel_ax211_bss_cache_init(&cache, 0U) ==
+	assert(drv_intel_ax211_bss_cache_init(&cache, 0U) ==
 	    INTEL_AX211_BSS_INVALID);
 	memset(&cache, 0, sizeof(cache));
-	assert(intel_ax211_bss_cache_observe(&cache, &entry) ==
+	assert(drv_intel_ax211_bss_cache_observe(&cache, &entry) ==
 	    INTEL_AX211_BSS_INVALID);
-	assert(intel_ax211_bss_cache_init(&cache, HARDWARE_EPOCH) ==
+	assert(drv_intel_ax211_bss_cache_init(&cache, HARDWARE_EPOCH) ==
 	    INTEL_AX211_BSS_OK);
 	entry.tim_valid = 1U;
 	entry.dtim_period = 0U;
-	assert(intel_ax211_bss_cache_observe(&cache, &entry) ==
+	assert(drv_intel_ax211_bss_cache_observe(&cache, &entry) ==
 	    INTEL_AX211_BSS_MALFORMED);
-	assert(intel_ax211_bss_assoc_metadata(&entry, CONNECTION_GENERATION,
+	assert(drv_intel_ax211_bss_assoc_metadata(&entry, CONNECTION_GENERATION,
 	    HARDWARE_EPOCH, &metadata) == INTEL_AX211_BSS_MALFORMED);
 }
 

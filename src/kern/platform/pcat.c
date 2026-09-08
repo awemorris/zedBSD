@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -66,7 +64,7 @@
 #include <hal/hal.h>
 
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
-int usb_hid_checkpoint_driver_register(void);
+int drv_usb_hid_checkpoint_driver_register(void);
 #endif
 #ifdef ZEDBSD_TEST_CHECKPOINTS
 int ws004_pci_msi_qemu_register(void);
@@ -106,7 +104,7 @@ kern_platform_init(
 		return 0;
 
 	/* Selects the partition scheme and starts with no disks. */
-	partition_set_scheme(&partition_scheme_pcat_auto);
+	partition_set_scheme(&drv_partition_scheme_pcat_auto);
 	disk_registry_reset();
 
 	/* Brings up the PCI core and, under test, the MSI fixture. */
@@ -137,7 +135,7 @@ kern_platform_init(
 		hal_printf("usb: RTL8822BU WLAN driver registration failed\n");
 #endif
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
-	if (usb_hid_checkpoint_driver_register() != 0)
+	if (drv_usb_hid_checkpoint_driver_register() != 0)
 		hal_printf("usb: HID checkpoint driver registration failed\n");
 #elif CONFIG_DRIVER_USB_HID
 	if (drv_usb_hid_driver_register() != 0)
@@ -166,7 +164,7 @@ kern_platform_init(
 		hal_printf("wlan: Intel AX211 PCI driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
-	if (pcat_graphics_pci_register() != 0)
+	if (drv_pcat_graphics_pci_register() != 0)
 		hal_printf("graphics: PCI driver registration failed\n");
 #endif
 
@@ -179,9 +177,9 @@ kern_platform_init(
 #endif
 
 	/* Lists every BIOS IDE unit as a boot device. */
-	(void)pcat_ide_init();
+	(void)drv_pcat_ide_init();
 	for (slot = 0; slot < 4U && count < capacity; slot++) {
-		disk = pcat_ide_bios_unit((uint8_t)(0x80U + slot));
+		disk = drv_pcat_ide_bios_unit((uint8_t)(0x80U + slot));
 		if (disk == 0)
 			continue;
 		device = &devices[count];
@@ -203,7 +201,7 @@ kern_platform_init(
 
 	/* Attaches the ISA NE2000 when one is configured and present. */
 #if CONFIG_DRIVER_NE2000
-	network_error = pcat_ne2000_init();
+	network_error = drv_pcat_ne2000_init();
 	if (network_error == 0)
 		hal_printf("net: ISA NE2000 at 0x300 irq 10 registered "
 		    "as ne0\n");
@@ -214,7 +212,7 @@ kern_platform_init(
 
 	/* Prepares the graphics driver. */
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
-	if (!pcat_graphics_prepare())
+	if (!drv_pcat_graphics_prepare())
 		hal_printf("graphics: PC/AT driver unavailable\n");
 #endif
 
@@ -299,7 +297,7 @@ kern_platform_input_init(
 #endif
 
 	/* Attaches the PS/2 mouse. */
-	error = pcat_ps2_mouse_init();
+	error = drv_pcat_ps2_mouse_init();
 
 	/* Reports the mouse attachment result. */
 	return error;
@@ -319,7 +317,7 @@ kern_platform_block_device(
 		return 0;
 
 	/* Looks up the unit by its BIOS identifier. */
-	disk = pcat_ide_bios_unit(device->bios_id);
+	disk = drv_pcat_ide_bios_unit(device->bios_id);
 
 	/* Reports the disk, or none. */
 	return disk;

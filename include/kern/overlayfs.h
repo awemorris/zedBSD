@@ -25,10 +25,10 @@ struct overlay_mount_args {
 };
 
 int
-overlayfs_init(void);
+drv_overlayfs_init(void);
 
 int
-overlay_mount_at(
+drv_overlay_mount_at(
 	struct mount *namespace_root,
 	const char *target,
 	const struct overlay_mount_args *args,

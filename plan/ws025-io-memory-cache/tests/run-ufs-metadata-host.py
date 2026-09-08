@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Production-linked WS025 counter tests, with retained commands and logs."""
+__import__('runpy').run_path(str(__import__('pathlib').Path(__file__).resolve().parents[3] / 'plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py'), run_name='__main__')
 import argparse
 import json
 import os
@@ -46,7 +47,7 @@ for variant in ("ordinary", "sanitize"):
             f"-DUFS_AUDIT_VERSION={version}", "-Ilibc/include", "-pthread",
             *([] if variant == "ordinary" else ["--param", "asan-globals=0"]),
             "plan/ws025-io-memory-cache/tests/ufs-metadata-host.c",
-            "src/drivers/fs/ufs/ufs-endian.c",
+            "plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.c",
             "src/kern/quota.c", "src/kern/io-stats.c", str(thread),
             "-Wl,--gc-sections", "-o", str(binary)])
         run(f"ufs{version}-{variant}", ["timeout", "60s", str(binary)])

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Production memory map/ownership tests with reproducible build logs."""
+__import__('runpy').run_path(str(__import__('pathlib').Path(__file__).resolve().parents[3] / 'plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py'), run_name='__main__')
 import json
 import os
 from pathlib import Path
@@ -20,11 +21,11 @@ groups = {
     "pmem-range": ["plan/ws025-io-memory-cache/tests/pmem-range-host.c",
                    "src/hal/amd64/pmem-range.c"],
     "dma-range": ["plan/ws025-io-memory-cache/tests/dma-range-host.c",
-                  "src/drivers/dma.c", "src/hal/amd64/pmem-range.c", "src/kern/io-stats.c"],
+                  "plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/dma.c", "src/hal/amd64/pmem-range.c", "src/kern/io-stats.c"],
     "dma-compat": ["plan/ws004-hardware/tests/dma-constraints-test.c",
-                   "src/drivers/dma.c", "src/hal/pmem-constraints.c", "src/kern/io-stats.c"],
+                   "plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/dma.c", "src/hal/pmem-constraints.c", "src/kern/io-stats.c"],
     "dma-lock": ["plan/ws003-bringup/tests/dma-allocation-lock-test.c",
-                 "src/drivers/dma.c", "src/hal/pmem-constraints.c", "src/kern/io-stats.c"],
+                 "plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/dma.c", "src/hal/pmem-constraints.c", "src/kern/io-stats.c"],
     "ram-map": ["plan/ws025-io-memory-cache/tests/ram-map-host.c",
                 "src/hal/amd64/ram-map.c"],
     "legacy-parameters": ["plan/ws003-bringup/tests/x86-parameter-handoff-test.c",

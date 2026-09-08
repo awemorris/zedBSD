@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -454,6 +452,7 @@ kern_boot_source_selector_validate(
 	unsigned index;
 	int error;
 
+	/* The identity prefixes a selector may carry. */
 	static const struct {
 		const char *prefix;
 		size_t length;
@@ -790,7 +789,7 @@ kern_boot_source_context_mount(
 		}
 
 		/* The partition must carry a supported FAT variant. */
-		error = fat_probe_type(disk, &fat_type);
+		error = drv_fat_probe_type(disk, &fat_type);
 		if (error == 0 && !kern_boot_source_fat_type_supported(fat_type))
 			error = EOPNOTSUPP;
 		if (error != 0) {

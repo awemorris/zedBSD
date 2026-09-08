@@ -3,7 +3,7 @@
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
 #include "kern/net/wlan.h"
-#include "kern/net/wlan-wpa2.h"
+#include "kern/net/wifi/wlan-wpa2.h"
 
 #include <assert.h>
 #include <errno.h>

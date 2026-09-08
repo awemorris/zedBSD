@@ -2,6 +2,6 @@
 #ifndef ZEDBSD_DRIVERS_HID_PS2_MOUSE_H
 #define ZEDBSD_DRIVERS_HID_PS2_MOUSE_H
 
-int pcat_ps2_mouse_init(void);
+int drv_pcat_ps2_mouse_init(void);
 
 #endif

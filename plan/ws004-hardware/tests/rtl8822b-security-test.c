@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "../../../src/drivers/rtl8822b-internal.h"
+#include "../../../src/drivers/wifi/rtl8822b/rtl8822b-internal.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -74,16 +74,16 @@ test_tx_queue_empty_snapshot(void)
 	fake.registers[0x0234U / 4U] = 0x00220022U;
 	fake.registers[0x0238U / 4U] = 0x00330033U;
 	fake.registers[0x023cU / 4U] = 0x00440044U;
-	assert(rtl8822b_tx_queues_empty(&radio, 100U) == 0);
+	assert(drv_rtl8822b_tx_queues_empty(&radio, 100U) == 0);
 	assert(fake.reads == 8U);
 	fake.registers[0x0234U / 4U] = 0x00210022U;
-	assert(rtl8822b_tx_queues_empty(&radio, 100U) == EBUSY);
+	assert(drv_rtl8822b_tx_queues_empty(&radio, 100U) == EBUSY);
 	/* A later transport error wins over an earlier mismatch: callers must not
 	 * mistake an incomplete snapshot for the expected retry state. */
 	fake.fail_read_address = 0x023aU;
-	assert(rtl8822b_tx_queues_empty(&radio, 100U) == EIO);
+	assert(drv_rtl8822b_tx_queues_empty(&radio, 100U) == EIO);
 	fake.now = 100U;
-	assert(rtl8822b_tx_queues_empty(&radio, 100U) == ETIMEDOUT);
+	assert(drv_rtl8822b_tx_queues_empty(&radio, 100U) == ETIMEDOUT);
 }
 
 static int
@@ -167,29 +167,29 @@ test_association_and_cam(void)
 
 	/* Keep the supplied deadline across association and every CAM transaction. */
 	fake.expected_deadline = 100U;
-	assert(rtl8822b_security_enable(&radio, 100U) == 0);
+	assert(drv_rtl8822b_security_enable(&radio, 100U) == 0);
 	assert((fake.registers[0x100U / 4U] & 0x200U) != 0U);
 	assert((fake.registers[0x680U / 4U] & 0xcfU) == 0xcfU);
-	assert(rtl8822b_security_set_association(&radio, bssid, 0x345U,
+	assert(drv_rtl8822b_security_set_association(&radio, bssid, 0x345U,
 	    100U) == 0);
 	assert(fake.registers[0x618U / 4U] == 0x03020102U);
 	assert((fake.registers[0x61cU / 4U] & 0xffffU) == 0x0504U);
 	assert((fake.registers[0x6a8U / 4U] & 0x7ffU) == 0x345U);
 	assert((fake.registers[0x100U / 4U] & 0x30000U) == 0x20000U);
 	assert((fake.registers[0x608U / 4U] & 0x40U) != 0U);
-	assert(rtl8822b_cam_program_ccmp(&radio,
+	assert(drv_rtl8822b_cam_program_ccmp(&radio,
 	    RTL8822B_CAM_PAIRWISE_SLOT, 0U, 0, bssid, key, 100U) == 0);
 	assert(fake.cam_count == 8U);
 	assert(fake.cam_address[0] == RTL8822B_CAM_PAIRWISE_SLOT * 8U + 7U);
 	assert(fake.cam_address[7] == RTL8822B_CAM_PAIRWISE_SLOT * 8U);
 	assert((fake.cam_value[7] & 0x8000U) != 0U);
 	assert(((fake.cam_value[7] >> 2) & 7U) == 4U);
-	assert(rtl8822b_cam_program_ccmp(&radio, 2U, 2U, 1, broadcast,
+	assert(drv_rtl8822b_cam_program_ccmp(&radio, 2U, 2U, 1, broadcast,
 	    key, 100U) == 0);
 	assert((fake.cam_value[15] & 0x40U) != 0U);
-	assert(rtl8822b_cam_clear(&radio, 2U, 100U) == 0);
+	assert(drv_rtl8822b_cam_clear(&radio, 2U, 100U) == 0);
 	assert(fake.cam_value[16] == 0U);
-	assert(rtl8822b_cam_stage_ccmp(&radio, 5U, 0U, 0, bssid, key,
+	assert(drv_rtl8822b_cam_stage_ccmp(&radio, 5U, 0U, 0, bssid, key,
 	    100U) == 0);
 	/* Stage first invalidates word zero, writes only words 7..1, and leaves
 	 * the replacement invisible until the explicit activation barrier. */
@@ -197,16 +197,16 @@ test_association_and_cam(void)
 	assert(fake.cam_address[17] == 5U * 8U);
 	assert(fake.cam_value[17] == 0U);
 	assert(fake.cam_address[24] == 5U * 8U + 1U);
-	assert(rtl8822b_cam_activate_ccmp(&radio, 5U, 0U, 0, bssid,
+	assert(drv_rtl8822b_cam_activate_ccmp(&radio, 5U, 0U, 0, bssid,
 	    100U) == 0);
 	assert(fake.cam_address[25] == 5U * 8U);
 	assert((fake.cam_value[25] & 0x8000U) != 0U);
-	assert(rtl8822b_cam_clear(&radio, 5U, 100U) == 0);
+	assert(drv_rtl8822b_cam_clear(&radio, 5U, 100U) == 0);
 	assert(fake.cam_value[26] == 0U);
 
 	/* Accept a later caller's different absolute deadline without reusing the old one. */
 	fake.expected_deadline = 137U;
-	assert(rtl8822b_security_clear_association(&radio, 137U) == 0);
+	assert(drv_rtl8822b_security_clear_association(&radio, 137U) == 0);
 	assert((fake.registers[0x608U / 4U] & 0x40U) == 0U);
 	assert((fake.registers[0x100U / 4U] & 0x30000U) == 0U);
 }
@@ -223,13 +223,13 @@ test_cam_failure_rollback(void)
 	radio_init(&radio, &fake);
 	/* Two register writes per word.  Fail the fourth word's data write. */
 	fake.fail_write = 7U;
-	assert(rtl8822b_cam_program_ccmp(&radio, 4U, 0U, 0, address, key,
+	assert(drv_rtl8822b_cam_program_ccmp(&radio, 4U, 0U, 0, address, key,
 	    100U) == EIO);
 	assert(fake.cam_count >= 3U);
 	assert(fake.cam_address[fake.cam_count - 1U] == 4U * 8U);
 	assert(fake.cam_value[fake.cam_count - 1U] == 0U);
 	fake.now = 100U;
-	assert(rtl8822b_cam_clear(&radio, 4U, 100U) == ETIMEDOUT);
+	assert(drv_rtl8822b_cam_clear(&radio, 4U, 100U) == ETIMEDOUT);
 }
 
 static void
@@ -249,10 +249,10 @@ test_descriptor(void)
 	frame[1] = 0x41U;
 	frame[4] = 2U;
 	radio.power_limits_valid = 0U;
-	assert(rtl8822b_data_frame_prepare(&radio, wire, sizeof(wire), frame,
+	assert(drv_rtl8822b_data_frame_prepare(&radio, wire, sizeof(wire), frame,
 	    sizeof(frame), 1, 7U, 0x321U, &length) == EINVAL);
 	radio.power_limits_valid = 1U;
-	assert(rtl8822b_data_frame_prepare(&radio, wire, sizeof(wire), frame,
+	assert(drv_rtl8822b_data_frame_prepare(&radio, wire, sizeof(wire), frame,
 	    sizeof(frame), 1, 7U, 0x321U, &length) == 0);
 	assert(length == 48U + sizeof(frame));
 	assert(((wire[6] >> 6) & 3U) == 3U);
@@ -263,7 +263,7 @@ test_descriptor(void)
 		    ((uint16_t)wire[index * 2U + 1U] << 8);
 	assert(checksum == 0U);
 	assert(memcmp(wire + 48U, frame, sizeof(frame)) == 0);
-	assert(rtl8822b_data_frame_prepare(&radio, wire, 10U, frame,
+	assert(drv_rtl8822b_data_frame_prepare(&radio, wire, 10U, frame,
 	    sizeof(frame), 1, 0U, 0U, &length) == ENOSPC);
 }
 
@@ -311,7 +311,7 @@ test_data_usb_boundaries(
 				/* Preserve the MAC frame size with either security mode. */
 				for (encrypted = 0U; encrypted < 2U; encrypted++) {
 					memset(wire, 0xa5, sizeof(wire));
-					assert(rtl8822b_data_frame_prepare(&radio, wire,
+					assert(drv_rtl8822b_data_frame_prepare(&radio, wire,
 					    sizeof(wire), frame, frame_length,
 					    (int)encrypted, 7U, 0x321U, &length) == 0);
 					assert(length == expected);
@@ -337,7 +337,7 @@ test_data_usb_boundaries(
 						    ((uint16_t)wire[index * 2U + 1U] << 8);
 					}
 					assert(checksum == 0U);
-					assert(rtl8822b_data_frame_prepare(&radio, wire,
+					assert(drv_rtl8822b_data_frame_prepare(&radio, wire,
 					    expected - 1U, frame, frame_length,
 					    (int)encrypted, 7U, 0x321U, &length) == ENOSPC);
 					assert(length == 0U);

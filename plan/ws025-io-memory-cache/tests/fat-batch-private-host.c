@@ -1,7 +1,7 @@
 /* Exercise actual FAT transactions with uncertain media completion and mirrors. */
 #include <stdio.h>
 #include <stdlib.h>
-#include "src/drivers/fs/fat.c"
+#include "../temp/p031-driver-fragments/src/drivers/fs/fat.c"
 
 #define REQUIRE(x) do { checks++; if (!(x)) { fprintf(stderr, "FAT batch line %u: %s\n", __LINE__, #x); abort(); } } while (0)
 static uint8_t media[64 * 512], durable[64 * 512], original[64 * 512];

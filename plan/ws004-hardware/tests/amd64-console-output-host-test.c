@@ -21,7 +21,7 @@ void pcat_console_output_test_reentrant_transient(int);
 int pcat_console_output_test_state(unsigned *, unsigned *);
 
 /* The renderer only needs a stable, addressable glyph table in this test. */
-const uint8_t pcat_vgafont16[256U * 16U] = { 0 };
+const uint8_t drv_pcat_vgafont16[256U * 16U] = { 0 };
 
 void
 asm_outb(uint16_t port, uint8_t value)

@@ -588,7 +588,7 @@ scan(struct partition *entries, unsigned capacity)
 {
 	memset(diagnostics, 0, sizeof(diagnostics));
 	diagnostic_length = 0U;
-	return partition_scheme_pcat_auto.scan(&partition_scheme_pcat_auto,
+	return drv_partition_scheme_pcat_auto.scan(&drv_partition_scheme_pcat_auto,
 	    &disk, entries, capacity);
 }
 

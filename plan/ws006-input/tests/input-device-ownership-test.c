@@ -225,7 +225,7 @@ test_registration_publication_and_rollback(void)
 	cdev_failures = TEST_INPUT_DEVICE_MAX + 1U;
 	for (index = 0; index < TEST_INPUT_DEVICE_MAX + 1U; index++) {
 		device = NULL;
-		assert(input_device_register(&info, &device) == EIO);
+		assert(drv_input_device_register(&info, &device) == EIO);
 		assert(device == NULL);
 	}
 	assert(registered_count == 0);
@@ -310,7 +310,7 @@ register_keyboard(unsigned flags)
 	};
 	struct input_device *device = NULL;
 
-	assert(input_device_register(&info, &device) == 0);
+	assert(drv_input_device_register(&info, &device) == 0);
 	assert(device != NULL);
 	return device;
 }
@@ -334,7 +334,7 @@ register_keyboard_callbacks(int (*open_callback)(void *),
 	};
 	struct input_device *device = NULL;
 
-	assert(input_device_register(&info, &device) == 0);
+	assert(drv_input_device_register(&info, &device) == 0);
 	return device;
 }
 
@@ -397,7 +397,7 @@ register_pointer(uint16_t button)
 	};
 	struct input_device *device = NULL;
 
-	assert(input_device_register(&info, &device) == 0);
+	assert(drv_input_device_register(&info, &device) == 0);
 	assert(device != NULL);
 	return device;
 }
@@ -425,7 +425,7 @@ test_momentary(void)
 	struct hal_key_event press = key_event("a", HAL_KEY_EVENT_PRESS);
 
 	clear_capture();
-	input_device_emit_key_event(device, &press);
+	drv_input_device_emit_key_event(device, &press);
 	assert(captured_count == 1);
 	assert(captured[0].device == device && captured[0].event_count == 3);
 	assert(captured[0].events[0].event.type == EV_KEY &&
@@ -442,7 +442,7 @@ test_momentary(void)
 
 	/* The synthetic release cleared state: detach has no extra key release. */
 	clear_capture();
-	input_device_unregister(device);
+	drv_input_device_unregister(device);
 	assert(captured_count == 1);
 	assert(captured[0].device == device &&
 	    captured[0].flags == INPUT_REPORT_DETACH &&
@@ -463,10 +463,10 @@ test_two_physical_keyboards(void)
 	struct hal_key_event release = key_event("a", HAL_KEY_EVENT_RELEASE);
 
 	clear_capture();
-	input_device_emit_key_event(first, &shift);
-	input_device_emit_key_event(second, &press);
-	input_device_emit_key_event(second, &repeat);
-	input_device_emit_key_event(second, &release);
+	drv_input_device_emit_key_event(first, &shift);
+	drv_input_device_emit_key_event(second, &press);
+	drv_input_device_emit_key_event(second, &repeat);
+	drv_input_device_emit_key_event(second, &release);
 	assert(captured_count == 4);
 	expect_key_report(0, first, KEY_LEFTSHIFT, 1);
 	expect_key_report(1, second, KEY_A, 1);
@@ -476,13 +476,13 @@ test_two_physical_keyboards(void)
 
 	/* Only the first device still holds a key at detach. */
 	clear_capture();
-	input_device_unregister(first);
+	drv_input_device_unregister(first);
 	assert(captured_count == 2);
 	expect_key_report(0, first, KEY_LEFTSHIFT, 0);
 	assert(captured[1].device == first &&
 	    captured[1].flags == INPUT_REPORT_DETACH);
 	clear_capture();
-	input_device_unregister(second);
+	drv_input_device_unregister(second);
 	assert(captured_count == 1 &&
 	    captured[0].flags == INPUT_REPORT_DETACH);
 }
@@ -493,15 +493,15 @@ test_two_pointers(void)
 	struct input_device *first = register_pointer(BTN_LEFT);
 	struct input_device *second = register_pointer(BTN_RIGHT);
 
-	input_device_emit(first, EV_KEY, BTN_LEFT, 1);
-	input_device_emit(second, EV_KEY, BTN_RIGHT, 1);
+	drv_input_device_emit(first, EV_KEY, BTN_LEFT, 1);
+	drv_input_device_emit(second, EV_KEY, BTN_RIGHT, 1);
 	clear_capture();
-	input_device_unregister(first);
+	drv_input_device_unregister(first);
 	assert(captured_count == 2);
 	expect_key_report(0, first, BTN_LEFT, 0);
 	assert(captured[1].flags == INPUT_REPORT_DETACH);
 	clear_capture();
-	input_device_unregister(second);
+	drv_input_device_unregister(second);
 	assert(captured_count == 2);
 	expect_key_report(0, second, BTN_RIGHT, 0);
 	assert(captured[1].flags == INPUT_REPORT_DETACH);
@@ -539,14 +539,14 @@ test_detached_reader_and_delayed_slot_reuse(
 	assert(first_cdev->ops->poll(&test.file, POLLIN | POLLRDNORM,
 	    &returned) == 0);
 	assert((returned & POLLHUP) == 0);
-	input_device_emit(first, EV_REL, REL_X, 7);
+	drv_input_device_emit(first, EV_REL, REL_X, 7);
 	returned = 0;
 	assert(first_cdev->ops->poll(&test.file, POLLIN | POLLRDNORM,
 	    &returned) == 0);
 	assert((returned & (POLLIN | POLLRDNORM)) != 0);
 	assert((returned & POLLHUP) == 0);
 
-	input_device_unregister(first);
+	drv_input_device_unregister(first);
 	assert(!cdev_is_published(first_cdev));
 	returned = 0;
 	assert(first_cdev->ops->poll(&test.file, POLLIN | POLLRDNORM,
@@ -571,8 +571,8 @@ test_detached_reader_and_delayed_slot_reuse(
 	third_cdev = device_cdev(third);
 	assert(third_cdev != NULL);
 	assert(!strcmp(third_cdev->name, first_name));
-	input_device_unregister(third);
-	input_device_unregister(second);
+	drv_input_device_unregister(third);
+	drv_input_device_unregister(second);
 }
 
 /* Verifies bounded event-slot exhaustion without a partial publication. */
@@ -603,10 +603,10 @@ test_event_slot_exhaustion(
 		assert(cdevs[index]->ops->open(&files[index].file) == 0);
 	}
 	for (index = 0; index < TEST_INPUT_DEVICE_MAX; index++)
-		input_device_unregister(devices[index]);
+		drv_input_device_unregister(devices[index]);
 	assert(registered_count == 0);
 	overflow = (struct input_device *)(uintptr_t)1U;
-	assert(input_device_register(&info, &overflow) == ENOSPC);
+	assert(drv_input_device_register(&info, &overflow) == ENOSPC);
 	assert(overflow == NULL);
 	for (index = 0; index < TEST_INPUT_DEVICE_MAX; index++) {
 		assert(cdevs[index]->ops->close(&files[index].file) == 0);
@@ -617,7 +617,7 @@ test_event_slot_exhaustion(
 	if (replacement_cdev == NULL)
 		abort();
 	assert(!strcmp(replacement_cdev->name, "event0"));
-	input_device_unregister(replacement);
+	drv_input_device_unregister(replacement);
 	assert(registered_count == 0);
 }
 
@@ -640,26 +640,26 @@ test_resync_transaction(void)
 
 	test_file_init(&test, device);
 	assert(cdev->ops->open(&test.file) == 0);
-	input_device_emit_key_event(device, &press);
+	drv_input_device_emit_key_event(device, &press);
 	count = cdev->ops->read(&test.file, events, sizeof(events));
 	assert(count == (ssize_t)(2U * sizeof(events[0])));
 
 	clear_capture();
-	input_device_emit_key_event(device, &begin);
+	drv_input_device_emit_key_event(device, &begin);
 	/* Normal transitions inside an incomplete stream fail closed. */
-	input_device_emit_key_event(device, &press);
+	drv_input_device_emit_key_event(device, &press);
 	memset(bits, 0, sizeof(bits));
 	assert(cdev->ops->ioctl(&test.file, EVIOCGKEY(sizeof(bits)),
 	    (uintptr_t)bits) == 0);
 	assert(key_bit(bits, KEY_A) && !key_bit(bits, KEY_LEFTSHIFT));
-	input_device_emit_key_event(device, &snapshot);
+	drv_input_device_emit_key_event(device, &snapshot);
 	/* A partial snapshot is never exposed through EVIOCGKEY. */
 	memset(bits, 0, sizeof(bits));
 	assert(cdev->ops->ioctl(&test.file, EVIOCGKEY(sizeof(bits)),
 	    (uintptr_t)bits) == 0);
 	assert(key_bit(bits, KEY_A) && !key_bit(bits, KEY_LEFTSHIFT));
-	input_device_emit_key_event(device, &snapshot); /* duplicate: ignored */
-	input_device_emit_key_event(device, &end);
+	drv_input_device_emit_key_event(device, &snapshot); /* duplicate: ignored */
+	drv_input_device_emit_key_event(device, &end);
 	memset(bits, 0, sizeof(bits));
 	assert(cdev->ops->ioctl(&test.file, EVIOCGKEY(sizeof(bits)),
 	    (uintptr_t)bits) == 0);
@@ -680,7 +680,7 @@ test_resync_transaction(void)
 	assert(cdev->ops->close(&test.file) == 0);
 	test_file_destroy(&test);
 	clear_capture();
-	input_device_unregister(device);
+	drv_input_device_unregister(device);
 	assert(captured_count == 2);
 	expect_key_report(0, device, KEY_LEFTSHIFT, 0);
 	assert(captured[1].flags == INPUT_REPORT_DETACH);
@@ -755,7 +755,7 @@ unregister_worker(void *argument)
 	struct callback_context *context = argument;
 
 	__atomic_store_n(&context->unregister_started, 1U, __ATOMIC_RELEASE);
-	input_device_unregister(context->device);
+	drv_input_device_unregister(context->device);
 	__atomic_store_n(&context->unregister_returned, 1U, __ATOMIC_RELEASE);
 	return NULL;
 }
@@ -772,7 +772,7 @@ concurrent_unregister_worker(void *argument)
 	struct unregister_call *call = argument;
 
 	__atomic_store_n(&call->started, 1U, __ATOMIC_RELEASE);
-	input_device_unregister(call->device);
+	drv_input_device_unregister(call->device);
 	__atomic_store_n(&call->returned, 1U, __ATOMIC_RELEASE);
 	return NULL;
 }
@@ -871,10 +871,10 @@ test_callback_pair_validation(void)
 	    .open = producer_open,
 	};
 
-	assert(input_device_register(&info, &device) == EINVAL);
+	assert(drv_input_device_register(&info, &device) == EINVAL);
 	info.open = NULL;
 	info.close = producer_close;
-	assert(input_device_register(&info, &device) == EINVAL);
+	assert(drv_input_device_register(&info, &device) == EINVAL);
 }
 
 int
@@ -884,8 +884,8 @@ main(void)
 
 	memset(&subscription, 0, sizeof(subscription));
 	registered_count = 0;
-	input_core_init();
-	assert(input_subscribe(&subscription, capture, NULL) == 0);
+	drv_input_core_init();
+	assert(drv_input_subscribe(&subscription, capture, NULL) == 0);
 	test_callback_pair_validation();
 	test_registration_publication_and_rollback();
 	test_momentary();
@@ -897,7 +897,7 @@ main(void)
 	test_two_pointers();
 	test_resync_transaction();
 	test_callback_retirement();
-	input_unsubscribe(&subscription);
+	drv_input_unsubscribe(&subscription);
 	puts("WS006 production input-device ownership: PASS");
 	return 0;
 }

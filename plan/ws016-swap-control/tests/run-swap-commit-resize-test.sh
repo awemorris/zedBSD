@@ -10,7 +10,7 @@ trap 'rm -f "$binary"' EXIT HUP INT TERM
 cd "$repo_dir"
 "${CC:-cc}" -std=c11 -Iinclude -Iinclude/uapi -I. \
 	-Wall -Wextra -Werror -ffunction-sections -fdata-sections \
-	src/kern/vm-commit.c \
+	src/kern/vm.c \
 	plan/ws016-swap-control/tests/swap-commit-resize-test.c \
 	-Wl,--gc-sections -o "$binary"
 "$binary"

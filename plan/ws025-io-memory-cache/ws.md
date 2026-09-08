@@ -4,9 +4,11 @@ Last updated: 2026-09-08
 
 WSID: `ws025`
 
-Status: completed; 必須 p001–p026 と依存 WS024 完了。q122 の統合受け入れ・既定設定・性能観測まで完了。条件付き p027–p030 は採用条件未成立のため今回は見送り、再開条件を記録した planned とする。実機 gate はユーザー判断によるクリア扱い。
+Status: mandatory p001–p026 completed; p031 in-progress; 必須 p001–p026 と依存 WS024 完了。q122 の統合受け入れ・既定設定・性能観測まで完了。条件付き p027–p030 は採用条件未成立のため今回は見送り、再開条件を記録した planned とする。実機 gate はユーザー判断によるクリア扱い。
 
 Parent: [master plan](../master.md)
+
+追加計画: [p031 ドライバ配置・命名・規約統一](phase031-driver-layout-style/phase.md) は構成合意済み・q123 で実行中。p027–p030 に先行する。q122 の完了記録は維持し、追加 Phase は未完了として扱う。
 
 ## 目的と承認済みの判断
 
@@ -89,6 +91,7 @@ p001 は q088 で completed（[results](phase001-baseline-contracts/results.md)�
 | [p028](phase028-direct-user-io/phase.md) | 条件付き: user page 直接 I/O | p022–p024、コピー律速の証拠 |
 | [p029](phase029-uas/phase.md) | 条件付き: UAS driver | p019/p024、対応実機と descriptor |
 | [p030](phase030-imod-measurement/phase.md) | 条件付き: IMOD 実機比較・設定判断 | p009/p025、対応実機 |
+| [p031](phase031-driver-layout-style/phase.md) | ドライバ配置・統合・drv_命名・coding-style適用、mkfs独立化とコマンド整理 | p026。p027–p030 の実装に先行 |
 
 ## 実装 wave と中間完了点
 
@@ -101,6 +104,7 @@ p001 は q088 で completed（[results](phase001-baseline-contracts/results.md)�
 | 3 | p015 → p016 → p017 → p018 | cache 保持・回収、エラー通知、data write-back |
 | 4 | p019 → p020、p022、p023 → p024、p025 | 先読み・exec 共有・非連続ページ・復旧 |
 | 5 | WS024 → p021、p026 | 統合 UFS の metadata 永続化と既定化 |
+| 整理 | p031 | 合意したドライバ構成・命名・規約へ統一 |
 | 拡張 | p027–p030 | 計測した機器・用途に限定した改善 |
 
 1a と 1b は開発上独立した部分を持つ。早い I/O 改善を全 RAM 対応まで待たせる必要はない。ただし高位 RAM の通常公開は DMA/VM まで準備した p005 で行う。共有 checkout の編集競合と build/runtime の並列実行は避ける。

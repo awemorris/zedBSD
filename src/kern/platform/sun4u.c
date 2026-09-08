@@ -1,5 +1,3 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -20,7 +18,7 @@
 #include <kern/disk.h>
 #include <kern/platform.h>
 #include <kern/sun4u/boot.h>
-#include "drivers/sun4u-cmd646.h"
+#include "drivers/platform/sun4u/sun4u-cmd646.h"
 
 /*
  * Publishes the boot devices described by the sun4u boot handoff.
@@ -52,9 +50,9 @@ kern_platform_init(
 		return 0;
 
 	/* Selects the Sun partition scheme and starts the IDE controller. */
-	partition_set_scheme(&partition_scheme_sun);
+	partition_set_scheme(&drv_partition_scheme_sun);
 	disk_registry_reset();
-	if (sun4u_cmd646_init(s->ide_primary_command, s->ide_primary_control) != 0)
+	if (drv_sun4u_cmd646_init(s->ide_primary_command, s->ide_primary_control) != 0)
 		return 0;
 
 	/* Publishes the IDE disk as the boot device. */
@@ -106,7 +104,7 @@ kern_platform_block_device(
 		return NULL;
 
 	/* Resolves the CMD646 disk. */
-	disk = sun4u_cmd646_disk();
+	disk = drv_sun4u_cmd646_disk();
 
 	/* Reports the disk. */
 	return disk;

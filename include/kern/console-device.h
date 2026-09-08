@@ -13,12 +13,12 @@
 #define ZEDBSD_KERN_CONSOLE_DEVICE_H
 
 int
-console_device_register(void);
+drv_console_device_register(void);
 
 int
-console_input_poll_event(void);
+drv_console_input_poll_event(void);
 
 int
-console_input_read_event(void);
+drv_console_input_read_event(void);
 
 #endif

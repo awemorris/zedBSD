@@ -11,7 +11,7 @@ static void link_write_check(uint64_t first,uint32_t count,const void *buffer)
  (void)count;(void)buffer;
  if(first==176 || first==8 || first==16) {
   REQUIRE(namespace_journal->pending_ready && namespace_journal->image_valid);
-  REQUIRE(ufs_get32(namespace_journal->image,16,0)==(link_shared?2U:3U));
+  REQUIRE(drv_ufs_get32(namespace_journal->image,16,0)==(link_shared?2U:3U));
   if(link_snapshot)REQUIRE((snapshot_mask&expected)==expected);
  }
 }
@@ -25,9 +25,9 @@ static unsigned added_names(unsigned size)
 {
  unsigned pos=0,found=0;uint8_t *p=storage+176*512;
  while(pos<size) {
-  unsigned length=ufs_get16(p,pos+4,0);
+  unsigned length=drv_ufs_get16(p,pos+4,0);
   REQUIRE(length>=8 && !(length&3) && length<=size-pos && pos%512+length<=512);
-  if(ufs_get32(p,pos,0)==2 && p[pos+7]==3 && !memcmp(p+pos+8,"new",3))found++;
+  if(drv_ufs_get32(p,pos,0)==2 && p[pos+7]==3 && !memcmp(p+pos+8,"new",3))found++;
   pos+=length;
  }
  return found;
@@ -55,8 +55,8 @@ static void link_scenario(unsigned shared,unsigned layout,unsigned write_fail,un
   REQUIRE(namecache_lookup(&directory.inode,&cached_name,&cached)==0);
  }
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);
  fs.journal_enabled=1;fs.snapshot_available=link_snapshot;
  namespace_journal=&fs.journal;link_shared=shared;link_target=&node.inode;group_write_check=link_write_check;
  storage_writes=storage_syncs=0;snapshot_calls=snapshot_mask=dir_changes=0;
@@ -76,19 +76,19 @@ static void link_scenario(unsigned shared,unsigned layout,unsigned write_fail,un
  namecache_purge_mount(&mountp);
  failure_write=failure_write_again=failure_sync=commit_error=0;crash_cut=0;
  memcpy(storage,durable,sizeof(storage));
- REQUIRE(ufs_journal_init(&recovered,&io,380,130,379)==0);
- REQUIRE(ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
- namespace_journal=&recovered;REQUIRE(ufs_journal_replay(&recovered)==0);
+ REQUIRE(drv_ufs_journal_init(&recovered,&io,380,130,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&recovered,redo,sizeof(redo))==0);
+ namespace_journal=&recovered;REQUIRE(drv_ufs_journal_replay(&recovered)==0);
  raw_target=storage+8*512+2*UFS_DINODE_SIZE;
  raw_directory=storage+(shared?8:16)*512+(shared?3:2)*UFS_DINODE_SIZE;
- links=ufs_get16(raw_target,UFS_DI_NLINK,0);size=ufs_get64(raw_directory,UFS_DI_SIZE,0);
+ links=drv_ufs_get16(raw_target,UFS_DI_NLINK,0);size=drv_ufs_get64(raw_directory,UFS_DI_SIZE,0);
  REQUIRE(links==1 || links==2);
  REQUIRE(size==(layout==3?(links==2?512U:0U):(layout==2 && links==2?1024U:512U)));
  found=added_names((unsigned)size);REQUIRE(found==links-1);
- REQUIRE(ufs_get16(raw_directory,UFS_DI_NLINK,0)==2);
- REQUIRE(ufs_get64(raw_directory,UFS_DI_DB,0)==176);
- REQUIRE(ufs_get64(raw_target,UFS_DI_DB,0)==160);
- REQUIRE(ufs_get64(raw_target,UFS_DI_SIZE,0)==13*4096);
+ REQUIRE(drv_ufs_get16(raw_directory,UFS_DI_NLINK,0)==2);
+ REQUIRE(drv_ufs_get64(raw_directory,UFS_DI_DB,0)==176);
+ REQUIRE(drv_ufs_get64(raw_target,UFS_DI_DB,0)==160);
+ REQUIRE(drv_ufs_get64(raw_target,UFS_DI_SIZE,0)==13*4096);
  if(link_result==0)REQUIRE(links==2);
  group_write_check=NULL;free(fs.cg);
 }
@@ -104,8 +104,8 @@ static void link_refusals(void)
  directory.inode.i_size=512;directory.direct[0]=176;directory.blocks=8;
  REQUIRE(persist_inode(&directory.inode)==0);record(0,512,2,"old");REQUIRE(disk_sync(&disk)==0);
  io.context=&disk;io.read=media_read;io.write=media_write;io.flush=media_flush;
- REQUIRE(ufs_journal_init(&fs.journal,&io,380,18,379)==0);
- REQUIRE(ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);fs.journal_enabled=1;
+ REQUIRE(drv_ufs_journal_init(&fs.journal,&io,380,18,379)==0);
+ REQUIRE(drv_ufs_journal_bind_image(&fs.journal,redo,sizeof(redo))==0);fs.journal_enabled=1;
  storage_writes=storage_syncs=0;
  mutex_lock(&fs.namespace_lock);
  node.inode.i_linkcount=UINT16_MAX;
@@ -113,7 +113,7 @@ static void link_refusals(void)
  node.inode.i_linkcount=1;
  REQUIRE(link_group(&directory.inode,&invalid,&node.inode,&handled)==EINVAL && handled);
  REQUIRE(link_group(&directory.inode,&old_alias,&node.inode,&handled)==EEXIST && handled);
- ufs_put16(storage+176*512,4,4,0);
+ drv_ufs_put16(storage+176*512,4,4,0);
  REQUIRE(link_group(&directory.inode,&added,&node.inode,&handled)==EIO && handled);
  directory.inode.i_size=4096;memset(name,'x',248);name[248]=0;
  for(n=0;n<16;n++){name[0]='a'+n;record(n*256,256,4+n,name);}
@@ -128,7 +128,7 @@ static void link_refusals(void)
  /* Exactly two shared-block extents fit a slot that cannot hold three. */
  REQUIRE(link_group(&directory.inode,&added,&node.inode,&handled)==0 && handled);
  REQUIRE(ufs_sync(&mountp)==0);
- REQUIRE(node.inode.i_linkcount==1 && ufs_get16(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_NLINK,0)==2);
+ REQUIRE(node.inode.i_linkcount==1 && drv_ufs_get16(storage+8*512+2*UFS_DINODE_SIZE,UFS_DI_NLINK,0)==2);
  REQUIRE(added_names(512)==1);
  mutex_unlock(&fs.namespace_lock);free(fs.cg);
 }

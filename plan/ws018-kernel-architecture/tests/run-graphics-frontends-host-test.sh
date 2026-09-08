@@ -11,14 +11,14 @@ test_source="$repo/plan/ws018-kernel-architecture/tests/graphics-frontends-host-
 
 # PC/AT is also the LP64 provider, so this run checks the 64-bit UAPI layout.
 cc $common_flags -DZEDBSD_USER_ABI_LP64 -DGRAPHICS_TEST_PCAT \
-	"$test_source" "$repo/src/drivers/graphics/pcat/device.c" \
+	"$test_source" "$repo/src/drivers/platform/pcat/graphics/pcat-graphics.c" \
 	-o "$temporary/pcat"
 "$temporary/pcat"
 
 # PC-98 uses the 32-bit UAPI pointer layout.  The fixture's synthetic user
 # address space keeps embedded pointers valid without requiring host -m32 libc.
 cc $common_flags -DGRAPHICS_TEST_PC98 \
-	"$test_source" "$repo/src/drivers/graphics/pc98/device.c" \
+	"$test_source" "$repo/src/drivers/platform/pc98/graphics/pc98-graphics.c" \
 	-o "$temporary/pc98"
 "$temporary/pc98"
 
@@ -27,11 +27,11 @@ cc $common_flags -DGRAPHICS_TEST_PC98 \
 sed -e 's|drivers/graphics/pcat/backend.h|drivers/graphics/PLATFORM/backend.h|' \
 	-e 's/pcat_graphics_backend_/platform_graphics_backend_/g' \
 	-e 's/pcat_graphics_image/platform_graphics_image/g' \
-	"$repo/src/drivers/graphics/pcat/device.c" >"$temporary/pcat.normalized"
+	"$repo/src/drivers/platform/pcat/graphics/pcat-graphics.c" >"$temporary/pcat.normalized"
 sed -e 's|drivers/graphics/pc98/backend.h|drivers/graphics/PLATFORM/backend.h|' \
 	-e 's/pc98_graphics_backend_/platform_graphics_backend_/g' \
 	-e 's/pc98_graphics_image/platform_graphics_image/g' \
-	"$repo/src/drivers/graphics/pc98/device.c" >"$temporary/pc98.normalized"
+	"$repo/src/drivers/platform/pc98/graphics/pc98-graphics.c" >"$temporary/pc98.normalized"
 cmp "$temporary/pcat.normalized" "$temporary/pc98.normalized"
 
 test ! -e "$repo/src/kern/graphics-device.c"

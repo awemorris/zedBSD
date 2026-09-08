@@ -61,7 +61,7 @@ make -C "$repo" -j16 ZEDBSD_PLATFORM=amd64 ZEDBSD_ARCHITECTURE=amd64 \
 [[ $(<"$disabled_build/.graphics-device-config") == \
 	'CONFIG_DRIVER_GRAPHICS_DEVICE=n' ]]
 if nm "$disabled_build/vmunix" | \
-	rg 'graphics_device_register|pcat_graphics_backend_|pc98_graphics_backend_'; then
+	rg 'drv_graphics_device_register|pcat_graphics_backend_|pc98_graphics_backend_'; then
 	echo "graphics-disabled kernel contains a graphics frontend/backend" >&2
 	exit 1
 fi

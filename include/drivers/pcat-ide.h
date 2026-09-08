@@ -13,12 +13,12 @@
 #include "kern/disk.h"
 
 unsigned
-pcat_ide_init(void);
+drv_pcat_ide_init(void);
 struct disk *
-pcat_ide_unit(
+drv_pcat_ide_unit(
 	unsigned ordinal);
 struct disk *
-pcat_ide_bios_unit(
+drv_pcat_ide_bios_unit(
 	uint8_t bios_id);
 
 #endif

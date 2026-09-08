@@ -17,9 +17,9 @@
 
 #if defined(WS001_P023_UFS_MUTATION)
 #include <kern/quota.h>
-#include "drivers/fs/ufs/ufs-consistency.h"
-#include "drivers/fs/ufs/ufs-disk.h"
-#include "drivers/fs/ufs/ufs-endian.h"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-consistency.h"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-disk.h"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-endian.h"
 #endif
 
 #include <errno.h>
@@ -245,7 +245,7 @@ main(void)
 #elif defined(WS001_P023_UFS_MUTATION)
 
 /* Use the real internal layouts instead of stale test-side structure copies. */
-#include "drivers/fs/ufs/ufs-private.h"
+#include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-private.h"
 #define fixture_ufs_mount_state ufs_mount_state
 #define fixture_ufs_inode_info ufs_inode_info
 
@@ -334,7 +334,7 @@ disk_write(struct disk *disk, uint64_t block, uint32_t count,
 }
 
 int
-ufs_snapshot_preserve(struct ufs_snapshot *snapshot, uint64_t first,
+drv_ufs_snapshot_preserve(struct ufs_snapshot *snapshot, uint64_t first,
     uint32_t count)
 {
 	(void)snapshot;
@@ -345,7 +345,7 @@ ufs_snapshot_preserve(struct ufs_snapshot *snapshot, uint64_t first,
 }
 
 #include "../../ws025-io-memory-cache/tests/journal-view-stubs-host.inc"
-int ufs_journal_read(struct ufs_journal *journal, uint64_t first,
+int drv_ufs_journal_read(struct ufs_journal *journal, uint64_t first,
     uint32_t count, void *buffer)
 {
  (void)journal;(void)first;(void)count;(void)buffer;
@@ -353,7 +353,7 @@ int ufs_journal_read(struct ufs_journal *journal, uint64_t first,
  return EIO;
 }
 int
-ufs_journal_commit(struct ufs_journal *journal, uint64_t target,
+drv_ufs_journal_commit(struct ufs_journal *journal, uint64_t target,
     const void *payload, uint32_t sectors)
 {
 	(void)journal;
@@ -404,8 +404,8 @@ initialize_directory(struct fixture_ufs_mount_state *state,
 
 	block = directory_block();
 	memset(block, 0, FIXTURE_SECTOR_SIZE);
-	ufs_put32(block, 0, FIXTURE_OLD_INO, 0);
-	ufs_put16(block, 4, UFS_DIRBLKSIZ, 0);
+	drv_ufs_put32(block, 0, FIXTURE_OLD_INO, 0);
+	drv_ufs_put16(block, 4, UFS_DIRBLKSIZ, 0);
 	block[6] = 8;
 	block[7] = 6;
 	memcpy(block + 8, "victim", 6);
@@ -430,7 +430,7 @@ test_ufs_namespace_write_failure(void)
 	    FIXTURE_NEW_INO, 4, &old_number, &old_type), 0);
 	CHECK(old_number == FIXTURE_OLD_INO);
 	CHECK(old_type == 8);
-	CHECK(ufs_get32(directory_block(), 0, 0) == FIXTURE_NEW_INO);
+	CHECK(drv_ufs_get32(directory_block(), 0, 0) == FIXTURE_NEW_INO);
 	CHECK(directory_block()[6] == 4);
 	CHECK(memcmp(directory_block() + 8, "victim", 6) == 0);
 	CHECK(read_calls == 1U);

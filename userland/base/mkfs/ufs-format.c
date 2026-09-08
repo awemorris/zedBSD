@@ -12,7 +12,7 @@
  */
 
 #include "ufs-format.h"
-#include "src/drivers/fs/ufs/ufs-super.h"
+#include "ufs-super.h"
 
 #include <errno.h>
 #include <stddef.h>

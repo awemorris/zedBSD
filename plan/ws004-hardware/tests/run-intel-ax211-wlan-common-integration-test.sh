@@ -19,13 +19,13 @@ $repo_root/src/kern/net/wlan-crypto.c \
 $repo_root/src/kern/net/wlan-wpa2-codec.c \
 $repo_root/src/kern/net/wlan-wpa2.c \
 $repo_root/src/kern/net/wlan-l2.c"
-private_sources="$repo_root/src/drivers/intel-ax211-protocol.c \
-$repo_root/src/drivers/intel-ax211-scan.c \
-$repo_root/src/drivers/intel-ax211-assoc.c \
-$repo_root/src/drivers/intel-ax211-bss.c \
-$repo_root/src/drivers/intel-ax211-key.c \
-$repo_root/src/drivers/intel-ax211-tx.c \
-$repo_root/src/drivers/intel-ax211-rx.c"
+private_sources="$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-protocol.c \
+$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-scan.c \
+$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-assoc.c \
+$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-bss.c \
+$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-key.c \
+$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-tx.c \
+$repo_root/src/drivers/wifi/intel-ax211/intel-ax211-rx.c"
 sources="$common_sources $private_sources"
 fixture="$test_dir/intel-ax211-wlan-common-integration-test.c"
 

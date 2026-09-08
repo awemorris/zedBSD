@@ -41,17 +41,17 @@ struct input_capability_state {
 	struct input_absinfo abs_info[ABS_MAX + 1U];
 };
 
-int input_capability_state_init(struct input_capability_state *,
+int drv_input_capability_state_init(struct input_capability_state *,
 				const struct input_capability *, size_t,
 				const struct input_abs_axis *, size_t);
-int input_capability_bits(const struct input_capability_state *, unsigned,
+int drv_input_capability_bits(const struct input_capability_state *, unsigned,
 			  const uint8_t **, size_t *);
-int input_capability_key_state(const struct input_capability_state *,
+int drv_input_capability_key_state(const struct input_capability_state *,
 			       const uint8_t **, size_t *);
-int input_capability_copy(const uint8_t *, size_t, size_t, uint8_t *, size_t);
-int input_capability_abs_info(const struct input_capability_state *, unsigned,
+int drv_input_capability_copy(const uint8_t *, size_t, size_t, uint8_t *, size_t);
+int drv_input_capability_abs_info(const struct input_capability_state *, unsigned,
 			      struct input_absinfo *);
-int input_capability_event(struct input_capability_state *, uint16_t,
+int drv_input_capability_event(struct input_capability_state *, uint16_t,
 			   uint16_t, int32_t);
 
 #endif

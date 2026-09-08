@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../../src/drivers/intel-ax211-tx-ring.h"
+#include "../../../src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.h"
 
 #define TEST_CHECK(condition) do { \
 	if (!(condition)) { \
@@ -225,40 +225,40 @@ test_api_and_queue_config(void)
 	versions[5U] = INTEL_AX211_TX_GROUP;
 	versions[6U] = INTEL_AX211_TX_COMMAND_VERSION;
 	versions[7U] = INTEL_AX211_TX_NOTIFICATION_VERSION;
-	TEST_CHECK(intel_ax211_protocol_command_table_parse(versions,
+	TEST_CHECK(drv_intel_ax211_protocol_command_table_parse(versions,
 	    sizeof(versions), &table) == INTEL_AX211_PROTOCOL_OK);
-	TEST_CHECK(intel_ax211_tx_ring_api89_validate(&table) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_api89_validate(&table) ==
 	    INTEL_AX211_TX_RING_OK);
 	versions[2U]--;
-	TEST_CHECK(intel_ax211_protocol_command_table_parse(versions,
+	TEST_CHECK(drv_intel_ax211_protocol_command_table_parse(versions,
 	    sizeof(versions), &table) == INTEL_AX211_PROTOCOL_OK);
-	TEST_CHECK(intel_ax211_tx_ring_api89_validate(&table) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_api89_validate(&table) ==
 	    INTEL_AX211_TX_RING_UNSUPPORTED);
 	versions[2U] = INTEL_AX211_TX_QUEUE_CONFIG_COMMAND_VERSION;
 	versions[6U]--;
-	TEST_CHECK(intel_ax211_protocol_command_table_parse(versions,
+	TEST_CHECK(drv_intel_ax211_protocol_command_table_parse(versions,
 	    sizeof(versions), &table) == INTEL_AX211_PROTOCOL_OK);
-	TEST_CHECK(intel_ax211_tx_ring_api89_validate(&table) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_api89_validate(&table) ==
 	    INTEL_AX211_TX_RING_UNSUPPORTED);
 
 	TEST_CHECK(allocator_reset() == 0);
 	memset(&ring, 0, sizeof(ring));
 	memset(&io, 0, sizeof(io));
-	TEST_CHECK(intel_ax211_tx_ring_allocate(&fixture_device, &fixture_ops,
+	TEST_CHECK(drv_intel_ax211_tx_ring_allocate(&fixture_device, &fixture_ops,
 	    &io, &ring) == INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(fixture_allocate_success == FIXTURE_ALLOCATION_COUNT);
 	TEST_CHECK(ring.tfd.size == INTEL_AX211_TX_RING_TFD_RING_SIZE);
 	TEST_CHECK(ring.byte_count.size ==
 	    INTEL_AX211_TX_RING_BYTE_COUNT_SIZE);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U,
 	    &config) == INTEL_AX211_TX_RING_OK);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 8U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_queue_add_build(&ring, 3U, 8U,
 	    &config) == INTEL_AX211_TX_RING_INVALID);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_queue_add_build(&ring, 3U,
 	    INTEL_AX211_TX_RING_MANAGEMENT_TID, &config) ==
 	    INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(config.command[8U] == INTEL_AX211_TX_RING_MANAGEMENT_TID);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U,
 	    &config) == INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(get_le32(config.command) == 0U);
 	TEST_CHECK(get_le32(config.command + 4U) == 8U);
@@ -292,16 +292,16 @@ test_api_and_queue_config(void)
 	message.generation = pending.generation;
 	message.payload = response;
 	message.payload_length = sizeof(response);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_complete(&ring, &config, 17U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_queue_add_complete(&ring, &config, 17U,
 	    23U, &message, &pending) == INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(ring.enabled && ring.station_id == 3U && ring.tid == 0U);
 	TEST_CHECK(ring.queue == FIXTURE_TX_QUEUE);
 	TEST_CHECK(ring.read_sequence == 0x45U && ring.write_sequence == 0x45U);
 	TEST_CHECK(ring.hardware_generation == 17U &&
 	    ring.connection_generation == 23U);
-	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 0) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_release(&ring, 0) ==
 	    INTEL_AX211_TX_RING_BARRIER_REQUIRED);
-	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 1) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_release(&ring, 1) ==
 	    INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(active_allocations() == 0U);
 	TEST_CHECK(fixture_free_count == FIXTURE_ALLOCATION_COUNT);
@@ -310,19 +310,19 @@ test_api_and_queue_config(void)
 	TEST_CHECK(allocator_reset() == 0);
 	memset(&ring, 0, sizeof(ring));
 	memset(&io, 0, sizeof(io));
-	TEST_CHECK(intel_ax211_tx_ring_allocate(&fixture_device, &fixture_ops,
+	TEST_CHECK(drv_intel_ax211_tx_ring_allocate(&fixture_device, &fixture_ops,
 	    &io, &ring) == INTEL_AX211_TX_RING_OK);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_queue_add_build(&ring, 3U, 0U,
 	    &config) == INTEL_AX211_TX_RING_OK);
 	put_le16(response, 0U);
-	result = intel_ax211_tx_ring_queue_add_complete(&ring, &config, 17U,
+	result = drv_intel_ax211_tx_ring_queue_add_complete(&ring, &config, 17U,
 	    23U, &message, &pending);
 	TEST_CHECK(result == INTEL_AX211_TX_RING_MALFORMED);
 	put_le16(response, FIXTURE_TX_QUEUE);
 	config.command[8U] = 1U;
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_complete(&ring, &config, 17U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_queue_add_complete(&ring, &config, 17U,
 	    23U, &message, &pending) == INTEL_AX211_TX_RING_INVALID);
-	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 0) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_release(&ring, 0) ==
 	    INTEL_AX211_TX_RING_OK);
 	return 0;
 }
@@ -345,7 +345,7 @@ test_submit_and_completion(void)
 	TEST_CHECK(fixture_ring_open(&ring, &io, 0U, 31U, 41U) == 0);
 	fixture_request(&request, frame, 41U, 51U);
 	request.band_5ghz = 1U;
-	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 100U, 50U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 100U, 50U,
 	    &handle) == INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(handle.hardware_generation == 31U &&
 	    handle.connection_generation == 41U && handle.cookie == 51U);
@@ -378,14 +378,14 @@ test_submit_and_completion(void)
 
 	message = fixture_completion(payload, 0U, (uint16_t)request.length, 1U,
 	    31U, 1U);
-	TEST_CHECK(intel_ax211_tx_ring_complete(&ring, &message, &retired) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_complete(&ring, &message, &retired) ==
 	    INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(retired.handle.cookie == 51U && retired.acknowledged == 1U);
 	TEST_CHECK(retired.byte_count == request.length &&
 	    ring.pending_count == 0U && ring.read_sequence == 1U);
 	TEST_CHECK(bytes_are(ring.slot[0U].command.address,
 	    ring.slot[0U].command.size, 0U));
-	TEST_CHECK(intel_ax211_tx_ring_complete(&ring, &message, &retired) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_complete(&ring, &message, &retired) ==
 	    INTEL_AX211_TX_RING_DUPLICATE);
 
 	memset(frame, 0, sizeof(frame));
@@ -409,7 +409,7 @@ test_submit_and_completion(void)
 	request.frame_class = INTEL_AX211_TX_FRAME_DATA;
 	request.encrypted = 1U;
 	request.key_index = 2U;
-	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 200U, 50U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 200U, 50U,
 	    &handle) == INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(handle.cookie == 52U && handle.key_generation == 53U &&
 	    handle.packet_number == request.packet_number);
@@ -418,11 +418,11 @@ test_submit_and_completion(void)
 	TEST_CHECK(memcmp(ring.slot[1U].payload.address, frame + 24U, 8U) != 0);
 	TEST_CHECK(get_le16((uint8_t *)ring.byte_count.address + 2U) == 40U);
 	message = fixture_completion(payload, 1U, 40U, 2U, 31U, 1U);
-	TEST_CHECK(intel_ax211_tx_ring_complete(&ring, &message, &retired) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_complete(&ring, &message, &retired) ==
 	    INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(retired.handle.key_generation == 53U &&
 	    retired.handle.packet_number == request.packet_number);
-	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 1) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_release(&ring, 1) ==
 	    INTEL_AX211_TX_RING_OK);
 	return 0;
 }
@@ -443,17 +443,17 @@ test_wrap_and_ring_full(void)
 	TEST_CHECK(allocator_reset() == 0);
 	TEST_CHECK(fixture_ring_open(&ring, &io, UINT16_MAX, 3U, 5U) == 0);
 	fixture_request(&request, frame, 5U, 1U);
-	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
 	    &handle) == INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(handle.index == UINT8_MAX &&
 	    handle.scheduler_sequence == UINT8_MAX);
 	TEST_CHECK(io.last_value == UINT32_C(0x01070100));
 	message = fixture_completion(payload, UINT8_MAX,
 	    (uint16_t)request.length, 256U, 3U, 1U);
-	TEST_CHECK(intel_ax211_tx_ring_complete(&ring, &message, &retired) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_complete(&ring, &message, &retired) ==
 	    INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(ring.read_sequence == 256U);
-	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 1) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_release(&ring, 1) ==
 	    INTEL_AX211_TX_RING_OK);
 
 	TEST_CHECK(allocator_reset() == 0);
@@ -461,18 +461,18 @@ test_wrap_and_ring_full(void)
 	fixture_request(&request, frame, 9U, 1U);
 	for (index = 0U; index < INTEL_AX211_TX_RING_INFLIGHT_LIMIT; index++) {
 		request.cookie = (uint64_t)index + 1U;
-		TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
+		TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
 		    &handle) == INTEL_AX211_TX_RING_OK);
 	}
 	request.cookie++;
-	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
 	    &handle) == INTEL_AX211_TX_RING_FULL);
 	TEST_CHECK(ring.pending_count == INTEL_AX211_TX_RING_INFLIGHT_LIMIT);
-	TEST_CHECK(intel_ax211_tx_ring_reset(&ring, 0) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_reset(&ring, 0) ==
 	    INTEL_AX211_TX_RING_BARRIER_REQUIRED);
-	TEST_CHECK(intel_ax211_tx_ring_reset(&ring, 1) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_reset(&ring, 1) ==
 	    INTEL_AX211_TX_RING_OK);
-	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 0) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_release(&ring, 0) ==
 	    INTEL_AX211_TX_RING_OK);
 	return 0;
 }
@@ -494,42 +494,42 @@ test_order_stale_duplicate_and_failure(void)
 	TEST_CHECK(allocator_reset() == 0);
 	TEST_CHECK(fixture_ring_open(&ring, &io, 0U, 61U, 71U) == 0);
 	fixture_request(&request, frame, 71U, 81U);
-	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
 	    &handle) == INTEL_AX211_TX_RING_OK);
-	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
 	    &handle) == INTEL_AX211_TX_RING_DUPLICATE);
 	request.cookie = 82U;
-	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
 	    &handle) == INTEL_AX211_TX_RING_OK);
 	message0 = fixture_completion(payload0, 0U,
 	    (uint16_t)request.length, 1U, 61U, 1U);
 	message1 = fixture_completion(payload1, 1U,
 	    (uint16_t)request.length, 2U, 61U, 1U);
-	TEST_CHECK(intel_ax211_tx_ring_complete(&ring, &message1, &retired) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_complete(&ring, &message1, &retired) ==
 	    INTEL_AX211_TX_RING_OUT_OF_ORDER);
 	message0.generation = 60U;
-	TEST_CHECK(intel_ax211_tx_ring_complete(&ring, &message0, &retired) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_complete(&ring, &message0, &retired) ==
 	    INTEL_AX211_TX_RING_STALE);
 	message0.generation = 61U;
-	TEST_CHECK(intel_ax211_tx_ring_complete(&ring, &message0, &retired) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_complete(&ring, &message0, &retired) ==
 	    INTEL_AX211_TX_RING_OK);
-	TEST_CHECK(intel_ax211_tx_ring_complete(&ring, &message0, &retired) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_complete(&ring, &message0, &retired) ==
 	    INTEL_AX211_TX_RING_DUPLICATE);
 	put_le16(payload1 + 30U, 63U);
-	TEST_CHECK(intel_ax211_tx_ring_complete(&ring, &message1, &retired) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_complete(&ring, &message1, &retired) ==
 	    INTEL_AX211_TX_RING_MALFORMED);
 	put_le16(payload1 + 30U, (uint16_t)request.length);
 	put_le32(payload1 + 40U, 0x83U);
-	TEST_CHECK(intel_ax211_tx_ring_complete(&ring, &message1, &retired) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_complete(&ring, &message1, &retired) ==
 	    INTEL_AX211_TX_RING_TX_FAILED);
 	TEST_CHECK(!retired.acknowledged && retired.handle.cookie == 82U);
 	TEST_CHECK(ring.pending_count == 0U);
 
 	request.connection_generation = 72U;
 	request.cookie = 83U;
-	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 0U, 10U,
 	    &handle) == INTEL_AX211_TX_RING_STALE);
-	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 1) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_release(&ring, 1) ==
 	    INTEL_AX211_TX_RING_OK);
 	return 0;
 }
@@ -546,43 +546,43 @@ test_timeout_reset_and_kick_failure(void)
 	TEST_CHECK(allocator_reset() == 0);
 	TEST_CHECK(fixture_ring_open(&ring, &io, 0U, 91U, 92U) == 0);
 	fixture_request(&request, frame, 92U, 93U);
-	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 100U, 5U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 100U, 5U,
 	    &handle) == INTEL_AX211_TX_RING_OK);
-	TEST_CHECK(intel_ax211_tx_ring_timeout_oldest(&ring, 104U, &handle) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_timeout_oldest(&ring, 104U, &handle) ==
 	    INTEL_AX211_TX_RING_PENDING);
-	TEST_CHECK(intel_ax211_tx_ring_timeout_oldest(&ring, 105U, &handle) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_timeout_oldest(&ring, 105U, &handle) ==
 	    INTEL_AX211_TX_RING_TIMEOUT);
 	TEST_CHECK(ring.poisoned && ring.pending_count == 1U);
-	TEST_CHECK(intel_ax211_tx_ring_reset(&ring, 0) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_reset(&ring, 0) ==
 	    INTEL_AX211_TX_RING_BARRIER_REQUIRED);
-	TEST_CHECK(intel_ax211_tx_ring_reset(&ring, 1) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_reset(&ring, 1) ==
 	    INTEL_AX211_TX_RING_OK);
 	TEST_CHECK(!ring.enabled && ring.pending_count == 0U && !ring.poisoned);
-	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 0) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_release(&ring, 0) ==
 	    INTEL_AX211_TX_RING_OK);
 
 	TEST_CHECK(allocator_reset() == 0);
 	TEST_CHECK(fixture_ring_open(&ring, &io, 0U, 101U, 102U) == 0);
 	fixture_request(&request, frame, 102U, 103U);
 	io.fail_write = 1U;
-	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 0U, 5U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 0U, 5U,
 	    &handle) == INTEL_AX211_TX_RING_KICK_FAILED);
 	TEST_CHECK(ring.poisoned && ring.pending_count == 1U &&
 	    ring.slot[0U].active && ring.slot[0U].uncertain);
-	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 0) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_release(&ring, 0) ==
 	    INTEL_AX211_TX_RING_BARRIER_REQUIRED);
-	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 1) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_release(&ring, 1) ==
 	    INTEL_AX211_TX_RING_OK);
 
 	TEST_CHECK(allocator_reset() == 0);
 	TEST_CHECK(fixture_ring_open(&ring, &io, 0U, 111U, 112U) == 0);
 	fixture_request(&request, frame, 112U, 113U);
 	io.fail_sync_call = 2U;
-	TEST_CHECK(intel_ax211_tx_ring_submit(&ring, &request, 0U, 5U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_submit(&ring, &request, 0U, 5U,
 	    &handle) == INTEL_AX211_TX_RING_IO_ERROR);
 	TEST_CHECK(!ring.poisoned && ring.pending_count == 0U &&
 	    !ring.slot[0U].active);
-	TEST_CHECK(intel_ax211_tx_ring_release(&ring, 1) ==
+	TEST_CHECK(drv_intel_ax211_tx_ring_release(&ring, 1) ==
 	    INTEL_AX211_TX_RING_OK);
 	return 0;
 }
@@ -597,7 +597,7 @@ test_allocation_rollback(void)
 	fixture_fail_allocate_attempt = 13U;
 	memset(&ring, 0, sizeof(ring));
 	memset(&io, 0, sizeof(io));
-	TEST_CHECK(intel_ax211_tx_ring_allocate(&fixture_device, &fixture_ops,
+	TEST_CHECK(drv_intel_ax211_tx_ring_allocate(&fixture_device, &fixture_ops,
 	    &io, &ring) == INTEL_AX211_TX_RING_NO_MEMORY);
 	TEST_CHECK(active_allocations() == 0U);
 	TEST_CHECK(fixture_free_count == 12U);
@@ -621,9 +621,9 @@ fixture_ring_open(
 
 	memset(ring, 0, sizeof(*ring));
 	memset(io, 0, sizeof(*io));
-	TEST_CHECK(intel_ax211_tx_ring_allocate(&fixture_device, &fixture_ops,
+	TEST_CHECK(drv_intel_ax211_tx_ring_allocate(&fixture_device, &fixture_ops,
 	    io, ring) == INTEL_AX211_TX_RING_OK);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_build(ring, 2U,
+	TEST_CHECK(drv_intel_ax211_tx_ring_queue_add_build(ring, 2U,
 	    INTEL_AX211_TX_RING_MANAGEMENT_TID, &config) ==
 	    INTEL_AX211_TX_RING_OK);
 	memset(response, 0, sizeof(response));
@@ -648,7 +648,7 @@ fixture_ring_open(
 	message.generation = pending.generation;
 	message.payload = response;
 	message.payload_length = sizeof(response);
-	TEST_CHECK(intel_ax211_tx_ring_queue_add_complete(ring, &config,
+	TEST_CHECK(drv_intel_ax211_tx_ring_queue_add_complete(ring, &config,
 	    hardware_generation, connection_generation, &message, &pending) ==
 	    INTEL_AX211_TX_RING_OK);
 	return 0;

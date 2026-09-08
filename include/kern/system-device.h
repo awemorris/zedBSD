@@ -13,7 +13,7 @@
 #define ZEDBSD_KERN_SYSTEM_DEVICE_H
 
 int
-system_device_register(void);
+drv_system_device_register(void);
 
 /* Common thread-context boundary for every orderly halt or reboot path. */
 int
