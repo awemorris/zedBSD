@@ -22,8 +22,6 @@
 #include <fcntl.h>
 #endif
 
-#include "rtl8822b-tables.inc"
-
 #define RTL8822B_FW_SIGNATURE 0x8822U
 #define RTL8822B_FW_VERSION 30U
 #define RTL8822B_FW_SUBVERSION 20U
@@ -236,15 +234,6 @@
 #define RTL8822B_COEX_GRANT_MASK 0xff80U
 #define RTL8822B_COEX_WLAN_GRANT 0x7700U
 
-struct rtl8822b_phy_table_section {
-	uint8_t domain;
-	uint8_t width;
-	uint8_t rf_path;
-	uint8_t reserved;
-	const uint32_t *words;
-	size_t word_count;
-};
-
 struct rtl8822b_sha256_context {
 	uint32_t state[8];
 	uint64_t byte_count;
@@ -272,16 +261,19 @@ static const uint8_t rtl8822b_firmware_digest[32] = {
 	0xc2, 0xab, 0x09, 0x0d, 0x18, 0xd8, 0xad, 0x92, 0xac, 0x2b, 0xef,
 	0xd3, 0x5d, 0xb1, 0xc9, 0xe3, 0x66, 0x2d, 0x8d, 0x84, 0x18};
 
+#include "rtl8822b-tables.inc"
+
 static int radio_usb_phy_profile(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
 static int radio_usb_profile(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
 static int radio_board_wlan_only(const struct rtl8822b_radio *radio);
 static int radio_coex_ready(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
 static int radio_coex_grant_read(struct rtl8822b_radio *radio, uint32_t *value, uint64_t deadline_ticks);
 static int radio_wlan_only_profile(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
+static int radio_txagc_legacy_profile(struct rtl8822b_radio *radio, uint8_t channel, uint64_t deadline_ticks);
 
 static uint16_t load_le16(const uint8_t *bytes);
 
-/* Supports the load le16 operation. */
+/* Reads a 16-bit field, least significant byte first. */
 static uint16_t
 load_le16(
 	const uint8_t *bytes)
@@ -292,7 +284,7 @@ load_le16(
 
 static uint32_t load_le32(const uint8_t *bytes);
 
-/* Supports the load le32 operation. */
+/* Reads a 32-bit field, least significant byte first. */
 static uint32_t
 load_le32(
 	const uint8_t *bytes)
@@ -304,7 +296,7 @@ load_le32(
 
 static void store_le16(uint8_t *bytes, uint16_t value);
 
-/* Supports the store le16 operation. */
+/* Writes a 16-bit field, least significant byte first. */
 static void
 store_le16(
 	uint8_t *bytes,
@@ -316,7 +308,7 @@ store_le16(
 
 static void store_le32(uint8_t *bytes, uint32_t value);
 
-/* Supports the store le32 operation. */
+/* Writes a 32-bit field, least significant byte first. */
 static void
 store_le32(
 	uint8_t *bytes,
@@ -330,7 +322,7 @@ store_le32(
 
 static uint32_t rotate_right(uint32_t value, unsigned shift);
 
-/* Supports the rotate right operation. */
+/* Rotates a word right, as the hash function needs. */
 static uint32_t
 rotate_right(
 	uint32_t value,
@@ -342,7 +334,7 @@ rotate_right(
 
 static void sha256_transform(struct rtl8822b_sha256_context *context, const uint8_t block[64]);
 
-/* Supports the sha256 transform operation. */
+/* Folds one block into the running hash state. */
 static void
 sha256_transform(
 	struct rtl8822b_sha256_context *context,
@@ -418,7 +410,7 @@ sha256_transform(
 
 static void sha256_init(struct rtl8822b_sha256_context *context);
 
-/* Supports the sha256 init operation. */
+/* Starts a hash with the constants the algorithm defines. */
 static void
 sha256_init(
 	struct rtl8822b_sha256_context *context)
@@ -434,7 +426,7 @@ sha256_init(
 
 static void sha256_update(struct rtl8822b_sha256_context *context, const uint8_t *data, size_t length);
 
-/* Supports the sha256 update operation. */
+/* Takes more bytes into a running hash. */
 static void
 sha256_update(
 	struct rtl8822b_sha256_context *context,
@@ -465,7 +457,7 @@ sha256_update(
 
 static void sha256_final(struct rtl8822b_sha256_context *context, uint8_t digest[32]);
 
-/* Supports the sha256 final operation. */
+/* Finishes a hash and reports its digest. */
 static void
 sha256_final(
 	struct rtl8822b_sha256_context *context,
@@ -506,7 +498,7 @@ sha256_final(
 }
 
 /*
- * Implements the drv rtl8822b sha256 operation.
+ * Hashes a run of bytes in one call.
  */
 int
 drv_rtl8822b_sha256(
@@ -538,7 +530,7 @@ drv_rtl8822b_sha256(
 
 static int firmware_validate_expected(const uint8_t *data, size_t length, const uint8_t expected_digest[32], struct rtl8822b_firmware_view *view);
 
-/* Supports the firmware validate expected operation. */
+/* Reports the digest the firmware image should hash to. */
 static int
 firmware_validate_expected(
 	const uint8_t *data,
@@ -619,7 +611,7 @@ firmware_validate_expected(
 }
 
 /*
- * Implements the drv rtl8822b firmware validate operation.
+ * Refuses a firmware image that is not the expected one.
  */
 int
 drv_rtl8822b_firmware_validate(
@@ -639,7 +631,7 @@ drv_rtl8822b_firmware_validate(
 
 static int firmware_blob_state(const struct rtl8822b_firmware_blob *firmware, int *owned);
 
-/* Supports the firmware blob state operation. */
+/* Reports whether the firmware image is present and usable. */
 static int
 firmware_blob_state(
 	const struct rtl8822b_firmware_blob *firmware,
@@ -668,7 +660,7 @@ firmware_blob_state(
 #ifndef RTL8822B_HOST_TEST
 static void firmware_scrub(void *memory, size_t length);
 
-/* Supports the firmware scrub operation. */
+/* Clears the firmware image out of memory. */
 static void
 firmware_scrub(
 	void *memory,
@@ -682,7 +674,7 @@ firmware_scrub(
 }
 
 /*
- * Implements the drv rtl8822b firmware release operation.
+ * Gives the firmware image back.
  */
 void
 drv_rtl8822b_firmware_release(
@@ -702,7 +694,7 @@ drv_rtl8822b_firmware_release(
 }
 
 /*
- * Implements the drv rtl8822b firmware load operation.
+ * Reads the firmware image and checks it before use.
  */
 int
 drv_rtl8822b_firmware_load(
@@ -803,7 +795,7 @@ close_file:
 
 #ifdef RTL8822B_TESTING
 /*
- * Implements the drv rtl8822b test firmware validate operation.
+ * Exposes the firmware check to the host test harness.
  */
 int
 drv_rtl8822b_test_firmware_validate(
@@ -823,7 +815,7 @@ drv_rtl8822b_test_firmware_validate(
 }
 
 /*
- * Implements the drv rtl8822b test firmware blob state operation.
+ * Exposes the image state to the host test harness.
  */
 int
 drv_rtl8822b_test_firmware_blob_state(
@@ -842,7 +834,7 @@ drv_rtl8822b_test_firmware_blob_state(
 
 static int firmware_walk_segment(const struct rtl8822b_firmware_view *view, enum rtl8822b_firmware_segment segment, size_t file_offset, size_t segment_length, uint32_t destination, rtl8822b_firmware_chunk_fn callback, void *context);
 
-/* Supports the firmware walk segment operation. */
+/* Walks one segment of the firmware image. */
 static int
 firmware_walk_segment(
 	const struct rtl8822b_firmware_view *view,
@@ -905,7 +897,7 @@ firmware_walk_segment(
 
 static int firmware_view_equal(const struct rtl8822b_firmware_view *left, const struct rtl8822b_firmware_view *right);
 
-/* Supports the firmware view equal operation. */
+/* Compares two views of the firmware image. */
 static int
 firmware_view_equal(
 	const struct rtl8822b_firmware_view *left,
@@ -926,7 +918,7 @@ firmware_view_equal(
 
 static int firmware_walk_expected(const struct rtl8822b_firmware_view *view, const uint8_t expected_digest[32], rtl8822b_firmware_chunk_fn callback, void *context);
 
-/* Supports the firmware walk expected operation. */
+/* Reports the segments the image should be made of. */
 static int
 firmware_walk_expected(
 	const struct rtl8822b_firmware_view *view,
@@ -974,7 +966,7 @@ firmware_walk_expected(
 }
 
 /*
- * Implements the drv rtl8822b firmware walk operation.
+ * Walks the firmware image segment by segment.
  */
 int
 drv_rtl8822b_firmware_walk(
@@ -1022,7 +1014,7 @@ drv_rtl8822b_test_firmware_segment(
 }
 
 /*
- * Implements the drv rtl8822b test firmware walk operation.
+ * Exposes that walk to the host test harness.
  */
 int
 drv_rtl8822b_test_firmware_walk(
@@ -1043,7 +1035,7 @@ drv_rtl8822b_test_firmware_walk(
 #endif
 
 /*
- * Implements the drv rtl8822b firmware tx descriptor operation.
+ * Builds the descriptor a firmware download is written under.
  */
 int
 drv_rtl8822b_firmware_tx_descriptor(
@@ -1076,7 +1068,7 @@ drv_rtl8822b_firmware_tx_descriptor(
 }
 
 /*
- * Implements the drv rtl8822b efuse decode operation.
+ * Decodes the packed contents of the device's fuse map.
  */
 int
 drv_rtl8822b_efuse_decode(
@@ -1154,7 +1146,7 @@ drv_rtl8822b_efuse_decode(
 }
 
 /*
- * Implements the drv rtl8822b chip identity parse operation.
+ * Reads which revision of the chip this is.
  */
 int
 drv_rtl8822b_chip_identity_parse(
@@ -1187,7 +1179,7 @@ drv_rtl8822b_chip_identity_parse(
 
 static int mac_address_valid(const uint8_t address[6]);
 
-/* Supports the mac address valid operation. */
+/* Refuses a hardware address no station could have. */
 static int
 mac_address_valid(
 	const uint8_t address[6])
@@ -1216,7 +1208,7 @@ mac_address_valid(
 
 static int board_tx_power_2g_valid(const struct rtl8822bu_board_info *board);
 
-/* Supports the board tx power 2g valid operation. */
+/* Refuses a 2.4 GHz power table the board could not hold. */
 static int
 board_tx_power_2g_valid(
 	const struct rtl8822bu_board_info *board)
@@ -1257,7 +1249,7 @@ board_tx_power_2g_valid(
 
 static int board_tx_power_5g_w52_valid(const struct rtl8822bu_board_info *board);
 
-/* Supports the board tx power 5g w52 valid operation. */
+/* Refuses a 5 GHz power table the board could not hold. */
 static int
 board_tx_power_5g_w52_valid(
 	const struct rtl8822bu_board_info *board)
@@ -1297,7 +1289,7 @@ board_tx_power_5g_w52_valid(
 
 static int channel_is_w52(uint8_t channel);
 
-/* Supports the channel is w52 operation. */
+/* Asks whether a channel is one of the lower 5 GHz band. */
 static int
 channel_is_w52(
 	uint8_t channel)
@@ -1358,7 +1350,7 @@ drv_rtl8822b_board_active_channel_allowed(
 }
 
 /*
- * Implements the drv rtl8822bu board parse operation.
+ * Reads the board's own calibration out of its fuse map.
  */
 int
 drv_rtl8822bu_board_parse(
@@ -1438,7 +1430,7 @@ drv_rtl8822bu_board_parse(
 
 static int32_t clamp_rssi(int32_t value);
 
-/* Supports the clamp rssi operation. */
+/* Holds a signal strength inside the range the kernel reports. */
 static int32_t
 clamp_rssi(
 	int32_t value)
@@ -1624,7 +1616,7 @@ drv_rtl8822b_rx_packet_parse(
 }
 
 /*
- * Implements the drv rtl8822b rx aggregate walk operation.
+ * Walks the frames the device packed into one transfer.
  */
 int
 drv_rtl8822b_rx_aggregate_walk(
@@ -1767,7 +1759,7 @@ static const struct rtl8822b_power_command rtl8822b_power_disable[] = {
 
 static int radio_error(int error);
 
-/* Supports the radio error operation. */
+/* Records the first failure a radio sequence met. */
 static int
 radio_error(
 	int error)
@@ -1778,7 +1770,7 @@ radio_error(
 
 static int radio_deadline_check(const struct rtl8822b_radio *radio, uint64_t deadline_ticks);
 
-/* Supports the radio deadline check operation. */
+/* Refuses to keep waiting past a sequence's deadline. */
 static int
 radio_deadline_check(
 	const struct rtl8822b_radio *radio,
@@ -1802,7 +1794,7 @@ radio_deadline_check(
 
 static int radio_read(struct rtl8822b_radio *radio, uint16_t address, unsigned width, uint32_t *value, uint64_t deadline_ticks);
 
-/* Supports the radio read operation. */
+/* Reads one radio register. */
 static int
 radio_read(
 	struct rtl8822b_radio *radio,
@@ -1847,7 +1839,7 @@ radio_read(
 
 static int radio_write(struct rtl8822b_radio *radio, uint16_t address, unsigned width, uint32_t value, uint64_t deadline_ticks);
 
-/* Supports the radio write operation. */
+/* Writes one radio register. */
 static int
 radio_write(
 	struct rtl8822b_radio *radio,
@@ -1893,7 +1885,7 @@ radio_write(
 
 static int radio_delay(struct rtl8822b_radio *radio, uint32_t microseconds, uint64_t deadline_ticks);
 
-/* Supports the radio delay operation. */
+/* Waits the moment a radio step needs. */
 static int
 radio_delay(
 	struct rtl8822b_radio *radio,
@@ -1927,7 +1919,7 @@ radio_delay(
 
 static int radio_update(struct rtl8822b_radio *radio, uint16_t address, unsigned width, uint32_t mask, uint32_t value, uint64_t deadline_ticks);
 
-/* Supports the radio update operation. */
+/* Changes selected bits of one radio register. */
 static int
 radio_update(
 	struct rtl8822b_radio *radio,
@@ -1957,7 +1949,7 @@ radio_update(
 
 static int radio_power_commands(struct rtl8822b_radio *radio, const struct rtl8822b_power_command *commands, size_t count, uint64_t deadline_ticks);
 
-/* Supports the radio power commands operation. */
+/* Reports the power sequence for one direction. */
 static int
 radio_power_commands(
 	struct rtl8822b_radio *radio,
@@ -2047,7 +2039,7 @@ radio_power_commands(
 
 static int radio_power_state_is_on(struct rtl8822b_radio *radio, int *powered, uint64_t deadline_ticks);
 
-/* Supports the radio power state is on operation. */
+/* Asks whether the radio is already powered. */
 static int
 radio_power_state_is_on(
 	struct rtl8822b_radio *radio,
@@ -2159,7 +2151,7 @@ radio_warm_firmware_ack(
 
 static int radio_condition_matches(const struct rtl8822b_radio *radio, uint32_t word);
 
-/* Supports the radio condition matches operation. */
+/* Asks whether one power step applies to this chip revision. */
 static int
 radio_condition_matches(
 	const struct rtl8822b_radio *radio,
@@ -2195,7 +2187,7 @@ radio_condition_matches(
 
 static int radio_rf_write(struct rtl8822b_radio *radio, uint8_t path, uint16_t rf_address, uint32_t value, uint64_t deadline_ticks);
 
-/* Supports the radio rf write operation. */
+/* Writes one register of the radio front end. */
 static int
 radio_rf_write(
 	struct rtl8822b_radio *radio,
@@ -2233,7 +2225,7 @@ radio_rf_write(
 
 static int radio_table_write(struct rtl8822b_radio *radio, uint8_t domain, uint8_t width, uint8_t rf_path, uint32_t address, uint32_t value, uint64_t deadline_ticks);
 
-/* Supports the radio table write operation. */
+/* Writes one entry of a radio initialization table. */
 static int
 radio_table_write(
 	struct rtl8822b_radio *radio,
@@ -2354,7 +2346,7 @@ radio_table_write(
 
 static int radio_table_apply(struct rtl8822b_radio *radio, uint8_t domain, uint8_t width, uint8_t rf_path, const uint32_t *words, size_t word_count, uint64_t deadline_ticks);
 
-/* Supports the radio table apply operation. */
+/* Writes a whole radio initialization table. */
 static int
 radio_table_apply(
 	struct rtl8822b_radio *radio,
@@ -2482,7 +2474,7 @@ radio_table_apply(
 
 #ifdef RTL8822B_TESTING
 /*
- * Implements the drv rtl8822b test radio table apply operation.
+ * Exposes that to the host test harness.
  */
 int
 drv_rtl8822b_test_radio_table_apply(
@@ -2527,7 +2519,7 @@ struct rtl8822b_journal {
 
 static unsigned mask_shift(uint32_t mask);
 
-/* Supports the mask shift operation. */
+/* Reports how far a field mask is shifted. */
 static unsigned
 mask_shift(
 	uint32_t mask)
@@ -2546,7 +2538,7 @@ mask_shift(
 
 static uint32_t mask_value(uint32_t mask, uint32_t value);
 
-/* Supports the mask value operation. */
+/* Renders a value as the bits a field mask selects. */
 static uint32_t
 mask_value(
 	uint32_t mask,
@@ -2563,7 +2555,7 @@ mask_value(
 
 static int journal_add(struct rtl8822b_journal *journal, uint8_t kind, uint16_t address, uint8_t width, uint8_t rf_path, uint32_t value);
 
-/* Supports the journal add operation. */
+/* Records one register write so it can be undone. */
 static int
 journal_add(
 	struct rtl8822b_journal *journal,
@@ -2591,7 +2583,7 @@ journal_add(
 
 static int journal_update(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint16_t address, uint8_t width, uint32_t mask, uint32_t value, uint64_t deadline_ticks);
 
-/* Supports the journal update operation. */
+/* Records one masked register change so it can be undone. */
 static int
 journal_update(
 	struct rtl8822b_radio *radio,
@@ -2632,7 +2624,7 @@ journal_update(
 
 static int journal_update_phy_paths(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint16_t address, uint32_t mask, uint32_t value, uint64_t deadline_ticks);
 
-/* Supports the journal update phy paths operation. */
+/* Records the same change on every physical path. */
 static int
 journal_update_phy_paths(
 	struct rtl8822b_radio *radio,
@@ -2667,7 +2659,7 @@ journal_update_phy_paths(
 
 static int radio_rf_read(struct rtl8822b_radio *radio, uint8_t path, uint16_t rf_address, uint32_t *value, uint64_t deadline_ticks);
 
-/* Supports the radio rf read operation. */
+/* Reads one register of the radio front end. */
 static int
 radio_rf_read(
 	struct rtl8822b_radio *radio,
@@ -2702,7 +2694,7 @@ radio_rf_read(
 
 static int journal_rf_update(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t path, uint16_t address, uint32_t mask, uint32_t value, uint64_t deadline_ticks);
 
-/* Supports the journal rf update operation. */
+/* Records one front-end change so it can be undone. */
 static int
 journal_rf_update(
 	struct rtl8822b_radio *radio,
@@ -2744,7 +2736,7 @@ journal_rf_update(
 
 static int journal_rollback(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal);
 
-/* Supports the journal rollback operation. */
+/* Undoes every recorded change, in reverse. */
 static int
 journal_rollback(
 	struct rtl8822b_radio *radio,
@@ -2788,7 +2780,7 @@ journal_rollback(
 
 static void radio_emergency_off(struct rtl8822b_radio *radio);
 
-/* Supports the radio emergency off operation. */
+/* Powers the radio down after a sequence has failed. */
 static void
 radio_emergency_off(
 	struct rtl8822b_radio *radio)
@@ -2841,7 +2833,7 @@ radio_emergency_off(
 
 static int radio_pre_power(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
 
-/* Supports the radio pre power operation. */
+/* Prepares the chip before the power sequence runs. */
 static int
 radio_pre_power(
 	struct rtl8822b_radio *radio,
@@ -2900,7 +2892,7 @@ radio_pre_power(
 
 static int radio_post_power(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
 
-/* Supports the radio post power operation. */
+/* Finishes the chip's setup after that sequence. */
 static int
 radio_post_power(
 	struct rtl8822b_radio *radio,
@@ -2963,7 +2955,7 @@ radio_post_power(
 
 static int radio_mac_channel_20(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t channel, uint64_t deadline_ticks);
 
-/* Supports the radio mac channel 20 operation. */
+/* Sets the media access registers for a 20 MHz channel. */
 static int
 radio_mac_channel_20(
 	struct rtl8822b_radio *radio,
@@ -3017,7 +3009,7 @@ radio_mac_channel_20(
 
 static int radio_bb_channel_20(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t channel, uint64_t deadline_ticks);
 
-/* Supports the radio bb channel 20 operation. */
+/* Sets the baseband registers for a 20 MHz channel. */
 static int
 radio_bb_channel_20(
 	struct rtl8822b_radio *radio,
@@ -3109,7 +3101,7 @@ radio_bb_channel_20(
 
 static int radio_rf_channel_20(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t channel, uint64_t deadline_ticks);
 
-/* Supports the radio rf channel 20 operation. */
+/* Sets the front-end registers for a 20 MHz channel. */
 static int
 radio_rf_channel_20(
 	struct rtl8822b_radio *radio,
@@ -3175,7 +3167,7 @@ radio_rf_channel_20(
 
 static int radio_rxdfir_20(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint64_t deadline_ticks);
 
-/* Supports the radio rxdfir 20 operation. */
+/* Sets the receive filter for a 20 MHz channel. */
 static int
 radio_rxdfir_20(
 	struct rtl8822b_radio *radio,
@@ -3209,7 +3201,7 @@ radio_rxdfir_20(
 
 static int radio_toggle_igi(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint64_t deadline_ticks);
 
-/* Supports the radio toggle igi operation. */
+/* Nudges the automatic gain control so it re-settles. */
 static int
 radio_toggle_igi(
 	struct rtl8822b_radio *radio,
@@ -3272,7 +3264,7 @@ radio_toggle_igi(
 
 static int radio_cca_20(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t channel, uint64_t deadline_ticks);
 
-/* Supports the radio cca 20 operation. */
+/* Sets the clear-channel assessment for a 20 MHz channel. */
 static int
 radio_cca_20(
 	struct rtl8822b_radio *radio,
@@ -3353,7 +3345,7 @@ radio_cca_20(
 
 static int radio_rfe_channel(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t channel, uint64_t deadline_ticks);
 
-/* Supports the radio rfe channel operation. */
+/* Sets the front-end switch for the band a channel is in. */
 static int
 radio_rfe_channel(
 	struct rtl8822b_radio *radio,
@@ -3419,7 +3411,7 @@ radio_rfe_channel(
 	return 0;
 }
 
-/* Supports the radio channel apply operation. */
+/* Puts the radio on one channel. */
 static int
 radio_channel_apply(
 	struct rtl8822b_radio *radio,
@@ -3470,8 +3462,7 @@ radio_channel_apply(
 
 	/* Checks the operation status. */
 	if (error == 0) {
-		error = radio_txagc_legacy_profile(radio, channel,
-						   deadline_ticks);
+		error = radio_txagc_legacy_profile(radio, channel, deadline_ticks);
 	}
 
 	/* Checks the operation status. */
@@ -3500,7 +3491,7 @@ radio_channel_apply(
 	return 0;
 }
 
-/* Supports the radio table section apply operation. */
+/* Writes one section of the radio initialization tables. */
 static int
 radio_table_section_apply(
 	struct rtl8822b_radio *radio,
@@ -3547,7 +3538,7 @@ radio_table_section_apply(
 	return error;
 }
 
-/* Supports the radio tables apply operation. */
+/* Writes every section of those tables. */
 static int
 radio_tables_apply(
 	struct rtl8822b_radio *radio,
@@ -3586,7 +3577,7 @@ radio_tables_apply(
 	return 0;
 }
 
-/* Supports the radio 2g power group operation. */
+/* Reports which 2.4 GHz power group a channel is in. */
 static unsigned
 radio_2g_power_group(
 	uint8_t channel)
@@ -3607,7 +3598,7 @@ radio_2g_power_group(
 	return 3U;
 }
 
-/* Supports the radio txagc legacy index operation. */
+/* Reports the gain table index of a legacy rate. */
 static uint8_t
 radio_txagc_legacy_index(
 	const struct rtl8822bu_board_info *board,
@@ -3648,7 +3639,7 @@ radio_txagc_legacy_index(
 	return (uint8_t)index;
 }
 
-/* Supports the radio w52 power group operation. */
+/* Reports which 5 GHz power group a channel is in. */
 static unsigned
 radio_w52_power_group(
 	uint8_t channel)
@@ -3656,7 +3647,7 @@ radio_w52_power_group(
 	/* Returns the computed result. */
 	return channel <= 40U ? 0U : 1U;
 }
-/* Supports the radio txagc 5g legacy index operation. */
+/* Reports the 5 GHz gain table index of a legacy rate. */
 static uint8_t
 radio_txagc_5g_legacy_index(
 	const struct rtl8822bu_board_info *board,
@@ -3690,7 +3681,7 @@ radio_txagc_5g_legacy_index(
 	return (uint8_t)index;
 }
 
-/* Supports the radio txagc legacy profile operation. */
+/* Writes the transmit gain table for the legacy rates. */
 static int
 radio_txagc_legacy_profile(
 	struct rtl8822b_radio *radio,
@@ -3753,7 +3744,7 @@ radio_txagc_legacy_profile(
 	return 0;
 }
 
-/* Supports the radio fifo 3bulkout profile operation. */
+/* Sets the queue map this transport's three endpoints need. */
 static int
 radio_fifo_3bulkout_profile(
 	struct rtl8822b_radio *radio,
@@ -4097,7 +4088,7 @@ radio_usb_profile(
 
 static int radio_phy_trx_mode(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
 
-/* Supports the radio phy trx mode operation. */
+/* Sets the transmit and receive mode of the baseband. */
 static int
 radio_phy_trx_mode(
 	struct rtl8822b_radio *radio,
@@ -4277,7 +4268,7 @@ radio_phy_trx_mode(
 
 static int radio_phy_rfe_post_table(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
 
-/* Supports the radio phy rfe post table operation. */
+/* Writes the front-end registers the tables leave over. */
 static int
 radio_phy_rfe_post_table(
 	struct rtl8822b_radio *radio,
@@ -4555,7 +4546,7 @@ radio_wlan_only_profile(
 
 static int radio_driver_info_profile(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
 
-/* Supports the radio driver info profile operation. */
+/* Sets how much per-frame information the device reports. */
 static int
 radio_driver_info_profile(
 	struct rtl8822b_radio *radio,
@@ -4593,7 +4584,7 @@ radio_driver_info_profile(
 
 static int radio_minimum_mac_profile(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
 
-/* Supports the radio minimum mac profile operation. */
+/* Writes the smallest media access setup that works. */
 static int
 radio_minimum_mac_profile(
 	struct rtl8822b_radio *radio,
@@ -4834,7 +4825,7 @@ radio_minimum_mac_profile(
 }
 
 /*
- * Implements the drv rtl8822b radio power on operation.
+ * Powers the radio up and runs its initialization.
  */
 int
 drv_rtl8822b_radio_power_on(
@@ -4926,7 +4917,7 @@ drv_rtl8822b_radio_power_on(
 }
 
 /*
- * Implements the drv rtl8822b radio start operation.
+ * Brings the radio into service on a channel.
  */
 int
 drv_rtl8822b_radio_start(
@@ -5045,7 +5036,7 @@ drv_rtl8822b_radio_start(
 }
 
 /*
- * Implements the drv rtl8822b radio set channel operation.
+ * Moves the radio to another channel.
  */
 int
 drv_rtl8822b_radio_set_channel(
@@ -5068,7 +5059,7 @@ drv_rtl8822b_radio_set_channel(
 }
 
 /*
- * Implements the drv rtl8822b radio rx generation pause operation.
+ * Stops the receive path taking new frames.
  */
 int
 drv_rtl8822b_radio_rx_generation_pause(
@@ -5140,7 +5131,7 @@ drv_rtl8822b_radio_rx_generation_pause(
 }
 
 /*
- * Implements the drv rtl8822b radio rx generation resume operation.
+ * Lets it take frames again.
  */
 int
 drv_rtl8822b_radio_rx_generation_resume(
@@ -5194,7 +5185,7 @@ drv_rtl8822b_radio_rx_generation_resume(
 }
 
 /*
- * Implements the drv rtl8822b radio stop operation.
+ * Takes the radio out of service and powers it down.
  */
 int
 drv_rtl8822b_radio_stop(
@@ -5270,7 +5261,7 @@ drv_rtl8822b_radio_stop(
 }
 
 /*
- * Implements the drv rtl8822b radio active scan allowed operation.
+ * Asks whether this channel may be probed actively.
  */
 int
 drv_rtl8822b_radio_active_scan_allowed(
@@ -5293,7 +5284,7 @@ drv_rtl8822b_radio_active_scan_allowed(
 	return error;
 }
 
-/* Supports the probe request valid operation. */
+/* Refuses a probe request frame that is malformed. */
 static int
 probe_request_valid(
 	const struct rtl8822b_radio *radio,
@@ -5356,7 +5347,7 @@ probe_request_valid(
 
 static int radio_management_frame_prepare(const struct rtl8822b_radio *radio, uint8_t *wire, size_t capacity, const uint8_t *frame, size_t frame_length, size_t *wire_length);
 
-/* Supports the radio management frame prepare operation. */
+/* Builds the descriptor one management frame is sent under. */
 static int
 radio_management_frame_prepare(
 	const struct rtl8822b_radio *radio,
@@ -5424,7 +5415,7 @@ radio_management_frame_prepare(
 }
 
 /*
- * Implements the drv rtl8822b radio management frame prepare operation.
+ * Prepares a management frame for transmission.
  */
 int
 drv_rtl8822b_radio_management_frame_prepare(
@@ -5455,7 +5446,7 @@ drv_rtl8822b_radio_management_frame_prepare(
 }
 
 /*
- * Implements the drv rtl8822b radio deauthentication prepare operation.
+ * Prepares the frame that tells a station it is disconnected.
  */
 int
 drv_rtl8822b_radio_deauthentication_prepare(

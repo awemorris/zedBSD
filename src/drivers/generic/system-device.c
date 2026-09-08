@@ -64,8 +64,6 @@ static int map_source_state(uint32_t state, uint32_t *mapped);
 static int control_ioctl(unsigned long request, uintptr_t argument, int superuser);
 static int get_source_ioctl(uintptr_t argument);
 
-static const struct cdev_ops system_ops = {.ioctl = system_ioctl};
-
 _Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->uuid) == ZEDBSD_SYSTEM_SWAP_UUID_SIZE, "kernel and UAPI swap UUID sizes differ");
 _Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->label) == ZEDBSD_SYSTEM_SWAP_LABEL_SIZE, "kernel and UAPI swap label sizes differ");
 _Static_assert(sizeof(((struct kern_swap_control_source_info *)0)->source) == ZEDBSD_SYSTEM_SWAP_SOURCE_MAX, "kernel and UAPI swap source-string sizes differ");
@@ -987,3 +985,11 @@ get_source_ioctl(
 	/* Succeeded. */
 	return 0;
 }
+
+/*
+ * /dev/system
+ */
+
+static const struct cdev_ops system_ops = {
+	.ioctl = system_ioctl
+};

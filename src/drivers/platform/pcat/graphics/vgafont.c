@@ -1,15 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
- * IBM PC-compatible 8x16 VGA font.
- *
- * Data imported from SeaBIOS vgasrc/vgafonts.c.  SeaBIOS documents the
- * individual fonts from fntcol16.zip as public domain.  The data is kept in
- * its original byte-for-byte form; this wrapper is part of zedBSD.
- *
- * Source: https://github.com/coreboot/seabios/blob/master/vgasrc/vgafonts.c
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ * Public Domain IBM PC-compatible 8x16 VGA font.
  */
+
 #include "drivers/platform/pcat/graphics/vgafont.h"
 
 const uint8_t drv_pcat_vgafont16[PCAT_VGAFONT_GLYPHS * PCAT_VGAFONT_HEIGHT] = {

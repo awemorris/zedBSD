@@ -98,7 +98,6 @@ enum {
 	AX211_TLV_DEBUG_LAST = 0x100000a
 };
 
-/* Supports the ax211 get le16 operation. */
 static uint16_t ax211_get_le16(const uint8_t *bytes);
 
 /* Supports the ax211 get le16 operation. */
@@ -110,7 +109,6 @@ ax211_get_le16(
 	return (uint16_t)((uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8));
 }
 
-/* Supports the ax211 get le32 operation. */
 static uint32_t ax211_get_le32(const uint8_t *bytes);
 
 /* Supports the ax211 get le32 operation. */
@@ -123,7 +121,6 @@ ax211_get_le32(
 	       ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
 }
 
-/* Supports the ax211 put le16 operation. */
 static void ax211_put_le16(uint8_t *bytes, uint16_t value);
 
 /* Supports the ax211 put le16 operation. */
@@ -136,7 +133,6 @@ ax211_put_le16(
 	bytes[1] = (uint8_t)(value >> 8);
 }
 
-/* Supports the ax211 put le32 operation. */
 static void ax211_put_le32(uint8_t *bytes, uint32_t value);
 
 /* Supports the ax211 put le32 operation. */
@@ -151,7 +147,6 @@ ax211_put_le32(
 	bytes[3] = (uint8_t)(value >> 24);
 }
 
-/* Supports the ax211 put le64 operation. */
 static void ax211_put_le64(uint8_t *bytes, uint64_t value);
 
 /* Supports the ax211 put le64 operation. */
@@ -167,7 +162,6 @@ ax211_put_le64(
 		bytes[index] = (uint8_t)(value >> (index * 8));
 }
 
-/* Supports the ax211 tlv span operation. */
 static int ax211_tlv_span(uint32_t value, size_t remaining, size_t *span);
 
 /* Supports the ax211 tlv span operation. */
@@ -192,7 +186,6 @@ ax211_tlv_span(
 	return INTEL_AX211_OK;
 }
 
-/* Supports the ax211 ignored firmware tlv operation. */
 static int ax211_ignored_firmware_tlv(uint32_t type);
 
 /* Supports the ax211 ignored firmware tlv operation. */
@@ -227,9 +220,6 @@ ax211_ignored_firmware_tlv(
 /*
  * Implements the drv intel ax211 identity matches operation.
  */
-/*
- * Implements the drv intel ax211 identity matches operation.
- */
 int
 drv_intel_ax211_identity_matches(
 	const struct intel_ax211_identity *identity)
@@ -249,9 +239,6 @@ drv_intel_ax211_identity_matches(
 /*
  * Implements the drv intel ax211 mac type supported operation.
  */
-/*
- * Implements the drv intel ax211 mac type supported operation.
- */
 int
 drv_intel_ax211_mac_type_supported(
 	uint16_t mac_type)
@@ -261,9 +248,6 @@ drv_intel_ax211_mac_type_supported(
 	       mac_type == INTEL_AX211_MAC_TYPE_SOF;
 }
 
-/*
- * Implements the drv intel ax211 firmware parse operation.
- */
 /*
  * Implements the drv intel ax211 firmware parse operation.
  */
@@ -537,9 +521,6 @@ drv_intel_ax211_firmware_parse(
 /*
  * Implements the drv intel ax211 sku equal operation.
  */
-/*
- * Implements the drv intel ax211 sku equal operation.
- */
 int
 drv_intel_ax211_sku_equal(
 	const struct intel_ax211_sku_id *left,
@@ -555,7 +536,6 @@ drv_intel_ax211_sku_equal(
 	       left->data[2] == right->data[2];
 }
 
-/* Supports the ax211 pnvm finish operation. */
 static int ax211_pnvm_finish(const struct intel_ax211_pnvm_manifest *candidate, int active, int version_seen, int hardware_match, uint16_t mac_type, uint16_t rf_id, struct intel_ax211_pnvm_manifest *manifest);
 
 /* Supports the ax211 pnvm finish operation. */
@@ -588,9 +568,6 @@ ax211_pnvm_finish(
 	return INTEL_AX211_OK;
 }
 
-/*
- * Implements the drv intel ax211 pnvm parse operation.
- */
 /*
  * Implements the drv intel ax211 pnvm parse operation.
  */
@@ -751,9 +728,6 @@ drv_intel_ax211_pnvm_parse(
 /*
  * Implements the drv intel ax211 pnvm inspect operation.
  */
-/*
- * Implements the drv intel ax211 pnvm inspect operation.
- */
 int
 drv_intel_ax211_pnvm_inspect(
 	const uint8_t *bytes,
@@ -855,9 +829,6 @@ drv_intel_ax211_pnvm_inspect(
 /*
  * Implements the drv intel ax211 context info gen3 encode operation.
  */
-/*
- * Implements the drv intel ax211 context info gen3 encode operation.
- */
 int
 drv_intel_ax211_context_info_gen3_encode(
 	uint8_t output[104],
@@ -910,9 +881,6 @@ drv_intel_ax211_context_info_gen3_encode(
 /*
  * Implements the drv intel ax211 rx transfer descriptor encode operation.
  */
-/*
- * Implements the drv intel ax211 rx transfer descriptor encode operation.
- */
 int
 drv_intel_ax211_rx_transfer_descriptor_encode(
 	uint8_t output[16],
@@ -933,9 +901,6 @@ drv_intel_ax211_rx_transfer_descriptor_encode(
 /*
  * Implements the drv intel ax211 rx completion descriptor decode operation.
  */
-/*
- * Implements the drv intel ax211 rx completion descriptor decode operation.
- */
 int
 drv_intel_ax211_rx_completion_descriptor_decode(
 	const uint8_t input[32],
@@ -951,9 +916,6 @@ drv_intel_ax211_rx_completion_descriptor_decode(
 	return INTEL_AX211_OK;
 }
 
-/*
- * Implements the drv intel ax211 tfd encode operation.
- */
 /*
  * Implements the drv intel ax211 tfd encode operation.
  */
@@ -998,9 +960,6 @@ drv_intel_ax211_tfd_encode(
 /*
  * Implements the drv intel ax211 narrow command encode operation.
  */
-/*
- * Implements the drv intel ax211 narrow command encode operation.
- */
 int
 drv_intel_ax211_narrow_command_encode(
 	uint8_t output[4],
@@ -1020,9 +979,6 @@ drv_intel_ax211_narrow_command_encode(
 	return INTEL_AX211_OK;
 }
 
-/*
- * Implements the drv intel ax211 wide command encode operation.
- */
 /*
  * Implements the drv intel ax211 wide command encode operation.
  */
@@ -1051,9 +1007,6 @@ drv_intel_ax211_wide_command_encode(
 	return INTEL_AX211_OK;
 }
 
-/*
- * Implements the drv intel ax211 event decode operation.
- */
 /*
  * Implements the drv intel ax211 event decode operation.
  */
@@ -1099,9 +1052,6 @@ drv_intel_ax211_event_decode(
 /*
  * Implements the drv intel ax211 ring init operation.
  */
-/*
- * Implements the drv intel ax211 ring init operation.
- */
 int
 drv_intel_ax211_ring_init(
 	struct intel_ax211_ring *ring,
@@ -1126,9 +1076,6 @@ drv_intel_ax211_ring_init(
 /*
  * Implements the drv intel ax211 ring reserve operation.
  */
-/*
- * Implements the drv intel ax211 ring reserve operation.
- */
 int
 drv_intel_ax211_ring_reserve(
 	struct intel_ax211_ring *ring,
@@ -1150,9 +1097,6 @@ drv_intel_ax211_ring_reserve(
 	return INTEL_AX211_OK;
 }
 
-/*
- * Implements the drv intel ax211 ring complete operation.
- */
 /*
  * Implements the drv intel ax211 ring complete operation.
  */
@@ -1181,9 +1125,6 @@ drv_intel_ax211_ring_complete(
 /*
  * Implements the drv intel ax211 ring available operation.
  */
-/*
- * Implements the drv intel ax211 ring available operation.
- */
 size_t
 drv_intel_ax211_ring_available(
 	const struct intel_ax211_ring *ring)
@@ -1196,9 +1137,6 @@ drv_intel_ax211_ring_available(
 	return (size_t)(ring->capacity - ring->used);
 }
 
-/*
- * Implements the drv intel ax211 scrub operation.
- */
 /*
  * Implements the drv intel ax211 scrub operation.
  */
@@ -1217,9 +1155,6 @@ drv_intel_ax211_scrub(
 		*bytes++ = 0;
 }
 
-/*
- * Implements the drv intel ax211 staging set operation.
- */
 /*
  * Implements the drv intel ax211 staging set operation.
  */
@@ -1247,9 +1182,6 @@ drv_intel_ax211_staging_set(
 	return INTEL_AX211_OK;
 }
 
-/*
- * Implements the drv intel ax211 staging clear operation.
- */
 /*
  * Implements the drv intel ax211 staging clear operation.
  */

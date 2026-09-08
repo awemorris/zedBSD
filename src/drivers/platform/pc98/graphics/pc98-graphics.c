@@ -1,6 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
+/*
+ * PC-98 graphics driver
+ */
+
 #include "kern/graphics-device.h"
 #include "kern/cdev.h"
 #include "kern/file.h"
@@ -25,8 +33,7 @@
 static struct file *graphics_owner __attribute__((section(".vfs_bss")));
 static int graphics_entered __attribute__((section(".vfs_bss")));
 static struct graphics_mode graphics_mode __attribute__((section(".vfs_bss")));
-static uint8_t row_buffer[GRAPHICS_ROW_MAX]
-	__attribute__((section(".vfs_bss")));
+static uint8_t row_buffer[GRAPHICS_ROW_MAX] __attribute__((section(".vfs_bss")));
 static uint32_t palette_buffer[256] __attribute__((section(".vfs_bss")));
 static struct mutex graphics_lock __attribute__((section(".vfs_bss")));
 static int graphics_lock_ready __attribute__((section(".vfs_bss")));

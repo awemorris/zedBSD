@@ -106,7 +106,6 @@ static atomic_uint_t async_initialized;
 static struct spinlock async_registry;
 static struct bio_async_endpoint async_endpoints[ASYNC_ENDPOINTS];
 
-
 static void disk_write_accept(struct disk *leaf, struct bio *bio);
 static void disk_write_retire(struct disk *leaf, struct bio *bio, int error, size_t transferred);
 static void disk_persistence_invalidate_locked(struct disk *leaf);

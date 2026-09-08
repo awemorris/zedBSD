@@ -1,6 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* Raspberry Pi 4 eMMC2 SDHCI PIO driver. */
+/*
+ * Raspberry Pi 4 eMMC2 SDHCI PIO driver.
+ */
+
 #ifndef ZEDBSD_DRIVERS_RPI4_SDHCI_H
 #define ZEDBSD_DRIVERS_RPI4_SDHCI_H
 

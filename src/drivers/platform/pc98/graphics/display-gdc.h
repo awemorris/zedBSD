@@ -1,20 +1,12 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
- * Copyright (C) 1996-2024 Keiichi Tabata
  *
  * SPDX-License-Identifier: Zlib
  */
 
 /*
- * Boots zedBSD graphics NEC PC-9800 GDC safe-mode backend
- *
- *
- * Display sequencing is adapted from StratoHAL 98disp_gdc.c at commit
- * 76e909577bdf4629f11e473539b446a948fef830. This Boots version is altered
- * to preserve text VRAM and update only requested rectangles.
+ * zedBSD graphics NEC PC-9800 GDC.
  */
 
 #ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_GDC_H

@@ -1,10 +1,12 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
 /*
- * NEC PC-98 internal IDE driver
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * NEC PC-98 internal IDE driver
  */
 
 #ifndef ZEDBSD_DRIVERS_IDE_PC98_H

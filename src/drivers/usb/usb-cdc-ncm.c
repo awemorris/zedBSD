@@ -1,10 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * USB CDC NCM NTH16/NDP16 wire codec
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  */
+
 #include <drivers/usb-cdc-ncm.h>
 #include <errno.h>
 #include <limits.h>

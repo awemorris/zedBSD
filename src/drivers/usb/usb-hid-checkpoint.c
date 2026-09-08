@@ -1,9 +1,12 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
- * ws004-p031 test-only USB HID interrupt checkpoint
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
+ * Test: USB HID interrupt checkpoint
  */
 
 #include <drivers/usb.h>
@@ -61,7 +64,11 @@ static void checkpoint_report_detach(struct usb_hid_checkpoint *checkpoint, int 
 static int checkpoint_detach(struct drv_usb_interface *interface, unsigned flags);
 
 static const struct drv_usb_id checkpoint_ids[] = {
-	{.match_flags = DRV_USB_ID_IF_CLASS, .interface_class = USB_HID_CLASS}};
+	{
+		.match_flags = DRV_USB_ID_IF_CLASS,
+		.interface_class = USB_HID_CLASS
+	}
+};
 
 static struct drv_usb_driver checkpoint_driver = {
 	.name = "usb-hid-checkpoint",

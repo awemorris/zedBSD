@@ -1,20 +1,12 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
 /*
- * -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*-
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
  */
 
 /*
- * zedBSD
- * Copyright (c) 1996-2024, Keiichi Tabata
- * Copyright (c) 2025, 2026, Awe Morris
- *
- * zedBSD graphics NEC PC-9821 Core-Graph / Cirrus GD5440 display backend,
- * imported from Boots.  The register sequence is adapted from StratoHAL
- * 98disp_cirrus.c at commit 76e909577bdf4629f11e473539b446a948fef830 and
- * is deliberately limited to the Core-Graph path at 640x480x8/24.
- * Port I/O and the linear framebuffer are injected by the embedder so
- * the driver stays compiler and host neutral.
+ * zedBSD graphics NEC PC-9821 Core-Graph / Cirrus GD5440 display backend.
  */
 
 #ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_CIRRUS_H

@@ -1,12 +1,12 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * NEC PC-98 uPD8255 bus mouse drive
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
- *
- * The interface follows the PC-98 PPI wiring also implemented by
- * qemu-pc98: 0x7fd9/0x7fdb/0x7fdd/0x7fdf and IRQ 13.
  */
 
 #include "drivers/hid/pc98-busmouse.h"
@@ -64,9 +64,6 @@ void ws018_pc98_mouse_test_outb(uint16_t, uint8_t);
 #else
 static uint8_t inb(uint16_t port);
 
-/*
- * Forward declaration.
- */
 static void outb(uint16_t port, uint8_t value);
 static uint8_t read_nibble(uint8_t control);
 static void read_sample(int32_t *dx, int32_t *dy, uint32_t *buttons);

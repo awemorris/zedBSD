@@ -1,10 +1,12 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
 /*
- * PC/AT ISA NE2000 Ethernet driver
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * ISA NE2000 Ethernet driver
  */
 
 #include "drivers/pcat-ne2000.h"
@@ -49,21 +51,11 @@ static void ne2000_write_data16(void *cookie, uint16_t value);
 static int ne2000_reset(void *cookie);
 static void ne2000_irq_handler(int irq, hal_irq_ack_t acknowledge, void *argument);
 
-static const struct dp8390_bus_ops ne2000_bus_ops = {
-	.read_reg = ne2000_read_reg,
-	.write_reg = ne2000_write_reg,
-	.read_data8 = ne2000_read_data8,
-	.read_data16 = ne2000_read_data16,
-	.write_data16 = ne2000_write_data16,
-	.reset = ne2000_reset,
-};
-
 /*
  * Implements the drv pcat ne2000 init operation.
  */
 int
-drv_pcat_ne2000_init(
-	void)
+drv_pcat_ne2000_init(void)
 {
 	struct net_device *registered;
 	uint8_t prom[16];
@@ -307,3 +299,16 @@ ne2000_irq_handler(
 	drv_dp8390_interrupt(&state->dp);
 	hal_irq_send_eoi(acknowledge);
 }
+
+/*
+ * ISA NE2000
+ */
+
+static const struct dp8390_bus_ops ne2000_bus_ops = {
+	.read_reg = ne2000_read_reg,
+	.write_reg = ne2000_write_reg,
+	.read_data8 = ne2000_read_data8,
+	.read_data16 = ne2000_read_data16,
+	.write_data16 = ne2000_write_data16,
+	.reset = ne2000_reset,
+};

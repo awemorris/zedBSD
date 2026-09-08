@@ -1,9 +1,12 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * IBM PC/AT i8042 PS/2 mouse driver
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  */
 
 #include "drivers/hid/ps2-mouse.h"
@@ -62,9 +65,6 @@ void ws018_input_hid_test_outb(uint16_t, uint8_t);
 
 static uint8_t inb(uint16_t port);
 
-/*
- * Forward declaration.
- */
 static void outb(uint16_t port, uint8_t value);
 static int wait_input_empty(void);
 static int write_command(uint8_t command);

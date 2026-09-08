@@ -204,9 +204,6 @@ extern void cache_memory_commit(enum cache_memory_kind, size_t) __attribute__((w
 extern void cache_memory_cancel(enum cache_memory_kind, size_t) __attribute__((weak));
 extern void cache_memory_release(enum cache_memory_kind, size_t) __attribute__((weak));
 
-/*
- * Forward declarations.
- */
 static int vm_object_get_shared_internal(struct file *file, struct vm_object **result, int cache_only);
 static bool registry_lock(void);
 static void registry_unlock(bool enabled);
@@ -6198,10 +6195,8 @@ vm_object_sync_range_internal(
 	int error;
 
 	/* Preserves the ordinary entry point without reserving a second payload. */
-
-	/* Reports the failure. */
 	error = vm_object_sync_range_buffer(object, offset, size, flags, detaching,
-	    resize_owner, resize_target, NULL, 0);
+					    resize_owner, resize_target, NULL, 0);
 	if (error != 0)
 		return error;
 
@@ -8712,8 +8707,6 @@ reclaim_backing_owned(
 	}
 
 	/* Anything else keeps its only copy on swap. */
-
-	/* Reports why the page could not be written out. */
 	error = swap_out_backing_owned(backing);
 	if (error != 0)
 		return error;

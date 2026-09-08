@@ -1,8 +1,12 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * NEC PC-98 internal IDE driver (PIO, polled)
- * Copyright (C) 2026 Awe Morris
  *
  * - The PC-98 built-in IDE multiplexes two ATA channels.
  * - Each with a master/slave pair onto one register block.
@@ -12,8 +16,6 @@
  * - Reference model: qemu-pc98 hw/ide/pc98-ide.c
  * - Reference driver: linux-pc98 drivers/ata/pata_pc9800.c.
  * - Interrupts stay disabled (nIEN), everything is polled.
- *
- * SPDX-License-Identifier: Zlib
  */
 
 #include "drivers/platform/pc98/pc98-ide.h"

@@ -1,10 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * File-backed loop block devices
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  */
+
 #include "kern/loop.h"
 #include "kern/backing-claim.h"
 #include "kern/block-identity.h"
@@ -24,8 +28,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-
-extern unsigned vm_object_cache_drain(struct mount *) __attribute__((weak));
 
 #define LOOP_SECTOR_SIZE 512U
 #define LOOP_MAX_TRANSFER_BLOCKS 128U
@@ -52,8 +54,9 @@ struct loop_device {
 	uint64_t size_bytes;
 };
 
-static struct loop_device loops[LOOP_MAX_DEVICES]
-	__attribute__((section(".vfs_bss")));
+extern unsigned vm_object_cache_drain(struct mount *) __attribute__((weak));
+
+static struct loop_device loops[LOOP_MAX_DEVICES] __attribute__((section(".vfs_bss")));
 static struct spinlock loop_lock;
 
 static int loop_backing_valid(struct file *backing, unsigned flags);
@@ -63,13 +66,6 @@ static int loop_open(struct disk *disk);
 static void loop_close(struct disk *disk);
 static int loop_ioctl(struct disk *disk, unsigned long request, void *argument);
 static int loop_submit(struct disk *disk, struct bio *bio);
-
-static const struct disk_ops loop_disk_ops = {
-	.open = loop_open,
-	.close = loop_close,
-	.submit = loop_submit,
-	.ioctl = loop_ioctl,
-};
 
 /*
  * Implements the drv loop init operation.
@@ -829,3 +825,15 @@ loop_submit(
 	/* Succeeded. */
 	return 0;
 }
+
+/*
+ * Loopback Device
+ */
+
+static const struct disk_ops loop_disk_ops = {
+	.open = loop_open,
+	.close = loop_close,
+	.submit = loop_submit,
+	.ioctl = loop_ioctl,
+};
+

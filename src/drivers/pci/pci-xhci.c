@@ -1,31 +1,38 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
-/* Begin consolidated pci-xhci.c. */
 /*
- * Native PCI xHCI host controller. Copyright (C) 2026 Awe Morris;
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * PCI xHCI host controller
+ */
+
 #include <drivers/pci-xhci.h>
 #include <drivers/pci.h>
 #include <drivers/pci-xhci-capability.h>
 #include <drivers/pci-xhci-control.h>
 #include <drivers/pci-xhci-lifecycle.h>
 #include <drivers/usb.h>
-#include <errno.h>
+
 #include <hal/hal.h>
 #include <kern/atomic.h>
 #include <kern/io-stats.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
+
+#include <errno.h>
 #include <limits.h>
 #include <string.h>
 
 #define XHCI_USBCMD 0x00U
+
 #ifndef ZEDBSD_XHCI_IMOD
 #define ZEDBSD_XHCI_IMOD 4000U
 #endif
-_Static_assert(ZEDBSD_XHCI_IMOD <= 65535U, "xHCI IMOD interval range");
+
 #define XHCI_USBSTS 0x04U
 #define XHCI_PAGESIZE 0x08U
 #define XHCI_CRCR 0x18U
@@ -67,21 +74,25 @@ _Static_assert(ZEDBSD_XHCI_IMOD <= 65535U, "xHCI IMOD interval range");
 struct xhci_trb {
 	volatile uint32_t parameter_low, parameter_high, status, control;
 };
+
 struct xhci_erst {
 	uint64_t address;
 	uint32_t size, reserved;
 };
+
 struct xhci_ring {
 	struct drv_dma_buffer dma;
 	struct xhci_trb *trbs;
 	unsigned enqueue, cycle;
 };
+
 struct xhci_endpoint {
 	struct xhci_ring ring;
 	struct xhci_request *active;
 	unsigned dci;
 	unsigned enabled, recovering, stall_publishing;
 };
+
 struct xhci_device {
 	struct drv_usb_device *usb;
 	struct drv_dma_buffer output_context, input_context;
@@ -92,6 +103,7 @@ struct xhci_device {
 	unsigned completions_busy;
 	struct xhci_device *next;
 };
+
 struct xhci_urb_reservation;
 
 struct xhci_request {
@@ -121,6 +133,7 @@ struct xhci_request {
 	enum drv_usb_urb_status terminal_status;
 	struct xhci_request *completion_next;
 };
+
 struct xhci_urb_reservation {
 	struct xhci_request request;
 	struct drv_dma_buffer backing;
@@ -129,6 +142,7 @@ struct xhci_urb_reservation {
 	uint64_t generation;
 	unsigned busy;
 };
+
 struct xhci_controller {
 	struct drv_pci_device *pci;
 	struct drv_pci_mapping mapping;
@@ -157,6 +171,7 @@ struct xhci_controller {
 	volatile unsigned irq_busy;
 	volatile unsigned event_busy;
 	volatile unsigned command_event_ready;
+
 	/*
 	 * Protected by active_lock.  Each endpoint remains queue-depth one,
 	 * while these counts provide bounded controller teardown barriers.
@@ -186,13 +201,7 @@ static int xhci_sg_plan(struct xhci_request *request, size_t length);
 static int xhci_sg_short(const struct xhci_request *request, unsigned offset, size_t residual, size_t *actual);
 static void xhci_sg_enqueue(struct xhci_ring *ring, const struct xhci_request *request, int input, size_t packet_size, int zero_packet);
 static void xhci_request_release(struct xhci_controller *, struct xhci_request *);
-
-/* Supports the rd8 operation. */
 static uint8_t rd8(volatile uint8_t *b, unsigned o);
-
-/*
- * Forward declaration.
- */
 static uint32_t rd32(volatile uint8_t *b, unsigned o);
 static void wr32(volatile uint8_t *b, unsigned o, uint32_t v);
 static void wr8(volatile uint8_t *b, unsigned o, uint8_t v);
@@ -289,7 +298,45 @@ static int xhci_guarded_root_port_reset(struct drv_usb_hcd *h, unsigned port);
 static int xhci_attach(struct drv_pci_device *d, const struct drv_pci_id *id);
 static int xhci_detach(struct drv_pci_device *d, unsigned flags);
 
-/* Supports the rd8 operation. */
+_Static_assert(ZEDBSD_XHCI_IMOD <= 65535U, "xHCI IMOD interval range");
+
+/*
+ * Registers this driver with the PCI bus.
+ */
+int
+drv_pci_xhci_driver_register(
+	void)
+{
+	int error;
+
+	/* Obtains the drv pci driver register result. */
+	error = drv_pci_driver_register(&driver);
+
+	/* Returns the computed result. */
+	return error;
+}
+
+/*
+ * Probes the root ports of every controller this driver holds.
+ */
+void
+drv_pci_xhci_probe_roots(
+	void)
+{
+	struct xhci_controller *c;
+
+	/* Process each linked entry. */
+	for (c = controllers; c; c = c->next) {
+		/* Classifies the current input character. */
+		if (c->quarantined)
+			continue;
+		drv_usb_hcd_root_hub_changed(&c->hcd);
+		c->port_pending = 0;
+		c->root_ready = 1;
+	}
+}
+
+/* Reads one byte of a controller register. */
 static uint8_t
 rd8(
 	volatile uint8_t *b,
@@ -298,9 +345,7 @@ rd8(
 	/* Returns the computed result. */
 	return b[o];
 }
-/* Supports the rd32 operation. */
-
-/* Supports the rd32 operation. */
+/* Reads one 32-bit controller register. */
 static uint32_t
 rd32(
 	volatile uint8_t *b,
@@ -309,9 +354,7 @@ rd32(
 	/* Returns the computed result. */
 	return *(volatile uint32_t *)(b + o);
 }
-/* Supports the wr32 operation. */
-
-/* Supports the wr32 operation. */
+/* Writes one 32-bit controller register. */
 static void
 wr32(
 	volatile uint8_t *b,
@@ -322,9 +365,7 @@ wr32(
 
 	hal_io_mb();
 }
-/* Supports the wr8 operation. */
-
-/* Supports the wr8 operation. */
+/* Writes one byte of a controller register. */
 static void
 wr8(
 	volatile uint8_t *b,
@@ -334,9 +375,7 @@ wr8(
 	b[o] = v;
 	hal_io_mb();
 }
-/* Supports the wr64 operation. */
-
-/* Supports the wr64 operation. */
+/* Writes one 64-bit controller register, low half first. */
 static void
 wr64(
 	volatile uint8_t *b,
@@ -346,9 +385,7 @@ wr64(
 	wr32(b, o, (uint32_t)v);
 	wr32(b, o + 4U, (uint32_t)(v >> 32));
 }
-/* Supports the hcd controller operation. */
-
-/* Supports the hcd controller operation. */
+/* Takes the controller behind a host controller handle. */
 static struct xhci_controller *
 hcd_controller(
 	struct drv_usb_hcd *h)
@@ -357,9 +394,7 @@ hcd_controller(
 	return (void *)h->private_data[0];
 }
 
-/* Supports the wait bits operation. */
-
-/* Supports the wait bits operation. */
+/* Spins until selected register bits read the wanted value. */
 static int
 wait_bits(
 	volatile uint8_t *b,
@@ -386,9 +421,7 @@ wait_bits(
 	return ETIMEDOUT;
 }
 
-/* Supports the xhci bar raw operation. */
-
-/* Supports the xhci bar raw operation. */
+/* Reads the two halves of a base address register. */
 static void
 xhci_bar_raw(
 	struct drv_pci_device *device,
@@ -408,9 +441,7 @@ xhci_bar_raw(
 	}
 }
 
-/* Supports the xhci pci identity operation. */
-
-/* Supports the xhci pci identity operation. */
+/* Records what the PCI configuration space says this device is. */
 static void
 xhci_pci_identity(
 	struct drv_pci_device *device)
@@ -448,9 +479,7 @@ xhci_pci_identity(
 	}
 }
 
-/* Supports the xhci restore bar operation. */
-
-/* Supports the xhci restore bar operation. */
+/* Puts the base address register back the way it was found. */
 static int
 xhci_restore_bar(
 	struct xhci_controller *controller)
@@ -480,9 +509,7 @@ xhci_restore_bar(
 	return function_result;
 }
 
-/* Supports the xhci bus master disable operation. */
-
-/* Supports the xhci bus master disable operation. */
+/* Stops the controller from mastering the bus. */
 static int
 xhci_bus_master_disable(
 	struct xhci_controller *controller)
@@ -505,9 +532,7 @@ xhci_bus_master_disable(
 	return (command & XHCI_PCI_COMMAND_MASTER) == 0 ? 0 : EIO;
 }
 
-/* Supports the xhci pci quiesce operation. */
-
-/* Supports the xhci pci quiesce operation. */
+/* Takes the controller off the bus and out of interrupt service. */
 static int
 xhci_pci_quiesce(
 	struct xhci_controller *controller)
@@ -538,9 +563,7 @@ xhci_pci_quiesce(
 	return (command & XHCI_PCI_COMMAND_ENABLE) == 0 ? 0 : EIO;
 }
 
-/* Supports the xhci legacy release operation. */
-
-/* Supports the xhci legacy release operation. */
+/* Takes ownership of the controller away from the firmware. */
 static void
 xhci_legacy_release(
 	struct xhci_controller *controller)
@@ -565,9 +588,7 @@ xhci_legacy_release(
 	controller->legacy_claimed = 0;
 }
 
-/* Supports the xhci pci release operation. */
-
-/* Supports the xhci pci release operation. */
+/* Gives every PCI resource this driver claimed back. */
 static int
 xhci_pci_release(
 	struct xhci_controller *controller)
@@ -645,7 +666,6 @@ xhci_pci_release(
 }
 
 /* Counts first entry into retained controller ownership, not retained bytes. */
-/* Supports the xhci mark quarantined operation. */
 static void
 xhci_mark_quarantined(
 	struct xhci_controller *controller)
@@ -656,9 +676,7 @@ xhci_mark_quarantined(
 	controller->quarantined = 1;
 }
 
-/* Supports the xhci quarantine operation. */
-
-/* Supports the xhci quarantine operation. */
+/* Quarantines the controller and records what went wrong. */
 static void
 xhci_quarantine(
 	struct xhci_controller *controller,
@@ -678,9 +696,7 @@ xhci_quarantine(
 		   stage, error);
 }
 
-/* Supports the ring alloc operation. */
-
-/* Supports the ring alloc operation. */
+/* Takes the memory one transfer or command ring lives in. */
 static int
 ring_alloc(
 	struct xhci_controller *c,
@@ -699,9 +715,7 @@ ring_alloc(
 	/* Succeeded. */
 	return 0;
 }
-/* Supports the ring free operation. */
-
-/* Supports the ring free operation. */
+/* Gives a ring's memory back. */
 static void
 ring_free(
 	struct xhci_controller *c,
@@ -712,9 +726,8 @@ ring_free(
 		drv_dma_free_coherent(c->hcd.dma, &r->dma);
 	memset(r, 0, sizeof(*r));
 }
-/* Supports the ring push operation. */
 
-/* Supports the ring push operation. */
+/* Appends one descriptor to a ring, wrapping at its end. */
 static uint64_t
 ring_push(
 	struct xhci_ring *r,
@@ -752,9 +765,7 @@ ring_push(
 	return trb_address;
 }
 
-/* Supports the event take operation. */
-
-/* Supports the event take operation. */
+/* Takes the next event the controller has posted, if any. */
 static int
 event_take(
 	struct xhci_controller *c,
@@ -782,9 +793,7 @@ event_take(
 	return 1;
 }
 
-/* Supports the event lock operation. */
-
-/* Supports the event lock operation. */
+/* Takes the lock that serializes event handling. */
 static void
 event_lock(
 	struct xhci_controller *c)
@@ -794,9 +803,7 @@ event_lock(
 		hal_compiler_barrier();
 }
 
-/* Supports the event unlock operation. */
-
-/* Supports the event unlock operation. */
+/* Gives that lock back. */
 static void
 event_unlock(
 	struct xhci_controller *c)
@@ -804,9 +811,7 @@ event_unlock(
 	__atomic_store_n(&c->event_busy, 0U, __ATOMIC_RELEASE);
 }
 
-/* Supports the port change defer operation. */
-
-/* Supports the port change defer operation. */
+/* Hands a root port change to the worker thread. */
 static void
 port_change_defer(
 	struct xhci_controller *c)
@@ -824,9 +829,7 @@ port_change_defer(
 		kernel_notify_task(worker->task);
 }
 
-/* Supports the xhci event pointer operation. */
-
-/* Supports the xhci event pointer operation. */
+/* Reports the descriptor address an event refers to. */
 static uint64_t
 xhci_event_pointer(
 	const struct xhci_trb *event)
@@ -836,9 +839,7 @@ xhci_event_pointer(
 	       ((uint64_t)event->parameter_high << 32);
 }
 
-/* Supports the command ex operation. */
-
-/* Supports the command ex operation. */
+/* Runs one controller command and reports its full result. */
 static int
 command_ex(
 	struct xhci_controller *c,
@@ -987,9 +988,7 @@ command_ex(
 	return result;
 }
 
-/* Supports the command operation. */
-
-/* Supports the command operation. */
+/* Runs one controller command. */
 static int
 command(
 	struct xhci_controller *c,
@@ -1007,9 +1006,7 @@ command(
 	return error;
 }
 
-/* Supports the ownership operation. */
-
-/* Supports the ownership operation. */
+/* Takes ownership of the controller from the firmware. */
 static int
 ownership(
 	struct xhci_controller *c)
@@ -1100,9 +1097,7 @@ ownership(
 	return 0;
 }
 
-/* Supports the fill slot operation. */
-
-/* Supports the fill slot operation. */
+/* Fills in the slot context that describes a device. */
 static void
 fill_slot(
 	struct xhci_controller *c,
@@ -1116,9 +1111,8 @@ fill_slot(
 	w[0] = ((d->speed_id & 15U) << 20) | ((entries & 31U) << 27);
 	w[1] = drv_usb_device_port(d->usb) << 16;
 }
-/* Supports the fill endpoint operation. */
 
-/* Supports the fill endpoint operation. */
+/* Fills in the endpoint context that describes one endpoint. */
 static void
 fill_endpoint(
 	struct xhci_controller *c,
@@ -1139,9 +1133,8 @@ fill_endpoint(
 	w[3] = (uint32_t)(dequeue >> 32);
 	w[4] = encoded->word4;
 }
-/* Supports the xhci usb device operation. */
 
-/* Supports the xhci usb device operation. */
+/* Takes the controller's device state behind a USB device. */
 static struct xhci_device *
 xhci_usb_device(
 	struct drv_usb_device *u)
@@ -1154,9 +1147,7 @@ xhci_usb_device(
 	return device != NULL && device->usb == u ? device : NULL;
 }
 
-/* Supports the xhci slot device locked operation. */
-
-/* Supports the xhci slot device locked operation. */
+/* Finds the device that occupies one slot of the controller. */
 static struct xhci_device *
 xhci_slot_device_locked(
 	struct xhci_controller *c,
@@ -1175,9 +1166,7 @@ xhci_slot_device_locked(
 	return NULL;
 }
 
-/* Supports the xhci event request locked operation. */
-
-/* Supports the xhci event request locked operation. */
+/* Finds the request an event belongs to. */
 static struct xhci_request *
 xhci_event_request_locked(
 	struct xhci_controller *c,
@@ -1218,9 +1207,7 @@ xhci_event_request_locked(
 	return request;
 }
 
-/* Supports the xhci request publish locked operation. */
-
-/* Supports the xhci request publish locked operation. */
+/* Publishes a request so events can be matched against it. */
 static int
 xhci_request_publish_locked(
 	struct xhci_controller *c,
@@ -1240,9 +1227,7 @@ xhci_request_publish_locked(
 	return 0;
 }
 
-/* Supports the xhci request unlink locked operation. */
-
-/* Supports the xhci request unlink locked operation. */
+/* Takes a request back out of the published list. */
 static int
 xhci_request_unlink_locked(
 	struct xhci_controller *c,
@@ -1262,9 +1247,7 @@ xhci_request_unlink_locked(
 	return 1;
 }
 
-/* Supports the xhci recovery leave locked operation. */
-
-/* Supports the xhci recovery leave locked operation. */
+/* Ends the recovery an endpoint was being held in. */
 static void
 xhci_recovery_leave_locked(
 	struct xhci_controller *c,
@@ -1278,9 +1261,7 @@ xhci_recovery_leave_locked(
 	c->endpoint_recoveries_busy--;
 }
 
-/* Supports the xhci device recovery busy locked operation. */
-
-/* Supports the xhci device recovery busy locked operation. */
+/* Asks whether any endpoint of a device is still recovering. */
 static int
 xhci_device_recovery_busy_locked(
 	const struct xhci_device *device)
@@ -1298,9 +1279,7 @@ xhci_device_recovery_busy_locked(
 	return 0;
 }
 
-/* Supports the xhci device request busy locked operation. */
-
-/* Supports the xhci device request busy locked operation. */
+/* Asks whether any request of a device is still outstanding. */
 static int
 xhci_device_request_busy_locked(
 	const struct xhci_device *device)
@@ -1318,9 +1297,7 @@ xhci_device_request_busy_locked(
 	return 0;
 }
 
-/* Supports the xhci default owner release operation. */
-
-/* Supports the xhci default owner release operation. */
+/* Gives up the control endpoint a device was addressed through. */
 static void
 xhci_default_owner_release(
 	struct xhci_controller *c,
@@ -1339,9 +1316,7 @@ xhci_default_owner_release(
 		d->default_owned = 0;
 }
 
-/* Supports the xhci device release operation. */
-
-/* Supports the xhci device release operation. */
+/* Gives every resource a device held back. */
 static void
 xhci_device_release(
 	struct drv_usb_hcd *h,
@@ -1408,9 +1383,7 @@ xhci_device_release(
 	hal_free(d);
 }
 
-/* Supports the xhci device enable operation. */
-
-/* Supports the xhci device enable operation. */
+/* Takes a slot for a newly attached device. */
 static int
 xhci_device_enable(
 	struct drv_usb_hcd *h,
@@ -1559,9 +1532,7 @@ fail:
 	return e;
 }
 
-/* Supports the xhci set address operation. */
-
-/* Supports the xhci set address operation. */
+/* Gives a device its bus address. */
 static int
 xhci_set_address(
 	struct drv_usb_hcd *h,
@@ -1639,9 +1610,7 @@ xhci_set_address(
 	return 0;
 }
 
-/* Supports the xhci device disable operation. */
-
-/* Supports the xhci device disable operation. */
+/* Gives a device's slot back to the controller. */
 static void
 xhci_device_disable(
 	struct drv_usb_hcd *h,
@@ -1666,9 +1635,7 @@ xhci_device_disable(
 	xhci_device_release(h, d);
 }
 
-/* Supports the xhci endpoint enable operation. */
-
-/* Supports the xhci endpoint enable operation. */
+/* Configures one endpoint of a device. */
 static int
 xhci_endpoint_enable(
 	struct drv_usb_hcd *h,
@@ -1769,9 +1736,7 @@ xhci_endpoint_enable(
 	/* Succeeded. */
 	return 0;
 }
-/* Supports the xhci endpoint disable operation. */
-
-/* Supports the xhci endpoint disable operation. */
+/* Takes one endpoint out of the device's configuration. */
 static int
 xhci_endpoint_disable(
 	struct drv_usb_hcd *h,
@@ -1852,8 +1817,11 @@ xhci_endpoint_disable(
 	return 0;
 }
 
-/* event_lock is held across this ownership claim.  Therefore cancellation, Disable Slot, and ring reuse cannot pass an event which was dequeued but had not yet acquired its endpoint owner. */
-/* Supports the transfer claim operation. */
+/*
+ * event_lock is held across this ownership claim.  Therefore
+ * cancellation, Disable Slot, and ring reuse cannot pass an event
+ * which was dequeued but had not yet acquired its endpoint owner.
+ */
 static int
 transfer_claim(
 	struct xhci_controller *c,
@@ -1980,9 +1948,7 @@ transfer_claim(
 	return 1;
 }
 
-/* Supports the xhci completion finish operation. */
-
-/* Supports the xhci completion finish operation. */
+/* Completes one request and hands it back to its caller. */
 static void
 xhci_completion_finish(
 	struct xhci_controller *c,
@@ -2078,8 +2044,7 @@ xhci_completion_finish(
 		__builtin_trap();
 }
 
-/* Supports the xhci completion drain operation. */
-/* Supports the xhci completion drain operation. */
+/* Completes every request that is ready to be handed back. */
 static void
 xhci_completion_drain(
 	struct xhci_controller *c)
@@ -2121,9 +2086,8 @@ xhci_completion_drain(
 		irq = spin_lock_irqsave(&c->active_lock);
 	}
 }
-/* Supports the xhci irq operation. */
 
-/* Supports the xhci irq operation. */
+/* Serves one interrupt from the controller. */
 static int
 xhci_irq(
 	void *argument)
@@ -2205,9 +2169,7 @@ out:
 	return handled;
 }
 
-/* Supports the xhci port worker operation. */
-
-/* Supports the xhci port worker operation. */
+/* Serves root port changes outside interrupt context. */
 static void
 xhci_port_worker(
 	void *argument)
@@ -2231,9 +2193,7 @@ xhci_port_worker(
 	}
 }
 
-/* Supports the xhci worker start operation. */
-
-/* Supports the xhci worker start operation. */
+/* Starts the thread that serves root port changes. */
 static int
 xhci_worker_start(
 	struct xhci_controller *c)
@@ -2256,9 +2216,7 @@ xhci_worker_start(
 	return 0;
 }
 
-/* Supports the xhci worker stop operation. */
-
-/* Supports the xhci worker stop operation. */
+/* Stops that thread and waits for it. */
 static void
 xhci_worker_stop(
 	struct xhci_controller *c)
@@ -2277,9 +2235,7 @@ xhci_worker_stop(
 	(void)thread_wait(worker, NULL);
 }
 
-/* Supports the normal trb count operation. */
-
-/* Supports the normal trb count operation. */
+/* Counts the descriptors one buffer needs, page by page. */
 static unsigned
 normal_trb_count(
 	uint64_t address,
@@ -2306,9 +2262,7 @@ normal_trb_count(
 	return count;
 }
 
-/* Supports the enqueue normal operation. */
-
-/* Supports the enqueue normal operation. */
+/* Appends the descriptors one data buffer needs to a ring. */
 static uint64_t
 enqueue_normal(
 	struct xhci_ring *ring,
@@ -2384,9 +2338,7 @@ enqueue_normal(
 	return final_trb;
 }
 
-/* Supports the xhci endpoint restart empty operation. */
-
-/* Supports the xhci endpoint restart empty operation. */
+/* Restarts an endpoint whose ring has been emptied. */
 static int
 xhci_endpoint_restart_empty(
 	struct xhci_controller *c,
@@ -2433,9 +2385,7 @@ xhci_endpoint_restart_empty(
 	}
 }
 
-/* Supports the xhci endpoint recover operation. */
-
-/* Supports the xhci endpoint recover operation. */
+/* Brings a halted endpoint back into service. */
 static int
 xhci_endpoint_recover(
 	struct xhci_controller *c,
@@ -2525,9 +2475,7 @@ xhci_endpoint_recover(
 	return error != 0 ? error : EIO;
 }
 
-/* Supports the xhci endpoint reset operation. */
-
-/* Supports the xhci endpoint reset operation. */
+/* Clears an endpoint's halt and restarts its ring. */
 static int
 xhci_endpoint_reset(
 	struct drv_usb_hcd *h,
@@ -2627,9 +2575,7 @@ xhci_endpoint_reset(
 	return 0;
 }
 
-/* Reclaim may reach a USB-backed swap source after consuming the last free physical page.  A transfer on that path must not allocate the DMA page which is needed to free a page.  USB storage serializes its BOT stages, so one request and one bounded coherent buffer reserved at start are sufficient for its reclaim-safe transfers even while unrelated endpoints remain active.  URBs with normal reservations use their own request/DMA first. Other ordinary traffic, including persistent networking, uses the dynamic path. */
-
-/* Supports the xhci request alloc operation. */
+/* Takes the state and the buffer one request needs. */
 static struct xhci_request *
 xhci_request_alloc(
 	struct xhci_controller *c,
@@ -2751,8 +2697,7 @@ xhci_request_alloc(
 	return request;
 }
 
-/* Supports the xhci request release operation. */
-/* Supports the xhci request release operation. */
+/* Gives a request's state and buffer back. */
 static void
 xhci_request_release(
 	struct xhci_controller *c,
@@ -2818,9 +2763,7 @@ xhci_request_release(
 	spin_unlock_irqrestore(&c->active_lock, irq);
 }
 
-/* Supports the xhci submission enter operation. */
-
-/* Supports the xhci submission enter operation. */
+/* Joins the gate that keeps submissions out of a teardown. */
 static int
 xhci_submission_enter(
 	struct xhci_controller *c)
@@ -2850,9 +2793,7 @@ xhci_submission_enter(
 	return 0;
 }
 
-/* HCD callbacks other than start/stop/quiesce may use controller MMIO, command/event rings, or device DMA without submitting an URB.  Track them independently so a port worker which entered enumeration just before USB shutdown cannot race the final controller-DMA release. */
-
-/* Supports the xhci operation enter operation. */
+/* Joins the gate that keeps operations out of a teardown. */
 static int
 xhci_operation_enter(
 	struct xhci_controller *c)
@@ -2882,9 +2823,7 @@ xhci_operation_enter(
 	return 0;
 }
 
-/* Supports the xhci operation leave operation. */
-
-/* Supports the xhci operation leave operation. */
+/* Leaves that gate. */
 static void
 xhci_operation_leave(
 	struct xhci_controller *c)
@@ -2904,7 +2843,6 @@ xhci_operation_leave(
 }
 
 /* Reserves an idle URB's request and DMA, aligned to avoid a 64 KiB control boundary. */
-/* Supports the xhci urb reserve operation. */
 static int
 xhci_urb_reserve(
 	struct drv_usb_hcd *hcd,
@@ -2996,7 +2934,6 @@ xhci_urb_reserve(
 }
 
 /* Shares the reservation's lifetime-stable CPU staging with USB core. */
-/* Supports the xhci urb reserve buffer operation. */
 static void *
 xhci_urb_reserve_buffer(
 	struct drv_usb_hcd *hcd,
@@ -3023,7 +2960,6 @@ xhci_urb_reserve_buffer(
 }
 
 /* Frees an URB reservation only after all HCD references and DMA have retired. */
-/* Supports the xhci urb unreserve operation. */
 static void
 xhci_urb_unreserve(
 	struct drv_usb_hcd *hcd,
@@ -3052,9 +2988,7 @@ xhci_urb_unreserve(
 	hal_free(reservation);
 }
 
-/* Supports the xhci submission leave operation. */
-
-/* Supports the xhci submission leave operation. */
+/* Leaves the submission gate. */
 static void
 xhci_submission_leave(
 	struct xhci_controller *c)
@@ -3073,9 +3007,7 @@ xhci_submission_leave(
 	spin_unlock_irqrestore(&c->active_lock, irq);
 }
 
-/* Supports the xhci urb enqueue operation. */
-
-/* Supports the xhci urb enqueue operation. */
+/* Puts one transfer on the ring of its endpoint. */
 static int
 xhci_urb_enqueue(
 	struct drv_usb_hcd *h,
@@ -3361,8 +3293,7 @@ xhci_urb_enqueue(
 	return 0;
 }
 
-/* Supports the xhci endpoint state operation. */
-/* Supports the xhci endpoint state operation. */
+/* Reads the state the controller keeps for one endpoint. */
 static unsigned
 xhci_endpoint_state(
 	struct xhci_controller *c,
@@ -3385,9 +3316,7 @@ xhci_endpoint_state(
 	return context[0] & 7U;
 }
 
-/* Supports the xhci cancel request operation. */
-
-/* Supports the xhci cancel request operation. */
+/* Stops one outstanding request and takes it off its ring. */
 static int
 xhci_cancel_request(
 	struct xhci_controller *c,
@@ -3549,9 +3478,7 @@ release:
 	return 0;
 }
 
-/* Supports the xhci urb dequeue operation. */
-
-/* Supports the xhci urb dequeue operation. */
+/* Cancels one transfer that has not completed. */
 static int
 xhci_urb_dequeue(
 	struct drv_usb_hcd *h,
@@ -3614,9 +3541,7 @@ xhci_urb_dequeue(
 	return error;
 }
 
-/* Supports the xhci endpoint quiesce operation. */
-
-/* Supports the xhci endpoint quiesce operation. */
+/* Stops one endpoint and waits for it to fall idle. */
 static int
 xhci_endpoint_quiesce(
 	struct xhci_controller *c,
@@ -3694,9 +3619,7 @@ xhci_endpoint_quiesce(
 	return error != 0 ? error : EIO;
 }
 
-/* Supports the xhci device quiesce operation. */
-
-/* Supports the xhci device quiesce operation. */
+/* Stops every endpoint of a device and waits for them. */
 static int
 xhci_device_quiesce(
 	struct drv_usb_hcd *h,
@@ -3728,6 +3651,7 @@ xhci_device_quiesce(
 	 * recovery barrier before this loop proceeds.
 	 */
 	wait_started = sched_ticks();
+
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		irq = spin_lock_irqsave(&c->active_lock);
@@ -3761,6 +3685,7 @@ xhci_device_quiesce(
 	 * endpoint from reaching its own checked cancellation boundary.
 	 */
 	wait_started = sched_ticks();
+
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		r = NULL;
@@ -3835,6 +3760,7 @@ xhci_device_quiesce(
 	 * window.
 	 */
 	wait_started = sched_ticks();
+
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		owned = drv_usb_device_hcd_urb_count(u);
@@ -3905,9 +3831,7 @@ xhci_device_quiesce(
 	return 0;
 }
 
-/* Supports the xhci frame operation. */
-
-/* Supports the xhci frame operation. */
+/* Reports the frame number the bus stands at. */
 static uint32_t
 xhci_frame(
 	struct drv_usb_hcd *h)
@@ -3921,9 +3845,7 @@ xhci_frame(
 	/* Returns the computed result. */
 	return function_result;
 }
-/* Supports the xhci root status operation. */
-
-/* Supports the xhci root status operation. */
+/* Reports which root ports have changed. */
 static int
 xhci_root_status(
 	struct drv_usb_hcd *h,
@@ -3952,9 +3874,7 @@ xhci_root_status(
 	/* Succeeded. */
 	return 0;
 }
-/* Supports the xhci root control operation. */
-
-/* Supports the xhci root control operation. */
+/* Serves one hub request against the root ports. */
 static int
 xhci_root_control(
 	struct drv_usb_hcd *h,
@@ -4098,9 +4018,7 @@ xhci_root_control(
 	return ENOTSUP;
 }
 
-/* Supports the xhci root port reset operation. */
-
-/* Supports the xhci root port reset operation. */
+/* Resets one root port and waits for the device on it. */
 static int
 xhci_root_port_reset(
 	struct drv_usb_hcd *h,
@@ -4228,9 +4146,7 @@ xhci_root_port_reset(
 	return ETIMEDOUT;
 }
 
-/* Supports the xhci scratchpads free operation. */
-
-/* Supports the xhci scratchpads free operation. */
+/* Gives the scratchpad pages back to the allocator. */
 static void
 xhci_scratchpads_free(
 	struct xhci_controller *c)
@@ -4257,9 +4173,7 @@ xhci_scratchpads_free(
 		drv_dma_free_coherent(c->hcd.dma, &c->scratchpad_array);
 }
 
-/* Supports the xhci scratchpads alloc operation. */
-
-/* Supports the xhci scratchpads alloc operation. */
+/* Takes the scratchpad pages the controller demands. */
 static int
 xhci_scratchpads_alloc(
 	struct xhci_controller *c)
@@ -4309,9 +4223,7 @@ fail:
 	return e;
 }
 
-/* HCHalted, PCI bus-master disable, and IRQ drain are all prerequisites for this software-only ownership drop.  Until then an endpoint owner remains published even when a cancellation command failed, so a late Transfer Event can never alias a reused ring slot. */
-
-/* Supports the xhci controller drain requests operation. */
+/* Completes every outstanding request with a cancellation. */
 static void
 xhci_controller_drain_requests(
 	struct xhci_controller *c)
@@ -4391,9 +4303,7 @@ xhci_controller_drain_requests(
 	}
 }
 
-/* Supports the xhci submission quiesce operation. */
-
-/* Supports the xhci submission quiesce operation. */
+/* Closes the submission gate and waits for what is inside it. */
 static int
 xhci_submission_quiesce(
 	struct xhci_controller *c)
@@ -4444,9 +4354,7 @@ xhci_submission_quiesce(
 	}
 }
 
-/* Supports the xhci irq quiesce operation. */
-
-/* Supports the xhci irq quiesce operation. */
+/* Waits for the interrupt handler to leave. */
 static int
 xhci_irq_quiesce(
 	struct xhci_controller *c)
@@ -4471,9 +4379,7 @@ xhci_irq_quiesce(
 	return 0;
 }
 
-/* Supports the xhci irq disestablish operation. */
-
-/* Supports the xhci irq disestablish operation. */
+/* Takes the interrupt handler out of service. */
 static int
 xhci_irq_disestablish(
 	struct xhci_controller *c)
@@ -4535,9 +4441,7 @@ xhci_irq_disestablish(
 	return function_result;
 }
 
-/* Supports the xhci quiesce operation. */
-
-/* Supports the xhci quiesce operation. */
+/* Brings the controller to a stop that nothing is running under. */
 static int
 xhci_quiesce(
 	struct drv_usb_hcd *h)
@@ -4599,9 +4503,7 @@ xhci_quiesce(
 	return 0;
 }
 
-/* Supports the xhci release resources operation. */
-
-/* Supports the xhci release resources operation. */
+/* Gives every resource the controller held back. */
 static int
 xhci_release_resources(
 	struct drv_usb_hcd *h)
@@ -4675,9 +4577,7 @@ xhci_release_resources(
 	return 0;
 }
 
-/* Supports the xhci stop operation. */
-
-/* Supports the xhci stop operation. */
+/* Stops the controller. */
 static void
 xhci_stop(
 	struct drv_usb_hcd *h)
@@ -4691,9 +4591,7 @@ xhci_stop(
 		xhci_mark_quarantined(c);
 }
 
-/* Supports the xhci stop checked operation. */
-
-/* Supports the xhci stop checked operation. */
+/* Stops the controller and reports whether it stopped. */
 static int
 xhci_stop_checked(
 	struct drv_usb_hcd *h)
@@ -4713,9 +4611,7 @@ xhci_stop_checked(
 	return function_result;
 }
 
-/* Supports the xhci start operation. */
-
-/* Supports the xhci start operation. */
+/* Brings the controller into service. */
 static int
 xhci_start(
 	struct drv_usb_hcd *h)
@@ -4841,9 +4737,7 @@ fail:
 	return e;
 }
 
-/* Supports the xhci guarded device enable operation. */
-
-/* Supports the xhci guarded device enable operation. */
+/* Takes a slot, refusing once the controller is quarantined. */
 static int
 xhci_guarded_device_enable(
 	struct drv_usb_hcd *h,
@@ -4866,9 +4760,7 @@ xhci_guarded_device_enable(
 	return 0;
 }
 
-/* Supports the xhci guarded set address operation. */
-
-/* Supports the xhci guarded set address operation. */
+/* Addresses a device, refusing once quarantined. */
 static int
 xhci_guarded_set_address(
 	struct drv_usb_hcd *h,
@@ -4892,9 +4784,7 @@ xhci_guarded_set_address(
 	return 0;
 }
 
-/* Supports the xhci guarded device quiesce operation. */
-
-/* Supports the xhci guarded device quiesce operation. */
+/* Stops a device, refusing once quarantined. */
 static int
 xhci_guarded_device_quiesce(
 	struct drv_usb_hcd *h,
@@ -4917,9 +4807,7 @@ xhci_guarded_device_quiesce(
 	return 0;
 }
 
-/* Supports the xhci guarded device disable operation. */
-
-/* Supports the xhci guarded device disable operation. */
+/* Gives a slot back, doing nothing once quarantined. */
 static void
 xhci_guarded_device_disable(
 	struct drv_usb_hcd *h,
@@ -4934,9 +4822,7 @@ xhci_guarded_device_disable(
 	xhci_operation_leave(c);
 }
 
-/* Supports the xhci guarded urb dequeue operation. */
-
-/* Supports the xhci guarded urb dequeue operation. */
+/* Cancels a transfer, refusing once quarantined. */
 static int
 xhci_guarded_urb_dequeue(
 	struct drv_usb_hcd *h,
@@ -4959,9 +4845,7 @@ xhci_guarded_urb_dequeue(
 	return 0;
 }
 
-/* Supports the xhci guarded endpoint enable operation. */
-
-/* Supports the xhci guarded endpoint enable operation. */
+/* Configures an endpoint, refusing once quarantined. */
 static int
 xhci_guarded_endpoint_enable(
 	struct drv_usb_hcd *h,
@@ -4984,9 +4868,7 @@ xhci_guarded_endpoint_enable(
 	return 0;
 }
 
-/* Supports the xhci guarded endpoint reset operation. */
-
-/* Supports the xhci guarded endpoint reset operation. */
+/* Resets an endpoint, refusing once quarantined. */
 static int
 xhci_guarded_endpoint_reset(
 	struct drv_usb_hcd *h,
@@ -5009,9 +4891,7 @@ xhci_guarded_endpoint_reset(
 	return 0;
 }
 
-/* Supports the xhci guarded endpoint disable operation. */
-
-/* Supports the xhci guarded endpoint disable operation. */
+/* Unconfigures an endpoint, refusing once quarantined. */
 static int
 xhci_guarded_endpoint_disable(
 	struct drv_usb_hcd *h,
@@ -5035,9 +4915,7 @@ xhci_guarded_endpoint_disable(
 	return 0;
 }
 
-/* Supports the xhci guarded frame operation. */
-
-/* Supports the xhci guarded frame operation. */
+/* Reports the frame number, or zero once quarantined. */
 static uint32_t
 xhci_guarded_frame(
 	struct drv_usb_hcd *h)
@@ -5055,9 +4933,7 @@ xhci_guarded_frame(
 	return frame;
 }
 
-/* Supports the xhci guarded root status operation. */
-
-/* Supports the xhci guarded root status operation. */
+/* Reports root port changes, refusing once quarantined. */
 static int
 xhci_guarded_root_status(
 	struct drv_usb_hcd *h,
@@ -5082,9 +4958,7 @@ xhci_guarded_root_status(
 	return 0;
 }
 
-/* Supports the xhci guarded root control operation. */
-
-/* Supports the xhci guarded root control operation. */
+/* Serves a hub request, refusing once quarantined. */
 static int
 xhci_guarded_root_control(
 	struct drv_usb_hcd *h,
@@ -5110,9 +4984,7 @@ xhci_guarded_root_control(
 	return 0;
 }
 
-/* Supports the xhci guarded root port reset operation. */
-
-/* Supports the xhci guarded root port reset operation. */
+/* Resets a root port, refusing once quarantined. */
 static int
 xhci_guarded_root_port_reset(
 	struct drv_usb_hcd *h,
@@ -5135,30 +5007,7 @@ xhci_guarded_root_port_reset(
 	return 0;
 }
 
-static const struct drv_usb_hcd_ops xhci_ops = {
-	.start = xhci_start,
-	.quiesce = xhci_quiesce,
-	.stop = xhci_stop,
-	.device_enable = xhci_guarded_device_enable,
-	.device_set_address = xhci_guarded_set_address,
-	.device_quiesce = xhci_guarded_device_quiesce,
-	.device_disable = xhci_guarded_device_disable,
-	.urb_enqueue = xhci_urb_enqueue,
-	.urb_reserve = xhci_urb_reserve,
-	.urb_unreserve = xhci_urb_unreserve,
-	.urb_reserve_buffer = xhci_urb_reserve_buffer,
-	.urb_dequeue = xhci_guarded_urb_dequeue,
-	.endpoint_enable = xhci_guarded_endpoint_enable,
-	.endpoint_disable = xhci_guarded_endpoint_disable,
-	.endpoint_reset = xhci_guarded_endpoint_reset,
-	.frame_number = xhci_guarded_frame,
-	.root_hub_status = xhci_guarded_root_status,
-	.root_hub_control = xhci_guarded_root_control,
-	.root_port_reset = xhci_guarded_root_port_reset};
-
-/* Supports the xhci attach operation. */
-
-/* Supports the xhci attach operation. */
+/* Brings up a controller the PCI bus has just matched. */
 static int
 xhci_attach(
 	struct drv_pci_device *d,
@@ -5455,9 +5304,8 @@ fail:
 	/* Returns the computed result. */
 	return e;
 }
-/* Supports the xhci detach operation. */
 
-/* Supports the xhci detach operation. */
+/* Takes a controller out of service and gives it back. */
 static int
 xhci_detach(
 	struct drv_pci_device *d,
@@ -5554,59 +5402,6 @@ xhci_detach(
 	/* Succeeded. */
 	return 0;
 }
-static const struct drv_pci_id ids[] = {{DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-					 DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-					 0x0c0330U, 0xffffffU, 0}};
-static struct drv_pci_driver driver = {.name = "xhci",
-				       .ids = ids,
-				       .id_count = 1,
-				       .attach = xhci_attach,
-				       .detach = xhci_detach};
-/*
- * Implements the drv pci xhci driver register operation.
- */
-/*
- * Implements the drv pci xhci driver register operation.
- */
-int
-drv_pci_xhci_driver_register(
-	void)
-{
-	int error;
-
-	/* Obtains the drv pci driver register result. */
-	error = drv_pci_driver_register(&driver);
-
-	/* Returns the computed result. */
-	return error;
-}
-/*
- * Implements the drv pci xhci probe roots operation.
- */
-/*
- * Implements the drv pci xhci probe roots operation.
- */
-void
-drv_pci_xhci_probe_roots(
-	void)
-{
-	struct xhci_controller *c;
-
-	/* Process each linked entry. */
-	for (c = controllers; c; c = c->next) {
-		/* Classifies the current input character. */
-		if (c->quarantined)
-			continue;
-		drv_usb_hcd_root_hub_changed(&c->hcd);
-		c->port_pending = 0;
-		c->root_ready = 1;
-	}
-}
-
-/* Begin consolidated pci-xhci-sg.inc. */
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
 
 /* The same immutable plan drives publication and short-event accounting. */
 static int
@@ -5679,7 +5474,7 @@ xhci_sg_plan(
 	return remaining == 0 ? 0 : EINVAL;
 }
 
-/* Supports the xhci sg short operation. */
+/* Reports how much of a scattered transfer actually moved. */
 static int
 xhci_sg_short(
 	const struct xhci_request *request,
@@ -5706,7 +5501,7 @@ xhci_sg_short(
 	return 1;
 }
 
-/* Supports the xhci sg enqueue operation. */
+/* Appends the descriptors a scattered transfer needs to a ring. */
 static void
 xhci_sg_enqueue(
 	struct xhci_ring *ring,
@@ -5751,5 +5546,44 @@ xhci_sg_enqueue(
 		io_stats_record(IO_XHCI_DATA_TRB, 0);
 	}
 }
-/* End consolidated pci-xhci-sg.inc. */
-/* End consolidated pci-xhci.c. */
+
+/*
+ * XHCI
+ */
+
+static const struct drv_usb_hcd_ops xhci_ops = {
+	.start = xhci_start,
+	.quiesce = xhci_quiesce,
+	.stop = xhci_stop,
+	.device_enable = xhci_guarded_device_enable,
+	.device_set_address = xhci_guarded_set_address,
+	.device_quiesce = xhci_guarded_device_quiesce,
+	.device_disable = xhci_guarded_device_disable,
+	.urb_enqueue = xhci_urb_enqueue,
+	.urb_reserve = xhci_urb_reserve,
+	.urb_unreserve = xhci_urb_unreserve,
+	.urb_reserve_buffer = xhci_urb_reserve_buffer,
+	.urb_dequeue = xhci_guarded_urb_dequeue,
+	.endpoint_enable = xhci_guarded_endpoint_enable,
+	.endpoint_disable = xhci_guarded_endpoint_disable,
+	.endpoint_reset = xhci_guarded_endpoint_reset,
+	.frame_number = xhci_guarded_frame,
+	.root_hub_status = xhci_guarded_root_status,
+	.root_hub_control = xhci_guarded_root_control,
+	.root_port_reset = xhci_guarded_root_port_reset};
+
+static const struct drv_pci_id ids[] = {
+	{
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		0x0c0330U, 0xffffffU, 0
+	}
+};
+
+static struct drv_pci_driver driver = {
+	.name = "xhci",
+	.ids = ids,
+	.id_count = 1,
+	.attach = xhci_attach,
+	.detach = xhci_detach
+};

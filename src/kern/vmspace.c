@@ -165,9 +165,6 @@ extern void vmspace_unmap_retire_checkpoint(struct vmspace *vm, uintptr_t start,
 extern void vmspace_pin_page_checkpoint(struct vmspace *vm, size_t index, size_t page_count) __attribute__((weak));
 extern void vmspace_object_revoke_checkpoint(struct vmspace *vm, uintptr_t address) __attribute__((weak));
 
-/*
- * Forward declaration.
- */
 static void (*vmspace_reap_notify)(void *);
 static int alloc_vm_page(struct hal_pmem *memory);
 static int alloc_vm_metadata_page(struct hal_pmem *memory);

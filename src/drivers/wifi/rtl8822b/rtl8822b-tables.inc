@@ -77,6 +77,15 @@
  * remain recorded here for a later full TX-power Phase.
  */
 
+struct rtl8822b_phy_table_section {
+	uint8_t domain;
+	uint8_t width;
+	uint8_t rf_path;
+	uint8_t reserved;
+	const uint32_t *words;
+	size_t word_count;
+};
+
 static const int8_t rtw8822b_2g_legacy_rate_offset[12] = {
        6,  4, 2, 0, 14, 12,
        10, 8, 6, 4, 2,  0};

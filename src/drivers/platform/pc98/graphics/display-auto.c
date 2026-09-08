@@ -1,13 +1,12 @@
-/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
-
 /*
  * zedBSD
- * Copyright (c) 2025, 2026, Awe Morris
+ * Copyright (C) 2026 Awe Morris
  *
- * zedBSD graphics PC-98 display selection, imported from Boots.  Probing
- * prefers the Core-Graph / Cirrus board at 640x480x8 by default (or 24bpp when
- * hinted) and falls back to the always-present GDC at 640x400x4, so one
- * HAL covers both machines.
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * zedBSD graphics NEC PC-9821 Core-Graph / Cirrus GD5440 display backend.
  */
 
 #include "drivers/platform/pc98/graphics/display-auto.h"

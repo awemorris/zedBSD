@@ -1,10 +1,16 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
-/* Begin consolidated usb-rtl8822bu.c. */
 /*
- * TP-Link Archer T3U Nano and Plus RTL8822BU USB WLAN substrate
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * RTL8822BU USB WLAN substrate
+ *
+ * Currently supports:
+ *  - TP Archer T3U Nano
+ *  - TP Archer T3U Plus
  */
 
 #include <drivers/usb-rtl8822bu.h>
@@ -67,6 +73,7 @@
 #define RTL8822BU_H2C_TRANSFER_TIMEOUT_MS 50U
 #define RTL8822BU_H2C_PACKET_SIZE 32U
 #define RTL8822BU_H2C_QUEUE_BYTES 1024U
+
 /*
  * The frozen 2048-page layout places FW TX at 2044 and reserved data at 1996.
  */
@@ -75,6 +82,7 @@
 #define RTL8822BU_RX_DRAIN_TIMEOUT_MS 50U
 #define RTL8822BU_RX_RECOVERY_LIMIT 3U
 #define RTL8822BU_RECOVERY_CLEANUP_RETRY_LIMIT 32U
+
 /*
  * Debug-level connect tracing stays compiled out of the product build.  Set
  * it to 1 to print the efuse calibration record, radio preparation timing,
@@ -86,6 +94,7 @@
 #ifndef RTL8822BU_TRACE
 #define RTL8822BU_TRACE 0
 #endif
+
 /*
  * The bounded RFE/cut model needs at most 3245 control transfers plus
  * 412326 us of explicit table/RF delay.  Fifteen seconds retains a finite
@@ -93,6 +102,7 @@
  */
 #define RTL8822BU_RADIO_OPEN_TIMEOUT_TICKS (15U * KERN_CLOCK_HZ)
 #define RTL8822BU_RADIO_STOP_TIMEOUT_TICKS (1U * KERN_CLOCK_HZ)
+
 /*
  * Four key inverses, association clear, radio disconnect, TX report retirement,
  * and scheduling margin share this finite common-close retry window.
@@ -101,6 +111,7 @@
 	(RTL8822BU_TX_REPORT_RETIRE_TICKS +                                    \
 	 5U * WLAN_CONNECT_TRANSITION_TICKS +                                  \
 	 RTL8822BU_SECURITY_TIMEOUT_TICKS + KERN_CLOCK_HZ)
+
 #define RTL8822BU_ACTIVITY_JOIN_TICKS (5U * KERN_CLOCK_HZ)
 #define RTL8822BU_MICROSECONDS_PER_SECOND 1000000ULL
 #define RTL8822BU_RELAXATIONS_PER_MICROSECOND 128U
@@ -162,24 +173,6 @@
 #define RTL8822BU_W52_SCAN_CHANNEL_COUNT 4U
 #define RTL8822BU_SCAN_CHANNEL_COUNT                                           \
 	(RTL8822BU_2G_SCAN_CHANNEL_COUNT + RTL8822BU_W52_SCAN_CHANNEL_COUNT)
-
-static const struct wlan_scan_channel
-	rtl8822bu_scan_channels[RTL8822BU_SCAN_CHANNEL_COUNT] = {
-		{1U, 2412U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{2U, 2417U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{3U, 2422U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{4U, 2427U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{5U, 2432U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{6U, 2437U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{7U, 2442U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{8U, 2447U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{9U, 2452U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{10U, 2457U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{11U, 2462U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{36U, 5180U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{40U, 5200U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{44U, 5220U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
-		{48U, 5240U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U}};
 
 #define RTL8822BU_MCUFW_INIT_READY 0x8000U
 #define RTL8822BU_MCUFW_DOWNLOAD_READY 0x4000U
@@ -387,12 +380,329 @@ struct rtl8822bu_adapter {
 	uint32_t scan_channel;
 };
 
+struct rtl8822bu_rx_report_context {
+	struct rtl8822bu_adapter *adapter;
+	unsigned reported;
+};
+
+struct rtl8822bu_firmware_saved_registers {
+	uint8_t txdma_map_high;
+	uint8_t cr;
+	uint8_t cr_high;
+	uint8_t beacon_control;
+	uint8_t sys_func_high;
+	uint8_t reserved_control_high;
+	uint8_t sys_clock_high;
+	uint8_t cpu_dmem_high;
+	uint16_t fifo_page_info;
+	uint16_t fifo_page_control;
+	uint16_t mcufw_control;
+	uint32_t h2c_queue;
+	uint32_t rqpn_control;
+};
+
+struct rtl8822bu_firmware_transfer {
+	struct rtl8822bu_adapter *adapter;
+	const struct rtl8822b_firmware_view *view;
+	uint8_t *wire_buffer;
+	enum rtl8822b_firmware_segment segment;
+	uint32_t next_destination;
+	size_t next_file_offset;
+	unsigned segment_open;
+	unsigned dmem_complete;
+	unsigned imem_complete;
+};
+
+typedef int (*rtl8822bu_firmware_walk_fn)(const struct rtl8822b_firmware_view *, rtl8822b_firmware_chunk_fn, void *);
+
+
+/*
+ * Variables
+ */
+
+static const struct rtl8822bu_usb_profile rtl8822bu_usb_profiles[] = {
+	{
+		RTL8822BU_PRODUCT_ID,
+		RTL8822BU_DEVICE_RELEASE,
+		DRV_USB_SPEED_HIGH,
+		RTL8822BU_BULK_MAX_PACKET_SIZE,
+		64U
+	},
+	{
+		RTL8822BU_PLUS_PRODUCT_ID,
+		RTL8822BU_DEVICE_RELEASE,
+		DRV_USB_SPEED_HIGH,
+		RTL8822BU_BULK_MAX_PACKET_SIZE,
+		64U
+	},
+	{
+		RTL8822BU_PLUS_PRODUCT_ID,
+		RTL8822BU_SS_RELEASE,
+		DRV_USB_SPEED_SUPER,
+		RTL8822BU_SS_BULK_MAX_PACKET_SIZE,
+		9U
+	}
+};
+
+static const struct wlan_scan_channel rtl8822bu_scan_channels[RTL8822BU_SCAN_CHANNEL_COUNT] = {
+	{1U, 2412U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{2U, 2417U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{3U, 2422U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{4U, 2427U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{5U, 2432U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{6U, 2437U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{7U, 2442U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{8U, 2447U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{9U, 2452U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{10U, 2457U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{11U, 2462U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{36U, 5180U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{40U, 5200U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{44U, 5220U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U},
+	{48U, 5240U, WLAN_SCAN_CHANNEL_ACTIVE_ALLOWED, 0U}
+};
+
+/*
+ * Forward declarations
+ */
 static int rtl8822bu_log_error(struct rtl8822bu_adapter *);
 static int rtl8822bu_close_locked(struct rtl8822bu_adapter *);
 static int rtl8822bu_stop_retry(void *context);
 static int rtl8822bu_wait_activity(struct rtl8822bu_adapter *);
+static const struct rtl8822bu_usb_profile *rtl8822bu_usb_profile_find(const struct drv_usb_device_descriptor *, enum drv_usb_speed);
+static int rtl8822bu_endpoint_companion_accept(const struct rtl8822bu_binding *, const struct drv_usb_endpoint *, int);
+static int rtl8822bu_endpoint_accept(struct rtl8822bu_binding *, struct drv_usb_endpoint *);
+static int rtl8822bu_binding_parse(struct drv_usb_interface *, struct rtl8822bu_binding *);
+static void rtl8822bu_radio_transport_init(struct rtl8822bu_adapter *, struct rtl8822b_radio_transport *);
+static int rtl8822bu_register_control(struct rtl8822bu_adapter *, uint16_t, void *, size_t, int, uint64_t, size_t *);
+static int rtl8822bu_register_processing_delay(struct rtl8822bu_adapter *, uint8_t, uint64_t);
+static int rtl8822bu_register_transfer(struct rtl8822bu_adapter *, uint16_t, void *, size_t, int, uint64_t);
+static int rtl8822bu_read8(struct rtl8822bu_adapter *, uint16_t, uint8_t *);
+static int rtl8822bu_read16(struct rtl8822bu_adapter *, uint16_t, uint16_t *);
+static int rtl8822bu_read32(struct rtl8822bu_adapter *, uint16_t, uint32_t *);
+static int rtl8822bu_write8(struct rtl8822bu_adapter *, uint16_t, uint8_t);
+static int rtl8822bu_write16(struct rtl8822bu_adapter *, uint16_t, uint16_t);
+static int rtl8822bu_write32(struct rtl8822bu_adapter *, uint16_t, uint32_t);
+static int rtl8822bu_security_hardware_clear(struct rtl8822bu_adapter *, uint64_t);
+static int rtl8822bu_hardware_start_locked(struct rtl8822bu_adapter *);
+static int rtl8822bu_h2c_packet_send(struct rtl8822bu_adapter *, const uint8_t[RTL8822BU_H2C_PACKET_SIZE], uint64_t);
+static int rtl8822bu_firmware_info_send(struct rtl8822bu_adapter *, uint64_t);
+static void rtl8822bu_runtime_recover(struct rtl8822bu_adapter *);
+static void rtl8822bu_recovery_tx_snapshot(struct rtl8822bu_adapter *);
+static int rtl8822bu_rx_generation_pause(struct rtl8822bu_adapter *, uint64_t);
+static int rtl8822bu_rx_generation_resume(struct rtl8822bu_adapter *, uint64_t);
+static void rtl8822bu_deauthenticate_best_effort(struct rtl8822bu_adapter *, const uint8_t[6], uint64_t);
+static void rtl8822bu_sync_endpoint_result(struct rtl8822bu_adapter *, struct drv_usb_endpoint *, int);
+static int rtl8822bu_bulk_transfer(struct rtl8822bu_adapter *, struct drv_usb_endpoint *, void *, size_t, unsigned, size_t *);
+static int rtl8822bu_tx_report_generation_active_locked(const struct rtl8822bu_adapter *, uint64_t, uint64_t, int);
+static void rtl8822bu_tx_report_reap_locked(struct rtl8822bu_adapter *, uint64_t);
 
-/* Supports the rtl8822bu scan channel count operation. */
+int drv_usb_rtl8822bu_driver_register(void)
+{
+	int function_result;
+
+	/* Obtains the drv usb driver register result. */
+	function_result = drv_usb_driver_register(&rtl8822bu_driver);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+static int
+rtl8822bu_match(
+	struct drv_usb_interface *interface,
+	const struct drv_usb_id *id)
+{
+	int function_result;
+	struct rtl8822bu_binding binding;
+
+	(void)id;
+
+	/* Computes the function result. */
+	function_result =
+		rtl8822bu_binding_parse(interface, &binding) ? 200 : 0;
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+static int rtl8822bu_attach(
+	struct drv_usb_interface *interface,
+	const struct drv_usb_id *id)
+{
+	int cleanup_error;
+	struct rtl8822bu_binding binding;
+	struct rtl8822bu_adapter *adapter;
+	int error;
+
+	(void)id;
+
+	/* Checks the rtl8822bu binding parse result. */
+	if (!rtl8822bu_binding_parse(interface, &binding))
+		return ENODEV;
+
+	/* Handles the adapter availability. */
+	adapter = hal_malloc(sizeof(*adapter));
+	if (adapter == NULL)
+		return ENOMEM;
+	memset(adapter, 0, sizeof(*adapter));
+	rtl8822bu_connection_state_clear_locked(adapter);
+	adapter->usb_device = binding.device;
+	adapter->interface = interface;
+	adapter->bulk_in = binding.bulk_in;
+	adapter->bulk_out_high = binding.bulk_out_high;
+	adapter->bulk_out_normal = binding.bulk_out_normal;
+	adapter->bulk_out_low = binding.bulk_out_low;
+	adapter->bulk_max_packet_size = binding.bulk_max_packet_size;
+	spin_init(&adapter->lock, LOCK_RANK_DEVICE, "usb-rtl8822bu");
+
+	/* Checks the operation status. */
+	error = mutex_init(&adapter->lifecycle_lock, LOCK_RANK_DEVICE,
+			   "usb-rtl8822bu lifecycle");
+	if (error != 0) {
+		hal_free(adapter);
+
+		/* Failed. */
+		return error;
+	}
+
+	/* Checks the operation status. */
+	error = drv_usb_interface_set_driver_data(interface, adapter);
+	if (error != 0) {
+		hal_free(adapter);
+
+		/* Failed. */
+		return error;
+	}
+
+	mutex_lock(&adapter->lifecycle_lock);
+
+	adapter->rx_buffer = hal_malloc(RTL8822BU_RX_BUFFER_SIZE);
+
+	/* Handles the rx buffer availability. */
+	if (adapter->rx_buffer == NULL) {
+		error = ENOMEM;
+		goto fail_locked;
+	}
+
+	adapter->rx_urb =
+		drv_usb_urb_alloc(adapter->usb_device, adapter->bulk_in, 0U);
+
+	/* Handles the rx urb availability. */
+	if (adapter->rx_urb == NULL) {
+		error = ENOMEM;
+		goto fail_locked;
+	}
+
+	/* Checks the operation status. */
+	error = rtl8822bu_board_read(adapter, &adapter->board);
+	if (error != 0)
+		goto fail_locked;
+
+	/* Checks the operation status. */
+	error = rtl8822bu_net_device_create(adapter);
+	if (error != 0)
+		goto fail_locked;
+
+	mutex_unlock(&adapter->lifecycle_lock);
+
+	hal_printf("usb-rtl8822bu: %s mac=%02x:%02x:%02x:%02x:%02x:%02x "
+		   "cut=%u rfe=%u usb=%s bulk=%u country=%02x%02x plan=%02x "
+		   "rf-board=%02x "
+		   "pre-radio\n",
+		   adapter->net_device->name, adapter->board.mac_address[0],
+		   adapter->board.mac_address[1], adapter->board.mac_address[2],
+		   adapter->board.mac_address[3], adapter->board.mac_address[4],
+		   adapter->board.mac_address[5], adapter->board.chip.cut,
+		   adapter->board.rfe_option,
+		   adapter->bulk_max_packet_size ==
+				   RTL8822BU_SS_BULK_MAX_PACKET_SIZE
+			   ? "SS"
+			   : "HS",
+		   adapter->bulk_max_packet_size,
+		   adapter->board.country_code[0],
+		   adapter->board.country_code[1], adapter->board.channel_plan,
+		   adapter->board.rf_board_option);
+
+	/* Succeeded. */
+	return 0;
+
+fail_locked:
+
+	mutex_unlock(&adapter->lifecycle_lock);
+
+	cleanup_error = rtl8822bu_teardown(interface, adapter,
+					   DRV_USB_DETACH_ATTACH_FAILED);
+
+	/* Returns the computed result. */
+	return cleanup_error != 0 ? cleanup_error : error;
+}
+
+static int
+rtl8822bu_detach(
+	struct drv_usb_interface *interface,
+	unsigned flags)
+{
+	int function_result;
+	struct rtl8822bu_adapter *adapter;
+
+	/* Handles the adapter availability. */
+	adapter = drv_usb_interface_driver_data(interface);
+	if (adapter == NULL)
+		return 0;
+
+	/* Obtains the rtl8822bu teardown result. */
+	function_result = rtl8822bu_teardown(interface, adapter, flags);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+static void
+rtl8822bu_shutdown(
+	struct drv_usb_interface *interface)
+{
+	struct rtl8822bu_adapter *adapter =
+		drv_usb_interface_driver_data(interface);
+	struct wlan_station *station;
+	unsigned long enabled;
+	int error;
+
+	/* Handles the adapter availability. */
+	if (adapter == NULL)
+		return;
+	mutex_lock(&adapter->lifecycle_lock);
+	enabled = spin_lock_irqsave(&adapter->lock);
+
+	adapter->detaching = 1U;
+	station = adapter->station;
+
+	spin_unlock_irqrestore(&adapter->lock, enabled);
+
+	/* Handles the net device availability. */
+	if (adapter->net_device != NULL)
+		(void)net_device_set_carrier(adapter->net_device, 0);
+
+	/* Checks the operation status. */
+	error = rtl8822bu_station_close_wait(station);
+	if (error == 0 || error == ENODEV) {
+		/* Checks the operation status. */
+		error = rtl8822bu_hardware_stop_locked(adapter);
+		if (error == 0) {
+			enabled = spin_lock_irqsave(&adapter->lock);
+			adapter->ready = 0U;
+			spin_unlock_irqrestore(&adapter->lock, enabled);
+		}
+	} else {
+		enabled = spin_lock_irqsave(&adapter->lock);
+		adapter->quarantined = 1U;
+		spin_unlock_irqrestore(&adapter->lock, enabled);
+	}
+
+	mutex_unlock(&adapter->lifecycle_lock);
+}
+
+/* Reports how many channels one scan plan covers. */
 static uint32_t
 rtl8822bu_scan_channel_count(
 	const struct rtl8822bu_board_info *board)
@@ -408,7 +718,7 @@ rtl8822bu_scan_channel_count(
 	return function_result;
 }
 
-/* Supports the rtl8822bu scan step valid operation. */
+/* Refuses a scan step this device could not carry out. */
 static int
 rtl8822bu_scan_step_valid(
 	const struct rtl8822bu_adapter *adapter,
@@ -436,65 +746,6 @@ rtl8822bu_scan_step_valid(
 	/* Succeeded. */
 	return 0;
 }
-
-typedef int (*rtl8822bu_firmware_walk_fn)(const struct rtl8822b_firmware_view *,
-					  rtl8822b_firmware_chunk_fn, void *);
-
-static const struct rtl8822bu_usb_profile rtl8822bu_usb_profiles[] = {
-	{RTL8822BU_PRODUCT_ID, RTL8822BU_DEVICE_RELEASE, DRV_USB_SPEED_HIGH,
-	 RTL8822BU_BULK_MAX_PACKET_SIZE, 64U},
-	{RTL8822BU_PLUS_PRODUCT_ID, RTL8822BU_DEVICE_RELEASE,
-	 DRV_USB_SPEED_HIGH, RTL8822BU_BULK_MAX_PACKET_SIZE, 64U},
-	{RTL8822BU_PLUS_PRODUCT_ID, RTL8822BU_SS_RELEASE, DRV_USB_SPEED_SUPER,
-	 RTL8822BU_SS_BULK_MAX_PACKET_SIZE, 9U}};
-
-static const struct rtl8822bu_usb_profile *
-rtl8822bu_usb_profile_find(const struct drv_usb_device_descriptor *,
-			   enum drv_usb_speed);
-static int rtl8822bu_endpoint_companion_accept(const struct rtl8822bu_binding *,
-					       const struct drv_usb_endpoint *,
-					       int);
-static int rtl8822bu_endpoint_accept(struct rtl8822bu_binding *,
-				     struct drv_usb_endpoint *);
-static int rtl8822bu_binding_parse(struct drv_usb_interface *,
-				   struct rtl8822bu_binding *);
-static void rtl8822bu_radio_transport_init(struct rtl8822bu_adapter *,
-					   struct rtl8822b_radio_transport *);
-static int rtl8822bu_register_control(struct rtl8822bu_adapter *, uint16_t,
-				      void *, size_t, int, uint64_t, size_t *);
-static int rtl8822bu_register_processing_delay(struct rtl8822bu_adapter *,
-					       uint8_t, uint64_t);
-static int rtl8822bu_register_transfer(struct rtl8822bu_adapter *, uint16_t,
-				       void *, size_t, int, uint64_t);
-static int rtl8822bu_read8(struct rtl8822bu_adapter *, uint16_t, uint8_t *);
-static int rtl8822bu_read16(struct rtl8822bu_adapter *, uint16_t, uint16_t *);
-static int rtl8822bu_read32(struct rtl8822bu_adapter *, uint16_t, uint32_t *);
-static int rtl8822bu_write8(struct rtl8822bu_adapter *, uint16_t, uint8_t);
-static int rtl8822bu_write16(struct rtl8822bu_adapter *, uint16_t, uint16_t);
-static int rtl8822bu_write32(struct rtl8822bu_adapter *, uint16_t, uint32_t);
-static int rtl8822bu_security_hardware_clear(struct rtl8822bu_adapter *,
-					     uint64_t);
-static int rtl8822bu_hardware_start_locked(struct rtl8822bu_adapter *);
-static int rtl8822bu_h2c_packet_send(struct rtl8822bu_adapter *,
-				     const uint8_t[RTL8822BU_H2C_PACKET_SIZE],
-				     uint64_t);
-static int rtl8822bu_firmware_info_send(struct rtl8822bu_adapter *, uint64_t);
-static void rtl8822bu_runtime_recover(struct rtl8822bu_adapter *);
-static void rtl8822bu_recovery_tx_snapshot(struct rtl8822bu_adapter *);
-static int rtl8822bu_rx_generation_pause(struct rtl8822bu_adapter *, uint64_t);
-static int rtl8822bu_rx_generation_resume(struct rtl8822bu_adapter *, uint64_t);
-static void rtl8822bu_deauthenticate_best_effort(struct rtl8822bu_adapter *,
-						 const uint8_t[6], uint64_t);
-static void rtl8822bu_sync_endpoint_result(struct rtl8822bu_adapter *,
-					   struct drv_usb_endpoint *, int);
-static int rtl8822bu_bulk_transfer(struct rtl8822bu_adapter *,
-				   struct drv_usb_endpoint *, void *, size_t,
-				   unsigned, size_t *);
-static int
-rtl8822bu_tx_report_generation_active_locked(const struct rtl8822bu_adapter *,
-					     uint64_t, uint64_t, int);
-static void rtl8822bu_tx_report_reap_locked(struct rtl8822bu_adapter *,
-					    uint64_t);
 
 /* Publishes a register value only after its deadline-bounded protocol completes. */
 static int
@@ -563,7 +814,7 @@ rtl8822bu_radio_write(
 	return error;
 }
 
-/* Supports the rtl8822bu radio now operation. */
+/* Reports the current time as the radio sequences measure it. */
 static uint64_t
 rtl8822bu_radio_now(
 	void *context)
@@ -579,7 +830,7 @@ rtl8822bu_radio_now(
 	return function_result;
 }
 
-/* Supports the rtl8822bu radio yield operation. */
+/* Gives the processor up while a radio step settles. */
 static void
 rtl8822bu_radio_yield(
 	void *context)
@@ -588,7 +839,7 @@ rtl8822bu_radio_yield(
 	sched_yield();
 }
 
-/* Supports the rtl8822bu radio delay us operation. */
+/* Waits the given number of microseconds. */
 static int
 rtl8822bu_radio_delay_us(
 	void *context,
@@ -667,7 +918,7 @@ rtl8822bu_radio_delay_us(
 	return 0;
 }
 
-/* Supports the rtl8822bu deadline after operation. */
+/* Reports the deadline a wait of that long ends at. */
 static int
 rtl8822bu_deadline_after(
 	uint64_t delta,
@@ -683,7 +934,7 @@ rtl8822bu_deadline_after(
 	return 0;
 }
 
-/* Supports the rtl8822bu load le16 operation. */
+/* Reads a 16-bit field, least significant byte first. */
 static uint16_t
 rtl8822bu_load_le16(
 	const uint8_t *bytes)
@@ -692,7 +943,7 @@ rtl8822bu_load_le16(
 	return (uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8);
 }
 
-/* Supports the rtl8822bu load le32 operation. */
+/* Reads a 32-bit field, least significant byte first. */
 static uint32_t
 rtl8822bu_load_le32(
 	const uint8_t *bytes)
@@ -702,7 +953,7 @@ rtl8822bu_load_le32(
 	       ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
 }
 
-/* Supports the rtl8822bu store le16 operation. */
+/* Writes a 16-bit field, least significant byte first. */
 static void
 rtl8822bu_store_le16(
 	uint8_t *bytes,
@@ -712,7 +963,7 @@ rtl8822bu_store_le16(
 	bytes[1] = (uint8_t)(value >> 8);
 }
 
-/* Supports the rtl8822bu store le32 operation. */
+/* Writes a 32-bit field, least significant byte first. */
 static void
 rtl8822bu_store_le32(
 	uint8_t *bytes,
@@ -724,7 +975,7 @@ rtl8822bu_store_le32(
 	bytes[3] = (uint8_t)(value >> 24);
 }
 
-/* Supports the rtl8822bu mac equal operation. */
+/* Compares two hardware addresses. */
 static int
 rtl8822bu_mac_equal(
 	const uint8_t left[6],
@@ -741,7 +992,7 @@ rtl8822bu_mac_equal(
 	return difference == 0U;
 }
 
-/* Supports the rtl8822bu bytes zero operation. */
+/* Asks whether a run of bytes is entirely zero. */
 static int
 rtl8822bu_bytes_zero(
 	const void *pointer,
@@ -758,7 +1009,7 @@ rtl8822bu_bytes_zero(
 	return value == 0U;
 }
 
-/* Supports the rtl8822bu unicast address operation. */
+/* Asks whether an address names one station rather than many. */
 static int
 rtl8822bu_unicast_address(
 	const uint8_t address[6])
@@ -774,7 +1025,7 @@ rtl8822bu_unicast_address(
 	return error;
 }
 
-/* Supports the rtl8822bu connection state clear locked operation. */
+/* Forgets everything remembered about the current connection. */
 static void
 rtl8822bu_connection_state_clear_locked(
 	struct rtl8822bu_adapter *adapter)
@@ -811,6 +1062,7 @@ rtl8822bu_connection_state_clear_locked(
 	       sizeof(adapter->group_staged_generation));
 	memset(adapter->group_retired_generation, 0,
 	       sizeof(adapter->group_retired_generation));
+
 	/* Process each remaining element. */
 	for (index = 0U; index < RTL8822BU_GROUP_KEY_COUNT; index++) {
 		adapter->group_key_slot[index] = (uint8_t)index;
@@ -822,7 +1074,7 @@ rtl8822bu_connection_state_clear_locked(
 	adapter->tx_quiescing = 0U;
 }
 
-/* Supports the rtl8822bu tx quiesce result locked operation. */
+/* Reports whether every transmission has finished. */
 static void
 rtl8822bu_tx_quiesce_result_locked(
 	struct rtl8822bu_adapter *adapter,
@@ -856,7 +1108,7 @@ rtl8822bu_tx_quiesce_result_locked(
 	adapter->quarantined = 1U;
 }
 
-/* Supports the rtl8822bu operation leave operation. */
+/* Leaves the gate that keeps operations out of a teardown. */
 static void
 rtl8822bu_operation_leave(
 	struct rtl8822bu_adapter *adapter)
@@ -868,6 +1120,7 @@ rtl8822bu_operation_leave(
 	if (adapter->radio_operations_active == 0U)
 		__builtin_trap();
 	adapter->radio_operations_active--;
+
 	schedule = adapter->radio_operations_active == 0U &&
 		   adapter->recovery_pending && !adapter->recovery_active &&
 		   adapter->ready && !adapter->detaching && adapter->opened &&
@@ -908,8 +1161,8 @@ rtl8822bu_usb_profile_find(
 	size_t index;
 
 	/* Compares both release fields because mode switching changes both. */
-	for (index = 0U; index < sizeof(rtl8822bu_usb_profiles) /
-					 sizeof(rtl8822bu_usb_profiles[0]);
+	for (index = 0U;
+	     index < sizeof(rtl8822bu_usb_profiles) / sizeof(rtl8822bu_usb_profiles[0]);
 	     index++) {
 		profile = &rtl8822bu_usb_profiles[index];
 
@@ -941,8 +1194,7 @@ rtl8822bu_endpoint_companion_accept(
 	const struct drv_usb_endpoint *endpoint,
 	int interrupt)
 {
-	const struct drv_usb_superspeed_endpoint_companion_descriptor
-		*companion;
+	const struct drv_usb_superspeed_endpoint_companion_descriptor *companion;
 	uint8_t burst;
 	uint16_t bytes_per_interval;
 
@@ -1447,7 +1699,7 @@ rtl8822bu_register_transfer(
 	return 0;
 }
 
-/* Supports the rtl8822bu read8 operation. */
+/* Reads one byte of a device register over the bus. */
 static int
 rtl8822bu_read8(
 	struct rtl8822bu_adapter *adapter,
@@ -1475,7 +1727,7 @@ rtl8822bu_read8(
 	return 0;
 }
 
-/* Supports the rtl8822bu read16 operation. */
+/* Reads one 16-bit device register. */
 static int
 rtl8822bu_read16(
 	struct rtl8822bu_adapter *adapter,
@@ -1505,7 +1757,7 @@ rtl8822bu_read16(
 	return 0;
 }
 
-/* Supports the rtl8822bu read32 operation. */
+/* Reads one 32-bit device register. */
 static int
 rtl8822bu_read32(
 	struct rtl8822bu_adapter *adapter,
@@ -1536,7 +1788,7 @@ rtl8822bu_read32(
 	return 0;
 }
 
-/* Supports the rtl8822bu write8 operation. */
+/* Writes one byte of a device register over the bus. */
 static int
 rtl8822bu_write8(
 	struct rtl8822bu_adapter *adapter,
@@ -1554,7 +1806,7 @@ rtl8822bu_write8(
 	return error;
 }
 
-/* Supports the rtl8822bu write16 operation. */
+/* Writes one 16-bit device register. */
 static int
 rtl8822bu_write16(
 	struct rtl8822bu_adapter *adapter,
@@ -1572,7 +1824,7 @@ rtl8822bu_write16(
 	return error;
 }
 
-/* Supports the rtl8822bu write32 operation. */
+/* Writes one 32-bit device register. */
 static int
 rtl8822bu_write32(
 	struct rtl8822bu_adapter *adapter,
@@ -1591,7 +1843,7 @@ rtl8822bu_write32(
 	return error;
 }
 
-/* Supports the rtl8822bu record cleanup error operation. */
+/* Records the first failure a cleanup met. */
 static void
 rtl8822bu_record_cleanup_error(
 	int *error,
@@ -1602,7 +1854,7 @@ rtl8822bu_record_cleanup_error(
 		*error = cleanup_error;
 }
 
-/* Supports the rtl8822bu efuse physical read operation. */
+/* Reads the raw contents of the device's fuse map. */
 static int
 rtl8822bu_efuse_physical_read(
 	struct rtl8822bu_adapter *adapter,
@@ -1745,7 +1997,7 @@ out:
 	return 0;
 }
 
-/* Supports the rtl8822bu board read operation. */
+/* Reads the board's own calibration out of that map. */
 static int
 rtl8822bu_board_read(
 	struct rtl8822bu_adapter *adapter,
@@ -1788,7 +2040,6 @@ rtl8822bu_board_read(
 	}
 
 #if RTL8822BU_TRACE
-
 	/*
 	 * One bounded nonsecret calibration record per attach: whether the
 	 * efuse transmit-power indexes are healthy midrange values or the
@@ -1834,35 +2085,7 @@ rtl8822bu_board_read(
 	return 0;
 }
 
-struct rtl8822bu_firmware_saved_registers {
-	uint8_t txdma_map_high;
-	uint8_t cr;
-	uint8_t cr_high;
-	uint8_t beacon_control;
-	uint8_t sys_func_high;
-	uint8_t reserved_control_high;
-	uint8_t sys_clock_high;
-	uint8_t cpu_dmem_high;
-	uint16_t fifo_page_info;
-	uint16_t fifo_page_control;
-	uint16_t mcufw_control;
-	uint32_t h2c_queue;
-	uint32_t rqpn_control;
-};
-
-struct rtl8822bu_firmware_transfer {
-	struct rtl8822bu_adapter *adapter;
-	const struct rtl8822b_firmware_view *view;
-	uint8_t *wire_buffer;
-	enum rtl8822b_firmware_segment segment;
-	uint32_t next_destination;
-	size_t next_file_offset;
-	unsigned segment_open;
-	unsigned dmem_complete;
-	unsigned imem_complete;
-};
-
-/* Supports the rtl8822bu wait32 operation. */
+/* Waits for a 32-bit register to read the wanted value. */
 static int
 rtl8822bu_wait32(
 	struct rtl8822bu_adapter *adapter,
@@ -1891,7 +2114,7 @@ rtl8822bu_wait32(
 	return ETIMEDOUT;
 }
 
-/* Supports the rtl8822bu wait16 operation. */
+/* Waits for a 16-bit register to read the wanted value. */
 static int
 rtl8822bu_wait16(
 	struct rtl8822bu_adapter *adapter,
@@ -1920,7 +2143,7 @@ rtl8822bu_wait16(
 	return ETIMEDOUT;
 }
 
-/* Supports the rtl8822bu firmware save operation. */
+/* Saves the registers a firmware download will change. */
 static int
 rtl8822bu_firmware_save(
 	struct rtl8822bu_adapter *adapter,
@@ -1989,7 +2212,7 @@ rtl8822bu_firmware_save(
 	return 0;
 }
 
-/* Supports the rtl8822bu firmware restore transport operation. */
+/* Puts those registers back after a download. */
 static int
 rtl8822bu_firmware_restore_transport(
 	struct rtl8822bu_adapter *adapter,
@@ -1998,30 +2221,21 @@ rtl8822bu_firmware_restore_transport(
 	int error = 0, cleanup_error;
 
 	/* Puts the transport registers back the way they were. */
-	cleanup_error = rtl8822bu_write16(
-		adapter, RTL8822BU_REG_FIFOPAGE_CTRL_2,
-		saved->fifo_page_control | RTL8822BU_BEACON_VALID);
+	cleanup_error = rtl8822bu_write16(adapter, RTL8822BU_REG_FIFOPAGE_CTRL_2, saved->fifo_page_control | RTL8822BU_BEACON_VALID);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
-	cleanup_error = rtl8822bu_write8(adapter, RTL8822BU_REG_BCN_CTRL,
-					 saved->beacon_control);
+	cleanup_error = rtl8822bu_write8(adapter, RTL8822BU_REG_BCN_CTRL, saved->beacon_control);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
-	cleanup_error = rtl8822bu_write32(adapter, RTL8822BU_REG_RQPN_CTRL_2,
-					  saved->rqpn_control);
+	cleanup_error = rtl8822bu_write32(adapter, RTL8822BU_REG_RQPN_CTRL_2, saved->rqpn_control);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
-	cleanup_error = rtl8822bu_write16(
-		adapter, RTL8822BU_REG_FIFOPAGE_INFO_1, saved->fifo_page_info);
+	cleanup_error = rtl8822bu_write16(adapter, RTL8822BU_REG_FIFOPAGE_INFO_1, saved->fifo_page_info);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
-	cleanup_error = rtl8822bu_write32(adapter, RTL8822BU_REG_H2CQ_CSR,
-					  saved->h2c_queue);
+	cleanup_error = rtl8822bu_write32(adapter, RTL8822BU_REG_H2CQ_CSR, saved->h2c_queue);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
-	cleanup_error = rtl8822bu_write8(adapter, RTL8822BU_REG_CR + 1U,
-					 saved->cr_high);
+	cleanup_error = rtl8822bu_write8(adapter, RTL8822BU_REG_CR + 1U, saved->cr_high);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
 	cleanup_error = rtl8822bu_write8(adapter, RTL8822BU_REG_CR, saved->cr);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
-	cleanup_error =
-		rtl8822bu_write8(adapter, RTL8822BU_REG_TXDMA_PQ_MAP + 1U,
-				 saved->txdma_map_high);
+	cleanup_error = rtl8822bu_write8(adapter, RTL8822BU_REG_TXDMA_PQ_MAP + 1U, saved->txdma_map_high);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
 
 	/* Reports the failure. */
@@ -2032,7 +2246,7 @@ rtl8822bu_firmware_restore_transport(
 	return 0;
 }
 
-/* Supports the rtl8822bu firmware restore failure operation. */
+/* Puts them back after a download that failed. */
 static int
 rtl8822bu_firmware_restore_failure(
 	struct rtl8822bu_adapter *adapter,
@@ -2068,7 +2282,7 @@ rtl8822bu_firmware_restore_failure(
 	return 0;
 }
 
-/* Supports the rtl8822bu firmware prepare operation. */
+/* Prepares the device to take a firmware image. */
 static int
 rtl8822bu_firmware_prepare(
 	struct rtl8822bu_adapter *adapter,
@@ -2082,7 +2296,7 @@ rtl8822bu_firmware_prepare(
 	if (error == 0) {
 		error = rtl8822bu_write8(adapter, RTL8822BU_REG_RSV_CTRL + 1U,
 					 saved->reserved_control_high &
-						 ~RTL8822BU_WCPU_IO_ENABLE);
+					 ~RTL8822BU_WCPU_IO_ENABLE);
 	}
 	if (error == 0) {
 		error = rtl8822bu_write8(adapter,
@@ -2096,7 +2310,7 @@ rtl8822bu_firmware_prepare(
 	if (error == 0) {
 		error = rtl8822bu_write8(adapter, RTL8822BU_REG_CR + 1U,
 					 saved->cr_high |
-						 RTL8822BU_CR_ENABLE_SW_BEACON);
+					 RTL8822BU_CR_ENABLE_SW_BEACON);
 	}
 	if (error == 0) {
 		error = rtl8822bu_write32(adapter, RTL8822BU_REG_H2CQ_CSR,
@@ -2109,13 +2323,13 @@ rtl8822bu_firmware_prepare(
 	if (error == 0) {
 		error = rtl8822bu_write32(adapter, RTL8822BU_REG_RQPN_CTRL_2,
 					  saved->rqpn_control |
-						  RTL8822BU_LOAD_RQPN);
+					  RTL8822BU_LOAD_RQPN);
 	}
 	if (error == 0) {
 		error = rtl8822bu_write8(
 			adapter, RTL8822BU_REG_BCN_CTRL,
 			(saved->beacon_control & ~RTL8822BU_ENABLE_BEACON) |
-				RTL8822BU_DISABLE_TSF_UPDATE);
+			RTL8822BU_DISABLE_TSF_UPDATE);
 	}
 	if (error == 0) {
 		error = rtl8822bu_write8(adapter,
@@ -2139,7 +2353,7 @@ rtl8822bu_firmware_prepare(
 		error = rtl8822bu_write16(
 			adapter, RTL8822BU_REG_MCUFW_CTRL,
 			(saved->mcufw_control & 0x3800U) |
-				RTL8822BU_MCUFW_DOWNLOAD_ENABLE);
+			RTL8822BU_MCUFW_DOWNLOAD_ENABLE);
 	}
 
 	/* Reports the failure. */
@@ -2150,7 +2364,7 @@ rtl8822bu_firmware_prepare(
 	return 0;
 }
 
-/* Supports the rtl8822bu firmware reserved page operation. */
+/* Points the device at the page a download is written to. */
 static int
 rtl8822bu_firmware_reserved_page(
 	struct rtl8822bu_firmware_transfer *transfer,
@@ -2206,7 +2420,7 @@ rtl8822bu_firmware_reserved_page(
 	return function_result;
 }
 
-/* Supports the rtl8822bu firmware ddma operation. */
+/* Runs the direct transfer that moves one firmware chunk. */
 static int
 rtl8822bu_firmware_ddma(
 	struct rtl8822bu_firmware_transfer *transfer,
@@ -2252,7 +2466,7 @@ rtl8822bu_firmware_ddma(
 	return function_result;
 }
 
-/* Supports the rtl8822bu firmware chunk operation. */
+/* Writes one chunk of the firmware image. */
 static int
 rtl8822bu_firmware_chunk(
 	void *context,
@@ -2376,7 +2590,7 @@ rtl8822bu_firmware_chunk(
 	return 0;
 }
 
-/* Supports the rtl8822bu firmware download model operation. */
+/* Reports the plan a firmware download follows. */
 static int
 rtl8822bu_firmware_download_model(
 	struct rtl8822bu_adapter *adapter,
@@ -2512,7 +2726,7 @@ out:
 	return 0;
 }
 
-/* Supports the rtl8822bu firmware download operation. */
+/* Writes the whole firmware image into the device. */
 static int __attribute__((unused))
 rtl8822bu_firmware_download(
 	struct rtl8822bu_adapter *adapter,
@@ -2528,7 +2742,7 @@ rtl8822bu_firmware_download(
 	return error;
 }
 
-/* Supports the rtl8822bu ready station operation. */
+/* Prepares the device to act as a station. */
 static int
 rtl8822bu_ready_station(
 	struct rtl8822bu_adapter *adapter,
@@ -2551,7 +2765,7 @@ rtl8822bu_ready_station(
 	return ready;
 }
 
-/* Supports the rtl8822bu urb status error operation. */
+/* Renders a transfer status as the error it stands for. */
 static int
 rtl8822bu_urb_status_error(
 	enum drv_usb_urb_status status)
@@ -2576,7 +2790,7 @@ rtl8822bu_urb_status_error(
 	return EIO;
 }
 
-/* Supports the rtl8822bu sync error streak locked operation. */
+/* Counts how many synchronous transfers have failed in a row. */
 static unsigned *
 rtl8822bu_sync_error_streak_locked(
 	struct rtl8822bu_adapter *adapter,
@@ -2598,7 +2812,7 @@ rtl8822bu_sync_error_streak_locked(
 	return &adapter->tx_low_error_streak;
 }
 
-/* Supports the rtl8822bu sync endpoint result operation. */
+/* Reports how a synchronous endpoint transfer ended. */
 static void
 rtl8822bu_sync_endpoint_result(
 	struct rtl8822bu_adapter *adapter,
@@ -2691,7 +2905,7 @@ rtl8822bu_bulk_transfer(
 	return 0;
 }
 
-/* Supports the rtl8822bu rx completion operation. */
+/* Takes one finished receive transfer. */
 static void
 rtl8822bu_rx_completion(
 	struct drv_usb_urb *urb,
@@ -2739,7 +2953,7 @@ rtl8822bu_rx_completion(
 		net_device_schedule_poll(adapter->net_device);
 }
 
-/* Supports the rtl8822bu rx submit operation. */
+/* Puts one receive transfer back on its endpoint. */
 static int
 rtl8822bu_rx_submit(
 	struct rtl8822bu_adapter *adapter,
@@ -2833,7 +3047,7 @@ rtl8822bu_rx_submit(
 	return 0;
 }
 
-/* Supports the rtl8822bu poll enter operation. */
+/* Joins the gate that serializes polling. */
 static int
 rtl8822bu_poll_enter(
 	struct rtl8822bu_adapter *adapter)
@@ -2854,7 +3068,7 @@ rtl8822bu_poll_enter(
 	return admitted;
 }
 
-/* Supports the rtl8822bu poll exit operation. */
+/* Leaves that gate. */
 static void
 rtl8822bu_poll_exit(
 	struct rtl8822bu_adapter *adapter)
@@ -2908,7 +3122,7 @@ rtl8822bu_wait_activity(
 	}
 }
 
-/* Supports the rtl8822bu rx stop operation. */
+/* Stops the receive path and waits for it. */
 static int
 rtl8822bu_rx_stop(
 	struct rtl8822bu_adapter *adapter)
@@ -3050,7 +3264,7 @@ rtl8822bu_rx_generation_pause(
 	return 0;
 }
 
-/* Supports the rtl8822bu rx generation resume operation. */
+/* Lets the receive path take frames again. */
 static int
 rtl8822bu_rx_generation_resume(
 	struct rtl8822bu_adapter *adapter,
@@ -3109,7 +3323,7 @@ rtl8822bu_rx_generation_resume(
 	return 0;
 }
 
-/* Supports the rtl8822bu rx start operation. */
+/* Starts the receive path. */
 static int
 rtl8822bu_rx_start(
 	struct rtl8822bu_adapter *adapter,
@@ -3320,7 +3534,7 @@ rtl8822bu_hardware_stop_locked(
 	return 0;
 }
 
-/* Supports the rtl8822bu tx report generation active locked operation. */
+/* Asks whether transmit reports still belong to this generation. */
 static int
 rtl8822bu_tx_report_generation_active_locked(
 	const struct rtl8822bu_adapter *adapter,
@@ -3348,7 +3562,7 @@ rtl8822bu_tx_report_generation_active_locked(
 	return 0;
 }
 
-/* Supports the rtl8822bu tx report reap locked operation. */
+/* Takes the transmit reports that have arrived. */
 static void
 rtl8822bu_tx_report_reap_locked(
 	struct rtl8822bu_adapter *adapter,
@@ -3393,7 +3607,7 @@ rtl8822bu_tx_report_reap_locked(
 	}
 }
 
-/* Supports the rtl8822bu tx report reserve locked operation. */
+/* Reserves the slot one transmission's report will land in. */
 static int
 rtl8822bu_tx_report_reserve_locked(
 	struct rtl8822bu_adapter *adapter,
@@ -3458,7 +3672,7 @@ rtl8822bu_tx_report_reserve_locked(
 	return ENOSPC;
 }
 
-/* Supports the rtl8822bu tx report release operation. */
+/* Gives that slot back. */
 static void
 rtl8822bu_tx_report_release(
 	struct rtl8822bu_adapter *adapter,
@@ -3481,7 +3695,7 @@ rtl8822bu_tx_report_release(
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 }
 
-/* Supports the rtl8822bu tx report abandon attempted operation. */
+/* Gives up waiting for a report that never arrived. */
 static void
 rtl8822bu_tx_report_abandon_attempted(
 	struct rtl8822bu_adapter *adapter,
@@ -3534,7 +3748,7 @@ rtl8822bu_tx_report_abandon_attempted(
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 }
 
-/* Supports the rtl8822bu c2h tx report decode operation. */
+/* Decodes one transmit report the device sent up. */
 static int
 rtl8822bu_c2h_tx_report_decode(
 	const struct rtl8822b_rx_packet *packet,
@@ -3587,7 +3801,7 @@ rtl8822bu_c2h_tx_report_decode(
 	return 0;
 }
 
-/* Supports the rtl8822bu tx report complete operation. */
+/* Completes the transmission a report belongs to. */
 static int
 rtl8822bu_tx_report_complete(
 	struct rtl8822bu_adapter *adapter,
@@ -3651,7 +3865,7 @@ rtl8822bu_tx_report_complete(
 	return 0;
 }
 
-/* Supports the rtl8822bu tx descriptor set priority operation. */
+/* Sets the queue a frame is transmitted from. */
 static int
 rtl8822bu_tx_descriptor_set_priority(
 	uint8_t *wire,
@@ -3706,7 +3920,7 @@ rtl8822bu_tx_descriptor_set_priority(
 	return 0;
 }
 
-/* Supports the rtl8822bu tx descriptor request report operation. */
+/* Asks the device to report how a frame was transmitted. */
 static int
 rtl8822bu_tx_descriptor_request_report(
 	uint8_t *wire,
@@ -3739,7 +3953,7 @@ rtl8822bu_tx_descriptor_request_report(
 	return 0;
 }
 
-/* Supports the rtl8822bu frame transmit private operation. */
+/* Transmits one frame, with the device lock already held. */
 static int
 rtl8822bu_frame_transmit_private(
 	struct rtl8822bu_adapter *adapter,
@@ -3956,7 +4170,7 @@ out_release:
 	return 0;
 }
 
-/* Supports the rtl8822bu frame transmit operation. */
+/* Transmits one frame. */
 static int
 rtl8822bu_frame_transmit(
 	void *context,
@@ -4048,7 +4262,7 @@ rtl8822bu_frame_transmit(
 	return 0;
 }
 
-/* Supports the rtl8822bu rx classify operation. */
+/* Reports what kind of thing one received block is. */
 static int
 rtl8822bu_rx_classify(
 	struct rtl8822bu_adapter *adapter,
@@ -4221,12 +4435,7 @@ rtl8822bu_rx_classify(
 	return 0;
 }
 
-struct rtl8822bu_rx_report_context {
-	struct rtl8822bu_adapter *adapter;
-	unsigned reported;
-};
-
-/* Supports the rtl8822bu rx report operation. */
+/* Hands one received frame up to the wireless stack. */
 static int
 rtl8822bu_rx_report(
 	void *context,
@@ -4314,6 +4523,7 @@ rtl8822bu_rx_report(
 	enabled = spin_lock_irqsave(&adapter->lock);
 
 	station = adapter->station;
+
 #if RTL8822BU_TRACE
 	key_installed = adapter->pairwise_key_installed;
 #endif
@@ -4330,8 +4540,8 @@ rtl8822bu_rx_report(
 			station, classified.connection_generation,
 			classified.cookie, classified.tx_error == 0,
 			classified.tx_error);
-#if RTL8822BU_TRACE
 
+#if RTL8822BU_TRACE
 		/*
 		 * Pre-key firmware reports localize a physically silent
 		 * authentication path; keyed data traffic stays quiet.  The
@@ -4378,8 +4588,8 @@ rtl8822bu_rx_report(
 					 !classified.icv_error;
 		frame_report.key_index = classified.key_index;
 		frame_report.integrity_error = classified.icv_error;
-#if RTL8822BU_TRACE
 
+#if RTL8822BU_TRACE
 		/*
 		 * Authentication, association-response, disassociation, and
 		 * deauthentication deliveries are the bounded connect-stage
@@ -4406,8 +4616,8 @@ rtl8822bu_rx_report(
 			/* Succeeded. */
 			return 0;
 		}
-#if RTL8822BU_TRACE
 
+#if RTL8822BU_TRACE
 		/* Handles the connect stage frame condition. */
 		if (connect_stage_frame) {
 			hal_printf("usb-rtl8822bu: rx-management subtype=%02x "
@@ -4441,8 +4651,8 @@ rtl8822bu_rx_report(
 
 	generation = adapter->scan_generation;
 	channel = adapter->scan_channel;
-#if RTL8822BU_TRACE
 
+#if RTL8822BU_TRACE
 	/* Handles the phy sample condition. */
 	phy_sample = generation != 0U &&
 		     adapter->phy_sample_generation != generation;
@@ -4458,8 +4668,8 @@ rtl8822bu_rx_report(
 	 */
 	if (station == NULL || generation == 0U || channel == 0U)
 		return 0;
-#if RTL8822BU_TRACE
 
+#if RTL8822BU_TRACE
 	/*
 	 * One raw sample per scan generation decides whether a weak displayed
 	 * power is real received power or a zeroed PHY status.
@@ -4501,7 +4711,7 @@ rtl8822bu_rx_report(
 	return 0;
 }
 
-/* Supports the rtl8822bu rx has work operation. */
+/* Asks whether the receive path has anything to do. */
 static int
 rtl8822bu_rx_has_work(
 	struct rtl8822bu_adapter *adapter)
@@ -4520,7 +4730,7 @@ rtl8822bu_rx_has_work(
 	return pending;
 }
 
-/* Supports the rtl8822bu scan channel start operation. */
+/* Moves the radio to the next channel of a scan. */
 static int
 rtl8822bu_scan_channel_start(
 	void *context,
@@ -4659,7 +4869,7 @@ rtl8822bu_scan_channel_start(
 	return error == ESTALE ? 0 : error;
 }
 
-/* Supports the rtl8822bu scan stop operation. */
+/* Ends a scan and puts the radio back. */
 static int
 rtl8822bu_scan_stop(
 	void *context,
@@ -4685,7 +4895,7 @@ rtl8822bu_scan_stop(
 	return 0;
 }
 
-/* Supports the rtl8822bu security hardware clear operation. */
+/* Clears every key the device holds in hardware. */
 static int
 rtl8822bu_security_hardware_clear(
 	struct rtl8822bu_adapter *adapter,
@@ -4784,9 +4994,12 @@ rtl8822bu_security_hardware_clear(
 	return 0;
 }
 
-static int rtl8822bu_connect_start(void *context, uint64_t generation,
-				   const struct wlan_bss_record *bss,
-				   uint64_t deadline)
+static int
+rtl8822bu_connect_start(
+	void *context,
+	uint64_t generation,
+	const struct wlan_bss_record *bss,
+	uint64_t deadline)
 {
 	struct rtl8822bu_adapter *adapter = context;
 	unsigned long enabled;
@@ -4940,8 +5153,8 @@ static int rtl8822bu_connect_start(void *context, uint64_t generation,
 		return error;
 
 	stage = "channel-program";
-	error = drv_rtl8822b_radio_set_channel(&adapter->radio, bss->channel,
-					       deadline);
+	error = drv_rtl8822b_radio_set_channel(&adapter->radio, bss->channel, deadline);
+
 #if RTL8822BU_TRACE
 	channel_finished = clock_ticks();
 #endif
@@ -4953,8 +5166,8 @@ static int rtl8822bu_connect_start(void *context, uint64_t generation,
 	}
 
 	stopped = clock_ticks();
-#if RTL8822BU_TRACE
 
+#if RTL8822BU_TRACE
 	/* Checks the operation status. */
 	if (error == 0) {
 		hal_printf("usb-rtl8822bu: connect generation=%llu prepared "
@@ -5045,9 +5258,13 @@ static int rtl8822bu_connect_start(void *context, uint64_t generation,
 	return 0;
 }
 
-static int rtl8822bu_association_set(void *context, uint64_t generation,
-				     const uint8_t bssid[6], uint16_t aid,
-				     uint64_t deadline)
+static int
+rtl8822bu_association_set(
+	void *context,
+	uint64_t generation,
+	const uint8_t bssid[6],
+	uint16_t aid,
+	uint64_t deadline)
 {
 	struct rtl8822bu_adapter *adapter = context;
 	unsigned long enabled;
@@ -5199,8 +5416,11 @@ static int rtl8822bu_association_set(void *context, uint64_t generation,
 	return 0;
 }
 
-static int rtl8822bu_association_clear(void *context, uint64_t generation,
-				       uint64_t deadline)
+static int
+rtl8822bu_association_clear(
+	void *context,
+	uint64_t generation,
+	uint64_t deadline)
 {
 	struct rtl8822bu_adapter *adapter = context;
 	uint8_t bssid[6];
@@ -5349,14 +5569,18 @@ static int rtl8822bu_association_clear(void *context, uint64_t generation,
 }
 
 static int
-rtl8822bu_key_install_checked(struct rtl8822bu_adapter *adapter,
-			      uint64_t generation, enum rtl8822bu_key_role role,
-			      uint8_t key_index, const uint8_t address[6],
-			      const uint8_t key[16], uint64_t key_generation,
-			      uint64_t deadline)
+rtl8822bu_key_install_checked(
+	struct rtl8822bu_adapter *adapter,
+	uint64_t generation,
+	enum rtl8822bu_key_role role,
+	uint8_t key_index,
+	const uint8_t address[6],
+	const uint8_t key[16],
+	uint64_t key_generation,
+	uint64_t deadline)
 {
 	static const uint8_t broadcast[6] = {0xffU, 0xffU, 0xffU,
-					     0xffU, 0xffU, 0xffU};
+		0xffU, 0xffU, 0xffU};
 	const uint8_t *cam_address;
 	unsigned long enabled;
 	uint64_t cleanup_deadline;
@@ -5671,14 +5895,16 @@ rtl8822bu_key_install_checked(struct rtl8822bu_adapter *adapter,
 	return 0;
 }
 
-static int rtl8822bu_keys_activate_checked(struct rtl8822bu_adapter *adapter,
-					   uint64_t generation,
-					   uint64_t pairwise_generation,
-					   uint64_t group_generation,
-					   uint64_t deadline)
+static int
+rtl8822bu_keys_activate_checked(
+	struct rtl8822bu_adapter *adapter,
+	uint64_t generation,
+	uint64_t pairwise_generation,
+	uint64_t group_generation,
+	uint64_t deadline)
 {
 	static const uint8_t broadcast[6] = {0xffU, 0xffU, 0xffU,
-					     0xffU, 0xffU, 0xffU};
+		0xffU, 0xffU, 0xffU};
 	unsigned long enabled;
 	uint64_t now;
 	uint64_t old_pairwise_generation = 0U;
@@ -6040,12 +6266,14 @@ out_error:
 	return 0;
 }
 
-static int rtl8822bu_key_delete_checked(struct rtl8822bu_adapter *adapter,
-					uint64_t generation,
-					enum rtl8822bu_key_role role,
-					uint8_t key_index,
-					uint64_t key_generation,
-					uint64_t deadline)
+static int
+rtl8822bu_key_delete_checked(
+	struct rtl8822bu_adapter *adapter,
+	uint64_t generation,
+	enum rtl8822bu_key_role role,
+	uint8_t key_index,
+	uint64_t key_generation,
+	uint64_t deadline)
 {
 	enum rtl8822bu_key_location {
 		RTL8822BU_KEY_ABSENT,
@@ -6322,8 +6550,10 @@ static int rtl8822bu_key_delete_checked(struct rtl8822bu_adapter *adapter,
 }
 
 static void
-rtl8822bu_deauthenticate_best_effort(struct rtl8822bu_adapter *adapter,
-				     const uint8_t bssid[6], uint64_t deadline)
+rtl8822bu_deauthenticate_best_effort(
+	struct rtl8822bu_adapter *adapter,
+	const uint8_t bssid[6],
+	uint64_t deadline)
 {
 	uint8_t wire[RTL8822B_MANAGEMENT_TX_DESCRIPTOR_SIZE + 26U + 1U];
 	uint64_t now, remaining, milliseconds;
@@ -6372,7 +6602,10 @@ out:
 	memset(wire, 0, sizeof(wire));
 }
 
-static int rtl8822bu_disconnect(void *context, uint64_t generation)
+static int
+rtl8822bu_disconnect(
+	void *context,
+	uint64_t generation)
 {
 	struct rtl8822bu_adapter *adapter = context;
 	uint8_t bssid[6];
@@ -6484,9 +6717,13 @@ static int rtl8822bu_disconnect(void *context, uint64_t generation)
 	return 0;
 }
 
-static int rtl8822bu_management_transmit(void *context, uint64_t generation,
-					 const uint8_t *frame, size_t length,
-					 uint64_t deadline)
+static int
+rtl8822bu_management_transmit(
+	void *context,
+	uint64_t generation,
+	const uint8_t *frame,
+	size_t length,
+	uint64_t deadline)
 {
 	struct rtl8822bu_adapter *adapter = context;
 	uint8_t *wire;
@@ -6630,8 +6867,10 @@ out_operation:
 	return 0;
 }
 
-static int rtl8822bu_key_install(void *context,
-				 const struct wlan_radio_key_request *request)
+static int
+rtl8822bu_key_install(
+	void *context,
+	const struct wlan_radio_key_request *request)
 {
 	int function_result;
 	struct rtl8822bu_adapter *adapter = context;
@@ -6659,10 +6898,14 @@ static int rtl8822bu_key_install(void *context,
 	return function_result;
 }
 
-static int rtl8822bu_key_delete(void *context, uint64_t generation,
-				enum wlan_radio_key_kind kind,
-				uint8_t key_index, uint64_t key_generation,
-				uint64_t deadline)
+static int
+rtl8822bu_key_delete(
+	void *context,
+	uint64_t generation,
+	enum wlan_radio_key_kind kind,
+	uint8_t key_index,
+	uint64_t key_generation,
+	uint64_t deadline)
 {
 	int function_result;
 	struct rtl8822bu_adapter *adapter = context;
@@ -6685,10 +6928,13 @@ static int rtl8822bu_key_delete(void *context, uint64_t generation,
 	return function_result;
 }
 
-static int rtl8822bu_keys_activate(void *context, uint64_t generation,
-				   uint64_t pairwise_key_generation,
-				   uint64_t group_key_generation,
-				   uint64_t deadline)
+static int
+rtl8822bu_keys_activate(
+	void *context,
+	uint64_t generation,
+	uint64_t pairwise_key_generation,
+	uint64_t group_key_generation,
+	uint64_t deadline)
 {
 	int function_result;
 
@@ -6701,7 +6947,9 @@ static int rtl8822bu_keys_activate(void *context, uint64_t generation,
 	return function_result;
 }
 
-static int rtl8822bu_quiesce(void *context)
+static int
+rtl8822bu_quiesce(
+	void *context)
 {
 	struct rtl8822bu_adapter *adapter = context;
 	unsigned long enabled;
@@ -6726,28 +6974,14 @@ static int rtl8822bu_quiesce(void *context)
 	return 0;
 }
 
-static const struct wlan_radio_ops rtl8822bu_radio_ops = {
-	.scan_channel_start = rtl8822bu_scan_channel_start,
-	.scan_stop = rtl8822bu_scan_stop,
-	.connect_start = rtl8822bu_connect_start,
-	.disconnect = rtl8822bu_disconnect,
-	.management_transmit = rtl8822bu_management_transmit,
-	.association_set = rtl8822bu_association_set,
-	.association_clear = rtl8822bu_association_clear,
-	.frame_transmit = rtl8822bu_frame_transmit,
-	.key_install = rtl8822bu_key_install,
-	.key_delete = rtl8822bu_key_delete,
-	.keys_activate = rtl8822bu_keys_activate,
-	.quiesce = rtl8822bu_quiesce,
-	.stop_retry = rtl8822bu_stop_retry};
-
 /*
  * Sends one bounded H2C command through the initialized private command queue.
  */
 static int
-rtl8822bu_h2c_packet_send(struct rtl8822bu_adapter *adapter,
-			  const uint8_t packet[RTL8822BU_H2C_PACKET_SIZE],
-			  uint64_t deadline)
+rtl8822bu_h2c_packet_send(
+	struct rtl8822bu_adapter *adapter,
+	const uint8_t packet[RTL8822BU_H2C_PACKET_SIZE],
+	uint64_t deadline)
 {
 	uint8_t wire[RTL8822B_FIRMWARE_TX_DESCRIPTOR_SIZE +
 		     RTL8822BU_H2C_PACKET_SIZE];
@@ -6896,8 +7130,10 @@ rtl8822bu_h2c_packet_send(struct rtl8822bu_adapter *adapter,
  * Supplies the reserved FIFO boundary and measured PHY identity to fresh
  * firmware.
  */
-static int rtl8822bu_firmware_info_send(struct rtl8822bu_adapter *adapter,
-					uint64_t deadline)
+static int
+rtl8822bu_firmware_info_send(
+	struct rtl8822bu_adapter *adapter,
+	uint64_t deadline)
 {
 	uint8_t packet[RTL8822BU_H2C_PACKET_SIZE];
 	uint8_t antenna;
@@ -6956,7 +7192,9 @@ static int rtl8822bu_firmware_info_send(struct rtl8822bu_adapter *adapter,
 	return 0;
 }
 
-static int rtl8822bu_hardware_start_locked(struct rtl8822bu_adapter *adapter)
+static int
+rtl8822bu_hardware_start_locked(
+	struct rtl8822bu_adapter *adapter)
 {
 	struct rtl8822b_firmware_blob firmware;
 	struct rtl8822b_radio_transport transport;
@@ -7067,7 +7305,9 @@ done:
 	return 0;
 }
 
-static int rtl8822bu_open(struct net_device *device)
+static int
+rtl8822bu_open(
+	struct net_device *device)
 {
 	struct rtl8822bu_adapter *adapter = device->driver_data;
 	unsigned long enabled;
@@ -7133,7 +7373,9 @@ static int rtl8822bu_open(struct net_device *device)
 	return 0;
 }
 
-static int rtl8822bu_station_close_wait(struct wlan_station *station)
+static int
+rtl8822bu_station_close_wait(
+	struct wlan_station *station)
 {
 	uint64_t deadline;
 	int error;
@@ -7168,7 +7410,9 @@ static int rtl8822bu_station_close_wait(struct wlan_station *station)
 }
 
 /* Records a bounded read-only TX snapshot without changing recovery state. */
-static void rtl8822bu_recovery_tx_snapshot(struct rtl8822bu_adapter *adapter)
+static void
+rtl8822bu_recovery_tx_snapshot(
+	struct rtl8822bu_adapter *adapter)
 {
 	static const uint16_t registers[] = {0x0210U, 0x0230U, 0x0232U,
 					     0x010cU, 0x0522U, 0x0100U};
@@ -7294,7 +7538,9 @@ static void rtl8822bu_recovery_tx_snapshot(struct rtl8822bu_adapter *adapter)
  * the fresh handshake.  Explicit IFF_DOWN/remove still use station_close and
  * deliberately erase that reconnect intent.
  */
-static void rtl8822bu_runtime_recover(struct rtl8822bu_adapter *adapter)
+static void
+rtl8822bu_runtime_recover(
+	struct rtl8822bu_adapter *adapter)
 {
 	struct wlan_station *station;
 	unsigned long enabled;
@@ -7445,7 +7691,9 @@ static void rtl8822bu_runtime_recover(struct rtl8822bu_adapter *adapter)
 }
 
 /* Retires common ownership around a checked host and device stop. */
-static int rtl8822bu_close_locked(struct rtl8822bu_adapter *adapter)
+static int
+rtl8822bu_close_locked(
+	struct rtl8822bu_adapter *adapter)
 {
 	struct wlan_station *station;
 	unsigned long enabled;
@@ -7507,7 +7755,9 @@ static int rtl8822bu_close_locked(struct rtl8822bu_adapter *adapter)
 }
 
 /* The station work pin retains the adapter across a checked stop retry. */
-static int rtl8822bu_stop_retry(void *context)
+static int
+rtl8822bu_stop_retry(
+	void *context)
 {
 	struct rtl8822bu_adapter *adapter;
 	int error;
@@ -7528,7 +7778,9 @@ static int rtl8822bu_stop_retry(void *context)
 }
 
 /* Failed synchronous close arms independent checked retirement. */
-static void rtl8822bu_close(struct net_device *device)
+static void
+rtl8822bu_close(
+	struct net_device *device)
 {
 	struct rtl8822bu_adapter *adapter;
 	int error;
@@ -7552,8 +7804,9 @@ static void rtl8822bu_close(struct net_device *device)
 	mutex_unlock(&adapter->lifecycle_lock);
 }
 
-static int rtl8822bu_transmit(struct net_device *device,
-			      struct packet_buf *packet)
+static int rtl8822bu_transmit(
+	struct net_device *device,
+	struct packet_buf *packet)
 {
 	struct rtl8822bu_adapter *adapter = device->driver_data;
 	struct wlan_station *station;
@@ -7609,8 +7862,10 @@ static int rtl8822bu_transmit(struct net_device *device,
 	return 0;
 }
 
-static unsigned rtl8822bu_poll_receive(struct net_device *device,
-				       unsigned budget)
+static unsigned
+rtl8822bu_poll_receive(
+	struct net_device *device,
+	unsigned budget)
 {
 	int rearm_error;
 	struct rtl8822bu_adapter *adapter = device->driver_data;
@@ -7782,8 +8037,11 @@ static unsigned rtl8822bu_poll_receive(struct net_device *device,
 	return take_ready || take_rearm ? 1U : 0U;
 }
 
-static int rtl8822bu_ioctl(struct net_device *device, unsigned long request,
-			   void *argument)
+static int
+rtl8822bu_ioctl(
+	struct net_device *device,
+	unsigned long request,
+	void *argument)
 {
 	struct rtl8822bu_adapter *adapter = device->driver_data;
 	struct wlan_station *station;
@@ -7844,7 +8102,9 @@ static int rtl8822bu_ioctl(struct net_device *device, unsigned long request,
 	return 0;
 }
 
-static void rtl8822bu_release(void *driver_data)
+static void
+rtl8822bu_release(
+	void *driver_data)
 {
 	struct rtl8822bu_adapter *adapter = driver_data;
 
@@ -7855,7 +8115,9 @@ static void rtl8822bu_release(void *driver_data)
 	hal_free(adapter);
 }
 
-static void rtl8822bu_usb_resources_free(struct rtl8822bu_adapter *adapter)
+static void
+rtl8822bu_usb_resources_free(
+	struct rtl8822bu_adapter *adapter)
 {
 	/* Handles the adapter availability. */
 	if (adapter == NULL)
@@ -7871,16 +8133,10 @@ static void rtl8822bu_usb_resources_free(struct rtl8822bu_adapter *adapter)
 	}
 }
 
-static const struct net_device_ops rtl8822bu_net_ops = {
-	.open = rtl8822bu_open,
-	.close = rtl8822bu_close,
-	.transmit = rtl8822bu_transmit,
-	.poll_receive = rtl8822bu_poll_receive,
-	.ioctl = rtl8822bu_ioctl,
-	.release = rtl8822bu_release};
-
-static void rtl8822bu_scan_profile(const struct rtl8822bu_board_info *board,
-				   struct wlan_scan_profile *profile)
+static void
+rtl8822bu_scan_profile(
+	const struct rtl8822bu_board_info *board,
+	struct wlan_scan_profile *profile)
 {
 	memset(profile, 0, sizeof(*profile));
 	profile->channel_count = rtl8822bu_scan_channel_count(board);
@@ -7888,7 +8144,9 @@ static void rtl8822bu_scan_profile(const struct rtl8822bu_board_info *board,
 	       profile->channel_count * sizeof(profile->channels[0]));
 }
 
-static int rtl8822bu_net_device_create(struct rtl8822bu_adapter *adapter)
+static int
+rtl8822bu_net_device_create(
+	struct rtl8822bu_adapter *adapter)
 {
 	struct wlan_scan_profile profile;
 	struct net_device *device;
@@ -8113,229 +8371,71 @@ static int rtl8822bu_teardown(struct drv_usb_interface *interface,
 	return 0;
 }
 
-static int rtl8822bu_match(struct drv_usb_interface *interface,
-			   const struct drv_usb_id *id)
-{
-	int function_result;
-	struct rtl8822bu_binding binding;
 
-	(void)id;
-
-	/* Computes the function result. */
-	function_result =
-		rtl8822bu_binding_parse(interface, &binding) ? 200 : 0;
-
-	/* Returns the computed result. */
-	return function_result;
-}
-
-static int rtl8822bu_attach(struct drv_usb_interface *interface,
-			    const struct drv_usb_id *id)
-{
-	int cleanup_error;
-	struct rtl8822bu_binding binding;
-	struct rtl8822bu_adapter *adapter;
-	int error;
-
-	(void)id;
-
-	/* Checks the rtl8822bu binding parse result. */
-	if (!rtl8822bu_binding_parse(interface, &binding))
-		return ENODEV;
-
-	/* Handles the adapter availability. */
-	adapter = hal_malloc(sizeof(*adapter));
-	if (adapter == NULL)
-		return ENOMEM;
-	memset(adapter, 0, sizeof(*adapter));
-	rtl8822bu_connection_state_clear_locked(adapter);
-	adapter->usb_device = binding.device;
-	adapter->interface = interface;
-	adapter->bulk_in = binding.bulk_in;
-	adapter->bulk_out_high = binding.bulk_out_high;
-	adapter->bulk_out_normal = binding.bulk_out_normal;
-	adapter->bulk_out_low = binding.bulk_out_low;
-	adapter->bulk_max_packet_size = binding.bulk_max_packet_size;
-	spin_init(&adapter->lock, LOCK_RANK_DEVICE, "usb-rtl8822bu");
-
-	/* Checks the operation status. */
-	error = mutex_init(&adapter->lifecycle_lock, LOCK_RANK_DEVICE,
-			   "usb-rtl8822bu lifecycle");
-	if (error != 0) {
-		hal_free(adapter);
-
-		/* Failed. */
-		return error;
-	}
-
-	/* Checks the operation status. */
-	error = drv_usb_interface_set_driver_data(interface, adapter);
-	if (error != 0) {
-		hal_free(adapter);
-
-		/* Failed. */
-		return error;
-	}
-
-	mutex_lock(&adapter->lifecycle_lock);
-
-	adapter->rx_buffer = hal_malloc(RTL8822BU_RX_BUFFER_SIZE);
-
-	/* Handles the rx buffer availability. */
-	if (adapter->rx_buffer == NULL) {
-		error = ENOMEM;
-		goto fail_locked;
-	}
-
-	adapter->rx_urb =
-		drv_usb_urb_alloc(adapter->usb_device, adapter->bulk_in, 0U);
-
-	/* Handles the rx urb availability. */
-	if (adapter->rx_urb == NULL) {
-		error = ENOMEM;
-		goto fail_locked;
-	}
-
-	/* Checks the operation status. */
-	error = rtl8822bu_board_read(adapter, &adapter->board);
-	if (error != 0)
-		goto fail_locked;
-
-	/* Checks the operation status. */
-	error = rtl8822bu_net_device_create(adapter);
-	if (error != 0)
-		goto fail_locked;
-
-	mutex_unlock(&adapter->lifecycle_lock);
-
-	hal_printf("usb-rtl8822bu: %s mac=%02x:%02x:%02x:%02x:%02x:%02x "
-		   "cut=%u rfe=%u usb=%s bulk=%u country=%02x%02x plan=%02x "
-		   "rf-board=%02x "
-		   "pre-radio\n",
-		   adapter->net_device->name, adapter->board.mac_address[0],
-		   adapter->board.mac_address[1], adapter->board.mac_address[2],
-		   adapter->board.mac_address[3], adapter->board.mac_address[4],
-		   adapter->board.mac_address[5], adapter->board.chip.cut,
-		   adapter->board.rfe_option,
-		   adapter->bulk_max_packet_size ==
-				   RTL8822BU_SS_BULK_MAX_PACKET_SIZE
-			   ? "SS"
-			   : "HS",
-		   adapter->bulk_max_packet_size,
-		   adapter->board.country_code[0],
-		   adapter->board.country_code[1], adapter->board.channel_plan,
-		   adapter->board.rf_board_option);
-
-	/* Succeeded. */
-	return 0;
-
-fail_locked:
-
-	mutex_unlock(&adapter->lifecycle_lock);
-
-	cleanup_error = rtl8822bu_teardown(interface, adapter,
-					   DRV_USB_DETACH_ATTACH_FAILED);
-
-	/* Returns the computed result. */
-	return cleanup_error != 0 ? cleanup_error : error;
-}
-
-static int rtl8822bu_detach(struct drv_usb_interface *interface, unsigned flags)
-{
-	int function_result;
-	struct rtl8822bu_adapter *adapter;
-
-	/* Handles the adapter availability. */
-	adapter = drv_usb_interface_driver_data(interface);
-	if (adapter == NULL)
-		return 0;
-
-	/* Obtains the rtl8822bu teardown result. */
-	function_result = rtl8822bu_teardown(interface, adapter, flags);
-
-	/* Returns the computed result. */
-	return function_result;
-}
-
-static void rtl8822bu_shutdown(struct drv_usb_interface *interface)
-{
-	struct rtl8822bu_adapter *adapter =
-		drv_usb_interface_driver_data(interface);
-	struct wlan_station *station;
-	unsigned long enabled;
-	int error;
-
-	/* Handles the adapter availability. */
-	if (adapter == NULL)
-		return;
-	mutex_lock(&adapter->lifecycle_lock);
-	enabled = spin_lock_irqsave(&adapter->lock);
-
-	adapter->detaching = 1U;
-	station = adapter->station;
-
-	spin_unlock_irqrestore(&adapter->lock, enabled);
-
-	/* Handles the net device availability. */
-	if (adapter->net_device != NULL)
-		(void)net_device_set_carrier(adapter->net_device, 0);
-
-	/* Checks the operation status. */
-	error = rtl8822bu_station_close_wait(station);
-	if (error == 0 || error == ENODEV) {
-		/* Checks the operation status. */
-		error = rtl8822bu_hardware_stop_locked(adapter);
-		if (error == 0) {
-			enabled = spin_lock_irqsave(&adapter->lock);
-			adapter->ready = 0U;
-			spin_unlock_irqrestore(&adapter->lock, enabled);
-		}
-	} else {
-		enabled = spin_lock_irqsave(&adapter->lock);
-		adapter->quarantined = 1U;
-		spin_unlock_irqrestore(&adapter->lock, enabled);
-	}
-
-	mutex_unlock(&adapter->lifecycle_lock);
-}
+/*
+ * RTL8822BU
+ */
 
 static const struct drv_usb_id rtl8822bu_ids[] = {
-	{.match_flags = DRV_USB_ID_VENDOR | DRV_USB_ID_PRODUCT |
-			DRV_USB_ID_RELEASE_RANGE | DRV_USB_ID_IF_CLASS |
-			DRV_USB_ID_IF_SUBCLASS | DRV_USB_ID_IF_PROTOCOL |
-			DRV_USB_ID_IF_NUMBER,
-	 .vendor = RTL8822BU_VENDOR_ID,
-	 .product = RTL8822BU_PRODUCT_ID,
-	 .release_minimum = RTL8822BU_DEVICE_RELEASE,
-	 .release_maximum = RTL8822BU_DEVICE_RELEASE,
-	 .interface_class = RTL8822BU_INTERFACE_CLASS,
-	 .interface_subclass = RTL8822BU_INTERFACE_SUBCLASS,
-	 .interface_protocol = RTL8822BU_INTERFACE_PROTOCOL,
-	 .interface_number = 0U},
-	{.match_flags = DRV_USB_ID_VENDOR | DRV_USB_ID_PRODUCT |
-			DRV_USB_ID_RELEASE_RANGE | DRV_USB_ID_IF_CLASS |
-			DRV_USB_ID_IF_SUBCLASS | DRV_USB_ID_IF_PROTOCOL |
-			DRV_USB_ID_IF_NUMBER,
-	 .vendor = RTL8822BU_VENDOR_ID,
-	 .product = RTL8822BU_PLUS_PRODUCT_ID,
-	 .release_minimum = RTL8822BU_DEVICE_RELEASE,
-	 .release_maximum = RTL8822BU_DEVICE_RELEASE,
-	 .interface_class = RTL8822BU_INTERFACE_CLASS,
-	 .interface_subclass = RTL8822BU_INTERFACE_SUBCLASS,
-	 .interface_protocol = RTL8822BU_INTERFACE_PROTOCOL,
-	 .interface_number = 0U},
-	{.match_flags = DRV_USB_ID_VENDOR | DRV_USB_ID_PRODUCT |
-			DRV_USB_ID_RELEASE_RANGE | DRV_USB_ID_IF_CLASS |
-			DRV_USB_ID_IF_SUBCLASS | DRV_USB_ID_IF_PROTOCOL |
-			DRV_USB_ID_IF_NUMBER,
-	 .vendor = RTL8822BU_VENDOR_ID,
-	 .product = RTL8822BU_PLUS_PRODUCT_ID,
-	 .release_minimum = RTL8822BU_SS_RELEASE,
-	 .release_maximum = RTL8822BU_SS_RELEASE,
-	 .interface_class = RTL8822BU_INTERFACE_CLASS,
-	 .interface_subclass = RTL8822BU_INTERFACE_SUBCLASS,
-	 .interface_protocol = RTL8822BU_INTERFACE_PROTOCOL,
-	 .interface_number = 0U}};
+	{
+		.match_flags = DRV_USB_ID_VENDOR | DRV_USB_ID_PRODUCT | DRV_USB_ID_RELEASE_RANGE | DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS | DRV_USB_ID_IF_PROTOCOL | DRV_USB_ID_IF_NUMBER,
+		.vendor = RTL8822BU_VENDOR_ID,
+		.product = RTL8822BU_PRODUCT_ID,
+		.release_minimum = RTL8822BU_DEVICE_RELEASE,
+		.release_maximum = RTL8822BU_DEVICE_RELEASE,
+		.interface_class = RTL8822BU_INTERFACE_CLASS,
+		.interface_subclass = RTL8822BU_INTERFACE_SUBCLASS,
+		.interface_protocol = RTL8822BU_INTERFACE_PROTOCOL,
+		.interface_number = 0U
+	},
+	{
+		.match_flags = DRV_USB_ID_VENDOR | DRV_USB_ID_PRODUCT | DRV_USB_ID_RELEASE_RANGE | DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS | DRV_USB_ID_IF_PROTOCOL | DRV_USB_ID_IF_NUMBER,
+		.vendor = RTL8822BU_VENDOR_ID,
+		.product = RTL8822BU_PLUS_PRODUCT_ID,
+		.release_minimum = RTL8822BU_DEVICE_RELEASE,
+		.release_maximum = RTL8822BU_DEVICE_RELEASE,
+		.interface_class = RTL8822BU_INTERFACE_CLASS,
+		.interface_subclass = RTL8822BU_INTERFACE_SUBCLASS,
+		.interface_protocol = RTL8822BU_INTERFACE_PROTOCOL,
+		.interface_number = 0U
+	},
+	{
+		.match_flags = DRV_USB_ID_VENDOR | DRV_USB_ID_PRODUCT | DRV_USB_ID_RELEASE_RANGE | DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS | DRV_USB_ID_IF_PROTOCOL | DRV_USB_ID_IF_NUMBER,
+		.vendor = RTL8822BU_VENDOR_ID,
+		.product = RTL8822BU_PLUS_PRODUCT_ID,
+		.release_minimum = RTL8822BU_SS_RELEASE,
+		.release_maximum = RTL8822BU_SS_RELEASE,
+		.interface_class = RTL8822BU_INTERFACE_CLASS,
+		.interface_subclass = RTL8822BU_INTERFACE_SUBCLASS,
+		.interface_protocol = RTL8822BU_INTERFACE_PROTOCOL,
+		.interface_number = 0U
+	}
+};
+
+static const struct wlan_radio_ops rtl8822bu_radio_ops = {
+	.scan_channel_start = rtl8822bu_scan_channel_start,
+	.scan_stop = rtl8822bu_scan_stop,
+	.connect_start = rtl8822bu_connect_start,
+	.disconnect = rtl8822bu_disconnect,
+	.management_transmit = rtl8822bu_management_transmit,
+	.association_set = rtl8822bu_association_set,
+	.association_clear = rtl8822bu_association_clear,
+	.frame_transmit = rtl8822bu_frame_transmit,
+	.key_install = rtl8822bu_key_install,
+	.key_delete = rtl8822bu_key_delete,
+	.keys_activate = rtl8822bu_keys_activate,
+	.quiesce = rtl8822bu_quiesce,
+	.stop_retry = rtl8822bu_stop_retry
+};
+
+static const struct net_device_ops rtl8822bu_net_ops = {
+	.open = rtl8822bu_open,
+	.close = rtl8822bu_close,
+	.transmit = rtl8822bu_transmit,
+	.poll_receive = rtl8822bu_poll_receive,
+	.ioctl = rtl8822bu_ioctl,
+	.release = rtl8822bu_release
+};
 
 static struct drv_usb_driver rtl8822bu_driver = {
 	.name = "usb-rtl8822bu",
@@ -8344,16 +8444,5 @@ static struct drv_usb_driver rtl8822bu_driver = {
 	.match = rtl8822bu_match,
 	.attach = rtl8822bu_attach,
 	.detach = rtl8822bu_detach,
-	.shutdown = rtl8822bu_shutdown};
-
-int drv_usb_rtl8822bu_driver_register(void)
-{
-	int function_result;
-
-	/* Obtains the drv usb driver register result. */
-	function_result = drv_usb_driver_register(&rtl8822bu_driver);
-
-	/* Returns the computed result. */
-	return function_result;
-}
-/* End consolidated usb-rtl8822bu.c. */
+	.shutdown = rtl8822bu_shutdown
+};

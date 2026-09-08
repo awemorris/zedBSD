@@ -1,7 +1,13 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* X68000 SCSI disk mark and partition decoder. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
+/*
+ * X68000 SCSI disk mark and partition decoder.
+ */
 
 #include <drivers/disklabel.h>
 
@@ -19,8 +25,42 @@ const struct partition_scheme drv_partition_scheme_x68k = {
 	.scan = x68k_scan,
 };
 
+
+/* Supports the x68k scan operation. */
+static int
+x68k_scan(
+	const struct partition_scheme *scheme,
+	struct disk *disk,
+	struct partition *entries,
+	unsigned capacity)
+{
+	uint8_t boot_area[X68K_PARTITION_BOOT_BYTES];
+	int count, index;
+
+	(void)scheme;
+
+	/* Checks the disk read result. */
+	if (disk == NULL || disk->d_block_size != 512U ||
+	    disk_read(disk, 0, X68K_PARTITION_BOOT_BYTES / 512U, boot_area) !=
+		    0) {
+		/* Reports operation failure. */
+		return -1;
+	}
+	count = drv_x68k_partition_decode(boot_area, sizeof(boot_area),
+					  disk->d_block_count, entries,
+					  capacity);
+	/* Process each remaining element. */
+	for (index = 0; index < count; index++)
+		entries[index].p_parent = disk;
+
+	/* Returns the computed result. */
+	return count;
+}
+
 /*
  * Implements the drv x68k partition decode operation.
+ *
+ * XXX: Is this currently used?
  */
 int
 drv_x68k_partition_decode(
@@ -157,35 +197,4 @@ be24(
 {
 	/* Returns the computed result. */
 	return (uint32_t)p[0] << 16 | (uint32_t)p[1] << 8 | p[2];
-}
-
-/* Supports the x68k scan operation. */
-static int
-x68k_scan(
-	const struct partition_scheme *scheme,
-	struct disk *disk,
-	struct partition *entries,
-	unsigned capacity)
-{
-	uint8_t boot_area[X68K_PARTITION_BOOT_BYTES];
-	int count, index;
-
-	(void)scheme;
-
-	/* Checks the disk read result. */
-	if (disk == NULL || disk->d_block_size != 512U ||
-	    disk_read(disk, 0, X68K_PARTITION_BOOT_BYTES / 512U, boot_area) !=
-		    0) {
-		/* Reports operation failure. */
-		return -1;
-	}
-	count = drv_x68k_partition_decode(boot_area, sizeof(boot_area),
-					  disk->d_block_count, entries,
-					  capacity);
-	/* Process each remaining element. */
-	for (index = 0; index < count; index++)
-		entries[index].p_parent = disk;
-
-	/* Returns the computed result. */
-	return count;
 }

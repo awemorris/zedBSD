@@ -52,9 +52,6 @@ static const uint8_t ax211_pnvm_digest[32] = {
 
 static uint32_t ax211_rotate_right(uint32_t value, unsigned amount);
 
-/*
- * Forward declaration.
- */
 static uint32_t ax211_get_be32(const uint8_t *bytes);
 static void ax211_put_be32(uint8_t *bytes, uint32_t value);
 static void ax211_sha256_transform(struct ax211_sha256_context *context, const uint8_t block[64]);

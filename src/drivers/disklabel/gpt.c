@@ -1,9 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * Strict, read-only GUID Partition Table parser.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
  */
+
 #include <drivers/disklabel.h>
 
 #include <errno.h>
@@ -73,7 +78,7 @@ const struct partition_scheme drv_partition_scheme_gpt = {
 	.scan = gpt_scan,
 };
 
-/* Supports the get32 operation. */
+/* Reads a 32-bit field, least significant byte first. */
 static uint32_t
 get32(
 	const uint8_t *p)
@@ -83,7 +88,7 @@ get32(
 	       ((uint32_t)p[3] << 24);
 }
 
-/* Supports the get64 operation. */
+/* Reads a 64-bit field, least significant byte first. */
 static uint64_t
 get64(
 	const uint8_t *p)
@@ -97,7 +102,7 @@ get64(
 	return function_result;
 }
 
-/* Supports the all zero operation. */
+/* Asks whether a run of bytes is entirely zero. */
 static int
 all_zero(
 	const uint8_t *p,
@@ -114,7 +119,7 @@ all_zero(
 	return 1;
 }
 
-/* Supports the crc32 update operation. */
+/* Folds more bytes into a running checksum. */
 static uint32_t
 crc32_update(
 	uint32_t crc,
@@ -137,7 +142,7 @@ crc32_update(
 	return crc;
 }
 
-/* Supports the crc32 operation. */
+/* Computes the checksum of a run of bytes. */
 static uint32_t
 crc32(
 	const uint8_t *data,
@@ -152,7 +157,7 @@ crc32(
 	return function_result;
 }
 
-/* Supports the decimal u64 operation. */
+/* Renders a value as decimal digits. */
 static void
 decimal_u64(
 	char output[21U],
@@ -171,7 +176,7 @@ decimal_u64(
 	output[count] = '\0';
 }
 
-/* Supports the canonical protective mbr operation. */
+/* Reports what the protective boot record ought to hold. */
 static int
 canonical_protective_mbr(
 	struct disk *disk,
@@ -224,7 +229,7 @@ canonical_protective_mbr(
 	return 0;
 }
 
-/* Supports the protective mbr matches extent operation. */
+/* Asks whether that record covers the whole disk. */
 static int
 protective_mbr_matches_extent(
 	uint32_t advertised_blocks,
@@ -237,7 +242,7 @@ protective_mbr_matches_extent(
 	return advertised_blocks == expected ? 0 : -EINVAL;
 }
 
-/* Supports the pure protective mbr operation. */
+/* Refuses a boot record that also holds real partitions. */
 static int
 pure_protective_mbr(
 	struct disk *disk,
@@ -266,7 +271,7 @@ pure_protective_mbr(
 	return 1;
 }
 
-/* Supports the conventional reserve blocks operation. */
+/* Reports how many blocks the table conventionally reserves. */
 static uint64_t
 conventional_reserve_blocks(
 	const struct disk *disk)
@@ -281,7 +286,7 @@ conventional_reserve_blocks(
 	return blocks;
 }
 
-/* Supports the zero declared backup reservation operation. */
+/* Asks whether the backup header declares no reservation. */
 static int
 zero_declared_backup_reservation(
 	struct disk *disk,
@@ -310,7 +315,7 @@ zero_declared_backup_reservation(
 	return 1;
 }
 
-/* Supports the read table bytes operation. */
+/* Reads the partition table off the disk. */
 static int
 read_table_bytes(
 	struct disk *disk,
@@ -348,7 +353,7 @@ read_table_bytes(
 	return 0;
 }
 
-/* Supports the table crc operation. */
+/* Computes the checksum the table should carry. */
 static int
 table_crc(
 	struct disk *disk,
@@ -380,7 +385,7 @@ table_crc(
 	return 0;
 }
 
-/* Supports the hex operation. */
+/* Renders one nibble as a hexadecimal character. */
 static char
 hex(
 	unsigned value)
@@ -389,7 +394,7 @@ hex(
 	return (char)(value < 10U ? '0' + value : 'a' + value - 10U);
 }
 
-/* Supports the guid text operation. */
+/* Renders a unique identifier in its usual written form. */
 static void
 guid_text(
 	char output[PARTITION_UUID_MAX],
@@ -412,7 +417,7 @@ guid_text(
 	output[at] = '\0';
 }
 
-/* Supports the utf8 emit operation. */
+/* Appends one code point to a UTF-8 string being built. */
 static void
 utf8_emit(
 	char output[PARTITION_LABEL_MAX],
@@ -437,7 +442,7 @@ utf8_emit(
 	}
 }
 
-/* Supports the gpt name operation. */
+/* Renders a partition name as UTF-8. */
 static int
 gpt_name(
 	char output[PARTITION_LABEL_MAX],
@@ -491,7 +496,7 @@ gpt_name(
 	return 0;
 }
 
-/* Supports the header layout operation. */
+/* Reports where the header says its table lies. */
 static int
 header_layout(
 	struct disk *disk,
@@ -567,7 +572,7 @@ header_layout(
 	return 0;
 }
 
-/* Supports the validate entries operation. */
+/* Refuses entries that overlap or leave the disk. */
 static int
 validate_entries(
 	struct disk *disk,
@@ -694,7 +699,7 @@ validate_entries(
 	return 0;
 }
 
-/* Supports the read header operation. */
+/* Reads and checks one of the two table headers. */
 static int
 read_header(
 	struct disk *disk,
@@ -755,7 +760,7 @@ read_header(
 	return 0;
 }
 
-/* Supports the primary header extent operation. */
+/* Reports the area the primary header describes. */
 static int
 primary_header_extent(
 	struct disk *disk,
@@ -798,7 +803,7 @@ primary_header_extent(
 	return 0;
 }
 
-/* Supports the validate copy operation. */
+/* Refuses a backup that does not agree with the primary. */
 static int
 validate_copy(
 	struct disk *disk,
@@ -857,7 +862,7 @@ out:
 	return 0;
 }
 
-/* Supports the copy headers equal operation. */
+/* Asks whether the two headers agree. */
 static int
 copy_headers_equal(
 	const struct gpt_copy *left,
@@ -880,7 +885,7 @@ copy_headers_equal(
 	return error;
 }
 
-/* Supports the copy tables equal operation. */
+/* Asks whether the two tables agree. */
 static int
 copy_tables_equal(
 	struct disk *disk,
@@ -1113,7 +1118,7 @@ intentional_primary_only(
 	return error;
 }
 
-/* Supports the gpt scan operation. */
+/* Reads a disk's partition table and publishes what it holds. */
 static int
 gpt_scan(
 	const struct partition_scheme *scheme,

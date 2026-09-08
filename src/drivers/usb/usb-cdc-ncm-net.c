@@ -1,10 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * Integrated USB CDC NCM network driver
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  */
+
 #include <drivers/usb-cdc-ncm.h>
 #include <drivers/usb.h>
 #include <errno.h>
@@ -163,31 +167,35 @@ static int ncm_detach(struct drv_usb_interface *interface, unsigned flags);
 static void ncm_shutdown(struct drv_usb_interface *interface);
 static int ncm_match(struct drv_usb_interface *interface, const struct drv_usb_id *id);
 
-static const struct net_device_ops ncm_net_ops = {.open = ncm_open,
-						  .close = ncm_close,
-						  .transmit = ncm_transmit,
-						  .poll_receive =
-							  ncm_poll_receive,
-						  .release = ncm_release};
+static const struct net_device_ops ncm_net_ops = {
+	.open = ncm_open,
+	.close = ncm_close,
+	.transmit = ncm_transmit,
+	.poll_receive = ncm_poll_receive,
+	.release = ncm_release
+};
 
 static const struct drv_usb_id ncm_ids[] = {
-	{.match_flags = DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS |
-			DRV_USB_ID_IF_PROTOCOL,
-	 .interface_class = NCM_COMMUNICATION_CLASS,
-	 .interface_subclass = NCM_COMMUNICATION_SUBCLASS,
-	 .interface_protocol = NCM_COMMUNICATION_PROTOCOL}};
+	{
+		.match_flags = DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS | DRV_USB_ID_IF_PROTOCOL,
+		.interface_class = NCM_COMMUNICATION_CLASS,
+		.interface_subclass = NCM_COMMUNICATION_SUBCLASS,
+		.interface_protocol = NCM_COMMUNICATION_PROTOCOL
+	}
+};
 
-static struct drv_usb_driver ncm_driver = {.name = "usb-cdc-ncm",
-					   .ids = ncm_ids,
-					   .id_count = sizeof(ncm_ids) /
-						       sizeof(ncm_ids[0]),
-					   .match = ncm_match,
-					   .attach = ncm_attach,
-					   .detach = ncm_detach,
-					   .shutdown = ncm_shutdown};
+static struct drv_usb_driver ncm_driver = {
+	.name = "usb-cdc-ncm",
+	.ids = ncm_ids,
+	.id_count = sizeof(ncm_ids) / sizeof(ncm_ids[0]),
+	.match = ncm_match,
+	.attach = ncm_attach,
+	.detach = ncm_detach,
+	.shutdown = ncm_shutdown
+};
 
 /*
- * Implements the drv usb cdc ncm driver register operation.
+ * Registers this driver with the USB subsystem.
  */
 int
 drv_usb_cdc_ncm_driver_register(
@@ -202,7 +210,7 @@ drv_usb_cdc_ncm_driver_register(
 	return error;
 }
 
-/* Supports the ncm le16 operation. */
+/* Reads a 16-bit field, least significant byte first. */
 static uint16_t
 ncm_le16(
 	const uint8_t *bytes)
@@ -211,7 +219,7 @@ ncm_le16(
 	return (uint16_t)((uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8));
 }
 
-/* Supports the ncm le32 operation. */
+/* Reads a 32-bit field, least significant byte first. */
 static uint32_t
 ncm_le32(
 	const uint8_t *bytes)
@@ -221,7 +229,7 @@ ncm_le32(
 	       ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
 }
 
-/* Supports the ncm interface configuration operation. */
+/* Reports the configuration an interface belongs to. */
 static struct drv_usb_configuration *
 ncm_interface_configuration(
 	struct drv_usb_interface *interface)
@@ -257,7 +265,7 @@ ncm_interface_configuration(
 	return NULL;
 }
 
-/* Supports the ncm iad covers operation. */
+/* Asks whether an association covers a given interface. */
 static int
 ncm_iad_covers(
 	const struct drv_usb_interface_association_descriptor *iad,
@@ -269,7 +277,7 @@ ncm_iad_covers(
 	       interface_number - iad->first_interface < iad->interface_count;
 }
 
-/* Supports the ncm iad consistent operation. */
+/* Refuses an association that does not describe this function. */
 static int
 ncm_iad_consistent(
 	struct drv_usb_configuration *configuration,
@@ -312,7 +320,7 @@ ncm_iad_consistent(
 	return 1;
 }
 
-/* Supports the ncm control descriptors operation. */
+/* Finds the class descriptors the control interface carries. */
 static int
 ncm_control_descriptors(
 	const struct drv_usb_host_interface *alternate,
@@ -396,7 +404,7 @@ ncm_control_descriptors(
 	       ncm == 1U;
 }
 
-/* Supports the ncm find notification operation. */
+/* Finds the interrupt endpoint notifications arrive on. */
 static int
 ncm_find_notification(
 	const struct drv_usb_host_interface *alternate,
@@ -430,7 +438,7 @@ ncm_find_notification(
 	return 1;
 }
 
-/* Supports the ncm find data alternate operation. */
+/* Finds the data setting that actually carries packets. */
 static int
 ncm_find_data_alternate(
 	struct drv_usb_interface *data,
@@ -516,7 +524,7 @@ ncm_find_data_alternate(
 	return empty_found && bulk_found;
 }
 
-/* Supports the ncm binding parse operation. */
+/* Reads everything this driver needs out of the interface. */
 static int
 ncm_binding_parse(
 	struct drv_usb_interface *control,
@@ -587,7 +595,7 @@ ncm_binding_parse(
 	return 1;
 }
 
-/* Supports the ncm hex operation. */
+/* Renders one hexadecimal character as its value. */
 static int
 ncm_hex(
 	unsigned char character)
@@ -608,7 +616,7 @@ ncm_hex(
 	return -1;
 }
 
-/* Supports the ncm get mac operation. */
+/* Reads the hardware address out of a string descriptor. */
 static int
 ncm_get_mac(
 	const struct ncm_binding *binding,
@@ -650,7 +658,7 @@ ncm_get_mac(
 	return 0;
 }
 
-/* Supports the ncm control operation. */
+/* Runs one class control request against the device. */
 static int
 ncm_control(
 	struct ncm_adapter *adapter,
@@ -673,7 +681,7 @@ ncm_control(
 	return error;
 }
 
-/* Supports the ncm program profile operation. */
+/* Tells the device the block sizes this driver will use. */
 static int
 ncm_program_profile(
 	struct ncm_adapter *adapter)
@@ -726,7 +734,7 @@ ncm_program_profile(
 	return 0;
 }
 
-/* Supports the ncm program packet filter operation. */
+/* Tells the device which packets to pass up. */
 static int
 ncm_program_packet_filter(
 	struct ncm_adapter *adapter)
@@ -784,7 +792,7 @@ ncm_program_packet_filter(
 	return 0;
 }
 
-/* Supports the ncm urb status error operation. */
+/* Renders a transfer status as the error it stands for. */
 static int
 ncm_urb_status_error(
 	enum drv_usb_urb_status status)
@@ -809,7 +817,7 @@ ncm_urb_status_error(
 	return EIO;
 }
 
-/* Supports the ncm tx status is error operation. */
+/* Asks whether a transmit status is one to report. */
 static int
 ncm_tx_status_is_error(
 	enum drv_usb_urb_status status)
@@ -820,7 +828,7 @@ ncm_tx_status_is_error(
 	       status == DRV_USB_URB_IO_ERROR;
 }
 
-/* Supports the ncm completion operation. */
+/* Takes one finished transfer. */
 static void
 ncm_completion(
 	struct drv_usb_urb *urb,
@@ -848,7 +856,7 @@ ncm_completion(
 	net_device_schedule_poll(adapter->net_device);
 }
 
-/* Supports the ncm start urb operation. */
+/* Puts one transfer back on its endpoint. */
 static int
 ncm_start_urb(
 	struct ncm_adapter *adapter,
@@ -895,7 +903,7 @@ ncm_start_urb(
 	return 0;
 }
 
-/* Supports the ncm cancel and drain operation. */
+/* Cancels a transfer and waits for it to leave. */
 static int
 ncm_cancel_and_drain(
 	struct drv_usb_urb *urb)
@@ -919,7 +927,7 @@ ncm_cancel_and_drain(
 	return error;
 }
 
-/* Supports the ncm wait activity operation. */
+/* Waits for everything this device has in flight to finish. */
 static void
 ncm_wait_activity(
 	struct ncm_adapter *adapter)
@@ -941,7 +949,7 @@ ncm_wait_activity(
 	}
 }
 
-/* Supports the ncm free rx queue operation. */
+/* Gives back the packets that were waiting to be delivered. */
 static void
 ncm_free_rx_queue(
 	struct ncm_adapter *adapter)
@@ -970,7 +978,7 @@ ncm_free_rx_queue(
 		packet_buf_free(packets[--count]);
 }
 
-/* Supports the ncm stop operation. */
+/* Stops the interface carrying traffic. */
 static int
 ncm_stop(
 	struct ncm_adapter *adapter)
@@ -1053,7 +1061,7 @@ ncm_stop(
 	return 0;
 }
 
-/* Supports the ncm open operation. */
+/* Brings the interface up and starts its transfers. */
 static int
 ncm_open(
 	struct net_device *device)
@@ -1110,7 +1118,7 @@ ncm_open(
 	return 0;
 }
 
-/* Supports the ncm close operation. */
+/* Takes the interface down. */
 static void
 ncm_close(
 	struct net_device *device)
@@ -1120,7 +1128,7 @@ ncm_close(
 	(void)ncm_stop(adapter);
 }
 
-/* Supports the ncm transmit operation. */
+/* Sends one packet, wrapped in the block format the device wants. */
 static int
 ncm_transmit(
 	struct net_device *device,
@@ -1208,7 +1216,7 @@ ncm_transmit(
 	return 0;
 }
 
-/* Supports the ncm queue datagram operation. */
+/* Puts one received packet on the delivery queue. */
 static int
 ncm_queue_datagram(
 	const void *frame,
@@ -1263,7 +1271,7 @@ ncm_queue_datagram(
 	return 0;
 }
 
-/* Supports the ncm notification process operation. */
+/* Takes one notification the device has sent. */
 static void
 ncm_notification_process(
 	struct ncm_adapter *adapter)
@@ -1313,7 +1321,7 @@ ncm_notification_process(
 	}
 }
 
-/* Supports the ncm rearm operation. */
+/* Puts the receive and notification transfers back on. */
 static int
 ncm_rearm(
 	struct ncm_adapter *adapter,
@@ -1400,7 +1408,7 @@ ncm_rearm(
 	return 0;
 }
 
-/* Supports the ncm deliver queued operation. */
+/* Hands the queued packets up to the network stack. */
 static unsigned
 ncm_deliver_queued(
 	struct ncm_adapter *adapter,
@@ -1433,7 +1441,7 @@ ncm_deliver_queued(
 	return delivered;
 }
 
-/* Supports the ncm poll enter operation. */
+/* Joins the gate that serializes polling. */
 static int
 ncm_poll_enter(
 	struct ncm_adapter *adapter)
@@ -1452,7 +1460,7 @@ ncm_poll_enter(
 	return admitted;
 }
 
-/* Supports the ncm poll exit operation. */
+/* Leaves that gate. */
 static void
 ncm_poll_exit(
 	struct ncm_adapter *adapter)
@@ -1467,7 +1475,7 @@ ncm_poll_exit(
 	spin_unlock_irqrestore(&adapter->lock, irq);
 }
 
-/* Supports the ncm take pending operation. */
+/* Takes whatever the poll has to deal with. */
 static int
 ncm_take_pending(
 	struct ncm_adapter *adapter,
@@ -1486,7 +1494,7 @@ ncm_take_pending(
 	return taken;
 }
 
-/* Supports the ncm restore pending operation. */
+/* Puts back what the poll could not deal with yet. */
 static void
 ncm_restore_pending(
 	struct ncm_adapter *adapter,
@@ -1499,7 +1507,7 @@ ncm_restore_pending(
 	spin_unlock_irqrestore(&adapter->lock, irq);
 }
 
-/* Supports the ncm take notification rearm operation. */
+/* Claims the right to re-arm the notification transfer. */
 static int
 ncm_take_notification_rearm(
 	struct ncm_adapter *adapter)
@@ -1520,7 +1528,7 @@ ncm_take_notification_rearm(
 	return taken;
 }
 
-/* Supports the ncm take rx rearm operation. */
+/* Claims the right to re-arm the receive transfer. */
 static int
 ncm_take_rx_rearm(
 	struct ncm_adapter *adapter)
@@ -1541,7 +1549,7 @@ ncm_take_rx_rearm(
 	return taken;
 }
 
-/* Supports the ncm poll tx completion operation. */
+/* Takes the transmit completion the poll found. */
 static int
 ncm_poll_tx_completion(
 	struct ncm_adapter *adapter)
@@ -1582,7 +1590,7 @@ ncm_poll_tx_completion(
 	return 1;
 }
 
-/* Supports the ncm poll notification completion operation. */
+/* Takes the notification completion the poll found. */
 static int
 ncm_poll_notification_completion(
 	struct ncm_adapter *adapter)
@@ -1607,7 +1615,7 @@ ncm_poll_notification_completion(
 	return 1;
 }
 
-/* Supports the ncm poll rx completion operation. */
+/* Takes the receive completion the poll found. */
 static int
 ncm_poll_rx_completion(
 	struct net_device *device,
@@ -1645,7 +1653,7 @@ ncm_poll_rx_completion(
 	return 1;
 }
 
-/* Supports the ncm has poll work operation. */
+/* Asks whether the poll has anything left to do. */
 static int
 ncm_has_poll_work(
 	struct ncm_adapter *adapter)
@@ -1666,7 +1674,7 @@ ncm_has_poll_work(
 	return pending;
 }
 
-/* Supports the ncm poll receive operation. */
+/* Serves one round of polling for this device. */
 static unsigned
 ncm_poll_receive(
 	struct net_device *device,
@@ -1763,7 +1771,7 @@ ncm_poll_receive(
 	return work;
 }
 
-/* Supports the ncm release operation. */
+/* Gives every resource this device held back. */
 static void
 ncm_release(
 	void *driver_data)
@@ -1771,7 +1779,7 @@ ncm_release(
 	hal_free(driver_data);
 }
 
-/* Supports the ncm set ready operation. */
+/* Marks the device as ready to carry traffic. */
 static void
 ncm_set_ready(
 	struct ncm_adapter *adapter,
@@ -1784,7 +1792,7 @@ ncm_set_ready(
 	spin_unlock_irqrestore(&adapter->lock, irq);
 }
 
-/* Supports the ncm urbs free operation. */
+/* Gives the transfers this device used back. */
 static void
 ncm_urbs_free(
 	struct ncm_adapter *adapter)
@@ -1797,7 +1805,7 @@ ncm_urbs_free(
 	adapter->notification_urb = NULL;
 }
 
-/* Supports the ncm urbs alloc operation. */
+/* Takes the transfers this device needs. */
 static int
 ncm_urbs_alloc(
 	struct ncm_adapter *adapter)
@@ -1821,7 +1829,7 @@ ncm_urbs_alloc(
 	return ENOMEM;
 }
 
-/* Supports the ncm buffers free operation. */
+/* Gives the buffers this device used back. */
 static void
 ncm_buffers_free(
 	struct ncm_adapter *adapter)
@@ -1834,7 +1842,7 @@ ncm_buffers_free(
 	adapter->notification_buffer = NULL;
 }
 
-/* Supports the ncm buffers alloc operation. */
+/* Takes the buffers this device needs. */
 static int
 ncm_buffers_alloc(
 	struct ncm_adapter *adapter)
@@ -1855,7 +1863,7 @@ ncm_buffers_alloc(
 	return ENOMEM;
 }
 
-/* Supports the ncm net device create operation. */
+/* Publishes this device as a network interface. */
 static int
 ncm_net_device_create(
 	struct ncm_adapter *adapter,
@@ -1904,7 +1912,7 @@ ncm_net_device_create(
 	return 0;
 }
 
-/* Supports the ncm attach operation. */
+/* Binds this driver to an interface the bus has matched. */
 static int
 ncm_attach(
 	struct drv_usb_interface *interface,
@@ -2031,7 +2039,7 @@ ncm_attach(
 	return 0;
 }
 
-/* Supports the ncm detach operation. */
+/* Gives that interface up and everything held for it. */
 static int
 ncm_detach(
 	struct drv_usb_interface *interface,
@@ -2082,7 +2090,7 @@ ncm_detach(
 	return 0;
 }
 
-/* Supports the ncm shutdown operation. */
+/* Takes the device out of service at system shutdown. */
 static void
 ncm_shutdown(
 	struct drv_usb_interface *interface)
@@ -2096,7 +2104,7 @@ ncm_shutdown(
 	}
 }
 
-/* Supports the ncm match operation. */
+/* Reports whether this driver can drive an interface. */
 static int
 ncm_match(
 	struct drv_usb_interface *interface,

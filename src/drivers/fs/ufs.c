@@ -492,9 +492,6 @@ int drv_ufs_snapshot_read(struct ufs_snapshot *snapshot, uint64_t first, uint32_
 int drv_ufs_snapshot_delete(struct ufs_snapshot *snapshot);
 int drv_ufs_super_decode(const void *buffer, size_t length, uint64_t sectors, struct ufs_super *super);
 
-/*
- * Forward declaration.
- */
 static int ufs_identify(struct disk *disk, struct block_identity *identity);
 static int ufs_writeback_range(struct file *file, off_t offset, size_t length);
 static int inode_size_values(const uint8_t *raw, const struct ufs_super *super, uint64_t *size, uint64_t *blocks);
@@ -1473,7 +1470,7 @@ drv_ufs_get64(
 }
 
 /*
- * Implements the drv ufs put16 operation.
+ * Writes a 16-bit field into a raw on-disk structure.
  */
 void
 drv_ufs_put16(
@@ -1495,7 +1492,7 @@ drv_ufs_put16(
 }
 
 /*
- * Implements the drv ufs put32 operation.
+ * Writes a 32-bit field into a raw on-disk structure.
  */
 void
 drv_ufs_put32(
@@ -1521,7 +1518,7 @@ drv_ufs_put32(
 }
 
 /*
- * Implements the drv ufs put64 operation.
+ * Writes a 64-bit field into a raw on-disk structure.
  */
 void
 drv_ufs_put64(
@@ -1714,7 +1711,7 @@ drv_ufs_journal_view_release(
 }
 
 /*
- * Implements the drv ufs snapshot init operation.
+ * Binds a snapshot to the area of the volume it lives in.
  */
 int
 drv_ufs_snapshot_init(
@@ -1768,7 +1765,7 @@ drv_ufs_snapshot_init(
 }
 
 /*
- * Implements the drv ufs snapshot open operation.
+ * Rebuilds a snapshot's map from what its area holds.
  */
 int
 drv_ufs_snapshot_open(
@@ -1933,7 +1930,7 @@ drv_ufs_snapshot_open(
 }
 
 /*
- * Implements the drv ufs snapshot create operation.
+ * Starts a snapshot, from which nothing is preserved yet.
  */
 int
 drv_ufs_snapshot_create(
@@ -1966,7 +1963,7 @@ drv_ufs_snapshot_create(
 }
 
 /*
- * Implements the drv ufs snapshot preserve operation.
+ * Copies sectors aside before a write overwrites them.
  */
 int
 drv_ufs_snapshot_preserve(
@@ -2071,7 +2068,7 @@ drv_ufs_snapshot_preserve(
 }
 
 /*
- * Implements the drv ufs snapshot read operation.
+ * Reads sectors as they stood when the snapshot was taken.
  */
 int
 drv_ufs_snapshot_read(
@@ -2130,7 +2127,7 @@ drv_ufs_snapshot_read(
 }
 
 /*
- * Implements the drv ufs snapshot delete operation.
+ * Ends a snapshot and lets its area be reused.
  */
 int
 drv_ufs_snapshot_delete(
@@ -2643,7 +2640,7 @@ observed_disk_read(
 	return error;
 }
 
-/* Supports the journal read operation. */
+/* Reads sectors of the journal through the mount's disk. */
 static int
 journal_read(
 	void *context,
@@ -2661,7 +2658,7 @@ journal_read(
 	return error;
 }
 
-/* Supports the journal write operation. */
+/* Writes sectors of the journal through the mount's disk. */
 static int
 journal_write(
 	void *context,
@@ -2691,7 +2688,7 @@ journal_write(
 	return bytes_written;
 }
 
-/* Supports the journal flush operation. */
+/* Makes the journal's own writes durable. */
 static int
 journal_flush(
 	void *context)
@@ -2706,7 +2703,7 @@ journal_flush(
 	return error;
 }
 
-/* Supports the locator get32 operation. */
+/* Reads a 32-bit field of a locator sector. */
 static uint32_t
 locator_get32(
 	const uint8_t *p)
@@ -2716,7 +2713,7 @@ locator_get32(
 		(uint32_t)p[3] << 24;
 }
 
-/* Supports the locator get64 operation. */
+/* Reads a 64-bit field of a locator sector. */
 static uint64_t
 locator_get64(
 	const uint8_t *p)
@@ -2731,7 +2728,7 @@ locator_get64(
 	return value;
 }
 
-/* Supports the locator digest operation. */
+/* Computes the checksum a locator sector carries. */
 static uint32_t
 locator_digest(
 	const uint8_t *p,
@@ -2883,7 +2880,7 @@ journal_image_free(
 	ms->journal.image_valid = 0;
 }
 
-/* Supports the journal discover operation. */
+/* Finds the journal a volume carries, and replays it. */
 static int
 journal_discover(
 	struct mount *mountp,
@@ -2981,7 +2978,7 @@ journal_discover(
 	return 0;
 }
 
-/* Supports the snapshot discover operation. */
+/* Finds the snapshot a volume carries, and opens it. */
 static int
 snapshot_discover(
 	struct mount *mountp,
@@ -3139,7 +3136,7 @@ snapshot_discover(
 	return 0;
 }
 
-/* Supports the write sectors impl operation. */
+/* Writes sectors, preserving what a snapshot still needs. */
 static int
 write_sectors_impl(
 	struct mount *mountp,
@@ -3243,7 +3240,7 @@ write_sectors_context(
 	return 0;
 }
 
-/* Supports the write sectors operation. */
+/* Writes sectors through the mount's own ordering context. */
 static int
 write_sectors(
 	struct mount *mountp,
@@ -3261,7 +3258,7 @@ write_sectors(
 	return error;
 }
 
-/* Supports the state operation. */
+/* Takes the private state this driver keeps beside a mount. */
 static struct ufs_mount_state *
 state(
 	const struct mount *mountp)
@@ -3274,7 +3271,7 @@ state(
 	return mountp->m_data;
 }
 
-/* Supports the info operation. */
+/* Takes the private inode this driver keeps beside a kernel one. */
 static struct ufs_inode_info *
 info(
 	const struct inode *inode)
@@ -3370,7 +3367,7 @@ read_metadata_sectors(
 	return 0;
 }
 
-/* Supports the read block operation. */
+/* Reads one file system block off the volume. */
 static int
 read_block(
 	struct mount *mountp,
@@ -3401,7 +3398,7 @@ read_block(
 	return error;
 }
 
-/* Supports the write block operation. */
+/* Writes one file system block to the volume. */
 static int
 write_block(
 	struct mount *mountp,
@@ -3450,7 +3447,7 @@ read_content_block(
 	return error;
 }
 
-/* Supports the write content block operation. */
+/* Writes one block of file content to the volume. */
 static int
 write_content_block(
 	struct mount *mountp,
@@ -3472,7 +3469,7 @@ write_content_block(
 	return error;
 }
 
-/* Supports the write content context operation. */
+/* Writes one block of content in the caller's ordering context. */
 static int
 write_content_context(
 	struct mount *mountp,
@@ -3502,7 +3499,7 @@ write_content_context(
 	return error;
 }
 
-/* Supports the bit test operation. */
+/* Asks whether one bit of a bitmap is set. */
 static int
 bit_test(
 	const uint8_t *map,
@@ -3512,7 +3509,7 @@ bit_test(
 	return (map[bit >> 3] & (uint8_t)(1U << (bit & 7U))) != 0;
 }
 
-/* Supports the bit set operation. */
+/* Sets one bit of a bitmap. */
 static void
 bit_set(
 	uint8_t *map,
@@ -3521,7 +3518,7 @@ bit_set(
 	map[bit >> 3] |= (uint8_t)(1U << (bit & 7U));
 }
 
-/* Supports the bit clear operation. */
+/* Clears one bit of a bitmap. */
 static void
 bit_clear(
 	uint8_t *map,
@@ -3530,7 +3527,7 @@ bit_clear(
 	map[bit >> 3] &= (uint8_t)~(1U << (bit & 7U));
 }
 
-/* Supports the cgstart operation. */
+/* Reports the fragment a cylinder group begins at. */
 static uint64_t
 cgstart(
 	const struct ufs_super *super,
@@ -3540,7 +3537,7 @@ cgstart(
 	return (uint64_t)cg * super->fpg + (uint64_t)super->cgoffset * (cg & ~super->cgmask);
 }
 
-/* Supports the cg ndblk operation. */
+/* Reports how many data fragments a cylinder group holds. */
 static uint32_t
 cg_ndblk(
 	const struct ufs_super *super,
@@ -3768,7 +3765,7 @@ cg_header_check(
 	return 0;
 }
 
-/* Supports the load cg locked operation. */
+/* Reads one cylinder group into the mount buffer and checks it. */
 static int
 load_cg_locked(
 	struct mount *mountp,
@@ -3845,7 +3842,7 @@ load_cg_locked(
 	return 0;
 }
 
-/* Supports the valid inode fragment operation. */
+/* Tests whether a pointer names a data block of this volume. */
 static int
 valid_inode_fragment(
 	const struct ufs_super *super,
@@ -3879,7 +3876,7 @@ valid_inode_fragment(
 	return 0;
 }
 
-/* Supports the prepare super summaries operation. */
+/* Builds the superblock image the volume totals are written in. */
 static int
 prepare_super_summaries(
 	struct mount *mountp,
@@ -4029,7 +4026,7 @@ write_cg_rollback(
 	return original_error;
 }
 
-/* Supports the adjust directory count operation. */
+/* Adds or takes one directory from the counts a group keeps. */
 static int
 adjust_directory_count(
 	struct mount *mountp,
@@ -4099,7 +4096,7 @@ adjust_directory_count(
 	return 0;
 }
 
-/* Supports the quota now operation. */
+/* Reports the current time as the quota records measure it. */
 static uint64_t
 quota_now(
 	void)
@@ -4117,7 +4114,7 @@ quota_now(
 	return 0;
 }
 
-/* Supports the allocate block compat operation. */
+/* Takes one block, charging it to an owner's quota. */
 static int
 allocate_block_compat(
 	struct mount *mountp,
@@ -4360,7 +4357,7 @@ allocate_block(
 	return 0;
 }
 
-/* Supports the free block operation. */
+/* Gives one block back, crediting its owner's quota. */
 static int
 free_block(
 	struct mount *mountp,
@@ -4483,7 +4480,7 @@ free_block(
 	return 0;
 }
 
-/* Supports the allocate inode number operation. */
+/* Takes one free inode number, charging it to an owner. */
 static int
 allocate_inode_number(
 	struct mount *mountp,
@@ -4596,7 +4593,7 @@ allocate_inode_number(
 	return 0;
 }
 
-/* Supports the free inode number operation. */
+/* Gives one inode number back, crediting its owner. */
 static int
 free_inode_number(
 	struct mount *mountp,
@@ -4745,7 +4742,7 @@ indirect_entry(
 	return 0;
 }
 
-/* Supports the bmap operation. */
+/* Turns a position in a file into the fragment holding it. */
 static int
 bmap(
 	struct inode *inode,
@@ -6550,6 +6547,7 @@ allocation_write_run(
 		error = write_cg(inode->i_mount);
 	}
 
+	/* Writes the content of the run out to the volume. */
 	if (error == 0) {
 		io_stats_record(IO_UFS_CONTENT_WRITE, bytes);
 		error = write_sectors_context(inode->i_mount,
@@ -7862,7 +7860,7 @@ pwrite_inode_context(
 	return -final_error;	/* Failed. */
 }
 
-/* Supports the indirect span operation. */
+/* Reports how many blocks one indirect level reaches over. */
 static uint64_t
 indirect_span(
 	const struct ufs_super *super,
@@ -8023,6 +8021,7 @@ release_group_locked(
 	for (n = 0; n < ms->super.frag; n++)
 		bit_set(group->cg + ms->cg_freeoff, local + n);
 
+	/* Gives the block back to the counts the group and volume keep. */
 	drv_ufs_put32(group->cg, UFS_CG_NBFREE, free_blocks + 1U, ms->super.swapped);
 	drv_ufs_put64(group->summaries, UFS_FS_CSTOTAL_NBFREE, ms->super.cstotal_nbfree + 1U, ms->super.swapped);
 	extents[0].target = (cgstart(&ms->super, cg) + ms->super.cblkno) << ms->super.fsbtodb;
@@ -8367,7 +8366,7 @@ out:
 	return 0;
 }
 
-/* Supports the ufs truncate operation. */
+/* Changes the size of a file. */
 static int
 ufs_truncate(
 	struct inode *inode,
@@ -8794,7 +8793,7 @@ decode_inode_raw(
 	return 0;
 }
 
-/* Supports the load inode locked operation. */
+/* Reads one inode off the volume, with the mount lock held. */
 static int
 load_inode_locked(
 	struct mount *mountp,
@@ -8929,7 +8928,7 @@ load_inode(
 	return 0;
 }
 
-/* Supports the next dirent operation. */
+/* Reads the directory record that follows a cursor. */
 static int
 next_dirent(
 	struct inode *directory,
@@ -9030,7 +9029,7 @@ next_dirent(
 	return ENOENT;
 }
 
-/* Supports the dir minimum operation. */
+/* Reports the smallest record that could hold a name that long. */
 static uint16_t
 dir_minimum(
 	uint8_t length)
@@ -9039,7 +9038,7 @@ dir_minimum(
 	return (uint16_t)((8U + length + 3U) & ~3U);
 }
 
-/* Supports the dir type operation. */
+/* Renders a file kind as the type byte a record stores. */
 static uint8_t
 dir_type(
 	enum inode_type type)
@@ -9073,7 +9072,7 @@ dir_type(
 	return encoded;
 }
 
-/* Supports the restore directory block operation. */
+/* Puts a directory block back the way a failed change found it. */
 static int
 restore_directory_block(
 	struct inode *directory,
@@ -9099,7 +9098,7 @@ restore_directory_block(
 	return original_error;
 }
 
-/* Supports the dir find record operation. */
+/* Looks through a directory block for the record of one name. */
 static int
 dir_find_record(
 	struct inode *directory,
@@ -9211,7 +9210,7 @@ dir_find_record(
 	return ENOENT;
 }
 
-/* Supports the dir add operation. */
+/* Adds one name to a directory. */
 static int
 dir_add(
 	struct inode *directory,
@@ -9239,13 +9238,13 @@ dir_add(
 	pos = 0;
 	allocated = 0;
 
-	/* Validates the current name. */
+	/* A name of nothing, or one longer than a record can hold. */
 	if (name->cn_namelen == 0 || name->cn_namelen > 255U)
 		return EINVAL;
 
 	/* Rejects a component that holds a byte no name may contain. */
 	for (pos = 0; pos < name->cn_namelen; pos++) {
-		/* Validates the current name. */
+		/* A separator is the one byte a component may not hold. */
 		if (name->cn_nameptr[pos] == '/')
 			return EINVAL;
 	}
@@ -9387,6 +9386,7 @@ commit:
 	if (error == 0)
 		error = persist_inode(directory);
 
+	/* A write that failed puts the directory back the way it was. */
 	if (error != 0) {
 		rollback = restore_directory_block(directory, ui->direct[0],
 						   original, error);
@@ -9462,7 +9462,7 @@ out:
 	return 0;
 }
 
-/* Supports the dir remove operation. */
+/* Takes one name out of a directory. */
 static int
 dir_remove(
 	struct inode *directory,
@@ -9545,7 +9545,7 @@ dir_remove(
 	return 0;
 }
 
-/* Supports the dir replace operation. */
+/* Points one name at another inode. */
 static int
 dir_replace(
 	struct inode *directory,
@@ -9619,7 +9619,7 @@ dir_replace(
 	return 0;
 }
 
-/* Supports the name is dot operation. */
+/* Tests whether a name is the directory itself or its parent. */
 static int
 name_is_dot(
 	const struct componentname *name)
@@ -9630,7 +9630,7 @@ name_is_dot(
 		 name->cn_nameptr[1] == '.');
 }
 
-/* Supports the detach new socket special operation. */
+/* Takes the socket a half-made inode still holds. */
 static void
 detach_new_socket_special(
 	struct inode *inode)
@@ -9655,7 +9655,7 @@ detach_new_socket_special(
 	mutex_unlock(&inode->i_lock);
 }
 
-/* Supports the discard new inode operation. */
+/* Undoes a creation that could not be finished. */
 static int
 discard_new_inode(
 	struct inode *inode,
@@ -9813,7 +9813,7 @@ discard_new_inode(
 	return 0;
 }
 
-/* Supports the discard new inode after error operation. */
+/* Undoes a creation and reports the error that caused it. */
 static int
 discard_new_inode_after_error(
 	struct inode *inode,
@@ -9933,7 +9933,6 @@ reserve_inode_locked(
 	if (is_directory && (directories == UINT32_MAX ||
 			     ms->super.cstotal_ndir == UINT64_MAX))
 		return EIO;	/* Failed. */
-
 
 	/*
 	 * Initializes all persistent ownership fields before making the slot
@@ -10290,7 +10289,7 @@ new_inode(
 	return 0;
 }
 
-/* Supports the ufs lookup locked operation. */
+/* Resolves one name under a directory, with the mount lock held. */
 static int
 ufs_lookup_locked(
 	struct inode *directory,
@@ -10341,7 +10340,7 @@ ufs_lookup_locked(
 	return 0;
 }
 
-/* Supports the ufs lookup operation. */
+/* Resolves one name under a directory. */
 static int
 ufs_lookup(
 	struct inode *directory,
@@ -10669,7 +10668,7 @@ directory_image_insert(
 
 	/* Rejects a component that holds a byte no name may contain. */
 	for (n = 0; n < name->cn_namelen; n++) {
-		/* Validates the current name. */
+		/* A separator is the one byte a component may not hold. */
 		if (name->cn_nameptr[n] == '/')
 			return EINVAL;
 	}
@@ -11431,6 +11430,7 @@ rename_group(
 	for (n = 0; n < lock_count; n++)
 		mutex_lock(&locks[n]->i_lock);
 
+	/* Renames the name with every inode of the rename held. */
 	mutex_lock(&ms->lock);
 	error = rename_group_locked(old_directory,
 				    old_name,
@@ -11833,7 +11833,7 @@ out:
 	return 0;
 }
 
-/* Supports the ufs mkdir operation. */
+/* Creates a directory. */
 static int
 ufs_mkdir(
 	struct inode *directory,
@@ -11932,6 +11932,7 @@ ufs_mkdir(
 			if (removed != (uint32_t)inode->i_ino)
 				rollback_error = EIO;
 
+			/* Puts the parent's link count back as well. */
 			mutex_lock(&directory->i_lock);
 			directory->i_linkcount = old_directory_links;
 			if (rollback_error == 0)
@@ -11972,7 +11973,7 @@ out:
 	return 0;
 }
 
-/* Supports the ufs mknod operation. */
+/* Creates a device, socket or named pipe. */
 static int
 ufs_mknod(
 	struct inode *directory,
@@ -12052,7 +12053,7 @@ out:
 	return 0;
 }
 
-/* Supports the ufs unlink operation. */
+/* Removes a name that does not belong to a directory. */
 static int
 ufs_unlink(
 	struct inode *directory,
@@ -12153,7 +12154,7 @@ out:
 	return 0;
 }
 
-/* Supports the directory empty operation. */
+/* Asks whether a directory holds anything but dot and dot-dot. */
 static int
 directory_empty(
 	struct inode *directory)
@@ -12192,7 +12193,7 @@ directory_empty(
 	return -error;
 }
 
-/* Supports the ufs rmdir operation. */
+/* Removes an empty directory. */
 static int
 ufs_rmdir(
 	struct inode *directory,
@@ -12291,6 +12292,7 @@ ufs_rmdir(
 		mutex_unlock(&directory->i_lock);
 	}
 
+	/* A removal that failed puts both inodes and the name back. */
 	if (error != 0 && removed) {
 		mutex_lock(&target->i_lock);
 		target->i_linkcount = old_target_links;
@@ -12321,7 +12323,7 @@ out:
 	return 0;
 }
 
-/* Supports the ufs rename operation. */
+/* Renames or moves a name. */
 static int
 ufs_rename(
 	struct inode *old_directory,
@@ -12708,7 +12710,7 @@ out:
 	return 0;
 }
 
-/* Supports the ufs link operation. */
+/* Adds a second name for an inode that already has one. */
 static int
 ufs_link(
 	struct inode *directory,
@@ -12804,7 +12806,7 @@ out:
 	return 0;
 }
 
-/* Supports the ufs symlink operation. */
+/* Creates a symbolic link. */
 static int
 ufs_symlink(
 	struct inode *directory,
@@ -12883,7 +12885,7 @@ out:
 	return 0;
 }
 
-/* Supports the pwrite inode operation. */
+/* Writes at a position of an inode's own content. */
 static ssize_t
 pwrite_inode(
 	struct inode *inode,
@@ -12900,7 +12902,7 @@ pwrite_inode(
 	return written;
 }
 
-/* Supports the ufs read operation. */
+/* Reads at the file position and advances it. */
 static ssize_t
 ufs_read(
 	struct file *file,
@@ -12919,7 +12921,7 @@ ufs_read(
 	return n;
 }
 
-/* Supports the ufs pread operation. */
+/* Reads at a position, without moving the file position. */
 static ssize_t
 ufs_pread(
 	struct file *file,
@@ -12936,7 +12938,7 @@ ufs_pread(
 	return read_bytes;
 }
 
-/* Supports the ufs write operation. */
+/* Writes at the file position and advances it. */
 static ssize_t
 ufs_write(
 	struct file *file,
@@ -12955,7 +12957,7 @@ ufs_write(
 	return n;
 }
 
-/* Supports the ufs pwrite operation. */
+/* Writes at a position, without moving the file position. */
 static ssize_t
 ufs_pwrite(
 	struct file *file,
@@ -12972,7 +12974,7 @@ ufs_pwrite(
 	return written;
 }
 
-/* Supports the ufs pwrite context operation. */
+/* Writes at a position in the caller's ordering context. */
 static ssize_t
 ufs_pwrite_context(
 	struct file *file,
@@ -13005,7 +13007,7 @@ ufs_pwrite_context(
 	return written;
 }
 
-/* Supports the ufs readdir operation. */
+/* Reads the next directory entry. */
 static int
 ufs_readdir(
 	struct file *file,
@@ -13033,14 +13035,33 @@ ufs_readdir(
 	if (error)
 		return error;
 
+	/* Renders the record as the entry the caller reads. */
 	memset(entry, 0, sizeof(*entry));
 	entry->d_ino = number;
-	entry->d_type = type == 1    ? INODE_FIFO
-		: type == 4  ? INODE_DIR
-		: type == 8  ? INODE_REG
-		: type == 10 ? INODE_SYMLINK
-		: type == 12 ? INODE_SOCKET
-		: INODE_NONE;
+
+	/* The type byte of a record has its own encoding. */
+	switch (type) {
+	case 1:
+		entry->d_type = INODE_FIFO;
+		break;
+	case 4:
+		entry->d_type = INODE_DIR;
+		break;
+	case 8:
+		entry->d_type = INODE_REG;
+		break;
+	case 10:
+		entry->d_type = INODE_SYMLINK;
+		break;
+	case 12:
+		entry->d_type = INODE_SOCKET;
+		break;
+	default:
+		/* A kind this record encoding has no number for. */
+		entry->d_type = INODE_NONE;
+		break;
+	}
+
 	strcpy(entry->d_name, name);
 	*eof = 0;
 
@@ -13048,7 +13069,7 @@ ufs_readdir(
 	return 0;
 }
 
-/* Supports the ufs readlink operation. */
+/* Reads the target a symbolic link names. */
 static ssize_t
 ufs_readlink(
 	struct inode *inode,
@@ -13086,7 +13107,7 @@ ufs_readlink(
 	return read_bytes;
 }
 
-/* Supports the extattr align operation. */
+/* Rounds a length up to the boundary a record starts on. */
 static size_t
 extattr_align(
 	size_t value)
@@ -13095,7 +13116,7 @@ extattr_align(
 	return (value + 7U) & ~(size_t)7U;
 }
 
-/* Supports the extattr name operation. */
+/* Splits an attribute name into its namespace and the rest. */
 static int
 extattr_name(
 	const char *name,
@@ -13152,7 +13173,7 @@ extattr_name(
 	return 0;
 }
 
-/* Supports the extattr load operation. */
+/* Reads and validates the whole attribute area of an inode. */
 static int
 extattr_load(
 	struct inode *inode,
@@ -13258,7 +13279,7 @@ invalid:
 	return EIO;
 }
 
-/* Supports the extattr find operation. */
+/* Finds one attribute record inside a loaded area. */
 static int
 extattr_find(
 	struct inode *inode,
@@ -13329,7 +13350,7 @@ extattr_find(
 	return ENODATA;
 }
 
-/* Supports the extattr publish operation. */
+/* Writes a new attribute area, moving blocks as that needs. */
 static int
 extattr_publish(
 	struct inode *inode,
@@ -13587,7 +13608,7 @@ out:
 	return 0;
 }
 
-/* Supports the ufs getxattr operation. */
+/* Reads the value of one extended attribute. */
 static ssize_t
 ufs_getxattr(
 	struct inode *inode,
@@ -13637,7 +13658,7 @@ ufs_getxattr(
 	return (ssize_t)content_length;
 }
 
-/* Supports the ufs setxattr operation. */
+/* Writes, adds or replaces one extended attribute. */
 static int
 ufs_setxattr(
 	struct inode *inode,
@@ -13767,7 +13788,7 @@ out:
 	return 0;
 }
 
-/* Supports the ufs listxattr operation. */
+/* Reports the names of every attribute an inode carries. */
 static ssize_t
 ufs_listxattr(
 	struct inode *inode,
@@ -13863,7 +13884,7 @@ out:
 	return (ssize_t)needed;
 }
 
-/* Supports the ufs removexattr operation. */
+/* Takes one extended attribute away. */
 static int
 ufs_removexattr(
 	struct inode *inode,
@@ -13943,7 +13964,7 @@ out:
 	return 0;
 }
 
-/* Supports the ufs getattr operation. */
+/* Reports what a caller may know about an inode. */
 static int
 ufs_getattr(
 	struct inode *inode,
@@ -13974,7 +13995,7 @@ ufs_getattr(
 	return 0;
 }
 
-/* Supports the valid disk time operation. */
+/* Tests whether a time is one the on-disk format can hold. */
 static int
 valid_disk_time(
 	time_t seconds,
@@ -13994,7 +14015,7 @@ valid_disk_time(
 	return 1;
 }
 
-/* Supports the ufs setattr operation. */
+/* Changes the mode, owner or times of an inode. */
 static int
 ufs_setattr(
 	struct inode *inode,
@@ -14154,6 +14175,7 @@ ufs_setattr(
 		if (quota_moved)
 			quota_transfer_rollback(&quota_transfer_state);
 
+		/* A change that failed puts every field back as it was. */
 		inode->i_mode = old_mode;
 		inode->i_uid = old_uid;
 		inode->i_gid = old_gid;
@@ -14174,7 +14196,7 @@ ufs_setattr(
 	return 0;
 }
 
-/* Supports the ufs inode sync operation. */
+/* Writes one inode back to the volume. */
 static int
 ufs_inode_sync(
 	struct inode *inode)
@@ -14660,6 +14682,7 @@ creation_unlink_group(
 	else
 		error = EROFS;
 
+	/* Publishes the emptied inode as one group of its own. */
 	if (error == 0) {
 		extent.target = fragment << ms->super.fsbtodb;
 		extent.sectors = ms->super.bsize / UFS_SECTOR_SIZE;
@@ -14735,7 +14758,7 @@ discard_reserved_inode(
 	return 0;
 }
 
-/* Supports the ufs file sync operation. */
+/* Makes everything a file has written durable. */
 static int
 ufs_file_sync(
 	struct file *file)
@@ -14758,7 +14781,7 @@ ufs_file_sync(
 	return synced;
 }
 
-/* Supports the ufs alloc inode operation. */
+/* Takes one of the driver's fixed inode slots. */
 static struct inode *
 ufs_alloc_inode(
 	struct mount *mountp)
@@ -14775,7 +14798,7 @@ ufs_alloc_inode(
 	return allocated;
 }
 
-/* Supports the ufs free inode operation. */
+/* Gives an inode slot back. */
 static void
 ufs_free_inode(
 	struct inode *inode)
@@ -14783,7 +14806,7 @@ ufs_free_inode(
 	kern_free(inode);
 }
 
-/* Supports the ufs read super operation. */
+/* Reads and decodes the superblock of a volume. */
 static int
 ufs_read_super(
 	struct disk *disk,
@@ -14819,7 +14842,7 @@ ufs_read_super(
 	return 0;
 }
 
-/* Supports the ufs identity hex operation. */
+/* Renders one nibble as a hexadecimal character. */
 static char
 ufs_identity_hex(
 	unsigned value)
@@ -14832,7 +14855,7 @@ ufs_identity_hex(
 	return (char)('A' + value - 10U);
 }
 
-/* Supports the ufs identity hex32 operation. */
+/* Renders a 32-bit value as eight hexadecimal characters. */
 static void
 ufs_identity_hex32(
 	char output[8],
@@ -14846,7 +14869,7 @@ ufs_identity_hex32(
 	}
 }
 
-/* Supports the ufs identity label operation. */
+/* Copies a volume label out, replacing what it cannot show. */
 static void
 ufs_identity_label(
 	char *output,
@@ -14877,7 +14900,7 @@ ufs_identity_label(
 	output[end] = '\0';
 }
 
-/* Supports the ufs write clean operation. */
+/* Marks the volume clean or dirty in its superblock. */
 static int
 ufs_write_clean(
 	struct mount *mountp,
@@ -14931,7 +14954,7 @@ ufs_write_clean(
 	return 0;
 }
 
-/* Supports the ufs probe operation. */
+/* Asks whether a disk carries a volume this driver can mount. */
 static int
 ufs_probe(
 	struct disk *disk)
@@ -14946,7 +14969,7 @@ ufs_probe(
 	return error;
 }
 
-/* Supports the ufs quota rebuild operation. */
+/* Counts every inode's usage to rebuild the quota records. */
 static int
 ufs_quota_rebuild(
 	struct mount *mountp)
@@ -15034,7 +15057,7 @@ ufs_quota_rebuild(
 	return 0;
 }
 
-/* Supports the ufs quota load operation. */
+/* Reads the quota configuration the root inode carries. */
 static int
 ufs_quota_load(
 	struct mount *mountp,
@@ -15089,7 +15112,7 @@ ufs_quota_load(
 	return 0;
 }
 
-/* Supports the snapshot disk submit operation. */
+/* Serves one request against the snapshot's own disk. */
 static int
 snapshot_disk_submit(
 	struct disk *disk,
@@ -15132,7 +15155,7 @@ snapshot_disk_submit(
 	return 0;
 }
 
-/* Supports the snapshot disk publish operation. */
+/* Publishes the snapshot as a read-only disk of its own. */
 static int
 snapshot_disk_publish(
 	struct ufs_mount_state *ms)
@@ -15198,7 +15221,7 @@ snapshot_disk_publish(
 	return ENOSPC;
 }
 
-/* Supports the snapshot disk remove operation. */
+/* Takes that snapshot disk back out of service. */
 static int
 snapshot_disk_remove(
 	struct ufs_mount_state *ms)
@@ -15228,7 +15251,7 @@ snapshot_disk_remove(
 	return 0;
 }
 
-/* Supports the ufs state free operation. */
+/* Gives a mount's private state and everything it holds back. */
 static void
 ufs_state_free(
 	struct ufs_mount_state *ms)
@@ -15244,7 +15267,7 @@ ufs_state_free(
 	kern_free(ms);
 }
 
-/* Supports the ufs quota persist operation. */
+/* Writes the quota records back to the volume. */
 static int
 ufs_quota_persist(
 	struct mount *mountp)
@@ -15832,7 +15855,7 @@ ufs_sync(
 	return 0;
 }
 
-/* Supports the ufs statvfs operation. */
+/* Reports how much of the volume is used and how much is free. */
 static int
 ufs_statvfs(
 	struct mount *mountp,
@@ -15872,7 +15895,7 @@ ufs_statvfs(
 	return 0;
 }
 
-/* Supports the ufs quotactl operation. */
+/* Serves one quota request against this mount. */
 static int
 ufs_quotactl(
 	struct mount *mountp,
@@ -16030,7 +16053,7 @@ ufs_quotactl(
 	return 0;
 }
 
-/* Supports the ufs snapshotctl operation. */
+/* Serves one snapshot request against this mount. */
 static int
 ufs_snapshotctl(
 	struct mount *mountp,
@@ -16126,7 +16149,7 @@ ufs_snapshotctl(
 	return 0;
 }
 
-/* Supports the ufs prepare unmount operation. */
+/* Refuses an unmount the volume is not ready for. */
 static int
 ufs_prepare_unmount(
 	struct mount *mountp)
@@ -16150,7 +16173,7 @@ ufs_prepare_unmount(
 	return error;
 }
 
-/* Supports the ufs unmount operation. */
+/* Takes a mount out of service and gives its state back. */
 static void
 ufs_unmount(
 	struct mount *mountp)
@@ -16224,7 +16247,7 @@ ufs_writeback_range(
 	return 1;
 }
 
-/* Supports the checksum operation. */
+/* Computes the checksum a journal record carries. */
 static uint32_t
 checksum(
 	const void *buffer,
@@ -16244,7 +16267,7 @@ checksum(
 	return value;
 }
 
-/* Supports the put32 operation. */
+/* Writes a 32-bit field of a journal record. */
 static void
 put32(
 	uint8_t *p,
@@ -16256,7 +16279,7 @@ put32(
 	p[3] = (uint8_t)(v >> 24);
 }
 
-/* Supports the put64 operation. */
+/* Writes a 64-bit field of a journal record. */
 static void
 put64(
 	uint8_t *p,
@@ -16266,7 +16289,7 @@ put64(
 	put32(p + 4, (uint32_t)(v >> 32));
 }
 
-/* Supports the get32 operation. */
+/* Reads a 32-bit field of a journal record. */
 static uint32_t
 get32(
 	const uint8_t *p)
@@ -16276,7 +16299,7 @@ get32(
 		(uint32_t)p[3] << 24;
 }
 
-/* Supports the get64 operation. */
+/* Reads a 64-bit field of a journal record. */
 static uint64_t
 get64(
 	const uint8_t *p)
@@ -16290,7 +16313,7 @@ get64(
 	return value;
 }
 
-/* Supports the clear record operation. */
+/* Blanks one sector of the journal. */
 static int
 clear_record(
 	struct ufs_journal *journal,
@@ -16901,7 +16924,7 @@ snapshot_put32(
 	p[3] = (uint8_t)(v >> 24);
 }
 
-/* Supports the snapshot put64 operation. */
+/* Writes a 64-bit field of a snapshot record. */
 static void
 snapshot_put64(
 	uint8_t *p,
@@ -16911,7 +16934,7 @@ snapshot_put64(
 	snapshot_put32(p + 4, (uint32_t)(v >> 32));
 }
 
-/* Supports the snapshot get32 operation. */
+/* Reads a 32-bit field of a snapshot record. */
 static uint32_t
 snapshot_get32(
 	const uint8_t *p)
@@ -16921,7 +16944,7 @@ snapshot_get32(
 		(uint32_t)p[3] << 24;
 }
 
-/* Supports the snapshot get64 operation. */
+/* Reads a 64-bit field of a snapshot record. */
 static uint64_t
 snapshot_get64(
 	const uint8_t *p)
@@ -16936,7 +16959,7 @@ snapshot_get64(
 	return value;
 }
 
-/* Supports the digest operation. */
+/* Computes the checksum a snapshot record carries. */
 static uint32_t
 digest(
 	const void *buffer,
@@ -16956,7 +16979,7 @@ digest(
 	return value;
 }
 
-/* Supports the hash sector operation. */
+/* Reports which map slot a volume sector hashes to. */
 static size_t
 hash_sector(
 	uint64_t sector,
@@ -16970,7 +16993,7 @@ hash_sector(
 	return (size_t)(sector % count);
 }
 
-/* Supports the map find operation. */
+/* Finds, or makes, the map entry that stands for one sector. */
 static struct ufs_snapshot_entry *
 map_find(
 	struct ufs_snapshot *snapshot,
@@ -17010,7 +17033,7 @@ map_find(
 	return NULL;
 }
 
-/* Supports the map clear operation. */
+/* Empties the map of preserved sectors. */
 static void
 map_clear(
 	struct ufs_snapshot *snapshot)
@@ -17024,7 +17047,7 @@ map_clear(
 	}
 }
 
-/* Supports the write control operation. */
+/* Writes the control sector that describes a snapshot. */
 static int
 write_control(
 	struct ufs_snapshot *snapshot,
@@ -17067,7 +17090,7 @@ write_control(
 	return 0;
 }
 
-/* Supports the power2 operation. */
+/* Tests whether a value is a power of two. */
 static int
 power2(
 	uint32_t value)

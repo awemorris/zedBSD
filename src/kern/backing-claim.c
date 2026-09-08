@@ -98,9 +98,6 @@ extern int drv_fat_file_backing_identity(struct inode *, struct disk **, uint64_
  */
 static const unsigned char early_boot_execution_token;
 
-/*
- * Forward declarations.
- */
 static const void *current_execution(void);
 static int canonical_range(struct disk *disk, uint64_t block, uint64_t count, struct backing_range *result);
 static int inode_key(struct inode *inode, struct backing_object_key *key);

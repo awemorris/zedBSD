@@ -1,33 +1,24 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* Big-endian Sun disklabel partition scanner. */
+/*
+ * Big-endian Sun disklabel partition scanner.
+ */
+
 #include <drivers/disklabel.h>
 
+static int scan(const struct partition_scheme *s, struct disk *d, struct partition *e, unsigned capacity);
 static uint16_t be16(const uint8_t *p);
 static uint32_t be32(const uint8_t *p);
-static int scan(const struct partition_scheme *s, struct disk *d, struct partition *e, unsigned capacity);
 
-const struct partition_scheme drv_partition_scheme_sun = {.name = "sun",
-							  .scan = scan};
-
-/* Supports the be16 operation. */
-static uint16_t
-be16(
-	const uint8_t *p)
-{
-	/* Returns the computed result. */
-	return (uint16_t)((uint16_t)p[0] << 8 | p[1]);
-}
-
-/* Supports the be32 operation. */
-static uint32_t
-be32(
-	const uint8_t *p)
-{
-	/* Returns the computed result. */
-	return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 |
-	       (uint32_t)p[2] << 8 | p[3];
-}
+const struct partition_scheme drv_partition_scheme_sun = {
+	.name = "sun",
+	.scan = scan
+};
 
 /* Supports the scan operation. */
 static int
@@ -97,4 +88,23 @@ scan(
 
 	/* Returns the computed result. */
 	return (int)count;
+}
+
+/* Supports the be16 operation. */
+static uint16_t
+be16(
+	const uint8_t *p)
+{
+	/* Returns the computed result. */
+	return (uint16_t)((uint16_t)p[0] << 8 | p[1]);
+}
+
+/* Supports the be32 operation. */
+static uint32_t
+be32(
+	const uint8_t *p)
+{
+	/* Returns the computed result. */
+	return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 |
+	       (uint32_t)p[2] << 8 | p[3];
 }

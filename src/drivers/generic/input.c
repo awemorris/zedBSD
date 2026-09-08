@@ -1,415 +1,15 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
-/* Begin consolidated input-capability.c. */
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * /dev/input/eventN evdev
  */
 
 #include "kern/input-capability.h"
-
-#include <errno.h>
-#include <string.h>
-
-/* Supports the bit test operation. */
-static int bit_test(const unsigned long *bits, unsigned bit);
-
-/* Supports the bit test operation. */
-static int
-bit_test(
-	const unsigned long *bits,
-	unsigned bit)
-{
-	/* Returns the computed result. */
-	return (bits[bit / INPUT_BITS_PER_WORD] &
-		(1UL << (bit % INPUT_BITS_PER_WORD))) != 0;
-}
-
-/* Supports the bit set operation. */
-static void bit_set(unsigned long *bits, unsigned bit);
-
-/* Supports the bit set operation. */
-static void
-bit_set(
-	unsigned long *bits,
-	unsigned bit)
-{
-	bits[bit / INPUT_BITS_PER_WORD] |= 1UL << (bit % INPUT_BITS_PER_WORD);
-}
-
-/* Supports the bit clear operation. */
-static void bit_clear(unsigned long *bits, unsigned bit);
-
-/* Supports the bit clear operation. */
-static void
-bit_clear(
-	unsigned long *bits,
-	unsigned bit)
-{
-	bits[bit / INPUT_BITS_PER_WORD] &=
-		~(1UL << (bit % INPUT_BITS_PER_WORD));
-}
-
-/* Supports the capability bits mutable operation. */
-static int capability_bits_mutable(struct input_capability_state *state, unsigned type, unsigned long **bits, size_t *size);
-
-/* Supports the capability bits mutable operation. */
-static int
-capability_bits_mutable(
-	struct input_capability_state *state,
-	unsigned type,
-	unsigned long **bits,
-	size_t *size)
-{
-	/* Handles the state availability. */
-	if (state == NULL || bits == NULL || size == NULL)
-		return EINVAL;
-	/* Dispatch the selected syntax or record type. */
-	switch (type) {
-	case EV_KEY:
-		*bits = state->key_bits;
-		*size = sizeof(state->key_bits);
-		/* Succeeded. */
-		return 0;
-	case EV_REL:
-		*bits = state->rel_bits;
-		*size = sizeof(state->rel_bits);
-		/* Succeeded. */
-		return 0;
-	case EV_ABS:
-		*bits = state->abs_bits;
-		*size = sizeof(state->abs_bits);
-		/* Succeeded. */
-		return 0;
-	default:
-		/* Failed. */
-		return EINVAL;
-	}
-}
-
-/* Supports the capability code valid operation. */
-static int capability_code_valid(unsigned type, unsigned code);
-
-/* Supports the capability code valid operation. */
-static int
-capability_code_valid(
-	unsigned type,
-	unsigned code)
-{
-	/* Dispatch the selected syntax or record type. */
-	switch (type) {
-	case EV_SYN:
-		/* Returns the computed result. */
-		return code == SYN_REPORT;
-	case EV_KEY:
-		/* Returns the computed result. */
-		return code <= KEY_MAX;
-	case EV_REL:
-		/* Returns the computed result. */
-		return code <= REL_MAX;
-	case EV_ABS:
-		/* Returns the computed result. */
-		return code <= ABS_MAX;
-	default:
-		/* Succeeded. */
-		return 0;
-	}
-}
-
-/*
- * Implements the drv input capability state init operation.
- */
-/*
- * Implements the drv input capability state init operation.
- */
-int
-drv_input_capability_state_init(
-	struct input_capability_state *state,
-	const struct input_capability *capabilities,
-	size_t capability_count,
-	const struct input_abs_axis *absolute_axes,
-	size_t absolute_axis_count)
-{
-	const struct input_capability *capability;
-	unsigned long *bits;
-	size_t size;
-	const struct input_abs_axis *axis;
-	const struct input_absinfo *info;
-	size_t i;
-
-	/* Handles the state availability. */
-	if (state == NULL || (capability_count != 0 && capabilities == NULL) ||
-	    (absolute_axis_count != 0 && absolute_axes == NULL) ||
-	    capability_count > INPUT_CAPABILITY_COUNT_MAX ||
-	    absolute_axis_count > ABS_MAX + 1U) {
-		/* Failed. */
-		return EINVAL;
-	}
-	memset(state, 0, sizeof(*state));
-	/* Process each remaining element. */
-	for (i = 0; i < capability_count; i++) {
-		/* Checks the capability code valid result. */
-		capability = &capabilities[i];
-		if (!capability_code_valid(capability->type, capability->code))
-			return EINVAL;
-
-		/* Handles the capability condition. */
-		if (capability->type == EV_SYN) {
-			/* Checks the bit test result. */
-			if (bit_test(state->event_bits, EV_SYN))
-				return EINVAL;
-			bit_set(state->event_bits, EV_SYN);
-			continue;
-		}
-
-		/* Checks the capability bits mutable result. */
-		if (capability_bits_mutable(state, capability->type, &bits,
-					    &size) != 0 ||
-		    capability->code >= size * 8U ||
-		    bit_test(bits, capability->code)) {
-			/* Failed. */
-			return EINVAL;
-		}
-		bit_set(state->event_bits, capability->type);
-		bit_set(bits, capability->code);
-	}
-
-	/* Process each remaining element. */
-	for (i = 0; i < absolute_axis_count; i++) {
-		axis = &absolute_axes[i];
-
-		/* Checks the bit test result. */
-		info = &axis->info;
-		if (axis->code > ABS_MAX ||
-		    !bit_test(state->abs_bits, axis->code) ||
-		    bit_test(state->abs_configured, axis->code) ||
-		    info->minimum > info->maximum ||
-		    info->value < info->minimum ||
-		    info->value > info->maximum || info->fuzz < 0 ||
-		    info->flat < 0 || info->resolution < 0) {
-			/* Failed. */
-			return EINVAL;
-		}
-		state->abs_info[axis->code] = *info;
-		bit_set(state->abs_configured, axis->code);
-	}
-
-	/* Process each element required by the operation. */
-	for (i = 0; i <= ABS_MAX; i++) {
-		/* Checks the bit test result. */
-		if (bit_test(state->abs_bits, (unsigned)i) &&
-		    !bit_test(state->abs_configured, (unsigned)i)) {
-			/* Failed. */
-			return EINVAL;
-		}
-	}
-
-	/* Checks the bit test result. */
-	if (!bit_test(state->event_bits, EV_SYN))
-		return EINVAL;
-
-	/* Succeeded. */
-	return 0;
-}
-
-/*
- * Implements the drv input capability bits operation.
- */
-/*
- * Implements the drv input capability bits operation.
- */
-int
-drv_input_capability_bits(
-	const struct input_capability_state *state,
-	unsigned type,
-	const uint8_t **bits,
-	size_t *size)
-{
-	/* Handles the state availability. */
-	if (state == NULL || bits == NULL || size == NULL)
-		return EINVAL;
-
-	/* Handles the type condition. */
-	if (type == EV_SYN) {
-		*bits = (const uint8_t *)state->event_bits;
-		*size = sizeof(state->event_bits);
-		/* Succeeded. */
-		return 0;
-	}
-
-	/* Dispatch the selected syntax or record type. */
-	switch (type) {
-	case EV_KEY:
-		*bits = (const uint8_t *)state->key_bits;
-		*size = sizeof(state->key_bits);
-		/* Succeeded. */
-		return 0;
-	case EV_REL:
-		*bits = (const uint8_t *)state->rel_bits;
-		*size = sizeof(state->rel_bits);
-		/* Succeeded. */
-		return 0;
-	case EV_ABS:
-		*bits = (const uint8_t *)state->abs_bits;
-		*size = sizeof(state->abs_bits);
-		/* Succeeded. */
-		return 0;
-	default:
-		/* Failed. */
-		return EINVAL;
-	}
-}
-
-/*
- * Implements the drv input capability key state operation.
- */
-/*
- * Implements the drv input capability key state operation.
- */
-int
-drv_input_capability_key_state(
-	const struct input_capability_state *state,
-	const uint8_t **bits,
-	size_t *size)
-{
-	/* Handles the state availability. */
-	if (state == NULL || bits == NULL || size == NULL)
-		return EINVAL;
-	*bits = (const uint8_t *)state->key_state;
-	*size = sizeof(state->key_state);
-	/* Succeeded. */
-	return 0;
-}
-
-/*
- * Implements the drv input capability copy operation.
- */
-/*
- * Implements the drv input capability copy operation.
- */
-int
-drv_input_capability_copy(
-	const uint8_t *source,
-	size_t source_size,
-	size_t offset,
-	uint8_t *destination,
-	size_t capacity)
-{
-	size_t index;
-	size_t i;
-
-	/* Handles the source availability. */
-	if ((source_size != 0 && source == NULL) ||
-	    (capacity != 0 && destination == NULL) ||
-	    capacity > SIZE_MAX - offset) {
-		/* Failed. */
-		return EINVAL;
-	}
-	/* Process each element required by the operation. */
-	for (i = 0; i < capacity; i++) {
-		index = offset + i;
-		destination[i] = index < source_size ? source[index] : 0;
-	}
-
-	/* Succeeded. */
-	return 0;
-}
-
-/*
- * Implements the drv input capability abs info operation.
- */
-/*
- * Implements the drv input capability abs info operation.
- */
-int
-drv_input_capability_abs_info(
-	const struct input_capability_state *state,
-	unsigned axis,
-	struct input_absinfo *info)
-{
-	/* Handles the state availability. */
-	if (state == NULL || info == NULL || axis > ABS_MAX)
-		return EINVAL;
-
-	/* Checks the bit test result. */
-	if (!bit_test(state->abs_bits, axis))
-		return ENOENT;
-	*info = state->abs_info[axis];
-	/* Succeeded. */
-	return 0;
-}
-
-/*
- * Implements the drv input capability event operation.
- */
-/*
- * Implements the drv input capability event operation.
- */
-int
-drv_input_capability_event(
-	struct input_capability_state *state,
-	uint16_t type,
-	uint16_t code,
-	int32_t value)
-{
-	int error;
-
-	/* Handles the state availability. */
-	if (state == NULL)
-		return 0;
-
-	/* Handles the type condition. */
-	if (type == EV_SYN) {
-		/* Computes the function result. */
-		error = code == SYN_REPORT && value == 0 &&
-				  bit_test(state->event_bits, EV_SYN);
-
-		/* Failed. */
-		return error;
-	}
-
-	/* Checks the bit test result. */
-	if (type == EV_KEY && code <= KEY_MAX &&
-	    bit_test(state->key_bits, code)) {
-		/* Validates the current value. */
-		if (value == 0)
-			bit_clear(state->key_state, code);
-		else if (value == 1 || value == 2)
-			bit_set(state->key_state, code);
-		else {
-			/* Succeeded. */
-			return 0;
-		}
-
-		/* Reports operation failure. */
-		return 1;
-	} else if (type == EV_REL && code <= REL_MAX &&
-		   bit_test(state->rel_bits, code)) {
-		/* Reports operation failure. */
-		return 1;
-	} else if (type == EV_ABS && code <= ABS_MAX &&
-		   bit_test(state->abs_bits, code)) {
-		state->abs_info[code].value = value;
-
-		/* Reports operation failure. */
-		return 1;
-	}
-
-	/* Succeeded. */
-	return 0;
-}
-/* End consolidated input-capability.c. */
-
-/* Begin consolidated input-device.c. */
-/*
- * zedBSD
- * Copyright (C) 2026 Awe Morris
- *
- * SPDX-License-Identifier: Zlib
- */
-
 #include "kern/input-device.h"
 #include "kern/cdev.h"
 #include "kern/clock.h"
@@ -423,14 +23,18 @@ drv_input_capability_event(
 #include "kern/uaccess.h"
 #include "kern/waitq.h"
 
-#include <errno.h>
-#include <fcntl.h>
 #include <hal/hal.h>
+#include <zedbsd/input.h>
+
+#include <errno.h>
+#include <string.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 
 #define INPUT_DEVICE_MAX 8U
 #define INPUT_TEXT_MAX 64U
+#define INPUT_SUBSCRIBER_MAX 8U
 
 struct input_reader {
 	struct input_queue_reader cursor;
@@ -465,737 +69,132 @@ struct input_device {
 	int owner_released;
 };
 
+struct symbol_entry {
+	const char *name;
+	uint16_t evdev;
+	uint16_t legacy;
+	char normal;
+	char shifted;
+};
+
+static const uint16_t letter_codes[26] = {
+	KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I,
+	KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R,
+	KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
+};
+
+static const uint16_t digit_codes[10] = {
+	KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9,
+};
+
+static const char shifted_digits[10] = {
+	')', '!', '@', '#', '$', '%', '^', '&', '*', '(',
+};
+
+static struct spinlock subscriber_lock;
+static struct input_subscription *subscribers[INPUT_SUBSCRIBER_MAX];
+
 static struct spinlock registry_lock;
+
 static struct input_device *input_device_reserved[INPUT_DEVICE_MAX];
 
+static const struct symbol_entry symbols[] = {
+	{"esc", KEY_ESC, INPUT_KEY_ESCAPE, 0, 0},
+	{"backspace", KEY_BACKSPACE, INPUT_KEY_BACKSPACE, 0, 0},
+	{"tab", KEY_TAB, INPUT_KEY_TAB, 0, 0},
+	{"enter", KEY_ENTER, INPUT_KEY_ENTER, 0, 0},
+	{"space", KEY_SPACE, 0, ' ', ' '},
+	{"minus", KEY_MINUS, 0, '-', '_'},
+	{"equal", KEY_EQUAL, 0, '=', '+'},
+	{"leftbrace", KEY_LEFTBRACE, 0, '[', '{'},
+	{"rightbrace", KEY_RIGHTBRACE, 0, ']', '}'},
+	{"semicolon", KEY_SEMICOLON, 0, ';', ':'},
+	{"apostrophe", KEY_APOSTROPHE, 0, '\'', '"'},
+	{"grave", KEY_GRAVE, 0, '`', '~'},
+	{"backslash", KEY_BACKSLASH, 0, '\\', '|'},
+	{"comma", KEY_COMMA, 0, ',', '<'},
+	{"dot", KEY_DOT, 0, '.', '>'},
+	{"slash", KEY_SLASH, 0, '/', '?'},
+	{"jis-1", KEY_1, 0, '1', '!'},
+	{"jis-2", KEY_2, 0, '2', '"'},
+	{"jis-3", KEY_3, 0, '3', '#'},
+	{"jis-4", KEY_4, 0, '4', '$'},
+	{"jis-5", KEY_5, 0, '5', '%'},
+	{"jis-6", KEY_6, 0, '6', '&'},
+	{"jis-7", KEY_7, 0, '7', '\''},
+	{"jis-8", KEY_8, 0, '8', '('},
+	{"jis-9", KEY_9, 0, '9', ')'},
+	{"jis-0", KEY_0, 0, '0', '0'},
+	{"jis-minus", KEY_MINUS, 0, '-', '='},
+	{"jis-caret", KEY_EQUAL, 0, '^', '~'},
+	{"jis-yen", KEY_RESERVED, 0, '\\', '|'},
+	{"jis-at", KEY_LEFTBRACE, 0, '@', '`'},
+	{"jis-lbrace", KEY_RIGHTBRACE, 0, '[', '{'},
+	{"jis-semi", KEY_SEMICOLON, 0, ';', '+'},
+	{"jis-colon", KEY_APOSTROPHE, 0, ':', '*'},
+	{"jis-rbrace", KEY_BACKSLASH, 0, ']', '}'},
+	{"jis-comma", KEY_COMMA, 0, ',', '<'},
+	{"jis-dot", KEY_DOT, 0, '.', '>'},
+	{"jis-slash", KEY_SLASH, 0, '/', '?'},
+	{"jis-ro", KEY_RESERVED, 0, '\\', '_'},
+	{"jis-kp-slash", KEY_RESERVED, 0, '/', '/'},
+	{"jis-kp-star", KEY_RESERVED, 0, '*', '*'},
+	{"jis-kp-minus", KEY_RESERVED, 0, '-', '-'},
+	{"jis-kp-7", KEY_RESERVED, 0, '7', '7'},
+	{"jis-kp-8", KEY_RESERVED, 0, '8', '8'},
+	{"jis-kp-9", KEY_RESERVED, 0, '9', '9'},
+	{"jis-kp-plus", KEY_RESERVED, 0, '+', '+'},
+	{"jis-kp-4", KEY_RESERVED, 0, '4', '4'},
+	{"jis-kp-5", KEY_RESERVED, 0, '5', '5'},
+	{"jis-kp-6", KEY_RESERVED, 0, '6', '6'},
+	{"jis-kp-equal", KEY_RESERVED, 0, '=', '='},
+	{"jis-kp-1", KEY_RESERVED, 0, '1', '1'},
+	{"jis-kp-2", KEY_RESERVED, 0, '2', '2'},
+	{"jis-kp-3", KEY_RESERVED, 0, '3', '3'},
+	{"jis-kp-enter", KEY_RESERVED, INPUT_KEY_ENTER, 0, 0},
+	{"jis-kp-0", KEY_RESERVED, 0, '0', '0'},
+	{"jis-kp-comma", KEY_RESERVED, 0, ',', ','},
+	{"jis-kp-dot", KEY_RESERVED, 0, '.', '.'},
+	{"leftshift", KEY_LEFTSHIFT, INPUT_KEY_SHIFT_SYMBOL, 0, 0},
+	{"rightshift", KEY_RIGHTSHIFT, INPUT_KEY_SHIFT_SYMBOL, 0, 0},
+	{"leftctrl", KEY_LEFTCTRL, INPUT_KEY_CTRL_SYMBOL, 0, 0},
+	{"rightctrl", KEY_RIGHTCTRL, INPUT_KEY_CTRL_SYMBOL, 0, 0},
+	{"leftalt", KEY_LEFTALT, INPUT_KEY_GRAPH_SYMBOL, 0, 0},
+	{"rightalt", KEY_RIGHTALT, INPUT_KEY_GRAPH_SYMBOL, 0, 0},
+	{"capslock", KEY_CAPSLOCK, INPUT_KEY_CAPS_LOCK, 0, 0},
+	{"kana", KEY_RESERVED, INPUT_KEY_KANA, 0, 0},
+	{"home", KEY_HOME, INPUT_KEY_HOME, 0, 0},
+	{"up", KEY_UP, INPUT_KEY_UP, 0, 0},
+	{"pageup", KEY_PAGEUP, INPUT_KEY_PAGE_UP, 0, 0},
+	{"left", KEY_LEFT, INPUT_KEY_LEFT, 0, 0},
+	{"right", KEY_RIGHT, INPUT_KEY_RIGHT, 0, 0},
+	{"end", KEY_END, INPUT_KEY_END, 0, 0},
+	{"down", KEY_DOWN, INPUT_KEY_DOWN, 0, 0},
+	{"pagedown", KEY_PAGEDOWN, INPUT_KEY_PAGE_DOWN, 0, 0},
+	{"insert", KEY_INSERT, INPUT_KEY_INSERT, 0, 0},
+	{"delete", KEY_DELETE, INPUT_KEY_DELETE, 0, 0},
+};
+
+static const struct symbol_entry *find_symbol(const char *name);
+
+/*
+ * Forward declaration
+ */
+static int bit_test(const unsigned long *bits, unsigned bit);
 static int input_device_tryref(struct input_device *device);
 static void input_device_ref(struct input_device *device);
 static void input_device_release(struct input_device *device);
 static void input_cdev_finalize(void *data);
-
 static void report_timestamp(struct input_event *event, uint64_t milliseconds);
-
-/* Supports the report timestamp operation. */
-static void
-report_timestamp(
-	struct input_event *event,
-	uint64_t milliseconds)
-{
-	memset(event, 0, sizeof(*event));
-	event->time.tv_sec = (time_t)(milliseconds / 1000U);
-	event->time.tv_usec = (int64_t)((milliseconds % 1000U) * 1000U);
-}
-
-static void report_init(struct input_report *report, struct input_device *device);
-
-/* Supports the report init operation. */
-static void
-report_init(
-	struct input_report *report,
-	struct input_device *device)
-{
-	memset(report, 0, sizeof(*report));
-	report->device = device;
-	report->device_id = device->number;
-}
-
-static void report_event(struct input_report *report, uint64_t milliseconds, uint16_t type, uint16_t code, int32_t value, const struct hal_key_event *key_event);
-
-/* Supports the report event operation. */
-static void
-report_event(
-	struct input_report *report,
-	uint64_t milliseconds,
-	uint16_t type,
-	uint16_t code,
-	int32_t value,
-	const struct hal_key_event *key_event)
-{
-	struct input_report_event *item;
-	size_t index;
-
-	/* Handles the report condition. */
-	if (report->event_count == INPUT_REPORT_EVENT_MAX)
-		return;
-	item = &report->events[report->event_count++];
-	report_timestamp(&item->event, milliseconds);
-	item->event.type = type;
-	item->event.code = code;
-	item->event.value = value;
-
-	/* Handles the key event availability. */
-	if (key_event == NULL)
-		return;
-	/* Process each remaining element. */
-	for (index = 0; index < HAL_KEY_SYMBOL_SIZE; index++)
-		item->symbol[index] = key_event->symbol[index];
-	item->key_flags = key_event->flags;
-}
-
-static struct input_device *file_device(struct file *file);
-
-/* Supports the file device operation. */
-static struct input_device *
-file_device(
-	struct file *file)
-{
-	/* Returns the computed result. */
-	return file != NULL && file->f_inode != NULL &&
-			       file->f_inode->i_data != NULL
-		       ? ((const struct cdev *)file->f_inode->i_data)->data
-		       : NULL;
-}
-
-static struct input_reader *file_reader(struct file *file);
-
-/* Supports the file reader operation. */
-static struct input_reader *
-file_reader(
-	struct file *file)
-{
-	/* Returns the computed result. */
-	return file != NULL ? file->f_data : NULL;
-}
-
-static int producer_callback_enter(struct input_device *device);
-
-/* Supports the producer callback enter operation. */
-static int
-producer_callback_enter(
-	struct input_device *device)
-{
-	unsigned long irq = spin_lock_irqsave(&device->lock);
-
-	/* Handles the device condition. */
-	if (!device->registered || device->retiring) {
-		spin_unlock_irqrestore(&device->lock, irq);
-
-		/* Failed. */
-		return ENODEV;
-	}
-
-	device->producer_callbacks++;
-
-	spin_unlock_irqrestore(&device->lock, irq);
-
-	/* Succeeded. */
-	return 0;
-}
-
-static void producer_callback_leave(struct input_device *device);
-
-/* Supports the producer callback leave operation. */
-static void
-producer_callback_leave(
-	struct input_device *device)
-{
-	unsigned long irq = spin_lock_irqsave(&device->lock);
-
-	/* Handles the device condition. */
-	if (device->producer_callbacks != 0)
-		device->producer_callbacks--;
-	waitq_wake_all(&device->waitq);
-
-	spin_unlock_irqrestore(&device->lock, irq);
-}
-
 static int input_open(struct file *file);
-
-/* Supports the input open operation. */
-static int
-input_open(
-	struct file *file)
-{
-	struct input_device *device = file_device(file);
-	struct input_reader *reader;
-	unsigned long irq;
-	int error, attached = 0;
-
-	/* Handles the device availability. */
-	if (device == NULL)
-		return ENODEV;
-
-	/* Checks the file status flags get result. */
-	if ((file_status_flags_get(file) & O_ACCMODE) == O_WRONLY)
-		return EACCES;
-
-	/* Handles the reader availability. */
-	reader = kern_calloc(1, sizeof(*reader));
-	if (reader == NULL)
-		return ENOMEM;
-
-	/* Checks the operation status. */
-	error = producer_callback_enter(device);
-	if (error != 0) {
-		kern_free(reader);
-
-		/* Failed. */
-		return error;
-	}
-
-	/* Handles the open availability. */
-	if (device->open != NULL) {
-		/* Checks the operation status. */
-		error = device->open(device->context);
-		if (error != 0) {
-			producer_callback_leave(device);
-			kern_free(reader);
-
-			/* Failed. */
-			return error;
-		}
-	}
-
-	irq = spin_lock_irqsave(&device->lock);
-
-	/* Handles the device condition. */
-	if (device->registered && !device->retiring) {
-		drv_input_queue_reader_init(&device->queue, &reader->cursor);
-		reader->producer_opened = device->close != NULL;
-		reader->next = device->readers;
-		device->readers = reader;
-		file->f_data = reader;
-		attached = 1;
-	}
-
-	spin_unlock_irqrestore(&device->lock, irq);
-
-	/* Keep the admission held through the compensating close. */
-	if (!attached && device->close != NULL)
-		device->close(device->context);
-	producer_callback_leave(device);
-
-	/* Handles the attached condition. */
-	if (!attached) {
-		kern_free(reader);
-
-		/* Failed. */
-		return ENODEV;
-	}
-
-	/* Succeeded. */
-	return 0;
-}
-
 static int input_close(struct file *file);
-
-/* Supports the input close operation. */
-static int
-input_close(
-	struct file *file)
-{
-	struct input_device *device = file_device(file);
-	struct input_reader *reader = file_reader(file), **link;
-	unsigned long irq;
-	int close_producer = 0;
-
-	/* Handles the device availability. */
-	if (device == NULL || reader == NULL)
-		return 0;
-	irq = spin_lock_irqsave(&device->lock);
-
-	/* Process each linked entry. */
-	for (link = &device->readers; *link != NULL; link = &(*link)->next) {
-		/* Handles the link condition. */
-		if (*link == reader) {
-			*link = reader->next;
-			break;
-		}
-	}
-
-	/* Handles the device condition. */
-	if (device->grabber == reader)
-		device->grabber = NULL;
-
-	/* Handles the reader condition. */
-	if (reader->producer_opened) {
-		reader->producer_opened = 0;
-		device->producer_callbacks++;
-		close_producer = 1;
-	}
-
-	file->f_data = NULL;
-
-	spin_unlock_irqrestore(&device->lock, irq);
-
-	/* Handles the close producer condition. */
-	if (close_producer)
-		device->close(device->context);
-
-	/* Handles the close producer condition. */
-	if (close_producer)
-		producer_callback_leave(device);
-	kern_free(reader);
-
-	/* Succeeded. */
-	return 0;
-}
-
 static ssize_t input_read(struct file *file, void *buffer, size_t size);
-
-/* Supports the input read operation. */
-static ssize_t
-input_read(
-	struct file *file,
-	void *buffer,
-	size_t size)
-{
-	ssize_t function_result;
-	uint64_t sequence;
-	int error;
-	struct input_device *device = file_device(file);
-	struct input_reader *reader = file_reader(file);
-	size_t capacity, count;
-	unsigned long irq;
-
-	/* Handles the device availability. */
-	if (device == NULL || reader == NULL)
-		return -ENODEV;
-
-	/* Checks the current data size. */
-	if (size < sizeof(struct input_event))
-		return -EINVAL;
-	capacity = size / sizeof(struct input_event);
-	irq = spin_lock_irqsave(&device->lock);
-
-	/* Continue until the operation reaches a terminal state. */
-	for (;;) {
-		/* Handles the grabber availability. */
-		if (device->grabber == NULL || device->grabber == reader) {
-			/* Checks the remaining item count. */
-			count = drv_input_queue_read(&device->queue,
-						     &reader->cursor, buffer,
-						     capacity);
-			if (count != 0) {
-				spin_unlock_irqrestore(&device->lock, irq);
-
-				/* Computes the function result. */
-				function_result =
-					(ssize_t)(count *
-						  sizeof(struct input_event));
-
-				/* Returns the computed result. */
-				return function_result;
-			}
-		}
-
-		/* Handles the device condition. */
-		if (!device->registered) {
-			spin_unlock_irqrestore(&device->lock, irq);
-
-			/* Succeeded. */
-			return 0;
-		}
-
-		/* Checks the file status flags get result. */
-		if ((file_status_flags_get(file) & O_NONBLOCK) != 0) {
-			spin_unlock_irqrestore(&device->lock, irq);
-
-			/* Failed. */
-			return -EAGAIN;
-		}
-
-		sequence = waitq_sequence(&device->waitq);
-
-		/* Checks the operation status. */
-		error = waitq_sleep(&device->waitq, &device->lock, sequence, 0,
-				    WAITQ_INTERRUPTIBLE);
-		if (error == EINTR) {
-			spin_unlock_irqrestore(&device->lock, irq);
-
-			/* Failed. */
-			return -EINTR;
-		}
-	}
-}
-
-static int input_poll(struct file *file, short requested, short *returned);
-
-/* Supports the input poll operation. */
-static int
-input_poll(
-	struct file *file,
-	short requested,
-	short *returned)
-{
-	struct input_device *device = file_device(file);
-	struct input_reader *reader = file_reader(file);
-	unsigned long irq;
-	short result = 0;
-
-	/* Handles the returned availability. */
-	if (returned == NULL)
-		return EINVAL;
-
-	/* Handles the device availability. */
-	if (device == NULL || reader == NULL) {
-		*returned = POLLERR | POLLHUP;
-		/* Succeeded. */
-		return 0;
-	}
-
-	irq = spin_lock_irqsave(&device->lock);
-
-	/* Checks the drv input queue readable result. */
-	if ((device->grabber == NULL || device->grabber == reader) &&
-	    drv_input_queue_readable(&device->queue, &reader->cursor))
-		result |= requested & (POLLIN | POLLRDNORM);
-
-	/* Handles the device condition. */
-	if (!device->registered)
-		result |= POLLHUP;
-
-	spin_unlock_irqrestore(&device->lock, irq);
-
-	*returned = result;
-	/* Succeeded. */
-	return 0;
-}
-
-static int copy_text(const char *text, unsigned long request, uintptr_t argument);
-
-/* Supports the copy text operation. */
-static int
-copy_text(
-	const char *text,
-	unsigned long request,
-	uintptr_t argument)
-{
-	int error;
-	size_t capacity = (request >> 16) & 0x1fffU;
-	size_t length = strlen(text) + 1U;
-
-	/* Handles the capacity condition. */
-	if (capacity == 0)
-		return EINVAL;
-
-	/* Checks the current data length. */
-	if (length > capacity)
-		length = capacity;
-
-	/* Obtains the copyout result. */
-	error = copyout(text, argument, length);
-
-	/* Returns the computed result. */
-	return error;
-}
-
-static size_t ioctl_size(unsigned long request);
-
-/* Supports the ioctl size operation. */
-static size_t
-ioctl_size(
-	unsigned long request)
-{
-	/* Returns the computed result. */
-	return (request >> 16) & 0x1fffU;
-}
-
-static int copy_bits(const uint8_t *bits, size_t bit_size, size_t capacity, uintptr_t argument);
-
-/* Supports the copy bits operation. */
-static int
-copy_bits(
-	const uint8_t *bits,
-	size_t bit_size,
-	size_t capacity,
-	uintptr_t argument)
-{
-	uint8_t output[32];
-	size_t copied = 0, count;
-	uintptr_t address;
-	int error;
-
-	/* Continue while the operation condition remains true. */
-	while (copied < capacity) {
-		/* Checks the remaining item count. */
-		count = capacity - copied;
-		if (count > sizeof(output))
-			count = sizeof(output);
-
-		/* Checks the operation status. */
-		error = drv_input_capability_copy(bits, bit_size, copied,
-						  output, count);
-		if (error == 0)
-			error = user_address_add(argument, copied, &address);
-		if (error == 0)
-			error = copyout(output, address, count);
-		if (error != 0)
-			return error;
-		copied += count;
-	}
-
-	/* Succeeded. */
-	return 0;
-}
-
-static int copy_capability_bits(const struct input_device *device, unsigned type, size_t capacity, uintptr_t argument);
-
-/* Supports the copy capability bits operation. */
-static int
-copy_capability_bits(
-	const struct input_device *device,
-	unsigned type,
-	size_t capacity,
-	uintptr_t argument)
-{
-	int function_result;
-	const uint8_t *bits;
-	size_t size;
-	int error = drv_input_capability_bits(&device->capability_state, type,
-					      &bits, &size);
-
-	/* Checks the operation status. */
-	if (error != 0)
-		return ENOTTY;
-
-	/* Obtains the copy bits result. */
-	function_result = copy_bits(bits, size, capacity, argument);
-
-	/* Returns the computed result. */
-	return function_result;
-}
-
-static int copy_key_state(struct input_device *device, size_t capacity, uintptr_t argument);
-
-/* Supports the copy key state operation. */
-static int
-copy_key_state(
-	struct input_device *device,
-	size_t capacity,
-	uintptr_t argument)
-{
-	int error;
-	uint8_t snapshot[INPUT_KEY_BITS_SIZE];
-	const uint8_t *bits;
-	size_t size;
-	unsigned long irq;
-
-	irq = spin_lock_irqsave(&device->lock);
-
-	(void)drv_input_capability_key_state(&device->capability_state, &bits,
-					     &size);
-	memcpy(snapshot, bits, sizeof(snapshot));
-
-	spin_unlock_irqrestore(&device->lock, irq);
-
-	/* Obtains the copy bits result. */
-	error = copy_bits(snapshot, size, capacity, argument);
-
-	/* Returns the computed result. */
-	return error;
-}
-
-static int copy_abs_info(struct input_device *device, unsigned axis, uintptr_t argument);
-
-/* Supports the copy abs info operation. */
-static int
-copy_abs_info(
-	struct input_device *device,
-	unsigned axis,
-	uintptr_t argument)
-{
-	int function_result;
-	struct input_absinfo info;
-	unsigned long irq;
-	int error;
-
-	irq = spin_lock_irqsave(&device->lock);
-
-	error = drv_input_capability_abs_info(&device->capability_state, axis,
-					      &info);
-
-	spin_unlock_irqrestore(&device->lock, irq);
-
-	/* Checks the operation status. */
-	if (error == ENOENT)
-		return ENOTTY;
-
-	/* Checks the operation status. */
-	if (error != 0)
-		return error;
-
-	/* Obtains the copyout result. */
-	function_result = copyout(&info, argument, sizeof(info));
-
-	/* Returns the computed result. */
-	return function_result;
-}
-
 static int input_ioctl(struct file *file, unsigned long request, uintptr_t argument);
-
-/* Supports the input ioctl operation. */
-static int
-input_ioctl(
-	struct file *file,
-	unsigned long request,
-	uintptr_t argument)
-{
-	int function_result;
-	struct input_device *device = file_device(file);
-	struct input_reader *reader = file_reader(file), *item;
-	unsigned group = (unsigned)((request >> 8) & 0xffU);
-	unsigned number = (unsigned)(request & 0xffU);
-	size_t size = ioctl_size(request);
-	unsigned long irq;
-	int value, error = 0;
-
-	/* Handles the device availability. */
-	if (device == NULL || reader == NULL)
-		return ENODEV;
-
-	/* Handles the request condition. */
-	if (request == EVIOCGVERSION) {
-		value = EV_VERSION;
-
-		/* Obtains the copyout result. */
-		function_result = copyout(&value, argument, sizeof(value));
-
-		/* Returns the computed result. */
-		return function_result;
-	}
-
-	/* Handles the request condition. */
-	if (request == EVIOCGID) {
-		/* Obtains the copyout result. */
-		function_result =
-			copyout(&device->id, argument, sizeof(device->id));
-
-		/* Returns the computed result. */
-		return function_result;
-	}
-
-	/* Handles the group condition. */
-	if (group == ZEDBSD_EVDEV_IOC_GROUP) {
-		/* Dispatch the selected operation case. */
-		switch (number) {
-		case 0x06:
-			/* Checks the EVIOCGNAME result. */
-			if (request != EVIOCGNAME(size))
-				return ENOTTY;
-
-			/* Obtains the copy text result. */
-			function_result =
-				copy_text(device->name, request, argument);
-
-			/* Returns the computed result. */
-			return function_result;
-		case 0x07:
-			/* Checks the EVIOCGPHYS result. */
-			if (request != EVIOCGPHYS(size))
-				return ENOTTY;
-
-			/* Obtains the copy text result. */
-			function_result = copy_text(device->physical_path,
-						    request, argument);
-
-			/* Returns the computed result. */
-			return function_result;
-		case 0x08:
-			/* Checks the EVIOCGUNIQ result. */
-			if (request != EVIOCGUNIQ(size))
-				return ENOTTY;
-
-			/* Obtains the copy text result. */
-			function_result =
-				copy_text(device->unique_id, request, argument);
-
-			/* Returns the computed result. */
-			return function_result;
-		default:
-			break;
-		}
-	}
-
-	/* Checks the EVIOCGKEY result. */
-	if (group == ZEDBSD_EVDEV_IOC_GROUP && number == 0x18U &&
-	    request == EVIOCGKEY(size)) {
-		/* Obtains the copy key state result. */
-		function_result = copy_key_state(device, size, argument);
-
-		/* Returns the computed result. */
-		return function_result;
-	}
-
-	/* Checks the EVIOCGBIT result. */
-	if (group == ZEDBSD_EVDEV_IOC_GROUP && number >= 0x20U &&
-	    number <= 0x20U + EV_MAX &&
-	    request == EVIOCGBIT(number - 0x20U, size)) {
-		/* Obtains the copy capability bits result. */
-		function_result = copy_capability_bits(device, number - 0x20U,
-						       size, argument);
-
-		/* Returns the computed result. */
-		return function_result;
-	}
-
-	/* Checks the EVIOCGABS result. */
-	if (group == ZEDBSD_EVDEV_IOC_GROUP && number >= 0x40U &&
-	    number <= 0x40U + ABS_MAX && request == EVIOCGABS(number - 0x40U)) {
-		/* Obtains the copy abs info result. */
-		function_result =
-			copy_abs_info(device, number - 0x40U, argument);
-
-		/* Returns the computed result. */
-		return function_result;
-	}
-
-	/* Handles the request condition. */
-	if (request != EVIOCGRAB)
-		return ENOTTY;
-
-	/* Checks the operation status. */
-	if ((error = copyin(argument, &value, sizeof(value))) != 0)
-		return error;
-	irq = spin_lock_irqsave(&device->lock);
-
-	/* Validates the current value. */
-	if (value != 0) {
-		/* Handles the grabber availability. */
-		if (device->grabber != NULL && device->grabber != reader)
-			error = EBUSY;
-		else
-			device->grabber = reader;
-	} else if (device->grabber != reader) {
-		error = EINVAL;
-	} else {
-		device->grabber = NULL;
-		/* Process each linked entry. */
-		for (item = device->readers; item != NULL; item = item->next) {
-			/* Handles the item condition. */
-			if (item != reader) {
-				item->cursor.sequence =
-					device->queue.next_sequence;
-			}
-		}
-
-		waitq_wake_all(&device->waitq);
-	}
-
-	spin_unlock_irqrestore(&device->lock, irq);
-
-	/* Checks the operation status. */
-	if (error == 0)
-		poll_notify();
-
-	/* Reports the failure. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded. */
-	return 0;
-}
-
-static const struct cdev_ops input_ops = {
-	.open = input_open,
-	.close = input_close,
-	.read = input_read,
-	.ioctl = input_ioctl,
-	.poll = input_poll,
-};
+static int input_poll(struct file *file, short requested, short *returned);
+static int copy_info_text(char *destination, const char *source);
 
 /*
- * Implements the drv input core init operation.
+ * Brings the input subsystem into service.
  */
 void
 drv_input_core_init(
@@ -1205,29 +204,8 @@ drv_input_core_init(
 	drv_input_subscriber_init();
 }
 
-static int copy_info_text(char *destination, const char *source);
-
-/* Supports the copy info text operation. */
-static int
-copy_info_text(
-	char *destination,
-	const char *source)
-{
-	/* Handles the source availability. */
-	if (source == NULL)
-		source = "";
-
-	/* Checks the strlen result. */
-	if (strlen(source) >= INPUT_TEXT_MAX)
-		return ENAMETOOLONG;
-	strcpy(destination, source);
-
-	/* Succeeded. */
-	return 0;
-}
-
 /*
- * Implements the drv input device register operation.
+ * Publishes one device to the input subsystem.
  */
 int
 drv_input_device_register(
@@ -1351,7 +329,272 @@ drv_input_device_register(
 }
 
 /*
- * Implements the drv input device unregister operation.
+ * Reports the bitmap of one capability kind.
+ */
+int
+drv_input_capability_bits(
+	const struct input_capability_state *state,
+	unsigned type,
+	const uint8_t **bits,
+	size_t *size)
+{
+	/* Handles the state availability. */
+	if (state == NULL || bits == NULL || size == NULL)
+		return EINVAL;
+
+	/* Handles the type condition. */
+	if (type == EV_SYN) {
+		*bits = (const uint8_t *)state->event_bits;
+		*size = sizeof(state->event_bits);
+		/* Succeeded. */
+		return 0;
+	}
+
+	/* Dispatch the selected syntax or record type. */
+	switch (type) {
+	case EV_KEY:
+		*bits = (const uint8_t *)state->key_bits;
+		*size = sizeof(state->key_bits);
+		/* Succeeded. */
+		return 0;
+	case EV_REL:
+		*bits = (const uint8_t *)state->rel_bits;
+		*size = sizeof(state->rel_bits);
+		/* Succeeded. */
+		return 0;
+	case EV_ABS:
+		*bits = (const uint8_t *)state->abs_bits;
+		*size = sizeof(state->abs_bits);
+		/* Succeeded. */
+		return 0;
+	default:
+		/* Failed. */
+		return EINVAL;
+	}
+}
+
+/*
+ * Reports which keys the device currently holds down.
+ */
+int
+drv_input_capability_key_state(
+	const struct input_capability_state *state,
+	const uint8_t **bits,
+	size_t *size)
+{
+	/* Handles the state availability. */
+	if (state == NULL || bits == NULL || size == NULL)
+		return EINVAL;
+	*bits = (const uint8_t *)state->key_state;
+	*size = sizeof(state->key_state);
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Copies one device's capability record.
+ */
+int
+drv_input_capability_copy(
+	const uint8_t *source,
+	size_t source_size,
+	size_t offset,
+	uint8_t *destination,
+	size_t capacity)
+{
+	size_t index;
+	size_t i;
+
+	/* Handles the source availability. */
+	if ((source_size != 0 && source == NULL) ||
+	    (capacity != 0 && destination == NULL) ||
+	    capacity > SIZE_MAX - offset) {
+		/* Failed. */
+		return EINVAL;
+	}
+	/* Process each element required by the operation. */
+	for (i = 0; i < capacity; i++) {
+		index = offset + i;
+		destination[i] = index < source_size ? source[index] : 0;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Reports the range one absolute axis reports over.
+ */
+int
+drv_input_capability_abs_info(
+	const struct input_capability_state *state,
+	unsigned axis,
+	struct input_absinfo *info)
+{
+	/* Handles the state availability. */
+	if (state == NULL || info == NULL || axis > ABS_MAX)
+		return EINVAL;
+
+	/* Checks the bit test result. */
+	if (!bit_test(state->abs_bits, axis))
+		return ENOENT;
+	*info = state->abs_info[axis];
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Takes one event into the record of what is held down.
+ */
+int
+drv_input_capability_event(
+	struct input_capability_state *state,
+	uint16_t type,
+	uint16_t code,
+	int32_t value)
+{
+	int error;
+
+	/* Handles the state availability. */
+	if (state == NULL)
+		return 0;
+
+	/* Handles the type condition. */
+	if (type == EV_SYN) {
+		/* Computes the function result. */
+		error = code == SYN_REPORT && value == 0 &&
+				  bit_test(state->event_bits, EV_SYN);
+
+		/* Failed. */
+		return error;
+	}
+
+	/* Checks the bit test result. */
+	if (type == EV_KEY && code <= KEY_MAX &&
+	    bit_test(state->key_bits, code)) {
+		/* Validates the current value. */
+		if (value == 0)
+			bit_clear(state->key_state, code);
+		else if (value == 1 || value == 2)
+			bit_set(state->key_state, code);
+		else {
+			/* Succeeded. */
+			return 0;
+		}
+
+		/* Reports operation failure. */
+		return 1;
+	} else if (type == EV_REL && code <= REL_MAX &&
+		   bit_test(state->rel_bits, code)) {
+		/* Reports operation failure. */
+		return 1;
+	} else if (type == EV_ABS && code <= ABS_MAX &&
+		   bit_test(state->abs_bits, code)) {
+		state->abs_info[code].value = value;
+
+		/* Reports operation failure. */
+		return 1;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Starts the record of what a device can report.
+ */
+int
+drv_input_capability_state_init(
+	struct input_capability_state *state,
+	const struct input_capability *capabilities,
+	size_t capability_count,
+	const struct input_abs_axis *absolute_axes,
+	size_t absolute_axis_count)
+{
+	const struct input_capability *capability;
+	unsigned long *bits;
+	size_t size;
+	const struct input_abs_axis *axis;
+	const struct input_absinfo *info;
+	size_t i;
+
+	/* Handles the state availability. */
+	if (state == NULL || (capability_count != 0 && capabilities == NULL) ||
+	    (absolute_axis_count != 0 && absolute_axes == NULL) ||
+	    capability_count > INPUT_CAPABILITY_COUNT_MAX ||
+	    absolute_axis_count > ABS_MAX + 1U) {
+		/* Failed. */
+		return EINVAL;
+	}
+	memset(state, 0, sizeof(*state));
+	/* Process each remaining element. */
+	for (i = 0; i < capability_count; i++) {
+		/* Checks the capability code valid result. */
+		capability = &capabilities[i];
+		if (!capability_code_valid(capability->type, capability->code))
+			return EINVAL;
+
+		/* Handles the capability condition. */
+		if (capability->type == EV_SYN) {
+			/* Checks the bit test result. */
+			if (bit_test(state->event_bits, EV_SYN))
+				return EINVAL;
+			bit_set(state->event_bits, EV_SYN);
+			continue;
+		}
+
+		/* Checks the capability bits mutable result. */
+		if (capability_bits_mutable(state, capability->type, &bits,
+					    &size) != 0 ||
+		    capability->code >= size * 8U ||
+		    bit_test(bits, capability->code)) {
+			/* Failed. */
+			return EINVAL;
+		}
+		bit_set(state->event_bits, capability->type);
+		bit_set(bits, capability->code);
+	}
+
+	/* Process each remaining element. */
+	for (i = 0; i < absolute_axis_count; i++) {
+		axis = &absolute_axes[i];
+
+		/* Checks the bit test result. */
+		info = &axis->info;
+		if (axis->code > ABS_MAX ||
+		    !bit_test(state->abs_bits, axis->code) ||
+		    bit_test(state->abs_configured, axis->code) ||
+		    info->minimum > info->maximum ||
+		    info->value < info->minimum ||
+		    info->value > info->maximum || info->fuzz < 0 ||
+		    info->flat < 0 || info->resolution < 0) {
+			/* Failed. */
+			return EINVAL;
+		}
+		state->abs_info[axis->code] = *info;
+		bit_set(state->abs_configured, axis->code);
+	}
+
+	/* Process each element required by the operation. */
+	for (i = 0; i <= ABS_MAX; i++) {
+		/* Checks the bit test result. */
+		if (bit_test(state->abs_bits, (unsigned)i) &&
+		    !bit_test(state->abs_configured, (unsigned)i)) {
+			/* Failed. */
+			return EINVAL;
+		}
+	}
+
+	/* Checks the bit test result. */
+	if (!bit_test(state->event_bits, EV_SYN))
+		return EINVAL;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Takes it back out.
  */
 void
 drv_input_device_unregister(
@@ -1570,7 +813,7 @@ drv_input_device_unregister(
 }
 
 /*
- * Implements the drv input device emit operation.
+ * Publishes one report of events from a device.
  */
 void
 drv_input_device_emit(
@@ -1616,148 +859,8 @@ drv_input_device_emit(
 		poll_notify();
 }
 
-static void input_device_resync_begin(struct input_device *device, uint32_t key_flags);
-
-/* Supports the input device resync begin operation. */
-static void
-input_device_resync_begin(
-	struct input_device *device,
-	uint32_t key_flags)
-{
-	struct input_report report;
-	unsigned long irq, publication_irq;
-	int published = 0;
-
-	publication_irq = spin_lock_irqsave(&device->publication_lock);
-	irq = spin_lock_irqsave(&device->lock);
-
-	/* Handles the device condition. */
-	if (device->registered && !device->retiring) {
-		memset(device->resync_key_state, 0,
-		       sizeof(device->resync_key_state));
-		device->resyncing = 1;
-		published = 1;
-	}
-
-	spin_unlock_irqrestore(&device->lock, irq);
-
-	/* Handles the published condition. */
-	if (published) {
-		report_init(&report, device);
-		report.flags = INPUT_REPORT_RESYNC_BEGIN |
-			       ((key_flags & HAL_KEY_EVENT_LOCK_CAPS) != 0
-					? INPUT_REPORT_LOCK_CAPS
-					: 0U) |
-			       ((key_flags & HAL_KEY_EVENT_LOCK_KANA) != 0
-					? INPUT_REPORT_LOCK_KANA
-					: 0U);
-		drv_input_subscriber_publish(&report);
-	}
-
-	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
-}
-
-static void input_device_resync_snapshot(struct input_device *device, const struct hal_key_event *key_event);
-
-/* Supports the input device resync snapshot operation. */
-static void
-input_device_resync_snapshot(
-	struct input_device *device,
-	const struct hal_key_event *key_event)
-{
-	struct input_report report;
-	uint64_t milliseconds = clock_milliseconds(NULL);
-	unsigned long irq, publication_irq;
-	uint16_t code = drv_input_key_from_symbol(key_event->symbol);
-	int logical_only = code == KEY_RESERVED &&
-			   drv_input_key_symbol_supported(key_event->symbol);
-	int published = 0;
-
-	/* Handles the code condition. */
-	if (code == KEY_RESERVED && !logical_only)
-		return;
-	report_init(&report, device);
-	report.flags = INPUT_REPORT_SNAPSHOT;
-	report_event(&report, milliseconds, EV_KEY, code, 1, key_event);
-	publication_irq = spin_lock_irqsave(&device->publication_lock);
-	irq = spin_lock_irqsave(&device->lock);
-
-	/* Handles the device condition. */
-	if (device->registered && !device->retiring && device->resyncing) {
-		/* Handles the logical only condition. */
-		if (logical_only) {
-			published = 1;
-		} else if ((device->capability_state
-				    .key_bits[code / INPUT_BITS_PER_WORD] &
-			    (1UL << (code % INPUT_BITS_PER_WORD))) != 0 &&
-			   (device->resync_key_state[code /
-						     INPUT_BITS_PER_WORD] &
-			    (1UL << (code % INPUT_BITS_PER_WORD))) == 0) {
-			device->resync_key_state[code / INPUT_BITS_PER_WORD] |=
-				1UL << (code % INPUT_BITS_PER_WORD);
-			published = 1;
-		}
-	}
-
-	spin_unlock_irqrestore(&device->lock, irq);
-
-	/* Handles the published condition. */
-	if (published)
-		drv_input_subscriber_publish(&report);
-
-	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
-}
-
-static void input_device_resync_end(struct input_device *device);
-
-/* Supports the input device resync end operation. */
-static void
-input_device_resync_end(
-	struct input_device *device)
-{
-	struct input_report report;
-	struct input_event event;
-	uint64_t milliseconds = clock_milliseconds(NULL);
-	unsigned long irq, publication_irq;
-	int published = 0;
-
-	publication_irq = spin_lock_irqsave(&device->publication_lock);
-	irq = spin_lock_irqsave(&device->lock);
-
-	/* Handles the device condition. */
-	if (device->registered && !device->retiring && device->resyncing) {
-		device->resyncing = 0;
-		memcpy(device->capability_state.key_state,
-		       device->resync_key_state,
-		       sizeof(device->capability_state.key_state));
-		report_timestamp(&event, milliseconds);
-		event.type = EV_SYN;
-		event.code = SYN_DROPPED;
-		drv_input_queue_push(&device->queue, &event);
-		event.code = SYN_REPORT;
-		drv_input_queue_push(&device->queue, &event);
-		waitq_wake_all(&device->waitq);
-		published = 1;
-	}
-
-	spin_unlock_irqrestore(&device->lock, irq);
-
-	/* Handles the published condition. */
-	if (published) {
-		report_init(&report, device);
-		report.flags = INPUT_REPORT_RESYNC_END;
-		drv_input_subscriber_publish(&report);
-	}
-
-	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
-
-	/* Handles the published condition. */
-	if (published)
-		poll_notify();
-}
-
 /*
- * Implements the drv input device emit key event operation.
+ * Publishes one key event from a device.
  */
 void
 drv_input_device_emit_key_event(
@@ -1891,219 +994,8 @@ drv_input_device_emit_key_event(
 		poll_notify();
 }
 
-/* Tries to retain an input generation across concurrent terminal removal. */
-static int
-input_device_tryref(
-	struct input_device *device)
-{
-	int error;
-
-	/* Computes the function result. */
-	error = device != NULL && refcount_tryget(&device->refs);
-
-	/* Returns the computed result. */
-	return error;
-}
-
-/* Retains one input generation for an owned subsystem reference. */
-static void
-input_device_ref(
-	struct input_device *device)
-{
-	/* Handles the device availability. */
-	if (device != NULL)
-		refcount_get(&device->refs);
-}
-
-/* Releases the event number only when the complete generation is gone. */
-static void
-input_device_release(
-	struct input_device *device)
-{
-	unsigned long irq;
-
-	/* Checks the refcount put result. */
-	if (device == NULL || !refcount_put(&device->refs))
-		return;
-
-	irq = spin_lock_irqsave(&registry_lock);
-
-	/* Handles the device condition. */
-	if (device->number < INPUT_DEVICE_MAX &&
-	    input_device_reserved[device->number] == device)
-		input_device_reserved[device->number] = NULL;
-
-	spin_unlock_irqrestore(&registry_lock, irq);
-
-	kern_free(device);
-}
-
-/* Releases the input reference owned by one terminal cdev generation. */
-static void
-input_cdev_finalize(
-	void *data)
-{
-	input_device_release(data);
-}
-/* End consolidated input-device.c. */
-
-/* Begin consolidated input-keymap.c. */
 /*
- * zedBSD
- * Copyright (C) 2026 Awe Morris
- *
- * SPDX-License-Identifier: Zlib
- */
-
-#include "kern/input-keymap.h"
-
-#include <string.h>
-#include <zedbsd/input.h>
-
-struct symbol_entry {
-	const char *name;
-	uint16_t evdev;
-	uint16_t legacy;
-	char normal;
-	char shifted;
-};
-
-static const uint16_t letter_codes[26] = {
-	KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I,
-	KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R,
-	KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
-};
-
-static const uint16_t digit_codes[10] = {
-	KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9,
-};
-
-static const char shifted_digits[10] = {
-	')', '!', '@', '#', '$', '%', '^', '&', '*', '(',
-};
-
-static const struct symbol_entry symbols[] = {
-	{"esc", KEY_ESC, INPUT_KEY_ESCAPE, 0, 0},
-	{"backspace", KEY_BACKSPACE, INPUT_KEY_BACKSPACE, 0, 0},
-	{"tab", KEY_TAB, INPUT_KEY_TAB, 0, 0},
-	{"enter", KEY_ENTER, INPUT_KEY_ENTER, 0, 0},
-	{"space", KEY_SPACE, 0, ' ', ' '},
-	{"minus", KEY_MINUS, 0, '-', '_'},
-	{"equal", KEY_EQUAL, 0, '=', '+'},
-	{"leftbrace", KEY_LEFTBRACE, 0, '[', '{'},
-	{"rightbrace", KEY_RIGHTBRACE, 0, ']', '}'},
-	{"semicolon", KEY_SEMICOLON, 0, ';', ':'},
-	{"apostrophe", KEY_APOSTROPHE, 0, '\'', '"'},
-	{"grave", KEY_GRAVE, 0, '`', '~'},
-	{"backslash", KEY_BACKSLASH, 0, '\\', '|'},
-	{"comma", KEY_COMMA, 0, ',', '<'},
-	{"dot", KEY_DOT, 0, '.', '>'},
-	{"slash", KEY_SLASH, 0, '/', '?'},
-	{"jis-1", KEY_1, 0, '1', '!'},
-	{"jis-2", KEY_2, 0, '2', '"'},
-	{"jis-3", KEY_3, 0, '3', '#'},
-	{"jis-4", KEY_4, 0, '4', '$'},
-	{"jis-5", KEY_5, 0, '5', '%'},
-	{"jis-6", KEY_6, 0, '6', '&'},
-	{"jis-7", KEY_7, 0, '7', '\''},
-	{"jis-8", KEY_8, 0, '8', '('},
-	{"jis-9", KEY_9, 0, '9', ')'},
-	{"jis-0", KEY_0, 0, '0', '0'},
-	{"jis-minus", KEY_MINUS, 0, '-', '='},
-	{"jis-caret", KEY_EQUAL, 0, '^', '~'},
-	{"jis-yen", KEY_RESERVED, 0, '\\', '|'},
-	{"jis-at", KEY_LEFTBRACE, 0, '@', '`'},
-	{"jis-lbrace", KEY_RIGHTBRACE, 0, '[', '{'},
-	{"jis-semi", KEY_SEMICOLON, 0, ';', '+'},
-	{"jis-colon", KEY_APOSTROPHE, 0, ':', '*'},
-	{"jis-rbrace", KEY_BACKSLASH, 0, ']', '}'},
-	{"jis-comma", KEY_COMMA, 0, ',', '<'},
-	{"jis-dot", KEY_DOT, 0, '.', '>'},
-	{"jis-slash", KEY_SLASH, 0, '/', '?'},
-	{"jis-ro", KEY_RESERVED, 0, '\\', '_'},
-	{"jis-kp-slash", KEY_RESERVED, 0, '/', '/'},
-	{"jis-kp-star", KEY_RESERVED, 0, '*', '*'},
-	{"jis-kp-minus", KEY_RESERVED, 0, '-', '-'},
-	{"jis-kp-7", KEY_RESERVED, 0, '7', '7'},
-	{"jis-kp-8", KEY_RESERVED, 0, '8', '8'},
-	{"jis-kp-9", KEY_RESERVED, 0, '9', '9'},
-	{"jis-kp-plus", KEY_RESERVED, 0, '+', '+'},
-	{"jis-kp-4", KEY_RESERVED, 0, '4', '4'},
-	{"jis-kp-5", KEY_RESERVED, 0, '5', '5'},
-	{"jis-kp-6", KEY_RESERVED, 0, '6', '6'},
-	{"jis-kp-equal", KEY_RESERVED, 0, '=', '='},
-	{"jis-kp-1", KEY_RESERVED, 0, '1', '1'},
-	{"jis-kp-2", KEY_RESERVED, 0, '2', '2'},
-	{"jis-kp-3", KEY_RESERVED, 0, '3', '3'},
-	{"jis-kp-enter", KEY_RESERVED, INPUT_KEY_ENTER, 0, 0},
-	{"jis-kp-0", KEY_RESERVED, 0, '0', '0'},
-	{"jis-kp-comma", KEY_RESERVED, 0, ',', ','},
-	{"jis-kp-dot", KEY_RESERVED, 0, '.', '.'},
-	{"leftshift", KEY_LEFTSHIFT, INPUT_KEY_SHIFT_SYMBOL, 0, 0},
-	{"rightshift", KEY_RIGHTSHIFT, INPUT_KEY_SHIFT_SYMBOL, 0, 0},
-	{"leftctrl", KEY_LEFTCTRL, INPUT_KEY_CTRL_SYMBOL, 0, 0},
-	{"rightctrl", KEY_RIGHTCTRL, INPUT_KEY_CTRL_SYMBOL, 0, 0},
-	{"leftalt", KEY_LEFTALT, INPUT_KEY_GRAPH_SYMBOL, 0, 0},
-	{"rightalt", KEY_RIGHTALT, INPUT_KEY_GRAPH_SYMBOL, 0, 0},
-	{"capslock", KEY_CAPSLOCK, INPUT_KEY_CAPS_LOCK, 0, 0},
-	{"kana", KEY_RESERVED, INPUT_KEY_KANA, 0, 0},
-	{"home", KEY_HOME, INPUT_KEY_HOME, 0, 0},
-	{"up", KEY_UP, INPUT_KEY_UP, 0, 0},
-	{"pageup", KEY_PAGEUP, INPUT_KEY_PAGE_UP, 0, 0},
-	{"left", KEY_LEFT, INPUT_KEY_LEFT, 0, 0},
-	{"right", KEY_RIGHT, INPUT_KEY_RIGHT, 0, 0},
-	{"end", KEY_END, INPUT_KEY_END, 0, 0},
-	{"down", KEY_DOWN, INPUT_KEY_DOWN, 0, 0},
-	{"pagedown", KEY_PAGEDOWN, INPUT_KEY_PAGE_DOWN, 0, 0},
-	{"insert", KEY_INSERT, INPUT_KEY_INSERT, 0, 0},
-	{"delete", KEY_DELETE, INPUT_KEY_DELETE, 0, 0},
-};
-
-static const struct symbol_entry *find_symbol(const char *name);
-
-/* Supports the find symbol operation. */
-static const struct symbol_entry *
-find_symbol(
-	const char *name)
-{
-	unsigned index;
-
-	/* Process each remaining element. */
-	for (index = 0; index < sizeof(symbols) / sizeof(symbols[0]); index++) {
-		/* Selects the matching value. */
-		if (strcmp(name, symbols[index].name) == 0)
-			return &symbols[index];
-	}
-
-	/* Reports that no result is available. */
-	return NULL;
-}
-
-static int function_number(const char *symbol);
-
-/* Supports the function number operation. */
-static int
-function_number(
-	const char *symbol)
-{
-	/* Handles the symbol condition. */
-	if (symbol[0] != 'f')
-		return 0;
-
-	/* Handles the symbol condition. */
-	if (symbol[1] >= '1' && symbol[1] <= '9' && symbol[2] == '\0')
-		return symbol[1] - '0';
-
-	/* Selects the matching value. */
-	if (strcmp(symbol, "f10") == 0)
-		return 10;
-
-	/* Succeeded. */
-	return 0;
-}
-
-/*
- * Implements the drv input keymap init operation.
+ * Starts the keymap with the layout it was built for.
  */
 void
 drv_input_keymap_init(
@@ -2113,7 +1005,7 @@ drv_input_keymap_init(
 }
 
 /*
- * Implements the drv input key from symbol operation.
+ * Reports the key code one symbol is produced by.
  */
 uint16_t
 drv_input_key_from_symbol(
@@ -2238,7 +1130,7 @@ drv_input_key_from_symbol(
 }
 
 /*
- * Implements the drv input key symbol supported operation.
+ * Asks whether the keymap can produce one symbol.
  */
 int
 drv_input_key_symbol_supported(
@@ -2263,7 +1155,7 @@ drv_input_key_symbol_supported(
 }
 
 /*
- * Implements the drv input keymap event from code operation.
+ * Renders one key code as the symbol it produces.
  */
 int
 drv_input_keymap_event_from_code(
@@ -2345,37 +1237,8 @@ drv_input_keymap_event_from_code(
 	return 1;
 }
 
-static void update_modifier(struct input_keymap_state *state, const char *symbol, int down, int press);
-
-/* Supports the update modifier operation. */
-static void
-update_modifier(
-	struct input_keymap_state *state,
-	const char *symbol,
-	int down,
-	int press)
-{
-	/* Selects the matching value. */
-	if (strcmp(symbol, "leftshift") == 0)
-		state->left_shift = (uint8_t)down;
-	else if (strcmp(symbol, "rightshift") == 0)
-		state->right_shift = (uint8_t)down;
-	else if (strcmp(symbol, "leftctrl") == 0)
-		state->left_control = (uint8_t)down;
-	else if (strcmp(symbol, "rightctrl") == 0)
-		state->right_control = (uint8_t)down;
-	else if (strcmp(symbol, "leftalt") == 0)
-		state->left_graph = (uint8_t)down;
-	else if (strcmp(symbol, "rightalt") == 0)
-		state->right_graph = (uint8_t)down;
-	else if (strcmp(symbol, "capslock") == 0 && press)
-		state->caps_lock ^= 1U;
-	else if (strcmp(symbol, "kana") == 0 && press)
-		state->kana_lock ^= 1U;
-}
-
 /*
- * Implements the drv input keymap translate operation.
+ * Renders one key event as the character it produces.
  */
 int
 drv_input_keymap_translate(
@@ -2440,22 +1303,9 @@ drv_input_keymap_translate(
 	/* Reports operation failure. */
 	return 1;
 }
-/* End consolidated input-keymap.c. */
-
-/* Begin consolidated input-queue.c. */
-/*
- * zedBSD
- * Copyright (C) 2026 Awe Morris
- *
- * SPDX-License-Identifier: Zlib
- */
-
-#include "kern/input-queue.h"
-
-#include <string.h>
 
 /*
- * Implements the drv input queue init operation.
+ * Starts the queue events are delivered through.
  */
 void
 drv_input_queue_init(
@@ -2465,7 +1315,7 @@ drv_input_queue_init(
 }
 
 /*
- * Implements the drv input queue reader init operation.
+ * Starts one reader's view of that queue.
  */
 void
 drv_input_queue_reader_init(
@@ -2476,7 +1326,7 @@ drv_input_queue_reader_init(
 }
 
 /*
- * Implements the drv input queue push operation.
+ * Puts one report on the queue.
  */
 void
 drv_input_queue_push(
@@ -2495,7 +1345,7 @@ drv_input_queue_push(
 }
 
 /*
- * Implements the drv input queue read operation.
+ * Takes the reports one reader has not seen yet.
  */
 size_t
 drv_input_queue_read(
@@ -2529,7 +1379,7 @@ drv_input_queue_read(
 }
 
 /*
- * Implements the drv input queue readable operation.
+ * Asks whether a reader has anything waiting.
  */
 int
 drv_input_queue_readable(
@@ -2542,7 +1392,7 @@ drv_input_queue_readable(
 }
 
 /*
- * Implements the drv input queue detach operation.
+ * Takes one reader off the queue.
  */
 void
 drv_input_queue_detach(
@@ -2550,28 +1400,9 @@ drv_input_queue_detach(
 {
 	queue->detached = 1;
 }
-/* End consolidated input-queue.c. */
-
-/* Begin consolidated input-subscriber.c. */
-/*
- * zedBSD
- * Copyright (C) 2026 Awe Morris
- *
- * SPDX-License-Identifier: Zlib
- */
-
-#include "kern/input-device.h"
-#include "kern/lock.h"
-
-#include <errno.h>
-
-#define INPUT_SUBSCRIBER_MAX 8U
-
-static struct spinlock subscriber_lock;
-static struct input_subscription *subscribers[INPUT_SUBSCRIBER_MAX];
 
 /*
- * Implements the drv input subscriber init operation.
+ * Starts one subscriber's state.
  */
 void
 drv_input_subscriber_init(
@@ -2586,7 +1417,7 @@ drv_input_subscriber_init(
 }
 
 /*
- * Implements the drv input subscribe operation.
+ * Subscribes a caller to a device's events.
  */
 int
 drv_input_subscribe(
@@ -2640,7 +1471,7 @@ drv_input_subscribe(
 }
 
 /*
- * Implements the drv input unsubscribe operation.
+ * Takes that subscription away.
  */
 void
 drv_input_unsubscribe(
@@ -2696,4 +1527,1056 @@ drv_input_subscriber_publish(
 
 	spin_unlock_irqrestore(&subscriber_lock, irq);
 }
-/* End consolidated input-subscriber.c. */
+
+/* Asks whether one bit of a bitmap is set. */
+static int
+bit_test(
+	const unsigned long *bits,
+	unsigned bit)
+{
+	/* Returns the computed result. */
+	return (bits[bit / INPUT_BITS_PER_WORD] &
+		(1UL << (bit % INPUT_BITS_PER_WORD))) != 0;
+}
+
+/* Sets one bit of a bitmap. */
+static void
+bit_set(
+	unsigned long *bits,
+	unsigned bit)
+{
+	bits[bit / INPUT_BITS_PER_WORD] |= 1UL << (bit % INPUT_BITS_PER_WORD);
+}
+
+/* Clears one bit of a bitmap. */
+static void
+bit_clear(
+	unsigned long *bits,
+	unsigned bit)
+{
+	bits[bit / INPUT_BITS_PER_WORD] &=
+		~(1UL << (bit % INPUT_BITS_PER_WORD));
+}
+
+/* Reports the bitmap one capability kind is recorded in. */
+static int
+capability_bits_mutable(
+	struct input_capability_state *state,
+	unsigned type,
+	unsigned long **bits,
+	size_t *size)
+{
+	/* Handles the state availability. */
+	if (state == NULL || bits == NULL || size == NULL)
+		return EINVAL;
+	/* Dispatch the selected syntax or record type. */
+	switch (type) {
+	case EV_KEY:
+		*bits = state->key_bits;
+		*size = sizeof(state->key_bits);
+		/* Succeeded. */
+		return 0;
+	case EV_REL:
+		*bits = state->rel_bits;
+		*size = sizeof(state->rel_bits);
+		/* Succeeded. */
+		return 0;
+	case EV_ABS:
+		*bits = state->abs_bits;
+		*size = sizeof(state->abs_bits);
+		/* Succeeded. */
+		return 0;
+	default:
+		/* Failed. */
+		return EINVAL;
+	}
+}
+
+/* Refuses a code the capability bitmaps have no room for. */
+static int
+capability_code_valid(
+	unsigned type,
+	unsigned code)
+{
+	/* Dispatch the selected syntax or record type. */
+	switch (type) {
+	case EV_SYN:
+		/* Returns the computed result. */
+		return code == SYN_REPORT;
+	case EV_KEY:
+		/* Returns the computed result. */
+		return code <= KEY_MAX;
+	case EV_REL:
+		/* Returns the computed result. */
+		return code <= REL_MAX;
+	case EV_ABS:
+		/* Returns the computed result. */
+		return code <= ABS_MAX;
+	default:
+		/* Succeeded. */
+		return 0;
+	}
+}
+
+/* Stamps a report with the time it was made. */
+static void
+report_timestamp(
+	struct input_event *event,
+	uint64_t milliseconds)
+{
+	memset(event, 0, sizeof(*event));
+	event->time.tv_sec = (time_t)(milliseconds / 1000U);
+	event->time.tv_usec = (int64_t)((milliseconds % 1000U) * 1000U);
+}
+
+/* Starts a report of input events. */
+static void
+report_init(
+	struct input_report *report,
+	struct input_device *device)
+{
+	memset(report, 0, sizeof(*report));
+	report->device = device;
+	report->device_id = device->number;
+}
+
+/* Appends one event to a report. */
+static void
+report_event(
+	struct input_report *report,
+	uint64_t milliseconds,
+	uint16_t type,
+	uint16_t code,
+	int32_t value,
+	const struct hal_key_event *key_event)
+{
+	struct input_report_event *item;
+	size_t index;
+
+	/* Handles the report condition. */
+	if (report->event_count == INPUT_REPORT_EVENT_MAX)
+		return;
+	item = &report->events[report->event_count++];
+	report_timestamp(&item->event, milliseconds);
+	item->event.type = type;
+	item->event.code = code;
+	item->event.value = value;
+
+	/* Handles the key event availability. */
+	if (key_event == NULL)
+		return;
+	/* Process each remaining element. */
+	for (index = 0; index < HAL_KEY_SYMBOL_SIZE; index++)
+		item->symbol[index] = key_event->symbol[index];
+	item->key_flags = key_event->flags;
+}
+
+/* Reports the device behind an open input file. */
+static struct input_device *
+file_device(
+	struct file *file)
+{
+	/* Returns the computed result. */
+	return file != NULL && file->f_inode != NULL &&
+			       file->f_inode->i_data != NULL
+		       ? ((const struct cdev *)file->f_inode->i_data)->data
+		       : NULL;
+}
+
+/* Reports the reader state behind an open input file. */
+static struct input_reader *
+file_reader(
+	struct file *file)
+{
+	/* Returns the computed result. */
+	return file != NULL ? file->f_data : NULL;
+}
+
+/* Joins the gate that keeps a producer out of a teardown. */
+static int
+producer_callback_enter(
+	struct input_device *device)
+{
+	unsigned long irq = spin_lock_irqsave(&device->lock);
+
+	/* Handles the device condition. */
+	if (!device->registered || device->retiring) {
+		spin_unlock_irqrestore(&device->lock, irq);
+
+		/* Failed. */
+		return ENODEV;
+	}
+
+	device->producer_callbacks++;
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Leaves that gate. */
+static void
+producer_callback_leave(
+	struct input_device *device)
+{
+	unsigned long irq = spin_lock_irqsave(&device->lock);
+
+	/* Handles the device condition. */
+	if (device->producer_callbacks != 0)
+		device->producer_callbacks--;
+	waitq_wake_all(&device->waitq);
+
+	spin_unlock_irqrestore(&device->lock, irq);
+}
+
+/* Opens one input device for reading. */
+static int
+input_open(
+	struct file *file)
+{
+	struct input_device *device = file_device(file);
+	struct input_reader *reader;
+	unsigned long irq;
+	int error, attached = 0;
+
+	/* Handles the device availability. */
+	if (device == NULL)
+		return ENODEV;
+
+	/* Checks the file status flags get result. */
+	if ((file_status_flags_get(file) & O_ACCMODE) == O_WRONLY)
+		return EACCES;
+
+	/* Handles the reader availability. */
+	reader = kern_calloc(1, sizeof(*reader));
+	if (reader == NULL)
+		return ENOMEM;
+
+	/* Checks the operation status. */
+	error = producer_callback_enter(device);
+	if (error != 0) {
+		kern_free(reader);
+
+		/* Failed. */
+		return error;
+	}
+
+	/* Handles the open availability. */
+	if (device->open != NULL) {
+		/* Checks the operation status. */
+		error = device->open(device->context);
+		if (error != 0) {
+			producer_callback_leave(device);
+			kern_free(reader);
+
+			/* Failed. */
+			return error;
+		}
+	}
+
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Handles the device condition. */
+	if (device->registered && !device->retiring) {
+		drv_input_queue_reader_init(&device->queue, &reader->cursor);
+		reader->producer_opened = device->close != NULL;
+		reader->next = device->readers;
+		device->readers = reader;
+		file->f_data = reader;
+		attached = 1;
+	}
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Keep the admission held through the compensating close. */
+	if (!attached && device->close != NULL)
+		device->close(device->context);
+	producer_callback_leave(device);
+
+	/* Handles the attached condition. */
+	if (!attached) {
+		kern_free(reader);
+
+		/* Failed. */
+		return ENODEV;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Closes it again. */
+static int
+input_close(
+	struct file *file)
+{
+	struct input_device *device = file_device(file);
+	struct input_reader *reader = file_reader(file), **link;
+	unsigned long irq;
+	int close_producer = 0;
+
+	/* Handles the device availability. */
+	if (device == NULL || reader == NULL)
+		return 0;
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Process each linked entry. */
+	for (link = &device->readers; *link != NULL; link = &(*link)->next) {
+		/* Handles the link condition. */
+		if (*link == reader) {
+			*link = reader->next;
+			break;
+		}
+	}
+
+	/* Handles the device condition. */
+	if (device->grabber == reader)
+		device->grabber = NULL;
+
+	/* Handles the reader condition. */
+	if (reader->producer_opened) {
+		reader->producer_opened = 0;
+		device->producer_callbacks++;
+		close_producer = 1;
+	}
+
+	file->f_data = NULL;
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Handles the close producer condition. */
+	if (close_producer)
+		device->close(device->context);
+
+	/* Handles the close producer condition. */
+	if (close_producer)
+		producer_callback_leave(device);
+	kern_free(reader);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Reads the events that have been queued for a reader. */
+static ssize_t
+input_read(
+	struct file *file,
+	void *buffer,
+	size_t size)
+{
+	ssize_t function_result;
+	uint64_t sequence;
+	int error;
+	struct input_device *device = file_device(file);
+	struct input_reader *reader = file_reader(file);
+	size_t capacity, count;
+	unsigned long irq;
+
+	/* Handles the device availability. */
+	if (device == NULL || reader == NULL)
+		return -ENODEV;
+
+	/* Checks the current data size. */
+	if (size < sizeof(struct input_event))
+		return -EINVAL;
+	capacity = size / sizeof(struct input_event);
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Continue until the operation reaches a terminal state. */
+	for (;;) {
+		/* Handles the grabber availability. */
+		if (device->grabber == NULL || device->grabber == reader) {
+			/* Checks the remaining item count. */
+			count = drv_input_queue_read(&device->queue,
+						     &reader->cursor, buffer,
+						     capacity);
+			if (count != 0) {
+				spin_unlock_irqrestore(&device->lock, irq);
+
+				/* Computes the function result. */
+				function_result =
+					(ssize_t)(count *
+						  sizeof(struct input_event));
+
+				/* Returns the computed result. */
+				return function_result;
+			}
+		}
+
+		/* Handles the device condition. */
+		if (!device->registered) {
+			spin_unlock_irqrestore(&device->lock, irq);
+
+			/* Succeeded. */
+			return 0;
+		}
+
+		/* Checks the file status flags get result. */
+		if ((file_status_flags_get(file) & O_NONBLOCK) != 0) {
+			spin_unlock_irqrestore(&device->lock, irq);
+
+			/* Failed. */
+			return -EAGAIN;
+		}
+
+		sequence = waitq_sequence(&device->waitq);
+
+		/* Checks the operation status. */
+		error = waitq_sleep(&device->waitq, &device->lock, sequence, 0,
+				    WAITQ_INTERRUPTIBLE);
+		if (error == EINTR) {
+			spin_unlock_irqrestore(&device->lock, irq);
+
+			/* Failed. */
+			return -EINTR;
+		}
+	}
+}
+
+/* Reports whether a reader has events waiting. */
+static int
+input_poll(
+	struct file *file,
+	short requested,
+	short *returned)
+{
+	struct input_device *device = file_device(file);
+	struct input_reader *reader = file_reader(file);
+	unsigned long irq;
+	short result = 0;
+
+	/* Handles the returned availability. */
+	if (returned == NULL)
+		return EINVAL;
+
+	/* Handles the device availability. */
+	if (device == NULL || reader == NULL) {
+		*returned = POLLERR | POLLHUP;
+		/* Succeeded. */
+		return 0;
+	}
+
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Checks the drv input queue readable result. */
+	if ((device->grabber == NULL || device->grabber == reader) &&
+	    drv_input_queue_readable(&device->queue, &reader->cursor))
+		result |= requested & (POLLIN | POLLRDNORM);
+
+	/* Handles the device condition. */
+	if (!device->registered)
+		result |= POLLHUP;
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	*returned = result;
+	/* Succeeded. */
+	return 0;
+}
+
+/* Copies a string out to a caller buffer. */
+static int
+copy_text(
+	const char *text,
+	unsigned long request,
+	uintptr_t argument)
+{
+	int error;
+	size_t capacity = (request >> 16) & 0x1fffU;
+	size_t length = strlen(text) + 1U;
+
+	/* Handles the capacity condition. */
+	if (capacity == 0)
+		return EINVAL;
+
+	/* Checks the current data length. */
+	if (length > capacity)
+		length = capacity;
+
+	/* Obtains the copyout result. */
+	error = copyout(text, argument, length);
+
+	/* Returns the computed result. */
+	return error;
+}
+
+/* Reports how many bytes one control request asks for. */
+static size_t
+ioctl_size(
+	unsigned long request)
+{
+	/* Returns the computed result. */
+	return (request >> 16) & 0x1fffU;
+}
+
+/* Copies a bitmap out to a caller buffer. */
+static int
+copy_bits(
+	const uint8_t *bits,
+	size_t bit_size,
+	size_t capacity,
+	uintptr_t argument)
+{
+	uint8_t output[32];
+	size_t copied = 0, count;
+	uintptr_t address;
+	int error;
+
+	/* Continue while the operation condition remains true. */
+	while (copied < capacity) {
+		/* Checks the remaining item count. */
+		count = capacity - copied;
+		if (count > sizeof(output))
+			count = sizeof(output);
+
+		/* Checks the operation status. */
+		error = drv_input_capability_copy(bits, bit_size, copied,
+						  output, count);
+		if (error == 0)
+			error = user_address_add(argument, copied, &address);
+		if (error == 0)
+			error = copyout(output, address, count);
+		if (error != 0)
+			return error;
+		copied += count;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Copies one capability bitmap out. */
+static int
+copy_capability_bits(
+	const struct input_device *device,
+	unsigned type,
+	size_t capacity,
+	uintptr_t argument)
+{
+	int function_result;
+	const uint8_t *bits;
+	size_t size;
+	int error = drv_input_capability_bits(&device->capability_state, type,
+					      &bits, &size);
+
+	/* Checks the operation status. */
+	if (error != 0)
+		return ENOTTY;
+
+	/* Obtains the copy bits result. */
+	function_result = copy_bits(bits, size, capacity, argument);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/* Copies the held-key bitmap out. */
+static int
+copy_key_state(
+	struct input_device *device,
+	size_t capacity,
+	uintptr_t argument)
+{
+	int error;
+	uint8_t snapshot[INPUT_KEY_BITS_SIZE];
+	const uint8_t *bits;
+	size_t size;
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&device->lock);
+
+	(void)drv_input_capability_key_state(&device->capability_state, &bits,
+					     &size);
+	memcpy(snapshot, bits, sizeof(snapshot));
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Obtains the copy bits result. */
+	error = copy_bits(snapshot, size, capacity, argument);
+
+	/* Returns the computed result. */
+	return error;
+}
+
+/* Copies one axis's range out. */
+static int
+copy_abs_info(
+	struct input_device *device,
+	unsigned axis,
+	uintptr_t argument)
+{
+	int function_result;
+	struct input_absinfo info;
+	unsigned long irq;
+	int error;
+
+	irq = spin_lock_irqsave(&device->lock);
+
+	error = drv_input_capability_abs_info(&device->capability_state, axis,
+					      &info);
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Checks the operation status. */
+	if (error == ENOENT)
+		return ENOTTY;
+
+	/* Checks the operation status. */
+	if (error != 0)
+		return error;
+
+	/* Obtains the copyout result. */
+	function_result = copyout(&info, argument, sizeof(info));
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/* Serves one control request against an input device. */
+static int
+input_ioctl(
+	struct file *file,
+	unsigned long request,
+	uintptr_t argument)
+{
+	int function_result;
+	struct input_device *device = file_device(file);
+	struct input_reader *reader = file_reader(file), *item;
+	unsigned group = (unsigned)((request >> 8) & 0xffU);
+	unsigned number = (unsigned)(request & 0xffU);
+	size_t size = ioctl_size(request);
+	unsigned long irq;
+	int value, error = 0;
+
+	/* Handles the device availability. */
+	if (device == NULL || reader == NULL)
+		return ENODEV;
+
+	/* Handles the request condition. */
+	if (request == EVIOCGVERSION) {
+		value = EV_VERSION;
+
+		/* Obtains the copyout result. */
+		function_result = copyout(&value, argument, sizeof(value));
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Handles the request condition. */
+	if (request == EVIOCGID) {
+		/* Obtains the copyout result. */
+		function_result =
+			copyout(&device->id, argument, sizeof(device->id));
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Handles the group condition. */
+	if (group == ZEDBSD_EVDEV_IOC_GROUP) {
+		/* Dispatch the selected operation case. */
+		switch (number) {
+		case 0x06:
+			/* Checks the EVIOCGNAME result. */
+			if (request != EVIOCGNAME(size))
+				return ENOTTY;
+
+			/* Obtains the copy text result. */
+			function_result =
+				copy_text(device->name, request, argument);
+
+			/* Returns the computed result. */
+			return function_result;
+		case 0x07:
+			/* Checks the EVIOCGPHYS result. */
+			if (request != EVIOCGPHYS(size))
+				return ENOTTY;
+
+			/* Obtains the copy text result. */
+			function_result = copy_text(device->physical_path,
+						    request, argument);
+
+			/* Returns the computed result. */
+			return function_result;
+		case 0x08:
+			/* Checks the EVIOCGUNIQ result. */
+			if (request != EVIOCGUNIQ(size))
+				return ENOTTY;
+
+			/* Obtains the copy text result. */
+			function_result =
+				copy_text(device->unique_id, request, argument);
+
+			/* Returns the computed result. */
+			return function_result;
+		default:
+			break;
+		}
+	}
+
+	/* Checks the EVIOCGKEY result. */
+	if (group == ZEDBSD_EVDEV_IOC_GROUP && number == 0x18U &&
+	    request == EVIOCGKEY(size)) {
+		/* Obtains the copy key state result. */
+		function_result = copy_key_state(device, size, argument);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Checks the EVIOCGBIT result. */
+	if (group == ZEDBSD_EVDEV_IOC_GROUP && number >= 0x20U &&
+	    number <= 0x20U + EV_MAX &&
+	    request == EVIOCGBIT(number - 0x20U, size)) {
+		/* Obtains the copy capability bits result. */
+		function_result = copy_capability_bits(device, number - 0x20U,
+						       size, argument);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Checks the EVIOCGABS result. */
+	if (group == ZEDBSD_EVDEV_IOC_GROUP && number >= 0x40U &&
+	    number <= 0x40U + ABS_MAX && request == EVIOCGABS(number - 0x40U)) {
+		/* Obtains the copy abs info result. */
+		function_result =
+			copy_abs_info(device, number - 0x40U, argument);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Handles the request condition. */
+	if (request != EVIOCGRAB)
+		return ENOTTY;
+
+	/* Checks the operation status. */
+	if ((error = copyin(argument, &value, sizeof(value))) != 0)
+		return error;
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Validates the current value. */
+	if (value != 0) {
+		/* Handles the grabber availability. */
+		if (device->grabber != NULL && device->grabber != reader)
+			error = EBUSY;
+		else
+			device->grabber = reader;
+	} else if (device->grabber != reader) {
+		error = EINVAL;
+	} else {
+		device->grabber = NULL;
+		/* Process each linked entry. */
+		for (item = device->readers; item != NULL; item = item->next) {
+			/* Handles the item condition. */
+			if (item != reader) {
+				item->cursor.sequence =
+					device->queue.next_sequence;
+			}
+		}
+
+		waitq_wake_all(&device->waitq);
+	}
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Checks the operation status. */
+	if (error == 0)
+		poll_notify();
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Copies one of a device's descriptive strings out. */
+static int
+copy_info_text(
+	char *destination,
+	const char *source)
+{
+	/* Handles the source availability. */
+	if (source == NULL)
+		source = "";
+
+	/* Checks the strlen result. */
+	if (strlen(source) >= INPUT_TEXT_MAX)
+		return ENAMETOOLONG;
+	strcpy(destination, source);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Starts the resynchronization a new reader needs. */
+static void
+input_device_resync_begin(
+	struct input_device *device,
+	uint32_t key_flags)
+{
+	struct input_report report;
+	unsigned long irq, publication_irq;
+	int published = 0;
+
+	publication_irq = spin_lock_irqsave(&device->publication_lock);
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Handles the device condition. */
+	if (device->registered && !device->retiring) {
+		memset(device->resync_key_state, 0,
+		       sizeof(device->resync_key_state));
+		device->resyncing = 1;
+		published = 1;
+	}
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Handles the published condition. */
+	if (published) {
+		report_init(&report, device);
+		report.flags = INPUT_REPORT_RESYNC_BEGIN |
+			       ((key_flags & HAL_KEY_EVENT_LOCK_CAPS) != 0
+					? INPUT_REPORT_LOCK_CAPS
+					: 0U) |
+			       ((key_flags & HAL_KEY_EVENT_LOCK_KANA) != 0
+					? INPUT_REPORT_LOCK_KANA
+					: 0U);
+		drv_input_subscriber_publish(&report);
+	}
+
+	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
+}
+
+/* Builds the events that describe the current state. */
+static void
+input_device_resync_snapshot(
+	struct input_device *device,
+	const struct hal_key_event *key_event)
+{
+	struct input_report report;
+	uint64_t milliseconds = clock_milliseconds(NULL);
+	unsigned long irq, publication_irq;
+	uint16_t code = drv_input_key_from_symbol(key_event->symbol);
+	int logical_only = code == KEY_RESERVED &&
+			   drv_input_key_symbol_supported(key_event->symbol);
+	int published = 0;
+
+	/* Handles the code condition. */
+	if (code == KEY_RESERVED && !logical_only)
+		return;
+	report_init(&report, device);
+	report.flags = INPUT_REPORT_SNAPSHOT;
+	report_event(&report, milliseconds, EV_KEY, code, 1, key_event);
+	publication_irq = spin_lock_irqsave(&device->publication_lock);
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Handles the device condition. */
+	if (device->registered && !device->retiring && device->resyncing) {
+		/* Handles the logical only condition. */
+		if (logical_only) {
+			published = 1;
+		} else if ((device->capability_state
+				    .key_bits[code / INPUT_BITS_PER_WORD] &
+			    (1UL << (code % INPUT_BITS_PER_WORD))) != 0 &&
+			   (device->resync_key_state[code /
+						     INPUT_BITS_PER_WORD] &
+			    (1UL << (code % INPUT_BITS_PER_WORD))) == 0) {
+			device->resync_key_state[code / INPUT_BITS_PER_WORD] |=
+				1UL << (code % INPUT_BITS_PER_WORD);
+			published = 1;
+		}
+	}
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Handles the published condition. */
+	if (published)
+		drv_input_subscriber_publish(&report);
+
+	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
+}
+
+/* Ends that resynchronization. */
+static void
+input_device_resync_end(
+	struct input_device *device)
+{
+	struct input_report report;
+	struct input_event event;
+	uint64_t milliseconds = clock_milliseconds(NULL);
+	unsigned long irq, publication_irq;
+	int published = 0;
+
+	publication_irq = spin_lock_irqsave(&device->publication_lock);
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Handles the device condition. */
+	if (device->registered && !device->retiring && device->resyncing) {
+		device->resyncing = 0;
+		memcpy(device->capability_state.key_state,
+		       device->resync_key_state,
+		       sizeof(device->capability_state.key_state));
+		report_timestamp(&event, milliseconds);
+		event.type = EV_SYN;
+		event.code = SYN_DROPPED;
+		drv_input_queue_push(&device->queue, &event);
+		event.code = SYN_REPORT;
+		drv_input_queue_push(&device->queue, &event);
+		waitq_wake_all(&device->waitq);
+		published = 1;
+	}
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Handles the published condition. */
+	if (published) {
+		report_init(&report, device);
+		report.flags = INPUT_REPORT_RESYNC_END;
+		drv_input_subscriber_publish(&report);
+	}
+
+	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
+
+	/* Handles the published condition. */
+	if (published)
+		poll_notify();
+}
+
+/* Tries to retain an input generation across concurrent terminal removal. */
+static int
+input_device_tryref(
+	struct input_device *device)
+{
+	int error;
+
+	/* Computes the function result. */
+	error = device != NULL && refcount_tryget(&device->refs);
+
+	/* Returns the computed result. */
+	return error;
+}
+
+/* Retains one input generation for an owned subsystem reference. */
+static void
+input_device_ref(
+	struct input_device *device)
+{
+	/* Handles the device availability. */
+	if (device != NULL)
+		refcount_get(&device->refs);
+}
+
+/* Releases the event number only when the complete generation is gone. */
+static void
+input_device_release(
+	struct input_device *device)
+{
+	unsigned long irq;
+
+	/* Checks the refcount put result. */
+	if (device == NULL || !refcount_put(&device->refs))
+		return;
+
+	irq = spin_lock_irqsave(&registry_lock);
+
+	/* Handles the device condition. */
+	if (device->number < INPUT_DEVICE_MAX &&
+	    input_device_reserved[device->number] == device)
+		input_device_reserved[device->number] = NULL;
+
+	spin_unlock_irqrestore(&registry_lock, irq);
+
+	kern_free(device);
+}
+
+/* Releases the input reference owned by one terminal cdev generation. */
+static void
+input_cdev_finalize(
+	void *data)
+{
+	input_device_release(data);
+}
+
+/* Finds the key symbol one name stands for. */
+static const struct symbol_entry *
+find_symbol(
+	const char *name)
+{
+	unsigned index;
+
+	/* Process each remaining element. */
+	for (index = 0; index < sizeof(symbols) / sizeof(symbols[0]); index++) {
+		/* Selects the matching value. */
+		if (strcmp(name, symbols[index].name) == 0)
+			return &symbols[index];
+	}
+
+	/* Reports that no result is available. */
+	return NULL;
+}
+
+/* Reports which function key a symbol is, if it is one. */
+static int
+function_number(
+	const char *symbol)
+{
+	/* Handles the symbol condition. */
+	if (symbol[0] != 'f')
+		return 0;
+
+	/* Handles the symbol condition. */
+	if (symbol[1] >= '1' && symbol[1] <= '9' && symbol[2] == '\0')
+		return symbol[1] - '0';
+
+	/* Selects the matching value. */
+	if (strcmp(symbol, "f10") == 0)
+		return 10;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Takes one modifier key press or release into the state. */
+static void
+update_modifier(
+	struct input_keymap_state *state,
+	const char *symbol,
+	int down,
+	int press)
+{
+	/* Selects the matching value. */
+	if (strcmp(symbol, "leftshift") == 0)
+		state->left_shift = (uint8_t)down;
+	else if (strcmp(symbol, "rightshift") == 0)
+		state->right_shift = (uint8_t)down;
+	else if (strcmp(symbol, "leftctrl") == 0)
+		state->left_control = (uint8_t)down;
+	else if (strcmp(symbol, "rightctrl") == 0)
+		state->right_control = (uint8_t)down;
+	else if (strcmp(symbol, "leftalt") == 0)
+		state->left_graph = (uint8_t)down;
+	else if (strcmp(symbol, "rightalt") == 0)
+		state->right_graph = (uint8_t)down;
+	else if (strcmp(symbol, "capslock") == 0 && press)
+		state->caps_lock ^= 1U;
+	else if (strcmp(symbol, "kana") == 0 && press)
+		state->kana_lock ^= 1U;
+}
+
+/*
+ * Input device
+ */
+
+static const struct cdev_ops input_ops = {
+	.open = input_open,
+	.close = input_close,
+	.read = input_read,
+	.ioctl = input_ioctl,
+	.poll = input_poll,
+};

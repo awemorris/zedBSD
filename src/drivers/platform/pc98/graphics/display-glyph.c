@@ -1,14 +1,12 @@
-/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
-
 /*
  * zedBSD
- * Copyright (c) 2025, 2026, Awe Morris
+ * Copyright (C) 2026 Awe Morris
  *
- * zedBSD graphics PC-98 CGROM glyph backend, imported from Boots.
- * CGROM selection and read sequencing is adapted from StratoHAL 98glyph.c,
- * commit 76e909577bdf4629f11e473539b446a948fef830.  In particular, preserve
- * its VSYNC exclusion, 0x68 mode switch, CG-window byte layout, and symbol
- * bank handling; these details matter on physical PC-98 hardware.
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * zedBSD graphics PC-98 CGROM glyph backend.
  */
 
 #include "drivers/platform/pc98/graphics/display-glyph.h"

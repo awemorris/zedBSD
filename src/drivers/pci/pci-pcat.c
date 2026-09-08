@@ -1,9 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
 /*
- * PC/AT PCI Configuration Mechanism #1 host. Copyright (C) 2026 Awe Morris;
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * PCI Configuration Mechanism #1 host.
+ */
+
 #include <drivers/pci-pcat.h>
 #include <drivers/pci.h>
 #include <errno.h>
@@ -30,10 +35,8 @@ struct pcat_bar_mapping {
 static struct pcat_bar_mapping *bar_mappings;
 
 #if defined(__x86_64__)
-extern int amd64_acpi_ecam_address(uint16_t, uint8_t, uint8_t, uint8_t,
-				   paddr_t *);
-extern int amd64_acpi_ecam_pointer(uint16_t, uint8_t, uint8_t, uint8_t,
-				   volatile uint8_t **);
+extern int amd64_acpi_ecam_address(uint16_t, uint8_t, uint8_t, uint8_t, paddr_t *);
+extern int amd64_acpi_ecam_pointer(uint16_t, uint8_t, uint8_t, uint8_t, volatile uint8_t **);
 #endif
 
 static int ecam_function_address(const struct drv_pci_address *address, paddr_t *result);
@@ -49,15 +52,6 @@ static int pcat_map_bar(void *context, struct drv_pci_device *device, const stru
 static void pcat_unmap_bar(void *context, struct drv_pci_mapping *mapping);
 static int pcat_allocate_irqs(void *context, struct drv_pci_device *device, enum drv_pci_irq_type type, unsigned minimum, unsigned maximum, struct drv_pci_irq *irqs, unsigned *count);
 static void pcat_free_irqs(void *context, struct drv_pci_device *device, struct drv_pci_irq *irqs, unsigned count);
-
-static const struct drv_pci_bus_ops pcat_bus_ops = {
-	.config_space_size = 4096,
-	.config_read = pcat_config_read,
-	.config_write = pcat_config_write,
-	.map_bar = pcat_map_bar,
-	.unmap_bar = pcat_unmap_bar,
-	.allocate_irqs = pcat_allocate_irqs,
-	.free_irqs = pcat_free_irqs};
 
 /*
  * Implements the drv pci pcat init operation.
@@ -661,3 +655,17 @@ pcat_free_irqs(
 	(void)irqs;
 	(void)count;
 }
+
+/*
+ * PC/AT PCI
+ */
+
+static const struct drv_pci_bus_ops pcat_bus_ops = {
+	.config_space_size = 4096,
+	.config_read = pcat_config_read,
+	.config_write = pcat_config_write,
+	.map_bar = pcat_map_bar,
+	.unmap_bar = pcat_unmap_bar,
+	.allocate_irqs = pcat_allocate_irqs,
+	.free_irqs = pcat_free_irqs
+};

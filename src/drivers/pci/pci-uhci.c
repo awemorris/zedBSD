@@ -1,10 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * PCI UHCI host controller driver
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  */
+
 #include <drivers/pci-uhci.h>
 #include <drivers/pci.h>
 #include <drivers/usb.h>
@@ -62,12 +66,16 @@
 #define UHCI_RETIRE_TICKS 100U
 #define UHCI_QUIESCE_TICKS 100U
 #define UHCI_ADVANCE_POLL_TICKS 1U
+
 /*
  * Match the established UHCI stuck-QH threshold: a normal TD-status/QH-element
  * writeback window must not be mistaken for the early-Intel element bug.
  */
 #define UHCI_QH_STALL_TICKS 20U
-/* The kernel clock is 100 Hz, so ten ticks are a bounded 100-ms poll. */
+
+/*
+ * The kernel clock is 100 Hz, so ten ticks are a bounded 100-ms poll.
+ */
 #define UHCI_ROOT_POLL_TICKS 10U
 #define UHCI_PERIODIC_LEVELS 8U
 #define UHCI_MAX_PERIODIC_INTERVAL (1U << (UHCI_PERIODIC_LEVELS - 1U))
@@ -75,20 +83,11 @@
 #define UHCI_SKELETON_COUNT (UHCI_PERIODIC_LEVELS + 1U)
 #define UHCI_FRAME_BIT_TIMES 12000U
 #define UHCI_ASYNC_RESERVE_BIT_TIMES 1200U
-#define UHCI_PERIODIC_BUDGET_BIT_TIMES                                         \
-	(UHCI_FRAME_BIT_TIMES - UHCI_ASYNC_RESERVE_BIT_TIMES)
+#define UHCI_PERIODIC_BUDGET_BIT_TIMES (UHCI_FRAME_BIT_TIMES - UHCI_ASYNC_RESERVE_BIT_TIMES)
 #define UHCI_TRANSACTION_OVERHEAD_BITS 160U
-#define UHCI_PORT_RW_BITS                                                      \
-	(UHCI_PORT_PE | UHCI_PORT_RD | UHCI_PORT_RESET | UHCI_PORT_SUSPEND)
+#define UHCI_PORT_RW_BITS (UHCI_PORT_PE | UHCI_PORT_RD | UHCI_PORT_RESET | UHCI_PORT_SUSPEND)
 #define UHCI_PORT_CHANGE_BITS (UHCI_PORT_CSC | UHCI_PORT_PEC)
 #define UHCI_ENDPOINT_STALL_PUBLISHING_SLOT 1U
-
-struct uhci_qh {
-	volatile uint32_t head, element, reserved[2];
-};
-struct uhci_td {
-	volatile uint32_t link, status, token, buffer;
-};
 
 enum uhci_request_state {
 	UHCI_REQUEST_ACTIVE,
@@ -97,6 +96,13 @@ enum uhci_request_state {
 	UHCI_REQUEST_COMPLETING,
 	UHCI_REQUEST_RETIRED_CANCEL,
 	UHCI_REQUEST_FAILED
+};
+
+struct uhci_qh {
+	volatile uint32_t head, element, reserved[2];
+};
+struct uhci_td {
+	volatile uint32_t link, status, token, buffer;
 };
 
 struct uhci_request {
@@ -259,30 +265,8 @@ static int uhci_runtime_operational(struct uhci_controller *controller);
 static int uhci_attach(struct drv_pci_device *device, const struct drv_pci_id *id);
 static int uhci_detach(struct drv_pci_device *device, unsigned flags);
 
-static const struct drv_usb_hcd_ops uhci_ops = {
-	.start = uhci_start,
-	.quiesce = uhci_quiesce,
-	.stop = uhci_stop,
-	.urb_enqueue = uhci_urb_enqueue,
-	.urb_dequeue = uhci_urb_dequeue,
-	.endpoint_enable = uhci_endpoint_enable,
-	.endpoint_disable = uhci_endpoint_disable,
-	.endpoint_reset = uhci_endpoint_reset,
-	.frame_number = uhci_frame_number,
-	.root_hub_status = uhci_root_hub_status,
-	.root_hub_control = uhci_root_hub_control};
-
-static const struct drv_pci_id uhci_ids[] = {{DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-					      DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-					      0x0c0300U, 0xffffffU, 0}};
-static struct drv_pci_driver uhci_driver = {.name = "uhci",
-					    .ids = uhci_ids,
-					    .id_count = 1,
-					    .attach = uhci_attach,
-					    .detach = uhci_detach};
-
 /*
- * Implements the drv pci uhci driver register operation.
+ * Registers this driver with the PCI bus.
  */
 int
 drv_pci_uhci_driver_register(
@@ -298,7 +282,7 @@ drv_pci_uhci_driver_register(
 }
 
 /*
- * Implements the drv pci uhci probe roots operation.
+ * Probes the root ports of every controller this driver holds.
  */
 void
 drv_pci_uhci_probe_roots(
@@ -317,7 +301,7 @@ drv_pci_uhci_probe_roots(
 	}
 }
 
-/* Supports the uhci root worker arm operation. */
+/* Arms the thread that serves root port changes. */
 static void
 uhci_root_worker_arm(
 	struct uhci_controller *controller)
@@ -351,7 +335,7 @@ uhci_root_worker_arm(
 #endif
 }
 
-/* Supports the in8 operation. */
+/* Reads one byte of a controller register. */
 static uint8_t
 in8(
 	uint16_t port)
@@ -364,7 +348,7 @@ in8(
 	return v;
 }
 
-/* Supports the in16 operation. */
+/* Reads one 16-bit controller register. */
 static uint16_t
 in16(
 	uint16_t port)
@@ -377,7 +361,7 @@ in16(
 	return v;
 }
 
-/* Supports the out8 operation. */
+/* Writes one byte of a controller register. */
 static void
 out8(
 	uint16_t port,
@@ -386,7 +370,7 @@ out8(
 	__asm__ volatile("outb %0,%w1" ::"a"(v), "Nd"(port));
 }
 
-/* Supports the out16 operation. */
+/* Writes one 16-bit controller register. */
 static void
 out16(
 	uint16_t port,
@@ -395,7 +379,7 @@ out16(
 	__asm__ volatile("outw %0,%w1" ::"a"(v), "Nd"(port));
 }
 
-/* Supports the out32 operation. */
+/* Writes one 32-bit controller register. */
 static void
 out32(
 	uint16_t port,
@@ -404,7 +388,7 @@ out32(
 	__asm__ volatile("outl %0,%w1" ::"a"(v), "Nd"(port));
 }
 
-/* Supports the hcd controller operation. */
+/* Takes the controller behind a host controller handle. */
 static struct uhci_controller *
 hcd_controller(
 	struct drv_usb_hcd *hcd)
@@ -413,7 +397,7 @@ hcd_controller(
 	return (struct uhci_controller *)hcd->private_data[0];
 }
 
-/* Supports the io pause operation. */
+/* Waits the short moment a register write needs to settle. */
 static void
 io_pause(
 	unsigned count)
@@ -423,7 +407,7 @@ io_pause(
 		(void)in8(0x80U);
 }
 
-/* Supports the uhci skeleton link operation. */
+/* Builds the empty schedule every frame starts from. */
 static uint32_t
 uhci_skeleton_link(
 	struct uhci_controller *controller,
@@ -441,7 +425,7 @@ uhci_skeleton_link(
 	return function_result;
 }
 
-/* Supports the uhci frame periodic level operation. */
+/* Reports which periodic level one frame begins at. */
 static unsigned
 uhci_frame_periodic_level(
 	unsigned frame)
@@ -458,7 +442,7 @@ uhci_frame_periodic_level(
 	return level;
 }
 
-/* Supports the uhci schedule release operation. */
+/* Gives the memory the schedule lives in back. */
 static void
 uhci_schedule_release(
 	struct uhci_controller *controller)
@@ -500,7 +484,7 @@ uhci_schedule_release(
 	}
 }
 
-/* Supports the uhci schedule initialize operation. */
+/* Builds the frame list and the queue heads under it. */
 static int
 uhci_schedule_initialize(
 	struct uhci_controller *controller)
@@ -590,7 +574,7 @@ uhci_schedule_initialize(
 	return 0;
 }
 
-/* Supports the uhci request sets empty locked operation. */
+/* Asks whether every request list of the controller is empty. */
 static int
 uhci_request_sets_empty_locked(
 	struct uhci_controller *controller)
@@ -619,7 +603,7 @@ uhci_request_sets_empty_locked(
 	return 1;
 }
 
-/* Supports the uhci wait running operation. */
+/* Waits for the controller to report that it is running. */
 static int
 uhci_wait_running(
 	struct uhci_controller *controller)
@@ -653,7 +637,7 @@ uhci_wait_running(
 	}
 }
 
-/* Supports the uhci start operation. */
+/* Brings the controller into service. */
 static int
 uhci_start(
 	struct drv_usb_hcd *hcd)
@@ -776,7 +760,7 @@ fail:
 	return 0;
 }
 
-/* Supports the uhci hardware stop operation. */
+/* Stops the controller itself. */
 static int
 uhci_hardware_stop(
 	struct uhci_controller *controller,
@@ -856,7 +840,7 @@ uhci_hardware_stop(
 	return 0;
 }
 
-/* Supports the uhci bus master disable operation. */
+/* Stops the controller from mastering the bus. */
 static int
 uhci_bus_master_disable(
 	struct uhci_controller *controller)
@@ -879,7 +863,7 @@ uhci_bus_master_disable(
 	return (command & UHCI_PCI_MASTER) == 0 ? 0 : EIO;
 }
 
-/* Supports the uhci irq disestablish operation. */
+/* Takes the interrupt handler out of service. */
 static int
 uhci_irq_disestablish(
 	struct uhci_controller *controller)
@@ -927,7 +911,7 @@ uhci_irq_disestablish(
 	return 0;
 }
 
-/* Supports the uhci stop operation. */
+/* Stops the controller. */
 static void
 uhci_stop(
 	struct drv_usb_hcd *hcd)
@@ -963,7 +947,7 @@ uhci_stop(
 	uhci_schedule_release(controller);
 }
 
-/* Supports the uhci report shutdown evidence operation. */
+/* Records what state the controller was left in. */
 static int
 uhci_report_shutdown_evidence(
 	struct uhci_controller *controller)
@@ -1010,7 +994,7 @@ uhci_report_shutdown_evidence(
 	return 0;
 }
 
-/* Supports the uhci wait submissions operation. */
+/* Waits for every submission in flight to finish. */
 static int
 uhci_wait_submissions(
 	struct uhci_controller *controller)
@@ -1038,7 +1022,7 @@ uhci_wait_submissions(
 	}
 }
 
-/* Supports the uhci quiesce operation. */
+/* Brings the controller to a stop that nothing is running under. */
 static int
 uhci_quiesce(
 	struct drv_usb_hcd *hcd)
@@ -1120,7 +1104,7 @@ uhci_quiesce(
 	return function_result;
 }
 
-/* Supports the uhci quiesce requests operation. */
+/* Waits for every outstanding request to leave. */
 static int
 uhci_quiesce_requests(
 	struct uhci_controller *controller)
@@ -1231,7 +1215,7 @@ uhci_quiesce_requests(
 	}
 }
 
-/* Supports the uhci retirement begin locked operation. */
+/* Starts retiring one request. */
 static void
 uhci_retirement_begin_locked(
 	struct uhci_controller *controller,
@@ -1261,7 +1245,7 @@ uhci_retirement_begin_locked(
 	request->unlink_frame = in16(controller->io_base + UHCI_FRNUM);
 }
 
-/* Supports the uhci request advance clear operation. */
+/* Clears the progress a request had been making. */
 static void
 uhci_request_advance_clear(
 	struct uhci_request *request)
@@ -1273,7 +1257,7 @@ uhci_request_advance_clear(
 	request->advance_started_tick = 0;
 }
 
-/* Supports the uhci schedule unlink locked operation. */
+/* Unlinks a request from the schedule. */
 static void
 uhci_schedule_unlink_locked(
 	struct uhci_controller *controller,
@@ -1318,7 +1302,7 @@ uhci_schedule_unlink_locked(
 	hal_io_wmb();
 }
 
-/* Supports the uhci schedule head operation. */
+/* Finds the queue head a request belongs under. */
 static struct uhci_request **
 uhci_schedule_head(
 	struct uhci_controller *controller,
@@ -1337,7 +1321,7 @@ uhci_schedule_head(
 	return &controller->asynchronous;
 }
 
-/* Supports the uhci retirement enqueue locked operation. */
+/* Puts a request on the list of those waiting to be retired. */
 static void
 uhci_retirement_enqueue_locked(
 	struct uhci_controller *controller,
@@ -1357,7 +1341,7 @@ uhci_retirement_enqueue_locked(
 	request->retirement_queued = true;
 }
 
-/* Supports the uhci retirement process operation. */
+/* Moves every request waiting to retire one step further. */
 static void
 uhci_retirement_process(
 	struct uhci_controller *controller)
@@ -1378,7 +1362,7 @@ uhci_retirement_process(
 	}
 }
 
-/* Supports the uhci retirement process request operation. */
+/* Moves one such request one step further. */
 static void
 uhci_retirement_process_request(
 	struct uhci_controller *controller,
@@ -1452,7 +1436,7 @@ uhci_retirement_process_request(
 	uhci_finish_completion(controller, request);
 }
 
-/* Supports the uhci request active locked operation. */
+/* Asks whether the controller is still running a request. */
 static int
 uhci_request_active_locked(
 	struct uhci_controller *controller,
@@ -1472,7 +1456,7 @@ uhci_request_active_locked(
 	return 0;
 }
 
-/* Supports the uhci wait frame advance operation. */
+/* Waits for the frame counter to move past a request. */
 static int
 uhci_wait_frame_advance(
 	struct uhci_controller *controller,
@@ -1519,7 +1503,7 @@ uhci_wait_frame_advance(
 	}
 }
 
-/* Supports the uhci retirement fail operation. */
+/* Fails a request that could not be retired cleanly. */
 static void
 uhci_retirement_fail(
 	struct uhci_controller *controller,
@@ -1560,7 +1544,7 @@ uhci_retirement_fail(
 	}
 }
 
-/* Supports the uhci retirement remove locked operation. */
+/* Takes a request off the retirement list. */
 static void
 uhci_retirement_remove_locked(
 	struct uhci_controller *controller,
@@ -1594,7 +1578,7 @@ uhci_retirement_remove_locked(
 	__builtin_trap();
 }
 
-/* Supports the uhci root worker request stop operation. */
+/* Asks the root port thread to stop. */
 static void
 uhci_root_worker_request_stop(
 	struct uhci_controller *controller)
@@ -1616,7 +1600,7 @@ uhci_root_worker_request_stop(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the uhci finish completion operation. */
+/* Hands a retired request back to its caller. */
 static void
 uhci_finish_completion(
 	struct uhci_controller *controller,
@@ -1703,7 +1687,7 @@ uhci_finish_completion(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the uhci request actual operation. */
+/* Reports how many bytes a request actually moved. */
 static size_t
 uhci_request_actual(
 	struct uhci_request *request)
@@ -1746,7 +1730,7 @@ uhci_request_actual(
 	return actual;
 }
 
-/* Supports the uhci request commit toggle operation. */
+/* Saves the data toggle a request leaves its endpoint at. */
 static void
 uhci_request_commit_toggle(
 	struct uhci_request *request)
@@ -1784,7 +1768,7 @@ uhci_request_commit_toggle(
 	}
 }
 
-/* Supports the uhci periodic release locked operation. */
+/* Gives a periodic endpoint's bandwidth back. */
 static void
 uhci_periodic_release_locked(
 	struct uhci_controller *controller,
@@ -1802,7 +1786,7 @@ uhci_periodic_release_locked(
 	request->periodic_reserved = false;
 }
 
-/* Supports the uhci active remove locked operation. */
+/* Takes a request off the list of those being run. */
 static void
 uhci_active_remove_locked(
 	struct uhci_controller *controller,
@@ -1831,7 +1815,7 @@ uhci_active_remove_locked(
 	__builtin_trap();
 }
 
-/* Supports the uhci request free operation. */
+/* Gives a request's descriptors and state back. */
 static void
 uhci_request_free(
 	struct uhci_controller *c,
@@ -1884,7 +1868,7 @@ uhci_request_free(
 	hal_free(r);
 }
 
-/* Supports the uhci retirement defer operation. */
+/* Hands a request to the thread that retires them. */
 static void
 uhci_retirement_defer(
 	struct uhci_controller *controller)
@@ -1905,7 +1889,7 @@ uhci_retirement_defer(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the uhci root worker stop operation. */
+/* Stops the thread that serves root port changes. */
 static int
 uhci_root_worker_stop(
 	struct uhci_controller *controller)
@@ -1999,7 +1983,7 @@ uhci_root_worker_stop(
 	return 0;
 }
 
-/* Supports the uhci retirement worker stop operation. */
+/* Stops the thread that retires requests. */
 static int
 uhci_retirement_worker_stop(
 	struct uhci_controller *controller)
@@ -2101,7 +2085,7 @@ uhci_retirement_worker_stop(
 	return 0;
 }
 
-/* Supports the uhci token operation. */
+/* Builds the token word one transfer descriptor carries. */
 static uint32_t
 uhci_token(
 	uint8_t pid,
@@ -2117,7 +2101,7 @@ uhci_token(
 	       ((uint32_t)toggle << 19) | (encoded_length << 21);
 }
 
-/* Supports the uhci reclaim request acquire operation. */
+/* Takes a request off the reclaim list to be reused. */
 static int
 uhci_reclaim_request_acquire(
 	struct uhci_controller *controller,
@@ -2163,7 +2147,7 @@ uhci_reclaim_request_acquire(
 	return 0;
 }
 
-/* Supports the uhci builder leave operation. */
+/* Leaves the gate that serializes request building. */
 static void
 uhci_builder_leave(
 	struct uhci_controller *controller)
@@ -2180,7 +2164,7 @@ uhci_builder_leave(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the uhci builder discard operation. */
+/* Discards a request that was never linked into the schedule. */
 static void
 uhci_builder_discard(
 	struct uhci_controller *controller,
@@ -2196,7 +2180,7 @@ uhci_builder_discard(
 	uhci_builder_leave(controller);
 }
 
-/* Supports the uhci add td operation. */
+/* Appends one transfer descriptor to a request. */
 static int
 uhci_add_td(
 	struct uhci_request *r,
@@ -2231,7 +2215,7 @@ uhci_add_td(
 	return 0;
 }
 
-/* Supports the uhci periodic level operation. */
+/* Reports which periodic level an interval belongs to. */
 static unsigned
 uhci_periodic_level(
 	uint8_t interval)
@@ -2254,7 +2238,7 @@ uhci_periodic_level(
 	return level;
 }
 
-/* Supports the uhci endpoint parameters operation. */
+/* Works out the interval and the packet size of an endpoint. */
 static int
 uhci_endpoint_parameters(
 	struct drv_usb_endpoint *endpoint,
@@ -2335,7 +2319,7 @@ uhci_endpoint_parameters(
 	return 0;
 }
 
-/* Supports the uhci required td count operation. */
+/* Counts the descriptors one transfer needs. */
 static int
 uhci_required_td_count(
 	enum drv_usb_transfer_type type,
@@ -2365,7 +2349,7 @@ uhci_required_td_count(
 	return 0;
 }
 
-/* Supports the uhci periodic cost operation. */
+/* Reports the bandwidth one periodic endpoint would cost. */
 static int
 uhci_periodic_cost(
 	size_t length,
@@ -2400,7 +2384,7 @@ uhci_periodic_cost(
 	return 0;
 }
 
-/* Supports the uhci build request operation. */
+/* Builds the descriptors one transfer needs. */
 static int
 uhci_build_request(
 	struct uhci_controller *c,
@@ -2670,7 +2654,7 @@ fail:
 	return 0;
 }
 
-/* Supports the uhci progress frame sample operation. */
+/* Samples the frame counter, to tell progress from a stall. */
 static int
 uhci_progress_frame_sample(
 	struct uhci_controller *controller,
@@ -2904,7 +2888,7 @@ uhci_request_qh_progress_locked(
 	return 0;
 }
 
-/* Supports the uhci request terminal operation. */
+/* Reports the status the last descriptor of a request holds. */
 static int
 uhci_request_terminal(
 	struct uhci_request *request,
@@ -2944,7 +2928,7 @@ uhci_request_terminal(
 	return 1;
 }
 
-/* Supports the uhci request prepare toggle operation. */
+/* Gives a request the data toggle its endpoint stands at. */
 static void
 uhci_request_prepare_toggle(
 	struct uhci_request *request)
@@ -2972,7 +2956,7 @@ uhci_request_prepare_toggle(
 	}
 }
 
-/* Supports the uhci request link operation. */
+/* Reports the descriptor address a request begins at. */
 static uint32_t
 uhci_request_link(
 	const struct uhci_request *request)
@@ -2981,7 +2965,7 @@ uhci_request_link(
 	return (uint32_t)request->schedule.device_address | UHCI_LINK_QH;
 }
 
-/* Supports the uhci schedule tail link operation. */
+/* Finds the end of the list a request links onto. */
 static uint32_t
 uhci_schedule_tail_link(
 	struct uhci_controller *controller,
@@ -3011,7 +2995,7 @@ uhci_schedule_tail_link(
 	return function_result;
 }
 
-/* Supports the uhci endpoint owned locked operation. */
+/* Asks whether an endpoint still owns any request. */
 static int
 uhci_endpoint_owned_locked(
 	struct uhci_controller *controller,
@@ -3031,7 +3015,7 @@ uhci_endpoint_owned_locked(
 	return 0;
 }
 
-/* Supports the uhci periodic admit locked operation. */
+/* Reserves the bandwidth one periodic endpoint needs. */
 static int
 uhci_periodic_admit_locked(
 	struct uhci_controller *controller,
@@ -3063,7 +3047,7 @@ uhci_periodic_admit_locked(
 	return 0;
 }
 
-/* Supports the uhci active insert locked operation. */
+/* Puts a request on the list of those being run. */
 static void
 uhci_active_insert_locked(
 	struct uhci_controller *controller,
@@ -3077,7 +3061,7 @@ uhci_active_insert_locked(
 	controller->active_count++;
 }
 
-/* Supports the uhci schedule insert locked operation. */
+/* Links a request into the schedule. */
 static void
 uhci_schedule_insert_locked(
 	struct uhci_controller *controller,
@@ -3106,7 +3090,7 @@ uhci_schedule_insert_locked(
 	hal_io_wmb();
 }
 
-/* Supports the uhci qh progress watchdog operation. */
+/* Fails a queue head that has stopped making progress. */
 static int
 uhci_qh_progress_watchdog(
 	struct uhci_controller *controller)
@@ -3174,7 +3158,7 @@ uhci_qh_progress_watchdog(
 	return active;
 }
 
-/* Supports the uhci retirement worker operation. */
+/* Retires finished requests outside interrupt context. */
 static void
 uhci_retirement_worker(
 	void *argument)
@@ -3227,7 +3211,7 @@ uhci_retirement_worker(
 	}
 }
 
-/* Supports the uhci retirement worker start operation. */
+/* Starts the thread that does so. */
 static int
 uhci_retirement_worker_start(
 	struct uhci_controller *controller)
@@ -3277,7 +3261,7 @@ uhci_retirement_worker_start(
 	return 0;
 }
 
-/* Supports the uhci retirement watchdog arm operation. */
+/* Arms the watchdog that catches a stalled queue head. */
 static void
 uhci_retirement_watchdog_arm(
 	struct uhci_controller *controller)
@@ -3297,7 +3281,7 @@ uhci_retirement_watchdog_arm(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the uhci urb enqueue operation. */
+/* Puts one transfer into the schedule of its endpoint. */
 static int
 uhci_urb_enqueue(
 	struct drv_usb_hcd *hcd,
@@ -3413,7 +3397,7 @@ uhci_urb_enqueue(
 	return 0;
 }
 
-/* Supports the uhci urb dequeue operation. */
+/* Cancels one transfer that has not completed. */
 static int
 uhci_urb_dequeue(
 	struct drv_usb_hcd *hcd,
@@ -3507,7 +3491,7 @@ uhci_urb_dequeue(
 	}
 }
 
-/* Supports the uhci irq operation. */
+/* Serves one interrupt from the controller. */
 static int
 uhci_irq(
 	void *argument)
@@ -3574,7 +3558,7 @@ uhci_irq(
 	return 1;
 }
 
-/* Supports the uhci endpoint enable operation. */
+/* Prepares the driver state one endpoint needs. */
 static int
 uhci_endpoint_enable(
 	struct drv_usb_hcd *hcd,
@@ -3587,7 +3571,7 @@ uhci_endpoint_enable(
 	return 0;
 }
 
-/* Supports the uhci endpoint disable operation. */
+/* Gives that state back. */
 static int
 uhci_endpoint_disable(
 	struct drv_usb_hcd *hcd,
@@ -3600,7 +3584,7 @@ uhci_endpoint_disable(
 	return 0;
 }
 
-/* Supports the uhci endpoint reset operation. */
+/* Clears an endpoint's halt and its data toggle. */
 static int
 uhci_endpoint_reset(
 	struct drv_usb_hcd *hcd,
@@ -3646,7 +3630,7 @@ uhci_endpoint_reset(
 	return 0;
 }
 
-/* Supports the uhci frame number operation. */
+/* Reports the frame number the bus stands at. */
 static uint32_t
 uhci_frame_number(
 	struct drv_usb_hcd *hcd)
@@ -3661,7 +3645,7 @@ uhci_frame_number(
 	return function_result;
 }
 
-/* Supports the uhci root hub status operation. */
+/* Reports which root ports have changed. */
 static int
 uhci_root_hub_status(
 	struct drv_usb_hcd *hcd,
@@ -3693,7 +3677,7 @@ uhci_root_hub_status(
 	return 0;
 }
 
-/* Supports the uhci root port update operation. */
+/* Applies one change to a root port register. */
 static int
 uhci_root_port_update(
 	struct uhci_controller *controller,
@@ -3736,7 +3720,7 @@ uhci_root_port_update(
 	return 0;
 }
 
-/* Supports the uhci root hub control operation. */
+/* Serves one hub request against the root ports. */
 static int
 uhci_root_hub_control(
 	struct drv_usb_hcd *hcd,
@@ -3839,7 +3823,7 @@ uhci_root_hub_control(
 	return 0;
 }
 
-/* Supports the uhci root ports changed operation. */
+/* Asks whether any root port has reported a change. */
 static int
 uhci_root_ports_changed(
 	struct uhci_controller *controller)
@@ -3890,7 +3874,7 @@ uhci_root_ports_changed(
 	return changed;
 }
 
-/* Supports the uhci root worker operation. */
+/* Serves root port changes outside interrupt context. */
 static void
 uhci_root_worker(
 	void *argument)
@@ -3963,7 +3947,7 @@ uhci_root_worker(
 	}
 }
 
-/* Supports the uhci root worker start operation. */
+/* Starts the thread that does so. */
 static int
 uhci_root_worker_start(
 	struct uhci_controller *controller)
@@ -4006,7 +3990,7 @@ uhci_root_worker_start(
 	return 0;
 }
 
-/* Supports the uhci publish operation. */
+/* Publishes the controller so the rest of the kernel sees it. */
 static void
 uhci_publish(
 	struct uhci_controller *controller)
@@ -4020,7 +4004,7 @@ uhci_publish(
 	controller->listed = 1;
 }
 
-/* Supports the uhci unpublish operation. */
+/* Takes it back out of view. */
 static void
 uhci_unpublish(
 	struct uhci_controller *controller)
@@ -4043,7 +4027,7 @@ uhci_unpublish(
 	controller->listed = 0;
 }
 
-/* Supports the uhci pci release operation. */
+/* Gives every PCI resource this driver claimed back. */
 static int
 uhci_pci_release(
 	struct uhci_controller *controller)
@@ -4090,7 +4074,7 @@ uhci_pci_release(
 	return 0;
 }
 
-/* Supports the uhci cleanup operation. */
+/* Undoes everything a failed or finished attach had done. */
 static int
 uhci_cleanup(
 	struct uhci_controller *controller)
@@ -4208,7 +4192,7 @@ uhci_cleanup(
 	return function_result;
 }
 
-/* Supports the uhci runtime operational operation. */
+/* Asks whether the controller is running and free of faults. */
 static int
 uhci_runtime_operational(
 	struct uhci_controller *controller)
@@ -4232,7 +4216,7 @@ uhci_runtime_operational(
 	return operational;
 }
 
-/* Supports the uhci attach operation. */
+/* Brings up a controller the PCI bus has just matched. */
 static int
 uhci_attach(
 	struct drv_pci_device *device,
@@ -4371,7 +4355,7 @@ fail:
 	return 0;
 }
 
-/* Supports the uhci detach operation. */
+/* Takes a controller out of service and gives it back. */
 static int
 uhci_detach(
 	struct drv_pci_device *device,
@@ -4409,3 +4393,39 @@ uhci_detach(
 	/* Succeeded. */
 	return 0;
 }
+
+/*
+ * UHCI
+ */
+
+static const struct drv_usb_hcd_ops uhci_ops = {
+	.start = uhci_start,
+	.quiesce = uhci_quiesce,
+	.stop = uhci_stop,
+	.urb_enqueue = uhci_urb_enqueue,
+	.urb_dequeue = uhci_urb_dequeue,
+	.endpoint_enable = uhci_endpoint_enable,
+	.endpoint_disable = uhci_endpoint_disable,
+	.endpoint_reset = uhci_endpoint_reset,
+	.frame_number = uhci_frame_number,
+	.root_hub_status = uhci_root_hub_status,
+	.root_hub_control = uhci_root_hub_control
+};
+
+static const struct drv_pci_id uhci_ids[] = {
+	{
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		0x0c0300U,
+		0xffffffU,
+		0
+	}
+};
+
+static struct drv_pci_driver uhci_driver = {
+	.name = "uhci",
+	.ids = uhci_ids,
+	.id_count = 1,
+	.attach = uhci_attach,
+	.detach = uhci_detach
+};

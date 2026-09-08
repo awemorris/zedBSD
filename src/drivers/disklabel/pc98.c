@@ -1,21 +1,33 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* Begin consolidated pc98-auto.c. */
 /*
  * Per-disk PC-98 partition format selection.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
  */
+
 #include <drivers/disklabel.h>
 
-/* Supports the pc98 auto scan operation. */
-static int pc98_auto_scan(const struct partition_scheme *scheme, struct disk *disk, struct partition *entries, unsigned capacity);
+#define PC98_TABLE_LBA 1U
+#define PC98_ENTRY_SIZE 32U
 
-/*
- * Forward declaration.
- */
-static uint16_t get16(const uint8_t *p);
-static int chs_to_lba(const struct disk_geometry *geometry, const uint8_t *p, uint64_t *result);
+static int pc98_auto_scan(const struct partition_scheme *scheme, struct disk *disk, struct partition *entries, unsigned capacity);
 static int pc98_scan(const struct partition_scheme *scheme, struct disk *dev, struct partition *entries, unsigned max_entries);
+static int chs_to_lba(const struct disk_geometry *geometry, const uint8_t *p, uint64_t *result);
+static uint16_t get16(const uint8_t *p);
+
+const struct partition_scheme drv_partition_scheme_pc98_auto = {
+	.name = "pc98-auto",
+	.scan = pc98_auto_scan,
+};
+
+const struct partition_scheme drv_partition_scheme_pc98 = {
+	.name = "pc98",
+	.scan = pc98_scan,
+};
 
 /* Supports the pc98 auto scan operation. */
 static int
@@ -68,60 +80,6 @@ pc98_auto_scan(
 
 	/* Returns the computed result. */
 	return error;
-}
-
-const struct partition_scheme drv_partition_scheme_pc98_auto = {
-	.name = "pc98-auto",
-	.scan = pc98_auto_scan,
-};
-/* End consolidated pc98-auto.c. */
-
-/* Begin consolidated pc98.c. */
-/*
- * NEC PC-98 partition-table scheme
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
- *
- * The table lives in the sector after the IPL (LBA 1 on the 512-byte
- * disks this loader supports) and holds sixteen 32-byte entries.  All
- * addresses are CHS in the geometry the firmware sensed at boot, which
- * is why the disk geometry ioctl carries that geometry rather than the
- * drive's native IDENTIFY values.  The inclusive end CHS determines the
- * partition disk's block count.
- */
-
-#include <drivers/disklabel.h>
-
-#define PC98_TABLE_LBA 1U
-#define PC98_ENTRY_SIZE 32U
-
-/* Supports the get16 operation. */
-static uint16_t
-get16(
-	const uint8_t *p)
-{
-	/* Returns the computed result. */
-	return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
-}
-
-/* sect, head, cyl(16bit) -> LBA in the firmware geometry. */
-static int
-chs_to_lba(
-	const struct disk_geometry *geometry,
-	const uint8_t *p,
-	uint64_t *result)
-{
-	uint16_t cylinder = get16(p + 2);
-
-	/* Checks the current pointer. */
-	if (p[1] >= geometry->heads || p[0] >= geometry->sectors_per_track)
-		return 0;
-	*result = ((uint64_t)cylinder * geometry->heads + p[1]) *
-			  geometry->sectors_per_track +
-		  p[0];
-
-	/* Reports operation failure. */
-	return 1;
 }
 
 /* Supports the pc98 scan operation. */
@@ -213,8 +171,31 @@ pc98_scan(
 	return (int)count;
 }
 
-const struct partition_scheme drv_partition_scheme_pc98 = {
-	.name = "pc98",
-	.scan = pc98_scan,
-};
-/* End consolidated pc98.c. */
+/* sect, head, cyl(16bit) -> LBA in the firmware geometry. */
+static int
+chs_to_lba(
+	const struct disk_geometry *geometry,
+	const uint8_t *p,
+	uint64_t *result)
+{
+	uint16_t cylinder = get16(p + 2);
+
+	/* Checks the current pointer. */
+	if (p[1] >= geometry->heads || p[0] >= geometry->sectors_per_track)
+		return 0;
+	*result = ((uint64_t)cylinder * geometry->heads + p[1]) *
+			  geometry->sectors_per_track +
+		  p[0];
+
+	/* Reports operation failure. */
+	return 1;
+}
+
+/* Supports the get16 operation. */
+static uint16_t
+get16(
+	const uint8_t *p)
+{
+	/* Returns the computed result. */
+	return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+}

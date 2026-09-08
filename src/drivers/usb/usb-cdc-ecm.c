@@ -1,10 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * Integrated USB CDC ECM network driver
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  */
+
 #include <drivers/usb-cdc-ecm.h>
 #include <drivers/usb.h>
 #include <errno.h>
@@ -146,31 +150,35 @@ static int ecm_detach(struct drv_usb_interface *interface, unsigned flags);
 static void ecm_shutdown(struct drv_usb_interface *interface);
 static int ecm_match(struct drv_usb_interface *interface, const struct drv_usb_id *id);
 
-static const struct net_device_ops ecm_net_ops = {.open = ecm_open,
-						  .close = ecm_close,
-						  .transmit = ecm_transmit,
-						  .poll_receive =
-							  ecm_poll_receive,
-						  .release = ecm_release};
+static const struct net_device_ops ecm_net_ops = {
+	.open = ecm_open,
+	.close = ecm_close,
+	.transmit = ecm_transmit,
+	.poll_receive =
+	ecm_poll_receive,
+	.release = ecm_release};
 
 static const struct drv_usb_id ecm_ids[] = {
-	{.match_flags = DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS |
-			DRV_USB_ID_IF_PROTOCOL,
-	 .interface_class = ECM_COMMUNICATION_CLASS,
-	 .interface_subclass = ECM_COMMUNICATION_SUBCLASS,
-	 .interface_protocol = ECM_COMMUNICATION_PROTOCOL}};
+	{
+		.match_flags = DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS | DRV_USB_ID_IF_PROTOCOL,
+		.interface_class = ECM_COMMUNICATION_CLASS,
+		.interface_subclass = ECM_COMMUNICATION_SUBCLASS,
+		.interface_protocol = ECM_COMMUNICATION_PROTOCOL
+	}
+};
 
-static struct drv_usb_driver ecm_driver = {.name = "usb-cdc-ecm",
-					   .ids = ecm_ids,
-					   .id_count = sizeof(ecm_ids) /
-						       sizeof(ecm_ids[0]),
-					   .match = ecm_match,
-					   .attach = ecm_attach,
-					   .detach = ecm_detach,
-					   .shutdown = ecm_shutdown};
+static struct drv_usb_driver ecm_driver = {
+	.name = "usb-cdc-ecm",
+	.ids = ecm_ids,
+	.id_count = sizeof(ecm_ids) / sizeof(ecm_ids[0]),
+	.match = ecm_match,
+	.attach = ecm_attach,
+	.detach = ecm_detach,
+	.shutdown = ecm_shutdown
+};
 
 /*
- * Implements the drv usb cdc ecm driver register operation.
+ * Registers this driver with the USB subsystem.
  */
 int
 drv_usb_cdc_ecm_driver_register(
@@ -185,7 +193,7 @@ drv_usb_cdc_ecm_driver_register(
 	return error;
 }
 
-/* Supports the ecm le16 operation. */
+/* Reads a 16-bit field, least significant byte first. */
 static uint16_t
 ecm_le16(
 	const uint8_t *bytes)
@@ -194,7 +202,7 @@ ecm_le16(
 	return (uint16_t)((uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8));
 }
 
-/* Supports the ecm le32 operation. */
+/* Reads a 32-bit field, least significant byte first. */
 static uint32_t
 ecm_le32(
 	const uint8_t *bytes)
@@ -204,7 +212,7 @@ ecm_le32(
 	       ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
 }
 
-/* Supports the ecm interface configuration operation. */
+/* Reports the configuration an interface belongs to. */
 static struct drv_usb_configuration *
 ecm_interface_configuration(
 	struct drv_usb_interface *interface)
@@ -240,7 +248,7 @@ ecm_interface_configuration(
 	return NULL;
 }
 
-/* Supports the ecm iad covers operation. */
+/* Asks whether an association covers a given interface. */
 static int
 ecm_iad_covers(
 	const struct drv_usb_interface_association_descriptor *iad,
@@ -252,7 +260,7 @@ ecm_iad_covers(
 	       interface_number - iad->first_interface < iad->interface_count;
 }
 
-/* Supports the ecm iad consistent operation. */
+/* Refuses an association that does not describe this function. */
 static int
 ecm_iad_consistent(
 	struct drv_usb_configuration *configuration,
@@ -295,7 +303,7 @@ ecm_iad_consistent(
 	return 1;
 }
 
-/* Supports the ecm control descriptors operation. */
+/* Finds the class descriptors the control interface carries. */
 static int
 ecm_control_descriptors(
 	const struct drv_usb_host_interface *alternate,
@@ -368,7 +376,7 @@ ecm_control_descriptors(
 	return header == 1U && union_descriptor == 1U && ethernet == 1U;
 }
 
-/* Supports the ecm find notification operation. */
+/* Finds the interrupt endpoint notifications arrive on. */
 static int
 ecm_find_notification(
 	const struct drv_usb_host_interface *alternate,
@@ -402,7 +410,7 @@ ecm_find_notification(
 	return 1;
 }
 
-/* Supports the ecm find data alternate operation. */
+/* Finds the data setting that actually carries packets. */
 static int
 ecm_find_data_alternate(
 	struct drv_usb_interface *data,
@@ -486,7 +494,7 @@ ecm_find_data_alternate(
 	return empty_found && bulk_found;
 }
 
-/* Supports the ecm binding parse operation. */
+/* Reads everything this driver needs out of the interface. */
 static int
 ecm_binding_parse(
 	struct drv_usb_interface *control,
@@ -572,7 +580,7 @@ ecm_binding_parse(
 	return 1;
 }
 
-/* Supports the ecm hex operation. */
+/* Renders one hexadecimal character as its value. */
 static int
 ecm_hex(
 	unsigned char character)
@@ -593,7 +601,7 @@ ecm_hex(
 	return -1;
 }
 
-/* Supports the ecm get mac operation. */
+/* Reads the hardware address out of a string descriptor. */
 static int
 ecm_get_mac(
 	const struct ecm_binding *binding,
@@ -635,7 +643,7 @@ ecm_get_mac(
 	return 0;
 }
 
-/* Supports the ecm control operation. */
+/* Runs one class control request against the device. */
 static int
 ecm_control(
 	struct ecm_adapter *adapter,
@@ -658,7 +666,7 @@ ecm_control(
 	return error;
 }
 
-/* Supports the ecm program packet filter operation. */
+/* Tells the device which packets to pass up. */
 static int
 ecm_program_packet_filter(
 	struct ecm_adapter *adapter)
@@ -712,7 +720,7 @@ ecm_program_packet_filter(
 	return 0;
 }
 
-/* Supports the ecm urb status error operation. */
+/* Renders a transfer status as the error it stands for. */
 static int
 ecm_urb_status_error(
 	enum drv_usb_urb_status status)
@@ -737,7 +745,7 @@ ecm_urb_status_error(
 	return EIO;
 }
 
-/* Supports the ecm completion operation. */
+/* Takes one finished transfer. */
 static void
 ecm_completion(
 	struct drv_usb_urb *urb,
@@ -759,7 +767,7 @@ ecm_completion(
 	net_device_schedule_poll(adapter->net_device);
 }
 
-/* Supports the ecm start urb operation. */
+/* Puts one transfer back on its endpoint. */
 static int
 ecm_start_urb(
 	struct ecm_adapter *adapter,
@@ -807,7 +815,7 @@ ecm_start_urb(
 	return 0;
 }
 
-/* Supports the ecm cancel and drain operation. */
+/* Cancels a transfer and waits for it to leave. */
 static int
 ecm_cancel_and_drain(
 	struct drv_usb_urb *urb)
@@ -831,7 +839,7 @@ ecm_cancel_and_drain(
 	return error;
 }
 
-/* Supports the ecm wait activity operation. */
+/* Waits for everything this device has in flight to finish. */
 static void
 ecm_wait_activity(
 	struct ecm_adapter *adapter)
@@ -853,7 +861,7 @@ ecm_wait_activity(
 	}
 }
 
-/* Supports the ecm stop operation. */
+/* Stops the interface carrying traffic. */
 static int
 ecm_stop(
 	struct ecm_adapter *adapter)
@@ -929,7 +937,7 @@ ecm_stop(
 	return 0;
 }
 
-/* Supports the ecm open operation. */
+/* Brings the interface up and starts its transfers. */
 static int
 ecm_open(
 	struct net_device *device)
@@ -978,7 +986,7 @@ ecm_open(
 	return 0;
 }
 
-/* Supports the ecm close operation. */
+/* Takes the interface down. */
 static void
 ecm_close(
 	struct net_device *device)
@@ -988,7 +996,7 @@ ecm_close(
 	(void)ecm_stop(adapter);
 }
 
-/* Supports the ecm transmit operation. */
+/* Sends one packet on the data endpoint. */
 static int
 ecm_transmit(
 	struct net_device *device,
@@ -1083,7 +1091,7 @@ ecm_transmit(
 	return 0;
 }
 
-/* Supports the ecm notification process operation. */
+/* Takes one notification the device has sent. */
 static void
 ecm_notification_process(
 	struct ecm_adapter *adapter)
@@ -1127,7 +1135,7 @@ ecm_notification_process(
 	}
 }
 
-/* Supports the ecm rearm operation. */
+/* Puts the receive and notification transfers back on. */
 static int
 ecm_rearm(
 	struct ecm_adapter *adapter,
@@ -1198,7 +1206,7 @@ ecm_rearm(
 	return 0;
 }
 
-/* Supports the ecm poll enter operation. */
+/* Joins the gate that serializes polling. */
 static int
 ecm_poll_enter(
 	struct ecm_adapter *adapter)
@@ -1217,7 +1225,7 @@ ecm_poll_enter(
 	return admitted;
 }
 
-/* Supports the ecm poll exit operation. */
+/* Leaves that gate. */
 static void
 ecm_poll_exit(
 	struct ecm_adapter *adapter)
@@ -1232,7 +1240,7 @@ ecm_poll_exit(
 	spin_unlock_irqrestore(&adapter->lock, irq);
 }
 
-/* Supports the ecm take pending operation. */
+/* Takes whatever the poll has to deal with. */
 static int
 ecm_take_pending(
 	struct ecm_adapter *adapter,
@@ -1251,7 +1259,7 @@ ecm_take_pending(
 	return taken;
 }
 
-/* Supports the ecm restore pending operation. */
+/* Puts back what the poll could not deal with yet. */
 static void
 ecm_restore_pending(
 	struct ecm_adapter *adapter,
@@ -1264,7 +1272,7 @@ ecm_restore_pending(
 	spin_unlock_irqrestore(&adapter->lock, irq);
 }
 
-/* Supports the ecm take rearm operation. */
+/* Claims the right to re-arm a transfer. */
 static int
 ecm_take_rearm(
 	struct ecm_adapter *adapter,
@@ -1289,7 +1297,7 @@ ecm_take_rearm(
 	return taken;
 }
 
-/* Supports the ecm poll tx completion operation. */
+/* Takes the transmit completion the poll found. */
 static int
 ecm_poll_tx_completion(
 	struct ecm_adapter *adapter)
@@ -1330,7 +1338,7 @@ ecm_poll_tx_completion(
 	return 1;
 }
 
-/* Supports the ecm poll notification completion operation. */
+/* Takes the notification completion the poll found. */
 static int
 ecm_poll_notification_completion(
 	struct ecm_adapter *adapter)
@@ -1355,7 +1363,7 @@ ecm_poll_notification_completion(
 	return 1;
 }
 
-/* Supports the ecm poll rx completion operation. */
+/* Takes the receive completion the poll found. */
 static int
 ecm_poll_rx_completion(
 	struct net_device *device,
@@ -1414,7 +1422,7 @@ ecm_poll_rx_completion(
 	return 1;
 }
 
-/* Supports the ecm has poll work operation. */
+/* Asks whether the poll has anything left to do. */
 static int
 ecm_has_poll_work(
 	struct ecm_adapter *adapter)
@@ -1434,7 +1442,7 @@ ecm_has_poll_work(
 	return pending;
 }
 
-/* Supports the ecm poll receive operation. */
+/* Serves one round of polling for this device. */
 static unsigned
 ecm_poll_receive(
 	struct net_device *device,
@@ -1512,7 +1520,7 @@ ecm_poll_receive(
 	return work;
 }
 
-/* Supports the ecm release operation. */
+/* Gives every resource this device held back. */
 static void
 ecm_release(
 	void *driver_data)
@@ -1520,7 +1528,7 @@ ecm_release(
 	hal_free(driver_data);
 }
 
-/* Supports the ecm set ready operation. */
+/* Marks the device as ready to carry traffic. */
 static void
 ecm_set_ready(
 	struct ecm_adapter *adapter,
@@ -1533,7 +1541,7 @@ ecm_set_ready(
 	spin_unlock_irqrestore(&adapter->lock, irq);
 }
 
-/* Supports the ecm urbs free operation. */
+/* Gives the transfers this device used back. */
 static void
 ecm_urbs_free(
 	struct ecm_adapter *adapter)
@@ -1546,7 +1554,7 @@ ecm_urbs_free(
 	adapter->notification_urb = NULL;
 }
 
-/* Supports the ecm urbs alloc operation. */
+/* Takes the transfers this device needs. */
 static int
 ecm_urbs_alloc(
 	struct ecm_adapter *adapter)
@@ -1570,7 +1578,7 @@ ecm_urbs_alloc(
 	return ENOMEM;
 }
 
-/* Supports the ecm buffers free operation. */
+/* Gives the buffers this device used back. */
 static void
 ecm_buffers_free(
 	struct ecm_adapter *adapter)
@@ -1583,7 +1591,7 @@ ecm_buffers_free(
 	adapter->notification_buffer = NULL;
 }
 
-/* Supports the ecm buffers alloc operation. */
+/* Takes the buffers this device needs. */
 static int
 ecm_buffers_alloc(
 	struct ecm_adapter *adapter)
@@ -1604,7 +1612,7 @@ ecm_buffers_alloc(
 	return ENOMEM;
 }
 
-/* Supports the ecm net device create operation. */
+/* Publishes this device as a network interface. */
 static int
 ecm_net_device_create(
 	struct ecm_adapter *adapter,
@@ -1649,7 +1657,7 @@ ecm_net_device_create(
 	return 0;
 }
 
-/* Supports the ecm attach operation. */
+/* Binds this driver to an interface the bus has matched. */
 static int
 ecm_attach(
 	struct drv_usb_interface *interface,
@@ -1731,7 +1739,7 @@ ecm_attach(
 	return 0;
 }
 
-/* Supports the ecm detach operation. */
+/* Gives that interface up and everything held for it. */
 static int
 ecm_detach(
 	struct drv_usb_interface *interface,
@@ -1778,7 +1786,7 @@ ecm_detach(
 	return 0;
 }
 
-/* Supports the ecm shutdown operation. */
+/* Takes the device out of service at system shutdown. */
 static void
 ecm_shutdown(
 	struct drv_usb_interface *interface)
@@ -1792,7 +1800,7 @@ ecm_shutdown(
 	}
 }
 
-/* Supports the ecm match operation. */
+/* Reports whether this driver can drive an interface. */
 static int
 ecm_match(
 	struct drv_usb_interface *interface,

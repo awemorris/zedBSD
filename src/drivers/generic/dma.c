@@ -1,6 +1,3 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
-/* Begin consolidated dma.c. */
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -20,16 +17,6 @@
 #include <kern/lock.h>
 #include <limits.h>
 #include <string.h>
-
-extern int cache_memory_reserve(enum cache_memory_kind, size_t, int)
-	__attribute__((weak));
-extern void cache_memory_commit(enum cache_memory_kind, size_t)
-	__attribute__((weak));
-extern void cache_memory_cancel(enum cache_memory_kind, size_t)
-	__attribute__((weak));
-extern void cache_memory_release(enum cache_memory_kind, size_t)
-	__attribute__((weak));
-extern size_t cache_memory_reclaim(size_t) __attribute__((weak));
 
 struct dma_allocation {
 	struct hal_pmem memory;
@@ -51,90 +38,38 @@ struct drv_dma_mapping {
 	enum drv_dma_direction direction;
 };
 
+struct drv_dma_vector {
+	struct drv_dma_device *device;
+	struct hal_vmap *mapping;
+	struct drv_dma_buffer contiguous;
+	void *address;
+	size_t size, charged;
+	unsigned count;
+	struct drv_dma_segment segments[DRV_DMA_VECTOR_MAX_SEGMENTS];
+};
+
+/*
+ * Weak
+ */
+extern int cache_memory_reserve(enum cache_memory_kind, size_t, int) __attribute__((weak));
+extern void cache_memory_commit(enum cache_memory_kind, size_t) __attribute__((weak));
+extern void cache_memory_cancel(enum cache_memory_kind, size_t) __attribute__((weak));
+extern void cache_memory_release(enum cache_memory_kind, size_t) __attribute__((weak));
+extern size_t cache_memory_reclaim(size_t) __attribute__((weak));
+extern unsigned hal_vmap_capabilities(void) __attribute__((weak));
+extern int hal_vmap_reserve(size_t, struct hal_vmap **) __attribute__((weak));
+extern int hal_vmap_populate(struct hal_vmap *, uint64_t, uint64_t) __attribute__((weak));
+extern int hal_vmap_pin(struct hal_vmap *, void **) __attribute__((weak));
+extern void hal_vmap_unpin(struct hal_vmap *) __attribute__((weak));
+extern int hal_vmap_release(struct hal_vmap *) __attribute__((weak));
+extern int hal_kernel_page_lookup(const void *, hal_physaddr_t *) __attribute__((weak));
+
+/*
+ * Forward declaration
+ */
 static int device_operation_begin(struct drv_dma_device *device, int allow_destroying);
-
-/* A DMA device is normally shared by every device on one bus.  In particular, two host controllers can allocate and release coherent buffers from IRQ and process context at the same time.  The spinlock protects only the device lifecycle and allocation-list metadata; the physical-memory allocator and heap allocator must never be entered while it is held. */
-static int
-device_operation_begin(
-	struct drv_dma_device *device,
-	int allow_destroying)
-{
-	unsigned long irq;
-	int error = 0;
-
-	irq = spin_lock_irqsave(&device->lock);
-
-	/* Handles the device condition. */
-	if (device->destroying && !allow_destroying)
-		error = EBUSY;
-	else if (device->active_operations == UINT_MAX)
-		error = EOVERFLOW;
-	else
-		device->active_operations++;
-
-	spin_unlock_irqrestore(&device->lock, irq);
-
-	/* Reports the failure. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded. */
-	return 0;
-}
-
-static void device_operation_end(struct drv_dma_device *device);
-
-/* Supports the device operation end operation. */
-static void
-device_operation_end(
-	struct drv_dma_device *device)
-{
-	unsigned long irq;
-
-	irq = spin_lock_irqsave(&device->lock);
-
-	/* Handles the device condition. */
-	if (device->active_operations == 0)
-		__builtin_trap();
-	device->active_operations--;
-
-	spin_unlock_irqrestore(&device->lock, irq);
-}
-
-static int address_fits(const struct drv_dma_device *device, uint64_t address, size_t size);
-
-/* Supports the address fits operation. */
-static int
-address_fits(
-	const struct drv_dma_device *device,
-	uint64_t address,
-	size_t size)
-{
-	uint64_t limit;
-
-	/* Checks the current data size. */
-	if (size == 0)
-		return 0;
-
-	/* Handles the device condition. */
-	if (device->constraints.address_bits >= 64U)
-		return (uint64_t)size - 1U <= UINT64_MAX - address;
-	limit = (uint64_t)1U << device->constraints.address_bits;
-
-	/* Returns the computed result. */
-	return address < limit && size <= limit - address;
-}
-
-static int is_power_of_two(uint64_t value);
-
-/* Supports the is power of two operation. */
-static int
-is_power_of_two(
-	uint64_t value)
-{
-	/* Returns the computed result. */
-	return value != 0 && (value & (value - 1U)) == 0;
-}
+static int dma_vector_segments(struct drv_dma_vector *vector);
+static int dma_vector_backing_free(struct drv_dma_vector *vector);
 
 /*
  * Implements the drv dma device create operation.
@@ -635,34 +570,6 @@ drv_dma_sync_for_device(
 	(void)mapping;
 }
 
-/* Begin consolidated dma-vector.inc. */
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
-
-extern unsigned hal_vmap_capabilities(void) __attribute__((weak));
-extern int hal_vmap_reserve(size_t, struct hal_vmap **) __attribute__((weak));
-extern int hal_vmap_populate(struct hal_vmap *, uint64_t, uint64_t)
-	__attribute__((weak));
-extern int hal_vmap_pin(struct hal_vmap *, void **) __attribute__((weak));
-extern void hal_vmap_unpin(struct hal_vmap *) __attribute__((weak));
-extern int hal_vmap_release(struct hal_vmap *) __attribute__((weak));
-extern int hal_kernel_page_lookup(const void *, hal_physaddr_t *)
-	__attribute__((weak));
-
-struct drv_dma_vector {
-	struct drv_dma_device *device;
-	struct hal_vmap *mapping;
-	struct drv_dma_buffer contiguous;
-	void *address;
-	size_t size, charged;
-	unsigned count;
-	struct drv_dma_segment segments[DRV_DMA_VECTOR_MAX_SEGMENTS];
-};
-
-static int dma_vector_segments(struct drv_dma_vector *vector);
-static int dma_vector_backing_free(struct drv_dma_vector *vector);
-
 /*
  * Owns isolated DMA staging, never an arbitrary caller's reusable buffer.
  */
@@ -900,6 +807,90 @@ drv_dma_vector_segment(
 	return 0;
 }
 
+/*
+ * A DMA device is normally shared by every device on one bus.  In
+ * particular, two host controllers can allocate and release coherent
+ * buffers from IRQ and process context at the same time.  The
+ * spinlock protects only the device lifecycle and allocation-list
+ * metadata; the physical-memory allocator and heap allocator must
+ * never be entered while it is held.
+ */
+static int
+device_operation_begin(
+	struct drv_dma_device *device,
+	int allow_destroying)
+{
+	unsigned long irq;
+	int error = 0;
+
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Handles the device condition. */
+	if (device->destroying && !allow_destroying)
+		error = EBUSY;
+	else if (device->active_operations == UINT_MAX)
+		error = EOVERFLOW;
+	else
+		device->active_operations++;
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Supports the device operation end operation. */
+static void
+device_operation_end(
+	struct drv_dma_device *device)
+{
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Handles the device condition. */
+	if (device->active_operations == 0)
+		__builtin_trap();
+	device->active_operations--;
+
+	spin_unlock_irqrestore(&device->lock, irq);
+}
+
+/* Supports the address fits operation. */
+static int
+address_fits(
+	const struct drv_dma_device *device,
+	uint64_t address,
+	size_t size)
+{
+	uint64_t limit;
+
+	/* Checks the current data size. */
+	if (size == 0)
+		return 0;
+
+	/* Handles the device condition. */
+	if (device->constraints.address_bits >= 64U)
+		return (uint64_t)size - 1U <= UINT64_MAX - address;
+	limit = (uint64_t)1U << device->constraints.address_bits;
+
+	/* Returns the computed result. */
+	return address < limit && size <= limit - address;
+}
+
+/* Supports the is power of two operation. */
+static int
+is_power_of_two(
+	uint64_t value)
+{
+	/* Returns the computed result. */
+	return value != 0 && (value & (value - 1U)) == 0;
+}
+
 /* Splits every page by mask, maximum segment length and device boundaries. */
 static int
 dma_vector_segments(
@@ -1013,5 +1004,3 @@ dma_vector_backing_free(
 	/* Succeeded. */
 	return 0;
 }
-/* End consolidated dma-vector.inc. */
-/* End consolidated dma.c. */

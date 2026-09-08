@@ -1,13 +1,22 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
+/*
+ * PC-98 graphics-private frontend/backend boundary.
+ */
+
 #include "drivers/platform/pc98/graphics/backend.h"
 #include "drivers/graphics/pc98.h"
+#include "drivers/platform/pc98/graphics/display-auto.h"
+#include "drivers/platform/pc98/graphics/display.h"
 #include "hal/i386/bsp-pc98/display.h"
 
-#include "drivers/platform/pc98/graphics/display-auto.h"
 #include <hal/hal.h>
-#include "drivers/platform/pc98/graphics/display.h"
+
 #include <string.h>
 
 #define CIRRUS_PADDR 0xf0000000U

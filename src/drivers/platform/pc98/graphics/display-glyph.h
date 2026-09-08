@@ -1,5 +1,3 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
@@ -8,7 +6,7 @@
  */
 
 /*
- * Boots PC-98 CGROM glyph backend
+ * zedBSD graphics PC-98 CGROM glyph backend.
  */
 
 #ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_GLYPH_H

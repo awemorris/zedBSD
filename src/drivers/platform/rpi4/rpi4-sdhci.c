@@ -1,15 +1,20 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
 /*
- * Raspberry Pi 4 BCM2711 eMMC2 SDHCI PIO driver
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
 
+/*
+ * Raspberry Pi 4 BCM2711 eMMC2 SDHCI PIO driver
+ */
+
 #include "drivers/platform/rpi4/rpi4-sdhci.h"
-#include <errno.h>
+
 #include <hal/hal.h>
 #include <kern/disk.h>
+
+#include <errno.h>
 
 #define DIRECT_BASE 0xffff000000000000ULL
 #define REG_BLOCK_SIZE 0x04

@@ -7,9 +7,6 @@
 
 static void zero_bytes(uint8_t *bytes, size_t length);
 
-/*
- * Forward declaration.
- */
 static uint32_t be32(const uint8_t *p);
 static uint32_t poll_limit(const struct x68k_spc_bus *bus);
 static void poll_relax(const struct x68k_spc_bus *bus);

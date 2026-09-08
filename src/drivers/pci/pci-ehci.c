@@ -1,10 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * PCI EHCI host controller driver
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  */
+
 #include <drivers/pci-ehci.h>
 #include <drivers/pci.h>
 #include <drivers/usb.h>
@@ -348,31 +352,8 @@ static int ehci_runtime_operational(struct ehci_controller *controller);
 static int ehci_attach(struct drv_pci_device *device, const struct drv_pci_id *id);
 static int ehci_detach(struct drv_pci_device *device, unsigned flags);
 
-static const struct drv_usb_hcd_ops ehci_ops = {
-	.start = ehci_start,
-	.quiesce = ehci_quiesce,
-	.stop = ehci_stop,
-	.urb_enqueue = ehci_urb_enqueue,
-	.urb_dequeue = ehci_urb_dequeue,
-	.endpoint_enable = ehci_endpoint_enable,
-	.endpoint_disable = ehci_endpoint_disable,
-	.endpoint_reset = ehci_endpoint_reset,
-	.frame_number = ehci_frame_number,
-	.root_hub_status = ehci_root_status,
-	.root_hub_control = ehci_root_control};
-
-static const struct drv_pci_id ehci_ids[] = {{DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-					      DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
-					      0x0c0320U, 0xffffffU, 0}};
-
-static struct drv_pci_driver ehci_driver = {.name = "ehci",
-					    .ids = ehci_ids,
-					    .id_count = 1,
-					    .attach = ehci_attach,
-					    .detach = ehci_detach};
-
 /*
- * Implements the drv pci ehci driver register operation.
+ * Registers this driver with the PCI bus.
  */
 int
 drv_pci_ehci_driver_register(
@@ -388,7 +369,7 @@ drv_pci_ehci_driver_register(
 }
 
 /*
- * Implements the drv pci ehci probe roots operation.
+ * Probes the root ports of every controller this driver holds.
  */
 void
 drv_pci_ehci_probe_roots(
@@ -416,7 +397,7 @@ drv_pci_ehci_probe_roots(
 	}
 }
 
-/* Supports the ehci root ports changed operation. */
+/* Asks whether any root port has reported a change. */
 static int
 ehci_root_ports_changed(
 	struct ehci_controller *controller)
@@ -489,7 +470,7 @@ ehci_root_ports_changed(
 	return changed;
 }
 
-/* Supports the rd32 operation. */
+/* Reads one 32-bit controller register. */
 static uint32_t
 rd32(
 	volatile uint8_t *registers,
@@ -499,7 +480,7 @@ rd32(
 	return *(volatile uint32_t *)(registers + offset);
 }
 
-/* Supports the ehci controller fail locked operation. */
+/* Marks the controller as failed and stops taking requests. */
 static void
 ehci_controller_fail_locked(
 	struct ehci_controller *controller,
@@ -530,7 +511,7 @@ ehci_controller_fail_locked(
 	}
 }
 
-/* Supports the ehci retirement worker wakeup operation. */
+/* Wakes the thread that retires finished requests. */
 static void
 ehci_retirement_worker_wakeup(
 	struct ehci_controller *controller)
@@ -557,7 +538,7 @@ ehci_retirement_worker_wakeup(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the ehci root worker arm operation. */
+/* Arms the thread that serves root port changes. */
 static void
 ehci_root_worker_arm(
 	struct ehci_controller *controller)
@@ -585,7 +566,7 @@ ehci_root_worker_arm(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the rd8 operation. */
+/* Reads one byte of a controller register. */
 static uint8_t
 rd8(
 	volatile uint8_t *registers,
@@ -595,7 +576,7 @@ rd8(
 	return registers[offset];
 }
 
-/* Supports the wr32 operation. */
+/* Writes one 32-bit controller register. */
 static void
 wr32(
 	volatile uint8_t *registers,
@@ -607,7 +588,7 @@ wr32(
 	hal_io_mb();
 }
 
-/* Supports the ehci port write operation. */
+/* Writes one root port register, keeping the bits it must not clear. */
 static void
 ehci_port_write(
 	struct ehci_controller *controller,
@@ -631,7 +612,7 @@ ehci_port_write(
 	wr32(controller->operational, EHCI_PORTSC(port), value);
 }
 
-/* Supports the ehci port handoff operation. */
+/* Hands a port that is not high speed to the companion controller. */
 static int
 ehci_port_handoff(
 	struct ehci_controller *controller,
@@ -653,7 +634,7 @@ ehci_port_handoff(
 	return (status & EHCI_PORT_OWNER) != 0 ? 0 : EIO;
 }
 
-/* Supports the ehci port finish reset operation. */
+/* Ends a port reset and reads what speed the device is. */
 static int
 ehci_port_finish_reset(
 	struct ehci_controller *controller,
@@ -698,7 +679,7 @@ ehci_port_finish_reset(
 	return 0;
 }
 
-/* Supports the hcd controller operation. */
+/* Takes the controller behind a host controller handle. */
 static struct ehci_controller *
 hcd_controller(
 	struct drv_usb_hcd *hcd)
@@ -707,7 +688,7 @@ hcd_controller(
 	return (struct ehci_controller *)hcd->private_data[0];
 }
 
-/* Supports the ehci ownership operation. */
+/* Takes ownership of the controller from the firmware. */
 static int
 ehci_ownership(
 	struct ehci_controller *controller)
@@ -762,7 +743,7 @@ ehci_ownership(
 	return 0;
 }
 
-/* Supports the ehci skeleton link operation. */
+/* Builds the empty periodic schedule every frame starts from. */
 static uint32_t
 ehci_skeleton_link(
 	struct ehci_controller *controller,
@@ -781,7 +762,7 @@ ehci_skeleton_link(
 	return function_result;
 }
 
-/* Supports the ehci request link operation. */
+/* Reports the descriptor address a request begins at. */
 static uint32_t
 ehci_request_link(
 	const struct ehci_request *request)
@@ -790,7 +771,7 @@ ehci_request_link(
 	return (uint32_t)request->schedule.device_address | EHCI_LINK_QH;
 }
 
-/* Supports the ehci dma buffer is 32bit operation. */
+/* Asks whether a buffer lies inside the first four gigabytes. */
 static int
 ehci_dma_buffer_is_32bit(
 	const struct drv_dma_buffer *buffer)
@@ -801,7 +782,7 @@ ehci_dma_buffer_is_32bit(
 		       (uint64_t)UINT32_MAX - (uint64_t)buffer->device_address;
 }
 
-/* Supports the ehci reverse bits operation. */
+/* Reverses the bits of a frame index, as the schedule is ordered. */
 static unsigned
 ehci_reverse_bits(
 	unsigned value,
@@ -819,7 +800,7 @@ ehci_reverse_bits(
 	return result;
 }
 
-/* Supports the ehci periodic reserve locked operation. */
+/* Reserves the bandwidth one periodic endpoint needs. */
 static int
 ehci_periodic_reserve_locked(
 	struct ehci_controller *controller,
@@ -880,7 +861,7 @@ ehci_periodic_reserve_locked(
 	return 0;
 }
 
-/* Supports the ehci periodic release locked operation. */
+/* Gives that bandwidth back. */
 static void
 ehci_periodic_release_locked(
 	struct ehci_controller *controller,
@@ -915,7 +896,7 @@ ehci_periodic_release_locked(
 	request->periodic_service_mask = 0;
 }
 
-/* Supports the ehci schedule release operation. */
+/* Gives the memory both schedules live in back. */
 static void
 ehci_schedule_release(
 	struct ehci_controller *controller)
@@ -965,7 +946,7 @@ ehci_schedule_release(
 	}
 }
 
-/* Supports the ehci schedule initialize operation. */
+/* Builds the asynchronous and periodic schedules. */
 static int
 ehci_schedule_initialize(
 	struct ehci_controller *controller)
@@ -1082,7 +1063,7 @@ fail:
 	return 0;
 }
 
-/* Supports the ehci wait schedule status operation. */
+/* Waits for the controller to report a schedule stopped or started. */
 static int
 ehci_wait_schedule_status(
 	struct ehci_controller *controller,
@@ -1113,7 +1094,7 @@ ehci_wait_schedule_status(
 	}
 }
 
-/* Supports the ehci start operation. */
+/* Brings the controller into service. */
 static int
 ehci_start(
 	struct drv_usb_hcd *hcd)
@@ -1290,7 +1271,7 @@ fail:
 	return 0;
 }
 
-/* Supports the ehci hardware stop operation. */
+/* Stops the controller itself. */
 static int
 ehci_hardware_stop(
 	struct ehci_controller *controller,
@@ -1494,7 +1475,7 @@ stop_owner:
 	return 0;
 }
 
-/* Supports the ehci bus master disable operation. */
+/* Stops the controller from mastering the bus. */
 static int
 ehci_bus_master_disable(
 	struct ehci_controller *controller)
@@ -1517,7 +1498,7 @@ ehci_bus_master_disable(
 	return (command & EHCI_PCI_COMMAND_MASTER) == 0 ? 0 : EIO;
 }
 
-/* Supports the ehci irq disestablish operation. */
+/* Takes the interrupt handler out of service. */
 static int
 ehci_irq_disestablish(
 	struct ehci_controller *controller)
@@ -1565,7 +1546,7 @@ ehci_irq_disestablish(
 	return 0;
 }
 
-/* Supports the ehci qtd token operation. */
+/* Builds the token word one transfer descriptor carries. */
 static uint32_t
 ehci_qtd_token(
 	unsigned pid,
@@ -1577,7 +1558,7 @@ ehci_qtd_token(
 	       ((uint32_t)length << 16) | ((uint32_t)toggle << 31);
 }
 
-/* Supports the ehci qtd buffer operation. */
+/* Fills in the buffer pointers one transfer descriptor carries. */
 static void
 ehci_qtd_buffer(
 	struct ehci_qtd *qtd,
@@ -1596,7 +1577,7 @@ ehci_qtd_buffer(
 	}
 }
 
-/* Supports the ehci add qtd operation. */
+/* Appends one transfer descriptor to a request. */
 static int
 ehci_add_qtd(
 	struct ehci_request *request,
@@ -1629,7 +1610,7 @@ ehci_add_qtd(
 	return 0;
 }
 
-/* Supports the ehci request free operation. */
+/* Gives a request's descriptors and state back. */
 static void
 ehci_request_free(
 	struct ehci_controller *controller,
@@ -1682,7 +1663,7 @@ ehci_request_free(
 	hal_free(request);
 }
 
-/* Supports the ehci reclaim request acquire operation. */
+/* Takes a request off the reclaim list to be reused. */
 static int
 ehci_reclaim_request_acquire(
 	struct ehci_controller *controller,
@@ -1728,7 +1709,7 @@ ehci_reclaim_request_acquire(
 	return 0;
 }
 
-/* Supports the ehci periodic parameters operation. */
+/* Works out the interval and offset a periodic endpoint gets. */
 static int
 ehci_periodic_parameters(
 	uint8_t interval,
@@ -1770,7 +1751,7 @@ ehci_periodic_parameters(
 	return 0;
 }
 
-/* Supports the ehci build request operation. */
+/* Builds the descriptors one transfer needs. */
 static int
 ehci_build_request(
 	struct ehci_controller *controller,
@@ -2115,7 +2096,7 @@ fail:
 	return 0;
 }
 
-/* Supports the ehci endpoint owner locked operation. */
+/* Finds the endpoint a request belongs to. */
 static struct ehci_request *
 ehci_endpoint_owner_locked(
 	struct ehci_controller *controller,
@@ -2135,7 +2116,7 @@ ehci_endpoint_owner_locked(
 	return NULL;
 }
 
-/* Supports the ehci active insert locked operation. */
+/* Puts a request on the list of those the controller is running. */
 static void
 ehci_active_insert_locked(
 	struct ehci_controller *controller,
@@ -2146,7 +2127,7 @@ ehci_active_insert_locked(
 	controller->active_count++;
 }
 
-/* Supports the ehci active remove locked operation. */
+/* Takes it back off that list. */
 static void
 ehci_active_remove_locked(
 	struct ehci_controller *controller,
@@ -2175,7 +2156,7 @@ ehci_active_remove_locked(
 	__builtin_trap();
 }
 
-/* Supports the ehci async insert locked operation. */
+/* Links a request into the asynchronous schedule. */
 static void
 ehci_async_insert_locked(
 	struct ehci_controller *controller,
@@ -2209,7 +2190,7 @@ ehci_async_insert_locked(
 	request->linked = true;
 }
 
-/* Supports the ehci async unlink locked operation. */
+/* Unlinks it from that schedule. */
 static int
 ehci_async_unlink_locked(
 	struct ehci_controller *controller,
@@ -2260,7 +2241,7 @@ ehci_async_unlink_locked(
 	return 0;
 }
 
-/* Supports the ehci periodic parent link operation. */
+/* Finds where in the periodic schedule a request links in. */
 static uint32_t
 ehci_periodic_parent_link(
 	struct ehci_controller *controller,
@@ -2277,7 +2258,7 @@ ehci_periodic_parent_link(
 	return function_result;
 }
 
-/* Supports the ehci periodic insert locked operation. */
+/* Links a request into the periodic schedule. */
 static void
 ehci_periodic_insert_locked(
 	struct ehci_controller *controller,
@@ -2315,7 +2296,7 @@ ehci_periodic_insert_locked(
 	request->linked = true;
 }
 
-/* Supports the ehci periodic unlink locked operation. */
+/* Unlinks it from that schedule. */
 static int
 ehci_periodic_unlink_locked(
 	struct ehci_controller *controller,
@@ -2367,7 +2348,7 @@ ehci_periodic_unlink_locked(
 	return 0;
 }
 
-/* Supports the ehci builder leave operation. */
+/* Leaves the gate that serializes request building. */
 static void
 ehci_builder_leave(
 	struct ehci_controller *controller)
@@ -2382,7 +2363,7 @@ ehci_builder_leave(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the ehci unpublished request discard operation. */
+/* Discards a request that was never linked into a schedule. */
 static void
 ehci_unpublished_request_discard(
 	struct ehci_controller *controller,
@@ -2398,7 +2379,7 @@ ehci_unpublished_request_discard(
 	ehci_builder_leave(controller);
 }
 
-/* Supports the ehci periodic update acquire operation. */
+/* Takes the right to change the periodic schedule. */
 static int
 ehci_periodic_update_acquire(
 	struct ehci_controller *controller,
@@ -2444,7 +2425,7 @@ ehci_periodic_update_acquire(
 	}
 }
 
-/* Supports the ehci periodic update release operation. */
+/* Gives that right back. */
 static void
 ehci_periodic_update_release(
 	struct ehci_controller *controller)
@@ -2459,7 +2440,7 @@ ehci_periodic_update_release(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the ehci periodic pause operation. */
+/* Stops the controller walking the periodic schedule. */
 static int
 ehci_periodic_pause(
 	struct ehci_controller *controller)
@@ -2513,7 +2494,7 @@ ehci_periodic_pause(
 	return error;
 }
 
-/* Supports the ehci periodic resume operation. */
+/* Lets it walk that schedule again. */
 static int
 ehci_periodic_resume(
 	struct ehci_controller *controller)
@@ -2564,7 +2545,7 @@ ehci_periodic_resume(
 	return error;
 }
 
-/* Supports the ehci publish async request operation. */
+/* Publishes a request into the asynchronous schedule. */
 static int
 ehci_publish_async_request(
 	struct ehci_controller *controller,
@@ -2618,7 +2599,7 @@ ehci_publish_async_request(
 	}
 }
 
-/* Supports the ehci publish periodic request operation. */
+/* Publishes a request into the periodic schedule. */
 static int
 ehci_publish_periodic_request(
 	struct ehci_controller *controller,
@@ -2805,7 +2786,7 @@ ehci_publish_periodic_request(
 	return 0;
 }
 
-/* Supports the ehci urb enqueue operation. */
+/* Puts one transfer into the schedule of its endpoint. */
 static int
 ehci_urb_enqueue(
 	struct drv_usb_hcd *hcd,
@@ -2882,7 +2863,7 @@ ehci_urb_enqueue(
 	return function_result;
 }
 
-/* Supports the ehci request is active locked operation. */
+/* Asks whether the controller is still running a request. */
 static int
 ehci_request_is_active_locked(
 	struct ehci_controller *controller,
@@ -2902,7 +2883,7 @@ ehci_request_is_active_locked(
 	return 0;
 }
 
-/* Supports the ehci retirement enqueue locked operation. */
+/* Puts a request on the list of those waiting to be retired. */
 static void
 ehci_retirement_enqueue_locked(
 	struct ehci_controller *controller,
@@ -2922,7 +2903,7 @@ ehci_retirement_enqueue_locked(
 	request->retirement_queued = true;
 }
 
-/* Supports the ehci retirement pop locked operation. */
+/* Takes the next request off that list. */
 static void
 ehci_retirement_pop_locked(
 	struct ehci_controller *controller,
@@ -2941,7 +2922,7 @@ ehci_retirement_pop_locked(
 	request->retirement_queued = false;
 }
 
-/* Supports the ehci retirement begin locked operation. */
+/* Starts retiring one request. */
 static void
 ehci_retirement_begin_locked(
 	struct ehci_controller *controller,
@@ -2973,7 +2954,7 @@ ehci_retirement_begin_locked(
 	ehci_retirement_enqueue_locked(controller, request);
 }
 
-/* Supports the ehci request terminal operation. */
+/* Reports the status the last descriptor of a request holds. */
 static int
 ehci_request_terminal(
 	struct ehci_request *request,
@@ -3033,7 +3014,7 @@ ehci_request_terminal(
 	return 0;
 }
 
-/* Supports the ehci request actual operation. */
+/* Reports how many bytes a request actually moved. */
 static size_t
 ehci_request_actual(
 	struct ehci_request *request)
@@ -3078,7 +3059,7 @@ ehci_request_actual(
 	return actual;
 }
 
-/* Supports the ehci request commit toggle operation. */
+/* Saves the data toggle a request leaves its endpoint at. */
 static void
 ehci_request_commit_toggle(
 	struct ehci_request *request)
@@ -3090,7 +3071,7 @@ ehci_request_commit_toggle(
 	}
 }
 
-/* Supports the ehci retirement report operation. */
+/* Hands a retired request back to its caller. */
 static void
 ehci_retirement_report(
 	struct ehci_controller *controller)
@@ -3131,7 +3112,7 @@ ehci_retirement_report(
 	}
 }
 
-/* Supports the ehci retirement begin iaa locked operation. */
+/* Asks the controller to acknowledge an unlink. */
 static int
 ehci_retirement_begin_iaa_locked(
 	struct ehci_controller *controller,
@@ -3208,7 +3189,7 @@ ehci_retirement_begin_iaa_locked(
 	return 0;
 }
 
-/* Supports the ehci retirement observe iaa locked operation. */
+/* Notes that the controller has acknowledged it. */
 static int
 ehci_retirement_observe_iaa_locked(
 	struct ehci_controller *controller,
@@ -3255,7 +3236,7 @@ ehci_retirement_observe_iaa_locked(
 	return 0;
 }
 
-/* Supports the ehci retirement finish locked operation. */
+/* Finishes retiring one request. */
 static void
 ehci_retirement_finish_locked(
 	struct ehci_controller *controller,
@@ -3270,7 +3251,7 @@ ehci_retirement_finish_locked(
 		request->state = EHCI_REQUEST_COMPLETING;
 }
 
-/* Supports the ehci complete retired request operation. */
+/* Completes a request whose descriptors are no longer reachable. */
 static void
 ehci_complete_retired_request(
 	struct ehci_controller *controller,
@@ -3356,7 +3337,7 @@ ehci_complete_retired_request(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the ehci retire periodic request operation. */
+/* Retires a request that was in the periodic schedule. */
 static int
 ehci_retire_periodic_request(
 	struct ehci_controller *controller,
@@ -3462,7 +3443,7 @@ fail:
 	return 0;
 }
 
-/* Supports the ehci retirement progress operation. */
+/* Moves every request waiting to retire one step further. */
 static void
 ehci_retirement_progress(
 	struct ehci_controller *controller)
@@ -3587,7 +3568,7 @@ ehci_retirement_progress(
 	}
 }
 
-/* Supports the ehci controller fatal stop operation. */
+/* Stops a controller that has failed beyond recovery. */
 static void
 ehci_controller_fatal_stop(
 	struct ehci_controller *controller)
@@ -3623,7 +3604,7 @@ ehci_controller_fatal_stop(
 	}
 }
 
-/* Supports the ehci root worker stop operation. */
+/* Stops the thread that serves root port changes. */
 static int
 ehci_root_worker_stop(
 	struct ehci_controller *controller,
@@ -3723,7 +3704,7 @@ ehci_root_worker_stop(
 	return 0;
 }
 
-/* Supports the ehci retirement worker operation. */
+/* Retires finished requests outside interrupt context. */
 static void
 ehci_retirement_worker(
 	void *argument)
@@ -3757,7 +3738,7 @@ ehci_retirement_worker(
 	}
 }
 
-/* Supports the ehci retirement worker start operation. */
+/* Starts the thread that does so. */
 static int
 ehci_retirement_worker_start(
 	struct ehci_controller *controller)
@@ -3806,7 +3787,7 @@ ehci_retirement_worker_start(
 	return 0;
 }
 
-/* Supports the ehci retirement worker stop operation. */
+/* Stops that thread and waits for it. */
 static int
 ehci_retirement_worker_stop(
 	struct ehci_controller *controller)
@@ -3894,7 +3875,7 @@ ehci_retirement_worker_stop(
 	return 0;
 }
 
-/* Supports the ehci urb dequeue operation. */
+/* Cancels one transfer that has not completed. */
 static int
 ehci_urb_dequeue(
 	struct drv_usb_hcd *hcd,
@@ -4001,7 +3982,7 @@ ehci_urb_dequeue(
 	}
 }
 
-/* Supports the ehci root worker operation. */
+/* Serves root port changes outside interrupt context. */
 static void
 ehci_root_worker(
 	void *argument)
@@ -4096,7 +4077,7 @@ ehci_root_worker(
 	}
 }
 
-/* Supports the ehci root worker start operation. */
+/* Starts the thread that does so. */
 static int
 ehci_root_worker_start(
 	struct ehci_controller *controller)
@@ -4149,7 +4130,7 @@ ehci_root_worker_start(
 	return 0;
 }
 
-/* Supports the ehci root worker request stop operation. */
+/* Asks that thread to stop. */
 static void
 ehci_root_worker_request_stop(
 	struct ehci_controller *controller)
@@ -4171,7 +4152,7 @@ ehci_root_worker_request_stop(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the ehci root event defer operation. */
+/* Hands a root port change to that thread. */
 static void
 ehci_root_event_defer(
 	struct ehci_controller *controller)
@@ -4199,7 +4180,7 @@ ehci_root_event_defer(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
 
-/* Supports the ehci quiesce requests operation. */
+/* Waits for every outstanding request to leave. */
 static int
 ehci_quiesce_requests(
 	struct ehci_controller *controller)
@@ -4303,7 +4284,7 @@ ehci_quiesce_requests(
 	}
 }
 
-/* Supports the ehci report shutdown evidence operation. */
+/* Records what state the controller was left in. */
 static int
 ehci_report_shutdown_evidence(
 	struct ehci_controller *controller)
@@ -4358,7 +4339,7 @@ ehci_report_shutdown_evidence(
 	return 0;
 }
 
-/* Supports the ehci quiesce operation. */
+/* Brings the controller to a stop that nothing is running under. */
 static int
 ehci_quiesce(
 	struct drv_usb_hcd *hcd)
@@ -4499,7 +4480,7 @@ ehci_quiesce(
 	return function_result;
 }
 
-/* Supports the ehci stop operation. */
+/* Stops the controller. */
 static void
 ehci_stop(
 	struct drv_usb_hcd *hcd)
@@ -4542,7 +4523,7 @@ ehci_stop(
 	ehci_schedule_release(controller);
 }
 
-/* Supports the ehci endpoint enable operation. */
+/* Prepares the driver state one endpoint needs. */
 static int
 ehci_endpoint_enable(
 	struct drv_usb_hcd *hcd,
@@ -4555,7 +4536,7 @@ ehci_endpoint_enable(
 	return 0;
 }
 
-/* Supports the ehci endpoint disable operation. */
+/* Gives that state back. */
 static int
 ehci_endpoint_disable(
 	struct drv_usb_hcd *hcd,
@@ -4577,7 +4558,7 @@ ehci_endpoint_disable(
 	return 0;
 }
 
-/* Supports the ehci endpoint reset operation. */
+/* Clears an endpoint's halt and its data toggle. */
 static int
 ehci_endpoint_reset(
 	struct drv_usb_hcd *hcd,
@@ -4626,7 +4607,7 @@ ehci_endpoint_reset(
 	return 0;
 }
 
-/* Supports the ehci frame number operation. */
+/* Reports the frame number the bus stands at. */
 static uint32_t
 ehci_frame_number(
 	struct drv_usb_hcd *hcd)
@@ -4641,7 +4622,7 @@ ehci_frame_number(
 	return function_result;
 }
 
-/* Supports the ehci root status operation. */
+/* Reports which root ports have changed. */
 static int
 ehci_root_status(
 	struct drv_usb_hcd *hcd,
@@ -4680,7 +4661,7 @@ ehci_root_status(
 	return 0;
 }
 
-/* Supports the ehci root control operation. */
+/* Serves one hub request against the root ports. */
 static int
 ehci_root_control(
 	struct drv_usb_hcd *hcd,
@@ -4844,7 +4825,7 @@ ehci_root_control(
 	return ENOTSUP;
 }
 
-/* Supports the ehci irq operation. */
+/* Serves one interrupt from the controller. */
 static int
 ehci_irq(
 	void *argument)
@@ -5026,7 +5007,7 @@ ehci_irq(
 	return 1;
 }
 
-/* Supports the ehci publish operation. */
+/* Publishes the controller so the rest of the kernel sees it. */
 static void
 ehci_publish(
 	struct ehci_controller *controller)
@@ -5040,7 +5021,7 @@ ehci_publish(
 	controller->listed = 1;
 }
 
-/* Supports the ehci unpublish operation. */
+/* Takes it back out of view. */
 static void
 ehci_unpublish(
 	struct ehci_controller *controller)
@@ -5063,7 +5044,7 @@ ehci_unpublish(
 	controller->listed = 0;
 }
 
-/* Supports the ehci pci release operation. */
+/* Gives every PCI resource this driver claimed back. */
 static int
 ehci_pci_release(
 	struct ehci_controller *controller)
@@ -5134,7 +5115,7 @@ ehci_pci_release(
 	return 0;
 }
 
-/* Supports the ehci cleanup operation. */
+/* Undoes everything a failed or finished attach had done. */
 static int
 ehci_cleanup(
 	struct ehci_controller *controller)
@@ -5273,7 +5254,7 @@ ehci_cleanup(
 	return function_result;
 }
 
-/* Supports the ehci runtime operational operation. */
+/* Asks whether the controller is running and free of faults. */
 static int
 ehci_runtime_operational(
 	struct ehci_controller *controller)
@@ -5303,7 +5284,7 @@ ehci_runtime_operational(
 	return operational;
 }
 
-/* Supports the ehci attach operation. */
+/* Brings up a controller the PCI bus has just matched. */
 static int
 ehci_attach(
 	struct drv_pci_device *device,
@@ -5453,7 +5434,7 @@ fail:
 	return 0;
 }
 
-/* Supports the ehci detach operation. */
+/* Takes a controller out of service and gives it back. */
 static int
 ehci_detach(
 	struct drv_pci_device *device,
@@ -5491,3 +5472,37 @@ ehci_detach(
 	/* Succeeded. */
 	return 0;
 }
+
+/*
+ * EHCI
+ */
+
+static const struct drv_usb_hcd_ops ehci_ops = {
+	.start = ehci_start,
+	.quiesce = ehci_quiesce,
+	.stop = ehci_stop,
+	.urb_enqueue = ehci_urb_enqueue,
+	.urb_dequeue = ehci_urb_dequeue,
+	.endpoint_enable = ehci_endpoint_enable,
+	.endpoint_disable = ehci_endpoint_disable,
+	.endpoint_reset = ehci_endpoint_reset,
+	.frame_number = ehci_frame_number,
+	.root_hub_status = ehci_root_status,
+	.root_hub_control = ehci_root_control
+};
+
+static const struct drv_pci_id ehci_ids[] = {
+	{
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		0x0c0320U, 0xffffffU, 0
+	}
+};
+
+static struct drv_pci_driver ehci_driver = {
+	.name = "ehci",
+	.ids = ehci_ids,
+	.id_count = 1,
+	.attach = ehci_attach,
+	.detach = ehci_detach
+};

@@ -1,10 +1,20 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* CMD646 primary-channel ATA PIO driver for QEMU sun4u. */
+/*
+ * CMD646 primary-channel ATA PIO driver for QEMU sun4u.
+ */
+
 #include "drivers/platform/sun4u/sun4u-cmd646.h"
-#include <errno.h>
+
 #include <hal/hal.h>
 #include <kern/disk.h>
+
+#include <errno.h>
 
 #define ATA_DATA 0U
 #define ATA_ERROR 1U

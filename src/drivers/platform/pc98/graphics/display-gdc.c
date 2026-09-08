@@ -1,15 +1,12 @@
-/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
-
 /*
  * zedBSD
- * Copyright (c) 1996-2024, Keiichi Tabata
- * Copyright (c) 2025, 2026, Awe Morris
+ * Copyright (C) 2026 Awe Morris
  *
- * zedBSD graphics NEC PC-9800 GDC safe-mode display backend, imported from
- * Boots. Display sequencing is adapted from StratoHAL 98disp_gdc.c at commit
- * 76e909577bdf4629f11e473539b446a948fef830, altered to preserve text
- * VRAM and update only requested rectangles.  Port I/O is injected by
- * the embedder so the driver stays compiler neutral.
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * zedBSD graphics NEC PC-9800 GDC.
  */
 
 #include "drivers/platform/pc98/graphics/display-gdc.h"

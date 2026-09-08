@@ -1,3 +1,10 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #include "kern/console-device.h"
 #include "kern/cdev.h"
 #include "kern/clock.h"
@@ -76,9 +83,6 @@ static unsigned event_head, event_tail, event_used;
 
 static void console_drain_input_locked(void);
 
-/*
- * Forward declaration.
- */
 static struct console_open *console_open_state(struct file *file);
 static unsigned console_file_vt(struct file *file);
 static int console_open_file(struct file *file);
@@ -104,7 +108,7 @@ static ssize_t vt_write(struct file *file, const void *buffer, size_t size);
 static int vt_poll(struct file *file, short events, short *revents);
 static int vt_ioctl(struct file *file, unsigned long request, uintptr_t argument);
 
-/* Supports the console drain input locked operation. */
+/* Takes the input that has been queued for the console. */
 static void
 console_drain_input_locked(
 	void)
@@ -120,7 +124,7 @@ console_drain_input_locked(
 
 #ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
 
-/* Supports the console open state operation. */
+/* Reports the state behind an open console file. */
 static struct console_open *
 console_open_state(
 	struct file *file)
@@ -129,7 +133,7 @@ console_open_state(
 	return file != NULL ? file->f_data : NULL;
 }
 
-/* Supports the console file vt operation. */
+/* Reports which virtual terminal an open file belongs to. */
 static unsigned
 console_file_vt(
 	struct file *file)
@@ -140,7 +144,7 @@ console_file_vt(
 	return state != NULL ? state->vt : 0U;
 }
 
-/* Supports the console open file operation. */
+/* Opens the console, or one of its virtual terminals. */
 static int
 console_open_file(
 	struct file *file)
@@ -158,7 +162,7 @@ console_open_file(
 	return 0;
 }
 
-/* Supports the console close file operation. */
+/* Closes it again. */
 static int
 console_close_file(
 	struct file *file)
@@ -188,7 +192,7 @@ console_close_file(
 	return 0;
 }
 
-/* Supports the console capability add operation. */
+/* Records one thing the console's input source can report. */
 static int
 console_capability_add(
 	struct input_capability *capabilities,
@@ -221,7 +225,7 @@ console_capability_add(
 	return 0;
 }
 
-/* Supports the console capabilities operation. */
+/* Reports everything those sources can report together. */
 static int
 console_capabilities(
 	const struct hal_cons_input_info *hal_info,
@@ -266,7 +270,7 @@ console_capabilities(
 	return 0;
 }
 
-/* Supports the console input take operation. */
+/* Takes the next input event the console has. */
 static int
 console_input_take(
 	int consume,
@@ -398,7 +402,7 @@ console_input_take(
 }
 
 /*
- * Implements the drv console input poll event operation.
+ * Reports whether the console has an input event waiting.
  */
 int
 drv_console_input_poll_event(
@@ -413,7 +417,7 @@ drv_console_input_poll_event(
 	return error;
 }
 /*
- * Implements the drv console input read event operation.
+ * Reads the next input event the console has.
  */
 int
 drv_console_input_read_event(
@@ -429,7 +433,7 @@ drv_console_input_read_event(
 }
 #endif
 
-/* Supports the console source find operation. */
+/* Finds the input source one device is registered as. */
 static struct console_source_state *
 console_source_find(
 	struct input_device *source,
@@ -459,7 +463,7 @@ console_source_find(
 	return empty;
 }
 
-/* Supports the console source active key operation. */
+/* Asks whether a source still holds a key down. */
 static uint32_t
 console_source_active_key(
 	struct console_source_state *source,
@@ -530,7 +534,7 @@ console_source_active_key(
 	return translated;
 }
 
-/* Supports the console dispatch enqueue operation. */
+/* Puts one event on the queue the dispatcher serves. */
 static void
 console_dispatch_enqueue(
 	uint32_t translated,
@@ -743,7 +747,7 @@ console_input_subscriber(
 
 #ifdef ZEDBSD_INPUT_OWNERSHIP_TEST
 /*
- * Implements the drv console input ownership test reset operation.
+ * Clears the ownership record the host tests inspect.
  */
 void
 drv_console_input_ownership_test_reset(
@@ -760,7 +764,7 @@ drv_console_input_ownership_test_reset(
 }
 
 /*
- * Implements the drv console input ownership test publish operation.
+ * Publishes one ownership change for those tests.
  */
 void
 drv_console_input_ownership_test_publish(
@@ -770,7 +774,7 @@ drv_console_input_ownership_test_publish(
 }
 
 /*
- * Implements the drv console input ownership test pop operation.
+ * Takes one recorded change back off for those tests.
  */
 int
 drv_console_input_ownership_test_pop(
@@ -809,7 +813,7 @@ drv_console_input_ownership_test_pop(
 }
 
 /*
- * Implements the drv console input ownership test state operation.
+ * Reports the recorded state to those tests.
  */
 int
 drv_console_input_ownership_test_state(
@@ -859,7 +863,7 @@ drv_console_input_ownership_test_state(
 }
 
 /*
- * Implements the drv console input ownership test drain operation.
+ * Drains the whole record for those tests.
  */
 void
 drv_console_input_ownership_test_drain(
@@ -874,7 +878,7 @@ drv_console_input_ownership_test_drain(
 }
 #else
 
-/* Supports the console deliver operation. */
+/* Delivers one event to whoever the console is owned by. */
 static void
 console_deliver(
 	uint32_t translated,
@@ -935,7 +939,7 @@ console_deliver(
 	poll_notify();
 }
 
-/* Supports the console dispatch worker operation. */
+/* Delivers queued events outside the producer's context. */
 static void
 console_dispatch_worker(
 	void *argument)
@@ -964,7 +968,7 @@ console_dispatch_worker(
 	}
 }
 
-/* Supports the console input worker operation. */
+/* Takes input from the sources and queues it. */
 static void
 console_input_worker(
 	void *argument)
@@ -980,7 +984,7 @@ console_input_worker(
 	}
 }
 
-/* Supports the console event read operation. */
+/* Reads one event out of the console's own queue. */
 static ssize_t
 console_event_read(
 	struct file *file,
@@ -1037,7 +1041,7 @@ console_event_read(
 	return function_result;
 }
 
-/* Supports the console read operation. */
+/* Reads characters typed at the console. */
 static ssize_t
 console_read(
 	struct file *file,
@@ -1064,7 +1068,7 @@ console_read(
 	return function_result;
 }
 
-/* Supports the console write operation. */
+/* Writes characters to the console. */
 static ssize_t
 console_write(
 	struct file *file,
@@ -1083,7 +1087,7 @@ console_write(
 	return result;
 }
 
-/* Supports the console write at operation. */
+/* Writes characters at one position of the console. */
 static int
 console_write_at(
 	uintptr_t argument)
@@ -1122,7 +1126,7 @@ console_write_at(
 	return function_result;
 }
 
-/* Supports the console ioctl operation. */
+/* Serves one control request against the console. */
 static int
 console_ioctl(
 	struct file *file,
@@ -1347,7 +1351,7 @@ console_ioctl(
 	}
 }
 
-/* Supports the console poll operation. */
+/* Reports whether the console has anything to read. */
 static int
 console_poll(
 	struct file *file,
@@ -1381,7 +1385,7 @@ console_poll(
 	return error;
 }
 
-/* Supports the vt read operation. */
+/* Reads characters typed at one virtual terminal. */
 static ssize_t
 vt_read(
 	struct file *file,
@@ -1398,7 +1402,7 @@ vt_read(
 	return function_result;
 }
 
-/* Supports the vt write operation. */
+/* Writes characters to one virtual terminal. */
 static ssize_t
 vt_write(
 	struct file *file,
@@ -1416,7 +1420,7 @@ vt_write(
 	return result;
 }
 
-/* Supports the vt poll operation. */
+/* Reports whether a virtual terminal has anything to read. */
 static int
 vt_poll(
 	struct file *file,
@@ -1433,7 +1437,7 @@ vt_poll(
 	return error;
 }
 
-/* Supports the vt ioctl operation. */
+/* Serves one control request against a virtual terminal. */
 static int
 vt_ioctl(
 	struct file *file,
@@ -1467,7 +1471,7 @@ static const struct cdev_ops console_ops = {
 };
 
 /*
- * Implements the drv console device register operation.
+ * Publishes the console and its terminals as devices.
  */
 int
 drv_console_device_register(

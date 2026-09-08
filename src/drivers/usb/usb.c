@@ -1,14 +1,18 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
 /*
- * zedBSD USB host core
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
- *
- * The driver model and URB terminology follow the Linux USB API.  This is
- * an independent implementation and contains no Linux implementation code.
  *
  * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * USB host core
+
+ * The driver model and URB terminology follow the Linux USB API.
+ * This is an independent implementation and contains no Linux
+ * implementation code.
+ */
+
 #include <drivers/usb.h>
 #include <errno.h>
 #include <hal/hal.h>
@@ -196,6 +200,9 @@ static uint64_t usb_device_generation;
 static bool usb_initialized;
 static atomic_uint_t usb_topology_gate;
 
+/*
+ * Forward declaration
+ */
 static void usb_topology_lock(void);
 static void usb_topology_unlock(void);
 static void device_begin_disconnect(struct drv_usb_device *device);
@@ -293,7 +300,7 @@ static int endpoint_clear_halt_request(struct drv_usb_device *device, struct drv
 static void endpoint_binding_unpin(struct drv_usb_interface *owner);
 
 /*
- * Implements the drv usb init operation.
+ * Brings the USB subsystem into service.
  */
 int
 drv_usb_init(
@@ -316,7 +323,7 @@ drv_usb_init(
 }
 
 /*
- * Implements the drv usb shutdown operation.
+ * Takes the USB subsystem out of service.
  */
 void
 drv_usb_shutdown(
@@ -460,7 +467,7 @@ drv_usb_shutdown(
 }
 
 /*
- * Implements the drv usb hcd register operation.
+ * Publishes a host controller and its root hub as a bus.
  */
 int
 drv_usb_hcd_register(
@@ -558,7 +565,7 @@ drv_usb_hcd_register(
 }
 
 /*
- * Implements the drv usb hcd unregister operation.
+ * Takes a host controller and its bus back out of service.
  */
 int
 drv_usb_hcd_unregister(
@@ -673,7 +680,7 @@ drv_usb_hcd_unregister(
 }
 
 /*
- * Implements the drv usb decode superspeed endpoint companion operation.
+ * Reads the companion descriptor a SuperSpeed endpoint carries.
  */
 int
 drv_usb_decode_superspeed_endpoint_companion(
@@ -706,7 +713,7 @@ drv_usb_decode_superspeed_endpoint_companion(
 }
 
 /*
- * Implements the drv usb hcd root hub changed operation.
+ * Tells the subsystem that a root port has changed.
  */
 void
 drv_usb_hcd_root_hub_changed(
@@ -833,7 +840,7 @@ drv_usb_hcd_root_hub_changed(
 }
 
 /*
- * Implements the drv usb hcd complete operation.
+ * Completes one transfer a host controller has finished.
  */
 void
 drv_usb_hcd_complete(
@@ -848,7 +855,7 @@ drv_usb_hcd_complete(
 }
 
 /*
- * Implements the drv usb foreach bus operation.
+ * Calls back for every bus the subsystem holds.
  */
 int
 drv_usb_foreach_bus(
@@ -873,7 +880,7 @@ drv_usb_foreach_bus(
 }
 
 /*
- * Implements the drv usb bus foreach device operation.
+ * Calls back for every device of one bus.
  */
 int
 drv_usb_bus_foreach_device(
@@ -903,7 +910,7 @@ drv_usb_bus_foreach_device(
 }
 
 /*
- * Implements the drv usb foreach device operation.
+ * Calls back for every device of every bus.
  */
 int
 drv_usb_foreach_device(
@@ -928,7 +935,7 @@ drv_usb_foreach_device(
 }
 
 /*
- * Implements the drv usb device foreach interface operation.
+ * Calls back for every interface of one device.
  */
 int
 drv_usb_device_foreach_interface(
@@ -954,7 +961,7 @@ drv_usb_device_foreach_interface(
 }
 
 /*
- * Implements the drv usb find device operation.
+ * Finds a device by its bus and address.
  */
 struct drv_usb_device *
 drv_usb_find_device(
@@ -985,7 +992,7 @@ drv_usb_find_device(
 }
 
 /*
- * Implements the drv usb bus number operation.
+ * Reports the number a bus was published under.
  */
 unsigned
 drv_usb_bus_number(
@@ -996,7 +1003,7 @@ drv_usb_bus_number(
 }
 
 /*
- * Implements the drv usb bus hcd operation.
+ * Reports the host controller behind a bus.
  */
 struct drv_usb_hcd *
 drv_usb_bus_hcd(
@@ -1007,7 +1014,7 @@ drv_usb_bus_hcd(
 }
 
 /*
- * Implements the drv usb bus root hub operation.
+ * Reports the root hub device of a bus.
  */
 struct drv_usb_device *
 drv_usb_bus_root_hub(
@@ -1018,7 +1025,7 @@ drv_usb_bus_root_hub(
 }
 
 /*
- * Implements the drv usb device bus operation.
+ * Reports the bus a device is on.
  */
 struct drv_usb_bus *
 drv_usb_device_bus(
@@ -1029,7 +1036,7 @@ drv_usb_device_bus(
 }
 
 /*
- * Implements the drv usb device parent operation.
+ * Reports the hub a device hangs from.
  */
 struct drv_usb_device *
 drv_usb_device_parent(
@@ -1040,7 +1047,7 @@ drv_usb_device_parent(
 }
 
 /*
- * Implements the drv usb device address operation.
+ * Reports the bus address a device was given.
  */
 unsigned
 drv_usb_device_address(
@@ -1051,7 +1058,7 @@ drv_usb_device_address(
 }
 
 /*
- * Implements the drv usb device port operation.
+ * Reports which port of its parent a device is on.
  */
 unsigned
 drv_usb_device_port(
@@ -1062,7 +1069,7 @@ drv_usb_device_port(
 }
 
 /*
- * Implements the drv usb device speed operation.
+ * Reports the speed a device was enumerated at.
  */
 enum drv_usb_speed
 drv_usb_device_speed(
@@ -1073,7 +1080,7 @@ drv_usb_device_speed(
 }
 
 /*
- * Implements the drv usb device state operation.
+ * Reports where a device stands in its life.
  */
 enum drv_usb_device_state
 drv_usb_device_state(
@@ -1084,7 +1091,7 @@ drv_usb_device_state(
 }
 
 /*
- * Implements the drv usb device descriptor operation.
+ * Reports the device descriptor that was read from it.
  */
 const struct drv_usb_device_descriptor *
 drv_usb_device_descriptor(
@@ -1095,7 +1102,7 @@ drv_usb_device_descriptor(
 }
 
 /*
- * Implements the drv usb device hcd urb count operation.
+ * Reports how many transfers the controller still holds.
  */
 unsigned
 drv_usb_device_hcd_urb_count(
@@ -1111,7 +1118,7 @@ drv_usb_device_hcd_urb_count(
 }
 
 /*
- * Implements the drv usb device is tearing down operation.
+ * Asks whether a device is already being disconnected.
  */
 int
 drv_usb_device_is_tearing_down(
@@ -1130,7 +1137,7 @@ drv_usb_device_is_tearing_down(
 }
 
 /*
- * Implements the drv usb device hcd capabilities operation.
+ * Reports what the controller can do for this device.
  */
 unsigned
 drv_usb_device_hcd_capabilities(
@@ -1141,7 +1148,7 @@ drv_usb_device_hcd_capabilities(
 }
 
 /*
- * Implements the drv usb device hcd data operation.
+ * Reports the controller's own state for this device.
  */
 uintptr_t
 drv_usb_device_hcd_data(
@@ -1160,7 +1167,7 @@ drv_usb_device_hcd_data(
 }
 
 /*
- * Implements the drv usb device set hcd data operation.
+ * Gives the controller somewhere to keep that state.
  */
 int
 drv_usb_device_set_hcd_data(
@@ -1178,7 +1185,7 @@ drv_usb_device_set_hcd_data(
 }
 
 /*
- * Implements the drv usb device dma operation.
+ * Reports the DMA device transfers to this device use.
  */
 struct drv_dma_device *
 drv_usb_device_dma(
@@ -1189,7 +1196,7 @@ drv_usb_device_dma(
 }
 
 /*
- * Implements the drv usb device reset operation.
+ * Resets a device through the port it hangs from.
  */
 int
 drv_usb_device_reset(
@@ -1517,7 +1524,7 @@ out:
 }
 
 /*
- * Implements the drv usb device set configuration operation.
+ * Selects which configuration a device presents.
  */
 int
 drv_usb_device_set_configuration(
@@ -1701,7 +1708,7 @@ out:
 }
 
 /*
- * Implements the drv usb device get string operation.
+ * Reads one string descriptor from a device.
  */
 int
 drv_usb_device_get_string(
@@ -1802,7 +1809,7 @@ drv_usb_device_get_string(
 }
 
 /*
- * Implements the drv usb urb alloc operation.
+ * Takes the state one transfer needs.
  */
 struct drv_usb_urb *
 drv_usb_urb_alloc(
@@ -1885,7 +1892,7 @@ drv_usb_urb_alloc(
 }
 
 /*
- * Implements the drv usb urb free operation.
+ * Gives that state back.
  */
 void
 drv_usb_urb_free(
@@ -2095,7 +2102,7 @@ drv_usb_urb_transfer_reservation(
 }
 
 /*
- * Implements the drv usb urb setup operation.
+ * Describes a transfer of bulk or interrupt data.
  */
 int
 drv_usb_urb_setup(
@@ -2150,7 +2157,7 @@ drv_usb_urb_setup(
 }
 
 /*
- * Implements the drv usb urb setup control flags operation.
+ * Describes a control transfer, with flags of its own.
  */
 int
 drv_usb_urb_setup_control_flags(
@@ -2186,7 +2193,7 @@ drv_usb_urb_setup_control_flags(
 }
 
 /*
- * Implements the drv usb urb setup control operation.
+ * Describes a control transfer.
  */
 int
 drv_usb_urb_setup_control(
@@ -2209,7 +2216,7 @@ drv_usb_urb_setup_control(
 }
 
 /*
- * Implements the drv usb urb setup isochronous operation.
+ * Describes an isochronous transfer.
  */
 int
 drv_usb_urb_setup_isochronous(
@@ -2230,7 +2237,7 @@ drv_usb_urb_setup_isochronous(
 }
 
 /*
- * Implements the drv usb urb submit operation.
+ * Hands a transfer to the host controller.
  */
 int
 drv_usb_urb_submit(
@@ -2381,7 +2388,7 @@ out_submit:
 }
 
 /*
- * Implements the drv usb urb cancel operation.
+ * Asks the host controller to give a transfer up.
  */
 int
 drv_usb_urb_cancel(
@@ -2397,7 +2404,7 @@ drv_usb_urb_cancel(
 }
 
 /*
- * Implements the drv usb urb wait operation.
+ * Waits for a transfer to complete.
  */
 int
 drv_usb_urb_wait(
@@ -2473,7 +2480,7 @@ drv_usb_urb_wait(
 }
 
 /*
- * Implements the drv usb urb drain operation.
+ * Waits for a transfer to leave the controller entirely.
  */
 int
 drv_usb_urb_drain(
@@ -2515,7 +2522,7 @@ drv_usb_urb_drain(
 }
 
 /*
- * Implements the drv usb urb wait reusable operation.
+ * Waits until a transfer's state may be used again.
  */
 int
 drv_usb_urb_wait_reusable(
@@ -2575,7 +2582,7 @@ drv_usb_urb_wait_reusable(
 }
 
 /*
- * Implements the drv usb urb status operation.
+ * Reports how a completed transfer ended.
  */
 enum drv_usb_urb_status
 drv_usb_urb_status(
@@ -2592,7 +2599,7 @@ drv_usb_urb_status(
 }
 
 /*
- * Implements the drv usb urb actual length operation.
+ * Reports how many bytes a transfer moved.
  */
 size_t
 drv_usb_urb_actual_length(
@@ -2610,7 +2617,7 @@ drv_usb_urb_actual_length(
 }
 
 /*
- * Implements the drv usb urb buffer operation.
+ * Reports the buffer a transfer uses.
  */
 void *
 drv_usb_urb_buffer(
@@ -2621,7 +2628,7 @@ drv_usb_urb_buffer(
 }
 
 /*
- * Implements the drv usb urb length operation.
+ * Reports how many bytes a transfer asked for.
  */
 size_t
 drv_usb_urb_length(
@@ -2632,7 +2639,7 @@ drv_usb_urb_length(
 }
 
 /*
- * Implements the drv usb urb flags operation.
+ * Reports the flags a transfer was described with.
  */
 unsigned
 drv_usb_urb_flags(
@@ -2643,7 +2650,7 @@ drv_usb_urb_flags(
 }
 
 /*
- * Implements the drv usb urb control request operation.
+ * Reports the request a control transfer carries.
  */
 const struct drv_usb_control_request *
 drv_usb_urb_control_request(
@@ -2655,7 +2662,7 @@ drv_usb_urb_control_request(
 }
 
 /*
- * Implements the drv usb urb hcd data operation.
+ * Reports the controller's own state for this transfer.
  */
 void *
 drv_usb_urb_hcd_data(
@@ -2666,7 +2673,7 @@ drv_usb_urb_hcd_data(
 }
 
 /*
- * Implements the drv usb urb set hcd data operation.
+ * Gives the controller somewhere to keep that state.
  */
 int
 drv_usb_urb_set_hcd_data(
@@ -2683,7 +2690,7 @@ drv_usb_urb_set_hcd_data(
 }
 
 /*
- * Implements the drv usb urb device operation.
+ * Reports the device a transfer is addressed to.
  */
 struct drv_usb_device *
 drv_usb_urb_device(
@@ -2694,7 +2701,7 @@ drv_usb_urb_device(
 }
 
 /*
- * Implements the drv usb urb endpoint operation.
+ * Reports the endpoint a transfer is addressed to.
  */
 struct drv_usb_endpoint *
 drv_usb_urb_endpoint(
@@ -2705,7 +2712,7 @@ drv_usb_urb_endpoint(
 }
 
 /*
- * Implements the drv usb control operation.
+ * Runs one control transfer and waits for it.
  */
 int
 drv_usb_control(
@@ -2742,7 +2749,7 @@ drv_usb_control(
 }
 
 /*
- * Implements the drv usb bulk operation.
+ * Runs one bulk transfer and waits for it.
  */
 int
 drv_usb_bulk(
@@ -2765,7 +2772,7 @@ drv_usb_bulk(
 }
 
 /*
- * Implements the drv usb interrupt operation.
+ * Runs one interrupt transfer and waits for it.
  */
 int
 drv_usb_interrupt(
@@ -2788,7 +2795,7 @@ drv_usb_interrupt(
 }
 
 /*
- * Implements the drv usb configuration descriptor operation.
+ * Reports the descriptor of one configuration.
  */
 const struct drv_usb_configuration_descriptor *
 drv_usb_configuration_descriptor(
@@ -2799,7 +2806,7 @@ drv_usb_configuration_descriptor(
 }
 
 /*
- * Implements the drv usb device configuration count operation.
+ * Reports how many configurations a device offers.
  */
 unsigned
 drv_usb_device_configuration_count(
@@ -2810,7 +2817,7 @@ drv_usb_device_configuration_count(
 }
 
 /*
- * Implements the drv usb device configuration operation.
+ * Reports one configuration of a device by its index.
  */
 struct drv_usb_configuration *
 drv_usb_device_configuration(
@@ -2822,7 +2829,7 @@ drv_usb_device_configuration(
 }
 
 /*
- * Implements the drv usb device active configuration operation.
+ * Reports the configuration a device currently presents.
  */
 struct drv_usb_configuration *
 drv_usb_device_active_configuration(
@@ -2838,7 +2845,7 @@ drv_usb_device_active_configuration(
 }
 
 /*
- * Implements the drv usb configuration raw descriptors operation.
+ * Reports the descriptor bytes a configuration was read as.
  */
 const void *
 drv_usb_configuration_raw_descriptors(
@@ -2853,7 +2860,7 @@ drv_usb_configuration_raw_descriptors(
 }
 
 /*
- * Implements the drv usb configuration interface count operation.
+ * Reports how many interfaces a configuration holds.
  */
 unsigned
 drv_usb_configuration_interface_count(
@@ -2864,7 +2871,7 @@ drv_usb_configuration_interface_count(
 }
 
 /*
- * Implements the drv usb configuration interface operation.
+ * Reports one interface of a configuration by its index.
  */
 struct drv_usb_interface *
 drv_usb_configuration_interface(
@@ -2889,7 +2896,7 @@ drv_usb_configuration_interface(
 }
 
 /*
- * Implements the drv usb configuration find interface operation.
+ * Finds an interface of a configuration by its number.
  */
 struct drv_usb_interface *
 drv_usb_configuration_find_interface(
@@ -2909,7 +2916,7 @@ drv_usb_configuration_find_interface(
 }
 
 /*
- * Implements the drv usb configuration iad count operation.
+ * Reports how many interface associations a configuration holds.
  */
 unsigned
 drv_usb_configuration_iad_count(
@@ -2920,7 +2927,7 @@ drv_usb_configuration_iad_count(
 }
 
 /*
- * Implements the drv usb configuration iad operation.
+ * Reports one of those associations by its index.
  */
 const struct drv_usb_interface_association_descriptor *
 drv_usb_configuration_iad(
@@ -2934,7 +2941,7 @@ drv_usb_configuration_iad(
 }
 
 /*
- * Implements the drv usb interface device operation.
+ * Reports the device an interface belongs to.
  */
 struct drv_usb_device *
 drv_usb_interface_device(
@@ -2945,7 +2952,7 @@ drv_usb_interface_device(
 }
 
 /*
- * Implements the drv usb interface descriptor operation.
+ * Reports the descriptor of an interface's active setting.
  */
 const struct drv_usb_interface_descriptor *
 drv_usb_interface_descriptor(
@@ -2960,7 +2967,7 @@ drv_usb_interface_descriptor(
 }
 
 /*
- * Implements the drv usb interface number operation.
+ * Reports the number an interface was given.
  */
 unsigned
 drv_usb_interface_number(
@@ -2973,7 +2980,7 @@ drv_usb_interface_number(
 }
 
 /*
- * Implements the drv usb interface alternate count operation.
+ * Reports how many alternate settings an interface has.
  */
 unsigned
 drv_usb_interface_alternate_count(
@@ -2984,7 +2991,7 @@ drv_usb_interface_alternate_count(
 }
 
 /*
- * Implements the drv usb interface active alternate operation.
+ * Reports the setting an interface currently presents.
  */
 const struct drv_usb_host_interface *
 drv_usb_interface_active_alternate(
@@ -3003,7 +3010,7 @@ drv_usb_interface_active_alternate(
 }
 
 /*
- * Implements the drv usb interface alternate operation.
+ * Reports one alternate setting by its index.
  */
 const struct drv_usb_host_interface *
 drv_usb_interface_alternate(
@@ -3028,7 +3035,7 @@ drv_usb_interface_alternate(
 }
 
 /*
- * Implements the drv usb interface find alternate operation.
+ * Finds an alternate setting by its number.
  */
 const struct drv_usb_host_interface *
 drv_usb_interface_find_alternate(
@@ -3050,7 +3057,7 @@ drv_usb_interface_find_alternate(
 }
 
 /*
- * Implements the drv usb interface set alternate operation.
+ * Selects which alternate setting an interface presents.
  */
 int
 drv_usb_interface_set_alternate(
@@ -3218,7 +3225,7 @@ out:
 }
 
 /*
- * Implements the drv usb interface claim operation.
+ * Claims an interface for one driver.
  */
 int
 drv_usb_interface_claim(
@@ -3308,7 +3315,7 @@ out_device:
 }
 
 /*
- * Implements the drv usb interface release operation.
+ * Gives a claimed interface back.
  */
 int
 drv_usb_interface_release(
@@ -3387,7 +3394,7 @@ out_device:
 }
 
 /*
- * Implements the drv usb interface claimed by operation.
+ * Asks whether a given driver holds an interface.
  */
 struct drv_usb_interface *
 drv_usb_interface_claimed_by(
@@ -3404,7 +3411,7 @@ drv_usb_interface_claimed_by(
 }
 
 /*
- * Implements the drv usb interface driver operation.
+ * Reports the driver that holds an interface.
  */
 struct drv_usb_driver *
 drv_usb_interface_driver(
@@ -3415,7 +3422,7 @@ drv_usb_interface_driver(
 }
 
 /*
- * Implements the drv usb interface driver data operation.
+ * Reports that driver's own state for the interface.
  */
 void *
 drv_usb_interface_driver_data(
@@ -3426,7 +3433,7 @@ drv_usb_interface_driver_data(
 }
 
 /*
- * Implements the drv usb interface set driver data operation.
+ * Gives the driver somewhere to keep that state.
  */
 int
 drv_usb_interface_set_driver_data(
@@ -3443,7 +3450,7 @@ drv_usb_interface_set_driver_data(
 }
 
 /*
- * Implements the drv usb host interface descriptor operation.
+ * Reports the descriptor of one alternate setting.
  */
 const struct drv_usb_interface_descriptor *
 drv_usb_host_interface_descriptor(
@@ -3454,7 +3461,7 @@ drv_usb_host_interface_descriptor(
 }
 
 /*
- * Implements the drv usb host interface endpoint count operation.
+ * Reports how many endpoints one setting has.
  */
 unsigned
 drv_usb_host_interface_endpoint_count(
@@ -3465,7 +3472,7 @@ drv_usb_host_interface_endpoint_count(
 }
 
 /*
- * Implements the drv usb host interface endpoint operation.
+ * Reports one endpoint of a setting by its index.
  */
 struct drv_usb_endpoint *
 drv_usb_host_interface_endpoint(
@@ -3479,7 +3486,7 @@ drv_usb_host_interface_endpoint(
 }
 
 /*
- * Implements the drv usb host interface extra count operation.
+ * Reports how many extra descriptors a setting carries.
  */
 unsigned
 drv_usb_host_interface_extra_count(
@@ -3490,7 +3497,7 @@ drv_usb_host_interface_extra_count(
 }
 
 /*
- * Implements the drv usb host interface extra operation.
+ * Reports one of those descriptors by its index.
  */
 int
 drv_usb_host_interface_extra(
@@ -3540,7 +3547,7 @@ drv_usb_host_interface_extra(
 }
 
 /*
- * Implements the drv usb interface endpoint count operation.
+ * Reports how many endpoints an interface has active.
  */
 unsigned
 drv_usb_interface_endpoint_count(
@@ -3555,7 +3562,7 @@ drv_usb_interface_endpoint_count(
 }
 
 /*
- * Implements the drv usb interface endpoint operation.
+ * Reports one active endpoint by its index.
  */
 struct drv_usb_endpoint *
 drv_usb_interface_endpoint(
@@ -3573,7 +3580,7 @@ drv_usb_interface_endpoint(
 }
 
 /*
- * Implements the drv usb interface find endpoint operation.
+ * Finds an active endpoint by its address.
  */
 struct drv_usb_endpoint *
 drv_usb_interface_find_endpoint(
@@ -3627,7 +3634,7 @@ drv_usb_interface_find_endpoint(
 }
 
 /*
- * Implements the drv usb endpoint device operation.
+ * Reports the device an endpoint belongs to.
  */
 struct drv_usb_device *
 drv_usb_endpoint_device(
@@ -3638,7 +3645,7 @@ drv_usb_endpoint_device(
 }
 
 /*
- * Implements the drv usb endpoint descriptor operation.
+ * Reports the descriptor of an endpoint.
  */
 const struct drv_usb_endpoint_descriptor *
 drv_usb_endpoint_descriptor(
@@ -3649,7 +3656,7 @@ drv_usb_endpoint_descriptor(
 }
 
 /*
- * Implements the drv usb endpoint type operation.
+ * Reports which of the four transfer types an endpoint is.
  */
 enum drv_usb_transfer_type
 drv_usb_endpoint_type(
@@ -3660,7 +3667,7 @@ drv_usb_endpoint_type(
 }
 
 /*
- * Implements the drv usb endpoint address operation.
+ * Reports the address an endpoint answers on.
  */
 uint8_t
 drv_usb_endpoint_address(
@@ -3671,7 +3678,7 @@ drv_usb_endpoint_address(
 }
 
 /*
- * Implements the drv usb endpoint max packet size operation.
+ * Reports the largest packet an endpoint takes.
  */
 uint16_t
 drv_usb_endpoint_max_packet_size(
@@ -3682,7 +3689,7 @@ drv_usb_endpoint_max_packet_size(
 }
 
 /*
- * Implements the drv usb endpoint maximum burst operation.
+ * Reports how many packets an endpoint takes in a burst.
  */
 uint8_t
 drv_usb_endpoint_maximum_burst(
@@ -3693,7 +3700,7 @@ drv_usb_endpoint_maximum_burst(
 }
 
 /*
- * Implements the drv usb endpoint superspeed companion operation.
+ * Reports the companion descriptor a SuperSpeed endpoint has.
  */
 const struct drv_usb_superspeed_endpoint_companion_descriptor *
 drv_usb_endpoint_superspeed_companion(
@@ -3704,7 +3711,7 @@ drv_usb_endpoint_superspeed_companion(
 }
 
 /*
- * Implements the drv usb endpoint is input operation.
+ * Asks whether an endpoint carries data toward the host.
  */
 bool
 drv_usb_endpoint_is_input(
@@ -3715,7 +3722,7 @@ drv_usb_endpoint_is_input(
 }
 
 /*
- * Implements the drv usb endpoint hcd data operation.
+ * Reports the controller's own state for this endpoint.
  */
 uintptr_t
 drv_usb_endpoint_hcd_data(
@@ -3727,7 +3734,7 @@ drv_usb_endpoint_hcd_data(
 }
 
 /*
- * Implements the drv usb endpoint set hcd data operation.
+ * Gives the controller somewhere to keep that state.
  */
 int
 drv_usb_endpoint_set_hcd_data(
@@ -3745,7 +3752,7 @@ drv_usb_endpoint_set_hcd_data(
 }
 
 /*
- * Implements the drv usb endpoint clear halt operation.
+ * Clears the halt an endpoint has fallen into.
  */
 int
 drv_usb_endpoint_clear_halt(
@@ -3904,7 +3911,7 @@ out:
 }
 
 /*
- * Implements the drv usb id match operation.
+ * Asks whether one identifier pattern matches an interface.
  */
 int
 drv_usb_id_match(
@@ -3953,7 +3960,7 @@ drv_usb_id_match(
 }
 
 /*
- * Implements the drv usb driver find id operation.
+ * Finds the pattern of a driver that matches an interface.
  */
 const struct drv_usb_id *
 drv_usb_driver_find_id(
@@ -3977,7 +3984,7 @@ drv_usb_driver_find_id(
 }
 
 /*
- * Implements the drv usb interface probe operation.
+ * Offers an interface to every registered driver in turn.
  */
 int
 drv_usb_interface_probe(
@@ -3993,7 +4000,7 @@ drv_usb_interface_probe(
 }
 
 /*
- * Implements the drv usb interface detach operation.
+ * Tells the driver holding an interface to give it up.
  */
 int
 drv_usb_interface_detach(
@@ -4034,7 +4041,7 @@ drv_usb_interface_detach(
 }
 
 /*
- * Implements the drv usb driver register operation.
+ * Registers a driver with the USB subsystem.
  */
 int
 drv_usb_driver_register(
@@ -4065,7 +4072,7 @@ drv_usb_driver_register(
 }
 
 /*
- * Implements the drv usb driver unregister operation.
+ * Takes a driver back out of the subsystem.
  */
 int
 drv_usb_driver_unregister(
@@ -4093,7 +4100,7 @@ drv_usb_driver_unregister(
 }
 
 /*
- * Implements the drv usb dump operation.
+ * Prints the whole device tree for debugging.
  */
 void
 drv_usb_dump(
@@ -4108,7 +4115,7 @@ drv_usb_dump(
 	}
 }
 
-/* Supports the usb topology lock operation. */
+/* Takes the lock that guards the whole device tree. */
 static void
 usb_topology_lock(
 	void)
@@ -4118,7 +4125,7 @@ usb_topology_lock(
 		sched_yield();
 }
 
-/* Supports the usb topology unlock operation. */
+/* Gives that lock back. */
 static void
 usb_topology_unlock(
 	void)
@@ -4126,7 +4133,7 @@ usb_topology_unlock(
 	atomic_store_release(&usb_topology_gate, 0U);
 }
 
-/* Supports the device begin disconnect operation. */
+/* Marks a device as disconnecting, once and only once. */
 static void
 device_begin_disconnect(
 	struct drv_usb_device *device)
@@ -4176,7 +4183,7 @@ device_begin_disconnect(
 			     USB_DISCONNECT_BARRIER_DONE);
 }
 
-/* Supports the io gate close operation. */
+/* Closes the gate that lets transfers into a device. */
 static void
 io_gate_close(
 	atomic_uint_t *gate)
@@ -4195,7 +4202,7 @@ io_gate_close(
 	}
 }
 
-/* Supports the detach interfaces operation. */
+/* Tells every driver holding an interface to give it up. */
 static int
 detach_interfaces(
 	struct drv_usb_device *device)
@@ -4235,7 +4242,7 @@ detach_interfaces(
 	return first_error;
 }
 
-/* Supports the interface binding detach operation. */
+/* Detaches the driver bound to one interface. */
 static int
 interface_binding_detach(
 	struct drv_usb_interface *interface,
@@ -4277,7 +4284,7 @@ interface_binding_detach(
 	return 0;
 }
 
-/* Supports the interface binding clear operation. */
+/* Forgets which driver an interface was bound to. */
 static void
 interface_binding_clear(
 	struct drv_usb_interface *interface)
@@ -4309,7 +4316,7 @@ interface_binding_clear(
 	atomic_store_release(&interface->binding_state, USB_BINDING_DEAD);
 }
 
-/* Supports the interface claim owner operation. */
+/* Reports the driver that holds an interface. */
 static struct drv_usb_interface *
 interface_claim_owner(
 	const struct drv_usb_interface *interface)
@@ -4324,7 +4331,7 @@ interface_claim_owner(
 	return function_result;
 }
 
-/* Supports the io gate close wait operation. */
+/* Waits for the transfers already inside the gate to leave. */
 static void
 io_gate_close_wait(
 	atomic_uint_t *gate)
@@ -4334,7 +4341,7 @@ io_gate_close_wait(
 		sched_yield();
 }
 
-/* Supports the io gate close empty operation. */
+/* Closes the gate of a device that has no transfer inside it. */
 static int
 io_gate_close_empty(
 	atomic_uint_t *gate)
@@ -4352,7 +4359,7 @@ io_gate_close_empty(
 	return error;
 }
 
-/* Supports the interface publish claim operation. */
+/* Publishes a driver's claim on an interface. */
 static void
 interface_publish_claim(
 	struct drv_usb_interface *interface,
@@ -4361,7 +4368,7 @@ interface_publish_claim(
 	__atomic_store_n(&interface->claimed_by, owner, __ATOMIC_RELEASE);
 }
 
-/* Supports the io gate open operation. */
+/* Opens the gate that lets transfers into a device. */
 static void
 io_gate_open(
 	atomic_uint_t *gate)
@@ -4374,7 +4381,7 @@ io_gate_open(
 	atomic_store_release(gate, 0U);
 }
 
-/* Supports the device quiesce operation. */
+/* Stops a device and waits for everything it holds to finish. */
 static int
 device_quiesce(
 	struct drv_usb_bus *bus,
@@ -4422,7 +4429,7 @@ device_quiesce(
 	return 0;
 }
 
-/* Supports the device is quarantined operation. */
+/* Asks whether a device has been put out of use. */
 static int
 device_is_quarantined(
 	const struct drv_usb_device *device)
@@ -4436,7 +4443,7 @@ device_is_quarantined(
 	return error;
 }
 
-/* Supports the device link operation. */
+/* Links a device into the tree of its bus. */
 static void
 device_link(
 	struct drv_usb_bus *bus,
@@ -4449,7 +4456,7 @@ device_link(
 	bus->devices = device;
 }
 
-/* Supports the device linked operation. */
+/* Asks whether a device is still in that tree. */
 static int
 device_linked(
 	struct drv_usb_bus *bus,
@@ -4468,7 +4475,7 @@ device_linked(
 	return 0;
 }
 
-/* Supports the allocate root hub operation. */
+/* Builds the device that stands for a controller's root hub. */
 static struct drv_usb_device *
 allocate_root_hub(
 	struct drv_usb_bus *bus)
@@ -4494,7 +4501,7 @@ allocate_root_hub(
 	return device;
 }
 
-/* Supports the find hcd bus operation. */
+/* Finds the bus a host controller was published as. */
 static struct drv_usb_bus *
 find_hcd_bus(
 	struct drv_usb_hcd *hcd)
@@ -4512,7 +4519,7 @@ find_hcd_bus(
 	return NULL;
 }
 
-/* Supports the root port status operation. */
+/* Reads the status of one root port. */
 static int
 root_port_status(
 	struct drv_usb_hcd *hcd,
@@ -4537,7 +4544,7 @@ root_port_status(
 	return function_result;
 }
 
-/* Supports the root port acknowledge changes operation. */
+/* Acknowledges the changes a root port has reported. */
 static int
 root_port_acknowledge_changes(
 	struct drv_usb_hcd *hcd,
@@ -4581,7 +4588,7 @@ root_port_acknowledge_changes(
 	return 0;
 }
 
-/* Supports the usb generation next operation. */
+/* Takes the next generation number the tree is stamped with. */
 static uint64_t
 usb_generation_next(
 	uint64_t *generation)
@@ -4596,7 +4603,7 @@ usb_generation_next(
 	return *generation;
 }
 
-/* Supports the find port device operation. */
+/* Finds the device that hangs from one port of a hub. */
 static struct drv_usb_device *
 find_port_device(
 	struct drv_usb_bus *bus,
@@ -4615,7 +4622,7 @@ find_port_device(
 	return NULL;
 }
 
-/* Supports the device is disconnecting operation. */
+/* Asks whether a device is already being disconnected. */
 static int
 device_is_disconnecting(
 	const struct drv_usb_device *device)
@@ -4629,7 +4636,7 @@ device_is_disconnecting(
 	return error;
 }
 
-/* Supports the destroy device operation. */
+/* Gives a device and everything below it back. */
 static int
 destroy_device(
 	struct drv_usb_bus *bus,
@@ -4679,7 +4686,7 @@ destroy_device(
 	return error;
 }
 
-/* Supports the device disable active endpoints operation. */
+/* Unconfigures every endpoint a device has active. */
 static int
 device_disable_active_endpoints(
 	struct drv_usb_device *device)
@@ -4698,7 +4705,7 @@ device_disable_active_endpoints(
 	return error;
 }
 
-/* Supports the device active configuration operation. */
+/* Reports the configuration a device currently presents. */
 static struct drv_usb_configuration *
 device_active_configuration(
 	const struct drv_usb_device *device)
@@ -4713,7 +4720,7 @@ device_active_configuration(
 	return function_result;
 }
 
-/* Supports the configuration disable endpoints operation. */
+/* Unconfigures every endpoint of one configuration. */
 static int
 configuration_disable_endpoints(
 	struct drv_usb_configuration *configuration)
@@ -4759,7 +4766,7 @@ configuration_disable_endpoints(
 	return 0;
 }
 
-/* Supports the host interface disable operation. */
+/* Unconfigures every endpoint of one alternate setting. */
 static int
 host_interface_disable(
 	struct drv_usb_host_interface *alternate)
@@ -4807,7 +4814,7 @@ host_interface_disable(
 	return 0;
 }
 
-/* Supports the device quarantine selection operation. */
+/* Puts a device out of use after a failed selection. */
 static void
 device_quarantine_selection(
 	struct drv_usb_device *device,
@@ -4825,7 +4832,7 @@ device_quarantine_selection(
 	io_gate_close(&device->submit_gate);
 }
 
-/* Supports the interface active alternate operation. */
+/* Reports the alternate setting an interface presents. */
 static struct drv_usb_host_interface *
 interface_active_alternate(
 	const struct drv_usb_interface *interface)
@@ -4840,7 +4847,7 @@ interface_active_alternate(
 	return function_result;
 }
 
-/* Supports the host interface enable operation. */
+/* Configures every endpoint of one alternate setting. */
 static int
 host_interface_enable(
 	struct drv_usb_host_interface *alternate)
@@ -4889,7 +4896,7 @@ host_interface_enable(
 	return 0;
 }
 
-/* Supports the device release operation. */
+/* Gives every resource a device held back. */
 static int
 device_release(
 	struct drv_usb_bus *bus,
@@ -4952,7 +4959,7 @@ device_release(
 	return 0;
 }
 
-/* Supports the device finalize operation. */
+/* Retires a device once nothing refers to it any more. */
 static void
 device_finalize(
 	struct drv_usb_bus *bus,
@@ -4998,7 +5005,7 @@ device_finalize(
 	}
 }
 
-/* Supports the free configurations operation. */
+/* Gives every configuration a device read back. */
 static void
 free_configurations(
 	struct drv_usb_device *device)
@@ -5019,7 +5026,7 @@ free_configurations(
 	device->interfaces = NULL;
 }
 
-/* Supports the free configuration operation. */
+/* Gives one configuration and its interfaces back. */
 static void
 free_configuration(
 	struct drv_usb_configuration *configuration)
@@ -5055,7 +5062,7 @@ free_configuration(
 	memset(configuration, 0, sizeof(*configuration));
 }
 
-/* Supports the device publish configuration operation. */
+/* Publishes the configuration a device now presents. */
 static void
 device_publish_configuration(
 	struct drv_usb_device *device,
@@ -5065,7 +5072,7 @@ device_publish_configuration(
 			 __ATOMIC_RELEASE);
 }
 
-/* Supports the legacy root port reset operation. */
+/* Resets a root port on a controller with no reset call. */
 static int
 legacy_root_port_reset(
 	struct drv_usb_hcd *hcd,
@@ -5100,7 +5107,7 @@ legacy_root_port_reset(
 	return 0;
 }
 
-/* Supports the usb delay ticks operation. */
+/* Reports how many ticks a delay in milliseconds takes. */
 static void
 usb_delay_ticks(
 	uint64_t count)
@@ -5112,7 +5119,7 @@ usb_delay_ticks(
 		hal_compiler_barrier();
 }
 
-/* Supports the enumerate port operation. */
+/* Enumerates whatever has just been attached to one port. */
 static int
 enumerate_port(
 	struct drv_usb_bus *bus,
@@ -5350,7 +5357,7 @@ fail:
 	return 0;
 }
 
-/* Supports the ep0 packet size operation. */
+/* Reads the packet size a device's control endpoint takes. */
 static int
 ep0_packet_size(
 	enum drv_usb_speed speed,
@@ -5388,7 +5395,7 @@ ep0_packet_size(
 	return decoded != 0;
 }
 
-/* Supports the allocate address operation. */
+/* Takes the next free bus address for a new device. */
 static int
 allocate_address(
 	struct drv_usb_bus *bus)
@@ -5410,7 +5417,7 @@ allocate_address(
 	return -1;
 }
 
-/* Supports the enumerate configuration operation. */
+/* Reads and parses one configuration of a device. */
 static int
 enumerate_configuration(
 	struct drv_usb_device *device,
@@ -5474,7 +5481,7 @@ enumerate_configuration(
 	return function_result;
 }
 
-/* Supports the parse configuration operation. */
+/* Splits a configuration's descriptor bytes into its parts. */
 static int
 parse_configuration(
 	struct drv_usb_configuration *configuration,
@@ -5807,7 +5814,7 @@ fail:
 	return 0;
 }
 
-/* Supports the configuration iads prepare operation. */
+/* Builds the interface associations a configuration declares. */
 static int
 configuration_iads_prepare(
 	struct drv_usb_configuration *configuration,
@@ -5868,7 +5875,7 @@ configuration_iads_prepare(
 	return 0;
 }
 
-/* Supports the configuration find interface operation. */
+/* Finds an interface of a configuration by its number. */
 static struct drv_usb_interface *
 configuration_find_interface(
 	struct drv_usb_configuration *configuration,
@@ -5891,7 +5898,7 @@ configuration_find_interface(
 	return NULL;
 }
 
-/* Supports the interface find alternate operation. */
+/* Finds an alternate setting of an interface by its number. */
 static struct drv_usb_host_interface *
 interface_find_alternate(
 	struct drv_usb_interface *interface,
@@ -5911,7 +5918,7 @@ interface_find_alternate(
 	return NULL;
 }
 
-/* Supports the interface publish alternate operation. */
+/* Publishes the alternate setting an interface now presents. */
 static void
 interface_publish_alternate(
 	struct drv_usb_interface *interface,
@@ -5924,7 +5931,7 @@ interface_publish_alternate(
 			 __ATOMIC_RELEASE);
 }
 
-/* Supports the configuration endpoint addresses validate operation. */
+/* Refuses a configuration that gives one address twice. */
 static int
 configuration_endpoint_addresses_validate(
 	const struct drv_usb_configuration *configuration)
@@ -5973,7 +5980,7 @@ configuration_endpoint_addresses_validate(
 	return 0;
 }
 
-/* Supports the configuration iads validate operation. */
+/* Refuses an association that names interfaces it cannot have. */
 static int
 configuration_iads_validate(
 	struct drv_usb_configuration *configuration)
@@ -6023,7 +6030,7 @@ configuration_iads_validate(
 	return 0;
 }
 
-/* Supports the device preferred configuration operation. */
+/* Picks the configuration a device should be set to. */
 static struct drv_usb_configuration *
 device_preferred_configuration(
 	struct drv_usb_device *device,
@@ -6074,7 +6081,7 @@ device_preferred_configuration(
 	return best;
 }
 
-/* Supports the interface registered driver score operation. */
+/* Reports how well a registered driver matches an interface. */
 static int
 interface_registered_driver_score(
 	struct drv_usb_interface *interface)
@@ -6103,7 +6110,7 @@ interface_registered_driver_score(
 	return best;
 }
 
-/* Supports the interface probe internal operation. */
+/* Offers one interface to the drivers that could take it. */
 static int
 interface_probe_internal(
 	struct drv_usb_interface *interface,
@@ -6231,7 +6238,7 @@ out:
 	return 0;
 }
 
-/* Supports the device binding enter operation. */
+/* Joins the gate that keeps binding out of a disconnect. */
 static int
 device_binding_enter(
 	struct drv_usb_device *device)
@@ -6262,7 +6269,7 @@ device_binding_enter(
 	return 0;
 }
 
-/* Supports the io gate enter operation. */
+/* Joins the gate that lets a transfer into a device. */
 static int
 io_gate_enter(
 	atomic_uint_t *gate)
@@ -6285,7 +6292,7 @@ io_gate_enter(
 	}
 }
 
-/* Supports the io gate exit operation. */
+/* Leaves that gate. */
 static void
 io_gate_exit(
 	atomic_uint_t *gate)
@@ -6302,7 +6309,7 @@ io_gate_exit(
 		hal_atomic_fence_acquire();
 }
 
-/* Supports the device binding exit operation. */
+/* Leaves the binding gate. */
 static void
 device_binding_exit(
 	struct drv_usb_device *device)
@@ -6310,7 +6317,7 @@ device_binding_exit(
 	io_gate_exit(&device->binding_transactions);
 }
 
-/* Supports the interface report probe operation. */
+/* Records which driver took an interface, and how. */
 static void
 interface_report_probe(
 	struct drv_usb_interface *interface,
@@ -6381,7 +6388,7 @@ interface_report_probe(
 	}
 }
 
-/* Supports the urb publish terminal operation. */
+/* Publishes the result a transfer ended with. */
 static int
 urb_publish_terminal(
 	struct drv_usb_urb *urb,
@@ -6447,7 +6454,7 @@ urb_publish_terminal(
 	return 1;
 }
 
-/* Supports the submit commit finish operation. */
+/* Finishes a submission that has reached the controller. */
 static void
 submit_commit_finish(
 	struct drv_usb_urb *urb,
@@ -6466,7 +6473,7 @@ submit_commit_finish(
 	atomic_store_release(&commit->finished, 1U);
 }
 
-/* Supports the binding submitter put operation. */
+/* Gives up the submission reference a binding held. */
 static void
 binding_submitter_put(
 	struct drv_usb_interface *owner)
@@ -6477,7 +6484,7 @@ binding_submitter_put(
 	io_gate_exit(&owner->binding_submitters);
 }
 
-/* Supports the endpoint publish halted operation. */
+/* Records that an endpoint has fallen into a halt. */
 static void
 endpoint_publish_halted(
 	struct drv_usb_device *device,
@@ -6489,7 +6496,7 @@ endpoint_publish_halted(
 		atomic_store_release(&endpoint->halted, halted);
 }
 
-/* Supports the endpoint uses halt operation. */
+/* Asks whether an endpoint's type can halt at all. */
 static int
 endpoint_uses_halt(
 	const struct drv_usb_device *device,
@@ -6501,7 +6508,7 @@ endpoint_uses_halt(
 		endpoint->type == DRV_USB_TRANSFER_INTERRUPT);
 }
 
-/* Supports the urb hcd put operation. */
+/* Gives up the reference the controller held on a transfer. */
 static void
 urb_hcd_put(
 	struct drv_usb_urb *urb)
@@ -6521,7 +6528,7 @@ urb_hcd_put(
 	}
 }
 
-/* Supports the urb admission put operation. */
+/* Gives up the reference admission held on a transfer. */
 static void
 urb_admission_put(
 	struct drv_usb_urb *urb)
@@ -6553,7 +6560,7 @@ urb_admission_put(
 		device_control_unlock(urb->device);
 }
 
-/* Supports the device control unlock operation. */
+/* Gives the control endpoint of a device back. */
 static void
 device_control_unlock(
 	struct drv_usb_device *device)
@@ -6561,7 +6568,7 @@ device_control_unlock(
 	atomic_store_release(&device->control_gate, 0U);
 }
 
-/* Supports the urb put operation. */
+/* Gives up one reference to a transfer. */
 static void
 urb_put(
 	struct drv_usb_urb *urb)
@@ -6596,7 +6603,7 @@ urb_put(
 	device_urb_put(device);
 }
 
-/* Supports the device urb put operation. */
+/* Gives up the reference a device held on a transfer. */
 static void
 device_urb_put(
 	struct drv_usb_device *device)
@@ -6615,7 +6622,7 @@ device_urb_put(
 		hal_atomic_fence_acquire();
 }
 
-/* Supports the configuration effective owner operation. */
+/* Reports which driver a configuration is really owned by. */
 static int
 configuration_effective_owner(
 	struct drv_usb_configuration *configuration,
@@ -6654,7 +6661,7 @@ configuration_effective_owner(
 	return 0;
 }
 
-/* Supports the interface binding owner operation. */
+/* Reports the driver an interface is bound to. */
 static struct drv_usb_interface *
 interface_binding_owner(
 	struct drv_usb_interface *interface)
@@ -6674,7 +6681,7 @@ interface_binding_owner(
 	return function_result;
 }
 
-/* Supports the configuration close io operation. */
+/* Closes the transfer gate of every interface of a configuration. */
 static int
 configuration_close_io(
 	struct drv_usb_configuration *configuration,
@@ -6707,7 +6714,7 @@ configuration_close_io(
 	return 0;
 }
 
-/* Supports the device control try lock operation. */
+/* Takes the control endpoint of a device, if it is free. */
 static int
 device_control_try_lock(
 	struct drv_usb_device *device)
@@ -6732,7 +6739,7 @@ device_control_try_lock(
 	return 0;
 }
 
-/* Supports the device reset connection check operation. */
+/* Asks whether a device is still the one that was reset. */
 static int
 device_reset_connection_check(
 	struct drv_usb_bus *bus,
@@ -6764,7 +6771,7 @@ device_reset_connection_check(
 	return 0;
 }
 
-/* Supports the configuration enable endpoints operation. */
+/* Configures every endpoint of one configuration. */
 static int
 configuration_enable_endpoints(
 	struct drv_usb_configuration *configuration)
@@ -6809,7 +6816,7 @@ configuration_enable_endpoints(
 	return 0;
 }
 
-/* Supports the device quarantine recovery operation. */
+/* Puts a device out of use after a failed recovery. */
 static void
 device_quarantine_recovery(
 	struct drv_usb_device *device,
@@ -6826,7 +6833,7 @@ device_quarantine_recovery(
 	io_gate_close(&device->submit_gate);
 }
 
-/* Supports the usb control locked operation. */
+/* Runs one control transfer with the device's control lock held. */
 static int
 usb_control_locked(
 	struct drv_usb_device *device,
@@ -6892,7 +6899,7 @@ usb_control_locked(
 	return 0;
 }
 
-/* Supports the configuration restore operation. */
+/* Puts a configuration back the way it was before a change. */
 static int
 configuration_restore(
 	struct drv_usb_device *device,
@@ -6960,7 +6967,7 @@ configuration_restore(
 	return function_result;
 }
 
-/* Supports the configuration reset endpoints operation. */
+/* Clears the halt of every endpoint of a configuration. */
 static int
 configuration_reset_endpoints(
 	struct drv_usb_configuration *configuration)
@@ -7007,7 +7014,7 @@ configuration_reset_endpoints(
 	return 0;
 }
 
-/* Supports the configuration open io operation. */
+/* Opens the transfer gate of every interface of a configuration. */
 static void
 configuration_open_io(
 	struct drv_usb_interface **closed,
@@ -7018,7 +7025,7 @@ configuration_open_io(
 		io_gate_open(&closed[--closed_count]->io_gate);
 }
 
-/* Supports the configuration has owners operation. */
+/* Asks whether any driver still holds part of a configuration. */
 static int
 configuration_has_owners(
 	const struct drv_usb_configuration *configuration)
@@ -7041,7 +7048,7 @@ configuration_has_owners(
 	return 0;
 }
 
-/* Supports the configuration select defaults operation. */
+/* Selects the default alternate setting of every interface. */
 static void
 configuration_select_defaults(
 	struct drv_usb_configuration *configuration)
@@ -7056,7 +7063,7 @@ configuration_select_defaults(
 	}
 }
 
-/* Supports the usb string descriptor operation. */
+/* Reads one string descriptor and renders it as UTF-8. */
 static int
 usb_string_descriptor(
 	struct drv_usb_device *device,
@@ -7111,7 +7118,7 @@ usb_string_descriptor(
 	return 0;
 }
 
-/* Supports the utf8 append operation. */
+/* Appends one code point to a UTF-8 string being built. */
 static int
 utf8_append(
 	char *buffer,
@@ -7161,7 +7168,7 @@ utf8_append(
 	return 0;
 }
 
-/* Supports the device urb get operation. */
+/* Takes a reference on a transfer for its device. */
 static int
 device_urb_get(
 	struct drv_usb_device *device)
@@ -7189,7 +7196,7 @@ device_urb_get(
 	}
 }
 
-/* Supports the endpoint retained by device operation. */
+/* Asks whether a device still holds an endpoint's state. */
 static int
 endpoint_retained_by_device(
 	const struct drv_usb_device *device,
@@ -7236,7 +7243,7 @@ endpoint_retained_by_device(
 	return 0;
 }
 
-/* Supports the endpoint is halted operation. */
+/* Asks whether an endpoint has fallen into a halt. */
 static int
 endpoint_is_halted(
 	const struct drv_usb_device *device,
@@ -7252,7 +7259,7 @@ endpoint_is_halted(
 	return error;
 }
 
-/* Supports the urb hcd get operation. */
+/* Takes a reference on a transfer for the controller. */
 static int
 urb_hcd_get(
 	struct drv_usb_urb *urb)
@@ -7282,7 +7289,7 @@ urb_hcd_get(
 	return 0;
 }
 
-/* Supports the urb admission get operation. */
+/* Takes a reference on a transfer for admission. */
 static int
 urb_admission_get(
 	struct drv_usb_urb *urb,
@@ -7348,7 +7355,7 @@ urb_admission_get(
 	return 0;
 }
 
-/* Supports the binding admission enter operation. */
+/* Joins the gate that admits a binding's transfers. */
 static int
 binding_admission_enter(
 	struct drv_usb_urb *urb,
@@ -7425,7 +7432,7 @@ binding_admission_enter(
 	return 0;
 }
 
-/* Supports the urb cancel to operation. */
+/* Cancels a transfer and waits for it to reach a given state. */
 static int
 urb_cancel_to(
 	struct drv_usb_urb *u,
@@ -7448,7 +7455,7 @@ urb_cancel_to(
 	return published ? 0 : EALREADY;
 }
 
-/* Supports the device control lock operation. */
+/* Takes the control endpoint of a device and waits for it. */
 static int
 device_control_lock(
 	struct drv_usb_device *device,
@@ -7490,7 +7497,7 @@ device_control_lock(
 	}
 }
 
-/* Supports the sync data operation. */
+/* Waits for the data a transfer moved to become visible. */
 static int
 sync_data(
 	struct drv_usb_device *device,
@@ -7536,7 +7543,7 @@ sync_data(
 	return 0;
 }
 
-/* Supports the host interface reset endpoints operation. */
+/* Clears the halt of every endpoint of one alternate setting. */
 static int
 host_interface_reset_endpoints(
 	struct drv_usb_host_interface *alternate)
@@ -7569,7 +7576,7 @@ host_interface_reset_endpoints(
 	return 0;
 }
 
-/* Supports the endpoint binding pin operation. */
+/* Pins an endpoint's state while a binding uses it. */
 static int
 endpoint_binding_pin(
 	struct drv_usb_interface *interface,
@@ -7643,7 +7650,7 @@ endpoint_binding_pin(
 	return 0;
 }
 
-/* Supports the endpoint clear halt request operation. */
+/* Sends the device the request that clears an endpoint halt. */
 static int
 endpoint_clear_halt_request(
 	struct drv_usb_device *device,
@@ -7684,7 +7691,7 @@ endpoint_clear_halt_request(
 	return function_result;
 }
 
-/* Supports the endpoint binding unpin operation. */
+/* Gives that pin back. */
 static void
 endpoint_binding_unpin(
 	struct drv_usb_interface *owner)

@@ -1,10 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * USB Mass Storage Bulk-Only Transport and minimal SCSI disk driver
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  */
+
 #include <drivers/usb-storage.h>
 #include <drivers/usb-storage-bot.h>
 #include <drivers/usb-storage-scsi.h>
@@ -103,6 +107,9 @@ struct usb_storage {
 #endif
 };
 
+/*
+ * Forward declaration
+ */
 static uint32_t get_le32(const uint8_t value[4]);
 static void put_le32(uint8_t value[4], uint32_t number);
 static uint32_t get_be32(const uint8_t value[4]);
@@ -138,25 +145,8 @@ static int storage_control_stop(struct usb_storage *storage);
 static int storage_attach(struct drv_usb_interface *interface, const struct drv_usb_id *id);
 static int storage_detach(struct drv_usb_interface *interface, unsigned flags);
 
-static const struct disk_ops storage_disk_ops = {.submit = storage_submit,
-						 .ioctl = storage_ioctl};
-
-static const struct drv_usb_id storage_ids[] = {
-	{.match_flags = DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS |
-			DRV_USB_ID_IF_PROTOCOL,
-	 .interface_class = USB_MASS_STORAGE_CLASS,
-	 .interface_subclass = USB_MASS_STORAGE_SCSI,
-	 .interface_protocol = USB_MASS_STORAGE_BULK_ONLY}};
-
-static struct drv_usb_driver storage_driver = {
-	.name = "usb-storage",
-	.ids = storage_ids,
-	.id_count = sizeof(storage_ids) / sizeof(storage_ids[0]),
-	.attach = storage_attach,
-	.detach = storage_detach};
-
 /*
- * Implements the drv usb storage driver register operation.
+ * Registers this driver with the USB subsystem.
  */
 int
 drv_usb_storage_driver_register(
@@ -171,7 +161,7 @@ drv_usb_storage_driver_register(
 	return error;
 }
 
-/* Supports the get le32 operation. */
+/* Reads a 32-bit field, least significant byte first. */
 static uint32_t
 get_le32(
 	const uint8_t value[4])
@@ -181,7 +171,7 @@ get_le32(
 	       ((uint32_t)value[2] << 16) | ((uint32_t)value[3] << 24);
 }
 
-/* Supports the put le32 operation. */
+/* Writes a 32-bit field, least significant byte first. */
 static void
 put_le32(
 	uint8_t value[4],
@@ -193,7 +183,7 @@ put_le32(
 	value[3] = (uint8_t)(number >> 24);
 }
 
-/* Supports the get be32 operation. */
+/* Reads a 32-bit field, most significant byte first. */
 static uint32_t
 get_be32(
 	const uint8_t value[4])
@@ -203,7 +193,7 @@ get_be32(
 	       ((uint32_t)value[2] << 8) | value[3];
 }
 
-/* Supports the get be16 operation. */
+/* Reads a 16-bit field, most significant byte first. */
 static uint16_t
 get_be16(
 	const uint8_t value[2])
@@ -212,7 +202,7 @@ get_be16(
 	return (uint16_t)((uint16_t)value[0] << 8) | value[1];
 }
 
-/* Supports the put be32 operation. */
+/* Writes a 32-bit field, most significant byte first. */
 static void
 put_be32(
 	uint8_t value[4],
@@ -224,7 +214,7 @@ put_be32(
 	value[3] = (uint8_t)number;
 }
 
-/* Supports the put be16 operation. */
+/* Writes a 16-bit field, most significant byte first. */
 static void
 put_be16(
 	uint8_t value[2],
@@ -355,7 +345,7 @@ storage_urb_transfer(
 	return 0;
 }
 
-/* Supports the storage bulk operation. */
+/* Runs one bulk transfer against the device. */
 static int
 storage_bulk(
 	struct usb_storage *storage,
@@ -387,7 +377,7 @@ storage_bulk(
 	return error;
 }
 
-/* Supports the storage control operation. */
+/* Runs one control transfer against the device. */
 static int
 storage_control(
 	struct usb_storage *storage,
@@ -466,7 +456,7 @@ storage_control(
 	return 0;
 }
 
-/* Supports the storage urbs alloc operation. */
+/* Takes the transfers this device needs. */
 static int
 storage_urbs_alloc(
 	struct usb_storage *storage)
@@ -552,7 +542,7 @@ storage_transfer_reserve(
 	return 0;
 }
 
-/* Supports the storage urbs free operation. */
+/* Gives them back. */
 static void
 storage_urbs_free(
 	struct usb_storage *storage)
@@ -565,7 +555,7 @@ storage_urbs_free(
 	storage->control_urb = NULL;
 }
 
-/* Supports the bot reset operation. */
+/* Resets the device the way the transport defines. */
 static int
 bot_reset(
 	struct usb_storage *storage)
@@ -599,7 +589,7 @@ bot_reset(
 	return 0;
 }
 
-/* Supports the bot command locked operation. */
+/* Runs one command, with the device lock held. */
 static int
 bot_command_locked(
 	struct usb_storage *storage,
@@ -801,7 +791,7 @@ transport_error:
 	return error != 0 ? error : EIO;
 }
 
-/* Supports the request sense locked operation. */
+/* Asks the device why its last command failed. */
 static int
 request_sense_locked(
 	struct usb_storage *storage,
@@ -927,7 +917,7 @@ fail:
 	return 0;
 }
 
-/* Supports the bot command sense locked operation. */
+/* Runs one command and reads its sense data if it failed. */
 static int
 bot_command_sense_locked(
 	struct usb_storage *storage,
@@ -1083,7 +1073,7 @@ bot_command_sense_locked(
 	return 0;
 }
 
-/* Supports the bot command sense report operation. */
+/* Runs one command and reports the sense data it gave. */
 static int
 bot_command_sense_report(
 	struct usb_storage *storage,
@@ -1114,7 +1104,7 @@ bot_command_sense_report(
 	return 0;
 }
 
-/* Supports the bot command sense operation. */
+/* Runs one command and keeps the sense data it gave. */
 static int
 bot_command_sense(
 	struct usb_storage *storage,
@@ -1137,7 +1127,7 @@ bot_command_sense(
 	return error;
 }
 
-/* Supports the bot command operation. */
+/* Runs one command against the device. */
 static int
 bot_command(
 	struct usb_storage *storage,
@@ -1158,7 +1148,7 @@ bot_command(
 	return error;
 }
 
-/* Supports the flush policy name operation. */
+/* Reports the name of the cache policy in force. */
 static const char *
 flush_policy_name(
 	enum drv_usb_scsi_flush_policy policy)
@@ -1180,7 +1170,7 @@ flush_policy_name(
 	}
 }
 
-/* Supports the scsi configure flush policy operation. */
+/* Decides how this device's write cache must be flushed. */
 static void
 scsi_configure_flush_policy(
 	struct usb_storage *storage)
@@ -1261,7 +1251,7 @@ scsi_configure_flush_policy(
 	}
 }
 
-/* Supports the scsi probe operation. */
+/* Reads the geometry the device reports and publishes it. */
 static int
 scsi_probe(
 	struct usb_storage *storage,
@@ -1357,7 +1347,7 @@ scsi_probe(
 	return 0;
 }
 
-/* Supports the storage submit operation. */
+/* Serves one block request against this device. */
 static int
 storage_submit(
 	struct disk *disk,
@@ -1472,7 +1462,7 @@ out:
 	return 0;
 }
 
-/* Supports the storage ioctl operation. */
+/* Serves one control request against this device. */
 static int
 storage_ioctl(
 	struct disk *disk,
@@ -1833,7 +1823,7 @@ storage_control_stop(
 	return 0;
 }
 
-/* Supports the storage attach operation. */
+/* Binds this driver to an interface the bus has matched. */
 static int
 storage_attach(
 	struct drv_usb_interface *interface,
@@ -1955,7 +1945,7 @@ fail:
 	return 0;
 }
 
-/* Supports the storage detach operation. */
+/* Gives that interface up and everything held for it. */
 static int
 storage_detach(
 	struct drv_usb_interface *interface,
@@ -2015,3 +2005,29 @@ unlock:
 	/* Succeeded. */
 	return 0;
 }
+
+/*
+ * USB Mass Storage Class
+ */
+
+static const struct disk_ops storage_disk_ops = {
+	.submit = storage_submit,
+	.ioctl = storage_ioctl
+};
+
+static const struct drv_usb_id storage_ids[] = {
+	{
+		.match_flags = DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS | DRV_USB_ID_IF_PROTOCOL,
+		.interface_class = USB_MASS_STORAGE_CLASS,
+		.interface_subclass = USB_MASS_STORAGE_SCSI,
+		.interface_protocol = USB_MASS_STORAGE_BULK_ONLY
+	}
+};
+
+static struct drv_usb_driver storage_driver = {
+	.name = "usb-storage",
+	.ids = storage_ids,
+	.id_count = sizeof(storage_ids) / sizeof(storage_ids[0]),
+	.attach = storage_attach,
+	.detach = storage_detach
+};

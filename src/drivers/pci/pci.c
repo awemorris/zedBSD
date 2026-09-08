@@ -1,12 +1,18 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
- * Generic PCI bus core. Copyright (C) 2026 Awe Morris; SPDX-License-Identifier:
- * Zlib
+ * Generic PCI bus core.
  */
+
 #include <drivers/pci.h>
-#include <errno.h>
 #include <hal/hal.h>
+
+#include <errno.h>
 #include <string.h>
 
 #define PCI_COMMAND 0x04U
@@ -20,8 +26,7 @@
 #define PCI_COMMAND_MEMORY 0x0002U
 #define PCI_COMMAND_MASTER 0x0004U
 #define PCI_COMMAND_INTX_DISABLE 0x0400U
-#define PCI_COMMAND_ENABLE_MASK                                                \
-	(PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER)
+#define PCI_COMMAND_ENABLE_MASK (PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER)
 #define PCI_MSI_CONTROL 0x02U
 #define PCI_MSI_ADDRESS 0x04U
 #define PCI_MSI_ENABLE 0x0001U
@@ -129,7 +134,7 @@ static void pci_irq_dispatch(int irq, hal_irq_ack_t acknowledge, void *argument)
 static void pci_intx_dispatch(int irq, hal_irq_ack_t acknowledge, void *argument);
 
 /*
- * Implements the drv pci init operation.
+ * Brings the PCI subsystem into service.
  */
 int
 drv_pci_init(
@@ -149,7 +154,7 @@ drv_pci_init(
 }
 
 /*
- * Implements the drv pci shutdown operation.
+ * Takes the PCI subsystem out of service.
  */
 void
 drv_pci_shutdown(
@@ -172,7 +177,7 @@ drv_pci_shutdown(
 }
 
 /*
- * Implements the drv pci bus create root operation.
+ * Creates the bus that a host bridge presents.
  */
 int
 drv_pci_bus_create_root(
@@ -210,7 +215,7 @@ drv_pci_bus_create_root(
 }
 
 /*
- * Implements the drv pci bus create child operation.
+ * Creates the bus behind a bridge.
  */
 int
 drv_pci_bus_create_child(
@@ -244,7 +249,7 @@ drv_pci_bus_create_child(
 }
 
 /*
- * Implements the drv pci bus destroy operation.
+ * Gives a bus and every device on it back.
  */
 int
 drv_pci_bus_destroy(
@@ -284,7 +289,7 @@ drv_pci_bus_destroy(
 }
 
 /*
- * Implements the drv pci bus scan operation.
+ * Finds the devices on one bus.
  */
 int
 drv_pci_bus_scan(
@@ -367,7 +372,7 @@ drv_pci_bus_scan(
 }
 
 /*
- * Implements the drv pci bus rescan operation.
+ * Finds the devices on one bus again, after a change.
  */
 int
 drv_pci_bus_rescan(
@@ -383,7 +388,7 @@ drv_pci_bus_rescan(
 }
 
 /*
- * Implements the drv pci bus scan tree operation.
+ * Finds the devices on a bus and on every bus below it.
  */
 int
 drv_pci_bus_scan_tree(
@@ -410,7 +415,7 @@ drv_pci_bus_scan_tree(
 }
 
 /*
- * Implements the drv pci scan all operation.
+ * Scans every root bus of the machine.
  */
 int
 drv_pci_scan_all(
@@ -431,7 +436,7 @@ drv_pci_scan_all(
 }
 
 /*
- * Implements the drv pci foreach bus operation.
+ * Calls back for every bus the subsystem holds.
  */
 int
 drv_pci_foreach_bus(
@@ -456,7 +461,7 @@ drv_pci_foreach_bus(
 }
 
 /*
- * Implements the drv pci foreach device operation.
+ * Calls back for every device of every bus.
  */
 int
 drv_pci_foreach_device(
@@ -481,7 +486,7 @@ drv_pci_foreach_device(
 }
 
 /*
- * Implements the drv pci bus segment operation.
+ * Reports the segment a bus belongs to.
  */
 uint16_t
 drv_pci_bus_segment(
@@ -492,7 +497,7 @@ drv_pci_bus_segment(
 }
 
 /*
- * Implements the drv pci bus number operation.
+ * Reports the number a bus was found under.
  */
 uint8_t
 drv_pci_bus_number(
@@ -503,7 +508,7 @@ drv_pci_bus_number(
 }
 
 /*
- * Implements the drv pci bus parent operation.
+ * Reports the bus a bus hangs from.
  */
 struct drv_pci_bus *
 drv_pci_bus_parent(
@@ -514,7 +519,7 @@ drv_pci_bus_parent(
 }
 
 /*
- * Implements the drv pci bus bridge operation.
+ * Reports the bridge that presents a bus.
  */
 struct drv_pci_device *
 drv_pci_bus_bridge(
@@ -525,7 +530,7 @@ drv_pci_bus_bridge(
 }
 
 /*
- * Implements the drv pci bus foreach device operation.
+ * Calls back for every device of one bus.
  */
 int
 drv_pci_bus_foreach_device(
@@ -551,7 +556,7 @@ drv_pci_bus_foreach_device(
 }
 
 /*
- * Implements the drv pci find device operation.
+ * Finds a device by its address.
  */
 struct drv_pci_device *
 drv_pci_find_device(
@@ -578,7 +583,7 @@ drv_pci_find_device(
 }
 
 /*
- * Implements the drv pci find id operation.
+ * Finds a device by its vendor and product.
  */
 struct drv_pci_device *
 drv_pci_find_id(
@@ -613,7 +618,7 @@ drv_pci_find_id(
 }
 
 /*
- * Implements the drv pci find class operation.
+ * Finds a device by the class it declares.
  */
 struct drv_pci_device *
 drv_pci_find_class(
@@ -648,7 +653,7 @@ drv_pci_find_class(
 }
 
 /*
- * Implements the drv pci device bus operation.
+ * Reports the bus a device is on.
  */
 struct drv_pci_bus *
 drv_pci_device_bus(
@@ -659,7 +664,7 @@ drv_pci_device_bus(
 }
 
 /*
- * Implements the drv pci device subordinate bus operation.
+ * Reports the bus a bridge device presents.
  */
 struct drv_pci_bus *
 drv_pci_device_subordinate_bus(
@@ -670,7 +675,7 @@ drv_pci_device_subordinate_bus(
 }
 
 /*
- * Implements the drv pci device address operation.
+ * Reports the address a device answers on.
  */
 void
 drv_pci_device_address(
@@ -683,7 +688,7 @@ drv_pci_device_address(
 }
 
 /*
- * Implements the drv pci device vendor operation.
+ * Reports the vendor a device declares.
  */
 uint16_t
 drv_pci_device_vendor(
@@ -694,7 +699,7 @@ drv_pci_device_vendor(
 }
 
 /*
- * Implements the drv pci device product operation.
+ * Reports the product a device declares.
  */
 uint16_t
 drv_pci_device_product(
@@ -705,7 +710,7 @@ drv_pci_device_product(
 }
 
 /*
- * Implements the drv pci device subvendor operation.
+ * Reports the subsystem vendor a device declares.
  */
 uint16_t
 drv_pci_device_subvendor(
@@ -716,7 +721,7 @@ drv_pci_device_subvendor(
 }
 
 /*
- * Implements the drv pci device subproduct operation.
+ * Reports the subsystem product a device declares.
  */
 uint16_t
 drv_pci_device_subproduct(
@@ -727,7 +732,7 @@ drv_pci_device_subproduct(
 }
 
 /*
- * Implements the drv pci device class operation.
+ * Reports the class a device declares.
  */
 uint32_t
 drv_pci_device_class(
@@ -738,7 +743,7 @@ drv_pci_device_class(
 }
 
 /*
- * Implements the drv pci device revision operation.
+ * Reports the revision a device declares.
  */
 uint8_t
 drv_pci_device_revision(
@@ -749,7 +754,7 @@ drv_pci_device_revision(
 }
 
 /*
- * Implements the drv pci device header type operation.
+ * Reports which layout a device's configuration space has.
  */
 uint8_t
 drv_pci_device_header_type(
@@ -760,7 +765,7 @@ drv_pci_device_header_type(
 }
 
 /*
- * Implements the drv pci device is bridge operation.
+ * Asks whether a device presents a bus of its own.
  */
 bool
 drv_pci_device_is_bridge(
@@ -771,7 +776,7 @@ drv_pci_device_is_bridge(
 }
 
 /*
- * Implements the drv pci device is multifunction operation.
+ * Asks whether a device presents more than one function.
  */
 bool
 drv_pci_device_is_multifunction(
@@ -782,7 +787,7 @@ drv_pci_device_is_multifunction(
 }
 
 /*
- * Implements the drv pci device config read8 operation.
+ * Reads one byte of configuration space.
  */
 int
 drv_pci_device_config_read8(
@@ -803,7 +808,7 @@ drv_pci_device_config_read8(
 }
 
 /*
- * Implements the drv pci device config read16 operation.
+ * Reads a 16-bit field of configuration space.
  */
 int
 drv_pci_device_config_read16(
@@ -824,7 +829,7 @@ drv_pci_device_config_read16(
 }
 
 /*
- * Implements the drv pci device config read32 operation.
+ * Reads a 32-bit field of configuration space.
  */
 int
 drv_pci_device_config_read32(
@@ -842,7 +847,7 @@ drv_pci_device_config_read32(
 }
 
 /*
- * Implements the drv pci device config write8 operation.
+ * Writes one byte of configuration space.
  */
 int
 drv_pci_device_config_write8(
@@ -860,7 +865,7 @@ drv_pci_device_config_write8(
 }
 
 /*
- * Implements the drv pci device config write16 operation.
+ * Writes a 16-bit field of configuration space.
  */
 int
 drv_pci_device_config_write16(
@@ -878,7 +883,7 @@ drv_pci_device_config_write16(
 }
 
 /*
- * Implements the drv pci device config write32 operation.
+ * Writes a 32-bit field of configuration space.
  */
 int
 drv_pci_device_config_write32(
@@ -896,7 +901,7 @@ drv_pci_device_config_write32(
 }
 
 /*
- * Implements the drv pci device find capability operation.
+ * Finds one capability in a device's capability list.
  */
 int
 drv_pci_device_find_capability(
@@ -947,7 +952,7 @@ drv_pci_device_find_capability(
 }
 
 /*
- * Implements the drv pci device find extended capability operation.
+ * Finds one extended capability of a device.
  */
 int
 drv_pci_device_find_extended_capability(
@@ -1000,7 +1005,7 @@ drv_pci_device_find_extended_capability(
 }
 
 /*
- * Implements the drv pci device enable operation.
+ * Lets a device answer on both its address spaces.
  */
 int
 drv_pci_device_enable(
@@ -1026,7 +1031,7 @@ drv_pci_device_enable(
 }
 
 /*
- * Implements the drv pci device disable operation.
+ * Stops it answering on either.
  */
 void
 drv_pci_device_disable(
@@ -1041,7 +1046,7 @@ drv_pci_device_disable(
 }
 
 /*
- * Implements the drv pci device enable io operation.
+ * Lets a device answer in the port address space.
  */
 int
 drv_pci_device_enable_io(
@@ -1057,7 +1062,7 @@ drv_pci_device_enable_io(
 }
 
 /*
- * Implements the drv pci device enable memory operation.
+ * Lets a device answer in the memory address space.
  */
 int
 drv_pci_device_enable_memory(
@@ -1073,7 +1078,7 @@ drv_pci_device_enable_memory(
 }
 
 /*
- * Implements the drv pci device save enable state operation.
+ * Remembers which spaces a device was answering on.
  */
 int
 drv_pci_device_save_enable_state(
@@ -1103,7 +1108,7 @@ drv_pci_device_save_enable_state(
 }
 
 /*
- * Implements the drv pci device restore enable state operation.
+ * Puts that back the way it was.
  */
 int
 drv_pci_device_restore_enable_state(
@@ -1155,7 +1160,7 @@ drv_pci_device_restore_enable_state(
 }
 
 /*
- * Implements the drv pci device set bus master operation.
+ * Lets a device master the bus, or stops it.
  */
 int
 drv_pci_device_set_bus_master(
@@ -1173,7 +1178,7 @@ drv_pci_device_set_bus_master(
 }
 
 /*
- * Implements the drv pci device bar count operation.
+ * Reports how many base address registers a device has.
  */
 unsigned
 drv_pci_device_bar_count(
@@ -1184,7 +1189,7 @@ drv_pci_device_bar_count(
 }
 
 /*
- * Implements the drv pci device bar operation.
+ * Reports what one base address register describes.
  */
 int
 drv_pci_device_bar(
@@ -1201,7 +1206,7 @@ drv_pci_device_bar(
 }
 
 /*
- * Implements the drv pci device assign bar operation.
+ * Gives one base address register an address.
  */
 int
 drv_pci_device_assign_bar(
@@ -1324,7 +1329,7 @@ rollback:
 }
 
 /*
- * Implements the drv pci device claim bar operation.
+ * Claims the address space one register describes.
  */
 int
 drv_pci_device_claim_bar(
@@ -1345,7 +1350,7 @@ drv_pci_device_claim_bar(
 }
 
 /*
- * Implements the drv pci device release bar operation.
+ * Gives that space back.
  */
 void
 drv_pci_device_release_bar(
@@ -1358,7 +1363,7 @@ drv_pci_device_release_bar(
 }
 
 /*
- * Implements the drv pci device map bar region operation.
+ * Maps part of the space one register describes.
  */
 int
 drv_pci_device_map_bar_region(
@@ -1394,7 +1399,7 @@ drv_pci_device_map_bar_region(
 }
 
 /*
- * Implements the drv pci device map bar operation.
+ * Maps the whole space one register describes.
  */
 int
 drv_pci_device_map_bar(
@@ -1418,7 +1423,7 @@ drv_pci_device_map_bar(
 }
 
 /*
- * Implements the drv pci device unmap bar operation.
+ * Unmaps it again.
  */
 void
 drv_pci_device_unmap_bar(
@@ -1431,7 +1436,7 @@ drv_pci_device_unmap_bar(
 }
 
 /*
- * Implements the drv pci device allocate irqs operation.
+ * Takes the interrupts a device asks for.
  */
 int
 drv_pci_device_allocate_irqs(
@@ -1483,7 +1488,7 @@ drv_pci_device_allocate_irqs(
 }
 
 /*
- * Implements the drv pci device free irqs operation.
+ * Gives those interrupts back.
  */
 void
 drv_pci_device_free_irqs(
@@ -1499,7 +1504,7 @@ drv_pci_device_free_irqs(
 }
 
 /*
- * Implements the drv pci device establish irq operation.
+ * Puts a handler on one of a device's interrupts.
  */
 int
 drv_pci_device_establish_irq(
@@ -1556,7 +1561,7 @@ drv_pci_device_establish_irq(
 }
 
 /*
- * Implements the drv pci device disestablish irq checked operation.
+ * Takes that handler off, reporting whether it could.
  */
 int
 drv_pci_device_disestablish_irq_checked(
@@ -1690,7 +1695,7 @@ drv_pci_device_disestablish_irq_checked(
 }
 
 /*
- * Implements the drv pci device disestablish irq operation.
+ * Takes that handler off.
  */
 void
 drv_pci_device_disestablish_irq(
@@ -1706,7 +1711,7 @@ drv_pci_device_disestablish_irq(
 }
 
 /*
- * Implements the drv pci device dma operation.
+ * Reports the DMA device a device's transfers go through.
  */
 struct drv_dma_device *
 drv_pci_device_dma(
@@ -1717,7 +1722,7 @@ drv_pci_device_dma(
 }
 
 /*
- * Implements the drv pci device driver operation.
+ * Reports the driver that holds a device.
  */
 struct drv_pci_driver *
 drv_pci_device_driver(
@@ -1728,7 +1733,7 @@ drv_pci_device_driver(
 }
 
 /*
- * Implements the drv pci device driver data operation.
+ * Reports that driver's own state for the device.
  */
 void *
 drv_pci_device_driver_data(
@@ -1739,7 +1744,7 @@ drv_pci_device_driver_data(
 }
 
 /*
- * Implements the drv pci device set driver data operation.
+ * Gives the driver somewhere to keep that state.
  */
 int
 drv_pci_device_set_driver_data(
@@ -1756,7 +1761,7 @@ drv_pci_device_set_driver_data(
 }
 
 /*
- * Implements the drv pci id match operation.
+ * Asks whether one identifier pattern matches a device.
  */
 int
 drv_pci_id_match(
@@ -1779,7 +1784,7 @@ drv_pci_id_match(
 }
 
 /*
- * Implements the drv pci driver find id operation.
+ * Finds the pattern of a driver that matches a device.
  */
 const struct drv_pci_id *
 drv_pci_driver_find_id(
@@ -1803,7 +1808,7 @@ drv_pci_driver_find_id(
 }
 
 /*
- * Implements the drv pci driver match operation.
+ * Asks whether a driver would take a device at all.
  */
 int
 drv_pci_driver_match(
@@ -1827,7 +1832,7 @@ drv_pci_driver_match(
 }
 
 /*
- * Implements the drv pci device probe operation.
+ * Offers a device to every registered driver in turn.
  */
 int
 drv_pci_device_probe(
@@ -1866,7 +1871,7 @@ drv_pci_device_probe(
 }
 
 /*
- * Implements the drv pci device detach operation.
+ * Tells the driver holding a device to give it up.
  */
 int
 drv_pci_device_detach(
@@ -1894,7 +1899,7 @@ drv_pci_device_detach(
 }
 
 /*
- * Implements the drv pci device reprobe operation.
+ * Offers a device to the drivers again after a change.
  */
 int
 drv_pci_device_reprobe(
@@ -1923,7 +1928,7 @@ drv_pci_device_reprobe(
 }
 
 /*
- * Implements the drv pci driver register operation.
+ * Registers a driver with the PCI subsystem.
  */
 int
 drv_pci_driver_register(
@@ -1969,7 +1974,7 @@ drv_pci_driver_register(
 }
 
 /*
- * Implements the drv pci driver unregister operation.
+ * Takes a driver back out of the subsystem.
  */
 int
 drv_pci_driver_unregister(
@@ -2009,7 +2014,7 @@ drv_pci_driver_unregister(
 }
 
 /*
- * Implements the drv pci driver name operation.
+ * Reports the name a driver was registered under.
  */
 const char *
 drv_pci_driver_name(
@@ -2020,7 +2025,7 @@ drv_pci_driver_name(
 }
 
 /*
- * Implements the drv pci driver device count operation.
+ * Reports how many devices a driver holds.
  */
 size_t
 drv_pci_driver_device_count(
@@ -2045,7 +2050,7 @@ drv_pci_driver_device_count(
 }
 
 /*
- * Implements the drv pci driver foreach device operation.
+ * Calls back for every device a driver holds.
  */
 int
 drv_pci_driver_foreach_device(
@@ -2075,7 +2080,7 @@ drv_pci_driver_foreach_device(
 }
 
 /*
- * Implements the drv pci dump operation.
+ * Prints the whole device tree for debugging.
  */
 void
 drv_pci_dump(
@@ -2099,7 +2104,7 @@ drv_pci_dump(
 	}
 }
 
-/* Supports the cfg read operation. */
+/* Reads configuration space through the platform's own path. */
 static int
 cfg_read(
 	struct drv_pci_bus *bus,
@@ -2130,7 +2135,7 @@ cfg_read(
 	return error;
 }
 
-/* Supports the find device on bus operation. */
+/* Finds a device of one bus by its slot and function. */
 static struct drv_pci_device *
 find_device_on_bus(
 	struct drv_pci_bus *bus,
@@ -2154,7 +2159,7 @@ find_device_on_bus(
 	return NULL;
 }
 
-/* Supports the read device operation. */
+/* Reads everything the subsystem keeps about one device. */
 static int
 read_device(
 	struct drv_pci_device *device)
@@ -2253,7 +2258,7 @@ read_device(
 	return 0;
 }
 
-/* Supports the cfg write operation. */
+/* Writes configuration space through the platform's own path. */
 static int
 cfg_write(
 	struct drv_pci_bus *bus,
@@ -2284,7 +2289,7 @@ cfg_write(
 	return error;
 }
 
-/* Supports the foreach device tree operation. */
+/* Walks a bus and every bus below it, device by device. */
 static int
 foreach_device_tree(
 	struct drv_pci_bus *b,
@@ -2312,7 +2317,7 @@ foreach_device_tree(
 	return 0;
 }
 
-/* Supports the command set operation. */
+/* Changes selected bits of a device's command register. */
 static int
 command_set(
 	struct drv_pci_device *d,
@@ -2340,7 +2345,7 @@ command_set(
 	return error;
 }
 
-/* Supports the pci bar read raw operation. */
+/* Reads the raw contents of one base address register. */
 static int
 pci_bar_read_raw(
 	struct drv_pci_device *device,
@@ -2372,7 +2377,7 @@ pci_bar_read_raw(
 	return 0;
 }
 
-/* Supports the pci command quiesce operation. */
+/* Stops a device answering while its registers are probed. */
 static int
 pci_command_quiesce(
 	struct drv_pci_device *device,
@@ -2397,7 +2402,7 @@ pci_command_quiesce(
 	return (readback & PCI_COMMAND_ENABLE_MASK) == 0 ? 0 : EIO;
 }
 
-/* Supports the pci bar write raw operation. */
+/* Writes the raw contents of one base address register. */
 static int
 pci_bar_write_raw(
 	struct drv_pci_device *device,
@@ -2426,7 +2431,7 @@ pci_bar_write_raw(
 	return function_result;
 }
 
-/* Supports the pci bar cache readback operation. */
+/* Reads a register back and records what it now holds. */
 static void
 pci_bar_cache_readback(
 	struct drv_pci_device *device,
@@ -2442,7 +2447,7 @@ pci_bar_cache_readback(
 		bar->bus_address = 0;
 }
 
-/* Supports the pci bar address operation. */
+/* Reports the address one base address register names. */
 static uint64_t
 pci_bar_address(
 	enum drv_pci_bar_type type,
@@ -2458,7 +2463,7 @@ pci_bar_address(
 	       (low & ~15U);
 }
 
-/* Supports the establish intx operation. */
+/* Puts a handler on a device's pin-based interrupt. */
 static int
 establish_intx(
 	struct pci_irq_cookie *cookie,
@@ -2535,7 +2540,7 @@ establish_intx(
 	return 0;
 }
 
-/* Supports the intx lock enter operation. */
+/* Takes the lock that guards the shared pin lines. */
 static bool
 intx_lock_enter(
 	void)
@@ -2550,7 +2555,7 @@ intx_lock_enter(
 	return enabled;
 }
 
-/* Supports the find intx line operation. */
+/* Finds the line a device's pin is routed to. */
 static struct pci_intx_line *
 find_intx_line(
 	int irq)
@@ -2568,7 +2573,7 @@ find_intx_line(
 	return NULL;
 }
 
-/* Supports the intx lock leave operation. */
+/* Gives that lock back. */
 static void
 intx_lock_leave(
 	bool enabled)
@@ -2580,7 +2585,7 @@ intx_lock_leave(
 		hal_irq_enable();
 }
 
-/* Supports the establish msi operation. */
+/* Puts a handler on a device's message-signalled interrupt. */
 static int
 establish_msi(
 	struct pci_irq_cookie *cookie,
@@ -2727,7 +2732,7 @@ fail:
 	return 0;
 }
 
-/* Supports the pci source operation. */
+/* Reports the interrupt source one handler is on. */
 static void
 pci_source(
 	const struct drv_pci_address *address,
@@ -2755,7 +2760,7 @@ pci_source(
 	result[16] = '\0';
 }
 
-/* Supports the establish msix operation. */
+/* Puts a handler on one entry of a device's message table. */
 static int
 establish_msix(
 	struct pci_irq_cookie *cookie)
@@ -2863,7 +2868,7 @@ fail:
 	return 0;
 }
 
-/* Supports the map msix entry operation. */
+/* Maps the table entry one message interrupt lives in. */
 static int
 map_msix_entry(
 	struct pci_irq_cookie *cookie)
@@ -2909,7 +2914,7 @@ map_msix_entry(
 	return error;
 }
 
-/* Supports the disestablish intx operation. */
+/* Takes a handler off a pin-based interrupt. */
 static int
 disestablish_intx(
 	struct pci_irq_cookie *cookie)
@@ -3013,7 +3018,7 @@ disestablish_intx(
 	return 0;
 }
 
-/* Supports the pci irq dispatch operation. */
+/* Serves one interrupt and hands it to the right handler. */
 static void
 pci_irq_dispatch(
 	int irq,
@@ -3027,7 +3032,7 @@ pci_irq_dispatch(
 	hal_irq_send_eoi(acknowledge);
 }
 
-/* Supports the pci intx dispatch operation. */
+/* Serves one pin interrupt, which several devices may share. */
 static void
 pci_intx_dispatch(
 	int irq,

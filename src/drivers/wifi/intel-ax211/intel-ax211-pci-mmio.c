@@ -48,9 +48,6 @@ static const struct intel_ax211_mmio_ops ax211_pci_mmio_operations = {
 	.clock_us = ax211_backend_clock_us,
 	.trace_deadline = NULL};
 
-/*
- * Forward declaration.
- */
 static int ax211_backend_range_valid(const struct intel_ax211_pci_mmio_backend *backend, uint32_t offset);
 
 /*

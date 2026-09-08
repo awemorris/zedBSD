@@ -1,7 +1,13 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* X68000 MB89352 polled-PIO disk adapter. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * X68000 MB89352 synchronous polled-PIO block driver.
+ */
 
 #ifndef ZEDBSD_DRIVERS_X68K_SPC_DISK_H
 #define ZEDBSD_DRIVERS_X68K_SPC_DISK_H

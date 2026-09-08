@@ -1,8 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
-/* PC-98 graphics-private frontend/backend boundary.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * PC-98 graphics-private frontend/backend boundary.
+ */
+
 #ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_BACKEND_H
 #define ZEDBSD_DRIVERS_GRAPHICS_PC98_BACKEND_H
 

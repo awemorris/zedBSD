@@ -1,9 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * PC/AT VGA 8x16 ASCII font preservation.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
  */
+
 #include "drivers/platform/pcat/graphics/font.h"
 #include "drivers/platform/pcat/graphics/vgafont.h"
 

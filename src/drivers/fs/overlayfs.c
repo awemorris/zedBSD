@@ -164,7 +164,8 @@ static OVERLAY_HIGH uint64_t overlay_get64(const uint8_t *p);
 static OVERLAY_HIGH void overlay_put16(uint8_t *p, uint16_t value);
 static OVERLAY_HIGH void overlay_put32(uint8_t *p, uint32_t value);
 static OVERLAY_HIGH void overlay_put64(uint8_t *p, uint64_t value);
-static OVERLAY_HIGH uint32_t overlay_crc_update(uint32_t crc, const uint8_t *data, size_t length);
+static OVERLAY_HIGH uint32_t overlay_crc_update(uint32_t crc,
+    const uint8_t *data, size_t length);
 static OVERLAY_HIGH uint32_t overlay_record_crc(const uint8_t record[OVERLAY_RECORD_BYTES]);
 static OVERLAY_HIGH int overlay_all_zero(const uint8_t *data, size_t length);
 static OVERLAY_HIGH const uint8_t * overlay_id(const struct overlay_mount_state *state);
@@ -172,14 +173,18 @@ static OVERLAY_HIGH int overlay_metadata_find(const struct overlay_metadata entr
 static OVERLAY_HIGH int overlay_metadata_apply(struct overlay_metadata entries[OVERLAY_METADATA_MAX], const char *path, unsigned opcode, uint64_t sequence);
 static OVERLAY_HIGH unsigned overlay_metadata_flags(const struct overlay_mount_state *state, const char *path);
 static OVERLAY_HIGH uint32_t overlay_metadata_digest(const struct overlay_metadata entries[OVERLAY_METADATA_MAX]);
-static OVERLAY_HIGH int overlay_read_record(struct file *file, unsigned sector, uint8_t record[OVERLAY_RECORD_BYTES]);
+static OVERLAY_HIGH int overlay_read_record(struct file *file, unsigned sector,
+    uint8_t record[OVERLAY_RECORD_BYTES]);
 static OVERLAY_HIGH int overlay_record_valid(const uint8_t record[OVERLAY_RECORD_BYTES]);
 static OVERLAY_HIGH int overlay_snapshot_apply(struct overlay_journal_view *view, const uint8_t record[OVERLAY_RECORD_BYTES], const uint8_t id[4]);
 static OVERLAY_HIGH int overlay_operation_apply(struct overlay_journal_view *view, const uint8_t record[OVERLAY_RECORD_BYTES], const uint8_t id[4]);
-static OVERLAY_HIGH int overlay_validate_slot(struct overlay_mount_state *state, unsigned slot, struct overlay_journal_view *view);
-static OVERLAY_HIGH int overlay_open_journal(struct overlay_mount_state *state, unsigned slot);
+static OVERLAY_HIGH int overlay_validate_slot(struct overlay_mount_state *state,
+    unsigned slot, struct overlay_journal_view *view);
+static OVERLAY_HIGH int overlay_open_journal(struct overlay_mount_state *state,
+    unsigned slot);
 static OVERLAY_HIGH int overlay_journal_load(struct overlay_mount_state *state);
-static OVERLAY_HIGH int overlay_write_record(struct file *file, unsigned sector, const uint8_t record[OVERLAY_RECORD_BYTES]);
+static OVERLAY_HIGH int overlay_write_record(struct file *file, unsigned sector,
+    const uint8_t record[OVERLAY_RECORD_BYTES]);
 static OVERLAY_HIGH unsigned overlay_metadata_count(const struct overlay_metadata entries[OVERLAY_METADATA_MAX]);
 static OVERLAY_HIGH int overlay_metadata_sorted_index(const struct overlay_metadata entries[OVERLAY_METADATA_MAX], const char *after);
 static OVERLAY_HIGH int overlay_journal_compact(struct overlay_mount_state *state);
@@ -191,79 +196,139 @@ static OVERLAY_HIGH int overlay_slot_index(const struct inode *inode);
 static OVERLAY_HIGH struct inode * overlay_alloc_inode(struct mount *mountp);
 static OVERLAY_HIGH void overlay_free_inode(struct inode *inode);
 static OVERLAY_HIGH const struct path * overlay_select_path_locked(const struct overlay_inode_info *info, enum overlay_path_selection selection);
-static OVERLAY_HIGH int overlay_path_snapshot(struct inode *inode, enum overlay_path_selection selection, struct path *result);
-static OVERLAY_HIGH int overlay_info_snapshot(struct inode *inode, struct path *upper, struct path *lower, char relative[ZEDBSD_PATH_MAX]);
+static OVERLAY_HIGH int overlay_path_snapshot(struct inode *inode,
+    enum overlay_path_selection selection, struct path *result);
+static OVERLAY_HIGH int overlay_info_snapshot(struct inode *inode,
+    struct path *upper, struct path *lower, char relative[ZEDBSD_PATH_MAX]);
 static OVERLAY_HIGH int overlay_temporary_name(const char *name);
 static OVERLAY_HIGH int overlay_reserved_name(const char *name);
 static OVERLAY_HIGH int overlay_component_text(const struct componentname *component, char name[NAME_MAX + 1U]);
-static OVERLAY_HIGH int overlay_join(const char *parent, const char *name, char result[ZEDBSD_PATH_MAX]);
-static OVERLAY_HIGH int overlay_identity_get(struct overlay_mount_state *state, const char *path, unsigned *index_out, ino_t *ino_out, int *created_out);
-static OVERLAY_HIGH int overlay_lookup_real(const struct path *directory, const struct componentname *component, struct path *result);
+static OVERLAY_HIGH int overlay_join(const char *parent, const char *name,
+    char result[ZEDBSD_PATH_MAX]);
+static OVERLAY_HIGH int overlay_identity_get(struct overlay_mount_state *state,
+    const char *path, unsigned *index_out, ino_t *ino_out, int *created_out);
+static OVERLAY_HIGH int overlay_lookup_real(const struct path *directory,
+    const struct componentname *component, struct path *result);
 static OVERLAY_HIGH void overlay_refresh_locked(struct inode *inode);
 static OVERLAY_HIGH void overlay_refresh(struct inode *inode);
-static OVERLAY_HIGH int overlay_make_inode(struct mount *mountp, const char *relative, struct path *upper, struct path *lower, struct inode **result);
-static OVERLAY_HIGH int overlay_lookup(struct inode *directory, const struct componentname *component, struct inode **result);
-static OVERLAY_HIGH int overlay_getattr(struct inode *inode, struct stat *status);
-static OVERLAY_HIGH int overlay_find_relative(struct mount *mountp, const char *relative, struct inode **result);
-static OVERLAY_HIGH int overlay_split_path(const char *path, char parent[ZEDBSD_PATH_MAX], struct componentname *name);
-static OVERLAY_HIGH void overlay_publish_upper(struct inode *inode, const struct path *upper, int clear_lower, const char *relative);
-static OVERLAY_HIGH void overlay_install_upper(struct inode *inode, const struct path *upper);
-static OVERLAY_HIGH void overlay_clear_upper_if(struct inode *inode, const struct path *expected);
+static OVERLAY_HIGH int overlay_make_inode(struct mount *mountp,
+    const char *relative, struct path *upper, struct path *lower,
+    struct inode **result);
+static OVERLAY_HIGH int overlay_lookup(struct inode *directory,
+    const struct componentname *component, struct inode **result);
+static OVERLAY_HIGH int overlay_getattr(struct inode *inode,
+    struct stat *status);
+static OVERLAY_HIGH int overlay_find_relative(struct mount *mountp,
+    const char *relative, struct inode **result);
+static OVERLAY_HIGH int overlay_split_path(const char *path,
+    char parent[ZEDBSD_PATH_MAX], struct componentname *name);
+static OVERLAY_HIGH void overlay_publish_upper(struct inode *inode,
+    const struct path *upper, int clear_lower, const char *relative);
+static OVERLAY_HIGH void overlay_install_upper(struct inode *inode,
+    const struct path *upper);
+static OVERLAY_HIGH void overlay_clear_upper_if(struct inode *inode,
+    const struct path *expected);
 static OVERLAY_HIGH int overlay_materialization_complete(struct overlay_mount_state *state, struct overlay_materialization_transaction *transaction, int error);
 static OVERLAY_HIGH int overlay_ensure_upper_dir_tracked(struct inode *directory, struct overlay_materialization_transaction *transaction);
 static OVERLAY_HIGH int overlay_ensure_upper_dir(struct inode *directory);
 static OVERLAY_HIGH void overlay_temp_name(uint16_t number, char name[11]);
 static OVERLAY_HIGH int overlay_copy_up_regular(struct inode *inode);
-static OVERLAY_HIGH int overlay_new_preflight(struct inode *directory, const struct componentname *name, char text[NAME_MAX + 1U], char relative[ZEDBSD_PATH_MAX], struct inode **hidden_lower);
-static OVERLAY_HIGH int overlay_finish_new(struct inode *directory, const struct componentname *name, const char *relative, int directory_object, int opaque_added, struct inode **result);
-static OVERLAY_HIGH int overlay_create(struct inode *directory, const struct componentname *name, const struct inode_creation_request *request, struct inode **result);
-static OVERLAY_HIGH int overlay_mkdir(struct inode *directory, const struct componentname *name, const struct inode_creation_request *request, struct inode **result);
-static OVERLAY_HIGH void overlay_special_clear(struct inode *inode, void *expected);
-static OVERLAY_HIGH int overlay_special_transfer(struct inode *source, struct inode *destination, void *expected);
-static OVERLAY_HIGH int overlay_mknod_socket(struct inode *directory, const struct componentname *name, const struct inode_creation_request *request, const char *relative, struct inode **result);
-static OVERLAY_HIGH int overlay_mknod(struct inode *directory, const struct componentname *name, const struct inode_creation_request *request, struct inode **result);
-static OVERLAY_HIGH int overlay_symlink(struct inode *directory, const struct componentname *name, const char *target, const struct inode_creation_request *request, struct inode **result);
-static OVERLAY_HIGH ssize_t overlay_readlink(struct inode *inode, char *buffer, size_t capacity);
-static OVERLAY_HIGH int overlay_path_is_below(const char *path, const char *root);
+static OVERLAY_HIGH int overlay_new_preflight(struct inode *directory,
+    const struct componentname *name, char text[NAME_MAX + 1U],
+    char relative[ZEDBSD_PATH_MAX], struct inode **hidden_lower);
+static OVERLAY_HIGH int overlay_finish_new(struct inode *directory,
+    const struct componentname *name, const char *relative,
+    int directory_object, int opaque_added, struct inode **result);
+static OVERLAY_HIGH int overlay_create(struct inode *directory,
+    const struct componentname *name,
+    const struct inode_creation_request *request, struct inode **result);
+static OVERLAY_HIGH int overlay_mkdir(struct inode *directory,
+    const struct componentname *name,
+    const struct inode_creation_request *request, struct inode **result);
+static OVERLAY_HIGH void overlay_special_clear(struct inode *inode,
+    void *expected);
+static OVERLAY_HIGH int overlay_special_transfer(struct inode *source,
+    struct inode *destination, void *expected);
+static OVERLAY_HIGH int overlay_mknod_socket(struct inode *directory,
+    const struct componentname *name,
+    const struct inode_creation_request *request, const char *relative,
+    struct inode **result);
+static OVERLAY_HIGH int overlay_mknod(struct inode *directory,
+    const struct componentname *name,
+    const struct inode_creation_request *request, struct inode **result);
+static OVERLAY_HIGH int overlay_symlink(struct inode *directory,
+    const struct componentname *name, const char *target,
+    const struct inode_creation_request *request, struct inode **result);
+static OVERLAY_HIGH ssize_t overlay_readlink(struct inode *inode, char *buffer,
+    size_t capacity);
+static OVERLAY_HIGH int overlay_path_is_below(const char *path,
+    const char *root);
 static OVERLAY_HIGH int overlay_repath_preflight(struct overlay_mount_state *state, const char *old_path, const char *new_path, const struct inode *replaced);
 static OVERLAY_HIGH void overlay_repath_commit(struct overlay_mount_state *state, struct mount *mountp, const char *old_path, const char *new_path);
-static OVERLAY_HIGH int overlay_rename(struct inode *old_directory, const struct componentname *old_name, struct inode *new_directory, const struct componentname *new_name, unsigned flags);
+static OVERLAY_HIGH int overlay_rename(struct inode *old_directory,
+    const struct componentname *old_name, struct inode *new_directory,
+    const struct componentname *new_name, unsigned flags);
 static OVERLAY_HIGH void overlay_retire_inode(struct inode *inode);
 static OVERLAY_HIGH int overlay_directory_empty(struct inode *inode);
-static OVERLAY_HIGH int overlay_remove(struct inode *directory, const struct componentname *name, int removing_directory);
-static OVERLAY_HIGH int overlay_unlink(struct inode *directory, const struct componentname *name);
-static OVERLAY_HIGH int overlay_rmdir(struct inode *directory, const struct componentname *name);
-static OVERLAY_HIGH int overlay_truncate_upper(struct inode *inode, const struct inode_truncate_request *request, struct inode_truncate_result *result);
-static OVERLAY_HIGH int overlay_truncate_limited(struct inode *inode, const struct inode_truncate_request *request, struct inode_truncate_result *result);
+static OVERLAY_HIGH int overlay_remove(struct inode *directory,
+    const struct componentname *name, int removing_directory);
+static OVERLAY_HIGH int overlay_unlink(struct inode *directory,
+    const struct componentname *name);
+static OVERLAY_HIGH int overlay_rmdir(struct inode *directory,
+    const struct componentname *name);
+static OVERLAY_HIGH int overlay_truncate_upper(struct inode *inode,
+    const struct inode_truncate_request *request,
+    struct inode_truncate_result *result);
+static OVERLAY_HIGH int overlay_truncate_limited(struct inode *inode,
+    const struct inode_truncate_request *request,
+    struct inode_truncate_result *result);
 static OVERLAY_HIGH int overlay_truncate(struct inode *inode, off_t size);
-static OVERLAY_HIGH int overlay_setattr(struct inode *inode, const struct stat *status, unsigned mask);
+static OVERLAY_HIGH int overlay_setattr(struct inode *inode,
+    const struct stat *status, unsigned mask);
 static OVERLAY_HIGH void overlay_reclaim(struct inode *inode);
 static OVERLAY_HIGH int overlay_regular_open(struct file *file);
-static OVERLAY_HIGH ssize_t overlay_pread(struct file *file, void *buffer, size_t size, off_t offset);
-static OVERLAY_HIGH ssize_t overlay_pread_internal(struct file *file, void *buffer, size_t size, off_t offset, unsigned flags);
-static OVERLAY_HIGH ssize_t overlay_read(struct file *file, void *buffer, size_t size);
-static OVERLAY_HIGH ssize_t overlay_pwrite(struct file *file, const void *buffer, size_t size, off_t offset);
-static OVERLAY_HIGH ssize_t overlay_pwrite_internal(struct file *file, const void *buffer, size_t size, off_t offset, unsigned flags, const struct ucred *credential, const struct io_context *context);
+static OVERLAY_HIGH ssize_t overlay_pread(struct file *file, void *buffer,
+    size_t size, off_t offset);
+static OVERLAY_HIGH ssize_t overlay_pread_internal(struct file *file,
+    void *buffer, size_t size, off_t offset, unsigned flags);
+static OVERLAY_HIGH ssize_t overlay_read(struct file *file, void *buffer,
+    size_t size);
+static OVERLAY_HIGH ssize_t overlay_pwrite(struct file *file,
+    const void *buffer, size_t size, off_t offset);
+static OVERLAY_HIGH ssize_t overlay_pwrite_internal(struct file *file,
+    const void *buffer, size_t size, off_t offset, unsigned flags,
+    const struct ucred *credential, const struct io_context *context);
 #ifdef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
-static int overlay_host_truncate_limited(struct inode *inode, const struct inode_truncate_request *request, struct inode_truncate_result *result);
+static int overlay_host_truncate_limited(struct inode *inode,
+    const struct inode_truncate_request *request,
+    struct inode_truncate_result *result);
 #endif
-static OVERLAY_HIGH ssize_t overlay_write(struct file *file, const void *buffer, size_t size);
+static OVERLAY_HIGH ssize_t overlay_write(struct file *file, const void *buffer,
+    size_t size);
 static OVERLAY_HIGH int overlay_regular_fsync(struct file *file);
 static OVERLAY_HIGH int overlay_regular_close(struct file *file);
 static OVERLAY_HIGH int overlay_dir_open(struct file *file);
 static OVERLAY_HIGH void overlay_dir_drop_active(struct overlay_dir_cursor *cursor);
-static OVERLAY_HIGH int overlay_dir_open_phase(struct file *file, struct overlay_dir_cursor *cursor);
-static OVERLAY_HIGH int overlay_dir_upper_has(struct inode *directory, const char *name);
-static OVERLAY_HIGH int overlay_dir_child_hidden(struct inode *directory, const char *name);
-static OVERLAY_HIGH int overlay_dir_emit(struct file *file, const char *name, struct dirent *entry);
-static OVERLAY_HIGH int overlay_readdir(struct file *file, struct dirent *entry, int *eof);
-static OVERLAY_HIGH off_t overlay_dir_seek(struct file *file, off_t offset, int whence);
+static OVERLAY_HIGH int overlay_dir_open_phase(struct file *file,
+    struct overlay_dir_cursor *cursor);
+static OVERLAY_HIGH int overlay_dir_upper_has(struct inode *directory,
+    const char *name);
+static OVERLAY_HIGH int overlay_dir_child_hidden(struct inode *directory,
+    const char *name);
+static OVERLAY_HIGH int overlay_dir_emit(struct file *file, const char *name,
+    struct dirent *entry);
+static OVERLAY_HIGH int overlay_readdir(struct file *file, struct dirent *entry,
+    int *eof);
+static OVERLAY_HIGH off_t overlay_dir_seek(struct file *file, off_t offset,
+    int whence);
 static OVERLAY_HIGH int overlay_dir_close(struct file *file);
 static OVERLAY_HIGH int overlay_directory_fsync(struct file *file);
-static OVERLAY_HIGH int overlay_cleanup_temps(struct path *directory, unsigned depth, unsigned *visited, unsigned *deleted);
+static OVERLAY_HIGH int overlay_cleanup_temps(struct path *directory,
+    unsigned depth, unsigned *visited, unsigned *deleted);
 static OVERLAY_HIGH int overlay_mount_impl(struct mount *mountp);
 static OVERLAY_HIGH int overlay_sync_mount(struct mount *mountp);
-static OVERLAY_HIGH int overlay_statvfs(struct mount *mountp, struct statvfs *result);
+static OVERLAY_HIGH int overlay_statvfs(struct mount *mountp,
+    struct statvfs *result);
 static OVERLAY_HIGH void overlay_unmount_impl(struct mount *mountp);
 static OVERLAY_HIGH int overlay_prepare_mutation(struct inode *inode);
 
@@ -346,6 +411,7 @@ drv_overlay_mount_at(
 {
 	struct path root;
 	const char *name;
+	const char *separator;
 	int mount_flags;
 	int error;
 
@@ -353,9 +419,14 @@ drv_overlay_mount_at(
 	name = target;
 	if (namespace_root == NULL || target == NULL || args == NULL)
 		return EINVAL;
+
+	/* A leading slash is the root, which the mount is taken relative to. */
 	if (name[0] == '/')
 		name++;
-	if (name[0] == '\0' || strchr(name, '/') != NULL)
+
+	/* What is left has to be a name, and one single component of a path. */
+	separator = strchr(name, '/');
+	if (name[0] == '\0' || separator != NULL)
 		return EINVAL;
 
 	/* Mounts under the namespace root. */
@@ -498,6 +569,7 @@ overlay_content_host_layers_supported(
 	struct mount upper;
 	struct mount lower;
 	struct overlay_mount_args args;
+	int supported;
 
 	/* Builds a mount pair of the requested layer kinds. */
 	memset(&upper, 0, sizeof(upper));
@@ -510,9 +582,12 @@ overlay_content_host_layers_supported(
 	args.upper.p_mount = &upper;
 	args.lower.p_mount = &lower;
 
-	/* Reports whether the overlay would accept that pair. */
-	if (!overlay_layers_supported(&args))
+	/* Asks whether the overlay would accept that pair of layers. */
+	supported = overlay_layers_supported(&args);
+	if (!supported)
 		return EOPNOTSUPP;
+
+	/* Succeeded. */
 	return 0;
 }
 #endif
@@ -555,7 +630,15 @@ static OVERLAY_HIGH uint64_t
 overlay_get64(
 	const uint8_t *p)
 {
-	return (uint64_t)overlay_get32(p) | (uint64_t)overlay_get32(p + 4) << 32;
+	uint32_t low;
+	uint32_t high;
+
+	/* The two halves the field is stored as, least significant first. */
+	low = overlay_get32(p);
+	high = overlay_get32(p + 4);
+
+	/* The two halves assembled into one value. */
+	return low | (uint64_t)high << 32;
 }
 
 /* Writes a little-endian 16-bit field. */
@@ -655,12 +738,21 @@ overlay_metadata_find(
 	const char *path)
 {
 	unsigned i;
+	int difference;
 
+	/* Walks the table looking for the entry that holds this path. */
 	for (i = 0; i < OVERLAY_METADATA_MAX; i++) {
-		if (entries[i].used && !strcmp(entries[i].path, path))
+		/* An unused slot holds no path to compare against. */
+		if (!entries[i].used)
+			continue;
+
+		/* Compares the slot's path with the one being looked for. */
+		difference = strcmp(entries[i].path, path);
+		if (difference == 0)
 			return (int)i;
 	}
 
+	/* Reports that no entry holds it. */
 	return -1;
 }
 
@@ -708,7 +800,8 @@ overlay_metadata_apply(
 	}
 
 	/* Updates the flag, dropping an entry with none left. */
-	if (opcode == OVERLAY_OP_ADD_WHITEOUT || opcode == OVERLAY_OP_SET_OPAQUE)
+	if (opcode == OVERLAY_OP_ADD_WHITEOUT ||
+	    opcode == OVERLAY_OP_SET_OPAQUE)
 		entries[index].flags |= (uint8_t)bit;
 	else
 		entries[index].flags &= (uint8_t)~bit;
@@ -741,6 +834,7 @@ overlay_metadata_digest(
 	char previous[ZEDBSD_PATH_MAX];
 	unsigned emitted;
 	int best;
+	int difference;
 	unsigned i;
 
 	crc = 0xffffffffU;
@@ -751,18 +845,36 @@ overlay_metadata_digest(
 	for (;;) {
 		best = -1;
 		for (i = 0; i < OVERLAY_METADATA_MAX; i++) {
-			if (!entries[i].used ||
-			    (emitted != 0 && strcmp(entries[i].path, previous) <= 0))
+			/* An unused slot holds no path to emit. */
+			if (!entries[i].used)
 				continue;
-			if (best < 0 || strcmp(entries[i].path,
-			    entries[best].path) < 0)
+
+			/* Skips every path already emitted in this order. */
+			if (emitted != 0) {
+				difference = strcmp(entries[i].path, previous);
+				if (difference <= 0)
+					continue;
+			}
+
+			/* The first candidate is the best one so far. */
+			if (best < 0) {
+				best = (int)i;
+				continue;
+			}
+
+			/* And any smaller path takes its place. */
+			difference = strcmp(entries[i].path,
+					    entries[best].path);
+			if (difference < 0)
 				best = (int)i;
 		}
 
 		if (best < 0)
 			break;
-		crc = overlay_crc_update(crc, (const uint8_t *)entries[best].path,
-			strlen(entries[best].path) + 1U);
+		/* Folds the path and its flag into the running digest. */
+		crc = overlay_crc_update(crc,
+		    (const uint8_t *)entries[best].path,
+		    strlen(entries[best].path) + 1U);
 		crc = overlay_crc_update(crc, &entries[best].flags, 1U);
 		strcpy(previous, entries[best].path);
 		emitted++;
@@ -799,8 +911,18 @@ static OVERLAY_HIGH int
 overlay_record_valid(
 	const uint8_t record[OVERLAY_RECORD_BYTES])
 {
-	if (overlay_get32(record + 508) != overlay_record_crc(record))
+	uint32_t stored;
+	uint32_t computed;
+
+	/* The checksum the record carries, and the one it should carry. */
+	stored = overlay_get32(record + 508);
+	computed = overlay_record_crc(record);
+
+	/* A record whose checksum disagrees was never fully written. */
+	if (stored != computed)
 		return 0;
+
+	/* Succeeded. */
 	return 1;
 }
 
@@ -1015,11 +1137,15 @@ overlay_validate_slot(
 	int identity;
 	int tail_blank;
 	int valid;
+	int blank;
 	int error;
 
 	id = overlay_id(state);
 
-	/* The slot header names the epoch, the snapshot count, and the commit sector. */
+	/*
+	 * The slot header names the epoch, the snapshot count, and the commit
+	 * sector.
+	 */
 	memset(view, 0, sizeof(*view));
 	error = overlay_read_record(state->journal[slot], 0, record);
 	if (error != 0)
@@ -1096,17 +1222,26 @@ overlay_validate_slot(
 	/* The snapshot records rebuild the table and feed the digest. */
 	digest = overlay_crc_update(0xffffffffU, record, sizeof(record));
 	for (sector = 1; sector <= snapshot_count; sector++) {
-		error = overlay_read_record(state->journal[slot], sector, record);
+		error = overlay_read_record(state->journal[slot], sector,
+		    record);
 		if (error != 0)
 			return error;
-		if (!overlay_record_valid(record) ||
-		    overlay_snapshot_apply(view, record, id) != 0)
+		/* A record whose checksum does not hold ends the rebuild. */
+		valid = overlay_record_valid(record);
+		if (!valid)
 			return 0;
+
+		/* And so does one the table will not take. */
+		error = overlay_snapshot_apply(view, record, id);
+		if (error != 0)
+			return 0;
+
 		digest = overlay_crc_update(digest, record, sizeof(record));
 	}
 
 	/* The commit record must match the header and the digest. */
-	error = overlay_read_record(state->journal[slot], commit_sector, commit);
+	error = overlay_read_record(state->journal[slot], commit_sector,
+	    commit);
 	if (error != 0)
 		return error;
 	/* A commit whose checksum does not hold was never fully written. */
@@ -1164,13 +1299,25 @@ overlay_validate_slot(
 	/* Operation records follow until the first blank or broken one. */
 	sector = commit_sector + 1U;
 	while (sector < OVERLAY_SLOT_SECTORS) {
-		error = overlay_read_record(state->journal[slot], sector, record);
+		error = overlay_read_record(state->journal[slot], sector,
+		    record);
 		if (error != 0)
 			return error;
-		if (overlay_all_zero(record, sizeof(record)) ||
-		    !overlay_record_valid(record) ||
-		    overlay_operation_apply(view, record, id) != 0)
+		/* A blank sector is where the operation records stop. */
+		blank = overlay_all_zero(record, sizeof(record));
+		if (blank)
 			break;
+
+		/* So is one whose checksum does not hold. */
+		valid = overlay_record_valid(record);
+		if (!valid)
+			break;
+
+		/* And so is one the table will not take. */
+		error = overlay_operation_apply(view, record, id);
+		if (error != 0)
+			break;
+
 		sector++;
 	}
 
@@ -1202,7 +1349,8 @@ overlay_open_journal(
 	error = inode_lookup(state->upper_root.p_inode, &component, &inode);
 	if (error != 0)
 		return error;
-	if (inode->i_type != INODE_REG || inode->i_size != OVERLAY_JOURNAL_BYTES) {
+	if (inode->i_type != INODE_REG ||
+	    inode->i_size != OVERLAY_JOURNAL_BYTES) {
 		inode_release(inode);
 		return EINVAL;
 	}
@@ -1245,12 +1393,14 @@ overlay_journal_load(
 		goto out;
 	}
 
+	/* Both journal slots have to be there before either can be read. */
 	error = overlay_open_journal(state, 0);
 	if (error != 0)
 		goto out;
 	error = overlay_open_journal(state, 1);
 	if (error != 0)
 		goto out;
+	/* Rebuilds each slot; a broken one leaves its view invalid. */
 	first_error = overlay_validate_slot(state, 0, views[0]);
 	second_error = overlay_validate_slot(state, 1, views[1]);
 	if (first_error != 0 && second_error != 0) {
@@ -1263,7 +1413,10 @@ overlay_journal_load(
 		goto out;
 	}
 
-	/* Prefers the newer epoch, then the longer sequence; equal ones must agree. */
+	/*
+	 * Prefers the newer epoch, then the longer sequence; equal ones must
+	 * agree.
+	 */
 	if (!views[0]->valid) {
 		chosen = 1;
 	} else if (!views[1]->valid) {
@@ -1285,6 +1438,7 @@ overlay_journal_load(
 		chosen = 0;
 	}
 
+	/* Takes the table, the epoch and the position of the chosen slot. */
 	memcpy(state->metadata, views[chosen]->metadata,
 	       sizeof(state->metadata));
 	state->active_slot = chosen;
@@ -1354,15 +1508,32 @@ overlay_metadata_sorted_index(
 	const char *after)
 {
 	int best;
+	int difference;
 	unsigned i;
 
 	/* Takes the smallest path that sorts after the given one. */
 	best = -1;
 	for (i = 0; i < OVERLAY_METADATA_MAX; i++) {
-		if (!entries[i].used || (after != NULL &&
-		    strcmp(entries[i].path, after) <= 0))
+		/* An unused slot holds no path to compare against. */
+		if (!entries[i].used)
 			continue;
-		if (best < 0 || strcmp(entries[i].path, entries[best].path) < 0)
+
+		/* Skips every path that does not sort after the given one. */
+		if (after != NULL) {
+			difference = strcmp(entries[i].path, after);
+			if (difference <= 0)
+				continue;
+		}
+
+		/* The first candidate is the best one so far. */
+		if (best < 0) {
+			best = (int)i;
+			continue;
+		}
+
+		/* And any smaller path takes its place. */
+		difference = strcmp(entries[i].path, entries[best].path);
+		if (difference < 0)
 			best = (int)i;
 	}
 
@@ -1445,7 +1616,9 @@ overlay_journal_compact_impl(
 		length = strlen(state->metadata[index].path);
 		memset(record, 0, sizeof(record));
 
-		/* The signature and version a reader identifies the entry by. */
+		/*
+		 * The signature and version a reader identifies the entry by.
+		 */
 		memcpy(record, "ZOVLSNP\0", 8);
 		overlay_put16(record + 8, 1);
 
@@ -1466,7 +1639,8 @@ overlay_journal_compact_impl(
 
 		/* And a checksum over the whole record. */
 		overlay_put32(record + 508, overlay_record_crc(record));
-		error = overlay_write_record(state->journal[target], sector, record);
+		error = overlay_write_record(state->journal[target], sector,
+		    record);
 		if (error != 0)
 			return error;
 		digest = overlay_crc_update(digest, record, sizeof(record));
@@ -1494,7 +1668,8 @@ overlay_journal_compact_impl(
 
 	/* And a checksum over the whole record. */
 	overlay_put32(record + 508, overlay_record_crc(record));
-	error = overlay_write_record(state->journal[target], commit_sector, record);
+	error = overlay_write_record(state->journal[target], commit_sector,
+	    record);
 	if (error == 0)
 		error = file_fsync(state->journal[target]);
 	if (error == 0)
@@ -1616,7 +1791,10 @@ overlay_journal_append_impl(
 
 /* Keeps the logical journal boundary active until all of its work finishes. */
 static OVERLAY_HIGH int
-overlay_journal_append(struct overlay_mount_state *state, unsigned opcode, const char *path)
+overlay_journal_append(
+	struct overlay_mount_state *state,
+	unsigned opcode,
+	const char *path)
 {
 	int error;
 
@@ -1690,10 +1868,14 @@ overlay_free_inode(
 
 	index = overlay_slot_index(inode);
 	if (index >= 0)
-		memset(&overlay_inodes[index], 0, sizeof(overlay_inodes[index]));
+		memset(&overlay_inodes[index], 0,
+		    sizeof(overlay_inodes[index]));
 }
 
-/* Selects the upper, lower, or visible path of an inode; the caller holds its lock. */
+/*
+ * Selects the upper, lower, or visible path of an inode; the caller holds its
+ * lock.
+ */
 static OVERLAY_HIGH const struct path *
 overlay_select_path_locked(
 	const struct overlay_inode_info *info,
@@ -1769,6 +1951,7 @@ overlay_info_snapshot(
 	/* Copies everything asked for under the inode lock. */
 	mutex_lock(&inode->i_lock);
 
+	/* Reports only the parts of the pair the caller asked for. */
 	if (upper != NULL && info->upper.p_inode != NULL)
 		path_set(upper, info->upper.p_mount, info->upper.p_inode);
 	if (lower != NULL && info->lower.p_inode != NULL)
@@ -1824,14 +2007,28 @@ static OVERLAY_HIGH int
 overlay_reserved_name(
 	const char *name)
 {
+	int difference;
+	int temporary;
+
+	/* A call that names nothing has no name to test. */
 	if (name == NULL)
 		return 0;
-	if (!strcmp(name, ".zovl0"))
+
+	/* The two journal slots each have a name of their own. */
+	difference = strcmp(name, ".zovl0");
+	if (difference == 0)
 		return 1;
-	if (!strcmp(name, ".zovl1"))
+
+	difference = strcmp(name, ".zovl1");
+	if (difference == 0)
 		return 1;
-	if (overlay_temporary_name(name))
+
+	/* And a name the overlay uses while replacing a file is reserved. */
+	temporary = overlay_temporary_name(name);
+	if (temporary)
 		return 1;
+
+	/* Reports that the name is the caller's to use. */
 	return 0;
 }
 
@@ -1860,6 +2057,7 @@ overlay_join(
 	size_t parent_length;
 	size_t name_length;
 	size_t separator_length;
+	const char *separator;
 
 	parent_length = strlen(parent);
 	name_length = strlen(name);
@@ -1869,9 +2067,13 @@ overlay_join(
 		separator_length = 1;
 	else
 		separator_length = 0;
-	if (name_length == 0 ||
-	    strchr(name, '/') != NULL ||
-	    parent_length + separator_length + name_length >= ZEDBSD_PATH_MAX)
+	/* A component with no name, or one that is itself a path. */
+	separator = strchr(name, '/');
+	if (name_length == 0 || separator != NULL)
+		return ENAMETOOLONG;
+
+	/* And a result the caller buffer could not hold. */
+	if (parent_length + separator_length + name_length >= ZEDBSD_PATH_MAX)
 		return ENAMETOOLONG;
 	memcpy(result, parent, parent_length);
 	if (parent_length != 0) {
@@ -1894,6 +2096,7 @@ overlay_identity_get(
 {
 	unsigned i;
 	unsigned free_index;
+	int difference;
 
 	free_index = OVERLAY_IDENTITY_MAX;
 
@@ -1901,8 +2104,13 @@ overlay_identity_get(
 	if (created_out != NULL)
 		*created_out = 0;
 	for (i = 0; i < OVERLAY_IDENTITY_MAX; i++) {
-		if (state->identities[i].state == OVERLAY_ID_ACTIVE &&
-		    !strcmp(state->identities[i].path, path)) {
+		/* Compares only the slots that still name a live path. */
+		difference = 1;
+		if (state->identities[i].state == OVERLAY_ID_ACTIVE)
+			difference = strcmp(state->identities[i].path, path);
+
+		/* An identity already made for this path is reused. */
+		if (difference == 0) {
 			*index_out = i;
 			*ino_out = state->identities[i].ino;
 			return 0;
@@ -1953,18 +2161,23 @@ overlay_lookup_real(
 	return 0;
 }
 
-/* Copies the visible layer's attributes into the overlay inode; the caller holds its lock. */
+/*
+ * Copies the visible layer's attributes into the overlay inode; the caller
+ * holds its lock.
+ */
 static OVERLAY_HIGH void
 overlay_refresh_locked(
 	struct inode *inode)
 {
 	struct overlay_inode_info *info;
+	const struct path *visible_path;
 	const struct inode *visible;
 
 	info = overlay_info(inode);
 
 	/* An inode without a visible layer keeps its old attributes. */
-	visible = overlay_select_path_locked(info, OVERLAY_PATH_VISIBLE)->p_inode;
+	visible_path = overlay_select_path_locked(info, OVERLAY_PATH_VISIBLE);
+	visible = visible_path->p_inode;
 	if (visible == NULL)
 		return;
 	inode->i_type = visible->i_type;
@@ -1995,8 +2208,15 @@ static OVERLAY_HIGH void
 overlay_refresh(
 	struct inode *inode)
 {
-	if (inode == NULL || overlay_info(inode) == NULL)
+	struct overlay_inode_info *info;
+
+	/* An inode this driver did not make has nothing to refresh from. */
+	info = NULL;
+	if (inode != NULL)
+		info = overlay_info(inode);
+	if (info == NULL)
 		return;
+
 	mutex_lock(&inode->i_lock);
 
 	overlay_refresh_locked(inode);
@@ -2004,7 +2224,9 @@ overlay_refresh(
 	mutex_unlock(&inode->i_lock);
 }
 
-/* Finds or creates the overlay inode of a relative path with its layer paths. */
+/*
+ * Finds or creates the overlay inode of a relative path with its layer paths.
+ */
 static OVERLAY_HIGH int
 overlay_make_inode(
 	struct mount *mountp,
@@ -2018,6 +2240,7 @@ overlay_make_inode(
 	struct inode *inode;
 	unsigned identity;
 	ino_t ino;
+	int cached;
 	int error;
 	int identity_created;
 	int slot;
@@ -2029,7 +2252,9 @@ overlay_make_inode(
 	    &identity_created);
 	if (error != 0)
 		return error;
-	if (inode_get(mountp, ino, result) == 0) {
+	/* Asks the inode cache whether this identity is already in core. */
+	cached = inode_get(mountp, ino, result);
+	if (cached == 0) {
 		info = overlay_info(*result);
 		if (info == NULL) {
 			inode_release(*result);
@@ -2057,6 +2282,7 @@ overlay_make_inode(
 		return ENOSPC;
 	}
 
+	/* Which of the driver's fixed inode slots this one occupies. */
 	slot = overlay_slot_index(inode);
 	if (slot < 0) {
 		inode_release(inode);
@@ -2099,13 +2325,20 @@ overlay_lookup(
 	char name[NAME_MAX + 1U];
 	char parent_path[ZEDBSD_PATH_MAX];
 	char relative[ZEDBSD_PATH_MAX];
+	struct overlay_inode_info *info;
+	unsigned parent_flags;
+	unsigned name_flags;
+	int opaque_parent;
+	int whiteout_name;
+	int reserved;
 	int upper_error;
 	int lower_error;
 	int error;
 	char *slash;
 
-	/* Rejects anything but an overlay directory. */
-	if (directory->i_type != INODE_DIR || overlay_info(directory) == NULL)
+	/* Rejects anything but a directory this driver made. */
+	info = overlay_info(directory);
+	if (directory->i_type != INODE_DIR || info == NULL)
 		return ENOTDIR;
 
 	/* Dot is the directory itself. */
@@ -2145,7 +2378,9 @@ overlay_lookup(
 	error = overlay_component_text(component, name);
 	if (error != 0)
 		goto out_directories;
-	if (overlay_reserved_name(name)) {
+	/* A name the overlay keeps for itself never resolves to anything. */
+	reserved = overlay_reserved_name(name);
+	if (reserved) {
 		error = ENOENT;
 		goto out_directories;
 	}
@@ -2158,17 +2393,23 @@ overlay_lookup(
 	path_init(&upper);
 	path_init(&lower);
 	upper_error = overlay_lookup_real(&upper_directory, component, &upper);
-	if (upper_error == 0) {
-		if ((overlay_metadata_flags(directory->i_mount->m_data,
-		    parent_path) & OVERLAY_META_OPAQUE) != 0)
-			lower_error = ENOENT;
-		else
-			lower_error = overlay_lookup_real(&lower_directory,
-			    component, &lower);
-	} else if ((overlay_metadata_flags(directory->i_mount->m_data,
-		 relative) & OVERLAY_META_WHITEOUT) != 0 ||
-		 (overlay_metadata_flags(directory->i_mount->m_data,
-		 parent_path) & OVERLAY_META_OPAQUE) != 0) {
+
+	/*
+	 * An opaque parent hides every lower child of it, and a whiteout
+	 * hides the one name it was recorded for.  Either way the lower layer
+	 * is not looked in at all.
+	 */
+	parent_flags = overlay_metadata_flags(directory->i_mount->m_data,
+					      parent_path);
+	name_flags = overlay_metadata_flags(directory->i_mount->m_data,
+					    relative);
+	opaque_parent = (parent_flags & OVERLAY_META_OPAQUE) != 0;
+	whiteout_name = (name_flags & OVERLAY_META_WHITEOUT) != 0;
+
+	/* Decides whether the lower layer is looked in at all. */
+	if (upper_error == 0 && opaque_parent) {
+		lower_error = ENOENT;
+	} else if (upper_error != 0 && (whiteout_name || opaque_parent)) {
 		lower_error = ENOENT;
 	} else {
 		lower_error = overlay_lookup_real(&lower_directory, component,
@@ -2368,6 +2609,7 @@ overlay_publish_upper(
 	path_set(&replacement, upper->p_mount, upper->p_inode);
 	mutex_lock(&inode->i_lock);
 
+	/* Takes the old pair aside so it can be released after the lock. */
 	old_upper = info->upper;
 	info->upper = replacement;
 	path_init(&replacement);
@@ -2415,6 +2657,7 @@ overlay_clear_upper_if(
 	/* Clears under the lock and releases outside it. */
 	mutex_lock(&inode->i_lock);
 
+	/* Clears the upper only when it is still the one that was published. */
 	if (info->upper.p_mount == expected->p_mount &&
 	    info->upper.p_inode == expected->p_inode) {
 		removed = info->upper;
@@ -2427,7 +2670,9 @@ overlay_clear_upper_if(
 	path_release(&removed);
 }
 
-/* Finishes a materialization transaction, removing its directories on failure. */
+/*
+ * Finishes a materialization transaction, removing its directories on failure.
+ */
 static OVERLAY_HIGH int
 overlay_materialization_complete(
 	struct overlay_mount_state *state,
@@ -2465,13 +2710,15 @@ overlay_materialization_complete(
 			name.cn_nameptr = entry->name;
 			name.cn_namelen = strlen(entry->name);
 			name.cn_flags = COMPONENT_LAST;
-			one_error = inode_rmdir(entry->parent_upper.p_inode, &name);
+			one_error = inode_rmdir(entry->parent_upper.p_inode,
+			    &name);
 			if (one_error == 0)
 				overlay_clear_upper_if(entry->directory,
 				    &entry->created_upper);
 			if (cleanup_error == 0)
 				cleanup_error = one_error;
-			one_error = mount_sync_backend(entry->parent_upper.p_mount);
+			one_error = mount_sync_backend(
+				entry->parent_upper.p_mount);
 			if (cleanup_error == 0)
 				cleanup_error = one_error;
 		}
@@ -2517,6 +2764,7 @@ overlay_ensure_upper_dir_tracked(
 	struct componentname name;
 	char relative[ZEDBSD_PATH_MAX];
 	char parent_path[ZEDBSD_PATH_MAX];
+	struct overlay_inode_info *info;
 	int error;
 	int cleanup_error;
 	int sync_error;
@@ -2526,9 +2774,11 @@ overlay_ensure_upper_dir_tracked(
 	pending = NULL;
 	created_new = 0;
 
-	/* Rejects anything but an overlay directory. */
-	if (overlay_info(directory) == NULL || directory->i_type != INODE_DIR)
+	/* Rejects anything but a directory this driver made. */
+	info = overlay_info(directory);
+	if (info == NULL || directory->i_type != INODE_DIR)
 		return ENOTDIR;
+
 	state = directory->i_mount->m_data;
 	error = overlay_info_snapshot(directory, &upper, &lower, relative);
 	if (error != 0)
@@ -2564,6 +2814,7 @@ overlay_ensure_upper_dir_tracked(
 		error = inode_creation_request_preserve(source, &request);
 	}
 
+	/* Takes the parent's upper directory, which the new one is made in. */
 	path_init(&parent_upper);
 	if (error == 0)
 		error = overlay_path_snapshot(parent, OVERLAY_PATH_UPPER,
@@ -2578,6 +2829,7 @@ overlay_ensure_upper_dir_tracked(
 		}
 	}
 
+	/* Makes the directory, or takes the one that is already there. */
 	if (error == 0)
 		error = inode_mkdir(parent_upper.p_inode, &name,
 			&request, &created);
@@ -2633,7 +2885,8 @@ overlay_ensure_upper_dir_tracked(
 			 * live entry to publish even if the following
 			 * durability sync fails.
 			 */
-			cleanup_error = inode_rmdir(parent_upper.p_inode, &name);
+			cleanup_error = inode_rmdir(parent_upper.p_inode,
+			    &name);
 			if (cleanup_error != 0)
 				overlay_install_upper(directory, &created_path);
 			sync_error = mount_sync_backend(parent_upper.p_mount);
@@ -2649,6 +2902,7 @@ overlay_ensure_upper_dir_tracked(
 		inode_release(created);
 	}
 
+	/* Gives back everything this call took a reference to. */
 	path_release(&parent_upper);
 	inode_release(parent);
 out_paths:
@@ -2742,6 +2996,8 @@ overlay_copy_up_regular(
 	int final_removed;
 	int retain_materialization;
 	int entered_transaction;
+	int io_owned;
+	int transaction_owned;
 	unsigned attempts;
 	uint16_t number;
 	size_t wanted;
@@ -2771,15 +3027,24 @@ overlay_copy_up_regular(
 		return EROFS;
 	/*
 	 * Generic preparation has already committed the upper before taking
-	 * i_io_lock. Inner metadata/truncate calls must not reacquire namespace.
+	 * i_io_lock.  Inner metadata and truncate calls must not reacquire
+	 * namespace.
 	 * Callers without i_io still join the gate below: another namespace
 	 * operation may have published provisional ancestors pending rollback.
 	 */
-	if (mutex_owned(&inode->i_io_lock)) {
-		error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER, &upper);
+	io_owned = mutex_owned(&inode->i_io_lock);
+	if (io_owned) {
+		error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER,
+					      &upper);
 		if (error == 0)
 			path_release(&upper);
-		return error == ENOENT ? EDEADLK : error;
+
+		/* A caller inside i_io_lock could not wait for the copy-up. */
+		if (error == ENOENT)
+			return EDEADLK;
+
+		/* Reports what the snapshot found. */
+		return error;
 	}
 
 	path_init(&upper);
@@ -2793,7 +3058,8 @@ overlay_copy_up_regular(
 	 * or truncate may enter copy-up after path resolution, so join the
 	 * same gate here to exclude create/unlink/rename of the final name.
 	 */
-	if (!mutex_owned(inode->i_mount->m_vfs_transaction_lock)) {
+	transaction_owned = mutex_owned(inode->i_mount->m_vfs_transaction_lock);
+	if (!transaction_owned) {
 		mount_vfs_transaction_enter(inode->i_mount);
 		entered_transaction = 1;
 	}
@@ -2811,7 +3077,9 @@ overlay_copy_up_regular(
 		goto out;
 	}
 
-	/* The first waiter may have completed the copy while this caller slept. */
+	/*
+	 * The first waiter may have completed the copy while this caller slept.
+	 */
 	error = overlay_info_snapshot(inode, &upper, &lower, relative);
 	if (error != 0)
 		goto out;
@@ -2828,9 +3096,11 @@ overlay_copy_up_regular(
 	/* Materializes the parent and prepares a preserving creation. */
 	error = overlay_split_path(relative, parent_path, &final_name);
 	if (error == 0)
-		error = overlay_find_relative(inode->i_mount, parent_path, &parent);
+		error = overlay_find_relative(inode->i_mount, parent_path,
+		    &parent);
 	if (error == 0)
-		error = overlay_ensure_upper_dir_tracked(parent, &materialization);
+		error = overlay_ensure_upper_dir_tracked(parent,
+		    &materialization);
 	if (error == 0)
 		error = overlay_path_snapshot(parent, OVERLAY_PATH_UPPER,
 		    &parent_upper);
@@ -2882,6 +3152,7 @@ overlay_copy_up_regular(
 			break;
 		}
 
+		/* Writes the block just read into the upper copy. */
 		written = file_pwrite(destination, buffer, wanted, offset);
 		if (written != (ssize_t)wanted) {
 			if (written < 0)
@@ -2924,6 +3195,7 @@ overlay_copy_up_regular(
 			renamed = 1;
 	}
 
+	/* A copy that reached its final name is published once durable. */
 	if (renamed) {
 		error = mount_sync_backend(parent_upper.p_mount);
 		if (error == 0) {
@@ -2949,9 +3221,11 @@ overlay_copy_up_regular(
 				error = original_error;
 			} else {
 				if (!final_removed) {
-					path_set(&final_path, parent_upper.p_mount,
+					path_set(&final_path,
+					    parent_upper.p_mount,
 					    temp_inode);
-					overlay_install_upper(inode, &final_path);
+					overlay_install_upper(inode,
+					    &final_path);
 					retain_materialization = 1;
 				}
 
@@ -2983,10 +3257,11 @@ out:
 
 	/* Settles the materialized ancestors and releases everything. */
 	if (retain_materialization)
-		(void)overlay_materialization_complete(state, &materialization, 0);
+		(void)overlay_materialization_complete(state, &materialization,
+		    0);
 	else
-		error = overlay_materialization_complete(state, &materialization,
-		    error);
+		error = overlay_materialization_complete(state,
+		    &materialization, error);
 	if (temp_inode != NULL)
 		inode_release(temp_inode);
 	if (parent != NULL)
@@ -3010,7 +3285,10 @@ out:
 	return 0;
 }
 
-/* Rejects an upper or visible-lower collision before changing the upper namespace. */
+/*
+ * Rejects an upper or visible-lower collision before changing the upper
+ * namespace.
+ */
 static OVERLAY_HIGH int
 overlay_new_preflight(
 	struct inode *directory,
@@ -3023,9 +3301,11 @@ overlay_new_preflight(
 	struct path upper;
 	struct path lower;
 	struct inode *found;
+	struct overlay_inode_info *info;
 	char parent_path[ZEDBSD_PATH_MAX];
 	unsigned flags;
 	unsigned parent_flags;
+	int reserved;
 	int error;
 
 	state = directory->i_mount->m_data;
@@ -3037,7 +3317,10 @@ overlay_new_preflight(
 	 */
 	if (hidden_lower != NULL)
 		*hidden_lower = NULL;
-	if (overlay_info(directory) == NULL || directory->i_type != INODE_DIR)
+
+	/* Rejects anything but a directory this driver made. */
+	info = overlay_info(directory);
+	if (info == NULL || directory->i_type != INODE_DIR)
 		return ENOTDIR;
 	error = overlay_info_snapshot(directory, &upper, &lower, parent_path);
 	if (error != 0)
@@ -3047,7 +3330,9 @@ overlay_new_preflight(
 	error = overlay_component_text(name, text);
 	if (error != 0)
 		goto out;
-	if (overlay_reserved_name(text)) {
+	/* A name the overlay keeps for itself can never be created. */
+	reserved = overlay_reserved_name(text);
+	if (reserved) {
 		error = EINVAL;
 		goto out;
 	}
@@ -3068,10 +3353,13 @@ overlay_new_preflight(
 			goto out;
 	}
 
-	/* A visible lower object blocks the creation; a hidden one is reported. */
+	/*
+	 * A visible lower object blocks the creation; a hidden one is reported.
+	 */
 	flags = overlay_metadata_flags(state, relative);
 	parent_flags = overlay_metadata_flags(state, parent_path);
-	if (lower.p_inode == NULL || (parent_flags & OVERLAY_META_OPAQUE) != 0) {
+	if (lower.p_inode == NULL ||
+	    (parent_flags & OVERLAY_META_OPAQUE) != 0) {
 		error = 0;
 		goto out;
 	}
@@ -3082,6 +3370,7 @@ overlay_new_preflight(
 		goto out;
 	}
 
+	/* A name that exists may only be taken when a whiteout covers it. */
 	if (error != 0)
 		goto out;
 	if ((flags & OVERLAY_META_WHITEOUT) == 0) {
@@ -3121,6 +3410,7 @@ overlay_finish_new(
 {
 	struct overlay_mount_state *state;
 	struct path upper;
+	unsigned name_flags;
 	int error;
 	int cleanup_error;
 	int one_error;
@@ -3130,7 +3420,10 @@ overlay_finish_new(
 	cleanup_error = 0;
 	whiteout_removed = 0;
 
-	/* Makes the upper object durable and drops a whiteout that hid the name. */
+	/*
+	 * Makes the upper object durable and drops a whiteout that hid the
+	 * name.
+	 */
 	error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER, &upper);
 	if (error != 0) {
 		if (error == ENOENT)
@@ -3139,8 +3432,10 @@ overlay_finish_new(
 	}
 
 	error = mount_sync_backend(upper.p_mount);
-	if (error == 0 && (overlay_metadata_flags(state, relative) &
-	    OVERLAY_META_WHITEOUT) != 0) {
+
+	/* Creating the name again retires the whiteout that hid it. */
+	name_flags = overlay_metadata_flags(state, relative);
+	if (error == 0 && (name_flags & OVERLAY_META_WHITEOUT) != 0) {
 		error = overlay_journal_append(state,
 		    OVERLAY_OP_REMOVE_WHITEOUT, relative);
 		if (error == 0)
@@ -3169,6 +3464,7 @@ overlay_finish_new(
 			cleanup_error = one_error;
 	}
 
+	/* Takes the half-made object back out of the upper layer. */
 	if (directory_object)
 		one_error = inode_rmdir(upper.p_inode, name);
 	else
@@ -3182,6 +3478,7 @@ overlay_finish_new(
 			cleanup_error = one_error;
 	}
 
+	/* A rollback that could not be made durable stops all writing. */
 	one_error = mount_sync_backend(upper.p_mount);
 	if (cleanup_error == 0)
 		cleanup_error = one_error;
@@ -3237,7 +3534,8 @@ overlay_create(
 		error = overlay_ensure_upper_dir_tracked(directory,
 		    &materialization);
 	if (error == 0)
-		error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER, &upper);
+		error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER,
+		    &upper);
 	if (error == 0)
 		error = inode_create(upper.p_inode, name, request, &created);
 	if (error == 0)
@@ -3248,7 +3546,8 @@ overlay_create(
 		    result);
 
 	/* Reports the failure. */
-	error = overlay_materialization_complete(state, &materialization, error);
+	error = overlay_materialization_complete(state, &materialization,
+	    error);
 	if (error != 0)
 		return error;
 
@@ -3256,7 +3555,9 @@ overlay_create(
 	return 0;
 }
 
-/* Creates a directory in the upper layer, opaque over a whited-out lower one. */
+/*
+ * Creates a directory in the upper layer, opaque over a whited-out lower one.
+ */
 static OVERLAY_HIGH int
 overlay_mkdir(
 	struct inode *directory,
@@ -3303,13 +3604,16 @@ overlay_mkdir(
 	if (error != 0)
 		goto out;
 
-	/* A directory replacing a whited-out lower one must not merge with it. */
+	/*
+	 * A directory replacing a whited-out lower one must not merge with it.
+	 */
 	metadata_flags = overlay_metadata_flags(state, relative);
 	if (lower != NULL &&
 	    lower->i_type == INODE_DIR &&
 	    (metadata_flags & OVERLAY_META_WHITEOUT) != 0 &&
 	    (metadata_flags & OVERLAY_META_OPAQUE) == 0) {
-		error = overlay_journal_append(state, OVERLAY_OP_SET_OPAQUE, relative);
+		error = overlay_journal_append(state, OVERLAY_OP_SET_OPAQUE,
+		    relative);
 		if (error != 0)
 			goto out;
 		opaque_added = 1;
@@ -3342,7 +3646,8 @@ out:
 	path_release(&upper);
 
 	/* Reports the failure. */
-	error = overlay_materialization_complete(state, &materialization, error);
+	error = overlay_materialization_complete(state, &materialization,
+	    error);
 	if (error != 0)
 		return error;
 
@@ -3350,7 +3655,9 @@ out:
 	return 0;
 }
 
-/* Detaches a special endpoint from an inode when it is still the expected one. */
+/*
+ * Detaches a special endpoint from an inode when it is still the expected one.
+ */
 static OVERLAY_HIGH void
 overlay_special_clear(
 	struct inode *inode,
@@ -3366,7 +3673,9 @@ overlay_special_clear(
 	mutex_unlock(&inode->i_lock);
 }
 
-/* Moves a special endpoint from one inode to another, restoring it on failure. */
+/*
+ * Moves a special endpoint from one inode to another, restoring it on failure.
+ */
 static OVERLAY_HIGH int
 overlay_special_transfer(
 	struct inode *source,
@@ -3400,6 +3709,7 @@ overlay_special_transfer(
 
 	mutex_unlock(&destination->i_lock);
 
+	/* A transfer that failed gives the object back to its source. */
 	if (error != 0) {
 		mutex_lock(&source->i_lock);
 		if (source->i_special == NULL)
@@ -3415,7 +3725,10 @@ overlay_special_transfer(
 	return 0;
 }
 
-/* Builds a pathname socket under a reserved temporary name and renames it into place. */
+/*
+ * Builds a pathname socket under a reserved temporary name and renames it into
+ * place.
+ */
 static OVERLAY_HIGH int
 overlay_mknod_socket(
 	struct inode *directory,
@@ -3518,6 +3831,7 @@ out:
 		}
 	}
 
+	/* Gives back everything this call took a reference to. */
 	if (prepared != NULL)
 		inode_release(prepared);
 	if (created != NULL) {
@@ -3580,12 +3894,15 @@ overlay_mknod(
 		error = overlay_ensure_upper_dir_tracked(directory,
 		    &materialization);
 
-	/* A socket binds its endpoint first; anything else is created in place. */
+	/*
+	 * A socket binds its endpoint first; anything else is created in place.
+	 */
 	if (error == 0 && request->type == INODE_SOCKET)
 		error = overlay_mknod_socket(directory, name, request, relative,
 		    result);
 	else if (error == 0)
-		error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER, &upper);
+		error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER,
+		    &upper);
 	if (error == 0 && request->type != INODE_SOCKET)
 		error = inode_mknod(upper.p_inode, name, request, &created);
 	path_release(&upper);
@@ -3596,7 +3913,8 @@ overlay_mknod(
 	}
 
 	/* Reports the failure. */
-	error = overlay_materialization_complete(state, &materialization, error);
+	error = overlay_materialization_complete(state, &materialization,
+	    error);
 	if (error != 0)
 		return error;
 
@@ -3626,7 +3944,9 @@ overlay_symlink(
 	materialization.count = 0U;
 	created = NULL;
 
-	/* Rejects anything but a symbolic link request on a writable overlay. */
+	/*
+	 * Rejects anything but a symbolic link request on a writable overlay.
+	 */
 	if (target == NULL ||
 	    request == NULL ||
 	    request->type != INODE_SYMLINK ||
@@ -3643,7 +3963,8 @@ overlay_symlink(
 		error = overlay_ensure_upper_dir_tracked(directory,
 		    &materialization);
 	if (error == 0)
-		error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER, &upper);
+		error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER,
+		    &upper);
 	if (error == 0)
 		error = inode_symlink(upper.p_inode, name, target, request,
 		    &created);
@@ -3655,7 +3976,8 @@ overlay_symlink(
 	}
 
 	/* Reports the failure. */
-	error = overlay_materialization_complete(state, &materialization, error);
+	error = overlay_materialization_complete(state, &materialization,
+	    error);
 	if (error != 0)
 		return error;
 
@@ -3695,10 +4017,12 @@ overlay_path_is_below(
 	const char *root)
 {
 	size_t length;
+	int difference;
 
 	/* Requires the path to start at the root. */
 	length = strlen(root);
-	if (strncmp(path, root, length) != 0)
+	difference = strncmp(path, root, length);
+	if (difference != 0)
 		return 0;
 
 	/* Requires the match to end on a component boundary. */
@@ -3707,7 +4031,9 @@ overlay_path_is_below(
 	return 1;
 }
 
-/* Checks that moving a subtree keeps every identity path in bounds and unique. */
+/*
+ * Checks that moving a subtree keeps every identity path in bounds and unique.
+ */
 static OVERLAY_HIGH int
 overlay_repath_preflight(
 	struct overlay_mount_state *state,
@@ -3721,28 +4047,68 @@ overlay_repath_preflight(
 	size_t new_length;
 	char candidate[ZEDBSD_PATH_MAX];
 	const char *suffix;
+	const struct overlay_inode_info *replaced_info;
+	size_t suffix_length;
+	int difference;
+	int below;
 
 	old_length = strlen(old_path);
 	new_length = strlen(new_path);
 
-	/* Every active identity below the old path must fit under the new one. */
+	/*
+	 * Every active identity below the old path must fit under the new one.
+	 */
 	for (i = 0; i < OVERLAY_IDENTITY_MAX; i++) {
-		if (state->identities[i].state != OVERLAY_ID_ACTIVE ||
-		    !overlay_path_is_below(state->identities[i].path, old_path))
+		/* Only a live identity inside the subtree is being moved. */
+		if (state->identities[i].state != OVERLAY_ID_ACTIVE)
 			continue;
+
+		below = overlay_path_is_below(state->identities[i].path,
+					      old_path);
+		if (!below)
+			continue;
+
+		/* What the identity's path holds past the subtree root. */
 		suffix = state->identities[i].path + old_length;
-		if (new_length + strlen(suffix) >= sizeof(candidate))
+
+		/*
+		 * The rewritten path has to fit in the buffer it is built in.
+		 */
+		suffix_length = strlen(suffix);
+		if (new_length + suffix_length >= sizeof(candidate))
 			return ENAMETOOLONG;
 
-		/* The rewritten path may only collide with the replaced object. */
+		/*
+		 * The rewritten path may only collide with the replaced object.
+		 */
 		strcpy(candidate, new_path);
 		strcat(candidate, suffix);
 		for (j = 0; j < OVERLAY_IDENTITY_MAX; j++) {
-			if (state->identities[j].state != OVERLAY_ID_ACTIVE ||
-			    overlay_path_is_below(state->identities[j].path, old_path) ||
-			    strcmp(state->identities[j].path, candidate))
+			/* A slot that names nothing cannot be collided with. */
+			if (state->identities[j].state != OVERLAY_ID_ACTIVE)
 				continue;
-			if (replaced == NULL || overlay_info(replaced)->identity_index != j)
+
+			/* Nor can one that is itself being moved. */
+			below = overlay_path_is_below(
+				state->identities[j].path, old_path);
+			if (below)
+				continue;
+
+			/* Only an identity of the same path is a collision. */
+			difference = strcmp(state->identities[j].path,
+					    candidate);
+			if (difference != 0)
+				continue;
+
+			/*
+			 * A collision is allowed only with the object this
+			 * rename replaces, which is about to go away.
+			 */
+			if (replaced == NULL)
+				return EEXIST;
+
+			replaced_info = overlay_info(replaced);
+			if (replaced_info->identity_index != j)
 				return EEXIST;
 		}
 	}
@@ -3763,14 +4129,21 @@ overlay_repath_commit(
 	char updated[ZEDBSD_PATH_MAX];
 	struct overlay_inode_info *info;
 	struct inode *inode;
+	int below;
 
 	old_length = strlen(old_path);
 
 	/* Rewrites the identity table. */
 	for (i = 0; i < OVERLAY_IDENTITY_MAX; i++) {
-		if (state->identities[i].state != OVERLAY_ID_ACTIVE ||
-		    !overlay_path_is_below(state->identities[i].path, old_path))
+		/* Only a live identity inside the subtree is being moved. */
+		if (state->identities[i].state != OVERLAY_ID_ACTIVE)
 			continue;
+
+		below = overlay_path_is_below(state->identities[i].path,
+					      old_path);
+		if (!below)
+			continue;
+
 		strcpy(updated, new_path);
 		strcat(updated, state->identities[i].path + old_length);
 		strcpy(state->identities[i].path, updated);
@@ -3784,7 +4157,10 @@ overlay_repath_commit(
 		inode = &overlay_inodes[i].inode;
 		info = &overlay_inodes[i].info;
 		mutex_lock(&inode->i_lock);
-		if (overlay_path_is_below(info->path, old_path)) {
+
+		/* Only an inode inside the subtree has its path rewritten. */
+		below = overlay_path_is_below(info->path, old_path);
+		if (below) {
 			strcpy(updated, new_path);
 			strcat(updated, info->path + old_length);
 			strcpy(info->path, updated);
@@ -3819,6 +4195,9 @@ overlay_rename(
 	char new_parent_path[ZEDBSD_PATH_MAX];
 	char old_relative[ZEDBSD_PATH_MAX];
 	char new_relative[ZEDBSD_PATH_MAX];
+	unsigned name_flags;
+	int old_reserved;
+	int new_reserved;
 	int error;
 	unsigned identity;
 
@@ -3842,11 +4221,15 @@ overlay_rename(
 		error = overlay_component_text(new_name, new_text);
 	if (error != 0)
 		return error;
-	if (overlay_reserved_name(old_text) || overlay_reserved_name(new_text))
+	/* A name the overlay keeps for itself is neither end of a rename. */
+	old_reserved = overlay_reserved_name(old_text);
+	new_reserved = overlay_reserved_name(new_text);
+	if (old_reserved || new_reserved)
 		return EINVAL;
 
 	/* Resolves the source and any target through the merged view. */
-	error = overlay_info_snapshot(old_directory, NULL, &old_parent_lower, old_parent_path);
+	error = overlay_info_snapshot(old_directory, NULL, &old_parent_lower,
+	    old_parent_path);
 	if (error == 0)
 		error = overlay_info_snapshot(new_directory, NULL, NULL,
 		    new_parent_path);
@@ -3859,7 +4242,8 @@ overlay_rename(
 	if (error != 0)
 		goto out;
 	source_info = overlay_info(source);
-	error = overlay_info_snapshot(source, &source_upper, &source_lower, NULL);
+	error = overlay_info_snapshot(source, &source_upper, &source_lower,
+	    NULL);
 	if (error != 0)
 		goto out;
 	/*
@@ -3867,7 +4251,8 @@ overlay_rename(
 	 * still whiteout the old backing name, just like unlink.
 	 */
 	if (source_lower.p_inode == NULL && old_parent_lower.p_inode != NULL) {
-		error = overlay_lookup_real(&old_parent_lower, old_name, &source_lower);
+		error = overlay_lookup_real(&old_parent_lower, old_name,
+		    &source_lower);
 		if (error != 0 && error != ENOENT)
 			goto out;
 	}
@@ -3880,7 +4265,8 @@ overlay_rename(
 
 	/* A directory must be upper-only; a regular file is copied up. */
 	if (source->i_type == INODE_DIR) {
-		if (source_upper.p_inode == NULL || source_lower.p_inode != NULL) {
+		if (source_upper.p_inode == NULL ||
+		    source_lower.p_inode != NULL) {
 			error = EXDEV;
 			goto out;
 		}
@@ -3896,6 +4282,7 @@ overlay_rename(
 				goto out;
 		}
 
+		/* Every identity under the subtree has to survive the move. */
 		error = overlay_repath_preflight(state, old_relative,
 			new_relative, target);
 		if (error != 0)
@@ -3909,8 +4296,8 @@ overlay_rename(
 			goto out;
 		path_release(&source_upper);
 		path_release(&source_lower);
-		error = overlay_info_snapshot(source, &source_upper, &source_lower,
-		    NULL);
+		error = overlay_info_snapshot(source, &source_upper,
+		    &source_lower, NULL);
 		if (error != 0)
 			goto out;
 	}
@@ -3954,7 +4341,9 @@ overlay_rename(
 	overlay_publish_upper(source, &new_upper_path, 1, new_relative);
 	if (target != NULL && target != source)
 		overlay_retire_inode(target);
-	/* Reject delayed pre-rename lookups even when the following sync fails. */
+	/*
+	 * Reject delayed pre-rename lookups even when the following sync fails.
+	 */
 	inode_dir_changed(old_directory);
 	if (new_directory != old_directory)
 		inode_dir_changed(new_directory);
@@ -3967,14 +4356,16 @@ overlay_rename(
 	error = mount_sync_backend(new_parent_upper.p_mount);
 	if (error != 0)
 		goto out;
-	if ((overlay_metadata_flags(state, new_relative) &
-	    OVERLAY_META_WHITEOUT) != 0) {
+	/* Renaming onto the name retires the whiteout that hid it. */
+	name_flags = overlay_metadata_flags(state, new_relative);
+	if ((name_flags & OVERLAY_META_WHITEOUT) != 0) {
 		error = overlay_journal_append(state,
 			OVERLAY_OP_REMOVE_WHITEOUT, new_relative);
 		if (error != 0)
 			goto out;
 	}
 
+	/* Gives back everything this call took a reference to. */
 	error = 0;
 out:
 	if (target != NULL)
@@ -4008,7 +4399,8 @@ overlay_retire_inode(
 	info = overlay_info(inode);
 
 	if (info->identity_index < OVERLAY_IDENTITY_MAX)
-		state->identities[info->identity_index].state = OVERLAY_ID_RETIRED;
+		state->identities[info->identity_index].state =
+			OVERLAY_ID_RETIRED;
 	inode->i_flags |= INODE_DEAD;
 }
 
@@ -4041,7 +4433,9 @@ overlay_directory_empty(
 	return ENOTEMPTY;
 }
 
-/* Removes a name from the merged view, hiding a lower object with a whiteout. */
+/*
+ * Removes a name from the merged view, hiding a lower object with a whiteout.
+ */
 static OVERLAY_HIGH int
 overlay_remove(
 	struct inode *directory,
@@ -4057,6 +4451,7 @@ overlay_remove(
 	char text[NAME_MAX + 1U];
 	char parent_path[ZEDBSD_PATH_MAX];
 	char relative[ZEDBSD_PATH_MAX];
+	int reserved;
 	int error;
 
 	state = directory->i_mount->m_data;
@@ -4071,7 +4466,9 @@ overlay_remove(
 	error = overlay_component_text(name, text);
 	if (error != 0)
 		return error;
-	if (overlay_reserved_name(text))
+	/* A name the overlay keeps for itself is never the caller's. */
+	reserved = overlay_reserved_name(text);
+	if (reserved)
 		return EINVAL;
 
 	/* Resolves the object through the merged view. */
@@ -4087,11 +4484,14 @@ overlay_remove(
 		return error;
 	}
 
-	error = overlay_info_snapshot(target, &target_upper, &target_lower, NULL);
+	error = overlay_info_snapshot(target, &target_upper, &target_lower,
+	    NULL);
 	if (error != 0)
 		goto out;
 
-	/* The object must match the requested kind; a directory must be empty. */
+	/*
+	 * The object must match the requested kind; a directory must be empty.
+	 */
 	if ((target->i_type == INODE_DIR) != removing_directory) {
 		if (removing_directory)
 			error = ENOTDIR;
@@ -4116,6 +4516,7 @@ overlay_remove(
 			goto out;
 	}
 
+	/* A lower object cannot be deleted, only covered by a whiteout. */
 	if (target_lower.p_inode != NULL) {
 		error = overlay_journal_append(state,
 			OVERLAY_OP_ADD_WHITEOUT, relative);
@@ -4123,6 +4524,7 @@ overlay_remove(
 			goto out;
 	}
 
+	/* An upper object is removed from the upper layer itself. */
 	if (target_upper.p_inode != NULL) {
 		if (removing_directory)
 			error = inode_rmdir(parent_upper.p_inode, name);
@@ -4134,12 +4536,16 @@ overlay_remove(
 
 	/*
 	 * Removal is committed in the live namespace even if durability fails.
-	 * Publish invalidation before sync; generic callers only do it on success.
+	 * Publish invalidation before sync; generic callers only do it on
+	 * success.
 	 */
 	inode_dir_changed(directory);
 	namecache_remove(directory, name);
 	overlay_retire_inode(target);
-	error = target_upper.p_inode != NULL ? mount_sync_backend(parent_upper.p_mount) : 0;
+	/* Only a removal that reached the upper layer must be made durable. */
+	error = 0;
+	if (target_upper.p_inode != NULL)
+		error = mount_sync_backend(parent_upper.p_mount);
 out:
 	path_release(&parent_lower);
 	inode_release(target);
@@ -4199,10 +4605,14 @@ overlay_truncate_upper(
 	struct path upper;
 	struct inode_truncate_request inner_request;
 	struct inode_truncate_result inner_result;
+	struct overlay_inode_info *info;
 	int error;
 
-	if (request == NULL || result == NULL || overlay_info(inode) == NULL)
+	/* An inode this driver did not make cannot be truncated through it. */
+	info = overlay_info(inode);
+	if (request == NULL || result == NULL || info == NULL)
 		return EINVAL;
+
 	result->actual_size = inode->i_size;
 	result->limit_exceeded = 0;
 
@@ -4329,7 +4739,8 @@ overlay_setattr(
 
 	/* Applies the change and makes it durable. */
 	if (error == 0)
-		error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER, &upper);
+		error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER,
+		    &upper);
 	if (error == 0)
 		error = inode_setattr(upper.p_inode, status, mask);
 	if (error == 0) {
@@ -4380,14 +4791,20 @@ overlay_regular_open(
 	struct file *file)
 {
 	struct overlay_file_info *info;
+	struct overlay_inode_info *inode_info;
 	struct path visible;
+	int status_flags;
 	int error;
 	int real_flags;
 
-	/* A writable open copies a lower file up first. */
-	if (overlay_info(file->f_inode) == NULL)
+	/* A file this driver did not make cannot be opened through it. */
+	inode_info = overlay_info(file->f_inode);
+	if (inode_info == NULL)
 		return EIO;
-	if ((file_status_flags_get(file) & O_ACCMODE) != O_RDONLY) {
+
+	/* A writable open copies a lower file up first. */
+	status_flags = file_status_flags_get(file);
+	if ((status_flags & O_ACCMODE) != O_RDONLY) {
 		error = overlay_copy_up_regular(file->f_inode);
 		if (error != 0)
 			return error;
@@ -4408,7 +4825,9 @@ overlay_regular_open(
 		return ENOMEM;
 	}
 
-	real_flags = file_status_flags_get(file) & ~(O_CREAT | O_EXCL | O_TRUNC);
+	/* The real file takes the flags the caller opened this one with. */
+	real_flags = file_status_flags_get(file);
+	real_flags &= ~(O_CREAT | O_EXCL | O_TRUNC);
 	error = file_open_resolved(&visible, real_flags, &info->real);
 	path_release(&visible);
 	if (error != 0) {
@@ -4509,7 +4928,9 @@ overlay_pwrite(
 	return count;
 }
 
-/* Writes at an offset to the upper copy with the caller's flags and credential. */
+/*
+ * Writes at an offset to the upper copy with the caller's flags and credential.
+ */
 static OVERLAY_HIGH ssize_t
 overlay_pwrite_internal(
 	struct file *file,
@@ -4536,7 +4957,9 @@ overlay_pwrite_internal(
 }
 
 #ifdef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
-/* Exercises the real stacking callback without exposing overlay-private state. */
+/*
+ * Exercises the real stacking callback without exposing overlay-private state.
+ */
 static int
 overlay_host_truncate_limited(
 	struct inode *inode,
@@ -4564,8 +4987,11 @@ overlay_write(
 {
 	off_t offset;
 	ssize_t count;
+	int status_flags;
 
-	if ((file_status_flags_get(file) & O_APPEND) != 0)
+	/* An appending write always starts at the current end of the file. */
+	status_flags = file_status_flags_get(file);
+	if ((status_flags & O_APPEND) != 0)
 		offset = file->f_inode->i_size;
 	else
 		offset = file->f_offset;
@@ -4664,6 +5090,7 @@ overlay_dir_open_phase(
 	struct path *upper_argument;
 	struct path *lower_argument;
 	char relative[ZEDBSD_PATH_MAX];
+	unsigned directory_flags;
 	int error;
 
 	/* Takes the layer path of the current phase. */
@@ -4681,9 +5108,10 @@ overlay_dir_open_phase(
 		return error;
 
 	/* The lower phase is skipped below an opaque directory. */
+	directory_flags = overlay_metadata_flags(
+		file->f_inode->i_mount->m_data, relative);
 	if (cursor->phase == OVERLAY_DIR_LOWER &&
-	    (overlay_metadata_flags(file->f_inode->i_mount->m_data,
-	     relative) & OVERLAY_META_OPAQUE) != 0)
+	    (directory_flags & OVERLAY_META_OPAQUE) != 0)
 		error = ENOENT;
 	else if (path.p_inode == NULL || path.p_inode->i_type != INODE_DIR)
 		error = ENOENT;
@@ -4711,7 +5139,10 @@ overlay_dir_upper_has(
 	struct inode *found;
 	int error;
 
-	/* A directory without an upper layer has nothing; a failure hides the name. */
+	/*
+	 * A directory without an upper layer has nothing; a failure hides the
+	 * name.
+	 */
 	error = overlay_path_snapshot(directory, OVERLAY_PATH_UPPER, &upper);
 	if (error == ENOENT)
 		return 0;
@@ -4740,11 +5171,15 @@ overlay_dir_child_hidden(
 	char parent[ZEDBSD_PATH_MAX];
 	char relative[ZEDBSD_PATH_MAX];
 	unsigned flags;
+	int error;
 
 	/* Treats a name it cannot resolve as hidden. */
-	if (overlay_info_snapshot(directory, NULL, NULL, parent) != 0)
+	error = overlay_info_snapshot(directory, NULL, NULL, parent);
+	if (error != 0)
 		return 1;
-	if (overlay_join(parent, name, relative) != 0)
+
+	error = overlay_join(parent, name, relative);
+	if (error != 0)
 		return 1;
 
 	/* Hides a name the upper layer marks as a whiteout. */
@@ -4791,16 +5226,25 @@ overlay_readdir(
 	int *eof)
 {
 	struct overlay_dir_cursor *cursor;
+	struct overlay_inode_info *info;
 	struct dirent real_entry;
 	int real_eof;
+	int dot;
+	int dotdot;
+	int reserved;
+	int shadowed;
 	int error;
 
 	cursor = file->f_data;
 
-	if (cursor == NULL || overlay_info(file->f_inode) == NULL)
+	/* A directory this driver did not make cannot be read through it. */
+	info = overlay_info(file->f_inode);
+	if (cursor == NULL || info == NULL)
 		return EIO;
 
-	/* Walks the upper listing, then the lower one, skipping hidden names. */
+	/*
+	 * Walks the upper listing, then the lower one, skipping hidden names.
+	 */
 	while (cursor->phase != OVERLAY_DIR_DONE) {
 		real_eof = 0;
 		if (cursor->active == NULL) {
@@ -4814,6 +5258,7 @@ overlay_readdir(
 				return error;
 		}
 
+		/* Reads the next name of the layer this phase is walking. */
 		error = file_readdir(cursor->active, &real_entry, &real_eof);
 		if (error != 0)
 			return error;
@@ -4823,16 +5268,33 @@ overlay_readdir(
 			continue;
 		}
 
-		/* Dot entries, reserved names, and shadowed lower names are skipped. */
-		if (!strcmp(real_entry.d_name, ".") ||
-		    !strcmp(real_entry.d_name, ".."))
+		/*
+		 * Dot entries, reserved names, and shadowed lower names are
+		 * skipped.
+		 */
+		dot = strcmp(real_entry.d_name, ".");
+		dotdot = strcmp(real_entry.d_name, "..");
+		if (dot == 0 || dotdot == 0)
 			continue;
-		if (overlay_reserved_name(real_entry.d_name))
+
+		/* A name the overlay keeps for itself is not the caller's. */
+		reserved = overlay_reserved_name(real_entry.d_name);
+		if (reserved)
 			continue;
-		if (cursor->phase == OVERLAY_DIR_LOWER &&
-		    (overlay_dir_upper_has(file->f_inode, real_entry.d_name) ||
-		     overlay_dir_child_hidden(file->f_inode, real_entry.d_name)))
-			continue;
+
+		/*
+		 * A lower name the upper layer also holds, or one a whiteout
+		 * covers, is not visible through the merged view.
+		 */
+		if (cursor->phase == OVERLAY_DIR_LOWER) {
+			shadowed = overlay_dir_upper_has(file->f_inode,
+							 real_entry.d_name);
+			if (!shadowed)
+				shadowed = overlay_dir_child_hidden(
+					file->f_inode, real_entry.d_name);
+			if (shadowed)
+				continue;
+		}
 		error = overlay_dir_emit(file, real_entry.d_name, entry);
 		if (error != 0)
 			return error;
@@ -4890,6 +5352,7 @@ overlay_directory_fsync(
 	struct file *file)
 {
 	struct overlay_mount_state *state;
+	struct overlay_inode_info *info;
 	struct path upper_path;
 	struct file *upper;
 	int error;
@@ -4901,7 +5364,10 @@ overlay_directory_fsync(
 	if (file == NULL || file->f_inode == NULL)
 		return EINVAL;
 	state = file->f_inode->i_mount->m_data;
-	if (state == NULL || overlay_info(file->f_inode) == NULL)
+
+	/* A file this driver did not make cannot be synced through it. */
+	info = overlay_info(file->f_inode);
+	if (state == NULL || info == NULL)
 		return EIO;
 	if (state->flags == OVERLAY_READ_ONLY)
 		return 0;
@@ -4941,7 +5407,10 @@ overlay_directory_fsync(
 	return 0;
 }
 
-/* Deletes stale temporaries below an upper directory, bounded in depth and work. */
+/*
+ * Deletes stale temporaries below an upper directory, bounded in depth and
+ * work.
+ */
 static OVERLAY_HIGH int
 overlay_cleanup_temps(
 	struct path *directory,
@@ -4954,15 +5423,21 @@ overlay_cleanup_temps(
 	struct path child_path;
 	struct file *file;
 	struct dirent entry;
+	int temporary;
+	int dot;
+	int dotdot;
 	int eof;
 	int error;
 
 	if (depth > 16U)
 		return ELOOP;
 
-	/* Deletion can change FAT directory offsets.  Delete one and restart. */
+	/*
+	 * Deletion can change FAT directory offsets.  Delete one and restart.
+	 */
 	for (;;) {
-		error = file_open_resolved(directory, O_RDONLY | O_DIRECTORY, &file);
+		error = file_open_resolved(directory, O_RDONLY | O_DIRECTORY,
+		    &file);
 		if (error != 0)
 			return error;
 		eof = 0;
@@ -4970,12 +5445,15 @@ overlay_cleanup_temps(
 			error = file_readdir(file, &entry, &eof);
 			if (error != 0 || eof)
 				break;
-			if (!overlay_temporary_name(entry.d_name))
+			/* Only the overlay's own leftovers are cleaned up. */
+			temporary = overlay_temporary_name(entry.d_name);
+			if (!temporary)
 				continue;
 			component.cn_nameptr = entry.d_name;
 			component.cn_namelen = strlen(entry.d_name);
 			component.cn_flags = COMPONENT_LAST;
-			error = inode_lookup(directory->p_inode, &component, &child);
+			error = inode_lookup(directory->p_inode, &component,
+			    &child);
 			if (error != 0)
 				break;
 			if (child->i_type == INODE_DIR) {
@@ -4985,6 +5463,8 @@ overlay_cleanup_temps(
 			}
 
 			inode_release(child);
+
+			/* One pass deletes only so many names. */
 			(*deleted)++;
 			if (*deleted > 256U) {
 				error = EOVERFLOW;
@@ -4995,6 +5475,7 @@ overlay_cleanup_temps(
 			break;
 		}
 
+		/* The listing is reopened after every deletion it makes. */
 		(void)file_close(file);
 		if (error != 0)
 			return error;
@@ -5011,14 +5492,18 @@ overlay_cleanup_temps(
 		error = file_readdir(file, &entry, &eof);
 		if (error != 0 || eof)
 			break;
-		if (!strcmp(entry.d_name, ".") || !strcmp(entry.d_name, ".."))
+		dot = strcmp(entry.d_name, ".");
+		dotdot = strcmp(entry.d_name, "..");
+		if (dot == 0 || dotdot == 0)
 			continue;
+
 		(*visited)++;
 		if (*visited > 512U) {
 			error = EOVERFLOW;
 			break;
 		}
 
+		/* Descends into every child directory of this one. */
 		component.cn_nameptr = entry.d_name;
 		component.cn_namelen = strlen(entry.d_name);
 		component.cn_flags = 0;
@@ -5061,6 +5546,7 @@ overlay_mount_impl(
 	struct inode *root;
 	unsigned visited;
 	unsigned deleted;
+	int supported;
 	int error;
 
 	args = mountp->m_data;
@@ -5093,7 +5579,8 @@ overlay_mount_impl(
 	 * unsupported topology explicitly rather than silently exposing
 	 * stale metadata or an ABBA deadlock.
 	 */
-	if (!overlay_layers_supported(args))
+	supported = overlay_layers_supported(args);
+	if (!supported)
 		return EOPNOTSUPP;
 
 	/* Records the layers with the root identity and loads the journal. */
@@ -5116,7 +5603,8 @@ overlay_mount_impl(
 		goto fail_state;
 
 	/* Removes temporaries left by an interrupted copy-up. */
-	error = overlay_cleanup_temps(&state->upper_root, 0, &visited, &deleted);
+	error = overlay_cleanup_temps(&state->upper_root, 0, &visited,
+	    &deleted);
 	if (error == 0 && deleted != 0)
 		error = mount_sync_backend(state->upper_root.p_mount);
 	if (error != 0)
@@ -5188,7 +5676,8 @@ overlay_statvfs(
 	else
 		state = NULL;
 
-	if (state == NULL || result == NULL || state->upper_root.p_mount == NULL)
+	if (state == NULL || result == NULL ||
+	    state->upper_root.p_mount == NULL)
 		return EINVAL;
 
 	/* Reports the failure. */
@@ -5236,20 +5725,30 @@ overlay_prepare_mutation(
 {
 	struct overlay_mount_state *state = inode->i_mount->m_data;
 	struct path upper;
+	int io_owned;
 	int error, entered;
 
 	if (state->flags != OVERLAY_READ_WRITE)
 		return EROFS;
 	/*
 	 * An already-owned I/O domain implies an outer preparation. Otherwise
-	 * join even for an existing upper: it may belong to an in-flight ancestor
-	 * materialization which can still roll back while holding namespace.
+	 * join even for an existing upper: it may belong to an in-flight
+	 * ancestor materialization which can still roll back while holding
+	 * namespace.
 	 */
-	if (mutex_owned(&inode->i_io_lock)) {
-		error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER, &upper);
+	io_owned = mutex_owned(&inode->i_io_lock);
+	if (io_owned) {
+		error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER,
+					      &upper);
 		if (error == 0)
 			path_release(&upper);
-		return error == ENOENT ? EDEADLK : error;
+
+		/* A caller inside i_io_lock could not wait for the copy-up. */
+		if (error == ENOENT)
+			return EDEADLK;
+
+		/* Reports what the snapshot found. */
+		return error;
 	}
 
 	entered = mount_vfs_transaction_join(inode->i_mount);
@@ -5258,6 +5757,7 @@ overlay_prepare_mutation(
 		goto out;
 	}
 
+	/* An object that has no upper copy yet is materialized here. */
 	error = overlay_path_snapshot(inode, OVERLAY_PATH_UPPER, &upper);
 	if (error == 0) {
 		path_release(&upper);

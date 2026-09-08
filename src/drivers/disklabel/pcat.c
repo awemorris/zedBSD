@@ -1,9 +1,14 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
 /*
  * PC/AT per-disk GPT versus legacy MBR selection.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
  */
+
 #include <drivers/disklabel.h>
 
 #include <errno.h>

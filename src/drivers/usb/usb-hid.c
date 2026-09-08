@@ -1,11 +1,27 @@
-/* -*- mode: c; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 
-/* Begin consolidated hid-report.c. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
-#include "drivers/hid/hid-report.h"
+/*
+ * USB Human Interface Device input driver
+ */
 
-#include "kern/kmem.h"
+#include <drivers/hid/hid-report.h>
+#include <drivers/usb-hid.h>
+#include <drivers/usb.h>
+#include <hal/hal.h>
+#include <kern/input-device.h>
+#include <kern/lock.h>
+#include <kern/sched.h>
+#include <kern/thread.h>
+#include <kern/kmem.h>
 
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 #include <errno.h>
 #include <string.h>
 
@@ -55,6 +71,21 @@
 #define HID_LAYOUT_PROFILE_DESCRIPTOR 0U
 #define HID_LAYOUT_PROFILE_BOOT_KEYBOARD 1U
 #define HID_LAYOUT_PROFILE_BOOT_MOUSE 2U
+
+#define USB_HID_CLASS 0x03U
+#define USB_HID_DESCRIPTOR 0x21U
+#define USB_HID_REPORT_DESCRIPTOR 0x22U
+#define USB_REQUEST_GET_DESCRIPTOR 0x06U
+#define USB_HID_REQUEST_SET_PROTOCOL 0x0bU
+#define USB_HID_PROTOCOL_REPORT 1U
+#define USB_HID_CONTROL_TIMEOUT_MS 1000U
+#define USB_HID_DRAIN_TIMEOUT_MS 5000U
+
+/* drv_input_device_register() accepts at most 63 bytes plus NUL. */
+#define USB_HID_TEXT_MAX 64U
+#define USB_HID_ERROR_MARKERS 16U
+#define USB_HID_WORK_ARM (1U << 0)
+#define USB_HID_WORK_COMPLETE (1U << 1)
 
 struct hid_report_field {
 	uint32_t bit_offset;
@@ -127,10 +158,1326 @@ struct hid_parser {
 	int supported_field_seen;
 };
 
-/* Supports the item unsigned operation. */
-static uint32_t item_unsigned(const uint8_t *data, size_t size);
+struct usb_hid_report_state {
+	uint8_t id;
+	unsigned long held[INPUT_BIT_WORDS(KEY_MAX)];
+};
 
-/* Supports the item unsigned operation. */
+struct usb_hid {
+	struct drv_usb_interface *interface;
+	struct drv_usb_device *device;
+	struct drv_usb_endpoint *endpoint;
+	struct drv_usb_urb *urb;
+	struct hid_report_layout *layout;
+	struct input_device *input;
+	struct thread *worker;
+	struct spinlock lock;
+	struct usb_hid *pending_next;
+	uint8_t *buffer;
+	size_t buffer_size;
+	struct input_capability capabilities[HID_REPORT_FIELD_COUNT_MAX + 1U];
+	struct input_abs_axis absolute_axes[ABS_MAX + 1U];
+	struct usb_hid_report_state reports[HID_REPORT_ID_COUNT_MAX];
+	unsigned long held[INPUT_BIT_WORDS(KEY_MAX)];
+	size_t capability_count;
+	size_t absolute_axis_count;
+	size_t report_count;
+	unsigned work_pending;
+	unsigned stopping;
+	unsigned submit_active;
+	unsigned activating;
+	unsigned active;
+	unsigned pending;
+	unsigned error_markers;
+	char name[USB_HID_TEXT_MAX];
+	char physical_path[USB_HID_TEXT_MAX];
+	char unique_id[USB_HID_TEXT_MAX];
+};
+
+static struct spinlock usb_hid_pending_lock;
+static struct usb_hid *usb_hid_pending;
+static unsigned usb_hid_input_is_ready;
+static unsigned usb_hid_registered;
+
+/*
+ * Forward declaration
+ */
+
+static uint16_t usb_hid_le16(const uint8_t *bytes);
+
+/*
+ * Registers this driver with the USB subsystem.
+ */
+int
+drv_usb_hid_driver_register(
+	void)
+{
+	int error;
+
+	/* Handles the usb hid registered condition. */
+	if (usb_hid_registered)
+		return EALREADY;
+	spin_init(&usb_hid_pending_lock, LOCK_RANK_DEVICE, "usb hid pending");
+	usb_hid_pending = NULL;
+	usb_hid_input_is_ready = 0U;
+
+	/* Checks the operation status. */
+	error = drv_usb_driver_register(&usb_hid_driver);
+	if (error == 0)
+		usb_hid_registered = 1U;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Activates the devices that were waiting for the input layer.
+ */
+void
+drv_usb_hid_input_ready(
+	void)
+{
+	unsigned long hid_irq;
+	struct usb_hid *hid, *claimed;
+	unsigned interface_number;
+	unsigned long irq;
+	int error;
+
+	/* Handles the usb hid registered condition. */
+	if (!usb_hid_registered)
+		return;
+	/* Continue until the operation reaches a terminal state. */
+	for (;;) {
+		interface_number = 0U;
+
+		irq = spin_lock_irqsave(&usb_hid_pending_lock);
+		usb_hid_input_is_ready = 1U;
+		hid = usb_hid_pending;
+		claimed = NULL;
+
+		/* Handles the hid availability. */
+		if (hid != NULL) {
+			usb_hid_pending = hid->pending_next;
+			hid->pending_next = NULL;
+			hid->pending = 0U;
+
+			/*
+			 * Pin the state against detach before dropping the list
+			 * lock. Detach closes admission and joins this
+			 * activation flag.
+			 */
+			hid_irq = spin_lock_irqsave(&hid->lock);
+
+			/* Handles the hid condition. */
+			if (!hid->stopping && !hid->active &&
+			    !hid->activating) {
+				hid->activating = 1U;
+				interface_number = drv_usb_interface_number(
+					hid->interface);
+				claimed = hid;
+			}
+
+			spin_unlock_irqrestore(&hid->lock, hid_irq);
+		}
+
+		spin_unlock_irqrestore(&usb_hid_pending_lock, irq);
+
+		/* Handles the hid availability. */
+		if (hid == NULL)
+			return;
+
+		/*
+		 * A stopped generation was removed by detach and owns its own
+		 * free. Continue draining later pending interfaces instead of
+		 * treating it as the end of the list.
+		 */
+		if (claimed == NULL)
+			continue;
+
+		/* Checks the operation status. */
+		error = usb_hid_activate(claimed, 1);
+		if (error != 0) {
+			hal_printf("usb-hid: deferred activation failed "
+				   "interface=%u error=%d\n",
+				   interface_number, error);
+		}
+	}
+}
+
+/* Reports whether this driver can drive an interface. */
+static int
+usb_hid_match(
+	struct drv_usb_interface *interface,
+	const struct drv_usb_id *id)
+{
+	struct drv_usb_endpoint *endpoint;
+	size_t descriptor_length, capacity;
+
+	(void)id;
+
+	/* Checks the usb hid report descriptor length result. */
+	if (usb_hid_report_descriptor_length(interface, &descriptor_length) !=
+		    0 ||
+	    usb_hid_find_endpoint(interface, &endpoint) != 0 ||
+	    usb_hid_endpoint_capacity(interface, endpoint, &capacity) != 0) {
+		/* Succeeded. */
+		return 0;
+	}
+
+	/* Returns the computed result. */
+	return descriptor_length != 0U && capacity != 0U ? 100 : 0;
+}
+
+/* Binds this driver to an interface the bus has matched. */
+static int
+usb_hid_attach(
+	struct drv_usb_interface *interface,
+	const struct drv_usb_id *id)
+{
+	const struct drv_usb_interface_descriptor *interface_descriptor;
+	struct usb_hid *hid;
+	unsigned long irq;
+	int error, ready;
+
+	(void)id;
+
+	/* Handles the interface descriptor availability. */
+	interface_descriptor = drv_usb_interface_descriptor(interface);
+	if (interface_descriptor == NULL ||
+	    interface_descriptor->interface_class != USB_HID_CLASS) {
+		/* Failed. */
+		return ENODEV;
+	}
+
+	/* Handles the hid availability. */
+	hid = hal_malloc(sizeof(*hid));
+	if (hid == NULL)
+		return ENOMEM;
+	memset(hid, 0, sizeof(*hid));
+	hid->interface = interface;
+	hid->device = drv_usb_interface_device(interface);
+	spin_init(&hid->lock, LOCK_RANK_DEVICE, "usb hid");
+
+	/* Checks the operation status. */
+	error = usb_hid_find_endpoint(interface, &hid->endpoint);
+	if (error != 0)
+		goto fail;
+
+	/* Checks the operation status. */
+	error = usb_hid_fetch_layout(hid);
+	if (error != 0)
+		goto fail;
+
+	/*
+	 * Report Protocol is a checked publication prerequisite.  There is no
+	 * Boot-Protocol fallback for malformed or unsupported devices.
+	 */
+
+	/* Checks the operation status. */
+	error = usb_hid_set_report_protocol(hid);
+	if (error != 0)
+		goto fail;
+	usb_hid_identity(hid);
+	hid->buffer = hal_malloc(hid->buffer_size);
+
+	/* Handles the buffer availability. */
+	if (hid->buffer == NULL) {
+		error = ENOMEM;
+		goto fail;
+	}
+
+	hid->urb = drv_usb_urb_alloc(hid->device, hid->endpoint, 0);
+
+	/* Handles the urb availability. */
+	if (hid->urb == NULL) {
+		error = ENOMEM;
+		goto fail;
+	}
+
+	/* Checks the operation status. */
+	error = drv_usb_interface_set_driver_data(interface, hid);
+	if (error != 0)
+		goto fail;
+	irq = spin_lock_irqsave(&usb_hid_pending_lock);
+
+	/* Handles the ready condition. */
+	ready = usb_hid_input_is_ready != 0U;
+	if (!ready) {
+		hid->pending = 1U;
+		hid->pending_next = usb_hid_pending;
+		usb_hid_pending = hid;
+	}
+
+	spin_unlock_irqrestore(&usb_hid_pending_lock, irq);
+
+	/* Handles the ready condition. */
+	if (ready) {
+		/* Checks the operation status. */
+		error = usb_hid_activate(hid, 0);
+		if (error != 0) {
+			(void)drv_usb_interface_set_driver_data(interface,
+								NULL);
+			goto fail;
+		}
+	}
+
+	/* Succeeded. */
+	return 0;
+
+fail:
+
+	/* Handles the urb availability. */
+	if (hid->urb != NULL)
+		drv_usb_urb_free(hid->urb);
+
+	/* Handles the buffer availability. */
+	if (hid->buffer != NULL)
+		hal_free(hid->buffer);
+
+	/* Handles the layout availability. */
+	if (hid->layout != NULL)
+		drv_hid_report_layout_destroy(hid->layout);
+	hal_free(hid);
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Gives that interface up and everything held for it. */
+static int
+usb_hid_detach(
+	struct drv_usb_interface *interface,
+	unsigned flags)
+{
+	struct usb_hid *hid = drv_usb_interface_driver_data(interface);
+	enum drv_usb_urb_status status;
+	int drain_error = 0, join_error;
+
+	(void)flags;
+
+	/* Handles the hid availability. */
+	if (hid == NULL)
+		return 0;
+	usb_hid_pending_remove(hid);
+	usb_hid_close_admission(hid);
+
+	/* Handles the urb availability. */
+	if (hid->urb != NULL) {
+		/* Checks the operation status. */
+		status = drv_usb_urb_status(hid->urb);
+		if (status == DRV_USB_URB_PENDING)
+			(void)drv_usb_urb_cancel(hid->urb);
+		drain_error =
+			drv_usb_urb_drain(hid->urb, USB_HID_DRAIN_TIMEOUT_MS);
+	}
+
+	/* Checks the operation status. */
+	join_error = usb_hid_join_worker(hid);
+	if (drain_error != 0 || join_error != 0)
+		return drain_error != 0 ? drain_error : join_error;
+
+	/*
+	 * drv_input_device_unregister performs the one terminal held-key/button
+	 * release before it detaches the old event generation.
+	 */
+	usb_hid_unpublish(hid);
+	(void)drv_usb_interface_set_driver_data(interface, NULL);
+
+	/* Handles the urb availability. */
+	if (hid->urb != NULL)
+		drv_usb_urb_free(hid->urb);
+
+	/* Handles the buffer availability. */
+	if (hid->buffer != NULL)
+		hal_free(hid->buffer);
+
+	/* Handles the layout availability. */
+	if (hid->layout != NULL)
+		drv_hid_report_layout_destroy(hid->layout);
+	hal_free(hid);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Reports how long the report descriptor of an interface is. */
+static int
+usb_hid_report_descriptor_length(
+	struct drv_usb_interface *interface,
+	size_t *result)
+{
+	const uint8_t *subordinate;
+	size_t report_length;
+	const uint8_t *descriptor;
+	size_t length, entries, entry;
+	int error;
+	const struct drv_usb_host_interface *alternate;
+	unsigned count, index;
+	size_t found = 0;
+
+	/* Handles the alternate availability. */
+	alternate = drv_usb_interface_active_alternate(interface);
+	if (alternate == NULL || result == NULL)
+		return EINVAL;
+	count = drv_usb_host_interface_extra_count(alternate);
+	/* Process each remaining element. */
+	for (index = 0; index < count; index++) {
+		/* Checks the operation status. */
+		error = drv_usb_host_interface_extra(
+			alternate, index, (const void **)&descriptor, &length);
+		if (error != 0)
+			return error;
+
+		/* Checks the current data length. */
+		if (length < 2U || descriptor[0] != length ||
+		    descriptor[1] != USB_HID_DESCRIPTOR)
+			continue;
+
+		/* Checks the current data length. */
+		if (length < 6U)
+			return EINVAL;
+
+		/* Handles the entries condition. */
+		entries = descriptor[5];
+		if (entries == 0U || entries > (length - 6U) / 3U ||
+		    6U + entries * 3U != length) {
+			/* Failed. */
+			return EINVAL;
+		}
+		/* Process each element required by the operation. */
+		for (entry = 0; entry < entries; entry++) {
+			/* Handles the subordinate condition. */
+			subordinate = descriptor + 6U + entry * 3U;
+			if (subordinate[0] != USB_HID_REPORT_DESCRIPTOR)
+				continue;
+
+			/* Handles the report length condition. */
+			report_length = usb_hid_le16(subordinate + 1U);
+			if (report_length == 0U ||
+			    report_length > HID_REPORT_DESCRIPTOR_SIZE_MAX ||
+			    found != 0U) {
+				/* Failed. */
+				return EINVAL;
+			}
+			found = report_length;
+		}
+	}
+
+	/* Handles the found condition. */
+	if (found == 0U)
+		return ENOENT;
+	*result = found;
+	/* Succeeded. */
+	return 0;
+}
+
+/* Reports how many bytes one interrupt endpoint carries. */
+static int
+usb_hid_endpoint_capacity(
+	struct drv_usb_interface *interface,
+	struct drv_usb_endpoint *endpoint,
+	size_t *result)
+{
+	const struct drv_usb_endpoint_descriptor *descriptor;
+	const struct drv_usb_superspeed_endpoint_companion_descriptor
+		*companion;
+	enum drv_usb_speed speed;
+	uint16_t maximum;
+	unsigned payload, packets;
+	size_t capacity;
+
+	/* Handles the descriptor availability. */
+	descriptor = drv_usb_endpoint_descriptor(endpoint);
+	if (descriptor == NULL || descriptor->interval == 0U || result == NULL)
+		return EINVAL;
+	maximum = drv_usb_endpoint_max_packet_size(endpoint);
+	payload = maximum & 0x07ffU;
+	packets = 1U + ((maximum >> 11U) & 3U);
+
+	/* Handles the payload condition. */
+	speed = drv_usb_device_speed(drv_usb_interface_device(interface));
+	if (payload == 0U || (maximum & 0xe000U) != 0U || packets == 4U)
+		return EINVAL;
+
+	/* Handles the speed condition. */
+	if (speed == DRV_USB_SPEED_LOW) {
+		/* Handles the payload condition. */
+		if (payload > 8U || packets != 1U)
+			return EINVAL;
+	} else if (speed == DRV_USB_SPEED_FULL) {
+		/* Handles the payload condition. */
+		if (payload > 64U || packets != 1U)
+			return EINVAL;
+	} else if (speed == DRV_USB_SPEED_HIGH) {
+		/* Handles the payload condition. */
+		if (payload > 1024U)
+			return EINVAL;
+	} else if (speed == DRV_USB_SPEED_SUPER ||
+		   speed == DRV_USB_SPEED_SUPER_PLUS) {
+		/* Handles the payload condition. */
+		if (payload > 1024U || packets != 1U)
+			return EINVAL;
+		companion = drv_usb_endpoint_superspeed_companion(endpoint);
+		capacity =
+			(size_t)payload *
+			((size_t)drv_usb_endpoint_maximum_burst(endpoint) + 1U);
+
+		/* Handles the companion availability. */
+		if (companion != NULL && companion->bytes_per_interval != 0U) {
+			/* Handles the companion condition. */
+			if (companion->bytes_per_interval > capacity)
+				return EINVAL;
+			capacity = companion->bytes_per_interval;
+		}
+
+		*result = capacity;
+		/* Succeeded. */
+		return 0;
+	} else {
+		/* Failed. */
+		return EINVAL;
+	}
+
+	*result = (size_t)payload * packets;
+	/* Succeeded. */
+	return 0;
+}
+
+/* Finds the interrupt-in endpoint of an interface. */
+static int
+usb_hid_find_endpoint(
+	struct drv_usb_interface *interface,
+	struct drv_usb_endpoint **result)
+{
+	struct drv_usb_endpoint *endpoint, *extra;
+
+	/* Handles the endpoint availability. */
+	endpoint = drv_usb_interface_find_endpoint(
+		interface, DRV_USB_TRANSFER_INTERRUPT, DRV_USB_DIR_IN, NULL);
+	if (endpoint == NULL)
+		return ENODEV;
+
+	/* Handles the extra availability. */
+	extra = drv_usb_interface_find_endpoint(interface,
+						DRV_USB_TRANSFER_INTERRUPT,
+						DRV_USB_DIR_IN, endpoint);
+	if (extra != NULL)
+		return EOPNOTSUPP;
+	*result = endpoint;
+	/* Succeeded. */
+	return 0;
+}
+
+/* Reads the report descriptor and parses it into a layout. */
+static int
+usb_hid_fetch_layout(
+	struct usb_hid *hid)
+{
+	struct hid_report_report_info report;
+	struct hid_report_layout_info info;
+	uint8_t *descriptor;
+	size_t descriptor_length, actual = 0, index, capacity;
+	size_t maximum_report = 0;
+	int error;
+
+	/* Checks the operation status. */
+	error = usb_hid_report_descriptor_length(hid->interface,
+						 &descriptor_length);
+	if (error != 0)
+		return error;
+
+	/* Handles the descriptor availability. */
+	descriptor = hal_malloc(descriptor_length);
+	if (descriptor == NULL)
+		return ENOMEM;
+
+	/* Checks the operation status. */
+	error = drv_usb_control(
+		hid->device,
+		DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD |
+			DRV_USB_RECIP_INTERFACE,
+		USB_REQUEST_GET_DESCRIPTOR,
+		(uint16_t)(USB_HID_REPORT_DESCRIPTOR << 8U),
+		(uint16_t)drv_usb_interface_number(hid->interface), descriptor,
+		descriptor_length, USB_HID_CONTROL_TIMEOUT_MS, &actual);
+	if (error == 0 && actual != descriptor_length)
+		error = EIO;
+	if (error == 0) {
+		error = drv_hid_report_layout_parse(
+			descriptor, descriptor_length, &hid->layout);
+	}
+
+	hal_free(descriptor);
+
+	/* Checks the operation status. */
+	if (error != 0)
+		return error;
+
+	/* Checks the operation status. */
+	error = drv_hid_report_layout_get_info(hid->layout, &info);
+	if (error != 0 || info.report_count == 0U ||
+	    info.report_count > HID_REPORT_ID_COUNT_MAX ||
+	    info.capability_count > HID_REPORT_FIELD_COUNT_MAX + 1U ||
+	    info.absolute_axis_count > ABS_MAX + 1U) {
+		/* Returns the computed result. */
+		return error != 0 ? error : EINVAL;
+	}
+	hid->report_count = info.report_count;
+	hid->capability_count = info.capability_count;
+	hid->absolute_axis_count = info.absolute_axis_count;
+	/* Process each remaining element. */
+	for (index = 0; index < info.report_count; index++) {
+		/* Checks the operation status. */
+		error = drv_hid_report_layout_get_report(hid->layout, index,
+							 &report);
+		if (error != 0 || report.minimum_size == 0U ||
+		    report.minimum_size > HID_REPORT_BITS_MAX / 8U + 1U) {
+			/* Returns the computed result. */
+			return error != 0 ? error : EINVAL;
+		}
+		hid->reports[index].id = report.report_id;
+
+		/* Handles the report condition. */
+		if (report.minimum_size > maximum_report)
+			maximum_report = report.minimum_size;
+	}
+
+	/* Process each remaining element. */
+	for (index = 0; index < info.capability_count; index++) {
+		/* Checks the operation status. */
+		error = drv_hid_report_layout_get_capability(
+			hid->layout, index, &hid->capabilities[index]);
+		if (error != 0)
+			return error;
+	}
+
+	/* Process each remaining element. */
+	for (index = 0; index < info.absolute_axis_count; index++) {
+		/* Checks the operation status. */
+		error = drv_hid_report_layout_get_absolute_axis(
+			hid->layout, index, &hid->absolute_axes[index]);
+		if (error != 0)
+			return error;
+	}
+
+	/* Checks the operation status. */
+	error = usb_hid_endpoint_capacity(hid->interface, hid->endpoint,
+					  &capacity);
+	if (error != 0)
+		return error;
+
+	/* Handles the maximum report condition. */
+	if (maximum_report > capacity)
+		return EOVERFLOW;
+	hid->buffer_size = maximum_report;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Puts the device into the report protocol, not the boot one. */
+static int
+usb_hid_set_report_protocol(
+	struct usb_hid *hid)
+{
+	int error;
+	const struct drv_usb_interface_descriptor *descriptor;
+	size_t actual = 0;
+
+	/* Handles the descriptor availability. */
+	descriptor = drv_usb_interface_descriptor(hid->interface);
+	if (descriptor == NULL)
+		return EINVAL;
+
+	/* Non-Boot interfaces already have exactly one Report Protocol. */
+	if (descriptor->interface_subclass != 1U)
+		return 0;
+
+	/* Obtains the drv usb control result. */
+	error = drv_usb_control(
+		hid->device,
+		DRV_USB_DIR_OUT | DRV_USB_REQUEST_CLASS |
+			DRV_USB_RECIP_INTERFACE,
+		USB_HID_REQUEST_SET_PROTOCOL, USB_HID_PROTOCOL_REPORT,
+		(uint16_t)drv_usb_interface_number(hid->interface), NULL, 0,
+		USB_HID_CONTROL_TIMEOUT_MS, &actual);
+
+	/* Returns the computed result. */
+	return error;
+}
+
+/* Asks whether a layout reports one particular thing. */
+static int
+usb_hid_has_capability(
+	const struct usb_hid *hid,
+	uint16_t type,
+	uint16_t code)
+{
+	size_t index;
+
+	/* Process each remaining element. */
+	for (index = 0; index < hid->capability_count; index++) {
+		/* Handles the hid condition. */
+		if (hid->capabilities[index].type == type &&
+		    hid->capabilities[index].code == code) {
+			/* Reports operation failure. */
+			return 1;
+		}
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Builds the name this device is presented to the kernel under. */
+static void
+usb_hid_identity(
+	struct usb_hid *hid)
+{
+	const struct drv_usb_device_descriptor *descriptor;
+	unsigned bus, address, port, interface_number;
+	int error;
+
+	/* Renders the topology as the physical path of the device. */
+	descriptor = drv_usb_device_descriptor(hid->device);
+	bus = drv_usb_bus_number(drv_usb_device_bus(hid->device));
+	address = drv_usb_device_address(hid->device);
+	port = drv_usb_device_port(hid->device);
+	interface_number = drv_usb_interface_number(hid->interface);
+	(void)snprintf(hid->physical_path, sizeof(hid->physical_path),
+		       "usb%u/port%u/device%u/interface%u", bus, port, address,
+		       interface_number);
+	hid->unique_id[0] = '\0';
+
+	/* Checks the file descriptor. */
+	if (descriptor->serial_string != 0U) {
+		(void)drv_usb_device_get_string(
+			hid->device, descriptor->serial_string, 0,
+			hid->unique_id, sizeof(hid->unique_id));
+	}
+
+	hid->name[0] = '\0';
+
+	/* Checks the operation status. */
+	error = descriptor->product_string == 0U
+			? ENOENT
+			: drv_usb_device_get_string(
+				  hid->device, descriptor->product_string, 0,
+				  hid->name, sizeof(hid->name));
+	if (error == 0 && hid->name[0] != '\0')
+		return;
+
+	/* Handles the usb hid has capability condition. */
+	if (usb_hid_has_capability(hid, EV_ABS, ABS_X))
+		(void)snprintf(hid->name, sizeof(hid->name), "USB HID tablet");
+	else if (usb_hid_has_capability(hid, EV_REL, REL_X))
+		(void)snprintf(hid->name, sizeof(hid->name), "USB HID mouse");
+	else
+		(void)snprintf(hid->name, sizeof(hid->name),
+			       "USB HID keyboard");
+}
+
+/* Takes one finished interrupt transfer. */
+static void
+usb_hid_completion(
+	struct drv_usb_urb *urb,
+	void *argument)
+{
+	struct usb_hid *hid = argument;
+	struct thread *worker;
+	unsigned long irq;
+
+	/* Handles the hid availability. */
+	if (hid == NULL || urb != hid->urb)
+		return;
+	irq = spin_lock_irqsave(&hid->lock);
+
+	hid->work_pending |= USB_HID_WORK_COMPLETE;
+	worker = hid->worker;
+
+	spin_unlock_irqrestore(&hid->lock, irq);
+
+	/* Handles the worker availability. */
+	if (worker != NULL)
+		kernel_notify_task(worker->task);
+}
+
+/* Joins the gate that lets a transfer be submitted. */
+static int
+usb_hid_begin_submit(
+	struct usb_hid *hid)
+{
+	unsigned long irq = spin_lock_irqsave(&hid->lock);
+	int admitted = !hid->stopping && !hid->submit_active;
+
+	/* Handles the admitted condition. */
+	if (admitted)
+		hid->submit_active = 1U;
+
+	spin_unlock_irqrestore(&hid->lock, irq);
+
+	/* Returns the computed result. */
+	return admitted ? 0 : EBUSY;
+}
+
+static void usb_hid_end_submit(struct usb_hid *hid);
+
+/* Leaves that gate. */
+static void
+usb_hid_end_submit(
+	struct usb_hid *hid)
+{
+	unsigned long irq = spin_lock_irqsave(&hid->lock);
+
+	/* Handles the hid condition. */
+	if (!hid->submit_active)
+		__builtin_trap();
+	hid->submit_active = 0U;
+
+	spin_unlock_irqrestore(&hid->lock, irq);
+}
+
+/* Puts the interrupt transfer back on its endpoint. */
+static int
+usb_hid_arm(
+	struct usb_hid *hid)
+{
+	int error;
+
+	/* Checks the operation status. */
+	error = usb_hid_begin_submit(hid);
+	if (error != 0)
+		return error;
+	memset(hid->buffer, 0, hid->buffer_size);
+
+	/* Checks the operation status. */
+	error = drv_usb_urb_setup(hid->urb, hid->buffer, hid->buffer_size,
+				  DRV_USB_URB_SHORT_OK, 0, usb_hid_completion,
+				  hid);
+	if (error == 0)
+		error = drv_usb_urb_submit(hid->urb);
+	usb_hid_end_submit(hid);
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Reports where one report stands in its handling. */
+static struct usb_hid_report_state *
+usb_hid_report_state(
+	struct usb_hid *hid,
+	uint8_t report_id)
+{
+	size_t index;
+
+	/* Process each remaining element. */
+	for (index = 0; index < hid->report_count; index++) {
+		/* Handles the hid condition. */
+		if (hid->reports[index].id == report_id)
+			return &hid->reports[index];
+	}
+
+	/* Reports that no result is available. */
+	return NULL;
+}
+
+/* Publishes one decoded report to the input subsystem. */
+static void
+usb_hid_publish_report(
+	struct usb_hid *hid,
+	const uint8_t *buffer,
+	size_t length)
+{
+	const struct hid_report_value *value_local;
+	const struct hid_report_value *value_local1;
+	size_t word;
+	unsigned long bit;
+	int old_value;
+	int new_value;
+	struct hid_report_input decoded;
+	struct usb_hid_report_state *state;
+	unsigned long current[INPUT_BIT_WORDS(KEY_MAX)];
+	unsigned long aggregate[INPUT_BIT_WORDS(KEY_MAX)];
+	size_t index;
+	unsigned code;
+	int error, emitted = 0;
+
+	/* Checks the operation status. */
+	error = drv_hid_report_decode(hid->layout, buffer, length, &decoded);
+	if (error != 0) {
+		/* Checks the operation status. */
+		if (hid->error_markers++ < USB_HID_ERROR_MARKERS) {
+			hal_printf("usb-hid: malformed input usb%u device=%u "
+				   "interface=%u length=%u error=%d\n",
+				   drv_usb_bus_number(
+					   drv_usb_device_bus(hid->device)),
+				   drv_usb_device_address(hid->device),
+				   drv_usb_interface_number(hid->interface),
+				   (unsigned)length, error);
+		}
+
+		/* Returns the computed result. */
+		return;
+	}
+
+	/* Handles the state availability. */
+	state = usb_hid_report_state(hid, decoded.report_id);
+	if (state == NULL)
+		return;
+	memset(current, 0, sizeof(current));
+	/* Process each remaining element. */
+	for (index = 0; index < decoded.value_count; index++) {
+		/* Handles the value local condition. */
+		value_local = &decoded.values[index];
+		if (value_local->type == EV_KEY &&
+		    value_local->code <= KEY_MAX) {
+			current[value_local->code / INPUT_BITS_PER_WORD] |=
+				1UL
+				<< (value_local->code % INPUT_BITS_PER_WORD);
+		}
+	}
+
+	/* Checks the operation status. */
+	if (!decoded.keyboard_error) {
+		memcpy(state->held, current, sizeof(state->held));
+		memset(aggregate, 0, sizeof(aggregate));
+		/* Process each remaining element. */
+		for (index = 0; index < hid->report_count; index++) {
+			/* Process each element required by the operation. */
+			for (word = 0; word < INPUT_BIT_WORDS(KEY_MAX);
+			     word++) {
+				aggregate[word] |=
+					hid->reports[index].held[word];
+			}
+		}
+
+		/* Process each element required by the operation. */
+		for (code = 0; code <= KEY_MAX; code++) {
+			bit = 1UL << (code % INPUT_BITS_PER_WORD);
+			old_value = (hid->held[code / INPUT_BITS_PER_WORD] &
+				     bit) != 0;
+
+			/* Handles the old value condition. */
+			new_value = (aggregate[code / INPUT_BITS_PER_WORD] &
+				     bit) != 0;
+			if (old_value == new_value)
+				continue;
+			drv_input_device_emit(hid->input, EV_KEY,
+					      (uint16_t)code, new_value);
+			emitted = 1;
+		}
+
+		memcpy(hid->held, aggregate, sizeof(hid->held));
+	}
+
+	/* Process each remaining element. */
+	for (index = 0; index < decoded.value_count; index++) {
+		/* Handles the value local1 condition. */
+		value_local1 = &decoded.values[index];
+		if (value_local1->type == EV_KEY ||
+		    (value_local1->type == EV_REL && value_local1->value == 0))
+			continue;
+		drv_input_device_emit(hid->input, value_local1->type,
+				      value_local1->code, value_local1->value);
+		emitted = 1;
+	}
+
+	/* Handles the emitted condition. */
+	if (emitted)
+		drv_input_device_emit(hid->input, EV_SYN, SYN_REPORT, 0);
+}
+
+/* Takes whatever the worker thread has to do next. */
+static unsigned
+usb_hid_take_work(
+	struct usb_hid *hid,
+	int *stopping)
+{
+	unsigned long irq = spin_lock_irqsave(&hid->lock);
+	unsigned work = hid->work_pending;
+
+	hid->work_pending = 0U;
+	*stopping = hid->stopping != 0U;
+
+	spin_unlock_irqrestore(&hid->lock, irq);
+
+	/* Returns the computed result. */
+	return work;
+}
+
+/* Takes this device back out of the input subsystem. */
+static void
+usb_hid_unpublish(
+	struct usb_hid *hid)
+{
+	struct input_device *input;
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&hid->lock);
+
+	input = hid->input;
+	hid->input = NULL;
+	hid->active = 0U;
+
+	spin_unlock_irqrestore(&hid->lock, irq);
+
+	/* Handles the input availability. */
+	if (input != NULL)
+		drv_input_device_unregister(input);
+}
+
+/* Stops the transfers and the worker this device runs. */
+static void
+usb_hid_runtime_stop(
+	struct usb_hid *hid,
+	const char *stage,
+	int error,
+	int transfer_status)
+{
+	unsigned long irq;
+	int report;
+
+	irq = spin_lock_irqsave(&hid->lock);
+
+	hid->stopping = 1U;
+	report = hid->error_markers++ < USB_HID_ERROR_MARKERS;
+
+	spin_unlock_irqrestore(&hid->lock, irq);
+
+	/*
+	 * Remove a device which cannot be rearmed instead of leaving a visible
+	 * event node that can never produce another report.  Detach joins this
+	 * worker before attempting the same idempotent unpublication.
+	 */
+	usb_hid_unpublish(hid);
+
+	/* Handles the report condition. */
+	if (report) {
+		/* Handles the transfer status condition. */
+		if (transfer_status) {
+			hal_printf(
+				"usb-hid: terminal transfer stopped "
+				"interface=%u status=%d; input unpublished\n",
+				drv_usb_interface_number(hid->interface),
+				error);
+		} else {
+			hal_printf("usb-hid: %s failed interface=%u error=%d; "
+				   "input unpublished\n",
+				   stage,
+				   drv_usb_interface_number(hid->interface),
+				   error);
+		}
+	}
+}
+
+/* Decodes and publishes reports outside interrupt context. */
+static void
+usb_hid_worker(
+	void *argument)
+{
+	enum drv_usb_urb_status status;
+	unsigned long irq;
+	int stopping_now;
+	unsigned work;
+	int error, stopping;
+	struct usb_hid *hid = argument;
+
+	/* Continue until the operation reaches a terminal state. */
+	for (;;) {
+		/* Handles the stopping condition. */
+		work = usb_hid_take_work(hid, &stopping);
+		if (stopping)
+			return;
+
+		/* Handles the work condition. */
+		if (work == 0U) {
+			kernel_wait_task();
+			continue;
+		}
+
+		/* Handles the work condition. */
+		if ((work & USB_HID_WORK_COMPLETE) != 0U) {
+			/* Checks the operation status. */
+			error = drv_usb_urb_drain(hid->urb,
+						  USB_HID_DRAIN_TIMEOUT_MS);
+			if (error != 0) {
+				usb_hid_runtime_stop(hid, "completion drain",
+						     error, 0);
+
+				/* Returns the computed result. */
+				return;
+			}
+
+			/* Checks the operation status. */
+			status = drv_usb_urb_status(hid->urb);
+			if (status == DRV_USB_URB_COMPLETE) {
+				usb_hid_publish_report(
+					hid, hid->buffer,
+					drv_usb_urb_actual_length(hid->urb));
+				work |= USB_HID_WORK_ARM;
+			} else if (status == DRV_USB_URB_STALL) {
+				/* Checks the operation status. */
+				error = drv_usb_endpoint_clear_halt(
+					hid->endpoint);
+				if (error == 0) {
+					work |= USB_HID_WORK_ARM;
+				} else {
+					usb_hid_runtime_stop(hid, "clear-halt",
+							     error, 0);
+
+					/* Returns the computed result. */
+					return;
+				}
+			} else if (status != DRV_USB_URB_CANCELLED &&
+				   status != DRV_USB_URB_DISCONNECTED) {
+				usb_hid_runtime_stop(hid, "terminal transfer",
+						     (int)status, 1);
+
+				/* Returns the computed result. */
+				return;
+			}
+		}
+
+		/* Handles the work condition. */
+		if ((work & USB_HID_WORK_ARM) != 0U) {
+			/* Checks the operation status. */
+			error = usb_hid_arm(hid);
+			if (error != 0) {
+				/*
+				 * EBUSY is expected only after detach closes
+				 * admission.  In that case detach owns
+				 * publication; any other EBUSY is still a
+				 * terminal always-on-URB contract failure.
+				 */
+				irq = spin_lock_irqsave(&hid->lock);
+				stopping_now = hid->stopping != 0U;
+
+				spin_unlock_irqrestore(&hid->lock, irq);
+
+				/* Handles the stopping now condition. */
+				if (!stopping_now) {
+					usb_hid_runtime_stop(hid, "rearm",
+							     error, 0);
+				}
+
+				/* Returns the computed result. */
+				return;
+			}
+		}
+	}
+}
+
+/* Waits for that worker to leave. */
+static int
+usb_hid_join_worker(
+	struct usb_hid *hid)
+{
+	struct thread *worker = hid->worker;
+	int error;
+
+	/* Handles the worker availability. */
+	if (worker == NULL)
+		return 0;
+
+	/* Handles the worker condition. */
+	if (worker == curthread)
+		return EBUSY;
+	kernel_notify_task(worker->task);
+	/* Continue while the operation condition remains true. */
+	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) !=
+	       THREAD_ZOMBIE)
+		sched_yield();
+
+	/* Checks the operation status. */
+	error = thread_wait(worker, NULL);
+	if (error == 0)
+		hid->worker = NULL;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Stops new transfers being admitted. */
+static void
+usb_hid_close_admission(
+	struct usb_hid *hid)
+{
+	unsigned long irq;
+	unsigned active;
+
+	irq = spin_lock_irqsave(&hid->lock);
+
+	hid->stopping = 1U;
+
+	spin_unlock_irqrestore(&hid->lock, irq);
+
+	/* Handles the worker availability. */
+	if (hid->worker != NULL)
+		kernel_notify_task(hid->worker->task);
+	/* Continue until the operation reaches a terminal state. */
+	for (;;) {
+		irq = spin_lock_irqsave(&hid->lock);
+		active = hid->submit_active || hid->activating;
+		spin_unlock_irqrestore(&hid->lock, irq);
+
+		/* Handles the active condition. */
+		if (!active)
+			return;
+		sched_yield();
+	}
+}
+
+/* Brings the device into service and arms its first transfer. */
+static int
+usb_hid_activate(
+	struct usb_hid *hid,
+	int activation_claimed)
+{
+	const struct drv_usb_device_descriptor *usb_descriptor;
+	struct input_device_info info;
+	struct thread *worker;
+	unsigned long irq;
+	int error;
+
+	/* Handles the activation claimed condition. */
+	if (!activation_claimed) {
+		/* Handles the hid condition. */
+		irq = spin_lock_irqsave(&hid->lock);
+		if (hid->stopping || hid->active || hid->activating) {
+			spin_unlock_irqrestore(&hid->lock, irq);
+
+			/* Returns the computed result. */
+			return hid->active ? 0 : EBUSY;
+		}
+
+		hid->activating = 1U;
+		spin_unlock_irqrestore(&hid->lock, irq);
+	}
+
+	/* Checks the operation status. */
+	error = kthread_create(usb_hid_worker, hid, SCHED_PRIORITY_DEFAULT,
+			       &worker);
+	if (error != 0)
+		goto out;
+	hid->worker = worker;
+	usb_descriptor = drv_usb_device_descriptor(hid->device);
+	memset(&info, 0, sizeof(info));
+	info.name = hid->name;
+	info.physical_path = hid->physical_path;
+	info.unique_id = hid->unique_id;
+	info.id.bustype = BUS_USB;
+	info.id.vendor = usb_descriptor->vendor;
+	info.id.product = usb_descriptor->product;
+	info.id.version = usb_descriptor->device_release;
+	info.capabilities = hid->capabilities;
+	info.capability_count = hid->capability_count;
+	info.absolute_axes = hid->absolute_axes;
+	info.absolute_axis_count = hid->absolute_axis_count;
+
+	/* Checks the operation status. */
+	error = drv_input_device_register(&info, &hid->input);
+	if (error != 0) {
+		irq = spin_lock_irqsave(&hid->lock);
+		hid->stopping = 1U;
+		spin_unlock_irqrestore(&hid->lock, irq);
+		thread_start(worker);
+		(void)usb_hid_join_worker(hid);
+		goto out;
+	}
+
+	/*
+	 * The first accepted request is part of the attach transaction.  A
+	 * publication which can never receive a report is not a successful HID
+	 * attachment.  Synchronous completion is safe: its callback only
+	 * records work for the worker which is started below.
+	 */
+
+	/* Checks the operation status. */
+	error = usb_hid_arm(hid);
+	if (error != 0) {
+		usb_hid_unpublish(hid);
+		irq = spin_lock_irqsave(&hid->lock);
+		hid->stopping = 1U;
+		spin_unlock_irqrestore(&hid->lock, irq);
+		thread_start(worker);
+		(void)usb_hid_join_worker(hid);
+		goto out;
+	}
+
+	irq = spin_lock_irqsave(&hid->lock);
+
+	hid->active = 1U;
+
+	spin_unlock_irqrestore(&hid->lock, irq);
+
+	thread_start(worker);
+	hal_printf("usb-hid: event device usb%u device=%u interface=%u "
+		   "endpoint=%02x report-bytes=%u\n",
+		   drv_usb_bus_number(drv_usb_device_bus(hid->device)),
+		   drv_usb_device_address(hid->device),
+		   drv_usb_interface_number(hid->interface),
+		   drv_usb_endpoint_address(hid->endpoint),
+		   (unsigned)hid->buffer_size);
+
+out:
+	irq = spin_lock_irqsave(&hid->lock);
+
+	hid->activating = 0U;
+
+	spin_unlock_irqrestore(&hid->lock, irq);
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Takes this device off the list of those waiting to activate. */
+static void
+usb_hid_pending_remove(
+	struct usb_hid *hid)
+{
+	struct usb_hid **link;
+	unsigned long irq = spin_lock_irqsave(&usb_hid_pending_lock);
+
+	/* Handles the hid condition. */
+	if (hid->pending) {
+		/* Process each element required by the operation. */
+		for (link = &usb_hid_pending; *link != NULL;
+		     link = &(*link)->pending_next) {
+			/* Handles the link condition. */
+			if (*link == hid) {
+				*link = hid->pending_next;
+				break;
+			}
+		}
+
+		hid->pending = 0U;
+		hid->pending_next = NULL;
+	}
+
+	spin_unlock_irqrestore(&usb_hid_pending_lock, irq);
+}
+
+/* Reads the unsigned value one report descriptor item carries. */
 static uint32_t
 item_unsigned(
 	const uint8_t *data,
@@ -147,10 +1494,7 @@ item_unsigned(
 	return value;
 }
 
-/* Supports the sign extend operation. */
-static int32_t sign_extend(uint32_t value, unsigned bits);
-
-/* Supports the sign extend operation. */
+/* Extends a value of the given width to a full signed one. */
 static int32_t
 sign_extend(
 	uint32_t value,
@@ -166,10 +1510,7 @@ sign_extend(
 	return (int32_t)extended;
 }
 
-/* Supports the item signed operation. */
-static int item_signed(const uint8_t *data, size_t size, int32_t *result);
-
-/* Supports the item signed operation. */
+/* Reads the signed value one report descriptor item carries. */
 static int
 item_signed(
 	const uint8_t *data,
@@ -184,10 +1525,7 @@ item_signed(
 	return 0;
 }
 
-/* Supports the local clear operation. */
-static void local_clear(struct hid_local_state *local);
-
-/* Supports the local clear operation. */
+/* Forgets the local items collected for the next main item. */
 static void
 local_clear(
 	struct hid_local_state *local)
@@ -195,10 +1533,7 @@ local_clear(
 	memset(local, 0, sizeof(*local));
 }
 
-/* Supports the usage value operation. */
-static int usage_value(const struct hid_global_state *global, const uint8_t *data, size_t size, uint32_t *result);
-
-/* Supports the usage value operation. */
+/* Reports one collected usage, with its page attached. */
 static int
 usage_value(
 	const struct hid_global_state *global,
@@ -228,10 +1563,7 @@ usage_value(
 	return 0;
 }
 
-/* Supports the local validate operation. */
-static int local_validate(const struct hid_local_state *local);
-
-/* Supports the local validate operation. */
+/* Refuses local items that do not describe a usable field. */
 static int
 local_validate(
 	const struct hid_local_state *local)
@@ -240,10 +1572,7 @@ local_validate(
 	return local->range_open ? EINVAL : 0;
 }
 
-/* Supports the local usage at operation. */
-static int local_usage_at(const struct hid_local_state *local, uint32_t index, uint32_t *usage);
-
-/* Supports the local usage at operation. */
+/* Reports the usage that belongs to one field of an array. */
 static int
 local_usage_at(
 	const struct hid_local_state *local,
@@ -277,10 +1606,7 @@ local_usage_at(
 	return 1;
 }
 
-/* Supports the find report operation. */
-static struct hid_report_description * find_report(struct hid_report_layout *layout, uint8_t id);
-
-/* Supports the find report operation. */
+/* Finds the report of a given kind and identifier. */
 static struct hid_report_description *
 find_report(
 	struct hid_report_layout *layout,
@@ -299,10 +1625,9 @@ find_report(
 	return NULL;
 }
 
-/* Supports the find report const operation. */
 static const struct hid_report_description * find_report_const(const struct hid_report_layout *layout, uint8_t id);
 
-/* Supports the find report const operation. */
+/* Finds that report without permission to change it. */
 static const struct hid_report_description *
 find_report_const(
 	const struct hid_report_layout *layout,
@@ -321,10 +1646,7 @@ find_report_const(
 	return NULL;
 }
 
-/* Supports the add report operation. */
-static int add_report(struct hid_report_layout *layout, uint8_t id, struct hid_report_description **result);
-
-/* Supports the add report operation. */
+/* Adds a report of a given kind and identifier to the layout. */
 static int
 add_report(
 	struct hid_report_layout *layout,
@@ -348,10 +1670,7 @@ add_report(
 	return 0;
 }
 
-/* Supports the add capability operation. */
-static int add_capability(struct hid_report_layout *layout, uint16_t type, uint16_t code);
-
-/* Supports the add capability operation. */
+/* Records that the device can report one thing. */
 static int
 add_capability(
 	struct hid_report_layout *layout,
@@ -381,10 +1700,7 @@ add_capability(
 	return 0;
 }
 
-/* Supports the add absolute axis operation. */
-static int add_absolute_axis(struct hid_report_layout *layout, uint16_t code, int32_t minimum, int32_t maximum);
-
-/* Supports the add absolute axis operation. */
+/* Records an axis the device reports an absolute position on. */
 static int
 add_absolute_axis(
 	struct hid_report_layout *layout,
@@ -423,10 +1739,7 @@ add_absolute_axis(
 	return 0;
 }
 
-/* Supports the keyboard code operation. */
-static uint16_t keyboard_code(uint16_t usage);
-
-/* Supports the keyboard code operation. */
+/* Renders one keyboard usage as the key code the kernel uses. */
 static uint16_t
 keyboard_code(
 	uint16_t usage)
@@ -565,10 +1878,7 @@ keyboard_code(
 	}
 }
 
-/* Supports the usage to event operation. */
-static int usage_to_event(uint32_t usage, unsigned input_flags, uint16_t *type, uint16_t *code, uint8_t *kind);
-
-/* Supports the usage to event operation. */
+/* Renders one usage as the input event it stands for. */
 static int
 usage_to_event(
 	uint32_t usage,
@@ -649,10 +1959,7 @@ usage_to_event(
 	}
 }
 
-/* Supports the logical maximum operation. */
-static int logical_maximum(const struct hid_global_state *global, int32_t *result);
-
-/* Supports the logical maximum operation. */
+/* Reports the largest value a field of that width can hold. */
 static int
 logical_maximum(
 	const struct hid_global_state *global,
@@ -680,10 +1987,7 @@ logical_maximum(
 	return global->logical_minimum <= *result ? 0 : EINVAL;
 }
 
-/* Supports the logical range fits field operation. */
-static int logical_range_fits_field(int32_t minimum, int32_t maximum, uint32_t bit_size);
-
-/* Supports the logical range fits field operation. */
+/* Asks whether a declared range fits the field it is declared on. */
 static int
 logical_range_fits_field(
 	int32_t minimum,
@@ -711,10 +2015,7 @@ logical_range_fits_field(
 	       (int64_t)maximum <= field_maximum;
 }
 
-/* Supports the add field operation. */
-static int add_field(struct hid_parser *parser, struct hid_report_description *report, uint32_t bit_offset, uint32_t usage_minimum, uint32_t usage_maximum, int32_t logical_minimum, int32_t logical_maximum, uint16_t type, uint16_t code, uint8_t bit_size, uint8_t kind);
-
-/* Supports the add field operation. */
+/* Adds one field of a report to the layout. */
 static int
 add_field(
 	struct hid_parser *parser,
@@ -790,10 +2091,7 @@ add_field(
 	return 0;
 }
 
-/* Supports the add keyboard array capabilities operation. */
-static int add_keyboard_array_capabilities(struct hid_report_layout *layout, uint32_t minimum, uint32_t maximum);
-
-/* Supports the add keyboard array capabilities operation. */
+/* Records every key an array field of a keyboard can report. */
 static int
 add_keyboard_array_capabilities(
 	struct hid_report_layout *layout,
@@ -834,10 +2132,7 @@ add_keyboard_array_capabilities(
 	return 0;
 }
 
-/* Supports the parse input operation. */
-static int parse_input(struct hid_parser *parser, uint32_t flags);
-
-/* Supports the parse input operation. */
+/* Takes one input main item into the layout. */
 static int
 parse_input(
 	struct hid_parser *parser,
@@ -1034,10 +2329,7 @@ advance:
 	return 0;
 }
 
-/* Supports the parse main operation. */
-static int parse_main(struct hid_parser *parser, unsigned tag, const uint8_t *data, size_t size);
-
-/* Supports the parse main operation. */
+/* Takes one main item into the layout. */
 static int
 parse_main(
 	struct hid_parser *parser,
@@ -1111,10 +2403,7 @@ parse_main(
 	return 0;
 }
 
-/* Supports the parse global operation. */
-static int parse_global(struct hid_parser *parser, unsigned tag, const uint8_t *data, size_t size);
-
-/* Supports the parse global operation. */
+/* Takes one global item into the parser state. */
 static int
 parse_global(
 	struct hid_parser *parser,
@@ -1227,10 +2516,7 @@ parse_global(
 	}
 }
 
-/* Supports the parse local operation. */
-static int parse_local(struct hid_parser *parser, unsigned tag, const uint8_t *data, size_t size);
-
-/* Supports the parse local operation. */
+/* Takes one local item into the parser state. */
 static int
 parse_local(
 	struct hid_parser *parser,
@@ -1316,10 +2602,7 @@ parse_local(
 	}
 }
 
-/* Supports the parse descriptor operation. */
-static int parse_descriptor(struct hid_parser *parser);
-
-/* Supports the parse descriptor operation. */
+/* Walks a whole report descriptor, item by item. */
 static int
 parse_descriptor(
 	struct hid_parser *parser)
@@ -1395,10 +2678,7 @@ parse_descriptor(
 	return 0;
 }
 
-/* Supports the layout allocate operation. */
-static struct hid_report_layout *layout_allocate(void);
-
-/* Supports the layout allocate operation. */
+/* Takes the memory one parsed layout lives in. */
 static struct hid_report_layout *
 layout_allocate(
 	void)
@@ -1418,10 +2698,7 @@ layout_allocate(
 }
 
 /*
- * Implements the drv hid report layout parse operation.
- */
-/*
- * Implements the drv hid report layout parse operation.
+ * Parses a report descriptor into a layout this kernel can use.
  */
 int
 drv_hid_report_layout_parse(
@@ -1473,10 +2750,7 @@ drv_hid_report_layout_parse(
 	return 0;
 }
 
-/* Supports the boot layout begin operation. */
-static int boot_layout_begin(struct hid_report_layout **result, struct hid_report_layout **layout_result, struct hid_report_description **report_result);
-
-/* Supports the boot layout begin operation. */
+/* Starts a layout for one of the two boot protocols. */
 static int
 boot_layout_begin(
 	struct hid_report_layout **result,
@@ -1510,10 +2784,7 @@ boot_layout_begin(
 }
 
 /*
- * Implements the drv hid report layout boot keyboard operation.
- */
-/*
- * Implements the drv hid report layout boot keyboard operation.
+ * Builds the fixed layout the boot keyboard protocol has.
  */
 int
 drv_hid_report_layout_boot_keyboard(
@@ -1598,10 +2869,7 @@ fail:
 }
 
 /*
- * Implements the drv hid report layout boot mouse operation.
- */
-/*
- * Implements the drv hid report layout boot mouse operation.
+ * Builds the fixed layout the boot mouse protocol has.
  */
 int
 drv_hid_report_layout_boot_mouse(
@@ -1674,10 +2942,7 @@ fail:
 }
 
 /*
- * Implements the drv hid report layout destroy operation.
- */
-/*
- * Implements the drv hid report layout destroy operation.
+ * Gives a layout and its memory back.
  */
 void
 drv_hid_report_layout_destroy(
@@ -1687,10 +2952,7 @@ drv_hid_report_layout_destroy(
 }
 
 /*
- * Implements the drv hid report layout get info operation.
- */
-/*
- * Implements the drv hid report layout get info operation.
+ * Reports what a layout says the device is.
  */
 int
 drv_hid_report_layout_get_info(
@@ -1712,10 +2974,7 @@ drv_hid_report_layout_get_info(
 }
 
 /*
- * Implements the drv hid report layout get report operation.
- */
-/*
- * Implements the drv hid report layout get report operation.
+ * Reports one report of a layout by its index.
  */
 int
 drv_hid_report_layout_get_report(
@@ -1743,10 +3002,7 @@ drv_hid_report_layout_get_report(
 }
 
 /*
- * Implements the drv hid report layout get capability operation.
- */
-/*
- * Implements the drv hid report layout get capability operation.
+ * Reports one thing the device can report, by index.
  */
 int
 drv_hid_report_layout_get_capability(
@@ -1767,10 +3023,7 @@ drv_hid_report_layout_get_capability(
 }
 
 /*
- * Implements the drv hid report layout get absolute axis operation.
- */
-/*
- * Implements the drv hid report layout get absolute axis operation.
+ * Reports one absolute axis of the device, by index.
  */
 int
 drv_hid_report_layout_get_absolute_axis(
@@ -1790,10 +3043,7 @@ drv_hid_report_layout_get_absolute_axis(
 	return 0;
 }
 
-/* Supports the extract value operation. */
-static int extract_value(const uint8_t *data, size_t length, uint32_t bit_offset, uint8_t bit_size, uint32_t *result);
-
-/* Supports the extract value operation. */
+/* Takes one field's bits out of a report. */
 static int
 extract_value(
 	const uint8_t *data,
@@ -1828,10 +3078,7 @@ extract_value(
 	return 0;
 }
 
-/* Supports the decode field value operation. */
-static int decode_field_value(const struct hid_report_field *field, const uint8_t *data, size_t length, uint32_t *raw_result, int32_t *value_result);
-
-/* Supports the decode field value operation. */
+/* Renders one field's bits as the value it stands for. */
 static int
 decode_field_value(
 	const struct hid_report_field *field,
@@ -1869,10 +3116,7 @@ decode_field_value(
 	return 0;
 }
 
-/* Supports the key already present operation. */
-static int key_already_present(const struct hid_report_input *input, uint16_t code);
-
-/* Supports the key already present operation. */
+/* Asks whether a key is already among those being reported. */
 static int
 key_already_present(
 	const struct hid_report_input *input,
@@ -1894,10 +3138,7 @@ key_already_present(
 	return 0;
 }
 
-/* Supports the append value operation. */
-static int append_value(struct hid_report_input *input, uint16_t type, uint16_t code, int32_t value);
-
-/* Supports the append value operation. */
+/* Appends one decoded value to the events being built. */
 static int
 append_value(
 	struct hid_report_input *input,
@@ -1924,10 +3165,7 @@ append_value(
 }
 
 /*
- * Implements the drv hid report decode operation.
- */
-/*
- * Implements the drv hid report decode operation.
+ * Renders one report as the input events it stands for.
  */
 int
 drv_hid_report_decode(
@@ -2084,86 +3322,8 @@ drv_hid_report_decode(
 	/* Succeeded. */
 	return 0;
 }
-/* End consolidated hid-report.c. */
 
-/* Begin consolidated usb-hid.c. */
-/*
- * USB Human Interface Device input driver
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
- */
-
-#include <drivers/hid/hid-report.h>
-#include <drivers/usb-hid.h>
-#include <drivers/usb.h>
-#include <errno.h>
-#include <hal/hal.h>
-#include <kern/input-device.h>
-#include <kern/lock.h>
-#include <kern/sched.h>
-#include <kern/thread.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-
-#define USB_HID_CLASS 0x03U
-#define USB_HID_DESCRIPTOR 0x21U
-#define USB_HID_REPORT_DESCRIPTOR 0x22U
-#define USB_REQUEST_GET_DESCRIPTOR 0x06U
-#define USB_HID_REQUEST_SET_PROTOCOL 0x0bU
-#define USB_HID_PROTOCOL_REPORT 1U
-#define USB_HID_CONTROL_TIMEOUT_MS 1000U
-#define USB_HID_DRAIN_TIMEOUT_MS 5000U
-/* drv_input_device_register() accepts at most 63 bytes plus NUL. */
-#define USB_HID_TEXT_MAX 64U
-#define USB_HID_ERROR_MARKERS 16U
-#define USB_HID_WORK_ARM (1U << 0)
-#define USB_HID_WORK_COMPLETE (1U << 1)
-
-struct usb_hid_report_state {
-	uint8_t id;
-	unsigned long held[INPUT_BIT_WORDS(KEY_MAX)];
-};
-
-struct usb_hid {
-	struct drv_usb_interface *interface;
-	struct drv_usb_device *device;
-	struct drv_usb_endpoint *endpoint;
-	struct drv_usb_urb *urb;
-	struct hid_report_layout *layout;
-	struct input_device *input;
-	struct thread *worker;
-	struct spinlock lock;
-	struct usb_hid *pending_next;
-	uint8_t *buffer;
-	size_t buffer_size;
-	struct input_capability capabilities[HID_REPORT_FIELD_COUNT_MAX + 1U];
-	struct input_abs_axis absolute_axes[ABS_MAX + 1U];
-	struct usb_hid_report_state reports[HID_REPORT_ID_COUNT_MAX];
-	unsigned long held[INPUT_BIT_WORDS(KEY_MAX)];
-	size_t capability_count;
-	size_t absolute_axis_count;
-	size_t report_count;
-	unsigned work_pending;
-	unsigned stopping;
-	unsigned submit_active;
-	unsigned activating;
-	unsigned active;
-	unsigned pending;
-	unsigned error_markers;
-	char name[USB_HID_TEXT_MAX];
-	char physical_path[USB_HID_TEXT_MAX];
-	char unique_id[USB_HID_TEXT_MAX];
-};
-
-static struct spinlock usb_hid_pending_lock;
-static struct usb_hid *usb_hid_pending;
-static unsigned usb_hid_input_is_ready;
-static unsigned usb_hid_registered;
-
-static uint16_t usb_hid_le16(const uint8_t *bytes);
-
-/* Supports the usb hid le16 operation. */
+/* Reads a 16-bit descriptor field, least significant byte first. */
 static uint16_t
 usb_hid_le16(
 	const uint8_t *bytes)
@@ -2172,1223 +3332,16 @@ usb_hid_le16(
 	return (uint16_t)bytes[0] | (uint16_t)((uint16_t)bytes[1] << 8U);
 }
 
-static int usb_hid_report_descriptor_length(struct drv_usb_interface *interface, size_t *result);
-
-/* Supports the usb hid report descriptor length operation. */
-static int
-usb_hid_report_descriptor_length(
-	struct drv_usb_interface *interface,
-	size_t *result)
-{
-	const uint8_t *subordinate;
-	size_t report_length;
-	const uint8_t *descriptor;
-	size_t length, entries, entry;
-	int error;
-	const struct drv_usb_host_interface *alternate;
-	unsigned count, index;
-	size_t found = 0;
-
-	/* Handles the alternate availability. */
-	alternate = drv_usb_interface_active_alternate(interface);
-	if (alternate == NULL || result == NULL)
-		return EINVAL;
-	count = drv_usb_host_interface_extra_count(alternate);
-	/* Process each remaining element. */
-	for (index = 0; index < count; index++) {
-		/* Checks the operation status. */
-		error = drv_usb_host_interface_extra(
-			alternate, index, (const void **)&descriptor, &length);
-		if (error != 0)
-			return error;
-
-		/* Checks the current data length. */
-		if (length < 2U || descriptor[0] != length ||
-		    descriptor[1] != USB_HID_DESCRIPTOR)
-			continue;
-
-		/* Checks the current data length. */
-		if (length < 6U)
-			return EINVAL;
-
-		/* Handles the entries condition. */
-		entries = descriptor[5];
-		if (entries == 0U || entries > (length - 6U) / 3U ||
-		    6U + entries * 3U != length) {
-			/* Failed. */
-			return EINVAL;
-		}
-		/* Process each element required by the operation. */
-		for (entry = 0; entry < entries; entry++) {
-			/* Handles the subordinate condition. */
-			subordinate = descriptor + 6U + entry * 3U;
-			if (subordinate[0] != USB_HID_REPORT_DESCRIPTOR)
-				continue;
-
-			/* Handles the report length condition. */
-			report_length = usb_hid_le16(subordinate + 1U);
-			if (report_length == 0U ||
-			    report_length > HID_REPORT_DESCRIPTOR_SIZE_MAX ||
-			    found != 0U) {
-				/* Failed. */
-				return EINVAL;
-			}
-			found = report_length;
-		}
-	}
-
-	/* Handles the found condition. */
-	if (found == 0U)
-		return ENOENT;
-	*result = found;
-	/* Succeeded. */
-	return 0;
-}
-
-static int usb_hid_endpoint_capacity(struct drv_usb_interface *interface, struct drv_usb_endpoint *endpoint, size_t *result);
-
-/* Supports the usb hid endpoint capacity operation. */
-static int
-usb_hid_endpoint_capacity(
-	struct drv_usb_interface *interface,
-	struct drv_usb_endpoint *endpoint,
-	size_t *result)
-{
-	const struct drv_usb_endpoint_descriptor *descriptor;
-	const struct drv_usb_superspeed_endpoint_companion_descriptor
-		*companion;
-	enum drv_usb_speed speed;
-	uint16_t maximum;
-	unsigned payload, packets;
-	size_t capacity;
-
-	/* Handles the descriptor availability. */
-	descriptor = drv_usb_endpoint_descriptor(endpoint);
-	if (descriptor == NULL || descriptor->interval == 0U || result == NULL)
-		return EINVAL;
-	maximum = drv_usb_endpoint_max_packet_size(endpoint);
-	payload = maximum & 0x07ffU;
-	packets = 1U + ((maximum >> 11U) & 3U);
-
-	/* Handles the payload condition. */
-	speed = drv_usb_device_speed(drv_usb_interface_device(interface));
-	if (payload == 0U || (maximum & 0xe000U) != 0U || packets == 4U)
-		return EINVAL;
-
-	/* Handles the speed condition. */
-	if (speed == DRV_USB_SPEED_LOW) {
-		/* Handles the payload condition. */
-		if (payload > 8U || packets != 1U)
-			return EINVAL;
-	} else if (speed == DRV_USB_SPEED_FULL) {
-		/* Handles the payload condition. */
-		if (payload > 64U || packets != 1U)
-			return EINVAL;
-	} else if (speed == DRV_USB_SPEED_HIGH) {
-		/* Handles the payload condition. */
-		if (payload > 1024U)
-			return EINVAL;
-	} else if (speed == DRV_USB_SPEED_SUPER ||
-		   speed == DRV_USB_SPEED_SUPER_PLUS) {
-		/* Handles the payload condition. */
-		if (payload > 1024U || packets != 1U)
-			return EINVAL;
-		companion = drv_usb_endpoint_superspeed_companion(endpoint);
-		capacity =
-			(size_t)payload *
-			((size_t)drv_usb_endpoint_maximum_burst(endpoint) + 1U);
-
-		/* Handles the companion availability. */
-		if (companion != NULL && companion->bytes_per_interval != 0U) {
-			/* Handles the companion condition. */
-			if (companion->bytes_per_interval > capacity)
-				return EINVAL;
-			capacity = companion->bytes_per_interval;
-		}
-
-		*result = capacity;
-		/* Succeeded. */
-		return 0;
-	} else {
-		/* Failed. */
-		return EINVAL;
-	}
-
-	*result = (size_t)payload * packets;
-	/* Succeeded. */
-	return 0;
-}
-
-static int usb_hid_find_endpoint(struct drv_usb_interface *interface, struct drv_usb_endpoint **result);
-
-/* Supports the usb hid find endpoint operation. */
-static int
-usb_hid_find_endpoint(
-	struct drv_usb_interface *interface,
-	struct drv_usb_endpoint **result)
-{
-	struct drv_usb_endpoint *endpoint, *extra;
-
-	/* Handles the endpoint availability. */
-	endpoint = drv_usb_interface_find_endpoint(
-		interface, DRV_USB_TRANSFER_INTERRUPT, DRV_USB_DIR_IN, NULL);
-	if (endpoint == NULL)
-		return ENODEV;
-
-	/* Handles the extra availability. */
-	extra = drv_usb_interface_find_endpoint(interface,
-						DRV_USB_TRANSFER_INTERRUPT,
-						DRV_USB_DIR_IN, endpoint);
-	if (extra != NULL)
-		return EOPNOTSUPP;
-	*result = endpoint;
-	/* Succeeded. */
-	return 0;
-}
-
-static int usb_hid_fetch_layout(struct usb_hid *hid);
-
-/* Supports the usb hid fetch layout operation. */
-static int
-usb_hid_fetch_layout(
-	struct usb_hid *hid)
-{
-	struct hid_report_report_info report;
-	struct hid_report_layout_info info;
-	uint8_t *descriptor;
-	size_t descriptor_length, actual = 0, index, capacity;
-	size_t maximum_report = 0;
-	int error;
-
-	/* Checks the operation status. */
-	error = usb_hid_report_descriptor_length(hid->interface,
-						 &descriptor_length);
-	if (error != 0)
-		return error;
-
-	/* Handles the descriptor availability. */
-	descriptor = hal_malloc(descriptor_length);
-	if (descriptor == NULL)
-		return ENOMEM;
-
-	/* Checks the operation status. */
-	error = drv_usb_control(
-		hid->device,
-		DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD |
-			DRV_USB_RECIP_INTERFACE,
-		USB_REQUEST_GET_DESCRIPTOR,
-		(uint16_t)(USB_HID_REPORT_DESCRIPTOR << 8U),
-		(uint16_t)drv_usb_interface_number(hid->interface), descriptor,
-		descriptor_length, USB_HID_CONTROL_TIMEOUT_MS, &actual);
-	if (error == 0 && actual != descriptor_length)
-		error = EIO;
-	if (error == 0) {
-		error = drv_hid_report_layout_parse(
-			descriptor, descriptor_length, &hid->layout);
-	}
-
-	hal_free(descriptor);
-
-	/* Checks the operation status. */
-	if (error != 0)
-		return error;
-
-	/* Checks the operation status. */
-	error = drv_hid_report_layout_get_info(hid->layout, &info);
-	if (error != 0 || info.report_count == 0U ||
-	    info.report_count > HID_REPORT_ID_COUNT_MAX ||
-	    info.capability_count > HID_REPORT_FIELD_COUNT_MAX + 1U ||
-	    info.absolute_axis_count > ABS_MAX + 1U) {
-		/* Returns the computed result. */
-		return error != 0 ? error : EINVAL;
-	}
-	hid->report_count = info.report_count;
-	hid->capability_count = info.capability_count;
-	hid->absolute_axis_count = info.absolute_axis_count;
-	/* Process each remaining element. */
-	for (index = 0; index < info.report_count; index++) {
-		/* Checks the operation status. */
-		error = drv_hid_report_layout_get_report(hid->layout, index,
-							 &report);
-		if (error != 0 || report.minimum_size == 0U ||
-		    report.minimum_size > HID_REPORT_BITS_MAX / 8U + 1U) {
-			/* Returns the computed result. */
-			return error != 0 ? error : EINVAL;
-		}
-		hid->reports[index].id = report.report_id;
-
-		/* Handles the report condition. */
-		if (report.minimum_size > maximum_report)
-			maximum_report = report.minimum_size;
-	}
-
-	/* Process each remaining element. */
-	for (index = 0; index < info.capability_count; index++) {
-		/* Checks the operation status. */
-		error = drv_hid_report_layout_get_capability(
-			hid->layout, index, &hid->capabilities[index]);
-		if (error != 0)
-			return error;
-	}
-
-	/* Process each remaining element. */
-	for (index = 0; index < info.absolute_axis_count; index++) {
-		/* Checks the operation status. */
-		error = drv_hid_report_layout_get_absolute_axis(
-			hid->layout, index, &hid->absolute_axes[index]);
-		if (error != 0)
-			return error;
-	}
-
-	/* Checks the operation status. */
-	error = usb_hid_endpoint_capacity(hid->interface, hid->endpoint,
-					  &capacity);
-	if (error != 0)
-		return error;
-
-	/* Handles the maximum report condition. */
-	if (maximum_report > capacity)
-		return EOVERFLOW;
-	hid->buffer_size = maximum_report;
-
-	/* Succeeded. */
-	return 0;
-}
-
-static int usb_hid_set_report_protocol(struct usb_hid *hid);
-
-/* Supports the usb hid set report protocol operation. */
-static int
-usb_hid_set_report_protocol(
-	struct usb_hid *hid)
-{
-	int error;
-	const struct drv_usb_interface_descriptor *descriptor;
-	size_t actual = 0;
-
-	/* Handles the descriptor availability. */
-	descriptor = drv_usb_interface_descriptor(hid->interface);
-	if (descriptor == NULL)
-		return EINVAL;
-
-	/* Non-Boot interfaces already have exactly one Report Protocol. */
-	if (descriptor->interface_subclass != 1U)
-		return 0;
-
-	/* Obtains the drv usb control result. */
-	error = drv_usb_control(
-		hid->device,
-		DRV_USB_DIR_OUT | DRV_USB_REQUEST_CLASS |
-			DRV_USB_RECIP_INTERFACE,
-		USB_HID_REQUEST_SET_PROTOCOL, USB_HID_PROTOCOL_REPORT,
-		(uint16_t)drv_usb_interface_number(hid->interface), NULL, 0,
-		USB_HID_CONTROL_TIMEOUT_MS, &actual);
-
-	/* Returns the computed result. */
-	return error;
-}
-
-static int usb_hid_has_capability(const struct usb_hid *hid, uint16_t type, uint16_t code);
-
-/* Supports the usb hid has capability operation. */
-static int
-usb_hid_has_capability(
-	const struct usb_hid *hid,
-	uint16_t type,
-	uint16_t code)
-{
-	size_t index;
-
-	/* Process each remaining element. */
-	for (index = 0; index < hid->capability_count; index++) {
-		/* Handles the hid condition. */
-		if (hid->capabilities[index].type == type &&
-		    hid->capabilities[index].code == code) {
-			/* Reports operation failure. */
-			return 1;
-		}
-	}
-
-	/* Succeeded. */
-	return 0;
-}
-
-static void usb_hid_identity(struct usb_hid *hid);
-
-/* Supports the usb hid identity operation. */
-static void
-usb_hid_identity(
-	struct usb_hid *hid)
-{
-	const struct drv_usb_device_descriptor *descriptor;
-	unsigned bus, address, port, interface_number;
-	int error;
-
-	/* Renders the topology as the physical path of the device. */
-	descriptor = drv_usb_device_descriptor(hid->device);
-	bus = drv_usb_bus_number(drv_usb_device_bus(hid->device));
-	address = drv_usb_device_address(hid->device);
-	port = drv_usb_device_port(hid->device);
-	interface_number = drv_usb_interface_number(hid->interface);
-	(void)snprintf(hid->physical_path, sizeof(hid->physical_path),
-		       "usb%u/port%u/device%u/interface%u", bus, port, address,
-		       interface_number);
-	hid->unique_id[0] = '\0';
-
-	/* Checks the file descriptor. */
-	if (descriptor->serial_string != 0U) {
-		(void)drv_usb_device_get_string(
-			hid->device, descriptor->serial_string, 0,
-			hid->unique_id, sizeof(hid->unique_id));
-	}
-
-	hid->name[0] = '\0';
-
-	/* Checks the operation status. */
-	error = descriptor->product_string == 0U
-			? ENOENT
-			: drv_usb_device_get_string(
-				  hid->device, descriptor->product_string, 0,
-				  hid->name, sizeof(hid->name));
-	if (error == 0 && hid->name[0] != '\0')
-		return;
-
-	/* Handles the usb hid has capability condition. */
-	if (usb_hid_has_capability(hid, EV_ABS, ABS_X))
-		(void)snprintf(hid->name, sizeof(hid->name), "USB HID tablet");
-	else if (usb_hid_has_capability(hid, EV_REL, REL_X))
-		(void)snprintf(hid->name, sizeof(hid->name), "USB HID mouse");
-	else
-		(void)snprintf(hid->name, sizeof(hid->name),
-			       "USB HID keyboard");
-}
-
-static void usb_hid_completion(struct drv_usb_urb *urb, void *argument);
-
-/* Supports the usb hid completion operation. */
-static void
-usb_hid_completion(
-	struct drv_usb_urb *urb,
-	void *argument)
-{
-	struct usb_hid *hid = argument;
-	struct thread *worker;
-	unsigned long irq;
-
-	/* Handles the hid availability. */
-	if (hid == NULL || urb != hid->urb)
-		return;
-	irq = spin_lock_irqsave(&hid->lock);
-
-	hid->work_pending |= USB_HID_WORK_COMPLETE;
-	worker = hid->worker;
-
-	spin_unlock_irqrestore(&hid->lock, irq);
-
-	/* Handles the worker availability. */
-	if (worker != NULL)
-		kernel_notify_task(worker->task);
-}
-
-static int usb_hid_begin_submit(struct usb_hid *hid);
-
-/* Supports the usb hid begin submit operation. */
-static int
-usb_hid_begin_submit(
-	struct usb_hid *hid)
-{
-	unsigned long irq = spin_lock_irqsave(&hid->lock);
-	int admitted = !hid->stopping && !hid->submit_active;
-
-	/* Handles the admitted condition. */
-	if (admitted)
-		hid->submit_active = 1U;
-
-	spin_unlock_irqrestore(&hid->lock, irq);
-
-	/* Returns the computed result. */
-	return admitted ? 0 : EBUSY;
-}
-
-static void usb_hid_end_submit(struct usb_hid *hid);
-
-/* Supports the usb hid end submit operation. */
-static void
-usb_hid_end_submit(
-	struct usb_hid *hid)
-{
-	unsigned long irq = spin_lock_irqsave(&hid->lock);
-
-	/* Handles the hid condition. */
-	if (!hid->submit_active)
-		__builtin_trap();
-	hid->submit_active = 0U;
-
-	spin_unlock_irqrestore(&hid->lock, irq);
-}
-
-static int usb_hid_arm(struct usb_hid *hid);
-
-/* Supports the usb hid arm operation. */
-static int
-usb_hid_arm(
-	struct usb_hid *hid)
-{
-	int error;
-
-	/* Checks the operation status. */
-	error = usb_hid_begin_submit(hid);
-	if (error != 0)
-		return error;
-	memset(hid->buffer, 0, hid->buffer_size);
-
-	/* Checks the operation status. */
-	error = drv_usb_urb_setup(hid->urb, hid->buffer, hid->buffer_size,
-				  DRV_USB_URB_SHORT_OK, 0, usb_hid_completion,
-				  hid);
-	if (error == 0)
-		error = drv_usb_urb_submit(hid->urb);
-	usb_hid_end_submit(hid);
-
-	/* Reports the failure. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded. */
-	return 0;
-}
-
-static struct usb_hid_report_state *usb_hid_report_state(struct usb_hid *hid, uint8_t report_id);
-
-/* Supports the usb hid report state operation. */
-static struct usb_hid_report_state *
-usb_hid_report_state(
-	struct usb_hid *hid,
-	uint8_t report_id)
-{
-	size_t index;
-
-	/* Process each remaining element. */
-	for (index = 0; index < hid->report_count; index++) {
-		/* Handles the hid condition. */
-		if (hid->reports[index].id == report_id)
-			return &hid->reports[index];
-	}
-
-	/* Reports that no result is available. */
-	return NULL;
-}
-
-static void usb_hid_publish_report(struct usb_hid *hid, const uint8_t *buffer, size_t length);
-
-/* Supports the usb hid publish report operation. */
-static void
-usb_hid_publish_report(
-	struct usb_hid *hid,
-	const uint8_t *buffer,
-	size_t length)
-{
-	const struct hid_report_value *value_local;
-	const struct hid_report_value *value_local1;
-	size_t word;
-	unsigned long bit;
-	int old_value;
-	int new_value;
-	struct hid_report_input decoded;
-	struct usb_hid_report_state *state;
-	unsigned long current[INPUT_BIT_WORDS(KEY_MAX)];
-	unsigned long aggregate[INPUT_BIT_WORDS(KEY_MAX)];
-	size_t index;
-	unsigned code;
-	int error, emitted = 0;
-
-	/* Checks the operation status. */
-	error = drv_hid_report_decode(hid->layout, buffer, length, &decoded);
-	if (error != 0) {
-		/* Checks the operation status. */
-		if (hid->error_markers++ < USB_HID_ERROR_MARKERS) {
-			hal_printf("usb-hid: malformed input usb%u device=%u "
-				   "interface=%u length=%u error=%d\n",
-				   drv_usb_bus_number(
-					   drv_usb_device_bus(hid->device)),
-				   drv_usb_device_address(hid->device),
-				   drv_usb_interface_number(hid->interface),
-				   (unsigned)length, error);
-		}
-
-		/* Returns the computed result. */
-		return;
-	}
-
-	/* Handles the state availability. */
-	state = usb_hid_report_state(hid, decoded.report_id);
-	if (state == NULL)
-		return;
-	memset(current, 0, sizeof(current));
-	/* Process each remaining element. */
-	for (index = 0; index < decoded.value_count; index++) {
-		/* Handles the value local condition. */
-		value_local = &decoded.values[index];
-		if (value_local->type == EV_KEY &&
-		    value_local->code <= KEY_MAX) {
-			current[value_local->code / INPUT_BITS_PER_WORD] |=
-				1UL
-				<< (value_local->code % INPUT_BITS_PER_WORD);
-		}
-	}
-
-	/* Checks the operation status. */
-	if (!decoded.keyboard_error) {
-		memcpy(state->held, current, sizeof(state->held));
-		memset(aggregate, 0, sizeof(aggregate));
-		/* Process each remaining element. */
-		for (index = 0; index < hid->report_count; index++) {
-			/* Process each element required by the operation. */
-			for (word = 0; word < INPUT_BIT_WORDS(KEY_MAX);
-			     word++) {
-				aggregate[word] |=
-					hid->reports[index].held[word];
-			}
-		}
-
-		/* Process each element required by the operation. */
-		for (code = 0; code <= KEY_MAX; code++) {
-			bit = 1UL << (code % INPUT_BITS_PER_WORD);
-			old_value = (hid->held[code / INPUT_BITS_PER_WORD] &
-				     bit) != 0;
-
-			/* Handles the old value condition. */
-			new_value = (aggregate[code / INPUT_BITS_PER_WORD] &
-				     bit) != 0;
-			if (old_value == new_value)
-				continue;
-			drv_input_device_emit(hid->input, EV_KEY,
-					      (uint16_t)code, new_value);
-			emitted = 1;
-		}
-
-		memcpy(hid->held, aggregate, sizeof(hid->held));
-	}
-
-	/* Process each remaining element. */
-	for (index = 0; index < decoded.value_count; index++) {
-		/* Handles the value local1 condition. */
-		value_local1 = &decoded.values[index];
-		if (value_local1->type == EV_KEY ||
-		    (value_local1->type == EV_REL && value_local1->value == 0))
-			continue;
-		drv_input_device_emit(hid->input, value_local1->type,
-				      value_local1->code, value_local1->value);
-		emitted = 1;
-	}
-
-	/* Handles the emitted condition. */
-	if (emitted)
-		drv_input_device_emit(hid->input, EV_SYN, SYN_REPORT, 0);
-}
-
-static unsigned usb_hid_take_work(struct usb_hid *hid, int *stopping);
-
-/* Supports the usb hid take work operation. */
-static unsigned
-usb_hid_take_work(
-	struct usb_hid *hid,
-	int *stopping)
-{
-	unsigned long irq = spin_lock_irqsave(&hid->lock);
-	unsigned work = hid->work_pending;
-
-	hid->work_pending = 0U;
-	*stopping = hid->stopping != 0U;
-
-	spin_unlock_irqrestore(&hid->lock, irq);
-
-	/* Returns the computed result. */
-	return work;
-}
-
-static void usb_hid_unpublish(struct usb_hid *hid);
-
-/* Supports the usb hid unpublish operation. */
-static void
-usb_hid_unpublish(
-	struct usb_hid *hid)
-{
-	struct input_device *input;
-	unsigned long irq;
-
-	irq = spin_lock_irqsave(&hid->lock);
-
-	input = hid->input;
-	hid->input = NULL;
-	hid->active = 0U;
-
-	spin_unlock_irqrestore(&hid->lock, irq);
-
-	/* Handles the input availability. */
-	if (input != NULL)
-		drv_input_device_unregister(input);
-}
-
-static void usb_hid_runtime_stop(struct usb_hid *hid, const char *stage, int error, int transfer_status);
-
-/* Supports the usb hid runtime stop operation. */
-static void
-usb_hid_runtime_stop(
-	struct usb_hid *hid,
-	const char *stage,
-	int error,
-	int transfer_status)
-{
-	unsigned long irq;
-	int report;
-
-	irq = spin_lock_irqsave(&hid->lock);
-
-	hid->stopping = 1U;
-	report = hid->error_markers++ < USB_HID_ERROR_MARKERS;
-
-	spin_unlock_irqrestore(&hid->lock, irq);
-
-	/*
-	 * Remove a device which cannot be rearmed instead of leaving a visible
-	 * event node that can never produce another report.  Detach joins this
-	 * worker before attempting the same idempotent unpublication.
-	 */
-	usb_hid_unpublish(hid);
-
-	/* Handles the report condition. */
-	if (report) {
-		/* Handles the transfer status condition. */
-		if (transfer_status) {
-			hal_printf(
-				"usb-hid: terminal transfer stopped "
-				"interface=%u status=%d; input unpublished\n",
-				drv_usb_interface_number(hid->interface),
-				error);
-		} else {
-			hal_printf("usb-hid: %s failed interface=%u error=%d; "
-				   "input unpublished\n",
-				   stage,
-				   drv_usb_interface_number(hid->interface),
-				   error);
-		}
-	}
-}
-
-static void usb_hid_worker(void *argument);
-
-/* Supports the usb hid worker operation. */
-static void
-usb_hid_worker(
-	void *argument)
-{
-	enum drv_usb_urb_status status;
-	unsigned long irq;
-	int stopping_now;
-	unsigned work;
-	int error, stopping;
-	struct usb_hid *hid = argument;
-
-	/* Continue until the operation reaches a terminal state. */
-	for (;;) {
-		/* Handles the stopping condition. */
-		work = usb_hid_take_work(hid, &stopping);
-		if (stopping)
-			return;
-
-		/* Handles the work condition. */
-		if (work == 0U) {
-			kernel_wait_task();
-			continue;
-		}
-
-		/* Handles the work condition. */
-		if ((work & USB_HID_WORK_COMPLETE) != 0U) {
-			/* Checks the operation status. */
-			error = drv_usb_urb_drain(hid->urb,
-						  USB_HID_DRAIN_TIMEOUT_MS);
-			if (error != 0) {
-				usb_hid_runtime_stop(hid, "completion drain",
-						     error, 0);
-
-				/* Returns the computed result. */
-				return;
-			}
-
-			/* Checks the operation status. */
-			status = drv_usb_urb_status(hid->urb);
-			if (status == DRV_USB_URB_COMPLETE) {
-				usb_hid_publish_report(
-					hid, hid->buffer,
-					drv_usb_urb_actual_length(hid->urb));
-				work |= USB_HID_WORK_ARM;
-			} else if (status == DRV_USB_URB_STALL) {
-				/* Checks the operation status. */
-				error = drv_usb_endpoint_clear_halt(
-					hid->endpoint);
-				if (error == 0) {
-					work |= USB_HID_WORK_ARM;
-				} else {
-					usb_hid_runtime_stop(hid, "clear-halt",
-							     error, 0);
-
-					/* Returns the computed result. */
-					return;
-				}
-			} else if (status != DRV_USB_URB_CANCELLED &&
-				   status != DRV_USB_URB_DISCONNECTED) {
-				usb_hid_runtime_stop(hid, "terminal transfer",
-						     (int)status, 1);
-
-				/* Returns the computed result. */
-				return;
-			}
-		}
-
-		/* Handles the work condition. */
-		if ((work & USB_HID_WORK_ARM) != 0U) {
-			/* Checks the operation status. */
-			error = usb_hid_arm(hid);
-			if (error != 0) {
-				/*
-				 * EBUSY is expected only after detach closes
-				 * admission.  In that case detach owns
-				 * publication; any other EBUSY is still a
-				 * terminal always-on-URB contract failure.
-				 */
-				irq = spin_lock_irqsave(&hid->lock);
-				stopping_now = hid->stopping != 0U;
-
-				spin_unlock_irqrestore(&hid->lock, irq);
-
-				/* Handles the stopping now condition. */
-				if (!stopping_now) {
-					usb_hid_runtime_stop(hid, "rearm",
-							     error, 0);
-				}
-
-				/* Returns the computed result. */
-				return;
-			}
-		}
-	}
-}
-
-static int usb_hid_join_worker(struct usb_hid *hid);
-
-/* Supports the usb hid join worker operation. */
-static int
-usb_hid_join_worker(
-	struct usb_hid *hid)
-{
-	struct thread *worker = hid->worker;
-	int error;
-
-	/* Handles the worker availability. */
-	if (worker == NULL)
-		return 0;
-
-	/* Handles the worker condition. */
-	if (worker == curthread)
-		return EBUSY;
-	kernel_notify_task(worker->task);
-	/* Continue while the operation condition remains true. */
-	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) !=
-	       THREAD_ZOMBIE)
-		sched_yield();
-
-	/* Checks the operation status. */
-	error = thread_wait(worker, NULL);
-	if (error == 0)
-		hid->worker = NULL;
-
-	/* Reports the failure. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded. */
-	return 0;
-}
-
-static void usb_hid_close_admission(struct usb_hid *hid);
-
-/* Supports the usb hid close admission operation. */
-static void
-usb_hid_close_admission(
-	struct usb_hid *hid)
-{
-	unsigned long irq;
-	unsigned active;
-
-	irq = spin_lock_irqsave(&hid->lock);
-
-	hid->stopping = 1U;
-
-	spin_unlock_irqrestore(&hid->lock, irq);
-
-	/* Handles the worker availability. */
-	if (hid->worker != NULL)
-		kernel_notify_task(hid->worker->task);
-	/* Continue until the operation reaches a terminal state. */
-	for (;;) {
-		irq = spin_lock_irqsave(&hid->lock);
-		active = hid->submit_active || hid->activating;
-		spin_unlock_irqrestore(&hid->lock, irq);
-
-		/* Handles the active condition. */
-		if (!active)
-			return;
-		sched_yield();
-	}
-}
-
-static int usb_hid_activate(struct usb_hid *hid, int activation_claimed);
-
-/* Supports the usb hid activate operation. */
-static int
-usb_hid_activate(
-	struct usb_hid *hid,
-	int activation_claimed)
-{
-	const struct drv_usb_device_descriptor *usb_descriptor;
-	struct input_device_info info;
-	struct thread *worker;
-	unsigned long irq;
-	int error;
-
-	/* Handles the activation claimed condition. */
-	if (!activation_claimed) {
-		/* Handles the hid condition. */
-		irq = spin_lock_irqsave(&hid->lock);
-		if (hid->stopping || hid->active || hid->activating) {
-			spin_unlock_irqrestore(&hid->lock, irq);
-
-			/* Returns the computed result. */
-			return hid->active ? 0 : EBUSY;
-		}
-
-		hid->activating = 1U;
-		spin_unlock_irqrestore(&hid->lock, irq);
-	}
-
-	/* Checks the operation status. */
-	error = kthread_create(usb_hid_worker, hid, SCHED_PRIORITY_DEFAULT,
-			       &worker);
-	if (error != 0)
-		goto out;
-	hid->worker = worker;
-	usb_descriptor = drv_usb_device_descriptor(hid->device);
-	memset(&info, 0, sizeof(info));
-	info.name = hid->name;
-	info.physical_path = hid->physical_path;
-	info.unique_id = hid->unique_id;
-	info.id.bustype = BUS_USB;
-	info.id.vendor = usb_descriptor->vendor;
-	info.id.product = usb_descriptor->product;
-	info.id.version = usb_descriptor->device_release;
-	info.capabilities = hid->capabilities;
-	info.capability_count = hid->capability_count;
-	info.absolute_axes = hid->absolute_axes;
-	info.absolute_axis_count = hid->absolute_axis_count;
-
-	/* Checks the operation status. */
-	error = drv_input_device_register(&info, &hid->input);
-	if (error != 0) {
-		irq = spin_lock_irqsave(&hid->lock);
-		hid->stopping = 1U;
-		spin_unlock_irqrestore(&hid->lock, irq);
-		thread_start(worker);
-		(void)usb_hid_join_worker(hid);
-		goto out;
-	}
-
-	/*
-	 * The first accepted request is part of the attach transaction.  A
-	 * publication which can never receive a report is not a successful HID
-	 * attachment.  Synchronous completion is safe: its callback only
-	 * records work for the worker which is started below.
-	 */
-
-	/* Checks the operation status. */
-	error = usb_hid_arm(hid);
-	if (error != 0) {
-		usb_hid_unpublish(hid);
-		irq = spin_lock_irqsave(&hid->lock);
-		hid->stopping = 1U;
-		spin_unlock_irqrestore(&hid->lock, irq);
-		thread_start(worker);
-		(void)usb_hid_join_worker(hid);
-		goto out;
-	}
-
-	irq = spin_lock_irqsave(&hid->lock);
-
-	hid->active = 1U;
-
-	spin_unlock_irqrestore(&hid->lock, irq);
-
-	thread_start(worker);
-	hal_printf("usb-hid: event device usb%u device=%u interface=%u "
-		   "endpoint=%02x report-bytes=%u\n",
-		   drv_usb_bus_number(drv_usb_device_bus(hid->device)),
-		   drv_usb_device_address(hid->device),
-		   drv_usb_interface_number(hid->interface),
-		   drv_usb_endpoint_address(hid->endpoint),
-		   (unsigned)hid->buffer_size);
-
-out:
-	irq = spin_lock_irqsave(&hid->lock);
-
-	hid->activating = 0U;
-
-	spin_unlock_irqrestore(&hid->lock, irq);
-
-	/* Reports the failure. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded. */
-	return 0;
-}
-
-static void usb_hid_pending_remove(struct usb_hid *hid);
-
-/* Supports the usb hid pending remove operation. */
-static void
-usb_hid_pending_remove(
-	struct usb_hid *hid)
-{
-	struct usb_hid **link;
-	unsigned long irq = spin_lock_irqsave(&usb_hid_pending_lock);
-
-	/* Handles the hid condition. */
-	if (hid->pending) {
-		/* Process each element required by the operation. */
-		for (link = &usb_hid_pending; *link != NULL;
-		     link = &(*link)->pending_next) {
-			/* Handles the link condition. */
-			if (*link == hid) {
-				*link = hid->pending_next;
-				break;
-			}
-		}
-
-		hid->pending = 0U;
-		hid->pending_next = NULL;
-	}
-
-	spin_unlock_irqrestore(&usb_hid_pending_lock, irq);
-}
-
-static int usb_hid_attach(struct drv_usb_interface *interface, const struct drv_usb_id *id);
-
-/* Supports the usb hid attach operation. */
-static int
-usb_hid_attach(
-	struct drv_usb_interface *interface,
-	const struct drv_usb_id *id)
-{
-	const struct drv_usb_interface_descriptor *interface_descriptor;
-	struct usb_hid *hid;
-	unsigned long irq;
-	int error, ready;
-
-	(void)id;
-
-	/* Handles the interface descriptor availability. */
-	interface_descriptor = drv_usb_interface_descriptor(interface);
-	if (interface_descriptor == NULL ||
-	    interface_descriptor->interface_class != USB_HID_CLASS) {
-		/* Failed. */
-		return ENODEV;
-	}
-
-	/* Handles the hid availability. */
-	hid = hal_malloc(sizeof(*hid));
-	if (hid == NULL)
-		return ENOMEM;
-	memset(hid, 0, sizeof(*hid));
-	hid->interface = interface;
-	hid->device = drv_usb_interface_device(interface);
-	spin_init(&hid->lock, LOCK_RANK_DEVICE, "usb hid");
-
-	/* Checks the operation status. */
-	error = usb_hid_find_endpoint(interface, &hid->endpoint);
-	if (error != 0)
-		goto fail;
-
-	/* Checks the operation status. */
-	error = usb_hid_fetch_layout(hid);
-	if (error != 0)
-		goto fail;
-
-	/*
-	 * Report Protocol is a checked publication prerequisite.  There is no
-	 * Boot-Protocol fallback for malformed or unsupported devices.
-	 */
-
-	/* Checks the operation status. */
-	error = usb_hid_set_report_protocol(hid);
-	if (error != 0)
-		goto fail;
-	usb_hid_identity(hid);
-	hid->buffer = hal_malloc(hid->buffer_size);
-
-	/* Handles the buffer availability. */
-	if (hid->buffer == NULL) {
-		error = ENOMEM;
-		goto fail;
-	}
-
-	hid->urb = drv_usb_urb_alloc(hid->device, hid->endpoint, 0);
-
-	/* Handles the urb availability. */
-	if (hid->urb == NULL) {
-		error = ENOMEM;
-		goto fail;
-	}
-
-	/* Checks the operation status. */
-	error = drv_usb_interface_set_driver_data(interface, hid);
-	if (error != 0)
-		goto fail;
-	irq = spin_lock_irqsave(&usb_hid_pending_lock);
-
-	/* Handles the ready condition. */
-	ready = usb_hid_input_is_ready != 0U;
-	if (!ready) {
-		hid->pending = 1U;
-		hid->pending_next = usb_hid_pending;
-		usb_hid_pending = hid;
-	}
-
-	spin_unlock_irqrestore(&usb_hid_pending_lock, irq);
-
-	/* Handles the ready condition. */
-	if (ready) {
-		/* Checks the operation status. */
-		error = usb_hid_activate(hid, 0);
-		if (error != 0) {
-			(void)drv_usb_interface_set_driver_data(interface,
-								NULL);
-			goto fail;
-		}
-	}
-
-	/* Succeeded. */
-	return 0;
-
-fail:
-
-	/* Handles the urb availability. */
-	if (hid->urb != NULL)
-		drv_usb_urb_free(hid->urb);
-
-	/* Handles the buffer availability. */
-	if (hid->buffer != NULL)
-		hal_free(hid->buffer);
-
-	/* Handles the layout availability. */
-	if (hid->layout != NULL)
-		drv_hid_report_layout_destroy(hid->layout);
-	hal_free(hid);
-
-	/* Reports the failure. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded. */
-	return 0;
-}
-
-static int usb_hid_detach(struct drv_usb_interface *interface, unsigned flags);
-
-/* Supports the usb hid detach operation. */
-static int
-usb_hid_detach(
-	struct drv_usb_interface *interface,
-	unsigned flags)
-{
-	struct usb_hid *hid = drv_usb_interface_driver_data(interface);
-	enum drv_usb_urb_status status;
-	int drain_error = 0, join_error;
-
-	(void)flags;
-
-	/* Handles the hid availability. */
-	if (hid == NULL)
-		return 0;
-	usb_hid_pending_remove(hid);
-	usb_hid_close_admission(hid);
-
-	/* Handles the urb availability. */
-	if (hid->urb != NULL) {
-		/* Checks the operation status. */
-		status = drv_usb_urb_status(hid->urb);
-		if (status == DRV_USB_URB_PENDING)
-			(void)drv_usb_urb_cancel(hid->urb);
-		drain_error =
-			drv_usb_urb_drain(hid->urb, USB_HID_DRAIN_TIMEOUT_MS);
-	}
-
-	/* Checks the operation status. */
-	join_error = usb_hid_join_worker(hid);
-	if (drain_error != 0 || join_error != 0)
-		return drain_error != 0 ? drain_error : join_error;
-
-	/*
-	 * drv_input_device_unregister performs the one terminal held-key/button
-	 * release before it detaches the old event generation.
-	 */
-	usb_hid_unpublish(hid);
-	(void)drv_usb_interface_set_driver_data(interface, NULL);
-
-	/* Handles the urb availability. */
-	if (hid->urb != NULL)
-		drv_usb_urb_free(hid->urb);
-
-	/* Handles the buffer availability. */
-	if (hid->buffer != NULL)
-		hal_free(hid->buffer);
-
-	/* Handles the layout availability. */
-	if (hid->layout != NULL)
-		drv_hid_report_layout_destroy(hid->layout);
-	hal_free(hid);
-
-	/* Succeeded. */
-	return 0;
-}
-
-static int usb_hid_match(struct drv_usb_interface *interface, const struct drv_usb_id *id);
-
-/* Supports the usb hid match operation. */
-static int
-usb_hid_match(
-	struct drv_usb_interface *interface,
-	const struct drv_usb_id *id)
-{
-	struct drv_usb_endpoint *endpoint;
-	size_t descriptor_length, capacity;
-
-	(void)id;
-
-	/* Checks the usb hid report descriptor length result. */
-	if (usb_hid_report_descriptor_length(interface, &descriptor_length) !=
-		    0 ||
-	    usb_hid_find_endpoint(interface, &endpoint) != 0 ||
-	    usb_hid_endpoint_capacity(interface, endpoint, &capacity) != 0) {
-		/* Succeeded. */
-		return 0;
-	}
-
-	/* Returns the computed result. */
-	return descriptor_length != 0U && capacity != 0U ? 100 : 0;
-}
+/*
+ * USB HID
+ */
 
 static const struct drv_usb_id usb_hid_ids[] = {
-	{.match_flags = DRV_USB_ID_IF_CLASS, .interface_class = USB_HID_CLASS}};
+	{
+		.match_flags = DRV_USB_ID_IF_CLASS,
+		.interface_class = USB_HID_CLASS
+	}
+};
 
 static struct drv_usb_driver usb_hid_driver = {
 	.name = "usb-hid",
@@ -3396,108 +3349,5 @@ static struct drv_usb_driver usb_hid_driver = {
 	.id_count = sizeof(usb_hid_ids) / sizeof(usb_hid_ids[0]),
 	.match = usb_hid_match,
 	.attach = usb_hid_attach,
-	.detach = usb_hid_detach};
-
-/*
- * Implements the drv usb hid driver register operation.
- */
-int
-drv_usb_hid_driver_register(
-	void)
-{
-	int error;
-
-	/* Handles the usb hid registered condition. */
-	if (usb_hid_registered)
-		return EALREADY;
-	spin_init(&usb_hid_pending_lock, LOCK_RANK_DEVICE, "usb hid pending");
-	usb_hid_pending = NULL;
-	usb_hid_input_is_ready = 0U;
-
-	/* Checks the operation status. */
-	error = drv_usb_driver_register(&usb_hid_driver);
-	if (error == 0)
-		usb_hid_registered = 1U;
-
-	/* Reports the failure. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded. */
-	return 0;
-}
-
-/*
- * Implements the drv usb hid input ready operation.
- */
-void
-drv_usb_hid_input_ready(
-	void)
-{
-	unsigned long hid_irq;
-	struct usb_hid *hid, *claimed;
-	unsigned interface_number;
-	unsigned long irq;
-	int error;
-
-	/* Handles the usb hid registered condition. */
-	if (!usb_hid_registered)
-		return;
-	/* Continue until the operation reaches a terminal state. */
-	for (;;) {
-		interface_number = 0U;
-
-		irq = spin_lock_irqsave(&usb_hid_pending_lock);
-		usb_hid_input_is_ready = 1U;
-		hid = usb_hid_pending;
-		claimed = NULL;
-
-		/* Handles the hid availability. */
-		if (hid != NULL) {
-			usb_hid_pending = hid->pending_next;
-			hid->pending_next = NULL;
-			hid->pending = 0U;
-
-			/*
-			 * Pin the state against detach before dropping the list
-			 * lock. Detach closes admission and joins this
-			 * activation flag.
-			 */
-			hid_irq = spin_lock_irqsave(&hid->lock);
-
-			/* Handles the hid condition. */
-			if (!hid->stopping && !hid->active &&
-			    !hid->activating) {
-				hid->activating = 1U;
-				interface_number = drv_usb_interface_number(
-					hid->interface);
-				claimed = hid;
-			}
-
-			spin_unlock_irqrestore(&hid->lock, hid_irq);
-		}
-
-		spin_unlock_irqrestore(&usb_hid_pending_lock, irq);
-
-		/* Handles the hid availability. */
-		if (hid == NULL)
-			return;
-
-		/*
-		 * A stopped generation was removed by detach and owns its own
-		 * free. Continue draining later pending interfaces instead of
-		 * treating it as the end of the list.
-		 */
-		if (claimed == NULL)
-			continue;
-
-		/* Checks the operation status. */
-		error = usb_hid_activate(claimed, 1);
-		if (error != 0) {
-			hal_printf("usb-hid: deferred activation failed "
-				   "interface=%u error=%d\n",
-				   interface_number, error);
-		}
-	}
-}
-/* End consolidated usb-hid.c. */
+	.detach = usb_hid_detach
+};
