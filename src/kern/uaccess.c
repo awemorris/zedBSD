@@ -50,8 +50,12 @@ user_range_check(
 	vm = current_vmspace();
 	error = vmspace_check(vm, address, size, prot);
 
-	/* Reports the check result. */
-	return error;
+	/* Reports why the check failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -214,8 +218,12 @@ uaccess_pin(
 	vm = current_vmspace();
 	error = uaccess_pin_vmspace(vm, address, size, prot, pin);
 
-	/* Reports the pin result. */
-	return error;
+	/* Reports why the pin failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -396,8 +404,12 @@ copyin(
 	vm = current_vmspace();
 	error = vmspace_copy_from(vm, destination, source, size);
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -425,8 +437,12 @@ copyout(
 	vm = current_vmspace();
 	error = vmspace_copy_to(vm, destination, source, size);
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

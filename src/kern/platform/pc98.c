@@ -138,8 +138,12 @@ kern_platform_input_init(
 	/* Starts the bus mouse driver. */
 	error = drv_pc98_busmouse_init();
 
-	/* Reports the driver result. */
-	return error;
+	/* Reports why the driver failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

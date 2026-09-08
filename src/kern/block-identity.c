@@ -262,8 +262,12 @@ read_bytes(
 	}
 	kern_free(block);
 
-	/* Reports the read result. */
-	return error;
+	/* Reports why the read failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Copies the partition table's UUID and label into an identity. */

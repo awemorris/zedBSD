@@ -268,7 +268,11 @@ fail:
 	release_cred(owned_cred);
 
 	/* Reports the lookup failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -284,8 +288,12 @@ namei_path_at(
 
 	error = namei_path_flags_at(context, path, 0, result);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -382,8 +390,12 @@ namei_parent_path_at(
 		return ENOTDIR;
 	}
 
-	/* Reports the parent lookup result. */
-	return error;
+	/* Reports why the parent lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -535,8 +547,12 @@ fs_chdir(
 	error = fs_chdir_path(context, &directory);
 	path_release(&directory);
 
-	/* Reports the change result. */
-	return error;
+	/* Reports why the change failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -579,8 +595,12 @@ fs_getcwd(
 	path_release(&cwd);
 	path_release(&root);
 
-	/* Reports the walk result. */
-	return error;
+	/* Reports why the walk failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Releases a credential when the process subsystem exists. */
@@ -661,7 +681,11 @@ search_access(
 	error = vfs_access(directory, cred, X_OK);
 
 	/* Reports the access check. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Resolves one named child of a directory, crossing a mount point. */
@@ -752,8 +776,12 @@ out:
 	if (parent->p_inode->i_dirseq != sequence)
 		return EAGAIN;
 
-	/* Reports the scan result. */
-	return error;
+	/* Reports why the scan failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Builds the working directory path once by walking up to the root. */

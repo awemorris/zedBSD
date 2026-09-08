@@ -405,8 +405,12 @@ kern_boot_parameters_initialize(
 	current_parameters_valid = error == 0;
 	current_parameters_source_present = error == 0 && input != NULL;
 
-	/* Reports the parse result. */
-	return error;
+	/* Reports why the parse failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -491,8 +495,12 @@ kern_boot_source_selector_validate(
 	/* A bare name is a device name. */
 	error = selector_text(selector, DISK_NAME_MAX, 1);
 
-	/* Reports the validation result. */
-	return error;
+	/* Reports why the validation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -849,8 +857,12 @@ kern_boot_source_lookup(
 	if (error == 0 && slot_out != NULL)
 		*slot_out = reference.slot;
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -975,8 +987,12 @@ kern_boot_source_runtime_lookup(
 	/* Looks the path up in the slot's runtime mount. */
 	error = runtime_mount_lookup(source, reference.relative, path_out);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1105,7 +1121,11 @@ parse_error(
 	parameters_reset(parameters);
 
 	/* Reports the caller's error. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Compares an unterminated name with a parameter name. */
@@ -1223,7 +1243,11 @@ context_fail(
 	context->cleanup_error = kern_boot_source_context_destroy(context);
 
 	/* Reports the caller's error. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Looks a relative path up in a slot's runtime mount. */
@@ -1253,6 +1277,10 @@ runtime_mount_lookup(
 	error = namei_path_at(&context, relative, result);
 	cwdinfo_destroy(&context);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

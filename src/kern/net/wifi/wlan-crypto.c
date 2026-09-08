@@ -259,8 +259,12 @@ wlan_sha1(
 	else
 		wlan_crypto_erase(&context, sizeof(context));
 
-	/* Reports the digest result. */
-	return error;
+	/* Reports why the digest failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -348,7 +352,11 @@ fail:
 	wlan_crypto_erase(context, sizeof(*context));
 
 	/* Reports the failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -377,8 +385,12 @@ wlan_hmac_sha1_update(
 	if (error != 0)
 		context->failed = 1;
 
-	/* Reports the update result. */
-	return error;
+	/* Reports why the update failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -416,7 +428,11 @@ wlan_hmac_sha1_final(
 	wlan_crypto_erase(context, sizeof(*context));
 
 	/* Reports the finished digest. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -458,8 +474,12 @@ wlan_hmac_sha1(
 	else
 		wlan_crypto_erase(&context, sizeof(context));
 
-	/* Reports the digest result. */
-	return error;
+	/* Reports why the digest failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -561,8 +581,12 @@ wlan_pbkdf2_hmac_sha1(
 	wlan_crypto_erase(next, sizeof(next));
 	wlan_crypto_erase(counter_bytes, sizeof(counter_bytes));
 
-	/* Reports the derivation result. */
-	return error;
+	/* Reports why the derivation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -650,8 +674,12 @@ wlan_crypto_prf_sha1(
 	wlan_crypto_erase(&hmac, sizeof(hmac));
 	wlan_crypto_erase(digest, sizeof(digest));
 
-	/* Reports the expansion result. */
-	return error;
+	/* Reports why the expansion failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

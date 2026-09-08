@@ -616,7 +616,13 @@ readahead_trim(
 		spin_unlock_irqrestore(&registry, irq);
 	}
 	mutex_unlock(&control);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Initializes the fixed registry before publishing any locks or wait queues. */

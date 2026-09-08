@@ -302,8 +302,12 @@ mouse_input_open(
 	}
 	mutex_unlock(&lifecycle_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void mouse_input_close(void *context);

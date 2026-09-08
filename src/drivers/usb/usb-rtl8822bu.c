@@ -520,8 +520,12 @@ rtl8822bu_radio_read(
 			 ((uint32_t)bytes[3] << 24);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Carries the radio transaction deadline through its USB register write. */
@@ -1257,8 +1261,12 @@ rtl8822bu_register_control(
 	if (error == 0 && clock_ticks() >= deadline)
 		error = ETIMEDOUT;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Emits at most one repetitive transport diagnostic per adapter per second. */
@@ -1331,7 +1339,11 @@ rtl8822bu_register_processing_delay(
 	}
 
 	/* Returns the bounded auxiliary transaction's result. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Performs a register access and its required ON-section completion step. */
@@ -1429,8 +1441,13 @@ rtl8822bu_read8(
 	/* Checks the operation status. */
 	if (error == 0)
 		*result = bytes[0];
-	/* Returns the computed result. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu read16 operation. */
@@ -1455,8 +1472,12 @@ rtl8822bu_read16(
 				     ((uint16_t)bytes[1] << 8));
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu read32 operation. */
@@ -1482,8 +1503,12 @@ rtl8822bu_read32(
 			  ((uint32_t)bytes[3] << 24);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu write8 operation. */
@@ -1687,8 +1712,12 @@ out:
 					 RTL8822BU_EFUSE_ACCESS_OFF);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu board read operation. */
@@ -1773,8 +1802,12 @@ rtl8822bu_board_read(
 	hal_free(logical);
 	hal_free(physical);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 struct rtl8822bu_firmware_saved_registers {
@@ -1948,8 +1981,12 @@ rtl8822bu_firmware_save(
 					 &saved->mcufw_control);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu firmware restore transport operation. */
@@ -1987,8 +2024,12 @@ rtl8822bu_firmware_restore_transport(
 				 saved->txdma_map_high);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu firmware restore failure operation. */
@@ -2019,8 +2060,12 @@ rtl8822bu_firmware_restore_failure(
 		adapter, RTL8822BU_REG_SYS_FUNC_EN + 1U, saved->sys_func_high);
 	rtl8822bu_record_cleanup_error(&error, cleanup_error);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu firmware prepare operation. */
@@ -2122,8 +2167,12 @@ rtl8822bu_firmware_prepare(
 				RTL8822BU_MCUFW_DOWNLOAD_ENABLE);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu firmware reserved page operation. */
@@ -2355,8 +2404,12 @@ rtl8822bu_firmware_chunk(
 	if (error == 0)
 		transfer->segment_open = 0U;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu firmware download model operation. */
@@ -2494,8 +2547,12 @@ out:
 	memset(&transfer, 0, sizeof(transfer));
 	memset(&saved, 0, sizeof(saved));
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu firmware download operation. */
@@ -2670,8 +2727,12 @@ rtl8822bu_bulk_transfer(
 		error = EIO;
 	rtl8822bu_sync_endpoint_result(adapter, endpoint, error);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu rx completion operation. */
@@ -2801,8 +2862,12 @@ rtl8822bu_rx_submit(
 	adapter->starts_active--;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu poll enter operation. */
@@ -2926,8 +2991,12 @@ rtl8822bu_rx_stop(
 	}
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Retire the complete old RX producer generation before a CAM generation is published.  A poll/start already admitted by the old generation is never waited from inside a radio callback: the common worker receives EBUSY and retries after that bounded producer retires. */
@@ -2999,8 +3068,12 @@ rtl8822bu_rx_generation_pause(
 		spin_unlock_irqrestore(&adapter->lock, enabled);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu rx generation resume operation. */
@@ -3057,8 +3130,12 @@ rtl8822bu_rx_generation_resume(
 					RTL8822BU_RX_DRAIN_TIMEOUT_MS);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu rx start operation. */
@@ -3248,8 +3325,12 @@ rtl8822bu_hardware_stop_locked(
 		rtl8822bu_record_cleanup_error(&error, security_error);
 	rtl8822bu_record_cleanup_error(&error, stop_error);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu tx report generation active locked operation. */
@@ -3865,8 +3946,12 @@ out_release:
 	}
 	rtl8822bu_operation_leave(adapter);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu frame transmit operation. */
@@ -3950,8 +4035,12 @@ rtl8822bu_frame_transmit(
 #endif
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu rx classify operation. */
@@ -4381,8 +4470,12 @@ rtl8822bu_rx_report(
 	if (error == 0)
 		report->reported++;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the rtl8822bu rx has work operation. */
@@ -4644,8 +4737,12 @@ rtl8822bu_security_hardware_clear(
 	}
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int rtl8822bu_connect_start(void *context, uint64_t generation,
@@ -4890,8 +4987,12 @@ static int rtl8822bu_connect_start(void *context, uint64_t generation,
 	}
 	rtl8822bu_operation_leave(adapter);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int rtl8822bu_association_set(void *context, uint64_t generation,
@@ -5030,8 +5131,12 @@ static int rtl8822bu_association_set(void *context, uint64_t generation,
 	}
 	rtl8822bu_operation_leave(adapter);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int rtl8822bu_association_clear(void *context, uint64_t generation,
@@ -5167,8 +5272,12 @@ static int rtl8822bu_association_clear(void *context, uint64_t generation,
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	rtl8822bu_operation_leave(adapter);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int
@@ -5478,8 +5587,12 @@ rtl8822bu_key_install_checked(struct rtl8822bu_adapter *adapter,
 	}
 	rtl8822bu_operation_leave(adapter);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int rtl8822bu_keys_activate_checked(struct rtl8822bu_adapter *adapter,
@@ -5835,8 +5948,12 @@ out_error:
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	rtl8822bu_operation_leave(adapter);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int rtl8822bu_key_delete_checked(struct rtl8822bu_adapter *adapter,
@@ -6098,8 +6215,12 @@ static int rtl8822bu_key_delete_checked(struct rtl8822bu_adapter *adapter,
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	rtl8822bu_operation_leave(adapter);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void
@@ -6252,8 +6373,12 @@ static int rtl8822bu_disconnect(void *context, uint64_t generation)
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 	rtl8822bu_operation_leave(adapter);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int rtl8822bu_management_transmit(void *context, uint64_t generation,
@@ -6390,8 +6515,12 @@ out_operation:
 	}
 	rtl8822bu_operation_leave(adapter);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int rtl8822bu_key_install(void *context,
@@ -6480,8 +6609,12 @@ static int rtl8822bu_quiesce(void *context)
 	adapter->scan_channel = 0U;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static const struct wlan_radio_ops rtl8822bu_radio_ops = {
@@ -6802,8 +6935,12 @@ fail_hardware:
 	RTL8822BU_FIRMWARE_RELEASE(&firmware);
 done:
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int rtl8822bu_open(struct net_device *device)
@@ -6863,8 +7000,12 @@ static int rtl8822bu_open(struct net_device *device)
 	}
 	mutex_unlock(&adapter->lifecycle_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int rtl8822bu_station_close_wait(struct wlan_station *station)
@@ -7218,8 +7359,12 @@ static int rtl8822bu_close_locked(struct rtl8822bu_adapter *adapter)
 		adapter->close_pending = 0U;
 	spin_unlock_irqrestore(&adapter->lock, enabled);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* The station work pin retains the adapter across a checked stop retry. */
@@ -7233,8 +7378,12 @@ static int rtl8822bu_stop_retry(void *context)
 	error = rtl8822bu_close_locked(adapter);
 	mutex_unlock(&adapter->lifecycle_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Failed synchronous close arms independent checked retirement. */
@@ -7308,8 +7457,12 @@ static int rtl8822bu_transmit(struct net_device *device,
 	error = wlan_station_transmit(station, packet);
 	rtl8822bu_operation_leave(adapter);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static unsigned rtl8822bu_poll_receive(struct net_device *device,
@@ -7527,8 +7680,12 @@ static int rtl8822bu_ioctl(struct net_device *device, unsigned long request,
 			   error, operations, reports, quiescing);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void rtl8822bu_release(void *driver_data)

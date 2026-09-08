@@ -577,5 +577,9 @@ fail_locked:
 	poll_notify();
 
 	/* Reports the failed open. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

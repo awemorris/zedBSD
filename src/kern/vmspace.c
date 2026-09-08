@@ -30,19 +30,21 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#define PAGE_SIZE ZEDBSD_PAGE_SIZE
+#define PAGE_SIZE			ZEDBSD_PAGE_SIZE
+#define VM_PAGE_SLAB_SLOTS		32U
+#define VM_PRIVATE_PAGE_SLAB_SLOTS	24U
+#define VM_PRIVATE_PAGE_SLAB_FREE_MASK	((1U << VM_PRIVATE_PAGE_SLAB_SLOTS) - 1U)
+#define VM_PAGE_MAP_RECLAIM_RETRIES	4U
+#define VM_PAGE_MAP_RESERVE_PAGES	4U
 
-#define VM_PAGE_SLAB_SLOTS 32U
-
-#define VM_PRIVATE_PAGE_SLAB_SLOTS 24U
-
-#define VM_PRIVATE_PAGE_SLAB_FREE_MASK \
-	((1U << VM_PRIVATE_PAGE_SLAB_SLOTS) - 1U)
-
-#define VM_PAGE_MAP_RECLAIM_RETRIES 4U
-
-#define VM_PAGE_MAP_RESERVE_PAGES 4U
-
+/*
+ * One page of storage carved into mapping descriptors.
+ *
+ * Descriptors are handed out from a slab's free mask rather than allocated
+ * one at a time, so a mapping can be created on a fault path that must not
+ * enter the general allocator.  A slab stays on the list for as long as it
+ * holds any live slot.
+ */
 struct vm_page_slab {
 	struct hal_pmem memory;
 	struct vm_page_slab *next;
@@ -51,6 +53,12 @@ struct vm_page_slab {
 	struct vm_page slots[VM_PAGE_SLAB_SLOTS];
 };
 
+/*
+ * One page of storage carved into private page backings.
+ *
+ * It works exactly like the mapping slab above, but for the anonymous
+ * backings that reclaim and copy-on-write hand around.
+ */
 struct vm_private_page_slab {
 	struct hal_pmem memory;
 	struct vm_private_page_slab *next;
@@ -59,43 +67,107 @@ struct vm_private_page_slab {
 	struct vm_private_page slots[VM_PRIVATE_PAGE_SLAB_SLOTS];
 };
 
+/*
+ * The address space the kernel itself runs in.
+ *
+ * It is statically constructed with a reference that is never dropped, so
+ * that early code can map before any allocator is up.
+ */
 struct vmspace kernel_vmspace = {
 	.space = HAL_SPACE_SYS,
 	.refs = { 1 },
 };
 
+/*
+ * Guards the mapping slab list below.
+ *
+ * It is a spinlock rather than a mutex because descriptors are taken on
+ * fault paths that must not sleep.
+ */
 static struct spinlock vm_page_slab_lock;
 
+/*
+ * The mapping slabs, in most-recently-added order.
+ *
+ * Slabs are added when no slot is free and are never returned to the
+ * system, because the descriptors they hold outlive any single mapping.
+ */
 static struct vm_page_slab *vm_page_slabs;
 
+/*
+ * Guards the private page slab list below.
+ */
 static struct spinlock vm_private_page_slab_lock;
 
+/*
+ * The private page slabs, in most-recently-added order.
+ *
+ * They live for the lifetime of the kernel, on the same grounds as the
+ * mapping slabs above.
+ */
 static struct vm_private_page_slab *vm_private_page_slabs;
 
+/*
+ * Guards the reap queue and the reaper callback below.
+ */
 static struct spinlock vmspace_reap_lock;
 
+/*
+ * The head of the queue of address spaces waiting to be torn down.
+ *
+ * A final reference is dropped from scheduler context, which may not sleep,
+ * so the address space is queued here and the reaper finishes it.
+ */
 static struct vmspace *vmspace_reap_head;
 
+/*
+ * The tail of that queue, so an enqueue is a constant-time append.
+ */
 static struct vmspace *vmspace_reap_tail;
 
+/*
+ * The address layout this platform gives every user address space.
+ *
+ * It is filled once, on the first call that needs it, and read without a
+ * lock afterwards.
+ */
 struct vm_layout vm_layout;
 
+/*
+ * Whether the layout above has been filled.
+ */
 static int vm_layout_initialized;
 
+/*
+ * How many user address spaces exist.
+ *
+ * It is raised when one is created and lowered when one is finally reaped,
+ * so a shutdown can wait for it to fall to zero.
+ */
 static atomic_uint_t vmspace_live;
 
-extern void vmspace_unmap_retire_checkpoint(struct vmspace *vm, uintptr_t start,
-	size_t size) __attribute__((weak));
-extern void vmspace_pin_page_checkpoint(struct vmspace *vm, size_t index,
-	size_t page_count) __attribute__((weak));
-extern void vmspace_object_revoke_checkpoint(struct vmspace *vm,
-	uintptr_t address) __attribute__((weak));
-_Static_assert(sizeof(struct vm_page_slab) <= PAGE_SIZE,
-	"VM page metadata slab exceeds one physical page");
-_Static_assert(VM_PRIVATE_PAGE_SLAB_SLOTS < 32U,
-	"VM private metadata slab bitmap must fit uint32_t");
-_Static_assert(sizeof(struct vm_private_page_slab) <= PAGE_SIZE,
-	"VM private metadata slab exceeds one physical page");
+/*
+ * The argument handed back to the reaper callback.
+ *
+ * It is published under the reap lock together with the callback itself, so
+ * a queue item that predates registration still reaches the right reaper.
+ */
+static void *vmspace_reap_notify_argument;
+
+/*
+ * Test checkpoints.
+ *
+ * The test build defines these to observe a step that leaves no other
+ * trace.  They are weak so that a production kernel links without them and
+ * every call site is a null test the compiler removes.
+ */
+extern void vmspace_unmap_retire_checkpoint(struct vmspace *vm, uintptr_t start, size_t size) __attribute__((weak));
+extern void vmspace_pin_page_checkpoint(struct vmspace *vm, size_t index, size_t page_count) __attribute__((weak));
+extern void vmspace_object_revoke_checkpoint(struct vmspace *vm, uintptr_t address) __attribute__((weak));
+
+/*
+ * Forward declaration.
+ */
 static void (*vmspace_reap_notify)(void *);
 static int alloc_vm_page(struct hal_pmem *memory);
 static int alloc_vm_metadata_page(struct hal_pmem *memory);
@@ -156,7 +228,12 @@ static void vmspace_set_stack_limit_locked(struct vmspace *vm, uint64_t limit);
 static int vmspace_set_data_limit_locked(struct vmspace *vm, uint64_t limit);
 static void vmspace_generation_advance_locked(struct vmspace *vm);
 
-static void *vmspace_reap_notify_argument;
+/*
+ * Static asserts.
+ */
+_Static_assert(sizeof(struct vm_page_slab) <= PAGE_SIZE, "VM page metadata slab exceeds one physical page");
+_Static_assert(VM_PRIVATE_PAGE_SLAB_SLOTS < 32U, "VM private metadata slab bitmap must fit uint32_t");
+_Static_assert(sizeof(struct vm_private_page_slab) <= PAGE_SIZE, "VM private metadata slab exceeds one physical page");
 
 /*
  * Initializes the user address layout and the metadata allocators once.
@@ -172,12 +249,11 @@ vmspace_layout_init(
 		return;
 
 	/* Initializes the slab and reaper locks. */
-	spin_init(&vm_page_slab_lock, LOCK_RANK_VM_OBJECT,
-	    "VM page metadata");
-	spin_init(&vm_private_page_slab_lock, LOCK_RANK_VM_OBJECT,
-	    "VM private metadata");
-	spin_init(&vmspace_reap_lock, LOCK_RANK_VMSPACE,
-	    "VM space reaper");
+	spin_init(&vm_page_slab_lock, LOCK_RANK_VM_OBJECT, "VM page metadata");
+	spin_init(&vm_private_page_slab_lock, LOCK_RANK_VM_OBJECT, "VM private metadata");
+	spin_init(&vmspace_reap_lock, LOCK_RANK_VMSPACE, "VM space reaper");
+
+	/* Starts every slab list, reap queue and reaper hook out empty. */
 	vm_page_slabs = NULL;
 	vm_private_page_slabs = NULL;
 	vmspace_reap_head = NULL;
@@ -193,8 +269,11 @@ vmspace_layout_init(
 	    limit <= minimum ||
 	    (limit & (PAGE_SIZE - 1U)) != 0)
 		HAL_FATAL("invalid HAL user address range");
+
 	vm_layout.user_minimum = minimum;
 	vm_layout.user_limit = limit;
+
+/* Places the break and the mmap area where this ABI expects them. */
 #ifdef ZEDBSD_USER_ABI_LP64
 	vm_layout.brk_limit = 0x0000000100000000ULL;
 	vm_layout.mmap_base = 0x0000000100000000ULL;
@@ -202,10 +281,12 @@ vmspace_layout_init(
 	vm_layout.brk_limit = 0x10000000U;
 	vm_layout.mmap_base = 0x10000000U;
 #endif
+
 	if (vm_layout.brk_limit >= limit ||
 	    vm_layout.mmap_base >= limit ||
 	    limit - minimum <= PAGE_SIZE)
 		HAL_FATAL("user address range too small");
+
 	vm_layout.stack_top = limit - PAGE_SIZE;
 	vm_layout_initialized = 1;
 }
@@ -227,7 +308,9 @@ vm_page_alloc_metadata(
 
 	/* Takes a free slot from an existing slab. */
 	irq = spin_lock_irqsave(&vm_page_slab_lock);
+
 	page = vm_page_slab_take_locked();
+
 	spin_unlock_irqrestore(&vm_page_slab_lock, irq);
 	if (page != NULL)
 		return page;
@@ -245,7 +328,10 @@ vm_page_alloc_metadata(
 	memset(fresh, 0, PAGE_SIZE);
 	fresh->memory = memory;
 	fresh->free_mask = UINT32_MAX;
+
 	irq = spin_lock_irqsave(&vm_page_slab_lock);
+
+	/* Adds the freshly built slab only when no slot became free meanwhile. */
 	page = vm_page_slab_take_locked();
 	if (page == NULL) {
 		fresh->next = vm_page_slabs;
@@ -253,9 +339,12 @@ vm_page_alloc_metadata(
 		page = vm_page_slab_take_locked();
 		fresh = NULL;
 	}
+
 	spin_unlock_irqrestore(&vm_page_slab_lock, irq);
+
 	if (fresh != NULL)
 		(void)hal_pmem_free(&memory);
+
 	return page;
 }
 
@@ -292,6 +381,7 @@ vm_page_free_metadata(
 		    address >= end ||
 		    (address - first) % sizeof(struct vm_page) != 0)
 			continue;
+
 		slot = (unsigned)((address - first) / sizeof(struct vm_page));
 		if ((slab->free_mask & (1U << slot)) != 0 || slab->used == 0)
 			HAL_FATAL("invalid VM page metadata free");
@@ -305,11 +395,15 @@ vm_page_free_metadata(
 			released = slab->memory;
 			release = 1;
 		}
+
 		spin_unlock_irqrestore(&vm_page_slab_lock, irq);
+
 		if (release && hal_pmem_free(&released) != HAL_OK)
 			HAL_FATAL("VM page metadata slab free failed");
+
 		return;
 	}
+
 	spin_unlock_irqrestore(&vm_page_slab_lock, irq);
 	HAL_FATAL("foreign VM page metadata free");
 }
@@ -335,20 +429,24 @@ vm_private_page_free_metadata(
 
 	if (backing == NULL)
 		return;
+
 	address = (uintptr_t)backing;
 
-	/* Finds the slab that contains the record. */
 	irq = spin_lock_irqsave(&vm_private_page_slab_lock);
+
+	/* Finds the slab that contains the record. */
 	for (link = &vm_private_page_slabs; *link != NULL; link = &slab->next) {
 		slab = *link;
 		first = (uintptr_t)&slab->slots[0];
 		end = (uintptr_t)&slab->slots[VM_PRIVATE_PAGE_SLAB_SLOTS];
+
 		if (address < first ||
 		    address >= end ||
 		    (address - first) % sizeof(struct vm_private_page) != 0)
 			continue;
-		slot = (unsigned)((address - first) /
-		    sizeof(struct vm_private_page));
+
+		slot = (unsigned)((address - first) / sizeof(struct vm_private_page));
+
 		if ((slab->free_mask & (1U << slot)) != 0 || slab->used == 0)
 			HAL_FATAL("invalid VM private metadata free");
 
@@ -361,12 +459,17 @@ vm_private_page_free_metadata(
 			released = slab->memory;
 			release = 1;
 		}
+
 		spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
+
 		if (release && hal_pmem_free(&released) != HAL_OK)
 			HAL_FATAL("VM private metadata slab free failed");
+
 		return;
 	}
+
 	spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
+
 	HAL_FATAL("foreign VM private metadata free");
 }
 
@@ -379,14 +482,24 @@ vmspace_user_range_valid(
 	size_t size)
 {
 	vmspace_layout_init();
+
+	/* Rejects an empty range, which lies nowhere. */
 	if (size == 0)
 		return 0;
+
+	/* Rejects a range that starts below the user address range. */
 	if (start < vm_layout.user_minimum)
 		return 0;
+
+	/* Rejects a range that starts at or above its end. */
 	if (start >= vm_layout.user_limit)
 		return 0;
+
+	/* Rejects a range that reaches past that end. */
 	if (size > vm_layout.user_limit - start)
 		return 0;
+
+	/* Succeeded: the whole range lies inside the user address range. */
 	return 1;
 }
 
@@ -426,6 +539,7 @@ vmspace_object_page_revoke(
 	/* Rejects a page without an owning object. */
 	if (object_page == NULL)
 		return EINVAL;
+
 	object = object_page->owner;
 	if (object == NULL)
 		return EINVAL;
@@ -434,39 +548,49 @@ vmspace_object_page_revoke(
 	for (;;) {
 		/* Takes the next mapping while the page is still BUSY. */
 		vm_metadata_enter();
+
 		irq = spin_lock_irqsave(&object->lock);
+
 		if ((object_page->flags & VM_OBJECT_PAGE_BUSY) == 0) {
 			spin_unlock_irqrestore(&object->lock, irq);
 			vm_metadata_leave();
 			return EBUSY;
 		}
+
+		/* Stops once no mapping of the page is left to revoke. */
 		mapping = object_page->mappings;
 		if (mapping == NULL) {
 			spin_unlock_irqrestore(&object->lock, irq);
 			vm_metadata_leave();
 			break;
 		}
+
 		vm = mapping->vm;
 		region = mapping->region;
 		if (vm == NULL || region == NULL || !vmspace_tryref(vm))
 			HAL_FATAL("invalid shared VM reverse mapping");
+
 		spin_unlock_irqrestore(&object->lock, irq);
 
 		/* Pins the mapping in metadata. */
 		mutex_lock(&vm->lock);
 		irq = spin_lock_irqsave(&object->lock);
+
 		if (mapping->object_page != object_page ||
 		    mapping->vm != vm ||
 		    mapping->region != region ||
 		    (mapping->flags & VM_MAPPING_BUSY) != 0)
 			HAL_FATAL("shared VM reverse mapping changed while pinned");
+
 		mapping->flags |= VM_MAPPING_BUSY;
 		region->hold_count++;
 		readonly = region->prot & ~HAL_SPACE_WRITE;
 		was_mapped = (mapping->flags & VM_MAPPING_MAPPED) != 0;
+
 		spin_unlock_irqrestore(&object->lock, irq);
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
+
 		if (vmspace_object_revoke_checkpoint != NULL)
 			vmspace_object_revoke_checkpoint(vm, mapping->address);
 
@@ -475,17 +599,22 @@ vmspace_object_page_revoke(
 			flags = 0;
 			if (readonly != 0) {
 				error = hal_page_prot_query(vm->space,
-				    (void *)mapping->address, PAGE_SIZE, readonly,
-				    &flags);
+							    (void *)mapping->address,
+							    PAGE_SIZE,
+							    readonly,
+							    &flags);
 				if (error != HAL_OK)
 					HAL_FATAL("shared VM write revoke failed");
 			} else {
 				/* The synchronous unmap is the revoke operation. */
 				flags |= HAL_PAGE_DIRTY;
 			}
-			if (hal_page_unmap(vm->space, (void *)mapping->address,
-			    PAGE_SIZE) != HAL_OK)
+
+			if (hal_page_unmap(vm->space,
+					   (void *)mapping->address,
+					   PAGE_SIZE) != HAL_OK)
 				HAL_FATAL("shared VM content unmap failed");
+
 			observed |= flags;
 		}
 
@@ -493,32 +622,45 @@ vmspace_object_page_revoke(
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
 		irq = spin_lock_irqsave(&object->lock);
+
 		if (mapping->object_page != object_page ||
 		    (mapping->flags & VM_MAPPING_BUSY) == 0)
 			HAL_FATAL("shared VM revoke reservation lost");
+
+		/*
+		 * Walks the region's mapping list to the link that refers to
+		 * this mapping, keeping the address of the link so it can be
+		 * unlinked without a second search.
+		 */
 		link = &region->pages;
 		while (*link != NULL && *link != mapping)
 			link = &(*link)->next;
 		if (*link != mapping)
 			HAL_FATAL("shared VM mapping left region");
 		*link = mapping->next;
+
 		mapping->flags &= ~(VM_MAPPING_MAPPED | VM_MAPPING_BUSY);
 		vm_object_mapping_remove_locked(object_page, mapping);
 		mapping->object_page = NULL;
 		if (region->hold_count == 0)
 			HAL_FATAL("shared VM revoke region hold underflow");
 		region->hold_count--;
+
 		vmspace_generation_advance_locked(vm);
+
 		waitq_wake_all(&object->page_waitq);
 		spin_unlock_irqrestore(&object->lock, irq);
 		vmspace_fault_wake_locked(vm);
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
+
 		vm_page_free_metadata(mapping);
 		vmspace_put(vm);
 	}
+
 	if (observed_flags != NULL)
 		*observed_flags = observed;
+
 	return 0;
 }
 
@@ -535,6 +677,7 @@ vm_page_effective_prot(
 	prot = page->region->prot;
 	if ((page->flags & VM_MAPPING_COW) != 0)
 		prot &= ~HAL_SPACE_WRITE;
+
 	return prot;
 }
 
@@ -581,16 +724,19 @@ vm_private_page_vaddr(
 	/* A page without a private backing has no address. */
 	if (page == NULL)
 		return 0;
+
 	backing = page->private_page;
 	if (backing == NULL)
 		return 0;
 
-	/* Reads the address only while the backing is resident. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
+	/* Reads the address only while the backing is resident. */
 	if ((backing->flags & VM_PAGE_RESIDENT) != 0)
 		address = (uintptr_t)backing->pmem.vaddr;
 	else
 		address = 0;
+
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 
 	/* Reports the resident address, or zero. */
@@ -623,11 +769,13 @@ vmspace_create(
 	refcount_init(&vm->refs, 1);
 	(void)mutex_init(&vm->lock, LOCK_RANK_VMSPACE, "VM space");
 	waitq_init(&vm->fault_waitq, "VM fault");
+
 	vm->generation = 1;
 	vm->address_limit = vmspace_address_cap();
 	vm->data_limit = vm->address_limit;
 	vm->stack_limit = vm->address_limit;
 	(void)atomic_fetch_add_relaxed(&vmspace_live, 1U);
+
 	return vm;
 }
 
@@ -642,7 +790,9 @@ vmspace_tryref(
 
 	if (vm == NULL)
 		return 0;
+
 	acquired = refcount_tryget(&vm->refs);
+
 	return acquired;
 }
 
@@ -732,12 +882,16 @@ retry:
 	error = 0;
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
+	/* Rejects an address no region covers with the access asked for. */
 	region = find_region_locked(vm, address, 1);
 	if (region == NULL || (region->prot & required) == 0) {
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
 		return EFAULT;
 	}
+
+	/* Waits out a mapping another fault already owns. */
 	page = find_page(region, page_address);
 	if (page != NULL && (page->flags & VM_MAPPING_BUSY) != 0) {
 		sequence = waitq_sequence(&vm->fault_waitq);
@@ -746,6 +900,8 @@ retry:
 		vmspace_wait_fault_event(vm, sequence);
 		goto retry;
 	}
+
+	/* An existing object mapping is served by the object cache. */
 	if (page != NULL && page->object_page != NULL) {
 		if (region->snapshot != NULL && (required == HAL_SPACE_WRITE ||
 		    (page->flags & VM_MAPPING_MAPPED) == 0)) {
@@ -758,6 +914,7 @@ retry:
 				goto retry;
 			return error;
 		}
+
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
 		return 0;
@@ -772,17 +929,23 @@ retry:
 		old_unmapped = 0;
 		map_pressure = 0;
 		retry_fault = 0;
+
 		if (page->private_page == NULL) {
 			mutex_unlock(&vm->lock);
 			vm_metadata_leave();
 			return EFAULT;
 		}
+
 		region->hold_count++;
+
 		page->flags |= VM_MAPPING_BUSY;
 		reserved_backing = page->private_page;
+
 		vm_private_page_ref(reserved_backing);
+
 		reservation_generation = vm->generation;
 		reservation_prot = region->prot;
+
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
 
@@ -794,35 +957,57 @@ retry:
 		/* Waiting for another vmspace's owner may have changed this backing. */
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
-		if (error == 0 &&
-		    (find_region_locked(vm, address, 1) != region ||
-		    find_page(region, page_address) != page ||
-		    page->region != region ||
-		    page->address != page_address ||
-		    page->private_page != reserved_backing ||
-		    region->prot != reservation_prot ||
-		    (region->prot & required) == 0))
-			error = EAGAIN;
+
+		if (error == 0) {
+			if (find_region_locked(vm, address, 1) != region) {
+				/* The region this reservation named is gone. */
+				error = EAGAIN;
+			} else if (find_page(region, page_address) != page) {
+				/* The region no longer holds this mapping. */
+				error = EAGAIN;
+			} else if (page->region != region) {
+				/* The mapping now belongs to another region. */
+				error = EAGAIN;
+			} else if (page->address != page_address) {
+				/* The mapping now covers another address. */
+				error = EAGAIN;
+			} else if (page->private_page != reserved_backing) {
+				/* The mapping took a different backing. */
+				error = EAGAIN;
+			} else if (region->prot != reservation_prot) {
+				/* The region's protection changed under the wait. */
+				error = EAGAIN;
+			} else if ((region->prot & required) == 0) {
+				/* The region no longer permits this access. */
+				error = EAGAIN;
+			}
+		}
+
 		if (error == 0) {
 			/* Full validation acknowledges unrelated generation changes. */
 			reservation_generation = vm->generation;
-			need_cow = required == HAL_SPACE_WRITE &&
-			    (page->flags & VM_MAPPING_COW) != 0;
+			need_cow = required == HAL_SPACE_WRITE && (page->flags & VM_MAPPING_COW) != 0;
 			was_mapped = (page->flags & VM_MAPPING_MAPPED) != 0;
 		}
+
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
 
 		/* Brings a swapped page back and prepares a COW copy. */
 		if (error == 0) {
+
+			/* Samples the backing the copy will map, while it is still owned. */
 			state_irq = spin_lock_irqsave(&reserved_backing->state_lock);
 			swapped = (reserved_backing->flags & VM_PAGE_SWAPPED) != 0;
 			spin_unlock_irqrestore(&reserved_backing->state_lock, state_irq);
 			if (swapped)
 				error = vm_private_page_in_owned(reserved_backing, page);
 		}
+
 		if (error == 0 && need_cow)
 			error = prepare_cow_copy(page, reserved_backing, &fresh);
+
+		/* Samples what the copy must still match when it is installed. */
 		if (error == 0) {
 			state_irq = spin_lock_irqsave(&reserved_backing->state_lock);
 			if ((reserved_backing->flags &
@@ -834,6 +1019,7 @@ retry:
 				    reserved_backing->generation;
 				prepared_physical = reserved_backing->pmem.paddr;
 			}
+
 			spin_unlock_irqrestore(&reserved_backing->state_lock,
 			    state_irq);
 		}
@@ -850,8 +1036,11 @@ retry:
 		/* Revalidates everything and installs the mapping. */
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
+
 		if (old_unmapped)
 			page->flags &= ~VM_MAPPING_MAPPED;
+
+		/* Refuses the mapping if the backing moved since it was sampled. */
 		if (error == 0) {
 			state_irq = spin_lock_irqsave(&reserved_backing->state_lock);
 			if ((reserved_backing->flags &
@@ -864,6 +1053,8 @@ retry:
 			spin_unlock_irqrestore(&reserved_backing->state_lock,
 			    state_irq);
 		}
+
+		/* Refuses the mapping if anything the reservation named has changed. */
 		if (error == 0 &&
 		    (vm->generation != reservation_generation ||
 		    find_region_locked(vm, address, 1) != region ||
@@ -874,6 +1065,8 @@ retry:
 		    region->prot != reservation_prot ||
 		    (region->prot & required) == 0))
 			error = EAGAIN;
+
+		/* Installs the copy, giving up on map pressure so a reclaim can run. */
 		if (error == 0 && fresh != NULL) {
 			if (hal_page_map(vm->space, (void *)page_address,
 			    fresh->pmem.paddr, PAGE_SIZE, region->prot) != HAL_OK) {
@@ -907,6 +1100,8 @@ retry:
 				map_pressure_retries++;
 				error = EAGAIN;
 			}
+
+			/* Retakes the locks and traps if the reservation did not survive. */
 			vm_metadata_enter();
 			mutex_lock(&vm->lock);
 			if (find_region_locked(vm, address, 1) != region ||
@@ -921,20 +1116,27 @@ retry:
 		page->flags &= ~VM_MAPPING_BUSY;
 		if (region->hold_count == 0)
 			HAL_FATAL("VM fault region hold underflow");
+
 		region->hold_count--;
 		if (error == 0)
 			vmspace_generation_advance_locked(vm);
+
 		retry_fault = error == EAGAIN;
 		vmspace_fault_wake_locked(vm);
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
+
 		if (backing_owner)
 			vm_private_page_io_release(reserved_backing);
+
 		vm_private_page_put(reserved_backing);
+
 		if (fresh != NULL)
 			vm_private_page_put(fresh);
+
 		if (retry_fault)
 			goto retry;
+
 		return error;
 	}
 
@@ -943,11 +1145,13 @@ retry:
 	reservation_generation = vm->generation;
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+
 	page = vm_page_alloc_metadata();
 	if (page == NULL) {
 		error = ENOMEM;
 		goto release_region;
 	}
+
 	page->vm = vm;
 	page->region = region;
 	page->address = page_address;
@@ -956,11 +1160,14 @@ retry:
 	/* Links the placeholder unless the page appeared meanwhile. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	if (find_region_locked(vm, address, 1) != region ||
 	    (region->prot & required) == 0) {
 		error = EFAULT;
 		goto unlink_locked;
 	}
+
+	/* Starts over when another fault published this page first. */
 	if (find_page(region, page_address) != NULL) {
 		region->hold_count--;
 		vmspace_fault_wake_locked(vm);
@@ -976,6 +1183,8 @@ retry:
 		error = EFAULT;
 		goto unlink_locked;
 	}
+
+	/* Publishes the placeholder and samples what it is measured against. */
 	page->next = region->pages;
 	region->pages = page;
 	reservation_generation = vm->generation;
@@ -990,36 +1199,54 @@ retry:
 			maximum_offset = (uint64_t)INT64_MAX;
 		else
 			maximum_offset = (uint64_t)INT32_MAX;
+
+		/* Refuses an offset the file cannot address. */
 		if (region->file_offset < 0 ||
 		    (uint64_t)region->file_offset +
 		    (uint64_t)(page_address - region->start) > maximum_offset) {
 			error = EOVERFLOW;
 			goto remove_placeholder;
 		}
-		object_offset = region->file_offset +
-		    (off_t)(page_address - region->start);
-		if (region->snapshot != NULL &&
-		    (object_offset < region->snapshot->offset ||
-		    (uint64_t)(object_offset - region->snapshot->offset) >= region->snapshot->length)) {
-			error = EFAULT;
-			goto remove_placeholder;
+
+		/* Refuses an offset outside the snapshot this region maps. */
+		object_offset = region->file_offset + (off_t)(page_address - region->start);
+		if (region->snapshot != NULL) {
+			if (object_offset < region->snapshot->offset ||
+			    (uint64_t)(object_offset - region->snapshot->offset) >= region->snapshot->length) {
+				error = EFAULT;
+				goto remove_placeholder;
+			}
 		}
+
+		/* Reads the page in through the object, or through the snapshot. */
 		error = vm_object_fault(region->snapshot != NULL ?
-		    region->snapshot->input.read_object : region->object, object_offset, &object_page);
+					region->snapshot->input.read_object :
+					region->object,
+					object_offset,
+					&object_page);
 		if (error != 0)
 			goto remove_placeholder;
+
+		/* A snapshot mapping must get the page the snapshot pinned. */
 		if (region->snapshot != NULL) {
 			if (object_page != region->snapshot->pages[
 			    (size_t)(object_offset - region->snapshot->offset) / PAGE_SIZE]) {
 				error = EIO;
 				goto remove_placeholder;
 			}
+
 			page->flags |= VM_MAPPING_COW;
 		}
+
+		/* Maps the object page, read-only when a snapshot owns it. */
 		page->object_page = object_page;
-		mapped = hal_page_map(vm->space, (void *)page_address,
-		    object_page->pmem.paddr, PAGE_SIZE,
-		    region->snapshot != NULL ? region->prot & ~HAL_SPACE_WRITE : region->prot) == HAL_OK;
+		mapped = hal_page_map(vm->space,
+				      (void *)page_address,
+				      object_page->pmem.paddr,
+				      PAGE_SIZE,
+				      region->snapshot != NULL ?
+				      region->prot & ~HAL_SPACE_WRITE :
+				      region->prot) == HAL_OK;
 		if (!mapped) {
 			/*
 			 * The fault hold keeps this cache page out of object
@@ -1035,24 +1262,33 @@ retry:
 			} else {
 				error = ENOMEM;
 			}
+
 			goto remove_placeholder;
 		}
+
 		page->flags |= VM_PAGE_RESIDENT | VM_MAPPING_MAPPED;
+
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
+
 		if (find_region_locked(vm, address, 1) != region ||
 		    find_page(region, page_address) != page)
 			HAL_FATAL("lost VM fault reservation");
+
 		vm_object_mapping_add(object_page, page);
+
 		object_page = NULL;
 		page->flags &= ~VM_MAPPING_BUSY;
 		region->hold_count--;
+
 		vmspace_generation_advance_locked(vm);
 		vmspace_fault_wake_locked(vm);
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
+
 		if (required == HAL_SPACE_WRITE && snapshot_cached)
 			goto retry;
+
 		return 0;
 	}
 
@@ -1062,35 +1298,47 @@ retry:
 		error = ENOMEM;
 		goto remove_placeholder;
 	}
+
 	private_page_attach_new(page, page->private_page);
 	reserved_backing = page->private_page;
 	vm_private_page_ref(reserved_backing);
 	private_io_hold = 1;
+
 	error = vm_private_page_io_acquire(reserved_backing);
 	if (error != 0)
 		goto remove_placeholder;
+
 	private_io_owned = 1;
 	if (allocate_page_frame(page->private_page, page) != 0) {
 		error = ENOMEM;
 		goto remove_placeholder;
 	}
+
+	/* Fills the fresh page from the file, or with zeroes. */
 	if (region->backing == VM_BACKING_FILE) {
 		error = fill_file_page(region, page);
 	} else {
 		memset((void *)page->private_page->pmem.vaddr, 0, PAGE_SIZE);
 		error = 0;
 	}
+
+	/* Publishes the filled page as resident and samples what it became. */
 	if (error == 0) {
-		irq = spin_lock_irqsave(
-		    &page->private_page->state_lock);
+		irq = spin_lock_irqsave(&page->private_page->state_lock);
+
 		page->private_page->flags |= VM_PAGE_RESIDENT;
+
 		page->private_page->generation++;
 		if (page->private_page->generation == 0)
 			page->private_page->generation++;
+
 		prepared_backing_generation = page->private_page->generation;
+
 		prepared_physical = page->private_page->pmem.paddr;
+
 		spin_unlock_irqrestore(&page->private_page->state_lock, irq);
 	}
+
 	if (error != 0)
 		goto remove_placeholder;
 
@@ -1098,18 +1346,20 @@ retry:
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
 	if (error == 0) {
-		irq = spin_lock_irqsave(
-		    &reserved_backing->state_lock);
-		if ((reserved_backing->flags &
-		    (VM_PAGE_BUSY | VM_PAGE_RESIDENT)) !=
-		    (VM_PAGE_BUSY | VM_PAGE_RESIDENT) ||
+		irq = spin_lock_irqsave(&reserved_backing->state_lock);
+
+		if ((reserved_backing->flags & (VM_PAGE_BUSY | VM_PAGE_RESIDENT)) != (VM_PAGE_BUSY | VM_PAGE_RESIDENT) ||
 		    reserved_backing->generation != prepared_backing_generation ||
 		    reserved_backing->pmem.paddr != prepared_physical)
 			error = EAGAIN;
+
 		spin_unlock_irqrestore(&reserved_backing->state_lock, irq);
 	}
+
 	if (error != 0)
 		goto unlink_locked;
+
+	/* Refuses the mapping if anything the reservation named has changed. */
 	if (vm->generation != reservation_generation ||
 	    find_region_locked(vm, address, 1) != region ||
 	    find_page(region, page_address) != page ||
@@ -1121,6 +1371,7 @@ retry:
 		error = EAGAIN;
 		goto unlink_locked;
 	}
+
 	if (hal_page_map(vm->space, (void *)page_address,
 	    prepared_physical, PAGE_SIZE, region->prot) != HAL_OK) {
 		/*
@@ -1141,6 +1392,7 @@ retry:
 		} else {
 			error = ENOMEM;
 		}
+
 		goto remove_placeholder;
 	}
 
@@ -1148,28 +1400,35 @@ retry:
 	mapped = 1;
 	page->flags |= VM_MAPPING_MAPPED;
 	vm_page_track(page);
+
 	page->flags &= ~VM_MAPPING_BUSY;
 	region->hold_count--;
+
 	vmspace_generation_advance_locked(vm);
 	vmspace_fault_wake_locked(vm);
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+
 	vm_private_page_io_release(reserved_backing);
 	private_io_owned = 0;
 	vm_private_page_put(reserved_backing);
 	private_io_hold = 0;
+
 	return 0;
 
 remove_placeholder:
 	/* Undoes a partial mapping and drops an object fault hold. */
 	if (mapped)
 		(void)hal_page_unmap(vm->space, (void *)page_address, PAGE_SIZE);
+
 	if (object_page != NULL) {
 		vm_object_fault_release(object_page);
 		object_page = NULL;
 	}
+
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 unlink_locked:
 	/* Unlinks the placeholder and releases the region hold. */
 	link = &region->pages;
@@ -1177,40 +1436,54 @@ unlink_locked:
 		link = &(*link)->next;
 	if (*link == page)
 		*link = page->next;
+
 	if (region->hold_count == 0)
 		HAL_FATAL("VM fault region hold underflow");
 	region->hold_count--;
+
 	vmspace_fault_wake_locked(vm);
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+
 	if (page->private_page != NULL)
 		vm_page_untrack(page);
+
 	if (private_io_owned) {
 		vm_private_page_io_release(reserved_backing);
 		private_io_owned = 0;
 	}
+
 	if (private_io_hold) {
 		vm_private_page_put(reserved_backing);
 		private_io_hold = 0;
 	}
+
 	vm_page_free_metadata(page);
+
 	if (error == EAGAIN)
 		goto retry;
+
 	return error;
 
 release_region:
 	/* Releases the region hold this fault took and wakes the waiters. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	if (region->hold_count == 0)
 		HAL_FATAL("VM fault region hold underflow");
 	region->hold_count--;
+
 	vmspace_fault_wake_locked(vm);
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1272,16 +1545,36 @@ vmspace_pin_user_pages(
 	struct vm_page *entry;
 	int wait_error;
 
-	/* Rejects a malformed request or a result array of the wrong size. */
-	if (vm == NULL ||
-	    vm == &kernel_vmspace ||
-	    pages == NULL ||
-	    size == 0 ||
-	    (required & ~(HAL_SPACE_READ | HAL_SPACE_WRITE |
-	    HAL_SPACE_EXEC)) != 0 ||
-	    required == 0 ||
-	    !vmspace_user_range_valid(address, size))
+	/* Rejects a call that names no address space. */
+	if (vm == NULL)
 		return EFAULT;
+
+	/* Rejects the kernel address space, which is never pinned this way. */
+	if (vm == &kernel_vmspace)
+		return EFAULT;
+
+	/* Rejects a call that names nowhere to report the pages. */
+	if (pages == NULL)
+		return EFAULT;
+
+	/* Rejects an empty range. */
+	if (size == 0)
+		return EFAULT;
+
+	/* Rejects an access this kernel does not define. */
+	if ((required & ~(HAL_SPACE_READ | HAL_SPACE_WRITE |
+	    HAL_SPACE_EXEC)) != 0)
+		return EFAULT;
+
+	/* Rejects a request that asks for no access at all. */
+	if (required == 0)
+		return EFAULT;
+
+	/* Rejects a range that does not lie inside the user address range. */
+	if (!vmspace_user_range_valid(address, size))
+		return EFAULT;
+
+	/* Rejects a result array that does not match the range. */
 	first = address & ~(uintptr_t)(PAGE_SIZE - 1U);
 	last = (address + size - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
 	expected = (size_t)((last - first) / PAGE_SIZE) + 1U;
@@ -1305,6 +1598,7 @@ retry_faults:
 			if (error != 0)
 				return error;
 		}
+
 		if (current == last)
 			break;
 	}
@@ -1325,27 +1619,39 @@ retry_faults:
 	error = vmspace_check_locked(vm, address, size, required);
 	for (index = 0, current = first; error == 0 && index < page_count;
 	     index++, current += PAGE_SIZE) {
+
+		/* Looks up the mapping the fault just published. */
 		region = find_region_locked(vm, current, 1);
 		if (region != NULL)
 			entry = find_page(region, current);
 		else
 			entry = NULL;
+
+		/* Faults again when the mapping went away under the walk. */
 		if (entry == NULL) {
 			refault = 1;
 			error = EAGAIN;
 			break;
 		}
+
+		/* Waits out a mapping another pass owns. */
 		if ((entry->flags & VM_MAPPING_BUSY) != 0) {
 			fault_sequence = waitq_sequence(&vm->fault_waitq);
 			wait_fault = 1;
 			error = EAGAIN;
 			break;
 		}
+
+		/*
+		 * A mapping is backed either privately or by an object, never
+		 * by both and never by neither.
+		 */
 		if ((entry->private_page == NULL) ==
 		    (entry->object_page == NULL)) {
 			error = EFAULT;
 			break;
 		}
+
 		if ((required & HAL_SPACE_WRITE) != 0 &&
 		    (entry->flags & VM_MAPPING_COW) != 0) {
 			/* Private cache pages also require COW before a writable pin. */
@@ -1353,12 +1659,15 @@ retry_faults:
 			error = EAGAIN;
 			break;
 		}
+
+		/* A private mapping must be resident and past any copy-on-write. */
 		if (entry->private_page != NULL) {
 			if (!vm_private_page_is_resident(entry)) {
 				refault = 1;
 				error = EAGAIN;
 				break;
 			}
+
 			if ((required & HAL_SPACE_WRITE) != 0 &&
 			    (entry->flags & VM_MAPPING_COW) != 0) {
 				/* A fork raced the fault phase; break the new COW generation. */
@@ -1382,6 +1691,8 @@ retry_faults:
 				wait_backing = entry->private_page;
 				vm_private_page_ref(wait_backing);
 			}
+
+			/* Records which of the two backings this pin holds. */
 			if (error == 0) {
 				pages[index].kind = VMSPACE_PINNED_PRIVATE;
 				pages[index].owner.private_page = entry->private_page;
@@ -1394,11 +1705,13 @@ retry_faults:
 				pages[index].memory = entry->object_page->pmem;
 			}
 		}
+
 		if (error == 0)
 			acquired++;
 		if (error == 0 && vmspace_pin_page_checkpoint != NULL)
 			vmspace_pin_page_checkpoint(vm, index, page_count);
 	}
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 	if (error == 0)
@@ -1413,13 +1726,21 @@ retry_faults:
 			return wait_error;
 		goto retry_faults;
 	}
+
 	if (wait_fault) {
 		vmspace_wait_fault_event(vm, fault_sequence);
 		goto retry_faults;
 	}
+
 	if (refault)
 		goto retry_faults;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1467,13 +1788,19 @@ vmspace_wire_range(
 		error = vmspace_fault(vm, page, fault_access);
 		if (error != 0)
 			break;
+
+		/* Takes the locks the mapping below is inspected under. */
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
+
+		/* Looks up the mapping the fault just published. */
 		region = find_region_locked(vm, page, 1);
 		if (region != NULL)
 			entry = find_page(region, page);
 		else
 			entry = NULL;
+
+		/* Waits out a mapping another pass owns. */
 		if (entry != NULL && (entry->flags & VM_MAPPING_BUSY) != 0) {
 			sequence = waitq_sequence(&vm->fault_waitq);
 			mutex_unlock(&vm->lock);
@@ -1481,6 +1808,8 @@ vmspace_wire_range(
 			vmspace_wait_fault_event(vm, sequence);
 			continue;
 		}
+
+		/* Refuses a page the fault did not leave resident. */
 		if (entry == NULL || (entry->object_page == NULL &&
 		    !vm_private_page_is_resident(entry))) {
 			error = EFAULT;
@@ -1488,6 +1817,8 @@ vmspace_wire_range(
 			vm_metadata_leave();
 			break;
 		}
+
+		/* Wires the page and moves on to the next one. */
 		entry->wire_count++;
 		vmspace_generation_advance_locked(vm);
 		mutex_unlock(&vm->lock);
@@ -1512,7 +1843,13 @@ vmspace_wire_range(
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1552,36 +1889,49 @@ vmspace_sync(
 	while (current < end) {
 		object = NULL;
 		offset = 0;
+
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
+
 		region = find_region_locked(vm, current, 1);
 		if (region == NULL) {
 			mutex_unlock(&vm->lock);
 			vm_metadata_leave();
 			return ENOMEM;
 		}
+
+		/* Clamps the run to the region and takes the object it maps. */
 		overlap_end = region->start + region->size;
 		if (overlap_end > end)
 			overlap_end = end;
+
 		if (region->object != NULL) {
 			object = region->object;
 			vm_object_ref(object);
 			offset = region->file_offset +
 			    (off_t)(current - region->start);
 		}
+
+		/* Syncs the object outside the locks, then releases it. */
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
+
 		if (object != NULL)
 			error = vm_object_sync_range(object, offset,
 			    overlap_end - current, flags);
 		else
 			error = 0;
+
 		if (object != NULL)
 			vm_object_put(object);
+
 		if (error != 0)
 			return error;
+
 		current = overlap_end;
 	}
+
+	/* An invalidating sync forces every fault to look again. */
 	if ((flags & MS_INVALIDATE) != 0) {
 		vm_metadata_enter();
 		mutex_lock(&vm->lock);
@@ -1589,6 +1939,7 @@ vmspace_sync(
 		mutex_unlock(&vm->lock);
 		vm_metadata_leave();
 	}
+
 	return 0;
 }
 
@@ -1661,10 +2012,13 @@ vmspace_set_reaper_notify(
 
 	/* Publishes the callback and notes whether work already waits. */
 	vmspace_layout_init();
+
 	irq = spin_lock_irqsave(&vmspace_reap_lock);
+
 	vmspace_reap_notify = notify;
 	vmspace_reap_notify_argument = argument;
 	pending = vmspace_reap_head != NULL;
+
 	spin_unlock_irqrestore(&vmspace_reap_lock, irq);
 
 	/*
@@ -1692,10 +2046,13 @@ vmspace_reap_pending(
 
 	/* Takes the whole queue, then destroys each entry unlocked. */
 	irq = spin_lock_irqsave(&vmspace_reap_lock);
+
 	list = vmspace_reap_head;
 	vmspace_reap_head = NULL;
 	vmspace_reap_tail = NULL;
+
 	spin_unlock_irqrestore(&vmspace_reap_lock, irq);
+
 	while (list != NULL) {
 		next = list->reap_next;
 		list->reap_next = NULL;
@@ -1703,6 +2060,7 @@ vmspace_reap_pending(
 		list = next;
 		count++;
 	}
+
 	return count;
 }
 
@@ -1748,17 +2106,21 @@ vmspace_fork(
 
 	if (source == NULL || source == &kernel_vmspace || result == NULL)
 		return EINVAL;
+
 	*result = NULL;
+
 retry:
 	/* Copies under the source locks. */
 	wait_backing = NULL;
 	failed_copy = NULL;
+
 	vm_metadata_enter();
 	mutex_lock(&source->lock);
-	error = vmspace_fork_locked(source, result, &wait_backing,
-	    &failed_copy);
+
+	error = vmspace_fork_locked(source, result, &wait_backing, &failed_copy);
 	if (error == 0)
 		vmspace_generation_advance_locked(source);
+
 	mutex_unlock(&source->lock);
 	vm_metadata_leave();
 
@@ -1772,9 +2134,16 @@ retry:
 			goto retry;
 		return wait_error;
 	}
+
 	if (error == EAGAIN)
 		goto retry;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1792,17 +2161,24 @@ vmspace_map_anon(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	error = vmspace_map_anon_locked(vm, start, size, prot, result);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1821,18 +2197,24 @@ vmspace_map_anon_fixed_noreplace(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
-	error = vmspace_map_anon_fixed_noreplace_locked(vm, start, size, prot,
-	    result);
+
+	error = vmspace_map_anon_fixed_noreplace_locked(vm, start, size, prot, result);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1875,6 +2257,7 @@ vmspace_map_anon_fixed(
 			commit_size = 0;
 		data_size = 0;
 	}
+
 	if (shared) {
 		error = vm_object_create_anonymous(size, &object);
 		if (error != 0)
@@ -1882,18 +2265,35 @@ vmspace_map_anon_fixed(
 	}
 
 	/* Prepares the region fully before replacing the old mappings. */
-	error = prepare_region(start, size, prot, VM_BACKING_ANON, NULL, 0,
-	    start, data_size, flags, commit_size, &prepared);
+	error = prepare_region(start,
+			       size,
+			       prot,
+			       VM_BACKING_ANON,
+			       NULL,
+			       0,
+			       start,
+			       data_size,
+			       flags,
+			       commit_size,
+			       &prepared);
 	if (error != 0) {
 		if (object != NULL)
 			vm_object_put(object);
 		return error;
 	}
+
 	prepared->object = object;
+
 	error = vmspace_replace_prepared(vm, prepared, result);
 	if (error != 0)
 		discard_prepared_region(prepared);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1932,21 +2332,41 @@ vmspace_map_anon_shared_find(
 	/* Finds a free range and maps the object there. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
-	error = vmspace_find_free_range_locked(vm, hint, rounded, PAGE_SIZE,
-	    &start);
-	if (error == 0)
-		error = map_region(vm, start, rounded, prot, VM_BACKING_ANON,
-		    NULL, 0, start, rounded, VM_REGION_SHARED, 0, &region);
+
+	error = vmspace_find_free_range_locked(vm, hint, rounded, PAGE_SIZE, &start);
+	if (error == 0) {
+		error = map_region(vm,
+				   start,
+				   rounded,
+				   prot,
+				   VM_BACKING_ANON,
+				   NULL,
+				   0,
+				   start,
+				   rounded,
+				   VM_REGION_SHARED,
+				   0,
+				   &region);
+	}
+
 	if (error == 0) {
 		region->object = object;
 		*mapped = start;
 		vmspace_generation_advance_locked(vm);
 	}
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+
 	if (error != 0)
 		vm_object_put(object);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1978,8 +2398,12 @@ vmspace_map_file(
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2023,7 +2447,11 @@ vmspace_map_file_shared(
 		vm_object_put(object);
 
 	/* Reports publication or its exact failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2067,6 +2495,7 @@ vmspace_map_file_fixed(
 		else
 			commit_size = 0;
 	}
+
 	if (shared) {
 		error = vm_object_get_shared(file, &object);
 		if (error != 0)
@@ -2081,11 +2510,18 @@ vmspace_map_file_fixed(
 			vm_object_put(object);
 		return error;
 	}
+
 	prepared->object = object;
 	error = vmspace_replace_prepared(vm, prepared, result);
 	if (error != 0)
 		discard_prepared_region(prepared);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2111,8 +2547,12 @@ vmspace_map_stack(
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2175,11 +2615,16 @@ vmspace_shared_mapping_key(
 		*offset = (uintptr_t)region->file_offset + address - region->start;
 		error = 0;
 	}
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2203,8 +2648,12 @@ vmspace_check(
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2218,10 +2667,13 @@ vmspace_unwire_range(
 {
 	if (vm == NULL || vm == &kernel_vmspace)
 		return;
+
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	vmspace_unwire_range_locked(vm, address, size);
 	vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 }
@@ -2240,8 +2692,15 @@ vmspace_copy_to(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EFAULT;
+
 	error = vmspace_copy_to_locked(vm, destination, source, size);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2258,8 +2717,15 @@ vmspace_copy_from(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EFAULT;
+
 	error = vmspace_copy_from_locked(vm, destination, source, size);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2278,16 +2744,22 @@ vmspace_find_free_range_bounded(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
-	error = vmspace_find_free_range_bounded_locked(vm, minimum, maximum,
-	    size, alignment, mapped);
+
+	error = vmspace_find_free_range_bounded_locked(vm, minimum, maximum, size, alignment, mapped);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2305,16 +2777,22 @@ vmspace_find_free_range(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
-	error = vmspace_find_free_range_locked(vm, hint, size, alignment,
-	    mapped);
+
+	error = vmspace_find_free_range_locked(vm, hint, size, alignment, mapped);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2332,17 +2810,24 @@ vmspace_map_find(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	error = vmspace_map_find_locked(vm, hint, size, prot, mapped);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2366,15 +2851,20 @@ vmspace_map_file_find(
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
-	error = vmspace_map_file_find_locked(vm, hint, size, prot, file,
-	    offset, data_size, mapped);
+
+	error = vmspace_map_file_find_locked(vm, hint, size, prot, file, offset, data_size, mapped);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2406,10 +2896,11 @@ vmspace_map_file_shared_find(
 	/* Selects and publishes the region while the object excludes formatting. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
-	error = vmspace_map_file_shared_find_locked(
-		vm, hint, size, prot, file, offset, data_size, object, mapped);
+
+	error = vmspace_map_file_shared_find_locked(vm, hint, size, prot, file, offset, data_size, object, mapped);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
@@ -2418,7 +2909,11 @@ vmspace_map_file_shared_find(
 		vm_object_put(object);
 
 	/* Reports publication or its exact failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2435,17 +2930,24 @@ vmspace_set_brk_start(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	error = vmspace_set_brk_start_locked(vm, start, static_data_bytes);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2461,17 +2963,24 @@ vmspace_brk(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	error = vmspace_brk_locked(vm, requested, result);
 	if (error == 0 && requested != 0)
 		vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2490,12 +2999,15 @@ vmspace_unmap(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	error = vmspace_unmap_locked(vm, start, size, &retired);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
@@ -2507,8 +3019,15 @@ vmspace_unmap(
 	if (error == 0 && retired != NULL &&
 	    vmspace_unmap_retire_checkpoint != NULL)
 		vmspace_unmap_retire_checkpoint(vm, start, size);
+
 	release_retired_regions(retired);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2525,17 +3044,24 @@ vmspace_protect(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	error = vmspace_protect_locked(vm, start, size, prot);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2550,17 +3076,24 @@ vmspace_set_address_limit(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	error = vmspace_set_address_limit_locked(vm, limit);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2575,17 +3108,24 @@ vmspace_set_data_limit(
 
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
+
 	/* Runs the mapping under the metadata and space locks. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	error = vmspace_set_data_limit_locked(vm, limit);
 	if (error == 0)
 		vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2598,10 +3138,13 @@ vmspace_set_stack_limit(
 {
 	if (vm == NULL || vm == &kernel_vmspace)
 		return;
+
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	vmspace_set_stack_limit_locked(vm, limit);
 	vmspace_generation_advance_locked(vm);
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 }
@@ -2636,11 +3179,16 @@ vmspace_map_exec_snapshot(
 		region->snapshot = snapshot;
 		vmspace_generation_advance_locked(vm);
 	}
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
 
-	/* Reports the mapping result. */
-	return error;
+	/* Reports why the mapping failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Allocates one physical page for user memory. */
@@ -2655,7 +3203,13 @@ alloc_vm_page(
 	int error;
 
 	error = hal_pmem_alloc(&request, memory);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Allocates a metadata slab page, reclaiming once when not under the metadata lock. */
@@ -2680,12 +3234,21 @@ alloc_vm_metadata_page(
 	 * and cannot recurse through this helper.
 	 */
 	error = alloc_vm_page(memory);
+
 	if (error == HAL_OK)
 		return HAL_OK;
+
 	if (vm_metadata_owned() || vm_reclaim_one(NULL) != 0)
 		return error;
+
 	error = alloc_vm_page(memory);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Takes a zeroed page-metadata slot from any slab; the caller holds the slab lock. */
@@ -2697,6 +3260,8 @@ vm_page_slab_take_locked(
 	unsigned slot;
 
 	/* Takes the first free slot of the first slab that has one. */
+
+	/* Takes the first free slot of the first slab that has one. */
 	for (slab = vm_page_slabs; slab != NULL; slab = slab->next) {
 		if (slab->free_mask == 0)
 			continue;
@@ -2704,6 +3269,8 @@ vm_page_slab_take_locked(
 			if ((slab->free_mask & (1U << slot)) != 0)
 				break;
 		}
+
+		/* Takes the slot the free mask named and hands it back cleared. */
 		if (slot == VM_PAGE_SLAB_SLOTS)
 			HAL_FATAL("invalid VM page slab bitmap");
 		slab->free_mask &= ~(1U << slot);
@@ -2732,6 +3299,8 @@ vm_private_page_slab_take_locked(
 			if ((slab->free_mask & (1U << slot)) != 0)
 				break;
 		}
+
+		/* Takes the slot the free mask named and hands it back cleared. */
 		if (slot == VM_PRIVATE_PAGE_SLAB_SLOTS)
 			HAL_FATAL("invalid VM private metadata slab bitmap");
 		slab->free_mask &= ~(1U << slot);
@@ -2784,6 +3353,7 @@ vm_private_page_alloc_metadata(
 		backing = vm_private_page_slab_take_locked();
 		fresh = NULL;
 	}
+
 	spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
 	if (fresh != NULL && hal_pmem_free(&memory) != HAL_OK)
 		HAL_FATAL("unused VM private metadata slab free failed");
@@ -2797,18 +3367,25 @@ range_valid(
 	size_t size)
 {
 	vmspace_layout_init();
+
 	if (size == 0)
 		return 0;
+
 	if ((start & (PAGE_SIZE - 1U)) != 0)
 		return 0;
+
 	if ((size & (PAGE_SIZE - 1U)) != 0)
 		return 0;
+
 	if (start < vm_layout.user_minimum)
 		return 0;
+
 	if (start >= vm_layout.user_limit)
 		return 0;
+
 	if (size > vm_layout.user_limit - start)
 		return 0;
+
 	return 1;
 }
 
@@ -2867,6 +3444,7 @@ reclaim_page_map_reserve(
 		if (vm_reclaim_private_one(avoid) != 0)
 			break;
 	}
+
 	return reclaimed;
 }
 
@@ -2892,14 +3470,20 @@ private_page_attach_new(
 {
 	unsigned long irq;
 
-	/* Makes the page the first and only mapping of a fresh backing. */
+	/*
+	 * Makes the page the first and only mapping of a fresh backing.
+	 */
+
 	irq = spin_lock_irqsave(&backing->state_lock);
+
 	if (backing->mapping_count != 0 || backing->mappings != NULL)
 		HAL_FATAL("attaching initialized VM private backing twice");
+
 	backing->mapping_count = 1;
 	page->private_page = backing;
 	page->private_next = backing->mappings;
 	backing->mappings = page;
+
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 }
 
@@ -2946,6 +3530,7 @@ vmspace_fork_locked(
 	copy = vmspace_create();
 	if (copy == NULL)
 		return ENOMEM;
+
 	copy->address_limit = source->address_limit;
 	copy->data_limit = source->data_limit;
 	copy->stack_limit = source->stack_limit;
@@ -2953,25 +3538,36 @@ vmspace_fork_locked(
 	/* Copies each region, then shares each of its private pages. */
 	for (source_region = source->regions; source_region != NULL;
 	     source_region = source_region->next) {
-		error = map_region(copy, source_region->start, source_region->size,
-		    source_region->prot, source_region->backing,
-		    source_region->file, source_region->file_offset,
-		    source_region->data_start, source_region->data_size,
-		    source_region->flags, source_region->commit_size,
-		    &copy_region);
+		error = map_region(copy,
+				   source_region->start,
+				   source_region->size,
+				   source_region->prot,
+				   source_region->backing,
+				   source_region->file,
+				   source_region->file_offset,
+				   source_region->data_start,
+				   source_region->data_size,
+				   source_region->flags,
+				   source_region->commit_size,
+				   &copy_region);
 		if (error != 0)
 			goto fail;
+
 		copy_region->max_prot = source_region->max_prot;
+
 		if (source_region->snapshot != NULL) {
 			file_exec_snapshot_ref(source_region->snapshot);
 			copy_region->snapshot = source_region->snapshot;
 		}
+
 		if (source_region->object != NULL) {
 			vm_object_ref(source_region->object);
 			copy_region->object = source_region->object;
 			/* Shared object pages are mapped lazily in the child. */
 			continue;
 		}
+
+		/* Gives the child a mapping descriptor for every one the parent has. */
 		for (source_page = source_region->pages; source_page != NULL;
 		     source_page = source_page->next) {
 			physical = 0;
@@ -2981,6 +3577,7 @@ vmspace_fork_locked(
 				error = ENOMEM;
 				goto fail;
 			}
+
 			copy_page->vm = copy;
 			copy_page->region = copy_region;
 			copy_page->address = source_page->address;
@@ -2989,6 +3586,7 @@ vmspace_fork_locked(
 				vm_page_free_metadata(copy_page);
 				continue;
 			}
+
 			if (source_page->private_page == NULL) {
 				vm_page_free_metadata(copy_page);
 				error = EFAULT;
@@ -3005,12 +3603,12 @@ vmspace_fork_locked(
 			if (source_region->hold_count == (unsigned)-1)
 				HAL_FATAL("VM fork region hold overflow");
 			source_region->hold_count++;
+
 			source_page->flags |= VM_MAPPING_BUSY;
 			backing = source_page->private_page;
 			page_address = source_page->address;
 			cow_prot = source_region->prot & ~HAL_SPACE_WRITE;
-			source_mapped =
-			    (source_page->flags & VM_MAPPING_MAPPED) != 0;
+			source_mapped = (source_page->flags & VM_MAPPING_MAPPED) != 0;
 			reservation_generation = source->generation;
 
 			/* Read-only private mappings also need COW for later mprotect. */
@@ -3020,6 +3618,8 @@ vmspace_fork_locked(
 					*wait_backing = backing;
 					vm_private_page_ref(*wait_backing);
 				}
+
+				/* Releases what the failed page took before unwinding. */
 				source_page->flags &= ~VM_MAPPING_BUSY;
 				if (source_region->hold_count == 0)
 					HAL_FATAL("VM fork region hold underflow");
@@ -3028,26 +3628,32 @@ vmspace_fork_locked(
 				vm_page_free_metadata(copy_page);
 				goto fail;
 			}
+
+			/* Links the copy in and samples the backing it will share. */
 			copy_page->next = copy_region->pages;
 			copy_region->pages = copy_page;
 			state_irq = spin_lock_irqsave(&backing->state_lock);
 			resident = (backing->flags & VM_PAGE_RESIDENT) != 0;
 			if (resident)
 				physical = backing->pmem.paddr;
+
 			spin_unlock_irqrestore(&backing->state_lock, state_irq);
 
 			/* Downgrades the source and maps the child with no VM lock held. */
 			mutex_unlock(&source->lock);
 			vm_metadata_leave();
+
 			if (resident && source_mapped && hal_page_prot(source->space,
 			    (void *)page_address, PAGE_SIZE, cow_prot) != HAL_OK)
 				error = ENOMEM;
+
 			if (error == 0 && resident && source_mapped &&
 			    hal_page_map(copy->space, (void *)page_address, physical,
 			    PAGE_SIZE, cow_prot) != HAL_OK)
 				error = ENOMEM;
 			else if (error == 0 && resident && source_mapped)
 				child_mapped = 1;
+
 			vm_metadata_enter();
 			mutex_lock(&source->lock);
 
@@ -3057,18 +3663,24 @@ vmspace_fork_locked(
 			    source_page->private_page != backing ||
 			    find_page(source_region, page_address) != source_page)
 				HAL_FATAL("VM fork lost pinned source mapping");
+
 			if (child_mapped)
 				copy_page->flags |= VM_MAPPING_MAPPED;
+
 			if (error == 0 && source->generation != reservation_generation)
 				error = EAGAIN;
+
 			source_page->flags &= ~VM_MAPPING_BUSY;
 			if (source_region->hold_count == 0)
 				HAL_FATAL("VM fork region hold underflow");
+
 			source_region->hold_count--;
 			vm_private_page_operation_end(backing);
 			vmspace_fault_wake_locked(source);
+
 			if (error != 0)
 				goto fail;
+
 			vmspace_generation_advance_locked(source);
 		}
 	}
@@ -3082,12 +3694,19 @@ vmspace_fork_locked(
 	copy->stack_bottom = source->stack_bottom;
 	copy->stack_top = source->stack_top;
 	*result = copy;
+
 	return 0;
 
 fail:
 	/* Child teardown may free pages or sync objects, so retire it locklessly. */
 	*failed_copy = copy;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Creates a region in a vmspace at a range that must be free; the caller holds the VM locks. */
@@ -3120,11 +3739,14 @@ map_region(
 	    overlaps(vm, start, size) ||
 	    (prot & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) != 0)
 		return EINVAL;
+
 	mapped_bytes = vm->mapped_virtual_bytes;
 	if (mapped_bytes > vm->address_limit)
 		mapped_bytes = vm->address_limit;
+
 	if ((uint64_t)size > vm->address_limit - mapped_bytes)
 		return ENOMEM;
+
 	if (backing == VM_BACKING_FILE &&
 	    (file == NULL || file_offset < 0 || data_start < start ||
 	     data_start >= start + size || data_size > start + size - data_start))
@@ -3149,6 +3771,8 @@ map_region(
 			return error;
 		}
 	}
+
+	/* Describes the mapping and publishes it in the address space. */
 	region->start = start;
 	region->size = size;
 	region->prot = prot;
@@ -3160,12 +3784,16 @@ map_region(
 	region->file_offset = file_offset;
 	region->data_start = data_start;
 	region->data_size = data_size;
+
 	if (file != NULL)
 		file_ref(file);
+
 	insert_region(vm, region);
 	vm->mapped_virtual_bytes += size;
+
 	if (result != NULL)
 		*result = region;
+
 	return 0;
 }
 
@@ -3222,6 +3850,8 @@ prepare_region(
 			return error;
 		}
 	}
+
+	/* Describes the mapping without publishing it yet. */
 	region->start = start;
 	region->size = size;
 	region->prot = prot;
@@ -3274,9 +3904,15 @@ vmspace_map_anon_locked(
 		commit_size = size;
 	else
 		commit_size = 0;
-	error = map_region(vm, start, size, prot, VM_BACKING_ANON, NULL,
-	    0, start, 0, 0, commit_size, result);
-	return error;
+
+	error = map_region(vm, start, size, prot, VM_BACKING_ANON, NULL, 0, start, 0, 0, commit_size, result);
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Maps anonymous memory at a range that must not be in use; the caller holds the VM locks. */
@@ -3299,8 +3935,12 @@ vmspace_map_anon_fixed_noreplace_locked(
 	/* Maps the range as ordinary anonymous memory. */
 	error = vmspace_map_anon_locked(vm, start, size, prot, result);
 
-	/* Reports the mapping result. */
-	return error;
+	/* Reports why the mapping failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Maps a private file region at a free range; the caller holds the VM locks. */
@@ -3324,9 +3964,15 @@ vmspace_map_file_locked(
 		commit_size = size;
 	else
 		commit_size = 0;
-	error = map_region(vm, start, size, prot, VM_BACKING_FILE, file,
-	    file_offset, data_start, data_size, 0, commit_size, result);
-	return error;
+
+	error = map_region(vm, start, size, prot, VM_BACKING_FILE, file, file_offset, data_start, data_size, 0, commit_size, result);
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Maps a shared file region at a free range; the caller holds the VM locks. */
@@ -3354,9 +4000,18 @@ vmspace_map_file_shared_locked(
 		return EINVAL;
 
 	/* Creates the region while its address-space metadata is locked. */
-	error = map_region(
-		vm, start, size, prot, VM_BACKING_FILE, file,
-		file_offset, start, data_size, VM_REGION_SHARED, 0, &region);
+	error = map_region(vm,
+			   start,
+			   size,
+			   prot,
+			   VM_BACKING_FILE,
+			   file,
+			   file_offset,
+			   start,
+			   data_size,
+			   VM_REGION_SHARED,
+			   0,
+			   &region);
 	if (error != 0)
 		return error;
 
@@ -3398,12 +4053,15 @@ vmspace_map_stack_locked(
 	    size > top ||
 	    guard_size > top - size)
 		return EINVAL;
+
 	mapped_bytes = vm->mapped_virtual_bytes;
 	if (mapped_bytes > vm->address_limit)
 		mapped_bytes = vm->address_limit;
+
 	if ((uint64_t)size > vm->stack_limit ||
 	    (uint64_t)size + guard_size > vm->address_limit - mapped_bytes)
 		return ENOMEM;
+
 	bottom = top - size;
 	guard_bottom = bottom - guard_size;
 	if (!range_valid(guard_bottom, size + guard_size) ||
@@ -3414,11 +4072,14 @@ vmspace_map_stack_locked(
 	guard = kern_calloc(1, sizeof(*guard));
 	if (guard == NULL)
 		return ENOMEM;
+
 	stack = kern_calloc(1, sizeof(*stack));
 	if (stack == NULL) {
 		kern_free(guard);
 		return ENOMEM;
 	}
+
+	/* Reserves the commitment the stack will use. */
 	error = vm_commit_reserve(size);
 	if (error != 0) {
 		kern_free(stack);
@@ -3441,12 +4102,15 @@ vmspace_map_stack_locked(
 	stack->commit_size = size;
 	stack->backing = VM_BACKING_ANON;
 	stack->data_start = bottom;
+
 	insert_region(vm, guard);
 	insert_region(vm, stack);
+
 	vm->mapped_virtual_bytes += size + guard_size;
 	vm->stack_guard_bottom = guard_bottom;
 	vm->stack_bottom = bottom;
 	vm->stack_top = top;
+
 	return 0;
 }
 
@@ -3488,6 +4152,7 @@ find_page(
 		if (page->address == address)
 			return page;
 	}
+
 	return NULL;
 }
 
@@ -3522,15 +4187,19 @@ vmspace_wait_faults_locked(
 				busy = 1;
 				break;
 			}
+
+			/* Looks for a mapping of this region that a fault still owns. */
 			for (page = region->pages; page != NULL; page = page->next) {
 				if ((page->flags & VM_MAPPING_BUSY) != 0) {
 					busy = 1;
 					break;
 				}
 			}
+
 			if (busy)
 				break;
 		}
+
 		if (!busy)
 			return;
 
@@ -3600,12 +4269,15 @@ fill_file_page(
 		offset_max = (uint64_t)INT64_MAX;
 	else
 		offset_max = (uint64_t)INT32_MAX;
+
 	if (region->file_offset < 0 ||
 	    (uint64_t)(read_start - region->data_start) >
 	    offset_max - (uint64_t)region->file_offset)
 		return EOVERFLOW;
+
 	offset = region->file_offset +
 		(off_t)(read_start - region->data_start);
+
 	count = file_pread(region->file,
 		(void *)(page->private_page->pmem.vaddr +
 		    read_start - page->address),
@@ -3631,6 +4303,7 @@ prepare_cow_copy(
 	fresh = private_page_alloc();
 	if (fresh == NULL)
 		return ENOMEM;
+
 	if (allocate_page_frame(fresh, page) != 0) {
 		vm_private_page_put(fresh);
 		return ENOMEM;
@@ -3696,6 +4369,7 @@ vmspace_check_locked(
 		else
 			current = end;
 	}
+
 	if (current == end)
 		return 0;
 	return EFAULT;
@@ -3726,11 +4400,13 @@ vmspace_pin_mapping_ready(
 	 */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	region = find_region_locked(vm, address, 1);
 	if (region != NULL)
 		entry = find_page(region, address);
 	else
 		entry = NULL;
+
 	if (entry != NULL &&
 	    (region->prot & required) == required &&
 	    (entry->flags & (VM_MAPPING_BUSY | VM_MAPPING_MAPPED)) ==
@@ -3758,8 +4434,10 @@ vmspace_pin_mapping_ready(
 			}
 		}
 	}
+
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+
 	return ready;
 }
 
@@ -3777,6 +4455,7 @@ vmspace_unwire_range_locked(
 
 	if (vm == NULL || size == 0 || address > UINTPTR_MAX - size)
 		return;
+
 	/* Drops one wire from every mapped page of the range. */
 	page = address & ~(uintptr_t)(PAGE_SIZE - 1U);
 	last = (address + size - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
@@ -3821,20 +4500,24 @@ copy_backing(
 	/* Pins every page of the range. */
 	if (size == 0)
 		return 0;
+
 	if (kernel == NULL)
 		return EINVAL;
+
 	if (!vmspace_user_range_valid(user_address, size))
 		return EFAULT;
+
 	first = user_address & ~(uintptr_t)(PAGE_SIZE - 1U);
 	last = (user_address + size - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
 	page_count = (size_t)((last - first) / PAGE_SIZE) + 1U;
 	if (page_count > SIZE_MAX / sizeof(*pages))
 		return ENOMEM;
+
 	pages = kern_calloc(page_count, sizeof(*pages));
 	if (pages == NULL)
 		return ENOMEM;
-	error = vmspace_pin_user_pages(vm, user_address, size, required, pages,
-	    page_count);
+
+	error = vmspace_pin_user_pages(vm, user_address, size, required, pages, page_count);
 	if (error != 0) {
 		kern_free(pages);
 		if (error == ENOMEM)
@@ -3859,6 +4542,8 @@ copy_backing(
 			} else {
 				memcpy(bytes, mapped, chunk);
 			}
+
+			/* Copies through whichever backing the pin holds. */
 			error = 0;
 		} else if (page->kind == VMSPACE_PINNED_OBJECT) {
 			if (to_user)
@@ -3870,15 +4555,25 @@ copy_backing(
 		} else {
 			error = EFAULT;
 		}
+
 		if (error != 0)
 			break;
+
+		/* Advances past the bytes this pin carried. */
 		bytes += chunk;
 		position += chunk;
 		size -= chunk;
 	}
+
 	vmspace_unpin_user_pages(pages, page_count);
 	kern_free(pages);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Copies kernel memory into a user range. */
@@ -3891,9 +4586,14 @@ vmspace_copy_to_locked(
 {
 	int error;
 
-	error = copy_backing(vm, destination, (void *)source, size,
-	    HAL_SPACE_WRITE, 1);
-	return error;
+	error = copy_backing(vm, destination, (void *)source, size, HAL_SPACE_WRITE, 1);
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Copies a user range into kernel memory. */
@@ -3908,7 +4608,13 @@ vmspace_copy_from_locked(
 
 	error = copy_backing(vm, source, destination, size,
 	    HAL_SPACE_READ, 0);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Finds a free aligned range between two bounds; the caller holds the VM lock. */
@@ -3939,25 +4645,32 @@ vmspace_find_free_range_bounded_locked(
 	    minimum >= maximum ||
 	    size > (size_t)(maximum - minimum))
 		return EINVAL;
+
 	if (size > SIZE_MAX - (PAGE_SIZE - 1U))
 		return EOVERFLOW;
+
 	size = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
 	limit = maximum;
 	if (vm->stack_guard_bottom != 0 && vm->stack_guard_bottom < limit)
 		limit = vm->stack_guard_bottom;
+
 	start = minimum;
 	if (start > UINTPTR_MAX - (alignment - 1U))
 		return ENOMEM;
+
 	start = (start + alignment - 1U) & ~(uintptr_t)(alignment - 1U);
 
 	/* Slides the candidate past every region it collides with. */
 	for (;;) {
 		moved = 0;
+
 		if (start >= limit || size > limit - start)
 			return ENOMEM;
+
 		for (region = vm->regions; region != NULL; region = region->next) {
 			if (start + size <= region->start)
 				break;
+
 			if (start < region->start + region->size &&
 			    region->start < start + size) {
 				if (region->start > UINTPTR_MAX - region->size ||
@@ -3970,9 +4683,11 @@ vmspace_find_free_range_bounded_locked(
 				break;
 			}
 		}
+
 		if (!moved)
 			break;
 	}
+
 	*mapped = start;
 	return 0;
 }
@@ -3996,11 +4711,14 @@ vmspace_find_free_range_locked(
 		return ENOMEM;
 
 	/* Searches from the hint up to the end of the user area. */
-	error = vmspace_find_free_range_bounded_locked(vm, hint, vm_layout.user_limit,
-	    size, alignment, mapped);
+	error = vmspace_find_free_range_bounded_locked(vm, hint, vm_layout.user_limit, size, alignment, mapped);
 
-	/* Reports the search result. */
-	return error;
+	/* Reports why the search failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Maps anonymous memory at a free range near a hint; the caller holds the VM locks. */
@@ -4021,7 +4739,13 @@ vmspace_map_find_locked(
 		    (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U), prot, NULL);
 	if (error == 0)
 		*mapped = start;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Maps a private file region at a free range near a hint; the caller holds the VM locks. */
@@ -4047,15 +4771,20 @@ vmspace_map_file_find_locked(
 
 	/* Maps the file there, clamping the data to the mapping. */
 	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
+
 	if (data_size > size)
 		data_size = size;
-	error = vmspace_map_file_locked(vm, start, rounded, prot, file, offset,
-	    start, data_size, NULL);
+
+	error = vmspace_map_file_locked(vm, start, rounded, prot, file, offset, start, data_size, NULL);
 	if (error == 0)
 		*mapped = start;
 
-	/* Reports the mapping result. */
-	return error;
+	/* Reports why the mapping failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Maps a shared file region at a free range near a hint; the caller holds the VM locks. */
@@ -4092,7 +4821,11 @@ vmspace_map_file_shared_find_locked(
 		*mapped = start;
 
 	/* Reports the mapping outcome to the prepared-object owner. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Unmaps and frees one page record during teardown. */
@@ -4109,6 +4842,7 @@ free_vm_page(
 		vm_page_free_metadata(page);
 		return;
 	}
+
 	if (page->flags & VM_MAPPING_MAPPED)
 		(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
 	vm_page_untrack(page);
@@ -4152,6 +4886,8 @@ detach_vm_page_for_unmap(
 			HAL_FATAL("VM unmap commit failed");
 		page->flags &= ~VM_MAPPING_MAPPED;
 	}
+
+	/* An object mapping only leaves the object's reverse mapping list. */
 	if (page->object_page != NULL) {
 		vm_object_mapping_remove(page->object_page, page);
 		page->object_page = NULL;
@@ -4246,31 +4982,40 @@ split_region_prepared(
 	*right = *region;
 	right->start = address;
 	right->size = right_size;
+
 	if (original_data_start > address)
 		right_data_start = original_data_start;
 	else
 		right_data_start = address;
+
 	if (original_data_end < region_end)
 		right_data_end = original_data_end;
 	else
 		right_data_end = region_end;
+
 	if (right_data_end < right_data_start)
 		right_data_end = right_data_start;
+
 	right->data_start = right_data_start;
 	right->data_size = right_data_end - right_data_start;
+
 	if (region->backing == VM_BACKING_FILE &&
 	    right_data_start > original_data_start)
-		right->file_offset +=
-		    (off_t)(right_data_start - original_data_start);
+		right->file_offset += (off_t)(right_data_start - original_data_start);
+
 	if (region->commit_size != 0)
 		right->commit_size = right_size;
 	else
 		right->commit_size = 0;
+
 	right->pages = NULL;
+
 	if (right->file != NULL)
 		file_ref(right->file);
+
 	if (right->object != NULL)
 		vm_object_ref(right->object);
+
 	if (right->snapshot != NULL)
 		file_exec_snapshot_ref(right->snapshot);
 
@@ -4287,8 +5032,11 @@ split_region_prepared(
 		left_data_start = region->start;
 		left_data_end = left_data_start;
 	}
+
+	/* Gives the left half its share of the data range and the commitment. */
 	region->data_start = left_data_start;
 	region->data_size = left_data_end - left_data_start;
+
 	if (region->commit_size != 0)
 		region->commit_size = left_size;
 	else
@@ -4302,13 +5050,16 @@ split_region_prepared(
 			link = &page->next;
 			continue;
 		}
+
 		*link = page->next;
 		page->region = right;
 		page->next = right->pages;
 		right->pages = page;
 	}
+
 	right->next = region->next;
 	region->next = right;
+
 	return 0;
 }
 
@@ -4331,8 +5082,12 @@ split_region(
 	if (error != 0)
 		kern_free(right);
 
-	/* Reports the split result. */
-	return error;
+	/* Reports why the split failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Frees a list of retired regions and their resources outside the locks. */
@@ -4395,6 +5150,7 @@ vmspace_replace_prepared(
 	    prepared == NULL ||
 	    !range_valid(prepared->start, prepared->size))
 		return EINVAL;
+
 	split_first = kern_calloc(1, sizeof(*split_first));
 	split_second = kern_calloc(1, sizeof(*split_second));
 	if (split_first == NULL || split_second == NULL) {
@@ -4402,6 +5158,7 @@ vmspace_replace_prepared(
 		kern_free(split_second);
 		return ENOMEM;
 	}
+
 	start = prepared->start;
 	end = start + prepared->size;
 	vm_metadata_enter();
@@ -4416,10 +5173,13 @@ vmspace_replace_prepared(
 			error = EINVAL;
 			goto out_locked;
 		}
+
 		if (region->hold_count != 0) {
 			error = EAGAIN;
 			goto out_locked;
 		}
+
+		/* Refuses the replacement while any page of the range is wired. */
 		for (page = region->pages; page != NULL; page = page->next) {
 			if (page->address < end &&
 			    page->address + PAGE_SIZE > start &&
@@ -4428,6 +5188,8 @@ vmspace_replace_prepared(
 				goto out_locked;
 			}
 		}
+
+		/* Counts how much mapped address space the replacement frees. */
 		if (region->start > start)
 			overlap_start = region->start;
 		else
@@ -4438,10 +5200,13 @@ vmspace_replace_prepared(
 			overlap_end = end;
 		removed += overlap_end - overlap_start;
 	}
+
 	if (removed > vm->mapped_virtual_bytes) {
 		error = ENOMEM;
 		goto out_locked;
 	}
+
+	/* Refuses a replacement that would exceed the address-space limit. */
 	mapped_bytes = vm->mapped_virtual_bytes - removed;
 	if (mapped_bytes > vm->address_limit)
 		mapped_bytes = vm->address_limit;
@@ -4458,6 +5223,8 @@ vmspace_replace_prepared(
 			goto out_locked;
 		split_first = NULL;
 	}
+
+	/* Splits the region that straddles the start of the range. */
 	region = find_region_locked(vm, start, 1);
 	if (region != NULL && start > region->start) {
 		if (split_first != NULL)
@@ -4479,10 +5246,12 @@ vmspace_replace_prepared(
 		if (region->start >= start)
 			detach_region_pages_for_unmap(vm, region);
 	}
+
 	for (link = &vm->regions; *link != NULL; link = &(*link)->next) {
 		if ((*link)->start >= start)
 			break;
 	}
+
 	region = *link;
 	while (region != NULL && region->start < end) {
 		*link = region->next;
@@ -4491,6 +5260,7 @@ vmspace_replace_prepared(
 		retired = region;
 		region = *link;
 	}
+
 	insert_region(vm, prepared);
 	vm->mapped_virtual_bytes += prepared->size;
 	vmspace_generation_advance_locked(vm);
@@ -4510,8 +5280,12 @@ out_locked:
 		vmspace_unmap_retire_checkpoint(vm, start, prepared->size);
 	release_retired_regions(retired);
 
-	/* Reports the replacement result. */
-	return error;
+	/* Reports why the replacement failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Records the program break start; the caller holds the VM locks. */
@@ -4529,11 +5303,14 @@ vmspace_set_brk_start_locked(
 	    start >= vm_layout.brk_limit ||
 	    overlaps(vm, start, PAGE_SIZE))
 		return EINVAL;
+
 	if (static_data_bytes > vm->data_limit)
 		return ENOMEM;
+
 	vm->brk_start = start;
 	vm->brk_current = start;
 	vm->static_data_bytes = static_data_bytes;
+
 	return 0;
 }
 
@@ -4573,14 +5350,15 @@ vmspace_brk_locked(
 	/* The request must stay within the break area and the data limit. */
 	if (requested < vm->brk_start || requested >= vm_layout.brk_limit)
 		return ENOMEM;
+
 	if (vm->static_data_bytes > vm->data_limit ||
 	    (uint64_t)(requested - vm->brk_start) >
 	    vm->data_limit - vm->static_data_bytes)
 		return ENOMEM;
-	old_end = (vm->brk_current + PAGE_SIZE - 1U) &
-		~(uintptr_t)(PAGE_SIZE - 1U);
-	new_end = (requested + PAGE_SIZE - 1U) &
-		~(uintptr_t)(PAGE_SIZE - 1U);
+
+	old_end = (vm->brk_current + PAGE_SIZE - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
+	new_end = (requested + PAGE_SIZE - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
+
 	for (link = &vm->regions; *link != NULL; link = &(*link)->next) {
 		if (((*link)->flags & VM_REGION_BRK) != 0) {
 			region = *link;
@@ -4626,9 +5404,12 @@ vmspace_brk_locked(
 				page_link = &page->next;
 				continue;
 			}
+
 			*page_link = page->next;
 			free_vm_page(vm, page);
 		}
+
+		/* Gives back the commitment and the address space the break released. */
 		difference = old_end - new_end;
 		vm_commit_release(difference);
 		region->size -= difference;
@@ -4639,8 +5420,10 @@ vmspace_brk_locked(
 			kern_free(region);
 		}
 	}
+
 	vm->brk_current = requested;
 	*result = requested;
+
 	return 0;
 }
 
@@ -4682,12 +5465,16 @@ vmspace_unmap_locked(
 				return EBUSY;
 		}
 	}
+
+	/* Splits the region that straddles the end of the range. */
 	region = find_region_locked(vm, end - 1U, 1);
 	if (region != NULL && end < region->start + region->size) {
 		error = split_region(region, end);
 		if (error != 0)
 			return error;
 	}
+
+	/* Splits the region that straddles the start of the range. */
 	region = find_region_locked(vm, start, 1);
 	if (region != NULL && start > region->start) {
 		error = split_region(region, start);
@@ -4707,10 +5494,12 @@ vmspace_unmap_locked(
 		if (region->start >= start)
 			detach_region_pages_for_unmap(vm, region);
 	}
+
 	for (link = &vm->regions; *link != NULL; link = &(*link)->next) {
 		if ((*link)->start >= start)
 			break;
 	}
+
 	region = *link;
 	while (region != NULL && region->start < end) {
 		*link = region->next;
@@ -4719,6 +5508,7 @@ vmspace_unmap_locked(
 		*retired = region;
 		region = *link;
 	}
+
 	return 0;
 }
 
@@ -4776,6 +5566,7 @@ vmspace_protect_locked(
 		if (covered > end)
 			covered = end;
 	}
+
 	if (covered != end)
 		return EINVAL;
 
@@ -4786,6 +5577,8 @@ vmspace_protect_locked(
 		if (error != 0)
 			return error;
 	}
+
+	/* Splits the region that straddles the start of the range. */
 	region = find_region_locked(vm, start, 1);
 	if (start > region->start) {
 		error = split_region(region, start);
@@ -4793,6 +5586,7 @@ vmspace_protect_locked(
 			return error;
 		region = region->next;
 	}
+
 	first = region;
 
 	/* A region becoming accessible or writable needs commit first. */
@@ -4806,6 +5600,7 @@ vmspace_protect_locked(
 			new_commit += region->size;
 		}
 	}
+
 	if (new_commit != 0) {
 		error = vm_commit_reserve(new_commit);
 		if (error != 0)
@@ -4848,6 +5643,8 @@ vmspace_protect_locked(
 					page->flags |= VM_MAPPING_MAPPED |
 					    VM_MAPPING_PROTECT_ADDED;
 			}
+
+			/* Remembers where the failure happened so it can be rolled back. */
 			if (hal_error != HAL_OK) {
 				failed_region = region;
 				failed_page = page;
@@ -4869,6 +5666,7 @@ vmspace_protect_locked(
 		      (prot & HAL_SPACE_WRITE) != 0)))
 			region->commit_size = region->size;
 	}
+
 	return 0;
 
 rollback:
@@ -4902,9 +5700,11 @@ rollback:
 				HAL_FATAL("VM protection rollback failed");
 			}
 		}
+
 		if (region == failed_region)
 			break;
 	}
+
 	if (new_commit != 0)
 		vm_commit_release(new_commit);
 	return EINVAL;
@@ -4936,6 +5736,7 @@ vmspace_destroy(
 		vm_metadata_enter();
 		region = vm->regions;
 	}
+
 	hal_page_destroy_space(vm->space);
 	(void)atomic_raw_fetch_add_relaxed(&vmspace_live.value, (unsigned)-1);
 	vm_metadata_leave();
@@ -5048,20 +5849,27 @@ vmspace_exec_cache_fault(
 		else
 			unmapped = 1;
 	}
+
+	/* Revalidates everything and installs the mapping. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
+
 	if ((page->flags & VM_MAPPING_BUSY) == 0 || region->hold_count == 0)
 		HAL_FATAL("exec cache fault lost reservation");
+
 	if (unmapped)
 		page->flags &= ~VM_MAPPING_MAPPED;
+
 	if (error == 0 && (find_region_locked(vm, address, 1) != region ||
 	    find_page(region, address) != page || page->object_page != source ||
 	    region->snapshot == NULL || region->prot != prot || (prot & required) == 0))
 		error = EAGAIN;
+
 	if (error == 0 && hal_page_map(vm->space, (void *)address,
 	    writing ? fresh->pmem.paddr : source->pmem.paddr, PAGE_SIZE,
 	    writing ? prot : prot & ~HAL_SPACE_WRITE) != HAL_OK)
 		error = ENOMEM;
+
 	if (error == 0) {
 		if (writing) {
 			vm_object_mapping_remove(source, page);
@@ -5072,15 +5880,25 @@ vmspace_exec_cache_fault(
 			vm_page_track(page);
 			page->flags &= ~VM_MAPPING_COW;
 		}
+
 		page->flags |= VM_MAPPING_MAPPED;
 		vmspace_generation_advance_locked(vm);
 	}
+
+	/* Releases the reservation and wakes the faults that waited. */
 	page->flags &= ~VM_MAPPING_BUSY;
 	region->hold_count--;
 	vmspace_fault_wake_locked(vm);
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+
 	if (fresh != NULL)
 		vm_private_page_put(fresh);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

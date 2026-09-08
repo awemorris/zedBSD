@@ -88,8 +88,12 @@ ipv4_output(
 
 	error = ipv4_output_common(device, destination, protocol, 0, 0, 0, packet);
 
-	/* Reports the send result. */
-	return error;
+	/* Reports why the send failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -106,8 +110,12 @@ ipv4_output_wait(
 
 	error = ipv4_output_common(device, destination, protocol, 0, 0, 1, packet);
 
-	/* Reports the send result. */
-	return error;
+	/* Reports why the send failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -135,8 +143,12 @@ ipv4_output_source(
 	error = ipv4_output_common(device, destination, protocol, source, 1, 0,
 	    packet);
 
-	/* Reports the send result. */
-	return error;
+	/* Reports why the send failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -156,8 +168,12 @@ ipv4_init(
 	/* Receives IPv4 frames from Ethernet. */
 	error = ethernet_protocol_register(ETHERNET_TYPE_IPV4, ipv4_input);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Builds and sends one IPv4 packet; the packet is always consumed. */
@@ -264,8 +280,12 @@ ipv4_output_common(
 	if (have_route)
 		route_release(&route);
 
-	/* Reports the send result. */
-	return error;
+	/* Reports why the send failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Receives an IPv4 packet from Ethernet; the packet is always consumed. */

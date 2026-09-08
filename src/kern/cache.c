@@ -319,7 +319,11 @@ cache_memory_set_target(
 	mutex_unlock(&control_lock);
 
 	/* Reports whether the new target was actually published. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

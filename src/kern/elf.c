@@ -140,8 +140,12 @@ elf32_load_content(
 	if (error == 0)
 		copy_image32(image, &normalized);
 
-	/* Reports the load result. */
-	return error;
+	/* Reports why the load failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -163,8 +167,12 @@ elf32_load(
 	error = elf32_load_content(&lease, vm, image);
 	file_content_lease_end(&lease);
 
-	/* Reports the load result. */
-	return error;
+	/* Reports why the load failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -194,8 +202,12 @@ elf32_load_interpreter(
 		copy_image32(image, &normalized);
 	file_content_lease_end(&lease);
 
-	/* Reports the load result. */
-	return error;
+	/* Reports why the load failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -220,8 +232,12 @@ elf64_load_content(
 	if (error == 0)
 		copy_image64(image, &normalized);
 
-	/* Reports the load result. */
-	return error;
+	/* Reports why the load failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -243,8 +259,12 @@ elf64_load(
 	error = elf64_load_content(&lease, vm, image);
 	file_content_lease_end(&lease);
 
-	/* Reports the load result. */
-	return error;
+	/* Reports why the load failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -274,8 +294,12 @@ elf64_load_interpreter(
 		copy_image64(image, &normalized);
 	file_content_lease_end(&lease);
 
-	/* Reports the load result. */
-	return error;
+	/* Reports why the load failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Recognizes the one-page RWX PLT segment that SPARC V9 binaries carry. */
@@ -735,8 +759,12 @@ copy_segment_snapshot(
 	if (buffer != fallback)
 		io_pool_release(buffer);
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Shares immutable full pages, retaining private edge and BSS pages. */
@@ -790,7 +818,13 @@ load_segment_snapshot(
 	if (error == 0)
 		error = copy_segment_snapshot(lease, vm, end,
 		    source + (off_t)(leading + shared), size - leading - shared);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Validates an image of one class and role and maps its segments. */
@@ -1159,8 +1193,12 @@ invalid:
 out:
 	kern_free(programs);
 
-	/* Reports the load result. */
-	return error;
+	/* Reports why the load failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Copies a normalized image description into the 32-bit record. */

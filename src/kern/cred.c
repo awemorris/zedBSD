@@ -303,7 +303,11 @@ vfs_may_create(
 	error = vfs_access(parent, cred, W_OK | X_OK);
 
 	/* Reports the access check. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -368,7 +372,11 @@ vfs_may_rename(
 		error = vfs_may_create(new_parent, cred);
 
 	/* Reports the destination check. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -431,7 +439,11 @@ vfs_clear_setid_on_content_change(
 	error = inode_setattr(inode, &status, INODE_ATTR_MODE);
 
 	/* Reports the mode update. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -455,8 +467,12 @@ vfs_clear_setid_on_write(
 	/* Clears the bits as for any content change. */
 	error = vfs_clear_setid_on_content_change(inode);
 
-	/* Reports the clearing result. */
-	return error;
+	/* Reports why the clearing failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -509,8 +525,12 @@ vfs_setxattr(
 	/* Writes the attribute. */
 	error = inode_setxattr(inode, name, value, size, flags);
 
-	/* Reports the write result. */
-	return error;
+	/* Reports why the write failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -609,8 +629,12 @@ vfs_removexattr(
 	/* Removes the attribute. */
 	error = inode_removexattr(inode, name);
 
-	/* Reports the removal result. */
-	return error;
+	/* Reports why the removal failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Checks the permission an attribute namespace requires for an access. */

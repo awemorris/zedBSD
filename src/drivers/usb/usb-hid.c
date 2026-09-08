@@ -1101,8 +1101,12 @@ parse_main(
 	}
 	local_clear(&parser->local);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the parse global operation. */
@@ -1587,8 +1591,12 @@ fail:
 	kern_free(parser);
 	kern_free(layout);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1660,8 +1668,12 @@ fail:
 	kern_free(parser);
 	kern_free(layout);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2650,8 +2662,12 @@ usb_hid_arm(
 		error = drv_usb_urb_submit(hid->urb);
 	usb_hid_end_submit(hid);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static struct usb_hid_report_state *usb_hid_report_state(struct usb_hid *hid, uint8_t report_id);
@@ -2996,8 +3012,12 @@ usb_hid_join_worker(
 	if (error == 0)
 		hid->worker = NULL;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void usb_hid_close_admission(struct usb_hid *hid);
@@ -3124,8 +3144,12 @@ out:
 	hid->activating = 0U;
 	spin_unlock_irqrestore(&hid->lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void usb_hid_pending_remove(struct usb_hid *hid);
@@ -3266,8 +3290,12 @@ fail:
 		drv_hid_report_layout_destroy(hid->layout);
 	hal_free(hid);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int usb_hid_detach(struct drv_usb_interface *interface, unsigned flags);
@@ -3387,8 +3415,12 @@ drv_usb_hid_driver_register(
 	if (error == 0)
 		usb_hid_registered = 1U;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

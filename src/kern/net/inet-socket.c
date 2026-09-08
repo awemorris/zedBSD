@@ -122,8 +122,12 @@ inet_interface_configuration(
 	}
 	interface_unlock(enabled);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -310,8 +314,12 @@ inet_socket_getsockname(
 
 	error = inet_socket_name(inet, address, length, 0);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -327,8 +335,12 @@ inet_socket_getpeername(
 
 	error = inet_socket_name(inet, address, length, 1);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -619,8 +631,12 @@ inet_socket_ioctl(
 	error = copyout(&request, argument, sizeof(request));
 	net_device_release(device);
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -652,8 +668,12 @@ inet_socket_init(
 	/* Registers the family. */
 	error = socket_family_register(AF_INET, &inet_family);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -806,7 +826,11 @@ out:
 		net_device_release(release_device);
 
 	/* Reports whether the device has a record. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Replaces the connected route of an interface after an address change. */
@@ -965,8 +989,12 @@ inet_ioctl_ifconf(
 	configuration.ifc_len = copied;
 	error = copyout(&configuration, argument, sizeof(configuration));
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Tests whether a command is one of the route ioctls. */
@@ -1217,8 +1245,12 @@ out_device:
 out:
 	inet_ioctl_scrub(&request, sizeof(request));
 
-	/* Reports the request result. */
-	return error;
+	/* Reports why the request failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Creates an AF_INET socket of the protocol its type implies. */

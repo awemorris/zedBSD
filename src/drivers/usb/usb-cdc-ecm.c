@@ -750,8 +750,12 @@ ecm_program_packet_filter(
 	adapter->starts_active--;
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ecm urb status error operation. */
@@ -837,8 +841,12 @@ ecm_start_urb(
 	adapter->starts_active--;
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ecm cancel and drain operation. */
@@ -951,8 +959,12 @@ ecm_stop(
 	if (adapter->net_device != NULL)
 		(void)net_device_set_carrier(adapter->net_device, 0);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ecm open operation. */
@@ -1100,8 +1112,12 @@ ecm_transmit(
 		adapter->tx_busy = 0;
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ecm notification process operation. */
@@ -1209,8 +1225,12 @@ ecm_rearm(
 	if (quarantine && error == EAGAIN)
 		return EIO;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ecm poll enter operation. */

@@ -110,7 +110,11 @@ partition_create_disk(
 	atomic_store_release(&partition_reloading, 0);
 
 	/* Reports publication without retaining the pool reservation. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -140,7 +144,11 @@ partition_retire_media(
 	atomic_store_release(&partition_reloading, 0);
 
 	/* Preserves all pool records when retirement was refused. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Publishes one partition while the caller excludes pool replacement. */
@@ -318,7 +326,11 @@ partition_reload(
 	atomic_store_release(&partition_reloading, 0);
 
 	/* Preserves the validation, allocation or commit result. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reads a little-endian MBR word without alignment assumptions. */

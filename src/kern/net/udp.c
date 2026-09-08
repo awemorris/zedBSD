@@ -121,8 +121,12 @@ udp_init(
 	/* Receives UDP datagrams from IPv4. */
 	error = ipv4_protocol_register(IPPROTO_UDP, udp_input);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Converts a socket to its UDP endpoint. */
@@ -202,8 +206,12 @@ udp_allocate_port(
 	error = udp_allocate_port_locked(endpoint);
 	spin_unlock_irqrestore(&udp_registry_lock, irq);
 
-	/* Reports the allocation result. */
-	return error;
+	/* Reports why the allocation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Binds a socket to a local address, allocating a port when none is given. */
@@ -247,8 +255,12 @@ udp_bind(
 	}
 	spin_unlock_irqrestore(&udp_registry_lock, irq);
 
-	/* Reports the bind result. */
-	return error;
+	/* Reports why the bind failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Sets the remote address, allocating a local port when none is bound. */
@@ -285,8 +297,12 @@ udp_connect(
 	}
 	spin_unlock_irqrestore(&udp_registry_lock, irq);
 
-	/* Reports the connect result. */
-	return error;
+	/* Reports why the connect failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Sends a datagram to the addressed or connected destination. */
@@ -510,8 +526,12 @@ udp_getsockname(
 	endpoint = udp_endpoint(socket);
 	error = inet_socket_getsockname(&endpoint->inet, address, length);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the socket's remote address. */
@@ -527,8 +547,12 @@ udp_getpeername(
 	endpoint = udp_endpoint(socket);
 	error = inet_socket_getpeername(&endpoint->inet, address, length);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Sets SO_BROADCAST here and forwards every other option. */
@@ -562,8 +586,12 @@ udp_setsockopt(
 	error = inet_socket_setsockopt(&endpoint->inet, level, option, value,
 	    length);
 
-	/* Reports the option result. */
-	return error;
+	/* Reports why the option failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reads SO_BROADCAST here and forwards every other option. */
@@ -595,8 +623,12 @@ udp_getsockopt(
 	error = inet_socket_getsockopt(&endpoint->inet, level, option, value,
 	    length);
 
-	/* Reports the option result. */
-	return error;
+	/* Reports why the option failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Unregisters and frees a UDP socket. */
@@ -712,6 +744,10 @@ udp_input(
 	error = socket_enqueue_packet(&best->inet.socket, packet);
 	socket_release(&best->inet.socket);
 
-	/* Reports the queueing result. */
-	return error;
+	/* Reports why the queueing failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

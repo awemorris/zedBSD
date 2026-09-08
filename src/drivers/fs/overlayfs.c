@@ -329,8 +329,12 @@ drv_overlayfs_init(
 
 	error = filesystem_register(&overlay_filesystem_type);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -369,8 +373,12 @@ drv_overlay_mount_at(
 	    result);
 	path_release(&root);
 
-	/* Reports the mount result. */
-	return error;
+	/* Reports why the mount failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 #ifdef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
@@ -475,8 +483,12 @@ overlay_content_host_truncate(
 	outer->i_mount = saved_mount;
 	outer->i_data = saved_data;
 
-	/* Reports the truncate result. */
-	return error;
+	/* Reports why the truncate failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1009,7 +1021,13 @@ overlay_open_journal(
 		flags = O_RDONLY;
 	error = file_open_resolved(&path, flags, &state->journal[slot]);
 	path_release(&path);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Loads the metadata from the newer valid journal slot. */
@@ -1080,7 +1098,13 @@ out:
 		kern_free(views[0]);
 	if (views[1] != NULL)
 		kern_free(views[1]);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Writes one journal record. */
@@ -1261,7 +1285,13 @@ overlay_journal_compact(struct overlay_mount_state *state)
 	error = overlay_journal_compact_impl(state);
 	if (state->owner != NULL)
 		io_epoch_end(&state->owner->m_write_epoch);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 
@@ -1348,7 +1378,13 @@ overlay_journal_append(struct overlay_mount_state *state, unsigned opcode, const
 	error = overlay_journal_append_impl(state, opcode, path);
 	if (state->owner != NULL)
 		io_epoch_end(&state->owner->m_write_epoch);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 
@@ -1896,7 +1932,13 @@ overlay_lookup(
 out_directories:
 	path_release(&upper_directory);
 	path_release(&lower_directory);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the visible layer's attributes under the overlay's inode number. */
@@ -1926,7 +1968,13 @@ overlay_getattr(
 		status->st_ino = inode->i_ino;
 		status->st_dev = 0;
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Resolves a relative path from the overlay root through overlay lookups. */
@@ -2157,7 +2205,13 @@ overlay_materialization_complete(
 		state->flags = OVERLAY_READ_ONLY;
 		return cleanup_error;
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Makes sure a directory exists in the upper layer, recording new ones. */
@@ -2310,7 +2364,13 @@ out_paths:
 		kern_free(pending);
 	path_release(&upper);
 	path_release(&lower);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Makes sure a directory exists in the upper layer as its own transaction. */
@@ -2328,7 +2388,13 @@ overlay_ensure_upper_dir(
 	state = directory->i_mount->m_data;
 	error = overlay_ensure_upper_dir_tracked(directory, &transaction);
 	error = overlay_materialization_complete(state, &transaction, error);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Formats a temporary name, ovXXXX.tmp, from a counter. */
@@ -2630,7 +2696,13 @@ out:
 	mutex_unlock(&state->copy_up_lock);
 	if (entered_transaction)
 		mount_vfs_transaction_leave(inode->i_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Rejects an upper or visible-lower collision before changing the upper namespace. */
@@ -2717,7 +2789,13 @@ out:
 		inode_release(found);
 	path_release(&upper);
 	path_release(&lower);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Makes a new upper object durable and visible, or removes it on failure. */
@@ -2800,7 +2878,13 @@ overlay_finish_new(
 	path_release(&upper);
 	if (cleanup_error != 0)
 		return cleanup_error;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Creates a regular file in the upper layer. */
@@ -2848,7 +2932,13 @@ overlay_create(
 		error = overlay_finish_new(directory, name, relative, 0, 0,
 		    result);
 	error = overlay_materialization_complete(state, &materialization, error);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Creates a directory in the upper layer, opaque over a whited-out lower one. */
@@ -2935,7 +3025,13 @@ out:
 		inode_release(lower);
 	path_release(&upper);
 	error = overlay_materialization_complete(state, &materialization, error);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Detaches a special endpoint from an inode when it is still the expected one. */
@@ -2986,7 +3082,13 @@ overlay_special_transfer(
 			source->i_special = expected;
 		mutex_unlock(&source->i_lock);
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Builds a pathname socket under a reserved temporary name and renames it into place. */
@@ -3100,7 +3202,13 @@ out:
 	mutex_unlock(&state->copy_up_lock);
 out_unlocked:
 	path_release(&parent_upper);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Creates a special node in the upper layer. */
@@ -3158,7 +3266,13 @@ overlay_mknod(
 		    result);
 	}
 	error = overlay_materialization_complete(state, &materialization, error);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Creates a symbolic link in the upper layer. */
@@ -3211,7 +3325,13 @@ overlay_symlink(
 		    result);
 	}
 	error = overlay_materialization_complete(state, &materialization, error);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reads a symbolic link from its visible layer. */
@@ -3529,7 +3649,13 @@ out:
 	path_release(&source_upper);
 	path_release(&source_lower);
 	path_release(&new_upper_path);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Retires an inode's identity and marks the inode dead. */
@@ -3675,7 +3801,13 @@ out:
 	path_release(&parent_upper);
 	path_release(&target_upper);
 	path_release(&target_lower);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Unlinks a non-directory from the merged view. */
@@ -3687,7 +3819,13 @@ overlay_unlink(
 	int error;
 
 	error = overlay_remove(directory, name, 0);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Removes an empty directory from the merged view. */
@@ -3699,7 +3837,13 @@ overlay_rmdir(
 	int error;
 
 	error = overlay_remove(directory, name, 1);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Truncates the upper copy through the upper layer's transaction. */
@@ -3744,7 +3888,13 @@ overlay_truncate_upper(
 	if (error == 0)
 		error = mount_sync_backend(upper.p_mount);
 	path_release(&upper);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Truncates a regular file, copying a lower one up first. */
@@ -3775,7 +3925,13 @@ overlay_truncate_limited(
 		return error;
 	}
 	error = overlay_truncate_upper(inode, request, result);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Truncates a regular file to a size without a growth limit. */
@@ -3794,7 +3950,13 @@ overlay_truncate(
 	int error;
 
 	error = overlay_truncate_limited(inode, &request, &result);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Changes attributes on the upper copy, materializing it first. */
@@ -3833,7 +3995,13 @@ overlay_setattr(
 		error = mount_sync_backend(upper.p_mount);
 	}
 	path_release(&upper);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Drops the layer references of an inode leaving the cache. */
@@ -4033,7 +4201,13 @@ overlay_host_truncate_limited(
 	int error;
 
 	error = overlay_truncate_upper(inode, request, result);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 #endif
 
@@ -4074,7 +4248,13 @@ overlay_regular_fsync(
 
 	if (error == 0)
 		error = mount_sync_backend(file->f_inode->i_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Closes the real file behind an overlay regular file. */
@@ -4094,7 +4274,13 @@ overlay_regular_close(
 		kern_free(info);
 	}
 	file->f_data = NULL;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Opens a cursor over the merged directory listing. */
@@ -4160,7 +4346,13 @@ overlay_dir_open_phase(
 		error = file_open_resolved(&path, O_RDONLY | O_DIRECTORY,
 		    &cursor->active);
 	path_release(&path);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Tests whether the upper layer has an entry of a name. */
@@ -4393,7 +4585,13 @@ overlay_directory_fsync(
 	if (error != 0)
 		return error;
 	error = mount_sync_backend(state->upper_root.p_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Deletes stale temporaries below an upper directory, bounded in depth and work. */
@@ -4491,7 +4689,13 @@ overlay_cleanup_temps(
 			break;
 	}
 	(void)file_close(file);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Mounts an overlay from its upper and lower layer arguments. */
@@ -4574,7 +4778,13 @@ fail_state:
 	path_release(&state->upper_root);
 	kern_free(state);
 	mountp->m_data = NULL;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Syncs the active journal and the upper layer of a writable overlay. */
@@ -4595,7 +4805,13 @@ overlay_sync_mount(
 	error = file_fsync(state->journal[state->active_slot]);
 	if (error == 0)
 		error = mount_sync_backend(state->upper_root.p_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the statistics of the upper layer. */
@@ -4615,7 +4831,13 @@ overlay_statvfs(
 	if (state == NULL || result == NULL || state->upper_root.p_mount == NULL)
 		return EINVAL;
 	error = mount_statvfs(state->upper_root.p_mount, result);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Releases the journal files and the layer references of an overlay. */
@@ -4688,5 +4910,11 @@ overlay_prepare_mutation(
 out:
 	if (entered)
 		mount_vfs_transaction_leave(inode->i_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

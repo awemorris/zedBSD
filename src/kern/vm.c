@@ -48,6 +48,13 @@
 #define VM_PAGE_TRACKED			0x0010U
 #define stats				vm_reclaim_counters
 
+/*
+ * One page of storage carved into page descriptors.
+ *
+ * Descriptors are handed out from a slab's free list rather than allocated
+ * one at a time, and a slab that still has a free descriptor stays on the
+ * global list so the next allocation finds it without a search.
+ */
 struct vm_page_slab {
 	struct hal_pmem memory;
 	struct vm_page_slab *next;
@@ -57,96 +64,237 @@ struct vm_page_slab {
 };
 
 /*
- * XXX: 解説を入れる
+ * The registry of shared objects, in most-recently-published order.
+ *
+ * A file-backed object lives here for as long as any mapping, cache
+ * reference or write-back holds it, so a second mapping of the same inode
+ * finds the object that already exists.
  */
 static struct vm_object *shared_objects VM_OBJECT_DATA;
 
 /*
- * XXX: 解説を入れる
+ * How many objects the registry holds.
  */
 static unsigned object_count VM_OBJECT_DATA;
 
 /*
- * XXX: 解説を入れる
+ * The generation stamped on the object published next.
+ *
+ * It only ever increases, so a stale reference to a slot that has been
+ * reused is recognized by the generation that came with it.
  */
 static uint64_t object_registry_generation VM_OBJECT_DATA;
 
 /*
- * XXX: 解説を入れる
+ * How many registry entries exist only because the page cache asked for them.
+ *
+ * These are bounded by VM_OBJECT_CACHE_OBJECTS: an optional admission is
+ * refused once that many are already held.
  */
 static unsigned cache_objects VM_OBJECT_DATA;
 
 /*
- * XXX: 解説を入れる
+ * How many pages every object holds together.
  */
 static atomic_uint_t object_pages VM_OBJECT_DATA;
 
 /*
- * XXX: 解説を入れる
+ * The spin word that guards the registry above.
+ *
+ * It is taken raw rather than as a spinlock because the registry is walked
+ * from contexts that must not block.
  */
 static atomic_uint_t object_registry_lock VM_OBJECT_DATA;
 
 /*
- * XXX: 解説を入れる
+ * The slabs that back the object page descriptors.
  */
 static struct vm_page_slab *page_slabs VM_OBJECT_DATA;
 
 /*
- * XXX: 解説を入れる
+ * The spin word that guards the slab list above.
  */
 static atomic_uint_t page_slab_lock VM_OBJECT_DATA;
 
 /*
- * XXX: 解説を入れる
+ * The commitment accounting that bounds anonymous memory.
+ *
+ * It holds the physical and swap capacity, the limit those two add up to,
+ * and how much of that limit is already committed.
  */
 static struct vm_commit_stats commit_stats;
 
 /*
- * XXX: 解説を入れる
+ * The spinlock that guards the commitment accounting above.
  */
 static struct spinlock commit_lock = {
 	{ 0 }, LOCK_RANK_VM_OBJECT, "VM commit accounting", 0, 0
 };
 
 /*
- * XXX: 解説を入れる
+ * The mutex that orders every piece of VM metadata work.
  */
 static struct mutex metadata_lock;
 
 /*
- * XXX: 解説を入れる
+ * How deep the owning thread has entered the metadata lock.
+ *
+ * The lock is re-entrant for the thread that already holds it, and the
+ * mutex is released only when the outermost entry leaves.
  */
 static unsigned metadata_depth;
 
 /*
- * XXX: 解説を入れる
+ * The list of private pages that reclaim may write to swap.
  */
 static struct vm_private_page *page_queue;
 
 /*
- * XXX: 解説を入れる
+ * The mutex that guards the private page queue above.
  */
 static struct mutex reclaim_lock;
 
 /*
- * XXX: 解説を入れる
+ * The reclaim statistics, published for the sysctl that reports them.
  */
 struct vm_reclaim_stats vm_reclaim_counters;
 
 /*
- * XXX: 解説を入れる
+ * Whether the commitment limit has been published.
+ *
+ * Until it is, nothing can commit and a swap resize only seeds the
+ * accounting rather than changing a live limit.
  */
 static int commit_initialized;
 
 /*
- * XXX: 解説を入れる
+ * Whether a swap capacity has been seeded before initialization.
+ *
+ * The prepared manager and the published backend must agree on the
+ * capacity, so initialization compares against what a resize left here.
  */
 static int commit_swap_seeded;
 
 /*
- * XXX: 解説を入れる
+ * Whether the metadata lock has been initialized.
  */
 static int metadata_initialized;
+
+/*
+ * Optional collaborators.
+ *
+ * Each of these lives in a translation unit that some platforms leave out of
+ * the kernel, so the reference is weak and every call site tests it first.
+ */
+extern void writeback_ticket_commit(struct writeback_ticket *, size_t) __attribute__((weak));
+extern void writeback_budget_clean(struct writeback_budget *, size_t) __attribute__((weak));
+extern int disk_cache_acquire(struct disk *, struct disk **) __attribute__((weak));
+extern void disk_cache_release(struct disk *) __attribute__((weak));
+extern void *io_pool_borrow(size_t, size_t *) __attribute__((weak));
+extern void io_pool_release(void *) __attribute__((weak));
+extern bool hal_irq_disable(void) __attribute__((weak));
+extern void hal_irq_enable(void) __attribute__((weak));
+extern int vmspace_object_page_revoke(struct vm_object_page *, uint32_t *) __attribute__((weak));
+extern void vm_object_read_checkpoint(struct inode *, size_t, size_t) __attribute__((weak));
+extern void io_error_record(struct io_error_state *, int) __attribute__((weak));
+extern void readahead_consumed(size_t, size_t) __attribute__((weak));
+extern size_t cache_memory_reclaim(size_t) __attribute__((weak));
+extern int cache_memory_reserve(enum cache_memory_kind, size_t, int) __attribute__((weak));
+extern void cache_memory_commit(enum cache_memory_kind, size_t) __attribute__((weak));
+extern void cache_memory_cancel(enum cache_memory_kind, size_t) __attribute__((weak));
+extern void cache_memory_release(enum cache_memory_kind, size_t) __attribute__((weak));
+
+/*
+ * Forward declarations.
+ */
+static int vm_object_get_shared_internal(struct file *file, struct vm_object **result, int cache_only);
+static bool registry_lock(void);
+static void registry_unlock(bool enabled);
+static struct vm_object *find_object_by_inode_locked(struct inode *inode);
+static int object_wait_registry_sequence(struct vm_object *object, uint64_t sequence);
+static int object_wait_registry_transition(struct vm_object *object, uint64_t sequence);
+static void object_wake_registry_waiters(struct vm_object *object);
+static void object_wait_registry_waiters(struct vm_object *object);
+static int object_operation_begin(struct vm_object *object);
+static void object_operation_end(struct vm_object *object);
+static int alloc_vm_page(struct hal_pmem *memory);
+static struct vm_object_page *find_page(struct vm_object *object, off_t offset);
+static int unlink_page_locked(struct vm_object_page **head, struct vm_object_page *page);
+static uint64_t next_generation(struct vm_object *object);
+static uint64_t next_inode_resize_generation_locked(struct inode *inode);
+static uint64_t next_inode_content_generation_locked(struct inode *inode);
+static void object_initialize_eof_locked(struct vm_object *object, struct inode *inode);
+static int page_overlaps(const struct vm_object_page *page, uint64_t start, uint64_t end);
+static int object_has_dirty_pages_locked(struct vm_object *object);
+static int object_has_busy_pages_locked(const struct vm_object *object);
+static int object_has_busy_pages(struct vm_object *object);
+static void object_record_writeback_error_locked(struct vm_object *object, int error);
+static int write_page_data(struct vm_object *object, struct vm_object_page *page, off_t logical_size, int inode_io_owned);
+static void clear_page_dirty_locked(struct vm_object_page *page);
+static void free_object_page(struct vm_object_page *page);
+static int object_can_destroy(struct vm_object *object);
+static int unlink_object_locked(struct vm_object *object);
+static void destroy_object(struct vm_object *object);
+static void retain_object(struct vm_object *object, int error);
+static int object_wait_resize(struct vm_object *object);
+static void content_release_pages_locked(struct vm_object *object, uint64_t generation);
+static void vm_object_content_finish(struct vm_object_content *content, const void *buffer, size_t committed, int commit);
+static void vm_object_resize_finish(struct vm_object_resize *resize, off_t logical_size, int commit);
+static int vm_object_page_pin_copy(struct vm_object_page *page, size_t offset, void *buffer, size_t length, int write);
+static int range_has_wired_mapping(struct vm_object *object, uint64_t start, uint64_t end);
+static int vm_object_sync_range_internal(struct vm_object *object, off_t offset, size_t size, int flags, int detaching, int resize_owner, off_t resize_target);
+static int vm_object_sync_range_buffer(struct vm_object *object, off_t offset, size_t size, int flags, int detaching, int resize_owner, off_t resize_target, void *scratch, size_t capacity);
+static void object_page_dirty_link(struct vm_object_page *page);
+static void object_page_dirty_unlink(struct vm_object_page *page);
+static void object_page_dirty_mark(struct vm_object_page *page);
+static int object_memory_reserve(enum cache_memory_kind kind, int optional);
+static bool object_slab_lock(void);
+static void object_slab_unlock(bool enabled);
+static struct vm_page_slab *object_slab_alloc(int optional);
+static struct vm_object_page *object_descriptor_alloc(int optional);
+static void object_descriptor_free(struct vm_object_page *page);
+static struct vm_object_page *alloc_object_page(struct vm_object *object, off_t offset, int optional);
+static void release_object_page_storage(struct vm_object_page *page);
+static unsigned page_index_height(const struct vm_object_page *page);
+static void page_index_update(struct vm_object_page *page);
+static struct vm_object_page *page_index_rotate_left(struct vm_object_page *page);
+static struct vm_object_page *page_index_rotate_right(struct vm_object_page *page);
+static struct vm_object_page *page_index_balance(struct vm_object_page *page);
+static struct vm_object_page *page_index_insert(struct vm_object_page *root, struct vm_object_page *page);
+static struct vm_object_page *page_index_extract_min(struct vm_object_page *root, struct vm_object_page **minimum);
+static struct vm_object_page *page_index_remove(struct vm_object_page *root, struct vm_object_page *page);
+static void object_page_index_insert(struct vm_object *object, struct vm_object_page *page);
+static void object_page_index_remove(struct vm_object *object, struct vm_object_page *page);
+static int object_reference_locked(struct vm_object *object, struct file *file, int cache_only);
+static int object_cache_retainable(struct vm_object *object);
+static int object_cache_evict_one(struct mount *mount);
+static void object_cache_discard_prepared(struct vm_object_page **pages, unsigned count);
+static int object_cache_read_missing(struct vm_object *object, off_t offset, void *buffer, size_t length, ssize_t *result, int *handled, int *stop);
+static struct vm_object_page *sync_page_at_or_after(struct vm_object *object, uint64_t offset);
+static int write_dirty_pages(struct vm_object *object, uint64_t generation, off_t logical_size, int inode_io_owned, void *reserved_scratch, size_t reserved_capacity);
+static size_t object_prefetch_consume(struct vm_object_page *page, size_t start, size_t length);
+static void object_prefetch_retire(struct vm_object_page *page);
+static uint32_t mapping_prot(const struct vm_page *page);
+static void queue_remove(struct vm_private_page *backing);
+static int backing_wired_or_avoided(struct vm_private_page *backing, struct vm_page *avoid);
+static int backing_has_wired_mapping(struct vm_private_page *backing);
+static int backing_has_busy_mapping(struct vm_private_page *backing);
+static uint32_t backing_pte_flags(struct vm_private_page *backing);
+static void vmspace_fault_wake(struct vmspace *vm);
+static void pin_backing_mappings(struct vm_private_page *backing);
+static void unpin_backing_mappings(struct vm_private_page *backing);
+static int unmap_backing_ptes(struct vm_private_page *backing, uint32_t *pte_flags);
+static void rollback_backing_ptes(struct vm_private_page *backing);
+static int swap_out_backing_owned(struct vm_private_page *backing);
+static int discard_file_backing_owned(struct vm_private_page *backing);
+static int private_page_targets_source(struct vm_private_page *backing, unsigned source_id);
+static void private_page_advance_locked(struct vm_private_page *backing);
+static int private_page_wait_sequence(struct vm_private_page *backing, uint64_t sequence);
+static int private_page_wait_sequence_interruptible(struct vm_private_page *backing, uint64_t sequence);
+static int vm_private_page_wait_idle_cancelable(struct vm_private_page *backing, int (*cancel)(void *), void *cancel_argument);
+static unsigned reclaim_object_fault_reserve(void);
+static void drain_mapping_pins_release(struct vm_private_page *backing);
+static int reclaim_backing_owned(struct vm_private_page *backing, int file_candidate);
 
 /*
  * Object
@@ -181,7 +329,13 @@ vm_object_get_shared(
 	/* Publishes the mapping before releasing the admission reservation. */
 	error = vm_object_get_shared_internal(file, result, 0);
 	backing_mutation_end(&guard);
-	return error;
+
+	/* Reports why the object could not be admitted. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller now holds the shared object. */
+	return 0;
 }
 
 /*
@@ -240,8 +394,12 @@ vm_object_backing_busy(
 		inode_release(inodes[index]);
 	kern_free(inodes);
 
-	/* Reports either a complete absence of aliases or the refusal reason. */
-	return error;
+	/* Reports the alias that refused the admission. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: no cached object aliases a retained claim. */
+	return 0;
 }
 
 /*
@@ -390,8 +548,7 @@ retry_mapping:
 	 * DETACHING excludes new mappings, so final writeback does not need
 	 * the cross-vm metadata lock which a waiting mapper may already hold.
 	 */
-	error = vm_object_sync_range_internal(object, 0, SIZE_MAX, MS_SYNC, 1, 0,
-	    0);
+	error = vm_object_sync_range_internal(object, 0, SIZE_MAX, MS_SYNC, 1, 0, 0);
 
 	/* Unlinks a clean object, or retains one that still has dirty pages. */
 	enabled = registry_lock();
@@ -474,18 +631,25 @@ vm_object_inode_io_wait(
 		 * inode->i_io_lock.
 		 */
 		enabled = registry_lock();
+
 		object = find_object_by_inode_locked(inode);
 		if (object == NULL ||
 		    (object->flags & VM_OBJECT_DETACHING) == 0) {
 			registry_unlock(enabled);
+
+			/* Succeeded: no teardown stands in the way. */
 			return 0;
 		}
+
 		sequence = waitq_sequence(&object->registry_waitq);
+
 		object->registry_waiters++;
 		if (object->registry_waiters == 0)
 			HAL_FATAL("VM object registry waiter overflow");
+
 		refcount_get(&object->refs);
 		registry_unlock(enabled);
+
 		error = object_wait_registry_transition(object, sequence);
 		if (error != 0 && error != EAGAIN)
 			return error;
@@ -508,11 +672,13 @@ vm_object_inode_resize_active(
 
 	/* Samples the three gates together. */
 	irq = spin_lock_irqsave(&inode->i_vm_lock);
+
 	active = 0;
 	if (inode->i_vm_resize_active != 0 ||
 	    inode->i_vm_content_active != 0 ||
 	    inode->i_vm_content_readers != 0)
 		active = 1;
+
 	spin_unlock_irqrestore(&inode->i_vm_lock, irq);
 
 	/* Reports the sampled state. */
@@ -535,15 +701,20 @@ vm_object_content_read_begin(
 
 	/* Counts the reader unless a transaction is in progress. */
 	irq = spin_lock_irqsave(&inode->i_vm_lock);
+
+	/* Refuses a reader while a resize or a write owns the inode. */
 	if (inode->i_vm_resize_active || inode->i_vm_content_active) {
 		spin_unlock_irqrestore(&inode->i_vm_lock, irq);
 		return EBUSY;
 	}
+
+	/* Refuses a reader the counter cannot hold. */
 	if (inode->i_vm_content_readers == UINT_MAX) {
 		spin_unlock_irqrestore(&inode->i_vm_lock, irq);
 		return EOVERFLOW;
 	}
 	inode->i_vm_content_readers++;
+
 	spin_unlock_irqrestore(&inode->i_vm_lock, irq);
 
 	/* Reports the taken lease. */
@@ -565,11 +736,14 @@ vm_object_content_read_end(
 
 	/* Counts the reader down. */
 	irq = spin_lock_irqsave(&inode->i_vm_lock);
+
 	if (inode->i_vm_content_readers == 0)
 		HAL_FATAL("VM content read lease underflow");
+
 	inode->i_vm_content_readers--;
 	if (inode->i_vm_content_readers == 0)
 		waitq_wake_all(&inode->i_vm_waitq);
+
 	spin_unlock_irqrestore(&inode->i_vm_lock, irq);
 }
 
@@ -591,6 +765,8 @@ vm_object_cache_published(
 
 	/* Classifies the registry entry. */
 	enabled = registry_lock();
+
+	/* Classifies the registry entry the inode has, if it has one. */
 	object = find_object_by_inode_locked(inode);
 	if (object == NULL)
 		result = 0;
@@ -598,9 +774,14 @@ vm_object_cache_published(
 		result = -EAGAIN;
 	else
 		result = 1;
+
 	registry_unlock(enabled);
 
-	/* Reports the classification. */
+	/* Reports a teardown in progress as a refusal. */
+	if (result < 0)
+		return result;
+
+	/* Succeeded: reports whether an object is published. */
 	return result;
 }
 
@@ -631,6 +812,7 @@ vm_object_content_begin(
 	    offset < 0 ||
 	    (uint64_t)offset + length < (uint64_t)offset)
 		return EINVAL;
+
 	memset(content, 0, sizeof(*content));
 
 	/* An empty range needs no transaction. */
@@ -645,6 +827,7 @@ vm_object_content_begin(
 	/* Only one content transaction runs, and never under a read lease. */
 	enabled = registry_lock();
 	inode_irq = spin_lock_irqsave(&inode->i_vm_lock);
+
 	if (inode->i_vm_content_active || inode->i_vm_content_readers != 0) {
 		spin_unlock_irqrestore(&inode->i_vm_lock, inode_irq);
 		registry_unlock(enabled);
@@ -698,7 +881,9 @@ vm_object_content_begin(
 			object->write_file = file;
 		}
 	}
+
 	spin_unlock_irqrestore(&inode->i_vm_lock, inode_irq);
+
 	registry_unlock(enabled);
 
 	/* Describes the transaction to its caller. */
@@ -915,7 +1100,13 @@ vm_object_read_coherent(
 
 	/* Preserves the existing coherent-read contract for callers without feedback. */
 	error = vm_object_read_coherent_useful(inode, offset, buffer, length, result, NULL);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -970,6 +1161,7 @@ retry_lookup:
 		registry_unlock(enabled);
 		return ENOENT;
 	}
+
 	/* Waits out a teardown and looks the object up again. */
 	if ((object->flags & VM_OBJECT_DETACHING) != 0) {
 		sequence = waitq_sequence(&object->registry_waitq);
@@ -1072,7 +1264,13 @@ retry_lookup:
 		*result = (ssize_t)done;
 		return 0;
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1101,6 +1299,8 @@ vm_object_resize_begin(
 	/* Only one transaction runs, and never under a read lease. */
 	enabled = registry_lock();
 	inode_irq = spin_lock_irqsave(&inode->i_vm_lock);
+
+	/* Refuses a resize while another transaction or a reader owns the inode. */
 	if (inode->i_vm_resize_active ||
 	    inode->i_vm_content_active ||
 	    inode->i_vm_content_readers != 0) {
@@ -1128,6 +1328,7 @@ vm_object_resize_begin(
 		resize->old_size = object->logical_size;
 		spin_unlock_irqrestore(&object->lock, object_irq);
 	}
+
 	/* A resize to the current size has nothing to publish. */
 	resize->inode = inode;
 	resize->target_size = target_size;
@@ -1155,7 +1356,9 @@ vm_object_resize_begin(
 		if (object->active_operations == 0)
 			HAL_FATAL("VM object operation counter overflow");
 	}
+
 	spin_unlock_irqrestore(&inode->i_vm_lock, inode_irq);
+
 	registry_unlock(enabled);
 
 	/* Reports the begun transaction. */
@@ -1224,8 +1427,12 @@ vm_object_resize_prepare(
 	if (error == 0)
 		resize->prepared = 1;
 
-	/* Reports the preparation result. */
-	return error;
+	/* Reports why the preparation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1252,6 +1459,7 @@ vm_object_resize_abort(
 		old_size = resize->old_size;
 	else
 		old_size = 0;
+
 	vm_object_resize_finish(resize, old_size, 0);
 }
 
@@ -1291,6 +1499,8 @@ vm_object_fault(
 retry:
 	/* Waits for any transaction and samples the generations. */
 	irq = spin_lock_irqsave(&object->lock);
+
+	/* Waits out any transaction, then samples what the fault is measured against. */
 	while ((object->flags & (VM_OBJECT_RESIZING | VM_OBJECT_CONTENT)) != 0) {
 		sequence = waitq_sequence(&object->page_waitq);
 		error = waitq_sleep(&object->page_waitq, &object->lock,
@@ -1345,7 +1555,9 @@ retry:
 		spin_unlock_irqrestore(&object->lock, irq);
 		return 0;
 	}
+
 	spin_unlock_irqrestore(&object->lock, irq);
+
 	if (offset >= fault_size)
 		return ENXIO;
 
@@ -1362,6 +1574,11 @@ retry:
 
 	/* Publishes it unless the world changed or another fault won. */
 	irq = spin_lock_irqsave(&object->lock);
+
+	/*
+	 * Starts over when a transaction, a size change or another fault
+	 * overtook this one while the page was being read.
+	 */
 	if ((object->flags & (VM_OBJECT_RESIZING | VM_OBJECT_CONTENT)) != 0 ||
 	    object->size_generation != fault_generation ||
 	    object->content_generation != fault_content_generation ||
@@ -1374,6 +1591,7 @@ retry:
 	object->pages = page;
 	object_page_index_insert(object, page);
 	(void)atomic_fetch_add_relaxed(&object_pages, 1);
+
 	spin_unlock_irqrestore(&object->lock, irq);
 
 read_page:
@@ -1430,6 +1648,7 @@ read_io_retry:
 	/* Publishes the result, marking the page in error on failure. */
 	irq = spin_lock_irqsave(&object->lock);
 
+	/* Fails the fault when a transaction or a size change overtook the read. */
 	if ((object->flags & (VM_OBJECT_RESIZING | VM_OBJECT_CONTENT)) != 0 ||
 	    object->size_generation != fault_generation ||
 	    object->content_generation != fault_content_generation) {
@@ -1440,6 +1659,7 @@ read_io_retry:
 		return EAGAIN;
 	}
 
+	/* Fails the fault when the backend did not return the whole page. */
 	if (count != (ssize_t)length) {
 		if (count < 0)
 			error = (int)-count;
@@ -1459,6 +1679,7 @@ read_io_retry:
 	waitq_wake_all(&object->page_waitq);
 
 	*result = page;
+
 	spin_unlock_irqrestore(&object->lock, irq);
 
 	/* Reports the held page. */
@@ -1520,6 +1741,7 @@ vm_object_page_pin(
 	refcount_get(&object->refs);
 
 	spin_unlock_irqrestore(&object->lock, irq);
+
 	registry_unlock(enabled);
 
 	/* Reports the pinned page. */
@@ -1540,8 +1762,12 @@ vm_object_page_pin_read(
 
 	error = vm_object_page_pin_copy(page, offset, buffer, length, 0);
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1558,8 +1784,12 @@ vm_object_page_pin_write(
 
 	error = vm_object_page_pin_copy(page, offset, (void *)buffer, length, 1);
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1584,6 +1814,7 @@ vm_object_page_unpin(
 
 	/* Drops the pin and hold; an orphan with no holds left is freed. */
 	irq = spin_lock_irqsave(&object->lock);
+
 	if (page->hold_count == 0 || page->pin_count == 0)
 		HAL_FATAL("VM object page pin underflow");
 	page->pin_count--;
@@ -1601,6 +1832,7 @@ vm_object_page_unpin(
 		free_page = page;
 	}
 	waitq_wake_all(&object->page_waitq);
+
 	spin_unlock_irqrestore(&object->lock, irq);
 
 	/* Frees the unlinked orphan and ends the pin's operation. */
@@ -1632,10 +1864,12 @@ vm_object_fault_release(
 
 	/* Drops the hold and wakes the waiters. */
 	irq = spin_lock_irqsave(&page->owner->lock);
+
 	if (page->hold_count == 0)
 		HAL_FATAL("VM object fault hold underflow");
 	page->hold_count--;
 	waitq_wake_all(&page->owner->page_waitq);
+
 	spin_unlock_irqrestore(&page->owner->lock, irq);
 }
 
@@ -1656,13 +1890,19 @@ vm_object_mapping_add(
 	/* Links the mapping and releases the hold under the metadata lock. */
 	vm_metadata_enter();
 	irq = spin_lock_irqsave(&object_page->owner->lock);
+
+	/* Turns the fault's hold into a published mapping. */
 	if (object_page->hold_count == 0)
 		HAL_FATAL("mapping VM object page without fault hold");
+
 	mapping->object_next = object_page->mappings;
+
 	object_page->mappings = mapping;
 	object_page->mapping_count++;
 	object_page->hold_count--;
+
 	waitq_wake_all(&object_page->owner->page_waitq);
+
 	spin_unlock_irqrestore(&object_page->owner->lock, irq);
 	vm_metadata_leave();
 }
@@ -1707,7 +1947,9 @@ vm_object_mapping_remove(
 	/* Unlinks under the metadata and owner locks. */
 	vm_metadata_enter();
 	irq = spin_lock_irqsave(&object_page->owner->lock);
+
 	vm_object_mapping_remove_locked(object_page, mapping);
+
 	spin_unlock_irqrestore(&object_page->owner->lock, irq);
 	vm_metadata_leave();
 }
@@ -1728,7 +1970,9 @@ vm_object_mark_dirty(
 	/* Sets the flag under the metadata and owner locks. */
 	vm_metadata_enter();
 	irq = spin_lock_irqsave(&page->owner->lock);
+
 	object_page_dirty_mark(page);
+
 	spin_unlock_irqrestore(&page->owner->lock, irq);
 	vm_metadata_leave();
 }
@@ -1760,8 +2004,12 @@ vm_object_sync_range(
 	    0);
 	object_operation_end(object);
 
-	/* Reports the sync result. */
-	return error;
+	/* Reports why the sync failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1776,7 +2024,13 @@ vm_object_sync_inode(
 
 	/* Uses optional shared scratch for an ordinary caller. */
 	error = vm_object_sync_inode_buffer(inode, NULL, 0);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1808,23 +2062,31 @@ retry_lookup:
 			continue;
 		if ((object->flags & VM_OBJECT_DETACHING) != 0) {
 			sequence = waitq_sequence(&object->registry_waitq);
+
 			object->registry_waiters++;
 			if (object->registry_waiters == 0)
 				HAL_FATAL("VM object registry waiter overflow");
+
 			refcount_get(&object->refs);
 			registry_unlock(enabled);
+
 			error = object_wait_registry_transition(object, sequence);
 			if (error != 0 && error != EAGAIN)
 				return error;
+
 			goto retry_lookup;
 		}
+
 		/* Waits out a resize and looks the object up again. */
 		if ((object->flags & VM_OBJECT_RESIZING) != 0) {
 			refcount_get(&object->refs);
 			registry_unlock(enabled);
+
 			error = object_wait_resize(object);
+
 			if (refcount_put(&object->refs))
 				destroy_object(object);
+
 			if (error != 0)
 				return error;
 			goto retry_lookup;
@@ -1834,6 +2096,7 @@ retry_lookup:
 		object->active_operations++;
 		if (object->active_operations == 0)
 			HAL_FATAL("VM object operation counter overflow");
+
 		refcount_get(&object->refs);
 		break;
 	}
@@ -1883,8 +2146,12 @@ retry_lookup:
 	if (write_file != NULL)
 		(void)file_close(write_file);
 
-	/* Reports the writeback result. */
-	return error;
+	/* Reports why the writeback failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1921,6 +2188,7 @@ retry_lookup:
 			goto retry_lookup;
 		return;
 	}
+
 	/* Counts this truncate as an operation and pins the object. */
 	if (object != NULL) {
 		object->active_operations++;
@@ -1941,8 +2209,9 @@ retry_lookup:
 	 * PTE/cache identity.
 	 */
 	error = vm_object_sync_range_internal(object,
-	    size & ~(off_t)(PAGE_SIZE - 1U), SIZE_MAX,
-	    MS_SYNC | MS_INVALIDATE, 0, 0, 0);
+					      size & ~(off_t)(PAGE_SIZE - 1U), SIZE_MAX,
+					      MS_SYNC | MS_INVALIDATE, 0, 0, 0);
+
 	/* Publishes the new end of file once the pages are gone. */
 	if (error == 0) {
 		irq = spin_lock_irqsave(&object->lock);
@@ -2037,6 +2306,7 @@ vm_object_cache_prepare(
 	    file->f_ops->pread == NULL || file->f_format_claim != NULL ||
 	    file->f_backing_claim != NULL)
 		return;
+
 	inode = file_vm_inode(file);
 	if (inode == NULL ||
 	    (inode->i_flags & (INODE_LOOPFILE | INODE_SWAPFILE)) != 0)
@@ -2159,6 +2429,7 @@ vm_object_writeback_prepare(
 
 	*result = NULL;
 
+	/* Refuses a handle that cannot own write-back of a regular file. */
 	if (file == NULL ||
 	    file->f_inode == NULL ||
 	    file->f_path.p_inode == NULL ||
@@ -2258,6 +2529,7 @@ vm_object_content_prepare_delayed(
 	ssize_t received;
 	int error;
 
+	/* Refuses a transaction that is not an unprepared, writable, non-empty one for this object. */
 	if (content == NULL ||
 	    !content->active ||
 	    content->prepared ||
@@ -2299,7 +2571,17 @@ vm_object_content_prepare_delayed(
 		pages[index] = find_page(object, (off_t)(base + index * PAGE_SIZE));
 
 		/*
-		 * XXX: 条件文が複雑するぎるので、自然言語で条件の内容をコメントに箇条書きで書く。
+		 * Refuses the whole transaction when a page this write would
+		 * take is not free to take.  That is the case when the page
+		 * exists and any of the following holds:
+		 *
+		 * - it is busy, so another transaction owns it;
+		 * - it is under write-back, so its contents are being written
+		 *   out and must not change underneath;
+		 * - it carries an error, so its contents are not trustworthy;
+		 * - it is orphaned, so it no longer belongs to this object;
+		 * - its hold count and its pin count disagree, which means a
+		 *   holder other than a pin is still looking at it.
 		 */
 		if (pages[index] != NULL &&
 		    ((pages[index]->flags &
@@ -2313,6 +2595,7 @@ vm_object_content_prepare_delayed(
 		}
 	}
 
+	/* Takes every page that already exists, under this transaction's generation. */
 	for (index = 0; index < count; index++) {
 		if (pages[index] != NULL) {
 			pages[index]->flags |= VM_OBJECT_PAGE_BUSY | VM_OBJECT_PAGE_WRITEBACK;
@@ -2325,6 +2608,7 @@ vm_object_content_prepare_delayed(
 	for (index = 0; index < count; index++) {
 		current = base + (uint64_t)index * PAGE_SIZE;
 
+		/* Allocates a page for a hole this transaction covers. */
 		if (pages[index] == NULL) {
 			pages[index] = alloc_object_page(object, (off_t)current, 1);
 			if (pages[index] == NULL) {
@@ -2361,6 +2645,7 @@ vm_object_content_prepare_delayed(
 
 		observed = 0;
 
+		/* Revokes every mapping of a taken page before it may change. */
 		if (pages[index]->mapping_count != 0) {
 			if (vmspace_object_page_revoke == NULL)
 				error = EOPNOTSUPP;
@@ -2382,6 +2667,7 @@ vm_object_content_prepare_delayed(
 	/* Recheck all private identities before publishing any of them. */
 	irq = spin_lock_irqsave(&object->lock);
 
+	/* Refuses the transaction when a fault published one of these pages first. */
 	for (index = 0; index < count; index++) {
 		if (fresh[index]) {
 			if (find_page(object, pages[index]->offset) != NULL) {
@@ -2392,6 +2678,7 @@ vm_object_content_prepare_delayed(
 		}
 	}
 
+	/* Publishes the pages this transaction allocated. */
 	for (index = 0; index < count; index++) {
 		if (fresh[index]) {
 			pages[index]->next = object->pages;
@@ -2420,7 +2707,12 @@ failed:
 			release_object_page_storage(pages[index]);
 	}
 
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2513,23 +2805,36 @@ vm_object_prefetch_prepare(
 	bool enabled;
 	int error;
 
-	/*
-	 * Rejects malformed or already owned requests before reserving
-	 * resources.
-	 *
-	 * XXX:
-	 *  - ORが多すぎる。
-	 *  - 条件節１つごとにif(cond) return EINVAL;を書く。
-	 *  - それぞれの条件に意味をコメントで1行書く。
-	 */
-	if (inode == NULL ||
-	    fill == NULL ||
-	    fill->object != NULL ||
-	    offset < 0 ||
-	    (offset & (PAGE_SIZE - 1U)) != 0 ||
-	    length == 0 ||
-	    (length & (PAGE_SIZE - 1U)) != 0 ||
-	    length > KERN_IO_BATCH_MAX)
+	/* Rejects a request that names no file to read from. */
+	if (inode == NULL)
+		return EINVAL;
+
+	/* Rejects a request that names nowhere to report the run. */
+	if (fill == NULL)
+		return EINVAL;
+
+	/* Rejects a descriptor that already owns an object. */
+	if (fill->object != NULL)
+		return EINVAL;
+
+	/* Rejects an offset before the start of the file. */
+	if (offset < 0)
+		return EINVAL;
+
+	/* Rejects an offset that does not begin a page. */
+	if ((offset & (PAGE_SIZE - 1U)) != 0)
+		return EINVAL;
+
+	/* Rejects an empty run. */
+	if (length == 0)
+		return EINVAL;
+
+	/* Rejects a length that does not cover whole pages. */
+	if ((length & (PAGE_SIZE - 1U)) != 0)
+		return EINVAL;
+
+	/* Rejects a run longer than one batch of disk work. */
+	if (length > KERN_IO_BATCH_MAX)
 		return EINVAL;
 
 	memset(fill, 0, sizeof(*fill));
@@ -2577,7 +2882,18 @@ vm_object_prefetch_prepare(
 	 */
 	irq = spin_lock_irqsave(&object->lock);
 
-	/* XXX: 条件の意味をコメントで自然言語で箇条書きで書く */
+	/*
+	 * Leaves the fill to demand paging unless the object is one a
+	 * prefetch may fill.  It is not when any of the following holds:
+	 *
+	 * - the object carries no cache reference, so nothing keeps the
+	 *   pages this fill would publish;
+	 * - a content transaction, a resize or an anonymous mapping owns
+	 *   the object, so its pages are not the file's to read;
+	 * - the offset is at or past the end of file;
+	 * - the first page is already resident, so there is no missing
+	 *   prefix to read.
+	 */
 	if ((object->flags & VM_OBJECT_CACHE_REFERENCE) == 0 ||
 	    (object->flags & (VM_OBJECT_CONTENT | VM_OBJECT_RESIZING | VM_OBJECT_ANONYMOUS)) != 0 ||
 	    offset >= object->logical_size ||
@@ -2591,6 +2907,7 @@ vm_object_prefetch_prepare(
 	if ((uint64_t)length > (uint64_t)(object->logical_size - offset))
 		length = (size_t)(object->logical_size - offset);
 
+	/* Stops the run at the first page that is already resident. */
 	for (index = 1; (size_t)index * PAGE_SIZE < length; index++) {
 		if (find_page(object, offset + (off_t)index * PAGE_SIZE) != NULL) {
 			length = (size_t)index * PAGE_SIZE;
@@ -2615,6 +2932,7 @@ vm_object_prefetch_prepare(
 		return EINVAL;
 	}
 
+	/* Allocates a private frame for every page of the run. */
 	while (fill->count < needed) {
 		page = alloc_object_page(object,
 		    offset + (off_t)fill->count * PAGE_SIZE, 1);
@@ -2681,13 +2999,24 @@ vm_object_prefetch_complete(
 	error = 0;
 	irq = spin_lock_irqsave(&object->lock);
 
-	/* XXX：複数のif文に分ける。ifごとに意味をコメントで書く。 */
-	if (object->size_generation != fill->size_generation ||
-	    object->content_generation != fill->content_generation ||
-	    (object->flags & (VM_OBJECT_CONTENT | VM_OBJECT_RESIZING | VM_OBJECT_DETACHING)) != 0 ||
-	    fill->offset > object->logical_size ||
-	    (uint64_t)fill->length > (uint64_t)(object->logical_size - fill->offset))
+	if (object->size_generation != fill->size_generation) {
+		/* The file size has changed since the run was measured. */
 		error = EAGAIN;
+	} else if (object->content_generation != fill->content_generation) {
+		/* The contents have changed since the run was measured. */
+		error = EAGAIN;
+	} else if ((object->flags &
+	    (VM_OBJECT_CONTENT | VM_OBJECT_RESIZING | VM_OBJECT_DETACHING)) != 0) {
+		/*
+		 * A write, a resize or a detach now owns the object, so these
+		 * pages are no longer the file's to publish.
+		 */
+		error = EAGAIN;
+	} else if (fill->offset > object->logical_size ||
+	    (uint64_t)fill->length > (uint64_t)(object->logical_size - fill->offset)) {
+		/* The run no longer lies inside the file. */
+		error = EAGAIN;
+	}
 
 	/* Yields to a demand fault that already published one of these pages. */
 	for (index = 0; index < fill->count && error == 0; index++) {
@@ -2703,6 +3032,7 @@ vm_object_prefetch_complete(
 			if (page->prefetch_valid > PAGE_SIZE)
 				page->prefetch_valid = PAGE_SIZE;
 
+			/* Publishes the page as resident, indexed and untouched. */
 			page->prefetch_size_generation = fill->size_generation;
 			page->prefetch_frontier = 0;
 			page->prefetch_used = 0;
@@ -2718,13 +3048,18 @@ vm_object_prefetch_complete(
 
 		waitq_wake_all(&object->page_waitq);
 	}
+
 	spin_unlock_irqrestore(&object->lock, irq);
 
 	/* Releases whatever the publication did not take. */
 	vm_object_prefetch_abort(fill);
 
-	/* Reports the publication result. */
-	return error;
+	/* Reports why the publication failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2743,23 +3078,23 @@ vm_object_prefetch_abort(
 	if (fill == NULL || fill->object == NULL)
 		return;
 
-	/* XXX: 意味をコメントで書く。 */
+	/* Keeps the object, because the descriptor is cleared below. */
 	object = fill->object;
 
-	/* XXX: 意味をコメントで書く。 */
+	/* Returns every frame the fill prepared but never published. */
 	object_cache_discard_prepared(fill->pages, fill->count);
 
-	/* XXX: 意味をコメントで書く。 */
+	/* Releases the disk admission the fill pinned. */
 	if (fill->disk != NULL)
 		disk_cache_release(fill->disk);
 
-	/* XXX: 意味をコメントで書く。 */
+	/* Empties the descriptor so a second cancellation does nothing. */
 	memset(fill, 0, sizeof(*fill));
 
-	/* XXX: 意味をコメントで書く。 */
+	/* Retires the operation this prefetch counted against the object. */
 	object_operation_end(object);
 
-	/* XXX: 意味をコメントで書く。 */
+	/* Destroys the object when this was the last reference to it. */
 	if (refcount_put(&object->refs))
 		destroy_object(object);
 }
@@ -2969,7 +3304,9 @@ vm_commit_get_stats(
 
 	/* Copies the statistics under the lock. */
 	irq = spin_lock_irqsave(&commit_lock);
+
 	memcpy(output, &commit_stats, sizeof(*output));
+
 	spin_unlock_irqrestore(&commit_lock, irq);
 }
 
@@ -2985,9 +3322,11 @@ vm_commit_can_shutdown_swap(
 
 	/* Swap is safe to remove while nothing depends on its capacity. */
 	irq = spin_lock_irqsave(&commit_lock);
+
 	safe = !commit_initialized ||
 		commit_stats.swap_pages == 0 ||
 		commit_stats.used_pages == 0;
+
 	spin_unlock_irqrestore(&commit_lock, irq);
 
 	/* Reports the verdict. */
@@ -3013,7 +3352,12 @@ vm_page_note_in(
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
 
-	/* XXX: 意味をコメントで説明。 */
+	/*
+	 * Moves one page from the swapped count to the resident count and
+	 * records the page-in.  The swapped count is only decremented when
+	 * it is non-zero, because a page read for the first time was never
+	 * counted as swapped.
+	 */
 	if (stats.swapped)
 		stats.swapped--;
 	stats.resident++;
@@ -3022,7 +3366,6 @@ vm_page_note_in(
 	mutex_unlock(&reclaim_lock);
 	vm_metadata_leave();
 }
-
 
 /*
  * Metadata
@@ -3065,6 +3408,7 @@ vm_metadata_enter(
 
 	/* Takes the first entry. */
 	mutex_lock(&metadata_lock);
+
 	metadata_depth = 1;
 }
 
@@ -3162,6 +3506,7 @@ vm_private_page_put(
 	/* Takes the page and slot out of a backing nothing else uses. */
 	irq = spin_lock_irqsave(&backing->state_lock);
 
+	/* Traps on a backing something still maps, holds, pins or owns. */
 	if (backing->mapping_count != 0 ||
 	    backing->mappings != NULL ||
 	    backing->active_operations != 0 ||
@@ -3206,7 +3551,10 @@ vm_private_page_io_acquire(
 	for (;;) {
 		irq = spin_lock_irqsave(&backing->state_lock);
 
-		/* XXX: 条件の意味をコメントで書く。 */
+		/*
+		 * Takes the page when it is idle: nobody owns it for I/O, no
+		 * operation is running against it, and nothing has it pinned.
+		 */
 		if ((backing->flags & VM_PAGE_BUSY) == 0 &&
 		    backing->active_operations == 0 &&
 		    backing->pin_count == 0) {
@@ -3244,6 +3592,8 @@ vm_private_page_io_try_acquire(
 
 	/* Fails while an owner, operation, or pin is present. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
+	/* Refuses a page that is not idle, rather than waiting for it. */
 	if ((backing->flags & VM_PAGE_BUSY) != 0 ||
 	    backing->active_operations != 0 ||
 	    backing->pin_count != 0) {
@@ -3255,6 +3605,7 @@ vm_private_page_io_try_acquire(
 	refcount_get(&backing->refs);
 	backing->flags |= VM_PAGE_BUSY;
 	private_page_advance_locked(backing);
+
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 
 	/* Reports the acquired ownership. */
@@ -3276,6 +3627,7 @@ vm_private_page_io_release(
 
 	/* Clears the ownership, which must be held. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
 	if ((backing->flags & VM_PAGE_BUSY) == 0)
 		HAL_FATAL("VM private backing I/O ownership underflow");
 
@@ -3284,6 +3636,7 @@ vm_private_page_io_release(
 	private_page_advance_locked(backing);
 
 	waitq_wake_all(&backing->state_waitq);
+
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 }
 
@@ -3306,7 +3659,10 @@ vm_private_page_wait_idle(
 	for (;;) {
 		irq = spin_lock_irqsave(&backing->state_lock);
 
-		/* XXX: 条件の意味をコメントで書く。 */
+		/*
+		 * Reports the page idle when nobody owns it for I/O, no
+		 * operation is running against it, and nothing has it pinned.
+		 */
 		if ((backing->flags & VM_PAGE_BUSY) == 0 &&
 		    backing->active_operations == 0 &&
 		    backing->pin_count == 0) {
@@ -3341,6 +3697,7 @@ vm_private_page_operation_try_begin(
 
 	/* Fails while an I/O owner or pin is present. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
 	if ((backing->flags & VM_PAGE_BUSY) != 0 || backing->pin_count != 0) {
 		spin_unlock_irqrestore(&backing->state_lock, irq);
 		return EBUSY;
@@ -3373,6 +3730,7 @@ vm_private_page_operation_end(
 
 	/* Counts the operation down, waking waiters when it was the last. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
 	if (backing->active_operations == 0)
 		HAL_FATAL("VM private backing operation counter underflow");
 
@@ -3383,6 +3741,7 @@ vm_private_page_operation_end(
 		waitq_wake_all(&backing->state_waitq);
 
 	spin_unlock_irqrestore(&backing->state_lock, irq);
+
 	vm_private_page_put(backing);
 }
 
@@ -3401,8 +3760,10 @@ vm_private_page_mark_dirty(
 
 	/* Sets the flag under the state lock. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
 	backing->flags |= VM_PAGE_DIRTY;
 	private_page_advance_locked(backing);
+
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 }
 
@@ -3424,6 +3785,8 @@ vm_private_page_pin(
 
 	/* Fails while an owner or operation is present, or the page is absent. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
+	/* Refuses a page that is busy, in use, or not in memory. */
 	if ((backing->flags & VM_PAGE_BUSY) != 0 ||
 	    backing->active_operations != 0 ||
 	    (backing->flags & VM_PAGE_RESIDENT) == 0) {
@@ -3504,7 +3867,10 @@ vm_private_page_in_owned(
 	/* Takes the swap slot of an owned, swapped-out backing. */
 	irq = spin_lock_irqsave(&backing->state_lock);
 
-	/* XXX: 意味をコメントで説明。 */
+	/*
+	 * Refuses a page that is not both owned for I/O by this caller and
+	 * currently swapped out, because only such a page has a slot to read.
+	 */
 	if ((backing->flags & (VM_PAGE_BUSY | VM_PAGE_SWAPPED)) !=
 	    (VM_PAGE_BUSY | VM_PAGE_SWAPPED)) {
 		spin_unlock_irqrestore(&backing->state_lock, irq);
@@ -3520,6 +3886,7 @@ vm_private_page_in_owned(
 	else
 		error = ENOMEM;
 
+	/* Reclaims once and tries again before giving up on memory. */
 	if (error != 0 && vm_reclaim_one(accounting_page) == 0) {
 		if (hal_pmem_alloc(&request, &backing->pmem) == HAL_OK)
 			error = 0;
@@ -3549,11 +3916,12 @@ vm_private_page_in_owned(
 
 	/* Publishes the backing as resident and no longer swapped. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
 	if ((backing->flags & (VM_PAGE_BUSY | VM_PAGE_SWAPPED)) !=
 	    (VM_PAGE_BUSY | VM_PAGE_SWAPPED) || backing->swap_slot != slot)
 		HAL_FATAL("VM private page-in state changed under I/O owner");
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Forgets the slot, because the page now lives in memory again. */
 	backing->swap_slot = SWAP_SLOT_NONE;
 	backing->flags &= ~VM_PAGE_SWAPPED;
 
@@ -3565,6 +3933,7 @@ vm_private_page_in_owned(
 	private_page_advance_locked(backing);
 
 	spin_unlock_irqrestore(&backing->state_lock, irq);
+
 	vm_page_note_in(accounting_page);
 
 	/* Reports the paged-in backing. */
@@ -3598,24 +3967,27 @@ vm_page_track(
 	mutex_lock(&reclaim_lock);
 	irq = spin_lock_irqsave(&backing->state_lock);
 
-	/* XXX: 条件の意味をコメントで説明。 */
+	/*
+	 * Traps on a backing that cannot be tracked: one that no mapping
+	 * refers to, or one the reclaim queue already holds.
+	 */
 	if (backing->mapping_count == 0 ||
 	    (backing->flags & VM_PAGE_TRACKED) != 0)
 		HAL_FATAL("invalid VM private backing track");
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Marks the backing as one the reclaim queue now holds. */
 	backing->flags |= VM_PAGE_TRACKED;
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Notes whether the page is in memory, for the count kept below. */
 	resident = (backing->flags & VM_PAGE_RESIDENT) != 0;
 
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Puts the backing at the head of the reclaim queue. */
 	backing->queue_next = page_queue;
 	page_queue = backing;
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Counts a resident page towards what reclaim can free. */
 	if (resident)
 		stats.resident++;
 
@@ -3649,7 +4021,10 @@ vm_page_untrack(
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
 
-	/* XXX: 探索の内容をコメントで説明。 */
+	/*
+	 * Walks the reverse mapping list to the link that refers to this
+	 * page, keeping the address of the link so it can be unlinked.
+	 */
 	link = &backing->mappings;
 	while (*link != NULL && *link != page)
 		link = &(*link)->private_next;
@@ -3672,7 +4047,7 @@ vm_page_untrack(
 	swapped = (backing->flags & VM_PAGE_SWAPPED) != 0;
 	tracked = (backing->flags & VM_PAGE_TRACKED) != 0;
 
-	/* XXX: 意味をコメントで説明。 */
+	/* A backing that no mapping refers to leaves the reclaim queue. */
 	if (last_mapping)
 		backing->flags &= ~VM_PAGE_TRACKED;
 
@@ -3682,11 +4057,11 @@ vm_page_untrack(
 	if (last_mapping && tracked) {
 		queue_remove(backing);
 
-		/* XXX: 意味をコメントで説明。 */
+		/* Takes a page that was in memory off the resident count. */
 		if (resident && stats.resident)
 			stats.resident--;
 
-		/* XXX: 意味をコメントで説明。 */
+		/* Takes a page that was on swap off the swapped count. */
 		if (swapped && stats.swapped)
 			stats.swapped--;
 	}
@@ -3722,11 +4097,15 @@ vm_page_replace_private(
 
 	/* The old backing must be owned and mapped. */
 	vm_metadata_enter();
+
 	old = page->private_page;
 	mutex_lock(&reclaim_lock);
 	old_irq = spin_lock_irqsave(&old->state_lock);
 
-	/* XXX: 意味をコメントで説明。 */
+	/*
+	 * Traps unless the caller owns the old backing for I/O and at least
+	 * one mapping still refers to it.
+	 */
 	if ((old->flags & VM_PAGE_BUSY) == 0 || old->mapping_count == 0)
 		HAL_FATAL("replacing an unowned VM private backing");
 
@@ -3740,42 +4119,50 @@ vm_page_replace_private(
 		HAL_FATAL("private page mapping not linked");
 	*link = page->private_next;
 
-	/* XXX: この節の意味をコメントで説明。 */
+	/*
+	 * Drops the mapping the old backing just lost, and remembers the
+	 * state it was in, because the counters below are adjusted outside
+	 * the state lock.
+	 */
 	old_irq = spin_lock_irqsave(&old->state_lock);
+
+	/* Drops the mapping and samples the state the counters below need. */
 	old->mapping_count--;
 	old_last = old->mapping_count == 0;
 	old_resident = (old->flags & VM_PAGE_RESIDENT) != 0;
 	old_swapped = (old->flags & VM_PAGE_SWAPPED) != 0;
 	if (old_last)
 		old->flags &= ~VM_PAGE_TRACKED;
+
 	spin_unlock_irqrestore(&old->state_lock, old_irq);
 
 	/* The fresh backing takes the page as its only mapping. */
 	fresh_irq = spin_lock_irqsave(&fresh->state_lock);
+
 	if (fresh->mapping_count != 0 ||
 	    fresh->mappings != NULL ||
 	    (fresh->flags & (VM_PAGE_BUSY | VM_PAGE_TRACKED)) != 0)
 		HAL_FATAL("replacement VM private backing is not fresh");
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Gives the fresh backing this page as its one and only mapping. */
 	fresh->mapping_count = 1;
 	fresh->flags |= VM_PAGE_TRACKED;
 	fresh_resident = (fresh->flags & VM_PAGE_RESIDENT) != 0;
 
 	spin_unlock_irqrestore(&fresh->state_lock, fresh_irq);
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Points the page at the fresh backing. */
 	page->private_page = fresh;
 	page->private_next = fresh->mappings;
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Links the page into the fresh backing's reverse mapping list. */
 	fresh->mappings = page;
 	fresh->queue_next = page_queue;
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Puts the fresh backing at the head of the reclaim queue. */
 	page_queue = fresh;
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Counts a resident page towards what reclaim can free. */
 	if (fresh_resident)
 		stats.resident++;
 
@@ -3820,6 +4207,7 @@ vm_page_share_private(
 		return error;
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
+
 	if (source->private_page != backing) {
 		error = EAGAIN;
 		goto out;
@@ -3827,6 +4215,7 @@ vm_page_share_private(
 
 	/* Adds the copy as another mapping. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
 	if ((backing->flags & VM_PAGE_BUSY) != 0)
 		HAL_FATAL("VM private operation overlapped I/O owner");
 
@@ -3838,7 +4227,10 @@ vm_page_share_private(
 
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 
-	/* XXX: 意味をコメントで説明。 */
+	/*
+	 * Links the copy into the same backing as the source and marks both
+	 * sides copy-on-write, so the first write to either one faults.
+	 */
 	copy->private_page = backing;
 	copy->private_next = backing->mappings;
 	backing->mappings = copy;
@@ -3860,14 +4252,19 @@ vm_page_share_private(
 	}
 
 out:
+
 	mutex_unlock(&reclaim_lock);
 	vm_metadata_leave();
 
 	if (error != 0)
 		vm_private_page_operation_end(backing);
 
-	/* Reports the share result. */
-	return error;
+	/* Reports why the share failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -3976,6 +4373,7 @@ vm_object_reclaim_one(
 
 	/* Selects the first idle, unwired page of a quiet object. */
 	vm_metadata_enter();
+
 	enabled = registry_lock();
 	for (object = shared_objects; object != NULL; object = object->next) {
 		/* Skips an object that is being detached or resized. */
@@ -4020,6 +4418,7 @@ vm_object_reclaim_one(
 			break;
 	}
 	registry_unlock(enabled);
+
 	vm_metadata_leave();
 
 	/* Reports an empty object store. */
@@ -4085,7 +4484,9 @@ vm_reclaim_one(
 		return ENOMEM;
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
+
 	stats.reclaims++;
+
 	mutex_unlock(&reclaim_lock);
 	vm_metadata_leave();
 
@@ -4102,7 +4503,9 @@ vm_reclaim_note_fault(
 {
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
+
 	stats.faults++;
+
 	mutex_unlock(&reclaim_lock);
 	vm_metadata_leave();
 }
@@ -4127,6 +4530,7 @@ vm_reclaim_get_stats(
 	/* Takes the counters as the starting point under the reclaim lock. */
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
+
 	memcpy(output, &stats, sizeof(*output));
 
 	/* Clears the fields this pass classifies for itself. */
@@ -4330,8 +4734,12 @@ vm_reclaim_drain_swap_source(
 
 	error = vm_reclaim_drain_swap_source_cancelable(source_id, NULL, NULL);
 
-	/* Reports the drain result. */
-	return error;
+	/* Reports why the drain failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -4359,6 +4767,7 @@ vm_reclaim_private_one(
 	/* The first pass skips accessed pages; the second takes any. */
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
+
 	for (pass = 0; pass < 2; pass++) {
 		for (backing = page_queue; backing != NULL;
 		     backing = backing->queue_next) {
@@ -4387,6 +4796,7 @@ vm_reclaim_private_one(
 		}
 	}
 out:
+
 	mutex_unlock(&reclaim_lock);
 	vm_metadata_leave();
 
@@ -4432,6 +4842,7 @@ vm_object_get_shared_internal(
 	if (inode == NULL)
 		return EINVAL;
 
+	/* Notes whether this handle could serve as the object's writer. */
 	writable = 0;
 	if (!cache_only &&
 	    (file_status_flags_get(file) & O_ACCMODE) != O_RDONLY &&
@@ -4501,6 +4912,7 @@ retry_lookup:
 			return error;
 		}
 
+		/* Restarts when the handle no longer names the inode it did. */
 		if (file_vm_inode(object->file) != inode) {
 			destroy_object(object);
 			return EAGAIN;
@@ -4529,6 +4941,7 @@ retry_lookup:
 			if (existing->registry_waiters == 0)
 				HAL_FATAL("VM object registry waiter overflow");
 
+			/* Waits out the transition the existing object is in, then looks again. */
 			refcount_get(&existing->refs);
 			registry_unlock(enabled);
 			destroy_object(object);
@@ -4639,10 +5052,17 @@ object_wait_registry_sequence(
 	int error;
 
 	irq = spin_lock_irqsave(&object->lock);
+
 	error = waitq_sleep(&object->registry_waitq, &object->lock, sequence, 0, 0);
+
 	spin_unlock_irqrestore(&object->lock, irq);
 
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Waits for a teardown transition, then drops the waiter's pin taken under the registry lock. */
@@ -4670,7 +5090,12 @@ object_wait_registry_transition(
 	if (refcount_put(&object->refs))
 		destroy_object(object);
 
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Wakes everyone waiting on an object's registry state. */
@@ -4681,7 +5106,9 @@ object_wake_registry_waiters(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&object->lock);
+
 	waitq_wake_all(&object->registry_waitq);
+
 	spin_unlock_irqrestore(&object->lock, irq);
 }
 
@@ -4786,8 +5213,12 @@ alloc_vm_page(
 			HAL_FATAL("VM page allocation rollback failed");
 	}
 
-	/* Reports the allocation result. */
-	return error;
+	/* Reports why the allocation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Finds the cached page at an offset. */
@@ -4882,17 +5313,23 @@ object_initialize_eof_locked(
 
 	/* A resize in progress pins registry teardown until it finishes. */
 	if (inode->i_vm_resize_active) {
-		/* XXX: 意味をコメントで説明。 */
+		/*
+		 * Adopts the size the resize started from, and joins the
+		 * resize as one more operation holding the object open.
+		 */
 		object->logical_size = inode->i_vm_resize_old_size;
 		object->size_generation = inode->i_vm_resize_generation;
 		object->resize_generation = inode->i_vm_resize_generation;
 		object->flags |= VM_OBJECT_RESIZING;
 		object->active_operations = 1;
 	} else {
-		/* XXX: 意味をコメントで説明。 */
+		/* Adopts the size the file has right now. */
 		object->logical_size = inode->i_size;
 
-		/* XXX: 意味をコメントで説明。 */
+		/*
+		 * Continues the inode's size generation where a past resize
+		 * left it, and starts at one when there has never been one.
+		 */
 		if (inode->i_vm_resize_generation != 0)
 			object->size_generation = inode->i_vm_resize_generation;
 		else
@@ -4901,12 +5338,15 @@ object_initialize_eof_locked(
 
 	/* So does a content write in progress. */
 	if (inode->i_vm_content_active) {
-		/* XXX: 意味をコメントで説明。 */
+		/*
+		 * Adopts the write's content generation and joins it as one
+		 * more operation holding the object open.
+		 */
 		object->flags |= VM_OBJECT_CONTENT;
 		object->content_generation = inode->i_vm_content_generation;
 		object->active_operations++;
 
-		/* XXX: 意味をコメントで説明。 */
+		/* Traps when the operation counter wraps. */
 		if (object->active_operations == 0)
 			HAL_FATAL("VM object operation counter overflow");
 	}
@@ -4957,18 +5397,21 @@ object_has_busy_pages_locked(
 
 	/* Looks for a live page that is under I/O or held. */
 	for (page = object->pages; page != NULL; page = page->next) {
-		/* XXX: 意味をコメントで説明。 */
+		/* A page another transaction owns or is writing out is busy. */
 		if (page->flags & (VM_OBJECT_PAGE_BUSY | VM_OBJECT_PAGE_WRITEBACK))
 			return 1;
 
-		/* XXX: 意味をコメントで説明。 */
+		/* So is a page some reader is still holding. */
 		if (page->hold_count != 0)
 			return 1;
 	}
 
 	/* Looks for an orphan that is still finishing its writeback. */
 	for (page = object->orphan_pages; page != NULL; page = page->next) {
-		/* XXX: 意味をコメントで説明。 */
+		/*
+		 * An orphan is busy on the same terms: owned by another
+		 * transaction, still being written out, or still held.
+		 */
 		if ((page->flags & (VM_OBJECT_PAGE_BUSY | VM_OBJECT_PAGE_WRITEBACK)) != 0 ||
 		    page->hold_count != 0)
 			return 1;
@@ -5009,10 +5452,10 @@ object_record_writeback_error_locked(
 
 	/* Keeps failed dirty ownership observable after another descriptor retries it. */
 	if (object->inode != NULL && io_error_record != NULL) {
-		/* XXX: 意味をコメントで説明。 */
+		/* Records the failure against the file itself. */
 		io_error_record(&object->inode->i_write_error, error);
 
-		/* XXX: 意味をコメントで説明。 */
+		/* And against the file system it belongs to. */
 		if (object->inode->i_mount != NULL)
 			io_error_record(&object->inode->i_mount->m_write_error, error);
 	}
@@ -5229,8 +5672,11 @@ retain_object(
 
 	/* Records the failure and marks the object as retained. */
 	irq = spin_lock_irqsave(&object->lock);
+
 	object_record_writeback_error_locked(object, error);
+
 	spin_unlock_irqrestore(&object->lock, irq);
+
 	object->flags |= VM_OBJECT_RETAINED_WRITEBACK;
 }
 
@@ -5245,6 +5691,8 @@ object_wait_resize(
 
 	/* Sleeps while a resize or content transaction owns the object. */
 	irq = spin_lock_irqsave(&object->lock);
+
+	/* Sleeps until no transaction owns the object. */
 	while ((object->flags & (VM_OBJECT_RESIZING | VM_OBJECT_CONTENT)) != 0) {
 		sequence = waitq_sequence(&object->page_waitq);
 		error = waitq_sleep(&object->page_waitq, &object->lock,
@@ -5254,6 +5702,7 @@ object_wait_resize(
 			return error;
 		}
 	}
+
 	spin_unlock_irqrestore(&object->lock, irq);
 
 	/* Reports an object no transaction owns any more. */
@@ -5273,6 +5722,7 @@ content_release_pages_locked(
 		if (page->content_generation != generation)
 			continue;
 
+		/* Returns the page to service, owned by no transaction. */
 		page->content_generation = 0;
 		page->write_generation = 0;
 		page->write_dirty_generation = 0;
@@ -5312,7 +5762,11 @@ vm_object_content_finish(
 	if (content == NULL || !content->active || content->inode == NULL)
 		return;
 	if (commit) {
-		/* XXX: 意味をコメントで説明。 */
+		/*
+		 * Traps on a commit that cannot be honoured: one the
+		 * transaction never prepared, one claiming more bytes than
+		 * the transaction covers, or one with bytes but no buffer.
+		 */
 		if (!content->prepared ||
 		    committed > content->length ||
 		    (committed != 0 && buffer == NULL))
@@ -5323,6 +5777,7 @@ vm_object_content_finish(
 	inode = content->inode;
 	enabled = registry_lock();
 	inode_irq = spin_lock_irqsave(&inode->i_vm_lock);
+
 	if (!inode->i_vm_content_active ||
 	    inode->i_vm_content_generation != content->generation)
 		HAL_FATAL("inode lost VM content transaction");
@@ -5335,7 +5790,10 @@ vm_object_content_finish(
 
 		object_irq = spin_lock_irqsave(&object->lock);
 
-		/* XXX: 意味をコメントで説明。 */
+		/*
+		 * Traps when the object no longer carries this transaction,
+		 * because the pages below would then belong to another one.
+		 */
 		if ((object->flags & VM_OBJECT_CONTENT) == 0 ||
 		    object->content_generation != content->generation)
 			HAL_FATAL("VM object content generation mismatch");
@@ -5423,17 +5881,22 @@ vm_object_content_finish(
 
 	(void)next_inode_content_generation_locked(inode);
 	waitq_wake_all(&inode->i_vm_waitq);
+
 	spin_unlock_irqrestore(&inode->i_vm_lock, inode_irq);
+
 	registry_unlock(enabled);
 
-	/* XXX: 意味をコメントで説明。 */
+	/*
+	 * Releases the object outside every lock, waking whoever waited on
+	 * the registry for this transaction to end.
+	 */
 	if (wake_registry) {
 		object_wake_registry_waiters(object);
 		if (refcount_put(&object->refs))
 			destroy_object(object);
 	}
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Empties the descriptor so a second finish does nothing. */
 	memset(content, 0, sizeof(*content));
 }
 
@@ -5463,7 +5926,10 @@ vm_object_resize_finish(
 	if (resize == NULL || !resize->active || resize->inode == NULL)
 		return;
 
-	/* XXX: 意味をコメントで説明。 */
+	/*
+	 * Traps on a commit the transaction never prepared, or one that
+	 * names a size no file can have.
+	 */
 	if (commit && (!resize->prepared || logical_size < 0))
 		HAL_FATAL("committing unprepared VM object resize");
 
@@ -5472,15 +5938,15 @@ vm_object_resize_finish(
 	enabled = registry_lock();
 	inode_irq = spin_lock_irqsave(&inode->i_vm_lock);
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Traps when the inode no longer carries this resize. */
 	if (!inode->i_vm_resize_active ||
 	    inode->i_vm_resize_generation != resize->generation)
 		HAL_FATAL("inode lost VM object resize transaction");
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Takes the generation the settled size is published under. */
 	stable_generation = next_inode_resize_generation_locked(inode);
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Finds the object this resize has to settle, if one exists. */
 	object = find_object_by_inode_locked(inode);
 
 	if (object != NULL) {
@@ -5553,24 +6019,29 @@ vm_object_resize_finish(
 	inode->i_vm_resize_target_size = 0;
 
 	waitq_wake_all(&inode->i_vm_waitq);
+
 	spin_unlock_irqrestore(&inode->i_vm_lock, inode_irq);
+
 	registry_unlock(enabled);
 
-	/* XXX: 意味をコメントで説明。 */
+	/*
+	 * Releases the object outside every lock, waking whoever waited on
+	 * the registry for this resize to end.
+	 */
 	if (wake_registry) {
 		object_wake_registry_waiters(object);
 		if (refcount_put(&object->refs))
 			destroy_object(object);
 	}
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Frees the orphans the resize left behind, outside every lock. */
 	while (free_pages != NULL) {
 		page = free_pages;
 		free_pages = page->next;
 		free_object_page(page);
 	}
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Empties the descriptor so a second finish does nothing. */
 	memset(resize, 0, sizeof(*resize));
 }
 
@@ -5588,19 +6059,31 @@ vm_object_page_pin_copy(
 	int error;
 	uint64_t sequence;
 
-	/* Rejects a missing page, owner, or buffer, or a range past the page. */
-	/* XXX: ifを分解して１つずつrejectの理由をコメントで丁寧に説明。 */
-	if (page == NULL || buffer == NULL)
+	/* Rejects a call that names no page to copy through. */
+	if (page == NULL)
+		return EINVAL;
+
+	/* Rejects a call that names no buffer to copy from or into. */
+	if (buffer == NULL)
 		return EINVAL;
 
 	object = page->owner;
 
-	/* XXX: ifを分解して１つずつrejectの理由をコメントで丁寧に説明。 */
-	if (object == NULL || offset > PAGE_SIZE || length > PAGE_SIZE - offset)
+	/* Rejects a page that no object owns, because it has no lock to take. */
+	if (object == NULL)
+		return EINVAL;
+
+	/* Rejects a start that lies past the end of the page. */
+	if (offset > PAGE_SIZE)
+		return EINVAL;
+
+	/* Rejects a run that would reach past the end of the page. */
+	if (length > PAGE_SIZE - offset)
 		return EINVAL;
 
 	/* Waits for the page to leave any writeback, still pinned. */
 	irq = spin_lock_irqsave(&object->lock);
+
 	for (;;) {
 		if (page->owner != object || page->pin_count == 0) {
 			spin_unlock_irqrestore(&object->lock, irq);
@@ -5650,6 +6133,7 @@ range_has_wired_mapping(
 		if (!page_overlaps(page, start, end))
 			continue;
 
+		/* Reports the first mapping of this page that is wired. */
 		for (mapping = page->mappings;
 		     mapping != NULL;
 		     mapping = mapping->object_next) {
@@ -5679,7 +6163,12 @@ vm_object_sync_range_internal(
 	error = vm_object_sync_range_buffer(object, offset, size, flags, detaching,
 	    resize_owner, resize_target, NULL, 0);
 
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Drains the captured range while using the supplied worker reserve when present. */
@@ -5721,14 +6210,28 @@ vm_object_sync_range_buffer(
 	selected_write = 0;
 	held_inode_io = 0;
 
-	/* XXX: ifを分解して１つずつrejectの理由をコメントで丁寧に説明。 */
-	/* Rejects a missing object, an empty range, or inconsistent flags. */
-	if (object == NULL ||
-	    offset < 0 ||
-	    size == 0 ||
-	    (flags & ~(MS_ASYNC | MS_INVALIDATE | MS_SYNC)) != 0 ||
-	    (flags & (MS_ASYNC | MS_SYNC)) == 0 ||
-	    (flags & (MS_ASYNC | MS_SYNC)) == (MS_ASYNC | MS_SYNC))
+	/* Rejects a call that names no object to sync. */
+	if (object == NULL)
+		return EINVAL;
+
+	/* Rejects an offset before the start of the object. */
+	if (offset < 0)
+		return EINVAL;
+
+	/* Rejects an empty range. */
+	if (size == 0)
+		return EINVAL;
+
+	/* Rejects a flag this call does not define. */
+	if ((flags & ~(MS_ASYNC | MS_INVALIDATE | MS_SYNC)) != 0)
+		return EINVAL;
+
+	/* Rejects a call that says neither whether to wait nor not to. */
+	if ((flags & (MS_ASYNC | MS_SYNC)) == 0)
+		return EINVAL;
+
+	/* Rejects a call that asks both to wait and not to. */
+	if ((flags & (MS_ASYNC | MS_SYNC)) == (MS_ASYNC | MS_SYNC))
 		return EINVAL;
 
 	/* offset zero plus SIZE_MAX is the internal full-object sentinel. */
@@ -5756,6 +6259,7 @@ vm_object_sync_range_buffer(
 
 			mutex_unlock(&object->inode->i_io_lock);
 
+			/* Waits out the transaction and takes the lock again. */
 			error = object_wait_resize(object);
 			if (error != 0)
 				return error;
@@ -5784,20 +6288,21 @@ vm_object_sync_range_buffer(
 
 	/* Samples the end of file and starts a sync generation. */
 	irq = spin_lock_irqsave(&object->lock);
+
 	write_limit = object->logical_size;
 	if (resize_owner && (object->flags & VM_OBJECT_RESIZING) == 0)
 		HAL_FATAL("VM resize writeback without transaction ownership");
 
-	/* XXX: 意味をコメントで説明。 */
+	/* A detaching object must have no mapping left anywhere. */
 	if (detaching) {
-		/* XXX: 探索の意味をコメントで説明。 */
+		/* Traps on the first page a mapping still refers to. */
 		for (page = object->pages; page != NULL; page = page->next) {
 			if (page->mappings != NULL || page->mapping_count != 0)
 				HAL_FATAL("detaching VM object still has reverse mappings");
 		}
 	}
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Stamps this pass, so a page is taken at most once by it. */
 	sync_generation = next_generation(object);
 
 	spin_unlock_irqrestore(&object->lock, irq);
@@ -5818,15 +6323,31 @@ vm_object_sync_range_buffer(
 		/* Looks for the next page of the range this pass has not taken. */
 		irq = spin_lock_irqsave(&object->lock);
 		for (page = object->pages; page != NULL; page = page->next) {
-			/* XXX: ifを２つに分解。意味をコメントで説明。 */
-			if (!page_overlaps(page, start, end) ||
-			    page->write_generation == sync_generation)
+			/* Skips a page outside the range this call names. */
+			if (!page_overlaps(page, start, end))
 				continue;
 
-			/* XXX: ifを3つに分解。意味をコメントで説明。 */
-			if ((page->flags & (VM_OBJECT_PAGE_BUSY | VM_OBJECT_PAGE_WRITEBACK)) != 0 ||
-			    page->hold_count != page->pin_count ||
-			    (!resize_owner && (flags & MS_INVALIDATE) != 0 && page->pin_count != 0)) {
+			/* Skips a page this pass has already taken. */
+			if (page->write_generation == sync_generation)
+				continue;
+
+			/* Waits out a page another transaction owns or is writing. */
+			if ((page->flags & (VM_OBJECT_PAGE_BUSY | VM_OBJECT_PAGE_WRITEBACK)) != 0) {
+				wait_for_page = 1;
+				break;
+			}
+
+			/* Waits out a page a reader other than a pin still holds. */
+			if (page->hold_count != page->pin_count) {
+				wait_for_page = 1;
+				break;
+			}
+
+			/*
+			 * An invalidating sync also waits out a pinned page,
+			 * because it may not drop one out from under a pin.
+			 */
+			if (!resize_owner && (flags & MS_INVALIDATE) != 0 && page->pin_count != 0) {
 				wait_for_page = 1;
 				break;
 			}
@@ -5837,7 +6358,7 @@ vm_object_sync_range_buffer(
 		/* Sleeps until a page that is still busy reports progress. */
 		if (wait_for_page) {
 			sequence = waitq_sequence(&object->page_waitq);
-			error = waitq_sleep(&object->page_waitq, &object->lock,　sequence, 0, 0);
+			error = waitq_sleep(&object->page_waitq, &object->lock, sequence, 0, 0);
 			if (error != 0 && error != EAGAIN) {
 				first_error = error;
 				spin_unlock_irqrestore(&object->lock, irq);
@@ -5854,7 +6375,7 @@ vm_object_sync_range_buffer(
 		}
 
 		/* Takes the page out of service for this sync generation. */
-		candidate->flags |= VM_OBJECT_PAGE_BUSY |　VM_OBJECT_PAGE_WRITEBACK;
+		candidate->flags |= VM_OBJECT_PAGE_BUSY | VM_OBJECT_PAGE_WRITEBACK;
 		candidate->write_generation = sync_generation;
 		has_mappings = candidate->mapping_count != 0;
 
@@ -5903,7 +6424,9 @@ vm_object_sync_range_buffer(
 
 	/* Notes an earlier failure the object is still carrying. */
 	irq = spin_lock_irqsave(&object->lock);
+
 	retry_writeback = object->writeback_error != 0;
+
 	spin_unlock_irqrestore(&object->lock, irq);
 
 	/*
@@ -5913,18 +6436,21 @@ vm_object_sync_range_buffer(
 	 */
 	if (!resize_owner && (selected_write || retry_writeback) && first_error == 0) {
 		if (object->write_file == NULL) {
-			/* XXX: どんな条件のときなのか意味をコメントで説明。 */
+			/*
+			 * Nothing was opened for writing, so the data this
+			 * pass wrote out cannot be made durable.
+			 */
 			error = EACCES;
 		} else if (object->write_file->f_ops != NULL && object->write_file->f_ops->fsync != NULL) {
-			/* XXX: どんな条件のときなのか意味をコメントで説明。 */
+			/* The open file offers a barrier of its own. */
 			error = object->write_file->f_ops->fsync(object->write_file);
 		} else if (object->inode != NULL &&
 		    object->inode->i_op != NULL &&
 		    object->inode->i_op->sync != NULL) {
-			/* XXX: どんな条件のときなのか意味をコメントで説明。 */
+			/* The file system offers one instead. */
 			error = object->inode->i_op->sync(object->inode);
 		} else {
-			/* XXX: 成功なら成功とコメントで説明。 */
+			/* Neither offers one, so the pass is already durable. */
 			error = 0;
 		}
 
@@ -5938,7 +6464,12 @@ vm_object_sync_range_buffer(
 	if (first_error != 0)
 		object_record_writeback_error_locked(object, first_error);
 
-	/* XXX: ループで何をしているのかコメントで説明。 */
+	/*
+	 * Walks the page list once, releasing every page this pass took and
+	 * unlinking the ones that leave the list as orphans or retirements.
+	 * The walk keeps the address of the link, so a page can be taken out
+	 * without a second search.
+	 */
 	link = &object->pages;
 	for (;;) {
 		/* Visits only the pages this sync generation took. */
@@ -5963,16 +6494,20 @@ vm_object_sync_range_buffer(
 
 		/* A resize owner orphans a pinned page instead of releasing it. */
 		if (first_error == 0 && resize_owner && page->pin_count != 0) {
-			/* XXX: 条件の意味をコメントで説明。 */
+			/*
+			 * Traps unless the page is one an orphan may be made
+			 * of: no mapping refers to it and the only holders
+			 * left are its pins.
+			 */
 			if (page->mappings != NULL ||
 			    page->mapping_count != 0 ||
 			    page->hold_count != page->pin_count)
 				HAL_FATAL("invalid VM resize orphan candidate");
 
-			/* XXX: 意味をコメントで説明。 */
+			/* Takes the page out of the live list. */
 			*link = page->next;
 
-			/* XXX: 意味をコメントで説明。 */
+			/* Moves it to the orphan list, out of the indexes. */
 			object_page_index_remove(object, page);
 			object_page_dirty_unlink(page);
 			page->flags |= VM_OBJECT_PAGE_ORPHANED;
@@ -5984,17 +6519,20 @@ vm_object_sync_range_buffer(
 
 		/* MS_INVALIDATE retires a page nothing references any more. */
 		if (first_error == 0 && (flags & MS_INVALIDATE) != 0) {
-			/* XXX: 条件の意味をコメントで説明。 */
+			/*
+			 * Traps unless nothing refers to the page any more:
+			 * no mapping, no holder and no pin.
+			 */
 			if (page->mappings != NULL ||
 			    page->mapping_count != 0 ||
 			    page->hold_count != 0 ||
 			    page->pin_count != 0)
 				HAL_FATAL("invalid VM invalidate retire candidate");
 
-			/* XXX: 意味をコメントで説明。 */
+			/* Takes the page out of the live list. */
 			*link = page->next;
 
-			/* XXX: 意味をコメントで説明。 */
+			/* Moves it to the list this call frees on the way out. */
 			object_page_index_remove(object, page);
 			page->next = retired;
 			retired = page;
@@ -6006,7 +6544,11 @@ vm_object_sync_range_buffer(
 
 	waitq_wake_all(&object->page_waitq);
 
-	/* XXX: 意味をコメントで説明。 */
+	/*
+	 * A clean pass over an object with nothing dirty left clears the
+	 * remembered write-back error, because there is no longer any data
+	 * the error could still apply to.
+	 */
 	if (first_error == 0 && !object_has_dirty_pages_locked(object))
 		object->writeback_error = 0;
 
@@ -6039,8 +6581,15 @@ object_page_dirty_link(
 	    (page->flags & VM_OBJECT_PAGE_ORPHANED) != 0)
 		return;
 
-	/* Adds membership without scanning or sorting other resident pages. */
-	/* XXX: 意味を丁寧に複数行のコメントで説明。 */
+	/*
+	 * Adds membership without scanning or sorting other resident pages.
+	 *
+	 * The page goes to the head of the owner's dirty list: its previous
+	 * link is cleared, its next link takes what the head held, the old
+	 * head points back at it when there was one, and the owner's head
+	 * becomes this page.  The membership flag then records that the page
+	 * is on the list, so a second mark does nothing.
+	 */
 	page->dirty_previous = NULL;
 	page->dirty_next = page->owner->dirty_pages;
 	if (page->dirty_next != NULL)
@@ -6072,11 +6621,11 @@ object_page_dirty_unlink(
 	else
 		page->owner->dirty_pages = page->dirty_next;
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Closes the list from the other side as well. */
 	if (page->dirty_next != NULL)
 		page->dirty_next->dirty_previous = page->dirty_previous;
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Leaves the page off the list and records that it is off it. */
 	page->dirty_previous = NULL;
 	page->dirty_next = NULL;
 	page->dirty_linked = 0;
@@ -6090,16 +6639,16 @@ static void
 object_page_dirty_mark(
 	struct vm_object_page *page)
 {
-	/* XXX: 意味をコメントで説明。 */
+	/* A page that has been written is no longer a prefetch of the file. */
 	object_prefetch_retire(page);
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Records the new contents as not yet written back. */
 	page->flags |= VM_OBJECT_PAGE_DIRTY;
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Stamps the change, so a write-back knows what it cleaned. */
 	page->dirty_generation = next_generation(page->owner);
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Publishes the page to the owner's dirty list. */
 	object_page_dirty_link(page);
 }
 
@@ -6120,7 +6669,7 @@ object_memory_reserve(
 	if (cache_memory_reserve == NULL)
 		return 0;
 
-	/* XXX: 意味をコメントで説明。 */
+	/* Asks the budget owner for one page. */
 	error = cache_memory_reserve(kind, PAGE_SIZE, optional);
 	if (error == 0 || !optional || cache_memory_reclaim == NULL)
 		return error;
@@ -6134,7 +6683,12 @@ object_memory_reserve(
 
 	error = cache_memory_reserve(kind, PAGE_SIZE, optional);
 
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Serializes descriptor ownership without sleeping or taking another lock. */
@@ -6205,7 +6759,12 @@ object_slab_alloc(
 	memset(slab, 0, PAGE_SIZE);
 	slab->memory = memory;
 
-	/* XXX: ループの内容をコメントで説明。 */
+	/*
+	 * Carves the page after the slab header into descriptors and puts
+	 * every one of them on the slab's free list.  The header size is
+	 * rounded up so the first descriptor is correctly aligned, and the
+	 * walk stops before the last descriptor that would not fit whole.
+	 */
 	header = (sizeof(*slab) + __alignof__(struct vm_object_page) - 1U) & ~(size_t)(__alignof__(struct vm_object_page) - 1U);
 	for (offset = header;
 	     offset + sizeof(*page) <= PAGE_SIZE;
@@ -6267,6 +6826,7 @@ object_descriptor_alloc(
 	slab->free_pages = page->next;
 	slab->used++;
 
+	/* Takes a slab that has run out off the head of the list. */
 	if (slab->free_pages == NULL) {
 		page_slabs = slab->next;
 		if (page_slabs != NULL)
@@ -6354,6 +6914,7 @@ alloc_object_page(
 	if (object_memory_reserve(CACHE_MEMORY_FILE_DATA, optional) != 0)
 		return NULL;
 
+	/* Returns the reservation when no descriptor is free. */
 	page = object_descriptor_alloc(optional);
 	if (page == NULL) {
 		if (cache_memory_cancel != NULL)
@@ -6361,6 +6922,7 @@ alloc_object_page(
 		return NULL;
 	}
 
+	/* Returns the descriptor and the reservation when no frame is free. */
 	if (alloc_vm_page(&page->pmem) != HAL_OK) {
 		object_descriptor_free(page);
 		if (cache_memory_cancel != NULL)
@@ -6480,24 +7042,40 @@ page_index_balance(
 
 	/* Corrects a left-heavy subtree, including its inner-heavy case. */
 	if (left > right + 1U) {
-		/* XXX: どんな場合にこのブロックに入るのか詳しくコメントで説明。 */
+		/*
+		 * The left subtree is at least two levels taller than the
+		 * right one, so an insertion or a removal on the left has
+		 * left this node out of balance.
+		 */
 
-		/* XXX: ifの条件の意味とその場合に行う処理を詳しくコメントで説明。 */
+		/*
+		 * When the taller side of that left child is its own right
+		 * subtree, the imbalance is the inner-heavy case: one right
+		 * rotation here would only move it.  Rotating the child left
+		 * first turns it into the outer-heavy case.
+		 */
 		if (page_index_height(page->index_left->index_right) >
 		    page_index_height(page->index_left->index_left))
 			page->index_left = page_index_rotate_left(page->index_left);
 
-		/* XXX: 意味をコメントで説明。 */
+		/* Rotates right, which lifts the left child into this place. */
 		page = page_index_rotate_right(page);
 	} else if (right > left + 1U) {
-		/* XXX: どんな場合にこのブロックに入るのか詳しくコメントで説明。 */
+		/*
+		 * The mirror case: the right subtree is at least two levels
+		 * taller than the left one.
+		 */
 
-		/* XXX: ifの条件の意味とその場合に行う処理を詳しくコメントで説明。 */
+		/*
+		 * When the taller side of that right child is its own left
+		 * subtree, this is the inner-heavy case.  Rotating the child
+		 * right first turns it into the outer-heavy case.
+		 */
 		if (page_index_height(page->index_right->index_left) >
 		    page_index_height(page->index_right->index_right))
 			page->index_right = page_index_rotate_right(page->index_right);
 
-		/* XXX: 意味をコメントで説明。 */
+		/* Rotates left, which lifts the right child into this place. */
 		page = page_index_rotate_left(page);
 	}
 
@@ -6621,20 +7199,29 @@ object_reference_locked(
 	struct file *file,
 	int cache_only)
 {
-	int writable;
-
 	/*
 	 * Existing mapping objects keep their original close and retention
 	 * policy.
 	 */
 
-	/* Preserves an existing write-capable handle for shared dirty pages. */
-	/* XXX: まとめて１つのifにできそう。条件の意味を箇条書きで複数行コメントで説明。*/
-	writable = !cache_only &&
-		(file_status_flags_get(file) & O_ACCMODE) != O_RDONLY &&
-		file->f_ops != NULL &&
-		file->f_ops->pwrite != NULL;
-	if (writable && object->write_file == NULL) {
+	/*
+	 * Adopts this handle as the one shared dirty pages are written back
+	 * through.  That happens only when all of the following hold:
+	 *
+	 * - the caller is taking a mapping rather than a cache reference, so
+	 *   the handle will outlive a transient read;
+	 * - the handle was opened for writing;
+	 * - the handle has file operations at all;
+	 * - those operations can write at an offset, which is how write-back
+	 *   reaches the backend;
+	 * - the object has no write handle yet, because an existing one is
+	 *   kept for the life of the object.
+	 */
+	if (!cache_only &&
+	    (file_status_flags_get(file) & O_ACCMODE) != O_RDONLY &&
+	    file->f_ops != NULL &&
+	    file->f_ops->pwrite != NULL &&
+	    object->write_file == NULL) {
 		file_ref(file);
 		object->write_file = file;
 	}
@@ -6788,6 +7375,7 @@ object_cache_read_missing(
 	base = offset & ~(off_t)(PAGE_SIZE - 1U);
 	in_page = (size_t)(offset - base);
 	irq = spin_lock_irqsave(&object->lock);
+
 	if ((object->flags & VM_OBJECT_CACHE_REFERENCE) == 0 ||
 	    find_page(object, base) != NULL) {
 		spin_unlock_irqrestore(&object->lock, irq);
@@ -6798,6 +7386,7 @@ object_cache_read_missing(
 	eof = object->logical_size;
 	size_generation = object->size_generation;
 	content_generation = object->content_generation;
+
 	spin_unlock_irqrestore(&object->lock, irq);
 
 	/* A read that starts at or past the end of file stops the caller. */
@@ -6824,6 +7413,7 @@ object_cache_read_missing(
 
 	irq = spin_lock_irqsave(&object->lock);
 
+	/* Stops the read at the first page that is already resident. */
 	for (index = 1; (size_t)index * PAGE_SIZE < transfer; index++) {
 		if (find_page(object, base + (off_t)index * PAGE_SIZE) != NULL) {
 			transfer = (size_t)index * PAGE_SIZE;
@@ -6843,7 +7433,10 @@ object_cache_read_missing(
 	scratch = NULL;
 	capacity = 0;
 
-	/* XXX: 意味をコメントで説明。 */
+	/*
+	 * Borrows only when both halves of the pool are present, because a
+	 * buffer that cannot be given back must not be taken.
+	 */
 	if (io_pool_borrow != NULL &&
 	    io_pool_release != NULL)
 		scratch = io_pool_borrow(transfer, &capacity);
@@ -6966,6 +7559,7 @@ object_cache_read_missing(
 	if (count > (ssize_t)transfer)
 		count = -EIO;
 
+	/* Fills each page from the staging, or marks it failed. */
 	for (index = 0; index < prepared; index++) {
 		page = pages[index];
 		valid = transfer - (size_t)index * PAGE_SIZE;
@@ -6984,6 +7578,7 @@ object_cache_read_missing(
 	}
 
 	waitq_wake_all(&object->page_waitq);
+
 	spin_unlock_irqrestore(&object->lock, irq);
 
 	/*
@@ -7074,6 +7669,7 @@ write_dirty_pages(
 	capacity = 0;
 	scratch = NULL;
 
+	/* Uses the caller's staging, or borrows one from the pool. */
 	if (reserved_scratch != NULL && reserved_capacity >= PAGE_SIZE) {
 		scratch = reserved_scratch;
 		capacity = reserved_capacity;
@@ -7104,6 +7700,7 @@ write_dirty_pages(
 			break;
 		}
 
+		/* Skips a page this pass did not take or that now lies past the end of file. */
 		position = (uint64_t)page->offset + PAGE_SIZE;
 		if (page->write_generation != generation ||
 		    page->write_dirty_generation == 0 || page->offset >= logical_size) {
@@ -7150,6 +7747,7 @@ write_dirty_pages(
 			 */
 			irq = spin_lock_irqsave(&object->lock);
 
+			/* Stops the batch at the first page that does not continue it. */
 			page = sync_page_at_or_after(object, position);
 			if (page == NULL ||
 			    (uint64_t)page->offset != position ||
@@ -7194,7 +7792,12 @@ write_dirty_pages(
 	if (scratch != NULL && scratch != reserved_scratch)
 		io_pool_release(scratch);
 
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -7217,6 +7820,7 @@ object_prefetch_consume(
 	if (page->prefetch_valid == 0)
 		return 0;
 
+	/* Retires the prefetch once the page is mapped, resized under, or written. */
 	if (page->mapping_count != 0 ||
 	    page->prefetch_size_generation != page->owner->size_generation ||
 	    (page->flags & VM_OBJECT_PAGE_DIRTY) != 0) {
@@ -7224,6 +7828,7 @@ object_prefetch_consume(
 		return 0;
 	}
 
+	/* Clamps the run to the bytes read but not yet consumed. */
 	end = start + length;
 	if (end > page->prefetch_valid)
 		end = page->prefetch_valid;
@@ -7383,7 +7988,9 @@ vmspace_fault_wake(
 	unsigned long irq;
 
 	irq = spin_lock_irqsave(&vm->lock.guard);
+
 	waitq_wake_all(&vm->fault_waitq);
+
 	spin_unlock_irqrestore(&vm->lock.guard, irq);
 }
 
@@ -7398,11 +8005,23 @@ pin_backing_mappings(
 	for (page = backing->mappings; page != NULL; page = page->private_next) {
 		vmspace_ref(page->vm);
 		mutex_lock(&page->vm->lock);
+
+		/*
+		 * Traps on a mapping that cannot be pinned: one a pass
+		 * already owns, or one whose region hold count would wrap.
+		 */
 		if ((page->flags & VM_MAPPING_BUSY) != 0 ||
 		    page->region->hold_count == (unsigned)-1)
 			HAL_FATAL("VM reclaim mapping pin invariant failed");
+
+		/*
+		 * BUSY marks the mapping as owned by this reclaim pass, so a
+		 * fault on it waits instead of racing.  The region hold keeps
+		 * the address space from retiring it underneath.
+		 */
 		page->flags |= VM_MAPPING_BUSY;
 		page->region->hold_count++;
+
 		mutex_unlock(&page->vm->lock);
 	}
 }
@@ -7420,21 +8039,41 @@ unpin_backing_mappings(
 		/* Retires the reclaim state the pass left on the mapping. */
 		vm = page->vm;
 		mutex_lock(&vm->lock);
+
+		/*
+		 * A mapping this pass unmapped is published as no longer
+		 * mapped, so the next fault reads it in again.
+		 */
 		if ((page->flags & VM_MAPPING_RECLAIM_UNMAPPED) != 0) {
 			page->flags &= ~(VM_MAPPING_RECLAIM_UNMAPPED |
 			    VM_MAPPING_RECLAIM_PROTECTED | VM_MAPPING_MAPPED);
 		}
+
+		/*
+		 * Drops the write protection the pass installed, and then the
+		 * ownership itself, which lets a waiting fault proceed.
+		 */
 		page->flags &= ~VM_MAPPING_RECLAIM_PROTECTED;
 		page->flags &= ~VM_MAPPING_BUSY;
 
 		/* Releases the region and wakes the faults that waited. */
 		if (page->region->hold_count == 0)
 			HAL_FATAL("VM reclaim region hold underflow");
+
+		/* Releases the hold that kept the region from retiring. */
 		page->region->hold_count--;
+
+		/*
+		 * Advances the address space's generation so a fault that
+		 * sampled it before this change knows to look again.  Zero is
+		 * skipped, because it is the never-sampled value.
+		 */
 		vm->generation++;
 		if (vm->generation == 0)
 			vm->generation++;
+
 		vmspace_fault_wake(vm);
+
 		mutex_unlock(&vm->lock);
 
 		/* Never run final vmspace destruction under either VM metadata lock. */
@@ -7547,7 +8186,11 @@ rollback:
 	}
 
 	/* Reports the failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Restores the PTEs of a backing whose reclaim was abandoned. */
@@ -7571,6 +8214,7 @@ rollback_backing_ptes(
 		if ((page->flags & VM_MAPPING_RECLAIM_PROTECTED) == 0)
 			continue;
 
+		/* Restores the protection reclaim took away from this mapping. */
 		if (hal_page_prot(page->vm->space,
 				  (void *)page->address,
 				  PAGE_SIZE,
@@ -7700,6 +8344,7 @@ discard_file_backing_owned(
 	/* Detaches every mapping from its region and frees it. */
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
+
 	for (page = backing->mappings; page != NULL; page = next) {
 		/* Splices the page out of its region. */
 		vm = page->vm;
@@ -7756,6 +8401,7 @@ discard_file_backing_owned(
 	memset(&backing->pmem, 0, sizeof(backing->pmem));
 
 	private_page_advance_locked(backing);
+
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 
 	/* Discharges the page from the reclaim counters. */
@@ -7789,19 +8435,29 @@ private_page_targets_source(
 
 	/* Samples the swap state. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
 	flags = backing->flags;
 	slot = backing->swap_slot;
+
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 
-	/* The slot must decode to the source. */
+	/* Reports no match for a page that is not on swap at all. */
 	if ((flags & VM_PAGE_SWAPPED) == 0)
 		return 0;
+
+	/* Reports no match for a page that holds no slot. */
 	if (slot == SWAP_SLOT_NONE)
 		return 0;
+
+	/* Reports no match for a slot that does not decode. */
 	if (swap_slot_decode(slot, &decoded_source, NULL) != 0)
 		return 0;
+
+	/* Reports no match for a slot on some other source. */
 	if (decoded_source != source_id)
 		return 0;
+
+	/* Succeeded: the page is on the source the caller named. */
 	return 1;
 }
 
@@ -7824,11 +8480,19 @@ private_page_wait_sequence(
 	unsigned long irq;
 	int error;
 
+	/* Sleeps under the state lock, which waitq_sleep() drops and retakes. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
 	error = waitq_sleep(&backing->state_waitq, &backing->state_lock, sequence, 0, 0);
+
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 
-	return error;
+	/* Reports why the sleep ended. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Sleeps interruptibly on a backing's state queue for the sequence observed. */
@@ -7842,11 +8506,17 @@ private_page_wait_sequence_interruptible(
 
 	irq = spin_lock_irqsave(&backing->state_lock);
 
+	/* A signal ends this sleep as well as a wake-up does. */
 	error = waitq_sleep(&backing->state_waitq, &backing->state_lock, sequence, 0, WAITQ_INTERRUPTIBLE);
 
 	spin_unlock_irqrestore(&backing->state_lock, irq);
 
-	return error;
+	/* Reports the signal or the failure that ended the sleep. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the backing reported progress. */
+	return 0;
 }
 
 /* Waits for a backing to go idle, polling a cancel callback around each sleep. */
@@ -7876,6 +8546,7 @@ vm_private_page_wait_idle_cancelable(
 
 		irq = spin_lock_irqsave(&backing->state_lock);
 
+		/* Reports the page idle when nobody owns, runs against, or pins it. */
 		if ((backing->flags & VM_PAGE_BUSY) == 0 &&
 		    backing->active_operations == 0 &&
 		    backing->pin_count == 0) {
@@ -7921,7 +8592,9 @@ drain_mapping_pins_release(
 {
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
+
 	unpin_backing_mappings(backing);
+
 	mutex_unlock(&reclaim_lock);
 	vm_metadata_leave();
 }
@@ -7948,23 +8621,50 @@ reclaim_backing_owned(
 
 		mutex_unlock(&reclaim_lock);
 		vm_metadata_leave();
+
+		/*
+		 * Gives up the I/O ownership and the reference this pass
+		 * held, leaving the backing exactly as it was found.
+		 */
 		vm_private_page_io_release(backing);
 		vm_private_page_put(backing);
 
+		/* Reports the shootdown failure. */
 		return error;
 	}
 
-	/* A clean file copy is discarded; anything else goes to swap. */
+	/* Samples the state that decides between discard and swap-out. */
 	irq = spin_lock_irqsave(&backing->state_lock);
+
 	state_flags = backing->flags;
+
 	spin_unlock_irqrestore(&backing->state_lock, irq);
+
+	/*
+	 * A file page neither the software nor the hardware recorded as
+	 * written still matches the file, so it is discarded rather than
+	 * written to swap.
+	 */
 	if (file_candidate &&
 	    (state_flags & VM_PAGE_DIRTY) == 0 &&
 	    (pte_flags & HAL_PAGE_DIRTY) == 0) {
 		error = discard_file_backing_owned(backing);
-		return error;
+
+		/* Reports why the page could not be discarded. */
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the page was dropped without any write. */
+		return 0;
 	}
+
+	/* Anything else keeps its only copy on swap. */
 	error = swap_out_backing_owned(backing);
 
-	return error;
+	/* Reports why the page could not be written out. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the page now lives on swap. */
+	return 0;
 }

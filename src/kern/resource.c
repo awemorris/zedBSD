@@ -229,8 +229,12 @@ resource_limit_set(
 
 	mutex_unlock(&process->resource_lock);
 
-	/* Reports the change result. */
-	return error;
+	/* Reports why the change failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -285,8 +289,12 @@ resource_limit_apply_vm(
 	if (error == 0)
 		error = vmspace_set_data_limit(vm, data.current);
 
-	/* Reports the application result. */
-	return error;
+	/* Reports why the application failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

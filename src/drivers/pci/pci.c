@@ -1316,8 +1316,12 @@ rollback:
 				original_high);
 	pci_bar_cache_readback(device, index, bar);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1473,8 +1477,12 @@ drv_pci_device_allocate_irqs(
 			return error;
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2709,8 +2717,12 @@ fail:
 		device, cookie->capability + PCI_MSI_CONTROL,
 		cookie->msi_control_saved);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the pci source operation. */
@@ -2839,8 +2851,12 @@ fail:
 		cookie->table_mapped = 0;
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the map msix entry operation. */

@@ -226,8 +226,12 @@ swap_manager_enable(
 
 	error = swap_manager_enable_transition(backend, NULL);
 
-	/* Reports the enable result. */
-	return error;
+	/* Reports why the enable failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -448,8 +452,12 @@ swap_source_add(
 			swap_manager_disable_empty(backend);
 	}
 
-	/* Reports the add result. */
-	return error;
+	/* Reports why the add failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -467,8 +475,12 @@ swap_activate(
 
 	error = swap_source_add(backend, 0, ops, data, page_size, slot_count);
 
-	/* Reports the add result. */
-	return error;
+	/* Reports why the add failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -579,8 +591,12 @@ swap_read_page(
 
 	error = swap_io(backend, slot, page, 0);
 
-	/* Reports the read result. */
-	return error;
+	/* Reports why the read failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -596,8 +612,12 @@ swap_write_page(
 
 	error = swap_io(backend, slot, (void *)page, 1);
 
-	/* Reports the write result. */
-	return error;
+	/* Reports why the write failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1007,8 +1027,12 @@ swap_set_system_backend(
 		system_backend = backend;
 	spin_unlock_irqrestore(&swap_lock, irq);
 
-	/* Reports the publication result. */
-	return error;
+	/* Reports why the publication failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1182,8 +1206,12 @@ kern_swap_control_register(
 	}
 	spin_unlock_irqrestore(&control_lock, irq);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1268,8 +1296,12 @@ out_release:
 out:
 	control_leave();
 
-	/* Reports the add result. */
-	return error;
+	/* Reports why the add failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1317,8 +1349,12 @@ kern_swap_control_remove(
 out:
 	control_leave();
 
-	/* Reports the removal result. */
-	return error;
+	/* Reports why the removal failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1517,7 +1553,11 @@ swap_header_validate(
 	error = swap_header_parse(header, backing_bytes, NULL);
 
 	/* Returns the parser's exact error. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1756,8 +1796,12 @@ out:
 		kern_free(data);
 	kern_free(claim_extents);
 
-	/* Reports the preparation result. */
-	return error;
+	/* Reports why the preparation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2003,8 +2047,12 @@ kern_swap_source_set_add(
 out:
 	source_set_control_leave(set);
 
-	/* Reports the add result. */
-	return error;
+	/* Reports why the add failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2198,8 +2246,12 @@ fail:
 out:
 	source_set_control_leave(set);
 
-	/* Reports the activation result. */
-	return error;
+	/* Reports why the activation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2329,8 +2381,12 @@ rollback_prepared:
 out:
 	source_set_control_leave(set);
 
-	/* Reports the add result. */
-	return error;
+	/* Reports why the add failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2346,8 +2402,12 @@ kern_swap_source_set_runtime_remove(
 	error = kern_swap_source_set_runtime_remove_cancelable(set, source_id,
 	    NULL, NULL);
 
-	/* Reports the removal result. */
-	return error;
+	/* Reports why the removal failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2428,8 +2488,12 @@ kern_swap_source_set_runtime_remove_cancelable(
 out:
 	source_set_control_leave(set);
 
-	/* Reports the removal result. */
-	return error;
+	/* Reports why the removal failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2466,8 +2530,12 @@ kern_swap_source_set_find_identity(
 	}
 	spin_unlock_irqrestore(&swap_source_lock, irq);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2594,8 +2662,12 @@ kern_swap_source_set_abort(
 out:
 	source_set_control_leave(set);
 
-	/* Reports the abort result. */
-	return error;
+	/* Reports why the abort failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2785,8 +2857,12 @@ swap_io(
 	backend->inflight--;
 	spin_unlock_irqrestore(&swap_lock, irq);
 
-	/* Reports the driver's result. */
-	return error;
+	/* Reports why the driver's failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Tests whether a swap parameter is a boot<slot>:<path> reference. */
@@ -2871,7 +2947,11 @@ control_enter(
 	spin_unlock_irqrestore(&control_lock, irq);
 
 	/* Reports whether the operation was taken. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Releases the control operation. */
@@ -2905,7 +2985,11 @@ control_snapshot_registration(
 	spin_unlock_irqrestore(&control_lock, irq);
 
 	/* Reports whether a registration was copied. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Resolves a selector to a disk, and for a file path also to its inode. */
@@ -3040,7 +3124,11 @@ control_revalidate_identity(
 	control_release_identity(&path, disk, identity_inode);
 
 	/* Reports whether the selector still names the source. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports EINTR to a cancelable removal when its thread has a signal. */
@@ -3216,7 +3304,13 @@ swap_disk_write(
 		error = disk_write_direct_claimed(disk, block, count, page, claim);
 	else
 		error = disk_write_direct(disk, block, count, page);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Transfers one swap page of a file source through its extents. */
@@ -3288,7 +3382,13 @@ file_swap_read(
 	int error;
 
 	error = file_swap_io(argument, slot, page, 0);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Writes one page of a file source. */
@@ -3301,7 +3401,13 @@ file_swap_write(
 	int error;
 
 	error = file_swap_io(argument, slot, (void *)page, 1);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Flushes the disk under a file source. */
@@ -3314,7 +3420,13 @@ file_swap_flush(
 
 	data = argument;
 	error = bio_flush(data->disk);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Releases a file source's inode, disk, and claim. */
@@ -3373,7 +3485,13 @@ raw_swap_read(
 	int error;
 
 	error = raw_swap_io(argument, slot, page, 0);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Writes one page of a raw source. */
@@ -3386,7 +3504,13 @@ raw_swap_write(
 	int error;
 
 	error = raw_swap_io(argument, slot, (void *)page, 1);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Flushes the disk under a raw source. */
@@ -3399,7 +3523,13 @@ raw_swap_flush(
 
 	data = argument;
 	error = bio_flush(data->disk);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Releases a raw source's disk and claim. */
@@ -3512,7 +3642,11 @@ source_set_control_enter(
 	spin_unlock_irqrestore(&swap_source_lock, irq);
 
 	/* Reports whether the gate was taken. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Releases the set's control flag. */
@@ -3537,5 +3671,11 @@ source_set_current_total(
 	int error;
 
 	error = swap_get_stats(&set->backend, total, &free_slots);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

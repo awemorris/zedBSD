@@ -452,7 +452,11 @@ charge_node(
 	mutex_unlock(&state->quota_lock);
 
 	/* Reports whether the quota allowed it. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Returns one node to the mount's node quota. */
@@ -492,8 +496,12 @@ charge_page(
 		}
 	}
 
-	/* Reports the charge result. */
-	return error;
+	/* Reports why the charge failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Returns one page to the commit limit and the byte quota. */
@@ -779,7 +787,13 @@ tmpfs_create(
 	if (request == NULL || request->type != INODE_REG)
 		return EINVAL;
 	error = tmpfs_make(directory, component, request, NULL, result);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Creates a directory. */
@@ -795,7 +809,13 @@ tmpfs_mkdir(
 	if (request == NULL || request->type != INODE_DIR)
 		return EINVAL;
 	error = tmpfs_make(directory, component, request, NULL, result);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Creates a FIFO, socket, or device node. */
@@ -817,7 +837,13 @@ tmpfs_mknod(
 	    request->type != INODE_BLOCK)
 		return EOPNOTSUPP;
 	error = tmpfs_make(directory, component, request, NULL, result);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Creates a symbolic link. */
@@ -834,7 +860,13 @@ tmpfs_symlink(
 	if (request == NULL || request->type != INODE_SYMLINK)
 		return EINVAL;
 	error = tmpfs_make(directory, component, request, target, result);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Copies a symlink target, truncated to the buffer. */
@@ -982,7 +1014,13 @@ tmpfs_unlink(
 	int error;
 
 	error = detach_entry(directory, component, 0);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Removes an empty directory. */
@@ -994,7 +1032,13 @@ tmpfs_rmdir(
 	int error;
 
 	error = detach_entry(directory, component, 1);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Renames an entry within the mount, replacing a compatible target. */

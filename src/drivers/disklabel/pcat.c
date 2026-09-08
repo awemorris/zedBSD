@@ -132,6 +132,10 @@ pcat_auto_scan(
 out:
 	kern_free(block);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

@@ -1563,8 +1563,12 @@ xhci_set_address(
 	if (error == 0)
 		xhci_default_owner_release(c, d);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the xhci device disable operation. */
@@ -2539,8 +2543,12 @@ xhci_endpoint_reset(
 	xhci_recovery_leave_locked(c, endpoint);
 	spin_unlock_irqrestore(&c->active_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reclaim may reach a USB-backed swap source after consuming the last free physical page.  A transfer on that path must not allocate the DMA page which is needed to free a page.  USB storage serializes its BOT stages, so one request and one bounded coherent buffer reserved at start are sufficient for its reclaim-safe transfers even while unrelated endpoints remain active.  URBs with normal reservations use their own request/DMA first. Other ordinary traffic, including persistent networking, uses the dynamic path. */
@@ -4743,8 +4751,12 @@ xhci_guarded_device_enable(
 	error = xhci_device_enable(h, u);
 	xhci_operation_leave(c);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the xhci guarded set address operation. */
@@ -4766,8 +4778,12 @@ xhci_guarded_set_address(
 	error = xhci_set_address(h, u, address);
 	xhci_operation_leave(c);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the xhci guarded device quiesce operation. */
@@ -4788,8 +4804,12 @@ xhci_guarded_device_quiesce(
 	error = xhci_device_quiesce(h, u);
 	xhci_operation_leave(c);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the xhci guarded device disable operation. */
@@ -4828,8 +4848,12 @@ xhci_guarded_urb_dequeue(
 	error = xhci_urb_dequeue(h, u);
 	xhci_operation_leave(c);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the xhci guarded endpoint enable operation. */
@@ -4850,8 +4874,12 @@ xhci_guarded_endpoint_enable(
 	error = xhci_endpoint_enable(h, endpoint);
 	xhci_operation_leave(c);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the xhci guarded endpoint reset operation. */
@@ -4872,8 +4900,12 @@ xhci_guarded_endpoint_reset(
 	error = xhci_endpoint_reset(h, endpoint);
 	xhci_operation_leave(c);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the xhci guarded endpoint disable operation. */
@@ -4896,8 +4928,12 @@ xhci_guarded_endpoint_disable(
 	error = xhci_endpoint_disable(h, endpoint);
 	xhci_operation_leave(c);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the xhci guarded frame operation. */
@@ -4941,8 +4977,12 @@ xhci_guarded_root_status(
 	error = xhci_root_status(h, buffer, length, actual);
 	xhci_operation_leave(c);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the xhci guarded root control operation. */
@@ -4966,8 +5006,12 @@ xhci_guarded_root_control(
 	error = xhci_root_control(h, request, buffer, length, actual);
 	xhci_operation_leave(c);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the xhci guarded root port reset operation. */
@@ -4988,8 +5032,12 @@ xhci_guarded_root_port_reset(
 	error = xhci_root_port_reset(h, port);
 	xhci_operation_leave(c);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static const struct drv_usb_hcd_ops xhci_ops = {

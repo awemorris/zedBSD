@@ -135,8 +135,12 @@ usync_wait(
 		error = 0;
 	spin_unlock_irqrestore(&bucket->lock, irq);
 
-	/* Reports the sleep result. */
-	return error;
+	/* Reports why the sleep failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

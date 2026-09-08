@@ -346,7 +346,11 @@ loopback_open(
 	error = net_device_set_carrier(device, 1);
 
 	/* Reports the carrier change. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Takes the loopback device down by dropping its carrier. */
@@ -394,8 +398,12 @@ loopback_init(
 		loopback_device = NULL;
 	}
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Takes the oldest queued packet, or none. */

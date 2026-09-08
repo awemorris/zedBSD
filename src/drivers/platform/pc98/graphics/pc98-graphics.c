@@ -151,8 +151,12 @@ graphics_open(
 	}
 	mutex_unlock(&graphics_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the graphics close operation. */
@@ -256,8 +260,12 @@ graphics_enter(
 		graphics_entered = 0;
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the graphics get modes operation. */
@@ -645,8 +653,12 @@ graphics_glyph(
 	if (error == 0)
 		error = copyout(&request, argument, sizeof(request));
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the graphics ioctl locked operation. */
@@ -794,6 +806,10 @@ graphics_ioctl(
 	error = graphics_ioctl_locked(file, request, argument);
 	mutex_unlock(&graphics_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

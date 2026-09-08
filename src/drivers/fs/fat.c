@@ -2517,8 +2517,12 @@ fat_sector_images_commit(
 	if (rollback != 0)
 		return rollback;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Commit bounded FAT sector images and restore every mirror on uncertain errors. */
@@ -2690,8 +2694,12 @@ fat_table_transaction(
 	error = fat_sector_images_commit(filesystem, slots, used, UINT32_MAX);
 	kern_free(slots);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Preserve the immediate fallback with the same required durability boundaries. */
@@ -2722,7 +2730,11 @@ fat_raw_set_cluster(
 	error = fat_raw_set_cluster_immediate(filesystem, cluster, value);
 
 	/* Report the original update result without leaving deferred state. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Publish a newly initialized cluster together with a same-sector tail link. */
@@ -2792,7 +2804,11 @@ fat_link_initialized_cluster(
 	}
 
 	/* Preserve the original tail-link failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Merge a bounded directory run while preserving neighboring and hidden slots. */
@@ -2888,8 +2904,12 @@ fat_directory_transaction(
 						      : UINT32_MAX);
 	kern_free(slots);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 static uint32_t fat_raw_dir_cluster(const struct fat_mount_state *fat, const uint8_t raw[32]);
 
@@ -3061,8 +3081,12 @@ fat_file_validate_at(
 	error = fat_raw_validate_chain_at(file->mount, file->first_cluster,
 					  wanted, cursor, last);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Publishes a successful operation only if its validated chain stayed unchanged. */
@@ -3456,7 +3480,11 @@ fat_raw_extend_cluster(
 	error = fat_link_initialized_cluster(filesystem, tail, *added);
 
 	/* Report the fully published link or its completed rollback. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Prepare an initialized private chain before linking it into an existing file. */
@@ -7215,8 +7243,12 @@ fat_stat_path(
 	if (error == 0)
 		set_inode_ops(*result);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int fat_stat_path_casefold(struct mount *mountp, const char *path, struct inode **result);
@@ -7259,8 +7291,12 @@ fat_stat_path_casefold(
 	if (error == 0)
 		set_inode_ops(*result);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int fat_lookup_unlocked(struct inode *directory, const struct componentname *name, struct inode **result);
@@ -7343,8 +7379,12 @@ fat_lookup(
 	error = fat_lookup_unlocked(directory, name, result);
 	mutex_unlock(&state->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int fat_lookup_casefold_unlocked(struct inode *directory, const struct componentname *name, struct inode **result);
@@ -7567,8 +7607,12 @@ fat_setattr(
 		error = fat_setattr_unlocked(inode, status, mask);
 	mutex_unlock(&state->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static struct fat_file_state *fat_file_get(struct file *file);
@@ -7640,8 +7684,12 @@ fat_open_file(
 	error = fat_file_get(file) != NULL ? 0 : EIO;
 	mutex_unlock(&state->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static ssize_t fat_loop_transfer(struct file *file, struct fat_file_state *state, void *buffer, size_t length, off_t offset, int writing);
@@ -7803,8 +7851,12 @@ drv_fat_file_set_loop_map(
 out:
 	mutex_unlock(&mount->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static ssize_t fat_pread_file_unlocked(struct file *file, void *buffer, size_t length, off_t offset);
@@ -8171,8 +8223,12 @@ fat_readdir(
 	error = fat_readdir_unlocked(file, entry, eof);
 	mutex_unlock(&state->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the fat close file operation. */
@@ -8230,8 +8286,12 @@ fat_close_file(
 	if (mount_state != NULL)
 		mutex_unlock(&mount_state->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the fat fsync operation. */
@@ -8261,8 +8321,12 @@ fat_fsync(
 		error = disk_sync(file->f_inode->i_mount->m_disk);
 	mutex_unlock(&mount_state->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the fat lookup casefold operation. */
@@ -8279,8 +8343,12 @@ fat_lookup_casefold(
 	error = fat_lookup_casefold_unlocked(directory, name, result);
 	mutex_unlock(&state->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the fat truncate operation. */
@@ -8454,8 +8522,12 @@ rollback_raw:
 	}
 	namecache_remove(directory, name);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the fat create operation. */
@@ -8488,8 +8560,13 @@ fat_create(
 		return error;
 	}
 	*result = created;
-	/* Returns the computed result. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the fat orphan operation. */
@@ -8655,8 +8732,12 @@ rollback_raw:
 	}
 	namecache_remove(directory, name);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the fat mkdir operation. */
@@ -8689,8 +8770,13 @@ fat_mkdir(
 		return error;
 	}
 	*result = created;
-	/* Returns the computed result. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static FAT_MUTATION int fat_remove_inode_unlocked(struct inode *directory, const struct componentname *name, int remove_directory, struct inode **orphaned);
@@ -8742,8 +8828,12 @@ fat_remove_inode_unlocked(
 	if (error != 0)
 		inode_release(victim);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the fat unlink operation. */
@@ -8764,8 +8854,12 @@ fat_unlink(
 	if (orphaned != NULL)
 		fat_release_orphan(orphaned);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the fat rmdir operation. */
@@ -8786,8 +8880,12 @@ fat_rmdir(
 	if (orphaned != NULL)
 		fat_release_orphan(orphaned);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static FAT_MUTATION int fat_path_descendant(const char *parent, const char *path);
@@ -9108,8 +9206,12 @@ fat_rename(
 	if (orphaned != NULL)
 		fat_release_orphan(orphaned);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void fat_reclaim_unlocked(struct inode *inode);
@@ -9539,8 +9641,12 @@ fat_sync_mount(
 		error = disk_sync(mountp->m_disk);
 	mutex_unlock(&state->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void fat_unmount_impl(struct mount *mountp);
@@ -9610,8 +9716,12 @@ fat_statvfs(
 	}
 	mutex_unlock(&state->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Proves an overwrite stays within a complete existing cluster chain. */
@@ -9722,8 +9832,12 @@ drv_fat_file_extents(
 		error = fat_engine_file_extents(state, callback, context);
 	mutex_unlock(&mount_state->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 struct contiguous_context {

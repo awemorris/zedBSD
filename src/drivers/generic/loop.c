@@ -362,8 +362,12 @@ fail_refs:
 	loop->index = i;
 	spin_unlock_irqrestore(&loop_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -413,8 +417,12 @@ drv_loop_attach_path(
 	}
 	cwdinfo_destroy(&context);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -488,8 +496,12 @@ retryable:
 	loop->detaching = false;
 	spin_unlock_irqrestore(&loop_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the loop backing valid operation. */
@@ -631,8 +643,12 @@ out:
 	}
 	kern_free(collection.extents);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the loop collect extent operation. */

@@ -273,8 +273,12 @@ ax211_sha256(
 	else
 		drv_intel_ax211_scrub(&context, sizeof(context));
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ax211_digest_matches(const uint8_t *bytes, size_t length, const uint8_t expected[32]);
@@ -458,8 +462,13 @@ ax211_read_exact_file(
 		ax211_release_bytes(&result, exact_size);
 	else
 		*bytes = result;
-	/* Returns the computed result. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ax211_parse_ucode(const uint8_t *bytes, size_t length, struct intel_ax211_firmware_manifest *manifest);

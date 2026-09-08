@@ -569,7 +569,13 @@ tty_console_ioctl(
 	int error;
 
 	error = tty_vt_ioctl(0, file, request, argument);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -587,7 +593,13 @@ tty_vt_ioctl(
 	if (vt >= TTY_VT_COUNT)
 		return ENODEV;
 	error = tty_ioctl_instance(&console_ttys[vt], file, request, argument);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -602,7 +614,13 @@ tty_console_poll(
 	int error;
 
 	error = tty_vt_poll(0, file, events, revents);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -794,8 +812,12 @@ tty_pty_register(
 	}
 	error = cdev_register("ptmx", 0x00010001U, &pty_ptmx_ops, NULL);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 #ifdef ZEDBSD_TTY_TEST
@@ -1408,7 +1430,13 @@ tty_assign_controlling(
 	spin_unlock_irqrestore(&tty->lock, irq);
 	if (error != 0)
 		process_controlling_tty_detach_one(process, tty, generation);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Applies the job-control rules to a background process's terminal access. */
@@ -2758,7 +2786,13 @@ pty_slave_ioctl(
 	if (handle == NULL)
 		return EIO;
 	error = tty_ioctl_instance(&handle->pair->slave, file, request, argument);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the readiness of a slave. */

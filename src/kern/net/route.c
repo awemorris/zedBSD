@@ -167,8 +167,12 @@ route_add(
 
 	error = route_add_flags(network, netmask, gateway, device, flags);
 
-	/* Reports the add result. */
-	return error;
+	/* Reports why the add failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -434,8 +438,12 @@ route_ioctl(
 	error = route_add_flags(network, netmask, gateway, device, flags);
 	net_device_release(device);
 
-	/* Reports the add result. */
-	return error;
+	/* Reports why the add failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Disables interrupts, when the HAL is present, and takes the table lock. */

@@ -476,8 +476,12 @@ inode_lookup_casefold(
 		return EOPNOTSUPP;
 	error = directory->i_op->lookup_casefold(directory, name, result);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -712,7 +716,13 @@ inode_setattr(
 out:
 	if (held_io)
 		mutex_unlock(&i->i_io_lock);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -960,8 +970,12 @@ inode_truncate_transaction(
 	error = inode_truncate_transaction_impl(i, request, result);
 	backing_mutation_end(&guard);
 
-	/* Reports the truncate result. */
-	return error;
+	/* Reports why the truncate failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -979,7 +993,13 @@ inode_truncate_limited_cred(
 
 	error = inode_truncate_limited_impl(i, size, growth_limit, cred, 0,
 	    limit_exceeded);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -996,7 +1016,13 @@ inode_truncate_limited(
 
 	error = inode_truncate_limited_impl(i, size, growth_limit, NULL, 0,
 	    limit_exceeded);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1010,7 +1036,13 @@ inode_truncate(
 	int error;
 
 	error = inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 0, NULL);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1024,7 +1056,13 @@ inode_truncate_content_change(
 	int error;
 
 	error = inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 1, NULL);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1092,8 +1130,12 @@ inode_setxattr(
 	if (error == 0)
 		inode_touch(inode, INODE_ATTR_CTIME);
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1150,8 +1192,12 @@ inode_removexattr(
 	if (error == 0)
 		inode_touch(inode, INODE_ATTR_CTIME);
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1171,8 +1217,12 @@ inode_sync(
 	else
 		error = 0;
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1220,7 +1270,13 @@ inode_create(
 		error = inode_create_locked(i, n, request, r);
 	if (entered)
 		mount_vfs_transaction_leave(i->i_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1242,7 +1298,13 @@ inode_link(
 		error = inode_link_locked(directory, name, target);
 	if (entered)
 		mount_vfs_transaction_leave(directory->i_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1265,7 +1327,13 @@ inode_mkdir(
 		error = inode_mkdir_locked(i, n, request, r);
 	if (entered)
 		mount_vfs_transaction_leave(i->i_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1288,7 +1356,13 @@ inode_mknod(
 		error = inode_mknod_locked(i, n, request, r);
 	if (entered)
 		mount_vfs_transaction_leave(i->i_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1325,8 +1399,12 @@ inode_rename(
 	if (entered)
 		mount_vfs_transaction_leave(od->i_mount);
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1347,7 +1425,13 @@ inode_rmdir(
 		error = inode_rmdir_locked(i, n);
 	if (entered)
 		mount_vfs_transaction_leave(i->i_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1371,7 +1455,13 @@ inode_symlink(
 		error = inode_symlink_locked(directory, name, target, request, result);
 	if (entered)
 		mount_vfs_transaction_leave(directory->i_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1392,7 +1482,13 @@ inode_unlink(
 		error = inode_unlink_locked(i, n);
 	if (entered)
 		mount_vfs_transaction_leave(i->i_mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1456,7 +1552,13 @@ out:
 	inode_release(current);
 	if (fast != NULL)
 		inode_release(fast);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1495,8 +1597,12 @@ inode_create_locked(
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1535,8 +1641,12 @@ inode_mkdir_locked(
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1577,8 +1687,12 @@ inode_mknod_locked(
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1639,8 +1753,12 @@ inode_unlink_locked(
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1692,8 +1810,12 @@ inode_rmdir_locked(
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1836,7 +1958,13 @@ inode_rename_locked(
 		backing_mutation_end(&target_guard);
 	backing_mutation_end(&source_guard);
 	inode_release(source);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1883,8 +2011,12 @@ inode_link_locked(
 		inode_touch(directory, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1928,8 +2060,12 @@ inode_symlink_locked(
 		inode_touch(directory, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the pool index of a pool inode, or -1. */
@@ -2132,8 +2268,12 @@ inode_creation_preserve_acl(
 	/* Copies the ACL onto the child. */
 	error = posix_acl_store(child, name, &acl);
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Tests whether two inode pointers name the same object. */
@@ -2388,7 +2528,13 @@ retry:
 		}
 	}
 	mutex_unlock(&i->i_io_lock);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Builds a truncate request and runs it as a transaction. */
@@ -2413,7 +2559,13 @@ inode_truncate_limited_impl(
 	error = inode_truncate_transaction(i, &request, &result);
 	if (limit_exceeded != NULL)
 		*limit_exceeded = result.limit_exceeded;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Tests whether an extended attribute name is non-empty and bounded. */

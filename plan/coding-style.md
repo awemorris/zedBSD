@@ -41,6 +41,59 @@ that use it when moving it to the top would make the implementation harder to
 read.  This is a narrow exception for macros that are inseparable from the
 local implementation.
 
+Every type definition carries a comment above it that says what role the type
+plays, not what its fields are.  Say what one instance stands for and what
+keeps instances alive:
+
+```c
+/*
+ * One page of storage carved into mapping descriptors.
+ *
+ * Descriptors are handed out from a slab's free mask rather than allocated
+ * one at a time, so a mapping can be created on a fault path that must not
+ * enter the general allocator.
+ */
+struct vm_page_slab {
+```
+
+Every file-scope variable carries a comment above it that says what the
+variable holds, why the file needs it, and how long it lives, not merely what
+its type is.  State the invariant a reader would otherwise have to reconstruct
+from the call sites: what protects the variable, when it is filled and when it
+is emptied, what its zero value means, and what other variable it is kept
+consistent with.
+
+```c
+/*
+ * The generation stamped on the object published next.
+ *
+ * It only ever increases, so a stale reference to a slot that has been
+ * reused is recognized by the generation that came with it.
+ */
+static uint64_t object_registry_generation;
+```
+
+The forward-declaration block and any weak `extern` declarations of optional
+collaborators are part of the file's structure, not commentary.  A weak
+declaration is what makes `if (optional_function != NULL)` a real test; without
+it the compiler treats the test as always true and `-Werror` rejects the file.
+Never drop either block while moving code between files.
+
+A group of weak declarations carries a comment that says why those symbols are
+optional -- which build leaves them out, and what a null test means at every
+call site:
+
+```c
+/*
+ * Test checkpoints.
+ *
+ * The test build defines these to observe a step that leaves no other trace.
+ * They are weak so that a production kernel links without them and every call
+ * site is a null test the compiler removes.
+ */
+extern void vmspace_pin_page_checkpoint(struct vmspace *vm, size_t index, size_t page_count) __attribute__((weak));
+```
+
 ## 3. Forward declarations and function definitions
 
 Every non-`static inline` static function has a forward declaration.  A forward
@@ -188,6 +241,60 @@ exceptions are the first paragraph after an opening brace, a continued comment
 block, and a comment directly following a `case` or other label where inserting
 a blank line would not create a paragraph boundary.
 
+A block that ends with a closing brace ends its semantic paragraph.  Put a
+blank line after that brace before the next statement or comment, so a decision
+and whatever follows it are never read as one paragraph:
+
+```c
+/* Waits out a mapping another pass owns. */
+if ((entry->flags & VM_MAPPING_BUSY) != 0) {
+	sequence = waitq_sequence(&vm->fault_waitq);
+	break;
+}
+
+/* Refuses a page the fault did not leave resident. */
+if (entry->object_page == NULL)
+	return EFAULT;
+```
+
+The exceptions are the continuations of the same statement -- `else`, the
+`while` of a `do`-`while`, a following `case` or label, and the brace that
+closes the enclosing block -- which take no blank line before them.
+
+An assignment and the `if` that immediately checks it stay together as one
+paragraph, and that paragraph takes a blank line on both sides like any other.
+
+A critical section is a semantic paragraph whose boundaries are the lock and
+the unlock.  Put a blank line after the acquisition and before the release, so
+the body of the section stands on its own, and another blank line after the
+release.  The purpose comment goes above the acquisition and describes what the
+section does, not that it takes a lock:
+
+```c
+/* Samples the state that decides between discard and swap-out. */
+irq = spin_lock_irqsave(&backing->state_lock);
+
+state_flags = backing->flags;
+
+spin_unlock_irqrestore(&backing->state_lock, irq);
+
+/* Anything else keeps its only copy on swap. */
+error = swap_out_backing_owned(backing);
+```
+
+This applies to a critical section that stands in the function body.  An unwind
+sequence inside a decision -- a block that only releases what it holds and
+returns -- stays compact and takes no internal blank lines:
+
+```c
+if (page->owner != object) {
+	spin_unlock_irqrestore(&object->lock, irq);
+	registry_unlock(enabled);
+
+	return EINVAL;
+}
+```
+
 Place a blank line before the purpose comment that introduces a `switch`,
 `for`, or `while` block.  Keep the purpose comment adjacent to the paragraph;
 loop-preparation assignments may appear between that comment and the loop as
@@ -245,7 +352,23 @@ their relationship is immediately clear.  The rule against combining
 significant calls still applies.
 
 Preserve the original short-circuit evaluation order when decomposing a
-condition.
+condition.  When the clauses do not return but assign the same result, separate
+`if` statements silently evaluate every clause; use an `else if` chain, which
+keeps the short circuit and still gives each clause its own comment and stop
+point:
+
+```c
+if (object->size_generation != fill->size_generation) {
+	/* The file size has changed since the run was measured. */
+	error = EAGAIN;
+} else if (object->content_generation != fill->content_generation) {
+	/* The contents have changed since the run was measured. */
+	error = EAGAIN;
+}
+```
+
+This matters when a later clause depends on an earlier one having been false,
+for example when it subtracts two values that an earlier clause proved ordered.
 
 ## 7. Loops and switches
 
@@ -379,6 +502,30 @@ Use this form for a comment that spans multiple lines:
 
 Do not start a multi-line comment with prose on the opening `/*` line.
 
+A statement that sets or clears a flag, or that moves a counter, is an
+exception to "do not comment the obvious individual statement" whenever the
+flag or the counter is part of a protocol between subsystems.  Say what the
+flag means to whoever observes it and what the counter keeps alive, never what
+the operator does:
+
+```c
+/*
+ * BUSY marks the mapping as owned by this reclaim pass, so a fault on it
+ * waits instead of racing.  The region hold keeps the address space from
+ * retiring it underneath.
+ */
+page->flags |= VM_MAPPING_BUSY;
+page->region->hold_count++;
+```
+
+`page->flags |= VM_MAPPING_BUSY;  /* Sets the busy flag. */` restates the code
+and is worse than no comment, because it looks as though the meaning has been
+documented.
+
+A generation counter that skips a value, a counter checked for overflow, and a
+counter whose zero means "nothing holds this any more" each state that fact in
+their comment.
+
 ## 11. Returns
 
 Precede a return with a comment that explains the returned result or the reason
@@ -403,6 +550,33 @@ if (status != 0)
 
 /* Reports a successful submission. */
 return 0;
+```
+
+This applies to the last return of a function as much as to a checked call in
+the middle of it.  A function that ends with a bare `return error;` hides which
+outcome it is reporting and gives a debugger one stop point where there should
+be two.  Split it even when the value is simply passed through:
+
+```c
+/* Reports why the object could not be admitted. */
+if (error != 0)
+	return error;
+
+/* Succeeded: the caller now holds the shared object. */
+return 0;
+```
+
+Say `Succeeded` on the success path, and add what succeeded when the caller
+gains something by it.  A function that classifies rather than reports an error
+still separates the refusal from the answer:
+
+```c
+/* Reports a teardown in progress as a refusal. */
+if (result < 0)
+	return result;
+
+/* Succeeded: reports whether an object is published. */
+return result;
 ```
 
 Literal, variable, field, and simple arithmetic returns may remain direct, with
@@ -452,7 +626,10 @@ Then add the file explanation:
 Before finishing a C-source change, verify that:
 
 - file sections and public/static function order are correct
-- every normal static function has a one-line forward declaration
+- every normal static function has a one-line forward declaration, and the
+  weak `extern` declarations of optional collaborators are present
+- every file-scope variable has a comment that states what it holds and what
+  protects it
 - every public function definition has a verb-and-object comment
 - every local declaration is in the function-leading ANSI C declaration group,
   no `for` initializer declares a variable, and no standalone scope-only block
@@ -460,7 +637,7 @@ Before finishing a C-source change, verify that:
 - the declaration group, first statement, and assertions follow the required
   order and spacing
 - compound decisions and fallible calls are individually debuggable
-- no `goto` statement is used for cleanup or control flow
+- `goto` is used only for a single forward jump to a shared cleanup label
 - every loop and `switch` has an immediately preceding intent comment
 - split calls use one argument per line and split controlled statements use
   braces
@@ -470,6 +647,17 @@ Before finishing a C-source change, verify that:
 - allocations, checks, and per-object initialization form clear blocks
 - every semantic paragraph, decision, loop, and return has an adjacent purpose
   comment and the expected blank lines
+- every critical section is separated from its lock and unlock by blank lines,
+  and a compact unwind block inside a decision is not
+- a blank line follows every closing brace that ends a decision or a loop,
+  except before `else`, a `do`-`while` `while`, a label, or the enclosing brace
+- every type definition and every file-scope variable states its role, and a
+  weak declaration group states why its symbols are optional
+- every protocol flag and counter operation says what the flag or the counter
+  means to its observers
+- no function ends with a bare `return error;`: the failure and the success
+  return separately, and the success return says so
+- a decomposed condition still short-circuits in its original order
 - every loop-preparation assignment is covered by the loop paragraph comment,
   every comment starts a new paragraph where required, and meaningful function
   results are not returned directly

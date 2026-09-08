@@ -85,8 +85,12 @@ drv_system_device_register(
 
 	error = cdev_register("system", 0x00010002U, &system_ops, NULL);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -114,8 +118,12 @@ drv_system_swap_device_ioctl(
 		break;
 	}
 
-	/* Reports the handler result. */
-	return error;
+	/* Reports why the handler failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Dispatches a system device ioctl to its handler. */
@@ -182,8 +190,12 @@ system_ioctl(
 		break;
 	}
 
-	/* Reports the handler result. */
-	return error;
+	/* Reports why the handler failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Copies a bounded mount snapshot or its required capacity to the caller. */
@@ -240,7 +252,13 @@ system_get_mounts(
 
 	/* Releases the private snapshot without replacing its operation error. */
 	kern_free(output);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the boot identifiers and the device and partition counts. */
@@ -260,8 +278,12 @@ system_get_info(
 	/* Copies it to the caller. */
 	error = copyout(&info, argument, sizeof(info));
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Describes one boot device by index. */
@@ -298,8 +320,12 @@ system_get_device(
 	/* Copies the description to the caller. */
 	error = copyout(&output, argument, sizeof(output));
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the physical, heap, virtual memory, and swap statistics. */
@@ -369,8 +395,12 @@ system_get_vmstat(
 	/* Copies the report to the caller. */
 	error = copyout(&output, argument, sizeof(output));
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the kernel resource accounting snapshot. */
@@ -385,8 +415,12 @@ system_get_resources(
 	kern_resource_snapshot(&output);
 	error = copyout(&output, argument, sizeof(output));
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Describes the first process at or after a process identifier. */
@@ -464,8 +498,12 @@ system_get_process(
 	/* Copies the description to the caller. */
 	error = copyout(&output, argument, sizeof(output));
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Finds the next process that uses a path or a mount. */
@@ -546,8 +584,12 @@ system_get_file_usage(
 	/* Copies the description to the caller. */
 	error = copyout(&output, argument, sizeof(output));
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Forwards a swap control request with the caller's privilege. */
@@ -568,8 +610,12 @@ system_swap_ioctl(
 	/* Forwards the request to the swap device. */
 	error = drv_system_swap_device_ioctl(request, argument, superuser);
 
-	/* Reports the swap device result. */
-	return error;
+	/* Reports why the swap device failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports how one process uses a path: directories, descriptors, mappings. */
@@ -870,8 +916,12 @@ control_ioctl(
 	else
 		error = kern_swap_control_remove(control.source);
 
-	/* Reports the change result. */
-	return error;
+	/* Reports why the change failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Handles a swap source query. */
@@ -923,6 +973,10 @@ get_source_ioctl(
 	/* Copies the answer out. */
 	error = copyout(&output, argument, sizeof(output));
 
-	/* Reports the copy result. */
-	return error;
+	/* Reports why the copy failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

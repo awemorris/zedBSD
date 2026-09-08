@@ -61,8 +61,12 @@ socket_file_create(
 		*result = NULL;
 	}
 
-	/* Reports the creation result. */
-	return error;
+	/* Reports why the creation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -82,8 +86,12 @@ socket_file_reserve(
 	*result = NULL;
 	error = file_create_pseudo(&socket_file_ops, O_RDWR, NULL, result);
 
-	/* Reports the creation result. */
-	return error;
+	/* Reports why the creation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -302,8 +310,12 @@ socket_file_ioctl(
 	/* Forwards the request. */
 	error = socket->ops->ioctl(socket, request, argument);
 
-	/* Reports the socket's result. */
-	return error;
+	/* Reports why the socket's failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Closes the socket when its file is closed. */
@@ -350,6 +362,10 @@ socket_file_poll(
 	else
 		error = socket_poll_common(socket, events, revents);
 
-	/* Reports the poll result. */
-	return error;
+	/* Reports why the poll failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

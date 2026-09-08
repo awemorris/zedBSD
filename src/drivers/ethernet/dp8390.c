@@ -500,8 +500,12 @@ dp_open(
 
 	spin_unlock_irqrestore(&dp->lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the dp close operation. */
@@ -570,8 +574,12 @@ dp_transmit(
 out:
 	spin_unlock_irqrestore(&dp->lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the current page operation. */

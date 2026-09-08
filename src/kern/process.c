@@ -199,8 +199,12 @@ process_reaper_start(
 		    reaper_thread->task);
 	}
 
-	/* Reports the start result. */
-	return error;
+	/* Reports why the start failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -414,8 +418,12 @@ process_controlling_tty_attach(
 	}
 	spin_unlock_irqrestore(&process_tree_lock, irq);
 
-	/* Reports the attach result. */
-	return error;
+	/* Reports why the attach failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -879,8 +887,12 @@ out:
 	if (target != caller)
 		process_release(target);
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -973,8 +985,12 @@ process_signal_pgrp(
 
 	error = process_signal_pgrp_except(session, pgrp, signo, NULL);
 
-	/* Reports the delivery result. */
-	return error;
+	/* Reports why the delivery failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1211,7 +1227,11 @@ fail:
 	process_free_mem(child);
 
 	/* Reports the failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1606,8 +1626,12 @@ out:
 		memset(event, 0, sizeof(*event));
 	}
 
-	/* Reports the commit result. */
-	return error;
+	/* Reports why the commit failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

@@ -739,7 +739,11 @@ prepare_created_thread(
 	thread->task = NULL;
 
 	/* Reports the preparation failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Runs a kernel thread's entry function and exits when it returns. */

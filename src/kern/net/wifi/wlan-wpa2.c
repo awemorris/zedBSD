@@ -183,7 +183,13 @@ wlan_wpa2_engine_start(
 
 	/* Sends the authentication request. */
 	error = build_authentication(engine, now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -375,7 +381,13 @@ wlan_wpa2_engine_receive_eapol(
 
 	/* Anything else is a protocol violation. */
 	error = fail(engine, EACCES);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -591,7 +603,13 @@ wlan_wpa2_engine_timer(
 		return error;
 	}
 	error = retry_current(engine, pending, now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -621,7 +639,13 @@ wlan_wpa2_engine_stop(
 	engine->generation = 0U;
 	engine->key_generation = 0U;
 	memset(&engine->profile, 0, sizeof(engine->profile));
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1037,7 +1061,13 @@ fail(
 	(void)cleanup(engine);
 	engine->last_error = error;
 	engine->state = WLAN_WPA2_STATE_FAILED;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Tests that a callback set is complete. */
@@ -1184,7 +1214,13 @@ cache_and_submit(
 	engine->tx_length = length;
 	engine->retry_count = 0U;
 	error = submit_current(engine, pending_state, now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Retransmits the current frame, failing once the retry budget is spent. */
@@ -1206,8 +1242,12 @@ retry_current(
 	engine->retry_count++;
 	error = submit_current(engine, pending_state, now_ticks);
 
-	/* Reports the retry result. */
-	return error;
+	/* Reports why the retry failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Builds and sends the open-system authentication request. */
@@ -1234,8 +1274,12 @@ build_authentication(
 	error = cache_and_submit(engine, WLAN_WPA2_STATE_AUTH_TX,
 	    WLAN_WPA2_TX_MANAGEMENT, engine->profile.bssid, length, now_ticks);
 
-	/* Reports the transmit result. */
-	return error;
+	/* Reports why the transmit failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Builds and sends the association request. */
@@ -1265,8 +1309,12 @@ build_association(
 	error = cache_and_submit(engine, WLAN_WPA2_STATE_ASSOC_TX,
 	    WLAN_WPA2_TX_MANAGEMENT, engine->profile.bssid, length, now_ticks);
 
-	/* Reports the transmit result. */
-	return error;
+	/* Reports why the transmit failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Computes the MIC of an EAPOL-Key frame with its MIC field zeroed. */
@@ -1297,7 +1345,13 @@ eapol_mic_calculate(
 		memcpy(mic, digest, WLAN_WPA2_KEY_MIC_LENGTH);
 	wlan_crypto_erase(copy, sizeof(copy));
 	wlan_crypto_erase(digest, sizeof(digest));
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Checks the MIC of a received EAPOL-Key frame against the PTK. */
@@ -1364,8 +1418,12 @@ derive_ptk(
 	    sizeof(engine->ptk));
 	wlan_crypto_erase(data, sizeof(data));
 
-	/* Reports the derivation result. */
-	return error;
+	/* Reports why the derivation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Builds and sends handshake message 2 with the SNonce and RSN element. */
@@ -1413,7 +1471,13 @@ build_message_2(
 	/* Sends it. */
 	error = cache_and_submit(engine, WLAN_WPA2_STATE_MESSAGE_2_TX,
 	    WLAN_WPA2_TX_EAPOL, engine->profile.bssid, length, now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Builds and sends handshake message 4. */
@@ -1451,7 +1515,13 @@ build_message_4(
 	/* Sends it. */
 	error = cache_and_submit(engine, pending_state, WLAN_WPA2_TX_EAPOL,
 	    engine->profile.bssid, length, now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Builds and sends group handshake message 2. */
@@ -1489,7 +1559,13 @@ build_group_message_2(
 	/* Sends it. */
 	error = cache_and_submit(engine, pending_state, WLAN_WPA2_TX_EAPOL,
 	    engine->profile.bssid, length, now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Decodes the 48-bit receive packet number of a key RSC field. */
@@ -1552,8 +1628,12 @@ program_pending_group_key(
 	if (error == 0)
 		engine->pending_group_programmed = 1U;
 
-	/* Reports the installation result. */
-	return error;
+	/* Reports why the installation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Installs the pairwise and group keys from message 3, staging them during a rekey. */
@@ -1651,7 +1731,13 @@ message_1_first(
 		return error;
 	}
 	error = build_message_2(engine, now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Handles a repeated message 1 by resending message 2. */
@@ -1691,7 +1777,13 @@ message_1_retransmit(
 	if (engine->state == WLAN_WPA2_STATE_MESSAGE_2_TX)
 		return EALREADY;
 	error = retry_current(engine, WLAN_WPA2_STATE_MESSAGE_2_TX, now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Digests a message 3 frame so a repeat can be recognized. */
@@ -1704,7 +1796,13 @@ message_3_digest(
 	int error;
 
 	error = wlan_sha1(frame, length, digest);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Computes the deadline for a rekey to recover the connection. */
@@ -1771,7 +1869,13 @@ pairwise_rekey_begin(
 	engine->old_group_retired = 0U;
 	engine->old_pairwise_retired = 0U;
 	error = message_1_first(engine, key, now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Handles group message 1: stages a new group key or re-acknowledges a repeat. */
@@ -1978,7 +2082,13 @@ group_message_1(
 	retire_implicitly_completed_tx(engine);
 	error = build_group_message_2(engine,
 	    WLAN_WPA2_STATE_GROUP_MESSAGE_2_TX, now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Handles a repeated message 3 by revalidating it and resending message 4. */
@@ -2110,7 +2220,13 @@ message_3_retransmit(
 	else
 		pending_state = WLAN_WPA2_STATE_MESSAGE_4_TX;
 	error = build_message_4(engine, pending_state, now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Handles the first message 3: installs the keys and answers with message 4. */
@@ -2176,7 +2292,13 @@ message_3_first(
 	retire_implicitly_completed_tx(engine);
 	error = build_message_4(engine, WLAN_WPA2_STATE_MESSAGE_4_TX,
 	    now_ticks);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Maps a state to the transmission state its retry re-enters. */

@@ -109,8 +109,12 @@ icmp_init(
 	/* Receives ICMP packets from IPv4. */
 	error = ipv4_protocol_register(IPPROTO_ICMP, icmp_input);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Converts a socket to its ICMP endpoint. */
@@ -134,8 +138,12 @@ icmp_bind(
 	endpoint = icmp_endpoint(socket);
 	error = inet_socket_bind(&endpoint->inet, address, length);
 
-	/* Reports the bind result. */
-	return error;
+	/* Reports why the bind failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Sets the remote address the socket sends to and receives from. */
@@ -154,8 +162,12 @@ icmp_connect(
 	endpoint = icmp_endpoint(socket);
 	error = inet_socket_connect(&endpoint->inet, address, length);
 
-	/* Reports the connect result. */
-	return error;
+	/* Reports why the connect failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Sends an ICMP message, filling in its checksum. */
@@ -298,8 +310,12 @@ icmp_getsockname(
 	endpoint = icmp_endpoint(socket);
 	error = inet_socket_getsockname(&endpoint->inet, address, length);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the socket's remote address. */
@@ -315,8 +331,12 @@ icmp_getpeername(
 	endpoint = icmp_endpoint(socket);
 	error = inet_socket_getpeername(&endpoint->inet, address, length);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Unregisters and frees an ICMP socket. */

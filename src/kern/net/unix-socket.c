@@ -818,8 +818,12 @@ unix_socket_bind_path(
 	endpoint->binding_in_progress = 0;
 	spin_unlock_irqrestore(&socket->lock, irq);
 
-	/* Reports the bind result. */
-	return error;
+	/* Reports why the bind failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -922,8 +926,12 @@ unix_socket_connect_path(
 	error = unix_connect_resolved(socket, listener, connector_credential, path,
 				     io_flags);
 
-	/* Reports the connect result. */
-	return error;
+	/* Reports why the connect failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -984,8 +992,12 @@ unix_socket_init(
 
 	error = socket_family_register(AF_UNIX, &family_ops);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Closes the files of a rights record and frees it. */
@@ -1345,7 +1357,13 @@ unix_stream_wait_space(
 			break;
 	}
 	spin_unlock_irqrestore(&peer->lock, irq);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Sends stream data to the peer, chunk by chunk, coalescing plain writes. */
@@ -1916,7 +1934,13 @@ unix_connect_resolved(
 		kern_free(connection);
 		socket_release(accepted);
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Rejects the generic connect; connecting needs the caller's directory context. */

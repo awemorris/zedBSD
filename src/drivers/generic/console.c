@@ -1627,7 +1627,11 @@ fail:
 		(void)thread_abort_new(producer);
 	input_started = 0;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 #endif

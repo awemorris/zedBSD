@@ -366,8 +366,12 @@ signal_send_process(
 	info.code = SI_KERNEL;
 	error = signal_send_process_info(process, signo, &info);
 
-	/* Reports the send result. */
-	return error;
+	/* Reports why the send failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -901,8 +905,12 @@ signal_send_thread(
 	info.code = SI_KERNEL;
 	error = signal_send_thread_info(thread, signo, &info);
 
-	/* Reports the send result. */
-	return error;
+	/* Reports why the send failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

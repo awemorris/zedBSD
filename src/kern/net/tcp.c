@@ -146,8 +146,12 @@ tcp_init(
 	    "TCP socket registry");
 	error = ipv4_protocol_register(IPPROTO_TCP, tcp_input);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -575,7 +579,13 @@ tcp_send_segment_at(
 	error = ipv4_output(device, endpoint->tcp.inet.remote_address,
 	    IPPROTO_TCP, packet);
 	net_device_release(device);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Assigns a free ephemeral port under the registry lock. */
@@ -589,7 +599,13 @@ tcp_allocate_port(
 	irq = spin_lock_irqsave(&tcp_registry_lock);
 	error = tcp_allocate_port_locked(endpoint);
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Transmits one segment at the next send sequence. */
@@ -604,7 +620,13 @@ tcp_send_segment(
 
 	error = tcp_send_segment_at(endpoint, endpoint->tcp.send_next, flags,
 	    data, length);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Takes the retransmission record out of an endpoint for the caller to free. */
@@ -785,8 +807,12 @@ tcp_bind(
 	}
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
 
-	/* Reports the bind result. */
-	return error;
+	/* Reports why the bind failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Puts a bound socket into the listening state. */
@@ -1105,7 +1131,13 @@ wait_for_connect:
 		error = ETIMEDOUT;
 	endpoint->tcp.connect_wait_deadline = 0;
 	spin_unlock_irqrestore(&socket->lock, irq);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Sends one segment of data on an established connection. */
@@ -1303,8 +1335,12 @@ tcp_shutdown(
 		spin_unlock_irqrestore(&socket->lock, irq);
 	}
 
-	/* Reports the shutdown result. */
-	return error;
+	/* Reports why the shutdown failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the local address. */
@@ -1319,7 +1355,13 @@ tcp_getsockname(
 
 	endpoint = tcp_endpoint(socket);
 	error = inet_socket_getsockname(&endpoint->tcp.inet, address, length);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the peer address. */
@@ -1334,7 +1376,13 @@ tcp_getpeername(
 
 	endpoint = tcp_endpoint(socket);
 	error = inet_socket_getpeername(&endpoint->tcp.inet, address, length);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Closes a socket, aborting its queued children and unregistering it. */

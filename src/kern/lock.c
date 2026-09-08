@@ -378,6 +378,10 @@ mutex_wait(
 	mutex->owner = thread;
 	spin_unlock_irqrestore(&mutex->guard, irq);
 
-	/* Reports the condition wait result. */
-	return error;
+	/* Reports why the condition wait failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

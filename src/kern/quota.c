@@ -273,8 +273,12 @@ quota_reserve(
 	}
 	mutex_unlock(&state->lock);
 
-	/* Reports the reservation result. */
-	return error;
+	/* Reports why the reservation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -437,8 +441,12 @@ quota_transfer_begin(
 	}
 	mutex_unlock(&state->lock);
 
-	/* Reports the transfer result. */
-	return error;
+	/* Reports why the transfer failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -522,8 +530,12 @@ quota_transfer(
 	if (error == 0)
 		quota_transfer_commit(&transfer);
 
-	/* Reports the transfer result. */
-	return error;
+	/* Reports why the transfer failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

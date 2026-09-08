@@ -551,5 +551,11 @@ sysctl_writeback(
 		return ENOENT;
 	error = writeback_mount_set(mount, (int)request.enabled);
 	mount_release(mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

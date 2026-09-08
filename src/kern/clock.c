@@ -269,8 +269,12 @@ kern_timespec_add(
 	result->tv_nsec = a->tv_nsec + b->tv_nsec;
 	error = kern_timespec_normalize(result);
 
-	/* Reports the normalization result. */
-	return error;
+	/* Reports why the normalization failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -298,8 +302,12 @@ kern_timespec_sub(
 	negated.tv_nsec = -b->tv_nsec;
 	error = kern_timespec_add(a, &negated, result);
 
-	/* Reports the addition result. */
-	return error;
+	/* Reports why the addition failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -530,8 +538,12 @@ kern_clock_settime(
 	if (error == 0)
 		usync_realtime_changed();
 
-	/* Reports the change result. */
-	return error;
+	/* Reports why the change failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

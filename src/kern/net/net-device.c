@@ -715,8 +715,12 @@ net_device_set_carrier(
 		route_socket_notify(event_ifindex, event_generation, event_flags,
 		    transition);
 
-	/* Reports the update result. */
-	return error;
+	/* Reports why the update failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -869,8 +873,12 @@ net_device_open(
 		net_device_schedule_poll(device);
 	net_device_release(device);
 
-	/* Reports the open result. */
-	return error;
+	/* Reports why the open failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -989,8 +997,12 @@ net_device_transmit(
 	device_unlock(enabled);
 	net_device_release(device);
 
-	/* Reports the transmit result. */
-	return error;
+	/* Reports why the transmit failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1061,7 +1073,13 @@ net_device_ioctl(
 	/* Reports the driver's result, or the device's disappearance. */
 	if (!live)
 		return ENODEV;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

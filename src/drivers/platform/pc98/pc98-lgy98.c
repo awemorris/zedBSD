@@ -159,8 +159,12 @@ drv_pc98_lgy98_init(
 	net_device_destroy(lgy_device);
 	lgy_device = NULL;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the lgy read reg operation. */
@@ -284,8 +288,12 @@ lgy_open(
 	if (error == 0)
 		hal_irq_unmask(LGY_IRQ);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the lgy close operation. */

@@ -69,8 +69,12 @@ drv_rtl8822b_security_enable(
 				   RTL8822B_SECURITY_PROFILE, deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -177,8 +181,12 @@ drv_rtl8822b_security_set_association(
 							      deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -280,8 +288,12 @@ rollback:
 out:
 	secret_erase(words, sizeof(words));
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -325,8 +337,12 @@ drv_rtl8822b_cam_stage_ccmp(
 		(void)cam_write_word(radio, slot, 0U, 0U, deadline_ticks);
 	secret_erase(words, sizeof(words));
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

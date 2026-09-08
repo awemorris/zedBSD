@@ -709,8 +709,12 @@ validate_entries(
 	kern_free(records);
 	kern_free(raw);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the read header operation. */
@@ -811,8 +815,12 @@ primary_header_extent(
 		*logical_last = primary.alternate_lba;
 	kern_free(block);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the validate copy operation. */
@@ -866,8 +874,12 @@ validate_copy(
 out:
 	kern_free(block);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the copy headers equal operation. */
@@ -1075,8 +1087,12 @@ recover_backup_candidates(
 out:
 	kern_free(candidate_entries[1U]);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* The UEFI-only image deliberately omits the conventional backup array and header while reserving their logical final blocks as zero.  This strict shape remains self-contained when copied to a larger physical medium. Keep the probe independent of attacker-controlled usable-range values: it reads only the MBR and the 16-KiB array reservation plus one header block. A matching shape with nonzero reserved blocks is not classified as an intentional omission; exact-media degraded-copy recovery remains separate. */
@@ -1331,6 +1347,10 @@ out:
 	kern_free(primary_entries);
 	kern_free(backup_entries);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

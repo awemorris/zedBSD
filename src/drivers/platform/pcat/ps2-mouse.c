@@ -504,8 +504,12 @@ mouse_start(
 	if (error == 0)
 		hal_irq_unmask(PS2_MOUSE_IRQ);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void mouse_stop(void);
@@ -566,8 +570,12 @@ mouse_input_open(
 	}
 	mutex_unlock(&lifecycle_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void mouse_input_close(void *context);
@@ -625,6 +633,10 @@ drv_pcat_ps2_mouse_init(
 	if (error != 0)
 		(void)hal_irq_set_handler(PS2_MOUSE_IRQ, NULL, NULL);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

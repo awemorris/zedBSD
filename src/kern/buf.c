@@ -25,18 +25,18 @@
 #include <errno.h>
 #include <string.h>
 
-#define BUF_HASH_BUCKETS 64U
-
-#define BUF_MIN_BYTES (64U * 1024U)
+#define BUF_HASH_BUCKETS	64U
+#define BUF_MIN_BYTES		(64U * 1024U)
+#define BUF_SLAB_BYTES		ZEDBSD_PAGE_SIZE
+#define BUF_RUN_LINES		(KERN_IO_BATCH_MAX / ZEDBSD_PAGE_SIZE)
 
 #ifndef CONFIG_BUF_CACHE_KIB
 #define CONFIG_BUF_CACHE_KIB 0
 #endif
 
-#define BUF_SLAB_BYTES ZEDBSD_PAGE_SIZE
-
-#define BUF_RUN_LINES (KERN_IO_BATCH_MAX / ZEDBSD_PAGE_SIZE)
-
+/*
+ * XXX: 説明を入れる。
+ */
 struct buf_slab {
 	struct hal_pmem memory;
 	struct buf_slab *next;
@@ -45,62 +45,144 @@ struct buf_slab {
 	unsigned used;
 };
 
+/* XXX: これはincludeに置き換えできるかも？ */
 struct thread;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static struct spinlock cache_lock;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static struct spinlock dirty_index_lock;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static struct buf *dirty_head;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static struct buf *dirty_tail;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static struct mutex cache_control;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static struct buf *cache_hash[BUF_HASH_BUCKETS];
 
+/*
+ * XXX: 説明を入れる。
+ */
 static struct buf *lru_head;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static struct buf *lru_tail;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static struct buf_slab *slabs;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static uint64_t cache_max_bytes;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static uint64_t cache_current_bytes;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static uint64_t cache_reserved_bytes;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static uint64_t cache_data_bytes;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static uint64_t cache_metadata_bytes;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static volatile uint64_t cache_dirty_bytes;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static volatile uint64_t stat_buffers;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static volatile uint64_t stat_hits;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static volatile uint64_t stat_misses;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static volatile uint64_t stat_read_bios;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static volatile uint64_t stat_write_bios;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static volatile uint64_t stat_evictions;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static volatile uint64_t stat_waits;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static volatile uint64_t stat_writeback_errors;
 
+/*
+ * XXX: 説明を入れる。
+ */
 static unsigned cache_initialized;
 
+/* XXX: これはincludeで解決するかも？ */
+struct thread *thread_current(void);
+
+/*
+ * XXX: なぜweakなのa説明を入れる。
+ */
 extern int cache_memory_reserve(enum cache_memory_kind, size_t, int) __attribute__((weak));
 extern void cache_memory_commit(enum cache_memory_kind, size_t) __attribute__((weak));
 extern void cache_memory_cancel(enum cache_memory_kind, size_t) __attribute__((weak));
 extern void cache_memory_release(enum cache_memory_kind, size_t) __attribute__((weak));
 extern size_t cache_memory_reclaim(size_t) __attribute__((weak));
-struct thread *thread_current(void);
+
+/*
+ * Forward declaration
+ */
 static unsigned buf_hash_key(const struct disk *disk, uint64_t block);
 static size_t slab_header_size(void);
 static struct buf * slab_slot(struct buf_slab *slab, unsigned slot);
@@ -205,8 +287,12 @@ buf_get(
 		return error;
 	error = acquire_line(leaf, mapped, 1, result);
 
-	/* Reports the acquisition result. */
-	return error;
+	/* Reports why the acquisition failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -255,18 +341,24 @@ buf_mark_dirty(
 
 	/* Advances the generation, skipping zero, and sets the flags. */
 	irq = spin_lock_irqsave(&buffer->b_lock);
+
 	if (buffer->b_generation == UINT64_MAX)
 		buffer->b_flags |= BUF_GENERATION_EXHAUSTED;
+
 	buffer->b_generation++;
 	if (buffer->b_generation == 0)
 		buffer->b_generation++;
+
 	buffer->b_dirty_generation = buffer->b_generation;
+
+	/* Publishes the new contents and counts the buffer as dirty once. */
 	buffer->b_flags |= BUF_VALID;
 	if (!(buffer->b_flags & BUF_DIRTY)) {
 		buffer->b_flags |= BUF_DIRTY;
 		stat_add(&cache_dirty_bytes, buffer->b_size);
 		dirty_link(buffer);
 	}
+
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
 }
 
@@ -283,7 +375,13 @@ buf_writeback(
 	int error;
 
 	error = buf_writeback_context(buffer, NULL);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Executes the synchronous operation with explicit inherited provenance. */
@@ -323,11 +421,16 @@ buf_writeback_context(
 	buffer->b_io_inflight = 1;
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
 	stat_add(&stat_write_bios, 1);
-	error = disk_write_direct_context(buffer->b_disk, buffer->b_block,
-	    buffer->b_block_count, buffer->b_data, &drain);
+	error = disk_write_direct_context(buffer->b_disk,
+					  buffer->b_block,
+					  buffer->b_block_count,
+					  buffer->b_data,
+					  &drain);
 
 	/* Records the outcome; only an unmodified buffer becomes clean. */
 	irq = spin_lock_irqsave(&buffer->b_lock);
+
+	/* Clears the dirty record on a write nothing raced, and keeps it on a failure. */
 	buffer->b_io_state = BUF_IO_IDLE;
 	buffer->b_io_inflight = 0;
 	buffer->b_error = error;
@@ -340,11 +443,16 @@ buf_writeback_context(
 		buffer->b_flags |= BUF_ERROR | BUF_DIRTY | BUF_VALID;
 		stat_add(&stat_writeback_errors, 1);
 	}
+
 	waitq_wake_all(&buffer->b_waitq);
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
 
-	/* Reports the write result. */
-	return error;
+	/* Reports why the write failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -557,7 +665,13 @@ buf_write(
 	int error;
 
 	error = buf_write_context(disk, block, count, data, NULL);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Executes the synchronous operation with explicit inherited provenance. */
@@ -630,17 +744,22 @@ buf_write_context(
 		    amount_blocks == line_blocks &&
 		    line_start + line_blocks <= leaf->d_block_count)
 			full = 1;
+
 		error = acquire_line(leaf, mapped, !full, &buffer);
 		if (error != 0)
 			return error;
+
 		memcpy((uint8_t *)buffer->b_data +
-		    offset_blocks * leaf->d_block_size, in,
-		    (size_t)(amount_blocks * leaf->d_block_size));
+		       offset_blocks * leaf->d_block_size, in,
+		       (size_t)(amount_blocks * leaf->d_block_size));
+
 		buf_mark_dirty(buffer);
 		error = buf_writeback_context(buffer, context);
 		buf_release(buffer);
+
 		if (error != 0)
 			return error;
+
 		in += amount_blocks * leaf->d_block_size;
 		mapped += amount_blocks;
 	}
@@ -1445,8 +1564,12 @@ read_buffer(
 	waitq_wake_all(&buffer->b_waitq);
 	spin_unlock_irqrestore(&buffer->b_lock, irq);
 
-	/* Reports the read result. */
-	return error;
+	/* Reports why the read failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Acquires one referenced line, with no other line ownership while waiting. */
@@ -1904,8 +2027,12 @@ writeback_one_reclaimable(
 		error = buf_writeback(candidate);
 	buf_release(candidate);
 
-	/* Reports the writeback result. */
-	return error;
+	/* Reports why the writeback failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Publishes a first dirty transition while the caller holds the buffer lock. */

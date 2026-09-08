@@ -565,7 +565,11 @@ out_root:
 	error = vfs_fail(failure_stage, error);
 
 	/* Reports the failed stage. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Resolves a swap path selector: an absolute path or a runtime boot selector. */
@@ -591,7 +595,13 @@ vfs_swap_resolve_path(
 	}
 	error = kern_boot_source_runtime_lookup(context->boot_sources, selector,
 	    result);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Resolves a swap disk selector through the block identity registry. */
@@ -613,7 +623,13 @@ vfs_swap_resolve_disk(
 	if (error != 0)
 		return error;
 	error = block_identity_resolve(selector, result);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Resolves the first and last block of a disk on its leaf. */
@@ -690,7 +706,13 @@ vfs_fail(
 	int error)
 {
 	VFS_LOG("vfs: %s failed (error %d)\n", stage, error);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Makes sure a directory exists under the root, creating it when missing. */
@@ -730,7 +752,13 @@ vfs_ensure_root_directory(
 		error = inode_mkdir(root->p_inode, &component, &request, &inode);
 	if (inode != NULL)
 		inode_release(inode);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Logs the boot device and partition the loader handed off. */
@@ -948,7 +976,13 @@ out:
 	path_release(&marker);
 	if (unmount_private(mountp) != 0 && error == 0)
 		error = EBUSY;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 #if defined(HAL_ARCH_ARM64)
@@ -1107,7 +1141,13 @@ fail:
 
 	/* Reports the stage that failed. */
 	error = vfs_fail(stage, error);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 #endif
 
@@ -1428,7 +1468,13 @@ fail:
 
 	/* Reports the stage that failed. */
 	error = vfs_fail(stage, error);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Resolves the rootpart selector to a referenced partition. */

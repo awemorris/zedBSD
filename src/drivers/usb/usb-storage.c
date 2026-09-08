@@ -378,8 +378,13 @@ storage_urb_transfer(
 	/* Handles the actual availability. */
 	if (actual != NULL)
 		*actual = drv_usb_urb_actual_length(urb);
-	/* Returns the computed result. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the storage bulk operation. */
@@ -486,8 +491,13 @@ storage_control(
 	/* Handles the actual availability. */
 	if (actual != NULL)
 		*actual = drv_usb_urb_actual_length(storage->control_urb);
-	/* Returns the computed result. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the storage urbs alloc operation. */
@@ -613,8 +623,12 @@ bot_reset(
 	if (error == 0)
 		error = drv_usb_endpoint_clear_halt(storage->bulk_out);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the bot command locked operation. */
@@ -849,8 +863,12 @@ request_sense_locked(
 		/* Returns the computed result. */
 		return EIO;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Refreshes policy within the original command's lock and deadline. */
@@ -933,8 +951,12 @@ fail:
 	storage->media_state = STORAGE_FAILED;
 	disk_media_revoke(storage->disk);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the bot command sense locked operation. */
@@ -1077,8 +1099,12 @@ bot_command_sense_locked(
 	}
 	storage->command_deadline = 0;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the bot command sense report operation. */
@@ -1102,8 +1128,12 @@ bot_command_sense_report(
 					 report_command_failed);
 	mutex_unlock(&storage->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the bot command sense operation. */
@@ -1610,8 +1640,12 @@ storage_refresh_partitions(
 	if (error == EINVAL || error == EOPNOTSUPP)
 		return 0;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Executes one bounded pass under control ownership, never from a submitted BIO. */
@@ -1722,8 +1756,12 @@ storage_control_step(
 	if (error == 0 && storage->partitions_pending)
 		error = storage_refresh_partitions(storage);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Polls readiness outside submitted BIOs, with class lifetime held until join. */
@@ -1769,8 +1807,12 @@ storage_control_start(
 	if (error == 0)
 		thread_start(storage->control_worker);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Never waits with a command/control mutex held; failed joins retain ownership. */
@@ -1804,8 +1846,12 @@ storage_control_stop(
 	if (error == 0)
 		storage->control_worker = NULL;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the storage attach operation. */
@@ -1920,8 +1966,12 @@ fail:
 	storage_urbs_free(storage);
 	hal_free(storage);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the storage detach operation. */
@@ -1975,6 +2025,10 @@ storage_detach(
 unlock:
 	mutex_unlock(&storage->control_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

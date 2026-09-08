@@ -1497,8 +1497,12 @@ out:
 		io_gate_open(&device->binding_transactions);
 	usb_topology_unlock();
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1675,8 +1679,12 @@ out:
 	if (selection_locked)
 		atomic_store_release(&device->selection_gate, 0U);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2149,8 +2157,12 @@ drv_usb_urb_setup_control_flags(
 	if (error == 0)
 		u->control = *r;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2337,8 +2349,12 @@ out_hcd:
 out_submit:
 	io_gate_exit(&device->submit_gate);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2693,8 +2709,12 @@ drv_usb_control(
 				   buffer, length, timeout_ms, actual);
 	device_control_unlock(device);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -3166,8 +3186,12 @@ out:
 	if (selection_locked)
 		atomic_store_release(&device->selection_gate, 0U);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -3251,8 +3275,12 @@ drv_usb_interface_claim(
 out_device:
 	device_binding_exit(device);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -3325,8 +3353,12 @@ drv_usb_interface_release(
 out_device:
 	device_binding_exit(device);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -3835,8 +3867,12 @@ out:
 	if (binding_entered)
 		device_binding_exit(device);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -3961,8 +3997,12 @@ drv_usb_interface_detach(
 		error = interface_binding_detach(interface, flags, state);
 	device_binding_exit(device);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -4347,8 +4387,12 @@ device_quiesce(
 	hal_atomic_store_release(&device->quarantined, 1U);
 	device_link(bus, device);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the device is quarantined operation. */
@@ -5269,8 +5313,12 @@ fail:
 	}
 	device_release(bus, device);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ep0 packet size operation. */
@@ -5703,8 +5751,12 @@ parse_configuration(
 fail:
 	free_configuration(configuration);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the configuration iads prepare operation. */
@@ -6118,8 +6170,12 @@ interface_probe_internal(
 out:
 	device_binding_exit(device);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the device binding enter operation. */
@@ -6779,8 +6835,12 @@ usb_control_locked(
 		*actual = drv_usb_urb_actual_length(urb);
 	drv_usb_urb_free(urb);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the configuration restore operation. */
@@ -7420,8 +7480,12 @@ sync_data(
 		*actual = drv_usb_urb_actual_length(urb);
 	drv_usb_urb_free(urb);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the host interface reset endpoints operation. */

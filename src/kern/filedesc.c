@@ -174,8 +174,12 @@ filedesc_install(
 
 	error = filedesc_install_from(fd, file, 0, 0, descriptor);
 
-	/* Reports the installation result. */
-	return error;
+	/* Reports why the installation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -314,8 +318,12 @@ filedesc_close(
 		return error;
 	error = file_close(file);
 
-	/* Reports the close result. */
-	return error;
+	/* Reports why the close failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -678,8 +686,12 @@ filedesc_install_many(
 	if (error != 0)
 		filedesc_abort_reserved(&reservation);
 
-	/* Reports the installation result. */
-	return error;
+	/* Reports why the installation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

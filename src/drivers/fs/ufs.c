@@ -452,8 +452,12 @@ journal_checkpoint_locked(
 	if (ms->journal.poisoned)
 		ms->writable = 0;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Counts filesystem disk requests, including metadata and journal traffic. */
@@ -666,7 +670,13 @@ journal_image_alloc(
 	/*
  * Reports a complete immutable-image owner or a fully unwound failure.
 	 */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Releases backing only after the mount owner has excluded every journal caller. */
@@ -754,8 +764,12 @@ journal_discover(
 		error = drv_ufs_journal_replay(&ms->journal);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int snapshot_discover(struct mount *mountp, struct ufs_mount_state *ms);
@@ -953,8 +967,12 @@ write_sectors_context(
 	error = write_sectors_impl(mountp, lba, count, buffer, &child);
 	io_epoch_end(&mountp->m_write_epoch);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the write sectors operation. */
@@ -1040,7 +1058,13 @@ journal_read_image(
 	/*
  * Releases before any caller falls back to the serialized home-read
 	 * path. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int read_metadata_sectors(struct mount *mountp, uint64_t first, uint32_t count, void *buffer);
@@ -1080,8 +1104,12 @@ read_metadata_sectors(
 	if (ms->journal_enabled)
 		mutex_unlock(&ms->journal_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int read_block(struct mount *mountp, uint64_t fragment, void *buffer);
@@ -1347,8 +1375,12 @@ load_cg_image(
 	if (ms->journal_enabled)
 		mutex_unlock(&ms->journal_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int load_cg_locked(struct mount *mountp, uint32_t cg);
@@ -1488,8 +1520,12 @@ prepare_super_summaries(
 			      ms->super.cstotal_nffree, ms->super.swapped);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int write_super_summaries(struct mount *mountp);
@@ -1517,8 +1553,12 @@ write_super_summaries(
 	}
 	kern_free(buffer);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int write_cg(struct mount *mountp);
@@ -1561,7 +1601,11 @@ write_cg(
 		ms->cg_dirty = 0;
 
 	/* Preserves the immediate writer's original error convention. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int write_cg_rollback(struct mount *mountp, int original_error);
@@ -1635,8 +1679,12 @@ adjust_directory_count(
 	}
 	mutex_unlock(&ms->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static uint64_t quota_now(void);
@@ -1774,8 +1822,12 @@ allocate_block_compat(
 	else
 		quota_rollback(&charge);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1823,8 +1875,12 @@ allocation_allocate(
 	error = allocate_block_compat(context->mountp, context->uid,
 				      context->gid, result);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Closes an already-persisted allocation; there is no deferred state in p010. */
@@ -1965,8 +2021,12 @@ free_block(
 		return EIO;
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int allocate_inode_number(struct mount *mountp, uid_t uid, gid_t gid, uint32_t *number);
@@ -2050,8 +2110,12 @@ allocate_inode_number(
 	else
 		quota_rollback(&charge);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int free_inode_number(struct mount *mountp, uint32_t number, uid_t uid, gid_t gid);
@@ -2125,8 +2189,12 @@ free_inode_number(
 		return EIO;
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int indirect_entry(struct mount *mountp, uint64_t fragment, uint32_t index, uint64_t *result);
@@ -2177,7 +2245,13 @@ indirect_entry(
 	/*
  * Releases the common cache pin inside disk_read before returning the
 	 * pointer. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int bmap(struct inode *inode, uint64_t logical, uint64_t *result);
@@ -2240,8 +2314,13 @@ bmap(
 			break;
 	}
 	*result = fragment;
-	/* Returns the computed result. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int bmap_ensure(struct inode *inode, uint64_t logical, uint64_t *result);
@@ -2819,8 +2898,12 @@ persist_inode_locked(
 		error = write_block(inode->i_mount, fragment, block);
 	kern_free(block);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Protects shared dinode blocks for ordinary metadata callers. */
@@ -2838,7 +2921,11 @@ persist_inode(
 	mutex_unlock(&ms->lock);
 
 	/* Report the original serialization result. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Begin consolidated ufs-transaction.inc. */
@@ -2972,7 +3059,13 @@ metadata_group_commit(
 	/*
  * Returns the original errno independently of positive committed
 	 * ownership. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Bounds a caller-owned image set by both memory and journal capacity. */
@@ -3258,8 +3351,12 @@ allocation_group_commit(
 	run->committed = outcome.committed;
 	run->uncertain = outcome.uncertain;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Prepares an absent suffix without installing empty nodes or live references. */
@@ -3617,7 +3714,13 @@ allocation_run_abort(
 	/*
  * Let the caller retain charges when rollback durability remains
 	 * uncertain. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* End every quota reservation and release private working memory. */
@@ -4272,7 +4375,13 @@ xattr_existing_locked(
 	/*
  * Returns the original errno without compensating writes or repeated
 	 * frees. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reserves bounded storage while the caller retains the inode lock. */
@@ -4400,7 +4509,11 @@ xattr_existing_group(
 	kern_free(group);
 
 	/* Reports only the admitted operation's outcome. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Clears all existing attribute backing through the shared update owner. */
@@ -4414,8 +4527,12 @@ xattr_release_group(
 	/* Keeps the clear caller's explicit handled/result convention. */
 	error = xattr_existing_group(inode, NULL, 0, handled);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 /* End consolidated ufs-xattr-release.inc. */
 
@@ -4673,7 +4790,13 @@ initial_block_locked(
 	/*
  * Preserves the original errno and its separately recorded ownership
 	 * outcome. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reserves memory and quota before admitting the first metadata block. */
@@ -4762,7 +4885,13 @@ initial_block_group(
 	/*
  * Returns an admitted failure without retrying the compatibility
 	 * allocator. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Allocates initialized attribute backing through the common first-block owner. */
@@ -4779,8 +4908,12 @@ xattr_allocate_group(
 	error = initial_block_group(inode, UFS_INITIAL_XATTR, area, length,
 				    handled);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Allocates empty directory backing without publishing any directory entry. */
@@ -4797,8 +4930,12 @@ directory_backing_group(
 	error = initial_block_group(inode, UFS_INITIAL_DIRECTORY, NULL, 0,
 				    handled);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 /* End consolidated ufs-xattr-allocation.inc. */
 
@@ -5213,7 +5350,13 @@ release_group_locked(
 	/*
  * Preserves errno separately from any release that recovery
 	 * established. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reserves bounded private storage before a journal-backed pointer release. */
@@ -5272,7 +5415,11 @@ release_group(
 	kern_free(group);
 
 	/* Reports a complete bounded release or its original failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 /* End consolidated ufs-release.inc. */
 
@@ -5339,8 +5486,12 @@ detach_inode_block(
 	if (error != 0)
 		ms->writable = 0;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int truncate_indirect(struct inode *inode, uint64_t root, unsigned depth, uint64_t base, uint64_t keep, int *empty);
@@ -5448,8 +5599,12 @@ truncate_indirect(
 out:
 	kern_free(block);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ufs_truncate(struct inode *inode, off_t size);
@@ -5550,8 +5705,12 @@ out:
 	kern_free(block);
 	mutex_unlock(&inode->i_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static enum inode_type mode_type(uint16_t mode);
@@ -5866,8 +6025,12 @@ load_inode(
 	if (entered)
 		mutex_unlock(gate);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int next_dirent(struct inode *directory, off_t *cursor, uint32_t *number, uint8_t *type, char name[NAME_MAX + 1U]);
@@ -6276,8 +6439,12 @@ out:
 	kern_free(original);
 	kern_free(block);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int dir_remove(struct inode *directory, const struct componentname *name, uint32_t *number);
@@ -6338,8 +6505,12 @@ dir_remove(
 	kern_free(original);
 	kern_free(block);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int dir_replace(struct inode *directory, const struct componentname *name, uint32_t number, uint8_t type, uint32_t *old_number, uint8_t *old_type);
@@ -6393,8 +6564,12 @@ dir_replace(
 	kern_free(original);
 	kern_free(block);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int name_is_dot(const struct componentname *name);
@@ -6574,8 +6749,12 @@ discard_new_inode(
 	inode->i_flags |= INODE_DEAD;
 	inode_release(inode);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int discard_new_inode_after_error(struct inode *inode, int directory_counted, int original_error);
@@ -6802,7 +6981,13 @@ reserve_inode_locked(
 	/*
  * Preserves original errors separately from durable identity ownership.
 	 */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Owns quota and private images for a supported zero-link inode reservation. */
@@ -6863,7 +7048,13 @@ reserve_inode_group(
 	/*
  * Leaves failure cleanup and final name publication to the creation
 	 * owner. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 static int new_inode(struct inode *directory, const struct inode_creation_request *request, nlink_t links, struct inode **result);
 
@@ -7034,8 +7225,12 @@ ufs_lookup_locked(
 		}
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ufs lookup operation. */
@@ -7057,8 +7252,12 @@ ufs_lookup(
 	if (entered)
 		mutex_unlock(gate);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Begin consolidated ufs-namespace.inc. */
@@ -7206,7 +7405,11 @@ remove_group_locked(
 	}
 
 	/* Keeps the original errno even when recovery established removal. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Owns bounded private storage and error-path namespace cache publication. */
@@ -7289,7 +7492,13 @@ remove_group(
 	/*
  * Reports the original group outcome after releasing all transient
 	 * ownership. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 struct ufs_link_group {
@@ -7501,8 +7710,12 @@ link_group_locked(
 		}
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Owns private hard-link preparation through its live namespace outcome. */
@@ -7566,8 +7779,12 @@ link_group(
 	kern_free(group->memory);
 	kern_free(group);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 struct ufs_rename_group {
@@ -7861,7 +8078,13 @@ rename_group_locked(
 	/*
  * Preserves an error even when recovery establishes that the rename
 	 * committed. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Owns unique inode locks, exact image capacity and rename cache publication. */
@@ -8017,7 +8240,13 @@ rename_group(
 	/*
  * Returns the original transaction result after releasing transient
 	 * ownership. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 /* End consolidated ufs-namespace.inc. */
 
@@ -8122,7 +8351,11 @@ creation_group_locked(
 	}
 
 	/* Returns the original I/O result separately from durable ownership. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Owns initial parent backing and private final publication under namespace exclusion. */
@@ -8213,7 +8446,13 @@ creation_group(
 	/*
  * Preserves the admitted error without falling back to independent
 	 * writes. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Finishes all grouped creation kinds without discarding a possibly named child. */
@@ -8255,8 +8494,12 @@ creation_publish(
 	error = discard_new_inode_after_error(
 		target, target->i_type == INODE_DIR, error);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 static int ufs_create(struct inode *directory, const struct componentname *name, const struct inode_creation_request *request, struct inode **result);
 
@@ -8317,8 +8560,12 @@ ufs_create(
 out:
 	mutex_unlock(&ms->namespace_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ufs_mkdir(struct inode *directory, const struct componentname *name, const struct inode_creation_request *request, struct inode **result);
@@ -8442,8 +8689,12 @@ ufs_mkdir(
 out:
 	mutex_unlock(&ms->namespace_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ufs_mknod(struct inode *directory, const struct componentname *name, const struct inode_creation_request *request, struct inode **result);
@@ -8513,8 +8764,12 @@ ufs_mknod(
 out:
 	mutex_unlock(&ms->namespace_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ufs_unlink(struct inode *directory, const struct componentname *name);
@@ -8602,8 +8857,12 @@ out:
 	inode_release(target);
 	mutex_unlock(&ms->namespace_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int directory_empty(struct inode *directory);
@@ -8733,8 +8992,12 @@ out:
 	inode_release(target);
 	mutex_unlock(&ms->namespace_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ufs_rename(struct inode *old_directory, const struct componentname *old_name, struct inode *new_directory, const struct componentname *new_name, unsigned flags);
@@ -9033,8 +9296,12 @@ out:
 	inode_release(source);
 	mutex_unlock(&ms->namespace_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ufs_link(struct inode *directory, const struct componentname *name, struct inode *target);
@@ -9126,8 +9393,12 @@ ufs_link(
 out:
 	mutex_unlock(&ms->namespace_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ufs_symlink(struct inode *directory, const struct componentname *name, const char *target, const struct inode_creation_request *request, struct inode **result);
@@ -9200,8 +9471,12 @@ ufs_symlink(
 out:
 	mutex_unlock(&ms->namespace_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the pwrite inode operation. */
@@ -9810,8 +10085,12 @@ out:
 	kern_free(old_area);
 	kern_free(block);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ufs getxattr operation. */
@@ -9952,8 +10231,12 @@ out:
 	kern_free(updated);
 	kern_free(area);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static ssize_t ufs_listxattr(struct inode *inode, char *list, size_t size);
@@ -10089,8 +10372,12 @@ out:
 	kern_free(updated);
 	kern_free(area);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ufs_getattr(struct inode *inode, struct stat *status);
@@ -10283,8 +10570,12 @@ ufs_setattr(
 	}
 	mutex_unlock(&inode->i_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ufs_inode_sync(struct inode *inode);
@@ -10312,8 +10603,12 @@ ufs_inode_sync(
 								   : EROFS;
 	mutex_unlock(&inode->i_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Begin consolidated ufs-inode-retirement.inc. */
@@ -10495,7 +10790,13 @@ retire_inode_locked(
 	/*
  * Preserves the original failure independently of established
 	 * retirement. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Owns private retirement storage and exclusion after data and xattr teardown. */
@@ -10550,7 +10851,13 @@ retire_inode_group(
 	/*
  * Returns the admitted result without a second compensating retirement.
 	 */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 /* End consolidated ufs-inode-retirement.inc. */
 
@@ -10625,7 +10932,13 @@ reclaim_unlinked_inode(
 	/*
  * Returns actual retirement failure to explicit cleanup and recovery
 	 * callers. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void ufs_reclaim(struct inode *inode);
@@ -10707,7 +11020,13 @@ creation_unlink_group(
 	/*
  * Retains references and the original errno on an unsuccessful
 	 * transition. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Discards an unpublished journal-backed creation through checked release owners. */
@@ -10737,7 +11056,13 @@ discard_reserved_inode(
 	/*
  * Reports incomplete cleanup without hiding which persistent owners
 	 * remain. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static const struct inode_ops ufs_inode_ops = {.lookup = ufs_lookup,
@@ -10847,8 +11172,12 @@ ufs_read_super(
 	}
 	kern_free(buffer);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static char ufs_identity_hex(unsigned value);
@@ -11028,8 +11357,12 @@ ufs_write_clean(
 	mutex_unlock(&ms->lock);
 	kern_free(buffer);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 static int ufs_probe(struct disk *disk);
 
@@ -11119,8 +11452,12 @@ ufs_quota_rebuild(
 	}
 	kern_free(block);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int ufs_quota_load(struct mount *mountp, struct inode *root);
@@ -11160,8 +11497,12 @@ ufs_quota_load(
 				 : (loaded < 0 ? (int)-loaded : EIO);
 	kern_free(buffer);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int snapshot_disk_submit(struct disk *disk, struct bio *bio);
@@ -11291,8 +11632,12 @@ snapshot_disk_remove(
 	if (error == 0)
 		ms->snapshot_disk = NULL;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void ufs_state_free(struct ufs_mount_state *ms);
@@ -11346,8 +11691,12 @@ ufs_quota_persist(
 		error = disk_sync(mountp->m_disk);
 	kern_free(buffer);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Begin consolidated ufs-orphan.inc. */
@@ -11409,8 +11758,12 @@ orphan_recover_one(
 	 * outcomes. */
 	error = reclaim_unlinked_inode(&owner->inode);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Scans a private mount using stable candidate bits and freshly read dinodes. */
@@ -11532,7 +11885,13 @@ orphan_recover(
 	/*
  * Returns failure with persistent remaining ownership for the next
 	 * mount attempt. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 static int ufs_mount_impl(struct mount *mountp);
 
@@ -11832,8 +12191,12 @@ ufs_sync(
 		error = disk_sync(mountp->m_disk);
 	mutex_unlock(&ms->lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 static int ufs_statvfs(struct mount *mountp, struct statvfs *result);
 
@@ -11998,8 +12361,12 @@ ufs_quotactl(
 		ms->writable = 0;
 	kern_free(saved);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 static int ufs_snapshotctl(struct mount *mountp, struct snapshot_control *request);
 
@@ -12679,8 +13046,12 @@ drv_ufs_journal_publishv(
 				       journal->pending_digest, 0, NULL);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -12716,8 +13087,12 @@ drv_ufs_journal_commitv(
 		journal_close_views(journal);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -12787,8 +13162,12 @@ drv_ufs_journal_drain(
 		journal_close_views(journal);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -13558,8 +13937,12 @@ drv_ufs_journal_view_copy(
 		return error;
 	error = journal_view_transfer(view, first, count, buffer, 1);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -13914,8 +14297,12 @@ drv_ufs_snapshot_create(
 		snapshot->active = 1;
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -14079,8 +14466,12 @@ drv_ufs_snapshot_delete(
 		map_clear(snapshot);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 /* End consolidated ufs-snapshot.c. */
 

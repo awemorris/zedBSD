@@ -239,8 +239,12 @@ checkpoint_arm(
 	checkpoint_end_submit(checkpoint);
 	checkpoint_report_submit(checkpoint, error);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the checkpoint take work operation. */

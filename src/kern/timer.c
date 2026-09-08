@@ -195,8 +195,12 @@ process_timer_delete(
 	spin_unlock_irqrestore(&process_timer_lock, irq);
 	process_release(release);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -241,8 +245,12 @@ process_timer_gettime(
 	}
 	spin_unlock_irqrestore(&process_timer_lock, irq);
 
-	/* Reports the lookup or snapshot result. */
-	return error;
+	/* Reports why the lookup or snapshot failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -418,8 +426,12 @@ process_timer_getoverrun(
 		*result = process_timers[slot].overrun;
 	spin_unlock_irqrestore(&process_timer_lock, irq);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -746,8 +758,12 @@ realtime_units(
 	/* Converts it to nanoseconds. */
 	error = timespec_to_units(&now, KERN_NSEC_PER_SEC, result);
 
-	/* Reports the conversion result. */
-	return error;
+	/* Reports why the conversion failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Computes the units left until a timer expires; zero when disarmed. */
@@ -795,6 +811,10 @@ timer_clock_snapshot_locked(
 	/* Reads the real-time clock. */
 	error = realtime_units(now_realtime);
 
-	/* Reports the clock read result. */
-	return error;
+	/* Reports why the clock read failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

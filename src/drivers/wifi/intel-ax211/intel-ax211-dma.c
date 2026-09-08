@@ -486,8 +486,12 @@ ax211_fixed_buffers_allocate(
 					      INTEL_AX211_RX_STATUS_SIZE, 16U);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ax211 buffer allocate operation. */
@@ -595,8 +599,12 @@ ax211_firmware_buffers_allocate(
 		}
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ax211 rx buffers allocate operation. */
@@ -632,8 +640,12 @@ ax211_rx_buffers_allocate(
 		}
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ax211 scratch build operation. */

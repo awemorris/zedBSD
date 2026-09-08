@@ -984,8 +984,12 @@ block_fsync(
 	/* Flushes the disk. */
 	error = disk_sync(file->f_data);
 
-	/* Reports the flush result. */
-	return error;
+	/* Reports why the flush failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Answers the identity query here and forwards other ioctls to the disk. */
@@ -1043,8 +1047,12 @@ block_ioctl(
 	/* Forwards everything else to the disk. */
 	error = disk_ioctl(file->f_data, request, (void *)argument);
 
-	/* Reports the disk's result. */
-	return error;
+	/* Reports why the disk's failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Builds the root and fixed directories of a new devfs mount. */

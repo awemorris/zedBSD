@@ -78,8 +78,12 @@ socket_family_register(
 		families[family] = ops;
 	spin_unlock_irqrestore(&socket_registry_lock, irq);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -161,8 +165,12 @@ socket_create(
 		(void)atomic_raw_fetch_add_relaxed(&socket_count.value,
 		    (unsigned)-1);
 
-	/* Reports the creation result. */
-	return error;
+	/* Reports why the creation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -382,7 +390,11 @@ socket_take_error(
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	/* Reports the taken error. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -706,8 +718,12 @@ socket_enqueue_packet_wait(
 	else
 		poll_notify();
 
-	/* Reports the queueing result. */
-	return error;
+	/* Reports why the queueing failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

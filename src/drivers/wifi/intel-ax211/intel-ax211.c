@@ -1680,8 +1680,12 @@ drv_pci_intel_ax211_driver_register(
 	if (error == 0)
 		ax211_registry_initialized = 1U;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2523,8 +2527,12 @@ ax211_pci_refresh_one(
 	ax211_pci_scrub(mac_address, sizeof(mac_address));
 	mutex_unlock(&controller->lifecycle_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Transactionally publishes an administratively-down WLAN station graph. */
@@ -3151,8 +3159,13 @@ ax211_pci_ltr_enabled(
 	/* Checks the operation status. */
 	if (error == 0)
 		*enabled = (control & AX211_PCIE_DEVICE_CONTROL2_LTR) != 0U;
-	/* Returns the computed result. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* The exclusive MSI-X handler only latches work for a safe context. */
@@ -6704,8 +6717,12 @@ ax211_net_open(
 	}
 	mutex_unlock(&controller->lifecycle_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reconciles common retirement only after all driver operations can be joined. */
@@ -6777,8 +6794,12 @@ ax211_pci_close_locked(
 	if (error == 0)
 		controller->close_pending = 0U;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Closes the epoch without losing the ability to retry an incomplete close. */
@@ -6887,8 +6908,12 @@ ax211_net_transmit(
 	ax211_pci_operation_leave_locked(controller);
 	mutex_unlock(&controller->lifecycle_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ax211 net poll receive operation. */
@@ -8316,8 +8341,12 @@ ax211_radio_stop_retry(
 	error = ax211_pci_close_locked(controller);
 	mutex_unlock(&controller->lifecycle_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ax211 radio quiesce operation. */
@@ -8341,8 +8370,12 @@ ax211_radio_quiesce(
 		controller->quarantined = 1U;
 	mutex_unlock(&controller->lifecycle_lock);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Erases temporary and terminal controller-owned identity/state bytes. */

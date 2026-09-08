@@ -346,7 +346,11 @@ syscall_restart_deadline_rearm(
 	}
 
 	/* Reports how the deadline arithmetic went. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -374,7 +378,13 @@ syscall_restart_deadline_after(
 		return 0;
 	}
 	error = syscall_restart_deadline_rearm(ticks, deadline);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -464,7 +474,13 @@ syscall_test_thread_join_claim(
 	if (target == NULL)
 		return EINVAL;
 	error = thread_join_claim_locked(target, owner, stop_redispatch);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -658,7 +674,13 @@ poll_timeout(
 		return 0;
 	}
 	error = syscall_restart_deadline_after(ticks, deadline);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Handles ppoll(2). */
@@ -741,7 +763,13 @@ pselect_pin(
 
 	/* Reads the initial value through the pin. */
 	error = copyin_pinned(pin, 0, value, sizeof(*value));
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Handles pselect(2) on top of the poll machinery. */
@@ -1017,7 +1045,13 @@ descriptor_socket(
 	if (process == NULL || process->fd == NULL)
 		return EBADF;
 	error = socket_file_ref_get(process->fd, descriptor, reference);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Drops a socket reference and passes a result through. */
@@ -1049,7 +1083,13 @@ copy_sockaddr_in(
 	/* Reads the address into cleared storage. */
 	memset(storage, 0, sizeof(*storage));
 	error = copyin(address, storage, length);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Copies a socket address and its length out to user memory. */
@@ -1086,7 +1126,13 @@ copy_sockaddr_out(
 			return error;
 	}
 	error = copyout(&actual, length_address, sizeof(actual));
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Releases the pins of a socket address output. */
@@ -1143,7 +1189,13 @@ sockaddr_output_pin(
 	error = uaccess_pin(address, bytes, PROT_WRITE, &pin->address);
 	if (error != 0)
 		sockaddr_output_unpin(pin);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Copies a socket address and its length out through pinned outputs. */
@@ -1177,7 +1229,13 @@ copy_sockaddr_out_pinned(
 		error = copyout_pinned(&pin->address, 0, storage, copied);
 	if (error == 0)
 		error = copyout_pinned(&pin->length, 0, &actual, sizeof(actual));
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Handles socket(2). */
@@ -4554,7 +4612,13 @@ replace_cred(
 	int error;
 
 	error = process_cred_replace(process, replacement);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Handles getuid(2), geteuid(2), getgid(2), getegid(2), and getgroups(2). */
@@ -5160,7 +5224,13 @@ sys_resolve_path_at(
 		(void)file_close(*held);
 		*held = NULL;
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Takes an inode reference by descriptor or by path for the xattr calls. */
@@ -5204,7 +5274,13 @@ sys_inode_ref_acquire(
 		reference->inode = reference->path.p_inode;
 		reference->has_path = 1;
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Releases an inode reference taken by sys_inode_ref_acquire(). */
@@ -5826,7 +5902,13 @@ sys_parent_path_at(
 		(void)file_close(*held);
 		*held = NULL;
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Handles linkat(2). */

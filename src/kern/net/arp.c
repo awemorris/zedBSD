@@ -127,8 +127,12 @@ arp_resolve(
 	error = arp_lookup_locked(device, address, hardware);
 	spin_unlock_irqrestore(&cache_lock, irq);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -210,8 +214,12 @@ arp_request(
 
 	error = arp_send(device, ARP_OPERATION_REQUEST, address, NULL);
 
-	/* Reports the send result. */
-	return error;
+	/* Reports why the send failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -239,8 +247,12 @@ arp_init(
 	/* Receives ARP frames from Ethernet. */
 	error = ethernet_protocol_register(ETHERNET_TYPE_ARP, arp_input);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Finds a cached hardware address; the caller holds the cache lock. */
@@ -383,8 +395,12 @@ arp_send(
 		destination = target_hardware;
 	error = ethernet_output(device, destination, ETHERNET_TYPE_ARP, packet);
 
-	/* Reports the send result. */
-	return error;
+	/* Reports why the send failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Receives an ARP packet: learns the sender and answers a request for us. */

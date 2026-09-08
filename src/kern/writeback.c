@@ -189,8 +189,12 @@ writeback_budget_attach(
 	if (error != 0)
 		disk_release(leaf);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -546,8 +550,12 @@ writeback_domain_acquire(
 		disk_cache_release(tokens[count]);
 	}
 
-	/* Reports the resolution result. */
-	return error;
+	/* Reports why the resolution failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -577,7 +585,13 @@ writeback_mount_set(
 	else
 		error = policy_disable(mount);
 	mutex_unlock(&policy_control);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -851,7 +865,13 @@ writeback_mount_admit(
 		waitq_wake_all(&policy->worker->wake);
 	}
 	spin_unlock_irqrestore(&policy_registry, irq);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1411,7 +1431,13 @@ worker_sync_mount(
 
 	/* Flushes backend metadata without certifying unrelated concurrent VM writes. */
 	error = mount_sync_backend(mount);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Closes admission and joins every ticket and active pass before borrowing scratch. */

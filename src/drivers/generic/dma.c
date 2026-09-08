@@ -73,8 +73,12 @@ device_operation_begin(
 		device->active_operations++;
 	spin_unlock_irqrestore(&device->lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void device_operation_end(struct drv_dma_device *device);
@@ -783,8 +787,12 @@ fail:
 	hal_free(vector);
 	device_operation_end(device);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

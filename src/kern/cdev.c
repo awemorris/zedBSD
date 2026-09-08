@@ -412,8 +412,12 @@ cdev_open_file(
 	/* Opens through the device. */
 	error = device->ops->open(file);
 
-	/* Reports the device's result. */
-	return error;
+	/* Reports why the device's failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Closes a file on a device through the device's close operation. */
@@ -435,8 +439,12 @@ cdev_close_file(
 	/* Closes through the device. */
 	error = device->ops->close(file);
 
-	/* Reports the device's result. */
-	return error;
+	/* Reports why the device's failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reads from a device through its read operation. */
@@ -510,8 +518,12 @@ cdev_ioctl_file(
 	/* Forwards the request. */
 	error = device->ops->ioctl(file, request, argument);
 
-	/* Reports the device's result. */
-	return error;
+	/* Reports why the device's failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Polls a device through its poll operation. */
@@ -545,8 +557,12 @@ cdev_poll_file(
 	/* Polls through the device. */
 	error = device->ops->poll(file, events, revents);
 
-	/* Reports the device's result. */
-	return error;
+	/* Reports why the device's failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Validates one devfs component name. */

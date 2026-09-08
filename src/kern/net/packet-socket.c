@@ -69,8 +69,12 @@ packet_socket_init(
 	/* Registers AF_PACKET. */
 	error = socket_family_register(AF_PACKET, &packet_family);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

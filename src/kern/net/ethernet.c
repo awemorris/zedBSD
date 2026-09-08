@@ -182,8 +182,12 @@ ethernet_output(
 	/* Hands the frame to the device. */
 	error = net_device_transmit(device, packet);
 
-	/* Reports the transmit result. */
-	return error;
+	/* Reports why the transmit failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Tests whether an address is the broadcast address. */

@@ -653,8 +653,12 @@ finish_block_length(
 		return 0;
 	error = checked_add(*block_length, 1U, block_length);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the store le32 operation. */
@@ -736,8 +740,12 @@ validate_ntb16(
 		return EINVAL;
 	error = parse_ndp_chain(profile, bytes, result, first_ndp);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the parse ndp chain operation. */

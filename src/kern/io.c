@@ -439,8 +439,12 @@ io_scratch_free(
 	if (error == HAL_OK)
 		memset(scratch, 0, sizeof(*scratch));
 
-	/* Reports the release result. */
-	return error;
+	/* Reports why the release failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

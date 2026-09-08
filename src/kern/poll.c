@@ -111,8 +111,12 @@ poll_wait(
 	error = waitq_sleep(&channel.waitq, &channel.lock, observed, deadline, flags);
 	spin_unlock_irqrestore(&channel.lock, irq);
 
-	/* Reports the sleep result. */
-	return error;
+	/* Reports why the sleep failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

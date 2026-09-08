@@ -1164,8 +1164,12 @@ input_ioctl(
 	if (error == 0)
 		poll_notify();
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static const struct cdev_ops input_ops = {

@@ -9310,8 +9310,13 @@ radio_power_state_is_on(
 	/* Checks the operation status. */
 	if (error == 0)
 		*powered = control != 0xeaU && (status & 0x01U) == 0U;
-	/* Returns the computed result. */
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_warm_firmware_ack(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
@@ -9888,8 +9893,12 @@ journal_update_phy_paths(
 				       value, deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_rf_read(struct rtl8822b_radio *radio, uint8_t path, uint16_t rf_address, uint32_t *value, uint64_t deadline_ticks);
@@ -10119,8 +10128,12 @@ radio_pre_power(
 				     deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_post_power(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
@@ -10182,8 +10195,12 @@ radio_post_power(
 		}
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_mac_channel_20(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t channel, uint64_t deadline_ticks);
@@ -10233,8 +10250,12 @@ radio_mac_channel_20(
 			channel_is_w52(channel) ? 1U : 0U, deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_bb_channel_20(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t channel, uint64_t deadline_ticks);
@@ -10322,8 +10343,12 @@ radio_bb_channel_20(
 				       0x40000000U, 1U, deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_rf_channel_20(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t channel, uint64_t deadline_ticks);
@@ -10384,8 +10409,12 @@ radio_rf_channel_20(
 					  0x00080000U, 1U, deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_rxdfir_20(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint64_t deadline_ticks);
@@ -10415,8 +10444,12 @@ radio_rxdfir_20(
 			deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_toggle_igi(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint64_t deadline_ticks);
@@ -10475,8 +10508,12 @@ radio_toggle_igi(
 			antenna | (antenna << 4), deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_cca_20(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t channel, uint64_t deadline_ticks);
@@ -10552,8 +10589,12 @@ radio_cca_20(
 				       deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_rfe_channel(struct rtl8822b_radio *radio, struct rtl8822b_journal *journal, uint8_t channel, uint64_t deadline_ticks);
@@ -10616,8 +10657,12 @@ radio_rfe_channel(
 			antenna, deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_txagc_legacy_profile(struct rtl8822b_radio *radio, uint8_t channel, uint64_t deadline_ticks);
@@ -10793,8 +10838,12 @@ radio_tables_apply(
 			deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static unsigned radio_2g_power_group(uint8_t channel);
@@ -11219,8 +11268,12 @@ radio_fifo_3bulkout_profile(
 			error = EIO;
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Configures the USB3 PHY adjustment required by RTL8822B cut D. */
@@ -11308,8 +11361,12 @@ radio_usb_profile(
 				    0x2005U, deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_phy_trx_mode(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
@@ -11491,8 +11548,12 @@ radio_phy_trx_mode(
 	if (error == 0)
 		error = radio_rf_write(radio, 0U, 0xefU, 0U, deadline_ticks);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_phy_rfe_post_table(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
@@ -11532,8 +11593,12 @@ radio_phy_rfe_post_table(
 				     0x00000c3fU, 0x00000c3fU, deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Identifies a programmed board which explicitly has no Bluetooth coexistence. */
@@ -11639,8 +11704,12 @@ radio_coex_grant_read(
 	error = radio_read(radio, RTL8822B_REG_COEX_READ, 4U, value,
 			   deadline_ticks);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Gives a known WLAN-only board its software grants and antenna-switch ownership. */
@@ -11789,8 +11858,12 @@ radio_driver_info_profile(
 				     0x00000300U, 0U, deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int radio_minimum_mac_profile(struct rtl8822b_radio *radio, uint64_t deadline_ticks);
@@ -12027,8 +12100,12 @@ radio_minimum_mac_profile(
 				     0x40U, 0x40U, deadline_ticks);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -12396,8 +12473,12 @@ drv_rtl8822b_radio_rx_generation_resume(
 	if (error == 0)
 		radio->rx_generation_paused = 0U;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -12693,7 +12774,11 @@ drv_rtl8822b_radio_deauthentication_prepare(
 					       sizeof(frame), wire_length);
 	memset(frame, 0, sizeof(frame));
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 /* End consolidated rtl8822b.c. */

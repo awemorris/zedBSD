@@ -844,8 +844,12 @@ fail:
 			   "(%d); schedule retained\n",
 			   error, stop_error);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the uhci hardware stop operation. */
@@ -2007,8 +2011,12 @@ uhci_root_worker_stop(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 	thread_release(worker);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the uhci retirement worker stop operation. */
@@ -2096,8 +2104,12 @@ uhci_retirement_worker_stop(
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 	thread_release(worker);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the uhci token operation. */
@@ -2659,8 +2671,12 @@ uhci_build_request(
 fail:
 	uhci_request_free(c, r);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the uhci progress frame sample operation. */
@@ -3612,8 +3628,12 @@ uhci_endpoint_reset(
 	}
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the uhci frame number operation. */
@@ -4315,8 +4335,12 @@ fail:
 	}
 	hal_free(controller);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the uhci detach operation. */

@@ -173,7 +173,11 @@ file_format_reserve(
 	mutex_unlock(&file->f_lock);
 
 	/* Reports the reservation result without changing descriptor position. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -190,7 +194,13 @@ file_openat(
 	int error;
 
 	error = file_openat_cred(context, NULL, path, flags, mode, result);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -370,7 +380,13 @@ file_openat_cred(
 
 fail_file:
 	file_free(file);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -485,7 +501,13 @@ file_ioctl(
 	 * must not exclude read/write on a full-duplex descriptor.
 	 */
 	error = file->f_ops->ioctl(file, request, argument);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -652,7 +674,13 @@ file_content_lease_begin(
 fail_file:
 	(void)file_close(file);
 	memset(lease, 0, sizeof(*lease));
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Selects a shared immutable-input lease without weakening mutable snapshots. */
@@ -722,7 +750,13 @@ fail:
 		disk_cache_release(lease->read_disk);
 	memset(lease, 0, sizeof(*lease));
 	(void)file_close(file);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Captures full canonical pages before an executable mapping becomes visible. */
@@ -792,7 +826,13 @@ file_exec_snapshot_create(
 
 fail:
 	file_exec_snapshot_put(snapshot);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Shares immutable ownership across VM regions, splits and fork. */
@@ -1149,7 +1189,13 @@ file_io_begin(
 	int error;
 
 	error = file_io_begin_cred(file, kind, offset, internal_flags, NULL, io);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2105,7 +2151,13 @@ file_fsync(
 		}
 	}
 	mutex_unlock(&file->f_lock);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2126,7 +2178,13 @@ file_fsync_backend(
 	mutex_lock(&file->f_lock);
 	error = file_fsync_backend_locked(file);
 	mutex_unlock(&file->f_lock);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2181,7 +2239,13 @@ file_close(
 	else if (file->f_inode != NULL)
 		inode_release(file->f_inode);
 	file_free(file);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2495,7 +2559,13 @@ file_format_ioctl(
 
 	/* Reserves the opened object using its expected byte count. */
 	error = file_format_reserve(file, request.size_bytes);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Records complete, ordered FAT data extents without admitting holes. */
@@ -2583,7 +2653,13 @@ file_format_finalize(
 
 	/* Releases temporary extent storage on every outcome. */
 	kern_free(collection.entries);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Validates and publishes one lease while descriptor and inode I/O are held. */
@@ -2695,7 +2771,13 @@ file_fsync_backend_locked(
 		error = inode_sync(file->f_inode);
 	else
 		error = 0;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Prepares optional delayed ownership only for an ordinary direct-content write. */

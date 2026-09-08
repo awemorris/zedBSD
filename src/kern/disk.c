@@ -197,7 +197,11 @@ disk_reload_begin(
 	disk_unlock(enabled);
 
 	/* Reports whether this caller acquired the admission gate. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -236,7 +240,11 @@ disk_reload_replace(
 	disk_unlock(enabled);
 
 	/* Reports the unchanged namespace or the completed replacement. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -577,8 +585,12 @@ disk_gone_if_idle(
 out:
 	backing_mutation_end(&guard);
 
-	/* Reports the removal result. */
-	return error;
+	/* Reports why the removal failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -816,7 +828,11 @@ disk_buffer_acquire(
 	disk_unlock(enabled);
 
 	/* Reports whether the reference was granted. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1032,8 +1048,12 @@ disk_open(
 	if (error == ENXIO && disk->d_ops != NULL && disk->d_ops->close != NULL)
 		disk->d_ops->close(disk);
 
-	/* Reports the open result. */
-	return error;
+	/* Reports why the open failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1072,8 +1092,12 @@ disk_open_by_dev(
 	if (error == 0)
 		*result = disk;
 
-	/* Reports the open result. */
-	return error;
+	/* Reports why the open failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1137,8 +1161,12 @@ disk_ioctl(
 	error = disk->d_ops->ioctl(disk, request, argument);
 	disk_release(disk);
 
-	/* Reports the driver's result. */
-	return error;
+	/* Reports why the driver's failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1261,7 +1289,13 @@ disk_media_retire(
 	(void)refcount_put_not_last(&disk->d_refs);
 	disk_unlock(enabled);
 	backing_mutation_end(&guard);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1312,8 +1346,12 @@ bio_submit(
 		disk_unlock(enabled);
 	}
 
-	/* Reports the submission result. */
-	return error;
+	/* Reports why the submission failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1492,8 +1530,12 @@ bio_wait(
 		error = EINVAL;
 	spin_unlock_irqrestore(&bio->b_lock, irq);
 
-	/* Reports the completion result. */
-	return error;
+	/* Reports why the completion failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1573,7 +1615,11 @@ bio_flush(
 	disk_cache_leave(leaf);
 
 	/* Preserves the physical barrier result for upper dirty owners. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1590,8 +1636,12 @@ disk_read_direct(
 
 	error = disk_transfer_direct(disk, BIO_READ, block, count, data, NULL, NULL, NULL);
 
-	/* Reports the transfer result. */
-	return error;
+	/* Reports why the transfer failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1609,8 +1659,12 @@ disk_write_direct(
 	/* Writes without an I/O context. */
 	error = disk_write_direct_context(disk, block, count, data, NULL);
 
-	/* Reports the transfer result. */
-	return error;
+	/* Reports why the transfer failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1633,8 +1687,12 @@ disk_write_direct_context(
 	error = disk_transfer_direct(disk, BIO_WRITE, block, count, (void *)data,
 				     NULL, NULL, context);
 
-	/* Reports the transfer result. */
-	return error;
+	/* Reports why the transfer failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1662,8 +1720,12 @@ disk_transfer_progress(
 		completed,
 		NULL);
 
-	/* Reports the transfer result. */
-	return error;
+	/* Reports why the transfer failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1693,7 +1755,11 @@ disk_transfer_progress_context(
 	error = disk_transfer_direct(disk, op, block, count, data, NULL, completed, context);
 
 	/* Reports the transfer outcome independently of its confirmed prefix. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1715,8 +1781,12 @@ disk_write_direct_claimed(
 	error = disk_transfer_direct(disk, BIO_WRITE, block, count, (void *)data,
 				     claim, NULL, NULL);
 
-	/* Reports the transfer result. */
-	return error;
+	/* Reports why the transfer failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1734,8 +1804,12 @@ disk_sync(
 		return error;
 	error = bio_flush(disk);
 
-	/* Reports the flush result. */
-	return error;
+	/* Reports why the flush failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1752,8 +1826,12 @@ disk_read(
 
 	error = disk_cached_transfer(disk, block, count, data, 0, NULL, NULL);
 
-	/* Reports the read result. */
-	return error;
+	/* Reports why the read failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1771,7 +1849,13 @@ disk_read_view(
 
 	/* Applies the same lifecycle admission as ordinary cached I/O. */
 	error = disk_cached_transfer(disk, block, count, data, 0, view, NULL);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1814,8 +1898,12 @@ disk_write(
 	/* Writes without an I/O context. */
 	error = disk_write_context(disk, block, count, data, NULL);
 
-	/* Reports the write result. */
-	return error;
+	/* Reports why the write failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1847,8 +1935,12 @@ disk_write_context(
 	error = disk_cached_transfer(disk, block, count, (void *)data, 1, NULL, context);
 	backing_mutation_end(&guard);
 
-	/* Reports the write result. */
-	return error;
+	/* Reports why the write failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1866,8 +1958,12 @@ disk_write_filesystem(
 	/* Writes without an I/O context. */
 	error = disk_write_filesystem_context(disk, block, count, data, NULL);
 
-	/* Reports the write result. */
-	return error;
+	/* Reports why the write failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1900,8 +1996,12 @@ disk_write_filesystem_context(
 	error = disk_cached_transfer(disk, block, count, (void *)data, 1, NULL, context);
 	backing_mutation_end(&guard);
 
-	/* Reports the write result. */
-	return error;
+	/* Reports why the write failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1921,7 +2021,11 @@ disk_cache_acquire(
 	error = disk_cache_enter(disk, leaf);
 
 	/* Reports the acquired token or the lifecycle refusal. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2033,7 +2137,13 @@ failed_memory:
 	spin_unlock_irqrestore(&endpoint->lock, irq);
 	spin_unlock_irqrestore(&async_registry, registry_irq);
 	disk_cache_release(token);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 int
@@ -2286,7 +2396,13 @@ bio_async_wait(struct bio_async_request *request)
 	}
 	error = request->error;
 	spin_unlock_irqrestore(&endpoint->lock, irq);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 int
@@ -2309,7 +2425,13 @@ bio_async_result(struct bio_async_request *request, const void **data, size_t *t
 	if (error == 0 && request->bio.b_op == BIO_READ)
 		*data = request->payload;
 	spin_unlock_irqrestore(&request->endpoint->lock, irq);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 void
@@ -2894,7 +3016,11 @@ disk_cached_transfer(
 	disk_cache_leave(leaf);
 
 	/* Preserves the cache operation's result. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Guards the disk registry without sleeping, reporting the interrupt state. */

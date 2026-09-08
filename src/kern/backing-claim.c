@@ -393,8 +393,12 @@ out_locked:
 	/* Frees the extents only when they were not published. */
 	kern_free(ranges);
 
-	/* Reports the finalization result. */
-	return error;
+	/* Reports why the finalization failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -586,8 +590,12 @@ backing_mutation_begin_inode(
 	/* Delegates to the owner-aware form without an owner. */
 	error = backing_mutation_begin_inode_claimed(inode, NULL, guard);
 
-	/* Reports the reservation result. */
-	return error;
+	/* Reports why the reservation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -630,8 +638,12 @@ backing_mutation_begin_inode_claimed(
 	/* Reserves the keyed mutation. */
 	error = mutation_reserve(&key, NULL, NULL, owner, 0, guard);
 
-	/* Reports the reservation result. */
-	return error;
+	/* Reports why the reservation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -657,8 +669,12 @@ backing_mutation_begin_disk(
 	/* Reserves the raw mutation. */
 	error = mutation_reserve(NULL, &range, NULL, owner, 0, guard);
 
-	/* Reports the reservation result. */
-	return error;
+	/* Reports why the reservation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -715,8 +731,12 @@ backing_mutation_begin_disk_filesystem(
 	/* Reserves the filesystem mutation. */
 	error = mutation_reserve(NULL, &range, &volume, NULL, 1, guard);
 
-	/* Reports the reservation result. */
-	return error;
+	/* Reports why the reservation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -770,8 +790,12 @@ backing_claim_check_disk(
 	if (error == 0)
 		backing_mutation_end(&guard);
 
-	/* Reports the probe result. */
-	return error;
+	/* Reports why the probe failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -832,7 +856,11 @@ out:
 	spin_unlock_irqrestore(&claim_lock, irq);
 
 	/* Reports the mount verdict. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -850,7 +878,11 @@ backing_claim_check_teardown(
 	error = backing_claim_check_mount(disk, 0);
 
 	/* Reports the teardown verdict. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Identifies the executing context that owns nested mutations. */
@@ -1386,6 +1418,10 @@ mutation_reserve(
 out:
 	spin_unlock_irqrestore(&claim_lock, irq);
 
-	/* Reports the reservation result. */
-	return error;
+	/* Reports why the reservation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

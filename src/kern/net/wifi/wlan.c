@@ -440,7 +440,13 @@ wlan_station_scan_profile_update(
 	spin_unlock_irqrestore(&station->lock, enabled);
 	station_control_leave(station);
 	station_leave(station);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -567,7 +573,13 @@ wlan_station_report_scan_bss(
 	if (wake_worker)
 		wlan_worker_wakeup();
 	station_leave(station);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -596,8 +608,12 @@ wlan_station_report_scan_frame(
 	/* Reports the record to the scan. */
 	error = wlan_station_report_scan_bss(station, generation, &bss);
 
-	/* Reports the result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1139,7 +1155,13 @@ wlan_station_ioctl(
 	else
 		error = ioctl_status(station, argument);
 	station_leave(station);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1183,7 +1205,13 @@ wlan_station_close(
 	if (error == 0)
 		station->closing = 0;
 	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Publishes close intent before the driver starts its synchronous join. */
@@ -1258,7 +1286,13 @@ wlan_station_stop_cancel(struct wlan_station *station)
 	station->stop_retry_disabled = 1;
 	error = station->stop_work_active ? EBUSY : 0;
 	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1883,7 +1917,13 @@ wlan_station_test_seed_authorized(
 	if (error != 0)
 		station->controlled_port = 0U;
 	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1919,7 +1959,13 @@ wlan_station_test_begin_pairwise_rekey(
 		station_sync_wpa_locked(station);
 	}
 	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2056,7 +2102,13 @@ wlan_station_test_complete_authorized(
 	if (error != 0)
 		station->controlled_port = 0U;
 	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -2155,7 +2207,13 @@ wlan_station_test_transmit_eapol(
 	    WLAN_WPA2_TX_EAPOL, station->selected.bssid, frame, length, deadline);
 	station_control_leave(station);
 	station_leave(station);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 #endif
 
@@ -2534,7 +2592,13 @@ station_carrier_down_locked(
 	if (error == ENODEV && station->device != NULL &&
 	    !net_device_carrier(station->device))
 		error = 0;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Computes the deadline of one WPA2 transition within the connection budget. */
@@ -2713,7 +2777,13 @@ station_wpa_radio_start(
 			error = ESTALE;
 		spin_unlock_irqrestore(&station->lock, enabled);
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Transmits a management or EAPOL frame for the WPA2 engine. */
@@ -2821,7 +2891,13 @@ station_wpa_transmit(
 	error = station->ops->frame_transmit(station->radio_context, &request);
 	wlan_crypto_erase(ethernet, sizeof(ethernet));
 	wlan_crypto_erase(mpdu, sizeof(mpdu));
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Records the association in the radio for the WPA2 engine. */
@@ -2843,7 +2919,13 @@ station_wpa_association_set(
 	/* Asks the radio to record the association. */
 	error = station->ops->association_set(station->radio_context,
 	    generation, bssid, aid, station_wpa_deadline(station));
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Clears the association in the radio for the WPA2 engine. */
@@ -2863,7 +2945,13 @@ station_wpa_association_clear(
 	/* Asks the radio to drop the association. */
 	error = station->ops->association_clear(station->radio_context,
 	    generation, station_wpa_cleanup_deadline(station));
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Installs a pairwise or group key in the radio for the WPA2 engine. */
@@ -2935,7 +3023,13 @@ station_wpa_key_install(
 		spin_unlock_irqrestore(&station->lock, enabled);
 	}
 	wlan_crypto_erase(&request, sizeof(request));
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Activates staged keys in the radio and on the receive path for the WPA2 engine. */
@@ -2985,7 +3079,13 @@ station_wpa_keys_activate(
 		    station->wpa2.pending_group_receive_packet_number;
 	}
 	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Raises the receive replay floor of a key for the WPA2 engine. */
@@ -3048,7 +3148,13 @@ station_wpa_key_receive_pn_advance(
 			*floor = receive_packet_number;
 	}
 	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Deletes a key from the radio and the receive path for the WPA2 engine. */
@@ -3104,7 +3210,13 @@ station_wpa_key_delete(
 		}
 		spin_unlock_irqrestore(&station->lock, enabled);
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Opens or closes the controlled port for the WPA2 engine. */
@@ -3147,7 +3259,13 @@ station_wpa_authorized_set(
 		error = station_carrier_down_locked(station);
 	}
 	spin_unlock_irqrestore(&station->lock, enabled);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Stops the radio for the WPA2 engine. */
@@ -3174,7 +3292,13 @@ station_wpa_radio_stop(
 			station->connect_driver_active = 0;
 		spin_unlock_irqrestore(&station->lock, enabled);
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Terminates one connection generation after a link loss; the caller holds the control gate. */
@@ -3389,7 +3513,13 @@ station_find_enter(
 		break;
 	}
 	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Takes an active reference on the station of a slot index. */
@@ -3428,7 +3558,13 @@ station_index_enter(
 		spin_unlock_irqrestore(&station->lock, enabled);
 	}
 	spin_unlock_irqrestore(&wlan_registry_lock, registry_enabled);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Orders two BSSIDs. */
@@ -3777,7 +3913,13 @@ output:
 	station_control_leave(station);
 	if (wake_start)
 		wlan_worker_wakeup();
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the scan and snapshot state for the scan status ioctl. */
@@ -3965,7 +4107,13 @@ done:
 	secure_zero(credential, sizeof(credential));
 	secure_zero(request->passphrase, sizeof(request->passphrase));
 	request->passphrase_length = 0U;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Stops the scan and connection of a station; the caller holds the control gate. */
@@ -4118,7 +4266,13 @@ station_retire(
 	station_control_enter(station);
 	error = station_retire_controlled(station, keep_administrative_up);
 	station_control_leave(station);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Retires the connection for the disconnect ioctl. */
@@ -4167,7 +4321,13 @@ ioctl_disconnect(
 	memset(request->reserved, 0, sizeof(request->reserved));
 	spin_unlock_irqrestore(&station->lock, enabled);
 	station_control_leave(station);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Registry ownership protects a read-only snapshot without delaying stop. */
@@ -4187,7 +4347,13 @@ station_status_device(struct net_device *device, struct wlan_status_request *req
 		}
 	}
 	spin_unlock_irqrestore(&wlan_registry_lock, enabled);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the station state for the status ioctl. */

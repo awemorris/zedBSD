@@ -505,8 +505,12 @@ out:
 	kern_free(words);
 	kern_free(address);
 
-	/* Reports the stack result. */
-	return error;
+	/* Reports why the stack failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -679,8 +683,12 @@ out:
 	if (process != NULL)
 		process_free_mem(process);
 
-	/* Reports the spawn result. */
-	return error;
+	/* Reports why the spawn failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -697,8 +705,12 @@ process_execve(
 
 	error = process_exec_file(process, path, NULL, 1, argv, envp);
 
-	/* Reports the exec result. */
-	return error;
+	/* Reports why the exec failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -721,8 +733,12 @@ process_fexecve(
 		label = "fexecve";
 	error = process_exec_file(process, label, file, 0, argv, envp);
 
-	/* Reports the exec result. */
-	return error;
+	/* Reports why the exec failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -739,8 +755,12 @@ process_spawn(
 
 	error = process_spawn_from(&process0, path, argv, envp, result);
 
-	/* Reports the spawn result. */
-	return error;
+	/* Reports why the spawn failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -761,8 +781,12 @@ process_spawn_init(
 	argv[1] = NULL;
 	error = process_spawn(path, argv, envp, result);
 
-	/* Reports the spawn result. */
-	return error;
+	/* Reports why the spawn failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Measures a terminated string that must fit within a maximum. */
@@ -910,8 +934,12 @@ load_executable(
 	if (interpreter_file != NULL)
 		(void)file_close(interpreter_file);
 
-	/* Reports the load result. */
-	return error;
+	/* Reports why the load failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Releases the file, lease, and owned vector of a resolved target. */
@@ -1080,7 +1108,11 @@ fail:
 	exec_target_release(target);
 
 	/* Reports the resolution failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Checks that a resolved target still has the identity it was resolved with. */
@@ -1403,6 +1435,10 @@ out:
 	if (new_vm != NULL)
 		vmspace_put(new_vm);
 
-	/* Reports the exec result. */
-	return error;
+	/* Reports why the exec failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }

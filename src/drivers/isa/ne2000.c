@@ -157,8 +157,12 @@ drv_pcat_ne2000_init(
 	net_device_destroy(ne2000.device);
 	ne2000.device = NULL;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the port inb operation. */

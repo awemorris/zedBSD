@@ -269,8 +269,12 @@ posix_acl_store(
 	size = 8U + (size_t)acl->count * sizeof(acl->entries[0]);
 	error = inode_setxattr(inode, name, acl, size, 0);
 
-	/* Reports the attribute write result. */
-	return error;
+	/* Reports why the attribute write failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -322,8 +326,12 @@ posix_acl_chmod(
 	/* Stores the updated ACL. */
 	error = posix_acl_store(inode, POSIX_ACL_XATTR_ACCESS, &acl);
 
-	/* Reports the store result. */
-	return error;
+	/* Reports why the store failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

@@ -588,8 +588,12 @@ wlan_wpa2_m3_plaintext_parse(
 
 	error = key_plaintext_parse(plaintext, length, result, 1);
 
-	/* Reports the parse result. */
-	return error;
+	/* Reports why the parse failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -605,8 +609,12 @@ wlan_wpa2_group_plaintext_parse(
 
 	error = key_plaintext_parse(plaintext, length, result, 0);
 
-	/* Reports the parse result. */
-	return error;
+	/* Reports why the parse failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

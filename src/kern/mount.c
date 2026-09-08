@@ -558,7 +558,11 @@ fail:
 	mount_free(mountp);
 
 	/* Reports the failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -627,7 +631,11 @@ fail:
 	mount_free(mountp);
 
 	/* Reports the failure. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -712,8 +720,12 @@ mount_private_promote_root(
 	if (error == 0 && result != NULL)
 		*result = mountp;
 
-	/* Reports the promotion result. */
-	return error;
+	/* Reports why the promotion failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -752,8 +764,12 @@ mount_private_lookup(
 	error = namei_path_at(&context, relative, result);
 	cwdinfo_destroy(&context);
 
-	/* Reports the lookup result. */
-	return error;
+	/* Reports why the lookup failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -793,7 +809,13 @@ mount_sync_backend(
 		    io_error_record != NULL)
 			io_error_record(&mountp->m_write_error, error);
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -807,7 +829,13 @@ mount_sync(
 
 	/* Uses optional shared scratch for ordinary callers. */
 	error = mount_sync_buffer(mountp, NULL, 0);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -854,7 +882,13 @@ mount_sync_buffer(
 				error = observed;
 		}
 	}
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -991,7 +1025,13 @@ mount_quotactl(
 	if (mountp->m_type == NULL || mountp->m_type->quotactl == NULL)
 		return EOPNOTSUPP;
 	error = mountp->m_type->quotactl(mountp, request);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1019,7 +1059,13 @@ mount_snapshotctl(
 	if (mountp->m_type == NULL || mountp->m_type->snapshotctl == NULL)
 		return EOPNOTSUPP;
 	error = mountp->m_type->snapshotctl(mountp, request);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1054,8 +1100,12 @@ mount(
 	error = mount_at(type_name, &root, dir + 1, flags, data, NULL);
 	path_release(&root);
 
-	/* Reports the mount result. */
-	return error;
+	/* Reports why the mount failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1533,7 +1583,13 @@ mount_info_snapshot(
 		mount_release(snapshot[i]);
 	}
 	path_release(&context.root);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1588,7 +1644,13 @@ mount_namespace_check_inode(
 	}
 	for (index = 0; index < count; index++)
 		inode_release(anchors[index]);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1621,7 +1683,11 @@ mount_namespace_check_name(
 	spin_unlock_irqrestore(&namespace_lock, irq);
 
 	/* Reports whether the name is free. */
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -1915,7 +1981,13 @@ mount_filesystem(
 	error = mount_filesystem_on_disk(mountp, type_name, disk,
 	    flags, data);
 	disk_release(disk);
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Tests that a name is a usable single path component. */
@@ -2086,7 +2158,13 @@ prepare_filesystem_destroy(
 		error = mountp->m_type->prepare_unmount(mountp);
 	else
 		error = 0;
-	return error;
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Releases a mount's root inode, inodes, filesystem, and disk. */

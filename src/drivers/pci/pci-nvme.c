@@ -213,8 +213,12 @@ drv_nvme_lifecycle_fail(
 	lifecycle->failure_count++;
 	lifecycle->quarantined = 1;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Run cleanup in the only DMA-safe order: controller -> bus master -> handler -> in-flight IRQs -> IRQ allocation -> DMA -> BAR mapping/address -> saved PCI command -> BAR claim. A fallible action is committed to the ledger only after it succeeds.  The caller may retain a quarantined object or retry; either choice cannot free a successfully released resource twice. */
@@ -2037,8 +2041,12 @@ nvme_shutdown_stop_admission(
 		spin_unlock_irqrestore(&controller->command_lock, irq);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_shutdown_normal(void *context);
@@ -2103,8 +2111,12 @@ nvme_shutdown_controller_disable(
 		controller->lifecycle.controller_enabled = 0;
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_shutdown_bus_master_disable(void *context);
@@ -2129,8 +2141,12 @@ nvme_shutdown_bus_master_disable(
 	if (error == 0)
 		controller->lifecycle.master_disabled = 1;
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static const struct drv_nvme_shutdown_ops nvme_shutdown_operations = {
@@ -2354,8 +2370,12 @@ nvme_lifecycle_irq_drain(
 	if (error == 0 && controller->io_slot_count != 0U)
 		error = nvme_io_lifecycles_quiesce(controller);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void nvme_lifecycle_irq_free(void *context);
@@ -2422,8 +2442,12 @@ nvme_lifecycle_bar_restore(
 			   quiesce_error);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_lifecycle_pci_restore(void *context);
@@ -2472,8 +2496,12 @@ fail:
 			   quiesce_error);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void nvme_lifecycle_bar_release(void *context);
@@ -2919,8 +2947,12 @@ nvme_admin_execute_mode(
 out:
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_admin_execute(struct nvme_controller *controller, struct drv_nvme_command *command, uint32_t *result);
@@ -3159,8 +3191,12 @@ nvme_io_begin_bio(
 out:
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void nvme_io_end_bio(struct nvme_controller *controller, enum bio_op operation);
@@ -3318,8 +3354,12 @@ nvme_io_slot_acquire(
 	}
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_io_post(struct nvme_controller *controller, struct nvme_io_slot *slot, const struct drv_nvme_command *command, int uses_payload);
@@ -3384,8 +3424,12 @@ fail:
 	nvme_io_fail_all_locked(controller, error);
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_io_wait_completion(struct nvme_controller *controller, struct nvme_io_slot *slot, int *recovery_owner);
@@ -3434,8 +3478,12 @@ nvme_io_wait_completion(
 	}
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_io_claim_recovery_locked(struct nvme_controller *controller);
@@ -3570,8 +3618,12 @@ nvme_io_execute(
 	if (recovery_owner)
 		(void)nvme_io_recover(controller);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_disk_submit(struct disk *disk, struct bio *bio);
@@ -3694,8 +3746,12 @@ nvme_io_flush_internal(
 	error = nvme_io_execute(controller, DRV_NVME_NVM_FLUSH, 0U, 0U, NULL);
 	nvme_io_end_bio(controller, BIO_FLUSH);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_probe_permitted(struct nvme_controller *controller);
@@ -3848,8 +3904,12 @@ nvme_probe_namespace(
 fail_disk:
 	(void)disk_destroy(disk);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_dma_allocate(struct nvme_controller *controller);
@@ -3922,8 +3982,12 @@ nvme_dma_allocate(
 fail:
 	nvme_dma_free(controller);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void nvme_io_dma_free_unpublished(struct nvme_controller *controller);
@@ -4060,8 +4124,12 @@ nvme_io_dma_allocate(
 fail:
 	nvme_io_dma_free_unpublished(controller);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_io_queue_memory_reset(struct nvme_controller *controller);
@@ -4207,8 +4275,12 @@ nvme_io_queue_create(
 	waitq_wake_all(&controller->io_state_waitq);
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the nvme controller enable operation. */
@@ -4339,8 +4411,12 @@ nvme_io_lifecycles_quiesce(
 	}
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static void nvme_io_quarantine(struct nvme_controller *controller, int error, int dma_unsafe);
@@ -4530,8 +4606,12 @@ fail:
 		   "retained\n",
 		   error);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_attach(struct drv_pci_device *device, const struct drv_pci_id *id);
@@ -4887,8 +4967,12 @@ fail:
 	hal_printf("nvme: attach failed at %s (%d)\n", stage, error);
 	hal_free(controller);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 static int nvme_detach_owned(struct nvme_controller *controller);

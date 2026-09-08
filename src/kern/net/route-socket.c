@@ -64,8 +64,12 @@ route_socket_init(
 	/* Registers the read-only routing socket family. */
 	error = socket_family_register(AF_ROUTE, &route_family);
 
-	/* Reports the registration result. */
-	return error;
+	/* Reports why the registration failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -313,8 +317,12 @@ route_poll(
 	if (error == 0)
 		*revents &= (short)~(POLLOUT | POLLWRNORM);
 
-	/* Reports the common poll result. */
-	return error;
+	/* Reports why the common poll failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Closes and releases a routing endpoint. */

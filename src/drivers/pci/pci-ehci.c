@@ -1160,8 +1160,12 @@ ehci_schedule_initialize(
 fail:
 	ehci_schedule_release(controller);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ehci wait schedule status operation. */
@@ -1350,8 +1354,12 @@ fail:
 			   error, stop_error);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ehci hardware stop operation. */
@@ -1543,8 +1551,12 @@ stop_owner:
 			   owner, halt_error, master_error, irq_error);
 	}
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ehci bus master disable operation. */
@@ -2154,8 +2166,12 @@ ehci_build_request(
 fail:
 	ehci_request_free(controller, request);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ehci endpoint owner locked operation. */
@@ -3474,8 +3490,12 @@ fail:
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 	ehci_retirement_report(controller);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ehci retirement progress operation. */
@@ -3719,8 +3739,12 @@ ehci_root_worker_stop(
 	controller->root_joining = 0;
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ehci retirement worker operation. */
@@ -3871,8 +3895,12 @@ ehci_retirement_worker_stop(
 	controller->retirement_joining = 0;
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ehci urb dequeue operation. */
@@ -4521,8 +4549,12 @@ ehci_endpoint_disable(
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ehci endpoint reset operation. */
@@ -4566,8 +4598,12 @@ ehci_endpoint_reset(
 	}
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ehci frame number operation. */
@@ -5377,8 +5413,12 @@ fail:
 	}
 	hal_free(controller);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Supports the ehci detach operation. */
