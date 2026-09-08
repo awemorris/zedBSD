@@ -2391,6 +2391,7 @@ fat_utf8_casefold_equal(
 	/* Handles the left availability. */
 	if (left == NULL || right == NULL)
 		return 0;
+
 	/* Continue while the operation condition remains true. */
 	while (*a && *b) {
 		/* Checks the decode utf8 result. */
@@ -10560,6 +10561,7 @@ fat_mount_impl(
 	/* Handles the state availability. */
 	if (state == NULL)
 		return ENOSPC;
+
 	memset(&fat_metadata_tables[i], 0, sizeof(fat_metadata_tables[i]));
 	state->metadata = &fat_metadata_tables[i];
 	(void)mutex_init(&state->lock, LOCK_RANK_INODE, "FAT mount");
