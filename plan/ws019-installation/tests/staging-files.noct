@@ -1,0 +1,47 @@
+require commands;
+func fresh(path) {
+    instRequire(["/bin/cp", "-T", "--update=none-fail", "--attributes-only", "--preserve=mode", "--", "/sbin/mkfs", path]);
+    if (FileUtil.getFileSize(path) != 0) { System.error("new staging file not empty"); }
+}
+func main(args) {
+    if (Array.size(args) != 1) { System.error("expected disposable mount"); }
+    var base = args[0];
+    var data = base + "/data temporary";
+    var swap = base + "/swap temporary";
+    fresh(data);
+    var result = instRun(["/bin/cp", "-T", "--update=none-fail", "--", "/bin/sh", data], "5", 1048576);
+    if (result[0] == 0 || FileUtil.getFileSize(data) != 0) { System.error("existing staging overwritten"); }
+    print("STAGING data growth begin");
+    print(instRequire(["/bin/time", "/bin/truncate", "-s", "33554432", data]));
+    if (FileUtil.getFileSize(data) != 33554432) { System.error("wrong data size"); }
+    print("STAGING data format begin");
+    print(instRequire(["/bin/time", "/sbin/mkfs", "-t", "ufs", data]));
+    instRequire(["/bin/sync", "--", data]);
+    instRequire(["/bin/mv", "-T", "--update=none-fail", "--", data, base + "/data.img"]);
+    fresh(swap);
+    print("STAGING swap growth begin");
+    print(instRequire(["/bin/time", "/bin/truncate", "-s", "67108864", swap]));
+    print("STAGING swap format begin");
+    print(instRequire(["/bin/time", "/sbin/mkswap", swap]));
+    instRequire(["/bin/sync", "--", swap]);
+    instRequire(["/bin/mv", "-T", "--update=none-fail", "--", swap, base + "/swapfile"]);
+    instRequire(["/bin/sync", "--", base]);
+    // Capacity refusal must not destroy the existing zero-length staging file.
+    var capacity = base + "/capacity temporary";
+    fresh(capacity);
+    print("STAGING capacity refusal begin");
+    result = instRun(["/bin/truncate", "-s", "268435456", capacity], "60", 1048576);
+    if (result[0] != 1 || FileUtil.getFileSize(capacity) != 0) {
+        System.error("capacity refusal failed: " + result[0] + " " + result[1]);
+    }
+    // This size fits the volume itself but exceeds its remaining free space.
+    result = instRun(["/bin/truncate", "-s", "201326592", capacity], "60", 1048576);
+    if (result[0] != 1 || FileUtil.getFileSize(capacity) != 0) {
+        System.error("free-space refusal failed: " + result[0] + " " + result[1]);
+    }
+    instRequire(["/bin/rm", "--", capacity]);
+    if (FileUtil.getFileSize(base + "/data.img") != 33554432 || FileUtil.getFileSize(base + "/swapfile") != 67108864) {
+        System.error("published sizes changed");
+    }
+    print("Noct staging PASS fresh-data fresh-swap conflict capacity");
+}

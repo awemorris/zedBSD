@@ -1,0 +1,78 @@
+require source;
+func sourceCheck(condition, message) { if (!condition) { System.error("source test: " + message); } }
+func sourceInvoke(context, unused) { return context.fn(context.bytes, context.size); }
+func sourceBad(fn, bytes, size, offset, replacement) {
+    var original = bytes[offset];
+    bytes[offset] = replacement;
+    var result = System.pcall(sourceInvoke, {fn:fn, bytes:bytes, size:size}, 0);
+    bytes[offset] = original;
+    sourceCheck(!result.ok, "unexpected header acceptance at " + offset);
+}
+func sourceReadFail(context, unused) { return instSourceRead(context.path, context.offset, context.count); }
+func main(args) {
+    sourceCheck(Array.size(args) == 3 || (Array.size(args) == 4 && args[3] == "--capture"),
+        "loader kernel rootfs paths required");
+    var loaderSize = instFileIdentity(args[0]).size;
+    var kernelSize = instFileIdentity(args[1]).size;
+    var rootSize = instFileIdentity(args[2]).size;
+    var loaderBytes = loaderSize;
+    if (loaderBytes > 65536) { loaderBytes = 65536; }
+    var pe = instSourceRead(args[0], 0, loaderBytes);
+    var elf = instSourceRead(args[1], 0, 512);
+    var ufs = instSourceRead(args[2], 65536, 8192);
+    sourceCheck(instSourcePe(pe, loaderSize) && instSourceElf(elf, kernelSize) && instSourceUfs(ufs, rootSize),
+        "actual build artifacts");
+    for (offset in [0, 4, 5, 6, 16, 18, 20, 28, 52, 54, 56]) {
+        sourceBad(instSourceElf, elf, kernelSize, offset, 0);
+    }
+    sourceBad(instSourceElf, elf, kernelSize, 32, 255);
+    var table = instU32(elf, 32);
+    var load = -1;
+    for (i in 0..instU16(elf, 56)) {
+        if (instU32(elf, table + i * 56) == 1 && load == -1) { load = table + i * 56; }
+    }
+    sourceCheck(load >= 0, "load found");
+    sourceBad(instSourceElf, elf, kernelSize, load + 27, 255);
+    sourceBad(instSourceElf, elf, kernelSize, load + 20, 0);
+    sourceBad(instSourceElf, elf, kernelSize, load + 15, 127);
+    sourceBad(instSourceElf, elf, kernelSize, load + 47, 127);
+    var peOffset = instU32(pe, 60);
+    var optional = peOffset + 24;
+    for (offset in [0, peOffset, peOffset + 4, peOffset + 6, optional, optional + 68]) {
+        sourceBad(instSourcePe, pe, loaderSize, offset, 0);
+    }
+    sourceBad(instSourcePe, pe, loaderSize, 63, 127);
+    sourceBad(instSourcePe, pe, loaderSize, peOffset + 7, 255);
+    sourceBad(instSourcePe, pe, loaderSize, optional + 35, 127);
+    var section = optional + instU16(pe, peOffset + 20);
+    sourceBad(instSourcePe, pe, loaderSize, section + 23, 127);
+    for (offset in [1372, 45, 49, 53, 56, 80, 84, 96, 100, 116, 120]) {
+        // High group count and invalid shifts remain bounded before arithmetic.
+        sourceBad(instSourceUfs, ufs, rootSize, offset, 255);
+    }
+    sourceBad(instSourceUfs, ufs, rootSize, 1087, 127);
+    sourceBad(instSourceUfs, ufs, rootSize, 1002, 0);
+    sourceBad(instSourceUfs, ufs, rootSize, 23, 127);
+    // Failed exact reads close their descriptors; repeated failures must remain usable.
+    for (i in 0..64) {
+        var failed = System.pcall(sourceReadFail, {path:args[0], offset:loaderSize, count:512}, 0);
+        sourceCheck(!failed.ok, "short read accepted");
+    }
+    sourceCheck(Packed.size(instSourceRead(args[0], 0, 64)) == 64, "reader survives short reads");
+    if (Array.size(args) == 4) {
+        var roles = ["loader", "kernel", "rootfs"];
+        var captured = [];
+        for (i in 0..3) {
+            var record = instCaptureSource(roles[i], args[i]);
+            sourceCheck(record.role == roles[i] && record.path == args[i] && record.bytes > 0 &&
+                String.charCount(record.digest) == 64, "native source capture");
+            Array.push(captured, record);
+        }
+        var entries = instAdmissionManifest("/unused-esp", "/unused-payload",
+            "12345678-1234-5678-9abc-123456789abc", captured);
+        sourceCheck(entries[2].bytes == rootSize && entries[2].digest == captured[2].digest,
+            "actual sources feed the manifest");
+        print("native source capture PASS identities digests manifest");
+    }
+    print("installer source PASS actual PE ELF UFS malformed headers and 64 short reads");
+}

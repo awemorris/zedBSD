@@ -11,6 +11,8 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <zedbsd/input.h>
+#include <zedbsd/console.h>
+#include <termios.h>
 
 #define BITS_PER_WORD (sizeof(unsigned long) * 8U)
 #define BIT_WORDS(maximum)                                                     \
@@ -292,6 +294,55 @@ fail:
 	return -1;
 }
 
+/* Verifies removed requests cannot steal the ordinary console stream. */
+static int
+test_console_character_api(void)
+{
+	static const unsigned long retired[] = {
+		_IOR('c', 9, uint32_t), _IOR('c', 10, uint32_t),
+		_IOWR('c', 11, uint64_t), _IO('c', 12),
+		_IOR('c', 14, uint64_t), _IOW('c', 15, uint64_t)
+	};
+	struct console_size geometry;
+	struct termios attributes;
+	unsigned char buffer[64];
+	unsigned index;
+	int descriptor;
+	int result;
+
+	/* Retained geometry, termios and isatty use the same descriptor. */
+	descriptor = open("/dev/console", O_RDWR | O_NONBLOCK);
+	if (descriptor < 0)
+		return -1;
+	result = ioctl(descriptor, ZEDBSD_CONSOLE_GET_SIZE, &geometry);
+	if (result != 0 || geometry.rows == 0U || geometry.columns == 0U) {
+		close(descriptor);
+		return -1;
+	}
+	result = tcgetattr(descriptor, &attributes);
+	if (result != 0 || !isatty(descriptor)) {
+		close(descriptor);
+		return -1;
+	}
+
+	/* Obsolete numeric encodings fail without mutating caller buffers. */
+	for (index = 0U; index < sizeof(retired) / sizeof(retired[0]); index++) {
+		memset(buffer, 0xa5, sizeof(buffer));
+		errno = 0;
+		result = ioctl(descriptor, retired[index], buffer);
+		if (result != -1 || errno != EOPNOTSUPP ||
+		    !bytes_are(buffer, sizeof(buffer), 0xa5)) {
+			close(descriptor);
+			return -1;
+		}
+	}
+	close(descriptor);
+	puts("IN-T50 PASS retired=6 tty=preserved");
+
+	/* Succeeded. */
+	return 0;
+}
+
 int
 main(void)
 {
@@ -302,6 +353,11 @@ main(void)
 
 	/* QEMU monitor sendkey releases may still be draining after exec. */
 	sleep(1);
+	if (test_console_character_api() != 0) {
+		fprintf(stderr, "IN-T12 FAIL console character API: %s\n", strerror(errno));
+		return 1;
+	}
+
 	directory = opendir("/dev/input");
 	if (directory == NULL) {
 		fprintf(stderr, "IN-T12 FAIL opendir /dev/input: %s\n",

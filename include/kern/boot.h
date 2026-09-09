@@ -16,6 +16,11 @@
 #include <stdint.h>
 
 #include <boot/parameters.h>
+#include <boot/provenance.h>
+
+int kern_boot_provenance_set(const struct boot_provenance *record);
+const char *kern_boot_source_selector(unsigned configuration);
+uint64_t kern_boot_config_matches(void);
 
 /*
  * Shared data contract between the real-mode Stage 1 and 32-bit Stage 2.

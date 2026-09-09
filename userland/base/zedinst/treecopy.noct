@@ -1,0 +1,169 @@
+// Runs census before copying; reports completion independently of diagnostics.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require files;
+require treeprogress;
+
+func instTreeCopyNotify(context, state) {
+    print("Files copied: " + state.done + " / " + state.census.total +
+        " (directories: " + state.directoriesDone + " / " + state.census.directoryTotal + ")");
+}
+
+func instTreeReadBody(context, unused) {
+    context.file = File.open(context.path, "rb");
+    File.seek(context.file, context.offset);
+    while (context.offset < context.end) {
+        var count = context.end - context.offset;
+        if (count > 65536) { count = 65536; }
+        var data = File.read(context.file, count);
+        if (Packed.size(data) <= 0 || Packed.size(data) > count) {
+            System.error("incomplete tree record read");
+        }
+        context.feed(context.target, data, context.directory);
+        context.offset = context.offset + Packed.size(data);
+    }
+    return context.offset;
+}
+
+func instTreeReadClose(context, unused) { File.close(context.file); }
+
+func instTreeReadRange(path, offset, end, target, feed, directory) {
+    if (offset < 0 || end < offset) { System.error("tree record file shrank"); }
+    if (end == offset) { return offset; }
+    var context = {path:path, offset:offset, end:end, target:target,
+        feed:feed, directory:directory, file:0};
+    var result = System.pcall(instTreeReadBody, context, 0);
+    var closed = {ok:true};
+    if (context.file != 0) { closed = System.pcall(instTreeReadClose, context, 0); }
+    if (!result.ok) { System.error(result.message); }
+    if (!closed.ok) { System.error(closed.message); }
+    return result.value;
+}
+
+func instTreeReportFeed(progress, data, unused) { instTreeProgressFeed(progress, data); }
+
+func instTreePrepare(source, workspace, findCommand) {
+    instControlledPath(source);
+    instControlledPath(workspace);
+    // The caller supplies an admitted immutable source and a new private directory.
+    var identity = instFileIdentity(workspace);
+    var uid = instNumber(instLines(instRequire(["/bin/id", "-u"]))[0], 10);
+    if ((identity.mode & 61440) != 16384 || identity.permissions != 448 || identity.uid != uid) {
+        System.error("tree census workspace is not private");
+    }
+    var names = instLines(instRequire(["/bin/ls", "-a1", "--", workspace]));
+    for (name in names) {
+        if (name != "." && name != "..") { System.error("tree census workspace is not empty"); }
+    }
+    if (source == "/" || workspace == source ||
+        String.substring(workspace, 0, String.charCount(source) + 1) == source + "/") {
+        System.error("tree census workspace is inside the source");
+    }
+    var files = workspace + "/files";
+    var directories = workspace + "/directories";
+    instRequire([findCommand, source, "-type", "d", "-fprint0", directories,
+        "-o", "-fprint0", files]);
+    var census = instTreeCensus();
+    for (entry in [{path:files, directory:false}, {path:directories, directory:true}]) {
+        var before = instFileIdentity(entry.path);
+        if ((before.mode & 61440) != 32768) { System.error("census is not a regular file"); }
+        instTreeReadRange(entry.path, 0L, before.size, census, instTreeCensusFeed, entry.directory);
+        var after = instFileOwned(entry.path, before);
+        if (after.size != before.size) { System.error("census changed while reading"); }
+    }
+    instTreeCensusFreeze(census);
+    var limit = 12L;
+    for (path, value in census.files) { limit = limit + String.byteLength(path) + 3L; }
+    for (path, value in census.directories) { limit = limit + String.byteLength(path) + 3L; }
+    return {source:source, workspace:workspace, identity:identity,
+        census:census, limit:limit, report:workspace + "/report"};
+}
+
+func instTreeCopyPoll(context) {
+    var size = FileUtil.getFileSize(context.prepared.report);
+    if (size < context.offset || size > context.prepared.limit) {
+        System.error("copy completion report has an invalid size");
+    }
+    // A missing report gives size zero; final stat/header checks refuse that case.
+    var before = context.progress.done;
+    var directories = context.progress.directoriesDone;
+    context.offset = instTreeReadRange(context.prepared.report, context.offset,
+        size, context.progress, instTreeReportFeed, false);
+    if (before != context.progress.done || directories != context.progress.directoriesDone) {
+        context.notify(context.ui, context.progress);
+    }
+}
+
+func instTreeCopyOutput(context, text) {
+    if (String.byteLength(context.output) + String.byteLength(text) > 65536) {
+        System.error("copy diagnostics exceeded their bound");
+    }
+    context.output = context.output + text;
+}
+
+func instTreeCopyBody(context, unused) {
+    var workspace = instFileIdentity(context.prepared.workspace);
+    var expected = context.prepared.identity;
+    if (workspace.device != expected.device || workspace.inode != expected.inode ||
+        workspace.mode != expected.mode || workspace.uid != expected.uid) {
+        System.error("tree copy workspace changed");
+    }
+    // Present the frozen total before the copy process can mutate its destination.
+    context.notify(context.ui, context.progress);
+    context.process = Process.spawn(["/bin/timeout", "-k", "2", context.seconds,
+        context.command, "-a", "-T", "--report-file=" + context.prepared.report,
+        "--", context.prepared.source, context.destination]);
+    if (context.process < 0) { System.error("cannot spawn tree copy"); }
+    while (Process.isAlive(context.process)) {
+        instTreeCopyOutput(context, Process.read(context.process, 100));
+        instTreeCopyPoll(context);
+    }
+    while (true) {
+        var text = Process.read(context.process, 0);
+        if (text == "") { break; }
+        instTreeCopyOutput(context, text);
+    }
+    context.status = Process.wait(context.process);
+    Process.close(context.process);
+    context.process = -1;
+    instTreeCopyPoll(context);
+    var report = instFileIdentity(context.prepared.report);
+    if ((report.mode & 61440) != 32768 || report.size != context.offset) {
+        System.error("copy report is not a complete regular file");
+    }
+    instTreeProgressFinish(context.progress, context.status);
+    return true;
+}
+
+func instTreeCopyReap(context, unused) {
+    // timeout relays TERM and its -k timer kills/reaps a child that does not exit.
+    Process.kill(context.process, 15);
+    while (Process.isAlive(context.process)) { Process.read(context.process, 100); }
+    Process.wait(context.process);
+    Process.close(context.process);
+    context.process = -1;
+}
+
+func instTreeCopy(prepared, destination, seconds, command, notify, ui) {
+    instControlledPath(destination);
+    if (instNumber(seconds, 10) == 0) { System.error("copy requires a finite time bound"); }
+    var context = {prepared:prepared, destination:destination, seconds:seconds,
+        command:command, notify:notify, ui:ui, progress:instTreeProgress(prepared.census),
+        offset:0L, process:-1, status:-1, output:""};
+    var result = System.pcall(instTreeCopyBody, context, 0);
+    var cleanup = {ok:true};
+    if (context.process >= 0) { cleanup = System.pcall(instTreeCopyReap, context, 0); }
+    var message = "";
+    if (!result.ok) { message = result.message; }
+    if (!cleanup.ok) { message = message + " child cleanup: " + cleanup.message; }
+    // This reports copying only; reconciliation and sync still precede install success.
+    return {ok:result.ok && cleanup.ok, message:message, output:context.output,
+        done:context.progress.done, total:prepared.census.total,
+        directoriesDone:context.progress.directoriesDone, directories:prepared.census.directoryTotal};
+}
+
+// Caller owns synced, read-only verification mounts for both trees.
+func instTreeVerify(source, destination) {
+    instControlledPath(source);
+    instControlledPath(destination);
+    instRequire(["/bin/diff", "-r", "-q", "--metadata", "--", source, destination]);
+}

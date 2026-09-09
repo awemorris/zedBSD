@@ -124,6 +124,7 @@ static int tmpfs_getattr(struct inode *inode, struct stat *status);
 static int tmpfs_setattr(struct inode *inode, const struct stat *status, unsigned mask);
 static int tmpfs_readdir(struct file *file, struct dirent *entry, int *eof);
 static void tmpfs_reclaim(struct inode *inode);
+static void tmpfs_retire_namespace(struct inode *inode);
 static int tmpfs_mount_impl(struct mount *mountp);
 static void tmpfs_unmount(struct mount *mountp);
 static int tmpfs_statvfs(struct mount *mountp, struct statvfs *result);
@@ -147,6 +148,7 @@ static const struct inode_ops tmpfs_inode_ops = {
 	.listxattr = tmpfs_listxattr,
 	.removexattr = tmpfs_removexattr,
 	.reclaim = tmpfs_reclaim,
+	.retire_namespace = tmpfs_retire_namespace,
 };
 
 static const struct file_ops tmpfs_directory_ops = {
@@ -681,7 +683,7 @@ publish_new(
 	entry->cookie = state->next_cookie++;
 
 	/* The namespace holds its own reference to the inode. */
-	inode_ref(inode);
+	inode_namespace_ref(inode);
 	*link = entry;
 	if (inode->i_type == INODE_DIR)
 		directory->i_linkcount++;
@@ -965,7 +967,7 @@ tmpfs_link(
 	}
 
 	entry->cookie = parent->state->next_cookie++;
-	inode_ref(target);
+	inode_namespace_ref(target);
 	*link = entry;
 
 	/* inode_link() publishes the successful link-count increment. */
@@ -1036,7 +1038,7 @@ detach_entry(
 	mutex_unlock(&parent->state->namespace_lock);
 
 	/* Drops the namespace reference and frees the entry. */
-	inode_release(entry->inode);
+	inode_namespace_release(entry->inode);
 	kern_free(entry);
 
 	/* Reports the removed entry. */
@@ -1191,7 +1193,7 @@ tmpfs_rename(
 
 	/* Drops the replaced target outside the lock. */
 	if (replaced != NULL) {
-		inode_release(replaced->inode);
+		inode_namespace_release(replaced->inode);
 		kern_free(replaced);
 	}
 
@@ -1598,6 +1600,32 @@ tmpfs_readdir(
 
 	/* Reports the next entry. */
 	return 0;
+}
+
+/* Drops directory-entry owners once the whole mount has passed teardown checks. */
+static void
+tmpfs_retire_namespace(
+	struct inode *inode)
+{
+	struct tmpfs_node *node;
+	struct tmpfs_dirent *entry;
+	struct tmpfs_dirent *next;
+
+	/* The admitted DYING mount has no external users or namespace mutations. */
+	node = tmpfs_node(inode);
+	if (node == NULL)
+		return;
+
+	entry = node->children;
+	node->children = NULL;
+
+	/* Cache owners keep linked nodes alive until the subsequent inode purge. */
+	while (entry != NULL) {
+		next = entry->next;
+		inode_namespace_release(entry->inode);
+		kern_free(entry);
+		entry = next;
+	}
 }
 
 /* Frees everything a dead inode's node holds. */

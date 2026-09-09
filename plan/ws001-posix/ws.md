@@ -573,3 +573,13 @@ The project-level goal is reached only when:
 Until that point, incomplete work is expected.  The correct iterative outcome
 is a smaller verified step plus an accurate hand-off in this master, not an
 unsupported completion claim.
+
+### q136 shell-status observation (unclassified)
+
+The initial WS002 normal-session fixture attempted absent `/bin/true`; the
+console printed `sh: /bin/true: not found` but the following interactive
+`echo P032RESULT3 $?` printed zero. Evidence:
+`plan/ws002-services/temp/q136-normal-pcat/run0/screen.log`. Do not count this
+status-only fixture as command success. The replacement session test requires
+actual pwd output. Investigate command-not-found status/interactive expansion
+under WS001 before assuming a kernel teardown failure; no shell fix is claimed.

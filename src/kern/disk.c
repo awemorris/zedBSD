@@ -99,6 +99,7 @@ static struct disk disks[DISK_MAX];
 static uint8_t disk_used[DISK_MAX];
 static struct disk *disk_head;
 static unsigned live_count;
+static unsigned admin_count;
 static dev_t next_dev = 1;
 static atomic_uint_t disk_registry_lock;
 struct bio_async_endpoint;
@@ -123,6 +124,8 @@ static int bio_dispatch(struct bio *bio);
 static int disk_transfer_direct(struct disk *disk, enum bio_op op, uint64_t block, uint32_t count, void *data, const struct backing_claim *claim, uint32_t *completed, const struct io_context *context);
 static struct disk *disk_leaf(struct disk *disk);
 static int disk_reload_idle(struct disk *parent);
+static int disk_admin_idle(struct disk *target);
+static int disk_admin_conflict_locked(struct disk *, uint64_t, uint64_t, int);
 static int disk_media_idle_locked(struct disk *parent, unsigned extra);
 static int disk_reload_replace_locked(struct disk *parent, struct disk **new_disks, unsigned count);
 static int disk_cache_enter(struct disk *disk, struct disk **leaf_out);
@@ -135,12 +138,206 @@ static void async_unlink_locked(struct bio_async_endpoint *endpoint, struct bio_
 
 _Static_assert(DISK_NAME_MAX >= sizeof("nvme0n4294967295"), "DISK_NAME_MAX must represent every 32-bit NVMe namespace ID");
 
+/* Computes a canonical interval without acquiring a second registry lock.
+ * Allocated prospective children are supported for namespace admission. */
+static int
+disk_admin_span(struct disk *disk, uint64_t block, uint64_t count,
+	struct disk **leaf, uint64_t *first)
+{
+	struct disk *parent;
+	unsigned depth = 0;
+
+	if (disk == NULL || count == 0 || block >= disk->d_block_count ||
+	    count > disk->d_block_count - block)
+		return EINVAL;
+	while (disk->d_parent != NULL) {
+		parent = disk->d_parent;
+		if (++depth > DISK_MAX || disk->d_block_size != parent->d_block_size ||
+		    block > UINT64_MAX - disk->d_parent_offset)
+			return EINVAL;
+		block += disk->d_parent_offset;
+		if (block >= parent->d_block_count || count > parent->d_block_count - block)
+			return EINVAL;
+		disk = parent;
+	}
+	*leaf = disk;
+	*first = block;
+	return 0;
+}
+
+/* A closed logical volume excludes every overlapping physical alias. */
+static int
+disk_admin_conflict_locked(struct disk *disk, uint64_t block, uint64_t count,
+	int allow_owner)
+{
+	struct disk *leaf;
+	struct disk *reserved_leaf;
+	struct disk *reserved;
+	uint64_t first;
+	uint64_t reserved_first;
+	struct thread *thread;
+
+	/* Ordinary I/O pays no registry scan when administration is inactive. */
+	if (admin_count == 0)
+		return 0;
+	if (disk_admin_span(disk, block, count, &leaf, &first) != 0)
+		return EBUSY;
+	thread = thread_current != NULL ? thread_current() : NULL;
+	for (reserved = disk_head; reserved != NULL; reserved = reserved->d_next) {
+		if (reserved->d_admin_owner == NULL)
+			continue;
+		if (disk_admin_span(reserved, 0, reserved->d_block_count,
+		    &reserved_leaf, &reserved_first) != 0)
+			return EBUSY;
+		if (leaf != reserved_leaf || first >= reserved_first + reserved->d_block_count ||
+		    reserved_first >= first + count)
+			continue;
+		if (!allow_owner || thread == NULL || reserved->d_admin_thread != thread ||
+		    first < reserved_first || count > reserved->d_block_count - (first - reserved_first))
+			return EBUSY;
+	}
+	return 0;
+}
+
+/* Requires one target description and no other overlapping volume owner. */
+static int
+disk_admin_idle(struct disk *target)
+{
+	struct disk *leaf;
+	struct disk *other_leaf;
+	struct disk *other;
+	uint64_t first;
+	uint64_t other_first;
+
+	if (disk_admin_span(target, 0, target->d_block_count, &leaf, &first) != 0)
+		return EINVAL;
+	if (target == leaf)
+		return disk_reload_idle(target);
+	/* Initial quiescence is conservatively leaf-wide; later disjoint I/O is allowed. */
+	if (leaf->d_inflight != 0 || leaf->d_cache_users != 0)
+		return EBUSY;
+	for (other = disk_head; other != NULL; other = other->d_next) {
+		if (disk_admin_span(other, 0, other->d_block_count, &other_leaf, &other_first) != 0)
+			return EBUSY;
+		if (leaf != other_leaf || first >= other_first + other->d_block_count ||
+		    other_first >= first + target->d_block_count)
+			continue;
+		if (other->d_open_count != (other == target ? 1U : 0U) ||
+		    other->d_opening != 0 || other->d_closing != 0)
+			return EBUSY;
+		/* The physical parent's references include its nonoverlapping children. */
+		if (other != target && other != leaf && refcount_load(&other->d_refs) != 1)
+			return EBUSY;
+	}
+	return 0;
+}
+
+/* Closes new-open admission while one description owns the raw backing claim. */
+int
+disk_admin_begin(
+	struct disk *parent,
+	const struct backing_claim *owner)
+{
+	bool enabled;
+	int error;
+
+	enabled = disk_lock();
+	if (parent == NULL || owner == NULL || disk_index(parent) < 0) {
+		error = EINVAL;
+	} else if (parent->d_state != DISK_LIVE || disk_media_status(parent) != 0) {
+		error = ENXIO;
+	} else if (parent->d_media_backing != NULL ||
+	    (parent->d_flags & DISK_FILE_BACKED) != 0 ||
+	    (parent->d_parent != NULL &&
+	    (parent->d_parent->d_parent != NULL || (parent->d_flags & DISK_PARTITION) == 0 ||
+	    (parent->d_parent->d_flags & DISK_FILE_BACKED) != 0))) {
+		error = EOPNOTSUPP;
+	} else if (((parent->d_flags | disk_leaf(parent)->d_flags) & DISK_READ_ONLY) != 0) {
+		error = EROFS;
+	} else if (disk_leaf(parent)->d_reload_owner != NULL ||
+	    disk_admin_conflict_locked(parent, 0, parent->d_block_count, 0) != 0) {
+		error = EBUSY;
+	} else {
+		error = disk_admin_idle(parent);
+		if (error == 0) {
+			parent->d_admin_owner = owner;
+			admin_count++;
+		}
+	}
+	disk_unlock(enabled);
+	return error;
+}
+
+/* Permits one serialized syscall to use the reserved disk and its cache. */
+int
+disk_admin_io_begin(
+	struct disk *parent,
+	const struct backing_claim *owner)
+{
+	struct thread *thread;
+	bool enabled;
+	int error;
+
+	thread = thread_current != NULL ? thread_current() : NULL;
+	enabled = disk_lock();
+	if (parent == NULL || parent->d_state != DISK_LIVE || disk_media_status(parent) != 0) {
+		error = ENXIO;
+	} else if (owner == NULL || parent->d_admin_owner != owner || thread == NULL) {
+		error = EINVAL;
+	} else if (parent->d_admin_thread != NULL) {
+		error = EBUSY;
+	} else {
+		parent->d_admin_thread = thread;
+		error = 0;
+	}
+	disk_unlock(enabled);
+	return error;
+}
+
+void
+disk_admin_io_end(
+	struct disk *parent,
+	const struct backing_claim *owner)
+{
+	bool enabled;
+
+	enabled = disk_lock();
+	if (parent != NULL && parent->d_admin_owner == owner &&
+	    thread_current != NULL && parent->d_admin_thread == thread_current())
+		parent->d_admin_thread = NULL;
+	disk_unlock(enabled);
+}
+
+/* Called only after the description's final operation has completed. */
+void
+disk_admin_end(
+	struct disk *parent,
+	const struct backing_claim *owner)
+{
+	bool enabled;
+
+	enabled = disk_lock();
+	if (parent != NULL && owner != NULL && parent->d_admin_owner == owner) {
+		parent->d_admin_owner = NULL;
+		admin_count--;
+	}
+	disk_unlock(enabled);
+}
+
 /*
  * Reserves one otherwise idle physical disk for partition-table reload.
  */
 int
 disk_reload_begin(
 	struct disk *parent)
+{
+	return disk_reload_begin_claimed(parent, NULL);
+}
+
+int
+disk_reload_begin_claimed(
+	struct disk *parent,
+	const struct backing_claim *claim)
 {
 	struct thread *owner;
 	bool enabled;
@@ -157,7 +354,9 @@ disk_reload_begin(
 	    (parent->d_flags & DISK_PARTITION) != 0 ||
 	    owner == NULL) {
 		error = EINVAL;
-	} else if (parent->d_reload_owner != NULL) {
+	} else if (parent->d_reload_owner != NULL ||
+	    (parent->d_admin_owner != NULL && parent->d_admin_owner != claim) ||
+	    disk_admin_conflict_locked(parent, 0, parent->d_block_count, 1) != 0) {
 		error = EBUSY;
 	} else {
 		error = disk_reload_idle(parent);
@@ -405,7 +604,9 @@ disk_create(
 		return ENXIO;
 	}
 
-	if (disk->d_parent != NULL && disk_leaf(disk)->d_reload_owner != NULL) {
+	if (disk->d_parent != NULL &&
+	    (disk_leaf(disk)->d_reload_owner != NULL ||
+	    disk_admin_conflict_locked(disk, 0, disk->d_block_count, 0) != 0)) {
 		disk_unlock(enabled);
 		return EBUSY;
 	}
@@ -466,7 +667,8 @@ disk_gone(
 
 	/* Only a live disk is unlinked. */
 	enabled = disk_lock();
-	if (disk_leaf(disk)->d_reload_owner != NULL)
+	if (disk_leaf(disk)->d_reload_owner != NULL ||
+	    disk_admin_conflict_locked(disk, 0, disk->d_block_count, 0) != 0)
 		goto out;
 	if (disk->d_state == DISK_GONE)
 		goto out;
@@ -526,7 +728,8 @@ disk_gone_if_idle(
 	    disk->d_inflight != 0 ||
 	    disk->d_opening != 0 ||
 	    disk->d_closing != 0 ||
-	    disk_leaf(disk)->d_reload_owner != NULL) {
+	    disk_leaf(disk)->d_reload_owner != NULL ||
+	    disk_admin_conflict_locked(disk, 0, disk->d_block_count, 0) != 0) {
 		disk_unlock(enabled);
 		error = EBUSY;
 		goto out;
@@ -555,6 +758,7 @@ disk_gone_if_idle(
 	    disk->d_opening != 0 ||
 	    disk->d_closing != 0 ||
 	    disk_leaf(disk)->d_reload_owner != NULL ||
+	    disk_admin_conflict_locked(disk, 0, disk->d_block_count, 0) != 0 ||
 	    refcount_load(&disk->d_refs) != 1) {
 		disk_unlock(enabled);
 		error = EBUSY;
@@ -883,6 +1087,7 @@ disk_registry_reset(
 		disk_used[i] = 0;
 	disk_head = NULL;
 	live_count = 0;
+	admin_count = 0;
 	next_dev = 1;
 
 	disk_unlock(enabled);
@@ -927,6 +1132,11 @@ disk_block_info(
 	info->device = (uint32_t)disk->d_dev;
 	info->parent_device = disk->d_parent != NULL ? (uint32_t)disk->d_parent->d_dev : 0;
 	info->flags = disk->d_flags & (DISK_READ_ONLY | DISK_REMOVABLE | DISK_PARTITION);
+
+	/* Exposes the backing capability without leaking internal flag values. */
+	if ((disk->d_flags & DISK_FILE_BACKED) != 0)
+		info->flags |= ZEDBSD_BLOCK_FILE_BACKED;
+
 	info->sector_size = disk->d_block_size;
 	info->sector_count = disk->d_block_count;
 	info->parent_offset = disk->d_parent_offset;
@@ -1037,7 +1247,8 @@ disk_open(
 	}
 
 	/* Holds a temporary lifetime reference across the driver call. */
-	if (disk_leaf(disk)->d_reload_owner != NULL) {
+	if (disk_leaf(disk)->d_reload_owner != NULL ||
+	    disk_admin_conflict_locked(disk, 0, disk->d_block_count, 0) != 0) {
 		disk_unlock(enabled);
 		return EBUSY;
 	}
@@ -2715,7 +2926,7 @@ disk_media_idle_locked(
 
 	/* Refuses a device that still has users or work in flight. */
 	if (parent->d_open_count || parent->d_opening || parent->d_closing ||
-	    parent->d_inflight || parent->d_cache_users || parent->d_reload_owner)
+	    parent->d_inflight || parent->d_cache_users || parent->d_reload_owner || parent->d_admin_owner)
 		return EBUSY;
 
 	/* Counts the references the caller is allowed to still hold. */
@@ -2726,7 +2937,7 @@ disk_media_idle_locked(
 		if (child->d_parent != parent || !(child->d_flags & DISK_PARTITION) ||
 		    child->d_open_count || child->d_opening || child->d_closing ||
 		    child->d_inflight || child->d_cache_users || child->d_buffer_refs ||
-		    child->d_reload_owner || refcount_load(&child->d_refs) != 1)
+		    child->d_reload_owner || child->d_admin_owner || refcount_load(&child->d_refs) != 1)
 			return EBUSY;
 		expected++;
 	}
@@ -2893,6 +3104,12 @@ bio_admit(
 	}
 
 	/* Only the reload owner may issue direct I/O to the reserved physical disk. */
+	if (disk_admin_conflict_locked(disk,
+	    bio->b_op == BIO_FLUSH ? 0 : bio->b_block,
+	    bio->b_op == BIO_FLUSH ? disk->d_block_count : bio->b_block_count, 1) != 0) {
+		disk_unlock(enabled);
+		return EBUSY;
+	}
 	if (leaf->d_reload_owner != NULL &&
 	    (disk != leaf || thread_current == NULL ||
 	     leaf->d_reload_owner != thread_current())) {
@@ -3103,6 +3320,10 @@ disk_cache_enter(
 	}
 
 	/* Excludes everyone but the thread that is reloading the partitions. */
+	if (disk_admin_conflict_locked(disk, 0, disk->d_block_count, 1) != 0) {
+		disk_unlock(enabled);
+		return EBUSY;
+	}
 	if (leaf->d_reload_owner != NULL &&
 	    (disk != leaf || thread_current == NULL ||
 	     leaf->d_reload_owner != thread_current())) {

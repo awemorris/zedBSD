@@ -37,6 +37,8 @@ static void
 swap_command_usage(const char *program)
 {
 	fprintf(stderr, "usage: %s [--] SOURCE...\n", program);
+	if (strcmp(program, "swapon") == 0)
+		fprintf(stderr, "       swapon -a\n");
 }
 
 static int

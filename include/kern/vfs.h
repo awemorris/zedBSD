@@ -16,6 +16,8 @@
 #include "kern/namei.h"
 
 extern struct cwdinfo kern_cwdinfo;
+struct root_image_info;
+int kern_vfs_root_image_info(struct root_image_info *result);
 
 int
 kern_vfs_init(

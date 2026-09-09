@@ -68,10 +68,13 @@ struct mapping_thread {
 #ifdef ZEDBSD_FILE_CACHE_HOST
 int ws025_writeback_eligible(struct file *, off_t, size_t);
 const struct filesystem_type drv_fat_filesystem_type = {
-	.fs_name = "fat", .writeback_range = ws025_writeback_eligible
+	.fs_name = "fat", .writeback_range = ws025_writeback_eligible,
+	.file_extents = drv_fat_file_extents
 };
 #else
-const struct filesystem_type drv_fat_filesystem_type = { .fs_name = "fat" };
+const struct filesystem_type drv_fat_filesystem_type = {
+	.fs_name = "fat", .file_extents = drv_fat_file_extents
+};
 #endif
 
 static unsigned checks;
@@ -426,7 +429,11 @@ drv_fat_file_backing_identity(
 	uint64_t *object)
 {
 	/* Require sleeping FAT identity resolution outside higher-ranked VM locks. */
+#ifdef ZEDBSD_RESERVATION_CURRENT_VM
+	CHECK(!vm_metadata_owned());
+#else
 	CHECK(metadata_depth == 0);
+#endif
 	CHECK(vm_mutex_depth == 0);
 
 	/* Use the fixture inode number as the FAT directory-entry offset. */
@@ -1461,7 +1468,11 @@ test_vmspace_entrypoints(void)
 	    fixture.foreign, 0, 4096, &region) == EBUSY);
 	CHECK(vmspace_map_file_shared_find(&vm, 0, 4096, HAL_SPACE_READ,
 	    fixture.foreign, 0, 4096, &mapped) == EBUSY);
+#ifdef ZEDBSD_RESERVATION_CURRENT_VM
+	CHECK(!vm_metadata_owned());
+#else
 	CHECK(metadata_depth == 0);
+#endif
 	CHECK(vm_mutex_depth == 0);
 	close_fixture(&fixture);
 }

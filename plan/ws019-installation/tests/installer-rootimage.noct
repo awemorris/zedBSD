@@ -1,0 +1,46 @@
+require rootimage;
+
+func check(ok, message) { if (!ok) { System.error(message); } }
+func record(text, unused) { return instRootImageRequire(instRootImageRecord(text)); }
+func admit(data, unused) { instRootImageAdmit(data.image, data.identity); }
+func changed(data, unused) { instRootImageSame(data.before, data.after); }
+
+func main(args) {
+    var text = "kern.boot.root_image: 1:15:9:2:42:1048576\n";
+    var image = record(text, 0);
+    var identity = {mode:33188, device:2, inode:42, size:1048576};
+    instRootImageAdmit(image, identity);
+    instRootImageSame(image, record(text, 0));
+    var count = 2;
+    for (bad in ["", "kern.boot.root_image: 1:15:9:2:42:1048576",
+        "kern.boot.root_image: 1:0:0:0:0:0\n", "kern.boot.root_image: 1:7:9:2:42:1048576\n",
+        "kern.boot.root_image: 1:11:9:2:42:1048576\n", "kern.boot.root_image: 1:15:0:2:42:1048576\n",
+        "kern.boot.root_image: 1:15:9:0:42:1048576\n", "kern.boot.root_image: 1:15:9:2:0:1048576\n",
+        "kern.boot.root_image: 1:15:9:2:42:0\n", "kern.boot.root_image: 2:15:9:2:42:1048576\n",
+        "kern.boot.root_image: 1:31:9:2:42:1048576\n", "kern.boot.root_image: 1:15:9:2:42:1048576:0\n",
+        "kern.boot.root_image: 1:15:9:2:-42:1048576\n", text + text]) {
+        var result = System.pcall(record, bad, 0);
+        check(!result.ok, "bad root-image record admitted");
+        count = count + 1;
+    }
+    for (field in ["mode", "device", "inode", "size"]) {
+        var other = {mode:33188, device:2, inode:42, size:1048576};
+        other[field] = 0;
+        var result = System.pcall(admit, {image:image, identity:other}, 0);
+        check(!result.ok, "different backing object admitted");
+        count = count + 1;
+    }
+    for (field in ["flags", "loop", "device", "inode", "bytes"]) {
+        var other = record(text, 0);
+        other[field] = other[field] + 1;
+        var result = System.pcall(changed, {before:image, after:other}, 0);
+        check(!result.ok, "changed root image admitted");
+        count = count + 1;
+    }
+    check(instSourceChoice(Term.KEY_RET) == 1, "enter");
+    check(instSourceChoice(Term.CTRL | 106) == 1, "console newline");
+    check(instSourceChoice(27) == -1, "escape");
+    check(instSourceChoice(-2) == -1, "EOF");
+    check(instSourceChoice(-1) == 0 && instSourceChoice(104) == 0, "HTTP cannot be selected");
+    print("installer root image PASS " + (count + 5) + " cases");
+}

@@ -125,6 +125,49 @@ swap_format_verify(
 	return 0;
 }
 
+/*
+ * Checks the canonical header and every byte in the unused swap slots.
+ */
+int
+swap_format_pristine(
+	int fd,
+	uint64_t bytes)
+{
+	uint8_t block[SWAP_PAGE_SIZE];
+	uint64_t offset;
+	size_t index;
+	ssize_t done;
+	int error;
+
+	/* Validates geometry and the complete deterministic header page first. */
+	error = swap_format_verify(fd, bytes);
+	if (error != 0)
+		return error;
+
+	/* Scans all slots without writing or acquiring activation authority. */
+	for (offset = SWAP_PAGE_SIZE; offset < bytes; offset += sizeof(block)) {
+		do {
+			done = pread(fd, block, sizeof(block), (off_t)offset);
+		} while (done < 0 && errno == EINTR);
+
+		/* Preserves the read error and rejects truncated slot contents. */
+		if (done < 0)
+			return errno;
+
+		/* Requires the full page guaranteed by validated swap geometry. */
+		if (done != (ssize_t)sizeof(block))
+			return EIO;
+
+		/* Rejects any data left by a previous activation or unrelated use. */
+		for (index = 0; index < sizeof(block); index++) {
+			if (block[index] != 0)
+				return EIO;
+		}
+	}
+
+	return 0;
+}
+
 /* Encodes one little-endian word without alignment assumptions. */
 static void
 put32(

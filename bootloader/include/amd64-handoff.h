@@ -4,6 +4,7 @@
 #define ZEDBSD_BOOTLOADER_AMD64_HANDOFF_H
 
 #include "boot-parameter-handoff.h"
+#include "../../include/boot/provenance.h"
 
 /* Values carried by the root-partition fields in the ZBL6 ABI. */
 #define ZBL6_PARTITION_SCHEME_MBR 1U
@@ -50,6 +51,8 @@
 #define ZBL6_HANDOFF_V5_UEFI_PARAMETERS_OFFSET ZBL6_HANDOFF_V4_SIZE
 
 /* V6 appends the same memory envelope after either unchanged V5 prefix. */
+#define ZBL6_HANDOFF_V7_VERSION 7
+#define ZBL6_HANDOFF_V7_UEFI_SIZE (ZBL6_HANDOFF_V6_UEFI_SIZE + ZEDBSD_BOOT_PROVENANCE_SIZE)
 #define ZBL6_HANDOFF_V6_VERSION 6
 #define ZBL6_MEMORY_HANDOFF_SIZE 64
 #define ZBL6_HANDOFF_V6_BIOS_MEMORY_OFFSET ZBL6_HANDOFF_V5_BIOS_SIZE
@@ -251,6 +254,17 @@ struct zbl6_handoff_v6_uefi {
 	struct zbl6_handoff_v5_uefi prefix;
 	struct zbl6_memory_handoff memory;
 } __attribute__((packed));
+
+/* V7 retains the V6 memory offsets and appends copied source identities. */
+struct zbl6_handoff_v7_uefi {
+	struct zbl6_handoff_v5_uefi prefix;
+	struct zbl6_memory_handoff memory;
+	struct boot_provenance provenance;
+} __attribute__((packed));
+_Static_assert(sizeof(struct zbl6_handoff_v7_uefi) == ZBL6_HANDOFF_V7_UEFI_SIZE,
+    "ZBL6 V7 UEFI size");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v7_uefi, provenance) ==
+    ZBL6_HANDOFF_V6_UEFI_SIZE, "ZBL6 V7 provenance offset");
 
 _Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, source) ==
 	       ZBL6_MEMORY_SOURCE_OFFSET, "ZBL6 memory source offset");

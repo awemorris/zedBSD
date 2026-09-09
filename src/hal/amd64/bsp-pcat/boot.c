@@ -111,14 +111,27 @@ bsp_boot_init(
 	hal_memset(&boot_info_v2, 0, sizeof(boot_info_v2));
 	hal_memset(&boot_framebuffer, 0, sizeof(boot_framebuffer));
 	hal_memset(boot_selector, 0, sizeof(boot_selector));
+	(void)kern_boot_provenance_set(NULL);
 	form = zbl6_handoff_classify_raw(raw_boot_info);
 
 	/* Rejects unsupported version, size, or flag combinations. */
 	if (form == ZBL6_HANDOFF_FORM_INVALID)
 		HAL_FATAL("unsupported amd64 ZBL6 handoff");
 
-	v6 = form == ZBL6_HANDOFF_FORM_V6_BIOS || form == ZBL6_HANDOFF_FORM_V6_UEFI;
+	v6 = form == ZBL6_HANDOFF_FORM_V6_BIOS ||
+	    form == ZBL6_HANDOFF_FORM_V6_UEFI || form == ZBL6_HANDOFF_FORM_V7_UEFI;
 	hal_memset(&boot_memory, 0, sizeof(boot_memory));
+	if (form == ZBL6_HANDOFF_FORM_V7_UEFI) {
+		struct boot_provenance provenance;
+
+		/* The raw packed tail may be unaligned; retain an aligned copy. */
+		hal_memcpy(&provenance,
+		    (const uint8_t *)raw + ZBL6_HANDOFF_V6_UEFI_SIZE,
+		    sizeof(provenance));
+		if (kern_boot_provenance_set(&provenance) != 0)
+			HAL_FATAL("invalid amd64 boot provenance");
+	}
+
 
 	/* Preserves BIOS and UEFI forms through their distinct contracts. */
 	if (form == ZBL6_HANDOFF_FORM_LEGACY_BIOS ||

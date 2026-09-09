@@ -1,0 +1,40 @@
+// Measure the frozen, immutable census without interpreting filenames as commands.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require treecopy;
+require nativeplan;
+
+func instNativeMeasureBatch(paths, measured) {
+    if (Array.size(paths) == 0) { return; }
+    var argv = ["/bin/stat", "-c", "%d:%i:%f:%s:%a:%u:%g", "--"];
+    for (path in paths) { Array.push(argv, path); }
+    var lines = instLines(instRequire(argv));
+    if (Array.size(lines) != Array.size(paths)) { System.error("incomplete source measurements"); }
+    for (line in lines) {
+        var record = instStatRecord(line + "\n");
+        var kind = record.mode & 61440;
+        // Count hard links independently: overestimation is safe and deterministic.
+        if (kind == 32768 || kind == 40960 || kind == 16384) {
+            measured.tree = instNativeAdd(measured.tree, record.size);
+        } else if (kind != 8192 && kind != 24576 && kind != 4096) {
+            System.error("unsupported object in installation source");
+        }
+        measured.objects = instNativeAdd(measured.objects, 1L);
+    }
+}
+
+func instNativeMeasure(prepared, inputs, swapBytes) {
+    var measured = {loader:inputs[0].bytes, kernel:inputs[1].bytes,
+        tree:0L, objects:0L, swap:swapBytes};
+    var batch = [];
+    for (map in [prepared.census.files, prepared.census.directories]) {
+        for (path, present in map) {
+            Array.push(batch, path);
+            if (Array.size(batch) == 32) {
+                instNativeMeasureBatch(batch, measured);
+                batch = [];
+            }
+        }
+    }
+    instNativeMeasureBatch(batch, measured);
+    return measured;
+}

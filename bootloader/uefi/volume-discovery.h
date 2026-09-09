@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "../../include/boot/provenance.h"
 
 #define ZBL_UEFI_VOLUME_MAX_HANDLES 128U
 #define ZBL_UEFI_DEVICE_PATH_MAX_BYTES 4096U
@@ -47,6 +48,9 @@ struct zbl_uefi_partition_path {
 enum zbl_uefi_device_path_result zbl_uefi_partition_path_parse(
 	const void *path, size_t available_bytes,
 	struct zbl_uefi_partition_path *view);
+
+int zbl_uefi_partition_identity_copy(const struct zbl_uefi_partition_path *path,
+    struct boot_partition_identity *identity);
 
 int zbl_uefi_partition_paths_same_disk(
 	const struct zbl_uefi_partition_path *left,

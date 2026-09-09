@@ -18,7 +18,6 @@
 #include <zedbsd/auxv.h>
 #include <zedbsd/dirent.h>
 #include <zedbsd/fcntl.h>
-#include <zedbsd/console.h>
 #include <zedbsd/syscall.h>
 #include <sys/sysctl.h>
 #include <zedbsd/process.h>
@@ -53,6 +52,7 @@
 #include <sys/uio.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -138,6 +138,8 @@ static intptr_t call(uint32_t number, uintptr_t a0, uintptr_t a1, uintptr_t a2, 
 static void cancel_point(void);
 static ssize_t positional_vector_io(int fd, const struct iovec *iov, int count, off_t offset, int writing);
 static int ioctl_has_argument(unsigned long request);
+static int ttyname_match(const char *path, const struct stat *wanted, char *buffer, size_t size);
+static int ttyname_scan(const char *directory, const struct stat *wanted, char *buffer, size_t size);
 static long path_limit(int name);
 static int aio_submit(struct aiocb *control, int writing, int notify);
 static void aio_notify(const struct sigevent *event);
@@ -2012,6 +2014,19 @@ renameat(
 
 	/* Returns the computed result. */
 	return function_result;
+}
+
+/* Renames with an explicit atomic destination policy. */
+int
+renameat2(
+	int olddirfd,
+	const char *oldpath,
+	int newdirfd,
+	const char *newpath,
+	unsigned flags)
+{
+	return (int)call(ZEDBSD_SYS_renameat2, olddirfd, (uintptr_t)oldpath,
+	    newdirfd, (uintptr_t)newpath, flags, 0);
 }
 
 /*
@@ -4369,8 +4384,10 @@ int
 isatty(
 	int fd)
 {
-	/* Handles a failed ioctl operation. */
-	if (ioctl(fd, ZEDBSD_CONSOLE_ISATTY) == 0)
+	struct termios attributes;
+
+	/* Console, virtual terminals and PTYs share the termios contract. */
+	if (tcgetattr(fd, &attributes) == 0)
 		return 1;
 
 	/* Handles the reported system error. */
@@ -4504,14 +4521,15 @@ char *
 ttyname(
 	int fd)
 {
-	char *function_result;
-	static char name[] = "/dev/console";
+	static char name[PATH_MAX];
+	int error;
 
-	/* Computes the function result. */
-	function_result = isatty(fd) ? name : NULL;
-
-	/* Returns the computed result. */
-	return function_result;
+	error = ttyname_r(fd, name, sizeof(name));
+	if (error != 0) {
+		errno = error;
+		return NULL;
+	}
+	return name;
 }
 
 /*
@@ -4523,7 +4541,9 @@ ttyname_r(
 	char *buffer,
 	size_t size)
 {
-	static const char name[] = "/dev/console";
+	struct stat wanted;
+	int first_error;
+	int error;
 
 	/* Handles the buffer availability. */
 	if (buffer == NULL)
@@ -4532,14 +4552,91 @@ ttyname_r(
 	/* Handles a failed isatty operation. */
 	if (!isatty(fd))
 		return errno;
+	if (fstat(fd, &wanted) != 0)
+		return errno;
+	if (!S_ISCHR(wanted.st_mode))
+		return ENOTTY;
 
-	/* Checks the current data size. */
-	if (size < sizeof(name))
+	/* Prefer the ordinary console name when it identifies this exact inode. */
+	error = ttyname_match("/dev/console", &wanted, buffer, size);
+	if (error != ENOENT)
+		return error;
+	first_error = ttyname_scan("/dev", &wanted, buffer, size);
+	if (first_error == 0 || first_error == ERANGE)
+		return first_error;
+
+	/* PTY names are dynamic: discover them without depending on rdev encoding. */
+	error = ttyname_scan("/dev/pts", &wanted, buffer, size);
+	if (error == 0 || error == ERANGE)
+		return error;
+	if (first_error != ENODEV && first_error != ENOENT)
+		return first_error;
+	return error == ENOENT ? ENODEV : error;
+}
+
+/* Copies a name only when its character-device identity matches the open fd. */
+static int
+ttyname_match(
+	const char *path,
+	const struct stat *wanted,
+	char *buffer,
+	size_t size)
+{
+	struct stat found;
+	size_t length;
+
+	if (stat(path, &found) != 0)
+		return ENOENT;
+	if (!S_ISCHR(found.st_mode) || found.st_dev != wanted->st_dev ||
+	    found.st_ino != wanted->st_ino || found.st_rdev != wanted->st_rdev)
+		return ENOENT;
+	length = strlen(path) + 1;
+	if (length > size)
 		return ERANGE;
-	memcpy(buffer, name, sizeof(name));
-
-	/* Reports successful completion. */
+	memcpy(buffer, path, length);
 	return 0;
+}
+
+/* Searches one device directory, preserving errors and closing its descriptor. */
+static int
+ttyname_scan(
+	const char *directory,
+	const struct stat *wanted,
+	char *buffer,
+	size_t size)
+{
+	DIR *stream;
+	struct dirent *entry;
+	char path[PATH_MAX];
+	int length;
+	int error;
+
+	stream = opendir(directory);
+	if (stream == NULL)
+		return errno;
+	error = ENODEV;
+	for (;;) {
+		errno = 0;
+		entry = readdir(stream);
+		if (entry == NULL) {
+			if (errno != 0)
+				error = errno;
+			break;
+		}
+		if (entry->d_name[0] == '.')
+			continue;
+		length = snprintf(path, sizeof(path), "%s/%s", directory,
+		    entry->d_name);
+		if (length < 0 || (size_t)length >= sizeof(path))
+			continue;
+		error = ttyname_match(path, wanted, buffer, size);
+		if (error != ENOENT)
+			break;
+		error = ENODEV;
+	}
+	if (closedir(stream) != 0 && error == 0)
+		error = errno;
+	return error;
 }
 
 /*

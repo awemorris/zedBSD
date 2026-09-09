@@ -1,0 +1,90 @@
+// Pure, checked native layout shared by installer frontends.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require identity;
+
+func instNativeAdd(a, b) {
+    if (a < 0 || b < 0 || b > 9223372036854775807L - a) {
+        System.error("native layout size overflow");
+    }
+    return a + b;
+}
+func instNativeMul(a, b) {
+    if (a < 0 || b < 0 || (b != 0 && a > 9223372036854775807L / b)) {
+        System.error("native layout size overflow");
+    }
+    return a * b;
+}
+func instNativeRound(value, unit) {
+    var remainder = value % unit;
+    if (remainder == 0) { return value; }
+    return instNativeAdd(value, unit - remainder);
+}
+func instNativeSize(value) { return instNumber("" + value, 10); }
+
+func instNativePlan(target, source, measured, identifiers) {
+    // Reuse the machine-inventory contract instead of trusting typed callers.
+    var disk = instDeviceRecord(["device", instDeviceName(target.name),
+        "" + target.id, "" + target.parent, "" + target.flags,
+        "" + target.sectorSize, "" + target.sectors, "" + target.offset]);
+    if (disk.parent != 0 || disk.offset != 0 || (disk.flags & 9) != 0 ||
+        disk.id > 4294967295L || disk.sectorSize != 512) {
+        System.error("native installation requires a writable whole 512-byte-sector disk");
+    }
+    if (disk.id == source.id || disk.name == source.name || disk.id == source.parent) {
+        System.error("native destination overlaps installation source");
+    }
+    if (Array.size(identifiers) != 3) { System.error("native layout needs three GUIDs"); }
+    var guids = [];
+    for (identifier in identifiers) {
+        var guid = instGuid(identifier);
+        for (previous in guids) {
+            if (guid == previous) { System.error("native layout GUIDs must be distinct"); }
+        }
+        Array.push(guids, guid);
+    }
+    var loader = instNativeSize(measured.loader);
+    var kernel = instNativeSize(measured.kernel);
+    var tree = instNativeSize(measured.tree);
+    var objects = instNativeSize(measured.objects);
+    var swap = instNativeSize(measured.swap);
+    if (loader == 0 || kernel == 0 || tree == 0 || objects == 0 ||
+        swap < 8192 || swap % 4096 != 0) {
+        System.error("incomplete native installation size measurements");
+    }
+    var mib = 1048576L;
+    var bootBytes = instNativeAdd(loader, kernel);
+    // Two worst-case FAT tables use less than 1/32 of the payload size.
+    var fatAllowance = bootBytes / 32L;
+    if (bootBytes % 32L != 0) { fatAllowance = fatAllowance + 1; }
+    var espBytes = instNativeRound(instNativeAdd(instNativeAdd(bootBytes, fatAllowance), 16L * mib), mib);
+    if (espBytes < 64L * mib) { espBytes = 64L * mib; }
+    if (espBytes / 512L > 4294967295L) { System.error("ESP exceeds FAT32 sector limit"); }
+    var required = instNativeAdd(tree, instNativeMul(objects, 8192L));
+    required = instNativeAdd(instNativeAdd(required, swap), 64L * mib);
+    // 128 GPT entries of 128 bytes occupy 32 sectors, plus the backup header.
+    var first = 2048L;
+    var rootFirst = instNativeAdd(first, espBytes / 512L);
+    if (disk.sectors <= 33 || rootFirst >= disk.sectors - 33) {
+        System.error("disk too small for native partitions");
+    }
+    var rootCount = disk.sectors - 33 - rootFirst;
+    rootCount = rootCount - rootCount % 2048L;
+    var rootBytes = instNativeMul(rootCount, 512L);
+    if (rootBytes < required) { System.error("disk too small for native root and swap"); }
+    var esp = {start:first, count:espBytes / 512L, bytes:espBytes,
+        type:"c12a7328-f81f-11d2-ba4b-00a0c93ec93b", guid:guids[1], name:"EFI System"};
+    var root = {start:rootFirst, count:rootCount, bytes:rootBytes,
+        type:"516e7cb6-6ecf-11d6-8ff8-00022d09712b", guid:guids[2], name:"zedBSD root"};
+    var argv = ["/sbin/diskpart", "init", disk.name, guids[0]];
+    for (part in [esp, root]) {
+        for (argument in ["" + part.start, "" + part.count, part.type, part.guid, part.name]) {
+            Array.push(argv, argument);
+        }
+    }
+    // Native file swap activates after mounting root; it is not a FAT boot slot.
+    var configuration = "kernel=vmunix\nboot0=PARTUUID=" + esp.guid +
+        "\nrootpart=PARTUUID=" + root.guid + "\n";
+    return {disk:disk, guid:guids[0], esp:esp, root:root, requiredRoot:required,
+        swapBytes:swap, swapPath:"/swapfile", argv:argv, configuration:configuration,
+        requiresFormatAdmission:true};
+}

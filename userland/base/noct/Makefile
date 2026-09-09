@@ -12,7 +12,8 @@ ZEDBSD_NOCT_DISTDIR := $(ZEDBSD_NOCT_PACKAGE_ROOT)/distfiles
 ZEDBSD_NOCT_DISTFILE := $(ZEDBSD_NOCT_DISTDIR)/$(ZEDBSD_NOCT_ARCHIVE_NAME)
 ZEDBSD_NOCT_PATCHES := \
 	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0001-connect-zedbsd-target-adapter.patch \
-	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0002-use-project-llvm-sysroot.patch
+	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0002-use-project-llvm-sysroot.patch \
+	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0003-terminal-partial-input-progress.patch
 ZEDBSD_NOCT_FETCH ?= curl --fail --location --silent --show-error
 ZEDBSD_NOCT_SHA256 ?= sha256sum
 
@@ -36,7 +37,7 @@ $(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,noct,amd64,n,package,,y,base,base/noc
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter noct,$(ZEDBSD_USER_PROGRAMS)),\
 	$(BUILD)/bin/noct $(NOCT_PACKAGE_HOLORIS))
 ZEDBSD_PACKAGE_FILES += $(if $(filter noct,$(ZEDBSD_USER_PROGRAMS)),\
-	--file $(ZEDBSD_PACKAGE_BINDIR)/noct=$(BUILD)/bin/noct \
+	--file /bin/noct=$(BUILD)/bin/noct \
 	--file $(ZEDBSD_PACKAGE_BINDIR)/holoris.nct=$(NOCT_PACKAGE_HOLORIS))
 
 define ZEDBSD_NOCT_VERIFY_ARCHIVE_COMMANDS

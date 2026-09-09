@@ -4,7 +4,7 @@ Last updated: 2026-09-02
 
 Phase ID: `ws022-p001`
 
-Status: planned; not queued
+Status: completed (q127)
 
 Parent: [WS022](../ws.md)
 
@@ -30,3 +30,7 @@ changing loader behavior.
    work as a separate Phase before implementation rather than guessing.
 5. Complete when the layout and ownership contract is written here, fixtures
    are repeatable, and no public ABI question remains for p002.
+
+## q127結果
+
+[確定契約](contract.md)にTCB ABI改訂、両x86 HAL、template所有権、dynamic境界を記録。project clang/ld.lldの正常2・不正18 ELF fixture生成とFS/GSコード確認PASS。実loader/runtime受け入れはp002/p003で実施する。

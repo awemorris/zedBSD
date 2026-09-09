@@ -84,6 +84,10 @@ show_all(
 	void)
 {
 	static const char *const names[] = {
+	    "kern.boot.firmware_partition",
+	    "kern.boot.config_partition",
+	    "kern.boot.config_matches",
+	    "kern.boot.root_image",
 	    "vfs.bufcache.max_bytes",
 	    "vfs.bufcache.current_bytes",
 	    "vfs.bufcache.dirty_bytes",
@@ -128,8 +132,47 @@ show_name(
 	struct memory_stats memory;
 	unsigned event;
 	uint64_t value;
+	struct root_image_info root_image;
+	size_t root_image_size;
 
-	/* Formats speculative observations separately from ordinary demand I/O. */
+	/* A single bounded record describes one live root/lower/loop observation. */
+	if (strcmp(name, "kern.boot.root_image") == 0) {
+		root_image_size = sizeof(root_image);
+		if (sysctlbyname(name, &root_image, &root_image_size, NULL, 0) != 0)
+			return -1;
+		if (root_image_size != sizeof(root_image) || root_image.version != ROOT_IMAGE_VERSION) {
+			errno = EIO;
+			return -1;
+		}
+		printf("%s: %u:%u:%llu:%llu:%llu:%llu\n", name,
+		    root_image.version, root_image.flags,
+		    (unsigned long long)root_image.loop_device,
+		    (unsigned long long)root_image.backing_device,
+		    (unsigned long long)root_image.backing_inode,
+		    (unsigned long long)root_image.backing_bytes);
+		return 0;
+	}
+
+	/* Boot selectors are strings; the match count retains numeric
+	 * rendering. */
+	if (strcmp(name, "kern.boot.firmware_partition") == 0 ||
+	    strcmp(name, "kern.boot.config_partition") == 0) {
+		char selector[64];
+		size_t size = sizeof(selector);
+
+		if (sysctlbyname(name, selector, &size, NULL, 0) != 0)
+			return -1;
+		if (size == 0 || size > sizeof(selector) ||
+		    selector[size - 1] != '\0') {
+			errno = EIO;
+			return -1;
+		}
+		printf("%s: %s\n", name, selector);
+		return 0;
+	}
+
+	/* Formats speculative observations separately from ordinary demand I/O.
+	 */
 	if (strcmp(name, "vfs.readahead.stats") == 0)
 		return show_readahead();
 

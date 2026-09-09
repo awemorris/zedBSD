@@ -1,0 +1,105 @@
+// Read-only installer selection using retained boot provenance and disk metadata.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require metadata;
+
+func instBootValue(text, name) {
+    var lines = instLines(text);
+    var prefix = name + ": ";
+    if (Array.size(lines) != 1 || String.substring(lines[0], 0, String.charCount(prefix)) != prefix) {
+        System.error("invalid boot provenance output");
+    }
+    return String.substring(lines[0], String.charCount(prefix), -1);
+}
+func instDiscoveryObserve(context) {
+    var firmware = "kern.boot.firmware_partition";
+    var configuration = "kern.boot.config_partition";
+    var matches = "kern.boot.config_matches";
+    var provenance = {
+        firmware:instBootValue(instRequire(["/sbin/sysctl", firmware]), firmware),
+        configuration:instBootValue(instRequire(["/sbin/sysctl", configuration]), configuration),
+        matches:instNumber(instBootValue(instRequire(["/sbin/sysctl", matches]), matches), 10)
+    };
+    var devices = instInventory(instRequire(["/sbin/diskpart", "--machine", "list"]));
+    var identities = {};
+    for (i in 0..Array.size(devices)) {
+        var device = devices[i];
+        if (device.parent == 0) { continue; }
+        identities[device.name] = instIdentity(instRequire(["/sbin/blkid", "-o", "export",
+            "-s", "PARTUUID", "--", "/dev/" + device.name]));
+    }
+    return {provenance:provenance, devices:devices, identities:identities};
+}
+func instDiscoveryMetadata(context, name, source) {
+    if (source) { return instMetadataCaptureSource(instMetadataOps(), context, name); }
+    return instMetadataCapture(instMetadataOps(), context, name);
+}
+func instDiscoveryOps() { return {observe:instDiscoveryObserve, metadata:instDiscoveryMetadata}; }
+func instDiscoverReloaded(diskName, payloadName) {
+    diskName = instDeviceName(diskName);
+    payloadName = instDeviceName(payloadName);
+    var before = instDiscoveryObserve(0);
+    var source = instDiscoveryOrigins(before);
+    var disk = instFindDevice(before.devices, diskName);
+    if (disk.parent != 0 || disk.id == source.disk.id || (disk.flags & 1) != 0) {
+        System.error("cannot reload the requested installation destination");
+    }
+    // Reload rejects existing consumers, including claims outside the visible mounts.
+    instRequire(["/sbin/diskpart", "reload", diskName]);
+    var discovered = instDiscover(instDiscoveryOps(), 0, diskName, payloadName);
+    if (!instSameDevice(disk, discovered.target.disk) ||
+        !instSameDevice(source.disk, discovered.origins.disk) ||
+        before.provenance.firmware != discovered.provenance.firmware ||
+        before.provenance.configuration != discovered.provenance.configuration) {
+        System.error("disk or boot provenance changed across reload");
+    }
+    return discovered;
+}
+func instDiscoveryOrigins(observed) {
+    if (observed.provenance.matches != 1) { System.error("requires exactly one boot configuration"); }
+    var firmware = instResolveOrigin(observed.devices, observed.identities, observed.provenance.firmware);
+    var configuration = instResolveOrigin(observed.devices, observed.identities, observed.provenance.configuration);
+    if (firmware.parent != configuration.parent) { System.error("boot sources differ in parent disk"); }
+    var parent = 0;
+    for (i in 0..Array.size(observed.devices)) {
+        if (observed.devices[i].id == firmware.parent) { parent = observed.devices[i]; }
+    }
+    if (parent == 0 || parent.parent != 0) { System.error("boot source parent is unavailable"); }
+    return {firmware:firmware, configuration:configuration, disk:parent};
+}
+func instDiscoveryContains(snapshot, device, guid) {
+    for (i in 0..Array.size(snapshot.children)) {
+        var child = snapshot.children[i];
+        if (instSameDevice(child, device) && Dict.hasKey(snapshot.identities, child.name) &&
+            snapshot.identities[child.name].PARTUUID == guid) { return true; }
+    }
+    System.error("source origin changed during metadata capture");
+}
+func instDiscover(ops, context, diskName, payloadName) {
+    diskName = instDeviceName(diskName);
+    payloadName = instDeviceName(payloadName);
+    var first = ops.observe(context);
+    var origins = instDiscoveryOrigins(first);
+    var disk = instFindDevice(first.devices, diskName);
+    if (disk.parent != 0 || disk.id == origins.disk.id) { System.error("destination overlaps source disk"); }
+    var source = ops.metadata(context, origins.disk.name, true);
+    if (!instSameDevice(source.disk, origins.disk)) { System.error("source parent changed"); }
+    instDiscoveryContains(source, origins.firmware, instGuid(String.substring(first.provenance.firmware, 9, -1)));
+    instDiscoveryContains(source, origins.configuration, instGuid(String.substring(first.provenance.configuration, 9, -1)));
+    var target = ops.metadata(context, diskName, false);
+    if (!instSameDevice(target.disk, disk)) { System.error("destination changed"); }
+    var selected = instChoose(first.devices, first.identities, target.table, target.fat32,
+        origins.firmware, origins.configuration, payloadName);
+    // Repeat global origin resolution to detect new aliases as well as replacement.
+    var last = ops.observe(context);
+    var after = instDiscoveryOrigins(last);
+    if (!instSameDevice(origins.disk, after.disk) || !instSameDevice(origins.firmware, after.firmware) ||
+        !instSameDevice(origins.configuration, after.configuration) ||
+        first.provenance.firmware != last.provenance.firmware ||
+        first.provenance.configuration != last.provenance.configuration) { System.error("boot provenance changed"); }
+    var latest = instChoose(last.devices, last.identities, target.table, target.fat32,
+        after.firmware, after.configuration, payloadName);
+    if (!instSameDevice(selected.esp.device, latest.esp.device) ||
+        !instSameDevice(selected.payload.device, latest.payload.device) ||
+        !instSameDevice(disk, instFindDevice(last.devices, diskName))) { System.error("target selection changed"); }
+    return {source:source, target:target, origins:origins, selected:selected, provenance:first.provenance};
+}

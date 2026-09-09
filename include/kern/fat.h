@@ -23,7 +23,7 @@ extern const struct filesystem_type drv_fat_filesystem_type;
 
 int drv_fat_probe_type(struct disk *disk, enum bootfat_type *type);
 
-typedef int (*fat_extent_cb)(uint64_t, uint64_t, uint32_t, void *);
+typedef file_extent_cb fat_extent_cb;
 
 int drv_fat_file_extents(struct file *file, fat_extent_cb callback, void *context);
 

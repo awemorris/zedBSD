@@ -1,0 +1,93 @@
+// Inspect destination contents and capacity without creating managed paths.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require preflight;
+
+func instDestinationLookup(ops, context, root, names) {
+    var path = root;
+    var identity = 0;
+    for (i in 0..Array.size(names)) {
+        path = path + "/" + names[i];
+        identity = ops.stat(context, path);
+        if (identity == 0) { return 0; }
+        if (i + 1 < Array.size(names) && (identity.mode & 61440) != 16384) {
+            System.error("destination ancestor is not a directory: " + path);
+        }
+    }
+    return identity;
+}
+func instDestinationContents(ops, context, esp, payload, entries) {
+    var present = [];
+    var paths = [["EFI", "BOOT", "BOOTX64.EFI"], ["vmunix"], ["rootfs.img"],
+        ["data.img"], ["swapfile"], ["zedbsd.cfg"]];
+    if (Array.size(entries) != 6) { System.error("incomplete destination manifest"); }
+    for (i in 0..6) {
+        var root = payload;
+        if (i == 0) { root = esp; }
+        var identity = instDestinationLookup(ops, context, root, paths[i]);
+        if (identity != 0) { ops.verify(context, entries[i], entries[i].final, identity); }
+        Array.push(present, identity != 0);
+    }
+    var directories = [];
+    for (names in [["EFI"], ["EFI", "BOOT"]]) {
+        var identity = instDestinationLookup(ops, context, esp, names);
+        var path = esp;
+        for (name in names) { path = path + "/" + name; }
+        if (identity == 0) { Array.push(directories, {path:path, mount:esp}); }
+        else if ((identity.mode & 61440) != 16384) { System.error("destination directory conflict: " + path); }
+    }
+    // A previous/foreign stage directory is not owned by this invocation.
+    for (root in [esp, payload]) {
+        if (ops.stat(context, root + "/zedinst-stage") != 0) {
+            System.error("existing stage directory requires recovery: " + root);
+        }
+        var needsStage = false;
+        for (i in 0..6) {
+            if (entries[i].mount == root && !present[i]) { needsStage = true; }
+        }
+        if (needsStage) { Array.push(directories, {path:root + "/zedinst-stage", mount:root}); }
+    }
+    return {present:present, directories:directories};
+}
+func instDestinationMounts(workspace, discovered) {
+    var mounts = {};
+    var selected = discovered.selected;
+    for (child in discovered.target.children) {
+        var identity = discovered.target.identities[child.name];
+        if (!Dict.hasKey(identity, "TYPE") || identity.TYPE != "vfat") { continue; }
+        var directory = instWorkspaceDirectory(workspace, "target-" + child.name);
+        var readonly = child.id != selected.esp.device.id && child.id != selected.payload.device.id;
+        mounts[child.name] = instWorkspaceAttach(workspace, directory, child.name, readonly);
+    }
+    if (!Dict.hasKey(mounts, selected.esp.device.name) || !Dict.hasKey(mounts, selected.payload.device.name)) {
+        System.error("destination FAT mounts unavailable");
+    }
+    return mounts;
+}
+func instDestinationCandidates(workspace, mounts, payload) {
+    for (name, mount in mounts) {
+        instWorkspaceCheck(workspace, mount);
+        if (name != payload && instFileLookup(0, mount.path + "/zedbsd.cfg") != 0) {
+            System.error("competing destination configuration: " + name);
+        }
+    }
+}
+func instDestinationPrepare(workspace, discovered, source) {
+    var mounts = instDestinationMounts(workspace, discovered);
+    var selected = discovered.selected;
+    instDestinationCandidates(workspace, mounts, selected.payload.device.name);
+    var esp = mounts[selected.esp.device.name].path;
+    var payload = mounts[selected.payload.device.name].path;
+    var entries = instAdmissionManifest(esp, payload, selected.payload.partition.guid, source.inputs);
+    var contents = instDestinationContents(instFileOperations(), 0, esp, payload, entries);
+    var capacity = [];
+    for (device in [selected.esp.device, selected.payload.device]) {
+        var mount = mounts[device.name].path;
+        var bpb = discovered.target.bpbs[device.name];
+        var cluster = instU16(bpb, 11) * bpb[13];
+        var count = 0;
+        for (directory in contents.directories) { if (directory.mount == mount) { count = count + 1; } }
+        Array.push(capacity, instFileAdmitCapacity(entries, contents.present, mount, cluster, count));
+    }
+    return {mounts:mounts, esp:esp, payload:payload, entries:entries,
+        present:contents.present, directories:contents.directories, capacity:capacity};
+}

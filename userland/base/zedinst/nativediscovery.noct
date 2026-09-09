@@ -1,0 +1,99 @@
+// Admit blank native destinations while retaining the existing source checks.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require discovery;
+require nativeplan;
+
+func instNativeCandidates(observed) {
+    var source = instDiscoveryOrigins(observed);
+    var candidates = [];
+    for (disk in observed.devices) {
+        if (disk.parent == 0 && disk.offset == 0 && (disk.flags & 9) == 0 &&
+            disk.id != source.disk.id && disk.sectorSize == 512 && disk.sectors > 67) {
+            Array.push(candidates, disk);
+        }
+    }
+    return candidates;
+}
+
+func instNativeTargetBytes(disk) {
+    var path = "/dev/" + disk.name;
+    var head = instSourceRead(path, 0L, 34 * disk.sectorSize);
+    var tail = instSourceRead(path, (disk.sectors - 33L) * disk.sectorSize, 33 * disk.sectorSize);
+    if (Packed.size(head) != 34 * disk.sectorSize || Packed.size(tail) != 33 * disk.sectorSize) {
+        System.error("incomplete native destination observation");
+    }
+    return {head:head, tail:tail};
+}
+
+func instNativeDiscover(diskName) {
+    var first = instDiscoveryObserve(0);
+    var origins = instDiscoveryOrigins(first);
+    var disk = instFindDevice(instNativeCandidates(first), diskName);
+    var source = instDiscoveryMetadata(0, origins.disk.name, true);
+    if (!instSameDevice(source.disk, origins.disk)) { System.error("source parent changed"); }
+    instDiscoveryContains(source, origins.firmware, instGuid(String.substring(first.provenance.firmware, 9, -1)));
+    instDiscoveryContains(source, origins.configuration, instGuid(String.substring(first.provenance.configuration, 9, -1)));
+    var baseline = instNativeTargetBytes(disk);
+    var discovered = {source:source, origins:origins, provenance:first.provenance,
+        disk:disk, baseline:baseline, before:first};
+    instNativeBeforeErase(discovered);
+    return discovered;
+}
+
+func instNativeObserveSame(discovered) {
+    var observed = instDiscoveryObserve(0);
+    var origins = instDiscoveryOrigins(observed);
+    if (!instSameDevice(origins.disk, discovered.origins.disk) ||
+        !instSameDevice(origins.firmware, discovered.origins.firmware) ||
+        !instSameDevice(origins.configuration, discovered.origins.configuration) ||
+        !instSameDevice(instFindDevice(observed.devices, discovered.disk.name), discovered.disk) ||
+        observed.provenance.firmware != discovered.provenance.firmware ||
+        observed.provenance.configuration != discovered.provenance.configuration) {
+        System.error("native installation device or source changed");
+    }
+    return observed;
+}
+
+func instNativeBeforeErase(discovered) {
+    var observed = instNativeObserveSame(discovered);
+    var before = discovered.before;
+    var previousCount = 0;
+    var currentCount = 0;
+    for (child in before.devices) {
+        if (child.parent != discovered.disk.id) { continue; }
+        previousCount = previousCount + 1;
+        if (!instSameDevice(child, instFindDevice(observed.devices, child.name))) {
+            System.error("native target partition changed before confirmation");
+        }
+    }
+    for (child in observed.devices) {
+        if (child.parent == discovered.disk.id) { currentCount = currentCount + 1; }
+    }
+    if (previousCount != currentCount) { System.error("native target children changed"); }
+    var current = instNativeTargetBytes(discovered.disk);
+    if (!instMetadataBytesEqual(current.head, discovered.baseline.head) ||
+        !instMetadataBytesEqual(current.tail, discovered.baseline.tail)) {
+        System.error("native target metadata changed before confirmation");
+    }
+}
+
+func instNativeReconcile(discovered, plan) {
+    var observed = instNativeObserveSame(discovered);
+    var table = instTable(instRequire(["/sbin/diskpart", "--machine", "show", plan.disk.name]), plan.disk);
+    if (Array.size(table.parts) != 2) { System.error("native GPT has an unexpected partition count"); }
+    var devices = [];
+    for (i in 0..2) {
+        var expected = plan.esp;
+        if (i == 1) { expected = plan.root; }
+        var part = table.parts[i];
+        if (part.slot != i + 1 || part.start != expected.start || part.count != expected.count ||
+            part.guid != expected.guid || part.type != expected.type || part.attributes != 0) {
+            System.error("native GPT differs from the approved layout");
+        }
+        Array.push(devices, instPartitionDevice(observed.devices, observed.identities, plan.disk, part));
+    }
+    var count = 0;
+    for (child in observed.devices) { if (child.parent == plan.disk.id) { count = count + 1; } }
+    if (count != 2) { System.error("native target has unaccounted children"); }
+    return devices;
+}

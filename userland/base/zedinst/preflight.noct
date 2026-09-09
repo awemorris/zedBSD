@@ -1,0 +1,79 @@
+// Connect retained boot provenance to owned source mounts and immutable inputs.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require discovery;
+require workspace;
+require rootimage;
+require rootview;
+
+func instReadConfiguration(path) {
+    var identity = instFileIdentity(path);
+    if ((identity.mode & 61440) != 32768 || identity.size == 0 || identity.size > 4096) {
+        System.error("configuration is not a bounded regular file: " + path);
+    }
+    var bytes = instSourceRead(path, 0, identity.size);
+    var after = instFileOwned(path, identity);
+    if (Packed.size(bytes) != identity.size || after.size != identity.size) {
+        System.error("configuration changed during inspection");
+    }
+    return {path:path, identity:identity, text:Packed.toString(bytes, 0, Packed.size(bytes))};
+}
+func instSourceMounts(workspace, discovered) {
+    var rootImage = instRootImageObserve();
+    var mounts = {};
+    var candidates = [];
+    var source = discovered.source;
+    // Inspect every recognized FAT source partition, not just the boot-time winner.
+    for (child in source.children) {
+        var identity = source.identities[child.name];
+        if (!Dict.hasKey(identity, "TYPE") || identity.TYPE != "vfat") { continue; }
+        var directory = instWorkspaceDirectory(workspace, "source-" + child.name);
+        var mount = instWorkspaceAttach(workspace, directory, child.name, true);
+        mounts[child.name] = mount;
+        var path = mount.path + "/zedbsd.cfg";
+        if (instFileLookup(0, path) != 0) { Array.push(candidates, {device:child, path:path}); }
+    }
+    var firmware = discovered.origins.firmware;
+    var configuration = discovered.origins.configuration;
+    if (!Dict.hasKey(mounts, firmware.name) || !Dict.hasKey(mounts, configuration.name)) {
+        System.error("boot origins are not available FAT sources");
+    }
+    if (Array.size(candidates) != 1 || !instSameDevice(candidates[0].device, configuration)) {
+        System.error("source configuration is missing, ambiguous or relocated");
+    }
+    var config = instReadConfiguration(candidates[0].path);
+    var identity = source.identities[configuration.name];
+    instSourceConfiguration(config.text, identity.PARTUUID, identity.UUID);
+    var firmwarePath = mounts[firmware.name].path;
+    var payloadPath = mounts[configuration.name].path;
+    var inputs = [instCaptureSource("loader", firmwarePath + "/EFI/BOOT/BOOTX64.EFI"),
+        instCaptureSource("kernel", payloadPath + "/vmunix"),
+        instCaptureSource("rootfs", payloadPath + "/rootfs.img")];
+    instRootImageAdmit(rootImage, inputs[2].identity);
+    instRootImageSame(rootImage, instRootImageObserve());
+    var tree = instRootViewAcquire(workspace, rootImage, instRootViewObserve, 0);
+    return {mounts:mounts, configuration:config, inputs:inputs, rootImage:rootImage, tree:tree};
+}
+func instSourceRecheck(workspace, discovered, prepared) {
+    instRootViewCheck(workspace, prepared.tree);
+    instRootImageSame(prepared.rootImage, instRootImageObserve());
+    instMetadataRevalidate(instMetadataOps(), 0, discovered.source);
+    var candidates = 0;
+    for (name, mount in prepared.mounts) {
+        instWorkspaceCheck(workspace, mount);
+        var path = mount.path + "/zedbsd.cfg";
+        if (instFileLookup(0, path) == 0) { continue; }
+        candidates = candidates + 1;
+        if (path != prepared.configuration.path) { System.error("new source configuration candidate"); }
+    }
+    if (candidates != 1) { System.error("source configuration is no longer unique"); }
+    var current = instReadConfiguration(prepared.configuration.path);
+    if (!instSameFileObject(current.identity, prepared.configuration.identity) ||
+        current.text != prepared.configuration.text) { System.error("source configuration changed"); }
+    for (input in prepared.inputs) {
+        var identity = instFileOwned(input.path, input.identity);
+        if (input.role == "rootfs") { instRootImageAdmit(prepared.rootImage, identity); }
+        if (identity.size != input.bytes || instFileDigest(input.path) != input.digest) {
+            System.error("immutable source changed: " + input.path);
+        }
+    }
+}

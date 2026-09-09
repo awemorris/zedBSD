@@ -114,6 +114,7 @@ endif
 AMD64_USB_CLASS_SOURCES :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-storage.c
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-uas.c
 endif
 AMD64_NVME_SOURCES :=
 ifeq ($(CONFIG_DRIVER_PCI_NVME),y)
@@ -196,7 +197,7 @@ AMD64_KERNEL_SOURCES := \
 	src/drivers/generic/input.c \
 	src/kern/locale-record.c \
 	src/kern/tty.c \
-	src/drivers/generic/system-device.c src/kern/shutdown.c \
+	src/drivers/generic/system-device.c src/drivers/generic/memory-device.c src/kern/shutdown.c \
 	src/drivers/platform/pcat/graphics/vgafont.c src/kern/init.c
 ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
 AMD64_KERNEL_SOURCES += \
@@ -677,7 +678,7 @@ DYNAMIC_FLOAT_PARSE_OBJS := $(DYNAMIC_FLOAT_DIR)/zed-softfloat.o \
 	$(DYNAMIC_FLOAT_DIR)/float-parse.o
 DYNAMIC_LIBC_OBJS += $(DYNAMIC_LIBM_OBJ) $(DYNAMIC_FLOAT_PARSE_OBJS)
 
-$(DYNAMIC_DIR)/obj/%.o: %.c
+$(DYNAMIC_DIR)/obj/%.o: %.c $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
 
@@ -1340,3 +1341,6 @@ $(BUILD)/bootloader/common-memory-map.i386.o: bootloader/common/memory-map.c boo
  -fno-stack-protector -fno-asynchronous-unwind-tables \
  -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
  -c $< -o $@
+
+# The copied boot-source record is part of the UEFI producer ABI.
+$(BUILD)/uefi/bootx64.o $(BUILD)/uefi/volume-discovery.o: include/boot/provenance.h

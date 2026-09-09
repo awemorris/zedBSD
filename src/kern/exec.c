@@ -661,6 +661,7 @@ process_spawn_from(
 	error = thread_create(process, execution_entry, sp, &thread);
 	if (error != 0)
 		goto out;
+	hal_task_set_tls(thread->task, image.thread_pointer);
 	error = exec_target_revalidate(&target, access_cred);
 	if (error != 0) {
 		if (thread_abort_new(thread) != 0)
@@ -1417,6 +1418,7 @@ process_exec_file(
 	irq_enabled = hal_irq_disable();
 	if (hal_task_exec_current(new_vm->space, execution_entry, sp) != 0)
 		HAL_FATAL("validated HAL exec commit failed");
+	hal_task_set_tls(curthread->task, image.thread_pointer);
 
 	/*
 	 * process->vmspace owns one strong reference.  Publish the

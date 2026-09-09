@@ -1,0 +1,15 @@
+require commands;
+func main(args) {
+    var data = "/run/installer-data";
+    var swap = "/run/installer-swap";
+    instRequire(["/bin/cp", "-T", "--attributes-only", "--preserve=mode", "--update=none-fail", "/sbin/mkfs", data]);
+    instRequire(["/bin/truncate", "-s", "33554432", data]);
+    instRequire(["/sbin/mkfs", "-t", "ufs", data]);
+    instRequire(["/bin/cp", "-T", "--attributes-only", "--preserve=mode", "--update=none-fail", "/sbin/mkfs", swap]);
+    instRequire(["/bin/truncate", "-s", "67108864", swap]);
+    instRequire(["/sbin/mkswap", swap]);
+    print(instRequire(["/bin/cksum", "-a", "sha256", "--", data]));
+    print(instRequire(["/bin/cksum", "-a", "sha256", "--", swap]));
+    instRequire(["/bin/rm", "--", data, swap]);
+    print("installer scratch PASS fresh-format stream-digest");
+}

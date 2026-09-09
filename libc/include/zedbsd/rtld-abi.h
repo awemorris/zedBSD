@@ -16,11 +16,12 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <zedbsd/tls.h>
 
 /*
  * XXX: Rename the following ZEDBSD_* to KERN_*
  */
-#define ZEDBSD_RTLD_ABI_VERSION 4U
+#define ZEDBSD_RTLD_ABI_VERSION 5U
 #define ZEDBSD_RTLD_DLERROR_SIZE 192U
 
 struct __tls_index {
@@ -31,6 +32,7 @@ struct __tls_index {
 struct dl_info;
 
 struct __rtld_tcb {
+	struct zedbsd_tls_prefix tls;
 	void **dtv;
 	size_t dtv_count;
 	uint64_t dtv_generation;
@@ -40,6 +42,9 @@ struct __rtld_tcb {
 	/* Runtime-linker private thread registry link. */
 	struct __rtld_tcb *rtld_next;
 };
+
+typedef char __rtld_tcb_reserve_check[
+	sizeof(struct __rtld_tcb) <= ZEDBSD_TLS_TCB_RESERVE ? 1 : -1];
 
 /*
  * Data-based import table used by libc.so.

@@ -8,10 +8,11 @@ and acquires IPv4 configuration only after the controlled port is authorized.
 No high-level command accepts an interface operand.
 
 The commands and configuration model build for the maintained amd64 and i386
-base systems. The accepted physical radio path is the Japan-market TP-Link
-Archer T3U Nano using the RTL8822BU driver, including ordinary 2.4-GHz and Japan
-W52 5-GHz operation. This does not claim DFS, W53/W56, WPA3, roaming, AP mode,
-or completion of the separate AX211 direct-boot work.
+base systems. Earlier acceptance covers RTL8822BU 2.4-GHz and Japan W52
+5-GHz operation. Later q124 tests cover AX211 PCI passthrough together with
+a physical TP-Link Archer T3U Plus (USB 2357:0138) in QEMU. Either radio may
+become wlan0 or wlan1. This does not claim DFS, W53/W56, WPA3, roaming, AP mode,
+or universal freedom from firmware initialization failures.
 
 ## Command grammar
 
@@ -144,10 +145,24 @@ up and starts asynchronous scans. An empty successful enumeration is a valid
 continues with the usable radios in their original stable order.
 
 Automatic selection walks `auto` profiles in file order, then chooses the first
-stable-discovery-order radio reporting a supported visible candidate. Manual
+stable-discovery-order radio currently reporting a supported visible candidate.
+It does not wait for every other radio's scan to finish. Failed radios are
+skipped and later candidates can be considered in subsequent sweeps. Manual
 `connect SSID` requires an enabled policy and an exact saved profile, whether
 that profile is marked manual or auto; it uses the same stable radio rule.
 DHCP starts only after WPA2/CCMP authorization succeeds.
+
+Saving an `auto` profile after `enable` notifies the active policy and permits
+automatic connection. Repeating `enable` for the existing healthy policy
+preserves its lease rather than launching another DHCP client. The selected
+radio alone owns managed IPv4; loser scans are stopped when selection commits.
+`wifi wlan0 list` is a nonblocking scan-cache snapshot: an empty result while
+scanning is valid, not proof that the hardware found no access points.
+
+`dhcpc` writes first-OFFER, bound and failure events to `/dev/console`, so
+background operation remains visible independently of its inherited stdout.
+An OFFER is progress, not a completed lease. Inspect `net wifi list` and
+interface/address state before concluding that connection has succeeded.
 
 `disconnect` cancels managed work, retires the current managed L2/L3 state,
 enters `manual-disconnected`, and leaves radios up and scanning. `disable`
@@ -205,3 +220,12 @@ The automatic protocol, credential, orchestration, lifecycle, build, and QEMU
 gates passed in q071. The project owner also accepted the consolidated
 RTL8822BU physical WLAN result on 2026-09-05. See the [completed Queue
 record](../../plan/queue-q071.md) and [WS005 result](../../plan/ws005-networking/ws.md).
+
+The later [multi-radio q124 results](../../plan/ws025-io-memory-cache/phase035-multi-radio-selection/results.md)
+cover 36 host scenarios plus physical AX211/RTL8822BU attached to QEMU,
+enable-before-set-key, key-first, repeated enable and cancellation. One measured
+RTL selection reached OFFER in 6.524 seconds and IPv4 in 9.152 seconds; an
+AX211 selection reached IPv4 in 18.962 seconds. These are individual test
+observations, not a latency guarantee. AX211 initialization assertions remain
+a possible firmware failure with a tested recovery path. Console reporting is
+implemented in [dhcpc/main.c](../../userland/base/dhcpc/main.c).

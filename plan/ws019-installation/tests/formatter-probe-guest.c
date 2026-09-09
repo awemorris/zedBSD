@@ -25,6 +25,7 @@ static int swap_state(const char *path, int expected);
 static int persistence(const char *path, int writing);
 static int create_file(const char *path, const char *size_text);
 static int select_overlay(const char *path);
+static int flip_byte(const char *path, const char *offset_text);
 
 /*
  * Runs a bounded observation through the ordinary target interfaces.
@@ -37,7 +38,9 @@ main(
 	int result;
 
 	/* Selects one observation with an explicit target. */
-	if (argc == 3 && strcmp(argv[1], "select-overlay") == 0) {
+	if (argc == 4 && strcmp(argv[1], "flip") == 0) {
+		result = flip_byte(argv[2], argv[3]);
+	} else if (argc == 3 && strcmp(argv[1], "select-overlay") == 0) {
 		result = select_overlay(argv[2]);
 	} else if (argc == 4 && strcmp(argv[1], "create") == 0) {
 		result = create_file(argv[2], argv[3]);
@@ -55,6 +58,61 @@ main(
 	if (result == 0)
 		puts("formatter-probe PASS");
 	return result;
+}
+
+/* Toggles one byte only in the two explicit disposable formatter files. */
+static int
+flip_byte(
+	const char *path,
+	const char *offset_text)
+{
+	struct stat status;
+	char *end;
+	unsigned long offset;
+	unsigned char byte;
+	ssize_t count;
+	int fd;
+	int error;
+
+	/* Restricts the corruption helper to this fixture's generated files. */
+	if (strcmp(path, "/q078/data.img") != 0 && strcmp(path, "/q078/swapfile") != 0)
+		return 1;
+
+	/* Parses a complete bounded byte offset. */
+	errno = 0;
+	offset = strtoul(offset_text, &end, 10);
+	if (errno != 0 || end == offset_text || *end != '\0')
+		return 1;
+
+	/* Opens a regular non-symlink target and checks the exact mutation bound. */
+	fd = open(path, O_RDWR | O_NOFOLLOW);
+	if (fd < 0)
+		return 1;
+	error = fstat(fd, &status);
+	if (error < 0 || !S_ISREG(status.st_mode) || offset >= (unsigned long)status.st_size) {
+		close(fd);
+		return 1;
+	}
+
+	/* Performs a reversible byte change and flushes it before verification. */
+	count = pread(fd, &byte, 1, (off_t)offset);
+	if (count != 1) {
+		close(fd);
+		return 1;
+	}
+	byte ^= 0x5a;
+	count = pwrite(fd, &byte, 1, (off_t)offset);
+	error = fsync(fd);
+	if (count != 1 || error < 0) {
+		close(fd);
+		return 1;
+	}
+
+	/* Requires successful descriptor release before reporting mutation done. */
+	error = close(fd);
+	if (error < 0)
+		return 1;
+	return 0;
 }
 
 /* Selects the generated files in this cell's existing disposable boot config. */
@@ -218,7 +276,7 @@ persistence(
 	const char *path,
 	int writing)
 {
-	static const char payload[] = "q078 generated UFS1 overlay persistence\n";
+	static const char payload[] = "q129 generated UFS overlay persistence\n";
 	char buffer[sizeof(payload)];
 	ssize_t count;
 	int fd;

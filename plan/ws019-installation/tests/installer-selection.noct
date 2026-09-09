@@ -1,0 +1,61 @@
+require selection;
+func assertTrue(v) { if (!v) { System.error("selection assertion failed"); } }
+func choose(s, unused) { return instChoose(s.devices, s.identities, s.table, s.fat32, s.firmware, s.configuration, s.payload); }
+func tableParse(text, disk) { return instTable(text, disk); }
+func mustReject(f, a, b) { var result = System.pcall(f, a, b); if (result.ok) { System.error("unexpected selection acceptance"); } }
+func scenario() {
+    var text = "device\tnvme0n1\t1\t0\t0\t512\t524288\t0\n";
+    var devices = instInventory(text + "device\tnvme0n1p1\t2\t1\t4\t512\t131072\t2048\n" +
+        "device\tnvme0n1p2\t3\t1\t4\t512\t389120\t133120\n" +
+        "device\tsda\t4\t0\t2\t512\t524288\t0\n" +
+        "device\tsda1\t5\t4\t4\t512\t131072\t2048\n" +
+        "device\tsda2\t6\t4\t4\t512\t389120\t133120\n");
+    var a = "11111111-1111-4111-8111-111111111111";
+    var b = "22222222-2222-4222-8222-222222222222";
+    text = text + "table\tgpt\t0\t2\nrange\t0\t512\nrange\t512\t512\nrange\t1024\t16384\n" +
+        "range\t268434944\t512\nrange\t268418560\t16384\n" +
+        "partition\t1\t2048\t131072\tc12a7328-f81f-11d2-ba4b-00a0c93ec93b\t" + a + "\t0\n" +
+        "partition\t2\t133120\t389120\tebd0a0a2-b9e5-4433-87c0-68b6b72699c7\t" + b + "\t0\n";
+    return { devices: devices, text: text, table: instTable(text, devices[0]),
+        identities: { nvme0n1p1: { DEVNAME: "nvme0n1p1", PARTUUID: a }, nvme0n1p2: { DEVNAME: "nvme0n1p2", PARTUUID: b } },
+        fat32: { nvme0n1p1: true, nvme0n1p2: true },
+        firmware: devices[4], configuration: devices[5], payload: "nvme0n1p2" };
+}
+func put32(bytes, offset, value) { for (i in 0..4) { bytes[offset + i] = (value >> (8 * i)) & 255; } }
+func main(args) {
+    var s = scenario(); var selected = choose(s, 0);
+    assertTrue(selected.esp.device.id == 2 && selected.payload.device.id == 3);
+    s = scenario(); s.table.restrictions = 2; mustReject(choose, s, 0);
+    s = scenario(); s.payload = "nvme0n1p1"; mustReject(choose, s, 0);
+    s = scenario(); s.payload = "sda2"; mustReject(choose, s, 0);
+    s = scenario(); s.table.disk.flags = 1; mustReject(choose, s, 0);
+    s = scenario(); s.devices[2].flags = 5; mustReject(choose, s, 0);
+    s = scenario(); s.firmware = s.devices[1]; mustReject(choose, s, 0);
+    s = scenario(); s.configuration = s.devices[2]; mustReject(choose, s, 0);
+    s = scenario(); s.fat32.nvme0n1p2 = false; mustReject(choose, s, 0);
+    s = scenario(); s.fat32.nvme0n1p1 = false; mustReject(choose, s, 0);
+    s = scenario(); s.table.parts[1].type = s.table.parts[0].type; mustReject(choose, s, 0);
+    s = scenario(); s.devices[2].offset = s.devices[2].offset + 1; mustReject(choose, s, 0);
+    s = scenario(); s.identities.nvme0n1p2.PARTUUID = s.identities.nvme0n1p1.PARTUUID; mustReject(choose, s, 0);
+    s = scenario(); s.table.parts[1].attributes = 1152921504606846976L; mustReject(choose, s, 0);
+    s = scenario(); var extra = Dict.copy(s.devices[2]); extra.id = 9; extra.name = "alias";
+    Array.push(s.devices, extra); s.identities.alias = { DEVNAME: "alias", PARTUUID: s.identities.nvme0n1p2.PARTUUID };
+    mustReject(choose, s, 0);
+    s = scenario(); var rows = instLines(s.text);
+    rows[1] = "table\tgpt\t1\t2";
+    var text = ""; for (i in 0..Array.size(rows)) { text = text + rows[i] + "\n"; }
+    mustReject(tableParse, text, s.devices[0]);
+    rows[1] = "table\tgpt\t2\t2";
+    text = ""; for (i in 0..Array.size(rows)) { text = text + rows[i] + "\n"; }
+    mustReject(tableParse, text, s.devices[0]);
+    mustReject(tableParse, s.text + "range\t0\t512\n", s.devices[0]);
+    mustReject(tableParse, String.substring(s.text, 0, String.charCount(s.text) - 1), s.devices[0]);
+    var boot = Packed.uint8(512); boot[510] = 85; boot[511] = 170;
+    boot[12] = 2; boot[13] = 1; boot[14] = 32; boot[16] = 2;
+    put32(boot, 32, 131072); put32(boot, 36, 1024); put32(boot, 44, 2);
+    assertTrue(instFat32(boot, s.devices[1]));
+    boot[17] = 224; assertTrue(!instFat32(boot, s.devices[1])); boot[17] = 0;
+    boot[13] = 3; assertTrue(!instFat32(boot, s.devices[1])); boot[13] = 1;
+    put32(boot, 32, 131073); assertTrue(!instFat32(boot, s.devices[1]));
+    print("installer selection PASS geometry stale-map source-alias ESP FAT32");
+}

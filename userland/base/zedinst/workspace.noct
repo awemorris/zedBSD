@@ -1,0 +1,103 @@
+// Own only explicitly acquired installer directories and mounts.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require files;
+
+func instDirectorySame(a, b) {
+    return a != 0 && b != 0 && a.device == b.device && a.inode == b.inode &&
+        (a.mode & 61440) == 16384 && (b.mode & 61440) == 16384;
+}
+func instWorkspaceStat(context, path) { return instFileIdentity(path); }
+func instWorkspaceMkdir(context, path) { instRequire(["/bin/mkdir", "-m", "700", path]); }
+func instWorkspaceRmdir(context, path) { instRequire(["/bin/rmdir", path]); }
+func instWorkspaceMount(context, item) {
+    var command = ["/sbin/mount", "-t", item.filesystem];
+    if (item.readonly) { Array.push(command, "-r"); }
+    Array.push(command, item.device);
+    Array.push(command, item.path);
+    instRequire(command);
+}
+func instWorkspaceUnmount(context, path) { instRequire(["/sbin/umount", path]); }
+func instWorkspaceOps() {
+    return {stat:instWorkspaceStat, mkdir:instWorkspaceMkdir, rmdir:instWorkspaceRmdir,
+        mount:instWorkspaceMount, unmount:instWorkspaceUnmount};
+}
+func instWorkspaceNew(ops, context, root) {
+    instControlledPath(root);
+    return {ops:ops, context:context, root:root, resources:[]};
+}
+func instWorkspaceOwnDirectory(workspace, path) {
+    var current = workspace.ops.stat(workspace.context, path);
+    if ((current.mode & 61440) != 16384 || current.uid != 0 || current.permissions != 448) {
+        System.error("workspace must be a root-owned 0700 directory");
+    }
+    return current;
+}
+func instWorkspaceCheck(workspace, item) {
+    var actual = workspace.ops.stat(workspace.context, item.path);
+    if (!instDirectorySame(actual, item.identity)) { System.error("workspace object changed: " + item.path); }
+}
+func instWorkspaceDirectory(workspace, name) {
+    var path = workspace.root;
+    if (name != "") {
+        name = instDeviceName(name);
+        if (Array.size(workspace.resources) == 0) { System.error("workspace root is not owned"); }
+        instWorkspaceCheck(workspace, workspace.resources[0]);
+        path = path + "/" + name;
+    } else if (Array.size(workspace.resources) != 0) { System.error("workspace already acquired"); }
+    // A failed command can have taken effect; record uncertainty before invoking it.
+    var item = {kind:"directory", path:path, state:"pending", identity:0};
+    Array.push(workspace.resources, item);
+    workspace.ops.mkdir(workspace.context, path);
+    item.identity = instWorkspaceOwnDirectory(workspace, path);
+    item.state = "owned";
+    return item;
+}
+func instWorkspaceAttach(workspace, directory, device, readonly) {
+    return instWorkspaceAttachType(workspace, directory, device, readonly, "fat");
+}
+func instWorkspaceAttachType(workspace, directory, device, readonly, filesystem) {
+    if (filesystem != "fat" && filesystem != "ufs") { System.error("unsupported workspace filesystem"); }
+    if (directory.kind != "directory" || directory.state != "owned") { System.error("unowned mount directory"); }
+    var found = false;
+    for (item in workspace.resources) {
+        if (item.path == directory.path && item.kind == "directory" &&
+            instDirectorySame(item.identity, directory.identity)) { found = true; }
+        if (item.path == directory.path && item.kind == "mount") { System.error("mount path already acquired"); }
+    }
+    if (!found || directory.path == workspace.root) { System.error("mount must be a workspace child"); }
+    instWorkspaceCheck(workspace, directory);
+    var mount = {kind:"mount", path:directory.path, state:"pending", identity:0,
+        covered:directory.identity, device:instDeviceName(device), readonly:readonly,
+        filesystem:filesystem};
+    Array.push(workspace.resources, mount);
+    workspace.ops.mount(workspace.context, mount);
+    mount.identity = workspace.ops.stat(workspace.context, mount.path);
+    if ((mount.identity.mode & 61440) != 16384 || instDirectorySame(mount.identity, mount.covered)) {
+        System.error("mount did not replace the covered directory");
+    }
+    mount.state = "owned";
+    return mount;
+}
+func instWorkspaceReleaseOne(workspace, item) {
+    if (item.state != "owned") { System.error("uncertain workspace operation: " + item.path); }
+    instWorkspaceCheck(workspace, item);
+    item.state = "pending";
+    if (item.kind == "mount") {
+        workspace.ops.unmount(workspace.context, item.path);
+        var covered = workspace.ops.stat(workspace.context, item.path);
+        if (!instDirectorySame(covered, item.covered)) { System.error("covered directory changed: " + item.path); }
+    } else { workspace.ops.rmdir(workspace.context, item.path); }
+    item.state = "released";
+}
+func instWorkspaceRelease(workspace) {
+    var index = Array.size(workspace.resources);
+    while (index > 0) {
+        index = index - 1;
+        var item = workspace.resources[index];
+        if (item.state == "released") { continue; }
+        var released = System.pcall(instWorkspaceReleaseOne, workspace, item);
+        // Stop before touching an ancestor of any unresolved resource.
+        if (!released.ok) { return {ok:false, path:item.path, message:released.message}; }
+    }
+    return {ok:true, path:"", message:""};
+}

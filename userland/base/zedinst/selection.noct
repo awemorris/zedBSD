@@ -1,0 +1,156 @@
+// GPT/live-map reconciliation and explicit installer target selection.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require identity;
+func instSameDevice(a, b) {
+    return a.name == b.name && a.id == b.id && a.parent == b.parent &&
+        a.flags == b.flags && a.sectorSize == b.sectorSize &&
+        a.sectors == b.sectors && a.offset == b.offset;
+}
+func instTable(text, disk) {
+    return instTablePolicy(text, disk, false);
+}
+func instTablePolicy(text, disk, sourceHybrid) {
+    var lines = instLines(text);
+    if (Array.size(lines) < 3 || !instSameDevice(instDeviceRecord(instSplit(lines[0], "\t")), disk)) {
+        System.error("table device changed");
+    }
+    var header = instSplit(lines[1], "\t");
+    if (Array.size(header) != 4 || header[0] != "table" || header[1] != "gpt") {
+        System.error("requires a healthy supported GPT");
+    }
+    var restrictions = instNumber(header[2], 10);
+    if (restrictions != 0 && !(sourceHybrid && restrictions == 2)) {
+        System.error("requires a healthy supported GPT");
+    }
+    var expected = instNumber(header[3], 10);
+    var ranges = [];
+    var parts = [];
+    var bytes = disk.sectors * disk.sectorSize;
+    for (i in 2..Array.size(lines)) {
+        var fields = instSplit(lines[i], "\t");
+        if (fields[0] == "range" && Array.size(fields) == 3) {
+            var offset = instNumber(fields[1], 10);
+            var size = instNumber(fields[2], 10);
+            if (size == 0 || offset > bytes || size > bytes - offset ||
+                offset % disk.sectorSize != 0 || size % disk.sectorSize != 0) {
+                System.error("invalid GPT metadata extent");
+            }
+            for (j in 0..Array.size(ranges)) {
+                if (offset < ranges[j].offset + ranges[j].size && ranges[j].offset < offset + size) {
+                    System.error("overlapping GPT metadata extents");
+                }
+            }
+            Array.push(ranges, { offset: offset, size: size });
+        } else if (fields[0] == "partition" && Array.size(fields) == 7) {
+            var part = { slot: instNumber(fields[1], 10), start: instNumber(fields[2], 10),
+                count: instNumber(fields[3], 10), type: instGuid(fields[4]),
+                guid: instGuid(fields[5]), attributes: instNumber(fields[6], 10) };
+            if (part.slot == 0 || part.slot > 4096 || part.count == 0 ||
+                part.start >= disk.sectors || part.count > disk.sectors - part.start) {
+                System.error("invalid GPT partition extent");
+            }
+            for (j in 0..Array.size(parts)) {
+                if (part.slot == parts[j].slot || part.guid == parts[j].guid ||
+                    (part.start < parts[j].start + parts[j].count && parts[j].start < part.start + part.count)) {
+                    System.error("duplicate or overlapping GPT partition");
+                }
+            }
+            Array.push(parts, part);
+        } else { System.error("unexpected diskpart record"); }
+    }
+    if (Array.size(ranges) != 5 || Array.size(parts) != expected || expected == 0) {
+        System.error("incomplete GPT description");
+    }
+    if (ranges[0].offset != 0 || ranges[0].size != disk.sectorSize) {
+        System.error("missing protective MBR extent");
+    }
+    for (i in 0..Array.size(parts)) {
+        var begin = parts[i].start * disk.sectorSize;
+        var end = (parts[i].start + parts[i].count) * disk.sectorSize;
+        for (j in 0..Array.size(ranges)) {
+            if (begin < ranges[j].offset + ranges[j].size && ranges[j].offset < end) {
+                System.error("partition overlaps GPT metadata");
+            }
+        }
+    }
+    return { disk: disk, parts: parts, ranges: ranges, restrictions:restrictions };
+}
+func instPartitionDevice(devices, identities, disk, part) {
+    var matches = [];
+    for (i in 0..Array.size(devices)) {
+        var d = devices[i];
+        if (d.parent != disk.id) { continue; }
+        if (d.offset == part.start && d.sectors == part.count && d.sectorSize == disk.sectorSize) {
+            if (!Dict.hasKey(identities, d.name) || !Dict.hasKey(identities[d.name], "PARTUUID") ||
+                identities[d.name].PARTUUID != part.guid || identities[d.name].DEVNAME != d.name) {
+                System.error("live partition identity disagrees with GPT");
+            }
+            Array.push(matches, d);
+        }
+    }
+    if (Array.size(matches) != 1) { System.error("missing or ambiguous live partition extent"); }
+    return matches[0];
+}
+func instChoose(devices, identities, table, fat32, firmware, configuration, payloadName) {
+    var disk = table.disk;
+    if (Dict.hasKey(table, "restrictions") && table.restrictions != 0) {
+        System.error("restricted source table cannot be an installation destination");
+    }
+    if (disk.parent != 0 || (disk.flags & 1) != 0) { System.error("destination is not a writable whole disk"); }
+    if (firmware.parent == disk.id || configuration.parent == disk.id) { System.error("destination overlaps boot source"); }
+    var requested = instFindDevice(devices, payloadName);
+    if (requested.parent != disk.id || (requested.flags & 1) != 0) { System.error("payload is not a writable child of the selected disk"); }
+    var esps = [];
+    var payload = 0;
+    var children = [];
+    for (i in 0..Array.size(table.parts)) {
+        var p = table.parts[i];
+        var d = instPartitionDevice(devices, identities, disk, p);
+        Array.push(children, d);
+        var usable = Dict.hasKey(fat32, d.name) && fat32[d.name] &&
+            (d.flags & 1) == 0 && (p.attributes & 1152921504606846976L) == 0;
+        if (p.type == "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" && usable) {
+            Array.push(esps, { device: d, partition: p });
+        }
+        if (d.id == requested.id) {
+            if (!usable) { System.error("payload is not writable FAT32"); }
+            payload = { device: d, partition: p };
+        }
+    }
+    if (Array.size(esps) != 1) { System.error("requires exactly one usable FAT32 ESP"); }
+    if (payload == 0 || payload.device.id == esps[0].device.id) { System.error("payload must differ from the ESP"); }
+    // Every live child must have been accounted for; stale aliases cannot be ignored.
+    for (i in 0..Array.size(devices)) {
+        if (devices[i].parent != disk.id) { continue; }
+        var found = false;
+        for (j in 0..Array.size(children)) { if (devices[i].id == children[j].id) { found = true; } }
+        if (!found) { System.error("unaccounted live partition"); }
+    }
+    return { disk: disk, esp: esps[0], payload: payload, children: children, table: table };
+}
+func instU16(bytes, offset) { return Long.from((bytes[offset] & 255) | ((bytes[offset + 1] & 255) << 8)); }
+func instU32(bytes, offset) {
+    var value = 0L;
+    for (i in 0..4) { value = value | (Long.from(bytes[offset + i] & 255) << (8 * i)); }
+    return value;
+}
+// This classifies the BPB; the FAT mount still performs full filesystem validation.
+func instFat32(bytes, device) {
+    if (Packed.size(bytes) != 512 || (bytes[510] & 255) != 85 || (bytes[511] & 255) != 170) { return false; }
+    var sector = instU16(bytes, 11);
+    var cluster = Long.from(bytes[13] & 255);
+    var reserved = instU16(bytes, 14);
+    var fats = Long.from(bytes[16] & 255);
+    var total = Long.from(instU32(bytes, 32));
+    var fat = Long.from(instU32(bytes, 36));
+    var root = Long.from(instU32(bytes, 44));
+    if ((sector != 512 && sector != 1024) || cluster == 0 || cluster > 128 ||
+        (cluster & (cluster - 1)) != 0 || reserved == 0 || (fats != 1 && fats != 2) ||
+        instU16(bytes, 17) != 0 || instU16(bytes, 19) != 0 || instU16(bytes, 22) != 0 ||
+        fat == 0 || total > device.sectors * device.sectorSize / sector) { return false; }
+    var metadata = reserved + fats * fat;
+    if (total <= metadata) { return false; }
+    var clusters = (total - metadata) / cluster;
+    return clusters >= 65525 && clusters < 0x0ffffff5 && root >= 2 && root < clusters + 2 &&
+        fat * sector >= (clusters + 2) * 4;
+}

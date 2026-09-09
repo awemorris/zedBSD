@@ -13,6 +13,7 @@ struct image {
 	uint64_t sectors;
 	uint32_t sector;
 	unsigned calls, fault, writes, flushes;
+	unsigned corrupt;
 	uint64_t write_at[8];
 };
 static unsigned checks;
@@ -44,7 +45,9 @@ static int write_image(void *ctx, uint64_t off, const void *p, size_t n)
 		/* Model a short write: some bytes reached disk before EIO. */
 		memcpy(address(m, off, n), p, n / 2); return EIO;
 	}
-	memcpy(address(m, off, n), p, n); return 0;
+	memcpy(address(m, off, n), p, n);
+	if (m->calls == m->corrupt) address(m, off, n)[0] ^= 1;
+	return 0;
 }
 static int flush_image(void *ctx)
 {
@@ -217,7 +220,125 @@ static void test_corrupt(unsigned sector)
 	free(m);
 }
 
-int main(void)
+static void initialize_media(struct image *m, unsigned sector)
+{
+	memset(m, 0, sizeof(*m));
+	m->sector = sector;
+	m->sectors = (uint64_t)UINT32_MAX + 4096;
+	memset(m->first, 0xa5, WINDOW);
+	memset(m->last, 0x5a, WINDOW);
+}
+
+static void test_initialize(unsigned sector, const char *directory)
+{
+	struct image *m = malloc(sizeof(*m));
+	struct dp_table t, loaded;
+	struct dp_io io;
+	unsigned calls, prepare_calls;
+	int started;
+	uint64_t offsets[5];
+	CHECK(m != NULL);
+	initialize_media(m, sector);
+	io = image_io(m);
+	CHECK(dp_initialize_gpt(&t, &io, uuid1) == 0);
+	CHECK(!m->writes && !m->flushes);
+	prepare_calls = m->calls;
+	CHECK(t.copy[0].first == 2 + 16384 / sector);
+	CHECK(t.copy[0].last == m->sectors - 2 - 16384 / sector);
+	CHECK(dp_add(&t, 1, 2048, 4096, esp, uuid2, "ESP") == 0);
+	CHECK(dp_add(&t, 2, 2048, 1, esp, uuid1, "overlap") == EINVAL);
+	CHECK(dp_add(&t, 2, t.copy[0].last, 2, esp, uuid1, "outside") == EINVAL);
+	CHECK(dp_write(&t, &started) == 0 && started == 1);
+	calls = m->calls;
+	CHECK(m->writes == 5 && m->flushes == 3);
+	CHECK(m->write_at[0] == (m->sectors - 1 - 16384 / sector) * sector);
+	CHECK(m->write_at[1] == (m->sectors - 1) * sector);
+	CHECK(m->write_at[2] == 2 * sector && m->write_at[3] == sector);
+	CHECK(m->write_at[4] == 0);
+	CHECK(m->first[450] == 0xee && m->first[510] == 0x55 && m->first[511] == 0xaa);
+	CHECK(m->first[458] == 0xff && m->first[461] == 0xff);
+	/* No unrelated byte outside the three front and two rear regions changed. */
+	for (unsigned i = 2 * sector + 16384; i < WINDOW; i++) CHECK(m->first[i] == 0xa5);
+	for (unsigned i = 0; i < WINDOW - sector - 16384; i++) CHECK(m->last[i] == 0x5a);
+	CHECK(dp_load(&loaded, &io) == 0 && !loaded.restrictions && loaded.count == 1);
+	CHECK(loaded.parts[0].start == 2048 && loaded.parts[0].count == 4096);
+	CHECK(!strcmp(loaded.parts[0].name, "ESP"));
+	dp_free(&loaded);
+	if (directory != NULL) {
+		char path[1024];
+		uint8_t geometry[12];
+		FILE *output;
+		CHECK(snprintf(path, sizeof(path), "%s/init-%u.bin", directory, sector) < (int)sizeof(path));
+		output = fopen(path, "wb"); CHECK(output != NULL);
+		put32(geometry, sector); put64(geometry + 4, m->sectors);
+		CHECK(fwrite(geometry, 1, sizeof(geometry), output) == sizeof(geometry));
+		CHECK(fwrite(m->first, 1, WINDOW, output) == WINDOW);
+		CHECK(fwrite(m->last, 1, WINDOW, output) == WINDOW);
+		CHECK(fclose(output) == 0);
+	}
+	dp_free(&t);
+
+	/* Every preparation/preflight/write/flush/readback failure is observable. */
+	for (unsigned fault = 1; fault <= calls; fault++) {
+		initialize_media(m, sector); io = image_io(m); m->fault = fault;
+		int error = dp_initialize_gpt(&t, &io, uuid1);
+		if (fault <= prepare_calls) CHECK(error == EIO && !m->writes);
+		else {
+			CHECK(error == 0);
+			CHECK(dp_write(&t, &started) == EIO);
+			CHECK(started == (m->writes != 0));
+			if (!started) CHECK(m->flushes == 0);
+		}
+		dp_free(&t);
+	}
+	/* Silent backend corruption is caught at readback, including the PMBR. */
+	for (unsigned operation = 1; operation <= calls; operation++) {
+		initialize_media(m, sector); io = image_io(m); m->corrupt = operation;
+		CHECK(dp_initialize_gpt(&t, &io, uuid1) == 0);
+		int error = dp_write(&t, &started);
+		CHECK(error == 0 || (error == EBUSY && started == 1));
+		if (operation == 11 || operation == 12 || operation == 16 || operation == 17 || operation == 21)
+			CHECK(error == EBUSY);
+		dp_free(&t);
+	}
+	offsets[0] = 0;
+	offsets[1] = sector;
+	offsets[2] = 2 * sector;
+	offsets[3] = (m->sectors - 1) * sector;
+	offsets[4] = (m->sectors - 1 - 16384 / sector) * sector;
+	for (unsigned index = 0; index < 5; index++) {
+		initialize_media(m, sector); io = image_io(m);
+		CHECK(dp_initialize_gpt(&t, &io, uuid1) == 0);
+		address(m, offsets[index], 1)[0] ^= 1;
+		CHECK(dp_write(&t, &started) == EBUSY && started == 0 && !m->writes);
+		dp_free(&t);
+	}
+
+	initialize_media(m, sector); io = image_io(m);
+	CHECK(dp_initialize_gpt(&t, &io, "bad") == EINVAL && !m->calls);
+	CHECK(dp_initialize_gpt(&t, &io, "00000000-0000-0000-0000-000000000000") == EINVAL);
+	io.sectors = UINT64_MAX;
+	CHECK(dp_initialize_gpt(&t, &io, uuid1) == EOVERFLOW);
+	io.sectors = 2 * (16384 / sector) + 3;
+	CHECK(dp_initialize_gpt(&t, &io, uuid1) == ENOSPC && !m->calls);
+	m->sectors = ++io.sectors;
+	CHECK(dp_initialize_gpt(&t, &io, uuid1) == 0);
+	CHECK(t.copy[0].first == t.copy[0].last);
+	CHECK(dp_add(&t, 1, t.copy[0].first, 1, esp, uuid2, "small") == 0);
+	CHECK(dp_write(&t, &started) == 0);
+	dp_free(&t);
+	CHECK(dp_load(&t, &io) == 0 && !t.restrictions && t.count == 1);
+	dp_free(&t);
+	/* A blank medium is accepted, as well as the arbitrary old bytes above. */
+	initialize_media(m, sector); memset(m->first, 0, WINDOW); memset(m->last, 0, WINDOW);
+	io = image_io(m);
+	CHECK(dp_initialize_gpt(&t, &io, uuid1) == 0);
+	CHECK(dp_write(&t, &started) == 0); dp_free(&t);
+	CHECK(dp_load(&t, &io) == 0 && !t.restrictions && t.count == 0); dp_free(&t);
+	free(m);
+}
+
+int main(int argc, char **argv)
 {
 	uint8_t guid[16]; char text[37];
 	CHECK(dp_crc32("123456789", 9) == 0xcbf43926U);
@@ -225,6 +346,8 @@ int main(void)
 	CHECK(dp_guid_parse("00000000-0000-0000-0000-000000000000", guid) == EINVAL);
 	test_format(512, 0); test_format(512, 1); test_format(4096, 1);
 	test_corrupt(512); test_corrupt(4096);
+	test_initialize(512, argc > 1 ? argv[1] : NULL);
+	test_initialize(4096, argc > 1 ? argv[1] : NULL);
 	printf("userspace partition parser/writer: %u checks PASS\n", checks);
 	return 0;
 }

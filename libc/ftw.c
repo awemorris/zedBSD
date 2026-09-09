@@ -16,7 +16,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(ZEDBSD_DYNAMIC_LIBC) || defined(ZEDBSD_STATIC_TLS)
 #define FTW_THREAD_LOCAL _Thread_local
 #else
 #define FTW_THREAD_LOCAL

@@ -1,0 +1,5 @@
+// Read a truncated event followed by pipe EOF through the actual ANSI backend.
+func main(args) {
+    if (Term.readKey(100) != -2) { System.error("partial EOF did not terminate"); }
+    print("EOF PASS");
+}

@@ -60,6 +60,7 @@ partition_create_disk(
 	struct partition *partition);
 
 int partition_reload(struct disk *);
+int partition_reload_claimed(struct disk *, const struct backing_claim *);
 
 void
 partition_reset(void);

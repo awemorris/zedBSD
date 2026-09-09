@@ -58,6 +58,39 @@ static uint8_t kernel_heap_libc_lock_active[HAL_CPU_MAX];
 static uint8_t kernel_heap_libc_irq_enabled[HAL_CPU_MAX];
 static struct kernel_large_allocation *kernel_large_allocations;
 
+#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+/* Private QMP-readable provenance; all writers hold kernel_heap_lock. */
+struct kernel_heap_trace_entry {
+	uint64_t sequence;
+	uintptr_t caller;
+	uintptr_t pointer;
+	size_t size;
+	unsigned cpu;
+	unsigned event;
+};
+static volatile struct kernel_heap_trace_entry kernel_heap_trace[2048];
+static uint64_t kernel_heap_trace_sequence;
+static volatile unsigned kernel_heap_trace_failed;
+static void kernel_heap_trace_record(unsigned event, void *caller, void *pointer, size_t size);
+static void kernel_heap_trace_check(unsigned event, void *caller);
+static void kernel_heap_trace_observer(void *context, void *pointer, size_t size, enum heap_event event);
+#define KERNEL_HEAP_TRACE(event, caller, pointer, size) \
+	kernel_heap_trace_record(event, caller, pointer, size)
+#define KERNEL_HEAP_CHECK(event, caller) kernel_heap_trace_check(event, caller)
+#else
+#define KERNEL_HEAP_TRACE(event, caller, pointer, size) ((void)0)
+#define KERNEL_HEAP_CHECK(event, caller) ((void)0)
+#endif
+
+#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+void
+__heap_trace_pointer_walk(void *pointer, void *caller)
+{
+	kernel_heap_trace_record(12U, caller, pointer, 0);
+}
+
+#endif
+
 extern char __kernel_vma_start[], __kernel_vma_end[];
 
 static bool kernel_heap_lock_enter(void);
@@ -91,6 +124,7 @@ __libc_heap_lock(
 	/* Spins for the lock, then records the interrupt state for the unlock. */
 	while (!atomic_try_acquire_zero(&kernel_heap_lock))
 		hal_compiler_barrier();
+	KERNEL_HEAP_CHECK(1, __builtin_return_address(0));
 	kernel_heap_libc_irq_enabled[cpu] = enabled ? 1U : 0U;
 	kernel_heap_libc_lock_active[cpu] = 1U;
 }
@@ -114,6 +148,7 @@ __libc_heap_unlock(
 	enabled = kernel_heap_libc_irq_enabled[cpu] != 0;
 	kernel_heap_libc_lock_active[cpu] = 0;
 	kernel_heap_libc_irq_enabled[cpu] = 0;
+	KERNEL_HEAP_CHECK(2, __builtin_return_address(0));
 	atomic_store_release(&kernel_heap_lock, 0U);
 	if (enabled)
 		hal_irq_enable();
@@ -140,6 +175,7 @@ kern_malloc(
 	/* Tries the fixed heap first for a small request. */
 	if (size < KERNEL_LARGE_THRESHOLD) {
 		enabled = kernel_heap_lock_enter();
+		KERNEL_HEAP_TRACE(3, __builtin_return_address(0), NULL, size);
 		result = heap_allocator_alloc(&kernel_heap, size);
 		kernel_heap_lock_leave(enabled);
 		if (result != NULL)
@@ -233,6 +269,7 @@ kern_free(
 
 	/* Returns a fixed heap block to the heap. */
 	enabled = kernel_heap_lock_enter();
+	KERNEL_HEAP_TRACE(4, __builtin_return_address(0), pointer, 0);
 	if (address >= (uintptr_t)kernel_heap.begin &&
 	    address < (uintptr_t)kernel_heap.end) {
 		heap_allocator_free(&kernel_heap, pointer);
@@ -318,6 +355,9 @@ kernel_entry(
 	kern_logf("boot: kernel heap, process, and scheduler initialization\n");
 	heap_allocator_init(&kernel_heap, kernel_heap_storage,
 			    KERNEL_HEAP_SIZE);
+#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+	heap_allocator_set_observer(&kernel_heap, kernel_heap_trace_observer, NULL);
+#endif
 	(void)heap_active_set(&kernel_heap);
 	hal_set_allocator(kernel_alloc, kernel_free);
 	hal_task_init();
@@ -412,6 +452,7 @@ kernel_heap_lock_enter(
 	/* Spins for the lock. */
 	while (!atomic_try_acquire_zero(&kernel_heap_lock))
 		hal_compiler_barrier();
+	KERNEL_HEAP_CHECK(5, __builtin_return_address(0));
 
 	/* Reports whether interrupts were enabled. */
 	return enabled;
@@ -422,12 +463,61 @@ static void
 kernel_heap_lock_leave(
 	bool enabled)
 {
+	KERNEL_HEAP_CHECK(6, __builtin_return_address(0));
 	atomic_store_release(&kernel_heap_lock, 0U);
 
 	/* Re-enables interrupts only when they were enabled before. */
 	if (enabled)
 		hal_irq_enable();
 }
+
+#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+/* Record without allocation, logging, or any second lock domain. */
+static void
+kernel_heap_trace_record(
+	unsigned event,
+	void *caller,
+	void *pointer,
+	size_t size)
+{
+	volatile struct kernel_heap_trace_entry *entry;
+	uint64_t sequence;
+
+	sequence = ++kernel_heap_trace_sequence;
+	entry = &kernel_heap_trace[(sequence - 1U) % 2048U];
+	entry->sequence = sequence;
+	entry->caller = (uintptr_t)caller;
+	entry->pointer = (uintptr_t)pointer;
+	entry->size = size;
+	entry->cpu = hal_cpu_current();
+	entry->event = event;
+}
+
+static void
+kernel_heap_trace_check(
+	unsigned event,
+	void *caller)
+{
+	kernel_heap_trace_record(event, caller, NULL, 0);
+	if (!heap_allocator_trace_validate(&kernel_heap) || kernel_heap.errors != 0) {
+		kernel_heap_trace_failed = event;
+		/* Preserve the first failure in RAM without recursive diagnostics. */
+		hal_cpu_panic_all();
+	}
+}
+
+static void
+kernel_heap_trace_observer(
+	void *context,
+	void *pointer,
+	size_t size,
+	enum heap_event event)
+{
+	(void)context;
+	kernel_heap_trace_record(10U + (unsigned)event,
+	    __builtin_return_address(0), pointer, size);
+}
+#endif
 
 /* Allocates memory for the HAL. */
 static void *

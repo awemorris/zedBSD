@@ -1,0 +1,21 @@
+require destination;
+func preflightAcquire(context, unused) {
+    instWorkspaceDirectory(context.workspace, "");
+    context.source = instSourceMounts(context.workspace, context.discovered);
+    instSourceRecheck(context.workspace, context.discovered, context.source);
+    if (Array.size(context.source.inputs) != 3) { System.error("missing immutable inputs"); }
+    var target = instDestinationPrepare(context.workspace, context.discovered, context.source);
+    if (Array.size(target.entries) != 6 || Array.size(target.capacity) != 2) {
+        System.error("incomplete destination preparation");
+    }
+}
+func main(args) {
+    if (Array.size(args) != 2) { System.error("requires explicit disk and payload"); }
+    var context = {discovered:instDiscoverReloaded(args[0], args[1]),
+        workspace:instWorkspaceNew(instWorkspaceOps(), 0, "/run/zedinst-preflight-test"), source:0};
+    var result = System.pcall(preflightAcquire, context, 0);
+    var released = instWorkspaceRelease(context.workspace);
+    if (!released.ok) { System.error("preserved workspace: " + released.path + ": " + released.message); }
+    if (!result.ok) { System.error(result.message); }
+    print("native preflight PASS source and destination mounts provenance configuration artifacts capacity and cleanup");
+}

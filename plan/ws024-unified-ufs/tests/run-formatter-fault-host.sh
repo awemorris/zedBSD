@@ -1,7 +1,6 @@
 #!/bin/sh
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
-python3 "$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)/plan/ws025-io-memory-cache/tests/prepare-driver-fragments.py"
 # Fix host-created journal permissions for a deterministic metadata fixture.
 umask 022
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
@@ -29,11 +28,11 @@ for mode in ordinary sanitize; do
 	# shellcheck disable=SC2086
 	${HOSTCC:-cc} -std=c89 -D_POSIX_C_SOURCE=200809L -O1 -g \
 		-Wall -Wextra -Werror -Wdeclaration-after-statement $extra \
-		-I"$repo" -I"$repo/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs" \
+		-I"$repo" \
 		-Dpread=ufs_test_pread -Dpwrite=ufs_test_pwrite \
 		-c "$repo/userland/base/mkfs/ufs-format.c" \
 		-o "$temporary/formatter-$mode.o"
-	# Link the same standalone decoder consumed by the production UFS probe.
+	# Link the independently maintained userland decoder.
 	# shellcheck disable=SC2086
 	${HOSTCC:-cc} -std=c89 -D_POSIX_C_SOURCE=200809L -O1 -g \
 		-Wall -Wextra -Werror -Wdeclaration-after-statement $extra -I"$repo" \

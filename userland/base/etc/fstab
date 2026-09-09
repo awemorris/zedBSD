@@ -1,2 +1,5 @@
 # device                mountpoint      type    options
 # Root is mounted by the kernel.  Additional filesystems may be listed here.
+# Optional numeric dump/pass columns are accepted. init runs mount -a, then swapon -a.
+# /swapfile             none            swap    sw              0 0
+# Swap options: sw/defaults, noauto, nofail (missing file/device only).

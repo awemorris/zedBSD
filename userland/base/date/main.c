@@ -89,6 +89,10 @@ main(
 		case 's':
 			printf("%lld", (long long)ts.tv_sec);
 			break;
+		case 'N':
+			/* Exposes the clock's nanosecond field with a fixed width. */
+			printf("%09ld", (long)ts.tv_nsec);
+			break;
 		default:
 			putchar('%');
 			putchar(fmt[i]);

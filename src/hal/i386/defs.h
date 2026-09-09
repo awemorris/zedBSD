@@ -59,6 +59,7 @@
 #define SEG_INVALID		(0x0000)	/* Invalid */
 #define SEG_SYS_CODE		(0x0008)	/* Sys Code */
 #define SEG_SYS_DATA		(0x0010)	/* Sys Data */
+#define SEG_USER_TLS		(0x0030)	/* Per-CPU user TLS base */
 #define SEG_USER_CODE		(0x0018)	/* User Code */
 #define SEG_USER_DATA		(0x0020)	/* User Data */
 #define SEG_TSS			(0x0028)	/* TSS (sole tss for now) */

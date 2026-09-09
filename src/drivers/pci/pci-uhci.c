@@ -329,7 +329,7 @@ drv_pci_uhci_probe_roots(
 		/* Handles the controller condition. */
 		if (controller->quarantined)
 			continue;
-		drv_usb_hcd_root_hub_changed(&controller->hcd);
+		/* Enumerate in the schedulable root worker, not the boot idle task. */
 		uhci_root_worker_arm(controller);
 	}
 }
@@ -1309,6 +1309,8 @@ uhci_schedule_unlink_locked(
 	successor = request->qh->head;
 	if (request->schedule_previous != NULL) {
 		request->schedule_previous->qh->head = successor;
+		request->schedule_previous->schedule_next =
+			request->schedule_next;
 	} else {
 		/* Handles the head condition. */
 		if (*head != request)

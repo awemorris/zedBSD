@@ -5,7 +5,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "../../ws018-kernel-architecture/tests/mount-thread-host.h"
+#ifdef UFS_AUDIT_CURRENT_DRIVER
+#include "../../../src/drivers/fs/ufs.c"
+#else
 #include "../../ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/fs/ufs/ufs-vfs.c"
+#endif
 #define AUDIT_STATE struct ufs_mount_state
 #define AUDIT_INODE struct ufs_inode_info
 #define AUDIT_DINODE_SIZE UFS_DINODE_SIZE

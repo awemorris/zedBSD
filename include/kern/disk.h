@@ -28,6 +28,7 @@
 #define DISK_PARTITION	0x00000004U
 /* Driver guarantees flush persistence and invalidates proofs across reset. */
 #define DISK_FLUSH_PROOF	0x00000008U
+#define DISK_FILE_BACKED	0x00000010U
 
 #define DISK_IOCTL_GET_GEOMETRY	1UL
 
@@ -122,6 +123,10 @@ struct disk {
 	unsigned d_flush_busy;
 	/* Non-NULL only while the whole-disk replacement owner is admitted. */
 	struct thread *d_reload_owner;
+	/* Borrowed from the sole open description; registry lock protects it. */
+	const struct backing_claim *d_admin_owner;
+	/* Synchronous kernel call only; never retained across a syscall return. */
+	struct thread *d_admin_thread;
 	unsigned d_identity_valid;
 	uint32_t d_identity_flags;
 	char d_identity_type[16];
@@ -220,6 +225,11 @@ disk_destroy(
 
 /* Whole-disk replacement gate. Caller holds the sole whole-disk open. */
 int disk_reload_begin(struct disk *);
+int disk_reload_begin_claimed(struct disk *, const struct backing_claim *);
+int disk_admin_begin(struct disk *, const struct backing_claim *);
+void disk_admin_end(struct disk *, const struct backing_claim *);
+int disk_admin_io_begin(struct disk *, const struct backing_claim *);
+void disk_admin_io_end(struct disk *, const struct backing_claim *);
 void disk_reload_end(struct disk *);
 int disk_reload_replace(struct disk *, struct disk **, unsigned);
 

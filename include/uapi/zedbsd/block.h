@@ -11,6 +11,8 @@
 #define ZEDBSD_BLOCK_READ_ONLY 1U
 #define ZEDBSD_BLOCK_REMOVABLE 2U
 #define ZEDBSD_BLOCK_PARTITION 4U
+/* File-backed volumes cannot be installation destinations. */
+#define ZEDBSD_BLOCK_FILE_BACKED 8U
 
 /* Identity is a registration number, not an on-disk GUID. */
 struct zedbsd_block_info {
@@ -29,5 +31,10 @@ _Static_assert(offsetof(struct zedbsd_block_info, sector_count) == 24U,
 /* Privileged, synchronous, whole disk only; any mounted child -> EBUSY.
  * Userspace must fsync table writes first. No argument and no force mode. */
 #define BLKREREADPART _IO('B', 3)
+/* Privileged O_RDWR physical disk or direct partition. Input matches BLKGETINFO.
+ * Excludes other opens/mounts and backing users until the final description
+ * close. Nonoverlapping siblings remain usable. Dup/fork share the reservation.
+ * No force or explicit unlock. File-backed devices are unsupported. */
+#define BLKRESERVE _IOW('B', 4, struct zedbsd_block_info)
 
 #endif

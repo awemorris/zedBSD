@@ -12,6 +12,7 @@ enum backing_claim_owner {
 	BACKING_CLAIM_SWAP = 1,
 	BACKING_CLAIM_LOOP = 2,
 	BACKING_CLAIM_FORMAT = 3,
+	BACKING_CLAIM_ADMIN = 4,
 };
 
 struct backing_claim_extent {
@@ -31,6 +32,10 @@ int backing_claim_prepare_inode(struct inode *, enum backing_claim_owner,
 				struct backing_claim **);
 int backing_claim_finalize(struct backing_claim *,
 			   const struct backing_claim_extent *, unsigned);
+struct file;
+/* Includes optional file-owned metadata without changing the logical data map. */
+int backing_claim_finalize_file(struct backing_claim *, struct file *,
+	const struct backing_claim_extent *, unsigned);
 int backing_claim_prepare_disk(struct disk *, uint64_t, uint64_t,
 			       enum backing_claim_owner,
 			       struct backing_claim **);

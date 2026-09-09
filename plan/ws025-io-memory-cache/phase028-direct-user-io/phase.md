@@ -4,7 +4,7 @@
 
 Phase ID: `ws025-p028`
 
-Status: planned; Priority 1に再選択（2026-09-09）、実装未開始。q122での見送りは履歴として保持。
+Status: uncleared (q125); 現ソース・着手条件確認済み、実装未開始。
 
 Parent: [WS025](../ws.md)
 
@@ -59,3 +59,26 @@ pin だけで DMA が可能とみなさない。効果または契約の根拠�
 Not adopted in the mandatory WS025 implementation. Measure a remaining user-copy CPU bottleneck and define the complete pin/COW/unmap/cancel contract.
 See [effective policy and evidence basis](../phase026-integration-defaults/effective-policy.md).
 This records the conditional decision, not completion of this optional phase.
+
+## q125 現ソースに合わせた詳細化
+
+ユーザーのPriority全件自走指示により着手条件を確認。完了できないPhaseはunclearedとし他WSへ進む。
+
+対象: src/kern/syscall.c、src/kern/file.c、src/kern/vmspace.c、src/kern/vm/以下、src/drivers/generic/dma.c。
+
+現状: vmspace_pin_user_pagesは存在するが、pinはDMAとの同時書換えを禁止するcontent leaseではない。file content leaseとuser aliasの寿命は別。p024 controlled比較はCPU改善を示していない。
+
+設計手順: (1) 対象を通常fileのaligned bulk I/Oに限定し、small/unaligned/faultは既存copyを保持。(2) 入力user aliasをwrite-protect/COW snapshotにする契約と、出力aliasへDMA書込みする権限・dirty公開を分離。(3) inode cache世代/範囲lease→user pin→DMA mapの取得順、逆順解放を固定。(4) unmap/exit/truncate/cancel、shared alias変更、short/error時のprefix公開をfault fixtureで検証。(5) CPU/コピー量のnative比較で採用判断する。
+
+今回の未クリア理由: direct user I/Oを正当化する対象workloadのcopy律速測定がなく、既存pinだけではalias/COW整合を満たせない。p024のコピー削減結果をdirect I/OのCPU改善と読み替えない。
+
+再開条件: 対象workloadのcopyコストを分離した測定、および共有aliasのfreeze/COW方式を検証するVM fixture。測定と契約が揃うまで既存copyで運用する。
+
+旧停止節のplanned維持はq122時点の判断。今回の実行結果はunclearedとして扱う。
+
+## q139 後の実装準備
+
+実機不在を停止条件にせず、既存pin/BUSY/reverse mapping/vmapの所有者を
+調査した。[段階導入案](design-followup.md)に、既存pinを自分で待たない
+try-upgrade、別aliasのPTE revoke、借用フレームのvmap寿命、入力snapshotと
+出力prefix公開を分離する手順を記録した。p028はまだ実装・検証していない。

@@ -1,0 +1,164 @@
+// Interactive existing-FAT installation with one owned cleanup boundary.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require destination;
+require confirmation;
+
+func instInstallRevalidate(context) {
+    instSourceRecheck(context.workspace, context.discovered, context.source);
+    instMetadataRevalidate(instMetadataOps(), 0, context.discovered.target);
+    var observed = instDiscoveryObserve(0);
+    var origins = instDiscoveryOrigins(observed);
+    if (!instSameDevice(origins.disk, context.discovered.origins.disk) ||
+        observed.provenance.firmware != context.discovered.provenance.firmware ||
+        observed.provenance.configuration != context.discovered.provenance.configuration) {
+        System.error("boot source changed after preparation");
+    }
+    instDestinationCandidates(context.workspace, context.destination.mounts,
+        context.discovered.selected.payload.device.name);
+}
+func instInstallSummary(context) {
+    var selected = context.discovered.selected;
+    var text = "Install zedBSD\r\nSource disk: " + context.discovered.source.disk.name +
+        "\r\nDestination disk: " + selected.disk.name +
+        "\r\nESP: " + selected.esp.device.name + " PARTUUID=" + selected.esp.partition.guid +
+        "\r\nPayload: " + selected.payload.device.name + " PARTUUID=" + selected.payload.partition.guid;
+    for (i in 0..2) {
+        var name = "ESP";
+        if (i == 1) { name = "Payload"; }
+        var capacity = context.destination.capacity[i];
+        text = text + "\r\n" + name + " free/required bytes: " + capacity.available + "/" + capacity.needed;
+    }
+    for (entry in context.destination.entries) {
+        var name = selected.payload.device.name;
+        if (entry.role == "loader") { name = selected.esp.device.name; }
+        text = text + "\r\n/dev/" + name + ":" +
+            String.substring(entry.final, String.charCount(entry.mount), -1);
+    }
+    return text;
+}
+func instInstallDirectories(context) {
+    for (directory in context.destination.directories) {
+        var item = {path:directory.path, identity:0, state:"pending",
+            temporary:directory.path == directory.mount + "/zedinst-stage"};
+        Array.push(context.directories, item);
+        instRequire(["/bin/mkdir", directory.path]);
+        item.identity = instFileIdentity(directory.path);
+        if ((item.identity.mode & 61440) != 16384) { System.error("created directory changed"); }
+        item.state = "owned";
+        instRequire(["/bin/sync", "--", directory.path]);
+        instRequire(["/bin/sync", "--", instFileParent(directory.path)[0]]);
+    }
+    var needsSeed = false;
+    for (present in context.destination.present) { if (!present) { needsSeed = true; } }
+    if (!needsSeed) { return; }
+    instInstallSeed(context);
+}
+func instInstallSeed(context) {
+    context.seedPending = true;
+    instRequire(["/bin/cp", "-T", "--attributes-only", "--preserve=mode", "--update=none-fail",
+        "--", "/bin/sh", context.seed]);
+    context.seedIdentity = instFileIdentity(context.seed);
+    if (!instSameFileObject(context.seedIdentity, context.seedIdentity) ||
+        context.seedIdentity.size != 0) {
+        System.error("invalid private staging seed: mode=" + context.seedIdentity.mode +
+            " size=" + context.seedIdentity.size);
+    }
+    // The source executable's mode is not the FAT publication mode contract.
+    instRequire(["/bin/chmod", "755", context.seed]);
+    context.seedIdentity = instFileOwned(context.seed, context.seedIdentity);
+    if (context.seedIdentity.permissions != 493) { System.error("cannot set staging seed permissions"); }
+}
+func instInstallBody(context, unused) {
+    instWorkspaceDirectory(context.workspace, "");
+    context.source = instSourceMounts(context.workspace, context.discovered);
+    context.destination = instDestinationPrepare(context.workspace, context.discovered, context.source);
+    if (!instConfirm(instInstallSummary(context), context.disk, context.payload)) {
+        context.cancelled = true;
+        return false;
+    }
+    instInstallRevalidate(context);
+    // Refresh admission after the interactive pause, before creating directories.
+    var contents = instDestinationContents(instFileOperations(), 0, context.destination.esp,
+        context.destination.payload, context.destination.entries);
+    context.destination.directories = contents.directories;
+    context.destination.present = contents.present;
+    for (device in [context.discovered.selected.esp.device, context.discovered.selected.payload.device]) {
+        var mount = context.destination.mounts[device.name].path;
+        var count = 0;
+        for (directory in contents.directories) { if (directory.mount == mount) { count = count + 1; } }
+        var bpb = context.discovered.target.bpbs[device.name];
+        instFileAdmitCapacity(context.destination.entries, contents.present, mount,
+            instU16(bpb, 11) * bpb[13], count);
+    }
+    instInstallDirectories(context);
+    context.transaction = instManagedTransaction(instFileOperations(), context, context.destination.entries);
+    if (!context.transaction.ok) { System.error(context.transaction.message); }
+    return true;
+}
+func instInstallRemoveDirectory(context, item) {
+    if (item.state != "owned") { System.error("directory creation outcome uncertain: " + item.path); }
+    if (!instDirectorySame(instFileIdentity(item.path), item.identity)) {
+        System.error("stage directory replaced: " + item.path);
+    }
+    instRequire(["/bin/rmdir", item.path]);
+    item.state = "released";
+    instRequire(["/bin/sync", "--", instFileParent(item.path)[0]]);
+}
+func instInstallRemoveSeed(context, unused) {
+    if (context.seedIdentity == 0) { System.error("seed creation outcome uncertain"); }
+    instFileRemove(0, context.seed, context.seedIdentity);
+}
+func instInstallLocation(context, path) {
+    if (context.destination == 0) { return path; }
+    for (name, mount in context.destination.mounts) {
+        if (String.substring(path, 0, String.charCount(mount.path) + 1) == mount.path + "/") {
+            return "/dev/" + name + ":" + String.substring(path, String.charCount(mount.path), -1);
+        }
+    }
+    return path;
+}
+func instInstall(disk, payload) {
+    disk = instDeviceName(disk);
+    payload = instDeviceName(payload);
+    if (Term.isTTY() != 1) { System.error("installation requires an interactive terminal"); }
+    if (instLines(instRequire(["/bin/id", "-u"]))[0] != "0") { System.error("installation requires root"); }
+    if (!instSourceScreen()) {
+        return {ok:false, cancelled:true, message:"", cleanup:[], transaction:0};
+    }
+    instRootImageObserve();
+    var discovered = instDiscoverReloaded(disk, payload);
+    var context = {disk:disk, payload:payload, discovered:discovered, source:0, destination:0,
+        workspace:instWorkspaceNew(instWorkspaceOps(), 0, "/run/zedinst"),
+        seed:"/run/zedinst/seed", seedIdentity:0, seedPending:false, directories:[],
+        transaction:0, cancelled:false, revalidate:instInstallRevalidate};
+    var result = System.pcall(instInstallBody, context, 0);
+    return instInstallFinish(context, result);
+}
+func instInstallFinish(context, result) {
+    var cleanup = [];
+    for (item in context.directories) {
+        if (!item.temporary) { continue; }
+        var removed = System.pcall(instInstallRemoveDirectory, context, item);
+        if (!removed.ok) { Array.push(cleanup, instInstallLocation(context, item.path) + ": " + removed.message); }
+    }
+    if (context.seedPending) {
+        var removed = System.pcall(instInstallRemoveSeed, context, 0);
+        if (!removed.ok) { Array.push(cleanup, removed.message); }
+    }
+    var released = instWorkspaceRelease(context.workspace);
+    if (!released.ok) { Array.push(cleanup, released.message); }
+    var message = "";
+    if (!result.ok) { message = result.message; }
+    // Preserve usable recovery locations after the temporary mounts disappear.
+    if (context.transaction != 0) {
+        for (i in 0..Array.size(context.transaction.published)) {
+            context.transaction.published[i] = instInstallLocation(context, context.transaction.published[i]);
+        }
+        for (i in 0..Array.size(context.transaction.uncertain)) {
+            context.transaction.uncertain[i] = instInstallLocation(context, context.transaction.uncertain[i]);
+        }
+        for (item in context.transaction.leftovers) { item.path = instInstallLocation(context, item.path); }
+    }
+    return {ok:result.ok && !context.cancelled && Array.size(cleanup) == 0,
+        cancelled:context.cancelled, message:message, cleanup:cleanup, transaction:context.transaction};
+}

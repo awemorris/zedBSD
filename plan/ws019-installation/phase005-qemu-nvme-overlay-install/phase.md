@@ -1,10 +1,10 @@
 # WS019 Phase 005: QEMU NVMe overlay-install acceptance
 
-Last updated: 2026-09-05
+Last updated: 2026-09-09
 
 Phase ID: `ws019-p005`
 
-Status: planned; dependency-gated
+Status: completed; [q160 results](q160-results.md), public install and NVMe-only boot accepted
 
 Parent: [WS019](../ws.md)
 
@@ -28,7 +28,8 @@ any physical Latitude write.
 
 1. install succeeds and preserves GPT, labels, unmanaged files, and NVRAM;
 2. installed fallback loader discovers the same-disk `/zedbsd.cfg`, consumes
-   `kernel=vmunix`, binds omitted `boot0` and bare image paths to that FAT,
+   `kernel=vmunix`, resolves the generated explicit `boot0=PARTUUID=...` to
+   the selected payload and uses its `boot0:` image paths,
    mounts
    `rootfs.img` plus `data.img`, activates `swapfile`, and reaches login;
 3. an absent config fails visibly; duplicate configs warn and choose the first
@@ -39,7 +40,8 @@ any physical Latitude write.
    report success;
 5. an auxiliary FAT disk with matching-looking files cannot steal selection
    from the ESP's physical GPT disk;
-6. the generated 32-MiB `data.img` is recognized and mounted as UFS1, the
+6. the generated 32-MiB `data.img` is recognized and mounted as the current
+   single 64-bit UFS, the
    generated 64-MiB `swapfile` is recognized as ZEDSWAP2, and neither source
    live object is opened as an installation input.
 
@@ -67,3 +69,22 @@ transaction. WS024 is implementing the driver/producer migration and retains
 old-media rejection and fresh-file initialization boundaries. Do not infer
 in-place conversion from the new public name. This update does not start the
 installer phase; its existing prerequisites still apply.
+
+## Current acceptance preparation (q158)
+
+The q101 paragraph is historical: WS024 and WS019-p014 are complete, and UFS1
+is no longer an accepted generated format. Current source configuration may
+omit boot0, but the installer generates an explicit selected-payload PARTUUID;
+do not weaken selection to test an obsolete generated profile.
+
+After p004 acceptance, detach the source USB completely and boot a disposable
+copy of the accepted destination with the normal UEFI fallback path. Record
+the loader/kernel, root mount, UFS upper and active swap evidence. Create a
+small file in the installed writable overlay, shut down normally, boot the
+same installed copy again and verify persistence. Retain the original accepted
+installer output separately from these boot-time modifications.
+
+The p004 cancel/install/rerun fixture runs unchanged orchestration in a private
+test rootfs. That alone does not satisfy the production package or installed
+boot gates. Record the final packaged production source and destination hashes
+before naming a WS003 candidate. No physical-disk write is implied by this plan.

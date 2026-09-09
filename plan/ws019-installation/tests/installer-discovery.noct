@@ -1,0 +1,79 @@
+require discovery;
+func discoveryCheck(ok, text) { if (!ok) { System.error("discovery test: " + text); } }
+func discoveryFixture() {
+    var s = discoveryScenario();
+    s.identities.sda1 = {DEVNAME:"sda1", PARTUUID:"33333333-3333-4333-8333-333333333333"};
+    s.identities.sda2 = {DEVNAME:"sda2", PARTUUID:"44444444-4444-4444-8444-444444444444"};
+    return s;
+}
+func discoveryObserve(context) {
+    context.calls = context.calls + 1;
+    var s = discoveryFixture();
+    var p = {firmware:"PARTUUID=" + s.identities.sda1.PARTUUID,
+        configuration:"PARTUUID=" + s.identities.sda2.PARTUUID, matches:1};
+    if (context.mode == "unavailable") { p.firmware = "unavailable"; }
+    if (context.mode == "ambiguous") { p.matches = 2; }
+    if (context.mode == "source-parent") { s.devices[5].parent = 1; }
+    if (context.calls >= 2) {
+        if (context.mode == "source-id") { s.devices[4].id = 99; }
+        if (context.mode == "target-id") { s.devices[1].id = 99; }
+        if (context.mode == "target-guid") { s.identities.nvme0n1p1.PARTUUID = s.identities.sda1.PARTUUID; }
+        if (context.mode == "duplicate-source") { s.identities.nvme0n1p1.PARTUUID = s.identities.sda2.PARTUUID; }
+    }
+    return {devices:s.devices, identities:s.identities, provenance:p};
+}
+func discoveryMetadata(context, name, source) {
+    discoveryCheck(source == (name == "sda"), "source policy separation");
+    var s = discoveryFixture();
+    if (name == "sda") {
+        if (context.mode == "source-metadata") { s.devices[4].offset = 99; }
+        return {disk:s.devices[3], children:[s.devices[4],s.devices[5]], identities:s.identities};
+    }
+    if (context.mode == "no-esp") { s.fat32.nvme0n1p1 = false; }
+    if (context.mode == "payload-format") { s.fat32.nvme0n1p2 = false; }
+    return {disk:s.devices[0], table:s.table, identities:s.identities, fat32:s.fat32};
+}
+func discoveryInvoke(context, unused) {
+    return instDiscover({observe:discoveryObserve, metadata:discoveryMetadata}, context,
+        context.disk, context.payload);
+}
+func main(args) {
+    if (Array.size(args) == 2) {
+        var selected = instDiscover(instDiscoveryOps(), 0, args[0], args[1]);
+        discoveryCheck(selected.origins.disk.id != selected.target.disk.id, "source isolation");
+        discoveryCheck(selected.selected.payload.device.name == args[1], "explicit payload");
+        print("native discovery PASS firmware config source ESP payload");
+        return;
+    }
+    var context = {calls:0, mode:"normal", disk:"nvme0n1", payload:"nvme0n1p2"};
+    var result = discoveryInvoke(context, 0);
+    discoveryCheck(context.calls == 2 && result.selected.esp.device.name == "nvme0n1p1", "healthy selection");
+    for (mode in ["unavailable", "ambiguous", "source-parent", "source-id", "target-id",
+        "target-guid", "duplicate-source", "source-metadata", "no-esp", "payload-format", "same-disk", "same-partition"]) {
+        context = {calls:0, mode:mode, disk:"nvme0n1", payload:"nvme0n1p2"};
+        if (mode == "same-disk") { context.disk = "sda"; }
+        if (mode == "same-partition") { context.payload = "nvme0n1p1"; }
+        var rejected = System.pcall(discoveryInvoke, context, 0);
+        discoveryCheck(!rejected.ok, "accepted " + mode);
+    }
+    discoveryCheck(instBootValue("kern.boot.config_matches: 1\n", "kern.boot.config_matches") == "1", "sysctl record");
+    print("installer discovery PASS healthy selection and 12 refusal scenarios");
+}
+func discoveryScenario() {
+    var text = "device\tnvme0n1\t1\t0\t0\t512\t524288\t0\n";
+    var devices = instInventory(text + "device\tnvme0n1p1\t2\t1\t4\t512\t131072\t2048\n" +
+        "device\tnvme0n1p2\t3\t1\t4\t512\t389120\t133120\n" +
+        "device\tsda\t4\t0\t2\t512\t524288\t0\n" +
+        "device\tsda1\t5\t4\t4\t512\t131072\t2048\n" +
+        "device\tsda2\t6\t4\t4\t512\t389120\t133120\n");
+    var a = "11111111-1111-4111-8111-111111111111";
+    var b = "22222222-2222-4222-8222-222222222222";
+    text = text + "table\tgpt\t0\t2\nrange\t0\t512\nrange\t512\t512\nrange\t1024\t16384\n" +
+        "range\t268434944\t512\nrange\t268418560\t16384\n" +
+        "partition\t1\t2048\t131072\tc12a7328-f81f-11d2-ba4b-00a0c93ec93b\t" + a + "\t0\n" +
+        "partition\t2\t133120\t389120\tebd0a0a2-b9e5-4433-87c0-68b6b72699c7\t" + b + "\t0\n";
+    return { devices: devices, text: text, table: instTable(text, devices[0]),
+        identities: { nvme0n1p1: { DEVNAME: "nvme0n1p1", PARTUUID: a }, nvme0n1p2: { DEVNAME: "nvme0n1p2", PARTUUID: b } },
+        fat32: { nvme0n1p1: true, nvme0n1p2: true },
+        firmware: devices[4], configuration: devices[5], payload: "nvme0n1p2" };
+}

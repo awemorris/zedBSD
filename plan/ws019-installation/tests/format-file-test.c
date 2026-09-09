@@ -109,7 +109,18 @@ static void check_cli(void);
 #define ufs_format_verify fake_verify
 #define ufs_format_feature_write fake_write
 #define ufs_format_feature_verify fake_verify
+#define ufs_format_pristine fake_verify
+#define ufs_format_feature_pristine fake_verify
+int mkfs_block_command(int argc, char **argv)
+{
+	(void)argc;
+	(void)argv;
+	abort();
+	return 2;
+}
 #include "userland/base/mkfs/main.c"
+#undef ufs_format_feature_pristine
+#undef ufs_format_pristine
 #undef ufs_format_feature_verify
 #undef ufs_format_feature_write
 #undef ufs_format_verify
@@ -122,7 +133,9 @@ static void check_cli(void);
 #define swap_format_validate_size fake_validate
 #define swap_format_write fake_write
 #define swap_format_verify fake_verify
+#define swap_format_pristine fake_verify
 #include "userland/base/mkswap/main.c"
+#undef swap_format_pristine
 #undef swap_format_verify
 #undef swap_format_write
 #undef swap_format_validate_size

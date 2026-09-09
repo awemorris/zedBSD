@@ -60,6 +60,11 @@ main(
 		w = waitpid(p, &st, 0);
 	while (w < 0 && errno == EINTR);
 	clock_gettime(CLOCK_MONOTONIC, &b);
+	/* Borrow a second before rendering a fractional elapsed time. */
+	if (b.tv_nsec < a.tv_nsec) {
+		b.tv_sec--;
+		b.tv_nsec += 1000000000L;
+	}
 	fprintf(stderr, "real %lld.%03ld\n", (long long)(b.tv_sec - a.tv_sec),
 		(b.tv_nsec - a.tv_nsec) / 1000000);
 

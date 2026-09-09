@@ -308,7 +308,7 @@ def create(args: argparse.Namespace) -> None:
                 "::/bin/sh")
         if args.noct:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.noct),
-                "::/usr/bin/noct")
+                "::/bin/noct")
         for name, source in bin_files.items():
             run("mcopy", "-i", f"{temporary}@@{offset}", str(source),
                 f"::/bin/{name}")

@@ -17,6 +17,7 @@
 #include <hal/hal.h>
 
 void i386_percpu_init(hal_cpu_id_t, uintptr_t);
+void i386_percpu_set_tls(hal_cpu_id_t, uintptr_t);
 void i386_percpu_set_kernel_stack(hal_cpu_id_t, uintptr_t);
 
 #endif

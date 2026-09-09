@@ -1,0 +1,44 @@
+// Bounded argv-based command execution for the Noct installer.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+func instRun(command, seconds, limit) {
+    var argv = ["/bin/timeout", "-k", "2", seconds];
+    for (i in 0..Array.size(command)) { Array.push(argv, command[i]); }
+    var handle = Process.spawn(argv);
+    if (handle < 0) { return [-1, "cannot spawn command", false]; }
+    var output = "";
+    var overflow = false;
+    while (Process.isAlive(handle)) {
+        var chunk = Process.read(handle, 100);
+        if (!overflow) {
+            if (String.byteLength(output) + String.byteLength(chunk) > limit) {
+                overflow = true;
+                Process.kill(handle, 15);
+            } else { output = output + chunk; }
+        }
+    }
+    // A child can exit with unread terminal output. Drain before releasing it.
+    while (true) {
+        var chunk = Process.read(handle, 0);
+        if (chunk == "") { break; }
+        if (!overflow) {
+            if (String.byteLength(output) + String.byteLength(chunk) > limit) {
+                overflow = true;
+            } else { output = output + chunk; }
+        }
+    }
+    var status = Process.wait(handle);
+    Process.close(handle);
+    return [status, output, overflow];
+}
+
+func instRequire(command) {
+    var result = instRun(command, "180", 1048576);
+    if (result[0] != 0 || result[2]) {
+        var description = command[0];
+        for (i in 1..Array.size(command)) {
+            description = description + " [" + command[i] + "]";
+        }
+        System.error("command failed: " + description + " status=" + result[0] + "\n" + result[1]);
+    }
+    return result[1];
+}

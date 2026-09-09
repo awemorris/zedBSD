@@ -33,6 +33,7 @@
 #include "kern/graphics-device.h"
 #endif
 #include "kern/system-device.h"
+#include "kern/memory-device.h"
 #include "kern/devfs.h"
 #include "kern/tmpfs.h"
 #include "kern/overlayfs.h"
@@ -47,6 +48,8 @@
 #include <fcntl.h>
 #include <hal/hal.h>
 #include <string.h>
+
+#include <zedbsd/sysctl.h>
 
 #define PHYSICAL_DISK_MAX 4U
 #define VFS_HIGH __attribute__((section(".hightext")))
@@ -141,6 +144,74 @@ static const struct kern_swap_control_resolver_ops vfs_swap_resolver = {
 	.resolve_disk = vfs_swap_resolve_disk,
 	.validate_raw = vfs_swap_validate_raw,
 };
+
+/* Observes the live root image, independent of retained configuration strings. */
+VFS_HIGH int
+kern_vfs_root_image_info(struct root_image_info *result)
+{
+	struct mount *root;
+	struct path lower;
+	struct file *backing;
+	struct stat status;
+	unsigned flags;
+	int error, close_error;
+
+	if (result == NULL)
+		return EINVAL;
+	memset(result, 0, sizeof(*result));
+	result->version = ROOT_IMAGE_VERSION;
+	root = mount_root_get_ref();
+	if (root == NULL)
+		return ENXIO;
+
+	/* Retain the lower path before inspecting its loop attachment. */
+	error = drv_overlay_lower_root_ref(root, &lower);
+	if (error == EOPNOTSUPP) {
+		mount_release(root);
+		return 0;
+	}
+	if (error != 0) {
+		mount_release(root);
+		return error;
+	}
+	result->flags = ROOT_IMAGE_OVERLAY | ROOT_IMAGE_MOUNTED;
+	if (lower.p_mount->m_flags & MOUNT_READ_ONLY)
+		result->flags |= ROOT_IMAGE_READ_ONLY;
+	backing = NULL;
+	if (lower.p_mount->m_disk == NULL)
+		error = EOPNOTSUPP;
+	else {
+		result->loop_device = lower.p_mount->m_disk->d_dev;
+		error = drv_loop_backing_file_ref(lower.p_mount->m_disk, &backing, &flags);
+	}
+
+	/* File identity is retained under its inode lock, never reconstructed by name. */
+	if (error == 0) {
+		mutex_lock(&backing->f_inode->i_lock);
+		error = inode_getattr(backing->f_inode, &status);
+		mutex_unlock(&backing->f_inode->i_lock);
+		if (error == 0) {
+			if (!S_ISREG(status.st_mode) || status.st_size <= 0)
+				error = EINVAL;
+			else {
+				result->backing_device = status.st_dev;
+				result->backing_inode = status.st_ino;
+				result->backing_bytes = (uint64_t)status.st_size;
+				if (flags & LOOP_READ_ONLY)
+					result->flags |= ROOT_IMAGE_LOOP_READ_ONLY;
+			}
+		}
+		close_error = file_close(backing);
+		if (error == 0)
+			error = close_error;
+	} else if (error == EOPNOTSUPP) {
+		/* An overlay on a plain filesystem is not a mounted root image. */
+		error = 0;
+	}
+	path_release(&lower);
+	mount_release(root);
+	return error;
+}
 
 /*
  * Brings up the VFS from the boot handoff.
@@ -284,6 +355,12 @@ kern_vfs_init(
 	}
 
 #endif
+	error = drv_memory_device_register();
+	if (error != 0) {
+		error = vfs_fail("register memory devices", error);
+		return error;
+	}
+
 	error = drv_system_device_register();
 	if (error != 0) {
 		error = vfs_fail("register system", error);

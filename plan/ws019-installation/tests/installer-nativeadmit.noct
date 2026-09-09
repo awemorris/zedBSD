@@ -1,0 +1,78 @@
+require nativeadmit;
+func naCheck(ok, text) { if (!ok) { System.error(text); } }
+func naFixture() {
+    return {disk:{name:"nvme0n1", id:2, parent:0, flags:0, sectorSize:512, sectors:524288L, offset:0},
+        source:{name:"sda", id:1, parent:0},
+        sizes:{loader:1048576L, kernel:8388608L, tree:33554432L, objects:1000, swap:33554432L},
+        ids:["aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "cccccccc-bbbb-4ccc-8ddd-eeeeeeeeeeee"]};
+}
+func naQuery(context, argv) {
+    context.calls = context.calls + 1;
+    var native = argv[2] == "ufs";
+    naCheck(argv[0] == "/sbin/mkfs" && argv[1] == "-t", "unexpected command");
+    var index = 3;
+    var profile = "fat32";
+    if (native) { index = 4; profile = "ufs-native"; naCheck(argv[3] == "--profile=native", "profile"); }
+    naCheck(argv[index] == "--check-size" && Array.size(argv) == index + 2, "query operands");
+    var bytes = instNumber(argv[index + 1], 10);
+    var unit = 512;
+    var inodes = 0;
+    var free = bytes - 1048576L;
+    if (native) { unit = 8192; inodes = 1021; }
+    if (context.mode == "exact" || context.mode == "root-short" ||
+        context.mode == "inode-short" || context.mode == "esp-short") {
+        if (native) { free = 142409728L; inodes = 1008; }
+        else { free = 9438720L; }
+    }
+    if (context.mode == "root-short" && native) { free = free - unit; }
+    if (context.mode == "inode-short" && native) { inodes = inodes - 1; }
+    if (context.mode == "esp-short" && !native) { free = free - unit; }
+    var fields = ["format", "1", profile, "512", "" + bytes, "" + free, "" + inodes, "" + unit];
+    if (context.mode == "tag") { fields[0] = "other"; }
+    if (context.mode == "version") { fields[1] = "2"; }
+    if (context.mode == "profile") { fields[2] = "ufs"; }
+    if (context.mode == "sector") { fields[3] = "4096"; }
+    if (context.mode == "bytes") { fields[4] = "" + (bytes - 512); }
+    if (context.mode == "free-overflow") { fields[5] = "9223372036854775808"; }
+    if (context.mode == "free-larger") { fields[5] = "" + (bytes + 512); }
+    if (context.mode == "free-negative") { fields[5] = "-1"; }
+    if (context.mode == "free-align") { fields[5] = "" + (free - 1); }
+    if (context.mode == "inode-overflow") { fields[6] = "4294967296"; }
+    if (context.mode == "fat-inodes" && !native) { fields[6] = "1"; }
+    if (context.mode == "native-inodes" && native) { fields[6] = "0"; }
+    if (context.mode == "unit-zero") { fields[7] = "0"; }
+    if (context.mode == "unit-odd") { fields[7] = "768"; }
+    if (context.mode == "native-unit" && native) { fields[7] = "512"; }
+    if (context.mode == "unit-large") { fields[7] = "65536"; }
+    if (context.mode == "short") { Array.pop(fields); }
+    if (context.mode == "extra") { Array.push(fields, "0"); }
+    if (context.mode == "error") { System.error("query failed"); }
+    var text = "";
+    for (i in 0..Array.size(fields)) {
+        if (i != 0) { text = text + "\t"; }
+        text = text + fields[i];
+    }
+    if (context.mode == "no-newline") { return text; }
+    if (context.mode == "duplicate") { return text + "\n" + text + "\n"; }
+    if (context.mode == "empty") { return ""; }
+    return text + "\n";
+}
+func naRun(mode, unused) {
+    var f = naFixture();
+    var context = {mode:mode, calls:0};
+    var plan = instNativeAdmittedPlan(f.disk, f.source, f.sizes, f.ids, naQuery, context);
+    naCheck(context.calls == 2 && !plan.requiresFormatAdmission, "admission incomplete");
+    return plan;
+}
+func main(args) {
+    naRun("normal", 0);
+    var exact = naRun("exact", 0);
+    naCheck(exact.capacity.inodesRequired == 1008, "inode accounting");
+    var cases = ["root-short", "inode-short", "esp-short", "tag", "version", "profile", "sector",
+        "bytes", "free-overflow", "free-larger", "free-negative", "free-align", "inode-overflow",
+        "fat-inodes", "native-inodes", "unit-zero", "unit-odd", "native-unit", "unit-large",
+        "short", "extra", "error", "no-newline", "duplicate", "empty"];
+    for (mode in cases) { naCheck(!System.pcall(naRun, mode, 0).ok, "accepted " + mode); }
+    print("native formatter admission PASS: 2 accepted, " + Array.size(cases) + " refused");
+}

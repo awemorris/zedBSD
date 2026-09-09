@@ -46,7 +46,7 @@
 extern uint8_t zbl_transition_start[];
 extern uint8_t zbl_transition_end[];
 
-_Static_assert(ZBL6_HANDOFF_V6_UEFI_SIZE <=
+_Static_assert(ZBL6_HANDOFF_V7_UEFI_SIZE <=
 	       MEMORY_RANGES_OFFSET - HANDOFF_OFFSET,
 	       "UEFI parameter handoff must fit its low-memory slot");
 
@@ -72,6 +72,7 @@ struct loader_context {
 };
 
 struct discovered_volume {
+	struct boot_provenance provenance;
 	EFI_HANDLE handle;
 	EFI_FILE_PROTOCOL *root;
 	EFI_FILE_PROTOCOL *config;
@@ -701,6 +702,13 @@ discover_config_volume(struct loader_context *context,
 		console_hex64(context, "A64 CFG MATCHES ",
 		    selection.match_count);
 	}
+	discovered->provenance.version = ZEDBSD_BOOT_PROVENANCE_VERSION;
+	discovered->provenance.config_matches = (uint32_t)selection.match_count;
+	if (!zbl_uefi_partition_identity_copy(&loaded_path,
+	    &discovered->provenance.firmware) ||
+	    !zbl_uefi_partition_identity_copy(&selected_path,
+	    &discovered->provenance.configuration))
+		return discovery_abort(&selection, EFI_LOAD_ERROR);
 	discovered->match_count = selection.match_count;
 	if (!zbl_uefi_volume_selection_take(&selection, &selected))
 		return discovery_abort(&selection, EFI_LOAD_ERROR);
@@ -878,7 +886,8 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 		const struct zbl6_framebuffer *framebuffer,
 		const struct zbl_uefi_framebuffer_mapping *framebuffer_mapping,
 		uint32_t boot_volume_serial, uint8_t partition_scheme,
-		const struct zedbsd_boot_parameter_record *parameters)
+		const struct zedbsd_boot_parameter_record *parameters,
+		const struct boot_provenance *provenance)
 {
 	uint8_t *low = (void *)(uintptr_t)low_base;
 	uint64_t *pml4 = (void *)(low + LOW_PML4_OFFSET);
@@ -887,7 +896,7 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 	uint64_t *high_pdpt = (void *)(low + HIGH_PDPT_OFFSET);
 	uint64_t *high_pd = (void *)(low + HIGH_PD_OFFSET);
 	uint64_t *framebuffer_pd = (void *)(low + FRAMEBUFFER_PD_OFFSET);
-	struct zbl6_handoff_v6_uefi *handoff =
+	struct zbl6_handoff_v7_uefi *handoff =
 	    (void *)(low + HANDOFF_OFFSET);
 	struct zbl6_handoff_v3 *common = &handoff->prefix.common.common;
 	UINTN transition_size =
@@ -925,7 +934,7 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 		    (framebuffer_aligned + (uint64_t)index * 0x200000ULL) |
 		    PTE_PRESENT | PTE_WRITE | PTE_LARGE;
 	common->magic = ZBL6_HANDOFF_MAGIC;
-	common->version = ZBL6_HANDOFF_V6_VERSION;
+	common->version = ZBL6_HANDOFF_V7_VERSION;
 	common->size = sizeof(*handoff);
 	common->flags = ZBL6_HANDOFF_FLAG_UEFI |
 			ZBL6_HANDOFF_FLAG_MEMORY_MAP |
@@ -951,6 +960,7 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 	common->framebuffer_format = framebuffer->format;
 	handoff->prefix.common.boot_volume_serial = boot_volume_serial;
 	byte_copy(&handoff->prefix.parameters, parameters, sizeof(*parameters));
+	byte_copy(&handoff->provenance, provenance, sizeof(*provenance));
 }
 
 EFI_STATUS EFIAPI
@@ -973,7 +983,7 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	UINT32 descriptor_version;
 	UINT64 kernel_file_size;
 	EFI_MEMORY_DESCRIPTOR *map = 0;
-	struct zbl6_handoff_v6_uefi *handoff;
+	struct zbl6_handoff_v7_uefi *handoff;
 	struct zbl6_handoff_v3 *handoff_common;
 	struct zbl6_framebuffer framebuffer;
 	struct zbl_uefi_framebuffer_mapping framebuffer_mapping;
@@ -1085,7 +1095,7 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	low_pages_allocated = 1;
 	build_bootstrap(low_address, &plan, &framebuffer, &framebuffer_mapping,
 	    discovered.fat.volume_serial, (uint8_t)discovered.path.style,
-	    &configuration.parameter_record);
+	    &configuration.parameter_record, &discovered.provenance);
 	handoff = (void *)(uintptr_t)(low_address + HANDOFF_OFFSET);
 	handoff_common = &handoff->prefix.common.common;
 	ranges = (void *)(uintptr_t)(low_address + MEMORY_RANGES_OFFSET);

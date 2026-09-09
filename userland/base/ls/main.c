@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #define LS_PATH_CAPACITY 1024U
@@ -59,6 +60,7 @@ static int leap(long long y);
 static void print_name(const struct entry *item, const struct options *o);
 static char suffix(mode_t mode);
 static void free_entries(struct entry *items, size_t count);
+static int finish_output(int failed);
 
 /*
  * Runs the ls command.
@@ -140,7 +142,7 @@ main(
 		function_result = list_operand(".", &o, 0) ? 0 : 1;
 
 		/* Returns the computed result. */
-		return function_result;
+		return finish_output(function_result);
 	}
 
 	/* Process each remaining command-line operand. */
@@ -155,6 +157,21 @@ main(
 	}
 
 	/* Returns the computed result. */
+	return finish_output(failed);
+}
+
+/* Reports delayed output errors instead of accepting a partial listing. */
+static int
+finish_output(
+	int failed)
+{
+	int error;
+
+	/* Drains buffered names before publishing the command exit status. */
+	error = fflush(stdout);
+	if (error != 0 || ferror(stdout))
+		return 1;
+
 	return failed;
 }
 
@@ -316,11 +333,16 @@ load(
 		if (o->all && dot < 2U) {
 			name = dots[dot++];
 		} else {
+			/* Distinguishes an incomplete enumeration from its normal end. */
+			errno = 0;
 			de = readdir(d);
 
-			/* Handles the de condition. */
-			if (!de)
+			/* Refuses to publish a partial list after a directory read error. */
+			if (!de) {
+				if (errno != 0)
+					goto failed;
 				break;
+			}
 			name = de->d_name;
 
 			/* Handles the o condition. */

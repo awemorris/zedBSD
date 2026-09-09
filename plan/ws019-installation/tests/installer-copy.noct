@@ -1,0 +1,85 @@
+require copy;
+func copyCheck(ok, message) { if (!ok) { System.error("copy test: " + message); } }
+func copyOpen(c, path, mode) {
+    var s = c.ops.test;
+    s.opens = s.opens + 1;
+    if (s.fault == "open" + s.opens) { System.error("open fault"); }
+    return s.opens;
+}
+func copyClose(c, handle) {
+    var s = c.ops.test;
+    Array.push(s.closed, handle);
+    if (s.fault == "close" + handle) { System.error("close fault"); }
+    return true;
+}
+func copyRead(c, requested) {
+    var s = c.ops.test;
+    copyCheck(requested > 0 && requested <= 65536, "read bound");
+    if (s.fault == "read") { System.error("read fault"); }
+    var count = s.size - s.read;
+    if (count > requested) { count = requested; }
+    if (s.fragment != 0 && count > s.fragment) { count = s.fragment; }
+    if (s.fault == "early") { System.error("early EOF"); }
+    if (s.fault == "growth" && count == 0) { count = 1; }
+    if (s.fault == "oversize") { count = requested + 1; }
+    var data = Packed.uint8(count);
+    for (i in 0..count) { data[i] = (s.read + i) % 251; }
+    s.read = s.read + count;
+    return data;
+}
+func copyWrite(c, data, offset, count) {
+    var s = c.ops.test;
+    if (s.fault == "write") { System.error("write fault"); }
+    if (s.fault == "zero") { return 0; }
+    if (s.fault == "overwrite") { return count + 1; }
+    if (s.fragment != 0 && count > 7) { count = 7; }
+    for (i in 0..count) { copyCheck(data[offset + i] == (s.written + i) % 251, "bytes"); }
+    s.written = s.written + count;
+    return count;
+}
+func copyProgress(c, done, total) {
+    var s = c.ops.test;
+    if (s.fault == "progress") { System.error("progress fault"); }
+    copyCheck(done >= s.progress && done <= total, "monotonic progress");
+    s.progress = done;
+}
+func copyInvoke(c, unused) {
+    return instCopyWithOperations(c, "source", "target", c.test.size, "test");
+}
+func copySize(c) {
+    var s = c.ops.test;
+    if (s.fault == "growth") { return s.size + 1; }
+    return s.size;
+}
+func main(args) {
+    var cases = 0;
+    for (size in [0, 1, 65535, 65536, 65537, 2097153]) {
+        for (fault in ["", "open1", "open2", "read", "write", "zero", "overwrite",
+            "early", "growth", "oversize", "close1", "close2", "progress"]) {
+            if (size == 0 && (fault == "write" || fault == "zero" || fault == "read" ||
+                fault == "oversize" || fault == "overwrite" || fault == "early")) { continue; }
+            var state = {size:size, read:0, written:0, opens:0, closed:[],
+                progress:0, fault:fault, fragment:0};
+            var ops = {open:copyOpen, close:copyClose, read:copyRead,
+                write:copyWrite, progress:copyProgress, sourceSize:copySize, test:state};
+            var result = System.pcall(copyInvoke, ops, 0);
+            if (!result.ok && fault == "") { print(result.message); }
+            copyCheck(result.ok == (fault == ""), "failure outcome " + fault);
+            var closed = 2;
+            if (fault == "open1") { closed = 0; }
+            if (fault == "open2") { closed = 1; }
+            copyCheck(Array.size(state.closed) == closed, "all handles closed " + fault);
+            if (fault == "") {
+                copyCheck(state.written == size && state.progress == size, "complete extent");
+            }
+            cases = cases + 1;
+        }
+    }
+    var state = {size:65537, read:0, written:0, opens:0, closed:[],
+        progress:0, fault:"", fragment:13};
+    var ops = {open:copyOpen, close:copyClose, read:copyRead,
+        write:copyWrite, progress:copyProgress, sourceSize:copySize, test:state};
+    copyInvoke(ops, 0);
+    copyCheck(state.written == 65537 && Array.size(state.closed) == 2, "partial IO");
+    print("installer copy PASS " + (cases + 1) + " cases");
+}

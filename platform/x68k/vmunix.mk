@@ -127,7 +127,7 @@ X68K_KERNEL_SOURCES := \
 	src/drivers/generic/console.c src/drivers/generic/input.c \
 	src/kern/locale-record.c \
 	src/kern/tty.c \
- src/drivers/generic/system-device.c src/kern/shutdown.c \
+ src/drivers/generic/system-device.c src/drivers/generic/memory-device.c src/kern/shutdown.c \
 	src/kern/init.c
 X68K_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
 	$(KERN_UFS_SOURCES)

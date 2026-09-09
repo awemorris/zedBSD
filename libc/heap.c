@@ -31,6 +31,96 @@ struct heap_block {
 static struct heap_allocator default_heap;
 static struct heap_allocator *active_heap = &default_heap;
 
+#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+/* Private kernel builds override this hook with a non-allocating ring writer. */
+__attribute__((weak)) void
+__heap_trace_pointer_walk(void *pointer, void *caller)
+{
+	(void)pointer;
+	(void)caller;
+}
+
+/*
+ * Linear physical-chain validation for the private kernel provenance build.
+ * Check the expected in-range address before dereferencing each link, so a
+ * cycle or foreign link is reported without following it indefinitely.
+ */
+int
+heap_allocator_trace_validate(const struct heap_allocator *heap)
+{
+	const struct heap_block *block;
+	const struct heap_block *free_block;
+	const struct heap_block *previous;
+	const struct heap_block *previous_free;
+	uintptr_t expected;
+	uintptr_t end;
+	size_t block_limit;
+	size_t free_count;
+	size_t free_steps;
+	size_t physical_steps;
+	size_t used;
+	size_t header;
+
+	if (heap->begin == NULL)
+		return heap->first == NULL;
+	header = (sizeof(struct heap_block) + HEAP_ALIGNMENT - 1U) &
+	    ~(size_t)(HEAP_ALIGNMENT - 1U);
+	expected = (uintptr_t)heap->begin;
+	end = (uintptr_t)heap->end;
+	previous = NULL;
+	used = 0;
+	free_count = 0;
+	physical_steps = 0;
+	block_limit = (end - expected) / header + 1U;
+	for (block = heap->first; block != NULL; block = block->next_physical) {
+		if (++physical_steps > block_limit)
+			return 0;
+		if ((uintptr_t)block != expected || expected > end ||
+		    expected % HEAP_ALIGNMENT != 0 ||
+		    end - expected < header)
+			return 0;
+		if (block->magic != HEAP_MAGIC ||
+		    block->previous_physical != previous ||
+		    block->capacity > end - expected - header ||
+		    block->used > block->capacity)
+			return 0;
+		if (block->state != HEAP_FREE && block->state != HEAP_USED)
+			return 0;
+		if (block->state == HEAP_USED)
+			used += block->used;
+		else
+			free_count++;
+		expected += header + block->capacity;
+		previous = block;
+	}
+	if (expected != end || used != heap->current_bytes)
+		return 0;
+	previous_free = NULL;
+	free_steps = 0;
+	for (free_block = heap->free_list; free_block != NULL;
+	     free_block = free_block->next_free) {
+		int found = 0;
+		if (++free_steps > block_limit || free_steps > free_count)
+			return 0;
+		physical_steps = 0;
+		for (block = heap->first; block != NULL;
+		     block = block->next_physical) {
+			if (++physical_steps > block_limit)
+				return 0;
+			if (block == free_block) {
+				found = 1;
+				break;
+			}
+		}
+		if (!found || free_block->state != HEAP_FREE ||
+		    free_block->previous_free != previous_free)
+			return 0;
+		previous_free = free_block;
+	}
+	return free_steps == free_count;
+}
+#endif
+
 __attribute__((weak)) void __libc_heap_lock(void) { }
 __attribute__((weak)) void __libc_heap_unlock(void) { }
 
@@ -124,6 +214,10 @@ pointer_block(const struct heap_allocator *heap, void *pointer)
 	struct heap_block *block;
 	struct heap_block *cursor;
 	uint8_t *bytes = pointer;
+#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+	size_t limit;
+	size_t steps = 0;
+#endif
 
 	if (heap == NULL || pointer == NULL || heap->begin == NULL ||
 	    bytes < heap->begin + block_header_size() || bytes >= heap->end)
@@ -132,10 +226,18 @@ pointer_block(const struct heap_allocator *heap, void *pointer)
 	if ((uintptr_t)block % HEAP_ALIGNMENT != 0 ||
 	    block->magic != HEAP_MAGIC || block_payload(block) != bytes)
 		return NULL;
+#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+	limit = (size_t)(heap->end - heap->begin) / block_header_size() + 1U;
+#endif
 	for (cursor = heap->first; cursor != NULL;
-	     cursor = cursor->next_physical)
+	     cursor = cursor->next_physical) {
+#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+		if (++steps > limit)
+			return NULL;
+#endif
 		if (cursor == block)
 			return block;
+	}
 	return NULL;
 }
 
@@ -456,6 +558,9 @@ heap_allocator_free(struct heap_allocator *heap, void *pointer)
 		return;
 	if (heap == NULL)
 		return;
+#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+	__heap_trace_pointer_walk(pointer, __builtin_return_address(0));
+#endif
 	block = pointer_block(heap, pointer);
 	if (block == NULL || block->state != HEAP_USED) {
 		heap->errors++;

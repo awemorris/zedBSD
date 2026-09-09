@@ -551,12 +551,75 @@ test_fixed_disk_no_medium_is_not_an_idle_reader(void)
 	CHECK(diagnostic_occurrences("sense=02/3a/00") == 1U);
 }
 
+/* Root media remains referenced, but its class worker must not survive halt. */
+static void
+test_terminal_quiesce(void)
+{
+	struct drv_usb_interface interface;
+	struct usb_storage *storage;
+	struct disk disk;
+	struct bio bio;
+	unsigned calls;
+
+	fixture_reset(&interface, 1, 0x70U);
+	CHECK(storage_attach(&interface, &storage_ids[0]) == 0);
+	storage = interface.driver_data;
+	memset(&disk, 0, sizeof(disk));
+	disk.d_data = storage;
+	storage->disk = &disk;
+	storage->media_state = STORAGE_ONLINE;
+	calls = disk_calls;
+
+	/* Runtime detach refuses the referenced media without freeing its owner. */
+	CHECK(storage_detach(&interface, 0) != 0);
+	CHECK(storage->control_worker != NULL);
+	calls = disk_calls;
+
+	/* A failed worker join is reported, with all callback-visible state alive. */
+	control_hold_stop = 1;
+	CHECK(storage_quiesce(&interface) == EBUSY);
+	CHECK(storage->control_worker != NULL);
+	CHECK(storage->control_stopping == 1);
+	CHECK(storage->media_state == STORAGE_FAILED);
+	CHECK(storage->disk == &disk);
+	CHECK(disk_calls == calls);
+	CHECK(live_urbs == 3);
+	control_hold_stop = 0;
+	control_join_error = EIO;
+	CHECK(storage_quiesce(&interface) == EIO);
+	CHECK(storage->control_worker != NULL);
+	control_join_error = 0;
+	CHECK(storage_quiesce(&interface) == 0);
+	CHECK(storage->control_worker == NULL);
+	CHECK(control_live == 0);
+	CHECK(storage_quiesce(&interface) == 0);
+	CHECK(storage->disk == &disk);
+	CHECK(disk_calls == calls);
+	CHECK(live_urbs == 3);
+
+	/* Late block requests fail locally and never issue a BOT command. */
+	calls = ready_commands;
+	memset(&bio, 0, sizeof(bio));
+	bio.b_op = BIO_READ;
+	CHECK(storage_submit(&disk, &bio) == 0);
+	CHECK(bio_error == EIO);
+	CHECK(ready_commands == calls);
+	CHECK(diagnostic_occurrences("BOT CBW error") == 0);
+
+	/* Fixture disposal models a later release, not production terminal free. */
+	storage->disk = NULL;
+	CHECK(storage_detach(&interface, 0) == 0);
+	CHECK(live_urbs == 0);
+	CHECK(live_allocations == 0);
+}
+
 int
 main(void)
 {
 	test_current_no_medium_binds_idle();
 	test_deferred_no_medium_is_not_current_state();
 	test_fixed_disk_no_medium_is_not_an_idle_reader();
+	test_terminal_quiesce();
 	printf("USB storage no-medium production path: PASS (%u checks)\n",
 	    checks);
 	return 0;

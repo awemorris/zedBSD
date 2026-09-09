@@ -1,0 +1,14 @@
+require install;
+func main(args) {
+    if (Array.size(args) != 2) { System.error("usage: zedinst DISK PAYLOAD-PARTITION"); }
+    var result = instInstall(args[0], args[1]);
+    for (message in result.cleanup) { print("Cleanup incomplete: " + message); }
+    if (result.transaction != 0) {
+        for (path in result.transaction.published) { print("Published: " + path); }
+        for (path in result.transaction.uncertain) { print("Publication requires inspection: " + path); }
+        for (item in result.transaction.leftovers) { print("Preserved staging object: " + item.path); }
+    }
+    if (result.cancelled && Array.size(result.cleanup) == 0) { print("Installation cancelled."); return; }
+    if (!result.ok) { System.error("installation incomplete: " + result.message); }
+    print("Installation complete.");
+}

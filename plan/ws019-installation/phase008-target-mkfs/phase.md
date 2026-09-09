@@ -10,11 +10,11 @@ Combined ID: `ws019-p008`
 
 Status: completed in q079 after q078 implementation
 
-Planned successor: [WS024](../../ws024-unified-ufs/ws.md) records the user's
-2026-09-06 single-UFS/64-bit direction. Its p003 owns migration of this
-completed UFS1 formatter to `mkfs -t ufs FILE`, retaining the reservation and
-verification contract. The current command remains as recorded below until
-that later implementation is selected and completed.
+Current successor: WS024 completed the migration to the single 64-bit UFS
+format. The current command is `mkfs -t ufs FILE`; UFS1 is no longer accepted.
+The q079 completion below is historical UFS1 evidence, not acceptance of the
+current formatter. [p014](../phase014-current-ufs-formatter/phase.md) revalidates
+current userland-owned code and repairs any remaining installer/test mismatch.
 
 Parent: [WS019](../ws.md)
 

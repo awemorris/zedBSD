@@ -102,6 +102,7 @@ int unlink(const char *);
 int unlinkat(int, const char *, int);
 int rmdir(const char *);
 int renameat(int, const char *, int, const char *);
+int renameat2(int, const char *, int, const char *, unsigned);
 int link(const char *, const char *);
 int linkat(int, const char *, int, const char *, int);
 int symlink(const char *, const char *);

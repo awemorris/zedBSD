@@ -577,6 +577,7 @@ hal_task_context_switch(
 	/* Saves floating-point state and dispatches the assembly context switch. */
 	asm_fnsave(from->fpregs);
 	asm_frstor(to->fpregs);
+	i386_percpu_set_tls(hal_cpu_current(), to->tls);
 	asm_task_dispatch(&from->resume_esp, &to->resume_esp);
 }
 
@@ -610,9 +611,22 @@ hal_task_set_tls(
 	hal_task_t handle,
 	uintptr_t value)
 {
-	/* Updates only a valid task handle. */
-	if (handle != NULL)
-		((struct task_info *)handle)->tls = value;
+	uint16_t selector;
+	int irq_enabled;
+
+	if (handle == NULL)
+		return;
+
+	irq_enabled = hal_irq_disable();
+	((struct task_info *)handle)->tls = value;
+	if (handle == running_task) {
+		i386_percpu_set_tls(hal_cpu_current(), value);
+		/* Reload the hidden cache as well as the descriptor in memory. */
+		selector = SEG_USER_TLS | SEG_RPL_3;
+		__asm__ volatile("movw %0,%%gs" : : "r"(selector) : "memory");
+	}
+	if (irq_enabled)
+		hal_irq_enable();
 }
 
 /*
@@ -865,7 +879,7 @@ set_initial_resume_frame(
 		frame->ds = SEG_USER_DATA | SEG_RPL_3;
 		frame->es = SEG_USER_DATA | SEG_RPL_3;
 		frame->fs = SEG_USER_DATA | SEG_RPL_3;
-		frame->gs = SEG_USER_DATA | SEG_RPL_3;
+		frame->gs = SEG_USER_TLS | SEG_RPL_3;
 		frame->initial.user.eip = (uint32_t)start;
 		frame->initial.user.cs = SEG_USER_CODE | SEG_RPL_3;
 		frame->initial.user.eflags =

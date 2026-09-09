@@ -15,6 +15,7 @@
 #include <zedbsd/syscall.h>
 #include <errno.h>
 #include <signal.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -458,13 +459,15 @@ int
 raise(
 	int n)
 {
-	int function_result;
+	int error;
 
-	/* Obtains the kill result. */
-	function_result = kill(getpid(), n);
-
-	/* Returns the computed result. */
-	return function_result;
+	/* raise targets this thread, even in a multithreaded process. */
+	error = pthread_kill(pthread_self(), n);
+	if (error != 0) {
+		errno = error;
+		return -1;
+	}
+	return 0;
 }
 
 /*

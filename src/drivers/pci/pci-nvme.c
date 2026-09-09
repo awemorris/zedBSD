@@ -17,6 +17,7 @@
 #include <kern/atomic.h>
 #include <kern/clock.h>
 #include <kern/disk.h>
+#include <kern/io-pool.h>
 #include <kern/lock.h>
 #include <kern/page.h>
 #include <kern/sched.h>
@@ -33,6 +34,12 @@
 #define NVME_IO_QUEUE_ID 1U
 #define NVME_IO_BOUNCE_SIZE 4096U
 #define NVME_IO_MAX_SLOTS (NVME_IO_QUEUE_REQUESTED_DEPTH - 1U)
+#ifndef NVME_IO_PIPELINE_DEPTH
+#define NVME_IO_PIPELINE_DEPTH 4U
+#endif
+#if NVME_IO_PIPELINE_DEPTH < 1 || NVME_IO_PIPELINE_DEPTH > 8
+#error NVME_IO_PIPELINE_DEPTH must be between 1 and 8
+#endif
 #define NVME_PCI_COMMAND 0x04U
 #define NVME_PCI_COMMAND_ENABLE 0x0007U
 #define NVME_PCI_COMMAND_MEMORY 0x0002U
@@ -141,6 +148,13 @@ struct nvme_io_slot {
 	int error;
 };
 
+/* One logical chunk; its slot owns DMA until completion or quiescence. */
+struct nvme_io_chunk {
+	struct nvme_io_slot *slot;
+	uint8_t *bytes;
+	size_t length;
+};
+
 /* Lifecycle records embedded in each controller. */
 struct drv_nvme_detach_flush_lifecycle {
 	unsigned required;
@@ -229,6 +243,9 @@ struct nvme_controller {
 	uint32_t command_result;
 	int admin_fault;
 	unsigned io_pending;
+	/* Lifetime counters, read under command_lock or with all CPUs stopped. */
+	uint64_t io_commands_posted;
+	unsigned io_pending_high_water;
 	unsigned io_owned;
 	unsigned io_calls;
 	unsigned io_data_active;
@@ -421,10 +438,9 @@ static int nvme_io_begin_bio(struct nvme_controller *controller, enum bio_op ope
 static void nvme_io_end_bio(struct nvme_controller *controller, enum bio_op operation);
 static int nvme_io_command_id_in_use_locked(struct nvme_controller *controller, uint16_t command_id);
 static uint16_t nvme_io_next_command_id_locked(struct nvme_controller *controller);
-static int nvme_io_slot_acquire(struct nvme_controller *controller, struct nvme_io_slot **result);
+static int nvme_io_slot_acquire(struct nvme_controller *controller, struct nvme_io_slot **result, int may_wait);
 static int nvme_io_post(struct nvme_controller *controller, struct nvme_io_slot *slot, const struct drv_nvme_command *command, int uses_payload);
 static int nvme_io_wait_completion(struct nvme_controller *controller, struct nvme_io_slot *slot, int *recovery_owner);
-static int nvme_io_claim_recovery_locked(struct nvme_controller *controller);
 static void nvme_io_slot_release(struct nvme_controller *controller, struct nvme_io_slot *slot);
 static int nvme_io_execute(struct nvme_controller *controller, uint8_t opcode, uint64_t first_block, uint32_t block_count, void *bytes);
 static int nvme_io_flush_internal(struct nvme_controller *controller);
@@ -3969,7 +3985,8 @@ nvme_io_next_command_id_locked(
 static int
 nvme_io_slot_acquire(
 	struct nvme_controller *controller,
-	struct nvme_io_slot **result)
+	struct nvme_io_slot **result,
+	int may_wait)
 {
 	struct nvme_io_slot *slot;
 	uint16_t command_id;
@@ -4026,6 +4043,12 @@ nvme_io_slot_acquire(
 		/* Checks the operation status. */
 		if (error != 0)
 			break;
+
+		/* Reap our own commands before waiting for another caller's slot. */
+		if (!may_wait) {
+			error = EAGAIN;
+			break;
+		}
 
 		/* Checks the operation status. */
 		error = nvme_io_wait_locked(controller,
@@ -4094,6 +4117,9 @@ nvme_io_post(
 	controller->io_submission_tail = next;
 	slot->posted = 1;
 	controller->io_pending++;
+	controller->io_commands_posted++;
+	if (controller->io_pending > controller->io_pending_high_water)
+		controller->io_pending_high_water = controller->io_pending;
 	hal_io_wmb();
 	nvme_write32(controller, controller->io_submission_doorbell,
 		     controller->io_submission_tail);
@@ -4169,23 +4195,6 @@ nvme_io_wait_completion(
 	return 0;
 }
 
-/* Claims the right to recover the I/O path after a failure. */
-static int
-nvme_io_claim_recovery_locked(
-	struct nvme_controller *controller)
-{
-	/* Handles the controller condition. */
-	if (!controller->io_recovery_needed || controller->io_recovery_busy ||
-	    controller->detach_busy) {
-		/* Succeeded. */
-		return 0;
-	}
-	controller->io_recovery_busy = 1;
-
-	/* Reports operation failure. */
-	return 1;
-}
-
 /* Gives one command slot back. */
 static void
 nvme_io_slot_release(
@@ -4216,7 +4225,52 @@ nvme_io_slot_release(
 	spin_unlock_irqrestore(&controller->command_lock, irq);
 }
 
-/* Runs one I/O command from slot to completion. */
+/* Acquire and post, leaving every acquired slot for the caller to retire. */
+static int
+nvme_io_start(
+	struct nvme_controller *controller,
+	uint8_t opcode,
+	uint64_t first_block,
+	uint32_t block_count,
+	void *bytes,
+	int may_wait,
+	struct nvme_io_slot **result)
+{
+	struct drv_nvme_command command;
+	struct nvme_io_slot *slot;
+	unsigned long irq;
+	int error;
+
+	*result = NULL;
+	error = nvme_io_slot_acquire(controller, result, may_wait);
+	if (error != 0)
+		return error;
+	slot = *result;
+
+	if (opcode == DRV_NVME_NVM_WRITE) {
+		memcpy(slot->bounce_dma.address, bytes,
+		       (size_t)block_count * controller->namespace_block_size);
+	}
+
+	if (!drv_nvme_io_command(&command, slot->command_id, opcode,
+		controller->namespace_id, first_block, block_count,
+		opcode == DRV_NVME_NVM_FLUSH ? 0U :
+		    slot->bounce_dma.device_address) ||
+	    (opcode != DRV_NVME_NVM_FLUSH &&
+	     !drv_nvme_single_prp_transfer_valid(slot->bounce_dma.device_address,
+		controller->namespace_block_size, block_count,
+		controller->page_size))) {
+		irq = spin_lock_irqsave(&controller->command_lock);
+		nvme_io_fail_all_locked(controller, EINVAL);
+		spin_unlock_irqrestore(&controller->command_lock, irq);
+		return EINVAL;
+	}
+
+	return nvme_io_post(controller, slot, &command,
+	    opcode != DRV_NVME_NVM_FLUSH);
+}
+
+/* Internal and external FLUSH share the same slot and recovery machinery. */
 static int
 nvme_io_execute(
 	struct nvme_controller *controller,
@@ -4225,83 +4279,136 @@ nvme_io_execute(
 	uint32_t block_count,
 	void *bytes)
 {
-	unsigned long irq_local;
-	unsigned long irq_local1;
-	struct drv_nvme_command command;
 	struct nvme_io_slot *slot;
 	int recovery_owner;
 	int error;
 
-	/* Checks the operation status. */
-	error = nvme_io_slot_acquire(controller, &slot);
-	if (error != 0)
+	error = nvme_io_start(controller, opcode, first_block, block_count,
+	    bytes, 1, &slot);
+	if (slot == NULL)
 		return error;
 
-	/* Handles the opcode condition. */
-	if (opcode == DRV_NVME_NVM_WRITE) {
-		memcpy(slot->bounce_dma.address, bytes,
-		       (size_t)block_count * controller->namespace_block_size);
-	}
-
-	/* Checks the drv nvme io command result. */
-	if (!drv_nvme_io_command(&command, slot->command_id, opcode,
-				 controller->namespace_id, first_block,
-				 block_count,
-				 opcode == DRV_NVME_NVM_FLUSH
-					 ? 0U
-					 : slot->bounce_dma.device_address) ||
-	    (opcode != DRV_NVME_NVM_FLUSH &&
-	     !drv_nvme_single_prp_transfer_valid(
-		     slot->bounce_dma.device_address,
-		     controller->namespace_block_size, block_count,
-		     controller->page_size))) {
-		irq_local = spin_lock_irqsave(&controller->command_lock);
-
-		nvme_io_fail_all_locked(controller, EINVAL);
-		recovery_owner = nvme_io_claim_recovery_locked(controller);
-		spin_unlock_irqrestore(&controller->command_lock, irq_local);
-		nvme_io_slot_release(controller, slot);
-
-		/* Handles the recovery owner condition. */
-		if (recovery_owner)
-			(void)nvme_io_recover(controller);
-
-		/* Failed. */
-		return EINVAL;
-	}
-
-	/* Checks the operation status. */
-	error = nvme_io_post(controller, slot, &command,
-			     opcode != DRV_NVME_NVM_FLUSH);
-	if (error == 0) {
-		error = nvme_io_wait_completion(controller, slot,
-						&recovery_owner);
-	} else {
-		irq_local1 = spin_lock_irqsave(&controller->command_lock);
-
-		recovery_owner = nvme_io_claim_recovery_locked(controller);
-		spin_unlock_irqrestore(&controller->command_lock, irq_local1);
-	}
-
-	/* Checks the operation status. */
+	/* Failed posts also own a faulted slot and must participate in recovery. */
+	error = nvme_io_wait_completion(controller, slot, &recovery_owner);
 	if (error == 0 && opcode == DRV_NVME_NVM_READ) {
 		hal_io_rmb();
 		memcpy(bytes, slot->bounce_dma.address,
-		       (size_t)block_count * controller->namespace_block_size);
+		    (size_t)block_count * controller->namespace_block_size);
 	}
-
 	nvme_io_slot_release(controller, slot);
-
-	/* Handles the recovery owner condition. */
 	if (recovery_owner)
 		(void)nvme_io_recover(controller);
+	return error;
+}
 
-	/* Reports the failure. */
+/* Bound one BIO's concurrency without adding another DMA or CID owner. */
+static int
+nvme_io_pipeline(
+	struct nvme_controller *controller,
+	struct bio *bio,
+	size_t *transferred)
+{
+	struct nvme_io_chunk chunks[NVME_IO_PIPELINE_DEPTH];
+	struct nvme_io_chunk *entry;
+	struct nvme_io_slot *slot;
+	uint64_t block = bio->b_mapped_block;
+	uint32_t remaining = bio->b_block_count;
+	uint8_t *bytes = bio->b_data;
+	uint8_t opcode;
+	uint32_t count;
+	unsigned head = 0;
+	unsigned pending = 0;
+	unsigned index;
+	unsigned scan;
+	unsigned long irq;
+	int stopped = 0;
+	int launch_error = 0;
+	int error = 0;
+	int current;
+	int claimed;
+	int recovery_owner = 0;
+
+	opcode = bio->b_op == BIO_READ ? DRV_NVME_NVM_READ : DRV_NVME_NVM_WRITE;
+	*transferred = 0;
+	while (remaining != 0U || pending != 0U) {
+		while (!stopped && remaining != 0U &&
+		    pending < NVME_IO_PIPELINE_DEPTH) {
+			/* Notice a later CQ error before replenishing earlier successes. */
+			irq = spin_lock_irqsave(&controller->command_lock);
+			for (scan = 0; scan < pending; scan++) {
+				index = (head + scan) % NVME_IO_PIPELINE_DEPTH;
+				if (chunks[index].slot->error != 0)
+					stopped = 1;
+			}
+			spin_unlock_irqrestore(&controller->command_lock, irq);
+			if (stopped)
+				break;
+
+			count = drv_nvme_io_chunk_blocks(remaining,
+			    controller->namespace_block_size, NVME_IO_BOUNCE_SIZE,
+			    controller->maximum_transfer_bytes);
+			if (count == 0U) {
+				launch_error = EINVAL;
+				stopped = 1;
+				break;
+			}
+
+			current = nvme_io_start(controller, opcode, block, count,
+			    bytes, pending == 0U, &slot);
+			/* No blocking acquisition while this BIO has slots to drain. */
+			if (current == EAGAIN && slot == NULL && pending != 0U)
+				break;
+			if (slot == NULL) {
+				launch_error = current;
+				stopped = 1;
+				break;
+			}
+
+			index = (head + pending) % NVME_IO_PIPELINE_DEPTH;
+			entry = &chunks[index];
+			entry->slot = slot;
+			entry->bytes = bytes;
+			entry->length = (size_t)count * controller->namespace_block_size;
+			pending++;
+			block += count;
+			remaining -= count;
+			bytes += entry->length;
+			if (current != 0)
+				stopped = 1;
+		}
+
+		if (pending == 0U)
+			break;
+		/* Reap in logical order; IRQ completion remains CID-based. */
+		entry = &chunks[head];
+		current = nvme_io_wait_completion(controller, entry->slot, &claimed);
+		if (claimed)
+			recovery_owner = 1;
+		if (current != 0) {
+			if (error == 0)
+				error = current;
+			stopped = 1;
+		}
+		/* Report only the successful prefix, even if later writes completed. */
+		if (error == 0) {
+			if (opcode == DRV_NVME_NVM_READ) {
+				hal_io_rmb();
+				memcpy(entry->bytes, entry->slot->bounce_dma.address,
+				    entry->length);
+			}
+			*transferred += entry->length;
+		}
+		nvme_io_slot_release(controller, entry->slot);
+		head = (head + 1U) % NVME_IO_PIPELINE_DEPTH;
+		pending--;
+	}
+
+	/* Recovery waits for io_owned == 0, including all of this BIO's slots. */
+	if (recovery_owner)
+		(void)nvme_io_recover(controller);
 	if (error != 0)
 		return error;
-
-	/* Succeeded. */
-	return 0;
+	return launch_error;
 }
 
 /* Serves one block request against this namespace. */
@@ -4310,12 +4417,7 @@ nvme_disk_submit(
 	struct disk *disk,
 	struct bio *bio)
 {
-	uint32_t chunk;
-	size_t chunk_bytes;
 	struct nvme_controller *controller;
-	uint64_t block;
-	uint32_t remaining;
-	uint8_t *bytes;
 	size_t transferred = 0;
 	int owned;
 	int error;
@@ -4357,37 +4459,7 @@ nvme_disk_submit(
 		error = nvme_io_execute(controller, DRV_NVME_NVM_FLUSH, 0U, 0U,
 					NULL);
 	} else {
-		block = bio->b_mapped_block;
-		remaining = bio->b_block_count;
-		bytes = bio->b_data;
-		/* Continue while the operation condition remains true. */
-		while (remaining != 0U) {
-			/* Handles the chunk condition. */
-			chunk = drv_nvme_io_chunk_blocks(
-				remaining, controller->namespace_block_size,
-				NVME_IO_BOUNCE_SIZE,
-				controller->maximum_transfer_bytes);
-			if (chunk == 0U) {
-				error = EINVAL;
-				break;
-			}
-
-			chunk_bytes = (size_t)chunk *
-				      controller->namespace_block_size;
-
-			/* Checks the operation status. */
-			error = nvme_io_execute(controller,
-						bio->b_op == BIO_READ
-							? DRV_NVME_NVM_READ
-							: DRV_NVME_NVM_WRITE,
-						block, chunk, bytes);
-			if (error != 0)
-				break;
-			block += chunk;
-			remaining -= chunk;
-			bytes += chunk_bytes;
-			transferred += chunk_bytes;
-		}
+		error = nvme_io_pipeline(controller, bio, &transferred);
 	}
 
 	nvme_io_end_bio(controller, bio->b_op);
@@ -4540,9 +4612,8 @@ nvme_probe_namespace(
 	disk->d_flags = 0;
 	disk->d_block_size = controller->namespace_block_size;
 	disk->d_block_count = namespace_profile.block_count;
-	disk->d_max_transfer_blocks =
-		(uint32_t)(controller->maximum_transfer_bytes /
-			   disk->d_block_size);
+	/* The BIO may span commands; MDTS and PRP limits apply to each chunk. */
+	disk->d_max_transfer_blocks = KERN_IO_BATCH_MAX / disk->d_block_size;
 	disk->d_ops = &nvme_disk_ops;
 	disk->d_data = controller;
 

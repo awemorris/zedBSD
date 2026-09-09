@@ -90,6 +90,13 @@ archive and applies only the explicitly authorized tracked target final-link
 patch during strict extraction; the patch is not a BeUI adapter and is not a
 new zedBSD-owned fork.
 
+### Current source update (q155)
+
+WS019-p023 updates both verified archive extractions to post-2.0.1 commit
+`bb239816e20294c073702dc127142f6767375072` for LP64 File.seek. See
+[build and native acceptance](../ws019-installation/phase023-noct-large-seek/results.md).
+The following q063 identities are historical evidence, not the current pin.
+
 ### Q063 completion record
 
 Official release `v2.0.1`, tag commit

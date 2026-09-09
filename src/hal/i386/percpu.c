@@ -22,7 +22,7 @@ struct gdtr {
 	uint32_t base;
 } __attribute__((packed));
 
-static uint64_t gdts[I386_APIC_MAX_CPUS][6] __attribute__((aligned(16)));
+static uint64_t gdts[I386_APIC_MAX_CPUS][7] __attribute__((aligned(16)));
 static uint8_t tsses[I386_APIC_MAX_CPUS][104] __attribute__((aligned(16)));
 
 static uint64_t tss_descriptor(uintptr_t base_address);
@@ -49,6 +49,7 @@ i386_percpu_init(
 	gdts[cpu][2] = 0x00cf92000000ffffULL;
 	gdts[cpu][3] = 0x00cff8000000ffffULL;
 	gdts[cpu][4] = 0x00cff2000000ffffULL;
+	gdts[cpu][6] = 0x00cff2000000ffffULL;
 
 	/* Initializes the CPU's task-state segment and kernel stack. */
 	hal_memset(tsses[cpu], 0, sizeof(tsses[cpu]));
@@ -109,4 +110,22 @@ tss_descriptor(
 
 	/* Returns the complete descriptor image. */
 	return descriptor;
+}
+
+/* Publishes the next user TLS base into this CPU's descriptor table. */
+void
+i386_percpu_set_tls(
+	hal_cpu_id_t cpu,
+	uintptr_t base)
+{
+	uint64_t descriptor;
+
+	if (cpu >= I386_APIC_MAX_CPUS)
+		HAL_FATAL("invalid i386 TLS CPU");
+
+	descriptor = 0x00cff2000000ffffULL;
+	descriptor |= (uint64_t)(base & 0xffffU) << 16;
+	descriptor |= (uint64_t)((base >> 16) & 0xffU) << 32;
+	descriptor |= (uint64_t)((base >> 24) & 0xffU) << 56;
+	gdts[cpu][6] = descriptor;
 }

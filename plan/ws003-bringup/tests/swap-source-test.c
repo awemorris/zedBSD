@@ -22,7 +22,9 @@
 #define TEST_IO_RECORDS 128U
 #define TEST_FILE_EXTENTS 1025U
 
-const struct filesystem_type drv_fat_filesystem_type;
+const struct filesystem_type drv_fat_filesystem_type = {
+	.file_extents = drv_fat_file_extents
+};
 
 struct test_io_record {
 	int write;
@@ -747,7 +749,7 @@ allocate_worker(void *argument)
 	return NULL;
 }
 
-struct io_context {
+struct swap_test_io_context {
 	struct swap_backend *backend;
 	uint32_t slot;
 	uint32_t expected;
@@ -758,7 +760,7 @@ struct io_context {
 static void *
 io_worker(void *argument)
 {
-	struct io_context *context = argument;
+	struct swap_test_io_context *context = argument;
 	unsigned loop;
 
 	for (loop = 0; loop < context->loops; loop++) {
@@ -848,7 +850,7 @@ test_aggregate_and_concurrency(void)
 	struct disk first_disk = { .d_dev = 1U };
 	struct disk second_disk = { .d_dev = 2U };
 	struct allocation_context allocation;
-	struct io_context io[4];
+	struct swap_test_io_context io[4];
 	pthread_t threads[4];
 	uint32_t slots[5];
 	uint32_t value;
@@ -1000,7 +1002,8 @@ test_raw_source(void)
 	kern_swap_source_init(&source);
 	assert(kern_swap_source_prepare_raw(&disk, 2U, &source) == 0);
 	assert(source.slot_count == 2U && source.parameter_index == 2U);
-	assert(state.opens == 1U && state.open_handles == 1U && state.refs == 1U);
+	/* Both the prepared claim and the raw source retain the backing disk. */
+	assert(state.opens == 1U && state.open_handles == 1U && state.refs == 2U);
 	kern_swap_source_set_init(&set);
 	assert(kern_swap_source_set_add(&set, &source) == 0);
 	assert(kern_swap_source_set_activate(&set) == 0);
@@ -1028,7 +1031,7 @@ test_raw_source(void)
 	swap_free_slot(&set.backend, boundary_slot);
 	assert(kern_swap_source_set_abort(&set) == 0);
 	assert(state.flushes == 1U && state.closes == 1U &&
-	    state.releases == 1U && state.open_handles == 0U);
+	    state.releases == 2U && state.open_handles == 0U);
 	test_disk_fini(&state);
 
 	test_disk_init(&disk, &state, 81U, 4096U, 3U, DISK_PARTITION);
@@ -1229,8 +1232,8 @@ test_duplicate_and_partial_unwind(void)
 	assert(kern_swap_source_set_add(&set, &second) == EEXIST);
 	kern_swap_source_destroy(&second);
 	assert(kern_swap_source_set_abort(&set) == 0);
-	assert(state_a.closes == 1U && state_a.releases == 1U);
-	assert(state_b.closes == 1U && state_b.releases == 1U);
+	assert(state_a.closes == 1U && state_a.releases == 2U);
+	assert(state_b.closes == 1U && state_b.releases == 2U);
 	test_disk_fini(&state_a);
 	test_disk_fini(&state_b);
 
@@ -1250,7 +1253,7 @@ test_duplicate_and_partial_unwind(void)
 	assert(kern_swap_source_set_activate(&set) == EBUSY);
 	assert(set.active == 0U && set.count == 0U);
 	assert(state_partial.flushes == 0U && state_partial.closes == 1U &&
-	    state_partial.releases == 1U);
+	    state_partial.releases == 2U);
 	assert(kern_swap_source_set_abort(&blocker) == 0);
 	test_disk_fini(&state_partial);
 }

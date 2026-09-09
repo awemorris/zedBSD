@@ -18,8 +18,9 @@ for mode in normal sanitize; do
 		"$repo/src/kern/file.c" \
 		"$repo/src/kern/backing-claim.c" \
 		"$repo/src/kern/vm.c" \
+		"$repo/src/kern/cache.c" \
 		"$repo/src/kern/vmspace.c" \
-		"$repo/plan/ws019-installation/tests/format-reservation-test.c" \
+		"$repo/plan/ws019-installation/tests/reservation-current-host.c" \
 		-Wl,--gc-sections -pthread "$repo/src/kern/io.c" -o "$out/$mode"
 	timeout 30 "$out/$mode"
 done

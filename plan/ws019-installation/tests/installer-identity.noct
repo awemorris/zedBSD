@@ -1,0 +1,44 @@
+require identity;
+func check(value) { if (!value) { System.error("identity assertion failed"); } }
+func numeric(text, unused) { return instNumber(text, 10); }
+func device(text, unused) { return instInventory(text); }
+func parseIdentity(text, unused) { return instIdentity(text); }
+func parseStat(text, unused) { return instStatRecord(text); }
+func resolve(state, selector) { return instResolveOrigin(state.devices, state.identities, selector); }
+func rejected(f, a, b) { var result = System.pcall(f, a, b); if (result.ok) { System.error("unexpected acceptance: " + a); } }
+func main(args) {
+    check(instNumber("9223372036854775807", 10) == 9223372036854775807L);
+    check(instDeviceName("sda") == "sda");
+    var badNumbers = ["", "-1", "+1", "1x", "9223372036854775808", "18446744073709551616"];
+    for (i in 0..Array.size(badNumbers)) { rejected(numeric, badNumbers[i], 0); }
+    var parent = "device\tnvme0n1\t1\t0\t0\t512\t524288\t0\n";
+    var child = "device\tnvme0n1p1\t2\t1\t4\t512\t131072\t2048\n";
+    var inventory = instInventory(parent + child);
+    check(Array.size(inventory) == 2);
+    check(instFindDevice(inventory, "/dev/nvme0n1p1").parent == 1);
+    rejected(device, parent + child + child, 0);
+    rejected(device, "device\tnvme\r0n1\t1\t0\t0\t512\t10\t0\n", 0);
+    rejected(device, "device\tbad/name\t1\t0\t0\t512\t10\t0\n", 0);
+    rejected(device, "device\tx\t1\t0\t4\t512\t10\t0\n", 0);
+    rejected(device, "device\tx\t1\t0\t0\t513\t10\t0\n", 0);
+    rejected(device, "device\tx\t1\t0\t0\t512\t9223372036854775807\t0\n", 0);
+    rejected(device, "device\tx\t1\t0\t0\t512\t10\t0", 0);
+    var guid = "12345678-1234-4321-8765-123456789abc";
+    var exported = "DEVNAME=/dev/nvme0n1p1\r\r\nTYPE=vfat\r\nPARTUUID=" + guid + "\r\n\r\n";
+    var identities = { nvme0n1p1: instIdentity(exported) };
+    check(identities.nvme0n1p1.TYPE == "vfat");
+    var state = { devices: inventory, identities: identities };
+    check(instResolveOrigin(inventory, identities, "PARTUUID=" + guid).id == 2);
+    rejected(resolve, state, "unavailable");
+    rejected(resolve, state, "PARTUUID=00000000-0000-0000-0000-000000000000");
+    rejected(parseIdentity, exported + "TYPE=vfat\n", 0);
+    rejected(parseIdentity, "DEVNAME=/dev/nvme0n1p1\nPARTUUID=bad\n", 0);
+    var duplicate = instDeviceRecord(instSplit("device\tclone\t3\t1\t4\t512\t131072\t133120", "\t"));
+    Array.push(inventory, duplicate);
+    identities.clone = { DEVNAME: "clone", PARTUUID: guid };
+    rejected(resolve, state, "PARTUUID=" + guid);
+    var stat = instStatRecord("1:5:81ed:32:755:0:0\n");
+    check(stat.inode == 5 && stat.permissions == 493 && stat.size == 32);
+    rejected(parseStat, "1:5:81ed:32:755:0:0\n1:6:81ed:32:755:0:0\n", 0);
+    print("installer identity PASS numeric records aliases provenance");
+}

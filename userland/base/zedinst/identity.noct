@@ -1,0 +1,150 @@
+// Strict readers for existing-command records; no mutation or shell expansion.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+func instSplit(text, separator) {
+    var fields = [];
+    var start = 0;
+    for (i in 0..String.charCount(text)) {
+        if (String.charAt(text, i) == separator) {
+            Array.push(fields, String.substring(text, start, i - start));
+            start = i + 1;
+        }
+    }
+    Array.push(fields, String.substring(text, start, -1));
+    return fields;
+}
+func instLines(text) {
+    if (text == "" || String.charAt(text, String.charCount(text) - 1) != "\n") {
+        System.error("incomplete command output");
+    }
+    var lines = instSplit(text, "\n");
+    Array.pop(lines);
+    for (i in 0..Array.size(lines)) {
+        var line = lines[i];
+        var length = String.charCount(line);
+        while (length > 0 && String.charAt(line, length - 1) == "\r") { length = length - 1; }
+        line = String.substring(line, 0, length);
+        if (String.indexOf(line, "\r") >= 0) { System.error("embedded terminal control"); }
+        lines[i] = line;
+    }
+    return lines;
+}
+func instNumber(text, base) {
+    if (text == "") { System.error("empty number"); }
+    var value = 0L;
+    for (i in 0..String.charCount(text)) {
+        var c = String.charCodeAt(text, i);
+        var digit = -1;
+        if (c >= 48 && c <= 57) { digit = c - 48; }
+        if (c >= 97 && c <= 102) { digit = c - 87; }
+        if (c >= 65 && c <= 70) { digit = c - 55; }
+        if (digit < 0 || digit >= base || value > (9223372036854775807L - digit) / base) {
+            System.error("invalid or overflowing number");
+        }
+        value = value * base + digit;
+    }
+    return value;
+}
+func instDeviceName(name) {
+    if (String.substring(name, 0, 5) == "/dev/") { name = String.substring(name, 5, -1); }
+    if (name == "" || String.charCount(name) >= 32) { System.error("invalid device name"); }
+    for (i in 0..String.charCount(name)) {
+        var c = String.charCodeAt(name, i);
+        if (!((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 45 || c == 95)) {
+            System.error("invalid device name");
+        }
+    }
+    return name;
+}
+func instGuid(text) {
+    if (String.charCount(text) != 36) { System.error("invalid partition GUID"); }
+    for (i in 0..36) {
+        var c = String.charAt(text, i);
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (c != "-") { System.error("invalid partition GUID"); }
+        } else { instNumber(c, 16); }
+    }
+    text = String.toLowerCase(text);
+    if (text == "00000000-0000-0000-0000-000000000000") { System.error("zero partition GUID"); }
+    return text;
+}
+func instDeviceRecord(fields) {
+    if (Array.size(fields) != 8 || fields[0] != "device") { System.error("invalid device record"); }
+    var device = { name: instDeviceName(fields[1]), id: instNumber(fields[2], 10),
+        parent: instNumber(fields[3], 10), flags: instNumber(fields[4], 10),
+        sectorSize: instNumber(fields[5], 10), sectors: instNumber(fields[6], 10),
+        offset: instNumber(fields[7], 10) };
+    if (device.id == 0 || device.sectorSize < 512 || device.sectorSize > 4096 ||
+        (device.sectorSize & (device.sectorSize - 1)) != 0 || device.sectors == 0 ||
+        device.sectors > 9223372036854775807L / device.sectorSize || device.flags > 15 ||
+        ((device.parent != 0) != ((device.flags & 4) != 0))) {
+        System.error("invalid device geometry");
+    }
+    return device;
+}
+func instInventory(text) {
+    var devices = [];
+    var lines = instLines(text);
+    for (i in 0..Array.size(lines)) {
+        var device = instDeviceRecord(instSplit(lines[i], "\t"));
+        for (j in 0..Array.size(devices)) {
+            if (devices[j].name == device.name || devices[j].id == device.id) {
+                System.error("duplicate device registration");
+            }
+        }
+        Array.push(devices, device);
+    }
+    return devices;
+}
+func instFindDevice(devices, name) {
+    name = instDeviceName(name);
+    for (i in 0..Array.size(devices)) {
+        if (devices[i].name == name) { return devices[i]; }
+    }
+    System.error("device is not registered: " + name);
+}
+func instIdentity(text) {
+    var identity = {};
+    var lines = instLines(text);
+    for (i in 0..Array.size(lines)) {
+        if (lines[i] == "") { continue; }
+        var at = String.indexOf(lines[i], "=");
+        if (at <= 0) { System.error("invalid identity record"); }
+        var key = String.substring(lines[i], 0, at);
+        var value = String.substring(lines[i], at + 1, -1);
+        if (key != "DEVNAME" && key != "TYPE" && key != "UUID" && key != "PARTUUID") {
+            System.error("unexpected identity field");
+        }
+        if (Dict.hasKey(identity, key)) { System.error("duplicate identity field"); }
+        if (key == "DEVNAME") { value = instDeviceName(value); }
+        if (key == "PARTUUID") { value = instGuid(value); }
+        identity[key] = value;
+    }
+    if (!Dict.hasKey(identity, "DEVNAME")) { System.error("identity lacks device name"); }
+    return identity;
+}
+func instResolveOrigin(devices, identities, selector) {
+    if (String.substring(selector, 0, 9) != "PARTUUID=") { System.error("boot provenance unavailable"); }
+    var guid = instGuid(String.substring(selector, 9, -1));
+    var matches = [];
+    for (i in 0..Array.size(devices)) {
+        var device = devices[i];
+        if (!Dict.hasKey(identities, device.name)) { continue; }
+        var identity = identities[device.name];
+        if (identity["DEVNAME"] != device.name) { System.error("identity changed device"); }
+        if (Dict.hasKey(identity, "PARTUUID") && identity["PARTUUID"] == guid) {
+            if (device.parent == 0) { System.error("boot origin is not a partition"); }
+            Array.push(matches, device);
+        }
+    }
+    if (Array.size(matches) != 1) { System.error("boot origin is missing or ambiguous"); }
+    return matches[0];
+}
+func instStatRecord(text) {
+    var lines = instLines(text);
+    if (Array.size(lines) != 1) { System.error("ambiguous stat result"); }
+    var fields = instSplit(lines[0], ":");
+    if (Array.size(fields) != 7) { System.error("invalid stat record"); }
+    return { device: instNumber(fields[0], 10), inode: instNumber(fields[1], 10),
+        mode: instNumber(fields[2], 16), size: instNumber(fields[3], 10),
+        permissions: instNumber(fields[4], 8), uid: instNumber(fields[5], 10), gid: instNumber(fields[6], 10) };
+}

@@ -5,7 +5,7 @@ set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd -- "$script_dir/../../.." && pwd)
-config=$repo/config.mk
+config=${ZEDBSD_TEST_CONFIG:-$repo/config.mk}
 makefile=$script_dir/evdev-capability-qemu.mk
 probe_source=$script_dir/evdev-capability-probe.c
 test_image=$repo/build/amd64/ws006-p005-hdd-image.img
@@ -117,7 +117,7 @@ printf 'case\tresult\tevidence\n' >"$results"
 : >"$qemu_log"
 : >"$controller_result"
 
-build_command=(make -C "$repo" -j16 -f Makefile -f "$makefile"
+build_command=(make -C "$repo" -j16 "ZEDBSD_CONFIG=$config" -f Makefile -f "$makefile"
 	ws006-p005-qemu-image)
 {
 	printf 'test=IN-T12\n'

@@ -1,0 +1,74 @@
+// Bounded binary copying with byte progress and explicit stream ownership.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+func instCopyRead(context, count) { return File.read(context.input, count); }
+func instCopyWrite(context, bytes, offset, count) {
+    File.writeAll(context.output, bytes, offset, count);
+    return count;
+}
+func instCopyOpen(context, path, mode) { return File.open(path, mode); }
+func instCopyClose(context, file) { File.close(file); return true; }
+func instCopySourceSize(context) { return FileUtil.getFileSize(context.source); }
+func instCopyProgress(context, done, total) {
+    var percent = 100;
+    if (total != 0) { percent = done * 100L / total; }
+    print("Copying " + context.label + ": " + done + "/" + total +
+        " bytes (" + percent + "%)");
+}
+func instCopyOperations() {
+    return {open:instCopyOpen, close:instCopyClose, read:instCopyRead,
+        write:instCopyWrite, progress:instCopyProgress, sourceSize:instCopySourceSize};
+}
+func instCopyBody(context, unused) {
+    var ops = context.ops;
+    context.input = ops.open(context, context.source, "rb");
+    context.output = ops.open(context, context.target, "wb");
+    var done = 0L;
+    var reported = 0L;
+    ops.progress(context, done, context.bytes);
+    while (done < context.bytes) {
+        var wanted = context.bytes - done;
+        if (wanted > 65536) { wanted = 65536; }
+        var bytes = ops.read(context, wanted);
+        var count = Packed.size(bytes);
+        if (count <= 0 || count > wanted) { System.error("source size changed during copy"); }
+        var offset = 0;
+        while (offset < count) {
+            var written = ops.write(context, bytes, offset, count - offset);
+            if (written <= 0 || written > count - offset) { System.error("copy made no valid write progress"); }
+            offset = offset + written;
+        }
+        done = done + count;
+        if (done == context.bytes || done - reported >= 1048576) {
+            ops.progress(context, done, context.bytes);
+            reported = done;
+        }
+    }
+    // File.read reports EOF as an exception, so size/digest checks detect growth.
+    if (ops.sourceSize(context) != context.bytes) { System.error("source size changed during copy"); }
+    return done;
+}
+func instCopyCloseInput(context, unused) { return context.ops.close(context, context.input); }
+func instCopyCloseOutput(context, unused) { return context.ops.close(context, context.output); }
+func instCopyWithOperations(ops, source, target, bytes, label) {
+    if (bytes < 0 || bytes > 92233720368547758L || source == target) {
+        System.error("invalid copy extent or alias");
+    }
+    var context = {ops:ops, source:source, target:target, bytes:bytes,
+        label:label, input:0, output:0};
+    var copied = System.pcall(instCopyBody, context, 0);
+    var error = "";
+    if (!copied.ok) { error = copied.message; }
+    if (context.output != 0) {
+        var closed = System.pcall(instCopyCloseOutput, context, 0);
+        if (!closed.ok) { error = error + " output close: " + closed.message; }
+    }
+    if (context.input != 0) {
+        var closed = System.pcall(instCopyCloseInput, context, 0);
+        if (!closed.ok) { error = error + " input close: " + closed.message; }
+    }
+    if (error != "") { System.error("copy " + label + ": " + error); }
+    return copied.value;
+}
+func instCopyFile(source, target, bytes, label) {
+    return instCopyWithOperations(instCopyOperations(), source, target, bytes, label);
+}

@@ -1,7 +1,7 @@
 # Kernel boot parameters
 
 Status: current for the four x86 production-loader paths; reconciled with
-the configured-loader paths on 2026-08-31
+current source and retained configured-loader evidence on 2026-09-09
 
 This document defines the implemented textual kernel-parameter contract for
 selecting boot filesystems, the root mode, swap sources, and PID 1. The common
@@ -37,8 +37,8 @@ when a non-x86 architecture supplies a NULL parameter-source pointer; Section
 | --- | --- | --- |
 | Limits, record, names, grammar, defaults | [`include/boot/parameters.h`](../../include/boot/parameters.h), [`include/boot/parameter-handoff.h`](../../include/boot/parameter-handoff.h), [`include/kern/boot.h`](../../include/kern/boot.h), [`src/kern/boot.c`](../../src/kern/boot.c) | [BR-T42 parser fixture](../../plan/ws003-bringup/tests/boot-parameters-test.c), [q015 completion record](../../plan/queue-q015.md) |
 | Selectors, boot slots, and root modes | [`src/kern/block-identity.c`](../../src/kern/block-identity.c), [`src/kern/boot.c`](../../src/kern/boot.c), [`src/kern/vfs.c`](../../src/kern/vfs.c) | [BR-T44 source/root fixture](../../plan/ws003-bringup/tests/boot-source-test.c), [WS003 p013 evidence](../../plan/ws003-bringup/phase013-root-source-selection/phase.md) |
-| Boot-time swap sources | [`src/kern/swap-boot.c`](../../src/kern/swap-boot.c), [`src/kern/swap-source.c`](../../src/kern/swap-source.c), [`src/kern/swap.c`](../../src/kern/swap.c) | [BR-T45 swap fixture](../../plan/ws003-bringup/tests/swap-source-test.c), [WS003 p014 evidence](../../plan/ws003-bringup/phase014-multi-swap/phase.md) |
-| Runtime swap separation | [`include/uapi/zedbsd/system.h`](../../include/uapi/zedbsd/system.h), [`src/kern/swap-control.c`](../../src/kern/swap-control.c), [`src/kern/system-swap-device.c`](../../src/kern/system-swap-device.c) | [WS016 test index](../../plan/ws016-swap-control/tests/README.md), [runtime acceptance phase](../../plan/ws016-swap-control/phase004-runtime-swap-acceptance/phase.md), [q021 completion record](../../plan/queue-q021.md) |
+| Boot-time swap sources | [`src/kern/swap.c`](../../src/kern/swap.c), [`src/kern/swap.c`](../../src/kern/swap.c), [`src/kern/swap.c`](../../src/kern/swap.c) | [BR-T45 swap fixture](../../plan/ws003-bringup/tests/swap-source-test.c), [WS003 p014 evidence](../../plan/ws003-bringup/phase014-multi-swap/phase.md) |
+| Runtime swap separation | [`include/uapi/zedbsd/system.h`](../../include/uapi/zedbsd/system.h), [`src/kern/swap.c`](../../src/kern/swap.c), [`src/drivers/generic/system-device.c`](../../src/drivers/generic/system-device.c) | [WS016 test index](../../plan/ws016-swap-control/tests/README.md), [runtime acceptance phase](../../plan/ws016-swap-control/phase004-runtime-swap-acceptance/phase.md), [q021 completion record](../../plan/queue-q021.md) |
 | PID 1 selection | [`src/kern/main.c`](../../src/kern/main.c), [`src/kern/init.c`](../../src/kern/init.c) | [BR-T42 init cases](../../plan/ws003-bringup/tests/boot-parameters-test.c), [WS003 p011 evidence](../../plan/ws003-bringup/phase011-boot-parameter-core/phase.md) |
 | Common configured-loader language | [`bootloader/uefi/zedbsd-config.c`](../../bootloader/uefi/zedbsd-config.c), [`bootloader/uefi/zedbsd-config.h`](../../bootloader/uefi/zedbsd-config.h) | [configuration host fixture](../../plan/ws013-containers/tests/zedbsd-config-host-test.c), [WS013 test index](../../plan/ws013-containers/tests/README.md) |
 | Four current x86 loader paths | [`bootloader/uefi/bootx64.c`](../../bootloader/uefi/bootx64.c), [`bootloader/pcat/bootzbsd.S`](../../bootloader/pcat/bootzbsd.S), [`bootloader/pc98/bootzbsd.S`](../../bootloader/pc98/bootzbsd.S), [`src/hal/x86/boot-parameters.c`](../../src/hal/x86/boot-parameters.c) | [BR-T43 handoff fixture](../../plan/ws003-bringup/tests/x86-parameter-handoff-test.c), [q031 UEFI evidence](../../plan/queue-q031.md), [q032 BIOS evidence](../../plan/queue-q032.md) |
@@ -378,12 +378,12 @@ Only a non-x86 build receiving a NULL parameter-source pointer uses the
 retained legacy automatic-root path:
 
 1. begin with the loader-origin boot partition;
-2. inspect sibling partitions on that same physical disk for exactly one UFS1
+2. inspect sibling partitions on that same physical disk for exactly one UFS
    filesystem containing `/etc/zedbsd-root` with the exact marker
-   `zedBSD ufs1 root v1\n`, rejecting ambiguity;
-3. on ARM64, if no marked UFS1 partition exists, try `/rootfs.img` (then
+   `zedBSD ufs root v1\n`, rejecting ambiguity;
+3. on ARM64, if no marked UFS partition exists, try `/rootfs.img` (then
    `/rootfs.rp4`) together with `/data.img` using the legacy overlay path;
-4. otherwise mount the uniquely marked UFS1 partition, or the loader-origin
+4. otherwise mount the uniquely marked UFS partition, or the loader-origin
    boot partition when no marker is present, directly as root.
 
 That compatibility path does not interpret the new `bootN=`, root-mode, or

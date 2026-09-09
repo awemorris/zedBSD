@@ -13,9 +13,12 @@
 
 #include "userland/base/common/command.h"
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 
 static const char *kind(mode_t m);
+static int valid_format(const char *format);
+static void print_format(const char *format, const char *path, const struct stat *status);
 
 /*
  * Runs the stat command.
@@ -26,24 +29,43 @@ main(
 	char **argv)
 {
 	struct stat s;
-	int i, failed;
+	int i, first, failed;
+	const char *format;
 
 	failed = 0;
+	format = NULL;
+	first = 1;
+	if (first < argc && strcmp(argv[first], "-c") == 0) {
+		if (first + 1 >= argc)
+			return 2;
+		format = argv[first + 1];
+		first += 2;
+		if (!valid_format(format)) {
+			fprintf(stderr, "stat: unsupported format\n");
+			return 2;
+		}
+	}
+	if (first < argc && strcmp(argv[first], "--") == 0)
+		first++;
 
 	/* Validates the command-line arguments. */
-	if (argc < 2) {
-		fprintf(stderr, "usage: stat file...\n");
+	if (first >= argc) {
+		fprintf(stderr, "usage: stat [-c FORMAT] [--] file...\n");
 
 		/* Reports operation failure. */
 		return 1;
 	}
 
 	/* Process each remaining command-line operand. */
-	for (i = 1; i < argc; i++) {
+	for (i = first; i < argc; i++) {
 		/* Validates the command-line arguments. */
 		if (lstat(argv[i], &s)) {
 			command_error("stat", argv[i]);
 			failed = 1;
+			continue;
+		}
+		if (format != NULL) {
+			print_format(format, argv[i], &s);
 			continue;
 		}
 		printf("  File: %s\n  Size: %lld\tBlocks: %lld\tIO Block: "
@@ -61,7 +83,9 @@ main(
 	}
 
 	/* Returns the computed result. */
-	return failed;
+	if (fflush(stdout) != 0)
+		failed = 1;
+	return failed || ferror(stdout);
 }
 
 /* Supports the kind operation. */
@@ -99,4 +123,47 @@ kind(
 
 	/* Returns the computed result. */
 	return "unknown";
+}
+
+/* Validate before emitting any record, so an invalid field never looks complete. */
+static int
+valid_format(const char *format)
+{
+	while (*format != '\0') {
+		if (*format++ != '%')
+			continue;
+		if (*format == '\0')
+			return 0;
+		if (strchr("difsuagn%", *format) == NULL)
+			return 0;
+		format++;
+	}
+	return 1;
+}
+
+/* Numeric fields describe lstat identity; symbolic links are never followed. */
+static void
+print_format(const char *format, const char *path, const struct stat *status)
+{
+	char field;
+
+	while (*format != '\0') {
+		field = *format++;
+		if (field != '%') {
+			putchar(field);
+			continue;
+		}
+		switch (*format++) {
+		case 'd': printf("%llu", (unsigned long long)status->st_dev); break;
+		case 'i': printf("%llu", (unsigned long long)status->st_ino); break;
+		case 'f': printf("%x", (unsigned)status->st_mode); break;
+		case 's': printf("%lld", (long long)status->st_size); break;
+		case 'u': printf("%u", (unsigned)status->st_uid); break;
+		case 'g': printf("%u", (unsigned)status->st_gid); break;
+		case 'a': printf("%o", (unsigned)status->st_mode & 07777U); break;
+		case 'n': fputs(path, stdout); break;
+		case '%': putchar('%'); break;
+		}
+	}
+	putchar('\n');
 }

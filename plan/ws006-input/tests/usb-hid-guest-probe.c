@@ -4,10 +4,14 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pty.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include <zedbsd/input.h>
 
@@ -308,8 +312,10 @@ record_role(enum input_role role)
 	struct usb_input input;
 	struct input_event events[EVENT_BATCH];
 	struct pollfd polled;
+	struct timespec clock;
+	uint64_t deadline;
+	uint64_t now;
 	int descriptor, first = 0, second = 0, sync = 0;
-	int remaining = RECORD_TIMEOUT_MS;
 
 	if (unique_role(role, &input) != 0)
 		return 1;
@@ -319,17 +325,35 @@ record_role(enum input_role role)
 			strerror(errno));
 		return 1;
 	}
+	if (clock_gettime(CLOCK_MONOTONIC, &clock) != 0) {
+		fprintf(stderr, "USB-HID-GUEST FAIL monotonic clock\n");
+		close(descriptor);
+		return 1;
+	}
+	deadline = (uint64_t)clock.tv_sec * 1000U +
+	    (uint64_t)clock.tv_nsec / 1000000U + RECORD_TIMEOUT_MS;
 	printf("USB-HID-GUEST READY role=%s path=%s\n", role_name(role),
 	       input.path);
 	fflush(stdout);
 	polled.fd = descriptor;
 	polled.events = POLLIN | POLLHUP;
-	while (remaining > 0 && !(first && second && sync)) {
+	while (!(first && second && sync)) {
 		ssize_t bytes;
-		int waited = remaining > 250 ? 250 : remaining;
-		int result = poll(&polled, 1, waited);
+		int waited;
+		int result;
 
-		remaining -= waited;
+		/* Immediate events and EINTR consume elapsed time, not 250 ms. */
+		if (clock_gettime(CLOCK_MONOTONIC, &clock) != 0) {
+			fprintf(stderr, "USB-HID-GUEST FAIL monotonic clock\n");
+			close(descriptor);
+			return 1;
+		}
+		now = (uint64_t)clock.tv_sec * 1000U +
+		    (uint64_t)clock.tv_nsec / 1000000U;
+		if (now >= deadline)
+			break;
+		waited = deadline - now > 250U ? 250 : (int)(deadline - now);
+		result = poll(&polled, 1, waited);
 		if (result < 0 && errno == EINTR)
 			continue;
 		if (result < 0 || (polled.revents & (POLLERR | POLLHUP)) != 0) {
@@ -515,6 +539,119 @@ storage_read(const char *path)
 	return 0;
 }
 
+/* Optional private stress: exec and reap while another process reads USB. */
+static int
+retirement_churn(const char *program)
+{
+	unsigned index;
+	pid_t child;
+	pid_t waited;
+	int status;
+
+	printf("USB-HID-GUEST RETIREMENT READY iterations=128\n");
+	fflush(stdout);
+	for (index = 0; index < 128U; index++) {
+		child = fork();
+		if (child < 0)
+			return 1;
+		if (child == 0) {
+			execl(program, program, "retire-child", (char *)NULL);
+			_exit(99);
+		}
+		do {
+			waited = waitpid(child, &status, 0);
+		} while (waited < 0 && errno == EINTR);
+		if (waited != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+			return 1;
+	}
+	printf("USB-HID-GUEST RETIREMENT PASS iterations=128\n");
+	return 0;
+}
+
+/* Verifies actual libc/kernel PTY identity, not a mock console ioctl. */
+static int
+terminal_identity(void)
+{
+	int master = -1;
+	int slave = -1;
+	int duplicate = -1;
+	int ordinary = -1;
+	int descriptors[2] = {-1, -1};
+	int result = 1;
+	char expected[128];
+	char actual[128];
+	char short_name[2] = {'a', 'b'};
+	char *name;
+	struct stat opened;
+	struct stat named;
+
+	if (openpty(&master, &slave, expected, NULL, NULL) != 0)
+		goto out;
+	if (!isatty(master) || !isatty(slave) || !isatty(STDIN_FILENO))
+		goto out;
+	if (ttyname_r(slave, actual, sizeof(actual)) != 0 ||
+	    strcmp(actual, expected) != 0)
+		goto out;
+	if (fstat(slave, &opened) != 0 || stat(actual, &named) != 0 ||
+	    opened.st_dev != named.st_dev || opened.st_ino != named.st_ino ||
+	    opened.st_rdev != named.st_rdev)
+		goto out;
+	name = ttyname(slave);
+	if (name == NULL || strcmp(name, expected) != 0)
+		goto out;
+	if (ttyname_r(slave, short_name, sizeof(short_name)) != ERANGE ||
+	    short_name[0] != 'a' || short_name[1] != 'b')
+		goto out;
+	if (ttyname_r(slave, actual, 0) != ERANGE)
+		goto out;
+	duplicate = dup(slave);
+	if (duplicate < 0)
+		goto out;
+	if (close(slave) != 0)
+		goto out;
+	slave = -1;
+	if (!isatty(duplicate) || ttyname_r(duplicate, actual, sizeof(actual)) != 0 ||
+	    strcmp(actual, expected) != 0)
+		goto out;
+	errno = 0;
+	if (isatty(-1) || errno != EBADF ||
+	    ttyname_r(-1, actual, sizeof(actual)) != EBADF)
+		goto out;
+	errno = 0;
+	if (ttyname(-1) != NULL || errno != EBADF)
+		goto out;
+	if (pipe(descriptors) != 0)
+		goto out;
+	errno = 0;
+	if (isatty(descriptors[0]) || errno != ENOTTY ||
+	    ttyname_r(descriptors[0], actual, sizeof(actual)) != ENOTTY)
+		goto out;
+	ordinary = open("/bin/sh", O_RDONLY);
+	if (ordinary < 0)
+		goto out;
+	errno = 0;
+	if (isatty(ordinary) || errno != ENOTTY)
+		goto out;
+	printf("USB-HID-GUEST TTY PASS console master slave dup names bounds errors\n");
+	result = 0;
+out:
+	if (result != 0)
+		fprintf(stderr, "USB-HID-GUEST FAIL terminal identity errno=%d\n", errno);
+	if (ordinary >= 0)
+		close(ordinary);
+	if (descriptors[0] >= 0)
+		close(descriptors[0]);
+	if (descriptors[1] >= 0)
+		close(descriptors[1]);
+	if (duplicate >= 0)
+		close(duplicate);
+	if (slave >= 0)
+		close(slave);
+	if (master >= 0)
+		close(master);
+	return result;
+}
+
 static void
 usage(const char *program)
 {
@@ -529,6 +666,12 @@ main(int argc, char **argv)
 {
 	enum input_role role;
 
+	if (argc == 2 && strcmp(argv[1], "tty-identity") == 0)
+		return terminal_identity();
+	if (argc == 2 && strcmp(argv[1], "retire-child") == 0)
+		return 0;
+	if (argc == 2 && strcmp(argv[1], "retire") == 0)
+		return retirement_churn(argv[0]);
 	if (argc >= 3 && strcmp(argv[1], "inventory") == 0)
 		return inventory(argc, argv);
 	if (argc == 3 && strcmp(argv[1], "storage") == 0)

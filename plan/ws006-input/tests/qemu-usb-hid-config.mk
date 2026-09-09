@@ -20,4 +20,9 @@ CONFIG_DRIVER_USB_HID := y
 CONFIG_DRIVER_GRAPHICS := y
 CONFIG_DRIVER_LGY98 := n
 
+# Resolve defaults after the package registry is loaded by the top-level build.
+ifeq ($(WS006_XZED_SESSION),y)
+ZEDBSD_USER_PROGRAMS = $(ZEDBSD_DEFAULT_USER_PROGRAMS) Xzed zterm tty
+endif
+
 # The test-only storage reader is injected by qemu-usb-hid-acceptance.mk.

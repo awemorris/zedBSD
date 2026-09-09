@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(ZEDBSD_DYNAMIC_LIBC) || defined(ZEDBSD_STATIC_TLS)
 #define CRYPT_THREAD_LOCAL _Thread_local
 #else
 #define CRYPT_THREAD_LOCAL

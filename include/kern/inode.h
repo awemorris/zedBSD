@@ -162,6 +162,8 @@ struct inode_ops {
 	int (*removexattr)(struct inode *, const char *);
 	int (*sync)(struct inode *);
 	void (*reclaim)(struct inode *);
+	/* Infallible: drops directory-entry owners after final unmount admission. */
+	void (*retire_namespace)(struct inode *);
 };
 
 struct inode {
@@ -183,6 +185,8 @@ struct inode {
 	void (*i_special_destroy)(void *);
 	void *i_record_locks;
 	refcount_t i_refs;
+	/* Directory-entry owners, classified within i_refs; changed under VFS transactions. */
+	atomic_uint_t i_namespace_refs;
 
 	/*
 	 * Serializes one externally visible regular-file I/O operation.
@@ -258,6 +262,10 @@ inode_ref(
 void
 inode_release(
 	struct inode *inode);
+
+void inode_namespace_ref(struct inode *inode);
+void inode_namespace_release(struct inode *inode);
+void inode_cache_retire_namespace(struct mount *mount);
 
 void
 inode_cache_purge_mount(

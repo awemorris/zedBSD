@@ -17,6 +17,7 @@
  */
 
 #include "kern/file.h"
+#include "kern/file-backing.h"
 #include "kern/io-stats.h"
 #include "kern/cache-memory.h"
 #include "kern/disk.h"
@@ -2709,7 +2710,7 @@ file_format_finalize(
 	memset(&collection, 0, sizeof(collection));
 	collection.disk = file->f_inode->i_mount->m_disk;
 	collection.blocks = size / 512U;
-	error = drv_fat_file_extents(file, file_format_collect_extent, &collection);
+	error = file_backing_extents(file, file_format_collect_extent, &collection);
 	if (error != 0)
 		return error;
 
@@ -2728,14 +2729,15 @@ file_format_finalize(
 	collection.capacity = collection.count;
 	collection.count = 0;
 	collection.next_block = 0;
-	error = drv_fat_file_extents(file, file_format_collect_extent, &collection);
+	error = file_backing_extents(file, file_format_collect_extent, &collection);
 	if (error == 0 && collection.next_block != collection.blocks)
 		error = EIO;
 
 	/* Checks overlap with existing claims before making the extents active. */
 	if (error == 0) {
-		error = backing_claim_finalize(
+		error = backing_claim_finalize_file(
 			claim,
+			file,
 			collection.entries,
 			collection.count);
 	}
@@ -2773,10 +2775,13 @@ file_format_reserve_locked(
 	    (flags & (O_APPEND | O_TRUNC)) != 0)
 		return EINVAL;
 
-	/* Limits the first implementation to canonical FAT-backed files. */
+	/* Requires canonical physical backing and an extent provider. */
 	inode = file->f_inode;
 	mountp = inode->i_mount;
-	if (mountp == NULL || mountp->m_type != &drv_fat_filesystem_type ||
+	if (mountp == NULL || mountp->m_type == NULL ||
+	    mountp->m_type->file_extents == NULL ||
+	    (mountp->m_type->file_backing_identity == NULL &&
+	    mountp->m_type != &drv_fat_filesystem_type) ||
 	    mountp->m_disk == NULL || file_vm_inode(file) != inode)
 		return EOPNOTSUPP;
 

@@ -50,18 +50,18 @@ multi-license source tree, run:
 make download
 ```
 
-This verifies the official Noct `v2.0.1` source archive and the optional
+This verifies the pinned upstream Noct source archive and the optional
 firmware inputs even when those firmware packages are not selected. Downloaded
 bytes are ignored by Git but remain inside the working tree, allowing the
 post-download tree to be packed as a multi-license source distribution.
 
-Both host and target Noct come from release `v2.0.1`, tag commit
-`ed621e79139f55d06dd1a474243afbf0ce5efe0a`. The tracked archive identity is
-2,524,680 bytes with SHA-256
-`68588c84f508856474526be1c576cf6190ee99539cd81cc8453857d894f98f9f`.
+Both host and target Noct come from post-2.0.1 commit
+`bb239816e20294c073702dc127142f6767375072`, including the LP64 File.seek fix.
+The tracked archive identity is 2,528,421 bytes with SHA-256
+`fd3d9adc7da6de0e7de6e96a1e42edd08f2f07807b00ac5078e5f0457ca1887f`.
 Acquisition checks the size, digest, archive paths, member types, strict
 zero-fuzz patches, and a complete extracted-source manifest before publication.
-It never substitutes a Git checkout for that release archive.
+It never substitutes a Git checkout for that pinned archive.
 
 The toolchain target verifies and extracts Noct below `build/NoctLang`, builds
 the host interpreter with the host compiler, installs or accepts the patched

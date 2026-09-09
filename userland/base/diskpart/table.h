@@ -25,6 +25,8 @@ struct dp_part {
 };
 struct dp_copy {
 	uint8_t *header, *entries;
+	/* Initialization retains the old header separately from its replacement. */
+	uint8_t *before_header;
 	uint64_t lba, alternate, first, last, table_lba;
 	uint32_t slots, entry_size, header_size;
 	size_t bytes;
@@ -33,12 +35,16 @@ struct dp_table {
 	struct dp_io io;
 	unsigned format, restrictions, slots, count;
 	uint8_t *mbr, *edited;
+	uint8_t *new_mbr;
 	struct dp_copy copy[2];
 	struct dp_part *parts;
 	unsigned selected;
 	int changed;
 };
 int dp_load(struct dp_table *, const struct dp_io *);
+/* Snapshot and prepare only. Caller must provide exclusive media ownership
+ * through dp_write; this codec cannot acquire a kernel device reservation. */
+int dp_initialize_gpt(struct dp_table *, const struct dp_io *, const char *);
 void dp_free(struct dp_table *);
 int dp_guid_parse(const char *, uint8_t[16]);
 void dp_guid_text(const uint8_t[16], char[37]);

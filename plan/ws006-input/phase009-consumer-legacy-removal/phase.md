@@ -8,14 +8,23 @@ Phase ID: `p009`
 
 Combined ID: `ws006-p009`
 
-Status: Queue-ready; q063 satisfied the latest WS008 dependency and the user
-confirmed p008 physical USB HID operation on 2026-09-05
+Status: completed (q147); q126のconsumer検証にpaired USB rootと実Xzed受け入れを追加。
+
+Closure: [q147 results](../phase011-terminal-identity/results.md). q126 results
+below retain the historical failure and resume boundary.
 
 Parent: [WS006](../ws.md)
 
 Tests: [WS006 test index](../tests/README.md)
 
 ## Objective
+
+q146 acceptance: run an optional Xzed/zterm session at the end of the maintained
+xHCI and paired USB/HID campaign. Use the already discovered USB tablet to focus
+the terminal and USB keyboard to write a unique file from its shell. Terminate
+the bounded graphical process group, then verify the exact file content using
+the restored ordinary TTY. Retain console/GUI/pointer screenshots, capability
+logs and existing hotplug/I/O oracles. No old console-event fallback is allowed.
 
 Prove that every in-tree graphical, runtime, and kernel consumer has a supported
 input path, then delete the obsolete zedBSD `/dev/console` continuous-event,
@@ -134,3 +143,14 @@ or still uses the legacy console API.  Stop and return to the owning WS if a
 consumer requires a new evdev capability, or if removing the old API exposes a
 tty/job-control redesign.  Do not restore a compatibility ioctl simply to
 avoid completing a consumer migration.
+
+## q126 現ソースの設計
+
+- 実装ownerはsrc/drivers/generic/console.c。旧kernel shell consumerは不在で、drv_console_input_poll_event/read_eventは呼出しなし。
+- console_input_take、early keymapと専用input queue、event_mode owner/records/read/poll/ioctlを削除する。
+- input subscription、source別keymap/active state、dispatch worker、tty_console_input_eventを保持。TTY canonical/raw/job-controlは変更しない。
+- public console.hは表示とISATTYのみ残し、9–12/14–15は欠番のまま。unsupportedは通常tty ioctlのEOPNOTSUPP（実ソースとq126最初のguestで確認）。
+- 旧drain専用のfixture assertionは削除済み機能のテストとして撤去し、detach/resync/overflowの意味ある検証は残す。
+- Xzed/Noct/BeUIはevdev consumerを再確認し、source auditと実行可能なhost/native受け入れを証拠として記録する。
+
+結果と再開条件: [q126 results](results.md)。

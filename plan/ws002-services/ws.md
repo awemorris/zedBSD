@@ -1,20 +1,23 @@
 # WS002: system services
 
-Last updated: 2026-08-31
+Current update (2026-09-09): **completed**. The user clears p021 based on passing
+current acceptance and the likelihood that the old failure is already fixed.
+BUG-012 preserves the unproved historical cause and recurrence condition.
+See [completion reconciliation](completion.md) and
+[p021 closure](phase021-missing-login-session-teardown/closure.md).
+
+Last updated: 2026-09-09
 
 WSID: `ws002`
 
-Status: baseline complete through `ws002-p020`; corrective `ws002-p021` is
-planned and non-blocking; recurring console-login correction `ws002-p022` is
-complete
+Status: completed; service baseline and corrective phases accepted
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws002-p022`
+Last verified Phase: `ws002-p024` (q142); p021 subsequently cleared by user decision
 
-Resume point: return the now-passing exact-login gate to `ws020-p006`. Execute
-`ws002-p021` when missing-login session-lifecycle robustness is separately
-selected; continue networking in [WS005](../ws005-networking/ws.md).
+Resume point: no active phase. Preserve POSIX handoffs in WS001 and recurrence
+conditions in the bug ledger; continue other Priority workstreams.
 
 Shared tests: [WS002 test index](tests/README.md)
 
@@ -157,8 +160,10 @@ PID 1 does not parse fstab.  A required internal oneshot invokes
 | `ws002-p018` | [POSIX shell](phase018-shell/phase.md) | Partial with handoffs | Shell is usable; remaining incompatibilities are recorded in WS001 |
 | `ws002-p019` | [integrated QEMU acceptance](phase019-integration/phase.md) | Complete minimum system | Boot, login, services, jobs, network, and shutdown were exercised and repaired |
 | `ws002-p020` | [synchronous network service](phase020-network-service/phase.md) | Complete milestone | fd 3 readiness and synchronous `net` orchestration pass host/build/QEMU gates |
-| `ws002-p021` | [missing-login session teardown](phase021-missing-login-session-teardown/phase.md) | Planned corrective; non-blocking | A deliberately missing `/bin/login` cannot corrupt getty/TTY/process teardown or escape bounded crash-loop supervision |
+| `ws002-p021` | [missing-login session teardown](phase021-missing-login-session-teardown/phase.md) | Complete by user acceptance | Current runtime passes; likely corrected historical failure retained as BUG-012 |
 | `ws002-p022` | [intermittent console-login progress](phase022-intermittent-console-login/phase.md) | Complete | USB submit-commit IRQ self-wait repaired; deterministic old-order regression, unchanged `MAC-T022`, and ordinary initial plus final five exact-login boots pass |
+| `ws002-p023` | [USB boot halt](phase023-usb-boot-halt/phase.md) | Complete q135 | QEMU reproduction and correction, subsequent paired regression; physical boundary retained |
+| `ws002-p024` | [retirement heap integrity](phase024-retirement-heap-integrity/phase.md) | Complete q142 | UHCI stale-link correction and heap/lifecycle acceptance |
 
 The original Phase 11–19 detail is retained in the
 [legacy aggregate plan](history/phase011-019-legacy-plan.md).
@@ -194,3 +199,43 @@ Stop and request direction instead of expanding the design if work requires:
 - adding a material public kernel ABI not identified by the applicable Phase;
   or
 - weakening a correct POSIX expectation or QEMU acceptance test.
+
+## USB boot shutdown follow-up (2026-09-09)
+
+[ws002-p023](phase023-usb-boot-halt/phase.md)を追加。BUG-010のQEMU再現と、再現した場合の修正を現在のゴールに含める。p021と独立して扱い、USB解析は実装可能な作業の後段で実行する。
+
+### q135 USB boot halt correction
+
+[p023](phase023-usb-boot-halt/phase.md) completed its QEMU reproduction and
+correction. Referenced root-media detach left the control worker alive, and
+PC/AT halted only one CPU. Checked storage quiescence and all-CPU terminal
+stop now pass xHCI USB-root halt, dirty-data persistence, reboot and single-CPU
+checks. [Evidence](phase023-usb-boot-halt/results.md). q137 also passes paired
+EHCI/UHCI halt and persistent-data reboot regression after boot-context fixes.
+Physical USB halt remains unverified. WS002-p021 remains.
+
+### q136 session teardown verification
+
+p021 remains **uncleared** with [new evidence](phase021-missing-login-session-teardown/results.md):
+three missing-login boots per PCAT/PC98, 100 owner-recovery cycles per platform,
+and normal session regression pass. Old invalid-free provenance and controlled
+small-heap fallback investigation remain. Continue WS006; WS002 is not closed.
+
+### q137 heap-walk reproduction lead
+
+Paired USB input/root-I/O now reaches a process-reaper heap-walk stall after
+boot and hotplug succeed. [p024](phase024-retirement-heap-integrity/phase.md)
+plans bounded capture and first-failure diagnosis. The connection to p021's
+historical invalid free remains unproven; neither Phase is complete.
+
+## q140 / q141 heap-integrity continuation
+
+q140's Daybreak diagnostics reproduced a structural heap-header overwrite in
+paired UHCI retirement. q141 proved that non-head schedule unlink left the
+predecessor's software successor stale; a later unlink followed freed/reused
+memory and wrote a request pointer into the heap header. The narrow link repair
+and regression pass all heap/USB gates. p024 remains uncleared solely because
+the independent PCAT missing-login gate reports owner counts 9 to 8. See
+[p024 progress](phase024-retirement-heap-integrity/progress.md). The historic
+p021 lifecycle requirement remains separately owned and must be repaired before
+that last p024 completion gate can turn green.

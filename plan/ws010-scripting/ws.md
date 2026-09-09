@@ -67,8 +67,9 @@ without copying from or depending on `.internal/`.
 - Host source/extraction path: `build/NoctLang`.
 - Host interpreter path: `build/NoctLang/build-static/noct`.
 - Upstream repository: `https://github.com/awemorris/NoctLang.git`.
-- Current immutable host source is the official `v2.0.1` archive shared with
-  target Noct; Git checkout/fetch is no longer the active acquisition model.
+- Current immutable host source is the post-2.0.1 `bb239816` archive shared with
+  target Noct; [WS019-p023](../ws019-installation/phase023-noct-large-seek/results.md)
+  records the update. Git checkout/fetch is not the active acquisition model.
 - Noct scripts use `.noct`; Makefiles invoke the built interpreter explicitly.
 - New Makefile targets do not reintroduce a formal aggregate test interface.
 - `.internal/` is never a required runtime/build dependency at WS completion.

@@ -1,0 +1,55 @@
+require metadata;
+func metaCheck(ok, message) { if (!ok) { System.error("metadata test: " + message); } }
+func metaObserve(context, name) {
+    context.observations = context.observations + 1;
+    var first = "device\tnvme0n1\t1\t0\t0\t512\t10485760\t0\n";
+    var deviceText = first + "device\tnvme0n1p1\t2\t1\t4\t512\t131072\t2048\n";
+    if (context.mode == "extra") { deviceText = deviceText + "device\textra\t3\t1\t4\t512\t512\t200000\n"; }
+    var devices = instInventory(deviceText);
+    var guid = "11111111-1111-4111-8111-111111111111";
+    var identity = "DEVNAME=nvme0n1p1\nTYPE=vfat\nPARTUUID=" + guid + "\n";
+    if (context.mode == "identity" && context.observations >= 2) { identity = identity + "UUID=1234-ABCD\n"; }
+    if (context.mode == "device" && context.observations >= 2) { devices[1].id = 3; }
+    if (context.mode == "extent") { devices[1].offset = 2049; }
+    var text = first + "table\tgpt\t0\t1\nrange\t0\t512\nrange\t512\t512\n" +
+        "range\t1024\t131072\nrange\t5368708608\t512\nrange\t5368577536\t131072\n" +
+        "partition\t1\t2048\t131072\tc12a7328-f81f-11d2-ba4b-00a0c93ec93b\t" + guid + "\t0\n";
+    return {devices:devices, disk:devices[0], text:text,
+        identities:{nvme0n1p1:instIdentity(identity)}, identityText:{nvme0n1p1:identity}};
+}
+func metaRead(context, path, offset, size) {
+    metaCheck(size > 0 && size <= 65536, "bounded read");
+    context.reads = context.reads + 1;
+    if (offset > 4294967296L) { context.large = true; }
+    if (context.mode == "io") { System.error("injected read failure"); }
+    if (context.mode == "short") { return Packed.uint8(size - 1); }
+    var bytes = Packed.uint8(size);
+    if (context.observations >= 2 && ((context.mode == "raw" && path == "/dev/nvme0n1") ||
+        (context.mode == "bpb" && path == "/dev/nvme0n1p1"))) { bytes[0] = 1; }
+    return bytes;
+}
+func metaCapture(context, unused) { return instMetadataCapture({observe:metaObserve, read:metaRead}, context, "nvme0n1"); }
+func main(args) {
+    if (Array.size(args) == 1) {
+        var ops = instMetadataOps();
+        var snapshot = instMetadataCapture(ops, 0, args[0]);
+        metaCheck(instMetadataRevalidate(ops, 0, snapshot), "native revalidation");
+        metaCheck(Array.size(snapshot.children) > 0, "native live children");
+        var large = false;
+        for (i in 0..Array.size(snapshot.ranges)) { if (snapshot.ranges[i].offset > 4294967296L) { large = true; } }
+        metaCheck(large, "native backup table above 4 GiB");
+        metaCheck(snapshot.fat32[snapshot.children[0].name], "native FAT32 BPB");
+        print("native metadata PASS retained GPT BPB device identity revalidation");
+        return;
+    }
+    var context = {mode:"normal", observations:0, reads:0, large:false};
+    var saved = metaCapture(context, 0);
+    metaCheck(context.observations == 2 && context.reads == 16 && context.large, "chunked stable capture");
+    metaCheck(instMetadataRevalidate({observe:metaObserve, read:metaRead}, context, saved), "stable retry");
+    for (mode in ["identity", "device", "extent", "extra", "raw", "bpb", "io", "short"]) {
+        context = {mode:mode, observations:0, reads:0, large:false};
+        var result = System.pcall(metaCapture, context, 0);
+        metaCheck(!result.ok, "accepted " + mode);
+    }
+    print("installer metadata PASS stable chunking large offsets and 8 failure scenarios");
+}

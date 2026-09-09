@@ -328,6 +328,7 @@ __rtld_thread_alloc(
 		return -1;
 	}
 	rtld_memset(tcb, 0, sizeof(*tcb));
+	tcb->tls.self = (uintptr_t)tcb;
 	rtld_memset(dtv, 0, (RTLD_OBJECT_MAX + 1U) * sizeof(*dtv));
 	tcb->dtv = dtv;
 	tcb->dtv_count = RTLD_OBJECT_MAX + 1U;
@@ -2115,8 +2116,9 @@ map_one_segment(
 	remember_mapping(object, (uintptr_t)mapped,
 			 file_map_size != 0 ? file_map_size : memory_map_size);
 
-	/* Handles the file map size condition. */
-	if (file_map_size < memory_map_size) {
+	/* File-backed segments may need additional anonymous BSS pages.
+	 * A pure BSS segment was already mapped in full above. */
+	if (file_map_size != 0 && file_map_size < memory_map_size) {
 		anonymous = object->base + virtual_page + file_map_size;
 		anonymous_size = memory_map_size - file_map_size;
 		mapped = map_call(
@@ -2995,7 +2997,7 @@ register_tls_module(
 			/* Handles the alignment condition. */
 			if ((alignment & (alignment - 1U)) != 0 ||
 			    alignment > RTLD_PAGE_SIZE ||
-			    object->phdr[i].p_memsz > RTLD_PAGE_SIZE)
+			    object->phdr[i].p_memsz > ZEDBSD_TLS_MEMORY_MAX)
 				rtld_fatal("unsupported TLS alignment or size");
 
 			/* Process each remaining element. */

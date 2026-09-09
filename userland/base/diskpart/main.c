@@ -11,6 +11,19 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* Machine records contain numeric fields and kernel device/GUID tokens only. */
+static int machine_output;
+static void show_machine(const struct dp_table *, const struct zedbsd_block_info *);
+
+static void
+machine_device(const struct zedbsd_block_info *info)
+{
+	printf("device\t%s\t%u\t%u\t%u\t%u\t%llu\t%llu\n",
+	    info->name, info->device, info->parent_device, info->flags,
+	    info->sector_size, (unsigned long long)info->sector_count,
+	    (unsigned long long)info->parent_offset);
+}
+
 static int fd_read(void *context, uint64_t offset, void *data, size_t size)
 {
 	int fd = *(int *)context;
@@ -59,12 +72,16 @@ static int device_open(const char *operand, int writable, int *fd,
 static void help(void)
 {
 	puts("usage: diskpart [list | show DISK | reload DISK | help]");
+	puts("       diskpart --machine [list | show DISK]");
 	puts("       diskpart add DISK SLOT START COUNT TYPE [PARTUUID [NAME]]");
 	puts("       diskpart delete DISK SLOT");
+	puts("       diskpart init DISK DISKUUID [START COUNT TYPE PARTUUID NAME]...");
 	puts("SLOT is one-based; START/COUNT are decimal logical sectors.");
 	puts("TYPE: GPT GUID (PARTUUID required), or hexadecimal primary-MBR type.");
 	puts("Edits require interactive device-identity confirmation. No force mode.");
-	puts("Existing matching GPT or primary MBR only; no init/format/resize/move.");
+	puts("init replaces the whole disk's partition map with GPT (at most 16 groups).");
+	puts("init reserves the disk until close; requires exact ERASE device identity.");
+	puts("add/delete require existing matching GPT or primary MBR; no format/resize/move.");
 	puts("Extended MBR is displayed as a container; EBR chains are unsupported.");
 	puts("GPT writes require 128-byte entries, 92-byte headers, and <=16 active slots.");
 	puts("A mounted partition, even unchanged/read-only, prevents whole-disk reload.");
@@ -77,7 +94,8 @@ static int list(void)
 	struct dirent *entry;
 	int errors = 0;
 	if (!dir) return errno;
-	puts("DEVICE       REGISTRATION  SECTOR-SIZE  SECTORS  FLAGS");
+	if (!machine_output)
+		puts("DEVICE       REGISTRATION  SECTOR-SIZE  SECTORS  FLAGS");
 	while ((entry = readdir(dir)) != NULL) {
 		char path[64];
 		struct stat st;
@@ -88,26 +106,69 @@ static int list(void)
 		if (stat(path, &st) < 0 || !S_ISBLK(st.st_mode)) continue;
 		fd = open(path, O_RDONLY);
 		error = fd < 0 ? errno : query(fd, &info);
-		if (fd >= 0) close(fd);
+		if (fd >= 0 && close(fd) < 0 && error == 0) error = errno;
 		if (error) { fprintf(stderr, "diskpart: %s: %s\n", path, strerror(error)); errors = error; continue; }
+		if (machine_output) {
+			machine_device(&info);
+			continue;
+		}
 		if (info.flags & ZEDBSD_BLOCK_PARTITION) continue;
 		printf("%s %u %u %llu %s\n", info.name, info.device, info.sector_size,
 		    (unsigned long long)info.sector_count,
 		    info.flags & ZEDBSD_BLOCK_READ_ONLY ? "ro" : "rw");
 	}
-	closedir(dir); return errors;
+	closedir(dir);
+	if (fflush(stdout) != 0 && !errors) errors = EIO;
+	if (ferror(stdout) && !errors) errors = EIO;
+	return errors;
 }
 
 static void show(const struct dp_table *t)
 {
-	printf("On-disk %s table%s%s; %u active partitions (kernel mapping may differ)\n",
-	    t->format == DP_GPT ? "GPT" : "MBR",
+	printf("%s %s table%s%s; %u active partitions (kernel mapping may differ)\n",
+	    t->changed ? "Proposed" : "On-disk", t->format == DP_GPT ? "GPT" : "MBR",
 	    t->restrictions & DP_DEGRADED ? " [degraded; editing refused]" : "",
 	    t->restrictions & DP_UNSUPPORTED ? " [unsupported for editing]" : "", t->count);
 	for (unsigned i = 0; i < t->count; i++) {
 		const struct dp_part *p = &t->parts[i];
 		printf("%u start=%llu count=%llu type=%s uuid=%s name=%s\n", p->slot,
 		    (unsigned long long)p->start, (unsigned long long)p->count, p->type, p->uuid, p->name);
+	}
+}
+
+/* Describe the table and exact metadata spans without printing label text. */
+static void
+show_machine(const struct dp_table *table, const struct zedbsd_block_info *info)
+{
+	const struct dp_part *part;
+	const struct dp_copy *copy;
+	uint64_t bytes;
+	unsigned i;
+
+	machine_device(info);
+	printf("table\t%s\t%u\t%u\n",
+	    table->format == DP_GPT ? "gpt" : "mbr", table->restrictions, table->count);
+	printf("range\t0\t%u\n", info->sector_size);
+	if (table->format == DP_GPT) {
+		for (i = 0; i < 2; i++) {
+			copy = &table->copy[i];
+			if (copy->header == NULL || copy->entries == NULL)
+				continue;
+			bytes = ((uint64_t)copy->bytes + info->sector_size - 1U) /
+			    info->sector_size * info->sector_size;
+			printf("range\t%llu\t%u\n",
+			    (unsigned long long)(copy->lba * info->sector_size), info->sector_size);
+			printf("range\t%llu\t%llu\n",
+			    (unsigned long long)(copy->table_lba * info->sector_size),
+			    (unsigned long long)bytes);
+		}
+	}
+	for (i = 0; i < table->count; i++) {
+		part = &table->parts[i];
+		printf("partition\t%u\t%llu\t%llu\t%s\t%s\t%llu\n",
+		    part->slot, (unsigned long long)part->start,
+		    (unsigned long long)part->count, part->type, part->uuid,
+		    (unsigned long long)part->attributes);
 	}
 }
 
@@ -153,20 +214,152 @@ static int live_extents_match(const struct zedbsd_block_info *parent,
 	closedir(dir); return error;
 }
 
+/* Replaces the complete partition map under one file-description reservation. */
+static int
+initialize_disk(int argc, char **argv)
+{
+	struct zedbsd_block_info info;
+	struct dp_table table = {0};
+	struct dp_io io;
+	uint8_t guid[16];
+	uint64_t start;
+	uint64_t count;
+	char expected[80];
+	char answer[96];
+	size_t length;
+	int fd = -1;
+	int error = 0;
+	int status = 1;
+	int started = 0;
+	int index;
+
+	/* Refuse incomplete groups and invalid numbers before opening a device. */
+	if (argc < 4 || argc > 84 || (argc - 4) % 5 != 0) {
+		help();
+		return 2;
+	}
+	if (dp_guid_parse(argv[3], guid) != 0) {
+		help();
+		return 2;
+	}
+	for (index = 4; index < argc; index += 5) {
+		if (decimal(argv[index], &start) != 0 ||
+		    decimal(argv[index + 1], &count) != 0 || count == 0 ||
+		    dp_guid_parse(argv[index + 2], guid) != 0 ||
+		    dp_guid_parse(argv[index + 3], guid) != 0) {
+			help();
+			return 2;
+		}
+	}
+	error = device_open(argv[2], 1, &fd, &info);
+	if (error != 0)
+		goto out;
+	if (ioctl(fd, BLKRESERVE, &info) < 0) {
+		error = errno;
+		goto out;
+	}
+	io = (struct dp_io){ &fd, info.sector_count, info.sector_size, fd_read, fd_write, fd_flush };
+	error = dp_initialize_gpt(&table, &io, argv[3]);
+	if (error != 0)
+		goto out;
+	for (index = 4; index < argc; index += 5) {
+		/* The first pass established decimal syntax; geometry is checked here. */
+		(void)decimal(argv[index], &start);
+		(void)decimal(argv[index + 1], &count);
+		error = dp_add(&table, (unsigned)(index - 4) / 5 + 1,
+		    start, count, argv[index + 2], argv[index + 3], argv[index + 4]);
+		if (error != 0)
+			goto out;
+	}
+
+	printf("Target /dev/%s registration=%u sector-size=%u sectors=%llu\n",
+	    info.name, info.device, info.sector_size, (unsigned long long)info.sector_count);
+	puts("WARNING: Replace all existing partitions on this disk.");
+	puts("No filesystem is formatted or data securely erased. This operation is not crash-atomic.");
+	puts("Proposed complete GPT:");
+	show(&table);
+	snprintf(expected, sizeof(expected), "ERASE %s:%u", info.name, info.device);
+	printf("Type '%s' to initialize: ", expected);
+	if (fflush(stdout) != 0 || ferror(stdout)) {
+		error = EIO;
+		goto out;
+	}
+	if (fgets(answer, sizeof(answer), stdin) == NULL) {
+		error = ECANCELED;
+		goto out;
+	}
+	length = strlen(answer);
+	if (length == 0 || answer[length - 1] != '\n') {
+		error = ECANCELED;
+		goto out;
+	}
+	answer[--length] = 0;
+	if (length != 0 && answer[length - 1] == '\r')
+		answer[--length] = 0;
+	if (strcmp(answer, expected) != 0) {
+		error = ECANCELED;
+		goto out;
+	}
+
+	error = dp_write(&table, &started);
+	if (error != 0)
+		goto out;
+	if (ioctl(fd, BLKREREADPART, 0) < 0) {
+		error = errno;
+		status = 3;
+		fprintf(stderr, "diskpart: GPT written and verified, but kernel reload failed. No rollback performed.\n");
+		goto out;
+	}
+	status = 0;
+
+out:
+	dp_free(&table);
+	if (fd >= 0 && close(fd) < 0 && error == 0) {
+		error = errno;
+		status = 1;
+	}
+	if (status == 0) {
+		puts("GPT initialized, flushed, verified; kernel partition devices reloaded.");
+		if (fflush(stdout) != 0 || ferror(stdout)) {
+			error = EIO;
+			status = 1;
+		}
+	}
+	if (error != 0) {
+		fprintf(stderr, "diskpart: %s: %s. %s\n", argv[2], strerror(error),
+		    started ? "Disk metadata may have changed; no rollback performed." :
+		    "No partition metadata written.");
+	}
+	return status;
+}
+
 int main(int argc, char **argv)
 {
 	struct zedbsd_block_info info;
 	struct dp_table table;
 	struct dp_io io;
-	const char *verb = argc < 2 ? "list" : argv[1];
+	const char *verb;
 	int error = 0, fd = -1, editing, started = 0;
 	uint64_t slot = 0, start = 0, count = 0;
+	machine_output = 0;
+	if (argc > 1 && !strcmp(argv[1], "--machine")) {
+		machine_output = 1;
+		argc--;
+		argv++;
+	}
+	verb = argc < 2 ? "list" : argv[1];
+	if (machine_output && strcmp(verb, "list") && strcmp(verb, "show")) {
+		help();
+		return 2;
+	}
 	if (!strcmp(verb, "help") && argc == 2) { help(); return 0; }
 	if (!strcmp(verb, "list") && argc <= 2) {
 		error = list();
 		if (error) fprintf(stderr, "diskpart: list incomplete: %s\n", strerror(error));
 		return error ? 1 : 0;
 	}
+	if (!strcmp(verb, "init"))
+		return initialize_disk(argc, argv);
 	editing = !strcmp(verb, "add") || !strcmp(verb, "delete");
 	if ((!strcmp(verb, "show") || !strcmp(verb, "reload")) ? argc != 3 :
 	    !strcmp(verb, "delete") ? argc != 4 :
@@ -192,6 +385,10 @@ int main(int argc, char **argv)
 	io = (struct dp_io){ &fd, info.sector_count, info.sector_size, fd_read, fd_write, fd_flush };
 	error = dp_load(&table, &io);
 	if (error) goto done;
+	if (machine_output) {
+		show_machine(&table, &info);
+		goto free_table;
+	}
 	printf("Target /dev/%s registration=%u sector-size=%u sectors=%llu\n", info.name,
 	    info.device, info.sector_size, (unsigned long long)info.sector_count);
 	show(&table);
@@ -236,7 +433,9 @@ int main(int argc, char **argv)
 free_table:
 	dp_free(&table);
 done:
-	if (fd >= 0) close(fd);
+	if (fd >= 0 && close(fd) < 0 && error == 0) error = errno;
+	if (fflush(stdout) != 0 && !error) error = EIO;
+	if (ferror(stdout) && !error) error = EIO;
 	if (error) fprintf(stderr, "diskpart: %s: %s\n", argv[2], strerror(error));
 	return error ? 1 : 0;
 }

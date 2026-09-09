@@ -1,0 +1,95 @@
+// Authorize the exact reserved command once after the frontend's approval.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require commands;
+require identity;
+
+func instNativeChallenge(operation, device) {
+    var name = instDeviceName(device.name);
+    var phrase = operation + " " + name + ":" + device.id;
+    if (operation == "ERASE") {
+        return {phrase:phrase, prompt:"Type '" + phrase + "' to initialize: ",
+            header:"Target /dev/" + name + " registration=" + device.id +
+                " sector-size=" + device.sectorSize + " sectors=" + device.sectors};
+    }
+    if (operation == "FORMAT") {
+        return {phrase:phrase, prompt:"Type " + phrase + " to continue: ",
+            header:"Target /dev/" + name + " registration=" + device.id +
+                " bytes=" + device.sectorSize * device.sectors};
+    }
+    System.error("unsupported destructive command");
+}
+
+func instNativeCommandFeed(state, chunk) {
+    if (String.byteLength(state.output) + String.byteLength(chunk) > 65536) {
+        System.error("destructive command exceeded its output bound");
+    }
+    state.output = state.output + chunk;
+    var at = String.indexOf(state.output, state.challenge.prompt);
+    if (at < 0) { return false; }
+    var after = at + String.charCount(state.challenge.prompt);
+    if (String.indexOf(String.substring(state.output, after, -1), "Type ") >= 0) {
+        System.error("destructive command repeated its challenge");
+    }
+    if (state.sent) { return false; }
+    // The prompt must be the current suffix, preceded by the exact geometry line.
+    if (after != String.charCount(state.output)) {
+        System.error("unexpected output after destructive challenge");
+    }
+    var lines = instLines(String.substring(state.output, 0, at));
+    var found = 0;
+    for (line in lines) {
+        if (line == state.challenge.header) { found = found + 1; }
+    }
+    if (found != 1 || Array.size(lines) == 0 || lines[0] != state.challenge.header) {
+        System.error("destructive command target changed");
+    }
+    return true;
+}
+
+func instNativeCommandBody(state, unused) {
+    var argv = ["/bin/timeout", "-k", "2", "900"];
+    for (argument in state.argv) { Array.push(argv, argument); }
+    state.process = Process.spawn(argv);
+    if (state.process < 0) { System.error("cannot start destructive command"); }
+    while (Process.isAlive(state.process)) {
+        if (instNativeCommandFeed(state, Process.read(state.process, 100))) {
+            // Once attempted, a failed write or child exit can still mean partial media changes.
+            state.owner.started = true;
+            state.sent = true;
+            if (Process.write(state.process, state.challenge.phrase + "\n") != 1) {
+                System.error("cannot send destructive command authorization");
+            }
+        }
+    }
+    while (true) {
+        var chunk = Process.read(state.process, 0);
+        if (chunk == "") { break; }
+        instNativeCommandFeed(state, chunk);
+    }
+    var status = Process.wait(state.process);
+    Process.close(state.process);
+    state.process = -1;
+    if (!state.sent || status != 0) {
+        System.error("destructive command failed status=" + status + "\n" + state.output);
+    }
+    return true;
+}
+
+func instNativeCommandReap(state, unused) {
+    Process.kill(state.process, 15);
+    while (Process.isAlive(state.process)) { Process.read(state.process, 100); }
+    Process.wait(state.process);
+    Process.close(state.process);
+    state.process = -1;
+}
+
+func instNativeCommand(argv, operation, device, owner) {
+    var state = {argv:argv, challenge:instNativeChallenge(operation, device),
+        process:-1, output:"", sent:false, owner:owner};
+    var result = System.pcall(instNativeCommandBody, state, 0);
+    var cleanup = {ok:true};
+    if (state.process >= 0) { cleanup = System.pcall(instNativeCommandReap, state, 0); }
+    if (!cleanup.ok) { System.error("command cleanup uncertain: " + cleanup.message); }
+    if (!result.ok) { System.error(result.message); }
+    return true;
+}

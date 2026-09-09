@@ -1,22 +1,22 @@
 # WS006: input and evdev
 
-Last updated: 2026-09-05
+q147 closure: libc terminal identity is corrected. Ordinary xHCI and paired
+EHCI/UHCI campaigns pass USB-root I/O, HID/hotplug, native PTY checks and actual
+Xzed input/TTY restoration. [Results](phase011-terminal-identity/results.md).
+
+Last updated: 2026-09-09
 
 WSID: `ws006`
 
-Status: active; p008 is complete after q048's automatic/software milestone and
-the user's 2026-09-05 physical USB HID confirmation. Q063 satisfied p009's
-WS008 dependency, so p009 is Queue-ready.
+Status: completed (q147), including the user's 2026-09-05 physical USB HID
+confirmation and q126 Noct/BeUI consumer evidence.
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws006-p008` complete (`q048` plus physical confirmation)
+Last verified Phases: `ws006-p009`, `ws006-p010`, `ws006-p011` complete (`q147`).
 
-Resume point: Queue p009. Remove the event-oriented `/dev/console` input UAPI
-while preserving ordinary character-device/TTY input, verify that `/dev/mouse`
-has no surviving implementation, and retain Xzed keyboard/mouse input solely
-through evdev. The current tree already has no `/dev/mouse` pathname and Xzed
-opens capability-discovered nodes under `/dev/input`.
+Resume point: none in this WS. Legacy event UAPI and `/dev/mouse` are absent;
+ordinary TTY remains and Xzed opens capability-discovered evdev nodes.
 
 Shared tests: [WS006 test index](tests/README.md)
 
@@ -32,9 +32,11 @@ Shared tests: [WS006 test index](tests/README.md)
 | [`ws006-p006`](phase006-input-truthfulness-ownership/phase.md) | Complete automatic/source milestone (`q044`) | Per-source physical/momentary input, bounded console subscription, atomic overflow resync, and terminal callback ownership pass; fresh QEMU image acceptance remains behind WS008 MB-008 |
 | [`ws006-p007`](phase007-usb-hid-parser/phase.md) | Complete parser milestone (`q044`) | Bounded report/boot layouts and malformed/unsupported descriptor handling pass strict, sanitizer, and analyzer gates at 791 checks without live USB claims |
 | [`ws006-p008`](phase008-usb-hid-evdev/phase.md) | Complete (`q048` plus user physical confirmation, 2026-09-05) | Production Report-Protocol keyboard/mouse/tablet, generation-safe lifecycle, console coexistence, xHCI/EHCI/UHCI automatic gates, and physical USB HID pass |
-| [`ws006-p009`](phase009-consumer-legacy-removal/phase.md) | Queue-ready | Preserve `/dev/console` character input, remove only its event/key-state UAPI, confirm `/dev/mouse` remains absent, and close Xzed/Noct/BeUI on evdev-only input |
+| [`ws006-p009`](phase009-consumer-legacy-removal/phase.md) | Complete (q147) | Legacy removal, Noct/BeUI and actual Xzed acceptance pass |
+| [`ws006-p010`](phase010-legacy-usb-root-recovery/phase.md) | Complete (q147) | Paired USB-root/HID replay after boot and UHCI ownership repairs |
+| [`ws006-p011`](phase011-terminal-identity/phase.md) | Complete (q147) | libc PTY identity, native error/bounds cases and GUI restoration |
 
-## Remaining Phase order
+## Historical Phase order (superseded by q147 closure)
 
 ```text
 ws006-p005 complete
@@ -108,7 +110,7 @@ console's character/key translation path.
 | IN-03 | Complete PC/AT milestone | Console consumes the internal input stream | IN-01/02 | One worker fans out PC/AT physical events; keymap/queue/QEMU coexistence evidence passes |
 | IN-04 | Complete through `ws018-p007` | Xzed evdev migration | IN-02, GFX X11 repair | Keyboard and absolute/relative mouse behavior pass without a console-event or `/dev/mouse` fallback |
 | IN-05 | Historical milestone complete; latest WS008 revalidation required | Noct/BeUI evdev migration | IN-02, latest NOCT upstream/backend work | Selected latest BeUI target passes without console event ioctls |
-| IN-06 | Planned as `ws006-p009` | Remove console continuous-event and key-state UAPI | IN-03–05, IN-11 | No in-tree consumer remains; compatibility audit and regression tests pass |
+| IN-06 | q126実装済み / p009 uncleared | Remove console continuous-event and key-state UAPI | IN-03–05, IN-11 | No in-tree consumer remains; compatibility audit and regression tests pass |
 | IN-07 | Complete through `ws006-p006` | Truthful logical/physical producers, internal console subscription, and per-source ownership | IN-01–03 | Character-only, multiple-source, detach, and console/evdev coexistence fixtures pass |
 | IN-10 | Complete through `ws006-p007` | USB HID descriptor/report core | HW-01 xHCI, USB core | Descriptor parser corpus, malformed reports, boot/report protocol tests |
 | IN-11 | Automatic/software milestone complete through `ws006-p008`; IN-T42 pending | USB HID keyboard and mouse evdev devices | IN-01, IN-07, IN-10 | QEMU USB keyboard/tablet/mouse and physical hotplug tests pass |
@@ -139,3 +141,28 @@ condition.
 
 USB HID parsing treats report descriptors as untrusted device input: all
 lengths, counts, usages, and bit ranges are bounded before access.
+
+## q126 Priority実行結果
+
+旧console event UAPI撤去とTTY/evdev・Noct/BeUI・xHCI受け入れは通過。paired EHCI/UHCI USB root列挙timeoutとXzed GUI再検証を残し、WSは未完了。[p009結果・再開条件](phase009-consumer-legacy-removal/results.md)を参照。
+
+## Current goal ordering (2026-09-09)
+
+q126 EHCI/UHCI USB-root failure remains a required QEMU investigation and fix
+within the Priority goal. The user requests ready implementation work first,
+then USB analysis; this is an ordering change, not cancellation. Coordinate
+with WS002-p023 USB-boot halt investigation, keeping boot and shutdown outcomes
+separate unless evidence establishes a common cause.
+
+## q137 legacy USB prerequisite
+
+[p010](phase010-legacy-usb-root-recovery/phase.md) selected in q137 to repair
+paired EHCI/UHCI USB-root enumeration before resuming p009 GUI/input acceptance.
+
+q137 repairs boot-context ownership and reaches login, keyboard/relative input
+and hotplug. xHCI full acceptance and paired dirty USB halt/reboot pass; paired
+64 MiB concurrent I/O stalls in process-reaper heap traversal. p010 remains
+uncleared; [progress and resume path](phase010-legacy-usb-root-recovery/progress.md)
+point to WS002-p024 capture. WS006 and p009 remain incomplete.
+User authorization includes QEMU analysis and correction within the Priority
+goal; do not treat unavailable hardware as an implementation blocker.

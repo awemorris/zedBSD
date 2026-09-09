@@ -14,6 +14,8 @@
  */
 
 #include "kern/sysctl.h"
+#include "kern/boot.h"
+#include "kern/vfs.h"
 #include "kern/buf.h"
 #include "kern/io-stats.h"
 #include "kern/cache-memory.h"
@@ -45,6 +47,10 @@ static const struct sysctl_leaf leaves[] = {
 	{{ CTL_KERN, KERN_MSGBUF_SIZE, 0 }, 2, "kern.msgbuf_size"},
 	{{ CTL_KERN, KERN_MSGBUF_DROPPED, 0 }, 2, "kern.msgbuf_dropped"},
 	{{ CTL_KERN, KERN_HOSTNAME, 0 }, 2, "kern.hostname"},
+	{{ CTL_KERN, KERN_BOOT_FIRMWARE, 0 }, 2, "kern.boot.firmware_partition"},
+	{{ CTL_KERN, KERN_BOOT_CONFIGURATION, 0 }, 2, "kern.boot.config_partition"},
+	{{ CTL_KERN, KERN_BOOT_CONFIG_MATCHES, 0 }, 2, "kern.boot.config_matches"},
+	{{ CTL_KERN, KERN_BOOT_ROOT_IMAGE, 0 }, 2, "kern.boot.root_image"},
 	{{ CTL_VFS, VFS_BUFCACHE, VFS_BUFCACHE_MAX_BYTES }, 3,
 	 "vfs.bufcache.max_bytes"},
 	{{ CTL_VFS, VFS_BUFCACHE, VFS_BUFCACHE_CURRENT_BYTES }, 3,
@@ -102,6 +108,7 @@ kern_sysctl(
 	struct cache_memory_stats cache_memory;
 	struct readahead_report readahead;
 	struct memory_stats memory;
+	struct root_image_info root_image;
 	struct hal_memory_stats hal_memory;
 	const char *new_name;
 	uint64_t value;
@@ -160,6 +167,32 @@ kern_sysctl(
 		memory.physical_allocated_bytes = hal_memory.physical_allocated;
 		memory.physical_free_bytes = hal_memory.physical_free;
 		return sysctl_output(oldp, oldlenp, &memory, sizeof(memory));
+	}
+
+	/* Root-image admission reads current referenced objects, not boot text. */
+	if (namelen == 2 && name[0] == CTL_KERN && name[1] == KERN_BOOT_ROOT_IMAGE) {
+		if (newp != NULL || newlen != 0)
+			return EPERM;
+		error = kern_vfs_root_image_info(&root_image);
+		if (error != 0)
+			return error;
+		return sysctl_output(oldp, oldlenp, &root_image, sizeof(root_image));
+	}
+
+	/* Reports retained loader identities independently from boot parameters. */
+	if (namelen == 2 && name[0] == CTL_KERN &&
+	    name[1] >= KERN_BOOT_FIRMWARE && name[1] <= KERN_BOOT_CONFIG_MATCHES) {
+		const char *selector;
+		uint64_t matches;
+
+		if (newp != NULL || newlen != 0)
+			return EPERM;
+		if (name[1] == KERN_BOOT_CONFIG_MATCHES) {
+			matches = kern_boot_config_matches();
+			return sysctl_output(oldp, oldlenp, &matches, sizeof(matches));
+		}
+		selector = kern_boot_source_selector(name[1] == KERN_BOOT_CONFIGURATION);
+		return sysctl_output(oldp, oldlenp, selector, strlen(selector) + 1);
 	}
 
 	/* Handles the kernel leaves. */

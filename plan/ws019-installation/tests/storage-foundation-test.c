@@ -19,7 +19,14 @@ static int io_error, path_error;
 static int claim_error, alloc_error;
 static uintptr_t current_owner = 1;
 static int superuser = 1;
+static unsigned admin_claims;
+static const struct backing_claim *last_mutation_owner;
+static int invalidation_error;
 struct thread *thread_current(void) { return (struct thread *)current_owner; }
+#ifdef STORAGE_FOUNDATION_HAL_STUBS
+bool hal_irq_disable(void) { return false; }
+void hal_irq_enable(void) {}
+#endif
 struct ucred *cred_current_ref(void) { return NULL; }
 int cred_is_superuser(const struct ucred *c) { (void)c; return superuser; }
 void cred_release(struct ucred *c) { (void)c; }
@@ -33,12 +40,11 @@ void spin_init(struct spinlock *s, enum lock_rank r, const char *n)
 { memset(s, 0, sizeof(*s)); s->rank = r; s->name = n; }
 int mutex_init(struct mutex *m, enum lock_rank r, const char *n)
 { memset(m, 0, sizeof(*m)); spin_init(&m->guard, r, n); return 0; }
-/* This fixture exercises mount snapshots, not mount publication/mutation.
- * Keep accidentally retained host-link entrypoints fail-fast. KA-T121 links
- * the real inode/cache path with working locks and tests those operations. */
-int mutex_owned(struct mutex *m) { (void)m; abort(); }
-void mutex_lock(struct mutex *m) { (void)m; abort(); }
-void mutex_unlock(struct mutex *m) { (void)m; abort(); }
+/* Single-threaded description serialization; real mount races remain in the
+ * claim/concurrency fixtures. Unexpected inode mutation entrypoints abort. */
+int mutex_owned(struct mutex *m) { return m->locked && m->owner == thread_current(); }
+void mutex_lock(struct mutex *m) { CHECK(!m->locked); m->locked = 1; m->owner = thread_current(); }
+void mutex_unlock(struct mutex *m) { CHECK(mutex_owned(m)); m->locked = 0; m->owner = NULL; }
 int inode_lookup(struct inode *i, const struct componentname *n, struct inode **r)
 { (void)i; (void)n; (void)r; abort(); }
 void inode_dir_changed(struct inode *i) { (void)i; abort(); }
@@ -73,7 +79,22 @@ int fs_getcwd(const struct cwdinfo *c, char *b, size_t n)
 }
 int backing_mutation_begin_disk(struct disk *d, uint64_t b, uint64_t n,
 	const struct backing_claim *c, struct backing_mutation_guard *g)
-{ (void)d; (void)b; (void)n; (void)c; memset(g, 0, sizeof(*g)); return claim_error; }
+{ (void)d; (void)b; (void)n; last_mutation_owner = c; memset(g, 0, sizeof(*g)); return claim_error; }
+int backing_claim_prepare_disk(struct disk *d, uint64_t b, uint64_t n,
+	enum backing_claim_owner o, struct backing_claim **result)
+{
+	CHECK(d && b == 0 && n == d->d_block_count && o == BACKING_CLAIM_ADMIN);
+	*result = NULL;
+	if (claim_error) return claim_error;
+	*result = kern_calloc(1, 1);
+	if (!*result) return ENOMEM;
+	admin_claims++;
+	return 0;
+}
+#ifndef STORAGE_FOUNDATION_CUSTOM_CLAIM_RELEASE
+void backing_claim_release(struct backing_claim *claim)
+{ CHECK(claim && admin_claims); admin_claims--; free(claim); }
+#endif
 void backing_mutation_end(struct backing_mutation_guard *g) { (void)g; }
 void buf_reset(void) {}
 int buf_sync(struct disk *d) { (void)d; return io_error; }
@@ -84,7 +105,12 @@ int buf_read_view(struct disk *d, uint64_t b, uint32_t n, void *p, struct buf_vi
 int buf_view_matches(const struct buf_view *v) { return v->valid; }
 int buf_write(struct disk *d, uint64_t b, uint32_t n, const void *p)
 { return disk_write_direct(d, b, n, p); }
-int buf_invalidate_disk(struct disk *d, unsigned f) { (void)d; (void)f; return 0; }
+int buf_write_context(struct disk *d, uint64_t b, uint32_t n, const void *p,
+	const struct io_context *context)
+{ return disk_write_direct_context(d, b, n, p, context); }
+int buf_invalidate_disk(struct disk *d, unsigned f) { (void)d; (void)f; return invalidation_error; }
+int buf_invalidate(struct disk *d, uint64_t b, uint64_t n, unsigned f)
+{ (void)d; (void)b; (void)n; (void)f; return invalidation_error; }
 int copyin(uintptr_t u, void *k, size_t n)
 { if (!u) return EFAULT; memcpy(k, (void *)u, n); return 0; }
 int copyout(const void *k, uintptr_t u, size_t n)
@@ -307,9 +333,178 @@ static void test_reload(void)
 	partition_reset(); disk_registry_reset();
 }
 
+static void test_admin(void)
+{
+	struct disk *disk, *child;
+	struct inode node = {0};
+	struct file file = {0};
+	struct zedbsd_block_info info, changed;
+	unsigned char byte = 0x37;
+
+	disk_registry_reset(); partition_reset();
+	partition_set_scheme(&drv_partition_scheme_mbr);
+	disk = disk_alloc(); CHECK(disk != NULL);
+	strcpy(disk->d_name, "nvme0n1"); disk->d_block_size = 512;
+	disk->d_block_count = 4096; disk->d_ops = &ops;
+	CHECK(disk_create(disk) == 0);
+	node.i_rdev = disk->d_dev; file.f_inode = &node;
+	CHECK(block_open(&file) == 0);
+	memset(medium, 0, sizeof(medium)); medium[510] = 0x55; medium[511] = 0xaa;
+	mbr_entry(0, 100, 100);
+	CHECK(block_ioctl(&file, BLKREREADPART, 0) == 0);
+	child = partition_at(0)->p_disk;
+	memset(&info, 0, sizeof(info)); info.version = ZEDBSD_BLOCK_VERSION; info.struct_size = sizeof(info);
+	CHECK(block_ioctl(&file, BLKGETINFO, (uintptr_t)&info) == 0);
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EBADF);
+	atomic_store_release(&file.f_flags, O_RDWR);
+	superuser = 0; CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EPERM); superuser = 1;
+	CHECK(block_ioctl(&file, BLKRESERVE, 0) == EFAULT);
+	changed = info; changed.device++;
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&changed) == ESTALE);
+	changed = info; changed.sector_count++;
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&changed) == ESTALE);
+	CHECK(!admin_claims && disk->d_admin_owner == NULL);
+	CHECK(disk_open(child) == 0);
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EBUSY);
+	CHECK(!admin_claims && disk->d_admin_owner == NULL); disk_close(child);
+	CHECK(disk_open(disk) == 0);
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EBUSY); disk_close(disk);
+	disk->d_inflight = 1;
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EBUSY); disk->d_inflight = 0;
+	disk->d_opening = 1;
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EBUSY); disk->d_opening = 0;
+	disk->d_cache_users = 1;
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EBUSY); disk->d_cache_users = 0;
+	disk_ref(child);
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EBUSY); disk_release(child);
+	claim_error = EBUSY;
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EBUSY); claim_error = 0;
+	alloc_error = 1;
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == ENOMEM); alloc_error = 0;
+	CHECK(!admin_claims && disk->d_admin_owner == NULL);
+	disk->d_flags |= DISK_FILE_BACKED;
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EOPNOTSUPP);
+	disk->d_flags &= ~DISK_FILE_BACKED;
+	disk->d_flags |= DISK_READ_ONLY;
+	changed = info; CHECK(block_ioctl(&file, BLKGETINFO, (uintptr_t)&changed) == 0);
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&changed) == EROFS);
+	disk->d_flags &= ~DISK_READ_ONLY;
+	invalidation_error = EBUSY;
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EBUSY);
+	CHECK(!admin_claims && !disk->d_admin_owner && !disk->d_admin_thread);
+	invalidation_error = 0;
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == 0);
+	CHECK(admin_claims == 1 && disk->d_admin_owner == file.f_block_claim);
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == EBUSY);
+	CHECK(disk_open(disk) == EBUSY && disk_open(child) == EBUSY);
+	CHECK(disk_read(disk, 0, 1, medium) == EBUSY);
+	CHECK(disk_read_direct(disk, 0, 1, medium) == EBUSY);
+	CHECK(disk_admin_io_begin(disk, file.f_block_claim) == 0);
+	CHECK(disk_admin_io_begin(disk, file.f_block_claim) == EBUSY);
+	current_owner = 2;
+	CHECK(disk_read(disk, 0, 1, medium) == EBUSY);
+	disk_admin_io_end(disk, file.f_block_claim);
+	CHECK(disk->d_admin_thread == (struct thread *)1);
+	current_owner = 1;
+	disk_admin_io_end(disk, file.f_block_claim);
+	CHECK(!disk->d_admin_thread);
+	CHECK(partition_reload(disk) == EBUSY);
+	invalidation_error = EBUSY;
+	CHECK(block_pwrite(&file, &byte, 1, 4) == -EBUSY && !disk->d_admin_thread);
+	invalidation_error = 0;
+	CHECK(block_pwrite(&file, &byte, 1, 4) == 1);
+	CHECK(last_mutation_owner == file.f_block_claim);
+	io_error = EIO;
+	CHECK(block_fsync(&file) == EIO && !disk->d_admin_thread);
+	io_error = 0;
+	CHECK(block_fsync(&file) == 0);
+	CHECK(!disk->d_admin_thread);
+	CHECK(block_ioctl(&file, BLKREREADPART, 0) == 0);
+	CHECK(disk->d_admin_owner == file.f_block_claim && disk_open(disk) == EBUSY);
+	CHECK(block_close(&file) == 0);
+	CHECK(!admin_claims && !disk->d_admin_owner && !file.f_block_claim);
+	CHECK(block_open(&file) == 0);
+	CHECK(block_ioctl(&file, BLKRESERVE, (uintptr_t)&info) == 0);
+	disk_media_revoke(disk);
+	CHECK(block_pwrite(&file, &byte, 1, 4) == -ENXIO);
+	CHECK(block_ioctl(&file, BLKGETINFO, (uintptr_t)&info) == ENXIO);
+	CHECK(block_close(&file) == 0 && !admin_claims && !disk->d_admin_owner);
+	partition_reset(); disk_registry_reset();
+}
+
+static void test_partition_admin(void)
+{
+	struct disk *parent, *part, *sibling, *alias;
+	struct inode parent_node = {0}, part_node = {0}, sibling_node = {0};
+	struct file parent_file = {0}, part_file = {0}, sibling_file = {0};
+	struct zedbsd_block_info info = {0}, sibling_info = {0};
+	unsigned char data[512] = {0x71};
+	unsigned before;
+
+	disk_registry_reset(); partition_reset();
+	partition_set_scheme(&drv_partition_scheme_mbr);
+	parent = disk_alloc(); CHECK(parent != NULL);
+	strcpy(parent->d_name, "nvme0n1"); parent->d_block_size = 512;
+	parent->d_block_count = 8192; parent->d_ops = &ops;
+	CHECK(disk_create(parent) == 0);
+	parent_node.i_rdev = parent->d_dev; parent_file.f_inode = &parent_node;
+	atomic_store_release(&parent_file.f_flags, O_RDWR);
+	CHECK(block_open(&parent_file) == 0);
+	memset(medium, 0, sizeof(medium)); medium[510] = 0x55; medium[511] = 0xaa;
+	mbr_entry(0, 128, 128); mbr_entry(1, 512, 128);
+	CHECK(block_ioctl(&parent_file, BLKREREADPART, 0) == 0);
+	part = partition_at(0)->p_disk; sibling = partition_at(1)->p_disk;
+	alias = disk_alloc(); CHECK(alias != NULL);
+	strcpy(alias->d_name, "overlap"); alias->d_parent = parent;
+	alias->d_parent_offset = 192; alias->d_block_count = 64;
+	alias->d_block_size = 512; alias->d_flags = DISK_PARTITION;
+	CHECK(disk_create(alias) == 0);
+	part_node.i_rdev = part->d_dev; part_file.f_inode = &part_node;
+	atomic_store_release(&part_file.f_flags, O_RDWR);
+	CHECK(block_open(&part_file) == 0);
+	info.version = 1; info.struct_size = sizeof(info);
+	CHECK(block_ioctl(&part_file, BLKGETINFO, (uintptr_t)&info) == 0);
+	CHECK(block_ioctl(&part_file, BLKRESERVE, (uintptr_t)&info) == EBUSY); /* parent FD */
+	CHECK(block_close(&parent_file) == 0);
+	CHECK(disk_open(alias) == 0);
+	CHECK(block_ioctl(&part_file, BLKRESERVE, (uintptr_t)&info) == EBUSY); disk_close(alias);
+	CHECK(disk_open(sibling) == 0); /* An idle disjoint mounted/open volume is allowed. */
+	CHECK(block_ioctl(&part_file, BLKRESERVE, (uintptr_t)&info) == 0);
+	CHECK(admin_count == 1 && part->d_admin_owner == part_file.f_block_claim);
+	CHECK(disk_open(parent) == EBUSY && disk_open(alias) == EBUSY && disk_open(part) == EBUSY);
+	CHECK(disk_open(sibling) == 0); disk_close(sibling);
+	CHECK(disk_read(sibling, 0, 1, data) == 0 && last_block == 512);
+	CHECK(disk_write(sibling, 0, 1, data) == 0 && last_block == 512);
+	CHECK(disk_read_direct(parent, 128, 1, data) == EBUSY);
+	CHECK(disk_read_direct(parent, 0, 1, data) == 0); /* a nonoverlapping physical probe */
+	CHECK(disk_read(parent, 0, 1, data) == EBUSY); /* whole-volume cache admission */
+	CHECK(block_pwrite(&part_file, data, 1, 65535) == 1 && last_block == 255);
+	before = writes;
+	CHECK(block_pwrite(&part_file, data, 1, 65536) < 0 && writes == before);
+	CHECK(block_ioctl(&part_file, BLKREREADPART, 0) == EINVAL);
+	CHECK(!part->d_admin_thread && block_fsync(&part_file) == 0);
+	disk_close(sibling);
+	sibling_node.i_rdev = sibling->d_dev; sibling_file.f_inode = &sibling_node;
+	atomic_store_release(&sibling_file.f_flags, O_RDWR);
+	CHECK(block_open(&sibling_file) == 0);
+	sibling_info.version = 1; sibling_info.struct_size = sizeof(sibling_info);
+	CHECK(block_ioctl(&sibling_file, BLKGETINFO, (uintptr_t)&sibling_info) == 0);
+	CHECK(block_ioctl(&sibling_file, BLKRESERVE, (uintptr_t)&sibling_info) == 0);
+	CHECK(admin_count == 2);
+	CHECK(block_pwrite(&sibling_file, data, 1, 0) == 1 && last_block == 512);
+	CHECK(block_pread(&part_file, data, 1, 0) == 1 && last_block == 128);
+	CHECK(block_close(&part_file) == 0 && admin_count == 1);
+	CHECK(disk_open(parent) == EBUSY && disk_open(part) == 0); disk_close(part);
+	CHECK(block_close(&sibling_file) == 0 && admin_count == 0 && !admin_claims);
+	CHECK(disk_open(parent) == 0); disk_close(parent);
+	partition_reset(); disk_registry_reset();
+}
+
 int main(void)
 {
 	test_block(512); test_block(4096); test_mounts(); test_reload();
+	test_admin();
+	test_partition_admin();
 	printf("storage foundations: %u checks PASS\n", checks);
 	return 0;
 }

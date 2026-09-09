@@ -354,9 +354,9 @@ void
 kern_platform_halt(
 	void)
 {
-	/* Halts with interrupts disabled, and again after any wakeup. */
-	for (;;)
-		__asm__ volatile("cli; hlt");
+	/* Shutdown barriers have finished. Use the existing terminal CPU-stop
+	 * broadcast: a local CLI/HLT leaves other CPUs scheduling workers. */
+	hal_cpu_panic_all();
 }
 
 /*

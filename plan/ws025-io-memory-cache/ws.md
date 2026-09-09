@@ -1,16 +1,26 @@
 # WS025: I/O・キャッシュ・物理メモリ管理の段階的再設計
 
+q143 update: p030 private 0/160/4000 builds, actual MMIO interval readback and
+USB/HID campaigns pass; write/fsync and load/latency measurement remain.
+[Results](phase030-imod-measurement/results.md). q144 captured p029 QEMU
+descriptors at both speeds; q145 implements and verifies the parser. UAS
+command/data/status and stream transport remain; no UAS data-path success is
+claimed. See [UAS results](phase029-uas/results.md).
+
 Last updated: 2026-09-09
 
 WSID: `ws025`
 
-Status: mandatory p001–p026 completed; p031 uncleared; p032–p035 completed; q124 finished。p027–p030は2026-09-09ユーザー指定のPriority 1へ再選択（planned、実装未開始）。q122の見送りは履歴。
+Status: mandatory p001–p026 completed; p027 completed (q139); p028–p031 uncleared; p032 reopened for current physical PC98 failure; p033–p035 completed. p029 accepts QEMU UAS operation without physical hardware, but transport remains unimplemented. Direct-user-I/O contracts, UAS transport, measurements and physical PC98 recovery keep WS025 unfinished.
 
 Parent: [master plan](../master.md)
 
 追加計画: [p031 ドライバ配置・命名・規約統一](phase031-driver-layout-style/phase.md) は構成合意済み・q123 は uncleared で終了。p027–p030 に先行する。q122 の完了記録は維持し、追加 Phase は未完了として扱う。
 
-追加実行 (2026-09-09): p032 は通常 PC98 overlay/native の永続化・正常停止、loader 16/16、PCAT/amd64 build/login を確認し completed。q124 は p033〜p035のAX211自動接続・DHCP・反復復旧・二台同時接続も完了しfinished。
+最新ユーザー指示 (2026-09-09): p032は現行バイナリの実機不動作により再開。
+q124のPC98 QEMU overlay/native・永続化・停止・loader 16/16の合格は維持するが、
+実機成功とは扱わない。p029はQEMU UASの動作受け入れでcleared可能とする。
+q124のp033〜p035の無線受け入れ完了は維持する。
 
 ## 目的と承認済みの判断
 
@@ -91,10 +101,10 @@ p001 は q088 で completed（[results](phase001-baseline-contracts/results.md)�
 | [p026](phase026-integration-defaults/phase.md) | 統合受け入れ、段階別既定化、旧経路整理 | p005–p025 の必須成果 |
 | [p027](phase027-nvme-queue-depth/phase.md) | 条件付き: NVMe 多重発行 | p019、NVMe の測定結果 |
 | [p028](phase028-direct-user-io/phase.md) | 条件付き: user page 直接 I/O | p022–p024、コピー律速の証拠 |
-| [p029](phase029-uas/phase.md) | 条件付き: UAS driver | p019/p024、対応実機と descriptor |
+| [p029](phase029-uas/phase.md) | UAS driver。QEMU受け入れで完了可、transportは未完了 | p019/p024、QEMU UASと取得descriptor |
 | [p030](phase030-imod-measurement/phase.md) | 条件付き: IMOD 実機比較・設定判断 | p009/p025、対応実機 |
 | [p031](phase031-driver-layout-style/phase.md) | ドライバ配置・統合・drv_命名・coding-style適用、mkfs独立化とコマンド整理 | p026。p027–p030 の実装に先行 |
-| [p032](phase032-pc98-boot-regression/phase.md) | PC-98 QEMU 起動回帰の再現・原因修正・通常起動と操作の受け入れ | 現行リファクタリング済みツリー。残りの機能 Phase に先行 |
+| [p032](phase032-pc98-boot-regression/phase.md) | 再開：現行PC98バイナリの実機起動回復 | QEMU合格は保持。現行成果物と実機停止位置を照合しR10を確認 |
 
 ## 実装 wave と中間完了点
 
@@ -165,3 +175,21 @@ q124 進捗: p033 DHCP 復旧中に AX211 の反復 rollback エラーを実機�
 q124 最新: p032–p034 completed、p035 in-progress。2 seed のAX211実機反復とDHCP/取消し復旧の全gate完了。追加の複数無線 baseline を実行する。
 
 q124 最終: p032–p035 completed / finished。[p035結果](phase035-multi-radio-selection/results.md)：二台の両操作順序・反復・取消し復旧、AX211単独反復、36 storiesと3 architecture build完了。OFFER/bound観測約40秒→約6.5秒（同一enable→鍵登録系列）。firmware assert自体は残存事項として分離した。
+
+## Priority continuation clarification (2026-09-09)
+
+The user explicitly permits implementing p027–p030 without physical hardware.
+q125 uncleared evidence is historical; physical absence is no longer a reason
+to stop implementation. Separate QEMU functional evidence from unmeasured
+physical performance. The user owns no UAS hardware. Local QEMU exposes
+usb-uas; determine whether it can validate the transport. Move UAS to Future
+List only if QEMU validation proves unavailable. EHCI/UHCI analysis is deferred
+after ready implementation work but remains inside the current goal.
+
+## q139: p027 complete
+
+NVMe now admits 64 KiB BIOs and pipelines up to four existing command slots per
+BIO. Depth 1/2/4/8 host fault tests and QEMU native/restart/counter gates, three
+platform builds and NVMe UFS writeback regression passed. See
+[p027 results](phase027-nvme-queue-depth/results.md). p028-p030 and p031 final
+refactor confirmation remain open. Physical throughput is not claimed.

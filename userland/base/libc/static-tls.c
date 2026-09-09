@@ -19,54 +19,80 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#define STATIC_TCB_MAPPING_SIZE 4096U
+#define STATIC_TLS_PAGE_SIZE 4096U
 
-/*
- * Implements the rtld thread alloc operation.
- */
+/* Allocate a thread from the immutable executable template, never live TLS. */
 int
 __rtld_thread_alloc(
 	void *pthread_private,
 	struct __rtld_tcb **out)
 {
+	struct zedbsd_tls_prefix prefix;
 	struct __rtld_tcb *tcb;
+	intptr_t current;
+	void *mapping;
+	size_t payload;
+	size_t size;
 
-	/* Handles the out availability. */
 	if (out == NULL)
 		return -1;
 	*out = NULL;
-	tcb = mmap(NULL, STATIC_TCB_MAPPING_SIZE, PROT_READ | PROT_WRITE,
-		   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-
-	/* Handles an operation failure. */
-	if (tcb == MAP_FAILED)
+	memset(&prefix, 0, sizeof(prefix));
+	current = __syscall6(ZEDBSD_SYS_thread_self,
+	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	if (current < 0)
 		return -1;
-	memset(tcb, 0, sizeof(*tcb));
+	if (current != 0)
+		prefix = ((struct __rtld_tcb *)(uintptr_t)current)->tls;
+
+	/* Bound the clone before rounding or copying its user-owned metadata. */
+	if (prefix.memory_size > ZEDBSD_TLS_MEMORY_MAX)
+		return -1;
+	if (prefix.template_size > prefix.memory_size)
+		return -1;
+	if (prefix.distance < prefix.memory_size)
+		return -1;
+	if (prefix.distance > ZEDBSD_TLS_MEMORY_MAX + ZEDBSD_TLS_ALIGN_MAX)
+		return -1;
+	if (prefix.template_size != 0 && prefix.template_address == 0)
+		return -1;
+
+	payload = (prefix.distance + STATIC_TLS_PAGE_SIZE - 1U) &
+	    ~(size_t)(STATIC_TLS_PAGE_SIZE - 1U);
+	size = payload + ZEDBSD_TLS_TCB_RESERVE;
+	mapping = mmap(NULL, size, PROT_READ | PROT_WRITE,
+	    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (mapping == MAP_FAILED)
+		return -1;
+
+	/* Anonymous zero-fill initializes .tbss and the unused TCB tail. */
+	tcb = (struct __rtld_tcb *)((unsigned char *)mapping + payload);
+	if (prefix.template_size != 0)
+		memcpy((unsigned char *)tcb - prefix.distance,
+		    (const void *)prefix.template_address, prefix.template_size);
+	tcb->tls = prefix;
+	tcb->tls.self = (uintptr_t)tcb;
+	tcb->tls.mapping_base = (uintptr_t)mapping;
+	tcb->tls.mapping_size = size;
 	tcb->pthread_private = pthread_private;
 	*out = tcb;
-	/* Reports successful completion. */
 	return 0;
 }
 
-/*
- * Implements the rtld thread free operation.
- */
+/* The terminating thread's joiner/reaper owns this complete mapping. */
 void
 __rtld_thread_free(
 	struct __rtld_tcb *tcb)
 {
 	intptr_t current;
 
-	/* Handles the tcb availability. */
 	if (tcb == NULL)
 		return;
 	current = __syscall6(ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_GET_TLS,
-			     0, 0, 0, 0, 0);
-
-	/* Handles the current condition. */
+	    0, 0, 0, 0, 0);
 	if (current == (intptr_t)(uintptr_t)tcb)
 		return;
-	(void)munmap(tcb, STATIC_TCB_MAPPING_SIZE);
+	(void)munmap((void *)tcb->tls.mapping_base, tcb->tls.mapping_size);
 }
 
 /*

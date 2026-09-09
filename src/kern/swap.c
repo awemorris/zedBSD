@@ -36,6 +36,7 @@
 #include <kern/buf.h>
 #include <kern/fat.h>
 #include <kern/file.h>
+#include <kern/file-backing.h>
 #include <kern/kmem.h>
 #include <kern/klog.h>
 #include <kern/vm-commit.h>
@@ -1712,7 +1713,10 @@ kern_swap_source_prepare_file(
 
 	if (file->f_inode->i_mount == NULL ||
 	    file->f_inode->i_mount->m_disk == NULL ||
-	    file->f_inode->i_mount->m_type != &drv_fat_filesystem_type) {
+	    file->f_inode->i_mount->m_type == NULL ||
+	    file->f_inode->i_mount->m_type->file_extents == NULL ||
+	    (file->f_inode->i_mount->m_type->file_backing_identity == NULL &&
+	    file->f_inode->i_mount->m_type != &drv_fat_filesystem_type)) {
 		error = EOPNOTSUPP;
 		goto out;
 	}
@@ -1776,7 +1780,7 @@ kern_swap_source_prepare_file(
 	}
 
 	/* Collects the extents and claims them. */
-	error = drv_fat_file_extents(file, collect_extent, data);
+	error = file_backing_extents(file, collect_extent, data);
 	if (error != 0) {
 		if (data->extent_error != 0)
 			error = data->extent_error;
@@ -1801,7 +1805,7 @@ kern_swap_source_prepare_file(
 		    data->extents[index].block_count;
 	}
 
-	error = backing_claim_finalize(data->claim, claim_extents,
+	error = backing_claim_finalize_file(data->claim, file, claim_extents,
 	    data->extent_count);
 	kern_free(claim_extents);
 	claim_extents = NULL;

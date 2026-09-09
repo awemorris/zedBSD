@@ -1,0 +1,80 @@
+--- a/src/api/api-term-ansi.c
++++ b/src/api/api-term-ansi.c
+@@ -1317,12 +1317,16 @@
+ 	unsigned char buffer[4096];
+ 	ssize_t read_size;
+ 	size_t i;
++	size_t available;
+ 	int poll_result;
+ 	int wait_timeout;
+ 
+-	/* Reuses bytes already available in the input ring. */
+-	if (term.in_len > 0)
+-		return 1;
++	/* The decoder retained an incomplete event; only new bytes are progress. */
++	available = sizeof(term.in) - term.in_len;
++	if (available == 0)
++		return 0;
++	if (available > sizeof(buffer))
++		available = sizeof(buffer);
+ 
+ 	/*
+ 	 * Preserves caller timing after EOF because polling a dead terminal
+@@ -1375,7 +1379,7 @@
+ 		return 0;
+ 
+ 	/* Reads the available terminal bytes. */
+-	read_size = read(STDIN_FILENO, buffer, sizeof(buffer));
++	read_size = read(STDIN_FILENO, buffer, available);
+ 
+ 	/* Records a terminal that reached EOF. */
+ 	if (read_size == 0) {
+@@ -1461,6 +1465,10 @@
+ 
+ 		/* Accumulates one decimal parameter digit. */
+ 		if (final_byte >= '0' && final_byte <= '9') {
++			if (accumulator > 999999) {
++				*consumed = index - start + 1;
++				return 0;
++			}
+ 			accumulator = accumulator * 10 + (final_byte - '0');
+ 			has_digit = 1;
+ 			index++;
+@@ -1834,11 +1842,18 @@
+ 		if (event == 0)
+ 			continue;
+ 
++		/* Discards an unbounded incomplete event so later input can progress. */
++		if (term.in_len == sizeof(term.in)) {
++			in_consume(term.in_len);
++			succeeded = return_int(env, -1);
++			return succeeded;
++		}
++
+ 		/* Selects the normal caller timeout by default. */
+ 		wait_timeout = (int)timeout_ms;
+ 
+ 		/* Uses a short timeout to disambiguate a pending escape byte. */
+-		if (term.in_len > 0) {
++		if (term.in_len == 1) {
+ 			first_byte = in_peek(0);
+ 			if (first_byte == 0x1B)
+ 				wait_timeout = ESC_TIMEOUT_MS;
+@@ -1849,8 +1864,15 @@
+ 
+ 		/* Resolves timeout and EOF when no new input arrived. */
+ 		if (!fill_result) {
+-			/* Marks a pending escape as timed out. */
+-			if (term.in_len > 0) {
++			/* EOF cannot complete a partial event; do not retain it forever. */
++			if (term.eof) {
++				in_consume(term.in_len);
++				succeeded = return_int(env, -2);
++				return succeeded;
++			}
++
++			/* Resolves only a lone Escape; fragmented sequences stay buffered. */
++			if (term.in_len == 1) {
+ 				first_byte = in_peek(0);
+ 				if (first_byte == 0x1B) {
+ 					escape_wait = true;

@@ -1,6 +1,25 @@
 # ws002-p021: missing-login session teardown and crash-loop robustness
 
-Last updated: 2026-08-27
+Last updated: 2026-09-09
+
+Current decision: **cleared / completed by user acceptance, 2026-09-09**.
+[Closure](closure.md) supersedes the historical provenance requirement below.
+The old failure remains BUG-012 as likely already corrected, cause unproven.
+
+## q142 bounded baseline diagnosis
+
+Result: [q142 results](q142-results.md). Current gates pass on both platforms;
+historical invalid-free provenance remains uncleared.
+
+q141 observed thread/task owners 9 to 8 and a 16 KiB stack decrease between
+the pre-child baseline and the first completed getty. q137 introduced a detached
+boot worker that starts PID 1 before returning. First observe owners and PID 0
+thread count without creating any child. Require 25 consecutive equal samples
+20 ms apart, with a 5 second overall retry bound, before fixing the baseline.
+Log every transition. This is a measured quiescence condition, not a permitted
+per-child decrement: all 100 child comparisons must still match exactly.
+Run the maintained fixture on both PCAT and PC98. Preserve historical invalid
+free provenance as uncleared unless independently established.
 
 WSID: `ws002`
 
@@ -8,7 +27,7 @@ Phase ID: `p021`
 
 Combined ID: `ws002-p021`
 
-Status: Planned corrective; non-blocking
+Status: completed (user acceptance; current runtime verified, historical cause unproven)
 
 Parent WS: [WS002](../ws.md)
 
@@ -78,3 +97,18 @@ Stop before changing the console/TTY ownership model, scheduler retirement,
 or HAL task ABI unless allocation provenance proves that subsystem owns the
 first invalid free. A one-off failure without provenance is not authority for
 a speculative lifecycle rewrite.
+
+## q136 execution
+
+Use freshly built q135 PC98/PCAT ordinary images and disposable rootfs copies
+with /bin/login absent. First confirm current failure/restart behavior without
+changing lifetime code. Capture screen/console and monitor CPU/process state.
+If the old invalid free recurs, add bounded allocation provenance diagnostics
+and fix only the proved owner. If absent, retain the unproven accounting and
+provenance gates; a finite runtime smoke does not establish all completion
+conditions. No aggregate make check; serial runtime/builds and make -j16.
+
+## q136 result
+
+[Current runtime/accounting evidence and exact resume condition](results.md).
+No old invalid free recurred; do not infer a production correction.

@@ -17,6 +17,7 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -33,26 +34,41 @@
 #define FORMAT_TAIL_BYTES ((2U + FORMAT_LOG_SECTORS + FORMAT_SNAPSHOT_SECTORS) * 512U)
 #define FORMAT_REGULAR 0100000U
 #define FORMAT_DIRECTORY 0040000U
+#define FORMAT_NATIVE 2
+#define FORMAT_NATIVE_USED 152U
+#define FORMAT_MAX_FPG ((FORMAT_BLOCK - 200U) * 8U)
 
+/* One exact byte interval already compared with the generator's final bytes. */
+struct format_extent {
+	uint64_t start;
+	uint64_t end;
+};
+
+/* Geometry and optional bounded coverage owned by one formatter invocation. */
 struct format_context {
 	int fd;
 	int verify;
 	int profile;
 	uint64_t medium_bytes;
-	uint32_t fragments;
+	uint64_t fragments;
 	uint32_t ncg;
 	uint32_t fpg;
 	uint32_t cgsize;
+	struct format_extent *extents;
+	size_t extent_count;
+	size_t extent_capacity;
 };
 
 static int format_run(int fd, uint64_t bytes, int verify, int profile);
+static int record_extent(struct format_context *context, uint64_t offset, size_t length);
+static int verify_gaps(struct format_context *context);
 static int format_tail(struct format_context *context);
 static uint32_t locator_digest(const uint8_t *buffer, size_t length);
 static void put16(uint8_t *buffer, size_t offset, uint16_t value);
 static void put32(uint8_t *buffer, size_t offset, uint32_t value);
 static void put64(uint8_t *buffer, size_t offset, uint64_t value);
 static uint32_t record_crc(const uint8_t *buffer, size_t length);
-static void initialize_context(struct format_context *context, int fd, uint64_t bytes, int verify, int profile);
+static int initialize_context(struct format_context *context, int fd, uint64_t bytes, int verify, int profile);
 static int read_exact(int fd, void *buffer, size_t length, uint64_t offset);
 static int transfer(struct format_context *context, uint64_t offset, const uint8_t *buffer, size_t length);
 static int zero_region(struct format_context *context, uint64_t offset, uint64_t length);
@@ -144,6 +160,81 @@ ufs_format_feature_verify(
 	return error;
 }
 
+/*
+ * Checks the ordinary image including every unused and trailing byte.
+ */
+int
+ufs_format_pristine(
+	int fd,
+	uint64_t bytes)
+{
+	int error;
+
+	/* Enables exact coverage in addition to metadata comparison. */
+	error = format_run(fd, bytes, 2, 0);
+	return error;
+}
+
+/*
+ * Checks the persistence profile including all unused filesystem bytes.
+ */
+int
+ufs_format_feature_pristine(
+	int fd,
+	uint64_t bytes)
+{
+	int error;
+
+	/* Selects the same deterministic profile with full-byte verification. */
+	error = format_run(fd, bytes, 2, 1);
+	return error;
+}
+
+/* Native geometry is bounded by the actual format and host offset types. */
+int
+ufs_format_native_validate_size(uint64_t bytes)
+{
+	struct format_context context;
+
+	return initialize_context(&context, -1, bytes, 0, FORMAT_NATIVE);
+}
+
+/* Reports allocatable full blocks and inodes without opening or writing media. */
+int
+ufs_format_native_capacity(uint64_t bytes, struct ufs_format_capacity *capacity)
+{
+	struct format_context context;
+	uint64_t free_fragments;
+	int error;
+
+	if (capacity == NULL)
+		return EINVAL;
+	memset(capacity, 0, sizeof(*capacity));
+	error = initialize_context(&context, -1, bytes, 0, FORMAT_NATIVE);
+	if (error != 0)
+		return error;
+
+	/* Only the final group has a partial block; every other boundary is aligned. */
+	free_fragments = context.fragments - (uint64_t)context.ncg * FORMAT_DATA_FRAGMENT -
+	    (FORMAT_NATIVE_USED - FORMAT_DATA_FRAGMENT);
+	capacity->free_bytes = free_fragments / (FORMAT_BLOCK / FORMAT_FRAGMENT) * FORMAT_BLOCK;
+	capacity->free_inodes = (uint64_t)context.ncg * FORMAT_IPG - 3U;
+	capacity->allocation_size = FORMAT_BLOCK;
+	return 0;
+}
+
+int
+ufs_format_native_write(int fd, uint64_t bytes)
+{
+	return format_run(fd, bytes, 0, FORMAT_NATIVE);
+}
+
+int
+ufs_format_native_verify(int fd, uint64_t bytes)
+{
+	return format_run(fd, bytes, 1, FORMAT_NATIVE);
+}
+
 /* Generates or checks one explicit profile without mutable global state. */
 static int
 format_run(
@@ -158,10 +249,14 @@ format_run(
 	int error;
 
 	/* Reject unsupported geometry before touching the descriptor. */
-	error = ufs_format_validate_size(bytes);
+	if (profile != FORMAT_NATIVE) {
+		error = ufs_format_validate_size(bytes);
+		if (error != 0)
+			return error;
+	}
+	error = initialize_context(&context, fd, bytes, verify, profile);
 	if (error != 0)
 		return error;
-	initialize_context(&context, fd, bytes, verify, profile);
 
 	/* Decode a reopened image or invalidate its previous primary first. */
 	if (verify) {
@@ -175,11 +270,143 @@ format_run(
 		error = zero_region(&context, UFS_SBLOCK_OFFSET, FORMAT_BLOCK);
 		if (error != 0)
 			return error;
+		if (profile == FORMAT_NATIVE && fsync(fd) < 0)
+			return errno;
+	}
+
+	/* Allocates only geometry-bounded coverage for pristine verification. */
+	if (verify == 2) {
+		context.extent_capacity = (size_t)context.ncg * 4U + 16U;
+		context.extents = calloc(context.extent_capacity, sizeof(*context.extents));
+		if (context.extents == NULL)
+			return ENOMEM;
 	}
 
 	/* Install or verify every referenced region before the primary. */
 	error = format_metadata(&context);
+
+	/* Checks the complement only after every deterministic region matches. */
+	if (error == 0 && verify == 2)
+		error = verify_gaps(&context);
+
+	/* Releases per-call coverage even when a comparison or read failed. */
+	free(context.extents);
 	return error;
+}
+
+/* Records disjoint exact extents, coalescing only adjacent intervals. */
+static int
+record_extent(
+	struct format_context *context,
+	uint64_t offset,
+	size_t length)
+{
+	struct format_extent *extents;
+	uint64_t end;
+	size_t index;
+	size_t position;
+
+	/* Rejects empty, overflowing or out-of-image programming errors. */
+	if (length == 0 || offset > context->medium_bytes)
+		return EINVAL;
+
+	/* Subtracts before adding so an invalid extent cannot wrap. */
+	if ((uint64_t)length > context->medium_bytes - offset)
+		return EINVAL;
+
+	/* Finds the insertion point by exact byte order, not allocation maps. */
+	end = offset + length;
+	extents = context->extents;
+	position = 0;
+	while (position < context->extent_count && extents[position].start < offset)
+		position++;
+
+	/* Rejects overlapping comparisons rather than hiding generator mistakes. */
+	if (position > 0 && extents[position - 1U].end > offset)
+		return EINVAL;
+
+	/* Checks the following interval independently. */
+	if (position < context->extent_count && end > extents[position].start)
+		return EINVAL;
+
+	/* Extends the predecessor when this range touches its end. */
+	if (position > 0 && extents[position - 1U].end == offset) {
+		extents[position - 1U].end = end;
+
+		/* Joins both neighbors when this range exactly bridges their gap. */
+		if (position < context->extent_count && end == extents[position].start) {
+			extents[position - 1U].end = extents[position].end;
+			for (index = position; index + 1U < context->extent_count; index++)
+				extents[index] = extents[index + 1U];
+			context->extent_count--;
+		}
+
+		return 0;
+	}
+
+	/* Extends a successor without consuming an additional slot. */
+	if (position < context->extent_count && end == extents[position].start) {
+		extents[position].start = offset;
+		return 0;
+	}
+
+	/* Refuses to exceed the explicit geometry-derived metadata budget. */
+	if (context->extent_count == context->extent_capacity)
+		return EOVERFLOW;
+
+	/* Inserts a new isolated interval while preserving sorted order. */
+	for (index = context->extent_count; index > position; index--)
+		extents[index] = extents[index - 1U];
+	extents[position].start = offset;
+	extents[position].end = end;
+	context->extent_count++;
+	return 0;
+}
+
+/* Checks every byte outside the deterministic extents against zero. */
+static int
+verify_gaps(
+	struct format_context *context)
+{
+	uint8_t buffer[FORMAT_BLOCK];
+	uint64_t cursor;
+	uint64_t end;
+	size_t index;
+	size_t count;
+	size_t byte;
+	int error;
+
+	/* Includes the trailing gap with a sentinel at the exact medium end. */
+	cursor = 0;
+	for (index = 0; index <= context->extent_count; index++) {
+		end = context->medium_bytes;
+		if (index < context->extent_count)
+			end = context->extents[index].start;
+
+		/* Reads the complete gap, including a partial final buffer. */
+		while (cursor < end) {
+			count = sizeof(buffer);
+			if (end - cursor < count)
+				count = (size_t)(end - cursor);
+			error = read_exact(context->fd, buffer, count, cursor);
+			if (error != 0)
+				return error;
+
+			/* Rejects any previous payload hidden in currently unused space. */
+			for (byte = 0; byte < count; byte++) {
+				if (buffer[byte] != 0)
+					return EIO;
+			}
+
+			cursor += count;
+		}
+
+		/* Skips only bytes already compared successfully with the generator. */
+		if (index < context->extent_count)
+			cursor = context->extents[index].end;
+	}
+
+	return 0;
 }
 
 /* Stores a little-endian sixteen-bit field. */
@@ -248,7 +475,7 @@ record_crc(
 }
 
 /* Derives the bounded group geometry from a validated file size. */
-static void
+static int
 initialize_context(
 	struct format_context *context,
 	int fd,
@@ -256,14 +483,42 @@ initialize_context(
 	int verify,
 	int profile)
 {
+	uint64_t groups, last;
+	off_t final_offset;
+	uint32_t fpg;
+
+	/* Reject unsupported offsets before subtraction or any I/O. */
+	if (bytes < UFS_FORMAT_MIN_BYTES || bytes % FORMAT_FRAGMENT != 0)
+		return EINVAL;
+	final_offset = (off_t)(bytes - 1);
+	if (final_offset < 0 || (uint64_t)final_offset != bytes - 1)
+		return EOVERFLOW;
+
 	/* Keep geometry identical to the maintained host backend. */
+	memset(context, 0, sizeof(*context));
 	context->fd = fd;
 	context->verify = verify;
 	context->profile = profile;
 	context->medium_bytes = bytes;
 	if (profile)
 		bytes = (bytes - FORMAT_TAIL_BYTES) / FORMAT_FRAGMENT * FORMAT_FRAGMENT;
-	context->fragments = (uint32_t)(bytes / FORMAT_FRAGMENT);
+	context->fragments = bytes / FORMAT_FRAGMENT;
+	if (profile == FORMAT_NATIVE) {
+		/* A bounded search keeps even the final group's metadata in range. */
+		for (fpg = FORMAT_MAX_FPG; fpg >= 1024U; fpg -= 8U) {
+			groups = (context->fragments + fpg - 1U) / fpg;
+			if (groups > UINT32_MAX / FORMAT_IPG)
+				return EOVERFLOW;
+			last = context->fragments - (groups - 1U) * fpg;
+			if (last <= FORMAT_DATA_FRAGMENT)
+				continue;
+			context->ncg = (uint32_t)groups;
+			context->fpg = fpg;
+			context->cgsize = 200U + fpg / 8U;
+			return 0;
+		}
+		return EINVAL;
+	}
 	context->ncg = 2U;
 
 	/* Add groups until each bitmap fits one filesystem block. */
@@ -275,6 +530,7 @@ initialize_context(
 			break;
 		context->ncg++;
 	} while (1);
+	return 0;
 }
 
 /* Reads one complete record and refuses a truncated transfer. */
@@ -319,6 +575,8 @@ transfer(
 	/* Guard the bounded comparison buffer against a programming error. */
 	if (length > sizeof(actual))
 		return EINVAL;
+	if (offset > context->medium_bytes || length > context->medium_bytes - offset)
+		return EINVAL;
 
 	/* Compare a reopened record with its deterministic initial contents. */
 	if (context->verify) {
@@ -329,6 +587,12 @@ transfer(
 		/* Refuse a mismatched metadata or journal record. */
 		if (memcmp(actual, buffer, length) != 0)
 			return EIO;
+
+		/* Records exact final-byte coverage only in the pristine mode. */
+		if (context->verify == 2) {
+			error = record_extent(context, offset, length);
+			return error;
+		}
 
 		/* Report an exact match. */
 		return 0;
@@ -398,14 +662,14 @@ format_metadata(
 	}
 
 	/* Install the two journal files and their indirect blocks. */
-	error = format_journal(context, 0);
-	if (error != 0)
-		return error;
-
-	/* Install the initially inactive journal. */
-	error = format_journal(context, 1);
-	if (error != 0)
-		return error;
+	if (context->profile != FORMAT_NATIVE) {
+		error = format_journal(context, 0);
+		if (error != 0)
+			return error;
+		error = format_journal(context, 1);
+		if (error != 0)
+			return error;
+	}
 
 	/* Install the root marker and two initial directories. */
 	error = format_directories(context);
@@ -441,9 +705,13 @@ format_metadata(
 	}
 
 	/* Publish the primary superblock only after the complete tree exists. */
+	if (context->profile == FORMAT_NATIVE && !context->verify && fsync(context->fd) < 0)
+		return errno;
 	error = transfer(context, UFS_SBLOCK_OFFSET, buffer, sizeof(buffer));
 	if (error != 0)
 		return error;
+	if (context->profile == FORMAT_NATIVE && !context->verify && fsync(context->fd) < 0)
+		return errno;
 
 	/* Report all initialized records. */
 	return 0;
@@ -540,6 +808,15 @@ format_directories(
 	uint8_t buffer[FORMAT_BLOCK];
 	int error;
 
+	if (context->profile == FORMAT_NATIVE) {
+		/* Native root starts with only its own dot entries. */
+		memset(buffer, 0, sizeof(buffer));
+		directory_entry(buffer, 0U, 2U, 12U, 4U, ".");
+		directory_entry(buffer, 12U, 2U, 500U, 4U, "..");
+		return transfer(context, FORMAT_DATA_FRAGMENT * FORMAT_FRAGMENT,
+		    buffer, sizeof(buffer));
+	}
+
 	/* Install the maintained backend's root marker. */
 	memset(buffer, 0, sizeof(buffer));
 	memcpy(buffer, marker, sizeof(marker) - 1U);
@@ -622,11 +899,16 @@ format_inodes(
 
 	/* Encode the two directories and three regular files. */
 	memset(buffer, 0, sizeof(buffer));
-	format_inode(buffer, 2U, FORMAT_DIRECTORY | 0755U, 3U, 512U, 424U, 1U, 0U);
-	format_inode(buffer, 3U, FORMAT_REGULAR | 0644U, 1U, FORMAT_JOURNAL_BYTES, 144U, 16U, 272U);
-	format_inode(buffer, 4U, FORMAT_REGULAR | 0644U, 1U, FORMAT_JOURNAL_BYTES, 280U, 16U, 408U);
-	format_inode(buffer, 5U, FORMAT_DIRECTORY | 0755U, 2U, 512U, 432U, 1U, 0U);
-	format_inode(buffer, 6U, FORMAT_REGULAR | 0644U, 1U, sizeof(FORMAT_ROOT_MARKER) - 1U, 416U, 1U, 0U);
+	if (context->profile == FORMAT_NATIVE) {
+		format_inode(buffer, 2U, FORMAT_DIRECTORY | 0755U, 2U, 512U,
+		    FORMAT_DATA_FRAGMENT, 1U, 0U);
+	} else {
+		format_inode(buffer, 2U, FORMAT_DIRECTORY | 0755U, 3U, 512U, 424U, 1U, 0U);
+		format_inode(buffer, 3U, FORMAT_REGULAR | 0644U, 1U, FORMAT_JOURNAL_BYTES, 144U, 16U, 272U);
+		format_inode(buffer, 4U, FORMAT_REGULAR | 0644U, 1U, FORMAT_JOURNAL_BYTES, 280U, 16U, 408U);
+		format_inode(buffer, 5U, FORMAT_DIRECTORY | 0755U, 2U, 512U, 432U, 1U, 0U);
+		format_inode(buffer, 6U, FORMAT_REGULAR | 0644U, 1U, sizeof(FORMAT_ROOT_MARKER) - 1U, 416U, 1U, 0U);
+	}
 	error = transfer(context, 80U * FORMAT_FRAGMENT, buffer, sizeof(buffer));
 	if (error != 0)
 		return error;
@@ -659,20 +941,29 @@ make_cg(
 	uint32_t used;
 	uint32_t fragment;
 	uint32_t free_fragments;
+	uint64_t remaining;
+	unsigned allocated_inodes, directories;
 
 	/* Initialize the group header and fixed bitmap locations. */
 	memset(buffer, 0, FORMAT_BLOCK);
-	fragments = context->fragments - index * context->fpg;
-	if (fragments > context->fpg)
-		fragments = context->fpg;
+	remaining = context->fragments - (uint64_t)index * context->fpg;
+	fragments = remaining > context->fpg ? context->fpg : (uint32_t)remaining;
 	used = index == 0 ? FORMAT_CG0_USED : FORMAT_DATA_FRAGMENT;
+	allocated_inodes = 7U;
+	directories = 2U;
+	if (context->profile == FORMAT_NATIVE) {
+		if (index == 0)
+			used = FORMAT_NATIVE_USED;
+		allocated_inodes = 3U;
+		directories = 1U;
+	}
 	free_fragments = fragments - used;
 	put32(buffer, UFS_CG_MAGIC, UFS_CG_MAGIC_VALUE);
 	put32(buffer, UFS_CG_CGX, index);
 	put32(buffer, UFS_CG_NDBLK, fragments);
-	put32(buffer, UFS_CG_NDIR, index == 0 ? 2U : 0U);
+	put32(buffer, UFS_CG_NDIR, index == 0 ? directories : 0U);
 	put32(buffer, UFS_CG_NBFREE, free_fragments / 8U);
-	put32(buffer, UFS_CG_NIFREE, index == 0 ? FORMAT_IPG - 7U : FORMAT_IPG);
+	put32(buffer, UFS_CG_NIFREE, index == 0 ? FORMAT_IPG - allocated_inodes : FORMAT_IPG);
 	put32(buffer, UFS_CG_NFFREE, free_fragments % 8U);
 	put32(buffer, UFS_CG_IUSEDOFF, 168U);
 	put32(buffer, UFS_CG_FREEOFF, 200U);
@@ -682,7 +973,7 @@ make_cg(
 
 	/* Reserve the first seven inodes only in the first group. */
 	if (index == 0)
-		buffer[168U] = 0x7fU;
+		buffer[168U] = (uint8_t)((1U << allocated_inodes) - 1U);
 
 	/* Mark each unallocated fragment as available. */
 	for (fragment = used; fragment < fragments; fragment++)
@@ -696,10 +987,12 @@ make_super(
 	uint8_t *buffer)
 {
 	uint32_t free_fragments;
-	uint32_t free_blocks;
-	uint32_t partial_fragments;
+	uint64_t free_blocks;
+	uint64_t partial_fragments;
 	uint32_t group;
 	uint32_t fragments;
+	uint64_t remaining;
+	uint32_t first_used, allocated_inodes, directories;
 
 	/* Initialize the canonical fixed geometry and filesystem identity. */
 	memset(buffer, 0, FORMAT_BLOCK);
@@ -734,18 +1027,20 @@ make_super(
 	/* Sum full and partial free blocks across all cylinder groups. */
 	free_blocks = 0;
 	partial_fragments = 0;
+	first_used = context->profile == FORMAT_NATIVE ? FORMAT_NATIVE_USED : FORMAT_CG0_USED;
+	allocated_inodes = context->profile == FORMAT_NATIVE ? 3U : 7U;
+	directories = context->profile == FORMAT_NATIVE ? 1U : 2U;
 	for (group = 0; group < context->ncg; group++) {
-		fragments = context->fragments - group * context->fpg;
-		if (fragments > context->fpg)
-			fragments = context->fpg;
+		remaining = context->fragments - (uint64_t)group * context->fpg;
+		fragments = remaining > context->fpg ? context->fpg : (uint32_t)remaining;
 		free_fragments = fragments - (group == 0 ?
-		    FORMAT_CG0_USED : FORMAT_DATA_FRAGMENT);
+		    first_used : FORMAT_DATA_FRAGMENT);
 		free_blocks += free_fragments / 8U;
 		partial_fragments += free_fragments % 8U;
 	}
-	put64(buffer, UFS_FS_CSTOTAL_NDIR, 2U);
+	put64(buffer, UFS_FS_CSTOTAL_NDIR, directories);
 	put64(buffer, UFS_FS_CSTOTAL_NBFREE, free_blocks);
-	put64(buffer, UFS_FS_CSTOTAL_NIFREE, context->ncg * FORMAT_IPG - 7U);
+	put64(buffer, UFS_FS_CSTOTAL_NIFREE, (uint64_t)context->ncg * FORMAT_IPG - allocated_inodes);
 	put64(buffer, UFS_FS_CSTOTAL_NFFREE, partial_fragments);
 }
 

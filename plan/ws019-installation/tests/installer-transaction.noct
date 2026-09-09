@@ -1,0 +1,139 @@
+require transaction;
+func assertTransaction(condition, message) {
+    if (!condition) { System.error("transaction test: " + message); }
+}
+func txEvent(c, name) {
+    Array.push(c.events, name);
+    if (!c.failed && Array.size(c.events) == c.failAt) {
+        c.failed = true;
+        System.error("injected " + name);
+    }
+}
+func txIdentity(c) {
+    c.next = c.next + 1;
+    return { device: 3, inode: c.next, mode: 33188 };
+}
+func txStat(c, path) {
+    txEvent(c, "stat " + path);
+    if (!Dict.hasKey(c.files, path)) { return 0; }
+    return c.files[path].identity;
+}
+func txVerify(c, entry, path, expected) {
+    txEvent(c, "verify " + path);
+    assertTransaction(Dict.hasKey(c.files, path), "verified missing file");
+    var file = c.files[path];
+    if (!instSameFileObject(file.identity, expected) || file.content != entry.role) {
+        System.error("content or identity mismatch");
+    }
+}
+func txCreate(c, entry) {
+    txEvent(c, "create " + entry.stage);
+    if (Dict.hasKey(c.files, entry.stage)) { System.error("occupied staging path"); }
+    var identity = txIdentity(c);
+    c.files[entry.stage] = { identity: identity, content: "empty" };
+    txEvent(c, "created " + entry.stage);
+    return identity;
+}
+func txPopulate(c, entry, expected) {
+    txEvent(c, "populate " + entry.stage);
+    assertTransaction(instSameFileObject(c.files[entry.stage].identity, expected), "populate identity");
+    c.files[entry.stage].content = entry.role;
+}
+func txSync(c, path) { txEvent(c, "sync " + path); }
+func txRevalidate(c) { txEvent(c, "revalidate"); }
+func txPublish(c, entry) {
+    txEvent(c, "publish " + entry.final);
+    // Every missing output must be fully populated before the first rename.
+    for (i in 0..Array.size(c.entries)) {
+        var e = c.entries[i];
+        var path = e.final;
+        if (!Dict.hasKey(c.files, path)) { path = e.stage; }
+        assertTransaction(Dict.hasKey(c.files, path) && c.files[path].content == e.role, "publish before all preparations");
+    }
+    if (Dict.hasKey(c.files, entry.final)) { System.error("no-replace conflict"); }
+    c.files[entry.final] = { identity: txIdentity(c), content: c.files[entry.stage].content };
+    Dict.remove(c.files, entry.stage);
+    Array.push(c.finalCreated, entry.final);
+    txEvent(c, "published " + entry.final);
+}
+func txRemove(c, path, expected) {
+    txEvent(c, "remove " + path);
+    assertTransaction(String.indexOf(path, "/stage/") >= 0, "cleanup attempted final file");
+    assertTransaction(instSameFileObject(c.files[path].identity, expected), "cleanup identity");
+    Dict.remove(c.files, path);
+}
+func txSetup(failAt, existing) {
+    var entries = [];
+    var roles = ["loader", "kernel", "rootfs", "data", "swap", "config"];
+    var c = { files: {}, entries: entries, events: [], failAt: failAt,
+        failed: false, next: 0, finalCreated: [] };
+    for (i in 0..Array.size(roles)) {
+        var role = roles[i];
+        var entry = { role: role, final: "/final/" + role, stage: "/stage/" + role,
+            directory: "/final", stageDirectory: "/stage", bytes: 4096 };
+        Array.push(entries, entry);
+        if (i < existing) { c.files[entry.final] = { identity: txIdentity(c), content: role }; }
+    }
+    c.files["/unmanaged"] = { identity: txIdentity(c), content: "sentinel" };
+    return c;
+}
+func txCheck(c, report) {
+    assertTransaction(c.files["/unmanaged"].content == "sentinel", "unmanaged file changed");
+    for (i in 0..Array.size(c.finalCreated)) {
+        assertTransaction(Dict.hasKey(c.files, c.finalCreated[i]), "published file removed");
+    }
+    if (Dict.hasKey(c.files, "/final/config")) {
+        for (i in 0..Array.size(c.entries)) {
+            assertTransaction(Dict.hasKey(c.files, c.entries[i].final), "config published before payload");
+        }
+    }
+    for (i in 0..Array.size(c.entries)) {
+        var path = c.entries[i].stage;
+        if (!Dict.hasKey(c.files, path)) { continue; }
+        var reported = false;
+        for (j in 0..Array.size(report.leftovers)) {
+            if (report.leftovers[j].path == path) { reported = true; }
+        }
+        assertTransaction(reported, "unreported staging residue");
+    }
+}
+func main(args) {
+    var ops = { stat: txStat, verify: txVerify, create: txCreate, populate: txPopulate,
+        syncFile: txSync, syncDirectory: txSync, revalidate: txRevalidate,
+        publish: txPublish, remove: txRemove };
+    var c = txSetup(0, 0);
+    var report = instManagedTransaction(ops, c, c.entries);
+    assertTransaction(report.ok, report.message);
+    txCheck(c, report);
+    var count = Array.size(c.events);
+    var scenarios = 1;
+    // Inject an independent failure at every operation, including post-rename.
+    for (i in 1..count + 1) {
+        c = txSetup(i, 0);
+        report = instManagedTransaction(ops, c, c.entries);
+        assertTransaction(!report.ok && c.failed, "fault did not fail transaction");
+        txCheck(c, report);
+        scenarios = scenarios + 1;
+    }
+    // Accept every prefix of previously published identical final files.
+    for (i in 1..7) {
+        c = txSetup(0, i);
+        report = instManagedTransaction(ops, c, c.entries);
+        assertTransaction(report.ok, report.message);
+        txCheck(c, report);
+        scenarios = scenarios + 1;
+    }
+    c = txSetup(0, 3);
+    c.files["/final/kernel"].content = "foreign";
+    report = instManagedTransaction(ops, c, c.entries);
+    assertTransaction(!report.ok && Array.size(c.finalCreated) == 0, "existing conflict overwritten");
+    txCheck(c, report);
+    scenarios = scenarios + 1;
+    c = txSetup(0, 0);
+    c.files["/stage/kernel"] = { identity: txIdentity(c), content: "unknown" };
+    report = instManagedTransaction(ops, c, c.entries);
+    assertTransaction(!report.ok && c.files["/stage/kernel"].content == "unknown", "unknown stage deleted");
+    txCheck(c, report);
+    scenarios = scenarios + 1;
+    print("installer transaction PASS " + scenarios + " scenarios");
+}

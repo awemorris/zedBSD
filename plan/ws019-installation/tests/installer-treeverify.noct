@@ -1,0 +1,6 @@
+require treecopy;
+
+func main(args) {
+    instTreeVerify(args[0], args[1]);
+    print("installer tree verification PASS");
+}

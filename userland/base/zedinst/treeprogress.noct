@@ -1,0 +1,112 @@
+// Byte-safe source census and independent cp completion-record validation.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+func instTreeCensus() {
+    return {files:{}, directories:{}, total:0L, directoryTotal:0L,
+        filePartial:"", directoryPartial:"", frozen:false};
+}
+
+func instTreeCensusFeed(census, bytes, directory) {
+    if (census.frozen) { System.error("tree census is already frozen"); }
+    var partial = census.filePartial;
+    if (directory) { partial = census.directoryPartial; }
+    var hex = "0123456789abcdef";
+    for (i in 0..Packed.size(bytes)) {
+        var byte = bytes[i];
+        if (byte == 0) {
+            if (partial == "" || Dict.hasKey(census.files, partial) ||
+                Dict.hasKey(census.directories, partial)) {
+                System.error("empty or duplicate census path");
+            }
+            if (directory) {
+                census.directories[partial] = true;
+                census.directoryTotal = census.directoryTotal + 1L;
+            } else {
+                census.files[partial] = true;
+                census.total = census.total + 1L;
+            }
+            partial = "";
+        } else {
+            if (String.byteLength(partial) >= 8192) { System.error("census path too long"); }
+            partial = partial + String.charAt(hex, byte / 16) + String.charAt(hex, byte % 16);
+        }
+    }
+    if (directory) { census.directoryPartial = partial; }
+    else { census.filePartial = partial; }
+}
+
+func instTreeCensusFreeze(census) {
+    if (census.filePartial != "" || census.directoryPartial != "") {
+        System.error("truncated tree census");
+    }
+    census.frozen = true;
+    return census;
+}
+
+func instTreeProgress(census) {
+    if (!census.frozen) { System.error("copy started before census completion"); }
+    return {census:census, seen:{}, done:0L, directoriesDone:0L,
+        line:"", header:false, ended:false};
+}
+
+func instTreeProgressLine(progress) {
+    var line = progress.line;
+    progress.line = "";
+    if (progress.ended) { System.error("data after copy completion marker"); }
+    if (!progress.header) {
+        if (line != "CPCOPY1") { System.error("invalid copy report header"); }
+        progress.header = true;
+        return;
+    }
+    if (line == "END") {
+        if (progress.done != progress.census.total ||
+            progress.directoriesDone != progress.census.directoryTotal) {
+            System.error("copy report does not cover the source census");
+        }
+        progress.ended = true;
+        return;
+    }
+    if (String.byteLength(line) < 4 || String.charAt(line, 1) != "\t") {
+        System.error("malformed copy completion record");
+    }
+    var kind = String.charAt(line, 0);
+    var path = String.substring(line, 2, -1);
+    if (kind != "F" && kind != "D") { System.error("unknown copy record kind"); }
+    if (String.byteLength(path) % 2 != 0) { System.error("odd copy pathname encoding"); }
+    for (i in 0..String.charCount(path)) {
+        if (String.indexOf("0123456789abcdef", String.charAt(path, i)) < 0) {
+            System.error("invalid copy pathname encoding");
+        }
+    }
+    if (Dict.hasKey(progress.seen, path)) { System.error("duplicate copy completion"); }
+    if (kind == "F") {
+        if (!Dict.hasKey(progress.census.files, path)) { System.error("unknown copied file"); }
+        progress.done = progress.done + 1L;
+    } else {
+        if (!Dict.hasKey(progress.census.directories, path)) { System.error("unknown copied directory"); }
+        progress.directoriesDone = progress.directoriesDone + 1L;
+    }
+    progress.seen[path] = true;
+}
+
+func instTreeProgressFeed(progress, bytes) {
+    var ascii = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    for (i in 0..Packed.size(bytes)) {
+        var byte = bytes[i];
+        if (byte == 10) { instTreeProgressLine(progress); }
+        else {
+            if (String.byteLength(progress.line) >= 8194) { System.error("copy record too long"); }
+            if (byte == 9) { progress.line = progress.line + "\t"; }
+            else {
+                if (byte < 32 || byte > 126) { System.error("non-ASCII copy report"); }
+                progress.line = progress.line + String.charAt(ascii, byte - 32);
+            }
+        }
+    }
+}
+
+func instTreeProgressFinish(progress, status) {
+    if (status != 0 || !progress.header || !progress.ended || progress.line != "") {
+        System.error("copy process or completion report is incomplete");
+    }
+    return progress.done;
+}

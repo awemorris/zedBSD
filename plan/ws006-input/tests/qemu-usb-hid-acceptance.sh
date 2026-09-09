@@ -18,6 +18,16 @@ hotplug_timeout=${HOTPLUG_TIMEOUT_SECONDS:-90}
 cell_timeout=${CELL_TIMEOUT_SECONDS:-600}
 key_delay=${KEY_DELAY_SECONDS:-0.08}
 cells=${USB_HID_QEMU_CELLS:-"xhci paired"}
+imod=${USB_HID_XHCI_IMOD:-}
+xzed=${USB_HID_XZED:-0}
+case $xzed in
+0|1) ;;
+*) echo 'USB_HID_XZED must be 0 or 1' >&2; exit 2 ;;
+esac
+case $imod in
+''|0|160|4000) ;;
+*) echo 'USB_HID_XHCI_IMOD must be 0, 160, or 4000' >&2; exit 2 ;;
+esac
 
 usage()
 {
@@ -109,6 +119,10 @@ printf 'gate\tresult\tevidence\n' >"$results"
 	printf 'cells=%s\n' "$cells"
 	printf 'qemu=%s\n' "$("$qemu" --version | sed -n '1p')"
 	printf 'input_routing=USB-HID-display-video0,i8042-disabled\n'
+	printf 'heap_trace=%s\n' "${USB_HID_HEAP_TRACE:-0}"
+	printf 'xhci_imod=%s\n' "${imod:-default}"
+	printf 'xzed_session=%s\n' "$xzed"
+	printf 'retirement_churn=%s\n' "${USB_HID_RETIREMENT_CHURN:-0}"
 } >"$metadata"
 
 finish()
@@ -151,6 +165,7 @@ if rg -n '/dev/input/event[0-9]|strcmp[(][^,]+,[[:space:]]*"QEMU|EVIOCGNAME.*ROL
 	exit 1
 fi
 if ! TMPDIR="$task_tmp" cc -std=c11 -Wall -Wextra -Werror \
+	-DZEDBSD_USER_ABI_LP64 \
 	-I"$repo/libc/include" -I"$repo/include/uapi" -fsyntax-only \
 	"$guest_source" >"$output/guest-syntax.log" 2>&1; then
 	echo "guest probe host syntax gate failed" >&2
@@ -163,7 +178,7 @@ truncate -s 1048576 "$parser_image"
 run_parser_preflight()
 {
 	local kind=$1 log
-	local -a topology
+	local -a topology diagnostic_args
 	log=$output/qemu-parser-$kind.log
 
 	if [[ $kind == xhci ]]; then
@@ -213,10 +228,10 @@ for cell in $cells; do
 done
 
 source_ready=yes
-[[ -f $repo/plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/usb-hid.c ]] || source_ready=no
+[[ -f $repo/src/drivers/usb/usb-hid.c ]] || source_ready=no
 [[ -f $repo/include/drivers/usb-hid.h ]] || source_ready=no
 rg -q 'CONFIG_DRIVER_USB_HID' "$repo/Makefile" || source_ready=no
-rg -q 'src/drivers/usb-hid[.]c' "$repo/platform/amd64/vmunix.mk" || source_ready=no
+rg -q 'src/drivers/usb/usb-hid[.]c' "$repo/platform/amd64/vmunix.mk" || source_ready=no
 rg -q 'drv_usb_hid_driver_register' "$repo/src/kern/platform/pcat.c" || source_ready=no
 printf 'production_driver_source_ready=%s\n' "$source_ready" >>"$metadata"
 if [[ $source_ready != yes ]]; then
@@ -229,6 +244,19 @@ build_command=(make -C "$repo" -j16 -f Makefile -f "$phase_makefile"
 	ZEDBSD_CONFIG="$phase_config" BUILD="$private_build"
 	ARCH_IMAGE_DIR="$private_arch" DATA_IMAGE="$private_data"
 	SWAP_IMAGE="$private_swap" qemu-usb-hid-image)
+if [[ $xzed == 1 ]]; then
+	build_command+=(WS006_XZED_SESSION=y)
+fi
+test_cppflags=()
+if [[ ${USB_HID_HEAP_TRACE:-0} == 1 ]]; then
+	test_cppflags+=(-DZEDBSD_KERNEL_HEAP_TRACE)
+fi
+if [[ -n $imod ]]; then
+	test_cppflags+=("-DZEDBSD_XHCI_IMOD=${imod}U")
+fi
+if [[ ${#test_cppflags[@]} -ne 0 ]]; then
+	build_command+=("ZEDBSD_TEST_CPPFLAGS=${test_cppflags[*]}")
+fi
 printf 'build_command=' >>"$metadata"
 printf '%q ' env TMPDIR="$task_tmp" timeout --foreground --kill-after=10 \
 	"${build_timeout}s" "${build_command[@]}" >>"$metadata"
@@ -264,6 +292,14 @@ run_cell()
 	vars_copy=$cell_dir/OVMF_VARS.fd
 	guest_log=$cell_dir/guest.log
 	qmp_log=$cell_dir/qmp.log
+	diagnostic_args=()
+	if [[ ${USB_HID_QMP_DIAGNOSTICS:-0} == 1 ]]; then
+		[[ ${#cell_dir} -lt 90 ]] || {
+			echo 'diagnostic QMP socket path is too long' >&2
+			return 2
+		}
+		diagnostic_args=(-qmp "unix:$cell_dir/observe.sock,server=on,wait=off")
+	fi
 	controller_result=$cell_dir/controller-result.txt
 	cell_metadata=$cell_dir/metadata.txt
 	cp --reflink=auto --sparse=always "$image" "$run_image"
@@ -386,6 +422,10 @@ run_cell()
 			.) key=dot ;;
 			=) key=equal ;;
 			'&') key=7; shifted=yes ;;
+			';') key=semicolon ;;
+			'$') key=4; shifted=yes ;;
+			'!') key=1; shifted=yes ;;
+			'>') key=dot; shifted=yes ;;
 			*) echo "unsupported input character: $character" >&2; return 1 ;;
 			esac
 			qmp_key "$key" "$shifted" "$route"
@@ -425,13 +465,13 @@ run_cell()
 	wait_probe_pass()
 	{
 		wait_for "$async_pass_pattern" "$async_pass_target" \
-			"$command_timeout" "probe pass"
+			"$command_timeout" "probe pass" || return 1
 		wait_for "$shell_pattern" "$async_prompt" "$command_timeout" "probe shell return"
 	}
 
 	controller_sequence()
 	{
-		local password_before shell_before driver_count disconnect_count
+		local password_before shell_before driver_count disconnect_count before
 
 		printf '%s\n' '{"execute":"qmp_capabilities"}'
 		wait_for 'usb-storage: sd[a-z]+ blocks=[0-9]+ block-size=[0-9]+' 1 \
@@ -446,6 +486,10 @@ run_cell()
 		wait_for "$password_pattern" $((password_before + 1)) "$command_timeout" 'password prompt' || return 1
 		send_text ''
 		wait_for "$shell_pattern" $((shell_before + 1)) "$command_timeout" 'root shell' || return 1
+		if [[ $xzed == 1 ]]; then
+			send_shell '/usr/bin/usb-hid-guest-probe tty-identity' || return 1
+			wait_for '^USB-HID-GUEST TTY PASS ' 1 "$command_timeout" 'native PTY identity' || return 1
+		fi
 
 		send_shell '/usr/bin/usb-hid-guest-probe inventory keyboard' || return 1
 		# i8042 is disabled, so the login and every shell command above also
@@ -497,6 +541,11 @@ run_cell()
 		send_shell '/usr/bin/usb-hid-guest-probe storage /dev/sda &' || return 1
 		wait_for 'USB-HID-GUEST STORAGE READY path=/dev/sda bytes=67108864' \
 			1 "$command_timeout" 'concurrent USB root read start' || return 1
+		if [[ ${USB_HID_RETIREMENT_CHURN:-0} == 1 ]]; then
+			send_shell '/usr/bin/usb-hid-guest-probe retire &' || return 1
+			wait_for 'USB-HID-GUEST RETIREMENT READY iterations=128' 1 \
+				"$command_timeout" 'retirement stress start' || return 1
+		fi
 		start_probe '/usr/bin/usb-hid-guest-probe record relative' \
 			'^USB-HID-GUEST READY role=relative ' \
 			'^USB-HID-GUEST RECORD PASS role=relative\r?$' || return 1
@@ -506,6 +555,10 @@ run_cell()
 		wait_for 'USB-HID-GUEST STORAGE PASS bytes=67108864' 1 \
 			"$command_timeout" \
 			'concurrent USB root read' || return 1
+		if [[ ${USB_HID_RETIREMENT_CHURN:-0} == 1 ]]; then
+			wait_for 'USB-HID-GUEST RETIREMENT PASS iterations=128' 1 \
+				"$command_timeout" 'retirement stress completion' || return 1
+		fi
 
 		disconnect_count=$(marker_count "$disconnect_pattern" "$guest_log")
 		qmp_hmp 'device_del mouse3'
@@ -520,6 +573,38 @@ run_cell()
 			'^USB-HID-GUEST RECORD PASS role=absolute\r?$' || return 1
 		printf '%s\n' '{"execute":"input-send-event","arguments":{"device":"video0","events":[{"type":"abs","data":{"axis":"x","value":20000}},{"type":"abs","data":{"axis":"y","value":400}}]}}'
 		wait_probe_pass || return 1
+		if [[ $xzed == 1 ]]; then
+			send_shell 'rm -f /root/xzed-input' || return 1
+			qmp_hmp "screendump $cell_dir/console.ppm"
+			before=$(marker_count "$shell_pattern" "$guest_log")
+			send_text 'Xzed --size 800x600 -- /bin/zterm & sleep 45; kill -TERM -$!' || return 1
+			wait_for 'Xzed: input .* keyboard' 1 "$command_timeout" 'Xzed keyboard discovery' || return 1
+			wait_for 'Xzed: input .* absolute-pointer' 1 "$command_timeout" 'Xzed pointer discovery' || return 1
+			# Let zterm create and map its window before pointer focus.
+			sleep 3
+			qmp_hmp "screendump $cell_dir/xzed-before.ppm"
+			printf '%s\n' '{"execute":"input-send-event","arguments":{"device":"video0","events":[{"type":"abs","data":{"axis":"x","value":8192}},{"type":"abs","data":{"axis":"y","value":8192}}]}}'
+			sleep 1
+			printf '%s\n' '{"execute":"input-send-event","arguments":{"device":"video0","events":[{"type":"btn","data":{"down":true,"button":"left"}}]}}'
+			sleep 0.2
+			printf '%s\n' '{"execute":"input-send-event","arguments":{"device":"video0","events":[{"type":"btn","data":{"down":false,"button":"left"}}]}}'
+			# The PTY identity must appear while the outer shell still sleeps.
+			# This excludes queued console input as a false graphical success.
+			send_text 'tty > /dev/console' || return 1
+			wait_for '^/dev/pts/[0-9]+\r?$' 1 10 'live Xzed terminal identity' || return 1
+			send_text 'echo xzed-key-pass > /root/xzed-input' || return 1
+			sleep 1
+			qmp_hmp "screendump $cell_dir/xzed-after.ppm"
+			wait_for "$shell_pattern" $((before + 1)) 60 'Xzed return to TTY' || return 1
+			sleep 1
+			if rg -a -q '^/dev/console\r?$' "$guest_log"; then
+				printf 'fail\tgraphical keyboard input was replayed by the outer console\n' >"$controller_result"
+				return 1
+			fi
+			send_shell 'cat /root/xzed-input' || return 1
+			wait_for '^xzed-key-pass\r?$' 1 "$command_timeout" 'Xzed keyboard file proof' || return 1
+			qmp_hmp "screendump $cell_dir/restored.ppm"
+		fi
 		send_shell 'echo USB-HID-CELL-PASS' || return 1
 		printf 'pass\n' >"$controller_result"
 	}
@@ -548,7 +633,7 @@ run_cell()
 		-device VGA,id=video0 \
 		-drive "if=none,id=boot,file=$run_image,format=raw" \
 		"${topology[@]}" -display none -serial none \
-		-debugcon "file:$guest_log" -qmp stdio -no-reboot \
+		-debugcon "file:$guest_log" -qmp stdio "${diagnostic_args[@]}" -no-reboot \
 		>"$qmp_log" 2>&1
 	pipeline_status=("${PIPESTATUS[@]}")
 	set -e
@@ -579,6 +664,13 @@ run_cell()
 		return 1
 	fi
 	printf 'result=pass\n' >>"$cell_metadata"
+	if [[ $xzed == 1 ]]; then
+		[[ -s $cell_dir/console.ppm && -s $cell_dir/xzed-before.ppm &&
+		   -s $cell_dir/xzed-after.ppm && -s $cell_dir/restored.ppm ]] || return 1
+		! cmp -s "$cell_dir/console.ppm" "$cell_dir/xzed-before.ppm" || return 1
+		! cmp -s "$cell_dir/xzed-before.ppm" "$cell_dir/xzed-after.ppm" || return 1
+		printf '%s-xzed\tpass\t%s/xzed-after.ppm and keyboard file proof\n' "$kind" "$kind" >>"$results"
+	fi
 	printf '%s\tpass\t%s/guest.log\n' "$kind" "$kind" >>"$results"
 }
 

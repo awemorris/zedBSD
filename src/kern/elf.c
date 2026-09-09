@@ -25,6 +25,7 @@
 #include "kern/page.h"
 #include "kern/vmspace.h"
 
+#include <zedbsd/tls.h>
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
@@ -87,6 +88,7 @@ struct normalized_program {
 };
 
 struct normalized_image {
+	uintptr_t thread_pointer;
 	uintptr_t entry;
 	uintptr_t brk_start;
 	size_t static_data_size;
@@ -114,6 +116,9 @@ static uint32_t segment_prot(uint32_t flags);
 static int read_headers(struct file_content_lease *lease, unsigned elf_class, struct normalized_header *header, struct normalized_program **programs_out, uint64_t *file_size_out);
 static int copy_segment_snapshot(struct file_content_lease *lease, struct vmspace *vm, uintptr_t destination, off_t source, size_t size);
 static int load_segment_snapshot(struct file_content_lease *lease, struct vmspace *vm, uintptr_t destination, off_t source, size_t size, uint32_t prot);
+#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_I386)
+static int load_static_tls(struct file_content_lease *, struct vmspace *, const struct normalized_program *, uintptr_t *);
+#endif
 static int validate_and_load(struct file_content_lease *lease, struct vmspace *vm, unsigned elf_class, enum elf_load_role role, struct normalized_image *image);
 static void copy_image32(struct elf32_image_info *destination, const struct normalized_image *source);
 static void copy_image64(struct elf64_image_info *destination, const struct normalized_image *source);
@@ -835,6 +840,88 @@ load_segment_snapshot(
 }
 
 /* Validates an image of one class and role and maps its segments. */
+#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_I386)
+/* Builds a private initial block and a VM-owned immutable thread template. */
+static int
+load_static_tls(
+	struct file_content_lease *lease,
+	struct vmspace *vm,
+	const struct normalized_program *tls,
+	uintptr_t *thread_pointer)
+{
+	struct zedbsd_tls_prefix prefix;
+	uintptr_t template_address;
+	uintptr_t mapping;
+	uintptr_t tp;
+	size_t template_size;
+	size_t payload_size;
+	size_t mapping_size;
+	size_t alignment;
+	size_t distance;
+	int error;
+
+	alignment = (size_t)tls->align;
+	if (alignment == 0)
+		alignment = 1;
+	distance = (size_t)tls->memsz +
+	    (size_t)((0U - tls->vaddr - tls->memsz) & (alignment - 1U));
+	payload_size = (distance + PAGE_SIZE - 1U) & ~(size_t)(PAGE_SIZE - 1U);
+	mapping_size = payload_size + ZEDBSD_TLS_TCB_RESERVE;
+	template_size = ((size_t)tls->filesz + PAGE_SIZE - 1U) &
+	    ~(size_t)(PAGE_SIZE - 1U);
+	template_address = 0;
+
+	/* Empty/zero-fill TLS requires no file template mapping. */
+	if (template_size != 0) {
+		error = vmspace_map_find(vm, vm_layout.mmap_base, template_size,
+		    HAL_SPACE_READ | HAL_SPACE_WRITE, &template_address);
+		if (error != 0)
+			return error;
+		error = copy_segment_snapshot(lease, vm, template_address,
+		    (off_t)tls->offset, (size_t)tls->filesz);
+		if (error != 0)
+			goto free_template;
+		error = vmspace_protect(vm, template_address, template_size, HAL_SPACE_READ);
+		if (error != 0)
+			goto free_template;
+	}
+
+	error = vmspace_map_find(vm, vm_layout.mmap_base, mapping_size,
+	    HAL_SPACE_READ | HAL_SPACE_WRITE, &mapping);
+	if (error != 0)
+		goto free_template;
+	tp = mapping + payload_size;
+	error = copy_segment_snapshot(lease, vm, tp - distance,
+	    (off_t)tls->offset, (size_t)tls->filesz);
+	if (error != 0)
+		goto free_mapping;
+
+	/* Only the shared prefix is known to the loader; the tail remains zero. */
+	memset(&prefix, 0, sizeof(prefix));
+	prefix.self = tp;
+	prefix.mapping_base = mapping;
+	prefix.mapping_size = mapping_size;
+	prefix.template_address = template_address;
+	prefix.template_size = (size_t)tls->filesz;
+	prefix.memory_size = (size_t)tls->memsz;
+	prefix.alignment = alignment;
+	prefix.distance = distance;
+	error = vmspace_copy_to(vm, tp, &prefix, sizeof(prefix));
+	if (error != 0)
+		goto free_mapping;
+	*thread_pointer = tp;
+	return 0;
+
+free_mapping:
+	(void)vmspace_unmap(vm, mapping, mapping_size);
+free_template:
+	if (template_size != 0)
+		(void)vmspace_unmap(vm, template_address, template_size);
+	return error;
+}
+
+#endif
+
 static int
 validate_and_load(
 	struct file_content_lease *lease,
@@ -849,6 +936,8 @@ validate_and_load(
 	struct normalized_program *program;
 	struct normalized_program *other;
 	struct normalized_program *segment;
+	struct normalized_program *tls;
+	int tls_contained;
 	uintptr_t mapped_start[ELF_PHNUM_MAX];
 	size_t mapped_size[ELF_PHNUM_MAX];
 	uint64_t file_size;
@@ -886,6 +975,8 @@ validate_and_load(
 
 	/* Starts with an empty image and an inverted address range. */
 	programs = NULL;
+	tls = NULL;
+	tls_contained = 0;
 	minimum = UINT64_MAX;
 	maximum = 0;
 	maximum_align = PAGE_SIZE;
@@ -1000,6 +1091,32 @@ validate_and_load(
 				image->stack_size = (size_t)requested;
 			}
 
+			continue;
+		}
+
+		/* Validate TLS before allocating any part of the candidate image. */
+		if (program->type == PT_TLS) {
+			if (tls != NULL)
+				goto invalid;
+			tls = program;
+			if (tls->filesz > tls->memsz)
+				goto invalid;
+			if (tls->memsz > ZEDBSD_TLS_MEMORY_MAX)
+				goto invalid;
+			if (tls->offset > file_size)
+				goto invalid;
+			if (tls->filesz > file_size - tls->offset)
+				goto invalid;
+			if (tls->vaddr > UINT64_MAX - tls->memsz)
+				goto invalid;
+			if (tls->align > ZEDBSD_TLS_ALIGN_MAX)
+				goto invalid;
+			if (tls->align > 1U) {
+				if (!power_of_two64(tls->align))
+					goto invalid;
+				if (((tls->offset ^ tls->vaddr) & (tls->align - 1U)) != 0)
+					goto invalid;
+			}
 			continue;
 		}
 
@@ -1130,6 +1247,43 @@ validate_and_load(
 			goto invalid;
 	}
 
+	/* Linkers may emit an empty PT_TLS for a program without TLS symbols. */
+	if (tls != NULL && tls->memsz == 0)
+		tls = NULL;
+
+	/* The template must describe the same bytes as a readable load segment. */
+	if (tls != NULL) {
+		if (tls->vaddr > UINTPTR_MAX - load_bias)
+			goto invalid;
+		start = tls->vaddr + load_bias;
+		if (start < vm_layout.user_minimum)
+			goto invalid;
+		if (start >= vm_layout.user_limit)
+			goto invalid;
+		if (tls->memsz > vm_layout.user_limit - start)
+			goto invalid;
+		for (i = 0; i < header.phnum; i++) {
+			segment = &programs[i];
+			if (segment->type != PT_LOAD)
+				continue;
+			if ((segment->flags & PF_R) == 0)
+				continue;
+			if (tls->vaddr < segment->vaddr)
+				continue;
+			start = tls->vaddr - segment->vaddr;
+			if (start > segment->filesz)
+				continue;
+			if (tls->filesz > segment->filesz - start)
+				continue;
+			if (tls->offset != segment->offset + start)
+				continue;
+			tls_contained = 1;
+			break;
+		}
+		if (!tls_contained)
+			goto invalid;
+	}
+
 	/* Maps and fills every PT_LOAD segment. */
 	for (i = 0; i < header.phnum; i++) {
 		segment = &programs[i];
@@ -1180,6 +1334,17 @@ validate_and_load(
 		image->static_data_size = (size_t)(data_maximum - data_minimum);
 	}
 
+	/* The runtime linker owns dynamic TLS; static images start with a ready TP. */
+	if (tls != NULL && role == ELF_LOAD_MAIN && interp_count == 0) {
+#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_I386)
+		error = load_static_tls(lease, vm, tls, &image->thread_pointer);
+#else
+		error = ENOEXEC;
+#endif
+		if (error != 0)
+			goto rollback;
+	}
+
 	image->entry = load_bias + (uintptr_t)header.entry;
 	image->program_headers += load_bias;
 	image->program_header_size = header.phentsize;
@@ -1217,6 +1382,7 @@ copy_image32(
 	struct elf32_image_info *destination,
 	const struct normalized_image *source)
 {
+	destination->thread_pointer = source->thread_pointer;
 	destination->entry = source->entry;
 	destination->brk_start = source->brk_start;
 	destination->static_data_size = source->static_data_size;
@@ -1236,6 +1402,7 @@ copy_image64(
 	struct elf64_image_info *destination,
 	const struct normalized_image *source)
 {
+	destination->thread_pointer = source->thread_pointer;
 	destination->entry = source->entry;
 	destination->brk_start = source->brk_start;
 	destination->static_data_size = source->static_data_size;

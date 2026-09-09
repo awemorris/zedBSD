@@ -1,0 +1,71 @@
+require files;
+func filesCheck(value, message) { if (!value) { System.error("native file transaction: " + message); } }
+func filesRevalidate(context) {
+    var current = instFileIdentity(context.base);
+    filesCheck(current.device == context.baseIdentity.device && current.inode == context.baseIdentity.inode &&
+        (current.mode & 61440) == 16384, "destination identity changed");
+    var source = instFileIdentity(context.source);
+    filesCheck(instSameFileObject(source, context.sourceIdentity) && source.size == context.sourceIdentity.size,
+        "source identity changed");
+}
+func filesFailAfterPublish(context, entry) {
+    instFilePublish(context, entry);
+    context.published = context.published + 1;
+    if (context.published == 3) { System.error("fixture interruption after third rename"); }
+}
+func main(args) {
+    if (Array.size(args) != 1) { System.error("expected disposable FAT mount"); }
+    var base = args[0];
+    if (base != "/q149") { System.error("unexpected fixture mount"); }
+    var capacity = instFileCapacity(base);
+    filesCheck(capacity.available >= 100663296L && capacity.available <= capacity.total,
+        "real df capacity observation");
+    print("native capacity admission PASS");
+    // The host's executable umask must not become the FAT creation mode.
+    instRequire(["/bin/mkdir", "/run/q149-seed"]);
+    FileUtil.writeText("/run/q149-seed/seed", "staging seed\n");
+    instRequire(["/bin/chmod", "755", "/run/q149-seed/seed"]);
+    var context = { base: base, baseIdentity: instFileIdentity(base), seed: "/run/q149-seed/seed", source: "/bin/sh",
+        sourceIdentity: instFileIdentity("/bin/sh"), revalidate: filesRevalidate, published: 0 };
+    instRequire(["/bin/mkdir", base + "/stages"]);
+    var roles = ["loader", "kernel", "rootfs", "data", "swap", "config"];
+    var names = ["BOOTX64.EFI", "vmunix", "rootfs.img", "data.img", "swapfile", "zedbsd.cfg"];
+    var entries = [];
+    var digest = instFileDigest(context.source);
+    for (i in 0..6) {
+        var entry = { role: roles[i], final: base + "/" + names[i],
+            stage: base + "/stages/" + names[i], directory: base, stageDirectory: base + "/stages",
+            source: context.source, digest: digest, bytes: context.sourceIdentity.size,
+            permissions: 493, modeText: "755" };
+        if (i == 3) { entry.bytes = 33554432; }
+        if (i == 4) { entry.bytes = 67108864; }
+        if (i == 5) {
+            entry.text = "kernel=vmunix\noverlay-root=rootfs.img\n";
+            entry.bytes = String.byteLength(entry.text);
+        }
+        Array.push(entries, entry);
+    }
+    var ops = instFileOperations();
+    ops.publish = filesFailAfterPublish;
+    print("native transaction interrupted publication begin");
+    var report = instManagedTransaction(ops, context, entries);
+    filesCheck(!report.ok && Array.size(report.published) == 2 && Array.size(report.uncertain) == 1 &&
+        Array.size(report.leftovers) == 0, "partial publication report: " + report.message);
+    filesCheck(instFileLookup(context, entries[5].final) == 0, "configuration published early");
+    for (i in 0..6) { filesCheck(instFileLookup(context, entries[i].stage) == 0, "stage not cleaned"); }
+    print("native transaction recovery begin");
+    ops = instFileOperations();
+    report = instManagedTransaction(ops, context, entries);
+    filesCheck(report.ok && Array.size(report.published) == 3, "partial recovery: " + report.message);
+    print("native transaction identical rerun begin");
+    report = instManagedTransaction(ops, context, entries);
+    filesCheck(report.ok && Array.size(report.published) == 0, "identical rerun: " + report.message);
+    FileUtil.writeText(entries[5].final, "foreign configuration\n");
+    report = instManagedTransaction(ops, context, entries);
+    filesCheck(!report.ok && Array.size(report.published) == 0 && Array.size(report.leftovers) == 0,
+        "conflict accepted");
+    filesCheck(FileUtil.readText(entries[5].final) == "foreign configuration\n", "conflict overwritten");
+    FileUtil.writeText(entries[5].final, entries[5].text);
+    instFileSync(context, entries[5].final);
+    print("installer files PASS real-commands partial-publish recovery exact-rerun conflict");
+}

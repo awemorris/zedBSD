@@ -297,6 +297,8 @@ struct fake_controller {
 	unsigned teardown_device_disable_sequence;
 	unsigned teardown_hcd_quiesce_sequence;
 	unsigned teardown_stop_sequence;
+	unsigned teardown_class_quiesce_sequence;
+	int teardown_class_quiesce_error;
 	int teardown_detach_error;
 	int teardown_device_quiesce_error;
 	int teardown_hcd_quiesce_error;
@@ -770,6 +772,16 @@ fake_storage_detach(struct drv_usb_interface *interface, unsigned flags)
 	return 0;
 }
 
+static int
+fake_storage_quiesce(struct drv_usb_interface *interface)
+{
+	struct fake_controller *controller;
+	controller = fake_controller(drv_usb_bus_hcd(
+	    drv_usb_device_bus(drv_usb_interface_device(interface))));
+	controller->teardown_class_quiesce_sequence = ++controller->teardown_sequence;
+	return controller->teardown_class_quiesce_error;
+}
+
 static const struct drv_usb_id fake_storage_ids[] = {{
 	.match_flags = DRV_USB_ID_IF_CLASS | DRV_USB_ID_IF_SUBCLASS,
 	.interface_class = 8,
@@ -845,6 +857,7 @@ main(void)
 	struct fake_controller shutdown_success, shutdown_detach_failure;
 	struct fake_controller shutdown_device_failure, shutdown_hcd_failure;
 	struct fake_controller capability_controller;
+	struct fake_controller retained_root, failed_root;
 	struct drv_usb_hcd invalid_hcd;
 	struct drv_usb_hcd_ops invalid_ops;
 	struct drv_usb_bus *invalid_bus = NULL;
@@ -1347,6 +1360,28 @@ main(void)
 	fake_unregister(&hotplug_detach_failure);
 	CHECK(drv_usb_driver_unregister(&fake_storage_driver) == 0);
 
+	/* A retained root uses terminal quiescence, never ordinary disk detach. */
+	fake_storage_driver.quiesce = fake_storage_quiesce;
+	CHECK(drv_usb_driver_register(&fake_storage_driver) == 0);
+	fake_register(&retained_root, 0);
+	retained_root.teardown_tracking = 1U;
+	retained_root.teardown_hcd_quiesce_error = EIO;
+	drv_usb_hcd_root_hub_changed(&retained_root.hcd);
+	device = drv_usb_find_device(retained_root.bus_number, 1);
+	CHECK(device != NULL);
+	configuration = drv_usb_device_active_configuration(device);
+	control = drv_usb_configuration_find_interface(configuration, 0);
+	CHECK(drv_usb_interface_driver(control) == &fake_storage_driver);
+	fake_register(&failed_root, 0);
+	failed_root.teardown_tracking = 1U;
+	failed_root.teardown_class_quiesce_error = EBUSY;
+	drv_usb_hcd_root_hub_changed(&failed_root.hcd);
+	device = drv_usb_find_device(failed_root.bus_number, 1);
+	CHECK(device != NULL);
+	configuration = drv_usb_device_active_configuration(device);
+	control = drv_usb_configuration_find_interface(configuration, 0);
+	CHECK(drv_usb_interface_driver(control) == &fake_storage_driver);
+
 	/* drv_usb_shutdown() is a terminal boundary: the platform resets after
 	 * HCD stop, while failed teardown deliberately retains callback-visible
 	 * objects.  Exercise all three buses in one terminal invocation. */
@@ -1402,6 +1437,15 @@ main(void)
 	    drv_usb_interface_driver(control) == &fake_driver);
 
 	drv_usb_shutdown();
+	CHECK(retained_root.teardown_class_quiesce_sequence == 1U);
+	CHECK(retained_root.teardown_later_detach_sequence == 0U);
+	CHECK(retained_root.teardown_device_quiesce_sequence == 2U);
+	CHECK(retained_root.teardown_hcd_quiesce_sequence == 3U);
+	CHECK(retained_root.teardown_stop_sequence == 0U);
+	CHECK(failed_root.teardown_class_quiesce_sequence == 1U);
+	CHECK(failed_root.teardown_later_detach_sequence == 0U);
+	CHECK(failed_root.teardown_hcd_quiesce_sequence == 3U);
+	CHECK(failed_root.teardown_stop_sequence == 0U);
 	CHECK(shutdown_hcd_failure.teardown_detach_sequence == 1U);
 	CHECK(shutdown_hcd_failure.teardown_device_quiesce_sequence == 2U);
 	CHECK(shutdown_hcd_failure.teardown_hcd_quiesce_sequence == 3U);
@@ -1425,8 +1469,14 @@ main(void)
 	CHECK(shutdown_device_failure.teardown_stop_sequence == 0U);
 	CHECK(shutdown_device_failure.teardown_sequence == 3U);
 
+	retained_root.teardown_hcd_quiesce_error = 0;
 	shutdown_hcd_failure.teardown_hcd_quiesce_error = 0;
 	drv_usb_shutdown();
+	CHECK(retained_root.teardown_class_quiesce_sequence == 4U);
+	CHECK(retained_root.teardown_device_quiesce_sequence == 5U);
+	CHECK(retained_root.teardown_hcd_quiesce_sequence == 6U);
+	CHECK(retained_root.teardown_stop_sequence == 0U);
+	CHECK(retained_root.teardown_later_detach_sequence == 0U);
 	CHECK(shutdown_hcd_failure.teardown_hcd_quiesce_sequence == 5U);
 	CHECK(shutdown_hcd_failure.teardown_stop_sequence == 6U);
 	CHECK(shutdown_hcd_failure.teardown_sequence == 6U);

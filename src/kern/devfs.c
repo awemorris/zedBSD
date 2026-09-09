@@ -20,6 +20,7 @@
 #include "kern/devfs.h"
 #include "kern/backing-claim.h"
 #include "kern/block-identity.h"
+#include "kern/buf.h"
 #include "kern/cdev.h"
 #include "kern/disk.h"
 #include "kern/file.h"
@@ -782,6 +783,13 @@ static DEVFS_HIGH int
 block_close(
 	struct file *file)
 {
+	/* Final close owns the description; no ioctl or I/O can still borrow it. */
+	if (file->f_block_claim != NULL) {
+		disk_admin_end(file->f_data, file->f_block_claim);
+		backing_claim_release(file->f_block_claim);
+		file->f_block_claim = NULL;
+	}
+
 	/* Closes the disk when the open succeeded. */
 	if (file->f_data != NULL)
 		disk_close(file->f_data);
@@ -793,7 +801,7 @@ block_close(
 
 /* Reads bytes from a disk at an offset through the bounce buffer. */
 static DEVFS_HIGH ssize_t
-block_pread(
+block_pread_data(
 	struct file *file,
 	void *buffer,
 	size_t length,
@@ -840,7 +848,10 @@ block_pread(
 			return -error;
 		}
 
-		error = disk_read(disk, block, 1, bounce);
+		if (file->f_block_claim != NULL)
+			error = disk_read_direct(disk, block, 1, bounce);
+		else
+			error = disk_read(disk, block, 1, bounce);
 		if (error != 0) {
 			if (total != 0)
 				return (ssize_t)total;
@@ -854,6 +865,22 @@ block_pread(
 
 	/* Reports the bytes read. */
 	return (ssize_t)total;
+}
+
+static DEVFS_HIGH ssize_t
+block_pread(struct file *file, void *buffer, size_t length, off_t offset)
+{
+	ssize_t result;
+	int error;
+
+	if (file->f_block_claim == NULL)
+		return block_pread_data(file, buffer, length, offset);
+	error = disk_admin_io_begin(file->f_data, file->f_block_claim);
+	if (error != 0)
+		return -error;
+	result = block_pread_data(file, buffer, length, offset);
+	disk_admin_io_end(file->f_data, file->f_block_claim);
+	return result;
 }
 
 /* Reads from a disk at the file offset and advances it. */
@@ -876,7 +903,7 @@ block_read(
 
 /* Writes bytes to a disk at an offset through the bounce buffer. */
 static DEVFS_HIGH ssize_t
-block_pwrite(
+block_pwrite_data(
 	struct file *file,
 	const void *buffer,
 	size_t length,
@@ -923,11 +950,20 @@ block_pwrite(
 		first = position / block_size;
 		last = (position + length - 1U) / block_size;
 		error = backing_mutation_begin_disk(disk, first,
-		    last - first + 1U, NULL, &guard);
+		    last - first + 1U, file->f_block_claim, &guard);
 		if (error != 0)
 			return -error;
 	} else {
 		memset(&guard, 0, sizeof(guard));
+	}
+	/* Reserved I/O bypasses the cache. Invalidate overlapping clean lines
+	 * while foreign cache admissions and descriptor operations are excluded. */
+	if (file->f_block_claim != NULL && length != 0) {
+		error = buf_invalidate(disk, first, last - first + 1U, 0);
+		if (error != 0) {
+			backing_mutation_end(&guard);
+			return -error;
+		}
 	}
 
 	/* Writes one sector at a time, merging partial sectors with the disk. */
@@ -942,7 +978,10 @@ block_pwrite(
 		}
 
 		if (within != 0 || count != block_size) {
-			error = disk_read(disk, block, 1, bounce);
+			if (file->f_block_claim != NULL)
+				error = disk_read_direct(disk, block, 1, bounce);
+			else
+				error = disk_read(disk, block, 1, bounce);
 			if (error != 0) {
 				backing_mutation_end(&guard);
 				if (total != 0)
@@ -954,7 +993,10 @@ block_pwrite(
 		}
 
 		memcpy(bounce + within, input + total, count);
-		error = disk_write(disk, block, 1, bounce);
+		if (file->f_block_claim != NULL)
+			error = disk_write_direct_claimed(disk, block, 1, bounce, file->f_block_claim);
+		else
+			error = disk_write(disk, block, 1, bounce);
 		if (error != 0) {
 			backing_mutation_end(&guard);
 			if (total != 0)
@@ -970,6 +1012,22 @@ block_pwrite(
 
 	/* Reports the bytes written. */
 	return (ssize_t)total;
+}
+
+static DEVFS_HIGH ssize_t
+block_pwrite(struct file *file, const void *buffer, size_t length, off_t offset)
+{
+	ssize_t result;
+	int error;
+
+	if (file->f_block_claim == NULL)
+		return block_pwrite_data(file, buffer, length, offset);
+	error = disk_admin_io_begin(file->f_data, file->f_block_claim);
+	if (error != 0)
+		return -error;
+	result = block_pwrite_data(file, buffer, length, offset);
+	disk_admin_io_end(file->f_data, file->f_block_claim);
+	return result;
 }
 
 /* Writes to a disk at the file offset and advances it. */
@@ -1002,11 +1060,79 @@ block_fsync(
 		return ENXIO;
 
 	/* Flushes the disk. */
+	if (file->f_block_claim != NULL) {
+		error = disk_admin_io_begin(file->f_data, file->f_block_claim);
+		if (error != 0)
+			return error;
+	}
 	error = disk_sync(file->f_data);
+	if (file->f_block_claim != NULL)
+		disk_admin_io_end(file->f_data, file->f_block_claim);
 	if (error != 0)
 		return error;
 
 	/* Succeeded. */
+	return 0;
+}
+
+/* Acquires the raw claim and open gate together, or releases both on failure.
+ * The caller holds f_lock, so descriptor I/O cannot race publication. */
+static DEVFS_HIGH int
+block_reserve(
+	struct file *file,
+	uintptr_t argument)
+{
+	struct zedbsd_block_info expected;
+	struct zedbsd_block_info current;
+	struct backing_claim *claim;
+	struct disk *disk;
+	int error;
+
+	if ((file_status_flags_get(file) & O_ACCMODE) != O_RDWR)
+		return EBADF;
+	if (file->f_block_claim != NULL)
+		return EBUSY;
+	error = copyin(argument, &expected, sizeof(expected));
+	if (error != 0)
+		return error;
+	disk = file->f_data;
+	current = expected;
+	error = disk_block_info(disk, &current);
+	if (error != 0)
+		return error;
+	if (memcmp(&current, &expected, sizeof(current)) != 0)
+		return ESTALE;
+	if (disk->d_media_backing != NULL || (disk->d_flags & DISK_FILE_BACKED) != 0 ||
+	    (disk->d_parent != NULL && (disk->d_parent->d_parent != NULL ||
+	    (disk->d_flags & DISK_PARTITION) == 0 ||
+	    (disk->d_parent->d_flags & DISK_FILE_BACKED) != 0)))
+		return EOPNOTSUPP;
+	if ((disk->d_flags & DISK_READ_ONLY) != 0)
+		return EROFS;
+
+	/* The claim closes the writer race before the registry closes new opens. */
+	error = backing_claim_prepare_disk(disk, 0, disk->d_block_count,
+	    BACKING_CLAIM_ADMIN, &claim);
+	if (error != 0)
+		return error;
+	error = disk_admin_begin(disk, claim);
+	if (error != 0) {
+		backing_claim_release(claim);
+		return error;
+	}
+	/* Drop old clean aliases before any direct write. A retained dirty line
+	 * cannot write without its old authority, so invalidation refuses safely. */
+	error = disk_admin_io_begin(disk, claim);
+	if (error == 0) {
+		error = buf_invalidate_disk(disk, 0);
+		disk_admin_io_end(disk, claim);
+	}
+	if (error != 0) {
+		disk_admin_end(disk, claim);
+		backing_claim_release(claim);
+		return error;
+	}
+	file->f_block_claim = claim;
 	return 0;
 }
 
@@ -1023,17 +1149,29 @@ block_ioctl(
 	int error;
 
 	/* Requires privilege before validating an administrative reload request. */
-	if (request == BLKREREADPART) {
+	if (request == BLKREREADPART || request == BLKRESERVE) {
 		cred = cred_current_ref();
 		allowed = cred_is_superuser(cred);
 		cred_release(cred);
 		if (!allowed)
 			return EPERM;
 
-		/* Reload accepts no argument and retains its checked disk admission. */
-		if (argument != 0)
-			return EINVAL;
-		error = partition_reload(file->f_data);
+		/* These administrative ioctls serialize with the description's I/O. */
+		mutex_lock(&file->f_lock);
+		if (request == BLKRESERVE) {
+			error = block_reserve(file, argument);
+		} else if (argument != 0) {
+			error = EINVAL;
+		} else if (file->f_block_claim != NULL) {
+			error = disk_admin_io_begin(file->f_data, file->f_block_claim);
+			if (error == 0) {
+				error = partition_reload_claimed(file->f_data, file->f_block_claim);
+				disk_admin_io_end(file->f_data, file->f_block_claim);
+			}
+		} else {
+			error = partition_reload_claimed(file->f_data, file->f_block_claim);
+		}
+		mutex_unlock(&file->f_lock);
 		return error;
 	}
 

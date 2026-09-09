@@ -1,0 +1,202 @@
+// Dedicated installer transaction. Frontends supply review and progress callbacks.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require install;
+require nativeadmit;
+require nativecommand;
+require nativeguid;
+require nativemeasure;
+
+func instNativeCheck(context) {
+    instSourceRecheck(context.workspace, context.discovered, context.source);
+    var devices = instNativeReconcile(context.discovered, context.plan);
+    for (i in 0..2) {
+        if (!instSameDevice(devices[i], context.partitions[i])) {
+            System.error("native partition registration changed");
+        }
+    }
+    for (sector in [1L, context.plan.disk.sectors - 1L]) {
+        var header = instSourceRead("/dev/" + context.disk, sector * 512L, 512);
+        if (instNativeHeaderGuid(header, 0) != context.plan.guid) {
+            System.error("native disk GUID changed");
+        }
+    }
+    if (context.destination != 0) {
+        for (name, mount in context.destination.mounts) {
+            if (mount.state != "owned") { continue; }
+            instWorkspaceCheck(context.workspace, mount);
+            if (mount.identity.device != instFindDevice(devices, name).id) {
+                System.error("native destination mounted the wrong device");
+            }
+        }
+    }
+}
+
+func instNativeMount(context, index, name, readonly) {
+    instNativeCheck(context);
+    var directory = instWorkspaceDirectory(context.workspace, name);
+    var filesystem = "fat";
+    if (index == 1) { filesystem = "ufs"; }
+    var disk = context.partitions[index];
+    var mount = instWorkspaceAttachType(context.workspace, directory, disk.name, readonly, filesystem);
+    if (mount.identity.device != disk.id) { System.error("native mount identity mismatch"); }
+    context.destination.mounts[disk.name] = mount;
+    return mount;
+}
+
+func instNativeBootEntries(context, mount) {
+    var entries = [];
+    var paths = ["/EFI/BOOT/BOOTX64.EFI", "/vmunix", "/zedbsd.cfg"];
+    var roles = ["loader", "kernel", "config"];
+    for (i in 0..3) {
+        var entry = {role:roles[i], final:mount + paths[i], stage:mount + "/zedinst-stage/" + roles[i],
+            mount:mount, directory:mount, stageDirectory:mount + "/zedinst-stage",
+            modeText:"755", permissions:493, bytes:String.byteLength(context.plan.configuration),
+            text:context.plan.configuration, source:"", digest:""};
+        if (i == 0) { entry.directory = mount + "/EFI/BOOT"; }
+        if (i < 2) {
+            var input = context.source.inputs[i];
+            entry.source = input.path;
+            entry.digest = input.digest;
+            entry.bytes = input.bytes;
+        }
+        Array.push(entries, entry);
+    }
+    return entries;
+}
+
+func instNativeCopyRoot(context) {
+    context.ui.stage("Copying root filesystem");
+    var mount = instNativeMount(context, 1, "native-copy", false);
+    var copied = instTreeCopy(context.census, mount.path, "3600", "/bin/cp", context.ui.progress, context.ui);
+    if (!copied.ok) { System.error(copied.message + "\n" + copied.output); }
+    instRequire(["/bin/sync", "--", mount.path]);
+    instWorkspaceReleaseOne(context.workspace, mount);
+
+    // New read-only mounts compare persisted attributes, independent of read-time atime.
+    context.ui.stage("Verifying files and attributes");
+    var destination = instNativeMount(context, 1, "native-verify", true);
+    var sourceDirectory = instWorkspaceDirectory(context.workspace, "source-verify");
+    var source = instWorkspaceAttachType(context.workspace, sourceDirectory,
+        context.source.tree.device.name, true, "ufs");
+    if (source.identity.device != context.source.tree.device.id) {
+        System.error("source verification mount changed");
+    }
+    instTreeVerify(source.path, destination.path);
+    instWorkspaceReleaseOne(context.workspace, source);
+    instWorkspaceReleaseOne(context.workspace, destination);
+}
+
+func instNativeSwap(context) {
+    context.ui.stage("Preparing native swap file");
+    var mount = instNativeMount(context, 1, "native-final", false);
+    var path = mount.path + context.plan.swapPath;
+    if (instFileLookup(0, path) != 0) { System.error("installation source already contains /swapfile"); }
+    // Fully write each page; truncation alone would leave holes on native UFS.
+    instRequire(["/bin/dd", "if=/dev/zero", "of=" + path, "bs=65536",
+        "count=" + context.plan.swapBytes / 65536L, "conv=sync"]);
+    var identity = instFileIdentity(path);
+    if ((identity.mode & 61440) != 32768 || identity.size != context.plan.swapBytes) {
+        System.error("incomplete native swap allocation");
+    }
+    instRequire(["/bin/chmod", "600", path]);
+    instRequire(["/bin/sync", "--", path]);
+    instRequire(["/sbin/mkswap", path]);
+    instRequire(["/sbin/mkswap", "--verify-pristine", path]);
+    // The pending marker retains the mount if activation or deactivation is uncertain.
+    context.swapPending = path;
+    instRequire(["/sbin/swapon", path]);
+    instRequire(["/sbin/swapoff", path]);
+    context.swapPending = "";
+    var etc = instFileIdentity(mount.path + "/etc");
+    var fstab = instFileIdentity(mount.path + "/etc/fstab");
+    if ((etc.mode & 61440) != 16384 || (fstab.mode & 61440) != 32768) {
+        System.error("native source lacks a regular /etc/fstab");
+    }
+    var text = "# Native root is mounted by the kernel.\n/swapfile none swap sw 0 0\n";
+    FileUtil.writeText(mount.path + "/etc/fstab", text);
+    instFileOwned(mount.path + "/etc/fstab", fstab);
+    instRequire(["/bin/sync", "--", mount.path + "/etc/fstab"]);
+    if (FileUtil.readText(mount.path + "/etc/fstab") != text) { System.error("native fstab verification failed"); }
+    instRequire(["/bin/sync", "--", mount.path]);
+}
+
+func instNativeBody(context, unused) {
+    instWorkspaceDirectory(context.workspace, "");
+    context.ui.stage("Inspecting installation source");
+    context.source = instSourceMounts(context.workspace, context.discovered);
+    var directory = instWorkspaceDirectory(context.workspace, "census");
+    context.censusDirectory = directory.path;
+    context.census = instTreePrepare(context.source.tree.mount.path, directory.path, "/bin/find");
+    if (instFileLookup(0, context.source.tree.mount.path + "/swapfile") != 0) {
+        System.error("installation source already contains /swapfile");
+    }
+    var measured = instNativeMeasure(context.census, context.source.inputs, 32L * 1048576L);
+    instInstallSeed(context);
+    var guids = instNativeNewGuids(context);
+    context.plan = instNativeAdmittedPlan(context.discovered.disk, context.discovered.origins.disk,
+        measured, guids, instFormatQuery, 0);
+    if (!context.ui.review(context.plan, measured)) { context.cancelled = true; return false; }
+    instSourceRecheck(context.workspace, context.discovered, context.source);
+    instNativeBeforeErase(context.discovered);
+    // Repeat collision admission after the interactive pause.
+    var visible = instNativeVisibleGuids(instNativeObserveSame(context.discovered));
+    for (guid in guids) {
+        for (existing in visible) { if (guid == existing) { System.error("native GUID collision after review"); } }
+    }
+    context.ui.stage("Initializing destination disk");
+    instNativeCommand(context.plan.argv, "ERASE", context.plan.disk, context);
+    context.partitions = instNativeReconcile(context.discovered, context.plan);
+    instNativeCheck(context);
+    for (i in 0..2) {
+        instNativeCheck(context);
+        var argv = ["/sbin/mkfs", "-t", "fat32"];
+        if (i == 1) { argv = ["/sbin/mkfs", "-t", "ufs", "--profile=native"]; }
+        Array.push(argv, "/dev/" + context.partitions[i].name);
+        context.ui.stage("Formatting /dev/" + context.partitions[i].name);
+        instNativeCommand(argv, "FORMAT", context.partitions[i], context);
+    }
+    context.destination = {mounts:{}};
+    instNativeCopyRoot(context);
+    instNativeSwap(context);
+    var esp = instNativeMount(context, 0, "native-esp", false);
+    context.destination.directories = [{path:esp.path + "/EFI", mount:esp.path},
+        {path:esp.path + "/EFI/BOOT", mount:esp.path},
+        {path:esp.path + "/zedinst-stage", mount:esp.path}];
+    context.destination.present = [true];
+    instInstallDirectories(context);
+    context.ui.stage("Installing boot files");
+    var entries = instNativeBootEntries(context, esp.path);
+    context.transaction = instManagedProfile(instFileOperations(), context, entries, "native");
+    if (!context.transaction.ok) { System.error(context.transaction.message); }
+    return true;
+}
+
+func instNativeCensusCleanup(context, unused) {
+    if (context.censusDirectory == "") { return; }
+    for (name in ["files", "directories", "report"]) {
+        var path = context.censusDirectory + "/" + name;
+        var identity = instFileLookup(0, path);
+        if (identity != 0) { instFileRemove(0, path, identity); }
+    }
+}
+
+func instNativeInstall(disk, ui) {
+    var context = {disk:instDeviceName(disk), discovered:instNativeDiscover(disk), ui:ui,
+        source:0, destination:0, workspace:instWorkspaceNew(instWorkspaceOps(), 0, "/run/zedinst"),
+        seed:"/run/zedinst/seed", seedIdentity:0, seedPending:false, directories:[],
+        transaction:0, cancelled:false, started:false, swapPending:"", censusDirectory:"",
+        revalidate:instNativeCheck};
+    var result = System.pcall(instNativeBody, context, 0);
+    var records = System.pcall(instNativeCensusCleanup, context, 0);
+    var report = instInstallFinish(context, result);
+    if (!records.ok) { Array.push(report.cleanup, records.message); report.ok = false; }
+    report.started = context.started;
+    if (context.swapPending != "") {
+        report.ok = false;
+        Array.push(report.cleanup, "Swap activation outcome requires inspection: " + context.swapPending);
+    }
+    if (!report.ok && report.started) {
+        report.message = "Destination /dev/" + context.disk + " may contain a partial installation. " + report.message;
+    }
+    return report;
+}

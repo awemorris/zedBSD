@@ -39,6 +39,15 @@
 #define PIPELINE_MAX 16
 #define SHELL_SIGNAL_MAX 32
 
+/* Last completed command, retained across input lines and empty input. */
+static int shell_status;
+
+/* Parse failures stop a script even though ordinary command failures do not. */
+static int shell_syntax_error;
+
+/* Exact status supplied by an execution helper; -1 means boolean fallback. */
+static int execution_status = -1;
+
 static int command_background;
 static int command_subshell;
 static pid_t last_job;
@@ -61,6 +70,8 @@ struct pipeline_command {
 };
 
 static int command(char *text);
+static int command_argv_body(int argc, char **argv);
+static int wait_status_result(int status);
 static int run_pending_traps(void);
 static int parse_pipeline(const struct sh_token_list *list, size_t *position, struct pipeline_command *items, int *item_count, enum sh_token_type *following, const struct sh_expand_context *context);
 static int assignment_length(const char *text);
@@ -136,7 +147,8 @@ main(
 		shell_positional = argc >= 4 ? argv + 4 : NULL;
 
 		/* Computes the function result. */
-		function_result = command(argv[2]) ? 0 : 1;
+		(void)command(argv[2]);
+		function_result = shell_status;
 
 		/* Returns the computed result. */
 		return function_result;
@@ -149,7 +161,9 @@ main(
 		shell_positional = argv + 2;
 
 		/* Computes the function result. */
-		function_result = source_file_mode(argv[1], 0) ? 0 : 1;
+		function_result = source_file_mode(argv[1], 0);
+		function_result = function_result ? shell_status :
+		    (shell_status != 0 ? shell_status : 1);
 
 		/* Returns the computed result. */
 		return function_result;
@@ -177,8 +191,8 @@ main(
 		if (line == NULL) {
 			(void)putchar('\n');
 
-			/* Reports successful completion. */
-			return 0;
+			/* Returns the last command's status at end of input. */
+			return shell_status;
 		}
 
 		/* Handles the line condition. */
@@ -207,8 +221,9 @@ command(
 	int any;
 
 	connector = SH_TOKEN_SEMI;
+	shell_syntax_error = 0;
 	index = 0;
-	result = 1;
+	result = shell_status == 0;
 	any = 0;
 
 	/* Handles an operation failure. */
@@ -216,6 +231,9 @@ command(
 		fprintf(stderr, "sh: syntax error: %s\n", error_text);
 
 		/* Reports successful completion. */
+		shell_status = 2;
+		execution_status = 2;
+		shell_syntax_error = 1;
 		return 0;
 	}
 
@@ -225,13 +243,16 @@ command(
 		sh_tokens_free(&list);
 
 		/* Reports successful completion. */
+		shell_status = 2;
+		execution_status = 2;
+		shell_syntax_error = 1;
 		return 0;
 	}
 	while (list.tokens[index].type != SH_TOKEN_END) {
 		/* Handles a failed run pending traps operation. */
 		if (!run_pending_traps())
 			result = 0;
-		context.status = result ? 0 : 1;
+		context.status = shell_status;
 		context.shell_pid = (long)getpid();
 		context.last_job = (long)last_job;
 		context.lookup = shell_lookup;
@@ -246,6 +267,8 @@ command(
 		if (!parse_pipeline(&list, &index, items, &item_count, &next,
 				    &context)) {
 			result = 0;
+			shell_status = 2;
+			shell_syntax_error = 1;
 			goto done;
 		}
 
@@ -256,6 +279,8 @@ command(
 			fprintf(stderr, "sh: invalid operator\n");
 			pipeline_free(items, item_count);
 			result = 0;
+			shell_status = 2;
+			shell_syntax_error = 1;
 			goto done;
 		}
 		execute = connector == SH_TOKEN_SEMI ||
@@ -265,8 +290,11 @@ command(
 
 		/* Handles the execute condition. */
 		if (execute) {
+			execution_status = -1;
 			result = execute_pipeline(items, item_count,
 						  next == SH_TOKEN_AMP);
+			shell_status = execution_status >= 0 ? execution_status :
+			    (result ? 0 : 1);
 			any = 1;
 		}
 		pipeline_free(items, item_count);
@@ -282,13 +310,15 @@ command(
 		    (next == SH_TOKEN_AND_IF || next == SH_TOKEN_OR_IF)) {
 			fprintf(stderr, "sh: syntax error after operator\n");
 			result = 0;
+			shell_status = 2;
+			shell_syntax_error = 1;
 			goto done;
 		}
 	}
 
 	/* Handles the any condition. */
 	if (!any)
-		result = 1;
+		result = shell_status == 0;
 
 	/* Handles a failed run pending traps operation. */
 	if (!run_pending_traps())
@@ -298,6 +328,7 @@ done:
 	sh_tokens_free(&list);
 
 	/* Returns the computed result. */
+	execution_status = shell_status;
 	return result;
 }
 
@@ -309,9 +340,13 @@ run_pending_traps(
 	char *action;
 	int number;
 	int result;
+	int saved_status;
+	int saved_execution;
 
 	/* Process each element required by the operation. */
 	result = 1;
+	saved_status = shell_status;
+	saved_execution = execution_status;
 	for (number = 1; number < SHELL_SIGNAL_MAX; number++) {
 		/* Handles the trap pending condition. */
 		if (!trap_pending[number] || trap_action[number] == NULL)
@@ -325,8 +360,9 @@ run_pending_traps(
 		strcpy(action, trap_action[number]);
 
 		/* Handles a failed command operation. */
-		if (!command(action))
-			result = 0;
+		(void)command(action);
+		shell_status = saved_status;
+		execution_status = saved_execution;
 		free(action);
 	}
 
@@ -712,12 +748,11 @@ execute_pipeline(
 				(void)close(descriptors[1]);
 
 			/* Handles a failed pipeline child operation. */
-			if (!pipeline_child(&items[index])) {
-				(void)fflush(NULL);
-				_exit(1);
-			}
+			execution_status = -1;
+			function_result = pipeline_child(&items[index]);
 			(void)fflush(NULL);
-			_exit(0);
+			_exit(execution_status >= 0 ? execution_status :
+			    (function_result ? 0 : 1));
 		}
 
 		/* Handles the group condition. */
@@ -831,7 +866,7 @@ execute_pipeline(
 	}
 
 	/* Computes the function result. */
-	function_result = WIFEXITED(last_status) && WEXITSTATUS(last_status) == 0;
+	function_result = wait_status_result(last_status);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -971,8 +1006,46 @@ done:
 }
 
 /* Supports the command argv operation. */
+/* Retains full statuses while adapting boolean builtins at one boundary. */
 static int
 command_argv(
+	int argc,
+	char **argv)
+{
+	int success;
+
+	/* An execution helper may supply an exact child or nested-list status. */
+	execution_status = -1;
+	success = command_argv_body(argc, argv);
+	if (execution_status < 0)
+		execution_status = success ? 0 : 1;
+
+	/* Returns the predicate used by the existing builtin dispatch API. */
+	return success;
+}
+
+/* Converts a wait status without discarding its exit code or signal. */
+static int
+wait_status_result(
+	int status)
+{
+	/* Normal exits retain all eight exit-status bits. */
+	if (WIFEXITED(status))
+		execution_status = WEXITSTATUS(status);
+	else if (WIFSIGNALED(status))
+		execution_status = 128 + WTERMSIG(status);
+	else if (WIFSTOPPED(status))
+		execution_status = 128 + WSTOPSIG(status);
+	else
+		execution_status = 1;
+
+	/* Conditional operators consume success, expansion consumes the full code. */
+	return execution_status == 0;
+}
+
+/* Executes assignments and dispatches one simple command. */
+static int
+command_argv_body(
 	int argc,
 	char **argv)
 {
@@ -1153,8 +1226,6 @@ command_dispatch(
 	int index_local11;
 	int length_local10;
 	char saved_local9;
-	char *child_local12[ARG_MAX + 1];
-	int i_local13;
 	char *end;
 	int status;
 	pid_t job;
@@ -1539,13 +1610,14 @@ command_dispatch(
 		if (strchr(child_local[0], '/') == NULL) {
 			/* Handles a failed search path operation. */
 			if (!search_path(child_local[0], "", candidate_local6,
-					 sizeof(candidate_local6)))
-
-				/* Reports successful completion. */
+					 sizeof(candidate_local6))) {
+				execution_status = 127;
 				return 0;
+			}
 			child_local[0] = candidate_local6;
 		}
 		execve(child_local[0], child_local, environ);
+		execution_status = errno == ENOENT ? 127 : 126;
 		fprintf(stderr, "exec: %s: %s\n", child_local[0], strerror(errno));
 
 		/* Reports successful completion. */
@@ -1663,18 +1735,12 @@ command_dispatch(
 
 	/* Handles the selected command-line operation. */
 	if (!strcmp(argv[0], "exit"))
-		exit(argc == 2 ? atoi(argv[1]) : 0);
+		exit(argc == 2 ? atoi(argv[1]) : shell_status);
 
 	/* Validates the command-line arguments. */
-	if (strchr(argv[0], '/') != NULL && access(argv[0], F_OK) == 0) {
-		/* Process each remaining command-line operand. */
-		for (i_local13 = 0; i_local13 < argc; i_local13++)
-			child_local12[i_local13] = argv[i_local13];
-		child_local12[argc] = NULL;
-
-		/* Computes the function result. */
-		function_result = is_elf(argv[0]) ? run_external(child_local12)
-				       : run_shell_script(argc, argv, argv[0]);
+	if (strchr(argv[0], '/') != NULL) {
+		/* Explicit paths obey the same executable check as PATH matches. */
+		function_result = run_resolved(argc, argv, argv[0]);
 
 		/* Returns the computed result. */
 		return function_result;
@@ -2286,9 +2352,8 @@ source_file_mode(
 	FILE *file;
 	char *buffer, *line;
 	struct stat status;
-	unsigned line_number;
 
-	line_number = 0;
+	(void)continue_on_error;
 
 	/* Handles a failed stat operation. */
 	if (stat(path, &status) != 0 || status.st_size < 0 ||
@@ -2327,7 +2392,6 @@ source_file_mode(
 	line = buffer;
 	while (*line != '\0') {
 		end = line;
-		line_number++;
 
 		/* Continue while the operation condition remains true. */
 		while (*end != '\0' && *end != '\r' && *end != '\n')
@@ -2341,24 +2405,19 @@ source_file_mode(
 				end++;
 		}
 
-		/* Handles a failed command operation. */
-		if (!command(line)) {
-			/* Handles an operation failure. */
-			if (!continue_on_error) {
-				free(buffer);
-
-				/* Reports successful completion. */
-				return 0;
-			}
-			fprintf(stderr, "%s:%u: command failed\n", path,
-				line_number);
+		/* Ordinary failures do not enable an implicit errexit mode. */
+		(void)command(line);
+		if (shell_syntax_error) {
+			free(buffer);
+			return 0;
 		}
 		line = end;
 	}
 	free(buffer);
 
 	/* Reports operation failure. */
-	return 1;
+	execution_status = shell_status;
+	return shell_status == 0;
 }
 
 /* Supports the join arguments operation. */
@@ -2527,7 +2586,7 @@ shell_wait_builtin(
 	}
 
 	/* Computes the function result. */
-	function_result = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+	function_result = wait_status_result(status);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -2630,12 +2689,11 @@ spawn_wait(
 			fprintf(stderr, "%s\n",
 				signal_message(WTERMSIG(status)));
 
-			/* Reports successful completion. */
-			return 0;
+			return wait_status_result(status);
 		}
 
 		/* Computes the function result. */
-		function_result = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+		function_result = wait_status_result(status);
 
 		/* Returns the computed result. */
 		return function_result;
@@ -2665,6 +2723,7 @@ spawn_wait(
 
 	/* Handles an operation failure. */
 	if (error != 0) {
+		execution_status = error == ENOENT ? 127 : 126;
 		fprintf(stderr, "sh: %s: %s\n", argv[0], strerror(error));
 
 		/* Reports successful completion. */
@@ -2710,12 +2769,11 @@ spawn_wait(
 	if (WIFSIGNALED(status)) {
 		fprintf(stderr, "%s\n", signal_message(WTERMSIG(status)));
 
-		/* Reports successful completion. */
-		return 0;
+		return wait_status_result(status);
 	}
 
 	/* Computes the function result. */
-	function_result = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+	function_result = wait_status_result(status);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -3057,6 +3115,7 @@ run_search_path(
 		return function_result;
 	}
 	fprintf(stderr, "sh: %s: not found\n", argv[0]);
+	execution_status = 127;
 
 	/* Reports successful completion. */
 	return 0;
@@ -3075,6 +3134,7 @@ run_resolved(
 
 	/* Handles a failed executable file operation. */
 	if (!is_executable_file(path)) {
+		execution_status = errno == ENOENT ? 127 : 126;
 		fprintf(stderr, "sh: %s: %s\n", path, strerror(errno));
 
 		/* Reports successful completion. */
@@ -3219,7 +3279,6 @@ shell_command_substitute(
 	const char *source,
 	char **result)
 {
-	int success;
 	char chunk[256];
 	ssize_t count;
 	char *larger;
@@ -3257,9 +3316,9 @@ shell_command_substitute(
 			_exit(1);
 		(void)close(descriptors[1]);
 		command_subshell = 1;
-		success = command((char *)source);
+		(void)command((char *)source);
 		(void)fflush(NULL);
-		_exit(success ? 0 : 1);
+		_exit(shell_status);
 	}
 	(void)close(descriptors[1]);
 

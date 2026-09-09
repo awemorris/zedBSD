@@ -18,6 +18,7 @@
 #include "irq.h"
 #include "asm.h"
 #include "space.h"
+#include "smp.h"
 
 struct amd64_idt_entry {
 	uint16_t offset_low;
@@ -143,6 +144,10 @@ int_handler(
 
 	/* Classifies the interrupted context before dispatch. */
 	vector = (int)frame->vector;
+
+	/* A terminal stop NMI parks silently without entering user fault handling. */
+	if (vector == 2 && amd64_smp_stop_requested())
+		hal_cpu_park();
 	user_interrupt = (frame->cs & 3U) == 3U &&
 	    is_asynchronous_interrupt(vector);
 

@@ -177,6 +177,7 @@ enum syscall_number {
 	ZEDBSD_SYS_setresgid = 160,
 	ZEDBSD_SYS_getentropy = 161,
 	ZEDBSD_SYS_atomic = 162,
+	ZEDBSD_SYS_renameat2 = 163,
 };
 
 #endif

@@ -27,6 +27,9 @@ struct overlay_mount_args {
 int
 drv_overlayfs_init(void);
 
+/* Caller holds a mount reference; result owns its lower path reference. */
+int drv_overlay_lower_root_ref(struct mount *mountp, struct path *result);
+
 int
 drv_overlay_mount_at(
 	struct mount *namespace_root,

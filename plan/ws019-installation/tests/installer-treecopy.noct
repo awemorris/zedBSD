@@ -1,0 +1,30 @@
+require treecopy;
+
+func notify(ui, state) {
+    if (state.done < ui.last || state.done > state.census.total) {
+        System.error("non-monotonic tree copy progress");
+    }
+    if (ui.first) {
+        if (state.done != 0L || instFileLookup(0, ui.destination) != 0) {
+            System.error("initial census was not presented before copying");
+        }
+        ui.first = false;
+    }
+    ui.last = state.done;
+    instTreeCopyNotify(ui, state);
+    if (ui.fail && state.done > 0L) { System.error("UI failure"); }
+}
+
+func main(args) {
+    var prepared = instTreePrepare(args[0], args[1], args[3]);
+    var ui = {destination:args[2], last:0L, first:true, fail:args[5] == "ui"};
+    var result = instTreeCopy(prepared, args[2], "30", args[4], notify, ui);
+    if (args[5] == "ok") {
+        if (!result.ok || result.done != prepared.census.total || ui.first) {
+            System.error("tree copy failed: " + result.message + " " + result.output);
+        }
+    } else {
+        if (result.ok) { System.error("tree copy unexpectedly succeeded"); }
+    }
+    print("installer tree copy PASS " + args[5]);
+}

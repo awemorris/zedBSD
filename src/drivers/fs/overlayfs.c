@@ -381,6 +381,27 @@ static const struct filesystem_type overlay_filesystem_type = {
 	.free_inode = overlay_free_inode,
 };
 
+/* Returns the immutable lower-root relationship of a referenced overlay. */
+OVERLAY_HIGH int
+drv_overlay_lower_root_ref(struct mount *mountp, struct path *result)
+{
+	struct overlay_mount_state *state;
+
+	/* A native root has no overlay lower image. */
+	if (mountp == NULL || result == NULL)
+		return EINVAL;
+	path_init(result);
+	if (mountp->m_type != &overlay_filesystem_type)
+		return EOPNOTSUPP;
+	state = mountp->m_data;
+	if (state == NULL || state->lower_root.p_mount == NULL)
+		return ENXIO;
+
+	/* The caller's mount reference prevents destruction of these owned paths. */
+	path_set(result, state->lower_root.p_mount, state->lower_root.p_inode);
+	return 0;
+}
+
 /*
  * Registers the overlay filesystem type.
  */

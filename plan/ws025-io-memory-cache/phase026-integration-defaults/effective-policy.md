@@ -39,3 +39,11 @@ did not demonstrate CPU/latency improvement. That does not justify direct user
 DMA or new queue-depth/interrupt defaults. User acceptance of the physical gate
 is not substitute numeric evidence for these optional optimizations. These four
 phases are intentionally not claimed as implemented or tested.
+
+## q139 update (2026-09-09)
+
+The p027 row above records q122 history. Under the later user-authorized
+hardware-independent scope, p027 is now complete with a bounded per-BIO window
+of 4 and 64 KiB BIO admission. Existing 4 KiB command/MDTS and CID/DMA ownership
+remain. See [p027 results](../phase027-nvme-queue-depth/results.md) for depth
+1/2/4/8 functional evidence. No physical performance optimum is asserted.

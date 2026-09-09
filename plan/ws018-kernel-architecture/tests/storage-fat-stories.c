@@ -10,17 +10,18 @@
 #undef disk_write_filesystem
 #undef disk_write_filesystem_context
 #include "../../../src/kern/buf.c"
+#include <kern/file-backing.h>
 static int extent_fault;
 static unsigned live_claims;
 static int loop_test_file_extents(struct file *, fat_extent_cb, void *);
-#define drv_fat_file_extents loop_test_file_extents
+#define file_backing_extents loop_test_file_extents
 #include "../../../src/drivers/generic/loop.c"
-#undef drv_fat_file_extents
+#undef file_backing_extents
 
 static int loop_test_file_extents(struct file *f, fat_extent_cb cb, void *context)
 {
 	if (extent_fault) return cb(1, 100, 16, context);
-	return drv_fat_file_extents(f, cb, context);
+	return file_backing_extents(f, cb, context);
 }
 void *kern_calloc(size_t n, size_t size) { return calloc(n, size); }
 struct backing_claim { unsigned token; };
@@ -28,6 +29,9 @@ int backing_claim_prepare_inode(struct inode *inode, enum backing_claim_owner ow
 { (void)inode; (void)owner; *out = calloc(1, sizeof(**out)); if (!*out) return ENOMEM; live_claims++; return 0; }
 int backing_claim_finalize(struct backing_claim *claim, const struct backing_claim_extent *extents, unsigned count)
 { (void)claim; (void)extents; (void)count; return 0; }
+int backing_claim_finalize_file(struct backing_claim *claim, struct file *file,
+    const struct backing_claim_extent *extents, unsigned count)
+{ (void)file; return backing_claim_finalize(claim, extents, count); }
 void backing_claim_release(struct backing_claim *claim)
 { if (claim) { CHECK(live_claims); live_claims--; free(claim); } }
 void file_ref(struct file *f) { refcount_get(&f->f_refs); }

@@ -4,7 +4,7 @@ Last updated: 2026-09-05
 
 WSID: `ws022`
 
-Status: Queue-ready; WS021 dependency satisfied
+Status: completed (q128); amd64/i386 static TLSとdynamic回帰、PC98確認完了
 
 Parent: [master plan](../master.md)
 
@@ -44,9 +44,9 @@ restriction as a separately testable ELF/runtime change.
 
 | Phase | Status | Required result |
 | --- | --- | --- |
-| [`ws022-p001`](phase001-contract-and-fixtures/phase.md) | Planned | Freeze the x86 TLS/TCB layout and malformed/valid ELF fixture matrix against compiler-emitted `PT_TLS` objects |
-| [`ws022-p002`](phase002-exec-loader/phase.md) | Planned | Kernel exec validates, maps, initializes, and installs the initial executable TLS image atomically |
-| [`ws022-p003`](phase003-thread-runtime-acceptance/phase.md) | Planned | libc/pthread allocates independent TLS per thread and static x86 QEMU acceptance passes |
+| [`ws022-p001`](phase001-contract-and-fixtures/phase.md) | Completed q127 | Freeze the x86 TLS/TCB layout and malformed/valid ELF fixture matrix against compiler-emitted `PT_TLS` objects |
+| [`ws022-p002`](phase002-exec-loader/phase.md) | Completed q128 | Kernel exec validates, maps, initializes, and installs the initial executable TLS image atomically |
+| [`ws022-p003`](phase003-thread-runtime-acceptance/phase.md) | Completed q128 | libc/pthread allocates independent TLS per thread and static x86 QEMU acceptance passes |
 
 ## Completion conditions
 
@@ -59,3 +59,7 @@ restriction as a separately testable ELF/runtime change.
 - Repeated thread create/join and failed-create paths show no double free,
   stale thread pointer, cross-thread alias, or leaked TLS mapping.
 - Focused host/ELF tests, `make -j16`, amd64 QEMU, and i386 PC/AT QEMU pass.
+
+## Completion evidence
+
+[p003 results](phase003-thread-runtime-acceptance/results.md)に両x86 compiler/loader/pthread/signal/fork/dynamic TLS、PC98、通常buildの証拠を集約。[利用者向けTLS契約](../../docs/reference/tls.md)。

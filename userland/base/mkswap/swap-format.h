@@ -15,5 +15,6 @@
 int swap_format_validate_size(uint64_t);
 int swap_format_write(int, uint64_t);
 int swap_format_verify(int, uint64_t);
+int swap_format_pristine(int, uint64_t);
 
 #endif

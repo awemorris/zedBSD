@@ -1,0 +1,206 @@
+// Bounded source-artifact inspection; no source upper or swap image is read.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require files;
+require selection;
+
+func instSourceAssert(condition, message) {
+    if (!condition) { System.error("source artifact: " + message); }
+}
+func instSourceU64(bytes, offset) {
+    var high = instU32(bytes, offset + 4);
+    instSourceAssert(high <= 2147483647L, "unsupported 64-bit extent");
+    return high * 4294967296L + instU32(bytes, offset);
+}
+func instSourcePower(value) { return value > 0 && (value & (value - 1)) == 0; }
+
+// Match the maintained UEFI loader's restricted amd64 load geometry.
+func instSourceElf(header, size) {
+    instSourceAssert(Packed.size(header) == 512 && size >= 512 && size <= 2147483647L, "truncated ELF header");
+    instSourceAssert(instU32(header, 0) == 0x464c457f && header[4] == 2 && header[5] == 1 &&
+        header[6] == 1 && instU16(header, 16) == 2 && instU16(header, 18) == 62 &&
+        instU32(header, 20) == 1 && instU16(header, 52) == 64 && instU16(header, 54) == 56,
+        "not a supported amd64 kernel");
+    var offset = instSourceU64(header, 32);
+    var count = instU16(header, 56);
+    instSourceAssert(count > 0 && count <= 8 && offset <= 512 && count * 56 <= 512 - offset,
+        "ELF program table outside loader header");
+    instSourceAssert(instU32(header, 28) == 4294967295L, "kernel entry is not in high memory");
+    var entry = instU32(header, 24);
+    var previous = 0L;
+    var executable = false;
+    var loads = 0;
+    for (i in 0..count) {
+        var at = offset + i * 56;
+        if (instU32(header, at) != 1) { continue; }
+        var physical = instSourceU64(header, at + 24);
+        var fileOffset = instSourceU64(header, at + 8);
+        var fileSize = instSourceU64(header, at + 32);
+        var memorySize = instSourceU64(header, at + 40);
+        var alignment = instSourceU64(header, at + 48);
+        instSourceAssert(physical >= 2097152L && physical < 18874368L &&
+            memorySize > 0 && memorySize <= 18874368L - physical && fileSize <= memorySize &&
+            physical % 4096 == 0 && alignment >= 4096 && instSourcePower(alignment), "ELF load geometry");
+        instSourceAssert(instU32(header, at + 20) == 4294967295L &&
+            instU32(header, at + 16) == 2147483648L + physical, "ELF virtual/physical mismatch");
+        instSourceAssert(fileOffset <= size && fileSize <= size - fileOffset, "ELF segment beyond file");
+        if (loads == 0) { instSourceAssert(physical == 2097152L, "kernel physical start"); }
+        instSourceAssert(physical >= previous, "overlapping ELF loads");
+        previous = physical + memorySize;
+        loads = loads + 1;
+        if ((instU32(header, at + 4) & 1) != 0 && entry >= 2147483648L + physical &&
+            entry < 2147483648L + previous) { executable = true; }
+    }
+    instSourceAssert(loads != 0 && executable, "ELF entry is outside executable memory");
+    return true;
+}
+
+// Inspect EFI image identity and bounded section layout, not a signature policy.
+func instSourcePe(header, size) {
+    instSourceAssert(Packed.size(header) >= 64 && size >= Packed.size(header) && size <= 2147483647L, "truncated EFI image");
+    instSourceAssert(instU16(header, 0) == 0x5a4d, "missing DOS header");
+    var pe = instU32(header, 60);
+    instSourceAssert(pe >= 64 && pe <= Packed.size(header) - 24, "PE header offset");
+    instSourceAssert(instU32(header, pe) == 0x00004550 && instU16(header, pe + 4) == 0x8664,
+        "not an amd64 PE image");
+    var sections = instU16(header, pe + 6);
+    var optional = instU16(header, pe + 20);
+    var start = pe + 24;
+    instSourceAssert(sections > 0 && sections <= 96 && optional >= 112 &&
+        optional <= Packed.size(header) - start && sections * 40 <= Packed.size(header) - start - optional,
+        "PE section table bounds");
+    instSourceAssert(instU16(header, start) == 0x20b && instU16(header, start + 68) == 10 &&
+        (instU16(header, pe + 22) & 2) != 0, "not an EFI application");
+    var entry = instU32(header, start + 16);
+    var sectionAlignment = instU32(header, start + 32);
+    var fileAlignment = instU32(header, start + 36);
+    var imageSize = instU32(header, start + 56);
+    var headersSize = instU32(header, start + 60);
+    instSourceAssert(instSourcePower(sectionAlignment) && instSourcePower(fileAlignment) &&
+        sectionAlignment >= fileAlignment && fileAlignment >= 512 && fileAlignment <= 65536 &&
+        imageSize > 0 && imageSize % sectionAlignment == 0 && headersSize <= size &&
+        headersSize >= start + optional + sections * 40 && headersSize % fileAlignment == 0,
+        "PE image alignment");
+    var executable = false;
+    var spans = [];
+    for (i in 0..sections) {
+        var at = start + optional + i * 40;
+        var virtualSize = instU32(header, at + 8);
+        var virtualAddress = instU32(header, at + 12);
+        var rawSize = instU32(header, at + 16);
+        var rawOffset = instU32(header, at + 20);
+        var mapped = virtualSize;
+        if (rawSize > mapped) { mapped = rawSize; }
+        instSourceAssert(virtualAddress >= headersSize && virtualAddress % sectionAlignment == 0 &&
+            virtualAddress <= imageSize && mapped <= imageSize - virtualAddress &&
+            rawOffset <= size && rawSize <= size - rawOffset, "PE section extent");
+        if (rawSize != 0) {
+            instSourceAssert(rawOffset >= headersSize && rawOffset % fileAlignment == 0 &&
+                rawSize % fileAlignment == 0, "PE raw section alignment");
+        }
+        for (span in spans) {
+            instSourceAssert(!(virtualAddress < span.end && span.start < virtualAddress + mapped),
+                "overlapping PE virtual sections");
+            if (rawSize != 0 && span.rawSize != 0) {
+                instSourceAssert(!(rawOffset < span.rawOffset + span.rawSize && span.rawOffset < rawOffset + rawSize),
+                    "overlapping PE file sections");
+            }
+        }
+        Array.push(spans, { start: virtualAddress, end: virtualAddress + mapped, rawOffset: rawOffset, rawSize: rawSize });
+        if ((instU32(header, at + 36) & 0x20000000) != 0 && entry >= virtualAddress &&
+            entry < virtualAddress + virtualSize && entry - virtualAddress < rawSize) { executable = true; }
+    }
+    instSourceAssert(executable, "EFI entry is outside executable file data");
+    return true;
+}
+
+// Rootfs is populated: validate its superblock geometry, never pristine data.
+func instSourceUfs(super, size) {
+    instSourceAssert(Packed.size(super) == 8192 && size >= 73728 && size <= 2147483647L && size % 512 == 0,
+        "truncated UFS source");
+    instSourceAssert(instU32(super, 1372) == 0x19540119 && instSourceU64(super, 1000) == 65536,
+        "not the supported UFS profile");
+    var block = instU32(super, 48);
+    var fragment = instU32(super, 52);
+    var groups = instU32(super, 44);
+    var perGroup = instU32(super, 188);
+    var inodes = instU32(super, 184);
+    var fragments = instSourceU64(super, 1080);
+    instSourceAssert(instSourcePower(block) && instSourcePower(fragment) && fragment >= 512 &&
+        block >= fragment && block <= 65536 && instU32(super, 56) == block / fragment &&
+        fragments == size / fragment && size % fragment == 0, "UFS block geometry");
+    var blockShift = instU32(super, 80);
+    var fragmentShift = instU32(super, 84);
+    var ratioShift = instU32(super, 96);
+    var diskShift = instU32(super, 100);
+    instSourceAssert(blockShift < 32 && fragmentShift < 32 && ratioShift < 32 && diskShift < 32 &&
+        (1L << blockShift) == block && (1L << fragmentShift) == fragment &&
+        (1L << ratioShift) == block / fragment && (512L << diskShift) == fragment,
+        "UFS shift geometry");
+    instSourceAssert(groups > 0 && perGroup > 0 && inodes >= 3 && groups <= fragments &&
+        (groups - 1) * perGroup < fragments && fragments - (groups - 1) * perGroup <= perGroup,
+        "UFS cylinder groups");
+    instSourceAssert(instU32(super, 116) == block / 8 && instU32(super, 120) == block / 256 &&
+        instU32(super, 104) >= 1376 && instU32(super, 104) <= 8192 &&
+        instU32(super, 160) > 0 && instU32(super, 160) <= block, "UFS metadata sizing");
+    var sblock = instU32(super, 8);
+    var cblock = instU32(super, 12);
+    var iblock = instU32(super, 16);
+    var dblock = instU32(super, 20);
+    var inodeFragments = (inodes * 256 + fragment - 1) / fragment;
+    var lastSize = fragments - (groups - 1) * perGroup;
+    instSourceAssert(sblock == 65536 / fragment && cblock >= sblock + (8192 + fragment - 1) / fragment &&
+        iblock >= cblock + (instU32(super, 160) + fragment - 1) / fragment &&
+        dblock >= iblock + inodeFragments && dblock < lastSize, "UFS metadata overlap");
+    var summary = instSourceU64(super, 1096);
+    var summaryBytes = instU32(super, 156);
+    // The populated root-image producer omits the optional summary area.
+    if (summaryBytes != 0) {
+        instSourceAssert(summary >= dblock && summary <= fragments &&
+            summaryBytes <= (fragments - summary) * fragment, "UFS summary extent");
+    }
+    return true;
+}
+
+func instSourceReadBody(context, unused) {
+    File.seek(context.file, context.offset);
+    return File.readExact(context.file, context.count);
+}
+func instSourceClose(context, unused) { File.close(context.file); return true; }
+func instSourceRead(path, offset, count) {
+    instControlledPath(path);
+    instSourceAssert(count > 0 && count <= 65536 && offset >= 0 && offset <= 9223372036854775807L - count,
+        "unbounded source read");
+    var context = { file: File.open(path, "rb"), offset: offset, count: count };
+    var result = System.pcall(instSourceReadBody, context, 0);
+    var closed = System.pcall(instSourceClose, context, 0);
+    if (!result.ok) { System.error(result.message); }
+    if (!closed.ok) { System.error(closed.message); }
+    return result.value;
+}
+
+func instInspectSource(role, path, size) {
+    instSourceAssert(size >= 512 && size <= 2147483647L, "unsupported source size");
+    if (role == "kernel") { return instSourceElf(instSourceRead(path, 0, 512), size); }
+    if (role == "rootfs") { return instSourceUfs(instSourceRead(path, 65536, 8192), size); }
+    if (role == "loader") {
+        var count = size;
+        if (count > 65536) { count = 65536; }
+        return instSourcePe(instSourceRead(path, 0, count), size);
+    }
+    System.error("unknown immutable source role");
+}
+
+func instCaptureSource(role, path) {
+    instControlledPath(path);
+    var before = instFileIdentity(path);
+    instSourceAssert(instSameFileObject(before, before) && before.size >= 512 && before.size <= 2147483647L,
+        "source is not a bounded regular file");
+    var digest = instFileDigest(path);
+    instInspectSource(role, path, before.size);
+    var after = instFileOwned(path, before);
+    instSourceAssert(after.size == before.size && after.permissions == before.permissions &&
+        instFileDigest(path) == digest, "source changed during inspection");
+    var final = instFileOwned(path, before);
+    instSourceAssert(final.size == before.size && final.permissions == before.permissions, "source changed during digest");
+    return { role: role, path: path, bytes: before.size, digest: digest, identity: final };
+}

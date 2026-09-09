@@ -1,0 +1,181 @@
+// Retained disk observations; this detects changes but does not reserve a disk.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require source;
+
+func instMetadataObserve(context, name) {
+    var devices = instInventory(instRequire(["/sbin/diskpart", "--machine", "list"]));
+    var disk = instFindDevice(devices, name);
+    var text = instRequire(["/sbin/diskpart", "--machine", "show", name]);
+    var identities = {};
+    var identityText = {};
+    for (i in 0..Array.size(devices)) {
+        var child = devices[i];
+        if (child.parent != disk.id) { continue; }
+        var record = instRequire(["/sbin/blkid", "-o", "export", "-s", "TYPE", "-s", "UUID",
+            "-s", "PARTUUID", "--", "/dev/" + child.name]);
+        identities[child.name] = instIdentity(record);
+        identityText[child.name] = record;
+    }
+    return {devices:devices, disk:disk, text:text, identities:identities, identityText:identityText};
+}
+func instMetadataRead(context, path, offset, size) { return instSourceRead(path, offset, size); }
+func instMetadataOps() { return {observe:instMetadataObserve, read:instMetadataRead}; }
+func instMetadataBytesEqual(a, b) {
+    if (Packed.size(a) != Packed.size(b)) { return false; }
+    for (i in 0..Packed.size(a)) { if (a[i] != b[i]) { return false; } }
+    return true;
+}
+func instMetadataReadExact(ops, context, path, offset, size) {
+    var bytes = ops.read(context, path, offset, size);
+    if (Packed.size(bytes) != size) { System.error("short disk metadata read"); }
+    return bytes;
+}
+func instMetadataSample(ops, context, name) {
+    return instMetadataSamplePolicy(ops, context, name, false);
+}
+func instMetadataSamplePolicy(ops, context, name, sourceHybrid) {
+    name = instDeviceName(name);
+    var observed = ops.observe(context, name);
+    var disk = observed.disk;
+    if (disk.name != name || disk.parent != 0) { System.error("metadata needs the selected whole disk"); }
+    var table = instTablePolicy(observed.text, disk, sourceHybrid);
+    var total = 0L;
+    for (i in 0..Array.size(table.ranges)) {
+        if (table.ranges[i].size > 2097152L - total) { System.error("GPT metadata exceeds supported bound"); }
+        total = total + table.ranges[i].size;
+    }
+    var children = [];
+    for (i in 0..Array.size(table.parts)) {
+        Array.push(children, instPartitionDevice(observed.devices, observed.identities, disk, table.parts[i]));
+    }
+    for (i in 0..Array.size(observed.devices)) {
+        var child = observed.devices[i];
+        if (child.parent != disk.id) { continue; }
+        var found = false;
+        for (j in 0..Array.size(children)) { if (children[j].id == child.id) { found = true; } }
+        if (!found) { System.error("unaccounted disk child"); }
+    }
+    var ranges = [];
+    for (i in 0..Array.size(table.ranges)) {
+        var range = table.ranges[i];
+        var done = 0L;
+        while (done < range.size) {
+            var count = range.size - done;
+            if (count > 65536) { count = 65536; }
+            var offset = range.offset + done;
+            var bytes = instMetadataReadExact(ops, context, "/dev/" + name, offset, count);
+            Array.push(ranges, {offset:offset, size:count, bytes:bytes});
+            done = done + count;
+        }
+    }
+    if (table.restrictions == 2) { instMetadataSourceHybrid(disk, table, ranges); }
+    var bpbs = {};
+    var fat32 = {};
+    for (i in 0..Array.size(children)) {
+        var child = children[i];
+        var bpb = instMetadataReadExact(ops, context, "/dev/" + child.name, 0L, 512);
+        bpbs[child.name] = bpb;
+        fat32[child.name] = instFat32(bpb, child);
+    }
+    return {disk:disk, table:table, tableText:observed.text, children:children,
+        identities:observed.identities, identityText:observed.identityText,
+        ranges:ranges, bpbs:bpbs, fat32:fat32};
+}
+func instMetadataCompare(expected, current) {
+    if (!instSameDevice(expected.disk, current.disk) || expected.tableText != current.tableText ||
+        Array.size(expected.children) != Array.size(current.children) ||
+        Array.size(expected.ranges) != Array.size(current.ranges)) { System.error("disk metadata identity changed"); }
+    for (i in 0..Array.size(expected.children)) {
+        var child = expected.children[i];
+        if (!instSameDevice(child, current.children[i]) ||
+            expected.identityText[child.name] != current.identityText[child.name] ||
+            !instMetadataBytesEqual(expected.bpbs[child.name], current.bpbs[child.name])) {
+            System.error("partition identity or BPB changed");
+        }
+    }
+    for (i in 0..Array.size(expected.ranges)) {
+        var a = expected.ranges[i];
+        var b = current.ranges[i];
+        if (a.offset != b.offset || a.size != b.size || !instMetadataBytesEqual(a.bytes, b.bytes)) {
+            System.error("raw GPT metadata changed");
+        }
+    }
+    return true;
+}
+func instMetadataCapture(ops, context, name) {
+    var first = instMetadataSample(ops, context, name);
+    var second = instMetadataSample(ops, context, name);
+    instMetadataCompare(first, second);
+    return first;
+}
+func instMetadataRevalidate(ops, context, expected) {
+    var current = 0;
+    if (expected.table.restrictions == 2) {
+        current = instMetadataCaptureSource(ops, context, expected.disk.name);
+    } else { current = instMetadataCapture(ops, context, expected.disk.name); }
+    return instMetadataCompare(expected, current);
+}
+func instMetadataCaptureSource(ops, context, name) {
+    var first = instMetadataSamplePolicy(ops, context, name, true);
+    var second = instMetadataSamplePolicy(ops, context, name, true);
+    instMetadataCompare(first, second);
+    return first;
+}
+func instMetadataSector(ranges, offset) {
+    for (i in 0..Array.size(ranges)) {
+        var range = ranges[i];
+        if (offset >= range.offset && offset - range.offset <= range.size - 512) {
+            var bytes = Packed.uint8(512);
+            for (j in 0..512) { bytes[j] = range.bytes[offset - range.offset + j]; }
+            return bytes;
+        }
+    }
+    System.error("missing retained source header");
+}
+// Admit only the normal producer's read-only BIOS alias, never an editable target.
+func instMetadataSourceHybrid(disk, table, ranges) {
+    if (disk.sectorSize != 512) { System.error("hybrid source requires 512-byte sectors"); }
+    var mbr = instMetadataSector(ranges, 0L);
+    var last = disk.sectors - 1;
+    var primary = instMetadataSector(ranges, 512L);
+    var backup = instMetadataSector(ranges, last * 512);
+    for (header in [primary, backup]) {
+        if (Packed.toString(header, 0, 8) != "EFI PART" || instU32(header, 8) != 65536 ||
+            instU32(header, 12) != 92 || instU32(header, 20) != 0 || instU32(header, 84) != 128) {
+            System.error("unsupported hybrid source GPT header");
+        }
+    }
+    if (instSourceU64(primary, 24) != 1 || instSourceU64(primary, 32) != last ||
+        instSourceU64(backup, 24) != last || instSourceU64(backup, 32) != 1 ||
+        mbr[510] != 85 || mbr[511] != 170) { System.error("hybrid source header location"); }
+    var protective = 0;
+    var aliases = 0;
+    for (i in 0..4) {
+        var at = 446 + i * 16;
+        var empty = true;
+        for (j in 0..16) { if (mbr[at + j] != 0) { empty = false; } }
+        if (empty) { continue; }
+        var start = instU32(mbr, at + 8);
+        var count = instU32(mbr, at + 12);
+        if (mbr[at + 4] == 238) {
+            var expected = last;
+            if (expected > 4294967295L) { expected = 4294967295L; }
+            if (mbr[at] != 0 || start != 1 || count != expected) { System.error("invalid protective MBR extent"); }
+            protective = protective + 1;
+        } else {
+            if ((mbr[at] != 0 && mbr[at] != 128) || (mbr[at + 4] != 11 && mbr[at + 4] != 12)) {
+                System.error("unsupported BIOS source alias");
+            }
+            var matched = false;
+            for (part in table.parts) {
+                if (part.start == start && part.count == count &&
+                    (part.type == "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" ||
+                    part.type == "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7")) { matched = true; }
+            }
+            if (!matched) { System.error("BIOS alias disagrees with GPT"); }
+            aliases = aliases + 1;
+        }
+    }
+    if (protective != 1 || aliases != 1) { System.error("unsupported source MBR layout"); }
+    return true;
+}

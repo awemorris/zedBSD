@@ -1,0 +1,142 @@
+// Managed-file publication policy; filesystem effects live in command adapters.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+func instSameFileObject(a, b) {
+    return a != 0 && b != 0 && a.device == b.device && a.inode == b.inode &&
+        (a.mode & 61440) == 32768 && (b.mode & 61440) == 32768;
+}
+
+func instTransactionPlan(transaction) {
+    var roles = ["loader", "kernel", "rootfs", "data", "swap", "config"];
+    if (Dict.hasKey(transaction, "profile")) {
+        if (transaction.profile == "native") {
+            roles = ["loader", "kernel", "config"];
+        } else if (transaction.profile != "coexist") {
+            System.error("unknown managed file profile");
+        }
+    }
+    if (Array.size(transaction.entries) != Array.size(roles)) {
+        System.error("incomplete managed file set");
+    }
+    for (i in 0..Array.size(roles)) {
+        var entry = transaction.entries[i];
+        if (entry.role != roles[i] || entry.final == entry.stage || entry.bytes <= 0) {
+            System.error("invalid managed file order or geometry");
+        }
+        for (j in 0..i) {
+            var previous = transaction.entries[j];
+            if (entry.final == previous.final || entry.final == previous.stage ||
+                entry.stage == previous.final || entry.stage == previous.stage) {
+                System.error("aliased managed paths");
+            }
+        }
+        Array.push(transaction.states, { entry: entry, existing: 0, owned: 0,
+            attempted: false, publishing: false, published: false });
+    }
+}
+
+func instTransactionBody(transaction, unused) {
+    var ops = transaction.ops;
+    var context = transaction.context;
+    instTransactionPlan(transaction);
+    ops.revalidate(context);
+
+    // Reject every conflicting final before creating any staging file.
+    for (i in 0..Array.size(transaction.states)) {
+        var state = transaction.states[i];
+        var identity = ops.stat(context, state.entry.final);
+        if (identity != 0) {
+            ops.verify(context, state.entry, state.entry.final, identity);
+            state.existing = identity;
+        }
+    }
+
+    // Finish and verify all preparations before changing final names.
+    for (i in 0..Array.size(transaction.states)) {
+        var state = transaction.states[i];
+        if (state.existing != 0) { continue; }
+        state.attempted = true;
+        state.owned = ops.create(context, state.entry);
+        if (!instSameFileObject(state.owned, state.owned)) {
+            System.error("staging creation lacks regular-file ownership");
+        }
+        ops.populate(context, state.entry, state.owned);
+        ops.syncFile(context, state.entry.stage);
+        ops.verify(context, state.entry, state.entry.stage, state.owned);
+    }
+
+    // Recheck sources, destination geometry and every prepared object.
+    ops.revalidate(context);
+    for (i in 0..Array.size(transaction.states)) {
+        var state = transaction.states[i];
+        if (state.existing != 0) {
+            ops.verify(context, state.entry, state.entry.final, state.existing);
+        } else {
+            ops.verify(context, state.entry, state.entry.stage, state.owned);
+        }
+    }
+
+    // Publish in fixed order; the configuration marker is always last.
+    for (i in 0..Array.size(transaction.states)) {
+        var state = transaction.states[i];
+        ops.revalidate(context);
+        if (state.existing != 0) {
+            ops.verify(context, state.entry, state.entry.final, state.existing);
+        } else {
+            ops.verify(context, state.entry, state.entry.stage, state.owned);
+            state.publishing = true;
+            ops.publish(context, state.entry);
+            state.published = true;
+            // FAT rename changes st_ino; capture the final identity anew.
+            state.existing = ops.stat(context, state.entry.final);
+            if (state.existing == 0) { System.error("published file disappeared"); }
+            ops.verify(context, state.entry, state.entry.final, state.existing);
+        }
+        ops.syncDirectory(context, state.entry.directory);
+    }
+
+    // Do not report success from rename alone or from stale earlier reads.
+    ops.revalidate(context);
+    for (i in 0..Array.size(transaction.states)) {
+        var state = transaction.states[i];
+        ops.verify(context, state.entry, state.entry.final, state.existing);
+    }
+    return true;
+}
+
+func instTransactionCleanupOne(transaction, state) {
+    var ops = transaction.ops;
+    var context = transaction.context;
+    var current = ops.stat(context, state.entry.stage);
+    if (current == 0) { return true; }
+    if (!instSameFileObject(current, state.owned)) {
+        System.error("staging ownership uncertain: " + state.entry.stage);
+    }
+    ops.remove(context, state.entry.stage, state.owned);
+    ops.syncDirectory(context, state.entry.stageDirectory);
+    return true;
+}
+
+// Always return cleanup evidence; never erase final names to undo publication.
+func instManagedTransaction(ops, context, entries) {
+    return instManagedProfile(ops, context, entries, "coexist");
+}
+func instManagedProfile(ops, context, entries, profile) {
+    var transaction = { ops: ops, context: context, entries: entries, states: [], profile:profile };
+    var result = System.pcall(instTransactionBody, transaction, 0);
+    var report = { ok: result.ok, message: "", leftovers: [], published: [], uncertain: [] };
+    if (!result.ok) { report.message = result.message; }
+    for (i in 0..Array.size(transaction.states)) {
+        var state = transaction.states[i];
+        if (state.published) {
+            Array.push(report.published, state.entry.final);
+        } else if (state.publishing) {
+            Array.push(report.uncertain, state.entry.final);
+        }
+        if (result.ok || state.published || !state.attempted) { continue; }
+        var cleanup = System.pcall(instTransactionCleanupOne, transaction, state);
+        if (!cleanup.ok) {
+            Array.push(report.leftovers, { path: state.entry.stage, message: cleanup.message });
+        }
+    }
+    return report;
+}

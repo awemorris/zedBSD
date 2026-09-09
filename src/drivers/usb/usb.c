@@ -208,6 +208,8 @@ static void usb_topology_unlock(void);
 static void device_begin_disconnect(struct drv_usb_device *device);
 static void io_gate_close(atomic_uint_t *gate);
 static int detach_interfaces(struct drv_usb_device *device);
+static int shutdown_interfaces(struct drv_usb_device *device, int *retain);
+static int interface_binding_quiesce(struct drv_usb_interface *interface, unsigned expected_state);
 static int interface_binding_detach(struct drv_usb_interface *interface, unsigned flags, unsigned expected_state);
 static void interface_binding_clear(struct drv_usb_interface *interface);
 static struct drv_usb_interface * interface_claim_owner(const struct drv_usb_interface *interface);
@@ -387,7 +389,7 @@ drv_usb_shutdown(
 		for (device = bus->devices; device != NULL;
 		     device = device->next) {
 			/* Checks the operation status. */
-			error = detach_interfaces(device);
+			error = shutdown_interfaces(device, &retain);
 			if (error != 0) {
 				hal_printf("usb%u: device %u driver shutdown "
 					   "failed (%d); class resources "
@@ -4240,6 +4242,78 @@ detach_interfaces(
 
 	/* Returns the computed result. */
 	return first_error;
+}
+
+/* Stops class activity while retaining media still referenced by the root. */
+static int
+shutdown_interfaces(
+	struct drv_usb_device *device,
+	int *retain)
+{
+	struct drv_usb_interface *interface;
+	unsigned state;
+	int error;
+	int first_error;
+
+	/* Visits every function, even when one function cannot finish stopping. */
+	first_error = 0;
+	for (interface = device->interfaces; interface != NULL;
+	     interface = interface->next) {
+		state = atomic_load_acquire(&interface->binding_state);
+		if (interface->driver == NULL)
+			continue;
+		if (state == USB_BINDING_DEAD)
+			continue;
+
+		/* Uses checked non-destructive stopping when the class supports it. */
+		if (state != USB_BINDING_BOUND &&
+		    state != USB_BINDING_DETACH_PENDING) {
+			error = EBUSY;
+		} else if (interface->driver->quiesce != NULL) {
+			*retain = 1;
+			error = interface_binding_quiesce(interface, state);
+		} else {
+			error = interface_binding_detach(interface,
+				DRV_USB_DETACH_FORCE | DRV_USB_DETACH_QUIET,
+				state);
+		}
+
+		/* Preserves the first error without leaving other producers running. */
+		if (error != 0 && first_error == 0)
+			first_error = error;
+	}
+
+	return first_error;
+}
+
+/* Closes binding admission, joins the class, and keeps referenced objects. */
+static int
+interface_binding_quiesce(
+	struct drv_usb_interface *interface,
+	unsigned expected_state)
+{
+	int error;
+
+	/* Claims the binding against a concurrent detach or class operation. */
+	if (!atomic_compare_exchange(&interface->binding_state, &expected_state,
+		USB_BINDING_UNBINDING))
+		return EBUSY;
+	io_gate_close(&interface->binding_gate);
+	io_gate_close(&interface->binding_submitters);
+	while ((atomic_load_acquire(&interface->binding_submitters) &
+		USB_IO_GATE_COUNT_MASK) != 0)
+		sched_yield();
+
+	/* A successful class stop must leave no transfer/callback binding pins. */
+	error = interface->driver->quiesce(interface);
+	if (error == 0 && (atomic_load_acquire(&interface->binding_gate) &
+		USB_IO_GATE_COUNT_MASK) != 0)
+		error = EBUSY;
+
+	/* Keeps admission closed and ownership available for a checked retry. */
+	atomic_store_release(&interface->binding_state,
+		USB_BINDING_DETACH_PENDING);
+	return error;
 }
 
 /* Detaches the driver bound to one interface. */

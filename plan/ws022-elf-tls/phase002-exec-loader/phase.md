@@ -4,7 +4,7 @@ Last updated: 2026-09-02
 
 Phase ID: `ws022-p002`
 
-Status: planned; not queued
+Status: completed (q128)
 
 Parent: [WS022](../ws.md)
 
@@ -29,3 +29,7 @@ TLS block, and install its thread pointer before the first user instruction.
    segment validation.
 5. Pass all valid/malformed fixture tests on amd64 and i386 plus focused exec
    rollback tests and `make -j16`.
+
+詳細設計: [確定TLS契約](../phase001-contract-and-fixtures/contract.md)。TCB prefix、i386 GS descriptor、exec/spawnのTP commit、template VM所有権をこの順で実装する。
+
+結果: [p002検証記録](results.md)。amd64/i386の不正9例exec rollbackと初回TLSをQEMUで確認。pthread、zero-only等の拡張campaignはp003。

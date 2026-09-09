@@ -136,6 +136,8 @@ static unsigned active_vt;
 static unsigned console_escape_state[TTY_VT_COUNT];
 static unsigned console_escape_parameter[TTY_VT_COUNT];
 static unsigned console_escape_has_parameter[TTY_VT_COUNT];
+/* Unsupported CSI parameters/intermediates consume through the final byte. */
+static unsigned console_escape_ignored[TTY_VT_COUNT];
 static char vt_history[TTY_VT_COUNT][TTY_VT_HISTORY];
 static size_t vt_history_used[TTY_VT_COUNT];
 static struct spinlock pty_registry_lock;
@@ -1038,12 +1040,21 @@ tty_render(
 				console_escape_state[vt] = 2U;
 				console_escape_parameter[vt] = 0U;
 				console_escape_has_parameter[vt] = 0U;
+				console_escape_ignored[vt] = 0U;
 			} else {
 				hal_cons_write_n(&escape, 1U);
 				hal_cons_write_n(bytes + index - 1U, 1U);
 				console_escape_state[vt] = 0U;
 			}
 
+			continue;
+		}
+
+		/* CSI private markers, separators and intermediates are not final bytes. */
+		byte = bytes[index];
+		if (byte >= 0x20 && byte <= 0x3f && !(byte >= '0' && byte <= '9')) {
+			console_escape_ignored[vt] = 1U;
+			index++;
 			continue;
 		}
 
@@ -1056,7 +1067,8 @@ tty_render(
 			continue;
 		}
 
-		tty_console_csi(vt, (unsigned char)bytes[index]);
+		if (!console_escape_ignored[vt])
+			tty_console_csi(vt, (unsigned char)bytes[index]);
 		index++;
 		console_escape_state[vt] = 0U;
 	}

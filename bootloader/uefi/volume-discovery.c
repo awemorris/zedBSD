@@ -509,3 +509,23 @@ zbl_uefi_volume_selection_take(
 	zbl_uefi_volume_selection_init(selection);
 	return 1;
 }
+
+/* Copies the parsed hard-drive signature before firmware storage expires. */
+int
+zbl_uefi_partition_identity_copy(const struct zbl_uefi_partition_path *path,
+    struct boot_partition_identity *identity)
+{
+	size_t i;
+
+	if (path == 0 || identity == 0 || path->bytes == 0 ||
+	    path->partition_offset > path->path_size ||
+	    path->path_size - path->partition_offset < HARD_DRIVE_DEVICE_PATH_SIZE)
+		return 0;
+	identity->scheme = (uint32_t)path->style;
+	identity->index = path->partition_number;
+	identity->first_lba = path->partition_start;
+	identity->block_count = path->partition_size;
+	for (i = 0; i < sizeof(identity->signature); i++)
+		identity->signature[i] = path->bytes[path->partition_offset + 24U + i];
+	return 1;
+}

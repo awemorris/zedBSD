@@ -1,0 +1,46 @@
+// Interactive approval of one explicitly named installation destination.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require identity;
+
+func instConfirmationRead(context, unused) {
+    Term.write(context.summary + "\r\nType exactly: " + context.phrase + "\r\n> ");
+    Term.flush();
+    var input = "";
+    var ascii = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    // Bound an abandoned prompt without needing a spawned terminal or clock API.
+    for (poll in 0..1200) {
+        var key = Term.readKey(1000);
+        if (key == -1) { continue; }
+        // zedBSD console Enter produces LF, decoded by Term as Ctrl-J.
+        if (key == Term.KEY_RET || key == (Term.CTRL | 106)) { return input == context.phrase; }
+        if (key == Term.KEY_BS || key == 8) {
+            if (String.charCount(input) != 0) {
+                input = String.substring(input, 0, String.charCount(input) - 1);
+                Term.write("\b \b");
+                Term.flush();
+            }
+            continue;
+        }
+        // EOF, escape, modifiers and control keys all cancel the transaction.
+        if (key < 32 || key > 126) { return false; }
+        if (String.charCount(input) >= String.charCount(context.phrase)) { return false; }
+        var character = String.charAt(ascii, key - 32);
+        input = input + character;
+        Term.write(character);
+        Term.flush();
+    }
+    return false;
+}
+
+func instConfirm(summary, disk, payload) {
+    disk = instDeviceName(disk);
+    payload = instDeviceName(payload);
+    // Test this process's streams; spawned commands always have their own PTY.
+    if (Term.isTTY() != 1) { System.error("installation requires an interactive terminal"); }
+    var context = {summary:summary, phrase:"INSTALL " + disk + " " + payload};
+    if (Term.open() != 1) { System.error("cannot open confirmation terminal"); }
+    var result = System.pcall(instConfirmationRead, context, 0);
+    Term.close();
+    if (!result.ok) { System.error(result.message); }
+    return result.value;
+}

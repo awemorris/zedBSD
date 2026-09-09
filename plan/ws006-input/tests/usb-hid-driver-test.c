@@ -90,7 +90,7 @@ int kthread_create(void (*)(void *), void *, int, struct thread **);
 void thread_start(struct thread *);
 int thread_wait(struct thread *, void **);
 
-#include "../../../plan/ws025-io-memory-cache/temp/p031-driver-fragments/src/drivers/usb-hid.c"
+#include "../../../src/drivers/usb/usb-hid.c"
 
 static size_t checks;
 static struct input_event emitted[64];

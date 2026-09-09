@@ -1,0 +1,48 @@
+// Own an immutable view of the retained boot lower, independently of live root.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require rootimage;
+require workspace;
+
+func instRootViewObserve(context) {
+    var image = instRootImageObserve();
+    var devices = instInventory(instRequire(["/sbin/diskpart", "--machine", "list"]));
+    instRootImageSame(image, instRootImageObserve());
+    return {image:image, devices:devices};
+}
+func instRootViewDevice(expected, observed) {
+    instRootImageRequire(expected);
+    instRootImageSame(expected, observed.image);
+    var found = 0;
+    for (device in observed.devices) {
+        if (device.id != expected.loop) { continue; }
+        if (found != 0) { System.error("ambiguous root-image registration"); }
+        found = device;
+    }
+    if (found == 0) { System.error("root-image device is missing"); }
+    if (found.parent != 0 || (found.flags & 1) == 0 || found.offset != 0 ||
+        found.sectorSize * found.sectors != expected.bytes) {
+        System.error("root-image device geometry or protection changed");
+    }
+    return found;
+}
+func instRootViewCheck(workspace, view) {
+    var current = instRootViewDevice(view.image, view.observe(view.context));
+    if (current.name != view.device.name || current.id != view.device.id ||
+        current.flags != view.device.flags || current.sectorSize != view.device.sectorSize ||
+        current.sectors != view.device.sectors) {
+        System.error("root-image registration changed");
+    }
+    instWorkspaceCheck(workspace, view.mount);
+    if (view.mount.identity.device != current.id) {
+        System.error("source view mounted a different device");
+    }
+}
+func instRootViewAcquire(workspace, image, observe, context) {
+    var device = instRootViewDevice(image, observe(context));
+    var directory = instWorkspaceDirectory(workspace, "source-tree");
+    var mount = instWorkspaceAttachType(workspace, directory, device.name, true, "ufs");
+    var view = {image:image, device:device, mount:mount, observe:observe, context:context};
+    // Keep ownership even when post-mount revalidation refuses the source.
+    instRootViewCheck(workspace, view);
+    return view;
+}

@@ -24,7 +24,7 @@ cd "$repo_dir"
 
 "${CC:-cc}" -std=c11 -Iinclude -Iinclude/uapi -I. \
 	-Wall -Wextra -Werror -ffunction-sections -fdata-sections -pthread \
-	src/kern/swap.c src/kern/swap-format.c src/kern/backing-claim.c src/kern/swap-source.c \
+	src/kern/swap.c src/kern/backing-claim.c \
 	plan/ws003-bringup/tests/swap-source-test.c \
 	-Wl,--gc-sections -o "$binary"
 "$binary" "$v1" "$v2"

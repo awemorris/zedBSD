@@ -14,8 +14,10 @@
 #include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/poll.h"
+#ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
 #include "kern/sched.h"
 #include "kern/thread.h"
+#endif
 #include "kern/tty.h"
 #include "kern/uaccess.h"
 #include "kern/waitq.h"
@@ -27,7 +29,6 @@
 #include <string.h>
 
 #define CONSOLE_WRITE_MAX 512U
-#define CONSOLE_INPUT_EVENTS 64U
 #define CONSOLE_DISPATCH_EVENTS 64U
 #define CONSOLE_INPUT_SOURCES 8U
 #define CONSOLE_KEY_CAPABILITIES 128U
@@ -56,48 +57,38 @@ struct console_source_state {
 static struct console_dispatch_event dispatch_events[CONSOLE_DISPATCH_EVENTS];
 static unsigned dispatch_head, dispatch_tail, dispatch_used;
 static struct console_source_state console_sources[CONSOLE_INPUT_SOURCES];
-static uint32_t input_events[CONSOLE_INPUT_EVENTS];
-static unsigned input_head, input_tail, input_used;
-static unsigned input_started;
 static struct spinlock input_lock;
-static struct wait_queue input_waitq;
 static struct wait_queue dispatch_waitq;
+#ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
+/* Registration owns the HAL keyboard producer and its TTY subscription. */
 static struct input_device *keyboard_input;
-static struct input_keymap_state early_keymap;
-static int early_resyncing;
 static struct input_subscription console_subscription;
+#endif
 
-#define CONSOLE_EVENT_RECORDS 64U
 
 #ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
 struct console_open {
 	unsigned vt;
-	unsigned input_mode;
 };
 
-static struct console_open *event_owner;
-static struct console_input_event event_records[CONSOLE_EVENT_RECORDS];
-static unsigned event_sequence;
 #endif
-static unsigned event_head, event_tail, event_used;
 
-static void console_drain_input_locked(void);
 
+static struct console_source_state * console_source_find(struct input_device *source, int create);
+static uint32_t console_source_active_key(struct console_source_state *source, const struct input_report_event *item, uint32_t translated);
+static void console_dispatch_enqueue(uint32_t translated, unsigned device_id, unsigned repeat);
+static void console_input_subscriber(void *context, const struct input_report *report);
+
+#ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
 static struct console_open *console_open_state(struct file *file);
 static unsigned console_file_vt(struct file *file);
 static int console_open_file(struct file *file);
 static int console_close_file(struct file *file);
 static int console_capability_add(struct input_capability *capabilities, size_t *count, uint16_t code);
 static int console_capabilities(const struct hal_cons_input_info *hal_info, struct input_capability *capabilities, size_t *count);
-static int console_input_take(int consume, int wait);
-static struct console_source_state * console_source_find(struct input_device *source, int create);
-static uint32_t console_source_active_key(struct console_source_state *source, const struct input_report_event *item, uint32_t translated);
-static void console_dispatch_enqueue(uint32_t translated, unsigned device_id, unsigned repeat);
-static void console_input_subscriber(void *context, const struct input_report *report);
-static void console_deliver(uint32_t translated, unsigned device_id, unsigned overflow, unsigned repeat);
+static void console_deliver(uint32_t translated);
 static void console_dispatch_worker(void *argument);
 static void console_input_worker(void *argument);
-static ssize_t console_event_read(struct file *file, void *buffer, size_t size);
 static ssize_t console_read(struct file *file, void *buffer, size_t size);
 static ssize_t console_write(struct file *file, const void *buffer, size_t size);
 static int console_write_at(uintptr_t argument);
@@ -107,20 +98,7 @@ static ssize_t vt_read(struct file *file, void *buffer, size_t size);
 static ssize_t vt_write(struct file *file, const void *buffer, size_t size);
 static int vt_poll(struct file *file, short events, short *revents);
 static int vt_ioctl(struct file *file, unsigned long request, uintptr_t argument);
-
-/* Takes the input that has been queued for the console. */
-static void
-console_drain_input_locked(
-	void)
-{
-	input_head = input_tail = input_used = 0;
-	event_head = event_tail = event_used = 0;
-	dispatch_head = dispatch_tail = dispatch_used = 0;
-
-	/* The broker owns HAL transitions once started; never drop a break. */
-	if (!input_started)
-		hal_cons_drain_input();
-}
+#endif
 
 #ifndef ZEDBSD_INPUT_OWNERSHIP_TEST
 
@@ -155,38 +133,27 @@ console_open_file(
 	if (state == NULL)
 		return ENOMEM;
 	state->vt = 0;
-	state->input_mode = ZEDBSD_CONSOLE_INPUT_TEXT;
 	file->f_data = state;
 
 	/* Succeeded. */
 	return 0;
 }
 
-/* Closes it again. */
+/* Releases the VT identity held by this console file. */
 static int
 console_close_file(
 	struct file *file)
 {
-	struct console_open *state = console_open_state(file);
-	unsigned long irq;
+	struct console_open *state;
 
-	/* Handles the state availability. */
+	/* No input stream is owned by an individual console descriptor. */
+	state = console_open_state(file);
 	if (state == NULL)
 		return 0;
-	irq = spin_lock_irqsave(&input_lock);
 
-	/* Handles the event owner condition. */
-	if (event_owner == state) {
-		event_owner = NULL;
-		event_head = event_tail = event_used = 0;
-		waitq_wake_all(&input_waitq);
-	}
-
-	spin_unlock_irqrestore(&input_lock, irq);
-
+	/* Releases only this open file's terminal selection. */
 	kern_free(state);
 	file->f_data = NULL;
-	poll_notify();
 
 	/* Succeeded. */
 	return 0;
@@ -270,167 +237,7 @@ console_capabilities(
 	return 0;
 }
 
-/* Takes the next input event the console has. */
-static int
-console_input_take(
-	int consume,
-	int wait)
-{
-	uint8_t caps;
-	uint8_t kana;
-	struct hal_key_event event;
-	struct input_keymap_state state;
-	uint32_t translated;
-	int available;
-	uint64_t sequence;
-	int error;
-	unsigned long irq;
-	int result;
 
-	/* Handles the input started condition. */
-	if (!input_started) {
-		/* Continue until the operation reaches a terminal state. */
-		for (;;) {
-			state = early_keymap;
-
-			/* Handles the available condition. */
-			available = wait ? hal_cons_read_event(&event)
-					 : hal_cons_poll_event(&event);
-			if (!available)
-				return -1;
-
-			/* Handles the wait condition. */
-			if (!wait &&
-			    ((event.flags &
-			      (HAL_KEY_EVENT_RESYNC | HAL_KEY_EVENT_SNAPSHOT |
-			       HAL_KEY_EVENT_RESYNC_END)) != 0 ||
-			     early_resyncing))
-				(void)hal_cons_read_event(&event);
-
-			/* Handles the event condition. */
-			if ((event.flags & HAL_KEY_EVENT_RESYNC) != 0) {
-				drv_input_keymap_init(&early_keymap);
-				early_keymap.caps_lock =
-					(event.flags &
-					 HAL_KEY_EVENT_LOCK_CAPS) != 0;
-				early_keymap.kana_lock =
-					(event.flags &
-					 HAL_KEY_EVENT_LOCK_KANA) != 0;
-				early_resyncing = 1;
-				continue;
-			}
-
-			/* Handles the event condition. */
-			if (event.flags == (HAL_KEY_EVENT_PRESS |
-					    HAL_KEY_EVENT_SNAPSHOT) &&
-			    early_resyncing) {
-				caps = early_keymap.caps_lock;
-				kana = early_keymap.kana_lock;
-
-				/* Translates the key without disturbing the lock state. */
-				event.flags = HAL_KEY_EVENT_PRESS;
-				(void)drv_input_keymap_translate(
-					&early_keymap, &event, &translated);
-				early_keymap.caps_lock = caps;
-				early_keymap.kana_lock = kana;
-				continue;
-			}
-
-			/* Handles the event condition. */
-			if (event.flags == HAL_KEY_EVENT_RESYNC_END) {
-				early_resyncing = 0;
-				continue;
-			}
-
-			/* Handles the early resyncing condition. */
-			if (early_resyncing)
-				continue;
-
-			/* Checks the drv input keymap translate result. */
-			if (!drv_input_keymap_translate(&state, &event,
-							&translated)) {
-				/* Reports operation failure. */
-				return -1;
-			}
-
-			/* Handles the consume condition. */
-			if (consume)
-				early_keymap = state;
-
-			/* Returns the computed result. */
-			return (int)translated;
-		}
-	}
-
-	irq = spin_lock_irqsave(&input_lock);
-
-	/* Continue while the operation condition remains true. */
-	while (input_used == 0) {
-		/* Handles the wait condition. */
-		if (!wait) {
-			spin_unlock_irqrestore(&input_lock, irq);
-
-			/* Reports operation failure. */
-			return -1;
-		}
-
-		sequence = waitq_sequence(&input_waitq);
-
-		/* Checks the operation status. */
-		error = waitq_sleep(&input_waitq, &input_lock, sequence, 0,
-				    WAITQ_INTERRUPTIBLE);
-		if (error == EINTR) {
-			spin_unlock_irqrestore(&input_lock, irq);
-
-			/* Failed. */
-			return -EINTR;
-		}
-	}
-
-	result = (int)input_events[input_tail];
-
-	/* Handles the consume condition. */
-	if (consume) {
-		input_tail = (input_tail + 1U) % CONSOLE_INPUT_EVENTS;
-		input_used--;
-	}
-
-	spin_unlock_irqrestore(&input_lock, irq);
-
-	/* Returns the computed result. */
-	return result;
-}
-
-/*
- * Reports whether the console has an input event waiting.
- */
-int
-drv_console_input_poll_event(
-	void)
-{
-	int error;
-
-	/* Obtains the console input take result. */
-	error = console_input_take(0, 0);
-
-	/* Returns the computed result. */
-	return error;
-}
-/*
- * Reads the next input event the console has.
- */
-int
-drv_console_input_read_event(
-	void)
-{
-	int error;
-
-	/* Obtains the console input take result. */
-	error = console_input_take(1, 1);
-
-	/* Returns the computed result. */
-	return error;
-}
 #endif
 
 /* Finds the input source one device is registered as. */
@@ -754,12 +561,8 @@ drv_console_input_ownership_test_reset(
 	void)
 {
 	spin_init(&input_lock, LOCK_RANK_DEVICE, "console input test");
-	waitq_init(&input_waitq, "console input test");
 	waitq_init(&dispatch_waitq, "console dispatch test");
-	input_head = input_tail = input_used = 0;
-	event_head = event_tail = event_used = 0;
 	dispatch_head = dispatch_tail = dispatch_used = 0;
-	input_started = 1;
 	memset(console_sources, 0, sizeof(console_sources));
 }
 
@@ -862,80 +665,19 @@ drv_console_input_ownership_test_state(
 	return 1;
 }
 
-/*
- * Drains the whole record for those tests.
- */
-void
-drv_console_input_ownership_test_drain(
-	int started)
-{
-	unsigned long irq = spin_lock_irqsave(&input_lock);
-
-	input_started = started != 0;
-	console_drain_input_locked();
-
-	spin_unlock_irqrestore(&input_lock, irq);
-}
 #else
 
-/* Delivers one event to whoever the console is owned by. */
+/* Sends key presses through the ordinary TTY input discipline. */
 static void
 console_deliver(
-	uint32_t translated,
-	unsigned device_id,
-	unsigned overflow,
-	unsigned repeat)
+	uint32_t translated)
 {
-	struct console_input_event *record;
-	unsigned flags;
-	unsigned long irq = spin_lock_irqsave(&input_lock);
+	/* Releases are tracked by evdev and must not become TTY characters. */
+	if ((translated & INPUT_KEY_RELEASE) != 0U)
+		return;
 
-	/* Handles the event owner availability. */
-	if (event_owner != NULL) {
-		/* Handles the event used condition. */
-		flags = overflow != 0 ? ZEDBSD_CONSOLE_INPUT_FLAG_OVERFLOW : 0;
-		if (event_used == CONSOLE_EVENT_RECORDS) {
-			event_tail = (event_tail + 1U) % CONSOLE_EVENT_RECORDS;
-			event_used--;
-			flags |= ZEDBSD_CONSOLE_INPUT_FLAG_OVERFLOW;
-		}
-
-		record = &event_records[event_head];
-		memset(record, 0, sizeof(*record));
-		record->timestamp_ns = clock_milliseconds(NULL) * 1000000ULL;
-		record->sequence = ++event_sequence;
-		record->type = ZEDBSD_CONSOLE_INPUT_EVENT_KEY;
-		record->flags = (uint16_t)flags;
-		record->device_id = device_id;
-		record->key = translated & INPUT_KEY_MASK;
-		record->modifiers =
-			translated &
-			(INPUT_KEY_SHIFT | INPUT_KEY_CTRL | INPUT_KEY_GRAPH);
-		record->state = (translated & INPUT_KEY_RELEASE) != 0
-					? ZEDBSD_CONSOLE_KEY_RELEASE
-				: repeat != 0 ? ZEDBSD_CONSOLE_KEY_REPEAT
-					      : ZEDBSD_CONSOLE_KEY_PRESS;
-		event_head = (event_head + 1U) % CONSOLE_EVENT_RECORDS;
-		event_used++;
-		waitq_wake_all(&input_waitq);
-		spin_unlock_irqrestore(&input_lock, irq);
-	} else if ((translated & INPUT_KEY_RELEASE) == 0) {
-		/* Handles the input used condition. */
-		if (input_used == CONSOLE_INPUT_EVENTS) {
-			input_tail = (input_tail + 1U) % CONSOLE_INPUT_EVENTS;
-			input_used--;
-		}
-
-		input_events[input_head] = translated;
-		input_head = (input_head + 1U) % CONSOLE_INPUT_EVENTS;
-		input_used++;
-		waitq_wake_all(&input_waitq);
-		spin_unlock_irqrestore(&input_lock, irq);
-		tty_console_input_event(translated);
-	} else {
-		spin_unlock_irqrestore(&input_lock, irq);
-	}
-
+	/* The subscriber worker calls this outside the producer lock. */
+	tty_console_input_event(translated);
 	poll_notify();
 }
 
@@ -963,8 +705,7 @@ console_dispatch_worker(
 		dispatch_tail = (dispatch_tail + 1U) % CONSOLE_DISPATCH_EVENTS;
 		dispatch_used--;
 		spin_unlock_irqrestore(&input_lock, irq);
-		console_deliver(event.translated, event.device_id,
-				event.overflow, event.repeat);
+		console_deliver(event.translated);
 	}
 }
 
@@ -984,88 +725,25 @@ console_input_worker(
 	}
 }
 
-/* Reads one event out of the console's own queue. */
-static ssize_t
-console_event_read(
-	struct file *file,
-	void *buffer,
-	size_t size)
-{
-	ssize_t function_result;
-	uint64_t sequence;
-	int error;
-	size_t capacity, count = 0;
-	unsigned long irq;
 
-	/* Checks the current data size. */
-	if (size < sizeof(struct console_input_event))
-		return -EINVAL;
-	capacity = size / sizeof(struct console_input_event);
-	irq = spin_lock_irqsave(&input_lock);
-
-	/* Continue while the operation condition remains true. */
-	while (event_used == 0) {
-		/* Checks the file status flags get result. */
-		if ((file_status_flags_get(file) & O_NONBLOCK) != 0) {
-			spin_unlock_irqrestore(&input_lock, irq);
-
-			/* Failed. */
-			return -EAGAIN;
-		}
-
-		sequence = waitq_sequence(&input_waitq);
-
-		/* Checks the operation status. */
-		error = waitq_sleep(&input_waitq, &input_lock, sequence, 0,
-				    WAITQ_INTERRUPTIBLE);
-		if (error == EINTR) {
-			spin_unlock_irqrestore(&input_lock, irq);
-
-			/* Failed. */
-			return -EINTR;
-		}
-	}
-	while (count < capacity && event_used != 0) {
-		((struct console_input_event *)buffer)[count++] =
-			event_records[event_tail];
-		event_tail = (event_tail + 1U) % CONSOLE_EVENT_RECORDS;
-		event_used--;
-	}
-
-	spin_unlock_irqrestore(&input_lock, irq);
-
-	/* Computes the function result. */
-	function_result = (ssize_t)(count * sizeof(struct console_input_event));
-
-	/* Returns the computed result. */
-	return function_result;
-}
-
-/* Reads characters typed at the console. */
+/* Reads characters through the selected TTY discipline. */
 static ssize_t
 console_read(
 	struct file *file,
 	void *buffer,
 	size_t size)
 {
-	ssize_t function_result;
-	struct console_open *state = console_open_state(file);
+	unsigned vt;
+	ssize_t result;
 
-	/* Handles the state availability. */
-	if (state != NULL && state->input_mode == ZEDBSD_CONSOLE_INPUT_EVENT) {
-		/* Obtains the console event read result. */
-		function_result = console_event_read(file, buffer, size);
+	/* Canonical and noncanonical reads share the same terminal owner. */
+	vt = console_file_vt(file);
+	result = tty_vt_read(vt, file, buffer, size);
+	if (result < 0)
+		return result;
 
-		/* Returns the computed result. */
-		return function_result;
-	}
-
-	/* Obtains the tty vt read result. */
-	function_result =
-		tty_vt_read(console_file_vt(file), file, buffer, size);
-
-	/* Returns the computed result. */
-	return function_result;
+	/* Succeeded: reports the bytes delivered by the terminal. */
+	return result;
 }
 
 /* Writes characters to the console. */
@@ -1138,17 +816,8 @@ console_ioctl(
 	struct console_cursor cursor_local;
 	struct console_cursor cursor_local1;
 	struct console_cursor cursor_local2;
-	struct console_open *open_local;
-	struct console_input_mode mode_local;
-	struct console_open *open_local3;
-	struct console_input_mode mode_local4;
-	unsigned long irq_local;
-	unsigned long irq_local5;
 	struct console_row row;
 	struct console_position position;
-	struct console_event event;
-	int value;
-	struct console_key_state key;
 	struct hal_cons_state state;
 	int error;
 
@@ -1239,105 +908,6 @@ console_ioctl(
 
 		/* Returns the computed result. */
 		return function_result;
-	case ZEDBSD_CONSOLE_POLL_EVENT:
-	case ZEDBSD_CONSOLE_READ_EVENT:
-
-		/* Validates the current value. */
-		value = request == ZEDBSD_CONSOLE_POLL_EVENT
-				? console_input_take(0, 0)
-				: console_input_take(1, 1);
-		if (value == -EINTR)
-			return EINTR;
-
-		/* Validates the current value. */
-		if (value < 0)
-			return EAGAIN;
-		event.value = (uint32_t)value;
-
-		/* Obtains the copyout result. */
-		function_result = copyout(&event, argument, sizeof(event));
-
-		/* Returns the computed result. */
-		return function_result;
-	case ZEDBSD_CONSOLE_GET_INPUT_MODE:
-
-		/* Handles the open local availability. */
-		open_local = console_open_state(file);
-		if (open_local == NULL)
-			return ENODEV;
-		mode_local.mode = open_local->input_mode;
-		mode_local.flags = 0;
-
-		/* Obtains the copyout result. */
-		function_result =
-			copyout(&mode_local, argument, sizeof(mode_local));
-
-		/* Returns the computed result. */
-		return function_result;
-	case ZEDBSD_CONSOLE_SET_INPUT_MODE:
-
-		/* Handles the open local3 availability. */
-		open_local3 = console_open_state(file);
-		if (open_local3 == NULL)
-			return ENODEV;
-
-		/* Checks the operation status. */
-		error = copyin(argument, &mode_local4, sizeof(mode_local4));
-		if (error != 0)
-			return error;
-
-		/* Handles the mode local4 condition. */
-		if ((mode_local4.mode != ZEDBSD_CONSOLE_INPUT_TEXT &&
-		     mode_local4.mode != ZEDBSD_CONSOLE_INPUT_EVENT) ||
-		    mode_local4.flags != 0) {
-			/* Failed. */
-			return EINVAL;
-		}
-
-		/* Handles the event owner availability. */
-		irq_local = spin_lock_irqsave(&input_lock);
-		if (mode_local4.mode == ZEDBSD_CONSOLE_INPUT_EVENT &&
-		    event_owner != NULL && event_owner != open_local3) {
-			spin_unlock_irqrestore(&input_lock, irq_local);
-
-			/* Failed. */
-			return EBUSY;
-		}
-
-		/* Handles the mode local4 condition. */
-		if (mode_local4.mode == ZEDBSD_CONSOLE_INPUT_EVENT)
-			event_owner = open_local3;
-		else if (event_owner == open_local3)
-			event_owner = NULL;
-		open_local3->input_mode = mode_local4.mode;
-		event_head = event_tail = event_used = 0;
-		waitq_wake_all(&input_waitq);
-		spin_unlock_irqrestore(&input_lock, irq_local);
-		poll_notify();
-
-		/* Succeeded. */
-		return 0;
-	case ZEDBSD_CONSOLE_KEY_STATE:
-
-		/* Checks the operation status. */
-		error = copyin(argument, &key, sizeof(key));
-		if (error != 0)
-			return error;
-		key.down = hal_cons_key_state((int)key.key);
-
-		/* Obtains the copyout result. */
-		function_result = copyout(&key, argument, sizeof(key));
-
-		/* Returns the computed result. */
-		return function_result;
-	case ZEDBSD_CONSOLE_DRAIN_INPUT:
-		irq_local5 = spin_lock_irqsave(&input_lock);
-		console_drain_input_locked();
-		spin_unlock_irqrestore(&input_lock, irq_local5);
-		poll_notify();
-
-		/* Succeeded. */
-		return 0;
 	case ZEDBSD_CONSOLE_ISATTY:
 		/* Succeeded. */
 		return 0;
@@ -1351,38 +921,24 @@ console_ioctl(
 	}
 }
 
-/* Reports whether the console has anything to read. */
+/* Reports readiness through the selected TTY discipline. */
 static int
 console_poll(
 	struct file *file,
 	short events,
 	short *revents)
 {
+	unsigned vt;
 	int error;
-	unsigned long irq;
-	short result;
-	struct console_open *state = console_open_state(file);
 
-	/* Handles the state availability. */
-	if (state != NULL && state->input_mode == ZEDBSD_CONSOLE_INPUT_EVENT) {
-		result = events & (POLLOUT | POLLWRNORM);
+	/* Poll and read observe the same character stream. */
+	vt = console_file_vt(file);
+	error = tty_vt_poll(vt, file, events, revents);
+	if (error != 0)
+		return error;
 
-		/* Handles the event used condition. */
-		irq = spin_lock_irqsave(&input_lock);
-		if (event_used != 0)
-			result |= events & (POLLIN | POLLRDNORM);
-		spin_unlock_irqrestore(&input_lock, irq);
-		*revents = result;
-		/* Succeeded. */
-		return 0;
-	}
-
-	/* Obtains the tty vt poll result. */
-	error =
-		tty_vt_poll(console_file_vt(file), file, events, revents);
-
-	/* Returns the computed result. */
-	return error;
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reads characters typed at one virtual terminal. */
@@ -1521,15 +1077,9 @@ drv_console_device_register(
 
 	/* Starts every queue, lock and keymap out empty. */
 	spin_init(&input_lock, LOCK_RANK_DEVICE, "console input");
-	waitq_init(&input_waitq, "console input");
 	waitq_init(&dispatch_waitq, "console input dispatch");
-	input_head = input_tail = input_used = 0;
-	event_head = event_tail = event_used = event_sequence = 0;
 	dispatch_head = dispatch_tail = dispatch_used = 0;
-	event_owner = NULL;
 	keyboard_input = NULL;
-	drv_input_keymap_init(&early_keymap);
-	early_resyncing = 0;
 	memset(console_sources, 0, sizeof(console_sources));
 	memset(&console_subscription, 0, sizeof(console_subscription));
 
@@ -1583,7 +1133,6 @@ drv_console_device_register(
 				    console_input_subscriber, NULL);
 	if (error != 0)
 		goto fail;
-	input_started = 1;
 	thread_start(dispatcher);
 	thread_start(producer);
 	hal_cons_set_mode(HAL_CONS_TERMINAL);
@@ -1607,7 +1156,6 @@ fail:
 	/* Handles the producer availability. */
 	if (producer != NULL)
 		(void)thread_abort_new(producer);
-	input_started = 0;
 
 	/* Reports the failure. */
 	if (error != 0)

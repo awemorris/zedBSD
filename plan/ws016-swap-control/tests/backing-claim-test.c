@@ -14,8 +14,38 @@
 
 struct thread;
 
+static unsigned metadata_mode;
+static unsigned metadata_calls;
+static unsigned fail_next_allocation;
+
+static int test_data_extents(struct file *file, file_extent_cb callback, void *context)
+{ (void)file; (void)callback; (void)context; return EOPNOTSUPP; }
+
+static int test_identity(struct inode *inode, struct disk **disk, uint64_t *object)
+{ *disk = inode->i_mount->m_disk; *object = inode->i_ino; return 0; }
+
+static int test_metadata_extents(struct file *file, file_metadata_extent_cb callback, void *context)
+{
+	int error;
+	(void)file;
+	metadata_calls++;
+	if (metadata_mode == 0 || (metadata_mode == 4 && metadata_calls == 2) ||
+	    (metadata_mode == 5 && metadata_calls == 1))
+		return 0;
+	if (metadata_mode == 6 || (metadata_mode == 9 && metadata_calls == 2))
+		return EIO;
+	error = callback(metadata_mode == 2 ? 20 : metadata_mode == 7 ? 1000 : 60, 8, context);
+	if (error != 0)
+		return error;
+	if (metadata_mode == 3 || (metadata_mode == 10 && metadata_calls == 2))
+		return callback(60, 8, context);
+	return 0;
+}
+
 const struct filesystem_type drv_fat_filesystem_type = {
     .fs_name = "fat",
+    .file_extents = test_data_extents,
+    .file_metadata_extents = test_metadata_extents,
 };
 
 static _Thread_local int execution_token;
@@ -50,6 +80,10 @@ drv_fat_file_backing_identity(struct inode *inode, struct disk **disk,
 void *
 kern_calloc(size_t count, size_t size)
 {
+	if (fail_next_allocation) {
+		fail_next_allocation = 0;
+		return NULL;
+	}
 	return calloc(count, size);
 }
 
@@ -147,6 +181,179 @@ hold_whole_disk_mutation(void *argument)
 	return NULL;
 }
 
+static void
+test_identity_and_snapshot_admission(void)
+{
+	struct disk leaf;
+	struct disk partition;
+	struct disk alias;
+	struct mount mountp;
+	struct mount other_mount;
+	struct inode inode;
+	struct inode other_inode;
+	struct filesystem_type type;
+	struct backing_claim *claim;
+	struct backing_claim *second;
+	struct backing_claim_extent data;
+	struct backing_mutation_guard guard;
+	int matches;
+
+	make_disk(&leaf, 4096, NULL, 0);
+	make_disk(&partition, 1000, &leaf, 100);
+	make_disk(&alias, 1000, &leaf, 100);
+	memset(&type, 0, sizeof(type));
+	type.fs_name = "identity-provider";
+	type.file_backing_identity = test_identity;
+	memset(&mountp, 0, sizeof(mountp));
+	mountp.m_disk = &partition;
+	mountp.m_type = &type;
+	other_mount = mountp;
+	other_mount.m_disk = &alias;
+	make_inode(&inode, &mountp, 300);
+	make_inode(&other_inode, &other_mount, 300);
+	assert(backing_mutation_begin_disk(&partition, 0, 1000, NULL, &guard) == 0);
+	assert(backing_claim_prepare_inode(&other_inode, BACKING_CLAIM_SWAP, &claim) == EBUSY);
+	backing_mutation_end(&guard);
+	assert(backing_claim_prepare_inode(&inode, BACKING_CLAIM_SWAP, &claim) == 0);
+	assert(backing_claim_inode_matches(claim, &other_inode, &matches) == 0 && matches);
+	assert(backing_claim_prepare_inode(&other_inode, BACKING_CLAIM_SWAP, &second) == EBUSY);
+	assert(backing_mutation_begin_disk(&alias, 0, 1000, NULL, &guard) == EBUSY);
+	data.disk = &partition;
+	data.block = 20;
+	data.block_count = 8;
+	assert(backing_claim_finalize(claim, &data, 1) == 0);
+	assert(backing_mutation_begin_disk(&alias, 0, 1000, NULL, &guard) == EBUSY);
+	backing_claim_release(claim);
+	assert(backing_mutation_begin_disk(&alias, 0, 1000, NULL, &guard) == 0);
+	backing_mutation_end(&guard);
+	assert(refcount_load(&leaf.d_refs) == 0);
+	puts("canonical identity and snapshot admission orders: PASS");
+}
+
+static void
+test_file_metadata(void)
+{
+	struct disk leaf;
+	struct disk partition;
+	struct mount mountp;
+	struct inode inode;
+	struct inode other;
+	struct file file;
+	struct backing_claim *claim;
+	struct backing_claim_extent data;
+	struct backing_mutation_guard guard;
+	unsigned mode;
+	int error;
+
+	make_disk(&leaf, 4096, NULL, 0);
+	make_disk(&partition, 1000, &leaf, 100);
+	memset(&mountp, 0, sizeof(mountp));
+	mountp.m_disk = &partition;
+	mountp.m_type = &drv_fat_filesystem_type;
+	make_inode(&inode, &mountp, 300);
+	make_inode(&other, &mountp, 301);
+	memset(&file, 0, sizeof(file));
+	data.disk = &partition;
+	data.block = 20;
+	data.block_count = 8;
+	for (mode = 1; mode <= 12; mode++) {
+		metadata_mode = mode;
+		metadata_calls = 0;
+		file.f_inode = mode == 8 ? &other : &inode;
+		assert(backing_claim_prepare_inode(&inode, BACKING_CLAIM_SWAP, &claim) == 0);
+		fail_next_allocation = mode == 11;
+		error = backing_claim_finalize_file(claim, &file, &data,
+		    mode == 12 ? UINT32_MAX : 1);
+		assert((error == 0) == (mode == 1));
+		if (mode != 1) {
+			assert(backing_mutation_begin_disk(&partition, 900, 1, NULL, &guard) == EBUSY);
+			if (mode == 2 || mode == 3)
+				assert(error == EINVAL);
+			if (mode == 4 || mode == 5 || mode == 10)
+				assert(error == EAGAIN);
+			if (mode == 8)
+				assert(error == EXDEV && metadata_calls == 0);
+			if (mode == 11)
+				assert(error == ENOMEM && fail_next_allocation == 0);
+			if (mode == 12)
+				assert(error == EOVERFLOW);
+			metadata_mode = 1;
+			metadata_calls = 0;
+			file.f_inode = &inode;
+			assert(backing_claim_finalize_file(claim, &file, &data, 1) == 0);
+		}
+		assert(backing_mutation_begin_disk(&partition, 20, 1, NULL, &guard) == EBUSY);
+		assert(backing_mutation_begin_disk(&partition, 60, 1, NULL, &guard) == EBUSY);
+		backing_claim_release(claim);
+		assert(backing_mutation_begin_disk(&partition, 60, 1, NULL, &guard) == 0);
+		backing_mutation_end(&guard);
+		assert(refcount_load(&leaf.d_refs) == 0);
+	}
+	metadata_mode = 0;
+	puts("file metadata claims: PASS 12 protection and failure scenarios");
+}
+
+static void
+test_self_overlap(void)
+{
+	struct disk leaf;
+	struct disk partition;
+	struct mount mountp;
+	struct inode inode;
+	struct backing_claim *claim;
+	struct backing_claim_extent extents[32];
+	struct backing_mutation_guard guard;
+	uint64_t starts[32];
+	uint64_t ends[32];
+	uint32_t seed;
+	unsigned trial;
+	unsigned count;
+	unsigned i;
+	unsigned j;
+	int overlap;
+
+	make_disk(&leaf, 4096, NULL, 0);
+	make_disk(&partition, 1000, &leaf, 100);
+	memset(&mountp, 0, sizeof(mountp));
+	mountp.m_disk = &partition;
+	mountp.m_type = &drv_fat_filesystem_type;
+	make_inode(&inode, &mountp, 300);
+	seed = 37;
+	for (trial = 0; trial < 512; trial++) {
+		count = 1U + trial % 32U;
+		for (i = 0; i < count; i++) {
+			seed = seed * 1664525U + 1013904223U;
+			starts[i] = 100U + (seed >> 16) % 128U;
+			ends[i] = starts[i] + 1U + (seed >> 24) % 12U;
+			/* Include touching and reversed disjoint layouts, too. */
+			if (trial % 4U == 0) {
+				starts[i] = 100U + (count - i) * 4U;
+				ends[i] = starts[i] + 4U;
+			}
+			extents[i].disk = i % 2U == 0 ? &leaf : &partition;
+			extents[i].block = starts[i] - (i % 2U == 0 ? 0 : 100);
+			extents[i].block_count = ends[i] - starts[i];
+		}
+		overlap = 0;
+		for (i = 0; i < count; i++) {
+			for (j = i + 1; j < count; j++) {
+				if (starts[i] < ends[j] && starts[j] < ends[i])
+					overlap = 1;
+			}
+		}
+		assert(backing_claim_prepare_inode(&inode, BACKING_CLAIM_SWAP, &claim) == 0);
+		assert(backing_claim_finalize(claim, extents, count) == (overlap ? EINVAL : 0));
+		if (overlap) {
+			/* Failure retains preparing exclusion and permits explicit retry. */
+			assert(backing_mutation_begin_disk(&partition, 900, 1, NULL, &guard) == EBUSY);
+			assert(backing_claim_finalize(claim, extents, 1) == 0);
+		}
+		backing_claim_release(claim);
+		assert(refcount_load(&leaf.d_refs) == 0);
+	}
+	puts("backing self-overlap: PASS 512 oracle layouts and physical aliases");
+}
+
 int
 main(void)
 {
@@ -165,6 +372,10 @@ main(void)
 	struct backing_mutation_guard second_inode_guard;
 	struct mutation_race race;
 	pthread_t race_thread;
+
+	test_self_overlap();
+	test_file_metadata();
+	test_identity_and_snapshot_admission();
 
 	/* A PREPARING claim excludes raw writes but permits lower disk writes
 	 * belonging to an already accepted, unrelated inode mutation.
@@ -311,6 +522,18 @@ main(void)
 	assert(backing_mutation_begin_disk(&disjoint, 0, 1, NULL, &guard) ==
 	       EBUSY);
 	backing_claim_release(raw_claim);
+
+	/* ADMIN uses the same raw-range exclusion; only its owner may mutate. */
+	assert(backing_claim_prepare_disk(&disjoint, 0, disjoint.d_block_count,
+	    BACKING_CLAIM_ADMIN, &raw_claim) == 0);
+	assert(backing_mutation_begin_disk(&disjoint, 0, 1, NULL, &guard) == EBUSY);
+	assert(backing_mutation_begin_disk(&disjoint, 0, 1, raw_claim, &guard) == 0);
+	backing_mutation_end(&guard);
+	assert(backing_claim_prepare_disk(&disjoint, 0, 1,
+	    BACKING_CLAIM_SWAP, &second_claim) == EBUSY);
+	backing_claim_release(raw_claim);
+	assert(backing_mutation_begin_disk(&disjoint, 0, 1, NULL, &guard) == 0);
+	backing_mutation_end(&guard);
 
 	backing_claim_release(file_claim);
 	assert(backing_mutation_begin_inode(&inode_alias, &guard) == 0);

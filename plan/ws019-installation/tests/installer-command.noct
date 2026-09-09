@@ -1,0 +1,38 @@
+require commands;
+require identity;
+require selection;
+func main(args) {
+    var devices = instInventory(instRequire(["/sbin/diskpart", "--machine", "list"]));
+    var whole = instFindDevice(devices, "nvme0n1");
+    var part = instFindDevice(devices, "nvme0n1p1");
+    if (whole.parent != 0 || part.parent != whole.id) { System.error("wrong live parent"); }
+    var lines = instLines(instRequire(["/sbin/diskpart", "--machine", "show", whole.name]));
+    var record = instDeviceRecord(instSplit(lines[0], "\t"));
+    if (record.id != whole.id || lines[1] != "table\tgpt\t0\t1") { System.error("wrong table identity"); }
+    var ranges = 0;
+    var parts = 0;
+    for (i in 2..Array.size(lines)) {
+        var fields = instSplit(lines[i], "\t");
+        if (fields[0] == "range") {
+            if (Array.size(fields) != 3 || instNumber(fields[2], 10) == 0) { System.error("bad metadata span"); }
+            ranges = ranges + 1;
+        } else if (fields[0] == "partition") {
+            if (instNumber(fields[2], 10) != part.offset || instNumber(fields[3], 10) != part.sectors) {
+                System.error("stale partition map");
+            }
+            parts = parts + 1;
+        } else { System.error("unknown diskpart record"); }
+    }
+    if (ranges != 5 || parts != 1) { System.error("missing GPT records"); }
+    var id = instIdentity(instRequire(["/sbin/blkid", "-o", "export", "-s", "TYPE", "-s", "UUID", "-s", "PARTUUID", "--", "/dev/nvme0n1p1"]));
+    if (id.DEVNAME != part.name || id.TYPE != "vfat") { System.error("wrong filesystem identity"); }
+    var raw = File.open("/dev/nvme0n1p1", "rb");
+    var boot = File.readExact(raw, 512);
+    File.close(raw);
+    if (!instFat32(boot, part)) { System.error("NVMe BPB is not FAT32"); }
+    var ids = { nvme0n1p1: id };
+    if (instResolveOrigin(devices, ids, "PARTUUID=" + id.PARTUUID).id != part.id) { System.error("wrong selector resolution"); }
+    var stat = instStatRecord(instRequire(["/bin/stat", "-c", "%d:%i:%f:%s:%a:%u:%g", "--", "/bin/sh"]));
+    if ((stat.mode & 61440) != 32768 || stat.size <= 0) { System.error("invalid source identity"); }
+    print("installer command PASS device-parent GPT-ranges blkid-export stat-identity");
+}

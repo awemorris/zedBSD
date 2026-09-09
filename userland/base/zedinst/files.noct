@@ -1,0 +1,122 @@
+// Existing-command adapters for the managed-file transaction.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require commands;
+require copy;
+require identity;
+require transaction;
+require admission;
+
+func instFileParent(path) {
+    instControlledPath(path);
+    var last = -1;
+    for (i in 0..String.charCount(path)) {
+        if (String.charAt(path, i) == "/") { last = i; }
+    }
+    if (last < 0 || last == String.charCount(path) - 1) { System.error("expected absolute file path"); }
+    var parent = "/";
+    if (last != 0) { parent = String.substring(path, 0, last); }
+    return [parent, String.substring(path, last + 1, -1)];
+}
+func instFileIdentity(path) {
+    return instStatRecord(instRequire(["/bin/stat", "-c", "%d:%i:%f:%s:%a:%u:%g", "--", path]));
+}
+func instFileCapacity(path) {
+    instControlledPath(path);
+    return instCapacityRecord(instRequire(["/bin/df", "-P", "--", path]), path);
+}
+func instFileAdmitCapacity(entries, present, mount, cluster, newDirectories) {
+    var needed = instCapacityNeeded(entries, present, mount, cluster, newDirectories);
+    var observed = instFileCapacity(mount);
+    if (needed > observed.available) { System.error("insufficient staging capacity: " + mount); }
+    return { needed: needed, available: observed.available };
+}
+func instFileLookup(context, path) {
+    var result = instRun(["/bin/stat", "-c", "%d:%i:%f:%s:%a:%u:%g", "--", path], "30", 4096);
+    if (result[0] == 0 && !result[2]) { return instStatRecord(result[1]); }
+    if (result[2]) { System.error("unbounded stat output"); }
+    // Distinguish absence from failed inspection without trusting error prose.
+    var parts = instFileParent(path);
+    var parent = instFileIdentity(parts[0]);
+    if ((parent.mode & 61440) != 16384) { System.error("parent is not a directory"); }
+    var names = instLines(instRequire(["/bin/ls", "-a1", "--", parts[0]]));
+    for (i in 0..Array.size(names)) {
+        if (String.toLowerCase(names[i]) == String.toLowerCase(parts[1])) {
+            System.error("cannot inspect existing file: " + path);
+        }
+    }
+    return 0;
+}
+func instFileDigest(path) {
+    var lines = instLines(instRequire(["/bin/cksum", "-a", "sha256", "--", path]));
+    if (Array.size(lines) != 1 || String.charCount(lines[0]) != 66 + String.charCount(path) ||
+        String.substring(lines[0], 64, -1) != "  " + path) {
+        System.error("invalid digest result");
+    }
+    var digest = String.substring(lines[0], 0, 64);
+    for (i in 0..64) { instNumber(String.charAt(digest, i), 16); }
+    return String.toLowerCase(digest);
+}
+func instFileOwned(path, expected) {
+    var current = instFileIdentity(path);
+    if (!instSameFileObject(current, expected)) { System.error("file identity changed: " + path); }
+    return current;
+}
+func instFileVerify(context, entry, path, expected) {
+    var current = instFileOwned(path, expected);
+    if (current.size != entry.bytes || current.permissions != entry.permissions) {
+        System.error("file size or permissions differ: " + path);
+    }
+    if (entry.role == "data") {
+        instRequire(["/sbin/mkfs", "-t", "ufs", "--verify-pristine", path]);
+    } else if (entry.role == "swap") {
+        instRequire(["/sbin/mkswap", "--verify-pristine", path]);
+    } else if (entry.role == "config") {
+        if (FileUtil.readText(path) != entry.text) { System.error("configuration differs: " + path); }
+    } else {
+        if (instFileDigest(path) != entry.digest) { System.error("file contents differ: " + path); }
+    }
+    var after = instFileOwned(path, current);
+    if (after.size != current.size || after.permissions != current.permissions) {
+        System.error("file changed during verification: " + path);
+    }
+}
+func instFileCreate(context, entry) {
+    var seed = instFileIdentity(context.seed);
+    if ((seed.mode & 61440) != 32768 || seed.permissions != 493) {
+        System.error("staging seed must be a regular 0755 file");
+    }
+    instRequire(["/bin/cp", "-T", "--attributes-only", "--preserve=mode", "--update=none-fail",
+        "--", context.seed, entry.stage]);
+    var identity = instFileIdentity(entry.stage);
+    if (identity.size != 0) { System.error("created staging file is not empty"); }
+    return identity;
+}
+func instFilePopulate(context, entry, expected) {
+    instFileOwned(entry.stage, expected);
+    if (entry.role == "data" || entry.role == "swap") {
+        instRequire(["/bin/truncate", "-s", "" + entry.bytes, entry.stage]);
+        instFileOwned(entry.stage, expected);
+        if (entry.role == "data") { instRequire(["/sbin/mkfs", "-t", "ufs", entry.stage]); }
+        else { instRequire(["/sbin/mkswap", entry.stage]); }
+    } else if (entry.role == "config") {
+        FileUtil.writeText(entry.stage, entry.text);
+    } else {
+        instCopyFile(entry.source, entry.stage, entry.bytes, entry.role);
+    }
+    instFileOwned(entry.stage, expected);
+    instRequire(["/bin/chmod", entry.modeText, entry.stage]);
+}
+func instFileSync(context, path) { instRequire(["/bin/sync", "--", path]); }
+func instFilePublish(context, entry) {
+    instRequire(["/bin/mv", "-T", "--update=none-fail", "--", entry.stage, entry.final]);
+}
+func instFileRemove(context, path, expected) {
+    instFileOwned(path, expected);
+    instRequire(["/bin/rm", "--", path]);
+}
+func instFileRevalidate(context) { context.revalidate(context); }
+func instFileOperations() {
+    return { stat: instFileLookup, verify: instFileVerify, create: instFileCreate,
+        populate: instFilePopulate, syncFile: instFileSync, syncDirectory: instFileSync,
+        revalidate: instFileRevalidate, publish: instFilePublish, remove: instFileRemove };
+}

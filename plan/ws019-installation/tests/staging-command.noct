@@ -1,0 +1,14 @@
+require commands;
+func main(args) {
+    var result = instRun(["/bin/sh", "-c", "test \"$1\" = 'a b;literal'", "argv", "a b;literal"], "5", 1048576);
+    if (result[0] != 0 || result[2]) { System.error("argv preservation failed"); }
+    result = instRun(["/bin/sh", "-c", "exit 7"], "5", 1048576);
+    if (result[0] != 7) { System.error("child status failed: " + result[0]); }
+    result = instRun(["/bin/sleep", "10"], "1", 1048576);
+    if (result[0] != 124) { System.error("timeout failed: " + result[0]); }
+    var large = "";
+    for (i in 0..2048) { large = large + "x"; }
+    result = instRun(["/bin/sh", "-c", "printf '%s' \"$1\"", "output", large], "5", 1024);
+    if (!result[2] || String.byteLength(result[1]) > 1024) { System.error("output bound failed status=" + result[0] + " bytes=" + String.byteLength(result[1]) + " text=" + result[1]); }
+    print("Noct command PASS argv exit timeout output-limit");
+}

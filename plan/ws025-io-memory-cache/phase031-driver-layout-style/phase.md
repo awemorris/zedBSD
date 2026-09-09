@@ -4,7 +4,7 @@
 
 Phase ID: `ws025-p031`
 
-Status: uncleared; q123 finished。リファクタリング後の最終確認が残る。p032〜p035の回帰修正は完了。
+Status: uncleared; q123 finished。リファクタリング後の最終確認が残る。p033〜p035完了、p032はPC98実機起動回復のため再開。
 
 Parent: [WS025](../ws.md)
 

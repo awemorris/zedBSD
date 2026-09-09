@@ -1,0 +1,78 @@
+require workspace;
+func checkWorkspace(ok, text) { if (!ok) { System.error(text); } }
+func wsStat(c, path) {
+    if (!Dict.hasKey(c.files, path)) { System.error("missing path"); }
+    var f = c.files[path];
+    return {device:f.device, inode:f.inode, mode:16384, permissions:448, uid:0};
+}
+func wsMkdir(c, path) {
+    if (Dict.hasKey(c.files, path)) { System.error("already exists"); }
+    c.next = c.next + 1;
+    c.files[path] = {device:1, inode:c.next};
+    if (c.mode == "mkdir-after") { System.error("mkdir exit unavailable"); }
+}
+func wsRmdir(c, path) {
+    for (key, value in c.files) {
+        if (String.substring(key, 0, String.charCount(path) + 1) == path + "/") {
+            System.error("directory not empty");
+        }
+    }
+    if (c.mode == "rmdir-before") { System.error("rmdir failure"); }
+    Dict.remove(c.files, path);
+    Array.push(c.events, "rmdir " + path);
+}
+func wsMount(c, item) {
+    if (c.mode == "mount-before") { System.error("mount failure"); }
+    c.covered[item.path] = c.files[item.path];
+    c.files[item.path] = {device:2, inode:1};
+    Array.push(c.events, "mount " + item.path);
+    if (c.mode == "mount-after") { System.error("mount exit unavailable"); }
+}
+func wsUnmount(c, path) {
+    if (c.mode == "umount-before") { System.error("busy"); }
+    c.files[path] = c.covered[path];
+    Dict.remove(c.covered, path);
+    Array.push(c.events, "umount " + path);
+    if (c.mode == "umount-after") { System.error("umount exit unavailable"); }
+}
+func wsSetup(w, unused) {
+    instWorkspaceDirectory(w, "");
+    var directory = instWorkspaceDirectory(w, "source");
+    instWorkspaceAttach(w, directory, "sda1", true);
+}
+func main(args) {
+    if (Array.size(args) == 1) {
+        var native = instWorkspaceNew(instWorkspaceOps(), 0, "/run/zedinst-workspace-test");
+        var setup = System.pcall(wsSetup, native, 0);
+        var cleanup = instWorkspaceRelease(native);
+        if (!setup.ok) { System.error(setup.message); }
+        checkWorkspace(cleanup.ok, cleanup.message);
+        print("native workspace PASS owned source mount and cleanup");
+        return;
+    }
+    var ops = {stat:wsStat, mkdir:wsMkdir, rmdir:wsRmdir, mount:wsMount, unmount:wsUnmount};
+    for (mode in ["normal", "existing", "mkdir-after", "mount-before", "mount-after",
+        "umount-before", "umount-after", "rmdir-before", "replaced", "nonempty"]) {
+        var c = {mode:mode, next:10, files:{}, covered:{}, events:[]};
+        if (mode == "existing") { c.files["/run/zedinst"] = {device:1, inode:50}; }
+        var w = instWorkspaceNew(ops, c, "/run/zedinst");
+        var setup = System.pcall(wsSetup, w, 0);
+        if (mode == "replaced") { c.files["/run/zedinst/source"] = {device:99, inode:99}; }
+        if (mode == "nonempty") { c.files["/run/zedinst/foreign"] = {device:1, inode:90}; }
+        var result = instWorkspaceRelease(w);
+        if (mode == "normal") {
+            if (!setup.ok) { System.error(setup.message); }
+            checkWorkspace(setup.ok && result.ok && Dict.size(c.files) == 0,
+                "normal cleanup: " + result.message);
+            checkWorkspace(c.events[1] == "umount /run/zedinst/source" &&
+                c.events[2] == "rmdir /run/zedinst/source" && c.events[3] == "rmdir /run/zedinst", "cleanup order");
+        } else {
+            checkWorkspace(!result.ok, "accepted uncertain cleanup " + mode);
+            checkWorkspace(Dict.hasKey(c.files, "/run/zedinst"), "removed unresolved parent " + mode);
+        }
+        var count = Array.size(c.events);
+        instWorkspaceRelease(w);
+        checkWorkspace(count == Array.size(c.events), "cleanup retry repeated a mutation " + mode);
+    }
+    print("installer workspace PASS 10 lifecycle and recovery scenarios");
+}

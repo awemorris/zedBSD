@@ -4,7 +4,16 @@ Last updated: 2026-09-06
 
 Phase ID: `ws019-p004`
 
-Status: planned Noct implementation; follows p002, p003, p008, and p009
+Status: completed (q159); [public package and final acceptance](q159-results.md)
+pass. Installed boot and later mode/source UI extensions remain separate phases.
+
+Latest: [q157 results](q157-results.md), [q156 results](q156-results.md), [q154 results](q154-results.md), [q153 results](q153-results.md), [q152 results](q152-results.md), [q149 results](q149-results.md) and
+[remaining admission design](admission-design.md).
+
+q148 supplies read-only `mkfs`/`mkswap --verify-pristine` with native acceptance:
+[p019 results](../phase019-pristine-verification/results.md). The earlier
+canonical scratch-image obstacle is removed; implement the Noct transaction
+without an image-sized scratch allocation or a Noct ioctl.
 
 Parent: [WS019](../ws.md)
 
@@ -63,7 +72,7 @@ There is no whole-disk, native, format, overwrite, or noninteractive mode.
 ## Selected source and generation contract
 
 The live `DATA.IMG` and `SWAPFILE` are never copied. Installer templates are
-not introduced. P008 creates the same UFS1 format already consumed by the
+not introduced. The current formatter creates the single 64-bit UFS consumed by the
 overlay upper; p009 creates the same ZEDSWAP2 format already consumed by the
 swap subsystem. For installer v1, `zedinst` creates a 32-MiB `data.img` and a
 64-MiB `swapfile`, matching the current image defaults. Size selection is a
@@ -111,3 +120,29 @@ transaction. WS024 is implementing the driver/producer migration and retains
 old-media rejection and fresh-file initialization boundaries. Do not infer
 in-place conversion from the new public name. This update does not start the
 installer phase; its existing prerequisites still apply.
+
+## User clarification: command orchestration (2026-09-09)
+
+Noct is available and working. Implement the installer in Noct using command
+execution; lack of ioctl bindings does not justify replacing Noct or adding an
+installer-specific native helper. Extend existing commands where operations
+are missing. Missing POSIX commands or commands generally available on UNIX
+may be implemented in userland/base/. Do not invent new private commands.
+If an essential operation cannot be supplied within this boundary, record the
+exact missing function and mark the affected phase uncleared; continue other
+independent work. This supersedes the helper/bindings option above.
+
+Current formatter integration additionally depends on p014.
+
+## q134 selected design
+
+[Implementation contract](design.md) supersedes historical readiness gaps and
+UFS1/helper assumptions above. Implement the full Noct installer and command
+extensions, then its production acceptance; p005 remains installed-boot testing.
+
+## q140 中の読み取りによる再開準備
+
+[canonical検証の補足案](canonical-followup.md)に、既存フォーマッタの検証が
+未使用領域までの完全一致を保証しないことと、読み取り専用の初期状態検証を
+既存コマンドへ追加する候補を記録した。実装前にextent完全被覆とpublication
+時点のidentity/content再検証を具体化する。q134の未クリア状態は維持する。

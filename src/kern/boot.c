@@ -46,6 +46,11 @@ static const struct parameter_name parameter_names[KERN_BOOT_PARAMETER_COUNT] = 
 	PARAMETER_NAME("init"),
 };
 
+static char firmware_source[ZEDBSD_BOOT_SOURCE_SELECTOR_SIZE];
+static char configuration_source[ZEDBSD_BOOT_SOURCE_SELECTOR_SIZE];
+static uint64_t configuration_matches;
+static int provenance_selector(const struct boot_partition_identity *identity, char *output);
+
 static struct kern_boot_parameters current_parameters;
 static int current_parameters_valid;
 static int current_parameters_source_present;
@@ -58,6 +63,49 @@ static void record_unknown(struct kern_boot_parameters *parameters, const char *
 static int selector_text(const char *text, size_t maximum, int device_name);
 static int context_fail(struct kern_boot_source_context *context, unsigned slot, enum kern_boot_source_failure_stage stage, int error);
 static int runtime_mount_lookup(struct kern_boot_source_slot *source, const char *relative, struct path *result);
+
+/* Copies boot provenance before firmware storage can be reclaimed. */
+int
+kern_boot_provenance_set(const struct boot_provenance *record)
+{
+	char firmware[ZEDBSD_BOOT_SOURCE_SELECTOR_SIZE];
+	char configuration[ZEDBSD_BOOT_SOURCE_SELECTOR_SIZE];
+	int error;
+
+	firmware_source[0] = '\0';
+	configuration_source[0] = '\0';
+	configuration_matches = 0;
+	if (record == NULL)
+		return 0;
+	if (record->version != ZEDBSD_BOOT_PROVENANCE_VERSION ||
+	    record->config_matches == 0 || record->config_matches > 128U)
+		return EINVAL;
+	error = provenance_selector(&record->firmware, firmware);
+	if (error == 0)
+		error = provenance_selector(&record->configuration, configuration);
+	if (error != 0)
+		return error;
+	memcpy(firmware_source, firmware, sizeof(firmware_source));
+	memcpy(configuration_source, configuration, sizeof(configuration_source));
+	configuration_matches = record->config_matches;
+	return 0;
+}
+
+/* Returns an immutable selector, not the possibly overridden boot0 setting. */
+const char *
+kern_boot_source_selector(unsigned configuration)
+{
+	const char *source;
+
+	source = configuration ? configuration_source : firmware_source;
+	return source[0] != '\0' ? source : "unavailable";
+}
+
+uint64_t
+kern_boot_config_matches(void)
+{
+	return configuration_matches;
+}
 
 /*
  * Parses a boot parameter string into a parameter record.
@@ -1299,5 +1347,39 @@ runtime_mount_lookup(
 		return error;
 
 	/* Succeeded. */
+	return 0;
+}
+
+/* Formats only supported, nonempty GPT signatures into stable selectors. */
+static int
+provenance_selector(const struct boot_partition_identity *identity, char *output)
+{
+	static const uint8_t order[16] = {3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15};
+	static const char digits[] = "0123456789abcdef";
+	unsigned i, position, nonzero;
+	uint8_t byte;
+
+	memset(output, 0, ZEDBSD_BOOT_SOURCE_SELECTOR_SIZE);
+	if (identity->index == 0 || identity->block_count == 0 ||
+	    identity->first_lba > UINT64_MAX - identity->block_count)
+		return EINVAL;
+	if (identity->scheme == ZEDBSD_PARTITION_SCHEME_MBR)
+		return 0;
+	if (identity->scheme != ZEDBSD_PARTITION_SCHEME_GPT)
+		return EINVAL;
+	nonzero = 0;
+	for (i = 0; i < 16; i++)
+		nonzero |= identity->signature[i];
+	if (nonzero == 0)
+		return EINVAL;
+	memcpy(output, "PARTUUID=", 9);
+	position = 9;
+	for (i = 0; i < 16; i++) {
+		if (i == 4 || i == 6 || i == 8 || i == 10)
+			output[position++] = '-';
+		byte = identity->signature[order[i]];
+		output[position++] = digits[byte >> 4];
+		output[position++] = digits[byte & 15U];
+	}
 	return 0;
 }

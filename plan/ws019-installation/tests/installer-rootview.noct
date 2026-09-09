@@ -1,0 +1,58 @@
+require rootview;
+
+func rvCheck(ok, message) { if (!ok) { System.error(message); } }
+func rvImage() { return instRootImageRecord("kern.boot.root_image: 1:15:9:2:42:1048576\n"); }
+func rvStat(c, path) { return c.files[path]; }
+func rvDirectory(device, inode) { return {device:device, inode:inode, mode:16832, permissions:448, uid:0}; }
+func rvMkdir(c, path) { c.files[path] = rvDirectory(1, Dict.size(c.files) + 10); }
+func rvRmdir(c, path) { Dict.remove(c.files, path); }
+func rvMount(c, item) {
+    rvCheck(item.filesystem == "ufs" && item.readonly, "source mount is not read-only UFS");
+    c.covered = c.files[item.path];
+    c.files[item.path] = rvDirectory(9, 2);
+    if (c.mode == "wrong-mount") { c.files[item.path].device = 8; }
+    if (c.mode == "mount-after") { System.error("lost mount status"); }
+}
+func rvUnmount(c, path) { c.files[path] = c.covered; c.unmounted = c.unmounted + 1; }
+func rvObserve(c) {
+    c.calls = c.calls + 1;
+    var image = rvImage();
+    var devices = instInventory("device\tloop7\t9\t0\t1\t512\t2048\t0\n");
+    if (c.mode == "missing") { devices = []; }
+    if (c.mode == "writable") { devices[0].flags = 0; }
+    if (c.mode == "size") { devices[0].sectors = 1024; }
+    if (c.mode == "offset") { devices[0].offset = 1; }
+    if (c.mode == "parent") { devices[0].parent = 2; }
+    if (c.mode == "duplicate") { Array.push(devices, devices[0]); }
+    if (c.calls > 1 && c.mode == "renamed") { devices[0].name = "loop8"; }
+    if (c.calls > 1 && c.mode == "root-changed") { image.inode = 43; }
+    return {image:image, devices:devices};
+}
+func rvAcquire(data, unused) {
+    return instRootViewAcquire(data.w, rvImage(), rvObserve, data.c);
+}
+func rvBadType(data, unused) {
+    var directory = instWorkspaceDirectory(data.w, "invalid");
+    return instWorkspaceAttachType(data.w, directory, "loop7", true, "auto");
+}
+func main(args) {
+    var ops = {stat:rvStat, mkdir:rvMkdir, rmdir:rvRmdir, mount:rvMount, unmount:rvUnmount};
+    var count = 0;
+    for (mode in ["normal", "missing", "writable", "size", "offset", "parent", "duplicate",
+        "renamed", "root-changed", "wrong-mount", "mount-after", "bad-type"]) {
+        var c = {mode:mode, calls:0, files:{}, covered:0, unmounted:0};
+        var w = instWorkspaceNew(ops, c, "/run/test");
+        instWorkspaceDirectory(w, "");
+        var result = {ok:false};
+        if (mode == "bad-type") { result = System.pcall(rvBadType, {w:w, c:c}, 0); }
+        else { result = System.pcall(rvAcquire, {w:w, c:c}, 0); }
+        rvCheck(result.ok == (mode == "normal"), "unexpected admission: " + mode);
+        if (result.ok) { instRootViewCheck(w, result.value); }
+        var cleanup = instWorkspaceRelease(w);
+        rvCheck(cleanup.ok == (mode != "mount-after"), "cleanup result: " + mode);
+        if (cleanup.ok) { rvCheck(Dict.size(c.files) == 0, "leaked workspace: " + mode); }
+        else { rvCheck(c.unmounted == 0 && Dict.size(c.files) == 2, "uncertain mount cleanup"); }
+        count = count + 1;
+    }
+    print("installer root view PASS " + count + " scenarios");
+}

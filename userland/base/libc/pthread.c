@@ -289,7 +289,7 @@ fenv_t *
 __libc_fenv_location(
 	void)
 {
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(ZEDBSD_DYNAMIC_LIBC) || defined(ZEDBSD_STATIC_TLS)
 	static _Thread_local fenv_t environment = {0U, FE_TONEAREST};
 
 	/* Returns the computed result. */
@@ -337,7 +337,7 @@ int *
 __libc_errno_location(
 	void)
 {
-#if defined(ZEDBSD_DYNAMIC_LIBC)
+#if defined(ZEDBSD_DYNAMIC_LIBC) || defined(ZEDBSD_STATIC_TLS)
 	static _Thread_local int dynamic_errno;
 
 	/* Returns the computed result. */

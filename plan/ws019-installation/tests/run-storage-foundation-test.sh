@@ -4,7 +4,7 @@ set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-storage-test.XXXXXX")
 trap 'rm -rf -- "$temporary"' EXIT HUP INT TERM
-common="-std=c11 -O1 -g -Wall -Wextra -Werror -ffunction-sections -fdata-sections -DZEDBSD_USER_ABI_LP64 -DZEDBSD_STORAGE_HOST_TEST -I$repo -I$repo/include -I$repo/include/uapi -I$repo/src -I$repo/libc/include"
+common="-std=c11 -O1 -g -Wall -Wextra -Werror -ffunction-sections -fdata-sections -DZEDBSD_USER_ABI_LP64 -DZEDBSD_STORAGE_HOST_TEST -DSTORAGE_FOUNDATION_HAL_STUBS -I$repo -I$repo/include -I$repo/include/uapi -I$repo/src -I$repo/libc/include"
 for mode in ordinary sanitize; do
 	extra=""
 	if test "$mode" = sanitize; then
@@ -16,7 +16,7 @@ for mode in ordinary sanitize; do
 	${HOSTCC:-cc} $common $extra \
 		"$repo/plan/ws019-installation/tests/storage-foundation-test.c" \
 		"$repo/src/drivers/disklabel/mbr.c" \
-		-Wl,--gc-sections "$repo/src/kern/io-stats.c" -o "$temporary/$mode"
+		-Wl,--gc-sections "$repo/src/kern/io.c" -o "$temporary/$mode"
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$temporary/$mode"
 done
 for arch in amd64 i386; do

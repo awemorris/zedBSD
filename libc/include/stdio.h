@@ -10,6 +10,7 @@
 
 #include <stdarg.h>
 #include <stddef.h>
+#include <zedbsd/rename.h>
 #include <stdint.h>
 #include <sys/types.h>
 
@@ -88,6 +89,8 @@ void funlockfile(FILE *stream);
 int setvbuf(FILE *stream, char *buffer, int mode, size_t size);
 void setbuf(FILE *stream, char *buffer);
 int rename(const char *, const char *);
+int renameat(int, const char *, int, const char *);
+int renameat2(int, const char *, int, const char *, unsigned);
 int remove(const char *);
 int asprintf(char **, const char *, ...);
 int vasprintf(char **, const char *, va_list);

@@ -50,6 +50,7 @@
 #include <zedbsd/dirent.h>
 #include <zedbsd/atomic.h>
 #include <zedbsd/fcntl.h>
+#include <zedbsd/rename.h>
 #include <zedbsd/resource.h>
 #include <zedbsd/syscall.h>
 #include <zedbsd/process.h>
@@ -3687,7 +3688,8 @@ sys_mount_call(
 			mount_arguments = &internal;
 		else
 			mount_arguments = NULL;
-		error = mount(type, directory, mount_flags, mount_arguments);
+		error = mount_context(process->cwdi, type, directory,
+		    mount_flags, mount_arguments);
 	}
 
 	/* Reports the outcome of the call. */
@@ -3721,7 +3723,7 @@ sys_unmount_call(
 	/* Reads the mount point and detaches it. */
 	error = copyinstr(args[0], directory, sizeof(directory), NULL);
 	if (error == 0)
-		error = unmount(directory, 0);
+		error = unmount_context(process->cwdi, directory);
 
 	/* Reports the outcome of the call. */
 	if (error != 0)
@@ -4700,7 +4702,7 @@ sys_mutation_common(
 			    other_parent.p_inode, target, credential);
 		if (error == 0) {
 			error = inode_rename(parent.p_inode, &name,
-			    other_parent.p_inode, &other_name, 0);
+			    other_parent.p_inode, &other_name, (unsigned)option);
 			if (error == 0)
 				namecache_remove(other_parent.p_inode, &other_name);
 		}
@@ -4743,8 +4745,11 @@ sys_mutation_call(
 	const uintptr_t args[6])
 {
 	intptr_t result;
+	uintptr_t option;
 
-	result = sys_mutation_common(number, AT_FDCWD, args[0], args[1],
+	/* Only mkdir has a mode argument; rename's second argument is a path. */
+	option = number == ZEDBSD_SYS_mkdir ? args[1] : 0;
+	result = sys_mutation_common(number, AT_FDCWD, args[0], option,
 		AT_FDCWD, args[1]);
 	return result;
 }
@@ -4775,6 +4780,15 @@ sys_mutation_at_call(
 			operation = ZEDBSD_SYS_unlink;
 		result = sys_mutation_common(operation, (int)args[0],
 			args[1], 0, AT_FDCWD, 0);
+		return result;
+	}
+
+	/* Validates the new ABI without changing renameat's four arguments. */
+	if (number == ZEDBSD_SYS_renameat2) {
+		if ((args[4] & ~(uintptr_t)RENAME_NOREPLACE) != 0)
+			return -EINVAL;
+		result = sys_mutation_common(ZEDBSD_SYS_rename, (int)args[0],
+		    args[1], args[4], (int)args[2], args[3]);
 		return result;
 	}
 
@@ -8924,6 +8938,7 @@ syscall_dispatch_body(
 	case ZEDBSD_SYS_mkdirat:
 	case ZEDBSD_SYS_unlinkat:
 	case ZEDBSD_SYS_renameat:
+	case ZEDBSD_SYS_renameat2:
 		result = sys_mutation_at_call(number, args);
 		break;
 

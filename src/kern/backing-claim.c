@@ -19,6 +19,7 @@
 
 #include <kern/disk.h>
 #include <kern/fat.h>
+#include <kern/file-backing.h>
 #include <kern/inode.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
@@ -53,6 +54,14 @@ struct backing_claim {
 	unsigned key_valid;
 	unsigned preparing;
 	unsigned registered;
+};
+
+struct claim_metadata {
+	struct backing_claim *claim;
+	struct disk *disk;
+	struct backing_range *ranges;
+	unsigned count;
+	unsigned capacity;
 };
 
 struct backing_mutation {
@@ -101,6 +110,10 @@ static const unsigned char early_boot_execution_token;
 static const void *current_execution(void);
 static int canonical_range(struct disk *disk, uint64_t block, uint64_t count, struct backing_range *result);
 static int inode_key(struct inode *inode, struct backing_object_key *key);
+static int finalize_claim(struct backing_claim *claim, struct file *file, const struct backing_claim_extent *extents, unsigned count);
+static int collect_metadata(uint64_t block, uint32_t count, void *context);
+static void range_sift(struct backing_range *ranges, unsigned root, unsigned count);
+static int ranges_disjoint(struct backing_range *ranges, unsigned count);
 static int range_overlap(const struct backing_range *left, const struct backing_range *right);
 static int range_contains(const struct backing_range *outer, const struct backing_range *inner);
 static int range_equal(const struct backing_range *left, const struct backing_range *right);
@@ -298,8 +311,61 @@ backing_claim_finalize(
 	const struct backing_claim_extent *extents,
 	unsigned count)
 {
+	return finalize_claim(claim, NULL, extents, count);
+}
+
+int
+backing_claim_finalize_file(struct backing_claim *claim, struct file *file,
+	const struct backing_claim_extent *extents, unsigned count)
+{
+	int matches;
+	int error;
+
+	if (file == NULL || file->f_inode == NULL || count == 0)
+		return EINVAL;
+	error = backing_claim_inode_matches(claim, file->f_inode, &matches);
+	if (error != 0)
+		return error;
+	if (!matches)
+		return EXDEV;
+	return finalize_claim(claim, file, extents, count);
+}
+
+/* Canonicalizes metadata in both passes and bounds the second pass strictly. */
+static int
+collect_metadata(uint64_t block, uint32_t count, void *context)
+{
+	struct claim_metadata *metadata;
+	struct backing_range range;
+	int error;
+
+	metadata = context;
+	if (metadata->count == UINT32_MAX)
+		return EOVERFLOW;
+	if (metadata->ranges != NULL && metadata->count >= metadata->capacity)
+		return EAGAIN;
+	error = canonical_range(metadata->disk, block, count, &range);
+	if (error != 0)
+		return error;
+	if (range.leaf != metadata->claim->key.leaf ||
+	    range.first < metadata->claim->key.volume_first ||
+	    range.last > metadata->claim->key.volume_last)
+		return EXDEV;
+	if (metadata->ranges != NULL)
+		metadata->ranges[metadata->count] = range;
+	metadata->count++;
+	return 0;
+}
+
+static int
+finalize_claim(struct backing_claim *claim, struct file *file,
+	const struct backing_claim_extent *extents, unsigned count)
+{
 	struct backing_range *ranges;
 	struct backing_claim *existing;
+	struct claim_metadata metadata;
+	unsigned data_count;
+	unsigned metadata_count;
 	unsigned i;
 	unsigned j;
 	unsigned k;
@@ -316,6 +382,21 @@ backing_claim_finalize(
 	    (count != 0 && extents == NULL))
 		return EINVAL;
 
+	data_count = count;
+	metadata_count = 0;
+	memset(&metadata, 0, sizeof(metadata));
+	if (file != NULL) {
+		metadata.claim = claim;
+		metadata.disk = file->f_inode->i_mount->m_disk;
+		error = file_backing_metadata_extents(file, collect_metadata, &metadata);
+		if (error != 0)
+			return error;
+		metadata_count = metadata.count;
+		if (metadata_count > UINT32_MAX - count)
+			return EOVERFLOW;
+		count += metadata_count;
+	}
+
 	/* Canonicalizes every extent and confines it to the claimed volume. */
 	if (count != 0) {
 		ranges = kern_calloc(count, sizeof(*ranges));
@@ -323,7 +404,7 @@ backing_claim_finalize(
 			return ENOMEM;
 
 		/* Resolves every extent to a range of the canonical device. */
-		for (i = 0; i < count; i++) {
+		for (i = 0; i < data_count; i++) {
 			error = canonical_range(
 				extents[i].disk,
 				extents[i].block,
@@ -342,6 +423,26 @@ backing_claim_finalize(
 				return EXDEV;
 			}
 		}
+	}
+
+	if (file != NULL) {
+		metadata.ranges = ranges + data_count;
+		metadata.capacity = metadata_count;
+		metadata.count = 0;
+		error = file_backing_metadata_extents(file, collect_metadata, &metadata);
+		if (error == 0 && metadata.count != metadata_count)
+			error = EAGAIN;
+		if (error != 0) {
+			kern_free(ranges);
+			return error;
+		}
+	}
+
+	/* Ownership ranges may be reordered; the caller's logical map is separate. */
+	error = ranges_disjoint(ranges, count);
+	if (error != 0) {
+		kern_free(ranges);
+		return error;
 	}
 
 	irq = spin_lock_irqsave(&claim_lock);
@@ -426,7 +527,8 @@ backing_claim_prepare_disk(
 
 	/* Rejects a missing result pointer or an unknown owner kind. */
 	if (result == NULL ||
-	    (owner != BACKING_CLAIM_SWAP && owner != BACKING_CLAIM_LOOP))
+	    (owner != BACKING_CLAIM_SWAP && owner != BACKING_CLAIM_LOOP &&
+	    owner != BACKING_CLAIM_ADMIN))
 		return EINVAL;
 
 	*result = NULL;
@@ -956,7 +1058,7 @@ canonical_range(
 	return 0;
 }
 
-/* Derives the backing object key of a FAT regular file. */
+/* Qualifies the filesystem's stable file identity by its canonical volume. */
 static int
 inode_key(
 	struct inode *inode,
@@ -975,12 +1077,15 @@ inode_key(
 	if (inode->i_mount == NULL || inode->i_mount->m_disk == NULL)
 		return EOPNOTSUPP;
 
-	/* Rejects a file outside FAT. */
-	if (inode->i_mount->m_type != &drv_fat_filesystem_type)
+	if (inode->i_mount->m_type == NULL)
 		return EOPNOTSUPP;
 
-	/* Resolves the file identity through the FAT helper when present. */
-	if (drv_fat_file_backing_identity != NULL) {
+	/* Production filesystems provide their own stable object identity. */
+	if (inode->i_mount->m_type->file_backing_identity != NULL) {
+		error = inode->i_mount->m_type->file_backing_identity(inode, &disk, &object);
+	} else if (inode->i_mount->m_type != &drv_fat_filesystem_type) {
+		return EOPNOTSUPP;
+	} else if (drv_fat_file_backing_identity != NULL) {
 		error = drv_fat_file_backing_identity(inode, &disk, &object);
 	} else {
 		/*
@@ -1008,6 +1113,55 @@ inode_key(
 	key->object = object;
 
 	/* Reports the derived key. */
+	return 0;
+}
+
+/* Restores a maximum heap using physical starts as keys. */
+static void
+range_sift(struct backing_range *ranges, unsigned root, unsigned count)
+{
+	struct backing_range saved;
+	unsigned child;
+
+	saved = ranges[root];
+	while (root < count / 2U) {
+		child = root * 2U + 1U;
+		if (child + 1U < count && ranges[child].first < ranges[child + 1U].first)
+			child++;
+		if (saved.first >= ranges[child].first)
+			break;
+		ranges[root] = ranges[child];
+		root = child;
+	}
+	ranges[root] = saved;
+}
+
+/* Checks self-overlap outside the registry lock with bounded sorting work. */
+static int
+ranges_disjoint(struct backing_range *ranges, unsigned count)
+{
+	struct backing_range saved;
+	unsigned index;
+
+	if (count < 2U)
+		return 0;
+	index = count / 2U;
+	while (index != 0) {
+		index--;
+		range_sift(ranges, index, count);
+	}
+	index = count;
+	while (index > 1U) {
+		index--;
+		saved = ranges[0];
+		ranges[0] = ranges[index];
+		ranges[index] = saved;
+		range_sift(ranges, 0, index);
+	}
+	for (index = 1; index < count; index++) {
+		if (ranges[index - 1U].last > ranges[index].first)
+			return EINVAL;
+	}
 	return 0;
 }
 

@@ -16,9 +16,7 @@ void drv_console_input_ownership_test_publish(const struct input_report *);
 int drv_console_input_ownership_test_pop(uint32_t *, unsigned *, unsigned *);
 int drv_console_input_ownership_test_state(struct input_device *, unsigned,
     unsigned *, unsigned *, unsigned *, uint16_t *, int *);
-void drv_console_input_ownership_test_drain(int);
 
-static unsigned hal_drain_calls;
 
 void
 spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
@@ -57,11 +55,6 @@ waitq_wake_all(struct wait_queue *queue)
 	queue->sequence++;
 }
 
-void
-hal_cons_drain_input(void)
-{
-	hal_drain_calls++;
-}
 
 static struct input_report
 marker(struct input_device *device, unsigned id, unsigned flags)
@@ -161,7 +154,7 @@ test_state_only_resync(void)
 }
 
 static void
-test_console_only_detach_and_drain(void)
+test_console_only_detach(void)
 {
 	struct input_device *device = (struct input_device *)(uintptr_t)2U;
 	struct input_report report;
@@ -180,18 +173,13 @@ test_console_only_detach_and_drain(void)
 	assert((translated & INPUT_KEY_RELEASE) != 0);
 	assert(id == 22 && repeat == 0);
 
-	hal_drain_calls = 0;
-	drv_console_input_ownership_test_drain(1);
-	assert(hal_drain_calls == 0);
-	drv_console_input_ownership_test_drain(0);
-	assert(hal_drain_calls == 1);
 }
 
 int
 main(void)
 {
 	test_state_only_resync();
-	test_console_only_detach_and_drain();
+	test_console_only_detach();
 	puts("WS006 production console broker ownership: PASS");
 	return 0;
 }

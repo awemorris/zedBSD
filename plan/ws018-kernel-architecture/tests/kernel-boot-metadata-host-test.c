@@ -5,6 +5,7 @@
 
 #include <kern/boot.h>
 #include <kern/kernel.h>
+#include <kern/thread.h>
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -26,6 +27,10 @@ static unsigned vfs_device_count;
 static char selected_init[64];
 static jmp_buf idle_return;
 static struct kern_boot_parameters parameters;
+static struct thread boot_thread;
+static void (*boot_entry)(void *);
+static void *boot_argument;
+static unsigned boot_starts;
 
 #define CHECK(expression)                                                     \
 	do {                                                                   \
@@ -144,12 +149,40 @@ sched_idle(void)
 	longjmp(idle_return, 1);
 }
 
+int
+kthread_create(void (*entry)(void *), void *argument, int priority,
+	struct thread **result)
+{
+	CHECK(entry != NULL);
+	(void)priority;
+	memset(&boot_thread, 0, sizeof(boot_thread));
+	boot_entry = entry;
+	boot_argument = argument;
+	*result = &boot_thread;
+	return 0;
+}
+
+void
+thread_start(struct thread *thread)
+{
+	CHECK(thread == &boot_thread);
+	CHECK(thread->detached != 0);
+	boot_starts++;
+}
+
 static void
 run_kernel_main(const struct boot_handoff *handoff,
 	const struct boot_device *devices, unsigned device_count)
 {
+	unsigned previous_vfs = vfs_initializations;
+	unsigned previous_starts = boot_starts;
+
 	if (setjmp(idle_return) == 0)
 		kernel_main(handoff, devices, device_count);
+	/* The idle caller must not execute blocking filesystem initialization. */
+	CHECK(vfs_initializations == previous_vfs);
+	CHECK(boot_starts == previous_starts + 1);
+	boot_entry(boot_argument);
 }
 
 static void
@@ -210,7 +243,8 @@ main(void)
 		check_device(kern_boot_device_at(index), &expected[index]);
 	CHECK(kern_boot_device_at(3) == NULL);
 	CHECK(kern_boot_device_at(UINT32_MAX) == NULL);
-	CHECK(vfs_handoff == &handoff);
+	CHECK(vfs_handoff != &handoff);
+	CHECK(memcmp(vfs_handoff, &handoff, sizeof(handoff)) == 0);
 	CHECK(vfs_devices == devices);
 	CHECK(vfs_device_count == 3);
 	CHECK(strcmp(selected_init, "/sbin/init") == 0);
@@ -220,6 +254,7 @@ main(void)
 	 * this host caller likewise keeps its table alive for the test. */
 	memset(&handoff, 0xa5, sizeof(handoff));
 	CHECK(kern_boot_bios_id() == 0x82U);
+	CHECK(vfs_handoff->boot_bios_id == 0x82U);
 	for (index = 0; index < 3; index++)
 		check_device(kern_boot_device_at(index), &expected[index]);
 

@@ -33,6 +33,7 @@ extern uint8_t amd64_ap_trampoline_entry[];
 static unsigned present_count = 1;
 static struct hal_cpu_mask ready_mask;
 static volatile unsigned panic_available;
+static volatile unsigned stop_requested;
 
 static void short_delay(void);
 static int start_one(struct amd64_percpu *cpu, int *timecounter_valid);
@@ -409,8 +410,24 @@ void __attribute__((noreturn))
 hal_cpu_panic_all(
 	void)
 {
-	/* Delivers the architecture-wide panic broadcast. */
-	amd64_lapic_panic_all();
+	/* Only broadcast once every secondary can receive the terminal NMI. */
+	if (amd64_smp_panic_available()) {
+		__atomic_store_n(&stop_requested, 1U, __ATOMIC_RELEASE);
+		amd64_lapic_panic_all();
+	}
+
+	/* Early boot has no safe peer broadcast; stop the calling CPU locally. */
+	(void)hal_irq_disable();
+	for (;;)
+		asm_hlt();
+}
+
+/* Distinguishes the terminal stop NMI from an unrelated hardware fault. */
+int
+amd64_smp_stop_requested(
+	void)
+{
+	return __atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE) != 0;
 }
 
 /* Delays between architectural AP startup messages. */

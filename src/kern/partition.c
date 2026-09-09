@@ -280,6 +280,14 @@ int
 partition_reload(
 	struct disk *parent)
 {
+	return partition_reload_claimed(parent, NULL);
+}
+
+int
+partition_reload_claimed(
+	struct disk *parent,
+	const struct backing_claim *claim)
+{
 	struct backing_mutation_guard guard;
 	struct reload_workspace *work;
 	int error;
@@ -300,13 +308,13 @@ partition_reload(
 		return EBUSY;
 	work = NULL;
 	error = backing_mutation_begin_disk(
-		parent, 0, parent->d_block_count, NULL, &guard);
+		parent, 0, parent->d_block_count, claim, &guard);
 	if (error != 0) {
 		atomic_store_release(&partition_reloading, 0);
 		return error;
 	}
 
-	error = disk_reload_begin(parent);
+	error = disk_reload_begin_claimed(parent, claim);
 	if (error != 0) {
 		backing_mutation_end(&guard);
 		atomic_store_release(&partition_reloading, 0);

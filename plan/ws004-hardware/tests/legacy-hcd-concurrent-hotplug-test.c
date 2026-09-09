@@ -123,6 +123,51 @@ struct controller {
 	int iaa_clear_stuck;
 };
 
+struct schedule_link {
+	struct schedule_link *previous;
+	struct schedule_link *next;
+	unsigned hardware_successor;
+};
+
+static void
+schedule_link_unlink(struct schedule_link **head, struct schedule_link *request)
+{
+	if (request->previous != NULL) {
+		request->previous->hardware_successor = request->hardware_successor;
+		request->previous->next = request->next;
+	} else {
+		assert(*head == request);
+		*head = request->next;
+	}
+	if (request->next != NULL)
+		request->next->previous = request->previous;
+	request->previous = NULL;
+	request->next = NULL;
+}
+
+static void
+test_uhci_software_schedule_unlink(void)
+{
+	struct schedule_link first, middle, last;
+	struct schedule_link *head = &first;
+
+	memset(&first, 0, sizeof(first));
+	memset(&middle, 0, sizeof(middle));
+	memset(&last, 0, sizeof(last));
+	first.next = &middle;
+	first.hardware_successor = 2U;
+	middle.previous = &first;
+	middle.next = &last;
+	middle.hardware_successor = 3U;
+	last.previous = &middle;
+	schedule_link_unlink(&head, &middle);
+	assert(head == &first);
+	assert(first.next == &last);
+	assert(first.hardware_successor == 3U);
+	assert(last.previous == &first);
+	assert(middle.previous == NULL && middle.next == NULL);
+}
+
 struct uhci_advance_td_model {
 	uint32_t physical, link, status, token;
 };
@@ -2075,6 +2120,7 @@ test_reclaim_safe_preallocated_reserve(enum controller_kind kind)
 int
 main(void)
 {
+	test_uhci_software_schedule_unlink();
 	test_concurrent_progress(MODEL_UHCI);
 	test_concurrent_progress(MODEL_EHCI);
 	test_cancel_irq_exactly_once(MODEL_UHCI, TERMINAL_IRQ);

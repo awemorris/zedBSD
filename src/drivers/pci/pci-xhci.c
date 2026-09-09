@@ -368,9 +368,10 @@ drv_pci_xhci_probe_roots(
 		/* Classifies the current input character. */
 		if (c->quarantined)
 			continue;
-		drv_usb_hcd_root_hub_changed(&c->hcd);
-		c->port_pending = 0;
-		c->root_ready = 1;
+		/* Initial enumeration has the same worker ownership as hotplug.
+		 * The boot idle task must not retain the global topology gate. */
+		__atomic_store_n(&c->root_ready, 1U, __ATOMIC_RELEASE);
+		port_change_defer(c);
 	}
 }
 
@@ -857,9 +858,9 @@ port_change_defer(
 	struct thread *worker;
 
 	/* Classifies the current input character. */
-	if (!c->root_ready)
+	if (!__atomic_load_n(&c->root_ready, __ATOMIC_ACQUIRE))
 		return;
-	c->port_pending = 1U;
+	__atomic_store_n(&c->port_pending, 1U, __ATOMIC_RELEASE);
 
 	/* Handles the worker condition. */
 	worker = c->port_worker;

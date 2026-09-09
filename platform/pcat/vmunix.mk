@@ -58,7 +58,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/drivers/generic/input.o \
 	$(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
-	$(BUILD)/src/drivers/generic/system-device.o $(BUILD)/src/kern/shutdown.o \
+	$(BUILD)/src/drivers/generic/system-device.o $(BUILD)/src/drivers/generic/memory-device.o $(BUILD)/src/kern/shutdown.o \
 	$(PCAT_GRAPHICS_OBJS) \
 	$(KERN_BOOT_OBJS) \
 	$(BUILD)/src/kern/init.o \
@@ -81,6 +81,7 @@ endif
 PCAT_USB_CLASS_OBJS :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-storage.o
+PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-uas.o
 endif
 PCAT_NVME_OBJS :=
 ifeq ($(CONFIG_DRIVER_PCI_NVME),y)
@@ -546,7 +547,7 @@ DYNAMIC_SOFTFLOAT_OBJS := $(DYNAMIC_COMPILER_RT_OBJS) \
 	$(DYNAMIC_LIBM_OBJ) $(DYNAMIC_FLOAT_PARSE_OBJ)
 DYNAMIC_LIBC_OBJS += $(DYNAMIC_SOFTFLOAT_OBJS)
 
-$(DYNAMIC_DIR)/obj/%.o: %.c
+$(DYNAMIC_DIR)/obj/%.o: %.c $(ZEDBSD_SYSROOT_I386)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
 

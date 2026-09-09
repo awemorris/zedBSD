@@ -36,7 +36,7 @@ $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(WS006_P005_UFS),amd64,\
 	--file /usr/bin/evdev-capability-probe=$(WS006_P005_PROBE)))
 
 $(WS006_P005_IMAGE): $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(WS006_P005_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
@@ -44,11 +44,11 @@ $(WS006_P005_IMAGE): $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct \
 		--backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
-		--machine pcat --gpt \
+		--machine pcat --layout hybrid \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix \

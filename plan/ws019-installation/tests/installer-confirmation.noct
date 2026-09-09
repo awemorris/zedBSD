@@ -1,0 +1,7 @@
+require confirmation;
+func main(args) {
+    var accepted = instConfirm("Destination: test NVMe ESP and payload; no writes in this fixture.",
+        "nvme0n1", "nvme0n1p2");
+    if (accepted) { print("CONFIRM ACCEPTED"); }
+    else { print("CONFIRM CANCELLED"); }
+}

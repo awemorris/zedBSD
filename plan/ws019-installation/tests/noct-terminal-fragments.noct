@@ -1,0 +1,26 @@
+func terminalMark(text) { Term.write(text + "\r\n"); Term.flush(); }
+func terminalExpect(expected) {
+    var actual = Term.readKey(150);
+    if (actual != expected) { System.error("terminal event " + actual + " expected " + expected); }
+}
+func terminalFragments(context, unused) {
+    terminalMark("READY CSI");
+    terminalExpect(-1);
+    terminalMark("CONTINUE CSI");
+    terminalExpect(Term.KEY_UP);
+    terminalMark("READY UTF8");
+    terminalExpect(-1);
+    terminalMark("CONTINUE UTF8");
+    terminalExpect(12354);
+    terminalMark("READY SS3");
+    terminalExpect(-1);
+    terminalMark("CONTINUE SS3");
+    terminalExpect(Term.KEY_UP);
+}
+func main(args) {
+    if (Term.open() != 1) { System.error("no terminal"); }
+    var result = System.pcall(terminalFragments, 0, 0);
+    Term.close();
+    if (!result.ok) { System.error(result.message); }
+    print("FRAGMENTS PASS");
+}

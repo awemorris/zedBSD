@@ -114,7 +114,7 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	for source in $$(ZEDBSD_SYSROOT_LIBC_SOURCES); do \
 		object="$$$$temporary/obj/$$$$source.o"; mkdir -p "$$$${object%/*}"; \
 		'$(ZEDBSD_SYSROOT_CLANG)' --target='$(3)' --sysroot="$$$$temporary" \
-			$(4) -D$(5) $(11) -nostdinc -Ilibc/include -Iinclude/uapi -Iinclude -Isrc -I. \
+			$(4) -D$(5) $(11) -DZEDBSD_STATIC_TLS -nostdinc -Ilibc/include -Iinclude/uapi -Iinclude -Isrc -I. \
 			-ffreestanding -fno-builtin -fno-pic -fno-pie \
 			-fno-stack-protector -fno-asynchronous-unwind-tables \
 			-fno-unwind-tables -fno-common -fno-strict-aliasing \
@@ -130,7 +130,7 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	for source in $$(ZEDBSD_SYSROOT_COMPILER_RT_SOURCES); do \
 		object="$$$$temporary/obj/$$$$source.o"; mkdir -p "$$$${object%/*}"; \
 		'$(ZEDBSD_SYSROOT_CLANG)' --target='$(3)' --sysroot="$$$$temporary" \
-			$(4) -D$(5) $(11) -nostdinc -Ilibc/include -Iinclude/uapi -Iinclude -Isrc -I. \
+			$(4) -D$(5) $(11) -DZEDBSD_STATIC_TLS -nostdinc -Ilibc/include -Iinclude/uapi -Iinclude -Isrc -I. \
 			-ffreestanding -fno-builtin -fno-pic -fno-pie \
 			-fno-stack-protector -fno-asynchronous-unwind-tables \
 			-fno-unwind-tables -fno-common -fno-strict-aliasing \

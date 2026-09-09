@@ -1,0 +1,55 @@
+require metadata;
+func hybridCheck(ok, message) { if (!ok) { System.error("hybrid test: " + message); } }
+func hybridInvoke(context, unused) { return instMetadataSourceHybrid(context.disk, context.table, context.ranges); }
+func hybridBad(context, bytes, offset, value) {
+    var old = bytes[offset];
+    bytes[offset] = value;
+    var result = System.pcall(hybridInvoke, context, 0);
+    bytes[offset] = old;
+    hybridCheck(!result.ok, "accepted mutation at " + offset);
+}
+func main(args) {
+    hybridCheck(Array.size(args) == 1, "source image required");
+    var mbr = instSourceRead(args[0], 0L, 512);
+    var primary = instSourceRead(args[0], 512L, 512);
+    var last = instSourceU64(primary, 32);
+    var backup = instSourceRead(args[0], last * 512, 512);
+    var raw = instSourceRead(args[0], instSourceU64(primary, 72) * 512, instU32(primary, 80) * 128);
+    var parts = [];
+    for (i in 0..instU32(primary, 80)) {
+        var at = i * 128;
+        if (instSourceU64(raw, at + 32) == 0) { continue; }
+        Array.push(parts, {start:instSourceU64(raw, at + 32),
+            count:instSourceU64(raw, at + 40) - instSourceU64(raw, at + 32) + 1,
+            type:"ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"});
+    }
+    var context = {disk:{sectorSize:512, sectors:last + 1}, table:{parts:parts}, ranges:[
+        {offset:0L,size:512,bytes:mbr}, {offset:512L,size:512,bytes:primary},
+        {offset:last * 512,size:512,bytes:backup}]};
+    hybridCheck(hybridInvoke(context, 0), "normal producer profile");
+    hybridBad(context, mbr, 510, 0);
+    for (i in 0..4) {
+        var at = 446 + i * 16;
+        if (mbr[at + 4] == 238) {
+            hybridBad(context, mbr, at, 128);
+            hybridBad(context, mbr, at + 8, 2);
+            hybridBad(context, mbr, at + 12, mbr[at + 12] ^ 1);
+        } else if (mbr[at + 4] != 0) {
+            hybridBad(context, mbr, at, 1);
+            hybridBad(context, mbr, at + 4, 15);
+            hybridBad(context, mbr, at + 8, mbr[at + 8] ^ 1);
+            hybridBad(context, mbr, at + 12, mbr[at + 12] ^ 1);
+        }
+    }
+    for (header in [primary, backup]) {
+        hybridBad(context, header, 0, 0);
+        hybridBad(context, header, 12, 96);
+        hybridBad(context, header, 20, 1);
+        hybridBad(context, header, 84, 0);
+        hybridBad(context, header, 24, header[24] ^ 1);
+        hybridBad(context, header, 32, header[32] ^ 1);
+    }
+    context.disk.sectorSize = 4096;
+    hybridCheck(!System.pcall(hybridInvoke, context, 0).ok, "sector restriction");
+    print("installer hybrid PASS real source profile and 21 refusal mutations");
+}

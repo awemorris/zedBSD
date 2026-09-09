@@ -168,7 +168,7 @@ def check(args: argparse.Namespace) -> None:
 
     expected_files = (("BOOTZBSD.EXE", args.bootzbsd, "BOOTZBSD.EXE"),
                       ("VMUNIX", args.kernel, "VMUNIX"),
-                      ("usr/bin/noct", args.noct, "/usr/bin/noct"),
+                      ("bin/noct", args.noct, "/bin/noct"),
                       ("usr/bin/holoris.nct",
                        args.holoris if args.arch_image is None else None,
                        "/usr/bin/holoris.nct")) + tuple(bin_files)

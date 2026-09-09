@@ -2,6 +2,7 @@
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #define STORAGE_FOUNDATION_CUSTOM_LOCK
 #define STORAGE_FOUNDATION_CUSTOM_WAIT
+#define STORAGE_FOUNDATION_CUSTOM_CLAIM_RELEASE
 #include "../../ws018-kernel-architecture/tests/mount-thread-host.h"
 #define main foundation_main
 #include "../../ws019-installation/tests/storage-foundation-test.c"

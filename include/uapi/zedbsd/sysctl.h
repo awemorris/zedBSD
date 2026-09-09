@@ -68,6 +68,25 @@ struct memory_stats {
 #define KERN_MSGBUF_SIZE	2
 #define KERN_MSGBUF_DROPPED	3
 #define KERN_HOSTNAME	4
+#define KERN_BOOT_FIRMWARE 5
+#define KERN_BOOT_CONFIGURATION 6
+#define KERN_BOOT_CONFIG_MATCHES 7
+#define KERN_BOOT_ROOT_IMAGE 8
+#define ROOT_IMAGE_VERSION 1U
+#define ROOT_IMAGE_OVERLAY 1U
+#define ROOT_IMAGE_MOUNTED 2U
+#define ROOT_IMAGE_READ_ONLY 4U
+#define ROOT_IMAGE_LOOP_READ_ONLY 8U
+
+/* One live root/lower/loop observation; zero flags denotes a native root. */
+struct root_image_info {
+	uint32_t version;
+	uint32_t flags;
+	uint64_t loop_device;
+	uint64_t backing_device;
+	uint64_t backing_inode;
+	uint64_t backing_bytes;
+};
 #define ZEDBSD_HOST_NAME_MAX	64U
 
 struct bufcache_stats {

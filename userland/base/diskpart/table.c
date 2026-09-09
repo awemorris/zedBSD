@@ -221,8 +221,126 @@ static int parse_parts(struct dp_table *t, const uint8_t *raw)
 void dp_free(struct dp_table *t)
 {
 	free(t->mbr); free(t->edited); free(t->parts);
-	for (unsigned i = 0; i < 2; i++) { free(t->copy[i].header); free(t->copy[i].entries); }
+	free(t->new_mbr);
+	for (unsigned i = 0; i < 2; i++) {
+		free(t->copy[i].header);
+		free(t->copy[i].entries);
+		free(t->copy[i].before_header);
+	}
 	memset(t, 0, sizeof(*t));
+}
+
+/* Prepares an empty GPT without requiring the old partition map to be valid. */
+int
+dp_initialize_gpt(
+	struct dp_table *t,
+	const struct dp_io *io,
+	const char *uuid)
+{
+	struct dp_copy *copy;
+	uint8_t guid[16];
+	uint8_t *entry;
+	uint64_t table_blocks;
+	uint64_t protected_blocks;
+	unsigned index;
+	int error;
+
+	if (t == NULL)
+		return EINVAL;
+	memset(t, 0, sizeof(*t));
+	if (io == NULL)
+		return EINVAL;
+	if (io->read == NULL || io->write == NULL || io->flush == NULL)
+		return EINVAL;
+	if (io->sector_size != 512 && io->sector_size != 4096)
+		return EINVAL;
+	if (io->sectors > INT64_MAX / io->sector_size)
+		return EOVERFLOW;
+
+	/* Both 16-KiB entry arrays and headers leave at least one usable LBA. */
+	table_blocks = 16384U / io->sector_size;
+	if (io->sectors < 2 * table_blocks + 4)
+		return ENOSPC;
+	error = dp_guid_parse(uuid, guid);
+	if (error != 0)
+		return error;
+
+	t->io = *io;
+	t->format = DP_GPT;
+	t->slots = 128;
+	t->mbr = malloc(io->sector_size);
+	t->new_mbr = calloc(1, io->sector_size);
+	t->edited = calloc(128, 128);
+	t->parts = calloc(t->slots, sizeof(*t->parts));
+	if (t->mbr == NULL || t->new_mbr == NULL ||
+	    t->edited == NULL || t->parts == NULL) {
+		error = ENOMEM;
+		goto fail;
+	}
+	error = read_lba(io, 0, t->mbr, io->sector_size);
+	if (error != 0)
+		goto fail;
+
+	/* The protective record covers the disk, saturating at the MBR limit. */
+	protected_blocks = io->sectors - 1;
+	if (protected_blocks > UINT32_MAX)
+		protected_blocks = UINT32_MAX;
+	entry = t->new_mbr + 446;
+	entry[2] = 2;
+	entry[4] = 0xee;
+	memset(entry + 5, 0xff, 3);
+	put32(entry + 8, 1);
+	put32(entry + 12, (uint32_t)protected_blocks);
+	t->new_mbr[510] = 0x55;
+	t->new_mbr[511] = 0xaa;
+
+	for (index = 0; index < 2; index++) {
+		copy = &t->copy[index];
+		copy->lba = index == 0 ? 1 : io->sectors - 1;
+		copy->alternate = index == 0 ? io->sectors - 1 : 1;
+		copy->first = 2 + table_blocks;
+		copy->last = io->sectors - 2 - table_blocks;
+		copy->table_lba = index == 0 ? 2 : copy->lba - table_blocks;
+		copy->slots = 128;
+		copy->entry_size = 128;
+		copy->header_size = 92;
+		copy->bytes = 16384;
+		copy->header = calloc(1, io->sector_size);
+		copy->before_header = malloc(io->sector_size);
+		copy->entries = malloc(copy->bytes);
+		if (copy->header == NULL || copy->before_header == NULL ||
+		    copy->entries == NULL) {
+			error = ENOMEM;
+			goto fail;
+		}
+
+		/* Keep the old bytes for preflight, even on blank or corrupt media. */
+		error = read_lba(io, copy->lba, copy->before_header, io->sector_size);
+		if (error != 0)
+			goto fail;
+		error = read_lba(io, copy->table_lba, copy->entries, copy->bytes);
+		if (error != 0)
+			goto fail;
+
+		memcpy(copy->header, "EFI PART", 8);
+		put32(copy->header + 8, 0x10000);
+		put32(copy->header + 12, copy->header_size);
+		put64(copy->header + 24, copy->lba);
+		put64(copy->header + 32, copy->alternate);
+		put64(copy->header + 40, copy->first);
+		put64(copy->header + 48, copy->last);
+		memcpy(copy->header + 56, guid, sizeof(guid));
+		put64(copy->header + 72, copy->table_lba);
+		put32(copy->header + 80, copy->slots);
+		put32(copy->header + 84, copy->entry_size);
+		/* dp_write calculates both CRCs after the caller adds partitions. */
+	}
+	t->changed = 1;
+	return 0;
+
+fail:
+	dp_free(t);
+	return error;
 }
 
 int dp_load(struct dp_table *t, const struct dp_io *io)
@@ -358,7 +476,8 @@ int dp_write(struct dp_table *t, int *started)
 	if (t->format == DP_GPT) {
 		for (unsigned i = 0; i < 2; i++) {
 			struct dp_copy *c = &t->copy[i];
-			error = unchanged(t, c->lba, c->header, t->io.sector_size);
+			const uint8_t *before = c->before_header != NULL ? c->before_header : c->header;
+			error = unchanged(t, c->lba, before, t->io.sector_size);
 			if (!error) error = unchanged(t, c->table_lba, c->entries, c->bytes);
 			if (error) return error;
 		}
@@ -381,6 +500,19 @@ int dp_write(struct dp_table *t, int *started)
 		if (!error) error = unchanged(t, c->lba, header, t->io.sector_size);
 		if (!error) error = unchanged(t, c->table_lba, t->edited, c->bytes);
 		if (error) return error;
+	}
+	/* Publish the protective MBR only after both new GPT copies verify.
+	 * A failure here is still partial initialization, never a rollback. */
+	if (t->new_mbr != NULL) {
+		error = t->io.write(t->io.context, 0, t->new_mbr, t->io.sector_size);
+		if (error != 0)
+			return error;
+		error = t->io.flush(t->io.context);
+		if (error != 0)
+			return error;
+		error = unchanged(t, 0, t->new_mbr, t->io.sector_size);
+		if (error != 0)
+			return error;
 	}
 	return 0;
 }

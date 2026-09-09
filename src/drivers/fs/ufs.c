@@ -562,6 +562,13 @@ static int allocate_inode_number(struct mount *mountp, uid_t uid, gid_t gid, uin
 static int free_inode_number(struct mount *mountp, uint32_t number, uid_t uid, gid_t gid);
 static int indirect_entry(struct mount *mountp, uint64_t fragment, uint32_t index, uint64_t *result);
 static int bmap(struct inode *inode, uint64_t logical, uint64_t *result);
+static int ufs_backing_block(struct mount *mountp, uint64_t fragment);
+static int ufs_backing_map(struct inode *inode, uint64_t logical, uint64_t *result);
+static int ufs_file_extents(struct file *file, file_extent_cb callback, void *context);
+static int ufs_backing_identity(struct inode *inode, struct disk **disk, uint64_t *object);
+static int ufs_backing_lock(struct file *file, struct ufs_mount_state **result);
+static int ufs_metadata_tree(struct mount *mountp, uint64_t fragment, unsigned depth, uint64_t blocks, file_metadata_extent_cb callback, void *context);
+static int ufs_file_metadata_extents(struct file *file, file_metadata_extent_cb callback, void *context);
 static int bmap_ensure(struct inode *inode, uint64_t logical, uint64_t *result);
 static ssize_t pread_inode(struct inode *inode, void *buffer, size_t length, off_t offset);
 static void metadata_images_init(struct ufs_metadata_images *images, struct mount *mountp, uint8_t *memory, size_t bytes);
@@ -743,6 +750,9 @@ static const struct disk_ops snapshot_disk_ops = {
 };
 
 const struct filesystem_type drv_ufs_filesystem_type = {
+	.file_backing_identity = ufs_backing_identity,
+	.file_extents = ufs_file_extents,
+	.file_metadata_extents = ufs_file_metadata_extents,
 	.writeback_range = ufs_writeback_range,
 	.fs_name = "ufs",
 	.probe = ufs_probe,
@@ -2682,7 +2692,7 @@ journal_write(
 
 	/* Writes the sectors through that context. */
 	bytes_written =
-		disk_write_context(owner->disk, lba, count, buffer, &child);
+		disk_write_filesystem_context(owner->disk, lba, count, buffer, &child);
 
 	/* Reports how many bytes reached the disk. */
 	return bytes_written;
@@ -3200,7 +3210,7 @@ write_sectors_impl(
 
 	io_stats_record(IO_UFS_WRITE, (uint64_t)count * mountp->m_disk->d_block_size);
 
-	error = disk_write_context(mountp->m_disk, lba, count, buffer, context);
+	error = disk_write_filesystem_context(mountp->m_disk, lba, count, buffer, context);
 
 	/* Releases the snapshot hold the preservation took. */
 	if (snapshot_locked)
@@ -4740,6 +4750,337 @@ indirect_entry(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/* Inode numbers stay stable while a claim excludes unlink and reuse. */
+static int
+ufs_backing_identity(struct inode *inode, struct disk **disk, uint64_t *object)
+{
+	if (inode == NULL || disk == NULL || object == NULL)
+		return EINVAL;
+	if (inode->i_type != INODE_REG || inode->i_mount == NULL ||
+	    inode->i_mount->m_disk == NULL || inode->i_mount->m_type == NULL ||
+	    inode->i_mount->m_type->file_backing_identity != ufs_backing_identity)
+		return EOPNOTSUPP;
+	/* A virtual file-backed disk is not a canonical physical swap volume. */
+	if ((inode->i_mount->m_disk->d_flags & DISK_FILE_BACKED) != 0)
+		return EOPNOTSUPP;
+	if (inode->i_ino == 0)
+		return EIO;
+	*disk = inode->i_mount->m_disk;
+	*object = inode->i_ino;
+	return 0;
+}
+
+/* Validates one fully allocated block before exporting or following it. */
+static int
+ufs_backing_block(struct mount *mountp, uint64_t fragment)
+{
+	struct ufs_mount_state *ms;
+	const struct ufs_super *super;
+	uint64_t group;
+	uint64_t summary_fragments;
+	uint32_t local;
+	uint32_t n;
+	int error;
+
+	ms = state(mountp);
+	super = &ms->super;
+	if (fragment == 0 || fragment >= super->size ||
+	    super->frag > super->size - fragment)
+		return EIO;
+	group = fragment / super->fpg;
+	local = (uint32_t)(fragment % super->fpg);
+	if (group >= super->ncg || local < super->dblkno ||
+	    local % super->frag != 0 || super->frag > super->fpg - local)
+		return EIO;
+
+	/* Cylinder summaries occupy otherwise data-addressable fragments. */
+	summary_fragments = ((uint64_t)super->cssize + super->fsize - 1U) /
+	    super->fsize;
+	if (summary_fragments != 0 &&
+	    (super->csaddr >= super->size ||
+	    summary_fragments > super->size - super->csaddr))
+		return EIO;
+	if (summary_fragments != 0 && fragment < super->csaddr + summary_fragments &&
+	    super->csaddr < fragment + super->frag)
+		return EIO;
+
+	/* Every fragment must already belong to an allocation. */
+	error = load_cg_locked(mountp, (uint32_t)group);
+	if (error != 0)
+		return error;
+	for (n = 0; n < super->frag; n++) {
+		if (bit_test(ms->cg + ms->cg_freeoff, local + n))
+			return EIO;
+	}
+	return 0;
+}
+
+/* Follows only allocated indirect blocks; ordinary reads keep their own path. */
+static int
+ufs_backing_map(struct inode *inode, uint64_t logical, uint64_t *result)
+{
+	const struct ufs_super *super;
+	struct ufs_inode_info *ui;
+	uint64_t span;
+	uint64_t fragment;
+	uint64_t divisor;
+	uint32_t index;
+	unsigned level;
+	unsigned depth;
+	unsigned n;
+	int error;
+
+	super = &state(inode->i_mount)->super;
+	ui = info(inode);
+	if (logical < UFS_NDADDR) {
+		fragment = ui->direct[logical];
+	} else {
+		logical -= UFS_NDADDR;
+		span = super->nindir;
+		for (level = 0; level < UFS_NIADDR; level++) {
+			if (logical < span)
+				break;
+			logical -= span;
+			if (span > UINT64_MAX / super->nindir)
+				return EOVERFLOW;
+			span *= super->nindir;
+		}
+		if (level == UFS_NIADDR)
+			return EFBIG;
+		fragment = ui->indirect[level];
+		for (depth = level + 1U; depth != 0; depth--) {
+			error = ufs_backing_block(inode->i_mount, fragment);
+			if (error != 0)
+				return error;
+			divisor = 1;
+			for (n = 1; n < depth; n++)
+				divisor *= super->nindir;
+			index = (uint32_t)(logical / divisor);
+			logical %= divisor;
+			error = indirect_entry(inode->i_mount, fragment, index, &fragment);
+			if (error != 0)
+				return error;
+		}
+	}
+	error = ufs_backing_block(inode->i_mount, fragment);
+	if (error != 0)
+		return error;
+	*result = fragment;
+	return 0;
+}
+
+/* Shares geometry and snapshot admission for data and owned metadata. */
+static int
+ufs_backing_lock(struct file *file, struct ufs_mount_state **result)
+{
+	struct inode *inode;
+	struct mount *mountp;
+	struct ufs_mount_state *ms;
+	const struct ufs_super *super;
+
+	if (file == NULL || file->f_inode == NULL)
+		return EINVAL;
+	inode = file->f_inode;
+	mountp = inode->i_mount;
+	if (inode->i_type != INODE_REG || mountp == NULL ||
+	    mountp->m_type == NULL || mountp->m_type->file_extents != ufs_file_extents ||
+	    mountp->m_disk == NULL)
+		return EOPNOTSUPP;
+	ms = state(mountp);
+	if (ms == NULL)
+		return EIO;
+	super = &ms->super;
+	if (mountp->m_disk->d_block_size != UFS_SECTOR_SIZE ||
+	    super->cgoffset != 0)
+		return EOPNOTSUPP;
+	if (super->bsize == 0 || super->bsize % UFS_SECTOR_SIZE != 0 ||
+	    super->fsize < UFS_SECTOR_SIZE || super->fsize % UFS_SECTOR_SIZE != 0 ||
+	    super->frag == 0 || super->fpg == 0 || super->nindir == 0)
+		return EIO;
+	if (inode->i_size <= 0 || (uint64_t)inode->i_size % UFS_SECTOR_SIZE != 0)
+		return EINVAL;
+
+	/* A prepared claim keeps the layout fixed between count/fill traversals. */
+	mutex_lock(&ms->lock);
+	if (ms->snapshot.active) {
+		mutex_unlock(&ms->lock);
+		return EBUSY;
+	}
+	*result = ms;
+	return 0;
+}
+
+/* Exports ordered sector runs without allocating or changing the backing file. */
+static int
+ufs_file_extents(struct file *file, file_extent_cb callback, void *context)
+{
+	struct inode *inode;
+	struct mount *mountp;
+	struct ufs_mount_state *ms;
+	const struct ufs_super *super;
+	uint64_t remaining;
+	uint64_t logical;
+	uint64_t fragment;
+	uint64_t physical;
+	uint64_t run_logical;
+	uint64_t run_physical;
+	uint32_t count;
+	uint32_t run_count;
+	int error;
+
+	if (callback == NULL)
+		return EINVAL;
+	error = ufs_backing_lock(file, &ms);
+	if (error != 0)
+		return error;
+	inode = file->f_inode;
+	mountp = inode->i_mount;
+	super = &ms->super;
+	remaining = (uint64_t)inode->i_size / UFS_SECTOR_SIZE;
+	logical = 0;
+	run_logical = 0;
+	run_physical = 0;
+	run_count = 0;
+	error = 0;
+	while (remaining != 0) {
+		error = ufs_backing_map(inode, logical /
+		    (super->bsize / UFS_SECTOR_SIZE), &fragment);
+		if (error != 0)
+			break;
+		if (fragment > UINT64_MAX / (super->fsize / UFS_SECTOR_SIZE)) {
+			error = EOVERFLOW;
+			break;
+		}
+		physical = fragment * (super->fsize / UFS_SECTOR_SIZE);
+		count = super->bsize / UFS_SECTOR_SIZE;
+		if (remaining < count)
+			count = (uint32_t)remaining;
+		if (physical >= mountp->m_disk->d_block_count ||
+		    count > mountp->m_disk->d_block_count - physical) {
+			error = EIO;
+			break;
+		}
+		if (run_count != 0 && (physical != run_physical + run_count ||
+		    count > UINT32_MAX - run_count)) {
+			error = callback(run_logical, run_physical, run_count, context);
+			if (error != 0)
+				break;
+			run_count = 0;
+		}
+		if (run_count == 0) {
+			run_logical = logical;
+			run_physical = physical;
+		}
+		run_count += count;
+		logical += count;
+		remaining -= count;
+	}
+	if (error == 0 && run_count != 0)
+		error = callback(run_logical, run_physical, run_count, context);
+	mutex_unlock(&ms->lock);
+	return error;
+}
+
+/* Reports owned indirect blocks, limited by EOF and at most three levels. */
+static int
+ufs_metadata_tree(struct mount *mountp, uint64_t fragment, unsigned depth,
+	uint64_t blocks, file_metadata_extent_cb callback, void *context)
+{
+	const struct ufs_super *super;
+	uint64_t physical;
+	uint64_t span;
+	uint64_t child;
+	uint64_t used;
+	uint32_t index;
+	uint32_t sectors;
+	unsigned level;
+	int error;
+
+	if (depth == 0 || depth > UFS_NIADDR || blocks == 0)
+		return EINVAL;
+	super = &state(mountp)->super;
+	error = ufs_backing_block(mountp, fragment);
+	if (error != 0)
+		return error;
+	if (fragment > UINT64_MAX / (super->fsize / UFS_SECTOR_SIZE))
+		return EOVERFLOW;
+	physical = fragment * (super->fsize / UFS_SECTOR_SIZE);
+	sectors = super->bsize / UFS_SECTOR_SIZE;
+	if (physical >= mountp->m_disk->d_block_count ||
+	    sectors > mountp->m_disk->d_block_count - physical)
+		return EIO;
+	error = callback(physical, sectors, context);
+	if (error != 0 || depth == 1U)
+		return error;
+
+	span = 1;
+	for (level = 1; level < depth; level++) {
+		if (span > UINT64_MAX / super->nindir)
+			return EOVERFLOW;
+		span *= super->nindir;
+	}
+	index = 0;
+	while (blocks != 0) {
+		if (index >= super->nindir)
+			return EIO;
+		used = blocks < span ? blocks : span;
+		error = indirect_entry(mountp, fragment, index, &child);
+		if (error != 0)
+			return error;
+		error = ufs_metadata_tree(mountp, child, depth - 1U, used, callback, context);
+		if (error != 0)
+			return error;
+		blocks -= used;
+		index++;
+	}
+	return 0;
+}
+
+/* These ranges protect the layout and are not logical file contents. */
+static int
+ufs_file_metadata_extents(struct file *file, file_metadata_extent_cb callback,
+	void *context)
+{
+	struct ufs_mount_state *ms;
+	struct ufs_inode_info *ui;
+	const struct ufs_super *super;
+	uint64_t blocks;
+	uint64_t span;
+	uint64_t used;
+	unsigned level;
+	int error;
+
+	if (callback == NULL)
+		return EINVAL;
+	error = ufs_backing_lock(file, &ms);
+	if (error != 0)
+		return error;
+	super = &ms->super;
+	ui = info(file->f_inode);
+	blocks = ((uint64_t)file->f_inode->i_size - 1U) / super->bsize + 1U;
+	blocks = blocks > UFS_NDADDR ? blocks - UFS_NDADDR : 0;
+	span = super->nindir;
+	for (level = 0; level < UFS_NIADDR && blocks != 0; level++) {
+		used = blocks < span ? blocks : span;
+		error = ufs_metadata_tree(file->f_inode->i_mount, ui->indirect[level],
+		    level + 1U, used, callback, context);
+		if (error != 0)
+			break;
+		blocks -= used;
+		if (blocks != 0) {
+			if (span > UINT64_MAX / super->nindir) {
+				error = EOVERFLOW;
+				break;
+			}
+			span *= super->nindir;
+		}
+	}
+	if (error == 0 && blocks != 0)
+		error = EFBIG;
+	mutex_unlock(&ms->lock);
+	return error;
 }
 
 /* Turns a position in a file into the fragment holding it. */
@@ -13988,6 +14329,12 @@ ufs_getattr(
 	status->st_atime = inode->i_atime.tv_sec;
 	status->st_mtime = inode->i_mtime.tv_sec;
 	status->st_ctime = inode->i_ctime.tv_sec;
+
+	/* Preserve the precision needed by stat-based attribute copying. */
+	status->st_atim.tv_nsec = inode->i_atime.tv_nsec;
+	status->st_mtim.tv_nsec = inode->i_mtime.tv_nsec;
+	status->st_ctim.tv_nsec = inode->i_ctime.tv_nsec;
+
 	status->st_blksize = state(inode->i_mount)->super.bsize;
 	status->st_blocks = ui->blocks;
 
@@ -14039,11 +14386,9 @@ ufs_setattr(
 
 	memset(&quota_transfer_state, 0, sizeof(quota_transfer_state));
 
-#ifdef ZEDBSD_SYS_STAT_H
 	atime_nsec = status->st_atim.tv_nsec;
 	mtime_nsec = status->st_mtim.tv_nsec;
 	ctime_nsec = status->st_ctim.tv_nsec;
-#endif
 
 	/* Refuses an access time this on-disk format cannot hold. */
 	if ((mask & INODE_ATTR_ATIME) != 0) {
@@ -16060,6 +16405,7 @@ ufs_snapshotctl(
 	struct snapshot_control *request)
 {
 	struct ufs_mount_state *ms;
+	struct backing_mutation_guard guard;
 	int error;
 
 	ms = state(mountp);
@@ -16081,6 +16427,11 @@ ufs_snapshotctl(
 		/* Refuses to write to a volume that is no longer writable. */
 		if (!ms->writable)
 			return EROFS;
+		/* Excludes existing and newly preparing file backing across aliases. */
+		error = backing_mutation_begin_disk(mountp->m_disk, 0,
+		    mountp->m_disk->d_block_count, NULL, &guard);
+		if (error != 0)
+			return error;
 		mutex_lock(&ms->lock);
 		mutex_lock(&ms->snapshot_lock);
 		mutex_lock(&ms->journal_lock);
@@ -16093,7 +16444,7 @@ ufs_snapshotctl(
 		mutex_unlock(&ms->snapshot_lock);
 		mutex_unlock(&ms->lock);
 		if (error != 0)
-			return error;
+			goto create_finished;
 		if (error == 0)
 			error = snapshot_disk_publish(ms);
 		if (error != 0 && ms->snapshot.active) {
@@ -16101,7 +16452,8 @@ ufs_snapshotctl(
 			(void)drv_ufs_snapshot_delete(&ms->snapshot);
 			mutex_unlock(&ms->snapshot_lock);
 		}
-
+create_finished:
+		backing_mutation_end(&guard);
 		break;
 	case ZEDBSD_SNAPSHOT_DELETE:
 		/* Refuses to write to a volume that is no longer writable. */

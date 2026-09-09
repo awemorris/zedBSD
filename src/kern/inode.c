@@ -28,6 +28,7 @@
 #include "kern/posix-acl.h"
 #include "kern/vm-object.h"
 
+#include <zedbsd/rename.h>
 #include <errno.h>
 #include <string.h>
 
@@ -277,6 +278,82 @@ inode_release(
 	}
 }
 
+/* Retains one filesystem directory entry's owner within the total count. */
+void
+inode_namespace_ref(
+	struct inode *inode)
+{
+	/* Classify only a reference already present in the total ownership. */
+	inode_ref(inode);
+	(void)atomic_fetch_add_relaxed(&inode->i_namespace_refs, 1U);
+}
+
+/* Releases a directory entry without confusing it with an external owner. */
+void
+inode_namespace_release(
+	struct inode *inode)
+{
+	/* Remove the allowance before releasing the corresponding total reference. */
+	(void)atomic_fetch_add_relaxed(&inode->i_namespace_refs, (unsigned)-1);
+	inode_release(inode);
+}
+
+/* Retires namespace owners after all failure-capable unmount steps succeed. */
+void
+inode_cache_retire_namespace(
+	struct mount *mountp)
+{
+	struct inode *inode;
+	unsigned long irq;
+	unsigned i;
+
+	/* Pin all members before any directory releases its owners of later nodes. */
+	irq = spin_lock_irqsave(&inode_cache_lock);
+
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
+		inode = inode_cache[i];
+		if (inode != NULL && inode != INODE_CACHE_RESERVED &&
+		    inode->i_mount == mountp)
+			inode_ref(inode);
+	}
+
+	spin_unlock_irqrestore(&inode_cache_lock, irq);
+
+	/* The admitted mount cannot gain members; pins also prevent cache eviction. */
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
+		irq = spin_lock_irqsave(&inode_cache_lock);
+
+		inode = inode_cache[i];
+		if (inode == INODE_CACHE_RESERVED)
+			inode = NULL;
+		if (inode != NULL && inode->i_mount != mountp)
+			inode = NULL;
+		spin_unlock_irqrestore(&inode_cache_lock, irq);
+
+		/* The temporary owner permits reclaim callbacks outside the cache lock. */
+		if (inode != NULL) {
+			if (inode->i_op != NULL && inode->i_op->retire_namespace != NULL)
+				inode->i_op->retire_namespace(inode);
+		}
+	}
+
+	/* All namespaces are empty before any pin can release a dead inode. */
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
+		irq = spin_lock_irqsave(&inode_cache_lock);
+
+		inode = inode_cache[i];
+		if (inode == INODE_CACHE_RESERVED)
+			inode = NULL;
+		if (inode != NULL && inode->i_mount != mountp)
+			inode = NULL;
+
+		spin_unlock_irqrestore(&inode_cache_lock, irq);
+
+		if (inode != NULL)
+			inode_release(inode);
+	}
+}
+
 /*
  * Destroys every clean, unreferenced cached inode of a mount.
  */
@@ -325,6 +402,7 @@ inode_cache_mount_busy(
 	unsigned long irq;
 	struct inode *inode;
 	unsigned allowed;
+	unsigned internal;
 	int busy;
 
 	busy = 0;
@@ -342,6 +420,15 @@ inode_cache_mount_busy(
 			allowed = 2U;
 		else
 			allowed = 1U;
+
+		/* Directory entries retire only after this entire mount is admitted. */
+		internal = atomic_load_acquire(&inode->i_namespace_refs);
+		if (internal > UINT_MAX - allowed) {
+			busy = 1;
+			break;
+		}
+
+		allowed += internal;
 		if (refcount_load(&inode->i_refs) > allowed) {
 			busy = 1;
 			break;
@@ -538,6 +625,12 @@ inode_getattr(
 	status->st_atime = inode->i_atime.tv_sec;
 	status->st_mtime = inode->i_mtime.tv_sec;
 	status->st_ctime = inode->i_ctime.tv_sec;
+
+	/* Return the same timestamp precision as the inode stores. */
+	status->st_atim.tv_nsec = inode->i_atime.tv_nsec;
+	status->st_mtim.tv_nsec = inode->i_mtime.tv_nsec;
+	status->st_ctim.tv_nsec = inode->i_ctime.tv_nsec;
+
 	status->st_blksize = 512;
 	if (inode->i_size > 0)
 		status->st_blocks =
@@ -628,17 +721,13 @@ inode_setattr(
 		clock_realtime(&now.tv_sec, &now.tv_nsec);
 		if (mask & INODE_ATTR_ATIME_NOW) {
 			requested.st_atime = now.tv_sec;
-#ifdef ZEDBSD_SYS_STAT_H
 			requested.st_atim.tv_nsec = now.tv_nsec;
-#endif
 			mask |= INODE_ATTR_ATIME;
 		}
 
 		if (mask & INODE_ATTR_MTIME_NOW) {
 			requested.st_mtime = now.tv_sec;
-#ifdef ZEDBSD_SYS_STAT_H
 			requested.st_mtim.tv_nsec = now.tv_nsec;
-#endif
 			mask |= INODE_ATTR_MTIME;
 		}
 
@@ -716,29 +805,17 @@ inode_setattr(
 		i->i_gid = requested.st_gid;
 	if (mask & INODE_ATTR_ATIME) {
 		i->i_atime.tv_sec = requested.st_atime;
-#ifdef ZEDBSD_SYS_STAT_H
 		i->i_atime.tv_nsec = requested.st_atim.tv_nsec;
-#else
-		i->i_atime.tv_nsec = 0;
-#endif
 	}
 
 	if (mask & INODE_ATTR_MTIME) {
 		i->i_mtime.tv_sec = requested.st_mtime;
-#ifdef ZEDBSD_SYS_STAT_H
 		i->i_mtime.tv_nsec = requested.st_mtim.tv_nsec;
-#else
-		i->i_mtime.tv_nsec = 0;
-#endif
 	}
 
 	if (mask & INODE_ATTR_CTIME) {
 		i->i_ctime.tv_sec = requested.st_ctime;
-#ifdef ZEDBSD_SYS_STAT_H
 		i->i_ctime.tv_nsec = requested.st_ctim.tv_nsec;
-#else
-		i->i_ctime.tv_nsec = 0;
-#endif
 	} else if (mask != 0) {
 		inode_touch(i, INODE_ATTR_CTIME);
 	}
@@ -992,6 +1069,13 @@ inode_truncate_transaction(
 {
 	struct backing_mutation_guard guard;
 	int error;
+
+	/* Initializes the outcome even when backing admission refuses the call. */
+	if (result != NULL) {
+		memset(result, 0, sizeof(*result));
+		if (i != NULL)
+			result->actual_size = i->i_size;
+	}
 
 	/* A malformed request is refused by the implementation itself. */
 	if (i == NULL || request == NULL) {
@@ -1413,7 +1497,8 @@ inode_rename(
 	int entered, error;
 
 	/* A rename never crosses a mount. */
-	if (od == NULL || nd == NULL || nn == NULL || flags != 0)
+	if (od == NULL || nd == NULL || nn == NULL ||
+	    (flags & ~RENAME_NOREPLACE) != 0)
 		return EINVAL;
 	if (od->i_mount != nd->i_mount)
 		return EXDEV;
@@ -1888,7 +1973,8 @@ inode_rename_locked(
 	target_guarded = 0;
 
 	/* A rename never crosses a mount or touches a read-only one. */
-	if (od == NULL || on == NULL || nd == NULL || nn == NULL || flags != 0)
+	if (od == NULL || on == NULL || nd == NULL || nn == NULL ||
+	    (flags & ~RENAME_NOREPLACE) != 0)
 		return EINVAL;
 	if (od->i_mount != nd->i_mount)
 		return EXDEV;
@@ -1932,6 +2018,14 @@ inode_rename_locked(
 	/* Guards a replaced target and checks it matches the source's kind. */
 	error = inode_lookup(nd, nn, &target);
 	if (error == 0) {
+		/* The namespace lock makes destination refusal atomic with rename. */
+		if ((flags & RENAME_NOREPLACE) != 0) {
+			inode_release(target);
+			backing_mutation_end(&source_guard);
+			inode_release(source);
+			return EEXIST;
+		}
+
 		error = mount_namespace_check_inode(target);
 		if (error != 0) {
 			inode_release(target);
@@ -1991,7 +2085,7 @@ inode_rename_locked(
 
 	/* Runs the filesystem rename and updates both directories. */
 	if (od->i_op != NULL && od->i_op->rename != NULL)
-		error = od->i_op->rename(od, on, nd, nn, flags);
+		error = od->i_op->rename(od, on, nd, nn, 0);
 	else
 		error = EOPNOTSUPP;
 	if (error == 0) {

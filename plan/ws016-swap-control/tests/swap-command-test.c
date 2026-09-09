@@ -173,7 +173,8 @@ test_usage(const char *name, int (*entry)(int, char **))
 	char *unknown[] = {(char *)name, "valid", "-x", NULL};
 
 	(void)snprintf(expected, sizeof(expected),
-		       "usage: %s [--] SOURCE...\n", name);
+		       "usage: %s [--] SOURCE...\n%s", name,
+		       strcmp(name, "swapon") == 0 ? "       swapon -a\n" : "");
 	reset_mock();
 	require(invoke(entry, 1, none, output, sizeof(output)) == 2, name,
 		"no-operand status");

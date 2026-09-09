@@ -406,7 +406,6 @@ void
 drv_pci_ehci_probe_roots(
 	void)
 {
-	int changed;
 	struct ehci_controller *controller;
 
 	/* Process each linked entry. */
@@ -416,14 +415,8 @@ drv_pci_ehci_probe_roots(
 		if (controller->quarantined)
 			continue;
 
-		/* Handles the controller condition. */
-		changed = ehci_root_ports_changed(controller);
-		if (controller->quarantined)
-			continue;
-
-		/* Handles the changed condition. */
-		if (changed)
-			drv_usb_hcd_root_hub_changed(&controller->hcd);
+		/* The boot caller may be the idle thread. Never let it hold the
+		 * topology gate while a runnable companion waits for that gate. */
 		ehci_root_worker_arm(controller);
 	}
 }

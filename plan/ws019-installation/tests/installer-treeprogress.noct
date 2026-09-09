@@ -1,0 +1,82 @@
+require treeprogress;
+
+func check(ok, message) { if (!ok) { System.error("tree progress: " + message); } }
+func bytes(text) {
+    var data = Packed.uint8(String.charCount(text));
+    for (i in 0..Packed.size(data)) { data[i] = String.charCodeAt(text, i); }
+    return data;
+}
+func censusPath(census, values, directory) {
+    // Split every pathname byte and delimiter across independent reads.
+    for (value in values) {
+        var data = Packed.uint8(1);
+        data[0] = value;
+        instTreeCensusFeed(census, data, directory);
+    }
+}
+func fixture() {
+    var census = instTreeCensus();
+    censusPath(census, [47, 115, 47, 97, 10, 255, 0], false);
+    censusPath(census, [47, 115, 47, 98, 0], false);
+    censusPath(census, [47, 115, 0], true);
+    return instTreeCensusFreeze(census);
+}
+func invoke(test, unused) {
+    var progress = instTreeProgress(fixture());
+    var data = bytes(test.report);
+    var offset = 0;
+    while (offset < Packed.size(data)) {
+        var size = test.chunk;
+        if (size > Packed.size(data) - offset) { size = Packed.size(data) - offset; }
+        var part = Packed.uint8(size);
+        for (i in 0..size) { part[i] = data[offset + i]; }
+        var before = progress.done;
+        instTreeProgressFeed(progress, part);
+        check(progress.done >= before && progress.done <= 2L, "monotonic fixed total");
+        offset = offset + size;
+    }
+    return instTreeProgressFinish(progress, test.status);
+}
+func badCensus(test, unused) {
+    var census = instTreeCensus();
+    if (test == "unfrozen") { return instTreeProgress(census); }
+    if (test == "empty") { censusPath(census, [0], false); }
+    if (test == "partial") { censusPath(census, [47], false); }
+    if (test == "duplicate") {
+        censusPath(census, [47, 0], false);
+        censusPath(census, [47, 0], true);
+    }
+    instTreeCensusFreeze(census);
+    if (test == "frozen") { censusPath(census, [47, 0], false); }
+    return true;
+}
+func main(args) {
+    var prefix = "CPCOPY1\nF\t2f732f610aff\nF\t2f732f62\nD\t2f73\n";
+    var count = 0;
+    for (chunk in [1, 2, 7, 4096]) {
+        var result = invoke({report:prefix + "END\n", chunk:chunk, status:0}, 0);
+        check(result == 2L, "complete unusual-byte source");
+        count = count + 1;
+    }
+    for (report in ["WRONG\n", "CPCOPY1\nEND\n", prefix, prefix + "END",
+        prefix + "END\nx", prefix + "END\nEND\n", prefix + "F\t2f732f62\n",
+        "CPCOPY1\nF\t2f73\n", "CPCOPY1\nD\t2f732f62\n",
+        "CPCOPY1\nF\t00\n", "CPCOPY1\nF\tA0\n", "CPCOPY1\nF\t0\n",
+        "CPCOPY1\nF\t\n", "CPCOPY1\nZ\t2f73\n"]) {
+        var result = System.pcall(invoke, {report:report, chunk:1, status:0}, 0);
+        check(!result.ok, "invalid report rejected: " + report);
+        count = count + 1;
+    }
+    var result = System.pcall(invoke, {report:prefix + "END\n", chunk:5, status:1}, 0);
+    check(!result.ok, "END cannot override failed process close");
+    count = count + 1;
+    for (fault in ["unfrozen", "empty", "partial", "duplicate", "frozen"]) {
+        var result = System.pcall(badCensus, fault, 0);
+        check(!result.ok, "bad census refused: " + fault);
+        count = count + 1;
+    }
+    var empty = instTreeProgress(instTreeCensusFreeze(instTreeCensus()));
+    instTreeProgressFeed(empty, bytes("CPCOPY1\nEND\n"));
+    check(instTreeProgressFinish(empty, 0) == 0L, "empty census");
+    print("installer tree progress PASS " + (count + 1) + " cases");
+}

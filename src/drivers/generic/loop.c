@@ -16,6 +16,7 @@
 #include "kern/io-stats.h"
 #include "kern/fat.h"
 #include "kern/file.h"
+#include "kern/file-backing.h"
 #include "kern/inode.h"
 #include "kern/kmem.h"
 #include "kern/lock.h"
@@ -94,6 +95,41 @@ drv_loop_init(
 		loops[i].index = i;
 
 	/* Succeeded. */
+	return 0;
+}
+
+/* Pins the backing file while the attachment cannot be withdrawn. */
+int
+drv_loop_backing_file_ref(struct disk *disk, struct file **result, unsigned *flags)
+{
+	struct loop_device *loop;
+	unsigned long irq;
+	unsigned index;
+
+	if (disk == NULL || result == NULL || flags == NULL)
+		return EINVAL;
+	*result = NULL;
+	*flags = 0;
+	if (disk->d_ops != &loop_disk_ops)
+		return EOPNOTSUPP;
+
+	/* file_ref only increments its refcount while the loop owns the file. */
+	irq = spin_lock_irqsave(&loop_lock);
+	for (index = 0; index < LOOP_MAX_DEVICES; index++) {
+		loop = &loops[index];
+		if (loop->disk != disk || !loop->attached || loop->detaching)
+			continue;
+		if (loop->backing != NULL) {
+			file_ref(loop->backing);
+			*result = loop->backing;
+			*flags = loop->flags;
+		}
+		break;
+	}
+	spin_unlock_irqrestore(&loop_lock, irq);
+
+	if (*result == NULL)
+		return ENXIO;
 	return 0;
 }
 
@@ -296,7 +332,9 @@ drv_loop_attach_file(
 	disk->d_name[3] = 'p';
 	disk->d_name[4] = (char)('0' + loop->index);
 	disk->d_name[5] = '\0';
-	disk->d_flags = flags == LOOP_READ_ONLY ? DISK_READ_ONLY : 0;
+	disk->d_flags = DISK_FILE_BACKED;
+	if (flags == LOOP_READ_ONLY)
+		disk->d_flags |= DISK_READ_ONLY;
 	disk->d_block_size = LOOP_SECTOR_SIZE;
 	disk->d_block_count =
 		(uint64_t)(uint32_t)backing->f_inode->i_size / LOOP_SECTOR_SIZE;
@@ -316,6 +354,12 @@ drv_loop_attach_file(
 	loop->disk = disk;
 	loop->claim = claim;
 	backing->f_backing_claim = claim;
+	/* The FAT map is an optional cache optimization, not the retained claim. */
+	if (map != NULL && backing_inode->i_mount->m_type != &drv_fat_filesystem_type) {
+		kern_free(map);
+		map = NULL;
+		map_count = 0;
+	}
 	loop->map = map;
 
 	/* Handles the map availability. */
@@ -612,7 +656,7 @@ loop_finalize_claim(
 	memset(&collection, 0, sizeof(collection));
 
 	/* Checks the operation status. */
-	error = drv_fat_file_extents(backing, loop_collect_extent, &collection);
+	error = file_backing_extents(backing, loop_collect_extent, &collection);
 	if (error != 0)
 		return error;
 
@@ -640,7 +684,7 @@ loop_finalize_claim(
 	collection.count = 0;
 
 	/* Checks the operation status. */
-	error = drv_fat_file_extents(backing, loop_collect_extent, &collection);
+	error = file_backing_extents(backing, loop_collect_extent, &collection);
 	if (error != 0)
 		goto out;
 
@@ -655,7 +699,7 @@ loop_finalize_claim(
 	/* Process each remaining element. */
 	for (i = 0; i < collection.count; i++)
 		collection.extents[i].disk = disk;
-	error = backing_claim_finalize(claim, collection.extents,
+	error = backing_claim_finalize_file(claim, backing, collection.extents,
 				       collection.count);
 out:
 	if (error == 0) {

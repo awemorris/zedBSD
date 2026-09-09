@@ -22,12 +22,12 @@ qemu_runner="$root/plan/ws004-hardware/tests/run-legacy-hcd-concurrent-hotplug-q
 qemu_config="$root/plan/ws004-hardware/tests/config-amd64-legacy-hcd.mk"
 
 # shellcheck disable=SC2086
-$cc $common "$fixture" "$root/src/kern/io-stats.c" -o "$work/legacy-hcd-concurrent"
+$cc $common "$fixture" -o "$work/legacy-hcd-concurrent"
 "$work/legacy-hcd-concurrent"
 
 # shellcheck disable=SC2086
 $cc $common -fsanitize=address,undefined -fno-omit-frame-pointer \
-	"$fixture" "$root/src/kern/io-stats.c" -o "$work/legacy-hcd-concurrent-sanitize"
+	"$fixture" -o "$work/legacy-hcd-concurrent-sanitize"
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 	"$work/legacy-hcd-concurrent-sanitize"
 
@@ -88,6 +88,8 @@ uhci_request_free=$(sed -n \
 	'/^static void uhci_request_free(/,/^}/p' "$uhci")
 uhci_request_sets_empty=$(sed -n \
 	'/^uhci_request_sets_empty_locked(/,/^}/p' "$uhci")
+uhci_schedule_unlink=$(sed -n \
+	'/^uhci_schedule_unlink_locked(/,/^}/p' "$uhci")
 uhci_retirement_fail=$(sed -n '/^uhci_retirement_fail(/,/^}/p' "$uhci")
 uhci_retirement_start=$(sed -n \
 	'/^uhci_retirement_worker_start(/,/^}/p' "$uhci")
@@ -101,6 +103,15 @@ for contract in 'length > SIZE_MAX - 8U' 'uhci_endpoint_parameters' \
     'uhci_required_td_count' 'length > packet' \
     'r->td_count != required_tds' 'EOVERFLOW'; do
 	printf '%s\n' "$uhci_build" | grep -q "$contract"
+done
+
+# Removing a non-head QH must retire both representations of the same edge:
+# the hardware QH link and the software predecessor link.  Leaving the latter
+# stale makes a later unlink write through a freed/reused request.
+for contract in 'request->schedule_previous->qh->head = successor' \
+    'request->schedule_previous->schedule_next =' \
+    'request->schedule_next'; do
+	printf '%s\n' "$uhci_schedule_unlink" | grep -Fq -- "$contract"
 done
 
 # Reclaim-safe recovery must use the single request/schedule/bounce graph

@@ -1,0 +1,76 @@
+require install;
+func destinationStat(c, path) {
+    if (!Dict.hasKey(c.files, path)) { return 0; }
+    return c.files[path];
+}
+func destinationVerify(c, entry, path, identity) {
+    if ((identity.mode & 61440) != 32768 || identity.bad) { System.error("file conflict"); }
+    c.verified = c.verified + 1;
+}
+func destinationInvoke(c, unused) {
+    return instDestinationContents({stat:destinationStat, verify:destinationVerify}, c,
+        "/esp", "/payload", c.entries);
+}
+func main(args) {
+    var names = ["/esp/EFI/BOOT/BOOTX64.EFI", "/payload/vmunix", "/payload/rootfs.img",
+        "/payload/data.img", "/payload/swapfile", "/payload/zedbsd.cfg"];
+    var count = 0;
+    for (mask in 0..64) {
+        var c = {files:{}, verified:0, entries:[]};
+        c.files["/esp/EFI"] = {mode:16384};
+        c.files["/esp/EFI/BOOT"] = {mode:16384};
+        var expected = 0;
+        for (i in 0..6) {
+            var mount = "/payload";
+            if (i == 0) { mount = "/esp"; }
+            Array.push(c.entries, {final:names[i], mount:mount});
+            if ((mask & (1 << i)) != 0) {
+                c.files[names[i]] = {mode:32768, bad:false};
+                expected = expected + 1;
+            }
+        }
+        var result = destinationInvoke(c, 0);
+        var needed = 0;
+        if ((mask & 1) == 0) { needed = needed + 1; }
+        if ((mask & 62) != 62) { needed = needed + 1; }
+        if (c.verified != expected || Array.size(result.directories) != needed) { System.error("present subset"); }
+        if (mask == 63) {
+            for (mount in ["/esp", "/payload"]) {
+                if (instCapacityNeeded(c.entries, result.present, mount, 512, 0) != 0) {
+                    System.error("complete destination still needs free space");
+                }
+            }
+            var noop = {destination:{directories:result.directories, present:result.present}, seedPending:false};
+            instInstallDirectories(noop);
+            if (noop.seedPending) { System.error("complete destination created a seed"); }
+        }
+        for (i in 0..6) {
+            if (result.present[i] != ((mask & (1 << i)) != 0)) { System.error("wrong presence"); }
+        }
+        for (path in names) {
+            c.files[path] = {mode:32768, bad:true};
+            if (System.pcall(destinationInvoke, c, 0).ok) { System.error("conflict accepted"); }
+            Dict.remove(c.files, path);
+        }
+        count = count + 1;
+    }
+    for (bad in ["/esp/EFI", "/esp/EFI/BOOT", "/esp/zedinst-stage", "/payload/zedinst-stage"]) {
+        var c = {files:{}, verified:0, entries:[]};
+        for (i in 0..6) {
+            var mount = "/payload";
+            if (i == 0) { mount = "/esp"; }
+            Array.push(c.entries, {final:names[i], mount:mount});
+        }
+        c.files["/esp/EFI"] = {mode:16384};
+        c.files[bad] = {mode:32768};
+        if (System.pcall(destinationInvoke, c, 0).ok) { System.error("path conflict accepted"); }
+    }
+    var empty = {files:{}, verified:0, entries:[]};
+    for (i in 0..6) {
+        var mount = "/payload";
+        if (i == 0) { mount = "/esp"; }
+        Array.push(empty.entries, {final:names[i], mount:mount});
+    }
+    if (Array.size(destinationInvoke(empty, 0).directories) != 4) { System.error("missing ancestor plan"); }
+    print("destination contents PASS 64 subsets, 384 file conflicts, 4 path conflicts, missing ancestors");
+}

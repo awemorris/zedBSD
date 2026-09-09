@@ -32,11 +32,11 @@ def copy_image(source, destination):
                     str(source), str(destination)], check=True)
 
 
-def create_nvme(path):
+def create_nvme(path, sectors=SECTORS):
     """Constructs only this test's pre-existing GPT/FAT32 destination."""
     mbr = bytearray(512)
     mbr[450] = 0xEE
-    struct.pack_into("<II", mbr, 454, 1, SECTORS - 1)
+    struct.pack_into("<II", mbr, 454, 1, min(sectors - 1, 0xffffffff))
     mbr[510:512] = b"\x55\xaa"
     entries = bytearray(16384)
     entries[:16] = uuid.UUID(STORAGE["TYPE"]).bytes_le
@@ -44,14 +44,14 @@ def create_nvme(path):
     struct.pack_into("<QQ", entries, 32, 2048, 2048 + PART_SECTORS - 1)
     entries[56:66] = "q078a".encode("utf-16le")
     with path.open("xb") as disk:
-        disk.truncate(SECTORS * 512)
+        disk.truncate(sectors * 512)
         disk.write(mbr)
-        for lba, alternate, table in [(1, SECTORS - 1, 2),
-                                       (SECTORS - 1, 1, SECTORS - 33)]:
+        for lba, alternate, table in [(1, sectors - 1, 2),
+                                       (sectors - 1, 1, sectors - 33)]:
             header = bytearray(512)
             struct.pack_into("<8sIIIIQQQQ16sQIII", header, 0, b"EFI PART",
                              0x10000, 92, 0, 0, lba, alternate, 34,
-                             SECTORS - 34,
+                             sectors - 34,
                              uuid.UUID("78190000-aaaa-4aaa-8aaa-aaaaaaaaaaaa").bytes_le,
                              table, 128, 128, zlib.crc32(entries))
             struct.pack_into("<I", header, 16, zlib.crc32(header[:92]))
@@ -114,9 +114,10 @@ def boot_payload(source):
     return candidates[0]
 
 
-def prepare_boot(output, overlay, combined):
+def prepare_boot(output, overlay, combined, rootfs=None):
     source = REPO / "build/amd64/hdd-image.img"
-    rootfs = REPO / "build/arch-images/amd64-ws019-formatters.ufs"
+    if rootfs is None:
+        rootfs = REPO / "build/arch-images/amd64-ws019-formatters.ufs"
     assert rootfs.is_file(), "build ws019-formatter-qemu-fixture first"
     source_hash = digest(source)
     start = boot_payload(source)
@@ -158,6 +159,7 @@ def format_cell(guest):
     guest.run("mount -t fat nvme0n1p1 /q078")
     guest.run("mkfs -t ufs /q078/data.img", "ufs initialized")
     guest.run("mkswap /q078/swapfile", "16383 slots")
+    pristine_cell(guest)
     guest.run("mkfs -t ufs2 /q078/data.img", "usage:", 2)
     guest.run("mkfs -t ufs1 /q078/data.img", "usage:", 2)
     guest.run("mkfs -t ufs /dev/nvme0n1p1", status=1)
@@ -173,6 +175,35 @@ def format_cell(guest):
     guest.run("swapoff /q078/swapfile")
     guest.run("formatter-probe swap /q078/swapfile 0", "formatter-probe PASS")
     guest.run("umount /q078")
+
+
+def pristine_cell(guest):
+    """Runs actual read-only commands and hashes success/failure observations."""
+    for name, command, offsets in [
+            ("data.img", "mkfs -t ufs --verify-pristine", [65536, 450560, 33554431]),
+            ("swapfile", "mkswap --verify-pristine", [4096, 67108863])]:
+        path = "/q078/" + name
+        def content_hash():
+            output = guest.run("cksum -a sha256 " + path)
+            hashes = re.findall(r"\b[0-9a-f]{64}\b", output)
+            assert len(hashes) == 1, output
+            return hashes[0]
+        original = content_hash()
+        guest.run(command + " " + path, "pristine")
+        assert content_hash() == original, "successful verifier wrote content"
+        for offset in offsets:
+            guest.run(f"formatter-probe flip {path} {offset}", "formatter-probe PASS")
+            corrupted = content_hash()
+            assert corrupted != original, "corruption did not change bytes"
+            guest.run(command + " " + path, status=1)
+            assert content_hash() == corrupted, "failed verifier repaired content"
+            guest.run(f"formatter-probe flip {path} {offset}", "formatter-probe PASS")
+        guest.run(command + " " + path, "pristine")
+        assert content_hash() == original, "restored bytes differ"
+    guest.run("mkfs -t ufs --verify-pristine /dev/nvme0n1p1", status=1)
+    guest.run("mkswap --verify-pristine /q078", status=1)
+    guest.run("ln -s /q078/data.img /q148-pristine-link")
+    guest.run("mkfs -t ufs --verify-pristine /q148-pristine-link", status=1)
 
 
 def overlay_cell(guest):

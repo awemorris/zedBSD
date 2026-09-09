@@ -43,6 +43,7 @@ struct exec_shebang {
 };
 
 struct elf32_image_info {
+	uintptr_t thread_pointer;
 	uintptr_t entry;
 	uintptr_t brk_start;
 	size_t static_data_size;
@@ -56,6 +57,7 @@ struct elf32_image_info {
 };
 
 struct elf64_image_info {
+	uintptr_t thread_pointer;
 	uintptr_t entry;
 	uintptr_t brk_start;
 	size_t static_data_size;

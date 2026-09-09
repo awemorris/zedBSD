@@ -105,8 +105,6 @@ static int load_directory(const char *path, const struct ls_options *options, st
 static void sort_entries(struct ls_entry *entries, size_t count);
 static void print_column_entries(const struct ls_entry *entries, size_t count);
 static size_t entry_display_length(const struct ls_entry *entry);
-static int builtin_cp(int argc, char **argv);
-static const char *path_basename(const char *path);
 static int builtin_stat(int argc, char **argv);
 static const char *type_name(mode_t mode);
 static int builtin_touch(int argc, char **argv);
@@ -317,15 +315,6 @@ sh_builtin_dispatch(
 	if (!strcmp(argv[0], "ls")) {
 		/* Obtains the builtin ls result. */
 		function_result = builtin_ls(argc, argv);
-
-		/* Returns the computed result. */
-		return function_result;
-	}
-
-	/* Handles the selected command-line operation. */
-	if (!strcmp(argv[0], "cp")) {
-		/* Obtains the builtin cp result. */
-		function_result = builtin_cp(argc, argv);
 
 		/* Returns the computed result. */
 		return function_result;
@@ -1742,155 +1731,6 @@ entry_display_length(
 
 	/* Returns the computed result. */
 	return function_result;
-}
-
-/* Supports the builtin cp operation. */
-static int
-builtin_cp(
-	int argc,
-	char **argv)
-{
-	unsigned char buffer[COPY_BUFFER_SIZE];
-	char destination_path[PATH_BUFFER_SIZE];
-	const char *destination;
-	struct stat source_status, destination_status;
-	int source, target, success, destination_exists;
-	ssize_t count;
-
-	source = -1;
-	target = -1;
-	success = 0;
-	destination_exists = 0;
-
-	/* Validates the command-line arguments. */
-	if (argc != 3) {
-		fprintf(stderr, "usage: cp SOURCE DESTINATION\n");
-
-		/* Reports successful completion. */
-		return 0;
-	}
-	source = open(argv[1], O_RDONLY);
-
-	/* Handles a failed fstat operation. */
-	if (source < 0 || fstat(source, &source_status) != 0) {
-		fprintf(stderr, "cp: %s: %s\n", argv[1], strerror(errno));
-
-		/* Handles the source condition. */
-		if (source >= 0)
-			(void)close(source);
-
-		/* Reports successful completion. */
-		return 0;
-	}
-
-	/* Handles a failed S ISREG operation. */
-	if (!S_ISREG(source_status.st_mode)) {
-		fprintf(stderr, "cp: %s: not a regular file\n", argv[1]);
-		(void)close(source);
-
-		/* Reports successful completion. */
-		return 0;
-	}
-	destination = argv[2];
-
-	/* Handles a failed stat operation. */
-	if (stat(destination, &destination_status) == 0) {
-		destination_exists = 1;
-
-		/* Handles the destination status condition. */
-		if (S_ISDIR(destination_status.st_mode)) {
-			/* Validates the command-line arguments. */
-			if (!join_path(destination, path_basename(argv[1]),
-				       destination_path,
-				       sizeof(destination_path))) {
-				fprintf(stderr,
-					"cp: destination path is too long\n");
-				(void)close(source);
-
-				/* Reports successful completion. */
-				return 0;
-			}
-			destination = destination_path;
-			destination_exists =
-			    stat(destination, &destination_status) == 0;
-		}
-	} else if (errno != ENOENT) {
-		fprintf(stderr, "cp: %s: %s\n", destination, strerror(errno));
-		(void)close(source);
-
-		/* Reports successful completion. */
-		return 0;
-	}
-
-	/* Handles the destination exists condition. */
-	if (destination_exists &&
-	    source_status.st_dev == destination_status.st_dev &&
-	    source_status.st_ino == destination_status.st_ino) {
-		fprintf(stderr,
-			"cp: source and destination are the same file\n");
-		(void)close(source);
-
-		/* Reports successful completion. */
-		return 0;
-	}
-
-	/*
- * Without rename/unlink syscalls a failed copy may leave a partial
-	 * file. */
-	target = open(destination, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-
-	/* Handles the target condition. */
-	if (target < 0) {
-		fprintf(stderr, "cp: %s: %s\n", destination, strerror(errno));
-		(void)close(source);
-
-		/* Reports successful completion. */
-		return 0;
-	}
-	while ((count = read(source, buffer, sizeof(buffer))) > 0) {
-		/* Handles a failed write all operation. */
-		if (!write_all(target, buffer, (size_t)count)) {
-			fprintf(stderr, "cp: %s: %s\n", destination,
-				strerror(errno));
-			goto done;
-		}
-	}
-
-	/* Checks the remaining item count. */
-	if (count < 0) {
-		fprintf(stderr, "cp: %s: %s\n", argv[1], strerror(errno));
-		goto done;
-	}
-	success = 1;
-done:
-
-	/* Handles a failed close operation. */
-	if (close(target) != 0) {
-		fprintf(stderr, "cp: %s: %s\n", destination, strerror(errno));
-		success = 0;
-	}
-
-	/* Handles a failed close operation. */
-	if (close(source) != 0) {
-		fprintf(stderr, "cp: %s: %s\n", argv[1], strerror(errno));
-		success = 0;
-	}
-
-	/* Returns the computed result. */
-	return success;
-}
-
-/* Supports the path basename operation. */
-static const char *
-path_basename(
-	const char *path)
-{
-	const char *slash;
-
-	slash = strrchr(path, '/');
-
-	/* Returns the computed result. */
-	return slash == NULL ? path : slash + 1;
 }
 
 /* Supports the builtin stat operation. */

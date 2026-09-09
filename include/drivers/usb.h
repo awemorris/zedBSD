@@ -287,6 +287,13 @@ struct drv_usb_driver {
 	void (
 		*shutdown)(
 		struct drv_usb_interface *);
+	/* Checked terminal stop, without destroying referenced class/media objects.
+	 * Called after admission closes and before device/HCD DMA quiescence.
+	 * Must join class workers and finish callbacks; errors retain all owners.
+	 * Unlike detach, successful quiesce keeps the binding until reset. */
+	int (
+		*quiesce)(
+		struct drv_usb_interface *);
 	uintptr_t private_data[4];
 };
 

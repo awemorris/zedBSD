@@ -144,6 +144,7 @@ static int storage_control_start(struct usb_storage *storage);
 static int storage_control_stop(struct usb_storage *storage);
 static int storage_attach(struct drv_usb_interface *interface, const struct drv_usb_id *id);
 static int storage_detach(struct drv_usb_interface *interface, unsigned flags);
+static int storage_quiesce(struct drv_usb_interface *interface);
 
 /* Device operation and registration tables. */
 static const struct disk_ops storage_disk_ops = {
@@ -165,6 +166,7 @@ static struct drv_usb_driver storage_driver = {
 	.ids = storage_ids,
 	.id_count = sizeof(storage_ids) / sizeof(storage_ids[0]),
 	.attach = storage_attach,
+	.quiesce = storage_quiesce,
 	.detach = storage_detach
 };
 
@@ -1966,6 +1968,32 @@ fail:
 
 	/* Succeeded. */
 	return 0;
+}
+
+/* Stops terminal activity without destroying root/swap-referenced media. */
+static int
+storage_quiesce(
+	struct drv_usb_interface *interface)
+{
+	struct usb_storage *storage;
+	int error;
+
+	/* A failed attach may not have published any class owner. */
+	storage = drv_usb_interface_driver_data(interface);
+	if (storage == NULL)
+		return 0;
+
+	/* Excludes media revalidation and waits for the current BOT command. */
+	mutex_lock(&storage->control_lock);
+	atomic_raw_store_release(&storage->control_stopping, 1U);
+	mutex_lock(&storage->lock);
+	storage->media_state = STORAGE_FAILED;
+	mutex_unlock(&storage->lock);
+	mutex_unlock(&storage->control_lock);
+
+	/* Joins without either mutex held; failure keeps the worker and URBs. */
+	error = storage_control_stop(storage);
+	return error;
 }
 
 /* Gives that interface up and everything held for it. */

@@ -46,6 +46,8 @@ enum node_kind {
 	NODE_MTIME,
 	NODE_NEWER,
 	NODE_PRINT,
+	NODE_PRINT0,
+	NODE_FPRINT0,
 	NODE_PRUNE,
 	NODE_EXEC,
 };
@@ -68,6 +70,8 @@ struct node {
 	gid_t gid;
 	char type;
 	struct stat reference;
+	/* An explicit file-output action owns this stream until finalization. */
+	FILE *output;
 };
 
 struct parser {
@@ -104,6 +108,8 @@ static char *take_operand(struct parser *parser, const char *option);
 static int parse_number(const char *text, struct number *number);
 static void usage(void);
 static void free_expression(struct node *node);
+static int expression_has_action(const struct node *node);
+static int finish_outputs(struct node *node);
 static void scan_walk_options(struct node *node, struct walk_state *state);
 static int walk_path(const char *path, struct node *expression, struct walk_state *state);
 static int evaluate(struct node *node, const char *path, const char *name, const struct stat *status, struct walk_state *state);
@@ -128,6 +134,7 @@ main(
 	int path_end;
 	int index;
 	int has_action;
+	int output_error;
 
 	has_action = 0;
 
@@ -148,8 +155,11 @@ main(
 	/* Handles the path begin condition. */
 	if (path_begin == path_end)
 		path_begin = -1;
-	expression =
-	    parser.index == argc ? new_node(NODE_PRINT) : parse_or(&parser);
+	/* Implicit printing is appended once, after inspecting the parsed tree. */
+	if (parser.index == argc)
+		expression = new_node(NODE_TRUE);
+	else
+		expression = parse_or(&parser);
 
 	/* Validates the command-line arguments. */
 	if (expression == NULL || parser.failed || parser.index != argc) {
@@ -163,13 +173,7 @@ main(
 	/* Process each remaining command-line operand. */
 	state.depth_first = parser.depth_first;
 	state.same_device = parser.same_device;
-	for (index = 0; index < argc; index++) {
-		/* Handles the selected command-line operation. */
-		if (strcmp(argv[index], "-print") == 0 ||
-		    strcmp(argv[index], "-exec") == 0 ||
-		    strcmp(argv[index], "-ok") == 0)
-			has_action = 1;
-	}
+	has_action = expression_has_action(expression);
 
 	/* Handles the action condition. */
 	if (!has_action) {
@@ -202,16 +206,24 @@ main(
 			state.have_root_device = 0;
 			(void)walk_path(argv[index], expression, &state);
 		}
-	free_expression(expression);
+	/* Buffered manifest failures must be observed before declaring success. */
+	output_error = finish_outputs(expression);
+	if (output_error != 0)
+		state.errors = 1;
 
-	/* Handles an operation failure. */
-	if (ferror(stdout)) {
+	free_expression(expression);
+	output_error = fclose(stdout);
+	if (output_error != 0) {
 		fprintf(stderr, "find: write error\n");
 		state.errors = 1;
 	}
 
-	/* Returns the computed result. */
-	return state.errors ? 1 : 0;
+	/* Refuses to report an incomplete enumeration as successful. */
+	if (state.errors)
+		return 1;
+
+	/* Succeeded: traversal and all output streams completed. */
+	return 0;
 }
 
 /* Supports the is expression operation. */
@@ -418,6 +430,37 @@ parse_primary(
 
 		/* Returns the computed result. */
 		return function_result;
+	}
+
+	/* NUL terminators preserve every legal filename byte in the manifest. */
+	if (strcmp(token, "-print0") == 0) {
+		node = new_node(NODE_PRINT0);
+
+		/* Succeeded: the action writes filename-safe stdout records. */
+		return node;
+	}
+
+	/* A file action bypasses terminal output transformations. */
+	if (strcmp(token, "-fprint0") == 0) {
+		path = take_operand(parser, token);
+		if (path == NULL)
+			return NULL;
+
+		node = new_node(NODE_FPRINT0);
+		if (node == NULL)
+			return NULL;
+
+		node->text = path;
+		node->output = fopen(path, "wb");
+		if (node->output == NULL) {
+			fprintf(stderr, "find: %s: %s\n", path, strerror(errno));
+			free(node);
+			parser->failed = 1;
+			return NULL;
+		}
+
+		/* Succeeded: the expression now owns the output stream. */
+		return node;
 	}
 
 	/* Selects the matching value. */
@@ -704,7 +747,81 @@ free_expression(
 		return;
 	free_expression(node->left);
 	free_expression(node->right);
+
+	/* Parse failures also release streams opened by earlier actions. */
+	if (node->output != NULL)
+		(void)fclose(node->output);
+
 	free(node);
+}
+
+/* Recognizes actions in syntax nodes rather than coincidental operand text. */
+static int
+expression_has_action(
+	const struct node *node)
+{
+	int found;
+
+	/* Empty children contain no action. */
+	if (node == NULL)
+		return 0;
+
+	/* These explicit actions suppress the default print operation. */
+	switch (node->kind) {
+	case NODE_PRINT:
+	case NODE_PRINT0:
+	case NODE_FPRINT0:
+	case NODE_EXEC:
+		return 1;
+	default:
+		break;
+	}
+
+	/* Search both expression branches without interpreting their operands. */
+	found = expression_has_action(node->left);
+	if (found)
+		return 1;
+
+	found = expression_has_action(node->right);
+
+	/* Succeeded: reports whether any explicit action is present. */
+	return found;
+}
+
+/* Flushes and closes every owned manifest even if another close has failed. */
+static int
+finish_outputs(
+	struct node *node)
+{
+	int failed;
+	int status;
+
+	/* Empty children own no streams. */
+	if (node == NULL)
+		return 0;
+
+	/* Visit both branches, including actions skipped by short circuiting. */
+	failed = finish_outputs(node->left);
+	status = finish_outputs(node->right);
+	if (status != 0)
+		failed = 1;
+
+	/* Clear ownership after close, including its error path. */
+	if (node->output != NULL) {
+		status = fclose(node->output);
+		node->output = NULL;
+		if (status != 0) {
+			fprintf(stderr, "find: %s: write error\n", node->text);
+			failed = 1;
+		}
+	}
+
+	/* A buffered failure invalidates the complete manifest. */
+	if (failed)
+		return 1;
+
+	/* Succeeded: all owned output streams have closed. */
+	return 0;
 }
 
 /* Supports the scan walk options operation. */
@@ -806,8 +923,19 @@ walk_path(
 				strerror(errno));
 			state->errors = 1;
 		} else {
-			/* Process each directory entry. */
-			while ((entry = readdir(stream)) != NULL) {
+			/* Distinguish a complete directory from a failed enumeration. */
+			while (1) {
+				errno = 0;
+				entry = readdir(stream);
+				if (entry == NULL) {
+					if (errno != 0) {
+						fprintf(stderr, "find: %s: %s\n", path,
+							strerror(errno));
+						state->errors = 1;
+					}
+					break;
+				}
+
 				/* Selects the matching value. */
 				if (strcmp(entry->d_name, ".") == 0 ||
 				    strcmp(entry->d_name, "..") == 0)
@@ -858,6 +986,10 @@ evaluate(
 	struct walk_state *state)
 {
 	int function_result;
+	FILE *output;
+	size_t length;
+	size_t written;
+	int terminator;
 	time_t stamp;
 	unsigned long long value;
 
@@ -971,11 +1103,32 @@ evaluate(
 		/* Returns the computed result. */
 		return status->st_mtime > node->reference.st_mtime;
 	case NODE_PRINT:
-		/* Computes the function result. */
-		function_result = puts(path) != EOF;
+	case NODE_PRINT0:
+	case NODE_FPRINT0:
+		/* Explicit streams bypass PTYs; every action detects its own failure. */
+		output = stdout;
+		if (node->kind == NODE_FPRINT0)
+			output = node->output;
 
-		/* Returns the computed result. */
-		return function_result;
+		terminator = '\0';
+		if (node->kind == NODE_PRINT)
+			terminator = '\n';
+
+		length = strlen(path);
+		written = fwrite(path, 1, length, output);
+		if (written != length) {
+			state->errors = 1;
+			return 0;
+		}
+
+		function_result = fputc(terminator, output);
+		if (function_result == EOF) {
+			state->errors = 1;
+			return 0;
+		}
+
+		/* Succeeded: the record was written; final close checks buffering. */
+		return 1;
 	case NODE_PRUNE:
 		state->prune = 1;
 

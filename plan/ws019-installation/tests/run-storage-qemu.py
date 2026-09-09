@@ -60,7 +60,9 @@ def fixture(path, gpt):
 
 
 class Guest:
-    def __init__(self, output):
+    def __init__(self, output, usb_boot=False, extra_args=None, usb_topology='xhci'):
+        if usb_topology not in ('xhci', 'paired'):
+            raise ValueError('unknown USB topology')
         self.output = output
         self.log = output / "guest.log"
         self.deadline = time.monotonic() + 600
@@ -75,6 +77,31 @@ class Guest:
                 "-drive", f"file={output / 'mbr.img'},format=raw,if=ide,index=1",
                 "-nic", "none", "-display", "none", "-serial", "none",
                 "-debugcon", f"file:{self.log}", "-monitor", "stdio"]
+        if usb_boot:
+            # Isolate USB-root acceptance from the separately tracked IDE flush bug.
+            args[2] = "q35"
+            for drive in [f"file={output / 'boot.img'},format=raw,if=ide",
+                          f"file={output / 'mbr.img'},format=raw,if=ide,index=1"]:
+                index = args.index(drive)
+                del args[index - 1:index + 1]
+            if usb_topology == 'paired':
+                # Keep i8042 for the platform's current reboot reset path.
+                # A USB mouse exercises the companion without duplicating
+                # the PS/2 keyboard used by this command-oriented fixture.
+                args[2] = 'q35,usb=off'
+                args += ['-device', 'ich9-usb-ehci1,id=ehci',
+                         '-device', 'ich9-usb-uhci1,id=uhci1,masterbus=ehci.0,firstport=0',
+                         '-device', 'ich9-usb-uhci2,id=uhci2,masterbus=ehci.0,firstport=2',
+                         '-device', 'ich9-usb-uhci3,id=uhci3,masterbus=ehci.0,firstport=4',
+                         '-device', 'usb-mouse,bus=ehci.0,port=1,usb_version=1']
+                storage_bus = 'ehci.0,port=6'
+            else:
+                args += ['-device', 'qemu-xhci,id=xhci']
+                storage_bus = 'xhci.0'
+            args += [
+                     "-drive", f"file={output / 'boot.img'},format=raw,if=none,id=bootusb",
+                     "-device", f"usb-storage,drive=bootusb,bus={storage_bus},bootindex=1"]
+        args += extra_args or []
         self.commands.write(repr(args) + "\n")
         self.proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=self.monitor,
                                      stderr=subprocess.STDOUT, text=True)
@@ -99,7 +126,9 @@ class Guest:
         self.commands.flush()
         keys = {" ": "spc", "/": "slash", "-": "minus", ".": "dot",
                 ":": "shift-semicolon", "$": "shift-4", "?": "shift-slash",
-                "_": "shift-minus", "=": "equal"}
+                "_": "shift-minus", "=": "equal", "<": "shift-comma", ">": "shift-dot", ";": "semicolon",
+                "|": "shift-backslash", "'": "apostrophe", "!": "shift-1", "%": "shift-5",
+                '"': "shift-apostrophe"}
         for char in text:
             if "a" <= char <= "z" or "0" <= char <= "9":
                 key = char

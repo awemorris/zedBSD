@@ -84,6 +84,85 @@ format_file_run(
 	return 0;
 }
 
+/*
+ * Checks existing bytes without acquiring mutation or activation authority.
+ *
+ * Identity checks detect replacement but do not exclude concurrent writes.
+ */
+int
+format_file_verify(
+	const char *path,
+	int (*validate_size)(uint64_t),
+	int (*verify)(int, uint64_t),
+	uint64_t *size_out)
+{
+	struct stat expected;
+	struct stat actual;
+	int reader;
+	int error;
+
+	/* Rejects special objects before opening a potentially blocking name. */
+	error = lstat(path, &expected);
+	if (error < 0)
+		return errno;
+
+	/* Requires the same regular-file geometry as the formatter. */
+	if (!S_ISREG(expected.st_mode) || expected.st_size <= 0)
+		return EINVAL;
+
+	/* Refuses names with ambiguous installation ownership. */
+	if (expected.st_nlink != 1)
+		return EBUSY;
+
+	/* Validates size before reading any content. */
+	error = validate_size((uint64_t)expected.st_size);
+	if (error != 0)
+		return error;
+
+	/* Opens only a reader, with no format reservation or synchronization. */
+	reader = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+	if (reader < 0)
+		return errno;
+
+	/* Checks descriptor identity before invoking the content verifier. */
+	error = fstat(reader, &actual);
+	if (error < 0)
+		error = errno;
+	else
+		error = same_object(&expected, &actual);
+
+	/* Compares all required bytes only on the caller-selected object. */
+	if (error == 0)
+		error = verify(reader, (uint64_t)expected.st_size);
+
+	/* Detects descriptor geometry changes during the read. */
+	if (error == 0) {
+		error = fstat(reader, &actual);
+		if (error < 0)
+			error = errno;
+		else
+			error = same_object(&expected, &actual);
+	}
+
+	/* Detects pathname replacement while the checked descriptor is open. */
+	if (error == 0) {
+		error = lstat(path, &actual);
+		if (error < 0)
+			error = errno;
+		else
+			error = same_object(&expected, &actual);
+	}
+
+	/* Closes on every path without replacing an earlier verification error. */
+	error = close_files(-1, reader, error);
+	if (error != 0)
+		return error;
+
+	/* Publishes size only after a successful close. */
+	*size_out = (uint64_t)expected.st_size;
+	return 0;
+}
+
 /* Compares the immutable identity and caller-selected size. */
 static int
 same_object(

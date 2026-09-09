@@ -1,0 +1,44 @@
+// Sparse large offsets through the public Noct API and installer bounded reader.
+require source;
+func seekCheck(ok, text) { if (!ok) { System.error("large seek: " + text); } }
+func badSeek(file, offset) { return File.seek(file, offset); }
+func main(args) {
+    seekCheck(Array.size(args) == 1 || Array.size(args) == 3, "arguments");
+    var offsets = [2147483646L, 2147483647L, 2147483648L, 4294967295L, 4294967296L, 4294967552L];
+    var file = File.open(args[0], "wb");
+    var byte = Packed.uint8(1);
+    for (i in 0..Array.size(offsets)) {
+        File.seek(file, offsets[i]);
+        seekCheck(File.tell(file) == offsets[i], "write position");
+        byte[0] = 65 + i;
+        File.writeAll(file, byte, 0, 1);
+        seekCheck(File.tell(file) == offsets[i] + 1, "written position");
+    }
+    File.close(file);
+    file = File.open(args[0], "rb");
+    for (i in 0..Array.size(offsets)) {
+        File.seek(file, offsets[i]);
+        var read = File.readExact(file, 1);
+        seekCheck(read[0] == 65 + i, "read marker");
+        seekCheck(File.tell(file) == offsets[i] + 1, "read position");
+        var bounded = instSourceRead(args[0], offsets[i], 1);
+        seekCheck(bounded[0] == read[0], "bounded reader");
+    }
+    File.seek(file, 4096L);
+    seekCheck(File.readExact(file, 1)[0] == 0, "sparse hole");
+    for (i in 0..32) {
+        var rejected = System.pcall(badSeek, file, -1L);
+        seekCheck(!rejected.ok && File.tell(file) == 4097L, "negative offset preserves position");
+    }
+    File.close(file);
+    if (Array.size(args) == 3) {
+        var offset = instNumber(args[2], 10);
+        seekCheck(offset > 4294967296L, "backup GPT above 4 GiB");
+        var header = instSourceRead(args[1], offset, 512);
+        seekCheck(Packed.toString(header, 0, 8) == "EFI PART", "backup GPT signature");
+        seekCheck(instSourceU64(header, 24) == offset / 512 && instSourceU64(header, 32) == 1,
+            "backup GPT location");
+        print("native large GPT seek PASS");
+    }
+    print("Noct large seek PASS 2GiB 4GiB markers holes negative offsets bounded reader");
+}

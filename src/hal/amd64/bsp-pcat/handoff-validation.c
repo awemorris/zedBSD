@@ -185,6 +185,16 @@ zbl6_handoff_classify(
 		return ZBL6_HANDOFF_FORM_INVALID;
 	}
 
+	/* V7 is UEFI-only and retains the complete V6 ownership envelope. */
+	if (version == ZBL6_HANDOFF_V7_VERSION) {
+		required |= ZBL6_HANDOFF_FLAG_FRAMEBUFFER |
+		    ZBL6_HANDOFF_FLAG_BOOT_UUID | ZBL6_HANDOFF_FLAG_BOOT_PARAMETERS |
+		    ZBL6_HANDOFF_FLAG_BOOT_ALLOCATIONS;
+		if (size == ZBL6_HANDOFF_V7_UEFI_SIZE && flags == required)
+			return ZBL6_HANDOFF_FORM_V7_UEFI;
+		return ZBL6_HANDOFF_FORM_INVALID;
+	}
+
 	/* Version six retains both prefixes and requires explicit ownership. */
 	if (version == ZBL6_HANDOFF_V6_VERSION) {
 		if (size == ZBL6_HANDOFF_V6_BIOS_SIZE) {
@@ -309,7 +319,8 @@ zbl6_uefi_partition_handoff_valid(
 
 	/* Requires version five and its authoritative boot-volume UUID. */
 	if ((version != ZBL6_HANDOFF_V5_VERSION &&
-	    version != ZBL6_HANDOFF_V6_VERSION) ||
+	    version != ZBL6_HANDOFF_V6_VERSION &&
+	    version != ZBL6_HANDOFF_V7_VERSION) ||
 	    (flags & ZBL6_HANDOFF_FLAG_BOOT_UUID) == 0U)
 		return 0;
 

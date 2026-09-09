@@ -1,0 +1,7 @@
+require copy;
+func main(args) {
+    if (Array.size(args) != 2) { System.error("source target required"); }
+    var size = FileUtil.getFileSize(args[0]);
+    instCopyFile(args[0], args[1], size, "real-file");
+    print("PASS real file copy");
+}

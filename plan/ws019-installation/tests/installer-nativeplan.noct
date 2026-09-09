@@ -1,0 +1,82 @@
+require nativeplan;
+
+func npCheck(ok, message) { if (!ok) { System.error(message); } }
+func npFixture() {
+    return {disk:{name:"nvme0n1", id:2, parent:0, flags:0, sectorSize:512,
+        sectors:524288L, offset:0}, source:{name:"sda", id:1, parent:0},
+        sizes:{loader:1048576L, kernel:8388608L, tree:33554432L, objects:1000, swap:33554432L},
+        ids:["aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "cccccccc-bbbb-4ccc-8ddd-eeeeeeeeeeee"]};
+}
+func npPlan(f, unused) { return instNativePlan(f.disk, f.source, f.sizes, f.ids); }
+func npReject(kind, unused) {
+    var f = npFixture();
+    if (kind == "source-id") { f.disk.id = 1; }
+    if (kind == "source-name") { f.disk.name = "sda"; }
+    if (kind == "source-parent") { f.source.parent = 2; }
+    if (kind == "readonly") { f.disk.flags = 1; }
+    if (kind == "partition") { f.disk.parent = 3; f.disk.flags = 4; }
+    if (kind == "virtual") { f.disk.flags = 8; }
+    if (kind == "unknown-flags") { f.disk.flags = 16; }
+    if (kind == "offset") { f.disk.offset = 2048; }
+    if (kind == "4kn") { f.disk.sectorSize = 4096; }
+    if (kind == "zero-id") { f.disk.id = 0; }
+    if (kind == "id-overflow") { f.disk.id = 4294967296L; }
+    if (kind == "empty") { f.disk.sectors = 0; }
+    if (kind == "tiny") { f.disk.sectors = 33; }
+    if (kind == "small") { f.disk.sectors = 262144; }
+    if (kind == "disk-overflow") { f.disk.sectors = 9223372036854775807L; }
+    if (kind == "guid-count") { Array.pop(f.ids); }
+    if (kind == "guid-alias") { f.ids[2] = String.toUpperCase(f.ids[1]); }
+    if (kind == "guid-zero") { f.ids[0] = "00000000-0000-0000-0000-000000000000"; }
+    if (kind == "loader-zero") { f.sizes.loader = 0; }
+    if (kind == "kernel-zero") { f.sizes.kernel = 0; }
+    if (kind == "tree-zero") { f.sizes.tree = 0; }
+    if (kind == "objects-zero") { f.sizes.objects = 0; }
+    if (kind == "negative") { f.sizes.objects = -1; }
+    if (kind == "esp-overflow") { f.sizes.loader = 9223372036854775807L; }
+    if (kind == "fat-sector-limit") {
+        f.disk.sectors = 10737418240L;
+        f.sizes.loader = 2199023255552L;
+    }
+    if (kind == "tree-overflow") { f.sizes.tree = 9223372036854775807L; }
+    if (kind == "objects-overflow") { f.sizes.objects = 9223372036854775807L; }
+    if (kind == "swap-small") { f.sizes.swap = 4096; }
+    if (kind == "swap-align") { f.sizes.swap = 8193; }
+    return npPlan(f, 0);
+}
+func main(args) {
+    var f = npFixture();
+    var p = npPlan(f, 0);
+    npCheck(p.esp.start == 2048 && p.esp.bytes == 67108864L, "ESP geometry");
+    npCheck(p.root.start == 133120 && p.root.count == 389120, "root geometry");
+    npCheck(p.requiredRoot == 142409728L && p.swapBytes == 33554432L, "capacity accounting");
+    npCheck(Array.size(p.argv) == 14 && p.argv[4] == "2048" &&
+        p.argv[9] == "133120" && p.argv[10] == "389120", "exact command extents");
+    npCheck(p.configuration == "kernel=vmunix\nboot0=PARTUUID=" + f.ids[1] +
+        "\nrootpart=PARTUUID=" + f.ids[2] + "\n", "native configuration");
+    var accepted = 1;
+    for (sectors in [8388608L, 8589934592L, 10737418240L]) {
+        f = npFixture(); f.disk.sectors = sectors; p = npPlan(f, 0);
+        npCheck(p.root.start % 2048 == 0 && p.root.count % 2048 == 0 &&
+            p.root.start + p.root.count <= sectors - 33 &&
+            sectors - 33 - p.root.start - p.root.count < 2048, "large disk tail");
+        accepted = accepted + 1;
+    }
+    f = npFixture(); f.sizes.kernel = 67108864L; p = npPlan(f, 0);
+    npCheck(p.esp.bytes == 88080384L, "measured larger ESP"); accepted = accepted + 1;
+    f = npFixture();
+    var needed = instNativeRound(npPlan(f, 0).requiredRoot, 1048576L) / 512L;
+    f.disk.sectors = 133120L + needed + 33L;
+    p = npPlan(f, 0); npCheck(p.root.count == needed, "exact fit"); accepted = accepted + 1;
+    f.disk.sectors = f.disk.sectors - 1;
+    npCheck(!System.pcall(npPlan, f, 0).ok, "one-sector undersize accepted");
+    var cases = ["source-id", "source-name", "source-parent", "readonly", "partition",
+        "virtual", "unknown-flags", "offset", "4kn", "zero-id", "id-overflow", "empty", "tiny", "small",
+        "disk-overflow", "guid-count", "guid-alias", "guid-zero", "loader-zero", "kernel-zero",
+        "tree-zero", "objects-zero", "negative", "esp-overflow", "fat-sector-limit", "tree-overflow",
+        "objects-overflow", "swap-small", "swap-align"];
+    for (kind in cases) { npCheck(!System.pcall(npReject, kind, 0).ok, "accepted " + kind); }
+    print("native plan PASS: " + accepted + " valid layouts, " + (Array.size(cases) + 1) + " refusals");
+}

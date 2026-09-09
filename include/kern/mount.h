@@ -62,6 +62,9 @@ enum mount_state {
 	MOUNT_STATE_DEAD,
 };
 
+typedef int (*file_extent_cb)(uint64_t, uint64_t, uint32_t, void *);
+typedef int (*file_metadata_extent_cb)(uint64_t, uint32_t, void *);
+
 struct filesystem_type {
 	const char *fs_name;
 	unsigned fs_flags;
@@ -88,6 +91,14 @@ struct filesystem_type {
 	/* Caller holds the inode I/O lease. 1: allocated existing data,
 	 * 0: through required, negative errno: validation failure. */
 	int (*writeback_range)(struct file *, off_t, size_t);
+	/* Caller retains a prepared backing claim. Report ordered logical and
+	 * physical 512-byte sectors; never allocate blocks or retain the callback. */
+	int (*file_extents)(struct file *, file_extent_cb, void *);
+	/* Optional exclusive metadata ranges, never shared allocation tables.
+	 * These protect layout; they are not part of the logical file I/O map. */
+	int (*file_metadata_extents)(struct file *, file_metadata_extent_cb, void *);
+	/* Stable file identity across separate mounts; no mutation or admission. */
+	int (*file_backing_identity)(struct inode *, struct disk **, uint64_t *);
 };
 
 struct mount {
@@ -264,6 +275,11 @@ mount(
 	const char *dir,
 	int flags,
 	void *data);
+
+/* Process path operations retain resolved identities across namespace changes. */
+struct cwdinfo;
+int mount_context(struct cwdinfo *context, const char *type_name, const char *directory, int flags, void *data);
+int unmount_context(struct cwdinfo *context, const char *directory);
 
 int
 unmount(

@@ -1,0 +1,115 @@
+require admission;
+require files;
+
+func admitCheck(condition, message) {
+    if (!condition) { System.error("admission check: " + message); }
+}
+func admitRejected(fn, a, b, c) {
+    var result = System.pcall(admitCall, { fn: fn, a: a, b: b, c: c }, 0);
+    admitCheck(!result.ok, "unexpected acceptance");
+}
+func admitCall(context, unused) { return context.fn(context.a, context.b, context.c); }
+func admitPath(path, unused, ignored) { return instControlledPath(path); }
+func admitConfig(text, guid, uuid) { return instSourceConfiguration(text, guid, uuid); }
+func admitCapacity(text, path, ignored) { return instCapacityRecord(text, path); }
+func admitManifest(pair, guid, sources) { return instAdmissionManifest(pair[0], pair[1], guid, sources); }
+func admitNeed(context, cluster, directories) {
+    return instCapacityNeeded(context.entries, context.present, context.mount, cluster, directories);
+}
+func admitNativeCapacity(context, unused) {
+    return instFileAdmitCapacity(context.entries, context.present, context.mount, 512, 0);
+}
+func main(args) {
+    var guid = "12345678-1234-5678-9abc-123456789abc";
+    var uuid = "1234-ABCD";
+    var cfg = "kernel=vmunix\noverlay-root=rootfs.img\noverlay-data=data.img\nswap0=swapfile\n";
+    admitCheck(instSourceConfiguration(cfg, guid, uuid), "generated source");
+    admitCheck(instSourceConfiguration(String.substring(cfg, 0, String.charCount(cfg) - 1), guid, uuid), "unterminated final line");
+    admitCheck(instSourceConfiguration(cfg + "boot0=UUID=1234-abcd\ninit=/sbin/init\n", guid, uuid), "same FAT");
+    var destination = instDestinationConfiguration(guid);
+    admitCheck(instSourceConfiguration(destination, guid, uuid), "generated destination");
+    var additions = ["kernel=vmunix\n", "boot0=UUID=0000-0000\n", "boot0=partuuid=" + guid + "\n",
+        "init=/bin/sh\n", "swap1=/dev/sda\n", "rootpart=/dev/sda\n", "#comment\n", " \n",
+        "kernel =vmunix\n", "boot0=PARTUUID=bad\n", "init=/sbin/init\r\r\n", "init=/sbin/init\r"];
+    for (extra in additions) { admitRejected(admitConfig, cfg + extra, guid, uuid); }
+    var badProfiles = ["kernel=../vmunix", "kernel=boot0:vmunix", "kernel=/vmunix",
+        "kernel=other", "kernel=vmunix\noverlay-root=boot1:rootfs.img",
+        "kernel=vmunix\noverlay-root=rootfs.img\noverlay-data=other\nswap0=swapfile"];
+    for (bad in badProfiles) { admitRejected(admitConfig, bad + "\n", guid, uuid); }
+    var large = cfg;
+    for (i in 0..65) { large = large + "\n"; }
+    admitRejected(admitConfig, large, guid, uuid);
+    var badPaths = ["", "/", "relative/file", "/a/../b", "/a/./b", "/a//b", "/a/", "/a b", "/a\tb",
+        "/a\nb", "/a;false", "/a\\b", "/é"];
+    for (bad in badPaths) { admitRejected(admitPath, bad, 0, 0); }
+    admitCheck(instFileParent("/run/a")[0] == "/run", "adapter parent");
+    admitCheck(instFileParent("/a")[0] == "/", "root parent");
+    var digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    var sources = [ { role: "loader", path: "/src-esp/EFI/BOOT/BOOTX64.EFI", bytes: 513L, digest: digest },
+        { role: "kernel", path: "/src-payload/vmunix", bytes: 65537L, digest: digest },
+        { role: "rootfs", path: "/src-payload/rootfs.img", bytes: 1048577L, digest: digest } ];
+    var entries = instAdmissionManifest("/esp", "/payload", guid, sources);
+    admitCheck(Array.size(entries) == 6 && entries[0].final == "/esp/EFI/BOOT/BOOTX64.EFI" &&
+        entries[0].stage == "/esp/zedinst-stage/BOOTX64.EFI", "ESP layout");
+    admitCheck(entries[1].final == "/payload/vmunix" && entries[2].source == "/src-payload/rootfs.img", "immutable copy");
+    admitCheck(entries[3].bytes == 33554432L && entries[4].bytes == 67108864L &&
+        entries[5].text == destination && entries[5].bytes == String.byteLength(destination), "generated artifacts");
+    admitCheck(entries[5].role == "config" && entries[5].final == "/payload/zedbsd.cfg", "configuration last");
+    for (pair in [["/esp", "/esp"], ["/esp", "/ESP"], ["/a", "/a/b"], ["/a/b", "/a"]]) {
+        admitRejected(admitManifest, pair, guid, sources);
+    }
+    var sizes = [513L, 65537L, 1048577L, 33554432L, 67108864L, Long.from(String.byteLength(destination))];
+    var cases = 0;
+    // Independent arithmetic uses the small bounded byte sizes directly.
+    for (mask in 0..64) {
+        var present = [];
+        for (i in 0..6) { Array.push(present, (mask & (1 << i)) != 0); }
+        var cluster = 512L;
+        for (power in 0..9) {
+            var espNeed = 6 * cluster;
+            var payloadNeed = 2 * cluster;
+            for (i in 0..6) {
+                if (present[i]) { continue; }
+                var cost = ((sizes[i] + cluster - 1) / cluster + 2) * cluster;
+                if (i == 0) { espNeed = espNeed + cost; }
+                else { payloadNeed = payloadNeed + cost; }
+            }
+            admitCheck(instCapacityNeeded(entries, present, "/esp", cluster, 3) == espNeed, "ESP capacity subset");
+            admitCheck(instCapacityNeeded(entries, present, "/payload", cluster, 1) == payloadNeed, "payload capacity subset");
+            cases = cases + 1;
+            cluster = cluster * 2;
+        }
+    }
+    var context = { entries: entries, present: [false,false,false,false,false,false], mount: "/esp" };
+    for (cluster in [0, 511, 513, 262144]) { admitRejected(admitNeed, context, cluster, 0); }
+    admitRejected(admitNeed, context, 512, 4);
+    context.mount = "/other";
+    admitRejected(admitNeed, context, 512, 0);
+    var header = "Filesystem 512-blocks Used Available Capacity Mounted on\n";
+    var record = header + "/payload 100 40 50 45% /payload\n";
+    var capacity = instCapacityRecord(record, "/payload");
+    admitCheck(capacity.total == 51200 && capacity.used == 20480 && capacity.available == 25600, "df units");
+    var invalid = ["", header, record + record, header + "/payload 100 40 61 45% /payload\n",
+        header + "/payload 100 40 50 0% /payload\n",
+        header + "/payload 100 101 0 100% /payload\n", header + "/payload 100 0 0 101% /payload\n",
+        header + "/payload 100 0 0 0 /payload\n", header + "/payload 18014398509481984 0 0 0% /payload\n",
+        header + "/payload -1 0 0 0% /payload\n", header + "/payload 100 0 0 0% /other\n",
+        String.substring(record, 0, String.charCount(record) - 1)];
+    for (bad in invalid) { admitRejected(admitCapacity, bad, "/payload", 0); }
+    if (Array.size(args) != 0) {
+        admitCheck(Array.size(args) == 1 && args[0] == "/q149", "disposable capacity mount");
+        var native = { entries: instAdmissionManifest("/unused-esp", args[0], guid, sources),
+            present: [false,false,false,false,false,false], mount: args[0] };
+        var admitted = admitNativeCapacity(native, 0);
+        admitCheck(admitted.needed > 100663296L && admitted.needed <= admitted.available, "native positive admission");
+        native.entries[1].bytes = 2147483647L;
+        var rejected = System.pcall(admitNativeCapacity, native, 0);
+        admitCheck(!rejected.ok && String.indexOf(rejected.message, "insufficient staging capacity") >= 0,
+            "native capacity refusal");
+        native.present = [true,true,true,true,true,true];
+        admitted = admitNativeCapacity(native, 0);
+        admitCheck(admitted.needed == 0, "verified existing files consume no staging space");
+        print("native capacity guard PASS admission refusal existing-files");
+    }
+    print("installer admission PASS " + cases + " capacity subsets plus source/layout/parser boundaries");
+}

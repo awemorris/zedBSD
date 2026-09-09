@@ -25,6 +25,8 @@ enum loop_flags {
 
 /* Returns a referenced backing disk; EOPNOTSUPP identifies a non-loop disk. */
 int drv_loop_backing_disk_ref(struct disk *disk, struct disk **result);
+/* Returns an attached loop's referenced backing file and attachment flags. */
+int drv_loop_backing_file_ref(struct disk *disk, struct file **result, unsigned *flags);
 
 int
 drv_loop_init(void);

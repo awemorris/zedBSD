@@ -450,6 +450,12 @@ static uint32_t fat_raw_root_cluster(const struct fat_mount_state *fat);
 static int fat_raw_validate_chain_at(struct fat_mount_state *filesystem,
 	uint32_t first_cluster, uint32_t wanted_index,
 	struct fat_chain_cursor *cursor, uint32_t *last_cluster);
+static int fat_raw_validate_chain_count(struct fat_mount_state *filesystem,
+	uint32_t first_cluster, uint32_t wanted_index,
+	struct fat_chain_cursor *cursor, uint32_t *last_cluster,
+	uint32_t *allocated_clusters);
+static int fat_raw_growth_capacity(struct fat_mount_state *filesystem,
+	uint32_t allocated_clusters, uint64_t size);
 static int fat_raw_validate_chain(struct fat_mount_state *filesystem,
 	uint32_t first_cluster);
 static int fat_raw_free_chain(struct fat_mount_state *filesystem,
@@ -647,6 +653,7 @@ static ssize_t fat_pwrite_context(struct file *file, const void *buffer,
 static int fat_readdir(struct file *, struct dirent *, int *);
 static int fat_open_file(struct file *);
 static int fat_fsync(struct file *);
+static int fat_fsync_directory(struct file *);
 static int fat_close_file(struct file *);
 static int fat_flush_pending_closes(struct fat_mount_state *);
 static void set_inode_ops(struct inode *inode);
@@ -809,11 +816,14 @@ static const struct file_ops fat_regular_ops = {
 };
 
 static const struct file_ops fat_directory_ops = {
+	.fsync = fat_fsync_directory,
 	.readdir = fat_readdir,
 	.close = fat_close_file,
 };
 
 const struct filesystem_type drv_fat_filesystem_type = {
+	.file_backing_identity = drv_fat_file_backing_identity,
+	.file_extents = drv_fat_file_extents,
 	.writeback_range = fat_writeback_range,
 	.fs_name = "fat",
 	.probe = fat_probe,
@@ -3908,6 +3918,20 @@ fat_raw_validate_chain_at(
 	struct fat_chain_cursor *cursor,
 	uint32_t *last_cluster)
 {
+	return fat_raw_validate_chain_count(filesystem, first_cluster,
+		wanted_index, cursor, last_cluster, NULL);
+}
+
+/* Validates the entire chain and optionally reports its owned capacity. */
+static int
+fat_raw_validate_chain_count(
+	struct fat_mount_state *filesystem,
+	uint32_t first_cluster,
+	uint32_t wanted_index,
+	struct fat_chain_cursor *cursor,
+	uint32_t *last_cluster,
+	uint32_t *allocated_clusters)
+{
 	uint32_t next;
 	int result;
 	struct fat_mount_state *fat = filesystem;
@@ -3951,6 +3975,10 @@ fat_raw_validate_chain_at(
 		/* Asks whether the entry is the end-of-chain marker. */
 		last = fat_raw_is_end(fat, next);
 		if (last) {
+			/* Counts owned clusters, including allocation beyond EOF. */
+			if (allocated_clusters != NULL)
+				*allocated_clusters = steps + 1U;
+
 			/* Reports the last cluster, if the caller asked. */
 			if (last_cluster != NULL)
 				*last_cluster = cluster;
@@ -5670,6 +5698,50 @@ fat_raw_write(
 	return 0;
 }
 
+/*
+ * Admits a complete truncate growth under the caller's mount mutation lock.
+ * The allocation table is authoritative; FSInfo hints are not reservations.
+ */
+static int
+fat_raw_growth_capacity(
+	struct fat_mount_state *filesystem,
+	uint32_t allocated_clusters,
+	uint64_t size)
+{
+	uint64_t required;
+	uint32_t cluster_bytes;
+	uint32_t needed;
+	uint32_t cluster;
+	uint32_t value;
+	int error;
+
+	cluster_bytes = (uint32_t)filesystem->sectors_per_cluster * 512U;
+	if (cluster_bytes == 0U)
+		return EIO;
+
+	/* Round in 64 bits, then credit every cluster the file already owns. */
+	required = (size + cluster_bytes - 1U) / cluster_bytes;
+	if (required <= allocated_clusters)
+		return 0;
+	if (required > filesystem->cluster_count)
+		return ENOSPC;
+	needed = (uint32_t)required - allocated_clusters;
+
+	/* Stop once sufficient space is proven; allocation still owns the lock. */
+	for (cluster = 2U; cluster < filesystem->cluster_count + 2U; cluster++) {
+		error = fat_raw_next_cluster(filesystem, cluster, &value);
+		if (error != 0)
+			return error;
+		if (value != 0U)
+			continue;
+		needed--;
+		if (needed == 0U)
+			return 0;
+	}
+
+	return ENOSPC;
+}
+
 /* Changes the size of a file, freeing or zeroing what that costs. */
 static int
 fat_raw_truncate(
@@ -5677,6 +5749,7 @@ fat_raw_truncate(
 	uint64_t size)
 {
 	uint32_t cluster_bytes;
+	uint32_t allocated_clusters = 0U;
 	int rollback;
 	int cleanup;
 	uint64_t first_offset;
@@ -5722,16 +5795,26 @@ fat_raw_truncate(
 			first_offset = 0U;
 
 		/* Walks the chain as far as the new size reaches. */
-		result = fat_raw_validate_chain_at(
+		result = fat_raw_validate_chain_count(
 			file->mount, state->first_cluster,
 			(uint32_t)first_offset / cluster_bytes, &cursor,
-			&old_last);
+			&old_last, &allocated_clusters);
 		if (result != 0)
 			return result;
 	}
 
 	/* Growing a file fills the new space with zeroes. */
 	if (size > file->size) {
+		/* An existing size must fit its validated, owned chain. */
+		cluster_bytes = (uint32_t)fat->sectors_per_cluster * 512U;
+		if (old_size > (uint64_t)allocated_clusters * cluster_bytes)
+			return EIO;
+
+		/* Reject insufficient capacity before initializing new clusters. */
+		result = fat_raw_growth_capacity(fat, allocated_clusters, size);
+		if (result != 0)
+			return result;
+
 		/* Zeroes from the old end up to the new size. */
 		result = fat_raw_write_bytes(file,
 					     (uint32_t)file->size,
@@ -9761,6 +9844,21 @@ fat_close_file(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/* Flushes directory publication without treating its cursor as file state. */
+static int
+fat_fsync_directory(
+	struct file *file)
+{
+	struct inode *inode;
+
+	if (file == NULL)
+		return EINVAL;
+	inode = file->f_inode;
+	if (inode == NULL || inode->i_type != INODE_DIR)
+		return EINVAL;
+	return fat_sync_mount(inode->i_mount);
 }
 
 /* Makes everything this file has written durable. */

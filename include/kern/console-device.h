@@ -15,10 +15,4 @@
 int
 drv_console_device_register(void);
 
-int
-drv_console_input_poll_event(void);
-
-int
-drv_console_input_read_event(void);
-
 #endif

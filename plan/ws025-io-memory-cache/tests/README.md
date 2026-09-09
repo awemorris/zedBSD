@@ -1,5 +1,14 @@
 # WS025 fixture と実行証拠
 
+UAS descriptor parser: `bash plan/ws025-io-memory-cache/tests/run-uas-descriptor-host.sh`.
+Tests the production decoder using q144 captures and malformed variants under
+ordinary/ASan/UBSan builds. Capture new QEMU descriptors with
+`python3 plan/ws025-io-memory-cache/tests/capture-uas-descriptors.py plan/ws025-io-memory-cache/temp/OUTPUT`.
+
+IMOD functional comparison: `python3 plan/ws025-io-memory-cache/tests/run-imod-qemu.py plan/ws025-io-memory-cache/temp/OUTPUT`.
+Builds private 0/160/4000 artifacts, checks actual QMP MMIO readback, and runs
+the maintained USB/HID campaign. It does not measure physical IRQ latency.
+
 状態: p001–p004 完了、q092 / p005 高位 RAM の受け入れ実行中。
 
 Parent: [WS025](../ws.md)。[確認項目](../acceptance.md) の ID を fixture/result へ付ける。

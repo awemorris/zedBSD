@@ -21,6 +21,7 @@
 #include "kern/boot.h"
 #include "kern/klog.h"
 #include "kern/sched.h"
+#include "kern/thread.h"
 #include "kern/vm-commit.h"
 #include "kern/vm-reclaim.h"
 
@@ -34,6 +35,7 @@ static struct boot_handoff handoff_snapshot;
 static const struct boot_device *boot_devices;
 static unsigned boot_device_count;
 
+static void boot_worker(void *argument);
 static void boot_start(const struct boot_handoff *h, const struct boot_device *platform_devices, unsigned platform_device_count);
 
 /*
@@ -84,6 +86,9 @@ kernel_main(
 	const struct boot_device *platform_devices,
 	unsigned platform_device_count)
 {
+	struct thread *worker;
+	int error;
+
 	/*
 	 * PC-98 Stage 1 places its handoff below 1 MiB.  User address spaces do
 	 * not retain that identity mapping, so persistent kernel services must
@@ -96,9 +101,33 @@ kernel_main(
 	/* Starts the reclaim machinery before any subsystem can need memory. */
 	vm_reclaim_init();
 
-	/* Brings the system up as far as it goes, then idles. */
-	boot_start(h, platform_devices, platform_device_count);
+	/*
+	 * Mounting may wait for a storage worker that owns a mutex or URB.
+	 * The bootstrap thread is CPU0's idle task and cannot serve as that
+	 * sleeping waiter. Give initialization its own schedulable lifetime.
+	 */
+	error = kthread_create(boot_worker, NULL, SCHED_PRIORITY_DEFAULT,
+	    &worker);
+	if (error != 0) {
+		hal_printf("boot: initialization thread failed (%d); entering idle.\n",
+		    error);
+		kern_logf("boot: initialization thread failed (%d); entering idle.\n",
+		    error);
+	} else {
+		/* No joiner is needed; retirement releases this one-shot task. */
+		worker->detached = 1;
+		thread_start(worker);
+	}
 	sched_idle();
+}
+
+/* Runs blocking initialization using the retained, kernel-owned handoff. */
+static void
+boot_worker(
+	void *argument)
+{
+	(void)argument;
+	boot_start(&handoff_snapshot, boot_devices, boot_device_count);
 }
 
 /* Parses the boot parameters, mounts the root, and starts init. */

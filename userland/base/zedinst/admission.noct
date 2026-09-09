@@ -1,0 +1,188 @@
+// Pure admission records shared by preflight and managed-file publication.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require identity;
+
+// Controlled paths remain subject to separate filesystem ownership checks.
+func instControlledPath(path) {
+    if (String.charCount(path) < 2 || String.byteLength(path) >= 256 ||
+        String.charAt(path, 0) != "/") { System.error("invalid controlled path"); }
+    var components = instSplit(String.substring(path, 1, -1), "/");
+    for (part in components) {
+        if (part == "" || part == "." || part == "..") { System.error("ambiguous path component"); }
+        for (i in 0..String.charCount(part)) {
+            var c = String.charCodeAt(part, i);
+            if (!((c >= 48 && c <= 57) || (c >= 65 && c <= 90) ||
+                (c >= 97 && c <= 122) || c == 45 || c == 46 || c == 95)) {
+                System.error("unsupported controlled path character");
+            }
+        }
+    }
+    return path;
+}
+
+// Admit only the fixed artifact profile, not every configuration the loader accepts.
+func instSourceConfiguration(text, partuuid, uuid) {
+    partuuid = instGuid(partuuid);
+    if (String.charCount(uuid) != 9 || String.charAt(uuid, 4) != "-") {
+        System.error("invalid source FAT identity");
+    }
+    instNumber(String.substring(uuid, 0, 4), 16);
+    instNumber(String.substring(uuid, 5, 4), 16);
+    if (String.byteLength(text) > 4096) { System.error("source configuration too large"); }
+    // Unlike PTY command output, file contents must have exact loader line endings.
+    for (i in 0..String.charCount(text)) {
+        if (String.charAt(text, i) == "\r" &&
+            (i + 1 == String.charCount(text) || String.charAt(text, i + 1) != "\n")) {
+            System.error("invalid source configuration line ending");
+        }
+    }
+    if (text == "" || String.charAt(text, String.charCount(text) - 1) != "\n") { text = text + "\n"; }
+    var lines = instLines(text);
+    if (Array.size(lines) > 64) { System.error("too many source configuration lines"); }
+    var values = {};
+    for (line in lines) {
+        if (String.byteLength(line) > 511) { System.error("source configuration line too long"); }
+        for (i in 0..String.charCount(line)) {
+            var c = String.charCodeAt(line, i);
+            if (c < 33 || c > 126 || c == 34 || c == 39 || c == 35 || c == 59 || c == 92) {
+                System.error("unsupported source configuration syntax");
+            }
+        }
+        if (line == "") { continue; }
+        var at = String.indexOf(line, "=");
+        if (at < 1) { System.error("invalid source configuration directive"); }
+        var key = String.substring(line, 0, at);
+        var value = String.substring(line, at + 1, -1);
+        if (Dict.hasKey(values, key)) { System.error("duplicate source directive"); }
+        if (key != "kernel" && key != "overlay-root" && key != "overlay-data" &&
+            key != "swap0" && key != "boot0" && key != "init") {
+            System.error("unsupported installer source profile");
+        }
+        values[key] = value;
+    }
+    var keys = ["kernel", "overlay-root", "overlay-data", "swap0"];
+    var paths = ["vmunix", "rootfs.img", "data.img", "swapfile"];
+    for (i in 0..4) {
+        if (!Dict.hasKey(values, keys[i])) { System.error("incomplete source profile"); }
+        var value = values[keys[i]];
+        if (i != 0 && String.substring(value, 0, 6) == "boot0:") {
+            value = String.substring(value, 6, -1);
+        }
+        if (value != paths[i]) { System.error("redirected source artifact"); }
+    }
+    if (Dict.hasKey(values, "boot0")) {
+        var selector = values.boot0;
+        var matches = String.substring(selector, 0, 9) == "PARTUUID=" &&
+            String.toLowerCase(String.substring(selector, 9, -1)) == partuuid;
+        if (String.substring(selector, 0, 5) == "UUID=" &&
+            String.toLowerCase(String.substring(selector, 5, -1)) == String.toLowerCase(uuid)) { matches = true; }
+        if (!matches) {
+            System.error("source boot0 differs from configuration volume");
+        }
+    }
+    if (Dict.hasKey(values, "init") && values.init != "/sbin/init") {
+        System.error("source profile uses a different init");
+    }
+    return true;
+}
+
+func instDestinationConfiguration(partuuid) {
+    return "kernel=vmunix\nboot0=PARTUUID=" + instGuid(partuuid) +
+        "\noverlay-root=boot0:rootfs.img\noverlay-data=boot0:data.img\nswap0=boot0:swapfile\n";
+}
+
+// Source records have already passed immutable identity, digest and format admission.
+func instAdmissionManifest(esp, payload, partuuid, sources) {
+    instControlledPath(esp);
+    instControlledPath(payload);
+    var left = String.toLowerCase(esp);
+    var right = String.toLowerCase(payload);
+    if (left == right || String.indexOf(left + "/", right + "/") == 0 ||
+        String.indexOf(right + "/", left + "/") == 0) {
+        System.error("aliased destination mount paths");
+    }
+    if (Array.size(sources) != 3) { System.error("incomplete immutable source set"); }
+    var roles = ["loader", "kernel", "rootfs", "data", "swap", "config"];
+    var names = ["BOOTX64.EFI", "vmunix", "rootfs.img", "data.img", "swapfile", "zedbsd.cfg"];
+    var entries = [];
+    for (i in 0..6) {
+        var directory = payload;
+        var mount = payload;
+        if (i == 0) { directory = esp + "/EFI/BOOT"; mount = esp; }
+        var entry = { role: roles[i], directory: directory, mount: mount,
+            final: instControlledPath(directory + "/" + names[i]),
+            stageDirectory: instControlledPath(mount + "/zedinst-stage"),
+            stage: instControlledPath(mount + "/zedinst-stage/" + names[i]),
+            permissions: 493, modeText: "755", bytes: 0L };
+        if (i < 3) {
+            var source = sources[i];
+            if (source.role != roles[i] || source.bytes <= 0 || source.bytes > 2147483647L ||
+                String.charCount(source.digest) != 64) { System.error("invalid immutable source record"); }
+            for (j in 0..64) { instNumber(String.charAt(source.digest, j), 16); }
+            entry.source = instControlledPath(source.path);
+            entry.bytes = source.bytes;
+            entry.digest = String.toLowerCase(source.digest);
+        } else if (i == 3) { entry.bytes = 33554432L; }
+        else if (i == 4) { entry.bytes = 67108864L; }
+        else {
+            entry.text = instDestinationConfiguration(partuuid);
+            entry.bytes = Long.from(String.byteLength(entry.text));
+        }
+        Array.push(entries, entry);
+    }
+    return entries;
+}
+
+// Consume only df -P's default 512-byte units and one controlled operand.
+func instCapacityRecord(text, path) {
+    instControlledPath(path);
+    var lines = instLines(text);
+    if (Array.size(lines) != 2 || lines[0] != "Filesystem 512-blocks Used Available Capacity Mounted on") {
+        System.error("incomplete capacity report");
+    }
+    var fields = [];
+    for (field in instSplit(lines[1], " ")) { if (field != "") { Array.push(fields, field); } }
+    if (Array.size(fields) != 6 || fields[0] != path || fields[5] != path) {
+        System.error("capacity operand changed");
+    }
+    var total = instNumber(fields[1], 10);
+    var used = instNumber(fields[2], 10);
+    var available = instNumber(fields[3], 10);
+    var percentage = fields[4];
+    if (String.charCount(percentage) < 2 || String.charAt(percentage, String.charCount(percentage) - 1) != "%") {
+        System.error("invalid capacity percentage");
+    }
+    var percent = instNumber(String.substring(percentage, 0, String.charCount(percentage) - 1), 10);
+    if (used > total || available > total - used || percent > 100 || total > 9223372036854775807L / 512) {
+        System.error("invalid capacity counters");
+    }
+    // The byte-conversion limit above also bounds this percentage numerator.
+    var denominator = used + available;
+    var expected = 0L;
+    if (denominator != 0) { expected = (used * 100 + denominator - 1) / denominator; }
+    if (percent != expected) { System.error("inconsistent capacity percentage"); }
+    return { total: total * 512, used: used * 512, available: available * 512 };
+}
+
+// Account for allocation and worst-case directory growth without reserving space.
+func instCapacityNeeded(entries, present, mount, cluster, newDirectories) {
+    instControlledPath(mount);
+    if (Array.size(entries) != 6 || Array.size(present) != 6 || cluster < 512 || cluster > 131072 ||
+        (cluster & (cluster - 1)) != 0 || newDirectories < 0 || newDirectories > 3) {
+        System.error("invalid capacity geometry");
+    }
+    var needed = Long.from(newDirectories) * 2 * cluster;
+    var matched = false;
+    for (i in 0..6) {
+        if (entries[i].mount != mount) { continue; }
+        matched = true;
+        if (present[i]) { continue; }
+        var bytes = entries[i].bytes;
+        if (bytes <= 0 || bytes > 2147483647L) { System.error("invalid managed file size"); }
+        var clusters = bytes / cluster;
+        if (bytes % cluster != 0) { clusters = clusters + 1; }
+        needed = needed + (clusters + 2) * cluster;
+    }
+    if (!matched) { System.error("unknown capacity destination"); }
+    return needed;
+}

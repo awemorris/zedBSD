@@ -1,0 +1,52 @@
+// Codec admission for the shared native layout; this does not acquire a device lease.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require nativeplan;
+require commands;
+
+func instFormatCapacity(text, profile, bytes) {
+    var lines = instLines(text);
+    if (Array.size(lines) != 1) { System.error("ambiguous formatter capacity"); }
+    var fields = instSplit(lines[0], "\t");
+    if (Array.size(fields) != 8 || fields[0] != "format" || fields[1] != "1" ||
+        fields[2] != profile || fields[3] != "512" || instNumber(fields[4], 10) != bytes) {
+        System.error("formatter capacity identity mismatch");
+    }
+    var capacity = {bytes:bytes, free:instNumber(fields[5], 10),
+        inodes:instNumber(fields[6], 10), unit:instNumber(fields[7], 10)};
+    if (capacity.unit < 512 || capacity.unit > 32768 ||
+        (capacity.unit & (capacity.unit - 1)) != 0 || capacity.free > bytes ||
+        capacity.free % capacity.unit != 0 || capacity.inodes > 4294967295L) {
+        System.error("invalid formatter capacity geometry");
+    }
+    if (profile == "ufs-native") {
+        if (capacity.unit != 8192 || capacity.inodes == 0) {
+            System.error("unsupported native capacity");
+        }
+    } else if (profile != "fat32" || capacity.inodes != 0) {
+        System.error("unsupported formatter profile");
+    }
+    return capacity;
+}
+func instFormatQuery(context, request) { return instRequire(request); }
+
+func instNativeAdmittedPlan(target, source, measured, identifiers, query, context) {
+    var plan = instNativePlan(target, source, measured, identifiers);
+    var esp = instFormatCapacity(query(context,
+        ["/sbin/mkfs", "-t", "fat32", "--check-size", "" + plan.esp.bytes]),
+        "fat32", plan.esp.bytes);
+    var root = instFormatCapacity(query(context,
+        ["/sbin/mkfs", "-t", "ufs", "--profile=native", "--check-size", "" + plan.root.bytes]),
+        "ufs-native", plan.root.bytes);
+    // EFI, BOOT and configuration consume three additional FAT clusters.
+    var neededEsp = instNativeAdd(instNativeRound(instNativeSize(measured.loader), esp.unit),
+        instNativeRound(instNativeSize(measured.kernel), esp.unit));
+    neededEsp = instNativeAdd(neededEsp, 3L * esp.unit);
+    // Includes the swapfile, fstab replacement and runtime-directory bootstrap headroom.
+    var neededInodes = instNativeAdd(instNativeSize(measured.objects), 8L);
+    if (esp.free < neededEsp || root.free < plan.requiredRoot || root.inodes < neededInodes) {
+        System.error("formatter capacity cannot hold native installation");
+    }
+    plan.capacity = {esp:esp, root:root, espRequired:neededEsp, inodesRequired:neededInodes};
+    plan.requiresFormatAdmission = false;
+    return plan;
+}

@@ -31,22 +31,39 @@ main(
 	};
 	uint64_t size;
 	int error;
+	int pristine;
+	const char *path;
 
-	/* Requires exactly one explicit pre-sized file. */
-	if (argc != 2 || argv[1][0] == '-') {
-		fprintf(stderr, "usage: mkswap FILE\n");
+	/* Accepts one filename, optionally preceded by read-only verification. */
+	pristine = 0;
+	if (argc == 3 && strcmp(argv[1], "--verify-pristine") == 0)
+		pristine = 1;
+
+	/* Rejects missing operands and unknown options before any file access. */
+	if ((argc != 2 && !pristine) || argv[argc - 1][0] == '-') {
+		fprintf(stderr, "usage: mkswap [--verify-pristine] FILE\n");
 		return 2;
 	}
 
-	/* Generates, flushes and validates while holding exclusive mutation. */
-	error = format_file_run(argv[1], &ops, &size);
+	/* Keeps read-only verification separate from reserved initialization. */
+	path = argv[argc - 1];
+	if (pristine)
+		error = format_file_verify(path, swap_format_validate_size, swap_format_pristine, &size);
+	else
+		error = format_file_run(path, &ops, &size);
+
+	/* Reports the earliest operation failure. */
 	if (error != 0) {
-		fprintf(stderr, "mkswap: %s: %s\n", argv[1], strerror(error));
+		fprintf(stderr, "mkswap: %s: %s\n", path, strerror(error));
 		return 1;
 	}
 
-	/* Reports the checked slot count after all completion gates pass. */
-	printf("mkswap: %s: ZEDSWAP2 initialized (%" PRIu64 " slots)\n",
-		argv[1], size / 4096 - 1);
+	/* Reports whether bytes were checked or initialized, without activation. */
+	if (pristine)
+		printf("mkswap: %s: ZEDSWAP2 pristine (%" PRIu64 " slots)\n",
+			path, size / 4096 - 1);
+	else
+		printf("mkswap: %s: ZEDSWAP2 initialized (%" PRIu64 " slots)\n",
+			path, size / 4096 - 1);
 	return 0;
 }

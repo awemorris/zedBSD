@@ -1,0 +1,72 @@
+// Live root/lower/loop admission; configuration text is not mount evidence.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require identity;
+require commands;
+
+func instRootImageRecord(text) {
+    var lines = instLines(text);
+    var prefix = "kern.boot.root_image: ";
+    if (Array.size(lines) != 1 || String.substring(lines[0], 0, String.charCount(prefix)) != prefix) {
+        System.error("invalid live root-image response");
+    }
+    var fields = instSplit(String.substring(lines[0], String.charCount(prefix), -1), ":");
+    if (Array.size(fields) != 6) { System.error("invalid live root-image record"); }
+    var image = {version:instNumber(fields[0], 10), flags:instNumber(fields[1], 10),
+        loop:instNumber(fields[2], 10), device:instNumber(fields[3], 10),
+        inode:instNumber(fields[4], 10), bytes:instNumber(fields[5], 10)};
+    if (image.version != 1 || image.flags > 15) { System.error("unsupported root-image record"); }
+    return image;
+}
+
+func instRootImageRequire(image) {
+    if (image.flags != 15 || image.loop == 0 || image.device == 0 ||
+        image.inode == 0 || image.bytes < 512) {
+        System.error("Not booted from the installer disk: rootfs.img is not mounted as a read-only root image.");
+    }
+    return image;
+}
+
+func instRootImageObserve() {
+    return instRootImageRequire(instRootImageRecord(instRequire(["/sbin/sysctl", "kern.boot.root_image"])));
+}
+
+func instRootImageAdmit(image, identity) {
+    instRootImageRequire(image);
+    if ((identity.mode & 61440) != 32768 || image.device != identity.device ||
+        image.inode != identity.inode || image.bytes != identity.size) {
+        System.error("mounted root image does not match this installer disk's rootfs.img");
+    }
+}
+
+func instRootImageSame(before, after) {
+    if (before.flags != after.flags || before.loop != after.loop ||
+        before.device != after.device || before.inode != after.inode || before.bytes != after.bytes) {
+        System.error("mounted root image changed during installation");
+    }
+}
+
+func instSourceChoice(key) {
+    if (key == Term.KEY_RET || key == (Term.CTRL | 106)) { return 1; }
+    if (key == 27 || key < -1) { return -1; }
+    return 0;
+}
+
+func instSourceScreenRead(context, unused) {
+    Term.write("Install zedBSD\r\nInstallation source\r\n\r\n" +
+        "  > Installation disk\r\n    HTTP (not available yet)\r\n\r\n" +
+        "Enter: Continue    Esc: Cancel\r\n");
+    Term.flush();
+    for (poll in 0..1200) {
+        var choice = instSourceChoice(Term.readKey(1000));
+        if (choice != 0) { return choice == 1; }
+    }
+    return false;
+}
+
+func instSourceScreen() {
+    if (Term.open() != 1) { System.error("cannot open source selection terminal"); }
+    var result = System.pcall(instSourceScreenRead, 0, 0);
+    Term.close();
+    if (!result.ok) { System.error(result.message); }
+    return result.value;
+}

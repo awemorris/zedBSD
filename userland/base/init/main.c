@@ -87,7 +87,7 @@ enum dependency_result {
 static void make_runtime_directories(void);
 static struct rcconf_model *load_rcconf_snapshot(void);
 static void set_configured_hostname(const struct rcconf_model *snapshot);
-static void run_mount_all(void);
+static void run_startup_command(const char *path, char *name);
 static int load_services(const struct rcconf_model *snapshot);
 static int load_one_service(const char *name, const struct rcconf_model *snapshot);
 static int yes(const char *value);
@@ -146,7 +146,8 @@ main(
 			strerror(errno));
 	}
 	set_configured_hostname(snapshot);
-	run_mount_all();
+	run_startup_command("/sbin/mount", "mount");
+	run_startup_command("/sbin/swapon", "swapon");
 
 	/* Handles a failed load services operation. */
 	if (load_services(snapshot) != 0) {
@@ -251,28 +252,37 @@ set_configured_hostname(
 		fprintf(stderr, "init: sethostname: %s\n", strerror(errno));
 }
 
-/* Supports the run mount all operation. */
+/* Runs filesystem setup in order while retaining console recovery on failure. */
 static void
-run_mount_all(
-	void)
+run_startup_command(
+	const char *path,
+	char *name)
 {
 	pid_t child;
+	pid_t waited;
 	int status;
-	char *arguments[] = {"mount", "-a", NULL};
+	char *arguments[] = {name, "-a", NULL};
 
 	child = fork();
-
-	/* Checks the child process state. */
+	if (child < 0) {
+		fprintf(stderr, "init: %s -a: fork: %s\n", name, strerror(errno));
+		return;
+	}
 	if (child == 0) {
-		execv("/sbin/mount", arguments);
-		execv("/bin/mount", arguments);
+		execv(path, arguments);
 		_exit(127);
 	}
 
-	/* Handles a failed waitpid operation. */
-	if (child > 0 && waitpid(child, &status, 0) == child &&
-	    (!WIFEXITED(status) || WEXITSTATUS(status) != 0))
-		fprintf(stderr, "init: mount -a failed\n");
+	/* Signals must not let service startup race an unfinished setup command. */
+	do {
+		waited = waitpid(child, &status, 0);
+	} while (waited < 0 && errno == EINTR);
+	if (waited != child) {
+		fprintf(stderr, "init: %s -a: wait: %s\n", name, strerror(errno));
+		return;
+	}
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		fprintf(stderr, "init: %s -a failed\n", name);
 }
 
 /* Supports the load services operation. */

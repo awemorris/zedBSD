@@ -1,0 +1,80 @@
+// Non-secret, per-install UUIDv8 identifiers derived from a fresh clock sample.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+require files;
+require nativediscovery;
+
+func instNativeDigestGuid(digest) {
+    if (String.charCount(digest) != 64) { System.error("invalid GUID digest"); }
+    for (i in 0..64) { instNumber(String.charAt(digest, i), 16); }
+    digest = String.toLowerCase(digest);
+    var variant = String.charAt("89ab", instNumber(String.charAt(digest, 16), 16) % 4);
+    return instGuid(String.substring(digest, 0, 8) + "-" + String.substring(digest, 8, 4) +
+        "-8" + String.substring(digest, 13, 3) + "-" + variant +
+        String.substring(digest, 17, 3) + "-" + String.substring(digest, 20, 12));
+}
+
+func instNativeHeaderGuid(bytes, offset) {
+    if (Packed.size(bytes) < offset + 72) { System.error("short GPT header observation"); }
+    if (Packed.toString(bytes, offset, 8) != "EFI PART") { return ""; }
+    var text = "";
+    var hex = "0123456789abcdef";
+    for (i in [3, 2, 1, 0, -1, 5, 4, -1, 7, 6, -1, 8, 9, -1, 10, 11, 12, 13, 14, 15]) {
+        if (i == -1) { text = text + "-"; }
+        else {
+            var byte = bytes[offset + 56 + i];
+            text = text + String.charAt(hex, byte / 16) + String.charAt(hex, byte % 16);
+        }
+    }
+    return text;
+}
+
+func instNativeVisibleGuids(observed) {
+    var visible = [];
+    for (name, identity in observed.identities) {
+        if (Dict.hasKey(identity, "PARTUUID")) { Array.push(visible, identity.PARTUUID); }
+    }
+    for (disk in observed.devices) {
+        if (disk.parent != 0 || (disk.flags & 8) != 0 || disk.sectors < 2) { continue; }
+        // Check both header GUIDs even when an old GPT is damaged or inconsistent.
+        for (sector in [1L, disk.sectors - 1L]) {
+            var bytes = instSourceRead("/dev/" + disk.name, sector * disk.sectorSize, disk.sectorSize);
+            if (Packed.size(bytes) != disk.sectorSize) { System.error("cannot inspect visible disk GUID"); }
+            var guid = instNativeHeaderGuid(bytes, 0);
+            if (guid != "") { Array.push(visible, guid); }
+        }
+    }
+    return visible;
+}
+
+func instNativeNewGuids(context) {
+    var visible = instNativeVisibleGuids(instNativeObserveSame(context.discovered));
+    var guids = [];
+    var seed = instFileOwned(context.seed, context.seedIdentity);
+    var disk = context.discovered.disk;
+    // These are identities, not keys. No claim of cryptographic randomness is made.
+    for (attempt in 0..16) {
+        var lines = instLines(instRequire(["/bin/date", "+%s:%N"]));
+        if (Array.size(lines) != 1) { System.error("ambiguous GUID clock sample"); }
+        var clock = instSplit(lines[0], ":");
+        if (Array.size(clock) != 2 || String.charCount(clock[1]) != 9 ||
+            instNumber(clock[0], 10) == 0 || instNumber(clock[1], 10) > 999999999) {
+            System.error("GUID generation requires a valid precise clock");
+        }
+        var material = "zedBSD native installer UUIDv8\n" + lines[0] + "\n" +
+            seed.device + ":" + seed.inode + "\n" + disk.name + ":" + disk.id + ":" +
+            disk.sectors + "\n" + context.discovered.provenance.configuration + "\n" + attempt;
+        FileUtil.writeText(context.seed, material);
+        instFileOwned(context.seed, context.seedIdentity);
+        var guid = instNativeDigestGuid(instFileDigest(context.seed));
+        var collision = false;
+        for (existing in visible) { if (guid == existing) { collision = true; } }
+        if (collision) { continue; }
+        Array.push(guids, guid);
+        Array.push(visible, guid);
+        if (Array.size(guids) == 3) { break; }
+    }
+    instRequire(["/bin/truncate", "-s", "0", context.seed]);
+    instFileOwned(context.seed, context.seedIdentity);
+    if (Array.size(guids) != 3) { System.error("cannot generate distinct native GUIDs"); }
+    return guids;
+}

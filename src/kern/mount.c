@@ -86,7 +86,9 @@ static void unlink_child(struct mount *mountp);
 static int prepare_filesystem_destroy(struct mount *mountp, unsigned expected_refs);
 static void finalize_filesystem_destroy(struct mount *mountp);
 static void detach_mount(struct mount *mountp);
-static int reserve_mount(struct mount *mountp, const struct path *directory, const char *name);
+static int reserve_mount(struct mount *mountp, const struct path *directory, const char *name, const struct inode *expected);
+static int mount_at_target(const char *type_name, const struct path *directory, const char *name, int flags, void *data, struct mount **result, const struct inode *expected);
+static int unmount_owned(struct mount *mountp);
 static int same_inode(const struct inode *left, const struct inode *right);
 static void unlink_global(struct mount *mountp);
 
@@ -527,62 +529,14 @@ mount_at(
 	void *data,
 	struct mount **result)
 {
-	struct mount *mountp;
-	unsigned long irq;
 	int error;
-	int entered;
 
-	/* Rejects a missing type, a non-directory, or an unusable name. */
-	if (type_name == NULL ||
-	    directory == NULL ||
-	    directory->p_mount == NULL ||
-	    directory->p_inode == NULL ||
-	    directory->p_inode->i_type != INODE_DIR ||
-	    !valid_component(name))
-		return EINVAL;
-
-	/* Allocates a slot before reserving its name under the transaction. */
-	mountp = mount_alloc();
-	if (mountp == NULL)
-		return ENOSPC;
-	entered = mount_vfs_transaction_join(mountp);
-	error = reserve_mount(mountp, directory, name);
-	if (entered)
-		mount_vfs_transaction_leave(mountp);
-	if (error != 0)
-		goto fail;
-	error = mount_filesystem(mountp, type_name, flags, data);
-	entered = mount_vfs_transaction_join(mountp);
-	if (error != 0) {
-		detach_mount(mountp);
-		if (entered)
-			mount_vfs_transaction_leave(mountp);
-		goto fail;
-	}
-
-	irq = spin_lock_irqsave(&namespace_lock);
-
-	mountp->m_state = MOUNT_STATE_LIVE;
-
-	spin_unlock_irqrestore(&namespace_lock, irq);
-
-	inode_dir_changed(directory->p_inode);
-	if (entered)
-		mount_vfs_transaction_leave(mountp);
-	backing_mutation_end(&mountp->m_backing_guard);
-	if (result != NULL)
-		*result = mountp;
-
-	/* Reports the mounted filesystem. */
-	return 0;
-fail:
-	mount_free(mountp);
-
-	/* Reports the failure. */
+	/* Bootstrap mounts may create a namespace attachment without a covered inode. */
+	error = mount_at_target(type_name, directory, name, flags, data, result, NULL);
 	if (error != 0)
 		return error;
 
-	/* Succeeded. */
+	/* Succeeded: the requested bootstrap attachment is published. */
 	return 0;
 }
 
@@ -626,7 +580,7 @@ mount_bind_at(
 	if (error == 0 && (source->p_inode->i_flags & INODE_DEAD) != 0)
 		error = ENOENT;
 	if (error == 0)
-		error = reserve_mount(mountp, directory, name);
+		error = reserve_mount(mountp, directory, name, NULL);
 	if (error != 0)
 		goto fail;
 	mountp->m_bind_source = source->p_mount;
@@ -1148,6 +1102,104 @@ mount(
 }
 
 /*
+ * Mounts on an existing directory within one snapshot of a process's root.
+ */
+int
+mount_context(
+	struct cwdinfo *context,
+	const char *type_name,
+	const char *directory,
+	int flags,
+	void *data)
+{
+	struct cwdinfo *snapshot;
+	struct path target;
+	struct path parent;
+	struct componentname component;
+	char canonical[ZEDBSD_PATH_MAX];
+	char name[NAME_MAX + 1U];
+	int error;
+
+	/* A private directory-state copy prevents a concurrent chdir from retargeting us. */
+	snapshot = NULL;
+	path_init(&target);
+	path_init(&parent);
+	error = cwdinfo_clone(context, &snapshot);
+	if (error != 0)
+		return error;
+	error = namei_path_at(snapshot, directory, &target);
+	if (error == 0 && target.p_inode->i_type != INODE_DIR)
+		error = ENOTDIR;
+	if (error == 0 && same_inode(target.p_inode, target.p_mount->m_root))
+		error = EBUSY;
+
+	/* Resolve final symlinks and dot components before identifying the attachment parent. */
+	if (error == 0)
+		error = fs_chdir_path(snapshot, &target);
+	if (error == 0)
+		error = fs_getcwd(snapshot, canonical, sizeof(canonical));
+	if (error == 0 && !strcmp(canonical, "/"))
+		error = EBUSY;
+	if (error == 0)
+		error = namei_parent_path_at(snapshot, canonical, &parent,
+		    &component, name);
+	if (error == 0)
+		error = mount_at_target(type_name, &parent, name, flags, data,
+		    NULL, target.p_inode);
+
+	/* Reservation checked the covered identity before publishing or unwinding. */
+	path_release(&parent);
+	path_release(&target);
+	cwdinfo_release(snapshot);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the resolved directory is covered by the new mount. */
+	return 0;
+}
+
+/*
+ * Unmounts the resolved mount root without looking up its spelling again.
+ */
+int
+unmount_context(
+	struct cwdinfo *context,
+	const char *directory)
+{
+	struct cwdinfo *snapshot;
+	struct path target;
+	struct mount *mountp;
+	int error;
+
+	/* Resolve under one process root/cwd snapshot, including symbolic links. */
+	snapshot = NULL;
+	mountp = NULL;
+	path_init(&target);
+	error = cwdinfo_clone(context, &snapshot);
+	if (error != 0)
+		return error;
+	error = namei_path_at(snapshot, directory, &target);
+	if (error == 0 && !same_inode(target.p_inode, target.p_mount->m_root))
+		error = EINVAL;
+	if (error == 0) {
+		mountp = target.p_mount;
+		mount_ref(mountp);
+	}
+
+	/* Drop temporary inode/context owners, retaining the mount throughout teardown. */
+	path_release(&target);
+	cwdinfo_release(snapshot);
+	if (error != 0)
+		return error;
+	error = unmount_owned(mountp);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: teardown consumed the operation's held mount reference. */
+	return 0;
+}
+
+/*
  * Finds a live mount by path and takes a reference.
  */
 struct mount *
@@ -1452,112 +1504,18 @@ unmount(
 	int flags)
 {
 	struct mount *mountp;
-	struct mount_io_boundary boundary = { 0 };
-	unsigned expected_refs;
-	unsigned long irq;
 	int error;
-	int entered;
 
+	/* Internal callers retain the existing global-path lookup contract. */
 	(void)flags;
-
-	/* Finds the mount. */
 	mountp = mount_find_ref(dir);
 	if (mountp == NULL)
 		return ENOENT;
-
-	/* Joins optional reads before draining VM ownership or counting mount references. */
-	error = mount_io_quiesce(mountp, &boundary);
-	if (error != 0) {
-		mount_release(mountp);
+	error = unmount_owned(mountp);
+	if (error != 0)
 		return error;
-	}
 
-	expected_refs = 2;
-	if (boundary.writeback.mount != NULL)
-		expected_refs++;
-
-	/* Preserves failed dirty owners instead of misreporting their handles as busy. */
-	if (vm_object_sync_mount_buffer != NULL) {
-		error = vm_object_sync_mount_buffer(mountp, NULL, 0);
-		if (error != 0) {
-			mount_io_finish(&boundary, 0);
-			mount_release(mountp);
-			return error;
-		}
-	}
-
-	/* Drops clean cache paths before the namespace reference check. */
-	if (vm_object_cache_drain != NULL)
-		(void)vm_object_cache_drain(mountp);
-
-	/* The root, a dying mount, or a busy one cannot be unmounted. */
-	entered = mount_vfs_transaction_join(mountp);
-	irq = spin_lock_irqsave(&namespace_lock);
-
-	if (mountp == root_mount || mountp->m_state != MOUNT_STATE_LIVE) {
-		spin_unlock_irqrestore(&namespace_lock, irq);
-		if (entered)
-			mount_vfs_transaction_leave(mountp);
-		mount_io_finish(&boundary, 0);
-		mount_release(mountp);
-		return EBUSY;
-	}
-
-	if (mountp->m_children != NULL ||
-	    refcount_load(&mountp->m_refs) != expected_refs) {
-		spin_unlock_irqrestore(&namespace_lock, irq);
-		if (entered)
-			mount_vfs_transaction_leave(mountp);
-		mount_io_finish(&boundary, 0);
-		mount_release(mountp);
-		return EBUSY;
-	}
-
-	/* Reserves the attachment while its filesystem completes teardown. */
-	mountp->m_state = MOUNT_STATE_DYING;
-
-	spin_unlock_irqrestore(&namespace_lock, irq);
-
-	if (entered)
-		mount_vfs_transaction_leave(mountp);
-	/*
-	 * Keep the DYING attachment reserved through every failure-capable step.
-	 * Readers cannot acquire new references or fall through to covered data.
-	 * Sync and teardown may call back through an overlay into the VFS.
-	 */
-	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) == 0) {
-		error = prepare_filesystem_destroy(mountp, expected_refs);
-		if (error != 0) {
-			entered = mount_vfs_transaction_join(mountp);
-			irq = spin_lock_irqsave(&namespace_lock);
-			mountp->m_state = MOUNT_STATE_LIVE;
-			spin_unlock_irqrestore(&namespace_lock, irq);
-			if (entered)
-				mount_vfs_transaction_leave(mountp);
-			mount_io_finish(&boundary, 0);
-			mount_release(mountp);
-			return error;
-		}
-
-		mount_io_finish(&boundary, 1);
-		finalize_filesystem_destroy(mountp);
-	}
-
-	mount_io_finish(&boundary, 1);
-	entered = mount_vfs_transaction_join(mountp);
-	inode_dir_changed(mountp->m_cover.p_inode);
-	detach_mount(mountp);
-	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) != 0 &&
-	    mountp->m_root != NULL)
-		inode_release(mountp->m_root);
-	if (mountp->m_bind_source != NULL)
-		mount_release(mountp->m_bind_source);
-	if (entered)
-		mount_vfs_transaction_leave(mountp);
-	mount_release(mountp);
-	mount_free(mountp);
-
-	/* Reports the unmounted filesystem. */
+	/* Succeeded: teardown consumed the lookup reference. */
 	return 0;
 }
 
@@ -2263,6 +2221,9 @@ static void
 finalize_filesystem_destroy(
 	struct mount *mountp)
 {
+	/* No refusal remains: drop filesystem directory owners before inode purge. */
+	inode_cache_retire_namespace(mountp);
+
 	if (mountp->m_root != NULL) {
 		inode_release(mountp->m_root);
 		mountp->m_root = NULL;
@@ -2308,7 +2269,8 @@ static int
 reserve_mount(
 	struct mount *mountp,
 	const struct path *directory,
-	const char *name)
+	const char *name,
+	const struct inode *expected)
 {
 	struct componentname component = { name, strlen(name), 0 };
 	struct path existing;
@@ -2347,6 +2309,13 @@ reserve_mount(
 	    &mountp->m_covered_inode);
 	if (error != 0 && error != ENOENT)
 		return error;
+
+	/* A public mount must still cover the directory admitted by name lookup. */
+	if (expected != NULL && !same_inode(mountp->m_covered_inode, expected)) {
+		inode_release(mountp->m_covered_inode);
+		mountp->m_covered_inode = NULL;
+		return EAGAIN;
+	}
 
 	/* Publishes the mount in the namespace. */
 	path_set(&mountp->m_cover, directory->p_mount, directory->p_inode);
@@ -2429,4 +2398,181 @@ mount_io_finish(
 		writeback_unmount_finish(&boundary->writeback, committed);
 	if (readahead_boundary_end != NULL)
 		readahead_boundary_end(&boundary->readahead);
+}
+
+/* Reserves the admitted target before filesystem preparation can yield. */
+static int
+mount_at_target(
+	const char *type_name,
+	const struct path *directory,
+	const char *name,
+	int flags,
+	void *data,
+	struct mount **result,
+	const struct inode *expected)
+{
+	struct mount *mountp;
+	unsigned long irq;
+	int error;
+	int entered;
+
+	/* Rejects a missing type, a non-directory, or an unusable name. */
+	if (type_name == NULL ||
+	    directory == NULL ||
+	    directory->p_mount == NULL ||
+	    directory->p_inode == NULL ||
+	    directory->p_inode->i_type != INODE_DIR ||
+	    !valid_component(name))
+		return EINVAL;
+
+	/* Allocates a slot before reserving its name under the transaction. */
+	mountp = mount_alloc();
+	if (mountp == NULL)
+		return ENOSPC;
+	entered = mount_vfs_transaction_join(mountp);
+	error = reserve_mount(mountp, directory, name, expected);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
+	if (error != 0)
+		goto fail;
+	error = mount_filesystem(mountp, type_name, flags, data);
+	entered = mount_vfs_transaction_join(mountp);
+	if (error != 0) {
+		detach_mount(mountp);
+		if (entered)
+			mount_vfs_transaction_leave(mountp);
+		goto fail;
+	}
+
+	irq = spin_lock_irqsave(&namespace_lock);
+
+	mountp->m_state = MOUNT_STATE_LIVE;
+
+	spin_unlock_irqrestore(&namespace_lock, irq);
+
+	inode_dir_changed(directory->p_inode);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
+	backing_mutation_end(&mountp->m_backing_guard);
+	if (result != NULL)
+		*result = mountp;
+
+	/* Reports the mounted filesystem. */
+	return 0;
+fail:
+	mount_free(mountp);
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Consumes one held mount reference on every teardown outcome. */
+static int
+unmount_owned(
+	struct mount *mountp)
+{
+	struct mount_io_boundary boundary = { 0 };
+	unsigned expected_refs;
+	unsigned long irq;
+	int error;
+	int entered;
+
+	/* Joins optional reads before draining VM ownership or counting mount references. */
+	error = mount_io_quiesce(mountp, &boundary);
+	if (error != 0) {
+		mount_release(mountp);
+		return error;
+	}
+
+	expected_refs = 2;
+	if (boundary.writeback.mount != NULL)
+		expected_refs++;
+
+	/* Preserves failed dirty owners instead of misreporting their handles as busy. */
+	if (vm_object_sync_mount_buffer != NULL) {
+		error = vm_object_sync_mount_buffer(mountp, NULL, 0);
+		if (error != 0) {
+			mount_io_finish(&boundary, 0);
+			mount_release(mountp);
+			return error;
+		}
+	}
+
+	/* Drops clean cache paths before the namespace reference check. */
+	if (vm_object_cache_drain != NULL)
+		(void)vm_object_cache_drain(mountp);
+
+	/* The root, a dying mount, or a busy one cannot be unmounted. */
+	entered = mount_vfs_transaction_join(mountp);
+	irq = spin_lock_irqsave(&namespace_lock);
+
+	if (mountp == root_mount || mountp->m_state != MOUNT_STATE_LIVE) {
+		spin_unlock_irqrestore(&namespace_lock, irq);
+		if (entered)
+			mount_vfs_transaction_leave(mountp);
+		mount_io_finish(&boundary, 0);
+		mount_release(mountp);
+		return EBUSY;
+	}
+
+	if (mountp->m_children != NULL ||
+	    refcount_load(&mountp->m_refs) != expected_refs) {
+		spin_unlock_irqrestore(&namespace_lock, irq);
+		if (entered)
+			mount_vfs_transaction_leave(mountp);
+		mount_io_finish(&boundary, 0);
+		mount_release(mountp);
+		return EBUSY;
+	}
+
+	/* Reserves the attachment while its filesystem completes teardown. */
+	mountp->m_state = MOUNT_STATE_DYING;
+
+	spin_unlock_irqrestore(&namespace_lock, irq);
+
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
+	/*
+	 * Keep the DYING attachment reserved through every failure-capable step.
+	 * Readers cannot acquire new references or fall through to covered data.
+	 * Sync and teardown may call back through an overlay into the VFS.
+	 */
+	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) == 0) {
+		error = prepare_filesystem_destroy(mountp, expected_refs);
+		if (error != 0) {
+			entered = mount_vfs_transaction_join(mountp);
+			irq = spin_lock_irqsave(&namespace_lock);
+			mountp->m_state = MOUNT_STATE_LIVE;
+			spin_unlock_irqrestore(&namespace_lock, irq);
+			if (entered)
+				mount_vfs_transaction_leave(mountp);
+			mount_io_finish(&boundary, 0);
+			mount_release(mountp);
+			return error;
+		}
+
+		mount_io_finish(&boundary, 1);
+		finalize_filesystem_destroy(mountp);
+	}
+
+	mount_io_finish(&boundary, 1);
+	entered = mount_vfs_transaction_join(mountp);
+	inode_dir_changed(mountp->m_cover.p_inode);
+	detach_mount(mountp);
+	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) != 0 &&
+	    mountp->m_root != NULL)
+		inode_release(mountp->m_root);
+	if (mountp->m_bind_source != NULL)
+		mount_release(mountp->m_bind_source);
+	if (entered)
+		mount_vfs_transaction_leave(mountp);
+	mount_release(mountp);
+	mount_free(mountp);
+
+	/* Reports the unmounted filesystem. */
+	return 0;
 }

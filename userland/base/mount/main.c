@@ -11,6 +11,8 @@
  * Implements the zedBSD mount userland command.
  */
 
+#include "userland/base/common/fstab.h"
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -233,63 +235,38 @@ static int
 mount_all(
 	void)
 {
-	char *source, *target, *type, *options, *extra, *cursor;
+	struct command_fstab entry;
 	FILE *stream;
-	char line[1024];
 	unsigned line_number;
+	int result;
 	int failed;
 
-	stream = fopen("/etc/fstab", "r");
+	stream = fopen(FSTAB_PATH, "r");
 	line_number = 0;
 	failed = 0;
-
-	/* Handles the stream availability. */
 	if (stream == NULL) {
-		fprintf(stderr, "mount: /etc/fstab: %s\n", strerror(errno));
-
-		/* Reports operation failure. */
+		fprintf(stderr, "mount: %s: %s\n", FSTAB_PATH, strerror(errno));
 		return 1;
 	}
-	while (fgets(line, sizeof(line), stream) != NULL) {
-		cursor = line;
-		line_number++;
 
-		/* Continue while the operation condition remains true. */
-		while (*cursor == ' ' || *cursor == '\t')
-			cursor++;
-
-		/* Checks the current cursor position. */
-		if (*cursor == '#' || *cursor == '\n' || *cursor == '\0')
-			continue;
-		source = strtok(cursor, " \t\r\n");
-		target = strtok(NULL, " \t\r\n");
-		type = strtok(NULL, " \t\r\n");
-		options = strtok(NULL, " \t\r\n");
-		extra = strtok(NULL, " \t\r\n");
-
-		/* Handles the source availability. */
-		if (source == NULL || target == NULL || type == NULL ||
-		    options == NULL || extra != NULL) {
-			fprintf(stderr, "mount: /etc/fstab:%u: invalid entry\n",
-				line_number);
+	/* Swap records belong to swapon, after normal filesystem mounting. */
+	while ((result = command_fstab_next(stream, &entry, &line_number)) != 0) {
+		if (result < 0) {
+			fprintf(stderr, "mount: %s:%u: invalid entry or read failure\n",
+			    FSTAB_PATH, line_number);
 			failed = 1;
+			if (ferror(stream))
+				break;
 			continue;
 		}
-
-		/* Handles a failed mount fstab entry operation. */
-		if (mount_fstab_entry(source, target, type, options) != 0)
+		if (strcmp(entry.type, "swap") == 0)
+			continue;
+		if (mount_fstab_entry(entry.source, entry.target, entry.type,
+		    entry.options) != 0)
 			failed = 1;
 	}
-
-	/* Handles an operation failure. */
-	if (ferror(stream))
-		failed = 1;
-
-	/* Handles a failed fclose operation. */
 	if (fclose(stream) != 0)
 		failed = 1;
-
-	/* Returns the computed result. */
 	return failed;
 }
 

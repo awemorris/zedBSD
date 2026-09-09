@@ -11,7 +11,8 @@ for mode in ordinary sanitize; do
 	${HOSTCC:-cc} -std=c11 -O1 -g -Wall -Wextra -Werror $extra -I"$repo" \
 		"$repo/plan/ws019-installation/tests/diskpart-table-test.c" \
 		"$repo/userland/base/diskpart/table.c" -o "$temporary/$mode"
-	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$temporary/$mode"
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$temporary/$mode" "$temporary"
+	python3 "$repo/plan/ws019-installation/tests/gpt-init-inspect.py" "$temporary"
 	# Use host POSIX headers first and only zedBSD-specific UAPI afterwards.
 	# shellcheck disable=SC2086
 	${HOSTCC:-cc} -std=c11 -O1 -g -Wall -Wextra -Werror $extra -I"$repo" \

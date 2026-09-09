@@ -12,7 +12,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#ifndef NVME_GUEST_BYTES
 #define NVME_GUEST_BYTES 4096U
+#endif
 #define NVME_GUEST_STRESS_COMMANDS 96U
 #define NVME_GUEST_CONCURRENT_WORKERS 4U
 #define NVME_GUEST_CONCURRENT_COMMANDS 32U

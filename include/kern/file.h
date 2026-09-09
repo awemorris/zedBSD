@@ -220,6 +220,8 @@ struct file {
 	unsigned f_mount_cursor;
 	void *f_data;
 	struct backing_claim *f_backing_claim;
+	/* Block administration; f_lock guards publication, final close releases. */
+	struct backing_claim *f_block_claim;
 	/* Published under the regular inode I/O lock; final close releases it. */
 	struct backing_claim *f_format_claim;
 	uint64_t f_format_size;

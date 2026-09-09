@@ -68,6 +68,9 @@ size_t heap_allocator_largest_failed(const struct heap_allocator *heap);
 size_t heap_allocator_error_count(const struct heap_allocator *heap);
 size_t heap_allocator_largest_free(const struct heap_allocator *heap);
 int heap_allocator_validate(const struct heap_allocator *heap);
+#ifdef ZEDBSD_KERNEL_HEAP_TRACE
+int heap_allocator_trace_validate(const struct heap_allocator *heap);
+#endif
 
 /* Switch libc compatibility calls to heap and return the previous instance. */
 struct heap_allocator *heap_active_set(struct heap_allocator *heap);
